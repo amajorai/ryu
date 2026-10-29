@@ -17,6 +17,8 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@ryu/ui/components/editor/ui/tooltip.tsx";
+import { useDropNudge } from "@ryu/ui/hooks/use-drop-nudge.ts";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useComposedRef } from "@udecode/cn";
 import { GripHorizontal, type LucideProps, Trash2Icon } from "lucide-react";
@@ -35,7 +37,13 @@ import {
 	useSelected,
 	withHOC,
 } from "platejs/react";
-import { memo, type PropsWithChildren } from "react";
+import type { CSSProperties as ReactCSSProperties } from "react";
+import { memo, type PropsWithChildren, type RefObject, useRef } from "react";
+import editorStyles from "../editor-lint.module.css";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editorcolumnNode1-width"?: string | number;
+}
 
 export const ColumnElement = withHOC(
 	ResizableProvider,
@@ -46,6 +54,7 @@ export const ColumnElement = withHOC(
 			BlockSelectionPlugin,
 			"isSelectionAreaVisible"
 		);
+		const columnRef = useRef<HTMLDivElement>(null);
 
 		const { isDragging, nodeRef, previewRef, handleRef } = useDraggable({
 			element: props.element,
@@ -58,8 +67,17 @@ export const ColumnElement = withHOC(
 				),
 		});
 
+		const editorcolumnNode1Style: EditorVariableStyle = {
+			"--editorcolumnNode1-width": isNativeNumber(width ?? "100%")
+				? `${width ?? "100%"}px`
+				: (width ?? "100%"),
+		};
 		return (
-			<div className="group/column relative" style={{ width: width ?? "100%" }}>
+			<div
+				className={cn("group/column relative", editorStyles.editorcolumnNode1)}
+				ref={columnRef}
+				style={editorcolumnNode1Style}
+			>
 				{!(readOnly || isSelectionAreaVisible) && (
 					<div
 						className={cn(
@@ -87,7 +105,9 @@ export const ColumnElement = withHOC(
 					>
 						{props.children}
 
-						{!(readOnly || isSelectionAreaVisible) && <DropLine />}
+						{!(readOnly || isSelectionAreaVisible) && (
+							<DropGap columnRef={columnRef} />
+						)}
 					</div>
 				</PlateElement>
 			</div>
@@ -117,25 +137,12 @@ const ColumnDragHandle = memo(function ColumnDragHandle() {
 	);
 });
 
-function DropLine() {
+/** Eases this column and its neighbour apart where a dragged column would
+ *  drop, in place of a drawn drop line. */
+function DropGap({ columnRef }: { columnRef: RefObject<HTMLElement | null> }) {
 	const { dropLine } = useDropLine({ orientation: "horizontal" });
-
-	if (!dropLine) {
-		return null;
-	}
-
-	return (
-		<div
-			className={cn(
-				"slate-dropLine",
-				"reorder-drop-indicator absolute bg-brand/50",
-				dropLine === "left" &&
-					"inset-y-0 start-[-10.5px] w-1 group-first/column:-start-1",
-				dropLine === "right" &&
-					"inset-y-0 end-[-11px] w-1 group-last/column:-end-1"
-			)}
-		/>
-	);
+	useDropNudge(columnRef, dropLine);
+	return null;
 }
 
 export function ColumnGroupElement(props: PlateElementProps) {

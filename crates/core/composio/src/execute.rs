@@ -66,6 +66,21 @@ fn validate_base_url(base: &str) -> Result<()> {
     Ok(())
 }
 
+/// True when `tool` is one plain Composio action slug (`GITHUB_CREATE_ISSUE`):
+/// non-empty and made only of ASCII letters, digits, `_` and `-`.
+///
+/// The slug is model-chosen and becomes the last path segment of the
+/// key-bearing execute URL, while Core's per-toolkit connection ceiling is keyed
+/// on the slug's leading token. A `/`, `\`, `.`, `%`, `?`, `#` or whitespace
+/// could make the URL resolve to a different action (or another API path) than
+/// the one that was checked, so such a slug never reaches the request.
+fn is_action_slug(tool: &str) -> bool {
+    !tool.is_empty()
+        && tool
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
 /// Resolve the Composio entity for this call. A non-empty `user_id` always wins;
 /// the env / `"default"` is the fallback only.
 ///
@@ -109,6 +124,13 @@ pub enum ExecOutcome {
     },
 }
 
+/// Keeps billing evidence separate while preserving the existing outcome API
+/// for local callers that do not spend organization credits.
+pub struct BillingExecution {
+    pub outcome: ExecOutcome,
+    pub receipt: Option<crate::receipt::ComposioReceipt>,
+}
+
 /// Execute a Composio action (`tool` = the action slug, e.g. `GITHUB_CREATE_ISSUE`).
 ///
 /// Replicates the gateway execute() request shape and ADDS connection-required
@@ -134,6 +156,28 @@ pub async fn dispatch_with_connection(
     user_id: Option<&str>,
     connected_account_id: Option<&str>,
 ) -> Result<ExecOutcome> {
+    Ok(
+        dispatch_with_billing(http, tool, arguments, user_id, connected_account_id, false)
+            .await?
+            .outcome,
+    )
+}
+
+pub async fn dispatch_with_billing(
+    http: &Client,
+    tool: &str,
+    arguments: Value,
+    user_id: Option<&str>,
+    connected_account_id: Option<&str>,
+    metered: bool,
+) -> Result<BillingExecution> {
+    // Refuse a slug that is not one plain action name before the key is read or
+    // the URL is built, so Composio runs exactly the action that was authorized.
+    if !is_action_slug(tool) {
+        return Err(anyhow!(
+            "invalid Composio action slug: expected only ASCII letters, digits, '_' or '-'"
+        ));
+    }
     let key = crate::auth::key()
         .ok_or_else(|| anyhow!("Composio API key not set (Settings → Integrations)"))?;
     let entity = resolve_entity(user_id);
@@ -154,12 +198,12 @@ pub async fn dispatch_with_connection(
         "entity_id": entity,
     });
     if let Some(connection_id) = connected_account_id {
-        payload["connectedAccountId"] = Value::String(connection_id.to_owned());
+        payload["connected_account_id"] = Value::String(connection_id.to_owned());
     }
 
     let resp = client
         .post(&url)
-        .header("x-api-key", key)
+        .header("x-api-key", &key)
         .header("Content-Type", "application/json")
         .header("accept", "application/json")
         .json(&payload)
@@ -174,7 +218,10 @@ pub async fn dispatch_with_connection(
     // Connection/auth-required → NeedsConnection (both error AND success
     // shapes can signal it; Composio has churned the surface).
     if let Some(outcome) = detect_elicitation(status.as_u16(), &body) {
-        return Ok(outcome);
+        return Ok(BillingExecution {
+            outcome,
+            receipt: None,
+        });
     }
 
     if !status.is_success() {
@@ -187,8 +234,29 @@ pub async fn dispatch_with_connection(
         return Err(anyhow!("Composio action {tool} failed: {status}: {msg}"));
     }
 
+    if metered {
+        // The identity this request selected: a pinned account, or the entity
+        // whose account Composio picks. The log must agree with it.
+        let expected = connected_account_id.map_or(
+            crate::receipt::ExpectedExecutionIdentity::Entity(&entity),
+            crate::receipt::ExpectedExecutionIdentity::ConnectedAccount,
+        );
+        let receipt =
+            crate::receipt::execution_receipt(client, &execute_base_url()?, &key, &body, expected)
+                .await;
+        if receipt.is_err() {
+            tracing::warn!(tool, "Composio execution billing receipt unavailable");
+        }
+        return Ok(BillingExecution {
+            outcome: ExecOutcome::Ok(body.get("data").cloned().unwrap_or(body)),
+            receipt: receipt.ok(),
+        });
+    }
     // Composio wraps results in a `data` field; unwrap when present.
-    Ok(ExecOutcome::Ok(body.get("data").cloned().unwrap_or(body)))
+    Ok(BillingExecution {
+        outcome: ExecOutcome::Ok(body.get("data").cloned().unwrap_or(body)),
+        receipt: None,
+    })
 }
 
 /// Phrases that, when present in an error/message string, indicate the user has
@@ -502,6 +570,81 @@ mod tests {
         match prev_c {
             Some(v) => std::env::set_var("COMPOSIO_API_KEY", v),
             None => std::env::remove_var("COMPOSIO_API_KEY"),
+        }
+    }
+
+    /// Slugs that would leave the `/tools/execute/{slug}` segment, or name a
+    /// different action than the one whose toolkit ceiling was checked.
+    const PATH_SYNTAX_SLUGS: &[&str] = &[
+        "GITHUB_X/../GMAIL_SEND_EMAIL",
+        "GITHUB_X/%2e%2e/GMAIL_SEND_EMAIL",
+        "GITHUB_X\\..\\GMAIL_SEND_EMAIL",
+        "GITHUB_X%2F..%2FGMAIL_SEND_EMAIL",
+        "GMAIL_%53END_EMAIL",
+        "..",
+        ".",
+        "GMAIL_SEND_EMAIL?x=1",
+        "GMAIL_SEND_EMAIL#x",
+        " GMAIL_SEND_EMAIL",
+        "GMAIL_SEND_EMAIL\n",
+        "",
+    ];
+
+    #[test]
+    fn is_action_slug_accepts_plain_slugs_and_refuses_path_syntax() {
+        for slug in [
+            "GITHUB_CREATE_ISSUE",
+            "SLACK_SEND_MESSAGE",
+            "GMAIL_SEARCH_EMAILS",
+            "gmail-send_email2",
+        ] {
+            assert!(is_action_slug(slug), "slug {slug:?} must be accepted");
+        }
+        for slug in PATH_SYNTAX_SLUGS {
+            assert!(!is_action_slug(slug), "slug {slug:?} must be refused");
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_refuses_a_traversal_slug_before_any_request() {
+        // `GITHUB_X/../GMAIL_SEND_EMAIL` passes a `github` toolkit ceiling but
+        // would resolve to `/tools/execute/GMAIL_SEND_EMAIL`. With a key
+        // configured it must be refused before the base URL is even resolved;
+        // the off-policy base keeps this test from ever reaching the network.
+        let _lock = crate::auth::test_env_lock();
+        let prev_r = std::env::var("RYU_COMPOSIO_API_KEY").ok();
+        let prev_c = std::env::var("COMPOSIO_API_KEY").ok();
+        let prev_base = std::env::var("COMPOSIO_BASE_URL").ok();
+        clear_key_env();
+        crate::auth::set_key("test-key-not-real");
+        std::env::set_var("COMPOSIO_BASE_URL", "https://composio.invalid");
+        let http = Client::new();
+        for slug in PATH_SYNTAX_SLUGS {
+            let err = dispatch(&http, slug, json!({}), None)
+                .await
+                .expect_err("a path-syntax slug must be refused");
+            assert!(
+                err.to_string().contains("invalid Composio action slug"),
+                "slug {slug:?} was not refused by the slug check: {err}"
+            );
+        }
+        // A plain slug still proceeds past the slug check to the base-URL pin.
+        let err = dispatch(&http, "GITHUB_CREATE_ISSUE", json!({}), None)
+            .await
+            .expect_err("the off-policy base must still be refused");
+        assert!(err.to_string().contains("not allowlisted"), "{err}");
+        crate::auth::set_key("");
+        match prev_r {
+            Some(v) => std::env::set_var("RYU_COMPOSIO_API_KEY", v),
+            None => std::env::remove_var("RYU_COMPOSIO_API_KEY"),
+        }
+        match prev_c {
+            Some(v) => std::env::set_var("COMPOSIO_API_KEY", v),
+            None => std::env::remove_var("COMPOSIO_API_KEY"),
+        }
+        match prev_base {
+            Some(v) => std::env::set_var("COMPOSIO_BASE_URL", v),
+            None => std::env::remove_var("COMPOSIO_BASE_URL"),
         }
     }
 }

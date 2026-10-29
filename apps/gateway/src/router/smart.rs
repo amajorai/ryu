@@ -682,12 +682,22 @@ pub trait SmartRouterBackend: Send + Sync {
         session_id: Option<&str>,
         inference: &dyn InferenceClient,
     ) -> Result<Option<String>, GatewayError>;
+    /// The config this backend routes with, when it has one. The pipeline uses
+    /// it to build a pool-restricted copy (see
+    /// [`SmartRoutingConfig::restricted_to`]); a backend without one is still
+    /// pool-checked on its final choice.
+    fn config(&self) -> Option<&SmartRoutingConfig> {
+        None
+    }
 }
 
 #[async_trait::async_trait]
 impl SmartRouterBackend for SmartRouter {
     fn is_active(&self) -> bool {
         SmartRouter::is_active(self)
+    }
+    fn config(&self) -> Option<&SmartRoutingConfig> {
+        Some(&self.config)
     }
     async fn resolve(
         &self,

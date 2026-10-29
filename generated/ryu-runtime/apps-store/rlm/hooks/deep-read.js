@@ -110,11 +110,8 @@ try {
 	return { kind: "note", text: `Deep read could not run: ${e}` };
 }
 
-// The bridge hands back the sub-agent's final text; coerce defensively so a
-// non-string never reaches the user as "[object Object]".
-const text = (
-	typeof report === "string" ? report : String(report ?? "")
-).trim();
+// Normalize nullable transport replies before checking the final-text marker.
+const text = String(report ?? "").trim();
 const marker = text.match(/RLM:\s*(ok|budget_exhausted|error)\s+(\S+)\s*$/im);
 if (!marker) {
 	return {

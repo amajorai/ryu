@@ -1,9 +1,9 @@
 [package]
 name = "ryu-search"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Conversation search primitive for Ryu: a sqlite-vec (`vec0`) semantic KNN index plus a contentless FTS5 lexical index over past chat messages, storing vectors/inverted-index + metadata only (never message text — the caller re-reads and decrypts snippets from `conversations.db`). An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the ConversationStore reaches it unconditionally). The embedder is injected via the narrow `SearchEmbedder` trait, so the crate has ZERO dependency on apps/core — the registry-driven embedder choice and the default db paths stay Core-side (`apps/core/src/search_host.rs`)."
+description = "Conversation search primitive for Ryu: a semantic index of sealed message vectors (searched in memory) plus a blind-term FTS5 keyword index over past chat messages, storing sealed vectors, keyed term tokens and metadata only (never message text — the caller re-reads and decrypts snippets from `conversations.db`). sqlite-vec is linked only to read and migrate indexes written by older builds. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the ConversationStore reaches it unconditionally). The embedder is injected via the narrow `SearchEmbedder` trait, so the crate has ZERO dependency on apps/core — the registry-driven embedder choice and the default db paths stay Core-side (`apps/core/src/search_host.rs`)."
 repository = "https://github.com/amajorai/ryu"
 
 # Versions are matched to apps/core/Cargo.toml so there is no version skew when
@@ -13,7 +13,18 @@ anyhow = "1"
 async-trait = "0.1"
 rusqlite = { version = "0.40.0", features = ["bundled"] }
 sqlite-vec = "=0.1.6"
-tokio = { version = "1", features = ["sync"] }
+# `rt` for `spawn_blocking`: a search that opens a whole sealed partition
+# runs on a blocking thread, never on a runtime worker.
+tokio = { version = "1", features = ["sync", "rt"] }
+# Scope and metadata lookups pass id lists to SQLite's `json_each`.
+serde_json = "1"
+# Warnings for skipped unreadable rows and migration progress.
+tracing = "0.1"
+# Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
+# backend from this crate: Core links it through its own dependency.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["sqlite"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
+# Test builds only: lets unit tests construct sealing stores without a host.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["test-ephemeral-host"] }

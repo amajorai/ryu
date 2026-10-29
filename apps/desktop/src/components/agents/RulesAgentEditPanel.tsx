@@ -4,18 +4,19 @@ import {
 	Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
+} from "@ryu/ui/components/select.tsx";
 import { useCallback, useEffect, useState } from "react";
 import {
 	SettingsCard,
@@ -37,7 +38,7 @@ const APPLY_MODE_ITEMS = [
 	{ label: "Auto", value: "auto" },
 	{ label: "Always", value: "always" },
 	{ label: "Manual", value: "manual" },
-];
+] satisfies readonly { label: string; value: RuleApplyMode }[];
 
 export interface RulesAgentEditPanelProps {
 	agentId: string;
@@ -81,6 +82,7 @@ function ProjectRules({
 	cwd: string | null;
 	rules: DiscoveredProjectRule[];
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="flex flex-col gap-2">
 			<div className="flex items-center justify-between">
@@ -93,7 +95,9 @@ function ProjectRules({
 				<Badge variant="secondary">{rules.length}</Badge>
 			</div>
 			{cwd ? (
-				<p className="truncate text-muted-foreground text-xs">Project: {cwd}</p>
+				<p className="truncate text-muted-foreground text-xs">
+					{tl("Project: {cwd}", { cwd })}
+				</p>
 			) : null}
 			{rules.length === 0 ? (
 				<p className="rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs">
@@ -110,7 +114,10 @@ function ProjectRules({
 								<p className="truncate font-medium text-sm">
 									{rule.name ?? rule.path.split("/").at(-1) ?? rule.path}
 								</p>
-								<p className="truncate text-muted-foreground text-xs">
+								<p
+									className="truncate text-muted-foreground text-xs"
+									title={rule.path}
+								>
 									{rule.path}
 								</p>
 							</div>
@@ -134,6 +141,7 @@ export function RulesAgentEditPanel({
 	target,
 	title = "Rules",
 }: RulesAgentEditPanelProps) {
+	const tl = useLiteralMessages();
 	const [config, setConfig] = useState<AgentRulesConfig>(() =>
 		legacyRulesToConfig(legacyRules)
 	);
@@ -178,9 +186,13 @@ export function RulesAgentEditPanel({
 			.then((ok) => {
 				if (!cancelled) {
 					setDirty(!ok);
-					if (!ok) {
-						setError("Could not save rules");
-					}
+					setError(ok ? null : "Could not save rules");
+				}
+			})
+			.catch(() => {
+				if (!cancelled) {
+					setDirty(true);
+					setError("Could not save rules");
 				}
 			})
 			.finally(() => {
@@ -258,12 +270,10 @@ export function RulesAgentEditPanel({
 				<div className="grid gap-3 sm:grid-cols-2">
 					<div className="flex flex-col gap-1">
 						<Label htmlFor="rules-apply-mode">Apply mode</Label>
-						<Select
+						<Select<RuleApplyMode>
 							disabled={locked}
 							items={APPLY_MODE_ITEMS}
-							onValueChange={(value) =>
-								update({ applyMode: (value ?? "auto") as RuleApplyMode })
-							}
+							onValueChange={(value) => update({ applyMode: value ?? "auto" })}
 							value={config.applyMode}
 						>
 							<SelectTrigger id="rules-apply-mode">
@@ -332,7 +342,7 @@ export function RulesAgentEditPanel({
 						>
 							<div className="flex items-center gap-2">
 								<Checkbox
-									aria-label={`Enable rule ${rule.id}`}
+									aria-label={tl("Enable rule {id}", { id: rule.id })}
 									checked={rule.enabled}
 									disabled={locked}
 									onCheckedChange={(value) =>
@@ -363,15 +373,15 @@ export function RulesAgentEditPanel({
 								</Button>
 							</div>
 							<div className="flex items-center gap-2">
-								<Label className="text-xs" htmlFor={`rule-mode-${rule.id}`}>
+								<Label htmlFor={`rule-mode-${rule.id}`} size="compact">
 									Mode
 								</Label>
-								<Select
+								<Select<RuleApplyMode>
 									disabled={locked}
 									items={APPLY_MODE_ITEMS}
 									onValueChange={(value) =>
 										updateRule(rule.id, {
-											mode: (value ?? "auto") as RuleApplyMode,
+											mode: value ?? "auto",
 										})
 									}
 									value={rule.mode}

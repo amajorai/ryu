@@ -1,8 +1,8 @@
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
+import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import type { ReactNode } from "react";
+import { RyuOnboardingAvatar } from "./RyuOnboardingPersona.tsx";
 
 export function ActivationStepShell({
 	children,
@@ -21,7 +21,7 @@ export function ActivationStepShell({
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						<RyuOnboardingAvatar />
 					</div>
 					<PageHeader stagger={false} subtitle={subtitle} title={title} />
 				</StaggerReveal>

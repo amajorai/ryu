@@ -1,28 +1,21 @@
-// Recipe store: CRUD operations on ~/.ghost/recipes/ JSON files.
+// Recipe store: CRUD operations on `<data dir>/services/ghost/recipes/` JSON files.
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use super::types::Recipe;
 
-/// Persistent recipe store backed by JSON files in ~/.ghost/recipes/.
+/// Persistent recipe store backed by JSON files in `services/ghost/recipes/`.
 pub struct RecipeStore {
     dir: PathBuf,
 }
 
 impl RecipeStore {
-    /// Open (or create) the recipe store at the default location. Honors
-    /// `GHOST_DATA_DIR` (Core sets it to the profile-aware `~/.ryu{profile}/ghost`, so
-    /// a dev and a release Ghost don't share one recipe store); falls back to the
-    /// legacy `~/.ghost` when unset.
+    /// Open (or create) the recipe store at the default location: the profile-aware
+    /// Ryu data dir's `services/ghost/recipes` (see [`crate::paths`]), so a dev and a
+    /// release Ghost don't share one recipe store.
     pub fn open() -> Result<Self> {
-        let base = match std::env::var_os("GHOST_DATA_DIR") {
-            Some(dir) => PathBuf::from(dir),
-            None => dirs::home_dir()
-                .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-                .join(".ghost"),
-        };
-        let dir = base.join("recipes");
+        let dir = crate::paths::recipes_dir();
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("Failed to create recipe dir: {}", dir.display()))?;
         Ok(Self { dir })

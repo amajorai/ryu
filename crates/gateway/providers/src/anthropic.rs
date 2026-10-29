@@ -1,5 +1,5 @@
+use crate::response_body::BoundedResponse;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -10,15 +10,25 @@ use tracing::{debug, warn};
 
 use crate::{error::ProviderError, quota::ProviderQuotas};
 
-use super::{parse_rate_limit, Provider};
+use super::{
+    account_pool::AccountPool, classify_send_error, error_body_message, parse_account_quota,
+    parse_quota_domain, parse_rate_limit, streaming_request, upstream_error_with_key_refusal,
+    EgressClientPool, Provider,
+};
 
 pub struct AnthropicProvider {
+    provider_id: &'static str,
     client: reqwest::Client,
+    egress: Option<Arc<EgressClientPool>>,
     /// Account rotation set (#4). See `OpenAiProvider::keys`.
     keys: Vec<String>,
-    cursor: AtomicUsize,
+    account_pool: AccountPool,
     base_url: String,
     quota: Arc<ProviderQuotas>,
+    /// Top-level fields written over every converted body, after the
+    /// allowlist. Empty for every Anthropic slot; the Vercel lane uses it to
+    /// send its zero data retention option on the Messages leg.
+    extra_body: serde_json::Map<String, Value>,
 }
 
 impl AnthropicProvider {
@@ -28,23 +38,55 @@ impl AnthropicProvider {
         base_url: String,
         quota: Arc<ProviderQuotas>,
     ) -> Self {
+        Self::new_with_egress(client, None, keys, base_url, quota)
+    }
+
+    pub fn new_with_egress(
+        client: reqwest::Client,
+        egress: Option<Arc<EgressClientPool>>,
+        keys: Vec<String>,
+        base_url: String,
+        quota: Arc<ProviderQuotas>,
+    ) -> Self {
+        Self::new_named_with_egress("anthropic", client, egress, keys, base_url, quota)
+    }
+
+    pub fn new_named_with_egress(
+        provider_id: &'static str,
+        client: reqwest::Client,
+        egress: Option<Arc<EgressClientPool>>,
+        keys: Vec<String>,
+        base_url: String,
+        quota: Arc<ProviderQuotas>,
+    ) -> Self {
         Self {
+            provider_id,
             client,
+            egress,
+            account_pool: AccountPool::new(keys.len()),
             keys,
-            cursor: AtomicUsize::new(0),
             base_url,
             quota,
+            extra_body: serde_json::Map::new(),
         }
     }
 
+    /// Write these top-level fields over every converted body. Caller fields
+    /// never reach this map: the body conversion is an allowlist.
+    pub fn with_extra_body(mut self, extra: serde_json::Map<String, Value>) -> Self {
+        self.extra_body = extra;
+        self
+    }
+
     /// The next account key in round-robin order.
+    #[cfg(test)]
     fn next_key(&self) -> String {
-        let n = self.keys.len();
-        if n <= 1 {
-            return self.keys.first().cloned().unwrap_or_default();
-        }
-        let i = self.cursor.fetch_add(1, Ordering::Relaxed) % n;
-        self.keys[i].clone()
+        self.account_pool
+            .candidates(None)
+            .first()
+            .and_then(|index| self.keys.get(*index))
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn messages_url(&self) -> String {
@@ -58,13 +100,13 @@ impl AnthropicProvider {
     /// `cache_control.ttl`. When neither applies no beta header is sent at all.
     fn anthropic_post(
         &self,
+        client: &reqwest::Client,
         url: &str,
         key: &str,
         payload: &Value,
         caller_beta: Option<&str>,
     ) -> reqwest::RequestBuilder {
-        let mut req = self
-            .client
+        let mut req = client
             .post(url)
             .header("x-api-key", key)
             .header("anthropic-version", "2023-06-01");
@@ -74,18 +116,72 @@ impl AnthropicProvider {
         req.json(payload)
     }
 
+    async fn send_request(
+        &self,
+        session: Option<&str>,
+        context: &str,
+        make_request: impl Fn(&reqwest::Client) -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, ProviderError> {
+        let (index, client) = if let Some(pool) = &self.egress {
+            let (index, client) = pool.candidates(session).into_iter().next().ok_or_else(|| {
+                ProviderError::Transport(
+                    "all configured egress endpoints are cooling down".to_owned(),
+                )
+            })?;
+            (Some(index), client)
+        } else {
+            (None, &self.client)
+        };
+        let result = crate::trace_context::apply(make_request(client))
+            .send()
+            .await
+            .map_err(|error| classify_send_error(context, &error));
+        if let Ok(response) = &result {
+            crate::trace_context::observe_status(response.status());
+        }
+        if let (Some(pool), Some(index)) = (&self.egress, index) {
+            match &result {
+                Ok(response)
+                    if response.status() == reqwest::StatusCode::PROXY_AUTHENTICATION_REQUIRED =>
+                {
+                    pool.record_failure(index, Some(300));
+                    return Err(ProviderError::Transport(
+                        "configured egress proxy authentication failed".to_owned(),
+                    ));
+                }
+                Ok(_) => pool.record_success(session, index),
+                // An uncertain delivery cools the proxy without rotating or
+                // replaying the request.
+                Err(ProviderError::Transport(_) | ProviderError::DeliveryUncertain(_)) => {
+                    pool.record_failure(index, None)
+                }
+                Err(_) => {}
+            }
+        }
+        result
+    }
+
     /// Convert an OpenAI-format chat request body into an Anthropic messages body.
     ///
     /// This is an allowlist, not a passthrough: only the keys named below reach
     /// Anthropic. That is what keeps the private `ryu_anthropic_beta` field (see
     /// [`anthropic_beta_header`]) off the wire — it is read by the callers of
     /// `to_anthropic_body` for the header and never copied into the payload.
+    ///
+    /// The same holds for the private `ryu_upstream_subject` field: the Gateway
+    /// sets it on hosted attempts, and only its value is sent, as
+    /// `metadata.user_id`. A caller's own `metadata` is never copied.
     fn to_anthropic_body(&self, model: &str, body: &Value) -> Value {
         let messages = body["messages"].as_array().cloned().unwrap_or_default();
-        let filtered_messages = anthropic_messages(&messages);
+        let mut filtered_messages = anthropic_messages(&messages);
 
-        // Anthropic requires max_tokens; fall back to 4096 if not provided.
-        let max_tokens = body["max_tokens"].as_u64().unwrap_or(4096);
+        // Accept Chat Completions' current token limit while keeping the legacy
+        // key for existing clients. Anthropic still calls its wire field max_tokens.
+        let max_tokens = body
+            .get("max_completion_tokens")
+            .or_else(|| body.get("max_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(4096);
 
         let mut req = json!({
             "model": model,
@@ -98,12 +194,25 @@ impl AnthropicProvider {
             req["system"] = system;
         }
 
+        if let Some(subject) = body
+            .get(UPSTREAM_SUBJECT_FIELD)
+            .and_then(Value::as_str)
+            .filter(|subject| !subject.is_empty())
+        {
+            req["metadata"] = json!({ "user_id": subject });
+        }
+
         // Forward optional parameters
         if let Some(t) = body.get("temperature") {
             req["temperature"] = t.clone();
         }
         if let Some(p) = body.get("top_p") {
             req["top_p"] = p.clone();
+        }
+        // Native Anthropic sampler; reaches the body from the gateway's
+        // `ryu_sampling` translation or a caller that sent it directly.
+        if let Some(k) = body.get("top_k").filter(|k| k.is_u64()) {
+            req["top_k"] = k.clone();
         }
         if let Some(s) = body.get("stop") {
             // Anthropic uses "stop_sequences" as an array
@@ -130,6 +239,22 @@ impl AnthropicProvider {
             if let Some(choice) = anthropic_tool_choice(body) {
                 req["tool_choice"] = choice;
             }
+        }
+
+        // The prompt-cache policy's Auto mode marks the request, not a block.
+        // The allowlist above never copies that root key, so on the direct path
+        // Claude used to get no breakpoint at all and every turn re-sent the
+        // prompt uncached. Place it where automatic caching would: on the last
+        // cacheable block, caching the whole prefix.
+        if let Some(cache_control) = body.get("cache_control").filter(|c| c.is_object()) {
+            if !contains_cache_control(&req) {
+                place_request_cache_breakpoint(&mut filtered_messages, cache_control);
+                req["messages"] = Value::Array(filtered_messages);
+            }
+        }
+
+        for (key, value) in &self.extra_body {
+            req[key.as_str()] = value.clone();
         }
 
         req
@@ -242,14 +367,23 @@ pub(crate) struct CacheUsage {
     /// Prompt tokens written into the provider's cache (a cache *write* — billed
     /// above the normal input rate, which is why it is reported separately).
     pub write: u64,
+    /// The part of `write` written with the one-hour TTL
+    /// (`cache_creation.ephemeral_1h_input_tokens`), billed at a higher rate
+    /// than a default five-minute write.
+    pub write_1h: u64,
 }
 
 impl CacheUsage {
     /// Read the Anthropic-native field names off a `usage` object.
     pub(crate) fn from_anthropic(usage: &Value) -> Self {
+        let write = usage["cache_creation_input_tokens"].as_u64().unwrap_or(0);
         Self {
             read: usage["cache_read_input_tokens"].as_u64().unwrap_or(0),
-            write: usage["cache_creation_input_tokens"].as_u64().unwrap_or(0),
+            write,
+            write_1h: usage["cache_creation"]["ephemeral_1h_input_tokens"]
+                .as_u64()
+                .unwrap_or(0)
+                .min(write),
         }
     }
 
@@ -276,6 +410,15 @@ impl CacheUsage {
         // gateway sees the same fields it would get talking to Anthropic direct.
         usage["cache_read_input_tokens"] = json!(self.read);
         usage["cache_creation_input_tokens"] = json!(self.write);
+        // One-hour writes cost more than five-minute ones, so the split travels
+        // with the usage (only when present, keeping the default-TTL shape).
+        if self.write_1h > 0 {
+            usage["prompt_tokens_details"]["cache_write_1h_tokens"] = json!(self.write_1h);
+            usage["cache_creation"] = json!({
+                "ephemeral_5m_input_tokens": self.write - self.write_1h,
+                "ephemeral_1h_input_tokens": self.write_1h,
+            });
+        }
     }
 }
 
@@ -347,6 +490,53 @@ fn content_blocks(content: &Value) -> Vec<Value> {
 /// * `role: "tool"` messages become `tool_result` blocks inside a **user** turn,
 ///   and consecutive ones merge into a single turn because Anthropic requires
 ///   every result for a turn to arrive in one user message.
+/// True when a `cache_control` breakpoint already sits anywhere in `value`.
+fn contains_cache_control(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            map.contains_key("cache_control") || map.values().any(contains_cache_control)
+        }
+        Value::Array(items) => items.iter().any(contains_cache_control),
+        _ => false,
+    }
+}
+
+/// Put a request-level `cache_control` on the final message's last cacheable
+/// block. Thinking blocks and empty text cannot carry a breakpoint, so the walk
+/// skips them; a plain-string turn becomes a single text block to carry it.
+fn place_request_cache_breakpoint(messages: &mut [Value], cache_control: &Value) {
+    let Some(last) = messages.last_mut() else {
+        return;
+    };
+    match last.get_mut("content") {
+        Some(Value::String(text)) if !text.is_empty() => {
+            let text = std::mem::take(text);
+            last["content"] =
+                json!([{ "type": "text", "text": text, "cache_control": cache_control }]);
+        }
+        Some(Value::Array(blocks)) => {
+            let cacheable = blocks.iter_mut().rev().find(|block| {
+                let kind = block
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let empty_text = kind == "text"
+                    && block
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .is_none_or(str::is_empty);
+                block.is_object()
+                    && !matches!(kind, "thinking" | "redacted_thinking")
+                    && !empty_text
+            });
+            if let Some(block) = cacheable {
+                block["cache_control"] = cache_control.clone();
+            }
+        }
+        _ => {}
+    }
+}
+
 fn anthropic_messages(messages: &[Value]) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     // Index into `out` of the user turn currently collecting `tool_result`
@@ -371,6 +561,11 @@ fn anthropic_messages(messages: &[Value]) -> Vec<Value> {
                 });
                 if !m["content"].is_null() {
                     block["content"] = m["content"].clone();
+                }
+                // A caller's breakpoint on the result (the last block of an agent
+                // tool-loop turn) rides on the message; Anthropic wants it here.
+                if let Some(cache_control) = m.get("cache_control").filter(|c| c.is_object()) {
+                    block["cache_control"] = cache_control.clone();
                 }
                 match open_tool_turn {
                     Some(i) => {
@@ -411,12 +606,18 @@ fn anthropic_messages(messages: &[Value]) -> Vec<Value> {
                         _ => {}
                     }
                     for call in calls {
-                        blocks.push(json!({
+                        let mut block = json!({
                             "type": "tool_use",
                             "id": call["id"],
                             "name": call["function"]["name"],
                             "input": parse_tool_arguments(&call["function"]["arguments"]),
-                        }));
+                        });
+                        if let Some(cache_control) =
+                            call.get("cache_control").filter(|c| c.is_object())
+                        {
+                            block["cache_control"] = cache_control.clone();
+                        }
+                        blocks.push(block);
                     }
                     out.push(json!({ "role": "assistant", "content": blocks }));
                     open_tool_turn = None;
@@ -434,6 +635,83 @@ fn anthropic_messages(messages: &[Value]) -> Vec<Value> {
     }
 
     out
+}
+
+/// Translate compatible image blocks without fetching caller URLs or changing
+/// native Anthropic blocks, tool results, or cache breakpoints.
+fn translate_vision_blocks(value: &mut Value, provider: &str) -> Result<(), ProviderError> {
+    use base64::Engine as _;
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                translate_vision_blocks(item, provider)?;
+            }
+        }
+        Value::Object(object) => {
+            if object.get("type").and_then(Value::as_str) == Some("image_url") {
+                let url = object
+                    .get("image_url")
+                    .and_then(|image| image.get("url"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        ProviderError::Provider("Anthropic image_url needs a URL string".to_owned())
+                    })?;
+                let source = if let Some(data_uri) = url.strip_prefix("data:") {
+                    let (metadata, encoded) = data_uri.split_once(',').ok_or_else(|| {
+                        ProviderError::Provider("Anthropic image data URI is malformed".to_owned())
+                    })?;
+                    let mime = metadata
+                        .strip_suffix(";base64")
+                        .filter(|mime| {
+                            matches!(
+                                *mime,
+                                "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+                            )
+                        })
+                        .ok_or_else(|| {
+                            ProviderError::Provider(
+                                "Anthropic image needs JPEG, PNG, GIF or WebP base64".to_owned(),
+                            )
+                        })?;
+                    if encoded.is_empty()
+                        || encoded.len() > 10 * 1024 * 1024
+                        || base64::engine::general_purpose::STANDARD
+                            .decode(encoded)
+                            .is_err()
+                    {
+                        return Err(ProviderError::Provider(
+                            "Anthropic image base64 is empty, invalid or too large".to_owned(),
+                        ));
+                    }
+                    json!({"type":"base64","media_type":mime,"data":encoded})
+                } else {
+                    if provider.starts_with("bedrock") {
+                        return Err(ProviderError::Provider(
+                            "Bedrock vision requires inline image data".to_owned(),
+                        ));
+                    }
+                    crate::web::ValidatedPublicWebUrl::parse(url).map_err(|_| {
+                        ProviderError::Provider(
+                            "Anthropic image URL must be a public HTTP or HTTPS URL".to_owned(),
+                        )
+                    })?;
+                    json!({"type":"url","url":url})
+                };
+                object.remove("image_url");
+                object.insert("type".to_owned(), json!("image"));
+                object.insert("source".to_owned(), source);
+            } else {
+                // Content arrays can also occur inside tool-result blocks.
+                for key in ["messages", "content", "system"] {
+                    if let Some(child) = object.get_mut(key) {
+                        translate_vision_blocks(child, provider)?;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Decode an OpenAI `function.arguments` value into the object Anthropic wants
@@ -580,6 +858,10 @@ fn map_stop_reason(reason: Option<&str>) -> &'static str {
 ///
 /// Beta selection is the caller's business — nothing here sniffs tool types to
 /// guess which beta a request wants.
+/// Private body field carrying the Gateway's upstream subject; mirrored by
+/// `UPSTREAM_SUBJECT_FIELD` in the Gateway's identity module.
+const UPSTREAM_SUBJECT_FIELD: &str = "ryu_upstream_subject";
+
 fn anthropic_beta_header(caller: Option<&str>, wants_ttl: bool) -> Option<String> {
     let mut betas: Vec<&str> = Vec::new();
     for part in caller.unwrap_or_default().split(',') {
@@ -618,11 +900,34 @@ fn wants_extended_cache_ttl(payload: &Value) -> bool {
 
 /// Anthropic's opt-in beta for `cache_control.ttl` values beyond the 5-minute
 /// default (currently `"1h"`).
-const EXTENDED_CACHE_TTL_BETA: &str = "extended-cache-ttl-2025-04-11";
+pub const EXTENDED_CACHE_TTL_BETA: &str = "extended-cache-ttl-2025-04-11";
+
+/// Anthropic's original prompt-caching beta. Caching is generally available,
+/// so the value is a no-op upstream, but older SDKs still send it.
+pub const PROMPT_CACHING_BETA: &str = "prompt-caching-2024-07-31";
 
 impl Provider for AnthropicProvider {
+    fn configure_account_policies(&self, policies: &[crate::ProviderAccountPolicy]) {
+        self.account_pool.configure(policies);
+    }
+
+    fn configure_account_strategy(&self, strategy: crate::AccountSelectionStrategy) {
+        self.account_pool.configure_strategy(strategy);
+    }
+
+    fn configure_fill_first_drain_percent(&self, percent: u8) {
+        self.account_pool
+            .configure_fill_first_drain_percent(percent);
+    }
+
     fn name(&self) -> &'static str {
-        "anthropic"
+        self.provider_id
+    }
+
+    fn has_rotating_accounts(&self) -> bool {
+        self.account_pool.has_restrictions()
+            || self.keys.len() > 1
+            || self.egress.as_ref().is_some_and(|pool| pool.len() > 1)
     }
 
     fn complete<'a>(
@@ -630,75 +935,107 @@ impl Provider for AnthropicProvider {
         model: &'a str,
         body: &'a Value,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, ProviderError>> + Send + 'a>> {
+        self.complete_for_session(model, body, None)
+    }
+
+    fn complete_for_session<'a>(
+        &'a self,
+        model: &'a str,
+        body: &'a Value,
+        session: Option<&'a str>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, ProviderError>> + Send + 'a>> {
         Box::pin(async move {
-            let payload = self.to_anthropic_body(model, body);
+            let mut payload = self.to_anthropic_body(model, body);
+            translate_vision_blocks(&mut payload, self.provider_id)?;
             debug!(
-                provider = "anthropic",
+                provider = self.provider_id,
                 model, "sending non-streaming request"
             );
 
             let url = self.messages_url();
             let caller_beta = body["ryu_anthropic_beta"].as_str();
-            // Account rotation (#4): rotate keys on a 429 before failing over.
-            let attempts = self.keys.len().max(1);
+            // Account rotation (#4): rotate keys on a 429 or a refused key
+            // before failing over.
+            let candidates = self.account_pool.candidates(session);
             let mut last_err: Option<ProviderError> = None;
-            for _ in 0..attempts {
-                let key = self.next_key();
+            for index in candidates {
+                if !self.account_pool.is_available(index) {
+                    continue;
+                }
+                let key = &self.keys[index];
                 let resp = self
-                    .anthropic_post(&url, &key, &payload, caller_beta)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        ProviderError::Provider(format!("Anthropic request failed: {e}"))
-                    })?;
+                    .send_request(session, "Anthropic request failed", |client| {
+                        self.anthropic_post(client, &url, key, &payload, caller_beta)
+                    })
+                    .await?;
 
                 let status = resp.status();
+                if let Some(domain) = parse_quota_domain(resp.headers()) {
+                    self.account_pool.record_quota_domain(index, domain);
+                }
                 let rate_limit = parse_rate_limit(resp.headers());
+                let account_quota = parse_account_quota(resp.headers());
 
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
                     let retry_after = rate_limit.as_ref().and_then(|r| r.retry_after);
                     let reset_at = rate_limit.as_ref().and_then(|r| r.reset_at);
                     self.quota
-                        .record_rate_limited("anthropic", retry_after, reset_at);
-                    let _ = resp.text().await;
-                    warn!(provider = "anthropic", "provider rate limited (429)");
+                        .record_rate_limited(self.provider_id, retry_after, reset_at);
+                    self.account_pool.record_rate_limit(index, retry_after);
+                    let _ = resp.bounded_text().await;
+                    warn!(provider = self.provider_id, "provider rate limited (429)");
                     let e = ProviderError::RateLimited {
-                        provider: "anthropic".to_string(),
+                        provider: self.provider_id.to_string(),
                         retry_after,
                         reset_at,
                     };
-                    if attempts > 1 {
-                        last_err = Some(e);
+                    last_err = Some(e);
+                    continue;
+                }
+
+                // Classify an error by its status before parsing: a 400 with a
+                // non-JSON body is still this request's rejection, and a
+                // rejection must not count toward the shared provider circuit.
+                if !status.is_success() {
+                    let body = resp.bounded_text().await.unwrap_or_default();
+                    let msg = error_body_message(&body);
+                    warn!(provider = self.provider_id, status = %status, "provider returned error");
+                    let (error, key_refused) = upstream_error_with_key_refusal(
+                        self.provider_id,
+                        status,
+                        &body,
+                        format!("Anthropic error {status}: {msg}"),
+                    );
+                    if key_refused {
+                        self.account_pool.record_auth_failure(index);
+                        last_err = Some(error);
                         continue;
                     }
-                    return Err(e);
+                    return Err(error);
                 }
 
-                let json: Value = resp.json().await.map_err(|e| {
-                    ProviderError::Provider(format!("Anthropic response parse error: {e}"))
+                let json: Value = resp.bounded_json().await.map_err(|_| {
+                    // Accepted generations are billed upstream; never replay.
+                    ProviderError::DeliveryUncertain(
+                        "Anthropic accepted response could not be decoded".to_owned(),
+                    )
                 })?;
 
-                if !status.is_success() {
-                    let msg = json["error"]["message"]
-                        .as_str()
-                        .unwrap_or("unknown error")
-                        .to_string();
-                    warn!(provider = "anthropic", status = %status, error = %msg, "provider returned error");
-                    return Err(ProviderError::Provider(format!(
-                        "Anthropic error {status}: {msg}"
-                    )));
+                if let Some(info) = rate_limit.as_ref() {
+                    self.quota.record_success(self.provider_id, info);
+                }
+                if let Some(info) = account_quota.as_ref() {
+                    self.account_pool.record_quota(index, info);
                 }
 
-                if let Some(info) = rate_limit.as_ref() {
-                    self.quota.record_success("anthropic", info);
-                }
+                self.account_pool.record_success(session, index);
 
                 // Requested model (before routing) for response shaping
                 let requested_model = body["model"].as_str().unwrap_or(model);
                 return Ok(self.from_anthropic_response(&json, requested_model));
             }
             Err(last_err.unwrap_or_else(|| ProviderError::RateLimited {
-                provider: "anthropic".to_string(),
+                provider: self.provider_id.to_string(),
                 retry_after: None,
                 reset_at: None,
             }))
@@ -710,56 +1047,92 @@ impl Provider for AnthropicProvider {
         model: &'a str,
         body: &'a Value,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Body, ProviderError>> + Send + 'a>> {
+        self.complete_stream_for_session(model, body, None)
+    }
+
+    fn complete_stream_for_session<'a>(
+        &'a self,
+        model: &'a str,
+        body: &'a Value,
+        session: Option<&'a str>,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<Body, ProviderError>> + Send + 'a>> {
         Box::pin(async move {
             let mut payload = self.to_anthropic_body(model, body);
+            translate_vision_blocks(&mut payload, self.provider_id)?;
             payload["stream"] = Value::Bool(true);
-            debug!(provider = "anthropic", model, "sending streaming request");
+            debug!(
+                provider = self.provider_id,
+                model, "sending streaming request"
+            );
 
             let url = self.messages_url();
             let caller_beta = body["ryu_anthropic_beta"].as_str();
-            let attempts = self.keys.len().max(1);
+            let candidates = self.account_pool.candidates(session);
             let mut last_err: Option<ProviderError> = None;
-            for _ in 0..attempts {
-                let key = self.next_key();
+            for index in candidates {
+                if !self.account_pool.is_available(index) {
+                    continue;
+                }
+                let key = &self.keys[index];
                 let resp = self
-                    .anthropic_post(&url, &key, &payload, caller_beta)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        ProviderError::Provider(format!("Anthropic stream request failed: {e}"))
-                    })?;
+                    .send_request(session, "Anthropic stream request failed", |client| {
+                        streaming_request(self.anthropic_post(
+                            client,
+                            &url,
+                            key,
+                            &payload,
+                            caller_beta,
+                        ))
+                    })
+                    .await?;
 
                 let status = resp.status();
+                if let Some(domain) = parse_quota_domain(resp.headers()) {
+                    self.account_pool.record_quota_domain(index, domain);
+                }
                 let rate_limit = parse_rate_limit(resp.headers());
+                let account_quota = parse_account_quota(resp.headers());
 
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
                     let retry_after = rate_limit.as_ref().and_then(|r| r.retry_after);
                     let reset_at = rate_limit.as_ref().and_then(|r| r.reset_at);
                     self.quota
-                        .record_rate_limited("anthropic", retry_after, reset_at);
-                    let _ = resp.text().await;
+                        .record_rate_limited(self.provider_id, retry_after, reset_at);
+                    self.account_pool.record_rate_limit(index, retry_after);
+                    let _ = resp.bounded_text().await;
                     let e = ProviderError::RateLimited {
-                        provider: "anthropic".to_string(),
+                        provider: self.provider_id.to_string(),
                         retry_after,
                         reset_at,
                     };
-                    if attempts > 1 {
-                        last_err = Some(e);
-                        continue;
-                    }
-                    return Err(e);
+                    last_err = Some(e);
+                    continue;
                 }
 
                 if !status.is_success() {
-                    let text = resp.text().await.unwrap_or_default();
-                    return Err(ProviderError::Provider(format!(
-                        "Anthropic stream error {status}: {text}"
-                    )));
+                    let text = resp.bounded_text().await.unwrap_or_default();
+                    let (error, key_refused) = upstream_error_with_key_refusal(
+                        self.provider_id,
+                        status,
+                        &text,
+                        format!("Anthropic stream error {status}: {text}"),
+                    );
+                    if key_refused {
+                        self.account_pool.record_auth_failure(index);
+                        last_err = Some(error);
+                        continue;
+                    }
+                    return Err(error);
                 }
 
                 if let Some(info) = rate_limit.as_ref() {
-                    self.quota.record_success("anthropic", info);
+                    self.quota.record_success(self.provider_id, info);
                 }
+                if let Some(info) = account_quota.as_ref() {
+                    self.account_pool.record_quota(index, info);
+                }
+
+                self.account_pool.record_success(session, index);
 
                 let requested_model = body["model"].as_str().unwrap_or(model).to_string();
 
@@ -769,7 +1142,7 @@ impl Provider for AnthropicProvider {
                 return Ok(Body::from_stream(translated));
             }
             Err(last_err.unwrap_or_else(|| ProviderError::RateLimited {
-                provider: "anthropic".to_string(),
+                provider: self.provider_id.to_string(),
                 retry_after: None,
                 reset_at: None,
             }))
@@ -989,6 +1362,32 @@ fn translate_anthropic_stream(
                                         output.push(Ok(Bytes::from(line)));
                                     }
                                 }
+                                // Anthropic reports a failure after the 200 (an
+                                // `overloaded_error`, an `api_error`) as `event:
+                                // error` and then closes. Surface it in-band and
+                                // end the body with an error, never a terminal
+                                // chunk or `[DONE]`, so a truncated answer cannot
+                                // read as a clean completion.
+                                "error" => {
+                                    if finished {
+                                        continue;
+                                    }
+                                    finished = true;
+                                    let error = serde_json::from_str::<Value>(data)
+                                        .map(|v| v["error"].clone())
+                                        .unwrap_or(Value::Null);
+                                    let kind = error["type"].as_str().unwrap_or("api_error");
+                                    let message = error["message"]
+                                        .as_str()
+                                        .unwrap_or("Anthropic stream failed");
+                                    let frame = serde_json::json!({
+                                        "error": { "type": kind, "message": message },
+                                    });
+                                    output.push(Ok(Bytes::from(format!("data: {frame}\n\n"))));
+                                    output.push(Err(std::io::Error::other(format!(
+                                        "Anthropic stream error: {kind}"
+                                    ))));
+                                }
                                 _ => {}
                             }
                         }
@@ -1014,6 +1413,96 @@ mod tests {
             base_url,
             Arc::new(ProviderQuotas::new()),
         )
+    }
+
+    #[tokio::test]
+    async fn bedrock_rate_limits_keep_the_alias_identity_for_chat_and_stream() {
+        let server = MockServer::always(MockResponse::json(429, "quota")).await;
+        let body = json!({"messages":[{"role":"user","content":"hi"}]});
+        for streaming in [false, true] {
+            let provider = AnthropicProvider::new_named_with_egress(
+                "bedrock",
+                reqwest::Client::new(),
+                None,
+                vec!["test-key".to_owned()],
+                server.base_url().to_owned(),
+                Arc::new(ProviderQuotas::new()),
+            );
+            assert_eq!(provider.name(), "bedrock");
+            let error = if streaming {
+                provider
+                    .complete_stream("claude-test", &body)
+                    .await
+                    .err()
+                    .unwrap()
+            } else {
+                provider.complete("claude-test", &body).await.err().unwrap()
+            };
+            assert!(
+                matches!(error, ProviderError::RateLimited { provider, .. } if provider == "bedrock")
+            );
+        }
+        assert_eq!(server.request_count(), 2);
+    }
+
+    /// A generation Anthropic may still be running (timeout after the send) or
+    /// has finished (an accepted 2xx whose body cannot be decoded) is billed
+    /// upstream, so it must stop fallback instead of replaying on the next
+    /// provider. Only a connection that was never established may fall back.
+    #[tokio::test]
+    async fn uncertain_delivery_is_typed_and_never_replayed() {
+        let body = json!({"messages":[{"role":"user","content":"hi"}]});
+        let server = MockServer::always(MockResponse::ok_json("not-json")).await;
+        let provider = provider_with(server.base_url().to_owned(), vec!["first", "second"]);
+        let error = provider.complete("claude-test", &body).await.unwrap_err();
+        assert!(
+            matches!(error, ProviderError::DeliveryUncertain(_)),
+            "{error:?}"
+        );
+        assert_eq!(server.request_count(), 1);
+
+        let (url, seen, stalled) = crate::test_support::stalled_server().await;
+        let provider = AnthropicProvider::new(
+            // Streams lift the total timeout; the read timeout still fires.
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_millis(200))
+                .read_timeout(std::time::Duration::from_millis(200))
+                .build()
+                .unwrap(),
+            vec!["first".to_owned(), "second".to_owned()],
+            url,
+            Arc::new(ProviderQuotas::new()),
+        );
+        for (expected, streaming) in [(1, false), (2, true)] {
+            let error = if streaming {
+                provider
+                    .complete_stream("claude-test", &body)
+                    .await
+                    .err()
+                    .unwrap()
+            } else {
+                provider.complete("claude-test", &body).await.unwrap_err()
+            };
+            assert!(
+                matches!(error, ProviderError::DeliveryUncertain(_)),
+                "streaming={streaming}: {error:?}"
+            );
+            assert_eq!(
+                seen.load(std::sync::atomic::Ordering::SeqCst),
+                expected,
+                "streaming={streaming}"
+            );
+        }
+        stalled.abort();
+
+        let unused = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let refused = format!("http://{}", unused.local_addr().unwrap());
+        drop(unused);
+        let error = provider_with(refused, vec!["first"])
+            .complete("claude-test", &body)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ProviderError::Transport(_)), "{error:?}");
     }
 
     fn dummy() -> AnthropicProvider {
@@ -1053,6 +1542,27 @@ mod tests {
         let out = p.to_anthropic_body("m", &body);
         assert_eq!(out["system"], json!("one\n\ntwo"));
         assert_eq!(out["max_tokens"], json!(100));
+    }
+
+    #[test]
+    fn to_anthropic_body_maps_current_chat_token_limit() {
+        let p = dummy();
+        let body = json!({
+            "messages": [{ "role": "user", "content": "hi" }],
+            "max_completion_tokens": 123
+        });
+
+        assert_eq!(p.to_anthropic_body("m", &body)["max_tokens"], json!(123));
+    }
+
+    #[test]
+    fn to_anthropic_body_forwards_integer_top_k_only() {
+        let p = dummy();
+        let body = json!({ "messages": [{ "role": "user", "content": "hi" }], "top_k": 40 });
+        assert_eq!(p.to_anthropic_body("m", &body)["top_k"], json!(40));
+
+        let invalid = json!({ "messages": [{ "role": "user", "content": "hi" }], "top_k": 0.5 });
+        assert!(p.to_anthropic_body("m", &invalid).get("top_k").is_none());
     }
 
     #[test]
@@ -1195,6 +1705,71 @@ mod tests {
     }
 
     #[test]
+    fn to_anthropic_body_lifts_tool_loop_breakpoints_onto_the_blocks() {
+        let p = dummy();
+        let body = json!({
+            "messages": [
+                { "role": "assistant", "content": null, "tool_calls": [{
+                    "id": "tu_1", "type": "function",
+                    "function": { "name": "lookup", "arguments": "{}" },
+                    "cache_control": { "type": "ephemeral" }
+                }] },
+                { "role": "tool", "tool_call_id": "tu_1", "content": "found",
+                  "cache_control": { "type": "ephemeral", "ttl": "1h" } }
+            ]
+        });
+        let out = p.to_anthropic_body("m", &body);
+        assert_eq!(
+            out["messages"][0]["content"][0]["cache_control"]["type"],
+            json!("ephemeral")
+        );
+        assert_eq!(
+            out["messages"][1]["content"][0]["cache_control"]["ttl"],
+            json!("1h")
+        );
+    }
+
+    #[test]
+    fn to_anthropic_body_places_request_cache_control_on_the_last_block() {
+        // Auto prompt caching marks the request root; it must land on a block
+        // or Anthropic never caches the prefix.
+        let p = dummy();
+        let body = json!({
+            "cache_control": { "type": "ephemeral", "ttl": "1h" },
+            "messages": [
+                { "role": "system", "content": "sys" },
+                { "role": "user", "content": "first" },
+                { "role": "assistant", "content": "reply" },
+                { "role": "user", "content": "latest question" }
+            ]
+        });
+        let out = p.to_anthropic_body("claude-sonnet-4-5", &body);
+        assert!(out.get("cache_control").is_none());
+        let last = out["messages"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(last["content"][0]["text"], json!("latest question"));
+        assert_eq!(last["content"][0]["cache_control"]["ttl"], json!("1h"));
+        assert_eq!(out["messages"][0]["content"], json!("first"));
+    }
+
+    #[test]
+    fn to_anthropic_body_keeps_caller_breakpoints_over_the_request_marker() {
+        let p = dummy();
+        let body = json!({
+            "cache_control": { "type": "ephemeral" },
+            "messages": [
+                { "role": "user", "content": [
+                    { "type": "text", "text": "ctx", "cache_control": { "type": "ephemeral" } }
+                ]},
+                { "role": "assistant", "content": "ok" },
+                { "role": "user", "content": "next" }
+            ]
+        });
+        let out = p.to_anthropic_body("claude-sonnet-4-5", &body);
+        let last = out["messages"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(last["content"], json!("next"));
+    }
+
+    #[test]
     fn from_anthropic_response_surfaces_cache_read_and_write_tokens() {
         let p = dummy();
         let resp = json!({
@@ -1222,6 +1797,47 @@ mod tests {
         // Native names survive too.
         assert_eq!(out["usage"]["cache_read_input_tokens"], json!(900));
         assert_eq!(out["usage"]["cache_creation_input_tokens"], json!(100));
+        // A default-TTL write carries no one-hour split.
+        assert!(out["usage"]["prompt_tokens_details"]
+            .get("cache_write_1h_tokens")
+            .is_none());
+        assert!(out["usage"].get("cache_creation").is_none());
+    }
+
+    #[test]
+    fn from_anthropic_response_carries_the_one_hour_cache_write_split() {
+        let p = dummy();
+        let resp = json!({
+            "content": [{ "type": "text", "text": "x" }],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 100,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": 40,
+                    "ephemeral_1h_input_tokens": 60
+                }
+            }
+        });
+        let out = p.from_anthropic_response(&resp, "m");
+        assert_eq!(
+            out["usage"]["prompt_tokens_details"]["cache_write_tokens"],
+            json!(100)
+        );
+        assert_eq!(
+            out["usage"]["prompt_tokens_details"]["cache_write_1h_tokens"],
+            json!(60)
+        );
+        assert_eq!(
+            out["usage"]["cache_creation"]["ephemeral_1h_input_tokens"],
+            json!(60)
+        );
+        assert_eq!(
+            out["usage"]["cache_creation"]["ephemeral_5m_input_tokens"],
+            json!(40)
+        );
     }
 
     #[test]
@@ -1417,6 +2033,121 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn translate_anthropic_stream_fails_on_a_mid_stream_error_event() {
+        let sse = concat!(
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hal\"}}\n",
+            "event: error\n",
+            "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n",
+        );
+        let raw = futures_util::stream::iter(vec![Ok::<Bytes, reqwest::Error>(Bytes::from(sse))]);
+        let items: Vec<_> = translate_anthropic_stream(raw, "m".to_owned())
+            .collect()
+            .await;
+        let text: String = items
+            .iter()
+            .filter_map(|item| item.as_ref().ok())
+            .map(|bytes| std::str::from_utf8(bytes).unwrap().to_owned())
+            .collect();
+        assert!(text.contains(r#""content":"Hal""#), "got: {text}");
+        let frames = stream_chunks(&text);
+        let error = frames.last().unwrap();
+        assert_eq!(error["error"]["type"], json!("overloaded_error"));
+        assert_eq!(error["error"]["message"], json!("Overloaded"));
+        assert!(!text.contains("[DONE]"), "got: {text}");
+        assert!(!text.contains("finish_reason\":\"stop"), "got: {text}");
+        assert!(items.last().unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn refused_key_moves_the_session_to_a_healthy_key() {
+        let ok = r#"{"id":"m","content":[{"text":"ok"}],"stop_reason":"end_turn",
+            "usage":{"input_tokens":1,"output_tokens":1}}"#;
+        for (status, stream) in [(401, false), (403, true)] {
+            let server = MockServer::start(vec![
+                MockResponse::json(
+                    status,
+                    r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+                ),
+                MockResponse::ok_json(ok),
+                MockResponse::ok_json(ok),
+            ])
+            .await;
+            let p = provider_with(server.base_url().to_string(), vec!["revoked", "healthy"]);
+            let body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+            for _ in 0..2 {
+                if stream {
+                    p.complete_stream_for_session("m", &body, Some("conv"))
+                        .await
+                        .unwrap();
+                } else {
+                    p.complete_for_session("m", &body, Some("conv"))
+                        .await
+                        .unwrap();
+                }
+            }
+            let keys: Vec<_> = server
+                .requests()
+                .iter()
+                .map(|request| request.header("x-api-key").unwrap())
+                .collect();
+            assert_eq!(keys, ["revoked", "healthy", "healthy"], "{status}");
+        }
+        let server = MockServer::always(MockResponse::json(401, "{}")).await;
+        let p = provider_with(server.base_url().to_string(), vec!["only"]);
+        let body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        for _ in 0..2 {
+            assert!(matches!(
+                p.complete("m", &body).await,
+                Err(ProviderError::Rejected { status: 401, .. })
+            ));
+        }
+        assert_eq!(server.request_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_request_refusal_403_neither_rotates_nor_cools_the_key() {
+        // `permission_error`: this key may not use the requested model/beta. Any
+        // other key would be refused the same request, so the key stays usable.
+        let refusal =
+            r#"{"type":"error","error":{"type":"permission_error","message":"model not enabled"}}"#;
+        let ok = r#"{"id":"m","content":[{"text":"ok"}],"stop_reason":"end_turn",
+            "usage":{"input_tokens":1,"output_tokens":1}}"#;
+        for stream in [false, true] {
+            let server = MockServer::start(vec![
+                MockResponse::json(403, refusal),
+                MockResponse::ok_json(ok),
+            ])
+            .await;
+            let p = provider_with(server.base_url().to_string(), vec!["first", "second"]);
+            let body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+            let refused = if stream {
+                p.complete_stream_for_session("m", &body, Some("conv"))
+                    .await
+                    .err()
+            } else {
+                p.complete_for_session("m", &body, Some("conv")).await.err()
+            };
+            assert!(
+                matches!(refused, Some(ProviderError::Rejected { status: 403, .. })),
+                "stream={stream}: {refused:?}"
+            );
+            // The next request still goes to the first key: it was not cooled.
+            p.complete_for_session("m", &body, Some("conv"))
+                .await
+                .unwrap();
+            let keys: Vec<_> = server
+                .requests()
+                .iter()
+                .map(|request| request.header("x-api-key").unwrap())
+                .collect();
+            assert_eq!(keys, ["first", "first"], "stream={stream}");
+        }
+    }
+
+    #[tokio::test]
     async fn complete_translates_and_sends_anthropic_headers() {
         let server = MockServer::always(MockResponse::ok_json(
             r#"{"id":"msg_1","content":[{"type":"text","text":"hi there"}],
@@ -1449,6 +2180,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn vision_translates_inline_and_remote_images_on_buffered_and_streaming_wire() {
+        for streaming in [false, true] {
+            let reply = if streaming {
+                MockResponse::ok_json("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"seen\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+                    .with_header("content-type", "text/event-stream")
+            } else {
+                MockResponse::ok_json(
+                    r#"{"id":"msg_vision","content":[{"type":"text","text":"seen"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#,
+                )
+            };
+            let server = MockServer::always(reply).await;
+            let provider = provider_with(server.base_url().to_owned(), vec!["vision-key"]);
+            let body = json!({"messages":[{"role":"user","content":[
+                {"type":"text","text":"What is shown?"},
+                {"type":"image_url","image_url":{"url":"data:image/png;base64,AQID","detail":"high"},"cache_control":{"type":"ephemeral"}},
+                {"type":"image_url","image_url":{"url":"https://images.example.com/image.jpg"}},
+                {"type":"image","source":{"type":"base64","media_type":"image/webp","data":"AQID"}}
+            ]}]});
+            if streaming {
+                let response = provider
+                    .complete_stream("claude-vision", &body)
+                    .await
+                    .unwrap();
+                let bytes = axum::body::to_bytes(response, 1024 * 1024).await.unwrap();
+                let text = String::from_utf8(bytes.to_vec()).unwrap();
+                assert!(text.contains("seen"));
+                assert!(text.contains("[DONE]"));
+            } else {
+                let response = provider.complete("claude-vision", &body).await.unwrap();
+                assert_eq!(response["choices"][0]["message"]["content"], "seen");
+            }
+            let requests = server.requests();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].path, "/v1/messages");
+            assert_eq!(
+                requests[0].header("x-api-key").as_deref(),
+                Some("vision-key")
+            );
+            let payload = requests[0].json();
+            assert_eq!(payload["model"], "claude-vision");
+            assert_eq!(
+                payload["messages"][0]["content"][1],
+                json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":"AQID"},"cache_control":{"type":"ephemeral"}})
+            );
+            assert_eq!(
+                payload["messages"][0]["content"][2],
+                json!({"type":"image","source":{"type":"url","url":"https://images.example.com/image.jpg"}})
+            );
+            assert_eq!(
+                payload["messages"][0]["content"][3],
+                body["messages"][0]["content"][3]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_or_private_vision_inputs_never_send_credentials() {
+        let server = MockServer::always(MockResponse::ok_json("{}")).await;
+        let provider = provider_with(server.base_url().to_owned(), vec!["vision-key"]);
+        for url in [
+            "data:image/svg+xml;base64,AQID",
+            "data:image/png;base64,invalid",
+            "file:///image.png",
+            "http://127.0.0.1/image.png",
+            "https://user:password@example.com/image.png",
+        ] {
+            let body = json!({"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":url}}]}]});
+            assert!(provider.complete("claude-vision", &body).await.is_err());
+            assert!(provider
+                .complete_stream("claude-vision", &body)
+                .await
+                .is_err());
+        }
+        assert_eq!(server.requests().len(), 0);
+        let mut bedrock = json!({"messages":[{"content":[{"type":"image_url","image_url":{"url":"https://images.example.com/a.png"}}]}]});
+        assert!(translate_vision_blocks(&mut bedrock, "bedrock-api").is_err());
+    }
+
+    #[tokio::test]
     async fn complete_error_does_not_leak_the_api_key() {
         const SECRET: &str = "sk-ant-DO-NOT-LEAK-0xDEADBEEF";
         let server = MockServer::always(MockResponse::json(
@@ -1472,6 +2282,43 @@ mod tests {
             "key leaked in error: {rendered}"
         );
         assert!(rendered.contains("invalid request"));
+    }
+
+    #[tokio::test]
+    async fn request_rejections_are_typed_even_without_a_json_body() {
+        // A rejection says nothing about Anthropic's health, so it must reach
+        // the gateway as `Rejected` (never `Provider`) or one tenant's bad
+        // request would count toward the circuit every tenant shares.
+        for (status, reply) in [
+            (400, r#"{"error":{"message":"bad parameter"}}"#),
+            (413, "<html>request too large</html>"),
+            (422, "not json"),
+        ] {
+            let server = MockServer::always(MockResponse::json(status, reply)).await;
+            let p = provider_with(server.base_url().to_string(), vec!["sk-ant-test"]);
+            let body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+            assert!(
+                matches!(
+                    p.complete("m", &body).await,
+                    Err(ProviderError::Rejected { .. })
+                ),
+                "complete {status}"
+            );
+            assert!(
+                matches!(
+                    p.complete_stream("m", &body).await,
+                    Err(ProviderError::Rejected { .. })
+                ),
+                "stream {status}"
+            );
+        }
+        let server = MockServer::always(MockResponse::json(500, "upstream down")).await;
+        let p = provider_with(server.base_url().to_string(), vec!["sk-ant-test"]);
+        let body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        assert!(matches!(
+            p.complete("m", &body).await,
+            Err(ProviderError::Provider(_))
+        ));
     }
 
     #[tokio::test]
@@ -1926,6 +2773,45 @@ mod tests {
         );
         // The private field is a header instruction, never part of the payload.
         assert!(req.json().get("ryu_anthropic_beta").is_none());
+    }
+
+    #[tokio::test]
+    async fn upstream_subject_becomes_metadata_user_id_and_caller_metadata_is_dropped() {
+        let ok = r#"{"id":"m","content":[{"text":"ok"}],"stop_reason":"end_turn",
+                    "usage":{"input_tokens":1,"output_tokens":1}}"#;
+        let server = MockServer::always(MockResponse::ok_json(ok)).await;
+        let p = provider_with(server.base_url().to_string(), vec!["k"]);
+        let subject = "ryu.1.0123456789abcdef0123456789abcdef";
+        p.complete(
+            "m",
+            &json!({
+                "messages": [{ "role": "user", "content": "hi" }],
+                "metadata": { "user_id": "RYU_TEST_LEXICON-meta" },
+                "user": "RYU_TEST_LEXICON-user",
+                UPSTREAM_SUBJECT_FIELD: subject,
+            }),
+        )
+        .await
+        .unwrap();
+        // Without the private field no metadata is sent at all.
+        p.complete(
+            "m",
+            &json!({
+                "messages": [{ "role": "user", "content": "hi" }],
+                "metadata": { "user_id": "RYU_TEST_LEXICON-meta" },
+            }),
+        )
+        .await
+        .unwrap();
+
+        let requests = server.requests();
+        let stamped = requests[0].json();
+        assert_eq!(stamped["metadata"], json!({ "user_id": subject }));
+        assert!(stamped.get(UPSTREAM_SUBJECT_FIELD).is_none());
+        assert!(!stamped.to_string().contains("RYU_TEST_LEXICON"));
+        let plain = requests[1].json();
+        assert!(plain.get("metadata").is_none());
+        assert!(!plain.to_string().contains("RYU_TEST_LEXICON"));
     }
 
     // ── tool calling: response shaping ───────────────────────────────────────

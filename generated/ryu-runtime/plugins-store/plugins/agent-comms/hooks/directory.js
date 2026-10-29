@@ -33,7 +33,7 @@ if (output === null || output === undefined) {
 let agents = null;
 if (Array.isArray(output)) {
 	agents = output;
-} else if (typeof output === "object" && Array.isArray(output.agents)) {
+} else if (Object(output) === output && Array.isArray(output.agents)) {
 	agents = output.agents;
 }
 if (agents === null) {

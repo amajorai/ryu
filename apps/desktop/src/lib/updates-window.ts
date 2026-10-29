@@ -36,8 +36,16 @@
 // updates button in Settings, which re-reads after the resolve.
 
 import { updatesCutoffMs } from "@ryu/auth/lib/plans";
+import type { z } from "zod";
 import { getActiveUserId } from "@/lib/auth-client.ts";
 import { formatDate } from "@/src/lib/timezone.ts";
+import {
+	type NagRecord,
+	parseScopedUpdatesRecord,
+	updatesNagRecordSchema,
+	updatesWindowRecordSchema,
+	type WindowRecord,
+} from "./updates-window-records.ts";
 
 /** localStorage key: `{ accountId, windowEndsAt }` for the active account. */
 const UPDATES_WINDOW_KEY = "ryu.updates-window";
@@ -45,40 +53,26 @@ const UPDATES_WINDOW_KEY = "ryu.updates-window";
 /** localStorage key: `{ accountId, version }` — the last version nagged about. */
 const UPDATES_NAG_KEY = "ryu.updates-nag";
 
-interface WindowRecord {
-	accountId: string;
-	windowEndsAt: string;
-}
-
-interface NagRecord {
-	accountId: string;
-	version: string;
-}
-
 /**
  * Read a stored record and hand it back only when it belongs to the account that
  * is signed in right now. A missing, unparseable, foreign or unowned record is
  * indistinguishable from "no record", which is the fail-open direction for every
  * caller below.
  */
-function readScopedRecord(key: string): Record<string, unknown> | null {
+function readScopedRecord<T extends { accountId: string }>(
+	key: string,
+	schema: z.ZodType<T>
+): T | null {
 	const activeId = getActiveUserId();
-	// No signed-in account means nothing can legitimately own the record; compare
-	// explicitly so a corrupted `accountId: null` cannot match.
 	if (activeId === null) {
 		return null;
 	}
 	try {
-		const raw = localStorage.getItem(key);
-		if (!raw) {
-			return null;
-		}
-		const parsed = JSON.parse(raw) as unknown;
-		if (typeof parsed !== "object" || parsed === null) {
-			return null;
-		}
-		const record = parsed as Record<string, unknown>;
-		return record.accountId === activeId ? record : null;
+		return parseScopedUpdatesRecord(
+			localStorage.getItem(key),
+			activeId,
+			schema
+		);
 	} catch {
 		return null;
 	}
@@ -112,9 +106,12 @@ export function setUpdatesWindow(windowEndsAtIso: string | null): void {
  * lapse-aware — this is the date to DISPLAY.
  */
 export function getUpdatesWindowEnd(): string | null {
-	const record = readScopedRecord(UPDATES_WINDOW_KEY);
+	const record = readScopedRecord(
+		UPDATES_WINDOW_KEY,
+		updatesWindowRecordSchema
+	);
 	const windowEndsAt = record?.windowEndsAt;
-	if (typeof windowEndsAt !== "string") {
+	if (windowEndsAt === undefined) {
 		return null;
 	}
 	// One corrupted date must not poison every later check, and it must never
@@ -164,7 +161,7 @@ export function formatUpdatesCutoff(iso: string): string {
  * it: only an exact account + version match suppresses.
  */
 export function shouldNagForVersion(version: string): boolean {
-	const record = readScopedRecord(UPDATES_NAG_KEY);
+	const record = readScopedRecord(UPDATES_NAG_KEY, updatesNagRecordSchema);
 	return record?.version !== version;
 }
 

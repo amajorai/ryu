@@ -1,8 +1,9 @@
 "use client";
 
-import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable";
-import { SPRING_LAYOUT, SPRING_PRESS } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable.ts";
+import { SPRING_LAYOUT, SPRING_PRESS } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { MotionStyle } from "motion/react";
 import {
 	AnimatePresence,
 	LayoutGroup,
@@ -19,6 +20,12 @@ import {
 	useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { isNativeFunction } from "../lib/native-primitive-observation.ts";
+import drawingStyles from "./project-folder.drawing.module.css";
+
+interface FolderLayerStyle extends MotionStyle {
+	"--project-folder-1-z-index"?: MotionStyle["zIndex"];
+}
 
 const MAX_PREVIEWS = 5;
 
@@ -100,7 +107,7 @@ function renderPreviewContent(
 	preview: ProjectFolderPreview,
 	expanded: boolean
 ) {
-	return typeof preview.content === "function"
+	return isNativeFunction(preview.content)
 		? preview.content(expanded)
 		: preview.content;
 }
@@ -160,7 +167,7 @@ export function ProjectFolder({
 	}, [setExpanded, setOpen]);
 
 	useEffect(() => {
-		if (!expanded || typeof document === "undefined") {
+		if (!expanded || globalThis.document === undefined) {
 			return;
 		}
 
@@ -258,7 +265,7 @@ export function ProjectFolder({
 	);
 
 	const overlay =
-		typeof document === "undefined"
+		globalThis.document === undefined
 			? null
 			: createPortal(
 					<AnimatePresence
@@ -361,7 +368,7 @@ export function ProjectFolder({
 											</motion.div>
 										))}
 										{cappedPreviews.length === 0
-											? typeof emptyContent === "function"
+											? isNativeFunction(emptyContent)
 												? emptyContent(closeBeforeNavigation)
 												: emptyContent
 											: null}
@@ -409,12 +416,18 @@ export function ProjectFolder({
 									cappedPreviews.length
 								);
 								const { zIndex, ...motionTransform } = transform;
+								const folderLayerStyle: FolderLayerStyle = {
+									"--project-folder-1-z-index": zIndex,
+								};
 								return (
 									<motion.div
 										animate={motionTransform}
 										className={cn(
-											"absolute inset-0 overflow-hidden rounded-2xl border bg-muted",
-											preview.className
+											cn(
+												"absolute inset-0 overflow-hidden rounded-2xl border bg-muted",
+												preview.className
+											),
+											drawingStyles.folderLayer
 										)}
 										inert
 										initial={
@@ -424,7 +437,7 @@ export function ProjectFolder({
 										}
 										key={preview.id}
 										layoutId={`project-folder-preview-${preview.id}`}
-										style={{ zIndex: transform.zIndex }}
+										style={folderLayerStyle}
 										transition={transition}
 									>
 										{renderPreviewContent(preview, false)}

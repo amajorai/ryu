@@ -22,8 +22,16 @@
 //! Placement: this governs a *shared* resource, which is a Gateway concern
 //! (§ Core-vs-Gateway). Core only stamps the `x-ryu-priority` header and sets the
 //! engine's slot count.
+//!
+//! Tenancy: one node can serve several organizations (team nodes, hosted
+//! gateways resolving many `rgw_` tenants). Each request carries its org as the
+//! admission tenant, and the gate keeps two per-org rules so one org cannot
+//! starve the others: an org may hold at most `local_max_pending_per_org`
+//! requests (in flight plus queued), and a freed slot goes to the waiting org
+//! with the fewest requests in flight, FIFO within that org. Requests without
+//! an org share one untenanted bucket, so a single-user node behaves as before.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{
     atomic::{AtomicU32, Ordering},
     Arc, Mutex,
@@ -77,14 +85,22 @@ impl Priority {
 /// unowned.
 struct SlotGuard {
     gate: Option<Arc<ProviderGate>>,
+    tenant: Tenant,
 }
 
 impl Drop for SlotGuard {
     fn drop(&mut self) {
         if let Some(gate) = self.gate.take() {
-            ProviderGate::release(&gate);
+            ProviderGate::release(&gate, &self.tenant);
         }
     }
+}
+
+/// The admission tenant: the request's org, or `""` for untenanted traffic.
+type Tenant = Arc<str>;
+
+fn tenant_key(org_id: Option<&str>) -> Tenant {
+    Arc::from(org_id.filter(|org| !org.is_empty()).unwrap_or_default())
 }
 
 /// A held admission slot. The occupied slot is released when this is dropped
@@ -104,9 +120,12 @@ impl AdmissionPermit {
         Self { slot: None }
     }
 
-    fn held(gate: Arc<ProviderGate>) -> Self {
+    fn held(gate: Arc<ProviderGate>, tenant: Tenant) -> Self {
         Self {
-            slot: Some(SlotGuard { gate: Some(gate) }),
+            slot: Some(SlotGuard {
+                gate: Some(gate),
+                tenant,
+            }),
         }
     }
 
@@ -139,12 +158,70 @@ pub struct QueueFull {
     pub queued: u32,
 }
 
+struct Waiter {
+    tenant: Tenant,
+    sender: oneshot::Sender<SlotGuard>,
+}
+
 struct GateState {
     in_flight: u32,
+    /// Slots held per tenant; absent means zero.
+    in_flight_by_tenant: HashMap<Tenant, u32>,
     /// FIFO of interactive waiters, served first.
-    interactive: VecDeque<oneshot::Sender<SlotGuard>>,
+    interactive: VecDeque<Waiter>,
     /// FIFO of background waiters, served only when no interactive waiter waits.
-    background: VecDeque<oneshot::Sender<SlotGuard>>,
+    background: VecDeque<Waiter>,
+}
+
+impl GateState {
+    fn tenant_in_flight(&self, tenant: &str) -> u32 {
+        self.in_flight_by_tenant.get(tenant).copied().unwrap_or(0)
+    }
+
+    fn add_in_flight(&mut self, tenant: &Tenant) {
+        *self
+            .in_flight_by_tenant
+            .entry(Arc::clone(tenant))
+            .or_insert(0) += 1;
+    }
+
+    fn remove_in_flight(&mut self, tenant: &str) {
+        if let Some(count) = self.in_flight_by_tenant.get_mut(tenant) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.in_flight_by_tenant.remove(tenant);
+            }
+        }
+    }
+
+    /// Live (not abandoned) requests a tenant has in flight or queued.
+    fn tenant_pending(&self, tenant: &str) -> u32 {
+        let queued = self
+            .interactive
+            .iter()
+            .chain(self.background.iter())
+            .filter(|waiter| &*waiter.tenant == tenant && !waiter.sender.is_closed())
+            .count() as u32;
+        self.tenant_in_flight(tenant).saturating_add(queued)
+    }
+
+    /// Pop the waiter whose tenant holds the fewest slots, oldest first within
+    /// a tie, so a backlog from one tenant cannot hold the engine.
+    fn pop_fairest(&mut self, priority: Priority) -> Option<Waiter> {
+        let queue = match priority {
+            Priority::Interactive => &self.interactive,
+            Priority::Background => &self.background,
+        };
+        let index = queue
+            .iter()
+            .enumerate()
+            .min_by_key(|(index, waiter)| (self.tenant_in_flight(&waiter.tenant), *index))
+            .map(|(index, _)| index)?;
+        match priority {
+            Priority::Interactive => self.interactive.remove(index),
+            Priority::Background => self.background.remove(index),
+        }
+    }
 }
 
 /// Per-provider admission gate: a priority-aware async semaphore. A slot is
@@ -157,19 +234,24 @@ struct ProviderGate {
     name: String,
     max_in_flight: u32,
     max_queued: u32,
+    /// Per-tenant cap on in-flight plus queued requests. `0` = no cap. Never
+    /// applied to untenanted traffic.
+    max_pending_per_tenant: u32,
     state: Mutex<GateState>,
     /// Live queue depth, exposed for observability without taking the lock.
     queued_total: AtomicU32,
 }
 
 impl ProviderGate {
-    fn new(name: String, max_in_flight: u32, max_queued: u32) -> Self {
+    fn new(name: String, max_in_flight: u32, max_queued: u32, max_pending_per_tenant: u32) -> Self {
         Self {
             name,
             max_in_flight,
             max_queued,
+            max_pending_per_tenant,
             state: Mutex::new(GateState {
                 in_flight: 0,
+                in_flight_by_tenant: HashMap::new(),
                 interactive: VecDeque::new(),
                 background: VecDeque::new(),
             }),
@@ -182,23 +264,47 @@ impl ProviderGate {
     fn try_acquire_or_enqueue(
         &self,
         prio: Priority,
+        tenant: &Tenant,
     ) -> Result<Option<oneshot::Receiver<SlotGuard>>, QueueFull> {
         let mut g = self.state.lock().expect("admission gate lock poisoned");
+        if !tenant.is_empty()
+            && self.max_pending_per_tenant > 0
+            && g.tenant_pending(tenant) >= self.max_pending_per_tenant
+        {
+            return Err(QueueFull {
+                provider: self.name.clone(),
+                queued: (g.interactive.len() + g.background.len()) as u32,
+            });
+        }
         if g.in_flight < self.max_in_flight {
             g.in_flight += 1;
+            g.add_in_flight(tenant);
             return Ok(None);
         }
-        let queued = (g.interactive.len() + g.background.len()) as u32;
+        let mut queued = (g.interactive.len() + g.background.len()) as u32;
+        if queued >= self.max_queued {
+            // Waiters whose client disconnected stay queued until a release pops
+            // them. Before refusing, drop those so a burst of abandoned requests
+            // cannot turn live traffic into spurious `engine_overloaded` 503s.
+            g.interactive.retain(|waiter| !waiter.sender.is_closed());
+            g.background.retain(|waiter| !waiter.sender.is_closed());
+            queued = (g.interactive.len() + g.background.len()) as u32;
+            self.queued_total.store(queued, Ordering::Relaxed);
+        }
         if queued >= self.max_queued {
             return Err(QueueFull {
                 provider: self.name.clone(),
                 queued,
             });
         }
-        let (tx, rx) = oneshot::channel();
+        let (sender, rx) = oneshot::channel();
+        let waiter = Waiter {
+            tenant: Arc::clone(tenant),
+            sender,
+        };
         match prio {
-            Priority::Interactive => g.interactive.push_back(tx),
-            Priority::Background => g.background.push_back(tx),
+            Priority::Interactive => g.interactive.push_back(waiter),
+            Priority::Background => g.background.push_back(waiter),
         }
         self.queued_total.store(
             (g.interactive.len() + g.background.len()) as u32,
@@ -234,15 +340,17 @@ impl ProviderGate {
     /// any resulting guard `Drop`/recursive `release`). `SlotGuard::drop`
     /// calls back into `release`, which re-locks `state` — sending while still
     /// holding the lock would self-deadlock on that reentry.
-    fn release(gate: &Arc<Self>) {
+    fn release(gate: &Arc<Self>, tenant: &str) {
         let next = {
             let mut g = gate.state.lock().expect("admission gate lock poisoned");
+            g.remove_in_flight(tenant);
             let next = g
-                .interactive
-                .pop_front()
-                .or_else(|| g.background.pop_front());
+                .pop_fairest(Priority::Interactive)
+                .or_else(|| g.pop_fairest(Priority::Background));
             match &next {
-                Some(_) => {
+                Some(waiter) => {
+                    // The slot moves to the waiter's tenant with the guard.
+                    g.add_in_flight(&waiter.tenant);
                     gate.queued_total.store(
                         (g.interactive.len() + g.background.len()) as u32,
                         Ordering::Relaxed,
@@ -255,13 +363,14 @@ impl ProviderGate {
             }
             next
         };
-        if let Some(tx) = next {
+        if let Some(waiter) = next {
             let guard = SlotGuard {
                 gate: Some(Arc::clone(gate)),
+                tenant: waiter.tenant,
             };
             // Dead receiver → `send` hands the guard back as `Err`; dropping
             // it here re-enters `release` with the lock already released.
-            let _ = tx.send(guard);
+            let _ = waiter.sender.send(guard);
         }
     }
 
@@ -298,6 +407,7 @@ pub struct ConcurrencyLimiter {
     enabled: bool,
     local_max_in_flight: u32,
     local_max_queued: u32,
+    local_max_pending_per_org: u32,
     gates: DashMap<String, Arc<ProviderGate>>,
 }
 
@@ -310,6 +420,7 @@ impl ConcurrencyLimiter {
             enabled: config.enabled,
             local_max_in_flight: config.local_max_in_flight,
             local_max_queued: config.local_max_queued,
+            local_max_pending_per_org: config.effective_local_max_pending_per_org(),
             gates: DashMap::new(),
         }
     }
@@ -327,6 +438,7 @@ impl ConcurrencyLimiter {
             provider.to_string(),
             self.local_max_in_flight,
             self.local_max_queued,
+            self.local_max_pending_per_org,
         ));
         self.gates
             .entry(provider.to_string())
@@ -349,6 +461,17 @@ impl ConcurrencyLimiter {
         provider: &str,
         prio: Priority,
     ) -> Result<AdmissionPermit, QueueFull> {
+        self.acquire_for(provider, prio, None).await
+    }
+
+    /// [`Self::acquire`] on behalf of an org, so the gate's per-org cap and
+    /// fair hand-off apply. `None` is untenanted traffic.
+    pub async fn acquire_for(
+        &self,
+        provider: &str,
+        prio: Priority,
+        org_id: Option<&str>,
+    ) -> Result<AdmissionPermit, QueueFull> {
         let Some(gate) = self.gate_for(provider) else {
             return Ok(AdmissionPermit::none());
         };
@@ -360,8 +483,9 @@ impl ConcurrencyLimiter {
             priority = prio.as_str(),
             "admission: gated acquire"
         );
-        match gate.try_acquire_or_enqueue(prio)? {
-            None => Ok(AdmissionPermit::held(gate)),
+        let tenant = tenant_key(org_id);
+        match gate.try_acquire_or_enqueue(prio, &tenant)? {
+            None => Ok(AdmissionPermit::held(gate, tenant)),
             Some(rx) => {
                 // Wait for a finishing request to hand us a slot, as a
                 // SlotGuard whose ownership transfers to us. A recv error
@@ -372,7 +496,7 @@ impl ConcurrencyLimiter {
                 let provider_name = gate.name.clone();
                 let permit = match rx.await {
                     Ok(guard) => AdmissionPermit::from_guard(guard),
-                    Err(_) => AdmissionPermit::held(gate),
+                    Err(_) => AdmissionPermit::held(gate, tenant),
                 };
                 tracing::debug!(
                     provider = %provider_name,
@@ -399,7 +523,97 @@ mod tests {
             enabled: true,
             local_max_in_flight: max_in_flight,
             local_max_queued: max_queued,
+            local_max_pending_per_org: None,
         }
+    }
+
+    fn tenant_cfg(max_in_flight: u32, max_queued: u32, per_org: u32) -> ConcurrencyConfig {
+        ConcurrencyConfig {
+            local_max_pending_per_org: Some(per_org),
+            ..cfg(max_in_flight, max_queued)
+        }
+    }
+
+    #[tokio::test]
+    async fn one_org_cannot_fill_the_shared_queue() {
+        let lim = Arc::new(ConcurrencyLimiter::new(&tenant_cfg(1, 8, 2)));
+        let _held = lim
+            .acquire_for(LOCAL_PROVIDER, Priority::Interactive, Some("org-free"))
+            .await
+            .unwrap();
+        let lim2 = Arc::clone(&lim);
+        let _queued = tokio::spawn(async move {
+            lim2.acquire_for(LOCAL_PROVIDER, Priority::Interactive, Some("org-free"))
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // The org is at its share; a third request is refused...
+        assert!(lim
+            .acquire_for(LOCAL_PROVIDER, Priority::Interactive, Some("org-free"))
+            .await
+            .is_err());
+        // ...while another org can still queue for the engine.
+        let lim3 = Arc::clone(&lim);
+        let other = tokio::spawn(async move {
+            lim3.acquire_for(LOCAL_PROVIDER, Priority::Interactive, Some("org-paid"))
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(!other.is_finished(), "the other org waits in the queue");
+        assert_eq!(lim.snapshots()[0].queued, 2);
+    }
+
+    #[tokio::test]
+    async fn freed_slot_goes_to_the_org_with_fewest_in_flight() {
+        let lim = Arc::new(ConcurrencyLimiter::new(&tenant_cfg(2, 16, 0)));
+        let noisy_a = lim
+            .acquire_for(LOCAL_PROVIDER, Priority::Interactive, Some("org-noisy"))
+            .await
+            .unwrap();
+        let _noisy_b = lim
+            .acquire_for(LOCAL_PROVIDER, Priority::Interactive, Some("org-noisy"))
+            .await
+            .unwrap();
+
+        // The noisy org queues a backlog first; the quiet org arrives last.
+        let mut backlog = Vec::new();
+        for _ in 0..3 {
+            let lim2 = Arc::clone(&lim);
+            backlog.push(tokio::spawn(async move {
+                lim2.acquire_for(LOCAL_PROVIDER, Priority::Interactive, Some("org-noisy"))
+                    .await
+            }));
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let lim3 = Arc::clone(&lim);
+        let quiet = tokio::spawn(async move {
+            lim3.acquire_for(LOCAL_PROVIDER, Priority::Interactive, Some("org-quiet"))
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        drop(noisy_a);
+        let permit = tokio::time::timeout(std::time::Duration::from_millis(500), quiet)
+            .await
+            .expect("the quiet org is served next, ahead of the older backlog")
+            .unwrap();
+        assert!(permit.is_ok());
+        assert!(backlog.iter().all(|task| !task.is_finished()));
+    }
+
+    #[tokio::test]
+    async fn untenanted_traffic_is_not_capped_per_org() {
+        let lim = Arc::new(ConcurrencyLimiter::new(&tenant_cfg(1, 8, 1)));
+        let _held = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
+        let lim2 = Arc::clone(&lim);
+        let _queued =
+            tokio::spawn(async move { lim2.acquire(LOCAL_PROVIDER, Priority::Background).await });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(lim.snapshots()[0].queued, 1);
     }
 
     #[test]
@@ -515,6 +729,37 @@ mod tests {
         // Next acquire overflows the queue → rejected.
         let err = lim.acquire(LOCAL_PROVIDER, Priority::Interactive).await;
         assert!(err.is_err(), "overflow must reject with QueueFull");
+    }
+
+    #[tokio::test]
+    async fn abandoned_waiters_do_not_hold_queue_capacity() {
+        let lim = Arc::new(ConcurrencyLimiter::new(&cfg(1, 1)));
+        let _held = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
+        // A waiter fills the single queue slot, then its client goes away.
+        let lim2 = Arc::clone(&lim);
+        let abandoned =
+            tokio::spawn(async move { lim2.acquire(LOCAL_PROVIDER, Priority::Background).await });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        abandoned.abort();
+        let _ = abandoned.await;
+
+        // The dead waiter must not make the next request overflow the queue.
+        let lim3 = Arc::clone(&lim);
+        let live =
+            tokio::spawn(async move { lim3.acquire(LOCAL_PROVIDER, Priority::Interactive).await });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(
+            !live.is_finished(),
+            "live request must queue, not be rejected"
+        );
+        drop(_held);
+        assert!(
+            live.await.unwrap().is_ok(),
+            "live request gets the freed slot"
+        );
     }
 
     #[tokio::test]

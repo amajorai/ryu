@@ -326,6 +326,8 @@ impl Channel for WhatsAppChannel {
             threads: false,
             command_menu: false,
             voice: false,
+            reply_keyboards: false,
+            inline_buttons: false,
         }
     }
 
@@ -352,7 +354,7 @@ impl Channel for WhatsAppChannel {
         let Some(message_id) = self.latest_inbound(chat_id).await else {
             debug!(
                 channel = PLATFORM,
-                chat_id, "no inbound message id known; skipping typing indicator"
+                "no inbound message id known; skipping typing indicator"
             );
             return Ok(());
         };
@@ -396,6 +398,23 @@ impl Channel for WhatsAppChannel {
             .await
         {
             warn!(channel = PLATFORM, %err, "failed to react to whatsapp message");
+        }
+        Ok(())
+    }
+
+    /// WhatsApp removes a reaction by sending the same reaction with an empty
+    /// emoji, so the named emoji is not needed.
+    async fn remove_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        _emoji: &str,
+    ) -> anyhow::Result<()> {
+        if let Err(err) = self
+            .post_message(&reaction_payload(chat_id, message_id, ""))
+            .await
+        {
+            warn!(channel = PLATFORM, %err, "failed to remove whatsapp reaction");
         }
         Ok(())
     }
@@ -776,6 +795,7 @@ fn parse_inbound(payload: &Value) -> Vec<InboundMessage> {
                     message_id: message["id"].as_str().map(str::to_string),
                     is_group: false,
                     attachments,
+                    channel_action: None,
                 });
             }
         }

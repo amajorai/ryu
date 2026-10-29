@@ -198,7 +198,7 @@ function GitActionsProof() {
 		<main className="min-h-screen bg-background p-8 text-foreground">
 			<div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
 				<section className="rounded-2xl border border-border/70 bg-card p-8">
-					<p className="font-heading font-semibold text-primary text-xs uppercase tracking-[0.18em]">
+					<p className="font-heading font-semibold text-primary text-xs uppercase tracking-(--tracking-section)">
 						Ryu · Git workspace · Sample data
 					</p>
 					<h1 className="mt-3 font-heading font-semibold text-3xl tracking-tight">
@@ -217,8 +217,8 @@ function GitActionsProof() {
 									{BRANCH} · local environment
 								</p>
 							</div>
-							<span className="font-heading font-medium text-2xl text-emerald-500 tabular-nums">
-								+76,383 <span className="text-red-500">−8,438</span>
+							<span className="font-heading font-medium text-2xl text-success tabular-nums">
+								+76,383 <span className="text-destructive">−8,438</span>
 							</span>
 						</div>
 						<div className="mt-5 border-border/60 border-t pt-4">
@@ -274,7 +274,7 @@ function GitActionsProof() {
 								</div>
 								{ciAttachment ? (
 									<p
-										className="mt-3 rounded-md bg-emerald-500/10 px-2 py-1.5 text-emerald-400 text-xs"
+										className="mt-3 rounded-md bg-success/10 px-2 py-1.5 text-success text-xs"
 										data-testid="ci-report-attached"
 									>
 										Attached {ciAttachment.filename}
@@ -330,9 +330,7 @@ function GitActionsProof() {
 						</div>
 						<div>
 							<dt className="text-muted-foreground">Diff</dt>
-							<dd className="mt-1 font-mono text-emerald-500">
-								+76,383 −8,438
-							</dd>
+							<dd className="mt-1 font-mono text-success">+76,383 −8,438</dd>
 						</div>
 						<div>
 							<dt className="text-muted-foreground">Actions</dt>

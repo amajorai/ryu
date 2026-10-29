@@ -1,0 +1,6 @@
+.flow_right {
+	composes: flowRight from "./animations.module.css";
+}
+.dynamic1.dynamic1 {
+	animation-delay: var(--blocks-animationDelay);
+}

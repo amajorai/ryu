@@ -27,6 +27,15 @@ export {
 } from "./design-system-scorecard.ts";
 export { runScorecard } from "./plugin-scorecard.ts";
 export type {
+	MarketplacePublishPackageKind,
+	MarketplacePublishPreflightInput,
+	MarketplacePublishPreflightReport,
+} from "./publish-preflight.ts";
+export {
+	MARKETPLACE_PUBLISH_PACKAGE_KINDS,
+	runMarketplacePublishPreflight,
+} from "./publish-preflight.ts";
+export type {
 	CategoryScore,
 	CheckStatus,
 	Scorecard,

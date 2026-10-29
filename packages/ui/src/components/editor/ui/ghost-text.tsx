@@ -9,6 +9,8 @@ export function GhostText() {
 	const isSuggested = usePluginOption(
 		CopilotPlugin,
 		"isSuggested",
+		// SAFETY: Native Copilot isSuggested only compares suggestionNodeId === id.
+		// Forward the original identity; this does not prove it is a string.
 		element.id as string
 	);
 
@@ -27,7 +29,7 @@ function GhostTextContent() {
 			className="pointer-events-none text-muted-foreground/70 max-sm:hidden"
 			contentEditable={false}
 		>
-			{suggestionText && suggestionText}
+			{suggestionText}
 		</span>
 	);
 }

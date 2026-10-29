@@ -9,7 +9,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { PluginStoreTab } from "@/src/lib/api/plugins.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -20,11 +20,13 @@ const node = {
 	url: "http://node.test",
 	userJwt: "user-one",
 };
-const tab = {
+const tab: PluginStoreTab = {
 	app_enabled: true,
+	app_installed: true,
+	title: "Catalog",
 	id: "catalog",
 	plugin: "com.example.store",
-} as PluginStoreTab;
+};
 const contributedStoreQueryFn = () => Promise.resolve({ items: [], total: 0 });
 
 mock.module("@/src/hooks/useActiveNode.ts", () => ({

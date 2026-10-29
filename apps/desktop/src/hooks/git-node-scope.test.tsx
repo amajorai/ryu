@@ -5,15 +5,17 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const client = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
-const reads: Array<{ signal: AbortSignal; resolve: (value: unknown) => void }> =
-	[];
+const reads: Array<{
+	signal: AbortSignal;
+	resolve: <TValue>(value: TValue) => void;
+}> = [];
 const read = (_target: ApiTarget, _id: string, signal: AbortSignal) =>
 	new Promise((resolve) => reads.push({ signal, resolve }));
 mock.module("@/src/lib/query-client.ts", () => ({ queryClient: client }));

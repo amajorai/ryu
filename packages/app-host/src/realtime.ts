@@ -7,43 +7,34 @@
  * those values and exposes only this opaque room connection.
  */
 
-import type { RyuNodeShareOrigin } from "./app-bridge.ts";
+import { z } from "zod";
+import type * as CompanionProtocol from "./companion-contracts.ts";
+import type { RyuJsonValue } from "./rpc.ts";
 
-export interface TokenTableEvent {
-	data: unknown;
-	name: string;
-}
-export interface TokenTablePresence {
-	data: unknown;
-}
-
-export interface TokenTableConnectionInfo {
-	access: "read" | "write";
-	memberId: string;
-	presence: unknown[];
-	roomId: string;
-}
-
-export interface TokenTableConnection extends TokenTableConnectionInfo {
-	close(): Promise<void>;
-	publish(name: string, data: unknown): Promise<void>;
-	publishPresence(data: unknown): Promise<void>;
-}
-
-export interface TokenTableConnectHandlers {
-	onClose?: (event: { code: number; reason: string }) => void;
-	onError?: (error: unknown) => void;
-	onEvent?: (event: TokenTableEvent) => void;
-	onPresence?: (presence: TokenTablePresence) => void;
-	onResyncRequired?: (notice: { dropped?: number; reason: string }) => void;
-}
-
-export interface TokenTableApi {
-	connect(
-		input: { roomId: string },
-		handlers?: TokenTableConnectHandlers
-	): Promise<TokenTableConnection>;
-}
+/** These public interfaces remain declaration-merging targets in this module.
+ * The pure protocol owns their fields; generic ports retain public nested symbols.
+ */
+export interface TokenTableEvent extends CompanionProtocol.TokenTableEvent {}
+export interface TokenTablePresence
+	extends CompanionProtocol.TokenTablePresence {}
+export interface TokenTableConnectionInfo
+	extends CompanionProtocol.TokenTableConnectionInfo {}
+export interface TokenTableConnection
+	extends TokenTableConnectionInfo,
+		Pick<
+			CompanionProtocol.TokenTableConnection,
+			"close" | "publish" | "publishPresence"
+		> {}
+export interface TokenTableConnectHandlers
+	extends CompanionProtocol.TokenTableConnectHandlers<
+		TokenTableEvent,
+		TokenTablePresence
+	> {}
+export interface TokenTableApi
+	extends CompanionProtocol.TokenTableApi<
+		TokenTableConnectHandlers,
+		TokenTableConnection
+	> {}
 
 /** Generic names for the application-room contract. Token Table aliases remain
  * exported so existing companions continue to type-check unchanged. */
@@ -55,42 +46,25 @@ export type RealtimeAppConnectHandlers = TokenTableConnectHandlers;
 export type RealtimeAppApi = TokenTableApi;
 
 /** Generic app-facing locale primitive installed alongside realtime. */
-export interface RyuCompanionI18n {
-	get(): Promise<{
-		direction: "ltr" | "rtl";
-		locale: string;
-		packId: string | null;
-		packName: string | null;
-		packVersion: string | null;
-	}>;
-	subscribe(options: {
-		onChange: (snapshot: {
-			direction: "ltr" | "rtl";
-			locale: string;
-			packId: string | null;
-			packName: string | null;
-			packVersion: string | null;
-		}) => void;
-	}): { dispose(): void };
-	translate(input: {
-		defaultMessage: string;
-		id: string;
-		values?: Record<string, string | number | boolean | null>;
-	}): Promise<string>;
-}
+export interface RyuCompanionI18n extends CompanionProtocol.RyuCompanionI18n {}
 
 export interface RealtimeResourceChannel {
 	close(): Promise<void>;
-	publishChanged(data?: unknown): Promise<void>;
-	publishPresence(data: unknown): Promise<void>;
+	publishChanged(data?: RyuJsonValue): Promise<void>;
+	publishPresence(data: RyuJsonValue | undefined): Promise<void>;
 }
 
 export interface RealtimeResourceOptions {
-	onChanged: (data: unknown) => void | Promise<void>;
-	onError?: (error: unknown) => void;
-	onPresence?: (data: unknown) => void;
+	onChanged: (data: RyuJsonValue | undefined) => void | Promise<void>;
+	onError?: (cause: unknown) => void;
+	onPresence?: (data: RyuJsonValue | undefined) => void;
 	roomId: string;
 }
+
+const resourceChangedEnvelopeSchema = z.object({
+	data: z.json().optional(),
+	source_member_id: z.unknown().optional(),
+});
 
 /**
  * Join an app-owned resource room using snapshot-first semantics. The app's
@@ -113,10 +87,8 @@ export async function openRealtimeResource(
 				if (name !== "resource.changed") {
 					return;
 				}
-				const envelope =
-					typeof data === "object" && data !== null
-						? (data as { data?: unknown; source_member_id?: unknown })
-						: null;
+				const parsed = resourceChangedEnvelopeSchema.safeParse(data);
+				const envelope = parsed.success ? parsed.data : null;
 				if (envelope?.source_member_id === memberId) {
 					return;
 				}
@@ -132,24 +104,22 @@ export async function openRealtimeResource(
 	return {
 		close: () => connection.close(),
 		publishChanged: (data) =>
-			connection.publish("resource.changed", {
-				data,
-				source_member_id: memberId,
-			}),
+			connection.publish(
+				"resource.changed",
+				data === undefined
+					? { source_member_id: memberId }
+					: { data, source_member_id: memberId }
+			),
 		publishPresence: (data) => connection.publishPresence(data),
 	};
 }
 
-export interface RyuCompanionWindowApi {
-	i18n?: RyuCompanionI18n;
-	node?: {
-		shareOrigins(): Promise<RyuNodeShareOrigin[]>;
-	};
-	realtime: RealtimeAppApi;
-	/** @deprecated Use `realtime`; retained for Token Table compatibility. */
-	tokenTable: TokenTableApi;
-	[key: string]: unknown;
-}
+export interface RyuCompanionWindowApi
+	extends CompanionProtocol.RyuCompanionWindowApi<
+		RyuCompanionI18n,
+		RealtimeAppApi,
+		TokenTableApi
+	> {}
 
 declare global {
 	interface Window {

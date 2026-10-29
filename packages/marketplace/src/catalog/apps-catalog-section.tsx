@@ -2,6 +2,7 @@ import {
 	Add01Icon,
 	CheckmarkCircle02Icon,
 	Download01Icon,
+	GitForkIcon,
 	GridIcon,
 	InformationCircleIcon,
 	Link01Icon,
@@ -62,6 +63,8 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { PublisherTrustLevel } from "@ryuhq/protocol/publisher-trust";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMarketplaceHostOptional } from "../host.tsx";
 import ItemLikeButton from "../likes/like-button.tsx";
@@ -73,13 +76,14 @@ import BrandOrCoverImage, {
 	normalizeIconPadding,
 } from "./chrome/brand-image.tsx";
 import CommunityTrustNotice from "./chrome/community-trust-notice.tsx";
+import DeprecationNotice from "./chrome/deprecation-notice.tsx";
 import InfiniteSentinel from "./chrome/infinite-sentinel.tsx";
+import { RyuReviewedBadge } from "./chrome/ryu-reviewed-badge.tsx";
 import StoreCatalogCard from "./chrome/store-catalog-card.tsx";
 import StoreCatalogLayout, {
 	StoreCardGrid,
 } from "./chrome/store-catalog-layout.tsx";
 import StoreCategoryPage from "./chrome/store-category-page.tsx";
-
 import StoreItemAction, {
 	PublisherInstallDisclosure,
 	StoreItemOverflowMenu,
@@ -88,6 +92,11 @@ import StoreItemAction, {
 import StoreShelf from "./chrome/store-shelf.tsx";
 import StoreShelfHeading from "./chrome/store-shelf-heading.tsx";
 import VerifiedBadge from "./chrome/verified-badge.tsx";
+import {
+	DEPRECATED_LABEL,
+	isDeprecated,
+	resolveDeprecation,
+} from "./deprecation.ts";
 import {
 	ChannelPicker,
 	ChannelSwitchSummary,
@@ -107,6 +116,7 @@ import {
 	ListingStatStrip,
 } from "./detail/listing-detail-shell.tsx";
 import { ListingDetailTabs } from "./detail/listing-detail-tabs.tsx";
+import type { PublisherHealthInput } from "./detail/publisher-health.ts";
 import { ScorecardBadge } from "./detail/scorecard-panel.tsx";
 import { SupportExtensionPanel } from "./detail/support-extension-panel.tsx";
 import { grantDescription, grantLabel } from "./grant-labels.ts";
@@ -114,6 +124,7 @@ import {
 	type CatalogHost,
 	type CatalogInstall,
 	type PluginSettingsOpener,
+	useAllAppListingsAllowed,
 	useCatalogHost,
 	useEntryIncompatibility,
 	useNoInstallingLookup,
@@ -124,6 +135,7 @@ import { resolveCardIcon } from "./icon-url.ts";
 import ImportToolsAction from "./import-tools-action.tsx";
 import { useInstalledOnly } from "./installed-filter.tsx";
 import { REALM_ICONS } from "./realm-icons.ts";
+import { displayRemixSource, remixableFromEntry, remixPlan } from "./remix.ts";
 import { safeHttpUrl } from "./safe-url.ts";
 import { runScorecard, type Scorecard } from "./scorecard.ts";
 import { isUnstableRelease, stabilityLabel } from "./stability.ts";
@@ -323,10 +335,7 @@ export interface CommunityMarketplaceSection {
  * Marketplaces" section. A standalone topic-discovered repo carries no stamp and
  * keeps the flat "From the community" shelf. Exported for unit tests.
  */
-export function groupCommunityMarketplaces(items: readonly AppCatalogItem[]): {
-	marketplaces: CommunityMarketplaceSection[];
-	standalone: AppCatalogItem[];
-} {
+export function groupCommunityMarketplaces(items: readonly AppCatalogItem[]) {
 	const marketplaces = new Map<string, CommunityMarketplaceSection>();
 	const standalone: AppCatalogItem[] = [];
 	for (const item of items) {
@@ -346,10 +355,7 @@ export function groupCommunityMarketplaces(items: readonly AppCatalogItem[]): {
 	return { marketplaces: [...marketplaces.values()], standalone };
 }
 
-const VARIANT_COPY: Record<
-	AppsCatalogVariant,
-	{ noun: string; nounPlural: string; searchPlaceholder: string }
-> = {
+const VARIANT_COPY = {
 	apps: {
 		noun: "app",
 		nounPlural: "apps",
@@ -365,7 +371,10 @@ const VARIANT_COPY: Record<
 		nounPlural: "plugins",
 		searchPlaceholder: "Search plugins…",
 	},
-};
+} satisfies Record<
+	AppsCatalogVariant,
+	{ noun: string; nounPlural: string; searchPlaceholder: string }
+>;
 
 /**
  * Plugins catalog Store section, shared by desktop and web. Browses the active
@@ -417,7 +426,7 @@ export default function AppsCatalogSection({
 		setQuery,
 		selectedId,
 		select,
-		selectedItem,
+		selectedItem: catalogSelectedItem,
 		detail,
 		detailLoading,
 		detailError,
@@ -427,6 +436,7 @@ export default function AppsCatalogSection({
 		setEnabled,
 		lifecyclePending,
 		installFromUrl,
+		installUrlError,
 		switchChannel,
 		sources,
 		activeSource,
@@ -472,12 +482,27 @@ export default function AppsCatalogSection({
 	);
 	const passesInstalledFilter = (it: AppCatalogItem) =>
 		!installedOnly || it.installed;
+	// Rollout discovery gate: an app held behind a rollout flag is not listed
+	// until the reader's rollout reaches it. An installed copy always shows —
+	// installing was the opt-in, and the app itself is not flag-aware.
+	const useHostAppListingAllowed =
+		host.useAppListingAllowed ?? useAllAppListingsAllowed;
+	const appListingAllowed = useHostAppListingAllowed();
+	const passesRolloutFilter = (it: AppCatalogItem) =>
+		it.installed || appListingAllowed(it.entry.id);
+	// The same gate on the resolved selection: a gated, uninstalled id that
+	// arrives from outside the list (a Home card, a deep link) selects nothing.
+	const selectedItem =
+		catalogSelectedItem && passesRolloutFilter(catalogSelectedItem)
+			? catalogSelectedItem
+			: null;
 	const candidateItems = dedupeById(
 		items.filter(
 			(it) =>
 				!isCommunityEntry(it) &&
 				splitForVariant(it) &&
-				passesInstalledFilter(it)
+				passesInstalledFilter(it) &&
+				passesRolloutFilter(it)
 		)
 	);
 	const candidateCommunityItems = dedupeById(
@@ -485,6 +510,7 @@ export default function AppsCatalogSection({
 			.filter(isCommunityEntry)
 			.filter(splitForVariant)
 			.filter(passesInstalledFilter)
+			.filter(passesRolloutFilter)
 	);
 	const visibleItems = filterAppsByStability(candidateItems, showUnstable);
 	const communityItems = filterAppsByStability(
@@ -559,7 +585,7 @@ export default function AppsCatalogSection({
 		}
 		preselected.current = true;
 		selectFirstParty(initialSelectedId);
-		// biome-ignore lint/correctness/useExhaustiveDependencies: `selectFirstParty`
+		// `selectFirstParty`
 		// is re-created on every catalog refetch; depending on it would re-assert the
 		// arrival selection over whatever the user picked next. The latch above is
 		// the guard, and the id is the only real input.
@@ -595,13 +621,30 @@ export default function AppsCatalogSection({
 	const [communityInstallingId, setCommunityInstallingId] = useState<
 		string | null
 	>(null);
-	const onInstallCommunity = (item: AppCatalogItem) => {
+	const [communityInstallError, setCommunityInstallError] = useState<
+		string | null
+	>(null);
+	const installCommunity = async (item: AppCatalogItem) => {
 		const url = communityInstallUrl(item);
 		if (!url || communityInstallingId) {
 			return;
 		}
+		setCommunityInstallError(null);
 		setCommunityInstallingId(item.entry.id);
-		installFromUrl(url).finally(() => setCommunityInstallingId(null));
+		try {
+			await installFromUrl(url);
+		} catch (cause) {
+			setCommunityInstallError(
+				cause instanceof Error
+					? cause.message
+					: "Failed to install community listing"
+			);
+		} finally {
+			setCommunityInstallingId(null);
+		}
+	};
+	const onInstallCommunity = (item: AppCatalogItem) => {
+		void installCommunity(item);
 	};
 
 	// Is THIS listing busy? One question, one answer, everywhere on the page.
@@ -611,7 +654,10 @@ export default function AppsCatalogSection({
 	// so a host that provides no shared state — or a test host — still gets a
 	// correct per-instance answer instead of a dead flag.
 	const isInstalling = (id: string) =>
-		sharedInstalling(id) || installing === id || community.installing === id;
+		sharedInstalling(id) ||
+		installing === id ||
+		community.installing === id ||
+		communityInstallingId === id;
 
 	// Per-card lifecycle without a per-id hook: the hook's setEnabled() acts on the
 	// SELECTED item, so a card's Disable selects its item and defers the call until
@@ -666,10 +712,7 @@ export default function AppsCatalogSection({
 						id="show-unstable-releases"
 						onCheckedChange={(checked) => setShowUnstable(checked === true)}
 					/>
-					<Label
-						className="cursor-pointer text-sm"
-						htmlFor="show-unstable-releases"
-					>
+					<Label className="cursor-pointer" htmlFor="show-unstable-releases">
 						Show unstable releases
 					</Label>
 				</div>
@@ -690,12 +733,22 @@ export default function AppsCatalogSection({
 							selectSource={selectSource}
 							sources={sources}
 						/>
-						<InstallFromUrl install={installFromUrl} />
+						<InstallFromUrl
+							error={installUrlError ?? null}
+							install={installFromUrl}
+						/>
 					</>
 				) : null}
 			</div>
 		),
 	};
+	const activeCommunityItem =
+		active?.selectedItem && isCommunityEntry(active.selectedItem)
+			? active.selectedItem
+			: null;
+	const detailInstall = activeCommunityItem
+		? () => installCommunity(activeCommunityItem)
+		: (active?.install ?? install);
 
 	return (
 		<StoreCatalogLayout
@@ -705,7 +758,7 @@ export default function AppsCatalogSection({
 					detailError={active ? active.detailError : detailError}
 					detailLoading={active ? active.detailLoading : detailLoading}
 					error={active ? active.error : error}
-					install={active ? active.install : install}
+					install={detailInstall}
 					installLayer={host.install}
 					installVersion={active ? undefined : installVersion}
 					isInstalling={isInstalling}
@@ -729,9 +782,14 @@ export default function AppsCatalogSection({
 					canInstall={host.install != null}
 					communityFetchNextPage={community.fetchNextPage}
 					communityHasNextPage={community.hasNextPage}
+					communityInstallError={communityInstallError}
 					communityInstallingId={communityInstallingId}
 					communityItems={filteredCommunityItems}
-					communityLoading={community.loading}
+					communityLoadedCount={community.items.length}
+					// The shelf's sentinel needs the NEXT-page flag: `loading` is the
+					// initial-load flag and stays false through `fetchNextPage`, which
+					// left its request latch set after one extra page.
+					communityLoading={community.loading || community.loadingMore}
 					communitySelectedId={communitySelected ? community.selectedId : null}
 					error={error}
 					fallbackIcon={REALM_ICONS[variant === "plugins" ? "plugins" : "apps"]}
@@ -740,6 +798,7 @@ export default function AppsCatalogSection({
 					hasNextPage={hasNextPage}
 					isInstalling={isInstalling}
 					items={filteredVisibleItems}
+					loadedCount={items.length}
 					loading={loading}
 					loadingMore={loadingMore}
 					nounPlural={copy.nounPlural}
@@ -795,7 +854,7 @@ function TagFilter({
 				}
 				value={value ?? "__all__"}
 			>
-				<SelectTrigger className="h-8 w-full text-sm" size="sm">
+				<SelectTrigger className="h-8 w-full" size="sm">
 					<SelectValue placeholder="All tags" />
 				</SelectTrigger>
 				<SelectContent>
@@ -889,7 +948,7 @@ function PluginSourcePicker({
 					}}
 					value={activeSource}
 				>
-					<SelectTrigger className="h-8 w-full text-sm" size="sm">
+					<SelectTrigger className="h-8 w-full" size="sm">
 						<SelectValue placeholder="Source" />
 					</SelectTrigger>
 					<SelectContent>
@@ -906,7 +965,10 @@ function PluginSourcePicker({
 					<Tooltip>
 						<TooltipTrigger
 							render={
-								<PopoverTrigger className="inline-flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground">
+								<PopoverTrigger
+									className="inline-flex h-8 w-full items-center"
+									variant="marketplace-add"
+								>
 									<HugeiconsIcon className="size-4" icon={Add01Icon} />
 									Add marketplace
 								</PopoverTrigger>
@@ -960,8 +1022,10 @@ function PluginSourcePicker({
 }
 
 function InstallFromUrl({
+	error,
 	install,
 }: {
+	error: string | null;
 	install: (url: string) => Promise<void>;
 }) {
 	const [url, setUrl] = useState("");
@@ -978,46 +1042,54 @@ function InstallFromUrl({
 		install(trimmed)
 			.then(() => setUrl(""))
 			.catch(() => {
-				// Error surfaces via the hook's error state in the detail panel; the
-				// input stays populated so the user can correct the URL.
+				// Error is shown next to the input; the value stays populated for retry.
 			})
 			.finally(() => setBusy(false));
 	};
 
 	return (
-		<div className="flex items-center gap-2">
-			<div className="relative flex-1">
-				<HugeiconsIcon
-					className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-					icon={Link01Icon}
-				/>
-				<Input
-					className="pl-9"
-					onChange={(e) => setUrl(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter") {
-							submit();
-						}
-					}}
-					placeholder="https://…/manifest.json"
-					value={url}
-				/>
+		<div className="flex flex-col gap-1.5">
+			<div className="flex items-center gap-2">
+				<div className="relative flex-1">
+					<HugeiconsIcon
+						className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+						icon={Link01Icon}
+					/>
+					<Input
+						aria-label="App manifest URL"
+						leadingAdornment="default"
+						onChange={(e) => setUrl(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") {
+								submit();
+							}
+						}}
+						placeholder="https://…/manifest.json"
+						value={url}
+					/>
+				</div>
+				<Button
+					disabled={url.trim().length === 0}
+					loading={busy}
+					onClick={submit}
+					size="sm"
+					variant="ghost"
+				>
+					Add from URL
+				</Button>
 			</div>
-			<Button
-				disabled={url.trim().length === 0}
-				loading={busy}
-				onClick={submit}
-				size="sm"
-				variant="ghost"
-			>
-				Add from URL
-			</Button>
+			{error ? (
+				<p className="text-status-destructive text-xs" role="alert">
+					{error}
+				</p>
+			) : null}
 		</div>
 	);
 }
 
 function AppList({
 	items,
+	loadedCount,
 	loading,
 	loadingMore,
 	error,
@@ -1034,11 +1106,13 @@ function AppList({
 	stabilityFiltered,
 	searching,
 	communityItems,
+	communityLoadedCount,
 	communityLoading,
 	communityHasNextPage,
 	communityFetchNextPage,
 	communitySelectedId,
 	communityInstallingId,
+	communityInstallError,
 	onSelectCommunity,
 	onInstallCommunity,
 	onClearSearch,
@@ -1047,6 +1121,9 @@ function AppList({
 	groupBySource,
 }: {
 	items: AppCatalogItem[];
+	/** Rows loaded from the feed BEFORE client-side filtering; its growth tells
+	 *  the sentinel a page landed even when it added no visible row. */
+	loadedCount: number;
 	loading: boolean;
 	loadingMore: boolean;
 	error: string | null;
@@ -1071,6 +1148,8 @@ function AppList({
 	 *  apps/plugins slice. Rendered as a trailing shelf under their own heading and
 	 *  trust notice — see {@link CommunityShelf}. */
 	communityItems: AppCatalogItem[];
+	/** Community rows loaded BEFORE this tab's filters (see `loadedCount`). */
+	communityLoadedCount: number;
 	communityLoading: boolean;
 	communityHasNextPage: boolean;
 	communityFetchNextPage: () => void;
@@ -1079,6 +1158,7 @@ function AppList({
 	communitySelectedId: string | null;
 	/** The community row whose install is in flight, if any. */
 	communityInstallingId: string | null;
+	communityInstallError: string | null;
 	onSelectCommunity: (id: string) => void;
 	/** Install a community row from its repository — see {@link communityInstallUrl}. */
 	onInstallCommunity: (item: AppCatalogItem) => void;
@@ -1127,6 +1207,9 @@ function AppList({
 					pending={isInstalling(it.entry.id)}
 				/>
 			}
+			communityApp={
+				it.entry.origin === "community" || it.entry.reviewed === false
+			}
 			contextMenu={
 				// Mirrors the card's OWN control, installed states included — the
 				// right-click used to reach only listings you had not adopted yet,
@@ -1146,6 +1229,7 @@ function AppList({
 					/>
 				) : undefined
 			}
+			deprecated={isDeprecated(it.entry.deprecated)}
 			description={it.entry.description}
 			// A listing this node cannot run is DIMMED, never hidden: it used to
 			// vanish from the catalog entirely, leaving no way to learn that updating
@@ -1185,6 +1269,7 @@ function AppList({
 			}
 			publisherTrust={it.entry.publisher_trust}
 			publisherVerification={it.entry.publisher_verification}
+			reviewed={it.entry.reviewed}
 			seedId={it.entry.id}
 			selected={it.entry.id === selectedId}
 			stability={it.entry.stability}
@@ -1202,8 +1287,10 @@ function AppList({
 			fallbackIcon={fallbackIcon}
 			fetchNextPage={communityFetchNextPage}
 			hasNextPage={communityHasNextPage}
+			installError={communityInstallError}
 			installingId={communityInstallingId}
 			items={communityItems}
+			loadedCount={communityLoadedCount}
 			loading={communityLoading}
 			onInstallCommunity={onInstallCommunity}
 			onSelect={onSelectCommunity}
@@ -1225,7 +1312,7 @@ function AppList({
 	if (error && items.length === 0) {
 		return (
 			<div className="flex flex-col gap-3" ref={setScrollEl}>
-				<Empty className="h-full p-6">
+				<Empty className="h-full" inset="dense">
 					<EmptyHeader>
 						<EmptyMedia variant="icon">
 							<HugeiconsIcon icon={fallbackIcon} />
@@ -1246,8 +1333,11 @@ function AppList({
 	if (items.length === 0) {
 		return (
 			<div className="flex flex-col gap-3" ref={setScrollEl}>
-				{communityItems.length === 0 ? (
-					<Empty className="h-full p-6">
+				{/* A page can filter to zero visible rows (variant split, installed
+				    only, tags) while the feed still has more: keep paging instead of
+				    declaring the catalog empty. */}
+				{communityItems.length === 0 && !hasNextPage ? (
+					<Empty className="h-full" inset="dense">
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
 								<HugeiconsIcon icon={fallbackIcon} />
@@ -1270,6 +1360,13 @@ function AppList({
 						</EmptyContent>
 					</Empty>
 				) : null}
+				<InfiniteSentinel
+					hasMore={hasNextPage}
+					itemCount={loadedCount}
+					loading={loadingMore}
+					onLoadMore={fetchNextPage}
+					root={scrollEl}
+				/>
 				{communityShelf}
 			</div>
 		);
@@ -1364,6 +1461,7 @@ function AppList({
 			)}
 			<InfiniteSentinel
 				hasMore={hasNextPage}
+				itemCount={loadedCount}
 				loading={loadingMore}
 				onLoadMore={fetchNextPage}
 				root={scrollEl}
@@ -1388,7 +1486,9 @@ function AppList({
  */
 function CommunityShelf({
 	items,
+	loadedCount,
 	loading,
+	installError,
 	selectedId,
 	onSelect,
 	onInstallCommunity,
@@ -1401,9 +1501,12 @@ function CommunityShelf({
 	fallbackIcon: IconSvgElement;
 	fetchNextPage: () => void;
 	hasNextPage: boolean;
+	installError: string | null;
 	/** The row whose install is in flight, if any. */
 	installingId: string | null;
 	items: AppCatalogItem[];
+	/** Community rows loaded BEFORE this tab's filters (see `AppList`). */
+	loadedCount: number;
 	loading: boolean;
 	/** Install a community row from its repository (see the card's `action`). */
 	onInstallCommunity: (item: AppCatalogItem) => void;
@@ -1455,6 +1558,10 @@ function CommunityShelf({
 					pending={installingId === it.entry.id}
 				/>
 			}
+			communityApp={
+				it.entry.origin === "community" || it.entry.reviewed === false
+			}
+			deprecated={isDeprecated(it.entry.deprecated)}
 			description={it.entry.description}
 			dither={it.entry.icon_dither}
 			external={it.entry.external}
@@ -1481,6 +1588,7 @@ function CommunityShelf({
 			orgVerifiedTier={it.entry.org_verified_tier}
 			publisherTrust={it.entry.publisher_trust}
 			publisherVerification={it.entry.publisher_verification}
+			reviewed={it.entry.reviewed}
 			seedId={it.entry.id}
 			// A GitHub repo rarely declares a wash, so without this its card
 			// was a bare glyph on flat `bg-muted` in a grid of painted plates.
@@ -1493,6 +1601,11 @@ function CommunityShelf({
 
 	return (
 		<section className="mt-6 flex flex-col gap-3 border-t pt-6">
+			{installError ? (
+				<p className="text-sm text-status-destructive" role="alert">
+					{installError}
+				</p>
+			) : null}
 			{marketplaces.length > 0 ? (
 				<>
 					{/* The section's BIG header. The SHARED shelf heading primitive,
@@ -1537,6 +1650,7 @@ function CommunityShelf({
 			) : null}
 			<InfiniteSentinel
 				hasMore={hasNextPage}
+				itemCount={loadedCount}
 				loading={loading}
 				onLoadMore={fetchNextPage}
 				root={root}
@@ -1576,6 +1690,20 @@ export function pluginDownloadTaskId(id: string): string {
 /** Card action for an app: Add (inline), Enabled↔Disable morph (Disable
  *  inline), or Disabled→Enable which opens the preview so its grant dialog runs.
  *  Descriptor-only rows + read-only surfaces just open the preview. */
+/** The health signals the unverified-publisher install disclosure shows. One
+ *  builder for the card, its context menu, and the detail hero so the three
+ *  install paths cannot drift. */
+function appPublisherHealth(
+	entry: CatalogEntry
+): Omit<PublisherHealthInput, "publisherTrust"> {
+	return {
+		capabilities: entry.capabilities,
+		packageChecksum: entry.package_checksum,
+		reviewed: entry.reviewed,
+		signatureStatus: "unknown",
+	};
+}
+
 /**
  * The right-click rows for an app card — the same decisions {@link AppCardAction}
  * makes, restated for the context-menu primitive.
@@ -1620,12 +1748,7 @@ function AppCardContextMenu({
 			onInstall={onInstall}
 			onOpenChange={setCommunityDialogOpen}
 			open={communityDialogOpen}
-			publisherHealth={{
-				capabilities: item.entry.capabilities,
-				packageChecksum: item.entry.package_checksum,
-				reviewed: item.entry.reviewed,
-				signatureStatus: "unknown",
-			}}
+			publisherHealth={appPublisherHealth(item.entry)}
 			publisherTrust={publisherTrust ?? "dotted"}
 		/>
 	) : null;
@@ -1702,9 +1825,7 @@ function AppCardAction({
 		// destination, so the badge stays alone in that case.
 		return (
 			<div className="flex shrink-0 items-center gap-1">
-				<Badge className="text-xs" variant="secondary">
-					Required
-				</Badge>
+				<Badge variant="secondary">Required</Badge>
 				<StoreItemOverflowMenu onOpenSettings={onOpenSettings ?? undefined} />
 			</div>
 		);
@@ -1742,12 +1863,7 @@ function AppCardAction({
 				onEnable={onOpen}
 				onInstall={onInstall}
 				onOpenSettings={onOpenSettings ?? undefined}
-				publisherHealth={{
-					capabilities: item.entry.capabilities,
-					packageChecksum: item.entry.package_checksum,
-					reviewed: item.entry.reviewed,
-					signatureStatus: "unknown",
-				}}
+				publisherHealth={appPublisherHealth(item.entry)}
 				publisherTrust={item.entry.publisher_trust}
 				reportTarget={reportTargetForApp(item)}
 			/>
@@ -1762,7 +1878,7 @@ function AppCardAction({
  *  rendering "$0.00" — a price badge that says nothing costs attention for nothing. */
 export function priceLabel(entry: CatalogEntry): string | null {
 	const amount = entry.pricing?.amountMinor;
-	if (typeof amount !== "number" || amount <= 0) {
+	if (!isNativeNumber(amount) || amount <= 0) {
 		return null;
 	}
 	return formatPrice(amount, entry.pricing?.currency ?? "usd");
@@ -1777,10 +1893,7 @@ function PriceBadge({ entry }: { entry: CatalogEntry }) {
 		return null;
 	}
 	return (
-		<Badge
-			className="shrink-0 font-heading text-xs tabular-nums"
-			variant="outline"
-		>
+		<Badge className="shrink-0" typography="price" variant="outline">
 			{label}
 		</Badge>
 	);
@@ -1816,7 +1929,7 @@ function reportTargetForApp(item: AppCatalogItem) {
  *  costs: every branch below had to be re-surfaced. The Add button was `ghost`
  *  (no fill), the two link/Disable buttons were `outline` (border only), and two
  *  branches were bare `text-muted-foreground` prose. All four dissolve into an
- *  author-supplied wash. They are `secondary` + {@link HERO_CTA_CLASS}, or a
+ *  author-supplied wash. They are `secondary` + the shared hero-CTA appearance, or a
  *  hero-toned `StatusBadge`, so each keeps a surface the scrim cannot eat.
  *
  *  Split from {@link AppSecondaryActions} along STATE, not along layout: this half
@@ -1836,7 +1949,6 @@ function reportTargetForApp(item: AppCatalogItem) {
  *  dissolve into whatever colour the listing happens to declare. `secondary`
  *  gives a real plate, and the ring lifts it off a busy wash without inventing a
  *  second button style. */
-const HERO_CTA_CLASS = "shadow-sm ring-1 ring-black/10";
 
 function AppPrimaryAction({
 	item,
@@ -1848,6 +1960,7 @@ function AppPrimaryAction({
 	installLayer,
 	renderAffordance,
 	modelProviders,
+	publisherTrust,
 }: {
 	item: AppCatalogItem;
 	install: (
@@ -1864,10 +1977,14 @@ function AppPrimaryAction({
 	renderAffordance: CatalogHost["renderAffordance"];
 	/** Provider-backed sidecars need a stronger disclosure than a raw grant list. */
 	modelProviders?: CatalogModelProvider[] | null;
+	/** Resolved publisher identity mark (detail record over card). A dotted
+	 *  publisher gets the same two-step install disclosure as the cards. */
+	publisherTrust?: PublisherTrustLevel | null;
 }) {
 	const host = useCatalogHost();
 	const node = host.useActiveNode();
 	const [confirmOpen, setConfirmOpen] = useState(false);
+	const [disclosureOpen, setDisclosureOpen] = useState(false);
 	const { entry, grants, installed, enabled } = item;
 	const providers = modelProviders ?? [];
 
@@ -1890,8 +2007,18 @@ function AppPrimaryAction({
 	const runDisable = () => {
 		setEnabled(false).catch(noop);
 	};
-	const runInstall = () => {
+	const startInstall = () => {
 		install(entry.id, channel ? { channel } : undefined).catch(noop);
+	};
+	// The hero's Get must not be a one-click way around the cards' unverified-
+	// publisher disclosure: opening a card lands here.
+	const needsPublisherDisclosure = !installed && publisherTrust === "dotted";
+	const runInstall = () => {
+		if (needsPublisherDisclosure) {
+			setDisclosureOpen(true);
+			return;
+		}
+		startInstall();
 	};
 	const confirmEnable = () => {
 		setConfirmOpen(false);
@@ -1956,7 +2083,7 @@ function AppPrimaryAction({
 			const href = safeHttpUrl(entry.integration_url);
 			action = href ? (
 				<Button
-					className={HERO_CTA_CLASS}
+					appearance="marketplace-hero-cta"
 					render={<a href={href} rel="noopener noreferrer" target="_blank" />}
 					size="sm"
 					variant="secondary"
@@ -2011,7 +2138,7 @@ function AppPrimaryAction({
 	} else if (enabled) {
 		action = (
 			<Button
-				className={HERO_CTA_CLASS}
+				appearance="marketplace-hero-cta"
 				loading={lifecyclePending}
 				onClick={runDisable}
 				size="sm"
@@ -2035,6 +2162,15 @@ function AppPrimaryAction({
 	return (
 		<>
 			{action}
+			{installLayer && needsPublisherDisclosure ? (
+				<PublisherInstallDisclosure
+					onInstall={startInstall}
+					onOpenChange={setDisclosureOpen}
+					open={disclosureOpen}
+					publisherHealth={appPublisherHealth(entry)}
+					publisherTrust="dotted"
+				/>
+			) : null}
 			{/* Enable confirmation: list grants before enabling. Install-only.
 			    Rendered from here because `confirmOpen` is this component's state and
 			    the button that sets it is right above; the dialog itself portals out,
@@ -2153,10 +2289,31 @@ function AppSecondaryActions({
 	const noop = () => {
 		// intentionally empty: error is surfaced via the hook
 	};
+	// Remixing an app or plugin starts from a fork of its GitHub source; the fork
+	// credits this listing through `remixedFrom` when it is published.
+	const remix = remixPlan(remixableFromEntry(entry));
 
 	return (
 		<div className="flex w-full flex-col gap-2">
 			<div className="flex w-full flex-wrap items-center gap-2">
+				{remix.kind === "fork" ? (
+					<Button
+						nativeButton={false}
+						render={
+							<a
+								aria-label={`Remix ${entry.name} by forking its source on GitHub`}
+								href={remix.forkUrl}
+								rel="noopener noreferrer"
+								target="_blank"
+							/>
+						}
+						size="sm"
+						variant="ghost"
+					>
+						<HugeiconsIcon className="size-4" icon={GitForkIcon} />
+						Remix
+					</Button>
+				) : null}
 				{/* Configuring an app is not part of installing or disabling it, which
 				    is why this is here and not in the hero beside the lifecycle verb —
 				    but it is still where a user who just clicked into the listing looks
@@ -2185,9 +2342,7 @@ function AppSecondaryActions({
 						value={followed}
 					/>
 				) : installed && item.channel && item.channel !== STABLE_CHANNEL ? (
-					<Badge className="text-xs" variant="outline">
-						{channelLabel(item.channel)} channel
-					</Badge>
+					<Badge variant="outline">{channelLabel(item.channel)} channel</Badge>
 				) : null}
 				{status ? (
 					<span className="ml-auto flex shrink-0 items-center gap-2">
@@ -2341,7 +2496,7 @@ function AppDetailPanel({
 	const [tab, setTab] = useState<DetailTabId>("overview");
 	// Reset to Overview when the selection changes, so opening a second listing
 	// never lands on a tab that listing does not have.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: resetting is keyed
+	// resetting is keyed
 	// on the selection changing, not on the setter.
 	useEffect(() => setTab("overview"), [selectedId]);
 
@@ -2447,8 +2602,10 @@ function AppDetailPanel({
 	const heroStatusIcons = entry.built_in ? (
 		<StatusBadge kind="builtin" tone="hero" />
 	) : null;
+	const deprecation = resolveDeprecation(detail?.deprecated, entry.deprecated);
 	const heroBadges = [
 		isCommunityEntry(item) ? "Community" : null,
+		deprecation ? DEPRECATED_LABEL : null,
 		stabilityLabel(entry.stability),
 		isMandatoryListing(entry) ? "Required" : null,
 		// `companion` is deliberately dropped. Every app in the Apps tab IS a
@@ -2512,6 +2669,11 @@ function AppDetailPanel({
 								item={item}
 								lifecyclePending={lifecyclePending}
 								modelProviders={detail?.apiSurface?.modelProviders}
+								publisherTrust={
+									detail?.orgVerified === undefined
+										? entry.publisher_trust
+										: detail.publisherTrust
+								}
 								renderAffordance={renderAffordance}
 								setEnabled={setEnabled}
 							/>
@@ -2537,11 +2699,22 @@ function AppDetailPanel({
 			notice={
 				/* Load-bearing placement: unavoidable in the reading path BEFORE the
 				   action bar, so it cannot be scrolled past on the way to Install. */
-				isCommunityEntry(item) ? (
-					<CommunityTrustNotice
-						tone="inline"
-						topic={detail?.discoveredFrom?.topic}
-					/>
+				deprecation || isCommunityEntry(item) ? (
+					<div className="flex flex-col gap-3">
+						{deprecation ? (
+							<DeprecationNotice
+								message={deprecation.message}
+								name={entry.name}
+								replacement={deprecation.replacement}
+							/>
+						) : null}
+						{isCommunityEntry(item) ? (
+							<CommunityTrustNotice
+								tone="inline"
+								topic={detail?.discoveredFrom?.topic}
+							/>
+						) : null}
+					</div>
 				) : null
 			}
 			stats={
@@ -2686,7 +2859,7 @@ function appStatItems({
 		category ? { label: "Category", sub: "Category", value: category } : null,
 		developer ? { label: "Developer", value: developer } : null,
 		updated ? { label: "Updated", value: updated } : null,
-		typeof downloads === "number"
+		isNativeNumber(downloads)
 			? { label: "Downloads", value: formatCount(downloads) }
 			: null,
 		surfaces.length > 0
@@ -2756,7 +2929,7 @@ function AppDetailAside({
 				<ListingAsideCard title="Tags">
 					<div className="flex flex-wrap gap-1">
 						{entry.tags.map((t) => (
-							<Badge className="font-normal text-xs" key={t} variant="outline">
+							<Badge key={t} typography="normal" variant="outline">
 								{t}
 							</Badge>
 						))}
@@ -2767,11 +2940,7 @@ function AppDetailAside({
 				<ListingAsideCard title="Keywords">
 					<div className="flex flex-wrap gap-1">
 						{keywords.map((keyword) => (
-							<Badge
-								className="font-normal text-xs"
-								key={keyword}
-								variant="secondary"
-							>
+							<Badge key={keyword} typography="normal" variant="secondary">
 								{keyword}
 							</Badge>
 						))}
@@ -2804,33 +2973,38 @@ function AppDetailAside({
 
 /** Presentational icon per bundled-runnable kind. Falls back to a package glyph
  *  for unknown kinds so an unrecognized runnable still renders a row. */
-const RUNNABLE_KIND_ICONS: Record<string, typeof Package01Icon> = {
-	agent: Target01Icon,
-	companion: Package01Icon,
-	mcp: ServerStack01Icon,
-	skill: PotionIcon,
-	tool: Wrench01Icon,
-	workflow: WorkflowCircle06Icon,
-};
+const RUNNABLE_KIND_ICONS = new Map<string, typeof Package01Icon>(
+	Object.entries({
+		agent: Target01Icon,
+		companion: Package01Icon,
+		mcp: ServerStack01Icon,
+		skill: PotionIcon,
+		tool: Wrench01Icon,
+		workflow: WorkflowCircle06Icon,
+	})
+);
 
 /** Short human label per runnable kind (falls back to a capitalized kind). */
-const RUNNABLE_KIND_LABELS: Record<string, string> = {
-	agent: "Agent",
-	companion: "Companion",
-	mcp: "MCP",
-	skill: "Skill",
-	tool: "Tool",
-	workflow: "Workflow",
-};
+const RUNNABLE_KIND_LABELS = new Map(
+	Object.entries({
+		agent: "Agent",
+		companion: "Companion",
+		mcp: "MCP",
+		skill: "Skill",
+		tool: "Tool",
+		workflow: "Workflow",
+	})
+);
 
 function runnableKindIcon(kind: string): typeof Package01Icon {
-	return RUNNABLE_KIND_ICONS[kind] ?? Package01Icon;
+	return RUNNABLE_KIND_ICONS.get(kind) ?? Package01Icon;
 }
 
 /** Exported for unit tests — see the note on {@link isCompanionApp}. */
 export function runnableKindLabel(kind: string): string {
 	return (
-		RUNNABLE_KIND_LABELS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1)
+		RUNNABLE_KIND_LABELS.get(kind) ??
+		kind.charAt(0).toUpperCase() + kind.slice(1)
 	);
 }
 
@@ -2874,7 +3048,7 @@ function AppIncludedSection({
 						    — `runnableKindLabel` falls back to a capitalized raw kind and
 						    would still have printed "Companion". */}
 						{runnable.kind === "companion" ? null : (
-							<Badge className="shrink-0 text-xs" variant="secondary">
+							<Badge className="shrink-0" variant="secondary">
 								{runnableKindLabel(runnable.kind)}
 							</Badge>
 						)}
@@ -2901,7 +3075,11 @@ export { safeHttpUrl } from "./safe-url.ts";
 function InfoValue({ href, value }: { href?: string | null; value: string }) {
 	const safeHref = safeHttpUrl(href);
 	if (!safeHref) {
-		return <span className="truncate">{value}</span>;
+		return (
+			<span className="truncate" title={value}>
+				{value}
+			</span>
+		);
 	}
 	return (
 		<a
@@ -2940,6 +3118,14 @@ function appInfoRows({
 		{ label: "Category", value: detail?.category ?? entry.category ?? null },
 		{ label: "Version", value: version },
 		{ label: "License", value: detail?.license ?? entry.license ?? null },
+		{
+			label: "Remixed from",
+			value: displayRemixSource(entry.remixed_from)?.id ?? null,
+		},
+		{
+			label: "Remixing",
+			value: entry.allow_remix === false ? "Not allowed by the author" : null,
+		},
 		{
 			href:
 				detail?.repositoryUrl ?? entry.repository_url ?? entry.repo_url ?? null,
@@ -3105,9 +3291,10 @@ function AppHero({
 						tone="hero"
 						verificationDetails={publisherVerification}
 					/>
+					<RyuReviewedBadge reviewed={entry.reviewed} tone="hero" />
 					<MarketplaceAccessBadge
-						className="text-white hover:text-white/75"
 						membershipIncluded={Boolean(entry.membership_included)}
+						tone="hero"
 					/>
 				</>
 			}
@@ -3148,7 +3335,7 @@ function DescriptorDetail({
 			{detail?.feeds && detail.feeds.length > 0 ? (
 				<div className="flex flex-wrap gap-1">
 					{detail.feeds.map((feed) => (
-						<Badge className="text-xs" key={feed} variant="outline">
+						<Badge key={feed} variant="outline">
 							{feed}
 						</Badge>
 					))}
@@ -3172,7 +3359,7 @@ function AppStatusBadge({
 }) {
 	if (enabled) {
 		return (
-			<Badge className="shrink-0 gap-1" variant="secondary">
+			<Badge className="shrink-0" variant="secondary">
 				<HugeiconsIcon
 					className="size-3.5 text-status-success"
 					icon={CheckmarkCircle02Icon}

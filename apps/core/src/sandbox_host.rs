@@ -28,6 +28,38 @@ pub fn install_sandbox_host() {
         registered_org_id: || crate::sidecar::control_plane::registered_org().map(|o| o.id),
         default_run_budget_micro_usd: || Box::pin(default_run_budget_micro_usd()),
     });
+    install_box_credential_source();
+}
+
+/// On a managed node, Box calls use the control plane's short-lived `rbx1`
+/// tenant credential (`POST /api/box/node-credential`, keyed by the node's
+/// durable control-plane key), not static env. `RYU_SANDBOX_BOX_TOKEN` still
+/// wins when an operator sets it, and self-hosted nodes keep the env path.
+fn install_box_credential_source() {
+    if let Some(source) = managed_box_credential_source(
+        crate::sidecar::gateway::managed_node(),
+        crate::sidecar::control_plane::control_plane_url(),
+    ) {
+        ryu_sandbox::box_credential::install_source(std::sync::Arc::new(source));
+    }
+}
+
+/// The control-plane source for a managed node, authenticated with the same
+/// key Core sends on every control-plane call (env or enrolled), read at each
+/// fetch so a rotated key applies.
+fn managed_box_credential_source(
+    managed: bool,
+    control_plane_url: String,
+) -> Option<ryu_sandbox::box_credential::ControlPlaneCredentialSource> {
+    if !managed || control_plane_url.trim().is_empty() {
+        return None;
+    }
+    Some(
+        ryu_sandbox::box_credential::ControlPlaneCredentialSource::new(
+            control_plane_url,
+            std::sync::Arc::new(crate::sidecar::control_plane::gateway_key),
+        ),
+    )
 }
 
 /// Read the default per-run budget (micro-USD) from Core's preferences store.
@@ -44,5 +76,17 @@ async fn default_run_budget_micro_usd() -> u64 {
     {
         Ok(Some(raw)) => raw.trim().parse::<u64>().unwrap_or(0),
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn session_box_credential_source_is_installed_only_on_managed_nodes() {
+        assert!(super::managed_box_credential_source(false, "https://cp.example".into()).is_none());
+        assert!(super::managed_box_credential_source(true, "  ".into()).is_none());
+        let source = super::managed_box_credential_source(true, "https://cp.example/api/".into())
+            .expect("a managed node with a control plane gets the source");
+        assert!(format!("{source:?}").contains("https://cp.example"));
     }
 }

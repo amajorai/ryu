@@ -1,4 +1,4 @@
-import { selectSimpleApprovalValue } from "@ryu/blocks/composer/composer-acp-sections";
+import { selectSimpleApprovalValue } from "@ryu/blocks/composer/composer-acp-sections.ts";
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -68,7 +68,7 @@ function Story() {
 		<main className="min-h-screen bg-background px-6 py-10 text-foreground">
 			<div className="mx-auto max-w-5xl space-y-6">
 				<header className="space-y-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Completed feature proof
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">
@@ -99,7 +99,11 @@ function Story() {
 									className={`rounded-lg px-3 py-2 text-sm ${scenarioId === id ? "bg-primary text-primary-foreground" : "bg-muted"}`}
 									data-testid={`scenario-${id}`}
 									key={id}
-									onClick={() => setScenarioId(id as ScenarioId)}
+									onClick={() =>
+										setScenarioId(
+											/* SAFETY: Object.entries reads the exact private authored scenarios keys auto/approval/none; no code mutates that catalog, and ScenarioId is its native keyof domain. */ id as ScenarioId
+										)
+									}
 									type="button"
 								>
 									{option.label}
@@ -161,7 +165,7 @@ function Story() {
 								requests.
 							</p>
 						</div>
-						<span className="rounded-full bg-emerald-500/10 px-3 py-1 font-medium text-emerald-700 text-xs dark:text-emerald-300">
+						<span className="rounded-full bg-success/10 px-3 py-1 font-medium text-success text-xs dark:text-success">
 							Safe fields only
 						</span>
 					</div>

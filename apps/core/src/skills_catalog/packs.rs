@@ -34,7 +34,7 @@ const ROOT_SKILL_PATH: &str = ".";
 
 /// The persisted user-pack registry file (`~/.ryu/skill-packs.json`).
 fn user_packs_path() -> PathBuf {
-    crate::paths::ryu_dir().join("skill-packs.json")
+    crate::paths::state_path("skill-packs.json")
 }
 
 /// How a pack's members are obtained.
@@ -163,6 +163,10 @@ pub fn parse_pack_source(raw: &str) -> Result<PackSource> {
 /// onboarding selection decides which packs Core fetches.
 pub const BUILTIN_PACKS: &[(&str, &str)] = &[
     // (id/owner-repo, one-line description)
+    (
+        "jakubkrehel/skills",
+        "Interface design, typography, color, layout, accessibility, writing, and review skills.",
+    ),
     (
         "mattpocock/skills",
         "Matt Pocock's skill pack: TDD, code review, debugging, domain modeling and writing workflows.",
@@ -310,7 +314,7 @@ pub fn save_user_pack(pack: SkillPack) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
     }
-    std::fs::write(&path, serde_json::to_string_pretty(&packs)?)
+    crate::atomic_file::write_atomic(&path, serde_json::to_string_pretty(&packs)?.as_bytes())
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
@@ -327,7 +331,7 @@ pub fn remove_user_pack(id: &str) -> Result<bool> {
         return Ok(false);
     }
     let path = user_packs_path();
-    std::fs::write(&path, serde_json::to_string_pretty(&packs)?)
+    crate::atomic_file::write_atomic(&path, serde_json::to_string_pretty(&packs)?.as_bytes())
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(true)
 }
@@ -686,6 +690,7 @@ mod tests {
     fn builtin_packs_are_repo_packs() {
         let packs = builtin_packs();
         assert!(!packs.is_empty());
+        assert_eq!(packs[0].id, "jakubkrehel/skills");
         for pack in &packs {
             assert!(pack.builtin);
             assert!(matches!(pack.source, PackSource::Repo { .. }));

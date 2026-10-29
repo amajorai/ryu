@@ -1,0 +1,11 @@
+/* Keyframes behind TEXT_SHIMMER_CLASS_NAME (`animate-[beui-text-shimmer_...]`),
+ * used by TextShimmer and the reasoning loading states. Shared by globals.css
+ * and isolated stylesheets (such as the Fumadocs UI preview) that render them. */
+@keyframes beui-text-shimmer {
+	from {
+		background-position: 200% 0;
+	}
+	to {
+		background-position: -200% 0;
+	}
+}

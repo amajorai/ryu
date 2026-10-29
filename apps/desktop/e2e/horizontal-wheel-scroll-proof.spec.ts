@@ -2,8 +2,6 @@ import { expect, test } from "@playwright/test";
 
 test.describe.configure({ timeout: 90_000 });
 
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/Documents/Code/ryu/docs/proof/horizontal-wheel-scroll-proof.png";
 const STORY_URL = "/horizontal-wheel-scroll-proof.html";
 
 test("vertical wheel input moves horizontal-only rows", async ({ page }) => {
@@ -75,5 +73,8 @@ test("vertical wheel input moves horizontal-only rows", async ({ page }) => {
 		verticalBefore.scrollLeft
 	);
 
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("horizontal-wheel-scroll-proof.png"),
+		fullPage: true,
+	});
 });

@@ -20,6 +20,8 @@
 // every mirror, this one included, follows.
 
 import type { AppInfo, CatalogEntry } from "@ryuhq/core-client/plugins";
+import { z } from "zod";
+import { localize } from "./localizedText.ts";
 import { UsageError } from "./types.ts";
 
 /** What a registry item IS, for labelling/filtering only. */
@@ -39,15 +41,15 @@ const COMPANION_RUNNABLE_KIND = "companion";
  *  package, so it is read structurally off the pass-through wire object rather
  *  than by widening a type this unit cannot edit. Absent ⇒ an older wire, which
  *  is exactly the case the `kinds` fallback below exists for. */
-interface TypedCatalogEntry {
-	type?: AppKind;
-}
+const catalogClassificationSchema = z.object({
+	type: z.enum(["app", "plugin"]).optional().catch(undefined),
+});
 
 /** Classify a catalog entry. Prefers Core's explicit `type`; falls back to the
  *  legacy "ships a Companion runnable" derivation for wires that predate it —
  *  identical to the desktop's `e.type ? e.type === "app" : e.kinds.includes(…)`. */
 export function catalogEntryKind(entry: CatalogEntry): AppKind {
-	const explicit = (entry as CatalogEntry & TypedCatalogEntry).type;
+	const explicit = catalogClassificationSchema.parse(entry).type;
 	if (explicit) {
 		return explicit;
 	}
@@ -75,23 +77,13 @@ export function parseKindFilter(raw: string | null): KindFilter {
 		return raw;
 	}
 	throw new UsageError(
-		`Unknown --kind '${raw}'. Expected one of: app, plugin, all.`
+		localize("Unknown --kind '{kind}'. Expected one of: app, plugin, all.", {
+			kind: raw,
+		})
 	);
 }
 
 /** True when an item of `kind` survives `filter`. */
 export function matchesKind(filter: KindFilter, kind: AppKind): boolean {
 	return filter === "all" || filter === kind;
-}
-
-/** The noun for an empty-result message ("No apps installed." vs the unfiltered
- *  "No apps or plugins installed."), so the message names what was asked for. */
-export function kindFilterPlural(filter: KindFilter): string {
-	if (filter === "app") {
-		return "apps";
-	}
-	if (filter === "plugin") {
-		return "plugins";
-	}
-	return "apps or plugins";
 }

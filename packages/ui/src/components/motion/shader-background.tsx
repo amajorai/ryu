@@ -45,7 +45,7 @@ import {
 	Waves,
 	type WavesProps,
 } from "@paper-design/shaders-react";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useReducedMotion } from "motion/react";
 import type { ComponentType } from "react";
 
@@ -79,9 +79,7 @@ export type ShaderBackgroundProps = {
 	[K in ShaderBackgroundVariant]: { variant: K } & ShaderVariantProps[K];
 }[ShaderBackgroundVariant];
 
-const VARIANT_COMPONENTS: {
-	[K in ShaderBackgroundVariant]: ComponentType<ShaderVariantProps[K]>;
-} = {
+const VARIANT_COMPONENTS = {
 	"mesh-gradient": MeshGradient,
 	"grain-gradient": GrainGradient,
 	"dot-grid": DotGrid,
@@ -103,11 +101,14 @@ const VARIANT_COMPONENTS: {
 	"static-mesh-gradient": StaticMeshGradient,
 	"simplex-noise": SimplexNoise,
 	"perlin-noise": PerlinNoise,
+} satisfies {
+	[K in ShaderBackgroundVariant]: ComponentType<ShaderVariantProps[K]>;
 };
 
-export const SHADER_BACKGROUND_VARIANTS = Object.keys(
-	VARIANT_COMPONENTS
-) as ShaderBackgroundVariant[];
+export const SHADER_BACKGROUND_VARIANTS =
+	// SAFETY: This private literal registry defines every ShaderBackgroundVariant exactly once,
+	// with no spreads or writes; Object.keys erases its complete known native key union.
+	Object.keys(VARIANT_COMPONENTS) as ShaderBackgroundVariant[];
 
 /**
  * Not every variant animates (e.g. dot-grid is a static pattern), so `speed`
@@ -119,10 +120,13 @@ export function ShaderBackground({
 	...rest
 }: ShaderBackgroundProps) {
 	const reducedMotion = useReducedMotion();
+	// SAFETY: The public discriminated union pairs this variant with its complete native SDK props.
+	// TypeScript loses that correlation after rest destructuring and dynamic registry lookup;
+	// this private render forwards the same variant's entire props without projection or gates.
 	const Shader = VARIANT_COMPONENTS[variant] as ComponentType<
-		Record<string, unknown>
+		ShaderVariantProps[ShaderBackgroundVariant]
 	>;
-	const props = rest as Record<string, unknown>;
+	const props = rest;
 	const speedProps = reducedMotion && "speed" in props ? { speed: 0 } : {};
 
 	return (

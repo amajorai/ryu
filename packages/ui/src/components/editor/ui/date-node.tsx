@@ -20,6 +20,7 @@ import { PlateElement, useReadOnly } from "platejs/react";
 export function DateElement(props: PlateElementProps<TDateElement>) {
 	const { editor, element } = props;
 	const readOnly = useReadOnly();
+	const selectedDate = parseCanonicalDateValue(element.date ?? "");
 
 	const trigger = (
 		<span
@@ -53,7 +54,9 @@ export function DateElement(props: PlateElementProps<TDateElement>) {
 				<Popover>
 					<PopoverTrigger>{trigger}</PopoverTrigger>
 					<PopoverContent className="w-auto p-0">
+						{/* The popover mounts on each open, so it opens on the node's month. */}
 						<Calendar
+							defaultMonth={selectedDate}
 							mode="single"
 							onSelect={(date) => {
 								if (!date) {
@@ -65,7 +68,7 @@ export function DateElement(props: PlateElementProps<TDateElement>) {
 									{ at: element }
 								);
 							}}
-							selected={parseCanonicalDateValue(element.date ?? "")}
+							selected={selectedDate}
 						/>
 					</PopoverContent>
 				</Popover>

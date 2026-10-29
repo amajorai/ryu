@@ -1,6 +1,8 @@
+import { describe, expect, it } from "bun:test";
 import {
 	REWARDS_STORE,
 	storeCreditReward,
+	storeEntitlementReward,
 	storeItemByKey,
 } from "./rewards-store.ts";
 
@@ -35,5 +37,27 @@ describe("REWARDS_STORE catalog", () => {
 	it("returns null credit reward for entitlement items", () => {
 		expect(storeCreditReward(storeItemByKey("max-1m")!)).toBeNull();
 		expect(storeItemByKey("nope")).toBeUndefined();
+	});
+
+	it("maps every non-credit item to a fulfilment path", () => {
+		for (const item of REWARDS_STORE) {
+			const credit = storeCreditReward(item);
+			const entitlement = storeEntitlementReward(item);
+			expect(Boolean(credit) !== Boolean(entitlement)).toBe(true);
+		}
+		expect(storeEntitlementReward(storeItemByKey("desktop-1m")!)).toEqual({
+			kind: "plan",
+			months: 1,
+			plan: "plus",
+		});
+		expect(storeEntitlementReward(storeItemByKey("max-1m")!)).toEqual({
+			kind: "plan",
+			months: 1,
+			plan: "max",
+		});
+		expect(storeEntitlementReward(storeItemByKey("node-1m")!)).toEqual({
+			kind: "node",
+			months: 1,
+		});
 	});
 });

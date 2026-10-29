@@ -1,9 +1,10 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { sileo } from "sileo";
 import { OnboardingSetupStep } from "@/src/components/onboarding/OnboardingSetupStep.tsx";
+import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
 import type { OnboardingAgentSuggestion } from "@/src/lib/api/onboarding-profile.ts";
 import { EMPTY_AGENT_SELECTION } from "@/src/lib/api/preferences.ts";
 import "../../src/index.css";
@@ -84,6 +85,9 @@ const baseProps = {
 function ProofApp() {
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [reviewed, setReviewed] = useState<Set<string>>(new Set());
+	const [identityModes, setIdentityModes] = useState<
+		ReadonlyMap<string, AgentIdentityMode>
+	>(new Map());
 	const [skipped, setSkipped] = useState(false);
 
 	const toggle = (id: string) => {
@@ -104,10 +108,14 @@ function ProofApp() {
 				{...baseProps}
 				agentSuggestions={suggestions}
 				agentSuggestionsError={null}
+				agentSuggestionsIdentityModes={identityModes}
 				agentSuggestionsReviewed={reviewed}
 				agentSuggestionsSelected={selected}
 				agentSuggestionsSubmitting={false}
 				kind="agent-suggestions"
+				onAgentSuggestionIdentityModeChange={(id, mode) => {
+					setIdentityModes((current) => new Map(current).set(id, mode));
+				}}
 				onBackgroundProfile={() => undefined}
 				onCancelProfile={() => undefined}
 				onChooseOrganization={() => undefined}
@@ -119,6 +127,18 @@ function ProofApp() {
 					const added = suggestions
 						.filter((suggestion) => selected.has(suggestion.id))
 						.map((suggestion) => suggestion.name);
+					(
+						window as Window & {
+							__agentSuggestionsProof?: Record<string, AgentIdentityMode>;
+						}
+					).__agentSuggestionsProof = Object.fromEntries(
+						suggestions
+							.filter((suggestion) => selected.has(suggestion.id))
+							.map((suggestion) => [
+								suggestion.name,
+								identityModes.get(suggestion.id) ?? "managed",
+							])
+					);
 					if (added.length === 0) {
 						return;
 					}
@@ -165,4 +185,4 @@ function ProofApp() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(<ProofApp />);
+createRoot(document.getElementById("root")!).render(<ProofApp />);

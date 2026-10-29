@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { getEventListeners } from "node:events";
+import { z } from "zod";
 import { ownAppRequest } from "./app-request.ts";
 
 const cleanups: (() => void)[] = [];
@@ -56,25 +57,29 @@ test("cancelling a startup retry clears its wait and starts no further fetch", a
 	const reason = new Error("fixture closed");
 	const originalTimer = globalThis.setTimeout;
 	const originalClear = globalThis.clearTimeout;
-	let retryTimer: unknown;
+	let retryTimer: ReturnType<typeof originalTimer> | undefined;
 	let cleared = false;
-	globalThis.setTimeout = Object.assign(
-		(handler: TimerHandler, ms?: number, ...args: unknown[]) => {
-			const timer = originalTimer(handler, ms, ...args);
-			if (ms === 100) {
-				retryTimer = timer;
+	globalThis.setTimeout = new Proxy(originalTimer, {
+		apply(timer, receiver, args) {
+			// Bind preserves the native receiver while the direct call retains all
+			// timer overloads and forwards the callback arguments intact.
+			const result = timer.bind(receiver)(args[0], args[1], ...args.slice(2));
+			if (z.literal(100).safeParse(args[1]).success) {
+				retryTimer = result;
 				queueMicrotask(() => controller.abort(reason));
 			}
-			return timer;
+			return result;
 		},
-		originalTimer
-	);
-	globalThis.clearTimeout = (timer) => {
-		if (timer === retryTimer) {
-			cleared = true;
-		}
-		Reflect.apply(originalClear, globalThis, [timer]);
-	};
+	});
+	globalThis.clearTimeout = new Proxy(originalClear, {
+		apply(clear, receiver, args) {
+			const timer = args[0];
+			if (timer === retryTimer) {
+				cleared = true;
+			}
+			return clear.call(receiver, timer);
+		},
+	});
 	cleanups.push(() => {
 		globalThis.setTimeout = originalTimer;
 		globalThis.clearTimeout = originalClear;

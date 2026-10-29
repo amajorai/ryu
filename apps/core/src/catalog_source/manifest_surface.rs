@@ -262,7 +262,7 @@ fn project_extensions(manifest: &Value) -> Vec<Value> {
         );
     }
 
-    const SHELL_CONTRIBUTIONS: [(&str, &str); 14] = [
+    const SHELL_CONTRIBUTIONS: [(&str, &str); 17] = [
         ("views", "host-rendered views"),
         ("dock_panels", "dock panels"),
         ("sidebar_sections", "sidebar sections"),
@@ -277,6 +277,9 @@ fn project_extensions(manifest: &Value) -> Vec<Value> {
         ("selection_actions", "selection actions"),
         ("context_menu_items", "context-menu actions"),
         ("themes", "themes"),
+        ("backgrounds", "wallpaper backgrounds"),
+        ("avatar_accessories", "avatar accessories"),
+        ("avatar_styles", "avatar styles"),
     ];
     if let Some(contributes) = obj.get("contributes").and_then(Value::as_object) {
         for (key, label) in SHELL_CONTRIBUTIONS {
@@ -414,6 +417,9 @@ fn project_implementation(manifest: &Value) -> Vec<Value> {
             ("composer_controls", "composer controls"),
             ("widgets", "inline widgets"),
             ("themes", "themes"),
+            ("backgrounds", "wallpaper backgrounds"),
+            ("avatar_accessories", "avatar accessories"),
+            ("avatar_styles", "avatar styles"),
         ] {
             if contributes
                 .get(key)
@@ -879,7 +885,7 @@ mod tests {
         let s = surface(serde_json::json!({
             "runnables": [{
                 "id": "t1", "name": "Tool One", "kind": "tool",
-                "config": { "backend": { "inline_deno": { "code": "await evil()" } } },
+                "config": { "backend": { "inline_js": { "code": "await evil()" } } },
             }],
         }));
         let json = serde_json::to_string(&s).expect("serializes");
@@ -1056,6 +1062,7 @@ mod tests {
             ],
             "contributes": {
                 "dock_panels": [{ "id": "browser" }],
+                "backgrounds": [{ "id": "@ryu/browser:aurora", "label": "Aurora" }],
                 "turn_hooks": [{ "event": "context" }]
             },
             "sidecars": [{ "name": "browser" }]
@@ -1076,6 +1083,16 @@ mod tests {
             .collect();
         assert!(extension_targets.contains(&"ryu-shell"));
         assert!(extension_targets.contains(&"core"));
+        let shell_extension = projected["extensions"]
+            .as_array()
+            .expect("extensions")
+            .iter()
+            .find(|entry| entry["target"] == "ryu-shell")
+            .expect("shared shell extension");
+        assert!(shell_extension["features"]
+            .as_array()
+            .expect("shell features")
+            .contains(&serde_json::json!("wallpaper backgrounds")));
         let layers: Vec<&str> = projected["implementation"]
             .as_array()
             .expect("implementation")
@@ -1083,6 +1100,57 @@ mod tests {
             .filter_map(|entry| entry["layer"].as_str())
             .collect();
         assert_eq!(layers, vec!["core", "shared-shell", "sidecar"]);
+    }
+
+    #[test]
+    fn avatar_packs_project_as_shared_shell_contributions() {
+        let projected = project_manifest(&serde_json::json!({
+            "contributes": {
+                "avatar_accessories": [{ "id": "@acme/hats:beanie" }],
+                "avatar_styles": [{ "id": "@acme/hats:robot" }]
+            }
+        }));
+        let shell = projected["extensions"]
+            .as_array()
+            .expect("extensions")
+            .iter()
+            .find(|entry| entry["target"] == "ryu-shell")
+            .expect("shared shell contribution");
+        let features = shell["features"].as_array().expect("shell features");
+        assert!(features.contains(&serde_json::json!("avatar accessories")));
+        assert!(features.contains(&serde_json::json!("avatar styles")));
+    }
+
+    #[test]
+    fn wallpaper_backgrounds_project_as_shared_shell_contributions() {
+        let projected = project_manifest(&serde_json::json!({
+            "contributes": {
+                "backgrounds": [{
+                    "id": "@example/wallpapers:aurora",
+                    "label": "Aurora"
+                }]
+            }
+        }));
+        let shell = projected["extensions"]
+            .as_array()
+            .expect("extensions")
+            .iter()
+            .find(|entry| entry["target"] == "ryu-shell")
+            .expect("shared shell contribution");
+        assert!(shell["features"]
+            .as_array()
+            .expect("shell features")
+            .contains(&serde_json::json!("wallpaper backgrounds")));
+
+        let implementation = projected["implementation"]
+            .as_array()
+            .expect("implementation");
+        assert!(implementation.iter().any(|entry| {
+            entry["layer"] == "shared-shell"
+                && entry["features"].as_array().is_some_and(|features| {
+                    features.contains(&serde_json::json!("wallpaper backgrounds"))
+                })
+        }));
     }
 
     #[test]

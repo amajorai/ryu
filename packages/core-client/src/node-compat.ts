@@ -27,6 +27,7 @@
 
 import type { ApiTarget } from "./client.ts";
 import { request } from "./client.ts";
+import { systemHealthResponseSchema } from "./system.ts";
 
 /** The channel name for a build with no prerelease suffix. */
 export const STABLE_CHANNEL = "stable";
@@ -194,12 +195,12 @@ export function assessNode(
 export async function fetchNodeIdentity(
 	target: ApiTarget
 ): Promise<NodeIdentity> {
-	const json = await request<{
-		capabilities?: string[];
-		channel?: string;
-		status?: string;
-		version?: string;
-	}>(target, "/api/health");
+	const json = await request(
+		target,
+		"/api/health",
+		{},
+		systemHealthResponseSchema
+	);
 	return {
 		capabilities: json.capabilities,
 		channel: json.channel ?? null,

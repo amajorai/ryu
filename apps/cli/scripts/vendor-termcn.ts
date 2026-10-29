@@ -15,6 +15,10 @@
 
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import {
+	type TermcnRegistryFile,
+	termcnRegistryItemSchema,
+} from "./termcn-registry-contracts.ts";
 
 const REGISTRY_HOST = "https://www.termcn.dev";
 const ROOT_DIR = resolve(import.meta.dir, "..");
@@ -79,29 +83,48 @@ const ROOTS = [
 	"opentui-model-selector",
 ];
 
-interface RegistryFile {
-	content: string;
-	path: string;
-	target?: string;
-}
-
-interface RegistryItem {
-	dependencies?: string[];
-	files?: RegistryFile[];
-	name: string;
-	registryDependencies?: string[];
-}
-
 // The base (Ink/framework-agnostic) `theme-provider` is pulled transitively by
 // `theme-default`, but it writes an untargeted `theme-provider.tsx` at the repo
 // root that duplicates and is superseded by `opentui-theme-provider`
 // (`components/ui/theme-provider.tsx`, which every component imports). Skip it.
 const SKIP_ITEMS = new Set(["theme-provider"]);
 
-// Host compatibility hooks must survive registry refreshes.
+// Ryu's native SDK, I/O admission and lifecycle adaptations own these wrappers.
+// Keep their termcn attribution, and preserve verified local changes on refresh.
 const HOST_OWNED_FILES = new Set([
-	resolve(ROOT_DIR, "hooks/use-animation.ts"),
+	resolve(ROOT_DIR, "components/ui/alert.tsx"),
+	resolve(ROOT_DIR, "components/ui/badge.tsx"),
+	resolve(ROOT_DIR, "components/ui/banner.tsx"),
+	resolve(ROOT_DIR, "components/ui/big-text.tsx"),
+	resolve(ROOT_DIR, "components/ui/box.tsx"),
+	resolve(ROOT_DIR, "components/ui/card.tsx"),
+	resolve(ROOT_DIR, "components/ui/center.tsx"),
+	resolve(ROOT_DIR, "components/ui/chat-message.tsx"),
+	resolve(ROOT_DIR, "components/ui/columns.tsx"),
+	resolve(ROOT_DIR, "components/ui/diff.tsx"),
+	resolve(ROOT_DIR, "components/ui/divider.tsx"),
+	resolve(ROOT_DIR, "components/ui/heading.tsx"),
+	resolve(ROOT_DIR, "components/ui/help-screen.tsx"),
+	resolve(ROOT_DIR, "components/ui/link.tsx"),
+	resolve(ROOT_DIR, "components/ui/markdown.tsx"),
+	resolve(ROOT_DIR, "components/ui/modal.tsx"),
+	resolve(ROOT_DIR, "components/ui/panel.tsx"),
+	resolve(ROOT_DIR, "components/ui/scroll-view.tsx"),
+	resolve(ROOT_DIR, "components/ui/search-input.tsx"),
+	resolve(ROOT_DIR, "components/ui/spinner.tsx"),
+	resolve(ROOT_DIR, "components/ui/stack.tsx"),
+	resolve(ROOT_DIR, "components/ui/status-message.tsx"),
+	resolve(ROOT_DIR, "components/ui/table.tsx"),
+	resolve(ROOT_DIR, "components/ui/tabs.tsx"),
+	resolve(ROOT_DIR, "components/ui/tag.tsx"),
+	resolve(ROOT_DIR, "components/ui/terminal-text-contracts.ts"),
+	resolve(ROOT_DIR, "components/ui/text-area.tsx"),
+	resolve(ROOT_DIR, "components/ui/theme-provider.tsx"),
+	resolve(ROOT_DIR, "components/ui/toast.tsx"),
+	resolve(ROOT_DIR, "components/ui/toggle.tsx"),
 	resolve(ROOT_DIR, "components/ui/tool-call.tsx"),
+	resolve(ROOT_DIR, "components/ui/tooltip.tsx"),
+	resolve(ROOT_DIR, "hooks/use-animation.ts"),
 ]);
 
 const HOOK_PATH = /(?:^|\/)hooks\/(.+)$/;
@@ -128,7 +151,7 @@ const nameToUrl = (name: string): string =>
 		? normalizeUrl(name)
 		: `${REGISTRY_HOST}/r/${name}.json`;
 
-const targetFor = (file: RegistryFile): string => {
+const targetFor = (file: TermcnRegistryFile): string => {
 	if (file.target && file.target.trim().length > 0) {
 		return file.target;
 	}
@@ -158,7 +181,7 @@ async function vendorOne(urlOrName: string): Promise<void> {
 		process.stderr.write(`skip ${url} (HTTP ${resp.status})\n`);
 		return;
 	}
-	const item = (await resp.json()) as RegistryItem;
+	const item = termcnRegistryItemSchema.parse(await resp.json());
 
 	if (SKIP_ITEMS.has(item.name)) {
 		process.stderr.write(`skip ${item.name} (superseded)\n`);
@@ -186,8 +209,8 @@ async function vendorOne(urlOrName: string): Promise<void> {
 		// @opentui/core (e.g. borderStyle "round"/"bold", text inverse/underline,
 		// box borderBottom) which OpenTUI accepts at runtime via parseBorderStyle /
 		// by ignoring unknown props. They are not type-clean against 0.4.2, so we
-		// mark the vendored copies @ts-nocheck - they are third-party files we do
-		// not edit, and our own src/** stays fully type-checked.
+		// mark the vendored copies @ts-nocheck - untouched registry files keep the upstream ABI; adapted host-owned files
+		// are protected above, and our own src/** stays fully type-checked.
 		const content = file.content.startsWith("// @ts-nocheck")
 			? file.content
 			: `// @ts-nocheck - vendored termcn component, see scripts/vendor-termcn.ts\n${file.content}`;

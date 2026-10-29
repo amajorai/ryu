@@ -27,7 +27,7 @@ export interface IslandChatViewProps {
 	messages?: IslandChatMessage[];
 	offline?: boolean;
 	/** Focus-scoped composer settings shortcuts (cycle agent/mode/model/thinking). */
-	onComposerKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+	onComposerKeyDown?: (event: KeyboardEvent<HTMLElement>) => boolean;
 	/** Report the composer height so the island can size the compact bar. */
 	onComposerResize?: (height: number) => void;
 	onPrefillConsumed?: () => void;

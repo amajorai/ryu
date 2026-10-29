@@ -3,23 +3,19 @@ import {
 	BookOpen,
 	GitCommitHorizontal,
 	GraduationCap,
-	KeyRound,
 	LifeBuoy,
-	MessageCircle,
 	Newspaper,
 	Quote,
 	Scale,
-	Store,
-	Tag,
+	Trophy,
 	Users,
 } from "lucide-react";
 
-/* Resources power the marketing header's "Resources" mega-menu. They are the
- * non-product, non-solution destinations (docs, blog, changelog, marketplace,
- * pricing, help, community) that used to live only in the footer. Grouped into
- * a few categories so the dropdown mirrors Products and Solutions. */
+/* Resources power the marketing header's "Resources" menu: the non-product
+ * destinations (docs, learning, updates, community). Pricing leads that menu
+ * from `PLAN_LINKS` below; Marketplace lives in the Products menu. */
 
-export type ResourceCategory = "Learn" | "Explore" | "Support";
+export type ResourceCategory = "Learn" | "Updates" | "Community";
 
 /* Docs live in a separate Fumadocs app, not a route in this site. The base URL
  * is configurable via NEXT_PUBLIC_DOCS_URL (inlined by Next at build). Local
@@ -57,6 +53,18 @@ export function docsHref(path: string): string {
 }
 
 /**
+ * The shared "Read the docs" call to action. Docs live on their own site, so the
+ * link is absolute and opens in a new tab on every page that carries it.
+ */
+export function readTheDocsCta(path = "/docs"): {
+	external: true;
+	href: string;
+	label: string;
+} {
+	return { label: "Read the docs", href: docsHref(path), external: true };
+}
+
+/**
  * The booking link behind every "book a demo" / "free consultation" CTA.
  *
  * It lives here as ONE constant because it used to be a `const DEMO_HREF`
@@ -69,7 +77,22 @@ export const DEMO_HREF = "https://cal.com/amajor/ryu-demo";
 /** Public markdown playbook that lets another agent set up Ryu for the user. */
 export const SETUP_RYU_HREF = "/setup-ryu.md";
 export const SETUP_RYU_LABEL = "Set up Ryu for me";
-export const DISCORD_INVITE_HREF = "https://discord.gg/3RxeVyvdjG";
+/**
+ * Where "Join the Discord" links go. There is no public invite: the page mints
+ * a personal, single-use invite for the signed-in account (and bounces
+ * signed-out visitors to login first), so the server cannot be joined from a
+ * scraped or reshared link.
+ */
+export const DISCORD_JOIN_PATH = "/discord";
+
+/**
+ * The "Plans" group that leads the Resources menu on desktop and the Resources
+ * sheet on mobile: what Ryu costs and how to give it to someone.
+ */
+export const PLAN_LINKS: readonly { href: string; label: string }[] = [
+	{ label: "Pricing", href: "/pricing" },
+	{ label: "Gift Ryu", href: "/gifts" },
+];
 
 export interface Resource {
 	category: ResourceCategory;
@@ -82,6 +105,14 @@ export interface Resource {
 
 export const resources: Resource[] = [
 	/* ============================== LEARN =========================== */
+	{
+		category: "Learn",
+		label: "Docs",
+		description: "Guides, references, and how-tos for the whole platform.",
+		href: DOCS_URL,
+		external: true,
+		Icon: BookOpen,
+	},
 	{
 		category: "Learn",
 		label: "Academy",
@@ -98,93 +129,64 @@ export const resources: Resource[] = [
 	},
 	{
 		category: "Learn",
-		label: "Docs",
-		description: "Guides, references, and how-tos for the whole platform.",
-		href: DOCS_URL,
-		external: true,
-		Icon: BookOpen,
+		label: "Help Center",
+		description: "Answers, troubleshooting, and integration guides.",
+		href: "/help",
+		Icon: LifeBuoy,
 	},
+
+	/* ============================= UPDATES ========================== */
 	{
-		category: "Learn",
+		category: "Updates",
 		label: "Blog",
 		description: "Product updates, deep dives, and engineering notes.",
 		href: "/blog",
 		Icon: Newspaper,
 	},
 	{
-		category: "Learn",
+		category: "Updates",
 		label: "Changelog",
 		description: "Everything we ship, release by release.",
 		href: "/changelog",
 		Icon: GitCommitHorizontal,
 	},
-
-	/* ============================= EXPLORE ========================== */
 	{
-		category: "Explore",
-		label: "Customize",
-		description: "Browse and install agents, skills, tools, and apps.",
-		href: "/marketplace",
-		Icon: Store,
-	},
-	{
-		category: "Explore",
+		category: "Updates",
 		label: "Stories",
 		description: "How people use Ryu, in their own words. Share yours.",
 		href: "/stories",
 		Icon: Quote,
 	},
+
+	/* ============================ COMMUNITY ========================= */
 	{
-		category: "Explore",
+		category: "Community",
+		label: "Challenges",
+		description:
+			"Build, share, and compete in community challenges and events.",
+		href: "/challenges",
+		Icon: Trophy,
+	},
+	{
+		category: "Community",
 		label: "Compare",
 		description: "See how Ryu stacks up against the alternatives.",
 		href: "/compare",
 		Icon: Scale,
 	},
 	{
-		category: "Explore",
-		label: "Pricing",
-		description: "Plans for individuals, teams, and enterprises.",
-		href: "/pricing",
-		Icon: Tag,
-	},
-	{
-		category: "Explore",
-		label: "Bring your subscription",
-		description: "Route Claude Code and Codex on the plan you already pay for.",
-		href: "/subscriptions",
-		Icon: KeyRound,
-	},
-	{
-		category: "Explore",
-		label: "Community stats",
+		category: "Community",
+		label: "Stats",
 		description: "Community activity, protection, and savings at a glance.",
 		href: "/community",
 		Icon: Users,
-	},
-
-	/* ============================= SUPPORT ========================== */
-	{
-		category: "Support",
-		label: "Help Center",
-		description: "Answers, troubleshooting, and integration guides.",
-		href: "/help",
-		Icon: LifeBuoy,
-	},
-	{
-		category: "Support",
-		label: "Discord",
-		description: "Join the community and talk to the team.",
-		href: DISCORD_INVITE_HREF,
-		external: true,
-		Icon: MessageCircle,
 	},
 ];
 
 export const resourceCategories: ResourceCategory[] = [
 	"Learn",
-	"Explore",
-	"Support",
+	"Updates",
+	"Community",
 ];
 
 export function resourcesByCategory(category: ResourceCategory): Resource[] {

@@ -9,7 +9,7 @@
   "name": "Drawesome",
   "version": "0.1.0",
   "stability": "experimental",
-  "description": "A lightweight sketching studio for Ryu with seven natural-feeling pens, area erasing, SVG or PNG export, plus chat dialogs for sketching or annotating visual references.",
+  "description": "A focused sketch surface for Ryu with a compact pen, highlighter, and eraser toolbar, plus chat dialogs for sketching or annotating visual references.",
   "tagline": "Sketch ideas and attach them to chat",
   "keywords": [
     "drawing",

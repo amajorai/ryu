@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { modelId } from "@ryu/db/model-id";
 import { User } from "@ryu/db/models/auth.model";
 import {
 	Member,
@@ -10,17 +11,16 @@ import {
 	roleSatisfies,
 } from "@ryu/db/models/control-plane.model";
 import { PlatformInboxNotification } from "@ryu/db/models/inbox-notification.model";
-import { OrganizationFeatureControl } from "@ryu/db/models/organization-feature-control.model";
 import {
 	isOrganizationNotificationEnabled,
 	type OrganizationNotificationKind,
 	organizationNotificationRecipientRoles,
 } from "@ryu/db/models/organization-notification.model";
 import { OrganizationActivityEmail } from "@ryu/email";
-import {
-	organizationFeatureByKey,
-	resolveOrganizationFeature,
-} from "./organization-features.ts";
+import { z } from "zod";
+import { grantedInCurrentMembership } from "./membership-grant-filter.ts";
+import { resolveOrganizationFeatureValues } from "./organization-feature-values.ts";
+import { organizationFeatureByKey } from "./organization-features.ts";
 import {
 	deliverUserNotificationEmail,
 	shouldStoreUserNotificationInApp,
@@ -65,29 +65,45 @@ export interface OrganizationNotificationRecipient {
 	userId: string;
 }
 
-interface MemberLike {
-	organizationId?: unknown;
-	role?: unknown;
-	userId?: unknown;
-}
-
-interface UserLike {
-	_id?: unknown;
-	email?: unknown;
-}
-
-interface RoleAssignmentLike {
-	organizationId?: unknown;
-	roleKey?: unknown;
-	teamId?: unknown;
-	userId?: unknown;
-}
-
-const text = (value: unknown, max: number): string =>
-	typeof value === "string" ? value.trim().slice(0, max) : "";
-
-const normalizeEmail = (value: unknown): string =>
-	text(value, MAX_EMAIL).toLowerCase();
+const text = z
+	.function({
+		input: [
+			z
+				.string()
+				.nullish()
+				.catch("")
+				.transform((value) => value ?? ""),
+			z.number(),
+		],
+		output: z.string(),
+	})
+	.implement((value, max) => value.trim().slice(0, max));
+const normalizeEmail = z
+	.string()
+	.catch("")
+	.transform((value) => value.trim().slice(0, MAX_EMAIL).toLowerCase()).parse;
+const userSchema = z.object({
+	_id: z.unknown().transform((value) => modelId(value, MAX_ID)),
+	email: z.string().catch(""),
+});
+const membershipStamp = z.date().nullable().catch(null);
+const memberSchema = z.object({
+	createdAt: membershipStamp,
+	organizationId: z.unknown().transform((value) => modelId(value, MAX_ID)),
+	role: z.string().catch(""),
+	userId: z.unknown().transform((value) => modelId(value, MAX_ID)),
+});
+const roleAssignmentSchema = z.object({
+	createdAt: membershipStamp,
+	organizationId: z.unknown().transform((value) => modelId(value, MAX_ID)),
+	roleKey: z.string().catch(""),
+	userId: z.unknown().transform((value) => modelId(value, MAX_ID)),
+});
+const roleSchema = z.object({
+	organizationId: z.unknown().transform((value) => modelId(value, MAX_ID)),
+	key: z.string().catch(""),
+	permissions: z.array(z.string()).catch(() => []),
+});
 
 const uniqueStrings = (values: readonly string[], max: number): string[] => [
 	...new Set(values.map((value) => text(value, max)).filter(Boolean)),
@@ -103,25 +119,12 @@ async function organizationNotificationsEnabled(
 		return true;
 	}
 	try {
-		const controls = await OrganizationFeatureControl.find({
+		const values = await resolveOrganizationFeatureValues({
+			keys: [feature.key],
 			organizationId,
-			key: feature.key,
-			$or: [{ userId: null }, ...(userId ? [{ userId }] : [])],
-		}).limit(2);
-		let organizationOverride: boolean | null = null;
-		let memberOverride: boolean | null = null;
-		for (const control of controls) {
-			if (control.userId === null) {
-				organizationOverride = control.enabled;
-			} else if (control.userId === userId) {
-				memberOverride = control.enabled;
-			}
-		}
-		return resolveOrganizationFeature(
-			feature,
-			organizationOverride,
-			memberOverride
-		);
+			userId: userId || null,
+		});
+		return values.get(feature.key) !== false;
 	} catch {
 		// Notification delivery remains fail-open when the feature-control store is
 		// unavailable, matching the existing transactional notification policy.
@@ -129,7 +132,7 @@ async function organizationNotificationsEnabled(
 	}
 }
 
-function safeActionUrl(value: unknown): string | null {
+function safeActionUrl(value: string | null | undefined): string | null {
 	const candidate = text(value, MAX_TEXT);
 	if (!candidate) {
 		return null;
@@ -174,9 +177,11 @@ export async function resolveOrganizationRecipients(
 		return [];
 	}
 
-	const members = (await Member.find({
-		organizationId: { $in: ids },
-	}).select("organizationId role userId")) as unknown as MemberLike[];
+	const members = z.array(memberSchema).parse(
+		await Member.find({
+			organizationId: { $in: ids },
+		}).select("organizationId role userId createdAt")
+	);
 	const kind = options.kind;
 	const rolesByOrganization = new Map<string, string[]>();
 	if (options.roleKeys) {
@@ -190,10 +195,7 @@ export async function resolveOrganizationRecipients(
 				try {
 					return [
 						organizationId,
-						(await organizationNotificationRecipientRoles(
-							organizationId,
-							kind
-						)) as string[],
+						await organizationNotificationRecipientRoles(organizationId, kind),
 					] as const;
 				} catch {
 					return [organizationId, ["owner", "admin"]] as const;
@@ -209,21 +211,31 @@ export async function resolveOrganizationRecipients(
 		roles.some((role) => !["owner", "admin", "member", "viewer"].includes(role))
 	);
 	const customAssignments = hasCustomTarget
-		? ((await RoleAssignment.find({
-				organizationId: { $in: ids },
-				teamId: null,
-			}).select(
-				"organizationId userId roleKey teamId"
-			)) as unknown as RoleAssignmentLike[])
+		? z.array(roleAssignmentSchema).parse(
+				await RoleAssignment.find({
+					organizationId: { $in: ids },
+					teamId: null,
+				}).select("organizationId userId roleKey teamId createdAt")
+			)
 		: [];
+	// A grant left from an earlier membership never makes a re-invited member a
+	// custom-role recipient.
+	const memberByOrganizationUser = new Map(
+		members.map((member) => [
+			`${member.organizationId}:${member.userId}`,
+			member,
+		])
+	);
 	const customRoles = hasCustomTarget
-		? await OrgRoleModel.find({
-				organizationId: { $in: ids },
-				key: {
-					$in: [...rolesByOrganization.values()].flat(),
-				},
-				deletedAt: null,
-			})
+		? z.array(roleSchema).parse(
+				await OrgRoleModel.find({
+					organizationId: { $in: ids },
+					key: {
+						$in: [...rolesByOrganization.values()].flat(),
+					},
+					deletedAt: null,
+				})
+			)
 		: [];
 	const validCustomRoles = new Set(
 		customRoles.map(
@@ -235,20 +247,23 @@ export async function resolveOrganizationRecipients(
 		const organizationId = text(assignment.organizationId, MAX_ID);
 		const userId = text(assignment.userId, MAX_ID);
 		const roleKey = text(assignment.roleKey, 80).toLowerCase();
+		const key = `${organizationId}:${userId}`;
+		const member = memberByOrganizationUser.get(key);
 		if (
 			organizationId &&
 			userId &&
 			roleKey &&
+			member &&
+			grantedInCurrentMembership(assignment, member) &&
 			validCustomRoles.has(`${organizationId}:${roleKey}`)
 		) {
-			const key = `${organizationId}:${userId}`;
 			const roles = assignmentsByMember.get(key) ?? new Set<string>();
 			roles.add(roleKey);
 			assignmentsByMember.set(key, roles);
 		}
 	}
 
-	const matchesRole = (rawRole: unknown, target: string): boolean => {
+	const matchesRole = (rawRole: string, target: string): boolean => {
 		const role = mapBaRole(text(rawRole, 80));
 		if (target === "owner") {
 			return role === "owner";
@@ -266,8 +281,8 @@ export async function resolveOrganizationRecipients(
 	};
 	const organizationIdsByUser = new Map<string, Set<string>>();
 	for (const member of members) {
-		const userId = text(member.userId, MAX_ID);
-		const organizationId = text(member.organizationId, MAX_ID);
+		const userId = modelId(member.userId, MAX_ID);
+		const organizationId = modelId(member.organizationId, MAX_ID);
 		const roleKeys = rolesByOrganization.get(organizationId) ?? [
 			"owner",
 			"admin",
@@ -292,12 +307,14 @@ export async function resolveOrganizationRecipients(
 		return [];
 	}
 
-	const users = (await User.find({
-		_id: { $in: [...organizationIdsByUser.keys()] },
-	}).select("email")) as unknown as UserLike[];
+	const users = z.array(userSchema).parse(
+		await User.find({
+			_id: { $in: [...organizationIdsByUser.keys()] },
+		}).select("email")
+	);
 	const emailByUserId = new Map<string, string>();
 	for (const user of users) {
-		const userId = text(user._id, MAX_ID);
+		const userId = modelId(user._id, MAX_ID);
 		const email = normalizeEmail(user.email);
 		if (userId && email) {
 			emailByUserId.set(userId, email);
@@ -330,41 +347,61 @@ export async function resolveOrganizationPermissionRecipients(
 	organizationId: string,
 	permission: Permission
 ): Promise<OrganizationNotificationRecipient[]> {
-	const members = (await Member.find({ organizationId }).select(
-		"organizationId role userId"
-	)) as unknown as MemberLike[];
+	const members = z
+		.array(memberSchema)
+		.parse(
+			await Member.find({ organizationId }).select(
+				"organizationId role userId createdAt"
+			)
+		);
 	if (members.length === 0) {
 		return [];
 	}
 	const userIds = uniqueStrings(
-		members.map((member) => text(member.userId, MAX_ID)),
+		members.map((member) => modelId(member.userId, MAX_ID)),
 		MAX_ID
 	);
-	const assignments = (await RoleAssignment.find({
-		organizationId,
-		userId: { $in: userIds },
-		teamId: null,
-	}).select("userId roleKey teamId")) as unknown as RoleAssignmentLike[];
+	const assignments = z.array(roleAssignmentSchema).parse(
+		await RoleAssignment.find({
+			organizationId,
+			userId: { $in: userIds },
+			teamId: null,
+		}).select("userId roleKey teamId createdAt")
+	);
+	// Grants left from an earlier membership never confer the permission.
+	const memberByUser = new Map(
+		members.map((member) => [modelId(member.userId, MAX_ID), member])
+	);
 	const roleKeys = uniqueStrings(
 		assignments.map((assignment) => text(assignment.roleKey, 80)),
 		80
 	);
 	const roles =
 		roleKeys.length > 0
-			? await OrgRoleModel.find({
-					organizationId,
-					key: { $in: roleKeys },
-					deletedAt: null,
-				})
+			? z.array(roleSchema).parse(
+					await OrgRoleModel.find({
+						organizationId,
+						key: { $in: roleKeys },
+						deletedAt: null,
+					})
+				)
 			: [];
 	const permissionsByRole = new Map(
-		roles.map((role) => [role.key, role.permissions as string[]])
+		roles.map((role) => [role.key, role.permissions])
 	);
 	const assignmentKeysByUser = new Map<string, Set<string>>();
 	for (const assignment of assignments) {
 		const userId = text(assignment.userId, MAX_ID);
 		const roleKey = text(assignment.roleKey, 80);
-		if (!(userId && permissionsByRole.has(roleKey))) {
+		const member = memberByUser.get(userId);
+		if (
+			!(
+				userId &&
+				member &&
+				grantedInCurrentMembership(assignment, member) &&
+				permissionsByRole.has(roleKey)
+			)
+		) {
 			continue;
 		}
 		const keys = assignmentKeysByUser.get(userId) ?? new Set<string>();
@@ -372,7 +409,7 @@ export async function resolveOrganizationPermissionRecipients(
 		assignmentKeysByUser.set(userId, keys);
 	}
 	const eligibleIds = members.flatMap((member) => {
-		const userId = text(member.userId, MAX_ID);
+		const userId = modelId(member.userId, MAX_ID);
 		const assigned = [...(assignmentKeysByUser.get(userId) ?? new Set())].map(
 			(roleKey) => ({
 				permissions: permissionsByRole.get(roleKey) ?? [],
@@ -388,12 +425,14 @@ export async function resolveOrganizationPermissionRecipients(
 	if (eligibleIds.length === 0) {
 		return [];
 	}
-	const users = (await User.find({
-		_id: { $in: eligibleIds },
-	}).select("email")) as unknown as UserLike[];
+	const users = z.array(userSchema).parse(
+		await User.find({
+			_id: { $in: eligibleIds },
+		}).select("email")
+	);
 	const emailByUserId = new Map(
 		users.flatMap((user) => {
-			const userId = text(user._id, MAX_ID);
+			const userId = modelId(user._id, MAX_ID);
 			const email = normalizeEmail(user.email);
 			return userId && email ? [[userId, email] as const] : [];
 		})
@@ -411,18 +450,18 @@ async function resolveExtraRecipient(
 	let userId = text(recipient.userId, MAX_ID);
 	let email = normalizeEmail(recipient.email);
 	if (userId && !email) {
-		const user = (await User.findById(userId).select(
-			"email"
-		)) as UserLike | null;
+		const user = userSchema
+			.nullable()
+			.parse(await User.findById(userId).select("email"));
 		email = normalizeEmail(user?.email);
 	} else if (!userId && email) {
 		// Resolve a registered invitee by address so their personal channel
 		// preference still applies. Unregistered invitees remain email-only and
 		// continue through the required Better Auth invitation path.
-		const user = (await User.findOne({ email }).select(
-			"_id"
-		)) as UserLike | null;
-		userId = text(user?._id, MAX_ID);
+		const user = userSchema
+			.nullable()
+			.parse(await User.findOne({ email }).select("_id"));
+		userId = modelId(user?._id, MAX_ID);
 	}
 	if (!email) {
 		return null;

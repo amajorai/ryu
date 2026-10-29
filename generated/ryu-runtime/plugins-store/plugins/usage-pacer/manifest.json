@@ -14,7 +14,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/usage-pacer",
   "name": "Usage Pacer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "stability": "experimental",
   "category": "Automation",
   "description": "Keeps subscription agents usable for the whole rolling window. It can pace usage down with a fallback ladder, then spend remaining quota on stronger models or ACP fast mode as a reset approaches.",
@@ -72,7 +72,7 @@
             "type": "textarea",
             "pref_key": "usage-pacer-rules",
             "label": "Agent and global ladders",
-            "description": "JSON configuration. Agent entries override global entries. `windows` accepts `weekly`, `session`, or `both`; `ladder` uses `at` as used-percent. Optional `upgrade_ladder` uses `remaining` as percent left and/or `within_minutes` until reset; steps may set `model`, `effort`, or ACP `acp_config` values such as `fast_mode: \"true\"`.",
+            "description": "JSON configuration. Optional `providers` entries (keyed by subscription provider id, such as `claude-pro-max`) override `agents` entries, which override `global`. Provider entries apply to Ryu agent turns that spend a saved subscription account and pace against that account, or the least-used eligible account when the provider pools accounts. `windows` accepts `weekly`, `session`, or `both`; `ladder` uses `at` as used-percent. Optional `upgrade_ladder` uses `remaining` as percent left and/or `within_minutes` until reset; steps may set `model`, `effort`, or ACP `acp_config` values such as `fast_mode: \"true\"`.",
             "default": "{\n  \"global\": {\n    \"windows\": \"weekly\",\n    \"pace_deficit\": 15,\n    \"ladder\": [\n      { \"from\": \"opus\", \"at\": 50, \"model\": \"sonnet\" },\n      { \"from\": \"sonnet\", \"at\": 75, \"model\": \"haiku\" }\n    ],\n    \"upgrade_ladder\": [\n      { \"from\": \"sonnet\", \"remaining\": 20, \"model\": \"opus\" },\n      { \"from\": \"opus\", \"within_minutes\": 1440, \"acp_config\": { \"fast_mode\": \"true\" } }\n    ]\n  },\n  \"agents\": {\n    \"acp:claude\": {\n      \"windows\": \"both\",\n      \"pace_deficit\": 15,\n      \"ladder\": [\n        { \"from\": \"opus\", \"at\": 50, \"model\": \"sonnet\" },\n        { \"from\": \"sonnet\", \"at\": 75, \"model\": \"haiku\" }\n      ],\n      \"upgrade_ladder\": [\n        { \"from\": \"sonnet\", \"remaining\": 20, \"model\": \"opus\" },\n        { \"from\": \"opus\", \"within_minutes\": 1440, \"acp_config\": { \"fast_mode\": \"true\" } }\n      ]\n    }\n  }\n}"
           }
         ]

@@ -1,5 +1,7 @@
 "use client";
 
+import { useProviderCatalog } from "@/src/hooks/provider-query-scope.ts";
+
 // A settings-FIELD wrapper around the exact same universal picker the chat
 // composer uses (`UniversalPickerBody`) — so a plugin/gateway field that names a
 // model or an agent gets the full "Providers · Agents · External Agents" picker
@@ -24,7 +26,6 @@ import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { modelMenuItem } from "@/components/agent-elements/input/model-router.ts";
 import { ProviderCommandDialog } from "@/components/agent-elements/input/provider-command-dialog.tsx";
@@ -41,10 +42,7 @@ import {
 } from "@/src/lib/agent-logos.tsx";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import {
-	fetchPiCatalog,
-	filterEnabledModels,
-} from "@/src/lib/api/pi-config.ts";
+import { filterEnabledModels } from "@/src/lib/api/pi-config.ts";
 import {
 	ProviderBrandLogo,
 	svglForProvider,
@@ -57,12 +55,12 @@ const NOOP = () => {
 };
 
 /** Map a Pi provider id to its brand-logo key (mirrors `useUniversalPicker`). */
-const PROVIDER_ENGINE_KEY: Record<string, string> = {
-	google: "gemini",
-	"claude-pro-max": "claude",
-	"openai-codex": "codex",
-	chatgpt: "chatgpt",
-};
+const PROVIDER_ENGINE_KEY = new Map<string, string>([
+	["google", "gemini"],
+	["claude-pro-max", "claude"],
+	["openai-codex", "codex"],
+	["chatgpt", "chatgpt"],
+]);
 
 export interface AgentModelPickerFieldProps {
 	/** Accessible label for the trigger. */
@@ -110,13 +108,12 @@ function CustomModelRow({
 	};
 	return (
 		<div>
-			<span className="px-1.5 pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+			<span className="type-caption px-1.5 pb-1 font-medium text-muted-foreground uppercase tracking-wide">
 				Custom model
 			</span>
 			<div className="flex items-center gap-1">
 				<Input
 					aria-label="Custom model id"
-					className="h-7 text-[13px]"
 					onChange={(e) => setDraft(e.target.value)}
 					onKeyDown={(e) => {
 						e.stopPropagation();
@@ -126,6 +123,7 @@ function CustomModelRow({
 						}
 					}}
 					placeholder="Any model id (e.g. a local or pinned model)"
+					purpose="model-identifier"
 					value={draft}
 				/>
 				<button
@@ -161,7 +159,7 @@ function ValueMark({
 		if (agent?.avatarGlyph) {
 			return (
 				<AgentAvatar
-					className="size-4 shrink-0 rounded-full object-contain"
+					className="size-4 shrink-0 object-contain"
 					engine={engineForAgent(agent)}
 					glyph={agent.avatarGlyph}
 					size="16px"
@@ -198,9 +196,7 @@ export function AgentModelPickerField({
 }: AgentModelPickerFieldProps) {
 	// The Pi catalog for THIS target (read-only — never activated). Only fetched
 	// for model mode; agent mode reads the live agent registry instead.
-	const catalogQuery = useQuery({
-		queryKey: ["pi-config-catalog", target.url],
-		queryFn: () => fetchPiCatalog(target),
+	const catalogQuery = useProviderCatalog(target, {
 		enabled: mode === "model",
 		staleTime: 5 * 60 * 1000,
 		refetchOnWindowFocus: false,
@@ -245,7 +241,7 @@ export function AgentModelPickerField({
 					return {
 						id: p.id,
 						label: p.label,
-						engineKey: PROVIDER_ENGINE_KEY[p.id] ?? p.id,
+						engineKey: PROVIDER_ENGINE_KEY.get(p.id) ?? p.id,
 						authKind: p.authKind,
 						managed: false,
 						// The managed OpenRouter provider exposes its catalog through the
@@ -287,6 +283,10 @@ export function AgentModelPickerField({
 				availableExternal: [],
 				installedExternal: [],
 				installPendingId: null,
+				// This is a Settings field, not the compact chat bar. The selected
+				// interface density must never hide the model control the field exists
+				// to expose.
+				forceModelPicker: true,
 				hideAuto: true,
 				ryuAgent: null,
 				ryuActive: false,

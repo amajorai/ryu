@@ -39,13 +39,21 @@
 //! Core/Gateway guard is the load-bearing enforcement path if Codex skips the
 //! non-managed hook.
 //!
-//! **Known caveat (auth.json refresh divergence):** we copy the user's
-//! `~/.codex/auth.json` into the isolated home at spawn. OAuth access tokens
-//! refresh over time. A refresh written into the isolated home does NOT propagate
-//! back to the user's real `~/.codex`, and the next spawn re-copies the user's
-//! (possibly older) token over the isolated one. This is fine within a session;
-//! a follow-up could share the auth file (symlink) or skip the re-copy when the
-//! isolated token is newer.
+//! **auth.json custody:** the newest explicit sign-in wins, and token refreshes
+//! never stop the isolated copy following. The isolated home is seeded from the
+//! user's `~/.codex/auth.json`, and a marker records the hash of the user's
+//! bytes last seeded. By default the copy follows the user's file: whenever that
+//! file changes it is re-copied (overwriting a copy codex-acp merely refreshed,
+//! which is the same login), and when it is deleted (a Codex CLI sign-out) the
+//! copy is removed; while it is unchanged the copy is kept, since it may hold a
+//! fresher token. An explicit Ryu-side sign-in, account switch or sign-out
+//! ([`record_explicit_auth_change`]) makes the isolated home the owner and
+//! records the user's account at that moment: from then on a CLI token refresh
+//! or sign-out no longer overrides it, and only a CLI sign-in to a different
+//! account re-seeds the copy and ends Ryu's ownership. Nothing is ever written
+//! back to the user's real `~/.codex`.
+
+pub mod transcripts;
 
 use std::fs;
 use std::io::Read;
@@ -265,12 +273,12 @@ pub fn codex_home() -> PathBuf {
             return PathBuf::from(trimmed);
         }
     }
-    crate::sidecar::download_manager::ryu_dir().join("codex-home")
+    crate::paths::runtime_dir("codex-home")
 }
 
 /// The user's real `CODEX_HOME` (where their OAuth `auth.json` lives). Honours the
 /// `CODEX_HOME` env override Codex itself uses; defaults to `~/.codex`.
-fn user_codex_home() -> PathBuf {
+pub(crate) fn user_codex_home() -> PathBuf {
     if let Ok(custom) = std::env::var("CODEX_HOME") {
         let trimmed = custom.trim();
         if !trimmed.is_empty() {
@@ -292,7 +300,7 @@ pub fn safety_home() -> PathBuf {
             return PathBuf::from(trimmed);
         }
     }
-    crate::sidecar::download_manager::ryu_dir().join("codex-safety-home")
+    crate::paths::runtime_dir("codex-safety-home")
 }
 
 /// Materialize Ryu's safe Codex instruction/config/hook/rules layer without
@@ -422,6 +430,9 @@ fn ensure_safety_files(home: &Path) -> Result<()> {
     ensure_instruction(home, &trash)?;
     ensure_rules(home, &trash)?;
     ensure_hooks(home)?;
+    // Codex's own rollouts are plaintext in its format: cap their age and
+    // drop any prompt history (see `transcripts`).
+    transcripts::maintain_once_a_day(home.to_path_buf());
     Ok(())
 }
 
@@ -452,6 +463,21 @@ fn ensure_codex_config(home: &Path) -> Result<()> {
     features
         .entry("hooks".to_owned())
         .or_insert(toml::Value::Boolean(true));
+    // Codex's prompt history (`history.jsonl`) would keep every prompt in
+    // plaintext beside the rollouts; Ryu keeps its own sealed copy, so the
+    // managed homes never persist it.
+    let history = table
+        .entry("history".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    if !history.is_table() {
+        *history = toml::Value::Table(toml::map::Map::new());
+    }
+    if let Some(history) = history.as_table_mut() {
+        history.insert(
+            "persistence".to_owned(),
+            toml::Value::String("none".to_owned()),
+        );
+    }
     write_if_changed(&path, &toml::to_string_pretty(&root)?)
 }
 
@@ -647,13 +673,14 @@ fn write_if_changed(path: &Path, content: &str) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("creating parent directory {}", parent.display()))?;
     }
-    fs::write(path, content).with_context(|| format!("writing {}", path.display()))?;
+    crate::atomic_file::write_atomic(path, content.as_bytes())
+        .with_context(|| format!("writing {}", path.display()))?;
     set_private_permissions(path);
     Ok(())
 }
 
 fn backup_once(path: &Path) -> Result<()> {
-    let backup = PathBuf::from(format!("{}.ryu-safety-backup", path.display()));
+    let backup = PathBuf::from(format!("{}{SAFETY_BACKUP_SUFFIX}", path.display()));
     if backup.exists() {
         return Ok(());
     }
@@ -695,7 +722,7 @@ fn set_private_directory_permissions(path: &Path) -> Result<()> {
 /// `chatgpt.com/backend-api/codex` with the caller's own subscription auth
 /// unchanged.
 pub fn passthrough_base_url() -> String {
-    let base = crate::sidecar::gateway::gateway_url();
+    let base = crate::sidecar::gateway::configured_gateway_url();
     format!(
         "{}/passthrough/openai-responses",
         base.trim_end_matches('/')
@@ -721,12 +748,14 @@ pub fn ensure_gateway_home() -> Result<String> {
 
     ensure_safety_files(&home)?;
 
-    // Refresh the OAuth credential from the user's real Codex home so the
-    // subscription bearer + account id reach the passthrough. Best-effort.
-    let user_auth = user_codex_home().join("auth.json");
-    if user_auth.exists() {
-        copy_if_changed(&user_auth, &home.join("auth.json"))?;
-    }
+    // Seed the OAuth credential from the user's real Codex home so the
+    // subscription bearer + account id reach the passthrough, without undoing an
+    // explicit sign-in, account change or sign-out made inside Ryu.
+    reconcile_seeded_auth(
+        &user_codex_home().join("auth.json"),
+        &home.join("auth.json"),
+        &home.join(AUTH_SEED_MARKER),
+    )?;
 
     let base_url = passthrough_base_url();
     // A custom provider with `wire_api = "responses"` and NO `env_key` makes
@@ -767,19 +796,266 @@ pub fn ensure_gateway_home() -> Result<String> {
     Ok(home.to_string_lossy().into_owned())
 }
 
-fn copy_if_changed(source: &Path, destination: &Path) -> Result<()> {
-    let source_bytes = fs::read(source)
-        .with_context(|| format!("reading Codex auth source {}", source.display()))?;
-    if fs::read(destination).ok().as_deref() == Some(source_bytes.as_slice()) {
+/// Marker beside the isolated `auth.json` recording the custody state: the
+/// SHA-256 of the user's `~/.codex/auth.json` bytes last seeded (or seen when
+/// Ryu took ownership), whether an explicit Ryu-side sign-in/out owns the
+/// isolated copy, and the user's account identity at that moment. A marker from
+/// before ownership tracking holds only the bare hex digest; it reads as a
+/// not-owned seed of that digest.
+const AUTH_SEED_MARKER: &str = ".ryu-auth-seed";
+
+/// The JSON form of [`AUTH_SEED_MARKER`].
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct AuthSeedMarker {
+    /// Digest of the user's `auth.json`; `None` when it was absent.
+    #[serde(default)]
+    source_sha256: Option<String>,
+    /// Set only by an explicit Ryu authenticate/logout, never by a refresh.
+    #[serde(default)]
+    owned: bool,
+    /// The user's account when ownership was taken, if it could be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owned_identity: Option<AuthIdentity>,
+}
+
+/// Who a Codex `auth.json` signs in as, without any credential material. A
+/// ChatGPT login is its workspace account plus the user inside it; an API-key
+/// login is a truncated key fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct AuthIdentity {
+    kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user: Option<String>,
+}
+
+impl AuthIdentity {
+    /// A different account only when a component both sides know differs, so
+    /// an id_token that failed to parse once never reads as an account change.
+    fn is_different_account(&self, other: &Self) -> bool {
+        fn differs(left: &Option<String>, right: &Option<String>) -> bool {
+            matches!((left, right), (Some(left), Some(right)) if left != right)
+        }
+        self.kind != other.kind
+            || differs(&self.account, &other.account)
+            || differs(&self.user, &other.user)
+    }
+}
+
+fn auth_digest(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(bytes))
+}
+
+fn read_optional_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+fn non_empty_str(value: Option<&serde_json::Value>) -> Option<String> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+}
+
+/// Decode a JWT payload without verifying it: the identity only compares two
+/// local files the user already trusts, it authorizes nothing.
+fn jwt_claims(token: &str) -> Option<serde_json::Value> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let payload = token.split('.').nth(1)?;
+    let bytes = URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Read the account a Codex `auth.json` signs in as: `tokens.account_id` (or
+/// the id_token's `chatgpt_account_id` claim) plus the id_token's user, or an
+/// `OPENAI_API_KEY` fingerprint for API-key mode. `None` when unreadable.
+fn auth_identity(bytes: &[u8]) -> Option<AuthIdentity> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let api_key_mode = value
+        .get("auth_mode")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|mode| mode.replace(['_', '-'], "").eq_ignore_ascii_case("apikey"));
+    if !api_key_mode {
+        if let Some(tokens) = value.get("tokens") {
+            let claims = non_empty_str(tokens.get("id_token")).and_then(|token| jwt_claims(&token));
+            let auth = claims
+                .as_ref()
+                .and_then(|claims| claims.get("https://api.openai.com/auth"));
+            let account = non_empty_str(tokens.get("account_id"))
+                .or_else(|| non_empty_str(auth.and_then(|auth| auth.get("chatgpt_account_id"))));
+            let user = non_empty_str(auth.and_then(|auth| auth.get("chatgpt_user_id")))
+                .or_else(|| non_empty_str(auth.and_then(|auth| auth.get("user_id"))))
+                .or_else(|| non_empty_str(claims.as_ref().and_then(|claims| claims.get("sub"))));
+            if account.is_some() || user.is_some() {
+                return Some(AuthIdentity {
+                    kind: "chatgpt".to_owned(),
+                    account,
+                    user,
+                });
+            }
+        }
+    }
+    let key = non_empty_str(value.get("OPENAI_API_KEY"))?;
+    Some(AuthIdentity {
+        kind: "api-key".to_owned(),
+        account: Some(auth_digest(key.as_bytes())[..16].to_owned()),
+        user: None,
+    })
+}
+
+fn read_marker(marker: &Path) -> Result<Option<AuthSeedMarker>> {
+    let raw = read_optional_text(marker)?;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    if raw.starts_with('{') {
+        // An unreadable marker is treated as missing: the isolated copy is
+        // kept and a fresh not-owned marker is recorded.
+        return Ok(serde_json::from_str(raw).ok());
+    }
+    // The bare-digest marker from before ownership tracking.
+    Ok(Some(AuthSeedMarker {
+        source_sha256: Some(raw.to_owned()),
+        ..AuthSeedMarker::default()
+    }))
+}
+
+/// Apply the custody rule in the module docs: the newest explicit sign-in wins,
+/// and token refreshes on either side never stop the isolated copy following.
+fn reconcile_seeded_auth(source: &Path, isolated: &Path, marker: &Path) -> Result<()> {
+    remove_auth_backup(isolated);
+    let source_bytes = read_optional_bytes(source)?;
+    let source_digest = source_bytes.as_deref().map(auth_digest);
+    let Some(state) = read_marker(marker)? else {
+        if isolated.exists() {
+            // A home from before the marker (when every spawn re-copied the
+            // user's file) or with an unreadable one: the copy may hold a
+            // fresher refreshed token, so keep it and follow from here on.
+            return write_marker(
+                marker,
+                &AuthSeedMarker {
+                    source_sha256: source_digest,
+                    ..AuthSeedMarker::default()
+                },
+            );
+        }
+        // First use: nothing seeded yet.
+        if let Some(bytes) = source_bytes {
+            write_seed(isolated, marker, &bytes)?;
+        }
+        return Ok(());
+    };
+    if state.source_sha256 == source_digest {
+        // The user's file is unchanged; the isolated copy (possibly refreshed
+        // by codex-acp, or signed out inside Ryu) stays as it is.
         return Ok(());
     }
-    if destination.exists() {
-        backup_once(destination)?;
+    if state.owned {
+        // An explicit Ryu sign-in/out owns the copy. Only a sign-in to another
+        // account in the Codex CLI, a newer explicit choice, takes it back; a
+        // CLI token refresh or sign-out does not.
+        let current = source_bytes.as_deref().and_then(auth_identity);
+        let account_changed = match (&state.owned_identity, &current) {
+            (_, None) => false,
+            (Some(recorded), Some(current)) => recorded.is_different_account(current),
+            // Signed out of the CLI when Ryu took ownership, signed in since.
+            (None, Some(_)) => state.source_sha256.is_none(),
+        };
+        if !account_changed {
+            return Ok(());
+        }
     }
-    fs::write(destination, source_bytes)
-        .with_context(|| format!("writing Codex auth copy {}", destination.display()))?;
-    set_private_permissions(destination);
+    match source_bytes {
+        Some(bytes) => write_seed(isolated, marker, &bytes),
+        // The user signed out of Codex and Ryu never explicitly signed in.
+        None => {
+            if isolated.exists() {
+                fs::remove_file(isolated)
+                    .with_context(|| format!("removing {}", isolated.display()))?;
+            }
+            fs::remove_file(marker).with_context(|| format!("removing {}", marker.display()))
+        }
+    }
+}
+
+/// Record that an explicit Ryu-side sign-in, account switch or sign-out for
+/// the gateway-routed Codex succeeded, so the isolated `auth.json` stops
+/// following the user's file until they sign in to a different account there.
+/// Never called for a token refresh.
+pub fn record_explicit_auth_change() -> Result<()> {
+    take_auth_ownership(
+        &user_codex_home().join("auth.json"),
+        &codex_home().join(AUTH_SEED_MARKER),
+    )
+}
+
+fn take_auth_ownership(source: &Path, marker: &Path) -> Result<()> {
+    let source_bytes = read_optional_bytes(source)?;
+    write_marker(
+        marker,
+        &AuthSeedMarker {
+            source_sha256: source_bytes.as_deref().map(auth_digest),
+            owned: true,
+            owned_identity: source_bytes.as_deref().and_then(auth_identity),
+        },
+    )
+}
+
+/// Copy the user's Codex `auth.json` into the isolated home.
+///
+/// The copy holds the user's ChatGPT OAuth tokens in plaintext because the
+/// third-party Codex binary reads `<CODEX_HOME>/auth.json` itself and has no
+/// environment or stdin channel for a subscription login. What Ryu controls is
+/// kept minimal: the copy is written atomically through a temp file created
+/// `0600` (never briefly at umask permissions), and it is never backed up.
+/// Earlier builds kept the first replaced token set forever in
+/// `auth.json.ryu-safety-backup`; [`reconcile_seeded_auth`] deletes that file.
+/// The source is the user's own `~/.codex/auth.json`, so a backup protected
+/// nothing.
+fn write_seed(isolated: &Path, marker: &Path, bytes: &[u8]) -> Result<()> {
+    remove_auth_backup(isolated);
+    crate::atomic_file::write_atomic(isolated, bytes)
+        .with_context(|| format!("writing Codex auth copy {}", isolated.display()))?;
+    set_private_permissions(isolated);
+    write_marker(
+        marker,
+        &AuthSeedMarker {
+            source_sha256: Some(auth_digest(bytes)),
+            ..AuthSeedMarker::default()
+        },
+    )
+}
+
+fn write_marker(marker: &Path, state: &AuthSeedMarker) -> Result<()> {
+    let body = serde_json::to_vec(state).context("encoding Codex auth seed marker")?;
+    crate::atomic_file::write_atomic(marker, &body)
+        .with_context(|| format!("writing {}", marker.display()))?;
+    set_private_permissions(marker);
     Ok(())
+}
+
+/// Suffix [`backup_once`] gives a file it preserves before the first change.
+const SAFETY_BACKUP_SUFFIX: &str = ".ryu-safety-backup";
+
+/// Delete a legacy `auth.json.ryu-safety-backup` next to `auth_copy`. Best
+/// effort: a failure leaves the old owner-only file in place and is logged.
+fn remove_auth_backup(auth_copy: &Path) {
+    let backup = PathBuf::from(format!("{}{SAFETY_BACKUP_SUFFIX}", auth_copy.display()));
+    match fs::remove_file(&backup) {
+        Ok(()) => tracing::info!("removed the legacy Codex auth safety backup"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            tracing::warn!(%error, "could not remove the legacy Codex auth safety backup")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -792,6 +1068,269 @@ mod tests {
             .map(|duration| duration.as_nanos())
             .unwrap_or_default();
         std::env::temp_dir().join(format!("ryu-codex-{label}-{}-{nonce}", std::process::id()))
+    }
+
+    struct AuthFixture {
+        dir: PathBuf,
+    }
+
+    impl AuthFixture {
+        fn new(label: &str) -> Self {
+            let dir = unique_test_path(label);
+            fs::create_dir_all(dir.join("user")).unwrap();
+            fs::create_dir_all(dir.join("isolated")).unwrap();
+            Self { dir }
+        }
+        fn source(&self) -> PathBuf {
+            self.dir.join("user").join("auth.json")
+        }
+        fn isolated(&self) -> PathBuf {
+            self.dir.join("isolated").join("auth.json")
+        }
+        fn marker(&self) -> PathBuf {
+            self.dir.join("isolated").join(AUTH_SEED_MARKER)
+        }
+        fn reconcile(&self) {
+            reconcile_seeded_auth(&self.source(), &self.isolated(), &self.marker()).unwrap();
+        }
+        /// What a successful Ryu-side authenticate/switch/logout records.
+        fn take_ownership(&self) {
+            take_auth_ownership(&self.source(), &self.marker()).unwrap();
+        }
+        fn isolated_text(&self) -> Option<String> {
+            fs::read_to_string(self.isolated()).ok()
+        }
+        fn marker_state(&self) -> Option<AuthSeedMarker> {
+            read_marker(&self.marker()).unwrap()
+        }
+    }
+
+    impl Drop for AuthFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// A Codex ChatGPT-login `auth.json` in the CLI's real shape: the id_token
+    /// carries the account and user claims, `access` stands in for a token that
+    /// changes on every refresh.
+    fn chatgpt_auth(account: &str, user: &str, access: &str) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let claims = serde_json::json!({
+            "sub": format!("auth0|{user}"),
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": account,
+                "chatgpt_user_id": user,
+            },
+        });
+        let id_token = format!(
+            "e30.{}.sig",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap())
+        );
+        serde_json::json!({
+            "OPENAI_API_KEY": null,
+            "tokens": {
+                "id_token": id_token,
+                "access_token": access,
+                "refresh_token": format!("refresh-{access}"),
+                "account_id": account,
+            },
+            "last_refresh": "2026-10-17T00:00:00Z",
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn auth_identity_reads_the_account_without_credentials() {
+        let identity = auth_identity(chatgpt_auth("acct-1", "user-1", "tok").as_bytes()).unwrap();
+        assert_eq!(identity.kind, "chatgpt");
+        assert_eq!(identity.account.as_deref(), Some("acct-1"));
+        assert_eq!(identity.user.as_deref(), Some("user-1"));
+        // A refresh is the same account; another user or workspace is not.
+        let refreshed = auth_identity(chatgpt_auth("acct-1", "user-1", "tok2").as_bytes()).unwrap();
+        assert!(!identity.is_different_account(&refreshed));
+        let other_user = auth_identity(chatgpt_auth("acct-1", "user-2", "tok").as_bytes()).unwrap();
+        assert!(identity.is_different_account(&other_user));
+
+        let key = auth_identity(br#"{"auth_mode":"apikey","OPENAI_API_KEY":"sk-live"}"#).unwrap();
+        assert_eq!(key.kind, "api-key");
+        assert!(!format!("{key:?}").contains("sk-live"));
+        assert!(auth_identity(b"not json").is_none());
+        assert!(auth_identity(br#"{"tokens":{}}"#).is_none());
+    }
+
+    #[test]
+    fn seeded_auth_follows_the_user_login_until_ryu_changes_it() {
+        let fixture = AuthFixture::new("auth-seed");
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), None, "nothing to seed yet");
+
+        fs::write(fixture.source(), "account-a").unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text().as_deref(), Some("account-a"));
+
+        // An untouched seed follows a changed user login.
+        fs::write(fixture.source(), "account-a2").unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text().as_deref(), Some("account-a2"));
+    }
+
+    #[test]
+    fn a_refreshed_copy_still_follows_a_cli_account_change_when_not_owned() {
+        let fixture = AuthFixture::new("auth-refresh-follow");
+        fs::write(fixture.source(), chatgpt_auth("acct-a", "user-a", "t1")).unwrap();
+        fixture.reconcile();
+
+        // codex-acp refreshes the isolated token: same login, kept while the
+        // user's file is unchanged.
+        let refreshed = chatgpt_auth("acct-a", "user-a", "t1-refreshed");
+        fs::write(fixture.isolated(), &refreshed).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), Some(refreshed));
+
+        // The user signs in to another account in the Codex CLI.
+        let other = chatgpt_auth("acct-b", "user-b", "t2");
+        fs::write(fixture.source(), &other).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), Some(other));
+        assert!(!fixture.marker_state().unwrap().owned);
+    }
+
+    #[test]
+    fn an_owned_copy_ignores_cli_refreshes_and_sign_out_of_the_same_account() {
+        let fixture = AuthFixture::new("auth-owned-refresh");
+        fs::write(fixture.source(), chatgpt_auth("acct-a", "user-a", "t1")).unwrap();
+        fixture.reconcile();
+        // An explicit sign-in inside Ryu writes the isolated copy.
+        let ryu_login = chatgpt_auth("acct-r", "user-r", "ryu");
+        fs::write(fixture.isolated(), &ryu_login).unwrap();
+        fixture.take_ownership();
+
+        fs::write(
+            fixture.source(),
+            chatgpt_auth("acct-a", "user-a", "t1-refreshed"),
+        )
+        .unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text().as_deref(), Some(ryu_login.as_str()));
+        assert!(fixture.marker_state().unwrap().owned);
+
+        // A CLI sign-out does not sign Ryu out either.
+        fs::remove_file(fixture.source()).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), Some(ryu_login));
+    }
+
+    #[test]
+    fn an_owned_copy_follows_a_cli_sign_in_to_another_account() {
+        let fixture = AuthFixture::new("auth-owned-switch");
+        fs::write(fixture.source(), chatgpt_auth("acct-a", "user-a", "t1")).unwrap();
+        fixture.reconcile();
+        fs::write(fixture.isolated(), chatgpt_auth("acct-r", "user-r", "ryu")).unwrap();
+        fixture.take_ownership();
+
+        let other = chatgpt_auth("acct-b", "user-b", "t2");
+        fs::write(fixture.source(), &other).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), Some(other));
+        assert!(!fixture.marker_state().unwrap().owned, "ownership ends");
+
+        // Following resumes: the next CLI change is seeded too.
+        let next = chatgpt_auth("acct-b", "user-b", "t3");
+        fs::write(fixture.source(), &next).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), Some(next));
+    }
+
+    #[test]
+    fn a_ryu_sign_out_survives_cli_refreshes_until_another_account_signs_in() {
+        let fixture = AuthFixture::new("auth-owned-logout");
+        fs::write(fixture.source(), chatgpt_auth("acct-a", "user-a", "t1")).unwrap();
+        fixture.reconcile();
+        fs::remove_file(fixture.isolated()).unwrap();
+        fixture.take_ownership();
+
+        fs::write(fixture.source(), chatgpt_auth("acct-a", "user-a", "t2")).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), None);
+
+        let other = chatgpt_auth("acct-b", "user-b", "t3");
+        fs::write(fixture.source(), &other).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), Some(other));
+    }
+
+    #[test]
+    fn a_sign_out_inside_ryu_is_not_reseeded() {
+        let fixture = AuthFixture::new("auth-logout");
+        fs::write(fixture.source(), "account-a").unwrap();
+        fixture.reconcile();
+        fs::remove_file(fixture.isolated()).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), None);
+    }
+
+    #[test]
+    fn a_user_sign_out_removes_a_copy_ryu_does_not_own() {
+        let fixture = AuthFixture::new("auth-global-logout");
+        fs::write(fixture.source(), chatgpt_auth("acct-a", "user-a", "t1")).unwrap();
+        fixture.reconcile();
+        // Even after codex-acp refreshed it.
+        fs::write(fixture.isolated(), chatgpt_auth("acct-a", "user-a", "t1b")).unwrap();
+        fs::remove_file(fixture.source()).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), None);
+        assert!(!fixture.marker().exists());
+
+        // A later user login seeds again.
+        fs::write(fixture.source(), "account-c").unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text().as_deref(), Some("account-c"));
+    }
+
+    #[test]
+    fn a_pre_marker_home_keeps_its_copy_and_then_follows() {
+        let fixture = AuthFixture::new("auth-legacy");
+        fs::write(fixture.source(), "account-a").unwrap();
+        fs::write(fixture.isolated(), "account-a").unwrap();
+        fixture.reconcile();
+        assert!(fixture.marker().exists(), "identical copy becomes the seed");
+        fs::write(fixture.source(), "account-a2").unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text().as_deref(), Some("account-a2"));
+
+        let other = AuthFixture::new("auth-legacy-different");
+        fs::write(other.source(), "account-a").unwrap();
+        fs::write(other.isolated(), "account-b").unwrap();
+        other.reconcile();
+        assert_eq!(other.isolated_text().as_deref(), Some("account-b"));
+    }
+
+    #[test]
+    fn a_bare_digest_marker_migrates_as_a_seed_ryu_does_not_own() {
+        let fixture = AuthFixture::new("auth-marker-v1");
+        let seeded = chatgpt_auth("acct-a", "user-a", "t1");
+        fs::write(fixture.source(), &seeded).unwrap();
+        // The pre-ownership format: the hex digest of the seeded bytes, with an
+        // isolated copy codex-acp has since refreshed.
+        fs::write(fixture.marker(), auth_digest(seeded.as_bytes())).unwrap();
+        let refreshed = chatgpt_auth("acct-a", "user-a", "t1-refreshed");
+        fs::write(fixture.isolated(), &refreshed).unwrap();
+
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), Some(refreshed), "unchanged source");
+        assert_eq!(
+            fixture.marker_state(),
+            Some(AuthSeedMarker {
+                source_sha256: Some(auth_digest(seeded.as_bytes())),
+                ..AuthSeedMarker::default()
+            })
+        );
+
+        let other = chatgpt_auth("acct-b", "user-b", "t2");
+        fs::write(fixture.source(), &other).unwrap();
+        fixture.reconcile();
+        assert_eq!(fixture.isolated_text(), Some(other));
     }
 
     #[test]
@@ -876,6 +1415,59 @@ mod tests {
     }
 
     #[test]
+    fn auth_copy_is_private_never_backed_up_and_drops_the_legacy_backup() {
+        let root = unique_test_path("auth-copy");
+        fs::create_dir_all(root.join("home")).expect("create test Codex home");
+        let source = root.join("user-auth.json");
+        let destination = root.join("home").join("auth.json");
+        let marker = root.join("home").join(AUTH_SEED_MARKER);
+        let legacy_backup = root.join("home").join("auth.json.ryu-safety-backup");
+        fs::write(&source, br#"{"tokens":{"refresh_token":"rt-old"}}"#).expect("seed source");
+        fs::write(
+            &legacy_backup,
+            br#"{"tokens":{"refresh_token":"rt-oldest"}}"#,
+        )
+        .expect("seed legacy backup");
+
+        // First seed, then a changed source replaces the copy: neither leaves a
+        // backup of the replaced tokens behind.
+        reconcile_seeded_auth(&source, &destination, &marker).expect("seed auth");
+        fs::write(&source, br#"{"tokens":{"refresh_token":"rt-new"}}"#).expect("update source");
+        reconcile_seeded_auth(&source, &destination, &marker).expect("copy auth");
+
+        assert_eq!(
+            fs::read(&destination).expect("read copy"),
+            fs::read(&source).expect("read source")
+        );
+        assert!(
+            !legacy_backup.exists(),
+            "legacy auth backup must be deleted"
+        );
+        let leftovers: Vec<_> = fs::read_dir(root.join("home"))
+            .expect("list home")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "auth.json" && name != AUTH_SEED_MARKER)
+            .collect();
+        assert!(leftovers.is_empty(), "unexpected files: {leftovers:?}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&destination)
+                .expect("stat copy")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        // An unchanged source still removes a backup an older build left behind.
+        fs::write(&legacy_backup, b"stale").expect("seed legacy backup again");
+        reconcile_seeded_auth(&source, &destination, &marker).expect("reconcile unchanged auth");
+        assert!(!legacy_backup.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn missing_hook_tool_name_fails_closed() {
         let payload = serde_json::json!({ "tool_input": { "command": "echo hi" } });
         assert!(safe_delete_hook_reason(&payload)
@@ -945,6 +1537,14 @@ mod tests {
         assert_eq!(
             parsed.get("approval_policy").and_then(toml::Value::as_str),
             Some("on-request")
+        );
+        assert_eq!(
+            parsed
+                .get("history")
+                .and_then(|history| history.get("persistence"))
+                .and_then(toml::Value::as_str),
+            Some("none"),
+            "Codex must not keep a plaintext prompt history"
         );
         let hooks = std::fs::read_to_string(std::path::Path::new(&home).join("hooks.json"))
             .expect("hooks.json written");

@@ -1,5 +1,5 @@
-import { ComputeShareSurface } from "@/src/components/exchange/ComputeShareSurface.tsx";
+import { ComputeSharePage } from "@/src/components/exchange/ComputeSharePage.tsx";
 
 export default function ComputePage() {
-	return <ComputeShareSurface mode="compute" />;
+	return <ComputeSharePage mode="compute" />;
 }

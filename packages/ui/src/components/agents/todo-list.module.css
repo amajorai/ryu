@@ -1,0 +1,6 @@
+.inline1 {
+	transform-origin: var(--todo-list-1-transform-origin);
+}
+.inline2 {
+	max-height: var(--todo-list-2-max-height);
+}

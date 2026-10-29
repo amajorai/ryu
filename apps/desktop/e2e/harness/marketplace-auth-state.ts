@@ -1,5 +1,6 @@
 import { create } from "zustand";
 export const useAuthState = create(() => ({
+	// SAFETY: The authored alpha string is retained unchanged while widening this local state to its intended string-or-null domain.
 	user: "alpha" as string | null,
 	organization: "org",
 }));

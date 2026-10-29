@@ -23,6 +23,8 @@
  * control plane, never in OSS core/gateway.
  */
 
+import { GATED_CAPABILITIES, planLimit, QUOTAS } from "./plans.ts";
+
 /** The psychology lever a card appeals to. */
 export type UpsellLever = "investment" | "friction" | "desire";
 
@@ -187,7 +189,7 @@ const investmentCandidates = (
 				metric: "agent-time",
 				value: agentHours,
 				headline: `Your agents have worked ${agentHours.toLocaleString()} hours for you`,
-				subtext: "Give them room to run — unlock parallel background runs.",
+				subtext: "Keep managed AI running with a plan and usage credits.",
 			},
 		});
 	}
@@ -220,7 +222,10 @@ const frictionCandidates = (
 ): ScoredCard[] => {
 	const out: ScoredCard[] = [];
 	for (const [cap, hits] of Object.entries(snapshot.capHits ?? {})) {
-		if (hits > 0) {
+		const field = Object.keys(QUOTAS).find(
+			(key): key is keyof typeof QUOTAS => key === cap
+		);
+		if (field && Number.isFinite(planLimit(null, field)) && hits > 0) {
 			out.push({
 				score: hits * perCapHit,
 				card: {
@@ -249,7 +254,10 @@ const desireCandidates = (
 	for (const [feature, attempts] of Object.entries(
 		snapshot.gatedAttempts ?? {}
 	)) {
-		if (attempts > 0) {
+		if (
+			attempts > 0 &&
+			GATED_CAPABILITIES.some((capability) => capability === feature)
+		) {
 			out.push({
 				score: attempts * perGatedAttempt,
 				card: {

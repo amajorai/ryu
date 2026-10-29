@@ -18,8 +18,9 @@
 //! `ryu_dashboards` type. Core provides the impl:
 //!
 //! - in-process (`InProcDashboardFeed`) — wraps the in-process engine;
-//! - out-of-process (`dashboards_client::DashboardsClient`) — proxies to the
-//!   `ryu-dashboards` sidecar over loopback (+ its SSE stream for change events).
+//! - out-of-process (`dashboard_capabilities::CapabilityDashboardFeed`) — calls the
+//!   `dashboards.*` capabilities of whichever enabled app provides them (+ the
+//!   `dashboards.changes` SSE stream for change events).
 //!
 //! The device *auth* (per-device Bearer verification against the registry) stays
 //! Core-side; only the render + data cross this seam.

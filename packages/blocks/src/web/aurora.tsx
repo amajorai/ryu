@@ -1,9 +1,10 @@
 "use client";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 
-import { Color, Mesh, Program, Renderer, Triangle } from "ogl";
+import { Color, type ColorTuple, Mesh, Program, Renderer, Triangle } from "ogl";
 import { useEffect, useMemo, useRef } from "react";
 
-import "./aurora.css";
+import styles from "./aurora.module.css";
 
 const MAX_COLOR_STOPS = 8;
 
@@ -156,12 +157,12 @@ export const FOOTER_AURORA_COLOR_STOPS: AuroraColorStop[] = [
 
 function toRgb(hex: string) {
 	const c = new Color(hex);
-	return [c.r, c.g, c.b] as [number, number, number];
+	return [c.r, c.g, c.b] satisfies ColorTuple;
 }
 
 function normalizeColorStops(stops: AuroraColorStopInput[]): AuroraColorStop[] {
 	const normalized = stops.map((stop, index) => {
-		if (typeof stop === "string") {
+		if (isNativeText(stop)) {
 			const position = stops.length === 1 ? 0 : index / (stops.length - 1);
 			return { color: stop, position };
 		}
@@ -198,10 +199,6 @@ export default function Aurora({
 	time,
 }: AuroraProps) {
 	const ramp = useMemo(() => normalizeColorStops(colorStops), [colorStops]);
-	const _rampKey = useMemo(
-		() => ramp.map((stop) => `${stop.color}:${stop.position}`).join("|"),
-		[ramp]
-	);
 
 	const propsRef = useRef({
 		amplitude,
@@ -221,14 +218,43 @@ export default function Aurora({
 			return;
 		}
 
-		const packed = packColorStops(ramp);
+		const enableCssFallback = () => {
+			ctn.classList.add(styles.fallback);
+			const syncAnimationState = () => {
+				ctn.style.setProperty(
+					"--aurora-fallback-play-state",
+					document.hidden ? "paused" : "running"
+				);
+			};
 
-		const renderer = new Renderer({
-			alpha: true,
-			premultipliedAlpha: true,
-			antialias: true,
-		});
+			document.addEventListener("visibilitychange", syncAnimationState);
+			syncAnimationState();
+
+			return () => {
+				document.removeEventListener("visibilitychange", syncAnimationState);
+				ctn.style.removeProperty("--aurora-fallback-play-state");
+				ctn.classList.remove(styles.fallback);
+			};
+		};
+
+		let renderer: Renderer;
+		try {
+			renderer = new Renderer({
+				alpha: true,
+				premultipliedAlpha: true,
+				antialias: true,
+			});
+		} catch {
+			return enableCssFallback();
+		}
+
 		const gl = renderer.gl;
+		if (!(gl && String(gl.getParameter(gl.VERSION)).includes("WebGL 2"))) {
+			gl?.getExtension("WEBGL_lose_context")?.loseContext();
+			return enableCssFallback();
+		}
+
+		const packed = packColorStops(ramp);
 		gl.clearColor(0, 0, 0, 0);
 		gl.enable(gl.BLEND);
 		gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -277,10 +303,19 @@ export default function Aurora({
 
 		const mesh = new Mesh(gl, { geometry, program });
 		ctn.appendChild(gl.canvas);
+		let fallbackCleanup: (() => void) | undefined;
+		const handleContextLost = (event: Event) => {
+			event.preventDefault();
+			fallbackCleanup ??= enableCssFallback();
+		};
+		gl.canvas.addEventListener("webglcontextlost", handleContextLost);
 
 		let animateId = 0;
 		const update = (t: number) => {
-			animateId = requestAnimationFrame(update);
+			if (gl.isContextLost()) {
+				fallbackCleanup ??= enableCssFallback();
+				return;
+			}
 			if (!program) {
 				return;
 			}
@@ -297,6 +332,7 @@ export default function Aurora({
 			program.uniforms.uColorCount.value = livePacked.count;
 
 			renderer.render({ scene: mesh });
+			animateId = requestAnimationFrame(update);
 		};
 		animateId = requestAnimationFrame(update);
 
@@ -304,6 +340,8 @@ export default function Aurora({
 
 		return () => {
 			cancelAnimationFrame(animateId);
+			gl.canvas.removeEventListener("webglcontextlost", handleContextLost);
+			fallbackCleanup?.();
 			window.removeEventListener("resize", resize);
 			resizeObserver.disconnect();
 			if (ctn && gl.canvas.parentNode === ctn) {
@@ -313,5 +351,5 @@ export default function Aurora({
 		};
 	}, [amplitude, blend, ramp, fan]);
 
-	return <div className="aurora-container" ref={ctnDom} />;
+	return <div className={styles.container} data-testid="aurora" ref={ctnDom} />;
 }

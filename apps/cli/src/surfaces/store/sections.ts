@@ -43,27 +43,29 @@ export const STORE_SECTIONS: SectionMeta[] = [
 // deep links and the standalone paths Integrate points at this surface
 // (/models, /skills, /engines, /finetune). `plugins` -> the real plugin surface;
 // `sidecars`/`apps` -> the sidecar catalog.
-const SECTION_BY_SEGMENT: Record<string, StoreSection> = {
-	store: "plugins",
-	plugins: "plugins",
-	sidecars: "apps",
-	apps: "apps",
-	models: "models",
-	skills: "skills",
-	mcp: "mcp",
-	tools: "mcp",
-	agents: "agents",
-	engines: "engines",
-	finetune: "finetune",
-	"fine-tune": "finetune",
-};
+const SECTION_BY_SEGMENT = new Map<string, StoreSection>(
+	Object.entries({
+		store: "plugins",
+		plugins: "plugins",
+		sidecars: "apps",
+		apps: "apps",
+		models: "models",
+		skills: "skills",
+		mcp: "mcp",
+		tools: "mcp",
+		agents: "agents",
+		engines: "engines",
+		finetune: "finetune",
+		"fine-tune": "finetune",
+	} satisfies Record<string, StoreSection>)
+);
 
 /** Decide the initial section for a tab path (the deepest recognized segment wins,
  * so /store/models lands on Models and /store defaults to Plugins). */
 export function sectionFromPath(path: string): StoreSection {
 	const segments = path.split("/").filter(Boolean);
 	for (let i = segments.length - 1; i >= 0; i--) {
-		const match = SECTION_BY_SEGMENT[segments[i]];
+		const match = SECTION_BY_SEGMENT.get(segments[i]);
 		if (match) {
 			return match;
 		}

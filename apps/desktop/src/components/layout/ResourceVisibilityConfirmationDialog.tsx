@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -23,9 +24,10 @@ export function ResourceVisibilityConfirmationDialog({
 	onOpenChange: (open: boolean) => void;
 	request: VisibilityChangeRequest | null;
 }) {
+	const tl = useLiteralMessages();
 	const sharing = request?.to === "team";
-	const resourceLabel = request?.resourceType === "space" ? "Space" : "chat";
-	const resourceName = request?.name ?? "this resource";
+	const resourceKind = request?.resourceType === "space" ? "space" : "chat";
+	const resourceName = request?.name ?? tl("this resource");
 	return (
 		<AlertDialog
 			onOpenChange={(open) => {
@@ -42,8 +44,14 @@ export function ResourceVisibilityConfirmationDialog({
 					</AlertDialogTitle>
 					<AlertDialogDescription>
 						{sharing
-							? `"${resourceName}" will become visible to everyone in your team. Team members will be able to find and use this ${resourceLabel}.`
-							: `"${resourceName}" will no longer be accessible to the team. It will remain available to you, but only organization admins can make a shared ${resourceLabel} private.`}
+							? tl(
+									'"{resourceName}" will become visible to everyone in your team. Team members will be able to find and use this {resourceKind, select, space {Space} other {chat}}.',
+									{ resourceKind, resourceName }
+								)
+							: tl(
+									'"{resourceName}" will no longer be accessible to the team. It will remain available to you, but only organization admins can make a shared {resourceKind, select, space {Space} other {chat}} private.',
+									{ resourceKind, resourceName }
+								)}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>

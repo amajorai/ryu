@@ -1,3 +1,5 @@
+import { updateCheckResponseSchema } from "@ryuhq/core-client/updates.ts";
+import { z } from "zod";
 // apps/desktop/src/lib/api/update.ts
 //
 // Typed client for Core's unified update service (`/api/version`,
@@ -115,7 +117,12 @@ export function getVersionInfo(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<VersionInfo> {
-	return request<VersionInfo>(target, "/api/version", { signal });
+	return request<VersionInfo>(
+		target,
+		"/api/version",
+		{ signal },
+		versionInfoResponseSchema
+	);
 }
 
 export interface CheckForUpdateOptions {
@@ -160,7 +167,8 @@ export async function checkForUpdate(
 		return await request<UpdateCheck>(
 			target,
 			`/api/update/check?${params.toString()}`,
-			{ signal: options?.signal }
+			{ signal: options?.signal },
+			updateCheckResponseSchema
 		);
 	} catch {
 		// Deliberately leaves every updates-window field undefined. A transport
@@ -205,10 +213,15 @@ export function applyNodeUpdate(
 	asset: ReleaseAsset
 ): Promise<ApplyUpdateResult> {
 	// `request` serializes the body itself — pass the asset, not a JSON string.
-	return request<ApplyUpdateResult>(target, "/api/update/apply", {
-		method: "POST",
-		body: asset,
-	});
+	return request<ApplyUpdateResult>(
+		target,
+		"/api/update/apply",
+		{
+			method: "POST",
+			body: asset,
+		},
+		applyUpdateResultResponseSchema
+	);
 }
 
 // --- Deferred install ("tonight" instead of "now") -------------------------
@@ -239,24 +252,39 @@ export function scheduleNodeUpdate(
 	asset: ReleaseAsset,
 	version: string
 ): Promise<PendingUpdate> {
-	return request<PendingUpdate>(target, "/api/update/schedule", {
-		method: "POST",
-		body: { asset, version },
-	});
+	return request<PendingUpdate>(
+		target,
+		"/api/update/schedule",
+		{
+			method: "POST",
+			body: { asset, version },
+		},
+		pendingUpdateResponseSchema
+	);
 }
 
 /** The node's pending deferred update, if any, plus the node's own zone. */
 export function getNodeUpdateSchedule(
 	target: ApiTarget
 ): Promise<{ pending: PendingUpdate | null; timeZone: string }> {
-	return request(target, "/api/update/schedule");
+	return request(
+		target,
+		"/api/update/schedule",
+		{},
+		getNodeUpdateScheduleResponseSchema
+	);
 }
 
 /** Cancel a deferred update. Idempotent. */
 export function cancelNodeUpdateSchedule(
 	target: ApiTarget
 ): Promise<{ ok: boolean }> {
-	return request(target, "/api/update/schedule", { method: "DELETE" });
+	return request(
+		target,
+		"/api/update/schedule",
+		{ method: "DELETE" },
+		cancelNodeUpdateScheduleResponseSchema
+	);
 }
 
 // --- Auto-update toggle (shared cross-surface via Core preferences) ---------
@@ -273,7 +301,9 @@ export async function getAutoUpdateEnabled(
 		return true;
 	}
 	try {
-		const parsed = JSON.parse(raw) as { enabled?: unknown };
+		const parsed = z
+			.object({ enabled: z.boolean().optional().catch(undefined) })
+			.parse(JSON.parse(raw));
 		return parsed.enabled !== false;
 	} catch {
 		return true;
@@ -290,4 +320,80 @@ export function setAutoUpdateEnabled(
 		AUTO_UPDATE_PREF_KEY,
 		JSON.stringify({ enabled })
 	);
+}
+
+const versionInfoResponseSchema: z.ZodType<VersionInfo> =
+	retainValidatedResponse(
+		z
+			.object({
+				components: z.array(
+					z.object({ name: z.string(), version: z.string() }).passthrough()
+				),
+				platform: z.string(),
+				ryu_version: z.string(),
+			})
+			.passthrough()
+	);
+const applyUpdateResultResponseSchema: z.ZodType<ApplyUpdateResult> =
+	retainValidatedResponse(
+		z
+			.object({
+				applied: z.boolean(),
+				message: z.string(),
+				restart_required: z.boolean(),
+				staged_path: z.string(),
+			})
+			.passthrough()
+	);
+const pendingUpdateResponseSchema: z.ZodType<PendingUpdate> =
+	retainValidatedResponse(
+		z
+			.object({
+				asset: z
+					.object({
+						kind: z.string(),
+						name: z.string(),
+						size: z.number(),
+						url: z.string(),
+					})
+					.passthrough(),
+				scheduled_for: z.string(),
+				time_zone: z.string(),
+				version: z.string(),
+			})
+			.passthrough()
+	);
+const getNodeUpdateScheduleResponseSchema: z.ZodType<{
+	pending: PendingUpdate | null;
+	timeZone: string;
+}> = retainValidatedResponse(
+	z
+		.object({
+			pending: z.union([
+				z
+					.object({
+						asset: z
+							.object({
+								kind: z.string(),
+								name: z.string(),
+								size: z.number(),
+								url: z.string(),
+							})
+							.passthrough(),
+						scheduled_for: z.string(),
+						time_zone: z.string(),
+						version: z.string(),
+					})
+					.passthrough(),
+				z.null(),
+			]),
+			timeZone: z.string(),
+		})
+		.passthrough()
+);
+const cancelNodeUpdateScheduleResponseSchema: z.ZodType<{ ok: boolean }> =
+	retainValidatedResponse(z.object({ ok: z.boolean() }).passthrough());
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

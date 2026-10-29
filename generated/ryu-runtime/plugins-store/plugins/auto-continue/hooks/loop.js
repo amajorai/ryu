@@ -73,7 +73,7 @@ const lastUser = ctx.transcript
 	.reverse()
 	.find((m) => m.role === "user");
 const typed = ((lastUser && lastUser.content) || "").trim();
-if (typed.indexOf("/auto-continue") === 0) {
+if (/^\/auto-continue(?:\s|$)/u.test(typed)) {
 	const arg = typed.slice("/auto-continue".length).trim().toLowerCase();
 	if (arg === "off" || arg === "stop") {
 		await host.storage.delete(convId);
@@ -89,6 +89,10 @@ if (typed.indexOf("/auto-continue") === 0) {
 			text: "Auto-continue is on for this chat. After each turn a local agent will scan for genuinely unfinished work and keep going until it is done. Stop it anytime with '/auto-continue off'.",
 		};
 	}
+	return {
+		kind: "note",
+		text: "Use '/auto-continue on' to arm Auto Continue or '/auto-continue off' to stop it.",
+	};
 }
 
 // Belt and braces with the manifest's `match.stateful` pre-gate: that gate exists to
@@ -100,7 +104,7 @@ if (raw !== null && raw !== undefined && String(raw).trim() !== "") {
 	try {
 		const parsed = JSON.parse(String(raw));
 		armed = parsed !== null && parsed.status === "active";
-	} catch (_e) {
+	} catch  {
 		// A half-written / garbled record fails quiet in the STOP direction: it must
 		// never spend a single scanner call on a value the plugin cannot trust.
 		armed = false;

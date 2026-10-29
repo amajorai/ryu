@@ -4,7 +4,6 @@
 // fenced code blocks, inline code, bold, italics, and line breaks. Anything else
 // renders as plain text, which is safe (no raw HTML is ever injected).
 
-// biome-ignore lint/correctness/noUnresolvedImports: Fragment is a valid React export; biome's resolver misreports it
 import { Fragment, type ReactNode } from "react";
 
 const BOLD = /\*\*([^*]+)\*\*/g;
@@ -31,7 +30,7 @@ function tokenizeInline(line: string): Segment[] {
 		if (match.index > cursor) {
 			segments.push(...tokenizeEmphasis(line.slice(cursor, match.index)));
 		}
-		segments.push({ kind: "code", value: match[1] });
+		segments.push({ kind: "code", value: match[1] ?? match[0] });
 		cursor = match.index + match[0].length;
 	}
 	if (cursor < line.length) {
@@ -50,7 +49,7 @@ function tokenizeEmphasis(text: string): Segment[] {
 		if (match.index > cursor) {
 			segments.push(...tokenizeItalic(text.slice(cursor, match.index)));
 		}
-		segments.push({ kind: "bold", value: match[1] });
+		segments.push({ kind: "bold", value: match[1] ?? match[0] });
 		cursor = match.index + match[0].length;
 	}
 	if (cursor < text.length) {
@@ -72,7 +71,7 @@ function tokenizeItalic(text: string): Segment[] {
 		if (match.index > cursor) {
 			segments.push({ kind: "text", value: text.slice(cursor, match.index) });
 		}
-		segments.push({ kind: "italic", value: match[1] });
+		segments.push({ kind: "italic", value: match[1] ?? match[0] });
 		cursor = match.index + match[0].length;
 	}
 	if (cursor < text.length) {
@@ -85,7 +84,7 @@ function renderSegment(segment: Segment, key: number): ReactNode {
 	if (segment.kind === "code") {
 		return (
 			<code
-				className="rounded bg-muted px-1 py-0.5 font-mono text-[0.8em]"
+				className="rounded bg-muted px-1 py-0.5 font-mono text-xs"
 				key={key}
 			>
 				{segment.value}
@@ -132,7 +131,6 @@ function renderBlocks(text: string): ReactNode[] {
 				key={`p-${blockKey++}`}
 			>
 				{text_.split("\n").map((row, rowIndex) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: rows are positional
 					<Fragment key={rowIndex}>
 						{rowIndex > 0 ? <br /> : null}
 						{renderInline(row)}
@@ -148,7 +146,7 @@ function renderBlocks(text: string): ReactNode[] {
 			if (inFence) {
 				blocks.push(
 					<pre
-						className="overflow-x-auto rounded-lg bg-black/40 p-2 font-mono text-[0.78rem] text-foreground"
+						className="text-(length:--text-image-viewer-caption) overflow-x-auto rounded-lg bg-black/40 p-2 font-mono text-foreground"
 						key={`code-${blockKey++}`}
 					>
 						<code>{fenceLines.join("\n")}</code>
@@ -176,7 +174,7 @@ function renderBlocks(text: string): ReactNode[] {
 	if (inFence && fenceLines.length > 0) {
 		blocks.push(
 			<pre
-				className="overflow-x-auto rounded-lg bg-black/40 p-2 font-mono text-[0.78rem] text-foreground"
+				className="text-(length:--text-image-viewer-caption) overflow-x-auto rounded-lg bg-black/40 p-2 font-mono text-foreground"
 				key={`code-${blockKey++}`}
 			>
 				<code>{fenceLines.join("\n")}</code>

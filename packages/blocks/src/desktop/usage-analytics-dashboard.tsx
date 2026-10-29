@@ -1,33 +1,16 @@
 "use client";
 
-import { Calendar03Icon, FilterIcon } from "@hugeicons/core-free-icons";
+import { Calendar03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Alert, AlertDescription } from "@ryu/ui/components/alert";
-import { Badge } from "@ryu/ui/components/badge";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
-import { Calendar } from "@ryu/ui/components/calendar";
-import {
-	Card,
-	CardAction,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card";
+import { Calendar, useDisplayToday } from "@ryu/ui/components/calendar";
 import {
 	type ChartConfig,
 	ChartContainer,
 	ChartTooltip,
 	ChartTooltipContent,
 } from "@ryu/ui/components/chart";
-import {
-	Empty,
-	EmptyContent,
-	EmptyDescription,
-	EmptyHeader,
-	EmptyMedia,
-	EmptyTitle,
-} from "@ryu/ui/components/empty";
 import {
 	Popover,
 	PopoverContent,
@@ -42,37 +25,69 @@ import {
 	SelectTrigger,
 } from "@ryu/ui/components/select";
 import { Spinner } from "@ryu/ui/components/spinner";
+import { Switch } from "@ryu/ui/components/switch";
 import { ToggleGroup, ToggleGroupItem } from "@ryu/ui/components/toggle-group";
-import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { useId, useState } from "react";
+import { formatCount, formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
+import { formatDate } from "@ryu/ui/lib/timezone.ts";
+import {
+	type ComponentProps,
+	type CSSProperties,
+	type ReactNode,
+	useId,
+	useMemo,
+	useState,
+} from "react";
 import {
 	Area,
-	AreaChart,
+	Bar,
 	CartesianGrid,
-	// biome-ignore lint/suspicious/noDeprecatedImports: Recharts Pie still uses Cell for per-slice colors.
-	Cell,
+	ComposedChart,
+	Line,
 	Pie,
 	PieChart,
 	XAxis,
 	YAxis,
 } from "recharts";
-import { formatMicroUsd } from "./credits.tsx";
 import {
-	compactUsageTrendPoints,
+	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "./settings-items.tsx";
+import {
+	cacheReuseRatio,
 	GRANULARITY_LABELS,
+	isLabelledPurposeKey,
+	PLUGIN_PURPOSE_LABEL,
+	pluginIdForPurpose,
 	type UsageAnalyticsData,
 	type UsageBreakdownRow,
 	type UsageDateRange,
 	type UsageGranularity,
 	type UsageScope,
-	type UsageTrendPoint,
+	usageCacheSeries,
+	usageProviderLabel,
 } from "./usage-analytics.ts";
+import styles from "./usage-analytics-dashboard.module.css";
+import { formatForecastChange, type UsageForecast } from "./usage-forecast.ts";
+import {
+	usagePresetRange,
+	usageRangeDays,
+	usageRangeFromDays,
+} from "./usage-range-days.ts";
+import {
+	buildUsageTrendChart,
+	type UsageTrendChartModel,
+	type UsageTrendForecastGap,
+	type UsageTrendMetric,
+	type UsageTrendView,
+} from "./usage-trend-forecast.ts";
 
-const SCOPE_LABELS: Record<UsageScope, string> = {
+const SCOPE_LABELS = {
 	node: "This node",
 	organization: "Organization",
 	you: "You",
-};
+} satisfies Record<UsageScope, string>;
 
 const SCOPE_VALUES: UsageScope[] = ["you", "organization", "node"];
 const GRANULARITY_VALUES: UsageGranularity[] = [
@@ -92,8 +107,6 @@ const CHART_COLORS = [
 	"oklch(0.65 0.16 200)",
 ] as const;
 
-const ANALYTICS_CARD_CLASS = "border border-border/60 bg-card/80 shadow-sm";
-
 const KPI_COLORS = {
 	"active days": "oklch(0.68 0.16 164)",
 	"active members": "oklch(0.68 0.16 164)",
@@ -105,37 +118,76 @@ const KPI_COLORS = {
 	tokens: "oklch(0.62 0.19 306)",
 } as const;
 
-type TrendMetric = "requests" | "tokens" | "errors" | "spend";
+type TrendMetric = UsageTrendMetric;
 
-const TREND_METRICS: readonly {
+interface UsageTrendMetricDefinition {
 	color: string;
 	key: TrendMetric;
 	label: string;
-}[] = [
+}
+const TREND_METRICS = [
 	{ color: KPI_COLORS.requests, key: "requests", label: "Requests" },
 	{ color: KPI_COLORS.tokens, key: "tokens", label: "Tokens" },
 	{ color: KPI_COLORS.errors, key: "errors", label: "Errors" },
 	{ color: KPI_COLORS["credit spend"], key: "spend", label: "Credit spend" },
-];
+] as const satisfies readonly UsageTrendMetricDefinition[];
 
-function startOfDay(date: Date): Date {
-	return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+interface UsageMarkerStyle extends CSSProperties {
+	"--usage-marker-background": string | undefined;
+	"--usage-marker-foreground": string | undefined;
+	"--usage-marker-opacity": number | undefined;
+	"--usage-marker-width": string | undefined;
+}
+interface UsageMarkerProps
+	extends Omit<ComponentProps<"span">, "style" | "color" | "ref"> {
+	backgroundColor?: string;
+	color?: string;
+	element?: "span" | "div";
+	opacity?: number;
+	width?: string;
+}
+function UsageMarker({
+	backgroundColor,
+	color,
+	element: Element = "span",
+	opacity,
+	width,
+	className,
+	...props
+}: UsageMarkerProps) {
+	const markerStyle: UsageMarkerStyle = {
+		"--usage-marker-background": backgroundColor,
+		"--usage-marker-foreground": color,
+		"--usage-marker-width": width,
+		"--usage-marker-opacity": opacity,
+	};
+	return (
+		<Element
+			{...props}
+			className={[
+				className,
+				backgroundColor !== undefined && styles.background,
+				color !== undefined && styles.foreground,
+				opacity !== undefined && styles.intensity,
+				width !== undefined && styles.width,
+			]
+				.filter(Boolean)
+				.join(" ")}
+			style={markerStyle}
+		/>
+	);
 }
 
-function addDays(date: Date, days: number): Date {
-	const next = new Date(date);
-	next.setDate(next.getDate() + days);
-	return next;
-}
+const RANGE_LABEL_FORMAT = {
+	day: "numeric",
+	month: "short",
+	year: "numeric",
+} as const satisfies Intl.DateTimeFormatOptions;
 
+/** The range's first and last day, named in the display zone and language. */
 function dateRangeLabel(range: UsageDateRange): string {
 	const lastDay = new Date(range.to.getTime() - 1);
-	const formatter = new Intl.DateTimeFormat(undefined, {
-		day: "numeric",
-		month: "short",
-		year: "numeric",
-	});
-	return `${formatter.format(range.from)} – ${formatter.format(lastDay)}`;
+	return `${formatDate(range.from, RANGE_LABEL_FORMAT)} – ${formatDate(lastDay, RANGE_LABEL_FORMAT)}`;
 }
 
 function formatCompact(value: number): string {
@@ -148,10 +200,6 @@ function formatMilliseconds(value: number | null): string {
 
 function formatSpend(value: number | null): string {
 	return value === null ? "Not billed" : formatMicroUsd(value);
-}
-
-function trendPointValue(point: UsageTrendPoint, metric: TrendMetric): number {
-	return metric === "spend" ? (point.spend ?? 0) : point[metric];
 }
 
 function trendMetricTotal(
@@ -171,7 +219,10 @@ function trendMetricTotal(
 }
 
 function formatTrendValue(metric: TrendMetric, value: number): string {
-	return metric === "spend" ? formatMicroUsd(value) : formatCompact(value);
+	// Forecasts are fractional; counts read as whole requests, tokens, errors.
+	return metric === "spend"
+		? formatMicroUsd(value)
+		: formatCompact(Math.round(value));
 }
 
 function formatBreakdownValue(entry: UsageBreakdownRow): string {
@@ -192,30 +243,25 @@ function KpiCard({
 	label: string;
 	value: string;
 }) {
+	// A flat tile: the KPI row shares one settings card instead of a card each.
 	return (
-		<Card
-			className={`${ANALYTICS_CARD_CLASS} min-h-24`}
+		<div
+			className="flex min-w-0 flex-col gap-1"
 			data-testid={`usage-kpi-${label.toLowerCase().replaceAll(" ", "-")}`}
 		>
-			<CardHeader className="gap-2">
-				<CardDescription className="flex items-center gap-2">
-					<span
-						aria-hidden="true"
-						className="size-2 shrink-0 rounded-full"
-						style={{ backgroundColor: color }}
-					/>
-					{label}
-				</CardDescription>
-				<CardTitle className="font-medium text-2xl tabular-nums">
-					{value}
-				</CardTitle>
-			</CardHeader>
+			<span className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs">
+				<UsageMarker
+					aria-hidden="true"
+					backgroundColor={color}
+					className="size-2 shrink-0 rounded-full"
+				/>
+				<span className="truncate">{label}</span>
+			</span>
+			<span className="truncate font-medium text-xl tabular-nums">{value}</span>
 			{detail ? (
-				<CardContent className="pt-0">
-					<p className="text-muted-foreground text-xs">{detail}</p>
-				</CardContent>
+				<span className="text-muted-foreground text-xs">{detail}</span>
 			) : null}
-		</Card>
+		</div>
 	);
 }
 
@@ -232,13 +278,13 @@ function MetricTile({
 }) {
 	return (
 		<div
-			className={`flex min-w-0 flex-col gap-1 rounded-2xl border border-border/50 bg-muted/35 px-3 py-2.5 ${selected ? "bg-primary/5 ring-1 ring-primary/25" : ""}`}
+			className={`flex min-w-0 flex-col gap-1 transition-opacity ${selected ? "" : "opacity-60"}`}
 		>
 			<div className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs">
-				<span
+				<UsageMarker
 					aria-hidden="true"
+					backgroundColor={color}
 					className="size-2 shrink-0 rounded-full"
-					style={{ backgroundColor: color }}
 				/>
 				<span className="truncate">{label}</span>
 			</div>
@@ -247,28 +293,205 @@ function MetricTile({
 	);
 }
 
+const FORECAST_COLOR = "var(--muted-foreground)";
+
+const FORECAST_GAP_MESSAGES = {
+	disabled: "",
+	"insufficient-data": "Not enough recent activity to project a trend yet.",
+	"range-ended": "Forecasts appear when the selected range includes now.",
+	"too-detailed": "Choose a coarser resolution to see a forecast.",
+} satisfies Record<UsageTrendForecastGap, string>;
+
+function forecastTone(forecast: UsageForecast): string {
+	if (forecast.direction === "up") {
+		return "text-status-warning";
+	}
+	if (forecast.direction === "down") {
+		return "text-status-success";
+	}
+	return "text-muted-foreground";
+}
+
+function TrendTooltipRow({
+	color,
+	label,
+	value,
+}: {
+	color?: string;
+	label: string;
+	value: string;
+}) {
+	return (
+		<div className="flex w-full items-center justify-between gap-3">
+			<span className="flex items-center gap-1.5 text-muted-foreground">
+				<UsageMarker
+					aria-hidden="true"
+					backgroundColor={color}
+					className="size-2 shrink-0 rounded-[2px]"
+				/>
+				{label}
+			</span>
+			<span className="font-medium font-mono text-foreground tabular-nums">
+				{value}
+			</span>
+		</div>
+	);
+}
+
+function ForecastSummary({
+	horizonLabel,
+	metric,
+	model,
+}: {
+	horizonLabel: string;
+	metric: TrendMetric;
+	model: UsageTrendChartModel;
+}) {
+	if (model.forecastGap === "disabled") {
+		return null;
+	}
+	if (model.forecastGap !== null) {
+		return (
+			<p
+				className="text-muted-foreground text-xs"
+				data-testid="usage-trend-forecast-gap"
+			>
+				{FORECAST_GAP_MESSAGES[model.forecastGap]}
+			</p>
+		);
+	}
+	if (model.view === "total") {
+		const forecast = model.series[0]?.forecast;
+		if (!forecast) {
+			return null;
+		}
+		return (
+			<div
+				className="flex flex-wrap items-center justify-between gap-3 border-border/50 border-t pt-3"
+				data-testid="usage-trend-forecast"
+			>
+				<div className="flex min-w-0 flex-col gap-0.5">
+					<span className="text-muted-foreground text-xs">
+						Forecast · {horizonLabel}
+					</span>
+					<span className="font-medium text-sm tabular-nums">
+						{formatTrendValue(metric, forecast.total.value)}
+					</span>
+				</div>
+				<div className="flex min-w-0 flex-col gap-0.5 text-right">
+					<span className="text-muted-foreground text-xs">80% range</span>
+					<span className="text-sm tabular-nums">
+						{formatTrendValue(metric, forecast.total.lower)} –{" "}
+						{formatTrendValue(metric, forecast.total.upper)}
+					</span>
+				</div>
+				<div className="flex min-w-0 flex-col gap-0.5 text-right">
+					<span className="text-muted-foreground text-xs">Trend</span>
+					<span className={`text-sm tabular-nums ${forecastTone(forecast)}`}>
+						{formatForecastChange(forecast)}
+					</span>
+				</div>
+			</div>
+		);
+	}
+	return (
+		<div className="overflow-x-auto" data-testid="usage-trend-forecast">
+			<table className="w-full text-left text-xs">
+				<caption className="sr-only">
+					Forecast by provider for the {horizonLabel}
+				</caption>
+				<thead className="border-border/50 border-b text-muted-foreground">
+					<tr>
+						<th className="py-2 font-normal">Provider</th>
+						<th className="px-3 text-right font-normal">In range</th>
+						<th className="px-3 text-right font-normal">
+							Forecast · {horizonLabel}
+						</th>
+						<th className="py-2 text-right font-normal">Trend</th>
+					</tr>
+				</thead>
+				<tbody>
+					{model.series.map((series, index) => (
+						<tr
+							className="border-border/30 border-b last:border-0"
+							key={series.key}
+						>
+							<td className="py-2">
+								<span className="flex min-w-0 items-center gap-2">
+									<UsageMarker
+										aria-hidden="true"
+										backgroundColor={CHART_COLORS[index % CHART_COLORS.length]}
+										className="size-2 shrink-0 rounded-full"
+									/>
+									<span className="truncate">{series.label}</span>
+								</span>
+							</td>
+							<td className="px-3 text-right tabular-nums">
+								{series.actualTotal === null
+									? "—"
+									: formatTrendValue(metric, series.actualTotal)}
+							</td>
+							<td className="px-3 text-right tabular-nums">
+								{series.forecast ? (
+									<span
+										title={`80% range ${formatTrendValue(metric, series.forecast.total.lower)} – ${formatTrendValue(metric, series.forecast.total.upper)}`}
+									>
+										{formatTrendValue(metric, series.forecast.total.value)}
+									</span>
+								) : (
+									<span className="text-muted-foreground">Too little data</span>
+								)}
+							</td>
+							<td
+								className={`py-2 text-right tabular-nums ${series.forecast ? forecastTone(series.forecast) : "text-muted-foreground"}`}
+							>
+								{series.forecast ? formatForecastChange(series.forecast) : "—"}
+							</td>
+						</tr>
+					))}
+				</tbody>
+			</table>
+		</div>
+	);
+}
+
 function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 	const [selectedMetric, setSelectedMetric] = useState<TrendMetric>("requests");
+	const [view, setView] = useState<UsageTrendView>("total");
+	const [showForecast, setShowForecast] = useState(true);
 	const gradientId = `usage-trend-fill-${useId().replace(/:/g, "")}`;
-	const chartData = compactUsageTrendPoints(
-		data.buckets.map((bucket) => ({
-			errors: bucket.errors,
-			label: bucket.label,
-			requests: bucket.requests,
-			spend: bucket.spendMicroUsd,
-			tokens: bucket.inputTokens + bucket.outputTokens,
-		}))
-	);
 	const metricDefinition =
 		TREND_METRICS.find(({ key }) => key === selectedMetric) ?? TREND_METRICS[0];
+	const model = useMemo(
+		() =>
+			buildUsageTrendChart({
+				data,
+				forecast: showForecast,
+				metric: selectedMetric,
+				metricLabel: metricDefinition.label,
+				view,
+			}),
+		[data, metricDefinition.label, selectedMetric, showForecast, view]
+	);
+	const seriesColor = (index: number) =>
+		model.view === "total"
+			? metricDefinition.color
+			: (CHART_COLORS[index % CHART_COLORS.length] ?? metricDefinition.color);
 	const config: ChartConfig = {
-		[selectedMetric]: {
-			color: metricDefinition.color,
-			label: metricDefinition.label,
-		},
+		[model.bandKey]: { color: FORECAST_COLOR, label: "80% range" },
 	};
-	const hasSelectedData = chartData.some(
-		(point) => trendPointValue(point, selectedMetric) > 0
+	model.series.forEach((series, index) => {
+		config[series.actualKey] = {
+			color: seriesColor(index),
+			label: series.label,
+		};
+		config[series.forecastKey] = {
+			color: seriesColor(index),
+			label: model.view === "total" ? "Forecast" : `${series.label} forecast`,
+		};
+	});
+	const hasSelectedData = model.series.some(
+		(series) => (series.actualTotal ?? 0) > 0
 	);
 	const selectedTotal = trendMetricTotal(data, selectedMetric);
 	const metricTiles = [
@@ -297,152 +520,254 @@ function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 			value: formatSpend(data.totals.spendMicroUsd),
 		},
 	];
+	const forecastSwitchId = useId();
 
 	return (
-		<Card
-			className={`${ANALYTICS_CARD_CLASS} min-w-0`}
-			data-testid="usage-analytics-chart-trend"
-		>
-			<CardHeader className="gap-3">
-				<div className="flex items-start justify-between gap-4">
-					<div className="min-w-0">
-						<CardTitle>Activity over time</CardTitle>
-						<CardDescription>
-							{metricDefinition.label} at{" "}
-							{GRANULARITY_LABELS[data.granularity].toLowerCase()} resolution.
-						</CardDescription>
-					</div>
-					<CardAction className="ml-auto shrink-0 text-right">
-						<div
-							className="font-medium text-xl tabular-nums"
+		<div className="min-w-0" data-testid="usage-analytics-chart-trend">
+			<SettingsSection
+				caption={`${metricDefinition.label} at ${GRANULARITY_LABELS[
+					data.granularity
+				].toLowerCase()} resolution${
+					showForecast
+						? `, with a trend forecast for the ${model.horizonLabel}.`
+						: "."
+				}`}
+				headerAction={
+					<span className="flex items-baseline gap-1.5 text-xs">
+						<span
+							className="font-medium text-foreground tabular-nums"
 							data-testid="usage-trend-selected"
 						>
 							{selectedTotal === null
 								? "Not billed"
 								: formatTrendValue(selectedMetric, selectedTotal)}
-						</div>
-						<div className="text-muted-foreground text-xs">
+						</span>
+						<span className="text-muted-foreground">
 							{metricDefinition.label.toLowerCase()} in range
-						</div>
-					</CardAction>
-				</div>
-				<div
-					className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-muted/35 p-1.5"
-					data-testid="usage-trend-metric"
-				>
-					<span className="px-2 font-medium text-muted-foreground text-xs">
-						Show
+						</span>
 					</span>
-					<ToggleGroup
-						aria-label="Usage trend metric"
-						className="bg-transparent"
-						multiple={false}
-						onValueChange={(values: string[]) => {
-							const [value] = values;
-							if (TREND_METRICS.some(({ key }) => key === value)) {
-								setSelectedMetric(value as TrendMetric);
-							}
-						}}
-						spacing={0}
-						value={[selectedMetric]}
-						variant="default"
+				}
+				title="Activity over time"
+			>
+				<SettingsCard className="flex flex-col gap-4">
+					<div
+						className="flex flex-wrap items-center gap-2"
+						data-testid="usage-trend-metric"
 					>
-						{TREND_METRICS.map((metric) => (
-							<ToggleGroupItem
-								className="h-8 px-2.5 text-xs"
-								key={metric.key}
-								value={metric.key}
-							>
-								<span
-									aria-hidden="true"
-									className="mr-1.5 size-1.5 rounded-full"
-									style={{ backgroundColor: metric.color }}
-								/>
-								{metric.label}
-							</ToggleGroupItem>
-						))}
-					</ToggleGroup>
-				</div>
-			</CardHeader>
-			<CardContent className="flex flex-col gap-4">
-				{hasSelectedData ? (
-					<ChartContainer className="h-[280px] w-full" config={config}>
-						<AreaChart
-							accessibilityLayer
-							data={chartData}
-							margin={{ left: 4, right: 8, top: 8 }}
+						<ToggleGroup
+							appearance="segmented"
+							aria-label="Usage trend metric"
+							className="h-auto max-w-full flex-wrap"
+							multiple={false}
+							onValueChange={(values: string[]) => {
+								const [value] = values;
+								const metric = TREND_METRICS.find(({ key }) => key === value);
+								if (metric) {
+									setSelectedMetric(metric.key);
+								}
+							}}
+							spacing={0}
+							value={[selectedMetric]}
+							variant="default"
 						>
-							<defs>
-								<linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-									<stop
-										offset="5%"
-										stopColor={`var(--color-${selectedMetric})`}
-										stopOpacity={0.35}
+							{TREND_METRICS.map((metric) => (
+								<ToggleGroupItem
+									density="segmented"
+									key={metric.key}
+									value={metric.key}
+								>
+									<UsageMarker
+										aria-hidden="true"
+										backgroundColor={metric.color}
+										className="mr-1.5 size-1.5 rounded-full"
 									/>
-									<stop
-										offset="95%"
-										stopColor={`var(--color-${selectedMetric})`}
-										stopOpacity={0.02}
-									/>
-								</linearGradient>
-							</defs>
-							<CartesianGrid strokeOpacity={0.35} vertical={false} />
-							<XAxis
-								axisLine={false}
-								dataKey="label"
-								minTickGap={38}
-								tickLine={false}
-								tickMargin={8}
-							/>
-							<YAxis
-								axisLine={false}
-								tickFormatter={(value) =>
-									formatTrendValue(selectedMetric, Number(value))
-								}
-								tickLine={false}
-								width={36}
-							/>
-							<ChartTooltip
-								content={
-									<ChartTooltipContent
-										formatter={(value) =>
-											formatTrendValue(selectedMetric, Number(value))
-										}
-										indicator="line"
-									/>
-								}
-								cursor={{
-									stroke: "var(--border)",
-									strokeDasharray: "4 4",
-								}}
-							/>
-							<Area
-								connectNulls={selectedMetric === "spend"}
-								dataKey={selectedMetric}
-								fill={`url(#${gradientId})`}
-								fillOpacity={0.9}
-								stroke={`var(--color-${selectedMetric})`}
-								strokeWidth={2}
-								type="monotone"
-							/>
-						</AreaChart>
-					</ChartContainer>
-				) : (
-					<div className="flex h-[280px] items-center justify-center text-muted-foreground text-sm">
-						No {metricDefinition.label.toLowerCase()} in this range.
+									{metric.label}
+								</ToggleGroupItem>
+							))}
+						</ToggleGroup>
 					</div>
-				)}
-				<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-					{metricTiles.map(({ key: metricKey, ...tile }) => (
-						<MetricTile
-							key={tile.label}
-							selected={metricKey === selectedMetric}
-							{...tile}
+					<div
+						className="flex flex-wrap items-center justify-between gap-2"
+						data-testid="usage-trend-forecast-controls"
+					>
+						<ToggleGroup
+							appearance="segmented"
+							aria-label="Usage trend grouping"
+							multiple={false}
+							onValueChange={(values: string[]) => {
+								const [value] = values;
+								if (value === "total" || value === "provider") {
+									setView(value);
+								}
+							}}
+							spacing={0}
+							value={[view]}
+							variant="default"
+						>
+							<ToggleGroupItem density="segmented" value="total">
+								Total
+							</ToggleGroupItem>
+							<ToggleGroupItem density="segmented" value="provider">
+								By provider
+							</ToggleGroupItem>
+						</ToggleGroup>
+						<label
+							className="flex items-center gap-2 text-muted-foreground text-xs"
+							htmlFor={forecastSwitchId}
+						>
+							Forecast
+							<Switch
+								checked={showForecast}
+								id={forecastSwitchId}
+								onCheckedChange={setShowForecast}
+							/>
+						</label>
+					</div>
+					{model.providerFallback ? (
+						<p className="text-muted-foreground text-xs">
+							This scope reports totals only, so the chart shows the combined
+							trend.
+						</p>
+					) : null}
+					{hasSelectedData ? (
+						<ChartContainer className="h-[280px] w-full" config={config}>
+							<ComposedChart
+								accessibilityLayer
+								data={model.rows}
+								margin={{ left: 4, right: 8, top: 8 }}
+							>
+								<defs>
+									<linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+										<stop
+											offset="5%"
+											stopColor={metricDefinition.color}
+											stopOpacity={0.35}
+										/>
+										<stop
+											offset="95%"
+											stopColor={metricDefinition.color}
+											stopOpacity={0.02}
+										/>
+									</linearGradient>
+								</defs>
+								<CartesianGrid strokeOpacity={0.35} vertical={false} />
+								<XAxis
+									axisLine={false}
+									dataKey="label"
+									minTickGap={38}
+									tickLine={false}
+									tickMargin={8}
+								/>
+								<YAxis
+									axisLine={false}
+									tickFormatter={(value) =>
+										formatTrendValue(selectedMetric, Number(value))
+									}
+									tickLine={false}
+									width={36}
+								/>
+								<ChartTooltip
+									content={
+										<ChartTooltipContent
+											formatter={(value, name) => {
+												const key = String(name);
+												const formatted = Array.isArray(value)
+													? `${formatTrendValue(selectedMetric, Number(value[0]))} – ${formatTrendValue(selectedMetric, Number(value[1]))}`
+													: formatTrendValue(selectedMetric, Number(value));
+												return (
+													<TrendTooltipRow
+														color={config[key]?.color}
+														label={String(config[key]?.label ?? key)}
+														value={formatted}
+													/>
+												);
+											}}
+											indicator="line"
+										/>
+									}
+									cursor={{
+										stroke: "var(--border)",
+										strokeDasharray: "4 4",
+									}}
+								/>
+								{model.view === "total" && model.forecastGap === null ? (
+									<Area
+										activeDot={false}
+										dataKey={model.bandKey}
+										fill={FORECAST_COLOR}
+										fillOpacity={0.12}
+										isAnimationActive={false}
+										stroke="none"
+										type="monotone"
+									/>
+								) : null}
+								{model.view === "total" ? (
+									<Area
+										connectNulls={selectedMetric === "spend"}
+										dataKey={model.series[0]?.actualKey ?? "actual"}
+										fill={`url(#${gradientId})`}
+										fillOpacity={0.9}
+										stroke={metricDefinition.color}
+										strokeWidth={2}
+										type="monotone"
+									/>
+								) : (
+									model.series.map((series, index) => (
+										<Line
+											connectNulls={selectedMetric === "spend"}
+											dataKey={series.actualKey}
+											dot={false}
+											isAnimationActive={false}
+											key={series.actualKey}
+											stroke={seriesColor(index)}
+											strokeWidth={2}
+											type="monotone"
+										/>
+									))
+								)}
+								{model.forecastGap === null
+									? model.series.map((series, index) =>
+											series.forecast ? (
+												<Line
+													dataKey={series.forecastKey}
+													dot={false}
+													isAnimationActive={false}
+													key={series.forecastKey}
+													stroke={seriesColor(index)}
+													strokeDasharray="5 4"
+													strokeOpacity={0.85}
+													strokeWidth={2}
+													type="monotone"
+												/>
+											) : null
+										)
+									: null}
+							</ComposedChart>
+						</ChartContainer>
+					) : (
+						<div className="flex h-[280px] items-center justify-center text-muted-foreground text-sm">
+							No {metricDefinition.label.toLowerCase()} in this range.
+						</div>
+					)}
+					{hasSelectedData ? (
+						<ForecastSummary
+							horizonLabel={model.horizonLabel}
+							metric={selectedMetric}
+							model={model}
 						/>
-					))}
-				</div>
-			</CardContent>
-		</Card>
+					) : null}
+					<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+						{metricTiles.map(({ key: metricKey, ...tile }) => (
+							<MetricTile
+								key={tile.label}
+								selected={metricKey === selectedMetric}
+								{...tile}
+							/>
+						))}
+					</div>
+				</SettingsCard>
+			</SettingsSection>
+		</div>
 	);
 }
 
@@ -468,6 +793,7 @@ function UsageDonut({
 		...entry,
 		color: CHART_COLORS[index % CHART_COLORS.length],
 		colorKey: `item${index}`,
+		fill: `var(--color-item${index})`,
 		chartValue:
 			entry.requests > 0 ? entry.requests : (entry.spendMicroUsd ?? 0),
 	}));
@@ -484,79 +810,69 @@ function UsageDonut({
 	);
 
 	return (
-		<Card
-			className={ANALYTICS_CARD_CLASS}
-			data-testid={`usage-analytics-${testId}`}
-		>
-			<CardHeader className="gap-2">
-				<CardTitle>{title}</CardTitle>
-				<CardDescription className="max-w-md">{description}</CardDescription>
-			</CardHeader>
-			<CardContent className="flex flex-col gap-4">
-				{chartData.length > 0 ? (
-					<div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-						<div className="relative mx-auto h-[180px] w-[180px] shrink-0">
-							<ChartContainer className="h-full w-full" config={config}>
-								<PieChart accessibilityLayer>
-									<ChartTooltip content={<ChartTooltipContent hideLabel />} />
-									<Pie
-										data={chartData}
-										dataKey="chartValue"
-										innerRadius={54}
-										nameKey="label"
-										outerRadius={78}
-										paddingAngle={3}
-										strokeWidth={0}
-									>
-										{chartData.map((entry) => (
-											<Cell
-												fill={`var(--color-${entry.colorKey})`}
-												key={entry.key}
-											/>
-										))}
-									</Pie>
-								</PieChart>
-							</ChartContainer>
-							<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-								<span className="font-medium text-xl tabular-nums">
-									{total > 0
-										? formatCompact(total)
-										: formatMicroUsd(totalSpend)}
-								</span>
-								<span className="text-[11px] text-muted-foreground">
-									{total > 0 ? "requests" : "credit spend"}
-								</span>
-							</div>
-						</div>
-						<div className="flex min-w-0 flex-1 flex-col gap-2" role="list">
-							{chartData.map((entry) => (
-								<div
-									className="flex items-center justify-between gap-3 rounded-2xl bg-muted/35 px-2.5 py-1.5 text-xs"
-									key={entry.key}
-									role="listitem"
-								>
-									<span className="flex min-w-0 items-center gap-2">
-										<span
-											aria-hidden="true"
-											className="size-2 shrink-0 rounded-full"
-											style={{ backgroundColor: entry.color }}
+		<div className="min-w-0" data-testid={`usage-analytics-${testId}`}>
+			<SettingsSection caption={description} title={title}>
+				<SettingsCard>
+					{chartData.length > 0 ? (
+						<div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+							<div className="relative mx-auto h-[180px] w-[180px] shrink-0">
+								<ChartContainer className="h-full w-full" config={config}>
+									<PieChart accessibilityLayer>
+										<ChartTooltip content={<ChartTooltipContent hideLabel />} />
+										<Pie
+											data={chartData}
+											dataKey="chartValue"
+											innerRadius={54}
+											nameKey="label"
+											outerRadius={78}
+											paddingAngle={3}
+											strokeWidth={0}
 										/>
-										<span className="truncate">{entry.label}</span>
+									</PieChart>
+								</ChartContainer>
+								<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+									<span className="font-medium text-xl tabular-nums">
+										{total > 0
+											? formatCompact(total)
+											: formatMicroUsd(totalSpend)}
 									</span>
-									<span className="shrink-0 text-right text-muted-foreground tabular-nums">
-										{formatBreakdownValue(entry)}
+									<span className="type-caption text-muted-foreground">
+										{total > 0 ? "requests" : "credit spend"}
 									</span>
 								</div>
-							))}
+							</div>
+							<div className="flex min-w-0 flex-1 flex-col gap-2" role="list">
+								{chartData.map((entry) => (
+									<div
+										className="flex items-center justify-between gap-3 py-1 text-xs"
+										key={entry.key}
+										role="listitem"
+									>
+										<span className="flex min-w-0 items-center gap-2">
+											<UsageMarker
+												aria-hidden="true"
+												backgroundColor={entry.color}
+												className="size-2 shrink-0 rounded-full"
+											/>
+											<span className="truncate" title={entry.label}>
+												{entry.label}
+											</span>
+										</span>
+										<span className="shrink-0 text-right text-muted-foreground tabular-nums">
+											{formatBreakdownValue(entry)}
+										</span>
+									</div>
+								))}
+							</div>
 						</div>
-					</div>
-				) : (
-					<div className="flex h-[180px] items-center justify-center text-muted-foreground text-sm">
-						No breakdown yet.
-					</div>
-				)}
-			</CardContent>
-		</Card>
+					) : (
+						<div className="flex h-[180px] items-center justify-center text-muted-foreground text-sm">
+							No breakdown yet.
+						</div>
+					)}
+				</SettingsCard>
+			</SettingsSection>
+		</div>
 	);
 }
 
@@ -577,76 +893,92 @@ function ActivityHeatmap({ data }: { data: UsageAnalyticsData }) {
 		0
 	);
 	return (
-		<Card
-			className={ANALYTICS_CARD_CLASS}
-			data-testid="usage-analytics-chart-heatmap"
-		>
-			<CardHeader className="flex flex-row items-start justify-between gap-4">
-				<div className="min-w-0">
-					<CardTitle>Activity rhythm</CardTitle>
-					<CardDescription>
-						Quickly spot quiet periods and sustained usage.
-					</CardDescription>
-				</div>
-				<CardAction className="ml-auto shrink-0 text-right">
-					<div className="font-medium text-xl tabular-nums">{peak}</div>
-					<div className="text-muted-foreground text-xs">peak requests</div>
-				</CardAction>
-			</CardHeader>
-			<CardContent className="flex flex-col gap-3">
-				<div className="flex items-center justify-end gap-2 text-[11px] text-muted-foreground">
-					<span>Less</span>
-					{[0.08, 0.3, 0.55, 0.8, 1].map((opacity) => (
-						<span
-							aria-hidden="true"
-							className="size-3 rounded-[4px] bg-primary"
-							key={opacity}
-							style={{ opacity }}
-						/>
-					))}
-					<span>More</span>
-				</div>
-				<div
-					aria-label="Usage activity heatmap"
-					className="grid grid-cols-7 gap-1.5"
-					role="img"
-				>
-					{cells.map((point, index) => {
-						if (!point) {
+		<div className="min-w-0" data-testid="usage-analytics-chart-heatmap">
+			<SettingsSection
+				caption="Quickly spot quiet periods and sustained usage."
+				headerAction={
+					<span className="flex items-baseline gap-1.5 text-xs">
+						<span className="font-medium text-foreground tabular-nums">
+							{peak}
+						</span>
+						<span className="text-muted-foreground">peak requests</span>
+					</span>
+				}
+				title="Activity rhythm"
+			>
+				<SettingsCard className="flex flex-col gap-3">
+					<div className="type-caption flex items-center justify-end gap-2 text-muted-foreground">
+						<span>Less</span>
+						{[0.08, 0.3, 0.55, 0.8, 1].map((opacity) => (
+							<UsageMarker
+								aria-hidden="true"
+								className="size-3 rounded-sm bg-primary"
+								key={opacity}
+								opacity={opacity}
+							/>
+						))}
+						<span>More</span>
+					</div>
+					<div
+						aria-label="Usage activity heatmap"
+						className="grid grid-cols-7 gap-1.5"
+						role="img"
+					>
+						{cells.map((point, index) => {
+							if (!point) {
+								return (
+									<span
+										aria-hidden="true"
+										className="aspect-square rounded-sm"
+										key={`empty-${index}`}
+									/>
+								);
+							}
+							const intensity = max > 0 ? point.requests / max : 0;
 							return (
-								<span
-									aria-hidden="true"
-									className="aspect-square rounded-[4px]"
-									key={`empty-${index}`}
+								<UsageMarker
+									className="aspect-square rounded-sm bg-primary transition-opacity"
+									key={point.start}
+									opacity={point.requests === 0 ? 0.08 : 0.2 + intensity * 0.8}
+									title={`${point.label}: ${formatCompact(point.requests)} requests`}
 								/>
 							);
-						}
-						const intensity = max > 0 ? point.requests / max : 0;
-						return (
-							<span
-								className="aspect-square rounded-[4px] bg-primary transition-opacity"
-								key={point.start}
-								style={{
-									opacity: point.requests === 0 ? 0.08 : 0.2 + intensity * 0.8,
-								}}
-								title={`${point.label}: ${formatCompact(point.requests)} requests`}
-							/>
-						);
-					})}
-				</div>
-				<div className="grid grid-cols-7 gap-1.5 text-center text-[10px] text-muted-foreground">
-					{axisLabels.map((point) => (
-						<span className="truncate" key={point.start}>
-							{point.label}
-						</span>
-					))}
-				</div>
-			</CardContent>
-		</Card>
+						})}
+					</div>
+					<div className="type-compact grid grid-cols-7 gap-1.5 text-center text-muted-foreground">
+						{axisLabels.map((point) => (
+							<span className="truncate" key={point.start}>
+								{point.label}
+							</span>
+						))}
+					</div>
+				</SettingsCard>
+			</SettingsSection>
+		</div>
 	);
 }
 
-function FeatureMix({ data }: { data: UsageBreakdownRow[] }) {
+/** Route an English source literal through the shared i18n literal boundary. */
+function LocalizedLiteral({ value }: { value: string }) {
+	return <>{useLocalizedText(value, { literal: true })}</>;
+}
+
+/** Ranked request-share bars, used for feature and purpose attribution. */
+function FeatureMix({
+	data,
+	description = "Which product surfaces are driving the activity.",
+	emptyMessage = "No feature attribution in this range.",
+	renderLabel,
+	testId = "chart-feature-mix",
+	title = "Usage by feature",
+}: {
+	data: UsageBreakdownRow[];
+	description?: string;
+	emptyMessage?: string;
+	renderLabel?: (entry: UsageBreakdownRow) => ReactNode;
+	testId?: string;
+	title?: string;
+}) {
 	const shown = data.filter((entry) => entry.requests > 0).slice(0, 5);
 	const max = shown.reduce(
 		(highest, entry) => Math.max(highest, entry.requests),
@@ -654,60 +986,246 @@ function FeatureMix({ data }: { data: UsageBreakdownRow[] }) {
 	);
 	const total = shown.reduce((sum, entry) => sum + entry.requests, 0);
 	return (
-		<Card
-			className={ANALYTICS_CARD_CLASS}
-			data-testid="usage-analytics-chart-feature-mix"
-		>
-			<CardHeader className="gap-2">
-				<CardTitle>Usage by feature</CardTitle>
-				<CardDescription>
-					Which product surfaces are driving the activity.
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
-				{shown.length > 0 ? (
-					<div className="flex flex-col gap-3">
-						{shown.map((entry, index) => (
-							<div className="flex flex-col gap-1" key={entry.key}>
-								<div className="flex items-center justify-between gap-3 text-xs">
-									<span className="flex min-w-0 items-center gap-2">
-										<span
-											aria-hidden="true"
-											className="size-2 shrink-0 rounded-full"
-											style={{
-												backgroundColor:
-													CHART_COLORS[index % CHART_COLORS.length],
-											}}
+		<div className="min-w-0" data-testid={`usage-analytics-${testId}`}>
+			<SettingsSection caption={description} title={title}>
+				<SettingsCard>
+					{shown.length > 0 ? (
+						<div className="flex flex-col gap-3">
+							{shown.map((entry, index) => (
+								<div className="flex flex-col gap-1" key={entry.key}>
+									<div className="flex items-center justify-between gap-3 text-xs">
+										<span className="flex min-w-0 items-center gap-2">
+											<UsageMarker
+												aria-hidden="true"
+												backgroundColor={
+													CHART_COLORS[index % CHART_COLORS.length]
+												}
+												className="size-2 shrink-0 rounded-full"
+											/>
+											<span className="truncate" title={entry.label}>
+												{renderLabel ? renderLabel(entry) : entry.label}
+											</span>
+										</span>
+										<span className="shrink-0 text-muted-foreground tabular-nums">
+											{formatCompact(entry.requests)} ·{" "}
+											{total > 0
+												? `${String(Math.round((entry.requests / total) * 100))}%`
+												: "0%"}
+										</span>
+									</div>
+									<div className="h-2.5 overflow-hidden rounded-full bg-muted/70">
+										<UsageMarker
+											backgroundColor={
+												CHART_COLORS[index % CHART_COLORS.length]
+											}
+											className="h-full rounded-full"
+											element="div"
+											width={`${Math.max(3, (entry.requests / max) * 100)}%`}
 										/>
-										<span className="truncate">{entry.label}</span>
-									</span>
-									<span className="shrink-0 text-muted-foreground tabular-nums">
-										{formatCompact(entry.requests)} ·{" "}
-										{total > 0
-											? `${String(Math.round((entry.requests / total) * 100))}%`
-											: "0%"}
-									</span>
+									</div>
 								</div>
-								<div className="h-2.5 overflow-hidden rounded-full bg-muted/70">
-									<div
-										className="h-full rounded-full"
-										style={{
-											backgroundColor:
-												CHART_COLORS[index % CHART_COLORS.length],
-											width: `${Math.max(3, (entry.requests / max) * 100)}%`,
+							))}
+						</div>
+					) : (
+						<p className="text-muted-foreground text-sm">{emptyMessage}</p>
+					)}
+				</SettingsCard>
+			</SettingsSection>
+		</div>
+	);
+}
+
+/**
+ * Purpose rows keep their raw Gateway key. First-party labels go through the
+ * literal i18n boundary; plugin ids and unknown tags are data and stay as-is.
+ */
+function PurposeLabel({ entry }: { entry: UsageBreakdownRow }) {
+	if (isLabelledPurposeKey(entry.key)) {
+		return <LocalizedLiteral value={entry.label} />;
+	}
+	const pluginId = pluginIdForPurpose(entry.key);
+	if (pluginId === null) {
+		return <>{entry.key}</>;
+	}
+	return (
+		<>
+			<LocalizedLiteral value={PLUGIN_PURPOSE_LABEL} /> · {pluginId}
+		</>
+	);
+}
+
+function PurposeMix({ data }: { data: UsageBreakdownRow[] }) {
+	return (
+		<FeatureMix
+			data={data}
+			description="Calls Ryu makes on your behalf, such as compaction, titles and suggestions, next to your own turns."
+			emptyMessage="No background calls in this range."
+			renderLabel={(entry) => <PurposeLabel entry={entry} />}
+			testId="chart-purpose"
+			title="Model calls by purpose"
+		/>
+	);
+}
+
+const CACHE_COLORS = {
+	read: CHART_COLORS[2],
+	reuse: CHART_COLORS[1],
+	write: CHART_COLORS[3],
+} as const;
+
+function formatPercent(value: number | null): string {
+	return value === null ? "—" : `${String(Math.round(value * 100))}%`;
+}
+
+/**
+ * Prompt-cache volume per bucket. Read and written tokens are the primary
+ * marks; reuse (reads ÷ (reads + writes)) is a secondary line, shown only when
+ * the provider reports writes at all. Providers that only report reads would
+ * otherwise pin it at 100%.
+ */
+function PromptCacheTrend({ data }: { data: UsageAnalyticsData }) {
+	const points = useMemo(() => usageCacheSeries(data.buckets), [data.buckets]);
+	const { cacheReadTokens, cacheWriteTokens } = data.totals;
+	const reportsWrites = cacheWriteTokens > 0;
+	const reuse = cacheReuseRatio(cacheReadTokens, cacheWriteTokens);
+	const config: ChartConfig = {
+		read: { color: CACHE_COLORS.read, label: "Cache reads" },
+		ratio: { color: CACHE_COLORS.reuse, label: "Reuse" },
+		write: { color: CACHE_COLORS.write, label: "Cache writes" },
+	};
+	const tiles = [
+		{
+			color: CACHE_COLORS.read,
+			label: "Cache reads",
+			value: formatCompact(cacheReadTokens),
+		},
+		{
+			color: CACHE_COLORS.write,
+			label: "Cache writes",
+			value: formatCompact(cacheWriteTokens),
+		},
+	];
+	return (
+		<div className="min-w-0" data-testid="usage-analytics-chart-prompt-cache">
+			<SettingsSection
+				caption="Prompt tokens served from the provider cache, and tokens written to it."
+				headerAction={
+					reportsWrites ? (
+						<span className="flex items-baseline gap-1.5 text-xs">
+							<span
+								className="font-medium text-foreground tabular-nums"
+								data-testid="usage-prompt-cache-reuse"
+							>
+								{formatPercent(reuse)}
+							</span>
+							<span className="text-muted-foreground">
+								<LocalizedLiteral value="reads vs writes" />
+							</span>
+						</span>
+					) : null
+				}
+				title="Prompt cache"
+			>
+				<SettingsCard className="flex flex-col gap-4">
+					<ChartContainer className="h-[220px] w-full" config={config}>
+						<ComposedChart
+							accessibilityLayer
+							data={points}
+							margin={{ left: 4, right: 8, top: 8 }}
+						>
+							<CartesianGrid strokeOpacity={0.35} vertical={false} />
+							<XAxis
+								axisLine={false}
+								dataKey="label"
+								minTickGap={38}
+								tickLine={false}
+								tickMargin={8}
+							/>
+							<YAxis
+								axisLine={false}
+								tickFormatter={(value) => formatCompact(Number(value))}
+								tickLine={false}
+								width={36}
+								yAxisId="tokens"
+							/>
+							{reportsWrites ? (
+								<YAxis
+									axisLine={false}
+									domain={[0, 1]}
+									orientation="right"
+									tickFormatter={(value) => formatPercent(Number(value))}
+									tickLine={false}
+									width={36}
+									yAxisId="ratio"
+								/>
+							) : null}
+							<ChartTooltip
+								content={
+									<ChartTooltipContent
+										formatter={(value, name) => {
+											const key = String(name);
+											return (
+												<TrendTooltipRow
+													color={config[key]?.color}
+													label={String(config[key]?.label ?? key)}
+													value={
+														key === "ratio"
+															? formatPercent(Number(value))
+															: formatCompact(Number(value))
+													}
+												/>
+											);
 										}}
+										indicator="line"
 									/>
-								</div>
-							</div>
+								}
+								cursor={{ fill: "var(--muted)", fillOpacity: 0.35 }}
+							/>
+							<Bar
+								dataKey="read"
+								fill="var(--color-read)"
+								isAnimationActive={false}
+								maxBarSize={24}
+								stackId="cache"
+								yAxisId="tokens"
+							/>
+							<Bar
+								dataKey="write"
+								fill="var(--color-write)"
+								isAnimationActive={false}
+								maxBarSize={24}
+								radius={[4, 4, 0, 0]}
+								stackId="cache"
+								yAxisId="tokens"
+							/>
+							{reportsWrites ? (
+								<Line
+									connectNulls={false}
+									dataKey="ratio"
+									dot={false}
+									isAnimationActive={false}
+									stroke="var(--color-ratio)"
+									strokeWidth={2}
+									type="monotone"
+									yAxisId="ratio"
+								/>
+							) : null}
+						</ComposedChart>
+					</ChartContainer>
+					{reportsWrites ? null : (
+						<p className="text-muted-foreground text-xs">
+							The providers in this range report cache reads but not cache
+							writes, so no reuse ratio is shown.
+						</p>
+					)}
+					<div className="grid grid-cols-2 gap-2">
+						{tiles.map((tile) => (
+							<MetricTile key={tile.label} selected {...tile} />
 						))}
 					</div>
-				) : (
-					<p className="text-muted-foreground text-sm">
-						No feature attribution in this range.
-					</p>
-				)}
-			</CardContent>
-		</Card>
+				</SettingsCard>
+			</SettingsSection>
+		</div>
 	);
 }
 
@@ -739,62 +1257,57 @@ function RankedBreakdown({
 	);
 	const denominator = max > 0 ? max : maxSpend;
 	return (
-		<Card
-			className={ANALYTICS_CARD_CLASS}
-			data-testid={`usage-analytics-${testId}`}
-		>
-			<CardHeader className="gap-2">
-				<CardTitle>{title}</CardTitle>
-				<CardDescription>{description}</CardDescription>
-			</CardHeader>
-			<CardContent>
-				{shown.length > 0 ? (
-					<div className="flex flex-col gap-3">
-						{shown.map((entry, index) => (
-							<div className="flex flex-col gap-1" key={entry.key}>
-								<div className="flex items-center justify-between gap-3 text-xs">
-									<span className="flex min-w-0 items-center gap-2">
-										<span
-											className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground tabular-nums"
-											style={{
-												color: CHART_COLORS[index % CHART_COLORS.length],
-											}}
-										>
-											{index + 1}
+		<div className="min-w-0" data-testid={`usage-analytics-${testId}`}>
+			<SettingsSection caption={description} title={title}>
+				<SettingsCard>
+					{shown.length > 0 ? (
+						<div className="flex flex-col gap-3">
+							{shown.map((entry, index) => (
+								<div className="flex flex-col gap-1" key={entry.key}>
+									<div className="flex items-center justify-between gap-3 text-xs">
+										<span className="flex min-w-0 items-center gap-2">
+											<UsageMarker
+												className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground tabular-nums"
+												color={CHART_COLORS[index % CHART_COLORS.length]}
+											>
+												{index + 1}
+											</UsageMarker>
+											<span className="truncate" title={entry.label}>
+												{entry.label}
+											</span>
 										</span>
-										<span className="truncate">{entry.label}</span>
-									</span>
-									<span className="shrink-0 text-right text-muted-foreground tabular-nums">
-										{formatBreakdownValue(entry)}
-									</span>
-								</div>
-								<div className="h-2 overflow-hidden rounded-full bg-muted/70">
-									<div
-										className="h-full rounded-full"
-										style={{
-											backgroundColor:
-												CHART_COLORS[index % CHART_COLORS.length],
-											width: `${Math.max(
+										<span className="shrink-0 text-right text-muted-foreground tabular-nums">
+											{formatBreakdownValue(entry)}
+										</span>
+									</div>
+									<div className="h-2 overflow-hidden rounded-full bg-muted/70">
+										<UsageMarker
+											backgroundColor={
+												CHART_COLORS[index % CHART_COLORS.length]
+											}
+											className="h-full rounded-full"
+											element="div"
+											width={`${Math.max(
 												3,
 												((max > 0
 													? entry.requests
 													: (entry.spendMicroUsd ?? 0)) /
 													denominator) *
 													100
-											)}%`,
-										}}
-									/>
+											)}%`}
+										/>
+									</div>
 								</div>
-							</div>
-						))}
-					</div>
-				) : (
-					<p className="text-muted-foreground text-sm">
-						No breakdown in this range.
-					</p>
-				)}
-			</CardContent>
-		</Card>
+							))}
+						</div>
+					) : (
+						<p className="text-muted-foreground text-sm">
+							No breakdown in this range.
+						</p>
+					)}
+				</SettingsCard>
+			</SettingsSection>
+		</div>
 	);
 }
 
@@ -806,21 +1319,18 @@ function DateRangeControl({
 	range: UsageDateRange;
 }) {
 	const [open, setOpen] = useState(false);
-	const selected = {
-		from: range.from,
-		to: new Date(range.to.getTime() - 1),
-	};
+	// Days are civil dates in the display zone. Reading today through the
+	// subscribed hook also re-renders the label and the highlight at that zone's
+	// midnight and when the zone changes.
+	const today = useDisplayToday();
+	const selected = usageRangeDays(range);
 	const choosePreset = (days: number) => {
-		const to = startOfDay(new Date());
-		onChange({ from: addDays(to, -days + 1), to: addDays(to, 1) });
+		onChange(usagePresetRange(days));
 		setOpen(false);
 	};
 	return (
 		<Popover onOpenChange={setOpen} open={open}>
-			<PopoverTrigger
-				aria-label="Choose usage date range"
-				className="inline-flex h-9 items-center gap-2 rounded-3xl border border-input bg-input/50 px-3 text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/30"
-			>
+			<PopoverTrigger aria-label="Choose usage date range" variant="date-range">
 				<HugeiconsIcon icon={Calendar03Icon} size={16} />
 				<span className="max-w-48 truncate">{dateRangeLabel(range)}</span>
 			</PopoverTrigger>
@@ -847,18 +1357,14 @@ function DateRangeControl({
 					</div>
 					<Calendar
 						defaultMonth={selected.from}
-						disabled={{ after: new Date() }}
+						disabled={{ after: today }}
 						mode="range"
 						numberOfMonths={2}
 						onSelect={(next) => {
 							if (!next?.from) {
 								return;
 							}
-							const from = startOfDay(next.from);
-							const to = next.to
-								? addDays(startOfDay(next.to), 1)
-								: addDays(from, 1);
-							onChange({ from, to });
+							onChange(usageRangeFromDays(next.from, next.to));
 							if (next.to) {
 								setOpen(false);
 							}
@@ -911,167 +1417,187 @@ export function UsageAnalyticsDashboard({
 	const providers = providerOptions ?? analytics?.providerOptions ?? [];
 	const models = modelOptions ?? analytics?.modelOptions ?? [];
 	const totals = analytics?.totals;
+	const purposeRows = analytics?.byPurpose ?? [];
+	const hasPurposes = purposeRows.some((row) => row.requests > 0);
+	const hasPromptCache =
+		(totals?.cacheReadTokens ?? 0) + (totals?.cacheWriteTokens ?? 0) > 0;
 	return (
 		<section
 			aria-label="Usage analytics"
-			className="flex flex-col gap-4"
+			className="flex flex-col gap-6"
 			data-testid="usage-analytics-dashboard"
 		>
-			<div className="flex flex-col gap-1">
-				<div className="flex flex-wrap items-center gap-2">
-					<h4 className="font-medium text-base">Usage analytics</h4>
-					<Badge className="rounded-full" variant="outline">
-						{SCOPE_LABELS[scope]}
-					</Badge>
-				</div>
-				<p className="text-muted-foreground text-sm">
-					{analytics?.caption ?? "Choose a scope to explore consumption."}
-				</p>
-			</div>
-
-			<div
-				className={`${ANALYTICS_CARD_CLASS} flex flex-col gap-2 p-2`}
-				data-testid="usage-filter-rail"
-			>
-				<div className="flex flex-wrap items-center gap-2">
-					<div className="flex items-center gap-1 rounded-2xl bg-muted/50 p-1">
-						<span className="flex items-center gap-1.5 px-2 font-medium text-muted-foreground text-xs">
-							<HugeiconsIcon icon={FilterIcon} size={14} />
-							Scope
-						</span>
-						<ToggleGroup
-							aria-label="Usage scope"
-							className="rounded-2xl bg-transparent"
-							multiple={false}
-							onValueChange={(values: string[]) => {
-								const [value] = values;
-								if (SCOPE_VALUES.includes(value as UsageScope)) {
-									onScopeChange(value as UsageScope);
-								}
-							}}
-							spacing={0}
-							value={[scope]}
-							variant="default"
-						>
-							{SCOPE_VALUES.map((value) => (
-								<ToggleGroupItem
-									className="h-8 px-3 text-xs"
-									key={value}
-									value={value}
+			<SettingsSection title="Usage analytics">
+				<div data-testid="usage-filter-rail">
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<ToggleGroup
+									appearance="segmented"
+									aria-label="Usage scope"
+									className="h-auto max-w-full flex-wrap"
+									multiple={false}
+									onValueChange={(values: string[]) => {
+										const [value] = values;
+										const selection = SCOPE_VALUES.find(
+											(candidate) => candidate === value
+										);
+										if (selection) {
+											onScopeChange(selection);
+										}
+									}}
+									spacing={0}
+									value={[scope]}
+									variant="default"
 								>
-									{SCOPE_LABELS[value]}
-								</ToggleGroupItem>
-							))}
-						</ToggleGroup>
-					</div>
-					<div className="flex items-center gap-1 rounded-2xl bg-muted/50 p-1">
-						<span className="px-2 font-medium text-muted-foreground text-xs">
-							Resolution
-						</span>
-						<ToggleGroup
-							aria-label="Usage granularity"
-							className="rounded-2xl bg-transparent"
-							multiple={false}
-							onValueChange={(values: string[]) => {
-								const [value] = values;
-								if (GRANULARITY_VALUES.includes(value as UsageGranularity)) {
-									onGranularityChange(value as UsageGranularity);
-								}
-							}}
-							spacing={0}
-							value={[granularity]}
-							variant="default"
-						>
-							{GRANULARITY_VALUES.map((value) => (
-								<ToggleGroupItem
-									className="h-8 px-2.5 text-xs"
-									key={value}
-									value={value}
+									{SCOPE_VALUES.map((value) => (
+										<ToggleGroupItem
+											density="segmented"
+											key={value}
+											value={value}
+										>
+											{SCOPE_LABELS[value]}
+										</ToggleGroupItem>
+									))}
+								</ToggleGroup>
+							}
+							description={
+								analytics?.caption ?? "Choose a scope to explore consumption."
+							}
+							title="Scope"
+						/>
+						<SettingsItem
+							actions={
+								<ToggleGroup
+									appearance="segmented"
+									aria-label="Usage granularity"
+									className="h-auto max-w-full flex-wrap"
+									multiple={false}
+									onValueChange={(values: string[]) => {
+										const [value] = values;
+										const selection = GRANULARITY_VALUES.find(
+											(candidate) => candidate === value
+										);
+										if (selection) {
+											onGranularityChange(selection);
+										}
+									}}
+									spacing={0}
+									value={[granularity]}
+									variant="default"
 								>
-									{GRANULARITY_LABELS[value]}
-								</ToggleGroupItem>
-							))}
-						</ToggleGroup>
-					</div>
-					<DateRangeControl onChange={onRangeChange} range={range} />
+									{GRANULARITY_VALUES.map((value) => (
+										<ToggleGroupItem
+											density="segmented"
+											key={value}
+											value={value}
+										>
+											{GRANULARITY_LABELS[value]}
+										</ToggleGroupItem>
+									))}
+								</ToggleGroup>
+							}
+							title="Resolution"
+						/>
+						<SettingsItem
+							actions={
+								<DateRangeControl onChange={onRangeChange} range={range} />
+							}
+							title="Date range"
+						/>
+						<SettingsItem
+							actions={
+								<Select
+									onValueChange={(value) =>
+										onProviderChange(value === "all" ? null : value)
+									}
+									value={provider ?? "all"}
+								>
+									<SelectTrigger
+										appearance="filter"
+										aria-label="Filter by provider"
+										className="min-w-40"
+										size="sm"
+										variant="default"
+									>
+										<span className="max-w-40 truncate">
+											{provider
+												? usageProviderLabel(provider)
+												: "All providers"}
+										</span>
+									</SelectTrigger>
+									<SelectContent>
+										<SelectGroup>
+											<SelectLabel>Provider</SelectLabel>
+											<SelectItem value="all">All providers</SelectItem>
+											{providers.map((value) => (
+												<SelectItem key={value} value={value}>
+													{usageProviderLabel(value)}
+												</SelectItem>
+											))}
+										</SelectGroup>
+									</SelectContent>
+								</Select>
+							}
+							title="Provider"
+						/>
+						<SettingsItem
+							actions={
+								<Select
+									onValueChange={(value) =>
+										onModelChange(value === "all" ? null : value)
+									}
+									value={model ?? "all"}
+								>
+									<SelectTrigger
+										appearance="filter"
+										aria-label="Filter by model"
+										className="min-w-44"
+										size="sm"
+										variant="default"
+									>
+										<span
+											className="max-w-44 truncate"
+											title={model ?? "All models"}
+										>
+											{model ?? "All models"}
+										</span>
+									</SelectTrigger>
+									<SelectContent>
+										<SelectGroup>
+											<SelectLabel>Model</SelectLabel>
+											<SelectItem value="all">All models</SelectItem>
+											{models.map((value) => (
+												<SelectItem key={value} value={value}>
+													{value}
+												</SelectItem>
+											))}
+										</SelectGroup>
+									</SelectContent>
+								</Select>
+							}
+							title="Model"
+						/>
+					</SettingsGroup>
 				</div>
-				<div className="flex flex-wrap items-center gap-2 border-border/50 border-t pt-2">
-					<span className="px-2 font-medium text-muted-foreground text-xs">
-						Narrow by
-					</span>
-					<Select
-						onValueChange={(value) =>
-							onProviderChange(value === "all" ? null : value)
-						}
-						value={provider ?? "all"}
-					>
-						<SelectTrigger
-							aria-label="Filter by provider"
-							className="min-w-40 border-border/50 bg-muted/50"
-							size="sm"
-							variant="default"
-						>
-							<span className="max-w-40 truncate">
-								{provider ?? "All providers"}
-							</span>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectGroup>
-								<SelectLabel>Provider</SelectLabel>
-								<SelectItem value="all">All providers</SelectItem>
-								{providers.map((value) => (
-									<SelectItem key={value} value={value}>
-										{value}
-									</SelectItem>
-								))}
-							</SelectGroup>
-						</SelectContent>
-					</Select>
-					<Select
-						onValueChange={(value) =>
-							onModelChange(value === "all" ? null : value)
-						}
-						value={model ?? "all"}
-					>
-						<SelectTrigger
-							aria-label="Filter by model"
-							className="min-w-44 border-border/50 bg-muted/50"
-							size="sm"
-							variant="default"
-						>
-							<span className="max-w-44 truncate">{model ?? "All models"}</span>
-						</SelectTrigger>
-						<SelectContent>
-							<SelectGroup>
-								<SelectLabel>Model</SelectLabel>
-								<SelectItem value="all">All models</SelectItem>
-								{models.map((value) => (
-									<SelectItem key={value} value={value}>
-										{value}
-									</SelectItem>
-								))}
-							</SelectGroup>
-						</SelectContent>
-					</Select>
-				</div>
-			</div>
 
-			{analytics?.availability?.supported === false ? (
-				<Alert data-testid="usage-analytics-availability" variant="info">
-					<AlertDescription>{analytics.availability.message}</AlertDescription>
-				</Alert>
-			) : null}
+				{analytics?.availability?.supported === false ? (
+					<SettingsCard className="text-muted-foreground text-sm">
+						<p data-testid="usage-analytics-availability">
+							{analytics.availability.message}
+						</p>
+					</SettingsCard>
+				) : null}
 
-			{loading && !analytics ? (
-				<div className="flex items-center justify-center gap-2 py-10 text-muted-foreground text-sm">
-					<Spinner /> Loading analytics…
-				</div>
-			) : null}
+				{loading && !analytics ? (
+					<SettingsCard className="flex items-center justify-center gap-2 py-8 text-muted-foreground text-sm">
+						<Spinner /> Loading analytics…
+					</SettingsCard>
+				) : null}
 
-			{analytics ? (
-				<>
-					<div
-						className={`grid grid-cols-2 gap-2 md:grid-cols-3 ${
+				{analytics ? (
+					<SettingsCard
+						className={`grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 ${
 							scope === "organization" ? "xl:grid-cols-7" : "xl:grid-cols-6"
 						}`}
 					>
@@ -1137,9 +1663,31 @@ export function UsageAnalyticsDashboard({
 								value={formatCompact(totals?.activeNodes ?? 0)}
 							/>
 						) : null}
-					</div>
+					</SettingsCard>
+				) : loading || failed ? null : (
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								onRefresh ? (
+									<Button onClick={onRefresh} size="sm" variant="outline">
+										Refresh analytics
+									</Button>
+								) : null
+							}
+							title={
+								<span className="text-muted-foreground">
+									No analytics loaded. Choose a scope and range to explore
+									usage.
+								</span>
+							}
+						/>
+					</SettingsGroup>
+				)}
+			</SettingsSection>
 
-					<div className="grid gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,1fr)]">
+			{analytics ? (
+				<>
+					<div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,1fr)]">
 						<UsageTrend data={analytics} />
 						<UsageDonut
 							data={analytics.bySource}
@@ -1148,7 +1696,7 @@ export function UsageAnalyticsDashboard({
 							title="Consumption source"
 						/>
 					</div>
-					<div className="grid gap-3 md:grid-cols-2">
+					<div className="grid gap-6 md:grid-cols-2">
 						<UsageDonut
 							data={analytics.byProvider}
 							description="Compare providers before narrowing the dashboard."
@@ -1157,7 +1705,13 @@ export function UsageAnalyticsDashboard({
 						/>
 						<FeatureMix data={analytics.byFeature} />
 					</div>
-					<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+					{hasPurposes || hasPromptCache ? (
+						<div className="grid gap-6 md:grid-cols-2">
+							{hasPurposes ? <PurposeMix data={purposeRows} /> : null}
+							{hasPromptCache ? <PromptCacheTrend data={analytics} /> : null}
+						</div>
+					) : null}
+					<div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
 						<RankedBreakdown
 							data={analytics.byModel}
 							description="Most observed model calls in this scope."
@@ -1173,26 +1727,7 @@ export function UsageAnalyticsDashboard({
 						<ActivityHeatmap data={analytics} />
 					</div>
 				</>
-			) : loading || failed ? null : (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia variant="icon">
-							<HugeiconsIcon icon={Calendar03Icon} size={20} />
-						</EmptyMedia>
-						<EmptyTitle>No analytics loaded</EmptyTitle>
-						<EmptyDescription>
-							Choose a scope and range to explore usage.
-						</EmptyDescription>
-					</EmptyHeader>
-					{onRefresh ? (
-						<EmptyContent>
-							<Button onClick={onRefresh} size="sm" variant="ghost">
-								Refresh analytics
-							</Button>
-						</EmptyContent>
-					) : null}
-				</Empty>
-			)}
+			) : null}
 		</section>
 	);
 }

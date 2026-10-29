@@ -1,0 +1,13 @@
+{
+  "status": 400,
+  "headers": {
+    "content-type": "application/json;charset=utf-8"
+  },
+  "body": {
+    "error": {
+      "code": "invalid_input",
+      "message": "Check the submitted fields",
+      "fields": ["name", "slug"]
+    }
+  }
+}

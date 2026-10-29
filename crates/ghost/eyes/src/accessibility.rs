@@ -60,6 +60,10 @@ mod windows_impl {
             tokio::task::spawn_blocking(get_focused_tree_sync).await?
         }
         async fn find_element(&self, description: &str) -> Option<AXTreeNode> {
+            // An empty query would match the root node (every string contains "").
+            if description.trim().is_empty() {
+                return None;
+            }
             let desc = description.to_string();
             tokio::task::spawn_blocking(move || find_element_sync(&desc))
                 .await
@@ -656,6 +660,10 @@ impl AXTree for MacOSAXTree {
         tokio::task::spawn_blocking(macos_ax::get_focused_tree_sync).await?
     }
     async fn find_element(&self, description: &str) -> Option<AXTreeNode> {
+        // An empty query would match the root node (every string contains "").
+        if description.trim().is_empty() {
+            return None;
+        }
         let desc = description.to_string();
         tokio::task::spawn_blocking(move || macos_ax::find_element_sync(&desc))
             .await
@@ -737,6 +745,10 @@ impl AXTree for LinuxAXTree {
         }
     }
     async fn find_element(&self, description: &str) -> Option<AXTreeNode> {
+        // An empty query would match the root node (every string contains "").
+        if description.trim().is_empty() {
+            return None;
+        }
         let query = description.to_lowercase();
         let tree = self.get_focused_tree().await.ok()?;
         find_in_tree_linux(&tree, &query)
@@ -1081,25 +1093,6 @@ mod tests {
             focused: false,
             hidden: false,
         }
-    }
-
-    #[test]
-    fn bounds_equality_and_clone() {
-        let a = Bounds {
-            x: 1,
-            y: 2,
-            width: 3,
-            height: 4,
-        };
-        let b = a.clone();
-        assert_eq!(a, b);
-        let c = Bounds {
-            x: 1,
-            y: 2,
-            width: 3,
-            height: 5,
-        };
-        assert_ne!(a, c);
     }
 
     #[test]

@@ -27,7 +27,8 @@ rather than silently dropping the SSRF guard. **That trait is the swap seam.**
   transport → launch command; `remotes[]` → hosted URL), ignoring unknown fields.
 - Catalog card/detail shaping + SSRF-safe cursor pagination.
 - Security-hardened **install-plan builder**: validates/normalizes the package
-  identifier + version and remote URL (no shell metacharacters, no path traversal);
+  identifier + exact version, verifies npm/PyPI ownership metadata, requires OCI
+  digests, and validates remote URLs (no shell metacharacters, no path traversal);
   the installed entry is written **disabled** so install never auto-launches. A
   freshly installed server lands in the same `~/.ryu/mcp.json` the sidecar
   `McpRegistry` reads, so its tools are listable after a hot-reload.
@@ -36,5 +37,6 @@ rather than silently dropping the SSRF guard. **That trait is the swap seam.**
 
 Compiled-into-Core crate; served over Core's `/api/mcp/*` catalog routes.
 
-Deps: anyhow, serde/serde_json, async-trait, url. No download logic here (install
-writes config only; launch is the sidecar's job).
+Deps: anyhow, serde/serde_json, async-trait, url. Package metadata verification uses
+the Core-provided SSRF-guarded fetch seam; install never downloads or executes a
+package, and launch remains the sidecar's job.

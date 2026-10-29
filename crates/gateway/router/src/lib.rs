@@ -23,6 +23,9 @@
 //! these string tables and map the returned provider strings back to
 //! `ProviderId` / `RouteDecision`, so every call site is behavior-identical.
 
+pub mod own_supply;
+pub mod pool;
+
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -55,6 +58,28 @@ pub fn builtin_prefixes() -> Vec<(String, String)> {
         // to the Ryu Cloud GPU node's Modal inference app (serverless GPU),
         // so a node can offload heavy local-model calls onto Modal's GPUs.
         ("modal/", "modal"),
+        // Direct embedding families. Only prefixes that are actual upstream
+        // model IDs are claimed; Together's shared open-model IDs need an
+        // explicit model_map entry so Ryu does not steal a local model.
+        ("voyage-", "voyage"),
+        ("jina-", "jina"),
+        ("mistral-embed", "mistral"),
+        ("codestral-embed", "mistral"),
+        ("nvidia/", "nvidia"),
+        ("fireworks/", "fireworks"),
+        ("embed-v", "cohere"),
+        ("rerank-v", "cohere"),
+        ("aura-", "deepgram"),
+        ("nova-", "deepgram"),
+        ("recraftv", "recraft"),
+        ("stable-image-", "stability"),
+        ("sd3.5-", "stability"),
+        ("flux-", "bfl"),
+        ("image-01", "minimax"),
+        ("gen4.5", "runway"),
+        ("gen4_turbo", "runway"),
+        ("eleven_", "elevenlabs"),
+        ("inworld-tts-", "inworld"),
         // gemini-: native Gemini (and other native-format providers) served
         // through the genai-backed provider, so they route here rather than
         // to the OpenAI-compatible passthroughs.
@@ -65,8 +90,9 @@ pub fn builtin_prefixes() -> Vec<(String, String)> {
         // explicit operator `routing.model_map` or `default_provider`, so the
         // whole pool split (`apps/gateway/src/credit_pools.rs`) is inert on a
         // zero-config deploy: no id routes to the pool, so no request is ever
-        // pool-tagged and no grant is ever drawn. (That is still the situation for
-        // `openai-credits`, which cannot have a row — see the end of this block.)
+        // pool-tagged and no grant is ever drawn. (`vertex`, `openai-credits` and
+        // `anthropic-credits` cannot have a row here — see the end of this block —
+        // and are reached through [`POOL_NAMESPACES`] instead.)
         //
         // PLACEMENT IS LOAD-BEARING, for one row: `mistral.` MUST stay above the
         // `("mistral", "local")` row below. `route` takes the FIRST `starts_with`
@@ -144,10 +170,11 @@ pub fn builtin_prefixes() -> Vec<(String, String)> {
         // holding only `openrouter` grant money.
         //
         // So Vertex is reached exactly as the donated OpenAI slot below is: through
-        // an operator `routing.model_map` entry or `default_provider`, inert on a
-        // zero-config deploy. A donated allowance that must be aimed deliberately is
-        // the correct default — spending a donation is not a decision a compile-time
-        // prefix should make on an operator's behalf.
+        // its explicit `ryu-vision/` namespace ([`POOL_NAMESPACES`], which strips
+        // the namespace and so CAN carry a non-upstream prefix), an operator
+        // `routing.model_map` entry, or `default_provider`. No bare id is claimed:
+        // a donated allowance must be aimed deliberately — by the user picking the
+        // tier, or the operator — never by a compile-time prefix on a vendor id.
         // NO ROW FOR THE DONATED OPENAI POOL, deliberately — see
         // `config::OPENAI_CREDITS_PROVIDER_ID`. Real OpenAI ids carry no
         // namespace, and `gpt-`/`o1`/`o3`/`o4`/`text-davinci` above are already
@@ -155,9 +182,10 @@ pub fn builtin_prefixes() -> Vec<(String, String)> {
         // convert every pass-through caller's own-key traffic into donated spend,
         // which is the one outcome the separate id exists to prevent, and an
         // invented `openai/…` prefix would only 404 (see the verbatim-model note
-        // above). So the donated route is reachable through an operator
-        // `routing.model_map` entry or `default_provider` ONLY — inert on a
-        // zero-config deploy, on purpose.
+        // above). So the donated route is reachable through its explicit
+        // `ryu-reasoning/` namespace ([`POOL_NAMESPACES`]), an operator
+        // `routing.model_map` entry, or `default_provider` — never by a bare id.
+        // `anthropic-credits` is the same case against `claude-` (`ryu-code/`).
         //
         // Consequence of routing these at all, stated so it is not a surprise:
         // every pool provider registers only when configured (`if let Some(c) =
@@ -212,6 +240,478 @@ pub fn builtin_prefixes() -> Vec<(String, String)> {
     .collect()
 }
 
+/// Ryu-branded model aliases for the managed credit-pool tiers:
+/// `(alias id, gateway provider slot, upstream model id)`.
+///
+/// Ryu sells managed inference as TIERS ("Ryu Fast", "Ryu Frontier", "Ryu
+/// Vision", "Ryu Reasoning", "Ryu Code") and never names the supplier behind
+/// one. A vendor's model id names the vendor, so the ids Core offers for a
+/// managed tier are these aliases instead: `ryu-<tier>/<size>`, with `<size>`
+/// from `lite` (smallest/cheapest) → `standard` → `max` (most capable), using
+/// only as many sizes as the tier has models.
+///
+/// [`RoutingTables::route`] resolves an alias (ASCII-case-insensitive, EXACT
+/// match only) to its slot and upstream id at the pool-namespace step, and the
+/// gateway rewrites the upstream id back to the alias in responses and in the
+/// user-visible usage/ledger attribution ([`pool_model_alias_for`]). Core's
+/// `managed-<pool>` rows in `apps/core/src/pi_config/mod.rs` offer exactly these
+/// ids; `the_model_ids_core_offers_for_each_pool_still_route_to_that_pool`
+/// mirrors them.
+///
+/// Every alias id lives inside a [`POOL_NAMESPACES`] namespace or a namespace no
+/// vendor uses (`ryu-fast/`, `ryu-frontier/`), so no alias captures an id that
+/// routes anywhere today. The pre-alias raw forms (`ryu-code/claude-sonnet-4-5`,
+/// `@cf/…`, `anthropic.…`) still route exactly as before — saved configs keep
+/// working — but are no longer advertised.
+pub const POOL_MODEL_ALIASES: &[(&str, &str, &str)] = &[
+    // Ryu Fast — Cloudflare Workers AI.
+    (
+        "ryu-fast/lite",
+        "cloudflare",
+        "@cf/mistral/mistral-7b-instruct-v0.2",
+    ),
+    (
+        "ryu-fast/standard",
+        "cloudflare",
+        "@cf/meta/llama-3.1-8b-instruct",
+    ),
+    (
+        "ryu-fast/max",
+        "cloudflare",
+        "@cf/qwen/qwen1.5-14b-chat-awq",
+    ),
+    // Ryu Frontier — Amazon Bedrock.
+    (
+        "ryu-frontier/lite",
+        "bedrock",
+        "meta.llama3-1-70b-instruct-v1:0",
+    ),
+    ("ryu-frontier/standard", "bedrock", "amazon.nova-pro-v1:0"),
+    (
+        "ryu-frontier/max",
+        "bedrock",
+        "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    ),
+    // Ryu Vision — Google Cloud Vertex AI (OpenAI-compatible surface ids).
+    ("ryu-vision/lite", "vertex", "google/gemini-2.5-flash"),
+    ("ryu-vision/max", "vertex", "google/gemini-2.5-pro"),
+    // Ryu Reasoning — donated OpenAI credit.
+    ("ryu-reasoning/lite", "openai-credits", "o4-mini"),
+    ("ryu-reasoning/standard", "openai-credits", "o3"),
+    ("ryu-reasoning/max", "openai-credits", "gpt-5"),
+    // Ryu Code — Ryu's own Anthropic account.
+    ("ryu-code/lite", "anthropic-credits", "claude-haiku-4-5"),
+    (
+        "ryu-code/standard",
+        "anthropic-credits",
+        "claude-sonnet-4-5",
+    ),
+    ("ryu-code/max", "anthropic-credits", "claude-opus-4-5"),
+];
+
+/// Resolve a Ryu model alias (see [`POOL_MODEL_ALIASES`]) to `(gateway provider
+/// slot, upstream model id)`. Exact, ASCII-case-insensitive match; `None` for
+/// anything that is not an alias id.
+pub fn pool_model_alias_route(requested_model: &str) -> Option<(&'static str, &'static str)> {
+    POOL_MODEL_ALIASES
+        .iter()
+        .find(|(alias, _, _)| alias.eq_ignore_ascii_case(requested_model))
+        .map(|(_, provider, upstream)| (*provider, *upstream))
+}
+
+/// The canonical (lower-case) alias id for a requested model, when it is one.
+pub fn pool_model_alias_id(requested_model: &str) -> Option<&'static str> {
+    POOL_MODEL_ALIASES
+        .iter()
+        .find(|(alias, _, _)| alias.eq_ignore_ascii_case(requested_model))
+        .map(|(alias, _, _)| *alias)
+}
+
+/// Reverse lookup: the alias that names `upstream_model` when it was served by
+/// the managed pool slot `provider`, or `None`. Keyed on the SLOT as well as the
+/// id because the bare upstream ids are shared with BYOK slots
+/// (`claude-sonnet-4-5` on the own-key `anthropic` slot is the user's own
+/// traffic and must keep its real name).
+pub fn pool_model_alias_for(provider: &str, upstream_model: &str) -> Option<&'static str> {
+    POOL_MODEL_ALIASES
+        .iter()
+        .find(|(_, slot, upstream)| {
+            *slot == provider && upstream.eq_ignore_ascii_case(upstream_model)
+        })
+        .map(|(alias, _, _)| *alias)
+}
+
+/// The COMPILED SEED of the Ryu Router own-supply table: Ryu Router models that
+/// Ryu can also serve from ITS OWN donated supply, as
+/// `(Ryu Router model id, gateway pool slot, upstream model id)`.
+///
+/// The live table is control-plane data (admin "Ryu Router models" page, no
+/// deploy), published to fleet gateways as an [`own_supply::OwnSupplyTable`].
+/// This constant is only the fallback: what a self-hosted / non-fleet gateway
+/// routes on, what Core's legacy-tier migration reads, and what the control
+/// plane inserts into an empty table (`packages/auth/src/lib/own-supply-seed.ts`,
+/// pinned to this list by `own-supply-seed.test.ts`).
+///
+/// The user picks models by their real Ryu Router (OpenRouter-catalog) id; the
+/// serving supplier is never shown. When a managed caller holds free credit and
+/// the picked id has a row whose slot is configured, the gateway serves it from
+/// that slot (so the free grant pays for it) and rewrites the response back to
+/// the id the user picked; otherwise the request goes to OpenRouter.
+///
+/// Rules for a row: the two ids must name the SAME model (no "close enough"
+/// substitutes), the upstream must already be a [`POOL_MODEL_ALIASES`] upstream
+/// (priced, aliased, routable), and the left id must route to `openrouter` by
+/// default — `pool_model_equivalents_are_exact_routable_and_openrouter_ids`
+/// pins all three. Rows in [`SEED_CANARY_REQUIRED`] never route until a
+/// gateway canary has proven them callable.
+///
+/// `anthropic/claude-3.5-sonnet` (Bedrock) was dropped: OpenRouter no longer
+/// lists it.
+pub const SEED_OWN_SUPPLY_EQUIVALENTS: &[(&str, &str, &str)] = &[
+    (
+        "anthropic/claude-opus-4.5",
+        "anthropic-credits",
+        "claude-opus-4-5",
+    ),
+    (
+        "anthropic/claude-sonnet-4.5",
+        "anthropic-credits",
+        "claude-sonnet-4-5",
+    ),
+    (
+        "anthropic/claude-haiku-4.5",
+        "anthropic-credits",
+        "claude-haiku-4-5",
+    ),
+    ("amazon/nova-pro-v1", "bedrock", "amazon.nova-pro-v1:0"),
+    (
+        "meta-llama/llama-3.1-70b-instruct",
+        "bedrock",
+        "meta.llama3-1-70b-instruct-v1:0",
+    ),
+    ("openai/gpt-5", "openai-credits", "gpt-5"),
+    ("openai/o3", "openai-credits", "o3"),
+    ("openai/o4-mini", "openai-credits", "o4-mini"),
+    ("google/gemini-2.5-pro", "vertex", "google/gemini-2.5-pro"),
+    (
+        "google/gemini-2.5-flash",
+        "vertex",
+        "google/gemini-2.5-flash",
+    ),
+    (
+        "meta-llama/llama-3.1-8b-instruct",
+        "cloudflare",
+        "@cf/meta/llama-3.1-8b-instruct",
+    ),
+];
+
+/// Seed rows `(slot, upstream)` that must pass a gateway canary before they
+/// route or carry the Free tag: the Bedrock slot speaks Anthropic Messages, so
+/// its non-Claude rows are expected to be unservable until proven otherwise.
+pub const SEED_CANARY_REQUIRED: &[(&str, &str)] = &[
+    ("bedrock", "amazon.nova-pro-v1:0"),
+    ("bedrock", "meta.llama3-1-70b-instruct-v1:0"),
+];
+
+/// The SEED own-supply candidates for a Ryu Router model id, in preference
+/// order (exact, ASCII-case-insensitive). Empty when the seed has none. Routing
+/// reads the live [`own_supply::OwnSupplyTable`] instead.
+pub fn pool_model_equivalents(
+    requested_model: &str,
+) -> impl Iterator<Item = (&'static str, &'static str)> + '_ {
+    SEED_OWN_SUPPLY_EQUIVALENTS
+        .iter()
+        .filter(move |(id, _, _)| id.eq_ignore_ascii_case(requested_model))
+        .map(|(_, slot, upstream)| (*slot, *upstream))
+}
+
+/// Reverse SEED lookup: the Ryu Router id a user knows for `upstream_model`
+/// served by the own-supply slot `provider`, or `None`. Keyed on the slot, so
+/// BYOK traffic with the same bare id keeps its own name.
+pub fn pool_model_equivalent_id(provider: &str, upstream_model: &str) -> Option<&'static str> {
+    SEED_OWN_SUPPLY_EQUIVALENTS
+        .iter()
+        .find(|(_, slot, upstream)| {
+            *slot == provider && upstream.eq_ignore_ascii_case(upstream_model)
+        })
+        .map(|(id, _, _)| *id)
+}
+
+/// The alias a managed tier is offered under when nobody picked a size: the
+/// slot's `…/standard` alias, else its first (smallest) alias. `None` when the
+/// slot sells no tier.
+pub fn pool_default_alias_for(provider: &str) -> Option<&'static str> {
+    let mut aliases = POOL_MODEL_ALIASES
+        .iter()
+        .filter(|(_, slot, _)| *slot == provider)
+        .map(|(alias, _, _)| *alias);
+    let first = aliases.next()?;
+    if first.ends_with("/standard") {
+        return Some(first);
+    }
+    Some(
+        aliases
+            .find(|alias| alias.ends_with("/standard"))
+            .unwrap_or(first),
+    )
+}
+
+/// Explicit credit-pool namespaces: `<namespace><upstream model id>` selects a
+/// donated pool's gateway slot by NAME and strips the namespace before the id
+/// goes upstream, e.g. `ryu-code/claude-sonnet-4-5` → (`anthropic-credits`,
+/// `claude-sonnet-4-5`).
+///
+/// This exists for the three pools whose vendors' real ids are already claimed
+/// by a BYOK slot or by OpenRouter, so no bare prefix can reach them without
+/// stealing someone else's traffic (see the long notes in [`builtin_prefixes`]):
+/// `claude-*` is the BYOK `anthropic` slot, `gpt-`/`o3`/`o4` the BYOK `openai`
+/// slot, and `google/gemini-*` a live OpenRouter id. A namespace that no vendor
+/// uses is the one way to ask for the donated supply without capturing any id
+/// that routes somewhere today — the bare ids keep routing exactly as before.
+///
+/// The namespaces are the pools' public tier names (`packages/auth/src/lib/
+/// credit-pools.ts`: "Ryu Code", "Ryu Reasoning", "Ryu Vision"), never the
+/// supplier's, so the wire id a user sees names the tier they were sold. Core's
+/// `managed-<pool>` rows in `apps/core/src/pi_config/mod.rs` offer ids in this
+/// form; `the_model_ids_core_offers_for_each_pool_still_route_to_that_pool`
+/// mirrors them.
+///
+/// Matching is ASCII-case-insensitive on the namespace only; the remainder is
+/// forwarded byte-for-byte. A bare namespace with nothing after it is not a
+/// model and is left to the normal routing order.
+pub const POOL_NAMESPACES: &[(&str, &str)] = &[
+    ("ryu-code/", "anthropic-credits"),
+    ("ryu-reasoning/", "openai-credits"),
+    ("ryu-vision/", "vertex"),
+];
+
+/// Resolve an explicitly pool-namespaced model id (see [`POOL_NAMESPACES`]) to
+/// `(gateway provider id, upstream model id)`, or `None` when the id carries no
+/// pool namespace.
+pub fn pool_namespace_route(requested_model: &str) -> Option<(&'static str, &str)> {
+    POOL_NAMESPACES.iter().find_map(|(namespace, provider)| {
+        let head = requested_model.get(..namespace.len())?;
+        if !head.eq_ignore_ascii_case(namespace) {
+            return None;
+        }
+        let upstream = &requested_model[namespace.len()..];
+        (!upstream.is_empty()).then_some((*provider, upstream))
+    })
+}
+
+/// The Gateway's keyless local engine slot (llama.cpp).
+pub const LOCAL_SLOT: &str = "local";
+
+/// The Gateway's classify tier slot (a small resident local model).
+pub const CLASSIFY_SLOT: &str = "classify";
+
+/// The Gateway slots that serve from Ryu's OWN (donated) supply: every pool in
+/// the Gateway's `credit_pools` table except the retail OpenRouter
+/// pass-through. Shared so Core can tell, before a turn, which models an agent
+/// with limited model providers can still use. The Gateway's
+/// `own_supply_slots_match_the_router_crate` test pins this list to its pool
+/// table.
+pub const OWN_SUPPLY_SLOTS: &[&str] = &[
+    "cloudflare",
+    "bedrock",
+    "vertex",
+    "openai-credits",
+    "anthropic-credits",
+];
+
+/// Whether a Gateway provider slot uses none of the user's own credentials:
+/// the keyless local engine, the classify tier, or Ryu's own supply. An
+/// agent's model provider access never limits these. (The Gateway also exempts
+/// keyless SDK routes, which it checks against its credential catalog.)
+pub fn slot_uses_no_user_credential(provider: &str) -> bool {
+    provider == LOCAL_SLOT || provider == CLASSIFY_SLOT || OWN_SUPPLY_SLOTS.contains(&provider)
+}
+
+/// The slot a model id routes to by the compiled-in rules alone: a Ryu model
+/// alias, an explicit pool namespace, then the first [`builtin_prefixes`] hit
+/// (steps 3 and 4 of [`RoutingTables::route`]). `None` when only an operator's
+/// `model_map` or the configured default provider would decide it, which a
+/// caller without the Gateway's config cannot know.
+pub fn builtin_route(requested_model: &str) -> Option<String> {
+    if let Some((provider, _)) = pool_model_alias_route(requested_model) {
+        return Some(provider.to_owned());
+    }
+    if let Some((provider, _)) = pool_namespace_route(requested_model) {
+        return Some(provider.to_owned());
+    }
+    let model_lower = requested_model.to_lowercase();
+    builtin_prefixes()
+        .into_iter()
+        .find(|(prefix, _)| model_lower.starts_with(prefix.as_str()))
+        .map(|(_, provider)| provider)
+}
+
+#[cfg(test)]
+mod credential_free_route_tests {
+    use super::*;
+
+    #[test]
+    fn builtin_route_matches_the_tables_without_an_operator_map() {
+        let tables = RoutingTables {
+            model_map: HashMap::new(),
+            builtin_prefixes: builtin_prefixes(),
+            default_provider: "configured-default".to_owned(),
+            modality_map: HashMap::new(),
+            fallback_chain: Vec::new(),
+            provider_tiers: HashMap::new(),
+            eval_candidates: Vec::new(),
+            explore_ratio: 0.0,
+        };
+        for model in [
+            "ryu-code/standard",
+            "ryu-vision/google/gemini-2.5-pro",
+            "@cf/meta/llama-3.1-8b-instruct",
+            "claude-sonnet-4-5",
+            "gpt-5",
+            "gemini-2.5-pro",
+            "openrouter/auto",
+            "gemma-3-4b-it",
+            "gemma-3-270m",
+        ] {
+            assert_eq!(
+                builtin_route(model).as_deref(),
+                Some(tables.route(model).0.as_str()),
+                "{model}"
+            );
+        }
+        assert_eq!(builtin_route("anthropic/claude-sonnet-4"), None);
+        assert_eq!(
+            tables.route("anthropic/claude-sonnet-4").0,
+            "configured-default"
+        );
+    }
+
+    #[test]
+    fn only_local_classify_and_own_supply_slots_need_no_user_credential() {
+        for free in [
+            LOCAL_SLOT,
+            CLASSIFY_SLOT,
+            "cloudflare",
+            "bedrock",
+            "vertex",
+            "openai-credits",
+            "anthropic-credits",
+        ] {
+            assert!(slot_uses_no_user_credential(free), "{free}");
+        }
+        for user in ["openai", "anthropic", "genai", "openrouter", "core", ""] {
+            assert!(!slot_uses_no_user_credential(user), "{user}");
+        }
+        // Every pool alias and namespace lands on an own-supply slot.
+        for (_, slot, _) in POOL_MODEL_ALIASES {
+            assert!(OWN_SUPPLY_SLOTS.contains(slot), "{slot}");
+        }
+        for (_, slot) in POOL_NAMESPACES {
+            assert!(OWN_SUPPLY_SLOTS.contains(slot), "{slot}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod direct_embedding_route_tests {
+    use super::*;
+
+    #[test]
+    fn direct_embedding_prefixes_do_not_claim_unrelated_local_models() {
+        let prefixes = builtin_prefixes();
+        for (model, expected) in [
+            ("voyage-4", "voyage"),
+            ("jina-embeddings-v5-text-small", "jina"),
+            ("mistral-embed", "mistral"),
+            ("codestral-embed", "mistral"),
+            ("nvidia/llama-nemotron-embed-vl-1b-v2", "nvidia"),
+            ("fireworks/qwen3-embedding-8b", "fireworks"),
+            ("embed-v4.0", "cohere"),
+            ("rerank-v4.0-fast", "cohere"),
+            ("aura-2-thalia-en", "deepgram"),
+            ("nova-3", "deepgram"),
+            ("recraftv4_1", "recraft"),
+            ("stable-image-ultra", "stability"),
+            ("sd3.5-large", "stability"),
+            ("flux-2-pro", "bfl"),
+            ("image-01", "minimax"),
+            ("gen4.5", "runway"),
+            ("gen4_turbo", "runway"),
+            ("flux-3-video", "bfl"),
+            ("eleven_multilingual_v2", "elevenlabs"),
+            ("inworld-tts-2", "inworld"),
+            ("inworld-tts-2", "inworld"),
+        ] {
+            let routed = prefixes
+                .iter()
+                .find(|(prefix, _)| model.starts_with(prefix))
+                .map(|(_, provider)| provider.as_str());
+            assert_eq!(routed, Some(expected), "{model}");
+        }
+        assert_eq!(
+            prefixes
+                .iter()
+                .find(|(prefix, _)| "BAAI/bge-base-en-v1.5".starts_with(prefix))
+                .map(|(_, provider)| provider.as_str()),
+            None,
+        );
+    }
+}
+
+/// Which [`RoutingTables::route`] precedence step produced a decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteSource {
+    /// Step 1 or 2: an operator `model_map` entry (exact or longest prefix).
+    ModelMap,
+    /// Step 3: a Ryu model alias ([`POOL_MODEL_ALIASES`]) or an explicit
+    /// credit-pool namespace ([`POOL_NAMESPACES`]). An explicit target, like a
+    /// builtin vendor prefix.
+    CreditPool,
+    /// Step 4: a zero-config [`builtin_prefixes`] row.
+    BuiltinPrefix,
+    /// Step 5: nothing matched, so `default_provider` took the model.
+    DefaultProvider,
+}
+
+/// The router-neutral model namespace owned by the routing layer.
+///
+/// `router/<model>` always targets whichever upstream router is active, so a
+/// caller can name an aggregator model without naming the aggregator. Swapping
+/// OpenRouter for LiteLLM re-points these ids without changing a prompt, agent,
+/// or allowlist — the same contract a Toolkit verb has.
+pub const UPSTREAM_ROUTER_PREFIX: &str = "router/";
+
+/// Upstream routers the routing layer can bind. Each is an ordinary provider
+/// registry id; the routing layer only decides which one receives the
+/// router-neutral and catch-all traffic.
+pub const UPSTREAM_ROUTER_IDS: &[&str] = &["openrouter", "litellm", "local"];
+
+/// The model segment after [`UPSTREAM_ROUTER_PREFIX`], matched
+/// case-insensitively, or `None` when the id is not router-neutral.
+pub fn strip_upstream_router_prefix(requested_model: &str) -> Option<&str> {
+    let prefix_len = UPSTREAM_ROUTER_PREFIX.len();
+    let head = requested_model.get(..prefix_len)?;
+    if !head.eq_ignore_ascii_case(UPSTREAM_ROUTER_PREFIX) {
+        return None;
+    }
+    let model = &requested_model[prefix_len..];
+    (!model.trim().is_empty()).then_some(model)
+}
+
+/// The model id an upstream router expects for a router-neutral model.
+///
+/// Vendor-qualified ids (`anthropic/claude-sonnet-4`) are already the native id
+/// on every aggregator. OpenRouter alone names its own meta-routers inside its
+/// namespace (`openrouter/auto`, `openrouter/pareto-code`), so an unqualified
+/// router-neutral id becomes `openrouter/<id>` there. Every other router serves
+/// the id exactly as its operator configured it.
+pub fn upstream_router_wire_model(router_id: &str, model: &str) -> String {
+    if router_id == "openrouter" && !model.contains('/') {
+        return format!("openrouter/{model}");
+    }
+    model.to_string()
+}
+
 /// A once-built, string-keyed snapshot of the routing config the gateway's
 /// `ModelRouter` resolves against. Built once in `ModelRouter::new` (config is a
 /// startup snapshot), then borrowed into the pure resolution methods so the hot
@@ -244,8 +744,10 @@ impl RoutingTables {
     /// outrank the whole builtin table, so no builtin row is a guarantee:
     /// 1. exact `model_map` hit,
     /// 2. longest `model_map` prefix hit,
-    /// 3. [`builtin_prefixes`] (first `starts_with` hit, top-down),
-    /// 4. `default_provider`.
+    /// 3. a Ryu model alias ([`POOL_MODEL_ALIASES`], exact) or an explicit pool
+    ///    namespace ([`POOL_NAMESPACES`], namespace stripped),
+    /// 4. [`builtin_prefixes`] (first `starts_with` hit, top-down),
+    /// 5. `default_provider`.
     ///
     /// The consequence worth stating: a broad user prefix (`gemma`, `gpt-`) silently
     /// re-homes every builtin route beneath it, including infrastructure routes like
@@ -253,6 +755,14 @@ impl RoutingTables {
     /// map has to be seeded as an EXACT entry (step 1) — see
     /// `apps/gateway/src/config.rs::seed_classify_route`.
     pub fn route(&self, requested_model: &str) -> (String, String) {
+        let (provider, model, _) = self.route_with_source(requested_model);
+        (provider, model)
+    }
+
+    /// [`Self::route`] plus which precedence step produced the decision. The
+    /// routing layer uses the step to tell an explicit target (an operator pin or
+    /// a builtin vendor prefix) from the catch-all an upstream router replaces.
+    pub fn route_with_source(&self, requested_model: &str) -> (String, String, RouteSource) {
         let model_lower = requested_model.to_lowercase();
 
         // 1. Exact match in user's model_map
@@ -261,26 +771,59 @@ impl RoutingTables {
                 .clone()
                 .unwrap_or_else(|| requested_model.to_string());
             debug!(requested = requested_model, provider = %provider, routed_model = %model, "route: exact model map hit");
-            return (provider.clone(), model);
+            return (provider.clone(), model, RouteSource::ModelMap);
         }
 
         // 2. Prefix match in user's model_map (longest prefix wins)
-        if let Some(decision) = self.prefix_match_user_map(requested_model) {
-            debug!(requested = requested_model, provider = %decision.0, "route: user prefix map hit");
-            return decision;
+        if let Some((provider, model)) = self.prefix_match_user_map(requested_model) {
+            debug!(requested = requested_model, provider = %provider, "route: user prefix map hit");
+            return (provider, model, RouteSource::ModelMap);
         }
 
-        // 3. Built-in prefix rules
+        // 3. Explicit credit-pool namespace. The ONLY builtin step with a rewrite
+        // slot: the namespace names Ryu's tier, not an upstream id, so it must be
+        // stripped or the vendor 404s. Ahead of the builtin table so no future
+        // builtin row can shadow an explicit pool choice; behind the operator's
+        // `model_map` like everything else compiled in.
+        // Ryu model aliases come first: `ryu-code/max` is also inside the
+        // `ryu-code/` namespace, and must resolve to its upstream id rather than
+        // forwarding the literal `max`.
+        if let Some((provider, upstream)) = pool_model_alias_route(requested_model) {
+            debug!(requested = requested_model, provider = %provider, "route: pool model alias hit");
+            return (
+                provider.to_string(),
+                upstream.to_string(),
+                RouteSource::CreditPool,
+            );
+        }
+        if let Some((provider, upstream)) = pool_namespace_route(requested_model) {
+            debug!(requested = requested_model, provider = %provider, routed_model = %upstream, "route: pool namespace hit");
+            return (
+                provider.to_string(),
+                upstream.to_string(),
+                RouteSource::CreditPool,
+            );
+        }
+
+        // 4. Built-in prefix rules
         for (prefix, provider) in &self.builtin_prefixes {
             if model_lower.starts_with(prefix.as_str()) {
                 debug!(requested = requested_model, provider = %provider, "route: builtin prefix hit");
-                return (provider.clone(), requested_model.to_string());
+                return (
+                    provider.clone(),
+                    requested_model.to_string(),
+                    RouteSource::BuiltinPrefix,
+                );
             }
         }
 
-        // 4. Fall back to configured default provider
+        // 5. Fall back to configured default provider
         debug!(requested = requested_model, provider = %self.default_provider, "route: default provider");
-        (self.default_provider.clone(), requested_model.to_string())
+        (
+            self.default_provider.clone(),
+            requested_model.to_string(),
+            RouteSource::DefaultProvider,
+        )
     }
 
     /// Resolve the provider and model for a modality request, honoring an
@@ -298,9 +841,16 @@ impl RoutingTables {
     ) -> (String, String) {
         // 1. Per-agent slot override wins over the static modality map.
         if let Some(provider) = slot_provider {
-            let model = slot_model
-                .map(str::to_owned)
-                .unwrap_or_else(|| requested_model.to_string());
+            let chosen = slot_model.unwrap_or(requested_model);
+            // A Ryu alias is never a model id any upstream knows: on its own
+            // slot it resolves to the upstream id it names (the same resolution
+            // `route` applies), so a slot override cannot send `ryu-code/max`
+            // to Anthropic verbatim. On any other slot it is left alone and the
+            // upstream rejects it, rather than silently re-homing the request.
+            let model = match pool_model_alias_route(chosen) {
+                Some((alias_slot, upstream)) if alias_slot == provider => upstream.to_owned(),
+                _ => chosen.to_owned(),
+            };
             debug!(
                 modality = modality,
                 requested = requested_model,
@@ -375,6 +925,15 @@ impl RoutingTables {
     ) -> Option<String> {
         let candidates = &self.eval_candidates;
         if candidates.len() < 2 {
+            return None;
+        }
+        // An explicit pool namespace is a billing choice, not a routing hint: A/B
+        // exploration would hand `ryu-code/…` to another candidate verbatim,
+        // which both 404s (the namespace is not an upstream id) and debits a pool
+        // the user did not pick. Leave it to `route`.
+        if pool_namespace_route(requested_model).is_some()
+            || pool_model_alias_route(requested_model).is_some()
+        {
             return None;
         }
 
@@ -729,6 +1288,61 @@ mod tests {
     }
 
     #[test]
+    fn route_with_source_names_the_precedence_step() {
+        let mut model_map = HashMap::new();
+        model_map.insert("pinned".to_owned(), ("anthropic".to_owned(), None));
+        let t = tables(
+            model_map,
+            HashMap::new(),
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+            0.0,
+            "openai",
+        );
+        assert_eq!(t.route_with_source("pinned").2, RouteSource::ModelMap);
+        assert_eq!(
+            t.route_with_source("claude-sonnet-4-5").2,
+            RouteSource::BuiltinPrefix
+        );
+        assert_eq!(
+            t.route_with_source("anthropic/claude-sonnet-4"),
+            (
+                "openai".to_owned(),
+                "anthropic/claude-sonnet-4".to_owned(),
+                RouteSource::DefaultProvider
+            )
+        );
+    }
+
+    #[test]
+    fn router_neutral_prefix_is_stripped_case_insensitively() {
+        assert_eq!(
+            strip_upstream_router_prefix("router/anthropic/claude-sonnet-4"),
+            Some("anthropic/claude-sonnet-4")
+        );
+        assert_eq!(strip_upstream_router_prefix("Router/auto"), Some("auto"));
+        assert_eq!(strip_upstream_router_prefix("router/"), None);
+        assert_eq!(strip_upstream_router_prefix("router/  "), None);
+        assert_eq!(strip_upstream_router_prefix("openrouter/auto"), None);
+        assert_eq!(strip_upstream_router_prefix("rout"), None);
+    }
+
+    #[test]
+    fn upstream_wire_model_keeps_openrouter_meta_routers_in_its_namespace() {
+        assert_eq!(
+            upstream_router_wire_model("openrouter", "auto"),
+            "openrouter/auto"
+        );
+        assert_eq!(
+            upstream_router_wire_model("openrouter", "anthropic/claude-sonnet-4"),
+            "anthropic/claude-sonnet-4"
+        );
+        assert_eq!(upstream_router_wire_model("litellm", "auto"), "auto");
+        assert_eq!(upstream_router_wire_model("local", "llama3.2"), "llama3.2");
+    }
+
+    #[test]
     fn apple_foundationmodel_routes_to_local() {
         let t = bare("openai");
         assert_eq!(t.route("apple-foundationmodel").0, "local");
@@ -851,39 +1465,343 @@ mod tests {
     /// The exact model ids Core puts in front of users for the pool-backed
     /// managed providers still route to the pool those rows claim.
     ///
-    /// The list is a literal COPY of `suggested_models` on the `managed-cloudflare`
-    /// and `managed-bedrock` rows in `apps/core/src/pi_config/mod.rs`. Core is a
+    /// The alias list is a literal COPY of `suggested_models` on the five
+    /// `managed-<pool>` rows in `apps/core/src/pi_config/mod.rs`. Core is a
     /// separate crate that cannot import this table, and the failure mode of a
-    /// disagreement is silent and financial: an id whose prefix this table stops
-    /// claiming falls through to `default_provider` — the retail pool — while the
-    /// picker still calls it "Ryu Fast" and the user's Fast grant goes untouched.
+    /// disagreement is silent and financial: an id this table stops claiming
+    /// falls through to `default_provider` — the retail pool — while the picker
+    /// still calls it "Ryu Fast" and the user's Fast grant goes untouched.
     ///
     /// So the duplication is the point. If a row here has to change to keep this
     /// test green, the corresponding Core row is wrong and must change with it.
     #[test]
     fn the_model_ids_core_offers_for_each_pool_still_route_to_that_pool() {
         let t = bare("openai");
-        for (model, pool) in [
+        for (model, pool, upstream) in [
             // managed-cloudflare → "Ryu Fast"
+            (
+                "ryu-fast/lite",
+                "cloudflare",
+                "@cf/mistral/mistral-7b-instruct-v0.2",
+            ),
+            (
+                "ryu-fast/standard",
+                "cloudflare",
+                "@cf/meta/llama-3.1-8b-instruct",
+            ),
+            (
+                "ryu-fast/max",
+                "cloudflare",
+                "@cf/qwen/qwen1.5-14b-chat-awq",
+            ),
+            // managed-bedrock → "Ryu Frontier"
+            (
+                "ryu-frontier/lite",
+                "bedrock",
+                "meta.llama3-1-70b-instruct-v1:0",
+            ),
+            ("ryu-frontier/standard", "bedrock", "amazon.nova-pro-v1:0"),
+            (
+                "ryu-frontier/max",
+                "bedrock",
+                "anthropic.claude-3-5-sonnet-20241022-v2:0",
+            ),
+            // managed-vertex → "Ryu Vision"
+            ("ryu-vision/lite", "vertex", "google/gemini-2.5-flash"),
+            ("ryu-vision/max", "vertex", "google/gemini-2.5-pro"),
+            // managed-openai-credits → "Ryu Reasoning"
+            ("ryu-reasoning/lite", "openai-credits", "o4-mini"),
+            ("ryu-reasoning/standard", "openai-credits", "o3"),
+            ("ryu-reasoning/max", "openai-credits", "gpt-5"),
+            // managed-anthropic-credits → "Ryu Code"
+            ("ryu-code/lite", "anthropic-credits", "claude-haiku-4-5"),
+            (
+                "ryu-code/standard",
+                "anthropic-credits",
+                "claude-sonnet-4-5",
+            ),
+            ("ryu-code/max", "anthropic-credits", "claude-opus-4-5"),
+        ] {
+            assert_eq!(
+                t.route(model),
+                (pool.to_string(), upstream.to_string()),
+                "Core offers `{model}` as {pool} supply"
+            );
+            // The usage/ledger attribution maps the served id back to the alias.
+            assert_eq!(pool_model_alias_for(pool, upstream), Some(model));
+        }
+        // And the table holds nothing Core does not offer.
+        assert_eq!(POOL_MODEL_ALIASES.len(), 14);
+    }
+
+    /// The pre-alias forms Core used to offer still route to the same pool and
+    /// upstream id (saved configs and free-typed ids keep working), even though
+    /// they are no longer advertised.
+    #[test]
+    fn pre_alias_pool_model_ids_still_route_for_back_compat() {
+        let t = bare("openai");
+        for (model, pool) in [
             ("@cf/meta/llama-3.1-8b-instruct", "cloudflare"),
             ("@cf/mistral/mistral-7b-instruct-v0.2", "cloudflare"),
             ("@cf/qwen/qwen1.5-14b-chat-awq", "cloudflare"),
-            // managed-bedrock → "Ryu Frontier"
             ("anthropic.claude-3-5-sonnet-20241022-v2:0", "bedrock"),
             ("amazon.nova-pro-v1:0", "bedrock"),
             ("meta.llama3-1-70b-instruct-v1:0", "bedrock"),
         ] {
-            let (routed, sent) = t.route(model);
-            assert_eq!(
-                routed, pool,
-                "Core offers `{model}` as {pool} supply, but this table routes it \
-                 to `{routed}` — that turn would debit the wrong pool"
-            );
-            // And the id reaches the provider verbatim: step 3 has no rewrite slot,
-            // so a prefix that is not part of a genuine upstream id routes cleanly
-            // and then 404s.
-            assert_eq!(sent, model);
+            assert_eq!(t.route(model), (pool.to_string(), model.to_string()));
         }
+        for (model, pool, upstream) in [
+            (
+                "ryu-code/claude-sonnet-4-5",
+                "anthropic-credits",
+                "claude-sonnet-4-5",
+            ),
+            (
+                "ryu-code/claude-opus-4-5",
+                "anthropic-credits",
+                "claude-opus-4-5",
+            ),
+            (
+                "ryu-code/claude-haiku-4-5",
+                "anthropic-credits",
+                "claude-haiku-4-5",
+            ),
+            ("ryu-reasoning/o3", "openai-credits", "o3"),
+            ("ryu-reasoning/o4-mini", "openai-credits", "o4-mini"),
+            ("ryu-reasoning/gpt-5", "openai-credits", "gpt-5"),
+            (
+                "ryu-vision/google/gemini-2.5-pro",
+                "vertex",
+                "google/gemini-2.5-pro",
+            ),
+            (
+                "ryu-vision/google/gemini-2.5-flash",
+                "vertex",
+                "google/gemini-2.5-flash",
+            ),
+        ] {
+            assert_eq!(t.route(model), (pool.to_string(), upstream.to_string()));
+        }
+    }
+
+    #[test]
+    fn pool_model_aliases_are_exact_case_insensitive_and_slot_keyed() {
+        let t = bare("openai");
+        assert_eq!(
+            t.route("RYU-Code/Max"),
+            (
+                "anthropic-credits".to_string(),
+                "claude-opus-4-5".to_string()
+            )
+        );
+        assert_eq!(pool_model_alias_id("RYU-Code/Max"), Some("ryu-code/max"));
+        // Exact only: a suffix or a missing size is not an alias.
+        assert_eq!(pool_model_alias_route("ryu-fast/lite-2"), None);
+        assert_eq!(pool_model_alias_route("ryu-fast/"), None);
+        assert_eq!(t.route("ryu-fast/lite-2").0, "openai");
+        // An unknown size in a namespaced tier keeps the old namespace behavior.
+        assert_eq!(
+            t.route("ryu-code/ultra"),
+            ("anthropic-credits".to_string(), "ultra".to_string())
+        );
+        // The reverse map is keyed on the managed SLOT: the same upstream id on
+        // a BYOK slot is the user's own traffic and keeps its real name.
+        assert_eq!(pool_model_alias_for("anthropic", "claude-opus-4-5"), None);
+        assert_eq!(pool_model_alias_for("openai", "o3"), None);
+        assert_eq!(
+            pool_model_alias_for("openrouter", "google/gemini-2.5-pro"),
+            None
+        );
+        // Aliases sit in namespaces no vendor uses: none is a builtin-prefix id.
+        for (alias, _, _) in POOL_MODEL_ALIASES {
+            assert!(alias.starts_with("ryu-"));
+            assert!(!builtin_prefixes()
+                .iter()
+                .any(|(prefix, _)| alias.starts_with(prefix.as_str())));
+        }
+    }
+
+    #[test]
+    fn pool_model_equivalents_are_exact_routable_and_openrouter_ids() {
+        let t = bare("openrouter");
+        for (id, slot, upstream) in SEED_OWN_SUPPLY_EQUIVALENTS {
+            // The left id is Ryu Router traffic today.
+            assert_eq!(t.route(id).0, "openrouter", "{id}");
+            // The upstream is an aliased (priced, routable) own-supply id, and
+            // the alias routes to exactly this slot + upstream.
+            let alias = pool_model_alias_for(slot, upstream)
+                .unwrap_or_else(|| panic!("{id}: {slot}/{upstream} has no alias"));
+            assert_eq!(
+                t.route(alias),
+                ((*slot).to_string(), (*upstream).to_string()),
+                "{id}"
+            );
+            // Both directions agree, and only for the own-supply slot.
+            assert_eq!(
+                pool_model_equivalents(id).next(),
+                Some((*slot, *upstream)),
+                "{id}"
+            );
+            assert_eq!(pool_model_equivalent_id(slot, upstream), Some(*id));
+            assert_eq!(pool_model_equivalent_id("openrouter", upstream), None);
+        }
+        assert_eq!(
+            pool_model_equivalents("Anthropic/Claude-Sonnet-4.5").next(),
+            Some(("anthropic-credits", "claude-sonnet-4-5"))
+        );
+        assert_eq!(pool_model_equivalents("openrouter/auto").next(), None);
+        assert_eq!(
+            pool_model_equivalents("anthropic/claude-sonnet-4").next(),
+            None
+        );
+        // A BYOK slot serving the same bare id keeps its name.
+        assert_eq!(
+            pool_model_equivalent_id("anthropic", "claude-sonnet-4-5"),
+            None
+        );
+        assert_eq!(pool_model_equivalent_id("openai", "o3"), None);
+    }
+
+    #[test]
+    fn a_slot_override_resolves_an_alias_on_its_own_slot_only() {
+        let t = bare("openrouter");
+        assert_eq!(
+            t.route_modality(
+                "chat",
+                "anything",
+                Some("anthropic-credits"),
+                Some("ryu-code/max")
+            ),
+            (
+                "anthropic-credits".to_string(),
+                "claude-opus-4-5".to_string()
+            )
+        );
+        assert_eq!(
+            t.route_modality("chat", "ryu-code/max", Some("openai"), None),
+            ("openai".to_string(), "ryu-code/max".to_string())
+        );
+    }
+
+    #[test]
+    fn pool_default_alias_prefers_standard_then_the_first_size() {
+        assert_eq!(
+            pool_default_alias_for("anthropic-credits"),
+            Some("ryu-code/standard")
+        );
+        assert_eq!(
+            pool_default_alias_for("cloudflare"),
+            Some("ryu-fast/standard")
+        );
+        // Ryu Vision has no `standard` size: its first (lite) alias stands in.
+        assert_eq!(pool_default_alias_for("vertex"), Some("ryu-vision/lite"));
+        // BYOK / untiered slots sell no tier.
+        assert_eq!(pool_default_alias_for("anthropic"), None);
+        assert_eq!(pool_default_alias_for("openrouter"), None);
+    }
+
+    /// An operator `model_map` entry still outranks an alias.
+    #[test]
+    fn operator_model_map_outranks_a_pool_model_alias() {
+        let mut model_map = HashMap::new();
+        model_map.insert(
+            "ryu-code/max".to_string(),
+            ("anthropic".to_string(), Some("claude-opus-4-5".to_string())),
+        );
+        let t = tables(
+            model_map,
+            HashMap::new(),
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+            0.0,
+            "openai",
+        );
+        assert_eq!(t.route("ryu-code/max").0, "anthropic");
+        assert_eq!(t.route("ryu-code/lite").0, "anthropic-credits");
+    }
+
+    /// The namespaces reach the donated slots WITHOUT taking a single id that
+    /// routes somewhere today. This is the whole reason they are namespaces and
+    /// not prefixes: the bare vendor ids belong to BYOK slots and OpenRouter.
+    #[test]
+    fn pool_namespaces_do_not_capture_byok_or_openrouter_ids() {
+        let t = bare("openrouter");
+        assert_eq!(t.route("claude-sonnet-4-5").0, "anthropic");
+        assert_eq!(t.route("gpt-5").0, "openai");
+        assert_eq!(t.route("o3").0, "openai");
+        assert_eq!(t.route("o4-mini").0, "openai");
+        assert_eq!(t.route("google/gemini-2.5-pro").0, "openrouter");
+        assert_eq!(t.route("gemini-2.5-pro").0, "genai");
+        // No builtin prefix row points at a namespaced slot either; the
+        // namespace step is the only compiled-in way in.
+        assert!(!builtin_prefixes()
+            .iter()
+            .any(|(_, p)| p == "anthropic-credits" || p == "openai-credits" || p == "vertex"));
+    }
+
+    #[test]
+    fn pool_namespace_matching_is_anchored_case_insensitive_and_non_empty() {
+        let t = bare("openai");
+        // Namespace case is forgiven; the upstream id's case is preserved.
+        assert_eq!(
+            t.route("Ryu-Code/Claude-X"),
+            ("anthropic-credits".to_string(), "Claude-X".to_string())
+        );
+        // A bare namespace is not a model: it takes the normal order.
+        assert_eq!(t.route("ryu-code/").0, "openai");
+        // Anchored at position 0 — a namespace inside an id is just text.
+        assert_eq!(
+            t.route("openrouter/ryu-code/claude-sonnet-4-5").0,
+            "openrouter"
+        );
+        // Multi-byte input around the boundary must not panic on slicing.
+        assert_eq!(t.route("ryu-codé/x").0, "openai");
+        assert_eq!(pool_namespace_route("ryu-co"), None);
+    }
+
+    /// An operator's `model_map` still outranks the compiled-in namespace, the
+    /// same precedence every builtin route has.
+    #[test]
+    fn operator_model_map_outranks_a_pool_namespace() {
+        let mut model_map = HashMap::new();
+        model_map.insert(
+            "ryu-code/claude-sonnet-4-5".to_string(),
+            (
+                "bedrock".to_string(),
+                Some("anthropic.claude-3-5-sonnet-20241022-v2:0".to_string()),
+            ),
+        );
+        let t = tables(
+            model_map,
+            HashMap::new(),
+            Vec::new(),
+            HashMap::new(),
+            Vec::new(),
+            0.0,
+            "openai",
+        );
+        assert_eq!(t.route("ryu-code/claude-sonnet-4-5").0, "bedrock");
+        assert_eq!(t.route("ryu-code/claude-opus-4-5").0, "anthropic-credits");
+    }
+
+    /// A/B eval routing must not reassign an explicit pool choice: it would send
+    /// the namespaced id verbatim to another candidate and bill the wrong pool.
+    #[test]
+    fn eval_route_leaves_pool_namespaced_ids_to_route() {
+        let t = tables(
+            HashMap::new(),
+            HashMap::new(),
+            Vec::new(),
+            HashMap::new(),
+            vec!["openai".to_string(), "openrouter".to_string()],
+            0.5,
+            "openai",
+        );
+        assert_eq!(t.eval_route("ryu-reasoning/o3", &|_| None, &|| 0), None);
+        assert_eq!(t.eval_route("ryu-fast/max", &|_| None, &|| 0), None);
+        assert_eq!(t.eval_route("ryu-frontier/lite", &|_| None, &|| 0), None);
+        assert!(t.eval_route("gpt-5", &|_| None, &|| 0).is_some());
     }
 
     #[test]
@@ -961,7 +1879,8 @@ mod tests {
             !prefixes
                 .iter()
                 .any(|(_, provider)| provider == "openai-credits"),
-            "the donated OpenAI pool is reachable via model_map/default_provider only"
+            "the donated OpenAI pool is reachable via its `ryu-reasoning/` namespace \
+             or model_map/default_provider only"
         );
         let t = bare("openai");
         for model in ["gpt-4o", "gpt-5", "o1-preview", "o3-mini", "o4-mini"] {

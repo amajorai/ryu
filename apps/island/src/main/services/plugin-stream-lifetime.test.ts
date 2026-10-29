@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,9 +36,28 @@ test("plugin terminal frames release held HTTP bodies", async () => {
 		},
 	});
 	try {
-		for (const name of ["plugin-host.ts", "response-deadline.ts", "sse.ts"]) {
+		await symlink(
+			join(import.meta.dirname, "../../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
+		);
+		await copyFile(
+			join(import.meta.dirname, "../../shared/host-json.ts"),
+			join(root, "host-json.ts")
+		);
+		for (const name of [
+			"plugin-host.ts",
+			"plugin-host-contract.ts",
+			"response-deadline.ts",
+			"sse.ts",
+		]) {
 			await copyFile(join(import.meta.dirname, name), join(root, name));
 		}
+		const hostSource = await readFile(join(root, "plugin-host.ts"), "utf8");
+		await writeFile(
+			join(root, "plugin-host.ts"),
+			hostSource.replaceAll("../../shared/host-json.ts", "./host-json.ts")
+		);
 		await writeFile(
 			join(root, "config.ts"),
 			`export const coreHeaders=()=>({}); export const loadConfig=()=>({coreBaseUrl:${JSON.stringify(server.url.toString().replace(/\/$/, ""))}});`

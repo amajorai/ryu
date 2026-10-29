@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import "@ryu/ui/app-ui.css";
+
+@source "./calendar-automation-proof.tsx";
+@source "./calendar-automation-proof-hooks.tsx";
+@source "../../src/components/calendar";
+@source "../../src/components/agents/AgentCalendarView.tsx";
+@source "../../../../packages/ui/src";
+
+html,
+body,
+#root {
+	min-height: 100%;
+	margin: 0;
+}
+
+body {
+	min-width: 320px;
+	color: var(--foreground);
+	background: var(--background);
+}

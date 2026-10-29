@@ -29,6 +29,151 @@ pub struct BindConnectTargetBody {
     target: ConnectTargetSelector,
 }
 
+/// Refuse an agent trigger binding on a connected account the agent's account
+/// policy does not allow (its identity mode and allowlist). The trigger runs on
+/// one of the user's accounts, so this guards every route that attaches one to
+/// an agent. A store error refuses with 503; an agent without a record keeps
+/// today's behaviour.
+pub(super) async fn agent_trigger_account_refusal(
+    state: &ServerState,
+    agent_id: &str,
+    connected_account_id: &str,
+) -> Option<(StatusCode, Json<Value>)> {
+    match state.agent_store.get(agent_id).await {
+        Ok(Some(record))
+            if !crate::agent_access::AgentAccountPolicy::from_record(&record)
+                .allows_composio_account(connected_account_id) =>
+        {
+            Some((
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "this agent is not allowed to use that connected account; allow it in the agent's account access"
+                })),
+            ))
+        }
+        Ok(_) => None,
+        Err(_) => Some((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "agent lookup unavailable" })),
+        )),
+    }
+}
+
+/// Refuse a trigger on one of the user's accounts that the calling user's own
+/// Composio entity does not hold (for example an account connected to an
+/// agent's own identity, passed as a user account). Embedded mode only: with
+/// the Connect service, Connect scopes every trigger to the caller's tenant.
+pub(super) async fn user_trigger_account_ownership_refusal(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    connected_account_id: &str,
+) -> Option<(StatusCode, Json<Value>)> {
+    let user = caller.as_ref().map(|caller| caller.user_id.as_str());
+    match crate::composio_connect::owned_connection(&state.client, connected_account_id, user).await
+    {
+        Ok(Some(_)) => None,
+        Ok(None) => Some((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no such account is connected to your account" })),
+        )),
+        Err(error) => Some((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": error.to_string() })),
+        )),
+    }
+}
+
+/// Check a trigger on an account connected to the agent's own identity and
+/// return that identity's Composio entity (`agent:<owner>:<agent_id>`), or the
+/// response to return. In order: the Connect service has no agent entities
+/// (501), the caller must be a verified user (403) who may run the agent
+/// (403), the agent must exist (404; a store error is 503), its policy must
+/// allow events from that own account (403), Composio must be configured (503),
+/// and the agent's own entity must hold the account (404) and have it active
+/// (409). Another agent's account, or one of the user's, is never found on
+/// this agent's entity.
+pub(super) async fn own_account_trigger_refusal(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    agent_id: &str,
+    connected_account_id: &str,
+) -> Result<String, (StatusCode, Json<Value>)> {
+    let refuse = |status: StatusCode, message: &str| (status, Json(json!({ "error": message })));
+    if ryu_composio::service::is_configured() {
+        return Err((
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({
+                "error": "triggers on an agent's own apps are not available with Connect service mode",
+                "code": "agent_entity_unsupported",
+            })),
+        ));
+    }
+    let Ok(owner) = crate::mcp_oauth::owner_for_caller(caller.as_ref()) else {
+        return Err(refuse(StatusCode::FORBIDDEN, "verified user required"));
+    };
+    if super::enforce_permission_on(
+        state,
+        caller,
+        crate::identity_verify::permissions::AGENT_RUN,
+        crate::acl::KIND_AGENT,
+        agent_id,
+    )
+    .await
+    .is_err()
+    {
+        return Err(refuse(
+            StatusCode::FORBIDDEN,
+            "agent execution is not permitted",
+        ));
+    }
+    let record = match state.agent_store.get(agent_id).await {
+        Ok(Some(record)) => record,
+        Ok(None) => return Err(refuse(StatusCode::NOT_FOUND, "agent not found")),
+        Err(_) => {
+            return Err(refuse(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "agent lookup unavailable",
+            ))
+        }
+    };
+    if !crate::agent_access::AgentAccountPolicy::from_record(&record)
+        .allows_own_composio_trigger(connected_account_id)
+    {
+        return Err(refuse(
+            StatusCode::FORBIDDEN,
+            "this agent is not allowed to use that connected account; allow it in the agent's account access",
+        ));
+    }
+    if !crate::composio_auth::is_configured() {
+        return Err(refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Composio is not configured; add a Composio API key first",
+        ));
+    }
+    let entity = crate::agent_access::AgentAccountPolicy::composio_agent_entity(&owner, agent_id);
+    match crate::composio_connect::owned_connection(
+        &state.client,
+        connected_account_id,
+        Some(&entity),
+    )
+    .await
+    {
+        Ok(Some(row)) if row.get("active").and_then(Value::as_bool) == Some(false) => Err(refuse(
+            StatusCode::CONFLICT,
+            "that account is not active; reconnect it for this agent first",
+        )),
+        Ok(Some(_)) => Ok(entity),
+        Ok(None) => Err(refuse(
+            StatusCode::NOT_FOUND,
+            "no such account is connected to this agent",
+        )),
+        Err(error) => Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": error.to_string() })),
+        )),
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/api/composio/targets",
@@ -55,7 +200,7 @@ pub async fn bind_target(
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({"code":"verified_user_required"})),
-            )
+            );
         }
     };
     use crate::identity_verify::permissions;
@@ -90,7 +235,9 @@ pub async fn bind_target(
             Json(json!({"code":"target_run_denied"})),
         );
     }
-    let result: Result<Value> = async {
+    // `Ok(Err(response))` is a policy refusal decided after the trigger (and so
+    // its connected account) has been resolved.
+    let result: Result<std::result::Result<Value, (StatusCode, Json<Value>)>> = async {
         match &body.target {
             ConnectTargetSelector::Agent(id) => {
                 if state.agent_store.get(id).await?.is_none()
@@ -113,6 +260,13 @@ pub async fn bind_target(
             .context("Connect trigger is not owned by the caller")?;
         if trigger.status != "active" {
             bail!("Connect trigger is not active");
+        }
+        if let ConnectTargetSelector::Agent(id) = &body.target {
+            if let Some(refusal) =
+                agent_trigger_account_refusal(&state, id, &trigger.connected_account_id).await
+            {
+                return Ok(Err(refusal));
+            }
         }
         let account = ryu_composio::service::connection_status(&trigger.connected_account_id, user)
             .await
@@ -145,11 +299,14 @@ pub async fn bind_target(
         let subscription = store
             .bind_connect_target(&owner, &identity, &toolkit, target)
             .await?;
-        Ok(json!({"subscription":subscription,"connectTriggerId":trigger.id}))
+        Ok(Ok(
+            json!({"subscription":subscription,"connectTriggerId":trigger.id}),
+        ))
     }
     .await;
     match result {
-        Ok(value) => (StatusCode::CREATED, Json(value)),
+        Ok(Ok(value)) => (StatusCode::CREATED, Json(value)),
+        Ok(Err(refusal)) => refusal,
         Err(error) => (
             StatusCode::BAD_GATEWAY,
             Json(json!({"error":error.to_string()})),
@@ -168,7 +325,7 @@ pub(super) async fn subscribe(
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({"error":"verified user required"})),
-            )
+            );
         }
     };
     if super::enforce_permission_on(
@@ -241,6 +398,86 @@ pub(super) async fn subscribe(
 struct CoreEventHandler {
     state: ServerState,
     caller: Option<crate::identity_verify::VerifiedCaller>,
+    authorization: Option<super::ResolvedAuthorization>,
+}
+
+fn authorize_connect_target(
+    resolved: &super::ResolvedAuthorization,
+    kind: &str,
+    id: &str,
+    now: u64,
+) -> bool {
+    use crate::authorization::{Capability, RoutePolicy};
+    let mut bindings = resolved.bindings.clone();
+    bindings.agent_id = (kind == "agent").then(|| id.to_owned());
+    bindings.resource_id = Some(id.to_owned());
+    bindings.plugin_id = None;
+    bindings.tool_name = None;
+    let capability = match kind {
+        "agent" => Capability::ToolsExec,
+        "workflow" => Capability::WorkflowsRun,
+        _ => return false,
+    };
+    resolved
+        .context
+        .authorize(&RoutePolicy::requires([capability]), &bindings, now)
+        .is_allowed()
+}
+
+#[cfg(test)]
+mod credential_target_tests {
+    use super::*;
+    #[test]
+    fn fanout_preserves_delegated_agent_and_resource_bounds() {
+        use crate::authorization::*;
+        let mut resolved = super::super::ResolvedAuthorization {
+            context: AuthorizationContext {
+                credential: CredentialKind::ManagedDelegation,
+                principal: Principal::Agent {
+                    agent_id: "a".into(),
+                },
+                capabilities: CapabilitySet::new([Capability::ToolsExec, Capability::WorkflowsRun]),
+                constraints: GrantConstraints {
+                    agent_id: Some("a".into()),
+                    ..Default::default()
+                },
+                issued_at: 0,
+                expires_at: Some(100),
+            },
+            bindings: RequestBindings {
+                agent_id: Some("a".into()),
+                ..Default::default()
+            },
+            caller: None,
+            verified_user_jwt: None,
+        };
+        assert!(authorize_connect_target(&resolved, "agent", "a", 1));
+        assert!(!authorize_connect_target(&resolved, "agent", "b", 1));
+        assert!(!authorize_connect_target(&resolved, "workflow", "a", 1));
+        assert!(!authorize_connect_target(&resolved, "agent", "a", 100));
+        resolved.context.constraints.agent_id = None;
+        resolved.context.constraints.resource_id = Some("workflow-a".into());
+        assert!(authorize_connect_target(
+            &resolved,
+            "workflow",
+            "workflow-a",
+            1
+        ));
+        assert!(!authorize_connect_target(
+            &resolved,
+            "workflow",
+            "workflow-b",
+            1
+        ));
+        resolved.context = AuthorizationContext::owner(0);
+        assert!(authorize_connect_target(&resolved, "agent", "b", 1));
+        assert!(authorize_connect_target(
+            &resolved,
+            "workflow",
+            "workflow-b",
+            1
+        ));
+    }
 }
 
 /// Start only explicitly configured owners. JWT files are reread and verified
@@ -333,6 +570,7 @@ async fn worker_attempt(
     let handler = CoreEventHandler {
         state: state.clone(),
         caller,
+        authorization: None,
     };
     ryu_composio::consumer::consume_one(user.as_deref(), &handler).await
 }
@@ -348,9 +586,45 @@ impl ryu_composio::consumer::EventHandler for CoreEventHandler {
         let targets = store.connect_targets(owner, payload).await?;
         if targets.is_empty() {
             if store.connect_event_was_unbound(owner, payload).await? {
+                crate::sidecar::gateway::record_composio_trigger_delivery(
+                    &self.state.client,
+                    delivery_id,
+                )
+                .await?;
                 return Ok(());
             }
             bail!("Connect event has no owned Core target; retaining delivery");
+        }
+        // An agent whose account access no longer allows the event's account
+        // (switched to its own identity, or the account was dropped from its
+        // allowlist) stops receiving it, whenever the binding was made. A store
+        // error retains the delivery.
+        let mut allowed_targets = Vec::with_capacity(targets.len());
+        for target in targets {
+            if target.target_kind == "agent" {
+                if let Some(record) = self.state.agent_store.get(&target.agent_id).await? {
+                    if !crate::agent_access::AgentAccountPolicy::from_record(&record)
+                        .allows_composio_account(&target.connected_account_id)
+                    {
+                        tracing::info!(
+                            agent = %target.agent_id,
+                            subscription = %target.id,
+                            "Connect event skipped: the agent may no longer use this account"
+                        );
+                        continue;
+                    }
+                }
+            }
+            allowed_targets.push(target);
+        }
+        let targets = allowed_targets;
+        if targets.is_empty() {
+            crate::sidecar::gateway::record_composio_trigger_delivery(
+                &self.state.client,
+                delivery_id,
+            )
+            .await?;
+            return Ok(());
         }
         // Authorize the entire fan-out before issuing any effects. A delivery
         // cannot choose arbitrary targets: these rows were bound by the owner.
@@ -393,6 +667,16 @@ impl ryu_composio::consumer::EventHandler for CoreEventHandler {
                 ),
                 _ => bail!("Invalid Connect target kind"),
             };
+            if self.authorization.as_ref().is_some_and(|resolved| {
+                !authorize_connect_target(
+                    resolved,
+                    &target.target_kind,
+                    id,
+                    chrono::Utc::now().timestamp().max(0) as u64,
+                )
+            }) {
+                bail!("Connect target exceeds credential authority");
+            }
             if super::enforce_permission_on(&self.state, &self.caller, permission, kind, id)
                 .await
                 .is_err()
@@ -400,6 +684,8 @@ impl ryu_composio::consumer::EventHandler for CoreEventHandler {
                 bail!("Connect target execution is not permitted");
             }
         }
+        crate::sidecar::gateway::record_composio_trigger_delivery(&self.state.client, delivery_id)
+            .await?;
         for target in &targets {
             crate::composio_host::run_connect_target(owner, delivery_id, target, payload).await?;
         }
@@ -419,6 +705,7 @@ impl ryu_composio::consumer::EventHandler for CoreEventHandler {
 pub async fn consume(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Extension(authorization): Extension<super::ResolvedAuthorization>,
     Json(_body): Json<ConsumeBody>,
 ) -> (StatusCode, Json<Value>) {
     if !ryu_composio::service::is_configured() {
@@ -434,7 +721,11 @@ pub async fn consume(
         );
     }
     let user_id = caller.as_ref().map(|caller| caller.user_id.clone());
-    let handler = CoreEventHandler { state, caller };
+    let handler = CoreEventHandler {
+        state,
+        caller,
+        authorization: Some(authorization),
+    };
     match ryu_composio::consumer::consume_one(user_id.as_deref(), &handler).await {
         Ok(ryu_composio::consumer::Consumption::Empty) => {
             (StatusCode::OK, Json(json!({"status":"empty"})))

@@ -1,6 +1,6 @@
 import { deflateSync } from "node:zlib";
-import { planTierColors } from "../components/plan-badge.tsx";
 import { fnv1a, xorshift32 } from "../components/dither-kit/pixel.ts";
+import { PRISM_OG_COLORS } from "./prism-colors.ts";
 
 // The Prism backdrop behind every social card. This server-safe generator lives in the shared UI package so all OG surfaces use the same background.
 //
@@ -73,6 +73,8 @@ const HUE_SPREAD_MAX = 165;
 /** The window of shader time a card's frozen frame is drawn from. */
 const TIME_RANGE = 2000;
 const COLOR_COUNT = 4;
+const OG_PRISM_FRAME_TIME = TIME_RANGE / 2;
+const OG_PRISM_PEAK_ALPHA = 0.58;
 
 const TWO_PI = Math.PI * 2;
 /** The shader's own offset, so frame 0 is not the shader's blank first frame. */
@@ -182,7 +184,7 @@ export const prismRoll = (seed: string): PrismRoll => {
 };
 
 /** The warp field, one 0-1 scalar per sample, before any colour is applied. */
-const warpShape = (px: number, py: number, time: number): number => {
+const sampleWarp = (px: number, py: number, time: number): number => {
 	// v_patternUV, with the pattern-sizing defaults the component ships (fit
 	// "none", no world size, no offset, origin centred, pixel ratio 1) folded
 	// out: the box origin and every offset term vanish, leaving the NDC half-
@@ -232,12 +234,12 @@ const warpShape = (px: number, py: number, time: number): number => {
 };
 
 /** The shader's colour ramp: walk the stops, mixing by the shape's position. */
-const shadeAt = (shape: number, colors: PrismColor[]): PrismColor => {
+const shadeAt = (sample: number, colors: PrismColor[]): PrismColor => {
 	const first = colors[0];
 	if (!first) {
 		return { r: 1, g: 1, b: 1 };
 	}
-	const mixer = shape * (colors.length - 1);
+	const mixer = sample * (colors.length - 1);
 	let out = { ...first };
 	for (let i = 1; i < colors.length; i++) {
 		const c = colors[i];
@@ -320,14 +322,19 @@ const encodePng = (width: number, height: number, rgb: Uint8Array): Buffer => {
 	]);
 };
 
-/** Composite a 0-1 channel onto white at the card's fixed strength. */
-const onWhite = (channel: number): number =>
-	Math.round(255 - (255 - clamp01(channel) * 255) * PEAK_ALPHA);
+/** Composite a 0-1 channel onto white at the requested strength. */
+const onWhite = (channel: number, peakAlpha = PEAK_ALPHA): number =>
+	Math.round(255 - (255 - clamp01(channel) * 255) * peakAlpha);
+
+/** A sampled social-card field, before its native PNG encoding. */
+export interface PrismRaster {
+	height: number;
+	rgb: Uint8Array;
+	width: number;
+}
 
 /** The Prism field for one seed, as raw RGB bytes. Exported for tests. */
-export const prismField = (
-	seed: string
-): { height: number; rgb: Uint8Array; width: number } => {
+export const prismField = (seed: string): PrismRaster => {
 	const { colors, time } = prismRoll(seed);
 	const rgb = new Uint8Array(FIELD_WIDTH * FIELD_HEIGHT * 3);
 	for (let y = 0; y < FIELD_HEIGHT; y++) {
@@ -335,7 +342,7 @@ export const prismField = (
 		const py = ((y + 0.5) / FIELD_HEIGHT) * CARD_HEIGHT;
 		for (let x = 0; x < FIELD_WIDTH; x++) {
 			const px = ((x + 0.5) / FIELD_WIDTH) * CARD_WIDTH;
-			const { r, g, b } = shadeAt(warpShape(px, py, time), colors);
+			const { r, g, b } = shadeAt(sampleWarp(px, py, time), colors);
 			const i = (y * FIELD_WIDTH + x) * 3;
 			rgb[i] = onWhite(r);
 			rgb[i + 1] = onWhite(g);
@@ -355,34 +362,50 @@ export const prismBackgroundDataUri = (seed: string): string => {
 	return `data:image/png;base64,${encodePng(width, height, rgb).toString("base64")}`;
 };
 
-/** Keep the original Prism geometry, recolored with the complete Pro palette. */
-export const proBadgeBackgroundDataUri = (): string => {
- const colors = planTierColors("pro").map((hex) => ({
-  r: Number.parseInt(hex.slice(1, 3), 16) / 255,
-  g: Number.parseInt(hex.slice(3, 5), 16) / 255,
-  b: Number.parseInt(hex.slice(5, 7), 16) / 255,
- }));
- const { time } = prismRoll("ryu");
- const shapes = new Float64Array(FIELD_WIDTH * FIELD_HEIGHT);
- let minimum = Number.POSITIVE_INFINITY;
- let maximum = Number.NEGATIVE_INFINITY;
- for (let y = 0; y < FIELD_HEIGHT; y++) {
-  for (let x = 0; x < FIELD_WIDTH; x++) {
-   const shape = warpShape(((x + 0.5) / FIELD_WIDTH) * CARD_WIDTH, ((y + 0.5) / FIELD_HEIGHT) * CARD_HEIGHT, time);
-   shapes[y * FIELD_WIDTH + x] = shape;
-   minimum = Math.min(minimum, shape);
-   maximum = Math.max(maximum, shape);
-  }
- }
- const rgb = new Uint8Array(FIELD_WIDTH * FIELD_HEIGHT * 3);
- const range = maximum - minimum || 1;
- for (let i = 0; i < shapes.length; i++) {
-  // The frozen frame samples only part of the shader range. Span the palette
-  // across that frame so the full Pro spectrum appears, not just its greens.
-  const { r, g, b } = shadeAt(((shapes[i] ?? minimum) - minimum) / range, colors);
-  rgb[i * 3] = onWhite(r);
-  rgb[i * 3 + 1] = onWhite(g);
-  rgb[i * 3 + 2] = onWhite(b);
- }
- return `data:image/png;base64,${encodePng(FIELD_WIDTH, FIELD_HEIGHT, rgb).toString("base64")}`;
+/** A deterministic Prism frame using the component's white-and-blue palette. */
+export const ogPrismField = (): PrismRaster => {
+	const colors = PRISM_OG_COLORS.map((hex) => ({
+		r: Number.parseInt(hex.slice(1, 3), 16) / 255,
+		g: Number.parseInt(hex.slice(3, 5), 16) / 255,
+		b: Number.parseInt(hex.slice(5, 7), 16) / 255,
+	}));
+	const warpSamples = new Float64Array(FIELD_WIDTH * FIELD_HEIGHT);
+	let minimum = Number.POSITIVE_INFINITY;
+	let maximum = Number.NEGATIVE_INFINITY;
+	for (let y = 0; y < FIELD_HEIGHT; y++) {
+		for (let x = 0; x < FIELD_WIDTH; x++) {
+			const sample = sampleWarp(
+				((x + 0.5) / FIELD_WIDTH) * CARD_WIDTH,
+				((y + 0.5) / FIELD_HEIGHT) * CARD_HEIGHT,
+				OG_PRISM_FRAME_TIME
+			);
+			warpSamples[y * FIELD_WIDTH + x] = sample;
+			minimum = Math.min(minimum, sample);
+			maximum = Math.max(maximum, sample);
+		}
+	}
+
+	const rgb = new Uint8Array(FIELD_WIDTH * FIELD_HEIGHT * 3);
+	const range = maximum - minimum || 1;
+	for (let i = 0; i < warpSamples.length; i++) {
+		// Freeze halfway through the shader's sampling window so the card opens
+		// on an already-active frame. Keep the blue recognizable while white
+		// replaces the original dark stop.
+		const color = shadeAt(
+			((warpSamples[i] ?? minimum) - minimum) / range,
+			colors
+		);
+		rgb[i * 3] = onWhite(color.r, OG_PRISM_PEAK_ALPHA);
+		rgb[i * 3 + 1] = onWhite(color.g, OG_PRISM_PEAK_ALPHA);
+		rgb[i * 3 + 2] = onWhite(color.b, OG_PRISM_PEAK_ALPHA);
+	}
+	return { height: FIELD_HEIGHT, rgb, width: FIELD_WIDTH };
 };
+
+/** The white-and-blue Prism frame as a data URI for the shared social card. */
+export const ogPrismBackgroundDataUri = (): string => {
+	const { width, height, rgb } = ogPrismField();
+	return `data:image/png;base64,${encodePng(width, height, rgb).toString("base64")}`;
+};
+
+export { PRISM_OG_COLORS } from "./prism-colors.ts";

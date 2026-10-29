@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { PluginSidebarSection } from "@/src/lib/api/plugins.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -77,9 +77,14 @@ function installFetch() {
 		mock(
 			(_input: RequestInfo | URL, init?: RequestInit) =>
 				new Promise<Response>((resolve) => {
+					if (!init?.signal) {
+						throw new Error(
+							"Sidebar source fetch requires its query AbortSignal"
+						);
+					}
 					reads.push({
 						jwt: new Headers(init?.headers).get("x-identity"),
-						signal: init?.signal as AbortSignal,
+						signal: init.signal,
 						resolve,
 					});
 				})
@@ -137,4 +142,23 @@ test("identity changes cancel obsolete reads and isolate cached rows", async () 
 	expect(first[0].rows).toEqual([]);
 	await settle(1, "New identity");
 	expect(first[0].rows[0].item.title).toBe("New identity");
+});
+
+test("denied reads remain errors and an explicit refetch recovers the collection", async () => {
+	installFetch();
+	await act(async () => root.render(<Harness />));
+	await act(async () => {
+		reads[0].resolve(Response.json({ error: "Denied" }, { status: 403 }));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	});
+	expect(first[0].error?.message).toBe("Collection could not be loaded (403).");
+	expect(first[0].rows).toEqual([]);
+	expect(reads).toHaveLength(1);
+	await act(async () => {
+		void client.refetchQueries({ queryKey: ["contributed-section-source"] });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	});
+	await settle(1, "Recovered row");
+	expect(first[0].error).toBeNull();
+	expect(first[0].rows[0].item.title).toBe("Recovered row");
 });

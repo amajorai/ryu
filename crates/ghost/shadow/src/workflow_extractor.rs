@@ -1,3 +1,4 @@
+use crate::timeline::open_event_column;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -116,7 +117,7 @@ pub fn extract_workflows(
     let mut stmt = conn
         .prepare(
             "SELECT ts, event_type, ax_role, ax_title, ax_identifier,
-                    window_title, app_name, bundle_id
+                    window_title, app_name, bundle_id, id
              FROM events_index
              WHERE track = 2
                AND ts >= ?1
@@ -128,13 +129,14 @@ pub fn extract_workflows(
     let raw_actions: Vec<RawAction> = stmt
         .query_map(params![start_ts as i64], |row| {
             let ts: i64 = row.get(0)?;
+            let id: i64 = row.get(8)?;
             Ok(RawAction {
                 ts: ts as u64,
                 event_type: row.get(1)?,
                 ax_role: row.get(2)?,
-                ax_title: row.get(3)?,
+                ax_title: open_event_column(id, "ax_title", row.get(3)?),
                 ax_identifier: row.get(4)?,
-                window_title: row.get(5)?,
+                window_title: open_event_column(id, "window_title", row.get(5)?),
                 app_name: row.get(6)?,
                 bundle_id: row.get(7)?,
             })
@@ -185,7 +187,7 @@ pub fn extract_workflows_for_app(
     let mut stmt = conn
         .prepare(
             "SELECT ts, event_type, ax_role, ax_title, ax_identifier,
-                    window_title, app_name, bundle_id
+                    window_title, app_name, bundle_id, id
              FROM events_index
              WHERE track = 2
                AND ts >= ?1
@@ -198,13 +200,14 @@ pub fn extract_workflows_for_app(
     let raw_actions: Vec<RawAction> = stmt
         .query_map(params![start_ts as i64, format!("%{}%", app_name)], |row| {
             let ts: i64 = row.get(0)?;
+            let id: i64 = row.get(8)?;
             Ok(RawAction {
                 ts: ts as u64,
                 event_type: row.get(1)?,
                 ax_role: row.get(2)?,
-                ax_title: row.get(3)?,
+                ax_title: open_event_column(id, "ax_title", row.get(3)?),
                 ax_identifier: row.get(4)?,
-                window_title: row.get(5)?,
+                window_title: open_event_column(id, "window_title", row.get(5)?),
                 app_name: row.get(6)?,
                 bundle_id: row.get(7)?,
             })
@@ -578,6 +581,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE events_index (
+                id INTEGER PRIMARY KEY,
                 ts INTEGER NOT NULL,
                 track INTEGER NOT NULL,
                 event_type TEXT NOT NULL DEFAULT '',

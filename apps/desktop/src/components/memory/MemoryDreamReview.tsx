@@ -1,16 +1,17 @@
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Card, CardContent, CardHeader } from "@ryu/ui/components/card";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Card, CardContent, CardHeader } from "@ryu/ui/components/card.tsx";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Label } from "@ryu/ui/components/label";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/empty.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import {
 	ArrowRight,
 	Check,
@@ -34,10 +35,6 @@ import {
 	updateDreamSettings,
 } from "@/src/lib/api/memory.ts";
 
-function isUnsupported(error: unknown): boolean {
-	return error instanceof ApiError && [404, 405, 501].includes(error.status);
-}
-
 function formatReviewDate(timestamp: number): string {
 	if (!timestamp) {
 		return "Not run yet";
@@ -51,6 +48,7 @@ function formatReviewDate(timestamp: number): string {
 function ProposalDiff({ proposal }: { proposal: MemoryProposal }) {
 	const previous = proposal.current?.content ?? null;
 	const next = proposal.proposed.content;
+	const tl = useLiteralMessages();
 	return (
 		<div className="flex flex-col gap-2">
 			<div className="flex items-center gap-2 text-muted-foreground text-xs">
@@ -85,7 +83,9 @@ function ProposalDiff({ proposal }: { proposal: MemoryProposal }) {
 			<div className="flex flex-wrap gap-1.5">
 				<Badge variant="secondary">{proposal.proposed.scope}</Badge>
 				<Badge variant="outline">
-					Importance {proposal.proposed.importance}
+					{tl("Importance {importance}", {
+						importance: String(proposal.proposed.importance),
+					})}
 				</Badge>
 				{proposal.proposed.tags.map((tag) => (
 					<Badge key={tag} variant="outline">
@@ -109,8 +109,8 @@ function ProposalCard({
 	proposal: MemoryProposal;
 }) {
 	return (
-		<Card className="border-border/70 shadow-none" data-testid="dream-proposal">
-			<CardHeader className="gap-3 border-border/60 border-b pb-4">
+		<Card borderTone="muted" data-testid="dream-proposal" elevation="flat">
+			<CardHeader appearance="dream-proposal">
 				<div className="flex items-start justify-between gap-4">
 					<div className="min-w-0">
 						<div className="flex flex-wrap items-center gap-2">
@@ -128,7 +128,7 @@ function ProposalCard({
 					<Badge variant="outline">Needs review</Badge>
 				</div>
 			</CardHeader>
-			<CardContent className="flex flex-col gap-4 pt-4">
+			<CardContent layout="spaced-stack" topSpacing="comfortable">
 				<ProposalDiff proposal={proposal} />
 				<div className="flex flex-wrap justify-end gap-2 border-border/60 border-t pt-3">
 					<Button
@@ -150,6 +150,7 @@ function ProposalCard({
 }
 
 export function MemoryDreamReview({ target }: { target: ApiTarget }) {
+	const tl = useLiteralMessages();
 	const [review, setReview] = useState<DreamReview | null>(null);
 	const [settings, setSettings] = useState<DreamSettings>({
 		automatic: false,
@@ -271,10 +272,7 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 		<div className="mx-auto flex max-w-3xl flex-col gap-4">
 			<div className="flex flex-wrap items-start justify-between gap-3">
 				<div>
-					<div className="flex items-center gap-2">
-						<Sparkles className="size-5 text-primary" />
-						<h1 className="font-medium text-lg">Dream review</h1>
-					</div>
+					<h1 className="font-medium text-lg">Dream review</h1>
 					<p className="mt-1 max-w-xl text-muted-foreground text-sm">
 						Dream looks back at recent conversations and suggests durable
 						memories. Nothing is saved until you accept it.
@@ -286,8 +284,8 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 				</Button>
 			</div>
 
-			<Card className="border-primary/20 bg-primary/5 shadow-none">
-				<CardContent className="flex flex-wrap items-center justify-between gap-4 pt-5">
+			<Card appearance="dream-highlight" elevation="flat">
+				<CardContent layout="summary-actions" topSpacing="generous">
 					<div className="flex items-start gap-3">
 						<div className="rounded-full bg-primary/10 p-2 text-primary">
 							<Clock3 className="size-4" />
@@ -309,8 +307,10 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 				</CardContent>
 			</Card>
 
-			{error && isUnsupported(error) ? (
-				<Empty className="border border-dashed py-12">
+			{error &&
+			error instanceof ApiError &&
+			[404, 405, 501].includes(error.status) ? (
+				<Empty appearance="bordered">
 					<EmptyHeader>
 						<EmptyTitle>Dream is not available on this node yet</EmptyTitle>
 						<EmptyDescription>
@@ -323,11 +323,9 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 					</Button>
 				</Empty>
 			) : loading ? (
-				<div className="flex justify-center py-16">
-					<Spinner />
-				</div>
+				<SkeletonRows spacing="review" />
 			) : error ? (
-				<Empty className="border border-dashed py-12">
+				<Empty appearance="bordered">
 					<EmptyHeader>
 						<EmptyTitle>Dream couldn't load</EmptyTitle>
 						<EmptyDescription>
@@ -343,9 +341,16 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 					<div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground text-xs">
 						<span>
 							{review.summary ??
-								`${review.proposals.length} proposal${review.proposals.length === 1 ? "" : "s"} waiting for your review.`}
+								tl(
+									"{count, plural, one {# proposal} other {# proposals}} waiting for your review.",
+									{ count: review.proposals.length }
+								)}
 						</span>
-						<span>Last run {formatReviewDate(review.generatedAt)}</span>
+						<span>
+							{tl("Last run {date}", {
+								date: formatReviewDate(review.generatedAt),
+							})}
+						</span>
 					</div>
 					<div className="flex flex-col gap-3">
 						{review.proposals.map((proposal) => (
@@ -360,7 +365,7 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 					</div>
 				</>
 			) : (
-				<Empty className="border border-dashed py-12">
+				<Empty appearance="bordered">
 					<EmptyHeader>
 						<EmptyTitle>No new memories to review</EmptyTitle>
 						<EmptyDescription>

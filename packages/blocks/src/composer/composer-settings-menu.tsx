@@ -15,7 +15,7 @@ import {
 } from "@ryu/ui/components/dropdown-menu";
 import { cn } from "@ryu/ui/lib/utils";
 import { isValidElement, type ReactNode, useState } from "react";
-import { COMPOSER_SELECT_TRIGGER } from "./composer-select.ts";
+import styles from "./composer-settings-menu.module.css";
 import {
 	FullAccessSelectionProvider,
 	isFullAccessEquivalent,
@@ -62,6 +62,7 @@ export interface ComposerSettingsMenuProps {
 	leading?: ReactNode;
 	sections: ComposerSettingsSection[];
 	side?: "top" | "bottom" | "left" | "right";
+	tone?: "muted" | "foreground";
 	trailing?: ReactNode;
 	trigger?: ReactNode;
 }
@@ -98,6 +99,7 @@ function ComposerSettingsMenuContent({
 	sections,
 	className,
 	compact = false,
+	tone = "muted",
 	footer,
 	leading,
 	trailing,
@@ -146,12 +148,11 @@ function ComposerSettingsMenuContent({
 			const deco = section.decorate?.(item);
 			return (
 				<DropdownMenuItem
-					className={cn(
-						"flex-col items-start gap-0.5",
-						isActive && "bg-foreground/10"
-					)}
+					active={isActive}
+					className="flex-col items-start"
 					key={item.id}
 					onClick={() => closeAfter(section)(item.id)}
+					spacing="tight"
 				>
 					<span className="flex w-full items-center gap-2.5">
 						{deco ? (
@@ -192,7 +193,12 @@ function ComposerSettingsMenuContent({
 							trigger
 						) : (
 							<Button
-								className={cn(COMPOSER_SELECT_TRIGGER, className)}
+								appearance={
+									tone === "foreground"
+										? "composer-settings-foreground"
+										: "composer-settings"
+								}
+								className={className}
 								size="sm"
 								type="button"
 								variant="ghost"
@@ -206,8 +212,13 @@ function ComposerSettingsMenuContent({
 				<DropdownMenuTrigger
 					render={
 						<Button
+							appearance={
+								tone === "foreground"
+									? "composer-settings-foreground"
+									: "composer-settings"
+							}
 							aria-label="Chat settings"
-							className={cn(COMPOSER_SELECT_TRIGGER, className)}
+							className={className}
 							size="sm"
 							type="button"
 							variant="ghost"
@@ -263,12 +274,12 @@ function ComposerSettingsMenuContent({
 					return (
 						<DropdownMenuSub key={section.key}>
 							<DropdownMenuSubTrigger>
-								<span className="flex-1 text-[13px] text-muted-foreground">
+								<span className="type-detail flex-1 text-muted-foreground">
 									{section.label}
 								</span>
 								<span
 									className={cn(
-										"flex max-w-[160px] items-center gap-1.5 text-[13px]",
+										"type-detail flex max-w-[160px] items-center gap-1.5",
 										activeDeco?.className
 									)}
 								>
@@ -283,7 +294,10 @@ function ComposerSettingsMenuContent({
 									<span className="truncate">{activeItemName(section)}</span>
 								</span>
 							</DropdownMenuSubTrigger>
-							<DropdownMenuSubContent className="max-h-80 min-w-[220px] max-w-[300px] overflow-hidden p-0">
+							<DropdownMenuSubContent
+								className="max-h-80 min-w-[220px] max-w-[300px] overflow-hidden"
+								render={<div className={styles.submenu} />}
+							>
 								{section.renderContent
 									? section.renderContent(closeAfter(section))
 									: section.items.map(renderRow(section))}

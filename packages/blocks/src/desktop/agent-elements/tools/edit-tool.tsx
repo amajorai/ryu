@@ -1,13 +1,16 @@
 import { FileDiff } from "@ryu/ui/components/agents/file-diff";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { Pencil } from "lucide-react";
 import { memo, useMemo } from "react";
 import { useToolComplete } from "../hooks/use-tool-complete.ts";
 import type { StepState, TimelineStep } from "../types/timeline.ts";
 import { diffLines } from "../utils/diff-lines.ts";
+import type { NativeSdkValue } from "../utils/native-sdk-observation.ts";
 import {
 	mapToolInvocationToStep,
 	mapToolStateToStepState,
 } from "../utils/tool-adapters.ts";
+import styles from "./edit-tool.module.css";
 import {
 	type ToolApproval,
 	ToolApprovalFooter,
@@ -15,10 +18,14 @@ import {
 
 export interface EditToolDiffCardProps {
 	approval?: ToolApproval;
-	input?: Record<string, unknown>;
+	input?: { old_string?: NativeSdkValue; new_string?: NativeSdkValue };
 	isCollapsible?: boolean;
 	onComplete: () => void;
-	output?: Record<string, unknown>;
+	output?: {
+		path?: NativeSdkValue;
+		old_content?: NativeSdkValue;
+		content?: NativeSdkValue;
+	};
 	state: StepState;
 	step: Extract<TimelineStep, { type: "tool-call" }>;
 }
@@ -53,7 +60,7 @@ export function EditToolDiffCard({
 }: EditToolDiffCardProps) {
 	useToolComplete(state === "animating", step.duration, onComplete);
 	const isPending = state === "animating";
-	const outputPath = typeof output?.path === "string" ? output.path : undefined;
+	const outputPath = isNativeText(output?.path) ? output.path : undefined;
 	const fileName =
 		step.filePath?.split("/").pop() ??
 		outputPath?.split("/").pop() ??
@@ -64,16 +71,18 @@ export function EditToolDiffCard({
 	// Resolve old/new contents the same way the legacy @pierre/diffs path did:
 	// prefer the part's own old/new strings, then the step's parsed diff lines.
 	const diff = useMemo(() => {
-		const oldFromOutput =
-			typeof output?.old_content === "string" ? output.old_content : undefined;
-		const newFromOutput =
-			typeof output?.content === "string" ? output.content : undefined;
+		const oldFromOutput = isNativeText(output?.old_content)
+			? output.old_content
+			: undefined;
+		const newFromOutput = isNativeText(output?.content)
+			? output.content
+			: undefined;
 		const oldFromInput =
-			!oldFromOutput && typeof input?.old_string === "string"
+			!oldFromOutput && isNativeText(input?.old_string)
 				? input.old_string
 				: undefined;
 		const newFromInput =
-			!newFromOutput && typeof input?.new_string === "string"
+			!newFromOutput && isNativeText(input?.new_string)
 				? input.new_string
 				: undefined;
 
@@ -107,7 +116,7 @@ export function EditToolDiffCard({
 			: "Edited";
 
 	return (
-		<div className="an-edit-tool-card">
+		<div className={styles.card}>
 			{diff ? (
 				<FileDiff
 					collapseOnComplete={isCollapsible && !isPending}
@@ -144,10 +153,8 @@ export const EditTool = memo(function EditTool({
 	isCollapsible = false,
 	expandByDefault = false,
 }: EditToolProps) {
-	const approval = (part.input?.approval ?? part.args?.approval) as
-		| ToolApproval
-		| undefined;
-	const toolName = (part.type as string)?.replace("tool-", "") || "Edit";
+	const approval = part.input?.approval ?? part.args?.approval;
+	const toolName = part.type?.replace("tool-", "") || "Edit";
 	const step = mapToolInvocationToStep(part.toolCallId ?? part.id ?? "edit", {
 		toolName,
 		args: part.input ?? part.args ?? {},

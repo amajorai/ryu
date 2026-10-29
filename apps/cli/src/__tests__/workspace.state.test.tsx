@@ -8,12 +8,12 @@
 // before the next assertion. No renderer keys, no Core — pure state machine.
 
 import { afterEach, expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
 import {
 	useWorkspace,
 	WorkspaceProvider,
 } from "../workspace/WorkspaceContext.tsx";
+import { testRender } from "./cli-test-render.ts";
 
 // The context value type is not exported; derive it from the hook (same idiom as
 // desktop-shell.smoke.test.tsx) so the tests never need a production type export.
@@ -22,6 +22,13 @@ type WorkspaceContextValue = ReturnType<typeof useWorkspace>;
 // Captured live workspace handle; refreshed on every render so reads see the
 // latest committed state.
 let ws: WorkspaceContextValue | null = null;
+
+function currentWorkspace(): WorkspaceContextValue {
+	if (!ws) {
+		throw new Error("workspace not captured");
+	}
+	return ws;
+}
 
 function Capture() {
 	ws = useWorkspace();
@@ -96,7 +103,7 @@ test("openTab adds a tab and makes it active", async () => {
 	await boot();
 	let openedId = "";
 	const w = await commit(() => {
-		openedId = (ws as WorkspaceContextValue).openTab("/agents");
+		openedId = currentWorkspace().openTab("/agents");
 	});
 	expect(w.tabs).toHaveLength(2);
 	expect(w.tabs.some((t) => t.id === openedId && t.path === "/agents")).toBe(
@@ -110,11 +117,11 @@ test("openTab reuses an existing singleton tab in the same pane", async () => {
 	await boot();
 	let first = "";
 	await commit(() => {
-		first = (ws as WorkspaceContextValue).openTab("/agents");
+		first = currentWorkspace().openTab("/agents");
 	});
 	let second = "";
 	const w = await commit(() => {
-		second = (ws as WorkspaceContextValue).openTab("/agents");
+		second = currentWorkspace().openTab("/agents");
 	});
 	// Same id returned, no duplicate tab created.
 	expect(second).toBe(first);
@@ -125,11 +132,11 @@ test("openTab with forceNew opens a second tab for a singleton path", async () =
 	await boot();
 	let first = "";
 	await commit(() => {
-		first = (ws as WorkspaceContextValue).openTab("/agents");
+		first = currentWorkspace().openTab("/agents");
 	});
 	let second = "";
 	const w = await commit(() => {
-		second = (ws as WorkspaceContextValue).openTab("/agents", {
+		second = currentWorkspace().openTab("/agents", {
 			forceNew: true,
 		});
 	});
@@ -142,10 +149,10 @@ test("openTab never dedupes /chat — each open is a distinct tab", async () => 
 	let a = "";
 	let b = "";
 	await commit(() => {
-		a = (ws as WorkspaceContextValue).openTab("/chat");
+		a = currentWorkspace().openTab("/chat");
 	});
 	const w = await commit(() => {
-		b = (ws as WorkspaceContextValue).openTab("/chat");
+		b = currentWorkspace().openTab("/chat");
 	});
 	expect(a).not.toBe(b);
 	// initial home chat + two more.
@@ -156,7 +163,7 @@ test("openTab honours a title override", async () => {
 	await boot();
 	let id = "";
 	const w = await commit(() => {
-		id = (ws as WorkspaceContextValue).openTab("/chat", { title: "Draft" });
+		id = currentWorkspace().openTab("/chat", { title: "Draft" });
 	});
 	expect(w.tabs.find((t) => t.id === id)?.title).toBe("Draft");
 });
@@ -167,26 +174,26 @@ test("closeTab removes the tab and restoreTab reopens it at its index", async ()
 	await boot();
 	let mid = "";
 	await commit(() => {
-		(ws as WorkspaceContextValue).openTab("/agents");
+		currentWorkspace().openTab("/agents");
 	});
 	await commit(() => {
-		mid = (ws as WorkspaceContextValue).openTab("/tools");
+		mid = currentWorkspace().openTab("/tools");
 	});
 	await commit(() => {
-		(ws as WorkspaceContextValue).openTab("/spaces");
+		currentWorkspace().openTab("/spaces");
 	});
 	// Order in the pane: [chat, agents, tools, spaces]; close the middle "tools".
-	const beforeIds = activePaneTabIds(ws as WorkspaceContextValue);
+	const beforeIds = activePaneTabIds(currentWorkspace());
 	const midIndex = beforeIds.indexOf(mid);
 	expect(midIndex).toBe(2);
 
 	const closed = await commit(() => {
-		(ws as WorkspaceContextValue).closeTab(mid);
+		currentWorkspace().closeTab(mid);
 	});
 	expect(closed.tabs.some((t) => t.id === mid)).toBe(false);
 
 	const restored = await commit(() => {
-		(ws as WorkspaceContextValue).restoreTab();
+		currentWorkspace().restoreTab();
 	});
 	const afterIds = activePaneTabIds(restored);
 	// Reopened tab carries the original path and lands back at its old index.
@@ -199,13 +206,13 @@ test("closeTab refuses to close a pinned tab", async () => {
 	await boot();
 	let id = "";
 	await commit(() => {
-		id = (ws as WorkspaceContextValue).openTab("/agents");
+		id = currentWorkspace().openTab("/agents");
 	});
 	await commit(() => {
-		(ws as WorkspaceContextValue).pinTab(id);
+		currentWorkspace().pinTab(id);
 	});
 	const w = await commit(() => {
-		(ws as WorkspaceContextValue).closeTab(id);
+		currentWorkspace().closeTab(id);
 	});
 	expect(w.tabs.some((t) => t.id === id)).toBe(true);
 });
@@ -214,7 +221,7 @@ test("closing the last tab seeds a fresh home chat (workspace never blank)", asy
 	const w0 = await boot();
 	const onlyId = w0.tabs[0].id;
 	const w = await commit(() => {
-		(ws as WorkspaceContextValue).closeTab(onlyId);
+		currentWorkspace().closeTab(onlyId);
 	});
 	// The original tab is gone but a fresh /chat replaces it.
 	expect(w.tabs).toHaveLength(1);
@@ -227,7 +234,7 @@ test("restoreTab is a no-op when nothing was closed", async () => {
 	const w0 = await boot();
 	const before = w0.tabs.length;
 	const w = await commit(() => {
-		(ws as WorkspaceContextValue).restoreTab();
+		currentWorkspace().restoreTab();
 	});
 	expect(w.tabs).toHaveLength(before);
 });
@@ -236,14 +243,14 @@ test("closing the active middle tab activates a surviving neighbour", async () =
 	await boot();
 	let mid = "";
 	await commit(() => {
-		(ws as WorkspaceContextValue).openTab("/agents");
+		currentWorkspace().openTab("/agents");
 	});
 	await commit(() => {
-		mid = (ws as WorkspaceContextValue).openTab("/tools");
+		mid = currentWorkspace().openTab("/tools");
 	});
 	// /tools is the active (last-opened) tab. Close it.
 	const w = await commit(() => {
-		(ws as WorkspaceContextValue).closeTab(mid);
+		currentWorkspace().closeTab(mid);
 	});
 	const pane = w.panes.find((p) => p.id === w.focusedPaneId);
 	expect(pane?.activeTabId).not.toBe(mid);
@@ -256,7 +263,7 @@ test("cycleTab is a no-op with a single tab", async () => {
 	const w0 = await boot();
 	const activeBefore = w0.panes[0].activeTabId;
 	const w = await commit(() => {
-		(ws as WorkspaceContextValue).cycleTab(1);
+		currentWorkspace().cycleTab(1);
 	});
 	expect(w.panes[0].activeTabId).toBe(activeBefore);
 });
@@ -264,21 +271,21 @@ test("cycleTab is a no-op with a single tab", async () => {
 test("cycleTab advances and wraps around the focused pane's tabs", async () => {
 	await boot();
 	await commit(() => {
-		(ws as WorkspaceContextValue).openTab("/agents");
+		currentWorkspace().openTab("/agents");
 	});
 	await commit(() => {
-		(ws as WorkspaceContextValue).openTab("/tools");
+		currentWorkspace().openTab("/tools");
 	});
-	const ids = activePaneTabIds(ws as WorkspaceContextValue);
+	const ids = activePaneTabIds(currentWorkspace());
 	expect(ids).toHaveLength(3);
 	// Active is the last (/tools, index 2). +1 wraps to index 0.
 	const wrapped = await commit(() => {
-		(ws as WorkspaceContextValue).cycleTab(1);
+		currentWorkspace().cycleTab(1);
 	});
 	expect(wrapped.panes[0].activeTabId).toBe(ids[0]);
 	// -1 from index 0 wraps back to the last tab.
 	const back = await commit(() => {
-		(ws as WorkspaceContextValue).cycleTab(-1);
+		currentWorkspace().cycleTab(-1);
 	});
 	expect(back.panes[0].activeTabId).toBe(ids[2]);
 });
@@ -288,10 +295,10 @@ test("cycleTab advances and wraps around the focused pane's tabs", async () => {
 test("splitActive opens a second pane duplicating the active path, then merges back", async () => {
 	await boot();
 	await commit(() => {
-		(ws as WorkspaceContextValue).openTab("/agents");
+		currentWorkspace().openTab("/agents");
 	});
 	const split = await commit(() => {
-		(ws as WorkspaceContextValue).splitActive();
+		currentWorkspace().splitActive();
 	});
 	expect(split.panes).toHaveLength(2);
 	// New pane is focused and seeded with a copy of the active /agents path.
@@ -300,7 +307,7 @@ test("splitActive opens a second pane duplicating the active path, then merges b
 	expect(split.tabs.find((t) => t.id === seedTabId)?.path).toBe("/agents");
 
 	const merged = await commit(() => {
-		(ws as WorkspaceContextValue).splitActive();
+		currentWorkspace().splitActive();
 	});
 	expect(merged.panes).toHaveLength(1);
 	// Both panes' tabs fold into the survivor.
@@ -310,7 +317,7 @@ test("splitActive opens a second pane duplicating the active path, then merges b
 test("focusPane moves keyboard focus without changing active tabs", async () => {
 	await boot();
 	const split = await commit(() => {
-		(ws as WorkspaceContextValue).splitActive();
+		currentWorkspace().splitActive();
 	});
 	expect(split.panes).toHaveLength(2);
 	const first = split.panes[0].id;
@@ -318,7 +325,7 @@ test("focusPane moves keyboard focus without changing active tabs", async () => 
 	// Split focuses the new (second) pane; move focus back to the first.
 	expect(split.focusedPaneId).toBe(second);
 	const w = await commit(() => {
-		(ws as WorkspaceContextValue).focusPane(first);
+		currentWorkspace().focusPane(first);
 	});
 	expect(w.focusedPaneId).toBe(first);
 });
@@ -327,7 +334,7 @@ test("focusPane ignores an unknown pane id", async () => {
 	const w0 = await boot();
 	const before = w0.focusedPaneId;
 	const w = await commit(() => {
-		(ws as WorkspaceContextValue).focusPane("pane-does-not-exist");
+		currentWorkspace().focusPane("pane-does-not-exist");
 	});
 	expect(w.focusedPaneId).toBe(before);
 });
@@ -338,28 +345,28 @@ test("pinTab toggles the pinned flag on and off", async () => {
 	await boot();
 	let id = "";
 	await commit(() => {
-		id = (ws as WorkspaceContextValue).openTab("/agents");
+		id = currentWorkspace().openTab("/agents");
 	});
 	const pinned = await commit(() => {
-		(ws as WorkspaceContextValue).pinTab(id);
+		currentWorkspace().pinTab(id);
 	});
 	expect(pinned.tabs.find((t) => t.id === id)?.pinned).toBe(true);
 	const unpinned = await commit(() => {
-		(ws as WorkspaceContextValue).pinTab(id);
+		currentWorkspace().pinTab(id);
 	});
 	expect(unpinned.tabs.find((t) => t.id === id)?.pinned).toBe(false);
 });
 
 test("activateTab makes a tab active and focuses its pane", async () => {
 	await boot();
-	const homeId = (ws as WorkspaceContextValue).tabs[0].id;
-	const homePane = (ws as WorkspaceContextValue).panes[0].id;
+	const homeId = currentWorkspace().tabs[0].id;
+	const homePane = currentWorkspace().panes[0].id;
 	await commit(() => {
-		(ws as WorkspaceContextValue).openTab("/agents");
+		currentWorkspace().openTab("/agents");
 	});
 	// /agents is now active; re-activate the original home tab.
 	const w = await commit(() => {
-		(ws as WorkspaceContextValue).activateTab(homePane, homeId);
+		currentWorkspace().activateTab(homePane, homeId);
 	});
 	const pane = w.panes.find((p) => p.id === homePane);
 	expect(pane?.activeTabId).toBe(homeId);

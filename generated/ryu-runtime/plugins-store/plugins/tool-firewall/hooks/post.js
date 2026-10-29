@@ -7,7 +7,7 @@
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 
-const out = JSON.stringify(ctx.tool_output || null);
+const out = JSON.stringify(ctx.tool_output ?? null);
 return {
 	kind: "note",
 	text:

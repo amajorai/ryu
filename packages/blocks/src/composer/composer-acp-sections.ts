@@ -1,4 +1,5 @@
 "use client";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 
 // The ONE derivation of a composer's ACP-driven picker sections — the Model
 // selector plus the Approval (permission mode) and agent-advertised config
@@ -113,10 +114,17 @@ export function flattenConfigOptions(
 	}
 	// Grouped form: `[{ options: [...] }, ...]`.
 	if ("options" in first) {
+		// SAFETY: ACP SessionConfigSelectOptions owns a homogeneous ungrouped/grouped
+		// array union, validated by the canonical Core ACP select options codec.
+		// The nonempty first grouped entry identifies the whole declared member;
+		// TypeScript cannot lift this entry check to its containing array.
 		return (raw as { options: AcpConfigSelectOption[] }[]).flatMap(
 			(g) => g.options
 		);
 	}
+	// SAFETY: The same declared homogeneous ACP array is nonempty above.
+	// Its first entry lacks the grouped options discriminator, so return the
+	// ungrouped member without copying its original native option references.
 	return raw as AcpConfigSelectOption[];
 }
 
@@ -209,7 +217,7 @@ export function shouldAdoptStreamedConfig(
 export function mergeStreamedConfig(
 	previous: Record<string, string>,
 	config: Record<string, string>
-): Record<string, string> {
+) {
 	return { ...previous, ...config };
 }
 
@@ -539,7 +547,11 @@ export function buildModelSection(
 	}
 	if (acpModelConfigOption) {
 		const opt = acpModelConfigOption;
-		const current = acpOptionValues[opt.id] ?? opt.currentValue;
+		// Boolean defaults belong to boolean config options, never to model IDs.
+		// A stored textual model remains authoritative over a malformed report.
+		const current =
+			acpOptionValues[opt.id] ??
+			(typeof opt.currentValue === "string" ? opt.currentValue : undefined);
 		const items = filterModelItems(
 			flattenConfigOptions(opt).map((o) => ({
 				id: o.value,
@@ -703,6 +715,14 @@ export interface AcpSectionsParams {
 	 * not just the user's own clicks. Surfaces with no live stream leave it undefined.
 	 */
 	streamedMode?: string | null;
+	/**
+	 * The emission identity (`messageId:partIndex`) of the part that carried
+	 * {@link streamedMode}. With it, a new emission of the SAME mode is still
+	 * adopted — by the agent that is now selected after a switch, or on a later
+	 * cycle — while a re-render over the same part never re-adopts. Without it the
+	 * hook can only dedupe on the mode value per agent.
+	 */
+	streamedModeKey?: string | null;
 }
 
 export interface AcpSectionsResult {
@@ -753,6 +773,7 @@ export function useAcpSections({
 	streamedConfig,
 	streamedControl,
 	streamedMode,
+	streamedModeKey,
 }: AcpSectionsParams): AcpSectionsResult {
 	const [acpMode, setAcpMode] = useState<string | null>(() =>
 		store.getAcpMode(agentId)
@@ -765,9 +786,16 @@ export function useAcpSections({
 		Record<string, string>
 	>(() => store.getAcpConfig(agentId));
 
-	// Tracks the last streamed mode we adopted, so a repeated identical event
-	// (same value re-emitted) doesn't clobber a user's subsequent manual pick.
-	const lastStreamedModeRef = useRef<string | null>(null);
+	// Tracks the last streamed mode we adopted, keyed by the agent it was adopted
+	// for and its emission (the part key when the caller supplies one, else the
+	// mode value), so a repeated identical event doesn't clobber a user's
+	// subsequent manual pick — while the same mode emitted for a DIFFERENT agent
+	// (agent A streamed `plan`, the user switched to B, and B switched itself to
+	// `plan`) is still adopted for B.
+	const lastStreamedModeRef = useRef<{
+		agentId: string | null;
+		emission: string;
+	} | null>(null);
 	// Same guard for the config write-back, but holding the EMISSION key of the
 	// part we adopted rather than its value: the caller re-derives the map from the
 	// message list on every stream chunk (fresh object, identical contents), and an
@@ -795,29 +823,41 @@ export function useAcpSections({
 		setAcpModel(seeded.model);
 		setAcpModelCleared(false);
 		setAcpOptionValues(seeded.options);
-		// A streamed mode belongs to the previous agent's session; forget it, or the
-		// old agent's write-back would land on the new one.
-		lastStreamedModeRef.current = null;
-		// `lastStreamedConfigRef` is deliberately NOT cleared. It holds a per-part
-		// emission key, unique for the life of the conversation, so it can never go
-		// stale — while clearing it is precisely what would let the previous agent's
-		// write-back re-apply (the caller keeps the last one around; it only ever
-		// sets that state, never clears it), overwriting the pick the user just made
-		// for whichever agent is now selected.
+		// Neither guard is cleared here. The caller keeps the last streamed
+		// mode/config around (it only ever sets that state, never clears it), and
+		// the adoption effects below do not re-run on an agent switch alone, so the
+		// previous agent's mode or write-back is not re-applied and persisted onto
+		// the agent now selected. Clearing either guard would reopen that leak and
+		// overwrite the pick just restored for the new agent. The mode guard is
+		// keyed by agent instead, so that agent's own later switch to the same mode
+		// is not mistaken for the previous one. The config guard holds a per-part
+		// emission key, unique for the life of the conversation, so it cannot go
+		// stale.
 	}, [agentId, store]);
 
 	// Adopt an agent-initiated mode switch (Core's `data-ryu-acp-mode`): sync the
 	// Approval picker's selection and persist it, mirroring a user click.
+	//
+	// `agentId` is read from a ref, not listed as a dep, for the same reason as the
+	// config write-back below: the caller never clears `streamedMode`, so an agentId
+	// dep would re-fire this on every agent switch and persist the previous agent's
+	// mode onto the newly selected one.
 	useEffect(() => {
-		if (!streamedMode || streamedMode === lastStreamedModeRef.current) {
+		if (!streamedMode) {
 			return;
 		}
-		lastStreamedModeRef.current = streamedMode;
-		setAcpMode(streamedMode);
-		if (agentId) {
-			store.setAcpMode(agentId, streamedMode);
+		const id = agentIdRef.current;
+		const emission = streamedModeKey ?? streamedMode;
+		const last = lastStreamedModeRef.current;
+		if (last && last.agentId === id && last.emission === emission) {
+			return;
 		}
-	}, [streamedMode, agentId, store]);
+		lastStreamedModeRef.current = { agentId: id, emission };
+		setAcpMode(streamedMode);
+		if (id) {
+			store.setAcpMode(id, streamedMode);
+		}
+	}, [streamedMode, streamedModeKey, store]);
 
 	// Adopt an agent-requested config write-back (Core's `data-ryu-acp-config`):
 	// MERGE the requested pairs over the current selections — never replace the
@@ -888,7 +928,7 @@ export function useAcpSections({
 		lastStreamedControlEffortRef.current = streamedControl.key;
 		setAcpOptionValues((previous) => {
 			const next = { ...previous };
-			if (typeof streamedControl.effort === "string") {
+			if (isNativeText(streamedControl.effort)) {
 				next[knownEffortId] = streamedControl.effort;
 			} else {
 				delete next[knownEffortId];

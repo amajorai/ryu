@@ -5,6 +5,7 @@ import {
 	type DefaultFileOpener,
 	normalizeDefaultFileOpener,
 } from "../../src/lib/default-file-opener.ts";
+import proofStyles from "./default-file-opener-proof.module.css";
 
 const SHELL_STORAGE_KEY = "ryu_workspace_terminal_shell";
 const OPENER_STORAGE_KEY = "ryu_workspace_default_file_opener";
@@ -14,12 +15,12 @@ const FILE_MANAGER_NAME = navigator.userAgent.includes("Mac")
 		? "Explorer"
 		: "Files";
 
-const FILE_OPENER_LABELS: Record<DefaultFileOpener, string> = {
+const FILE_OPENER_LABELS = {
 	system: `OS default (${FILE_MANAGER_NAME})`,
 	vscode: "VS Code",
 	cursor: "Cursor",
 	zed: "Zed",
-};
+} satisfies Record<DefaultFileOpener, string>;
 
 function readShell(): string {
 	return localStorage.getItem(SHELL_STORAGE_KEY) ?? "auto";
@@ -55,54 +56,18 @@ function Proof() {
 	};
 
 	return (
-		<main
-			style={{
-				background: "#171717",
-				boxSizing: "border-box",
-				color: "#f5f5f5",
-				fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
-				minHeight: "100vh",
-				padding: "48px 24px",
-			}}
-		>
-			<section
-				style={{
-					background: "#202020",
-					border: "1px solid #3b3b3b",
-					borderRadius: 18,
-					margin: "0 auto",
-					maxWidth: 760,
-					padding: 28,
-				}}
-			>
-				<p
-					style={{
-						color: "#a3a3a3",
-						fontSize: 12,
-						letterSpacing: "0.12em",
-						margin: 0,
-						textTransform: "uppercase",
-					}}
-				>
-					Desktop settings · React proof
-				</p>
-				<h1 style={{ fontSize: 28, margin: "10px 0 8px" }}>General settings</h1>
-				<p style={{ color: "#bdbdbd", margin: "0 0 28px" }}>
+		<main className={proofStyles.fixture1}>
+			<section className={proofStyles.fixture2}>
+				<p className={proofStyles.fixture3}>Desktop settings · React proof</p>
+				<h1 className={proofStyles.fixture4}>General settings</h1>
+				<p className={proofStyles.fixture5}>
 					The defaults used by terminal commands and the workspace file tree.
 				</p>
 
-				<div style={{ display: "grid", gap: 12 }}>
-					<label
-						style={{
-							border: "1px solid #3b3b3b",
-							borderRadius: 12,
-							display: "grid",
-							gap: 8,
-							padding: 16,
-						}}
-					>
-						<span style={{ fontWeight: 600 }}>Default shell</span>
-						<span style={{ color: "#a3a3a3", fontSize: 13 }}>
+				<div className={proofStyles.fixture6}>
+					<label className={proofStyles.fixture7}>
+						<span className={proofStyles.fixture8}>Default shell</span>
+						<span className={proofStyles.fixture9}>
 							OS default follows the platform shell.
 						</span>
 						<select
@@ -117,24 +82,16 @@ function Proof() {
 						</select>
 					</label>
 
-					<label
-						style={{
-							border: "1px solid #3b3b3b",
-							borderRadius: 12,
-							display: "grid",
-							gap: 8,
-							padding: 16,
-						}}
-					>
-						<span style={{ fontWeight: 600 }}>Default file opener</span>
-						<span style={{ color: "#a3a3a3", fontSize: 13 }}>
+					<label className={proofStyles.fixture10}>
+						<span className={proofStyles.fixture11}>Default file opener</span>
+						<span className={proofStyles.fixture12}>
 							The file tree Open action uses the OS default or an installed
 							editor.
 						</span>
 						<select
 							aria-label="Default file opener"
 							onChange={(event) =>
-								updateFileOpener(event.target.value as DefaultFileOpener)
+								updateFileOpener(normalizeDefaultFileOpener(event.target.value))
 							}
 							value={fileOpener}
 						>
@@ -147,14 +104,7 @@ function Proof() {
 					</label>
 				</div>
 
-				<div
-					style={{
-						alignItems: "center",
-						display: "flex",
-						gap: 12,
-						marginTop: 20,
-					}}
-				>
+				<div className={proofStyles.fixture13}>
 					<button onClick={reset} type="button">
 						Reset to OS defaults
 					</button>

@@ -1,3 +1,5 @@
+import type { FileDiffOptions } from "@pierre/diffs";
+import { z } from "zod";
 // apps/desktop/src/hooks/useDiffViewPrefs.ts
 //
 // localStorage-backed preferences for the workspace "Changes" diff viewer
@@ -12,6 +14,27 @@ import {
 	DEFAULT_DIFF_DARK_THEME,
 	DEFAULT_DIFF_LIGHT_THEME,
 } from "@/src/lib/pierre-themes.ts";
+
+const storedPreferences = z
+	.object({
+		darkTheme: z.string(),
+		lightTheme: z.string(),
+		diffIndicators: z.enum(["bars", "classic", "none"]),
+		diffStyle: z.enum(["split", "unified"]),
+		expandUnchanged: z.boolean(),
+		hunkSeparators: z.enum([
+			"simple",
+			"metadata",
+			"line-info",
+			"line-info-basic",
+		]),
+		lineDiffType: z.enum(["word-alt", "word", "char", "none"]),
+		showBackground: z.boolean(),
+		showLineNumbers: z.boolean(),
+		themeMode: z.enum(["system", "light", "dark"]),
+		wrapLines: z.boolean(),
+	})
+	.partial();
 
 const STORAGE_KEY = "ryu:diff-view-prefs";
 
@@ -77,7 +100,7 @@ function read(): DiffViewPrefs {
 		cache = raw
 			? {
 					...DEFAULT_DIFF_VIEW_PREFS,
-					...(JSON.parse(raw) as Partial<DiffViewPrefs>),
+					...storedPreferences.parse(JSON.parse(raw)),
 				}
 			: DEFAULT_DIFF_VIEW_PREFS;
 	} catch {
@@ -123,10 +146,7 @@ const TOKENIZE_MAX_LINE_LENGTH = 2000;
  * so the preview always matches what the real viewer renders. `extra` lets a
  * caller layer on per-instance options (e.g. `collapsed`).
  */
-export function diffViewPrefsToOptions(
-	prefs: DiffViewPrefs,
-	extra?: Record<string, unknown>
-) {
+function buildDiffViewOptions(prefs: DiffViewPrefs) {
 	return {
 		diffStyle: prefs.diffStyle,
 		diffIndicators: prefs.diffIndicators,
@@ -144,8 +164,23 @@ export function diffViewPrefsToOptions(
 		theme: { light: prefs.lightTheme, dark: prefs.darkTheme },
 		themeType: prefs.themeMode,
 		tokenizeMaxLineLength: TOKENIZE_MAX_LINE_LENGTH,
-		...extra,
 	};
+}
+
+export function diffViewPrefsToOptions(
+	prefs: DiffViewPrefs
+): ReturnType<typeof buildDiffViewOptions>;
+export function diffViewPrefsToOptions<
+	TExtra extends Partial<FileDiffOptions<never>>,
+>(
+	prefs: DiffViewPrefs,
+	extra: TExtra
+): ReturnType<typeof buildDiffViewOptions> & TExtra;
+export function diffViewPrefsToOptions(
+	prefs: DiffViewPrefs,
+	extra?: Partial<FileDiffOptions<never>>
+) {
+	return { ...buildDiffViewOptions(prefs), ...extra };
 }
 
 /** Merge a partial patch into the stored diff-view prefs. */

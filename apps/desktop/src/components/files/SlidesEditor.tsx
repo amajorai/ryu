@@ -1,19 +1,21 @@
 import {
-	getShapeId,
-	getShapeName,
-	getShapeText,
+	getShapeId as getSlideElementId,
+	getShapeName as getSlideElementName,
+	getSlideShapes as getSlideElements,
+	getShapeText as getSlideElementText,
 	getSlidePartName,
-	getSlideShapes,
 	getSlides,
-	hasShapeText,
+	hasShapeText as hasSlideElementText,
 	loadPresentation,
 	type PresentationData,
-	type SlideShapeData,
+	type SlideShapeData as SlideElementData,
 	savePresentation,
-	setShapeText,
+	setShapeText as setSlideElementText,
 } from "@office-kit/pptx";
 import { renderSlideToSvg } from "@office-kit/pptx-preview";
-import { Textarea } from "@ryu/ui/components/textarea";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import {
 	forwardRef,
 	useEffect,
@@ -41,6 +43,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 		);
 		const [activeSlide, setActiveSlide] = useState(0);
 		const [revision, setRevision] = useState(0);
+		const tl = useLiteralMessages();
 
 		useEffect(() => {
 			let cancelled = false;
@@ -54,7 +57,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 					}
 					setPresentation(loaded);
 				})
-				.catch((error: unknown) => {
+				.catch((error) => {
 					if (!cancelled) {
 						onLoadError(
 							error instanceof Error
@@ -93,11 +96,12 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 					: [],
 			[presentation, revision]
 		);
-		const textShapes = useMemo(
+		const textElements = useMemo(
 			() =>
 				slide
-					? getSlideShapes(slide).filter((shape): shape is SlideShapeData =>
-							hasShapeText(shape)
+					? getSlideElements(slide).filter(
+							(element): element is SlideElementData =>
+								hasSlideElementText(element)
 						)
 					: [],
 			[slide, revision]
@@ -119,7 +123,9 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 				>
 					{slides.map((item, index) => (
 						<button
-							aria-label={`Open slide ${index + 1}`}
+							aria-label={tl("Open slide {slideNumber}", {
+								slideNumber: String(index + 1),
+							})}
 							className={`mb-2 w-full rounded-md border p-1 text-left transition-colors ${
 								index === activeSlide
 									? "border-primary bg-primary/5"
@@ -133,7 +139,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 								alt=""
 								className="aspect-video w-full bg-white object-contain"
 								height={72}
-								src={previewUrls[index]}
+								src={safeMediaUrl(previewUrls[index]) ?? undefined}
 								width={128}
 							/>
 							<span className="mt-1 block px-1 text-muted-foreground text-xs">
@@ -144,10 +150,12 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 				</nav>
 				<main className="grid min-h-0 place-items-center overflow-auto p-6">
 					<img
-						alt={`Slide ${activeSlide + 1} preview`}
+						alt={tl("Slide {slideNumber} preview", {
+							slideNumber: String(activeSlide + 1),
+						})}
 						className="aspect-video w-full max-w-5xl border border-border bg-white object-contain shadow-xl"
 						height={720}
-						src={previewUrls[activeSlide]}
+						src={safeMediaUrl(previewUrls[activeSlide]) ?? undefined}
 						width={1280}
 					/>
 				</main>
@@ -156,22 +164,25 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 					<p className="mb-4 text-muted-foreground text-xs">
 						Edit text boxes while the slide preview updates.
 					</p>
-					{textShapes.length === 0 ? (
+					{textElements.length === 0 ? (
 						<p className="text-muted-foreground text-sm">
 							This slide has no editable text boxes.
 						</p>
 					) : (
 						<div className="space-y-3">
-							{textShapes.map((shape, index) => (
-								<label className="block" key={getShapeId(shape)}>
+							{textElements.map((element, index) => (
+								<label className="block" key={getSlideElementId(element)}>
 									<span className="mb-1 block font-medium text-xs">
-										{getShapeName(shape) || `Text box ${index + 1}`}
+										{getSlideElementName(element) ||
+											tl("Text box {textBoxNumber}", {
+												textBoxNumber: String(index + 1),
+											})}
 									</span>
 									<Textarea
-										defaultValue={getShapeText(shape)}
+										defaultValue={getSlideElementText(element)}
 										key={`${activeSlide}:${index}:${revision}`}
 										onBlur={(event) => {
-											setShapeText(shape, event.currentTarget.value);
+											setSlideElementText(element, event.currentTarget.value);
 											setRevision((value) => value + 1);
 											onDirty();
 										}}

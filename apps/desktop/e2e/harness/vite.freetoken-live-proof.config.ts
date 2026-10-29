@@ -1,12 +1,18 @@
 import { readFileSync } from "node:fs";
 import { defineConfig, mergeConfig } from "vite";
-import desktopConfig from "../../vite.config";
+import desktopConfig from "../../vite.config.ts";
+import {
+	proofClientCapability,
+	proofProxyAuthorization,
+} from "./proof-proxy-authorization.ts";
 
 // Test-only loopback proxy keeps the isolated Core token out of the browser bundle.
 const proofDir = process.env.RYU_FREETOKEN_PROOF_DIR ?? "/tmp/ryu-freetoken";
+const proofCapability = proofClientCapability();
 export default mergeConfig(
 	desktopConfig,
 	defineConfig({
+		plugins: [proofProxyAuthorization(proofCapability, 5240)],
 		cacheDir: `${proofDir}/vite-cache`,
 		server: {
 			host: "127.0.0.1",

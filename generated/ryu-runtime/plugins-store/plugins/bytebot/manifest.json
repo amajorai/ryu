@@ -182,10 +182,23 @@
           "action": "scroll",
           "scrollCount": 3
         },
-        "description": "Scroll the Bytebot desktop at the pointer's current position. `scrollCount` counts MOUSE-WHEEL TICKS, not pixels, and the daemon sleeps 150ms between ticks — so it is capped low on purpose: a value meant as pixels would wedge the desktop for minutes. Answers `{status, body}` because the action returns an empty body on success. Requires a reachable bytebotd at 127.0.0.1:9990.",
+        "description": "Scroll the Bytebot desktop at `coordinates` when given, otherwise at the pointer's current position. `scrollCount` counts MOUSE-WHEEL TICKS, not pixels, and the daemon sleeps 150ms between ticks — so it is capped low on purpose: a value meant as pixels would wedge the desktop for minutes. Answers `{status, body}` because the action returns an empty body on success. Requires a reachable bytebotd at 127.0.0.1:9990.",
         "input_schema": {
           "type": "object",
           "properties": {
+            "coordinates": {
+              "type": "object",
+              "description": "Where to scroll, in screen pixels. Omit to scroll at the pointer's current position.",
+              "properties": {
+                "x": {
+                  "type": "integer"
+                },
+                "y": {
+                  "type": "integer"
+                }
+              },
+              "required": ["x", "y"]
+            },
             "direction": {
               "type": "string",
               "description": "Which way to scroll.",
@@ -270,20 +283,12 @@
         },
         "computer.scroll": {
           "tool": "bytebot.scroll",
-          "args": {
-            "x": "",
-            "y": "",
-            "amount": "scrollCount"
-          },
-          "arg_clamp": {
-            "amount": {
-              "min": 1,
-              "max": 10
-            }
+          "adapter": {
+            "code_file": "adapters/computer.scroll.js"
           }
         }
       }
     }
   ],
-  "permission_grants": ["tool:http-egress:127.0.0.1"]
+  "permission_grants": ["tool:http-egress:127.0.0.1", "tool:execute"]
 }

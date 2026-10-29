@@ -1,4 +1,13 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
+import type { CSSProperties } from "react";
+import drawingStyles from "./plan-badge.drawing.module.css";
+
+interface BadgeInkStyle extends CSSProperties {
+	"--plan-badge-1-color"?: CSSProperties["color"];
+}
+interface BadgeGradientStyle extends CSSProperties {
+	"--plan-badge-2-background-image"?: CSSProperties["backgroundImage"];
+}
 
 /**
  * Subscription or pricing tier a {@link PlanBadge} can render. Billing-backed
@@ -18,9 +27,15 @@ export type PlanTier =
 	| "enterprise"
 	| "desktop-license";
 
+/**
+ * Palette used by pricing-card borders. Gateway PAYG is a standalone offer,
+ * not a subscription PlanTier.
+ */
+export type PlanCardPalette = PlanTier | "gateway-payg";
+
 /** Visual definition for one tier: gradient, on-gradient text colour, label. */
 interface TierStyle {
-	/** CSS `background-image` — a slanted linear-gradient. */
+	/** CSS `background-image` used by the tier badge. */
 	readonly gradient: string;
 	/** Text colour chosen for AA contrast on this gradient. */
 	readonly ink: string;
@@ -28,13 +43,13 @@ interface TierStyle {
 	readonly label: string;
 }
 
-const TIER_STYLES: Record<PlanTier, TierStyle> = {
-	// A Major Pass is the Marketplace tier: a restrained champagne-gold signal
-	// that reads as a premium pass without competing with Pro or Max.
+const TIER_STYLES = {
+	// A Major Pass carries the animated violet, rose, and amber gradient.
 	"marketplace-membership": {
 		label: "A Major Pass",
-		ink: "#2d2107",
-		gradient: "linear-gradient(15deg,#fff1b8 0%,#c8942e 100%)",
+		ink: "#ffffff",
+		gradient:
+			"linear-gradient(135deg,#090613 0%,#2b348f 30%,#655be0 52%,#de5c9f 73%,#ff941f 100%)",
 	},
 	// The signature holographic pastel — near-white, so it needs dark ink.
 	pro: {
@@ -47,7 +62,7 @@ const TIER_STYLES: Record<PlanTier, TierStyle> = {
 		label: "Plus",
 		ink: "#0b0b14",
 		gradient:
-			"linear-gradient(15deg,#b9f3ff 0%,#9cc8ff 42%,#c3a4ff 72%,#f2b6e8 100%)",
+			"radial-gradient(87.5139% 80.7298% at 76.8195% 26.8195%,#e2dfd8 0%,#e2dfd8 40%,rgba(226,223,216,0) 90%,rgba(226,223,216,0) 100%),radial-gradient(101.273% 101.273% at 100% 55.2245%,#56faf7 0%,#56faf7 35%,rgba(86,250,247,0) 80%),radial-gradient(160.387% 160.387% at 100% 53.6389%,#a162ff 20%,rgba(145,76,255,0) 75%),radial-gradient(197.349% 197.349% at 100% 53.6389%,#f8dcbb 0%,#f8dcbb 38%,rgba(226,223,216,0) 90%)",
 	},
 	// Max sits above Pro: a hotter, jewel-toned sweep (amber → magenta →
 	// violet → azure). Deep enough mid-tones to carry light ink.
@@ -57,16 +72,16 @@ const TIER_STYLES: Record<PlanTier, TierStyle> = {
 		gradient:
 			"linear-gradient(15deg,#c679c4 0%,#fa3d1d 25%,#ffb005 50%,#e1e1fe 75%,#0358f7 100%)",
 	},
-	// Teams reads "organisation": a confident indigo → cyan.
+	// Teams keeps the reference gradient saturated through the lightest stop.
 	teams: {
 		label: "Teams",
 		ink: "#ffffff",
-		gradient: "linear-gradient(15deg,#4f46e5 0%,#22d3ee 100%)",
+		gradient: "linear-gradient(180deg,#031c26 0%,#1b6aa7 43%,#57d2f4 100%)",
 	},
 	"teams-lite": {
 		label: "Teams Lite",
 		ink: "#ffffff",
-		gradient: "linear-gradient(15deg,#4f46e5 0%,#22d3ee 100%)",
+		gradient: "linear-gradient(180deg,#031c26 0%,#1b6aa7 43%,#57d2f4 100%)",
 	},
 	business: {
 		label: "Business",
@@ -82,13 +97,13 @@ const TIER_STYLES: Record<PlanTier, TierStyle> = {
 		gradient:
 			"linear-gradient(15deg,#0f766e 0,#059669 34%,#84cc16 67%,#f59e0b 100%)",
 	},
-	// The one-time desktop licence: a quiet brushed-steel tone, no shout.
+	// A one-time desktop licence gets the former champagne-gold palette.
 	"desktop-license": {
 		label: "Desktop",
 		ink: "#10131a",
-		gradient: "linear-gradient(15deg,#eef1f5 0,#cdd5e0 50%,#9aa6b8 100%)",
+		gradient: "linear-gradient(15deg,#fff1b8 0%,#c8942e 100%)",
 	},
-};
+} satisfies Record<PlanTier, TierStyle>;
 
 /**
  * The tier's gradient (a CSS `background-image` string), exposed for reuse
@@ -123,8 +138,14 @@ export function planTierLabel(plan: PlanTier): string {
  * first colour is repeated at the end by {@link planTierConicGradient} so the
  * sweep loops seamlessly. Kept beside the badge palette so both stay in sync.
  */
-const TIER_BORDER_COLORS: Record<PlanTier, readonly string[]> = {
-	"marketplace-membership": ["#fff1b8", "#c8942e"],
+const TIER_BORDER_COLORS = {
+	"marketplace-membership": [
+		"#090613",
+		"#2b348f",
+		"#655be0",
+		"#de5c9f",
+		"#ff941f",
+	],
 	pro: [
 		"#9effef",
 		"#d1ffd6",
@@ -134,10 +155,10 @@ const TIER_BORDER_COLORS: Record<PlanTier, readonly string[]> = {
 		"#ffb8eb",
 		"#ffdda3",
 	],
-	plus: ["#b9f3ff", "#9cc8ff", "#c3a4ff", "#f2b6e8"],
+	plus: ["#e2dfd8", "#56faf7", "#a162ff", "#f8dcbb"],
 	max: ["#c679c4", "#fa3d1d", "#ffb005", "#e1e1fe", "#0358f7"],
-	teams: ["#4f46e5", "#22d3ee"],
-	"teams-lite": ["#4f46e5", "#22d3ee"],
+	teams: ["#031c26", "#1b6aa7", "#57d2f4"],
+	"teams-lite": ["#031c26", "#1b6aa7", "#57d2f4"],
 	business: [
 		"#5dffe4",
 		"#8dff9a",
@@ -155,8 +176,17 @@ const TIER_BORDER_COLORS: Record<PlanTier, readonly string[]> = {
 		"#ffc45f",
 	],
 	enterprise: ["#0f766e", "#059669", "#84cc16", "#f59e0b"],
-	"desktop-license": ["#eef1f5", "#cdd5e0", "#9aa6b8"],
-};
+	"desktop-license": ["#fff1b8", "#c8942e"],
+} satisfies Record<PlanTier, readonly string[]>;
+
+const GATEWAY_PAYG_BORDER_COLORS = [
+	"#1e0b33",
+	"#354389",
+	"#624c95",
+	"#a73455",
+	"#f83d34",
+	"#f3a316",
+] as const;
 
 /**
  * A rotating conic gradient built from the tier's colours, for an animated card
@@ -178,14 +208,25 @@ export function planTierColors(plan: PlanTier): readonly string[] {
 }
 
 export function planTierConicGradient(plan: PlanTier): string {
-	const colors = TIER_BORDER_COLORS[plan];
+	return planCardConicGradient(plan);
+}
+
+export function planCardConicGradient(plan: PlanCardPalette): string {
+	const colors =
+		plan === "gateway-payg"
+			? GATEWAY_PAYG_BORDER_COLORS
+			: TIER_BORDER_COLORS[plan];
+	return conicGradientFromColors(colors);
+}
+
+function conicGradientFromColors(colors: readonly string[]): string {
 	const stops = [...colors, colors[0]].join(",");
 	return `conic-gradient(from var(--tier-border-angle),${stops})`;
 }
 
 const SIZE_STYLES = {
-	sm: "h-[15px] px-1.5 text-[9px]",
-	md: "h-[18px] px-2 text-[10px]",
+	sm: "h-[15px] px-1.5 type-micro",
+	md: "h-[18px] px-2 type-compact",
 } as const;
 
 export interface PlanBadgeProps {
@@ -201,7 +242,7 @@ export interface PlanBadgeProps {
 	title?: string;
 }
 
-const TIER_TITLES: Record<PlanTier, string> = {
+const TIER_TITLES = {
 	"marketplace-membership": "Ryu A Major Pass",
 	pro: "Ryu Pro",
 	plus: "Ryu Plus",
@@ -211,7 +252,7 @@ const TIER_TITLES: Record<PlanTier, string> = {
 	business: "Ryu Business",
 	enterprise: "Ryu Enterprise",
 	"desktop-license": "Ryu Desktop",
-};
+} satisfies Record<PlanTier, string>;
 
 /**
  * A right-slanted, italic, all-caps, bold gradient badge marking a user's
@@ -236,6 +277,12 @@ export function PlanBadge({
 	const style = TIER_STYLES[plan];
 	const text = (label ?? style.label).toUpperCase();
 
+	const badgeInkStyle: BadgeInkStyle = {
+		"--plan-badge-1-color": `var(--plan-tier-${plan}-ink)`,
+	};
+	const badgeGradientStyle: BadgeGradientStyle = {
+		"--plan-badge-2-background-image": `var(--plan-tier-${plan}-gradient)`,
+	};
 	return (
 		<span
 			className={cn("inline-flex shrink-0 select-none align-middle", className)}
@@ -243,15 +290,29 @@ export function PlanBadge({
 		>
 			<span
 				className={cn(
-					// The slanted plinth: skewed box, gradient fill, soft depth.
-					"relative inline-flex items-center justify-center overflow-hidden rounded-[5px]",
-					"shadow-[0_1px_2px_rgba(0,0,0,0.18)] ring-1 ring-white/25 ring-inset",
-					"-skew-x-12",
-					plan === "business" && "t-plan-badge-business",
-					SIZE_STYLES[size]
+					cn(
+						// The slanted plinth: skewed box, gradient fill, soft depth.
+						"relative inline-flex items-center justify-center overflow-hidden rounded-[5px]",
+						"shadow-[0_1px_2px_rgba(0,0,0,0.18)] ring-1 ring-white/25 ring-inset",
+						"-skew-x-12",
+						SIZE_STYLES[size]
+					),
+					drawingStyles.badgeInk
 				)}
-				style={{ backgroundImage: style.gradient, color: style.ink }}
+				style={badgeInkStyle}
 			>
+				<span
+					aria-hidden="true"
+					className={cn(
+						cn(
+							"t-plan-badge-gradient pointer-events-none absolute inset-0",
+							plan === "plus" && "t-plan-badge-plus-gradient",
+							plan === "business" && "t-plan-badge-business-gradient"
+						),
+						drawingStyles.badgeGradient
+					)}
+					style={badgeGradientStyle}
+				/>
 				{/* A looping diagonal sheen sweeping left to right, holographic. */}
 				<span
 					aria-hidden="true"

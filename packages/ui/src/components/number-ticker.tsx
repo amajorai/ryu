@@ -1,6 +1,10 @@
 "use client";
 
-import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import {
+	type CountFormattingInput,
+	formatCount,
+} from "@ryu/ui/lib/number-format.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
@@ -30,7 +34,8 @@ interface NumberTickerProps {
 	/** Static text rendered after the number. */
 	suffix?: string;
 	/** The number to display. */
-	value: number;
+	value: CountFormattingInput;
+	variant?: "default" | "plan-price" | "featured-plan-price";
 }
 
 const DIGIT_STRIP = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
@@ -46,10 +51,7 @@ function DigitColumn({
 	blur: boolean;
 }) {
 	return (
-		<span
-			className="relative inline-block text-center align-baseline tabular-nums leading-none"
-			style={{ height: "1em" }}
-		>
+		<span className="relative inline-block h-[1em] text-center align-baseline tabular-nums leading-none">
 			{/* In-flow spacer: fixes the column width + baseline to a real glyph. It
 			    is NOT clipped, so the column keeps a true text baseline that lines up
 			    with a prefix like "$" (an inline-block with overflow:hidden would
@@ -83,6 +85,7 @@ export function NumberTicker({
 	prefix = "",
 	suffix = "",
 	className,
+	variant = "default",
 	blur = false,
 	stagger = 0.05,
 	locale = true,
@@ -106,7 +109,17 @@ export function NumberTicker({
 	return (
 		<span
 			aria-label={`${prefix}${formatted}${suffix}`}
-			className={className}
+			className={
+				variant === "default"
+					? className
+					: cn(
+							variant === "plan-price" &&
+								"font-heading font-medium text-4xl tabular-nums",
+							variant === "featured-plan-price" &&
+								"font-heading font-medium text-4xl text-primary tabular-nums",
+							className
+						)
+			}
 			ref={ref}
 		>
 			{prefix}

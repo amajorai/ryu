@@ -2,7 +2,7 @@ import {
 	RyuAppMain,
 	RyuAppShell,
 	RyuAppToolbar,
-} from "@ryu/blocks/companion/app-ui";
+} from "@ryu/blocks/companion/app-ui.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { type ComponentType, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -14,18 +14,18 @@ document.documentElement.classList.toggle("dark", dark);
 async function mountProof() {
 	let Surface: ComponentType<{
 		close(): void;
-		submit(value: unknown): Promise<void>;
+		submit<Submission>(value: Submission): Promise<void>;
 	}>;
 	if (mode === "slides") {
 		const { ExportDialog } = await import(
-			"../../../../apps-store/slides/ui/src/components/ExportDialog"
+			"../../../../apps-store/slides/ui/src/components/ExportDialog.tsx"
 		);
 		Surface = ({ close, submit }) => (
 			<ExportDialog onClose={close} onExport={submit} />
 		);
 	} else if (mode === "pull-requests") {
 		const { StackDialog } = await import(
-			"../../../../apps-store/pull-requests/ui/src/App"
+			"../../../../apps-store/pull-requests/ui/src/App.tsx"
 		);
 		Surface = ({ close, submit }) => (
 			<StackDialog
@@ -40,7 +40,7 @@ async function mountProof() {
 		);
 	} else if (mode === "feedback-board") {
 		const { SubmitDialog } = await import(
-			"../../../../apps-store/feedback-board/ui/src/public/PublicBoard"
+			"../../../../apps-store/feedback-board/ui/src/public/PublicBoard.tsx"
 		);
 		Surface = ({ close, submit }) => (
 			<SubmitDialog
@@ -54,7 +54,7 @@ async function mountProof() {
 		);
 	} else if (mode === "teams") {
 		const { DeleteDialog } = await import(
-			"../../../../apps-store/teams/ui/src/App"
+			"../../../../apps-store/teams/ui/src/App.tsx"
 		);
 		Surface = ({ close, submit }) => (
 			<DeleteDialog
@@ -74,7 +74,7 @@ async function mountProof() {
 		);
 	} else if (mode === "rooms") {
 		const { RoomWorkbench } = await import(
-			"../../../../apps-store/rooms/ui/src/RoomWorkbench"
+			"../../../../apps-store/rooms/ui/src/RoomWorkbench.tsx"
 		);
 		Surface = ({ close }) => (
 			<RoomWorkbench
@@ -98,7 +98,7 @@ async function mountProof() {
 		);
 	} else {
 		const { AssetPicker } = await import(
-			"../../../../apps-store/canvas/ui/src/AssetPicker"
+			"../../../../apps-store/canvas/ui/src/AssetPicker.tsx"
 		);
 		Surface = ({ close, submit }) => (
 			<AssetPicker

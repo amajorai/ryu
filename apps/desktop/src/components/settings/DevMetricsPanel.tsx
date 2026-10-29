@@ -52,7 +52,10 @@ function Stat({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="flex min-w-0 flex-col gap-0.5">
 			<span className="font-medium text-sm tabular-nums">{value}</span>
-			<span className="truncate text-[11px] text-muted-foreground">
+			<span
+				className="type-caption truncate text-muted-foreground"
+				title={label}
+			>
 				{label}
 			</span>
 		</div>
@@ -200,7 +203,10 @@ export function DevMetricsPanel() {
 							<tbody className="tabular-nums">
 								{httpStats.slice(0, 15).map((stat) => (
 									<tr className="border-border/50 border-t" key={stat.path}>
-										<td className="max-w-[22rem] truncate py-1 pr-3 font-mono">
+										<td
+											className="max-w-[22rem] truncate py-1 pr-3 font-mono"
+											title={stat.path}
+										>
 											{stat.path}
 										</td>
 										<td className="py-1 pr-3 text-right">

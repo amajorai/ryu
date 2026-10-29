@@ -1,0 +1,65 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_4cbae62e029546ccb69dea25d83c62ba"
+  },
+  "body": {
+    "events": [
+      {
+        "acknowledgedAt": null,
+        "actions": [],
+        "archivedAt": null,
+        "attachment": null,
+        "body": "",
+        "createdAt": "2026-10-01T00:00:13.000Z",
+        "data": {},
+        "externalId": null,
+        "fingerprint": null,
+        "icon": null,
+        "id": "evt_069cfa7edb9b40feab419d496bfedf88",
+        "level": "info",
+        "occurredAt": "2026-10-01T00:00:13.000Z",
+        "priority": 3,
+        "project": null,
+        "recipient": null,
+        "response": null,
+        "source": "app",
+        "tags": [],
+        "title": "Fourth",
+        "topic": null,
+        "type": "notification",
+        "url": null
+      },
+      {
+        "acknowledgedAt": null,
+        "actions": [],
+        "archivedAt": null,
+        "attachment": null,
+        "body": "",
+        "createdAt": "2026-10-01T00:00:11.000Z",
+        "data": {},
+        "externalId": null,
+        "fingerprint": null,
+        "icon": null,
+        "id": "evt_86f187d9e30944ba8806b643ed49ae25",
+        "level": "info",
+        "occurredAt": "2026-10-01T00:00:11.000Z",
+        "priority": 3,
+        "project": null,
+        "recipient": null,
+        "response": null,
+        "source": "app",
+        "tags": [],
+        "title": "Second",
+        "topic": null,
+        "type": "notification",
+        "url": null
+      }
+    ],
+    "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2LTEwLTAxVDAwOjAwOjExLjAwMFoiLCJpZCI6ImV2dF84NmYxODdkOWUzMDk0NGJhODgwNmI2NDNlZDQ5YWUyNSJ9",
+    "ok": true,
+    "requestId": "req_4cbae62e029546ccb69dea25d83c62ba",
+    "type": "event.list"
+  }
+}

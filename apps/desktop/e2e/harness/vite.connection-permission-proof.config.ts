@@ -18,6 +18,8 @@ export default defineConfig({
 	},
 	optimizeDeps: {
 		entries: [path.resolve(harnessDir, "connection-permission-proof.html")],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	root: harnessDir,
 	publicDir: path.resolve(desktopRoot, "public"),

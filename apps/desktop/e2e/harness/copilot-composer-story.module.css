@@ -1,0 +1,19 @@
+/* Native global classes are owned by COPILOT_STYLES inside the shadow root. */
+.panel {
+	composes: panel from global;
+}
+.head {
+	composes: head from global;
+}
+.brand {
+	composes: brand from global;
+}
+.messages {
+	composes: messages from global;
+}
+.empty {
+	composes: empty from global;
+}
+.composer {
+	composes: composer from global;
+}

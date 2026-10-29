@@ -7,19 +7,16 @@ const RULES_CLOSE = "</ryu-rules-context>";
 const MAX_RULES = 32;
 const MAX_RULE_CHARS = 8000;
 const MAX_RULE_CONTEXT_CHARS = 24_000;
-const RULES_BLOCK = new RegExp(
-	`\\n*${RULES_OPEN.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}\\n[\\s\\S]*?${RULES_CLOSE}`,
-	"g",
-);
-
+// Core serializes hook preferences as serde_json::Value; native Object
+// identity distinguishes JSON containers from scalar values without coercion.
 function asObject(value, fallback = {}) {
-	if (value && typeof value === "object" && !Array.isArray(value)) {
+	if (value && Object(value) === value && !Array.isArray(value)) {
 		return value;
 	}
-	if (typeof value === "string") {
+	if (parsePrimitiveText(value) !== undefined) {
 		try {
 			const parsed = JSON.parse(value);
-			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			if (parsed && Object(parsed) === parsed && !Array.isArray(parsed)) {
 				return parsed;
 			}
 		} catch {
@@ -30,8 +27,8 @@ function asObject(value, fallback = {}) {
 }
 
 function asBoolean(value, fallback) {
-	if (typeof value === "boolean") return value;
-	if (typeof value === "string") {
+	if ((value === true || value === false)) return value;
+	if (parsePrimitiveText(value) !== undefined) {
 		if (value.toLowerCase() === "true") return true;
 		if (value.toLowerCase() === "false") return false;
 	}
@@ -46,53 +43,24 @@ function asMode(value, fallback = "auto") {
 }
 
 function textOfContent(content) {
-	if (typeof content === "string") return content;
+	if (parsePrimitiveText(content) !== undefined) return content;
 	if (!Array.isArray(content)) return content == null ? "" : String(content);
 	return content
 		.map((part) => {
-			if (typeof part === "string") return part;
-			return part && part.type === "text" && typeof part.text === "string" ? part.text : "";
+			if (parsePrimitiveText(part) !== undefined) return part;
+			return part && part.type === "text" && parsePrimitiveText(part.text) !== undefined ? part.text : "";
 		})
 		.join("\n");
 }
 
-function cleanText(text) {
-	return String(text || "").replace(RULES_BLOCK, "");
-}
-
-const projectInstructions =
-	typeof ctx?.project_instructions === "string" ? ctx.project_instructions : "";
-
-function stripProjectInstructions(text) {
-	if (!projectInstructions.trim()) return String(text || "");
-	return String(text || "")
-		.split(projectInstructions)
-		.join("")
-		.replace(/\n{3,}/g, "\n\n");
-}
-
-function cleanupOnly() {
-	if (Array.isArray(ctx?.messages)) {
-		let changed = false;
-		const messages = ctx.messages.map((message) => {
-			if (message?.role === "system" && typeof message.content === "string") {
-				const content = stripProjectInstructions(cleanText(message.content));
-				if (content !== message.content) changed = true;
-				return { ...message, content };
-			}
-			if (message?.role === "user" && typeof message.content === "string") {
-				const content = cleanText(message.content);
-				if (content !== message.content) changed = true;
-				return { ...message, content };
-			}
-			return message;
-		});
-		return changed ? { kind: "rewrite", messages } : { kind: "none" };
-	}
-	if (typeof ctx?.input === "string") {
-		const text = stripProjectInstructions(cleanText(ctx.input));
-		return text === ctx.input ? { kind: "none" } : { kind: "replace", text, fresh_session: true };
-	}
+// The system prompt and earlier turns are a frozen prompt-cache prefix (Core
+// drops any rewrite that edits them), and Core never writes the rules block back
+// into chat history, so "not injecting" needs no cleanup pass: it is simply no
+// directive. On the message-array plane (OpenAI-compatible/local agents) the next
+// turn resends the previous user message without its block, so the provider cache
+// prefix ends just before that message. ACP agents are the exception: the block
+// went to the warm session as part of that turn, so it stays in their history.
+function skipInjection() {
 	return { kind: "none" };
 }
 
@@ -177,7 +145,7 @@ function matchesGlob(value, glob) {
 
 function globList(rule) {
 	if (Array.isArray(rule?.globs)) return rule.globs;
-	if (typeof rule?.globs === "string") return [rule.globs];
+	if (parsePrimitiveText(rule?.globs) !== undefined) return [rule.globs];
 	return [];
 }
 
@@ -222,11 +190,11 @@ function latestUserText(messages, input) {
 			}
 		}
 	}
-	return typeof input === "string" ? input : "";
+	return parsePrimitiveText(input) !== undefined ? input : "";
 }
 
 function appendRuleBlock(text, ruleText) {
-	return `${cleanText(text)}\n\n${RULES_OPEN}\n${ruleText}\n${RULES_CLOSE}`;
+	return `${text}\n\n${RULES_OPEN}\n${ruleText}\n${RULES_CLOSE}`;
 }
 
 function boundedRuleText(rules) {
@@ -271,9 +239,9 @@ try {
 const enabled = asBoolean(preferences.enabled, true);
 const autoInject = asBoolean(preferences.autoInject, true);
 if (!enabled) {
-	return cleanupOnly();
+	return skipInjection();
 }
-if (!autoInject) return cleanupOnly();
+if (!autoInject) return skipInjection();
 
 const configuredMode = asMode(preferences.applyMode, "auto");
 const turnsPerPlan = Math.max(0, Number.parseInt(String(preferences.turnsPerPlan ?? 0), 10) || 0);
@@ -303,7 +271,7 @@ const selectedProjectRules = projectRules
 
 const selected = [...baseRules, ...selectedProjectRules];
 if (selected.length === 0) {
-	return cleanupOnly();
+	return skipInjection();
 }
 
 let countKey = null;
@@ -316,7 +284,7 @@ if (turnsPerPlan > 0 && ctx?.conversation_id) {
 		count = 0;
 	}
 	if (count >= turnsPerPlan) {
-		return cleanupOnly();
+		return skipInjection();
 	}
 }
 
@@ -329,31 +297,10 @@ if (countKey) {
 	}
 }
 
+// Only the latest user message changes. The system prompt and earlier turns stay
+// byte-identical so the provider's prompt-cache prefix survives every turn.
 if (Array.isArray(ctx?.messages)) {
-	let changed = false;
-	const messages = ctx.messages.map((message) => {
-		if (message?.role === "system" && typeof message.content === "string") {
-			const content = stripProjectInstructions(cleanText(message.content));
-			if (content !== message.content) changed = true;
-			return { ...message, content };
-		}
-		if (message?.role !== "user") return message;
-		if (typeof message.content === "string") {
-			const cleaned = cleanText(message.content);
-			if (cleaned !== message.content) changed = true;
-			return { ...message, content: cleaned };
-		}
-		if (Array.isArray(message.content)) {
-			const content = message.content.map((part) => {
-				if (part?.type !== "text" || typeof part.text !== "string") return part;
-				const cleaned = cleanText(part.text);
-				if (cleaned !== part.text) changed = true;
-				return { ...part, text: cleaned };
-			});
-			return { ...message, content };
-		}
-		return message;
-	});
+	const messages = [...ctx.messages];
 	let lastUserIndex = -1;
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
 		if (messages[index]?.role === "user") {
@@ -361,9 +308,9 @@ if (Array.isArray(ctx?.messages)) {
 			break;
 		}
 	}
-	if (lastUserIndex < 0) return changed ? { kind: "rewrite", messages } : { kind: "none" };
+	if (lastUserIndex < 0) return { kind: "none" };
 	const message = messages[lastUserIndex];
-	if (typeof message.content === "string") {
+	if (parsePrimitiveText(message.content) !== undefined) {
 		messages[lastUserIndex] = { ...message, content: appendRuleBlock(message.content, ruleText) };
 	} else if (Array.isArray(message.content)) {
 		messages[lastUserIndex] = {
@@ -376,8 +323,20 @@ if (Array.isArray(ctx?.messages)) {
 	return { kind: "rewrite", messages };
 }
 
-if (typeof ctx?.input !== "string" || !ctx.input.trim()) {
+// ACP: append to the flattened prompt. Core accepts only appended text and sends
+// it to the warm pooled session with the latest turn.
+if (parsePrimitiveText(ctx?.input) === undefined || !ctx.input.trim()) {
 	return { kind: "none" };
 }
-const prompt = appendRuleBlock(stripProjectInstructions(cleanText(ctx.input)), ruleText);
-return { kind: "replace", text: prompt, fresh_session: true };
+return { kind: "replace", text: appendRuleBlock(ctx.input, ruleText) };
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}

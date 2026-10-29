@@ -9,6 +9,7 @@
 // method names, same `PluginHostError` code mapping — so `@ryu/app-host`'s host
 // services are wired the same way as on desktop.
 
+import { hostJsonSchema, parseHostArguments } from "../../shared/host-json.ts";
 import type { PluginHostErrorCode } from "../../shared/ipc.ts";
 
 /** Carries a {@link PluginHostErrorCode} so the host RPC layer relays a structured
@@ -33,17 +34,19 @@ export class PluginHostError extends Error {
 export async function pluginHostInvoke(
 	pluginId: string,
 	method: string,
-	args: unknown
-): Promise<unknown> {
+	args: Parameters<typeof hostJsonSchema.parse>[0],
+	coreGeneration?: number
+) {
 	const result = await window.island.plugins.hostInvoke({
 		pluginId,
 		method,
-		args,
+		args: parseHostArguments(args),
+		coreGeneration,
 	});
 	if (!result.ok) {
 		throw new PluginHostError(result.code, result.message);
 	}
-	return result.result;
+	return hostJsonSchema.parse(result.result);
 }
 
 /**
@@ -55,8 +58,12 @@ export async function pluginHostInvoke(
  */
 export function pluginHostInvokeStream(
 	pluginId: string,
-	input: unknown,
-	opts: { onChunk: (delta: string) => void; signal?: AbortSignal }
+	input: Parameters<typeof hostJsonSchema.parse>[0],
+	opts: {
+		onChunk: (delta: string) => void;
+		signal?: AbortSignal;
+		coreGeneration?: number;
+	}
 ): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		let streamId: string | null = null;
@@ -109,7 +116,11 @@ export function pluginHostInvokeStream(
 		}
 
 		window.island.plugins
-			.startHostStream({ pluginId, input })
+			.startHostStream({
+				pluginId,
+				input: parseHostArguments(input),
+				coreGeneration: opts.coreGeneration,
+			})
 			.then((handle) => {
 				streamId = handle.streamId;
 				// No chunk/end event can arrive before `streamId` is set here: the main
@@ -123,7 +134,7 @@ export function pluginHostInvokeStream(
 					onAbort();
 				}
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (settled) {
 					return;
 				}

@@ -21,7 +21,10 @@ export default defineConfig({
 		"node_modules/.vite-catalog-performance" +
 			(process.env.RYU_PERF_BASELINE ? "-baseline" : "")
 	),
-	optimizeDeps: { entries: ["catalog-performance-proof.html"] },
+	optimizeDeps: {
+		entries: ["catalog-performance-proof.html"],
+		esbuildOptions: { target: "esnext" },
+	},
 	clearScreen: false,
 	define: { "process.env": {} },
 	resolve: {
@@ -31,7 +34,7 @@ export default defineConfig({
 						"@/src/hooks/useAgents.ts": "/tmp/ryu-perf-baseline/useAgents.ts",
 						"@/src/hooks/useApps.ts": "/tmp/ryu-perf-baseline/useApps.ts",
 					}
-				: {}),
+				: undefined),
 			"@": desktopRoot,
 		},
 		dedupe: ["react", "react-dom"],

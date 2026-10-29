@@ -12,45 +12,53 @@
 // (`{ success: false, error }`), and we want to surface that exact message —
 // the generic helper throws only the status code.
 
+import {
+	type RpcJsonResponse,
+	rpcJsonResponseSchema,
+	type WorkflowNodeRecord,
+	workflowDefinitionInputSchema,
+} from "@ryu/app-host/rpc";
+import type {
+	NodeRunState,
+	WorkflowEdge,
+	WorkflowTemplateMeta,
+	WorkflowTrigger,
+	WorkflowVersionMeta,
+} from "@ryuhq/core-client/workflows.ts";
+import type { z } from "zod";
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
+import {
+	type GatewayJsonValue,
+	gatewayJsonValueSchema,
+} from "./gateway-json-contracts.ts";
+import { encodePathId } from "./path-id.ts";
+import {
+	workflowEnvelopeSchema,
+	workflowErrorSchema,
+	workflowInstallPreviewSchema,
+	workflowInstallResultSchema,
+	workflowListEnvelopeSchema,
+	workflowRunEnvelopeSchema,
+	workflowTemplateEnvelopeSchema,
+	workflowTemplateListEnvelopeSchema,
+	workflowVersionDefinitionEnvelopeSchema,
+	workflowVersionListEnvelopeSchema,
+} from "./workflow-wire-contracts.ts";
+
+export type {
+	NodeRunState,
+	NodeStatus,
+	WorkflowEdge,
+	WorkflowTemplateCategory,
+	WorkflowTemplateMeta,
+	WorkflowTrigger,
+	WorkflowVersionMeta,
+} from "@ryuhq/core-client/workflows.ts";
 
 /** A single node in a workflow definition. `type` selects the node kind and
  * carries its config (Core flattens the kind onto the node). We keep the config
  * open since the JSON editor is the create surface for DA8. */
-export interface WorkflowNode {
-	id: string;
-	type: string;
-	[key: string]: unknown;
-}
-
-/** A directed edge between two node ids, optionally gated on a branch label. */
-export interface WorkflowEdge {
-	branch?: string | null;
-	from: string;
-	to: string;
-}
-
-/** How a workflow is fired. Mirrors Core's `WorkflowTrigger` (serde tag="type",
- * snake_case). The wire shape is the tagged union directly. */
-export type WorkflowTrigger =
-	| { type: "manual" }
-	| {
-			type: "schedule";
-			cron?: string | null;
-			every?: string | null;
-			require_approval?: boolean;
-	  }
-	| { type: "webhook"; secret?: string | null }
-	| {
-			type: "composio";
-			toolkit: string;
-			trigger_slug: string;
-			connected_account_id?: string | null;
-	  }
-	/** Run when an app event fires — an event an installed app declared in its
-	 *  manifest `contributes.hook_events`. `event` is the fully-qualified id,
-	 *  `<owning plugin id>#<event name>`. */
-	| { type: "event"; event: string };
+export type WorkflowNode = WorkflowNodeRecord;
 
 /** A persisted workflow definition as returned by Core. */
 export interface Workflow {
@@ -69,51 +77,16 @@ export interface Workflow {
 	updatedAt?: string | null;
 }
 
-interface WorkflowWire {
-	chat_input?: boolean | null;
-	created_at?: string | null;
-	description?: string | null;
-	edges?: WorkflowEdge[];
-	id: string;
-	name: string;
-	nodes: WorkflowNode[];
-	triggers?: WorkflowTrigger[];
-	updated_at?: string | null;
-}
-
-function toWorkflow(w: WorkflowWire): Workflow {
-	return {
-		id: w.id,
-		name: w.name,
-		description: w.description ?? null,
-		nodes: w.nodes ?? [],
-		edges: w.edges ?? [],
-		triggers: w.triggers ?? [],
-		chatInput: w.chat_input ?? false,
-		createdAt: w.created_at ?? null,
-		updatedAt: w.updated_at ?? null,
-	};
-}
-
-/** Per-node status within a run (mirrors Core's `NodeStatus`). */
-export type NodeStatus =
-	| "pending"
+/** Overall run status (mirrors Core's `RunStatus`). `awaiting_input` means the
+ * run is suspended at a durable Awakeable (human-in-the-loop) gate and can be
+ * continued via {@link resumeWorkflow}. `waiting` means a provider rate, usage,
+ * or session limit parked it; Core resumes it on its own at `resumeAt`. */
+export type RunStatus =
 	| "running"
 	| "completed"
 	| "failed"
-	| "skipped";
-
-/** Overall run status (mirrors Core's `RunStatus`). `awaiting_input` means the
- * run is suspended at a durable Awakeable (human-in-the-loop) gate and can be
- * continued via {@link resumeWorkflow}. */
-export type RunStatus = "running" | "completed" | "failed" | "awaiting_input";
-
-/** Persisted state of a single node within a run. */
-export interface NodeRunState {
-	error?: string | null;
-	output?: string | null;
-	status: NodeStatus;
-}
+	| "awaiting_input"
+	| "waiting";
 
 /** A workflow run record returned by Core's executor / run store. */
 export interface WorkflowRun {
@@ -127,41 +100,14 @@ export interface WorkflowRun {
 	input: Record<string, string>;
 	nodes: Record<string, NodeRunState>;
 	output: Record<string, string>;
+	/** When a `waiting` run resumes (RFC3339). */
+	resumeAt?: string | null;
 	runId: string;
 	status: RunStatus;
 	updatedAt: string;
+	/** The limit error that parked a `waiting` run. */
+	waitReason?: string | null;
 	workflowId: string;
-}
-
-interface WorkflowRunWire {
-	awaiting_node?: string | null;
-	created_at: string;
-	dry_run?: boolean | null;
-	dryRun?: boolean | null;
-	error?: string | null;
-	input?: Record<string, string>;
-	nodes?: Record<string, NodeRunState>;
-	output?: Record<string, string>;
-	run_id: string;
-	status: RunStatus;
-	updated_at: string;
-	workflow_id: string;
-}
-
-function toRun(r: WorkflowRunWire): WorkflowRun {
-	return {
-		runId: r.run_id,
-		workflowId: r.workflow_id,
-		status: r.status,
-		dryRun: r.dryRun ?? r.dry_run ?? false,
-		input: r.input ?? {},
-		output: r.output ?? {},
-		nodes: r.nodes ?? {},
-		error: r.error ?? null,
-		awaitingNode: r.awaiting_node ?? null,
-		createdAt: r.created_at,
-		updatedAt: r.updated_at,
-	};
 }
 
 export interface RunWorkflowOptions {
@@ -175,9 +121,9 @@ export interface RunWorkflowOptions {
 async function errorFromResponse(resp: Response, path: string): Promise<Error> {
 	try {
 		const text = await resp.text();
-		const body = text ? (JSON.parse(text) as { error?: unknown }) : null;
-		if (body && typeof body.error === "string" && body.error.length > 0) {
-			return new Error(body.error);
+		const body = workflowErrorSchema.safeParse(text ? JSON.parse(text) : null);
+		if (body.success && body.data.error) {
+			return new Error(body.data.error);
 		}
 	} catch {
 		// Non-JSON body — fall through to the status-based message.
@@ -185,20 +131,20 @@ async function errorFromResponse(resp: Response, path: string): Promise<Error> {
 	return new Error(`${path} failed: ${resp.status}`);
 }
 
-async function postJson<T>(
+async function postJson(
 	target: ApiTarget,
 	path: string,
-	body: unknown
-): Promise<T> {
+	body: GatewayJsonValue | RunWorkflowRequest | CreateWorkflowVersionRequest
+): Promise<RpcJsonResponse> {
 	const resp = await authenticatedFetch(target, path, {
 		method: "POST",
-		body: JSON.stringify(body),
+		body: JSON.stringify(gatewayJsonValueSchema.parse(body)),
 	});
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, path);
 	}
 	const text = await resp.text();
-	return (text ? JSON.parse(text) : undefined) as T;
+	return rpcJsonResponseSchema.parse(text ? JSON.parse(text) : undefined);
 }
 
 export async function fetchWorkflows(target: ApiTarget): Promise<Workflow[]> {
@@ -206,8 +152,7 @@ export async function fetchWorkflows(target: ApiTarget): Promise<Workflow[]> {
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, "/workflows");
 	}
-	const json = (await resp.json()) as { workflows?: WorkflowWire[] };
-	return (json.workflows ?? []).map(toWorkflow);
+	return workflowListEnvelopeSchema.parse(await resp.json()).workflows;
 }
 
 /** Fetch a single workflow definition by id (e.g. to re-hydrate the canvas after
@@ -216,37 +161,38 @@ export async function fetchWorkflow(
 	target: ApiTarget,
 	id: string
 ): Promise<Workflow> {
-	const resp = await authenticatedFetch(target, `/workflows/${id}`);
+	const path = `/workflows/${encodePathId(id)}`;
+	const resp = await authenticatedFetch(target, path);
 	if (!resp.ok) {
-		throw await errorFromResponse(resp, `/workflows/${id}`);
+		throw await errorFromResponse(resp, path);
 	}
-	const json = (await resp.json()) as { workflow: WorkflowWire };
-	return toWorkflow(json.workflow);
+	return workflowEnvelopeSchema.parse(await resp.json()).workflow;
 }
 
 /** Create (or overwrite, when `id` is set) a workflow. Core validates the DAG
  * first and returns a 400 with the validation error when it is invalid. */
 export async function createWorkflow(
 	target: ApiTarget,
-	definition: unknown
+	definition: Parameters<typeof workflowDefinitionInputSchema.parse>[0]
 ): Promise<Workflow> {
-	const json = await postJson<{ workflow: WorkflowWire }>(
+	const json = await postJson(
 		target,
 		"/workflows",
-		definition
+		workflowDefinitionInputSchema.parse(definition)
 	);
-	return toWorkflow(json.workflow);
+	return workflowEnvelopeSchema.parse(json).workflow;
 }
 
 export async function deleteWorkflow(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	const resp = await authenticatedFetch(target, `/workflows/${id}`, {
+	const path = `/workflows/${encodePathId(id)}`;
+	const resp = await authenticatedFetch(target, path, {
 		method: "DELETE",
 	});
 	if (!resp.ok) {
-		throw await errorFromResponse(resp, `/workflows/${id}`);
+		throw await errorFromResponse(resp, path);
 	}
 }
 
@@ -259,16 +205,16 @@ export async function runWorkflow(
 	input: Record<string, string>,
 	options: RunWorkflowOptions = {}
 ): Promise<WorkflowRun> {
-	const body: { input: Record<string, string>; dryRun?: boolean } = { input };
+	const body: RunWorkflowRequest = { input };
 	if (options.dryRun) {
 		body.dryRun = true;
 	}
-	const json = await postJson<{ run: WorkflowRunWire }>(
+	const json = await postJson(
 		target,
-		`/workflows/${id}/run`,
+		`/workflows/${encodePathId(id)}/run`,
 		body
 	);
-	return toRun(json.run);
+	return workflowRunEnvelopeSchema.parse(json).run;
 }
 
 /** Fetch the current state of a run (e.g. to poll a suspended run). */
@@ -276,12 +222,12 @@ export async function getWorkflowRun(
 	target: ApiTarget,
 	runId: string
 ): Promise<WorkflowRun> {
-	const resp = await authenticatedFetch(target, `/workflows/runs/${runId}`);
+	const path = `/workflows/runs/${encodePathId(runId)}`;
+	const resp = await authenticatedFetch(target, path);
 	if (!resp.ok) {
-		throw await errorFromResponse(resp, `/workflows/runs/${runId}`);
+		throw await errorFromResponse(resp, path);
 	}
-	const json = (await resp.json()) as { run: WorkflowRunWire };
-	return toRun(json.run);
+	return workflowRunEnvelopeSchema.parse(await resp.json()).run;
 }
 
 /** Resume a run suspended at an Awakeable (human-in-the-loop) gate. The `payload`
@@ -293,12 +239,12 @@ export async function resumeWorkflow(
 	runId: string,
 	payload: string
 ): Promise<WorkflowRun> {
-	const json = await postJson<{ run: WorkflowRunWire }>(
+	const json = await postJson(
 		target,
-		`/workflows/runs/${runId}/resume`,
+		`/workflows/runs/${encodePathId(runId)}/resume`,
 		{ payload }
 	);
-	return toRun(json.run);
+	return workflowRunEnvelopeSchema.parse(json).run;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,80 +259,10 @@ export async function resumeWorkflow(
 // (unlike the `/workflows` CRUD above) to match the catalog namespace.
 // ---------------------------------------------------------------------------
 
-/** The four catalog groupings a template can belong to. */
-export type WorkflowTemplateCategory =
-	| "research"
-	| "orchestration"
-	| "quality"
-	| "automation";
-
-const TEMPLATE_CATEGORIES: readonly string[] = [
-	"research",
-	"orchestration",
-	"quality",
-	"automation",
-];
-
-/** Summary card for a workflow template (list view). */
-export interface WorkflowTemplateMeta {
-	category: WorkflowTemplateCategory;
-	description: string;
-	/** Optional icon hint (emoji or icon id) from the catalog; may be null. */
-	icon: string | null;
-	id: string;
-	name: string;
-	/** Number of nodes in the primary workflow (a "size" hint for the card). */
-	nodeCount: number;
-	/** The agent-design pattern the template demonstrates (e.g. "routing"). */
-	pattern: string;
-	/** Provenance link (e.g. the Anthropic/Karpathy write-up), when set. */
-	sourceUrl: string | null;
-	tags: string[];
-}
-
 /** Full template detail: the meta plus the primary workflow's preview graph. */
 export interface WorkflowTemplateDetail extends WorkflowTemplateMeta {
 	edges: WorkflowEdge[];
 	nodes: WorkflowNode[];
-}
-
-interface WorkflowTemplateMetaWire {
-	category?: string | null;
-	description?: string | null;
-	icon?: string | null;
-	id: string;
-	name: string;
-	node_count?: number | null;
-	pattern: string;
-	source_url?: string | null;
-	tags?: string[] | null;
-}
-
-interface WorkflowTemplateDetailWire extends WorkflowTemplateMetaWire {
-	edges?: WorkflowEdge[];
-	nodes?: WorkflowNode[];
-}
-
-function toTemplateCategory(
-	value: string | null | undefined
-): WorkflowTemplateCategory {
-	return value && TEMPLATE_CATEGORIES.includes(value)
-		? (value as WorkflowTemplateCategory)
-		: "orchestration";
-}
-
-function toTemplateMeta(w: WorkflowTemplateMetaWire): WorkflowTemplateMeta {
-	return {
-		id: w.id,
-		name: w.name,
-		description: w.description ?? "",
-		category: toTemplateCategory(w.category),
-		pattern: w.pattern,
-		icon: w.icon ?? null,
-		nodeCount: w.node_count ?? 0,
-		tags: w.tags ?? [],
-		sourceUrl: w.source_url ?? null,
-	};
 }
 
 /** Browse the workflow-template catalog (`GET /api/workflows/catalog`). */
@@ -397,10 +273,7 @@ export async function fetchWorkflowTemplates(
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, "/api/workflows/catalog");
 	}
-	const json = (await resp.json()) as {
-		templates?: WorkflowTemplateMetaWire[];
-	};
-	return (json.templates ?? []).map(toTemplateMeta);
+	return workflowTemplateListEnvelopeSchema.parse(await resp.json()).templates;
 }
 
 /** Fetch one template's detail incl. the primary workflow's preview graph. */
@@ -408,18 +281,12 @@ export async function fetchWorkflowTemplate(
 	target: ApiTarget,
 	id: string
 ): Promise<WorkflowTemplateDetail> {
-	const path = `/api/workflows/catalog/${id}`;
+	const path = `/api/workflows/catalog/${encodePathId(id)}`;
 	const resp = await authenticatedFetch(target, path);
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, path);
 	}
-	const json = (await resp.json()) as { template: WorkflowTemplateDetailWire };
-	const t = json.template;
-	return {
-		...toTemplateMeta(t),
-		nodes: t.nodes ?? [],
-		edges: t.edges ?? [],
-	};
+	return workflowTemplateEnvelopeSchema.parse(await resp.json()).template;
 }
 
 /** Install a template: Core mints fresh workflow ids (primary + any `while`
@@ -428,75 +295,39 @@ export async function installWorkflowTemplate(
 	target: ApiTarget,
 	templateId: string
 ): Promise<string> {
-	const json = await postJson<{ workflow_id: string }>(
-		target,
-		"/api/workflows/catalog/install",
-		{ template_id: templateId }
-	);
-	return json.workflow_id;
+	const json = await postJson(target, "/api/workflows/catalog/install", {
+		template_id: templateId,
+	});
+	return workflowInstallResultSchema.parse(json).workflow_id;
 }
 
-export interface WorkflowTemplateInstallPreview {
-	action: "install";
-	dryRun: true;
-	success: boolean;
-	[key: string]: unknown;
-}
+export type WorkflowTemplateInstallPreview = z.output<
+	typeof workflowInstallPreviewSchema
+>;
 
 export function previewWorkflowTemplateInstall(
 	target: ApiTarget,
 	templateId: string
 ): Promise<WorkflowTemplateInstallPreview> {
-	return postJson<WorkflowTemplateInstallPreview>(
-		target,
-		"/api/workflows/catalog/install",
-		{ dryRun: true, template_id: templateId }
-	);
+	return postJson(target, "/api/workflows/catalog/install", {
+		dryRun: true,
+		template_id: templateId,
+	}).then(workflowInstallPreviewSchema.parse);
 }
 
 // ── Version history (server-backed) ─────────────────────────────────────────
-
-/** Metadata for one saved workflow version. */
-export interface WorkflowVersionMeta {
-	/** Unix milliseconds. */
-	createdAt: number;
-	id: string;
-	label: string | null;
-	name: string;
-	workflowId: string;
-}
-
-interface WorkflowVersionMetaWire {
-	created_at: number;
-	id: string;
-	label?: string | null;
-	name: string;
-	workflow_id: string;
-}
-
-function toWorkflowVersionMeta(
-	w: WorkflowVersionMetaWire
-): WorkflowVersionMeta {
-	return {
-		createdAt: w.created_at,
-		id: w.id,
-		label: w.label ?? null,
-		name: w.name,
-		workflowId: w.workflow_id,
-	};
-}
 
 /** List a workflow's saved versions, newest first (metadata only). */
 export async function listWorkflowVersions(
 	target: ApiTarget,
 	id: string
 ): Promise<WorkflowVersionMeta[]> {
-	const resp = await authenticatedFetch(target, `/workflows/${id}/versions`);
+	const path = `/workflows/${encodePathId(id)}/versions`;
+	const resp = await authenticatedFetch(target, path);
 	if (!resp.ok) {
-		throw await errorFromResponse(resp, `/workflows/${id}/versions`);
+		throw await errorFromResponse(resp, path);
 	}
-	const json = (await resp.json()) as { versions?: WorkflowVersionMetaWire[] };
-	return (json.versions ?? []).map(toWorkflowVersionMeta);
+	return workflowVersionListEnvelopeSchema.parse(await resp.json()).versions;
 }
 
 /** Fetch one version's captured definition as the raw wire object (snake_case),
@@ -505,30 +336,33 @@ export async function getWorkflowVersionDefinition(
 	target: ApiTarget,
 	id: string,
 	versionId: string
-): Promise<Record<string, unknown>> {
-	const resp = await authenticatedFetch(
-		target,
-		`/workflows/${id}/versions/${versionId}`
-	);
+): Promise<z.output<typeof workflowDefinitionInputSchema>> {
+	const path = `/workflows/${encodePathId(id)}/versions/${encodePathId(versionId)}`;
+	const resp = await authenticatedFetch(target, path);
 	if (!resp.ok) {
-		throw await errorFromResponse(
-			resp,
-			`/workflows/${id}/versions/${versionId}`
-		);
+		throw await errorFromResponse(resp, path);
 	}
-	const json = (await resp.json()) as {
-		version?: { workflow?: Record<string, unknown> };
-	};
-	return json.version?.workflow ?? {};
+	return (
+		workflowVersionDefinitionEnvelopeSchema.parse(await resp.json()).version
+			?.workflow ?? {}
+	);
 }
 
 /** Snapshot the workflow's current definition as a new version. */
 export async function createWorkflowVersion(
 	target: ApiTarget,
 	id: string,
-	label?: string
+	label?: string,
+	expectedRevision?: string
 ): Promise<void> {
-	await postJson(target, `/workflows/${id}/versions`, label ? { label } : {});
+	const body: CreateWorkflowVersionRequest = {};
+	if (label) {
+		body.label = label;
+	}
+	if (expectedRevision !== undefined) {
+		body.expectedRevision = expectedRevision;
+	}
+	await postJson(target, `/workflows/${encodePathId(id)}/versions`, body);
 }
 
 /** Restore a version as the workflow's current definition (undoable server-side).
@@ -538,10 +372,19 @@ export async function restoreWorkflowVersion(
 	id: string,
 	versionId: string
 ): Promise<Workflow> {
-	const json = await postJson<{ workflow: WorkflowWire }>(
+	const json = await postJson(
 		target,
-		`/workflows/${id}/versions/${versionId}/restore`,
+		`/workflows/${encodePathId(id)}/versions/${encodePathId(versionId)}/restore`,
 		{}
 	);
-	return toWorkflow(json.workflow);
+	return workflowEnvelopeSchema.parse(json).workflow;
+}
+
+interface RunWorkflowRequest {
+	dryRun?: boolean;
+	input: Record<string, string>;
+}
+interface CreateWorkflowVersionRequest {
+	expectedRevision?: string;
+	label?: string;
 }

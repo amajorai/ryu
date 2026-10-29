@@ -1,42 +1,95 @@
 use std::collections::HashMap;
 use std::ops::Bound;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use log::info;
+use ryu_crypto::{BlindIndex, ContentCipher, ContentContext};
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
+use tantivy::query::{BooleanQuery, Occur, Query, RangeQuery, TermQuery};
 use tantivy::schema::*;
-use tantivy::{Index, IndexReader, IndexWriter, Order, ReloadPolicy};
+use tantivy::{Index, IndexReader, IndexWriter, Order, ReloadPolicy, TantivyDocument};
 
+use crate::seal;
 use crate::timeline::TimelineEntry;
 
 /// Schema version — bump whenever fields change. Triggers index rebuild.
 /// v3: Added transcript metadata fields (audio_segment_id, audio_source, ts_end, confidence)
 /// v4: Made source_kind indexed (STRING) for TermQuery support in range queries
-const SCHEMA_VERSION: u32 = 4;
+/// v5: No stored or indexed plaintext: each document's text (app, window title,
+///     URL, OCR/transcript text) is one sealed payload (`RYU-CB01`, store
+///     `shadow-search`) and the index holds keyed blind term tokens. A v4 index
+///     is moved aside and converted in the background into the live index (no
+///     checkpoint reset; see [`LegacyConversion`]), older ones are rebuilt.
+pub(crate) const SCHEMA_VERSION: u32 = 5;
+/// The last schema that stored plaintext and can be converted document by document.
+const CONVERTIBLE_VERSION: u32 = 4;
+/// The blind-index field of the term tokens.
+const TERMS_FIELD: &str = ryu_crypto::blind_index::TERMS_FIELD;
+/// Where a v4 index waits (read-only) while it is converted in the background.
+const PENDING_SUFFIX: &str = ".legacy-pending";
+/// Documents converted so far (a count over the pending index's live
+/// documents, in segment order), written after each committed batch.
+const PROGRESS_FILE: &str = "ryu-convert-progress";
+/// Legacy documents converted per committed batch: bounds memory and the time
+/// the live index is locked.
+const CONVERT_BATCH: usize = 2_000;
+
+static DOC_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// The text of one document, sealed as a whole into its `sealed` field.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct Payload {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    app: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    text: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    session: String,
+}
+
+impl Payload {
+    fn searchable(&self) -> String {
+        [&self.app, &self.title, &self.url, &self.text]
+            .iter()
+            .filter(|part| !part.is_empty())
+            .map(|part| String::as_str(part))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
 
 /// Tantivy-based full-text search index over captured events and OCR text.
 /// Indexes Track 3 (app/window context) and OCR-derived screen text.
-/// Future milestones add transcripts and CLIP-derived text.
+///
+/// Nothing in the index is plaintext: documents carry a sealed payload and the
+/// blind term tokens of its text (whole-word search: no phrase, prefix or
+/// fuzzy matching; stopword-only queries return nothing). Timestamps, tracks,
+/// displays, source kinds and transcript timing stay clear for range queries.
 pub struct SearchIndex {
-    index: Index,
     reader: IndexReader,
     writer: Option<IndexWriter>,
     /// True if the index was rebuilt due to a schema version change.
     /// Callers should reset related checkpoints when this is true.
     rebuilt: bool,
+    /// A v4 index moved aside, still to be converted into this one.
+    legacy_pending: Option<PathBuf>,
+    cipher: ContentCipher,
+    blind: BlindIndex,
 
     // Schema field handles
+    doc_id_field: Field,
+    terms_field: Field,
+    sealed_field: Field,
     ts_field: Field,
     track_field: Field,
     event_type_field: Field,
-    app_name_field: Field,
-    window_title_field: Field,
-    url_field: Field,
     display_id_field: Field,
-    session_id_field: Field,
     source_kind_field: Field,
-    text_content_field: Field,
 
     // Transcript metadata fields (schema v3 — M4-B1)
     audio_segment_id_field: Field,
@@ -133,55 +186,218 @@ pub struct SearchIndexStats {
     pub num_segments: u64,
 }
 
+fn io_error(error: impl std::fmt::Display) -> SearchError {
+    SearchError::IndexIO(error.to_string())
+}
+
+fn tantivy_error(error: impl std::fmt::Display) -> SearchError {
+    SearchError::TantivyError(error.to_string())
+}
+
+fn read_version(dir: &Path) -> Option<u32> {
+    std::fs::read_to_string(dir.join("schema_version"))
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+}
+
+fn sibling(dir: &Path, suffix: &str) -> PathBuf {
+    let mut name = dir.file_name().unwrap_or_default().to_os_string();
+    name.push(suffix);
+    dir.with_file_name(name)
+}
+
+fn remove_index_files(dir: &Path) -> Result<(), SearchError> {
+    for entry in std::fs::read_dir(dir).map_err(io_error)?.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    Ok(())
+}
+
+/// The plaintext fields of one document of a legacy (v4) index, with the
+/// deterministic id its converted copy gets (so a batch redone after a crash
+/// replaces its earlier copy instead of duplicating it).
+pub struct LegacyDoc {
+    id: String,
+    payload: Payload,
+    ts: u64,
+    track: u64,
+    event_type: String,
+    source_kind: String,
+    display_id: Option<u64>,
+    audio_segment_id: Option<i64>,
+    audio_source: String,
+    ts_end: Option<u64>,
+    confidence: Option<f64>,
+}
+
+fn legacy_doc(schema: &Schema, doc: &TantivyDocument, id: String) -> LegacyDoc {
+    let field = |name: &str| schema.get_field(name).ok();
+    let text = |name: &str| {
+        field(name)
+            .map(|f| extract_text(doc, f))
+            .unwrap_or_default()
+    };
+    let u64_of = |name: &str| field(name).and_then(|f| doc.get_first(f).and_then(|v| v.as_u64()));
+    LegacyDoc {
+        id,
+        payload: Payload {
+            app: text("app_name"),
+            title: text("window_title"),
+            url: text("url"),
+            text: text("text_content"),
+            session: text("session_id"),
+        },
+        ts: u64_of("ts").unwrap_or(0),
+        track: u64_of("track").unwrap_or(0),
+        event_type: text("event_type"),
+        source_kind: text("source_kind"),
+        display_id: u64_of("display_id"),
+        audio_segment_id: field("audio_segment_id")
+            .and_then(|f| doc.get_first(f).and_then(|v| v.as_i64())),
+        audio_source: text("audio_source"),
+        ts_end: u64_of("ts_end"),
+        confidence: field("confidence").and_then(|f| doc.get_first(f).and_then(|v| v.as_f64())),
+    }
+}
+
+/// A plaintext v4 index moved aside at open, converted into the live sealed
+/// index in the background ([`Self::run`]). Until it finishes, search answers
+/// from what was converted so far plus everything indexed since.
+pub struct LegacyConversion {
+    dir: PathBuf,
+}
+
+impl LegacyConversion {
+    /// Stream the legacy documents segment by segment, handing them to `apply`
+    /// in batches of [`CONVERT_BATCH`] (it adds and commits them to the live
+    /// index), recording progress after each batch so a restart resumes where
+    /// it stopped. Deletes the plaintext index once every document is in.
+    /// Returns how many documents the legacy index held.
+    pub fn run(
+        self,
+        mut apply: impl FnMut(Vec<LegacyDoc>) -> Result<(), SearchError>,
+        mut progress: impl FnMut(u64, u64),
+    ) -> Result<u64, SearchError> {
+        let progress_path = self.dir.join(PROGRESS_FILE);
+        let done: u64 = std::fs::read_to_string(&progress_path)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+            .unwrap_or(0);
+        let total = {
+            let index = Index::open_in_dir(&self.dir).map_err(tantivy_error)?;
+            let schema = index.schema();
+            let reader = index.reader().map_err(tantivy_error)?;
+            let searcher = reader.searcher();
+            let total: u64 = searcher
+                .segment_readers()
+                .iter()
+                .map(|segment| u64::from(segment.num_docs()))
+                .sum();
+            let mut ordinal = 0u64;
+            let mut batch = Vec::with_capacity(CONVERT_BATCH);
+            let mut flush = |batch: &mut Vec<LegacyDoc>, ordinal: u64| {
+                if batch.is_empty() {
+                    return Ok(());
+                }
+                apply(std::mem::take(batch))?;
+                std::fs::write(&progress_path, ordinal.to_string()).map_err(io_error)?;
+                progress(ordinal, total);
+                Ok::<(), SearchError>(())
+            };
+            for (segment_ord, segment) in searcher.segment_readers().iter().enumerate() {
+                let segment_id = segment.segment_id().uuid_string();
+                for doc_id in segment.doc_ids_alive() {
+                    ordinal += 1;
+                    if ordinal <= done {
+                        continue;
+                    }
+                    let address = tantivy::DocAddress::new(segment_ord as u32, doc_id);
+                    let doc: TantivyDocument = searcher.doc(address).map_err(tantivy_error)?;
+                    batch.push(legacy_doc(
+                        &schema,
+                        &doc,
+                        format!("v4-{segment_id}-{doc_id:x}"),
+                    ));
+                    if batch.len() >= CONVERT_BATCH {
+                        flush(&mut batch, ordinal)?;
+                    }
+                }
+            }
+            flush(&mut batch, ordinal)?;
+            total
+        };
+        std::fs::remove_dir_all(&self.dir).map_err(io_error)?;
+        info!(
+            "Search index converted to sealed schema v{} ({} documents)",
+            SCHEMA_VERSION, total
+        );
+        Ok(total)
+    }
+}
+
 impl SearchIndex {
     pub fn new(index_dir: &Path) -> Result<Self, SearchError> {
-        std::fs::create_dir_all(index_dir).map_err(|e| SearchError::IndexIO(e.to_string()))?;
+        #[cfg(test)]
+        seal::install_fixed_key_for_tests();
+        let cipher = seal::content(seal::SEARCH_STORE).map_err(io_error)?;
+        let blind = seal::blind(seal::SEARCH_STORE, TERMS_FIELD).map_err(io_error)?;
+        Self::open_with(index_dir, cipher, blind)
+    }
 
-        // Check schema version — recreate index if stale
-        let version_file = index_dir.join("schema_version");
-        let needs_recreate = if version_file.exists() {
-            let stored = std::fs::read_to_string(&version_file)
-                .unwrap_or_default()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(0);
-            stored != SCHEMA_VERSION
-        } else {
-            // No version file — if meta.json exists, this is a v1 index that needs migration
-            index_dir.join("meta.json").exists()
-        };
+    fn open_with(
+        index_dir: &Path,
+        cipher: ContentCipher,
+        blind: BlindIndex,
+    ) -> Result<Self, SearchError> {
+        // Finish (or undo) a conversion a crash interrupted.
+        let legacy_dir = sibling(index_dir, ".legacy");
+        if legacy_dir.exists() {
+            if read_version(index_dir) == Some(SCHEMA_VERSION) {
+                let _ = std::fs::remove_dir_all(&legacy_dir);
+            } else {
+                let _ = std::fs::remove_dir_all(index_dir);
+                std::fs::rename(&legacy_dir, index_dir).map_err(io_error)?;
+            }
+        }
+        // A conversion an older build ran in place and a crash interrupted.
+        let _ = std::fs::remove_dir_all(sibling(index_dir, ".v5-building"));
+        seal::create_private_dir(index_dir).map_err(io_error)?;
 
-        if needs_recreate {
+        // Check schema version — convert or recreate the index if stale
+        let has_index = index_dir.join("meta.json").exists();
+        let stored = read_version(index_dir);
+        let mut needs_recreate = false;
+        let pending = sibling(index_dir, PENDING_SUFFIX);
+        if has_index && stored == Some(CONVERTIBLE_VERSION) {
+            // Moved aside (one rename) and converted in the background into a
+            // fresh sealed index, so opening never waits for it.
+            let _ = std::fs::remove_dir_all(&pending);
+            std::fs::rename(index_dir, &pending).map_err(io_error)?;
+            seal::create_private_dir(index_dir).map_err(io_error)?;
+        } else if has_index && stored != Some(SCHEMA_VERSION) {
             info!(
                 "Search schema version changed (want {}), rebuilding index at {}",
                 SCHEMA_VERSION,
                 index_dir.display()
             );
-            // Delete old index files. Keep the directory itself.
-            for entry in
-                std::fs::read_dir(index_dir).map_err(|e| SearchError::IndexIO(e.to_string()))?
-            {
-                if let Ok(entry) = entry {
-                    let path = entry.path();
-                    if path.is_file() {
-                        let _ = std::fs::remove_file(&path);
-                    }
-                }
-            }
+            remove_index_files(index_dir)?;
+            needs_recreate = true;
         }
 
         let schema = Self::build_schema();
 
         let index = if index_dir.join("meta.json").exists() {
-            Index::open_in_dir(index_dir).map_err(|e| SearchError::TantivyError(e.to_string()))?
+            Index::open_in_dir(index_dir).map_err(tantivy_error)?
         } else {
-            Index::create_in_dir(index_dir, schema.clone())
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?
+            Index::create_in_dir(index_dir, schema.clone()).map_err(tantivy_error)?
         };
 
         // Write schema version
-        std::fs::write(&version_file, SCHEMA_VERSION.to_string())
-            .map_err(|e| SearchError::IndexIO(e.to_string()))?;
+        std::fs::write(index_dir.join("schema_version"), SCHEMA_VERSION.to_string())
+            .map_err(io_error)?;
 
         let reader = index
             .reader_builder()
@@ -189,9 +405,7 @@ impl SearchIndex {
             .try_into()
             .map_err(|e: tantivy::TantivyError| SearchError::TantivyError(e.to_string()))?;
 
-        let writer = index
-            .writer(50_000_000)
-            .map_err(|e| SearchError::TantivyError(e.to_string()))?;
+        let writer = index.writer(50_000_000).map_err(tantivy_error)?;
 
         let schema = index.schema();
 
@@ -201,44 +415,89 @@ impl SearchIndex {
             SCHEMA_VERSION
         );
 
+        let legacy_pending = pending.join("meta.json").exists().then_some(pending);
         Ok(Self {
             reader,
             writer: Some(writer),
             rebuilt: needs_recreate,
+            legacy_pending,
+            cipher,
+            blind,
+            doc_id_field: schema.get_field("doc_id").unwrap(),
+            terms_field: schema.get_field("terms").unwrap(),
+            sealed_field: schema.get_field("sealed").unwrap(),
             ts_field: schema.get_field("ts").unwrap(),
             track_field: schema.get_field("track").unwrap(),
             event_type_field: schema.get_field("event_type").unwrap(),
-            app_name_field: schema.get_field("app_name").unwrap(),
-            window_title_field: schema.get_field("window_title").unwrap(),
-            url_field: schema.get_field("url").unwrap(),
             display_id_field: schema.get_field("display_id").unwrap(),
-            session_id_field: schema.get_field("session_id").unwrap(),
             source_kind_field: schema.get_field("source_kind").unwrap(),
-            text_content_field: schema.get_field("text_content").unwrap(),
             audio_segment_id_field: schema.get_field("audio_segment_id").unwrap(),
             audio_source_field: schema.get_field("audio_source").unwrap(),
             ts_end_field: schema.get_field("ts_end").unwrap(),
             confidence_field: schema.get_field("confidence").unwrap(),
-            index,
         })
+    }
+
+    /// The v4 index waiting to be converted into this one, if any (taken
+    /// once; run it on a background thread with [`Self::add_converted`]).
+    pub fn take_legacy_conversion(&mut self) -> Option<LegacyConversion> {
+        self.legacy_pending
+            .take()
+            .map(|dir| LegacyConversion { dir })
+    }
+
+    /// Add one batch of converted legacy documents and commit. Each replaces
+    /// any copy of the same legacy document a crashed run committed earlier.
+    pub fn add_converted(&mut self, docs: Vec<LegacyDoc>) -> Result<(), SearchError> {
+        let count = docs.len() as u32;
+        for doc in docs {
+            let mut out = self.base_doc_with_id(
+                doc.id.clone(),
+                doc.ts,
+                doc.track,
+                &doc.event_type,
+                &doc.source_kind,
+                &doc.payload,
+            )?;
+            if let Some(display) = doc.display_id {
+                out.add_u64(self.display_id_field, display);
+            }
+            if let Some(segment) = doc.audio_segment_id {
+                out.add_i64(self.audio_segment_id_field, segment);
+            }
+            if !doc.audio_source.is_empty() {
+                out.add_text(self.audio_source_field, &doc.audio_source);
+            }
+            if let Some(ts_end) = doc.ts_end {
+                out.add_u64(self.ts_end_field, ts_end);
+            }
+            if let Some(confidence) = doc.confidence {
+                out.add_f64(self.confidence_field, confidence);
+            }
+            let writer = self
+                .writer
+                .as_mut()
+                .ok_or_else(|| SearchError::TantivyError("Writer not available".into()))?;
+            writer.delete_term(Term::from_field_text(self.doc_id_field, &doc.id));
+            writer.add_document(out).map_err(tantivy_error)?;
+        }
+        self.commit(count, "converted legacy")
     }
 
     fn build_schema() -> Schema {
         let mut sb = Schema::builder();
 
-        // Searchable text fields (tokenized by Tantivy's default tokenizer)
-        sb.add_text_field("app_name", TEXT | STORED);
-        sb.add_text_field("window_title", TEXT | STORED);
-        sb.add_text_field("url", TEXT | STORED);
-        sb.add_text_field("text_content", TEXT | STORED);
+        // Document id (bound into the payload's AAD) and the sealed payload.
+        sb.add_text_field("doc_id", STRING | STORED);
+        sb.add_bytes_field("sealed", STORED);
+        // Blind term tokens (raw, indexed, never stored).
+        sb.add_text_field("terms", STRING);
 
-        // Stored-only fields (retrievable but not searchable)
+        // Stored-only metadata (event kind, not user text)
         sb.add_text_field("event_type", STORED);
-        sb.add_text_field("session_id", STORED);
 
         // source_kind: indexed as exact-match (STRING) for TermQuery filtering.
-        // Values: "track3", "ocr", "transcript". Enables efficient range queries
-        // like "all transcript chunks in time window" without scanning entire index.
+        // Values: "track3", "passive", "ocr", "transcript".
         sb.add_text_field("source_kind", STRING | STORED);
 
         // Numeric fields (sortable + retrievable)
@@ -255,15 +514,102 @@ impl SearchIndex {
         sb.build()
     }
 
-    /// Index a batch of timeline entries into Tantivy. Returns count of docs added.
-    /// Currently indexes Track 3 events (app context). Track 2 input events
-    /// contain individual keystrokes that need aggregation (future milestone).
-    pub fn index_entries(&mut self, entries: &[TimelineEntry]) -> Result<u32, SearchError> {
+    fn payload_context(doc_id: &str) -> ContentContext {
+        ContentContext::new("doc.payload").with("id", doc_id)
+    }
+
+    /// A document with its id, sealed payload, blind tokens and base metadata.
+    fn base_doc(
+        &self,
+        ts: u64,
+        track: u64,
+        event_type: &str,
+        source_kind: &str,
+        payload: &Payload,
+    ) -> Result<TantivyDocument, SearchError> {
+        let doc_id = format!(
+            "{ts:x}-{:x}-{:x}",
+            std::process::id(),
+            DOC_SEQ.fetch_add(1, Ordering::Relaxed)
+        );
+        self.base_doc_with_id(doc_id, ts, track, event_type, source_kind, payload)
+    }
+
+    fn base_doc_with_id(
+        &self,
+        doc_id: String,
+        ts: u64,
+        track: u64,
+        event_type: &str,
+        source_kind: &str,
+        payload: &Payload,
+    ) -> Result<TantivyDocument, SearchError> {
+        let json = serde_json::to_vec(payload).map_err(io_error)?;
+        let sealed = self
+            .cipher
+            .seal_bytes(&json, &Self::payload_context(&doc_id))
+            .map_err(io_error)?;
+        let mut doc = TantivyDocument::default();
+        doc.add_text(self.doc_id_field, &doc_id);
+        doc.add_bytes(self.sealed_field, &sealed);
+        for token in self.blind.term_tokens(&payload.searchable()) {
+            doc.add_text(self.terms_field, &token);
+        }
+        doc.add_u64(self.ts_field, ts);
+        doc.add_u64(self.track_field, track);
+        doc.add_text(self.event_type_field, event_type);
+        doc.add_text(self.source_kind_field, source_kind);
+        Ok(doc)
+    }
+
+    /// Open a document's sealed payload; `None` (counted) when it does not open.
+    fn open_payload(&self, doc: &TantivyDocument) -> Option<Payload> {
+        let doc_id = extract_text(doc, self.doc_id_field);
+        let sealed = doc
+            .get_first(self.sealed_field)
+            .and_then(|v| v.as_bytes())
+            .map(<[u8]>::to_vec)
+            .unwrap_or_default();
+        let opened = self
+            .cipher
+            .open_bytes(&sealed, &Self::payload_context(&doc_id))
+            .ok()
+            .filter(|opened| !opened.needs_reseal || ContentCipher::is_sealed_bytes(&sealed))
+            .and_then(|opened| serde_json::from_slice::<Payload>(&opened.value).ok());
+        if opened.is_none() {
+            seal::note_unreadable("search document");
+        }
+        opened
+    }
+
+    fn commit(&mut self, count: u32, what: &str) -> Result<(), SearchError> {
+        if count == 0 {
+            return Ok(());
+        }
         let writer = self
             .writer
             .as_mut()
             .ok_or_else(|| SearchError::TantivyError("Writer not available".into()))?;
+        writer.commit().map_err(tantivy_error)?;
+        self.reader.reload().map_err(tantivy_error)?;
+        info!("Indexed {count} {what} documents into search index");
+        Ok(())
+    }
 
+    fn add(&mut self, doc: TantivyDocument) -> Result<(), SearchError> {
+        self.writer
+            .as_mut()
+            .ok_or_else(|| SearchError::TantivyError("Writer not available".into()))?
+            .add_document(doc)
+            .map_err(tantivy_error)?;
+        Ok(())
+    }
+
+    /// Index a batch of timeline entries into Tantivy. Returns count of docs added.
+    /// Currently indexes Track 3 events (app context). Track 2 input events
+    /// contain individual keystrokes that need aggregation (future milestone).
+    pub fn index_entries(&mut self, entries: &[TimelineEntry]) -> Result<u32, SearchError> {
+        seal::require_writable().map_err(io_error)?;
         let mut count = 0u32;
 
         for entry in entries {
@@ -282,96 +628,55 @@ impl SearchIndex {
                 continue;
             }
 
-            let mut doc = tantivy::TantivyDocument::default();
-            doc.add_u64(self.ts_field, entry.ts);
-            doc.add_u64(self.track_field, entry.track as u64);
-            doc.add_text(self.event_type_field, &entry.event_type);
-            doc.add_text(
-                self.source_kind_field,
+            let payload = Payload {
+                app: entry.app_name.clone().unwrap_or_default(),
+                title: entry.window_title.clone().unwrap_or_default(),
+                url: entry.url.clone().unwrap_or_default(),
+                ..Payload::default()
+            };
+            let mut doc = self.base_doc(
+                entry.ts,
+                entry.track as u64,
+                &entry.event_type,
                 if is_passive { "passive" } else { "track3" },
-            );
-
-            if let Some(ref app) = entry.app_name {
-                doc.add_text(self.app_name_field, app);
-            }
-            if let Some(ref title) = entry.window_title {
-                doc.add_text(self.window_title_field, title);
-            }
-            if let Some(ref url) = entry.url {
-                doc.add_text(self.url_field, url);
-            }
-
+                &payload,
+            )?;
             if let Some(did) = entry.display_id {
                 doc.add_u64(self.display_id_field, did as u64);
             }
-
-            writer
-                .add_document(doc)
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
+            self.add(doc)?;
             count += 1;
         }
 
-        if count > 0 {
-            writer
-                .commit()
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-            self.reader
-                .reload()
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-            info!("Indexed {} track3 documents into search index", count);
-        }
-
+        self.commit(count, "track3")?;
         Ok(count)
     }
 
     /// Index a batch of OCR text entries into Tantivy. Returns count of docs added.
     pub fn index_ocr_entries(&mut self, entries: &[OcrEntry]) -> Result<u32, SearchError> {
-        let writer = self
-            .writer
-            .as_mut()
-            .ok_or_else(|| SearchError::TantivyError("Writer not available".into()))?;
-
+        seal::require_writable().map_err(io_error)?;
         let mut count = 0u32;
 
         for entry in entries {
             if entry.text.trim().is_empty() {
                 continue;
             }
-
-            let mut doc = tantivy::TantivyDocument::default();
-            doc.add_u64(self.ts_field, entry.ts);
-            doc.add_u64(self.track_field, 1); // Track 1 = visual stream
-            doc.add_text(self.event_type_field, "ocr_frame");
-            doc.add_text(self.source_kind_field, "ocr");
-            doc.add_text(self.text_content_field, &entry.text);
-
-            if let Some(ref app) = entry.app_name {
-                doc.add_text(self.app_name_field, app);
-            }
-            if let Some(ref title) = entry.window_title {
-                doc.add_text(self.window_title_field, title);
-            }
-
+            let payload = Payload {
+                app: entry.app_name.clone().unwrap_or_default(),
+                title: entry.window_title.clone().unwrap_or_default(),
+                text: entry.text.clone(),
+                ..Payload::default()
+            };
+            // Track 1 = visual stream
+            let mut doc = self.base_doc(entry.ts, 1, "ocr_frame", "ocr", &payload)?;
             if let Some(did) = entry.display_id {
                 doc.add_u64(self.display_id_field, did as u64);
             }
-
-            writer
-                .add_document(doc)
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
+            self.add(doc)?;
             count += 1;
         }
 
-        if count > 0 {
-            writer
-                .commit()
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-            self.reader
-                .reload()
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-            info!("Indexed {} OCR documents into search index", count);
-        }
-
+        self.commit(count, "OCR")?;
         Ok(count)
     }
 
@@ -381,25 +686,27 @@ impl SearchIndex {
         &mut self,
         entries: &[TranscriptEntry],
     ) -> Result<u32, SearchError> {
-        let writer = self
-            .writer
-            .as_mut()
-            .ok_or_else(|| SearchError::TantivyError("Writer not available".into()))?;
-
+        seal::require_writable().map_err(io_error)?;
         let mut count = 0u32;
 
         for entry in entries {
             if entry.text.trim().is_empty() {
                 continue;
             }
-
-            let mut doc = tantivy::TantivyDocument::default();
-            doc.add_u64(self.ts_field, entry.ts_start);
-            doc.add_u64(self.track_field, 4); // Track 4 = audio stream
-            doc.add_text(self.event_type_field, "transcript_chunk");
-            doc.add_text(self.source_kind_field, "transcript");
-            doc.add_text(self.text_content_field, &entry.text);
-
+            let payload = Payload {
+                app: entry.app_name.clone().unwrap_or_default(),
+                title: entry.window_title.clone().unwrap_or_default(),
+                text: entry.text.clone(),
+                ..Payload::default()
+            };
+            // Track 4 = audio stream
+            let mut doc = self.base_doc(
+                entry.ts_start,
+                4,
+                "transcript_chunk",
+                "transcript",
+                &payload,
+            )?;
             // Transcript metadata — persisted for M4-C/M4-E playback
             doc.add_i64(self.audio_segment_id_field, entry.audio_segment_id);
             doc.add_text(self.audio_source_field, &entry.source);
@@ -407,177 +714,121 @@ impl SearchIndex {
             if let Some(conf) = entry.confidence {
                 doc.add_f64(self.confidence_field, conf as f64);
             }
-
-            if let Some(ref app) = entry.app_name {
-                doc.add_text(self.app_name_field, app);
-            }
-            if let Some(ref title) = entry.window_title {
-                doc.add_text(self.window_title_field, title);
-            }
-
-            writer
-                .add_document(doc)
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
+            self.add(doc)?;
             count += 1;
         }
 
-        if count > 0 {
-            writer
-                .commit()
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-            self.reader
-                .reload()
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-            info!("Indexed {} transcript documents into search index", count);
-        }
-
+        self.commit(count, "transcript")?;
         Ok(count)
     }
 
-    /// Sanitize a query string for Tantivy's QueryParser.
-    ///
-    /// Tantivy interprets colons as field specifiers (`11:30` → field "11", value "30"),
-    /// which fails because we only have app_name, window_title, url, and text_content fields.
-    /// This wraps colon-containing tokens in quotes so they're treated as literal text,
-    /// while leaving normal tokens untouched for standard full-text behavior.
-    fn sanitize_query(query_str: &str) -> String {
-        query_str
-            .split_whitespace()
+    /// The blind-token query of `query_str`: any of its terms (`None` when it
+    /// has no indexable term).
+    fn token_query(&self, query_str: &str) -> Option<BooleanQuery> {
+        let tokens = self.blind.term_tokens(query_str);
+        if tokens.is_empty() {
+            return None;
+        }
+        let clauses: Vec<(Occur, Box<dyn Query>)> = tokens
+            .iter()
             .map(|token| {
-                if token.contains(':') && !token.starts_with('"') {
-                    // Wrap in quotes to force literal phrase matching
-                    format!("\"{}\"", token.replace('"', ""))
-                } else {
-                    token.to_string()
-                }
+                let query: Box<dyn Query> = Box::new(TermQuery::new(
+                    Term::from_field_text(self.terms_field, token),
+                    IndexRecordOption::Basic,
+                ));
+                (Occur::Should, query)
             })
-            .collect::<Vec<_>>()
-            .join(" ")
+            .collect();
+        Some(BooleanQuery::new(clauses))
+    }
+
+    /// Build a result from a hit: open the payload, derive reason and snippet.
+    fn result_from(
+        &self,
+        doc: &TantivyDocument,
+        score: f32,
+        query_str: &str,
+    ) -> Option<SearchResult> {
+        let payload = self.open_payload(doc)?;
+        let source_kind = extract_text(doc, self.source_kind_field);
+        let match_reason = determine_match_reason(
+            query_str,
+            &payload.app,
+            &payload.title,
+            &payload.url,
+            &payload.text,
+            &source_kind,
+        );
+        // For OCR/transcript results, the snippet comes from the opened text.
+        let snippet = if source_kind == "ocr" || source_kind == "transcript" {
+            make_snippet(&payload.text, query_str, 120)
+        } else {
+            String::new()
+        };
+        Some(SearchResult {
+            ts: extract_u64(doc, self.ts_field),
+            app_name: payload.app,
+            window_title: payload.title,
+            url: payload.url,
+            display_id: doc
+                .get_first(self.display_id_field)
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32),
+            event_type: extract_text(doc, self.event_type_field),
+            score,
+            match_reason,
+            source_kind,
+            snippet,
+            audio_segment_id: doc
+                .get_first(self.audio_segment_id_field)
+                .and_then(|v| v.as_i64()),
+            audio_source: extract_text(doc, self.audio_source_field),
+            ts_end: extract_u64(doc, self.ts_end_field),
+            confidence: extract_opt_f32(doc, self.confidence_field),
+        })
+    }
+
+    fn run_query(
+        &self,
+        query: &dyn Query,
+        query_str: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        let searcher = self.reader.searcher();
+        // Fetch more candidates than requested to account for dedup merging
+        let top_docs = searcher
+            .search(
+                query,
+                &TopDocs::with_limit(limit.max(1) * 3).order_by_score(),
+            )
+            .map_err(tantivy_error)?;
+        let mut raw_results = Vec::with_capacity(top_docs.len());
+        for (score, doc_address) in top_docs {
+            let doc: TantivyDocument = searcher.doc(doc_address).map_err(tantivy_error)?;
+            if let Some(result) = self.result_from(&doc, score, query_str) {
+                raw_results.push(result);
+            }
+        }
+        // Deduplicate results within a 5-second window on the same display
+        Ok(deduplicate_results(raw_results, limit))
     }
 
     /// Execute a text search query. Returns top `limit` results ordered by relevance.
-    /// Searches across app_name, window_title, url, and text_content fields.
-    /// Deduplicates results within a 5-second window on the same display.
+    /// Matches whole words of the app name, window title, URL and OCR/transcript
+    /// text (blind tokens). Deduplicates results within a 5-second window on the
+    /// same display.
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
         if query_str.trim().is_empty() {
             return Ok(Vec::new());
         }
-
-        let searcher = self.reader.searcher();
-        let safe_query = Self::sanitize_query(query_str);
-
-        let query_parser = QueryParser::for_index(
-            &self.index,
-            vec![
-                self.app_name_field,
-                self.window_title_field,
-                self.url_field,
-                self.text_content_field,
-            ],
-        );
-
-        // Use lenient parsing as a safety net for any remaining edge cases.
-        let (query, errors) = query_parser.parse_query_lenient(&safe_query);
-        if !errors.is_empty() {
-            log::warn!("Query parse warnings for {:?}: {:?}", query_str, errors);
-        }
-
-        // Fetch more candidates than requested to account for dedup merging
-        let fetch_limit = limit * 3;
-        let top_docs = searcher
-            .search(&query, &TopDocs::with_limit(fetch_limit))
-            .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-
-        let mut raw_results = Vec::with_capacity(top_docs.len());
-
-        for (score, doc_address) in top_docs {
-            let doc: tantivy::TantivyDocument = searcher
-                .doc(doc_address)
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-
-            let ts = doc
-                .get_first(self.ts_field)
-                .and_then(|v| match v {
-                    tantivy::schema::OwnedValue::U64(n) => Some(*n),
-                    _ => None,
-                })
-                .unwrap_or(0);
-
-            let app_name = extract_text(&doc, self.app_name_field);
-            let window_title = extract_text(&doc, self.window_title_field);
-            let url = extract_text(&doc, self.url_field);
-            let event_type = extract_text(&doc, self.event_type_field);
-            let source_kind = extract_text(&doc, self.source_kind_field);
-            let text_content = extract_text(&doc, self.text_content_field);
-
-            let display_id = doc.get_first(self.display_id_field).and_then(|v| match v {
-                tantivy::schema::OwnedValue::U64(n) => Some(*n as u32),
-                _ => None,
-            });
-
-            // Transcript metadata (None/empty/0 for non-transcript results)
-            let audio_segment_id =
-                doc.get_first(self.audio_segment_id_field)
-                    .and_then(|v| match v {
-                        tantivy::schema::OwnedValue::I64(n) => Some(*n),
-                        _ => None,
-                    });
-            let audio_source = extract_text(&doc, self.audio_source_field);
-            let ts_end = doc
-                .get_first(self.ts_end_field)
-                .and_then(|v| match v {
-                    tantivy::schema::OwnedValue::U64(n) => Some(*n),
-                    _ => None,
-                })
-                .unwrap_or(0);
-            let confidence = doc.get_first(self.confidence_field).and_then(|v| match v {
-                tantivy::schema::OwnedValue::F64(n) => Some(*n as f32),
-                _ => None,
-            });
-
-            let match_reason = determine_match_reason(
-                query_str,
-                &app_name,
-                &window_title,
-                &url,
-                &text_content,
-                &source_kind,
-            );
-
-            // For OCR results, create a snippet from the text_content
-            let snippet = if source_kind == "ocr" || source_kind == "transcript" {
-                make_snippet(&text_content, query_str, 120)
-            } else {
-                String::new()
-            };
-
-            raw_results.push(SearchResult {
-                ts,
-                app_name,
-                window_title,
-                url,
-                display_id,
-                event_type,
-                score,
-                match_reason,
-                source_kind,
-                snippet,
-                audio_segment_id,
-                audio_source,
-                ts_end,
-                confidence,
-            });
-        }
-
-        // Deduplicate results within a 5-second window on the same display
-        let deduped = deduplicate_results(raw_results, limit);
-
-        Ok(deduped)
+        let Some(query) = self.token_query(query_str) else {
+            return Ok(Vec::new());
+        };
+        self.run_query(&query, query_str, limit)
     }
 
     /// Execute a text search within a timestamp range.
     /// Returns top `limit` results where `ts` is between `start_us` and `end_us` (inclusive).
-    /// Combines a parsed text query with a RangeQuery on the ts field.
     pub fn search_in_range(
         &self,
         query_str: &str,
@@ -588,127 +839,54 @@ impl SearchIndex {
         if query_str.trim().is_empty() || start_us > end_us {
             return Ok(Vec::new());
         }
-
-        let searcher = self.reader.searcher();
-        let safe_query = Self::sanitize_query(query_str);
-
-        let query_parser = QueryParser::for_index(
-            &self.index,
-            vec![
-                self.app_name_field,
-                self.window_title_field,
-                self.url_field,
-                self.text_content_field,
-            ],
-        );
-
-        // Use lenient parsing as a safety net for any remaining edge cases.
-        let (text_query, errors) = query_parser.parse_query_lenient(&safe_query);
-        if !errors.is_empty() {
-            log::warn!(
-                "Range query parse warnings for {:?}: {:?}",
-                query_str,
-                errors
-            );
-        }
-
-        let range_query = RangeQuery::new_u64_bounds(
-            "ts".to_string(),
+        let Some(text_query) = self.token_query(query_str) else {
+            return Ok(Vec::new());
+        };
+        let range_query = u64_range_query(
+            self.ts_field,
             Bound::Included(start_us),
             Bound::Included(end_us),
         );
-
         let bool_query = BooleanQuery::new(vec![
             (Occur::Must, Box::new(text_query)),
             (Occur::Must, Box::new(range_query)),
         ]);
+        self.run_query(&bool_query, query_str, limit)
+    }
 
-        let fetch_limit = limit * 3;
-        let top_docs = searcher
-            .search(&bool_query, &TopDocs::with_limit(fetch_limit))
-            .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-
-        let mut raw_results = Vec::with_capacity(top_docs.len());
-
-        for (score, doc_address) in top_docs {
-            let doc: tantivy::TantivyDocument = searcher
-                .doc(doc_address)
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-
-            let ts = doc
-                .get_first(self.ts_field)
-                .and_then(|v| match v {
-                    tantivy::schema::OwnedValue::U64(n) => Some(*n),
-                    _ => None,
-                })
-                .unwrap_or(0);
-
-            let app_name = extract_text(&doc, self.app_name_field);
-            let window_title = extract_text(&doc, self.window_title_field);
-            let url = extract_text(&doc, self.url_field);
-            let event_type = extract_text(&doc, self.event_type_field);
-            let source_kind = extract_text(&doc, self.source_kind_field);
-            let text_content = extract_text(&doc, self.text_content_field);
-
-            let display_id = doc.get_first(self.display_id_field).and_then(|v| match v {
-                tantivy::schema::OwnedValue::U64(n) => Some(*n as u32),
-                _ => None,
-            });
-
-            let audio_segment_id =
-                doc.get_first(self.audio_segment_id_field)
-                    .and_then(|v| match v {
-                        tantivy::schema::OwnedValue::I64(n) => Some(*n),
-                        _ => None,
-                    });
-            let audio_source = extract_text(&doc, self.audio_source_field);
-            let ts_end = doc
-                .get_first(self.ts_end_field)
-                .and_then(|v| match v {
-                    tantivy::schema::OwnedValue::U64(n) => Some(*n),
-                    _ => None,
-                })
-                .unwrap_or(0);
-            let confidence = doc.get_first(self.confidence_field).and_then(|v| match v {
-                tantivy::schema::OwnedValue::F64(n) => Some(*n as f32),
-                _ => None,
-            });
-
-            let match_reason = determine_match_reason(
-                query_str,
-                &app_name,
-                &window_title,
-                &url,
-                &text_content,
-                &source_kind,
-            );
-
-            let snippet = if source_kind == "ocr" || source_kind == "transcript" {
-                make_snippet(&text_content, query_str, 120)
-            } else {
-                String::new()
-            };
-
-            raw_results.push(SearchResult {
-                ts,
-                app_name,
-                window_title,
-                url,
-                display_id,
-                event_type,
-                score,
-                match_reason,
-                source_kind,
-                snippet,
-                audio_segment_id,
-                audio_source,
-                ts_end,
-                confidence,
-            });
+    /// Delete every document (app context, passive text, OCR and transcript
+    /// chunks) whose `ts` is older than `cutoff_us`, commit, and reload the
+    /// reader so searches stop returning it. Returns how many documents matched.
+    /// Used by the history retention sweep; deleting an already-empty range is a
+    /// no-op, so a sweep interrupted before commit simply repeats next time.
+    pub fn delete_before(&mut self, cutoff_us: u64) -> Result<u64, SearchError> {
+        if cutoff_us == 0 {
+            return Ok(0);
         }
-
-        let deduped = deduplicate_results(raw_results, limit);
-        Ok(deduped)
+        let older = || u64_range_query(self.ts_field, Bound::Unbounded, Bound::Excluded(cutoff_us));
+        let matched = self
+            .reader
+            .searcher()
+            .search(&older(), &tantivy::collector::Count)
+            .map_err(|e| SearchError::TantivyError(e.to_string()))? as u64;
+        if matched == 0 {
+            return Ok(0);
+        }
+        let writer = self
+            .writer
+            .as_mut()
+            .ok_or_else(|| SearchError::TantivyError("Writer not available".into()))?;
+        writer
+            .delete_query(Box::new(older()))
+            .map_err(|e| SearchError::TantivyError(e.to_string()))?;
+        writer
+            .commit()
+            .map_err(|e| SearchError::TantivyError(e.to_string()))?;
+        self.reader
+            .reload()
+            .map_err(|e| SearchError::TantivyError(e.to_string()))?;
+        info!("Retention removed {matched} search documents older than the history window");
+        Ok(matched)
     }
 
     /// Get index statistics for diagnostics.
@@ -724,11 +902,6 @@ impl SearchIndex {
 
     /// List transcript chunks within a time range, with pagination.
     /// Returns up to `limit` results starting at `offset`, sorted by ts_start ascending.
-    ///
-    /// Uses a BooleanQuery combining:
-    /// - TermQuery on source_kind="transcript" (STRING-indexed, schema v4)
-    /// - RangeQuery on ts field (FAST-indexed, optimized path)
-    /// Pagination and ordering handled by Tantivy collector, not post-processing.
     ///
     /// Input guards:
     /// - limit == 0 → empty result
@@ -777,8 +950,8 @@ impl SearchIndex {
             Term::from_field_text(self.source_kind_field, "transcript"),
             IndexRecordOption::Basic,
         );
-        let range_query = RangeQuery::new_u64_bounds(
-            "ts".to_string(),
+        let range_query = u64_range_query(
+            self.ts_field,
             if overlapping {
                 Bound::Unbounded
             } else {
@@ -793,8 +966,8 @@ impl SearchIndex {
         if overlapping {
             conditions.push((
                 Occur::Must,
-                Box::new(RangeQuery::new_u64_bounds(
-                    "ts_end".to_string(),
+                Box::new(u64_range_query(
+                    self.ts_end_field,
                     Bound::Excluded(start_us),
                     Bound::Unbounded,
                 )),
@@ -809,23 +982,23 @@ impl SearchIndex {
 
         let top_docs = searcher
             .search(&bool_query, &collector)
-            .map_err(|e| SearchError::TantivyError(e.to_string()))?;
+            .map_err(tantivy_error)?;
 
-        // Extract document fields — already filtered, sorted, and paginated by Tantivy
+        // Already filtered, sorted, and paginated by Tantivy; open each payload.
         let mut results = Vec::with_capacity(top_docs.len());
         for (_ts_value, doc_addr) in top_docs {
-            let doc: tantivy::TantivyDocument = searcher
-                .doc(doc_addr)
-                .map_err(|e| SearchError::TantivyError(e.to_string()))?;
-
+            let doc: TantivyDocument = searcher.doc(doc_addr).map_err(tantivy_error)?;
+            let Some(payload) = self.open_payload(&doc) else {
+                continue;
+            };
             results.push(TranscriptChunkResult {
                 ts_start: extract_u64(&doc, self.ts_field),
                 ts_end: extract_u64(&doc, self.ts_end_field),
-                text: extract_text(&doc, self.text_content_field),
+                text: payload.text,
                 audio_source: extract_text(&doc, self.audio_source_field),
                 confidence: extract_opt_f32(&doc, self.confidence_field),
-                app_name: extract_text(&doc, self.app_name_field),
-                window_title: extract_text(&doc, self.window_title_field),
+                app_name: payload.app,
+                window_title: payload.title,
                 audio_segment_id: extract_i64(&doc, self.audio_segment_id_field),
             });
         }
@@ -841,42 +1014,38 @@ impl SearchIndex {
     }
 }
 
+/// Range query over a `u64` field, with the term bounds Tantivy 0.26 expects.
+fn u64_range_query(field: Field, lower: Bound<u64>, upper: Bound<u64>) -> RangeQuery {
+    let term = |bound: Bound<u64>| match bound {
+        Bound::Included(value) => Bound::Included(Term::from_field_u64(field, value)),
+        Bound::Excluded(value) => Bound::Excluded(Term::from_field_u64(field, value)),
+        Bound::Unbounded => Bound::Unbounded,
+    };
+    RangeQuery::new(term(lower), term(upper))
+}
+
 /// Extract a text field value from a Tantivy document, returning empty string if absent.
 fn extract_text(doc: &tantivy::TantivyDocument, field: Field) -> String {
     doc.get_first(field)
-        .and_then(|v| match v {
-            tantivy::schema::OwnedValue::Str(s) => Some(s.to_string()),
-            _ => None,
-        })
+        .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_default()
 }
 
 /// Extract a u64 field value from a Tantivy document, returning 0 if absent.
 fn extract_u64(doc: &tantivy::TantivyDocument, field: Field) -> u64 {
-    doc.get_first(field)
-        .and_then(|v| match v {
-            tantivy::schema::OwnedValue::U64(n) => Some(*n),
-            _ => None,
-        })
-        .unwrap_or(0)
+    doc.get_first(field).and_then(|v| v.as_u64()).unwrap_or(0)
 }
 
 /// Extract an i64 field value from a Tantivy document, returning 0 if absent.
 fn extract_i64(doc: &tantivy::TantivyDocument, field: Field) -> i64 {
-    doc.get_first(field)
-        .and_then(|v| match v {
-            tantivy::schema::OwnedValue::I64(n) => Some(*n),
-            _ => None,
-        })
-        .unwrap_or(0)
+    doc.get_first(field).and_then(|v| v.as_i64()).unwrap_or(0)
 }
 
 /// Extract an optional f32 field value from a Tantivy document.
 fn extract_opt_f32(doc: &tantivy::TantivyDocument, field: Field) -> Option<f32> {
-    doc.get_first(field).and_then(|v| match v {
-        tantivy::schema::OwnedValue::F64(n) => Some(*n as f32),
-        _ => None,
-    })
+    doc.get_first(field)
+        .and_then(|v| v.as_f64())
+        .map(|n| n as f32)
 }
 
 /// Determine which fields matched the query for the match reason tag.
@@ -2060,5 +2229,191 @@ mod tests {
         // URLs contain colons and slashes — lenient parsing should handle them
         let results = index.search("https://google.com", 10).unwrap();
         assert!(!results.is_empty());
+    }
+
+    fn dir_contains(dir: &Path, needle: &[u8]) -> bool {
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if std::fs::read(&path)
+                    .map(|bytes| bytes.windows(needle.len()).any(|w| w == needle))
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn index_files_hold_no_plaintext_and_search_still_finds_words() {
+        let tmp = TempDir::new().unwrap();
+        let mut index = SearchIndex::new(tmp.path()).unwrap();
+        index
+            .index_ocr_entries(&[OcrEntry {
+                ts: 5_000,
+                display_id: Some(0),
+                text: "quarterly zebracorn forecast for payroll".into(),
+                app_name: Some("Numbers".into()),
+                window_title: Some("Budget sheet zebracorn".into()),
+                confidence: None,
+            }])
+            .unwrap();
+        drop(index);
+        assert!(!dir_contains(tmp.path(), b"zebracorn"));
+        assert!(!dir_contains(tmp.path(), b"payroll"));
+        let index = SearchIndex::new(tmp.path()).unwrap();
+        let results = index.search("zebracorn", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].window_title, "Budget sheet zebracorn");
+        assert!(results[0].snippet.contains("zebracorn"));
+        // Whole words only, and stopword-only queries find nothing.
+        assert!(index.search("zebra", 10).unwrap().is_empty());
+        assert!(index.search("the", 10).unwrap().is_empty());
+    }
+
+    fn legacy_v4_schema() -> Schema {
+        let mut sb = Schema::builder();
+        sb.add_text_field("app_name", TEXT | STORED);
+        sb.add_text_field("window_title", TEXT | STORED);
+        sb.add_text_field("url", TEXT | STORED);
+        sb.add_text_field("text_content", TEXT | STORED);
+        sb.add_text_field("event_type", STORED);
+        sb.add_text_field("session_id", STORED);
+        sb.add_text_field("source_kind", STRING | STORED);
+        sb.add_u64_field("ts", FAST | STORED);
+        sb.add_u64_field("track", FAST | STORED);
+        sb.add_u64_field("display_id", FAST | STORED);
+        sb.add_i64_field("audio_segment_id", FAST | STORED);
+        sb.add_text_field("audio_source", STORED);
+        sb.add_u64_field("ts_end", FAST | STORED);
+        sb.add_f64_field("confidence", FAST | STORED);
+        sb.build()
+    }
+
+    #[test]
+    fn a_plaintext_v4_index_is_converted_in_place() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("search");
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let schema = legacy_v4_schema();
+            let index = Index::create_in_dir(&dir, schema.clone()).unwrap();
+            let mut writer: IndexWriter = index.writer(15_000_000).unwrap();
+            let mut doc = TantivyDocument::default();
+            doc.add_text(
+                schema.get_field("text_content").unwrap(),
+                "legacy meeting kumquat notes",
+            );
+            doc.add_text(schema.get_field("source_kind").unwrap(), "transcript");
+            doc.add_text(schema.get_field("audio_source").unwrap(), "mic");
+            doc.add_u64(schema.get_field("ts").unwrap(), 10);
+            doc.add_u64(schema.get_field("ts_end").unwrap(), 20);
+            doc.add_u64(schema.get_field("track").unwrap(), 4);
+            doc.add_i64(schema.get_field("audio_segment_id").unwrap(), 7);
+            writer.add_document(doc).unwrap();
+            writer.commit().unwrap();
+            std::fs::write(dir.join("schema_version"), "4").unwrap();
+        }
+        assert!(dir_contains(&dir, b"kumquat"));
+        let mut index = SearchIndex::new(&dir).unwrap();
+        assert!(!index.was_rebuilt());
+        // Opening does not wait for the conversion: the live index is fresh
+        // and sealed, the plaintext one waits beside it.
+        assert!(!dir_contains(&dir, b"kumquat"));
+        assert_eq!(index.stats().total_docs, 0);
+        let conversion = index
+            .take_legacy_conversion()
+            .expect("a pending conversion");
+        let mut reported = Vec::new();
+        let total = conversion
+            .run(
+                |docs| index.add_converted(docs),
+                |done, total| reported.push((done, total)),
+            )
+            .unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(reported, [(1, 1)]);
+        assert!(
+            !sibling(&dir, PENDING_SUFFIX).exists(),
+            "the plaintext index is deleted"
+        );
+        assert!(!dir_contains(&dir, b"kumquat"));
+        assert!(!sibling(&dir, ".legacy").exists());
+        assert_eq!(index.search("kumquat", 5).unwrap().len(), 1);
+        let chunks = index
+            .list_transcript_chunks_in_range(0, 100, 10, 0)
+            .unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text, "legacy meeting kumquat notes");
+        assert_eq!(chunks[0].audio_segment_id, 7);
+        drop(index);
+        // Reopening is a no-op.
+        let mut index = SearchIndex::new(&dir).unwrap();
+        assert_eq!(index.stats().total_docs, 1);
+        assert!(index.take_legacy_conversion().is_none());
+    }
+
+    /// Writes a v4 index with `count` documents whose text holds `marker`.
+    fn write_v4_index(dir: &Path, count: u64, marker: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        let schema = legacy_v4_schema();
+        let index = Index::create_in_dir(dir, schema.clone()).unwrap();
+        let mut writer: IndexWriter = index.writer(15_000_000).unwrap();
+        for i in 0..count {
+            let mut doc = TantivyDocument::default();
+            doc.add_text(
+                schema.get_field("text_content").unwrap(),
+                format!("{marker} entry {i}"),
+            );
+            doc.add_text(schema.get_field("source_kind").unwrap(), "ocr");
+            doc.add_u64(schema.get_field("ts").unwrap(), 1_000 + i);
+            doc.add_u64(schema.get_field("track").unwrap(), 3);
+            writer.add_document(doc).unwrap();
+        }
+        writer.commit().unwrap();
+        std::fs::write(dir.join("schema_version"), "4").unwrap();
+    }
+
+    #[test]
+    fn an_interrupted_conversion_resumes_without_duplicates() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("search");
+        let count = CONVERT_BATCH as u64 + 5;
+        write_v4_index(&dir, count, "persimmon");
+        {
+            let mut index = SearchIndex::new(&dir).unwrap();
+            let conversion = index.take_legacy_conversion().unwrap();
+            // The first batch commits, then the process "dies" on the second.
+            let mut batches = 0;
+            let result = conversion.run(
+                |docs| {
+                    batches += 1;
+                    if batches == 2 {
+                        return Err(SearchError::IndexIO("killed".into()));
+                    }
+                    index.add_converted(docs)
+                },
+                |_, _| {},
+            );
+            assert!(result.is_err());
+            assert_eq!(index.stats().total_docs, CONVERT_BATCH as u64);
+        }
+        // Lose the progress mark too: the redone batch must replace, not add.
+        std::fs::remove_file(sibling(&dir, PENDING_SUFFIX).join(PROGRESS_FILE)).unwrap();
+        let mut index = SearchIndex::new(&dir).unwrap();
+        let conversion = index
+            .take_legacy_conversion()
+            .expect("resumed at the next open");
+        conversion
+            .run(|docs| index.add_converted(docs), |_, _| {})
+            .unwrap();
+        assert_eq!(index.stats().total_docs, count);
+        assert!(!sibling(&dir, PENDING_SUFFIX).exists());
+        assert!(!dir_contains(tmp.path(), b"persimmon"));
     }
 }

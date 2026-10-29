@@ -1,4 +1,4 @@
-import { AgentChat } from "@ryu/blocks/desktop/agent-elements/agent-chat";
+import { AgentChat } from "@ryu/blocks/desktop/agent-elements/agent-chat.tsx";
 import {
 	Sidebar,
 	SidebarContent,
@@ -25,6 +25,7 @@ import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx"
 import { TabsProvider } from "../../src/contexts/TabsContext.tsx";
 import type { Conversation } from "../../types/chat.ts";
 import "../../src/index.css";
+import { IDLE_REORDER_SHIFT } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 
 const PROOF_TARGET = { token: null, url: "http://proof.local" };
 const STORAGE_KEYS = [
@@ -64,7 +65,7 @@ const BOT_AGENT = {
 	engine: "ryu",
 	id: "ryu",
 	name: "Ryu",
-	title: "Ryu Bot",
+	title: "Bot",
 } as const;
 
 const noOp = () => undefined;
@@ -86,6 +87,7 @@ const handlers = {
 	onOpenNewSideChat: noOp,
 	onOpenSideChat: noOp,
 	onRenameConversation: noOp,
+	onMoveToProject: noOp,
 	onRemoveFromProject: noOp,
 	onRequestConversationVisibility: noOp,
 	onSelectConversation: noOp,
@@ -93,10 +95,11 @@ const handlers = {
 	onToggleArchive: noOp,
 	onTogglePin: noOp,
 	pinnedIds: new Set<string>(),
+	projectTargets: [],
 	projectNameForFolder: () => "proof",
 	target: PROOF_TARGET,
 	unreadIds: new Set<string>(),
-} as unknown as ChatRowHandlers;
+} satisfies ChatRowHandlers;
 
 const dnd = {
 	draggingKey: null,
@@ -105,6 +108,7 @@ const dnd = {
 	onDragOver: noOp,
 	onDragStart: noOp,
 	onDrop: noOp,
+	shift: IDLE_REORDER_SHIFT,
 	order: [],
 };
 
@@ -121,8 +125,63 @@ const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
 
+const ACTIVITY_PROMPT: UIMessage = {
+	id: "bot-proof-activity-user",
+	parts: [{ text: "What's on this weekend?", type: "text" }],
+	role: "user",
+};
+
+/** Seeds a live turn so the header's status line can be proven per state. */
+function activityFromUrl(): {
+	messages: UIMessage[];
+	status: "ready" | "streaming" | "submitted";
+} {
+	const activity = new URLSearchParams(window.location.search).get("activity");
+	if (activity === "thinking") {
+		return { messages: [ACTIVITY_PROMPT], status: "submitted" };
+	}
+	if (activity === "working") {
+		return {
+			messages: [
+				ACTIVITY_PROMPT,
+				{
+					id: "bot-proof-activity-assistant",
+					parts: [
+						{
+							input: { query: "events this weekend" },
+							state: "input-available",
+							toolCallId: "bot-proof-search",
+							toolName: "web_search",
+							type: "dynamic-tool",
+						},
+					],
+					role: "assistant",
+				},
+			],
+			status: "streaming",
+		};
+	}
+	if (activity === "typing") {
+		return {
+			messages: [
+				ACTIVITY_PROMPT,
+				{
+					id: "bot-proof-activity-assistant",
+					parts: [{ text: "Here are a few ideas", type: "text" }],
+					role: "assistant",
+				},
+			],
+			status: "streaming",
+		};
+	}
+	return { messages: [], status: "ready" };
+}
+
 function ChatPreview() {
-	const [messages, setMessages] = useState<UIMessage[]>([]);
+	const [initialActivity] = useState(activityFromUrl);
+	const [messages, setMessages] = useState<UIMessage[]>(
+		initialActivity.messages
+	);
 	const [sent, setSent] = useState("");
 	const logo: EmptyStateLogo = { engine: "ryu", kind: "single" };
 
@@ -146,11 +205,11 @@ function ChatPreview() {
 						<BotChatHeader agent={BOT_AGENT} clearTitleBar={false} />
 						<div className="flex items-center justify-between border-border/60 border-b px-8 py-3">
 							<div>
-								<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
+								<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 									Managed chat
 								</p>
 								<h1 className="mt-1 font-semibold text-xl tracking-tight">
-									Ryu Bot
+									Bot
 								</h1>
 							</div>
 							<div
@@ -181,11 +240,11 @@ function ChatPreview() {
 							id: `bot-proof-${previous.length}`,
 							parts: [{ text: message.content, type: "text" }],
 							role: "user",
-						} as UIMessage,
+						},
 					]);
 				}}
 				onStop={noOp}
-				status="ready"
+				status={initialActivity.status}
 			/>
 		</section>
 	);
@@ -227,7 +286,7 @@ function Story() {
 												data-testid="bot-connection-status"
 											>
 												<p className="font-medium text-xs">Ryu Cloud</p>
-												<p className="mt-0.5 text-[10px] text-success">
+												<p className="type-compact mt-0.5 text-success">
 													Connected
 												</p>
 											</div>

@@ -1,11 +1,11 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardFooter,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
+} from "@ryu/ui/components/card.tsx";
 import { BriefcaseBusiness, Check, Sparkles } from "lucide-react";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
@@ -39,7 +39,11 @@ export function ActivationValueStep({
 			subtitle="Ryu fits into the tools you already use, so the work can start without a new operating system."
 			title="Put the work in perspective"
 		>
-			<Card className="w-full max-w-3xl border border-border/60">
+			<Card
+				appearance="onboarding"
+				borderTone="subtle"
+				className="w-full max-w-3xl"
+			>
 				<CardHeader>
 					<CardTitle>Ryu lives where you already work</CardTitle>
 					<p className="text-muted-foreground text-sm">
@@ -80,7 +84,7 @@ export function ActivationValueStep({
 						</div>
 					</div>
 				</CardContent>
-				<CardFooter className="justify-end border-t">
+				<CardFooter appearance="onboarding-step" className="justify-end">
 					<Button onClick={onContinue}>See your first task</Button>
 				</CardFooter>
 			</Card>

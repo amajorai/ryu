@@ -6,24 +6,18 @@
 // Only `pickRecommendedQuant`, which depends on the desktop model-catalog type,
 // lives here.
 
+import { pickBestFit } from "@ryu/blocks/desktop/model-fit.ts";
 import type { ModelFile } from "./api/models.ts";
 import { isModelGgufFile } from "./catalog/friendly.ts";
-
-// Worst → best is the reverse; lower rank = better fit for this device.
-const FIT_RANK: Record<ModelFile["fit"], number> = {
-	great: 0,
-	ok: 1,
-	partial: 2,
-	cpu: 3,
-	unknown: 4,
-	too_big: 5,
-};
 
 /**
  * Pick the quantization to pre-select when a deep link asks to install a model:
  * the best device fit, breaking ties toward the smaller file (more likely to
- * actually run). Returns `null` only when there are no files at all. An already
- * installed quant is preferred so re-triggering a link is a no-op.
+ * actually run). The ranking is the shared `FIT_RANK`, so a blocked quant
+ * (`too_big` / `no_space`) is picked only when every quant is blocked — callers
+ * must still check `isBlockedFit` before installing. Returns `null` only when
+ * there are no files at all. An already installed quant is preferred so
+ * re-triggering a link is a no-op.
  */
 export function pickRecommendedQuant(files: ModelFile[]): ModelFile | null {
 	const modelFiles = files.filter((file) => isModelGgufFile(file.filename));
@@ -34,13 +28,5 @@ export function pickRecommendedQuant(files: ModelFile[]): ModelFile | null {
 	if (alreadyInstalled) {
 		return alreadyInstalled;
 	}
-	return modelFiles.reduce((best, f) => {
-		const byFit = FIT_RANK[f.fit] - FIT_RANK[best.fit];
-		if (byFit !== 0) {
-			return byFit < 0 ? f : best;
-		}
-		const fSize = f.sizeBytes ?? Number.POSITIVE_INFINITY;
-		const bestSize = best.sizeBytes ?? Number.POSITIVE_INFINITY;
-		return fSize < bestSize ? f : best;
-	});
+	return pickBestFit(modelFiles);
 }

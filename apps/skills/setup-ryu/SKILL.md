@@ -90,7 +90,7 @@ Add this to the agent's MCP config (`mcpServers`). Point the path at this repo's
 }
 ```
 
-The package also exposes a `ryu-mcp` bin, so after `bun install` you can launch it by that name instead of the file path.
+Once `@ryuhq/mcp` is published to npm, `"command": "bunx", "args": ["@ryuhq/mcp"]` replaces the file path and needs no checkout. The package's `ryu-mcp` bin points at the built `dist/index.js`, so inside the repo run the source as above or `bun run build` in `apps/mcp` first.
 
 After connecting, the agent receives the canonical tool list via the MCP `tools/list` handshake - trust that list for exact names. The tools include `ryu_ask`, `ryu_list_agents`, `ryu_search_models`, `ryu_set_active_model`, `ryu_run_workflow`, `ryu_call_mcp_tool`, and `ryu_search_retrieval`. Full reference in [[ryu-mcp]].
 

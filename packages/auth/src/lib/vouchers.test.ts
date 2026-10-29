@@ -132,12 +132,17 @@ describe("first-purchase voucher", () => {
 
 	it("never lists a slug it also excludes", () => {
 		for (const slug of FIRST_PURCHASE_VOUCHER_SLUGS) {
-			expect(FIRST_PURCHASE_VOUCHER_EXCLUSIONS[slug]).toBeUndefined();
+			expect(
+				Reflect.get(FIRST_PURCHASE_VOUCHER_EXCLUSIONS, slug)
+			).toBeUndefined();
+			expect(Object.hasOwn(FIRST_PURCHASE_VOUCHER_EXCLUSIONS, slug)).toBe(
+				false
+			);
 		}
 	});
 
 	it("excludes max-yearly and the lifetime licence, with a reason each", () => {
-		for (const slug of ["max-yearly", "lifetime"]) {
+		for (const slug of ["max-yearly", "lifetime"] as const) {
 			expect(voucherAppliesToSlug(slug)).toBe(false);
 			expect(FIRST_PURCHASE_VOUCHER_EXCLUSIONS[slug]).toBeTruthy();
 		}
@@ -153,7 +158,7 @@ describe("first-purchase voucher", () => {
 		for (const slug of FIRST_PURCHASE_VOUCHER_SLUGS) {
 			expect(slug.endsWith("-monthly")).toBe(true);
 		}
-		for (const slug of ["pro-yearly", "max-yearly", "teams-yearly"]) {
+		for (const slug of ["pro-yearly", "max-yearly", "teams-yearly"] as const) {
 			expect(voucherAppliesToSlug(slug)).toBe(false);
 			expect(FIRST_PURCHASE_VOUCHER_EXCLUSIONS[slug]).toBeTruthy();
 		}

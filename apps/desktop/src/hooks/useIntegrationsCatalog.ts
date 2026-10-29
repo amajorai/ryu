@@ -47,6 +47,7 @@ export function integrationsListQuery(
 				limit: PAGE_LIMIT,
 				cursor: pageParam,
 			}),
+		// SAFETY: The initial cursor is the authored undefined literal, already a member of this query's string | undefined pageParam port. This widening seeds the same complete cursor type used by queryFn/getNextPageParam; it makes no claim about decoded HTTP data.
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (last: { nextCursor?: string | null }) =>
 			last.nextCursor ?? undefined,

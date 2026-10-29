@@ -1,0 +1,12 @@
+.frame,
+.coloredFrame,
+.emoji {
+	width: var(--glyph-size);
+	height: var(--glyph-size);
+}
+.coloredFrame {
+	color: var(--glyph-color);
+}
+.emoji {
+	font-size: var(--glyph-emoji-font-size);
+}

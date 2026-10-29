@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { ENGINE_LOGO_IDS, engineLogoProps } from "./engine-logos";
-import sources from "./engine-logos/sources.json";
+import sources from "./engine-logos/sources.json" with { type: "json" };
+import { ENGINE_LOGO_IDS, engineLogoProps } from "./engine-logos.ts";
 
 describe("bundled engine logos", () => {
 	test("FreeToken has bare artwork for both app themes", () => {

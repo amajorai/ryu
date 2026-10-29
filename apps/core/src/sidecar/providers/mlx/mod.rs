@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 
+use super::engine_child;
+use super::readiness;
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 use crate::win_process::NoWindow;
 use process::default_port;
@@ -62,6 +64,13 @@ impl Default for MlxManager {
     }
 }
 
+/// The model MLX binds at launch: explicit `with_model` > the user's
+/// active-model selection for this engine > `RYU_MLX_MODEL` > the small default.
+/// Also answers which model a route that left `model` unset should request.
+pub(crate) async fn launch_model(explicit: Option<String>) -> String {
+    super::resolve_launch_model("mlx", explicit, "RYU_MLX_MODEL", DEFAULT_MLX_MODEL).await
+}
+
 impl Sidecar for MlxManager {
     fn name(&self) -> &'static str {
         "mlx"
@@ -76,8 +85,22 @@ impl Sidecar for MlxManager {
         let port = self.port;
         let process = Arc::clone(&self.process);
         let running = Arc::clone(&self.running);
+        let client = self.client.clone();
 
         Box::pin(async move {
+            // Never respawn a resident engine: storing a new child drops the
+            // serving one (spawned with kill_on_drop(false)), orphaning it with
+            // its port and GPU memory. A child still loading after an earlier
+            // readiness timeout is waited on again. Model switches stop first
+            // (restart_sidecar / set_active_local_engine).
+            if engine_child::held_child_is_running(&process) {
+                engine_child::wait_for_listener(&process, port, "MLX", engine_child::READY_TIMEOUT)
+                    .await?;
+                running.store(true, Ordering::Relaxed);
+                tracing::info!("mlx already running — nothing to start");
+                return Ok(());
+            }
+
             // Node-gate: MLX only runs on Apple Silicon. Refuse here too (not just
             // at the install route) so the auto-start path can never spawn it on an
             // unsupported node.
@@ -87,14 +110,7 @@ impl Sidecar for MlxManager {
             // selection when it targets MLX > `RYU_MLX_MODEL` env > a sensible
             // small default. MLX cannot start without one, so we never error
             // here. `with_model` stays first (documented contract).
-            let model = match model {
-                Some(m) => m,
-                None => match crate::model_catalog::active_model_ref_for_engine("mlx").await {
-                    Some(r) => r,
-                    None => std::env::var("RYU_MLX_MODEL")
-                        .unwrap_or_else(|_| DEFAULT_MLX_MODEL.to_string()),
-                },
-            };
+            let model = launch_model(model).await;
 
             installer::ensure_installed()
                 .await
@@ -114,22 +130,33 @@ impl Sidecar for MlxManager {
                     crate::inference::LaunchConfig::default()
                 }
             };
-            let mut proc = MlxProcess::new(python, model, port).with_launch(launch);
+            readiness::ensure_port_free("mlx", port).await?;
+            // Serve the installed snapshot from disk when there is one.
+            let weights = crate::sidecar::providers::python_engine_model(&model);
+            let mut proc = MlxProcess::new(python, weights.model_arg, port).with_launch(launch);
             proc.start().await.context("spawning MLX process")?;
             *process.lock().unwrap() = Some(proc);
 
-            // Wait up to 120 s for the HTTP server to become reachable.
-            let addr = format!("127.0.0.1:{port}");
-            tokio::time::timeout(std::time::Duration::from_secs(120), async {
-                loop {
-                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            // Readiness is the live child answering `/health` and the OpenAI
+            // API — never a bare TCP connect, which a stale listener on the port
+            // would satisfy. `mlx_lm server`'s `/v1/models` lists only Hub-cache
+            // repos with a sharded index (verified against ml-explore/mlx-lm
+            // `server.py`), so the served model id cannot be required there; the
+            // pre-spawn port check plus child liveness rule out a stale server.
+            let probe = readiness::ReadyProbe {
+                engine: "mlx",
+                port,
+                health_path: Some("/health"),
+                expected_model: None,
+                timeout: std::time::Duration::from_secs(120),
+            };
+            if let Err(error) = readiness::wait_for_child(&client, &probe, &process).await {
+                let failed_child = process.lock().unwrap().take();
+                if let Some(mut child) = failed_child {
+                    let _ = child.stop().await;
                 }
-            })
-            .await
-            .context("MLX did not start within 120 s")?;
+                return Err(error).context("MLX readiness check failed");
+            }
 
             running.store(true, Ordering::Relaxed);
             tracing::info!("mlx started");
@@ -200,17 +227,52 @@ impl Sidecar for MlxManager {
 
             crate::sidecar::remove_from_version_store("mlx");
 
-            if delete_data {
-                // mlx-lm downloads models via HuggingFace Hub into
-                // ~/.cache/huggingface/hub. Removing ~/.cache/huggingface clears
-                // all downloaded model weights.
-                if let Some(home) = dirs::home_dir() {
-                    crate::sidecar::remove_dir(&home.join(".cache").join("huggingface")).await;
-                }
-            }
+            // `delete_data` deletes nothing outside Ryu, and nothing shared: the
+            // weights live in the catalog's `models/chat/snapshots/` (removed
+            // through the catalog) and the shared `models/hf` Hub cache that
+            // every Ryu Python runtime uses. Never `~/.cache/huggingface`.
+            let _ = delete_data;
 
             tracing::info!("mlx uninstalled");
             Ok(())
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// A second start (start-all, the services panel) while the engine is
+    /// resident keeps the serving child instead of spawning a competitor that
+    /// would replace, and so orphan, it. Returning before install also proves
+    /// no spawn path ran.
+    #[tokio::test]
+    async fn start_keeps_a_live_engine_instead_of_respawning() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mgr = MlxManager::new().with_port(port);
+        let child = tokio::process::Command::new("/bin/sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn sleeping child fixture");
+        *mgr.process.lock().unwrap() = Some(MlxProcess::from_child_for_test(child));
+        let pid = || {
+            mgr.process
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(MlxProcess::pid)
+        };
+        let serving = pid();
+        assert!(serving.is_some());
+
+        mgr.start().await.expect("a live engine is already started");
+        assert_eq!(pid(), serving, "the serving child must not be replaced");
+        assert!(mgr.is_running());
+
+        mgr.stop().await.expect("stop the fixture child");
+        assert!(!mgr.is_running());
     }
 }

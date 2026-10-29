@@ -13,7 +13,7 @@
 // callback that completes on its own (ChatGPT), and prompts in between — free
 // text, a pasted code, or a choice.
 
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -21,15 +21,16 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { toast } from "@ryu/ui/components/sileo";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { OTPCodeDisplay } from "@ryu/ui/components/motion/otp-input.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { SuccessCheck } from "@ryu/ui/components/success-check.tsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { ApiError, toTarget } from "@/src/lib/api/client.ts";
 import {
 	answerProviderLogin,
 	cancelProviderLogin,
@@ -38,28 +39,33 @@ import {
 	type PiLoginPrompt,
 	startProviderLogin,
 } from "@/src/lib/api/pi-config.ts";
+import { isTauriReady } from "@/src/lib/tauri-ready.ts";
 
 interface ProviderLoginDialogProps {
+	accountId?: string;
+	enablePlanUse?: boolean;
 	onOpenChange: (open: boolean) => void;
 	/** Called once the credential is stored, so the card can flip to Connected. */
-	onSuccess: () => void;
+	onSuccess: (event: PiLoginEvent) => void;
 	open: boolean;
 	providerId: string;
 	providerLabel: string;
 }
 
-/**
- * Send the user to the provider's page in their REAL browser. This must go
- * through the Tauri shell bridge, not `window.open`: inside the app's webview
- * `window.open` does not reliably reach the system browser, and a silently
- * swallowed authorization link is indistinguishable from a login that does
- * nothing — the exact failure this whole flow exists to end.
- */
-function openInBrowser(url: string) {
-	Promise.resolve(openExternal(url)).catch(() => undefined);
+/** Prefer Core's actionable error body over the generic HTTP path/status. */
+function providerLoginErrorMessage<TCause>(
+	cause: TCause,
+	fallback: string
+): string {
+	if (cause instanceof ApiError && cause.serverMessage) {
+		return cause.serverMessage;
+	}
+	return cause instanceof Error ? cause.message : fallback;
 }
 
 export function ProviderLoginDialog({
+	accountId,
+	enablePlanUse = false,
 	onOpenChange,
 	onSuccess,
 	open,
@@ -73,9 +79,9 @@ export function ProviderLoginDialog({
 	// comment used to defend.
 	//
 	// `useNodeStore` refreshes cloud tokens on every window `focus`, and
-	// `refreshCloudTokens` -> `fetchManagedNodes()` asks the control plane to MINT
-	// a user JWT per call. better-auth stamps a fresh `iat`/`exp` every time and
-	// caches nothing, so each fetch yields a different token STRING, which
+	// `refreshCloudTokens` -> `fetchManagedNodes()` asks the control plane to mint
+	// a node-bound delegation per call. Its `iat`/`exp` changes every time, so
+	// each fetch yields a different token STRING, which
 	// `decorateLocal` then writes into the active node. This flow deliberately
 	// sends the user to the system browser, so a focus round-trip is guaranteed:
 	// for anyone on a managed node, coming back from the consent screen changed
@@ -106,6 +112,7 @@ export function ProviderLoginDialog({
 		userCode: string;
 		verificationUri: string;
 	} | null>(null);
+	const [copiedDeviceCode, setCopiedDeviceCode] = useState<string | null>(null);
 	const [prompt, setPrompt] = useState<{
 		id: string;
 		prompt: PiLoginPrompt;
@@ -113,8 +120,21 @@ export function ProviderLoginDialog({
 	const [answer, setAnswer] = useState("");
 	const [status, setStatus] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [browserLaunchError, setBrowserLaunchError] = useState<string | null>(
+		null
+	);
 	const [done, setDone] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
+	const openInBrowser = useCallback(async (url: string) => {
+		setBrowserLaunchError(null);
+		try {
+			await openExternal(url);
+		} catch {
+			setBrowserLaunchError(
+				"Could not open your browser. Use the button below to retry."
+			);
+		}
+	}, []);
 
 	// Held in a ref so cleanup can cancel the flow without re-running the effect
 	// every time the id lands in state.
@@ -129,10 +149,11 @@ export function ProviderLoginDialog({
 					// Opening it immediately is the whole point of the flow: the user
 					// asked to log in, so put them in front of the consent screen.
 					if (event.url) {
-						openInBrowser(event.url);
+						void openInBrowser(event.url);
 					}
 					break;
 				case "device_code":
+					setCopiedDeviceCode(null);
 					setDeviceCode(
 						event.verificationUri && event.userCode
 							? {
@@ -142,7 +163,7 @@ export function ProviderLoginDialog({
 							: null
 					);
 					if (event.verificationUri) {
-						openInBrowser(event.verificationUri);
+						void openInBrowser(event.verificationUri);
 					}
 					break;
 				case "prompt":
@@ -159,8 +180,9 @@ export function ProviderLoginDialog({
 					setDone(true);
 					setPrompt(null);
 					setStatus(null);
+					setError(null);
 					toast.success({ title: `Connected ${providerLabel}` });
-					onSuccess();
+					onSuccess(event);
 					break;
 				case "error":
 					setError(event.message ?? "The login failed.");
@@ -170,7 +192,7 @@ export function ProviderLoginDialog({
 					break;
 			}
 		},
-		[onSuccess, providerLabel]
+		[onSuccess, openInBrowser, providerLabel]
 	);
 
 	// One flow per opening of the dialog. Closing aborts the stream AND cancels
@@ -183,7 +205,7 @@ export function ProviderLoginDialog({
 	// `onSuccess` (itself a stable `useCallback`) and a string, so it never
 	// changes in practice, and listing it would put a render-identity value in
 	// charge of whether the user's sign-in survives.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: re-running this effect kills the in-flight OAuth child; `applyEvent` is stable by construction, and the node token is read through `tokenRef` on purpose (see above).
+	// re-running this effect kills the in-flight OAuth child; `applyEvent` is stable by construction, and the node token is read through `tokenRef` on purpose (see above).
 	useEffect(() => {
 		if (!open) {
 			return;
@@ -205,11 +227,15 @@ export function ProviderLoginDialog({
 			setInstructions(null);
 			setDeviceCode(null);
 			setPrompt(null);
-			setStatus("Starting…");
+			setStatus("Preparing sign-in…");
 			setError(null);
+			setBrowserLaunchError(null);
 			setDone(false);
 			try {
-				const started = await startProviderLogin(target(), providerId);
+				const started = await startProviderLogin(target(), providerId, {
+					accountId,
+					enablePlanUse,
+				});
 				if (cancelled) {
 					// Raced the dialog closing — do not leave the flow running.
 					cancelProviderLogin(target(), started.sessionId).catch(
@@ -229,9 +255,7 @@ export function ProviderLoginDialog({
 				}
 			} catch (e) {
 				if (!(cancelled || controller.signal.aborted)) {
-					setError(
-						e instanceof Error ? e.message : "Could not start the login."
-					);
+					setError(providerLoginErrorMessage(e, "Could not start the login."));
 				}
 			}
 		};
@@ -246,7 +270,7 @@ export function ProviderLoginDialog({
 				cancelProviderLogin(target(), id).catch(() => undefined);
 			}
 		};
-	}, [open, providerId, nodeUrl]);
+	}, [open, providerId, nodeUrl, accountId, enablePlanUse]);
 
 	const submitAnswer = async () => {
 		if (!(prompt && sessionId)) {
@@ -263,13 +287,12 @@ export function ProviderLoginDialog({
 			if (res.accepted) {
 				setPrompt(null);
 				setStatus("Working…");
+				setError(null);
 			} else {
 				setError(res.error ?? "The login did not accept that answer.");
 			}
 		} catch (e) {
-			setError(
-				e instanceof Error ? e.message : "The answer could not be sent."
-			);
+			setError(providerLoginErrorMessage(e, "The answer could not be sent."));
 		} finally {
 			setSubmitting(false);
 		}
@@ -294,6 +317,16 @@ export function ProviderLoginDialog({
 		}
 	};
 
+	const copyDeviceCode = async (code: string) => {
+		try {
+			await navigator.clipboard.writeText(code);
+			setCopiedDeviceCode(code);
+			toast.success("Device code copied");
+		} catch {
+			toast.error("Couldn't copy the device code");
+		}
+	};
+
 	return (
 		<Dialog onOpenChange={handleOpenChange} open={open}>
 			<DialogContent className="sm:max-w-lg" showCloseButton={settled}>
@@ -308,7 +341,9 @@ export function ProviderLoginDialog({
 				<div className="flex flex-col gap-4">
 					{done ? (
 						<div className="flex items-center gap-3">
-							<SuccessCheck className="size-8 shrink-0 text-status-success" />
+							<span className="inline-flex shrink-0 text-status-success">
+								<SuccessCheck className="size-8" />
+							</span>
 							<p className="text-sm">
 								Connected. {providerLabel} is ready to use.
 							</p>
@@ -319,6 +354,12 @@ export function ProviderLoginDialog({
 						<p className="text-sm text-status-destructive">{error}</p>
 					) : null}
 
+					{browserLaunchError ? (
+						<p className="text-sm text-status-destructive" role="alert">
+							{browserLaunchError}
+						</p>
+					) : null}
+
 					{authUrl && !done ? (
 						<div className="flex flex-col gap-2">
 							<p className="text-muted-foreground text-xs">
@@ -326,7 +367,19 @@ export function ProviderLoginDialog({
 									"Your browser should have opened. If it didn't, use the button below."}
 							</p>
 							<Button
-								onClick={() => openInBrowser(authUrl)}
+								onClick={(event) => {
+									if (isTauriReady()) {
+										event.preventDefault();
+										void openInBrowser(authUrl);
+									}
+								}}
+								render={
+									<a
+										href={/^https?:\/\//.test(authUrl) ? authUrl : undefined}
+										rel="noopener noreferrer"
+										target="_blank"
+									/>
+								}
 								size="sm"
 								variant="ghost"
 							>
@@ -340,11 +393,24 @@ export function ProviderLoginDialog({
 							<p className="text-muted-foreground text-xs">
 								Enter this code on the verification page:
 							</p>
-							<p className="font-mono text-lg tracking-widest">
-								{deviceCode.userCode}
-							</p>
+							<div className="flex items-center gap-2">
+								<OTPCodeDisplay
+									aria-label={`${providerLabel} device code`}
+									code={deviceCode.userCode}
+									size="compact"
+								/>
+								<Button
+									onClick={() => void copyDeviceCode(deviceCode.userCode)}
+									size="sm"
+									variant="outline"
+								>
+									{copiedDeviceCode === deviceCode.userCode
+										? "Copied"
+										: "Copy code"}
+								</Button>
+							</div>
 							<Button
-								onClick={() => openInBrowser(deviceCode.verificationUri)}
+								onClick={() => void openInBrowser(deviceCode.verificationUri)}
 								size="sm"
 								variant="ghost"
 							>
@@ -379,15 +445,20 @@ export function ProviderLoginDialog({
 														if (res.accepted) {
 															setPrompt(null);
 															setStatus("Working…");
+															// Same as a typed answer: an accepted choice
+															// retires an earlier refusal, so the running
+															// flow is not shown as settled (and dismissible).
+															setError(null);
 														} else {
 															setError(res.error ?? "That choice was refused.");
 														}
 													})
-													.catch((e: unknown) => {
+													.catch((e) => {
 														setError(
-															e instanceof Error
-																? e.message
-																: "The choice could not be sent."
+															providerLoginErrorMessage(
+																e,
+																"The choice could not be sent."
+															)
 														);
 													})
 													.finally(() => setSubmitting(false));

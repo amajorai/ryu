@@ -1,72 +1,69 @@
+// React's style contract includes the exact CSS custom properties consumed below.
+declare module "react" {
+	interface CSSProperties {
+		"--fixture-value-1"?: string | number;
+		"--fixture-value-2"?: string | number;
+		"--fixture-value-3"?: string | number;
+		"--fixture-value-4"?: string | number;
+		"--fixture-value-5"?: string | number;
+		"--fixture-value-6"?: string | number;
+		"--fixture-value-7"?: string | number;
+		"--fixture-value-8"?: string | number;
+		"--fixture-value-9"?: string | number;
+		"--fixture-value-10"?: string | number;
+		"--fixture-value-11"?: string | number;
+		"--fixture-value-12"?: string | number;
+		"--fixture-value-13"?: string | number;
+		"--fixture-value-14"?: string | number;
+	}
+}
+
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import proofStyles from "./codex-quota-reset-watch-proof.module.css";
 
 type CheckState = "baseline" | "unchanged" | "changed" | "outage";
 
-const SOURCE_URL = "https://www.willcodexquotareset.com/";
+const SOURCE_URL = "https://codex-resets.com/";
 
-const states: Record<
-	CheckState,
-	{ body: string; label: string; tone: string; title: string }
-> = {
+interface CheckStatePresentation {
+	body: string;
+	label: string;
+	title: string;
+	tone: string;
+}
+const states = {
 	baseline: {
 		body: "The current snapshot is stored. No notification is sent for the first check.",
 		label: "BASELINE",
-		tone: "#7dd3fc",
+		tone: "var(--codex-quota-state-tone-1)",
 		title: "Baseline recorded",
 	},
 	unchanged: {
 		body: "The normalized forecast matches the last snapshot. The 30-minute check stays quiet.",
 		label: "NO CHANGE",
-		tone: "#94a3b8",
+		tone: "var(--codex-quota-state-tone-2)",
 		title: "No alert",
 	},
 	changed: {
 		body: "A monitored signal changed. The agent reports old/new values and sends notify.desktop.",
 		label: "MATERIAL CHANGE",
-		tone: "#43d39e",
+		tone: "var(--codex-quota-state-tone-3)",
 		title: "Desktop notification sent",
 	},
 	outage: {
 		body: "The public source could not be verified. The agent alerts once, keeps the last good snapshot, and alerts again on recovery.",
 		label: "SOURCE OUTAGE",
-		tone: "#fbbf24",
+		tone: "var(--codex-quota-state-tone-4)",
 		title: "Verification needed",
 	},
-};
+} satisfies Record<CheckState, CheckStatePresentation>;
 
 function Metric({ label, value }: { label: string; value: string }) {
 	return (
-		<div
-			style={{
-				background: "#111923",
-				border: "1px solid #223040",
-				borderRadius: 14,
-				padding: "15px 16px",
-			}}
-		>
-			<div
-				style={{
-					color: "#8292a5",
-					fontSize: 11,
-					fontWeight: 700,
-					letterSpacing: "0.12em",
-					textTransform: "uppercase",
-				}}
-			>
-				{label}
-			</div>
-			<div
-				style={{
-					color: "#eef5ff",
-					fontSize: 22,
-					fontWeight: 750,
-					letterSpacing: "-0.03em",
-					marginTop: 7,
-				}}
-			>
-				{value}
-			</div>
+		<div className={proofStyles.fixture1}>
+			<div className={proofStyles.fixture2}>{label}</div>
+			<div className={proofStyles.fixture3}>{value}</div>
 		</div>
 	);
 }
@@ -86,66 +83,21 @@ function App() {
 	);
 
 	return (
-		<main
-			style={{
-				background: "#090d12",
-				boxSizing: "border-box",
-				color: "#eef5ff",
-				fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-				minHeight: "100vh",
-				padding: "38px 24px 56px",
-			}}
-		>
-			<div style={{ margin: "0 auto", maxWidth: 1040 }}>
+		<main className={proofStyles.fixture4}>
+			<div className={proofStyles.fixture5}>
 				<header>
-					<div style={{ alignItems: "center", display: "flex", gap: 13 }}>
-						<div
-							aria-hidden="true"
-							style={{
-								alignItems: "center",
-								background: "#153c32",
-								border: "1px solid #43d39e",
-								borderRadius: 13,
-								display: "flex",
-								fontSize: 22,
-								height: 46,
-								justifyContent: "center",
-								width: 46,
-							}}
-						>
+					<div className={proofStyles.fixture6}>
+						<div aria-hidden="true" className={proofStyles.fixture7}>
 							↗
 						</div>
 						<div>
-							<div
-								style={{
-									color: "#43d39e",
-									fontSize: 12,
-									fontWeight: 750,
-									letterSpacing: "0.14em",
-								}}
-							>
+							<div className={proofStyles.fixture8}>
 								VERIFIED REACT ARTIFACT
 							</div>
-							<h1
-								style={{
-									fontSize: 34,
-									letterSpacing: "-0.045em",
-									margin: "5px 0 0",
-								}}
-							>
-								Codex Quota Reset Watch
-							</h1>
+							<h1 className={proofStyles.fixture9}>Codex Quota Reset Watch</h1>
 						</div>
 					</div>
-					<p
-						style={{
-							color: "#aebdcd",
-							fontSize: 16,
-							lineHeight: 1.6,
-							margin: "20px 0 26px",
-							maxWidth: 790,
-						}}
-					>
+					<p className={proofStyles.fixture10}>
 						A first-party marketplace agent that checks the public reset
 						forecast every 30 minutes, compares it with its last snapshot, and
 						tells the user only when something meaningful changes.
@@ -154,11 +106,7 @@ function App() {
 
 				<section
 					aria-label="Template summary"
-					style={{
-						display: "grid",
-						gap: 10,
-						gridTemplateColumns: "repeat(4, 1fr)",
-					}}
+					className={proofStyles.fixture11}
 				>
 					<Metric label="Marketplace id" value="ryu/codex-quota-reset-watch" />
 					<Metric label="Cadence" value="Every 30m" />
@@ -166,35 +114,9 @@ function App() {
 					<Metric label="Approval" value="Off" />
 				</section>
 
-				<section
-					aria-label="Monitoring flow"
-					style={{
-						background: "#111923",
-						border: "1px solid #223040",
-						borderRadius: 18,
-						marginTop: 18,
-						padding: 20,
-					}}
-				>
-					<div
-						style={{
-							color: "#8292a5",
-							fontSize: 11,
-							fontWeight: 700,
-							letterSpacing: "0.14em",
-							textTransform: "uppercase",
-						}}
-					>
-						Monitoring loop
-					</div>
-					<div
-						style={{
-							display: "grid",
-							gap: 12,
-							gridTemplateColumns: "repeat(4, 1fr)",
-							marginTop: 14,
-						}}
-					>
+				<section aria-label="Monitoring flow" className={proofStyles.fixture12}>
+					<div className={proofStyles.fixture13}>Monitoring loop</div>
+					<div className={proofStyles.fixture14}>
 						{[
 							["01", "Fetch", "web_fetch.get", "Read the public page."],
 							[
@@ -211,193 +133,68 @@ function App() {
 								"Tell the user on a real change.",
 							],
 						].map(([number, title, tool, detail]) => (
-							<div
-								key={number}
-								style={{
-									background: "#0d141c",
-									border: "1px solid #223040",
-									borderRadius: 14,
-									padding: 14,
-								}}
-							>
-								<div
-									style={{ color: "#43d39e", fontSize: 12, fontWeight: 750 }}
-								>
-									{number}
-								</div>
-								<div style={{ fontSize: 16, fontWeight: 700, marginTop: 8 }}>
-									{title}
-								</div>
-								<code style={{ color: "#7dd3fc", fontSize: 12 }}>{tool}</code>
-								<div
-									style={{
-										color: "#aebdcd",
-										fontSize: 12,
-										lineHeight: 1.5,
-										marginTop: 8,
-									}}
-								>
-									{detail}
-								</div>
+							<div className={proofStyles.fixture15} key={number}>
+								<div className={proofStyles.fixture16}>{number}</div>
+								<div className={proofStyles.fixture17}>{title}</div>
+								<code className={proofStyles.fixture18}>{tool}</code>
+								<div className={proofStyles.fixture19}>{detail}</div>
 							</div>
 						))}
 					</div>
 				</section>
 
-				<section
-					aria-label="Observed source"
-					style={{
-						display: "grid",
-						gap: 18,
-						gridTemplateColumns: "1.1fr 0.9fr",
-						marginTop: 18,
-					}}
-				>
-					<div
-						style={{
-							background: "#111923",
-							border: "1px solid #223040",
-							borderRadius: 18,
-							padding: 20,
-						}}
-					>
-						<div
-							style={{
-								color: "#8292a5",
-								fontSize: 11,
-								fontWeight: 700,
-								letterSpacing: "0.14em",
-								textTransform: "uppercase",
-							}}
-						>
-							Live source snapshot
-						</div>
+				<section aria-label="Observed source" className={proofStyles.fixture20}>
+					<div className={proofStyles.fixture21}>
+						<div className={proofStyles.fixture22}>Live source snapshot</div>
 						<a
+							className={proofStyles.fixture23}
 							href={SOURCE_URL}
 							rel="noopener"
-							style={{
-								color: "#7dd3fc",
-								display: "inline-block",
-								fontSize: 15,
-								marginTop: 13,
-							}}
 							target="_blank"
 						>
-							willcodexquotareset.com ↗
+							codex-resets.com ↗
 						</a>
-						<div
-							style={{
-								alignItems: "end",
-								display: "flex",
-								gap: 16,
-								marginTop: 20,
-							}}
-						>
+						<div className={proofStyles.fixture24}>
 							<div>
-								<div
-									style={{
-										color: "#8292a5",
-										fontSize: 11,
-										letterSpacing: "0.1em",
-										textTransform: "uppercase",
-									}}
-								>
-									Reset likelihood
-								</div>
-								<div
-									style={{
-										color: "#43d39e",
-										fontSize: 48,
-										fontWeight: 800,
-										letterSpacing: "-0.06em",
-										lineHeight: 1,
-									}}
-								>
-									36%
-								</div>
+								<div className={proofStyles.fixture25}>Reset likelihood</div>
+								<div className={proofStyles.fixture26}>36%</div>
 							</div>
-							<div style={{ borderLeft: "1px solid #334155", paddingLeft: 16 }}>
-								<div
-									style={{ color: "#eef5ff", fontSize: 17, fontWeight: 700 }}
-								>
-									Do not force it.
-								</div>
-								<div
-									style={{
-										color: "#aebdcd",
-										fontSize: 12,
-										lineHeight: 1.5,
-										marginTop: 5,
-									}}
-								>
+							<div className={proofStyles.fixture27}>
+								<div className={proofStyles.fixture28}>Do not force it.</div>
+								<div className={proofStyles.fixture29}>
 									Observed public guidance · last checked 03:48 PM
 								</div>
 							</div>
 						</div>
-						<div
-							style={{
-								borderTop: "1px solid #223040",
-								color: "#aebdcd",
-								fontSize: 12,
-								lineHeight: 1.55,
-								marginTop: 20,
-								paddingTop: 14,
-							}}
-						>
+						<div className={proofStyles.fixture30}>
 							The watcher preserves the site's caveat: this is a public
 							forecast, not an official OpenAI reset signal.
 						</div>
 					</div>
 
-					<div
-						style={{
-							background: "#111923",
-							border: "1px solid #223040",
-							borderRadius: 18,
-							padding: 20,
-						}}
-					>
-						<div
-							style={{
-								color: "#8292a5",
-								fontSize: 11,
-								fontWeight: 700,
-								letterSpacing: "0.14em",
-								textTransform: "uppercase",
-							}}
-						>
-							Alert policy preview
-						</div>
-						<div
-							style={{
-								color: "#eef5ff",
-								fontSize: 17,
-								fontWeight: 700,
-								marginTop: 13,
-							}}
-						>
-							Simulate the next check
-						</div>
-						<div
-							style={{
-								display: "flex",
-								flexWrap: "wrap",
-								gap: 7,
-								marginTop: 13,
-							}}
-						>
+					<div className={proofStyles.fixture31}>
+						<div className={proofStyles.fixture32}>Alert policy preview</div>
+						<div className={proofStyles.fixture33}>Simulate the next check</div>
+						<div className={proofStyles.fixture34}>
 							{stateButtons.map(([value, label]) => (
 								<button
+									className={proofStyles.dynamicFixture1}
 									key={value}
 									onClick={() => setCheckState(value)}
 									style={{
-										background: checkState === value ? "#153c32" : "#0d141c",
-										border: `1px solid ${checkState === value ? "#43d39e" : "#334155"}`,
-										borderRadius: 999,
-										color: checkState === value ? "#b9ffe2" : "#aebdcd",
-										cursor: "pointer",
-										fontSize: 12,
-										padding: "7px 10px",
+										"--fixture-value-1":
+											checkState === value
+												? "var(--codex-quota-reset-watch-proof-color-1)"
+												: "var(--codex-quota-reset-watch-proof-color-2)",
+										"--fixture-value-2": `1px solid ${checkState === value ? "var(--codex-quota-reset-watch-proof-color-3)" : "var(--codex-quota-reset-watch-proof-color-4)"}`,
+										"--fixture-value-3": "999px",
+										"--fixture-value-4":
+											checkState === value
+												? "var(--codex-quota-reset-watch-proof-color-5)"
+												: "var(--codex-quota-reset-watch-proof-color-6)",
+										"--fixture-value-5": "pointer",
+										"--fixture-value-6": "12px",
+										"--fixture-value-7": "7px 10px",
 									}}
 									type="button"
 								>
@@ -406,96 +203,43 @@ function App() {
 							))}
 						</div>
 						<div
+							className={proofStyles.dynamicFixture2}
 							data-testid="alert-policy-result"
 							style={{
-								borderLeft: `3px solid ${activeState.tone}`,
-								marginTop: 20,
-								paddingLeft: 13,
+								"--fixture-value-8": `3px solid ${activeState.tone}`,
+								"--fixture-value-9": "20px",
+								"--fixture-value-10": "13px",
 							}}
 						>
 							<div
+								className={proofStyles.dynamicFixture3}
 								style={{
-									color: activeState.tone,
-									fontSize: 11,
-									fontWeight: 750,
-									letterSpacing: "0.12em",
+									"--fixture-value-11": activeState.tone,
+									"--fixture-value-12": "11px",
+									"--fixture-value-13": 750,
+									"--fixture-value-14": "0.12em",
 								}}
 							>
 								{activeState.label}
 							</div>
-							<div style={{ fontSize: 18, fontWeight: 750, marginTop: 6 }}>
-								{activeState.title}
-							</div>
-							<div
-								style={{
-									color: "#aebdcd",
-									fontSize: 13,
-									lineHeight: 1.55,
-									marginTop: 7,
-								}}
-							>
-								{activeState.body}
-							</div>
+							<div className={proofStyles.fixture35}>{activeState.title}</div>
+							<div className={proofStyles.fixture36}>{activeState.body}</div>
 						</div>
 					</div>
 				</section>
 
 				<section
 					aria-label="Verification evidence"
+					className={proofStyles.fixture37}
 					data-testid="verification-evidence"
-					style={{
-						background: "#111923",
-						border: "1px solid #223040",
-						borderRadius: 18,
-						marginTop: 18,
-						padding: 20,
-					}}
 				>
-					<div
-						style={{
-							alignItems: "center",
-							display: "flex",
-							justifyContent: "space-between",
-							gap: 12,
-						}}
-					>
-						<div
-							style={{
-								color: "#8292a5",
-								fontSize: 11,
-								fontWeight: 700,
-								letterSpacing: "0.14em",
-								textTransform: "uppercase",
-							}}
-						>
-							Verification evidence
-						</div>
-						<span
-							data-testid="proof-status"
-							style={{
-								background: "#153c32",
-								border: "1px solid #43d39e",
-								borderRadius: 999,
-								color: "#b9ffe2",
-								fontSize: 11,
-								fontWeight: 750,
-								padding: "6px 10px",
-							}}
-						>
+					<div className={proofStyles.fixture38}>
+						<div className={proofStyles.fixture39}>Verification evidence</div>
+						<span className={proofStyles.fixture40} data-testid="proof-status">
 							READY
 						</span>
 					</div>
-					<ul
-						style={{
-							color: "#aebdcd",
-							display: "grid",
-							gap: 10,
-							lineHeight: 1.5,
-							listStyle: "none",
-							margin: "16px 0 0",
-							padding: 0,
-						}}
-					>
+					<ul className={proofStyles.fixture41}>
 						<li>
 							✓ First-party seed: <code>ryu/codex-quota-reset-watch</code>
 						</li>
@@ -510,14 +254,7 @@ function App() {
 					</ul>
 				</section>
 
-				<footer
-					style={{
-						color: "#6f8297",
-						fontSize: 12,
-						lineHeight: 1.6,
-						marginTop: 18,
-					}}
-				>
+				<footer className={proofStyles.fixture42}>
 					Forecast source observed in the browser before this proof was
 					rendered. The agent never claims an official OpenAI quota reset.
 				</footer>
@@ -535,6 +272,7 @@ if (!proofRootElement) {
 	throw new Error("Codex Quota Reset Watch proof root is missing");
 }
 
+// SAFETY: This fixture installs and reuses only its own optional React root handle below.
 const proofRuntime = globalThis as ProofRuntime;
 const proofRoot =
 	proofRuntime.__codexQuotaResetWatchRoot ?? createRoot(proofRootElement);

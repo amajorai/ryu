@@ -1,4 +1,7 @@
 "use client";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { CSSProperties } from "react";
+import styles from "./hero-workflow-loop.module.css";
 
 /*
  * The landing hero's visualisation: a looping, scripted run of ONE real Ryu
@@ -32,7 +35,7 @@ import { Button } from "@ryu/ui/components/button";
 import { Logo as RyuLogo } from "@ryu/ui/components/logo";
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
 import { cn } from "@ryu/ui/lib/utils";
-import type { ChatStatus, UIMessage } from "ai";
+import type { ChatStatus, DynamicToolUIPart, TextUIPart, UIMessage } from "ai";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentChat } from "../desktop/agent-elements/agent-chat.tsx";
@@ -43,12 +46,11 @@ import {
 	ACTION_PILL_WIDTH,
 	CONTENT_SPRING,
 	DETAIL_SIZES,
-	ISLAND_CSS,
 	ISLAND_SPRING,
+	ISLAND_SURFACE_BASE,
 	type IslandAction,
 	IslandActionPills,
 	LOGO_CIRCLE,
-	SHAPE_BASE,
 	SPLIT_GAP,
 	SUGGESTION_STACK_GAP,
 	TRANSLUCENT_SKIN,
@@ -61,16 +63,27 @@ const textMessage = (
 	id: string,
 	role: "user" | "assistant",
 	text: string
-): UIMessage =>
-	({ id, role, parts: [{ type: "text", text }] }) as unknown as UIMessage;
+): UIMessage => ({ id, role, parts: [{ type: "text", text }] });
 
-type Part = Record<string, unknown>;
+/** Authored pre-run tool cells; assistantParts supplies the actual SDK state. */
+interface ScriptedToolPart {
+	input: DynamicToolUIPart["input"];
+	output: DynamicToolUIPart["output"];
+	toolCallId: string;
+	type: `tool-${string}`;
+}
+type Part = TextUIPart | ScriptedToolPart;
+
+/** Both variants are owned by this script: text or a prefixed tool name. */
+function isScriptedToolPart(part: Part): part is ScriptedToolPart {
+	return isNativeText(part.type) && part.type.startsWith("tool");
+}
 
 const toolPart = (
 	name: string,
-	input: Record<string, unknown>,
-	output: Record<string, unknown>
-): Part => ({
+	input: DynamicToolUIPart["input"],
+	output: DynamicToolUIPart["output"]
+): ScriptedToolPart => ({
 	type: `tool-${name}`,
 	toolCallId: `hero-${name}`,
 	input,
@@ -115,7 +128,7 @@ interface Scenario {
 	suggestion: { body: string; title: string };
 }
 
-const SCENARIOS: Scenario[] = [
+const SCENARIOS: [Scenario, ...Scenario[]] = [
 	{
 		id: "call",
 		label: "After a call",
@@ -340,7 +353,7 @@ const SCENARIOS: Scenario[] = [
 			},
 			{
 				caption:
-					"Step 2 — it reads each one. Your bank details never leave the machine.",
+					"Step 2 — it reads the selected files. Check the configured model and tool destinations before sharing bank details.",
 				part: toolPart(
 					"Read",
 					{ file_path: "~/Downloads/hotel-receipt-14-mar.pdf" },
@@ -441,24 +454,23 @@ function runParts(scenario: Scenario): Part[] {
 	];
 }
 
-const RUN_PART_COUNT = runParts(SCENARIOS[0] as Scenario).length;
+const RUN_PART_COUNT = runParts(SCENARIOS[0]).length;
 
 /** Slice the turn to `count` parts, holding the last tool row mid-run. */
 function assistantParts(
 	parts: Part[],
 	count: number,
 	pending: boolean
-): Part[] {
+): UIMessage["parts"] {
 	const shown = parts.slice(0, count);
-	return shown.map((part, index) => {
-		const isTool =
-			typeof part.type === "string" && part.type.startsWith("tool");
+	return shown.map<UIMessage["parts"][number]>((part, index) => {
+		const isTool = isScriptedToolPart(part);
 		if (!isTool) {
 			return part;
 		}
 		const isLast = index === shown.length - 1;
 		if (isLast && pending) {
-			const { output, ...rest } = part;
+			const { output: _output, ...rest } = part;
 			return { ...rest, state: "input-available" };
 		}
 		return { ...part, state: "output-available" };
@@ -510,7 +522,7 @@ const RUN_BEAT = (
  * same order — only the captions and the transcript underneath change — so the
  * indices below stay valid whichever use case is on screen.
  */
-function buildBeats(scenario: Scenario): Beat[] {
+function buildBeats(scenario: Scenario): [Beat, ...Beat[]] {
 	return [
 		{
 			id: "watch",
@@ -605,7 +617,7 @@ function buildBeats(scenario: Scenario): Beat[] {
 }
 
 // Structural, not per-scenario: every scenario builds the same beat list.
-const BEAT_TEMPLATE = buildBeats(SCENARIOS[0] as Scenario);
+const BEAT_TEMPLATE = buildBeats(SCENARIOS[0]);
 const BEAT_COUNT = BEAT_TEMPLATE.length;
 const beatIndexOf = (id: string) =>
 	BEAT_TEMPLATE.findIndex((beat) => beat.id === id);
@@ -661,14 +673,14 @@ function DemoCursor({ mode }: { mode: Beat["island"]["cursor"] }) {
 			{mode === "press" ? (
 				<motion.span
 					animate={{ scale: 2.2, opacity: 0 }}
-					className="absolute size-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-200/70"
+					className="absolute size-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-space-paper-line-placeholder/70"
 					initial={{ scale: 0.4, opacity: 0.9 }}
 					transition={{ duration: 0.55 }}
 				/>
 			) : null}
 			<svg
 				aria-hidden="true"
-				className="drop-shadow-[0_2px_7px_rgba(0,0,0,0.7)]"
+				className={styles.pointer}
 				fill="none"
 				height="28"
 				viewBox="0 0 16 22"
@@ -677,8 +689,9 @@ function DemoCursor({ mode }: { mode: Beat["island"]["cursor"] }) {
 				<title>Pointer</title>
 				<path
 					d="M1 1.5 13.4 12.1h-5.7l-2.3 5.6z"
-					fill="white"
-					stroke="rgba(0,0,0,0.75)"
+					fill="var(--color-logo-mask-solid)"
+					stroke="var(--color-logo-mask-clear)"
+					strokeOpacity={0.75}
 					strokeWidth="1.4"
 				/>
 			</svg>
@@ -699,7 +712,7 @@ function IslandDetail({
 		return <IslandSuggestionChip suggestion={suggestion} />;
 	}
 	return (
-		<span className="truncate font-medium text-neutral-100 text-sm">
+		<span className="truncate font-medium text-sm text-space-home">
 			{pill ?? "Ryu"}
 		</span>
 	);
@@ -723,17 +736,29 @@ function DemoIsland({
 
 	return (
 		<div className="relative flex flex-col items-start">
-			<div className="flex items-start" style={{ gap: SPLIT_GAP }}>
+			<div
+				className={cn("flex items-start", styles.split)}
+				style={
+					{
+						"--hero-workflow-loop-gap": `${SPLIT_GAP}px`,
+					} satisfies PrivateStyle as PrivateStyle
+				}
+			>
 				<div
-					className={`${SHAPE_BASE} ${TRANSLUCENT_SKIN}`}
-					style={{
-						width: LOGO_CIRCLE.width,
-						height: LOGO_CIRCLE.height,
-						borderRadius: LOGO_CIRCLE.radius,
-					}}
+					className={cn(
+						`${ISLAND_SURFACE_BASE} ${TRANSLUCENT_SKIN}`,
+						styles.logoCircle
+					)}
+					style={
+						{
+							"--hero-workflow-loop-width": `${LOGO_CIRCLE.width}px`,
+							"--hero-workflow-loop-height": `${LOGO_CIRCLE.height}px`,
+							"--hero-workflow-loop-border-radius": `${LOGO_CIRCLE.radius}px`,
+						} satisfies PrivateStyle as PrivateStyle
+					}
 				>
 					<div className="flex h-full w-full items-center justify-center">
-						<RyuLogo className="text-current" size="34px" variant="eyes" />
+						<RyuLogo size="34px" tone="inherit" variant="eyes" />
 					</div>
 				</div>
 
@@ -746,7 +771,7 @@ function DemoIsland({
 								borderRadius: detail.radius,
 								opacity: 1,
 							}}
-							className={`${SHAPE_BASE} ${TRANSLUCENT_SKIN}`}
+							className={`${ISLAND_SURFACE_BASE} ${TRANSLUCENT_SKIN}`}
 							exit={{ width: 0, opacity: 0 }}
 							initial={{ width: 0, opacity: 0 }}
 							key="detail"
@@ -806,7 +831,7 @@ function HandoffTrail({ shown }: { shown: boolean }) {
 			{[0, 1, 2].map((index) => (
 				<motion.span
 					animate={{ left: "56%", top: "46%", opacity: [0, 1, 0] }}
-					className="absolute size-1.5 rounded-full bg-amber-300 shadow-[0_0_12px_2px_rgba(252,211,77,0.55)]"
+					className={cn("absolute size-1.5 rounded-full", styles.trail)}
 					initial={{ left: "50%", top: "12%", opacity: 0 }}
 					key={`trail-${index}`}
 					transition={{ duration: 0.9, delay: index * 0.16, ease: "easeOut" }}
@@ -907,7 +932,7 @@ function useBeatLoop(
 	const [index, setIndex] = useState(0);
 	const [visible, setVisible] = useState(true);
 	const stageRef = useRef<HTMLDivElement>(null);
-	const scenario = SCENARIOS[scenarioIndex] ?? (SCENARIOS[0] as Scenario);
+	const scenario = SCENARIOS[scenarioIndex] ?? SCENARIOS[0];
 	// Read inside the beat timer so a lap wrap advances from the CURRENT use
 	// case without the timer having to re-arm every time one is picked.
 	const scenarioIndexRef = useRef(scenarioIndex);
@@ -964,7 +989,7 @@ function useBeatLoop(
 	);
 
 	return {
-		beat: beats[index] ?? (beats[0] as Beat),
+		beat: beats[index] ?? beats[0],
 		index,
 		pickScenario,
 		scenario,
@@ -1020,7 +1045,7 @@ export function HeroWorkflowLoop({
 					beat.run.parts,
 					beat.run.pending
 				),
-			} as unknown as UIMessage);
+			});
 		}
 		return messages;
 	}, [beat, scenario]);
@@ -1066,7 +1091,7 @@ export function HeroWorkflowLoop({
 
 	// The switcher now lives outside this component, so the takeover is cleared
 	// on the scenario CHANGE rather than in the click handler.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the
+
 	// scenario changing, which is the whole trigger — the setters are stable.
 	useEffect(() => {
 		setTakeover(null);
@@ -1081,9 +1106,6 @@ export function HeroWorkflowLoop({
 
 	return (
 		<div className="mx-auto w-full min-w-0 max-w-6xl overflow-x-clip">
-			{/* Static, in-repo CSS injected as a text child (no user input, no XSS surface). */}
-			<style>{ISLAND_CSS}</style>
-
 			<div className="relative min-w-0">
 				{/* The island is OUTSIDE the window — it sits on the hero's background
 				    image, which is standing in for the desktop wallpaper. It is scaled
@@ -1091,16 +1113,25 @@ export function HeroWorkflowLoop({
 				    would otherwise render 1:1 and dwarf a shrunken app on narrow
 				    viewports) and centred, the way an always-on-top pill parks. */}
 				<div
-					className="relative"
-					style={{ height: (ISLAND_BAND + ISLAND_BAND_GAP) * scale }}
+					className={cn("relative", styles.islandBand)}
+					style={
+						{
+							"--hero-workflow-loop-height": `${(ISLAND_BAND + ISLAND_BAND_GAP) * scale}px`,
+						} satisfies PrivateStyle as PrivateStyle
+					}
 				>
 					{takeover ? null : (
 						<div
-							className="absolute top-0 left-1/2 z-30"
-							style={{
-								transform: `translateX(-50%) scale(${scale})`,
-								transformOrigin: "top center",
-							}}
+							className={cn(
+								"absolute top-0 left-1/2 z-30",
+								styles.scaledIsland
+							)}
+							style={
+								{
+									"--hero-workflow-loop-transform": `translateX(-50%) scale(${scale})`,
+									"--hero-workflow-loop-transform-origin": "top center",
+								} satisfies PrivateStyle as PrivateStyle
+							}
 						>
 							<DemoIsland
 								beat={beat}
@@ -1113,25 +1144,38 @@ export function HeroWorkflowLoop({
 
 				<div
 					className={cn(
-						"w-full min-w-0 overflow-hidden rounded-2xl shadow-2xl ring-1 transition-[box-shadow,--tw-ring-color] duration-500",
-						beat.focus === "desktop" && !takeover
-							? "ring-foreground/25"
-							: "ring-border"
+						cn(
+							"w-full min-w-0 overflow-hidden rounded-2xl shadow-2xl ring-1 duration-500",
+							beat.focus === "desktop" && !takeover
+								? "ring-foreground/25"
+								: "ring-border"
+						),
+						styles.frameHeight,
+						styles.frame
 					)}
 					ref={frameRef}
-					style={{ height: STAGE_HEIGHT * scale }}
+					style={
+						{
+							"--hero-workflow-loop-height": `${STAGE_HEIGHT * scale}px`,
+						} satisfies PrivateStyle as PrivateStyle
+					}
 				>
 					<div
-						className="relative origin-top-left bg-background"
+						className={cn(
+							"relative origin-top-left bg-background",
+							styles.stage
+						)}
 						data-beat-id={beat.id}
 						data-scenario-id={scenario.id}
 						data-testid="hero-workflow-stage"
 						ref={stageRef}
-						style={{
-							width: STAGE_WIDTH,
-							height: STAGE_HEIGHT,
-							transform: `scale(${scale})`,
-						}}
+						style={
+							{
+								"--hero-workflow-loop-width": `${STAGE_WIDTH}px`,
+								"--hero-workflow-loop-height": `${STAGE_HEIGHT}px`,
+								"--hero-workflow-loop-transform": `scale(${scale})`,
+							} satisfies PrivateStyle as PrivateStyle
+						}
 					>
 						<DesktopShell sidebarMode="trust">
 							{/* No fabricated "Agent / Model / Space" top bar. The real app
@@ -1170,3 +1214,12 @@ export function HeroWorkflowLoop({
 }
 
 export default HeroWorkflowLoop;
+
+interface PrivateStyle extends CSSProperties {
+	"--hero-workflow-loop-border-radius"?: string;
+	"--hero-workflow-loop-gap"?: string;
+	"--hero-workflow-loop-height"?: string;
+	"--hero-workflow-loop-transform"?: CSSProperties["transform"];
+	"--hero-workflow-loop-transform-origin"?: CSSProperties["transformOrigin"];
+	"--hero-workflow-loop-width"?: string;
+}

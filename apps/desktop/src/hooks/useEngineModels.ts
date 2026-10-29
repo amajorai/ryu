@@ -18,8 +18,20 @@ const EMPTY_MODELS: Record<string, ModelOption[]> = {};
 
 /** Map of engine id → model options, or `{}` until the first load resolves. */
 export function useEngineModels(): Record<string, ModelOption[]> {
+	return useEngineModelsState().models;
+}
+
+/**
+ * The catalog plus whether Core has answered (or failed to). A consumer that
+ * picks a default model waits for `settled`, so it chooses from Core's list
+ * rather than from the offline fallback shown while the request is in flight.
+ */
+export function useEngineModelsState(): {
+	models: Record<string, ModelOption[]>;
+	settled: boolean;
+} {
 	const node = useActiveNode();
-	const { data } = useQuery({
+	const { data, isPending } = useQuery({
 		queryKey: ["engine-models", node.url],
 		queryFn: () =>
 			fetchEngineModels({
@@ -29,5 +41,5 @@ export function useEngineModels(): Record<string, ModelOption[]> {
 			}),
 		staleTime: ONE_HOUR_MS,
 	});
-	return data ?? EMPTY_MODELS;
+	return { models: data ?? EMPTY_MODELS, settled: !isPending };
 }

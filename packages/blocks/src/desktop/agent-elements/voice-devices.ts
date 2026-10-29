@@ -1,3 +1,5 @@
+import { isNativeFunction } from "@ryu/ui/lib/native-primitive-observation.ts";
+
 // apps/desktop/src/lib/audio/devices.ts
 //
 // Audio input/output device preferences for the desktop. The default microphone
@@ -65,19 +67,39 @@ export function setDefaultSpeakerId(deviceId: string | null): void {
  * `enumerateDevices` after a getUserMedia grant, so the settings picker calls
  * this before listing. Tracks are stopped immediately — we only want the grant.
  */
-export async function ensureMicPermission(): Promise<boolean> {
-	if (!navigator.mediaDevices?.getUserMedia) {
-		return false;
+const MIC_PERMISSION_TIMEOUT_MS = 15_000;
+let pendingMicPermission: Promise<boolean> | null = null;
+
+export function ensureMicPermission(): Promise<boolean> {
+	if (pendingMicPermission) {
+		return pendingMicPermission;
 	}
-	try {
-		const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-		for (const track of stream.getTracks()) {
-			track.stop();
-		}
-		return true;
-	} catch {
-		return false;
+	if (!globalThis.navigator?.mediaDevices?.getUserMedia) {
+		return Promise.resolve(false);
 	}
+	pendingMicPermission = new Promise<boolean>((resolve) => {
+		const timeout = setTimeout(() => resolve(false), MIC_PERMISSION_TIMEOUT_MS);
+		// Keep the request shared until the OS answers, including after timeout.
+		// A late grant must stop every track, never leave the microphone running.
+		void Promise.resolve()
+			.then(() => navigator.mediaDevices.getUserMedia({ audio: true }))
+			.then(
+				(stream) => {
+					for (const track of stream.getTracks()) {
+						track.stop();
+					}
+					clearTimeout(timeout);
+					pendingMicPermission = null;
+					resolve(true);
+				},
+				() => {
+					clearTimeout(timeout);
+					pendingMicPermission = null;
+					resolve(false);
+				}
+			);
+	});
+	return pendingMicPermission;
 }
 
 /** Enumerate audio input and output devices (labels require a prior grant). */
@@ -100,10 +122,7 @@ export async function listAudioDevices(): Promise<AudioDeviceLists> {
 
 /** Whether the running webview supports routing audio output via `setSinkId`. */
 export function supportsSinkId(): boolean {
-	return (
-		typeof (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId ===
-		"function"
-	);
+	return isNativeFunction(HTMLMediaElement.prototype.setSinkId);
 }
 
 /**
@@ -119,11 +138,7 @@ export async function applyDefaultSpeaker(
 		return false;
 	}
 	try {
-		await (
-			element as HTMLMediaElement & {
-				setSinkId: (id: string) => Promise<void>;
-			}
-		).setSinkId(sinkId);
+		await element.setSinkId(sinkId);
 		return true;
 	} catch {
 		return false;

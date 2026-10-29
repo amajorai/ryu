@@ -1,3 +1,4 @@
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 // apps/desktop/src/components/library/ContributedLibrarySection.tsx
 //
 // An app-registered collection rendered inside the Library, from the SAME
@@ -27,12 +28,13 @@ import {
 	LibraryEmpty,
 	LibraryGrid,
 	LibraryLoading,
-} from "@ryu/blocks/desktop/library";
-import type { ViewMode } from "@ryu/blocks/desktop/view-toggle";
+} from "@ryu/blocks/desktop/library.tsx";
+import type { ViewMode } from "@ryu/blocks/desktop/view-toggle.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Icon } from "@ryu/ui/components/icon.tsx";
 import { useMemo } from "react";
 import LibraryView from "@/src/components/views/LibraryView.tsx";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { parseContributedTarget } from "@/src/contributions/contributed-target.ts";
 import type { SidebarSectionSourceData } from "@/src/hooks/useSidebarSectionSource.ts";
 import type { PluginSidebarSection } from "@/src/lib/api/plugins.ts";
@@ -48,8 +50,9 @@ export default function ContributedLibrarySection({
 	sourceData: SidebarSectionSourceData;
 	view: ViewMode;
 }) {
-	const { openTab } = useTabsContext();
-	const spec = section.spec;
+	const tl = useLiteralMessages();
+	const openTab = useTabSelector((state) => state.openTab);
+	const spec = useMemo(() => pluginSidebarSpec(section), [section]);
 	const rows: SourceItem[] = sourceData.rows;
 
 	const visible = useMemo(() => {
@@ -112,7 +115,9 @@ export default function ContributedLibrarySection({
 					query
 						? "Nothing matches your search."
 						: (spec?.emptyState?.description ??
-							`${section.title} has nothing in it yet.`)
+							tl("{title} has nothing in it yet.", {
+								title: section.title,
+							}))
 				}
 				icon={Package01Icon}
 				title={
@@ -130,11 +135,7 @@ export default function ContributedLibrarySection({
 						key: row.item.id,
 						icon: Package01Icon,
 						iconNode: section.icon ? (
-							<Icon
-								className="size-4 shrink-0 opacity-70"
-								icon={section.icon}
-								size={16}
-							/>
+							<Icon className="size-4 shrink-0" icon={section.icon} size={16} />
 						) : undefined,
 						name: row.item.title,
 						subtitle: row.item.subtitle ?? null,

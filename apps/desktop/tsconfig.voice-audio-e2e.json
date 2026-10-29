@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/dictation-settings-proof.spec.ts",
+    "e2e/harness/dictation-settings-proof.tsx",
+    "e2e/harness/voice-settings-proof.tsx",
+    "e2e/voice-audio-coverage.playwright.config.ts",
+    "e2e/harness/vite.voice-audio-coverage.config.ts"
+  ]
+}

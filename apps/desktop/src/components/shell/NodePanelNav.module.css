@@ -1,0 +1,26 @@
+/*
+ * Inset hairlines between the rows of a panel card, iOS-style: a divider
+ * starts where the row's text starts (past the icon tile when the row has one)
+ * and stops short of the trailing edge, so it never touches the card's sides.
+ * Drawn per row as a pseudo-element so a child that renders nothing leaves no
+ * stray line.
+ */
+.group > * + * {
+	position: relative;
+}
+
+.group > * + *::before {
+	position: absolute;
+	inset-inline-start: 0.875rem;
+	inset-inline-end: 0.875rem;
+	top: 0;
+	height: 1px;
+	pointer-events: none;
+	content: "";
+	background-color: var(--border);
+}
+
+/* Row padding (0.875rem) + Settings icon tile (1.5rem) + gap (0.625rem). */
+.group > * + *:has([data-slot="settings-icon-tile"])::before {
+	inset-inline-start: 3rem;
+}

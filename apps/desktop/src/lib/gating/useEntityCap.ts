@@ -11,11 +11,11 @@
 // `planCapBridge` singleton in sync so the zustand `useNodeStore` can enforce its
 // own cap and open the same upgrade modal.
 
-import { type PlanLimitField, planLimit } from "@ryu/auth/lib/plans";
+import type { PlanLimitField } from "@ryu/auth/lib/plans";
 import { useCallback, useEffect } from "react";
 import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
 import { hasBillingAuth } from "@/src/lib/api/billing.ts";
-import { effectivePlan, syncPlanCapState } from "./planCapBridge.ts";
+import { capLimit, effectivePlan, syncPlanCapState } from "./planCapBridge.ts";
 
 export interface EntityCapGuard {
 	/**
@@ -44,7 +44,7 @@ export function useEntityCap(): EntityCapGuard {
 			if (!hasBillingAuth()) {
 				return Number.POSITIVE_INFINITY;
 			}
-			return planLimit(plan, field);
+			return capLimit(plan, field);
 		},
 		[plan]
 	);

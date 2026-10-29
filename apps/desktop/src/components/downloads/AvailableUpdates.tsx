@@ -12,10 +12,15 @@
 //
 // Renders nothing when there are no updates, so it can be dropped in
 // unconditionally.
+//
+// Updating an enabled skill can rewrite its name and description in the skills
+// block of every thread that loads skills, so those updates ask first through
+// the shared skill-set confirmation. "Update all" asks once, and cancelling it
+// applies nothing.
 
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { useState } from "react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { useRef, useState } from "react";
 import {
 	TrayRow,
 	TrayRowIcon,
@@ -23,14 +28,19 @@ import {
 	TrayTextButton,
 	trayMeta,
 } from "@/src/components/shell/TrayPopover.tsx";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
+import { skillUpdateChanges } from "@/src/components/skills/skill-set-change.ts";
+import { withAppUpdateLast } from "@/src/hooks/available-updates-policy.ts";
 import {
 	type AvailableUpdate,
 	useAvailableUpdates,
 } from "@/src/hooks/useAvailableUpdates.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
+import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { kindIcon } from "./kindIcons.ts";
 
 /** Short human label for the artifact family. */
-const KIND_LABEL: Record<AvailableUpdate["kind"], string> = {
+const KIND_LABEL = {
 	app: "App",
 	agent: "Agent",
 	engine: "Engine",
@@ -41,7 +51,7 @@ const KIND_LABEL: Record<AvailableUpdate["kind"], string> = {
 	skill: "Skill",
 	mcp: "MCP",
 	model: "Model",
-};
+} satisfies Record<AvailableUpdate["kind"], string>;
 
 function versionText(update: AvailableUpdate): string | null {
 	if (update.currentVersion && update.latestVersion) {
@@ -93,15 +103,18 @@ function PageUpdateRow({
 			<TrayRowIcon icon={kindIcon(update.kind)} />
 			<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 				<div className="flex items-center gap-1.5">
-					<span className="truncate font-medium text-[13px] leading-tight">
+					<span
+						className="text-(length:--text-detail) truncate font-medium leading-tight"
+						title={update.name}
+					>
 						{update.name}
 					</span>
-					<Badge className="shrink-0 text-[10px]" variant="secondary">
+					<Badge className="shrink-0" size="compact" variant="secondary">
 						{KIND_LABEL[update.kind]}
 					</Badge>
 				</div>
 				{version && (
-					<span className="truncate text-[11px] text-muted-foreground tabular-nums leading-tight">
+					<span className="type-caption truncate text-muted-foreground tabular-nums leading-tight">
 						{version}
 					</span>
 				)}
@@ -118,35 +131,83 @@ function PageUpdateRow({
 	);
 }
 
+/** `startOnce` key for the "Update all" run; row keys are `<kind>:<id>`. */
+const UPDATE_ALL_KEY = "update-all";
+
 export function AvailableUpdates({ compact = false }: { compact?: boolean }) {
 	const { updates, applyingKeys, applyUpdate, refresh } = useAvailableUpdates();
+	const { confirmSkillSetChange } = useSkillDistributionFlow();
+	const getActiveNode = useNodeStore((s) => s.getActiveNode);
 	// A single flag for the "Update all" run (applies sequentially so a shared
 	// Core install queue isn't overwhelmed and each row can still show state).
 	const [updatingAll, setUpdatingAll] = useState(false);
+	// Runs still reading the installed list or waiting on the confirmation, so a
+	// second click in that window cannot start the same update twice.
+	const startingRef = useRef(new Set<string>());
 
 	if (updates.length === 0) {
 		return null;
 	}
 
+	// Resolves false when the user cancels; true at once when no enabled skill
+	// is among the updates.
+	const confirmSkillUpdates = async (
+		batch: readonly AvailableUpdate[]
+	): Promise<boolean> => {
+		const skills = batch.filter((update) => update.kind === "skill");
+		if (skills.length === 0) {
+			return true;
+		}
+		const names = await skillUpdateChanges(toTarget(getActiveNode()), skills);
+		return confirmSkillSetChange(names);
+	};
+
+	// Runs `run` unless a run under the same key is already starting.
+	const startOnce = async (key: string, run: () => Promise<void>) => {
+		if (startingRef.current.has(key)) {
+			return;
+		}
+		startingRef.current.add(key);
+		try {
+			await run();
+		} finally {
+			startingRef.current.delete(key);
+		}
+	};
+
+	const applyOne = (update: AvailableUpdate) =>
+		startOnce(update.key, async () => {
+			if (await confirmSkillUpdates([update])) {
+				await applyUpdate(update);
+			}
+		});
+
 	// Failures are reported by `useAvailableUpdates` (one toast per outcome, for
 	// every kind), so callers only need to keep a rejection from escaping.
 	const runOne = (update: AvailableUpdate) => {
-		applyUpdate(update).catch(() => undefined);
+		applyOne(update).catch(() => undefined);
 	};
 
-	const runAll = async () => {
-		setUpdatingAll(true);
-		try {
-			for (const update of updates) {
-				// Sequential on purpose — see note above. One failure must not abort
-				// the rest of the run, so each is caught individually.
-				await applyUpdate(update).catch(() => undefined);
+	const runAll = () =>
+		startOnce(UPDATE_ALL_KEY, async () => {
+			const batch = withAppUpdateLast(updates);
+			if (!(await confirmSkillUpdates(batch))) {
+				return;
 			}
-		} finally {
-			setUpdatingAll(false);
-			refresh();
-		}
-	};
+			setUpdatingAll(true);
+			try {
+				// The app update goes LAST: on a local node it installs the bundle and
+				// exits the app, which would cut every update queued behind it.
+				for (const update of batch) {
+					// Sequential on purpose — see note above. One failure must not abort
+					// the rest of the run, so each is caught individually.
+					await applyUpdate(update).catch(() => undefined);
+				}
+			} finally {
+				setUpdatingAll(false);
+				refresh();
+			}
+		});
 
 	const startAll = () => {
 		runAll().catch(() => undefined);

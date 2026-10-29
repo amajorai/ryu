@@ -7,6 +7,7 @@
 // near the app shell (Layout) alongside the other headless watchers.
 
 import { useEffect } from "react";
+import { toTarget } from "@/src/lib/api/client.ts";
 import { streamDownloads } from "@/src/lib/api/downloads.ts";
 import { useDownloadsStore } from "@/src/store/useDownloadsStore.ts";
 import { useInstallStore } from "@/src/store/useInstallStore.ts";
@@ -14,10 +15,13 @@ import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
 export function useDownloadsStream(): void {
 	// The global overlay tracks the active (default) node; switching the default
-	// node re-runs this effect via the url/token deps below.
+	// node re-runs this effect via the url/token/user JWT deps below.
 	const node = useNodeStore((s) => s.getActiveNode());
 	const url = node.url;
 	const token = node.token;
+	// A managed node may have no node token and authenticate with the user's
+	// delegation JWT instead; dropping it 401s the stream into endless reconnects.
+	const userJwt = node.userJwt;
 	const applySnapshot = useDownloadsStore((s) => s.applySnapshot);
 	const applyUpdate = useDownloadsStore((s) => s.applyUpdate);
 	const removeTask = useDownloadsStore((s) => s.removeTask);
@@ -25,7 +29,7 @@ export function useDownloadsStream(): void {
 
 	useEffect(() => {
 		const controller = new AbortController();
-		const target = { url, token: token ?? null };
+		const target = toTarget({ url, token, userJwt });
 
 		// Drop the mirror from any previous node; the snapshot event refills it.
 		reset();
@@ -52,5 +56,5 @@ export function useDownloadsStream(): void {
 		return () => {
 			controller.abort();
 		};
-	}, [url, token, applySnapshot, applyUpdate, removeTask, reset]);
+	}, [url, token, userJwt, applySnapshot, applyUpdate, removeTask, reset]);
 }

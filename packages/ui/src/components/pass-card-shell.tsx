@@ -1,5 +1,6 @@
 "use client";
 
+import type { MotionStyle } from "motion/react";
 import {
 	animate,
 	motion,
@@ -10,6 +11,7 @@ import {
 	useSpring,
 	useTransform,
 } from "motion/react";
+import type { CSSProperties } from "react";
 import {
 	type ReactNode,
 	useCallback,
@@ -18,12 +20,15 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import { cn } from "../lib/utils.ts";
 import { DitherAvatar, ditherAvatarHue } from "./dither-kit/avatar.tsx";
 import { hueFill } from "./dither-kit/pixel.ts";
 import { Logo } from "./logo.tsx";
 import { METAL_EDGE_RING_PX, MetalEdge } from "./metal-edge.tsx";
 import { ShaderBackground } from "./motion/shader-background.tsx";
+import drawingStyles from "./pass-card-shell.drawing.module.css";
+import styles from "./pass-card-shell.module.css";
 import {
 	CARD_HALF_THICKNESS_PX,
 	CARD_THICKNESS_PX,
@@ -31,9 +36,38 @@ import {
 	sliceDepths,
 } from "./pass-edge.ts";
 
+interface CardInteractionStyle extends MotionStyle {
+	"--pass-card-shell-1-perspective"?: string | undefined;
+	"--pass-card-shell-1-touch-action"?: MotionStyle["touchAction"];
+}
+interface CardSpinStyle extends MotionStyle {
+	"--pass-card-shell-2-rotate-x"?: MotionStyle["rotateX"];
+	"--pass-card-shell-2-rotate-y"?: MotionStyle["rotateY"];
+}
+interface CardTiltStyle extends MotionStyle {
+	"--pass-card-shell-3-rotate-x"?: MotionStyle["rotateX"];
+	"--pass-card-shell-3-rotate-y"?: MotionStyle["rotateY"];
+}
+interface CardGlareStyle extends MotionStyle {
+	"--pass-card-shell-4-background"?: MotionStyle["background"];
+}
+function drawingLength(value: CSSProperties["width"]): string | undefined {
+	return isNativeNumber(value) ? `${value}px` : value;
+}
+
 // Re-exported rather than re-declared: `pass-studio/scene.ts` and the tier card
 // import the thickness from HERE, and the edge module is where it now lives
 // alongside the slice geometry and the material that fills it.
+interface PassShellDrawingStyle extends React.CSSProperties {
+	"--pass-face-depth"?: string;
+	"--pass-face-radius"?: string;
+	"--pass-ring-padding"?: string;
+	"--pass-slice-depth"?: string;
+	"--pass-slice-fill"?: string;
+	"--pass-slice-radius"?: string;
+	"--pass-warp-opacity"?: number;
+}
+
 export { CARD_THICKNESS_PX };
 
 /**
@@ -205,24 +239,31 @@ function CardExtrusion({ edge, ringed }: { edge: PassEdge; ringed: boolean }) {
 				// material it is milled from — a card whose edge went flat read as
 				// cardboard rather than as metal waiting to be finished.
 				const live = iridescent && depth === 0;
+				const sliceStyle: PassShellDrawingStyle = {
+					"--pass-slice-fill": edgeSliceFill(depth, iridescent),
+					// See `SLICE_RADIUS_PX`: the card's own radius, less the live
+					// ring's gutter on the one plane that has one.
+					"--pass-slice-radius": `${live ? LIVE_SLICE_RADIUS_PX : SLICE_RADIUS_PX}px`,
+				};
 				const slice = (
 					<div
 						aria-hidden="true"
-						className="absolute inset-0"
-						style={{
-							backgroundImage: edgeSliceFill(depth, iridescent),
-							// See `SLICE_RADIUS_PX`: the card's own radius, less the live
-							// ring's gutter on the one plane that has one.
-							borderRadius: `${live ? LIVE_SLICE_RADIUS_PX : SLICE_RADIUS_PX}px`,
-						}}
+						className={cn("absolute inset-0", styles.slice)}
+						style={sliceStyle}
 					/>
 				);
+				const slicePlaneStyle: PassShellDrawingStyle = {
+					"--pass-slice-depth": `${depth}px`,
+				};
 				return (
 					<div
 						aria-hidden="true"
-						className="pointer-events-none absolute inset-0"
+						className={cn(
+							"pointer-events-none absolute inset-0",
+							styles.slicePlane
+						)}
 						key={depth}
-						style={{ transform: `translateZ(${depth}px)` }}
+						style={slicePlaneStyle}
 					>
 						{live ? (
 							// ONE hairline ring, on the middle plane only. Ringing every
@@ -278,7 +319,7 @@ export const hueHex = (hue: number): string => {
 
 const DARK_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 const subscribeToScheme = (onChange: () => void) => {
-	if (typeof window === "undefined" || !window.matchMedia) {
+	if (globalThis.window === undefined || !window.matchMedia) {
 		return () => {
 			/* nothing to unsubscribe from on the server */
 		};
@@ -393,10 +434,13 @@ function CardRingFrame({
 			</MetalEdge>
 		);
 	}
+	const ringPaddingStyle: PassShellDrawingStyle = {
+		"--pass-ring-padding": `${METAL_EDGE_RING_PX}px`,
+	};
 	return (
 		<div
-			className="flex h-full w-full flex-col"
-			style={{ padding: `${METAL_EDGE_RING_PX}px` }}
+			className={cn("flex h-full w-full flex-col", styles.ringPadding)}
+			style={ringPaddingStyle}
 		>
 			{children}
 		</div>
@@ -442,6 +486,20 @@ function PassFace({
 }) {
 	const isDark = useIsDarkFace(metalTheme);
 	const isWarp = backdrop === "warp";
+	const faceRadiusStyle: PassShellDrawingStyle = {
+		"--pass-face-radius": `${FACE_RADIUS_PX}px`,
+	};
+	const fillRadiusStyle: PassShellDrawingStyle = {
+		"--pass-face-radius": `${FACE_RADIUS_PX}px`,
+	};
+	const backdropStyle: PassShellDrawingStyle = {
+		"--pass-face-radius": `${FACE_RADIUS_PX}px`,
+		"--pass-warp-opacity": isWarp
+			? isDark
+				? (warpOpacity?.dark ?? WARP_OPACITY_DARK)
+				: (warpOpacity?.light ?? WARP_OPACITY_LIGHT)
+			: undefined,
+	};
 	return (
 		// `h-full` on top of the shared edge's own `w-full`: the back face is
 		// absolutely positioned to the card's box, so the ring wrapper has to be as
@@ -462,8 +520,11 @@ function PassFace({
 			    corners while the card is turning. The radius is the card's own less
 			    the gutter, so the face stays concentric with the ring around it. */}
 			<div
-				className="relative isolate flex h-full w-full flex-col overflow-hidden text-card-foreground"
-				style={{ borderRadius: `${FACE_RADIUS_PX}px` }}
+				className={cn(
+					"relative isolate flex h-full w-full flex-col overflow-hidden text-card-foreground",
+					styles.face
+				)}
+				style={faceRadiusStyle}
 			>
 				{/* The card face — fill and edge both — as its own layer rather than a
 				    `border bg-card` on the element above. MetalFx normalizes its DIRECT
@@ -488,9 +549,10 @@ function PassFace({
 					aria-hidden="true"
 					className={cn(
 						"pointer-events-none absolute inset-0 bg-card",
+						styles.face,
 						ringed && "border"
 					)}
-					style={{ borderRadius: `${FACE_RADIUS_PX}px` }}
+					style={fillRadiusStyle}
 				/>
 				{/* The generative backdrop, drawn from the member's own seed so the
 			    face IS them — two people never get the same card. Which texture
@@ -510,19 +572,11 @@ function PassFace({
 					aria-hidden="true"
 					className={cn(
 						"pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden",
+						styles.backdrop,
 						isWarp ? "opacity-(--pass-warp-opacity)" : "opacity-[0.14]",
 						mirrored && "-scale-x-100"
 					)}
-					style={{
-						clipPath: `inset(0 round ${FACE_RADIUS_PX}px)`,
-						...(isWarp
-							? ({
-									"--pass-warp-opacity": isDark
-										? (warpOpacity?.dark ?? WARP_OPACITY_DARK)
-										: (warpOpacity?.light ?? WARP_OPACITY_LIGHT),
-								} as React.CSSProperties)
-							: {}),
-					}}
+					style={backdropStyle}
 				>
 					{isWarp ? (
 						<WarpBackdrop
@@ -543,11 +597,10 @@ function PassFace({
 				    most of the laminated signal, so this only has to hint at it. */}
 				<div
 					aria-hidden="true"
-					className="pointer-events-none absolute inset-0 opacity-[0.16] mix-blend-soft-light"
-					style={{
-						background:
-							"linear-gradient(115deg, transparent 24%, color-mix(in oklab, var(--primary) 32%, transparent) 44%, transparent 58%, color-mix(in oklab, var(--primary) 18%, transparent) 74%, transparent 88%)",
-					}}
+					className={cn(
+						"pointer-events-none absolute inset-0 opacity-[0.16] mix-blend-soft-light",
+						styles.laminate
+					)}
 				/>
 				{children}
 			</div>
@@ -731,6 +784,21 @@ export function PassCardShell({
 	// the pointer is on the card, and resumes from exactly where it stopped, which
 	// is also what lets a drag write into the same value.
 	const spin = useMotionValue(0);
+	const previousStill = useRef(still);
+	useEffect(() => {
+		const becameStill = still && !previousStill.current;
+		previousStill.current = still;
+		if (!becameStill) {
+			return;
+		}
+		const frontAngle =
+			Math.round(spin.get() / FULL_TURN_DEGREES) * FULL_TURN_DEGREES;
+		const alignment = animate(spin, frontAngle, {
+			duration: reduceMotion ? 0 : TRANSITION_SECONDS,
+			ease: "easeOut",
+		});
+		return () => alignment.stop();
+	}, [reduceMotion, spin, still]);
 	/** Pitch contributed by dragging up/down; eases back to level on release. */
 	const dragPitch = useMotionValue(0);
 	// One slow, unbroken revolution, so the back of the pass comes into view once
@@ -839,6 +907,29 @@ export function PassCardShell({
 		ease: "easeOut" as const,
 	};
 
+	const frontDepthStyle: PassShellDrawingStyle = {
+		"--pass-face-depth": `${CARD_HALF_THICKNESS_PX}px`,
+	};
+	const backDepthStyle: PassShellDrawingStyle = {
+		"--pass-face-depth": `${CARD_HALF_THICKNESS_PX}px`,
+	};
+	const cardInteractionStyle: CardInteractionStyle = {
+		"--pass-card-shell-1-perspective": drawingLength(`${PERSPECTIVE_PX}px`),
+		"--pass-card-shell-1-touch-action": still ? "auto" : "none",
+	};
+	const cardSpinStyle: CardSpinStyle = {
+		"--pass-card-shell-2-rotate-x": dragPitch,
+		"--pass-card-shell-2-rotate-y": spin,
+	};
+	const cardTiltStyle: CardTiltStyle | undefined = reduceMotion
+		? undefined
+		: {
+				"--pass-card-shell-3-rotate-x": smoothTiltX,
+				"--pass-card-shell-3-rotate-y": smoothTiltY,
+			};
+	const cardGlareStyle: CardGlareStyle = {
+		"--pass-card-shell-4-background": glareBackground,
+	};
 	return (
 		// Three layers, each owning exactly one transform, because they change on
 		// different clocks: this one scales on hover, the next turns forever, the
@@ -850,12 +941,15 @@ export function PassCardShell({
 				y: reduceMotion || still || !settled ? 0 : [0, -FLOAT_TRAVEL_PX, 0],
 			}}
 			className={cn(
-				"w-full select-none [transform-style:preserve-3d]",
-				// The grab cursors are a promise the card can only keep while it turns;
-				// a still card advertises nothing and lets its caller say what a click
-				// does.
-				!still && "cursor-grab active:cursor-grabbing",
-				className
+				cn(
+					"w-full select-none [transform-style:preserve-3d]",
+					// The grab cursors are a promise the card can only keep while it turns;
+					// a still card advertises nothing and lets its caller say what a click
+					// does.
+					!still && "cursor-grab active:cursor-grabbing",
+					className
+				),
+				drawingStyles.cardInteraction
 			)}
 			// Native text/image dragging would otherwise hijack the gesture: the
 			// browser starts its own drag on mousedown-and-move over text, which
@@ -874,10 +968,7 @@ export function PassCardShell({
 			// pointermove handler ever sees it. A still card has no drag to protect,
 			// and claiming the gesture there would stop a grid from scrolling under
 			// the finger.
-			style={{
-				perspective: `${PERSPECTIVE_PX}px`,
-				touchAction: still ? "auto" : "none",
-			}}
+			style={cardInteractionStyle}
 			transition={{
 				scale: settleTransition,
 				y: {
@@ -892,8 +983,8 @@ export function PassCardShell({
 			    Reading straight off the motion value means hover or a drag interrupts
 			    it mid-angle and resuming picks up from there. */}
 			<motion.div
-				className="[transform-style:preserve-3d]"
-				style={{ rotateX: dragPitch, rotateY: spin }}
+				className={cn("[transform-style:preserve-3d]", drawingStyles.cardSpin)}
+				style={cardSpinStyle}
 			>
 				{/* Pointer tilt and the drop shadow, exactly as the reference pairs
 				    them. `preserve-3d` is what makes the two faces occupy real depth —
@@ -904,12 +995,11 @@ export function PassCardShell({
 					animate={{
 						boxShadow: hovered && !reduceMotion ? SHADOW_HOVER : SHADOW_RESTING,
 					}}
-					className="relative rounded-[1.75rem] [transform-style:preserve-3d]"
-					style={
-						reduceMotion
-							? undefined
-							: { rotateX: smoothTiltX, rotateY: smoothTiltY }
-					}
+					className={cn(
+						"relative rounded-[1.75rem] [transform-style:preserve-3d]",
+						drawingStyles.cardTilt
+					)}
+					style={cardTiltStyle}
 					transition={settleTransition}
 				>
 					{/* The thickness, drawn before the faces so a face always wins
@@ -921,8 +1011,8 @@ export function PassCardShell({
 				    that is not absolutely positioned — hence the transform goes on a
 				    wrapper rather than onto the extrusion's own transform. */}
 					<div
-						className="[backface-visibility:hidden]"
-						style={{ transform: `translateZ(${CARD_HALF_THICKNESS_PX}px)` }}
+						className={cn("[backface-visibility:hidden]", styles.front)}
+						style={frontDepthStyle}
 					>
 						<PassFace
 							backdrop={backdrop}
@@ -941,8 +1031,11 @@ export function PassCardShell({
 								<motion.div
 									animate={{ opacity: hovered && !reduceMotion ? 1 : 0 }}
 									aria-hidden="true"
-									className="pointer-events-none absolute inset-0"
-									style={{ background: glareBackground }}
+									className={cn(
+										"pointer-events-none absolute inset-0",
+										drawingStyles.cardGlare
+									)}
+									style={cardGlareStyle}
 									transition={{ duration: 0.25 }}
 								/>
 							) : null}
@@ -954,10 +1047,11 @@ export function PassCardShell({
 				    from assistive tech: it carries no information the front does not. */}
 					<div
 						aria-hidden="true"
-						className="absolute inset-0 [backface-visibility:hidden]"
-						style={{
-							transform: `rotateY(180deg) translateZ(${CARD_HALF_THICKNESS_PX}px)`,
-						}}
+						className={cn(
+							"absolute inset-0 [backface-visibility:hidden]",
+							styles.back
+						)}
+						style={backDepthStyle}
 					>
 						<PassFace
 							backdrop={backdrop}

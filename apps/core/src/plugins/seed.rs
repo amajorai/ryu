@@ -79,14 +79,15 @@ pub struct SeedSpec {
 /// pre-installed set: the explicit install path derives opt-in companion bundles from
 /// this same table. Adding a 16th companion to a second list is what caused the
 /// original carriage bug; there is no second list.
-fn seed_overrides() -> [SeedSpec; 40] {
+fn seed_overrides() -> [SeedSpec; 45] {
     use crate::plugin_manifest::{
-        ACTIVITY_UI_HTML, APPROVALS_UI_HTML, AUTOPILOT_UI_HTML, BLUEPRINT_UI_HTML,
-        CALENDAR_UI_HTML, CANVAS_PLUGIN_ID, CANVAS_UI_HTML, CHAT_BROADCAST_UI_HTML, CLIPS_UI_HTML,
-        CONVERT_PLUGIN_ID, CONVERT_UI_HTML, DRAWSOME_PLUGIN_ID, DRAWSOME_UI_HTML, EXPENSES_UI_HTML,
-        FINETUNE_PLUGIN_ID, FINETUNE_UI_HTML, HELP_CENTER_UI_HTML, INVOICES_UI_HTML,
-        LEARNING_UI_HTML, MAIL_UI_HTML, MEETINGS_UI_HTML, MONITORS_UI_HTML, NEWS_UI_HTML,
-        OUTREACH_UI_HTML, PEOPLE_UI_HTML, PROJECTS_UI_HTML, PULL_REQUESTS_UI_HTML, QUESTS_UI_HTML,
+        ACTIVITY_UI_HTML, APPROVALS_UI_HTML, APP_STUDIO_UI_HTML, AUTOPILOT_UI_HTML,
+        BLUEPRINT_UI_HTML, BOT_FLOWS_UI_HTML, CALENDAR_UI_HTML, CANVAS_PLUGIN_ID, CANVAS_UI_HTML,
+        CHAT_BROADCAST_UI_HTML, CLIPS_UI_HTML, CONVERT_PLUGIN_ID, CONVERT_UI_HTML,
+        DRAWSOME_PLUGIN_ID, DRAWSOME_UI_HTML, EXPENSES_UI_HTML, FAMILY_UI_HTML, FINETUNE_PLUGIN_ID,
+        FINETUNE_UI_HTML, FORMS_UI_HTML, HELP_CENTER_UI_HTML, INVOICES_UI_HTML, LEARNING_UI_HTML,
+        MAIL_UI_HTML, MEETINGS_UI_HTML, MONITORS_UI_HTML, NEWS_UI_HTML, OUTREACH_UI_HTML,
+        PEOPLE_UI_HTML, PROJECTS_UI_HTML, PULL_REQUESTS_UI_HTML, QUESTS_UI_HTML,
         REASONING_PLUGIN_ID, REASONING_UI_HTML, RLM_UI_HTML, SECURITY_UI_HTML, SITES_UI_HTML,
         SKILL_EDITOR_UI_HTML, SLIDES_PLUGIN_ID, SLIDES_UI_HTML, SOCIAL_UI_HTML, SUBTITLES_UI_HTML,
         TIMELINE_UI_HTML, TUITION_UI_HTML, WARMUP_UI_HTML, WEBHOOKS_UI_HTML, WHITEBOARD_PLUGIN_ID,
@@ -130,28 +131,51 @@ fn seed_overrides() -> [SeedSpec; 40] {
         },
         SeedSpec {
             id: CONVERT_PLUGIN_ID,
-            // Convert only persists bounded conversion metadata through the
-            // generic app-scoped KV bridge and emits optional host toasts. File
+            // Convert persists bounded metadata, emits optional host toasts, and
+            // downloads converted results only after the user requests them. File
             // bytes are read and transformed inside the Companion document.
-            grants: &["storage:kv", "ui:toast"],
+            grants: &["storage:kv", "ui:toast", "files:download"],
             ui_code: Some(CONVERT_UI_HTML),
         },
         SeedSpec {
             id: SLIDES_PLUGIN_ID,
             // The editor persists its own gallery and uses the generic Ryu model,
-            // media, and upload bridges. It is opt-in, so this row supplies the
-            // verified bundle and grants when the user explicitly installs it.
-            grants: &["storage:kv", "media:generate", "hook:side-model"],
+            // media, upload, and user-requested file-download bridges. It is opt-in,
+            // so this row supplies the verified bundle and grants when the user
+            // explicitly installs it.
+            grants: &[
+                "storage:kv",
+                "media:generate",
+                "hook:side-model",
+                "files:download",
+            ],
             ui_code: Some(SLIDES_UI_HTML),
         },
         SeedSpec {
+            id: "@ryu/app-studio",
+            // Its frame keeps drafts in its own app storage, edits through the
+            // governed side-model bridge, and installs the companion-only apps it
+            // builds via the host-validated `apps.installBundle` bridge
+            // (`plugins:install`). Opt-in: this row supplies the verified bundle and
+            // grants when the user explicitly installs it.
+            grants: &[
+                "storage:kv",
+                "hook:side-model",
+                "ui:toast",
+                "plugins:install",
+            ],
+            ui_code: Some(APP_STUDIO_UI_HTML),
+        },
+        SeedSpec {
             id: FINETUNE_PLUGIN_ID,
-            // Core's fine-tune orchestration. Its Unsloth training sidecar spawns on the
+            // The companion drives its own `ryu-finetune` sidecar through the generic
+            // ext-proxy (`app:http`) and keeps `finetune:runs` for the live progress
+            // stream. Its Unsloth training sidecar spawns on the
             // Core-tier auto-run path (`may_run_sidecar` is unconditional for Core), so it
             // must NOT declare `sidecar:process` — the Gateway validates + denies that
             // grant at enable (same fix as mail, commit 9faf67be). Grants mirror the
             // manifest's `permission_grants` exactly.
-            grants: &["finetune:runs"],
+            grants: &["app:http", "finetune:runs"],
             ui_code: Some(FINETUNE_UI_HTML),
         },
         SeedSpec {
@@ -234,7 +258,14 @@ fn seed_overrides() -> [SeedSpec; 40] {
             // backend reaches Core's `McpRegistry` through the `mcp.callTool` kernel
             // capability, which is gated on the declared∩approved intersection — so a
             // seeded record missing this grant would 403 every crawl.
-            grants: &["monitors:crud", "tools.invoke", "ui:declarative-http"],
+            // `subscriptions:read` feeds the provider-reset form's provider and
+            // account pickers (owner/admin only, enforced again in Core).
+            grants: &[
+                "monitors:crud",
+                "subscriptions:read",
+                "tools.invoke",
+                "ui:declarative-http",
+            ],
             ui_code: Some(MONITORS_UI_HTML),
         },
         SeedSpec {
@@ -253,6 +284,9 @@ fn seed_overrides() -> [SeedSpec; 40] {
                 "ghost:record",
                 "core:list_agents",
                 "app:realtime",
+                // The recipe picker reads the Recipes app's list route through the
+                // cross-app `app.request` bridge (reviewed per-target grant).
+                "app:http:@ryu/recipes",
                 "ui:toast",
                 "ui:declarative-http",
             ],
@@ -326,11 +360,39 @@ fn seed_overrides() -> [SeedSpec; 40] {
                 "app:http",
                 "hook:side-model",
                 "hook:run-agent",
+                "hook:run-agent:write",
                 "spaces:docs",
+                "spaces:database",
                 "identity:read",
                 "security:check",
+                "tools.invoke",
+                "plugins:install",
+                // The same sidecar binary exposes `sites.*` MCP tools to agents
+                // (`ryu-sites mcp`), which call the running Sites service with the
+                // same owner/editor checks as the companion.
+                "mcp:sites",
+                // The sidecar seals uploads, records and Site state under the
+                // Sites subkey.
+                "crypto:seal",
             ],
             ui_code: Some(SITES_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::FORMS_PLUGIN_ID,
+            // `crypto:seal`: the sidecar seals respondent answers under the
+            // Forms subkey.
+            grants: &["app:http", "crypto:seal"],
+            ui_code: Some(FORMS_UI_HTML),
+        },
+        SeedSpec {
+            id: "@ryu/bot-flows",
+            // The companion is the flow builder over the satellite sidecar that
+            // also serves the public chat pages. It uses the generic own-app HTTP
+            // bridge, the shared side-model lane for "Generate flow from
+            // description", and hands page context to the global assistant.
+            // Core does not carry bot routes.
+            grants: &["app:http", "hook:side-model", "assistant:context"],
+            ui_code: Some(BOT_FLOWS_UI_HTML),
         },
         SeedSpec {
             id: CHAT_BROADCAST_PLUGIN_ID,
@@ -356,6 +418,25 @@ fn seed_overrides() -> [SeedSpec; 40] {
             // enable).
             grants: &["learning:crud"],
             ui_code: Some(LEARNING_UI_HTML),
+        },
+        SeedSpec {
+            id: crate::plugins::builtins::BROWSER_PLUGIN_ID,
+            // A grants-only spec (no companion UI). The browser sidecar fills an
+            // agent's own website login into a page through the
+            // `vault.credentialFill` / `vault.totpEnroll` kernel capabilities, which
+            // the capability broker authorises against the stored
+            // `approved_grants` (`vault:fill`). Without this row a pre-installed
+            // browser is enabled with no grants and every fill 403s;
+            // `backfill_declared_grants` carries it onto records that predate the
+            // row. The set mirrors the manifest exactly; `vault:fill` is approved
+            // only for this app (a Gateway owner-exclusive grant), the other two
+            // are on the reviewed allowlist.
+            grants: &[
+                "browser:control",
+                "tool:http-egress:127.0.0.1",
+                "vault:fill",
+            ],
+            ui_code: None,
         },
         SeedSpec {
             id: "@ryu/chat-title",
@@ -488,6 +569,14 @@ fn seed_overrides() -> [SeedSpec; 40] {
             ui_code: Some(EXPENSES_UI_HTML),
         },
         SeedSpec {
+            id: "@ryu/family",
+            // The companion is the family hub over the same sidecar that exposes
+            // `family.*` MCP tools to the planner agent. It uses only the generic
+            // own-app HTTP bridge; Core does not carry family routes.
+            grants: &["app:http", "mcp:family"],
+            ui_code: Some(FAMILY_UI_HTML),
+        },
+        SeedSpec {
             id: crate::plugins::builtins::OUTREACH_PLUGIN_ID,
             // Outreach is a pure Companion composition layer. It uses the host's
             // durable app storage, shared model lane, existing Mail transport,
@@ -510,6 +599,7 @@ fn seed_overrides() -> [SeedSpec; 40] {
             // durable brief/cycle ledger and reads the secret-free catalog.
             grants: &[
                 "hook:run-agent",
+                "hook:run-agent:write",
                 "storage:kv",
                 "core:list_agents",
                 "shell:integrate",
@@ -523,6 +613,9 @@ fn seed_overrides() -> [SeedSpec; 40] {
                 "app:http",
                 "tool:http-egress:127.0.0.1",
                 "chat.sendFollowUp",
+                "chat:project-guidance",
+                // The sidecar seals its records under the Projects subkey.
+                "crypto:seal",
                 "shell:integrate",
                 "spaces:docs",
                 "storage:kv",
@@ -556,11 +649,14 @@ fn seed_overrides() -> [SeedSpec; 40] {
             // `hook:run-agent` is the turn hook's only route to the solver (the plugin
             // sandbox has no HTTP), and `mcp:reasoning` registers the app's own MCP
             // server so `reasoning.solve` exists for agents and workflow `mcp` nodes.
+            // `tool:execute` runs the sandboxed adapters that map the `verify.*`
+            // Toolkit verbs onto `reasoning.check` / `reasoning.policies`.
             grants: &[
                 "reasoning:check",
                 "hook:side-model",
                 "hook:run-agent",
                 "mcp:reasoning",
+                "tool:execute",
                 "ui:declarative-http",
             ],
             ui_code: Some(REASONING_UI_HTML),
@@ -568,9 +664,9 @@ fn seed_overrides() -> [SeedSpec; 40] {
         SeedSpec {
             id: crate::plugins::builtins::CLIPS_PLUGIN_ID,
             // Clips is opt-in because its sidecar can capture the user's screen. The
-            // generic app:http bridge is the only host capability the Companion needs;
-            // capture/ingest authorization remains in the app's permission levels.
-            grants: &["app:http"],
+            // Companion uses the generic app:http bridge and downloads an export only
+            // after the user requests it; capture/ingest stays permission-level gated.
+            grants: &["app:http", "files:download"],
             ui_code: Some(CLIPS_UI_HTML),
         },
         SeedSpec {
@@ -610,7 +706,9 @@ fn seed_overrides() -> [SeedSpec; 40] {
             // declare `sidecar:process` (the Gateway denies that grant at enable); the
             // sidecar is spawned by the manifest loader, not by a grant.
             //
-            // Only two grants, and the short list is the point. `mcp:blueprint`
+            // Only the grants the companion uses, and the short list is the point.
+            // `files:download` backs the explicit artifact export affordance.
+            // `mcp:blueprint`
             // registers the app's own MCP server so `blueprint.plan_publish` /
             // `plan_status` / `plan_get` / `step_update` exist for agents and workflow
             // `mcp` nodes — the ONLY way a plan ever gets published, since the app
@@ -625,15 +723,22 @@ fn seed_overrides() -> [SeedSpec; 40] {
             // it up and the opt-in pass writes only `ui_code`, leaving `enable_app` to
             // persist the Gateway-approved set. Recorded anyway, and set-equal to the
             // manifest's `permission_grants`, so a promotion is correct by construction.
-            grants: &["blueprint:review", "mcp:blueprint", "ui:declarative-http"],
+            grants: &[
+                "blueprint:review",
+                "mcp:blueprint",
+                "ui:declarative-http",
+                "files:download",
+            ],
             ui_code: Some(BLUEPRINT_UI_HTML),
         },
         SeedSpec {
             id: "@ryu/pull-requests",
             // Opt-in. `app:http` unlocks only the generic own-sidecar forwarder;
-            // `shell:integrate` supplies live theme updates. The enable path persists
-            // the Gateway-approved set, while this row carries the compiled UI.
-            grants: &["app:http", "shell:integrate"],
+            // `shell:integrate` supplies live theme updates; `assistant:context`
+            // hands the selected pull request to the global Ask Ryu assistant. The
+            // enable path persists the Gateway-approved set, while this row carries
+            // the compiled UI.
+            grants: &["app:http", "shell:integrate", "assistant:context"],
             ui_code: Some(PULL_REQUESTS_UI_HTML),
         },
         SeedSpec {
@@ -2312,14 +2417,20 @@ mod tests {
     /// unconditionally — a fresh install losing them would be a pure regression,
     /// with a missing tool as its only symptom. `pi-monitor` is net-new but
     /// pre-installed by design (a first-class capability the flagship should have),
-    /// so the same guard pins it too.
+    /// so the same guard pins it too, as it does `pi-copy` (the default
+    /// `copy_paste` file tool).
     ///
     /// The pre-installed axis is enough here: the id is in `CORE_PREINSTALLED` (so
     /// `preinstalled_specs` yields a spec, which the seed loop inserts + enables).
     #[test]
     fn the_pi_extension_plugins_are_seeded_enabled_on_a_fresh_install() {
         let specs = preinstalled_specs();
-        for id in ["@ryu/pi-shell", "@ryu/pi-subagent", "@ryu/pi-monitor"] {
+        for id in [
+            "@ryu/pi-shell",
+            "@ryu/pi-subagent",
+            "@ryu/pi-monitor",
+            "@ryu/pi-copy",
+        ] {
             assert!(
                 specs.iter().any(|s| s.id == id),
                 "'{id}' has no pre-installed seed spec, so a fresh install would never create \
@@ -2359,11 +2470,13 @@ mod tests {
         assert_eq!(
             with_ui,
             vec![
+                crate::plugins::builtins::PROJECTS_PLUGIN_ID,
                 crate::plugins::builtins::LEARNING_PLUGIN_ID,
                 crate::plugins::builtins::WEBHOOKS_PLUGIN_ID,
                 crate::plugins::builtins::CALENDAR_PLUGIN_ID,
                 crate::plugins::builtins::HELP_CENTER_PLUGIN_ID,
                 crate::plugins::builtins::SITES_PLUGIN_ID,
+                crate::plugins::builtins::FORMS_PLUGIN_ID,
                 crate::plugins::builtins::CHAT_BROADCAST_PLUGIN_ID,
             ],
             "only the companions that STAY pre-installed ship their prebuilt UI bundle via \
@@ -2372,7 +2485,7 @@ mod tests {
              activity/timeline/skill-editor, plus mail) are opt-in (not pre-installed), so they \
              leave the pre-installed seed — their SeedSpec `ui_code` is carried by \
              explicit install instead, onto the record created by the user, which is what makes \
-             enabling one from the Store mount a real UI. `learning` is back in the set: \
+             enabling one from the Store mount a real UI. `projects` is pre-installed as the top of the Projects › Bots › Sessions hierarchy, and `learning` is back in the set: \
              it owns the consent switches for a capture path the kernel runs regardless \
              of the record (see CORE_PREINSTALLED)"
         );

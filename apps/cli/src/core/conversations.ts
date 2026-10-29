@@ -1,13 +1,42 @@
-import { type ApiTarget, apiUrl, makeHeaders } from "@ryuhq/core-client/client";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+	request,
+} from "@ryuhq/core-client/client";
+import { z } from "zod";
+import {
+	type ConversationWire,
+	conversationDate,
+	conversationListResponseSchema,
+} from "./conversation-response.ts";
 
-interface ForkConversationResponse {
-	conversation?: { id?: unknown };
-}
+const conversationPartsSchema = z.json().optional();
+type ConversationParts = z.infer<typeof conversationPartsSchema>;
+const forkConversationSchema = z.object({
+	conversation: z.object({ id: z.string().min(1) }),
+});
+const resumedMessageSchema = z.object({
+	id: z.string(),
+	content: z.string(),
+	role: z.string(),
+	parts: conversationPartsSchema,
+});
+const resumedConversationSchema = z.object({
+	id: z.string(),
+	messages: z.array(resumedMessageSchema),
+	title: z.string().nullable().catch(null),
+});
+const conversationTitleSchema = z.object({ title: z.string().min(1) });
+const deletedConversationSchema = z.object({
+	removed: z.boolean().catch(false),
+});
 
 export interface ResumedConversationMessage {
 	content: string;
 	id: string;
-	parts?: unknown;
+	parts?: ConversationParts;
 	role: string;
 }
 
@@ -17,10 +46,46 @@ export interface ResumedConversation {
 	title: string | null;
 }
 
-interface ConversationDetailResponse {
-	id?: unknown;
-	messages?: unknown;
-	title?: unknown;
+const conversationCountSchema = z.number().nullable().catch(null);
+
+/** One row of Core's conversation list, normalised for display. */
+export interface ConversationRow {
+	date: string | null;
+	id: string;
+	messageCount: number | null;
+	title: string;
+}
+
+function toConversationRow(wire: ConversationWire): ConversationRow {
+	const trimmed = wire.title?.trim();
+	const date = conversationDate(wire.updated_at);
+	return {
+		id: wire.id,
+		title: trimmed && trimmed.length > 0 ? trimmed : "untitled",
+		messageCount: conversationCountSchema.parse(wire.message_count),
+		date: date && date.length > 0 ? date : null,
+	};
+}
+
+/**
+ * List Core's conversations in the order Core returns them (most recent
+ * first), optionally capped at `limit`. The response is `{ conversations }` or
+ * a bare array; `{}` reads as an empty list. No typed core-client module
+ * exposes the bare list, so this reads it through the shared HTTP primitive.
+ */
+export async function listRecentConversations(
+	target: ApiTarget,
+	limit?: number
+): Promise<ConversationRow[]> {
+	const json = await request(
+		target,
+		"/api/conversations",
+		{},
+		conversationListResponseSchema
+	);
+	const rows = Array.isArray(json) ? json : (json.conversations ?? []);
+	const capped = limit === undefined ? rows : rows.slice(0, limit);
+	return capped.map(toConversationRow);
 }
 
 function conversationPath(conversationId: string): string {
@@ -32,45 +97,28 @@ export async function resumeConversation(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<ResumedConversation> {
-	const response = await fetch(
+	const response = await fetchForTarget(target)(
 		apiUrl(target, conversationPath(conversationId)),
 		{
-			headers: makeHeaders(target.token),
+			headers: makeHeaders(target.token, target.userJwt),
 		}
 	);
 	if (!response.ok) {
 		throw new Error(`Resume conversation failed: ${response.status}`);
 	}
-	const body = (await response.json()) as ConversationDetailResponse;
-	if (
-		typeof body.id !== "string" ||
-		!Array.isArray(body.messages) ||
-		!body.messages.every((message) => {
-			if (message === null || typeof message !== "object") {
-				return false;
-			}
-			const item = message as Record<string, unknown>;
-			return (
-				typeof item.id === "string" &&
-				typeof item.role === "string" &&
-				typeof item.content === "string"
-			);
-		})
-	) {
+	const parsed = resumedConversationSchema.safeParse(await response.json());
+	if (!parsed.success) {
 		throw new Error("Resume conversation returned an invalid conversation");
 	}
 	return {
-		id: body.id,
-		title: typeof body.title === "string" ? body.title : null,
-		messages: body.messages.map((message) => {
-			const item = message as Record<string, unknown>;
-			return {
-				id: item.id as string,
-				role: item.role as string,
-				content: item.content as string,
-				parts: item.parts,
-			};
-		}),
+		id: parsed.data.id,
+		title: parsed.data.title,
+		messages: parsed.data.messages.map((message) => ({
+			id: message.id,
+			role: message.role,
+			content: message.content,
+			parts: message.parts,
+		})),
 	};
 }
 
@@ -84,25 +132,22 @@ export async function renameConversation(
 	if (normalizedTitle.length === 0) {
 		throw new Error("Conversation title must not be empty");
 	}
-	const response = await fetch(
+	const response = await fetchForTarget(target)(
 		apiUrl(target, `${conversationPath(conversationId)}/title`),
 		{
 			method: "POST",
-			headers: {
-				...makeHeaders(target.token),
-				"Content-Type": "application/json",
-			},
+			headers: makeHeaders(target.token, target.userJwt),
 			body: JSON.stringify({ title: normalizedTitle }),
 		}
 	);
 	if (!response.ok) {
 		throw new Error(`Rename conversation failed: ${response.status}`);
 	}
-	const body = (await response.json()) as { title?: unknown };
-	if (typeof body.title !== "string" || body.title.length === 0) {
+	const parsed = conversationTitleSchema.safeParse(await response.json());
+	if (!parsed.success) {
 		throw new Error("Rename conversation returned no title");
 	}
-	return body.title;
+	return parsed.data.title;
 }
 
 /** Permanently delete a conversation through Core. */
@@ -110,18 +155,18 @@ export async function deleteConversation(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<boolean> {
-	const response = await fetch(
+	const response = await fetchForTarget(target)(
 		apiUrl(target, conversationPath(conversationId)),
 		{
 			method: "DELETE",
-			headers: makeHeaders(target.token),
+			headers: makeHeaders(target.token, target.userJwt),
 		}
 	);
 	if (!response.ok) {
 		throw new Error(`Delete conversation failed: ${response.status}`);
 	}
-	const body = (await response.json()) as { removed?: unknown };
-	return body.removed === true;
+	const parsed = deletedConversationSchema.safeParse(await response.json());
+	return parsed.success && parsed.data.removed;
 }
 
 /** Set the server-backed pinned state for a conversation. */
@@ -130,17 +175,14 @@ export async function setConversationPinned(
 	conversationId: string,
 	pinned: boolean
 ): Promise<void> {
-	const response = await fetch(
+	const response = await fetchForTarget(target)(
 		apiUrl(
 			target,
 			`/api/conversations/${encodeURIComponent(conversationId)}/pinned`
 		),
 		{
 			method: "POST",
-			headers: {
-				...makeHeaders(target.token),
-				"Content-Type": "application/json",
-			},
+			headers: makeHeaders(target.token, target.userJwt),
 			body: JSON.stringify({ value: pinned }),
 		}
 	);
@@ -160,14 +202,14 @@ export async function forkConversation(
 	conversationId: string,
 	messageId?: string
 ): Promise<string> {
-	const response = await fetch(
+	const response = await fetchForTarget(target)(
 		apiUrl(
 			target,
 			`/api/conversations/${encodeURIComponent(conversationId)}/fork`
 		),
 		{
 			method: "POST",
-			headers: makeHeaders(target.token),
+			headers: makeHeaders(target.token, target.userJwt),
 			body:
 				messageId === undefined
 					? undefined
@@ -177,10 +219,9 @@ export async function forkConversation(
 	if (!response.ok) {
 		throw new Error(`Fork conversation failed: ${response.status}`);
 	}
-	const body = (await response.json()) as ForkConversationResponse;
-	const forkedId = body.conversation?.id;
-	if (typeof forkedId !== "string" || forkedId.length === 0) {
+	const parsed = forkConversationSchema.safeParse(await response.json());
+	if (!parsed.success) {
 		throw new Error("Fork conversation returned no conversation id");
 	}
-	return forkedId;
+	return parsed.data.conversation.id;
 }

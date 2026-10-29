@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/events.ts
 //
 // Client for Core's app-events feed: built-in agent actions (e.g.
@@ -25,5 +26,15 @@ export function streamDesktopNotifications(
 	onNotification: (n: DesktopNotification) => void,
 	signal?: AbortSignal
 ): Promise<void> {
-	return streamChannel(target, "notifications", onNotification, signal);
+	return streamChannel(
+		target,
+		"notifications",
+		onNotification,
+		signal,
+		z.object({
+			body: z.string().nullish(),
+			level: z.string().optional(),
+			title: z.string(),
+		})
+	);
 }

@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // Browser harness for the PATH-B companion certificate
 // (`e2e/companion-host.spec.ts`). Path A (an ESM bundle eval'd through
 // `thirdPartyPluginSrcdoc`) already has a certificate — `plugin-runtime.spec.ts`
@@ -15,7 +16,11 @@
 // bytes — the same bundle Core serves — because the pre-existing unit test wraps
 // `"<p>hi</p>"`, which is exactly why a real-bundle failure passed everything.
 
-import { ExtensionHost } from "@ryu/app-host/ExtensionHost";
+import {
+	COMPANION_THEME_MUTATION_ATTRIBUTES,
+	readCompanionThemeTokens,
+} from "@ryu/app-host/companion-theme";
+import { APP_DOWNLOAD_GRANT, ExtensionHost } from "@ryu/app-host/ExtensionHost";
 import {
 	type Capability,
 	capabilitiesFromGrants,
@@ -24,7 +29,7 @@ import {
 } from "@ryu/app-host/rpc";
 import { htmlCompanionSrcdoc } from "@ryu/app-host/third-party-plugin";
 import { Toaster, toast } from "@ryu/ui/components/sileo.tsx";
-import { createElement } from "react";
+import { type ComponentProps, createElement, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
 	createScopedToastHost,
@@ -63,8 +68,8 @@ let toastHost = createScopedToastHost({
 // arrives and is rejected (nonce mismatch) is a completely different bug from a
 // `ready` that never arrives (the frame's bridge script never ran).
 window.addEventListener("message", (event: MessageEvent) => {
-	const kind = (event.data as { kind?: unknown } | null)?.kind;
-	if (typeof kind === "string") {
+	const kind: unknown = event.data?.kind;
+	if (isNativeText(kind)) {
 		announced.push(kind);
 	}
 });
@@ -77,10 +82,7 @@ function mount(options: MountOptions): void {
 	});
 	announced.length = 0;
 	connected = false;
-	const nonce =
-		typeof crypto?.randomUUID === "function"
-			? crypto.randomUUID()
-			: `nonce-${Date.now()}`;
+	const nonce = crypto.randomUUID();
 	const granted: ReadonlySet<Capability> = capabilitiesFromGrants(
 		options.grants
 	);
@@ -101,7 +103,14 @@ function mount(options: MountOptions): void {
 					),
 	};
 
-	lastSrcdoc = htmlCompanionSrcdoc(nonce, options.appHtml, options.pluginId);
+	lastSrcdoc = htmlCompanionSrcdoc(
+		nonce,
+		options.appHtml,
+		options.pluginId,
+		undefined,
+		undefined,
+		readCompanionThemeTokens()
+	);
 
 	const container = document.getElementById("host-root");
 	if (!container) {
@@ -115,10 +124,11 @@ function mount(options: MountOptions): void {
 		createElement(
 			"div",
 			{ style: { minHeight: 360, padding: 24 } },
-			createElement(ExtensionHost, {
+			createElement(ThemeAwareExtensionHost, {
 				srcdoc: lastSrcdoc,
 				nonce,
 				granted,
+				allowDownloads: options.grants.includes(APP_DOWNLOAD_GRANT),
 				services,
 				onConnected: () => {
 					connected = true;
@@ -130,12 +140,29 @@ function mount(options: MountOptions): void {
 	);
 }
 
+function ThemeAwareExtensionHost(props: ComponentProps<typeof ExtensionHost>) {
+	const [themeTokens, setThemeTokens] = useState(readCompanionThemeTokens);
+	useEffect(() => {
+		const observer = new MutationObserver(() =>
+			setThemeTokens(readCompanionThemeTokens())
+		);
+		observer.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: [...COMPANION_THEME_MUTATION_ATTRIBUTES],
+		});
+		return () => observer.disconnect();
+	}, []);
+	return createElement(ExtensionHost, { ...props, themeTokens });
+}
+
 const api: CompanionApi = {
 	announced,
 	connected: () => connected,
 	mount,
 	srcdoc: () => lastSrcdoc,
 };
-(window as unknown as { __ryuCompanion: CompanionApi }).__ryuCompanion = api;
+/* SAFETY: This assignment publishes the complete locally checked CompanionApi value on the native browser Window under __ryuCompanion. The view owns only that publication slot; it makes no claim about plugin messages or native SDK members. */ (
+	window as typeof window & { __ryuCompanion: CompanionApi }
+).__ryuCompanion = api;
 
 document.body.setAttribute("data-harness-ready", "1");

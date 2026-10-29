@@ -24,8 +24,8 @@ import {
 	Time04Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -33,18 +33,26 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
+} from "@ryu/ui/components/empty.tsx";
 import {
 	RunStatusTimeline,
 	RunStatusTimelineLegend,
-} from "@ryu/ui/components/run-status-timeline";
-import { ScrollArea } from "@ryu/ui/components/scroll-area";
-import { cn } from "@ryu/ui/lib/utils";
-import { format, formatDistanceToNow } from "date-fns";
+} from "@ryu/ui/components/run-status-timeline.tsx";
+import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { useDisplayDayRevision } from "@ryu/ui/lib/display-day.ts";
+import {
+	formatDate,
+	formatDateTime,
+	formatTime,
+	startOfDisplayDayMs,
+} from "@ryu/ui/lib/timezone.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import { formatDistanceToNow } from "date-fns";
 import { useCallback, useMemo } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
-import { type RunSummary, useRuns } from "@/src/hooks/useRuns.ts";
+import { useRuns } from "@/src/hooks/useRuns.ts";
 import { useSchedules } from "@/src/hooks/useSchedules.ts";
 import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
 import {
@@ -67,6 +75,8 @@ interface HistoryEntry {
 	id: string;
 	/** Message count when known (only automated runs carry it in the stream). */
 	messageCount?: number;
+	/** Latest assistant message preview, when Core returned one for the chat list. */
+	preview?: string;
 	/** Lifecycle status from Core, including awaiting_input and interrupted. */
 	runStatus?: string;
 	title: string;
@@ -134,6 +144,8 @@ function relativeTime(ms: number): string {
 interface AgentRunHistoryViewProps {
 	/** Agent whose runs are shown. `null` in create-mode (never rendered then). */
 	agentId: string | null;
+	/** Compact day-grouped feed for an agent profile side panel. */
+	compact?: boolean;
 }
 
 /**
@@ -162,10 +174,14 @@ function useAgentHistory(agentId: string | null): HistoryEntry[] {
 				updatedAt: conv.updatedAt,
 				runStatus: conv.runStatus,
 				automated: isAutomated(conv.id, conv.runStatus),
+				preview:
+					conv.lastMessageRole === "assistant" && conv.lastMessage
+						? compactPreview(conv.lastMessage)
+						: undefined,
 			});
 		}
 
-		for (const run of runs as RunSummary[]) {
+		for (const run of runs) {
 			if (run.agent_id !== agentId) {
 				continue;
 			}
@@ -174,6 +190,7 @@ function useAgentHistory(agentId: string | null): HistoryEntry[] {
 				id: run.id,
 				title: run.title ?? existing?.title ?? "Untitled run",
 				updatedAt: run.updated_at || existing?.updatedAt || 0,
+				preview: existing?.preview,
 				runStatus: run.run_status ?? existing?.runStatus,
 				messageCount: run.message_count,
 				automated: true,
@@ -182,6 +199,11 @@ function useAgentHistory(agentId: string | null): HistoryEntry[] {
 
 		return Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
 	}, [agentId, conversations, runs]);
+}
+
+function compactPreview(value: string): string {
+	const normalized = value.replace(/\s+/g, " ").trim();
+	return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized;
 }
 
 function HistoryRow({
@@ -206,7 +228,9 @@ function HistoryRow({
 				icon={entry.automated ? RoboticIcon : Message01Icon}
 			/>
 			<div className="flex min-w-0 flex-1 flex-col">
-				<span className="truncate font-medium text-sm">{entry.title}</span>
+				<span className="truncate font-medium text-sm" title={entry.title}>
+					{entry.title}
+				</span>
 				<span className="text-muted-foreground text-xs">
 					{relativeTime(entry.updatedAt)}
 					{entry.messageCount == null
@@ -258,6 +282,92 @@ function HistorySection({
 	);
 }
 
+interface ActivityDay {
+	entries: HistoryEntry[];
+	key: string;
+	label: string;
+}
+
+/**
+ * Consecutive runs of entries sharing a civil day in the selected display
+ * zone (not the machine zone), labelled relative to that zone's today.
+ */
+function groupHistoryByDay(
+	entries: HistoryEntry[],
+	now: number = Date.now()
+): ActivityDay[] {
+	const today = startOfDisplayDayMs(now);
+	const yesterday = startOfDisplayDayMs(now, 1);
+	const groups: ActivityDay[] = [];
+	for (const entry of entries) {
+		const dayStart = startOfDisplayDayMs(entry.updatedAt);
+		const key = String(dayStart);
+		// Only today's own civil day is "Today": a run stamped on a later day (a
+		// node whose clock runs ahead) keeps its real date rather than joining it.
+		const label =
+			dayStart === today
+				? "Today"
+				: dayStart === yesterday
+					? "Yesterday"
+					: formatDate(entry.updatedAt, { month: "short", day: "numeric" });
+		const current = groups.at(-1);
+		if (current?.key === key) {
+			current.entries.push(entry);
+		} else {
+			groups.push({ entries: [entry], key, label });
+		}
+	}
+	return groups;
+}
+
+function CompactHistoryRow({
+	entry,
+	onOpen,
+}: {
+	entry: HistoryEntry;
+	onOpen: (id: string) => void;
+}) {
+	const status = statusMeta(entry.runStatus);
+	return (
+		<button
+			aria-label={`Open ${entry.title}`}
+			className="group flex w-full items-start gap-3 border-b px-1 py-3 text-left last:border-b-0 hover:bg-muted/30"
+			onClick={() => onOpen(entry.id)}
+			type="button"
+		>
+			<span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted/50 text-muted-foreground">
+				<HugeiconsIcon
+					className="size-4"
+					icon={status?.icon ?? (entry.automated ? RoboticIcon : Message01Icon)}
+				/>
+			</span>
+			<span className="min-w-0 flex-1">
+				<span className="flex items-center justify-between gap-2">
+					<span className="truncate font-medium text-sm" title={entry.title}>
+						{entry.title}
+					</span>
+					<span className="shrink-0 text-muted-foreground text-xs">
+						{formatTime(entry.updatedAt, {
+							hour: "numeric",
+							minute: "2-digit",
+						})}
+					</span>
+				</span>
+				{entry.preview ? (
+					<span className="mt-1 line-clamp-2 block text-muted-foreground text-xs">
+						{entry.preview}
+					</span>
+				) : null}
+				{status ? (
+					<span className="type-caption mt-1 block text-muted-foreground">
+						{status.label}
+					</span>
+				) : null}
+			</span>
+		</button>
+	);
+}
+
 function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 	const now = new Date();
 	const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -272,7 +382,7 @@ function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 
 	return (
 		<section
-			className="flex flex-col gap-3 rounded-[10px] bg-muted/40 p-3.5"
+			className="flex flex-col gap-3 rounded-lg bg-muted/40 p-3.5"
 			data-testid="agent-run-overview"
 		>
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -302,7 +412,9 @@ function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 					return (
 						<div className="min-w-0" key={job.id}>
 							<div className="flex items-center justify-between gap-2 text-xs">
-								<span className="truncate font-medium">{job.name}</span>
+								<span className="truncate font-medium" title={job.name}>
+									{job.name}
+								</span>
 								<span className="shrink-0 text-muted-foreground">
 									{job.enabled ? describeSchedule(job.schedule) : "Paused"}
 								</span>
@@ -314,7 +426,7 @@ function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 								entries={buildRunStatusTimelineEntries(start, now, jobEvents)}
 								startAt={start.getTime()}
 							/>
-							<p className="mt-1 truncate text-[11px] text-muted-foreground">
+							<p className="type-caption mt-1 truncate text-muted-foreground">
 								{last
 									? `${last.outcome === "success" ? "Succeeded" : "Failed"} ${formatDistanceToNow(new Date(last.startedAt), { addSuffix: true })}`
 									: "No runs yet"}
@@ -323,16 +435,27 @@ function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
 					);
 				})}
 			</div>
-			<p className="text-[11px] text-muted-foreground">
-				Window ending {format(now, "MMM d, HH:mm")}. Open an automated run below
-				to inspect its full persistent transcript.
+			<p className="type-caption text-muted-foreground">
+				Window ending{" "}
+				{formatDateTime(now, {
+					month: "short",
+					day: "numeric",
+					hour: "2-digit",
+					minute: "2-digit",
+					hourCycle: "h23",
+				})}
+				. Open an automated run below to inspect its full persistent transcript.
 			</p>
 		</section>
 	);
 }
 
-export function AgentRunHistoryView({ agentId }: AgentRunHistoryViewProps) {
-	const { refresh, setActiveConversationId } = useChatHistoryContext();
+export function AgentRunHistoryView({
+	agentId,
+	compact = false,
+}: AgentRunHistoryViewProps) {
+	const { conversationsLoading, refresh, setActiveConversationId } =
+		useChatHistoryContext();
 	const openTab = useTabSelector((state) => state.openTab);
 	const history = useAgentHistory(agentId);
 	const { jobs } = useSchedules();
@@ -362,6 +485,52 @@ export function AgentRunHistoryView({ agentId }: AgentRunHistoryViewProps) {
 		() => history.filter((e) => e.automated),
 		[history]
 	);
+	// The day revision changes at each display-zone midnight and on zone
+	// changes, so a mounted feed moves "Today" rows to "Yesterday" in place.
+	const dayRevision = useDisplayDayRevision();
+	const activityDays = useMemo(
+		() => groupHistoryByDay(history),
+		[history, dayRevision]
+	);
+
+	if (compact) {
+		if (conversationsLoading && history.length === 0) {
+			return <SkeletonRows inset="panel" label="Loading agent activity…" />;
+		}
+		return history.length === 0 ? (
+			<Empty className="min-h-64">
+				<EmptyHeader>
+					<EmptyMedia variant="icon">
+						<HugeiconsIcon icon={Time04Icon} />
+					</EmptyMedia>
+					<EmptyTitle>No activity yet</EmptyTitle>
+					<EmptyDescription>
+						Chats and automated runs for this agent will appear here.
+					</EmptyDescription>
+				</EmptyHeader>
+			</Empty>
+		) : (
+			<div
+				className="flex min-h-0 flex-col gap-5"
+				data-testid="agent-activity-feed"
+			>
+				{activityDays.map((day) => (
+					<section className="flex flex-col" key={day.key}>
+						<h3 className="px-1 pb-1 font-medium text-muted-foreground text-xs">
+							{day.label}
+						</h3>
+						{day.entries.map((entry) => (
+							<CompactHistoryRow
+								entry={entry}
+								key={entry.id}
+								onOpen={openRun}
+							/>
+						))}
+					</section>
+				))}
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex flex-col gap-4">

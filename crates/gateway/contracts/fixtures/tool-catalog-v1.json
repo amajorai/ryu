@@ -1,0 +1,650 @@
+{
+  "version": 1,
+  "description": "Ryu's curated tool catalog seed (Treg parity B3). Each entry is one vendor endpoint Ryu serves natively or prices from the vendor's own pages, typed by the capability taxonomy (capability-taxonomy-v1.json) and joined by endpoint id to its price record (tool-price-v1.json). docsUrl is the vendor's own API reference, checked on docsCheckedOn. operation is the vendor method and path template the entry describes (generated rows from vendor OpenAPI specs, tool-catalog-generated-v1.json, may not repeat it); probes are what tools/tool-catalog-verify.ts runs, cheapest first within a spend budget; verification is the latest verdict (unverified, verified, drifted, retired). Nothing here comes from another catalog. The control plane seeds its store from this file without overwriting curated edits. Read by ryu_gw_contracts::tool_catalog and @ryuhq/protocol/tool-catalog.",
+  "entries": [
+    {
+      "endpoint": "github.GITHUB_GET_THE_AUTHENTICATED_USER",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "account.whoami",
+      "title": "Get the authenticated user",
+      "docsUrl": "https://docs.github.com/en/rest/users/users#get-the-authenticated-user",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/user"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/users/users",
+          "expect": ["Get the authenticated user", "get /user"]
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "url": "https://api.github.com/user",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["login", "id"],
+          "estimatedMicroUsd": 0,
+          "credential": {
+            "env": "RYU_VERIFY_GITHUB_TOKEN",
+            "header": "Authorization",
+            "scheme": "bearer"
+          }
+        }
+      ],
+      "note": "Live probe needs a user token (RYU_VERIFY_GITHUB_TOKEN); an Actions installation token cannot read /user."
+    },
+    {
+      "endpoint": "github.GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "repository.list",
+      "title": "List repositories for the authenticated user",
+      "docsUrl": "https://docs.github.com/en/rest/repos/repos#list-repositories-for-the-authenticated-user",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/user/repos"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/repos/repos",
+          "expect": [
+            "List repositories for the authenticated user",
+            "get /user/repos"
+          ]
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "url": "https://api.github.com/user/repos?per_page=1",
+          "expectStatus": 200,
+          "expectJson": "array",
+          "expectKeys": ["id", "full_name", "private"],
+          "estimatedMicroUsd": 0,
+          "credential": {
+            "env": "RYU_VERIFY_GITHUB_TOKEN",
+            "header": "Authorization",
+            "scheme": "bearer"
+          }
+        }
+      ]
+    },
+    {
+      "endpoint": "github.GITHUB_LIST_REPOSITORY_ISSUES",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.list",
+      "title": "List repository issues",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#list-repository-issues",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/issues"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/issues",
+          "expect": ["List repository issues"]
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "url": "https://api.github.com/repos/octocat/Hello-World/issues?state=all&per_page=1",
+          "expectStatus": 200,
+          "expectJson": "array",
+          "expectKeys": ["number", "title", "state"],
+          "estimatedMicroUsd": 0
+        }
+      ],
+      "note": "The live probe reads a public repository without a credential (GitHub's unauthenticated rate limit applies)."
+    },
+    {
+      "endpoint": "github.GITHUB_GET_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.get",
+      "title": "Get an issue",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/issues",
+          "expect": ["Get an issue"]
+        }
+      ],
+      "note": "Docs probe only until a stable public issue is chosen for a live probe."
+    },
+    {
+      "endpoint": "github.GITHUB_CREATE_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.create",
+      "title": "Create an issue",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#create-an-issue",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/repos/{owner}/{repo}/issues"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/issues",
+          "expect": ["Create an issue"]
+        }
+      ],
+      "note": "A write: never live-probed, so its strongest method is docs_page."
+    },
+    {
+      "endpoint": "github.GITHUB_CREATE_AN_ISSUE_COMMENT",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.comment",
+      "title": "Create an issue comment",
+      "docsUrl": "https://docs.github.com/en/rest/issues/comments#create-an-issue-comment",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/repos/{owner}/{repo}/issues/{issue_number}/comments"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/comments",
+          "expect": ["Create an issue comment"]
+        }
+      ],
+      "note": "A write: never live-probed, so its strongest method is docs_page."
+    },
+    {
+      "endpoint": "github.GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.search",
+      "title": "Search issues and pull requests",
+      "docsUrl": "https://docs.github.com/en/rest/search/search#search-issues-and-pull-requests",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/search/issues"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/search/search",
+          "expect": ["Search issues and pull requests", "get /search/issues"]
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "url": "https://api.github.com/search/issues?q=repo%3Aoctocat%2FHello-World&per_page=1",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["total_count", "items"],
+          "estimatedMicroUsd": 0
+        }
+      ],
+      "note": "The live probe searches a public repository without a credential (GitHub's unauthenticated search limit applies)."
+    },
+    {
+      "endpoint": "github.GITHUB_LIST_ISSUES_ASSIGNED_TO_THE_AUTHENTICATED_USER",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.list_assigned",
+      "title": "List issues assigned to the authenticated user",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#list-issues-assigned-to-the-authenticated-user",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/issues"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/issues",
+          "expect": [
+            "List issues assigned to the authenticated user",
+            "get /issues"
+          ]
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "url": "https://api.github.com/issues?per_page=1",
+          "expectStatus": 200,
+          "expectJson": "array",
+          "expectKeys": [],
+          "estimatedMicroUsd": 0,
+          "credential": {
+            "env": "RYU_VERIFY_GITHUB_TOKEN",
+            "header": "Authorization",
+            "scheme": "bearer"
+          }
+        }
+      ]
+    },
+    {
+      "endpoint": "exa.search.auto",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.search",
+      "title": "Exa search (auto)",
+      "docsUrl": "https://docs.exa.ai/reference/search",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://exa.ai/pricing",
+          "expect": [
+            "Auto Search",
+            "Base price, with up to 10 results (per 1k requests) $4 $7",
+            "Cost per additional result above 10 (per 1k requests) $1"
+          ]
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "url": "https://api.exa.ai/search",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["results"],
+          "estimatedMicroUsd": 7000,
+          "credential": {
+            "env": "RYU_VERIFY_EXA_KEY",
+            "header": "x-api-key",
+            "scheme": "raw"
+          },
+          "body": {
+            "query": "capability taxonomy for agent tools",
+            "type": "auto",
+            "numResults": 1
+          }
+        }
+      ]
+    },
+    {
+      "endpoint": "exa.search.fast",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.search",
+      "title": "Exa search (fast)",
+      "docsUrl": "https://docs.exa.ai/reference/search",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "reason": "no longer on exa.ai: \"Fast Search\"",
+        "state": "drifted"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://exa.ai/pricing",
+          "expect": ["Fast Search"]
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "url": "https://api.exa.ai/search",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["results"],
+          "estimatedMicroUsd": 7000,
+          "credential": {
+            "env": "RYU_VERIFY_EXA_KEY",
+            "header": "x-api-key",
+            "scheme": "raw"
+          },
+          "body": {
+            "query": "capability taxonomy for agent tools",
+            "type": "fast",
+            "numResults": 1
+          }
+        }
+      ],
+      "note": "Exa's search reference marks `fast` legacy (use lite)."
+    },
+    {
+      "endpoint": "exa.search.instant",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.search",
+      "title": "Exa search (instant)",
+      "docsUrl": "https://docs.exa.ai/reference/search",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://exa.ai/pricing",
+          "expect": [
+            "Lite Search",
+            "Base price, with up to 10 results (per 1k requests) $4"
+          ]
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "url": "https://api.exa.ai/search",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["results"],
+          "estimatedMicroUsd": 4000,
+          "credential": {
+            "env": "RYU_VERIFY_EXA_KEY",
+            "header": "x-api-key",
+            "scheme": "raw"
+          },
+          "body": {
+            "query": "capability taxonomy for agent tools",
+            "type": "instant",
+            "numResults": 1
+          }
+        }
+      ],
+      "note": "Exa's search reference marks `instant` legacy (use lite) and prices it as Lite Search."
+    },
+    {
+      "endpoint": "exa.contents.text",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.extract",
+      "title": "Exa contents (text)",
+      "docsUrl": "https://docs.exa.ai/reference/get-contents",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/contents"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://exa.ai/pricing",
+          "expect": ["$1 (per 1k pages)"]
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "url": "https://api.exa.ai/contents",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["results"],
+          "estimatedMicroUsd": 1000,
+          "credential": {
+            "env": "RYU_VERIFY_EXA_KEY",
+            "header": "x-api-key",
+            "scheme": "raw"
+          },
+          "body": {
+            "urls": ["https://example.com"],
+            "text": true
+          }
+        }
+      ]
+    },
+    {
+      "endpoint": "tavily.search.basic",
+      "provider": "tavily",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.search",
+      "title": "Tavily search (basic)",
+      "docsUrl": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-credits",
+          "expect": ["Each request costs 1 API credit", "$0.008 per credit"]
+        },
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+          "expect": ["search_depth"]
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "url": "https://api.tavily.com/search",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["results"],
+          "estimatedMicroUsd": 8000,
+          "credential": {
+            "env": "RYU_VERIFY_TAVILY_KEY",
+            "header": "Authorization",
+            "scheme": "bearer"
+          },
+          "body": {
+            "query": "capability taxonomy for agent tools",
+            "search_depth": "basic",
+            "max_results": 1
+          }
+        }
+      ]
+    },
+    {
+      "endpoint": "tavily.search.advanced",
+      "provider": "tavily",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.search",
+      "title": "Tavily search (advanced)",
+      "docsUrl": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-credits",
+          "expect": ["Each request costs 2 API credits", "$0.008 per credit"]
+        },
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+          "expect": ["search_depth"]
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "url": "https://api.tavily.com/search",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["results"],
+          "estimatedMicroUsd": 16000,
+          "credential": {
+            "env": "RYU_VERIFY_TAVILY_KEY",
+            "header": "Authorization",
+            "scheme": "bearer"
+          },
+          "body": {
+            "query": "capability taxonomy for agent tools",
+            "search_depth": "advanced",
+            "max_results": 1
+          }
+        }
+      ]
+    },
+    {
+      "endpoint": "brave.web_search",
+      "provider": "brave",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.search",
+      "title": "Brave web search",
+      "docsUrl": "https://api-dashboard.search.brave.com/app/documentation/web-search/get-started",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/res/v1/web/search"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://brave.com/search/api/",
+          "expect": ["$5 per 1,000 requests"]
+        },
+        {
+          "kind": "docs_page",
+          "url": "https://api-dashboard.search.brave.com/app/documentation/web-search/get-started",
+          "expect": ["/res/v1/web/search", "X-Subscription-Token"]
+        },
+        {
+          "kind": "http",
+          "method": "GET",
+          "url": "https://api.search.brave.com/res/v1/web/search?q=capability%20taxonomy&count=1",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["query"],
+          "estimatedMicroUsd": 5000,
+          "credential": {
+            "env": "RYU_VERIFY_BRAVE_KEY",
+            "header": "X-Subscription-Token",
+            "scheme": "raw"
+          }
+        }
+      ]
+    }
+  ]
+}

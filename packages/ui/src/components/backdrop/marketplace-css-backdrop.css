@@ -1,0 +1,115 @@
+@keyframes ryu-patterncraft-aurora {
+	0% {
+		transform: scale(1) rotate(0deg);
+		opacity: 0.5;
+	}
+	50% {
+		transform: scale(1.2) rotate(180deg);
+		opacity: 0.8;
+	}
+	100% {
+		transform: scale(1) rotate(360deg);
+		opacity: 0.5;
+	}
+}
+
+@keyframes ryu-patterncraft-crystal-shimmer {
+	0%,
+	100% {
+		background-position:
+			0% 0%,
+			0% 0%,
+			0% 0%,
+			50% 50%;
+		background-size:
+			10px 10px,
+			10px 10px,
+			200% 200%,
+			200% 200%;
+	}
+	50% {
+		background-position:
+			1px 1px,
+			-1px -1px,
+			100% 100%,
+			50% 50%;
+		background-size:
+			12px 12px,
+			12px 12px,
+			200% 200%,
+			180% 180%;
+	}
+}
+
+.ryu-marketplace-animation {
+	animation: var(--ryu-marketplace-animation);
+}
+.ryu-marketplace-background {
+	background: var(--ryu-marketplace-background);
+}
+.ryu-marketplace-backgroundBlendMode {
+	background-blend-mode: var(--ryu-marketplace-backgroundBlendMode);
+}
+.ryu-marketplace-backgroundColor {
+	background-color: var(--ryu-marketplace-backgroundColor);
+}
+.ryu-marketplace-backgroundImage {
+	background-image: var(--ryu-marketplace-backgroundImage);
+}
+.ryu-marketplace-backgroundPosition {
+	background-position: var(--ryu-marketplace-backgroundPosition);
+}
+.ryu-marketplace-backgroundRepeat {
+	background-repeat: var(--ryu-marketplace-backgroundRepeat);
+}
+.ryu-marketplace-backgroundSize {
+	background-size: var(--ryu-marketplace-backgroundSize);
+}
+.ryu-marketplace-boxShadow {
+	box-shadow: var(--ryu-marketplace-boxShadow);
+}
+.ryu-marketplace-filter {
+	filter: var(--ryu-marketplace-filter);
+}
+.ryu-marketplace-imageRendering {
+	image-rendering: var(--ryu-marketplace-imageRendering);
+}
+.ryu-marketplace-maskComposite {
+	mask-composite: var(--ryu-marketplace-maskComposite);
+}
+.ryu-marketplace-maskImage {
+	mask-image: var(--ryu-marketplace-maskImage);
+}
+.ryu-marketplace-mixBlendMode {
+	mix-blend-mode: var(--ryu-marketplace-mixBlendMode);
+}
+.ryu-marketplace-opacity {
+	opacity: var(--ryu-marketplace-opacity);
+}
+.ryu-marketplace-WebkitMaskImage {
+	-webkit-mask-image: var(--ryu-marketplace-WebkitMaskImage);
+}
+
+/* WebKit composite keywords must be parsed literally: Blink does not preserve
+ * their prefixed alias semantics when substituted through var(). */
+.ryu-marketplace-WebkitMaskComposite-clear {
+	-webkit-mask-composite: clear;
+}
+.ryu-marketplace-WebkitMaskComposite-copy {
+	-webkit-mask-composite: copy;
+}
+.ryu-marketplace-WebkitMaskComposite-source-atop {
+	-webkit-mask-composite: source-atop;
+}
+.ryu-marketplace-WebkitMaskComposite-source-in {
+	-webkit-mask-composite: source-in;
+}
+.ryu-marketplace-WebkitMaskComposite-source-out {
+	-webkit-mask-composite: source-out;
+}
+.ryu-marketplace-WebkitMaskComposite-source-over {
+	-webkit-mask-composite: source-over;
+}
+.ryu-marketplace-WebkitMaskComposite-xor {
+	-webkit-mask-composite: xor;
+}

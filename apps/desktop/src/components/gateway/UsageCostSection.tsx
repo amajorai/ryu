@@ -20,26 +20,27 @@
 // (`updateGatewayConfig`), which Core forwards verbatim to the gateway's
 // `PUT /v1/config`.
 
-import { Dollar01Icon, Key01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Key01Icon } from "@hugeicons/core-free-icons";
+import { SettingsIconTile } from "@ryu/blocks/desktop/settings-nav.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	formatCurrency,
 	formatNumber as formatSharedNumber,
 } from "@ryu/ui/lib/number-format.ts";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { OrgBillingContext } from "@/src/components/billing/OrgBillingContext.tsx";
 import {
+	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -70,17 +71,17 @@ const TIER_PROVIDER_KINDS = [
 	"fal",
 ] as const;
 
-const PROVIDER_LABELS: Record<string, string> = {
-	openai: "OpenAI",
-	anthropic: "Anthropic",
-	local: "Local",
-	openrouter: "OpenRouter",
-	core: "Core",
-	modal: "Modal",
-	genai: "Gemini",
-	replicate: "Replicate",
-	fal: "Fal",
-};
+const PROVIDER_LABELS = new Map<string, string>([
+	["openai", "OpenAI"],
+	["anthropic", "Anthropic"],
+	["local", "Local"],
+	["openrouter", "OpenRouter"],
+	["core", "Core"],
+	["modal", "Modal"],
+	["genai", "Gemini"],
+	["replicate", "Replicate"],
+	["fal", "Fal"],
+]);
 
 const ROTATION_PROVIDERS: { slug: string; label: string; envVar: string }[] = [
 	{ slug: "openai", label: "OpenAI", envVar: "OPENAI_API_KEYS" },
@@ -95,7 +96,7 @@ const TIER_OPTIONS: { value: string; label: string }[] = [
 ];
 
 function providerLabel(kind: string): string {
-	return PROVIDER_LABELS[kind] ?? kind;
+	return PROVIDER_LABELS.get(kind) ?? kind;
 }
 
 function formatCost(microUsd: number): string {
@@ -186,15 +187,15 @@ function ProviderQuotaCard({ metrics }: { metrics: GatewayMetrics | null }) {
 			title="Provider quota"
 		>
 			{entries.length === 0 ? (
-				<p className="px-3.5 text-muted-foreground text-sm">
+				<SettingsCard className="text-center text-muted-foreground text-sm">
 					No provider quota observed yet. Drive a few requests through the
 					gateway and this fills in as upstreams report their limits.
-				</p>
+				</SettingsCard>
 			) : (
-				<div className="overflow-x-auto px-3.5">
+				<SettingsCard className="overflow-x-auto py-2">
 					<table className="w-full text-sm">
 						<thead>
-							<tr className="border-b text-left text-muted-foreground text-xs">
+							<tr className="border-border/60 border-b text-left text-muted-foreground text-xs">
 								<th className="pr-3 pb-2 font-medium">Provider</th>
 								<th className="pr-3 pb-2 font-medium">Remaining / Limit</th>
 								<th className="pr-3 pb-2 font-medium">Resets in</th>
@@ -205,7 +206,10 @@ function ProviderQuotaCard({ metrics }: { metrics: GatewayMetrics | null }) {
 							{entries.map(([name, q]) => {
 								const secs = liveResetSecs(q, elapsedSecs);
 								return (
-									<tr className="border-b last:border-0" key={name}>
+									<tr
+										className="border-border/60 border-b last:border-0"
+										key={name}
+									>
 										<td className="py-2 pr-3 font-medium">
 											{providerLabel(name)}
 										</td>
@@ -227,7 +231,7 @@ function ProviderQuotaCard({ metrics }: { metrics: GatewayMetrics | null }) {
 							})}
 						</tbody>
 					</table>
-				</div>
+				</SettingsCard>
 			)}
 		</SettingsSection>
 	);
@@ -236,7 +240,7 @@ function ProviderQuotaCard({ metrics }: { metrics: GatewayMetrics | null }) {
 // ── 2. Per-model spend ───────────────────────────────────────────────────────
 
 function ModelSpendCard() {
-	const { data, isLoading, isError, error } = useQuery({
+	const { data, isLoading, isError, error, refetch } = useQuery({
 		queryKey: ["profile", "stats"],
 		queryFn: fetchProfileStats,
 	});
@@ -244,52 +248,73 @@ function ModelSpendCard() {
 	const renderBody = () => {
 		if (isLoading) {
 			return (
-				<div className="flex items-center gap-2 px-3.5 text-muted-foreground text-sm">
-					<Spinner className="size-4" />
-					Loading…
-				</div>
+				<SettingsCard>
+					<SkeletonRows label="Loading…" spacing="budget" />
+				</SettingsCard>
 			);
 		}
 		if (isError || !data) {
+			const requiresSignIn =
+				error instanceof Error &&
+				error.message === "Sign in to view your stats.";
 			return (
-				<p className="px-3.5 text-muted-foreground text-sm">
-					{error instanceof Error
-						? error.message
-						: "Sign in to view your usage and spend."}
-				</p>
+				<SettingsItem
+					actions={
+						requiresSignIn ? null : (
+							<Button
+								aria-label="Retry account usage rollup"
+								onClick={() => void refetch()}
+								size="sm"
+								variant="outline"
+							>
+								Retry
+							</Button>
+						)
+					}
+					title={
+						<span className="text-muted-foreground">
+							{error instanceof Error
+								? error.message
+								: "Sign in to view your usage and spend."}
+						</span>
+					}
+				/>
 			);
 		}
 		const totalTokens = data.totals.inputTokens + data.totals.outputTokens;
 		const topModels = data.insights.topModels;
 		return (
-			<div className="flex flex-col gap-3">
-				<div className="grid grid-cols-2 gap-3 px-3.5 sm:grid-cols-3">
-					<MetricTile
+			<>
+				<SettingsGroup>
+					<MetricRow
 						label="Total spend"
 						value={formatCost(data.totals.costMicroUsd)}
 					/>
-					<MetricTile
+					<MetricRow
 						label="Requests"
 						value={formatNumber(data.totals.requestCount)}
 					/>
-					<MetricTile label="Tokens" value={formatNumber(totalTokens)} />
-				</div>
+					<MetricRow label="Tokens" value={formatNumber(totalTokens)} />
+				</SettingsGroup>
 				{topModels.length === 0 ? (
-					<p className="px-3.5 text-muted-foreground text-sm">
+					<SettingsCard className="text-center text-muted-foreground text-sm">
 						No model usage recorded yet.
-					</p>
+					</SettingsCard>
 				) : (
-					<div className="overflow-x-auto px-3.5">
+					<SettingsCard className="overflow-x-auto py-2">
 						<table className="w-full text-sm">
 							<thead>
-								<tr className="border-b text-left text-muted-foreground text-xs">
+								<tr className="border-border/60 border-b text-left text-muted-foreground text-xs">
 									<th className="pr-3 pb-2 font-medium">Model</th>
 									<th className="pb-2 text-right font-medium">Requests</th>
 								</tr>
 							</thead>
 							<tbody>
 								{topModels.map((m) => (
-									<tr className="border-b last:border-0" key={m.id}>
+									<tr
+										className="border-border/60 border-b last:border-0"
+										key={m.id}
+									>
 										<td className="py-2 pr-3 font-mono text-xs">{m.id}</td>
 										<td className="py-2 text-right font-mono text-xs tabular-nums">
 											{formatNumber(m.count)}
@@ -298,9 +323,9 @@ function ModelSpendCard() {
 								))}
 							</tbody>
 						</table>
-					</div>
+					</SettingsCard>
 				)}
-			</div>
+			</>
 		);
 	};
 
@@ -314,14 +339,16 @@ function ModelSpendCard() {
 	);
 }
 
-function MetricTile({ label, value }: { label: string; value: string }) {
+function MetricRow({ label, value }: { label: string; value: string }) {
 	return (
-		<div className="rounded-lg bg-muted/40 p-3">
-			<div className="text-muted-foreground text-xs">{label}</div>
-			<div className="mt-1 font-medium font-mono text-lg tabular-nums">
-				{value}
-			</div>
-		</div>
+		<SettingsItem
+			actions={
+				<span className="font-mono text-muted-foreground text-sm tabular-nums">
+					{value}
+				</span>
+			}
+			title={label}
+		/>
 	);
 }
 
@@ -339,7 +366,9 @@ function tierRowKinds(
 	const known = TIER_PROVIDER_KINDS.filter((k) => present.has(k));
 	const extra = [...present].filter(
 		(k) =>
-			!TIER_PROVIDER_KINDS.includes(k as (typeof TIER_PROVIDER_KINDS)[number])
+			!TIER_PROVIDER_KINDS.includes(
+				/* SAFETY: This assertion only adapts the native includes search parameter. The unchanged string is compared against the authored TIER_PROVIDER_KINDS values; it does not establish membership before that comparison. */ k as (typeof TIER_PROVIDER_KINDS)[number]
+			)
 	);
 	const rows = [...known, ...extra];
 	return rows.length > 0 ? rows : [...TIER_PROVIDER_KINDS];
@@ -356,36 +385,49 @@ function ProviderTierEditor({
 }) {
 	const [tiers, setTiers] = useState<Record<string, number> | null>(null);
 	const [loadError, setLoadError] = useState<string | null>(null);
+	const [loading, setLoading] = useState(false);
+	const [loadAttempt, setLoadAttempt] = useState(0);
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [saveOk, setSaveOk] = useState(false);
+	const configTarget = useMemo(
+		() => ({ ...target }),
+		[target.token, target.url, target.userJwt]
+	);
 
 	useEffect(() => {
-		if (!reachable || tiers !== null) {
+		if (!reachable) {
 			return;
 		}
 		let cancelled = false;
-		fetchGatewayConfig(target)
+		setLoading(true);
+		setTiers(null);
+		setLoadError(null);
+		fetchGatewayConfig(configTarget)
 			.then((cfg) => {
 				if (!cancelled) {
 					setTiers(cfg.routing.provider_tiers ?? {});
-					setLoadError(null);
 				}
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setLoadError(
 						e instanceof Error ? e.message : "Failed to load provider tiers"
 					);
 				}
+			})
+			.finally(() => {
+				if (!cancelled) {
+					setLoading(false);
+				}
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [reachable, tiers, target]);
+	}, [configTarget, loadAttempt, reachable]);
 
 	const setTier = (kind: string, tier: number) => {
-		setTiers((prev) => ({ ...(prev ?? {}), [kind]: tier }));
+		setTiers((prev) => ({ ...prev, [kind]: tier }));
 		setSaveOk(false);
 		setSaveError(null);
 	};
@@ -400,10 +442,12 @@ function ProviderTierEditor({
 		try {
 			// Re-fetch so the PUT carries the full routing object (preserving
 			// default_provider / model_map / fallback_chain) with only the
-			// provider_tiers map replaced.
-			const cfg = await fetchGatewayConfig(target);
-			await updateGatewayConfig(target, {
+			// provider_tiers map replaced. The revision of that read makes a
+			// concurrent routing edit a conflict instead of a silent overwrite.
+			const cfg = await fetchGatewayConfig(configTarget);
+			await updateGatewayConfig(configTarget, {
 				routing: { ...cfg.routing, provider_tiers: tiers },
+				expectedRevision: cfg.configRevision ?? undefined,
 			});
 			setSaveOk(true);
 			setTimeout(() => setSaveOk(false), 3000);
@@ -416,8 +460,22 @@ function ProviderTierEditor({
 		}
 	};
 
-	const isDisabled = !reachable || tiers === null;
+	const isDisabled = !reachable || tiers === null || loading;
 	const kinds = tierRowKinds(configuredProviders, tiers ?? {});
+	const retryLoad = () => {
+		setLoadError(null);
+		setLoadAttempt((attempt) => attempt + 1);
+	};
+	let saveNotice: ReactNode;
+	if (saveOk) {
+		saveNotice = (
+			<span className="text-status-success">
+				Saved. Restart the gateway for changes to take effect.
+			</span>
+		);
+	} else if (saveError) {
+		saveNotice = <span className="text-status-destructive">{saveError}</span>;
+	}
 
 	return (
 		<SettingsSection
@@ -435,57 +493,77 @@ function ProviderTierEditor({
 			}
 			title="Provider cost tiers"
 		>
-			<div className="flex flex-col gap-3">
+			<SettingsGroup>
 				{reachable && loadError ? (
-					<p className="px-3.5 text-sm text-status-destructive">{loadError}</p>
+					<SettingsItem
+						actions={
+							<Button
+								aria-label="Retry provider cost tier load"
+								onClick={retryLoad}
+								size="sm"
+								variant="outline"
+							>
+								Retry
+							</Button>
+						}
+						title={
+							<span className="text-status-destructive" title={loadError}>
+								Couldn’t load provider cost tiers.
+							</span>
+						}
+					/>
+				) : null}
+				{reachable && loading && !loadError ? (
+					<SettingsItem
+						title={
+							<span className="text-muted-foreground">
+								Loading provider cost tiers…
+							</span>
+						}
+					/>
 				) : null}
 				{reachable ? null : (
-					<p className="px-3.5 text-muted-foreground text-sm">
-						Gateway unreachable. Start the gateway and refresh to configure
-						provider tiers.
-					</p>
+					<SettingsItem
+						title={
+							<span className="text-muted-foreground">
+								Gateway unreachable. Start the gateway and refresh to configure
+								provider tiers.
+							</span>
+						}
+					/>
 				)}
-				<SettingsGroup>
-					{kinds.map((kind) => (
-						<SettingsItem
-							actions={
-								<Select
-									disabled={isDisabled}
-									items={TIER_OPTIONS}
-									onValueChange={(v) => v && setTier(kind, Number(v))}
-									value={String(tiers?.[kind] ?? 0)}
+				{kinds.map((kind, index) => (
+					<SettingsItem
+						actions={
+							<Select
+								disabled={isDisabled}
+								items={TIER_OPTIONS}
+								onValueChange={(v) => v && setTier(kind, Number(v))}
+								value={String(tiers?.[kind] ?? 0)}
+							>
+								<SelectTrigger
+									aria-label={`Cost tier for ${providerLabel(kind)}`}
+									className="w-44"
 								>
-									<SelectTrigger
-										aria-label={`Cost tier for ${providerLabel(kind)}`}
-										className="w-44"
-									>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										{TIER_OPTIONS.map((opt) => (
-											<SelectItem key={opt.value} value={opt.value}>
-												{opt.label}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							}
-							key={kind}
-							title={providerLabel(kind)}
-						/>
-					))}
-				</SettingsGroup>
-				<div className="flex items-center gap-3 px-3.5">
-					{saveOk ? (
-						<span className="text-sm text-status-success">
-							Saved. Restart the gateway for changes to take effect.
-						</span>
-					) : null}
-					{saveError ? (
-						<span className="text-sm text-status-destructive">{saveError}</span>
-					) : null}
-				</div>
-			</div>
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{TIER_OPTIONS.map((opt) => (
+										<SelectItem key={opt.value} value={opt.value}>
+											{opt.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						// The save outcome is the footer of the last row, so it reads
+						// directly under the card it describes.
+						description={index === kinds.length - 1 ? saveNotice : undefined}
+						key={kind}
+						title={providerLabel(kind)}
+					/>
+				))}
+			</SettingsGroup>
 		</SettingsSection>
 	);
 }
@@ -506,13 +584,22 @@ function AccountKeysDisplay({
 }) {
 	const [counts, setCounts] = useState<Record<string, number> | null>(null);
 	const [loadError, setLoadError] = useState<string | null>(null);
+	const [loading, setLoading] = useState(false);
+	const [loadAttempt, setLoadAttempt] = useState(0);
+	const configTarget = useMemo(
+		() => ({ ...target }),
+		[target.token, target.url, target.userJwt]
+	);
 
 	useEffect(() => {
 		if (!reachable) {
 			return;
 		}
 		let cancelled = false;
-		fetchGatewayConfig(target)
+		setLoading(true);
+		setCounts(null);
+		setLoadError(null);
+		fetchGatewayConfig(configTarget)
 			.then((cfg) => {
 				if (cancelled) {
 					return;
@@ -522,61 +609,100 @@ function AccountKeysDisplay({
 					anthropic: cfg.providers.anthropic?.api_key_count ?? 0,
 					openrouter: cfg.providers.openrouter?.api_key_count ?? 0,
 				});
-				setLoadError(null);
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setLoadError(
 						e instanceof Error ? e.message : "Failed to load providers"
 					);
 				}
+			})
+			.finally(() => {
+				if (!cancelled) {
+					setLoading(false);
+				}
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [reachable, target]);
+	}, [configTarget, loadAttempt, reachable]);
+
+	const retryLoad = () => {
+		setLoadError(null);
+		setLoadAttempt((attempt) => attempt + 1);
+	};
 
 	return (
 		<SettingsSection
 			caption="Extra API keys per provider for round-robin account rotation, alongside the primary key. Credentials are environment-variable-only: set OPENAI_API_KEYS / ANTHROPIC_API_KEYS / OPENROUTER_API_KEYS (comma-separated) and restart the gateway. The count reflects how many are configured; keys are never displayed."
 			title="Additional account keys"
 		>
-			<div className="flex flex-col gap-3">
+			<SettingsGroup>
 				{reachable && loadError ? (
-					<p className="px-3.5 text-sm text-status-destructive">{loadError}</p>
+					<SettingsItem
+						actions={
+							<Button
+								aria-label="Retry additional account key counts"
+								onClick={retryLoad}
+								size="sm"
+								variant="outline"
+							>
+								Retry
+							</Button>
+						}
+						title={
+							<span className="text-status-destructive" title={loadError}>
+								Couldn’t load account key counts.
+							</span>
+						}
+					/>
+				) : null}
+				{reachable && loading && !loadError ? (
+					<SettingsItem
+						title={
+							<span className="text-muted-foreground">
+								Checking additional account keys…
+							</span>
+						}
+					/>
 				) : null}
 				{reachable ? null : (
-					<p className="px-3.5 text-muted-foreground text-sm">
-						Gateway unreachable. Start the gateway and refresh to view account
-						keys.
-					</p>
+					<SettingsItem
+						title={
+							<span className="text-muted-foreground">
+								Gateway unreachable. Start the gateway and refresh to view
+								account keys.
+							</span>
+						}
+					/>
 				)}
-				<SettingsGroup>
-					{ROTATION_PROVIDERS.map(({ slug, label, envVar }) => {
-						const n = counts?.[slug] ?? 0;
-						return (
-							<SettingsItem
-								actions={
-									<Badge variant={n > 0 ? "default" : "secondary"}>
-										{n} account {n === 1 ? "key" : "keys"}
-									</Badge>
-								}
-								description={`Add rotation accounts via the ${envVar} env var (comma-separated).`}
-								key={slug}
-								title={
-									<span className="flex items-center gap-2">
-										<HugeiconsIcon
-											className="size-4 text-muted-foreground"
-											icon={Key01Icon}
-										/>
-										{label}
+				{ROTATION_PROVIDERS.map(({ slug, label, envVar }) => {
+					const n = counts?.[slug] ?? 0;
+					return (
+						<SettingsItem
+							actions={
+								<Badge variant={counts && n > 0 ? "default" : "secondary"}>
+									{counts
+										? `${n} account ${n === 1 ? "key" : "keys"}`
+										: loading && reachable
+											? "Checking…"
+											: "Unavailable"}
+								</Badge>
+							}
+							key={slug}
+							title={
+								<span className="flex items-center gap-2.5" title={envVar}>
+									{/* Tagged so the group's hairline starts at the label. */}
+									<span className="contents" data-slot="settings-icon-tile">
+										<SettingsIconTile icon={Key01Icon} tint="yellow" />
 									</span>
-								}
-							/>
-						);
-					})}
-				</SettingsGroup>
-			</div>
+									{label}
+								</span>
+							}
+						/>
+					);
+				})}
+			</SettingsGroup>
 		</SettingsSection>
 	);
 }
@@ -615,11 +741,11 @@ function ProviderCreditsCard() {
 /** The provider ids Core can read a balance for (mirrors `supportsProviderCredits`). */
 const CREDIT_PROVIDER_IDS = ["openrouter", "deepseek", "moonshot"] as const;
 
-const CREDIT_PROVIDER_LABELS: Record<string, string> = {
-	openrouter: "OpenRouter",
-	deepseek: "DeepSeek",
-	moonshot: "Moonshot / Kimi",
-};
+const CREDIT_PROVIDER_LABELS = new Map<string, string>([
+	["openrouter", "OpenRouter"],
+	["deepseek", "DeepSeek"],
+	["moonshot", "Moonshot / Kimi"],
+]);
 
 /**
  * One provider's balance row. Unlike the picker badge (which hides entirely when
@@ -632,7 +758,7 @@ function ProviderCreditsRow({ providerId }: { providerId: string }) {
 	// supported-provider gate and the poll cadence, and re-typing its query key
 	// here would make the two surfaces share cache only by coincidence.
 	const data = useProviderCredits(providerId);
-	const label = CREDIT_PROVIDER_LABELS[providerId] ?? providerId;
+	const label = CREDIT_PROVIDER_LABELS.get(providerId) ?? providerId;
 	const meter = data?.available ? data.meters.at(0) : undefined;
 	const amount = meter?.values.at(0);
 	let value = "Checking…";
@@ -663,7 +789,6 @@ function ProviderCreditsRow({ providerId }: { providerId: string }) {
 					{value}
 				</span>
 			}
-			description="Provider-side balance on this node · not Ryu organization credits"
 			title={label}
 		/>
 	);
@@ -683,23 +808,14 @@ export function UsageCostSection({
 	return (
 		<div className="flex flex-col gap-6">
 			<SettingsSection
-				caption="Live provider rate-limit windows, the account rollup, and the cost knobs that shape routing. Managed inference debits the organization wallet shown here; BYOK balances belong to keys stored on this node."
-				title="Usage & cost"
+				caption="Managed inference debits this organization wallet; BYOK balances belong to keys stored on this node. Quota countdowns refresh with the gateway status poll, and the account rollup below is separate from the organization wallet."
+				title="Billing"
 			>
-				<div className="space-y-2">
-					<OrgBillingContext
-						compact
-						description="Ryu managed inference spends from this organization's shared credits."
-						label="Managed inference billing"
-					/>
-					<div className="flex items-center gap-2 px-3.5 text-muted-foreground text-sm">
-						<HugeiconsIcon className="size-4" icon={Dollar01Icon} />
-						<span>
-							Quota countdowns refresh with the gateway status poll; the account
-							rollup below is separate from the organization wallet.
-						</span>
-					</div>
-				</div>
+				<OrgBillingContext
+					compact
+					description="Ryu managed inference spends from this organization's shared credits."
+					label="Managed inference billing"
+				/>
 			</SettingsSection>
 			<ProviderQuotaCard metrics={metrics} />
 			<ModelSpendCard />

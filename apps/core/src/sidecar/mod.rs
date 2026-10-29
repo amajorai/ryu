@@ -2,23 +2,35 @@ pub mod active_engine;
 pub mod adapters;
 pub mod agent_runner;
 pub mod agents;
+pub mod bundle_install;
+pub mod capability_consumer;
 pub mod cli_shims;
+pub mod cloudflared;
+pub mod cloudflared_downloader;
 pub mod control_plane;
-pub mod deno_runtime;
+pub mod deferred_authorization;
 pub mod download_manager;
 pub mod env_scrub;
+pub mod event_subscribers;
 pub mod ext_proxy;
 pub mod external_runtime;
 pub mod gateway;
 pub mod gateway_policy;
+pub mod gen_ai_spans;
 pub mod headroom;
 pub mod install_state;
 pub mod manager;
 pub mod manifest_sidecar;
 pub mod mcp;
+pub mod node_screener;
 pub mod onboarding;
+pub mod opentunnel;
+pub mod opentunnel_downloader;
+pub mod os_isolation;
+pub mod owned_loopback;
 pub mod path_manager;
 pub mod plugin_credentials;
+pub mod plugin_tunnel;
 pub mod process;
 pub mod providers;
 pub mod resources;
@@ -41,6 +53,100 @@ use std::future::Future;
 use std::pin::Pin;
 
 pub use manager::SidecarManager;
+
+/// Whether any tunnel may currently be re-originating remote traffic to Core
+/// over loopback: Tailcat's forwarding listener, a Cloudflare Quick Tunnel
+/// (whichever consumer started it: the VPN layer or webhook ingress, since a
+/// Quick Tunnel exposes every Core path either way), OpenTunnel, a plugin
+/// `network.tunnel` adapter, or Core's userspace `tailscaled` (Tailscale/Headscale),
+/// which re-originates every tailnet peer as `127.0.0.1`. While true, a loopback
+/// peer is NOT proof of a local caller. Every loopback-trust decision reads this
+/// one predicate so a new tunnel backend cannot be forgotten at one call site.
+pub(crate) fn forwarding_tunnel_active() -> bool {
+    #[cfg(test)]
+    if FORCE_FORWARDING_FOR_TEST
+        .try_with(|forced| *forced)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    tailcat::proxy_is_active()
+        || ryu_webhook_ingress::CloudflaredSource::forwarding_active()
+        || opentunnel::forwarding_active()
+        || plugin_tunnel::forwarding_active()
+        || tailscale::daemon_active()
+}
+
+/// The `host:port` a local tunnel client must dial to reach Core's listener.
+///
+/// A wildcard bind (`0.0.0.0` / `[::]`) is reachable on the matching loopback
+/// address; a specific bind (`[::1]`, a LAN address, a hostname) is reachable
+/// only on that address, so it is used as-is rather than assuming IPv4 loopback.
+pub fn tunnel_target(bind_addr: &str, port: u16) -> String {
+    use std::net::IpAddr;
+    let host = bind_addr
+        .rsplit_once(':')
+        .map_or(bind_addr, |(host, _)| host)
+        .trim();
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    match bare.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) if ip.is_unspecified() => format!("127.0.0.1:{port}"),
+        Ok(IpAddr::V6(ip)) if ip.is_unspecified() => format!("[::1]:{port}"),
+        Ok(IpAddr::V4(ip)) => format!("{ip}:{port}"),
+        Ok(IpAddr::V6(ip)) => format!("[{ip}]:{port}"),
+        Err(_) if bare.is_empty() => format!("127.0.0.1:{port}"),
+        Err(_) => format!("{bare}:{port}"),
+    }
+}
+
+/// Read a response body, refusing anything larger than `limit` bytes, so a
+/// misbehaving peer (a plugin sidecar, a relay) cannot make Core buffer an
+/// unbounded body.
+pub(crate) async fn read_body_capped(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> anyhow::Result<Vec<u8>> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        anyhow::bail!("response body exceeds {limit} bytes");
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > limit {
+            anyhow::bail!("response body exceeds {limit} bytes");
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+#[cfg(test)]
+mod tunnel_target_tests {
+    use super::tunnel_target;
+
+    #[test]
+    fn tunnel_target_follows_the_core_bind_host() {
+        assert_eq!(tunnel_target("127.0.0.1:7980", 7980), "127.0.0.1:7980");
+        assert_eq!(tunnel_target("0.0.0.0:7980", 7980), "127.0.0.1:7980");
+        assert_eq!(tunnel_target("[::]:7980", 7980), "[::1]:7980");
+        assert_eq!(tunnel_target("[::1]:7980", 7980), "[::1]:7980");
+        assert_eq!(
+            tunnel_target("192.168.1.20:7980", 7980),
+            "192.168.1.20:7980"
+        );
+        assert_eq!(tunnel_target("localhost:7980", 7980), "localhost:7980");
+        assert_eq!(tunnel_target(":7980", 7980), "127.0.0.1:7980");
+    }
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    /// Test-only: scope a request as if a tunnel were forwarding, without
+    /// flipping process-global tunnel state under parallel tests.
+    pub(crate) static FORCE_FORWARDING_FOR_TEST: bool;
+}
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
@@ -154,7 +260,7 @@ pub trait Sidecar: Send + Sync {
 
 /// Remove `~/.ryu/bin/<stem>` and `~/.ryu/bin/<stem>.exe` if they exist.
 pub(crate) async fn remove_ryu_binary(stem: &str) {
-    let bin_dir = crate::paths::ryu_dir().join("bin");
+    let bin_dir = crate::paths::bin_dir();
     let exe = format!("{stem}.exe");
     for candidate in [stem, exe.as_str()] {
         let path = bin_dir.join(candidate);
@@ -217,4 +323,9 @@ pub struct SidecarStatus {
     /// looked broken. Omitted on every healthy sidecar.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
+    /// The OS isolation recorded at this manifest sidecar's last start (mode,
+    /// backend, whether a restriction and filesystem confinement are actually
+    /// applied). Omitted for built-in sidecars and never-started ones. Additive.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<ryu_sandbox::os_isolation::IsolationStatus>,
 }

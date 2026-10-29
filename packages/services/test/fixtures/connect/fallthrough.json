@@ -1,0 +1,13 @@
+{
+  "status": 404,
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_eb11c594ee7f4c7e92e2249ded2c5543"
+  },
+  "body": {
+    "code": "not_found",
+    "error": "Connect route not found",
+    "ok": false
+  }
+}

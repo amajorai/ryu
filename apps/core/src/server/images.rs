@@ -27,6 +27,8 @@ pub struct ImageSearchQuery {
     #[serde(default)]
     pub q: String,
     pub limit: Option<u32>,
+    /// 1-based result page, so pickers can load more as the user scrolls.
+    pub page: Option<u32>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -83,6 +85,10 @@ fn bounded_limit(limit: Option<u32>) -> u32 {
     limit.unwrap_or(12).clamp(1, 24)
 }
 
+fn bounded_page(page: Option<u32>) -> u32 {
+    page.unwrap_or(1).clamp(1, 50)
+}
+
 fn https_url(value: Option<&Value>) -> Option<String> {
     let value = value.and_then(Value::as_str)?.trim();
     let parsed = url::Url::parse(value).ok()?;
@@ -96,10 +102,14 @@ fn u32_value(value: Option<&Value>) -> u32 {
         .unwrap_or(0)
 }
 
-async fn search_openverse(query: &str, limit: u32) -> Result<Vec<ImageResult>, String> {
+async fn search_openverse(query: &str, limit: u32, page: u32) -> Result<Vec<ImageResult>, String> {
     let response = image_client()
         .get(OPENVERSE_API)
-        .query(&[("q", query), ("page_size", &limit.to_string())])
+        .query(&[
+            ("q", query),
+            ("page_size", &limit.to_string()),
+            ("page", &page.to_string()),
+        ])
         .send()
         .await
         .map_err(|error| format!("openverse request failed: {error}"))?;
@@ -178,13 +188,19 @@ async fn search_openverse(query: &str, limit: u32) -> Result<Vec<ImageResult>, S
     Ok(results)
 }
 
-async fn search_unsplash(key: &str, query: &str, limit: u32) -> Result<Vec<ImageResult>, String> {
+async fn search_unsplash(
+    key: &str,
+    query: &str,
+    limit: u32,
+    page: u32,
+) -> Result<Vec<ImageResult>, String> {
     let response = image_client()
         .get(UNSPLASH_API)
         .query(&[
             ("client_id", key),
             ("query", query),
             ("per_page", &limit.to_string()),
+            ("page", &page.to_string()),
         ])
         .send()
         .await
@@ -243,7 +259,7 @@ async fn search_unsplash(key: &str, query: &str, limit: u32) -> Result<Vec<Image
     Ok(results)
 }
 
-/// `GET /api/assets/images/search?provider=openverse|unsplash&q=&limit=`.
+/// `GET /api/assets/images/search?provider=openverse|unsplash&q=&limit=&page=`.
 #[utoipa::path(
     get,
     path = "/api/assets/images/search",
@@ -259,6 +275,7 @@ pub async fn search(
     let provider = normalize_provider(&params.provider);
     let query = bounded_query(&params.q);
     let limit = bounded_limit(params.limit);
+    let page = bounded_page(params.page);
     if provider == "unsplash" {
         let Some(key) = resolve_unsplash_key(&state).await else {
             return (
@@ -270,10 +287,16 @@ pub async fn search(
                 })),
             );
         };
-        return match search_unsplash(&key, &query, limit).await {
+        return match search_unsplash(&key, &query, limit, page).await {
             Ok(results) => (
                 StatusCode::OK,
-                Json(json!({ "configured": true, "provider": "unsplash", "results": results })),
+                Json(json!({
+                    "configured": true,
+                    "provider": "unsplash",
+                    "page": page,
+                    "has_more": results.len() as u32 >= limit,
+                    "results": results,
+                })),
             ),
             Err(error) => (
                 StatusCode::BAD_GATEWAY,
@@ -284,10 +307,16 @@ pub async fn search(
         };
     }
 
-    match search_openverse(&query, limit).await {
+    match search_openverse(&query, limit, page).await {
         Ok(results) => (
             StatusCode::OK,
-            Json(json!({ "configured": true, "provider": "openverse", "results": results })),
+            Json(json!({
+                "configured": true,
+                "provider": "openverse",
+                "page": page,
+                "has_more": results.len() as u32 >= limit,
+                "results": results,
+            })),
         ),
         Err(error) => (
             StatusCode::BAD_GATEWAY,
@@ -302,6 +331,14 @@ pub async fn search(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn page_defaults_to_first_and_is_bounded() {
+        assert_eq!(bounded_page(None), 1);
+        assert_eq!(bounded_page(Some(0)), 1);
+        assert_eq!(bounded_page(Some(3)), 3);
+        assert_eq!(bounded_page(Some(500)), 50);
+    }
 
     #[test]
     fn provider_defaults_to_openverse_and_aliases_unsplash() {

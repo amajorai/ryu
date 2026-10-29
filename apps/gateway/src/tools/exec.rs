@@ -7,7 +7,7 @@
 //!     `{ok,output}` → `{ok,result}`.
 //!   - `execute` / `resume` → forward to Core's PTC endpoints (`/api/tools/exec`
 //!     and `/api/tools/exec/resume`). Those Core endpoints are **built and live**
-//!     (real Deno-subprocess sandbox + parked-execution resume); the gateway is
+//!     (real JS sandbox + parked-execution resume); the gateway is
 //!     purely the governance front and returns Core's outcome verbatim.
 //!
 //! Gating (Contract 2 / B-9): `(trusted_forwarder || master_key) &&
@@ -273,6 +273,7 @@ async fn exec_widget_tool(
             body.user_id.as_deref(),
             body.host_conversation_id.as_deref(),
             body.host_conversation_proof.as_deref(),
+            false,
         )
         .await;
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -342,6 +343,7 @@ async fn exec_kind_tool(
             body.user_id.as_deref(),
             body.host_conversation_id.as_deref(),
             body.host_conversation_proof.as_deref(),
+            false,
         )
         .await;
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -386,6 +388,7 @@ fn audit_kind_tool(
     record.user_name = ctx.user_name.clone();
     record.org_id = ctx.org_id.clone();
     record.team_id = ctx.team_id.clone();
+    record.key_id = ctx.key_id();
     record.project_id = ctx.project_id.clone();
     record.user_id = ctx.user_id.clone();
     record.agent_id = ctx.agent_id.clone();

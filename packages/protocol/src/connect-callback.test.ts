@@ -12,6 +12,24 @@ test("callback session round-trips without becoming an install or navigation int
 	expect(parseRyuDeepLink(link)).toBeNull();
 });
 
+test("callback builders preserve the requested profile scheme", () => {
+	for (const profile of [
+		"release",
+		"dev",
+		"beta",
+		"nightly",
+		"canary",
+	] as const) {
+		const link = buildConnectCallbackDeepLink("session", profile);
+		expect(
+			link.startsWith(profile === "release" ? "ryu://" : `ryu-${profile}://`)
+		).toBe(true);
+		expect(parseConnectCallbackDeepLink(link)).toEqual({
+			sessionUri: "session",
+		});
+	}
+});
+
 test("callback links cannot select credentials, accounts, nodes, or identities", () => {
 	const link = buildConnectCallbackDeepLink("session");
 	for (const suffix of [

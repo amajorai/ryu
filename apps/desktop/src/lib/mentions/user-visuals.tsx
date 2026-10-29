@@ -37,11 +37,9 @@ export function userMentionVisual(
 ): ReactNode {
 	const image = safeAvatarUrl(user.image);
 	return (
-		<Avatar aria-label={`${user.name} avatar`} className="size-3.5 shrink-0">
+		<Avatar aria-label={`${user.name} avatar`} className="shrink-0" size="xs">
 			{image ? <AvatarImage alt="" src={image} /> : null}
-			<AvatarFallback className="text-[8px]">
-				{userInitials(user.name)}
-			</AvatarFallback>
+			<AvatarFallback>{userInitials(user.name)}</AvatarFallback>
 		</Avatar>
 	);
 }

@@ -1,15 +1,26 @@
 "use client";
+import type { CSSProperties } from "react";
+import css from "./tool-result.module.css";
+
+interface Inline1Style extends CSSProperties {
+	"--tool-result-1-max-height"?: CSSProperties["maxHeight"];
+}
+
+import {
+	isNativeFunction,
+	isNativeText,
+} from "../../lib/native-primitive-observation.ts";
 
 // beui.dev/components/agents/tool-result
 
 import {
 	AgentCode,
 	type AgentCodeLanguage,
-} from "@ryu/ui/components/agents/agent-code";
-import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure";
-import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll";
-import { SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/agents/agent-code.tsx";
+import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
+import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll.tsx";
+import { SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Ban,
 	BookOpen,
@@ -36,6 +47,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { isNativeNumber } from "../../lib/native-primitive-observation.ts";
 
 export type ToolResultStatus = "running" | "success" | "error" | "cancelled";
 export type ToolResultKind = "terminal" | "request" | "custom";
@@ -80,7 +92,7 @@ function getStatusLabel(status: ToolResultStatus) {
 }
 
 function getSwapKey(value: ReactNode, fallback: string) {
-	return typeof value === "string" || typeof value === "number"
+	return isNativeText(value) || isNativeNumber(value)
 		? String(value)
 		: fallback;
 }
@@ -99,7 +111,7 @@ function getStatusClass(status: ToolResultStatus) {
 }
 
 function KindIcon({ kind, tool }: { kind: ToolResultKind; tool: ReactNode }) {
-	const toolName = typeof tool === "string" ? tool.toLowerCase() : "";
+	const toolName = isNativeText(tool) ? tool.toLowerCase() : "";
 	if (toolName.includes("read")) {
 		return <BookOpen className="size-4" />;
 	}
@@ -264,7 +276,7 @@ export function ToolResult({
 		}
 
 		const frame = requestAnimationFrame(() => {
-			if (typeof viewport.scrollTo === "function") {
+			if (isNativeFunction(viewport.scrollTo)) {
 				viewport.scrollTo({
 					top: viewport.scrollHeight,
 					behavior: reduce ? "auto" : "smooth",
@@ -290,6 +302,10 @@ export function ToolResult({
 		copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
 	}, [copyText, onCopy]);
 
+	const inline1Style: Inline1Style = {
+		"--tool-result-1-max-height":
+			maxHeight === undefined ? undefined : `${maxHeight}px`,
+	};
 	return (
 		<div
 			aria-busy={running}
@@ -319,13 +335,13 @@ export function ToolResult({
 							<ActionSwapRollText value={metaKey}>{meta}</ActionSwapRollText>
 						</span>
 					) : null}
-					<span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/55">
+					<span className="type-caption min-w-0 truncate font-mono text-muted-foreground/55">
 						<ActionSwapRollText value={toolKey}>{tool}</ActionSwapRollText>
 					</span>
 				</span>
 				<span
 					className={cn(
-						"inline-flex shrink-0 items-center gap-1 font-medium text-[11px]",
+						"type-caption inline-flex shrink-0 items-center gap-1 font-medium",
 						getStatusClass(status)
 					)}
 				>
@@ -352,10 +368,13 @@ export function ToolResult({
 					<div className="overflow-hidden rounded-xl bg-muted/80">
 						<div
 							aria-live="polite"
-							className="scroll-fade scrollbar-hide overflow-y-auto"
+							className={[
+								css.inline1,
+								"scroll-fade scrollbar-hide overflow-y-auto",
+							].join(" ")}
 							ref={viewportRef}
 							role="log"
-							style={{ maxHeight }}
+							style={inline1Style}
 						>
 							<div className={cn("p-3", contentClassName)}>{children}</div>
 						</div>
@@ -379,7 +398,7 @@ export function ToolResult({
 										<RotateCcw className="size-3.5" />
 									</ToolResultAction>
 								) : null}
-								<span className="ml-auto text-[11px] text-muted-foreground/55">
+								<span className="type-caption ml-auto text-muted-foreground/55">
 									<ActionSwapRollText value={status}>
 										{statusLabel}
 									</ActionSwapRollText>

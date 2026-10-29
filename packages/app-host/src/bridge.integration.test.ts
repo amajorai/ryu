@@ -1,3 +1,4 @@
+import type { RouteClaim } from "./rpc.ts";
 // Integration check for the host bridge wiring (#446) WITHOUT a DOM/iframe.
 //
 // The `ExtensionHost` React component can only be exercised in a real webview
@@ -10,6 +11,7 @@
 // over a real port: the part that is logic, not webview rendering.
 
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
 import {
 	asRpcRequest,
 	type Capability,
@@ -24,9 +26,22 @@ const NOT_GRANTED = /Capability not granted/;
 function services(): HostServices {
 	return {
 		listAgents: () => Promise.resolve(AGENTS),
-		registerRoute: () => Promise.resolve(null),
+		registerRoute: (claim: RouteClaim) => Promise.resolve({ path: claim.path }),
 	};
 }
+
+const portReplySchema = z.object({
+	kind: z.literal("ryu-plugin-rpc-result"),
+	id: z.number(),
+	result: z.json().optional(),
+	error: z
+		.union([
+			z.string().transform((message) => ({ message, code: undefined })),
+			z.object({ message: z.string(), code: z.string().optional() }),
+		])
+		.optional(),
+});
+type PortResult = z.infer<typeof portReplySchema>["result"];
 
 /** Attach the host's port handler (mirrors ExtensionHost.onPortMessage). */
 function attachHost(
@@ -48,11 +63,11 @@ function attachHost(
 				};
 				port.postMessage(reply);
 			})
-			.catch((err: unknown) => {
+			.catch((cause: unknown) => {
 				const reply: RpcResponse = {
 					kind: "ryu-plugin-rpc-result",
 					id: req.id,
-					error: err instanceof Error ? err.message : String(err),
+					error: cause instanceof Error ? cause.message : String(cause),
 				};
 				port.postMessage(reply);
 			});
@@ -64,28 +79,29 @@ function attachHost(
 function pluginCaller(port: MessagePort) {
 	const pending = new Map<
 		number,
-		{ resolve: (v: unknown) => void; reject: (e: Error) => void }
+		{ resolve: (value: PortResult) => void; reject: (e: Error) => void }
 	>();
 	let nextId = 1;
 	port.onmessage = (event: MessageEvent) => {
-		const msg = event.data as RpcResponse;
-		if (msg?.kind !== "ryu-plugin-rpc-result") {
+		const parsed = portReplySchema.safeParse(event.data);
+		if (!parsed.success) {
 			return;
 		}
+		const msg = parsed.data;
 		const p = pending.get(msg.id);
 		if (!p) {
 			return;
 		}
 		pending.delete(msg.id);
-		if (typeof msg.error === "string") {
-			p.reject(new Error(msg.error));
+		if (msg.error) {
+			p.reject(new Error(msg.error.message));
 		} else {
 			p.resolve(msg.result);
 		}
 	};
 	port.start?.();
 	return (method: string, args: unknown[] = []) =>
-		new Promise<unknown>((resolve, reject) => {
+		new Promise<PortResult>((resolve, reject) => {
 			const id = nextId++;
 			pending.set(id, { resolve, reject });
 			port.postMessage({ kind: "ryu-plugin-rpc", id, method, args });

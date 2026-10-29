@@ -5,15 +5,24 @@ import {
 	Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { SettingsNavRow } from "@ryu/blocks/desktop/settings-nav.tsx";
+import { SvglIcon, type SvglSpec } from "@ryu/blocks/web/svgl-icon.tsx";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+} from "react";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -43,18 +52,84 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { ImportSelection } from "@/src/lib/api/import.ts";
 import { listDirectory } from "@/src/lib/api/workspace.ts";
 
-const PROVIDERS: { label: string; value: SyncProvider }[] = [
-	{ label: "Claude", value: "claude" },
-	{ label: "Codex", value: "codex" },
-	{ label: "Cursor", value: "cursor" },
+interface ProviderOption {
+	/** Home folder under `~` offered as a one-click scan; absent when the
+	    source has no fixed home (an export download or a code project). */
+	home?: string;
+	label: string;
+	/** Bundled brand mark (`/logos/<slug>.svg`). */
+	logo: SvglSpec;
+	value: SyncProvider;
+}
+
+const PROVIDERS: ProviderOption[] = [
+	{ label: "Claude", value: "claude", home: ".claude", logo: "claude" },
+	{ label: "Codex", value: "codex", home: ".codex", logo: "codex" },
+	{
+		label: "Cursor",
+		value: "cursor",
+		home: ".cursor",
+		logo: { light: "cursor_light", dark: "cursor_dark" },
+	},
+	{ label: "OpenClaw", value: "openclaw", home: ".openclaw", logo: "openclaw" },
+	{
+		label: "Hermes",
+		value: "hermes",
+		home: ".hermes",
+		logo: { light: "hermes_light", dark: "hermes_dark" },
+	},
+	{
+		label: "ChatGPT",
+		value: "chatgpt",
+		logo: { light: "openai", dark: "openai_dark" },
+	},
+	{ label: "Claude.ai", value: "claude-ai", logo: "claude" },
+	{ label: "Muse", value: "muse", logo: "meta" },
+	{
+		label: "Dots",
+		value: "persona",
+		logo: { light: "openai", dark: "openai_dark" },
+	},
+	{
+		label: "Mastra",
+		value: "mastra",
+		logo: { light: "mastra_light", dark: "mastra_dark" },
+	},
+	{ label: "LangChain", value: "langchain", logo: "langchain" },
 ];
+
+/** Providers with a well-known home folder, offered as one-click scans. */
+const HOME_PROVIDERS = PROVIDERS.filter(
+	(entry): entry is ProviderOption & { home: string } =>
+		entry.home !== undefined
+);
+
+/** Where to point the root path for providers without a home folder. */
+const PROVIDER_ROOT_HINTS = new Map<SyncProvider, string>([
+	["chatgpt", "/Users/you/Downloads/chatgpt-export"],
+	["claude-ai", "/Users/you/Downloads/claude-export"],
+	["muse", "/Users/you/Downloads/muse-export"],
+	["persona", "/Users/you/my-dot"],
+	["mastra", "/Users/you/code/mastra-app"],
+	["langchain", "/Users/you/code/langgraph-app"],
+]);
 
 interface ProfileDraft {
 	exportEnabled: boolean;
 	id?: string;
 	importEnabled: boolean;
+	/** Omitted keeps the stored choice; a new profile starts without transcripts. */
+	includeConversations?: boolean;
 	provider: SyncProvider;
 	root: string;
+}
+
+/** Profiles carry `includeConversations` from Core; older Cores omit it (off). */
+function profileIncludesConversations(profile: AgentSyncProfile): boolean {
+	return (
+		(profile as AgentSyncProfile & { includeConversations?: unknown })
+			.includeConversations === true
+	);
 }
 
 function useAgentSyncProfiles(target: ApiTarget) {
@@ -113,6 +188,56 @@ function profileKey(profile: AgentSyncProfile): string {
 	return `${profile.provider}:${profile.root}`;
 }
 
+/** One muted sentence inside a card: the shared empty state for these lists. */
+function EmptyCard({ children }: { children: ReactNode }) {
+	return (
+		<SettingsCard className="text-center text-muted-foreground text-sm">
+			{children}
+		</SettingsCard>
+	);
+}
+
+/**
+ * A load failure as a plain sentence with Retry beside it. The raw message (an
+ * HTTP status, a schema issue list) stays available under "Details" instead of
+ * being the headline. The alert wraps the button so assistive tech announces
+ * the failure together with its recovery.
+ */
+function LoadErrorRow({
+	detail,
+	loading,
+	onRetry,
+	summary,
+}: {
+	detail: string;
+	loading: boolean;
+	onRetry: () => void;
+	summary: string;
+}) {
+	return (
+		<div role="alert">
+			<SettingsItem
+				actions={
+					<Button
+						disabled={loading}
+						onClick={onRetry}
+						size="sm"
+						variant="outline"
+					>
+						Retry
+					</Button>
+				}
+				title={summary}
+			>
+				<details className="text-muted-foreground text-xs">
+					<summary className="cursor-pointer select-none">Details</summary>
+					<span className="mt-1 block break-all font-mono">{detail}</span>
+				</details>
+			</SettingsItem>
+		</div>
+	);
+}
+
 function ProfileList({
 	profiles,
 	selectedId,
@@ -130,98 +255,139 @@ function ProfileList({
 }) {
 	if (profiles.length === 0) {
 		return (
-			<p className="text-muted-foreground text-sm">
-				No sync roots configured yet. Scan a detected root and save it below.
-			</p>
+			<EmptyCard>
+				No sync roots configured yet. Save a scanned folder to add one.
+			</EmptyCard>
 		);
 	}
 	return (
 		<SettingsGroup>
-			{profiles.map((profile) => (
-				<SettingsItem
-					actions={
-						<div className="flex items-center gap-2">
-							<Button onClick={() => onSelect(profile)} variant="outline">
-								Use
-							</Button>
-							<Badge
-								variant={
-									profile.conflictCount > 0 ? "destructive" : "secondary"
-								}
-							>
-								{profile.conflictCount > 0
-									? `${profile.conflictCount} conflicts`
-									: profile.status}
-							</Badge>
-							<div className="flex items-center gap-1.5 text-muted-foreground text-xs">
-								<span>Import</span>
-								<Switch
-									aria-label={`Enable import for ${providerLabel(profile.provider)}`}
-									checked={profile.importEnabled}
-									onCheckedChange={(checked) =>
-										onToggle(profile, "importEnabled", checked)
+			{profiles.map((profile) => {
+				const label = providerLabel(profile.provider);
+				return (
+					<SettingsItem
+						actions={
+							<div className="flex flex-wrap items-center gap-2">
+								<Badge
+									variant={
+										profile.conflictCount > 0 ? "destructive" : "secondary"
 									}
-								/>
-								<span>Export</span>
-								<Switch
-									aria-label={`Enable export for ${providerLabel(profile.provider)}`}
-									checked={profile.exportEnabled}
-									onCheckedChange={(checked) =>
-										onToggle(profile, "exportEnabled", checked)
-									}
-								/>
+								>
+									{profile.conflictCount > 0
+										? `${profile.conflictCount} conflicts`
+										: profile.status}
+								</Badge>
+								<div className="flex items-center gap-1.5 text-muted-foreground text-xs">
+									<span>Import</span>
+									<Switch
+										aria-label={`Enable import for ${label}`}
+										checked={profile.importEnabled}
+										onCheckedChange={(checked) =>
+											onToggle(profile, "importEnabled", checked)
+										}
+									/>
+									<span>Export</span>
+									<Switch
+										aria-label={`Enable export for ${label}`}
+										checked={profile.exportEnabled}
+										onCheckedChange={(checked) =>
+											onToggle(profile, "exportEnabled", checked)
+										}
+									/>
+								</div>
+								<Button
+									onClick={() => onSelect(profile)}
+									size="sm"
+									variant="outline"
+								>
+									Use
+								</Button>
 							</div>
-						</div>
-					}
-					description={
-						<span className="block truncate font-mono text-xs">
+						}
+						key={profileKey(profile)}
+						title={profile.id === selectedId ? `${label} · selected` : label}
+					>
+						<span
+							className="block truncate font-mono text-muted-foreground text-xs"
+							title={profile.root}
+						>
 							{profile.root}
 						</span>
-					}
-					key={profileKey(profile)}
-					title={`${providerLabel(profile.provider)} · ${profile.id === selectedId ? "selected" : "select"}`}
-				/>
-			))}
+					</SettingsItem>
+				);
+			})}
 		</SettingsGroup>
 	);
 }
 
 function RootDetection({
 	home,
+	homeError,
+	homeLoading,
 	onScan,
+	onRetry,
 	detected,
 }: {
 	detected: Set<string>;
+	homeError: string | null;
+	homeLoading: boolean;
 	home: string | null;
 	onScan: (path: string, provider: SyncProvider) => void;
+	onRetry: () => void;
 }) {
 	if (!home) {
+		if (homeError) {
+			return (
+				<LoadErrorRow
+					detail={homeError}
+					loading={homeLoading}
+					onRetry={onRetry}
+					summary="Couldn’t find this node’s home directory."
+				/>
+			);
+		}
 		return (
-			<p className="text-muted-foreground text-sm">
-				Detecting this node’s home directory…
-			</p>
+			<div role="status">
+				<SettingsItem
+					actions={homeLoading ? <Spinner className="size-4" /> : null}
+					title="Detecting this node’s home directory…"
+				/>
+			</div>
 		);
 	}
 	const separator = pathSeparator(home);
 	return (
-		<div className="grid gap-2 sm:grid-cols-3">
-			{PROVIDERS.map((provider) => {
-				const path = `${home}${separator}.${provider.value}`;
+		<SettingsGroup>
+			{HOME_PROVIDERS.map((provider) => {
+				const path = `${home}${separator}${provider.home}`;
 				return (
-					<Button
-						className="justify-between"
+					<SettingsNavRow
 						key={provider.value}
 						onClick={() => onScan(path, provider.value)}
-						variant="outline"
-					>
-						<span>{provider.label}</span>
-						<Badge variant={detected.has(path) ? "default" : "secondary"}>
-							{detected.has(path) ? "detected" : "scan"}
-						</Badge>
-					</Button>
+						title={
+							<span className="flex items-center gap-2.5">
+								<SvglIcon size={18} spec={provider.logo} />
+								{provider.label}
+							</span>
+						}
+						value={
+							<Badge variant={detected.has(path) ? "default" : "secondary"}>
+								{detected.has(path) ? "detected" : "scan"}
+							</Badge>
+						}
+					/>
 				);
 			})}
-		</div>
+		</SettingsGroup>
+	);
+}
+
+/** A scrolling checklist inside one card; rows are plain labels, no inner box. */
+function ChecklistCard({ children }: { children: ReactNode }) {
+	return (
+		<SettingsCard className="max-h-72 overflow-y-auto p-1.5">
+			{children}
+		</SettingsCard>
 	);
 }
 
@@ -235,19 +401,15 @@ function ScanItems({
 	selected: Set<string>;
 }) {
 	if (items.length === 0) {
-		return (
-			<p className="text-muted-foreground text-sm">
-				No supported setup items found.
-			</p>
-		);
+		return <EmptyCard>No supported setup items found.</EmptyCard>;
 	}
 	return (
-		<div className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-border/60 p-2">
+		<ChecklistCard>
 			{items.map((item) => {
 				const key = `${item.kind}:${item.id}`;
 				return (
 					<label
-						className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50"
+						className="flex cursor-pointer items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-foreground/5"
 						key={key}
 					>
 						<Checkbox
@@ -255,7 +417,9 @@ function ScanItems({
 							onCheckedChange={(checked) => onToggle(item, checked === true)}
 						/>
 						<span className="min-w-0 flex-1">
-							<span className="block truncate text-sm">{item.title}</span>
+							<span className="block truncate text-sm" title={item.title}>
+								{item.title}
+							</span>
 							<span className="block truncate font-mono text-muted-foreground text-xs">
 								{item.kind} · {item.id}
 							</span>
@@ -266,7 +430,7 @@ function ScanItems({
 					</label>
 				);
 			})}
-		</div>
+		</ChecklistCard>
 	);
 }
 
@@ -283,10 +447,10 @@ function ThreadItems({
 		return null;
 	}
 	return (
-		<div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border/60 p-2">
+		<ChecklistCard>
 			{items.map((thread) => (
 				<label
-					className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50"
+					className="flex cursor-pointer items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-foreground/5"
 					key={thread.id}
 				>
 					<Checkbox
@@ -294,7 +458,9 @@ function ThreadItems({
 						onCheckedChange={(checked) => onToggle(thread.id, checked === true)}
 					/>
 					<span className="min-w-0 flex-1">
-						<span className="block truncate text-sm">{thread.title}</span>
+						<span className="block truncate text-sm" title={thread.title}>
+							{thread.title}
+						</span>
 						<span className="block truncate font-mono text-muted-foreground text-xs">
 							{thread.native_session_id ?? thread.id} · {thread.message_count}{" "}
 							messages
@@ -302,26 +468,66 @@ function ThreadItems({
 					</span>
 				</label>
 			))}
-		</div>
+		</ChecklistCard>
 	);
 }
 
-function SyncStatusLine({ status }: { status: AgentSyncStatus | null }) {
+function MutedValue({ children }: { children: ReactNode }) {
+	return <span className="text-muted-foreground text-sm">{children}</span>;
+}
+
+function SyncStatusSection({ status }: { status: AgentSyncStatus | null }) {
 	if (!status) {
 		return null;
 	}
 	return (
-		<div className="flex flex-wrap gap-2 text-muted-foreground text-xs">
-			<span>{formatCount(status.profiles.length) ?? "—"} profiles</span>
-			<span>·</span>
-			<span>{formatCount(status.bindings.length) ?? "—"} ACP bindings</span>
-			<span>·</span>
-			<span>
-				{formatCount(status.activeOperations) ?? "—"} active operations
+		<SettingsSection title="Status">
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<MutedValue>
+							{formatCount(status.profiles.length) ?? "—"}
+						</MutedValue>
+					}
+					title="Profiles"
+				/>
+				<SettingsItem
+					actions={
+						<MutedValue>
+							{formatCount(status.bindings.length) ?? "—"}
+						</MutedValue>
+					}
+					title="ACP bindings"
+				/>
+				<SettingsItem
+					actions={
+						<MutedValue>
+							{formatCount(status.activeOperations) ?? "—"}
+						</MutedValue>
+					}
+					title="Active operations"
+				/>
+				<SettingsItem
+					actions={
+						<span className="font-mono text-muted-foreground text-xs">
+							{status.nodeId}
+						</span>
+					}
+					title="Node"
+				/>
+			</SettingsGroup>
+		</SettingsSection>
+	);
+}
+
+/** A proof record row: label on top, the (often long, monospace) value beneath. */
+function ProofRow({ title, value }: { title: string; value: string }) {
+	return (
+		<SettingsItem title={title}>
+			<span className="block break-all text-muted-foreground text-xs">
+				{value}
 			</span>
-			<span>·</span>
-			<span className="font-mono">node {status.nodeId}</span>
-		</div>
+		</SettingsItem>
 	);
 }
 
@@ -338,11 +544,11 @@ function ConflictList({
 	const conflicts =
 		status?.items.filter((item) => item.state === "conflict") ?? [];
 	if (conflicts.length === 0) {
-		return null;
+		return <EmptyCard>No conflicts.</EmptyCard>;
 	}
 	return (
-		<div className="space-y-1.5">
-			<p className="text-sm text-status-warning">
+		<>
+			<p className="px-3.5 text-status-warning text-xs leading-snug">
 				External changes are paused until reviewed.
 			</p>
 			<SettingsGroup>
@@ -352,22 +558,26 @@ function ConflictList({
 							<div className="flex gap-2">
 								<Button
 									onClick={() => onResolve(item, "keep_external")}
+									size="sm"
 									variant="outline"
 								>
 									Keep external
 								</Button>
-								<Button onClick={() => onResolve(item, "keep_ryu")}>
+								<Button onClick={() => onResolve(item, "keep_ryu")} size="sm">
 									Keep Ryu
 								</Button>
 							</div>
 						}
-						description={`${item.kind} · ${item.sourceId} · revision ${item.revision}`}
 						key={`${item.profileId}:${item.kind}:${item.sourceId}`}
 						title="Conflict paused"
-					/>
+					>
+						<span className="block truncate font-mono text-muted-foreground text-xs">
+							{`${item.kind} · ${item.sourceId} · revision ${item.revision}`}
+						</span>
+					</SettingsItem>
 				))}
 			</SettingsGroup>
-		</div>
+		</>
 	);
 }
 
@@ -381,6 +591,9 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 		status,
 	} = useAgentSyncProfiles(target);
 	const [home, setHome] = useState<string | null>(null);
+	const [homeError, setHomeError] = useState<string | null>(null);
+	const [homeLoading, setHomeLoading] = useState(true);
+	const [homeRetry, setHomeRetry] = useState(0);
 	const [detected, setDetected] = useState<Set<string>>(new Set());
 	const [selectedProfile, setSelectedProfile] =
 		useState<AgentSyncProfile | null>(null);
@@ -398,15 +611,18 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 
 	useEffect(() => {
 		let cancelled = false;
-		void listDirectory(target)
-			.then(async (listing) => {
+		async function loadDetectedRoots() {
+			setHomeLoading(true);
+			setHomeError(null);
+			try {
+				const listing = await listDirectory(target);
 				if (cancelled) {
 					return;
 				}
 				setHome(listing.home);
 				const separator = pathSeparator(listing.home);
-				const candidates = PROVIDERS.map((entry) => ({
-					path: `${listing.home}${separator}.${entry.value}`,
+				const candidates = HOME_PROVIDERS.map((entry) => ({
+					path: `${listing.home}${separator}${entry.home}`,
 					provider: entry.value,
 				}));
 				const results = await Promise.allSettled(
@@ -424,16 +640,26 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 						)
 					)
 				);
-			})
-			.catch(() => {
+			} catch (cause) {
 				if (!cancelled) {
 					setHome(null);
+					setHomeError(
+						cause instanceof Error
+							? cause.message
+							: "Could not load this node’s home directory"
+					);
 				}
-			});
+			} finally {
+				if (!cancelled) {
+					setHomeLoading(false);
+				}
+			}
+		}
+		void loadDetectedRoots();
 		return () => {
 			cancelled = true;
 		};
-	}, [target]);
+	}, [homeRetry, target]);
 
 	const onScan = useCallback(
 		async (path: string, nextProvider: SyncProvider) => {
@@ -485,7 +711,7 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 			value: boolean
 		) => {
 			try {
-				await save({
+				const saved = await save({
 					exportEnabled:
 						key === "exportEnabled" ? value : profile.exportEnabled,
 					importEnabled:
@@ -494,6 +720,9 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 					provider: profile.provider,
 					root: profile.root,
 				});
+				setSelectedProfile((current) =>
+					current?.id === saved.id ? saved : current
+				);
 			} catch (cause) {
 				setMessage(
 					cause instanceof Error ? cause.message : "Could not update profile"
@@ -502,6 +731,17 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 		},
 		[save]
 	);
+
+	const saveRoot = useCallback(async () => {
+		setMessage(null);
+		try {
+			await saveCurrentProfile({ importEnabled: true });
+		} catch (cause) {
+			setMessage(
+				cause instanceof Error ? cause.message : "Could not save sync root"
+			);
+		}
+	}, [saveCurrentProfile]);
 
 	const selectedItems = useMemo<ImportSelection[]>(
 		() =>
@@ -572,36 +812,78 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 		}
 	}, [refresh, scan, selectedThreads, target]);
 
+	const toggleSelectedItem = (item: AgentSyncScanItem, checked: boolean) => {
+		const key = `${item.kind}:${item.id}`;
+		setSelected((current) => {
+			const next = new Set(current);
+			if (checked) {
+				next.add(key);
+			} else {
+				next.delete(key);
+			}
+			return next;
+		});
+	};
+
+	const toggleSelectedThread = (id: string, checked: boolean) => {
+		setSelectedThreads((current) => {
+			const next = new Set(current);
+			if (checked) {
+				next.add(id);
+			} else {
+				next.delete(id);
+			}
+			return next;
+		});
+	};
+
 	return (
-		<div className="flex flex-col gap-4">
+		<div className="flex flex-col gap-6">
 			<SettingsSection
-				caption="Ryu reads Claude, Codex, and Cursor setup roots without changing them. Automatic import is off until you enable it for a saved root."
+				caption="Ryu reads Claude, Codex, Cursor, OpenClaw, and Hermes homes, a ChatGPT or Claude data export, a Muse download, a Dots folder, or a Mastra or LangChain project without changing them. Automatic import is off until you enable it for a saved root."
 				title="Import agent setup"
 			>
-				<SettingsCard className="flex flex-col gap-4">
-					<SyncStatusLine status={status} />
-					{profileError ? (
-						<p className="text-sm text-status-destructive">{profileError}</p>
-					) : null}
-					<RootDetection detected={detected} home={home} onScan={onScan} />
-					<div className="grid gap-3 sm:grid-cols-[1fr_150px_auto]">
-						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="agent-sync-import-root">Root path</Label>
+				<RootDetection
+					detected={detected}
+					home={home}
+					homeError={homeError}
+					homeLoading={homeLoading}
+					onRetry={() => setHomeRetry((attempt) => attempt + 1)}
+					onScan={onScan}
+				/>
+			</SettingsSection>
+
+			<SettingsSection title="Scan a folder">
+				<SettingsGroup>
+					<SettingsItem
+						actions={
 							<Input
 								id="agent-sync-import-root"
 								onChange={(event) => setRoot(event.target.value)}
-								placeholder="/Users/you/.claude"
+								placeholder={
+									PROVIDER_ROOT_HINTS.get(provider) ??
+									`/Users/you/${PROVIDERS.find((entry) => entry.value === provider)?.home ?? ".claude"}`
+								}
 								value={root}
 							/>
-						</div>
-						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="agent-sync-import-provider">Agent</Label>
+						}
+						title={
+							<Label className="font-normal" htmlFor="agent-sync-import-root">
+								Root path
+							</Label>
+						}
+					/>
+					<SettingsItem
+						actions={
 							<select
 								aria-label="Agent provider"
-								className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+								className="h-8 rounded-md border border-input bg-background px-2 text-sm"
 								id="agent-sync-import-provider"
 								onChange={(event) =>
-									setProvider(event.target.value as SyncProvider)
+									setProvider(
+										/* SAFETY: This authored select renders only PROVIDERS values, whose owner type is SyncProvider. This is a native UI selection, not a decoder for arbitrary synthetic events. */ event
+											.target.value as SyncProvider
+									)
 								}
 								value={provider}
 							>
@@ -611,159 +893,183 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 									</option>
 								))}
 							</select>
-						</div>
-						<Button
-							disabled={working || !root.trim()}
-							onClick={() => onScan(root, provider)}
-						>
-							<HugeiconsIcon className="size-4" icon={RefreshIcon} />
-							Scan
-						</Button>
-					</div>
-					<div className="flex flex-wrap gap-2">
-						<Button
-							disabled={working || !root.trim()}
-							onClick={() => void saveCurrentProfile()}
-							variant="outline"
-						>
-							Save root + enable import
-						</Button>
-						{selectedProfile ? (
-							<Badge variant="secondary">profile {selectedProfile.id}</Badge>
-						) : null}
-					</div>
-					{working ? <Spinner className="size-4" /> : null}
-				</SettingsCard>
+						}
+						title={
+							<Label
+								className="font-normal"
+								htmlFor="agent-sync-import-provider"
+							>
+								Agent
+							</Label>
+						}
+					/>
+					<SettingsItem
+						actions={
+							<div className="flex flex-wrap items-center gap-2">
+								{working ? <Spinner className="size-4" /> : null}
+								<Button
+									disabled={working || !root.trim()}
+									onClick={() => void saveRoot()}
+									size="sm"
+									variant="outline"
+								>
+									Save root + enable import
+								</Button>
+								<Button
+									disabled={working || !root.trim()}
+									onClick={() => onScan(root, provider)}
+									size="sm"
+								>
+									<HugeiconsIcon className="size-4" icon={RefreshIcon} />
+									Scan
+								</Button>
+							</div>
+						}
+						description={
+							message ? <span role="status">{message}</span> : undefined
+						}
+						title={
+							selectedProfile ? (
+								<Badge variant="secondary">profile {selectedProfile.id}</Badge>
+							) : (
+								"Not saved yet"
+							)
+						}
+					/>
+				</SettingsGroup>
 			</SettingsSection>
 
 			{scan ? (
-				<SettingsSection
-					caption={`${scan.items.length} setup items and ${scan.threads.length} native threads detected. Unsupported native history stays bundle-only.`}
-					title="Import preview"
-				>
-					<SettingsCard className="flex flex-col gap-3">
-						<div className="flex flex-wrap gap-2">
-							<Badge variant="secondary">{scan.provider}</Badge>
-							<Badge
-								variant={
-									scan.capabilities.nativeThreads ? "default" : "secondary"
-								}
-							>
-								{scan.capabilities.nativeThreads
-									? "native threads readable"
-									: "bundle-only threads"}
-							</Badge>
-							<Badge variant="secondary">
-								ACP{" "}
-								{scan.capabilities.acpLoadResume === true
-									? "resume"
-									: "replay fallback"}
-							</Badge>
-						</div>
-						<ScanItems
-							items={scan.items}
-							onToggle={(item, checked) => {
-								const key = `${item.kind}:${item.id}`;
-								setSelected((current) => {
-									const next = new Set(current);
-									if (checked) {
-										next.add(key);
-									} else {
-										next.delete(key);
-									}
-									return next;
-								});
-							}}
-							selected={selected}
-						/>
-						{scan.threads.length > 0 ? (
-							<>
-								<div className="flex items-center justify-between gap-2">
-									<Label>Native threads</Label>
-									<Badge variant={scan.agentId ? "default" : "secondary"}>
-										{scan.agentId ? "ACP-backed import" : "agent unavailable"}
+				<>
+					<SettingsSection
+						caption={`${scan.items.length} setup items and ${scan.threads.length} native threads detected. Unsupported native history stays bundle-only.`}
+						title="Import preview"
+					>
+						<SettingsItem
+							actions={
+								<div className="flex flex-wrap justify-end gap-2">
+									<Badge variant="secondary">{scan.provider}</Badge>
+									<Badge
+										variant={
+											scan.capabilities.nativeThreads ? "default" : "secondary"
+										}
+									>
+										{scan.capabilities.nativeThreads
+											? "native threads readable"
+											: "bundle-only threads"}
+									</Badge>
+									<Badge variant="secondary">
+										ACP{" "}
+										{scan.capabilities.acpLoadResume === true
+											? "resume"
+											: "replay fallback"}
 									</Badge>
 								</div>
-								<ThreadItems
-									items={scan.threads}
-									onToggle={(id, checked) => {
-										setSelectedThreads((current) => {
-											const next = new Set(current);
-											if (checked) {
-												next.add(id);
-											} else {
-												next.delete(id);
-											}
-											return next;
-										});
-									}}
-									selected={selectedThreads}
-								/>
+							}
+							title="Source"
+						/>
+					</SettingsSection>
+
+					<SettingsSection
+						headerAction={
+							<div className="flex gap-2">
+								<Button
+									disabled={working || selectedItems.length === 0}
+									onClick={() => void runImport(true)}
+									size="sm"
+									variant="outline"
+								>
+									Preview selected
+								</Button>
+								<Button
+									disabled={working || selectedItems.length === 0}
+									onClick={() => void runImport(false)}
+									size="sm"
+								>
+									<HugeiconsIcon className="size-4" icon={Download01Icon} />
+									Import selected
+								</Button>
+							</div>
+						}
+						title="Setup items"
+					>
+						<ScanItems
+							items={scan.items}
+							onToggle={toggleSelectedItem}
+							selected={selected}
+						/>
+					</SettingsSection>
+
+					{scan.threads.length > 0 ? (
+						<SettingsSection
+							headerAction={
 								<Button
 									disabled={
 										working || !scan.agentId || selectedThreads.size === 0
 									}
 									onClick={() => void runThreadImport()}
+									size="sm"
 									variant="outline"
 								>
 									Import selected threads
 								</Button>
-							</>
-						) : null}
-						{scan.warnings.map((warning) => (
-							<p className="text-status-warning text-xs" key={warning}>
-								{warning}
-							</p>
-						))}
-						<div className="flex flex-wrap gap-2">
-							<Button
-								disabled={working || selectedItems.length === 0}
-								onClick={() => void runImport(true)}
-								variant="outline"
-							>
-								Preview selected
-							</Button>
-							<Button
-								disabled={working || selectedItems.length === 0}
-								onClick={() => void runImport(false)}
-							>
-								<HugeiconsIcon className="size-4" icon={Download01Icon} />
-								Import selected
-							</Button>
-						</div>
-						{message ? (
-							<p className="text-muted-foreground text-sm">{message}</p>
-						) : null}
-					</SettingsCard>
-				</SettingsSection>
+							}
+							title="Native threads"
+						>
+							<SettingsItem
+								actions={
+									<Badge variant={scan.agentId ? "default" : "secondary"}>
+										{scan.agentId ? "ACP-backed import" : "agent unavailable"}
+									</Badge>
+								}
+								title="Import path"
+							/>
+							<ThreadItems
+								items={scan.threads}
+								onToggle={toggleSelectedThread}
+								selected={selectedThreads}
+							/>
+						</SettingsSection>
+					) : null}
+
+					{scan.warnings.length > 0 ? (
+						<SettingsSection title="Review before cutover">
+							<SettingsCard className="flex flex-col gap-1.5">
+								{scan.warnings.map((warning) => (
+									<p className="text-sm text-status-warning" key={warning}>
+										{warning}
+									</p>
+								))}
+							</SettingsCard>
+						</SettingsSection>
+					) : null}
+				</>
 			) : null}
+
 			{importResult ? (
 				<SettingsSection
 					caption="In-app proof of the last import operation."
 					title="Sync proof"
 				>
-					<SettingsCard className="grid gap-3 sm:grid-cols-2">
-						<SettingsItem
-							description={`${status?.profiles.length ?? 0} profiles · ${status?.bindings.length ?? 0} ACP bindings`}
+					<SettingsGroup>
+						<ProofRow
 							title="Profiles and bindings"
+							value={`${status?.profiles.length ?? 0} profiles · ${status?.bindings.length ?? 0} ACP bindings`}
 						/>
-						<SettingsItem
-							description={importResult.operationId}
-							title="Operation ID"
-						/>
-						<SettingsItem
-							description={`${importResult.imported} imported · ${importResult.skipped} skipped · ${importResult.failed} failed`}
+						<ProofRow title="Operation ID" value={importResult.operationId} />
+						<ProofRow
 							title="Imported counts"
+							value={`${importResult.imported} imported · ${importResult.skipped} skipped · ${importResult.failed} failed`}
 						/>
-						<SettingsItem
-							description={`${importResult.conflicts} conflicts`}
+						<ProofRow
 							title="Conflict count"
+							value={`${importResult.conflicts} conflicts`}
 						/>
-						<SettingsItem
-							description={`${status?.bindings.filter((binding) => binding.capabilities && JSON.stringify(binding.capabilities).includes("loadSession")).length ?? 0} capability records · replay fallback remains available`}
+						<ProofRow
 							title="ACP resume versus replay"
+							value={`${status?.bindings.filter((binding) => binding.capabilities && JSON.stringify(binding.capabilities).includes("loadSession")).length ?? 0} capability records · replay fallback remains available`}
 						/>
-					</SettingsCard>
+					</SettingsGroup>
 				</SettingsSection>
 			) : null}
 
@@ -771,20 +1077,37 @@ export function AgentSyncImportSection({ target }: { target: ApiTarget }) {
 				caption="Import and export switches are independent per root. A generated bundle hash is recorded so retries never create duplicate Ryu items."
 				title="Configured roots"
 			>
-				<SettingsCard>
-					{loading ? <Spinner className="size-4" /> : null}
+				{loading ? (
+					<SettingsCard>
+						<SkeletonRows label="Loading sync roots…" />
+					</SettingsCard>
+				) : profileError ? (
+					<LoadErrorRow
+						detail={profileError}
+						loading={loading}
+						onRetry={() => void refresh()}
+						summary="Couldn’t load sync roots."
+					/>
+				) : (
 					<ProfileList
 						onSelect={(profile) => {
 							setSelectedProfile(profile);
 							setProvider(profile.provider);
 							setRoot(profile.root);
+							setScan(null);
+							setSelected(new Set());
+							setSelectedThreads(new Set());
+							setImportResult(null);
+							setMessage(null);
 						}}
 						onToggle={toggleProfile}
 						profiles={profiles}
 						selectedId={selectedProfile?.id ?? null}
 					/>
-				</SettingsCard>
+				)}
 			</SettingsSection>
+
+			<SyncStatusSection status={status} />
 		</div>
 	);
 }
@@ -803,7 +1126,8 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 	const [destination, setDestination] = useState("");
 	const [includeAgents, setIncludeAgents] = useState(true);
 	const [includeSkills, setIncludeSkills] = useState(true);
-	const [includeConversations, setIncludeConversations] = useState(true);
+	// Transcripts leave the encrypted data folder as plaintext: opt-in only.
+	const [includeConversations, setIncludeConversations] = useState(false);
 	const [working, setWorking] = useState(false);
 	const [result, setResult] = useState<AgentSyncExportResult | null>(null);
 	const [resumeResults, setResumeResults] = useState<AgentSyncResumeResult[]>(
@@ -818,7 +1142,7 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 			value: boolean
 		) => {
 			try {
-				await save({
+				const saved = await save({
 					exportEnabled:
 						key === "exportEnabled" ? value : profile.exportEnabled,
 					importEnabled:
@@ -827,6 +1151,9 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 					provider: profile.provider,
 					root: profile.root,
 				});
+				setSelectedProfile((current) =>
+					current?.id === saved.id ? saved : current
+				);
 			} catch (cause) {
 				setMessage(
 					cause instanceof Error ? cause.message : "Could not update profile"
@@ -834,6 +1161,33 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 			}
 		},
 		[save]
+	);
+
+	const changeIncludeConversations = useCallback(
+		async (value: boolean) => {
+			setIncludeConversations(value);
+			if (!selectedProfile) {
+				return;
+			}
+			// Persist the choice on the selected destination so automatic
+			// exports follow it.
+			try {
+				const saved = await save({
+					exportEnabled: selectedProfile.exportEnabled,
+					id: selectedProfile.id,
+					importEnabled: selectedProfile.importEnabled,
+					includeConversations: value,
+					provider: selectedProfile.provider,
+					root: selectedProfile.root,
+				});
+				setSelectedProfile(saved);
+			} catch (cause) {
+				setMessage(
+					cause instanceof Error ? cause.message : "Could not update profile"
+				);
+			}
+		},
+		[save, selectedProfile]
 	);
 
 	const runExport = useCallback(
@@ -924,112 +1278,156 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 	);
 
 	return (
-		<div className="flex flex-col gap-4">
+		<div className="flex flex-col gap-6">
 			<SettingsSection
 				caption="Export is opt-in and writes one versioned portable bundle to the destination you choose. Ryu never fabricates Claude, Codex, or Cursor transcript files."
 				title="Export Ryu data"
 			>
-				<SettingsCard className="flex flex-col gap-4">
-					<SyncStatusLine status={status} />
-					{profileError ? (
-						<p className="text-sm text-status-destructive">{profileError}</p>
-					) : null}
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="agent-sync-export-destination">
-							Destination folder
-						</Label>
-						<div className="flex gap-2">
-							<Input
-								id="agent-sync-export-destination"
-								onChange={(event) => setDestination(event.target.value)}
-								placeholder="/Users/you/.claude"
-								value={destination}
-							/>
+				<SettingsGroup>
+					<SettingsItem
+						actions={
 							<Button
 								disabled={!selectedProfile}
 								onClick={() => setDestination(selectedProfile?.root ?? "")}
+								size="sm"
 								variant="outline"
 							>
 								<HugeiconsIcon className="size-4" icon={FolderOpenIcon} />
 								Use selected root
 							</Button>
-						</div>
-					</div>
-					<div className="grid gap-2 sm:grid-cols-3">
-						<label className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-							<Checkbox
-								checked={includeAgents}
-								onCheckedChange={(checked) =>
-									setIncludeAgents(checked === true)
-								}
-							/>
-							Agent definitions
-						</label>
-						<label className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-							<Checkbox
-								checked={includeConversations}
-								onCheckedChange={(checked) =>
-									setIncludeConversations(checked === true)
-								}
-							/>
-							Conversation transcripts
-						</label>
-						<label className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-							<Checkbox
-								checked={includeSkills}
-								onCheckedChange={(checked) =>
-									setIncludeSkills(checked === true)
-								}
-							/>
-							Agent Skills
-						</label>
-					</div>
-					<div className="flex flex-wrap gap-2">
-						<Button
-							disabled={working || !destination.trim()}
-							onClick={() => void runExport(true)}
-							variant="outline"
-						>
-							Preview bundle
-						</Button>
-						<Button
-							disabled={working || !destination.trim()}
-							onClick={() => void runExport(false)}
-						>
-							<HugeiconsIcon className="size-4" icon={Upload01Icon} />
-							Export bundle
-						</Button>
-						<Button
-							disabled={working || (status?.bindings.length ?? 0) === 0}
-							onClick={() => void runAcpResume()}
-							variant="outline"
-						>
-							Test ACP resume/load
-						</Button>
-						{working ? <Spinner className="size-4" /> : null}
-					</div>
-					{message ? (
-						<p className="text-muted-foreground text-sm">{message}</p>
-					) : null}
-				</SettingsCard>
+						}
+						title={
+							<Label
+								className="font-normal"
+								htmlFor="agent-sync-export-destination"
+							>
+								Destination folder
+							</Label>
+						}
+					>
+						<Input
+							id="agent-sync-export-destination"
+							onChange={(event) => setDestination(event.target.value)}
+							placeholder="/Users/you/.claude"
+							value={destination}
+						/>
+					</SettingsItem>
+					<SettingsItem
+						title={
+							<label className="flex cursor-pointer items-center gap-2.5">
+								<Checkbox
+									checked={includeAgents}
+									onCheckedChange={(checked) =>
+										setIncludeAgents(checked === true)
+									}
+								/>
+								Agent definitions
+							</label>
+						}
+					/>
+					<SettingsItem
+						description={
+							includeConversations ? (
+								<span role="note">
+									Conversation transcripts are written in plain text to the
+									destination folder, outside Ryu's encrypted data folder.
+									Anyone or any tool that can read that folder can read them.
+								</span>
+							) : undefined
+						}
+						title={
+							<label className="flex cursor-pointer items-center gap-2.5">
+								<Checkbox
+									checked={includeConversations}
+									onCheckedChange={(checked) =>
+										void changeIncludeConversations(checked === true)
+									}
+								/>
+								Conversation transcripts
+							</label>
+						}
+					/>
+					<SettingsItem
+						title={
+							<label className="flex cursor-pointer items-center gap-2.5">
+								<Checkbox
+									checked={includeSkills}
+									onCheckedChange={(checked) =>
+										setIncludeSkills(checked === true)
+									}
+								/>
+								Agent Skills
+							</label>
+						}
+					/>
+					<SettingsItem
+						actions={
+							<div className="flex flex-wrap items-center gap-2">
+								{working ? <Spinner className="size-4" /> : null}
+								<Button
+									disabled={working || !destination.trim()}
+									onClick={() => void runExport(true)}
+									size="sm"
+									variant="outline"
+								>
+									Preview bundle
+								</Button>
+								<Button
+									disabled={working || !destination.trim()}
+									onClick={() => void runExport(false)}
+									size="sm"
+								>
+									<HugeiconsIcon className="size-4" icon={Upload01Icon} />
+									Export bundle
+								</Button>
+							</div>
+						}
+						title="Bundle"
+					/>
+					<SettingsItem
+						actions={
+							<Button
+								disabled={working || (status?.bindings.length ?? 0) === 0}
+								onClick={() => void runAcpResume()}
+								size="sm"
+								variant="outline"
+							>
+								Test ACP resume/load
+							</Button>
+						}
+						description={message ?? undefined}
+						title="ACP sessions"
+					/>
+				</SettingsGroup>
 			</SettingsSection>
 
 			<SettingsSection
-				caption="Select a profile to persist export automation for that destination. Native setup projections are limited to supported, explicitly selected formats; conversations remain in the bundle."
+				caption="Select a profile to persist export automation for that destination. Native setup projections are limited to supported, explicitly selected formats. Automatic exports include conversation transcripts only when you tick them for that destination."
 				title="Export destinations"
 			>
-				<SettingsCard>
-					{loading ? <Spinner className="size-4" /> : null}
+				{loading ? (
+					<SettingsCard>
+						<SkeletonRows label="Loading sync roots…" />
+					</SettingsCard>
+				) : profileError ? (
+					<LoadErrorRow
+						detail={profileError}
+						loading={loading}
+						onRetry={() => void refresh()}
+						summary="Couldn’t load sync roots."
+					/>
+				) : (
 					<ProfileList
 						onSelect={(profile) => {
 							setSelectedProfile(profile);
 							setDestination(profile.root);
+							setIncludeConversations(profileIncludesConversations(profile));
 						}}
 						onToggle={toggleProfile}
 						profiles={profiles}
 						selectedId={selectedProfile?.id ?? null}
 					/>
-				</SettingsCard>
+				)}
 			</SettingsSection>
 
 			{result ? (
@@ -1037,50 +1435,45 @@ export function AgentSyncExportSection({ target }: { target: ApiTarget }) {
 					caption="This is the in-app verification record for the last operation."
 					title="Sync proof"
 				>
-					<SettingsCard className="grid gap-3 sm:grid-cols-2">
-						<SettingsItem
-							description={result.operationId}
-							title="Operation ID"
-						/>
-						<SettingsItem
-							description={result.bundleHash}
-							title="Bundle SHA-256"
-						/>
-						<SettingsItem
-							description={`${result.agents} agents · ${result.skills} skills · ${result.conversations} conversations · ${result.messages} messages`}
+					<SettingsGroup>
+						<ProofRow title="Operation ID" value={result.operationId} />
+						<ProofRow title="Bundle SHA-256" value={result.bundleHash} />
+						<ProofRow
 							title="Projected counts"
+							value={`${result.agents} agents · ${result.skills} skills · ${result.conversations} conversations · ${result.messages} messages`}
 						/>
-						<SettingsItem
-							description={`${result.acpResume.filter((entry) => entry.mode !== "replay").length} ACP loads/resumes · ${result.acpResume.filter((entry) => entry.mode === "replay").length} transcript replays`}
+						<ProofRow
 							title="ACP persistence"
+							value={`${result.acpResume.filter((entry) => entry.mode !== "replay").length} ACP loads/resumes · ${result.acpResume.filter((entry) => entry.mode === "replay").length} transcript replays`}
 						/>
-						<SettingsItem description={result.bundlePath} title="Bundle path" />
-						<SettingsItem
-							description={`${result.conflicts} conflicts · ${result.projectedFiles} files written`}
+						<ProofRow title="Bundle path" value={result.bundlePath} />
+						<ProofRow
 							title="Safety result"
+							value={`${result.conflicts} conflicts · ${result.projectedFiles} files written`}
 						/>
 						{resumeResults.length > 0 ? (
-							<SettingsItem
-								description={`${resumeResults.filter((entry) => entry.mode !== "replay").length} load/resume · ${resumeResults.filter((entry) => entry.mode === "replay").length} replay fallback`}
+							<ProofRow
 								title="ACP resume proof"
+								value={`${resumeResults.filter((entry) => entry.mode !== "replay").length} load/resume · ${resumeResults.filter((entry) => entry.mode === "replay").length} replay fallback`}
 							/>
 						) : null}
-					</SettingsCard>
+					</SettingsGroup>
 				</SettingsSection>
 			) : null}
+
 			<SettingsSection
 				caption="Ryu preserves conflicting output until you make an explicit choice."
 				title="Conflicts"
 			>
-				<SettingsCard>
-					<ConflictList
-						onResolve={(item, resolution) =>
-							void resolveConflict(item, resolution)
-						}
-						status={status}
-					/>
-				</SettingsCard>
+				<ConflictList
+					onResolve={(item, resolution) =>
+						void resolveConflict(item, resolution)
+					}
+					status={status}
+				/>
 			</SettingsSection>
+
+			<SyncStatusSection status={status} />
 		</div>
 	);
 }

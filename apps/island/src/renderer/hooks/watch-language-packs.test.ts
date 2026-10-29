@@ -48,3 +48,34 @@ process.stdout.write(JSON.stringify({hidden,overlapping,hiddenDeliveries,visible
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+test("catalog refresh reads from a caller-supplied bridge (the screen window)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "ryu-island-language-packs-"));
+	try {
+		await copyFile(
+			join(import.meta.dirname, "watch-language-packs.ts"),
+			join(root, "watch.ts")
+		);
+		await writeFile(
+			join(root, "run.ts"),
+			`
+import {watchLanguagePacks} from "./watch.ts";
+const win=new EventTarget();const doc=new EventTarget();doc.hidden=false;globalThis.window=win;globalThis.document=doc;
+win.setInterval=()=>1;win.clearInterval=()=>undefined;
+let calls=0;const received=[];const pack={id:"official/ar"};
+const source={get:async()=>{calls++;return {available:true,packs:[pack]};}};
+const stop=watchLanguagePacks(packs=>received.push(packs),source);await Bun.sleep(0);stop();
+process.stdout.write(JSON.stringify({calls,received}));
+`
+		);
+		const child = Bun.spawn([process.execPath, join(root, "run.ts")], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const result = await new Response(child.stdout).json();
+		expect(await child.exited).toBe(0);
+		expect(result).toEqual({ calls: 1, received: [[{ id: "official/ar" }]] });
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

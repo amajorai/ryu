@@ -12,7 +12,9 @@ use anyhow::{bail, Context, Result};
 use tokio::process::Command;
 
 use crate::catalog::registry;
-use crate::sidecar::download_manager::{ryu_dir, VersionStore};
+use ryu_sidecar_runtime::layout::EngineGroup;
+
+use crate::sidecar::download_manager::{engine_dir, VersionStore};
 use crate::win_process::NoWindow;
 
 /// Version-store key shared by the catalog, manager, and install route.
@@ -35,14 +37,15 @@ pub fn ensure_supported() -> Result<()> {
     )
 }
 
-/// The optional Ryu-managed location for an operator-provided binary.
+/// The optional Ryu-managed location for an operator-provided binary
+/// (`<data dir>/engines/chat/mlx-serve/`).
 pub fn managed_binary_path() -> PathBuf {
     let name = if cfg!(target_os = "windows") {
         "mlx-serve.exe"
     } else {
         "mlx-serve"
     };
-    ryu_dir().join("bin").join(name)
+    engine_dir(EngineGroup::Chat, "mlx-serve").join(name)
 }
 
 fn candidates() -> Vec<String> {

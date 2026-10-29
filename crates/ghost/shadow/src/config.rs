@@ -1,4 +1,3 @@
-use std::fs;
 use std::io;
 use std::path::PathBuf;
 
@@ -35,13 +34,20 @@ impl DataPaths {
     }
 
     /// Create all required directories if they don't exist.
+    /// Every directory is owner-only (0700 on Unix): it holds screen history.
     pub fn ensure_dirs(&self) -> io::Result<()> {
-        fs::create_dir_all(&self.events)?;
-        fs::create_dir_all(&self.media_video)?;
-        fs::create_dir_all(&self.media_audio)?;
-        fs::create_dir_all(&self.media_keyframes)?;
-        fs::create_dir_all(&self.indices)?;
-        fs::create_dir_all(&self.context)?;
+        for dir in [
+            &self.root,
+            &self.events,
+            &self.root.join("media"),
+            &self.media_video,
+            &self.media_audio,
+            &self.media_keyframes,
+            &self.indices,
+            &self.context,
+        ] {
+            crate::seal::create_private_dir(dir)?;
+        }
         Ok(())
     }
 

@@ -10,9 +10,9 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/ego-browser",
   "name": "Ego Browser",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
-  "description": "Ego lite (https://github.com/citrolabs/ego-lite) as an optional provider for Ryu's swappable browser.control layer. One sealed dispatcher launches the installed ego-browser CLI in a conversation-scoped Ego Space, while small adapters keep agents on the stable browser.navigate, browser.tabs, browser.snapshot, browser.click, browser.type, browser.scroll, and browser.screenshot verbs. Requires the Ego lite macOS app and ego-browser on PATH; Ryu does not install Ego lite or copy browser login state.",
+  "description": "Ego lite (https://github.com/citrolabs/ego-lite) as an optional provider for Ryu's swappable browser.control layer. Immutable operation tools launch the installed ego-browser CLI in a conversation-scoped Ego Space while small adapters preserve the stable browser.* verbs. Tabs, snapshot and screenshot carry read-only effect metadata; navigation, click, type, scroll and the legacy mixed dispatcher are conservatively mutating. Caller input cannot change an operation tool into another action. Requires the Ego lite macOS app and ego-browser on PATH; Ryu does not install Ego lite or copy browser login state.",
   "icon": "ai-browser",
   "iconDither": {
     "from": 3,
@@ -62,7 +62,11 @@
       "kind": "tool",
       "config": {
         "slug": "ego_browser.dispatch",
-        "backend": "inline_deno",
+        "backend": "inline_js",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true
+        },
         "timeout_secs": 60,
         "description": "Dispatch one validated browser operation to the conversation-scoped Ego lite Space.",
         "input_schema": {
@@ -110,7 +114,237 @@
           "required": ["operation"],
           "additionalProperties": false
         },
-        "code": "// Tool body for `ego_browser.dispatch`, run in Core's Deno sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_deno runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\nconst child = new Deno.Command(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: \"piped\",\n\tstdout: \"piped\",\n\tstderr: \"piped\",\n}).spawn();\nconst writer = child.stdin.getWriter();\nawait writer.write(new TextEncoder().encode(childScript));\nawait writer.close();\nconst output = await child.output();\nconst stdout = new TextDecoder().decode(output.stdout);\nconst stderr = new TextDecoder().decode(output.stderr).trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
+        "code": "// Tool body for `ego_browser.dispatch`, run in Core's JS sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_js runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\n// Core starts only programs this manifest's `run` list names (child_process).\nconst output = await childProcess.run(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: childScript,\n});\nconst stdout = output.stdout;\nconst stderr = output.stderr.trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
+      }
+    },
+    {
+      "id": "tool-ego-browser-tabs",
+      "name": "Ego Browser tabs",
+      "kind": "tool",
+      "config": {
+        "slug": "ego_browser.tabs",
+        "backend": "inline_js",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false
+        },
+        "timeout_secs": 60,
+        "description": "Run the immutable tabs operation in the conversation-scoped Ego Space.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "tabs"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "code": "input.operation = \"tabs\";\n// Tool body for `ego_browser.dispatch`, run in Core's JS sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_js runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\n// Core starts only programs this manifest's `run` list names (child_process).\nconst output = await childProcess.run(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: childScript,\n});\nconst stdout = output.stdout;\nconst stderr = output.stderr.trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
+      }
+    },
+    {
+      "id": "tool-ego-browser-navigate",
+      "name": "Ego Browser navigate",
+      "kind": "tool",
+      "config": {
+        "slug": "ego_browser.navigate",
+        "backend": "inline_js",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true
+        },
+        "timeout_secs": 60,
+        "description": "Run the immutable navigate operation in the conversation-scoped Ego Space.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "navigate"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": ["url"],
+          "additionalProperties": false
+        },
+        "code": "input.operation = \"navigate\";\n// Tool body for `ego_browser.dispatch`, run in Core's JS sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_js runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\n// Core starts only programs this manifest's `run` list names (child_process).\nconst output = await childProcess.run(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: childScript,\n});\nconst stdout = output.stdout;\nconst stderr = output.stderr.trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
+      }
+    },
+    {
+      "id": "tool-ego-browser-snapshot",
+      "name": "Ego Browser snapshot",
+      "kind": "tool",
+      "config": {
+        "slug": "ego_browser.snapshot",
+        "backend": "inline_js",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false
+        },
+        "timeout_secs": 60,
+        "description": "Run the immutable snapshot operation in the conversation-scoped Ego Space.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "snapshot"
+            },
+            "tab_id": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "code": "input.operation = \"snapshot\";\n// Tool body for `ego_browser.dispatch`, run in Core's JS sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_js runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\n// Core starts only programs this manifest's `run` list names (child_process).\nconst output = await childProcess.run(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: childScript,\n});\nconst stdout = output.stdout;\nconst stderr = output.stderr.trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
+      }
+    },
+    {
+      "id": "tool-ego-browser-click",
+      "name": "Ego Browser click",
+      "kind": "tool",
+      "config": {
+        "slug": "ego_browser.click",
+        "backend": "inline_js",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true
+        },
+        "timeout_secs": 60,
+        "description": "Run the immutable click operation in the conversation-scoped Ego Space.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "click"
+            },
+            "tab_id": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            }
+          },
+          "required": ["ref"],
+          "additionalProperties": false
+        },
+        "code": "input.operation = \"click\";\n// Tool body for `ego_browser.dispatch`, run in Core's JS sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_js runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\n// Core starts only programs this manifest's `run` list names (child_process).\nconst output = await childProcess.run(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: childScript,\n});\nconst stdout = output.stdout;\nconst stderr = output.stderr.trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
+      }
+    },
+    {
+      "id": "tool-ego-browser-type",
+      "name": "Ego Browser type",
+      "kind": "tool",
+      "config": {
+        "slug": "ego_browser.type",
+        "backend": "inline_js",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true
+        },
+        "timeout_secs": 60,
+        "description": "Run the immutable type operation in the conversation-scoped Ego Space.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "type"
+            },
+            "tab_id": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "submit": {
+              "type": "boolean"
+            }
+          },
+          "required": ["ref", "text"],
+          "additionalProperties": false
+        },
+        "code": "input.operation = \"type\";\n// Tool body for `ego_browser.dispatch`, run in Core's JS sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_js runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\n// Core starts only programs this manifest's `run` list names (child_process).\nconst output = await childProcess.run(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: childScript,\n});\nconst stdout = output.stdout;\nconst stderr = output.stderr.trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
+      }
+    },
+    {
+      "id": "tool-ego-browser-scroll",
+      "name": "Ego Browser scroll",
+      "kind": "tool",
+      "config": {
+        "slug": "ego_browser.scroll",
+        "backend": "inline_js",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true
+        },
+        "timeout_secs": 60,
+        "description": "Run the immutable scroll operation in the conversation-scoped Ego Space.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "scroll"
+            },
+            "tab_id": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string",
+              "enum": ["up", "down", "left", "right"]
+            },
+            "amount": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": ["direction"],
+          "additionalProperties": false
+        },
+        "code": "input.operation = \"scroll\";\n// Tool body for `ego_browser.dispatch`, run in Core's JS sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_js runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\n// Core starts only programs this manifest's `run` list names (child_process).\nconst output = await childProcess.run(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: childScript,\n});\nconst stdout = output.stdout;\nconst stderr = output.stderr.trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
+      }
+    },
+    {
+      "id": "tool-ego-browser-screenshot",
+      "name": "Ego Browser screenshot",
+      "kind": "tool",
+      "config": {
+        "slug": "ego_browser.screenshot",
+        "backend": "inline_js",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false
+        },
+        "timeout_secs": 60,
+        "description": "Run the immutable screenshot operation in the conversation-scoped Ego Space.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "const": "screenshot"
+            },
+            "tab_id": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "code": "input.operation = \"screenshot\";\n// Tool body for `ego_browser.dispatch`, run in Core's JS sandbox.\n//\n// This file is the readable authoring source. `build.mjs` seals it into the one\n// inline_js runnable in manifest.json so the signed wire manifest stays\n// self-contained. The seven canonical browser verbs use tiny code_file adapters\n// that add the immutable operation name and call this dispatcher.\n\nconst RESULT_PREFIX = \"__RYU_EGO_RESULT_V1__:\";\nconst operations = new Set([\n\t\"tabs\",\n\t\"navigate\",\n\t\"snapshot\",\n\t\"click\",\n\t\"type\",\n\t\"scroll\",\n\t\"screenshot\",\n]);\nconst operation = String(input.operation ?? \"\");\nif (!operations.has(operation)) {\n\tthrow new Error(`unsupported Ego Browser operation: ${operation}`);\n}\n\nconst scope = String(\n\tcaller?.conversation_id ?? caller?.agent_id ?? \"default\"\n)\n\t.replace(/[^a-zA-Z0-9_.-]/g, \"-\")\n\t.slice(0, 80) || \"default\";\nconst taskSpace = caller?.conversation_id\n\t? `ryu-conversation-${scope}`\n\t: `ryu-agent-${scope}`;\nconst inputJson = JSON.stringify(input ?? {});\nconst childScript = `\nawait taskSpaces.useOrCreate(${JSON.stringify(taskSpace)});\nconst input = JSON.parse(${JSON.stringify(inputJson)});\nconst operation = ${JSON.stringify(operation)};\n\nconst resolveTab = async () => {\n\tconst tabs = await browser.listTabs({ includeChrome: false });\n\tconst targetId = input.tab_id || tabs.find((tab) => tab.active)?.targetId || tabs[0]?.targetId;\n\tif (!targetId) throw new Error(\"ego-browser has no open tabs\");\n\tawait browser.switchTab(targetId);\n\treturn targetId;\n};\n\nlet result;\nif (operation === \"tabs\") {\n\tresult = { tabs: await browser.listTabs({ includeChrome: false }) };\n} else if (operation === \"navigate\") {\n\tif (typeof input.url !== \"string\" || input.url.trim() === \"\") {\n\t\tthrow new Error(\"browser.navigate requires a non-empty url\");\n\t}\n\tconst tab = await browser.openOrReuseTab(input.url, { wait: true });\n\tresult = { tab_id: tab.targetId, tab };\n} else if (operation === \"snapshot\") {\n\tif (input.tab_id !== undefined && typeof input.tab_id !== \"string\") {\n\t\tthrow new Error(\"browser.snapshot tab_id must be a string\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst raw = await page.snapshotRaw();\n\tresult = { tab_id: tabId, snapshot: raw.content, refs: raw.refs };\n} else if (operation === \"click\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.click requires a ref\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).click();\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"type\") {\n\tif (typeof input.ref !== \"string\" || input.ref.trim() === \"\") {\n\t\tthrow new Error(\"browser.type requires a ref\");\n\t}\n\tif (typeof input.text !== \"string\") {\n\t\tthrow new Error(\"browser.type requires text\");\n\t}\n\tconst tabId = await resolveTab();\n\tawait page.locator(input.ref).fill(input.text, { clearFirst: input.replace === true });\n\tif (input.submit === true) await page.locator(input.ref).press(\"Enter\");\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"scroll\") {\n\tconst vectors = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };\n\tconst vector = vectors[input.direction];\n\tif (!vector) {\n\t\tthrow new Error(\"browser.scroll direction must be up, down, left, or right\");\n\t}\n\tconst tabId = await resolveTab();\n\tconst info = await page.info();\n\tconst amount = Number.isInteger(input.amount)\n\t\t? Math.abs(input.amount)\n\t\t: Math.max(1, Math.round(info.h * 0.8));\n\tawait page.mouse.wheel(vector[0] * amount, vector[1] * amount);\n\tresult = { ok: true, tab_id: tabId };\n} else if (operation === \"screenshot\") {\n\tconst tabId = await resolveTab();\n\tconst capture = await cdp(\"Page.captureScreenshot\", { format: \"png\" });\n\tif (typeof capture?.data !== \"string\") {\n\t\tthrow new Error(\"ego-browser returned no screenshot data\");\n\t}\n\tresult = { tab_id: tabId, image: capture.data, encoding: \"base64\", mime: \"image/png\" };\n}\n\nconsole.log(${JSON.stringify(RESULT_PREFIX)} + JSON.stringify(result));\n`;\n\n// Core starts only programs this manifest's `run` list names (child_process).\nconst output = await childProcess.run(\"ego-browser\", {\n\targs: [\"nodejs\"],\n\tstdin: childScript,\n});\nconst stdout = output.stdout;\nconst stderr = output.stderr.trim();\nif (!output.success) {\n\tthrow new Error(\n\t\t`ego-browser failed: ${(stderr || stdout || \"the command exited unsuccessfully\").slice(-1000)}`\n\t);\n}\nconst frames = stdout\n\t.split(\"\\n\")\n\t.filter((line) => line.startsWith(RESULT_PREFIX));\nif (frames.length !== 1) {\n\tthrow new Error(\n\t\t`ego-browser returned ${frames.length} result frames: ${(stderr || stdout).slice(-1000)}`\n\t);\n}\nconst serialized = frames[0].slice(RESULT_PREFIX.length);\ntry {\n\treturn JSON.parse(serialized);\n} catch {\n\tthrow new Error(`ego-browser returned invalid JSON: ${serialized.slice(0, 1000)}`);\n}\n"
       }
     }
   ],
@@ -124,43 +358,43 @@
       "target": "local-machine",
       "tools": {
         "browser.tabs": {
-          "tool": "ego_browser.dispatch",
+          "tool": "ego_browser.tabs",
           "adapter": {
             "code_file": "adapters/browser.tabs.js"
           }
         },
         "browser.navigate": {
-          "tool": "ego_browser.dispatch",
+          "tool": "ego_browser.navigate",
           "adapter": {
             "code_file": "adapters/browser.navigate.js"
           }
         },
         "browser.snapshot": {
-          "tool": "ego_browser.dispatch",
+          "tool": "ego_browser.snapshot",
           "adapter": {
             "code_file": "adapters/browser.snapshot.js"
           }
         },
         "browser.click": {
-          "tool": "ego_browser.dispatch",
+          "tool": "ego_browser.click",
           "adapter": {
             "code_file": "adapters/browser.click.js"
           }
         },
         "browser.type": {
-          "tool": "ego_browser.dispatch",
+          "tool": "ego_browser.type",
           "adapter": {
             "code_file": "adapters/browser.type.js"
           }
         },
         "browser.scroll": {
-          "tool": "ego_browser.dispatch",
+          "tool": "ego_browser.scroll",
           "adapter": {
             "code_file": "adapters/browser.scroll.js"
           }
         },
         "browser.screenshot": {
-          "tool": "ego_browser.dispatch",
+          "tool": "ego_browser.screenshot",
           "adapter": {
             "code_file": "adapters/browser.screenshot.js"
           }

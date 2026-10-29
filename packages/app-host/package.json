@@ -4,11 +4,22 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./activity-score-input": "./src/activity-score-input.ts",
     "./app-bridge": "./src/app-bridge.ts",
+    "./app-bundle": "./src/app-bundle.ts",
+    "./app-request-target": "./src/app-request-target.ts",
+    "./assistant-client": "./src/assistant-client.ts",
+    "./finetune-compat": "./src/finetune-compat.ts",
+    "./recipes-compat": "./src/recipes-compat.ts",
+    "./json-values": "./src/json-values.ts",
     "./media-recording": "./src/media-recording.ts",
     "./standalone": "./src/standalone.ts",
+    "./companion-contracts": "./src/companion-contracts.ts",
     "./companion-theme": "./src/companion-theme.ts",
+    "./notification-privacy": "./src/notification-privacy.ts",
     "./rpc": "./src/rpc.ts",
+    "./streaming-rpc": "./src/streaming-rpc.ts",
+    "./opened-file": "./src/opened-file.ts",
     "./realtime": "./src/realtime.ts",
     "./views": "./src/views.ts",
     "./live-activity": "./src/live-activity.ts",
@@ -16,8 +27,15 @@
     "./third-party-plugin": "./src/third-party-plugin.ts",
     "./widget-bootstrap": "./src/widget-bootstrap.ts",
     "./widget-state-store": "./src/widget-state-store.ts",
+    "./model-context": "./src/model-context.ts",
     "./toast-host": "./src/toast-host.ts",
-    "./example-plugin": "./src/example-plugin.ts"
+    "./example-plugin": "./src/example-plugin.ts",
+    "./activity-operation-records": "./src/activity-operation-records.ts",
+    "./activity-trace-import": "./src/activity-trace-import.ts",
+    "./voice-services": "./src/voice-services.ts",
+    "./application-realtime-services": "./src/application-realtime-services.ts",
+    "./application-realtime-queue": "./src/application-realtime-queue.ts",
+    "./application-realtime-lifetime": "./src/application-realtime-lifetime.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -26,7 +44,8 @@
   "dependencies": {
     "@ryu/i18n": "workspace:*",
     "@ryuhq/core-client": "workspace:*",
-    "zustand": "^5"
+    "zustand": "^5",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "react": "^19",

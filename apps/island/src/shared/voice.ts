@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // Voice-input preference: the cross-process contract persisted in Core under the
 // `voice-input` key. The desktop writes it from its Voice settings; the island
 // companion (a separate Electron process that cannot share the desktop's
@@ -5,7 +7,8 @@
 // (1) register the push-to-talk global shortcut and (2) pick the transcription
 // engine. Mirrors `shared/appearance.ts`: a plain schema with no `@ryu/ui`
 // dependency, because the main process (which registers the shortcut and posts
-// audio to Core) externalizes workspace deps and cannot import `@ryu/ui`.
+// audio to Core) inlines workspace packages into its bundle and `@ryu/ui` is
+// renderer UI code.
 //
 // Like every Ryu default, the engine/model/shortcut are swappable, never a lock.
 
@@ -82,12 +85,12 @@ export const DEFAULT_VOICE_SHORTCUT = "CommandOrControl+Shift+A";
  * `Record<VoiceEngine, string>` so adding an engine to the union is a COMPILE
  * error here rather than an undefined lookup at runtime.
  */
-export const VOICE_ENGINE_MODELS: Record<VoiceEngine, string> = {
+export const VOICE_ENGINE_MODELS = {
 	whisper: "ggml-base.en",
 	parakeet: "parakeet-tdt-0.6b-v3",
 	audiocpp: "parakeet-tdt-0.6b-v3-q8_0",
 	gateway: "",
-};
+} satisfies Record<VoiceEngine, string>;
 
 /** Default voice-input settings: enabled, parakeet, safe rebindable shortcut. */
 export const DEFAULT_VOICE_PREFS: VoiceInputPrefs = {
@@ -98,53 +101,30 @@ export const DEFAULT_VOICE_PREFS: VoiceInputPrefs = {
 	shortcut: DEFAULT_VOICE_SHORTCUT,
 };
 
-/**
- * Coerce an unknown value to a known engine, defaulting to parakeet.
- *
- * Checked against the full list, not one `=== "whisper"`. This is the SECOND
- * coercion in the island (the other is in `dictation.ts`) and it feeds
- * `parseVoicePrefs` below, which the main process and the renderer both read —
- * so while it kept the hardcoded pair it silently rewrote a `gateway` pick made
- * in the desktop back to parakeet on the next island save.
- */
-function coerceEngine(value: unknown): VoiceEngine {
-	return VOICE_ENGINE_VALUES.includes(value as VoiceEngine)
-		? (value as VoiceEngine)
-		: "parakeet";
-}
+export const voiceEngineSchema = z.enum(VOICE_ENGINE_VALUES).catch("parakeet");
+const voicePrefsSchema = z
+	.object({
+		enabled: z.boolean().catch(true),
+		engine: voiceEngineSchema,
+		mode: z.enum(["toggle", "push-to-talk"]).catch(DEFAULT_VOICE_MODE),
+		model: z.string().min(1).optional().catch(undefined),
+		shortcut: z.string().trim().min(1).catch(DEFAULT_VOICE_SHORTCUT),
+	})
+	.transform(
+		(prefs): VoiceInputPrefs => ({
+			...prefs,
+			model: prefs.model ?? VOICE_ENGINE_MODELS[prefs.engine],
+		})
+	)
+	.catch(DEFAULT_VOICE_PREFS);
 
-/** Coerce an unknown value to a known activation mode, defaulting to toggle. */
-function coerceMode(value: unknown): VoiceInputMode {
-	return value === "push-to-talk" ? "push-to-talk" : "toggle";
-}
-
-/**
- * Tolerantly coerce a raw preference value (JSON string from Core, or `null`)
- * into {@link VoiceInputPrefs}. Falls back to the default for any missing/unknown
- * field so a malformed blob never breaks shortcut registration or capture.
- */
+/** Parse persisted preferences with per-field fallbacks and engine defaults. */
 export function parseVoicePrefs(raw: string | null): VoiceInputPrefs {
 	if (!raw) {
 		return DEFAULT_VOICE_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<VoiceInputPrefs>;
-		const engine = coerceEngine(parsed.engine);
-		const shortcut =
-			typeof parsed.shortcut === "string" && parsed.shortcut.trim().length > 0
-				? parsed.shortcut.trim()
-				: DEFAULT_VOICE_SHORTCUT;
-		const model =
-			typeof parsed.model === "string" && parsed.model.length > 0
-				? parsed.model
-				: VOICE_ENGINE_MODELS[engine];
-		return {
-			enabled: parsed.enabled !== false,
-			engine,
-			mode: coerceMode(parsed.mode),
-			model,
-			shortcut,
-		};
+		return voicePrefsSchema.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_VOICE_PREFS;
 	}

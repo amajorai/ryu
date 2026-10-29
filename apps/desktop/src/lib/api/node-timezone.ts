@@ -21,7 +21,71 @@
 // them and the surface must hide itself rather than guess a row by URL, which
 // would write one node's settings onto another's.
 
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { z } from "zod";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
+import { pluginRecord, pluginValueSchema } from "./plugin-wire-values.ts";
+
+/** GET returns serializeServer; PATCH returns the separate timezone publisher.
+ * Known fields mirror packages/api/src/routers/servers.ts and retain legacy
+ * optional lifecycle fields plus full future JSON metadata without cloning. */
+function preservePublisher<S extends z.ZodType>(schema: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			pluginValueSchema.safeParse(value).success &&
+			schema.safeParse(value).success
+	);
+}
+const nullableText = z.string().nullable();
+export const nodeTimeZonePatchSchema = preservePublisher(
+	z
+		.looseObject({
+			id: z.string(),
+			detectedTimeZone: nullableText,
+			effectiveTimeZone: z.string(),
+			nextQuietWindow: z.string(),
+			timeZone: nullableText,
+		})
+		.catchall(pluginValueSchema)
+);
+export const nodeTimeZoneServerSchema = preservePublisher(
+	z
+		.looseObject({
+			archived: z.boolean().optional(),
+			backupsEnabled: z.boolean(),
+			createdAt: z.string(),
+			createdBy: z.string(),
+			desktopEnabled: z.boolean(),
+			detectedTimeZone: nullableText,
+			effectiveTimeZone: z.string(),
+			error: nullableText,
+			hetznerServerId: nullableText,
+			hetznerType: z.string(),
+			id: z.string(),
+			includedWithMax: z.boolean(),
+			includedWithPlan: z.boolean(),
+			inferenceMode: z.enum(["managed", "byok"]),
+			location: z.string(),
+			monthlyUsdSnapshot: z.number(),
+			organizationId: z.string(),
+			polarSubscriptionId: nullableText,
+			publicUrl: nullableText,
+			removalReason: nullableText.optional(),
+			removeGraceEndsAt: nullableText,
+			removeScheduledAt: nullableText,
+			runsUntil: nullableText.optional(),
+			sshSetupRequired: z.boolean().optional(),
+			status: z.enum([
+				"provisioning",
+				"active",
+				"removing",
+				"removed",
+				"error",
+			]),
+			timeZone: nullableText,
+			updatedAt: z.string(),
+		})
+		.catchall(pluginValueSchema)
+);
 
 /** What both endpoints below answer with. */
 export interface NodeTimeZone {
@@ -54,39 +118,40 @@ function serversBase(): string {
 
 function authToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		return null;
 	}
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<S extends z.ZodType>(
+	path: string,
+	schema: S,
+	init?: RequestInit
+): Promise<z.output<S>> {
 	const token = authToken();
 	if (!token) {
 		throw new NodeTimeZoneError(401, "Sign in to manage this node.");
 	}
+	const headers = new Headers({ Authorization: `Bearer ${token}` });
+	if (init?.body !== undefined) {
+		headers.set("Content-Type", "application/json");
+	}
 	const resp = await fetch(`${serversBase()}${path}`, {
 		...init,
-		headers: {
-			Authorization: `Bearer ${token}`,
-			...(init?.body === undefined
-				? {}
-				: { "Content-Type": "application/json" }),
-		},
+		headers,
 	});
 	if (!resp.ok) {
 		// The server's own sentence is far more useful than a status code here:
 		// "requires admin role" and "not a recognised IANA time zone" are both
 		// things the person looking at the row can act on.
-		const body = (await resp.json().catch(() => null)) as {
-			message?: string;
-		} | null;
+		const body = pluginRecord(await resp.json().catch(() => null));
 		throw new NodeTimeZoneError(
 			resp.status,
-			body?.message ?? `Request failed: ${resp.status}`
+			String(body?.message ?? `Request failed: ${resp.status}`)
 		);
 	}
-	return (await resp.json()) as T;
+	return schema.parse(await resp.json());
 }
 
 /**
@@ -98,7 +163,10 @@ export function getNodeTimeZone(
 	orgId: string,
 	serverId: string
 ): Promise<NodeTimeZone> {
-	return request<NodeTimeZone>(`/orgs/${orgId}/servers/${serverId}`);
+	return request(
+		`/orgs/${orgId}/servers/${serverId}`,
+		nodeTimeZoneServerSchema
+	);
 }
 
 /**
@@ -115,10 +183,14 @@ export function setNodeTimeZone(
 	serverId: string,
 	timeZone: string | null
 ): Promise<NodeTimeZone> {
-	return request<NodeTimeZone>(`/orgs/${orgId}/servers/${serverId}/timezone`, {
-		method: "PATCH",
-		body: JSON.stringify({ timeZone }),
-	});
+	return request(
+		`/orgs/${orgId}/servers/${serverId}/timezone`,
+		nodeTimeZonePatchSchema,
+		{
+			method: "PATCH",
+			body: JSON.stringify({ timeZone }),
+		}
+	);
 }
 
 /**

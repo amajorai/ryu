@@ -13,12 +13,17 @@
 // the manual dialog. A scan runs on mount, on a fixed interval, and when the
 // window regains focus.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { readAutoSetupImportSetting } from "@/src/hooks/useAutoSetupImportSetting.ts";
 import { listAgentSyncProfiles } from "@/src/lib/api/agent-sync.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { runImport, scanImportFolder } from "@/src/lib/api/import.ts";
 import { listDirectory } from "@/src/lib/api/workspace.ts";
+import {
+	autoImportSeenKey,
+	loadAutoImportSeen,
+	saveAutoImportSeen,
+} from "@/src/lib/auto-import-seen.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 
 /** Agent config roots auto-scanned when the setting is on. */
@@ -35,29 +40,6 @@ const MAX_IMPORTS_PER_SCAN = 20;
 
 const SEEN_KEY = "ryu:auto-imported-setup-ids";
 
-function loadSeen(): Set<string> {
-	try {
-		const raw = localStorage.getItem(SEEN_KEY);
-		if (!raw) {
-			return new Set();
-		}
-		const parsed = JSON.parse(raw) as unknown;
-		return Array.isArray(parsed)
-			? new Set(parsed.filter((v) => typeof v === "string"))
-			: new Set();
-	} catch {
-		return new Set();
-	}
-}
-
-function saveSeen(seen: Set<string>) {
-	try {
-		localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
-	} catch {
-		// best-effort; Core's idempotent write keeps re-scans harmless
-	}
-}
-
 /**
  * Mount once (e.g. in the sidebar) to auto-import setup instructions while the
  * setting is on. Renders nothing.
@@ -71,26 +53,54 @@ export function useAutoSetupImport({
 	onImported?: () => void;
 }) {
 	const addProjectFolder = useWorkspaceStore((s) => s.addProjectFolder);
-	const targetRef = useRef(target);
-	targetRef.current = target;
+	const authority = useMemo(
+		() => ({
+			target: {
+				url: target.url.replace(/\/$/, ""),
+				token: target.token ?? null,
+				userJwt: target.userJwt ?? null,
+			},
+		}),
+		[
+			target.url.replace(/\/$/, ""),
+			target.token ?? null,
+			target.userJwt ?? null,
+		]
+	);
+	const authorityRef = useRef(authority);
+	authorityRef.current = authority;
+	const memorySeen = useRef(new Map<string, Set<string>>());
 	const onImportedRef = useRef(onImported);
 	onImportedRef.current = onImported;
 	const addFolderRef = useRef(addProjectFolder);
 	addFolderRef.current = addProjectFolder;
 
 	// One scan at a time; a poll that fires mid-scan is skipped.
-	const scanningRef = useRef(false);
-	const lastFocusScanRef = useRef(0);
 
 	useEffect(() => {
 		let cancelled = false;
+		let scanning = false;
+		let lastFocusScan = 0;
+		const capturedTarget = authority.target;
+		const ownsAuthority = () =>
+			!cancelled &&
+			authorityRef.current === authority &&
+			readAutoSetupImportSetting();
+		const memoryKey = JSON.stringify([
+			capturedTarget.url,
+			capturedTarget.token,
+			capturedTarget.userJwt,
+		]);
+		const fallbackSeen = memorySeen.current.get(memoryKey) ?? new Set<string>();
+		memorySeen.current.set(memoryKey, fallbackSeen);
+		let seenKey: string | null = null;
 
 		const scan = async () => {
-			if (cancelled || scanningRef.current || !readAutoSetupImportSetting()) {
+			if (!ownsAuthority() || scanning || !readAutoSetupImportSetting()) {
 				return;
 			}
-			scanningRef.current = true;
-			const seen = loadSeen();
+			scanning = true;
+			let seen: Set<string> | undefined;
 			let budget = MAX_IMPORTS_PER_SCAN;
 			let importedAny = false;
 			try {
@@ -99,23 +109,34 @@ export function useAutoSetupImport({
 				// would race the same setup item even though Core eventually dedups it.
 				const managedRoots = new Set(
 					(
-						await listAgentSyncProfiles(targetRef.current).catch(() => ({
+						await listAgentSyncProfiles(capturedTarget).catch(() => ({
 							profiles: [],
 						}))
 					).profiles
 						.filter((profile) => profile.importEnabled)
 						.map((profile) => profile.root)
 				);
+				if (!ownsAuthority()) {
+					return;
+				}
+				seenKey = await autoImportSeenKey(SEEN_KEY, capturedTarget);
+				if (!ownsAuthority()) {
+					return;
+				}
+				seen = loadAutoImportSeen(seenKey, fallbackSeen);
 				let home: string;
 				try {
-					const listing = await listDirectory(targetRef.current);
+					const listing = await listDirectory(capturedTarget);
 					home = listing.home;
 				} catch {
 					return;
 				}
+				if (!ownsAuthority()) {
+					return;
+				}
 				const sep = home.includes("\\") ? "\\" : "/";
 				for (const root of AGENT_CONFIG_ROOTS) {
-					if (cancelled || budget <= 0) {
+					if (!ownsAuthority() || budget <= 0) {
 						break;
 					}
 					const rootPath = `${home}${sep}${root}`;
@@ -124,11 +145,14 @@ export function useAutoSetupImport({
 					}
 					let scan: Awaited<ReturnType<typeof scanImportFolder>>;
 					try {
-						scan = await scanImportFolder(targetRef.current, rootPath);
+						scan = await scanImportFolder(capturedTarget, rootPath);
 					} catch {
 						// The root may not exist (no Claude/Cursor/Codex install) —
 						// degrade to nothing, never error.
 						continue;
+					}
+					if (!ownsAuthority()) {
+						return;
 					}
 					const instructions = scan.items.filter(
 						(i) => i.kind === "instructions"
@@ -137,22 +161,56 @@ export function useAutoSetupImport({
 						continue;
 					}
 					const toImport = instructions
-						.filter((i) => !seen.has(`${rootPath}:${i.id}`))
+						.filter(
+							(i) =>
+								!(
+									i.contentRevision &&
+									seen?.has(
+										`${JSON.stringify([rootPath, i.id])}:${i.contentRevision}`
+									)
+								)
+						)
 						.slice(0, budget);
 					if (toImport.length === 0) {
 						continue;
 					}
 					try {
 						const result = await runImport(
-							targetRef.current,
+							capturedTarget,
 							rootPath,
 							toImport.map((i) => ({ kind: i.kind, id: i.id }))
 						);
-						for (const item of toImport) {
-							seen.add(`${rootPath}:${item.id}`);
+						if (!ownsAuthority()) {
+							return;
 						}
 						budget -= toImport.length;
 						for (const r of result.results) {
+							if (r.status !== "imported" && r.status !== "skipped") {
+								continue;
+							}
+							const item = toImport.find(
+								(candidate) =>
+									candidate.id === r.id && candidate.kind === r.kind
+							);
+							if (!item) {
+								continue;
+							}
+							if (r.contentRevision) {
+								const prefix = `${JSON.stringify([rootPath, item.id])}:`;
+								// Only the last acknowledged revision can suppress a scan:
+								// reverting edited bytes must refresh the imported snapshot too.
+								for (const prior of seen) {
+									if (prior.startsWith(prefix)) {
+										seen.delete(prior);
+									}
+								}
+								for (const prior of fallbackSeen) {
+									if (prior.startsWith(prefix)) {
+										fallbackSeen.delete(prior);
+									}
+								}
+								seen.add(`${prefix}${r.contentRevision}`);
+							}
 							if (r.folderPath) {
 								addFolderRef.current(r.folderPath);
 								importedAny = true;
@@ -163,9 +221,11 @@ export function useAutoSetupImport({
 					}
 				}
 			} finally {
-				saveSeen(seen);
-				scanningRef.current = false;
-				if (importedAny && !cancelled) {
+				if (seen && ownsAuthority()) {
+					saveAutoImportSeen(seenKey, seen, fallbackSeen);
+				}
+				scanning = false;
+				if (importedAny && ownsAuthority()) {
 					onImportedRef.current?.();
 				}
 			}
@@ -179,10 +239,10 @@ export function useAutoSetupImport({
 		}, POLL_INTERVAL_MS);
 		const onFocus = () => {
 			const now = Date.now();
-			if (now - lastFocusScanRef.current < FOCUS_DEBOUNCE_MS) {
+			if (now - lastFocusScan < FOCUS_DEBOUNCE_MS) {
 				return;
 			}
-			lastFocusScanRef.current = now;
+			lastFocusScan = now;
 			scan().catch(() => undefined);
 		};
 		window.addEventListener("focus", onFocus);
@@ -193,5 +253,5 @@ export function useAutoSetupImport({
 			clearInterval(interval);
 			window.removeEventListener("focus", onFocus);
 		};
-	}, []);
+	}, [authority]);
 }

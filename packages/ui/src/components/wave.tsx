@@ -13,7 +13,15 @@
 // Shared in `@ryu/ui` so both the desktop composer and the island companion
 // render the same waveform for voice input.
 
+import type { CSSProperties } from "react";
 import { cn } from "../lib/utils.ts";
+import styles from "./wave.module.css";
+import "./wave-animation.css";
+
+interface WaveDrawingStyle extends CSSProperties {
+	"--wave-bar-delay"?: string;
+	"--wave-bar-height": string;
+}
 
 const WAVE_BAR_HEIGHTS = ["50%", "75%", "100%", "75%", "50%"] as const;
 
@@ -45,7 +53,14 @@ const MIN_LEVEL = 0.08;
  * no matter how many samples the caller provides.
  */
 function toBars(levels: number[], count: number): number[] {
-	const bars = new Array<number>(count).fill(0);
+	const barSlots: number[] = [];
+	try {
+		barSlots.length = count;
+	} catch {
+		// Array.length and the constructor expose different native RangeError messages in Bun. Replay only the rejected numeric constructor operation to preserve its original exception ABI; no constructed value is consumed.
+		Reflect.construct(Array, [count]);
+	}
+	const bars = barSlots.fill(0);
 	if (levels.length === 0) {
 		return bars;
 	}
@@ -87,23 +102,24 @@ function LiveWave({
 			role="status"
 			{...props}
 		>
-			{toBars(levels, count).map((level, index) => (
-				<span
-					aria-hidden="true"
-					className={cn(
-						"inline-block rounded-full bg-current",
-						fill && "flex-1"
-					)}
-					// biome-ignore lint/suspicious/noArrayIndexKey: fixed bar layout
-					key={index}
-					style={{
-						// `items-center` centres each bar, so it grows up AND down equally.
-						width: fill ? undefined : "12.5%",
-						height: `${Math.round(Math.max(MIN_LEVEL, Math.min(1, level)) * 100)}%`,
-						transition: "height 90ms linear",
-					}}
-				/>
-			))}
+			{toBars(levels, count).map((level, index) => {
+				const barStyle: WaveDrawingStyle = {
+					"--wave-bar-height": `${Math.round(Math.max(MIN_LEVEL, Math.min(1, level)) * 100)}%`,
+				};
+				return (
+					<span
+						aria-hidden="true"
+						className={cn(
+							"inline-block rounded-full bg-current",
+							fill && "flex-1",
+							styles.liveBar,
+							!fill && styles.inlineBar
+						)}
+						key={index}
+						style={barStyle}
+					/>
+				);
+			})}
 			<span className="sr-only">Recording</span>
 		</span>
 	);
@@ -121,42 +137,30 @@ function Wave({ className, levels, barCount, ...props }: WaveProps) {
 		);
 	}
 	return (
-		<>
-			<style>{`
-        @keyframes loading-ui-wave {
-          0%,
-          100% {
-            transform: scaleY(1);
-          }
-
-          50% {
-            transform: scaleY(0.6);
-          }
-        }
-      `}</style>
-			<span
-				className={cn("inline-flex items-center gap-[2.5%]", className)}
-				role="status"
-				{...props}
-			>
-				{WAVE_BAR_HEIGHTS.map((height, index) => (
+		<span
+			className={cn("inline-flex items-center gap-[2.5%]", className)}
+			role="status"
+			{...props}
+		>
+			{WAVE_BAR_HEIGHTS.map((height, index) => {
+				const barStyle: WaveDrawingStyle = {
+					"--wave-bar-height": height,
+					"--wave-bar-delay": `calc(var(--delay, 100ms) * ${index})`,
+				};
+				return (
 					<span
 						aria-hidden="true"
-						className="inline-block rounded-full bg-current"
-						// biome-ignore lint/suspicious/noArrayIndexKey: fixed 5-bar layout
+						className={cn(
+							"inline-block rounded-full bg-current",
+							styles.loadingBar
+						)}
 						key={index}
-						style={{
-							width: "12.5%",
-							height,
-							animation:
-								"loading-ui-wave var(--duration, 1s) ease-in-out infinite",
-							animationDelay: `calc(var(--delay, 100ms) * ${index})`,
-						}}
+						style={barStyle}
 					/>
-				))}
-				<span className="sr-only">Loading</span>
-			</span>
-		</>
+				);
+			})}
+			<span className="sr-only">Loading</span>
+		</span>
 	);
 }
 

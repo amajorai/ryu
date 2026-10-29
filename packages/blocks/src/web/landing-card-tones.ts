@@ -19,7 +19,7 @@ const neutralTone = {
 	title: "text-foreground",
 };
 
-export const LANDING_CARD_TONES: Record<LandingCardTone, typeof neutralTone> = {
+export const LANDING_CARD_TONES = {
 	orange: neutralTone,
 	blue: neutralTone,
 	pink: neutralTone,
@@ -27,15 +27,14 @@ export const LANDING_CARD_TONES: Record<LandingCardTone, typeof neutralTone> = {
 	yellow: neutralTone,
 	green: neutralTone,
 	teal: neutralTone,
-};
+} satisfies Record<LandingCardTone, typeof neutralTone>;
 
 export function landingCardSurfaceClass(_tone: LandingCardTone) {
 	return "h-full py-6";
 }
 
 export const landingMutedCardSurfaceClass = "h-full bg-muted/40 p-6";
-export const landingVisualFrameClass =
-	"overflow-hidden rounded-[2rem] bg-muted/40 p-2 md:p-3";
+export const landingVisualFrameClass = "overflow-hidden";
 export const landingSurfaceCardClass = "py-6";
 export const landingSurfaceCardFlexClass = "flex h-full flex-col gap-5 py-6";
 export const landingSurfaceCardXlClass = "py-6";

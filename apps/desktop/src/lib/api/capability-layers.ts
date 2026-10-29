@@ -1,7 +1,7 @@
 // apps/desktop/src/lib/api/capability-layers.ts
 //
-// Typed client for Core's CAPABILITY LAYER surface — `/api/capabilities` (the
-// read model) and `/api/capabilities/bindings` (the user's override map).
+// Typed client for Core's capability-layer read model and binding map:
+// `/api/capabilities` and `/api/capabilities/bindings`.
 //
 // A "layer" here is one capability (`web.search`, `browser.control`, `memory`, …)
 // that several enabled apps may provide at once. Core resolves it with a ladder:
@@ -25,6 +25,14 @@
 // say WHICH app broke and HOW. So the write goes through a raw fetch composed of
 // the same authenticated raw-fetch seam as every other Core call and throws a
 // typed {@link CapabilityBindingConflictError} instead.
+
+import { z } from "zod";
+import {
+	type CapabilityProviderWire,
+	capabilityBindingsReplySchema,
+	capabilityErrorReplySchema,
+	capabilityReadModelSchema,
+} from "./capability-layer-contracts.ts";
 
 import { type ApiTarget, authenticatedFetch, request } from "./client.ts";
 
@@ -98,6 +106,8 @@ export interface CapabilityLayer {
 	bound: string | null;
 	/** The capability name (`"web.search"`, `"memory"`, …). */
 	capability: string;
+	/** Whether this is a separately presented Decision Models layer. */
+	decisionModel: boolean;
 	/** True when the current binding comes from an explicit override, not the auto-pick. */
 	overridden: boolean;
 	/** Every candidate provider, sorted by id. */
@@ -141,35 +151,6 @@ export interface CapabilityReadModel {
 	verbs: CapabilityVerb[];
 }
 
-interface CapabilityProviderWire {
-	id: string;
-	is_default?: boolean;
-	name?: string;
-	serves_route?: boolean;
-	serves_verbs?: boolean;
-	target?: string;
-	verbs?: string[];
-	version?: string;
-}
-
-interface CapabilityLayerWire {
-	available?: CapabilityProviderWire[];
-	bound?: string | null;
-	capability: string;
-	overridden?: boolean;
-	providers?: CapabilityProviderWire[];
-	selectable?: boolean;
-	title?: string;
-	toolkit?: boolean;
-}
-
-interface CapabilityVerbWire {
-	capability?: string;
-	id: string;
-	provider?: string;
-	target?: string;
-}
-
 /**
  * Thrown when Core REFUSES a binding change (409): the requested override would
  * leave an enabled consumer unbound or ambiguous. Carries the offending
@@ -195,16 +176,19 @@ export class CapabilityBindingConflictError extends Error {
  * the blocking plugin visible. Lives here so every surface words a refusal the
  * same way instead of stringifying the error and losing both fields.
  */
+const nativeErrorSchema = z.instanceof(Error);
+
 export function describeBindingFailure(
-	error: unknown,
+	error: Parameters<typeof nativeErrorSchema.parse>[0],
 	providerName: string
 ): string {
 	if (error instanceof CapabilityBindingConflictError) {
 		const where = error.plugin ? ` (${error.plugin})` : "";
 		return `${error.message}${where} · ${error.bindingError}`;
 	}
-	if (error instanceof Error) {
-		return error.message;
+	const nativeError = nativeErrorSchema.safeParse(error);
+	if (nativeError.success) {
+		return nativeError.data.message;
 	}
 	return `Couldn't switch to ${providerName}`;
 }
@@ -264,10 +248,14 @@ export async function fetchCapabilityLayers(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<CapabilityReadModel> {
-	const json = await request<{
-		capabilities?: CapabilityLayerWire[];
-		verbs?: CapabilityVerbWire[];
-	}>(target, CAPABILITIES_PATH, { signal });
+	const json = capabilityReadModelSchema.parse(
+		await request(
+			target,
+			CAPABILITIES_PATH,
+			{ signal },
+			capabilityReadModelSchema
+		)
+	);
 	return {
 		capabilities: (json.capabilities ?? []).map(
 			(c): CapabilityLayer => ({
@@ -288,6 +276,10 @@ export async function fetchCapabilityLayers(
 				// capability as a toolkit. Showing no layers is recoverable by
 				// updating Core; showing wrong ones is what shipped.
 				toolkit: c.toolkit ?? false,
+				// Like `toolkit`, this is computed by Core from known manifests. An
+				// older Core does not identify Decision Models, so do not infer it from
+				// capability names or `selectable`.
+				decisionModel: c.decisionModel ?? false,
 			})
 		),
 		verbs: (json.verbs ?? []).map(
@@ -305,9 +297,13 @@ export async function fetchCapabilityLayers(
 export async function fetchCapabilityBindings(
 	target: ApiTarget
 ): Promise<Record<string, string>> {
-	const json = await request<{ overrides?: Record<string, string> }>(
-		target,
-		BINDINGS_PATH
+	const json = capabilityBindingsReplySchema.parse(
+		await request(
+			target,
+			BINDINGS_PATH,
+			undefined,
+			capabilityBindingsReplySchema
+		)
 	);
 	return json.overrides ?? {};
 }
@@ -317,19 +313,19 @@ async function bindingWriteError(resp: Response): Promise<Error> {
 	const status = resp.status;
 	const text = await resp.text().catch(() => "");
 	try {
-		const body = JSON.parse(text) as {
-			binding_error?: string;
-			error?: string;
-			plugin?: string;
-		};
-		if (status === 409 && typeof body.binding_error === "string") {
+		const body = capabilityErrorReplySchema.parse(JSON.parse(text));
+		if (
+			status === 409 &&
+			body.binding_error !== undefined &&
+			body.binding_error !== null
+		) {
 			return new CapabilityBindingConflictError(
 				body.error ?? "Core refused this layer change",
 				body.plugin ?? "",
 				body.binding_error
 			);
 		}
-		if (typeof body.error === "string") {
+		if (body.error !== undefined && body.error !== null) {
 			return new Error(body.error);
 		}
 	} catch {
@@ -359,7 +355,7 @@ async function replaceCapabilityBindings(
 		return overrides;
 	}
 	try {
-		const body = JSON.parse(text) as { overrides?: Record<string, string> };
+		const body = capabilityBindingsReplySchema.parse(JSON.parse(text));
 		return body.overrides ?? overrides;
 	} catch {
 		return overrides;
@@ -372,7 +368,7 @@ async function replaceCapabilityBindings(
  * interleave their GET/PUT and silently drop one. `NodeLayerMenu` only blocks
  * concurrent clicks WITHIN one submenu, so the cross-layer case is real.
  */
-let writeQueue: Promise<unknown> = Promise.resolve();
+let writeQueue: Promise<void> = Promise.resolve();
 
 function serializeWrite<T>(task: () => Promise<T>): Promise<T> {
 	const run = writeQueue.then(task, task);

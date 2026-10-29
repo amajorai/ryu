@@ -11,20 +11,21 @@
  *   bun run scripts/backfill-personal-orgs.ts --apply    # actually create orgs
  *   bun run scripts/backfill-personal-orgs.ts --apply --limit=1   # cap count
  *
- * Re-runnable: `ensurePersonalOrganization` re-checks membership per user, so a
- * partial failure can be retried without creating duplicate orgs.
+ * Guest (anonymous) accounts are skipped: they never get an organization, the
+ * same policy the session hook applies.
+ *
+ * Re-runnable: `ensurePersonalOrganization` re-checks membership per user under
+ * a per-user `PersonalOrganizationClaim`, so a partial failure can be retried,
+ * and a run that overlaps a target user's sign-in cannot mint a second org.
  */
 
 import { User } from "@ryu/db/models/auth.model";
 import { Member } from "@ryu/db/models/control-plane.model";
 import mongoose from "mongoose";
 import { auth } from "../src/index.ts";
-import {
-	ensurePersonalOrganization,
-	type OrganizationApi,
-} from "../src/lib/organizations.ts";
+import { ensurePersonalOrganization } from "../src/lib/organizations.ts";
 
-const orgApi = auth.api as unknown as OrganizationApi;
+const orgApi = auth.api;
 
 const apply = process.argv.includes("--apply");
 const limitArg = process.argv.find((arg) => arg.startsWith("--limit="));
@@ -36,7 +37,10 @@ async function main(): Promise<void> {
 	const memberUserIds = await Member.distinct("userId");
 	const withOrg = new Set(memberUserIds.map((id) => String(id)));
 
-	const users = await User.find({}, { _id: 1, email: 1 }).lean();
+	const users = await User.find(
+		{ isAnonymous: { $ne: true } },
+		{ _id: 1, email: 1 }
+	).lean();
 	const allTargets = users.filter((user) => !withOrg.has(String(user._id)));
 	const targets = Number.isFinite(limit)
 		? allTargets.slice(0, limit)

@@ -3,8 +3,6 @@ import { expect, test } from "@playwright/test";
 test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/pinned-agent-stage-proof.html";
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/21/01a02258-ed26-7fe3-a6d3-d38bc825776c/pinned-agent-stage-proof.png";
 
 test("shows hero, pair, and three-up pinned agent densities", async ({
 	page,
@@ -37,5 +35,8 @@ test("shows hero, pair, and three-up pinned agent densities", async ({
 		grid.locator('[data-testid="pinned-agent-stage"]')
 	).toHaveAttribute("data-pinned-count", "3");
 
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("pinned-agent-stage-proof.png"),
+		fullPage: true,
+	});
 });

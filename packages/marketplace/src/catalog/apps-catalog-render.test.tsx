@@ -106,8 +106,7 @@ function makeHost(
 			throw new Error("unused");
 		},
 		useActiveNode: () => ({ url: "", token: null }),
-		usePersistedToggle: (_k: string, d: boolean) =>
-			[d, () => undefined] as [boolean, (v: boolean) => void],
+		usePersistedToggle: (_k: string, d: boolean) => [d, () => undefined],
 		installSidecar: () => Promise.resolve(),
 		estimateLlmfit: () =>
 			Promise.resolve({
@@ -127,19 +126,23 @@ function makeHost(
 function render(
 	state: AppsCatalogState,
 	opts: {
+		appListingAllowed?: (appId: string) => boolean;
 		community?: AppsCatalogState;
 		install?: CatalogInstall | null;
 		variant?: "apps" | "plugins" | "all";
 	} = {}
 ): string {
+	const host = makeHost(
+		state,
+		opts.install === undefined ? MOCK_INSTALL : opts.install,
+		opts.community ?? makeAppsState()
+	);
+	const appListingAllowed = opts.appListingAllowed;
+	if (appListingAllowed) {
+		host.useAppListingAllowed = () => appListingAllowed;
+	}
 	return renderToStaticMarkup(
-		<CatalogHostProvider
-			host={makeHost(
-				state,
-				opts.install === undefined ? MOCK_INSTALL : opts.install,
-				opts.community ?? makeAppsState()
-			)}
-		>
+		<CatalogHostProvider host={host}>
 			<AppsCatalogSection variant={opts.variant ?? "all"} />
 		</CatalogHostProvider>
 	);
@@ -537,7 +540,7 @@ describe("AppsCatalogSection — verified organizations", () => {
 			})
 		);
 
-		expect(html).toContain("Officially verified by Ryu staff");
+		expect(html).toContain("Verified business");
 		expect(html).not.toContain("t-plan-badge-sheen");
 		expect(html).not.toContain("bg-[linear-gradient");
 	});
@@ -612,9 +615,62 @@ describe("AppsCatalogSection — verified organizations", () => {
 		// the qualifier — a visible test failure — rather than silently render an
 		// unqualified check that nobody notices.
 		const entry = makeEntry({ org_verified: true });
-		(entry as unknown as Record<string, unknown>).orgVerifiedTier = "official";
+		Object.assign(entry, { orgVerifiedTier: "official" });
 		const html = render(makeAppsState({ items: [makeItem({ entry })] }));
 		expect(html).toContain("Verified organization");
 		expect(html).not.toContain("Verified organization — Official");
+	});
+});
+
+describe("AppsCatalogSection — rollout-gated listings", () => {
+	const gated = (appId: string) => appId !== "@ryu/gated";
+	const items = [
+		makeItem({ entry: makeEntry({ id: "@ryu/open", name: "Open App" }) }),
+		makeItem({ entry: makeEntry({ id: "@ryu/gated", name: "Gated App" }) }),
+	];
+
+	test("a host with no rollout hook lists everything", () => {
+		const html = render(makeAppsState({ items }));
+		expect(html).toContain("Open App");
+		expect(html).toContain("Gated App");
+	});
+
+	test("an app whose rollout is off is not listed", () => {
+		const html = render(makeAppsState({ items }), {
+			appListingAllowed: gated,
+		});
+		expect(html).toContain("Open App");
+		expect(html).not.toContain("Gated App");
+	});
+
+	test("an installed copy stays listed while its rollout is off", () => {
+		const installed = [
+			items[0],
+			makeItem({
+				enabled: true,
+				entry: makeEntry({ id: "@ryu/gated", name: "Gated App" }),
+				installed: true,
+			}),
+		].filter((item): item is AppCatalogItem => item !== undefined);
+		const html = render(makeAppsState({ items: installed }), {
+			appListingAllowed: gated,
+		});
+		expect(html).toContain("Gated App");
+	});
+
+	test("a gated, uninstalled selection from outside the list opens nothing", () => {
+		const gatedItem = items[1];
+		if (!gatedItem) {
+			throw new Error("fixture");
+		}
+		const selected = makeAppsState({
+			items,
+			selectedId: "@ryu/gated",
+			selectedItem: gatedItem,
+		});
+		expect(render(selected)).toContain("Gated App");
+		expect(render(selected, { appListingAllowed: gated })).not.toContain(
+			"Gated App"
+		);
 	});
 });

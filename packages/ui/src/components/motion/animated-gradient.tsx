@@ -1,4 +1,13 @@
 "use client";
+import type { CSSProperties } from "react";
+import css from "./animated-gradient.module.css";
+
+interface Inline1Style extends CSSProperties {
+	"--animated-gradient-1-background"?: CSSProperties["background"];
+	"--animated-gradient-1-border-radius"?: CSSProperties["borderRadius"];
+}
+
+import { isNativeText } from "../../lib/native-primitive-observation.ts";
 
 // spell.sh/components/animated-gradient
 //
@@ -45,6 +54,7 @@ import {
 	useEffect,
 	useState,
 } from "react";
+import { isNativeNumber } from "../../lib/native-primitive-observation.ts";
 
 /** The six named looks. `prism` is the default, as upstream. */
 export type AnimatedGradientPreset =
@@ -56,7 +66,7 @@ export type AnimatedGradientPreset =
 	| "mist";
 
 /** The base pattern the colour field is warped over. */
-export type AnimatedGradientShape = "checks" | "stripes" | "edge";
+export type GradientPattern = "checks" | "stripes" | "edge";
 
 export const DEFAULT_ANIMATED_GRADIENT_PRESET: AnimatedGradientPreset = "prism";
 
@@ -94,7 +104,7 @@ export interface AnimatedGradientConfig {
 	/** Whole-field zoom, 0.01-4 (not a 0-100 slider). */
 	scale?: number;
 	/** Base pattern. Matched case-insensitively, so upstream's `Checks` works. */
-	shape?: AnimatedGradientShape;
+	shape?: GradientPattern;
 	/** Base-pattern zoom, 0-100. */
 	shapeSize?: number;
 	/** Edge hardness between stops, 0-100 (100 = fully smooth). */
@@ -107,6 +117,13 @@ export interface AnimatedGradientConfig {
 	swirlIterations?: number;
 }
 
+/** Complete manifest input before the resolver normalizes its pattern name.
+ * Presets retain their closed authored pattern owner above. */
+export interface AnimatedGradientInputConfig
+	extends Omit<AnimatedGradientConfig, "shape"> {
+	shape?: string;
+}
+
 /** The uniforms the shader and the static paint both read. */
 export interface ResolvedAnimatedGradient {
 	colors: string[];
@@ -115,7 +132,7 @@ export interface ResolvedAnimatedGradient {
 	proportion: number;
 	rotation: number;
 	scale: number;
-	shape: AnimatedGradientShape;
+	shape: GradientPattern;
 	shapeScale: number;
 	softness: number;
 	speed: number;
@@ -123,17 +140,14 @@ export interface ResolvedAnimatedGradient {
 	swirlIterations: number;
 }
 
-const SHAPES: AnimatedGradientShape[] = ["checks", "stripes", "edge"];
+const PATTERN_KINDS: GradientPattern[] = ["checks", "stripes", "edge"];
 
 /**
  * The preset table. Colours are the three stops; the rest are the authored
  * 0-100 form, so a preset and an author's config are the same shape and merge
  * by plain spread.
  */
-export const ANIMATED_GRADIENT_PRESETS: Record<
-	AnimatedGradientPreset,
-	Required<AnimatedGradientConfig>
-> = {
+export const ANIMATED_GRADIENT_PRESETS = {
 	/** Upstream's default, and the one set of numbers here that is exact — see the
 	 *  file header. Violet through the brand blue into aqua. */
 	prism: {
@@ -239,31 +253,29 @@ export const ANIMATED_GRADIENT_PRESETS: Record<
 		swirl: 35,
 		swirlIterations: 6,
 	},
-};
+} satisfies Record<AnimatedGradientPreset, Required<AnimatedGradientConfig>>;
 
-export const ANIMATED_GRADIENT_PRESET_NAMES = Object.keys(
-	ANIMATED_GRADIENT_PRESETS
-) as AnimatedGradientPreset[];
+export const ANIMATED_GRADIENT_PRESET_NAMES =
+	// SAFETY: This immediate module-initialization snapshot reads the six own enumerable string keys of the just-created complete preset literal. Its keys are exactly AnimatedGradientPreset; no external mutation can occur between the initializer and this statement.
+	Object.keys(ANIMATED_GRADIENT_PRESETS) as AnimatedGradientPreset[];
 
 /** Is this string one of the six? The authority for any untrusted input. */
-export function isAnimatedGradientPreset(
-	value: unknown
-): value is AnimatedGradientPreset {
-	return (
-		typeof value === "string" && Object.hasOwn(ANIMATED_GRADIENT_PRESETS, value)
-	);
+export function isAnimatedGradientPreset<T>(
+	value: T
+): value is T & AnimatedGradientPreset {
+	return isNativeText(value) && Object.hasOwn(ANIMATED_GRADIENT_PRESETS, value);
 }
 
 /** Is this string one of the three base patterns? Case-insensitive, because
  *  upstream's docs capitalise them (`Checks`). */
-export function toAnimatedGradientShape(
-	value: unknown
-): AnimatedGradientShape | null {
-	if (typeof value !== "string") {
+export function toGradientPattern<PatternInput>(
+	value: PatternInput
+): GradientPattern | null {
+	if (!isNativeText(value)) {
 		return null;
 	}
 	const lower = value.trim().toLowerCase();
-	return SHAPES.find((s) => s === lower) ?? null;
+	return PATTERN_KINDS.find((s) => s === lower) ?? null;
 }
 
 /**
@@ -273,20 +285,20 @@ export function toAnimatedGradientShape(
  * uniforms, and `swirlIterations: 1e6` or `scale: 1e9` from a third-party
  * manifest is a loop the GPU runs — a frozen tab, not a bad-looking banner.
  */
-const clampNumber = (
-	value: unknown,
+const clampNumber = <NumericInput,>(
+	value: NumericInput,
 	min: number,
 	max: number,
 	fallback: number
 ): number => {
-	if (typeof value !== "number" || !Number.isFinite(value)) {
+	if (!(isNativeNumber(value) && Number.isFinite(value))) {
 		return fallback;
 	}
 	return Math.min(max, Math.max(min, value));
 };
 
 /** A 0-100 authored slider as its 0-1 uniform. */
-const slider = (value: unknown, fallback: number): number =>
+const slider = <SliderInput,>(value: SliderInput, fallback: number): number =>
 	clampNumber(value, 0, 100, fallback) / 100;
 
 /**
@@ -298,7 +310,7 @@ const slider = (value: unknown, fallback: number): number =>
  */
 export function resolveAnimatedGradient(
 	input?: {
-		config?: AnimatedGradientConfig | null;
+		config?: AnimatedGradientInputConfig | null;
 		preset?: AnimatedGradientPreset | null;
 	} | null
 ): ResolvedAnimatedGradient {
@@ -308,9 +320,9 @@ export function resolveAnimatedGradient(
 				? input.preset
 				: DEFAULT_ANIMATED_GRADIENT_PRESET
 		];
-	const cfg = { ...base, ...(input?.config ?? {}) };
+	const cfg = { ...base, ...input?.config };
 	const colors = [cfg.color1, cfg.color2, cfg.color3].filter(
-		(c): c is string => typeof c === "string" && c.trim().length > 0
+		(c): c is string => isNativeText(c) && c.trim().length > 0
 	);
 	return {
 		colors:
@@ -320,7 +332,7 @@ export function resolveAnimatedGradient(
 		proportion: slider(cfg.proportion, base.proportion),
 		rotation: clampNumber(cfg.rotation, 0, 360, base.rotation),
 		scale: clampNumber(cfg.scale, 0.01, 4, base.scale),
-		shape: toAnimatedGradientShape(cfg.shape) ?? base.shape,
+		shape: toGradientPattern(cfg.shape) ?? base.shape,
 		shapeScale: slider(cfg.shapeSize, base.shapeSize),
 		softness: slider(cfg.softness, base.softness),
 		speed: slider(cfg.speed, base.speed),
@@ -415,7 +427,7 @@ class ShaderBoundary extends Component<
 function useLiveShader(live: boolean): boolean {
 	const [allowed, setAllowed] = useState(false);
 	useEffect(() => {
-		if (!live || typeof window === "undefined" || !window.matchMedia) {
+		if (!live || globalThis.window === undefined || !window.matchMedia) {
 			setAllowed(false);
 			return;
 		}
@@ -433,7 +445,7 @@ function useLiveShader(live: boolean): boolean {
 export interface AnimatedGradientProps {
 	className?: string;
 	/** Author overrides on top of the preset. */
-	config?: AnimatedGradientConfig | null;
+	config?: AnimatedGradientInputConfig | null;
 	/**
 	 * Mount the WebGL shader. DEFAULT FALSE, and that default is the feature: a
 	 * caller has to name itself as a place where one or two contexts are
@@ -457,15 +469,24 @@ export function AnimatedGradient({
 }: AnimatedGradientProps) {
 	const resolved = resolveAnimatedGradient({ config, preset });
 	const animate = useLiveShader(live);
+	const inline1Style: Inline1Style = {
+		"--animated-gradient-1-background": animatedGradientCss(resolved),
+		"--animated-gradient-1-border-radius":
+			radius === undefined
+				? undefined
+				: isNativeText(radius)
+					? radius
+					: `${radius}px`,
+		...style,
+	};
 	return (
 		<div
 			aria-hidden="true"
-			className={cn("relative isolate overflow-hidden", className)}
-			style={{
-				background: animatedGradientCss(resolved),
-				borderRadius: radius,
-				...style,
-			}}
+			className={[
+				css.inline1,
+				cn("relative isolate overflow-hidden", className),
+			].join(" ")}
+			style={inline1Style}
 		>
 			{animate ? (
 				<ShaderBoundary>

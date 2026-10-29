@@ -1,3 +1,15 @@
+import type { CSSProperties } from "react";
+import crmStyles from "./crm-values.module.css";
+
+interface CrmDataStyle extends CSSProperties {
+	"--crm-color"?: string;
+	"--crm-share"?: string;
+}
+
+import {
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 // Per-field-type rendering and editing for Harbor (`@ryu/crm`).
 //
 // Harbor's schema is user-defined, so nothing in the panel can switch on a fixed
@@ -10,20 +22,23 @@
 // Money is integer cents on the wire and divides once, at `formatValue`. No
 // currency arithmetic happens in floats anywhere above this file.
 
-import { Badge } from "@ryu/ui/components/badge";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Input } from "@ryu/ui/components/input";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/native-select.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import {
 	formatMinorCurrency,
 	formatNumber,
 } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils";
-import { safeHref } from "@/src/components/panels/crm/url-safety.ts";
+import { useRef } from "react";
+import {
+	safeHref,
+	safeMailtoHref,
+} from "@/src/components/panels/crm/url-safety.ts";
 import type { Field, SelectOption, ValueBag } from "@/src/lib/api/crm.ts";
 import {
 	formatDate as formatDateInZone,
@@ -66,7 +81,10 @@ function formatDatetime(raw: string): string {
  *  Falls back to rendering the raw id rather than blanking: a value whose option
  *  was deleted from the field config is still real data, and hiding it would make
  *  a row look empty when it is not. */
-function optionFor(field: Field, value: unknown): SelectOption | undefined {
+function optionFor<TValue>(
+	field: Field,
+	value: TValue
+): SelectOption | undefined {
 	return field.config?.options?.find((o) => o.id === value);
 }
 
@@ -74,17 +92,17 @@ function optionFor(field: Field, value: unknown): SelectOption | undefined {
  * The display string for one value. Pure — no JSX, so it is also what search,
  * export, and a card's subtitle use.
  */
-export function formatValue(field: Field, value: unknown): string {
+export function formatValue<TValue>(field: Field, value: TValue): string {
 	if (value === null || value === undefined || value === "") {
 		return EMPTY;
 	}
 	switch (field.field_type) {
 		case "currency":
-			return typeof value === "number"
+			return isNativeNumber(value)
 				? formatCents(value, field.config?.currency_code ?? "USD")
 				: String(value);
 		case "percent":
-			return typeof value === "number" ? `${value}%` : String(value);
+			return isNativeNumber(value) ? `${value}%` : String(value);
 		case "checkbox":
 			return value ? "Yes" : "No";
 		case "date":
@@ -100,7 +118,7 @@ export function formatValue(field: Field, value: unknown): string {
 				: String(value);
 		case "rating": {
 			const max = field.config?.max_rating ?? 5;
-			return typeof value === "number" ? `${value}/${max}` : String(value);
+			return isNativeNumber(value) ? `${value}/${max}` : String(value);
 		}
 		case "relation":
 			// The grid shows a count; the detail view resolves the actual records
@@ -131,22 +149,21 @@ export function FieldValue({ field, value }: { field: Field; value: unknown }) {
 
 	if (field.field_type === "select" || field.field_type === "status") {
 		const option = optionFor(field, value);
+		const colorStyle: CrmDataStyle | undefined = option?.color
+			? { "--crm-color": option.color }
+			: undefined;
 		return (
-			<Badge
-				className={cn("font-normal", option?.color && "border-transparent")}
-				// The colour lives in the field's config as user data, so it cannot
-				// come from a Tailwind token. Applied as an inline background with a
-				// readable foreground rather than as a class, which Tailwind could
-				// not have generated at build time anyway.
-				style={
-					option?.color
-						? { backgroundColor: option.color, color: "#fff" }
-						: undefined
-				}
-				variant={option?.color ? "default" : "secondary"}
+			<span
+				className={option?.color ? crmStyles.option : undefined}
+				style={colorStyle}
 			>
-				{option?.label ?? String(value)}
-			</Badge>
+				<Badge
+					typography="normal"
+					variant={option?.color ? "default" : "secondary"}
+				>
+					{option?.label ?? String(value)}
+				</Badge>
+			</span>
 		);
 	}
 
@@ -156,7 +173,7 @@ export function FieldValue({ field, value }: { field: Field; value: unknown }) {
 				{value.map((v) => {
 					const option = optionFor(field, v);
 					return (
-						<Badge className="font-normal" key={String(v)} variant="secondary">
+						<Badge key={String(v)} typography="normal" variant="secondary">
 							{option?.label ?? String(v)}
 						</Badge>
 					);
@@ -171,7 +188,7 @@ export function FieldValue({ field, value }: { field: Field; value: unknown }) {
 		);
 	}
 
-	if (field.field_type === "url" && typeof value === "string") {
+	if (field.field_type === "url" && isNativeText(value)) {
 		// A `url` field's value is USER DATA and reaches an `href` — and the widest
 		// path into it is CSV import, which means the author of a spreadsheet
 		// somebody else imports gets to choose the scheme. `javascript:` in an href
@@ -180,7 +197,11 @@ export function FieldValue({ field, value }: { field: Field; value: unknown }) {
 		// as inert text, still fully visible, just not clickable.
 		const safe = safeHref(value);
 		if (!safe) {
-			return <span className="truncate">{value}</span>;
+			return (
+				<span className="truncate" title={value}>
+					{value}
+				</span>
+			);
 		}
 		return (
 			// `rel="noopener"` is required alongside `target="_blank"` — the opened
@@ -196,18 +217,30 @@ export function FieldValue({ field, value }: { field: Field; value: unknown }) {
 		);
 	}
 
-	if (field.field_type === "email" && typeof value === "string") {
+	if (field.field_type === "email" && isNativeText(value)) {
+		const href = safeMailtoHref(value);
+		if (!href) {
+			return (
+				<span className="truncate" title={value}>
+					{value}
+				</span>
+			);
+		}
 		return (
 			<a
 				className="text-primary underline-offset-2 hover:underline"
-				href={`mailto:${value}`}
+				href={href}
 			>
 				{value}
 			</a>
 		);
 	}
 
-	return <span className="truncate">{formatValue(field, value)}</span>;
+	return (
+		<span className="truncate" title={formatValue(field, value)}>
+			{formatValue(field, value)}
+		</span>
+	);
 }
 
 /**
@@ -229,12 +262,19 @@ export function FieldEditor({
 	autoFocus?: boolean;
 	field: Field;
 	onCancel?: () => void;
-	onCommit: (next: unknown) => void;
+	onCommit: (next: ValueBag[string]) => void;
 	value: unknown;
 }) {
+	const canceled = useRef(false);
+	const commit = (next: ValueBag[string]) => {
+		if (!canceled.current) {
+			onCommit(next);
+		}
+	};
 	const stopOnEscape = (event: React.KeyboardEvent) => {
 		if (event.key === "Escape") {
 			event.preventDefault();
+			canceled.current = true;
 			onCancel?.();
 		}
 	};
@@ -245,7 +285,7 @@ export function FieldEditor({
 				<Checkbox
 					aria-label={field.name}
 					checked={Boolean(value)}
-					onCheckedChange={(next) => onCommit(Boolean(next))}
+					onCheckedChange={(next) => commit(Boolean(next))}
 				/>
 			);
 
@@ -255,8 +295,8 @@ export function FieldEditor({
 				<NativeSelect
 					aria-label={field.name}
 					autoFocus={autoFocus}
-					defaultValue={typeof value === "string" ? value : ""}
-					onChange={(event) => onCommit(event.target.value || null)}
+					defaultValue={isNativeText(value) ? value : ""}
+					onChange={(event) => commit(event.target.value || null)}
 					onKeyDown={stopOnEscape}
 				>
 					<NativeSelectOption value="">{EMPTY}</NativeSelectOption>
@@ -285,8 +325,8 @@ export function FieldEditor({
 				<Textarea
 					aria-label={field.name}
 					autoFocus={autoFocus}
-					defaultValue={typeof value === "string" ? value : ""}
-					onBlur={(event) => onCommit(event.target.value)}
+					defaultValue={isNativeText(value) ? value : ""}
+					onBlur={(event) => commit(event.target.value)}
 					onKeyDown={stopOnEscape}
 					rows={4}
 				/>
@@ -300,17 +340,30 @@ export function FieldEditor({
 					// Shown as a decimal amount, committed as integer cents. Rounding
 					// happens once, here, so a value typed as 42.005 cannot drift into
 					// the database as a float.
-					defaultValue={typeof value === "number" ? String(value / 100) : ""}
+					defaultValue={isNativeNumber(value) ? String(value / 100) : ""}
 					inputMode="decimal"
 					onBlur={(event) => {
 						const raw = event.target.value.trim();
 						if (raw === "") {
-							onCommit(null);
+							commit(null);
 							return;
 						}
-						const parsed = Number.parseFloat(raw);
-						onCommit(Number.isNaN(parsed) ? null : Math.round(parsed * 100));
+						const parsed = Number(raw);
+						if (
+							!(
+								/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw) &&
+								Number.isFinite(parsed) &&
+								Number.isSafeInteger(Math.round(parsed * 100))
+							)
+						) {
+							event.target.setCustomValidity("Enter a valid currency amount.");
+							event.target.reportValidity();
+							return;
+						}
+						event.target.setCustomValidity("");
+						commit(Math.round(parsed * 100));
 					}}
+					onChange={(event) => event.target.setCustomValidity("")}
 					onKeyDown={stopOnEscape}
 					type="text"
 				/>
@@ -323,7 +376,7 @@ export function FieldEditor({
 				<Input
 					aria-label={field.name}
 					autoFocus={autoFocus}
-					defaultValue={typeof value === "number" ? String(value) : ""}
+					defaultValue={isNativeNumber(value) ? String(value) : ""}
 					max={
 						field.field_type === "rating"
 							? (field.config?.max_rating ?? 5)
@@ -333,13 +386,18 @@ export function FieldEditor({
 					onBlur={(event) => {
 						const raw = event.target.value.trim();
 						if (raw === "") {
-							onCommit(null);
+							commit(null);
 							return;
 						}
 						const parsed = Number(raw);
-						onCommit(Number.isNaN(parsed) ? null : parsed);
+						if (!(Number.isFinite(parsed) && event.target.checkValidity())) {
+							event.target.reportValidity();
+							return;
+						}
+						commit(parsed);
 					}}
 					onKeyDown={stopOnEscape}
+					step={field.field_type === "rating" ? 1 : "any"}
 					type="number"
 				/>
 			);
@@ -354,7 +412,7 @@ export function FieldEditor({
 					onBlur={(event) => {
 						const raw = event.target.value;
 						if (!raw) {
-							onCommit(null);
+							commit(null);
 							return;
 						}
 						// The store wants RFC-3339. A `date` input yields `YYYY-MM-DD`
@@ -362,7 +420,7 @@ export function FieldEditor({
 						// zone — parsing through `Date` stamps the user's own zone,
 						// which is what they meant when they picked it.
 						const at = new Date(raw);
-						onCommit(Number.isNaN(at.getTime()) ? null : at.toISOString());
+						commit(Number.isNaN(at.getTime()) ? null : at.toISOString());
 					}}
 					onKeyDown={stopOnEscape}
 					type={field.field_type === "date" ? "date" : "datetime-local"}
@@ -374,8 +432,8 @@ export function FieldEditor({
 				<Input
 					aria-label={field.name}
 					autoFocus={autoFocus}
-					defaultValue={typeof value === "string" ? value : ""}
-					onBlur={(event) => onCommit(event.target.value)}
+					defaultValue={isNativeText(value) ? value : ""}
+					onBlur={(event) => commit(event.target.value)}
 					onKeyDown={stopOnEscape}
 					type={
 						field.field_type === "email"
@@ -392,8 +450,8 @@ export function FieldEditor({
 }
 
 /** RFC-3339 → the value shape an `<input type="date">` / `"datetime-local"` wants. */
-function toInputDate(value: unknown, type: "date" | "datetime"): string {
-	if (typeof value !== "string") {
+function toInputDate<TValue>(value: TValue, type: "date" | "datetime"): string {
+	if (!isNativeText(value)) {
 		return "";
 	}
 	const at = new Date(value);
@@ -419,7 +477,7 @@ export function recordTitle(
 	}
 	if (titleField && values) {
 		const raw = values[titleField.slug];
-		if (typeof raw === "string" && raw.trim() !== "") {
+		if (isNativeText(raw) && raw.trim() !== "") {
 			return raw;
 		}
 	}

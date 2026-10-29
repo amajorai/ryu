@@ -20,11 +20,13 @@
  *  - `credit` — a pool-restricted `CreditGrant` into the wallet of an org the
  *    user chooses at redemption time (the same reward-received dialog quests
  *    use). Fulfilled automatically.
- *  - `desktop_access` / `plan_time` / `node_time` — entitlement grants that
- *    need an existing entitlement/billing path to land in. The redemption row is
- *    created `pending`; fulfilment is whoever owns the entitlement side. These
- *    exist now so the catalog is real, and the router refuses them loudly until
- *    a fulfilment path is wired rather than silently doing nothing.
+ *  - `plan_time` / `desktop_access` — a non-renewing personal plan window
+ *    (`desktop_access` is the cheapest plan that includes the desktop app, Plus).
+ *    The redemption row itself carries the window, and entitlement resolution
+ *    overlays it exactly like a redeemed subscription gift. Fulfilled
+ *    automatically.
+ *  - `node_time` — a managed node provisioned into an org the user chooses,
+ *    scheduled for removal when the window ends. Fulfilled automatically.
  */
 
 import type { CreditPoolId } from "./credit-pools.ts";
@@ -82,7 +84,7 @@ export const REWARDS_STORE: readonly StoreItemDef[] = [
 		key: "desktop-1m",
 		title: "1 month desktop access",
 		description:
-			"One month of Ryu desktop access for a friend or a second machine.",
+			"One month of the entry personal plan on your account, which includes the desktop app.",
 		icon: "laptop",
 		costPoints: 3000,
 		reward: { kind: "desktop_access", months: 1 },
@@ -130,4 +132,35 @@ export function storeCreditReward(
 	return item.reward.kind === "credit"
 		? { creditMicroUsd: item.reward.creditMicroUsd, pool: item.reward.pool }
 		: null;
+}
+
+/** The plan that `desktop_access` grants: the cheapest plan with the desktop app. */
+export const DESKTOP_ACCESS_PLAN = "plus" as const;
+
+/** The entitlement a non-credit store item grants, or null for credit items. */
+export type StoreEntitlementReward =
+	| { kind: "plan"; months: number; plan: PlanId }
+	| { kind: "node"; months: number };
+
+export function storeEntitlementReward(
+	item: StoreItemDef
+): StoreEntitlementReward | null {
+	switch (item.reward.kind) {
+		case "plan_time":
+			return {
+				kind: "plan",
+				months: item.reward.months,
+				plan: item.reward.plan,
+			};
+		case "desktop_access":
+			return {
+				kind: "plan",
+				months: item.reward.months,
+				plan: DESKTOP_ACCESS_PLAN,
+			};
+		case "node_time":
+			return { kind: "node", months: item.reward.months };
+		default:
+			return null;
+	}
 }

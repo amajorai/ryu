@@ -21,9 +21,9 @@ describe("parseAutoUpdate", () => {
 			true
 		);
 		// A non-boolean value never silently disables updates.
-		expect(
-			parseAutoUpdate(JSON.stringify({ enabled: "off" as unknown })).enabled
-		).toBe(true);
+		expect(parseAutoUpdate(JSON.stringify({ enabled: "off" })).enabled).toBe(
+			true
+		);
 		expect(parseAutoUpdate(JSON.stringify({})).enabled).toBe(true);
 	});
 });

@@ -10,10 +10,10 @@ use axum::{
 };
 use chrono::{SecondsFormat, Utc};
 use ryu_a2a::{
-    discover_agent_card, outbound_task_record_id,
+    discover_verified_agent_card, outbound_task_record_id,
     protocol::{
         errors::error_code as codes, methods, AgentCapabilities, AgentCard, AgentInterface,
-        AgentSkill, Artifact, AuthenticationInfo, CancelTaskRequest,
+        AgentProvider, AgentSkill, Artifact, AuthenticationInfo, CancelTaskRequest,
         DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
         GetTaskPushNotificationConfigRequest, GetTaskRequest, HttpAuthSecurityScheme, JsonRpcError,
         JsonRpcId, JsonRpcRequest, JsonRpcResponse, ListTaskPushNotificationConfigsRequest,
@@ -34,7 +34,10 @@ use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-use super::runtime::{message_to_untrusted_prompt, runtime, A2aRuntime, AgentRunEvent};
+use super::card_assets::{card_asset_url, sign_card, CARD_ICON_PATH};
+use super::runtime::{
+    fetch_url_parts, message_to_untrusted_prompt_with, runtime, A2aRuntime, AgentRunEvent,
+};
 use crate::server::ServerState;
 
 const DEFAULT_TENANT: &str = "default";
@@ -44,6 +47,7 @@ const MAX_A2A_HOPS: u64 = 5;
 pub fn public_routes() -> Router<ServerState> {
     Router::new()
         .route("/.well-known/agent-card.json", get(agent_card))
+        .merge(super::card_assets::routes())
         .route("/a2a", post(json_rpc))
         // A2A uses literal colon operation suffixes (`message:send`,
         // `{id}:cancel`). Axum 0.7's matcher treats every colon as the start of a
@@ -295,6 +299,10 @@ async fn build_agent_card(extended: bool) -> Result<AgentCard, ApiError> {
         .public_base_url
         .unwrap_or_else(|| format!("http://127.0.0.1:{}", crate::profile::port(7980)));
     let endpoint = format!("{}/a2a", base_url.trim_end_matches('/'));
+    let provider = card_provider(
+        crate::sidecar::control_plane::registered_org().map(|org| org.name),
+        &base_url,
+    );
     let interfaces = vec![
         AgentInterface {
             url: endpoint.clone(),
@@ -309,7 +317,8 @@ async fn build_agent_card(extended: bool) -> Result<AgentCard, ApiError> {
             tenant: Some(DEFAULT_TENANT.to_owned()),
         },
     ];
-    Ok(AgentCard {
+    let icon_url = card_asset_url(&base_url, CARD_ICON_PATH);
+    let mut card = AgentCard {
         name: config.display_name,
         description: config.description,
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -323,9 +332,10 @@ async fn build_agent_card(extended: bool) -> Result<AgentCard, ApiError> {
         default_input_modes: vec!["text/plain".to_owned(), "application/json".to_owned()],
         default_output_modes: vec!["text/plain".to_owned(), "application/json".to_owned()],
         skills,
-        provider: None,
+        provider,
         documentation_url: Some("https://docs.ryuhq.com/docs/extend/integrate/a2a".to_owned()),
-        icon_url: None,
+        // The Ryu mark, served by this node next to the card.
+        icon_url: Some(icon_url),
         security_schemes: Some(std::collections::HashMap::from([(
             "bearer".to_owned(),
             SecurityScheme::HttpAuth(HttpAuthSecurityScheme {
@@ -339,6 +349,23 @@ async fn build_agent_card(extended: bool) -> Result<AgentCard, ApiError> {
             Vec::new(),
         )])]),
         signatures: None,
+    };
+    // Signed last, over the complete card, with the enrolled node identity key;
+    // the matching public key is published at the `jku` under the same base URL.
+    sign_card(&mut card, &base_url);
+    Ok(card)
+}
+
+/// The card's `provider`: the organization this node is registered to, when
+/// control-plane registration has succeeded. An unregistered node has no
+/// verified operator identity, so it omits `provider` rather than inventing one.
+fn card_provider(org_name: Option<String>, base_url: &str) -> Option<AgentProvider> {
+    let organization = org_name
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())?;
+    Some(AgentProvider {
+        organization,
+        url: base_url.trim_end_matches('/').to_owned(),
     })
 }
 
@@ -497,6 +524,36 @@ struct PreparedTask {
     events: broadcast::Receiver<AgentRunEvent>,
 }
 
+fn public_capabilities_for_request(
+    principal: &ryu_a2a::A2aPublicAgentBinding,
+    metadata: Option<&std::collections::HashMap<String, Value>>,
+) -> Result<BTreeSet<String>, ApiError> {
+    let Some(value) = metadata.and_then(|metadata| metadata.get("ryuPublicCapabilities")) else {
+        return Ok(principal.capability_allowlist.clone());
+    };
+    let Some(requested) = value.as_array() else {
+        return Err(ApiError::bad_request("Invalid public capability list"));
+    };
+    let requested = requested
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| ApiError::bad_request("Invalid public capability list"))
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if requested
+        .iter()
+        .any(|capability| !principal.capability_allowlist.contains(capability))
+    {
+        return Err(ApiError::bad_request(
+            "Public capabilities exceed the bound principal grant",
+        ));
+    }
+    Ok(requested)
+}
+
 async fn start_inbound_task(
     state: &ServerState,
     headers: &HeaderMap,
@@ -539,7 +596,8 @@ async fn start_inbound_task(
     if hop_count >= MAX_A2A_HOPS {
         return Err(ApiError::bad_request("A2A hop limit exceeded"));
     }
-    let prompt = message_to_untrusted_prompt(&request.message, &principal.name)
+    let fetched = fetch_url_parts(&request.message).await;
+    let prompt = message_to_untrusted_prompt_with(&request.message, &principal.name, &fetched)
         .map_err(|_| ApiError::bad_request("A2A message is not accepted"))?;
     let requested_task_id = request
         .message
@@ -572,12 +630,26 @@ async fn start_inbound_task(
             .local_agent_id
             .as_deref()
             .ok_or_else(|| ApiError::conflict("The task has no published local agent"))?;
-        let published = runtime
-            .store
-            .list_published_agents(&tenant_id, true)?
-            .into_iter()
-            .find(|published| published.agent_id == agent_id)
-            .ok_or_else(|| ApiError::conflict("The task's published agent is unavailable"))?;
+        let published = if let Some(binding) = principal.public_agent.as_ref() {
+            let published = runtime
+                .store
+                .get_published_agent(&tenant_id, &binding.published_agent_id)
+                .map_err(|_| ApiError::conflict("The task's published agent is unavailable"))?;
+            if !published.enabled || published.agent_id != agent_id {
+                return Err(ApiError::conflict(
+                    "The task's published agent is unavailable to this principal",
+                ));
+            }
+            published
+        } else {
+            runtime
+                .store
+                .list_published_agents(&tenant_id, true)?
+                .into_iter()
+                .find(|published| published.agent_id == agent_id)
+                .ok_or_else(|| ApiError::conflict("The task's published agent is unavailable"))?
+        };
+        authorize_principal_published_agent(&principal, &published)?;
         let mut task: Task =
             serde_json::from_value(existing.protocol_task).map_err(ApiError::internal)?;
         request.message.context_id = Some(existing.context_id.clone());
@@ -600,7 +672,9 @@ async fn start_inbound_task(
         )?;
         (task_id, existing.context_id, published)
     } else {
-        let published = select_published_agent(&runtime, &tenant_id, request.metadata.as_ref())?;
+        let published =
+            select_published_agent(&runtime, &tenant_id, request.metadata.as_ref(), &principal)?;
+        authorize_principal_published_agent(&principal, &published)?;
         let context_id = request
             .message
             .context_id
@@ -624,6 +698,10 @@ async fn start_inbound_task(
                 (
                     "ryuAgentId".to_owned(),
                     Value::String(published.agent_id.clone()),
+                ),
+                (
+                    "ryuPublishedAgentId".to_owned(),
+                    Value::String(published.id.clone()),
                 ),
                 ("ryuHopCount".to_owned(), Value::from(hop_count + 1)),
             ])),
@@ -657,6 +735,14 @@ async fn start_inbound_task(
         }
     }
     let conversation_id = conversation_key(&tenant_id, &principal.id, &context_id);
+    let public_agent_policy = match principal.public_agent.as_ref() {
+        Some(binding) => Some(crate::sidecar::adapters::PublicAgentRunPolicy {
+            published_agent_id: binding.published_agent_id.clone(),
+            agent_id: published.agent_id.clone(),
+            capabilities: public_capabilities_for_request(binding, request.metadata.as_ref())?,
+        }),
+        None => None,
+    };
     let events = runtime
         .start_agent_task(
             state.clone(),
@@ -667,6 +753,7 @@ async fn start_inbound_task(
             published.agent_id,
             principal.name,
             prompt,
+            public_agent_policy,
         )
         .map_err(ApiError::internal)?;
     Ok(PreparedTask {
@@ -1300,13 +1387,22 @@ fn save_peer(body: PeerBody, path_id: Option<String>) -> Result<A2aPeer, ApiErro
         }
     }
     let runtime = runtime().map_err(ApiError::internal)?;
+    let id = path_id.or(body.id);
+    // A signature status describes the card Ryu fetched. Keep it only while
+    // the saved card is unchanged; a hand-supplied card was never verified.
+    let card_signature = id
+        .as_deref()
+        .and_then(|id| runtime.store.get_peer(DEFAULT_TENANT, id).ok())
+        .filter(|existing| existing.agent_card == body.agent_card)
+        .and_then(|existing| existing.card_signature);
     Ok(runtime.store.upsert_peer(
         PeerUpsert {
-            id: path_id.or(body.id),
+            id,
             tenant_id: DEFAULT_TENANT.to_owned(),
             name: body.name,
             agent_card_url: body.agent_card_url,
             agent_card: body.agent_card,
+            card_signature,
             credential: body.credential,
             enabled: body.enabled,
         },
@@ -1349,10 +1445,24 @@ struct DiscoverBody {
 
 async fn management_discover_peer(Json(body): Json<DiscoverBody>) -> Response {
     let result = async {
-        let card = discover_agent_card(&body.url, local_policy(), ClientLimits::default())
-            .await
-            .map_err(ApiError::bad_gateway)?;
         let runtime = runtime().map_err(ApiError::internal)?;
+        let require_signature = runtime
+            .store
+            .server_config(DEFAULT_TENANT)?
+            .require_signed_peer_cards;
+        let discovered = discover_verified_agent_card(
+            &body.url,
+            local_policy(),
+            ClientLimits::default(),
+            require_signature,
+        )
+        .await
+        .map_err(|error| match error {
+            // Signature and validation failures are actionable; say which.
+            ryu_a2a::ClientError::InvalidAgentCard(_) => ApiError::bad_request(error.to_string()),
+            other => ApiError::bad_gateway(other),
+        })?;
+        let card = discovered.card;
         let peer = runtime.store.upsert_peer(
             PeerUpsert {
                 id: None,
@@ -1360,6 +1470,7 @@ async fn management_discover_peer(Json(body): Json<DiscoverBody>) -> Response {
                 name: body.name.unwrap_or_else(|| card.name.clone()),
                 agent_card_url: body.url,
                 agent_card: Some(serde_json::to_value(card).map_err(ApiError::internal)?),
+                card_signature: Some(discovered.signature),
                 credential: body.credential,
                 enabled: true,
             },
@@ -1468,6 +1579,10 @@ async fn management_list_principals() -> Response {
 struct PrincipalBody {
     name: String,
     scopes: BTreeSet<A2aScope>,
+    #[serde(default, rename = "publishedAgentId")]
+    published_agent_id: Option<String>,
+    #[serde(default, rename = "capabilityAllowlist")]
+    capability_allowlist: Option<BTreeSet<String>>,
 }
 
 #[derive(Serialize)]
@@ -1480,10 +1595,28 @@ struct IssuedTokenResponse {
 async fn management_issue_principal(Json(body): Json<PrincipalBody>) -> Response {
     management_result((|| {
         let runtime = runtime().map_err(ApiError::internal)?;
-        let IssuedPrincipalToken { principal, token } =
-            runtime
-                .store
-                .issue_principal_token(DEFAULT_TENANT, &body.name, body.scopes)?;
+        let issued = match (body.published_agent_id, body.capability_allowlist) {
+            (None, None) => {
+                runtime
+                    .store
+                    .issue_principal_token(DEFAULT_TENANT, &body.name, body.scopes)?
+            }
+            (Some(published_agent_id), Some(capability_allowlist)) => {
+                runtime.store.issue_public_agent_principal_token(
+                    DEFAULT_TENANT,
+                    &body.name,
+                    body.scopes,
+                    &published_agent_id,
+                    capability_allowlist,
+                )?
+            }
+            _ => {
+                return Err(ApiError::bad_request(
+                    "A public principal requires both a published agent and a capability allowlist",
+                ));
+            }
+        };
+        let IssuedPrincipalToken { principal, token } = issued;
         Ok(IssuedTokenResponse { principal, token })
     })())
 }
@@ -1653,14 +1786,32 @@ fn select_published_agent(
     runtime: &A2aRuntime,
     tenant: &str,
     metadata: Option<&std::collections::HashMap<String, Value>>,
+    principal: &A2aPrincipal,
 ) -> Result<PublishedAgent, ApiError> {
+    let requested = metadata
+        .and_then(|metadata| metadata.get("ryuAgentId"))
+        .and_then(Value::as_str);
+    if let Some(binding) = principal.public_agent.as_ref() {
+        let published = runtime
+            .store
+            .get_published_agent(tenant, &binding.published_agent_id)
+            .map_err(|_| ApiError::bad_request("The assigned published agent is unavailable"))?;
+        if !published.enabled
+            || requested.is_some_and(|requested| {
+                requested != published.id && requested != published.agent_id
+            })
+        {
+            return Err(ApiError::bad_request(
+                "The requested published agent is not available to this principal",
+            ));
+        }
+        return Ok(published);
+    }
+
     let published = runtime.store.list_published_agents(tenant, true)?;
     if published.is_empty() {
         return Err(ApiError::conflict("No local agents are published over A2A"));
     }
-    let requested = metadata
-        .and_then(|metadata| metadata.get("ryuAgentId"))
-        .and_then(Value::as_str);
     match requested {
         Some(requested) => published
             .into_iter()
@@ -1673,6 +1824,19 @@ fn select_published_agent(
         None => Err(ApiError::bad_request(
             "Multiple agents are published; set metadata.ryuAgentId",
         )),
+    }
+}
+
+fn authorize_principal_published_agent(
+    principal: &A2aPrincipal,
+    published: &PublishedAgent,
+) -> Result<(), ApiError> {
+    if principal.allows_published_agent(&published.id) {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "The requested published agent is not available to this principal",
+        ))
     }
 }
 
@@ -1922,6 +2086,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn card_provider_names_only_a_registered_org() {
+        assert!(card_provider(None, "https://node.example.com").is_none());
+        assert!(card_provider(Some("   ".to_owned()), "https://node.example.com").is_none());
+        let provider = card_provider(Some(" Acme ".to_owned()), "https://node.example.com/")
+            .expect("registered org becomes the provider");
+        assert_eq!(provider.organization, "Acme");
+        assert_eq!(provider.url, "https://node.example.com");
+    }
+
+    #[test]
     fn page_tokens_are_bounded_integers() {
         assert_eq!(decode_page_token(None).expect("empty token"), 0);
         assert_eq!(decode_page_token(Some("42")).expect("valid token"), 42);
@@ -1961,5 +2135,99 @@ mod tests {
         ));
         headers.insert("a2a-version", HeaderValue::from_static(VERSION));
         assert!(ensure_protocol_version(&headers).is_ok());
+    }
+
+    #[test]
+    fn public_principal_cannot_run_a_different_published_agent() {
+        let principal = A2aPrincipal {
+            id: "principal-1".to_owned(),
+            tenant_id: DEFAULT_TENANT.to_owned(),
+            name: "Profile visitor".to_owned(),
+            scopes: BTreeSet::from([A2aScope::Send]),
+            public_agent: Some(ryu_a2a::A2aPublicAgentBinding {
+                published_agent_id: "publication-a".to_owned(),
+                capability_allowlist: BTreeSet::from(["tool:files.read_file".to_owned()]),
+            }),
+            created_at: String::new(),
+            last_used_at: None,
+            revoked_at: None,
+        };
+        let other_publication = PublishedAgent {
+            id: "publication-b".to_owned(),
+            tenant_id: DEFAULT_TENANT.to_owned(),
+            agent_id: "agent-b".to_owned(),
+            name: "Agent B".to_owned(),
+            description: String::new(),
+            skills: Vec::new(),
+            enabled: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+
+        assert!(authorize_principal_published_agent(&principal, &other_publication).is_err());
+    }
+
+    #[test]
+    fn public_profile_capabilities_can_only_narrow_the_bound_principal() {
+        let binding = ryu_a2a::A2aPublicAgentBinding {
+            published_agent_id: "publication-a".to_owned(),
+            capability_allowlist: BTreeSet::from([
+                "tool:web.search".to_owned(),
+                "tool:files.read_file".to_owned(),
+            ]),
+        };
+        let metadata = std::collections::HashMap::from([(
+            "ryuPublicCapabilities".to_owned(),
+            json!(["tool:web.search"]),
+        )]);
+
+        assert_eq!(
+            public_capabilities_for_request(&binding, Some(&metadata)).expect("narrow grant"),
+            BTreeSet::from(["tool:web.search".to_owned()])
+        );
+        assert_eq!(
+            public_capabilities_for_request(&binding, None).expect("bound grant"),
+            binding.capability_allowlist
+        );
+
+        let widened = std::collections::HashMap::from([(
+            "ryuPublicCapabilities".to_owned(),
+            json!(["tool:shell.exec"]),
+        )]);
+        assert!(public_capabilities_for_request(&binding, Some(&widened)).is_err());
+
+        let malformed = std::collections::HashMap::from([(
+            "ryuPublicCapabilities".to_owned(),
+            json!(["tool:web.search", 7]),
+        )]);
+        assert!(public_capabilities_for_request(&binding, Some(&malformed)).is_err());
+    }
+
+    #[test]
+    fn unbound_principals_keep_existing_publication_access() {
+        let principal = A2aPrincipal {
+            id: "principal-legacy".to_owned(),
+            tenant_id: DEFAULT_TENANT.to_owned(),
+            name: "Legacy principal".to_owned(),
+            scopes: BTreeSet::from([A2aScope::Send]),
+            public_agent: None,
+            created_at: String::new(),
+            last_used_at: None,
+            revoked_at: None,
+        };
+        let published = PublishedAgent {
+            id: "publication-a".to_owned(),
+            tenant_id: DEFAULT_TENANT.to_owned(),
+            agent_id: "agent-a".to_owned(),
+            name: "Agent A".to_owned(),
+            description: String::new(),
+            skills: Vec::new(),
+            enabled: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+
+        assert!(authorize_principal_published_agent(&principal, &published).is_ok());
+        assert!(principal.allows_public_capability("tool:files.read_file"));
     }
 }

@@ -45,7 +45,7 @@ impl ImageHost for CoreImageHost {
     }
 
     fn gateway_token(&self) -> Option<String> {
-        crate::sidecar::gateway::gateway_core_token()
+        crate::sidecar::gateway::gateway_inference_token()
     }
 
     fn start_local_engine(&self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
@@ -56,5 +56,13 @@ impl ImageHost for CoreImageHost {
                 .await
                 .map_err(|e| format!("{e:#}"))
         })
+    }
+}
+
+impl ryu_image::video::LocalVideoHost for CoreImageHost {
+    fn local_video_inputs(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = ryu_image::video::LocalVideoInputs> + Send + '_>> {
+        Box::pin(crate::sidecar::providers::sdcpp::active_video_inputs())
     }
 }

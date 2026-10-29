@@ -74,6 +74,28 @@ pub fn load() -> Result<LoadReport> {
 }
 
 fn load_from_path(config_path: &Path) -> Result<LoadReport> {
+    let overrides = read_overrides(config_path)?;
+    apply_overrides(config_path, overrides)
+}
+
+/// Resolve the managed Pi state root without mutating environment or stores.
+pub(crate) fn pi_agent_override_at(config_dir: &Path) -> Result<Option<String>> {
+    if std::env::var_os("RYU_PI_AGENT_DIR").is_some() {
+        return Ok(std::env::var("RYU_PI_AGENT_DIR").ok());
+    }
+    let path = config_dir.join(CONFIG_FILE_NAME);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let overrides = read_overrides(&path)?;
+    overrides
+        .get("RYU_PI_AGENT_DIR")
+        .map(value_to_env)
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn read_overrides(config_path: &Path) -> Result<BTreeMap<String, Value>> {
     let metadata = std::fs::metadata(config_path)
         .with_context(|| format!("reading metadata for {}", config_path.display()))?;
     if metadata.len() > MAX_CONFIG_BYTES {
@@ -105,11 +127,17 @@ fn load_from_path(config_path: &Path) -> Result<LoadReport> {
     for (name, value) in config.overrides {
         overrides.insert(name, value);
     }
+    Ok(overrides)
+}
 
+fn apply_overrides(config_path: &Path, overrides: BTreeMap<String, Value>) -> Result<LoadReport> {
     let mut report = LoadReport {
         path: config_path.to_path_buf(),
         ..LoadReport::default()
     };
+    // Validate the complete document before changing process state. A malformed
+    // later entry must not leave earlier settings applied after a failed load.
+    let mut normalized = Vec::new();
     for (name, value) in overrides {
         if !is_valid_override_name(&name) {
             bail!(
@@ -127,6 +155,10 @@ fn load_from_path(config_path: &Path) -> Result<LoadReport> {
             continue;
         };
 
+        normalized.push((name, value));
+    }
+
+    for (name, value) in normalized {
         // Environment is the explicit deployment escape hatch and therefore wins
         // over the local file, including an intentionally empty value.
         if std::env::var_os(&name).is_some() {
@@ -137,13 +169,13 @@ fn load_from_path(config_path: &Path) -> Result<LoadReport> {
         report.applied += 1;
     }
 
-    eprintln!(
+    crate::log_rotation::write_diagnostic(format!(
 		"ryu config: loaded {} non-secret override(s) from {} ({} reserved/secret skipped, {} explicit env value(s) kept)",
 		report.applied,
 		report.path.display(),
 		report.ignored_reserved,
 		report.ignored_environment
-	);
+	));
 
     Ok(report)
 }
@@ -184,6 +216,17 @@ fn friendly_path_to_env_name(path: &[String]) -> String {
             segments.remove(0);
         }
         Some("voice") => {
+            segments.remove(0);
+        }
+        // Recall tuning is grouped under `rag` in the file, but its readers
+        // predate the group and use `RYU_AUTO_RECALL_*` and
+        // `RYU_CONTEXT_MAX_TOKENS`. Other `rag` keys keep their `RYU_RAG_` prefix.
+        Some("rag")
+            if matches!(
+                segments.get(1).map(String::as_str),
+                Some("autoRecall" | "contextMaxTokens")
+            ) =>
+        {
             segments.remove(0);
         }
         Some("node") => {
@@ -302,132 +345,4 @@ fn value_to_scalar(value: &Value) -> Result<Option<String>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ffi::OsString;
-    use std::sync::Mutex;
-    use tempfile::tempdir;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn replace_env(name: &str, value: Option<&str>) -> Option<OsString> {
-        let previous = std::env::var_os(name);
-        match value {
-            Some(value) => std::env::set_var(name, value),
-            None => std::env::remove_var(name),
-        }
-        previous
-    }
-
-    fn restore_env(name: &str, previous: Option<OsString>) {
-        match previous {
-            Some(value) => std::env::set_var(name, value),
-            None => std::env::remove_var(name),
-        }
-    }
-
-    #[test]
-    fn config_file_is_optional_and_uses_config_dir_path() {
-        assert!(path().ends_with(CONFIG_FILE_NAME));
-    }
-
-    #[test]
-    fn scalar_and_array_values_convert_to_process_env_strings() {
-        assert_eq!(
-            value_to_env(&Value::Bool(true)).unwrap(),
-            Some("true".into())
-        );
-        assert_eq!(value_to_env(&Value::from(5)).unwrap(), Some("5".into()));
-        assert_eq!(
-            value_to_env(&serde_json::json!(["a", 2, true])).unwrap(),
-            Some("a,2,true".into())
-        );
-    }
-
-    #[test]
-    fn friendly_settings_map_to_legacy_names() {
-        let mut flattened = BTreeMap::new();
-        flatten_settings(
-            &["models".to_owned()],
-            &serde_json::json!({
-                "defaultLlm": {"model": "gpt-4o-mini"},
-                "embedding": {"model": "nomic-embed"}
-            }),
-            &mut flattened,
-        )
-        .unwrap();
-        assert_eq!(
-            flattened.get("RYU_DEFAULT_LLM_MODEL"),
-            Some(&Value::String("gpt-4o-mini".to_owned()))
-        );
-        assert_eq!(
-            flattened.get("RYU_EMBED_MODEL"),
-            Some(&Value::String("nomic-embed".to_owned()))
-        );
-    }
-
-    #[test]
-    fn config_applies_non_secret_values_but_preserves_explicit_env() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempdir().unwrap();
-        let file = dir.path().join(CONFIG_FILE_NAME);
-        std::fs::write(
-            &file,
-            serde_json::to_vec(&serde_json::json!({
-                "version": CONFIG_VERSION,
-                "settings": {
-                    "models": {"defaultLlm": {"model": "from-settings"}}
-                },
-                "overrides": {
-                    "RYU_NODE_NAME": "from-file",
-                    "RYU_CORS_ORIGINS": ["http://one", "http://two"],
-                    "RYU_DEFAULT_LLM_API_KEY": "must-not-load"
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let previous_name = replace_env("RYU_NODE_NAME", Some("from-env"));
-        let previous_origins = replace_env("RYU_CORS_ORIGINS", None);
-        let previous_model = replace_env("RYU_DEFAULT_LLM_MODEL", None);
-        let previous_key = replace_env("RYU_DEFAULT_LLM_API_KEY", None);
-        let report = load_from_path(&file).unwrap();
-        assert_eq!(std::env::var("RYU_NODE_NAME").unwrap(), "from-env");
-        assert_eq!(
-            std::env::var("RYU_DEFAULT_LLM_MODEL").unwrap(),
-            "from-settings"
-        );
-        assert_eq!(
-            std::env::var("RYU_CORS_ORIGINS").unwrap(),
-            "http://one,http://two"
-        );
-        assert!(std::env::var_os("RYU_DEFAULT_LLM_API_KEY").is_none());
-        assert_eq!(report.applied, 2);
-        assert_eq!(report.ignored_environment, 1);
-        assert_eq!(report.ignored_reserved, 1);
-        restore_env("RYU_NODE_NAME", previous_name);
-        restore_env("RYU_DEFAULT_LLM_MODEL", previous_model);
-        restore_env("RYU_CORS_ORIGINS", previous_origins);
-        restore_env("RYU_DEFAULT_LLM_API_KEY", previous_key);
-    }
-
-    #[test]
-    fn config_rejects_non_ryu_overrides() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempdir().unwrap();
-        let file = dir.path().join(CONFIG_FILE_NAME);
-        std::fs::write(
-            &file,
-            serde_json::to_vec(&serde_json::json!({
-                "version": CONFIG_VERSION,
-                "overrides": {"OPENAI_BASE_URL": "https://example.test"}
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let error = load_from_path(&file).unwrap_err().to_string();
-        assert!(error.contains("only non-secret RYU_* settings are allowed"));
-    }
-}
+mod tests;

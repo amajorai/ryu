@@ -1,4 +1,15 @@
 import { type ApiTarget, request } from "./client.ts";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
+import {
+	governanceLayersSchema,
+	governanceLockedFieldsSchema,
+	governanceReasonSchema,
+	governanceRecordSchema,
+	governanceRevisionSchema,
+	governanceScopeSchema,
+	governanceWritableSchema,
+	parseGovernanceValues,
+} from "./governance-wire-contracts.ts";
 
 export type GovernanceScope = "node" | "organization" | "team" | "user";
 
@@ -22,6 +33,8 @@ export interface HookPolicyOverride {
 
 export interface GitGovernanceSettings {
 	alwaysForcePush?: boolean;
+	autoAddressPullRequestComments?: boolean;
+	autoArchiveClosedPullRequestChats?: boolean;
 	autoMergeWhenReady?: boolean;
 	branchPrefix?: string;
 	commitInstructions?: string;
@@ -46,6 +59,12 @@ export interface GatewayGovernanceValues {
 }
 
 export interface GatewayGovernanceLayer {
+	/**
+	 * Field paths this layer cannot change (`git.branchPrefix`,
+	 * `worktrees.autoDelete`, `hooks.<key>`). On the user layer this is every
+	 * organization/team lock, which the settings UI renders read-only.
+	 */
+	lockedFields?: string[];
 	revision: number;
 	scope: GovernanceScope;
 	unavailableReason?: string;
@@ -58,141 +77,53 @@ export interface GatewayGovernanceSnapshot {
 	schemaVersion: 1;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
-
-const parseScope = (value: unknown): GovernanceScope => {
-	switch (value) {
-		case "node":
-		case "organization":
-		case "team":
-		case "user":
-			return value;
-		default:
-			throw new Error("invalid governance scope");
-	}
-};
-
-const optionalBoolean = (
-	record: Record<string, unknown>,
-	key: string
-): boolean | undefined => {
-	const value = record[key];
-	return typeof value === "boolean" ? value : undefined;
-};
-
-const optionalString = (
-	record: Record<string, unknown>,
-	key: string
-): string | undefined => {
-	const value = record[key];
-	return typeof value === "string" ? value : undefined;
-};
-
-const parseHooks = (value: unknown): Record<string, HookPolicyOverride> => {
-	if (!isRecord(value)) {
-		return {};
-	}
-	const hooks: Record<string, HookPolicyOverride> = Object.create(null);
-	for (const [hookKey, rawOverride] of Object.entries(value)) {
-		if (!isRecord(rawOverride)) {
-			continue;
-		}
-		const enabled = optionalBoolean(rawOverride, "enabled");
-		const trusted = optionalBoolean(rawOverride, "trusted");
-		hooks[hookKey] = {
-			...(enabled === undefined ? {} : { enabled }),
-			...(trusted === undefined ? {} : { trusted }),
-		};
-	}
-	return hooks;
-};
-
-const parseGit = (value: unknown): GitGovernanceSettings | undefined => {
-	if (!isRecord(value)) {
-		return undefined;
-	}
-	const mergeMethod = value.mergeMethod;
-	const reviewDelivery = value.reviewDelivery;
-	return {
-		branchPrefix: optionalString(value, "branchPrefix"),
-		mergeMethod:
-			mergeMethod === "merge" || mergeMethod === "squash"
-				? mergeMethod
-				: undefined,
-		alwaysForcePush: optionalBoolean(value, "alwaysForcePush"),
-		createDraftPullRequests: optionalBoolean(value, "createDraftPullRequests"),
-		reviewDelivery:
-			reviewDelivery === "inline" || reviewDelivery === "detached"
-				? reviewDelivery
-				: undefined,
-		autoMergeWhenReady: optionalBoolean(value, "autoMergeWhenReady"),
-		watchInstructions: optionalString(value, "watchInstructions"),
-		commitInstructions: optionalString(value, "commitInstructions"),
-		pullRequestInstructions: optionalString(value, "pullRequestInstructions"),
-	};
-};
-
-const parseWorktrees = (
-	value: unknown
-): WorktreeGovernanceSettings | undefined => {
-	if (!isRecord(value)) {
-		return undefined;
-	}
-	const limit = value.autoDeleteLimit;
-	return {
-		root: optionalString(value, "root"),
-		fetchUpstream: optionalBoolean(value, "fetchUpstream"),
-		autoDelete: optionalBoolean(value, "autoDelete"),
-		autoDeleteLimit:
-			typeof limit === "number" && Number.isInteger(limit) ? limit : undefined,
-	};
-};
-
-const parseValues = (value: unknown): GatewayGovernanceValues => {
-	if (!isRecord(value)) {
-		return {};
-	}
-	const git = parseGit(value.git);
-	const worktrees = parseWorktrees(value.worktrees);
-	const hooks = parseHooks(value.hooks);
-	return {
-		...(git ? { git } : {}),
-		...(Object.keys(hooks).length > 0 ? { hooks } : {}),
-		...(worktrees ? { worktrees } : {}),
-	};
-};
-
 export const parseGatewayGovernanceSnapshot = (
-	value: unknown
+	value: Parameters<typeof governanceRecordSchema.parse>[0]
 ): GatewayGovernanceSnapshot => {
-	if (
-		!isRecord(value) ||
-		value.schemaVersion !== 1 ||
-		!Array.isArray(value.layers)
-	) {
+	const root = governanceRecordSchema.safeParse(value);
+	if (!root.success || root.data.schemaVersion !== 1) {
 		throw new Error("invalid gateway governance snapshot");
 	}
-	const layers = value.layers.map((rawLayer): GatewayGovernanceLayer => {
-		if (!isRecord(rawLayer)) {
+	const layerInputs = governanceLayersSchema.safeParse(root.data.layers);
+	if (!layerInputs.success) {
+		throw new Error("invalid gateway governance snapshot");
+	}
+	const layers = layerInputs.data.map((rawLayer): GatewayGovernanceLayer => {
+		const parsed = governanceRecordSchema.safeParse(rawLayer);
+		if (!parsed.success) {
 			throw new Error("invalid governance layer");
 		}
-		const revision = rawLayer.revision;
-		if (!(typeof revision === "number" && Number.isInteger(revision))) {
+		const revision = governanceRevisionSchema.safeParse(parsed.data.revision);
+		if (!revision.success) {
 			throw new Error("invalid governance revision");
 		}
-		if (typeof rawLayer.writable !== "boolean") {
+		const writable = governanceWritableSchema.safeParse(parsed.data.writable);
+		if (!writable.success) {
 			throw new Error("invalid governance writable state");
 		}
-		return {
-			revision,
-			scope: parseScope(rawLayer.scope),
-			values: parseValues(rawLayer.values),
-			writable: rawLayer.writable,
-			...(typeof rawLayer.unavailableReason === "string"
-				? { unavailableReason: rawLayer.unavailableReason }
-				: {}),
+		const scope = governanceScopeSchema.safeParse(parsed.data.scope);
+		if (!scope.success) {
+			throw new Error("invalid governance scope");
+		}
+		const layer: GatewayGovernanceLayer = {
+			revision: revision.data,
+			scope: scope.data,
+			values: parseGovernanceValues(parsed.data.values),
+			writable: writable.data,
 		};
+		const lockedFields = governanceLockedFieldsSchema.parse(
+			parsed.data.lockedFields
+		);
+		if (lockedFields.length > 0) {
+			layer.lockedFields = lockedFields;
+		}
+		const unavailableReason = governanceReasonSchema.parse(
+			parsed.data.unavailableReason
+		);
+		if (unavailableReason !== undefined) {
+			layer.unavailableReason = unavailableReason;
+		}
+		return layer;
 	});
 	return { layers, schemaVersion: 1 };
 };
@@ -201,9 +132,14 @@ export const fetchGatewayGovernance = async (
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<GatewayGovernanceSnapshot> => {
-	const raw = await request<unknown>(target, "/api/gateway/governance", {
-		signal,
-	});
+	const raw = await request<unknown>(
+		target,
+		"/api/gateway/governance",
+		{
+			signal,
+		},
+		gatewayJsonValueSchema
+	);
 	return parseGatewayGovernanceSnapshot(raw);
 };
 
@@ -227,10 +163,28 @@ export const updateGatewayGovernance = async <
 		{
 			body: { scope, values },
 			method: "PUT",
-		}
+		},
+		gatewayJsonValueSchema
 	);
 	return parseGatewayGovernanceSnapshot(raw);
 };
+
+/**
+ * Whether an organization or team administrator locked a governance field, so
+ * the user layer cannot override it. Node-scope edits are unaffected because
+ * the organization layer already outranks the node fallback.
+ */
+export const isGovernanceFieldLocked = (
+	snapshot: GatewayGovernanceSnapshot | undefined,
+	path: string
+): boolean =>
+	snapshot?.layers.some(
+		(layer) =>
+			(layer.scope === "organization" ||
+				layer.scope === "team" ||
+				layer.scope === "user") &&
+			(layer.lockedFields ?? []).includes(path)
+	) ?? false;
 
 const scopeRank = (scope: GovernanceScope): number => {
 	switch (scope) {

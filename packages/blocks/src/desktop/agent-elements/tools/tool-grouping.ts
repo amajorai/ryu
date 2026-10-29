@@ -1,7 +1,12 @@
+import { isNativeObjectLike } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
+import { nativeSdkSchemaAdmits } from "../utils/native-sdk-admission.ts";
+import type { NativeSdkValue } from "../utils/native-sdk-observation.ts";
+
 export interface ToolActivityPart {
-	input?: unknown;
-	output?: unknown;
-	result?: unknown;
+	input?: NativeSdkValue;
+	output?: NativeSdkValue;
+	result?: NativeSdkValue;
 	state?: string;
 	toolCallId?: string;
 	type: string;
@@ -33,8 +38,14 @@ const GROUPABLE_TOOL_TYPES = new Set([
 	"tool-cloning",
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+/** The success cell read by the grouping rule, not a complete tool result. */
+interface ToolSuccessObservation {
+	success?: NativeSdkValue;
+}
+const toolSuccessObservationSchema =
+	z.custom<ToolSuccessObservation>(isNativeObjectLike);
+function isRecord(value: NativeSdkValue): value is ToolSuccessObservation {
+	return nativeSdkSchemaAdmits(toolSuccessObservationSchema, value);
 }
 
 export function isCommandToolType(type: string): boolean {

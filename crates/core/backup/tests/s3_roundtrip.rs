@@ -135,7 +135,7 @@ async fn signed_multipart_upload_catalog_discovery_download_and_delete() {
     let content = vec![19u8; 10 * 1024 * 1024];
     std::fs::write(&input, &content).unwrap();
     let id = uuid::Uuid::new_v4().to_string();
-    let record = BackupRecord {
+    let mut record = BackupRecord {
         version: 1,
         id: id.clone(),
         source_node_id: "source-node".into(),
@@ -145,6 +145,15 @@ async fn signed_multipart_upload_catalog_discovery_download_and_delete() {
         sha256: encryption::sha256(content.as_slice()).unwrap(),
         object_key: s3.object_key(&id).unwrap(),
     };
+    // New uploads must use the scope-isolated namespace. Legacy flat paths
+    // remain readable, but cannot publish new backups into the flat catalog.
+    let flat_upload = s3.upload(&input, &record).await.unwrap_err();
+    assert!(flat_upload
+        .to_string()
+        .contains("Invalid backup object key"));
+    assert!(fixture.objects.lock().unwrap().is_empty());
+    assert!(fixture.parts.lock().unwrap().is_empty());
+    record.object_key = s3.scoped_object_key(&id, &record.scope).unwrap();
     s3.upload(&input, &record).await.unwrap();
     assert!(fixture.parts.lock().unwrap().len() >= 2);
     let catalog = s3.list(Some(&BackupScope::Node)).await.unwrap();

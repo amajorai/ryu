@@ -41,4 +41,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "scoped-pairing-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

@@ -32,4 +32,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "new-agent-chat-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

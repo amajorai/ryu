@@ -5,10 +5,15 @@ use crate::win_process::NoWindow;
 
 use uuid::Uuid;
 
-/// A live per-run worktree. Created by [`create_worktree`] and cleaned up when
-/// dropped (synchronous, so it works inside both regular code and `Drop` impls).
-/// Moving it into the ACP stream generator ensures cleanup on stream completion
-/// or on early client disconnect.
+#[path = "worktree_management.rs"]
+mod management;
+pub use management::{create_managed_worktree, ManagedWorktreeOptions};
+
+/// A live isolated worktree. [`create_managed_worktree`] registers durable
+/// retention metadata; dropping its guard runs environment cleanup and releases
+/// the worktree for retention or recoverable pruning. Guards held for an active
+/// conversation remain protected. The ephemeral [`create_worktree`] and
+/// [`create_worktree_in`] helpers remove their worktree and branch on drop.
 pub struct WorktreeGuard {
     /// Absolute path to the worktree directory.
     pub path: PathBuf,
@@ -21,6 +26,7 @@ pub struct WorktreeGuard {
     /// Environment variables inherited by setup/cleanup and the ACP child.
     pub environment: Vec<(String, String)>,
     cleanup_script: Option<String>,
+    management: Option<management::ManagedWorktree>,
 }
 
 impl Drop for WorktreeGuard {
@@ -32,7 +38,13 @@ impl Drop for WorktreeGuard {
                 tracing::warn!(error = %error, path = %self.path.display(), "worktree cleanup script failed");
             }
         }
-        remove_worktree_sync(&self.repo_root, &self.path, &self.branch);
+        if let Some(managed) = &self.management {
+            if let Err(error) = managed.complete(self) {
+                tracing::warn!(error = %error, path = %self.path.display(), "managed worktree retained after cleanup failure");
+            }
+        } else {
+            remove_worktree_sync(&self.repo_root, &self.path, &self.branch);
+        }
     }
 }
 
@@ -47,7 +59,7 @@ pub fn create_worktree(repo_path: &Path) -> anyhow::Result<WorktreeGuard> {
 /// Replaces whitespace with `-`, drops characters git forbids in refs, collapses
 /// `..` sequences, and trims leading/trailing separators. Returns `None` when
 /// nothing usable remains (caller falls back to the auto-generated name).
-fn sanitize_branch_name(raw: &str) -> Option<String> {
+pub(crate) fn sanitize_branch_name(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -76,7 +88,7 @@ fn sanitize_branch_name(raw: &str) -> Option<String> {
 }
 
 /// Whether a local branch already exists in `repo_path`.
-fn branch_exists(repo_path: &Path, branch: &str) -> bool {
+pub(crate) fn branch_exists(repo_path: &Path, branch: &str) -> bool {
     Command::new("git")
         .args(["show-ref", "--verify", "--quiet"])
         .arg(format!("refs/heads/{branch}"))
@@ -100,6 +112,14 @@ pub fn create_worktree_in(
     repo_path: &Path,
     branch_name: Option<&str>,
 ) -> anyhow::Result<WorktreeGuard> {
+    create_worktree_at(repo_path, branch_name, &repo_path.join(".ryu-worktrees"))
+}
+
+fn create_worktree_at(
+    repo_path: &Path,
+    branch_name: Option<&str>,
+    worktree_base: &Path,
+) -> anyhow::Result<WorktreeGuard> {
     let run_id = Uuid::new_v4().to_string();
     let branch = match branch_name.and_then(sanitize_branch_name) {
         Some(name) if branch_exists(repo_path, &name) => {
@@ -122,8 +142,7 @@ pub fn create_worktree_in(
         .unwrap_or_default();
 
     // Place worktrees under a Core-owned sub-directory of the repo.
-    let worktree_base = repo_path.join(".ryu-worktrees");
-    std::fs::create_dir_all(&worktree_base)?;
+    std::fs::create_dir_all(worktree_base)?;
     let worktree_path = worktree_base.join(format!("ryu-run-{run_id}"));
 
     let output = Command::new("git")
@@ -153,10 +172,25 @@ pub fn create_worktree_in(
         base_hash,
         environment: Vec::new(),
         cleanup_script: None,
+        management: None,
     })
 }
 
 impl WorktreeGuard {
+    /// Active hosts defer completion until they can resolve the latest cleanup policy.
+    pub fn suspend_managed_pruning(&mut self) {
+        if let Some(managed) = &mut self.management {
+            managed.suspend_pruning();
+        }
+    }
+
+    /// Resolve retention policy and arm completion for a known release.
+    pub fn update_managed_options(&mut self, options: &ManagedWorktreeOptions) {
+        if let Some(managed) = &mut self.management {
+            managed.update_options(options);
+        }
+    }
+
     /// Configure and bootstrap this worktree. The cleanup hook is armed before
     /// setup runs, so a partially completed setup still gets its matching cleanup.
     pub fn configure_environment(

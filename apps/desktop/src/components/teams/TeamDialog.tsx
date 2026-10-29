@@ -1,6 +1,7 @@
 import { Add01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -8,18 +9,18 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
+} from "@ryu/ui/components/dialog.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { type FormEvent, useEffect, useState } from "react";
+} from "@ryu/ui/components/select.tsx";
+import { type SubmitEvent, useEffect, useState } from "react";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import {
 	COORDINATION_OPTIONS,
@@ -66,6 +67,7 @@ export function TeamDialog({
 	/** Every agent that can be added to the team. */
 	agents: readonly TeamAgentOption[];
 }) {
+	const tl = useLiteralMessages();
 	const [name, setName] = useState("");
 	const [description, setDescription] = useState("");
 	const [coordination, setCoordination] = useState<Coordination>("broadcast");
@@ -109,7 +111,7 @@ export function TeamDialog({
 
 	const candidates = agents.filter((a) => !members.includes(a.id));
 
-	const handleSubmit = async (e: FormEvent) => {
+	const handleSubmit = async (e: SubmitEvent) => {
 		e.preventDefault();
 		if (!name.trim()) {
 			return;
@@ -191,11 +193,16 @@ export function TeamDialog({
 												}
 												size="16px"
 											/>
-											<span className="min-w-0 flex-1 truncate text-sm">
+											<span
+												className="min-w-0 flex-1 truncate text-sm"
+												title={agentName(memberId)}
+											>
 												{agentName(memberId)}
 											</span>
 											<button
-												aria-label={`Remove ${agentName(memberId)}`}
+												aria-label={tl("Remove {agentName}", {
+													agentName: agentName(memberId),
+												})}
 												className="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 												onClick={() => removeMember(memberId)}
 												type="button"
@@ -226,7 +233,10 @@ export function TeamDialog({
 														glyph={agent.avatarGlyph}
 														size="16px"
 													/>
-													<span className="min-w-0 flex-1 truncate text-sm">
+													<span
+														className="min-w-0 flex-1 truncate text-sm"
+														title={agent.name}
+													>
 														{agent.name}
 													</span>
 													<HugeiconsIcon
@@ -247,7 +257,7 @@ export function TeamDialog({
 									value: o.value,
 									label: o.label,
 								}))}
-								onValueChange={(v) => v && setCoordination(v as Coordination)}
+								onValueChange={(v) => v && setCoordination(v)}
 								value={coordination}
 							>
 								<SelectTrigger id="team-coordination">

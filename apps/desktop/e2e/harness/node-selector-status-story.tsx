@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // Browser proof for the real compact NodeSelector trigger and active-node row.
 // The story supplies a deterministic Core status response so the product surface
 // can be inspected without starting Core or depending on a user's node file.
@@ -20,9 +21,15 @@ const proofNodes = [
 		token: null,
 		url: "http://192.168.1.44:7980",
 	},
+	{
+		managed: true,
+		name: "cloud-workspace",
+		token: null,
+		url: "https://cloud.example.com",
+	},
 ];
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse<FixturePayload>(body: FixturePayload): Response {
 	return new Response(JSON.stringify(body), {
 		headers: { "Content-Type": "application/json" },
 		status: 200,
@@ -35,13 +42,15 @@ declare global {
 	}
 }
 window.nodeMenuProof = { info: 0, gateway: 0, cancelled: 0 };
+const cloudflaredStory = new URLSearchParams(location.search).has(
+	"cloudflared"
+);
 window.fetch = async (input, init) => {
-	const url =
-		typeof input === "string"
-			? input
-			: input instanceof Request
-				? input.url
-				: input.toString();
+	const url = isNativeText(input)
+		? input
+		: input instanceof Request
+			? input.url
+			: input.toString();
 
 	const detail = url.endsWith("/api/system/info")
 		? "info"
@@ -63,6 +72,23 @@ window.fetch = async (input, init) => {
 				}
 			});
 		}
+	}
+	if (url.endsWith("/api/mesh/status")) {
+		return jsonResponse(
+			cloudflaredStory
+				? {
+						backend: "cloudflared",
+						backend_state: "Running",
+						cloudflaredUrl: "https://warm-tree.trycloudflare.com",
+						enabled: true,
+						reachable: true,
+						up: true,
+					}
+				: {}
+		);
+	}
+	if (url.endsWith("/api/preferences/mesh-backend")) {
+		return jsonResponse(cloudflaredStory ? { value: "cloudflared" } : {});
 	}
 	if (url.endsWith("/api/system/status")) {
 		return jsonResponse({
@@ -112,8 +138,8 @@ function Story() {
 							<SystemStatusProvider>
 								<main className="min-h-screen bg-background p-10 text-foreground">
 									<div className="w-80 rounded-xl border border-border/60 bg-sidebar p-4 shadow-sm">
-										<p className="mb-3 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-											Node selector
+										<p className="mb-3 font-medium text-muted-foreground text-xs">
+											Computer selector
 										</p>
 										<NodeSelector mode="compact-dropdown" />
 									</div>

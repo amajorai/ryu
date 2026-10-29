@@ -1,8 +1,14 @@
-import { toast } from "@ryu/ui/components/sileo";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import {
+	type UseMutationOptions,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback } from "react";
 import {
 	type ApprovalRequest,
+	type ApprovalStatus,
 	approveApproval,
 	listApprovals,
 	rejectApproval,
@@ -19,7 +25,28 @@ export interface UseApprovalsResult {
 	reject: (id: string, note?: string) => Promise<ApprovalRequest>;
 }
 
-export function useApprovals(): UseApprovalsResult {
+export interface UseApprovalsOptions {
+	/** Ask Core for only this status (e.g. the interfaces' `pending` list).
+	 *  Without it the hook lists every approval, as the Inbox does. */
+	status?: ApprovalStatus;
+}
+
+/** Shared while loading or failed, so consumers' memos stay stable. */
+const NO_APPROVALS: ApprovalRequest[] = [];
+
+/** Query key of the approvals list; a status filter keys its own cache entry
+ *  under the same `["approvals"]` prefix, so approval events still refresh it. */
+export function approvalsListKey(url: string, status?: ApprovalStatus) {
+	return status
+		? (["approvals", "list", url, status] as const)
+		: (["approvals", "list", url] as const);
+}
+
+/** The approval inbox list plus approve / reject. */
+export function useApprovals(
+	options: UseApprovalsOptions = {}
+): UseApprovalsResult {
+	const { status } = options;
 	const node = useActiveNode();
 	const target: ApiTarget = {
 		url: node.url,
@@ -28,11 +55,9 @@ export function useApprovals(): UseApprovalsResult {
 	};
 	const qc = useQueryClient();
 
-	const listKey = ["approvals", "list", target.url] as const;
-
 	const listQuery = useQuery({
-		queryKey: listKey,
-		queryFn: () => listApprovals(target),
+		queryKey: approvalsListKey(target.url, status),
+		queryFn: () => listApprovals(target, status),
 	});
 
 	const invalidate = useCallback(() => {
@@ -41,10 +66,13 @@ export function useApprovals(): UseApprovalsResult {
 		);
 	}, [qc]);
 
-	const onError = useCallback((error: unknown) => {
-		const message = error instanceof Error ? error.message : "request failed";
-		toast.error({ title: "Approvals", description: message });
-	}, []);
+	const onError = useCallback(
+		(error: Parameters<NonNullable<UseMutationOptions["onError"]>>[0]) => {
+			const message = error instanceof Error ? error.message : "request failed";
+			toast.error({ title: "Approvals", description: message });
+		},
+		[]
+	);
 
 	const approveMutation = useMutation({
 		mutationFn: ({ id, note }: { id: string; note?: string }) =>
@@ -68,7 +96,7 @@ export function useApprovals(): UseApprovalsResult {
 	}
 
 	return {
-		approvals: listQuery.data ?? [],
+		approvals: listQuery.data ?? NO_APPROVALS,
 		loading: listQuery.isLoading,
 		error: listQuery.error instanceof Error ? listQuery.error.message : null,
 		approve: (id, note) => approveMutation.mutateAsync({ id, note }),

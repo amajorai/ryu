@@ -1,0 +1,7 @@
+.pane {
+	top: var(--proof-pane-top);
+	left: var(--proof-pane-left);
+	width: var(--proof-pane-width);
+	height: var(--proof-pane-height);
+	transition-property: left, top, width, height;
+}

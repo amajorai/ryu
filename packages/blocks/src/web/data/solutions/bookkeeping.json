@@ -1,41 +1,14 @@
 {
   "slug": "bookkeeping",
   "name": "Bookkeeping",
-  "navLabel": "Bookkeeping",
-  "category": "Finance & Risk",
   "icon": "BookOpen",
   "tagline": "Categorize transactions, reconcile accounts, and follow up on missing receipts.",
-  "heroEyebrow": "Ryu for Bookkeeping",
   "heroTitle": "Ryu for bookkeeping",
-  "heroSubtitle": "Categorize transactions, reconcile accounts, and follow up on missing receipts.",
   "visualKey": "WorkflowsVisual",
-  "intro": "Bookkeeping is repetitive, deadline-driven, and full of sensitive client data that doesn't belong in a public chatbot. Ryu lets you build workflows that categorize, reconcile, and follow up on a schedule, connect into your accounting tools, and log every run, so the routine work runs itself while a human reviews the result.",
-  "highlights": [
-    {
-      "title": "Runs on a schedule",
-      "description": "Chain agents and tools into workflows with triggers, so weekly categorization and reconciliation runs without you starting it.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Connects to your ledger",
-      "description": "Agents authenticate into QuickBooks, Xero, banks, and spreadsheets to read transactions and post drafts for your review.",
-      "icon": "Plug"
-    },
-    {
-      "title": "Books stay on your machine",
-      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Auditable by default",
-      "description": "Every run is logged in the Gateway audit trail, so you can show exactly what a workflow touched and when.",
-      "icon": "Eye"
-    }
-  ],
   "useCases": [
     {
       "title": "Transaction categorization",
-      "description": "Classify incoming transactions against each client's chart of accounts, learning their rules and flagging the unclear ones."
+      "description": "Classify incoming transactions against each client's chart of accounts and flag the unclear ones."
     },
     {
       "title": "Recurring reconciliation",
@@ -55,20 +28,13 @@
     },
     {
       "title": "Exception reporting",
-      "description": "Surface duplicates, miscategorizations, and unusual amounts across the books, each tied back to the entry it found."
+      "description": "Flag duplicates, miscategorizations, and unusual amounts across the books, each tied back to the entry it found."
     }
-  ],
-  "examplePrompts": [
-    "Set up a weekly workflow that categorizes new transactions in Xero against each client's chart of accounts.",
-    "Reconcile this bank feed to the ledger and list every transaction that didn't match.",
-    "Find every transaction this month missing a receipt and draft the requests to the client.",
-    "Draft this period's recurring depreciation and prepaid entries for me to approve.",
-    "Scan the books for duplicate or miscategorized entries and show me where each one is."
   ],
   "faq": [
     {
       "q": "Is client bookkeeping data safe with Ryu?",
-      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the run, so client books stay governed end to end."
+      "a": "Yes. With a local model, client books stay on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Can workflows run on their own schedule?",
@@ -76,10 +42,7 @@
     },
     {
       "q": "Will it post entries without me?",
-      "a": "No. Ryu drafts categorizations, reconciliations, and entries for a bookkeeper to review and approve. The audit trail records every run, so the review and any cleanup are quick and defensible."
+      "a": "No. Ryu drafts categorizations, reconciliations, and entries for a bookkeeper to review and approve. Review workflow history, tool outputs, and Gateway records for routed model calls before approving results."
     }
-  ],
-  "ctaTitle": "Give your practice an AI bookkeeper.",
-  "ctaSubtitle": "Categorize, reconcile, and follow up on a schedule, with client books kept private and every run on the record.",
-  "ctaNote": "Scheduled workflows · Local-first · Full audit trail"
+  ]
 }

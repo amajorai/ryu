@@ -1,3 +1,9 @@
+import {
+	isPositiveContextCount,
+	nativeContextPct,
+	nativeContextRemaining,
+} from "./native-context-usage.mjs";
+import type { NativeTokenOperand } from "./native-token-count.mjs";
 /**
  * The pure half of the Context panel: the wire types Core sends, the fixed
  * category palette, and the band math. Kept free of React so the reconciliation
@@ -6,7 +12,6 @@
  *
  * Producer: `apps/core/src/sidecar/adapters/context_breakdown.rs`.
  */
-
 /** A category of context, as Core attributes it. Mirrors `ContextSegment`. */
 export interface ContextBreakdownSegment {
 	/** Optional sub-label ("24 tools across 5 servers"). */
@@ -16,7 +21,6 @@ export interface ContextBreakdownSegment {
 	label: string;
 	tokens: number;
 }
-
 /** One turn's attribution. Mirrors `ContextBreakdown`. */
 export interface ContextBreakdownData {
 	/** Sum of `segments` — what Core could account for. */
@@ -29,7 +33,6 @@ export interface ContextBreakdownData {
 	/** Core's view of the window size; 0 when unknown. */
 	window: number;
 }
-
 /**
  * Fixed hue per category. Colour follows the ENTITY, never its rank — "skills"
  * is the same hue whether it is the largest band or the smallest, so comparing
@@ -45,7 +48,19 @@ export interface ContextBreakdownData {
  * muted ink rather than a ninth invented hue; their rows still carry a text
  * label, which is what identifies them.
  */
-export const SEGMENT_STYLES: Record<string, string> = {
+/** Authored segment classes plus the existing mutable extension-key port. */
+export interface ContextSegmentStyleRegistry {
+	documents: string;
+	images: string;
+	instructions: string;
+	memory: string;
+	messages: string;
+	recall: string;
+	skills: string;
+	tools: string;
+	[kind: string]: string;
+}
+export const SEGMENT_STYLES: ContextSegmentStyleRegistry = {
 	documents: "bg-[#4a3aa7] dark:bg-[#9085e9]",
 	images: "bg-[#e34948] dark:bg-[#e66767]",
 	instructions: "bg-[#008300] dark:bg-[#008300]",
@@ -55,17 +70,13 @@ export const SEGMENT_STYLES: Record<string, string> = {
 	skills: "bg-[#eb6834] dark:bg-[#d95926]",
 	tools: "bg-[#1baf7a] dark:bg-[#199e70]",
 };
-
 /** Fallback fill for a category with no dedicated slot. */
 export const OTHER_STYLE = "bg-muted-foreground";
-
 /** The band for context Core could not attribute (agent-side prompt, tool results). */
 export const UNATTRIBUTED_STYLE = "bg-muted-foreground/40";
-
 export function segmentStyle(kind: string): string {
 	return SEGMENT_STYLES[kind] ?? OTHER_STYLE;
 }
-
 /** One row of the bar: a fill class plus the tokens it represents. */
 export interface ContextBand {
 	className: string;
@@ -74,7 +85,6 @@ export interface ContextBand {
 	label: string;
 	tokens: number;
 }
-
 /**
  * Assemble the bands to draw, in bar order: attributed categories largest-first
  * (Core already sorts them), then the unattributed remainder.
@@ -87,7 +97,7 @@ export interface ContextBand {
  */
 export function contextBands(
 	breakdown: ContextBreakdownData,
-	reported?: number
+	reported?: NativeTokenOperand
 ): ContextBand[] {
 	const bands: ContextBand[] = breakdown.segments.map((s) => ({
 		className: segmentStyle(s.kind),
@@ -96,7 +106,10 @@ export function contextBands(
 		label: s.label,
 		tokens: s.tokens,
 	}));
-	const unattributed = Math.max(0, (reported ?? 0) - breakdown.attributed);
+	const unattributed = nativeContextRemaining(
+		() => reported ?? 0,
+		() => breakdown.attributed
+	);
 	if (unattributed > 0) {
 		bands.push({
 			className: UNATTRIBUTED_STYLE,
@@ -108,15 +121,16 @@ export function contextBands(
 	}
 	return bands;
 }
-
 /** `tokens` as a percentage of `total`; 0 when the total is unknown. */
-export function contextPct(tokens: number, total: number): number {
-	if (!(total > 0)) {
+export function contextPct(
+	tokens: NativeTokenOperand,
+	total: NativeTokenOperand
+): number {
+	if (!isPositiveContextCount(total)) {
 		return 0;
 	}
-	return (tokens / total) * 100;
+	return nativeContextPct(tokens, total);
 }
-
 /** One-decimal percentage, with a floor label so a tiny band never reads "0.0%". */
 export function formatContextPct(value: number): string {
 	if (value > 0 && value < 0.1) {

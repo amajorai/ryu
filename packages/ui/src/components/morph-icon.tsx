@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type IconInput,
 	MorphIcon as MorphIconPrimitive,

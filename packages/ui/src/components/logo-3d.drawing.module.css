@@ -1,0 +1,10 @@
+.logoContainer {
+	position: var(--logo-3d-1-position);
+	width: var(--logo-3d-1-width);
+	height: var(--logo-3d-1-height);
+	cursor: var(--logo-3d-1-cursor);
+}
+.logoViewport {
+	position: var(--logo-3d-2-position);
+	inset: var(--logo-3d-2-inset);
+}

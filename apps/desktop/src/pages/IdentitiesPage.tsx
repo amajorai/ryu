@@ -16,19 +16,19 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useCallback, useEffect, useState } from "react";
 import { sileo } from "sileo";
 import { openExternal } from "@/lib/tauri-bridge.ts";
@@ -39,14 +39,14 @@ import type { Connection, ConnectionStatus } from "@/src/lib/api/identities.ts";
 function StatusBadge({ status }: { status: ConnectionStatus }) {
 	if (status === "AUTHENTICATED") {
 		return (
-			<Badge className="gap-1" variant="secondary">
+			<Badge variant="secondary">
 				<HugeiconsIcon className="size-3" icon={SquareLock01Icon} />
 				Authenticated
 			</Badge>
 		);
 	}
 	return (
-		<Badge className="gap-1" variant="outline">
+		<Badge variant="outline">
 			<HugeiconsIcon className="size-3" icon={Key01Icon} />
 			Needs auth
 		</Badge>
@@ -118,7 +118,6 @@ export default function IdentitiesPage({
 	}, [initialNew, initialProfileId]);
 
 	const openCreate = useCallback(() => {
-		setSelectedId(null);
 		setShowCreate(true);
 	}, []);
 
@@ -139,11 +138,7 @@ export default function IdentitiesPage({
 	);
 
 	if (loading) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	return (
@@ -209,6 +204,7 @@ export default function IdentitiesPage({
 									</Button>
 								))}
 								<Button
+									aria-label="New connection"
 									onClick={openCreate}
 									size="sm"
 									title="New connection"
@@ -228,6 +224,7 @@ export default function IdentitiesPage({
 									<HugeiconsIcon className="size-4" icon={RefreshIcon} />
 								</Button>
 								<Button
+									aria-label="New connection"
 									onClick={openCreate}
 									size="sm"
 									title="New connection"
@@ -247,11 +244,13 @@ export default function IdentitiesPage({
 								try {
 									await importState(selected.id, state);
 									sileo.success({ title: "Credentials imported" });
+									return true;
 								} catch (e) {
 									sileo.error({
 										title:
 											e instanceof Error ? e.message : "Could not import state",
 									});
+									return false;
 								}
 							}}
 							onLogin={async () => {
@@ -406,7 +405,7 @@ function ConnectionDetail({
 	importing: boolean;
 	loggingIn: boolean;
 	onDelete: () => void;
-	onImport: (state: string) => Promise<void>;
+	onImport: (state: string) => Promise<boolean>;
 	onLogin: () => Promise<void>;
 	onRefresh: () => void;
 	polling: boolean;
@@ -418,7 +417,12 @@ function ConnectionDetail({
 		<div className="mx-auto max-w-xl space-y-5">
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0 space-y-1">
-					<h2 className="truncate font-medium text-lg">{connection.domain}</h2>
+					<h2
+						className="truncate font-medium text-lg"
+						title={connection.domain}
+					>
+						{connection.domain}
+					</h2>
 					<p className="text-muted-foreground text-sm">
 						Profile{" "}
 						<span className="font-medium text-foreground">
@@ -486,18 +490,20 @@ function ConnectionDetail({
 					shown to the model.
 				</p>
 				<Textarea
-					className="min-h-28 font-mono text-xs"
+					className="min-h-28"
 					id="manual-state"
 					onChange={(e) => setManualState(e.target.value)}
 					placeholder="session=…; token=…"
 					value={manualState}
+					variant="code-caption"
 				/>
 				<Button
 					disabled={manualState.trim() === ""}
 					loading={importing}
 					onClick={async () => {
-						await onImport(manualState.trim());
-						setManualState("");
+						if (await onImport(manualState.trim())) {
+							setManualState("");
+						}
 					}}
 					size="sm"
 				>

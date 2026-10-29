@@ -1,12 +1,16 @@
 import { GUEST_MODE_ENABLED } from "@ryu/auth/lib/guest-mode";
-import { type LocalCoreSetupState, LoginView } from "@ryu/blocks/desktop/login";
-import { toast } from "@ryu/ui/components/sileo";
+import {
+	type LocalCoreSetupState,
+	LoginView,
+} from "@ryu/blocks/desktop/login.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
 import { WEB_URL } from "@/lib/app-urls.ts";
 import {
 	authClient,
 	BACKEND_URL,
+	isVaultLocked,
 	storeSessionToken,
 } from "@/lib/auth-client.ts";
 import {
@@ -57,6 +61,15 @@ export default function LoginPage() {
 	// Guest sessions bypass durable-account waitlist admission. Keep the browser
 	// action behind the same shared policy as the server endpoint.
 	const canUseGuestMode = IS_WEBAPP && GUEST_MODE_ENABLED;
+
+	useEffect(() => {
+		if (isVaultLocked()) {
+			toast.warning("Your saved accounts are locked", {
+				description:
+					"Unlock your keychain, then return to Ryu. Signing in again won't remove them.",
+			});
+		}
+	}, []);
 
 	useEffect(() => {
 		return () => {
@@ -299,7 +312,7 @@ export default function LoginPage() {
 				: "Getting Ryu ready…";
 
 	return (
-		// biome-ignore lint/a11y/noAriaHiddenOnFocusable: top area used as drag region
+		// top area used as drag region
 		<div className="size-full" data-tauri-drag-region="true">
 			<LoginView
 				coreReady={coreReady}
@@ -324,6 +337,7 @@ export default function LoginPage() {
 				onUseCloud={canUseGuestMode ? handleUseCloud : undefined}
 				polling={polling}
 				userCode={userCode}
+				verificationUri={verificationUri}
 				waiting={waiting}
 			/>
 		</div>

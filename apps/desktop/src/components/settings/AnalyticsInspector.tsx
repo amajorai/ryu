@@ -14,8 +14,9 @@
 // It shows the random, account-unlinked install id and whether a project is
 // configured, and offers a one-click clear of the egress log.
 
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -23,8 +24,8 @@ import {
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
-} from "@ryu/ui/components/dialog";
-import { ScrollArea } from "@ryu/ui/components/scroll-area";
+} from "@ryu/ui/components/dialog.tsx";
+import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
 import { useCallback, useEffect, useState } from "react";
 import {
 	ANALYTICS_EVENT_CATALOG,
@@ -50,11 +51,11 @@ function EgressRow({ entry }: { entry: EgressLogEntry }) {
 		<div className="flex flex-col gap-0.5 border-border/50 border-b py-1.5 last:border-b-0">
 			<div className="flex items-center justify-between gap-2">
 				<code className="font-medium text-xs">{entry.event}</code>
-				<span className="text-[10px] text-muted-foreground">
+				<span className="type-compact text-muted-foreground">
 					{formatDateTime(entry.at)}
 				</span>
 			</div>
-			<span className="text-[11px] text-muted-foreground">
+			<span className="type-caption text-muted-foreground">
 				{formatProps(entry.props)}
 			</span>
 		</div>
@@ -62,6 +63,7 @@ function EgressRow({ entry }: { entry: EgressLogEntry }) {
 }
 
 export function AnalyticsInspector() {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [log, setLog] = useState<EgressLogEntry[]>([]);
 
@@ -111,7 +113,7 @@ export function AnalyticsInspector() {
 					<DialogDescription>
 						Anonymous, content-free events only. Install id (random, not linked
 						to your account):{" "}
-						<code className="text-[11px]">{getInstallId()}</code>.{" "}
+						<code className="type-caption">{getInstallId()}</code>.{" "}
 						{configured
 							? "A project is configured."
 							: "No analytics project is configured, so nothing is sent."}
@@ -121,13 +123,15 @@ export function AnalyticsInspector() {
 				<div className="space-y-4">
 					<section className="space-y-2">
 						<h3 className="font-medium text-sm">
-							Event catalog ({ANALYTICS_EVENT_NAMES.length})
+							{tl("Event catalog ({eventCount})", {
+								eventCount: ANALYTICS_EVENT_NAMES.length,
+							})}
 						</h3>
 						<p className="text-muted-foreground text-xs">
 							Every event type the app can ever send. There is no free-text or
 							content field in any of them.
 						</p>
-						<ScrollArea className="h-48 rounded-md border p-2">
+						<ScrollArea appearance="inspector" className="h-48">
 							<div className="space-y-2">
 								{ANALYTICS_EVENT_NAMES.map((name) => {
 									const meta = ANALYTICS_EVENT_CATALOG[name];
@@ -136,16 +140,12 @@ export function AnalyticsInspector() {
 											<div className="flex flex-wrap items-center gap-1.5">
 												<code className="font-medium text-xs">{name}</code>
 												{meta.props.map((prop) => (
-													<Badge
-														className="text-[10px]"
-														key={prop}
-														variant="secondary"
-													>
+													<Badge key={prop} size="compact" variant="secondary">
 														{prop}
 													</Badge>
 												))}
 											</div>
-											<span className="text-[11px] text-muted-foreground">
+											<span className="type-caption text-muted-foreground">
 												{meta.description}
 											</span>
 										</div>
@@ -157,7 +157,9 @@ export function AnalyticsInspector() {
 
 					<section className="space-y-2">
 						<div className="flex items-center justify-between">
-							<h3 className="font-medium text-sm">Egress log ({log.length})</h3>
+							<h3 className="font-medium text-sm">
+								{tl("Egress log ({entryCount})", { entryCount: log.length })}
+							</h3>
 							<div className="flex items-center gap-1">
 								<Button
 									onClick={refresh}
@@ -181,7 +183,7 @@ export function AnalyticsInspector() {
 							A local record of events actually sent from this install, newest
 							first.
 						</p>
-						<ScrollArea className="h-40 rounded-md border p-2">
+						<ScrollArea appearance="inspector" className="h-40">
 							{log.length === 0 ? (
 								<p className="py-4 text-center text-muted-foreground text-xs">
 									Nothing sent yet.

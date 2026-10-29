@@ -9,6 +9,11 @@ import {
 	useRef,
 	useState,
 } from "react";
+import {
+	isNativeBigInt,
+	isNativeNumber,
+	isNativeText,
+} from "../lib/native-primitive-observation.ts";
 import { cn } from "../lib/utils.ts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip.tsx";
 
@@ -80,7 +85,7 @@ export function useFadeOverflow<
 		clipRef,
 		innerRef,
 		ref: clipRef,
-		...(title === undefined ? {} : { title }),
+		...(title === undefined ? undefined : { title }),
 	};
 }
 
@@ -149,7 +154,7 @@ export function FadeOverflowText({
 		<span
 			className={cn(
 				"block min-w-0 overflow-hidden whitespace-nowrap",
-				clipped && "text-fade-edge",
+				clipped && "fade-text-edge",
 				className
 			)}
 			data-slot={dataSlot}
@@ -188,12 +193,11 @@ export function FadeOverflowTextChildren({
 	className?: string;
 }) {
 	return Children.map(children, (child, index) => {
-		const text =
-			typeof child === "string"
-				? child
-				: typeof child === "number" || typeof child === "bigint"
-					? String(child)
-					: undefined;
+		const text = isNativeText(child)
+			? child
+			: isNativeNumber(child) || isNativeBigInt(child)
+				? String(child)
+				: undefined;
 
 		if (text === undefined || text.trim().length === 0) {
 			return child;

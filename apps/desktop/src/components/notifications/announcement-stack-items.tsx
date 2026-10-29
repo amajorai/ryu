@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import "./announcement-stack-items.css";
 import {
 	ArrowUpRight01Icon,
 	Cancel01Icon,
@@ -11,41 +13,39 @@ import {
 	StarIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import type { NotificationStackItem } from "@ryu/ui/components/notification-stack";
+import type { NotificationStackItem } from "@ryu/ui/components/notification-stack.tsx";
 import type { SystemAnnouncement } from "@/src/hooks/useSystemAnnouncements.ts";
 import type { Announcement } from "@/src/lib/api/announcements.ts";
 
-const ICON_MAP: Record<string, IconSvgElement> = {
-	sparkles: SparklesIcon,
-	megaphone: Megaphone01Icon,
-	gift: GiftIcon,
-	rocket: RocketIcon,
-	bell: Notification01Icon,
-	star: StarIcon,
-	info: InformationCircleIcon,
-	new: NewReleasesIcon,
-};
+const ICON_MAP = new Map<string, IconSvgElement>([
+	["sparkles", SparklesIcon],
+	["megaphone", Megaphone01Icon],
+	["gift", GiftIcon],
+	["rocket", RocketIcon],
+	["bell", Notification01Icon],
+	["star", StarIcon],
+	["info", InformationCircleIcon],
+	["new", NewReleasesIcon],
+]);
 
 function iconFor(name: string | null): IconSvgElement {
 	if (!name) {
 		return Megaphone01Icon;
 	}
-	return ICON_MAP[name.trim().toLowerCase()] ?? Megaphone01Icon;
+	return ICON_MAP.get(name.trim().toLowerCase()) ?? Megaphone01Icon;
 }
 
 function accentIcon(accent: string, icon: SystemAnnouncement["icon"]) {
+	const announcementAccentVariables1: CSSProperties & {
+		"--announcement-accent": string;
+	} = { "--announcement-accent": accent };
 	return (
 		<span
-			className="flex size-7 items-center justify-center rounded-[10px]"
-			style={{
-				backgroundColor: `color-mix(in srgb, ${accent} 18%, transparent)`,
-			}}
+			className="flex size-7 items-center justify-center rounded-lg"
+			data-announcement-accent=""
+			style={announcementAccentVariables1}
 		>
-			<HugeiconsIcon
-				className="size-3.5"
-				icon={icon}
-				style={{ color: accent }}
-			/>
+			<HugeiconsIcon className="size-3.5" icon={icon} />
 		</span>
 	);
 }
@@ -60,7 +60,7 @@ function AnnouncementAction({
 	return (
 		<button
 			aria-label={label}
-			className="relative z-20 flex h-6 items-center gap-1 rounded-lg px-1.5 font-medium text-[10px] text-primary transition-colors hover:bg-primary/10"
+			className="type-compact relative z-20 flex h-6 items-center gap-1 rounded-lg px-1.5 font-medium text-primary transition-colors hover:bg-primary/10"
 			data-notification-action="true"
 			onClick={onClick}
 			type="button"

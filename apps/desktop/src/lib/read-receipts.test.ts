@@ -73,3 +73,53 @@ describe("read receipt contract", () => {
 		]);
 	});
 });
+
+it("accepts legacy snake_case and preserves camelCase precedence before trimming", () => {
+	expect(
+		readReceiptFromFrame(
+			{
+				type: "read_receipt",
+				conversation_id: "chat-1",
+				message_id: " m1 ",
+				user_id: " ada ",
+				read_at: ` ${ada.readAt} `,
+				user_name: " Ada ",
+			},
+			"chat-1"
+		)
+	).toEqual({ ...ada, userName: "Ada" });
+	expect(
+		readReceiptFromFrame(
+			{
+				...ada,
+				type: "readReceipt",
+				conversationId: "chat-1",
+				messageId: " ",
+				message_id: "fallback",
+				user_id: "other",
+			},
+			"chat-1"
+		)
+	).toBeNull();
+});
+
+it("falls back from malformed aliases and omits a blank display name", () => {
+	expect(
+		readReceiptFromFrame(
+			{
+				type: "readReceipt",
+				conversationId: 1,
+				conversation_id: "chat-1",
+				messageId: false,
+				message_id: "m1",
+				userId: null,
+				user_id: "ada",
+				readAt: [],
+				read_at: ada.readAt,
+				userName: " ",
+				user_name: "Ignored",
+			},
+			"chat-1"
+		)
+	).toEqual(ada);
+});

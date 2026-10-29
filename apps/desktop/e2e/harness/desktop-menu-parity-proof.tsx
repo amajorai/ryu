@@ -8,7 +8,7 @@ import {
 	DropdownMenuSubContent,
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import { ThemeProvider, useTheme } from "next-themes";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -18,14 +18,24 @@ import {
 	DesktopWebAccountLinks,
 } from "../../src/components/layout/NavUser.tsx";
 import { GlobalContextMenu } from "../../src/components/shell/GlobalContextMenu.tsx";
+import proofStyles from "./desktop-menu-parity-proof.module.css";
 import "../../src/index.css";
 import { Check, LogOut, Plus } from "lucide-react";
 
-const webDestinations = [
+const standardWebDestinations = [
 	{ label: "Profile", path: "/u/demo-user" },
+	{ label: "Organizations", path: "/organizations" },
 	{ label: "Invite a friend", path: "/referrals" },
+	{ label: "Join Discord", path: "/discord" },
 	{ label: "Account", path: "/settings" },
-	{ label: "API keys", path: "/api-keys" },
+	{ label: "Personal access tokens", path: "/api-keys" },
+] as const;
+
+const botWebDestinations = [
+	{ label: "Account", path: "/settings" },
+	{ label: "Organizations", path: "/organizations" },
+	{ label: "Join Discord", path: "/discord" },
+	{ label: "Download Ryu Build", path: "/download" },
 ] as const;
 
 const demoStoredAccounts = [
@@ -45,13 +55,8 @@ const demoStoredAccounts = [
 	},
 ] as const;
 
-if (typeof window !== "undefined") {
-	window.localStorage.setItem(
-		"ryu_accounts",
-		JSON.stringify(demoStoredAccounts)
-	);
-	window.localStorage.setItem("ryu_active_user_id", "demo-alex");
-}
+window.localStorage.setItem("ryu_accounts", JSON.stringify(demoStoredAccounts));
+window.localStorage.setItem("ryu_active_user_id", "demo-alex");
 
 function WebsiteAccountSwitcherProof({
 	onSignOutAll,
@@ -65,13 +70,15 @@ function WebsiteAccountSwitcherProof({
 
 	return (
 		<DropdownMenu>
-			<DropdownMenuTrigger className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 font-medium text-sm hover:bg-white/15">
+			<DropdownMenuTrigger variant="glass">
 				Website user nav
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="min-w-56">
 				<DropdownMenuSub>
-					<DropdownMenuSubTrigger className="gap-2">
-						<span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-cyan-400/20 font-semibold text-cyan-100 text-xs">
+					<DropdownMenuSubTrigger spacing="comfortable">
+						<span
+							className={`flex size-6 shrink-0 items-center justify-center rounded-full ${proofStyles.accountSurface} font-semibold ${proofStyles.accountText} text-xs`}
+						>
 							{activeAccount?.name.slice(0, 1)}
 						</span>
 						<span className="flex min-w-0 flex-1 flex-col text-left">
@@ -89,7 +96,9 @@ function WebsiteAccountSwitcherProof({
 									key={account.userId}
 									onClick={() => setActiveId(account.userId)}
 								>
-									<span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-cyan-400/20 font-semibold text-cyan-100 text-xs">
+									<span
+										className={`flex size-6 shrink-0 items-center justify-center rounded-full ${proofStyles.accountSurface} font-semibold ${proofStyles.accountText} text-xs`}
+									>
 										{account.name.slice(0, 1)}
 									</span>
 									<span className="flex min-w-0 flex-1 flex-col">
@@ -121,19 +130,28 @@ function WebsiteAccountSwitcherProof({
 }
 
 function ThemeState() {
-	const { theme } = useTheme();
-	return <output data-testid="theme-mode">{theme ?? "unset"}</output>;
+	const { resolvedTheme, theme } = useTheme();
+	return (
+		<output
+			className={`block w-fit rounded-lg border ${proofStyles.panelBorder} ${proofStyles.panelSurface} px-3 py-1 font-mono ${proofStyles.themeText} text-xs`}
+			data-resolved-theme={resolvedTheme ?? "unset"}
+			data-testid="theme-mode"
+			data-theme={theme ?? "unset"}
+		>
+			{theme ?? "unset"} · {resolvedTheme ?? "unset"}
+		</output>
+	);
 }
 
 function DesktopMenuParityProof() {
-	const [openedPath, setOpenedPath] = useState("None yet");
-	const [openedPaths, setOpenedPaths] = useState<string[]>([]);
+	const [standardOpenedPaths, setStandardOpenedPaths] = useState<string[]>([]);
+	const [botOpenedPaths, setBotOpenedPaths] = useState<string[]>([]);
 	const [accountAction, setAccountAction] = useState("None yet");
 
-	const handleOpenWeb = (path: string) => {
-		setOpenedPath(path);
-		setOpenedPaths((current) => [...current, path]);
-	};
+	const handleStandardOpenWeb = (path: string) =>
+		setStandardOpenedPaths((current) => [...current, path]);
+	const handleBotOpenWeb = (path: string) =>
+		setBotOpenedPaths((current) => [...current, path]);
 
 	return (
 		<ThemeProvider
@@ -142,19 +160,27 @@ function DesktopMenuParityProof() {
 			enableSystem
 			storageKey="ryu-desktop-menu-parity-proof-theme"
 		>
-			<ThemeState />
 			<GlobalContextMenu>
-				<main className="min-h-screen bg-[#0b0f14] p-6 text-slate-100 sm:p-10">
+				<main
+					className={`min-h-screen ${proofStyles.canvas} p-6 ${proofStyles.primaryText} sm:p-10`}
+				>
 					<div className="mx-auto flex max-w-5xl flex-col gap-6">
-						<header className="flex flex-col gap-4 border-white/10 border-b pb-6 sm:flex-row sm:items-start sm:justify-between">
+						<ThemeState />
+						<header
+							className={`flex flex-col gap-4 ${proofStyles.panelBorder} border-b pb-6 sm:flex-row sm:items-start sm:justify-between`}
+						>
 							<div>
-								<p className="font-medium text-slate-400 text-xs uppercase tracking-[0.18em]">
+								<p
+									className={`font-medium ${proofStyles.mutedText} text-xs uppercase ${proofStyles.labelTracking}`}
+								>
 									React verification artifact
 								</p>
 								<h1 className="mt-2 font-semibold text-3xl tracking-tight">
 									Desktop menu parity
 								</h1>
-								<p className="mt-2 max-w-2xl text-slate-400 text-sm leading-6">
+								<p
+									className={`mt-2 max-w-2xl ${proofStyles.mutedText} text-sm leading-6`}
+								>
 									This proof mounts the production desktop user-nav links, theme
 									submenu, and global right-click menu. Use the controls below
 									to verify the web destinations and the shared Sun / Moon /
@@ -162,7 +188,7 @@ function DesktopMenuParityProof() {
 								</p>
 							</div>
 							<div
-								className="inline-flex w-fit items-center rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 font-semibold text-emerald-200 text-xs"
+								className={`inline-flex w-fit items-center rounded-full border ${proofStyles.statusBorder} ${proofStyles.statusSurface} px-3 py-1.5 font-semibold ${proofStyles.statusText} text-xs`}
 								data-testid="proof-status"
 							>
 								Production components mounted
@@ -171,61 +197,105 @@ function DesktopMenuParityProof() {
 
 						<section
 							aria-label="Desktop user navigation proof"
-							className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
+							className={`rounded-2xl border ${proofStyles.panelBorder} ${proofStyles.panelSurface} p-5`}
 						>
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 								<div>
 									<h2 className="font-semibold text-lg">
-										User nav → web account
+										Desktop account links
 									</h2>
-									<p className="mt-1 text-slate-400 text-sm">
-										Open the menu and choose Profile, Invite a friend, Account,
-										or API keys.
+									<p className={`mt-1 ${proofStyles.mutedText} text-sm`}>
+										Standard and bot-product menus route to separate web account
+										destinations. The standard menu also contains the real theme
+										submenu.
 									</p>
 								</div>
-								<DropdownMenu>
-									<DropdownMenuTrigger className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 font-medium text-sm hover:bg-white/15">
-										Desktop user nav
-									</DropdownMenuTrigger>
-									<DropdownMenuContent align="end" className="min-w-56">
-										<DropdownMenuGroup>
+								<div className="flex flex-wrap gap-2">
+									<DropdownMenu>
+										<DropdownMenuTrigger variant="glass">
+											Desktop user nav
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end" className="min-w-56">
+											<DropdownMenuGroup>
+												<DesktopWebAccountLinks
+													onOpenWeb={handleStandardOpenWeb}
+													profilePath="/u/demo-user"
+												/>
+											</DropdownMenuGroup>
+											<DropdownMenuSeparator />
+											<DesktopThemeSubmenu />
+										</DropdownMenuContent>
+									</DropdownMenu>
+									<DropdownMenu>
+										<DropdownMenuTrigger variant="glass">
+											Bot product user nav
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end" className="min-w-56">
 											<DesktopWebAccountLinks
-												onOpenWeb={handleOpenWeb}
-												profilePath="/u/demo-user"
+												botProduct
+												onOpenWeb={handleBotOpenWeb}
+												profilePath="/bot-profile-disabled"
 											/>
-										</DropdownMenuGroup>
-										<DropdownMenuSeparator />
-										<DesktopThemeSubmenu />
-									</DropdownMenuContent>
-								</DropdownMenu>
+										</DropdownMenuContent>
+									</DropdownMenu>
+								</div>
 							</div>
-							<div className="mt-5 grid gap-3 sm:grid-cols-3">
-								{webDestinations.map((destination) => (
-									<div
-										className="rounded-xl border border-white/10 bg-black/20 p-3"
-										key={destination.label}
-									>
-										<div className="font-medium text-sm">
-											{destination.label}
-										</div>
-										<code className="mt-1 block text-slate-400 text-xs">
-											{destination.path}
-										</code>
+							<div className="mt-5 grid gap-6 lg:grid-cols-2">
+								<div>
+									<h3 className="mb-2 font-medium text-sm">Standard</h3>
+									<div className="grid gap-3 sm:grid-cols-2">
+										{standardWebDestinations.map((destination) => (
+											<div
+												className={`rounded-xl border ${proofStyles.panelBorder} ${proofStyles.resultSurface} p-3`}
+												key={destination.label}
+											>
+												<div className="font-medium text-sm">
+													{destination.label}
+												</div>
+												<code
+													className={`mt-1 block ${proofStyles.mutedText} text-xs`}
+												>
+													{destination.path}
+												</code>
+											</div>
+										))}
 									</div>
-								))}
+								</div>
+								<div>
+									<h3 className="mb-2 font-medium text-sm">Bot product</h3>
+									<div className="grid gap-3 sm:grid-cols-2">
+										{botWebDestinations.map((destination) => (
+											<div
+												className={`rounded-xl border ${proofStyles.panelBorder} ${proofStyles.resultSurface} p-3`}
+												key={destination.label}
+											>
+												<div className="font-medium text-sm">
+													{destination.label}
+												</div>
+												<code
+													className={`mt-1 block ${proofStyles.mutedText} text-xs`}
+												>
+													{destination.path}
+												</code>
+											</div>
+										))}
+									</div>
+								</div>
 							</div>
 						</section>
 
 						<section
 							aria-label="Account switcher submenu proof"
-							className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
+							className={`rounded-2xl border ${proofStyles.panelBorder} ${proofStyles.panelSurface} p-5`}
 						>
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 								<div>
 									<h2 className="font-semibold text-lg">
 										Account switcher submenu
 									</h2>
-									<p className="mt-1 max-w-2xl text-slate-400 text-sm leading-6">
+									<p
+										className={`mt-1 max-w-2xl ${proofStyles.mutedText} text-sm leading-6`}
+									>
 										Both user-nav triggers keep the active account as the
 										submenu trigger. The submenu contains account switching, Add
 										account, a separator, and Log out of all accounts.
@@ -233,7 +303,7 @@ function DesktopMenuParityProof() {
 								</div>
 								<div className="flex flex-wrap gap-2">
 									<DropdownMenu>
-										<DropdownMenuTrigger className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 font-medium text-sm hover:bg-white/15">
+										<DropdownMenuTrigger variant="glass">
 											Desktop active user
 										</DropdownMenuTrigger>
 										<DropdownMenuContent align="end" className="min-w-56">
@@ -257,8 +327,12 @@ function DesktopMenuParityProof() {
 									/>
 								</div>
 							</div>
-							<div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-3">
-								<div className="text-slate-400 text-xs uppercase tracking-wide">
+							<div
+								className={`mt-5 rounded-xl border ${proofStyles.panelBorder} ${proofStyles.resultSurface} p-3`}
+							>
+								<div
+									className={`${proofStyles.mutedText} text-xs uppercase tracking-wide`}
+								>
 									Last account action
 								</div>
 								<div
@@ -272,15 +346,15 @@ function DesktopMenuParityProof() {
 
 						<section
 							aria-label="Global context menu proof"
-							className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
+							className={`rounded-2xl border ${proofStyles.panelBorder} ${proofStyles.panelSurface} p-5`}
 						>
 							<h2 className="font-semibold text-lg">Global right-click menu</h2>
-							<p className="mt-1 text-slate-400 text-sm">
+							<p className={`mt-1 ${proofStyles.mutedText} text-sm`}>
 								Right-click the panel to open the production menu, then open
 								Appearance.
 							</p>
 							<div
-								className="mt-4 rounded-xl border border-violet-300/40 border-dashed bg-violet-300/10 p-6 text-center text-slate-200 text-sm"
+								className={`mt-4 rounded-xl border ${proofStyles.contextBorder} border-dashed ${proofStyles.contextSurface} p-6 text-center ${proofStyles.contextText} text-sm`}
 								data-testid="context-target"
 							>
 								Right-click this panel to inspect Appearance and its Light,
@@ -290,32 +364,34 @@ function DesktopMenuParityProof() {
 
 						<section
 							aria-label="Interaction results"
-							className="rounded-2xl border border-white/10 bg-white/[0.04] p-5"
+							className={`rounded-2xl border ${proofStyles.panelBorder} ${proofStyles.panelSurface} p-5`}
 						>
 							<h2 className="font-semibold text-lg">Interaction results</h2>
 							<dl className="mt-4 grid gap-4 sm:grid-cols-2">
 								<div>
-									<dt className="text-slate-400 text-xs uppercase tracking-wide">
-										Last web destination
+									<dt
+										className={`${proofStyles.mutedText} text-xs uppercase tracking-wide`}
+									>
+										Standard destinations selected
 									</dt>
 									<dd
 										className="mt-1 font-mono text-sm"
-										data-testid="opened-path"
+										data-testid="standard-opened-paths"
 									>
-										{openedPath}
+										{JSON.stringify(standardOpenedPaths)}
 									</dd>
 								</div>
 								<div>
-									<dt className="text-slate-400 text-xs uppercase tracking-wide">
-										Paths opened in this run
+									<dt
+										className={`${proofStyles.mutedText} text-xs uppercase tracking-wide`}
+									>
+										Bot-product destinations selected
 									</dt>
 									<dd
 										className="mt-1 font-mono text-sm"
-										data-testid="opened-paths"
+										data-testid="bot-opened-paths"
 									>
-										{openedPaths.length > 0
-											? openedPaths.join(" → ")
-											: "None yet"}
+										{JSON.stringify(botOpenedPaths)}
 									</dd>
 								</div>
 							</dl>

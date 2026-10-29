@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export type RecommendationKind =
 	| "app"
 	| "plugin"
@@ -30,7 +32,7 @@ export interface NormalizedRecommendations {
 	items: RecommendationItem[];
 }
 
-const KINDS = new Set<RecommendationKind>([
+const recommendationKindSchema = z.enum([
 	"agent",
 	"app",
 	"mcp",
@@ -38,50 +40,58 @@ const KINDS = new Set<RecommendationKind>([
 	"plugin",
 	"skill",
 ]);
-
-function stringValue(value: unknown): string | null {
-	return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function cadenceValue(value: unknown): NormalizedRecommendations["cadence"] {
-	return value === "daily" || value === "monthly" ? value : "weekly";
-}
+const recommendationTextSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.nullable()
+	.catch(null);
+const recommendationItemSchema = z
+	.object({
+		id: z.string().trim().min(1),
+		name: z.string().trim().min(1),
+		kind: z.string().trim().pipe(recommendationKindSchema),
+		description: recommendationTextSchema,
+		icon_url: z.unknown().optional(),
+		iconUrl: z.unknown().optional(),
+		installed: z.boolean().catch(false),
+		reason: recommendationTextSchema,
+	})
+	.transform(
+		(item): RecommendationItem => ({
+			description: item.description,
+			iconUrl: recommendationTextSchema.parse(item.icon_url ?? item.iconUrl),
+			id: item.id,
+			installed: item.installed,
+			kind: item.kind,
+			name: item.name,
+			reason: item.reason ?? "A match for your current catalog setup.",
+		})
+	);
+const recommendationsSchema = z
+	.object({
+		cadence: z.enum(["daily", "weekly", "monthly"]).catch("weekly"),
+		enabled: z.boolean().catch(true),
+		hidden: z.boolean().catch(false),
+		items: z
+			.custom<unknown[]>(Array.isArray)
+			.transform((items) =>
+				items.flatMap((entry) => {
+					const parsed = recommendationItemSchema.safeParse(entry);
+					return parsed.success ? [parsed.data] : [];
+				})
+			)
+			.catch(() => []),
+	})
+	.catch(() => ({
+		cadence: "weekly" as const,
+		enabled: true,
+		hidden: false,
+		items: [],
+	}));
 
 export function normalizeRecommendations(
 	value: RecommendationWire | null | undefined
 ): NormalizedRecommendations {
-	const items = Array.isArray(value?.items)
-		? value.items.flatMap((entry): RecommendationItem[] => {
-				if (!entry || typeof entry !== "object") {
-					return [];
-				}
-				const record = entry as Record<string, unknown>;
-				const id = stringValue(record.id);
-				const name = stringValue(record.name);
-				const kind = stringValue(record.kind);
-				if (!(id && name && kind && KINDS.has(kind as RecommendationKind))) {
-					return [];
-				}
-				return [
-					{
-						description: stringValue(record.description),
-						iconUrl: stringValue(record.icon_url ?? record.iconUrl),
-						id,
-						installed: record.installed === true,
-						kind: kind as RecommendationKind,
-						name,
-						reason:
-							stringValue(record.reason) ??
-							"A match for your current catalog setup.",
-					},
-				];
-			})
-		: [];
-
-	return {
-		cadence: cadenceValue(value?.cadence),
-		enabled: value?.enabled !== false,
-		hidden: value?.hidden === true,
-		items,
-	};
+	return recommendationsSchema.parse(value);
 }

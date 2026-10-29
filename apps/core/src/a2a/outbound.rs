@@ -45,6 +45,10 @@ static OUTBOUND_TASKS: OnceLock<Mutex<HashMap<String, ActiveOutbound>>> = OnceLo
 struct OutboundRegistration {
     conversation_id: Option<String>,
     generation: Uuid,
+    /// Keeps the cancel channel open for the whole turn. The map entry is
+    /// absent without a conversation id and is replaced by a newer turn, and
+    /// a closed channel would make `changed()` resolve with an error forever.
+    _cancel: watch::Sender<bool>,
 }
 
 impl Drop for OutboundRegistration {
@@ -76,7 +80,10 @@ fn register_outbound(
         if let Ok(mut active) = outbound_tasks().lock() {
             active.insert(
                 conversation_id.clone(),
-                ActiveOutbound { generation, cancel },
+                ActiveOutbound {
+                    generation,
+                    cancel: cancel.clone(),
+                },
             );
         }
     }
@@ -85,6 +92,7 @@ fn register_outbound(
         OutboundRegistration {
             conversation_id,
             generation,
+            _cancel: cancel,
         },
     )
 }
@@ -98,6 +106,14 @@ pub(crate) fn request_cancel(conversation_id: &str) -> bool {
         .is_some_and(|active| active.cancel.send(true).is_ok())
 }
 
+pub(crate) fn request_cancel_all() -> usize {
+    let active = outbound_tasks().lock().expect("outbound tasks poisoned");
+    active
+        .values()
+        .filter(|entry| entry.cancel.send(true).is_ok())
+        .count()
+}
+
 pub(crate) async fn route_peer_chat<F, Fut>(
     req: ChatStreamRequest,
     peer_id: String,
@@ -108,6 +124,10 @@ where
     F: FnOnce(String, &'static str) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = ()> + Send + 'static,
 {
+    let mut admission = match crate::execution_control::admit() {
+        Ok(admission) => admission,
+        Err(message) => return error_stream(message.to_owned()),
+    };
     let runtime = match runtime() {
         Ok(runtime) => runtime,
         Err(_) => return error_stream("A2A storage is unavailable".to_owned()),
@@ -199,15 +219,42 @@ where
         let mut remote_task_id: Option<String> = request_message.task_id.clone();
         let mut outcome = "completed";
         let mut failure: Option<String> = None;
+        let mut cancel_closed = false;
 
         yield Ok::<_, Infallible>(ui_start());
 
         if supports_streaming {
-            match client.send_streaming_message(&request).await {
+            let connected = tokio::select! {
+                biased;
+                _ = admission.cancelled() => {
+                    yield Ok::<_, Infallible>(ui_error(crate::execution_control::PAUSED_MESSAGE));
+                    yield Ok::<_, Infallible>(DONE_FRAME.to_vec());
+                    return;
+                }
+                connected = client.send_streaming_message(&request) => connected,
+            };
+            match connected {
                 Ok(mut events) => loop {
                     let event = tokio::select! {
-                        changed = cancel.changed() => {
-                            if changed.is_ok() && *cancel.borrow() {
+                        stopped = async {
+                            tokio::select! {
+                                biased;
+                                _ = admission.cancelled() => Some(true),
+                                changed = async {
+                                    if cancel_closed {
+                                        std::future::pending::<()>().await;
+                                    }
+                                    cancel.changed().await
+                                } => changed.ok().map(|()| *cancel.borrow()),
+                            }
+                        } => {
+                            // A closed cancel channel never signals again; stop
+                            // polling it instead of spinning on its error.
+                            let Some(stopped) = stopped else {
+                                cancel_closed = true;
+                                continue;
+                            };
+                            if stopped {
                                 if let Some(task_id) = &remote_task_id {
                                     if let Ok(task) = client.cancel_task(&CancelTaskRequest {
                                         id: task_id.clone(),
@@ -274,7 +321,16 @@ where
                 }
             }
         } else {
-            match client.send_message(&request).await {
+            let response = tokio::select! {
+                biased;
+                _ = admission.cancelled() => {
+                    yield Ok::<_, Infallible>(ui_error(crate::execution_control::PAUSED_MESSAGE));
+                    yield Ok::<_, Infallible>(DONE_FRAME.to_vec());
+                    return;
+                }
+                response = client.send_message(&request) => response,
+            };
+            match response {
                 Ok(response) => {
                     if let Err(error) = persist_send_response(&peer_id, &request_message, &response) {
                         tracing::warn!(peer_id, "failed to persist outbound A2A response: {error:#}");
@@ -724,5 +780,19 @@ mod tests {
         assert!(request_cancel(&conversation));
         drop(second);
         assert!(!request_cancel(&conversation));
+    }
+
+    #[tokio::test]
+    async fn cancel_channel_stays_open_without_a_map_entry() {
+        let (mut unregistered, _registration) = register_outbound(None);
+        let conversation = format!("cancel-test-{}", Uuid::new_v4());
+        let (mut superseded, _first) = register_outbound(Some(conversation.clone()));
+        let (_newest, _second) = register_outbound(Some(conversation));
+        for receiver in [&mut unregistered, &mut superseded] {
+            let changed =
+                tokio::time::timeout(std::time::Duration::from_millis(20), receiver.changed())
+                    .await;
+            assert!(changed.is_err(), "changed() stays pending, not Err");
+        }
     }
 }

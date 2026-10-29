@@ -1,7 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	type CSSProperties,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import { safeHttpUrl } from "../lib/safe-url.ts";
 import { cn } from "../lib/utils.ts";
+import styles from "./award-badge.module.css";
 
 /**
  * A Product Hunt award badge — the embeddable one, redrawn as an SVG so it
@@ -18,18 +27,22 @@ import { cn } from "../lib/utils.ts";
  * which is what an unclaimed award is.
  */
 
+interface AwardTransformStyle extends CSSProperties {
+	"--award-transform": string;
+}
+
 export type AwardBadgeType =
 	| "golden-kitty"
 	| "product-of-the-day"
 	| "product-of-the-month"
 	| "product-of-the-week";
 
-const TITLES: Record<AwardBadgeType, string> = {
+const TITLES = {
 	"golden-kitty": "Golden Kitty Awards",
 	"product-of-the-day": "Product of the Day",
 	"product-of-the-month": "Product of the Month",
 	"product-of-the-week": "Product of the Week",
-};
+} satisfies Record<AwardBadgeType, string>;
 
 /** Gold, silver, bronze — the badge's own placement colours. */
 const PLACE_FILLS = ["#f3e3ac", "#dddddd", "#f1cfa6"] as const;
@@ -42,7 +55,6 @@ const MIN_ROTATE = -0.25;
 const MAX_SCALE = 1;
 const MIN_SCALE = 0.97;
 const PERSPECTIVE_PX = 700;
-const SETTLE_MS = 200;
 /** The sheen: ten bands, each offset ten degrees from the last. */
 const SHEEN_BANDS = [
 	"hsl(358, 100%, 62%)",
@@ -123,6 +135,8 @@ function leanMatrix(rect: DOMRect, clientX: number, clientY: number): string {
 }
 
 export function AwardBadge({ className, href, place, type }: AwardBadgeProps) {
+	const tl = useLiteralMessages();
+	const safeHref = safeHttpUrl(href);
 	const ref = useRef<HTMLAnchorElement>(null);
 	const [matrix, setMatrix] = useState(IDENTITY_MATRIX);
 	const [sheenDegrees, setSheenDegrees] = useState(0);
@@ -165,80 +179,88 @@ export function AwardBadge({ className, href, place, type }: AwardBadgeProps) {
 	const fill =
 		PLACE_FILLS[(place ?? 0) - 1] ?? PLACE_FILLS[DEFAULT_PLACE_INDEX];
 	const label = `${TITLES[type]}${place ? ` #${place}` : ""}`;
+	const badgeName = tl("Product Hunt — {label}", { label });
 
+	const transformStyle: AwardTransformStyle = {
+		"--award-transform": `perspective(${PERSPECTIVE_PX}px) matrix3d(${matrix})`,
+	};
 	return (
 		<a
-			aria-label={`Product Hunt — ${label}`}
+			aria-label={badgeName}
 			className={cn("block w-[180px] cursor-pointer sm:w-[260px]", className)}
-			href={href}
+			href={safeHref ?? undefined}
 			onPointerLeave={release}
 			onPointerMove={track}
 			ref={ref}
 			rel="noopener noreferrer"
 			target="_blank"
 		>
-			<div
-				style={{
-					transform: `perspective(${PERSPECTIVE_PX}px) matrix3d(${matrix})`,
-					transformOrigin: "center center",
-					transition: `transform ${SETTLE_MS}ms ease-out`,
-				}}
-			>
+			<div className={styles.transform} style={transformStyle}>
 				<svg
 					className="h-auto w-full"
 					role="img"
 					viewBox="0 0 260 54"
 					xmlns="http://www.w3.org/2000/svg"
 				>
-					<title>{`Product Hunt — ${label}`}</title>
+					<title>{badgeName}</title>
 					<defs>
 						<filter id="award-badge-blur">
 							<feGaussianBlur in="SourceGraphic" stdDeviation="3" />
 						</filter>
 						<mask id="award-badge-mask">
-							<rect fill="white" height="54" rx="10" width="260" />
+							<rect className={styles.mask} height="54" rx="10" width="260" />
 						</mask>
 					</defs>
 					<rect fill={fill} height="54" rx="10" width="260" />
 					<rect
+						className={styles.frame}
 						fill="transparent"
 						height="46"
 						rx="8"
-						stroke="#bbbbbb"
 						strokeWidth="1"
 						width="252"
 						x="4"
 						y="4"
 					/>
-					<text fill="#666666" fontSize="9" fontWeight={500} x="53" y="20">
+					<text
+						className={styles.ink}
+						fontSize="9"
+						fontWeight={500}
+						x="53"
+						y="20"
+					>
 						PRODUCT HUNT
 					</text>
-					<text fill="#666666" fontSize="16" fontWeight={500} x="52" y="40">
+					<text
+						className={styles.ink}
+						fontSize="16"
+						fontWeight={500}
+						x="52"
+						y="40"
+					>
 						{label}
 					</text>
 					<g transform="translate(8, 9)">
-						<path d={PH_MARK} fill="#666666" />
+						<path className={styles.ink} d={PH_MARK} />
 					</g>
 					{/* The holographic sweep. Masked to the badge's rounded box so the
 					    blurred bands cannot bleed past its corners. */}
-					<g mask="url(#award-badge-mask)" style={{ mixBlendMode: "overlay" }}>
-						{SHEEN_BANDS.map((color, index) => (
-							<g
-								key={color}
-								style={{
-									transform: `rotate(${sheenDegrees + index * BAND_STEP_DEGREES}deg)`,
-									transformOrigin: "center center",
-									transition: `transform ${SETTLE_MS}ms ease-out`,
-								}}
-							>
-								<polygon
-									fill={color}
-									filter="url(#award-badge-blur)"
-									opacity="0.5"
-									points="0,0 260,54 260,0 0,54"
-								/>
-							</g>
-						))}
+					<g className={styles.overlay} mask="url(#award-badge-mask)">
+						{SHEEN_BANDS.map((color, index) => {
+							const bandStyle: AwardTransformStyle = {
+								"--award-transform": `rotate(${sheenDegrees + index * BAND_STEP_DEGREES}deg)`,
+							};
+							return (
+								<g className={styles.transform} key={color} style={bandStyle}>
+									<polygon
+										fill={color}
+										filter="url(#award-badge-blur)"
+										opacity="0.5"
+										points="0,0 260,54 260,0 0,54"
+									/>
+								</g>
+							);
+						})}
 					</g>
 				</svg>
 			</div>

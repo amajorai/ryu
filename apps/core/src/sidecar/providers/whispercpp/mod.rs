@@ -9,8 +9,9 @@
 //!
 //! Lifecycle, mirroring [`super::ollama::OllamaManager`]: if a whisper server is
 //! already answering on the port we **adopt** it (never killing a process we did
-//! not spawn); otherwise we spawn `whisper-server` from `~/.ryu/bin` with a GGML
-//! model resolved from `RYU_WHISPER_MODEL` (or the default model path).
+//! not spawn); otherwise we spawn `whisper-server` from `engines/audio/whispercpp/`
+//! with a GGML model resolved from `RYU_WHISPER_MODEL` (or the default model in
+//! `models/speech-to-text/whisper/`).
 
 pub mod downloader;
 
@@ -51,9 +52,7 @@ pub fn whisper_base_url() -> String {
 /// small English base model is a sensible default, not a lock: point
 /// `RYU_WHISPER_MODEL` at any whisper GGML model to override.
 fn default_model_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir()
-        .join("models")
-        .join("ggml-base.en.bin")
+    downloader::model_path()
 }
 
 fn resolved_model_path() -> std::path::PathBuf {
@@ -96,12 +95,7 @@ impl WhisperCppManager {
     }
 
     fn binary_path() -> std::path::PathBuf {
-        let name = if cfg!(target_os = "windows") {
-            "whisper-server.exe"
-        } else {
-            "whisper-server"
-        };
-        crate::paths::ryu_dir().join("bin").join(name)
+        downloader::server_binary_path()
     }
 
     /// Returns `true` if a whisper server is already answering on its port. Any
@@ -131,6 +125,12 @@ impl Sidecar for WhisperCppManager {
         let adopted_external = Arc::clone(&self.adopted_external);
         let client = self.client.clone();
         Box::pin(async move {
+            // Our own child is already up: nothing to start. Without this guard the
+            // reachability probe below would record our child as an adopted external
+            // server, and the next stop() would leave it running.
+            if process.is_running() {
+                return Ok(());
+            }
             // Adopt an already-running whisper server rather than spawning a
             // competing process that would fail to bind the port.
             if Self::server_reachable(&client).await {
@@ -148,7 +148,7 @@ impl Sidecar for WhisperCppManager {
                 anyhow::bail!(
                     "whisper-server binary not found at {}. Install the whisper.cpp \
                      voice engine from the Store, or place a `whisper-server` binary \
-                     in ~/.ryu/bin.",
+                     there.",
                     binary_path.display()
                 );
             }
@@ -156,9 +156,9 @@ impl Sidecar for WhisperCppManager {
             let model = resolved_model_path();
             if !model.exists() {
                 anyhow::bail!(
-                    "whisper GGML model not found at {}. Download a model (e.g. \
-                     ggml-base.en.bin) into ~/.ryu/models, or set RYU_WHISPER_MODEL \
-                     to a model path.",
+                    "whisper GGML model not found at {}. Reinstall the whisper.cpp \
+                     voice engine to fetch the default model, or set node-config.json \
+                     settings.whisper.model (RYU_WHISPER_MODEL) to a model path.",
                     model.display()
                 );
             }
@@ -173,6 +173,19 @@ impl Sidecar for WhisperCppManager {
                 "-m".into(),
                 model.to_string_lossy().to_string(),
             ];
+            let launch = super::engine_launch_config("whispercpp").await;
+            let mut args = args;
+            if let Some(threads) = launch.threads.filter(|threads| *threads > 0) {
+                args.extend(["--threads".to_owned(), threads.to_string()]);
+            }
+            // Catalog options first, then raw args. Core's loopback binding,
+            // profile port, and model path stay authoritative. (`-p` is
+            // whisper-server's `--processors`, not a port alias.)
+            args.extend(crate::inference::native_args("whispercpp", &launch.native));
+            args.extend(super::strip_managed_args(
+                &launch.extra_args,
+                &["--host", "--port", "--model", "-m"],
+            ));
             let program = binary_path.to_string_lossy().to_string();
             process
                 .start_path_with_args(&program, &args)
@@ -240,14 +253,12 @@ impl Sidecar for WhisperCppManager {
 
     fn uninstall(&self, delete_data: bool) -> crate::sidecar::BoxFuture<anyhow::Result<()>> {
         Box::pin(async move {
-            crate::sidecar::remove_ryu_binary("whisper-server").await;
+            crate::sidecar::remove_dir(&downloader::install_dir()).await;
             crate::sidecar::remove_from_version_store("whispercpp");
 
             if delete_data {
-                // GGML voice models live under ~/.ryu/models; leave other models
-                // (chat GGUFs) untouched by removing only whisper `ggml-*` files
-                // is out of scope — data deletion here is best-effort no-op.
-                tracing::info!("whispercpp delete_data: leaving ~/.ryu/models intact");
+                // whisper's own weights folder only; no other engine reads it.
+                crate::sidecar::remove_dir(&downloader::models_dir()).await;
             }
 
             tracing::info!("whispercpp uninstalled");

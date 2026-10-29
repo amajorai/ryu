@@ -81,7 +81,7 @@ function Story() {
 			<div className="relative mx-auto flex max-w-5xl flex-col gap-6">
 				<header className="flex flex-col gap-5 rounded-3xl border border-border/70 bg-background/75 p-6 shadow-sm backdrop-blur-sm sm:flex-row sm:items-start sm:justify-between">
 					<div>
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							Desktop appearance proof
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
@@ -120,13 +120,13 @@ function Story() {
 					>
 						<DropdownMenu>
 							<DropdownMenuTrigger
-								className="rounded-xl border border-border/70 bg-background/70 px-4 py-2 text-sm"
 								data-testid="dropdown-trigger"
+								variant="blurred-control"
 							>
 								Open dropdown
 							</DropdownMenuTrigger>
 							<DropdownMenuContent
-								className="min-w-64 p-2"
+								className="min-w-64"
 								data-testid="dropdown-content"
 							>
 								<DropdownMenuItem>Open workspace</DropdownMenuItem>
@@ -142,8 +142,9 @@ function Story() {
 					>
 						<Select defaultValue="work">
 							<SelectTrigger
+								appearance="glass-panel"
 								aria-label="Select workspace"
-								className="w-52 border border-border/70 bg-background/70"
+								className="w-52"
 							>
 								<SelectValue />
 							</SelectTrigger>

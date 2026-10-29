@@ -200,7 +200,13 @@ export function ListingDetailTabs({
 
 	return (
 		<Tabs
-			onValueChange={(value: string) => setTab(value as DetailTabId)}
+			onValueChange={(value: string) =>
+				// SAFETY: Each trigger below receives the authored DetailTabId row's id; Tabs
+				// forwards that selected value unchanged. This restores that producer
+				// type for the callback. It does not validate synthetic callback values
+				// or change the existing vanished-tab fallback at runtime.
+				setTab(value as DetailTabId)
+			}
 			value={activeTab}
 		>
 			{/* `pills` matches every other tab row in the store. Deliberately NO
@@ -208,7 +214,7 @@ export function ListingDetailTabs({
 			    trigger to the indicator whenever one is present, which cancels the
 			    solid pill. h-auto/flex-wrap because `pills` triggers are
 			    `flex-initial`, so a seven-tab row wraps instead of being crushed. */}
-			<TabsList className="h-auto flex-wrap gap-1" variant="pills">
+			<TabsList layout="listing-detail" sticky variant="pills">
 				{tabs.map((t) => (
 					<TabsTrigger key={t.id} value={t.id}>
 						{t.label}
@@ -216,12 +222,12 @@ export function ListingDetailTabs({
 				))}
 			</TabsList>
 			{overview ? (
-				<TabsContent className="pt-2" value="overview">
+				<TabsContent inset="listing-detail" value="overview">
 					{overview}
 				</TabsContent>
 			) : null}
 			{readme ? (
-				<TabsContent className="pt-2" value="readme">
+				<TabsContent inset="listing-detail" value="readme">
 					<ReadmePanel
 						Markdown={Markdown}
 						readme={readme}
@@ -230,12 +236,12 @@ export function ListingDetailTabs({
 				</TabsContent>
 			) : null}
 			{detail?.apiSurface && showApi ? (
-				<TabsContent className="pt-2" value="api">
+				<TabsContent inset="listing-detail" value="api">
 					<ApiReferencePanel surface={detail.apiSurface} />
 				</TabsContent>
 			) : null}
 			{showVersions ? (
-				<TabsContent className="pt-2" value="versions">
+				<TabsContent inset="listing-detail" value="versions">
 					<VersionsPanel
 						fetchVersionDetail={fetchVersionDetail}
 						installVersion={installVersion}
@@ -244,7 +250,7 @@ export function ListingDetailTabs({
 				</TabsContent>
 			) : null}
 			{showDeps ? (
-				<TabsContent className="pt-2" value="dependencies">
+				<TabsContent inset="listing-detail" value="dependencies">
 					<DependenciesPanel
 						detail={detail}
 						entry={entry}
@@ -253,12 +259,12 @@ export function ListingDetailTabs({
 				</TabsContent>
 			) : null}
 			{reviewsService ? (
-				<TabsContent className="pt-2" value="reviews">
+				<TabsContent inset="listing-detail" value="reviews">
 					<ReviewsPanel id={entry.id} kind={kind} service={reviewsService} />
 				</TabsContent>
 			) : null}
 			{showHealth && scorecard ? (
-				<TabsContent className="pt-2" value="health">
+				<TabsContent inset="listing-detail" value="health">
 					<ScorecardPanel
 						agentScan={agentScan}
 						developerCommand={`ryu plugin doctor ${entry.id}`}

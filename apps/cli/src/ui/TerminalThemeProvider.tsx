@@ -1,5 +1,6 @@
 /* @jsxImportSource @opentui/react */
 
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import {
 	createContext,
@@ -11,6 +12,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { z } from "zod";
 import {
 	detectColorScheme,
 	ThemeProvider as OpenTuiThemeProvider,
@@ -19,6 +21,7 @@ import { useCore } from "../core/CoreContext.tsx";
 import {
 	DEFAULT_THEME_PREFERENCE,
 	loadThemePreference,
+	noColorRequested,
 	RYU_THEME_PRESETS,
 	resolveThemePreference,
 	saveThemePreference,
@@ -70,24 +73,30 @@ function targetKey(target: ApiTarget): string {
 	return JSON.stringify([target.url, target.token]);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+const preferencePayloadSchema = z.json();
+const preferenceEnvelopeSchema = z.object({ value: preferencePayloadSchema });
+function preferenceValue(
+	response: Parameters<typeof preferencePayloadSchema.parse>[0]
+): z.infer<typeof preferencePayloadSchema> {
+	const payload = preferencePayloadSchema.parse(response);
+	const envelope = preferenceEnvelopeSchema.safeParse(payload);
+	return envelope.success ? envelope.data.value : payload;
 }
 
-function preferenceValue(response: unknown): unknown {
-	if (!isRecord(response)) {
-		return response;
-	}
-
-	return "value" in response ? response.value : response;
-}
-
-function persistPreference(target: ApiTarget, preference: unknown): void {
+function persistPreference(
+	target: ApiTarget,
+	preference: ThemePreference
+): void {
 	const value = serializeThemePreference(saveThemePreference(preference));
-	void request(target, `/api/preferences/${TERMINAL_THEME_PREFERENCE_KEY}`, {
-		body: { value },
-		method: "PUT",
-	}).catch(() => undefined);
+	void request(
+		target,
+		`/api/preferences/${TERMINAL_THEME_PREFERENCE_KEY}`,
+		{
+			body: { value },
+			method: "PUT",
+		},
+		appResponseValueSchema
+	).catch(() => undefined);
 }
 
 export interface TerminalThemeProviderProps {
@@ -147,9 +156,11 @@ export function TerminalThemeProvider({
 
 		const load = async (): Promise<void> => {
 			try {
-				const response = await request<unknown>(
+				const response = await request(
 					target,
-					`/api/preferences/${TERMINAL_THEME_PREFERENCE_KEY}`
+					`/api/preferences/${TERMINAL_THEME_PREFERENCE_KEY}`,
+					{},
+					appResponseValueSchema
 				);
 				finishLoad(loadThemePreference(preferenceValue(response)));
 				return;
@@ -158,9 +169,11 @@ export function TerminalThemeProvider({
 				// preference before falling back to the terminal-safe default.
 			}
 			try {
-				const response = await request<unknown>(
+				const response = await request(
 					target,
-					`/api/preferences/${DESKTOP_THEME_PREFERENCE_KEY}`
+					`/api/preferences/${DESKTOP_THEME_PREFERENCE_KEY}`,
+					{},
+					appResponseValueSchema
 				);
 				finishLoad(loadThemePreference(preferenceValue(response)));
 			} catch {
@@ -175,7 +188,7 @@ export function TerminalThemeProvider({
 	}, [activeTargetKey, target]);
 
 	const applyUserPreference = useCallback(
-		(nextValue: unknown): void => {
+		(nextValue: ThemePreference): void => {
 			const base =
 				preferenceTargetRef.current === activeTargetKey
 					? preferenceRef.current
@@ -228,7 +241,11 @@ export function TerminalThemeProvider({
 		applyUserPreference(defaultPreference());
 	}, [applyUserPreference]);
 
-	const theme = resolveThemePreference(preference, detectColorScheme());
+	const theme = resolveThemePreference(
+		preference,
+		detectColorScheme(),
+		noColorRequested()
+	);
 	const contextValue = useMemo<TerminalThemeContextValue>(
 		() => ({
 			availableModes: THEME_MODES,

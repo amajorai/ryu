@@ -2,8 +2,8 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 
 const sectionTitleSizes = {
-	default: "text-2xl md:text-3xl",
-	large: "text-3xl md:text-4xl",
+	default: "text-3xl md:text-4xl lg:text-[2.75rem]",
+	large: "text-4xl md:text-5xl lg:text-[3.5rem]",
 	small: "text-xl md:text-2xl",
 	compact: "text-lg md:text-xl",
 } as const;
@@ -11,7 +11,7 @@ const sectionTitleSizes = {
 export type SectionTitleSize = keyof typeof sectionTitleSizes;
 
 export const sectionTitleClass =
-	"text-balance font-heading font-medium text-2xl text-foreground leading-tight tracking-tight md:text-3xl";
+	"text-balance font-heading font-medium text-3xl text-foreground leading-[1.1] tracking-[-0.03em] md:text-4xl lg:text-[2.75rem]";
 
 interface SectionTitleProps {
 	as?: "h1" | "h2";
@@ -34,7 +34,7 @@ export function SectionTitle({
 	return (
 		<Tag
 			className={cn(
-				"text-balance font-heading font-medium text-foreground leading-tight tracking-tight",
+				"text-balance font-heading font-medium text-foreground leading-[1.1] tracking-[-0.03em]",
 				sectionTitleSizes[size],
 				className
 			)}

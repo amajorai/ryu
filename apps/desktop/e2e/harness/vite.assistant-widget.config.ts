@@ -37,4 +37,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "assistant-widget-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

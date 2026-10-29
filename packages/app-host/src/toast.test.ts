@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
+import type { RouteClaim } from "./rpc.ts";
 import {
 	asToastDismissArg,
 	asToastShowArg,
@@ -18,7 +19,7 @@ import {
 const TOAST = capabilitiesFromGrants(["ui:toast"]);
 const BASE_SERVICES: HostServices = {
 	listAgents: async () => [],
-	registerRoute: async () => null,
+	registerRoute: async (claim: RouteClaim) => ({ path: claim.path }),
 };
 
 describe("toast RPC contract", () => {
@@ -119,6 +120,26 @@ describe("toast RPC contract", () => {
 });
 
 describe("toast payload validation", () => {
+	it("omits undefined show fields but rejects explicitly undefined updates", () => {
+		expect(
+			asToastShowArg({
+				title: " Ready ",
+				description: undefined,
+				duration: undefined,
+				variant: undefined,
+			})
+		).toEqual({ title: " Ready " });
+		for (const key of ["description", "duration", "title", "variant"]) {
+			expect(
+				asToastUpdateArg({
+					id: "opaque",
+					description: "changed",
+					[key]: undefined,
+				})
+			).toBeNull();
+		}
+	});
+
 	it("accepts the finite public vocabulary and an empty description update", () => {
 		expect(
 			asToastShowArg({

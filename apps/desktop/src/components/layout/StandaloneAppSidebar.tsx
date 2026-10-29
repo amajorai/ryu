@@ -23,24 +23,27 @@ import {
 	usePluginContributions,
 } from "@/src/hooks/usePluginContributions.ts";
 import { useSidebarSectionSources } from "@/src/hooks/useSidebarSectionSource.ts";
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
+import type { PluginDocument } from "@/src/lib/api/plugin-wire-values.ts";
 import type {
 	PluginSidebarButton,
 	PluginSidebarSection,
 } from "@/src/lib/api/plugins.ts";
+import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
 
 export interface StandaloneAppNavigation {
-	context?: Record<string, unknown>;
+	context?: PluginDocument;
 	target: string;
 }
 
 function rowContext(
 	spec: SidebarSectionSpec | undefined,
 	row: SourceItem
-): Record<string, unknown> | undefined {
+): PluginDocument | undefined {
 	if (!spec?.context) {
 		return undefined;
 	}
-	const context: Record<string, unknown> = {};
+	const context: PluginDocument = {};
 	for (const [key, rowKey] of Object.entries(spec.context)) {
 		const value = row.raw[rowKey];
 		if (value !== undefined && value !== null) {
@@ -55,13 +58,13 @@ function rowTarget(
 	row: SourceItem,
 	homeTarget: string
 ): string {
-	const target = section.spec?.itemTarget;
+	const target = pluginSidebarSpec(section)?.itemTarget;
 	return target
 		? renderTemplate(target, { item: row.raw }, { uriEncode: true })
 		: homeTarget;
 }
 
-function queryContext(target: string): Record<string, unknown> | undefined {
+function queryContext(target: string): PluginDocument | undefined {
 	const query = target.split("?", 2)[1];
 	if (!query) {
 		return undefined;
@@ -86,7 +89,7 @@ function ContributedSection({
 	onNavigate: (navigation: StandaloneAppNavigation) => void;
 }) {
 	const { contribution, rows } = data;
-	const spec = contribution.spec;
+	const spec = useMemo(() => pluginSidebarSpec(contribution), [contribution]);
 	if (rows.length === 0 && !data.isLoading && !spec?.emptyState) {
 		return null;
 	}
@@ -153,7 +156,9 @@ export function StandaloneAppSidebar({
 }) {
 	const { companions, sidebar_buttons, sidebar_sections } =
 		usePluginContributions();
-	const companion = companions.find((item) => item.pluginId === appId);
+	const companion = companions.find(
+		(item) => item.pluginId === appId && isNavigablePluginCompanion(item)
+	);
 	const homeTarget = companion ? pluginCompanionPath(companion.id) : "/";
 	const sections = useMemo(
 		() =>
@@ -223,10 +228,10 @@ export function StandaloneAppSidebar({
 			<SidebarFooter>
 				{onRequestRemove ? (
 					<Button
-						className="w-full justify-start text-muted-foreground"
+						className="w-full justify-start"
 						onClick={onRequestRemove}
 						size="sm"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						Remove standalone app
 					</Button>

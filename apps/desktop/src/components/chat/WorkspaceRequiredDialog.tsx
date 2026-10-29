@@ -21,7 +21,7 @@ export function WorkspaceRequiredDialog({
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent
-				className="gap-5 px-5 py-6 sm:max-w-[30rem]"
+				appearance="workspace-required"
 				data-testid="workspace-required-dialog"
 			>
 				<DialogHeader>

@@ -6,4 +6,6 @@
 //! `crate::audit::…` re-exported here (so every call site — pipeline logging,
 //! the `/audit` API handler, `state.rs` wiring) stays byte-unchanged means the
 //! extraction is invisible to the rest of the gateway.
+//! Direct web service callers use `AuditRegistry::log_service` with safe usage;
+//! the legacy `AuditRecord` construction path remains unchanged for inference.
 pub use ryu_gw_audit::*;

@@ -35,7 +35,8 @@ pub struct PolicyAlert {
     /// The notification fan-out tier the matched rule requested.
     pub alert_tier: AlertTier,
     /// The identity dimension the decision applies to: `user` | `agent` |
-    /// `session` | `request`.
+    /// `session` | `request`, or a control-plane limit scope `org` | `member` |
+    /// `team` | `key`.
     pub scope: String,
     /// The subject id within `scope` (user id, agent id, session id, org id), or
     /// empty when there is none.
@@ -75,7 +76,14 @@ impl PolicyAlert {
                 d.limit,
                 org_id,
             ),
-            BudgetScope::User | BudgetScope::Agent => Self::budget(
+            BudgetScope::User
+            | BudgetScope::Agent
+            | BudgetScope::Org
+            | BudgetScope::Member
+            | BudgetScope::Team
+            | BudgetScope::Key
+            | BudgetScope::ServiceAccount
+            | BudgetScope::Tag => Self::budget(
                 scope_label(d.scope),
                 &d.key,
                 enforcement_label(d.action),
@@ -107,6 +115,31 @@ impl PolicyAlert {
             limit,
             org_id,
         )
+    }
+
+    /// A control-plane limit crossed one of its alert thresholds (for example
+    /// 80% of a monthly member cap). Always `notify`: the cap's own action only
+    /// applies once spend reaches 100%. The dedupe key includes the threshold
+    /// and the window start so each threshold fires once per window.
+    #[allow(clippy::too_many_arguments)]
+    pub fn limit_threshold(
+        scope: &str,
+        subject_key: &str,
+        tier: AlertTier,
+        used: u64,
+        limit: u64,
+        threshold_pct: u32,
+        window_start: i64,
+        org_id: &str,
+    ) -> Self {
+        let mut alert = Self::budget(scope, subject_key, "notify", tier, used, limit, org_id);
+        alert.dedupe_key = dedupe_key(
+            "budget_threshold",
+            scope,
+            &format!("{subject_key}\0{threshold_pct}\0{window_start}"),
+            limit,
+        );
+        alert
     }
 
     /// A per-session running-cost-cap alert.
@@ -235,6 +268,12 @@ fn scope_label(scope: BudgetScope) -> &'static str {
         BudgetScope::User => "user",
         BudgetScope::Agent => "agent",
         BudgetScope::Session => "session",
+        BudgetScope::Org => "org",
+        BudgetScope::Member => "member",
+        BudgetScope::Team => "team",
+        BudgetScope::Key => "key",
+        BudgetScope::ServiceAccount => "service_account",
+        BudgetScope::Tag => "tag",
     }
 }
 

@@ -7,6 +7,17 @@
 // allowlist, and the tab lists exactly what travels so the user does not have to
 // take that on faith.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@ryu/ui/components/alert-dialog.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Select,
@@ -17,11 +28,15 @@ import {
 } from "@ryu/ui/components/select.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
-import { useSyncExternalStore } from "react";
-import { resetRemoteSettings } from "@/src/lib/settings-sync/api.ts";
+import { useState, useSyncExternalStore } from "react";
+import {
+	resetRemoteSettings,
+	type SyncIdentity,
+} from "@/src/lib/settings-sync/api.ts";
 import {
 	type ConflictPolicy,
 	DEBOUNCE_MS,
+	getActiveSyncIdentity,
 	getConflictPolicy,
 	getConflicts,
 	getPendingCount,
@@ -60,18 +75,18 @@ const CONFLICT_POLICY_OPTIONS: { value: ConflictPolicy; label: string }[] = [
 	{ value: "upload", label: "Always keep this machine's copy" },
 ];
 
-const PLATFORM_LABEL: Record<ReturnType<typeof currentPlatform>, string> = {
+const PLATFORM_LABEL = {
 	darwin: "macOS",
 	win32: "Windows",
 	linux: "Linux",
-};
+} satisfies Record<ReturnType<typeof currentPlatform>, string>;
 
-const STATUS_TEXT: Record<string, string> = {
+const STATUS_TEXT = {
 	idle: "Up to date",
 	syncing: "Syncing…",
-	offline: "Can't reach the sync service",
+	offline: "Sync incomplete",
 	conflict: "Needs your decision",
-};
+} satisfies Record<ReturnType<typeof getSyncStatus>, string>;
 
 function relativeTime(at: number): string {
 	if (at === 0) {
@@ -100,13 +115,24 @@ function preview(value: string | null): string {
 }
 
 export function SettingsSyncTab() {
+	const tl = useLiteralMessages();
 	useSyncExternalStore(subscribeSyncState, getSyncRevision, getSyncRevision);
+	const [forgetOpen, setForgetOpen] = useState(false);
+	// The account the deletion is confirmed for, captured when the dialog opens.
+	const [forgetIdentity, setForgetIdentity] = useState<SyncIdentity | null>(
+		null
+	);
+	const [forgetting, setForgetting] = useState(false);
 
 	const enabled = isSyncEnabled();
 	const policy = getConflictPolicy();
 	const status = getSyncStatus();
 	const conflicts = getConflicts();
 	const pending = getPendingCount();
+	const statusText =
+		status === "idle" && pending > 0
+			? "Changes waiting to upload"
+			: (STATUS_TEXT[status] ?? status);
 	const platform = currentPlatform();
 
 	const grouped = new Map<SyncGroup, string[]>();
@@ -121,24 +147,49 @@ export function SettingsSyncTab() {
 
 	const handleSyncNow = async () => {
 		await syncPendingNow();
+		const result = getSyncStatus();
+		if (result === "offline") {
+			toast.error("Couldn't sync settings");
+			return;
+		}
+		if (result === "conflict") {
+			toast.error("Settings need your decision");
+			return;
+		}
+		if (getPendingCount() > 0) {
+			toast.message("Changes are still waiting to upload");
+			return;
+		}
 		toast.success("Settings synced");
 	};
 
 	const handleForget = async () => {
-		const ok = await resetRemoteSettings();
-		if (ok) {
-			toast.success("Cloud copy deleted", {
-				description: "The settings on this machine were not changed.",
-			});
-		} else {
-			toast.error("Couldn't delete the cloud copy");
+		if (forgetting) {
+			return;
+		}
+		setForgetting(true);
+		try {
+			const ok = await resetRemoteSettings(forgetIdentity);
+			if (ok) {
+				toast.success("Cloud copy deleted", {
+					description: "The settings on this machine were not changed.",
+				});
+				setForgetOpen(false);
+			} else {
+				toast.error("Couldn't delete the cloud copy");
+			}
+		} finally {
+			setForgetting(false);
 		}
 	};
 
 	return (
 		<div className="space-y-6">
 			<SettingsSection
-				caption={`Your desktop app settings follow you to every machine you sign in on. Changes upload ${Math.round(DEBOUNCE_MS / 1000)} seconds after you stop making them, so a run of adjustments becomes one upload rather than dozens.`}
+				caption={tl(
+					"Your desktop app settings follow you to every machine you sign in on. Changes upload {seconds} seconds after you stop making them, so a run of adjustments becomes one upload rather than dozens.",
+					{ seconds: Math.round(DEBOUNCE_MS / 1000) }
+				)}
 				title="Settings Sync"
 			>
 				<SettingsGroup>
@@ -156,7 +207,7 @@ export function SettingsSyncTab() {
 					<SettingsItem
 						actions={
 							<span className="text-muted-foreground text-sm">
-								{enabled ? (STATUS_TEXT[status] ?? status) : "Off"}
+								{enabled ? statusText : "Off"}
 							</span>
 						}
 						title="Status"
@@ -164,7 +215,7 @@ export function SettingsSyncTab() {
 					<SettingsItem
 						actions={
 							<Button
-								disabled={!enabled}
+								disabled={!enabled || status === "syncing"}
 								onClick={handleSyncNow}
 								size="sm"
 								variant="ghost"
@@ -174,8 +225,13 @@ export function SettingsSyncTab() {
 						}
 						description={
 							pending > 0
-								? `${pending} change${pending === 1 ? "" : "s"} waiting to upload. Last synced ${relativeTime(lastSyncAt())}.`
-								: `Last synced ${relativeTime(lastSyncAt())}.`
+								? tl(
+										"{pending, plural, one {# change} other {# changes}} waiting to upload. Last synced {lastSynced}.",
+										{ pending, lastSynced: relativeTime(lastSyncAt()) }
+									)
+								: tl("Last synced {lastSynced}.", {
+										lastSynced: relativeTime(lastSyncAt()),
+									})
 						}
 						title="Last Sync"
 					/>
@@ -191,9 +247,7 @@ export function SettingsSyncTab() {
 						actions={
 							<Select
 								items={CONFLICT_POLICY_OPTIONS}
-								onValueChange={(value) =>
-									setConflictPolicy(value as ConflictPolicy)
-								}
+								onValueChange={(value) => setConflictPolicy(value)}
 								value={policy}
 							>
 								<SelectTrigger className="w-56" size="sm">
@@ -236,7 +290,10 @@ export function SettingsSyncTab() {
 							</Button>
 						</div>
 					}
-					title={`${conflicts.length} setting${conflicts.length === 1 ? "" : "s"} need a decision`}
+					title={tl(
+						"{count, plural, one {# setting needs} other {# settings need}} a decision",
+						{ count: conflicts.length }
+					)}
 				>
 					{conflicts.map((conflict) => (
 						<SettingsCard key={conflict.key}>
@@ -246,8 +303,10 @@ export function SettingsSyncTab() {
 								</span>
 								<div className="grid gap-2 sm:grid-cols-2">
 									<div className="flex flex-col gap-1 rounded-md bg-background/60 p-2.5">
-										<span className="text-[11px] text-muted-foreground">
-											This machine · {relativeTime(conflict.localAt)}
+										<span className="type-caption text-muted-foreground">
+											{tl("This machine · {when}", {
+												when: relativeTime(conflict.localAt),
+											})}
 										</span>
 										<span className="break-all font-mono text-xs">
 											{preview(conflict.local)}
@@ -262,8 +321,10 @@ export function SettingsSyncTab() {
 										</Button>
 									</div>
 									<div className="flex flex-col gap-1 rounded-md bg-background/60 p-2.5">
-										<span className="text-[11px] text-muted-foreground">
-											Cloud · {relativeTime(conflict.remoteAt)}
+										<span className="type-caption text-muted-foreground">
+											{tl("Cloud · {when}", {
+												when: relativeTime(conflict.remoteAt),
+											})}
 										</span>
 										<span className="break-all font-mono text-xs">
 											{preview(conflict.remote)}
@@ -307,7 +368,14 @@ export function SettingsSyncTab() {
 				<SettingsGroup>
 					<SettingsItem
 						actions={
-							<Button onClick={handleForget} size="sm" variant="ghost">
+							<Button
+								onClick={() => {
+									setForgetIdentity(getActiveSyncIdentity());
+									setForgetOpen(true);
+								}}
+								size="sm"
+								variant="ghost"
+							>
 								Delete cloud copy
 							</Button>
 						}
@@ -315,6 +383,29 @@ export function SettingsSyncTab() {
 					/>
 				</SettingsGroup>
 			</SettingsSection>
+
+			<AlertDialog onOpenChange={setForgetOpen} open={forgetOpen}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete your cloud settings?</AlertDialogTitle>
+						<AlertDialogDescription>
+							This permanently removes the synced copy from your account.
+							Settings on this machine remain unchanged. This cannot be undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={forgetting}>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={forgetting}
+							loading={forgetting}
+							onClick={() => void handleForget()}
+							variant="destructive"
+						>
+							Delete cloud copy
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

@@ -1,0 +1,16 @@
+[package]
+name = "ryu-diarization"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Speaker diarization modality primitive for Ryu: a typed, model-neutral client and turn contract for local diarization engines."
+repository = "https://github.com/amajorai/ryu"
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+axum = { version = "0.7", features = ["multipart"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }

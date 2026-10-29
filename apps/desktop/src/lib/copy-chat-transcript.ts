@@ -1,4 +1,5 @@
-import { toast } from "@ryu/ui/components/sileo";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { z } from "zod";
 
 /** Minimal message shape accepted by the transcript formatter. */
 export interface TranscriptMessage {
@@ -27,21 +28,24 @@ export interface MarkdownTranscriptOptions extends TranscriptOptions {
 	title?: string;
 }
 
+// Only the text-part projection is consumed by the clipboard formatter. Other
+// native SDK parts remain untouched and are omitted from the transcript.
+const transcriptTextPartSchema = z.object({
+	type: z.literal("text"),
+	text: z.string(),
+});
 function textFromMessage(message: TranscriptMessage): string {
 	if (Array.isArray(message.parts) && message.parts.length > 0) {
 		return message.parts
-			.filter(
-				(part): part is { type: string; text?: string } =>
-					typeof part === "object" &&
-					part !== null &&
-					(part as { type?: string }).type === "text" &&
-					typeof (part as { text?: string }).text === "string"
-			)
-			.map((part) => part.text ?? "")
+			.flatMap((part) => {
+				const parsed = transcriptTextPartSchema.safeParse(part);
+				return parsed.success ? [parsed.data.text] : [];
+			})
 			.join("\n\n")
 			.trim();
 	}
-	return typeof message.content === "string" ? message.content.trim() : "";
+	const content = z.string().safeParse(message.content);
+	return content.success ? content.data.trim() : "";
 }
 
 function formatTimestampForTranscript(date: Date): string {
@@ -149,7 +153,7 @@ export async function copyChatTranscript(
 	options?: TranscriptOptions
 ): Promise<void> {
 	try {
-		const messages = typeof source === "function" ? await source() : source;
+		const messages = Array.isArray(source) ? source : await source();
 		const transcript = formatChatTranscript(messages, options);
 		if (!transcript) {
 			toast.info("Nothing to copy");
@@ -168,7 +172,7 @@ export async function copyChatTranscriptAsMarkdown(
 	options?: MarkdownTranscriptOptions
 ): Promise<void> {
 	try {
-		const messages = typeof source === "function" ? await source() : source;
+		const messages = Array.isArray(source) ? source : await source();
 		const transcript = formatChatTranscriptAsMarkdown(messages, options);
 		if (!transcript) {
 			toast.info("Nothing to copy");

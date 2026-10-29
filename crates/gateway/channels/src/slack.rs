@@ -40,9 +40,9 @@
 //! single-pass converter rather than a Markdown parser, because the alternative
 //! (a full parser dependency) buys nothing for a surface with this few marks.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -98,6 +98,16 @@ const ALLOWED_SUBTYPES: &[&str] = &[
     "thread_broadcast",
 ];
 
+/// How long a thread stays "active" (answerable without a re-@mention) after
+/// the bot last replied in it. Each reply refreshes it, so a live conversation
+/// never expires; an idle one costs at most a fresh mention to resume.
+const ACTIVE_THREAD_IDLE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Ceiling on the active-thread memory. Without it a long-running gateway in a
+/// busy workspace kept a slot for every thread the bot ever joined. Evicting
+/// the least recently used thread costs only a re-@mention there.
+const MAX_ACTIVE_THREADS: usize = 4096;
+
 pub struct SlackChannel {
     /// Core route, access policy, pairing store, command cache — everything the
     /// shared path needs, owned once instead of copied field-by-field.
@@ -109,12 +119,52 @@ pub struct SlackChannel {
     /// `auth.test` failed — the mention gate then fails OPEN (see [`decide_reply`]).
     bot_user_id: OnceLock<String>,
     /// Threads the bot is already answering in, so a follow-up in the same thread
-    /// does not need to re-@mention it. Keyed by the packed conversation key.
-    active_threads: Mutex<HashSet<String>>,
+    /// does not need to re-@mention it. Keyed by the packed conversation key,
+    /// valued by the last reply time; idle-TTL-pruned and hard-capped (see
+    /// [`remember_active_thread`]).
+    active_threads: Mutex<HashMap<String, Instant>>,
     options: SlackChannelOptions,
 }
 
 impl SlackChannel {
+    /// `reactions.add` / `reactions.remove` on the triggering message. Slack
+    /// names reactions by shortcode, so a Unicode emoji (Core's form) is
+    /// translated first; one with no known shortcode is skipped.
+    async fn reaction_call(&self, method: &str, chat_id: &str, message_id: &str, emoji: &str) {
+        let Some(name) = slack_reaction_name(emoji) else {
+            debug!(
+                emoji,
+                "no Slack shortcode is known for this emoji; skipping"
+            );
+            return;
+        };
+        let (channel, _) = unpack_thread(chat_id);
+        // The packed message id carries the thread anchor too; a reaction belongs
+        // on the message that triggered the turn, which is the first component.
+        let (timestamp, _) = unpack_thread(message_id);
+        let result: anyhow::Result<ApiAck> = async {
+            let ack = self
+                .http()
+                .post(format!("{SLACK_API_BASE}/{method}"))
+                .bearer_auth(&self.bot_token)
+                .json(&json!({ "channel": channel, "timestamp": timestamp, "name": name }))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            Ok(ack)
+        }
+        .await;
+        match result {
+            Ok(ack) if ack.ok => {}
+            Ok(ack) => warn!(
+                error = %ack.error.unwrap_or_default(),
+                method, "slack reaction call returned ok=false"
+            ),
+            Err(err) => warn!(%err, method, "slack reaction call failed"),
+        }
+    }
     /// Build a Slack adapter. `pairing` is the node-wide store, shared with every
     /// other channel so an approval granted once holds everywhere.
     pub fn new(
@@ -155,7 +205,7 @@ impl SlackChannel {
             app_token: cfg.app_token,
             bot_token: cfg.bot_token,
             bot_user_id: OnceLock::new(),
-            active_threads: Mutex::new(HashSet::new()),
+            active_threads: Mutex::new(HashMap::new()),
             options: cfg.options,
         })
     }
@@ -519,6 +569,8 @@ impl Channel for SlackChannel {
             voice: true,
             attachments: true,
             reactions: true,
+            reply_keyboards: false,
+            inline_buttons: false,
         }
     }
 
@@ -603,33 +655,21 @@ impl Channel for SlackChannel {
     /// scope or a deleted message are all logged and swallowed, because a failed
     /// acknowledgement must never affect the turn that follows it.
     async fn react(&self, chat_id: &str, message_id: &str, emoji: &str) -> anyhow::Result<()> {
-        let (channel, _) = unpack_thread(chat_id);
-        // The packed message id carries the thread anchor too; a reaction belongs
-        // on the message that triggered the turn, which is the first component.
-        let (timestamp, _) = unpack_thread(message_id);
-        let name = emoji.trim_matches(':');
-        let result: anyhow::Result<ApiAck> = async {
-            let ack = self
-                .http()
-                .post(format!("{SLACK_API_BASE}/reactions.add"))
-                .bearer_auth(&self.bot_token)
-                .json(&json!({ "channel": channel, "timestamp": timestamp, "name": name }))
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            Ok(ack)
-        }
-        .await;
-        match result {
-            Ok(ack) if ack.ok => {}
-            Ok(ack) => warn!(
-                error = %ack.error.unwrap_or_default(),
-                "slack reactions.add returned ok=false"
-            ),
-            Err(err) => warn!(%err, "slack reactions.add failed"),
-        }
+        self.reaction_call("reactions.add", chat_id, message_id, emoji)
+            .await;
+        Ok(())
+    }
+
+    /// Take back a reaction this bot placed. Same best-effort contract as
+    /// [`Channel::react`]: `no_reaction` is logged, never surfaced.
+    async fn remove_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> anyhow::Result<()> {
+        self.reaction_call("reactions.remove", chat_id, message_id, emoji)
+            .await;
         Ok(())
     }
 
@@ -802,10 +842,9 @@ impl Channel for SlackChannel {
                         // Honour the admin's group-reply choice. A channel message
                         // that doesn't address the bot is dropped here, before any
                         // model call is made.
-                        let in_active_thread = self
-                            .active_threads
-                            .lock()
-                            .is_ok_and(|threads| threads.contains(&conversation));
+                        let in_active_thread = self.active_threads.lock().is_ok_and(|threads| {
+                            thread_is_active(&threads, &conversation, Instant::now())
+                        });
                         let Some(text) = decide_reply_with_options(
                             &parsed,
                             self.runtime.cfg.group_reply_mode,
@@ -823,7 +862,7 @@ impl Channel for SlackChannel {
                         // without a re-@mention (matches the hosted connector).
                         if !parsed.is_dm && self.options.reply_in_thread {
                             if let Ok(mut threads) = self.active_threads.lock() {
-                                threads.insert(conversation);
+                                remember_active_thread(&mut threads, conversation, Instant::now());
                             }
                         }
 
@@ -842,6 +881,7 @@ impl Channel for SlackChannel {
                             message_id: parsed.message_id,
                             is_group: !parsed.is_dm,
                             attachments: parsed.attachments,
+                            channel_action: None,
                         };
                         let provider_id = inbound.message_id.clone().map_or_else(
                             || {
@@ -997,6 +1037,29 @@ fn conversation_key(chat_id: &str, message_id: Option<&str>) -> String {
     let (channel, existing) = unpack_thread(chat_id);
     let anchor = existing.or_else(|| message_id.map(thread_anchor));
     pack_thread(channel, anchor)
+}
+
+/// Whether the bot replied in `key` within the idle TTL.
+fn thread_is_active(threads: &HashMap<String, Instant>, key: &str, now: Instant) -> bool {
+    threads
+        .get(key)
+        .is_some_and(|seen| now.saturating_duration_since(*seen) < ACTIVE_THREAD_IDLE_TTL)
+}
+
+/// Mark `key` active as of `now`: drop idle threads, then evict the least
+/// recently used one when the map is still full, so the memory stays bounded.
+fn remember_active_thread(threads: &mut HashMap<String, Instant>, key: String, now: Instant) {
+    threads.retain(|_, seen| now.saturating_duration_since(*seen) < ACTIVE_THREAD_IDLE_TTL);
+    if threads.len() >= MAX_ACTIVE_THREADS && !threads.contains_key(&key) {
+        let oldest = threads
+            .iter()
+            .min_by_key(|(_, seen)| **seen)
+            .map(|(thread, _)| thread.clone());
+        if let Some(oldest) = oldest {
+            threads.remove(&oldest);
+        }
+    }
+    threads.insert(key, now);
 }
 
 // ─── Envelope / event parsing ──────────────────────────────────────────────────
@@ -1641,6 +1704,62 @@ struct UploadUrlResponse {
     error: Option<String>,
 }
 
+/// The Slack reaction name for `emoji`. A `:shortcode:` (or bare shortcode)
+/// passes through; a Unicode emoji is translated for the common reactions,
+/// since Slack's `reactions.*` methods accept names only.
+fn slack_reaction_name(emoji: &str) -> Option<String> {
+    let trimmed = emoji.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed
+        .trim_matches(':')
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+'))
+    {
+        return Some(trimmed.trim_matches(':').to_owned());
+    }
+    let bare: String = trimmed.chars().filter(|c| *c != '\u{fe0f}').collect();
+    let name = match bare.as_str() {
+        "👀" => "eyes",
+        "✅" => "white_check_mark",
+        "❌" => "x",
+        "👍" => "+1",
+        "👎" => "-1",
+        "👌" => "ok_hand",
+        "🙏" => "pray",
+        "❤" => "heart",
+        "🔥" => "fire",
+        "🎉" => "tada",
+        "😂" => "joy",
+        "🤣" => "rolling_on_the_floor_laughing",
+        "😁" => "grin",
+        "😄" => "smile",
+        "😮" => "open_mouth",
+        "😱" => "scream",
+        "😢" => "cry",
+        "😭" => "sob",
+        "🤔" => "thinking_face",
+        "👏" => "clap",
+        "🙌" => "raised_hands",
+        "💯" => "100",
+        "🚀" => "rocket",
+        "💪" => "muscle",
+        "🤝" => "handshake",
+        "🫡" => "saluting_face",
+        "✍" => "writing_hand",
+        "🥳" => "partying_face",
+        "😅" => "sweat_smile",
+        "😎" => "sunglasses",
+        "🤯" => "exploding_head",
+        "👋" => "wave",
+        "⚡" => "zap",
+        "🏆" => "trophy",
+        _ => return None,
+    };
+    Some(name.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1738,6 +1857,70 @@ mod tests {
         let parent = pack_message_id("111.222", Some("111.222"));
         assert_eq!(parent, "111.222");
         assert_eq!(thread_anchor(&parent), "111.222");
+    }
+
+    #[test]
+    fn active_threads_expire_and_stay_bounded() {
+        let t0 = Instant::now();
+        let mut threads = HashMap::new();
+        remember_active_thread(&mut threads, "C1:1.0".to_owned(), t0);
+        assert!(thread_is_active(&threads, "C1:1.0", t0));
+        assert!(thread_is_active(
+            &threads,
+            "C1:1.0",
+            t0 + ACTIVE_THREAD_IDLE_TTL - Duration::from_secs(1)
+        ));
+        assert!(!thread_is_active(
+            &threads,
+            "C1:1.0",
+            t0 + ACTIVE_THREAD_IDLE_TTL
+        ));
+        assert!(!thread_is_active(&threads, "C1:2.0", t0));
+
+        // A reply refreshes the thread, so a live conversation never expires.
+        remember_active_thread(
+            &mut threads,
+            "C1:1.0".to_owned(),
+            t0 + Duration::from_secs(3600),
+        );
+        assert!(thread_is_active(
+            &threads,
+            "C1:1.0",
+            t0 + ACTIVE_THREAD_IDLE_TTL
+        ));
+
+        // Remembering anything after the TTL drops the idle threads.
+        remember_active_thread(
+            &mut threads,
+            "C1:3.0".to_owned(),
+            t0 + ACTIVE_THREAD_IDLE_TTL * 2,
+        );
+        assert_eq!(threads.len(), 1);
+        assert!(threads.contains_key("C1:3.0"));
+
+        // The map never grows past the cap; the least recently used goes first.
+        let mut threads = HashMap::new();
+        for index in 0..=MAX_ACTIVE_THREADS {
+            let seconds = u64::try_from(index).expect("index fits u64");
+            remember_active_thread(
+                &mut threads,
+                format!("C1:{index}"),
+                t0 + Duration::from_secs(seconds),
+            );
+        }
+        assert_eq!(threads.len(), MAX_ACTIVE_THREADS);
+        assert!(!threads.contains_key("C1:0"));
+        assert!(threads.contains_key(&format!("C1:{MAX_ACTIVE_THREADS}")));
+
+        // Refreshing an existing thread at the cap evicts nothing.
+        let refreshed = t0 + Duration::from_secs(10_000);
+        remember_active_thread(&mut threads, "C1:1".to_owned(), refreshed);
+        assert_eq!(threads.len(), MAX_ACTIVE_THREADS);
+        assert_eq!(threads.get("C1:1"), Some(&refreshed));
+        // ...and the refreshed thread survives the next eviction.
+        remember_active_thread(&mut threads, "C1:new".to_owned(), refreshed);
+        assert!(threads.contains_key("C1:1"));
+        assert!(!threads.contains_key("C1:2"));
     }
 
     #[test]
@@ -2343,5 +2526,31 @@ mod tests {
         assert!(["a", "b", "c"]
             .iter()
             .all(|word| to_mrkdwn(&mixed).contains(word)));
+    }
+}
+
+#[cfg(test)]
+mod reaction_name_tests {
+    use super::slack_reaction_name;
+
+    #[test]
+    fn unicode_reactions_become_slack_shortcodes() {
+        // Slack's `reactions.add` takes names only; sending "👀" as a name was
+        // refused with `invalid_name`, so the working marker never appeared.
+        assert_eq!(slack_reaction_name("👀").as_deref(), Some("eyes"));
+        assert_eq!(slack_reaction_name("👍").as_deref(), Some("+1"));
+        assert_eq!(slack_reaction_name("❤️").as_deref(), Some("heart"));
+        assert_eq!(slack_reaction_name("❌").as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn shortcodes_pass_through_and_unknown_emoji_are_skipped() {
+        assert_eq!(
+            slack_reaction_name(":white_check_mark:").as_deref(),
+            Some("white_check_mark")
+        );
+        assert_eq!(slack_reaction_name("+1").as_deref(), Some("+1"));
+        assert_eq!(slack_reaction_name("🦀"), None);
+        assert_eq!(slack_reaction_name("  "), None);
     }
 }

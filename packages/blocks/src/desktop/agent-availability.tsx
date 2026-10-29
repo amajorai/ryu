@@ -13,23 +13,43 @@ export const AGENT_AVAILABILITY_OPTIONS = [
 	{
 		value: "away",
 		label: "Away",
-		description: "Keep questions in the transcript until you return.",
+		description:
+			"Agents keep working. Their questions wait in the transcript until you return.",
 	},
 	{
 		value: "do-not-disturb",
 		label: "Do not disturb",
 		description:
-			"Keep prompts out of the composer until you switch back to Online.",
+			"Agents keep working and prompts stay out of the composer until you switch back to Online.",
+	},
+	{
+		value: "gaming",
+		label: "Gaming",
+		description:
+			"Like Away, and local models are unloaded to free memory for your game.",
+	},
+	{
+		value: "streaming",
+		label: "Streaming",
+		description:
+			"Hide connected-app suggestion details while you stream. Agent questions wait until you return online.",
 	},
 ] as const;
+
+/** Statuses where an agent's questions must not block its turn. */
+export function agentQuestionsDeferred(
+	status: AgentAvailabilityStatus
+): boolean {
+	return status !== "online";
+}
 
 export type AgentAvailabilityStatus =
 	(typeof AGENT_AVAILABILITY_OPTIONS)[number]["value"];
 
 /** Defensive status guard for host-owned settings and persisted values. */
-export function isAgentAvailabilityStatus(
-	value: unknown
-): value is AgentAvailabilityStatus {
+export function isAgentAvailabilityStatus<Value>(
+	value: Value
+): value is Value & AgentAvailabilityStatus {
 	return AGENT_AVAILABILITY_OPTIONS.some((option) => option.value === value);
 }
 
@@ -55,6 +75,8 @@ export function AgentAvailabilityDot({
 		online: "bg-success",
 		away: "bg-warning",
 		"do-not-disturb": "bg-destructive",
+		gaming: "bg-info",
+		streaming: "bg-purple-500",
 	}[status];
 
 	return (

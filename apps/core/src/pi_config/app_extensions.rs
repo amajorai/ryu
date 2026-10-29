@@ -38,7 +38,7 @@ use crate::server::ServerState;
 /// `contributes.pi_extensions`.
 ///
 /// A Pi extension is not sandboxed code. A `turn_hooks` body runs in the
-/// deny-by-default Deno sandbox behind capability-gated `host.*`; a file named here
+/// deny-by-default JS sandbox behind capability-gated `host.*`; a file named here
 /// is loaded by the Pi process itself with full host privilege — the first-party
 /// ones spawn child processes and POST to Core. That is the same
 /// arbitrary-code-execution class as [`crate::sidecar::mcp::GRANT_MCP_SERVER`], so
@@ -302,7 +302,7 @@ pub async fn resolve_for_node(state: &ServerState) -> PiExtensionResolution {
     let Ok(records) = state.app_store.list().await else {
         return PiExtensionResolution::default();
     };
-    let enabled: HashMap<String, Vec<String>> = records
+    let mut enabled: HashMap<String, Vec<String>> = records
         .iter()
         .filter(|r| r.enabled)
         .map(|r| (r.id.clone(), r.approved_grants.clone()))
@@ -312,11 +312,48 @@ pub async fn resolve_for_node(state: &ServerState) -> PiExtensionResolution {
     let candidates: Vec<PluginManifest> = manifests
         .iter()
         .filter(|m| enabled.contains_key(&m.id))
+        .filter(|m| {
+            m.contributes
+                .as_ref()
+                .is_some_and(|c| !c.pi_extensions.is_empty())
+        })
         .cloned()
         .collect();
     drop(manifests);
 
-    resolve_pi_extensions(&candidates, &enabled, read_source)
+    // Local revocation and the opt-in trust requirement for host access. Pi
+    // extensions run with the Pi process's full host privilege, so a refused
+    // plugin ships none of them; each drop is reported like any other skip.
+    let mut refused = Vec::new();
+    if !candidates.is_empty() {
+        let policy = crate::plugins::isolation::load_trust_policy(Some(&state.app_store)).await;
+        for manifest in &candidates {
+            let record = records.iter().find(|r| r.id == manifest.id);
+            let version = record.map_or(manifest.version.as_str(), |r| r.version.as_str());
+            let provenance = record.and_then(|r| r.provenance.as_ref());
+            if let Some(refusal) = policy.host_access_refusal(manifest, version, provenance) {
+                enabled.remove(&manifest.id);
+                refused.extend(refused_skips(manifest, &refusal.to_string()));
+            }
+        }
+    }
+
+    let mut resolution = resolve_pi_extensions(&candidates, &enabled, read_source);
+    resolution.skipped.extend(refused);
+    resolution
+}
+
+/// One skip per declared extension of a plugin whose host access was refused.
+fn refused_skips(manifest: &PluginManifest, reason: &str) -> Vec<PiExtensionSkip> {
+    manifest
+        .contributes
+        .iter()
+        .flat_map(|c| c.pi_extensions.iter())
+        .map(|ext| PiExtensionSkip {
+            key: format!("{}/{}", manifest.id, ext.id),
+            reason: format!("plugin '{}': {reason}", manifest.id),
+        })
+        .collect()
 }
 
 /// Project the node's resolved extension set onto the managed Pi's config dir, so
@@ -484,6 +521,7 @@ mod tests {
                 ("@ryu/pi-shell", &[]),
                 ("@ryu/pi-subagent", &[]),
                 ("@ryu/pi-monitor", &[]),
+                ("@ryu/pi-copy", &[]),
             ]),
             read_source,
         );
@@ -501,6 +539,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                "ext-@ryu+pi-copy-copy.ts",
                 "ext-@ryu+pi-monitor-monitor.ts",
                 "ext-@ryu+pi-shell-shell.ts",
                 "ext-@ryu+pi-subagent-subagent.ts"

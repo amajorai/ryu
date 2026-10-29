@@ -191,7 +191,7 @@ pub async fn realtime_ws(
 }
 
 /// The outcome of the per-room access decision.
-enum AccessOutcome {
+pub(super) enum AccessOutcome {
     /// Join is permitted at this access level (`Read` or `Write`).
     Grant(Access),
     /// Join is refused; the static reason is sent in the close frame.
@@ -216,7 +216,7 @@ enum AccessOutcome {
 /// clients. Core's Tailcat proxy is recognized and excluded; other proxies must
 /// provide their own end-to-end authorization boundary. The window is narrow
 /// (only unpersisted rooms; scoped rows are never affected).
-fn decide_access(
+pub(super) fn decide_access(
     meta: anyhow::Result<Option<ResourceTenancy>>,
     caller: Option<&VerifiedCaller>,
     peer_is_loopback: bool,
@@ -954,6 +954,7 @@ mod tests {
         VerifiedCaller {
             user_id: user_id.to_owned(),
             email: None,
+            email_verified: false,
             org_id: org.map(str::to_owned),
             role,
             teams: Vec::new(),

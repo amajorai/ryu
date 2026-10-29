@@ -5,7 +5,8 @@
 // subscribes to Core's SSE change stream so a settings change re-registers the
 // push-to-talk shortcut + swaps the transcription engine live. The blob stays an
 // opaque JSON string here; `shared/voice.ts` owns the parsing (no `@ryu/ui` dep,
-// because the main process externalizes workspace deps).
+// because the main process inlines workspace packages and `@ryu/ui` is renderer
+// UI code).
 
 import { VOICE_PREF_KEY } from "../../shared/voice.ts";
 import { subscribePreferenceChanges } from "./preference-stream.ts";

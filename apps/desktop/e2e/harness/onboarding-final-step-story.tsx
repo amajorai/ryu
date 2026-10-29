@@ -1,5 +1,7 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { OnboardingGuidanceStep } from "../../src/components/onboarding/OnboardingGuidanceStep.tsx";
 import { PrivacyStep } from "../../src/components/onboarding/PrivacyStep.tsx";
 import "../../src/index.css";
 
@@ -11,7 +13,7 @@ const originalFetch = window.fetch.bind(window);
 // service dependency.
 window.fetch = async (input, init) => {
 	const requestUrl = new URL(
-		typeof input === "string"
+		isNativeText(input)
 			? input
 			: input instanceof Request
 				? input.url
@@ -40,13 +42,18 @@ window.fetch = async (input, init) => {
 
 function Story() {
 	const [completed, setCompleted] = useState(false);
+	const [showPrivacy, setShowPrivacy] = useState(false);
 
 	return (
 		<main
 			className="h-screen overflow-hidden bg-background text-foreground"
 			data-testid="onboarding-final-step-proof"
 		>
-			<PrivacyStep onContinue={() => setCompleted(true)} />
+			{showPrivacy ? (
+				<PrivacyStep onContinue={() => setCompleted(true)} />
+			) : (
+				<OnboardingGuidanceStep onContinue={() => setShowPrivacy(true)} />
+			)}
 			<output className="sr-only" data-testid="onboarding-status">
 				{completed ? "completed" : "active"}
 			</output>

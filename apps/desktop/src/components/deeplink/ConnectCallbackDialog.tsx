@@ -1,5 +1,9 @@
-import { Alert, AlertDescription, AlertTitle } from "@ryu/ui/components/alert";
-import { Button } from "@ryu/ui/components/button";
+import {
+	Alert,
+	AlertDescription,
+	AlertTitle,
+} from "@ryu/ui/components/alert.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -7,12 +11,12 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Field, FieldGroup, FieldLabel } from "@ryu/ui/components/field";
+} from "@ryu/ui/components/dialog.tsx";
+import { Field, FieldGroup, FieldLabel } from "@ryu/ui/components/field.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
+} from "@ryu/ui/components/native-select.tsx";
 import { normalizeRnpNodeUrl } from "@ryuhq/protocol/continuity";
 import { useRef, useState } from "react";
 

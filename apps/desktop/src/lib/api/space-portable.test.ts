@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import { exportSpacePackage, importSpacePackage } from "./space-portable.ts";
 
 const TARGET = { token: "node-token", url: "http://core.test" };
@@ -11,30 +12,30 @@ afterEach(() => {
 describe("portable Space API", () => {
 	it("exports a package response and normalizes its summary", async () => {
 		let called: { body: unknown; method: string; url: string } | undefined;
-		globalThis.fetch = (async (
-			input: URL | RequestInfo,
-			init?: RequestInit
-		) => {
-			called = {
-				body: init?.body ? JSON.parse(String(init.body)) : undefined,
-				method: init?.method ?? "GET",
-				url: String(input),
-			};
-			return Response.json({
-				archive_base64: "AQID",
-				content_type: "application/zip",
-				filename: "research.ryupack",
-				package: {
-					databases: 1,
-					embeddings: false,
-					files: ["index.md", "pages/note.md"],
-					name: "Research",
-					pages: 1,
-					rows: 2,
-					version: "1.0.0",
-				},
-			});
-		}) as typeof fetch;
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			async (input: URL | RequestInfo, init?: RequestInit) => {
+				called = {
+					body: init?.body ? JSON.parse(String(init.body)) : undefined,
+					method: init?.method ?? "GET",
+					url: String(input),
+				};
+				return Response.json({
+					archive_base64: "AQID",
+					content_type: "application/zip",
+					filename: "research.ryupack",
+					package: {
+						databases: 1,
+						embeddings: false,
+						files: ["index.md", "pages/note.md"],
+						name: "Research",
+						pages: 1,
+						rows: 2,
+						version: "1.0.0",
+					},
+				});
+			}
+		);
 
 		const exported = await exportSpacePackage(TARGET, "space / one");
 
@@ -57,26 +58,26 @@ describe("portable Space API", () => {
 
 	it("sends a binary archive as base64 and accepts an optional name", async () => {
 		let called: { body: unknown; method: string; url: string } | undefined;
-		globalThis.fetch = (async (
-			input: URL | RequestInfo,
-			init?: RequestInit
-		) => {
-			called = {
-				body: init?.body ? JSON.parse(String(init.body)) : undefined,
-				method: init?.method ?? "GET",
-				url: String(input),
-			};
-			return Response.json({
-				space: {
-					database_count: 1,
-					needs_reindex: true,
-					page_count: 3,
-					row_count: 2,
-					space_id: "new-space",
-					space_name: "Imported Research",
-				},
-			});
-		}) as typeof fetch;
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			async (input: URL | RequestInfo, init?: RequestInit) => {
+				called = {
+					body: init?.body ? JSON.parse(String(init.body)) : undefined,
+					method: init?.method ?? "GET",
+					url: String(input),
+				};
+				return Response.json({
+					space: {
+						database_count: 1,
+						needs_reindex: true,
+						page_count: 3,
+						row_count: 2,
+						space_id: "new-space",
+						space_name: "Imported Research",
+					},
+				});
+			}
+		);
 
 		const imported = await importSpacePackage(
 			TARGET,

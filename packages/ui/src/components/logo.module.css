@@ -1,0 +1,196 @@
+/* Native owner geometry. Keep these rules unlayered, matching the original logo styles. */
+.trace {
+	display: block;
+	flex-shrink: 0;
+}
+.traceFill {
+	opacity: 0;
+}
+.trace[data-logo-trace-phase="loop"] .traceStroke {
+	animation: ryu-logo-trace-loop var(--trace-loop-duration) linear infinite;
+}
+.trace[data-logo-trace-phase="closingOutline"] .traceStroke {
+	animation: ryu-logo-trace-close var(--trace-close-duration) ease-out forwards;
+}
+.trace[data-logo-trace-phase="fadingFill"] .traceStroke,
+.trace[data-logo-trace-phase="done"] .traceStroke {
+	stroke-dasharray: 1 0;
+}
+.trace[data-logo-trace-phase="fadingFill"] .traceFill {
+	animation: ryu-logo-trace-fill var(--trace-fill-duration) ease-out forwards;
+}
+.trace[data-logo-trace-phase="done"] .traceFill {
+	opacity: 1;
+}
+.trace[data-logo-trace-phase="done"] .traceOutline {
+	opacity: 0;
+}
+@keyframes ryu-logo-trace-loop {
+	to {
+		stroke-dashoffset: -1;
+	}
+}
+@keyframes ryu-logo-trace-close {
+	from {
+		stroke-dasharray: 0.16 0.84;
+	}
+	to {
+		stroke-dasharray: 1 0;
+	}
+}
+@keyframes ryu-logo-trace-fill {
+	to {
+		opacity: 1;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.trace .traceOutline {
+		display: none;
+	}
+	.trace .traceFill {
+		opacity: 1;
+		animation: none;
+	}
+	.trace .traceStroke {
+		animation: none;
+	}
+}
+
+.dimensions {
+	width: var(--logo-size);
+	height: var(--logo-size);
+}
+.sizeTransition {
+	transition:
+		width 0.3s ease-in-out,
+		height 0.3s ease-in-out;
+}
+.clipped {
+	clip-path: var(--logo-clip);
+}
+.shapeTransition {
+	transition:
+		width 0.3s ease-in-out,
+		height 0.3s ease-in-out,
+		clip-path 0.3s ease-in-out;
+}
+
+.skeleton {
+	--logo-animation-name: ryu-skeleton-shimmer;
+	background: linear-gradient(
+		90deg,
+		oklch(83% 0.01 264) 0%,
+		oklch(91% 0.03 264) 45%,
+		oklch(95% 0.04 264) 50%,
+		oklch(91% 0.03 264) 55%,
+		oklch(83% 0.01 264) 100%
+	);
+	background-size: 200% 100%;
+	animation: var(--logo-animation-name) 1.8s ease-in-out infinite;
+}
+@media (prefers-color-scheme: dark) {
+	.skeleton {
+		background: linear-gradient(
+			90deg,
+			oklch(28% 0.02 264) 0%,
+			oklch(36% 0.03 264) 45%,
+			oklch(40% 0.04 264) 50%,
+			oklch(36% 0.03 264) 55%,
+			oklch(28% 0.02 264) 100%
+		);
+		background-size: 200% 100%;
+	}
+}
+
+.root {
+	position: relative;
+	display: grid;
+	grid-template-areas: "stack";
+	overflow: hidden;
+	transform: scale(1.1);
+}
+
+.root::before,
+.root::after {
+	display: block;
+	grid-area: stack;
+	width: 100%;
+	height: 100%;
+	content: "";
+	transform: translateZ(0);
+}
+
+.root::before {
+	--logo-animation-name: ryu-logo-rotate;
+	background:
+		conic-gradient(
+			from calc(var(--logo-angle) * 2) at 25% 70%,
+			var(--c3),
+			transparent 20% 80%,
+			var(--c3)
+		),
+		conic-gradient(
+			from calc(var(--logo-angle) * 2) at 45% 75%,
+			var(--c2),
+			transparent 30% 60%,
+			var(--c2)
+		),
+		conic-gradient(
+			from calc(var(--logo-angle) * -3) at 80% 20%,
+			var(--c1),
+			transparent 40% 60%,
+			var(--c1)
+		),
+		conic-gradient(
+			from calc(var(--logo-angle) * 2) at 15% 5%,
+			var(--c2),
+			transparent 10% 90%,
+			var(--c2)
+		),
+		conic-gradient(
+			from calc(var(--logo-angle) * 1) at 20% 80%,
+			var(--c1),
+			transparent 10% 90%,
+			var(--c1)
+		),
+		conic-gradient(
+			from calc(var(--logo-angle) * -2) at 85% 10%,
+			var(--c3),
+			transparent 20% 80%,
+			var(--c3)
+		);
+	box-shadow: inset var(--bg) 0 0 var(--shadow-spread)
+		calc(var(--shadow-spread) * 0.2);
+	filter: blur(var(--blur-amount)) contrast(var(--contrast-amount));
+	animation: var(--logo-animation-name) var(--animation-duration) linear
+		infinite;
+}
+
+.root::after {
+	background-image: radial-gradient(
+		circle at center,
+		var(--bg) var(--dot-size),
+		transparent var(--dot-size)
+	);
+	background-size: calc(var(--dot-size) * 2) calc(var(--dot-size) * 2);
+	mix-blend-mode: overlay;
+	backdrop-filter: blur(calc(var(--blur-amount) * 2))
+		contrast(calc(var(--contrast-amount) * 2));
+}
+
+.root[style*="--mask-radius: 0%"]::after {
+	mask-image: none;
+}
+
+.root:not([style*="--mask-radius: 0%"])::after {
+	mask-image: radial-gradient(
+		var(--color-logo-mask-clear) var(--mask-radius),
+		transparent 75%
+	);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.root::before {
+		animation: none;
+	}
+}

@@ -14,7 +14,7 @@
 // Run it against a Core whose `versions.json` records an engine version behind
 // the pin, which is what makes an update row appear.
 
-import { Toaster } from "@ryu/ui/components/sileo";
+import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { AvailableUpdates } from "../../src/components/downloads/AvailableUpdates.tsx";
@@ -26,6 +26,7 @@ import "../../src/index.css";
 //   RYU_CORS_ORIGINS=http://localhost:5177
 // (Core's supported extension point for extra allowed origins; the built-in list
 // covers the app's own dev servers, not this harness.)
+// SAFETY: Native Vite loadEnv publishes custom VITE_ values as dotenv/process-environment strings, with undefined for an absent key; this proof configuration does not override VITE_CORE_URL with a non-string define.
 const CORE_URL =
 	(import.meta.env.VITE_CORE_URL as string | undefined) ??
 	"http://127.0.0.1:8980";

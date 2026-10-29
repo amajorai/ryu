@@ -6,8 +6,8 @@ import {
 	Settings01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -16,11 +16,11 @@ import {
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -125,11 +125,7 @@ export default function MarketplacesCatalogSection() {
 	};
 
 	if (sourcesQuery.isLoading) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	if (sourcesQuery.error) {
@@ -287,7 +283,10 @@ function MarketplaceSourceGroup({
 							>
 								<div className="min-w-0 flex-1">
 									<div className="flex flex-wrap items-center gap-2">
-										<span className="truncate font-medium text-sm">
+										<span
+											className="truncate font-medium text-sm"
+											title={source.displayName}
+										>
 											{source.displayName}
 										</span>
 										{source.builtin ? (

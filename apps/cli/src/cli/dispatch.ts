@@ -7,19 +7,36 @@
 // WorkspaceShell (unchanged). `ryu` and `ryu tui` both open the TUI.
 
 import type { ApiTarget } from "@ryuhq/core-client/client";
-import { buildTarget } from "../core/target.ts";
-import { realCoreApi, realScaffold } from "./api.ts";
+import { resolveNodeTarget, UnknownNodeError } from "../core/nodeTarget.ts";
+import { tf, tr } from "../i18n/translate.ts";
+import {
+	promptLine,
+	readStdin,
+	realCoreApi,
+	realScaffold,
+	runProcess,
+} from "./api.ts";
 import { findCommand, renderHelp } from "./commands.ts";
 import { errorToJson, formatError, formatTable } from "./output.ts";
+import {
+	findServicesCommand,
+	runServicesFromRyu,
+	SERVICES_COMMAND_NAME,
+} from "./services.ts";
+import type { TroubleshootHost } from "./troubleshoot.ts";
 import {
 	type CliContext,
 	type CliIO,
 	type CoreApi,
+	type FetchLike,
 	type GlobalFlags,
+	type LinePrompter,
 	type ParsedArgs,
+	type ProcessRunner,
 	type ScaffoldRunner,
 	UsageError,
 } from "./types.ts";
+import type { ContainerHost } from "./vaultIsolation.ts";
 import { VERSION } from "./version.ts";
 
 const EXIT_OK = 0;
@@ -29,16 +46,18 @@ const EXIT_USAGE = 2;
 /** The flags that consume a VALUE (`--flag v` or `--flag=v`), mapped to the field
  *  they set. A table keeps the parse loop flat: each new value-flag is one entry
  *  here instead of two more branches in an ever-growing else-if chain. */
-const VALUE_FLAGS = {
-	"--agent": "agent",
-	"--kind": "kind",
-	"--node": "node",
-	"--template": "template",
-} as const satisfies Record<string, "agent" | "kind" | "node" | "template">;
+type ValueFlag = "agent" | "file" | "kind" | "node" | "template";
+const VALUE_FLAGS = new Map<string, ValueFlag>([
+	["--agent", "agent"],
+	["--file", "file"],
+	["--kind", "kind"],
+	["--node", "node"],
+	["--template", "template"],
+]);
 
 /** Parse `process.argv.slice(2)` into a command, its positional args, and flags.
  *  Flags may appear anywhere; the value flags in {@link VALUE_FLAGS} (`--agent`,
- *  `--node`, `--kind`, `--template`) each consume the following token, or take it inline
+ *  `--file`, `--node`, `--kind`, `--template`) each consume the following token, or take it inline
  *  after an `=`. The first non-flag token is the command; the rest are its
  *  positional args. Unknown `--flags` are ignored so they never masquerade as
  *  positional args. A value flag given with no value stays null — its owner then
@@ -47,10 +66,13 @@ const VALUE_FLAGS = {
 export function parseArgs(argv: string[]): ParsedArgs {
 	const flags: GlobalFlags = {
 		agent: null,
+		file: null,
 		json: false,
 		kind: null,
 		node: null,
+		print: false,
 		template: null,
+		tokenEnv: false,
 		force: false,
 		cascade: false,
 		dryRun: false,
@@ -60,8 +82,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
 		version: false,
 	};
 	const positional: string[] = [];
+	let commandIndex = -1;
 	for (let i = 0; i < argv.length; i++) {
 		const tok = argv[i];
+		if (tok === "--") {
+			// End of options: everything after is positional, never a global flag,
+			// so `ryu secrets run -- node --version` cannot trigger `--version`.
+			if (commandIndex === -1 && i + 1 < argv.length) {
+				commandIndex = i + 1;
+			}
+			positional.push(...argv.slice(i + 1));
+			break;
+		}
 		if (tok === "--json") {
 			flags.json = true;
 		} else if (tok === "--force") {
@@ -74,6 +106,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
 			flags.fix = true;
 		} else if (tok === "--include-secrets") {
 			flags.includeSecrets = true;
+		} else if (tok === "--print") {
+			flags.print = true;
+		} else if (tok === "--token-env") {
+			flags.tokenEnv = true;
+		} else if (tok === "-f") {
+			flags.file = argv[i + 1] ?? null;
+			i++;
 		} else if (tok === "-h" || tok === "--help") {
 			flags.help = true;
 		} else if (tok === "--version") {
@@ -81,9 +120,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 		} else if (tok.startsWith("--")) {
 			const eq = tok.indexOf("=");
 			const name = eq === -1 ? tok : tok.slice(0, eq);
-			const key = Object.hasOwn(VALUE_FLAGS, name)
-				? VALUE_FLAGS[name as keyof typeof VALUE_FLAGS]
-				: null;
+			const key = VALUE_FLAGS.get(name);
 			if (!key) {
 				// Unknown long flag — ignore (do not treat as a positional/command).
 			} else if (eq === -1) {
@@ -95,11 +132,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
 		} else if (tok.startsWith("-")) {
 			// Unknown short flag — ignore (do not treat as a positional/command).
 		} else {
+			if (commandIndex === -1) {
+				commandIndex = i;
+			}
 			positional.push(tok);
 		}
 	}
 	const [command = null, ...args] = positional;
-	return { command, args, flags };
+	const rawArgs = commandIndex === -1 ? [] : argv.slice(commandIndex + 1);
+	return { command, args, flags, rawArgs };
 }
 
 /** True when this invocation should open the interactive TUI rather than run a
@@ -113,11 +154,29 @@ export function isInteractive(argv: string[]): boolean {
 	return parsed.command === null || parsed.command === "tui";
 }
 
-/** Resolve the target node: env (RYU_CORE_URL/TOKEN) with `--node <url>` overriding
- *  the URL for this one invocation (token still from env). */
+/** Resolve the target node through the saved node registry (core/nodeTarget.ts):
+ *  `--node <name|url>` picks a saved node (with its own token) or an http(s) URL;
+ *  without it RYU_CORE_URL wins, else the active node set by `ryu node use`. A
+ *  `--node` value that is neither is a usage error, not a bogus URL. */
 function resolveTarget(flags: GlobalFlags): ApiTarget {
-	const base = buildTarget();
-	return flags.node ? { url: flags.node, token: base.token } : base;
+	try {
+		return resolveNodeTarget(flags.node);
+	} catch (err) {
+		if (err instanceof UnknownNodeError) {
+			throw new UsageError(err.message);
+		}
+		throw err;
+	}
+}
+
+/** Render a command failure to stderr and map it to an exit code (2 = usage). */
+function reportFailure(io: CliIO, flags: GlobalFlags, err: unknown): number {
+	if (flags.json) {
+		io.err(`${JSON.stringify(errorToJson(err))}\n`);
+	} else {
+		io.err(`${tf("Error: {message}", { message: formatError(err) })}\n`);
+	}
+	return err instanceof UsageError ? EXIT_USAGE : EXIT_ERROR;
 }
 
 const defaultIo: CliIO = {
@@ -127,10 +186,24 @@ const defaultIo: CliIO = {
 
 interface RunOverrides {
 	api?: CoreApi;
+	/** Fake Docker/host seams for `ryu secrets run --isolation=container`. */
+	containerHost?: ContainerHost;
+	/** Environment for credential lookups (`RYU_VAULT_TOKEN`). */
+	env?: Record<string, string | undefined>;
+	/** Fake HTTP for `ryu doctor agents` endpoint probes. */
+	fetch?: FetchLike;
 	io?: CliIO;
+	/** Fake terminal answers for interactive commands (`ryu-cli agents access <id> pick`). */
+	promptLine?: LinePrompter;
+	/** Fake stdin for `ryu secrets set NAME -`. */
+	readStdin?: () => Promise<string | null>;
 	/** Fake scaffolder for `ryu init` — see {@link ScaffoldRunner}. */
 	scaffold?: ScaffoldRunner;
+	/** Fake child-process runner for `ryu secrets run`. */
+	spawn?: ProcessRunner;
 	target?: ApiTarget;
+	/** Fake filesystem/network seams for `ryu troubleshoot`. */
+	troubleshootHost?: TroubleshootHost;
 }
 
 /** Run one non-interactive `ryu` command and resolve to its exit code. Never
@@ -143,6 +216,17 @@ export async function runCli(
 	const parsed = parseArgs(argv);
 	const io = overrides.io ?? defaultIo;
 	const { flags } = parsed;
+	// `services` is located in the raw argv first: ryu-services value flags
+	// before it (`--base-url URL`) take their value (see services.ts).
+	const servicesAt = findServicesCommand(argv, new Set(VALUE_FLAGS.keys()));
+	if (servicesAt !== -1 || parsed.command === SERVICES_COMMAND_NAME) {
+		const at =
+			servicesAt === -1 ? argv.length - parsed.rawArgs.length - 1 : servicesAt;
+		return runServicesFromRyu(argv.slice(0, at), argv.slice(at + 1), {
+			env: overrides.env,
+			io,
+		});
+	}
 
 	// --help / --version short-circuit any subcommand.
 	if (flags.help) {
@@ -153,7 +237,7 @@ export async function runCli(
 		io.out(
 			flags.json
 				? `${JSON.stringify({ version: VERSION })}\n`
-				: `ryu ${VERSION}\n`
+				: `ryu-cli ${VERSION}\n`
 		);
 		return EXIT_OK;
 	}
@@ -164,13 +248,28 @@ export async function runCli(
 		return EXIT_OK;
 	}
 
+	let target: ApiTarget;
+	try {
+		target = overrides.target ?? resolveTarget(flags);
+	} catch (err) {
+		return reportFailure(io, flags, err);
+	}
+
 	const ctx: CliContext = {
 		api: overrides.api ?? realCoreApi,
 		args: parsed.args,
+		containerHost: overrides.containerHost,
+		env: overrides.env ?? process.env,
+		fetch: overrides.fetch ?? ((input, init) => fetch(input, init)),
 		flags,
 		io,
+		promptLine: overrides.promptLine ?? promptLine,
+		rawArgs: parsed.rawArgs,
+		readStdin: overrides.readStdin ?? readStdin,
 		scaffold: overrides.scaffold ?? realScaffold,
-		target: overrides.target ?? resolveTarget(flags),
+		spawn: overrides.spawn ?? runProcess,
+		target,
+		troubleshootHost: overrides.troubleshootHost,
 	};
 
 	// Built-ins are matched FIRST and always win — this is the feature-parity
@@ -187,13 +286,8 @@ export async function runCli(
 		// contributes `ryu <app> <cmd>` subcommands (surfaces.cli.commands).
 		return await runAppCommand(ctx, parsed.command);
 	} catch (err) {
-		if (flags.json) {
-			io.err(`${JSON.stringify(errorToJson(err))}\n`);
-		} else {
-			io.err(`Error: ${formatError(err)}\n`);
-		}
 		// A bad/missing argument is a usage error (2); anything else is runtime (1).
-		return err instanceof UsageError ? EXIT_USAGE : EXIT_ERROR;
+		return reportFailure(io, flags, err);
 	}
 }
 
@@ -208,6 +302,14 @@ export async function runCli(
 // `ext_proxy` (`<method> /api/ext/<appId><path>`). Built-ins are checked first and
 // always win, so no app can shadow one.
 
+/** The "unknown command" contract shared by a missing app and a node that cannot
+ *  list its apps. */
+function reportUnknownCommand(io: CliIO, name: string): void {
+	io.err(
+		`${tf("Unknown command: {name}", { name })}\n${tr("Run 'ryu-cli help' to see available commands.")}\n`
+	);
+}
+
 /** Resolve `appId` to an installed+enabled app and dispatch its subcommand. Returns
  *  a process exit code. Mirrors the "unknown command" contract when nothing matches
  *  so existing behavior (and its test) is unchanged. */
@@ -221,9 +323,7 @@ async function runAppCommand(ctx: CliContext, appId: string): Promise<number> {
 	try {
 		apps = await ctx.api.fetchApps(ctx.target);
 	} catch {
-		ctx.io.err(
-			`Unknown command: ${appId}\nRun 'ryu help' to see available commands.\n`
-		);
+		reportUnknownCommand(ctx.io, appId);
 		return EXIT_USAGE;
 	}
 	// Only an ENABLED, present (installed or built-in) app contributes commands. A
@@ -233,9 +333,7 @@ async function runAppCommand(ctx: CliContext, appId: string): Promise<number> {
 		(a) => a.id === appId && a.enabled && (a.installed || a.builtIn)
 	);
 	if (!app) {
-		ctx.io.err(
-			`Unknown command: ${appId}\nRun 'ryu help' to see available commands.\n`
-		);
+		reportUnknownCommand(ctx.io, appId);
 		return EXIT_USAGE;
 	}
 
@@ -245,7 +343,9 @@ async function runAppCommand(ctx: CliContext, appId: string): Promise<number> {
 	// here, preserving the offline-help guarantee.)
 	if (!subName) {
 		if (app.commands.length === 0) {
-			ctx.io.out(`${app.name} (${app.id}) contributes no commands.\n`);
+			ctx.io.out(
+				`${tf("{name} ({id}) contributes no commands.", { id: app.id, name: app.name })}\n`
+			);
 			return EXIT_OK;
 		}
 		if (ctx.flags.json) {
@@ -253,7 +353,7 @@ async function runAppCommand(ctx: CliContext, appId: string): Promise<number> {
 			return EXIT_OK;
 		}
 		const rows = app.commands.map((c) => [
-			`ryu ${app.id} ${c.name}`,
+			`ryu-cli ${app.id} ${c.name}`,
 			c.summary ?? "",
 		]);
 		ctx.io.out(`${formatTable(["COMMAND", "SUMMARY"], rows)}\n`);
@@ -262,9 +362,10 @@ async function runAppCommand(ctx: CliContext, appId: string): Promise<number> {
 
 	const sub = app.commands.find((c) => c.name === subName);
 	if (!sub) {
-		const available = app.commands.map((c) => c.name).join(", ") || "(none)";
+		const available =
+			app.commands.map((c) => c.name).join(", ") || tr("(none)");
 		ctx.io.err(
-			`Unknown command '${subName}' for app '${app.id}'. Available: ${available}.\n`
+			`${tf("Unknown command '{command}' for app '{app}'. Available: {available}.", { app: app.id, available, command: subName })}\n`
 		);
 		return EXIT_USAGE;
 	}

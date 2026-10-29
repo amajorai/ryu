@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/store/useProjectDockStore.ts
 //
 // Project-scoped workspace dock tabs. Shareable kinds (terminal, files,
@@ -10,11 +11,13 @@ import type {
 	DockSide,
 	DockTabKind,
 } from "@/src/components/panels/dock-panels.ts";
+import type { PersistedDockTabKind } from "@/src/lib/workspace-session.ts";
 
 const STORAGE_KEY = "ryu_pinned_dock_tabs";
 
 export interface ProjectDockTab {
-	kind: DockTabKind;
+	/** Saved identifiers can outlive this build's registered renderers. */
+	kind: PersistedDockTabKind;
 	label: string;
 	/** Window-tab id that owns this entry while unpinned. Ignored when pinned. */
 	ownerTabId: string;
@@ -23,14 +26,31 @@ export interface ProjectDockTab {
 	uid: string;
 }
 
-/** Persisted shape — only pinned tabs survive a reload (fresh content, same kind). */
+/** Only UI identity and pinned placement survive a reload; content mounts fresh. */
 interface PersistedPinnedTab {
-	kind: DockTabKind;
+	kind: PersistedDockTabKind;
 	label: string;
 	side: DockSide;
+	/** Missing on legacy rows; assigned and saved on their first valid restore. */
+	uid?: string;
 }
 
 type PersistedByFolder = Record<string, PersistedPinnedTab[]>;
+
+const persistedTab = z.object({
+	kind: z.string().refine((kind) => kind.trim().length > 0),
+	label: z.string(),
+	side: z.enum(["bottom", "right"]),
+	uid: z
+		.string()
+		.refine((uid) => uid.trim().length > 0)
+		.optional()
+		.catch(undefined),
+});
+const persistedFolders = z.record(
+	z.string(),
+	z.array(persistedTab.nullable().catch(null)).catch([])
+);
 
 function loadPersisted(): PersistedByFolder {
 	try {
@@ -38,37 +58,10 @@ function loadPersisted(): PersistedByFolder {
 		if (!raw) {
 			return {};
 		}
-		const parsed = JSON.parse(raw) as unknown;
-		if (!parsed || typeof parsed !== "object") {
-			return {};
-		}
-		const out: PersistedByFolder = {};
-		for (const [folder, tabs] of Object.entries(
-			parsed as Record<string, unknown>
-		)) {
-			if (!Array.isArray(tabs)) {
-				continue;
-			}
-			out[folder] = tabs.flatMap((t) => {
-				if (!t || typeof t !== "object") {
-					return [];
-				}
-				const row = t as Record<string, unknown>;
-				if (
-					typeof row.kind !== "string" ||
-					typeof row.label !== "string" ||
-					(row.side !== "bottom" && row.side !== "right")
-				) {
-					return [];
-				}
-				return [
-					{
-						kind: row.kind as DockTabKind,
-						label: row.label,
-						side: row.side,
-					},
-				];
-			});
+		const parsed = persistedFolders.parse(JSON.parse(raw));
+		const out: PersistedByFolder = Object.create(null);
+		for (const [folder, tabs] of Object.entries(parsed)) {
+			out[folder] = tabs.flatMap((tab) => (tab ? [tab] : []));
 		}
 		return out;
 	} catch {
@@ -77,11 +70,11 @@ function loadPersisted(): PersistedByFolder {
 }
 
 function persistPinned(byFolder: Record<string, ProjectDockTab[]>) {
-	const out: PersistedByFolder = {};
+	const out: PersistedByFolder = Object.create(null);
 	for (const [folder, tabs] of Object.entries(byFolder)) {
 		const pinned = tabs
 			.filter((t) => t.pinned)
-			.map((t) => ({ kind: t.kind, label: t.label, side: t.side }));
+			.map((t) => ({ uid: t.uid, kind: t.kind, label: t.label, side: t.side }));
 		if (pinned.length > 0) {
 			out[folder] = pinned;
 		}
@@ -99,19 +92,52 @@ export function mintProjectDockUid(): string {
 	return `project-dock-${dockTabCounter}-${Date.now().toString(36)}`;
 }
 
-function hydrateFromStorage(): Record<string, ProjectDockTab[]> {
+function isValidUid(uid: string | undefined): uid is string {
+	return uid !== undefined && uid.trim().length > 0;
+}
+
+function mintUnusedProjectDockUid(usedUids: Set<string>): string {
+	let uid = mintProjectDockUid();
+	while (usedUids.has(uid)) {
+		uid = mintProjectDockUid();
+	}
+	return uid;
+}
+
+/** Restore the local pinned UI projection, migrating legacy identities once. */
+export function hydrateProjectDockTabs(): Record<string, ProjectDockTab[]> {
 	const persisted = loadPersisted();
-	const byFolder: Record<string, ProjectDockTab[]> = {};
+	const reservedUids = new Set(
+		Object.values(persisted).flatMap((tabs) =>
+			tabs.flatMap((tab) => (tab.uid ? [tab.uid] : []))
+		)
+	);
+	const restoredUids = new Set<string>();
+	const byFolder: Record<string, ProjectDockTab[]> = Object.create(null);
+	let migrated = false;
 	for (const [folder, tabs] of Object.entries(persisted)) {
-		byFolder[folder] = tabs.map((t) => ({
-			uid: mintProjectDockUid(),
-			kind: t.kind,
-			label: t.label,
-			side: t.side,
-			pinned: true,
-			// Restored pins have no owning chat — they are project-shared.
-			ownerTabId: "",
-		}));
+		byFolder[folder] = tabs.map((tab) => {
+			let uid = tab.uid;
+			if (!uid || restoredUids.has(uid)) {
+				uid = mintUnusedProjectDockUid(reservedUids);
+				reservedUids.add(uid);
+				migrated = true;
+			}
+			restoredUids.add(uid);
+			return {
+				uid,
+				kind: tab.kind,
+				label: tab.label,
+				side: tab.side,
+				pinned: true,
+				// Restored pins have no owning chat — they are project-shared.
+				ownerTabId: "",
+			};
+		});
+	}
+	// Do not replace wholly malformed storage with an empty projection on load.
+	if (migrated) {
+		persistPinned(byFolder);
 	}
 	return byFolder;
 }
@@ -119,7 +145,10 @@ function hydrateFromStorage(): Record<string, ProjectDockTab[]> {
 interface ProjectDockState {
 	addTab: (
 		folder: string,
-		tab: Omit<ProjectDockTab, "uid"> & { uid?: string }
+		tab: Omit<ProjectDockTab, "uid" | "kind"> & {
+			kind: DockTabKind;
+			uid?: string;
+		}
 	) => ProjectDockTab;
 	byFolder: Record<string, ProjectDockTab[]>;
 	/** Drop unpinned tabs owned by a closed/unloaded window tab. */
@@ -127,7 +156,7 @@ interface ProjectDockState {
 	removeTab: (folder: string, uid: string) => void;
 	setLabel: (folder: string, uid: string, label: string) => void;
 	setSide: (folder: string, uid: string, side: DockSide) => void;
-	togglePin: (folder: string, uid: string) => void;
+	togglePin: (folder: string, uid: string, fallbackOwnerTabId?: string) => void;
 	updateTab: (
 		folder: string,
 		uid: string,
@@ -136,11 +165,17 @@ interface ProjectDockState {
 }
 
 export const useProjectDockStore = create<ProjectDockState>((set, get) => ({
-	byFolder: hydrateFromStorage(),
+	byFolder: hydrateProjectDockTabs(),
 
 	addTab: (folder, tab) => {
+		const usedUids = new Set(
+			Object.values(get().byFolder).flatMap((tabs) => tabs.map((t) => t.uid))
+		);
 		const entry: ProjectDockTab = {
-			uid: tab.uid ?? mintProjectDockUid(),
+			uid:
+				isValidUid(tab.uid) && !usedUids.has(tab.uid)
+					? tab.uid
+					: mintUnusedProjectDockUid(usedUids),
 			kind: tab.kind,
 			label: tab.label,
 			side: tab.side,
@@ -174,13 +209,19 @@ export const useProjectDockStore = create<ProjectDockState>((set, get) => ({
 		});
 	},
 
-	togglePin: (folder, uid) => {
+	togglePin: (folder, uid, fallbackOwnerTabId) => {
 		set((state) => {
 			const prev = state.byFolder[folder] ?? [];
 			const byFolder = {
 				...state.byFolder,
 				[folder]: prev.map((t) =>
-					t.uid === uid ? { ...t, pinned: !t.pinned } : t
+					t.uid === uid
+						? {
+								...t,
+								pinned: !t.pinned,
+								ownerTabId: t.ownerTabId || fallbackOwnerTabId || "",
+							}
+						: t
 				),
 			};
 			persistPinned(byFolder);

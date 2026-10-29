@@ -1,9 +1,19 @@
+import annotationStyles from "./browser-annotation.module.css";
+
+interface AnnotationRectStyle extends CSSProperties {
+	"--annotation-height": string;
+	"--annotation-left": string;
+	"--annotation-top": string;
+	"--annotation-width": string;
+}
+
 import {
 	Comment01Icon,
 	Mic01Icon,
 	RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -44,6 +54,8 @@ export interface BrowserElementContext {
 
 export interface BrowserWebMCPTool {
 	annotations: {
+		consequentialHint: boolean;
+		debugging: boolean;
 		readOnlyHint: boolean;
 		untrustedContentHint: boolean;
 	};
@@ -52,6 +64,7 @@ export interface BrowserWebMCPTool {
 	name: string;
 	origin: string;
 	title: string;
+	tool_id: string;
 }
 
 export type BrowserAnnotationKind = "area" | "element" | "elements";
@@ -105,6 +118,7 @@ export interface BrowserAnnotationInput {
 }
 
 interface BrowserAnnotationSurfaceProps {
+	askRyuPending?: boolean;
 	context: BrowserContextResult | null;
 	imageUrl: string | null;
 	isAnnotating: boolean;
@@ -139,12 +153,21 @@ interface SpeechRecognitionLike {
 	stop: () => void;
 }
 
+/** Complete private speech port consumed by the annotation recorder. */
+export type BrowserAnnotationSpeechRecognition = SpeechRecognitionLike;
+
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
-type SpeechWindow = Window & {
+/**
+ * The Web Speech constructors this recorder reads. A local view rather than a
+ * global `Window` augmentation: dependencies such as @assistant-ui/core already
+ * augment `Window` with their own constructor types, and a second declaration
+ * fails TS2717 in every program that loads both.
+ */
+interface SpeechRecognitionWindow {
 	SpeechRecognition?: SpeechRecognitionConstructor;
 	webkitSpeechRecognition?: SpeechRecognitionConstructor;
-};
+}
 
 const MIN_AREA_SIZE = 8;
 
@@ -175,28 +198,16 @@ function unionRects(rects: BrowserRect[]): BrowserRect | null {
 	return { height: bottom - top, width: right - left, x: left, y: top };
 }
 
-function rectStyle(
-	rect: BrowserRect,
-	viewport: BrowserContextResult["viewport"]
-): CSSProperties {
-	return {
-		height: `${(rect.height / viewport.height) * 100}%`,
-		left: `${(rect.x / viewport.width) * 100}%`,
-		top: `${(rect.y / viewport.height) * 100}%`,
-		width: `${(rect.width / viewport.width) * 100}%`,
-	};
-}
-
 function describeTarget(target: BrowserElementContext): string {
 	const label = target.name || target.text || target.content_preview;
 	return label ? `${target.tag} · ${label}` : target.selector;
 }
 
 function createRecognition(): SpeechRecognitionLike | null {
-	if (typeof window === "undefined") {
+	if (!globalThis.window) {
 		return null;
 	}
-	const speechWindow = window as SpeechWindow;
+	const speechWindow: SpeechRecognitionWindow & Window = window;
 	const Constructor =
 		speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
 	return Constructor ? new Constructor() : null;
@@ -214,6 +225,7 @@ function extractTranscript(event: SpeechRecognitionEventLike): string {
 }
 
 export function BrowserAnnotationSurface({
+	askRyuPending = false,
 	context,
 	imageUrl,
 	isAnnotating,
@@ -250,6 +262,7 @@ export function BrowserAnnotationSurface({
 		width: 1,
 	};
 	const annotations = context?.annotations ?? [];
+	const safeImageUrl = safeMediaUrl(imageUrl);
 	const draftRect =
 		dragStart && dragCurrent ? rectFromPoints(dragStart, dragCurrent) : null;
 	const selectedRect =
@@ -263,8 +276,8 @@ export function BrowserAnnotationSurface({
 	const draftKind: BrowserAnnotationKind =
 		draftSelections.length > 1
 			? "elements"
-			: (selectedRect?.width ?? 0) >= MIN_AREA_SIZE &&
-					(selectedRect?.height ?? 0) >= MIN_AREA_SIZE
+			: (draftSelections[0]?.width ?? 0) >= MIN_AREA_SIZE &&
+					(draftSelections[0]?.height ?? 0) >= MIN_AREA_SIZE
 				? "area"
 				: "element";
 
@@ -386,7 +399,7 @@ export function BrowserAnnotationSurface({
 		setIsSaving(true);
 		const style = Object.fromEntries(
 			Object.entries(draftStyle).filter(([, value]) => Boolean(value))
-		) as BrowserStyleAdjust;
+		) satisfies BrowserStyleAdjust;
 		try {
 			const result = await onAnnotate({
 				comment,
@@ -410,9 +423,18 @@ export function BrowserAnnotationSurface({
 		setDraftStyle((current) => ({ ...current, [key]: value }));
 	};
 
+	const draftGeometry: AnnotationRectStyle | undefined = draftRect
+		? {
+				"--annotation-height": `${(draftRect.height / viewport.height) * 100}%`,
+				"--annotation-left": `${(draftRect.x / viewport.width) * 100}%`,
+				"--annotation-top": `${(draftRect.y / viewport.height) * 100}%`,
+				"--annotation-width": `${(draftRect.width / viewport.width) * 100}%`,
+			}
+		: undefined;
+
 	return (
 		<div
-			className="flex min-h-0 flex-1 flex-col bg-muted/20"
+			className="flex min-h-0 min-w-0 flex-1 flex-col bg-muted/20"
 			data-testid="browser-annotation-surface"
 		>
 			<div className="flex shrink-0 flex-wrap items-center gap-1.5 border-border/60 border-b bg-background/90 px-2 py-1.5 text-xs">
@@ -450,16 +472,17 @@ export function BrowserAnnotationSurface({
 					)}
 					<button
 						className="rounded-md px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+						disabled={askRyuPending || annotations.length === 0}
 						onClick={onAskRyu}
 						type="button"
 					>
-						Ask Ryu to address notes
+						{askRyuPending ? "Preparing notes…" : "Ask Ryu to address notes"}
 					</button>
 				</div>
 			</div>
 
 			<div className="min-h-0 flex-1 overflow-auto p-3">
-				{imageUrl ? (
+				{safeImageUrl ? (
 					<div className="flex min-h-full min-w-full items-center justify-center">
 						<div
 							className={cn(
@@ -474,37 +497,62 @@ export function BrowserAnnotationSurface({
 							}
 							ref={frameRef}
 						>
-							{/* biome-ignore lint/performance/noImgElement: browser screenshots are data URIs captured from the local sidecar. */}
+							{/* browser screenshots are data URIs captured from the local sidecar. */}
 							<img
 								alt={context?.page.title || "Embedded browser tab"}
-								className="block max-h-[calc(100vh-13rem)] max-w-[calc(100vw-15rem)] select-none object-contain"
+								className="block max-h-[calc(100vh-13rem)] max-w-full select-none object-contain"
 								draggable={false}
-								src={imageUrl}
+								src={safeImageUrl}
 							/>
 							<div className="pointer-events-none absolute inset-0">
-								{annotations.map((annotation, index) => (
-									<div
-										className="absolute rounded border-2 border-amber-400/90 bg-amber-300/10"
-										data-testid={`browser-annotation-marker-${index + 1}`}
-										key={annotation.id}
-										style={rectStyle(annotation.rect, viewport)}
-									>
-										<span className="absolute -top-5 left-0 rounded bg-amber-400 px-1.5 py-0.5 font-medium text-[10px] text-black shadow-sm">
-											{index + 1}
-										</span>
-									</div>
-								))}
-								{draftSelections.map((selection, index) => (
-									<div
-										className="absolute rounded border-2 border-primary bg-primary/10"
-										key={`${selection.x}:${selection.y}:${index}`}
-										style={rectStyle(selection, viewport)}
-									/>
-								))}
+								{annotations.map((annotation, index) => {
+									const geometry: AnnotationRectStyle = {
+										"--annotation-height": `${(annotation.rect.height / viewport.height) * 100}%`,
+										"--annotation-left": `${(annotation.rect.x / viewport.width) * 100}%`,
+										"--annotation-top": `${(annotation.rect.y / viewport.height) * 100}%`,
+										"--annotation-width": `${(annotation.rect.width / viewport.width) * 100}%`,
+									};
+									return (
+										<div
+											className={cn(
+												annotationStyles.rect,
+												"absolute rounded border-2 border-highlight/90 bg-highlight/10"
+											)}
+											data-testid={`browser-annotation-marker-${index + 1}`}
+											key={annotation.id}
+											style={geometry}
+										>
+											<span className="type-compact absolute -top-5 left-0 rounded bg-highlight px-1.5 py-0.5 font-medium text-black shadow-sm">
+												{index + 1}
+											</span>
+										</div>
+									);
+								})}
+								{draftSelections.map((selection, index) => {
+									const geometry: AnnotationRectStyle = {
+										"--annotation-height": `${(selection.height / viewport.height) * 100}%`,
+										"--annotation-left": `${(selection.x / viewport.width) * 100}%`,
+										"--annotation-top": `${(selection.y / viewport.height) * 100}%`,
+										"--annotation-width": `${(selection.width / viewport.width) * 100}%`,
+									};
+									return (
+										<div
+											className={cn(
+												annotationStyles.rect,
+												"absolute rounded border-2 border-primary bg-primary/10"
+											)}
+											key={`${selection.x}:${selection.y}:${index}`}
+											style={geometry}
+										/>
+									);
+								})}
 								{draftRect && (
 									<div
-										className="absolute rounded border-2 border-primary border-dashed bg-primary/10"
-										style={rectStyle(draftRect, viewport)}
+										className={cn(
+											annotationStyles.rect,
+											"absolute rounded border-2 border-primary border-dashed bg-primary/10"
+										)}
+										style={draftGeometry}
 									/>
 								)}
 							</div>
@@ -582,7 +630,23 @@ export function BrowserAnnotationSurface({
 						>
 							{adjustOpen ? "Hide Adjust controls" : "Adjust styling"}
 						</button>
-						<span className="text-[11px] text-muted-foreground">
+						<button
+							className="text-muted-foreground text-xs hover:text-foreground"
+							disabled={isSaving}
+							onClick={() => {
+								recognitionRef.current?.stop();
+								setIsListening(false);
+								setDraftComment("");
+								setDraftContext(null);
+								setDraftSelections([]);
+								setDraftStyle({});
+								setAdjustOpen(false);
+							}}
+							type="button"
+						>
+							Cancel draft
+						</button>
+						<span className="type-caption text-muted-foreground">
 							⌘⇧D toggles mode
 						</span>
 					</div>
@@ -598,10 +662,10 @@ export function BrowserAnnotationSurface({
 									["margin", "Margin"],
 									["color", "Text color"],
 									["background_color", "Fill color"],
-								] as [keyof BrowserStyleAdjust, string][]
+								] satisfies [keyof BrowserStyleAdjust, string][]
 							).map(([key, label]) => (
 								<label
-									className="flex flex-col gap-1 text-[11px] text-muted-foreground"
+									className="type-caption flex flex-col gap-1 text-muted-foreground"
 									key={key}
 								>
 									{label}
@@ -626,10 +690,10 @@ export function BrowserAnnotationSurface({
 				<div className="max-h-32 shrink-0 space-y-1 overflow-y-auto border-border/60 border-t bg-background p-2">
 					{annotations.map((annotation, index) => (
 						<div
-							className="flex items-start gap-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs dark:bg-amber-950/30"
+							className="flex items-start gap-2 rounded-md bg-highlight/10 px-2 py-1.5 text-xs dark:bg-highlight/10"
 							key={annotation.id}
 						>
-							<span className="mt-0.5 rounded-full bg-amber-400 px-1.5 py-0.5 font-medium text-[10px] text-black">
+							<span className="type-compact mt-0.5 rounded-full bg-highlight px-1.5 py-0.5 font-medium text-black">
 								{index + 1}
 							</span>
 							<p className="min-w-0 flex-1 text-foreground">

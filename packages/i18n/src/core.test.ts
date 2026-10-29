@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { strToU8, zipSync } from "fflate";
 import {
 	formatMessage,
@@ -17,6 +17,115 @@ import {
 } from "./core.ts";
 import { REPEATED_LITERAL_TRANSLATIONS } from "./literal-translations.ts";
 import { BUILT_IN_LANGUAGE_PACKS, EN_MESSAGES } from "./messages.ts";
+
+describe("message formatter resource bounds", () => {
+	test("leaves excessive length, nesting and node counts literal", () => {
+		const messages = [
+			`${"{x, select, other{".repeat(6000)}Hello${"}}".repeat(6000)}`,
+			`${"{x, select, other{".repeat(40)}Hello${"}}".repeat(40)}`,
+			"{x}".repeat(1025),
+			`{x, select, a{safe} other{${"{".repeat(40)}${"}}".repeat(40)}`,
+		];
+		const started = performance.now();
+		for (const message of messages) {
+			expect(formatMessage(message, { x: "a" })).toBe(message);
+		}
+		// The original 6,000-level payload took seconds and overflowed the
+		// stack. This generous ceiling catches that regression without load.
+		expect(performance.now() - started).toBeLessThan(1000);
+	});
+
+	test("preserves nested select/plural and normal interpolation", () => {
+		expect(
+			formatMessage(
+				"{kind, select, files{{n, plural, one{# file for {name}} other{# files for {name}}}} other{None}}",
+				{ kind: "files", n: 2, name: "Ada" }
+			)
+		).toBe("2 files for Ada");
+		expect(formatMessage("{name}".repeat(1024), { name: "a" })).toBe(
+			"a".repeat(1024)
+		);
+	});
+});
+
+describe("message formatter reuse", () => {
+	test("constructs locale formatters once across repeated cardinal and ordinal messages", () => {
+		const NumberFormat = Intl.NumberFormat;
+		const PluralRules = Intl.PluralRules;
+		let numbers = 0;
+		let plurals = 0;
+		Intl.NumberFormat = new Proxy(NumberFormat, {
+			construct(target, args) {
+				numbers += 1;
+				return Reflect.construct(target, args);
+			},
+		});
+		Reflect.set(
+			Intl,
+			"PluralRules",
+			new Proxy(PluralRules, {
+				construct(target, args) {
+					plurals += 1;
+					return Reflect.construct(target, args);
+				},
+			})
+		);
+		try {
+			for (let count = 1; count <= 1000; count += 1) {
+				formatMessage(
+					"{n, plural, one {# item} other {# items}}",
+					{ n: count },
+					"en-x-reuse"
+				);
+				formatMessage(
+					"{n, selectordinal, one {#st} two {#nd} few {#rd} other {#th}}",
+					{ n: count },
+					"en-x-reuse"
+				);
+			}
+			expect(numbers).toBe(1);
+			expect(plurals).toBe(2);
+		} finally {
+			Intl.NumberFormat = NumberFormat;
+			Reflect.set(Intl, "PluralRules", PluralRules);
+		}
+	});
+	test("preserves locale-specific categories, number formatting, exact matches and invalid-locale errors", () => {
+		for (const locale of ["en", "ar", "ru", "de", "hi", "fr"]) {
+			for (const count of [0, 1, 2, 3, 11, 1000]) {
+				const category = new Intl.PluralRules(locale).select(count);
+				const number = new Intl.NumberFormat(locale).format(count);
+				expect(
+					formatMessage(
+						"{n, plural, zero {zero #} one {one #} two {two #} few {few #} many {many #} other {other #}}",
+						{ n: count },
+						locale
+					)
+				).toBe(`${category} ${number}`);
+			}
+		}
+		expect(
+			formatMessage("{n, plural, =2 {exact #} other {other #}}", { n: 2 }, "en")
+		).toBe("exact 2");
+		expect(() =>
+			formatMessage("{n, plural, other {#}}", { n: 2 }, "not_a_locale")
+		).toThrow(RangeError);
+	});
+	test("evicts old locale entries so arbitrary input cannot grow the cache without bound", () => {
+		const message = "{n, plural, other {#}}";
+		formatMessage(message, { n: 5 }, "en-x-evict");
+		for (let index = 0; index < 40; index += 1) {
+			formatMessage(message, { n: 5 }, `en-x-cache${index}`);
+		}
+		const numbers = spyOn(Intl, "NumberFormat");
+		try {
+			expect(formatMessage(message, { n: 5 }, "en-x-evict")).toBe("5");
+			expect(numbers).toHaveBeenCalledTimes(1);
+		} finally {
+			numbers.mockRestore();
+		}
+	});
+});
 
 describe("language-pack contract", () => {
 	test("ships complete starter catalogs for common locales", () => {
@@ -209,7 +318,27 @@ describe("language-pack contract", () => {
 		).toBe("Abrir en una pestaña nueva");
 		expect(
 			runtime.translate(messageIdForLiteral("Loading…"), {}, "Loading…")
+		).toBe("Cargando…");
+		expect(
+			runtime.translate(messageIdForLiteral("Loading"), {}, "Loading")
 		).toBe("Cargando");
+	});
+
+	test("translates desktop shell and composer literals", () => {
+		const runtime = new I18nRuntime([], {
+			initialLocale: "de-DE",
+			initialPackId: null,
+		});
+		const translate = (source: string) =>
+			runtime.translate(messageIdForLiteral(source), {}, source);
+		expect(translate("Close tabs to the right")).toBe("Tabs rechts schließen");
+		expect(translate("Messages in this chat won't be saved.")).toBe(
+			"Nachrichten in diesem Chat werden nicht gespeichert."
+		);
+		expect(translate("Regenerate reply")).toBe("Antwort neu generieren");
+		expect(runtime.translate("settings.title", {}, "Settings")).toBe(
+			"Einstellungen"
+		);
 	});
 
 	test("keeps right-to-left packs scoped and reports their direction", () => {
@@ -363,5 +492,57 @@ describe("language-pack contract", () => {
 		expect(() => parseLanguagePackArchive(archive)).toThrow(
 			LanguagePackValidationError
 		);
+	});
+});
+
+describe("app message overlays", () => {
+	const overlays = {
+		es: { "Ripple mode": "Modo de arrastre", Export: "No gana" },
+		"pt-BR": { "Ripple mode": "Modo ripple" },
+	};
+
+	test("an app literal follows the selected locale", () => {
+		const runtime = new I18nRuntime([], {
+			initialLocale: "es",
+			initialPackId: null,
+			overlays,
+		});
+		const id = messageIdForLiteral("Ripple mode");
+		expect(runtime.overlayMessage(id)).toBe("Modo de arrastre");
+		expect(runtime.translate(id, {}, "Ripple mode")).toBe("Modo de arrastre");
+		runtime.setLocale("pt-BR");
+		expect(runtime.translate(id, {}, "Ripple mode")).toBe("Modo ripple");
+		runtime.setLocale("en");
+		expect(runtime.overlayMessage(id)).toBeUndefined();
+		expect(runtime.translate(id, {}, "Ripple mode")).toBe("Ripple mode");
+	});
+
+	test("the selected pack's own message wins over an overlay", () => {
+		const runtime = new I18nRuntime([], {
+			initialLocale: "es",
+			initialPackId: null,
+			overlays,
+		});
+		const exportId = messageIdForLiteral("Export");
+		expect(runtime.translate(exportId, {}, "Export")).toBe(
+			runtime.selectedPack?.messages[exportId] ?? "missing"
+		);
+		expect(runtime.translate(exportId, {}, "Export")).not.toBe("No gana");
+	});
+
+	test("replacing overlays notifies subscribers", () => {
+		const runtime = new I18nRuntime([], {
+			initialLocale: "fr",
+			initialPackId: null,
+		});
+		let notified = 0;
+		runtime.subscribe(() => {
+			notified++;
+		});
+		const id = messageIdForLiteral("Ripple mode");
+		expect(runtime.overlayMessage(id)).toBeUndefined();
+		runtime.setOverlays({ fr: { "Ripple mode": "Mode ripple" } });
+		expect(notified).toBe(1);
+		expect(runtime.translate(id, {}, "Ripple mode")).toBe("Mode ripple");
 	});
 });

@@ -10,7 +10,7 @@ export function SpaceUploadPanel({
 	return (
 		<section
 			aria-labelledby="space-upload-title"
-			className="rounded-lg border border-border/70 bg-white/80 p-4 dark:bg-[#25262a]"
+			className="rounded-lg border bg-card p-4"
 			data-testid="space-upload-panel"
 		>
 			<h2 className="font-medium text-sm" id="space-upload-title">

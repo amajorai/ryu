@@ -10,6 +10,9 @@ use serde_json::Value;
 
 use crate::agents::{AgentLifecycleStatus, AgentRecord, AgentSafetyProfile, AgentStore};
 
+/// What a tool call does to state. Whether it reads private data or can send
+/// data off the machine is a separate axis, kept in
+/// [`crate::approvals::exfiltration_guard`] (`web.extract` is a `Read` here).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolEffect {
     Read,
@@ -44,6 +47,20 @@ pub fn classify_tool(tool_id: &str) -> ToolEffect {
         // still a mutation, so Trial/ReadOnly agents cannot use it, while an
         // ApprovalRequired agent can pass it through the normal approval gate.
         return ToolEffect::Mutate;
+    }
+    if tool_id == crate::sidecar::mcp::challenges_tool::SUBMIT_TOOL_ID {
+        // Its annotations are deliberately non-destructive and not read-only,
+        // which leaves the name heuristic to decide; `submit` is not one of its
+        // verbs. It sends an entry to the control plane as the user, so it is an
+        // outbound effect: blocked for Trial/ReadOnly agents, approval-gated
+        // otherwise.
+        return ToolEffect::External;
+    }
+    if tool_id == crate::sidecar::mcp::treg_tool::CALL_TOOL_ID {
+        // A metered call to a third-party API through the Gateway: spends the
+        // organization's credits and may write upstream, so it is an outbound
+        // effect, approval-gated like other external calls.
+        return ToolEffect::External;
     }
     let normalized = tool_id.to_ascii_lowercase();
     let tokens: Vec<&str> = normalized
@@ -352,6 +369,8 @@ mod tests {
         assert_eq!(classify_tool("gmail.send_email"), ToolEffect::External);
         assert_eq!(classify_tool("agents.react"), ToolEffect::Mutate);
         assert_eq!(classify_tool("vendor.mystery"), ToolEffect::Unknown);
+        assert_eq!(classify_tool("challenges.submit"), ToolEffect::External);
+        assert_eq!(classify_tool("vendor.submit"), ToolEffect::Unknown);
     }
 
     #[test]

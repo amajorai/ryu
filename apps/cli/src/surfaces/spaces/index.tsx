@@ -1,3 +1,11 @@
+import {
+	type ConversationRow,
+	listRecentConversations,
+} from "../../core/conversations.ts";
+import {
+	nativeErrorMessage as errText,
+	humanizeError,
+} from "../../core/native-errors.ts";
 /* @jsxImportSource @opentui/react */
 // Spaces surface (/spaces) - the desktop Spaces (RAG) page, terminal edition.
 // Ported from the legacy src/tabs/spaces.tsx so the new shell does not depend on
@@ -15,7 +23,6 @@
 // raw input).
 
 import { useKeyboard } from "@opentui/react";
-import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import {
 	fetchDocuments,
 	fetchSpaces,
@@ -34,6 +41,7 @@ import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import { useInputFocused } from "../../core/InputFocusContext.tsx";
+import { tf } from "../../i18n/translate.ts";
 import { ErrorView } from "../../ui/ErrorView.tsx";
 import { Loading } from "../../ui/Loading.tsx";
 import { useToast } from "../../ui/toast.tsx";
@@ -42,55 +50,9 @@ import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
 
 const SCROLL_STEP = 10;
 const HISTORY_WINDOW = 14;
-const DATE_SPLIT = "T";
-
-// Core's GET /api/conversations wire shape (snake_case). The response is
-// `{ conversations: [...] }` or a bare array.
-interface ConversationWire {
-	agent_id?: string | null;
-	id: string;
-	message_count?: number | null;
-	title?: string | null;
-	updated_at?: string | null;
-}
-
-interface ConversationRow {
-	date: string | null;
-	id: string;
-	messageCount: number | null;
-	title: string;
-}
-
-function toConversationRow(wire: ConversationWire): ConversationRow {
-	const trimmed = wire.title?.trim();
-	const date = wire.updated_at?.split(DATE_SPLIT)[0] ?? null;
-	return {
-		id: wire.id,
-		title: trimmed && trimmed.length > 0 ? trimmed : "untitled",
-		messageCount:
-			typeof wire.message_count === "number" ? wire.message_count : null,
-		date: date && date.length > 0 ? date : null,
-	};
-}
-
-// No typed core-client module exposes the bare conversation list, so this reads
-// it through the shared HTTP primitive.
-async function fetchConversations(
-	target: ApiTarget
-): Promise<ConversationRow[]> {
-	const json = await request<
-		ConversationWire[] | { conversations?: ConversationWire[] }
-	>(target, "/api/conversations");
-	const arr = Array.isArray(json) ? json : (json.conversations ?? []);
-	return arr.map(toConversationRow);
-}
-
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
 
 function SpacesSurface({ active, paneId }: SurfaceProps) {
-	const { target, url, token } = useCore();
+	const { target } = useCore();
 	const theme = useTheme();
 	const { notify } = useToast();
 	const { focusedPaneId } = useWorkspace();
@@ -137,7 +99,7 @@ function SpacesSurface({ active, paneId }: SurfaceProps) {
 				setIndex((i) => (list.length === 0 ? 0 : Math.min(i, list.length - 1)));
 				setLoaded(true);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (reqRef.current !== reqId) {
 					return;
 				}
@@ -150,15 +112,18 @@ function SpacesSurface({ active, paneId }: SurfaceProps) {
 				}
 			});
 
-		fetchConversations(target)
+		listRecentConversations(target)
 			.then((convs) => {
 				if (reqRef.current === reqId) {
 					setConversations(convs);
 				}
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (reqRef.current === reqId) {
-					notify(`conversations failed: ${errText(err)}`, "error");
+					notify(
+						tf("conversations failed: {error}", { error: errText(err) }),
+						"error"
+					);
 				}
 			});
 	}, [target, notify]);
@@ -190,14 +155,18 @@ function SpacesSurface({ active, paneId }: SurfaceProps) {
 					setDocs((prev) => ({ ...prev, [selectedSpaceId]: list }));
 				}
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (docsReqRef.current === reqId) {
-					notify(`documents failed: ${errText(err)}`, "error");
+					notify(
+						tf("documents failed: {error}", { error: errText(err) }),
+						"error"
+					);
 				}
 			});
 		// target/notify are derived from url/token + stable context; depending on
 		// url/token (primitives) avoids re-running this effect every render.
-	}, [active, selectedSpaceId, target, notify]);
+		// reloadKey invalidates the selected document cache when the user presses r.
+	}, [active, selectedSpaceId, target, notify, reloadKey]);
 
 	const refreshAll = useCallback(() => {
 		setDocs({});
@@ -225,7 +194,9 @@ function SpacesSurface({ active, paneId }: SurfaceProps) {
 		return <Loading label="Loading spaces…" />;
 	}
 	if (error) {
-		return <ErrorView message={error} />;
+		return (
+			<ErrorView message={humanizeError(error, { url: target.url })} onRetry />
+		);
 	}
 
 	const selectedDocs = selectedSpaceId ? docs[selectedSpaceId] : undefined;
@@ -268,12 +239,16 @@ function SpacesPane({ spaces, index }: { spaces: Space[]; index: number }) {
 				spaces.map((space, i) => {
 					const selected = i === index;
 					const count =
-						typeof space.documentCount === "number"
+						space.documentCount !== undefined && space.documentCount !== null
 							? ` (${space.documentCount} docs)`
 							: "";
 					return (
 						<box flexDirection="row" gap={1} key={space.id}>
-							<text fg={selected ? theme.colors.primary : theme.colors.muted}>
+							<text
+								fg={
+									selected ? theme.colors.primary : theme.colors.mutedForeground
+								}
+							>
 								{selected ? "›" : " "}
 							</text>
 							<text
@@ -331,7 +306,9 @@ function renderDocs(
 			{docs.map((doc) => (
 				<box flexDirection="row" gap={1} key={doc.id}>
 					<text fg={titleColor}>{doc.title}</text>
-					<text fg={mutedColor}>{`${doc.chunkCount} chunks`}</text>
+					<text fg={mutedColor}>
+						{tf("{chunkCount} chunks", { chunkCount: String(doc.chunkCount) })}
+					</text>
 				</box>
 			))}
 		</box>

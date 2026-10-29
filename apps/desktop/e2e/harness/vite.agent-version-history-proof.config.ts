@@ -8,6 +8,7 @@ const desktopRoot = path.resolve(harnessDir, "../..");
 
 export default defineConfig({
 	plugins: [react()],
+	define: { "process.env": {} },
 	css: {
 		postcss: {
 			plugins: [tailwindcss()],
@@ -32,4 +33,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "agent-version-history-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

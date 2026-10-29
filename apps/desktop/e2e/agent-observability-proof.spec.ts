@@ -1,8 +1,91 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+import { parseProofJson } from "./fixture-json.ts";
+
+const AGENT_ID = "observability-proof-agent";
+const PROOF_TIME = new Date("2026-09-28T12:00:00.000Z");
+
+interface ProofRequest {
+	body: unknown;
+	method: string;
+	path: string;
+	query: Record<string, string>;
+	status: number;
+}
+
+interface ProofSnapshot {
+	auditEntries: { id: string }[];
+	importedRunIds: string[];
+	prunedRows: number;
+	requests: ProofRequest[];
+	suites: { agent_id: string; id: string; name: string }[];
+}
+
+interface ProofWindow extends Window {
+	__AGENT_OBSERVABILITY_PROOF__: {
+		appendRefreshFixtureEntry: () => void;
+		failNext: (
+			point:
+				| "audit"
+				| "prune"
+				| "trace"
+				| "suiteList"
+				| "suiteCreate"
+				| "traceImport"
+				| "score"
+				| "redteam"
+		) => void;
+		snapshot: () => ProofSnapshot;
+	};
+}
+
+async function readProof(page: Page): Promise<ProofSnapshot> {
+	return page.evaluate(() =>
+		/* SAFETY: agent-observability-proof.tsx installs __AGENT_OBSERVABILITY_PROOF__ before this proof page is evaluated. */ (
+			window as ProofWindow
+		).__AGENT_OBSERVABILITY_PROOF__.snapshot()
+	);
+}
+
+async function openProof(page: Page): Promise<void> {
+	await page.clock.install({ time: PROOF_TIME });
+	await page.goto("/agent-observability-proof.html", {
+		waitUntil: "domcontentloaded",
+	});
+	await expect(page.getByTestId("proof-status")).toHaveText(
+		"Production UI mounted"
+	);
+	await expect(page.getByTestId("observability-events")).toBeVisible();
+}
+
+function requestsFor(
+	snapshot: ProofSnapshot,
+	method: string,
+	path: string
+): ProofRequest[] {
+	return snapshot.requests.filter(
+		(request) => request.method === method && request.path === path
+	);
+}
+
+function expectKnownFixtureRequests(snapshot: ProofSnapshot): void {
+	expect(snapshot.requests.filter((request) => request.status === 404)).toEqual(
+		[]
+	);
+}
+
+function expectWindowStart(
+	value: string | undefined,
+	durationMs: number
+): void {
+	expect(value).toBeTruthy();
+	const requestedStart = Date.parse(value ?? "");
+	const expectedStart = PROOF_TIME.getTime() - durationMs;
+	expect(Math.abs(requestedStart - expectedStart)).toBeLessThan(2000);
+}
 
 test("agent observability keeps the observe-to-trace workflow visible", async ({
 	page,
-}) => {
+}, testInfo) => {
 	const browserErrors: string[] = [];
 	page.on("console", (message) => {
 		if (message.type() === "error") {
@@ -11,6 +94,7 @@ test("agent observability keeps the observe-to-trace workflow visible", async ({
 	});
 	page.on("pageerror", (error) => browserErrors.push(error.message));
 
+	await page.clock.install({ time: PROOF_TIME });
 	await page.goto("/agent-observability-proof.html", {
 		waitUntil: "domcontentloaded",
 	});
@@ -19,16 +103,44 @@ test("agent observability keeps the observe-to-trace workflow visible", async ({
 		"Production UI mounted"
 	);
 	await expect(page.getByText("Agent observability").first()).toBeVisible();
+	await page.getByLabel("Observability window").selectOption("7d");
+	await expect(page.getByTestId("observability-summary")).toContainText(
+		"Last 7 days"
+	);
 	await expect(page.getByTestId("observability-summary")).toContainText(
 		"Requests"
+	);
+	await expect(page.getByTestId("observability-summary")).toContainText("60%");
+	await expect(page.getByTestId("observability-summary")).toContainText(
+		"1 hit · 1 miss"
+	);
+	await expect(page.getByTestId("observability-summary")).toContainText(
+		"Cache hits"
+	);
+	await expect(page.getByTestId("observability-summary")).toContainText("700");
+	await expect(page.getByTestId("observability-summary")).toContainText(
+		"Cache writes"
+	);
+	await expect(page.getByTestId("observability-summary")).toContainText("80");
+	await expect(page.getByTestId("observability-summary")).toContainText(
+		"Cache misses"
+	);
+	await expect(page.getByTestId("observability-summary")).toContainText(
+		"41,220"
 	);
 	await expect(page.getByTestId("observability-events")).toContainText(
 		"gpt-4o-mini"
 	);
+	await expect(
+		page.getByTestId("prompt-cache-status-audit-proof-success")
+	).toHaveText("Hit + write");
 	await page.getByLabel("Observability filter").selectOption("errors");
 	await expect(page.getByTestId("observability-events")).toContainText(
 		"claude-3-5-sonnet"
 	);
+	await expect(
+		page.getByTestId("prompt-cache-status-audit-proof-error")
+	).toHaveText("Miss + write");
 	await page.getByLabel("Observability filter").selectOption("all");
 	await page.getByLabel("Observability window").selectOption("7d");
 	await expect(page.getByTestId("observability-summary")).toContainText(
@@ -43,6 +155,36 @@ test("agent observability keeps the observe-to-trace workflow visible", async ({
 		"claude-3-5-sonnet"
 	);
 	await page.getByTestId("observability-event-audit-proof-success").click();
+	await expect(page.getByTestId("observability-prompt-cache")).toContainText(
+		"Hit + write"
+	);
+	await expect(page.getByTestId("observability-prompt-cache")).toContainText(
+		"300 tokens"
+	);
+	await expect(page.getByTestId("observability-context-window")).toContainText(
+		"128,000 tokens"
+	);
+	await expect(page.getByTestId("observability-context-window")).toContainText(
+		"42,000 input · 33% of window"
+	);
+	await expect(page.getByTestId("observability-cache-usage")).toContainText(
+		"Cache hits"
+	);
+	await expect(page.getByTestId("observability-cache-usage")).toContainText(
+		"700"
+	);
+	await expect(page.getByTestId("observability-cache-usage")).toContainText(
+		"Cache writes"
+	);
+	await expect(page.getByTestId("observability-cache-usage")).toContainText(
+		"80"
+	);
+	await expect(page.getByTestId("observability-cache-usage")).toContainText(
+		"Cache misses"
+	);
+	await expect(page.getByTestId("observability-cache-usage")).toContainText(
+		"41,220"
+	);
 	await expect(page.getByTestId("observability-trace")).toContainText(
 		"Core run spans"
 	);
@@ -56,8 +198,6 @@ test("agent observability keeps the observe-to-trace workflow visible", async ({
 	await expect(
 		page.getByRole("button", { exact: true, name: "Successful model calls" })
 	).toBeVisible();
-	await page.getByRole("button", { name: "Prune local audit" }).click();
-	await expect(page.getByText(/Retention applied/)).toBeVisible();
 	await page.getByLabel("Completed output to score").fill("A grounded answer.");
 	await page
 		.getByLabel("Online scoring rubric")
@@ -81,18 +221,481 @@ test("agent observability keeps the observe-to-trace workflow visible", async ({
 
 	await page.screenshot({
 		fullPage: true,
-		path: "artifacts/agent-observability-proof-complete.png",
+		path: testInfo.outputPath("agent-observability.png"),
 	});
 	await page.setViewportSize({ width: 480, height: 900 });
 	await page.screenshot({
 		fullPage: true,
-		path: "artifacts/agent-observability-proof-narrow.png",
+		path: testInfo.outputPath("agent-observability-proof-narrow.png"),
 	});
 	await page.evaluate(() => document.documentElement.classList.add("dark"));
 	await page.screenshot({
 		fullPage: true,
-		path: "artifacts/agent-observability-proof-dark.png",
+		path: testInfo.outputPath("agent-observability-proof-dark.png"),
 	});
 
 	expect(browserErrors).toEqual([]);
+	await page.getByRole("button", { name: "Prune local audit" }).click();
+	await expect(
+		page.getByText("Retention applied · 3 rows removed")
+	).toBeVisible();
+	await expect(page.getByText("No events match this view.")).toBeVisible();
+	const pruned = await readProof(page);
+	expect(pruned.auditEntries).toEqual([]);
+	expect(pruned.prunedRows).toBe(3);
+	expect(requestsFor(pruned, "POST", "/api/gateway/audit/prune")).toEqual([
+		{
+			body: null,
+			method: "POST",
+			path: "/api/gateway/audit/prune",
+			query: {},
+			status: 200,
+		},
+	]);
+	expectKnownFixtureRequests(pruned);
+});
+
+test("refresh retries the exact time-window query while search and event filters stay local", async ({
+	page,
+}) => {
+	await openProof(page);
+	let state = await readProof(page);
+	const initialAudit = requestsFor(state, "GET", "/api/gateway/audit")[0];
+	expect(initialAudit?.query).toMatchObject({
+		agent_id: AGENT_ID,
+		limit: "100",
+	});
+	expectWindowStart(initialAudit?.query.from, 24 * 60 * 60_000);
+	expect(state.auditEntries.map((entry) => entry.id)).toEqual([
+		"audit-proof-success",
+		"audit-proof-error",
+		"audit-proof-tool",
+	]);
+	await expect(
+		page.getByTestId("observability-event-audit-proof-success")
+	).toBeVisible();
+	await expect(
+		page.getByTestId("observability-event-audit-proof-error")
+	).toHaveCount(0);
+
+	await page.evaluate(() => {
+		window.__AGENT_OBSERVABILITY_PROOF__.appendRefreshFixtureEntry();
+		window.__AGENT_OBSERVABILITY_PROOF__.failNext("audit");
+	});
+	const refresh = page.getByRole("button", {
+		name: "Refresh observability",
+	});
+	await refresh.click();
+	await expect(page.getByText(/failed: 503/u)).toBeVisible();
+	await refresh.click();
+	await expect(
+		page.getByTestId("observability-event-audit-proof-refreshed")
+	).toBeVisible();
+	state = await readProof(page);
+	const auditReads = requestsFor(state, "GET", "/api/gateway/audit");
+	expect(auditReads.map((request) => request.status)).toEqual([200, 503, 200]);
+	for (const request of auditReads.slice(1)) {
+		expect(request.query).toMatchObject({ agent_id: AGENT_ID, limit: "100" });
+		expectWindowStart(request.query.from, 24 * 60 * 60_000);
+	}
+
+	const requestsBeforeLocalFilters = auditReads.length;
+	const search = page.getByLabel("Search observability");
+	await search.fill("background-refresh");
+	await expect(
+		page.getByTestId("observability-event-audit-proof-refreshed")
+	).toBeVisible();
+	await expect(
+		page.getByTestId("observability-event-audit-proof-success")
+	).toHaveCount(0);
+	await search.fill("");
+	state = await readProof(page);
+	expect(requestsFor(state, "GET", "/api/gateway/audit")).toHaveLength(
+		requestsBeforeLocalFilters
+	);
+	await page.getByLabel("Observability window").selectOption("7d");
+	await expect(
+		page.getByTestId("observability-event-audit-proof-error")
+	).toBeVisible();
+	state = await readProof(page);
+	const sevenDayRead = requestsFor(state, "GET", "/api/gateway/audit").at(-1);
+	expect(sevenDayRead?.query).toMatchObject({
+		agent_id: AGENT_ID,
+		limit: "100",
+	});
+	expectWindowStart(sevenDayRead?.query.from, 7 * 24 * 60 * 60_000);
+	const readsAfterWindowChange = requestsFor(
+		state,
+		"GET",
+		"/api/gateway/audit"
+	).length;
+	await page.getByLabel("Observability filter").selectOption("errors");
+	await expect(
+		page.getByTestId("observability-event-audit-proof-error")
+	).toBeVisible();
+	state = await readProof(page);
+	expect(requestsFor(state, "GET", "/api/gateway/audit")).toHaveLength(
+		readsAfterWindowChange
+	);
+
+	await page.getByLabel("Observability filter").selectOption("model");
+	await expect(
+		page.getByTestId("observability-event-audit-proof-success")
+	).toBeVisible();
+
+	await page.getByLabel("Observability filter").selectOption("tool");
+	await page.getByLabel("Observability window").selectOption("all");
+	await expect(
+		page.getByTestId("observability-event-audit-proof-tool")
+	).toBeVisible();
+	state = await readProof(page);
+	const allTimeRead = requestsFor(state, "GET", "/api/gateway/audit").at(-1);
+	expect(allTimeRead?.query).toEqual({ agent_id: AGENT_ID, limit: "100" });
+
+	await page.getByLabel("Observability filter").selectOption("model");
+	await page.getByTestId("observability-event-audit-proof-success").click();
+	await expect(page.getByTestId("observability-trace")).toContainText(
+		"search_docs"
+	);
+	await expect(page.getByTestId("observability-context-window")).toContainText(
+		"128,000 tokens"
+	);
+	state = await readProof(page);
+	expect(
+		requestsFor(state, "GET", "/api/runs/run-proof-success/trace")
+	).toEqual([
+		{
+			body: null,
+			method: "GET",
+			path: "/api/runs/run-proof-success/trace",
+			query: {},
+			status: 200,
+		},
+	]);
+	expect(
+		requestsFor(state, "GET", "/api/models/context-window").at(-1)
+	).toMatchObject({
+		method: "GET",
+		query: { model: "openai/gpt-4o-mini" },
+		status: 200,
+	});
+	await page.screenshot({
+		animations: "disabled",
+		fullPage: true,
+		path: test.info().outputPath("agent-observability-refresh-trace.png"),
+	});
+	expectKnownFixtureRequests(state);
+});
+
+test("saved views trim, persist, reapply, and delete the exact local query/filter/window", async ({
+	page,
+}) => {
+	await openProof(page);
+	await page.getByLabel("Observability filter").selectOption("errors");
+	await page.getByLabel("Observability window").selectOption("7d");
+	const search = page.getByLabel("Search observability");
+	await search.fill("claude-3-5-sonnet");
+	await expect(
+		page.getByTestId("observability-event-audit-proof-error")
+	).toBeVisible();
+
+	const save = page.getByRole("button", {
+		name: "Save current view",
+		exact: true,
+	});
+	await expect(save).toBeDisabled();
+	const name = page.getByLabel("Saved observability view name");
+	await name.fill("   ");
+	await expect(save).toBeDisabled();
+	await name.fill("  Provider timeout / seven day  ");
+	await save.click();
+	const viewButton = page.getByRole("button", {
+		name: "Provider timeout / seven day",
+		exact: true,
+	});
+	await expect(viewButton).toBeVisible();
+	const storedRaw = await page.evaluate(
+		(key) => localStorage.getItem(key),
+		`ryu-observability-views:${AGENT_ID}`
+	);
+	const stored = storedRaw ? parseProofJson(storedRaw) : null;
+	expect(stored).toEqual([
+		expect.objectContaining({
+			filter: "errors",
+			name: "Provider timeout / seven day",
+			query: "claude-3-5-sonnet",
+			timeRange: "7d",
+		}),
+	]);
+	await page.reload();
+	await expect(viewButton).toBeVisible();
+	await expect(search).toHaveValue("");
+	await expect(page.getByLabel("Observability filter")).toHaveValue("all");
+	await expect(page.getByLabel("Observability window")).toHaveValue("24h");
+	await viewButton.click();
+	await expect(search).toHaveValue("claude-3-5-sonnet");
+	await expect(page.getByLabel("Observability filter")).toHaveValue("errors");
+	await expect(page.getByLabel("Observability window")).toHaveValue("7d");
+	await expect(
+		page.getByTestId("observability-event-audit-proof-error")
+	).toBeVisible();
+	const appliedViewState = await readProof(page);
+	const appliedViewRead = requestsFor(
+		appliedViewState,
+		"GET",
+		"/api/gateway/audit"
+	).at(-1);
+	expect(appliedViewRead?.query).toMatchObject({
+		agent_id: AGENT_ID,
+		limit: "100",
+	});
+	expectWindowStart(appliedViewRead?.query.from, 7 * 24 * 60 * 60_000);
+	expectKnownFixtureRequests(appliedViewState);
+	await page.screenshot({
+		animations: "disabled",
+		fullPage: true,
+		path: test.info().outputPath("agent-observability-saved-view-applied.png"),
+	});
+
+	await page
+		.getByRole("button", {
+			name: "Remove saved view Provider timeout / seven day",
+			exact: true,
+		})
+		.click();
+	await expect(viewButton).toHaveCount(0);
+	expect(
+		await page.evaluate(
+			(key) => localStorage.getItem(key),
+			`ryu-observability-views:${AGENT_ID}`
+		)
+	).toBe("[]");
+	await page.reload();
+	await expect(viewButton).toHaveCount(0);
+	expectKnownFixtureRequests(await readProof(page));
+});
+
+test("prune reports failure, retries the exact POST, and persists the empty audit readback", async ({
+	page,
+}) => {
+	await openProof(page);
+	let state = await readProof(page);
+	expect(state.auditEntries).toHaveLength(3);
+	await page.evaluate(() =>
+		window.__AGENT_OBSERVABILITY_PROOF__.failNext("prune")
+	);
+	const prune = page.getByRole("button", {
+		name: "Prune local audit",
+		exact: true,
+	});
+	await prune.click();
+	await expect(page.getByRole("status")).toContainText(
+		"/api/gateway/audit/prune failed: 503"
+	);
+	state = await readProof(page);
+	expect(state.auditEntries).toHaveLength(3);
+	expect(state.prunedRows).toBe(0);
+	expect(
+		requestsFor(state, "POST", "/api/gateway/audit/prune").map(
+			(request) => request.status
+		)
+	).toEqual([503]);
+
+	await prune.click();
+	await expect(page.getByRole("status")).toHaveText(
+		"Retention applied · 3 rows removed"
+	);
+	await expect(page.getByText("No events match this view.")).toBeVisible();
+	state = await readProof(page);
+	expect(state.auditEntries).toEqual([]);
+	expect(state.prunedRows).toBe(3);
+	expect(
+		requestsFor(state, "POST", "/api/gateway/audit/prune").map(
+			({ body, status }) => ({ body, status })
+		)
+	).toEqual([
+		{ body: null, status: 503 },
+		{ body: null, status: 200 },
+	]);
+	const finalRead = requestsFor(state, "GET", "/api/gateway/audit").at(-1);
+	expect(finalRead).toMatchObject({
+		query: { agent_id: AGENT_ID, limit: "100" },
+		status: 200,
+	});
+	await page.screenshot({
+		animations: "disabled",
+		fullPage: true,
+		path: test.info().outputPath("agent-observability-pruned-empty.png"),
+	});
+	await page.reload();
+	await expect(page.getByTestId("observability-summary")).toContainText(
+		"Requests0"
+	);
+	const reloaded = await readProof(page);
+	expect(reloaded.auditEntries).toEqual([]);
+	expectKnownFixtureRequests(reloaded);
+});
+
+test("Quality handoff creates one local suite, retries trace import, and opens the exact conversation", async ({
+	page,
+}) => {
+	await openProof(page);
+	await page.getByTestId("observability-event-audit-proof-success").click();
+	await expect(page.getByTestId("observability-trace")).toContainText(
+		"search_docs"
+	);
+	await page.evaluate(() =>
+		window.__AGENT_OBSERVABILITY_PROOF__.failNext("traceImport")
+	);
+	const addToQuality = page.getByRole("button", {
+		name: "Add to Quality tests",
+		exact: true,
+	});
+	await addToQuality.click();
+	await expect(page.getByRole("alert")).toContainText("failed: 503");
+	let state = await readProof(page);
+	expect(state.suites).toHaveLength(1);
+	const suiteLists = requestsFor(state, "GET", "/api/prompt-suites");
+	expect(suiteLists.at(-1)?.query).toEqual({ agent_id: AGENT_ID });
+	expect(requestsFor(state, "POST", "/api/prompt-suites")).toEqual([
+		{
+			body: {
+				agent_id: AGENT_ID,
+				config: {
+					prompts: [],
+					providers: ["openai/gpt-4o-mini"],
+					tests: [],
+				},
+				label: "Trace baseline",
+				name: "Agent regression suite",
+			},
+			method: "POST",
+			path: "/api/prompt-suites",
+			query: {},
+			status: 200,
+		},
+	]);
+	const importPath = "/api/prompt-suites/suite-observability-proof/traces";
+	expect(
+		requestsFor(state, "POST", importPath).map(({ body, status }) => ({
+			body,
+			status,
+		}))
+	).toEqual([{ body: { run_id: "run-proof-success" }, status: 503 }]);
+
+	await addToQuality.click();
+	await expect(page.getByRole("status")).toContainText(
+		"Added to Agent regression suite as a versioned test case."
+	);
+	state = await readProof(page);
+	expect(requestsFor(state, "POST", "/api/prompt-suites")).toHaveLength(1);
+	expect(
+		requestsFor(state, "POST", importPath).map(({ body, status }) => ({
+			body,
+			status,
+		}))
+	).toEqual([
+		{ body: { run_id: "run-proof-success" }, status: 503 },
+		{ body: { run_id: "run-proof-success" }, status: 200 },
+	]);
+	await addToQuality.click();
+	await expect(page.getByRole("status")).toContainText(
+		"This trace is already in Agent regression suite."
+	);
+	state = await readProof(page);
+	expect(state.importedRunIds).toEqual(["run-proof-success"]);
+	expect(
+		requestsFor(state, "POST", importPath).map((request) => request.status)
+	).toEqual([503, 200, 200]);
+	expectKnownFixtureRequests(state);
+
+	await page
+		.getByRole("button", { name: "Open conversation", exact: true })
+		.click();
+	await expect(page.locator("body")).toHaveAttribute(
+		"data-opened-run",
+		"run-proof-success"
+	);
+	await page.screenshot({
+		animations: "disabled",
+		fullPage: true,
+		path: test
+			.info()
+			.outputPath("agent-observability-quality-retry-open-run.png"),
+	});
+});
+
+test("scoring and security failures can be retried with the same exact local request bodies", async ({
+	page,
+}) => {
+	await openProof(page);
+	await page.getByTestId("observability-event-audit-proof-success").click();
+	const score = page.getByRole("button", { name: "Score output", exact: true });
+	await expect(score).toBeDisabled();
+	await page.getByLabel("Completed output to score").fill("   ");
+	await expect(score).toBeDisabled();
+	await page
+		.getByLabel("Completed output to score")
+		.fill("  A grounded answer.  ");
+	await page
+		.getByLabel("Online scoring rubric")
+		.fill("  The answer is grounded.  ");
+	await expect(score).toBeEnabled();
+	await page.evaluate(() =>
+		window.__AGENT_OBSERVABILITY_PROOF__.failNext("score")
+	);
+	await score.click();
+	await expect(page.getByRole("alert")).toContainText(
+		"/api/gateway/evals/score failed: 503"
+	);
+	await score.click();
+	await expect(
+		page.getByText("Online score 91%", { exact: true })
+	).toBeVisible();
+	let state = await readProof(page);
+	const expectedScoreBody = {
+		agent_id: AGENT_ID,
+		assertions: [{ kind: "llm_rubric", rubric: "The answer is grounded." }],
+		model: "openai/gpt-4o-mini",
+		prompt: "req-proof-success",
+		response: "  A grounded answer.  ",
+	};
+	expect(
+		requestsFor(state, "POST", "/api/gateway/evals/score").map(
+			({ body, status }) => ({ body, status })
+		)
+	).toEqual([
+		{ body: expectedScoreBody, status: 503 },
+		{ body: expectedScoreBody, status: 200 },
+	]);
+
+	await page.evaluate(() =>
+		window.__AGENT_OBSERVABILITY_PROOF__.failNext("redteam")
+	);
+	const securityButton = page.getByTestId("observability-security-run");
+	await securityButton.click();
+	await expect(page.getByRole("alert")).toContainText(
+		"/api/gateway/redteam/run failed: 503"
+	);
+	await securityButton.click();
+	await expect(page.getByTestId("observability-security-result")).toContainText(
+		"5/5 protected"
+	);
+	state = await readProof(page);
+	expect(
+		requestsFor(state, "POST", "/api/gateway/redteam/run").map(
+			({ body, status }) => ({ body, status })
+		)
+	).toEqual([
+		{ body: { agent_id: AGENT_ID, model: "gpt-4o-mini" }, status: 503 },
+		{ body: { agent_id: AGENT_ID, model: "gpt-4o-mini" }, status: 200 },
+	]);
+	await page.screenshot({
+		animations: "disabled",
+		fullPage: true,
+		path: test
+			.info()
+			.outputPath("agent-observability-score-redteam-retried.png"),
+	});
+	expectKnownFixtureRequests(state);
 });

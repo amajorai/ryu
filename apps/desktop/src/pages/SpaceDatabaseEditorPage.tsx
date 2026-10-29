@@ -1,29 +1,39 @@
 import { LibraryIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { DataGrid } from "@ryu/ui/components/data-grid/data-grid";
+import { jsonResponseValueSchema } from "@ryu/app-host/json-values";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { DataGrid } from "@ryu/ui/components/data-grid/data-grid.tsx";
 import {
 	Dialog,
 	DialogContent,
+	DialogDescription,
+	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
+} from "@ryu/ui/components/dialog.tsx";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { useDataGrid } from "@ryu/ui/hooks/use-data-grid";
-import { getEmptyCellValue } from "@ryu/ui/lib/data-grid";
-import type { CellOpts } from "@ryu/ui/types/data-grid";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { useDataGrid } from "@ryu/ui/hooks/use-data-grid.ts";
+import { getEmptyCellValue } from "@ryu/ui/lib/data-grid.ts";
+import {
+	computeFormulaColumns,
+	renameColumnInFormulas,
+} from "@ryu/ui/lib/data-grid-formula.ts";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { CellOpts } from "@ryu/ui/types/data-grid.ts";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Maximize2, Plus } from "lucide-react";
+import { Maximize2, Play, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import { useTabTitleSync } from "@/src/components/layout/tab-rename.tsx";
 import { ColumnEditor } from "@/src/components/spaces/ColumnEditor.tsx";
 import { BoardView } from "@/src/components/spaces/views/BoardView.tsx";
@@ -36,6 +46,11 @@ import {
 	useTabSelector,
 } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
+import {
+	querySpaceDatabase,
+	type SpaceDatabaseQueryResult,
+} from "@/src/lib/api/spaces.ts";
 import {
 	type DatabaseSnapshot,
 	useDatabaseCollab,
@@ -52,6 +67,7 @@ import {
 	type DbViewKind,
 	defaultView,
 	diffCellEdits,
+	insertRows as insertRowsY,
 	makeEmptyRow,
 	newColumnId,
 	newRowId,
@@ -68,12 +84,12 @@ const DEFAULT_GRID_HEIGHT = 480;
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-const SAVE_LABEL: Record<SaveState, string> = {
+const SAVE_LABEL = {
 	idle: "",
 	saving: "Saving…",
 	saved: "Saved",
 	error: "Saved on this device",
-};
+} satisfies Record<SaveState, string>;
 
 /** A sensible default name for a freshly-added view of the given kind. */
 function defaultViewName(kind: DbViewKind): string {
@@ -98,6 +114,32 @@ type ColumnEditorState =
 			initial: { label: string; cell: CellOpts };
 	  }
 	| null;
+
+/**
+ * The grid edits rows that carry computed formula values; put back what is
+ * stored for formula columns (matched by row id) so results are never saved.
+ */
+function withStoredFormulaValues(
+	next: DbRow[],
+	stored: DbRow[],
+	columns: DbColumn[]
+): DbRow[] {
+	const formulaIds = columns
+		.filter((column) => column.cell.variant === "formula")
+		.map((column) => column.id);
+	if (formulaIds.length === 0) {
+		return next;
+	}
+	const storedById = new Map(stored.map((row) => [row.__id, row]));
+	return next.map((row) => {
+		const original = storedById.get(row.__id);
+		const restored: DbRow = { ...row };
+		for (const id of formulaIds) {
+			restored[id] = original?.[id] ?? "";
+		}
+		return restored;
+	});
+}
 
 /** Drop the reserved collaborative `__id` from rows before serializing to JSON. */
 function stripRowIds(rows: DbRow[]): DbRow[] {
@@ -142,6 +184,12 @@ export default function SpaceDatabaseEditorPage({
 	const [activeViewId, setActiveViewId] = useState<string>("");
 	const [saveState, setSaveState] = useState<SaveState>("idle");
 	const [columnEditor, setColumnEditor] = useState<ColumnEditorState>(null);
+	const [queryOpen, setQueryOpen] = useState(false);
+	const [queryText, setQueryText] = useState("SELECT * FROM data LIMIT 100");
+	const [queryResult, setQueryResult] =
+		useState<SpaceDatabaseQueryResult | null>(null);
+	const [queryError, setQueryError] = useState<string | null>(null);
+	const [queryRunning, setQueryRunning] = useState(false);
 	// Bumped by the load-error Retry button to re-run the initial fetch.
 	const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -166,7 +214,7 @@ export default function SpaceDatabaseEditorPage({
 				// collaborative and local paths, not just the collaborative snapshot.
 				const seededRows = parsed.rows.map((row) => ({
 					...row,
-					__id: typeof row.__id === "string" ? row.__id : newRowId(),
+					__id: isNativeText(row.__id) ? row.__id : newRowId(),
 				}));
 				const seededViews =
 					parsed.views && parsed.views.length > 0
@@ -260,19 +308,21 @@ export default function SpaceDatabaseEditorPage({
 		// than a partial/racey write.
 		const source = JSON.stringify({
 			columns: columnsRef.current,
-			rows: stripRowIds(rowsRef.current),
+			rows: collaborative ? stripRowIds(rowsRef.current) : rowsRef.current,
 			views: viewsRef.current,
 		} satisfies DatabaseDoc);
 		try {
 			await saveDocument(spaceId, databaseId, titleRef.current, source);
 			setSaveState("saved");
+			return true;
 		} catch {
 			setSaveState("error");
 			toast.error(
 				"Saved on this device. Some search features may be unavailable right now."
 			);
+			return false;
 		}
-	}, [saveDocument, spaceId, databaseId]);
+	}, [collaborative, saveDocument, spaceId, databaseId]);
 
 	const scheduleSave = useCallback(() => {
 		if (timerRef.current) {
@@ -312,17 +362,25 @@ export default function SpaceDatabaseEditorPage({
 
 	// A grid data edit. Collaborative: write only the changed cells to the CRDT
 	// (addressed by stable __id). Otherwise: local state + debounced PUT.
+	// Formula values are computed for display only, so they are never written.
 	const onDataChange = useCallback(
 		(next: DbRow[]) => {
+			const storedColumns = columnsRef.current.filter(
+				(column) => column.cell.variant !== "formula"
+			);
 			const doc = getCollabDoc();
 			if (doc) {
 				applyCellEdits(
 					doc,
-					diffCellEdits(next, rowsRef.current, columnsRef.current)
+					diffCellEdits(next, rowsRef.current, storedColumns)
 				);
 				return;
 			}
-			rowsRef.current = next;
+			rowsRef.current = withStoredFormulaValues(
+				next,
+				rowsRef.current,
+				columnsRef.current
+			);
 			setRows(next);
 			scheduleSave();
 		},
@@ -349,7 +407,7 @@ export default function SpaceDatabaseEditorPage({
 			if (doc) {
 				const ids = rowIndices
 					.map((index) => rowsRef.current[index]?.__id)
-					.filter((id): id is string => typeof id === "string");
+					.filter((id): id is string => isNativeText(id));
 				removeRowsY(doc, ids);
 				return;
 			}
@@ -360,6 +418,73 @@ export default function SpaceDatabaseEditorPage({
 			scheduleSave();
 		},
 		[scheduleSave, getCollabDoc]
+	);
+
+	// Insert rows at a data index: empty, duplicated (fresh ids, no body page),
+	// or restored by undo (same id and body page, so later undo steps still
+	// find the row). Returns the inserted row ids for the grid's undo history.
+	const onRowsInsert = useCallback(
+		({
+			index,
+			count,
+			source,
+			restore,
+		}: {
+			index: number;
+			count: number;
+			source?: DbRow[];
+			restore?: boolean;
+		}) => {
+			const columns = columnsRef.current;
+			const templates: DbRow[] = source
+				? source.map((row) => {
+						if (restore) {
+							const restored: DbRow = { ...row };
+							for (const column of columns) {
+								if (column.cell.variant === "formula") {
+									restored[column.id] = getEmptyCellValue(column.cell.variant);
+								}
+							}
+							return restored;
+						}
+						const copy: DbRow = {};
+						for (const column of columns) {
+							if (column.cell.variant !== "formula") {
+								copy[column.id] = structuredClone(row[column.id]);
+							}
+						}
+						return copy;
+					})
+				: Array.from({ length: count }, () => ({}));
+			const doc = getCollabDoc();
+			if (doc) {
+				return insertRowsY(doc, columns, index, templates);
+			}
+			const prepared = templates.map((row) => ({
+				...makeEmptyRow(columns),
+				...row,
+				__id: isNativeText(row.__id) && row.__id ? row.__id : newRowId(),
+			}));
+			const at = Math.max(0, Math.min(index, rowsRef.current.length));
+			const next = [
+				...rowsRef.current.slice(0, at),
+				...prepared,
+				...rowsRef.current.slice(at),
+			];
+			rowsRef.current = next;
+			setRows(next);
+			scheduleSave();
+			return prepared.map((row) => row.__id);
+		},
+		[scheduleSave, getCollabDoc]
+	);
+
+	// Paste that runs past the last row appends the missing rows in one step.
+	const onRowsAdd = useCallback(
+		(count: number) => {
+			onRowsInsert({ index: rowsRef.current.length, count });
+		},
+		[onRowsInsert]
 	);
 
 	const addColumn = useCallback(
@@ -400,9 +525,13 @@ export default function SpaceDatabaseEditorPage({
 			} else {
 				const prev = columnsRef.current.find((c) => c.id === columnId);
 				const variantChanged = prev && prev.cell.variant !== cell.variant;
-				const nextColumns = columnsRef.current.map((c) =>
+				const updatedColumns = columnsRef.current.map((c) =>
 					c.id === columnId ? { ...c, label, cell } : c
 				);
+				// Formulas name columns by label; carry a rename into them.
+				const nextColumns = prev
+					? renameColumnInFormulas(updatedColumns, prev.label, label)
+					: updatedColumns;
 				const nextRows = variantChanged
 					? rowsRef.current.map((row) => ({
 							...row,
@@ -421,22 +550,31 @@ export default function SpaceDatabaseEditorPage({
 	);
 
 	// Open the property editor for a column (from the header's "Edit property").
-	const onColumnEdit = useCallback((columnId: string) => {
-		const column = columnsRef.current.find((c) => c.id === columnId);
-		if (column) {
-			setColumnEditor({
-				mode: "edit",
-				columnId,
-				initial: { label: column.label, cell: column.cell },
-			});
-		}
-	}, []);
+	const onColumnEdit = useCallback(
+		(columnId: string) => {
+			if (readOnly) {
+				return;
+			}
+			const column = columnsRef.current.find((c) => c.id === columnId);
+			if (column) {
+				setColumnEditor({
+					mode: "edit",
+					columnId,
+					initial: { label: column.label, cell: column.cell },
+				});
+			}
+		},
+		[readOnly]
+	);
 
 	// Open a row as its own page (properties + markdown body) in a new tab.
 	const openRow = useCallback(
-		(row: DbRow) => {
+		async (row: DbRow) => {
 			const rowId = row.__id;
 			if (!rowId) {
+				return;
+			}
+			if (!(collaborative || readOnly || (await flush()))) {
 				return;
 			}
 			const nameColumnId = columnsRef.current[0]?.id;
@@ -445,13 +583,17 @@ export default function SpaceDatabaseEditorPage({
 				title: name || "Untitled",
 			});
 		},
-		[openTab, spaceId, databaseId]
+		[collaborative, readOnly, flush, openTab, spaceId, databaseId]
 	);
 
 	// Set a single cell by stable row + column id, in either persistence mode. Used
 	// by the board when a card is dragged to a new group lane.
 	const setCell = useCallback(
-		(rowId: string, columnId: string, value: unknown) => {
+		(
+			rowId: string,
+			columnId: string,
+			value: Parameters<typeof applyCellEdits>[1][number]["value"]
+		) => {
 			if (readOnly) {
 				return;
 			}
@@ -460,8 +602,9 @@ export default function SpaceDatabaseEditorPage({
 				applyCellEdits(doc, [{ rowId, columnId, value }]);
 				return;
 			}
+			const parsedValue = jsonResponseValueSchema.parse(value);
 			const next = rowsRef.current.map((row) =>
-				row.__id === rowId ? { ...row, [columnId]: value } : row
+				row.__id === rowId ? { ...row, [columnId]: parsedValue } : row
 			);
 			rowsRef.current = next;
 			setRows(next);
@@ -472,7 +615,7 @@ export default function SpaceDatabaseEditorPage({
 
 	// Append a row, optionally pre-filling some cells (a board lane's group value).
 	const createRow = useCallback(
-		(values?: Record<string, unknown>) => {
+		(values?: DbRow) => {
 			if (readOnly) {
 				return;
 			}
@@ -620,13 +763,13 @@ export default function SpaceDatabaseEditorPage({
 			size: 40,
 			header: () => null,
 			cell: ({ row }) => (
-				<div className="flex size-full items-center justify-center">
+				<div className="flex size-full items-center justify-center opacity-0 focus-within:opacity-100 group-hover:opacity-100">
 					<Button
 						aria-label="Open row"
-						className="size-6 text-muted-foreground opacity-0 focus:opacity-100 group-hover:opacity-100"
+						className="size-6"
 						onClick={() => openRow(row.original)}
 						size="icon"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						<Maximize2 className="size-3.5" />
 					</Button>
@@ -644,14 +787,28 @@ export default function SpaceDatabaseEditorPage({
 		];
 	}, [columns, openRow]);
 
+	// Formula columns are computed here for every view; storage keeps inputs only.
+	const displayRows = useMemo(
+		() => computeFormulaColumns(rows, columns),
+		[rows, columns]
+	);
+
 	const grid = useDataGrid<DbRow>({
-		data: rows,
+		data: displayRows,
 		columns: gridColumns,
+		// Stable row identity keeps undo/redo pointed at the right row after
+		// sorting, deletes, or collaborative edits.
+		getRowId: (row, index) =>
+			isNativeText(row.__id) ? row.__id : String(index),
+		enableSelectionSummary: true,
+		enablePaste: !readOnly,
 		onDataChange,
+		onRowsAdd,
+		onRowsInsert,
 		onRowAdd,
 		onRowsDelete,
 		readOnly,
-		meta: { onColumnEdit },
+		meta: { onColumnEdit: readOnly ? undefined : onColumnEdit },
 	});
 
 	if (error) {
@@ -679,11 +836,7 @@ export default function SpaceDatabaseEditorPage({
 	}
 
 	if (!loaded) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	let statusLabel = SAVE_LABEL[saveState];
@@ -704,21 +857,59 @@ export default function SpaceDatabaseEditorPage({
 
 	const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
 	const activeKind = activeView?.kind ?? "table";
+	const runQuery = async () => {
+		setQueryRunning(true);
+		setQueryError(null);
+		setQueryResult(null);
+		try {
+			setQueryResult(
+				await querySpaceDatabase(toTarget(node), spaceId, databaseId, queryText)
+			);
+		} catch (cause) {
+			setQueryError(
+				cause instanceof Error ? cause.message : "The query could not run"
+			);
+		} finally {
+			setQueryRunning(false);
+		}
+	};
+	const formatQueryValue = <TValue,>(value: TValue): string => {
+		if (value === null) {
+			return "NULL";
+		}
+		const primitive = z
+			.union([z.string(), z.number(), z.boolean(), z.undefined()])
+			.safeParse(value);
+		return primitive.success
+			? String(primitive.data)
+			: (JSON.stringify(value) ?? "");
+	};
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
 			<div className="flex shrink-0 items-center gap-3 border-b px-4 py-2">
 				<Input
 					aria-label="Database title"
-					className="h-8 border-none bg-transparent px-0 font-medium text-base shadow-none focus-visible:ring-0"
 					disabled={readOnly}
 					onChange={(e) => handleTitleChange(e.target.value)}
 					placeholder="Untitled"
+					purpose="space-title"
 					value={title}
 				/>
 				<span className="shrink-0 text-muted-foreground text-xs">
 					{statusLabel}
 				</span>
+				<Button
+					className="ml-auto"
+					onClick={() => {
+						setQueryError(null);
+						setQueryOpen(true);
+					}}
+					size="sm"
+					variant="outline"
+				>
+					SQL query
+				</Button>
 				{activeKind === "table" && (
 					<Button
 						disabled={readOnly}
@@ -754,7 +945,7 @@ export default function SpaceDatabaseEditorPage({
 						groupByColumnId={activeView?.groupByColumnId}
 						onOpenRow={openRow}
 						readOnly={readOnly}
-						rows={rows}
+						rows={displayRows}
 						setCell={setCell}
 					/>
 				)}
@@ -764,7 +955,7 @@ export default function SpaceDatabaseEditorPage({
 						createRow={createRow}
 						onOpenRow={openRow}
 						readOnly={readOnly}
-						rows={rows}
+						rows={displayRows}
 					/>
 				)}
 				{activeKind === "list" && (
@@ -773,10 +964,95 @@ export default function SpaceDatabaseEditorPage({
 						createRow={createRow}
 						onOpenRow={openRow}
 						readOnly={readOnly}
-						rows={rows}
+						rows={displayRows}
 					/>
 				)}
 			</div>
+			<Dialog onOpenChange={setQueryOpen} open={queryOpen}>
+				<DialogContent className="max-w-4xl">
+					<DialogHeader>
+						<DialogTitle>Query database</DialogTitle>
+						<DialogDescription>
+							Run read-only SQL against this database. Use the table name{" "}
+							<code>data</code>; results stop at 500 rows or 1 MB.
+						</DialogDescription>
+					</DialogHeader>
+					<label className="grid gap-2 text-sm" htmlFor="space-database-query">
+						SQL
+						<Textarea
+							className="min-h-36"
+							id="space-database-query"
+							maxLength={8000}
+							onChange={(event) => setQueryText(event.target.value)}
+							spellCheck={false}
+							typography="small"
+							value={queryText}
+							variant="code"
+						/>
+					</label>
+					{queryResult?.schema.length ? (
+						<div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground text-xs">
+							{queryResult.schema.map((column) => (
+								<span key={column.id}>
+									{column.label}: <code>{column.name}</code>
+								</span>
+							))}
+						</div>
+					) : null}
+					{queryError ? (
+						<p className="text-sm text-status-destructive" role="alert">
+							{queryError}
+						</p>
+					) : null}
+					{queryResult ? (
+						<div className="grid gap-2">
+							<p className="text-muted-foreground text-xs" role="status">
+								{queryResult.rows.length} rows
+								{queryResult.truncated ? " · result was limited" : ""}
+							</p>
+							<div className="max-h-72 overflow-auto rounded-md border">
+								<table className="w-full text-left text-sm">
+									<thead className="sticky top-0 bg-muted">
+										<tr>
+											{queryResult.columns.map((column, index) => (
+												<th
+													className="px-3 py-2 font-medium"
+													key={`${column}-${index}`}
+												>
+													{column}
+												</th>
+											))}
+										</tr>
+									</thead>
+									<tbody>
+										{queryResult.rows.map((row, rowIndex) => (
+											<tr className="border-t" key={rowIndex}>
+												{queryResult.columns.map((column, columnIndex) => (
+													<td
+														className="max-w-80 break-words px-3 py-2 align-top"
+														key={`${column}-${columnIndex}`}
+													>
+														{formatQueryValue(row[columnIndex] ?? null)}
+													</td>
+												))}
+											</tr>
+										))}
+									</tbody>
+								</table>
+							</div>
+						</div>
+					) : null}
+					<DialogFooter>
+						<Button
+							disabled={queryRunning || !queryText.trim()}
+							onClick={() => void runQuery()}
+						>
+							<Play className="size-3.5" />
+							{queryRunning ? "Running…" : "Run query"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 			<Dialog
 				onOpenChange={(open) => {
 					if (!open) {
@@ -793,6 +1069,11 @@ export default function SpaceDatabaseEditorPage({
 					</DialogHeader>
 					{columnEditor !== null && (
 						<ColumnEditor
+							columns={columns.filter(
+								(column) =>
+									columnEditor.mode !== "edit" ||
+									column.id !== columnEditor.columnId
+							)}
 							initial={
 								columnEditor.mode === "edit" ? columnEditor.initial : undefined
 							}

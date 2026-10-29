@@ -1,4 +1,4 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ConnectCallbackDialog } from "../../src/components/deeplink/ConnectCallbackDialog.tsx";

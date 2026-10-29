@@ -25,15 +25,20 @@
 
 import {
 	parseVoiceServerMsg,
+	type RvpCallEnded,
+	type VoiceClientMsg,
 	type VoiceServerMsg,
 	type VoiceState,
+	voiceServerMsgSchema,
 } from "@ryuhq/protocol/voice";
+import { z } from "zod";
 import {
-	appendWebSocketTicket,
 	type ApiTarget,
 	apiUrl,
+	appendWebSocketTicket,
 	requestWebSocketTicket,
 } from "./client.ts";
+import { startVoiceRingback } from "./voice-ringback.ts";
 
 /** Rate the server's VAD + STT expect; the client resamples the mic to this. */
 const TARGET_SAMPLE_RATE = 16_000;
@@ -48,6 +53,8 @@ const WEBSOCKET_OPEN = 1;
 export interface VoiceSessionHandlers {
 	/** Normalized mic RMS level for the current capture frame (0..1). */
 	onAudioLevel?: (level: number) => void;
+	/** Core saved the user-side call summary. */
+	onCallEnded?: (summary: RvpCallEnded) => void;
 	/** Assistant turn ended. */
 	onChatEnd?: (conversationId: string) => void;
 	/** Socket closed. */
@@ -58,6 +65,8 @@ export interface VoiceSessionHandlers {
 	onError?: (code: string, message: string) => void;
 	/** Socket opened + session started. */
 	onOpen?: () => void;
+	/** Core accepted the call. */
+	onReady?: () => void;
 	/** VAD detected the user's speech onset. */
 	onSpeechStart?: () => void;
 	/** Turn-phase change (idle/listening/thinking/speaking) for the UI. */
@@ -151,6 +160,11 @@ export class VoiceSessionConnection {
 	private source: MediaStreamAudioSourceNode | null = null;
 	private processor: ScriptProcessorNode | null = null;
 	private muted = false;
+	private closed = false;
+	private ending = false;
+	private summaryReceived = false;
+	private stopRingback: (() => void) | null = null;
+	private endTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Playback queue (sequential WAV sentences).
 	private playbackCtx: AudioContext | null = null;
@@ -170,15 +184,32 @@ export class VoiceSessionConnection {
 			return;
 		}
 		this.muted = false;
+		if (this.closed) {
+			return;
+		}
+		this.stopRingback = startVoiceRingback();
 		// Acquire the mic first — with AEC/NS/AGC so the assistant's own TTS output
 		// doesn't feed back into the mic and cause false barge-in.
-		this.mic = await navigator.mediaDevices.getUserMedia({
-			audio: {
-				echoCancellation: true,
-				noiseSuppression: true,
-				autoGainControl: true,
-			},
-		});
+		let mic: MediaStream;
+		try {
+			mic = await navigator.mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: true,
+					noiseSuppression: true,
+					autoGainControl: true,
+				},
+			});
+		} catch (error) {
+			this.stopRinging();
+			throw error;
+		}
+		if (this.closed) {
+			for (const track of mic.getTracks()) {
+				track.stop();
+			}
+			return;
+		}
+		this.mic = mic;
 
 		let ticket: string;
 		try {
@@ -187,8 +218,12 @@ export class VoiceSessionConnection {
 				route: "voice",
 			});
 		} catch (error) {
+			this.stopRinging();
 			this.teardownAudio();
 			throw error;
+		}
+		if (this.closed) {
+			return;
 		}
 
 		const socket = new WebSocket(appendWebSocketTicket(this.url, ticket));
@@ -198,15 +233,32 @@ export class VoiceSessionConnection {
 
 		socket.onopen = () => {
 			this.sendStart();
-			this.startCapture();
 			handlers?.onOpen?.();
 		};
 		socket.onmessage = (event) => this.dispatch(event);
 		socket.onclose = () => {
+			this.closed = true;
+			this.socket = null;
+			this.stopRinging();
+			if (this.endTimer) {
+				clearTimeout(this.endTimer);
+			}
+			this.stopPlayback();
 			this.teardownAudio();
 			handlers?.onClose?.();
 		};
-		socket.onerror = () => handlers?.onError?.("socket", "voice socket error");
+		socket.onerror = () => {
+			this.stopRinging();
+			// Hanging up a still-connecting socket closes it at once, and that
+			// close fires `error` by spec: not a transport failure to surface.
+			// A failure after hanging up an open call (while waiting for the
+			// summary) is still reported, like a server `error` frame then.
+			if (this.closed) {
+				return;
+			}
+			handlers?.onError?.("socket", "voice socket error");
+			this.close();
+		};
 	}
 
 	/** Send a typed message (fallback path; runs a turn without STT). */
@@ -230,10 +282,27 @@ export class VoiceSessionConnection {
 
 	/** Close the socket and tear down the mic + playback graph. */
 	close(): void {
+		if (this.closed || this.ending) {
+			return;
+		}
+		this.ending = true;
+		this.stopRinging();
 		this.stopPlayback();
 		this.teardownAudio();
+		if (this.socket?.readyState === WEBSOCKET_OPEN) {
+			this.sendJson({ type: "end" });
+			// Older nodes may not understand `end`; release the socket regardless.
+			this.endTimer = setTimeout(() => this.socket?.close(), 5000);
+			return;
+		}
+		this.closed = true;
 		this.socket?.close();
 		this.socket = null;
+	}
+
+	private stopRinging(): void {
+		this.stopRingback?.();
+		this.stopRingback = null;
 	}
 
 	// ── Uplink: mic capture ──────────────────────────────────────────────────
@@ -304,20 +373,46 @@ export class VoiceSessionConnection {
 
 	private dispatch(event: MessageEvent): void {
 		if (event.data instanceof ArrayBuffer) {
+			if (this.ending || this.closed) {
+				return;
+			}
 			this.enqueueAudio(event.data);
 			return;
 		}
-		if (typeof event.data === "string") {
-			const msg = parseVoiceServerMsg(event.data);
-			if (msg) {
-				this.dispatchControl(msg);
+		const controlFrame = z.string().safeParse(event.data);
+		if (controlFrame.success) {
+			const supported = voiceServerMsgSchema.safeParse(
+				parseVoiceServerMsg(controlFrame.data)
+			);
+			if (supported.success) {
+				this.dispatchControl(supported.data);
 			}
 		}
 	}
 
 	private dispatchControl(msg: VoiceServerMsg): void {
 		const h = this.options.handlers;
+		if (this.ending && msg.type !== "call_ended" && msg.type !== "error") {
+			return;
+		}
 		switch (msg.type) {
+			case "ready":
+				this.stopRinging();
+				if (!this.ending) {
+					this.startCapture();
+					h?.onReady?.();
+					h?.onState?.("idle");
+				}
+				break;
+			case "call_ended":
+				if (this.summaryReceived) {
+					return;
+				}
+				this.summaryReceived = true;
+				this.stopRinging();
+				h?.onCallEnded?.(msg);
+				this.socket?.close();
+				break;
 			case "state":
 				h?.onState?.(msg.value);
 				break;
@@ -338,10 +433,14 @@ export class VoiceSessionConnection {
 				this.stopPlayback();
 				break;
 			case "error":
+				this.stopRinging();
 				h?.onError?.(msg.code, msg.message);
+				if (this.ending) {
+					this.socket?.close();
+				}
 				break;
 			default:
-				// ready / tts_start / tts_end / pong — no client action needed.
+				// tts_start / tts_end / pong — no client action needed.
 				break;
 		}
 	}
@@ -355,6 +454,9 @@ export class VoiceSessionConnection {
 		// `decodeAudioData` detaches its input, so hand it a private copy.
 		ctx.decodeAudioData(wav.slice(0)).then(
 			(buffer) => {
+				if (this.ending || this.closed) {
+					return;
+				}
 				const src = ctx.createBufferSource();
 				src.buffer = buffer;
 				src.connect(ctx.destination);
@@ -382,9 +484,17 @@ export class VoiceSessionConnection {
 		}
 		this.playing.clear();
 		this.nextStartTime = 0;
+		if (
+			this.playbackCtx &&
+			this.playbackCtx.state !== "closed" &&
+			(this.ending || this.closed)
+		) {
+			this.playbackCtx.close().catch(() => undefined);
+			this.playbackCtx = null;
+		}
 	}
 
-	private sendJson(payload: unknown): void {
+	private sendJson(payload: VoiceClientMsg): void {
 		if (this.socket?.readyState === WEBSOCKET_OPEN) {
 			this.socket.send(JSON.stringify(payload));
 		}

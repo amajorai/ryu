@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "revision": 3,
+  "environments": [
+    {
+      "id": "environment-1",
+      "name": "Ryu development",
+      "repositories": ["amajorai/ryu"],
+      "installScript": "bun install",
+      "startInstructions": "Run the focused tests.",
+      "internet": {
+        "enabled": true,
+        "domainPolicy": "packageManagers",
+        "allowedDomains": ["*.example.com"]
+      },
+      "privacy": "private",
+      "vaultKeys": ["API_TOKEN"],
+      "tailscaleVaultKey": null,
+      "published": true
+    }
+  ],
+  "vault": [
+    {
+      "id": "entry-1",
+      "key": "API_TOKEN",
+      "kind": "networkSecret",
+      "environmentIds": ["environment-1"],
+      "domains": ["api.example.com"],
+      "hasValue": true
+    }
+  ]
+}

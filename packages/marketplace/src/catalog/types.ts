@@ -17,6 +17,7 @@ import type {
 	PublisherTrustLevel,
 	PublisherTrustSource,
 } from "@ryuhq/protocol/publisher-trust";
+import type { z } from "zod";
 import type { DesignSystemEvidence } from "./design-system-scorecard.ts";
 
 export type { DesignSystemEvidence } from "./design-system-scorecard.ts";
@@ -122,6 +123,14 @@ export type UnmetRequirement =
 			surface: Surface;
 			required: string;
 			reason: string;
+	  }
+	/** `engines.host_api` unsatisfied: `required`/`present` are plugin host API
+	 *  versions, not product versions. Always blocking (Core knows its host API). */
+	| {
+			code: "host_api_too_old";
+			surface: Surface;
+			required: string;
+			present: string;
 	  };
 
 /** The result of checking {@link HostFloors} against the running hosts. */
@@ -135,7 +144,7 @@ export interface CompatibilityVerdict {
 }
 
 /** The surface a floor key names, for display. `ryu` is Core. */
-const FLOOR_KEY_TO_SURFACE: Record<keyof HostFloors, Surface> = {
+const FLOOR_KEY_TO_SURFACE = {
 	cli: "cli",
 	desktop: "desktop",
 	extension: "extension",
@@ -144,7 +153,7 @@ const FLOOR_KEY_TO_SURFACE: Record<keyof HostFloors, Surface> = {
 	mobile: "mobile",
 	ryu: "core",
 	web: "web",
-};
+} satisfies Record<keyof HostFloors, Surface>;
 
 /** Strip a leading `v` and any prerelease/build suffix, returning `[major, minor,
  *  patch]`, or `null` if it does not look like semver.
@@ -242,6 +251,9 @@ export function evaluateCompatibility(
 	}
 
 	const unmet: UnmetRequirement[] = [];
+	// SAFETY: This private literal contains only HostFloors keys and Surface
+	// values, checked above with satisfies. It has no other writes or exports;
+	// Object.entries copies those own enumerable key/value pairs into tuples.
 	for (const [key, surface] of Object.entries(FLOOR_KEY_TO_SURFACE) as [
 		keyof HostFloors,
 		Surface,
@@ -255,7 +267,7 @@ export function evaluateCompatibility(
 		const present = known[surface];
 		if (present === undefined) {
 			const fromServer = serverVerdict?.unmet?.find(
-				(u) => u.surface === surface
+				(u) => u.surface === surface && u.code !== "host_api_too_old"
 			);
 			unmet.push(fromServer ?? { code: "unknown", required, surface });
 			continue;
@@ -266,7 +278,7 @@ export function evaluateCompatibility(
 		} else if (ok === null) {
 			// Undecidable locally — defer to the server rather than invent a verdict.
 			const fromServer = serverVerdict?.unmet?.find(
-				(u) => u.surface === surface
+				(u) => u.surface === surface && u.code !== "host_api_too_old"
 			);
 			if (fromServer) {
 				unmet.push(fromServer);
@@ -274,10 +286,16 @@ export function evaluateCompatibility(
 		}
 	}
 
+	// The host API floor is not a surface this client can observe; keep Core's
+	// verdict on it verbatim.
+	for (const u of serverVerdict?.unmet ?? []) {
+		if (u.code === "host_api_too_old") {
+			unmet.push(u);
+		}
+	}
+
 	return {
-		compatible: !unmet.some(
-			(u) => u.code === "too_old" || u.code === "invalid_requirement"
-		),
+		compatible: !unmet.some(isBlockingUnmet),
 		unmet,
 	};
 }
@@ -291,8 +309,14 @@ export function evaluateCompatibility(
 export function blockingUnmet(
 	verdict: CompatibilityVerdict | null | undefined
 ): UnmetRequirement[] {
-	return (verdict?.unmet ?? []).filter(
-		(u) => u.code === "too_old" || u.code === "invalid_requirement"
+	return (verdict?.unmet ?? []).filter(isBlockingUnmet);
+}
+
+function isBlockingUnmet(u: UnmetRequirement): boolean {
+	return (
+		u.code === "too_old" ||
+		u.code === "invalid_requirement" ||
+		u.code === "host_api_too_old"
 	);
 }
 
@@ -394,6 +418,26 @@ export interface CardThemePreview {
 	primary: string;
 	surface: string;
 	text: string;
+}
+
+/** A listing's deprecation notice, normalised by the producer from the
+ *  manifest's `deprecated` (`true`, a message string, or `{message,
+ *  replacement}`). Present — even as `{}` — means deprecated; absent/null means
+ *  current. The same single-word key rides the snake_case card and the
+ *  camelCase detail. */
+/** The listing a remix credits (manifest `remixedFrom`). Untrusted catalog
+ *  JSON: render only after checking both strings. */
+export interface CatalogRemixSource {
+	id?: string | null;
+	kind?: string | null;
+	version?: string | null;
+}
+
+export interface CatalogDeprecation {
+	/** Why it is deprecated, in the publisher's words. */
+	message?: string | null;
+	/** Id of the listing that supersedes this one. Display only. */
+	replacement?: string | null;
 }
 
 /** Public, non-executable summary of one swappable capability a listing serves. */
@@ -588,6 +632,9 @@ export interface CatalogPermissions {
 /** One catalog entry as the Apps section reads it. */
 export interface CatalogEntry {
 	accent_color?: string | null;
+	/** Whether the author allows remixes (manifest `allowRemix`). Absent or null
+	 *  means allowed; only `false` opts out. See `remixPlan`. */
+	allow_remix?: boolean | null;
 	author?: string | null;
 	banner?: CatalogBanner | null;
 	built_in?: boolean;
@@ -611,6 +658,8 @@ export interface CatalogEntry {
 	 *  floors as advisory `unknown`. Re-evaluate with `evaluateCompatibility` and
 	 *  the local version overlaid; that turns an advisory into a real refusal. */
 	compatibility?: CompatibilityVerdict | null;
+	/** Deprecation notice; see {@link CatalogDeprecation}. Absent = current. */
+	deprecated?: CatalogDeprecation | null;
 	description: string;
 	descriptor_only?: boolean;
 	developer?: string | null;
@@ -631,7 +680,7 @@ export interface CatalogEntry {
 	/** True when the listing calls a hosted/external provider rather than a local runtime. */
 	external?: boolean;
 	/** Redacted GitHub repository/release provenance. */
-	github_source?: Record<string, unknown> | null;
+	github_source?: Record<string, z.output<ReturnType<typeof z.json>>> | null;
 	homepage?: string | null;
 	/** Icon-primitive glyph id (Iconify `prefix:name`, bare Hugeicons name, or URL),
 	 *  masked with the current text colour. Distinct from `icon_url` (a raster logo);
@@ -755,6 +804,8 @@ export interface CatalogEntry {
 	 *  header can show stars without loading the review list. Absent = unrated. */
 	rating_average?: number | null;
 	rating_count?: number | null;
+	/** The listing this one remixes, credited by its manifest `remixedFrom`. */
+	remixed_from?: CatalogRemixSource | null;
 	/** The repository this listing was discovered from (community listings). */
 	repo_url?: string | null;
 	/** Public source/repository URL declared by the listing. */
@@ -861,6 +912,8 @@ export interface PluginCatalogDetail {
 	category?: string | null;
 	/** First publication timestamp, when the source reports one. */
 	createdAt?: string | null;
+	/** Deprecation notice; see {@link CatalogDeprecation}. Absent = current. */
+	deprecated?: CatalogDeprecation | null;
 	description?: string | null;
 	descriptor?: { url?: string | null } | null;
 	/** True when the listing is discovery-only: no verified in-store install path,
@@ -1133,6 +1186,8 @@ export interface AppsCatalogState {
 	 *  bare boolean it followed the SELECTION, so the spinner moved to whatever
 	 *  listing the user opened next. Matches `SkillsCatalogState.installing`. */
 	installing: string | null;
+	/** Error from the manual manifest URL install action, shown beside its field. */
+	installUrlError?: string | null;
 	/** Install or update one exact historical version from the Versions tab. */
 	installVersion?: (id: string, version: CatalogVersion) => Promise<void>;
 	items: AppCatalogItem[];
@@ -1175,18 +1230,126 @@ export type ModelSort = "trending" | "downloads" | "likes" | "recent";
 /** Model weight format (which engine family can serve it). */
 export type ModelFormat = "gguf" | "safetensors" | "mlx";
 
-/** Friendly model category shown in the task filter. */
-export type ModelCategory =
-	| "all"
-	| "chat"
-	| "vision"
-	| "embedding"
-	| "reranker"
-	| "stt"
-	| "tts";
+/**
+ * Model task filters shared by the catalog UI and the Desktop-to-Core adapter.
+ * Each non-`all` option is one Hugging Face pipeline tag; keeping the tag next
+ * to its label prevents the UI and request mapping from drifting apart.
+ */
+export const MODEL_CATEGORY_OPTIONS = [
+	{ value: "all", label: "All categories", pipelineTag: "" },
+	{ value: "chat", label: "Chat / text", pipelineTag: "text-generation" },
+	{ value: "vision", label: "Vision", pipelineTag: "image-text-to-text" },
+	{
+		value: "image-captioning",
+		label: "Image to text",
+		pipelineTag: "image-to-text",
+	},
+	{
+		value: "image-generation",
+		label: "Image generation",
+		pipelineTag: "text-to-image",
+	},
+	{
+		value: "image-editing",
+		label: "Image editing",
+		pipelineTag: "image-to-image",
+	},
+	{
+		value: "image-classification",
+		label: "Image classification",
+		pipelineTag: "image-classification",
+	},
+	{
+		value: "object-detection",
+		label: "Object detection",
+		pipelineTag: "object-detection",
+	},
+	{
+		value: "image-segmentation",
+		label: "Image segmentation",
+		pipelineTag: "image-segmentation",
+	},
+	{
+		value: "text-to-video",
+		label: "Text to video",
+		pipelineTag: "text-to-video",
+	},
+	{
+		value: "image-to-video",
+		label: "Image to video",
+		pipelineTag: "image-to-video",
+	},
+	{
+		value: "video-classification",
+		label: "Video understanding",
+		pipelineTag: "video-classification",
+	},
+	{
+		value: "embedding",
+		label: "Embedding / similarity",
+		pipelineTag: "sentence-similarity",
+	},
+	{
+		value: "feature-extraction",
+		label: "Embeddings / features",
+		pipelineTag: "feature-extraction",
+	},
+	{ value: "reranker", label: "Reranker", pipelineTag: "text-ranking" },
+	{
+		value: "stt",
+		label: "Speech to text",
+		pipelineTag: "automatic-speech-recognition",
+	},
+	{ value: "tts", label: "Text to speech", pipelineTag: "text-to-speech" },
+	{
+		value: "audio-generation",
+		label: "Audio generation",
+		pipelineTag: "text-to-audio",
+	},
+	{
+		value: "audio-conversion",
+		label: "Audio to audio",
+		pipelineTag: "audio-to-audio",
+	},
+	{
+		value: "audio-classification",
+		label: "Audio understanding",
+		pipelineTag: "audio-classification",
+	},
+	{
+		value: "voice-activity-detection",
+		label: "Voice activity detection",
+		pipelineTag: "voice-activity-detection",
+	},
+	{
+		value: "text-classification",
+		label: "Text classification",
+		pipelineTag: "text-classification",
+	},
+	{
+		value: "question-answering",
+		label: "Question answering",
+		pipelineTag: "question-answering",
+	},
+	{
+		value: "translation",
+		label: "Translation",
+		pipelineTag: "translation",
+	},
+	{
+		value: "summarization",
+		label: "Summarization",
+		pipelineTag: "summarization",
+	},
+] as const;
 
-/** Plain-language device-fit verdict, worst → best. */
+export type ModelCategory = (typeof MODEL_CATEGORY_OPTIONS)[number]["value"];
+
+/** Plain-language device-fit verdict, worst → best. `no_space` and `too_big`
+ *  block the install (Core refuses it); `cpu` and `partial` run but slowly. The
+ *  shared ranking lives in `@ryu/blocks/desktop/model-fit.ts`. */
 export type FitVerdict =
+	| "no_space"
 	| "too_big"
 	| "cpu"
 	| "partial"
@@ -1241,11 +1404,17 @@ export interface AaStats {
 	timeToFirstTokenS: number | null;
 }
 
-/** Detected hardware the fit verdicts were computed against. */
+/** Detected hardware the fit verdicts were computed against — always the Core
+ *  node serving the request, which may be remote. */
 export interface DeviceInfo {
+	/** Free bytes on the volume holding the node's models directory. */
+	diskFreeBytes?: number | null;
+	/** Human free-disk size (e.g. "120.4 GB"); empty when unknown. */
+	diskFreeHuman?: string;
 	gpuName: string | null;
 	os: string;
 	ramHuman: string;
+	totalRamBytes?: number | null;
 	unifiedMemory: boolean;
 	vramBytes: number | null;
 	vramHuman: string;
@@ -1258,6 +1427,8 @@ export interface ModelDetail {
 	files: ModelFile[];
 	format: ModelFormat;
 	readme: string | null;
+	/** Machine-readable snapshot fit verdict; empty for GGUF or an older Core. */
+	repoFit?: string;
 	repoFitLabel: string;
 	repoSizeBytes: number | null;
 	stats: AaStats | null;

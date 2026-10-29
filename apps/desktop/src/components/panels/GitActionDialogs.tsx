@@ -34,6 +34,7 @@ import {
 } from "@ryu/ui/components/dropdown-menu.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useState } from "react";
@@ -269,7 +270,10 @@ export function CreateGitHubRepositoryDialog({
 					the current branch. GitHub CLI handles your existing sign-in.
 				</p>
 				{error && (
-					<p className="mt-3 rounded-2xl bg-destructive/10 px-3 py-2 text-sm text-status-destructive">
+					<p
+						className="mt-3 rounded-2xl bg-destructive/10 px-3 py-2 text-sm text-status-destructive"
+						role="alert"
+					>
 						{error}
 					</p>
 				)}
@@ -380,7 +384,7 @@ function BranchTargetPicker({
 						className="size-4 shrink-0"
 						icon={GitBranchIcon}
 					/>
-					<ButtonLabel className="min-w-0 flex-1 truncate text-left font-normal">
+					<ButtonLabel className="min-w-0 flex-1 text-left">
 						{branch}
 					</ButtonLabel>
 					<HugeiconsIcon
@@ -397,14 +401,12 @@ function BranchTargetPicker({
 					<DropdownMenuGroup>
 						<DropdownMenuLabel>Commit to</DropdownMenuLabel>
 						{loading ? (
-							<div className="flex items-center gap-2 px-3 py-3 text-muted-foreground text-sm">
-								<HugeiconsIcon
-									aria-hidden
-									className="size-4 animate-spin"
-									icon={Loading01Icon}
-								/>
-								Loading branches…
-							</div>
+							<SkeletonRows
+								inset="panel-horizontal"
+								label="Loading branches…"
+								size="sm"
+								spacing="compact-stack"
+							/>
 						) : (
 							branchOptions.map((candidate) => (
 								<DropdownMenuItem
@@ -417,7 +419,9 @@ function BranchTargetPicker({
 										className="size-4 shrink-0 text-muted-foreground"
 										icon={GitBranchIcon}
 									/>
-									<span className="min-w-0 flex-1 truncate">{candidate}</span>
+									<span className="min-w-0 flex-1 truncate" title={candidate}>
+										{candidate}
+									</span>
 									{candidate === branch && (
 										<HugeiconsIcon
 											aria-hidden

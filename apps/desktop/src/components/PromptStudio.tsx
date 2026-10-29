@@ -31,33 +31,43 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Markdown } from "@ryu/blocks/desktop/agent-elements/markdown.tsx";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/native-select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import { DefaultChatTransport } from "ai";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { stringify as stringifyYaml } from "yaml";
+import { z } from "zod";
 import { MarkdownEditor } from "@/src/components/editor/MarkdownEditor.tsx";
+import { PromptLibrary } from "@/src/components/PromptLibrary.tsx";
 import { VersionHistory } from "@/src/components/versioning/VersionHistory.tsx";
+import { toastActionError } from "@/src/lib/action-error.ts";
 import {
 	createAgentPromptVersion,
 	getAgentPromptVersion,
 	listAgentPromptVersions,
 	restoreAgentPromptVersion,
 } from "@/src/lib/api/agents.ts";
-import { chatHeaders, chatStreamUrl } from "@/src/lib/api/chat.ts";
+import { cancelChat, chatHeaders, chatStreamUrl } from "@/src/lib/api/chat.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type Assertion,
@@ -67,7 +77,6 @@ import {
 	type EvalCaseScore,
 	type EvalDatasetCase,
 	type EvalMessage,
-	type EvalRunResult,
 	type ModelEvalResult,
 	runGatewayEvals,
 } from "@/src/lib/api/gateway.ts";
@@ -92,12 +101,42 @@ import {
 } from "@/src/lib/api/prompt-suites.ts";
 import { instrumentedFetch } from "@/src/lib/dev-metrics.ts";
 import {
+	ASSERTION_KINDS,
+	ASSERTION_LABELS,
+	type AssertionKind,
+	assertionKindSchema,
+	assertionText,
+	defaultAssertion,
+	gatewayAssertion,
+	isBoolean,
+	isNumber,
+	isRecord,
+	isString,
+	linkedPromptRunId,
+	loadTestSuite,
+	newTestCaseRow,
+	type PromptVariantRun,
+	parseCodeEvaluators,
+	parseEvalMessages,
+	parseRunTags,
+	parseThreshold,
+	persistTestSuite,
+	promptVariantRunsSchema,
+	resultFilterSchema,
+	type TestCaseRow,
+	withAssertionText,
+} from "@/src/lib/prompt-studio.ts";
+import {
 	normalizePromptfooConfig,
 	type PromptfooConfig,
+	type PromptfooDocument,
 	type PromptfooPrompt,
 	type PromptfooRelatedFiles,
 	type PromptfooTest,
+	type PromptfooValue,
+	parsePromptfooDocument,
 	parsePromptfooFile,
+	parsePromptfooValue,
 	serializePromptfooConfig,
 } from "@/src/lib/promptfoo.ts";
 
@@ -123,6 +162,26 @@ function extractPlaceholders(prompt: string): string[] {
 	return result;
 }
 
+function normalizePromptPlaceholders(prompt: string): string {
+	// Plate's Markdown serializer escapes opening braces. Preserve Prompt Studio's
+	// documented `{{variable}}` syntax when the prompt is edited in the rich editor.
+	return prompt.replace(/\\+\{\\+\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/gu, "{{$1}}");
+}
+
+function escapePromptPlaceholdersForEditor(prompt: string): string {
+	// Plate's Markdown parser interprets raw `{{name}}` as an expression instead
+	// of literal prompt text. Escaping the openers keeps placeholders visible;
+	// normalizePromptPlaceholders removes those escapes on the next edit.
+	return prompt.replace(
+		/(?<!\\)\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/gu,
+		String.raw`\{\{$1}}`
+	);
+}
+
+function hasPromptContent(prompt: string): boolean {
+	return prompt.replaceAll("\u200B", "").trim().length > 0;
+}
+
 function renderPrompt(prompt: string, vars: Record<string, string>): string {
 	return prompt.replace(
 		PLACEHOLDER_RE,
@@ -130,8 +189,8 @@ function renderPrompt(prompt: string, vars: Record<string, string>): string {
 	);
 }
 
-function displayVariable(value: unknown): string {
-	if (typeof value === "string") {
+function displayVariable(value: PromptfooValue): string {
+	if (isString(value)) {
 		return value;
 	}
 	if (value === undefined) {
@@ -140,13 +199,13 @@ function displayVariable(value: unknown): string {
 	return JSON.stringify(value);
 }
 
-function parseVariable(value: string): unknown {
+function parseVariable(value: string): PromptfooValue {
 	const trimmed = value.trim();
 	if (!trimmed) {
 		return "";
 	}
 	try {
-		return JSON.parse(trimmed) as unknown;
+		return parsePromptfooValue(JSON.parse(trimmed));
 	} catch {
 		return value;
 	}
@@ -170,485 +229,6 @@ function formatMicroUsd(value: number | null | undefined): string {
 	return value === null || value === undefined
 		? "unknown"
 		: `$${(value / 1_000_000).toFixed(4)}`;
-}
-
-function parseThreshold(value: string): number | undefined {
-	if (!value.trim()) {
-		return undefined;
-	}
-	const parsed = Number.parseFloat(value);
-	return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : undefined;
-}
-
-function parseRunTags(value: string): Record<string, string> {
-	const tags: Record<string, string> = {};
-	for (const item of value.split(",")) {
-		const [key, ...rest] = item.split("=");
-		const normalizedKey = key?.trim();
-		const normalizedValue = rest.join("=").trim();
-		if (normalizedKey && normalizedValue) {
-			tags[normalizedKey] = normalizedValue;
-		}
-	}
-	return tags;
-}
-
-function linkedPromptRunId(): string | null {
-	if (typeof window === "undefined") {
-		return null;
-	}
-	const queryString = window.location.hash.split("?")[1];
-	return queryString ? new URLSearchParams(queryString).get("run_id") : null;
-}
-
-// ── Assertion kinds (UI metadata) ──────────────────────────────────────────────
-
-const ASSERTION_KINDS = [
-	"contains",
-	"not_contains",
-	"equals",
-	"regex",
-	"icontains",
-	"starts_with",
-	"contains_any",
-	"contains_all",
-	"icontains_any",
-	"icontains_all",
-	"contains_json",
-	"contains_html",
-	"contains_xml",
-	"contains_sql",
-	"levenshtein",
-	"latency",
-	"cost",
-	"assert_set",
-	"is_html",
-	"is_xml",
-	"is_sql",
-	"is_refusal",
-	"moderation",
-	"javascript",
-	"python",
-	"ruby",
-	"webhook",
-	"is_json",
-	"json_valid",
-	"llm_judge",
-	"llm_rubric",
-	"similar",
-	"factuality",
-	"context_faithfulness",
-	"answer_relevance",
-] as const;
-
-type AssertionKind = (typeof ASSERTION_KINDS)[number];
-
-const ASSERTION_LABELS: Record<AssertionKind, string> = {
-	contains: "Contains",
-	not_contains: "Not contains",
-	equals: "Equals",
-	regex: "Regex",
-	icontains: "Contains (case-insensitive)",
-	starts_with: "Starts with",
-	contains_any: "Contains any",
-	contains_all: "Contains all",
-	icontains_any: "Contains any (case-insensitive)",
-	icontains_all: "Contains all (case-insensitive)",
-	contains_json: "Contains JSON",
-	contains_html: "Contains HTML",
-	contains_xml: "Contains XML",
-	contains_sql: "Contains SQL",
-	levenshtein: "Levenshtein",
-	latency: "Latency",
-	cost: "Cost",
-	assert_set: "Assertion set",
-	is_html: "HTML",
-	is_xml: "XML",
-	is_sql: "SQL",
-	is_refusal: "Refusal",
-	moderation: "Moderation",
-	javascript: "JavaScript",
-	python: "Python",
-	ruby: "Ruby",
-	webhook: "Webhook",
-	is_json: "Valid JSON",
-	json_valid: "Valid JSON",
-	llm_judge: "LLM judge",
-	llm_rubric: "LLM rubric",
-	similar: "Similar",
-	factuality: "Factuality",
-	context_faithfulness: "Context faithfulness",
-	answer_relevance: "Answer relevance",
-};
-
-/** Build a default assertion object for a given kind. */
-function defaultAssertion(kind: AssertionKind): Assertion {
-	if (
-		[
-			"json_valid",
-			"is_json",
-			"is_html",
-			"is_xml",
-			"is_sql",
-			"is_refusal",
-			"assert_set",
-		].includes(kind)
-	) {
-		if (kind === "assert_set") {
-			return { assertions: [], kind } as Assertion;
-		}
-		return { kind } as Assertion;
-	}
-	if (
-		[
-			"llm_judge",
-			"llm_rubric",
-			"similar",
-			"factuality",
-			"context_faithfulness",
-			"answer_relevance",
-		].includes(kind)
-	) {
-		return { kind, rubric: "" } as Assertion;
-	}
-	return { kind, value: "" } as Assertion;
-}
-
-/** The editable text payload of an assertion (value or rubric), if any. */
-function assertionText(a: Assertion): string {
-	if (
-		[
-			"json_valid",
-			"is_json",
-			"is_html",
-			"is_xml",
-			"is_sql",
-			"is_refusal",
-			"assert_set",
-		].includes(a.kind)
-	) {
-		if (a.kind === "assert_set" && "assertions" in a) {
-			return JSON.stringify(a.assertions);
-		}
-		return "";
-	}
-	if (
-		[
-			"llm_judge",
-			"llm_rubric",
-			"similar",
-			"factuality",
-			"context_faithfulness",
-			"answer_relevance",
-		].includes(a.kind)
-	) {
-		return a.kind === "similar" && "value" in a
-			? a.value
-			: "rubric" in a
-				? a.rubric
-				: "";
-	}
-	return "value" in a ? a.value : "";
-}
-
-/** Set the editable text payload of an assertion, preserving kind. */
-function withAssertionText(a: Assertion, text: string): Assertion {
-	if (
-		[
-			"json_valid",
-			"is_json",
-			"is_html",
-			"is_xml",
-			"is_sql",
-			"is_refusal",
-			"assert_set",
-		].includes(a.kind)
-	) {
-		if (a.kind === "assert_set") {
-			try {
-				const parsed: unknown = JSON.parse(text);
-				if (Array.isArray(parsed)) {
-					return {
-						assertions: parsed.filter(isPersistedAssertion),
-						kind: "assert_set",
-						options: a.options,
-					};
-				}
-			} catch {
-				// Keep the last valid assertion set until the JSON is complete.
-			}
-			return a;
-		}
-		return a;
-	}
-	if (
-		[
-			"llm_judge",
-			"llm_rubric",
-			"similar",
-			"factuality",
-			"context_faithfulness",
-			"answer_relevance",
-		].includes(a.kind)
-	) {
-		if (a.kind === "similar") {
-			return { kind: a.kind, options: a.options, value: text } as Assertion;
-		}
-		return { kind: a.kind, options: a.options, rubric: text } as Assertion;
-	}
-	return { kind: a.kind, options: a.options, value: text } as Assertion;
-}
-
-/** The Gateway wire contract flattens Promptfoo assertion options next to kind/value. */
-function gatewayAssertion(assertion: Assertion): Assertion {
-	const { options, ...base } = assertion as Assertion & {
-		options?: AssertionOptions;
-	};
-	return { ...base, ...(options ?? {}) } as Assertion;
-}
-
-// ── Test-case rows ─────────────────────────────────────────────────────────────
-
-interface TestCaseRow {
-	assertions: Assertion[];
-	context?: unknown;
-	/** Legacy convenience expected substring. */
-	expected: string;
-	id: string;
-	inheritDefaultTest?: boolean;
-	/** User message; may contain {{vars}}. */
-	input: string;
-	/** Ordered Promptfoo chat messages, when this case is multi-turn. */
-	messages?: EvalMessage[];
-	metadata: Record<string, unknown>;
-	name: string;
-	options: Record<string, unknown>;
-	provider?: string;
-	providerOutput?: unknown;
-	providers: string[];
-	/** Promptfoo-style mean assertion pass threshold, entered as 0..1. */
-	threshold: string;
-	vars: Record<string, unknown>;
-}
-
-function newTestCaseRow(): TestCaseRow {
-	return {
-		id: crypto.randomUUID(),
-		name: "",
-		input: "",
-		metadata: {},
-		options: {},
-		providers: [],
-		vars: {},
-		expected: "",
-		threshold: "",
-		assertions: [],
-	};
-}
-
-interface PromptTestSuiteSnapshot {
-	codeEvaluators?: CodeEvaluatorSpec[];
-	defaultTest?: Record<string, unknown>;
-	evaluatorIds: string[];
-	extraModels: string[];
-	judgeModel: string;
-	maxConcurrency?: number;
-	repeat?: number;
-	rows: TestCaseRow[];
-	tags?: Record<string, string>;
-	timeoutMs?: number;
-}
-
-function parseCodeEvaluators(value: unknown): CodeEvaluatorSpec[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	return value.flatMap((item) => {
-		if (!isRecord(item)) {
-			return [];
-		}
-		const id = typeof item.id === "string" ? item.id.trim() : "";
-		const lang =
-			item.lang === "python" ? "python" : item.lang === "js" ? "js" : null;
-		const source = typeof item.source === "string" ? item.source : "";
-		return id && lang && source ? [{ id, lang, source }] : [];
-	});
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-function isPersistedAssertion(value: unknown): value is Assertion {
-	if (!isRecord(value) || typeof value.kind !== "string") {
-		return false;
-	}
-	if (
-		[
-			"json_valid",
-			"is_json",
-			"is_html",
-			"is_xml",
-			"is_sql",
-			"is_refusal",
-			"assert_set",
-		].includes(value.kind)
-	) {
-		if (value.kind === "assert_set") {
-			return (
-				Array.isArray(value.assertions) &&
-				value.assertions.every(isPersistedAssertion)
-			);
-		}
-		return true;
-	}
-	if (
-		[
-			"llm_judge",
-			"llm_rubric",
-			"similar",
-			"factuality",
-			"context_faithfulness",
-			"answer_relevance",
-		].includes(value.kind)
-	) {
-		return value.kind === "similar"
-			? typeof value.value === "string"
-			: typeof value.rubric === "string";
-	}
-	return (
-		ASSERTION_KINDS.includes(value.kind as AssertionKind) &&
-		typeof value.value === "string"
-	);
-}
-
-function isPersistedRow(value: unknown): value is TestCaseRow {
-	if (!isRecord(value)) {
-		return false;
-	}
-	if (
-		typeof value.id !== "string" ||
-		typeof value.name !== "string" ||
-		typeof value.input !== "string" ||
-		typeof value.expected !== "string" ||
-		typeof value.threshold !== "string" ||
-		!isRecord(value.vars) ||
-		!Array.isArray(value.assertions)
-	) {
-		return false;
-	}
-	return (
-		value.assertions.every(isPersistedAssertion) &&
-		(value.messages === undefined || Array.isArray(value.messages)) &&
-		(value.metadata === undefined || isRecord(value.metadata)) &&
-		(value.options === undefined || isRecord(value.options)) &&
-		(value.providers === undefined || Array.isArray(value.providers))
-	);
-}
-
-function normalizeTestCaseRow(row: TestCaseRow): TestCaseRow {
-	return {
-		...newTestCaseRow(),
-		...row,
-		metadata: row.metadata ?? {},
-		options: row.options ?? {},
-		providers: row.providers ?? [],
-		vars: row.vars ?? {},
-	};
-}
-
-function testSuiteKey(agentId: string): string {
-	return `prompt-studio-tests:${agentId}`;
-}
-
-function loadTestSuite(agentId: string | null): PromptTestSuiteSnapshot {
-	if (!agentId || typeof window === "undefined") {
-		return {
-			evaluatorIds: [],
-			extraModels: [],
-			judgeModel: "",
-			rows: [],
-		};
-	}
-	try {
-		const raw = window.localStorage.getItem(testSuiteKey(agentId));
-		if (!raw) {
-			return {
-				evaluatorIds: [],
-				extraModels: [],
-				judgeModel: "",
-				rows: [],
-			};
-		}
-		const parsed: unknown = JSON.parse(raw);
-		if (!isRecord(parsed)) {
-			return {
-				evaluatorIds: [],
-				extraModels: [],
-				judgeModel: "",
-				rows: [],
-			};
-		}
-		return {
-			codeEvaluators: parseCodeEvaluators(parsed.codeEvaluators),
-			defaultTest: isRecord(parsed.defaultTest)
-				? parsed.defaultTest
-				: undefined,
-			evaluatorIds: Array.isArray(parsed.evaluatorIds)
-				? parsed.evaluatorIds.filter(
-						(value): value is string => typeof value === "string"
-					)
-				: [],
-			extraModels: Array.isArray(parsed.extraModels)
-				? parsed.extraModels.filter(
-						(model): model is string => typeof model === "string"
-					)
-				: [],
-			judgeModel:
-				typeof parsed.judgeModel === "string" ? parsed.judgeModel : "",
-			maxConcurrency:
-				typeof parsed.maxConcurrency === "number"
-					? parsed.maxConcurrency
-					: undefined,
-			repeat: typeof parsed.repeat === "number" ? parsed.repeat : undefined,
-			tags: isRecord(parsed.tags)
-				? Object.fromEntries(
-						Object.entries(parsed.tags).filter(
-							(entry): entry is [string, string] => typeof entry[1] === "string"
-						)
-					)
-				: undefined,
-			timeoutMs:
-				typeof parsed.timeoutMs === "number" ? parsed.timeoutMs : undefined,
-			rows: Array.isArray(parsed.rows)
-				? parsed.rows.filter(isPersistedRow).map(normalizeTestCaseRow)
-				: [],
-		};
-	} catch {
-		return {
-			evaluatorIds: [],
-			extraModels: [],
-			judgeModel: "",
-			rows: [],
-		};
-	}
-}
-
-function persistTestSuite(
-	agentId: string,
-	snapshot: PromptTestSuiteSnapshot
-): void {
-	if (typeof window === "undefined") {
-		return;
-	}
-	try {
-		window.localStorage.setItem(
-			testSuiteKey(agentId),
-			JSON.stringify(snapshot)
-		);
-	} catch {
-		// Test drafts remain usable when browser storage is unavailable or full.
-	}
 }
 
 // ── Props ──────────────────────────────────────────────────────────────────────
@@ -686,6 +266,8 @@ export function PromptStudio({
 	model = "",
 	engine = "",
 }: PromptStudioProps) {
+	const [editorRevision, setEditorRevision] = useState(0);
+	const lastEditorValueRef = useRef(value);
 	// Variable values entered by the user for the preview substitution.
 	const [varValues, setVarValues] = useState<Record<string, string>>({});
 	// Whether the preview panel is open.
@@ -695,11 +277,32 @@ export function PromptStudio({
 	const previewConvIdRef = useRef<string>(`preview-${crypto.randomUUID()}`);
 
 	const placeholders = useMemo(() => extractPlaceholders(value), [value]);
+	useEffect(() => {
+		if (lastEditorValueRef.current === value) {
+			return;
+		}
+		lastEditorValueRef.current = value;
+		setEditorRevision((revision) => revision + 1);
+	}, [value]);
+	const promptVersionScope = useMemo(
+		() => ({}),
+		[agentId, target.url, target.token, target.userJwt]
+	);
+	const activePromptVersionScope = useRef(promptVersionScope);
+	activePromptVersionScope.current = promptVersionScope;
+	const promptVersionMounted = useRef(true);
+	useEffect(() => {
+		promptVersionMounted.current = true;
+		return () => {
+			promptVersionMounted.current = false;
+		};
+	}, []);
 	const promptVersionSource = useMemo(() => {
 		if (!agentId) {
 			return null;
 		}
 		return {
+			scope: promptVersionScope,
 			getValue: (versionId: string) =>
 				getAgentPromptVersion(target, agentId, versionId),
 			list: async () =>
@@ -714,15 +317,21 @@ export function PromptStudio({
 					agentId,
 					versionId
 				);
+				if (
+					!promptVersionMounted.current ||
+					activePromptVersionScope.current !== promptVersionScope
+				) {
+					return;
+				}
 				onChange(restored);
 			},
 			snapshot: () => createAgentPromptVersion(target, agentId, value),
 		};
-	}, [agentId, onChange, target, value]);
+	}, [agentId, onChange, target, value, promptVersionScope]);
 
 	// Reset unknown var values when the placeholder set changes — avoid stale keys
 	// polluting the rendered prompt.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: varValues is read but deliberately excluded to avoid an update loop; only the placeholder set drives the reset.
+	// varValues is read but deliberately excluded to avoid an update loop; only the placeholder set drives the reset.
 	useEffect(() => {
 		const kept: Record<string, string> = {};
 		for (const name of placeholders) {
@@ -751,10 +360,16 @@ export function PromptStudio({
 			{/* Header */}
 			<div className="flex items-center gap-2">
 				<span className="font-medium text-base">Prompt Studio</span>
-				<Badge className="ml-1 text-[10px]" variant="secondary">
+				<Badge className="ml-1" size="compact" variant="secondary">
 					v{version}
 				</Badge>
 				<div className="ml-auto flex items-center gap-2">
+					<PromptLibrary
+						currentPrompt={value}
+						locked={locked}
+						onUsePrompt={onChange}
+						target={target}
+					/>
 					{promptVersionSource ? (
 						<VersionHistory
 							currentValue={value}
@@ -763,7 +378,7 @@ export function PromptStudio({
 						/>
 					) : null}
 					{locked ? (
-						<Badge className="gap-1" variant="secondary">
+						<Badge variant="secondary">
 							<HugeiconsIcon className="size-3" icon={LockedIcon} />
 							Locked — read only
 						</Badge>
@@ -802,15 +417,19 @@ export function PromptStudio({
 					// (the editor deserializes initialMarkdown once on mount).
 					<div className="rounded-md border" id="prompt-studio-editor">
 						<MarkdownEditor
-							initialMarkdown={value}
-							key={agentId ?? "new"}
-							onChangeMarkdown={onChange}
+							initialMarkdown={escapePromptPlaceholdersForEditor(value)}
+							key={`${agentId ?? "new"}:${editorRevision}`}
+							onChangeMarkdown={(markdown) => {
+								const nextValue = normalizePromptPlaceholders(markdown);
+								lastEditorValueRef.current = nextValue;
+								onChange(nextValue);
+							}}
 						/>
 					</div>
 				)}
 				<p className="text-muted-foreground text-xs">
 					Use{" "}
-					<code className="rounded bg-muted px-1 font-mono text-[11px]">
+					<code className="type-caption rounded bg-muted px-1 font-mono">
 						{"{{variable_name}}"}
 					</code>{" "}
 					for named placeholders. Fill them in below before previewing.
@@ -824,16 +443,16 @@ export function PromptStudio({
 					<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 						{placeholders.map((name) => (
 							<div className="flex flex-col gap-1" key={name}>
-								<Label className="text-xs" htmlFor={`var-${name}`}>
+								<Label htmlFor={`var-${name}`} size="compact">
 									{name}
 								</Label>
 								<Input
 									autoComplete="off"
-									className="h-8 text-xs"
 									id={`var-${name}`}
 									name={`preview-variable-${name}`}
 									onChange={(e) => handleVarChange(name, e.target.value)}
 									placeholder={`Value for {{${name}}}`}
+									size="compact"
 									value={varValues[name] ?? ""}
 								/>
 							</div>
@@ -856,7 +475,7 @@ export function PromptStudio({
 			{/* Preview trigger */}
 			<div className="flex items-center gap-2">
 				<Button
-					disabled={!(agentId && value.trim())}
+					disabled={!(agentId && hasPromptContent(value))}
 					onClick={handleOpenPreview}
 					size="sm"
 					variant="ghost"
@@ -913,9 +532,7 @@ function promptfooImportWarnings(config: PromptfooConfig): string[] {
 	return warnings;
 }
 
-function promptfooConfigExtras(
-	config: PromptfooConfig
-): Record<string, unknown> {
+function promptfooConfigExtras(config: PromptfooConfig): PromptfooDocument {
 	const editorKeys = new Set([
 		"code_evaluators",
 		"defaultTest",
@@ -930,13 +547,15 @@ function promptfooConfigExtras(
 		"targets",
 		"tests",
 	]);
-	return Object.fromEntries(
-		Object.entries(config).filter(([key]) => !editorKeys.has(key))
+	return parsePromptfooDocument(
+		Object.fromEntries(
+			Object.entries(config).filter(([key]) => !editorKeys.has(key))
+		)
 	);
 }
 
-function promptfooRunConfig(config: PromptfooConfig): Record<string, unknown> {
-	const merged: Record<string, unknown> = {};
+function promptfooRunConfig(config: PromptfooConfig): PromptfooDocument {
+	const merged: PromptfooDocument = {};
 	for (const key of ["commandLineOptions", "evaluateOptions", "run_config"]) {
 		const source = config[key];
 		if (isRecord(source)) {
@@ -947,23 +566,21 @@ function promptfooRunConfig(config: PromptfooConfig): Record<string, unknown> {
 }
 
 function numericRunOption(
-	config: Record<string, unknown>,
+	config: PromptfooDocument,
 	...keys: string[]
 ): number | undefined {
 	for (const key of keys) {
-		if (typeof config[key] === "number") {
+		if (isNumber(config[key])) {
 			return config[key];
 		}
 	}
 	return undefined;
 }
 
-function runTagsFromConfig(config: Record<string, unknown>): string {
+function runTagsFromConfig(config: PromptfooDocument): string {
 	return isRecord(config.tags)
 		? Object.entries(config.tags)
-				.filter(
-					(entry): entry is [string, string] => typeof entry[1] === "string"
-				)
+				.filter((entry): entry is [string, string] => isString(entry[1]))
 				.map(([key, value]) => `${key}=${value}`)
 				.join(", ")
 		: "";
@@ -975,12 +592,6 @@ interface PromptVariantRow {
 	messages: EvalMessage[];
 	name: string;
 	type: "chat" | "text";
-}
-
-interface PromptVariantRun {
-	promptId: string;
-	promptName: string;
-	result: EvalRunResult;
 }
 
 function promptVariantFromConfig(prompt: PromptfooPrompt): PromptVariantRow {
@@ -1016,20 +627,20 @@ function promptfooTestToRow(test: PromptfooTest, index: number): TestCaseRow {
 function rowToPromptfooTest(row: TestCaseRow): PromptfooTest {
 	return {
 		assertions: row.assertions,
-		context: row.context,
+		context: parsePromptfooValue(row.context),
 		description: row.name,
 		expected: row.expected.trim() || undefined,
 		inheritDefaultTest: row.inheritDefaultTest,
 		messages: row.messages,
-		metadata: row.metadata,
-		options: row.options,
+		metadata: parsePromptfooDocument(row.metadata),
+		options: parsePromptfooDocument(row.options),
 		prompt: row.input || undefined,
 		provider: row.provider,
-		providerOutput: row.providerOutput,
+		providerOutput: parsePromptfooValue(row.providerOutput),
 		providers: row.providers,
 		id: row.id,
 		threshold: parseThreshold(row.threshold),
-		vars: row.vars,
+		vars: parsePromptfooDocument(row.vars),
 	};
 }
 
@@ -1041,9 +652,9 @@ function suiteConfigFromEditor(
 	judgeModel: string,
 	evaluators: string[],
 	codeEvaluators: CodeEvaluatorSpec[] = [],
-	defaultTest?: Record<string, unknown>,
-	runConfig?: Record<string, unknown>,
-	configExtras: Record<string, unknown> = {}
+	defaultTest?: PromptfooDocument,
+	runConfig?: PromptfooDocument,
+	configExtras: PromptfooDocument = {}
 ): PromptfooConfig {
 	const prompts: PromptfooPrompt[] = [
 		{
@@ -1055,21 +666,25 @@ function suiteConfigFromEditor(
 		},
 		...variants,
 	];
-	return normalizePromptfooConfig({
+	const config = {
 		...configExtras,
-		...(defaultTest && Object.keys(defaultTest).length > 0
-			? { defaultTest }
-			: {}),
-		...(runConfig && Object.keys(runConfig).length > 0
-			? { run_config: runConfig }
-			: {}),
-		...(codeEvaluators.length > 0 ? { code_evaluators: codeEvaluators } : {}),
 		evaluators,
 		judge_model: judgeModel.trim() || undefined,
 		prompts,
 		providers,
 		tests: rows.map(rowToPromptfooTest),
-	});
+	};
+	const imported = parsePromptfooDocument(config);
+	if (defaultTest && Object.keys(defaultTest).length > 0) {
+		imported.defaultTest = defaultTest;
+	}
+	if (runConfig && Object.keys(runConfig).length > 0) {
+		imported.run_config = runConfig;
+	}
+	if (codeEvaluators.length > 0) {
+		imported.code_evaluators = parsePromptfooValue(codeEvaluators);
+	}
+	return normalizePromptfooConfig(imported);
 }
 
 function runConfigFromEditor(
@@ -1078,7 +693,7 @@ function runConfigFromEditor(
 	repeat: number,
 	cache: boolean,
 	tags: string
-): Record<string, unknown> {
+) {
 	return {
 		cache,
 		max_concurrency: maxConcurrency,
@@ -1102,11 +717,11 @@ function PromptTestCases({
 	const [codeEvaluators, setCodeEvaluators] = useState<CodeEvaluatorSpec[]>(
 		() => localSuite.codeEvaluators ?? []
 	);
-	const [configExtras, setConfigExtras] = useState<Record<string, unknown>>({});
+	const [configExtras, setConfigExtras] = useState<PromptfooDocument>({});
 	const [codeEvaluatorText, setCodeEvaluatorText] = useState(() =>
 		JSON.stringify(localSuite.codeEvaluators ?? [], null, 2)
 	);
-	const [defaultTest, setDefaultTest] = useState<Record<string, unknown>>(
+	const [defaultTest, setDefaultTest] = useState<PromptfooDocument>(
 		() => localSuite.defaultTest ?? {}
 	);
 	const [defaultTestText, setDefaultTestText] = useState(() =>
@@ -1168,11 +783,13 @@ function PromptTestCases({
 	const [error, setError] = useState<string | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
 	const loadedSuiteAgentRef = useRef<string | null>(null);
+	const importAppliedRef = useRef(false);
 
 	useEffect(() => () => abortRef.current?.abort(), []);
 
 	useEffect(() => {
 		let cancelled = false;
+		importAppliedRef.current = false;
 		const load = async () => {
 			loadedSuiteAgentRef.current = null;
 			setSuiteLoading(true);
@@ -1187,7 +804,7 @@ function PromptTestCases({
 					return;
 				}
 				const suites = await listPromptSuites(target, agentId);
-				if (cancelled) {
+				if (cancelled || importAppliedRef.current) {
 					return;
 				}
 				const nextSuite = suites[0];
@@ -1222,16 +839,14 @@ function PromptTestCases({
 				setConfigExtras(promptfooConfigExtras(config));
 				setSuiteName(nextSuite.name);
 				setCodeEvaluators(parseCodeEvaluators(config.code_evaluators));
-				setDefaultTest(config.defaultTest ?? {});
+				setDefaultTest(isRecord(config.defaultTest) ? config.defaultTest : {});
 				setRows(config.tests.map(promptfooTestToRow));
 				setExtraModels(config.providers);
-				setJudgeModel(
-					typeof config.judge_model === "string" ? config.judge_model : ""
-				);
+				setJudgeModel(isString(config.judge_model) ? config.judge_model : "");
 				setEvaluatorIds(
 					Array.isArray(config.evaluators)
-						? config.evaluators.filter(
-								(value): value is string => typeof value === "string"
+						? config.evaluators.filter((value): value is string =>
+								isString(value)
 							)
 						: []
 				);
@@ -1257,7 +872,7 @@ function PromptTestCases({
 					listPromptSuiteVersions(target, nextSuite.id),
 					listPromptRuns(target, nextSuite.id),
 				]);
-				if (!cancelled) {
+				if (!(cancelled || importAppliedRef.current)) {
 					setSuiteVersions(versions);
 					setSuiteRuns(runs);
 					const linkedRunId = linkedPromptRunId();
@@ -1266,9 +881,14 @@ function PromptTestCases({
 							getPromptRun(target, nextSuite.id, linkedRunId),
 							listPromptReviews(target, nextSuite.id, linkedRunId),
 						]);
-						const linkedResults = linkedRun.result.variants;
-						if (Array.isArray(linkedResults)) {
-							setResults(linkedResults as PromptVariantRun[]);
+						const linkedResults = isRecord(linkedRun.result)
+							? linkedRun.result.variants
+							: undefined;
+						if (
+							!(cancelled || importAppliedRef.current) &&
+							Array.isArray(linkedResults)
+						) {
+							setResults(promptVariantRunsSchema.parse(linkedResults));
 							setActiveRunId(linkedRunId);
 							setReviews(
 								Object.fromEntries(
@@ -1279,7 +899,7 @@ function PromptTestCases({
 					}
 				}
 			} catch (loadError) {
-				if (!cancelled) {
+				if (!(cancelled || importAppliedRef.current)) {
 					// Core may be on an older build while the editor is being upgraded;
 					// preserve the local draft and surface the durable-sync state.
 					const local = agentId ? loadTestSuite(agentId) : null;
@@ -1505,16 +1125,14 @@ function PromptTestCases({
 		(config: PromptfooConfig) => {
 			setConfigExtras(promptfooConfigExtras(config));
 			setCodeEvaluators(parseCodeEvaluators(config.code_evaluators));
-			setDefaultTest(config.defaultTest ?? {});
+			setDefaultTest(isRecord(config.defaultTest) ? config.defaultTest : {});
 			setRows(config.tests.map(promptfooTestToRow));
 			setExtraModels(config.providers);
-			setJudgeModel(
-				typeof config.judge_model === "string" ? config.judge_model : ""
-			);
+			setJudgeModel(isString(config.judge_model) ? config.judge_model : "");
 			setEvaluatorIds(
 				Array.isArray(config.evaluators)
-					? config.evaluators.filter(
-							(value): value is string => typeof value === "string"
+					? config.evaluators.filter((value): value is string =>
+							isString(value)
 						)
 					: []
 			);
@@ -1583,6 +1201,7 @@ function PromptTestCases({
 		if (!pendingImport) {
 			return;
 		}
+		importAppliedRef.current = true;
 		applyConfig(pendingImport.config);
 		setSuiteName(
 			pendingImport.filename.replace(/\.[^.]+$/, "") || "Imported suite"
@@ -1626,10 +1245,8 @@ function PromptTestCases({
 					});
 			setSuite(response.suite);
 			if (response.version) {
-				setSuiteVersions((prev) => [
-					response.version as PromptSuiteVersionMeta,
-					...prev,
-				]);
+				const version = response.version;
+				setSuiteVersions((prev) => [version, ...prev]);
 			}
 			setSaveLabel("");
 			setSuiteRuns(await listPromptRuns(target, response.suite.id));
@@ -1755,26 +1372,20 @@ function PromptTestCases({
 				threshold: parseThreshold(r.threshold),
 				metadata: r.metadata,
 				options: {
-					cache:
-						typeof r.options.cache === "boolean" ? r.options.cache : undefined,
-					prefix:
-						typeof r.options.prefix === "string" ? r.options.prefix : undefined,
-					suffix:
-						typeof r.options.suffix === "string" ? r.options.suffix : undefined,
-					timeout_ms:
-						typeof r.options.timeout_ms === "number"
-							? r.options.timeout_ms
+					cache: isBoolean(r.options.cache) ? r.options.cache : undefined,
+					prefix: isString(r.options.prefix) ? r.options.prefix : undefined,
+					suffix: isString(r.options.suffix) ? r.options.suffix : undefined,
+					timeout_ms: isNumber(r.options.timeout_ms)
+						? r.options.timeout_ms
+						: undefined,
+					transform: isString(r.options.transform)
+						? r.options.transform
+						: undefined,
+					transform_vars: isString(r.options.transform_vars)
+						? r.options.transform_vars
+						: isString(r.options.transformVars)
+							? r.options.transformVars
 							: undefined,
-					transform:
-						typeof r.options.transform === "string"
-							? r.options.transform
-							: undefined,
-					transform_vars:
-						typeof r.options.transform_vars === "string"
-							? r.options.transform_vars
-							: typeof r.options.transformVars === "string"
-								? r.options.transformVars
-								: undefined,
 				},
 				provider: r.provider,
 				providers: r.providers,
@@ -1885,9 +1496,11 @@ function PromptTestCases({
 					getPromptRun(target, suite.id, runId),
 					listPromptReviews(target, suite.id, runId),
 				]);
-				const savedResults = saved.result.variants;
+				const savedResults = isRecord(saved.result)
+					? saved.result.variants
+					: undefined;
 				if (Array.isArray(savedResults)) {
-					setResults(savedResults as PromptVariantRun[]);
+					setResults(promptVariantRunsSchema.parse(savedResults));
 					setActiveRunId(runId);
 					setReviews(
 						Object.fromEntries(
@@ -1987,9 +1600,11 @@ function PromptTestCases({
 			}
 			try {
 				const saved = await getPromptRun(target, suite.id, runId);
-				const savedResults = saved.result.variants;
+				const savedResults = isRecord(saved.result)
+					? saved.result.variants
+					: undefined;
 				if (Array.isArray(savedResults)) {
-					setComparisonResults(savedResults as PromptVariantRun[]);
+					setComparisonResults(promptVariantRunsSchema.parse(savedResults));
 					setComparisonRunId(runId);
 				}
 			} catch (compareError) {
@@ -2019,32 +1634,32 @@ function PromptTestCases({
 
 			<div className="flex flex-wrap items-end gap-2 rounded-lg bg-muted/20 p-3">
 				<div className="flex min-w-56 flex-1 flex-col gap-1">
-					<Label className="text-[11px]" htmlFor="promptfoo-suite-name">
+					<Label htmlFor="promptfoo-suite-name" size="caption">
 						Suite name
 					</Label>
 					<Input
-						className="h-8 text-xs"
 						disabled={locked}
 						id="promptfoo-suite-name"
 						onChange={(event) => setSuiteName(event.target.value)}
+						size="compact"
 						value={suiteName}
 					/>
 				</div>
 				<div className="flex min-w-44 flex-col gap-1">
-					<Label className="text-[11px]" htmlFor="promptfoo-save-label">
+					<Label htmlFor="promptfoo-save-label" size="caption">
 						Version label (optional)
 					</Label>
 					<Input
-						className="h-8 text-xs"
 						disabled={locked}
 						id="promptfoo-save-label"
 						onChange={(event) => setSaveLabel(event.target.value)}
 						placeholder="Baseline, stricter rubric…"
+						size="compact"
 						value={saveLabel}
 					/>
 				</div>
 				<Button
-					disabled={locked || suiteSaving || suiteLoading}
+					disabled={locked || !agentId || suiteSaving || suiteLoading}
 					loading={suiteSaving}
 					onClick={() => saveSuite().catch(() => undefined)}
 					size="sm"
@@ -2053,8 +1668,9 @@ function PromptTestCases({
 				</Button>
 				{suiteVersions.length > 0 ? (
 					<NativeSelect
+						appearance="compact"
 						aria-label="Restore suite version"
-						className="h-8 max-w-44 text-xs"
+						className="max-w-44"
 						disabled={locked}
 						onChange={(event) => {
 							if (event.target.value) {
@@ -2086,10 +1702,13 @@ function PromptTestCases({
 					</span>
 				</label>
 				<NativeSelect
+					appearance="compact"
 					aria-label="Export format"
-					className="h-8 w-24 text-xs"
+					className="w-24"
 					onChange={(event) =>
-						setExportFormat(event.target.value as typeof exportFormat)
+						setExportFormat(
+							z.enum(["yaml", "json", "jsonl", "csv"]).parse(event.target.value)
+						)
 					}
 					value={exportFormat}
 				>
@@ -2118,7 +1737,7 @@ function PromptTestCases({
 				>
 					<div>
 						<p className="font-medium text-xs">Import ready</p>
-						<p className="text-[11px] text-muted-foreground">
+						<p className="type-caption text-muted-foreground">
 							{pendingImport.filename} contains{" "}
 							{pendingImport.config.prompts.length} prompt
 							{pendingImport.config.prompts.length === 1 ? "" : "s"},{" "}
@@ -2130,7 +1749,7 @@ function PromptTestCases({
 						</p>
 					</div>
 					{pendingImport.warnings.map((warning) => (
-						<p className="text-[11px] text-status-warning" key={warning}>
+						<p className="type-caption text-status-warning" key={warning}>
 							{warning}
 						</p>
 					))}
@@ -2183,11 +1802,10 @@ function PromptTestCases({
 				primaryModel={model}
 			/>
 			<div className="flex flex-col gap-1 rounded-lg bg-muted/20 p-3">
-				<Label className="text-[11px]" htmlFor="promptfoo-evaluators">
+				<Label htmlFor="promptfoo-evaluators" size="caption">
 					Registry evaluators (optional, comma-separated)
 				</Label>
 				<Input
-					className="h-7 text-xs"
 					disabled={locked}
 					id="promptfoo-evaluators"
 					onChange={(event) =>
@@ -2199,9 +1817,10 @@ function PromptTestCases({
 						)
 					}
 					placeholder="assertions, exact_match, pii_detector…"
+					size="dense"
 					value={evaluatorIds.join(", ")}
 				/>
-				<p className="text-[10px] text-muted-foreground">
+				<p className="type-compact text-muted-foreground">
 					Uses the shared Gateway evaluator catalog in addition to inline
 					assertions.
 				</p>
@@ -2214,11 +1833,10 @@ function PromptTestCases({
 				<div className="mt-3 flex flex-col gap-3">
 					<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
 						<div className="flex flex-col gap-1">
-							<Label className="text-[11px]" htmlFor="promptfoo-concurrency">
+							<Label htmlFor="promptfoo-concurrency" size="caption">
 								Concurrency
 							</Label>
 							<Input
-								className="h-7 text-xs"
 								disabled={locked}
 								id="promptfoo-concurrency"
 								max={32}
@@ -2228,16 +1846,16 @@ function PromptTestCases({
 										Math.max(1, Math.min(32, Number(event.target.value) || 1))
 									)
 								}
+								size="dense"
 								type="number"
 								value={maxConcurrency}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<Label className="text-[11px]" htmlFor="promptfoo-timeout">
+							<Label htmlFor="promptfoo-timeout" size="caption">
 								Timeout (ms)
 							</Label>
 							<Input
-								className="h-7 text-xs"
 								disabled={locked}
 								id="promptfoo-timeout"
 								max={120_000}
@@ -2250,16 +1868,16 @@ function PromptTestCases({
 										)
 									)
 								}
+								size="dense"
 								type="number"
 								value={timeoutMs}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<Label className="text-[11px]" htmlFor="promptfoo-repeat">
+							<Label htmlFor="promptfoo-repeat" size="caption">
 								Repeat cases
 							</Label>
 							<Input
-								className="h-7 text-xs"
 								disabled={locked}
 								id="promptfoo-repeat"
 								max={20}
@@ -2269,14 +1887,15 @@ function PromptTestCases({
 										Math.max(1, Math.min(20, Number(event.target.value) || 1))
 									)
 								}
+								size="dense"
 								type="number"
 								value={repeat}
 							/>
 						</div>
-						<label className="flex items-center justify-between gap-2 rounded-md border px-2 text-[11px]">
+						<label className="type-caption flex items-center justify-between gap-2 rounded-md border px-2">
 							<span>
 								Cache outputs
-								<span className="block text-[10px] text-muted-foreground">
+								<span className="type-compact block text-muted-foreground">
 									Reuse identical inputs in this run
 								</span>
 							</span>
@@ -2290,54 +1909,55 @@ function PromptTestCases({
 					</div>
 					<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 						<div className="flex flex-col gap-1">
-							<Label className="text-[11px]" htmlFor="promptfoo-tags">
+							<Label htmlFor="promptfoo-tags" size="caption">
 								Run tags (key=value, comma-separated)
 							</Label>
 							<Input
-								className="h-7 text-xs"
 								disabled={locked}
 								id="promptfoo-tags"
 								onChange={(event) => setRunTags(event.target.value)}
 								placeholder="branch=main, owner=evals"
+								size="dense"
 								value={runTags}
 							/>
 						</div>
 						<div className="flex flex-col gap-1">
-							<Label className="text-[11px]" htmlFor="promptfoo-prefix-suffix">
+							<Label htmlFor="promptfoo-prefix-suffix" size="caption">
 								Prompt prefix / suffix
 							</Label>
 							<div className="flex gap-1">
 								<Input
 									aria-label="Prompt prefix"
-									className="h-7 text-xs"
 									disabled={locked}
 									onChange={(event) => setRunPrefix(event.target.value)}
 									placeholder="prefix"
+									size="dense"
 									value={runPrefix}
 								/>
 								<Input
 									aria-label="Prompt suffix"
-									className="h-7 text-xs"
 									disabled={locked}
 									onChange={(event) => setRunSuffix(event.target.value)}
 									placeholder="suffix"
+									size="dense"
 									value={runSuffix}
 								/>
 							</div>
 						</div>
 					</div>
 					<div className="flex flex-col gap-1">
-						<Label className="text-[11px]" htmlFor="promptfoo-default-test">
+						<Label htmlFor="promptfoo-default-test" size="caption">
 							Default test JSON (inherited by imported cases)
 						</Label>
 						<Textarea
-							className="min-h-16 font-mono text-xs"
 							disabled={locked}
 							id="promptfoo-default-test"
 							onChange={(event) => {
 								setDefaultTestText(event.target.value);
 								try {
-									const parsed: unknown = JSON.parse(event.target.value);
+									const parsed = parsePromptfooValue(
+										JSON.parse(event.target.value)
+									);
 									if (isRecord(parsed)) {
 										setDefaultTest(parsed);
 									}
@@ -2346,15 +1966,16 @@ function PromptTestCases({
 								}
 							}}
 							placeholder='{"vars":{"locale":"en"},"assert":[{"type":"contains","value":"{{answer}}"}]}'
+							size="dense"
 							value={defaultTestText}
+							variant="code"
 						/>
 					</div>
 					<div className="flex flex-col gap-1">
-						<Label className="text-[11px]" htmlFor="promptfoo-code-evaluators">
+						<Label htmlFor="promptfoo-code-evaluators" size="caption">
 							Custom JS/Python evaluators (Core sandbox)
 						</Label>
 						<Textarea
-							className="min-h-20 font-mono text-xs"
 							disabled={locked}
 							id="promptfoo-code-evaluators"
 							onChange={(event) => {
@@ -2362,7 +1983,7 @@ function PromptTestCases({
 								try {
 									setCodeEvaluators(
 										parseCodeEvaluators(
-											JSON.parse(event.target.value) as unknown
+											parsePromptfooValue(JSON.parse(event.target.value))
 										)
 									);
 								} catch {
@@ -2370,9 +1991,11 @@ function PromptTestCases({
 								}
 							}}
 							placeholder='[{"id":"safe_output","lang":"js","source":"({ score: output.includes(\"safe\") ? 1 : 0 })"}]'
+							size="compact"
 							value={codeEvaluatorText}
+							variant="code"
 						/>
-						<p className="text-[10px] text-muted-foreground">
+						<p className="type-compact text-muted-foreground">
 							Code is never run in the renderer or Gateway; Core reports
 							unavailable sandbox runtimes as not executed.
 						</p>
@@ -2463,7 +2086,7 @@ function PromptVariantsEditor({
 		<div className="flex flex-col gap-2 rounded-lg bg-muted/20 p-3">
 			<div className="flex items-center gap-2">
 				<span className="font-medium text-xs">Prompt variants</span>
-				<span className="text-[11px] text-muted-foreground">
+				<span className="type-caption text-muted-foreground">
 					Run text or multi-turn prompt variants through the same test matrix.
 				</span>
 				<Button disabled={locked} onClick={onAdd} size="sm" variant="ghost">
@@ -2472,7 +2095,7 @@ function PromptVariantsEditor({
 				</Button>
 			</div>
 			{variants.length === 0 ? (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="type-caption text-muted-foreground">
 					The agent prompt above is the primary variant. Add another to compare
 					prompt revisions side by side.
 				</p>
@@ -2484,11 +2107,13 @@ function PromptVariantsEditor({
 				>
 					<div className="flex items-center gap-2">
 						<Input
-							className="h-7 max-w-48 text-xs"
+							aria-label={`Prompt variant ${index + 1} name`}
+							className="max-w-48"
 							disabled={locked}
 							onChange={(event) =>
 								onUpdate(variant.id, { name: event.target.value })
 							}
+							size="dense"
 							value={variant.name || `Variant ${index + 1}`}
 						/>
 						<Button
@@ -2522,14 +2147,15 @@ function PromptVariantsEditor({
 							<HugeiconsIcon className="size-3" icon={Copy01Icon} />
 						</Button>
 						<NativeSelect
+							appearance="dense"
 							aria-label={`Prompt variant ${index + 1} type`}
-							className="h-7 w-24 text-xs"
+							className="w-24"
 							disabled={locked}
 							onChange={(event) =>
 								onUpdate(variant.id, {
 									messages:
 										event.target.value === "chat" ? variant.messages : [],
-									type: event.target.value as PromptVariantRow["type"],
+									type: z.enum(["text", "chat"]).parse(event.target.value),
 								})
 							}
 							value={variant.type}
@@ -2549,42 +2175,39 @@ function PromptVariantsEditor({
 					</div>
 					{variant.type === "chat" ? (
 						<Textarea
-							className="min-h-20 font-mono text-xs"
+							aria-label="Variant chat messages (JSON)"
 							disabled={locked}
 							onChange={(event) => {
 								try {
-									const parsed: unknown = JSON.parse(event.target.value);
+									const parsed = parsePromptfooValue(
+										JSON.parse(event.target.value)
+									);
 									if (!Array.isArray(parsed)) {
 										return;
 									}
 									onUpdate(variant.id, {
-										messages: parsed.filter(
-											(message): message is EvalMessage =>
-												typeof message === "object" &&
-												message !== null &&
-												["assistant", "system", "user"].includes(
-													(message as { role?: unknown }).role as string
-												) &&
-												typeof (message as { content?: unknown }).content ===
-													"string"
-										),
+										messages: parseEvalMessages(parsed),
 									});
 								} catch {
 									// Keep the last valid message list until the JSON is complete.
 								}
 							}}
 							placeholder='[{"role":"user","content":"Hello {{name}}"}]'
+							size="compact"
 							value={JSON.stringify(variant.messages, null, 2)}
+							variant="code"
 						/>
 					) : (
 						<Textarea
-							className="min-h-20 font-mono text-xs"
+							aria-label="Variant system prompt"
 							disabled={locked}
 							onChange={(event) =>
 								onUpdate(variant.id, { content: event.target.value })
 							}
 							placeholder="A second system prompt variant. {{vars}} are rendered per case."
+							size="compact"
 							value={variant.content}
+							variant="code"
 						/>
 					)}
 				</div>
@@ -2618,14 +2241,14 @@ function PromptRunHistory({
 	}
 	return (
 		<div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-muted/20 p-2">
-			<span className="mr-1 font-medium text-[11px]">Runs</span>
+			<span className="type-caption mr-1 font-medium">Runs</span>
 			{runs.slice(0, 8).map((run) => (
 				<div className="flex items-center gap-0.5" key={run.id}>
 					{editingId === run.id ? (
 						<>
 							<Input
 								aria-label={`Rename ${run.name}`}
-								className="h-7 w-44 text-[11px]"
+								className="w-44"
 								onChange={(event) => setEditingName(event.target.value)}
 								onKeyDown={(event) => {
 									if (event.key === "Enter") {
@@ -2636,6 +2259,7 @@ function PromptRunHistory({
 										setEditingId(null);
 									}
 								}}
+								size="caption"
 								value={editingName}
 							/>
 							<Button
@@ -2654,12 +2278,14 @@ function PromptRunHistory({
 						</>
 					) : (
 						<Button
-							className="h-7 max-w-56 text-[11px]"
+							className="max-w-56"
 							onClick={() => onSelect(run.id).catch(() => undefined)}
-							size="sm"
+							size="caption"
 							variant={selectedRunId === run.id ? "secondary" : "ghost"}
 						>
-							<span className="truncate">{run.name}</span>
+							<span className="truncate" title={run.name}>
+								{run.name}
+							</span>
 						</Button>
 					)}
 					{editingId !== run.id && confirmDeleteId !== run.id ? (
@@ -2687,9 +2313,8 @@ function PromptRunHistory({
 							</Button>
 							<Button
 								aria-label={`Compare ${run.name}`}
-								className="h-7 px-1.5 text-[10px]"
 								onClick={() => onCompare(run.id).catch(() => undefined)}
-								size="sm"
+								size="micro-dense"
 								variant="ghost"
 							>
 								Compare
@@ -2707,24 +2332,22 @@ function PromptRunHistory({
 					) : null}
 					{confirmDeleteId === run.id ? (
 						<>
-							<span className="text-[10px] text-status-destructive">
+							<span className="type-compact text-status-destructive">
 								Delete?
 							</span>
 							<Button
-								className="h-7 px-1.5 text-[10px]"
 								onClick={() => {
 									onDelete(run.id).catch(() => undefined);
 									setConfirmDeleteId(null);
 								}}
-								size="sm"
+								size="micro-dense"
 								variant="destructive"
 							>
 								Delete
 							</Button>
 							<Button
-								className="h-7 px-1.5 text-[10px]"
 								onClick={() => setConfirmDeleteId(null)}
-								size="sm"
+								size="micro-dense"
 								variant="ghost"
 							>
 								Cancel
@@ -2852,17 +2475,21 @@ function TestCaseRowEditor({
 				</span>
 				<Input
 					aria-label={`Case ${index + 1} id`}
-					className="h-7 max-w-36 font-mono text-[10px]"
+					className="max-w-36"
 					onChange={(e) => onUpdate(row.id, { id: e.target.value })}
 					placeholder="Stable id"
+					size="micro-dense"
 					value={row.id}
+					variant="code"
 				/>
 				<Input
+					aria-label={`Case ${index + 1} name`}
 					autoComplete="off"
-					className="h-7 max-w-48 text-xs"
+					className="max-w-48"
 					name={`test-case-name-${row.id}`}
 					onChange={(e) => onUpdate(row.id, { name: e.target.value })}
 					placeholder="Name (optional)"
+					size="dense"
 					value={row.name}
 				/>
 				<Button
@@ -2906,16 +2533,17 @@ function TestCaseRowEditor({
 			</div>
 
 			<div className="flex flex-col gap-1">
-				<Label className="text-xs" htmlFor={`test-input-${row.id}`}>
+				<Label htmlFor={`test-input-${row.id}`} size="compact">
 					User message
 				</Label>
 				<Textarea
-					className="min-h-16 font-mono text-xs"
 					id={`test-input-${row.id}`}
 					name={`test-input-${row.id}`}
 					onChange={(e) => onUpdate(row.id, { input: e.target.value })}
 					placeholder="The user message. {{vars}} allowed."
+					size="dense"
 					value={row.input}
+					variant="code"
 				/>
 			</div>
 
@@ -2923,13 +2551,14 @@ function TestCaseRowEditor({
 				<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 					{suggestedVars.map((name) => (
 						<div className="flex flex-col gap-1" key={name}>
-							<Label className="text-[11px]">{name}</Label>
+							<Label size="caption">{name}</Label>
 							<Input
+								aria-label={name}
 								autoComplete="off"
-								className="h-7 text-xs"
 								name={`test-variable-${row.id}-${name}`}
 								onChange={(e) => handleVarChange(name, e.target.value)}
 								placeholder={`Value for {{${name}}}`}
+								size="dense"
 								value={displayVariable(row.vars[name])}
 							/>
 						</div>
@@ -2938,59 +2567,52 @@ function TestCaseRowEditor({
 			) : null}
 
 			<div className="flex flex-col gap-1">
-				<Label className="text-xs" htmlFor={`test-messages-${row.id}`}>
+				<Label htmlFor={`test-messages-${row.id}`} size="compact">
 					Chat messages (optional JSON)
 				</Label>
 				<Textarea
-					className="min-h-16 font-mono text-xs"
 					id={`test-messages-${row.id}`}
 					onChange={(event) => {
 						try {
-							const parsed: unknown = JSON.parse(event.target.value);
+							const parsed = parsePromptfooValue(
+								JSON.parse(event.target.value)
+							);
 							if (!Array.isArray(parsed)) {
 								return;
 							}
 							onUpdate(row.id, {
-								messages: parsed.filter(
-									(message): message is EvalMessage =>
-										typeof message === "object" &&
-										message !== null &&
-										["assistant", "system", "user"].includes(
-											(message as { role?: unknown }).role as string
-										) &&
-										typeof (message as { content?: unknown }).content ===
-											"string"
-								),
+								messages: parseEvalMessages(parsed),
 							});
 						} catch {
 							// Keep the last valid list while the user edits JSON.
 						}
 					}}
 					placeholder='[{"role":"user","content":"Question for {{name}}"}]'
+					size="dense"
 					value={JSON.stringify(row.messages ?? [], null, 2)}
+					variant="code"
 				/>
 			</div>
 
 			<div className="flex flex-col gap-1">
-				<Label className="text-xs" htmlFor={`test-expected-${row.id}`}>
+				<Label htmlFor={`test-expected-${row.id}`} size="compact">
 					Expected (optional substring)
 				</Label>
 				<Input
-					className="h-7 text-xs"
 					id={`test-expected-${row.id}`}
 					name={`test-expected-${row.id}`}
 					onChange={(e) => onUpdate(row.id, { expected: e.target.value })}
 					placeholder="Substring the response should contain"
+					size="dense"
 					value={row.expected}
 				/>
 			</div>
 
 			<div className="flex flex-col gap-1">
-				<Label className="text-xs" htmlFor={`test-context-${row.id}`}>
+				<Label htmlFor={`test-context-${row.id}`} size="compact">
 					Reference/context (optional JSON)
 				</Label>
 				<Textarea
-					className="min-h-16 font-mono text-xs"
 					id={`test-context-${row.id}`}
 					onChange={(event) => {
 						if (!event.target.value.trim()) {
@@ -2999,27 +2621,28 @@ function TestCaseRowEditor({
 						}
 						try {
 							onUpdate(row.id, {
-								context: JSON.parse(event.target.value) as unknown,
+								context: parsePromptfooValue(JSON.parse(event.target.value)),
 							});
 						} catch {
 							// Keep the last valid context while the JSON is edited.
 						}
 					}}
 					placeholder='{"source":"...","facts":["..."]}'
+					size="dense"
 					value={
 						row.context === undefined
 							? ""
 							: JSON.stringify(row.context, null, 2)
 					}
+					variant="code"
 				/>
 			</div>
 
 			<div className="flex flex-col gap-1">
-				<Label className="text-xs" htmlFor={`test-threshold-${row.id}`}>
+				<Label htmlFor={`test-threshold-${row.id}`} size="compact">
 					Assertion threshold (optional)
 				</Label>
 				<Input
-					className="h-7 text-xs"
 					id={`test-threshold-${row.id}`}
 					inputMode="decimal"
 					max="1"
@@ -3027,15 +2650,16 @@ function TestCaseRowEditor({
 					name={`test-threshold-${row.id}`}
 					onChange={(e) => onUpdate(row.id, { threshold: e.target.value })}
 					placeholder="1.0 means every assertion must pass"
+					size="dense"
 					step="0.05"
 					type="number"
 					value={row.threshold}
 				/>
 			</div>
-			<label className="flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-[11px]">
+			<label className="type-caption flex items-center justify-between gap-2 rounded-md border px-2 py-1">
 				<span>
 					Inherit suite default test
-					<span className="block text-[10px] text-muted-foreground">
+					<span className="type-compact block text-muted-foreground">
 						Disable for a standalone case
 					</span>
 				</span>
@@ -3050,11 +2674,10 @@ function TestCaseRowEditor({
 
 			<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 				<div className="flex flex-col gap-1">
-					<Label className="text-[11px]" htmlFor={`test-provider-${row.id}`}>
+					<Label htmlFor={`test-provider-${row.id}`} size="caption">
 						Provider override (optional)
 					</Label>
 					<Input
-						className="h-7 text-xs"
 						id={`test-provider-${row.id}`}
 						onChange={(event) =>
 							onUpdate(row.id, {
@@ -3062,18 +2685,15 @@ function TestCaseRowEditor({
 							})
 						}
 						placeholder="openai:gpt-4o"
+						size="dense"
 						value={row.provider ?? ""}
 					/>
 				</div>
 				<div className="flex flex-col gap-1">
-					<Label
-						className="text-[11px]"
-						htmlFor={`test-provider-output-${row.id}`}
-					>
+					<Label htmlFor={`test-provider-output-${row.id}`} size="caption">
 						Provider output fixture (optional JSON)
 					</Label>
 					<Input
-						className="h-7 font-mono text-xs"
 						id={`test-provider-output-${row.id}`}
 						onChange={(event) =>
 							onUpdate(row.id, {
@@ -3083,24 +2703,29 @@ function TestCaseRowEditor({
 							})
 						}
 						placeholder='{"choices":[{"message":{"content":"fixture"}}]}'
+						size="dense"
 						value={
 							row.providerOutput === undefined
 								? ""
 								: displayVariable(row.providerOutput)
 						}
+						variant="code"
 					/>
 				</div>
 			</div>
 
 			<details className="rounded-md border border-dashed p-2">
-				<summary className="cursor-pointer text-[11px] text-muted-foreground">
+				<summary className="type-caption cursor-pointer text-muted-foreground">
 					Promptfoo case options (prefix, suffix, transform, timeout, cache)
 				</summary>
 				<Textarea
-					className="mt-2 min-h-16 font-mono text-xs"
+					aria-label="Promptfoo case options (JSON)"
+					className="mt-2"
 					onChange={(event) => {
 						try {
-							const parsed: unknown = JSON.parse(event.target.value);
+							const parsed = parsePromptfooValue(
+								JSON.parse(event.target.value)
+							);
 							if (isRecord(parsed)) {
 								onUpdate(row.id, { options: parsed });
 							}
@@ -3109,17 +2734,18 @@ function TestCaseRowEditor({
 						}
 					}}
 					placeholder='{"prefix":"","suffix":"","transform":"trim","timeout_ms":30000,"cache":true}'
+					size="dense"
 					value={JSON.stringify(row.options, null, 2)}
+					variant="code"
 				/>
 			</details>
 
 			<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
 				<div className="flex flex-col gap-1">
-					<Label className="text-[11px]" htmlFor={`test-providers-${row.id}`}>
+					<Label htmlFor={`test-providers-${row.id}`} size="caption">
 						Providers (optional, comma-separated)
 					</Label>
 					<Input
-						className="h-7 text-xs"
 						id={`test-providers-${row.id}`}
 						onChange={(event) =>
 							onUpdate(row.id, {
@@ -3130,19 +2756,21 @@ function TestCaseRowEditor({
 							})
 						}
 						placeholder="openai:gpt-4o, anthropic:claude…"
+						size="dense"
 						value={row.providers.join(", ")}
 					/>
 				</div>
 				<div className="flex flex-col gap-1">
-					<Label className="text-[11px]" htmlFor={`test-metadata-${row.id}`}>
+					<Label htmlFor={`test-metadata-${row.id}`} size="caption">
 						Metadata JSON
 					</Label>
 					<Input
-						className="h-7 font-mono text-xs"
 						id={`test-metadata-${row.id}`}
 						onChange={(event) => {
 							try {
-								const parsed: unknown = JSON.parse(event.target.value);
+								const parsed = parsePromptfooValue(
+									JSON.parse(event.target.value)
+								);
 								if (isRecord(parsed)) {
 									onUpdate(row.id, { metadata: parsed });
 								}
@@ -3151,17 +2779,19 @@ function TestCaseRowEditor({
 							}
 						}}
 						placeholder='{"team":"support"}'
+						size="dense"
 						value={JSON.stringify(row.metadata)}
+						variant="code"
 					/>
 				</div>
 			</div>
 
 			<div className="flex flex-col gap-2">
-				<Label className="text-xs">Assertions</Label>
+				<Label size="compact">Assertions</Label>
 				{row.assertions.map((a, idx) => (
 					<AssertionEditor
 						assertion={a}
-						// biome-ignore lint/suspicious/noArrayIndexKey: assertions are positional within a row and have no stable id
+						// assertions are positional within a row and have no stable id
 						key={`assertion-${idx}`}
 						onRemove={() => handleRemoveAssertion(idx)}
 						onUpdate={(next) => handleUpdateAssertion(idx, next)}
@@ -3233,7 +2863,7 @@ function AssertionEditor({
 			onUpdate({
 				...assertion,
 				options: { ...assertion.options, ...patch },
-			} as Assertion);
+			});
 		},
 		[assertion, onUpdate]
 	);
@@ -3266,9 +2896,12 @@ function AssertionEditor({
 		<div className="flex flex-col gap-1">
 			<div className="flex items-center gap-2">
 				<NativeSelect
+					appearance="dense"
 					aria-label="Assertion type"
-					className="h-7 w-36 text-xs"
-					onChange={(e) => handleKindChange(e.target.value as AssertionKind)}
+					className="w-36"
+					onChange={(e) =>
+						handleKindChange(assertionKindSchema.parse(e.target.value))
+					}
 					value={assertion.kind}
 				>
 					{ASSERTION_KINDS.map((k) => (
@@ -3280,9 +2913,10 @@ function AssertionEditor({
 				{needsText ? (
 					<Input
 						aria-label="Assertion value"
-						className="h-7 flex-1 text-xs"
+						className="flex-1"
 						onChange={(e) => handleTextChange(e.target.value)}
 						placeholder={placeholder}
+						size="dense"
 						value={assertionText(assertion)}
 					/>
 				) : (
@@ -3304,7 +2938,6 @@ function AssertionEditor({
 			<div className="grid grid-cols-2 gap-1 sm:grid-cols-5">
 				<Input
 					aria-label="Assertion threshold"
-					className="h-6 text-[10px]"
 					inputMode="decimal"
 					max="1"
 					min="0"
@@ -3312,13 +2945,13 @@ function AssertionEditor({
 						updateOptions({ threshold: parseThreshold(event.target.value) })
 					}
 					placeholder="Threshold"
+					size="micro"
 					step="0.05"
 					type="number"
 					value={assertion.options?.threshold ?? ""}
 				/>
 				<Input
 					aria-label="Assertion weight"
-					className="h-6 text-[10px]"
 					inputMode="decimal"
 					min="0"
 					onChange={(event) => {
@@ -3328,29 +2961,30 @@ function AssertionEditor({
 						});
 					}}
 					placeholder="Weight"
+					size="micro"
 					step="0.1"
 					type="number"
 					value={assertion.options?.weight ?? ""}
 				/>
 				<Input
 					aria-label="Assertion provider"
-					className="h-6 text-[10px]"
 					onChange={(event) =>
 						updateOptions({ provider: event.target.value || undefined })
 					}
 					placeholder="Judge model/provider"
+					size="micro"
 					value={assertion.options?.provider ?? ""}
 				/>
 				<Input
 					aria-label="Assertion transform"
-					className="h-6 text-[10px]"
 					onChange={(event) =>
 						updateOptions({ transform: event.target.value || undefined })
 					}
 					placeholder="Transform (exported)"
+					size="micro"
 					value={assertion.options?.transform ?? ""}
 				/>
-				<label className="flex items-center justify-between gap-1 rounded-md border px-2 text-[10px]">
+				<label className="type-compact flex items-center justify-between gap-1 rounded-md border px-2">
 					<span>Negate</span>
 					<Switch
 						aria-label="Negate assertion"
@@ -3404,7 +3038,7 @@ function ModelControls({
 				<span className="font-medium text-xs">Models</span>
 				<Badge variant="secondary">{primaryModel || "no model"}</Badge>
 				{extraModels.map((m) => (
-					<Badge className="gap-1 pr-1" key={m} variant="outline">
+					<Badge key={m} trailingAction variant="outline">
 						{m}
 						<Button
 							aria-label={`Remove model ${m}`}
@@ -3421,17 +3055,18 @@ function ModelControls({
 			</div>
 			<div className="flex flex-wrap items-end gap-2">
 				<div className="flex flex-col gap-1">
-					<Label className="text-[11px]" htmlFor="ps-add-model">
+					<Label htmlFor="ps-add-model" size="caption">
 						Add model to compare
 					</Label>
 					<div className="flex items-center gap-1">
 						<Input
-							className="h-7 w-48 text-xs"
+							className="w-48"
 							disabled={locked}
 							id="ps-add-model"
 							onChange={(e) => onNewModelChange(e.target.value)}
 							onKeyDown={handleKeyDown}
 							placeholder="e.g. claude-3-5-haiku"
+							size="dense"
 							value={newModel}
 						/>
 						<Button
@@ -3446,15 +3081,16 @@ function ModelControls({
 					</div>
 				</div>
 				<div className="flex flex-col gap-1">
-					<Label className="text-[11px]" htmlFor="ps-judge-model">
+					<Label htmlFor="ps-judge-model" size="caption">
 						Judge model (optional)
 					</Label>
 					<Input
-						className="h-7 w-48 text-xs"
+						className="w-48"
 						disabled={locked}
 						id="ps-judge-model"
 						onChange={(e) => onJudgeChange(e.target.value)}
 						placeholder="defaults to the first model"
+						size="dense"
 						value={judgeModel}
 					/>
 				</div>
@@ -3496,6 +3132,13 @@ function RunHint({
 	return null;
 }
 
+interface PromptScoreWidth extends CSSProperties {
+	"--prompt-score-width": string;
+}
+interface PromptScoreHeight extends CSSProperties {
+	"--prompt-score-height": string;
+}
+
 // ── Results matrix ─────────────────────────────────────────────────────────────
 
 interface ResultsMatrixProps {
@@ -3518,6 +3161,35 @@ type ResultFilter =
 	| "error"
 	| "different"
 	| "highlighted";
+
+function matchesMetadataQuery(
+	metadataInput: Parameters<typeof parsePromptfooValue>[0],
+	query: string
+): boolean {
+	const metadata = parsePromptfooValue(metadataInput);
+	const normalizedQuery = query.trim().toLowerCase();
+	if (!normalizedQuery) {
+		return true;
+	}
+	const separatorIndex = normalizedQuery.indexOf("=");
+	if (separatorIndex < 0) {
+		return JSON.stringify(metadata ?? {})
+			.toLowerCase()
+			.includes(normalizedQuery);
+	}
+	if (!isRecord(metadata)) {
+		return false;
+	}
+	const key = normalizedQuery.slice(0, separatorIndex).trim();
+	const expectedValue = normalizedQuery.slice(separatorIndex + 1).trim();
+	const actual = Object.entries(metadata).find(
+		([name]) => name.toLowerCase() === key
+	)?.[1];
+	if (actual === undefined) {
+		return false;
+	}
+	return JSON.stringify(actual).toLowerCase().includes(expectedValue);
+}
 
 interface ResultExportRow {
 	caseIndex: number;
@@ -3569,13 +3241,13 @@ function flattenResultRows(
 }
 
 function exportRowsCsv(rows: ResultExportRow[]): string {
-	const cell = (value: unknown): string => {
-		const text =
-			typeof value === "string" ? value : JSON.stringify(value ?? "");
+	const cell = (input: Parameters<typeof parsePromptfooValue>[0]): string => {
+		const value = parsePromptfooValue(input);
+		const text = isString(value) ? value : JSON.stringify(value ?? "");
 		return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 	};
 	return [
-		"prompt,model,case,overall,assertion_score,assertions_pass,error,response,latency_score,input_tokens,output_tokens,cost_micro_usd,metadata",
+		"prompt,model,case,overall,assertion_score,assertions_pass,error,response,latency_score,latency_available,policy_available,input_tokens,output_tokens,cost_micro_usd,metadata",
 		...rows.map(({ caseName, model, promptName, score }) =>
 			[
 				promptName,
@@ -3587,6 +3259,8 @@ function exportRowsCsv(rows: ResultExportRow[]): string {
 				score.error ?? "",
 				score.response_text,
 				score.latency_score,
+				score.latency_available ?? true,
+				score.policy_available ?? true,
 				score.input_tokens ?? "",
 				score.output_tokens ?? "",
 				score.cost_micro_usd ?? "",
@@ -3606,7 +3280,7 @@ function exportDpoJsonl(rows: ResultExportRow[]): string {
 		group.push(row);
 		byPromptAndCase.set(key, group);
 	}
-	const preferences: Record<string, unknown>[] = [];
+	const preferences: PromptfooDocument[] = [];
 	for (const group of byPromptAndCase.values()) {
 		if (group.length < 2) {
 			continue;
@@ -3622,7 +3296,7 @@ function exportDpoJsonl(rows: ResultExportRow[]): string {
 		preferences.push({
 			chosen: chosen.score.response_text,
 			chosen_model: chosen.model,
-			metadata: chosen.score.metadata ?? {},
+			metadata: parsePromptfooDocument(chosen.score.metadata ?? {}),
 			prompt: chosen.prompt,
 			rejected: rejected.score.response_text,
 			rejected_model: rejected.model,
@@ -3674,7 +3348,7 @@ function ResultsMatrix({
 	>("json");
 	const [copyMessage, setCopyMessage] = useState<string | null>(null);
 	useEffect(() => {
-		if (typeof window === "undefined") {
+		if (globalThis.window === undefined) {
 			return;
 		}
 		const queryString = window.location.hash.split("?")[1];
@@ -3689,7 +3363,7 @@ function ResultsMatrix({
 				linkedFilter
 			)
 		) {
-			setFilter(linkedFilter as ResultFilter);
+			setFilter(resultFilterSchema.parse(linkedFilter));
 		}
 		setQuery(params.get("q") ?? "");
 		setMetadataQuery(params.get("metadata") ?? "");
@@ -3697,7 +3371,7 @@ function ResultsMatrix({
 	}, []);
 
 	useEffect(() => {
-		if (typeof window === "undefined") {
+		if (globalThis.window === undefined) {
 			return;
 		}
 		const params = new URLSearchParams();
@@ -3772,9 +3446,10 @@ function ResultsMatrix({
 			}
 			if (
 				metadataQuery.trim() &&
-				!JSON.stringify(score.metadata ?? row?.metadata ?? {})
-					.toLowerCase()
-					.includes(metadataQuery.trim().toLowerCase())
+				!matchesMetadataQuery(
+					score.metadata ?? row?.metadata ?? {},
+					metadataQuery
+				)
 			) {
 				return false;
 			}
@@ -3900,26 +3575,26 @@ function ResultsMatrix({
 				<div className="flex flex-wrap items-center gap-2">
 					<span className="font-medium text-xs">Results matrix</span>
 					<Badge variant="outline">{visibleCount} visible cells</Badge>
-					<span className="text-[10px] text-muted-foreground">
+					<span className="type-compact text-muted-foreground">
 						Search, facet, review, compare, and export this run.
 					</span>
 				</div>
 				<div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
 					<Input
 						aria-label="Search result matrix"
-						className="h-7 text-xs"
 						onChange={(event) => setQuery(event.target.value)}
 						placeholder="Search cases, prompts, outputs, models"
+						size="dense"
 						value={query}
 					/>
 					<Input
 						aria-label="Filter result metadata"
-						className="h-7 text-xs"
 						onChange={(event) => setMetadataQuery(event.target.value)}
 						placeholder="Metadata facet, e.g. team=support"
+						size="dense"
 						value={metadataQuery}
 					/>
-					<label className="flex items-center justify-between gap-2 rounded-md border px-2 text-[10px]">
+					<label className="type-compact flex items-center justify-between gap-2 rounded-md border px-2">
 						<span>Regex search</span>
 						<Switch
 							aria-label="Regex result search"
@@ -3928,9 +3603,11 @@ function ResultsMatrix({
 						/>
 					</label>
 					<NativeSelect
+						appearance="dense"
 						aria-label="Result matrix filter"
-						className="h-7 text-xs"
-						onChange={(event) => setFilter(event.target.value as ResultFilter)}
+						onChange={(event) =>
+							setFilter(resultFilterSchema.parse(event.target.value))
+						}
 						value={filter}
 					>
 						<NativeSelectOption value="all">All cells</NativeSelectOption>
@@ -3947,10 +3624,22 @@ function ResultsMatrix({
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
 					<NativeSelect
+						appearance="dense"
 						aria-label="Results export format"
-						className="h-7 w-40 text-xs"
+						className="w-40"
 						onChange={(event) =>
-							setExportFormat(event.target.value as typeof exportFormat)
+							setExportFormat(
+								z
+									.enum([
+										"yaml",
+										"json",
+										"csv",
+										"failed_json",
+										"dpo_jsonl",
+										"human_yaml",
+									])
+									.parse(event.target.value)
+							)
 						}
 						value={exportFormat}
 					>
@@ -3988,8 +3677,12 @@ function ResultsMatrix({
 							<span className="text-muted-foreground">Current run</span>
 							<div className="h-2 overflow-hidden rounded-full bg-muted">
 								<div
-									className="h-full rounded-full bg-primary"
-									style={{ width: `${Math.round(runMean * 100)}%` }}
+									className="h-full w-(--prompt-score-width) rounded-full bg-primary"
+									style={
+										/* SAFETY: React forwards CSS custom properties; this typed literal contains only a percentage string. */ {
+											"--prompt-score-width": `${Math.round(runMean * 100)}%`,
+										} as PromptScoreWidth
+									}
 								/>
 							</div>
 							<span className="font-medium">{pct(runMean)}</span>
@@ -3998,8 +3691,12 @@ function ResultsMatrix({
 							<span className="text-muted-foreground">Compared run</span>
 							<div className="h-2 overflow-hidden rounded-full bg-muted">
 								<div
-									className="h-full rounded-full bg-secondary-foreground"
-									style={{ width: `${Math.round(comparisonMean * 100)}%` }}
+									className="h-full w-(--prompt-score-width) rounded-full bg-secondary-foreground"
+									style={
+										/* SAFETY: React forwards CSS custom properties; this typed literal contains only a percentage string. */ {
+											"--prompt-score-width": `${Math.round(comparisonMean * 100)}%`,
+										} as PromptScoreWidth
+									}
 								/>
 							</div>
 							<span className="font-medium">{pct(comparisonMean)}</span>
@@ -4034,7 +3731,7 @@ function ResultsMatrix({
 							))}
 						</div>
 						<div className="flex flex-col gap-1 rounded-lg border bg-muted/10 p-2">
-							<span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+							<span className="type-compact text-muted-foreground uppercase tracking-wide">
 								Quality by model
 							</span>
 							{models.map((entry) => (
@@ -4042,25 +3739,30 @@ function ResultsMatrix({
 									className="flex items-center gap-2"
 									key={`bar-${entry.model}`}
 								>
-									<span className="w-28 truncate text-[10px]">
+									<span
+										className="type-compact w-28 truncate"
+										title={entry.model}
+									>
 										{entry.model}
 									</span>
 									<div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
 										<div
-											className="h-full rounded-full bg-primary"
-											style={{
-												width: `${Math.round(entry.aggregate.mean_overall * 100)}%`,
-											}}
+											className="h-full w-(--prompt-score-width) rounded-full bg-primary"
+											style={
+												/* SAFETY: React forwards CSS custom properties; this typed literal contains only a percentage string. */ {
+													"--prompt-score-width": `${Math.round(entry.aggregate.mean_overall * 100)}%`,
+												} as PromptScoreWidth
+											}
 										/>
 									</div>
-									<span className="w-10 text-right text-[10px] tabular-nums">
+									<span className="type-compact w-10 text-right tabular-nums">
 										{pct(entry.aggregate.mean_overall)}
 									</span>
 								</div>
 							))}
 						</div>
 						<div className="flex flex-col gap-1 rounded-lg border bg-muted/10 p-2">
-							<span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+							<span className="type-compact text-muted-foreground uppercase tracking-wide">
 								Score distribution
 							</span>
 							{(() => {
@@ -4081,13 +3783,15 @@ function ResultsMatrix({
 											>
 												<div className="flex h-8 items-end rounded bg-muted">
 													<div
-														className="w-full rounded bg-primary/70"
-														style={{
-															height: `${Math.max(4, (count / maximum) * 100)}%`,
-														}}
+														className="h-(--prompt-score-height) w-full rounded bg-primary/70"
+														style={
+															/* SAFETY: React forwards CSS custom properties; this typed literal contains only a percentage string. */ {
+																"--prompt-score-height": `${Math.max(4, (count / maximum) * 100)}%`,
+															} as PromptScoreHeight
+														}
 													/>
 												</div>
-												<span className="text-center text-[9px] text-muted-foreground">
+												<span className="type-micro text-center text-muted-foreground">
 													{index * 25}–{index === 3 ? 100 : (index + 1) * 25}% ·{" "}
 													{count}
 												</span>
@@ -4187,7 +3891,12 @@ function ModelStatCard({ result }: { result: ModelEvalResult }) {
 					tone={scoreTone(agg.mean_overall)}
 					value={pct(agg.mean_overall)}
 				/>
-				<StatCell label="Policy" value={pct(agg.policy_pass_rate)} />
+				<StatCell
+					label="Policy"
+					value={
+						agg.policy_available_cases === 0 ? "N/A" : pct(agg.policy_pass_rate)
+					}
+				/>
 				<StatCell
 					label="Assert"
 					tone={scoreTone(assertionRate)}
@@ -4219,7 +3928,7 @@ function StatCell({
 }) {
 	return (
 		<div className="flex flex-col gap-0.5">
-			<span className="text-[9px] text-muted-foreground uppercase tracking-wide">
+			<span className="type-micro text-muted-foreground uppercase tracking-wide">
 				{label}
 			</span>
 			<span className={`font-medium text-xs ${tone ?? ""}`}>{value}</span>
@@ -4229,7 +3938,7 @@ function StatCell({
 
 function jsonOutput(text: string): string {
 	try {
-		return JSON.stringify(JSON.parse(text) as unknown, null, 2);
+		return JSON.stringify(parsePromptfooValue(JSON.parse(text)), null, 2);
 	} catch {
 		return text;
 	}
@@ -4308,6 +4017,8 @@ function MatrixCell({
 			setReviewed(pass);
 			setReviewScore(String(savedReview.score ?? score.overall));
 			onReviewSaved(savedReview);
+		} catch (error) {
+			toastActionError("Couldn't save review", error);
 		} finally {
 			setReviewSaving(false);
 		}
@@ -4316,7 +4027,8 @@ function MatrixCell({
 		<div className="flex flex-col gap-1.5">
 			<div className="flex flex-wrap items-center gap-1">
 				<Badge
-					className={`text-[10px] ${score.assertions_pass ? "" : "border-destructive text-status-destructive"}`}
+					size="compact"
+					tone={score.assertions_pass ? "default" : "destructive"}
 					variant={score.assertions_pass ? "secondary" : "outline"}
 				>
 					{score.assertions_pass ? "pass" : "fail"}
@@ -4330,7 +4042,7 @@ function MatrixCell({
 				<div className="flex flex-wrap gap-1">
 					{score.evaluators.map((evaluator) => (
 						<span
-							className={`rounded px-1 py-0.5 text-[10px] ${evaluator.pass ? "bg-success/15 text-status-success dark:text-status-success" : "bg-warning/15 text-status-warning dark:text-status-warning"}`}
+							className={`type-compact rounded px-1 py-0.5 ${evaluator.pass ? "bg-success/15 text-status-success dark:text-status-success" : "bg-warning/15 text-status-warning dark:text-status-warning"}`}
 							key={evaluator.id}
 						>
 							{evaluator.id}:{" "}
@@ -4342,7 +4054,7 @@ function MatrixCell({
 			<p className="line-clamp-4 whitespace-pre-wrap break-words text-muted-foreground">
 				{score.response_text}
 			</p>
-			<details className="rounded border border-dashed px-2 py-1 text-[10px]">
+			<details className="type-compact rounded border border-dashed px-2 py-1">
 				<summary className="cursor-pointer text-muted-foreground">
 					Inspect full cell
 				</summary>
@@ -4350,9 +4062,8 @@ function MatrixCell({
 					<div className="flex items-center justify-between gap-2">
 						<span className="text-muted-foreground">Rendered prompt</span>
 						<Button
-							className="h-6 px-1.5 text-[10px]"
 							onClick={() => onCopy(score.rendered_prompt ?? score.prompt)}
-							size="sm"
+							size="micro"
 							variant="ghost"
 						>
 							<HugeiconsIcon className="size-3" icon={Copy01Icon} />
@@ -4365,9 +4076,8 @@ function MatrixCell({
 					<div className="flex items-center justify-between gap-2">
 						<span className="text-muted-foreground">Full output</span>
 						<Button
-							className="h-6 px-1.5 text-[10px]"
 							onClick={() => onCopy(score.response_text)}
-							size="sm"
+							size="micro"
 							variant="ghost"
 						>
 							<HugeiconsIcon className="size-3" icon={Copy01Icon} />
@@ -4375,10 +4085,13 @@ function MatrixCell({
 						</Button>
 					</div>
 					<NativeSelect
+						appearance="micro-dense"
 						aria-label="Cell output render mode"
-						className="h-7 w-28 text-[10px]"
+						className="w-28"
 						onChange={(event) =>
-							setRenderMode(event.target.value as typeof renderMode)
+							setRenderMode(
+								z.enum(["text", "markdown", "json"]).parse(event.target.value)
+							)
 						}
 						value={renderMode}
 					>
@@ -4401,7 +4114,12 @@ function MatrixCell({
 						</pre>
 					)}
 					<div className="grid grid-cols-2 gap-1 text-muted-foreground">
-						<span>Latency score: {pct(score.latency_score)}</span>
+						<span>
+							Latency score:{" "}
+							{score.latency_available === false
+								? "N/A"
+								: pct(score.latency_score)}
+						</span>
 						<span>Tokens: {score.total_tokens ?? "—"}</span>
 						<span>Cost: {score.cost_micro_usd ?? "unknown"}µUSD</span>
 						<span>Cache: {score.cache_hit ? "hit" : "miss"}</span>
@@ -4421,27 +4139,26 @@ function MatrixCell({
 			</details>
 			{runId && suiteId ? (
 				<div className="flex items-center gap-1">
-					<span className="mr-1 text-[10px] text-muted-foreground">Review</span>
+					<span className="type-compact mr-1 text-muted-foreground">
+						Review
+					</span>
 					<Button
-						className="h-6 px-1.5 text-[10px]"
 						disabled={reviewSaving}
 						onClick={() => review(true).catch(() => undefined)}
-						size="sm"
+						size="micro"
 						variant={reviewed === true ? "secondary" : "ghost"}
 					>
 						Pass
 					</Button>
 					<Button
-						className="h-6 px-1.5 text-[10px]"
 						disabled={reviewSaving}
 						onClick={() => review(false).catch(() => undefined)}
-						size="sm"
+						size="micro"
 						variant={reviewed === false ? "destructive" : "ghost"}
 					>
 						Fail
 					</Button>
 					<Button
-						className="h-6 px-1.5 text-[10px]"
 						disabled={reviewSaving}
 						onClick={() => {
 							const next = !reviewHighlighted;
@@ -4450,38 +4167,39 @@ function MatrixCell({
 								highlighted: next,
 							}).catch(() => undefined);
 						}}
-						size="sm"
+						size="micro"
 						variant={reviewHighlighted ? "secondary" : "ghost"}
 					>
 						{reviewHighlighted ? "Highlighted" : "Highlight"}
 					</Button>
 					<Input
 						aria-label="Human review score"
-						className="h-6 w-16 text-[10px]"
+						className="w-16"
 						disabled={reviewSaving}
 						max="1"
 						min="0"
 						onChange={(event) => setReviewScore(event.target.value)}
 						placeholder="0–1"
+						size="micro"
 						step="0.05"
 						type="number"
 						value={reviewScore}
 					/>
 					<Input
 						aria-label="Human review comment"
-						className="h-6 text-[10px]"
 						disabled={reviewSaving}
 						onChange={(event) => setReviewComment(event.target.value)}
 						placeholder="Add a review comment…"
+						size="micro"
 						value={reviewComment}
 					/>
 					<Button
-						className="h-6 self-start px-1.5 text-[10px]"
+						className="self-start"
 						disabled={reviewSaving || !reviewComment.trim()}
 						onClick={() =>
 							review(reviewed ?? score.assertions_pass).catch(() => undefined)
 						}
-						size="sm"
+						size="micro"
 						variant="ghost"
 					>
 						Save comment
@@ -4499,10 +4217,10 @@ function AssertionChips({ assertions }: { assertions: AssertionResult[] }) {
 	return (
 		<div className="flex flex-wrap gap-1">
 			{assertions.map((a, i) => {
-				const className = `rounded px-1 py-0.5 text-[10px] ${a.pass ? "bg-success/15 text-status-success dark:text-status-success" : "bg-destructive/15 text-status-destructive"}`;
+				const className = `rounded px-1 py-0.5 type-compact ${a.pass ? "bg-success/15 text-status-success dark:text-status-success" : "bg-destructive/15 text-status-destructive"}`;
 				return a.detail ? (
 					<Tooltip
-						// biome-ignore lint/suspicious/noArrayIndexKey: assertion results are positional and have no stable id
+						// assertion results are positional and have no stable id
 						key={`${a.kind}-${i}`}
 					>
 						<TooltipTrigger
@@ -4513,7 +4231,7 @@ function AssertionChips({ assertions }: { assertions: AssertionResult[] }) {
 				) : (
 					<span
 						className={className}
-						// biome-ignore lint/suspicious/noArrayIndexKey: assertion results are positional and have no stable id
+						// assertion results are positional and have no stable id
 						key={`${a.kind}-${i}`}
 					>
 						{a.kind}
@@ -4539,7 +4257,7 @@ function PreviewPanel({ prompt, agentId, target, convId }: PreviewPanelProps) {
 	// without a system_prompt override field in ChatStreamRequest.
 	const previewMessage = `[PROMPT PREVIEW]\n\nDraft system prompt:\n\`\`\`\n${prompt}\n\`\`\`\n\nRespond as if this were your system prompt and confirm you understand your role.`;
 
-	const { messages, setMessages, status, error, stop } = useChat({
+	const { messages, sendMessage, status, error, stop } = useChat({
 		id: convId,
 		transport: new DefaultChatTransport({
 			api: chatStreamUrl(target),
@@ -4554,20 +4272,27 @@ function PreviewPanel({ prompt, agentId, target, convId }: PreviewPanelProps) {
 			}),
 		}),
 	});
+	const sentConversationRef = useRef<string | null>(null);
 	useEffect(() => {
-		if (messages.length > 0) {
+		if (sentConversationRef.current === convId) {
 			return;
 		}
-		setMessages([
-			{
-				id: "preview-user",
-				role: "user",
-				parts: [{ type: "text", text: previewMessage }],
-			},
-		]);
-	}, [messages.length, previewMessage, setMessages]);
+		sentConversationRef.current = convId;
+		// Opening Preview prompt is the user action that starts this ephemeral
+		// conversation. Showing a fabricated user message alone left the panel
+		// permanently at "No response yet" without sending anything to Core.
+		void sendMessage({ text: previewMessage });
+	}, [convId, previewMessage, sendMessage]);
 
 	const isStreaming = status === "streaming" || status === "submitted";
+	// Core keeps the saved preview turn running after its stream is aborted, so
+	// Stop also cancels it there.
+	const stopPreview = useCallback(() => {
+		void stop();
+		cancelChat(target, convId).catch(() => {
+			// No live turn, or Core is unreachable; the abort above still stands.
+		});
+	}, [convId, stop, target]);
 
 	const assistantMessages = messages.filter((m) => m.role === "assistant");
 	const lastAssistant = assistantMessages.at(-1);
@@ -4575,7 +4300,7 @@ function PreviewPanel({ prompt, agentId, target, convId }: PreviewPanelProps) {
 	const responseText =
 		lastAssistant?.parts
 			.filter((p) => p.type === "text")
-			.map((p) => (p as { type: "text"; text: string }).text)
+			.map((part) => part.text)
 			.join("") ?? "";
 
 	return (
@@ -4583,12 +4308,17 @@ function PreviewPanel({ prompt, agentId, target, convId }: PreviewPanelProps) {
 			<div className="flex items-center gap-2">
 				<span className="font-medium text-sm">Preview response</span>
 				{isStreaming ? (
-					<Badge className="ml-auto animate-pulse" variant="secondary">
+					<Badge className="ml-auto" motion="pulse" variant="secondary">
 						Streaming…
 					</Badge>
 				) : null}
 				{isStreaming ? (
-					<Button onClick={stop} size="icon-sm" variant="ghost">
+					<Button
+						aria-label="Stop preview response"
+						onClick={stopPreview}
+						size="icon-sm"
+						variant="ghost"
+					>
 						<HugeiconsIcon className="size-3" icon={Square01Icon} />
 					</Button>
 				) : null}

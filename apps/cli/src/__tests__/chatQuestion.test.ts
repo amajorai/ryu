@@ -1,4 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
+import {
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "@ryuhq/core-client/app-request-json";
 import type { ApiTarget } from "@ryuhq/core-client/client";
 import {
 	parseChatQuestion,
@@ -8,8 +12,24 @@ import {
 const target: ApiTarget = { token: "secret", url: "http://node:7980" };
 const realFetch = globalThis.fetch;
 
+function startQuestionNode(recordBody: (body: AppResponseValue) => void) {
+	return Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		async fetch(request) {
+			recordBody(appResponseValueSchema.parse(await request.json()));
+			return Response.json({ resolved: true });
+		},
+	});
+}
+
+const servers: ReturnType<typeof startQuestionNode>[] = [];
+
 afterEach(() => {
 	globalThis.fetch = realFetch;
+	for (const server of servers.splice(0)) {
+		server.stop(true);
+	}
 });
 
 test("parses normalized Question input and rejects malformed options", () => {
@@ -35,11 +55,25 @@ test("parses normalized Question input and rejects malformed options", () => {
 });
 
 test("posts typed answers to the Core question contract", async () => {
-	let body: unknown;
-	globalThis.fetch = (async (_input, init) => {
-		body = JSON.parse(String(init?.body));
-		return new Response(JSON.stringify({ resolved: true }), { status: 200 });
-	}) as typeof fetch;
+	let body: AppResponseValue;
+	const server = startQuestionNode((value) => {
+		body = value;
+	});
+	servers.push(server);
+	globalThis.fetch = Object.assign(
+		(...args: Parameters<typeof realFetch>) => {
+			const request = new Request(...args);
+			const url = new URL(request.url);
+			return realFetch.call(
+				globalThis,
+				new Request(
+					new URL(`${url.pathname}${url.search}`, server.url),
+					request
+				)
+			);
+		},
+		{ preconnect: realFetch.preconnect }
+	);
 	const question = parseChatQuestion({
 		toolCallId: "call-2",
 		questions: [{ id: "q-1", title: "Name", kind: "text" }],

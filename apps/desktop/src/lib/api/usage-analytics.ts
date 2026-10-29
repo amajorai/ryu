@@ -1,12 +1,13 @@
 import {
 	aggregateUsageEvents,
+	ledgerProviderLabel,
 	type UsageAnalyticsData,
 	type UsageBreakdownRow,
 	type UsageEvent,
 	type UsageGranularity,
 	type UsageScope,
 } from "@ryu/blocks/desktop/usage-analytics.ts";
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 import { ApiError, type ApiTarget } from "./client.ts";
 import { fetchUsage, type UsageStats } from "./credits.ts";
 import {
@@ -16,6 +17,10 @@ import {
 	parseGatewayUsageRollupResponse,
 } from "./gateway.ts";
 import { fetchProfileStats, fetchUsageDaily } from "./profile.ts";
+import {
+	legacyOrganizationUsageResponseSchema,
+	organizationUsageRollupTagSchema,
+} from "./usage-analytics-wire-contracts.ts";
 
 export interface UsageAnalyticsQuery {
 	from: Date;
@@ -23,25 +28,6 @@ export interface UsageAnalyticsQuery {
 	model?: string | null;
 	provider?: string | null;
 	to: Date;
-}
-
-interface LegacyOrganizationUsageEvent {
-	error: boolean;
-	inputTokens: number;
-	latencyMs: number;
-	memberId: string | null;
-	model: string;
-	nodeId: string;
-	outputTokens: number;
-	provider: string;
-	requestId?: string | null;
-	source?: UsageEvent["source"];
-	timestamp: string;
-}
-
-interface LegacyOrganizationUsageResponse {
-	capped: boolean;
-	events: LegacyOrganizationUsageEvent[];
 }
 
 type OrganizationEventsResult =
@@ -55,67 +41,12 @@ type OrganizationEventsResult =
 			kind: "legacy";
 	  };
 
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNullableString(value: unknown): value is string | null {
-	return value === null || typeof value === "string";
-}
-
-function isNonNegativeNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function isUsageSource(value: unknown): value is UsageEvent["source"] {
-	return (
-		value === undefined ||
-		value === null ||
-		value === "managed" ||
-		value === "byok" ||
-		value === "self_hosted" ||
-		value === "local" ||
-		value === "unknown"
-	);
-}
-
-function isLegacyOrganizationUsageEvent(
-	value: unknown
-): value is LegacyOrganizationUsageEvent {
-	if (!isUnknownRecord(value)) {
-		return false;
-	}
-	return (
-		typeof value.timestamp === "string" &&
-		Number.isFinite(Date.parse(value.timestamp)) &&
-		typeof value.provider === "string" &&
-		typeof value.model === "string" &&
-		typeof value.nodeId === "string" &&
-		isNullableString(value.memberId) &&
-		typeof value.error === "boolean" &&
-		isNonNegativeNumber(value.inputTokens) &&
-		isNonNegativeNumber(value.outputTokens) &&
-		isNonNegativeNumber(value.latencyMs) &&
-		(value.requestId === undefined || isNullableString(value.requestId)) &&
-		isUsageSource(value.source)
-	);
-}
-
-function isLegacyOrganizationUsageResponse(
-	value: unknown
-): value is LegacyOrganizationUsageResponse {
-	return (
-		isUnknownRecord(value) &&
-		typeof value.capped === "boolean" &&
-		Array.isArray(value.events) &&
-		value.events.every(isLegacyOrganizationUsageEvent)
-	);
-}
-
 function usageEventFromRollup(event: GatewayUsageRollupEvent): UsageEvent {
 	return {
 		agentSeconds: event.agentSeconds,
 		bucketSeconds: 900,
+		cacheReadTokens: event.cacheReadTokens,
+		cacheWriteTokens: event.cacheWriteTokens,
 		costMicroUsd: event.costMicroUsd,
 		errorCount: event.errorCount,
 		feature: event.feature,
@@ -127,18 +58,24 @@ function usageEventFromRollup(event: GatewayUsageRollupEvent): UsageEvent {
 		nodeId: event.nodeId,
 		outputTokens: event.outputTokens,
 		provider: event.provider,
+		// The contract tolerates a malformed purpose; keep only real strings.
+		// `undefined` (an older Gateway) stays distinct from `null` (foreground).
+		purpose:
+			typeof event.purpose === "string" || event.purpose === null
+				? event.purpose
+				: undefined,
 		requestCount: event.requestCount,
 		source: event.source,
 		timestamp: event.timestamp,
 	};
 }
 
-function authHeaders(): Record<string, string> {
-	const token = localStorage.getItem(TOKEN_KEY);
+function authHeaders(): Headers {
+	const token = getActiveToken();
 	if (!token) {
 		throw new Error("Sign in to view usage analytics.");
 	}
-	return { Authorization: `Bearer ${token}` };
+	return new Headers({ Authorization: `Bearer ${token}` });
 }
 
 function isoDay(date: Date): string {
@@ -178,15 +115,16 @@ async function fetchOrganizationEvents(
 			`Organization analytics request failed (${response.status})`
 		);
 	}
-	const body: unknown = await response.json();
-	if (isUnknownRecord(body) && body.kind === "rollup") {
+	const body = await response.json();
+	if (organizationUsageRollupTagSchema.safeParse(body).success) {
 		const rollup = parseGatewayUsageRollupResponse(body);
 		return {
 			events: rollup.events.map(usageEventFromRollup),
 			kind: "rollup",
 		};
 	}
-	if (!isLegacyOrganizationUsageResponse(body)) {
+	const legacy = legacyOrganizationUsageResponseSchema.safeParse(body);
+	if (!legacy.success) {
 		throw new Error("Organization analytics response was malformed.");
 	}
 	const creditUsage = await fetchUsage({
@@ -197,7 +135,7 @@ async function fetchOrganizationEvents(
 		until: new Date(query.to.getTime() - 1).toISOString(),
 	}).catch(() => null);
 	return {
-		capped: body.capped,
+		capped: legacy.data.capped,
 		creditLedgerCapped: Boolean(creditUsage?.nextCursor),
 		creditEvents:
 			creditUsage?.entries
@@ -218,7 +156,7 @@ async function fetchOrganizationEvents(
 					timestamp: entry.createdAt,
 				})) ?? [],
 		creditStats: creditUsage?.stats ?? null,
-		events: body.events.map((event) => ({
+		events: legacy.data.events.map((event) => ({
 			durationMs: event.latencyMs,
 			error: event.error,
 			inputTokens: event.inputTokens,
@@ -251,7 +189,8 @@ export function withoutDuplicateManagedCharges(
 
 function overlaySpendRows(
 	rows: UsageBreakdownRow[],
-	ledgerRows: UsageStats["byModel"] | UsageStats["byProvider"]
+	ledgerRows: UsageStats["byModel"] | UsageStats["byProvider"],
+	labelFor: (key: string) => string = (key) => key
 ): UsageBreakdownRow[] {
 	const spendByKey = new Map<string, number>();
 	for (const row of ledgerRows) {
@@ -271,7 +210,7 @@ function overlaySpendRows(
 		}
 		merged.push({
 			key,
-			label: key,
+			label: labelFor(key),
 			requests: 0,
 			spendMicroUsd,
 			tokens: 0,
@@ -310,7 +249,12 @@ function overlayCreditSpend(
 	return {
 		...data,
 		byModel: overlaySpendRows(data.byModel, stats.byModel),
-		byProvider: overlaySpendRows(data.byProvider, stats.byProvider),
+		// Ledger-only provider rows are managed traffic: never a slot id.
+		byProvider: overlaySpendRows(
+			data.byProvider,
+			stats.byProvider,
+			ledgerProviderLabel
+		),
 		bySource,
 		totals: { ...data.totals, spendMicroUsd: stats.spentMicroUsd },
 	};
@@ -326,6 +270,7 @@ function nodeSourceFor(
 		normalized === "local" ||
 		normalized === "ollama" ||
 		normalized === "lemonade" ||
+		normalized === "magnitude" ||
 		normalized === "llama-swap" ||
 		normalized === "freetoken" ||
 		normalized === "llamacpp" ||
@@ -395,6 +340,8 @@ async function fetchNodeEvents(
 	return {
 		reachable: response.reachable,
 		events: response.entries.map((entry) => ({
+			cacheReadTokens: entry.cache_read_tokens ?? undefined,
+			cacheWriteTokens: entry.cache_write_tokens ?? undefined,
 			durationMs: entry.latency_ms,
 			costMicroUsd: entry.cost_micro_usd,
 			error: Boolean(entry.error),
@@ -404,6 +351,9 @@ async function fetchNodeEvents(
 			model: entry.model,
 			outputTokens: entry.output_tokens ?? 0,
 			provider: entry.provider,
+			// Keep an older Gateway's missing field (`undefined`) distinct from a
+			// foreground row (`null`), as the rollup path does.
+			purpose: entry.purpose,
 			source: entry.source ?? nodeSourceFor(entry.provider, managed, localNode),
 			timestamp: entry.timestamp,
 		})),

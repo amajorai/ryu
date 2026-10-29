@@ -1,7 +1,7 @@
 {
   "extends": "@ryu/config/tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ESNext", "DOM"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "jsxImportSource": "@opentui/react",
     "moduleResolution": "bundler",
@@ -10,9 +10,25 @@
     "strictNullChecks": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      // Every component keeps its `@jsxImportSource @opentui/react` pragma; this
+      // routes the automatic runtime through the CLI's translating wrapper.
+      "@opentui/react/jsx-runtime": ["./src/i18n/jsx-runtime.ts"],
+      "@opentui/react/jsx-dev-runtime": ["./src/i18n/jsx-dev-runtime.ts"],
+      // Source-first resolution for the dist-published standalone-services
+      // packages `ryu services` delegates to (no build step in the workspace).
+      "@ryuhq/services-cli": ["../../packages/services-cli/src/index.ts"],
+      "@ryuhq/services": ["../../packages/services/src/index.ts"],
+      "@ryuhq/services/webhooks": [
+        "../../packages/services/src/webhooks/index.ts"
+      ],
+      "@ryuhq/services/errors": ["../../packages/services/src/errors.ts"],
+      "@ryuhq/services/tools": ["../../packages/services/src/tools/index.ts"],
+      "@ryuhq/client": ["../../packages/client/src/index.ts"],
+      "@ryuhq/protocol/sse": ["../../packages/protocol/src/sse-client.ts"]
     },
     "types": ["bun", "react"],
+    "typeRoots": ["./node_modules/@types"],
     // Relaxed only for the vendored termcn components under components/ui, hooks,
     // and lib (shadcn-style third-party sources imported by src). Our own src/**
     // code is held to the project standard via ultracite/biome.

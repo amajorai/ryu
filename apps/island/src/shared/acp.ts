@@ -1,3 +1,4 @@
+import { z } from "zod";
 export interface AcpSessionMode {
 	description?: string | null;
 	id: string;
@@ -49,10 +50,54 @@ export function flattenConfigOptions(
 	if (raw.length === 0) {
 		return [];
 	}
-	if ("options" in raw[0]) {
-		return (raw as { options: AcpConfigSelectOption[] }[]).flatMap(
-			(g) => g.options
-		);
-	}
-	return raw as AcpConfigSelectOption[];
+	return raw.flatMap((entry) => ("options" in entry ? entry.options : [entry]));
 }
+
+const acpDescriptionSchema = z.string().nullable().optional();
+const acpModeSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	description: acpDescriptionSchema,
+});
+const acpModelSchema = z.object({
+	modelId: z.string(),
+	name: z.string(),
+	description: acpDescriptionSchema,
+});
+const acpSelectOptionSchema = z.object({
+	value: z.string(),
+	name: z.string(),
+	description: acpDescriptionSchema,
+});
+const acpConfigOptionSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	description: acpDescriptionSchema,
+	category: acpDescriptionSchema,
+	currentValue: z.string().optional(),
+	type: z.string().optional(),
+	options: z
+		.union([
+			z.array(acpSelectOptionSchema),
+			z.array(z.object({ options: z.array(acpSelectOptionSchema) })),
+		])
+		.optional(),
+});
+/** Normalize missing ACP collections before exposing the session configuration. */
+export const acpConfigSchema = z.object({
+	configOptions: z.array(acpConfigOptionSchema).nullable().catch(null),
+	models: z
+		.object({
+			availableModels: z.array(acpModelSchema),
+			currentModelId: z.string(),
+		})
+		.nullable()
+		.catch(null),
+	modes: z
+		.object({
+			availableModes: z.array(acpModeSchema),
+			currentModeId: z.string(),
+		})
+		.nullable()
+		.catch(null),
+});

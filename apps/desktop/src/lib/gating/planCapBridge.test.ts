@@ -22,9 +22,9 @@
 //     the genuine implementation (its own singleton — exactly the isolation this
 //     test wants).
 //
-// The singleton `state.plan` starts `undefined` and can never be reset to
-// `undefined` again (no reset export), so the "unsynced → fail-open" case MUST be
-// asserted before any `syncPlanCapState`.
+// The singleton `state.plan` starts `undefined` and is reset to it only by
+// syncing an unresolved verdict (no reset export), so the "unsynced → fail-open"
+// case MUST be asserted before any `syncPlanCapState`.
 
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
@@ -35,6 +35,7 @@ mock.module("@/src/lib/api/billing.ts", () => ({
 }));
 
 const {
+	capLimit,
 	effectivePlan,
 	enforcePlanCap,
 	PlanCapError,
@@ -54,7 +55,7 @@ beforeEach(() => {
 describe("resolveCapLimit — fail-open before the plan is synced", () => {
 	test("unsynced + billing auth on → Infinity (payer never falsely blocked)", () => {
 		billingAuthOn = true;
-		expect(resolveCapLimit("maxAgents")).toBe(Number.POSITIVE_INFINITY);
+		expect(resolveCapLimit("maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
 	});
 
 	test("off the managed path is Infinity regardless of sync state", () => {
@@ -64,25 +65,49 @@ describe("resolveCapLimit — fail-open before the plan is synced", () => {
 });
 
 describe("effectivePlan", () => {
-	test("null verdict → null (unknown plan)", () => {
-		expect(effectivePlan(null)).toBeNull();
+	test("null verdict → undefined (unknown plan, not the free plan)", () => {
+		expect(effectivePlan(null)).toBeUndefined();
 	});
 
 	test("a purchased plan is returned verbatim", () => {
-		expect(effectivePlan({ plan: "max", proUnlocked: true } as never)).toBe(
-			"max"
-		);
+		expect(
+			effectivePlan({
+				plan: "max",
+				proUnlocked: true,
+				daysLeftInTrial: 0,
+				managedInference: true,
+				marketplaceApps: true,
+				paywalled: false,
+				reason: "subscription",
+			})
+		).toBe("max");
 	});
 
 	test("trial / lifetime (proUnlocked, no purchased plan) bands into 'pro'", () => {
-		expect(effectivePlan({ plan: null, proUnlocked: true } as never)).toBe(
-			"pro"
-		);
+		expect(
+			effectivePlan({
+				plan: null,
+				proUnlocked: true,
+				daysLeftInTrial: 1,
+				managedInference: false,
+				marketplaceApps: false,
+				paywalled: false,
+				reason: "trial",
+			})
+		).toBe("pro");
 	});
 
 	test("signed-in free (not proUnlocked, no plan) stays on the free (null) caps", () => {
 		expect(
-			effectivePlan({ plan: null, proUnlocked: false } as never)
+			effectivePlan({
+				plan: null,
+				proUnlocked: false,
+				daysLeftInTrial: 0,
+				managedInference: false,
+				marketplaceApps: false,
+				paywalled: true,
+				reason: "trial-expired",
+			})
 		).toBeNull();
 	});
 });
@@ -92,31 +117,64 @@ describe("resolveCapLimit — after sync", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = false;
 		// A finite free cap would apply on the managed path, but not off it.
-		expect(resolveCapLimit("maxAgents")).toBe(Number.POSITIVE_INFINITY);
+		expect(resolveCapLimit("maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
 	});
 
 	test("managed path + free plan reads the finite FREE_TIER_LIMITS value", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = true;
-		// FREE_TIER_LIMITS.maxAgents === 3 (single source of truth in plans.ts).
-		expect(resolveCapLimit("maxAgents")).toBe(3);
+		// FREE_TIER_LIMITS.maxOpenTabs === 3 (single source of truth in plans.ts).
+		expect(resolveCapLimit("maxOpenTabs")).toBe(3);
 	});
 
 	test("a paid plan lifts the cap (Infinity) on the managed path", () => {
 		syncPlanCapState("pro", () => undefined);
 		billingAuthOn = true;
-		expect(resolveCapLimit("maxAgents")).toBe(Number.POSITIVE_INFINITY);
+		expect(resolveCapLimit("maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
+	});
+});
+
+describe("an unresolved verdict", () => {
+	test("re-syncing an unknown plan fails open again on the managed path", () => {
+		syncPlanCapState(null, () => undefined);
+		billingAuthOn = true;
+		expect(resolveCapLimit("maxOpenTabs")).toBe(3);
+		syncPlanCapState(effectivePlan(null), () => undefined);
+		expect(resolveCapLimit("maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
+		expect(() => enforcePlanCap("maxRemoteNodes", 10_000)).not.toThrow();
+	});
+
+	test("capLimit is Infinity for an unknown plan and the free cap for null", () => {
+		expect(capLimit(undefined, "maxOpenTabs")).toBe(Number.POSITIVE_INFINITY);
+		expect(capLimit(null, "maxOpenTabs")).toBe(3);
 	});
 });
 
 describe("enforcePlanCap", () => {
+	test("free agents, concurrent runs, and Spaces never prompt an upgrade", () => {
+		let upgrades = 0;
+		syncPlanCapState(null, () => {
+			upgrades += 1;
+		});
+		billingAuthOn = true;
+		for (const field of [
+			"maxAgents",
+			"maxConcurrentRuns",
+			"maxSpaces",
+		] as const) {
+			expect(resolveCapLimit(field)).toBe(Number.POSITIVE_INFINITY);
+			expect(() => enforcePlanCap(field, 10_000)).not.toThrow();
+		}
+		expect(upgrades).toBe(0);
+	});
+
 	test("under the cap is a silent no-op (no throw, no upgrade prompt)", () => {
 		let upgrades = 0;
 		syncPlanCapState(null, () => {
 			upgrades += 1;
 		});
-		billingAuthOn = true; // free cap: maxAgents === 3
-		expect(() => enforcePlanCap("maxAgents", 2)).not.toThrow();
+		billingAuthOn = true; // free cap: maxOpenTabs === 3
+		expect(() => enforcePlanCap("maxOpenTabs", 2)).not.toThrow();
 		expect(upgrades).toBe(0);
 	});
 
@@ -128,14 +186,16 @@ describe("enforcePlanCap", () => {
 		billingAuthOn = true;
 		let caught: unknown;
 		try {
-			enforcePlanCap("maxAgents", 3);
+			enforcePlanCap("maxOpenTabs", 3);
 		} catch (error) {
 			caught = error;
 		}
 		expect(caught).toBeInstanceOf(PlanCapError);
+		// SAFETY: The preceding matcher established the caught instance of the real PlanCapError thrown by enforcePlanCap; its constructor owns this field.
 		expect((caught as InstanceType<typeof PlanCapError>).field).toBe(
-			"maxAgents"
+			"maxOpenTabs"
 		);
+		// SAFETY: This is the same caught PlanCapError already checked above; its real constructor assigns the numeric limit without an intervening write.
 		expect((caught as InstanceType<typeof PlanCapError>).limit).toBe(3);
 		expect(upgrades).toBe(1);
 	});
@@ -143,23 +203,23 @@ describe("enforcePlanCap", () => {
 	test("throws even when the registered requester is a no-op (cap still holds)", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = true;
-		expect(() => enforcePlanCap("maxAgents", 999)).toThrow(PlanCapError);
+		expect(() => enforcePlanCap("maxOpenTabs", 999)).toThrow(PlanCapError);
 	});
 
 	test("off the managed path never throws — self-host stays uncapped", () => {
 		syncPlanCapState(null, () => undefined);
 		billingAuthOn = false;
-		expect(() => enforcePlanCap("maxAgents", 10_000)).not.toThrow();
+		expect(() => enforcePlanCap("maxOpenTabs", 10_000)).not.toThrow();
 	});
 });
 
 describe("PlanCapError", () => {
 	test("carries field + limit and a descriptive message", () => {
-		const err = new PlanCapError("maxAgents", 3);
+		const err = new PlanCapError("maxOpenTabs", 3);
 		expect(err.name).toBe("PlanCapError");
-		expect(err.field).toBe("maxAgents");
+		expect(err.field).toBe("maxOpenTabs");
 		expect(err.limit).toBe(3);
-		expect(err.message).toContain("maxAgents");
+		expect(err.message).toContain("maxOpenTabs");
 		expect(err.message).toContain("3");
 		expect(err).toBeInstanceOf(Error);
 	});

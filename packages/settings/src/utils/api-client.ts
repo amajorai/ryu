@@ -1,3 +1,9 @@
+import type { AvatarUrls } from "@ryu/auth/lib/avatar";
+import { z } from "zod";
+import {
+	type SubscriptionStatus,
+	subscriptionStatusResponseSchema,
+} from "./subscription-status-contracts.ts";
 // API client for settings-related operations
 
 import type {
@@ -12,9 +18,28 @@ export type {
 	OwnedOAuthApp,
 } from "@ryu/auth/oauth-contract";
 
+let _apiBase: string | null = null;
+
 let _getToken: (() => string | null) | null = null;
 
-export function configureSettingsApi(opts: { getToken: () => string | null }) {
+export function configureSettingsApi(opts: {
+	getToken: () => string | null;
+	baseUrl?: string;
+}) {
+	if (opts.baseUrl) {
+		const url = new URL(opts.baseUrl);
+		if (
+			!["http:", "https:"].includes(url.protocol) ||
+			url.username ||
+			url.password ||
+			url.pathname !== "/" ||
+			url.search ||
+			url.hash
+		) {
+			throw new Error("Invalid settings API origin");
+		}
+		_apiBase = url.origin;
+	}
 	_getToken = opts.getToken;
 }
 
@@ -28,8 +53,16 @@ export interface Session {
 	expiresAt: Date;
 	id: string;
 	ipAddress?: string;
+	/** Authenticated session identity; list order is newest first. */
+	isCurrent: boolean;
 	userAgent?: string;
 	userId: string;
+}
+
+export interface OwnerAvatarResponse {
+	logo: string;
+	success: true;
+	urls: AvatarUrls;
 }
 
 export interface AvatarResponse {
@@ -95,6 +128,22 @@ export interface AccountMergePreflight {
 	summary?: { workspaces: number };
 }
 
+/** Why the signed-in account can't be deleted yet, and what deleting it removes. */
+export interface AccountDeletionPreflight {
+	blockers: Array<{ code: string; message: string }>;
+	deletable: boolean;
+	/** A confirmation email is waiting to be used. */
+	pending: boolean;
+	summary: {
+		/** Prepaid credit in workspaces deleted with the account (micro-USD). */
+		forfeitedCreditMicroUsd: number;
+		/** Workspaces where this account is the only member. */
+		workspacesDeleted: number;
+		/** Shared workspaces the account leaves. */
+		workspacesLeft: number;
+	};
+}
+
 export interface EmailChangeStatus {
 	emailChange?: {
 		id: string;
@@ -124,14 +173,7 @@ export interface Subscription {
 	status: string;
 }
 
-export interface SubscriptionStatus {
-	lifetime?: {
-		purchasedAt: string;
-		updatesExpiresAt: string;
-		expired: boolean;
-	} | null;
-	subscription: Subscription | null;
-}
+export type { SubscriptionStatus } from "./subscription-status-contracts.ts";
 
 export interface Invoice {
 	amount: number;
@@ -253,37 +295,74 @@ export interface AffiliateDashboard {
 	stats: AffiliateStats;
 }
 
-const API_BASE =
-	typeof window === "undefined"
-		? "http://localhost:3000"
-		: ((typeof import.meta === "undefined"
-				? undefined
-				: (import.meta as { env?: Record<string, string> }).env
-						?.VITE_APP_BACKEND_URL) ??
-			(typeof process === "undefined"
-				? undefined
-				: process.env.NEXT_PUBLIC_SERVER_URL) ??
-			"http://localhost:3000");
+function runtimeProcess(): typeof process | undefined {
+	try {
+		return process;
+	} catch (error) {
+		if (error instanceof ReferenceError) {
+			return undefined;
+		}
+		throw error;
+	}
+}
+
+function apiBase(): string {
+	if (_apiBase) {
+		return _apiBase;
+	}
+	const webBase =
+		runtimeProcess() === undefined
+			? undefined
+			: process.env.NEXT_PUBLIC_SERVER_URL;
+	if (webBase) {
+		const url = new URL(webBase);
+		if (
+			!["http:", "https:"].includes(url.protocol) ||
+			url.username ||
+			url.password ||
+			url.pathname !== "/" ||
+			url.search ||
+			url.hash
+		) {
+			throw new Error("Invalid settings API origin");
+		}
+		return url.origin;
+	}
+	if (globalThis.window !== undefined) {
+		return window.location.origin;
+	}
+	throw new Error("Settings API origin is not configured");
+}
+const ApiErrorSchema = z.object({ error: z.string().optional() });
+
+function responseError(
+	payload: z.input<typeof ApiErrorSchema>,
+	fallback: string
+): string {
+	const parsed = ApiErrorSchema.safeParse(payload);
+	return parsed.success ? (parsed.data.error ?? fallback) : fallback;
+}
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
 	const token = _getToken?.();
-	const response = await fetch(`${API_BASE}${path}`, {
+	const headers = new Headers({ "Content-Type": "application/json" });
+	if (token) {
+		headers.set("Authorization", `Bearer ${token}`);
+	}
+	new Headers(options?.headers).forEach((value, key) =>
+		headers.set(key, value)
+	);
+	const response = await fetch(`${apiBase()}${path}`, {
 		...options,
 		credentials: "include",
-		headers: {
-			"Content-Type": "application/json",
-			...(token ? { Authorization: `Bearer ${token}` } : {}),
-			...options?.headers,
-		},
+		headers,
 	});
 
 	if (!response.ok) {
 		const error = await response
 			.json()
 			.catch(() => ({ error: "Unknown error" }));
-		throw new Error(
-			(error as { error?: string }).error ?? `HTTP ${response.status}`
-		);
+		throw new Error(responseError(error, `HTTP ${response.status}`));
 	}
 
 	return response.json();
@@ -294,16 +373,19 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
  * all take the same multipart shape (`avatar` field) and the same auth (bearer
  * when present, cookies otherwise), so they share one implementation.
  */
-async function postAvatar(path: string, file: File): Promise<AvatarResponse> {
+async function postAvatar(
+	path: string,
+	file: File
+): Promise<OwnerAvatarResponse> {
 	const formData = new FormData();
 	formData.append("avatar", file);
 	const token = _getToken?.();
 
-	const response = await fetch(`${API_BASE}${path}`, {
+	const response = await fetch(`${apiBase()}${path}`, {
 		method: "POST",
 		body: formData,
 		credentials: "include",
-		...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+		headers: token ? { Authorization: `Bearer ${token}` } : undefined,
 	});
 
 	if (!response.ok) {
@@ -318,14 +400,17 @@ async function postAvatar(path: string, file: File): Promise<AvatarResponse> {
 export const settingsApi = {
 	/** Org + team logos. Server-side these are owner/admin only. */
 	organizations: {
-		uploadAvatar(organizationId: string, file: File): Promise<AvatarResponse> {
+		uploadAvatar(
+			organizationId: string,
+			file: File
+		): Promise<OwnerAvatarResponse> {
 			return postAvatar(`/api/orgs/${organizationId}/avatar`, file);
 		},
 		uploadTeamAvatar(
 			organizationId: string,
 			teamId: string,
 			file: File
-		): Promise<AvatarResponse> {
+		): Promise<OwnerAvatarResponse> {
 			return postAvatar(
 				`/api/orgs/${organizationId}/teams/${teamId}/avatar`,
 				file
@@ -338,20 +423,18 @@ export const settingsApi = {
 			formData.append("avatar", file);
 			const token = _getToken?.();
 
-			const response = await fetch(`${API_BASE}/api/profile/avatar`, {
+			const response = await fetch(`${apiBase()}/api/profile/avatar`, {
 				method: "POST",
 				body: formData,
 				credentials: "include",
-				...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+				headers: token ? { Authorization: `Bearer ${token}` } : undefined,
 			});
 
 			if (!response.ok) {
 				const error = await response
 					.json()
 					.catch(() => ({ error: "Upload failed" }));
-				throw new Error(
-					(error as { error?: string }).error ?? "Failed to upload avatar"
-				);
+				throw new Error(responseError(error, "Failed to upload avatar"));
 			}
 
 			return response.json();
@@ -370,13 +453,10 @@ export const settingsApi = {
 	},
 
 	user: {
-		async initiateEmailChange(
-			currentPassword: string,
-			newEmail: string
-		): Promise<void> {
+		async initiateEmailChange(newEmail: string): Promise<void> {
 			await fetchApi("/api/user/initiate-email-change", {
 				method: "POST",
-				body: JSON.stringify({ currentPassword, newEmail }),
+				body: JSON.stringify({ newEmail }),
 			});
 		},
 
@@ -427,7 +507,10 @@ export const settingsApi = {
 		},
 
 		async confirmMerge(token: string): Promise<void> {
-			await fetchApi(`/api/user/merge/confirm?token=${token}`);
+			await fetchApi("/api/user/merge/confirm", {
+				method: "POST",
+				body: JSON.stringify({ token }),
+			});
 		},
 
 		getMergeStatus(): Promise<AccountMergeStatus> {
@@ -438,13 +521,27 @@ export const settingsApi = {
 			await fetchApi("/api/user/merge/cancel", { method: "POST" });
 		},
 
-		async setPassword(
-			newPassword: string,
-			currentPassword?: string
-		): Promise<void> {
+		/**
+		 * Account deletion (see `docs/account-deletion.md`). `requestDeletion` is
+		 * step-up gated (`account.security`) and mails a confirmation link;
+		 * nothing is removed until that link is used.
+		 */
+		getDeletionPreflight(): Promise<AccountDeletionPreflight> {
+			return fetchApi("/api/user/delete-account/preflight");
+		},
+
+		async requestDeletion(): Promise<void> {
+			await fetchApi("/api/user/delete-account/request", { method: "POST" });
+		},
+
+		async cancelDeletion(): Promise<void> {
+			await fetchApi("/api/user/delete-account/cancel", { method: "POST" });
+		},
+
+		async setPassword(newPassword: string): Promise<void> {
 			await fetchApi("/api/user/set-password", {
 				method: "POST",
-				body: JSON.stringify({ newPassword, currentPassword }),
+				body: JSON.stringify({ newPassword }),
 			});
 		},
 	},
@@ -455,7 +552,9 @@ export const settingsApi = {
 		},
 
 		getSubscriptionStatus(): Promise<SubscriptionStatus> {
-			return fetchApi("/api/billing/subscription-status");
+			return fetchApi("/api/billing/subscription-status").then(
+				subscriptionStatusResponseSchema.parse
+			);
 		},
 
 		createLifetimeCheckout(organizationId?: string): Promise<{ url: string }> {

@@ -17,5 +17,11 @@ describe("resolveWorkspaceFilePath", () => {
 	test("rejects traversal and absolute paths outside the workspace", () => {
 		expect(resolveWorkspaceFilePath("/work/app", "../secret.txt")).toBeNull();
 		expect(resolveWorkspaceFilePath("/work/app", "/etc/passwd")).toBeNull();
+		expect(
+			resolveWorkspaceFilePath("/work/app", "/work/app/../../etc/x.json")
+		).toBeNull();
+		expect(
+			resolveWorkspaceFilePath("/work/app", "/work/app/./src/../../x")
+		).toBeNull();
 	});
 });

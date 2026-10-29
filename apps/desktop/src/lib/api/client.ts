@@ -1,3 +1,8 @@
+import {
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "@ryuhq/core-client/app-request-json";
+import { z } from "zod";
 // apps/desktop/src/lib/api/client.ts
 //
 // Shared HTTP plumbing for the typed Core/Gateway client modules. Every domain
@@ -6,7 +11,7 @@
 // always come from the node store (`getActiveNode()` -> { url, token, userJwt }), never
 // hardcoded — Core listens on :7980 but the active node may be remote.
 
-import { TOKEN_KEY } from "@/lib/auth-client.ts";
+import { getActiveToken } from "@/lib/auth-client.ts";
 import {
 	isDevMetricsEnabled,
 	normalizePath,
@@ -14,6 +19,8 @@ import {
 } from "@/src/lib/dev-metrics.ts";
 import { getRealtimeJwt } from "@/src/lib/realtime/jwt.ts";
 import type { Node } from "@/src/store/useNodeStore.ts";
+import { sealedLocalStorage } from "../content-seal.ts";
+import { parseApiErrorBody } from "./client-errors.ts";
 
 export const USER_JWT_HEADER = "x-ryu-user-jwt";
 
@@ -21,8 +28,66 @@ export const USER_JWT_HEADER = "x-ryu-user-jwt";
 export interface ApiTarget {
 	token: string | null;
 	url: string;
-	/** Managed-node user JWT; not a node secret and never persisted as one. */
+	/** Managed-node delegation, retained under the legacy field name. */
 	userJwt?: string | null;
+}
+
+/** Never send a general account JWT to a target with no admission credential. */
+export function maySendUserIdentity(target: ApiTarget): boolean {
+	return Boolean(target.token?.trim() || target.userJwt?.trim());
+}
+
+/**
+ * Whether the signed-in, account-wide JWT may be attached for `target`. The
+ * node must hold an admission credential ({@link maySendUserIdentity}) and be
+ * reached over a confidential transport: `https:`, or plain `http:` only to this
+ * machine. Over cleartext `http:` to another host, anyone on the path could read
+ * the token and replay it. A managed delegation in `target.userJwt` is a
+ * separate, node-bound credential that this check does not govern.
+ *
+ * Residual: this cannot tell an attacker's node from the user's own. A node
+ * saved with any token, including one a `ryu://nodes/connect` link supplied,
+ * still receives the account JWT over `https:`, and Core still admits that JWT
+ * as a bearer on the user's managed nodes. Closing that needs a node-audience
+ * bound credential checked by Core.
+ */
+export function mayAttachAccountJwt(target: ApiTarget): boolean {
+	return maySendUserIdentity(target) && hasConfidentialTransport(target.url);
+}
+
+/**
+ * The signed-in account JWT for a transport that attaches it as an extra header
+ * instead of through {@link requestHeaders} (chat streams), or `null` when
+ * {@link mayAttachAccountJwt} refuses the target. Realtime joins and WebSocket
+ * tickets use {@link realtimeJwtForTarget}.
+ */
+export async function accountJwtForTarget(
+	target: ApiTarget
+): Promise<string | null> {
+	if (!mayAttachAccountJwt(target)) {
+		return null;
+	}
+	return await getRealtimeJwt();
+}
+
+/** The target's own node-bound managed delegation, or `null`. */
+export function managedDelegationFor(target: ApiTarget): string | null {
+	return target.userJwt?.trim() ? target.userJwt : null;
+}
+
+/**
+ * The identity JWT a realtime join or WebSocket ticket carries for `target`.
+ * Realtime replaces the target's `userJwt` with this value, so where
+ * {@link mayAttachAccountJwt} withholds the account JWT the target's own
+ * managed delegation is kept instead of being stripped.
+ */
+export async function realtimeJwtForTarget(
+	target: ApiTarget
+): Promise<string | null> {
+	if (!mayAttachAccountJwt(target)) {
+		return managedDelegationFor(target);
+	}
+	return await getRealtimeJwt();
 }
 
 /** Narrow a full node (or any url/token pair) down to an {@link ApiTarget}. */
@@ -38,14 +103,14 @@ export function toTarget(
 
 /**
  * Build request headers for a direct-fetch call site. A node bearer wins; a
- * managed target may fall back to its short-lived user JWT and carries that JWT
+ * managed target may fall back to its short-lived node delegation and carries it
  * in the explicit identity header as well.
  */
 export function makeHeaders(
 	token: string | null,
 	userJwt: string | null = null
-): Record<string, string> {
-	const headers: Record<string, string> = {
+) {
+	const headers: RequestInit["headers"] = {
 		"Content-Type": "application/json",
 	};
 	const admissionBearer = token ?? userJwt;
@@ -82,6 +147,8 @@ export interface RequestOptions {
 	headers?: Record<string, string>;
 	method?: string;
 	signal?: AbortSignal;
+	/** Send no bearer or identity headers for public endpoints such as /api/health. */
+	skipAuthentication?: boolean;
 	/** Skip the control-plane JWT exchange for node-local liveness probes. */
 	skipUserJwt?: boolean;
 }
@@ -96,6 +163,8 @@ export type AuthenticatedFetchOptions = Omit<RequestInit, "headers"> & {
 	headers?: RequestHeaderOverrides;
 	/** Standalone local bootstrap has no control-plane session to exchange. */
 	skipUserJwt?: boolean;
+	/** Send no bearer or identity headers for public endpoints such as /api/health. */
+	skipAuthentication?: boolean;
 };
 
 /**
@@ -134,6 +203,18 @@ function isLoopbackTarget(url: string): boolean {
 	}
 }
 
+/** TLS to any host, or a Core on this machine. Cleartext to another host is not. */
+function hasConfidentialTransport(url: string): boolean {
+	if (isLoopbackTarget(url)) {
+		return true;
+	}
+	try {
+		return new URL(url).protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Build the buyer-token header from the signed-in control-plane session token,
  * but only for a loopback Core target. A remote or malformed target gets no
@@ -141,12 +222,12 @@ function isLoopbackTarget(url: string): boolean {
  */
 export function buyerTokenHeader(
 	target: Pick<ApiTarget, "url">
-): Record<string, string> {
+): NonNullable<RequestOptions["headers"]> {
 	if (!isLoopbackTarget(target.url)) {
 		return {};
 	}
 	try {
-		const token = localStorage.getItem(TOKEN_KEY);
+		const token = getActiveToken();
 		if (token) {
 			return { [BUYER_TOKEN_HEADER]: token };
 		}
@@ -161,15 +242,25 @@ const CLIENT_ID_KEY = "ryu_client_id";
 /** localStorage key the app store persists the signed-in OIDC user under. */
 const OIDC_USER_KEY = "ryu_oidc_user";
 
+const presenceUserSchema = z.object({
+	name: z.string().optional().catch(undefined),
+	email: z.string().optional().catch(undefined),
+});
+const appDisabledSchema = z.object({
+	error: z.literal("app_disabled"),
+	app: z.string(),
+	message: z.string().nullish().catch(undefined),
+});
+
 /** Stable per-install id, generated once and persisted. Used to dedup presence. */
 function clientId(): string {
 	try {
 		let id = localStorage.getItem(CLIENT_ID_KEY);
 		if (!id) {
 			id =
-				typeof crypto?.randomUUID === "function"
-					? crypto.randomUUID()
-					: `desktop-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+				globalThis.crypto?.randomUUID === undefined
+					? `desktop-${Date.now()}-${Math.round(Math.random() * 1e9)}`
+					: crypto.randomUUID();
 			localStorage.setItem(CLIENT_ID_KEY, id);
 		}
 		return id;
@@ -191,16 +282,16 @@ export function currentClientId(): string {
  * a node operator can see. User fields are URL-encoded so a non-ASCII display
  * name is still a valid HTTP header value (Core percent-decodes them).
  */
-export function identityHeaders(): Record<string, string> {
-	const headers: Record<string, string> = {
+export function identityHeaders() {
+	const headers: RequestInit["headers"] = {
 		"X-Ryu-Client-Id": clientId(),
 		"X-Ryu-Client-Label": "Desktop",
 		"X-Ryu-Surface": "desktop",
 	};
 	try {
-		const raw = localStorage.getItem(OIDC_USER_KEY);
+		const raw = sealedLocalStorage.getItem(OIDC_USER_KEY);
 		if (raw) {
-			const user = JSON.parse(raw) as { name?: string; email?: string };
+			const user = presenceUserSchema.parse(JSON.parse(raw));
 			if (user.email) {
 				headers["X-Ryu-User-Id"] = encodeURIComponent(user.email);
 			}
@@ -241,12 +332,18 @@ const PROTECTED_REQUEST_HEADERS = new Set([
  * via the cached, single-flight {@link getRealtimeJwt}. Returns `{}` when signed
  * out or the control plane is unreachable, so a local-first single-user node
  * keeps working with just its node token (Core then falls back to full trust).
+ * A managed delegation is sent as is; the account JWT only where
+ * {@link mayAttachAccountJwt} allows it.
  */
 async function verifiedUserHeader(
-	managedUserJwt?: string | null
+	target: ApiTarget
 ): Promise<Record<string, string>> {
+	const managedUserJwt = target.userJwt;
 	if (managedUserJwt?.trim()) {
 		return { [USER_JWT_HEADER]: managedUserJwt };
+	}
+	if (!mayAttachAccountJwt(target)) {
+		return {};
 	}
 	try {
 		const jwt = await getRealtimeJwt();
@@ -287,15 +384,11 @@ function appDisabledFromBody(
 		return null;
 	}
 	try {
-		const body = JSON.parse(text) as {
-			error?: string;
-			app?: string;
-			message?: string;
-		};
-		if (body.error === "app_disabled" && typeof body.app === "string") {
+		const parsed = appDisabledSchema.safeParse(JSON.parse(text));
+		if (parsed.success) {
 			return new AppDisabledError(
-				body.app,
-				body.message ?? "This app is disabled."
+				parsed.data.app,
+				parsed.data.message ?? "This app is disabled."
 			);
 		}
 	} catch {
@@ -306,7 +399,7 @@ function appDisabledFromBody(
 
 /**
  * A non-2xx response from a node. Carries the HTTP `status` and, when Core sent
- * one, the `{ "error": "…" }` body as {@link serverMessage}, so a caller can tell
+ * one, a legacy string or structured error message as {@link serverMessage}, so a caller can tell
  * "this Core is too old to have the route" (404) apart from "Core refused"
  * (403) instead of guessing from a bare message string.
  *
@@ -314,27 +407,24 @@ function appDisabledFromBody(
  * only log or match on the text are unaffected.
  */
 export class ApiError extends Error {
+	readonly body: AppResponseValue;
 	readonly status: number;
 	readonly serverMessage?: string;
+	readonly code?: string;
 
-	constructor(path: string, status: number, serverMessage?: string) {
+	constructor(
+		path: string,
+		status: number,
+		serverMessage?: string,
+		code?: string,
+		body?: Parameters<typeof appResponseValueSchema.parse>[0]
+	) {
 		super(`${path} failed: ${status}`);
 		this.name = "ApiError";
 		this.status = status;
 		this.serverMessage = serverMessage;
-	}
-}
-
-/** Pull Core's `{ "error": "…" }` message out of an error body, if it has one. */
-function serverErrorFromBody(text: string): string | undefined {
-	if (!text) {
-		return undefined;
-	}
-	try {
-		const parsed = JSON.parse(text) as { error?: unknown };
-		return typeof parsed.error === "string" ? parsed.error : undefined;
-	} catch {
-		return undefined;
+		this.code = code;
+		this.body = appResponseValueSchema.parse(body);
 	}
 }
 
@@ -375,13 +465,21 @@ function snippet(text: string): string {
  */
 export async function readJsonBody<T>(
 	resp: Response,
-	label: string
+	label: string,
+	codec: z.ZodType<T>
 ): Promise<JsonBody<T>> {
 	const text = await resp.text().catch(() => "");
 	let data: T | null = null;
+	let decodedJson = false;
+	let validContract = false;
 	if (text) {
 		try {
-			data = JSON.parse(text) as T;
+			const parsed = codec.safeParse(JSON.parse(text));
+			decodedJson = true;
+			if (parsed.success) {
+				data = parsed.data;
+				validContract = true;
+			}
 		} catch {
 			// Not JSON — `data` stays null and the raw text becomes the message.
 			data = null;
@@ -389,7 +487,7 @@ export async function readJsonBody<T>(
 	}
 
 	if (resp.ok) {
-		if (text && data === null) {
+		if (text && !decodedJson) {
 			// A 2xx that is not JSON means we reached something that is not this
 			// node's API (SPA/proxy fallback serving index.html), same failure mode
 			// `request()` reports below.
@@ -400,15 +498,19 @@ export async function readJsonBody<T>(
 				error: `${label} returned ${contentType}, not JSON — the node URL may be wrong or unreachable.`,
 			};
 		}
+		if (text && !validContract) {
+			return {
+				data: null,
+				status: resp.status,
+				error: `${label} returned an invalid response.`,
+			};
+		}
 		return { data, status: resp.status, error: null };
 	}
 
-	const serverError =
-		data && typeof data === "object"
-			? (data as { error?: unknown }).error
-			: undefined;
-	if (typeof serverError === "string" && serverError) {
-		return { data, status: resp.status, error: serverError };
+	const serverError = parseApiErrorBody(text);
+	if (serverError.message) {
+		return { data, status: resp.status, error: serverError.message };
 	}
 	const base = `${label} failed: ${resp.status}`;
 	const detail = snippet(text);
@@ -432,14 +534,18 @@ export async function readJsonBody<T>(
 export async function requestHeaders(
 	target: ApiTarget,
 	extra?: RequestHeaderOverrides,
-	options: { skipUserJwt?: boolean } = {}
+	options: { skipUserJwt?: boolean; skipAuthentication?: boolean } = {}
 ): Promise<Record<string, string>> {
-	const headers: Record<string, string> = {
-		// Local and self-hosted nodes use their node bearer. Managed nodes fall back
-		// to the short-lived user JWT returned by the control plane.
-		...makeHeaders(target.token, target.userJwt ?? null),
-		...identityHeaders(),
-		...(options.skipUserJwt ? {} : await verifiedUserHeader(target.userJwt)),
+	const headers: RequestInit["headers"] = {
+		...(options.skipAuthentication
+			? undefined
+			: makeHeaders(target.token, target.userJwt ?? null)),
+		...(options.skipAuthentication ? undefined : identityHeaders()),
+		...(options.skipAuthentication ||
+		options.skipUserJwt ||
+		!maySendUserIdentity(target)
+			? undefined
+			: await verifiedUserHeader(target)),
 	};
 	for (const [name, value] of Object.entries(extra ?? {})) {
 		if (PROTECTED_REQUEST_HEADERS.has(name.toLowerCase())) {
@@ -462,16 +568,26 @@ export async function requestHeaders(
  * Perform a raw-body request against Core with the complete authenticated header
  * set. Unlike {@link request}, this never serializes or parses the body: streams,
  * blobs, FormData, and callers with custom response handling keep their semantics.
+ * Browser HTTP caching is disabled unless the raw caller explicitly opts into it.
  */
 export async function authenticatedFetch(
 	target: ApiTarget,
 	path: string,
 	options: AuthenticatedFetchOptions = {}
 ): Promise<Response> {
-	const { headers: extraHeaders, skipUserJwt, ...init } = options;
+	const {
+		headers: extraHeaders,
+		skipUserJwt,
+		skipAuthentication,
+		...init
+	} = options;
 	return await fetch(apiUrl(target, path), {
 		...init,
-		headers: await requestHeaders(target, extraHeaders, { skipUserJwt }),
+		cache: options.cache ?? "no-store",
+		headers: await requestHeaders(target, extraHeaders, {
+			skipUserJwt,
+			skipAuthentication,
+		}),
 	});
 }
 
@@ -486,7 +602,7 @@ export async function authenticatedFetch(
 export async function request<T>(
 	target: ApiTarget,
 	path: string,
-	options: RequestOptions = {}
+	...[options = {}, responseCodec]: [RequestOptions | undefined, z.ZodType<T>]
 ): Promise<T> {
 	// Developer-mode timing. The gate is checked before anything is allocated, so
 	// a release build without Developer Mode pays one boolean read per call and
@@ -511,9 +627,13 @@ export async function request<T>(
 	let resp: Response;
 	try {
 		resp = await fetch(apiUrl(target, path), {
+			// Mutable node APIs must reach the captured authority without sharing
+			// a browser cache transaction with an in-flight request for another identity.
+			cache: "no-store",
 			method,
 			headers: await requestHeaders(target, options.headers, {
 				skipUserJwt: options.skipUserJwt,
+				skipAuthentication: options.skipAuthentication,
 			}),
 			body:
 				options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -533,15 +653,29 @@ export async function request<T>(
 		if (disabled) {
 			throw disabled;
 		}
-		throw new ApiError(path, resp.status, serverErrorFromBody(text));
+		const serverError = parseApiErrorBody(text);
+		let body: unknown;
+		try {
+			body = JSON.parse(text);
+		} catch {
+			body = undefined;
+		}
+		throw new ApiError(
+			path,
+			resp.status,
+			serverError.message,
+			serverError.code,
+			body
+		);
 	}
 	// Some endpoints (DELETE, no-content) return an empty body.
 	const text = await resp.text();
 	if (!text) {
-		return undefined as T;
+		return responseCodec.parse(undefined);
 	}
+	let decoded: AppResponseValue;
 	try {
-		return JSON.parse(text) as T;
+		decoded = appResponseValueSchema.parse(JSON.parse(text));
 	} catch {
 		// A 200 that isn't JSON means we reached something that is not this node's
 		// API — typically an SPA/proxy fallback serving index.html. Report that
@@ -551,4 +685,5 @@ export async function request<T>(
 			`${path} returned ${contentType}, not JSON — the node URL may be wrong or unreachable.`
 		);
 	}
+	return responseCodec.parse(decoded);
 }

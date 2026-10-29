@@ -16,6 +16,83 @@
 
 use ghost_permissions::Capability;
 
+/// Open only a fixed OS privacy pane. Keep custom schemes out of the general
+/// URL opener, whose inputs can originate from remote services.
+#[tauri::command]
+pub fn open_privacy_settings(app: tauri::AppHandle, capability: String) -> Result<(), String> {
+    use tauri_plugin_shell::ShellExt;
+    let url = privacy_settings_url(std::env::consts::OS, &capability)
+        .ok_or_else(|| "This privacy settings pane is unavailable on this platform.".to_string())?;
+    app.shell()
+        .open(url, None)
+        .map_err(|error| error.to_string())
+}
+
+fn privacy_settings_url(os: &str, capability: &str) -> Option<&'static str> {
+    match (os, capability) {
+        ("windows", "microphone") => Some("ms-settings:privacy-microphone"),
+        ("windows", "notifications") => Some("ms-settings:notifications"),
+        ("macos", "notifications") => {
+            Some("x-apple.systempreferences:com.apple.preference.notifications")
+        }
+        ("macos", "microphone") => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        }
+        ("macos", "accessibility") => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        }
+        ("macos", "screenRecording") => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        }
+        ("macos", "inputMonitoring") => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::privacy_settings_url;
+
+    #[test]
+    fn privacy_panes_are_fixed_and_platform_scoped() {
+        assert_eq!(
+            privacy_settings_url("windows", "microphone"),
+            Some("ms-settings:privacy-microphone")
+        );
+        for capability in [
+            "microphone",
+            "accessibility",
+            "screenRecording",
+            "inputMonitoring",
+        ] {
+            assert!(privacy_settings_url("macos", capability)
+                .unwrap()
+                .starts_with("x-apple.systempreferences:"));
+            assert_eq!(privacy_settings_url("linux", capability), None);
+        }
+        assert_eq!(privacy_settings_url("windows", "screenRecording"), None);
+        assert_eq!(
+            privacy_settings_url("windows", "notifications"),
+            Some("ms-settings:notifications")
+        );
+        assert_eq!(
+            privacy_settings_url("macos", "notifications"),
+            Some("x-apple.systempreferences:com.apple.preference.notifications")
+        );
+        assert_eq!(privacy_settings_url("linux", "notifications"), None);
+        for value in [
+            "file:///etc/passwd",
+            "ms-settings:privacy-microphone",
+            "microphone?redirect=evil",
+            "",
+        ] {
+            assert_eq!(privacy_settings_url("macos", value), None);
+        }
+    }
+}
+
 /// Whether Accessibility is currently granted. Never prompts.
 #[tauri::command]
 pub fn check_accessibility_permission() -> bool {

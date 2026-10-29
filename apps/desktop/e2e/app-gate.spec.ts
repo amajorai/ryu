@@ -103,6 +103,111 @@ test("app gates reuse the shared roster and stop Meetings work on disable", asyn
 		animations: "disabled",
 	});
 });
+
+test("a denied app enable shows the failure and retries before refreshing its feature", async ({
+	page,
+}) => {
+	let enabled = false;
+	let enableAttempts = 0;
+	let markRetryStarted: (() => void) | undefined;
+	let releaseRetry: (() => void) | undefined;
+	const retryStarted = new Promise<void>((resolve) => {
+		markRetryStarted = resolve;
+	});
+	const retryGate = new Promise<void>((resolve) => {
+		releaseRetry = resolve;
+	});
+	const enableRequests: {
+		id: string;
+		method: string;
+		path: string;
+	}[] = [];
+	await page.route("**/api/**", async (route) => {
+		const request = route.request();
+		const url = new URL(request.url());
+		if (!url.pathname.startsWith("/api/")) {
+			return route.continue();
+		}
+		if (url.pathname === "/api/plugins") {
+			return route.fulfill({ json: roster(enabled) });
+		}
+		if (url.pathname.endsWith("/enable")) {
+			enableAttempts += 1;
+			const encodedId = url.pathname.split("/").at(-2) ?? "";
+			enableRequests.push({
+				id: decodeURIComponent(encodedId),
+				method: request.method(),
+				path: url.pathname,
+			});
+			if (enableAttempts === 1) {
+				return route.fulfill({
+					json: { denied_grants: ["meetings.record"] },
+					status: 403,
+				});
+			}
+			markRetryStarted?.();
+			await retryGate;
+			enabled = true;
+			return route.fulfill({
+				json: {
+					app: { id: "@ryu/meetings", enabled, installed: true, config: {} },
+				},
+			});
+		}
+		return route.fulfill({ json: {} });
+	});
+
+	await page.goto("/app-gate-proof.html?notice-only=1");
+	const enableButton = page.getByRole("button", {
+		name: "Enable",
+		exact: true,
+	});
+	await expect(enableButton).toBeVisible();
+	await enableButton.click();
+	await expect(
+		page.getByText("Couldn't enable this app", { exact: true })
+	).toBeVisible();
+	await expect(
+		page.getByText("Gateway denied grants: meetings.record", { exact: true })
+	).toBeVisible();
+	await expect(enableButton).toHaveText("Enable");
+	await expect(page.getByTestId("enabled-refreshes")).toHaveText("0");
+
+	await page.screenshot({
+		path: path.resolve(
+			import.meta.dirname,
+			"../../../docs/proof/test-coverage-sweep-20260924/evidence/desktop-app-disabled-enable-retry.png"
+		),
+		fullPage: true,
+		animations: "disabled",
+	});
+
+	const retryClick = enableButton.click();
+	await retryStarted;
+	const enablingButton = page.getByRole("button", {
+		name: "Enabling…",
+		exact: true,
+	});
+	await expect(enablingButton).toBeDisabled();
+	await expect(enablingButton).toHaveText("Enabling…");
+	releaseRetry?.();
+	await retryClick;
+	await expect(page.getByTestId("enabled-refreshes")).toHaveText("1");
+	expect(enableAttempts).toBe(2);
+	expect(enableRequests).toEqual([
+		{
+			id: "@ryu/meetings",
+			method: "POST",
+			path: "/api/plugins/%40ryu%2Fmeetings/enable",
+		},
+		{
+			id: "@ryu/meetings",
+			method: "POST",
+			path: "/api/plugins/%40ryu%2Fmeetings/enable",
+		},
+	]);
+});
+
 test("unknown identity rosters stay closed and obsolete shared reads abort", async ({
 	page,
 }) => {

@@ -7,7 +7,12 @@
 // fetched when an agent id is present. Every decision lives in Core
 // (`GET /api/agents/:id/capabilities`).
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import {
 	type CapabilityOverrides,
@@ -66,13 +71,16 @@ export function useAgentCapabilities(
 	const enabled = Boolean(agentId);
 	const query = useQuery({
 		queryKey,
-		queryFn: () =>
-			fetchAgentCapabilities(
-				target,
-				agentId as string,
-				modelId ?? undefined,
-				acpSelections
-			),
+		queryFn:
+			agentId === null || agentId === undefined
+				? skipToken
+				: () =>
+						fetchAgentCapabilities(
+							target,
+							agentId,
+							modelId ?? undefined,
+							acpSelections
+						),
 		enabled,
 		// Keep the last answer visible while a new selection is probed, so the
 		// composer does not briefly treat "unknown" as "no reasoning".
@@ -85,8 +93,12 @@ export function useAgentCapabilities(
 	});
 
 	const mutation = useMutation({
-		mutationFn: (overrides: CapabilityOverrides) =>
-			setAgentCapabilities(target, agentId as string, overrides),
+		mutationFn: (overrides: CapabilityOverrides) => {
+			if (agentId === null || agentId === undefined) {
+				throw new Error("Select an agent before changing capabilities.");
+			}
+			return setAgentCapabilities(target, agentId, overrides);
+		},
 		onSuccess: (report) => {
 			queryClient.setQueryData(queryKey, report);
 		},
@@ -105,7 +117,7 @@ export function useAgentCapabilities(
 	return {
 		capabilities: query.data ?? null,
 		loading: enabled && query.isLoading,
-		error: (query.error as Error | null)?.message ?? null,
+		error: query.error?.message ?? null,
 		setOverrides,
 		saving: mutation.isPending,
 	};

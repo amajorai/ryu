@@ -62,4 +62,25 @@ describe("ConnectionStatusToast", () => {
 		expect(html).toContain('data-connection-restored="true"');
 		expect(html).toContain("Connection restored");
 	});
+
+	test("uses a borderless glass surface with room after the text", () => {
+		const html = renderToStaticMarkup(
+			<ConnectionStatusToast nodeName="Local" phase="offline" />
+		);
+		expect(html).toContain("bg-connection-toast-surface/65");
+		expect(html).toContain("backdrop-blur-2xl");
+		const surfaceClass = html.match(
+			/<div[^>]*class="([^"]*)"[^>]*data-slot="connection-status-surface"/
+		)?.[1];
+		expect(surfaceClass).toBeDefined();
+		const surfaceClasses = new Set(surfaceClass?.split(/\s+/));
+		expect(surfaceClasses.has("pl-2")).toBe(true);
+		expect(surfaceClasses.has("pr-4")).toBe(true);
+		expect(html).toContain("whitespace-nowrap");
+		expect(html).not.toContain("truncate");
+		expect(html).toContain('data-slot="connection-status-detail"');
+		expect(html).not.toContain("border-white/15");
+		expect(html).not.toContain("ring-white/10 ring-inset");
+		expect(html).not.toContain("ring-1 ring-inset");
+	});
 });

@@ -27,6 +27,11 @@ import {
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { renderTemplate } from "@ryu/app-host/views";
+import { COMPUTE_SHARE_FLAG } from "@ryu/auth/lib/feature-flags";
+import {
+	type AttachedImage,
+	InputBar,
+} from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import { CommandPalette as SharedCommandPalette } from "@ryu/command/CommandPalette";
 import type { CommandAction, CommandPaletteTab } from "@ryu/command/types";
 import { useHotkey } from "@ryu/hotkeys/react";
@@ -40,8 +45,9 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog";
-import { toast } from "@ryu/ui/components/sileo";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useTheme } from "next-themes";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -56,6 +62,7 @@ import { useCompanionAlias } from "@/src/contributions/use-companion-alias.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useCommandSearchSections } from "@/src/hooks/useCommandSearchSections.ts";
 import { useContributedSectionItems } from "@/src/hooks/useContributedCommands.ts";
+import { useFeatureFlag } from "@/src/hooks/useFeatureFlag.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -68,24 +75,33 @@ import {
 	searchMarketplaceCatalog,
 } from "@/src/lib/api/marketplace.ts";
 import { createMemory } from "@/src/lib/api/memory.ts";
+import type { PluginDocument } from "@/src/lib/api/plugin-wire-values.ts";
 import { fireActivationEvent } from "@/src/lib/api/plugins.ts";
 import { type ShadowSearchResult, searchShadow } from "@/src/lib/api/shadow.ts";
 import {
 	type SpaceLexicalHit,
 	searchSpaceDocuments,
 } from "@/src/lib/api/spaces.ts";
+import { stageImageUpload } from "@/src/lib/api/uploads.ts";
 import { toggleFullscreen } from "@/src/lib/fullscreen.ts";
+import { prefetchRoute } from "@/src/lib/route-prefetch.ts";
 import { listenWhenReady } from "@/src/lib/tauri-ready.ts";
 import { compactAge } from "@/src/lib/time.ts";
+import { useOptionalDesktopWorkbench } from "@/src/workbench/DesktopWorkbenchContext.tsx";
+import {
+	DESKTOP_SHELL_REGIONS,
+	useWorkbenchToolsContext,
+} from "@/src/workbench/workbench-chrome.tsx";
+import { workbenchLayoutCommands } from "@/src/workbench/workbench-commands.ts";
 import { SettingsDialog } from "../settings/LazySettingsDialog.tsx";
 
 /** Safely read a string field off an opaque plugin-contribution record. */
 function contribString(
-	record: Record<string, unknown>,
+	record: PluginDocument,
 	key: string
 ): string | undefined {
 	const value = record[key];
-	return typeof value === "string" ? value : undefined;
+	return isNativeText(value) ? value : undefined;
 }
 
 type SettingsSection =
@@ -138,15 +154,21 @@ const NAV_ITEMS = [
 	{ to: "/review", label: "Weekly review", icon: ArrowRight01Icon },
 ] as const;
 
-const NAV_RESULT_TYPES: Partial<Record<string, string>> = {
-	"/chat": "chats",
-	"/engines": "engines",
-	"/library/agent": "agents",
-	"/library/space": "spaces",
-	"/library/workflow": "workflows",
-	"/skills": "skills",
-	"/tools": "tools",
-};
+/** Navigation targets held behind the `ui.compute_share` rollout flag. */
+const COMPUTE_SHARE_NAV_TARGETS: ReadonlySet<string> = new Set([
+	"/compute",
+	"/share",
+]);
+
+const NAV_RESULT_TYPES = new Map<(typeof NAV_ITEMS)[number]["to"], string>([
+	["/chat", "chats"],
+	["/engines", "engines"],
+	["/library/agent", "agents"],
+	["/library/space", "spaces"],
+	["/library/workflow", "workflows"],
+	["/skills", "skills"],
+	["/tools", "tools"],
+]);
 
 const MAX_CHAT_RESULTS = 30;
 
@@ -174,6 +196,7 @@ export function CommandPalette() {
 	const [settingsSection, setSettingsSection] =
 		useState<SettingsSection>("appearance");
 	const [activeResultType, setActiveResultType] = useState("all");
+	const computeShareEnabled = useFeatureFlag(COMPUTE_SHARE_FLAG);
 	const openTab = useTabSelector((state) => state.openTab);
 	const requestScrollToMessage = useTabSelector(
 		(state) => state.requestScrollToMessage
@@ -189,6 +212,31 @@ export function CommandPalette() {
 		token: activeNode.token ?? null,
 		userJwt: activeNode.userJwt ?? null,
 	};
+	const targetScope = JSON.stringify([
+		target.url,
+		target.token,
+		target.userJwt,
+	]);
+	const currentTargetScope = useRef({ scope: targetScope, generation: 0 });
+	if (currentTargetScope.current.scope !== targetScope) {
+		currentTargetScope.current = {
+			scope: targetScope,
+			generation: currentTargetScope.current.generation + 1,
+		};
+	}
+	const targetGeneration = currentTargetScope.current.generation;
+	const mounted = useRef(true);
+	const composeGeneration = useRef(0);
+	const isCurrentTarget = () =>
+		mounted.current &&
+		currentTargetScope.current.generation === targetGeneration;
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			composeGeneration.current += 1;
+		};
+	}, []);
 	// Enabled plugins' declarative contributions (companions + slash commands +
 	// app-registered sidebar buttons), shared via react-query cache with the
 	// route-registration hook in Layout.
@@ -202,6 +250,8 @@ export function CommandPalette() {
 	// here without the shell hardcoding a single list.
 	const contributedSectionItems = useContributedSectionItems(open);
 	const [query, setQuery] = useState("");
+	const [composeDraft, setComposeDraft] = useState("");
+	const [composeImages, setComposeImages] = useState<AttachedImage[]>([]);
 	const [pendingMemory, setPendingMemory] = useState<string | null>(null);
 	const [shadowResults, setShadowResults] = useState<ShadowSearchResult[]>([]);
 	const [messageResults, setMessageResults] = useState<MessageSearchHit[]>([]);
@@ -213,6 +263,11 @@ export function CommandPalette() {
 	const messageAbort = useRef<AbortController | null>(null);
 	const spaceAbort = useRef<AbortController | null>(null);
 	const marketplaceAbort = useRef<AbortController | null>(null);
+	useEffect(() => {
+		composeGeneration.current += 1;
+		setComposeImages([]);
+		setPendingMemory(null);
+	}, [targetScope]);
 
 	// The palette toggle routes through the unified hotkey system so a rebind in
 	// Settings → Keyboard Shortcuts retargets it live. The custom event stays for
@@ -258,7 +313,7 @@ export function CommandPalette() {
 			}
 			unlisteners.push(unlisten);
 		};
-		const ignore = (error: unknown) => {
+		const ignore = <TError,>(error: TError) => {
 			console.error("tray event subscription failed", error);
 		};
 		listenWhenReady("tray-open-timeline", () => {
@@ -286,26 +341,29 @@ export function CommandPalette() {
 	// is not running so the palette still works as a plain command launcher.
 	useEffect(() => {
 		const q = query.trim();
+		searchAbort.current?.abort();
 		if (q.length < 2) {
 			setShadowResults([]);
 			return;
 		}
+		const controller = new AbortController();
+		searchAbort.current = controller;
 		const handle = setTimeout(async () => {
-			searchAbort.current?.abort();
-			const controller = new AbortController();
-			searchAbort.current = controller;
 			const results = await searchShadow(q, 8, controller.signal);
-			if (results) {
+			if (results && !controller.signal.aborted) {
 				setShadowResults(results);
 			}
 		}, 200);
-		return () => clearTimeout(handle);
+		return () => {
+			clearTimeout(handle);
+			controller.abort();
+		};
 	}, [query]);
 
 	// Debounced exact + semantic search over past chat messages. Core puts lexical
 	// FTS hits first and semantic hits after them, so literal recall stays
 	// predictable without losing meaning-based matches when embeddings exist.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: `target` is a fresh object every render; depending on its primitive fields avoids an infinite update loop (see comment on the deps array below).
+	// `target` is a fresh object every render; depending on its primitive fields avoids an infinite update loop (see comment on the deps array below).
 	useEffect(() => {
 		const q = query.trim();
 		messageAbort.current?.abort();
@@ -314,24 +372,27 @@ export function CommandPalette() {
 			return;
 		}
 		setMessageResults([]);
+		const controller = new AbortController();
+		messageAbort.current = controller;
 		const handle = setTimeout(async () => {
-			const controller = new AbortController();
-			messageAbort.current = controller;
 			const result = await searchConversations(target, q, 8, controller.signal);
-			if (result) {
+			if (result && !controller.signal.aborted && isCurrentTarget()) {
 				setMessageResults(result.hits);
 			}
 		}, 250);
-		return () => clearTimeout(handle);
+		return () => {
+			clearTimeout(handle);
+			controller.abort();
+		};
 		// Primitive deps only — `target` is a fresh object every render, so listing
 		// it would re-run this effect each render and the early `setMessageResults([])`
 		// (a fresh array, never bailed) would spin into an infinite update loop.
-	}, [query, target.url, target.token]);
+	}, [query, target.url, target.token, target.userJwt]);
 
 	// Page/Space lexical search is separate from per-Space RAG search: the palette
 	// needs predictable literal recall over visible metadata, page source, and
 	// extracted chunks, even when no embedding model is available.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: `target` is a fresh object every render; primitive fields are the stable request identity.
+	// `target` is a fresh object every render; primitive fields are the stable request identity.
 	useEffect(() => {
 		const q = query.trim();
 		spaceAbort.current?.abort();
@@ -340,21 +401,24 @@ export function CommandPalette() {
 			return;
 		}
 		setSpaceResults([]);
+		const controller = new AbortController();
+		spaceAbort.current = controller;
 		const handle = setTimeout(async () => {
-			const controller = new AbortController();
-			spaceAbort.current = controller;
 			const results = await searchSpaceDocuments(
 				target,
 				q,
 				8,
 				controller.signal
 			);
-			if (results) {
+			if (results && !controller.signal.aborted && isCurrentTarget()) {
 				setSpaceResults(results);
 			}
 		}, 250);
-		return () => clearTimeout(handle);
-	}, [query, target.url, target.token]);
+		return () => {
+			clearTimeout(handle);
+			controller.abort();
+		};
+	}, [query, target.url, target.token, target.userJwt]);
 
 	// The control-plane Marketplace is a separate public catalog from the
 	// node-scoped Store feed. Search it only after the user has typed a real query,
@@ -388,8 +452,10 @@ export function CommandPalette() {
 	}, [query]);
 
 	const close = () => {
+		composeGeneration.current += 1;
 		setOpen(false);
 		setQuery("");
+		setComposeDraft("");
 		setActiveResultType("all");
 		setShadowResults([]);
 		setMessageResults([]);
@@ -449,8 +515,14 @@ export function CommandPalette() {
 		}
 		try {
 			await createMemory(target, { content });
+			if (!isCurrentTarget()) {
+				return;
+			}
 			toast.success("Saved to memory", { description: content });
 		} catch {
+			if (!isCurrentTarget()) {
+				return;
+			}
 			toast.error("Couldn't save to memory", {
 				description: "Please check your connection and try again.",
 			});
@@ -501,7 +573,7 @@ export function CommandPalette() {
 	// own). Plain built-in paths carry no query and pass through unchanged.
 	const handleNavigate = (to: string, title?: string) => {
 		const { path, options } = parseContributedTarget(to);
-		openTab(path, { ...options, ...(title ? { title } : {}) });
+		openTab(path, { ...options, ...(title ? { title } : undefined) });
 		close();
 	};
 
@@ -513,7 +585,9 @@ export function CommandPalette() {
 		close();
 		fireActivationEvent(target, commandId)
 			.then(() => {
-				toast.success(`Ran ${label}`);
+				if (isCurrentTarget()) {
+					toast.success(`Ran ${label}`);
+				}
 			})
 			.catch(() => {
 				// Silent: activation is best-effort and must not disrupt the palette.
@@ -523,6 +597,75 @@ export function CommandPalette() {
 	const handleNewChat = () => {
 		setActiveConversationId(null);
 		openTab("/chat", { forceNew: true });
+		close();
+	};
+
+	const handleComposeAttach = () => {
+		const generation = composeGeneration.current;
+		const input = document.createElement("input");
+		input.accept = "image/*";
+		input.multiple = true;
+		input.type = "file";
+		input.onchange = () => {
+			if (!isCurrentTarget() || generation !== composeGeneration.current) {
+				return;
+			}
+			for (const file of Array.from(input.files ?? [])) {
+				if (!file.type.startsWith("image/")) {
+					continue;
+				}
+				void stageImageUpload(target, file)
+					.then(({ dataUrl, upload }) => {
+						if (
+							!isCurrentTarget() ||
+							generation !== composeGeneration.current
+						) {
+							return;
+						}
+						setComposeImages((previous) => [
+							...previous,
+							{
+								id: upload?.id ?? `img-${crypto.randomUUID()}`,
+								filename: file.name,
+								url: dataUrl,
+								mimeType: file.type,
+								size: file.size,
+							},
+						]);
+					})
+					.catch((error) => {
+						if (
+							!isCurrentTarget() ||
+							generation !== composeGeneration.current
+						) {
+							return;
+						}
+						toast.error("Could not attach image", {
+							description:
+								error instanceof Error
+									? error.message
+									: "Please try another image.",
+						});
+					});
+			}
+		};
+		input.click();
+	};
+
+	const handleComposeSend = (content: string) => {
+		const prompt = content.trim();
+		if (!prompt && composeImages.length === 0) {
+			return;
+		}
+		setActiveConversationId(null);
+		openTab("/chat", {
+			forceNew: true,
+			initialPrompt: prompt || undefined,
+			initialSubmit: true,
+			initialImages: composeImages.length > 0 ? composeImages : undefined,
+		});
+		setComposeDraft("");
+		setComposeImages([]);
 		close();
 	};
 
@@ -574,7 +717,9 @@ export function CommandPalette() {
 	// icons, shortcuts, and side effects as the previous inline cmdk markup. Built
 	// directly in render (like the old inline markup) so it always reflects the
 	// latest conversation list, theme, and sign-out state.
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: assembles many independent, flat action groups (chats, nav, theme, account); splitting would scatter one cohesive list.
+	// assembles many independent, flat action groups (chats, nav, theme, account); splitting would scatter one cohesive list.
+	const workbench = useOptionalDesktopWorkbench();
+	const workbenchTools = useWorkbenchToolsContext();
 	const buildActions = (): CommandAction[] => {
 		const items: CommandAction[] = [];
 
@@ -591,7 +736,7 @@ export function CommandPalette() {
 					id: `sidebar-${section.id}-${row.id}`,
 					group: section.label,
 					title: row.title,
-					value: `${section.label} ${row.title} ${row.subtitle ?? ""}`,
+					value: `${section.label} ${row.title} ${row.subtitle ?? ""} ${row.keywords ?? ""}`,
 					resultType: section.id,
 					trailing: resultMeta(row.subtitle, row.timestamp),
 					icon: row.icon ?? section.icon,
@@ -651,7 +796,10 @@ export function CommandPalette() {
 		);
 
 		for (const { to, label, icon } of NAV_ITEMS) {
-			const resultType = NAV_RESULT_TYPES[to];
+			if (!computeShareEnabled && COMPUTE_SHARE_NAV_TARGETS.has(to)) {
+				continue;
+			}
+			const resultType = NAV_RESULT_TYPES.get(to);
 			if (resultType && !searchTabs.some((tab) => tab.id === resultType)) {
 				continue;
 			}
@@ -662,6 +810,7 @@ export function CommandPalette() {
 				value: `navigate ${label}`,
 				icon,
 				resultType,
+				prefetchPath: parseContributedTarget(to).path,
 				onSelect: () => handleNavigate(to, label),
 			});
 		}
@@ -680,6 +829,7 @@ export function CommandPalette() {
 				title: button.title,
 				value: `navigate ${button.title}`,
 				icon: ArrowRight01Icon,
+				prefetchPath: parseContributedTarget(button.target).path,
 				onSelect: () => handleNavigate(button.target, button.title),
 			});
 		}
@@ -705,6 +855,7 @@ export function CommandPalette() {
 					value: `${section.title} ${row.item.title} ${row.item.subtitle ?? ""}`,
 					resultType: `plugin:${section.plugin}:${section.sectionId}`,
 					icon: ArrowRight01Icon,
+					prefetchPath: parseContributedTarget(route).path,
 					onSelect: () => handleNavigate(route, row.item.title),
 				});
 			}
@@ -720,6 +871,7 @@ export function CommandPalette() {
 				title: "Marketplace",
 				value: "navigate marketplace store buy licenses sell",
 				icon: DollarCircleIcon,
+				prefetchPath: "/marketplace",
 				onSelect: () => handleNavigate("/marketplace"),
 			},
 			{
@@ -728,6 +880,7 @@ export function CommandPalette() {
 				title: "Plugins",
 				value: "navigate plugins apps installed",
 				icon: Package01Icon,
+				prefetchPath: "/apps",
 				onSelect: () => handleNavigate("/apps"),
 			},
 			{
@@ -736,6 +889,7 @@ export function CommandPalette() {
 				title: "Extensions",
 				value: "navigate extensions browser desktop add-ons",
 				icon: PlugSocketIcon,
+				prefetchPath: "/extensions",
 				onSelect: () => handleNavigate("/extensions"),
 			}
 			// "Webhooks" used to be a fourth row here. `/webhooks` is owned by the
@@ -799,6 +953,7 @@ export function CommandPalette() {
 				"navigate channels telegram slack whatsapp personal business cloud api discord bots",
 			icon: Tv01Icon,
 			resultType: "channels",
+			prefetchPath: "/library/channel",
 			onSelect: () => handleNavigate("/library/channel", "Channels"),
 		});
 
@@ -809,6 +964,7 @@ export function CommandPalette() {
 			value: "navigate identities logins credentials connections vault",
 			icon: FingerPrintIcon,
 			resultType: "identities",
+			prefetchPath: "/library/identity",
 			onSelect: () => handleNavigate("/library/identity", "Identities"),
 		});
 
@@ -818,7 +974,17 @@ export function CommandPalette() {
 			title: "Vault",
 			value: "navigate vault secrets variables credentials mcp",
 			icon: ShieldKeyIcon,
+			prefetchPath: "/vault",
 			onSelect: () => handleNavigate("/vault", "Vault"),
+		});
+
+		items.push({
+			id: "nav-knowledge-graph",
+			group: "Navigation",
+			title: "Knowledge graph",
+			value: "navigate knowledge graph spaces pages links backlinks wiki",
+			icon: WorkflowCircle06Icon,
+			onSelect: () => handleNavigate("/graph", "Knowledge graph"),
 		});
 
 		items.push({
@@ -917,6 +1083,40 @@ export function CommandPalette() {
 			}
 		);
 
+		for (const tool of workbenchTools?.tools ?? []) {
+			items.push({
+				group: "Layout",
+				id: `workbench-open-${tool.id}`,
+				onSelect: () => {
+					workbenchTools?.openTool(tool.id);
+					close();
+				},
+				title: `Open ${tool.label}`,
+				value: `open ${tool.label.toLowerCase()} pane panel tool ${tool.region}`,
+			});
+		}
+		if (workbench) {
+			for (const command of workbenchLayoutCommands({
+				dispatch: workbench.dispatch,
+				movableRegions: DESKTOP_SHELL_REGIONS,
+				state: workbench.state,
+			})) {
+				items.push({
+					checked: command.checked,
+					disabled: command.disabled,
+					group: "Layout",
+					icon: command.icon,
+					id: command.id,
+					onSelect: () => {
+						command.run();
+						close();
+					},
+					title: command.title,
+					value: `${command.title.toLowerCase()} ${command.keywords}`,
+				});
+			}
+		}
+
 		// "Search everything" + "remember" — only when there is a real query.
 		const q = query.trim();
 		if (q.length >= 2) {
@@ -1001,11 +1201,47 @@ export function CommandPalette() {
 			<SharedCommandPalette
 				actions={buildActions()}
 				activeTab={activeResultType}
+				composeContent={
+					<InputBar
+						attachedImages={composeImages}
+						autoFocus
+						className="pt-2.5"
+						leftActions={
+							<span
+								className="flex items-center gap-2 px-2 text-muted-foreground text-xs"
+								data-testid="compose-send-shortcut"
+							>
+								Send
+								<kbd className="type-caption rounded-md border border-border/70 px-1.5 py-0.5 font-mono">
+									Enter
+								</kbd>
+							</span>
+						}
+						onAttach={handleComposeAttach}
+						onChange={setComposeDraft}
+						onRemoveImage={(id) =>
+							setComposeImages((previous) =>
+								previous.filter((image) => image.id !== id)
+							)
+						}
+						onSend={({ content }) => handleComposeSend(content)}
+						onStop={() => undefined}
+						placeholder="Write a message…"
+						status="ready"
+						value={composeDraft}
+					/>
+				}
+				dialogLayout="expanded"
+				onHighlight={(action) => {
+					if (action.prefetchPath) {
+						prefetchRoute(action.prefetchPath);
+					}
+				}}
 				onOpenChange={(o) => (o ? setOpen(true) : close())}
 				onSearchChange={setQuery}
 				onTabChange={setActiveResultType}
 				open={open}
-				placeholder="Search everything or run a command..."
+				placeholder="Search everything or run a command…"
 				search={query}
 				tabs={searchTabs}
 			/>

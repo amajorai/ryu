@@ -14,7 +14,7 @@
 
 import { Download01Icon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -22,12 +22,13 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { PullToRefresh } from "@ryu/ui/components/pull-to-refresh";
+} from "@ryu/ui/components/empty.tsx";
+import { PullToRefresh } from "@ryu/ui/components/pull-to-refresh.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { AvailableUpdates } from "@/src/components/downloads/AvailableUpdates.tsx";
+import { DownloadConcurrencyControl } from "@/src/components/downloads/DownloadConcurrencyControl.tsx";
 import { DownloadRow } from "@/src/components/downloads/DownloadRow.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -37,11 +38,9 @@ import {
 	useDownloadBulkActions,
 } from "@/src/hooks/useDownloadBulkActions.ts";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
-import {
-	type DownloadTask,
-	isInFlight,
-	listDownloadHistory,
-} from "@/src/lib/api/downloads.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
+import { type DownloadTask, isInFlight } from "@/src/lib/api/downloads.ts";
+import { downloadsHistoryQuery } from "@/src/lib/route-queries.ts";
 import {
 	selectOrderedTasks,
 	useDownloadsStore,
@@ -74,15 +73,7 @@ export default function DownloadsPage() {
 	const { updates, loading, refresh } = useAvailableUpdates();
 	const node = useActiveNode();
 
-	const historyQuery = useQuery({
-		queryKey: ["downloads", "history", node.url],
-		queryFn: () =>
-			listDownloadHistory({
-				url: node.url,
-				token: node.token,
-				userJwt: node.userJwt ?? null,
-			}),
-	});
+	const historyQuery = useQuery(downloadsHistoryQuery(toTarget(node)));
 
 	const active = tasks.filter(
 		(t) => isInFlight(t.state) || t.state === "paused"
@@ -120,7 +111,7 @@ export default function DownloadsPage() {
 		!(loading || historyQuery.isLoading);
 
 	return (
-		<PullToRefresh className="scroll-fade h-full" onRefresh={onRefresh}>
+		<PullToRefresh className="h-full" edgeFade onRefresh={onRefresh}>
 			<div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
 				<header className="flex items-center justify-between gap-3">
 					<div>
@@ -160,10 +151,10 @@ export default function DownloadsPage() {
 							</Button>
 						)}
 						{/* Refresh reports itself. Both feeds it kicks off resolve in well
-					    under a second on a local node, so without a held state the button
-					    looked inert on every press — the list simply redrew identical
-					    content. The state is driven by the queries' own in-flight flags
-					    plus a floor, so it is never a lie about work that already ended. */}
+				    under a second on a local node, so without a held state the button
+				    looked inert on every press — the list simply redrew identical
+				    content. The state is driven by the queries' own in-flight flags
+				    plus a floor, so it is never a lie about work that already ended. */}
 						<Button
 							loading={refreshing}
 							onClick={() => {
@@ -179,7 +170,7 @@ export default function DownloadsPage() {
 				</header>
 
 				{nothing ? (
-					<Empty className="py-10">
+					<Empty spacing="comfortable">
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
 								<HugeiconsIcon icon={Download01Icon} />
@@ -207,7 +198,9 @@ export default function DownloadsPage() {
 							</div>
 						)}
 
-						<Section title="Active">
+						{/* "How many at once" sits beside the queue it governs: "why is
+					    this slow" and "can it go faster" are the same moment. */}
+						<Section action={<DownloadConcurrencyControl />} title="Active">
 							{active.length > 0 ? (
 								<div className="flex flex-col rounded-2xl bg-card p-1">
 									{active.map((task) => (
@@ -245,10 +238,21 @@ export default function DownloadsPage() {
 	);
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({
+	action,
+	children,
+	title,
+}: {
+	action?: ReactNode;
+	children: ReactNode;
+	title: string;
+}) {
 	return (
 		<section className="flex flex-col gap-2">
-			<h2 className="font-medium text-muted-foreground text-sm">{title}</h2>
+			<div className="flex items-start justify-between gap-3">
+				<h2 className="font-medium text-muted-foreground text-sm">{title}</h2>
+				{action}
+			</div>
 			{children}
 		</section>
 	);

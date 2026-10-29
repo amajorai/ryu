@@ -1,0 +1,29 @@
+.fixture1 {
+	margin-bottom: 40px;
+}
+
+.fixture2 {
+	margin-bottom: 8px;
+	font-family: system-ui, sans-serif;
+	font-size: 12px;
+	opacity: 0.6;
+}
+
+.fixture3 {
+	padding: 40px;
+}
+
+.fixture4 {
+	margin-bottom: 8px;
+	font-family: system-ui, sans-serif;
+	font-size: 12px;
+	opacity: 0.6;
+}
+
+.fixture5 {
+	width: 720px;
+}
+
+.launchpadPane {
+	width: var(--launchpad-width);
+}

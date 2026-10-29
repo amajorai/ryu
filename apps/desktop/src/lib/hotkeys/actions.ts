@@ -51,6 +51,16 @@ export const DESKTOP_HOTKEYS: HotkeyRegistry = [
 			"Open or close the floating Ryu chat. Always opens the FLOATING layout, never the docked sidebar one — a hotkey that reopened whichever layout was last used would look dead when that was the sidebar.",
 	},
 	{
+		id: "interface.switch",
+		label: "Switch Interface",
+		category: "General",
+		// U for "user interface"; Mod+Shift+U is free in the app and in the
+		// browsers' and OSes' common chords.
+		defaultBinding: "Mod+Shift+U",
+		description:
+			"Open the interface switcher, from the chat, the OS desktop or any interface, with Back to chat at the top when another interface is open.",
+	},
+	{
 		id: "window.fullscreen-toggle",
 		label: "Toggle Full Screen",
 		category: "General",
@@ -100,6 +110,56 @@ export const DESKTOP_HOTKEYS: HotkeyRegistry = [
 		defaultBinding: "Mod+Shift+Tab",
 		description:
 			"Cycle to the previous open tab. Order follows Settings → Tabs → Switch tabs with Ctrl/Cmd+Tab.",
+	},
+	// --- Layout (panes) ---
+	// Unbound by default: the natural editor chords (Mod+Shift+Arrow, Mod+K
+	// sequences) either select text in inputs or are not representable as a
+	// single chord. Each one runs the matching Layout command-palette entry.
+	{
+		id: "workbench.focus-next-pane",
+		label: "Focus Next Pane",
+		category: "Layout",
+		defaultBinding: null,
+		description:
+			"Move focus to the next visible pane: Center panes in split order, then Right, then Bottom.",
+	},
+	{
+		id: "workbench.focus-previous-pane",
+		label: "Focus Previous Pane",
+		category: "Layout",
+		defaultBinding: null,
+	},
+	{
+		id: "workbench.move-tab-to-center",
+		label: "Move Tab to Center Pane",
+		category: "Layout",
+		defaultBinding: null,
+	},
+	{
+		id: "workbench.move-tab-to-right",
+		label: "Move Tab to Right Pane",
+		category: "Layout",
+		defaultBinding: null,
+	},
+	{
+		id: "workbench.move-tab-to-bottom",
+		label: "Move Tab to Bottom Pane",
+		category: "Layout",
+		defaultBinding: null,
+	},
+	{
+		id: "workbench.equalize-center-panes",
+		label: "Equalize Center Panes",
+		category: "Layout",
+		defaultBinding: null,
+	},
+	{
+		id: "workbench.reset-layout",
+		label: "Reset Layout",
+		category: "Layout",
+		defaultBinding: null,
+		description:
+			"Return every tab to its default pane and restore default sizes. Closes nothing.",
 	},
 	// --- Navigation ---
 	{
@@ -165,7 +225,7 @@ export const DESKTOP_HOTKEYS: HotkeyRegistry = [
 		category: "Chat",
 		defaultBinding: "Mod+Alt+Down",
 		description:
-			"Show or hide the focused chat's bottom dock (terminal, diff, preview…).",
+			"Show or hide the focused chat's bottom dock (terminal, diff, preview…). Outside a chat, shows or hides the Bottom pane when it has tabs.",
 	},
 	{
 		id: "chat.toggle-right-panel",
@@ -173,7 +233,7 @@ export const DESKTOP_HOTKEYS: HotkeyRegistry = [
 		category: "Chat",
 		defaultBinding: "Mod+Alt+Right",
 		description:
-			"Show or hide the focused chat's right dock (files, context, subagents…).",
+			"Show or hide the focused chat's right dock (files, context, subagents…). Outside a chat, shows or hides the Right pane when it has tabs.",
 	},
 	{
 		id: "chat.voice-mode",

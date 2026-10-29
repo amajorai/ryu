@@ -1,0 +1,96 @@
+.container {
+	position: relative;
+	width: 100%;
+	height: 100%;
+}
+
+.container canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+.fallback::before,
+.fallback::after {
+	position: absolute;
+	inset: -5% -8% -2%;
+	pointer-events: none;
+	content: "";
+	border-radius: 50%;
+	filter: blur(34px);
+	animation-play-state: var(--aurora-fallback-play-state, running);
+}
+
+.fallback::before {
+	background:
+		radial-gradient(
+			ellipse 37% 66% at 10% 100%,
+			rgb(0 252 185 / 76%),
+			transparent 74%
+		),
+		radial-gradient(
+			ellipse 43% 75% at 38% 106%,
+			rgb(55 128 255 / 72%),
+			transparent 76%
+		),
+		radial-gradient(
+			ellipse 42% 70% at 69% 100%,
+			rgb(121 89 255 / 68%),
+			transparent 74%
+		),
+		radial-gradient(
+			ellipse 36% 63% at 96% 104%,
+			rgb(239 94 146 / 70%),
+			transparent 74%
+		);
+	opacity: 0.78;
+	animation: footer-aurora-fallback-drift 21s ease-in-out infinite alternate;
+}
+
+.fallback::after {
+	background:
+		radial-gradient(
+			ellipse 37% 54% at 22% 95%,
+			rgb(0 186 244 / 68%),
+			transparent 73%
+		),
+		radial-gradient(
+			ellipse 40% 58% at 58% 101%,
+			rgb(187 77 217 / 62%),
+			transparent 76%
+		),
+		radial-gradient(
+			ellipse 37% 57% at 84% 94%,
+			rgb(255 136 62 / 66%),
+			transparent 75%
+		);
+	opacity: 0.66;
+	animation: footer-aurora-fallback-wave 28s ease-in-out infinite alternate;
+}
+
+@keyframes footer-aurora-fallback-drift {
+	from {
+		transform: translate3d(-3%, 2%, 0) scale(1.02);
+	}
+	to {
+		transform: translate3d(3%, -1%, 0) scale(1.09);
+	}
+}
+
+@keyframes footer-aurora-fallback-wave {
+	from {
+		opacity: 0.36;
+		transform: translate3d(3%, 1%, 0) scale(1.06);
+	}
+	to {
+		opacity: 0.66;
+		transform: translate3d(-3%, -2%, 0) scale(1.12);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.fallback::before,
+	.fallback::after {
+		animation: none;
+	}
+}

@@ -1,0 +1,38 @@
+{
+  "status": 201,
+  "headers": {
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_7432f3e0c3f847db8f7c3272bbd03391"
+  },
+  "body": {
+    "event": {
+      "actions": [],
+      "attachment": null,
+      "body": "",
+      "data": {},
+      "externalId": null,
+      "fingerprint": null,
+      "icon": null,
+      "level": "success",
+      "occurredAt": "2026-10-01T00:00:00.000Z",
+      "priority": 3,
+      "project": null,
+      "recipient": null,
+      "source": "app",
+      "tags": [],
+      "title": "Deploy finished",
+      "topic": null,
+      "type": "notification",
+      "url": null,
+      "response": null,
+      "acknowledgedAt": null,
+      "archivedAt": null,
+      "createdAt": "2026-10-01T00:00:00.000Z",
+      "id": "evt_220eb04632bc4239be622f93ea63a8ec"
+    },
+    "idempotent": false,
+    "ok": true,
+    "requestId": "req_7432f3e0c3f847db8f7c3272bbd03391",
+    "type": "event.created"
+  }
+}

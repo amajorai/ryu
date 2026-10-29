@@ -1,4 +1,5 @@
 import path from "node:path";
+import { LOGIN_APPROVAL_EXPIRES_IN_SECONDS } from "@ryu/auth/lib/login-approval-contract";
 import { expect, type Route, test } from "@playwright/test";
 
 test("account replacement cancels pending snapshots and unmount closes the stream", async ({
@@ -45,9 +46,11 @@ test("account replacement cancels pending snapshots and unmount closes the strea
 			requests: [
 				{
 					clientId: "ryu-desktop",
-					createdAt: "2026-09-13T00:00:00.000Z",
+					createdAt: new Date(Date.now()).toISOString(),
 					deviceLabel: "Performance fixture device",
-					expiresAt: "2099-01-01T00:00:00.000Z",
+					expiresAt: new Date(
+						Date.now() + LOGIN_APPROVAL_EXPIRES_IN_SECONDS * 1000
+					).toISOString(),
 					id: "fixture-approval",
 					ipAddress: null,
 					status: "pending",

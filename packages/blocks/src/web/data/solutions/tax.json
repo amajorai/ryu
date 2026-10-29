@@ -1,37 +1,10 @@
 {
   "slug": "tax",
   "name": "Tax",
-  "navLabel": "Tax",
-  "category": "Finance & Risk",
   "icon": "Receipt",
   "tagline": "Organize source documents and prepare draft work papers for a qualified reviewer.",
-  "heroEyebrow": "Ryu for Tax",
   "heroTitle": "Ryu for tax",
-  "heroSubtitle": "Organize source documents and prepare draft work papers for a qualified reviewer.",
   "visualKey": "GatewayVisual",
-  "intro": "Tax work handles some of the most sensitive personal and business data there is, and it can't be pasted into a public chatbot that trains on what it sees. Ryu runs capable agents locally, redacts identifiers on egress when you route to the cloud, and records every call, so prep and research move faster while taxpayer data stays protected.",
-  "highlights": [
-    {
-      "title": "Taxpayer data stays private",
-      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Grounded in your references",
-      "description": "Ground agents on your internal guidance and a client's prior returns with Spaces and RAG, so answers cite the source.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Auditable by default",
-      "description": "Every model and tool call is logged in the Gateway audit trail, so each position has a record of what the agent considered.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Connects to your tools",
-      "description": "Agents authenticate into spreadsheets, document stores, and email to gather source documents and draft summaries for review.",
-      "icon": "Plug"
-    }
-  ],
   "useCases": [
     {
       "title": "Source document organization",
@@ -58,28 +31,18 @@
       "description": "Compare this year's figures to prior returns, explain the largest changes, and flag items worth a closer look."
     }
   ],
-  "examplePrompts": [
-    "Sort these uploaded documents into a tax-prep checklist and tell me what is still missing.",
-    "Extract the income figures from these 1099s into a work paper and reconcile against last year's return.",
-    "Research whether this expense qualifies as deductible, quoting the relevant guidance in our library.",
-    "Review this client's records for deductions or credits they may have missed, with the entries behind each.",
-    "Compare this year's figures to the prior return and explain the largest changes."
-  ],
   "faq": [
     {
       "q": "Is taxpayer data safe with Ryu?",
-      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the call, so taxpayer information stays governed end to end."
+      "a": "Yes. With a local model, taxpayer information stays on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Can it research tax positions reliably?",
-      "a": "Ground agents on your internal guidance and reference library with Spaces and RAG so answers cite the source. Treat the result as research for a qualified preparer to confirm against current rules before relying on it."
+      "a": "Add your internal guidance and reference library to a Space so answers cite the source. Treat the result as research for a qualified preparer to confirm against current rules."
     },
     {
       "q": "Does it file returns for me?",
-      "a": "No. Ryu organizes records, drafts work papers, and researches positions for a qualified tax professional to review and file. The audit trail records what the agent considered, so the review is fast and defensible."
+      "a": "No. Ryu organizes records, drafts work papers, and researches positions for a qualified tax professional to review and file. The audit trail records which model ran and when."
     }
-  ],
-  "ctaTitle": "Give your practice an AI tax preparer.",
-  "ctaSubtitle": "Organize, research, and prep faster, with taxpayer data kept private and every call on the record.",
-  "ctaNote": "Local-first · PII/DLP redaction · Full audit trail"
+  ]
 }

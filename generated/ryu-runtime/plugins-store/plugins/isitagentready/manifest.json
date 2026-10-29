@@ -1,0 +1,62 @@
+{
+  "tags": ["agent-readiness", "web", "audit"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/isitagentready",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/isitagentready",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/isitagentready",
+  "name": "Is It Agent Ready?",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Scan a public website with Is Your Site Agent-Ready? (https://isitagentready.com): a live check of robots.txt and AI bot rules, sitemaps, Link headers, Markdown negotiation, MCP and A2A cards, Agent Skills, WebMCP, OAuth discovery and agent commerce protocols, scored as a readiness level from 0 (Not Ready) to 5 (Agent-Native). Keyless.",
+  "icon": "ai-scan",
+  "iconDither": { "from": 25, "to": "transparent", "direction": "down" },
+  "tagline": "Live agent-readiness scans from isitagentready.com",
+  "keywords": ["agent readiness", "agentic web", "audit", "robots.txt", "MCP"],
+  "category": "Developer Tools",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-isitagentready-scan",
+      "name": "Agent-Ready Scan",
+      "kind": "tool",
+      "config": {
+        "slug": "isitagentready.scan",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://isitagentready.com/api/scan",
+        "fail_open": true,
+        "unwrap_body": true,
+        "body_defaults": { "format": "agent" },
+        "description": "Run a fresh agent-readiness scan of one public website (about 5-10 seconds). By default (`format: agent`) it returns a compact Markdown report: the readiness level (0-5) and every failing check with its fix and an implementation-guide link. Pass `format: json` for the full per-check result (`level`, `level_name`, `checks` grouped by category with pass / fail / neutral / unableToCheck status and evidence, and `next_level` requirements).",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Public HTTP or HTTPS URL to scan, e.g. https://example.com."
+            },
+            "format": {
+              "type": "string",
+              "description": "`agent` (default) for a compact Markdown fix list, `json` for every check with evidence.",
+              "enum": ["agent", "json"]
+            }
+          },
+          "required": ["url"]
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:isitagentready.com"]
+}

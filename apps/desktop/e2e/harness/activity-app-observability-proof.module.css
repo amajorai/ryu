@@ -1,0 +1,21 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer utilities {
+	.status {
+		color: var(--color-emerald-700);
+		background-color: color-mix(
+			in oklab,
+			var(--color-emerald-500) 10%,
+			transparent
+		);
+		border-color: color-mix(
+			in oklab,
+			var(--color-emerald-500) 30%,
+			transparent
+		);
+	}
+	[class~="dark"] .status {
+		color: var(--color-emerald-300);
+	}
+}

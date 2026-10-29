@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/novnc.d.ts",
+    "src/components/layout/TabViewPane.tsx",
+    "src/components/layout/TabViewPane.remount.test.tsx",
+    "src/pages/ChatPage.tsx",
+    "e2e/chat-page-native-http.host.ts",
+    "e2e/chat-page-native-http-live-chat.ts",
+    "e2e/chat-page-native-http-live-chat.test.ts",
+    "e2e/chat-page-native-http-queue-isolation.spec.ts",
+    "../../packages/blocks/src/desktop/agent-elements/input-bar.tsx",
+    "../../packages/blocks/src/desktop/agent-elements/input-bar-reveal.test.tsx"
+  ]
+}

@@ -23,57 +23,106 @@
 import {
 	AGENT_BANNER_BASE,
 	AgentBannerDialog,
+	type AgentBannerPreferenceStore,
 	AgentBannerWash,
+	AgentProfileBannerFade,
 	resolveAgentBanner,
 	useAgentBannerPrefs,
-} from "@ryu/blocks/desktop/agent-banner-dialog";
+} from "@ryu/blocks/desktop/agent-banner-dialog.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
-} from "@ryu/blocks/desktop/settings-items";
-import { Button } from "@ryu/ui/components/button";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { useState } from "react";
+} from "@ryu/blocks/desktop/settings-items.tsx";
+import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
+import {
+	getBundledMarketplaceBackdrops,
+	resolveMarketplaceWallpaperSelection,
+} from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { type CSSProperties, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { installWallpaper } from "../../src/lib/wallpaper-library.ts";
 import "../../src/index.css";
 
 /** One agent, so the story is deterministic across runs. */
+const bannerBaseStyle: CSSProperties & { "--proof-banner-base": string } = {
+	"--proof-banner-base": AGENT_BANNER_BASE,
+};
+
 const AGENT = "Banner Story Agent";
+const AGENT_ID = "banner-story-agent";
+const NODE_PREF_KEY = `proof:node:agent-banner:${AGENT_ID}`;
+const MARKETPLACE_WALLPAPERS = getBundledMarketplaceBackdrops();
+
+const nodePreferenceStore: AgentBannerPreferenceStore = {
+	get: async () => localStorage.getItem(NODE_PREF_KEY),
+	set: async (_agentId, value) => {
+		localStorage.setItem(NODE_PREF_KEY, value);
+	},
+};
 
 try {
 	localStorage.removeItem(`ryu:agent-banner:${AGENT}`);
+	localStorage.removeItem(NODE_PREF_KEY);
 } catch {
 	// Storage unavailable: the hook already falls back to the derived default.
 }
 
 function BannerPane() {
-	const { prefs, reset, update } = useAgentBannerPrefs(AGENT);
+	const { error, loading, prefs, reset, update } = useAgentBannerPrefs(
+		AGENT_ID,
+		nodePreferenceStore,
+		AGENT
+	);
 	const banner = resolveAgentBanner(AGENT, prefs);
+	const wallpaper = resolveMarketplaceWallpaperSelection(prefs.wallpaper);
 	return (
 		<section className="flex flex-col gap-2">
 			<h2 className="font-medium text-sm">Banner</h2>
 			{/* The agent editor's own header shape: the dark slab with the wash over
 			    it and the customise trigger parked on top. */}
-			<div
-				className="relative h-32 overflow-hidden rounded-xl"
-				data-testid="banner-header"
-				style={{ background: AGENT_BANNER_BASE }}
-			>
-				<AgentBannerWash banner={banner} />
-				<div className="absolute top-3 left-3 z-10">
-					<AgentBannerDialog
-						agent={AGENT}
-						onReset={reset}
-						onUpdate={update}
-						prefs={prefs}
-					/>
+			<div className="overflow-hidden rounded-lg bg-card">
+				<div
+					className="bg-(image:--proof-banner-base) relative min-h-48 overflow-hidden"
+					data-testid="banner-header"
+					style={bannerBaseStyle}
+				>
+					{wallpaper ? (
+						<Backdrop
+							className="absolute inset-0"
+							definition={wallpaper}
+							live={false}
+							params={wallpaper.initialParams}
+						/>
+					) : (
+						<AgentBannerWash banner={banner} />
+					)}
+					<AgentProfileBannerFade />
+					<div className="absolute top-3 left-3 z-10">
+						<AgentBannerDialog
+							agent={AGENT_ID}
+							loading={loading}
+							marketplaceWallpapers={MARKETPLACE_WALLPAPERS}
+							onInstallWallpaper={(wallpaper) => installWallpaper(wallpaper.id)}
+							onReset={reset}
+							onUpdate={update}
+							prefs={prefs}
+							storageError={error}
+						/>
+					</div>
+				</div>
+				<div className="bg-card p-4" data-testid="banner-body">
+					<p className="font-medium">{AGENT}</p>
+					<p className="text-muted-foreground text-xs">Profile details</p>
 				</div>
 			</div>
 			<p className="text-muted-foreground text-xs" data-testid="banner-state">
-				{banner.preset.id}/{String(banner.color)}/{banner.direction}
+				{banner.preset.id}/{String(banner.color)}/{banner.direction}/wallpaper=
+				{wallpaper?.id ?? "style"}
 			</p>
 		</section>
 	);
@@ -163,8 +212,11 @@ function SettingsPane() {
 }
 
 function Story() {
+	const theme = new URLSearchParams(window.location.search).get("theme");
 	return (
-		<div className="dark min-h-screen bg-background p-8 text-foreground">
+		<div
+			className={`${theme === "light" ? "" : "dark"} min-h-screen bg-background p-8 text-foreground`}
+		>
 			<div className="mx-auto grid max-w-4xl gap-10 md:grid-cols-2">
 				<BannerPane />
 				<SettingsPane />

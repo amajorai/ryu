@@ -34,4 +34,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "office-workspace-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

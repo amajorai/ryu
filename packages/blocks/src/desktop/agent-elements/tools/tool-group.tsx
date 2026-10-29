@@ -1,8 +1,8 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AgentActivity,
 	type AgentActivityTrace,
 } from "@ryu/ui/components/agents/agent-activity";
-import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { memo, useMemo } from "react";
 import {
 	isCommandToolType,
@@ -49,6 +49,7 @@ export const ToolGroup = memo(function ToolGroup({
 	parts,
 	chatStatus,
 }: ToolGroupProps) {
+	const tl = useLiteralMessages();
 	const items = useMemo(
 		() => parts.map((part, index) => toTraceItem(part, index)),
 		[parts]
@@ -68,7 +69,9 @@ export const ToolGroup = memo(function ToolGroup({
 			contentType="trace"
 			items={items}
 			status={isWorking ? "working" : "complete"}
-			summary={`Ran ${formatNumber(count)} ${count === 1 ? "tool" : "tools"}`}
+			summary={tl("Ran {count, plural, one {# tool} other {# tools}}", {
+				count,
+			})}
 		/>
 	);
 });

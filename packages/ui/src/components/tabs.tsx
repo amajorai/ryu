@@ -1,4 +1,12 @@
 "use client";
+import { z } from "zod";
+import { observeNativeOptionalProperty } from "../lib/native-optional-property.mjs";
+import {
+	isNativeBoolean,
+	isNativeFunction,
+	isNativeNumber,
+	isNativeText,
+} from "../lib/native-primitive-observation.ts";
 
 import "../styles/tabs.css";
 
@@ -13,7 +21,7 @@ import {
 	ViewOffSlashIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useLocalizedText } from "@ryu/i18n/react";
+import { useLocalizedText, useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Command,
@@ -41,20 +49,18 @@ import {
 	useHorizontalOverflowState,
 } from "@ryu/ui/components/edge-scroller.tsx";
 import {
-	Popover,
-	PopoverAnchor,
-	PopoverContent,
-	PopoverTrigger,
-} from "@ryu/ui/components/popover.tsx";
+	type ReorderShift,
+	useReorderShift,
+} from "@ryu/ui/hooks/use-reorder-shift.tsx";
 import { useComposedRefs } from "@ryu/ui/lib/compose-refs.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
 import {
 	Children,
+	type CSSProperties,
 	cloneElement,
 	createContext,
 	type DragEvent,
-	type DragEventHandler,
 	forwardRef,
 	isValidElement,
 	type ReactElement,
@@ -70,7 +76,18 @@ import {
 } from "react";
 
 const useSafeLayoutEffect =
-	typeof window === "undefined" ? useEffect : useLayoutEffect;
+	globalThis.window === undefined ? useEffect : useLayoutEffect;
+
+interface TabsDropStyle extends CSSProperties {
+	"--drop-height"?: string | undefined;
+	"--drop-left"?: string | undefined;
+	"--drop-top"?: string | undefined;
+	"--drop-width"?: string | undefined;
+}
+interface TabsScrollStyle extends CSSProperties {
+	"--tabs-mask-image"?: CSSProperties["maskImage"];
+	"--tabs-webkit-mask-image"?: CSSProperties["WebkitMaskImage"];
+}
 
 type TabsValue = TabsPrimitive.Tab.Props["value"];
 type TabsChangeDetails = TabsPrimitive.Root.ChangeEventDetails;
@@ -116,14 +133,10 @@ function createProgrammaticChangeDetails(): TabsChangeDetails {
 
 function findFirstEnabledTabValue(children: ReactNode): TabsValue | undefined {
 	for (const child of Children.toArray(children)) {
-		if (!isValidElement(child)) {
+		if (!isValidElement<TabsPrimitive.Tab.Props>(child)) {
 			continue;
 		}
-		const props = child.props as {
-			children?: ReactNode;
-			disabled?: boolean;
-			value?: TabsValue;
-		};
+		const props = child.props;
 		if ("value" in props && props.value !== undefined && !props.disabled) {
 			return props.value;
 		}
@@ -135,15 +148,22 @@ function findFirstEnabledTabValue(children: ReactNode): TabsValue | undefined {
 	return undefined;
 }
 
+type TabsProps = TabsPrimitive.Root.Props & {
+	spacing?: "flush" | "comfortable" | "relaxed" | "generous";
+	inset?: "agent-activity" | "store-sections" | "library-sections";
+};
+
 function Tabs({
 	className,
+	spacing,
+	inset,
 	orientation = "horizontal",
 	value,
 	defaultValue,
 	onValueChange,
 	children,
 	...props
-}: TabsPrimitive.Root.Props) {
+}: TabsProps) {
 	const initialValue =
 		defaultValue === undefined
 			? findFirstEnabledTabValue(children)
@@ -183,7 +203,14 @@ function Tabs({
 		<TabsContext.Provider value={contextValue}>
 			<TabsPrimitive.Root
 				className={cn(
-					"group/tabs flex gap-2 data-horizontal:flex-col",
+					"group/tabs flex gap-2 has-[[data-slot=tabs-list-sticky]]:flex-col-reverse data-horizontal:flex-col md:has-[[data-slot=tabs-list-sticky]]:flex-col",
+					spacing === "flush" && "gap-0",
+					spacing === "comfortable" && "gap-4",
+					spacing === "relaxed" && "gap-3",
+					spacing === "generous" && "gap-8",
+					inset === "agent-activity" && "p-3",
+					inset === "store-sections" && "pt-2 pb-1",
+					inset === "library-sections" && "pt-2",
 					className
 				)}
 				data-orientation={orientation}
@@ -203,7 +230,7 @@ function Tabs({
 const tabsListVariants = cva(
 	// `relative` on every variant (not just segmented) so an optional sliding
 	// TabsIndicator can anchor its absolute box against any list.
-	"group/tabs-list relative inline-flex w-fit items-center justify-center rounded-full p-1 text-muted-foreground data-[variant=line]:rounded-none group-data-horizontal/tabs:h-9 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col group-data-vertical/tabs:rounded-2xl",
+	"group/tabs-list group-data-vertical/tabs:corner-squircle relative inline-flex w-fit items-center justify-center rounded-full p-1 text-muted-foreground data-[variant=line]:rounded-none group-data-horizontal/tabs:h-9 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col group-data-vertical/tabs:rounded-2xl",
 	{
 		variants: {
 			variant: {
@@ -236,6 +263,10 @@ const tabsListVariants = cva(
 					"flex-wrap gap-1 rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-fit",
 				segmented: "relative gap-1 bg-muted",
 			},
+			layout: {
+				"catalog-sections": "h-auto max-h-40 flex-wrap gap-1",
+				"listing-detail": "h-auto flex-wrap gap-1",
+			},
 		},
 		defaultVariants: {
 			variant: "default",
@@ -250,12 +281,30 @@ interface TabsListProps
 	manageLayout?: boolean;
 	/** Disable layout persistence while keeping responsive overflow controls. */
 	persistLayout?: boolean;
+	/** Keep horizontal tabs visible while their content scrolls. */
+	sticky?: boolean;
+	/** Space for a fixed header above sticky tabs on desktop. Defaults to zero. */
+	stickyOffset?: CSSProperties["top"];
 	/** Stable storage namespace. Use this when a page has more than one tab list. */
 	storageKey?: string;
 }
 
+type StickyTabsListStyle = CSSProperties & {
+	"--tabs-sticky-offset": NonNullable<CSSProperties["top"]>;
+};
+
+// Internal clone attributes are exact authored data-* slots; the complete native
+// Tab props and BaseUI event handlers remain the installed SDK owner.
+interface ManagedTabAttributes {
+	"data-tabs-dragging"?: string | undefined;
+	"data-tabs-drop-target"?: string | undefined;
+	"data-tabs-managed-key"?: string | undefined;
+	"data-tabs-managed-trigger"?: string | undefined;
+	"data-tabs-promoted"?: string | undefined;
+}
+
 interface TabItem {
-	element: ReactElement<TabsPrimitive.Tab.Props>;
+	element: ReactElement<TabsPrimitive.Tab.Props & ManagedTabAttributes>;
 	key: string;
 	label: string;
 	value: TabsValue;
@@ -268,11 +317,14 @@ function tabValueKey(value: TabsValue) {
 	if (value === null) {
 		return "null";
 	}
-	if (typeof value === "string") {
+	if (isNativeText(value)) {
 		return `string:${value}`;
 	}
-	if (typeof value === "number" || typeof value === "boolean") {
-		return `${typeof value}:${String(value)}`;
+	if (isNativeNumber(value)) {
+		return `number:${String(value)}`;
+	}
+	if (isNativeBoolean(value)) {
+		return `boolean:${String(value)}`;
 	}
 	try {
 		return `json:${JSON.stringify(value)}`;
@@ -282,34 +334,29 @@ function tabValueKey(value: TabsValue) {
 }
 
 function textFromNode(node: ReactNode): string {
-	if (typeof node === "string" || typeof node === "number") {
+	if (isNativeText(node) || isNativeNumber(node)) {
 		return String(node);
 	}
 	if (Array.isArray(node)) {
 		return node.map(textFromNode).join(" ");
 	}
-	if (isValidElement(node)) {
-		return textFromNode((node.props as { children?: ReactNode }).children);
+	if (isValidElement<{ children?: ReactNode }>(node)) {
+		return textFromNode(node.props.children);
 	}
 	return "";
 }
 
-function getTabItems(children: ReactNode): {
-	items: TabItem[];
-	staticChildren: ReactNode[];
-} {
+function getTabItems(children: ReactNode) {
 	const items: TabItem[] = [];
 	const staticChildren: ReactNode[] = [];
 	const seenKeys = new Set<string>();
 
 	for (const child of Children.toArray(children)) {
-		if (!isValidElement(child)) {
+		if (!isValidElement<TabsPrimitive.Tab.Props>(child)) {
 			staticChildren.push(child);
 			continue;
 		}
-		const props = child.props as TabsPrimitive.Tab.Props & {
-			[attribute: string]: unknown;
-		};
+		const props = child.props;
 		if (!("value" in props) || props.value === undefined) {
 			staticChildren.push(child);
 			continue;
@@ -318,12 +365,12 @@ function getTabItems(children: ReactNode): {
 		const key = seenKeys.has(baseKey) ? `${baseKey}:${items.length}` : baseKey;
 		seenKeys.add(baseKey);
 		const label =
-			(typeof props["aria-label"] === "string" && props["aria-label"]) ||
-			(typeof props.title === "string" && props.title) ||
+			(isNativeText(props["aria-label"]) && props["aria-label"]) ||
+			(isNativeText(props.title) && props.title) ||
 			textFromNode(props.children).replace(/\s+/g, " ").trim() ||
 			String(props.value);
 		items.push({
-			element: child as ReactElement<TabsPrimitive.Tab.Props>,
+			element: child,
 			key,
 			label,
 			value: props.value,
@@ -366,10 +413,19 @@ function reorderKeys(
 	];
 }
 
-interface PersistedTabsLayout {
-	hidden?: unknown;
-	order?: unknown;
-}
+const persistedTabsLayoutSchema = z.preprocess((data) => {
+	if (data === null || data === undefined) {
+		return null;
+	}
+	const hidden = observeNativeOptionalProperty(data, "hidden");
+	const order = observeNativeOptionalProperty(data, "order");
+	return {
+		hidden: Array.isArray(hidden) ? hidden.filter(isNativeText) : [],
+		order: Array.isArray(order) ? order.filter(isNativeText) : [],
+	};
+}, z
+	.object({ hidden: z.array(z.string()), order: z.array(z.string()) })
+	.nullable());
 
 function readPersistedLayout(storageKey: string) {
 	try {
@@ -377,15 +433,7 @@ function readPersistedLayout(storageKey: string) {
 		if (!raw) {
 			return null;
 		}
-		const parsed = JSON.parse(raw) as PersistedTabsLayout;
-		return {
-			hidden: Array.isArray(parsed.hidden)
-				? parsed.hidden.filter((key): key is string => typeof key === "string")
-				: [],
-			order: Array.isArray(parsed.order)
-				? parsed.order.filter((key): key is string => typeof key === "string")
-				: [],
-		};
+		return persistedTabsLayoutSchema.parse(JSON.parse(raw));
 	} catch {
 		return null;
 	}
@@ -411,17 +459,50 @@ function getDefaultStorageKey(
 	variant: string | undefined
 ) {
 	const locationKey =
-		typeof window === "undefined" ? "server" : window.location.pathname;
+		globalThis.window === undefined ? "server" : window.location.pathname;
 	return `${TABS_STORAGE_PREFIX}:${locationKey}:${id ?? variant ?? "default"}`;
+}
+
+/**
+ * Drop target for a drag over `hoveredKey`. When the dragged tab belongs to
+ * this list its neighbours have slid aside, so the target is the resting slot
+ * under the pointer (landing before it when moving back, after it when moving
+ * forward); otherwise it is the hovered tab's nearer half.
+ */
+function resolveTabsDrop(
+	drag: TabsDragController,
+	shift: ReorderShift,
+	order: string[],
+	hoveredKey: string,
+	event: DragEvent<HTMLElement>,
+	axis: "x" | "y"
+): { before: boolean; key: string } {
+	const source = drag.draggingKey;
+	if (source && shift.tracks(source)) {
+		const key = shift.resolveOver(hoveredKey, event.clientX, event.clientY);
+		return { before: order.indexOf(key) < order.indexOf(source), key };
+	}
+	const rect = event.currentTarget.getBoundingClientRect();
+	return {
+		before:
+			axis === "x"
+				? event.clientX < rect.left + rect.width / 2
+				: event.clientY < rect.top + rect.height / 2,
+		key: hoveredKey,
+	};
 }
 
 interface TabsDragController {
 	draggingKey: string | null;
 	dropTarget: { before: boolean; key: string } | null;
+	/** Slides the layout menu's rows apart to preview the drop. */
+	menuShift: ReorderShift;
 	onDragEnd: () => void;
 	onDragOver: (key: string, before: boolean, element?: HTMLElement) => void;
 	onDragStart: (key: string, event: DragEvent<HTMLElement>) => void;
 	onDrop: (key: string, before: boolean, sourceKey?: string) => void;
+	/** Slides the tab triggers apart to preview the drop. */
+	shift: ReorderShift;
 }
 
 interface TabsLayoutMenuContentProps {
@@ -481,7 +562,9 @@ function TabsLayoutMenuContent({
 						}
 						const isHidden = hiddenKeys.has(key);
 						const isActive = activeKey === key;
-						const isDragOver = drag.dropTarget?.key === key;
+						// Rows slide apart to preview the drop; the line is a fallback.
+						const isDragOver =
+							drag.dropTarget?.key === key && !drag.menuShift.previewing;
 						const dropBelow = isDragOver && !drag.dropTarget?.before;
 						return (
 							<CommandItem
@@ -497,19 +580,30 @@ function TabsLayoutMenuContent({
 									event.preventDefault();
 									event.stopPropagation();
 									event.dataTransfer.dropEffect = "move";
-									const rect = event.currentTarget.getBoundingClientRect();
-									drag.onDragOver(
+									const target = resolveTabsDrop(
+										drag,
+										drag.menuShift,
+										order,
 										key,
-										event.clientY < rect.top + rect.height / 2
+										event,
+										"y"
 									);
+									drag.onDragOver(target.key, target.before);
 								}}
 								onDrop={(event) => {
 									event.preventDefault();
 									event.stopPropagation();
-									const rect = event.currentTarget.getBoundingClientRect();
-									drag.onDrop(
+									const target = resolveTabsDrop(
+										drag,
+										drag.menuShift,
+										order,
 										key,
-										event.clientY < rect.top + rect.height / 2,
+										event,
+										"y"
+									);
+									drag.onDrop(
+										target.key,
+										target.before,
 										event.dataTransfer.getData(TABS_DRAG_MIME) || undefined
 									);
 								}}
@@ -517,6 +611,8 @@ function TabsLayoutMenuContent({
 									onSelect(item.value);
 									onClose();
 								}}
+								ref={drag.menuShift.register(key)}
+								style={drag.menuShift.styleFor(key)}
 								value={`${item.label} ${key}`}
 							>
 								{isDragOver && (
@@ -530,7 +626,7 @@ function TabsLayoutMenuContent({
 								)}
 								<button
 									aria-label={`Reorder ${item.label}`}
-									className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground active:cursor-grabbing"
+									className="corner-squircle flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground active:cursor-grabbing"
 									draggable
 									onClick={(event) => event.stopPropagation()}
 									onDragEnd={drag.onDragEnd}
@@ -562,7 +658,7 @@ function TabsLayoutMenuContent({
 								<DropdownMenu>
 									<DropdownMenuTrigger
 										aria-label={`More actions for ${item.label}`}
-										className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+										className="corner-squircle flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
 										onClick={(event) => event.stopPropagation()}
 										onPointerDown={(event) => event.stopPropagation()}
 										type="button"
@@ -621,6 +717,37 @@ function TabsLayoutMenuContent({
 	);
 }
 
+/**
+ * The overflow trigger's copy ("29 more" / "Show 29 more tabs") in the host
+ * language. Falls back to English when no I18nProvider is mounted.
+ */
+function useMoreTabsCopy(moreCount: number): {
+	label: string;
+	triggerText: string;
+} {
+	const i18n = useOptionalI18n();
+	const translate = (id: string, english: string, count?: number) => {
+		const values = count === undefined ? {} : { count };
+		return i18n
+			? i18n.t(id, values, english)
+			: english.replace("{count}", String(count ?? ""));
+	};
+	if (moreCount > 0) {
+		return {
+			label: translate(
+				"common.show-more-tabs-count",
+				"Show {count} more tabs",
+				moreCount
+			),
+			triggerText: translate("common.more-count", "{count} more", moreCount),
+		};
+	}
+	return {
+		label: translate("common.show-more-tabs", "Show more tabs"),
+		triggerText: translate("common.more", "More"),
+	};
+}
+
 interface TabsMenuProps {
 	activeKey: string | null;
 	drag: TabsDragController;
@@ -650,13 +777,12 @@ function TabsMoreMenu({
 	setOpen,
 	showTrigger,
 }: TabsMenuProps) {
+	const { label, triggerText } = useMoreTabsCopy(moreCount);
 	return (
 		<DropdownMenu onOpenChange={(nextOpen) => setOpen(nextOpen)} open={open}>
 			<DropdownMenuTrigger
 				aria-hidden={!showTrigger}
-				aria-label={
-					moreCount > 0 ? `Show ${moreCount} more tabs` : "Show more tabs"
-				}
+				aria-label={label}
 				className={cn(
 					tabsTriggerClassName,
 					"flex-initial shrink-0 text-muted-foreground!",
@@ -666,11 +792,12 @@ function TabsMoreMenu({
 				data-tabs-more-visible={showTrigger ? "true" : "false"}
 				tabIndex={showTrigger ? undefined : -1}
 			>
-				<span className="max-w-24 truncate">
-					{moreCount > 0 ? `${moreCount} more` : "More"}
-				</span>
+				<span className="max-w-24 truncate">{triggerText}</span>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-80 rounded-xl p-0">
+			<DropdownMenuContent
+				align="end"
+				className="corner-squircle w-80 rounded-xl p-0"
+			>
 				<TabsLayoutMenuContent
 					activeKey={activeKey}
 					drag={drag}
@@ -711,72 +838,97 @@ function ManagedTabTrigger({
 }: ManagedTabTriggerProps) {
 	const [open, setOpen] = useState(false);
 	const isDragging = drag.draggingKey === item.key;
-	const isDragOver = drag.dropTarget?.key === item.key;
+	// Triggers slide apart to preview the drop; the ring is only a fallback.
+	const isDragOver =
+		drag.dropTarget?.key === item.key && !drag.shift.previewing;
 	const originalProps = item.element.props;
-	const originalOnDragStart = originalProps.onDragStart as
-		| DragEventHandler<HTMLElement>
-		| undefined;
-	const originalOnDragEnd = originalProps.onDragEnd as
-		| DragEventHandler<HTMLElement>
-		| undefined;
-	const originalOnDragOver = originalProps.onDragOver as
-		| DragEventHandler<HTMLElement>
-		| undefined;
-	const originalOnDrop = originalProps.onDrop as
-		| DragEventHandler<HTMLElement>
-		| undefined;
-
-	const managedTrigger = cloneElement(
-		item.element as unknown as ReactElement<Record<string, unknown>>,
-		{
-			className: cn(
-				originalProps.className,
-				"cursor-grab active:cursor-grabbing",
-				isDragging && "opacity-40",
-				isDragOver && "data-[tabs-drop-target=true]:ring-2"
-			),
-			"data-tabs-dragging": isDragging ? "true" : undefined,
-			"data-tabs-drop-target": isDragOver ? "true" : undefined,
-			"data-tabs-managed-key": item.key,
-			"data-tabs-managed-trigger": "true",
-			"data-tabs-promoted": isPromoted ? "true" : undefined,
-			draggable: true,
-			onDragEnd: (event: DragEvent<HTMLElement>) => {
-				originalOnDragEnd?.(event);
-				drag.onDragEnd();
-			},
-			onDragOver: (event: DragEvent<HTMLElement>) => {
-				originalOnDragOver?.(event);
-				event.preventDefault();
-				event.stopPropagation();
-				event.dataTransfer.dropEffect = "move";
-				const rect = event.currentTarget.getBoundingClientRect();
-				drag.onDragOver(
-					item.key,
-					event.clientX < rect.left + rect.width / 2,
-					event.currentTarget
-				);
-			},
-			onDragStart: (event: DragEvent<HTMLElement>) => {
-				originalOnDragStart?.(event);
-				if (event.defaultPrevented) {
-					return;
-				}
-				drag.onDragStart(item.key, event);
-			},
-			onDrop: (event: DragEvent<HTMLElement>) => {
-				originalOnDrop?.(event);
-				event.preventDefault();
-				event.stopPropagation();
-				const rect = event.currentTarget.getBoundingClientRect();
-				drag.onDrop(
-					item.key,
-					event.clientX < rect.left + rect.width / 2,
-					event.dataTransfer.getData(TABS_DRAG_MIME) || undefined
-				);
-			},
-		} as Record<string, unknown>
+	const shiftRef = useComposedRefs(
+		originalProps.ref,
+		drag.shift.register(item.key)
 	);
+	const shiftStyle = drag.shift.styleFor(item.key);
+	const originalStyle = originalProps.style;
+	const originalOnDragStart = originalProps.onDragStart;
+	const originalOnDragEnd = originalProps.onDragEnd;
+	const originalOnDragOver = originalProps.onDragOver;
+	const originalOnDrop = originalProps.onDrop;
+
+	const managedTrigger = cloneElement(item.element, {
+		className: cn(
+			originalProps.className,
+			"cursor-grab active:cursor-grabbing",
+			isDragging && "opacity-40",
+			isDragOver && "data-[tabs-drop-target=true]:ring-2"
+		),
+		"data-tabs-dragging": isDragging ? "true" : undefined,
+		"data-tabs-drop-target": isDragOver ? "true" : undefined,
+		"data-tabs-managed-key": item.key,
+		"data-tabs-managed-trigger": "true",
+		"data-tabs-promoted": isPromoted ? "true" : undefined,
+		draggable: true,
+		ref: shiftRef,
+		style:
+			shiftStyle === undefined
+				? originalStyle
+				: typeof originalStyle === "function"
+					? (state: Parameters<typeof originalStyle>[0]) => ({
+							...originalStyle(state),
+							...shiftStyle,
+						})
+					: { ...originalStyle, ...shiftStyle },
+		onDragEnd: (
+			event: Parameters<NonNullable<TabsPrimitive.Tab.Props["onDragEnd"]>>[0]
+		) => {
+			originalOnDragEnd?.(event);
+			drag.onDragEnd();
+		},
+		onDragOver: (
+			event: Parameters<NonNullable<TabsPrimitive.Tab.Props["onDragOver"]>>[0]
+		) => {
+			originalOnDragOver?.(event);
+			event.preventDefault();
+			event.stopPropagation();
+			event.dataTransfer.dropEffect = "move";
+			const target = resolveTabsDrop(
+				drag,
+				drag.shift,
+				order,
+				item.key,
+				event,
+				"x"
+			);
+			drag.onDragOver(target.key, target.before, event.currentTarget);
+		},
+		onDragStart: (
+			event: Parameters<NonNullable<TabsPrimitive.Tab.Props["onDragStart"]>>[0]
+		) => {
+			originalOnDragStart?.(event);
+			if (event.defaultPrevented) {
+				return;
+			}
+			drag.onDragStart(item.key, event);
+		},
+		onDrop: (
+			event: Parameters<NonNullable<TabsPrimitive.Tab.Props["onDrop"]>>[0]
+		) => {
+			originalOnDrop?.(event);
+			event.preventDefault();
+			event.stopPropagation();
+			const target = resolveTabsDrop(
+				drag,
+				drag.shift,
+				order,
+				item.key,
+				event,
+				"x"
+			);
+			drag.onDrop(
+				target.key,
+				target.before,
+				event.dataTransfer.getData(TABS_DRAG_MIME) || undefined
+			);
+		},
+	});
 
 	return (
 		<ContextMenu onOpenChange={(nextOpen) => setOpen(nextOpen)} open={open}>
@@ -811,6 +963,32 @@ interface VisibleTabsLayoutOptions {
 interface VisibleTabsResolution {
 	keys: string[];
 	promotedKey: string | null;
+}
+
+/**
+ * Layout snaps each box to sub-pixel units, so a row that is exactly as wide
+ * as its tabs can measure a fraction of a pixel narrower than their sum.
+ */
+const TAB_FIT_SUBPIXEL_TOLERANCE_PX = 0.5;
+
+/**
+ * Size an element along the row axis in layout pixels, before CSS transforms.
+ * A bounding rect is scaled by any ancestor transform (a dialog's zoom-in), and
+ * the first fit often runs mid-animation, while gap and padding come from
+ * computed style unscaled; mixing the two misfits rows that fill their width
+ * exactly. A laid-out border-box element's computed size is its fractional
+ * untransformed border box, so prefer it and fall back to the rect elsewhere.
+ */
+function measureTabLayoutSize(element: HTMLElement, isVertical: boolean) {
+	const style = getComputedStyle(element);
+	if (style.boxSizing === "border-box") {
+		const size = Number.parseFloat(isVertical ? style.height : style.width);
+		if (Number.isFinite(size) && size > 0) {
+			return size;
+		}
+	}
+	const rect = element.getBoundingClientRect();
+	return isVertical ? rect.height : rect.width;
 }
 
 function resolveVisibleTabKeys(
@@ -856,15 +1034,28 @@ function resolveVisibleTabKeys(
 		? parsedPaddingStart
 		: 0;
 	const paddingEnd = Number.isFinite(parsedPaddingEnd) ? parsedPaddingEnd : 0;
+	// Measure the list with the same fractional, untransformed box the trigger
+	// widths come from. `clientWidth` rounds to an integer, so a content-sized
+	// (`w-fit`) row whose tabs fit exactly could read up to half a pixel short
+	// and push its last tab into the More menu, where it never renders to widen
+	// the row back.
+	const parsedBorderStart = Number.parseFloat(
+		isVertical ? computedStyle.borderTopWidth : computedStyle.borderLeftWidth
+	);
+	const parsedBorderEnd = Number.parseFloat(
+		isVertical
+			? computedStyle.borderBottomWidth
+			: computedStyle.borderRightWidth
+	);
 	const available =
-		(isVertical ? list.clientHeight : list.clientWidth) -
+		measureTabLayoutSize(list, isVertical) -
+		(Number.isFinite(parsedBorderStart) ? parsedBorderStart : 0) -
+		(Number.isFinite(parsedBorderEnd) ? parsedBorderEnd : 0) -
 		paddingStart -
 		paddingEnd;
 	const moreSize =
 		reserveMore && moreTrigger
-			? isVertical
-				? moreTrigger.getBoundingClientRect().height
-				: moreTrigger.getBoundingClientRect().width
+			? measureTabLayoutSize(moreTrigger, isVertical)
 			: 0;
 	const moreSpace = reserveMore
 		? moreSize + (candidates.length > 0 ? gap : 0)
@@ -876,7 +1067,10 @@ function resolveVisibleTabKeys(
 	for (const key of candidates) {
 		const size = widths.get(key) ?? (isVertical ? 36 : 112);
 		const nextUsed = used + (fitted.length > 0 ? gap : 0) + size;
-		if (fitted.length > 0 && nextUsed > availableForTabs) {
+		if (
+			fitted.length > 0 &&
+			nextUsed > availableForTabs + TAB_FIT_SUBPIXEL_TOLERANCE_PX
+		) {
 			continue;
 		}
 		fitted.push(key);
@@ -906,107 +1100,52 @@ function sameKeys(first: string[] | null, second: string[]) {
 }
 
 const TAB_SCROLL_PAGE_FRACTION = 0.8;
-const TAB_OVERFLOW_CLOSE_DELAY_MS = 180;
 
 interface TabsOverflowNavigationProps {
 	children: ReactElement;
 	edges: HorizontalOverflowEdges;
+	listId: string;
 	onScrollPage: (direction: -1 | 1) => void;
 }
 
 function TabsOverflowNavigation({
 	children,
 	edges,
+	listId,
 	onScrollPage,
 }: TabsOverflowNavigationProps) {
-	const [open, setOpen] = useState(false);
-	const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const hasOverflow = edges.start || edges.end;
 
-	const cancelClose = useCallback(() => {
-		if (closeTimerRef.current === null) {
-			return;
-		}
-		clearTimeout(closeTimerRef.current);
-		closeTimerRef.current = null;
-	}, []);
-	const openControls = useCallback(() => {
-		cancelClose();
-		setOpen(true);
-	}, [cancelClose]);
-	const scheduleClose = useCallback(() => {
-		cancelClose();
-		closeTimerRef.current = setTimeout(() => {
-			closeTimerRef.current = null;
-			setOpen(false);
-		}, TAB_OVERFLOW_CLOSE_DELAY_MS);
-	}, [cancelClose]);
-
-	useEffect(() => {
-		if (!hasOverflow) {
-			setOpen(false);
-		}
-	}, [hasOverflow]);
-
-	useEffect(() => {
-		return cancelClose;
-	}, [cancelClose]);
-
 	return (
-		<Popover
-			modal={false}
-			onOpenChange={(nextOpen) => {
-				if (nextOpen) {
-					openControls();
-					return;
-				}
-				cancelClose();
-				setOpen(false);
-			}}
-			open={open}
+		<div
+			className="group/tabs-overflow relative isolate min-w-0"
+			data-slot="tabs-list-overflow"
 		>
-			<PopoverAnchor asChild>
-				<div
-					className="group/tabs-overflow relative min-w-0"
-					data-slot="tabs-list-overflow"
-					onFocusCapture={openControls}
-					onPointerEnter={openControls}
-					onPointerLeave={scheduleClose}
-				>
-					{children}
-					{hasOverflow ? (
-						<PopoverTrigger
-							aria-label="Open tab scroll controls"
-							className="pointer-events-none absolute end-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-full border border-border/70 bg-background/90 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-opacity hover:bg-muted hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 group-hover/tabs-overflow:pointer-events-auto group-hover/tabs-overflow:opacity-100 data-popup-open:pointer-events-auto data-popup-open:opacity-100"
-							data-slot="tabs-overflow-trigger"
-							title="Scroll tabs"
-							type="button"
-						>
-							<HugeiconsIcon
-								aria-hidden
-								className="size-3.5"
-								icon={MoreHorizontalIcon}
-								strokeWidth={2}
-							/>
-						</PopoverTrigger>
-					) : null}
-				</div>
-			</PopoverAnchor>
+			{children}
 			{hasOverflow ? (
-				<PopoverContent
-					align="end"
-					className="w-auto gap-0 rounded-full p-1.5"
-					data-slot="tabs-overflow-controls"
-					initialFocus={false}
-					onPointerEnter={openControls}
-					onPointerLeave={scheduleClose}
-					side="bottom"
-					sideOffset={6}
-				>
-					<div className="flex items-center gap-1">
+				<>
+					{edges.start ? (
+						<span
+							aria-hidden="true"
+							className="corner-l-squircle pointer-events-none absolute inset-y-0 left-0 z-10 w-10 rounded-l-[inherit] backdrop-blur-[2px] [mask-image:linear-gradient(to_right,black,transparent)]"
+						/>
+					) : null}
+					{edges.end ? (
+						<span
+							aria-hidden="true"
+							className="corner-r-squircle pointer-events-none absolute inset-y-0 right-0 z-10 w-10 rounded-r-[inherit] backdrop-blur-[2px] [mask-image:linear-gradient(to_left,black,transparent)]"
+						/>
+					) : null}
+					<div
+						aria-label="Tab scrolling controls"
+						className="pointer-events-none absolute inset-0 z-20"
+						data-slot="tabs-overflow-controls"
+						role="group"
+					>
 						<Button
+							aria-controls={listId}
 							aria-label="Scroll tabs left"
-							className="rounded-full"
+							className="pointer-events-auto absolute inset-y-0 left-0 z-20 h-full w-9 rounded-r-none rounded-l-full border-0 bg-transparent p-0 text-foreground shadow-none hover:bg-transparent focus-visible:bg-transparent disabled:pointer-events-none disabled:opacity-0"
 							disabled={!edges.start}
 							onClick={() => onScrollPage(-1)}
 							size="icon-sm"
@@ -1019,8 +1158,9 @@ function TabsOverflowNavigation({
 							/>
 						</Button>
 						<Button
+							aria-controls={listId}
 							aria-label="Scroll tabs right"
-							className="rounded-full"
+							className="pointer-events-auto absolute inset-y-0 right-0 z-20 h-full w-9 rounded-r-full rounded-l-none border-0 bg-transparent p-0 text-foreground shadow-none hover:bg-transparent focus-visible:bg-transparent disabled:pointer-events-none disabled:opacity-0"
 							disabled={!edges.end}
 							onClick={() => onScrollPage(1)}
 							size="icon-sm"
@@ -1033,9 +1173,9 @@ function TabsOverflowNavigation({
 							/>
 						</Button>
 					</div>
-				</PopoverContent>
+				</>
 			) : null}
-		</Popover>
+		</div>
 	);
 }
 
@@ -1048,12 +1188,37 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 		persistLayout = true,
 		style: customStyle,
 		storageKey: storageKeyProp,
+		sticky = false,
+		stickyOffset = 0,
 		variant = "default",
+		layout,
 		...props
 	},
 	ref
 ) {
 	const { activeValue, orientation, selectValue } = useTabsContext();
+	const stickyStyle: StickyTabsListStyle = {
+		"--tabs-sticky-offset": isNativeNumber(stickyOffset)
+			? `${stickyOffset}px`
+			: stickyOffset,
+	};
+	const wrapSticky = (list: ReactNode) =>
+		sticky && orientation === "horizontal" ? (
+			<div
+				className="sticky bottom-0 z-20 min-w-0 shrink-0 border-t bg-background pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] md:top-[var(--tabs-sticky-offset)] md:bottom-auto md:border-t-0 md:pb-2"
+				data-slot="tabs-list-sticky"
+				style={stickyStyle}
+			>
+				{list}
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-x-0 bottom-full h-10 bg-linear-to-t from-background to-transparent md:top-full md:bottom-auto md:bg-linear-to-b"
+					data-slot="tabs-list-fade"
+				/>
+			</div>
+		) : (
+			list
+		);
 	const { items, staticChildren } = useMemo(
 		() => getTabItems(children),
 		[children]
@@ -1071,6 +1236,7 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 	const itemKeysSignature = nextItemKeys.join("\u0000");
 	const itemKeys = useMemo(() => nextItemKeys, [itemKeysSignature]);
 	const generatedStorageId = useId();
+	const overflowListId = id ?? generatedStorageId;
 	const storageKey =
 		persistLayout === false
 			? null
@@ -1093,17 +1259,94 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 		top: number;
 		width: number;
 	} | null>(null);
+	const reorderTarget = {
+		activeId: draggingKey,
+		before: dropTarget?.before,
+		overId: dropTarget?.key ?? null,
+	};
+	const triggerShift = useReorderShift({
+		...reorderTarget,
+		axis: orientation === "vertical" ? "y" : "x",
+	});
+	const menuShift = useReorderShift({ ...reorderTarget, axis: "y" });
 	const listRef = useRef<HTMLDivElement | null>(null);
 	const widthsRef = useRef(new Map<string, number>());
 	const draggingKeyRef = useRef<string | null>(null);
 	const loadedStorageKeyRef = useRef<string | null>(null);
+	const fullRowMeasureSignatureRef = useRef<string | null>(null);
 	const composedListRef = useComposedRefs(listRef, ref);
 	const overflowState = useHorizontalOverflowState(listRef, isScrollable);
-	useEffect(() => {
-		if (isScrollable) {
-			overflowState.measure();
+	const scrollStyle: TabsScrollStyle = {
+		...customStyle,
+		"--tabs-mask-image":
+			overflowState.style?.maskImage ??
+			(isNativeFunction(customStyle) ? undefined : customStyle?.maskImage),
+		"--tabs-webkit-mask-image":
+			overflowState.style?.WebkitMaskImage ??
+			(isNativeFunction(customStyle)
+				? undefined
+				: customStyle?.WebkitMaskImage),
+	};
+	const dropStyle: TabsDropStyle = {
+		"--drop-height": inlineIndicator
+			? `${inlineIndicator.height}px`
+			: undefined,
+		"--drop-left": inlineIndicator ? `${inlineIndicator.left}px` : undefined,
+		"--drop-top": inlineIndicator ? `${inlineIndicator.top}px` : undefined,
+		"--drop-width": inlineIndicator ? `${inlineIndicator.width}px` : undefined,
+	};
+	const revealTab = useCallback(
+		(tab: HTMLElement | null) => {
+			const list = listRef.current;
+			if (!(isScrollable && list && tab)) {
+				return;
+			}
+			const listBounds = list.getBoundingClientRect();
+			const tabBounds = tab.getBoundingClientRect();
+			const max = Math.max(0, list.scrollWidth - list.clientWidth);
+			const rtl = getComputedStyle(list).direction === "rtl";
+			const fromLeft = Math.max(
+				0,
+				Math.min(max, rtl ? max + list.scrollLeft : list.scrollLeft)
+			);
+			const left = listBounds.left + (fromLeft > 1 ? 36 : 0);
+			const right = listBounds.right - (fromLeft < max - 1 ? 36 : 0);
+			const delta =
+				tabBounds.left < left
+					? tabBounds.left - left
+					: tabBounds.right > right
+						? tabBounds.right - right
+						: 0;
+			if (delta === 0) {
+				return;
+			}
+			const reduceMotion =
+				globalThis.window !== undefined &&
+				window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+			list.scrollBy({
+				left: delta,
+				behavior: reduceMotion ? "auto" : "smooth",
+			});
+		},
+		[isScrollable]
+	);
+	useSafeLayoutEffect(() => {
+		if (!isScrollable) {
+			return;
 		}
-	}, [isScrollable, itemKeysSignature, overflowState.measure]);
+		overflowState.measure();
+		revealTab(
+			listRef.current?.querySelector<HTMLElement>(
+				'[role="tab"][aria-selected="true"]'
+			) ?? null
+		);
+	}, [
+		activeValue,
+		isScrollable,
+		itemKeysSignature,
+		overflowState.measure,
+		revealTab,
+	]);
 
 	const normalizedOrder = useMemo(
 		() => normalizeOrder(order, itemKeys),
@@ -1191,11 +1434,30 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 				if (!key) {
 					continue;
 				}
-				const rect = trigger.getBoundingClientRect();
 				widthsRef.current.set(
 					key,
-					orientation === "vertical" ? rect.height : rect.width
+					measureTabLayoutSize(trigger, orientation === "vertical")
 				);
+			}
+			// A tab that was not rendered in this frame and has never been measured
+			// (one added after mount, e.g. README/API arriving with a detail payload,
+			// measured by a frame scheduled before the item-change reset rendered it) has
+			// no width to fit with. Fitting it on a guess can overflow it into the
+			// More menu, where it is never rendered and so never re-measured. Render
+			// the full row for one frame instead; that frame measures every tab.
+			// Once per tab set, so a trigger that never reaches the DOM falls back
+			// to the guess instead of re-rendering every frame.
+			if (
+				fullRowMeasureSignatureRef.current !== itemKeysSignature &&
+				normalizedOrder.some(
+					(key) => !(hiddenKeys.has(key) || widthsRef.current.has(key))
+				)
+			) {
+				fullRowMeasureSignatureRef.current = itemKeysSignature;
+				setVisibleKeys(null);
+				setPromotedKey(null);
+				setMeasureVersion((version) => version + 1);
+				return;
 			}
 			const nextResolution = resolveVisibleTabKeys(list, {
 				activeKey,
@@ -1219,6 +1481,7 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 		activeKey,
 		hiddenKeys,
 		items.length,
+		itemKeysSignature,
 		measureVersion,
 		normalizedOrder,
 		orientation,
@@ -1227,7 +1490,7 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 
 	useEffect(() => {
 		const list = listRef.current;
-		if (!list || typeof ResizeObserver === "undefined") {
+		if (!list || globalThis.ResizeObserver === undefined) {
 			return;
 		}
 		const observer = new ResizeObserver(() => {
@@ -1273,10 +1536,17 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 		() => ({
 			draggingKey,
 			dropTarget,
+			menuShift,
 			onDragEnd: clearDrag,
 			onDragOver: (key, before, element) => {
 				const sourceKey = draggingKeyRef.current ?? draggingKey;
-				if (!sourceKey || sourceKey === key) {
+				if (!sourceKey) {
+					return;
+				}
+				if (sourceKey === key) {
+					// Back over its own resting slot: nothing moves.
+					setDropTarget(null);
+					setInlineIndicator(null);
 					return;
 				}
 				setDropTarget({ before, key });
@@ -1317,8 +1587,17 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 				}
 				clearDrag();
 			},
+			shift: triggerShift,
 		}),
-		[clearDrag, commitReorder, draggingKey, dropTarget, orientation]
+		[
+			clearDrag,
+			commitReorder,
+			draggingKey,
+			dropTarget,
+			menuShift,
+			orientation,
+			triggerShift,
+		]
 	);
 
 	const toggleHidden = useCallback(
@@ -1360,7 +1639,7 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 		const left =
 			direction * Math.max(120, list.clientWidth * TAB_SCROLL_PAGE_FRACTION);
 		const reducedMotion =
-			typeof window !== "undefined" &&
+			globalThis.window !== undefined &&
 			window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 		list.scrollBy({
 			behavior: reducedMotion ? "auto" : "smooth",
@@ -1372,34 +1651,45 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 		const list = (
 			<TabsPrimitive.List
 				className={cn(
-					tabsListVariants({ variant }),
+					tabsListVariants({ variant, layout }),
 					className,
 					isScrollable &&
 						"max-h-full max-w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden overscroll-x-contain [&>[data-slot=tabs-trigger]]:flex-none",
-					isScrollable && HORIZONTAL_SCROLLBAR_HIDDEN
+					isScrollable && HORIZONTAL_SCROLLBAR_HIDDEN,
+					isScrollable &&
+						"[-webkit-mask-image:var(--tabs-webkit-mask-image)]! [mask-image:var(--tabs-mask-image)]!"
 				)}
 				data-edges={isScrollable ? overflowState.dataEdges : undefined}
 				data-slot="tabs-list"
 				data-tabs-overflow={isScrollable ? "true" : undefined}
 				data-variant={variant}
+				id={isScrollable ? overflowListId : id}
 				ref={composedListRef}
-				style={
-					isScrollable
-						? { ...customStyle, ...overflowState.style }
-						: customStyle
-				}
+				style={isScrollable ? scrollStyle : customStyle}
 				{...props}
+				onFocusCapture={(event) => {
+					props.onFocusCapture?.(event);
+					if (
+						isScrollable &&
+						!event.defaultPrevented &&
+						event.target instanceof HTMLElement &&
+						event.target.getAttribute("role") === "tab"
+					) {
+						revealTab(event.target);
+					}
+				}}
 			>
 				{children}
 				{automaticIndicator}
 			</TabsPrimitive.List>
 		);
 		if (!isScrollable) {
-			return list;
+			return wrapSticky(list);
 		}
-		return (
+		return wrapSticky(
 			<TabsOverflowNavigation
 				edges={overflowState.edges}
+				listId={overflowListId}
 				onScrollPage={scrollPage}
 			>
 				{list}
@@ -1410,10 +1700,10 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 	const displayedItems = displayedKeys
 		.map((key) => itemByKey.get(key))
 		.filter((item): item is TabItem => item !== undefined);
-	return (
+	return wrapSticky(
 		<TabsPrimitive.List
 			className={cn(
-				tabsListVariants({ variant }),
+				tabsListVariants({ variant, layout }),
 				className,
 				"max-h-full max-w-full flex-nowrap overflow-hidden"
 			)}
@@ -1439,12 +1729,12 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 					order={normalizedOrder}
 				/>
 			))}
-			{inlineIndicator && (
+			{inlineIndicator && !triggerShift.previewing && (
 				<span
 					aria-hidden
-					className="pointer-events-none absolute z-20 rounded-full bg-primary"
+					className="pointer-events-none absolute top-[var(--drop-top)] left-[var(--drop-left)] z-20 h-[var(--drop-height)] w-[var(--drop-width)] rounded-full bg-primary"
 					data-tabs-drop-indicator="true"
-					style={inlineIndicator}
+					style={dropStyle}
 				/>
 			)}
 			<TabsMoreMenu
@@ -1467,15 +1757,38 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 	);
 });
 
+type TabsTriggerProps = TabsPrimitive.Tab.Props & {
+	density?: "review" | "catalog";
+	typography?: "pricing-plan" | "pricing-audience";
+	labelCase?: "capitalize";
+	spacing?: "store-section";
+	tone?: "muted";
+};
+
 function TabsTrigger({
 	children,
 	className,
+	density,
+	typography,
+	labelCase,
+	spacing,
+	tone,
 	...props
-}: TabsPrimitive.Tab.Props) {
+}: TabsTriggerProps) {
 	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<TabsPrimitive.Tab
-			className={cn(tabsTriggerClassName, className)}
+			className={cn(
+				tabsTriggerClassName,
+				density === "review" && "t-tabs-trigger-review",
+				density === "catalog" && "gap-1.5 px-2.5 py-1 text-xs",
+				typography === "pricing-plan" && "text-base! sm:text-xl!",
+				typography === "pricing-audience" && "text-base",
+				labelCase === "capitalize" && "capitalize",
+				spacing === "store-section" && "gap-1.5",
+				tone === "muted" && "text-muted-foreground",
+				className
+			)}
 			data-cuelume-toggle=""
 			data-slot="tabs-trigger"
 			{...props}
@@ -1487,14 +1800,14 @@ function TabsTrigger({
 
 const tabsTriggerClassName = cn(
 	"t-tabs-trigger",
-	"relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full border border-transparent! px-3 py-1 font-medium text-foreground/60 text-sm transition-all hover:text-foreground focus-visible:border-ring focus-visible:outline-1 focus-visible:outline-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-start]:ps-2 has-data-[icon=inline-end]:pe-2 aria-disabled:pointer-events-none aria-disabled:opacity-50 group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start group-data-vertical/tabs:rounded-2xl group-data-vertical/tabs:px-3 group-data-vertical/tabs:py-1.5 dark:text-muted-foreground dark:hover:text-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+	"group-data-vertical/tabs:corner-squircle relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full border border-transparent! px-3 py-1 font-medium text-foreground/60 text-sm transition-[color,background-color,border-color,box-shadow] hover:text-foreground focus-visible:border-ring focus-visible:outline-1 focus-visible:outline-ring focus-visible:ring-3 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-start]:ps-2 has-data-[icon=inline-end]:pe-2 aria-disabled:pointer-events-none aria-disabled:opacity-50 group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start group-data-vertical/tabs:rounded-2xl group-data-vertical/tabs:px-3 group-data-vertical/tabs:py-1.5 dark:text-muted-foreground dark:hover:text-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 	"group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
 	// The rule is the trigger's own `::before`, so the label sits under it
 	// with no extra element. `whitespace-normal` because a three-word step
 	// clipped to "Reserve your han…" in a narrow column loses the one
 	// instruction it exists to give — the rules are what align the strip,
 	// so a second line only makes it taller.
-	"group-data-[variant=stepper]/tabs-list:h-auto group-data-[variant=stepper]/tabs-list:flex-col group-data-[variant=stepper]/tabs-list:items-start group-data-[variant=stepper]/tabs-list:gap-2 group-data-[variant=stepper]/tabs-list:whitespace-normal group-data-[variant=stepper]/tabs-list:rounded-sm group-data-[variant=stepper]/tabs-list:px-0 group-data-[variant=stepper]/tabs-list:py-0 group-data-[variant=stepper]/tabs-list:text-start group-data-[variant=stepper]/tabs-list:text-muted-foreground/60 group-data-[variant=stepper]/tabs-list:text-xs",
+	"group-data-[variant=stepper]/tabs-list:corner-squircle group-data-[variant=stepper]/tabs-list:h-auto group-data-[variant=stepper]/tabs-list:flex-col group-data-[variant=stepper]/tabs-list:items-start group-data-[variant=stepper]/tabs-list:gap-2 group-data-[variant=stepper]/tabs-list:whitespace-normal group-data-[variant=stepper]/tabs-list:rounded-sm group-data-[variant=stepper]/tabs-list:px-0 group-data-[variant=stepper]/tabs-list:py-0 group-data-[variant=stepper]/tabs-list:text-start group-data-[variant=stepper]/tabs-list:text-muted-foreground/60 group-data-[variant=stepper]/tabs-list:text-xs",
 	"group-data-[variant=stepper]/tabs-list:before:h-1 group-data-[variant=stepper]/tabs-list:before:w-full group-data-[variant=stepper]/tabs-list:before:rounded-full group-data-[variant=stepper]/tabs-list:before:bg-border group-data-[variant=stepper]/tabs-list:before:transition-colors group-data-[variant=stepper]/tabs-list:before:content-['']",
 	"group-data-[variant=stepper]/tabs-list:data-active:bg-transparent! group-data-[variant=stepper]/tabs-list:data-active:text-foreground group-data-[variant=stepper]/tabs-list:data-active:after:opacity-0 group-data-[variant=stepper]/tabs-list:data-active:before:bg-foreground",
 	// `pills-lg` deliberately resolves to the same box as `pills`. The prefix
@@ -1591,10 +1904,43 @@ function TabsIndicator({
 	);
 }
 
-function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
+type TabsContentProps = TabsPrimitive.Panel.Props & {
+	inset?: "review" | "listing-detail" | "agent-activity";
+	layout?:
+		| "agent-activity"
+		| "agent-settings"
+		| "install-instructions"
+		| "sticky-showcase";
+	spacing?: "comfortable" | "relaxed" | "generous";
+	appearance?: "layout-proof";
+};
+
+function TabsContent({
+	className,
+	inset,
+	layout,
+	spacing,
+	appearance,
+	...props
+}: TabsContentProps) {
 	return (
 		<TabsPrimitive.Panel
-			className={cn("flex-1 text-sm outline-none", className)}
+			className={cn(
+				"flex-1 text-sm outline-none",
+				inset === "review" && "t-tabs-panel-review",
+				inset === "listing-detail" && "pt-2",
+				layout === "agent-activity" && "flex flex-col gap-5",
+				layout === "agent-settings" && "flex flex-col gap-6 pt-1",
+				layout === "install-instructions" && "flex flex-col gap-3",
+				layout === "sticky-showcase" && "flex flex-col gap-4 pt-4",
+				inset === "agent-activity" && "px-1 pb-3",
+				spacing === "comfortable" && "space-y-6",
+				spacing === "relaxed" && "space-y-4",
+				spacing === "generous" && "space-y-10",
+				appearance === "layout-proof" &&
+					"rounded-lg border bg-muted/30 p-4 text-sm",
+				className
+			)}
 			data-slot="tabs-content"
 			{...props}
 		/>
@@ -1602,6 +1948,7 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
 }
 
 export {
+	resolveVisibleTabKeys,
 	Tabs,
 	TabsContent,
 	TabsIndicator,

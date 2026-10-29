@@ -95,6 +95,23 @@ pub fn schedule_job_prefix(workflow_id: &str) -> String {
     format!("wf-sched-{workflow_id}-")
 }
 
+/// Whether `job_id` is one of `workflow_id`'s schedule-trigger jobs: exactly
+/// [`schedule_job_prefix`] followed by a trigger index. A bare prefix test is
+/// not enough because workflow ids may contain `-`, so `wf-sched-report-weekly-0`
+/// (owned by `report-weekly`) also starts with `report`'s prefix.
+pub fn is_schedule_job_of(workflow_id: &str, job_id: &str) -> bool {
+    job_id
+        .strip_prefix(&schedule_job_prefix(workflow_id))
+        .is_some_and(|idx| !idx.is_empty() && idx.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether `job` is owned by `workflow_id`'s schedule triggers: its id is one of
+/// that workflow's deterministic ids and it targets that workflow.
+fn owns_schedule_job(workflow_id: &str, job: &ScheduledJob) -> bool {
+    is_schedule_job_of(workflow_id, &job.id)
+        && matches!(&job.target, JobTarget::Workflow { workflow_id: target, .. } if target == workflow_id)
+}
+
 /// A schedule upsert the pure diff decided to apply: the deterministic job id,
 /// a display name, and the resolved schedule.
 #[derive(Debug, Clone, PartialEq)]
@@ -108,8 +125,8 @@ pub struct ScheduleUpsert {
 }
 
 /// The pure schedule-reconcile diff. Given a workflow's id, its triggers, and
-/// the ids of the scheduler jobs that currently belong to it (i.e. start with
-/// [`schedule_job_prefix`]), compute:
+/// the ids of the scheduler jobs that currently belong to it (see
+/// [`is_schedule_job_of`]), compute:
 ///   - `upserts`: the jobs that should exist for the current schedule triggers,
 ///   - `deletes`: existing owned-job ids no longer backed by a trigger.
 ///
@@ -174,8 +191,8 @@ pub fn apply_schedule_reconcile(
 ) {
     let owned_ids: Vec<String> = sched_store::list_jobs()
         .into_iter()
+        .filter(|job| owns_schedule_job(workflow_id, job))
         .map(|j| j.id)
-        .filter(|id| id.starts_with(&schedule_job_prefix(workflow_id)))
         .collect();
 
     let (upserts, deletes) =
@@ -221,7 +238,7 @@ pub fn apply_schedule_reconcile(
                 history: Vec::new(),
             },
         };
-        if let Err(e) = sched_store::save_job(&job) {
+        if let Err(e) = sched_store::recreate_authoritative_job(&job) {
             tracing::warn!(job = %job.id, error = %e, "failed to save workflow schedule job");
         }
     }
@@ -230,9 +247,8 @@ pub fn apply_schedule_reconcile(
 /// Tear down every scheduler job owned by a workflow's schedule triggers. Called
 /// on workflow delete so a removed workflow stops firing. Best-effort.
 pub fn delete_schedule_jobs(workflow_id: &str) {
-    let prefix = schedule_job_prefix(workflow_id);
     for job in sched_store::list_jobs() {
-        if job.id.starts_with(&prefix) {
+        if owns_schedule_job(workflow_id, &job) {
             if let Err(e) = sched_store::delete_job(&job.id) {
                 tracing::warn!(job = %job.id, error = %e, "failed to delete workflow schedule job on teardown");
             }
@@ -250,6 +266,18 @@ mod tests {
         assert_eq!(schedule_job_id("wf_abc", 3), "wf-sched-wf_abc-3");
         // Stable across calls — the basis for idempotent reconcile.
         assert_eq!(schedule_job_id("wf_abc", 1), schedule_job_id("wf_abc", 1));
+    }
+
+    #[test]
+    fn schedule_job_ownership_is_exact_for_hyphenated_ids() {
+        // `report-weekly`'s job must not count as owned by `report`.
+        let other = schedule_job_id("report-weekly", 0);
+        assert!(!is_schedule_job_of("report", &other));
+        assert!(is_schedule_job_of("report-weekly", &other));
+        assert!(is_schedule_job_of("report", &schedule_job_id("report", 0)));
+        assert!(is_schedule_job_of("report", &schedule_job_id("report", 12)));
+        assert!(!is_schedule_job_of("a", &schedule_job_id("a-1", 0)));
+        assert!(!is_schedule_job_of("report", "wf-sched-report-"));
     }
 
     #[test]

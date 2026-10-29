@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { type DefaultError, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { agentListOptions } from "@/src/lib/agent-list-query.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
@@ -29,7 +29,7 @@ export interface UseMcpResult {
 	callTool: (
 		tool: string,
 		agentId: string,
-		args: unknown
+		args: Parameters<typeof apiCallMcpTool>[1]["arguments"]
 	) => Promise<McpCallResult>;
 	/** Register a new MCP server and reload the list on success. */
 	createServer: (input: CreateMcpServerInput) => Promise<CreateMcpServerResult>;
@@ -105,7 +105,7 @@ export function useMcp(): UseMcpResult {
 	const agents = agentsQuery.data ?? [];
 	// Agent options are supplemental; a slow roster must not block server/tool browsing.
 	const loading = serversQuery.isPending || toolsQuery.isPending;
-	const describeError = (failure: unknown): string | null =>
+	const describeError = (failure: DefaultError | null): string | null =>
 		failure
 			? failure instanceof Error
 				? failure.message
@@ -142,7 +142,11 @@ export function useMcp(): UseMcpResult {
 	useCoreRefresh(reload);
 
 	const callTool = useCallback(
-		(tool: string, agentId: string, args: unknown) =>
+		(
+			tool: string,
+			agentId: string,
+			args: Parameters<typeof apiCallMcpTool>[1]["arguments"]
+		) =>
 			apiCallMcpTool(
 				{ url, token, userJwt },
 				{ tool, agentId, arguments: args }

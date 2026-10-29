@@ -70,6 +70,7 @@ export function deriveToolDetailPreset(
 			preset.commands === commands &&
 			preset.code === code
 		) {
+			// SAFETY: Object.entries returns the own keys of the authored compact/minimal/detailed table. Repository consumers only read this table; the native API erases those exact preset keys to string.
 			return id as ToolDetailPresetId;
 		}
 	}

@@ -1,5 +1,43 @@
 {
   "$defs": {
+    "AgentProfileTabContribution": {
+      "description": "One tab in the agent profile panel (see [`Contributes::agent_profile_tabs`]).",
+      "properties": {
+        "companion": {
+          "description": "A companion runnable belonging to the same plugin.",
+          "type": "string"
+        },
+        "icon": {
+          "description": "Optional glyph id resolved by the shell's Icon primitive (Iconify/Hugeicons).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable id within the plugin; the shell namespaces it by plugin id.",
+          "type": "string"
+        },
+        "order": {
+          "description": "Optional ordering hint among contributed tabs (lower = earlier).",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "title": {
+          "description": "Accessible tab label (the profile renders icon-only triggers).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "companion"
+      ],
+      "type": "object"
+    },
     "AppDependency": {
       "description": "A single plugin-to-plugin dependency edge.",
       "properties": {
@@ -68,6 +106,428 @@
       ],
       "type": "object"
     },
+    "AvatarAccessoryContribution": {
+      "description": "One accessory a plugin contributes (`contributes.avatar_accessories`).\n\n```json\n\"avatar_accessories\": [{\n  \"id\": \"@acme/hats:beanie\",\n  \"label\": \"Beanie\",\n  \"target\": \"ghost\",\n  \"region\": \"headwear\",\n  \"shapes\": [{ \"type\": \"path\", \"d\": \"M12 2 Q18 -3 24 2 Z\", \"fill\": \"palette.deep\" }]\n}]\n```",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable id in the form `<owning-plugin-id>:<local-id>`. Persisted in avatar\nselections, so keep it stable across releases.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Name shown in the avatar editor.",
+          "type": "string"
+        },
+        "layer": {
+          "$ref": "#/$defs/AvatarLayer",
+          "default": "front",
+          "description": "Draw in front of (default) or behind the body."
+        },
+        "region": {
+          "description": "Region the accessory dresses: one of [`GHOST_AVATAR_REGIONS`] for the ghost,\nor a region id the target style declares.",
+          "type": "string"
+        },
+        "shapes": {
+          "items": {
+            "$ref": "#/$defs/AvatarShape"
+          },
+          "type": "array"
+        },
+        "target": {
+          "description": "`ghost` for the Ryu ghost, or an avatar style id (`<plugin-id>:<local-id>`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "target",
+        "region",
+        "shapes"
+      ],
+      "type": "object"
+    },
+    "AvatarLayer": {
+      "description": "Whether a part draws in front of or behind the avatar body.",
+      "enum": [
+        "front",
+        "behind"
+      ],
+      "type": "string"
+    },
+    "AvatarShape": {
+      "description": "One drawn primitive. Coordinates are in the target's own space: the ghost's\n24-unit silhouette, or the style's `viewBox`.\n\nPaints (`fill`, `stroke`) accept `none`, `currentColor`, a `#rgb`/`#rgba`/\n`#rrggbb`/`#rrggbbaa` hex colour, `ink`, or a palette token\n(`palette.base`, `palette.light`, `palette.deep`) so a part recolours with the\navatar's palette.",
+      "properties": {
+        "cx": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cy": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "d": {
+          "description": "Path data for `path`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fill": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "height": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "opacity": {
+          "description": "0 to 1.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "points": {
+          "description": "Point list for `polygon` / `polyline`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "r": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rx": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ry": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "stroke": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strokeLinecap": {
+          "description": "`butt` | `round` | `square`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strokeLinejoin": {
+          "description": "`miter` | `round` | `bevel`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strokeWidth": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "transform": {
+          "description": "SVG transform list of `translate`, `rotate`, `scale`, `skewX`, `skewY`, or\n`matrix` functions with numeric arguments.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/AvatarShapeType"
+        },
+        "width": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "x": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "x1": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "x2": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "y": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "y1": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "y2": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "AvatarShapeType": {
+      "description": "One SVG primitive kind. Closed on purpose: every member has a renderer in the\nshell and an attribute grammar here.",
+      "enum": [
+        "path",
+        "circle",
+        "ellipse",
+        "rect",
+        "polygon",
+        "polyline",
+        "line"
+      ],
+      "type": "string"
+    },
+    "AvatarStyleContribution": {
+      "description": "A whole avatar style a plugin contributes (`contributes.avatar_styles`): a\ngenerative look in the spirit of a DiceBear style, chosen by seed and refined\nper region. Other plugins can dress its regions with accessories.",
+      "properties": {
+        "base": {
+          "default": [],
+          "description": "Shapes drawn between the behind and front regions (the body).",
+          "items": {
+            "$ref": "#/$defs/AvatarShape"
+          },
+          "type": "array"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable id in the form `<owning-plugin-id>:<local-id>`.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "palettes": {
+          "items": {
+            "$ref": "#/$defs/AvatarStylePalette"
+          },
+          "type": "array"
+        },
+        "regions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AvatarStyleRegion"
+          },
+          "type": "array"
+        },
+        "viewBox": {
+          "description": "`[min-x, min-y, width, height]` of the drawing space.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "viewBox",
+        "palettes"
+      ],
+      "type": "object"
+    },
+    "AvatarStyleOption": {
+      "description": "One selectable option inside a style region.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "shapes": {
+          "items": {
+            "$ref": "#/$defs/AvatarShape"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "shapes"
+      ],
+      "type": "object"
+    },
+    "AvatarStylePalette": {
+      "description": "A named colour set for an avatar style. Shapes reference it through the\n`palette.*` paint tokens; `ink` defaults to near-black when absent.",
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "deep": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ink": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "light": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "base",
+        "light",
+        "deep"
+      ],
+      "type": "object"
+    },
+    "AvatarStyleRegion": {
+      "description": "A region of a style (eyes, hair, hat, ...). Regions draw in declaration order\nwithin their layer: behind regions, then the base, then front regions.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "layer": {
+          "$ref": "#/$defs/AvatarLayer",
+          "default": "front"
+        },
+        "optional": {
+          "default": false,
+          "description": "When true the region may be left empty, and seeded avatars sometimes do.",
+          "type": "boolean"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/AvatarStyleOption"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "options"
+      ],
+      "type": "object"
+    },
+    "BackgroundContribution": {
+      "description": "A marketplace background is a data-only variant of a renderer shipped by\n`@ryu/ui`. `backdropId` is resolved through that host registry; the manifest\ncannot provide CSS, HTML, shader source, or executable rendering code.",
+      "properties": {
+        "attribution": {
+          "description": "Name to show for the background's source or creator.",
+          "type": "string"
+        },
+        "attributionUrl": {
+          "description": "HTTPS page for the visible attribution link. Core never fetches this URL.",
+          "type": "string"
+        },
+        "backdropId": {
+          "description": "A host-owned preset id from the `@ryu/ui` backdrop registry.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Optional description shown with the preview.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable id in the form `<owning-plugin-id>:<local-id>`.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Human-readable name shown in wallpaper settings.",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "Bounded renderer overrides. Unknown keys and values are ignored by the host.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "backdropId",
+        "attribution",
+        "attributionUrl"
+      ],
+      "type": "object"
+    },
     "BinarySpec": {
       "description": "A downloadable binary sidecar process. The artifact is fetched via the shared\nCore `DownloadCenter` (streaming `.part` + resume + checksum), never a\nhand-rolled fetcher. The URL may point at a **raw executable** (the default) or\nan **archive** (`tar.gz` / `tar.bz2` / `zip`) that is extracted with the\nco-located libraries preserved.",
       "properties": {
@@ -100,7 +560,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Extra environment variables layered on top of the inherited environment.",
+          "description": "Extra environment variables layered on top of the inherited environment.\n\n`\"RYU_EGRESS_PROXY_URL\": \"${RYU_EGRESS_PROXY_URL}\"` is a reserved request,\nnot a general token: Core always removes it, then fills in the node's\negress proxy URL only for a sidecar of an exact compiled built-in manifest\n(the Browser app). Any other manifest that declares it gets no such var.",
           "type": "object"
         },
         "sha256": {
@@ -127,7 +587,7 @@
       "type": "object"
     },
     "CapabilityAdapter": {
-      "description": "Provider-shipped JavaScript that maps one capability verb onto one provider tool.\n\nRuns in the SAME Deno sandbox as an `inline_deno` plugin tool, under the same\n[`crate`-level] grant model: the providing plugin must hold `tool:execute`, so\nshipping code is a visible, approvable act rather than a silent one.\n\nThe program is handed:\n- `input` — the canonical verb arguments, after layer defaults are applied.\n- `defaults` — the provider's resolved `arg_defaults`, including any `pref:`\n  tokens already looked up. This is what lets an adapter read per-install\n  configuration a template could not (`arg_template` expands from the CALLER's\n  arguments, so it can never see a resolved preference).\n- `callTool(args)` — invokes the provider's own [`CapabilityToolBinding::tool`]\n  and resolves to its raw response. It takes NO tool id: the target is fixed by\n  the manifest, so sandboxed code cannot redirect the call at another tool. An\n  adapter therefore grants no authority the declarative path did not already\n  grant — it is strictly the same single re-entry, expressed as code.\n\nIt returns the canonical result shape, which the facade passes through unchanged.\n\n**Bounded by the sandbox wall-clock.** A run gets `DEFAULT_DEADLINE_SECS` of\nactive compute, and time spent awaiting a tool call counts against it. An\nadapter that polls an async job must therefore treat \"still running\" as a normal\noutcome to report, not something to wait out.",
+      "description": "Provider-shipped JavaScript that maps one capability verb onto one provider tool.\n\nRuns in the SAME JS sandbox as an `inline_js` plugin tool, under the same\n[`crate`-level] grant model: the providing plugin must hold `tool:execute`, so\nshipping code is a visible, approvable act rather than a silent one.\n\nThe program is handed:\n- `input` — the canonical verb arguments, after layer defaults are applied.\n- `defaults` — the provider's resolved `arg_defaults`, including any `pref:`\n  tokens already looked up. This is what lets an adapter read per-install\n  configuration a template could not (`arg_template` expands from the CALLER's\n  arguments, so it can never see a resolved preference).\n- `callTool(args)` — invokes the provider's own [`CapabilityToolBinding::tool`]\n  and resolves to its raw response. It takes NO tool id: the target is fixed by\n  the manifest, so sandboxed code cannot redirect the call at another tool. An\n  adapter therefore grants no authority the declarative path did not already\n  grant — it is strictly the same single re-entry, expressed as code.\n\nIt returns the canonical result shape, which the facade passes through unchanged.\n\n**Bounded by the sandbox wall-clock.** A run gets `DEFAULT_DEADLINE_SECS` of\nactive compute, and time spent awaiting a tool call counts against it. An\nadapter that polls an async job must therefore treat \"still running\" as a normal\noutcome to report, not something to wait out.",
       "properties": {
         "code": {
           "default": "",
@@ -385,6 +845,35 @@
       ],
       "type": "object"
     },
+    "ComputerUsePlannerContribution": {
+      "description": "A plugin-owned local model adapter for Shadow's computer-use decision loop.\nThe host supplies the plugin id and sends `model_id` to the plugin's fixed\n`/computer-use` extension route; model ids are data, never URLs or code.",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable id scoped to the owning plugin.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Human-readable option shown in Shadow settings.",
+          "type": "string"
+        },
+        "model_id": {
+          "description": "Opaque identifier understood by the owning plugin's adapter.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "model_id"
+      ],
+      "type": "object"
+    },
     "ContextMenuContribution": {
       "description": "One context-menu row a plugin contributes (see\n[`Contributes::context_menu_items`]).",
       "properties": {
@@ -441,11 +930,39 @@
           "items": true,
           "type": "array"
         },
+        "agent_profile_tabs": {
+          "description": "Tabs an app adds to the agent profile panel (the right-dock profile a\nchat opens for its selected agent). Each tab embeds one of the plugin's\nown sandboxed companions, mounted with\n`{ \"surface\": \"agent-profile\", \"agentId\": … }` as `window.ryu.context`,\nso the app scopes itself to that agent. This lets an app such as\n`@ryu/calendar` own the profile's schedule tab: the tab appears and\ndisappears with the app instead of being hardcoded into the shell.",
+          "items": {
+            "$ref": "#/$defs/AgentProfileTabContribution"
+          },
+          "type": "array"
+        },
         "agents": {
           "default": [],
           "description": "Agents the plugin contributes (referenced by runnable id).",
           "items": {
             "$ref": "#/$defs/ContributionId"
+          },
+          "type": "array"
+        },
+        "avatar_accessories": {
+          "description": "Data-only **avatar accessories**: parts that dress one region of the Ryu\nghost (`target: \"ghost\"`) or of an avatar style. Drawn from the closed shape\nvocabulary in [`crate::avatar`], never from markup, so like themes they need\nzero grants. Self-contained, so they stay out of\n[`Contributes::referenced_ids`]. Served on `GET /api/plugins/contributions`.",
+          "items": {
+            "$ref": "#/$defs/AvatarAccessoryContribution"
+          },
+          "type": "array"
+        },
+        "avatar_styles": {
+          "description": "Data-only **avatar styles**: whole avatar looks (a peer of DiceBear styles)\nwith their own palettes and regions, which accessories may also dress.",
+          "items": {
+            "$ref": "#/$defs/AvatarStyleContribution"
+          },
+          "type": "array"
+        },
+        "backgrounds": {
+          "description": "Data-only wallpaper variants for the shared desktop backdrop registry.\nEach entry names a host-owned renderer preset and bounded parameter\noverrides; plugins never send executable rendering code to the shell.",
+          "items": {
+            "$ref": "#/$defs/BackgroundContribution"
           },
           "type": "array"
         },
@@ -477,6 +994,13 @@
           "default": [],
           "description": "Declarative **native** UI widgets the plugin contributes to the desktop\ncomposer. Core stores these verbatim and serves them via\n`GET /api/plugins/contributions` (tagged with the owning `plugin` id); the\ndesktop renders the known control types. Opaque to Core (the renderer owns\ninterpretation) so a new control type needs no Core change — an entry Core has\nnever heard of is forwarded byte-for-byte, so a desktop newer than the node it\ntalks to still gets everything it was shipped to render.\n\n# The control vocabulary\n\nEvery entry is an object carrying `id`, a `type` discriminant, a `label` and a\n`flag`; the remaining keys belong to that type. `flag` is universal because the\nper-request `plugin_flags` map is the composer's ONLY channel to the turn — a\ncontrol the turn hook cannot observe would do nothing. `type` is deliberately NOT\nan enum (same reasoning as [`ViewContribution::view`]): an unknown member must\nreach a newer shell intact rather than being rejected at load by an older Core.\nThe vocabulary the desktop composer understands today:\n\n- `\"toggle\"` — a switch row in the composer \"+\" menu, with an optional\n  `description`. Flipping it puts `flag: true` into `plugin_flags`. This is the\n  original — and until now the ONLY — rendered type.\n- `\"select\"` — a menu/segmented picker. Carries an `options` array of\n  `{ value, label, description?, icon? }` plus an optional `default`. The chosen\n  `value` (a string, not a bool) lands in `plugin_flags[flag]`, so a plugin can\n  offer modes (\"fast\" / \"thorough\") instead of on/off.\n- `\"chip\"` — an inline pill in the composer bar showing a LIVE value rather than\n  a menu row. Carries an optional `icon` and a `source` (the same\n  `@ryu/app-host/views` `ViewSource` a declarative view uses) the shell polls for\n  the displayed text, and exposes/clears its value through `flag`. This is what a\n  rich bespoke control (a recording indicator, a selected-clip pill) needs in\n  order to stop being hand-written host code.\n- `\"action\"` — a button that DISPATCHES rather than holding state. Carries an\n  optional `icon` and a `capability` (+ optional `args`) the shell invokes\n  through the plugin's granted capability seam — never inline code, and never a\n  capability the owning plugin was not granted — then marks `flag` so the turn\n  hook sees that it fired.\n\nA control may also carry `placement` (`\"menu\"`, the default, or `\"bar\"`) and\n`order`; the renderer, not Core, decides what to do with an unknown key.\n\nRenderers MUST ignore an entry whose `type` they do not know (the desktop\nfilters by `type`), so shipping a new control type degrades to \"not shown on\nolder shells\" instead of breaking the composer.",
           "items": true,
+          "type": "array"
+        },
+        "computer_use_planners": {
+          "description": "Local model adapters that implement Shadow's normalized computer-use\nplanner contract. Core stamps the owning plugin id when serving these rows,\nso Shadow discovers providers without a provider list in its own code.",
+          "items": {
+            "$ref": "#/$defs/ComputerUsePlannerContribution"
+          },
           "type": "array"
         },
         "context_menu_items": {
@@ -511,11 +1035,25 @@
           },
           "type": "array"
         },
+        "fileHandlers": {
+          "description": "File extensions opened by an enabled plugin's sandboxed companion. The host\ngrants access to the selected file only; this declaration is not a filesystem grant.",
+          "items": {
+            "$ref": "#/$defs/FileHandlerContribution"
+          },
+          "type": "array"
+        },
         "hook_events": {
           "default": [],
           "description": "**App events this plugin emits** — the *provider* half of the hook system,\nand the mirror image of [`Contributes::turn_hooks`] (the *consumer* half).\n\nCore's own hook phases (`post_assistant_turn`, `pre_tool_use`, `context`, …)\nare a closed set built into `plugin_host`, so before this surface existed a\nplugin could only react to things happening *in a chat turn*. An app that\nowns a real-world lifecycle — a meeting ending, a workflow run failing, an\nalert firing — had no way to let anything else react to it. That forced the\nclassic anti-pattern: every consumer polls the producer's HTTP routes, and\nevery new integration is bespoke wiring between two apps that must both be\nchanged.\n\nDeclaring an event here makes it a first-class hook phase. Any other plugin\nconsumes it by naming it in a `turn_hooks[].on`, and any workflow consumes it\nwith an `event` trigger — neither the producer nor Core learns anything about\nthe consumer. Apps therefore both **provide** and **consume** over one\nmechanism.\n\n# Ids are namespaced, and that is what makes collisions impossible\n\nEvery id MUST be `<owning plugin id>#<event name>` — the owning half is\nchecked against the manifest's own `id` at load, and the name half is\n`[a-z0-9][a-z0-9._-]*`. Because a Core phase name never contains `/`, an app\nliterally cannot declare an event that shadows one, no reserved-word list\nrequired. It is also why the emit path can authorize purely from the\nmanifest: the caller's authenticated plugin id must be the id in the event\nname, so an app can only ever emit its **own** events.\n\n# Core-interpreted, so a typed struct\n\nCore reads this table to authorize emits and to serve the event catalog, so\nper this type's own doc comment it gets a typed struct rather than opaque\nJSON. It names event strings rather than runnable ids, so it is\n**self-contained** and stays out of [`Contributes::referenced_ids`].",
           "items": {
             "$ref": "#/$defs/HookEventContribution"
+          },
+          "type": "array"
+        },
+        "interfaces": {
+          "description": "**Interfaces**: alternative presentations of the same agents, threads and\nmessages (Slack-style channels, a social feed, a 2D or 3D world).\n\nData-only, exactly like [`Contributes::backgrounds`]: each entry names a\nhost-owned renderer from [`CONTRIBUTABLE_INTERFACE_RENDERERS`] plus bounded\nparams. An interface never ships rendering code and never gets its own chat\npath; the host renders it over the one chat engine, so a hostile interface\ncan at worst look wrong. Not a catalog kind, for the argument\n[`Contributes::themes`] makes: it inherits install, signing, the Store and\nthe trust scorecard from the plugin. See [`InterfaceContribution`].",
+          "items": {
+            "$ref": "#/$defs/InterfaceContribution"
           },
           "type": "array"
         },
@@ -550,7 +1088,7 @@
           "type": "array"
         },
         "pi_extensions": {
-          "description": "**Pi extensions** the plugin ships — TypeScript files the managed `ryu` (Pi)\nagent loads at process start:\n\n```json\n\"pi_extensions\": [\n  { \"id\": \"shell\", \"file\": \"pi-extensions/ryu-shell.ts\",\n    \"description\": \"background bash for the managed Pi agent\" }\n]\n```\n\nPi ships none of plan mode, sub-agents, permission prompts or background bash\nand says so deliberately in its own docs — \"you can build or install those\nworkflows as extensions or packages\". This surface is that seam: the\ncapabilities Core used to hardcode into the spawn path become plugins the user\ncan enable and disable, and a third party can ship one at all.\n\n# This is UNSANDBOXED code, and the tier gate is not optional\n\nA [`Contributes::turn_hooks`] body runs in the deny-by-default Deno sandbox\nbehind capability-gated `host.*` calls. A file named here runs **inside the Pi\nprocess** with full host privilege: the first-party ones spawn children and\nPOST to Core. That is the same arbitrary-code-execution class as\n[`PluginManifest::mcp_servers`], so Core gates it identically — Core tier is\nauto-allowed, Community tier needs an operator-allowlisted grant, and the gate\nsits at the materializer, because writing the file is what makes it run.\n\n# Core-interpreted, so a typed struct — and NOT on the contributions endpoint\n\nCore resolves each `file` and projects it into the managed Pi's config dir, so\nper this type's own doc comment it gets a typed struct and is gathered at its\nconsumption site (`pi_config::app_extensions`) rather than served from\n`GET /api/plugins/contributions` — the same disposition as\n[`Contributes::lsp_servers`].\n\nThe `file` is deliberately NOT hydrated into an inline string the way a\n`code_file` is; see [`PluginManifest::pi_extension_refs`] for why.",
+          "description": "**Pi extensions** the plugin ships — TypeScript files the managed `ryu` (Pi)\nagent loads at process start:\n\n```json\n\"pi_extensions\": [\n  { \"id\": \"shell\", \"file\": \"pi-extensions/ryu-shell.ts\",\n    \"description\": \"background bash for the managed Pi agent\" }\n]\n```\n\nPi ships none of plan mode, sub-agents, permission prompts or background bash\nand says so deliberately in its own docs — \"you can build or install those\nworkflows as extensions or packages\". This surface is that seam: the\ncapabilities Core used to hardcode into the spawn path become plugins the user\ncan enable and disable, and a third party can ship one at all.\n\n# This is UNSANDBOXED code, and the tier gate is not optional\n\nA [`Contributes::turn_hooks`] body runs in the deny-by-default JS sandbox\nbehind capability-gated `host.*` calls. A file named here runs **inside the Pi\nprocess** with full host privilege: the first-party ones spawn children and\nPOST to Core. That is the same arbitrary-code-execution class as\n[`PluginManifest::mcp_servers`], so Core gates it identically — Core tier is\nauto-allowed, Community tier needs an operator-allowlisted grant, and the gate\nsits at the materializer, because writing the file is what makes it run.\n\n# Core-interpreted, so a typed struct — and NOT on the contributions endpoint\n\nCore resolves each `file` and projects it into the managed Pi's config dir, so\nper this type's own doc comment it gets a typed struct and is gathered at its\nconsumption site (`pi_config::app_extensions`) rather than served from\n`GET /api/plugins/contributions` — the same disposition as\n[`Contributes::lsp_servers`].\n\nThe `file` is deliberately NOT hydrated into an inline string the way a\n`code_file` is; see [`PluginManifest::pi_extension_refs`] for why.",
           "items": {
             "$ref": "#/$defs/PiExtensionContribution"
           },
@@ -788,8 +1326,45 @@
       ],
       "type": "object"
     },
+    "Deprecation": {
+      "anyOf": [
+        {
+          "description": "`true` = deprecated without explanation; `false` = current.",
+          "type": "boolean"
+        },
+        {
+          "description": "Deprecated, with this message.",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/DeprecationNotice",
+          "description": "Deprecated, with an optional message and replacement listing id."
+        }
+      ],
+      "description": "The manifest's `deprecated` declaration, in any of its three authoring shapes.\nSee [`PluginManifest::deprecated`].\n\nUntagged so the author writes the natural JSON (`true`, a string, or an\nobject) rather than a tagged envelope. Read through [`Deprecation::notice`],\nnever by matching the variants, so every consumer agrees on what \"deprecated\"\nmeans."
+    },
+    "DeprecationNotice": {
+      "description": "A normalised deprecation notice — the shape Core projects onto catalog cards\nand detail payloads under the single-word key `deprecated` (so it reads the\nsame on the snake_case card and the camelCase detail).",
+      "properties": {
+        "message": {
+          "description": "Why the listing is deprecated, shown on its detail page. Trimmed and\ncapped at [`MAX_DEPRECATION_MESSAGE_CHARS`] when projected.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replacement": {
+          "description": "Id of the listing that supersedes this one (e.g. `\"@ryu/foo\"`). Display\nonly: nothing is installed or migrated automatically. Dropped when longer\nthan [`MAX_PLUGIN_ID_LEN`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "DockPanelContribution": {
-      "description": "One app-registered **workspace dock panel** — a tab in the desktop's bottom or\nright dock (see [`Contributes::dock_panels`]).\n\nThe dock sibling of [`ViewContribution`] / [`SidebarSectionContribution`]: a typed\nenvelope (`id` / `title` / `icon` / `placement`) around an OPAQUE description of\nwhat the tab renders. Core stores it verbatim, tags it with the owning `plugin` id\nat `GET /api/plugins/contributions`, and never interprets `panel` or `spec` — so a\nnew panel capability is a renderer change, never a Core change.\n\n# The `panel` vocabulary\n\n`panel` is the render-mode discriminant the desktop's dock renderer switches on.\nIt is a plain `String` (not an enum) for the same reason [`ViewContribution::view`]\nis: an unknown member must reach a newer shell intact rather than being rejected at\nload by an older Core. The vocabulary the desktop understands today:\n\n- `\"companion\"` — mount the app's sandboxed companion surface in the dock. The\n  `spec` names it: `{ \"companion\": \"<runnable id>\" }`. This is the third-party\n  path: an app ships one companion UI and can surface it in the dock, the sidebar,\n  or a full tab without any host code.\n- `\"view\"` — render one of the plugin's own [`Contributes::views`] entries inside\n  the dock chrome: `{ \"view\": \"<view id>\" }`. Data-only, drawn with the host's own\n  `@ryu/ui` components, so a dock panel gets the Raycast tier for free.\n- `\"native\"` — the shell's OWN component, registered under `<plugin>/<id>`. This is\n  the migration seam for first-party apps whose panel is hand-written React driving\n  their sidecar through the ext-proxy (`@ryu/browser`, `@ryu/simulator`): the\n  *component* stays in the shell, but its existence, label, icon and placement stop\n  being a hardcoded `TabKind` variant and become the app's own declaration, so\n  disabling the app removes the tab. An unknown `<plugin>/<id>` simply renders\n  nothing — a native panel is never a code channel.\n\nThe full `spec` shape is owned by the shared TS vocabulary (`@ryu/app-host/views`\n`DockPanelSpec`), NOT by this contract.",
+      "description": "One app-registered **workspace workbench tab** and its preferred opening region\n(see [`Contributes::dock_panels`]).\n\nThe dock sibling of [`ViewContribution`] / [`SidebarSectionContribution`]: a typed\nenvelope (`id` / `title` / `icon` / `placement`) around an OPAQUE description of\nwhat the tab renders. Core stores it verbatim, tags it with the owning `plugin` id\nat `GET /api/plugins/contributions`, and never interprets `panel` or `spec` — so a\nnew panel capability is a renderer change, never a Core change.\n\n# The `panel` vocabulary\n\n`panel` is the render-mode discriminant the desktop's dock renderer switches on.\nIt is a plain `String` (not an enum) for the same reason [`ViewContribution::view`]\nis: an unknown member must reach a newer shell intact rather than being rejected at\nload by an older Core. The vocabulary the desktop understands today:\n\n- `\"companion\"` — mount the app's sandboxed companion surface in the dock. The\n  `spec` names it: `{ \"companion\": \"<runnable id>\" }`. This is the third-party\n  path: an app ships one companion UI and can surface it in the dock, the sidebar,\n  or a full tab without any host code.\n- `\"view\"` — render one of the plugin's own [`Contributes::views`] entries inside\n  the dock chrome: `{ \"view\": \"<view id>\" }`. Data-only, drawn with the host's own\n  `@ryu/ui` components, so a dock panel gets the Raycast tier for free.\n- `\"native\"` — the shell's OWN component, registered under `<plugin>/<id>`. This is\n  the migration seam for first-party apps whose panel is hand-written React driving\n  their sidecar through the ext-proxy (`@ryu/browser`, `@ryu/simulator`): the\n  *component* stays in the shell, but its existence, label, icon and placement stop\n  being a hardcoded `TabKind` variant and become the app's own declaration, so\n  disabling the app removes the tab. An unknown `<plugin>/<id>` simply renders\n  nothing — a native panel is never a code channel.\n\nThe full `spec` shape is owned by the shared TS vocabulary (`@ryu/app-host/views`\n`DockPanelSpec`), NOT by this contract.",
       "properties": {
         "icon": {
           "description": "Optional glyph id resolved by the shell's Icon primitive (Iconify/Hugeicons).",
@@ -817,7 +1392,7 @@
         "placement": {
           "$ref": "#/$defs/DockPanelPlacement",
           "default": "bottom",
-          "description": "Which dock the panel opens in. Defaults to [`DockPanelPlacement::Bottom`], the\ndrawer a terminal-shaped panel belongs in — and falls back to it for an\nunrecognised dock too, rather than failing the whole manifest\n(see [`deserialize_dock_panel_placement`])."
+          "description": "Which workbench region the tab prefers when it opens. Defaults to\n[`DockPanelPlacement::Bottom`], the drawer a terminal-shaped panel belongs in,\nand falls back to it for an unrecognised region too rather than failing the\nwhole manifest. This preference does not constrain later tab movement\n(see [`deserialize_dock_panel_placement`])."
         },
         "spec": {
           "description": "The payload for the render mode (`{ \"companion\": … }` / `{ \"view\": … }` / any\nfuture panel capability). Opaque to Core — the desktop dock renderer interprets\nit per `panel`. Absent = the mode needs no payload (the `\"native\"` case)."
@@ -835,7 +1410,7 @@
       "type": "object"
     },
     "DockPanelPlacement": {
-      "description": "Which of the desktop shell's workspace docks a [`DockPanelContribution`] opens in.\n\nUnlike the `panel` discriminant this is a CLOSED enum on purpose: the docks are\nshell geometry, not app vocabulary — there are exactly two of them (the bottom\ndrawer and the right rail), and an app cannot conjure a third. Adding a dock is a\nshell change, so it is correct for it to also be a contract change here.\n\nClosed does NOT mean \"fails the load\", though: see\n[`deserialize_dock_panel_placement`]. The set of valid values being fixed and the\nblast radius of an unrecognised one are separate decisions, and the second answer\nhas to match every sibling vocabulary field in this file.",
+      "description": "Which desktop workbench region a [`DockPanelContribution`] prefers when opened.\n\nUnlike the `panel` discriminant this is a CLOSED enum on purpose: the regions are\nshell geometry, not app vocabulary — there are exactly four of them (left rail,\ncenter canvas, bottom drawer and right rail), and an app cannot conjure a fifth.\nThis is only the preferred opening region; it never restricts where the user can\nmove the tab. Adding a region is a shell change, so it is correct for it to also\nbe a contract change here.\n\nClosed does NOT mean \"fails the load\", though: see\n[`deserialize_dock_panel_placement`]. The set of valid values being fixed and the\nblast radius of an unrecognised one are separate decisions, and the second answer\nhas to match every sibling vocabulary field in this file.",
       "oneOf": [
         {
           "const": "bottom",
@@ -848,8 +1423,18 @@
           "type": "string"
         },
         {
+          "const": "left",
+          "description": "The left rail.",
+          "type": "string"
+        },
+        {
+          "const": "center",
+          "description": "The center canvas.",
+          "type": "string"
+        },
+        {
           "const": "both",
-          "description": "Offered in BOTH docks — the user picks where to open it. This is what the\nBrowser and Simulator tabs do today.",
+          "description": "Offered in BOTH legacy docks — bottom and right. This deliberately retains\nthe pre-workbench fan-out rather than expanding to all four regions.",
           "type": "string"
         }
       ]
@@ -880,6 +1465,13 @@
         },
         "gateway": {
           "description": "Floor for the **Gateway**. The one non-Core surface Core can actually\nobserve (it spawns the Gateway and reads `version` from its `/health`), so a\nfloor here is genuinely enforceable rather than advisory.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "host_api": {
+          "description": "Semver requirement on the **plugin host API** the running Core serves\n([`crate::host_api::HOST_API_VERSION`], e.g. `\">=1.17.0\"` or `\"^1.17\"`).\n\nUnlike the per-surface floors above this is a contract version, not a\nproduct version: it moves only when host methods/grants/hook fields are\nadded (minor) or broken (major), so it is the precise floor for a plugin\nthat calls a host method introduced in a given host API minor. Core always\nknows its own host API version, so an unsatisfied requirement is BLOCKING\n(see [`UnmetRequirement::HostApiTooOld`]) and an unparseable one is\nrejected like any other invalid floor. Absent = any host API.",
           "type": [
             "string",
             "null"
@@ -916,6 +1508,29 @@
       ],
       "type": "object"
     },
+    "EventSubscription": {
+      "description": "One **sidecar event subscription** (in [`PluginManifest::subscribes`]).\n\nShaped like [`ProvidesEntry`]'s serving half on purpose: a local `sidecar` name\nplus a `route` declared on that sidecar's [`crate::schema::HttpProxySpec`]. The\nloader cross-validates both, the event's ownership, and the route's method.",
+      "properties": {
+        "event": {
+          "description": "The fully-qualified event id: one of this plugin's own\n`contributes.hook_events` ids (`<plugin id>#<name>`), or an allowlisted\nkernel event (`core#<name>`).",
+          "type": "string"
+        },
+        "route": {
+          "description": "The proxied sub-path on that sidecar Core POSTs each delivery to (e.g.\n`\"/events/meeting-ended\"`). Must be a declared route with method `POST` (or no\nmethod), and a fixed path (no `:param` / `*rest`).",
+          "type": "string"
+        },
+        "sidecar": {
+          "description": "The local `name` of one of this manifest's declared `sidecars` that receives\nthe event.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "sidecar",
+        "route"
+      ],
+      "type": "object"
+    },
     "ExternalRuntimeConfig": {
       "description": "code surface the Gateway must permit before it runs.",
       "properties": {
@@ -936,7 +1551,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Environment variables layered onto the runtime process at spawn. Values may\nuse `${RYU_DIR}` — expanded to the Core data dir (`~/.ryu`) at spawn — so a\nruntime can point caches/outputs at Core-owned paths without hardcoding an\nabsolute path in the (portable) manifest. Nothing else is interpolated.",
+          "description": "Environment variables layered onto the runtime process at spawn. Values may\nuse `${RYU_DIR}` (the Core data dir), `${RYU_PLUGIN_DATA_DIR}` (this\nplugin's own data dir, `<data dir>/plugin-data/<dir>`), `${RYU_MODELS_DIR}`\n(the shared `<data dir>/models`), `${RYU_PLUGIN_DIR}` and\n`${RYU_RUNTIME_DIR}` — expanded at spawn — so a runtime can point\ncaches/outputs at Core-owned paths without hardcoding an absolute path in\nthe (portable) manifest. Explicit `env:NAME` values resolve\nthrough the plugin-scoped process environment and encrypted secret store at\nsidecar start; missing or unauthorized references are omitted.\n\n`\"RYU_EGRESS_PROXY_URL\": \"${RYU_EGRESS_PROXY_URL}\"` is a reserved request,\nnot a general token: Core always removes it, then fills in the node's\negress proxy URL only for a sidecar of an exact compiled built-in manifest\n(the Browser app). Any other manifest that declares it gets no such var.",
           "type": "object"
         },
         "health_path": {
@@ -950,6 +1565,14 @@
         "kind": {
           "description": "Runtime kind. `\"python\"` is the only provisionable kind today; others are\naccepted (round-trip) but provisioning returns an \"unsupported\" error.\n\nDefaults to `\"python\"` so this config can be nested inside the internally\n`#[serde(tag = \"kind\")]`-tagged [`SidecarProcess::Python`] variant: there the\nouter enum consumes the `\"kind\"` key as its discriminant, so the inner field\nwould otherwise be reported missing — the classic internally-tagged collision.\nStandalone use still round-trips an explicit `kind`.",
           "type": "string"
+        },
+        "model_snapshots": {
+          "default": [],
+          "description": "Hugging Face model snapshots to fetch into this runtime before first run.\nEach entry names the exact files the plugin needs, so a model package can\ncarry a complete local checkpoint without downloading README images,\nevaluation artifacts, or executable files from the repository.",
+          "items": {
+            "$ref": "#/$defs/ModelSnapshotSpec"
+          },
+          "type": "array"
         },
         "port": {
           "default": null,
@@ -1008,6 +1631,38 @@
       },
       "required": [
         "entry"
+      ],
+      "type": "object"
+    },
+    "FileHandlerContribution": {
+      "properties": {
+        "companion": {
+          "description": "A companion runnable belonging to the same plugin.",
+          "type": "string"
+        },
+        "editable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "extensions": {
+          "description": "Lowercase extensions without a leading dot, for example `stl` or `txt`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "extensions",
+        "companion"
       ],
       "type": "object"
     },
@@ -1079,6 +1734,17 @@
             "null"
           ]
         },
+        "reply_cadence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplyCadence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Run on a completed-reply cadence read from preferences, for post-turn hooks\nthat act only every N replies (auto titling, periodic summaries) and would\notherwise spawn a sandbox on every turn just to return nothing."
+        },
         "stateful": {
           "default": false,
           "description": "Run if the plugin has stored state for this conversation (its default KV\nnamespace has a value keyed by `conversation_id`), e.g. an active goal.",
@@ -1120,6 +1786,21 @@
     "HttpProxySpec": {
       "description": "Declares the reverse-proxy front Core mounts onto a [`SidecarSpec`]. This is the\n**data** form of what `apps/core/src/sidecar/mail.rs` hand-codes: the exact set of\nexternal routes and their per-route auth posture. Core rejects any request whose\nsub-path is not one of [`routes`] (404), preserving mail's exact-route safety as a\ndeclaration instead of a hardcoded router.\n\n[`routes`]: HttpProxySpec::routes",
       "properties": {
+        "caller_resource_scope": {
+          "description": "Ask Core to attach the current set of resource ids the verified caller may\nread. Derived-index sidecars use this protected scope instead of trusting\nclient-supplied ownership fields.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "forward_caller_email": {
+          "description": "Whether Core stamps the verified caller's email (`x-ryu-caller-email`, the\nsigned identity token's `email` claim) on hops to this sidecar. Off by\ndefault: the caller's user and org IDs are the only identity every sidecar\nreceives, and a caller-supplied copy of the email header is stripped for\nevery sidecar either way. An app opts in only when it must match\nemail-addressed grants, such as named editors or invited viewers. Even\nthen, Core omits the header unless the token marks the email verified\n(`email_verified: true`).",
+          "type": "boolean"
+        },
+        "forward_caller_rate_subject": {
+          "description": "Whether Core stamps a pseudonymous per-client rate subject\n(`x-ryu-caller-rate-subject`) on hops to this sidecar, so an app can bound\nanonymous public writes per client instead of node-wide. The value is\n`user:<hash>` for a verified caller, `peer:<hash>` for an anonymous one\n(derived from the client address Core resolved, IPv6 by /64 prefix), or\n`unknown` when Core cannot tell clients apart. Hashes are scoped to the\nplugin id and never carry the raw address. A caller-supplied copy of the\nheader is stripped for every sidecar either way. Off by default.",
+          "type": "boolean"
+        },
         "forward_cookie_names": {
           "description": "Cookie names Core may forward to this sidecar. Browser cookies are stripped\nfrom every proxy hop by default; an app must explicitly declare its own\nnamespaced session cookies when a public route needs an HttpOnly session.\nThe manifest-level validator requires each name to use the plugin's cookie\nnamespace, so a sidecar cannot opt into Core's Better Auth cookie.",
           "items": {
@@ -1162,6 +1843,114 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "InterfaceContribution": {
+      "description": "One interface a plugin contributes (`contributes.interfaces`).\n\nThe wire shape matches `InterfaceDescriptor` in `@ryuhq/protocol/interfaces`\nminus the host-added `origin` and `plugin` tags.",
+      "properties": {
+        "attribution": {
+          "description": "Optional creator credit shown with the interface.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "description": "One line shown under the label in the switcher.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable id in the form `<owning-plugin-id>:<local-id>`; persisted as the\nuser's interface selection.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Name shown in the interface switcher.",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "description": "Bounded renderer knobs. Unknown keys and invalid values fall back to the\nrenderer's defaults on the host.",
+          "type": "object"
+        },
+        "renderer": {
+          "description": "A host-owned renderer id from [`CONTRIBUTABLE_INTERFACE_RENDERERS`].",
+          "type": "string"
+        },
+        "settings": {
+          "description": "The settings the interface shows (Settings → Appearance → Interfaces):\na relabelled subset of its renderer's, each naming one of its params.\nThe host checks each key, type and option against the renderer and\nfalls back to the renderer's own settings when any is invalid.",
+          "items": {
+            "$ref": "#/$defs/InterfaceSettingField"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "renderer"
+      ],
+      "type": "object"
+    },
+    "InterfaceSettingField": {
+      "description": "One setting a Marketplace interface shows. Mirrors the contribution form\nof `InterfaceSettingField` in `@ryuhq/protocol/interfaces` (the host adds\nits type from the renderer).",
+      "properties": {
+        "default": {
+          "description": "The value when the user has chosen none (a boolean, finite number or short string).",
+          "type": [
+            "boolean",
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "description": "One line under the label.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "The param this setting edits.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Shown as the setting's name.",
+          "type": "string"
+        },
+        "options": {
+          "description": "For a choice: which of the renderer's options to offer, relabelled.",
+          "items": {
+            "$ref": "#/$defs/InterfaceSettingOption"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "label"
+      ],
+      "type": "object"
+    },
+    "InterfaceSettingOption": {
+      "description": "One choice of an [`InterfaceSettingField`].",
+      "properties": {
+        "label": {
+          "description": "Shown for the choice.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The param value it stands for.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
       "type": "object"
     },
     "LiveActivityContribution": {
@@ -1207,6 +1996,24 @@
       ],
       "type": "object"
     },
+    "LocalBundleSpec": {
+      "description": "One per-platform bundle asset of a [`LocalProcessSpec`] (see\n[`LocalProcessSpec::bundles`]).",
+      "properties": {
+        "entrypoint": {
+          "description": "The program to spawn, as a traversal-safe path relative to the extraction\nroot (e.g. `\"Ryu Browser.app/Contents/MacOS/Ryu Browser\"`).",
+          "type": "string"
+        },
+        "format": {
+          "description": "Archive format of the release asset; also its file extension. Only\n`\"tar.gz\"` is supported — it carries the symlinks and executable bits an\napplication bundle depends on.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "entrypoint"
+      ],
+      "type": "object"
+    },
     "LocalProcessSpec": {
       "description": "A [`SidecarProcess::Local`] spec: spawn a binary already on the host, no fetch.",
       "properties": {
@@ -1217,6 +2024,13 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "bundles": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LocalBundleSpec"
+          },
+          "description": "Optional per-platform **bundle** assets, keyed by Core's platform tag\n(`update::platform_tag()`, e.g. `\"macos-aarch64\"`). On a host whose tag is a\nkey here, download-on-enable fetches the release asset\n`<command>-<platform_tag>.<format>` (plus its sibling `.sha256`, required)\ninstead of the single-file `<command>-<platform_tag>[.exe]`, extracts it into\na managed per-command directory, and spawns [`LocalBundleSpec::entrypoint`]\ninside it. This is for programs that cannot ship as one executable file —\ne.g. a macOS `.app` bundle (`\"Ryu Browser.app/Contents/MacOS/Ryu Browser\"`).\nPlatforms not listed keep the single-file asset. Empty = single-file only.",
+          "type": "object"
         },
         "command": {
           "description": "The program to spawn — a bare name resolved on `PATH` (e.g. `\"ryu-mail\"`), or\nan absolute path.",
@@ -1234,7 +2048,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Extra environment for the child (the reserved `RYU_EXT_*` vars are injected\nlast, so a manifest can never override them).",
+          "description": "Extra environment for the child (the reserved `RYU_EXT_*` vars are injected\nlast, so a manifest can never override them).\n\n`\"RYU_EGRESS_PROXY_URL\": \"${RYU_EGRESS_PROXY_URL}\"` is a reserved request,\nnot a general token: Core always removes it, then fills in the node's\negress proxy URL only for a sidecar of an exact compiled built-in manifest\n(the Browser app). Any other manifest that declares it gets no such var.",
           "type": "object"
         },
         "port_env": {
@@ -1495,6 +2309,37 @@
       ],
       "type": "object"
     },
+    "ModelSnapshotSpec": {
+      "description": "A pinned, allowlisted Hugging Face repository snapshot for an external runtime.\n\nThe provisioner enumerates the Hub tree at `revision`, verifies every requested\npath exists, and downloads only those files into the sidecar's private runtime\ndirectory. This is intentionally separate from [`AssetSpec`], which is for one\ndirect file and cannot preserve a model repository's directory layout.",
+      "properties": {
+        "dest_under_runtime": {
+          "description": "Destination directory relative to the sidecar runtime directory.",
+          "type": "string"
+        },
+        "files": {
+          "description": "Exact repository-relative files to fetch. Empty lists are rejected by the\nprovisioner so a manifest cannot claim to bundle a model while downloading\nnothing.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "default": "main",
+          "description": "Immutable Hub revision, normally a commit SHA. Branch names remain valid\nfor development but are not reproducible package provenance.",
+          "type": "string"
+        },
+        "source": {
+          "description": "A public Hub repository reference such as `hf:convaiinnovations/laya`.\nDirect URLs are not accepted for snapshots because the tree listing and\nfile allowlist are part of the trust boundary.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "dest_under_runtime",
+        "files"
+      ],
+      "type": "object"
+    },
     "NetworkPermission": {
       "anyOf": [
         {
@@ -1509,7 +2354,7 @@
           "type": "array"
         }
       ],
-      "description": "Outbound network permission, in the shape Deno's `--allow-net` supports: a bare\nboolean (`false` = deny all, `true` = allow all) or an explicit `host[:port]`\nallowlist.\n\nUntagged so the wire form is natural: `false` / `true` deserialize to\n[`NetworkPermission::All`]; a JSON array deserializes to\n[`NetworkPermission::Hosts`]."
+      "description": "Outbound network permission: a bare\nboolean (`false` = deny all, `true` = allow all) or an explicit `host[:port]`\nallowlist.\n\nUntagged so the wire form is natural: `false` / `true` deserialize to\n[`NetworkPermission::All`]; a JSON array deserializes to\n[`NetworkPermission::Hosts`]."
     },
     "NodeProcessSpec": {
       "description": "A [`SidecarProcess::Node`] spec: run a plugin's JavaScript backend under a managed\nNode/Bun runtime via Core's embedded host bootstrap. Nothing is hardcoded — the\nentry module, runtime preference, port, and health path are all data.",
@@ -1589,10 +2434,10 @@
       "type": "object"
     },
     "PermissionSet": {
-      "description": "The single, typed, **deny-by-default** permission set a plugin manifest\ndeclares, lowered by Core to every sandbox backend.\n\nThis is the one grammar that replaces three historically-disjoint ones:\nthe wasmtime/Docker [`crate`]-external `SandboxCapabilities` (typed but\nunreachable from a manifest), the Deno PTC's hardcoded zero-allow-flag spawn,\nand the opaque grant strings. A manifest declares ONE `permissions` block and\nCore lowers it to WASI preopens, Docker mount/network flags, or Deno\n`--allow-*` flags as appropriate.\n\n**Every field defaults to empty/false — the zero value is deny-all.** A missing\n`permissions` block (or an explicit `{}`) is byte-for-byte the same posture as\ntoday's zero-permission sandbox, which is what preserves the existing live\ndeny-all tests.",
+      "description": "The single, typed, **deny-by-default** permission set a plugin manifest\ndeclares, lowered by Core to every sandbox backend.\n\nThis is the one grammar that replaces three historically-disjoint ones:\nthe wasmtime/Docker [`crate`]-external `SandboxCapabilities` (typed but\nunreachable from a manifest), the JS sandbox's fixed deny-all posture, and the\nopaque grant strings. A manifest declares ONE `permissions` block and Core\nlowers it to WASI preopens, Docker mount/network flags, or the JS sandbox's\n`childProcess.run` allow-list as appropriate. The JS sandbox (hooks, adapters,\n`inline_js` tools, code mode) has no filesystem or network at all, so a set\nthat grants either is refused there rather than silently run deny-all.\n\n**Every field defaults to empty/false — the zero value is deny-all.** A missing\n`permissions` block (or an explicit `{}`) is byte-for-byte the same posture as\ntoday's zero-permission sandbox, which is what preserves the existing live\ndeny-all tests.",
       "properties": {
         "child_process": {
-          "description": "Whether the sandboxed code may spawn child processes. `false` (default) =\nno subprocess execution. Lowers to Deno's `--allow-run`; the wasmtime/Docker\nlowering has no subprocess channel to open, so this is a no-op there (a WASI\nmodule cannot fork, and the Docker exec is a single fixed argv).",
+          "description": "Whether the sandboxed code may spawn child processes. `false` (default) =\nno subprocess execution. Enables the JS sandbox's `childProcess.run` for the\nnames in [`Self::run`] (plus host capability shims); the wasmtime/Docker\nlowering has no subprocess channel to open, so this is a no-op there (a WASI\nmodule cannot fork, and the Docker exec is a single fixed argv).",
           "type": "boolean"
         },
         "fs": {
@@ -1601,10 +2446,10 @@
         },
         "network": {
           "$ref": "#/$defs/NetworkPermission",
-          "description": "Outbound network permission. `false`/absent (default) = no network; `true` =\nall hosts; a list of `host[:port]` entries = only those hosts (the shape\nDeno's `--allow-net` supports). See [`NetworkPermission`]."
+          "description": "Outbound network permission. `false`/absent (default) = no network; `true` =\nall hosts; a list of `host[:port]` entries = only those hosts. The JS sandbox\nhas no network and refuses a set that grants it. See [`NetworkPermission`]."
         },
         "run": {
-          "description": "Executable names sandboxed code may spawn when [`Self::child_process`] is\ntrue. Core lowers this to Deno's scoped `--allow-run=<name,...>` list in\naddition to declared capability shims. Empty grants no arbitrary binary.",
+          "description": "Executable names sandboxed code may spawn when [`Self::child_process`] is\ntrue: bare names `childProcess.run` may start (never paths), in addition to\ndeclared capability shims. Empty grants no arbitrary binary.",
           "items": {
             "type": "string"
           },
@@ -1719,6 +2564,17 @@
             "null"
           ]
         },
+        "layerKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProvidesLayerKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The product layer that owns this swappable capability. Most providers omit\nthis and Core classifies them with its facade/multi-provider toolkit rules.\nModel providers declare `\"decision-model\"` so their picker stays separate\nfrom tool selection while using the same provider binding contract.\nTunnel adapters declare `\"tunnel\"`: they provide `network.tunnel` and\nappear in the node's VPN layer instead of Toolkits."
+        },
         "route": {
           "description": "The proxied sub-path (on the named sidecar's [`crate::schema::HttpProxySpec`])\nthe broker forwards capability calls to (e.g. `\"/rag/query\"`). The loader\ncross-validates that the named sidecar declares a matching route.",
           "type": [
@@ -1771,6 +2627,63 @@
         "capability",
         "version"
       ],
+      "type": "object"
+    },
+    "ProvidesLayerKind": {
+      "description": "A named product layer for a provided capability.\n\nAbsence preserves the existing toolkit classification. Explicit kinds let Core\npresent a capability in another layer picker without treating it as a tool\nselection capability.",
+      "oneOf": [
+        {
+          "const": "decision-model",
+          "description": "Typed choice, score, and boolean decision models.",
+          "type": "string"
+        },
+        {
+          "const": "tunnel",
+          "description": "Public tunnel adapters for the node's VPN layer. Only valid on a\nselectable [`TUNNEL_CAPABILITY`] entry served by a sidecar route.",
+          "type": "string"
+        }
+      ]
+    },
+    "ReplyCadence": {
+      "description": "[`HookMatch::reply_cadence`]: when a post-turn hook's automatic run is due,\ncounted in completed assistant replies in the transcript. Preference values\nare read the way a hook body reads them with `host.getPreference`.",
+      "properties": {
+        "enabled_pref": {
+          "default": null,
+          "description": "Preference that, when exactly `\"false\"`, turns automatic runs off.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "every_default": {
+          "default": 5,
+          "description": "N when [`Self::every_pref`] is absent or unusable.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "every_pref": {
+          "default": null,
+          "description": "Run on every N-th reply, N read from this preference. A missing,\nnon-numeric or below-1 value falls back to [`Self::every_default`];\nvalues above 100 are treated as 100.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "first_pref": {
+          "default": null,
+          "description": "Preference that, when exactly `\"false\"`, turns the first-reply run off.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "first_reply": {
+          "default": true,
+          "description": "Also run on the very first reply.",
+          "type": "boolean"
+        }
+      },
       "type": "object"
     },
     "Requires": {
@@ -2162,8 +3075,15 @@
     "SettingsTabContribution": {
       "description": "One **settings tab** a plugin contributes (see [`Contributes::settings_tabs`]).\n\nA tab is EITHER declarative (`fields`, rendered by the shared plugin-settings\nrenderer against Core's preference store) OR a named `view` the shell resolves to\na bespoke component — for an app whose settings genuinely cannot be expressed as\na list of fields. A tab with neither renders as an empty section, which the\ndesktop's defensive parser drops on the floor; the loader rejects it instead so\nthe author gets told.",
       "properties": {
+        "companion": {
+          "description": "An owned companion UI rendered in the settings dialog. The host supplies\n`surface: \"settings\"` and `settingsTabId` as mount context.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "fields": {
-          "description": "The declarative fields this tab renders. Empty is only legal alongside a\n`view`.",
+          "description": "The declarative fields this tab renders. Empty is only legal alongside a\n`view` or `companion`.",
           "items": {
             "$ref": "#/$defs/SettingsFieldContribution"
           },
@@ -2394,6 +3314,76 @@
         }
       ]
     },
+    "SidecarSandboxFs": {
+      "description": "Declared extra filesystem access for a sandboxed sidecar.",
+      "properties": {
+        "read": {
+          "description": "Paths the sidecar may read (and execute from).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "write": {
+          "description": "Paths the sidecar may read and write.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SidecarSandboxMode": {
+      "description": "Operator-selectable OS-isolation mode for native sidecars, ordered from least\nto most strict so the effective mode is the `max` of every source.",
+      "oneOf": [
+        {
+          "const": "off",
+          "description": "No policy is computed and nothing is applied (the default).",
+          "type": "string"
+        },
+        {
+          "const": "audit",
+          "description": "The policy is computed and logged, and the would-be status is reported,\nbut nothing is applied to the process.",
+          "type": "string"
+        },
+        {
+          "const": "enforce",
+          "description": "The policy is applied with the platform backend (Landlock on Linux,\nSeatbelt on macOS, a Job Object on Windows).",
+          "type": "string"
+        }
+      ]
+    },
+    "SidecarSandboxSpec": {
+      "description": "The `sidecars[].sandbox` block. See [`SidecarSpec::sandbox`].",
+      "properties": {
+        "fs": {
+          "$ref": "#/$defs/SidecarSandboxFs",
+          "description": "Extra filesystem paths, each written with a placeholder root\n(`$APP_DATA`, `$RYU_DIR/...`, `$HOME/...`, `$TMP`). See\n[`parse_sandbox_path`] for the accepted grammar."
+        },
+        "memory_limit_mb": {
+          "description": "Optional memory cap for the sidecar's process tree, in MiB. Applied by the\nWindows Job Object backend only; ignored elsewhere. Must be `>= 64`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SidecarSandboxMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Minimum isolation mode this sidecar asks for. Combined with the operator\nsetting by taking the **stricter** of the two, so a manifest can opt itself\ninto `audit`/`enforce` but can never loosen what the operator chose."
+        }
+      },
+      "type": "object"
+    },
     "SidecarSpec": {
       "description": "A declarative **managed sidecar** a plugin may declare: a long-running child\nprocess Core owns end-to-end (download/provision → spawn → health-check →\nstop), registered into the Core `SidecarManager` on enable so it rides the\n*same* managed lifecycle (health monitor + resource sampler +\n`/api/sidecar/status`) as a built-in sidecar.\n\nThis is the **app ⇄ sidecar bridge**: it lets a capability sidecar (ghost,\nshadow, a TTS engine, …) be a fully manifest-defined app instead of hardcoded\nRust, and lets a third-party app ship its own process under a Gateway grant.\nInfra sidecars (llama.cpp, the gateway, embeddings) stay Core substrate and are\ndeliberately NOT expressible here.\n\nThe process is obtained one of two ways ([`SidecarProcess`]): a downloaded\n**binary**, or a **Python** runtime (reusing [`ExternalRuntimeConfig`] — venv +\npip + assets). Both are gated at enable by the `sidecar:process` grant; nothing\nis hardcoded — the binary URL, args, env, port, and health path are all data.",
       "properties": {
@@ -2464,6 +3454,17 @@
             }
           ],
           "description": "Optional **model-provider** declaration: when present, this sidecar serves an\nOpenAI-compatible endpoint and Core registers it as a selectable provider once\nthe process reports healthy, then deregisters it when the plugin is disabled or\nuninstalled. This is what makes a third-party *auth bridge* possible without a\nCore change: the plugin performs its own login/refresh, serves `/v1`, and\ndeclares that fact here. Absent = the sidecar is not a model provider.\n\nA sidecar cannot self-register: it holds only `RYU_EXT_TOKEN` (scoped to the\next-proxy hop and `/api/host/*`), and the host-RPC vocabulary has no\nprovider-registration method. Registration is therefore Core-side, driven by\nthis declaration.\n\n**Declaring this forces eager start and disables idle-stop**, overriding\n[`lazy`] and [`idle_stop_secs`]. Pi bypasses the ext proxy and dials the\nregistered `baseUrl` directly, so no request can ever wake this sidecar on\ndemand; a sidecar that is never started never reaches the Healthy edge that\nregisters it, and one that is scaled to zero drops out of Pi's model list until\na wake that will never come. Both coercions are logged at `info` rather than\nrejected by the validator, so existing manifests keep loading.\n\n[`lazy`]: SidecarSpec::lazy\n[`idle_stop_secs`]: SidecarSpec::idle_stop_secs"
+        },
+        "sandbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SidecarSandboxSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional **OS-isolation** declaration for this native process: extra\nfilesystem paths it needs beyond its own data directory and the system\ntemp directory, an optional stricter mode, and an optional memory cap.\n\nIsolation is controlled by the node operator (Core setting\n`RYU_SIDECAR_SANDBOX`, default `off`). This block can only make a sidecar\n**stricter**: its `mode` is combined with the operator's by taking the\nstricter of the two, and its paths only widen the sandbox's allow-list\nwithin the validated placeholder roots ([`SandboxPathBase`]), never to\nanother app's directory, the whole home directory, or the whole Core data\ndirectory. Absent = the default policy (own data dir + temp dir +\nsystem/runtime read access). Additive."
         }
       },
       "required": [
@@ -2477,8 +3478,15 @@
       "description": "A source-tree archive an external runtime extracts into its runtime dir before\nprovisioning (venv + `pip install -e .`). Distinct from [`AssetSpec`], which\nfetches a *single file* into `~/.ryu`; this delivers a whole package tree the\nplugin owns.",
       "properties": {
         "format": {
-          "description": "Archive format: `\"tar.gz\"` or `\"zip\"`. Extracted whole-tree into the runtime\ndir so the package's `pyproject.toml` lands at its root.",
+          "description": "Archive format: `\"tar.gz\"` or `\"zip\"`. Extracted whole-tree into the runtime\ndir so the package's `pyproject.toml` lands at its root. `\"directory\"` is\nalso supported with [`Self::path`] for package-owned source trees.",
           "type": "string"
+        },
+        "path": {
+          "description": "Optional path to a source directory carried by the installed plugin package.\nThe path is resolved relative to the plugin root, never relative to the\nshared Ryu data directory. It is useful for a plugin that ships its own\nsmall Python sidecar instead of requiring a separately published archive.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "sha256": {
           "default": null,
@@ -2489,12 +3497,12 @@
           ]
         },
         "url": {
+          "default": "",
           "description": "Direct **https** URL to the archive. Non-https is rejected by the SSRF egress\nscreen at download time.",
           "type": "string"
         }
       },
       "required": [
-        "url",
         "format"
       ],
       "type": "object"
@@ -2764,7 +3772,7 @@
             }
           ],
           "default": null,
-          "description": "Optional cheap pre-gate. When present, Core's `plugin_host` evaluates it\nin Rust **before** spawning the sandbox, so an idle hook (e.g. double-check\nwith its toggle off, or goal with no active condition) costs a flag/prefix\ncheck or one KV read instead of a Deno process. This is what makes it safe\nto ship these hooks **enabled by default** on every surface. Absent (or all\nfields empty) → the hook always runs, preserving prior behaviour."
+          "description": "Optional cheap pre-gate. When present, Core's `plugin_host` evaluates it\nin Rust **before** spawning the sandbox, so an idle hook (e.g. double-check\nwith its toggle off, or goal with no active condition) costs a flag/prefix\ncheck or one KV read instead of a sandbox run. This is what makes it safe\nto ship these hooks **enabled by default** on every surface. Absent (or all\nfields empty) → the hook always runs, preserving prior behaviour."
         },
         "mode": {
           "anyOf": [
@@ -2876,6 +3884,13 @@
       },
       "type": "array"
     },
+    "allowRemix": {
+      "description": "Whether other people may remix this listing: copy it into an editable\nitem of their own and publish that copy with a `remixedFrom` credit\n(Ryu extension: `allowRemix`). Absent means allowed, so every listing is\nremixable unless its author opts out with `false`.\n\nLike `license`, this is a catalog declaration rather than a runtime\ngrant. The marketplace enforces it when serving a remix and when a remix\nis published; it never changes what an installed copy may do. Read it\nthrough [`PluginManifest::remix_allowed`].",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "author": {
       "description": "Publisher/author. Claude `author` — a bare string or an object with a\n`name` field; the detail builder extracts the display string into\n`developer`. Kept as a raw value so both shapes round-trip."
     },
@@ -2933,6 +3948,17 @@
       ],
       "default": null,
       "description": "VS-Code-style **contribution points**: a declare-by-id block naming which\nof the manifest's `runnables` the plugin contributes to each extensible\nsurface. Every id referenced here MUST exist in `runnables` (the loader\ncross-validates). Absent when the plugin contributes nothing extra\n(the common case — a plugin's `runnables` are already its contributions)."
+    },
+    "deprecated": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Deprecation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Mark this listing as deprecated: it still installs, enables and runs for\nanyone who has it, but the Store badges it and the detail page explains why\nand what to use instead.\n\nThree accepted shapes, npm-style, so the common case stays one token:\n\n- `true` — deprecated, no explanation;\n- `\"Use @ryu/foo instead.\"` — deprecated with a message;\n- `{ \"message\": \"…\", \"replacement\": \"@ryu/foo\" }` — message plus the id of\n  the listing that supersedes this one.\n\n`false`/absent means current. Like `stability` this is a *catalog* signal,\nnot a lifecycle gate, and it is safe to self-assert: it can only make a\nlisting look worse, never grant it anything. Read it through\n[`PluginManifest::deprecation`], which normalises the three shapes."
     },
     "description": {
       "description": "Long plaintext/markdown description. Empty when absent (the built-in card\nhistorically emitted `\"\"` for this; preserved).",
@@ -3039,6 +4065,13 @@
       "description": "Human-readable display name shown in the app store / launcher.",
       "type": "string"
     },
+    "optional_permission_grants": {
+      "description": "Host grants available only after explicit per-app approval. They never\nenter the default install/enable grant set and do not block ordinary enable.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "permission_grants": {
       "default": [],
       "description": "Permission grants this app declares it needs (e.g. `\"mcp:web_search\"`).\nThese are *declarations only* at this layer — no enforcement happens here;\nthe Gateway owns grant enforcement.\n\nThis is the **app→host** lane and has nothing to do with\n[`permission_levels`], the **app→human** lane. See that field's doc comment\nfor the three-way table; conflating the two is the likeliest future bug here.\n\n[`permission_levels`]: PluginManifest::permission_levels",
@@ -3063,7 +4096,7 @@
           "type": "null"
         }
       ],
-      "description": "**Unified, deny-by-default runtime permission set** — the single typed\ngrammar (`{fs, child_process, run, network, tool}`) Core lowers to every sandbox\nbackend (wasmtime WASI preopens, Docker `--mount`/`--network` flags, Deno\n`--allow-*` flags). Absent = **deny-all** (the default for every manifest\npredating this field), so an app that declares nothing keeps today's exact\nzero-permission sandbox posture.\n\n# Relationship to [`permission_grants`] and [`permission_levels`]\n\nThese are **three distinct lanes** that must not be conflated:\n- [`permission_grants`] are opaque strings the **Gateway** approves at\n  install/enable time — the *approval* lane (who is allowed to ask).\n- `permissions` is the typed set **Core** lowers into the actual sandbox at\n  spawn/exec time — the *runtime-enforcement* lane (what the code can touch).\n- [`permission_levels`] is the app's *user-facing* vocabulary an admin grants\n  to a person or team — it never reaches the sandbox at all.\n\nA grant says \"this app may use the filesystem capability\"; `permissions.fs`\nsays \"…and here are the exact read/write paths the sandbox is opened with.\"\n\n[`permission_levels`]: PluginManifest::permission_levels\n\n# Altitude (manifest-level, per-runnable override is a followup)\n\nDeclared at the manifest root because **both** current enforcement sites\nresolve their config from the owning manifest, not from a sub-entry: an\n`inline_deno` tool's backend is resolved from the manifest by\n`McpRegistry::resolve_app_tool_backend`, and a managed sidecar is spawned\nfrom the manifest by `ManifestSidecar`. A per-[`crate::schema::ToolConfig`] /\nper-[`crate::schema::SidecarSpec`] override is a clean future extension (the\nresolver would fall back to this manifest-level set) but is intentionally not\nin v1."
+      "description": "**Unified, deny-by-default runtime permission set** — the single typed\ngrammar (`{fs, child_process, run, network, tool}`) Core lowers to every sandbox\nbackend (wasmtime WASI preopens, Docker `--mount`/`--network` flags, the JS\nsandbox's `childProcess.run` allow-list). Absent = **deny-all** (the default for every manifest\npredating this field), so an app that declares nothing keeps today's exact\nzero-permission sandbox posture.\n\n# Relationship to [`permission_grants`] and [`permission_levels`]\n\nThese are **three distinct lanes** that must not be conflated:\n- [`permission_grants`] are opaque strings the **Gateway** approves at\n  install/enable time — the *approval* lane (who is allowed to ask).\n- `permissions` is the typed set **Core** lowers into the actual sandbox at\n  spawn/exec time — the *runtime-enforcement* lane (what the code can touch).\n- [`permission_levels`] is the app's *user-facing* vocabulary an admin grants\n  to a person or team — it never reaches the sandbox at all.\n\nA grant says \"this app may use the filesystem capability\"; `permissions.fs`\nsays \"…and here are the exact read/write paths the sandbox is opened with.\"\n\n[`permission_levels`]: PluginManifest::permission_levels\n\n# Altitude (manifest-level, per-runnable override is a followup)\n\nDeclared at the manifest root because **both** current enforcement sites\nresolve their config from the owning manifest, not from a sub-entry: an\n`inline_js` tool's backend is resolved from the manifest by\n`McpRegistry::resolve_app_tool_backend`, and a managed sidecar is spawned\nfrom the manifest by `ManifestSidecar`. A per-[`crate::schema::ToolConfig`] /\nper-[`crate::schema::SidecarSpec`] override is a clean future extension (the\nresolver would fall back to this manifest-level set) but is intentionally not\nin v1."
     },
     "privacyPolicyUrl": {
       "description": "Privacy policy URL (contract key `privacyPolicyUrl`; Ryu extension).",
@@ -3147,6 +4180,13 @@
         "string",
         "null"
       ]
+    },
+    "subscribes": {
+      "description": "**Events this plugin's sidecars receive** — the sidecar counterpart of a\n`contributes.turn_hooks[].on` subscription, and the mirror image of\n[`Self::provides`]: each entry binds an event id to one of this manifest's\ndeclared `sidecars` + a declared POST route. When the event is raised, Core\nPOSTs `{ event, payload, emitted_at }` to that route through the ext-proxy hop\nwith the sidecar's own minted token — best-effort, off the emitter's path.\n\nThe event must be either one of this plugin's OWN declared\n`contributes.hook_events`, or an allowlisted kernel event (`core#<name>`,\n[`KERNEL_EVENTS`]); a kernel event that carries user data also requires its\ngrant in [`Self::permission_grants`]. Subscribing never lets a plugin emit a\nkernel event. Absent/empty for the common case.",
+      "items": {
+        "$ref": "#/$defs/EventSubscription"
+      },
+      "type": "array"
     },
     "surfaces": {
       "additionalProperties": {

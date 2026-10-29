@@ -1,0 +1,23 @@
+{
+  "name": "@ryu/workbench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./model": "./src/model.ts",
+    "./reducer": "./src/reducer.ts",
+    "./persistence": "./src/persistence.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "bun test src"
+  },
+  "devDependencies": {
+    "@ryu/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  }
+}

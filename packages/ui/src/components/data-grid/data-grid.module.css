@@ -1,0 +1,31 @@
+.grid {
+	max-height: var(--grid-height);
+}
+.minimum {
+	min-width: var(--grid-total-width);
+}
+.body {
+	min-width: var(--grid-total-width);
+	height: var(--grid-body-height);
+	contain: var(--grid-contain);
+}
+.add {
+	width: var(--grid-total-width);
+	min-width: var(--grid-total-width);
+}
+.cell {
+	position: var(--data-grid-pin-position);
+	right: var(--data-grid-pin-right);
+	left: var(--data-grid-pin-left);
+	z-index: var(--data-grid-pin-z-index);
+	width: var(--grid-cell-width, var(--data-grid-pin-width));
+	/* Opaque so sticky pinned columns cover cells scrolling beneath them. */
+	background: var(--background);
+	box-shadow: var(--data-grid-pin-shadow);
+	opacity: var(--data-grid-pin-opacity);
+}
+.row {
+	top: var(--grid-row-top);
+	height: var(--grid-row-height);
+	transform: var(--grid-row-transform);
+}

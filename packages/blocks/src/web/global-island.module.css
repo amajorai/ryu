@@ -1,0 +1,15 @@
+.split {
+	gap: var(--global-island-gap);
+}
+.logoCircle {
+	width: var(--global-island-width);
+	height: var(--global-island-height);
+	border-radius: var(--global-island-border-radius);
+}
+.zoneGhostGeometry {
+	top: var(--global-island-top);
+	left: var(--global-island-left);
+	width: var(--global-island-width);
+	height: var(--global-island-height);
+	border-radius: var(--global-island-border-radius);
+}

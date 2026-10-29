@@ -4,6 +4,14 @@ import type {
 } from "@ryu/app-host/media-recording";
 import { downsample, encodeWav } from "./audio-pcm.ts";
 
+/** How long a stopped microphone stays open for its owner's next clip. Apps
+ *  that follow speech in back-to-back clips (stop, read, discard, start) reuse
+ *  the open device instead of reopening it every cycle, which would drop the
+ *  audio spoken while the device restarts, flicker the OS microphone
+ *  indicator, and switch Bluetooth headset profiles. Samples are never kept
+ *  while no clip is recording. */
+const WARM_MS = 1500;
+
 /** One microphone owner per trusted host document. Each app retains its own pending clip. */
 export class BrowserRecordingHost {
 	private owner: string | null = null;
@@ -12,6 +20,9 @@ export class BrowserRecordingHost {
 	private processor: ScriptProcessorNode | null = null;
 	private samples: Float32Array[] = [];
 	private timer: ReturnType<typeof setTimeout> | undefined;
+	/** Owner whose stopped device is still open for a quick restart. */
+	private warmOwner: string | null = null;
+	private warmTimer: ReturnType<typeof setTimeout> | undefined;
 	private readonly clips = new Map<
 		string,
 		{ id: string; startedAt: string; durationMs: number; blob?: Blob }
@@ -34,10 +45,28 @@ export class BrowserRecordingHost {
 								? Date.now() - Date.parse(clip.startedAt)
 								: clip.durationMs,
 					}
-				: {}),
+				: undefined),
 		};
 	}
-	private async stop() {
+	/** Close the device. Fields are cleared before awaiting, so a start that
+	 *  runs meanwhile cannot have its new device torn down by this close. */
+	private async closeDevice() {
+		clearTimeout(this.warmTimer);
+		this.warmOwner = null;
+		const { stream, context, processor } = this;
+		this.stream = null;
+		this.context = null;
+		this.processor = null;
+		this.samples = [];
+		processor?.disconnect();
+		for (const track of stream?.getTracks() ?? []) {
+			track.stop();
+		}
+		await context?.close().catch(() => undefined);
+	}
+	/** End the owner's clip. With `keepWarm`, the device stays open briefly for
+	 *  the same owner's next start; otherwise it is closed now. */
+	private async stop(keepWarm = false) {
 		const owner = this.owner;
 		const context = this.context;
 		if (!(owner && context)) {
@@ -45,15 +74,7 @@ export class BrowserRecordingHost {
 		}
 		this.owner = null;
 		clearTimeout(this.timer);
-		this.processor?.disconnect();
-		for (const track of this.stream?.getTracks() ?? []) {
-			track.stop();
-		}
 		const rate = context.sampleRate;
-		await context.close();
-		this.stream = null;
-		this.context = null;
-		this.processor = null;
 		const frames = this.samples;
 		this.samples = [];
 		const merged = new Float32Array(
@@ -69,6 +90,77 @@ export class BrowserRecordingHost {
 			clip.durationMs = Math.round((merged.length * 1000) / rate);
 			clip.blob = encodeWav(downsample(merged, rate, 16_000), 16_000);
 		}
+		if (keepWarm) {
+			this.warmOwner = owner;
+			clearTimeout(this.warmTimer);
+			this.warmTimer = setTimeout(() => {
+				this.closeDevice().catch(() => undefined);
+			}, WARM_MS);
+			return;
+		}
+		await this.closeDevice();
+	}
+	private begin(owner: string) {
+		clearTimeout(this.warmTimer);
+		this.warmOwner = null;
+		this.samples = [];
+		this.owner = owner;
+		this.clips.set(owner, {
+			id: crypto.randomUUID(),
+			startedAt: new Date().toISOString(),
+			durationMs: 0,
+		});
+		this.timer = setTimeout(
+			() => {
+				this.stop().catch(() => undefined);
+			},
+			5 * 60 * 1000
+		);
+	}
+	private async open(owner: string): Promise<boolean> {
+		const stream = await navigator.mediaDevices.getUserMedia({
+			audio: { channelCount: 1 },
+		});
+		this.stream = stream;
+		if (this.startingOwner !== owner) {
+			await this.closeDevice();
+			return false;
+		}
+		const context = new AudioContext();
+		this.context = context;
+		const source = context.createMediaStreamSource(stream);
+		const processor = context.createScriptProcessor(4096, 1, 1);
+		this.processor = processor;
+		this.samples = [];
+		processor.onaudioprocess = (event) => {
+			// Only a recording clip keeps audio; a warm device discards it.
+			if (this.owner && this.processor === processor) {
+				this.samples.push(
+					new Float32Array(event.inputBuffer.getChannelData(0))
+				);
+			}
+		};
+		source.connect(processor);
+		processor.connect(context.destination);
+		await context.resume();
+		// The app may have been unmounted while the device was resuming.
+		if (this.startingOwner !== owner) {
+			await this.closeDevice();
+			return false;
+		}
+		for (const track of stream.getAudioTracks()) {
+			track.onended = () => {
+				if (this.stream !== stream) {
+					return;
+				}
+				if (this.owner) {
+					this.stop().catch(() => undefined);
+				} else {
+					this.closeDevice().catch(() => undefined);
+				}
+			};
+		}
+		return true;
 	}
 	async call(
 		owner: string,
@@ -94,55 +186,25 @@ export class BrowserRecordingHost {
 			if (!globalThis.navigator?.mediaDevices?.getUserMedia) {
 				return this.status(owner);
 			}
+			const warm =
+				this.warmOwner === owner &&
+				this.stream?.getAudioTracks().some((t) => t.readyState === "live");
+			if (warm) {
+				this.begin(owner);
+				return this.status(owner);
+			}
 			this.starting = true;
 			this.startingOwner = owner;
 			try {
-				this.stream = await navigator.mediaDevices.getUserMedia({
-					audio: { channelCount: 1 },
-				});
-				if (this.startingOwner !== owner) {
-					for (const track of this.stream.getTracks()) {
-						track.stop();
-					}
-					this.stream = null;
-					return this.status(owner);
+				// Another app's warm device is closed before this app opens its own.
+				if (this.warmOwner) {
+					await this.closeDevice();
 				}
-				this.context = new AudioContext();
-				const source = this.context.createMediaStreamSource(this.stream);
-				this.processor = this.context.createScriptProcessor(4096, 1, 1);
-				this.samples = [];
-				this.processor.onaudioprocess = (event) => {
-					this.samples.push(
-						new Float32Array(event.inputBuffer.getChannelData(0))
-					);
-				};
-				source.connect(this.processor);
-				this.processor.connect(this.context.destination);
-				await this.context.resume();
-				this.owner = owner;
-				this.clips.set(owner, {
-					id: crypto.randomUUID(),
-					startedAt: new Date().toISOString(),
-					durationMs: 0,
-				});
-				this.timer = setTimeout(
-					() => {
-						this.stop().catch(() => undefined);
-					},
-					5 * 60 * 1000
-				);
-				for (const track of this.stream.getAudioTracks()) {
-					track.onended = () => {
-						this.stop().catch(() => undefined);
-					};
+				if (await this.open(owner)) {
+					this.begin(owner);
 				}
 			} catch (error) {
-				for (const track of this.stream?.getTracks() ?? []) {
-					track.stop();
-				}
-				await this.context?.close().catch(() => undefined);
-				this.context = null;
-				this.stream = null;
+				await this.closeDevice();
 				throw error;
 			} finally {
 				this.starting = false;
@@ -156,7 +218,7 @@ export class BrowserRecordingHost {
 		}
 		if (input.action === "stop") {
 			if (this.owner === owner) {
-				await this.stop();
+				await this.stop(true);
 			}
 			return this.status(owner);
 		}
@@ -188,6 +250,8 @@ export class BrowserRecordingHost {
 		}
 		if (this.owner === owner) {
 			this.stop().catch(() => undefined);
+		} else if (this.warmOwner === owner) {
+			this.closeDevice().catch(() => undefined);
 		}
 	}
 }

@@ -33,7 +33,9 @@ const sampleSpec = {
 describe("AgentUI", () => {
 	test("forwards submit action values to the host callback", async () => {
 		const values: unknown[] = [];
-		const handlers = createAgentUiActionHandlers((value) => values.push(value));
+		const handlers = createAgentUiActionHandlers((value) => {
+			values.push(value);
+		});
 
 		await handlers.submit({ value: { choice: "approve" } });
 
@@ -191,5 +193,170 @@ describe("AgentUI", () => {
 		const html = renderToStaticMarkup(<AgentUI spec={{ not: "a spec" }} />);
 		expect(html.toLowerCase()).toContain("be rendered");
 		expect(html).toContain("not");
+	});
+
+	test("renders Stat tiles and resolves $computed values from state", () => {
+		const html = renderToStaticMarkup(
+			<AgentUI
+				spec={{
+					root: "grid",
+					state: { budget: { income: "5,000", rent: 1800, food: 600 } },
+					elements: {
+						grid: {
+							type: "Grid",
+							props: { columns: 2 },
+							children: ["left", "share"],
+						},
+						left: {
+							type: "Stat",
+							props: {
+								label: "Left over",
+								value: {
+									$computed: "format",
+									args: {
+										value: {
+											$computed: "subtract",
+											args: {
+												a: { $state: "/budget/income" },
+												b: {
+													$computed: "add",
+													args: {
+														a: { $state: "/budget/rent" },
+														b: { $state: "/budget/food" },
+													},
+												},
+											},
+										},
+										style: "currency",
+										currency: "USD",
+									},
+								},
+								delta: "+4% vs last month",
+								trend: "up",
+							},
+							children: [],
+						},
+						share: {
+							type: "Stat",
+							props: { label: "Rent share", value: 36 },
+							children: [],
+						},
+					},
+				}}
+			/>
+		);
+		expect(html).toContain("Left over");
+		expect(html).toContain("$2,600.00");
+		expect(html).toContain("+4% vs last month");
+		expect(html).toContain("text-status-success");
+		// Direction is announced, not conveyed only by the hidden arrow and color.
+		expect(html).toContain('<span class="sr-only">Up: </span>');
+		expect(html).toContain("Rent share");
+	});
+
+	test("renders a Chart inside the themed chart container", () => {
+		const html = renderToStaticMarkup(
+			<AgentUI
+				spec={{
+					root: "chart",
+					elements: {
+						chart: {
+							type: "Chart",
+							props: {
+								type: "bar",
+								xKey: "month",
+								data: [
+									{ month: "Jan", revenue: 120 },
+									{ month: "Feb", revenue: 160 },
+								],
+								series: [{ key: "revenue", label: "Revenue" }],
+							},
+							children: [],
+						},
+					},
+				}}
+			/>
+		);
+		expect(html).toContain('data-slot="chart"');
+	});
+
+	test("a Chart with unusable data shows an empty state instead of throwing", () => {
+		const html = renderToStaticMarkup(
+			<AgentUI
+				spec={{
+					root: "chart",
+					elements: {
+						chart: {
+							type: "Chart",
+							props: {
+								type: "line",
+								xKey: "x",
+								data: "not rows",
+								series: [{ key: "y" }],
+							},
+							children: [],
+						},
+					},
+				}}
+			/>
+		);
+		expect(html).toContain("No data");
+	});
+
+	test("a Chart whose rows are all invalid shows the empty state", () => {
+		const html = renderToStaticMarkup(
+			<AgentUI
+				spec={{
+					root: "chart",
+					elements: {
+						chart: {
+							type: "Chart",
+							props: {
+								type: "bar",
+								xKey: "x",
+								data: [1, "two", null],
+								series: [{ key: "y" }],
+							},
+							children: [],
+						},
+					},
+				}}
+			/>
+		);
+		expect(html).toContain("No data");
+	});
+
+	test("draws a partial spec while streaming and skips missing children", () => {
+		const html = renderToStaticMarkup(
+			<AgentUI
+				spec={{
+					root: "card",
+					elements: {
+						card: {
+							type: "Card",
+							props: { title: "Comparing plans" },
+							children: ["body", "not-yet-streamed"],
+						},
+						body: {
+							type: "Button",
+							props: { label: "Choose" },
+							children: [],
+						},
+					},
+				}}
+				streaming
+			/>
+		);
+		expect(html).toContain("Comparing plans");
+		// Actions stay disabled until the spec is complete.
+		expect(html).toMatch(/<button[^>]*disabled/);
+	});
+
+	test("a streaming spec without a usable header shows a quiet placeholder", () => {
+		const html = renderToStaticMarkup(
+			<AgentUI spec={{ elements: {} }} streaming />
+		);
+		expect(html).toContain("Rendering UI");
+		expect(html).not.toContain("couldn&#x27;t be rendered");
 	});
 });

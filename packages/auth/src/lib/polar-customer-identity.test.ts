@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
 let externalCustomer: { id: string; externalId: string } | null = null;
-let externalFailure: unknown = null;
+let externalFailure: Error | null = null;
 let knownContract: { polarCustomerId: string } | null = null;
 const createdCustomer = {
 	id: "created-org",
@@ -71,6 +71,18 @@ beforeEach(() => {
 afterAll(() => mock.restore());
 
 describe("Polar customer ownership", () => {
+	it("recognizes numeric SDK status fallbacks without coercing invalid statuses", async () => {
+		externalFailure = Object.assign(new Error("missing"), { status: 404 });
+		expect(await resolveOrganizationPolarCustomerId("B")).toBeNull();
+		externalFailure = Object.assign(new Error("invalid status"), {
+			statusCode: "404",
+			status: 404,
+		});
+		await expect(resolveOrganizationPolarCustomerId("B")).rejects.toBe(
+			externalFailure
+		);
+	});
+
 	it("does not adopt A's customer by shared payer email when B is missing", async () => {
 		personalCustomers = [
 			{ id: "customer-A", externalId: "ryu:organization:A", metadata: {} },
@@ -132,6 +144,70 @@ describe("Polar customer ownership", () => {
 		).rejects.toMatchObject({
 			code: "polar_customer_identity_reconciliation_required",
 		});
+		// The conflict was re-resolved once (still 404) before being surfaced.
+		expect(externalLookup).toHaveBeenCalledTimes(2);
+	});
+	it("adopts the concurrent winner when organization create loses the race", async () => {
+		createCustomer.mockImplementationOnce(() => {
+			// A double-clicked checkout committed the same identity first.
+			externalCustomer = { id: "raced-org", externalId: "ryu:organization:B" };
+			return Promise.reject(
+				Object.assign(new Error("external id exists"), { statusCode: 409 })
+			);
+		});
+		const { ensureOrganizationPolarCustomer } = await import(
+			"./polar-customer-identity.ts"
+		);
+		expect(
+			await ensureOrganizationPolarCustomer({
+				email: "owner@example.com",
+				organizationId: "B",
+			})
+		).toBe("raced-org");
+		expect(externalLookup).toHaveBeenCalledTimes(2);
+	});
+	it("adopts the concurrent winner when personal create loses the race", async () => {
+		createCustomer.mockImplementationOnce(() => {
+			externalCustomer = { id: "raced-personal", externalId: "user-B" };
+			return Promise.reject(
+				Object.assign(new Error("external id exists"), { statusCode: 422 })
+			);
+		});
+		expect(
+			await ensurePersonalPolarCustomer({
+				email: "owner@example.com",
+				userId: "user-B",
+			})
+		).toBe("raced-personal");
+		expect(externalLookup).toHaveBeenCalledTimes(2);
+	});
+	it("still requires reconciliation for an unexplained personal collision", async () => {
+		createCustomer.mockRejectedValueOnce(
+			Object.assign(new Error("email already exists"), { statusCode: 422 })
+		);
+		await expect(
+			ensurePersonalPolarCustomer({
+				email: "owner@example.com",
+				userId: "user-B",
+			})
+		).rejects.toMatchObject({
+			code: "polar_customer_identity_reconciliation_required",
+		});
+		expect(externalLookup).toHaveBeenCalledTimes(2);
+	});
+	it("never adopts a different identity found after a conflict", async () => {
+		createCustomer.mockImplementationOnce(() => {
+			externalCustomer = { id: "other-payer", externalId: "user-2" };
+			return Promise.reject(
+				Object.assign(new Error("email already exists"), { statusCode: 409 })
+			);
+		});
+		await expect(
+			ensurePersonalPolarCustomer({
+				email: "owner@example.com",
+				userId: "user-B",
+			})
+		).rejects.toThrow("different billing identity");
 	});
 	it("creates an individual customer when a personal checkout is new", async () => {
 		expect(

@@ -35,7 +35,7 @@ function ProofArtifact() {
 		<main className="min-h-screen bg-background p-8 text-foreground">
 			<div className="mx-auto flex max-w-2xl flex-col gap-6">
 				<header>
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						React verification artifact
 					</p>
 					<h1 className="mt-2 font-semibold text-3xl tracking-tight">
@@ -77,8 +77,8 @@ function ProofArtifact() {
 					<div
 						className={`mt-6 rounded-xl border px-4 py-3 font-medium text-sm ${
 							iconsMatch
-								? "border-emerald-400/30 bg-emerald-400/10 text-emerald-700 dark:text-emerald-200"
-								: "border-amber-400/30 bg-amber-400/10 text-amber-700 dark:text-amber-200"
+								? "border-success/30 bg-success/10 text-success"
+								: "border-warning/30 bg-warning/10 text-warning"
 						}`}
 						data-proof-status={iconsMatch ? "pass" : "pending"}
 						data-testid="proof-status"

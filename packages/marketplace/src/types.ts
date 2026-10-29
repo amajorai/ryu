@@ -15,13 +15,15 @@ import { formatMinorCurrency } from "@ryu/ui/lib/number-format.ts";
 
 /** The catalog kinds the money layer covers, matching the server's kind.
  *  `agent` is a user-published Agent Template — a configuration rather than
- *  executable code. */
+ *  executable code. `knowledge` is a published knowledge bundle (an OKF
+ *  concept collection), also content rather than code. */
 export type MarketplaceKind =
 	| "app"
 	| "plugin"
 	| "skill"
 	| "model"
 	| "mcp"
+	| "knowledge"
 	| "agent"
 	| "stack_template"
 	| "workflow"
@@ -39,6 +41,11 @@ export type LicenseStatus = "active" | "expired" | "refunded" | "disputed";
 export interface OwnedLicense {
 	buyerOrgId: string;
 	buyerUserId: string;
+	/**
+	 * A subscription license set to end at its period end instead of renewing.
+	 * Absent from servers that predate renewal management.
+	 */
+	cancelAtPeriodEnd?: boolean;
 	currency: string;
 	entitlementUntil: string | null;
 	id: string;
@@ -80,7 +87,7 @@ export interface SellerStatus {
 export interface PurchaseResult {
 	/** True when the org already held an active license (no new charge). */
 	alreadyLicensed: boolean;
-	/** Hosted Stripe Checkout URL to open, or "" when alreadyLicensed. */
+	/** Checkout URL (Ryu's checkout page, or Stripe-hosted Checkout when first-party checkout is off) to open, or "" when alreadyLicensed. */
 	url: string;
 }
 
@@ -106,4 +113,24 @@ export interface MarketplaceDetailTarget {
 /** Format a minor-unit (cents) amount as a localized currency string. */
 export function formatPrice(amountMinor: number, currency = "usd"): string {
 	return formatMinorCurrency(amountMinor, currency);
+}
+
+/** The pricing fields {@link formatPricingLabel} reads; every surface's pricing view satisfies it. */
+export interface MarketplacePriceTerms {
+	amountMinor: number;
+	currency: string;
+	interval: "month" | "year";
+	maxUpdates: number | null;
+	model: "one_time" | "subscription" | "bounded_updates";
+}
+
+/** Add the billing or included-update term to a marketplace price. */
+export function formatPricingLabel(pricing: MarketplacePriceTerms): string {
+	const suffix =
+		pricing.model === "subscription"
+			? `/${pricing.interval === "year" ? "yr" : "mo"}`
+			: pricing.model === "bounded_updates"
+				? ` · ${pricing.maxUpdates ?? "limited"} updates`
+				: "";
+	return `${formatPrice(pricing.amountMinor, pricing.currency)}${suffix}`;
 }

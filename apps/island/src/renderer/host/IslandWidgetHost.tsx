@@ -19,12 +19,16 @@
 import { CodedRpcError } from "@ryu/app-host/rpc";
 import { AppWidget } from "@ryu/blocks/desktop/agent-elements/app-widget";
 import {
-	type WidgetCallToolResult,
 	WidgetHostContext,
 	type WidgetHostServices,
 	type WidgetHostValue,
 } from "@ryu/blocks/desktop/agent-elements/widget-host-context";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { z } from "zod";
+import {
+	type hostJsonSchema,
+	parseHostArguments,
+} from "../../shared/host-json.ts";
 
 /**
  * POST a governed widget route through main. `pluginCoreHttp` re-validates the
@@ -32,36 +36,44 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
  * are the same closed enum the widget RPC gate speaks, so a failure maps straight
  * onto {@link CodedRpcError} with no status guessing.
  */
-async function postWidget<T>(path: string, body: unknown): Promise<T> {
+async function postWidget(
+	path: string,
+	body: Parameters<typeof hostJsonSchema.parse>[0]
+) {
 	const result = await window.island.plugins.coreHttp({
-		body,
+		body: parseHostArguments(body),
 		method: "POST",
 		path,
 	});
 	if (!result.ok) {
 		throw new CodedRpcError(result.code, result.message);
 	}
-	return result.data as T;
+	return z.json().parse(result.data);
 }
 
 const services: WidgetHostServices = {
 	callTool: (input) =>
-		postWidget<WidgetCallToolResult>("/api/widgets/tools/call", {
+		postWidget("/api/widgets/tools/call", {
 			arguments: input.args,
 			instance_id: input.instanceId,
 			server_id: input.serverId,
 			tool_call_id: input.toolCallId,
 			tool_id: input.name,
+		}).then((raw) => {
+			const parsed = z
+				.object({ ok: z.boolean(), output: z.json().optional() })
+				.parse(raw);
+			return { ok: parsed.ok, output: parsed.output ?? null };
 		}),
 	sendFollowUpMessage: async (input) => {
-		await postWidget<unknown>("/api/widgets/follow-up", {
+		await postWidget("/api/widgets/follow-up", {
 			instance_id: input.instanceId,
 			prompt: input.prompt,
 			tool_call_id: input.toolCallId,
 		});
 	},
 	setWidgetState: async (input) => {
-		await postWidget<unknown>("/api/widgets/state", {
+		await postWidget("/api/widgets/state", {
 			instance_id: input.instanceId,
 			state: input.state,
 			tool_call_id: input.toolCallId,

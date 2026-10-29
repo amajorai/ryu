@@ -3,6 +3,7 @@
 // Controlled dialog for filing a marketplace/app report. Reason dropdown +
 // optional details. Submit is injected so desktop (bearer) and web (cookie) stay outside.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -49,6 +50,7 @@ export function ReportDialog({
 	target,
 	onSubmit,
 }: ReportDialogProps) {
+	const tl = useLiteralMessages();
 	const [reason, setReason] = useState<ReportReason | null>(null);
 	const [details, setDetails] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -88,7 +90,7 @@ export function ReportDialog({
 				sileo.success({
 					title: "Report submitted",
 					description: issuesUrl
-						? `Also consider filing upstream: ${issuesUrl}`
+						? tl("Also consider filing upstream: {issuesUrl}", { issuesUrl })
 						: "Thanks — we'll look into it.",
 				});
 			} else {
@@ -116,7 +118,7 @@ export function ReportDialog({
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Report {name}</DialogTitle>
+					<DialogTitle>{tl("Report {name}", { name })}</DialogTitle>
 					<DialogDescription>
 						Tell us what's wrong. Security and abuse reports go to Ryu; quality
 						issues on hosted listings also reach the publisher.
@@ -156,7 +158,9 @@ export function ReportDialog({
 
 					<div className="flex flex-col gap-1.5">
 						<Label htmlFor="report-details">
-							Details{detailsRequired ? " (required)" : " (optional)"}
+							{detailsRequired
+								? tl("Details (required)")
+								: tl("Details (optional)")}
 						</Label>
 						<Textarea
 							id="report-details"

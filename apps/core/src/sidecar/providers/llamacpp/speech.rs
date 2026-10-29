@@ -13,7 +13,7 @@ use anyhow::Context;
 
 use crate::sidecar::providers::llamacpp::{
     process::{LlamaCppProcess, LlamaCppStartOptions},
-    LlamaCppDownloader,
+    stop_held_child, wait_for_ready, LlamaCppDownloader,
 };
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 
@@ -40,6 +40,33 @@ pub fn speech_processing_base_url() -> String {
 }
 
 /// Lifecycle manager for the dedicated S1-mini llama.cpp server.
+/// The Speech Processing launch config: saved settings over S1-mini's serving
+/// contract. S1-mini is trained with Qwen3 thinking disabled and greedy
+/// decoding, so those flags lead the raw args unless the user sets reasoning or
+/// the template kwargs explicitly; saved raw args follow and win where
+/// llama-server parses last-value-wins. Thinking is turned off with
+/// `--reasoning off` (setting `enable_thinking` through the template kwargs is
+/// deprecated upstream).
+fn speech_launch_config(saved: crate::inference::LaunchConfig) -> crate::inference::LaunchConfig {
+    let mut launch = saved;
+    launch.ctx_size.get_or_insert(4096);
+    launch.jinja.get_or_insert(true);
+    let mut contract = Vec::new();
+    let user_sets_thinking = ["reasoning", "chat_template_kwargs"].iter().any(|key| {
+        launch
+            .native
+            .get(*key)
+            .is_some_and(|value| !value.is_null())
+    });
+    if !user_sets_thinking {
+        contract.extend(["--reasoning".to_owned(), "off".to_owned()]);
+    }
+    contract.extend(["--temp".to_owned(), "0".to_owned()]);
+    contract.append(&mut launch.extra_args);
+    launch.extra_args = contract;
+    launch
+}
+
 pub struct LlamaCppSpeechManager {
     running: Arc<AtomicBool>,
     process: Arc<Mutex<Option<LlamaCppProcess>>>,
@@ -161,19 +188,8 @@ impl Sidecar for LlamaCppSpeechManager {
 				);
             }
 
-            let launch = crate::inference::LaunchConfig {
-                ctx_size: Some(4096),
-                jinja: Some(true),
-                // S1-mini is trained with Qwen3 thinking disabled and greedy
-                // decoding. These flags are part of the model's serving contract.
-                extra_args: vec![
-                    "--chat-template-kwargs".to_owned(),
-                    "{\"enable_thinking\":false}".to_owned(),
-                    "--temp".to_owned(),
-                    "0".to_owned(),
-                ],
-                ..Default::default()
-            };
+            let saved = crate::sidecar::providers::engine_launch_config("llamacpp-speech").await;
+            let launch = speech_launch_config(saved);
             let mut child = LlamaCppProcess::new(Self::binary_path());
             child
                 .start_with(LlamaCppStartOptions {
@@ -189,22 +205,14 @@ impl Sidecar for LlamaCppSpeechManager {
                 .context("spawning llama-server (Speech Processing)")?;
             *process.lock().unwrap() = Some(child);
 
-            tokio::time::timeout(std::time::Duration::from_secs(120), async {
-                loop {
-                    if tokio::net::TcpStream::connect(format!(
-                        "127.0.0.1:{}",
-                        speech_processing_port()
-                    ))
-                    .await
-                    .is_ok()
-                    {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-            })
-            .await
-            .context("Speech Processing did not start within 120s")?;
+            // Require `/health` 2xx from a child that is still alive; a bare TCP
+            // connect would accept a foreign listener after our child failed to bind.
+            let ready = wait_for_ready(&client, &process, speech_processing_port(), None).await;
+            if ready.is_err() {
+                // Stop a child that never became ready so the next start spawns afresh.
+                stop_held_child(&process).await;
+            }
+            ready.context("Speech Processing did not become ready")?;
 
             running.store(true, Ordering::Relaxed);
             tracing::info!("Speech Processing sidecar started on {addr} with S1-mini");
@@ -287,6 +295,27 @@ impl Sidecar for LlamaCppSpeechManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speech_launch_keeps_the_serving_contract_under_saved_settings() {
+        let launch = speech_launch_config(crate::inference::LaunchConfig::default());
+        assert_eq!(launch.ctx_size, Some(4096));
+        assert_eq!(launch.jinja, Some(true));
+        assert_eq!(launch.extra_args, vec!["--reasoning", "off", "--temp", "0"]);
+
+        let saved = crate::inference::LaunchConfig {
+            ctx_size: Some(2048),
+            native: serde_json::json!({ "chat_template_kwargs": "{}" })
+                .as_object()
+                .cloned()
+                .unwrap(),
+            extra_args: vec!["--temp".to_owned(), "0.2".to_owned()],
+            ..Default::default()
+        };
+        let launch = speech_launch_config(saved);
+        assert_eq!(launch.ctx_size, Some(2048));
+        assert_eq!(launch.extra_args, vec!["--temp", "0", "--temp", "0.2"]);
+    }
 
     #[test]
     fn speech_engine_identity_is_stable() {

@@ -1,4 +1,8 @@
 import {
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import {
 	IconBook2 as BookOpen,
 	IconFolderSearch as FolderSearch,
 	IconGitBranch as GitBranch,
@@ -20,13 +24,13 @@ const THINKING_WORD_SPLIT_RE = /\s+/;
 // Reasoning text a Thinking part carries, checking the streamed `input.thought`
 // first, then a string output/result. Used for the nested-row size subtitle.
 function getThoughtText(part: any): string {
-	if (typeof part.input?.thought === "string") {
+	if (isNativeText(part.input?.thought)) {
 		return part.input.thought;
 	}
-	if (typeof part.output === "string") {
+	if (isNativeText(part.output)) {
 		return part.output;
 	}
-	if (typeof part.result === "string") {
+	if (isNativeText(part.result)) {
 		return part.result;
 	}
 	return "";
@@ -92,7 +96,32 @@ function calculateDiffStats(oldString: string, newString: string) {
 	return { addedLines, removedLines };
 }
 
-export const toolRegistry: Record<string, ToolMeta> = {
+/** Complete authored generic-tool metadata plus the existing mutable extension port.
+ * ToolMeta's legacy callback input remains unchanged; this is not a full part DTO. */
+export interface ToolMetadataRegistry {
+	"tool-Agent": ToolMeta;
+	"tool-Bash": ToolMeta;
+	"tool-BashOutput": ToolMeta;
+	"tool-cloning": ToolMeta;
+	"tool-Edit": ToolMeta;
+	"tool-ExitPlanMode": ToolMeta;
+	"tool-Glob": ToolMeta;
+	"tool-Grep": ToolMeta;
+	"tool-KillShell": ToolMeta;
+	"tool-NotebookEdit": ToolMeta;
+	"tool-PlanWrite": ToolMeta;
+	"tool-Read": ToolMeta;
+	"tool-Skill": ToolMeta;
+	"tool-Task": ToolMeta;
+	"tool-Thinking": ToolMeta;
+	"tool-TodoWrite": ToolMeta;
+	"tool-WebFetch": ToolMeta;
+	"tool-WebSearch": ToolMeta;
+	"tool-Write": ToolMeta;
+	[partType: string]: ToolMeta;
+}
+
+export const toolRegistry: ToolMetadataRegistry = {
 	"tool-Task": {
 		icon: Sparkles,
 		title: (part) => {
@@ -105,7 +134,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 		},
 		subtitle: (part) => {
 			const desc = part.input?.description || "";
-			return desc.length > 50 ? `${desc.slice(0, 47)}...` : desc;
+			return desc.length > 50 ? `${desc.slice(0, 47)}…` : desc;
 		},
 		variant: "simple",
 	},
@@ -122,7 +151,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 		},
 		subtitle: (part) => {
 			const desc = part.input?.description || "";
-			return desc.length > 50 ? `${desc.slice(0, 47)}...` : desc;
+			return desc.length > 50 ? `${desc.slice(0, 47)}…` : desc;
 		},
 		variant: "simple",
 	},
@@ -149,9 +178,9 @@ export const toolRegistry: Record<string, ToolMeta> = {
 			const path = part.input?.path || "";
 			if (path) {
 				const combined = `${pattern} in ${getDisplayPath(path)}`;
-				return combined.length > 40 ? `${combined.slice(0, 37)}...` : combined;
+				return combined.length > 40 ? `${combined.slice(0, 37)}…` : combined;
 			}
-			return pattern.length > 40 ? `${pattern.slice(0, 37)}...` : pattern;
+			return pattern.length > 40 ? `${pattern.slice(0, 37)}…` : pattern;
 		},
 		variant: "simple",
 	},
@@ -169,7 +198,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 		},
 		subtitle: (part) => {
 			const pattern = part.input?.pattern || "";
-			return pattern.length > 40 ? `${pattern.slice(0, 37)}...` : pattern;
+			return pattern.length > 40 ? `${pattern.slice(0, 37)}…` : pattern;
 		},
 		variant: "simple",
 	},
@@ -253,7 +282,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 				(match: string) => getDisplayPath(match)
 			);
 			return normalized.length > 50
-				? `${normalized.slice(0, 47)}...`
+				? `${normalized.slice(0, 47)}…`
 				: normalized;
 		},
 		variant: "simple",
@@ -284,7 +313,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 		},
 		subtitle: (part) => {
 			const query = part.input?.query || "";
-			return query.length > 40 ? `${query.slice(0, 37)}...` : query;
+			return query.length > 40 ? `${query.slice(0, 37)}…` : query;
 		},
 		variant: "collapsible",
 	},
@@ -371,7 +400,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 		},
 		subtitle: (part) => {
 			const output = part.output;
-			if (typeof output === "string" && output.trim()) {
+			if (isNativeText(output) && output.trim()) {
 				return output.trim();
 			}
 			const command = part.input?.command || "";
@@ -384,7 +413,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 				(match: string) => getDisplayPath(match)
 			);
 			return normalized.length > 50
-				? `${normalized.slice(0, 47)}...`
+				? `${normalized.slice(0, 47)}…`
 				: normalized;
 		},
 		variant: "simple",
@@ -398,7 +427,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 		},
 		subtitle: (part) => {
 			const pid = part.input?.pid;
-			return typeof pid === "number" ? `pid ${pid}` : "";
+			return isNativeNumber(pid) ? `pid ${pid}` : "";
 		},
 		variant: "simple",
 	},
@@ -417,7 +446,7 @@ export const toolRegistry: Record<string, ToolMeta> = {
 		title: (part) => {
 			const isPending =
 				part.state !== "output-available" && part.state !== "output-error";
-			return isPending ? "Thinking..." : "Thought";
+			return isPending ? "Thinking…" : "Thought";
 		},
 		// Size hint for compact/nested Thinking rows (the full ThinkingTool card
 		// renders its own richer duration + size badges). Reasoning-token count
@@ -463,35 +492,37 @@ export function formatToolDisplayName(toolName: string): string {
 		.trim();
 }
 
-const BUILTIN_MCP_TOOLS: Record<string, McpToolInfo> = {
-	"tool-ListMcpResources": {
-		serverName: "mcp",
-		toolName: "list_resources",
-		displayName: "List Resources",
-		category: "list",
-	},
-	"tool-ListMcpResourcesTool": {
-		serverName: "mcp",
-		toolName: "list_resources",
-		displayName: "List Resources",
-		category: "list",
-	},
-	"tool-ReadMcpResource": {
-		serverName: "mcp",
-		toolName: "read_resource",
-		displayName: "Read Resource",
-		category: "get",
-	},
-	"tool-ReadMcpResourceTool": {
-		serverName: "mcp",
-		toolName: "read_resource",
-		displayName: "Read Resource",
-		category: "get",
-	},
-};
+const BUILTIN_MCP_TOOLS = new Map<string, McpToolInfo>(
+	Object.entries({
+		"tool-ListMcpResources": {
+			serverName: "mcp",
+			toolName: "list_resources",
+			displayName: "List Resources",
+			category: "list",
+		},
+		"tool-ListMcpResourcesTool": {
+			serverName: "mcp",
+			toolName: "list_resources",
+			displayName: "List Resources",
+			category: "list",
+		},
+		"tool-ReadMcpResource": {
+			serverName: "mcp",
+			toolName: "read_resource",
+			displayName: "Read Resource",
+			category: "get",
+		},
+		"tool-ReadMcpResourceTool": {
+			serverName: "mcp",
+			toolName: "read_resource",
+			displayName: "Read Resource",
+			category: "get",
+		},
+	})
+);
 
 export function parseMcpToolType(partType: string): McpToolInfo | null {
-	const builtin = BUILTIN_MCP_TOOLS[partType];
+	const builtin = BUILTIN_MCP_TOOLS.get(partType);
 	if (builtin) {
 		return builtin;
 	}

@@ -16,7 +16,11 @@ export interface UploadedFile {
 
 interface UseUploadFileProps {
 	onUploadComplete?: (file: UploadedFile) => void;
-	onUploadError?: (error: unknown) => void;
+	onUploadError?: (
+		...args: Parameters<
+			NonNullable<Parameters<ReturnType<EditorUploader>["catch"]>[0]>
+		>
+	) => void;
 }
 
 /**
@@ -78,13 +82,13 @@ export function useUploadFile({
 	};
 }
 
-export function getErrorMessage(err: unknown): string {
+export function getErrorMessage<ErrorValue>(err: ErrorValue): string {
 	if (err instanceof Error) {
 		return err.message;
 	}
 	return "Something went wrong, please try again later.";
 }
 
-export function showErrorToast(err: unknown) {
+export function showErrorToast<ErrorValue>(err: ErrorValue) {
 	return toast.error(getErrorMessage(err));
 }

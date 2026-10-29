@@ -11,6 +11,7 @@
 
 import { app, type BrowserWindow } from "electron";
 import electronUpdater from "electron-updater";
+import { z } from "zod";
 import {
 	AUTO_UPDATE_PREF_KEY,
 	parseAutoUpdate,
@@ -62,8 +63,9 @@ export async function getAutoUpdateEnabled(): Promise<boolean> {
 		if (!resp.ok) {
 			return parseAutoUpdate(null).enabled;
 		}
-		const data = (await resp.json()) as { value?: unknown };
-		const raw = typeof data.value === "string" ? data.value : null;
+		const raw = z
+			.object({ value: z.string().nullable().catch(null) })
+			.parse(await resp.json()).value;
 		return parseAutoUpdate(raw).enabled;
 	} catch {
 		return parseAutoUpdate(null).enabled;

@@ -17,6 +17,24 @@ test("renders unlimited attachments, agent images, tables, and Mermaid controls"
 	const user = page.locator('[data-message-id="rich-user"]');
 	await expect(user.locator('[data-slot="message-attachments"]')).toBeVisible();
 	await expect(user.getByTestId("message-image-attachment")).toHaveCount(6);
+	// Each tile shows a decoded PNG data URL, not an empty frame.
+	await expect
+		.poll(() =>
+			user
+				.getByTestId("message-image-attachment")
+				.locator("img")
+				.evaluateAll(
+					(images) =>
+						images.filter(
+							(image) =>
+								image instanceof HTMLImageElement &&
+								image.src.startsWith("data:image/png;base64,") &&
+								image.complete &&
+								image.naturalWidth > 0
+						).length
+				)
+		)
+		.toBe(6);
 	await expect(user).toContainText("Startup Runway v2.0.pdf");
 	await expect(user).toContainText(
 		"Startup_Runway_Weekly_Template_v2_Original.docx"
@@ -64,7 +82,7 @@ test("renders unlimited attachments, agent images, tables, and Mermaid controls"
 		expect(composerTile.width).toBeGreaterThanOrEqual(80);
 		expect(composerTile.height).toBeGreaterThanOrEqual(80);
 	}
-	const userImage = user.getByRole("button", { name: "Open brief-cover.svg" });
+	const userImage = user.getByRole("button", { name: "Open brief-cover.png" });
 	await userImage.scrollIntoViewIfNeeded();
 	await userImage.click();
 	const attachmentLightbox = page.getByRole("dialog");
@@ -74,11 +92,27 @@ test("renders unlimited attachments, agent images, tables, and Mermaid controls"
 	).toBeVisible();
 	await expect(
 		attachmentLightbox.getByRole("link", {
-			name: "Download brief-cover.svg",
+			name: "Download brief-cover.png",
 		})
-	).toHaveAttribute("download", "brief-cover.svg");
+	).toHaveAttribute("download", "brief-cover.png");
 	await attachmentLightbox.getByRole("button", { name: "Close" }).click();
 	await expect(attachmentLightbox).toHaveCount(0);
+
+	// The agent's generated image file part renders as a decoded PNG too.
+	await expect
+		.poll(() =>
+			page
+				.getByRole("button", { name: "Open agent-reference.png" })
+				.locator("img")
+				.evaluate(
+					(image) =>
+						image instanceof HTMLImageElement &&
+						image.src.startsWith("data:image/png;base64,") &&
+						image.complete &&
+						image.naturalWidth > 0
+				)
+		)
+		.toBe(true);
 
 	const scroller = viewport(page);
 	await expect(page.locator('[data-streamdown="mermaid-block"]')).toBeVisible({

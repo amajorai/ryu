@@ -131,3 +131,49 @@ describe("tab canvas layout", () => {
 		expect(snapshot.viewport).toEqual({ x: 0, y: 0, zoom: 1 });
 	});
 });
+
+test("saved canvas parsing repairs entries independently and resets nonobject snapshots", () => {
+	const malformed = reconcileTabCanvasSnapshot(
+		{
+			tabs: {
+				good: { x: -120, y: 44, width: 600, height: 300 },
+				broken: null,
+				partial: {
+					x: "24",
+					y: 70,
+					width: Number.POSITIVE_INFINITY,
+					height: 500,
+				},
+			},
+			groups: "invalid",
+			viewport: { x: -10, y: Number.NaN, zoom: 0.2 },
+		},
+		["good", "broken", "partial"],
+		["group:new"]
+	);
+	expect(malformed.tabs.good).toEqual({
+		x: -120,
+		y: 44,
+		width: 600,
+		height: 300,
+	});
+	expect(malformed.tabs.broken).toEqual({
+		x: 500,
+		y: 64,
+		width: 420,
+		height: 280,
+	});
+	expect(malformed.tabs.partial).toEqual({
+		x: 24,
+		y: 70,
+		width: 420,
+		height: 500,
+	});
+	expect(malformed.viewport).toEqual({ x: -10, y: 0, zoom: 0.2 });
+	expect(reconcileTabCanvasSnapshot(null, ["good"], [])).toEqual({
+		version: 1,
+		groups: {},
+		tabs: { good: { x: 24, y: 64, width: 420, height: 280 } },
+		viewport: { x: 0, y: 0, zoom: 1 },
+	});
+});

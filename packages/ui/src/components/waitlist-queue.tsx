@@ -6,14 +6,24 @@ import {
 	Ticket01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	SENSITIVE_MASK,
+	SensitiveDataScope,
+	SensitiveRevealButton,
+	useSensitiveValue,
+} from "@ryu/ui/components/sensitive-value.tsx";
 import { BorderBeam } from "border-beam";
 import { DoorClosed, DoorOpen } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { goalGradient } from "../lib/goal-gradient.ts";
+import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import { formatCount } from "../lib/number-format.ts";
+import { safeHttpUrl } from "../lib/safe-url.ts";
 import { cn } from "../lib/utils.ts";
 import { Button } from "./button.tsx";
 import { METAL_EDGE_TILE_RING_PX, MetalEdge } from "./metal-edge.tsx";
 import PageHeader from "./page-header.tsx";
+import { Progress, ProgressLabel } from "./progress.tsx";
 import { Spinner } from "./spinner.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs.tsx";
 import { UsernameMarquee } from "./username-marquee.tsx";
@@ -40,8 +50,12 @@ const COOLDOWN_TICK_MS = 500;
 const TILE_RADIUS_PX = 12;
 const REFERRAL_RADIUS_PX = 24;
 /** The filled surface inside each ring, rounded to stay concentric with it. */
-const TILE_FACE_RADIUS_PX = TILE_RADIUS_PX - METAL_EDGE_TILE_RING_PX;
-const REFERRAL_FACE_RADIUS_PX = REFERRAL_RADIUS_PX - METAL_EDGE_TILE_RING_PX;
+const WAITLIST_REFERRAL_GOALS = [1, 3, 5, 10] as const;
+/**
+ * A same-site absolute path (`/discord`), never protocol-relative (`//host`,
+ * or `/\host`, which browsers also resolve off-site).
+ */
+const SITE_PATH_RE = /^\/(?![/\\])/;
 
 function readCooldownUntil(): number {
 	try {
@@ -87,7 +101,10 @@ export interface WaitlistQueueProps {
 	className?: string;
 	/** True once the invite link has just been copied; drives the row's label. */
 	copied?: boolean;
-	/** Optional community link supplied by a host surface. */
+	/**
+	 * Optional community link supplied by a host surface: an absolute http(s)
+	 * URL (opens in a new tab) or a same-site path such as `/discord`.
+	 */
 	discordHref?: string;
 	/** The queue read failed. The screen still renders, minus the numbers. */
 	error?: boolean;
@@ -110,6 +127,7 @@ export interface WaitlistQueueProps {
 	onLifetimeAccess?: () => void;
 	/** Opens the waitlist-only leaderboard dialog supplied by the host app. */
 	onOpenLeaderboard?: () => void;
+	onPassTearComplete?: () => void;
 	/** Re-read the queue. Both apps get the button; both rate-limit it here. */
 	onRefresh?: () => void | Promise<void>;
 	onReserve: () => void;
@@ -118,6 +136,10 @@ export interface WaitlistQueueProps {
 	onUnreserve?: () => void;
 	/** Opens the paid plan picker supplied by the host app. */
 	onUpgrade?: () => void;
+	/** Optional decoration drawn over the pass, such as a seasonal companion. */
+	passCompanion?: ReactNode;
+	/** True after a submitted waitlist access code succeeds. */
+	passTorn?: boolean;
 	position?: number | null;
 	/** Optional web-only quest surface. The desktop queue keeps this tab absent. */
 	questsContent?: ReactNode;
@@ -139,7 +161,7 @@ export interface WaitlistQueueProps {
  * about to copy. Falls back to the whole string if it will not parse, so a
  * malformed link still renders rather than disappearing.
  */
-const splitReferralUrl = (url: string): { code: string; origin: string } => {
+const splitReferralUrl = (url: string) => {
 	try {
 		const parsed = new URL(url);
 		return { code: parsed.pathname, origin: parsed.host };
@@ -148,8 +170,17 @@ const splitReferralUrl = (url: string): { code: string; origin: string } => {
 	}
 };
 
-export function WaitlistQueue({
+export function WaitlistQueue(props: WaitlistQueueProps) {
+	return (
+		<SensitiveDataScope>
+			<WaitlistQueueContent {...props} />
+		</SensitiveDataScope>
+	);
+}
+
+function WaitlistQueueContent({
 	accessCodeContent,
+	passCompanion,
 	avatarSeed,
 	avatarUrl,
 	className,
@@ -168,6 +199,7 @@ export function WaitlistQueue({
 	joinedAt,
 	loaded = false,
 	metalTheme = "auto",
+	onPassTearComplete,
 	onApply,
 	onBack,
 	onChangeHandle,
@@ -178,6 +210,7 @@ export function WaitlistQueue({
 	onSignOut,
 	onUnreserve,
 	position,
+	passTorn = false,
 	referralCount = 0,
 	referralUrl,
 	reserved,
@@ -233,6 +266,12 @@ export function WaitlistQueue({
 		}
 	}, [onRefresh]);
 	const link = splitReferralUrl(referralUrl ?? "");
+	const referralVisibility = useSensitiveValue(referralUrl);
+	const discordIsSitePath = SITE_PATH_RE.test(discordHref ?? "");
+	const safeDiscordHref = discordIsSitePath
+		? discordHref
+		: safeHttpUrl(discordHref);
+	const referralGoal = goalGradient(referralCount, WAITLIST_REFERRAL_GOALS);
 	// Once a handle is claimed, that IS the headline — it is the newest and most
 	// specific thing true about this user, and repeating "you're in line" under it
 	// says nothing the position on the pass does not already say.
@@ -243,9 +282,7 @@ export function WaitlistQueue({
 		headerTitle = `You're in line, ${userName}`;
 	}
 	const showStats =
-		loaded &&
-		typeof totalWaiting === "number" &&
-		totalWaiting > QUEUE_STATS_MIN;
+		loaded && isNativeNumber(totalWaiting) && totalWaiting > QUEUE_STATS_MIN;
 
 	// Where the strip opens when the member has not steered it themselves: the
 	// one thing left to do. Unclaimed handle first, and once it is claimed the
@@ -315,15 +352,19 @@ export function WaitlistQueue({
 								)}
 							</Button>
 						) : null}
-						{discordHref ? (
+						{safeDiscordHref ? (
 							<Button
 								className="flex-1"
 								render={
-									<a
-										href={discordHref}
-										rel="noopener noreferrer"
-										target="_blank"
-									/>
+									discordIsSitePath ? (
+										<a href={safeDiscordHref} />
+									) : (
+										<a
+											href={safeDiscordHref}
+											rel="noopener noreferrer"
+											target="_blank"
+										/>
+									)
 								}
 								size="lg"
 								variant="outline"
@@ -342,8 +383,8 @@ export function WaitlistQueue({
 							type="button"
 							variant="destructive"
 						>
-							<DoorClosed className="size-4 transition-all duration-200 group-hover:hidden" />
-							<DoorOpen className="hidden size-4 transition-all duration-200 group-hover:block" />
+							<DoorClosed className="size-4 group-hover:hidden" />
+							<DoorOpen className="hidden size-4 group-hover:block" />
 							{signingOut ? "Signing out…" : "Sign out"}
 						</Button>
 					</div>
@@ -370,10 +411,7 @@ export function WaitlistQueue({
 								small
 								theme={metalTheme}
 							>
-								<div
-									className="h-full bg-muted px-4 py-3"
-									style={{ borderRadius: `${TILE_FACE_RADIUS_PX}px` }}
-								>
+								<div className="h-full rounded-[11px] bg-muted px-4 py-3">
 									<p className="text-muted-foreground text-xs">In line</p>
 									<p className="font-medium text-lg tabular-nums">
 										{formatCount(totalWaiting) ?? "—"}
@@ -387,10 +425,7 @@ export function WaitlistQueue({
 								small
 								theme={metalTheme}
 							>
-								<div
-									className="h-full bg-muted px-4 py-3"
-									style={{ borderRadius: `${TILE_FACE_RADIUS_PX}px` }}
-								>
+								<div className="h-full rounded-[11px] bg-muted px-4 py-3">
 									<p className="text-muted-foreground text-xs">
 										Estimated wait
 									</p>
@@ -455,6 +490,57 @@ export function WaitlistQueue({
 									subtitle="Want in faster? Every friend who joins on your link moves you up the queue."
 									title="Share your link"
 								/>
+								<div
+									className={cn(
+										"rounded-2xl border p-4 transition-colors",
+										referralGoal.nearGoal
+											? "border-primary/40 bg-primary/10"
+											: "border-border bg-muted/30"
+									)}
+									data-goal-gradient="waitlist-referrals"
+								>
+									<div className="flex items-start justify-between gap-3">
+										<div className="min-w-0">
+											<p className="font-medium text-sm">
+												Your next queue goal
+											</p>
+											<p className="mt-1 text-muted-foreground text-sm">
+												{referralGoal.complete
+													? "You reached the 10-referral checkpoint. Keep sharing as new people join."
+													: referralGoal.remaining === 1
+														? "One more friend reaches your next checkpoint."
+														: referralGoal.current === 0
+															? "Invite one friend to start moving up the queue."
+															: referralGoal.remaining +
+																" more friends reach your next checkpoint."}
+											</p>
+										</div>
+										<span className="shrink-0 rounded-full bg-background/70 px-2.5 py-1 font-medium text-primary text-xs">
+											{referralGoal.complete
+												? "Checkpoint reached"
+												: `${referralGoal.remaining} to go`}
+										</span>
+									</div>
+									<Progress
+										className="mt-4 gap-2"
+										value={referralGoal.progressPercent}
+									>
+										<ProgressLabel className="text-xs">
+											<span>
+												{formatCount(referralGoal.current) ?? "—"}{" "}
+												{referralGoal.current === 1 ? "referral" : "referrals"}
+											</span>
+											<span className="text-muted-foreground">
+												{referralGoal.target === null
+													? " / keep climbing"
+													: ` / ${referralGoal.target}`}
+											</span>
+										</ProgressLabel>
+									</Progress>
+									<p className="mt-3 text-muted-foreground text-xs">
+										Each confirmed signup can move you up the waitlist.
+									</p>
+								</div>
 								{/* The username reel: the handle on the pass is the same name
 								    everyone on your link can now claim for themselves. A short
 								    reel keeps it in the room without stealing the step. */}
@@ -480,22 +566,30 @@ export function WaitlistQueue({
 									theme={metalTheme === "auto" ? "auto" : metalTheme}
 								>
 									<button
-										className="flex h-16 w-full items-center justify-between gap-3 bg-muted px-5 text-left transition-colors hover:bg-[color-mix(in_oklab,var(--muted),var(--foreground)_5%)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+										className="flex h-16 w-full items-center justify-between gap-3 rounded-[23px] bg-muted px-5 text-left transition-colors hover:bg-[color-mix(in_oklab,var(--muted),var(--foreground)_5%)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring"
 										onClick={onCopyReferral}
-										style={{ borderRadius: `${REFERRAL_FACE_RADIUS_PX}px` }}
 										type="button"
 									>
 										<span className="min-w-0 truncate">
 											<span className="text-muted-foreground">
 												{link.origin}
 											</span>
-											<span className="font-medium">{link.code}</span>
+											<span className="font-medium">
+												{referralVisibility.revealed
+													? link.code
+													: SENSITIVE_MASK}
+											</span>
 										</span>
 										<span className="shrink-0 text-muted-foreground text-sm">
 											{copied ? "Copied" : "Copy"}
 										</span>
 									</button>
 								</BorderBeam>
+								<SensitiveRevealButton
+									label="referral link"
+									onToggle={referralVisibility.toggle}
+									revealed={referralVisibility.revealed}
+								/>
 								{/* The referral count rides on the button rather than sitting
 								    in a tile of its own: it is the score for the action the
 								    button performs, and it is private, so it does not belong
@@ -514,7 +608,9 @@ export function WaitlistQueue({
 										size={18}
 										strokeWidth={2}
 									/>
-									Share your pass
+									{referralGoal.nearGoal
+										? "Finish the checkpoint"
+										: "Share your pass"}
 									<span className="text-primary-foreground/70 tabular-nums">
 										({formatCount(referralCount) ?? "—"}{" "}
 										{referralCount === 1 ? "friend" : "friends"} referred)
@@ -622,15 +718,18 @@ export function WaitlistQueue({
 			) : null}
 
 			<div className="mx-auto grid w-full max-w-5xl items-center gap-14 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] md:gap-24">
-				<div className="mx-auto w-full max-w-sm md:mx-0">
+				<div className="relative mx-auto w-full max-w-sm md:mx-0">
+					{passCompanion}
 					<WaitlistPass
 						avatarSeed={avatarSeed}
 						avatarUrl={avatarUrl}
 						joinedAt={joinedAt}
 						metalTheme={metalTheme}
 						name={userName}
+						onTearComplete={onPassTearComplete}
 						position={position ?? null}
 						referralUrl={referralUrl}
+						torn={passTorn}
 						totalWaiting={totalWaiting ?? null}
 						username={reserved}
 					/>

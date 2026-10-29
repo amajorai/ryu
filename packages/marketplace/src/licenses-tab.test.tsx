@@ -11,7 +11,7 @@ import {
 	type MarketplaceHost,
 	MarketplaceHostProvider,
 } from "./host.tsx";
-import { LicensesTab } from "./licenses-tab.tsx";
+import { LicensesTab, licenseIsManageable } from "./licenses-tab.tsx";
 import type { OwnedLicense } from "./types.ts";
 
 function makeLicense(over: Partial<OwnedLicense> = {}): OwnedLicense {
@@ -39,7 +39,10 @@ function makeLicense(over: Partial<OwnedLicense> = {}): OwnedLicense {
 	};
 }
 
-function makeHost(over: Partial<LicensesState>): MarketplaceHost {
+function makeHost(
+	over: Partial<LicensesState>,
+	hostOver: Partial<MarketplaceHost> = {}
+): MarketplaceHost {
 	const licenses: LicensesState = {
 		authed: true,
 		error: null,
@@ -56,13 +59,18 @@ function makeHost(over: Partial<LicensesState>): MarketplaceHost {
 		useSellerStatus: () => {
 			throw new Error("unused");
 		},
+		...hostOver,
 	};
 }
 
-function render(over: Partial<LicensesState>): string {
+function render(
+	over: Partial<LicensesState>,
+	hostOver: Partial<MarketplaceHost> = {},
+	layout: "page" | "settings" = "page"
+): string {
 	return renderToStaticMarkup(
-		<MarketplaceHostProvider host={makeHost(over)}>
-			<LicensesTab />
+		<MarketplaceHostProvider host={makeHost(over, hostOver)}>
+			<LicensesTab layout={layout} />
 		</MarketplaceHostProvider>
 	);
 }
@@ -126,6 +134,20 @@ describe("LicensesTab — populated rows", () => {
 		expect(html).toContain("refunded");
 	});
 
+	test("a subscription set to end says its renewal is off", () => {
+		const html = render({
+			licenses: [
+				makeLicense({
+					cancelAtPeriodEnd: true,
+					id: "lic_s",
+					stripeSubscriptionId: "sub_1",
+				}),
+			],
+		});
+		expect(html).toContain("Renewal off");
+		expect(render({ licenses: [makeLicense()] })).not.toContain("Renewal off");
+	});
+
 	test("a disputed license surfaces the status badge", () => {
 		const html = render({
 			licenses: [makeLicense({ id: "lic_d", status: "disputed" })],
@@ -138,5 +160,82 @@ describe("LicensesTab — populated rows", () => {
 			licenses: [makeLicense({ currency: "eur", priceMinor: 500 })],
 		});
 		expect(html).toContain("5.00");
+	});
+});
+
+describe("LicensesTab — manage action", () => {
+	const subscription = makeLicense({
+		id: "lic_sub",
+		itemName: "Monthly thing",
+		stripeSubscriptionId: "sub_1",
+	});
+	const oneTime = makeLicense({ id: "lic_once", itemName: "Once thing" });
+
+	test("only a subscription license is manageable", () => {
+		expect(licenseIsManageable(subscription)).toBe(true);
+		expect(licenseIsManageable(oneTime)).toBe(false);
+	});
+
+	test("a host that can open a license gets Manage on subscription rows only", () => {
+		const html = render(
+			{ licenses: [subscription, oneTime] },
+			{ openLicense: () => undefined }
+		);
+		expect(html).toContain('aria-label="Manage Monthly thing"');
+		expect(html).not.toContain('aria-label="Manage Once thing"');
+	});
+
+	test("a host without openLicense renders no Manage action", () => {
+		const html = render({ licenses: [subscription] });
+		expect(html).not.toContain("Manage");
+	});
+});
+
+describe("LicensesTab — settings layout", () => {
+	test("the page layout keeps its own frame and title", () => {
+		const html = render({ licenses: [makeLicense()] });
+		expect(html).toContain("max-w-2xl");
+		expect(html).toContain("My licenses");
+	});
+
+	test("a settings pane drops the page frame for a Licenses section", () => {
+		const html = render({ licenses: [makeLicense()] }, {}, "settings");
+		expect(html).not.toContain("max-w-2xl");
+		expect(html).not.toContain("<h2");
+		expect(html).toContain("Licenses");
+		expect(html).toContain("Refresh");
+		expect(html).toContain('data-slot="item"');
+		expect(html).toContain("Thing");
+		expect(html).toContain("v1.2.3");
+		expect(html).toContain("19.99");
+	});
+
+	test("settings states keep their copy and actions", () => {
+		expect(
+			render({ error: { kind: "network", message: "offline" } }, {}, "settings")
+		).toContain("load your licenses");
+		const empty = render(
+			{ licenses: [] },
+			{ openMarketplace: () => undefined },
+			"settings"
+		);
+		expect(empty).toContain("No purchases yet");
+		expect(empty).toContain("Browse the marketplace");
+	});
+
+	test("settings rows keep the Manage action for subscriptions", () => {
+		const html = render(
+			{
+				licenses: [
+					makeLicense({
+						itemName: "Monthly thing",
+						stripeSubscriptionId: "sub_1",
+					}),
+				],
+			},
+			{ openLicense: () => undefined },
+			"settings"
+		);
+		expect(html).toContain('aria-label="Manage Monthly thing"');
 	});
 });

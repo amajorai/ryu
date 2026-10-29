@@ -1,7 +1,14 @@
+/**
+ * One probe of the device-login state: `true` once the flow signed in, `false`
+ * while it is still pending, or `{ failed }` when it ended without a sign-in.
+ */
+export type AccountProbeResult = boolean | { failed: string };
+
 /** A view-owned observer of Core's device-login state, never the login itself. */
 export function startAccountPolling(
-	probe: (signal: AbortSignal) => Promise<boolean>,
-	complete: (signedIn: boolean) => void,
+	probe: (signal: AbortSignal) => Promise<AccountProbeResult>,
+	/** `failure` is the flow's reason when it ended; absent on a timeout. */
+	complete: (signedIn: boolean, failure?: string) => void,
 	{ intervalMs, timeoutMs }: { intervalMs: number; timeoutMs: number }
 ): () => void {
 	const controller = new AbortController();
@@ -16,26 +23,28 @@ export function startAccountPolling(
 		clearTimeout(deadline);
 		controller.abort();
 	};
-	const finish = (signedIn: boolean) => {
+	const finish = (signedIn: boolean, failure?: string) => {
 		if (stopped) {
 			return;
 		}
 		stop();
-		complete(signedIn);
+		complete(signedIn, failure);
 	};
 	const deadline = setTimeout(() => finish(false), timeoutMs);
 	const tick = async () => {
 		if (stopped) {
 			return;
 		}
-		const signedIn = await probe(controller.signal).catch(() => false);
+		const result = await probe(controller.signal).catch(() => false);
 		if (stopped) {
 			return;
 		}
-		if (signedIn) {
+		if (result === true) {
 			finish(true);
-		} else {
+		} else if (result === false) {
 			timer = setTimeout(tick, intervalMs);
+		} else {
+			finish(false, result.failed);
 		}
 	};
 	timer = setTimeout(tick, intervalMs);

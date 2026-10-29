@@ -22,13 +22,15 @@ import {
 	usePluginContributionsQuery,
 } from "@/src/hooks/usePluginContributions.ts";
 
-export function useSidebarModes(): {
+export interface SidebarModesResult {
 	modes: SidebarModeDescriptor[];
 	/** Whether Core ANSWERED — not whether it returned anything, and not merely
 	 *  whether the fetch finished. `resolveSidebarMode` needs the difference to tell
 	 *  a mode that is not-fetched-yet from one whose app is gone. */
 	settled: boolean;
-} {
+}
+
+export function useSidebarModes(): SidebarModesResult {
 	const { sidebar_sections: sections, sidebar_modes: modes } =
 		usePluginContributions();
 	// `isSuccess`, deliberately NOT `isFetched`: this query is `retry: false`, so a
@@ -40,7 +42,7 @@ export function useSidebarModes(): {
 	// unsettled case.
 	const { isSuccess } = usePluginContributionsQuery();
 	const sectionKeys = useMemo<SectionKey[]>(
-		() => sections.map((s) => `plugin:${s.plugin}:${s.id}` as SectionKey),
+		() => sections.map((s): SectionKey => `plugin:${s.plugin}:${s.id}`),
 		[sections]
 	);
 	return {

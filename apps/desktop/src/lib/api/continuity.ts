@@ -5,14 +5,19 @@ import {
 	type RnpExportRequestV0,
 	type RnpResumeResultV0,
 } from "@ryuhq/protocol/continuity";
+import { z } from "zod";
 import { type ApiTarget, request } from "./client.ts";
+import {
+	type GatewayJsonValue,
+	gatewayJsonValueSchema,
+} from "./gateway-json-contracts.ts";
 
 export interface ContinuityTransport {
 	send: (input: {
-		body: unknown;
+		body: RnpExportRequestV0 | RnpContinuityBundleV0;
 		path: string;
 		target: ApiTarget;
-	}) => Promise<unknown>;
+	}) => Promise<GatewayJsonValue | RnpContinuityBundleV0>;
 }
 
 export interface TransferConversationInput {
@@ -25,50 +30,36 @@ export interface TransferConversationInput {
 	transcript?: RnpExportRequestV0["transcript"];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNonnegativeSafeInteger(value: unknown): value is number {
-	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function parseResumeResult(value: unknown): RnpResumeResultV0 {
-	if (!(isRecord(value) && value.version === 0)) {
+// This is the complete destination reply declared by the RNP v0 owner.
+// As before, parse strips additive fields and the caller reports one stable error.
+const resumeResultSchema = z.object({
+	version: z.literal(0),
+	conversationId: z.string(),
+	status: z.enum(["created", "merged", "unchanged"]),
+	imported: z.object({
+		messages: z.number().refine(Number.isSafeInteger).nonnegative(),
+		contextItems: z.number().refine(Number.isSafeInteger).nonnegative(),
+	}),
+	warnings: z.array(z.enum(["agent-unavailable", "earlier-messages-omitted"])),
+}) satisfies z.ZodType<RnpResumeResultV0>;
+function parseResumeResult(
+	value: Parameters<typeof resumeResultSchema.parse>[0]
+): RnpResumeResultV0 {
+	const parsed = resumeResultSchema.safeParse(value);
+	if (!parsed.success) {
 		throw new Error("The destination returned an invalid continuity response.");
 	}
-	if (
-		typeof value.conversationId !== "string" ||
-		(value.status !== "created" &&
-			value.status !== "merged" &&
-			value.status !== "unchanged") ||
-		!isRecord(value.imported) ||
-		!isNonnegativeSafeInteger(value.imported.messages) ||
-		!isNonnegativeSafeInteger(value.imported.contextItems) ||
-		!Array.isArray(value.warnings) ||
-		!value.warnings.every(
-			(warning) =>
-				warning === "agent-unavailable" ||
-				warning === "earlier-messages-omitted"
-		)
-	) {
-		throw new Error("The destination returned an invalid continuity response.");
-	}
-	return {
-		version: 0,
-		conversationId: value.conversationId,
-		status: value.status,
-		imported: {
-			messages: value.imported.messages,
-			contextItems: value.imported.contextItems,
-		},
-		warnings: value.warnings,
-	};
+	return parsed.data;
 }
 
 const httpTransport: ContinuityTransport = {
 	send: ({ body, path, target }) =>
-		request<unknown>(target, path, { method: "POST", body }),
+		request(
+			target,
+			path,
+			{ method: "POST", body },
+			gatewayJsonValueSchema
+		).then(gatewayJsonValueSchema.parse),
 };
 
 export function createContinuityClient(transport: ContinuityTransport) {

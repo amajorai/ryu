@@ -54,9 +54,19 @@ interface InlineComboboxContextValue {
 	trigger: string;
 }
 
-const InlineComboboxContext = createContext<InlineComboboxContextValue>(
-	null as unknown as InlineComboboxContextValue
+const InlineComboboxContext = createContext<InlineComboboxContextValue | null>(
+	null
 );
+
+function useRequiredInlineComboboxContext(): InlineComboboxContextValue {
+	const context = useContext(InlineComboboxContext);
+	if (context === null) {
+		throw new Error(
+			"InlineCombobox children require an InlineCombobox provider"
+		);
+	}
+	return context;
+}
 
 const defaultFilter: FilterFn = (
 	{ group, keywords = [], label, value },
@@ -102,7 +112,7 @@ const InlineCombobox = ({
 
 	// Check if current user is the creator of this element (for Yjs collaboration)
 	const isCreator = useMemo(() => {
-		const elementUserId = (element as any).userId;
+		const elementUserId = element.userId;
 		const currentUserId = editor.meta.userId;
 
 		// If no userId (backwards compatibility or non-Yjs), allow
@@ -238,7 +248,7 @@ const InlineComboboxInput = ({
 		inputRef: contextRef,
 		showTrigger,
 		trigger,
-	} = useContext(InlineComboboxContext);
+	} = useRequiredInlineComboboxContext();
 
 	const store = useComboboxContext()!;
 	const value = store.useState("value");
@@ -358,7 +368,7 @@ const InlineComboboxItem = ({
 	Required<Pick<ComboboxItemProps, "value">>) => {
 	const { value } = props;
 
-	const { filter, removeInput } = useContext(InlineComboboxContext);
+	const { filter, removeInput } = useRequiredInlineComboboxContext();
 
 	const store = useComboboxContext()!;
 
@@ -367,6 +377,9 @@ const InlineComboboxItem = ({
 
 	const visible = useMemo(
 		() =>
+			// SAFETY: search captures filter && Ariakit's string-valued "value"
+			// state. This same immutable filter's falsy branch short-circuits here;
+			// the invocation therefore receives the captured SDK string.
 			!filter || filter({ group, keywords, label, value }, search as string),
 		[filter, group, keywords, label, value, search]
 	);
@@ -391,7 +404,7 @@ const InlineComboboxEmpty = ({
 	children,
 	className,
 }: HTMLAttributes<HTMLDivElement>) => {
-	const { setHasEmpty } = useContext(InlineComboboxContext);
+	const { setHasEmpty } = useRequiredInlineComboboxContext();
 	const store = useComboboxContext()!;
 	const items = store.useState("items");
 

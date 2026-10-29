@@ -18,6 +18,8 @@
 
 import { createRequire } from "node:module";
 import type { BrowserWindow } from "electron";
+import { z } from "zod";
+import { presentWindow } from "./visibility.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -54,21 +56,6 @@ export function isFullscreenState(state: number): boolean {
 	);
 }
 
-/** The minimal slice of the `koffi` FFI surface this module uses. */
-interface KoffiLib {
-	func: (
-		convention: string,
-		name: string,
-		result: string,
-		args: unknown[]
-	) => (...callArgs: unknown[]) => number;
-}
-interface Koffi {
-	load(path: string): KoffiLib;
-	out(type: unknown): unknown;
-	pointer(type: string): unknown;
-}
-
 /** The bound `SHQueryUserNotificationState` function once resolved, or null. */
 type QueryStateFn = (out: number[]) => number;
 let queryState: QueryStateFn | null = null;
@@ -89,7 +76,9 @@ function getQueryState(): QueryStateFn | null {
 		return null;
 	}
 	try {
-		const koffi = require("koffi") as Koffi;
+		// SAFETY: The guarded optional dependency is loaded by its package name;
+		// these bindings use Koffi's installed public module declarations.
+		const koffi = require("koffi") as typeof import("koffi");
 		const shell32 = koffi.load("shell32.dll");
 		// HRESULT SHQueryUserNotificationState(QUERY_USER_NOTIFICATION_STATE *pquns)
 		const fn = shell32.func(
@@ -98,7 +87,10 @@ function getQueryState(): QueryStateFn | null {
 			"int",
 			[koffi.out(koffi.pointer("int"))]
 		);
-		queryState = (out: number[]) => fn(out) as number;
+		queryState = (out: number[]) => {
+			const result = z.number().int().safeParse(fn(out));
+			return result.success ? result.data : -1;
+		};
 	} catch {
 		queryState = null;
 	}
@@ -149,7 +141,7 @@ function restoreIfHidden(): void {
 	hiddenByFullscreen = false;
 	const win = getWindow();
 	if (win && !win.isDestroyed() && !win.isVisible()) {
-		win.show();
+		presentWindow(win, false);
 	}
 }
 

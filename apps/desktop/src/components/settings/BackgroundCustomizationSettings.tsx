@@ -5,23 +5,23 @@ import {
 	Image01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ColorPicker,
 	ColorPickerContent,
 	ColorPickerPanel,
 	ColorPickerTrigger,
-} from "@ryu/ui/components/color-picker";
-import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid";
+} from "@ryu/ui/components/color-picker.tsx";
+import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useRef, useState } from "react";
 import {
 	type BackgroundFit,
@@ -36,6 +36,8 @@ import {
 	setSurfaceBackground,
 	setSurfaceImage,
 } from "@/src/hooks/useBackgroundCustomization.ts";
+import previewStyles from "./settings-preview.module.css";
+import type { PreviewStyle } from "./settings-preview-style.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
 const FIT_OPTIONS: Array<{ value: BackgroundFit; label: string }> = [
@@ -73,9 +75,10 @@ function ColorSwatch({
 	return (
 		<ColorPicker format="hex" onValueChange={onChange} value={hex}>
 			<ColorPickerTrigger
+				appearance="hex-field"
 				aria-label={ariaLabel}
-				className="flex h-7 w-24 cursor-pointer items-center justify-center rounded border border-border px-2 font-mono text-[11px] uppercase transition-opacity hover:opacity-90"
-				style={{ backgroundColor: hex, color: getContrastColor(hex) }}
+				className="w-24"
+				palette={{ fillHex: hex, foregroundHex: getContrastColor(hex) }}
 			>
 				{hex}
 			</ColorPickerTrigger>
@@ -95,7 +98,7 @@ function FieldRow({
 }) {
 	return (
 		<div className="flex items-center gap-3">
-			<span className="w-28 flex-shrink-0 text-muted-foreground text-xs">
+			<span className="w-28 shrink-0 text-muted-foreground text-xs">
 				{label}
 			</span>
 			<div className="flex flex-1 items-center justify-end gap-2">
@@ -148,23 +151,26 @@ function GradientStopsEditor({
 		]);
 	};
 
+	const gradientStyle: PreviewStyle = {
+		"--settings-preview-image": buildGradientCss(stops, angle),
+	};
 	return (
 		<div className="space-y-2.5">
 			{/* Live preview of the stops at their current positions. */}
 			<div
 				aria-label="Gradient preview"
-				className="h-6 w-full rounded-md border border-border/60"
+				className={`h-6 w-full rounded-md border border-border/60 ${previewStyles.gradient}`}
 				role="img"
-				style={{ backgroundImage: buildGradientCss(stops, angle) }}
+				style={gradientStyle}
 			/>
 			{stops.map((stop, i) => (
 				<div
 					className="flex items-center gap-2"
-					// biome-ignore lint/suspicious/noArrayIndexKey: stops have no
+					// stops have no
 					// stable identity and rows keep insertion order.
 					key={i}
 				>
-					<span className="w-5 flex-shrink-0 text-center font-mono text-[11px] text-muted-foreground">
+					<span className="type-caption w-5 shrink-0 text-center font-mono text-muted-foreground">
 						{i + 1}
 					</span>
 					<ColorSwatch
@@ -183,8 +189,9 @@ function GradientStopsEditor({
 						value={stop.position}
 					/>
 					<Button
+						appearance="recipient-remove"
 						aria-label={`Remove gradient stop ${i + 1}`}
-						className="size-7 flex-shrink-0 p-0"
+						className="size-7 shrink-0"
 						disabled={stops.length <= 2}
 						onClick={() => remove(i)}
 						size="sm"
@@ -195,9 +202,10 @@ function GradientStopsEditor({
 				</div>
 			))}
 			<Button
-				className="h-7 w-full text-xs"
+				className="h-7 w-full"
 				onClick={add}
 				size="sm"
+				typography="compact"
 				variant="secondary"
 			>
 				<HugeiconsIcon className="mr-1" icon={Add01Icon} size={12} />
@@ -212,6 +220,7 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 		loadSurfaceBackground(surface)
 	);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const surfaceLabel = surface === "sidebar" ? "Sidebar" : "Page";
 
 	// Reflect external changes (Reset-to-defaults elsewhere in this tab, or
 	// another window) by reloading from the store when one is signaled.
@@ -261,6 +270,11 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 
 	const scaleApplies = bg.imageFit === "center" || bg.imageFit === "tile";
 
+	const imageStyle: PreviewStyle = {
+		"--settings-preview-image": bg.imageSrc
+			? `url("${bg.imageSrc}")`
+			: undefined,
+	};
 	return (
 		<div className="space-y-4">
 			{/* Gradient */}
@@ -273,6 +287,7 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 						</p>
 					</div>
 					<Switch
+						aria-label={`${surfaceLabel} gradient background`}
 						checked={bg.gradientEnabled}
 						onCheckedChange={(v) => update({ gradientEnabled: v })}
 					/>
@@ -307,6 +322,7 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 						</p>
 					</div>
 					<Switch
+						aria-label={`${surfaceLabel} image background`}
 						checked={bg.imageEnabled}
 						onCheckedChange={(v) => update({ imageEnabled: v })}
 					/>
@@ -327,16 +343,8 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 						/>
 						<div className="flex items-center gap-3">
 							<div
-								className="h-12 w-20 flex-shrink-0 overflow-hidden rounded bg-muted"
-								style={
-									bg.imageSrc
-										? {
-												backgroundImage: `url("${bg.imageSrc}")`,
-												backgroundSize: "cover",
-												backgroundPosition: "center",
-											}
-										: undefined
-								}
+								className={`h-12 w-20 shrink-0 overflow-hidden rounded bg-muted ${previewStyles.image}`}
+								style={imageStyle}
 							/>
 							<Button
 								onClick={() => fileInputRef.current?.click()}
@@ -363,14 +371,15 @@ function SurfaceBackgroundEditor({ surface }: { surface: BackgroundSurface }) {
 						{bg.imageSrc ? (
 							<>
 								<FieldRow label="Fit">
-									<Select
+									<Select<BackgroundFit>
 										items={FIT_OPTIONS}
-										onValueChange={(v) =>
-											v && update({ imageFit: v as BackgroundFit })
-										}
+										onValueChange={(v) => v && update({ imageFit: v })}
 										value={bg.imageFit}
 									>
-										<SelectTrigger className="h-8 w-36 text-sm">
+										<SelectTrigger
+											aria-label={`${surfaceLabel} image fit`}
+											className="h-8 w-36"
+										>
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>

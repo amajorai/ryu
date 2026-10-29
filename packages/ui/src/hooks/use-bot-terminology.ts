@@ -4,7 +4,8 @@ import { useCallback, useSyncExternalStore } from "react";
 export const BOT_TERMINOLOGY_STORAGE_KEY = "ryu:bot-terminology";
 export const DEFAULT_BOT_TERMINOLOGY = true;
 
-const AGENT_WORD_RE = /\b(agents?)\b/gi;
+// An optional "an " before a singular agent, which becomes "a bot".
+const AGENT_WORD_RE = /\b(?:(an) )?(agents?)\b/gi;
 const listeners = new Set<() => void>();
 
 function preserveCase(source: string, replacement: string): string {
@@ -30,10 +31,20 @@ function preserveCase(source: string, replacement: string): string {
  * working naturally.
  */
 export function replaceAgentTerms(text: string): string {
-	return text.replace(AGENT_WORD_RE, (match) => {
-		const replacement = match.toLowerCase().endsWith("s") ? "bots" : "bot";
-		return preserveCase(match, replacement);
-	});
+	return text.replace(
+		AGENT_WORD_RE,
+		(_match, article: string | undefined, word: string) => {
+			const plural = word.toLowerCase().endsWith("s");
+			const noun = preserveCase(word, plural ? "bots" : "bot");
+			if (!article) {
+				return noun;
+			}
+			// "an agent" reads "a bot", not "an bot".
+			return plural
+				? `${article} ${noun}`
+				: `${preserveCase(article, "a")} ${noun}`;
+		}
+	);
 }
 
 /** Current preference, safe when storage is unavailable. */
@@ -52,12 +63,12 @@ function subscribe(callback: () => void): () => void {
 			callback();
 		}
 	};
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.addEventListener("storage", onStorage);
 	}
 	return () => {
 		listeners.delete(callback);
-		if (typeof window !== "undefined") {
+		if (globalThis.window !== undefined) {
 			window.removeEventListener("storage", onStorage);
 		}
 	};

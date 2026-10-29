@@ -43,6 +43,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Tooltip,
 	TooltipContent,
@@ -61,46 +62,48 @@ import {
 } from "../friendly.ts";
 
 const BASE_CHIP =
-	"inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-3xl px-2 py-0.5 font-medium text-[11px] whitespace-nowrap transition-colors";
+	"inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-3xl px-2 py-0.5 font-medium type-caption whitespace-nowrap transition-colors";
 
 /** Subtle, theme-aware background per badge tone (no border — fill only). */
-const TONE_CLASS: Record<BadgeTone, string> = {
+const TONE_CLASS = {
 	neutral: "bg-foreground/8 text-foreground/80",
 	blue: "bg-info/12 text-status-info dark:text-status-info",
-	violet: "bg-violet-500/12 text-violet-600 dark:text-violet-400",
+	violet: "bg-primary/12 text-primary",
 	amber: "bg-warning/12 text-status-warning dark:text-status-warning",
 	rose: "bg-destructive/12 text-status-destructive dark:text-status-destructive",
 	emerald: "bg-success/12 text-status-success dark:text-status-success",
-};
+} satisfies Record<BadgeTone, string>;
 
 /** Token id → icon. Falls back to a tag icon via {@link tokenIcon}. */
-const TOKEN_ICON: Record<string, IconSvgElement> = {
-	instruct: Message01Icon,
-	chat: BubbleChatIcon,
-	base: BookOpen01Icon,
-	reasoning: AiBrain01Icon,
-	r1: IdeaIcon,
-	cot: Route01Icon,
-	mtp: FlashIcon,
-	uncensored: SquareUnlock01Icon,
-	qat: SparklesIcon,
-	finetuned: Settings01Icon,
-	distilled: DistributionIcon,
-	merged: GitMergeIcon,
-	vision: ViewIcon,
-	coder: SourceCodeIcon,
-	math: Calculator01Icon,
-	moe: AiNetworkIcon,
-	precision: Target01Icon,
-	gguf: Package01Icon,
-	format: File01Icon,
-	preview: TestTube01Icon,
-	longcontext: TextWrapIcon,
-};
+const TOKEN_ICON = new Map<string, IconSvgElement>(
+	Object.entries({
+		instruct: Message01Icon,
+		chat: BubbleChatIcon,
+		base: BookOpen01Icon,
+		reasoning: AiBrain01Icon,
+		r1: IdeaIcon,
+		cot: Route01Icon,
+		mtp: FlashIcon,
+		uncensored: SquareUnlock01Icon,
+		qat: SparklesIcon,
+		finetuned: Settings01Icon,
+		distilled: DistributionIcon,
+		merged: GitMergeIcon,
+		vision: ViewIcon,
+		coder: SourceCodeIcon,
+		math: Calculator01Icon,
+		moe: AiNetworkIcon,
+		precision: Target01Icon,
+		gguf: Package01Icon,
+		format: File01Icon,
+		preview: TestTube01Icon,
+		longcontext: TextWrapIcon,
+	})
+);
 
 /** Icon for a token id (tag icon when the token has no dedicated one). */
 export function tokenIcon(id: string): IconSvgElement {
-	return TOKEN_ICON[id] ?? Tag01Icon;
+	return TOKEN_ICON.get(id) ?? Tag01Icon;
 }
 
 /** Icon for the org/owner "browse this org" filter chip. */
@@ -109,14 +112,13 @@ export const ORG_ICON: IconSvgElement = Building01Icon;
 export const TAG_ICON: IconSvgElement = Tag01Icon;
 
 /** Icon + label per input/output modality. */
-const MODALITY_META: Record<Modality, { icon: IconSvgElement; label: string }> =
-	{
-		text: { icon: TextFontIcon, label: "Text" },
-		image: { icon: Image01Icon, label: "Image" },
-		pdf: { icon: Pdf01Icon, label: "PDF" },
-		video: { icon: Video01Icon, label: "Video" },
-		audio: { icon: AudioWave01Icon, label: "Audio" },
-	};
+const MODALITY_META = {
+	text: { icon: TextFontIcon, label: "Text" },
+	image: { icon: Image01Icon, label: "Image" },
+	pdf: { icon: Pdf01Icon, label: "PDF" },
+	video: { icon: Video01Icon, label: "Video" },
+	audio: { icon: AudioWave01Icon, label: "Audio" },
+} satisfies Record<Modality, { icon: IconSvgElement; label: string }>;
 
 /** One modality chip — icon + label, or icon-only with a tooltip in compact mode. */
 function ModalityChip({ m, compact }: { m: Modality; compact?: boolean }) {
@@ -362,6 +364,7 @@ export interface ActiveChip {
 
 /** Renders the active token + org filter chips with a per-chip remove button. */
 export function FilterChipBar({ chips }: { chips: ActiveChip[] }) {
+	const tl = useLiteralMessages();
 	if (chips.length === 0) {
 		return null;
 	}
@@ -376,7 +379,9 @@ export function FilterChipBar({ chips }: { chips: ActiveChip[] }) {
 					<HugeiconsIcon className="size-3" icon={chip.icon} />
 					{chip.label}
 					<button
-						aria-label={`Remove filter ${chip.label}`}
+						aria-label={tl("Remove filter {filterLabel}", {
+							filterLabel: chip.label,
+						})}
 						className="-mr-1 rounded-full p-0.5 hover:bg-foreground/10"
 						onClick={chip.onRemove}
 						type="button"

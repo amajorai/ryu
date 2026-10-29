@@ -7,6 +7,7 @@
  * copied into every satellite.
  */
 
+import { isNativeText } from "../lib/native-primitive-observation.ts";
 export type SandboxToastKind = "error" | "info" | "success" | "warning";
 
 export interface SandboxToastOptions {
@@ -21,26 +22,26 @@ const CONTAINER_ID = "ryu-sandbox-toast-container";
 const DEFAULT_DURATION_MS = 3200;
 const EXIT_DURATION_MS = 200;
 
-const BORDER_COLORS: Record<SandboxToastKind, string> = {
+const BORDER_COLORS = {
 	error: "#ef4444",
 	info: "#3b82f6",
 	success: "#22c55e",
 	warning: "#f59e0b",
-};
+} satisfies Record<SandboxToastKind, string>;
 
 /** Normalize the two call shapes used by the desktop and companion surfaces. */
 export function normalizeSandboxToast(
 	input: SandboxToastInput,
 	rest?: Omit<SandboxToastOptions, "title">
 ): SandboxToastOptions {
-	if (typeof input === "string") {
+	if (isNativeText(input)) {
 		return { title: input, ...rest };
 	}
 	return input;
 }
 
 function getContainer(): HTMLElement | null {
-	if (typeof document === "undefined") {
+	if (globalThis.document === undefined) {
 		return null;
 	}
 

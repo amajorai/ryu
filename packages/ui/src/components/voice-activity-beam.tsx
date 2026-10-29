@@ -2,13 +2,14 @@
 
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useReducedMotion } from "motion/react";
-import type { ReactNode } from "react";
-import type { BorderBeamTheme } from "./border-beam.tsx";
-import { BorderBeam } from "./border-beam.tsx";
+import type { CSSProperties, ReactNode } from "react";
 
-const WAVEFORM_BAR_COUNT = 16;
-const MIN_BAR_HEIGHT = 3;
-const MAX_BAR_HEIGHT = 18;
+import styles from "./voice-activity-beam.module.css";
+
+interface VoiceGlowStyle extends CSSProperties {
+	"--voice-glow-opacity": number;
+	"--voice-glow-scale": number;
+}
 
 export interface VoiceActivityBeamProps {
 	active?: boolean;
@@ -16,80 +17,87 @@ export interface VoiceActivityBeamProps {
 	className?: string;
 	/** Rolling mic RMS values, oldest-to-newest. */
 	levels: readonly number[];
-	/** Beam theme, matching the surface behind the visual. */
-	theme?: BorderBeamTheme;
+	/** Sweep a bright beam across the glow while the assistant is thinking. */
+	processing?: boolean;
 }
 
 function clampLevel(level: number): number {
 	return Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
 }
 
-function visibleLevels(levels: readonly number[]): number[] {
-	const recent = levels
-		.slice(-WAVEFORM_BAR_COUNT)
-		.map((level) => clampLevel(level));
-	if (recent.length === WAVEFORM_BAR_COUNT) {
-		return recent;
-	}
-	return [
-		...new Array<number>(WAVEFORM_BAR_COUNT - recent.length).fill(0),
-		...recent,
-	];
+function peakLevel(levels: readonly number[]): number {
+	return levels
+		.slice(-8)
+		.reduce((peak, level) => Math.max(peak, clampLevel(level)), 0);
 }
 
-/** A compact, decorative mic waveform framed by the installed line beam. */
+/** A sound-reactive, multicolor glow anchored to the bottom edge of a voice surface. */
 export function VoiceActivityBeam({
 	active = true,
 	children,
 	levels,
-	theme = "dark",
+	processing = false,
 	className,
 }: VoiceActivityBeamProps) {
 	const reducedMotion = useReducedMotion() ?? false;
-	const bars = visibleLevels(levels);
+	const level = active ? peakLevel(levels) : 0;
+	const glowScale = reducedMotion
+		? 0.46 + level * 0.24 + (processing ? 0.08 : 0)
+		: 0.46 + level * 0.96 + (processing ? 0.14 : 0);
+	const glowStyle: VoiceGlowStyle = {
+		"--voice-glow-opacity": active
+			? 0.52 + level * 0.42
+			: processing
+				? 0.5
+				: 0.04,
+		"--voice-glow-scale": glowScale,
+	};
 
 	return (
-		<BorderBeam
-			active={active && !reducedMotion}
-			borderRadius={999}
-			className={cn("shrink-0", className)}
-			colorVariant="ocean"
-			duration={2.4}
-			size="line"
-			strength={0.72}
-			theme={theme}
+		<div
+			className={cn("relative isolate flex min-h-7 shrink-0", className)}
+			data-active={active}
+			data-processing={processing}
+			data-voice-activity-beam="glow"
 		>
-			<div
-				className={cn(
-					"relative min-h-7 overflow-hidden rounded-full bg-background/55",
-					children
-						? "min-h-full"
-						: "flex h-full items-center justify-center px-3"
-				)}
-				data-voice-activity-beam="waveform"
-			>
-				{children}
-				<div
-					aria-hidden="true"
-					className={cn(
-						"pointer-events-none flex items-center justify-center gap-1",
-						children ? "absolute inset-x-3 bottom-1 h-3 opacity-70" : "h-full"
-					)}
-				>
-					{bars.map((level, index) => {
-						const height =
-							MIN_BAR_HEIGHT + level * (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT);
-						const opacity = 0.35 + level * 0.65;
-						return (
-							<span
-								className="w-0.5 rounded-full bg-current text-sky-300 transition-[height,opacity] duration-100 ease-out motion-reduce:transition-none"
-								key={index}
-								style={{ height: `${height}px`, opacity }}
-							/>
-						);
-					})}
+			{children ? (
+				<div className="relative z-10 flex h-full min-h-7 w-full items-center px-3">
+					{children}
 				</div>
+			) : null}
+			<div
+				aria-hidden="true"
+				className="pointer-events-none absolute inset-0 z-0"
+			>
+				<div
+					className={cn(
+						"voice-activity-beam__glow absolute inset-x-[-16%] bottom-[-40%] h-[180%] mix-blend-screen",
+						styles.glowPaint
+					)}
+					data-voice-glow
+					data-voice-level={level.toFixed(2)}
+					style={glowStyle}
+				/>
+				{processing ? (
+					reducedMotion ? (
+						<div
+							className={cn(
+								"absolute inset-y-[-18%] left-1/3 w-1/3 mix-blend-screen blur-[20px]",
+								styles.sweepStill
+							)}
+							data-voice-processing-sweep
+						/>
+					) : (
+						<div
+							className={cn(
+								"voice-activity-beam__sweep absolute inset-y-[-18%] left-[-20%] w-[48%] mix-blend-screen blur-[20px]",
+								styles.sweepAnimated
+							)}
+							data-voice-processing-sweep
+						/>
+					)
+				) : null}
 			</div>
-		</BorderBeam>
+		</div>
 	);
 }

@@ -12,6 +12,7 @@
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useContributions } from "../../core/ContributionsContext.tsx";
 import { parsePluginViewPath } from "../../core/contributions.ts";
+import { tf } from "../../i18n/translate.ts";
 import { ContributedViewPanel } from "../../ui/ContributedView.tsx";
 import { Loading } from "../../ui/Loading.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
@@ -90,7 +91,7 @@ function PluginViewBody({
 	return (
 		<text fg={theme.colors.mutedForeground}>
 			{viewId
-				? `No enabled app contributes the view "${viewId}".`
+				? tf('No enabled app contributes the view "{viewId}".', { viewId })
 				: "No view selected."}
 		</text>
 	);

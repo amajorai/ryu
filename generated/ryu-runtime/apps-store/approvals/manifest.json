@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/approvals",
   "name": "Approvals",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Security",
   "description": "Approval inbox: a human-in-the-loop queue where agent-proposed actions, edits, and fixes wait for your accept or reject before they take effect.",
@@ -63,20 +63,5 @@
   "companion": {
     "label": "Inbox",
     "icon": "shield-01"
-  },
-  "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "approvals.chat",
-        "title": "Approvals widget",
-        "description": "Approvals chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["approvals widget"],
-        "examples": ["Show me a approvals widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ]
   }
 }

@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_1e92b73bae584a26b4fbbaf6e1be227f"
+  },
+  "body": {
+    "type": "usage.report",
+    "ok": true,
+    "from": "2026-10-01T00:00:00.000Z",
+    "to": "2026-10-02T00:00:00.000Z",
+    "lines": [],
+    "nextCursor": null,
+    "unresolved": []
+  }
+}

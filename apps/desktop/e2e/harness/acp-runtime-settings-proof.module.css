@@ -1,0 +1,116 @@
+.fixture1 {
+	box-sizing: border-box;
+	min-height: 100vh;
+	padding: 32px 28px 48px;
+	font-family:
+		-apple-system,
+		BlinkMacSystemFont,
+		Segoe UI,
+		sans-serif;
+	color: #f4f4f5;
+	background: #09090b;
+}
+
+.fixture2 {
+	max-width: 1160px;
+	margin: 0 auto;
+}
+
+.fixture3 {
+	display: flex;
+	gap: 20px;
+	align-items: start;
+	justify-content: space-between;
+	margin-bottom: 24px;
+}
+
+.fixture4 {
+	font-size: 12px;
+	color: #c4b5fd;
+	letter-spacing: 1.4px;
+}
+
+.fixture5 {
+	margin: 7px 0 0;
+	font-size: 34px;
+}
+
+.fixture6 {
+	max-width: 780px;
+	margin: 10px 0 0;
+	font-size: 16px;
+	line-height: 1.5;
+	color: #a1a1aa;
+}
+
+.fixture7 {
+	padding: 9px 12px;
+	font-size: 11px;
+	font-weight: 800;
+	color: #86efac;
+	letter-spacing: 1px;
+	white-space: nowrap;
+	background: #123022;
+	border: 1px solid #245c3e;
+	border-radius: 999px;
+}
+
+.fixture8 {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 320px;
+	gap: 20px;
+}
+
+.fixture9 {
+	padding: 22px;
+	background: #111113;
+	border: 1px solid #27272a;
+	border-radius: 18px;
+}
+
+.fixture10 {
+	padding: 22px;
+	background: #111113;
+	border: 1px solid #27272a;
+	border-radius: 18px;
+}
+
+.fixture11 {
+	font-size: 11px;
+	color: #a1a1aa;
+	letter-spacing: 1px;
+}
+
+.fixture12 {
+	margin: 8px 0 18px;
+	font-size: 20px;
+}
+
+.fixture13 {
+	padding: 14px;
+	font-size: 14px;
+	line-height: 1.7;
+	background: #18181b;
+	border: 1px solid #3f3f46;
+	border-radius: 12px;
+}
+
+.fixture14 {
+	margin-top: 6px;
+	color: #86efac;
+}
+
+.fixture15 {
+	margin: 22px 0 8px;
+	font-size: 12px;
+	color: #a1a1aa;
+}
+
+.fixture16 {
+	padding-left: 20px;
+	margin: 0;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 11px;
+	line-height: 1.7;
+	color: #d4d4d8;
+}

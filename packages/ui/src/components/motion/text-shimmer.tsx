@@ -1,9 +1,9 @@
 import {
 	TEXT_SHIMMER_CLASS_NAME,
-	TEXT_SHIMMER_KEYFRAMES,
+	type TextShimmerStyle,
 	textShimmerStyle,
-} from "@ryu/ui/lib/text-shimmer";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/lib/text-shimmer.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CSSProperties, ElementType, ReactNode } from "react";
 
 export interface TextShimmerProps {
@@ -28,20 +28,25 @@ type ShimmerHost = ElementType<{
 export function TextShimmer({
 	children,
 	as = "span",
-	duration = 2.5,
+	duration = 0.9,
 	className,
 }: TextShimmerProps) {
+	// SAFETY: This view names exactly the children/className/style packet
+	// passed to React's complete polymorphic ElementType receiver below.
+	// It avoids the all-intrinsic-props intersection; it does not promise
+	// that a caller-provided component forwards styles or accepts children.
 	const Comp = as as ShimmerHost;
+	const shimmerStyle: TextShimmerStyle = {
+		"--text-shimmer-duration":
+			textShimmerStyle(duration)["--text-shimmer-duration"],
+	};
 
 	return (
-		<>
-			<style>{TEXT_SHIMMER_KEYFRAMES}</style>
-			<Comp
-				className={cn("inline-block", TEXT_SHIMMER_CLASS_NAME, className)}
-				style={textShimmerStyle(duration)}
-			>
-				{children}
-			</Comp>
-		</>
+		<Comp
+			className={cn("inline-block", TEXT_SHIMMER_CLASS_NAME, className)}
+			style={shimmerStyle}
+		>
+			{children}
+		</Comp>
 	);
 }

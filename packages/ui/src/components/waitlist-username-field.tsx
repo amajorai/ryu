@@ -28,7 +28,6 @@ export const WAITLIST_USERNAME_RE = /^[a-zA-Z0-9_]{3,32}$/;
  * wants it in, and the fill's radius inside the ring's gutter.
  */
 const FIELD_RADIUS_PX = 24;
-const FIELD_FACE_RADIUS_PX = FIELD_RADIUS_PX - METAL_EDGE_TILE_RING_PX;
 const USERNAME_MAX_LENGTH = 32;
 const LEADING_AT = /^@+/;
 
@@ -98,40 +97,51 @@ export function WaitlistUsernameField({
 		// reserved, and a second title inside the field stacked two headlines down
 		// the column. This state is just the two things you can do about it.
 		return (
-			<div className={cn("flex flex-col gap-2 sm:flex-row", className)}>
-				<Button
-					className="flex-1"
-					onClick={() => {
-						// Prefill with the current handle so "change" starts from what they
-						// have rather than from an empty field.
-						onChange(reserved);
-						setEditing(true);
-					}}
-					size="lg"
-					type="button"
-					variant="secondary"
-				>
-					<HugeiconsIcon icon={Edit03Icon} size={18} />
-					Change handle
-				</Button>
-				{onUnreserve ? (
+			<div className={cn("flex flex-col gap-2", className)}>
+				<div className="flex flex-col gap-2 sm:flex-row">
 					<Button
 						className="flex-1"
-						loading={pending}
-						onClick={onUnreserve}
+						onClick={() => {
+							// Prefill with the current handle so "change" starts from what they
+							// have rather than from an empty field.
+							onChange(reserved);
+							setEditing(true);
+						}}
 						size="lg"
 						type="button"
-						variant="destructive"
+						variant="secondary"
 					>
-						{pending ? (
-							"Releasing"
-						) : (
-							<>
-								<HugeiconsIcon icon={SeatSelectorIcon} size={18} />
-								Unreserve
-							</>
-						)}
+						<HugeiconsIcon icon={Edit03Icon} size={18} />
+						Change handle
 					</Button>
+					{onUnreserve ? (
+						<Button
+							className="flex-1"
+							loading={pending}
+							onClick={onUnreserve}
+							size="lg"
+							type="button"
+							variant="destructive"
+						>
+							{pending ? (
+								"Releasing"
+							) : (
+								<>
+									<HugeiconsIcon icon={SeatSelectorIcon} size={18} />
+									Unreserve
+								</>
+							)}
+						</Button>
+					) : null}
+				</div>
+				{error ? (
+					<p
+						className="text-status-destructive text-xs"
+						id={errorId}
+						role="alert"
+					>
+						{error}
+					</p>
 				) : null}
 			</div>
 		);
@@ -182,8 +192,7 @@ export function WaitlistUsernameField({
 							// `w-full`, not `flex-1`: the parent is now the ring's own column
 							// gutter, so a flex-grow here grows nothing and the field collapsed
 							// to its content width.
-							className="flex h-16 w-full min-w-0 items-center border-0 bg-muted px-4 focus-within:ring-[3px] focus-within:ring-ring/50"
-							style={{ borderRadius: `${FIELD_FACE_RADIUS_PX}px` }}
+							className="flex h-16 w-full min-w-0 items-center rounded-[23px] border-0 bg-muted px-4 focus-within:ring-3 focus-within:ring-ring"
 						>
 							<span
 								aria-hidden="true"

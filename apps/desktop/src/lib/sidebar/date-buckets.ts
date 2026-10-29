@@ -1,3 +1,6 @@
+import type { ViewSourceRow } from "@ryu/app-host/views";
+import { z } from "zod";
+
 // apps/desktop/src/lib/sidebar/date-buckets.ts
 //
 // The sidebar's ChatGPT-style date buckets, as a primitive ANY list can use.
@@ -50,22 +53,49 @@ export const DATE_BUCKETS: readonly { key: DatedBucketKey; label: string }[] = [
 	{ key: "older", label: "Older" },
 ];
 
-export const DATE_BUCKET_LABELS: Record<string, string> = {
-	...Object.fromEntries(DATE_BUCKETS.map((b) => [b.key, b.label])),
+const dateBucketLabelsSchema = z.object({
+	today: z.string(),
+	yesterday: z.string(),
+	"last-week": z.string(),
+	"last-month": z.string(),
+	"last-year": z.string(),
+	older: z.string(),
+	undated: z.string(),
+});
+export const DATE_BUCKET_LABELS = dateBucketLabelsSchema.parse({
+	...Object.fromEntries(
+		DATE_BUCKETS.map((bucket) => [bucket.key, bucket.label])
+	),
 	[UNDATED_BUCKET_KEY]: "Undated",
-};
+});
+const nativeEpochSchema = z.union([
+	z.number(),
+	z.nan(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+const timestampSchema = z.union([nativeEpochSchema, z.string()]);
 
 export const DAY_MS = 86_400_000;
+
+/** Display-zone civil starts; rolling windows count dates, not 24-hour spans. */
+export interface DateBucketCivilStarts {
+	yesterday: number;
+	lastWeek: number;
+	lastMonth: number;
+	lastYear: number;
+}
 
 /** Normalize a timestamp (epoch ms, ISO string, or absent) to a comparable epoch. */
 export function toEpoch(value: number | string | null | undefined): number {
 	if (value == null) {
 		return 0;
 	}
-	if (typeof value === "number") {
-		return value;
+	const text = z.string().safeParse(value);
+	if (!text.success) {
+		return nativeEpochSchema.parse(value);
 	}
-	const parsed = Date.parse(value);
+	const parsed = Date.parse(text.data);
 	return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -77,7 +107,7 @@ export function toEpoch(value: number | string | null | undefined): number {
  * A non-positive epoch is treated as absent — no row in this app predates the epoch.
  */
 export function stampEpoch(
-	value: number | string | null | undefined
+	value: number | string | null | undefined,
 ): number | null {
 	if (value == null || value === "") {
 		return null;
@@ -89,21 +119,22 @@ export function stampEpoch(
 /** Which dated bucket a timestamp falls into, relative to the start of today. */
 export function dateBucketKey(
 	ts: number,
-	startOfToday: number
+	startOfToday: number,
+	civilStarts?: DateBucketCivilStarts,
 ): DatedBucketKey {
 	if (ts >= startOfToday) {
 		return "today";
 	}
-	if (ts >= startOfToday - DAY_MS) {
+	if (ts >= (civilStarts?.yesterday ?? startOfToday - DAY_MS)) {
 		return "yesterday";
 	}
-	if (ts >= startOfToday - 7 * DAY_MS) {
+	if (ts >= (civilStarts?.lastWeek ?? startOfToday - 7 * DAY_MS)) {
 		return "last-week";
 	}
-	if (ts >= startOfToday - 30 * DAY_MS) {
+	if (ts >= (civilStarts?.lastMonth ?? startOfToday - 30 * DAY_MS)) {
 		return "last-month";
 	}
-	if (ts >= startOfToday - 365 * DAY_MS) {
+	if (ts >= (civilStarts?.lastYear ?? startOfToday - 365 * DAY_MS)) {
 		return "last-year";
 	}
 	return "older";
@@ -130,7 +161,8 @@ export interface DateBucket<T> {
 export function bucketByDate<T>(
 	items: readonly T[],
 	stampOf: (item: T) => number | string | null | undefined,
-	startOfToday: number
+	startOfToday: number,
+	civilStarts?: DateBucketCivilStarts,
 ): DateBucket<T>[] {
 	const byKey = new Map<DateBucketKey, { epoch: number; item: T }[]>();
 	const undated: T[] = [];
@@ -140,7 +172,7 @@ export function bucketByDate<T>(
 			undated.push(item);
 			continue;
 		}
-		const key = dateBucketKey(epoch, startOfToday);
+		const key = dateBucketKey(epoch, startOfToday, civilStarts);
 		const existing = byKey.get(key);
 		if (existing) {
 			existing.push({ epoch, item });
@@ -160,7 +192,7 @@ export function bucketByDate<T>(
 		out.push({
 			items: undated,
 			key: UNDATED_BUCKET_KEY,
-			label: DATE_BUCKET_LABELS[UNDATED_BUCKET_KEY] as string,
+			label: DATE_BUCKET_LABELS[UNDATED_BUCKET_KEY],
 		});
 	}
 	return out;
@@ -193,15 +225,10 @@ export const CONTRIBUTED_DATE_KEYS: readonly string[] = [
  * has one, else the first {@link CONTRIBUTED_DATE_KEYS} member the row actually
  * carries. `null` = this row cannot be dated (see {@link UNDATED_BUCKET_KEY}).
  */
-export function rowStamp(
-	row: Record<string, unknown>,
-	dateKey?: string
-): number | null {
+export function rowStamp(row: ViewSourceRow, dateKey?: string): number | null {
 	const read = (key: string): number | null => {
-		const value = row[key];
-		return typeof value === "number" || typeof value === "string"
-			? stampEpoch(value)
-			: null;
+		const value = timestampSchema.safeParse(row[key]);
+		return value.success ? stampEpoch(value.data) : null;
 	};
 	if (dateKey) {
 		return read(dateKey);

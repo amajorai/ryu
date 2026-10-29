@@ -96,6 +96,11 @@
               "items": {
                 "type": "string"
               }
+            },
+            "format": {
+              "type": "string",
+              "description": "Output format for the extracted content (default markdown).",
+              "enum": ["markdown", "text"]
             }
           },
           "required": ["urls"]
@@ -135,22 +140,14 @@
       "tools": {
         "web.extract": {
           "tool": "tavily.extract",
-          "args": {
-            "url": "urls[]",
-            "format": ""
-          },
-          "response": {
-            "results": "results",
-            "fields": {
-              "url": "url",
-              "content": "raw_content"
-            }
+          "adapter": {
+            "code_file": "adapters/web.extract.js"
           }
         }
       }
     }
   ],
-  "permission_grants": ["tool:http-egress:api.tavily.com"],
+  "permission_grants": ["tool:http-egress:api.tavily.com", "tool:execute"],
   "contributes": {
     "settings_tabs": [
       {

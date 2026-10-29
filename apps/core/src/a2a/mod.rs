@@ -5,8 +5,13 @@
 //! router and therefore use the node's normal authentication middleware.
 
 mod api;
+#[cfg(test)]
+mod api_tests;
+mod card_assets;
 mod outbound;
 mod runtime;
 
 pub use api::{management_routes, public_routes};
-pub(crate) use outbound::{request_cancel, route_peer_chat};
+pub(crate) use outbound::{request_cancel, request_cancel_all, route_peer_chat};
+#[cfg(test)]
+pub(crate) use runtime::test_support;

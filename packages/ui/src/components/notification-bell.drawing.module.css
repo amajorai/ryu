@@ -1,0 +1,16 @@
+.bellSwing {
+	transform: rotate(calc(var(--notification-bell-1-rotate) * 1deg));
+	transform-origin: var(--notification-bell-1-transform-origin);
+}
+.clapperSwing {
+	transform: rotate(calc(var(--notification-bell-2-rotate) * 1deg));
+	transform-origin: var(--notification-bell-2-transform-origin);
+	transform-box: var(--notification-bell-2-transform-box);
+}
+.digitRoll {
+	transform: translateY(calc(var(--notification-bell-3-y) * 1px));
+}
+.bellSize {
+	width: var(--notification-bell-4-width);
+	height: var(--notification-bell-4-height);
+}

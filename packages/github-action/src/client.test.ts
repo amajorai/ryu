@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { type FetchLike, RyuHttpError, RyuNodeClient } from "./client.ts";
+import type { JsonValue } from "./json.ts";
 
-function jsonResponse(value: unknown, status = 200): Response {
+function jsonResponse(value: JsonValue, status = 200): Response {
 	return new Response(JSON.stringify(value), {
 		headers: { "content-type": "application/json" },
 		status,
@@ -117,7 +118,7 @@ describe("Ryu Core HTTP client", () => {
 				},
 				1000
 			)
-			.catch((value: unknown) => value);
+			.catch((value) => value);
 
 		expect(String(error)).toContain("ended before a completion frame");
 	});
@@ -138,7 +139,7 @@ describe("Ryu Core HTTP client", () => {
 				},
 				1000
 			)
-			.catch((value: unknown) => value);
+			.catch((value) => value);
 
 		expect(capturedBody).toEqual({
 			agent_id: "agent-1",
@@ -171,7 +172,7 @@ describe("Ryu Core HTTP client", () => {
 				},
 				1000
 			)
-			.catch((value: unknown) => value);
+			.catch((value) => value);
 
 		expect(String(error)).toContain("[REDACTED]");
 		expect(String(error)).not.toContain("client-secret");
@@ -225,6 +226,71 @@ describe("Ryu Core HTTP client", () => {
 				20
 			)
 		).rejects.toThrow("timed out after 20ms");
+	});
+
+	it("never sends node, vault, or login credentials over remote cleartext", async () => {
+		let calls = 0;
+		const fetchImpl: FetchLike = async () => {
+			calls += 1;
+			return jsonResponse({ ok: true });
+		};
+		const cleartext = new RyuNodeClient(
+			{ ...target, url: "http://node.example" },
+			fetchImpl
+		);
+		await expect(
+			cleartext.callTool({ agent_id: "a", arguments: {}, tool: "t" }, 1000)
+		).rejects.toThrow("must use https");
+		await expect(
+			cleartext.vaultLogin({ roleId: "role", secretId: "secret-id" }, 1000)
+		).rejects.toThrow("must use https");
+		await expect(
+			cleartext.vaultExport(
+				"vault-token",
+				{ environment: null, names: [], path: "/" },
+				1000
+			)
+		).rejects.toThrow("must use https");
+		expect(calls).toBe(0);
+	});
+
+	it("does not follow a redirect with credentials attached", async () => {
+		const leaked: string[] = [];
+		const elsewhere = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			async fetch(request) {
+				leaked.push(
+					`${request.headers.get("authorization")} ${await request.text()}`
+				);
+				return jsonResponse({ ok: true });
+			},
+		});
+		const redirecting = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: () =>
+				new Response(null, {
+					status: 307,
+					headers: { location: `http://127.0.0.1:${elsewhere.port}/steal` },
+				}),
+		});
+		try {
+			const client = new RyuNodeClient({
+				...target,
+				url: `http://127.0.0.1:${redirecting.port}`,
+			});
+			await expect(
+				client.callTool({ agent_id: "a", arguments: {}, tool: "t" }, 2000)
+			).rejects.toThrow();
+			await expect(
+				client.vaultLogin({ roleId: "role", secretId: "secret-id" }, 2000)
+			).rejects.toThrow();
+			expect(leaked).toEqual([]);
+		} finally {
+			redirecting.stop(true);
+			elsewhere.stop(true);
+		}
 	});
 
 	it("keeps the timeout active while a JSON response body is stalled", async () => {

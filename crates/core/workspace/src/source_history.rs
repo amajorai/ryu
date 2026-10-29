@@ -1,27 +1,73 @@
-//! A small, local Git-backed history primitive for source artifacts.
+//! A small, local history primitive for source artifacts.
 //!
-//! The repository is owned by the caller (Core normally points it at
-//! `RYU_DIR/source-history`). Callers decide which source file represents a
-//! resource; this module only provides checkpoint, list, read, and path-safe
-//! Git operations. It deliberately does not know about Spaces, agents, skills,
-//! or workflows, so the existing generic VersionHistory UI can use one history
-//! contract across all of them.
+//! The store is owned by the caller (Core points it at
+//! `<data dir>/files/source-history`). Callers decide which source file
+//! represents a resource; this module only provides checkpoint, list and read.
+//! It deliberately does not know about Spaces, agents, skills, or workflows, so
+//! the existing generic VersionHistory UI can use one history contract across all
+//! of them.
+//!
+//! ## Storage
+//!
+//! Versions live in a sealed SQLite store, `<root>/history.db` (content store
+//! `source-history`): each row holds the source path and creation time in the
+//! clear, the label as `encb:v1:` and the content as `RYU-CB01` of
+//! `zstd(plaintext)`, both bound to `(id, path)`. `content_bi` is a blind token
+//! of the plaintext, used only to make an unchanged unlabeled checkpoint return
+//! the latest version. Retention keeps the newest [`Retention::keep_newest`]
+//! versions per path and drops versions older than [`Retention::max_age_days`]
+//! except the newest [`Retention::keep_after_age`] per path.
+//!
+//! ## Migration from the Git repository
+//!
+//! Earlier builds kept the history as a plaintext Git repository in the same
+//! root. On first use the repository is imported: every commit is read without
+//! holding the lock (ids stay the commit SHAs, so stored version ids keep
+//! working), the rows are verified, then the in-process lock and an exclusive
+//! file lock on `<root>/.lock` are taken, commits made after the snapshot are
+//! imported, and the store is marked migrated. Only then are `.git` and the
+//! working-tree files deleted. Without enough free space (twice the repository)
+//! the Git repository keeps serving and the import is retried at the next start.
 
 use std::collections::HashSet;
+use std::fs::File;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+use rusqlite::{params, Connection, OptionalExtension};
+use ryu_crypto::{BlindIndex, ContentCipher, ContentContext};
 
 use crate::win_process::NoWindow;
+
+mod git_history;
+mod sealed;
+mod storage;
+
+use git_history::*;
+use sealed::*;
+use storage::*;
 
 const MAX_HISTORY_PATH_BYTES: usize = 1024;
 const MAX_HISTORY_LABEL_BYTES: usize = 240;
 const DEFAULT_HISTORY_LIMIT: usize = 200;
 const SOURCE_PATH_TRAILER: &str = "Ryu-Source-Path:";
+const HISTORY_FORMAT_ARG: &str = "--format=%H%x1f%ct%x1f%s%x1f%b%x1e";
+
+/// Registered content-store name (KDF input: never rename).
+pub const SOURCE_HISTORY_STORE: &str = "source-history";
+/// The SQLite file inside the history root.
+pub const HISTORY_DB_FILE: &str = "history.db";
+const LOCK_FILE: &str = ".lock";
+const ZSTD_LEVEL: i32 = 3;
+const MIGRATED_KEY: &str = "migrated";
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 static SOURCE_HISTORY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+/// Roots whose Git import this process already attempted (retried next start).
+static MIGRATION_ATTEMPTED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 
-/// One immutable Git checkpoint, shaped for the existing version-history UIs.
+/// One immutable checkpoint, shaped for the existing version-history UIs.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceHistoryVersion {
     pub created_at: i64,
@@ -29,25 +75,68 @@ pub struct SourceHistoryVersion {
     pub label: Option<String>,
 }
 
-/// Git-backed source history rooted at one local repository.
+/// How many versions a path keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Retention {
+    /// Versions kept per path regardless of age.
+    pub keep_newest: usize,
+    /// Versions older than this many days are pruned...
+    pub max_age_days: i64,
+    /// ...except the newest this many per path.
+    pub keep_after_age: usize,
+}
+
+impl Default for Retention {
+    fn default() -> Self {
+        Self {
+            keep_newest: 200,
+            max_age_days: 365,
+            keep_after_age: 20,
+        }
+    }
+}
+
+/// Where a history root currently stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceHistoryState {
+    /// Sealed SQLite store (or nothing recorded yet).
+    Sealed,
+    /// Still the legacy plaintext Git repository; the reason the import has not
+    /// completed yet (for a health warning).
+    LegacyGit(String),
+}
+
+/// Source history rooted at one local directory.
 #[derive(Debug, Clone)]
 pub struct SourceHistory {
     root: PathBuf,
+    retention: Retention,
 }
 
 impl SourceHistory {
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            root,
+            retention: Retention::default(),
+        }
     }
 
-    /// Write one source file and checkpoint it as an immutable Git commit.
+    /// Override the retention policy (a settings hook).
+    pub fn with_retention(mut self, retention: Retention) -> Self {
+        self.retention = Retention {
+            keep_newest: retention.keep_newest.max(1),
+            max_age_days: retention.max_age_days.max(1),
+            keep_after_age: retention.keep_after_age.max(1),
+        };
+        self
+    }
+
+    /// Store one source version.
     ///
     /// An unlabeled checkpoint with unchanged bytes is idempotent: it returns the
-    /// existing latest commit. An explicit label creates a named Git checkpoint
-    /// even when the source bytes are unchanged, preserving the existing snapshot
-    /// API without pretending that a named action was a new content revision.
-    /// Commit identity is explicit and local, so this never depends on the user's
-    /// global Git configuration.
+    /// existing latest version. An explicit label creates a named checkpoint even
+    /// when the source bytes are unchanged, preserving the existing snapshot API
+    /// without pretending that a named action was a new content revision.
     pub fn checkpoint(
         &self,
         relative_path: &str,
@@ -55,57 +144,47 @@ impl SourceHistory {
         label: Option<&str>,
     ) -> std::io::Result<SourceHistoryVersion> {
         validate_relative_path(relative_path)?;
-        let _guard = source_history_lock()?;
-        self.ensure_repository()?;
-        let destination = self.root.join(relative_path);
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)?;
+        self.migrate_if_needed();
+        std::fs::create_dir_all(&self.root)?;
+        restrict_dir_to_owner(&self.root);
+        let _lock = self.lock(false)?;
+        match self.backend(true)? {
+            Backend::Sealed(store) => store.checkpoint(relative_path, content, label),
+            Backend::Git => GitHistory::new(&self.root).checkpoint(relative_path, content, label),
+            Backend::Empty => Err(io_error("source history could not be created")),
         }
-        std::fs::write(&destination, content.as_bytes())?;
+    }
 
-        self.run_git(&["add", "--", relative_path])?;
-        let changed = self.run_git_status(&["diff", "--cached", "--quiet", "--", relative_path])?;
-        if changed > 1 {
-            return Err(io_error("could not inspect the staged source checkpoint"));
+    /// Import one version a caller kept in its own legacy format, keeping its
+    /// creation time and label. `id` is reused when it is a valid version id
+    /// (hyphens dropped, lowercased), otherwise a new id is minted. Importing
+    /// the same `(id, path)` again is idempotent when the bytes match.
+    ///
+    /// Only the sealed store accepts imports: while the root still serves the
+    /// plaintext Git history (its own import is pending) this returns an error
+    /// so the caller keeps its legacy copy and retries later. The row is read
+    /// back and compared before this returns `Ok`, so the caller may delete its
+    /// legacy copy on success.
+    pub fn import_version(
+        &self,
+        relative_path: &str,
+        id: Option<&str>,
+        created_at: i64,
+        label: Option<&str>,
+        content: &str,
+    ) -> std::io::Result<SourceHistoryVersion> {
+        validate_relative_path(relative_path)?;
+        self.migrate_if_needed();
+        std::fs::create_dir_all(&self.root)?;
+        restrict_dir_to_owner(&self.root);
+        let _lock = self.lock(false)?;
+        match self.backend(true)? {
+            Backend::Sealed(store) => store.import(relative_path, id, created_at, label, content),
+            Backend::Git => Err(io_error(
+                "source history still holds its legacy Git repository; import later",
+            )),
+            Backend::Empty => Err(io_error("source history could not be created")),
         }
-        let has_label = label.is_some_and(|value| !value.trim().is_empty());
-        if changed == 0 && !has_label {
-            return self
-                .latest_for_path(relative_path)?
-                .ok_or_else(|| io_error("Git source history has no checkpoint"));
-        }
-
-        let subject = commit_subject(label);
-        let trailer = format!("{SOURCE_PATH_TRAILER} {relative_path}");
-        let mut commit = git_command(&self.root);
-        commit
-            .args([
-                "-c",
-                "user.name=Ryu",
-                "-c",
-                "user.email=local@ryu.dev",
-                "-c",
-                "commit.gpgSign=false",
-                "commit",
-                "--no-verify",
-            ])
-            .args((changed == 0).then_some("--allow-empty"))
-            .args([
-                "--only",
-                "-m",
-                subject.as_str(),
-                "-m",
-                trailer.as_str(),
-                "--",
-            ])
-            .arg(relative_path)
-            .current_dir(&self.root);
-        let output = commit.output()?;
-        if !output.status.success() {
-            return Err(command_error("commit", &output));
-        }
-        self.latest_for_path(relative_path)?
-            .ok_or_else(|| io_error("Git commit completed without a readable checkpoint"))
     }
 
     /// List recent checkpoints for one source path, newest first.
@@ -115,298 +194,270 @@ impl SourceHistory {
         limit: Option<usize>,
     ) -> std::io::Result<Vec<SourceHistoryVersion>> {
         validate_relative_path(relative_path)?;
-        let _guard = source_history_lock()?;
-        if !self.is_repository() {
+        self.migrate_if_needed();
+        if !self.root.is_dir() {
             return Ok(Vec::new());
         }
         let count = limit.unwrap_or(DEFAULT_HISTORY_LIMIT).clamp(1, 1000);
-        self.list_unlocked(relative_path, count)
+        let _lock = self.lock(false)?;
+        match self.backend(false)? {
+            Backend::Sealed(store) => store.list(relative_path, count),
+            Backend::Git => GitHistory::new(&self.root).list_unlocked(relative_path, count),
+            Backend::Empty => Ok(Vec::new()),
+        }
     }
 
-    /// Read one source file at a historical commit. A missing commit/path is
-    /// returned as `None`, matching the existing version-store behavior.
+    /// Read one source file at a historical version (an id or a unique prefix of
+    /// at least 7 hex digits). A missing version/path is returned as `None`,
+    /// matching the existing version-store behavior; a stored version that does
+    /// not open is an error.
     pub fn read(&self, relative_path: &str, version_id: &str) -> std::io::Result<Option<String>> {
         validate_relative_path(relative_path)?;
         validate_version_id(version_id)?;
-        let _guard = source_history_lock()?;
-        if !self.is_repository() {
+        self.migrate_if_needed();
+        if !self.root.is_dir() {
             return Ok(None);
         }
-        let spec = format!("{version_id}:{relative_path}");
-        // Keep the revision and path in one validated `commit:path` argument.
-        // Passing it after `--` would make Git interpret it as a pathspec rather
-        // than a revision on some versions.
-        let mut command = git_command(&self.root);
-        command.arg("show").arg(spec).current_dir(&self.root);
-        let output = command.output()?;
-        if !output.status.success() {
-            return Ok(None);
+        let _lock = self.lock(false)?;
+        match self.backend(false)? {
+            Backend::Sealed(store) => store.read(relative_path, version_id),
+            Backend::Git => GitHistory::new(&self.root).read_unlocked(relative_path, version_id),
+            Backend::Empty => Ok(None),
         }
-        String::from_utf8(output.stdout)
-            .map(Some)
-            .map_err(|error| io_error(&format!("Git history is not UTF-8: {error}")))
     }
 
-    /// Return the managed repository root, useful for diagnostics and export
-    /// surfaces that want to point a user at the local source tree.
+    /// Return the history root, useful for diagnostics.
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    fn ensure_repository(&self) -> std::io::Result<()> {
-        if self.is_repository() {
+    /// Run the legacy Git import if it is still due (once per process, like the
+    /// first list/read/checkpoint call would), then report [`Self::state`].
+    /// Core calls this at startup and from its encryption status so a store
+    /// left on plaintext Git (too little free space, or an import that did not
+    /// verify) is reported with its reason instead of only logged.
+    pub fn migrate_and_report(&self) -> SourceHistoryState {
+        self.migrate_if_needed();
+        self.state()
+    }
+
+    /// Whether this root is sealed or still holds legacy plaintext history.
+    ///
+    /// The `migrated` flag alone is not enough: a `.git` that came back after
+    /// the import (a restored export or a downgrade) and failed to re-import,
+    /// or working-tree copies whose removal failed, are plaintext on disk, so
+    /// they are reported as `LegacyGit` with the reason until they are gone.
+    pub fn state(&self) -> SourceHistoryState {
+        let has_git = self.root.join(".git").exists();
+        let migrated = matches!(
+            open_db(&self.root.join(HISTORY_DB_FILE), false),
+            Ok(Some(conn)) if is_migrated(&conn).unwrap_or(false)
+        );
+        if !has_git && !(migrated && has_leftover_entries(&self.root)) {
+            return SourceHistoryState::Sealed;
+        }
+        let fallback = if migrated {
+            "legacy plaintext history files are still present; removal is retried at the next start"
+        } else {
+            "the Git history has not been imported yet"
+        };
+        SourceHistoryState::LegacyGit(
+            last_migration_error(&self.root).unwrap_or_else(|| fallback.to_owned()),
+        )
+    }
+
+    fn lock(&self, exclusive: bool) -> std::io::Result<HistoryLock> {
+        let guard = source_history_lock()?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.root.join(LOCK_FILE))?;
+        if exclusive {
+            file.lock()?;
+        } else {
+            file.lock_shared()?;
+        }
+        Ok(HistoryLock {
+            _file: file,
+            _guard: guard,
+        })
+    }
+
+    /// Choose the backend for one call. Runs under the lock.
+    fn backend(&self, create: bool) -> std::io::Result<Backend> {
+        let db_path = self.root.join(HISTORY_DB_FILE);
+        let has_git = self.root.join(".git").is_dir();
+        let conn = match open_db(&db_path, create && !has_git)? {
+            Some(conn) => conn,
+            None if has_git => return Ok(Backend::Git),
+            None => return Ok(Backend::Empty),
+        };
+        if !is_migrated(&conn)? {
+            if has_git {
+                return Ok(Backend::Git);
+            }
+            set_migrated(&conn)?;
+        }
+        Ok(Backend::Sealed(SealedHistory::open(conn, self.retention)?))
+    }
+
+    /// Import a legacy Git repository, or finish removing what an earlier
+    /// import left behind, once per process (retried at each start).
+    fn migrate_if_needed(&self) {
+        if !self.root.join(".git").exists() && !self.has_migrated_leftovers() {
+            return;
+        }
+        {
+            let mut attempted = MIGRATION_ATTEMPTED
+                .get_or_init(|| Mutex::new(HashSet::new()))
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !attempted.insert(self.root.clone()) {
+                return;
+            }
+        }
+        match self.migrate_from_git(|| {}) {
+            // Done: a `.git` that comes back later in this process (a restored
+            // export) is imported again on the next call.
+            Ok(()) => {
+                clear_migration_error(&self.root);
+                MIGRATION_ATTEMPTED
+                    .get_or_init(|| Mutex::new(HashSet::new()))
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(&self.root);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    root = %self.root.display(),
+                    "source history keeps plaintext legacy files for now: {error}"
+                );
+                record_migration_error(&self.root, error.to_string());
+            }
+        }
+    }
+
+    /// A migrated store that still has plaintext files beside `history.db`
+    /// (a delete that failed or was interrupted).
+    fn has_migrated_leftovers(&self) -> bool {
+        if !has_leftover_entries(&self.root) {
+            return false;
+        }
+        matches!(
+            open_db(&self.root.join(HISTORY_DB_FILE), false),
+            Ok(Some(conn)) if is_migrated(&conn).unwrap_or(false)
+        )
+    }
+
+    /// The import itself. `after_snapshot` runs between the unlocked snapshot
+    /// and the locked catch-up (a test seam for concurrent writers).
+    fn migrate_from_git(&self, after_snapshot: impl FnOnce()) -> std::io::Result<()> {
+        let db_path = self.root.join(HISTORY_DB_FILE);
+        if let Some(conn) = open_db(&db_path, false)? {
+            if is_migrated(&conn)? {
+                return self.reconcile_after_migration(conn);
+            }
+        }
+        if !self.root.join(".git").exists() {
             return Ok(());
         }
-        std::fs::create_dir_all(&self.root)?;
-        let mut command = git_command(&self.root);
-        command.args(["init", "-b", "main"]).current_dir(&self.root);
-        let output = command.output()?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(command_error("init", &output))
+        let repository_bytes = dir_size(&self.root);
+        ryu_crypto::ensure_free_space(&self.root, repository_bytes.saturating_mul(2))
+            .map_err(|error| io_error(format!("{error:#}")))?;
+        let git = GitHistory::new(&self.root);
+
+        // Snapshot without the lock: writers keep using Git meanwhile.
+        let snapshot_head = git.head()?;
+        let conn = open_db(&db_path, true)?.ok_or_else(|| io_error("history.db missing"))?;
+        let store = SealedHistory::open(conn, self.retention)?;
+        let mut imported = Vec::new();
+        if let Some(head) = &snapshot_head {
+            imported.extend(store.import_commits(&git, None, head)?);
         }
-    }
+        store.verify(&imported)?;
+        after_snapshot();
 
-    fn is_repository(&self) -> bool {
-        self.root.join(".git").is_dir()
-    }
-
-    fn run_git(&self, args: &[&str]) -> std::io::Result<()> {
-        let mut command = git_command(&self.root);
-        command.args(args).current_dir(&self.root);
-        let output = command.output()?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(command_error(
-                args.first().copied().unwrap_or("Git"),
-                &output,
-            ))
-        }
-    }
-
-    fn run_git_status(&self, args: &[&str]) -> std::io::Result<i32> {
-        let mut command = git_command(&self.root);
-        command.args(args).current_dir(&self.root);
-        Ok(command.output()?.status.code().unwrap_or(1))
-    }
-
-    fn run_git_text(&self, args: &[&str]) -> std::io::Result<String> {
-        let mut command = git_command(&self.root);
-        command.args(args).current_dir(&self.root);
-        let output = command.output()?;
-        if output.status.success() {
-            String::from_utf8(output.stdout)
-                .map_err(|error| io_error(&format!("Git output is not UTF-8: {error}")))
-        } else if args.first().copied() == Some("log")
-            && String::from_utf8_lossy(&output.stderr).contains("does not have any commits yet")
+        // Catch up and flip under the in-process lock plus an exclusive file
+        // lock (which also covers a second process).
         {
-            Ok(String::new())
-        } else {
-            Err(command_error(
-                args.first().copied().unwrap_or("Git"),
-                &output,
-            ))
+            let _lock = self.lock(true)?;
+            let head = git.head()?;
+            if head != snapshot_head {
+                if let Some(head) = &head {
+                    let caught_up = store.import_commits(&git, snapshot_head.as_deref(), head)?;
+                    store.verify(&caught_up)?;
+                    imported.extend(caught_up);
+                }
+            }
+            store.prune_all()?;
+            set_migrated(&store.conn)?;
+            remove_git_leftovers(&self.root)?;
         }
+        tracing::info!(
+            root = %self.root.display(),
+            versions = imported.len(),
+            "source history imported from Git into the sealed store"
+        );
+        Ok(())
     }
+}
 
-    fn latest_for_path(
-        &self,
-        relative_path: &str,
-    ) -> std::io::Result<Option<SourceHistoryVersion>> {
-        Ok(self.list_unlocked(relative_path, 1)?.into_iter().next())
-    }
-
-    fn list_unlocked(
-        &self,
-        relative_path: &str,
-        limit: usize,
-    ) -> std::io::Result<Vec<SourceHistoryVersion>> {
-        let format = "%H%x1f%ct%x1f%s%x1f%b%x1e";
-        let format_arg = format!("--format={format}");
-        let all_commits = self.run_git_text(&["log", "--date=unix", &format_arg])?;
-        let path_commits =
-            self.run_git_text(&["log", "--date=unix", &format_arg, "--", relative_path])?;
-        let mut versions = parse_history_lines(&all_commits, Some(relative_path))?;
-        let mut seen = versions
-            .iter()
-            .map(|version| version.id.clone())
-            .collect::<HashSet<_>>();
-        for version in parse_history_lines(&path_commits, None)? {
-            if seen.insert(version.id.clone()) {
-                versions.push(version);
+impl SourceHistory {
+    /// The store was migrated earlier. A `.git` that is back (a data-folder
+    /// export from an older build restored over this folder, or a downgrade
+    /// that wrote new versions) is imported again before anything is deleted:
+    /// the import is idempotent, so versions already in the store are kept.
+    /// On any error `.git` stays and the import is retried at the next start.
+    fn reconcile_after_migration(&self, conn: Connection) -> std::io::Result<()> {
+        let _lock = self.lock(true)?;
+        if self.root.join(".git").exists() {
+            let git = GitHistory::new(&self.root);
+            if let Some(head) = git.head()? {
+                ryu_crypto::ensure_free_space(&self.root, dir_size(&self.root))
+                    .map_err(|error| io_error(format!("{error:#}")))?;
+                let store = SealedHistory::open(conn, self.retention)?;
+                let imported = store.import_commits(&git, None, &head)?;
+                store.verify(&imported)?;
+                store.prune_all()?;
+                tracing::info!(
+                    root = %self.root.display(),
+                    versions = imported.len(),
+                    "source history re-imported a restored Git repository"
+                );
             }
         }
-        versions.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-        versions.truncate(limit);
-        Ok(versions)
+        remove_git_leftovers(&self.root)
     }
 }
 
-fn source_history_lock() -> std::io::Result<std::sync::MutexGuard<'static, ()>> {
-    SOURCE_HISTORY_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| io_error("source history lock is poisoned"))
-}
-
-fn git_command(root: &Path) -> Command {
-    let mut command = Command::new("git");
-    command
-        .arg("-c")
-        .arg(format!(
-            "core.hooksPath={}",
-            if cfg!(windows) { "NUL" } else { "/dev/null" }
-        ))
-        .no_window()
-        .current_dir(root);
-    command
-}
-
-fn parse_history_lines(
-    raw: &str,
-    source_path: Option<&str>,
-) -> std::io::Result<Vec<SourceHistoryVersion>> {
-    let mut versions = Vec::new();
-    for record in raw
-        .split('\u{1e}')
-        .map(|record| record.trim_start_matches(['\n', '\r']))
-        .filter(|record| !record.trim().is_empty())
-    {
-        let mut fields = record.splitn(4, '\u{1f}');
-        let Some(id) = fields.next() else {
-            continue;
-        };
-        let Some(timestamp) = fields.next() else {
-            continue;
-        };
-        let Some(label) = fields.next() else {
-            continue;
-        };
-        let body = fields.next().unwrap_or_default();
-        if let Some(source_path) = source_path {
-            let expected = format!("{SOURCE_PATH_TRAILER} {source_path}");
-            if !body.lines().any(|line| line.trim() == expected) {
-                continue;
-            }
-        }
-        let created_at = timestamp
-            .parse::<i64>()
-            .map(|seconds| seconds.saturating_mul(1000))
-            .map_err(|_| io_error("Git history returned an invalid timestamp"))?;
-        versions.push(SourceHistoryVersion {
-            created_at,
-            id: id.to_owned(),
-            label: Some(label.to_owned()),
-        });
-    }
-    Ok(versions)
-}
-
-fn validate_relative_path(path: &str) -> std::io::Result<()> {
-    let relative = Path::new(path);
-    if path.is_empty()
-        || path.len() > MAX_HISTORY_PATH_BYTES
-        || relative.is_absolute()
-        || path.chars().any(char::is_control)
-        || relative
-            .components()
-            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
-    {
-        return Err(io_error(
-            "source history path must stay inside the repository",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_version_id(id: &str) -> std::io::Result<()> {
-    if id.len() < 7 || id.len() > 64 || !id.chars().all(|character| character.is_ascii_hexdigit()) {
-        return Err(io_error("source history version id is invalid"));
-    }
-    Ok(())
-}
-
-fn commit_subject(label: Option<&str>) -> String {
-    let label = label
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Checkpoint")
-        .chars()
-        .map(|character| {
-            if character.is_control() {
-                ' '
-            } else {
-                character
-            }
+/// Whether anything other than the sealed database and the lock file is in
+/// the history root.
+fn has_leftover_entries(root: &Path) -> bool {
+    std::fs::read_dir(root).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name != LOCK_FILE && !name.starts_with(HISTORY_DB_FILE)
         })
-        .collect::<String>();
-    label.chars().take(MAX_HISTORY_LABEL_BYTES).collect()
+    })
 }
 
-fn command_error(operation: &str, output: &std::process::Output) -> std::io::Error {
-    let details = String::from_utf8_lossy(&output.stderr)
-        .trim()
-        .chars()
-        .take(400)
-        .collect::<String>();
-    if details.is_empty() {
-        io_error(operation.to_owned())
-    } else {
-        io_error(format!("{operation}: {details}"))
-    }
+struct HistoryLock {
+    _file: File,
+    _guard: MutexGuard<'static, ()>,
 }
 
-fn io_error(message: impl Into<String>) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, message.into())
+enum Backend {
+    Sealed(SealedHistory),
+    Git,
+    Empty,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod tests;
 
-    #[test]
-    fn checkpoints_list_read_and_reject_unsafe_paths() {
-        let root = tempfile::tempdir().expect("temp source history");
-        let history = SourceHistory::new(root.path().join("source-history"));
-
-        let first = history
-            .checkpoint("workflows/example.json", "one\n", Some("First"))
-            .expect("first checkpoint");
-        let second = history
-            .checkpoint("workflows/example.json", "two\n", Some("Second"))
-            .expect("second checkpoint");
-        let duplicate = history
-            .checkpoint("workflows/example.json", "two\n", None)
-            .expect("idempotent checkpoint");
-        let named = history
-            .checkpoint("workflows/example.json", "two\n", Some("Named"))
-            .expect("named checkpoint");
-        history
-            .checkpoint("agents/example.json", "agent\n", Some("Other source"))
-            .expect("other source checkpoint");
-
-        assert_ne!(first.id, second.id);
-        assert_eq!(duplicate.id, second.id);
-        assert_ne!(named.id, second.id);
-        assert_eq!(
-            history.read("workflows/example.json", &first.id).unwrap(),
-            Some("one\n".to_owned())
-        );
-        assert_eq!(
-            history.read("workflows/example.json", &second.id).unwrap(),
-            Some("two\n".to_owned())
-        );
-        let versions = history.list("workflows/example.json", None).expect("list");
-        assert_eq!(versions.len(), 3);
-        assert!(versions[0]
-            .label
-            .as_deref()
-            .is_some_and(|label| label.contains("Named")));
-        assert!(history.checkpoint("../outside.json", "x", None).is_err());
-        assert!(history
-            .read("workflows/example.json", "not-a-commit")
-            .is_err());
-    }
-}
+/// Bounded listing of the legacy Git history (read while importing it).
+#[cfg(test)]
+mod git_history_tests;

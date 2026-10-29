@@ -1,7 +1,7 @@
 import { Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -22,7 +22,7 @@ function ProofSurface() {
 		<div className="min-h-screen bg-background px-6 py-10 text-foreground">
 			<div className="mx-auto max-w-3xl space-y-8">
 				<header className="space-y-3">
-					<div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.14em]">
+					<div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-widest">
 						<HugeiconsIcon className="size-4" icon={Shield01Icon} />
 						<span>Ryu connection review</span>
 					</div>
@@ -69,7 +69,7 @@ function ProofSurface() {
 					))}
 				</div>
 
-				<div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-muted-foreground text-sm">
+				<div className="rounded-2xl border border-warning/30 bg-warning/10 p-4 text-muted-foreground text-sm">
 					<span className="font-medium text-foreground">
 						People-data guardrail:
 					</span>{" "}

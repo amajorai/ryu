@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // Typed, metadata-only client for Core-owned remote MCP OAuth.
 
 import {
@@ -82,13 +84,38 @@ const mapConnection = (wire: ConnectionWire): McpOAuthConnection => ({
 	status: wire.status,
 });
 
+const connectionWireResponseCodec: z.ZodType<ConnectionWire> = z
+	.object({
+		access_level: gatewayJsonValueSchema.optional(),
+		account_label: z.union([z.string(), z.null()]).optional(),
+		expires_at: z.union([z.number(), z.null()]).optional(),
+		id: z.string(),
+		issuer: z.string(),
+		profile_id: z.string(),
+		resource_uri: z.string(),
+		scopes: z.array(z.string()).optional(),
+		status: z.union([z.literal("connected"), z.literal("reauth_required")]),
+	})
+	.passthrough();
+const serverWireResponseCodec: z.ZodType<ServerWire> = z
+	.object({
+		client_id: z.union([z.string(), z.null()]).optional(),
+		connections: z.array(connectionWireResponseCodec).optional(),
+		resource: z.union([z.string(), z.null()]).optional(),
+		server_name: z.string(),
+	})
+	.passthrough();
 export async function fetchMcpOAuth(
 	target: ApiTarget,
 	pluginId: string
 ): Promise<McpOAuthServerStatus[]> {
 	const response = await request<{ servers?: ServerWire[] }>(
 		target,
-		`/api/plugins/${encodeURIComponent(pluginId)}/auth`
+		`/api/plugins/${encodeURIComponent(pluginId)}/auth`,
+		{},
+		z
+			.object({ servers: z.array(serverWireResponseCodec).optional() })
+			.passthrough()
 	);
 	return (response.servers ?? []).map((server) => ({
 		clientId: server.client_id ?? null,
@@ -123,7 +150,18 @@ export async function connectMcpOAuth(
 				profile_id: profileId,
 			},
 			method: "POST",
-		}
+		},
+		z
+			.object({
+				access_level: gatewayJsonValueSchema.optional(),
+				authorization_url: z.string(),
+				callback_mode: z.union([z.literal("loopback"), z.literal("hosted")]),
+				expires_at: z.number(),
+				flow_id: z.string(),
+				scopes: z.array(z.string()).optional(),
+				status: z.literal("pending"),
+			})
+			.passthrough()
 	);
 	return {
 		accessLevel: normalizeConnectionAccessLevel(response.access_level),
@@ -145,7 +183,13 @@ export async function disconnectMcpOAuth(
 	return request(
 		target,
 		`/api/plugins/${encodeURIComponent(pluginId)}/auth/${encodeURIComponent(serverName)}?profile_id=${encodeURIComponent(profileId)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		z
+			.object({
+				deleted: z.boolean(),
+				revocation: z.enum(["confirmed", "not_confirmed"]),
+			})
+			.passthrough()
 	);
 }
 
@@ -167,7 +211,26 @@ export async function fetchMcpOAuthFlow(
 		status: "pending" | "connected" | "failed";
 	}>(
 		target,
-		`/api/plugins/${encodeURIComponent(pluginId)}/auth/flows/${encodeURIComponent(flowId)}`
+		`/api/plugins/${encodeURIComponent(pluginId)}/auth/flows/${encodeURIComponent(flowId)}`,
+		{},
+		z
+			.object({
+				access_level: gatewayJsonValueSchema.optional(),
+				callback_mode: z.union([z.literal("loopback"), z.literal("hosted")]),
+				error: z.union([z.string(), z.null()]).optional(),
+				expires_at: z.number(),
+				flow_id: z.string(),
+				plugin_id: z.string(),
+				profile_id: z.string(),
+				scopes: z.array(z.string()).optional(),
+				server_name: z.string(),
+				status: z.union([
+					z.literal("pending"),
+					z.literal("connected"),
+					z.literal("failed"),
+				]),
+			})
+			.passthrough()
 	);
 	return {
 		accessLevel: normalizeConnectionAccessLevel(response.access_level),

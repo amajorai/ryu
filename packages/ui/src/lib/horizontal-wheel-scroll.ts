@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 const HORIZONTAL_SCROLL_SLACK = 1;
 const WHEEL_LINE_HEIGHT = 16;
 
@@ -6,7 +8,7 @@ const SCROLLABLE_OVERFLOW_X = new Set(["auto", "overlay", "scroll"]);
 export interface HorizontalWheelElement {
 	clientHeight: number;
 	clientWidth: number;
-	parentElement: HorizontalWheelElement | null;
+	parentElement?: unknown;
 	scrollHeight: number;
 	scrollLeft: number;
 	scrollWidth: number;
@@ -23,6 +25,58 @@ export interface HorizontalWheelEvent {
 }
 
 type OverflowXReader = (element: HorizontalWheelElement) => string;
+/** The listener installer needs event ownership, rather than the whole DOM. */
+export type HorizontalWheelDocument = Pick<
+	Document,
+	"addEventListener" | "removeEventListener"
+>;
+
+// Scroll geometry is browser-owned; retain the original number semantics (even
+// non-finite dimensions) and, critically, the mutable element's identity.
+const wheelDimensionSchema = z.union([
+	z.number(),
+	z.nan(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+const horizontalWheelDimensionsSchema = z.object({
+	clientHeight: wheelDimensionSchema,
+	clientWidth: wheelDimensionSchema,
+	scrollHeight: wheelDimensionSchema,
+	scrollLeft: wheelDimensionSchema,
+	scrollWidth: wheelDimensionSchema,
+});
+const horizontalWheelElementSchema = z.custom<HorizontalWheelElement>(
+	(value) => horizontalWheelDimensionsSchema.safeParse(value).success
+);
+const wheelTargetParentSchema = z.object({
+	parentElement: z.unknown().optional(),
+});
+const computedStyleReaderSchema = z.custom<typeof globalThis.getComputedStyle>(
+	(value) => z.function().safeParse(value).success
+);
+const computedOverflowSchema = z.object({ overflowX: z.string() });
+const elementConstructorSchema = z.custom<typeof Element>(
+	(value) => z.function().safeParse(value).success
+);
+const elementOwnerConstructorSchema = z.object({
+	ownerDocument: z.object({
+		defaultView: z.object({ Element: elementConstructorSchema }),
+	}),
+});
+/** Use the owner's constructor too, so genuine iframe elements remain eligible. */
+const computedStyleElementSchema = z.custom<Element>((value) => {
+	const local = elementConstructorSchema.safeParse(globalThis.Element);
+	if (local.success && z.instanceof(local.data).safeParse(value).success) {
+		return true;
+	}
+	const owner = elementOwnerConstructorSchema.safeParse(value);
+	return (
+		owner.success &&
+		z.instanceof(owner.data.ownerDocument.defaultView.Element).safeParse(value)
+			.success
+	);
+});
 
 /** Convert a wheel delta into pixels without changing the browser's direction. */
 export function normalizeWheelDelta(
@@ -89,20 +143,20 @@ export function createHorizontalWheelHandler(
 	};
 }
 
-const installedDocuments = new WeakMap<Document, () => void>();
+const installedDocuments = new WeakMap<HorizontalWheelDocument, () => void>();
 
 /** Install the wheel adapter once for a browser document. */
 export function installHorizontalWheelScrolling(
-	targetDocument?: Document
+	targetDocument?: HorizontalWheelDocument
 ): () => void {
 	const ownerDocument =
-		targetDocument ?? (typeof document === "undefined" ? null : document);
+		targetDocument ?? (globalThis.document === undefined ? null : document);
 	if (!ownerDocument || installedDocuments.has(ownerDocument)) {
 		return () => {};
 	}
 
 	const handler = createHorizontalWheelHandler();
-	const listener = handler as unknown as EventListener;
+	const listener = (event: WheelEvent) => handler(event);
 	ownerDocument.addEventListener("wheel", listener, { passive: false });
 
 	const cleanup = () => {
@@ -143,22 +197,29 @@ function moveScrollLeft(
 }
 
 function readOverflowX(element: HorizontalWheelElement): string {
-	if (typeof globalThis.getComputedStyle !== "function") {
+	const reader = computedStyleReaderSchema.safeParse(
+		globalThis.getComputedStyle
+	);
+	if (!reader.success) {
 		return "";
 	}
-	return globalThis.getComputedStyle(element as unknown as Element).overflowX;
+	// The native DOM call validates its element argument, including elements from
+	// another realm. Decode only the computed-style projection this adapter owns.
+	return computedOverflowSchema.parse(
+		reader.data.call(globalThis, computedStyleElementSchema.parse(element))
+	).overflowX;
 }
 
-function elementFromTarget(target: unknown): HorizontalWheelElement | null {
-	const direct = asHorizontalWheelElement(target);
-	if (direct) {
-		return direct;
-	}
-	if (isRecord(target)) {
-		return asHorizontalWheelElement(target.parentElement);
-	}
-	return null;
-}
+const wheelEventTargetSchema = z
+	.union([
+		horizontalWheelElementSchema,
+		wheelTargetParentSchema.transform((parent) =>
+			asHorizontalWheelElement(parent.parentElement)
+		),
+	])
+	.nullable()
+	.catch(null);
+const elementFromTarget = wheelEventTargetSchema.parse;
 
 function parentElementOf(
 	element: HorizontalWheelElement
@@ -166,24 +227,6 @@ function parentElementOf(
 	return asHorizontalWheelElement(element.parentElement);
 }
 
-function asHorizontalWheelElement(
-	value: unknown
-): HorizontalWheelElement | null {
-	if (!isRecord(value)) {
-		return null;
-	}
-	if (
-		typeof value.clientHeight !== "number" ||
-		typeof value.clientWidth !== "number" ||
-		typeof value.scrollHeight !== "number" ||
-		typeof value.scrollLeft !== "number" ||
-		typeof value.scrollWidth !== "number"
-	) {
-		return null;
-	}
-	return value as unknown as HorizontalWheelElement;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
+const asHorizontalWheelElement = horizontalWheelElementSchema
+	.nullable()
+	.catch(null).parse;

@@ -6,8 +6,9 @@ import {
 	Loading01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { MorphIconSwap } from "@ryu/ui/components/morph-icon.tsx";
-import { NumberPopIn } from "@ryu/ui/components/number-pop-in";
+import { NumberPopIn } from "@ryu/ui/components/number-pop-in.tsx";
 import { SuccessCheck } from "@ryu/ui/components/success-check.tsx";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -34,12 +35,12 @@ interface InstallingStepProps {
 	token: string | null;
 }
 
-const DEP_DISPLAY_NAMES: Record<string, string> = {
-	git: "Git",
-	rust: "Rust",
-	npm: "Node.js (npm)",
-	python: "Python",
-};
+const DEP_DISPLAY_NAMES = new Map<string, string>([
+	["git", "Git"],
+	["rust", "Rust"],
+	["npm", "Node.js (npm)"],
+	["python", "Python"],
+]);
 
 export function InstallingStep({
 	sidecarNames,
@@ -48,6 +49,7 @@ export function InstallingStep({
 	token,
 	onComplete,
 }: InstallingStepProps) {
+	const tl = useLiteralMessages();
 	const [items, setItems] = useState<InstallItem[]>([]);
 	const [doneCount, setDoneCount] = useState(0);
 	const started = useRef(false);
@@ -63,7 +65,7 @@ export function InstallingStep({
 
 			const depItems: InstallItem[] = depNames.map((name) => ({
 				name,
-				displayName: DEP_DISPLAY_NAMES[name] ?? name,
+				displayName: DEP_DISPLAY_NAMES.get(name) ?? name,
 				status: "waiting",
 				isDep: true,
 			}));
@@ -96,7 +98,7 @@ export function InstallingStep({
 							if (!i.isDep) {
 								return i;
 							}
-							const result = results[i.name];
+							const result = results[i.name]?.status;
 							const status =
 								result === "installed" || result === "already_installed"
 									? "done"
@@ -166,7 +168,9 @@ export function InstallingStep({
 		<div className="flex flex-col gap-5">
 			<div className="flex items-center gap-3">
 				{doneCount >= total ? (
-					<SuccessCheck className="size-8 shrink-0 text-status-success" />
+					<span className="inline-flex shrink-0 text-status-success">
+						<SuccessCheck className="size-8" />
+					</span>
 				) : null}
 				<div>
 					<h2 className="mb-1 font-medium text-xl">Setting up Ryu</h2>
@@ -193,16 +197,21 @@ export function InstallingStep({
 								<div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
 							)}
 							{(item.status === "installing" || item.status === "done") && (
-								<MorphIconSwap
-									a={Loading01Icon}
-									b={CheckmarkCircle01Icon}
+								<span
 									className={
 										item.status === "done"
-											? "h-4 w-4 text-status-success"
-											: "h-4 w-4 animate-spin text-primary"
+											? "inline-flex text-status-success"
+											: "inline-flex animate-spin text-primary"
 									}
-									state={item.status === "done" ? "b" : "a"}
-								/>
+								>
+									{" "}
+									<MorphIconSwap
+										a={Loading01Icon}
+										b={CheckmarkCircle01Icon}
+										className="h-4 w-4"
+										state={item.status === "done" ? "b" : "a"}
+									/>
+								</span>
 							)}
 							{item.status === "failed" && (
 								<HugeiconsIcon
@@ -223,11 +232,18 @@ export function InstallingStep({
 							}
 						>
 							{item.status === "installing"
-								? `Getting ${item.displayName} ready…`
+								? tl("Getting {displayName} ready…", {
+										displayName: item.displayName,
+									})
 								: item.status === "done"
-									? `${item.displayName} is ready`
+									? tl("{displayName} is ready", {
+											displayName: item.displayName,
+										})
 									: item.status === "failed"
-										? `Something went wrong with ${item.displayName}. Retry from Services.`
+										? tl(
+												"Something went wrong with {displayName}. Retry from Services.",
+												{ displayName: item.displayName }
+											)
 										: item.displayName}
 						</span>
 					</div>

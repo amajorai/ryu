@@ -15,8 +15,19 @@ swap). ZERO dependency on `apps/core`.
 Why it exists: before it, every downloader streamed whole files into a `Vec<u8>`
 (multi-GB into RAM) with no progress, cancel, or resume. The center replaces that
 with stream-to-disk `.part` files (HTTP Range + `If-Range` resume), bounded retry,
-checksum-verify + atomic rename, and live progress over a broadcast channel (SSE).
-It is the single source of truth `/api/setup/status` is derived from.
+checksum-verify + durable atomic install (fsync the `.part`, rename, then fsync the
+directory on Unix, before the version store is written; an update keeps the previous
+install under a hard-linked `.previous` name until then and puts it back if the
+directory cannot be flushed; a `.previous` name a crash leaves beside an installed
+file is removed when the center loads at startup), and live progress over a
+broadcast channel (SSE). It is the single source of truth `/api/setup/status` is
+derived from.
+
+Every registry commit publishes its event while it still holds the registry lock,
+so the event order is the commit order and a `snapshot()` (GET) never shows a
+state whose event is still unsent. Each driver and indeterminate registration is
+stamped; one that has been superseded by a reinstall of the same id never removes
+the newer control handle, finishes its row, or writes its stale outcome to history.
 
 ## Key API
 

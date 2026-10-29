@@ -16,10 +16,10 @@ test("shares catalog requests, propagates changes, isolates nodes, and pauses ba
 	page.on("pageerror", (error) => errors.push(error.message));
 	await page.goto("/catalog-performance-proof.html");
 	await expect(page.getByTestId("agent-name")).toHaveText(
-		new Array(8).fill("alpha researcher")
+		Array.from({ length: 8 }, () => "alpha researcher")
 	);
 	await expect(page.getByTestId("app-state")).toHaveText(
-		new Array(8).fill("alpha Notes: Disabled")
+		Array.from({ length: 8 }, () => "alpha Notes: Disabled")
 	);
 	const metrics = async () =>
 		await (await request.get("/proof-metrics")).json();
@@ -28,30 +28,30 @@ test("shares catalog requests, propagates changes, isolates nodes, and pauses ba
 		.getByRole("button", { name: "Add workspace", exact: true })
 		.click();
 	await expect(page.getByTestId("agent-name")).toHaveText(
-		new Array(9).fill("alpha researcher")
+		Array.from({ length: 9 }, () => "alpha researcher")
 	);
 	expect((await metrics()).catalogReads).toBe(4);
 	await page.getByRole("button", { name: "Rename agent", exact: true }).click();
 	await expect(page.getByTestId("agent-name")).toHaveText(
-		new Array(9).fill("Updated researcher")
+		Array.from({ length: 9 }, () => "Updated researcher")
 	);
 	await page.getByRole("button", { name: "Toggle app", exact: true }).click();
 	await expect(page.getByTestId("app-state")).toHaveText(
-		new Array(9).fill("alpha Notes: Enabled")
+		Array.from({ length: 9 }, () => "alpha Notes: Enabled")
 	);
 	await page.getByRole("button", { name: "Node beta", exact: true }).click();
 	await expect(page.getByTestId("agent-name")).toHaveText(
-		new Array(9).fill("beta researcher")
+		Array.from({ length: 9 }, () => "beta researcher")
 	);
 	await expect(page.getByTestId("app-state")).toHaveText(
-		new Array(9).fill("beta Notes: Disabled")
+		Array.from({ length: 9 }, () => "beta Notes: Disabled")
 	);
 	await page.getByRole("button", { name: "Node alpha", exact: true }).click();
 	await expect(page.getByTestId("agent-name")).toHaveText(
-		new Array(9).fill("Updated researcher")
+		Array.from({ length: 9 }, () => "Updated researcher")
 	);
 	await expect(page.getByTestId("app-state")).toHaveText(
-		new Array(9).fill("alpha Notes: Enabled")
+		Array.from({ length: 9 }, () => "alpha Notes: Enabled")
 	);
 	const readsBefore = (await metrics()).catalogReads;
 	await page.getByRole("button", { name: "Refresh all", exact: true }).click();

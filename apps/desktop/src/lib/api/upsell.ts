@@ -24,27 +24,31 @@
 // two events distinct so the weights can later be tuned against real purchases.
 
 import type { UpsellCard } from "@ryu/auth/lib/upsell";
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
+import {
+	upsellCardsSchema,
+	upsellPitchEnvelopeSchema,
+	upsellShownAtSchema,
+	upsellStateReplySchema,
+} from "./billing-wire-contracts.ts";
 
 const BASE = `${BACKEND_URL.replace(/\/$/, "")}/api/upsell`;
 
 /** True when the user has a session token; the upsell requires sign-in. */
 function hasUpsellAuth(): boolean {
 	try {
-		return Boolean(localStorage.getItem(TOKEN_KEY));
+		return Boolean(getActiveToken());
 	} catch {
 		return false;
 	}
 }
 
-function authHeaders(): Record<string, string> {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-	};
+function authHeaders() {
+	const headers = new Headers({ "Content-Type": "application/json" });
 	try {
-		const token = localStorage.getItem(TOKEN_KEY);
+		const token = getActiveToken();
 		if (token) {
-			headers.Authorization = `Bearer ${token}`;
+			headers.set("Authorization", `Bearer ${token}`);
 		}
 	} catch {
 		// No storage — the request 401s and the caller treats it as a failed check.
@@ -64,16 +68,7 @@ export interface UpsellState {
 }
 
 /** Parse the server's `lastUpsellShownAt` (ISO string or epoch-ms) into ms. */
-function parseShownAt(value: unknown): number | null {
-	if (typeof value === "number") {
-		return Number.isFinite(value) ? value : null;
-	}
-	if (typeof value === "string") {
-		const ms = Date.parse(value);
-		return Number.isFinite(ms) ? ms : null;
-	}
-	return null;
-}
+const parseShownAt = upsellShownAtSchema.parse;
 
 /**
  * Fetch the per-user show-state. Resolves to `null` when the check FAILED
@@ -90,7 +85,7 @@ export async function fetchUpsellState(): Promise<UpsellState | null> {
 		if (!resp.ok) {
 			return null;
 		}
-		const json = (await resp.json()) as { lastUpsellShownAt?: unknown };
+		const json = upsellStateReplySchema.parse(await resp.json());
 		return { lastUpsellShownAtMs: parseShownAt(json.lastUpsellShownAt) };
 	} catch {
 		return null;
@@ -112,9 +107,12 @@ export async function fetchUpsellPitch(): Promise<UpsellCard[]> {
 		if (!resp.ok) {
 			return [];
 		}
-		const json = (await resp.json()) as { cards?: UpsellCard[] } | UpsellCard[];
-		const cards = Array.isArray(json) ? json : (json.cards ?? []);
-		return Array.isArray(cards) ? cards : [];
+		const json = await resp.json();
+		const bare = upsellCardsSchema.safeParse(json);
+		if (bare.success) {
+			return bare.data;
+		}
+		return upsellPitchEnvelopeSchema.parse(json).cards ?? [];
 	} catch {
 		return [];
 	}

@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /** One verified human's durable read marker for one conversation message. */
 export interface MessageReadReceipt {
 	messageId: string;
@@ -44,58 +46,50 @@ export function mergeReadReceipts(
 	});
 }
 
-/** Decode an untrusted realtime read-receipt frame for the active room. */
+const receiptFrameInputSchema = z.json();
+export type ReadReceiptFrameInput =
+	| z.infer<typeof receiptFrameInputSchema>
+	| undefined;
+const optionalReceiptString = z.string().optional().catch(undefined);
+export const readReceiptFrameSchema = z.object({
+	type: z.enum(["readReceipt", "read_receipt"]),
+	conversationId: optionalReceiptString,
+	conversation_id: optionalReceiptString,
+	messageId: optionalReceiptString,
+	message_id: optionalReceiptString,
+	userId: optionalReceiptString,
+	user_id: optionalReceiptString,
+	readAt: optionalReceiptString,
+	read_at: optionalReceiptString,
+	userName: optionalReceiptString,
+	user_name: optionalReceiptString,
+});
+
+/** Decode a realtime read-receipt frame for the active room. */
 export function readReceiptFromFrame(
-	data: unknown,
+	data: ReadReceiptFrameInput,
 	conversationId: string | null
 ): MessageReadReceipt | null {
-	if (typeof data !== "object" || data === null) {
+	const parsed = readReceiptFrameSchema.safeParse(data);
+	if (!parsed.success) {
 		return null;
 	}
-	const frame = data as Record<string, unknown>;
-	if (frame.type !== "readReceipt" && frame.type !== "read_receipt") {
-		return null;
-	}
+	const frame = parsed.data;
 	const frameConversationId =
-		typeof frame.conversationId === "string"
-			? frame.conversationId
-			: typeof frame.conversation_id === "string"
-				? frame.conversation_id
-				: null;
+		frame.conversationId ?? frame.conversation_id ?? null;
 	if (conversationId && frameConversationId !== conversationId) {
 		return null;
 	}
-	const messageId =
-		typeof frame.messageId === "string"
-			? frame.messageId.trim()
-			: typeof frame.message_id === "string"
-				? frame.message_id.trim()
-				: "";
-	const userId =
-		typeof frame.userId === "string"
-			? frame.userId.trim()
-			: typeof frame.user_id === "string"
-				? frame.user_id.trim()
-				: "";
-	const readAt =
-		typeof frame.readAt === "string"
-			? frame.readAt.trim()
-			: typeof frame.read_at === "string"
-				? frame.read_at.trim()
-				: "";
+	const messageId = (frame.messageId ?? frame.message_id ?? "").trim();
+	const userId = (frame.userId ?? frame.user_id ?? "").trim();
+	const readAt = (frame.readAt ?? frame.read_at ?? "").trim();
 	if (!(messageId && userId && readAt)) {
 		return null;
 	}
-	const userName =
-		typeof frame.userName === "string"
-			? frame.userName.trim()
-			: typeof frame.user_name === "string"
-				? frame.user_name.trim()
-				: "";
-	return {
-		messageId,
-		readAt,
-		userId,
-		...(userName ? { userName } : {}),
-	};
+	const userName = (frame.userName ?? frame.user_name ?? "").trim();
+	const receipt: MessageReadReceipt = { messageId, readAt, userId };
+	if (userName) {
+		receipt.userName = userName;
+	}
+	return receipt;
 }

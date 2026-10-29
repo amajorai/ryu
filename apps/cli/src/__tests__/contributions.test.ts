@@ -267,8 +267,8 @@ test("source mapping matches the source of truth", () => {
 			"garbage",
 		],
 	};
-	expect(sourceItemsFromResponse(source, payload)).toEqual(
-		upstreamSourceItems(source, payload)
+	expect(upstreamSourceItems(source, payload)).toEqual(
+		sourceItemsFromResponse(source, payload)
 	);
 	expect(sourceItemsFromResponse(source, payload)).toHaveLength(1);
 	expect(sourceItemsFromResponse(source, { quests: "nope" })).toEqual([]);

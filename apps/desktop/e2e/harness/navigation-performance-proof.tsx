@@ -19,6 +19,11 @@ import {
 import { RouteOutlet } from "@/src/contributions/RouteOutlet.tsx";
 import { contributionRegistry } from "@/src/contributions/registry.ts";
 import "../../src/index.css";
+import { useProductModeStore } from "../../src/lib/product-mode.ts";
+
+// OS is rollout-flagged (off by default) and this proof exercises it, so switch
+// it on as the app's flag sync (ProductModeAccessSync) would.
+useProductModeStore.getState().setOsAccess(true);
 
 localStorage.setItem("ryu:product-mode", "os");
 localStorage.setItem("ryu_startup_behavior", "restore");
@@ -210,11 +215,12 @@ function Shell() {
 						<CurrentTabIdProvider tabId={tab.id}>
 							{tab.unloaded ? null : (
 								<div
-									className="absolute inset-0"
+									className={
+										tab.id === activeTabId
+											? "absolute inset-0"
+											: "absolute inset-0 hidden"
+									}
 									data-pane={tab.id}
-									style={{
-										display: tab.id === activeTabId ? undefined : "none",
-									}}
 								>
 									<RouteOutlet onClose={() => closeTab(tab.id)} tab={tab} />
 								</div>

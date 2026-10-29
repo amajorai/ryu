@@ -1,5 +1,6 @@
 @import "./status-colors.css";
 @import "./overlays.css";
+@import "./registered-icon.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @plugin "@toolwind/corner-shape";
@@ -30,7 +31,7 @@
 	--secondary: oklch(0.97 0 0);
 	--secondary-foreground: oklch(0.205 0 0);
 	--muted: oklch(0.97 0 0);
-	--muted-foreground: oklch(0.556 0 0);
+	--muted-foreground: oklch(0.545 0 0);
 	--accent: oklch(0.97 0 0);
 	--accent-foreground: oklch(0.205 0 0);
 	--destructive: oklch(0.577 0.245 27.325);
@@ -42,7 +43,7 @@
 	--info-foreground: oklch(0.985 0 0);
 	--border: oklch(0.922 0 0);
 	--input: oklch(0.922 0 0);
-	--ring: oklch(0.708 0 0);
+	--ring: oklch(0.64 0 0);
 	--chart-1: oklch(0.87 0 0);
 	--chart-2: oklch(0.556 0 0);
 	--chart-3: oklch(0.439 0 0);
@@ -55,7 +56,7 @@
 	--sidebar-accent: oklch(0.97 0 0);
 	--sidebar-accent-foreground: oklch(0.205 0 0);
 	--sidebar-border: oklch(0.922 0 0);
-	--sidebar-ring: oklch(0.708 0 0);
+	--sidebar-ring: oklch(0.64 0 0);
 	--radius: 0.625rem;
 	--spacing: 0.24rem;
 	--ryu-ui-scale: 1;
@@ -203,8 +204,8 @@ body {
 	font-size: 14px;
 	line-height: 1.45;
 	color: var(--foreground);
-	background: var(--background);
 	zoom: var(--ryu-ui-scale, 1);
+	background: var(--background);
 }
 
 code,
@@ -218,8 +219,8 @@ body::before {
 	position: fixed;
 	inset: 0;
 	z-index: -1;
-	content: "";
 	pointer-events: none;
+	content: "";
 	background-color: var(--background);
 	background-image: var(--ryu-page-bg-image, none);
 	background-repeat: var(--ryu-page-bg-repeat, repeat);
@@ -324,6 +325,6 @@ a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-	outline: 2px solid color-mix(in oklch, var(--ring) 70%, transparent);
+	outline: 2px solid var(--ring);
 	outline-offset: 2px;
 }

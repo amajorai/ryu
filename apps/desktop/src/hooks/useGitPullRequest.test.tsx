@@ -4,16 +4,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import type { GitPullRequest } from "@/src/lib/api/pull-requests.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 const client = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
-const reads: Array<{ signal: AbortSignal; resolve: (value: unknown) => void }> =
-	[];
+const reads: Array<{
+	signal: AbortSignal;
+	resolve: (value: GitPullRequest | null) => void;
+}> = [];
 mock.module("@/src/lib/query-client.ts", () => ({ queryClient: client }));
 mock.module("./useGitStatus.ts", () => ({
 	canonicalCwd: (cwd: string) => cwd.trim(),
@@ -24,7 +27,15 @@ mock.module("@/src/lib/api/pull-requests.ts", () => ({
 		_cwd: string,
 		_branch: string,
 		signal: AbortSignal
-	) => new Promise((resolve) => reads.push({ signal, resolve })),
+	) =>
+		new Promise<GitPullRequest | null>((resolve) =>
+			reads.push({ signal, resolve })
+		),
+	// Linked pull request reads belong to other hooks in the module; these
+	// branch-lookup tests never mount them.
+	fetchPullRequestByUrl: () => Promise.reject(new Error("unused")),
+	fetchPullRequestFeedback: () => Promise.reject(new Error("unused")),
+	gitPullRequestStatus: () => null,
 }));
 const { useGitPullRequest, invalidateGitPullRequest } = await import(
 	"./useGitPullRequest.ts"

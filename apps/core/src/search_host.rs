@@ -1,7 +1,7 @@
 //! Core's kernel side of the extracted [`ryu_search`] seam.
 //!
-//! The `ryu-search` crate owns the conversation search stores — the sqlite-vec
-//! (`vec0`) semantic KNN index and the contentless FTS5 lexical index — plus their
+//! The `ryu-search` crate owns the conversation search stores — the sealed-vector
+//! semantic index and the blind-term FTS5 keyword index — plus their
 //! schema, KNN/FTS query logic, and dims reconciliation. What it cannot own —
 //! because they are kernel/RAG couplings that must stay in Core — are the two
 //! wirings the semantic index needs: the registry-configured embedder
@@ -95,11 +95,11 @@ impl SearchEmbedder for CoreSearchEmbedder {
 }
 
 fn message_index_db_path() -> PathBuf {
-    crate::paths::ryu_dir().join("message-embeddings.db")
+    crate::paths::db_path("message-embeddings.db")
 }
 
 fn message_fts_db_path() -> PathBuf {
-    crate::paths::ryu_dir().join("message-fts.db")
+    crate::paths::db_path("message-fts.db")
 }
 
 /// Open the semantic message index at the default path

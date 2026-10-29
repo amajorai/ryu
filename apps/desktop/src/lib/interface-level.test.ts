@@ -1,7 +1,7 @@
 // The pure rules behind the Interface mode switch. Kept separate from the
 // browser story (`e2e/interface-level-story.spec.ts`, which covers the switch,
 // gradient and writes) because these are the parts that decide what the
-// composer and node dropdown show, and they regress silently: a level added
+// composer shows, and they regress silently: a level added
 // in the middle, or a gate flipped to `!==`, still typechecks and still renders
 // the UI.
 
@@ -22,7 +22,6 @@ import {
 	setSidebarMode,
 } from "@/src/hooks/useSidebarMode.ts";
 import {
-	collapsesNodeSections,
 	DEFAULT_INTERFACE_LEVEL,
 	INTERFACE_LEVEL_KEY,
 	INTERFACE_LEVELS,
@@ -58,6 +57,8 @@ describe("the binary mode", () => {
 
 	it("parks an unknown mode on the first position rather than -1", () => {
 		// -1 would render a switch with no active position; the floor is load-bearing.
+		// SAFETY: Deliberately invalid input exercises the index fallback;
+		// the asserted value is confined to this runtime rejection test.
 		expect(interfaceLevelIndex("nonsense" as InterfaceLevel)).toBe(0);
 	});
 });
@@ -90,24 +91,6 @@ describe("what the composer shows", () => {
 			expect(model[i] || !model[i - 1]).toBe(true);
 			expect(tuning[i] || !tuning[i - 1]).toBe(true);
 		}
-	});
-});
-
-describe("what the node selector shows", () => {
-	// Kept out of the ladder sweep above on purpose: this gate is inverted
-	// relative to the composer's — true is LESS surface — so folding it into the
-	// "only ever adds surface" loop would need a negation and would read as the
-	// opposite of what it asserts.
-	it("collapses the technical blocks only at Ryu Work", () => {
-		expect(collapsesNodeSections("simple")).toBe(true);
-		expect(collapsesNodeSections("expert")).toBe(false);
-	});
-
-	it("folds them at the default level, where the disclosure has to work", () => {
-		// The a11y hazard this gate carries only exists at a level someone lands on
-		// without choosing it; if the default ever moves, the trigger's keyboard
-		// story stops being load-bearing and this test should be revisited.
-		expect(collapsesNodeSections(DEFAULT_INTERFACE_LEVEL)).toBe(true);
 	});
 });
 

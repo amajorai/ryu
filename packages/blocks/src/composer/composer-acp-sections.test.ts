@@ -43,7 +43,7 @@ function fakeStore(): AcpSelectionStore & {
 			model[agentId] = modelId;
 		},
 		setAcpConfigValue: (agentId, configId, valueId) => {
-			config[agentId] = { ...(config[agentId] ?? {}), [configId]: valueId };
+			config[agentId] = { ...config[agentId], [configId]: valueId };
 		},
 	};
 }
@@ -331,6 +331,68 @@ describe("buildModelSection", () => {
 		expect(section.value).toBe("gpt-5");
 		expect(section.items).toEqual([
 			{ id: "gpt-5", name: "GPT-5", description: undefined },
+		]);
+	});
+
+	it.each([
+		true,
+		false,
+	])("ignores boolean %s as an advertised current model but accepts a real text model choice", (reported) => {
+		const filteredCurrent: (string | null | undefined)[] = [];
+		const changes: [string, string][] = [];
+		const section = buildModelSection({
+			...base,
+			activeAgentIsAcp: true,
+			acpModelConfigOption: option({
+				id: "model",
+				category: "model",
+				currentValue: reported,
+				options: [{ value: "gpt-5", name: "GPT-5" }],
+			}),
+			filterModelItems: (items, current) => {
+				filteredCurrent.push(current);
+				return items;
+			},
+			onAcpOptionChange: (configId, valueId) => {
+				changes.push([configId, valueId]);
+			},
+		});
+		expect(filteredCurrent).toEqual([undefined]);
+		expect(section.value).toBeUndefined();
+		expect(section.items).toEqual([
+			{ id: "gpt-5", name: "GPT-5", description: undefined },
+		]);
+		expect(changes).toEqual([]);
+		section.onChange("gpt-5");
+		expect(changes).toEqual([["model", "gpt-5"]]);
+	});
+
+	it("preserves a saved textual model over a boolean report and the literal text model false", () => {
+		const section = buildModelSection({
+			...base,
+			activeAgentIsAcp: true,
+			acpOptionValues: { model: "saved" },
+			acpModelConfigOption: option({
+				id: "model",
+				category: "model",
+				currentValue: false,
+				options: [{ value: "saved", name: "Saved model" }],
+			}),
+		});
+		expect(section.value).toBe("saved");
+		const textModel = buildModelSection({
+			...base,
+			activeAgentIsAcp: true,
+			acpModelConfigOption: option({
+				id: "model",
+				category: "model",
+				currentValue: "false",
+				options: [{ value: "false", name: "Text model false" }],
+			}),
+		});
+		expect(textModel.value).toBe("false");
+		expect(textModel.items).toEqual([
+			{ id: "false", name: "Text model false", description: undefined },
 		]);
 	});
 
@@ -657,7 +719,10 @@ describe("boolean config options (unstable_boolean_config)", () => {
 			false
 		);
 		expect(visibleAcpConfigOptions).toHaveLength(1);
-		expect(visibleAcpConfigOptions[0].id).toBe("web_search");
+		const visibleToggle = visibleAcpConfigOptions[0];
+		if (!visibleToggle)
+			throw new Error("Boolean control did not survive the visibility filter");
+		expect(visibleToggle.id).toBe("web_search");
 	});
 });
 

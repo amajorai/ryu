@@ -15,8 +15,8 @@
 // tauri.conf.json, so the Dock/taskbar/`.desktop` entry and any in-app label can
 // never disagree — one table, not two.
 
-import { channelOf } from "@ryuhq/core-client/node-compat";
-import CHANNELS from "@/src/lib/release-channels.json";
+import { channelOf } from "@ryuhq/core-client/node-compat.ts";
+import CHANNELS from "@/src/lib/release-channels.json" with { type: "json" };
 
 interface ChannelBrand {
 	/** Suffix shown after the app name — "Nightly", "Research Preview", … */
@@ -25,7 +25,9 @@ interface ChannelBrand {
 	tile: string;
 }
 
-const TABLE = CHANNELS as Record<string, ChannelBrand>;
+const TABLE = new Map(
+	Object.entries(CHANNELS satisfies Record<string, ChannelBrand>)
+);
 
 /** The base product name, without any channel suffix. */
 export const APP_NAME = "Ryu";
@@ -49,7 +51,7 @@ export function channelOfVersion(version: string | null | undefined): string {
  * that it is not stable.
  */
 export function channelLabel(channel: string): string {
-	const known = TABLE[channel]?.label;
+	const known = TABLE.get(channel)?.label;
 	if (known) {
 		return known;
 	}

@@ -2,16 +2,16 @@
 
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu.tsx";
 import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
-} from "@ryu/ui/components/hover-card";
-import { Input } from "@ryu/ui/components/input";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/hover-card.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import { useEffect, useMemo, useState } from "react";
-import { COMPOSER_SELECT_ITEM } from "@/components/agent-elements/input/composer-select.ts";
+import { ItemTag } from "@/components/agent-elements/input/item-tag.tsx";
 import {
 	type ModelMenuOption,
 	sortModelGroups,
@@ -19,17 +19,33 @@ import {
 import { ModelHoverPreview } from "@/components/agent-elements/input/model-hover-preview.tsx";
 import { ModelUsageBadge } from "@/components/agent-elements/input/usage-bar.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	getModelInsight,
 	type ModelInsight,
 } from "@/src/lib/api/model-insight.ts";
 
+interface InsightScope {
+	id: number;
+	target: ApiTarget;
+}
+
+let nextInsightScopeId = 0;
+
 /** Short-lived cache so re-hovering is instant without pinning promotions forever. */
 const INSIGHT_CACHE_TTL_MS = 15 * 60 * 1000;
-const insightCache = new Map<
-	string,
-	{ expiresAt: number; value: ModelInsight | null }
+const insightCache = new WeakMap<
+	InsightScope,
+	Map<string, { expiresAt: number; value: ModelInsight | null }>
 >();
+function cacheFor(scope: InsightScope) {
+	let cache = insightCache.get(scope);
+	if (!cache) {
+		cache = new Map();
+		insightCache.set(scope, cache);
+	}
+	return cache;
+}
 
 function cacheKey(modelId: string, provider: string | null): string {
 	return `${provider ?? ""}::${modelId}`;
@@ -47,14 +63,14 @@ function ModelRow({
 	model,
 	isActive,
 	onSelect,
-	target,
+	scope,
 	usageAgentId,
 	insightProvider,
 }: {
 	model: ModelMenuOption;
 	isActive: boolean;
 	onSelect: (modelId: string) => void;
-	target: { url: string; token: string | null };
+	scope: InsightScope;
 	/**
 	 * The subscription agent these models belong to, when it has per-model quotas
 	 * worth showing (Claude's weekly Sonnet/Opus limits, Codex's Spark). Null for
@@ -74,19 +90,20 @@ function ModelRow({
 		if (!open) {
 			return;
 		}
+		const cache = cacheFor(scope);
 		const key = cacheKey(model.id, provider);
-		const cached = insightCache.get(key);
+		const cached = cache.get(key);
 		if (cached && cached.expiresAt > Date.now()) {
 			setInsight(cached.value);
 			setLoading(false);
 			return;
 		}
-		insightCache.delete(key);
+		cache.delete(key);
 		let cancelled = false;
 		setLoading(true);
-		getModelInsight(target, model.id, provider)
+		getModelInsight(scope.target, model.id, provider)
 			.then((result) => {
-				insightCache.set(key, {
+				cache.set(key, {
 					expiresAt: Date.now() + INSIGHT_CACHE_TTL_MS,
 					value: result,
 				});
@@ -102,20 +119,18 @@ function ModelRow({
 		return () => {
 			cancelled = true;
 		};
-	}, [open, model.id, provider, target]);
+	}, [open, model.id, provider, scope]);
 
 	const row = (
 		<DropdownMenuItem
-			className={cn(
-				COMPOSER_SELECT_ITEM,
-				"flex-col items-start gap-0.5",
-				isActive && "bg-accent"
-			)}
 			closeOnClick={false}
 			onClick={() => onSelect(model.id)}
+			purpose="composer-model"
+			selected={isActive}
 		>
 			<span className="flex w-full items-center gap-2.5">
 				<span className="flex-1 truncate">{model.name}</span>
+				{model.tag ? <ItemTag tag={model.tag} /> : null}
 				{usageAgentId ? (
 					<ModelUsageBadge
 						agentId={usageAgentId}
@@ -148,20 +163,21 @@ function ModelRow({
 			{showCard ? (
 				<HoverCardContent
 					align="start"
-					className="z-[80] w-auto max-w-[18rem] p-3"
+					className="z-[80] w-auto max-w-[18rem]"
 					side="right"
 					sideOffset={8}
+					spacing="rail"
 				>
 					{insight ? (
 						<ModelHoverPreview insight={insight} />
 					) : (
 						<div className="flex w-[16.5rem] flex-col gap-2">
-							<div className="h-3.5 w-2/3 animate-pulse rounded bg-muted-foreground/15" />
+							<div className="h-3.5 w-2/3 animate-skeleton rounded bg-muted-foreground/15" />
 							<div className="grid grid-cols-2 gap-2">
-								<div className="h-6 animate-pulse rounded bg-muted-foreground/10" />
-								<div className="h-6 animate-pulse rounded bg-muted-foreground/10" />
-								<div className="h-6 animate-pulse rounded bg-muted-foreground/10" />
-								<div className="h-6 animate-pulse rounded bg-muted-foreground/10" />
+								<div className="h-6 animate-skeleton rounded bg-muted-foreground/10" />
+								<div className="h-6 animate-skeleton rounded bg-muted-foreground/10" />
+								<div className="h-6 animate-skeleton rounded bg-muted-foreground/10" />
+								<div className="h-6 animate-skeleton rounded bg-muted-foreground/10" />
 							</div>
 						</div>
 					)}
@@ -187,11 +203,19 @@ export function ModelMenuContent({
 	insightProvider?: string | null;
 }) {
 	const node = useActiveNode();
-	const target = useMemo(
-		() => ({ url: node.url, token: node.token, userJwt: node.userJwt ?? null }),
+	const scope = useMemo<InsightScope>(
+		() => ({
+			id: ++nextInsightScopeId,
+			target: {
+				url: node.url,
+				token: node.token,
+				userJwt: node.userJwt ?? null,
+			},
+		}),
 		[node.url, node.token, node.userJwt]
 	);
 	const [query, setQuery] = useState("");
+	const tl = useLiteralMessages();
 	const normalizedQuery = query.trim().toLowerCase();
 
 	const groups = useMemo(() => {
@@ -222,10 +246,10 @@ export function ModelMenuContent({
 		<ModelRow
 			insightProvider={insightProvider}
 			isActive={model.id === activeId}
-			key={model.id}
+			key={`${scope.id}:${model.id}`}
 			model={model}
 			onSelect={onSelect}
-			target={target}
+			scope={scope}
 			usageAgentId={usageAgentId}
 		/>
 	);
@@ -235,23 +259,23 @@ export function ModelMenuContent({
 			<div className="sticky top-0 z-10">
 				<Input
 					aria-label="Filter models"
-					className="h-8 text-[13px]"
 					onChange={(e) => setQuery(e.target.value)}
 					placeholder="Search models…"
+					purpose="model-filter"
 					value={query}
 				/>
 			</div>
 			<div className="scroll-fade min-h-0 flex-1 overflow-y-auto p-1">
 				{groups.length === 0 ? (
 					<p className="px-3 py-4 text-center text-muted-foreground text-xs">
-						No models match &ldquo;{query.trim()}&rdquo;
+						{tl("No models match “{query}”", { query: query.trim() })}
 					</p>
 				) : null}
 				{hasGroups
 					? groups.map((group) => (
 							<div key={group.label ?? "__ungrouped__"}>
 								{group.label ? (
-									<div className="px-3 pt-2 pb-1 font-medium text-[11px] text-muted-foreground">
+									<div className="type-caption px-3 pt-2 pb-1 font-medium text-muted-foreground">
 										{group.label}
 									</div>
 								) : null}

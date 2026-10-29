@@ -1,8 +1,11 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // Typed client for durable per-human conversation read markers.
 //
 // Read markers are separate from the conversation message payload: one bulk
 // snapshot restores the Instagram-style avatar indicators, while the bounded
 // POST lets a viewport acknowledge several visible messages in one request.
+
+import { z } from "zod";
 
 import type {
 	MessageReadReceipt,
@@ -10,18 +13,27 @@ import type {
 } from "../read-receipts.ts";
 import { type ApiTarget, request } from "./client.ts";
 
-interface ReadReceiptWire {
-	messageId?: unknown;
-	readAt?: unknown;
-	userId?: unknown;
-	userName?: unknown;
-}
-
-interface ReadReceiptUserWire {
-	avatar?: unknown;
-	id?: unknown;
-	name?: unknown;
-}
+const optionalReceiptStringSchema = z.string().optional().catch(undefined);
+const readReceiptWireSchema = z.object({
+	messageId: optionalReceiptStringSchema,
+	readAt: optionalReceiptStringSchema,
+	userId: optionalReceiptStringSchema,
+	userName: optionalReceiptStringSchema,
+});
+const readReceiptUserWireSchema = z.object({
+	avatar: optionalReceiptStringSchema,
+	id: optionalReceiptStringSchema,
+	name: optionalReceiptStringSchema,
+});
+type ReadReceiptWire = z.infer<typeof readReceiptWireSchema>;
+type ReadReceiptUserWire = z.infer<typeof readReceiptUserWireSchema>;
+const readReceiptsSnapshotWireSchema = z.object({
+	receipts: z.array(readReceiptWireSchema).nullish(),
+	users: z.array(readReceiptUserWireSchema).nullish(),
+});
+const markReadWireSchema = z.object({
+	receipts: z.array(readReceiptWireSchema).nullish(),
+});
 
 export interface MessageReadReceiptsSnapshot {
 	receipts: MessageReadReceipt[];
@@ -29,33 +41,28 @@ export interface MessageReadReceiptsSnapshot {
 }
 
 function receiptFromWire(raw: ReadReceiptWire): MessageReadReceipt | null {
-	const messageId =
-		typeof raw.messageId === "string" ? raw.messageId.trim() : "";
-	const userId = typeof raw.userId === "string" ? raw.userId.trim() : "";
-	const readAt = typeof raw.readAt === "string" ? raw.readAt.trim() : "";
+	const messageId = raw.messageId?.trim() ?? "";
+	const userId = raw.userId?.trim() ?? "";
+	const readAt = raw.readAt?.trim() ?? "";
 	if (!(messageId && userId && readAt)) {
 		return null;
 	}
-	const userName = typeof raw.userName === "string" ? raw.userName.trim() : "";
-	return {
-		messageId,
-		readAt,
-		userId,
-		...(userName ? { userName } : {}),
-	};
+	const userName = raw.userName?.trim() ?? "";
+	const receipt: MessageReadReceipt = { messageId, readAt, userId };
+	if (userName) {
+		receipt.userName = userName;
+	}
+	return receipt;
 }
 
 function userFromWire(raw: ReadReceiptUserWire): MessageReadReceiptUser | null {
-	const id = typeof raw.id === "string" ? raw.id.trim() : "";
+	const id = raw.id?.trim() ?? "";
 	if (!id) {
 		return null;
 	}
-	const name = typeof raw.name === "string" ? raw.name.trim() : "";
+	const name = raw.name?.trim() ?? "";
 	return {
-		avatar:
-			typeof raw.avatar === "string"
-				? raw.avatar.trim() || undefined
-				: undefined,
+		avatar: raw.avatar?.trim() || undefined,
 		id,
 		name: name || id,
 	};
@@ -66,12 +73,13 @@ export async function listMessageReadReceipts(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<MessageReadReceiptsSnapshot> {
-	const body = await request<{
-		receipts?: ReadReceiptWire[];
-		users?: ReadReceiptUserWire[];
-	}>(
-		target,
-		`/api/conversations/${encodeURIComponent(conversationId)}/read-receipts`
+	const body = readReceiptsSnapshotWireSchema.parse(
+		await request(
+			target,
+			`/api/conversations/${encodeURIComponent(conversationId)}/read-receipts`,
+			{},
+			gatewayJsonValueSchema
+		)
 	);
 	return {
 		receipts: (body.receipts ?? []).flatMap((receipt) => {
@@ -91,13 +99,16 @@ export async function markMessageRead(
 	conversationId: string,
 	messageIds: readonly string[]
 ): Promise<MessageReadReceipt[]> {
-	const body = await request<{ receipts?: ReadReceiptWire[] }>(
-		target,
-		`/api/conversations/${encodeURIComponent(conversationId)}/read`,
-		{
-			body: { messageIds: [...new Set(messageIds)] },
-			method: "POST",
-		}
+	const body = markReadWireSchema.parse(
+		await request(
+			target,
+			`/api/conversations/${encodeURIComponent(conversationId)}/read`,
+			{
+				body: { messageIds: [...new Set(messageIds)] },
+				method: "POST",
+			},
+			gatewayJsonValueSchema
+		)
 	);
 	return (body.receipts ?? []).flatMap((receipt) => {
 		const normalized = receiptFromWire(receipt);

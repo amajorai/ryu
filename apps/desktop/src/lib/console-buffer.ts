@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+
 // apps/desktop/src/lib/console-buffer.ts
 //
 // A tiny in-memory ring buffer that captures console output for the crash screen's
@@ -34,8 +36,8 @@ const CAPTURED_LEVELS: readonly Level[] = [
 const buffer: Entry[] = [];
 let installed = false;
 
-const serializeArg = (arg: unknown): string => {
-	if (typeof arg === "string") {
+const serializeArg = <TArg>(arg: TArg): string | undefined => {
+	if (isNativeText(arg)) {
 		return arg;
 	}
 	if (arg instanceof Error) {
@@ -58,26 +60,28 @@ const shouldCapture = (): boolean =>
  * Idempotent. Active in development builds or when Developer Mode is on. Original
  * console behaviour is preserved — each call still forwards to the native method.
  *
- * Call with `force: true` to re-install after the user enables Developer Mode at
- * runtime (the idempotency guard is bypassed but the patch is still safe to apply
- * twice since it wraps the already-wrapped method).
+ * The capture gate is checked for each call so turning Developer Mode off stops
+ * adding new entries immediately. A later opt-in takes effect without another
+ * wrapper: installation remains idempotent for the lifetime of the page.
  */
-export const installConsoleCapture = (force = false): void => {
-	if ((!force && installed) || !shouldCapture()) {
+export const installConsoleCapture = (): void => {
+	if (installed || !shouldCapture()) {
 		return;
 	}
 	installed = true;
 
 	for (const level of CAPTURED_LEVELS) {
 		const original = console[level].bind(console);
-		console[level] = (...args: unknown[]): void => {
-			buffer.push({
-				level,
-				time: new Date().toISOString(),
-				text: args.map(serializeArg).join(" "),
-			});
-			if (buffer.length > MAX_ENTRIES) {
-				buffer.shift();
+		console[level] = (...args: Parameters<typeof original>): void => {
+			if (shouldCapture()) {
+				buffer.push({
+					level,
+					time: new Date().toISOString(),
+					text: args.map(serializeArg).join(" "),
+				});
+				if (buffer.length > MAX_ENTRIES) {
+					buffer.shift();
+				}
 			}
 			original(...args);
 		};

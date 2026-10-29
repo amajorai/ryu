@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom", "vite/client"]
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/components/settings/ResourcePermissions.tsx",
+    "src/components/settings/ResourcePermissions.authority.native-http.test.tsx"
+  ]
+}

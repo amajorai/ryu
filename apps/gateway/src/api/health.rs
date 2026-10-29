@@ -3,16 +3,48 @@ use serde_json::{json, Value};
 
 use crate::state::SharedState;
 
-pub async fn health(State(state): State<SharedState>) -> Json<Value> {
-    let providers = state.providers.available_providers();
-    let provider_names: Vec<&str> = providers.iter().map(|p| p.as_str()).collect();
-
-    Json(json!({
+pub async fn health(
+    State(state): State<SharedState>,
+    headers: axum::http::HeaderMap,
+) -> Json<Value> {
+    let mut body = json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
-        "providers": provider_names,
-        "auth_required": state.config.auth.require_auth,
-    }))
+    });
+    if let Some(raw_key) = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+    {
+        if crate::pipeline::authenticate(
+            &state,
+            crate::pipeline::AuthInputs::with_key(Some(raw_key)),
+        )
+        .await
+        .ok()
+        .is_some_and(|ctx| ctx.is_master_key)
+        {
+            let runtime = state.provider_runtime.snapshot();
+            body["providers"] = json!(runtime.providers.available_providers());
+            body["auth_required"] = json!(state.with_auth(|auth| auth.require_auth));
+            // Hash of the control-plane policy + limits last applied (null when
+            // unbound or on a control plane that predates the field).
+            body["policy_version"] = json!(state.policy_version());
+            // `ok`, or why the durable spend counters refuse metered requests
+            // (`budget store key mismatch` / `budget store key unavailable`).
+            body["budget_store"] = json!(state
+                .spend_store
+                .health()
+                .err()
+                .unwrap_or_else(|| "ok".to_owned()));
+            // How spend subject ids reach disk: `sealed`, `no key` (a
+            // never-sealed spend.db counted by raw id because no Gateway
+            // sealing key is held) or `memory`.
+            body["budget_store_sealing"] = json!(state.spend_store.sealing());
+            // Where this Gateway runs: `fleet`, `managed_node` or `self_hosted`.
+            body["custody"] = json!(state.custody);
+        }
+    }
+    Json(body)
 }
 
 #[cfg(test)]
@@ -24,12 +56,37 @@ mod tests {
     #[tokio::test]
     async fn health_reports_ok_version_and_auth_flag() {
         let state = Arc::new(AppState::new_for_test_default());
-        let Json(body) = health(State(state)).await;
+        let Json(body) = health(State(state), axum::http::HeaderMap::new()).await;
         assert_eq!(body["status"], "ok");
         assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
         // Default test config requires auth and registers no providers.
-        assert_eq!(body["auth_required"], true);
-        assert_eq!(body["providers"].as_array().unwrap().len(), 0);
+        assert!(body.get("auth_required").is_none());
+        assert!(body.get("providers").is_none());
+        assert!(body.get("custody").is_none());
+    }
+
+    #[tokio::test]
+    async fn health_reports_custody_to_the_master_key_only() {
+        let mut config = crate::config::GatewayConfig::default();
+        config.auth.master_key = Some("master-secret".to_owned());
+        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let mut state = AppState::new_for_test(
+            config,
+            audit,
+            crate::evals::EvalsRunner::new(Default::default()),
+        );
+        state.custody = crate::custody::GatewayCustody::Fleet;
+        let state = Arc::new(state);
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("authorization", "Bearer master-secret".parse().unwrap());
+        let Json(body) = health(State(Arc::clone(&state)), headers).await;
+        assert_eq!(body["custody"], "fleet");
+        let Json(anonymous) = health(State(state), axum::http::HeaderMap::new()).await;
+        assert!(anonymous.get("custody").is_none());
     }
 }
 
@@ -128,6 +185,7 @@ pub async fn readiness(
     State(state): State<SharedState>,
     axum::Extension(listener): axum::Extension<std::net::SocketAddr>,
     axum::extract::Query(query): axum::extract::Query<ReadinessQuery>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<ryu_gw_credentials::ReadinessProof>, crate::error::GatewayError> {
     if query.nonce.len() != 64 || !query.nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(crate::error::GatewayError::Unauthorized(
@@ -140,6 +198,17 @@ pub async fn readiness(
                 "Gateway has no readiness credential".to_owned(),
             )
         })?;
+        let signature = headers
+            .get("x-ryu-readiness-proof")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        ryu_gw_credentials::verify_readiness_request(&query.nonce, signature, admin).map_err(
+            |_| {
+                crate::error::GatewayError::Unauthorized(
+                    "invalid readiness request proof".to_owned(),
+                )
+            },
+        )?;
         let mut inference_keys = Vec::new();
         let mut core_keys = Vec::new();
         for key in &auth.api_keys {

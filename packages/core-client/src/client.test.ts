@@ -1,3 +1,5 @@
+import { appResponseValueSchema } from "./app-request-json.ts";
+import { createFetchFixture } from "./test-support/http-fixture.ts";
 // packages/core-client/src/client.test.ts
 //
 // Tests for the shared HTTP plumbing: apiUrl slash-joining, makeHeaders (bearer +
@@ -115,56 +117,62 @@ describe("buyerTokenHeader", () => {
 describe("request", () => {
 	test("defaults to GET, parses JSON, and merges extra headers", async () => {
 		let capturedInit: RequestInit | undefined;
-		globalThis.fetch = ((_url: string, init: RequestInit) => {
+		globalThis.fetch = createFetchFixture((_url: string, init: RequestInit) => {
 			capturedInit = init;
 			return Promise.resolve(new Response('{"v":1}', { status: 200 }));
-		}) as unknown as typeof fetch;
-		const data = await request<{ v: number }>(
+		});
+		const data = await request(
 			target({ token: "t" }),
 			"/api/x",
 			{
 				headers: { "X-Extra": "1" },
-			}
+			},
+			appResponseValueSchema
 		);
 		expect(data).toEqual({ v: 1 });
 		expect(capturedInit?.method).toBe("GET");
-		const h = capturedInit?.headers as Record<string, string>;
-		expect(h.Authorization).toBe("Bearer t");
-		expect(h["X-Extra"]).toBe("1");
+		const h = new Headers(capturedInit?.headers);
+		expect(h.get("Authorization")).toBe("Bearer t");
+		expect(h.get("X-Extra")).toBe("1");
 	});
 
 	test("keeps provider identity out of Authorization for an unbound target", async () => {
 		let capturedInit: RequestInit | undefined;
 		setUserJwtProvider(() => "identity-only-jwt");
-		globalThis.fetch = ((_url: string, init: RequestInit) => {
+		globalThis.fetch = createFetchFixture((_url: string, init: RequestInit) => {
 			capturedInit = init;
 			return Promise.resolve(new Response("{}", { status: 200 }));
-		}) as unknown as typeof fetch;
+		});
 
-		await request(target(), "/api/x");
-		const h = capturedInit?.headers as Record<string, string>;
-		expect(h.Authorization).toBeUndefined();
-		expect(h[USER_JWT_HEADER]).toBe("identity-only-jwt");
+		await request(target(), "/api/x", {}, appResponseValueSchema);
+		const h = new Headers(capturedInit?.headers);
+		expect(h.has("Authorization")).toBe(false);
+		expect(h.get(USER_JWT_HEADER)).toBe("identity-only-jwt");
 	});
 
 	test("serializes a body and honors the method", async () => {
 		let capturedInit: RequestInit | undefined;
-		globalThis.fetch = ((_url: string, init: RequestInit) => {
+		globalThis.fetch = createFetchFixture((_url: string, init: RequestInit) => {
 			capturedInit = init;
 			return Promise.resolve(new Response("{}", { status: 200 }));
-		}) as unknown as typeof fetch;
-		await request(target(), "/api/x", { method: "POST", body: { a: 1 } });
+		});
+		await request(
+			target(),
+			"/api/x",
+			{ method: "POST", body: { a: 1 } },
+			appResponseValueSchema
+		);
 		expect(capturedInit?.method).toBe("POST");
 		expect(capturedInit?.body).toBe('{"a":1}');
 	});
 
 	test("leaves body undefined when none is given", async () => {
 		let capturedInit: RequestInit | undefined;
-		globalThis.fetch = ((_url: string, init: RequestInit) => {
+		globalThis.fetch = createFetchFixture((_url: string, init: RequestInit) => {
 			capturedInit = init;
 			return Promise.resolve(new Response("{}", { status: 200 }));
-		}) as unknown as typeof fetch;
-		await request(target(), "/api/x");
+		});
+		await request(target(), "/api/x", {}, appResponseValueSchema);
 		expect(capturedInit?.body).toBeUndefined();
 	});
 
@@ -174,36 +182,47 @@ describe("request", () => {
 			called = true;
 			return new Response("{}", { status: 200 });
 		};
-		await request(target({ fetch: fetchImpl }), "/api/x");
+		await request(
+			target({ fetch: fetchImpl }),
+			"/api/x",
+			{},
+			appResponseValueSchema
+		);
 		expect(called).toBe(true);
 	});
 
 	test("returns undefined for an empty response body", async () => {
-		globalThis.fetch = (() =>
-			Promise.resolve(
-				new Response("", { status: 204 })
-			)) as unknown as typeof fetch;
-		expect(await request(target(), "/api/x")).toBeUndefined();
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(new Response("", { status: 204 }))
+		);
+		expect(
+			await request(target(), "/api/x", {}, appResponseValueSchema)
+		).toBeUndefined();
 	});
 
 	test("throws with path and status (no body) on non-2xx", async () => {
-		globalThis.fetch = (() =>
-			Promise.resolve(
-				new Response("ignored body", { status: 404 })
-			)) as unknown as typeof fetch;
-		await expect(request(target(), "/api/x")).rejects.toThrow(
-			"/api/x failed: 404"
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(new Response("ignored body", { status: 404 }))
 		);
+		await expect(
+			request(target(), "/api/x", {}, appResponseValueSchema)
+		).rejects.toThrow("/api/x failed: 404");
 	});
 
 	test("exposes status and a structured server error without changing message", async () => {
-		globalThis.fetch = (() =>
+		globalThis.fetch = createFetchFixture(() =>
 			Promise.resolve(
 				new Response('{"error":"skill_targets_required"}', { status: 409 })
-			)) as unknown as typeof fetch;
+			)
+		);
 
 		try {
-			await request(target(), "/api/skills/catalog/install");
+			await request(
+				target(),
+				"/api/skills/catalog/install",
+				{},
+				appResponseValueSchema
+			);
 			expect.unreachable("request should reject");
 		} catch (error) {
 			expect(error).toBeInstanceOf(ApiError);
@@ -213,17 +232,115 @@ describe("request", () => {
 			expect(error.message).toBe("/api/skills/catalog/install failed: 409");
 			expect(error.status).toBe(409);
 			expect(error.serverMessage).toBe("skill_targets_required");
+			expect(error.code).toBeUndefined();
+		}
+	});
+
+	test("keeps the server's error code beside its message", async () => {
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(
+				Response.json(
+					{
+						code: "mfa_enrollment_required",
+						error: "Add a passkey or an authenticator app.",
+					},
+					{ status: 403 }
+				)
+			)
+		);
+
+		try {
+			await request(target(), "/api/sessions", {}, appResponseValueSchema);
+			expect.unreachable("request should reject");
+		} catch (error) {
+			expect(error).toBeInstanceOf(ApiError);
+			if (!(error instanceof ApiError)) {
+				return;
+			}
+			expect(error.status).toBe(403);
+			expect(error.code).toBe("mfa_enrollment_required");
+			expect(error.serverMessage).toBe(
+				"Add a passkey or an authenticator app."
+			);
+		}
+	});
+
+	test("ignores a non-string error code", async () => {
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(
+				Response.json({ code: 42, error: "conflict" }, { status: 409 })
+			)
+		);
+
+		try {
+			await request(target(), "/api/x", {}, appResponseValueSchema);
+			expect.unreachable("request should reject");
+		} catch (error) {
+			expect(error).toBeInstanceOf(ApiError);
+			if (!(error instanceof ApiError)) {
+				return;
+			}
+			expect(error.code).toBeUndefined();
+			expect(error.serverMessage).toBe("conflict");
+		}
+	});
+
+	test("reads the code and message of a structured server error", async () => {
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(
+				new Response(
+					'{"error":{"code":"org_access_not_in_session","message":"Your sign-in does not include access."}}',
+					{ status: 403 }
+				)
+			)
+		);
+
+		try {
+			await request(target(), "/api/agents", {}, appResponseValueSchema);
+			expect.unreachable("request should reject");
+		} catch (error) {
+			expect(error).toBeInstanceOf(ApiError);
+			if (!(error instanceof ApiError)) {
+				return;
+			}
+			expect(error.message).toBe("/api/agents failed: 403");
+			expect(error.status).toBe(403);
+			expect(error.code).toBe("org_access_not_in_session");
+			expect(error.serverMessage).toBe("Your sign-in does not include access.");
+		}
+	});
+
+	test("reads the top-level code of a control-plane refusal Core passed through", async () => {
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(
+				new Response(
+					'{"code":"user_jwt_org_not_admitted","error":"Unauthorized"}',
+					{ status: 401 }
+				)
+			)
+		);
+
+		try {
+			await request(target(), "/api/vault/export", {}, appResponseValueSchema);
+			expect.unreachable("request should reject");
+		} catch (error) {
+			expect(error).toBeInstanceOf(ApiError);
+			if (!(error instanceof ApiError)) {
+				return;
+			}
+			expect(error.status).toBe(401);
+			expect(error.code).toBe("user_jwt_org_not_admitted");
+			expect(error.serverMessage).toBe("Unauthorized");
 		}
 	});
 
 	test("keeps non-JSON error bodies status-only", async () => {
-		globalThis.fetch = (() =>
-			Promise.resolve(
-				new Response("not json", { status: 502 })
-			)) as unknown as typeof fetch;
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(new Response("not json", { status: 502 }))
+		);
 
 		try {
-			await request(target(), "/api/x");
+			await request(target(), "/api/x", {}, appResponseValueSchema);
 			expect.unreachable("request should reject");
 		} catch (error) {
 			expect(error).toBeInstanceOf(ApiError);

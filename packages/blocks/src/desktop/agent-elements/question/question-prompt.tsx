@@ -1,4 +1,5 @@
 import { Button } from "@ryu/ui/components/button";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VoiceInputButton } from "../input/voice-input-button.tsx";
@@ -205,7 +206,7 @@ export function QuestionPrompt({
 		if (total < min) {
 			return false;
 		}
-		if (typeof max === "number" && total > max) {
+		if (isNativeNumber(max) && total > max) {
 			return false;
 		}
 		return total > 0;
@@ -264,7 +265,7 @@ export function QuestionPrompt({
 				data-total-questions={resolvedTotal}
 			>
 				<div className="flex items-center gap-2 text-foreground text-sm">
-					<span className="inline-flex h-5 min-w-5 items-center justify-center rounded-[4px] px-1 font-medium text-muted-foreground text-sm">
+					<span className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm px-1 font-medium text-muted-foreground text-sm">
 						{clampedIndex}
 					</span>
 					<span>{activeQuestion.title}</span>
@@ -278,7 +279,8 @@ export function QuestionPrompt({
 							const checked = selectedIds.includes(option.id);
 							return (
 								<Button
-									className="-mx-2 h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-left font-normal"
+									appearance="question-option"
+									className="-mx-2"
 									key={option.id}
 									onClick={() => {
 										if (activeQuestion.kind === "single") {
@@ -320,7 +322,7 @@ export function QuestionPrompt({
 							<div className="flex items-center gap-2 pt-1">
 								<span
 									className={cn(
-										"inline-flex h-5 min-w-5 items-center justify-center rounded-[4px] border px-1 font-medium text-sm",
+										"inline-flex h-5 min-w-5 items-center justify-center rounded-sm border px-1 font-medium text-sm",
 										selectedIds.includes(QUESTION_CUSTOM_ID)
 											? "border-primary bg-primary text-primary-foreground"
 											: "border-border bg-transparent text-muted-foreground"
@@ -361,6 +363,7 @@ export function QuestionPrompt({
 			{activeQuestion.kind === "text" && (
 				<div className="flex items-end gap-1 rounded-md border border-border bg-background px-1">
 					<textarea
+						aria-label="Your answer"
 						className="min-w-0 flex-1 resize-y border-0 bg-transparent px-1 py-1.5 text-foreground text-sm outline-none"
 						onChange={(event) => setTextValue(event.target.value)}
 						placeholder={activeQuestion.placeholder ?? "Type your answer"}
@@ -395,24 +398,24 @@ export function QuestionPrompt({
 					<div className="flex items-center gap-1.5">
 						{onPreviousQuestion && (
 							<Button
-								className="h-6 px-2 text-muted-foreground hover:text-foreground"
+								appearance="question-navigation"
 								disabled={!canGoPrev}
 								onClick={onPreviousQuestion}
 								size="sm"
 								type="button"
-								variant="ghost"
+								variant="ghost-muted"
 							>
 								Previous
 							</Button>
 						)}
 						{onNextQuestion && (
 							<Button
-								className="h-6 px-2 text-muted-foreground hover:text-foreground"
+								appearance="question-navigation"
 								disabled={!canGoNext}
 								onClick={onNextQuestion}
 								size="sm"
 								type="button"
-								variant="ghost"
+								variant="ghost-muted"
 							>
 								Next
 							</Button>
@@ -422,17 +425,17 @@ export function QuestionPrompt({
 				<div className="flex items-center justify-end gap-1.5">
 					{allowSkip && (
 						<Button
-							className="h-6 px-2 text-muted-foreground hover:text-foreground"
+							appearance="question-navigation"
 							onClick={handleSkip}
 							size="sm"
 							type="button"
-							variant="ghost"
+							variant="ghost-muted"
 						>
 							{skipLabel}
 						</Button>
 					)}
 					<Button
-						className="h-6 px-2.5"
+						appearance="question-submit"
 						disabled={!canSubmit}
 						onClick={handleSubmit}
 						size="sm"

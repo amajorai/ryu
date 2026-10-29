@@ -1,9 +1,10 @@
 //! Untrusted-content boundary wrapping + chat-template-token stripping for tool
 //! RESULTS re-entering the model on the gateway's openai-compat tool loop.
 //!
-//! The gateway's `run_tool_loop` (see [`crate::tools`]) folds each tool result
-//! back into the conversation as a `role:"tool"` message that is then sent
-//! straight to `provider.complete`. That is the managed/openai-compat plane's
+//! The gateway's `run_tool_loop` (see [`crate::tools`]), the legacy Composio
+//! loop, and `/v1/responses` hosted web search fold each external result back
+//! into the conversation as a `role:"tool"` message that is then sent to the
+//! provider. That is the managed/openai-compat plane's
 //! version of the "poisoned tool output steering a high-privilege model" attack
 //! surface: a malicious MCP server or a poisoned web page can return text that
 //! impersonates the chat transcript (`<|im_start|>system ...`) or smuggles new

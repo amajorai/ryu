@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // Shared AgentSelection shape for Island + desktop dictation prefs.
 // Mirrors `apps/desktop/src/lib/api/preferences.ts` AgentSelection so the
 // dictation preference blob can carry the same picker value the rest of the
@@ -35,20 +37,25 @@ export function isAgentSelectionEmpty(selection: AgentSelection): boolean {
 	);
 }
 
-function selectionString(value: unknown): string {
-	return typeof value === "string" ? value.trim() : "";
-}
+const selectionTextSchema = z.string().trim().catch("");
+const selectionSchema = z
+	.object({
+		agent_id: selectionTextSchema,
+		provider: selectionTextSchema,
+		model: selectionTextSchema,
+		thinking_level: selectionTextSchema,
+		effort: selectionTextSchema,
+		access_mode: selectionTextSchema,
+	})
+	.catch(EMPTY_AGENT_SELECTION);
 
-/**
- * Parse a stored selection. Accepts the JSON object form, a legacy bare agent
- * id string under `{ agent }`, or a legacy bare model id.
- */
-export function parseAgentSelection(value: unknown): AgentSelection {
-	if (value == null) {
-		return EMPTY_AGENT_SELECTION;
-	}
-	if (typeof value === "string") {
-		const trimmed = value.trim();
+type SelectionInput = Parameters<typeof selectionSchema.parse>[0];
+
+/** Decode stored object selections and legacy plain or serialized model IDs. */
+export function parseAgentSelection(value: SelectionInput): AgentSelection {
+	const text = z.string().safeParse(value);
+	if (text.success) {
+		const trimmed = text.data.trim();
 		if (!trimmed) {
 			return EMPTY_AGENT_SELECTION;
 		}
@@ -56,40 +63,25 @@ export function parseAgentSelection(value: unknown): AgentSelection {
 			return { ...EMPTY_AGENT_SELECTION, model: trimmed };
 		}
 		try {
-			return parseAgentSelection(JSON.parse(trimmed));
+			return selectionSchema.parse(JSON.parse(trimmed));
 		} catch {
 			return EMPTY_AGENT_SELECTION;
 		}
 	}
-	if (typeof value !== "object") {
-		return EMPTY_AGENT_SELECTION;
-	}
-	const parsed = value as Record<string, unknown>;
-	return {
-		agent_id: selectionString(parsed.agent_id),
-		provider: selectionString(parsed.provider),
-		model: selectionString(parsed.model),
-		thinking_level: selectionString(parsed.thinking_level),
-		effort: selectionString(parsed.effort),
-		access_mode: selectionString(parsed.access_mode),
-	};
+	return selectionSchema.parse(value);
 }
 
-/**
- * Prefer an explicit `selection` object; fall back to a legacy `agent` string
- * (Island dictation used to store only an agent id).
- */
+/** Prefer an explicit selection; preserve the older agent-ID preference. */
 export function parseAgentSelectionWithLegacyAgent(
-	selection: unknown,
-	legacyAgent: unknown
+	selection: SelectionInput,
+	legacyAgent: SelectionInput
 ): AgentSelection {
 	const fromSelection = parseAgentSelection(selection);
 	if (!isAgentSelectionEmpty(fromSelection)) {
 		return fromSelection;
 	}
-	const agent = selectionString(legacyAgent);
-	if (agent.length > 0) {
-		return { ...EMPTY_AGENT_SELECTION, agent_id: agent };
-	}
-	return EMPTY_AGENT_SELECTION;
+	const agent = selectionTextSchema.parse(legacyAgent);
+	return agent
+		? { ...EMPTY_AGENT_SELECTION, agent_id: agent }
+		: EMPTY_AGENT_SELECTION;
 }

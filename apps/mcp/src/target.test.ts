@@ -47,3 +47,11 @@ describe("MCP target", () => {
 		});
 	});
 });
+
+test("profile port lookup uses only authored keys", () => {
+	expect(coreUrlForProfile(" beta ")).toBe("http://127.0.0.1:11980");
+	expect(coreUrlForProfile("CANARY")).toBe("http://127.0.0.1:9980");
+	for (const profile of ["unknown", "constructor", "__proto__"]) {
+		expect(coreUrlForProfile(profile)).toBe("http://127.0.0.1:7980");
+	}
+});

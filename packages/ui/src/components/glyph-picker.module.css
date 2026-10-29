@@ -1,0 +1,24 @@
+.cropGuidePosition {
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+}
+
+.colorSwatch {
+	background-color: var(--glyph-picker-swatch-color);
+}
+.colorCycle {
+	background: conic-gradient(
+		from 0deg,
+		#ef4444,
+		#eab308,
+		#22c55e,
+		#3b82f6,
+		#a855f7,
+		#ef4444
+	);
+}
+.square {
+	width: var(--glyph-picker-square-size);
+	height: var(--glyph-picker-square-size);
+}

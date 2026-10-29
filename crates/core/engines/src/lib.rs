@@ -48,6 +48,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+mod native;
+mod presets;
+pub use native::*;
+pub use presets::*;
+
 /// The local inference engines that accept tuning. Remote OpenAI-compat providers
 /// map to [`Engine::Other`]: only the OpenAI-standard sampling fields are emitted
 /// for them so a real OpenAI endpoint never 400s on an unknown sampler field.
@@ -57,10 +62,23 @@ pub enum Engine {
     Ollama,
     Vllm,
     Sglang,
-    /// Apple MLX (`mlx_lm server`). Its launch surface is minimal and its
-    /// OpenAI-compat body accepts only the standard sampling fields plus
-    /// `repetition_penalty`, so it is treated conservatively (standard-only body,
-    /// no launch flags) to avoid 400s on unsupported knobs.
+    /// Apple MLX-VLM (`mlx_vlm.server`). Launch flags come from its native
+    /// catalog (`mlx-vlm`) plus the raw passthrough.
+    MlxVlm,
+    /// Native MLX Serve. Typed context size, its native catalog (`mlx-serve`)
+    /// and the raw passthrough.
+    MlxServe,
+    /// Apple oMLX. Its native catalog (`omlx`, mostly server environment) plus
+    /// the raw passthrough.
+    Omlx,
+    /// Apple Foundation Models via apfel. Its native catalog (`apfel`) plus the
+    /// raw passthrough; Core keeps the managed serve defaults.
+    Apfel,
+    /// Mesh LLM. Typed context, parallel lanes and draft model, its native
+    /// catalog (`mesh-llm`) and the raw passthrough.
+    MeshLlm,
+    /// Apple MLX (`mlx_lm server`). Its launch surface is kept in the raw
+    /// passthrough; its chat body accepts standard fields and repetition penalty.
     Mlx,
     Other,
 }
@@ -77,20 +95,19 @@ impl Engine {
             "vllm" => Self::Vllm,
             "sglang" => Self::Sglang,
             "mlx" => Self::Mlx,
-            // mlx-vlm and oMLX are new engines whose exact sampler surface is not
-            // yet verified here, so they are treated conservatively as `Other`
-            // (only the standard OpenAI fields are emitted — never a non-standard
-            // sampler that could 400). Promote to a dedicated arm once verified.
-            // apfel (Apple Foundation Models) is likewise `Other`: it accepts only
-            // the standard OpenAI fields and REJECTS penalty params, so the
-            // standard-only body is the safe surface (no launch flags either).
-            "mlx-vlm" | "mlxvlm" | "omlx" | "apfel" => Self::Other,
+            // These runtimes have their own launch arms. Their sampler surface
+            // remains unverified, so only standard OpenAI fields are emitted.
+            "mlx-vlm" | "mlxvlm" => Self::MlxVlm,
+            "mlx-serve" | "mlxserve" => Self::MlxServe,
+            "omlx" => Self::Omlx,
+            "apfel" => Self::Apfel,
+            "mesh-llm" | "meshllm" => Self::MeshLlm,
             _ => Self::Other,
         }
     }
 
-    /// Whether this is a local engine Ryu spawns (and can therefore tune with
-    /// launch flags and non-standard sampler fields).
+    /// Whether this route targets a local runtime rather than a remote provider.
+    /// Non-standard samplers still depend on each engine's match arm below.
     pub fn is_local(self) -> bool {
         !matches!(self, Self::Other)
     }
@@ -376,6 +393,7 @@ impl SamplingConfig {
             // Ollama: only the 7 standard fields above survive its OpenAI endpoint.
             // Everything else is set in the Modelfile (see ollama_modelfile_params).
             Engine::Ollama => {}
+            Engine::MlxVlm | Engine::MlxServe | Engine::Omlx | Engine::Apfel | Engine::MeshLlm => {}
             // Remote OpenAI-compatible providers: `response_format` and `logit_bias`
             // are OpenAI-standard, so they are safe to emit (unlike the non-standard
             // samplers, which stay gated to the local arms above).
@@ -616,6 +634,14 @@ pub struct LaunchConfig {
     /// flags, new engine knobs).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_args: Vec<String>,
+
+    /// Engine-native options keyed by [`NativeOption::key`]: the long tail of
+    /// each runtime's own flags and server environment, described per engine by
+    /// [`native_options`]. Builders emit only the keys the target engine's
+    /// catalog lists, after the typed flags and before `extra_args`, so raw
+    /// args still win where the runtime parses last-value-wins.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub native: Map<String, Value>,
 }
 
 impl LaunchConfig {
@@ -655,7 +681,16 @@ impl LaunchConfig {
             Engine::LlamaCpp => self.llamacpp_args(),
             Engine::Vllm => self.vllm_args(),
             Engine::Sglang => self.sglang_args(),
-            Engine::Mlx => self.mlx_args(),
+            Engine::Mlx => {
+                let mut a = native_args("mlx", &self.native);
+                a.extend(self.mlx_args());
+                a
+            }
+            Engine::MlxVlm => self.catalog_then_raw("mlx-vlm"),
+            Engine::Omlx => self.catalog_then_raw("omlx"),
+            Engine::Apfel => self.catalog_then_raw("apfel"),
+            Engine::MlxServe => self.mlx_serve_args(),
+            Engine::MeshLlm => self.mesh_llm_args(),
             Engine::Ollama | Engine::Other => Vec::new(),
         }
     }
@@ -710,6 +745,7 @@ impl LaunchConfig {
         a.kv_f("--rope-scale", self.rope_scale);
         a.kv_f("--rope-freq-base", self.rope_freq_base);
         a.kv_f("--rope-freq-scale", self.rope_freq_scale);
+        a.extend(&native_args("llamacpp", &self.native));
         a.extend(&self.extra_args);
         a.0
     }
@@ -739,6 +775,7 @@ impl LaunchConfig {
             a.push("--speculative-config");
             a.push(&Value::Object(obj).to_string());
         }
+        a.extend(&native_args("vllm", &self.native));
         a.extend(&self.extra_args);
         a.0
     }
@@ -750,6 +787,42 @@ impl LaunchConfig {
     /// works the day MLX supports it ("nothing hardcoded").
     fn mlx_args(&self) -> Vec<String> {
         let mut a = ArgBuf::default();
+        a.extend(&self.extra_args);
+        a.0
+    }
+
+    /// Native catalog options for `catalog`, then the raw `extra_args`, for
+    /// runtimes with no typed fields. Raw args come last so they win where the
+    /// runtime parses last-value-wins.
+    fn catalog_then_raw(&self, catalog: &str) -> Vec<String> {
+        let mut a = native_args(catalog, &self.native);
+        a.extend(self.mlx_args());
+        a
+    }
+
+    /// `mlx-serve --serve`: its own `--ctx-size` (0 = the model's maximum), then
+    /// native options, then raw args.
+    fn mlx_serve_args(&self) -> Vec<String> {
+        let mut a = ArgBuf::default();
+        a.kv("--ctx-size", self.ctx_size);
+        a.extend(&native_args("mlx-serve", &self.native));
+        a.extend(&self.extra_args);
+        a.0
+    }
+
+    /// `mesh-llm serve`: typed context, parallel lanes and draft model, then
+    /// native options, then raw args. Upstream `--parallel` is non-zero and
+    /// `--draft-max` is a `u16`, so out-of-range values are not emitted.
+    fn mesh_llm_args(&self) -> Vec<String> {
+        let mut a = ArgBuf::default();
+        a.kv("--ctx-size", self.ctx_size);
+        a.kv("--parallel", self.parallel.filter(|n| *n >= 1));
+        a.kv_str("--draft", self.draft_model.as_deref());
+        a.kv(
+            "--draft-max",
+            self.draft_max.filter(|n| *n <= u32::from(u16::MAX)),
+        );
+        a.extend(&native_args("mesh-llm", &self.native));
         a.extend(&self.extra_args);
         a.0
     }
@@ -772,6 +845,7 @@ impl LaunchConfig {
             self.draft_model.as_deref(),
         );
         a.kv("--speculative-num-steps", self.draft_max);
+        a.extend(&native_args("sglang", &self.native));
         a.extend(&self.extra_args);
         a.0
     }
@@ -855,13 +929,130 @@ mod tests {
         assert_eq!(Engine::from_name("vllm"), Engine::Vllm);
         assert_eq!(Engine::from_name("sglang"), Engine::Sglang);
         assert_eq!(Engine::from_name("mlx"), Engine::Mlx);
+        assert_eq!(Engine::from_name("mlx-vlm"), Engine::MlxVlm);
+        assert_eq!(Engine::from_name("mlx-serve"), Engine::MlxServe);
+        assert_eq!(Engine::from_name("oMLX"), Engine::Omlx);
+        assert_eq!(Engine::from_name("mesh-llm"), Engine::MeshLlm);
         // apfel (Apple Foundation Models) is deliberately `Other`: it accepts only
         // standard OpenAI sampling fields (and rejects penalty params), so the
         // standard-only body is the safe surface.
-        assert_eq!(Engine::from_name("apfel"), Engine::Other);
+        assert_eq!(Engine::from_name("apfel"), Engine::Apfel);
         assert!(Engine::LlamaCpp.is_local());
         assert!(Engine::Mlx.is_local());
+        assert!(Engine::MlxVlm.is_local());
+        assert!(Engine::MlxServe.is_local());
+        assert!(Engine::Omlx.is_local());
+        assert!(Engine::Apfel.is_local());
+        assert!(Engine::MeshLlm.is_local());
         assert!(!Engine::Other.is_local());
+    }
+
+    #[test]
+    fn raw_launch_engines_forward_extra_args() {
+        let config = LaunchConfig {
+            extra_args: vec!["--max-batch-size".to_owned(), "4".to_owned()],
+            ..Default::default()
+        };
+        let expected = vec!["--max-batch-size".to_owned(), "4".to_owned()];
+        assert_eq!(config.to_args(Engine::MlxVlm), expected);
+        assert_eq!(config.to_args(Engine::MlxServe), expected);
+        assert_eq!(config.to_args(Engine::Omlx), expected);
+        assert_eq!(config.to_args(Engine::Apfel), expected);
+        assert_eq!(config.to_args(Engine::MeshLlm), expected);
+    }
+
+    #[test]
+    fn native_options_sit_between_typed_flags_and_raw_args_per_engine() {
+        let config = LaunchConfig {
+            ctx_size: Some(4096),
+            native: serde_json::json!({
+                "split_mode": "layer",
+                "enforce_eager": true,
+                "trust_remote_code": true,
+            })
+            .as_object()
+            .cloned()
+            .unwrap(),
+            extra_args: vec!["--split-mode".to_owned(), "row".to_owned()],
+            ..Default::default()
+        };
+        assert_eq!(
+            config.to_args(Engine::LlamaCpp),
+            vec![
+                "--ctx-size",
+                "4096",
+                "--split-mode",
+                "layer",
+                "--split-mode",
+                "row"
+            ]
+        );
+        let vllm = config.to_args(Engine::Vllm);
+        assert!(vllm.contains(&"--enforce-eager".to_owned()));
+        assert!(vllm.contains(&"--trust-remote-code".to_owned()));
+        assert!(!vllm.contains(&"layer".to_owned()));
+        assert_eq!(
+            config.to_args(Engine::Mlx),
+            vec!["--trust-remote-code", "--split-mode", "row"]
+        );
+        assert_eq!(
+            config.to_args(Engine::MlxVlm),
+            vec!["--trust-remote-code", "--split-mode", "row"]
+        );
+        // Catalogs that do not list a key never receive it.
+        assert_eq!(config.to_args(Engine::Omlx), vec!["--split-mode", "row"]);
+        assert_eq!(config.to_args(Engine::Apfel), vec!["--split-mode", "row"]);
+    }
+
+    #[test]
+    fn runtime_catalogs_reach_each_launch_arm() {
+        let config = LaunchConfig {
+            ctx_size: Some(8192),
+            parallel: Some(2),
+            draft_model: Some("draft.gguf".to_owned()),
+            draft_max: Some(70_000),
+            native: serde_json::json!({
+                "omlx_memory_guard": "safe",
+                "apfel_max_concurrent": 8,
+                "apfel_retry": true,
+                "no_pld": true,
+                "mesh_split": true,
+                "mesh_kv_cache_disk": "auto",
+            })
+            .as_object()
+            .cloned()
+            .unwrap(),
+            extra_args: vec!["--raw".to_owned()],
+            ..Default::default()
+        };
+        assert_eq!(
+            config.to_args(Engine::Omlx),
+            vec!["--memory-guard", "safe", "--raw"]
+        );
+        assert_eq!(
+            config.to_args(Engine::Apfel),
+            vec!["--max-concurrent", "8", "--retry", "--raw"]
+        );
+        assert_eq!(
+            config.to_args(Engine::MlxServe),
+            vec!["--ctx-size", "8192", "--no-pld", "--raw"]
+        );
+        // draft_max 70000 overflows mesh-llm's u16 and is dropped.
+        assert_eq!(
+            config.to_args(Engine::MeshLlm),
+            vec![
+                "--ctx-size",
+                "8192",
+                "--parallel",
+                "2",
+                "--draft",
+                "draft.gguf",
+                "--split",
+                "--kv-cache-disk",
+                "auto",
+                "--raw"
+            ]
+        );
     }
 
     #[test]

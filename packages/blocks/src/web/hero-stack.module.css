@@ -1,0 +1,12 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	.glow {
+		background-image: radial-gradient(
+			circle at 50% 50%,
+			var(--foreground) 0%,
+			transparent 65%
+		);
+	}
+}

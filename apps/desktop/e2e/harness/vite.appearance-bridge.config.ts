@@ -19,4 +19,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "appearance-bridge-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

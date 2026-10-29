@@ -11,10 +11,16 @@ import {
 	type AppSurface,
 	AppSurfaceProvider,
 } from "../../src/contexts/app-surface-context.tsx";
+import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { DESKTOP_HOTKEYS } from "../../src/lib/hotkeys/actions.ts";
+import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import { useGatewayDialog } from "../../src/store/useGatewayDialog.ts";
 import { useSettingsDialog } from "../../src/store/useSettingsDialog.ts";
 import "../../src/index.css";
+
+// Gateway opens only in Console; grant the access App's ProductModeAccessSync
+// would grant a local node.
+useProductModeStore.setState({ requestedMode: "console", consoleAccess: true });
 
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
@@ -90,78 +96,83 @@ function ProofSurface() {
 
 	return (
 		<AppSurfaceProvider surface={surface}>
-			<ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-				<HotkeysProvider registry={DESKTOP_HOTKEYS}>
-					<ShortcutBindings onAction={setLastAction} />
-					<main className="min-h-screen bg-background p-8 text-foreground">
-						<div className="mx-auto flex max-w-3xl flex-col gap-5">
-							<header className="rounded-2xl border bg-card p-6 shadow-sm">
-								<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-									Desktop shortcut verification
-								</p>
-								<h1 className="mt-2 font-semibold text-2xl">
-									Settings dialog shortcuts
-								</h1>
-								<p className="mt-2 text-muted-foreground text-sm">
-									Press Ctrl+. or Cmd+. for Settings, and Ctrl+, or Cmd+, for
-									Gateway settings.
-								</p>
-								<dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
-									<div className="rounded-lg border bg-background p-3">
-										<dt className="text-muted-foreground">Last action</dt>
-										<dd
-											className="mt-1 font-mono"
-											data-testid="shortcut-last-action"
-										>
-											{lastAction}
-										</dd>
-									</div>
-									<div className="rounded-lg border bg-background p-3">
-										<dt className="text-muted-foreground">Surface</dt>
-										<dd className="mt-1 font-mono" data-testid="proof-surface">
-											{surface}
-										</dd>
-									</div>
-									<div className="rounded-lg border bg-background p-3">
-										<dt className="text-muted-foreground">Registry</dt>
-										<dd className="mt-1 font-mono">Mod-aware</dd>
-									</div>
-								</dl>
-							</header>
+			<EntitlementProvider>
+				<ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+					<HotkeysProvider registry={DESKTOP_HOTKEYS}>
+						<ShortcutBindings onAction={setLastAction} />
+						<main className="min-h-screen bg-background p-8 text-foreground">
+							<div className="mx-auto flex max-w-3xl flex-col gap-5">
+								<header className="rounded-2xl border bg-card p-6 shadow-sm">
+									<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+										Desktop shortcut verification
+									</p>
+									<h1 className="mt-2 font-semibold text-2xl">
+										Settings dialog shortcuts
+									</h1>
+									<p className="mt-2 text-muted-foreground text-sm">
+										Press Ctrl+. or Cmd+. for Settings, and Ctrl+, or Cmd+, for
+										Gateway settings.
+									</p>
+									<dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
+										<div className="rounded-lg border bg-background p-3">
+											<dt className="text-muted-foreground">Last action</dt>
+											<dd
+												className="mt-1 font-mono"
+												data-testid="shortcut-last-action"
+											>
+												{lastAction}
+											</dd>
+										</div>
+										<div className="rounded-lg border bg-background p-3">
+											<dt className="text-muted-foreground">Surface</dt>
+											<dd
+												className="mt-1 font-mono"
+												data-testid="proof-surface"
+											>
+												{surface}
+											</dd>
+										</div>
+										<div className="rounded-lg border bg-background p-3">
+											<dt className="text-muted-foreground">Registry</dt>
+											<dd className="mt-1 font-mono">Mod-aware</dd>
+										</div>
+									</dl>
+								</header>
 
-							<div className="flex flex-wrap gap-2">
-								<button
-									className="rounded-lg border bg-card px-3 py-2 text-sm"
-									data-testid="switch-mobile"
-									onClick={() => setSurface("mobile")}
-									type="button"
-								>
-									Switch to mobile surface
-								</button>
-								<button
-									className="rounded-lg border bg-card px-3 py-2 text-sm"
-									data-testid="open-mobile-keyboard"
-									onClick={() => openSettings("keyboard")}
-									type="button"
-								>
-									Open mobile Keyboard Shortcuts section
-								</button>
+								<div className="flex flex-wrap gap-2">
+									<button
+										className="rounded-lg border bg-card px-3 py-2 text-sm"
+										data-testid="switch-mobile"
+										onClick={() => setSurface("mobile")}
+										type="button"
+									>
+										Switch to mobile surface
+									</button>
+									<button
+										className="rounded-lg border bg-card px-3 py-2 text-sm"
+										data-testid="open-mobile-keyboard"
+										onClick={() => openSettings("keyboard")}
+										type="button"
+									>
+										Open mobile Keyboard Shortcuts section
+									</button>
+								</div>
 							</div>
-						</div>
-					</main>
+						</main>
 
-					<SettingsDialog
-						defaultSection={settingsSection}
-						onOpenChange={setSettingsOpen}
-						open={settingsOpen}
-					/>
-					<GatewayDialog
-						defaultSection={gatewaySection}
-						onOpenChange={setGatewayOpen}
-						open={gatewayOpen}
-					/>
-				</HotkeysProvider>
-			</ThemeProvider>
+						<SettingsDialog
+							defaultSection={settingsSection}
+							onOpenChange={setSettingsOpen}
+							open={settingsOpen}
+						/>
+						<GatewayDialog
+							defaultSection={gatewaySection}
+							onOpenChange={setGatewayOpen}
+							open={gatewayOpen}
+						/>
+					</HotkeysProvider>
+				</ThemeProvider>
+			</EntitlementProvider>
 		</AppSurfaceProvider>
 	);
 }

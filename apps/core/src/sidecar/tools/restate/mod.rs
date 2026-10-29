@@ -150,7 +150,7 @@ impl Sidecar for RestateManager {
             crate::sidecar::remove_from_version_store("restate");
 
             if delete_data {
-                crate::sidecar::remove_dir(&crate::paths::ryu_dir().join("restate")).await;
+                crate::sidecar::remove_dir(&crate::paths::service_dir("restate")).await;
             }
 
             tracing::info!("restate uninstalled");

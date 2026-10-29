@@ -10,6 +10,9 @@
 //!   - `{{trigger.<field>}}`  — a dotted JSON path into the trigger payload
 //!                              (the run state's reserved `trigger` key, parsed
 //!                              as JSON; e.g. `{{trigger.body.email}}`).
+//!   - `{{loop.<name>}}`      — inside a step with a `repeat` policy: `iteration`
+//!                              (1-based), `previous` (the prior iteration's
+//!                              output), or `original` (the step's first input).
 //!
 //! Any unknown token, missing key, or path miss resolves to the empty string.
 //!
@@ -80,6 +83,10 @@ fn resolve_token(token: &str, ctx: &TemplateCtx) -> String {
     }
     if let Some(path) = token.strip_prefix("trigger.") {
         return resolve_trigger(path, ctx);
+    }
+    if let Some(name) = token.strip_prefix("loop.") {
+        let key = format!("{}{name}", super::executor::LOOP_STATE_PREFIX);
+        return ctx.state.get(&key).cloned().unwrap_or_default();
     }
     // Unknown token kind → empty.
     String::new()
@@ -167,6 +174,15 @@ mod tests {
         // Non-string leaf is JSON-serialised.
         assert_eq!(resolve("{{trigger.body.n}}", &ctx()), "7");
         assert_eq!(resolve("{{trigger.flag}}", &ctx()), "true");
+    }
+
+    #[test]
+    fn resolves_loop_tokens_from_reserved_state() {
+        let mut c = ctx();
+        c.state
+            .insert("__loop_iteration".to_string(), "2".to_string());
+        assert_eq!(resolve("pass {{loop.iteration}}", &c), "pass 2");
+        assert_eq!(resolve("[{{loop.previous}}]", &c), "[]");
     }
 
     #[test]

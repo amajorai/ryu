@@ -1,5 +1,3 @@
-/// <reference path="../../../types/lodash-subpaths.d.ts" />
-
 "use client";
 
 import { BaseAIPlugin, withAIBatch } from "@platejs/ai";

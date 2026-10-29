@@ -1,3 +1,5 @@
+import { runSummarySchema } from "../../src/lib/api/run-wire-contracts.ts";
+import proofStyles from "./contributed-section-story.module.css";
 // Standalone browser story for the REAL `DynamicSidebarSection` — the generic
 // renderer behind every app-contributed `sidebar_sections` entry. Mounts it with
 // the Agent Status app's actual "Working" spec and a stubbed `fetch` standing in
@@ -16,13 +18,16 @@
 
 import type { SidebarSectionSpec } from "@ryu/app-host/views";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { DynamicSidebarSection } from "../../src/components/layout/AppSidebar.tsx";
-import {
-	TabsContext,
-	type TabsContextValue,
-} from "../../src/contexts/TabsContext.tsx";
+import { TabsContext } from "../../src/contexts/TabsContext.tsx";
+
+type TabsContextValue = NonNullable<
+	ComponentProps<typeof TabsContext.Provider>["value"]
+>;
 import "../../src/index.css";
+import { IDLE_REORDER_SHIFT } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 
 /** Canned `/api/runs` payload: two running rows (one without a folder, which must
  *  stay single-line), plus rows the section's filter has to drop. */
@@ -48,7 +53,17 @@ const RUNS = {
 			run_status: "completed",
 			folder_path: "/Users/dev/code/ryu-closed",
 		},
-	],
+	].map((run) =>
+		runSummarySchema.parse({
+			...run,
+			agent_id: null,
+			branch: run.branch ?? null,
+			created_at: 0,
+			message_count: 0,
+			updated_at: 0,
+			worktree_path: null,
+		})
+	),
 };
 
 const WORKING_SPEC: SidebarSectionSpec = {
@@ -79,9 +94,13 @@ function recordOpenTab(path: string, opts?: { conversationId?: string }) {
 	return "tab-1";
 }
 
-const tabs = {
-	openTab: recordOpenTab,
-} as unknown as TabsContextValue;
+const tabsFixture = { openTab: recordOpenTab } satisfies Pick<
+	TabsContextValue,
+	"openTab"
+>;
+// SAFETY: this isolated story mounts only DynamicSidebarSection, whose sole tabs
+// selector reads openTab; the fixture supplies that actual owner signature.
+const tabs = tabsFixture as TabsContextValue;
 
 const noopDnd = {
 	draggingKey: null,
@@ -90,6 +109,7 @@ const noopDnd = {
 	onDragOver: () => undefined,
 	onDragStart: () => undefined,
 	onDrop: () => undefined,
+	shift: IDLE_REORDER_SHIFT,
 	order: [],
 };
 
@@ -103,19 +123,25 @@ const noopMenu = {
 };
 
 // Stand in for Core: answer the section's `/api/runs` read, 404 anything else.
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
-	if (url.includes("/api/runs")) {
-		return Promise.resolve(
-			new Response(JSON.stringify(RUNS), {
-				status: 200,
-				headers: { "content-type": "application/json" },
-			})
-		);
-	}
-	return realFetch(input as RequestInfo, init);
-}) as typeof fetch;
+const realFetch = Object.assign(
+	globalThis.fetch.bind(globalThis),
+	globalThis.fetch
+);
+globalThis.fetch = Object.assign(
+	(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+		const url = input instanceof Request ? input.url : String(input);
+		if (url.includes("/api/runs")) {
+			return Promise.resolve(
+				new Response(JSON.stringify(RUNS), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				})
+			);
+		}
+		return realFetch(input, init);
+	},
+	globalThis.fetch
+);
 
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
@@ -125,8 +151,8 @@ function Story() {
 	return (
 		<QueryClientProvider client={queryClient}>
 			<TabsContext.Provider value={tabs}>
-				<div style={{ padding: 40 }}>
-					<div style={{ width: 240 }}>
+				<div className={proofStyles.stage}>
+					<div className={proofStyles.sidebar}>
 						<DynamicSidebarSection
 							collapsed={false}
 							contribution={{

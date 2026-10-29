@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "vite/client"]
+  },
+  "include": [
+    "src/hooks/useMessageQueue.ts",
+    "src/hooks/useMessageQueue.test.ts",
+    "src/hooks/useMessageQueue.consumer.test.tsx"
+  ]
+}

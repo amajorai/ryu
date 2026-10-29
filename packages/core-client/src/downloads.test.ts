@@ -1,3 +1,4 @@
+import { createFetchFixture } from "./test-support/http-fixture.ts";
 // packages/core-client/src/downloads.test.ts
 //
 // Tests for the download-center client: the isTerminal/isInFlight state
@@ -15,6 +16,7 @@ import {
 	clearDownload,
 	type DownloadEvent,
 	type DownloadState,
+	type DownloadTask,
 	isInFlight,
 	isTerminal,
 	listDownloads,
@@ -42,17 +44,17 @@ interface Captured {
 
 function stub(bodyText: string, status = 200): Captured {
 	const cap: Captured = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		cap.url = url;
 		cap.init = init;
 		return Promise.resolve(new Response(bodyText, { status }));
-	}) as unknown as typeof fetch;
+	});
 	return cap;
 }
 
 function streamOnce(chunks: string[], init?: ResponseInit): void {
 	const encoder = new TextEncoder();
-	globalThis.fetch = (() =>
+	globalThis.fetch = createFetchFixture(() =>
 		Promise.resolve(
 			new Response(
 				new ReadableStream<Uint8Array>({
@@ -65,7 +67,8 @@ function streamOnce(chunks: string[], init?: ResponseInit): void {
 				}),
 				init
 			)
-		)) as unknown as typeof fetch;
+		)
+	);
 }
 
 async function collect(chunks: string[]): Promise<DownloadEvent[]> {
@@ -73,6 +76,26 @@ async function collect(chunks: string[]): Promise<DownloadEvent[]> {
 	const seen: DownloadEvent[] = [];
 	await streamDownloads(target, (e) => seen.push(e));
 	return seen;
+}
+
+// Full native DownloadTask fixtures retain the original id assertions.
+function nativeTask(id: string): DownloadTask {
+	return {
+		id,
+		kind: "model",
+		role: "chat_model",
+		label: "Native",
+		url: null,
+		dest_path: null,
+		total_bytes: null,
+		received_bytes: 0,
+		state: "queued",
+		error: null,
+		retryable: true,
+		speed_bps: null,
+		created_at: 1,
+		updated_at: 1,
+	};
 }
 
 describe("state predicates", () => {
@@ -112,7 +135,7 @@ describe("state predicates", () => {
 describe("listDownloads", () => {
 	test("returns the downloads array from the snapshot", async () => {
 		const cap = stub(
-			JSON.stringify({ downloads: [{ id: "d1" }, { id: "d2" }] })
+			JSON.stringify({ downloads: [nativeTask("d1"), nativeTask("d2")] })
 		);
 		const tasks = await listDownloads(target);
 		expect(tasks.map((t) => t.id)).toEqual(["d1", "d2"]);
@@ -127,7 +150,10 @@ describe("listDownloads", () => {
 
 describe("control actions", () => {
 	test("each control POSTs to /:id/<action>", async () => {
-		const cases: [(t: ApiTarget, id: string) => Promise<unknown>, string][] = [
+		const cases: [
+			(t: ApiTarget, id: string) => ReturnType<typeof pauseDownload>,
+			string,
+		][] = [
 			[pauseDownload, "pause"],
 			[resumeDownload, "resume"],
 			[retryDownload, "retry"],
@@ -158,9 +184,25 @@ describe("control actions", () => {
 
 describe("streamDownloads — SSE parsing", () => {
 	test("parses snapshot / update / removed events in order", async () => {
+		const task = {
+			id: "d1",
+			kind: "model",
+			role: "chat_model",
+			label: "Model",
+			url: null,
+			dest_path: null,
+			total_bytes: null,
+			received_bytes: 0,
+			state: "queued",
+			error: null,
+			retryable: false,
+			speed_bps: null,
+			created_at: 1,
+			updated_at: 1,
+		} satisfies DownloadTask;
 		const seen = await collect([
 			'data: {"type":"snapshot","tasks":[]}\n\n',
-			'data: {"type":"update","task":{"id":"d1"}}\n\n',
+			`data: ${JSON.stringify({ type: "update", task })}\n\n`,
 			'data: {"type":"removed","id":"d1"}\n\n',
 		]);
 		expect(seen.map((e) => e.type)).toEqual(["snapshot", "update", "removed"]);
@@ -219,10 +261,9 @@ describe("streamDownloads — failure paths", () => {
 	});
 
 	test("throws when the response has no body", async () => {
-		globalThis.fetch = (() =>
-			Promise.resolve(
-				new Response(null, { status: 200 })
-			)) as unknown as typeof fetch;
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(new Response(null, { status: 200 }))
+		);
 		await expect(
 			streamDownloads(target, () => {
 				// no-op

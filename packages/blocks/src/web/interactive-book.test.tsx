@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PassportBook } from "./interactive-book";
+import { PassportBook } from "./interactive-book.tsx";
 
 test("Passport book exposes an accessible cover before interaction", () => {
 	const html = renderToStaticMarkup(createElement(PassportBook));

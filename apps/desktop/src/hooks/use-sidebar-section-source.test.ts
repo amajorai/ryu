@@ -7,7 +7,7 @@ function section(
 	path: string,
 	method = "GET"
 ): PluginSidebarSection {
-	const http: { method: "GET"; path: string } = { method: "GET", path };
+	const http = { method: "GET", path };
 	Reflect.set(http, "method", method);
 	return {
 		approved_grants: approvedGrants,

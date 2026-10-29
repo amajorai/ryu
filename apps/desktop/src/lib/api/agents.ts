@@ -1,3 +1,10 @@
+import { EXPRESSIVE_EXPRESSION_IDS } from "@ryu/ui/components/expressive.ts";
+import { EXPRESSIVE_ANIMATION_IDS } from "@ryu/ui/components/expressive-animation.ts";
+import { GHOST_AVATAR_VARIANTS } from "@ryu/ui/components/ghost-avatar.ts";
+import { parseGhostCostume } from "@ryu/ui/components/ghost-costume.ts";
+import { samplingConfigSchema } from "@ryuhq/core-client/inference.ts";
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/agents.ts
 //
 // Typed client for Core's agent CRUD endpoints (`/api/agents`). An agent is a
@@ -18,8 +25,19 @@ import type { ExpressiveExpressionSelection } from "@ryu/ui/components/expressiv
 import type { ExpressiveAnimationSelection } from "@ryu/ui/components/expressive-animation.ts";
 import type { GhostAvatarAppearance } from "@ryu/ui/components/ghost-avatar.ts";
 import { asGlyphValue, type GlyphValue } from "@ryu/ui/components/glyph.ts";
+import {
+	type AgentLaunchCheck,
+	type AgentLaunchCheckInput,
+	agentLaunchCheckResponseSchema,
+	encodeAgentPathId,
+	toAgentLaunchCheck,
+	toAgentLaunchCheckBody,
+} from "@ryuhq/core-client/agents.ts";
 import { track } from "@/src/lib/analytics.ts";
+import { rememberInstalledTemplate } from "@/src/lib/template-rewards.ts";
+import { agentLifecyclePreviewSchema } from "./agent-lifecycle-contracts.ts";
 import { type ApiTarget, buyerTokenHeader, request } from "./client.ts";
+import type { GatewayJsonValue } from "./gateway-json-contracts.ts";
 import type { SamplingConfig } from "./inference.ts";
 
 export type AgentLifecycleStatus = "draft" | "trial" | "active";
@@ -28,6 +46,21 @@ export type AgentSafetyProfile =
 	| "approval_required"
 	| "verified_plan_only"
 	| "autonomous";
+/** How an agent relates to the user's accounts. Mirrors Core's
+ * `AgentIdentityMode`: `managed` acts as the user with their connected
+ * accounts, `individual` has its own identity and accounts and never touches
+ * the user's, and `mixed` has both. Legacy rows read as `managed`. */
+export type AgentIdentityMode = "managed" | "individual" | "mixed";
+
+/**
+ * Where an app's agent got its identity mode: the mode its app last set, and a
+ * mode a newer app version asked for that Core left for the user to accept (by
+ * saving the agent with it) or dismiss (`dismissPendingIdentityMode`).
+ */
+export interface AgentAppIdentity {
+	appMode: AgentIdentityMode;
+	pendingMode: AgentIdentityMode | null;
+}
 
 function lifecycleStatus(
 	value: string | null | undefined
@@ -44,6 +77,26 @@ function safetyProfile(value: string | null | undefined): AgentSafetyProfile {
 		value === "autonomous"
 		? value
 		: "autonomous";
+}
+
+/**
+ * A missing value (a node from before identity modes) reads as `managed`, Core's
+ * legacy default. An unknown value (a mode this client does not know) reads as
+ * `individual`, the most restrictive mode, matching Core's fail-closed rule, so
+ * saving the agent can never widen it to act as the user.
+ */
+export function agentIdentityMode(
+	value: string | null | undefined
+): AgentIdentityMode {
+	if (value === "individual" || value === "mixed") {
+		return value;
+	}
+	return value === undefined ||
+		value === null ||
+		value === "" ||
+		value === "managed"
+		? "managed"
+		: "individual";
 }
 
 /**
@@ -103,6 +156,16 @@ export interface AgentChatModelSlot {
 
 /** The full persisted agent record returned by GET/POST/PUT `/api/agents/:id`. */
 export interface Agent {
+	/** Account keys this agent may use (`composio:<id>`, `mcp:<profile>:<plugin>:<server>`,
+	 * `provider:<id>`, `platform:treg`, `agent:<vault_account_id>`). `null` = no
+	 * allowlist (every account its identity mode permits); `[]` = none. */
+	accountAccess: string[] | null;
+	/**
+	 * For an app's agent, where its identity mode came from, including a mode a
+	 * newer app version asked for that waits for the user. Only `fetchAgent`
+	 * reads it; absent or `null` otherwise.
+	 */
+	appIdentity?: AgentAppIdentity | null;
 	builtIn: boolean;
 	/** Agent-creation capability. `null` = default (off). */
 	canCreateAgents: boolean | null;
@@ -113,6 +176,8 @@ export interface Agent {
 	description: string | null;
 	engine: string | null;
 	id: string;
+	/** Whether the agent acts as the user, has its own identity, or both. */
+	identityMode: AgentIdentityMode;
 	/** Identity Vault profile ids bound to this agent. Empty = none. */
 	identityProfileIds: string[];
 	/** Per-agent sampling defaults (advanced inference settings). */
@@ -157,6 +222,8 @@ export interface AgentTemplate {
 		required_plugins?: string[];
 		engine: string | null;
 		model: string | null;
+		/** Travels with the template; `account_access` never does (node-local). */
+		identity_mode?: AgentIdentityMode;
 	};
 	kind: string;
 	name: string;
@@ -195,19 +262,31 @@ export interface DicebearSpec {
 	style?: string | null;
 }
 
+/** A plugin-contributed avatar style selection. Mirrors Core's `AvatarStyleSpec`. */
+export interface AvatarStyleSpec {
+	palette?: string | null;
+	/** Region id → style option id, `none`, or a namespaced accessory id. */
+	parts?: Record<string, string> | null;
+	seed?: string | null;
+	style?: string | null;
+}
+
 /** Persona fields that travel with an agent save.
  *
  * Glyph sources from the shared GlyphPicker. Dither may layer as a background
  * under emoji or icon (never under DiceBear or an uploaded image). Saving a
  * primary source clears incompatible fields. */
 export interface AgentPersona {
+	/** Marketplace avatar style (style + seed + region picks). Null = none. */
+	avatar_style?: AvatarStyleSpec | null;
 	/** Custom avatar image for the agent, stored inline as a data URL (or a
 	 * remote URL). Null = no custom image; clients fall back to the engine logo. */
 	avatar_url?: string | null;
 	/** DiceBear generative avatar (style + seed). Null = none. */
 	dicebear?: DicebearSpec | null;
-	/** Display name the agent uses when introducing itself (optional). */
-	display_name: string | null;
+	/** Display name the agent uses when introducing itself. Absent/null = none;
+	 * Core omits it from a serialized `PersonaSlot` when unset. */
+	display_name?: string | null;
 	/** Dither-gradient avatar spec (alternative avatar source). Null = none. */
 	dither?: DitherSpec | null;
 	/** Native emoji used as the avatar glyph. Null = none. */
@@ -227,12 +306,16 @@ export interface AgentPersona {
 	/** Installed output-style profile assigned to this agent. Null/absent means
 	 * the agent uses its own instructions and tone. */
 	output_style_id?: string | null;
-	/** Tone string: "neutral" | "professional" | "friendly" | "pirate" | any custom string. Null = default. */
-	tone: string | null;
+	/** Tone string: "neutral" | "professional" | "friendly" | "pirate" | any custom string. Absent/null = default
+	 * (Core omits it from a serialized `PersonaSlot` when unset). */
+	tone?: string | null;
 }
 
 /** Fields the UI sends when creating or updating an agent. */
 export interface AgentInput {
+	/** Account allowlist. `null` clears it to unrestricted; `[]` allows none;
+	 * omit to leave unchanged. */
+	accountAccess?: string[] | null;
 	/** Toggle agent-creation. Omit to leave unchanged. */
 	canCreateAgents?: boolean | null;
 	/** Authoritative per-agent model/runtime slot on current Core nodes. */
@@ -240,7 +323,15 @@ export interface AgentInput {
 	/** Composio action names to bind to this agent (gateway-route only). */
 	composioActions?: string[];
 	description: string | null;
+	/**
+	 * Dismiss the identity mode a newer app version asked for
+	 * (`Agent.appIdentity.pendingMode`), keeping the current mode. To accept it
+	 * instead, save `identityMode` set to that mode.
+	 */
+	dismissPendingIdentityMode?: boolean;
 	engine: string | null;
+	/** Identity mode. Omit to leave unchanged (Core defaults new agents to `managed`). */
+	identityMode?: AgentIdentityMode;
 	/** Identity Vault profile ids to bind. Empty/omitted = none. */
 	identityProfileIds?: string[];
 	/** Optional per-agent sampling defaults. Serialised into the PUT body. */
@@ -319,6 +410,7 @@ interface MemorySlotWire {
 }
 
 interface AgentRecordWire {
+	account_access?: string[] | null;
 	built_in?: boolean;
 	can_create_agents?: boolean | null;
 	chat_model?: AgentChatModelSlotWire | null;
@@ -327,6 +419,7 @@ interface AgentRecordWire {
 	description?: string | null;
 	engine?: string | null;
 	id: string;
+	identity_mode?: string | null;
 	identity_profile_ids?: string[];
 	inference?: SamplingConfig | null;
 	lifecycle_status?: string | null;
@@ -381,6 +474,26 @@ function toSummary(a: AgentSummaryWire): AgentSummary {
 	};
 }
 
+interface AgentAppIdentityWire {
+	app_mode: string;
+	pending_mode?: string | null;
+}
+
+/** A mode this client does not know reads as `individual`, so nothing widens. */
+function toAgentAppIdentity(
+	wire: AgentAppIdentityWire | null | undefined
+): AgentAppIdentity | null {
+	if (!wire) {
+		return null;
+	}
+	return {
+		appMode: agentIdentityMode(wire.app_mode),
+		pendingMode: wire.pending_mode
+			? agentIdentityMode(wire.pending_mode)
+			: null,
+	};
+}
+
 function toAgent(a: AgentRecordWire, source?: string): Agent {
 	const engine = a.engine ?? null;
 	const model = a.model ?? a.chat_model?.model_id ?? null;
@@ -407,6 +520,8 @@ function toAgent(a: AgentRecordWire, source?: string): Agent {
 		composioActions: a.composio_actions ?? [],
 		skills: a.skills ?? [],
 		identityProfileIds: a.identity_profile_ids ?? [],
+		identityMode: agentIdentityMode(a.identity_mode),
+		accountAccess: a.account_access ?? null,
 		lifecycleStatus: lifecycleStatus(a.lifecycle_status),
 		inference: a.inference ?? null,
 		memory: {
@@ -427,8 +542,35 @@ function toAgent(a: AgentRecordWire, source?: string): Agent {
 	};
 }
 
-export function toAgentBody(input: AgentInput): Record<string, unknown> {
-	const body: Record<string, unknown> = {
+/** Complete snake_case request authored by toAgentBody; Core validates the saved agent. */
+export interface AgentWriteBody {
+	account_access?: AgentInput["accountAccess"];
+	can_create_agents?: AgentInput["canCreateAgents"];
+	chat_model?: {
+		engine: AgentChatModelSlot["engine"];
+		model_id: AgentChatModelSlot["modelId"];
+	} | null;
+	composio_actions?: AgentInput["composioActions"];
+	description: AgentInput["description"];
+	dismiss_pending_identity_mode?: AgentInput["dismissPendingIdentityMode"];
+	engine: AgentInput["engine"];
+	identity_mode?: AgentInput["identityMode"];
+	identity_profile_ids?: AgentInput["identityProfileIds"];
+	inference?: AgentInput["inference"];
+	memory?: AgentInput["memory"];
+	model?: AgentInput["model"];
+	name: AgentInput["name"];
+	orchestrator?: AgentInput["orchestrator"];
+	persona?: AgentInput["persona"];
+	safety_profile?: AgentInput["safetyProfile"];
+	skills?: AgentInput["skills"];
+	system_prompt: AgentInput["systemPrompt"];
+	title?: AgentInput["title"];
+	tools: AgentInput["tools"];
+	version?: AgentInput["version"];
+}
+export function toAgentBody(input: AgentInput): AgentWriteBody {
+	const body: AgentWriteBody = {
 		name: input.name,
 		description: input.description,
 		system_prompt: input.systemPrompt,
@@ -461,11 +603,27 @@ export function toAgentBody(input: AgentInput): Record<string, unknown> {
 	if (input.identityProfileIds !== undefined) {
 		body.identity_profile_ids = input.identityProfileIds;
 	}
+	if (input.identityMode !== undefined) {
+		body.identity_mode = input.identityMode;
+	}
+	if (input.dismissPendingIdentityMode !== undefined) {
+		body.dismiss_pending_identity_mode = input.dismissPendingIdentityMode;
+	}
+	// `null` is meaningful here: it clears the allowlist back to unrestricted.
+	if (input.accountAccess !== undefined) {
+		body.account_access = input.accountAccess;
+	}
 	if (input.persona !== undefined) {
 		body.persona = input.persona;
 	}
 	if (input.inference !== undefined) {
 		body.inference = input.inference;
+	}
+	if (input.orchestrator !== undefined) {
+		body.orchestrator = input.orchestrator;
+	}
+	if (input.canCreateAgents !== undefined) {
+		body.can_create_agents = input.canCreateAgents;
 	}
 	if (input.memory !== undefined) {
 		body.memory = input.memory;
@@ -476,6 +634,309 @@ export function toAgentBody(input: AgentInput): Record<string, unknown> {
 	return body;
 }
 
+const agentChatModelSlotWireResponseCodec: z.ZodType<AgentChatModelSlotWire> = z
+	.object({
+		engine: z.union([z.string(), z.null()]).optional(),
+		model_id: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const agentSummaryWireResponseCodec: z.ZodType<AgentSummaryWire> = z
+	.object({
+		avatar_glyph: z
+			.union([
+				gatewayJsonValueSchema.transform(
+					(value) => asGlyphValue(value) ?? null
+				),
+				z.null(),
+			])
+			.optional(),
+		avatar_url: z.union([z.string(), z.null()]).optional(),
+		chat_model: z
+			.union([agentChatModelSlotWireResponseCodec, z.null()])
+			.optional(),
+		created_at: z.union([z.string(), z.null()]).optional(),
+		description: z.union([z.string(), z.null()]).optional(),
+		engine: z.union([z.string(), z.null()]).optional(),
+		id: z.string(),
+		install_hint: z.union([z.string(), z.null()]).optional(),
+		installed: z.union([z.boolean(), z.null()]).optional(),
+		latest_version: z.union([z.string(), z.null()]).optional(),
+		lifecycle_status: z.union([z.string(), z.null()]).optional(),
+		locked: z.union([z.boolean(), z.null()]).optional(),
+		model: z.union([z.string(), z.null()]).optional(),
+		name: z.string(),
+		recommended: z.union([z.boolean(), z.null()]).optional(),
+		safety_profile: z.union([z.string(), z.null()]).optional(),
+		system_prompt: z.union([z.string(), z.null()]).optional(),
+		title: z.union([z.string(), z.null()]).optional(),
+		transport: z.union([z.string(), z.null()]).optional(),
+		version: z.union([z.string(), z.null()]).optional(),
+		version_status: z
+			.union([
+				z.literal("current"),
+				z.literal("behind_latest"),
+				z.literal("unknown"),
+				z.null(),
+			])
+			.optional(),
+	})
+	.passthrough();
+const agentCatalogEntryWireResponseCodec: z.ZodType<AgentCatalogEntryWire> = z
+	.object({
+		added: z.union([z.boolean(), z.null()]).optional(),
+		available: z.union([z.boolean(), z.null()]).optional(),
+		bridge_version_status: z
+			.union([
+				z.literal("current"),
+				z.literal("behind_latest"),
+				z.literal("unknown"),
+				z.null(),
+			])
+			.optional(),
+		description: z.union([z.string(), z.null()]).optional(),
+		detected: z.union([z.boolean(), z.null()]).optional(),
+		engine: z.union([z.string(), z.null()]).optional(),
+		gateway_bypass: z.union([z.boolean(), z.null()]).optional(),
+		icon_url: z.union([z.string(), z.null()]).optional(),
+		id: z.string(),
+		install_hint: z.union([z.string(), z.null()]).optional(),
+		installed_bridge_version: z.union([z.string(), z.null()]).optional(),
+		installed_version: z.union([z.string(), z.null()]).optional(),
+		latest_bridge_version: z.union([z.string(), z.null()]).optional(),
+		latest_version: z.union([z.string(), z.null()]).optional(),
+		name: z.string(),
+		recommended: z.union([z.boolean(), z.null()]).optional(),
+		registry_id: z.union([z.string(), z.null()]).optional(),
+		transport: z.union([z.string(), z.null()]).optional(),
+		version_status: z
+			.union([
+				z.literal("current"),
+				z.literal("behind_latest"),
+				z.literal("unknown"),
+				z.null(),
+			])
+			.optional(),
+	})
+	.passthrough();
+const memorySlotWireResponseCodec: z.ZodType<MemorySlotWire> = z
+	.object({
+		read_levels: z.union([z.array(z.string()), z.null()]).optional(),
+		space_ids: z.union([z.array(z.string()), z.null()]).optional(),
+		write_enabled: z.union([z.boolean(), z.null()]).optional(),
+	})
+	.passthrough();
+const dicebearSpecResponseCodec: z.ZodType<DicebearSpec> = z
+	.object({
+		seed: z.union([z.string(), z.null()]).optional(),
+		style: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const ditherSpecResponseCodec: z.ZodType<DitherSpec> = z
+	.object({
+		direction: z.union([z.string(), z.null()]).optional(),
+		from: z.union([z.string(), z.null()]).optional(),
+		to: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const agentPersonaResponseCodec: z.ZodType<AgentPersona> = z
+	.object({
+		avatar_url: z.union([z.string(), z.null()]).optional(),
+		dicebear: z.union([dicebearSpecResponseCodec, z.null()]).optional(),
+		// Core `PersonaSlot` skips None fields, so a default persona is `{}`.
+		display_name: z.union([z.string(), z.null()]).optional(),
+		dither: z.union([ditherSpecResponseCodec, z.null()]).optional(),
+		emoji: z.union([z.string(), z.null()]).optional(),
+		expressive: z
+			.union([
+				z.intersection(
+					z
+						.object({
+							animated: z.boolean().optional(),
+							animationDuration: z.number().optional(),
+							behavior: z.enum(["custom", "conversation"]).optional(),
+							bodyStyle: z.enum(["solid", "orb"]).optional(),
+							colors: z
+								.object({
+									bg: z.string().optional(),
+									c1: z.string().optional(),
+									c2: z.string().optional(),
+									c3: z.string().optional(),
+								})
+								.passthrough()
+								.optional(),
+							costume: gatewayJsonValueSchema
+								.transform(parseGhostCostume)
+								.optional(),
+							eyeScale: z.number().optional(),
+							variant: z.enum(GHOST_AVATAR_VARIANTS).optional(),
+						})
+						.passthrough(),
+					z
+						.object({
+							expression: z
+								.union([
+									z.union([
+										z.enum(EXPRESSIVE_EXPRESSION_IDS),
+										z.literal("random"),
+									]),
+									z.null(),
+								])
+								.optional(),
+							animation: z
+								.union([
+									z.union([
+										z.enum(EXPRESSIVE_ANIMATION_IDS),
+										z.literal("random"),
+									]),
+									z.null(),
+								])
+								.optional(),
+						})
+						.passthrough()
+				),
+				z.null(),
+			])
+			.optional(),
+		icon: z.union([z.string(), z.null()]).optional(),
+		icon_color: z.union([z.string(), z.null()]).optional(),
+		output_style_id: z.union([z.string(), z.null()]).optional(),
+		tone: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const agentRecordWireResponseCodec: z.ZodType<AgentRecordWire> = z
+	.object({
+		account_access: z.union([z.array(z.string()), z.null()]).optional(),
+		built_in: z.boolean().optional(),
+		can_create_agents: z.union([z.boolean(), z.null()]).optional(),
+		chat_model: z
+			.union([agentChatModelSlotWireResponseCodec, z.null()])
+			.optional(),
+		composio_actions: z.array(z.string()).optional(),
+		created_at: z.union([z.string(), z.null()]).optional(),
+		description: z.union([z.string(), z.null()]).optional(),
+		engine: z.union([z.string(), z.null()]).optional(),
+		id: z.string(),
+		identity_mode: z.union([z.string(), z.null()]).optional(),
+		identity_profile_ids: z.array(z.string()).optional(),
+		inference: z
+			.union([samplingConfigSchema.passthrough(), z.null()])
+			.optional(),
+		lifecycle_status: z.union([z.string(), z.null()]).optional(),
+		locked: z.boolean().optional(),
+		memory: z.union([memorySlotWireResponseCodec, z.null()]).optional(),
+		model: z.union([z.string(), z.null()]).optional(),
+		name: z.string(),
+		orchestrator: z.union([z.boolean(), z.null()]).optional(),
+		persona: z.union([agentPersonaResponseCodec, z.null()]).optional(),
+		safety_profile: z.union([z.string(), z.null()]).optional(),
+		skills: z.array(z.string()).optional(),
+		system_prompt: z.union([z.string(), z.null()]).optional(),
+		title: z.union([z.string(), z.null()]).optional(),
+		tools: z.array(z.string()).optional(),
+		updated_at: z.union([z.string(), z.null()]).optional(),
+		version: z.string().optional(),
+	})
+	.passthrough();
+const agentInstallDisclosureWireResponseCodec: z.ZodType<AgentInstallDisclosureWire> =
+	z
+		.object({
+			composio_actions: z.array(z.string()).optional(),
+			identity_mode: z.union([z.string(), z.null()]).optional(),
+			identity_profile_ids: z.array(z.string()).optional(),
+			memory_read_levels: z.array(z.string()).optional(),
+			memory_write_enabled: z.boolean().optional(),
+			policy_id: z.union([z.string(), z.null()]).optional(),
+			remote_avatar_url: z.union([z.string(), z.null()]).optional(),
+			required_plugins: z.array(z.string()).optional(),
+			space_ids: z.array(z.string()).optional(),
+			system_prompt_truncated: z.boolean().optional(),
+			tools: z.array(z.string()).optional(),
+		})
+		.passthrough();
+const agentUpdateCheckWireResponseCodec: z.ZodType<AgentUpdateCheckWire> = z
+	.object({
+		id: z.string(),
+		installed_version: z.union([z.string(), z.null()]).optional(),
+		installedVersion: z.union([z.string(), z.null()]).optional(),
+		latest_version: z.union([z.string(), z.null()]).optional(),
+		latestVersion: z.union([z.string(), z.null()]).optional(),
+		npm_package: z.union([z.string(), z.null()]).optional(),
+		npmPackage: z.union([z.string(), z.null()]).optional(),
+		update_available: z.union([z.boolean(), z.null()]).optional(),
+		updateAvailable: z.union([z.boolean(), z.null()]).optional(),
+	})
+	.passthrough();
+const agentUpdateResultWireResponseCodec: z.ZodType<AgentUpdateResultWire> = z
+	.object({
+		error: z.union([z.string(), z.null()]).optional(),
+		hint: z.union([z.string(), z.null()]).optional(),
+		installed_version: z.union([z.string(), z.null()]).optional(),
+		installedVersion: z.union([z.string(), z.null()]).optional(),
+		updated: z.union([z.boolean(), z.null()]).optional(),
+	})
+	.passthrough();
+const agentVersionMetaWireResponseCodec: z.ZodType<AgentVersionMetaWire> = z
+	.object({
+		agent_id: z.string(),
+		created_at: z.number(),
+		id: z.string(),
+		label: z.union([z.string(), z.null()]).optional(),
+		name: z.string(),
+		version: z.string(),
+	})
+	.passthrough();
+const agentPromptVersionMetaWireResponseCodec: z.ZodType<AgentPromptVersionMetaWire> =
+	z
+		.object({
+			agent_id: z.string(),
+			created_at: z.number(),
+			id: z.string(),
+			label: z.union([z.string(), z.null()]).optional(),
+		})
+		.passthrough();
+const agentTemplateResponseCodec: z.ZodType<AgentTemplate> = z
+	.object({
+		agent_config: z
+			.object({
+				title: z.string().optional(),
+				description: z.union([z.string(), z.null()]),
+				system_prompt: z.union([z.string(), z.null()]),
+				persona: z.union([agentPersonaResponseCodec, z.null()]).optional(),
+				tools: z.array(z.string()),
+				required_plugins: z.array(z.string()).optional(),
+				engine: z.union([z.string(), z.null()]),
+				model: z.union([z.string(), z.null()]),
+				// Normalised so a mode this client does not know cannot fail the export.
+				identity_mode: z.string().transform(agentIdentityMode).optional(),
+			})
+			.passthrough(),
+		kind: z.string(),
+		name: z.string(),
+		version: z.string(),
+	})
+	.passthrough();
+const agentToolWireResponseCodec: z.ZodType<AgentToolWire> = z
+	.object({
+		description: z.union([z.string(), z.null()]).optional(),
+		name: z.string(),
+	})
+	.passthrough();
+const agentAccountResponseCodec: z.ZodType<AgentAccount> = z
+	.object({
+		accountId: z.string(),
+		active: z.boolean(),
+		gatewayActive: z.boolean().optional(),
+		kind: z.string(),
+		label: z.string(),
+		provider: z.string().optional(),
+	})
+	.passthrough();
+const participantWireResponseCodec: z.ZodType<ParticipantWire> = z
+	.object({
+		agent_id: z.string(),
+		name: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
 export async function fetchAgents(
 	target: ApiTarget,
 	signal?: AbortSignal
@@ -483,7 +944,10 @@ export async function fetchAgents(
 	const json = await request<{ agents?: AgentSummaryWire[] }>(
 		target,
 		"/api/agents",
-		{ signal }
+		{ signal },
+		z
+			.object({ agents: z.array(agentSummaryWireResponseCodec).optional() })
+			.passthrough()
 	);
 	return (json.agents ?? []).map(toSummary);
 }
@@ -594,7 +1058,12 @@ export async function fetchAgentCatalog(
 	const json = await request<{ agents?: AgentCatalogEntryWire[] }>(
 		target,
 		path,
-		signal ? { signal } : undefined
+		signal ? { signal } : undefined,
+		z
+			.object({
+				agents: z.array(agentCatalogEntryWireResponseCodec).optional(),
+			})
+			.passthrough()
 	);
 	return (json.agents ?? []).map(toCatalogEntry);
 }
@@ -604,29 +1073,45 @@ export async function installAgent(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(target, "/api/agents/catalog/install", {
-		method: "POST",
-		body: { id },
-	});
+	await request<unknown>(
+		target,
+		"/api/agents/catalog/install",
+		{
+			method: "POST",
+			body: { id },
+		},
+		gatewayJsonValueSchema
+	);
 	track({ event: "agent_installed", agent_id: id });
 }
 
 export interface AgentLifecyclePreview {
 	action: "install" | "uninstall";
+	alreadyInstalled?: boolean;
 	dryRun: true;
 	id: string;
+	name?: string;
+	ok?: boolean;
 	success: boolean;
-	[key: string]: unknown;
+	wouldInstall?: boolean;
+	wouldUninstall?: boolean;
+	writes?: string[];
+	[key: string]: GatewayJsonValue;
 }
 
 export function previewAgentInstall(
 	target: ApiTarget,
 	id: string
 ): Promise<AgentLifecyclePreview> {
-	return request<AgentLifecyclePreview>(target, "/api/agents/catalog/install", {
-		method: "POST",
-		body: { dryRun: true, id },
-	});
+	return request(
+		target,
+		"/api/agents/catalog/install",
+		{
+			method: "POST",
+			body: { dryRun: true, id },
+		},
+		agentLifecyclePreviewSchema
+	);
 }
 
 /** Remove a built-in agent from the installed set (the flagship `ryu` cannot be removed). */
@@ -634,10 +1119,15 @@ export async function uninstallAgent(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(target, "/api/agents/catalog/uninstall", {
-		method: "POST",
-		body: { id },
-	});
+	await request<unknown>(
+		target,
+		"/api/agents/catalog/uninstall",
+		{
+			method: "POST",
+			body: { id },
+		},
+		gatewayJsonValueSchema
+	);
 	track({ event: "agent_uninstalled", agent_id: id });
 }
 
@@ -645,10 +1135,14 @@ export function previewAgentUninstall(
 	target: ApiTarget,
 	id: string
 ): Promise<AgentLifecyclePreview> {
-	return request<AgentLifecyclePreview>(
+	return request(
 		target,
 		"/api/agents/catalog/uninstall",
-		{ method: "POST", body: { dryRun: true, id } }
+		{
+			method: "POST",
+			body: { dryRun: true, id },
+		},
+		agentLifecyclePreviewSchema
 	);
 }
 
@@ -663,6 +1157,10 @@ export interface AgentInstallDisclosure {
 	/** Composio actions the template requested. Removed: their `composio.*` ids
 	 *  widen the effective tool allowlist against the installer's own accounts. */
 	composioActions: string[];
+	/** Whose accounts the publisher set the agent to work with. KEPT on the
+	 *  installed agent (it names whose accounts, never which). Null when Core
+	 *  recorded the install before it reported the mode. */
+	identityMode: AgentIdentityMode | null;
 	/** Identity Vault profiles the template named. Removed: a bound profile reads
 	 *  as a credential under the gateway grant. */
 	identityProfileIds: string[];
@@ -686,6 +1184,7 @@ export interface AgentInstallDisclosure {
 
 interface AgentInstallDisclosureWire {
 	composio_actions?: string[];
+	identity_mode?: string | null;
 	identity_profile_ids?: string[];
 	memory_read_levels?: string[];
 	memory_write_enabled?: boolean;
@@ -725,19 +1224,36 @@ export async function installPublishedAgent(
 	const json = await request<{
 		agent: AgentRecordWire;
 		requires?: AgentInstallDisclosureWire;
-	}>(target, "/api/agents/published/install", {
-		method: "POST",
-		body: { id, idempotency_key: idempotencyKey },
-		// A published agent may be PAID. Forward the control-plane bearer for
-		// optional account-aware Marketplace operations; it is not required to install.
-		headers: buyerTokenHeader(target),
-	});
+	}>(
+		target,
+		"/api/agents/published/install",
+		{
+			method: "POST",
+			body: { id, idempotency_key: idempotencyKey },
+			// A published agent may be PAID. Forward the control-plane bearer for
+			// optional account-aware Marketplace operations; it is not required to install.
+			headers: buyerTokenHeader(target),
+		},
+		z
+			.object({
+				agent: agentRecordWireResponseCodec,
+				requires: agentInstallDisclosureWireResponseCodec.optional(),
+			})
+			.passthrough()
+	);
 	const wire = json.requires ?? {};
 	track({ event: "agent_installed", agent_id: id });
+	const agent = toAgent(json.agent);
+	rememberInstalledTemplate(agent.id, id);
 	return {
-		agent: toAgent(json.agent),
+		agent,
 		requires: {
 			composioActions: wire.composio_actions ?? [],
+			// Absent means an older disclosure: unknown, not Core's default.
+			identityMode:
+				wire.identity_mode === undefined || wire.identity_mode === null
+					? null
+					: agentIdentityMode(wire.identity_mode),
 			identityProfileIds: wire.identity_profile_ids ?? [],
 			memoryReadLevels: wire.memory_read_levels ?? [],
 			memoryWriteEnabled: wire.memory_write_enabled ?? false,
@@ -816,7 +1332,9 @@ export async function fetchAgentUpdateCheck(
 ): Promise<AgentUpdateCheck> {
 	const w = await request<AgentUpdateCheckWire>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/update-check`
+		`/api/agents/${encodeAgentPathId(agentId)}/update-check`,
+		{},
+		agentUpdateCheckWireResponseCodec
 	);
 	return {
 		id: w.id,
@@ -838,8 +1356,9 @@ export async function runAgentUpdate(
 ): Promise<AgentUpdateResult> {
 	const w = await request<AgentUpdateResultWire>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/update`,
-		{ method: "POST" }
+		`/api/agents/${encodeAgentPathId(agentId)}/update`,
+		{ method: "POST" },
+		agentUpdateResultWireResponseCodec
 	);
 	return {
 		updated: w.updated ?? false,
@@ -849,15 +1368,59 @@ export async function runAgentUpdate(
 	};
 }
 
+export type { AgentLaunchCheck, AgentLaunchCheckInput };
+
+/**
+ * Whether Core would start an agent's engine under an identity mode and
+ * account access (`POST /api/agents/launch-check`), from the same checks its
+ * first turn runs.
+ */
+export async function checkAgentLaunch(
+	target: ApiTarget,
+	input: AgentLaunchCheckInput
+): Promise<AgentLaunchCheck> {
+	const json = await request(
+		target,
+		"/api/agents/launch-check",
+		{
+			method: "POST",
+			body: toAgentLaunchCheckBody(input),
+		},
+		agentLaunchCheckResponseSchema
+	);
+	return toAgentLaunchCheck(json);
+}
+
 export async function fetchAgent(
 	target: ApiTarget,
 	id: string
 ): Promise<Agent> {
-	const json = await request<{ agent: AgentRecordWire; source?: string }>(
+	const json = await request<{
+		agent: AgentRecordWire;
+		app_identity?: AgentAppIdentityWire | null;
+		source?: string;
+	}>(
 		target,
-		`/api/agents/${id}`
+		`/api/agents/${encodeAgentPathId(id)}`,
+		{},
+		z
+			.object({
+				agent: agentRecordWireResponseCodec,
+				app_identity: z
+					.object({
+						app_mode: z.string(),
+						pending_mode: z.union([z.string(), z.null()]).optional(),
+					})
+					.passthrough()
+					.nullish(),
+				source: z.string().optional(),
+			})
+			.passthrough()
 	);
-	return toAgent(json.agent, json.source);
+	return {
+		...toAgent(json.agent, json.source),
+		appIdentity: toAgentAppIdentity(json.app_identity),
+	};
 }
 
 export async function createAgent(
@@ -870,7 +1433,13 @@ export async function createAgent(
 		{
 			method: "POST",
 			body: toAgentBody(input),
-		}
+		},
+		z
+			.object({
+				agent: agentRecordWireResponseCodec,
+				source: z.string().optional(),
+			})
+			.passthrough()
 	);
 	return toAgent(json.agent, json.source);
 }
@@ -882,11 +1451,17 @@ export async function updateAgent(
 ): Promise<Agent> {
 	const json = await request<{ agent: AgentRecordWire; source?: string }>(
 		target,
-		`/api/agents/${id}`,
+		`/api/agents/${encodeAgentPathId(id)}`,
 		{
 			method: "PUT",
 			body: toAgentBody(input),
-		}
+		},
+		z
+			.object({
+				agent: agentRecordWireResponseCodec,
+				source: z.string().optional(),
+			})
+			.passthrough()
 	);
 	return toAgent(json.agent, json.source);
 }
@@ -930,7 +1505,13 @@ export async function listAgentVersions(
 ): Promise<AgentVersionMeta[]> {
 	const json = await request<{ versions?: AgentVersionMetaWire[] }>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/versions`
+		`/api/agents/${encodeAgentPathId(agentId)}/versions`,
+		{},
+		z
+			.object({
+				versions: z.array(agentVersionMetaWireResponseCodec).optional(),
+			})
+			.passthrough()
 	);
 	return (json.versions ?? []).map(toAgentVersionMeta);
 }
@@ -945,7 +1526,19 @@ export async function getAgentVersionSource(
 		version?: { agent?: AgentRecordWire; source?: string };
 	}>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/versions/${encodeURIComponent(versionId)}`
+		`/api/agents/${encodeAgentPathId(agentId)}/versions/${encodeURIComponent(versionId)}`,
+		{},
+		z
+			.object({
+				version: z
+					.object({
+						agent: agentRecordWireResponseCodec.optional(),
+						source: z.string().optional(),
+					})
+					.passthrough()
+					.optional(),
+			})
+			.passthrough()
 	);
 	const version = json.version;
 	if (version?.source) {
@@ -962,11 +1555,14 @@ export async function createAgentVersion(
 ): Promise<AgentVersionMeta> {
 	const json = await request<{ version?: AgentVersionMetaWire }>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/versions`,
+		`/api/agents/${encodeAgentPathId(agentId)}/versions`,
 		{
 			method: "POST",
 			body: label?.trim() ? { label: label.trim() } : {},
-		}
+		},
+		z
+			.object({ version: agentVersionMetaWireResponseCodec.optional() })
+			.passthrough()
 	);
 	if (!json.version) {
 		throw new Error("Core did not return the saved agent version");
@@ -985,8 +1581,14 @@ export async function restoreAgentVersion(
 		source?: string;
 	}>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/versions/${encodeURIComponent(versionId)}/restore`,
-		{ method: "POST" }
+		`/api/agents/${encodeAgentPathId(agentId)}/versions/${encodeURIComponent(versionId)}/restore`,
+		{ method: "POST" },
+		z
+			.object({
+				agent: agentRecordWireResponseCodec.optional(),
+				source: z.string().optional(),
+			})
+			.passthrough()
 	);
 	if (!json.agent) {
 		throw new Error("Core did not return the restored agent");
@@ -1018,7 +1620,13 @@ export async function listAgentPromptVersions(
 ): Promise<AgentPromptVersionMeta[]> {
 	const json = await request<{ versions?: AgentPromptVersionMetaWire[] }>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/prompt-versions`
+		`/api/agents/${encodeAgentPathId(agentId)}/prompt-versions`,
+		{},
+		z
+			.object({
+				versions: z.array(agentPromptVersionMetaWireResponseCodec).optional(),
+			})
+			.passthrough()
 	);
 	return (json.versions ?? []).map((version) => ({
 		agentId: version.agent_id,
@@ -1038,28 +1646,47 @@ export async function getAgentPromptVersion(
 		version?: { prompt?: string; source?: string };
 	}>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/prompt-versions/${encodeURIComponent(versionId)}`
+		`/api/agents/${encodeAgentPathId(agentId)}/prompt-versions/${encodeURIComponent(versionId)}`,
+		{},
+		z
+			.object({
+				version: z
+					.object({
+						prompt: z.string().optional(),
+						source: z.string().optional(),
+					})
+					.passthrough()
+					.optional(),
+			})
+			.passthrough()
 	);
 	return json.version?.prompt ?? json.version?.source ?? "";
 }
 
 /** Save the current Prompt Studio draft as a durable snapshot. */
+interface AgentPromptVersionWrite {
+	label?: string;
+	prompt: string;
+}
+
 export async function createAgentPromptVersion(
 	target: ApiTarget,
 	agentId: string,
 	prompt: string,
 	label?: string
 ): Promise<void> {
+	const body: AgentPromptVersionWrite = { prompt };
+	if (label?.trim()) {
+		body.label = label.trim();
+	}
 	await request(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/prompt-versions`,
+		`/api/agents/${encodeAgentPathId(agentId)}/prompt-versions`,
 		{
 			method: "POST",
-			body: {
-				prompt,
-				...(label?.trim() ? { label: label.trim() } : {}),
-			},
-		}
+			body,
+		},
+		gatewayJsonValueSchema.transform(() => undefined)
 	);
 }
 
@@ -1071,8 +1698,11 @@ export async function restoreAgentPromptVersion(
 ): Promise<string> {
 	const json = await request<{ prompt?: string; source?: string }>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/prompt-versions/${encodeURIComponent(versionId)}/restore`,
-		{ method: "POST" }
+		`/api/agents/${encodeAgentPathId(agentId)}/prompt-versions/${encodeURIComponent(versionId)}/restore`,
+		{ method: "POST" },
+		z
+			.object({ prompt: z.string().optional(), source: z.string().optional() })
+			.passthrough()
 	);
 	return json.prompt ?? json.source ?? "";
 }
@@ -1080,6 +1710,11 @@ export async function restoreAgentPromptVersion(
 /** Update only the lifecycle/safety controls without overwriting the editor's
  * other slots. Core validates lifecycle transitions and disables owned jobs on
  * demotion. */
+interface AgentPostureWrite {
+	lifecycle_status?: AgentLifecycleStatus;
+	safety_profile?: AgentSafetyProfile;
+}
+
 export async function updateAgentPosture(
 	target: ApiTarget,
 	id: string,
@@ -1088,20 +1723,62 @@ export async function updateAgentPosture(
 		safetyProfile?: AgentSafetyProfile;
 	}
 ): Promise<Agent> {
+	const body: AgentPostureWrite = {};
+	if (posture.lifecycleStatus !== undefined) {
+		body.lifecycle_status = posture.lifecycleStatus;
+	}
+	if (posture.safetyProfile !== undefined) {
+		body.safety_profile = posture.safetyProfile;
+	}
 	const json = await request<{ agent: AgentRecordWire }>(
 		target,
-		`/api/agents/${id}`,
+		`/api/agents/${encodeAgentPathId(id)}`,
 		{
 			method: "PUT",
-			body: {
-				...(posture.lifecycleStatus === undefined
-					? {}
-					: { lifecycle_status: posture.lifecycleStatus }),
-				...(posture.safetyProfile === undefined
-					? {}
-					: { safety_profile: posture.safetyProfile }),
-			},
-		}
+			body,
+		},
+		z.object({ agent: agentRecordWireResponseCodec }).passthrough()
+	);
+	return toAgent(json.agent);
+}
+
+/** Update only the identity mode and/or account allowlist without overwriting
+ * the editor's other slots. `accountAccess: null` clears the allowlist back to
+ * unrestricted; omit a field to leave it unchanged. */
+interface AgentAccountSettingsWrite {
+	account_access?: string[] | null;
+	dismiss_pending_identity_mode?: boolean;
+	identity_mode?: AgentIdentityMode;
+}
+
+export async function updateAgentAccountSettings(
+	target: ApiTarget,
+	id: string,
+	settings: {
+		accountAccess?: string[] | null;
+		/** Dismiss the identity mode an app update asked for, keeping the current one. */
+		dismissPendingIdentityMode?: boolean;
+		identityMode?: AgentIdentityMode;
+	}
+): Promise<Agent> {
+	const body: AgentAccountSettingsWrite = {};
+	if (settings.dismissPendingIdentityMode !== undefined) {
+		body.dismiss_pending_identity_mode = settings.dismissPendingIdentityMode;
+	}
+	if (settings.identityMode !== undefined) {
+		body.identity_mode = settings.identityMode;
+	}
+	if (settings.accountAccess !== undefined) {
+		body.account_access = settings.accountAccess;
+	}
+	const json = await request<{ agent: AgentRecordWire }>(
+		target,
+		`/api/agents/${encodeAgentPathId(id)}`,
+		{
+			method: "PUT",
+			body,
+		},
+		z.object({ agent: agentRecordWireResponseCodec }).passthrough()
 	);
 	return toAgent(json.agent);
 }
@@ -1110,7 +1787,14 @@ export async function deleteAgent(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<void>(target, `/api/agents/${id}`, { method: "DELETE" });
+	await request<void>(
+		target,
+		`/api/agents/${encodeAgentPathId(id)}`,
+		{
+			method: "DELETE",
+		},
+		gatewayJsonValueSchema.transform(() => undefined)
+	);
 }
 
 /** Export a portable agent template from `GET /api/agents/:id/export`. */
@@ -1120,7 +1804,9 @@ export async function exportAgent(
 ): Promise<AgentTemplate> {
 	const json = await request<{ template: AgentTemplate }>(
 		target,
-		`/api/agents/${id}/export`
+		`/api/agents/${encodeAgentPathId(id)}/export`,
+		{},
+		z.object({ template: agentTemplateResponseCodec }).passthrough()
 	);
 	return json.template;
 }
@@ -1136,7 +1822,8 @@ export async function importAgent(
 		{
 			method: "POST",
 			body: { template },
-		}
+		},
+		z.object({ agent: agentRecordWireResponseCodec }).passthrough()
 	);
 	return toAgent(json.agent);
 }
@@ -1171,7 +1858,20 @@ export async function migrateToRyu(
 		ryu_agent: AgentRecordWire;
 		source_id: string;
 		carried: string[];
-	}>(target, `/api/agents/${sourceId}/migrate-to-ryu`, { method: "POST" });
+	}>(
+		target,
+		`/api/agents/${encodeAgentPathId(sourceId)}/migrate-to-ryu`,
+		{
+			method: "POST",
+		},
+		z
+			.object({
+				ryu_agent: agentRecordWireResponseCodec,
+				source_id: z.string(),
+				carried: z.array(z.string()),
+			})
+			.passthrough()
+	);
 	return {
 		ryuAgent: toAgent(json.ryu_agent),
 		sourceId: json.source_id,
@@ -1198,7 +1898,17 @@ export async function fetchAgentTools(
 	const json = await request<{
 		tools?: AgentToolWire[];
 		mcpTools?: AgentToolWire[];
-	}>(target, `/api/agents/${id}/tools`);
+	}>(
+		target,
+		`/api/agents/${encodeAgentPathId(id)}/tools`,
+		{},
+		z
+			.object({
+				tools: z.array(agentToolWireResponseCodec).optional(),
+				mcpTools: z.array(agentToolWireResponseCodec).optional(),
+			})
+			.passthrough()
+	);
 	return {
 		observed: (json.tools ?? []).map(toTool),
 		mcp: (json.mcpTools ?? []).map(toTool),
@@ -1230,7 +1940,11 @@ export async function fetchAgentAccounts(
 ): Promise<AgentAccount[]> {
 	const json = await request<{ accounts?: AgentAccount[] }>(
 		target,
-		`/api/agents/${id}/accounts`
+		`/api/agents/${encodeAgentPathId(id)}/accounts`,
+		{},
+		z
+			.object({ accounts: z.array(agentAccountResponseCodec).optional() })
+			.passthrough()
 	);
 	return json.accounts ?? [];
 }
@@ -1250,12 +1964,23 @@ export async function switchAgentAccount(
 		switched: boolean;
 		reauthenticate?: boolean;
 		error?: string;
-	}>(target, `/api/agents/${id}/accounts/switch`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(input),
-	});
-	if (!json.switched) {
+	}>(
+		target,
+		`/api/agents/${encodeAgentPathId(id)}/accounts/switch`,
+		{
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: input,
+		},
+		z
+			.object({
+				switched: z.boolean(),
+				reauthenticate: z.boolean().optional(),
+				error: z.string().optional(),
+			})
+			.passthrough()
+	);
+	if (!(json.switched || json.reauthenticate)) {
 		throw new Error(json.error ?? "Could not switch account");
 	}
 	return { reauthenticate: json.reauthenticate };
@@ -1268,12 +1993,15 @@ export async function removeAgentAccount(
 ): Promise<void> {
 	const json = await request<{ removed: boolean; error?: string }>(
 		target,
-		`/api/agents/${id}/accounts/remove`,
+		`/api/agents/${encodeAgentPathId(id)}/accounts/remove`,
 		{
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ accountId }),
-		}
+			body: { accountId },
+		},
+		z
+			.object({ removed: z.boolean(), error: z.string().optional() })
+			.passthrough()
 	);
 	if (!json.removed) {
 		throw new Error(json.error ?? "Could not remove account");
@@ -1301,7 +2029,13 @@ export async function fetchParticipants(
 	try {
 		const json = await request<{ participants?: ParticipantWire[] }>(
 			target,
-			`/api/conversations/${encodeURIComponent(conversationId)}/participants`
+			`/api/conversations/${encodeURIComponent(conversationId)}/participants`,
+			{},
+			z
+				.object({
+					participants: z.array(participantWireResponseCodec).optional(),
+				})
+				.passthrough()
 		);
 		return (json.participants ?? []).map((p) => ({
 			agentId: p.agent_id,
@@ -1320,7 +2054,8 @@ export async function addParticipant(
 	await request<unknown>(
 		target,
 		`/api/conversations/${encodeURIComponent(conversationId)}/participants`,
-		{ method: "POST", body: { agent_id: agentId } }
+		{ method: "POST", body: { agent_id: agentId } },
+		gatewayJsonValueSchema
 	);
 }
 
@@ -1331,7 +2066,8 @@ export async function removeParticipant(
 ): Promise<void> {
 	await request<unknown>(
 		target,
-		`/api/conversations/${encodeURIComponent(conversationId)}/participants/${encodeURIComponent(agentId)}`,
-		{ method: "DELETE" }
+		`/api/conversations/${encodeURIComponent(conversationId)}/participants/${encodeAgentPathId(agentId)}`,
+		{ method: "DELETE" },
+		gatewayJsonValueSchema
 	);
 }

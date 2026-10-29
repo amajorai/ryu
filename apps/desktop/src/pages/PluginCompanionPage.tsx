@@ -1,3 +1,4 @@
+import { z } from "zod";
 // The desktop-rendered surface for a plugin-contributed **companion**
 // (`RunnableKind::Companion`). Companions are declared in a plugin's manifest and
 // surfaced by Core via `GET /api/plugins/contributions`; this page is where an
@@ -11,8 +12,10 @@
 
 import { Package01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import type { OpenedFileAccess } from "@ryu/app-host/opened-file";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -20,9 +23,13 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
+} from "@ryu/ui/components/empty.tsx";
 import { useMemo } from "react";
-import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
+import {
+	useCurrentTabId,
+	useTabSelector,
+} from "@/src/contexts/TabsContext.tsx";
+import { McpAppPanel } from "@/src/contributions/host/McpAppPanel.tsx";
 import { PluginHostPanel } from "@/src/contributions/host/PluginHostPanel.tsx";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 
@@ -70,33 +77,62 @@ export function CompanionUnavailable() {
 export default function PluginCompanionPage({
 	companionId,
 	mountContext,
+	fileAccess,
 }: {
 	companionId: string;
 	/** Optional host-supplied context baked into the sandboxed frame as
 	 *  `window.ryu.context` (e.g. `{ workflowId }` when a deep-link opens the
 	 *  Workflows canvas on a specific workflow). Forwarded to PluginHostPanel. */
 	mountContext?: unknown;
+	fileAccess?: OpenedFileAccess;
 }) {
+	const tl = useLiteralMessages();
 	const { companions } = usePluginContributions();
 	const companion = companions.find((c) => c.id === companionId);
+	const currentTabId = useCurrentTabId();
+	const conversationId = useTabSelector(
+		(state) =>
+			(
+				state.tabs.find((tab) => tab.id === currentTabId) ??
+				state.tabs.find((tab) => tab.id === state.activeTabId)
+			)?.conversationId
+	);
 
 	// Stabilise the context by serialized content so an inline `{ workflowId }`
 	// object from a route render-fn doesn't churn a new reference each render (the
 	// frame's srcdoc is memoized on `mountContext` identity — an unstable ref would
 	// reload the iframe on every parent re-render).
 	const contextKey = JSON.stringify(mountContext ?? null);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: contextKey is the content hash of mountContext.
+	// contextKey is the content hash of mountContext.
 	const stableContext = useMemo(() => mountContext, [contextKey]);
+	const appContext = z
+		.object({ appPath: z.string().optional() })
+		.safeParse(stableContext);
 
 	if (!companion) {
 		return <CompanionUnavailable />;
+	}
+	if (companion.mcpToolId) {
+		return (
+			<McpAppPanel
+				appPath={appContext.success ? appContext.data.appPath : undefined}
+				companion={companion}
+				conversationId={conversationId}
+				fileAccess={fileAccess}
+				globalEntry={!(conversationId || fileAccess)}
+			/>
+		);
 	}
 
 	// The single decision gate for running third-party code: no bundle → the benign
 	// summary below; never a fetch, never code. App access is not a billing decision;
 	// the host still enforces the enabled state and the Gateway-approved grants.
 	const content = companion.hasUi ? (
-		<PluginHostPanel companion={companion} mountContext={stableContext} />
+		<PluginHostPanel
+			companion={companion}
+			fileAccess={fileAccess}
+			mountContext={stableContext}
+		/>
 	) : null;
 
 	// `app__<runnable id>` — strip the `app__` prefix for a cleaner owning-plugin
@@ -117,7 +153,7 @@ export default function PluginCompanionPage({
 							{companion.label || companion.name}
 						</h1>
 						<p className="truncate text-muted-foreground text-sm">
-							Companion surface · {ownerHint}
+							{tl("Companion surface · {ownerHint}", { ownerHint })}
 						</p>
 					</div>
 				</div>

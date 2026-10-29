@@ -14,8 +14,8 @@
 // the pinned user-message bar, the centred 720px column) and tightens padding.
 // A new desktop part type shows up here for free.
 //
-// Not reused: the composer. The island's blended glass input is a genuinely
-// different control from the desktop InputBar, so `MessageInput` stays island-owned.
+// The Global Island keeps its blended glass treatment by configuring the shared
+// InputBar as compact and seamless; it does not fork the chat input behavior.
 
 import type { ChatStatus, UIMessage } from "ai";
 import type { ComponentProps } from "react";

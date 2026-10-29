@@ -1,0 +1,11 @@
+.inline1 {
+	width: var(--desktop-inline1-width);
+}
+
+.inline2 {
+	width: var(--desktop-inline2-width);
+}
+
+.authored1 {
+	transition-property: width;
+}

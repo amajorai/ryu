@@ -1,9 +1,11 @@
 /* @jsxImportSource @opentui/react */
 // Home surface (path /home) - the landing/overview screen, mirroring the desktop
 // HomePage's dashboard intent but kept light for the terminal: a live system-status
-// card (one GET /api/system/status, degrading to "Core unreachable" on failure) and
-// a keyboard-navigable list of quick actions that open the primary surfaces. It is a
-// pure navigator - no data mutation - so it owns only j/k selection + Enter to open.
+// card (one GET /api/system/status) and a keyboard-navigable list of quick actions
+// that open the primary surfaces. When Core does not answer, the status card becomes
+// the guided ConnectionCard (s start Core · ^N switch node · r retry, plus the
+// shared poller's auto-retry countdown), and Home reloads itself once Core is up.
+// Beyond that it is a pure navigator: j/k selection + Enter to open.
 
 import { useKeyboard } from "@opentui/react";
 import { fetchSystemStatus } from "@ryuhq/core-client/system";
@@ -12,6 +14,11 @@ import { Badge } from "@/components/ui/badge.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { useCoreHealth } from "../../core/CoreHealthContext.tsx";
+import { useShellKeyboardCaptured } from "../../core/InputFocusContext.tsx";
+import { tf } from "../../i18n/translate.ts";
+import { useOverlay } from "../../overlays/OverlayHost.tsx";
+import { CoreConnectionCard } from "../../ui/ConnectionCard.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
 
@@ -58,9 +65,12 @@ const QUICK_ACTIONS: QuickAction[] = [
 ];
 
 function HomeSurface({ active, paneId }: SurfaceProps) {
-	const { target, url, token } = useCore();
+	const { target } = useCore();
+	const health = useCoreHealth();
 	const theme = useTheme();
 	const { focusedPaneId, openTab } = useWorkspace();
+	const shellKeyboardCaptured = useShellKeyboardCaptured();
+	const { openId: overlayOpenId } = useOverlay();
 	const focused = active && focusedPaneId === paneId;
 
 	const [status, setStatus] = useState<StatusLine[] | null>(null);
@@ -70,6 +80,11 @@ function HomeSurface({ active, paneId }: SurfaceProps) {
 
 	// Track the latest request so a stale resolve cannot clobber fresh data.
 	const reqRef = useRef(0);
+	const recheckHealth = health?.recheck;
+	const healthState = health?.url === target.url ? health.state : "unknown";
+	// The guided card replaces the status card only while Core itself is not
+	// answering; a status failure on a healthy Core keeps the plain error.
+	const coreDown = reachable === false && healthState !== "up";
 
 	const runLoad = useCallback(() => {
 		const reqId = ++reqRef.current;
@@ -100,8 +115,10 @@ function HomeSurface({ active, paneId }: SurfaceProps) {
 				setStatus(null);
 				setEngine(null);
 				setReachable(false);
+				// Let the shared poller confirm (and keep retrying) the outage.
+				recheckHealth?.();
 			});
-	}, [target]);
+	}, [target, recheckHealth]);
 
 	// Lazy load on activation, and reload on node switch (url/token).
 	useEffect(() => {
@@ -110,8 +127,16 @@ function HomeSurface({ active, paneId }: SurfaceProps) {
 		}
 	}, [active, runLoad]);
 
+	// Core came back (auto-retry or s start Core): refresh the status card.
+	const reloadOnRecovery = reachable === false && healthState === "up";
+	useEffect(() => {
+		if (active && reloadOnRecovery) {
+			runLoad();
+		}
+	}, [active, reloadOnRecovery, runLoad]);
+
 	useKeyboard((key) => {
-		if (!focused) {
+		if (!focused || shellKeyboardCaptured || overlayOpenId) {
 			return;
 		}
 		if (key.name === "up" || key.name === "k") {
@@ -120,6 +145,8 @@ function HomeSurface({ active, paneId }: SurfaceProps) {
 			setIndex((i) => Math.min(QUICK_ACTIONS.length - 1, i + 1));
 		} else if (key.name === "r") {
 			runLoad();
+		} else if (key.name === "s" && coreDown && health?.canStart) {
+			health.startCore();
 		} else if (key.name === "return") {
 			const chosen = QUICK_ACTIONS[index];
 			if (chosen) {
@@ -129,8 +156,14 @@ function HomeSurface({ active, paneId }: SurfaceProps) {
 	});
 
 	return (
-		<box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
-			<box flexDirection="column" paddingBottom={1}>
+		<box
+			flexDirection="column"
+			flexGrow={1}
+			overflow="hidden"
+			paddingLeft={1}
+			paddingTop={1}
+		>
+			<box flexDirection="column" flexShrink={0} paddingBottom={1}>
 				<text fg={theme.colors.primary}>
 					<b>Ryu</b>
 				</text>
@@ -138,27 +171,45 @@ function HomeSurface({ active, paneId }: SurfaceProps) {
 					Your local overview - ↑↓ move · Enter open · r refresh
 				</text>
 			</box>
-			<StatusCard engine={engine} reachable={reachable} status={status} />
+			<StatusCard
+				coreDown={coreDown}
+				engine={engine}
+				reachable={reachable}
+				status={status}
+			/>
 			<ActionList index={index} />
 		</box>
 	);
 }
 
 function StatusCard({
+	coreDown,
 	status,
 	engine,
 	reachable,
 }: {
+	coreDown: boolean;
 	engine: string | null;
 	reachable: boolean | null;
 	status: StatusLine[] | null;
 }) {
 	const theme = useTheme();
+	if (coreDown) {
+		return (
+			// The right gutter matches Chat's card so the border never touches
+			// the terminal edge.
+			<box flexShrink={0} paddingBottom={1} paddingRight={1}>
+				<CoreConnectionCard keysActive />
+			</box>
+		);
+	}
 	if (reachable === false) {
 		return (
 			<box paddingBottom={1}>
 				<Card title="System">
-					<text fg={theme.colors.error}>Core unreachable</text>
+					<text fg={theme.colors.error}>
+						Couldn't load system status · r refresh
+					</text>
 				</Card>
 			</box>
 		);
@@ -174,7 +225,10 @@ function StatusCard({
 	}
 	return (
 		<box paddingBottom={1}>
-			<Card subtitle={engine ? `engine: ${engine}` : undefined} title="System">
+			<Card
+				subtitle={engine ? tf("engine: {engine}", { engine }) : undefined}
+				title="System"
+			>
 				<box flexDirection="row" gap={1}>
 					{status.map((line) => (
 						<Badge
@@ -198,8 +252,10 @@ function ActionList({ index }: { index: number }) {
 			{QUICK_ACTIONS.map((action, i) => {
 				const isSel = i === index;
 				return (
-					<box flexDirection="row" gap={1} key={action.id}>
-						<text fg={isSel ? theme.colors.primary : theme.colors.muted}>
+					<box flexDirection="row" flexShrink={0} gap={1} key={action.id}>
+						<text
+							fg={isSel ? theme.colors.primary : theme.colors.mutedForeground}
+						>
 							{isSel ? "›" : " "}
 						</text>
 						<text fg={isSel ? theme.colors.primary : theme.colors.foreground}>

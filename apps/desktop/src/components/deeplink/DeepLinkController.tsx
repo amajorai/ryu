@@ -1,14 +1,17 @@
-import { completeComposioConnection } from "@ryuhq/core-client/composio";
+import { completeComposioConnection } from "@ryuhq/core-client/composio.ts";
 import {
 	normalizeRnpNodeUrl,
 	resolveRnpNode,
 } from "@ryuhq/protocol/continuity";
 import {
 	type DeepLinkIntent,
+	isRyuDeepLinkProfile,
 	parseConnectCallbackDeepLink,
 	parseRyuDeepLink,
+	ryuDeepLinkProfile,
 } from "@ryuhq/protocol/deep-link";
 import { useQueryClient } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { useCallback, useEffect, useState } from "react";
 import { sileo } from "sileo";
@@ -28,6 +31,10 @@ type HandoffIntent = Extract<DeepLinkIntent, { kind: "handoff" }>;
 
 interface PendingHandoff {
 	intent: HandoffIntent;
+	/** Node list snapshot taken when the link was accepted. Node-store refreshes
+	 * (window focus, token refresh) must not reset the reviewed handoff; the
+	 * dialog re-reads live nodes through `resolveNodes` when continuing. */
+	nodes: Node[];
 	sourceNode: Node;
 }
 
@@ -45,6 +52,13 @@ interface PendingHandoff {
  * has no side effect — a chat prompt only PRE-SEEDS the composer, never sends.
  */
 function navigateForIntent(intent: DeepLinkIntent, openTab: OpenTab): boolean {
+	if (intent.kind === "plugin-app") {
+		openTab(
+			`/plugin/${encodeURIComponent(`mcp__${intent.pluginId}.${intent.toolName}`)}`,
+			{ mountContext: { appPath: intent.appPath } }
+		);
+		return true;
+	}
 	if (intent.kind === "page") {
 		// Credits lives in App Settings → Services (no standalone route).
 		if (intent.page === "credits") {
@@ -92,7 +106,6 @@ export function DeepLinkController() {
 	const { openTab } = useTabsContext();
 	const request = useDeepLinkStore((s) => s.request);
 	const nodes = useNodeStore((s) => s.nodes);
-	const setTabNodeOverride = useNodeStore((s) => s.setTabOverride);
 	const resolveConfiguredNodes = useCallback(
 		() => useNodeStore.getState().nodes,
 		[]
@@ -108,8 +121,22 @@ export function DeepLinkController() {
 		let unlisten: (() => void) | undefined;
 		let cancelled = false;
 
-		const handle = (urls: string[]) => {
+		const handle = async (urls: string[]) => {
+			const build = await invoke<{
+				profile: unknown;
+				deepLinkProfile: unknown;
+			}>("get_build_profile");
+			if (
+				cancelled ||
+				!isRyuDeepLinkProfile(build.profile) ||
+				build.deepLinkProfile !== build.profile
+			) {
+				return;
+			}
 			for (const url of urls) {
+				if (ryuDeepLinkProfile(url) !== build.profile) {
+					continue;
+				}
 				const callback = parseConnectCallbackDeepLink(url);
 				if (callback) {
 					setPendingCallback((current) => current ?? callback);
@@ -120,9 +147,10 @@ export function DeepLinkController() {
 					continue;
 				}
 				if (intent.kind === "handoff") {
+					const configuredNodes = useNodeStore.getState().nodes;
 					const resolution = resolveRnpNode(
 						intent.sourceNodeUrl,
-						useNodeStore.getState().nodes
+						configuredNodes
 					);
 					if (resolution.kind === "blocked") {
 						sileo.error({
@@ -130,7 +158,11 @@ export function DeepLinkController() {
 						});
 						continue;
 					}
-					setPendingHandoff({ intent, sourceNode: resolution.node });
+					setPendingHandoff({
+						intent,
+						nodes: configuredNodes,
+						sourceNode: resolution.node,
+					});
 					continue;
 				}
 				// Navigation intents act immediately (no side effect). Action intents
@@ -154,7 +186,11 @@ export function DeepLinkController() {
 
 		// Warm start: the running instance is handed the URL (single-instance
 		// forwards it on Windows/Linux). Rejects harmlessly outside Tauri.
-		onOpenUrl((urls) => handle(urls))
+		onOpenUrl((urls) => {
+			void handle(urls).catch(() => {
+				/* Native profile unavailable: ignore the link. */
+			});
+		})
 			.then((u) => {
 				if (cancelled) {
 					u();
@@ -168,9 +204,9 @@ export function DeepLinkController() {
 
 		// Cold start: the app was launched by the link — replay the launch URL.
 		getCurrent()
-			.then((urls) => {
+			.then(async (urls) => {
 				if (urls) {
-					handle(urls);
+					await handle(urls);
 				}
 			})
 			.catch(() => {
@@ -206,6 +242,10 @@ export function DeepLinkController() {
 						await queryClient.invalidateQueries({
 							queryKey: ["composio", "connections", node.url],
 						});
+						// The callback may have completed an agent's own app instead.
+						await queryClient.invalidateQueries({
+							queryKey: ["composio", "agent-connections", node.url],
+						});
 					}}
 				/>
 			) : null}
@@ -213,12 +253,15 @@ export function DeepLinkController() {
 				<ContinueOnNodeDialog
 					conversationId={pendingHandoff.intent.conversationId}
 					conversationTitle="Shared conversation"
-					nodes={nodes}
-					onCompleted={(destination) => {
-						const tabId = openTab("/chat", {
+					nodes={pendingHandoff.nodes}
+					onCompleted={(destination, _result, workspaceResult) => {
+						// A resumed working tree is a handed-off worktree; Core refuses
+						// to fork a managed worktree from it, so this tab runs Local.
+						openTab("/chat", {
 							conversationId: pendingHandoff.intent.conversationId,
+							node: destination.name,
+							worktreeMode: workspaceResult ? false : undefined,
 						});
-						setTabNodeOverride(tabId, destination.name);
 						setPendingHandoff(null);
 					}}
 					onOpenChange={(open) => {

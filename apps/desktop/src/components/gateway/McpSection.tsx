@@ -12,15 +12,18 @@
 // removing servers and editing per-agent allowlists is the Tools page in the
 // app (see `@ryu/blocks` Tools surface). Management links out from here.
 
-import { Search01Icon } from "@hugeicons/core-free-icons";
+import { Refresh01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	InputGroup,
 	InputGroupAddon,
 	InputGroupInput,
 } from "@ryu/ui/components/input-group.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useState } from "react";
 import {
 	SettingsCard,
@@ -35,32 +38,71 @@ import {
 	type McpServer,
 	type McpTool,
 } from "@/src/lib/api/mcp.ts";
+import { SettingsNotice } from "./SettingsNotice.tsx";
+
+// Load failures read as one plain sentence; the request summary stays as a
+// muted second line so it can still be matched against Core logs.
+function McpLoadError({
+	error,
+	onRetry,
+	subject,
+}: {
+	error: string;
+	onRetry: () => void;
+	subject: string;
+}) {
+	const tl = useLiteralMessages();
+	return (
+		<SettingsNotice
+			action={
+				<Button onClick={onRetry} size="sm" variant="outline">
+					Retry
+				</Button>
+			}
+			role="alert"
+			secondary={error}
+		>
+			{tl("Couldn’t load {subject}.", { subject })}
+		</SettingsNotice>
+	);
+}
+
+function McpEmpty({ children }: { children: string }) {
+	return (
+		<SettingsCard>
+			<p className="text-center text-muted-foreground text-sm">{children}</p>
+		</SettingsCard>
+	);
+}
 
 function ServersList({
 	servers,
 	loading,
 	error,
+	onRetry,
 }: {
 	error: string | null;
 	loading: boolean;
+	onRetry: () => void;
 	servers: McpServer[];
 }) {
 	if (loading) {
 		return (
-			<div className="flex items-center gap-2 px-3 text-muted-foreground text-sm">
-				<Spinner className="size-4" />
-				Loading…
-			</div>
+			<SettingsCard>
+				<SkeletonRows label="Loading…" spacing="panel" />
+			</SettingsCard>
 		);
 	}
 	if (error) {
-		return <p className="px-3 text-sm text-status-destructive">{error}</p>;
+		return (
+			<McpLoadError error={error} onRetry={onRetry} subject="MCP servers" />
+		);
 	}
 	if (servers.length === 0) {
 		return (
-			<p className="px-3 text-muted-foreground text-sm">
+			<McpEmpty>
 				No MCP servers registered. Add one from the Tools page.
-			</p>
+			</McpEmpty>
 		);
 	}
 	return (
@@ -116,9 +158,11 @@ function ToolsList({
 	tools,
 	loading,
 	error,
+	onRetry,
 }: {
 	error: string | null;
 	loading: boolean;
+	onRetry: () => void;
 	servers: McpServer[];
 	tools: McpTool[];
 }) {
@@ -135,47 +179,36 @@ function ToolsList({
 
 	if (loading) {
 		return (
-			<div className="flex items-center gap-2 px-3 text-muted-foreground text-sm">
-				<Spinner className="size-4" />
-				Loading…
-			</div>
+			<SettingsCard>
+				<SkeletonRows label="Loading…" spacing="panel" />
+			</SettingsCard>
 		);
 	}
 	if (error) {
-		return <p className="px-3 text-sm text-status-destructive">{error}</p>;
+		return <McpLoadError error={error} onRetry={onRetry} subject="MCP tools" />;
 	}
 	if (tools.length === 0) {
 		return (
-			<p className="px-3 text-muted-foreground text-sm">
-				No tools advertised by the registered servers yet.
-			</p>
+			<McpEmpty>No tools advertised by the registered servers yet.</McpEmpty>
 		);
 	}
+	if (visible.length === 0) {
+		return <McpEmpty>No enabled servers advertise tools.</McpEmpty>;
+	}
 	return (
-		<div className="flex flex-col gap-3 px-3">
-			{visible.length === 0 ? (
-				<p className="text-muted-foreground text-sm">
-					No enabled servers advertise tools.
-				</p>
-			) : (
-				visible.map(([server, list]) => (
-					<div className="flex flex-col gap-1" key={server}>
-						<span className="font-medium text-sm">{server}</span>
-						<div className="flex flex-wrap gap-2">
-							{list.map((t) => (
-								<Badge
-									className="font-mono text-xs"
-									key={t.id}
-									variant="secondary"
-								>
-									{t.name}
-								</Badge>
-							))}
-						</div>
+		<SettingsGroup>
+			{visible.map(([server, list]) => (
+				<SettingsItem key={server} title={server}>
+					<div className="flex flex-wrap gap-1.5">
+						{list.map((t) => (
+							<Badge key={t.id} typography="code" variant="secondary">
+								{t.name}
+							</Badge>
+						))}
 					</div>
-				))
-			)}
-		</div>
+				</SettingsItem>
+			))}
+		</SettingsGroup>
 	);
 }
 
@@ -185,9 +218,12 @@ export function McpSection({ target }: { target: ApiTarget }) {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
+	const [refreshKey, setRefreshKey] = useState(0);
 
 	useEffect(() => {
 		let cancelled = false;
+		setLoading(true);
+		setError(null);
 		Promise.all([fetchMcpServers(target), fetchMcpTools(target)])
 			.then(([s, t]) => {
 				if (!cancelled) {
@@ -196,7 +232,7 @@ export function McpSection({ target }: { target: ApiTarget }) {
 					setError(null);
 				}
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setError(
 						e instanceof Error ? e.message : "Failed to load MCP servers"
@@ -211,7 +247,7 @@ export function McpSection({ target }: { target: ApiTarget }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [target]);
+	}, [refreshKey, target]);
 	const needle = query.trim().toLowerCase();
 	const filteredServers = servers.filter((server) =>
 		server.name.toLowerCase().includes(needle)
@@ -222,46 +258,63 @@ export function McpSection({ target }: { target: ApiTarget }) {
 		)
 	);
 
+	const refresh = () => setRefreshKey((current) => current + 1);
+
 	return (
-		<div className="flex flex-col gap-4">
+		<div className="flex flex-col gap-6">
+			{/* An iOS-style search field above the lists it filters, not a toolbar
+			    squeezed into a section header. */}
+			<InputGroup className="w-full">
+				<InputGroupAddon>
+					<HugeiconsIcon className="size-4" icon={Search01Icon} />
+				</InputGroupAddon>
+				<InputGroupInput
+					aria-label="Search MCP servers and tools"
+					onChange={(event) => setQuery(event.target.value)}
+					placeholder="Search servers and tools…"
+					value={query}
+				/>
+			</InputGroup>
 			<SettingsSection
 				caption="The MCP servers this node exposes. A host (Claude Desktop, Cursor, …) that connects to Ryu can call the tools below through the same governance as everything else."
 				headerAction={
-					<InputGroup className="w-64">
-						<InputGroupAddon>
-							<HugeiconsIcon className="size-4" icon={Search01Icon} />
-						</InputGroupAddon>
-						<InputGroupInput
-							aria-label="Search MCP servers and tools"
-							onChange={(event) => setQuery(event.target.value)}
-							placeholder="Search servers and tools…"
-							value={query}
+					<Button
+						aria-label={
+							loading ? "Refreshing MCP inventory" : "Refresh MCP inventory"
+						}
+						disabled={loading}
+						onClick={refresh}
+						size="icon"
+						variant="ghost"
+					>
+						<HugeiconsIcon
+							aria-hidden
+							className={cn("size-4", loading && "animate-spin")}
+							icon={Refresh01Icon}
 						/>
-					</InputGroup>
+					</Button>
 				}
 				title="MCP servers"
 			>
-				<SettingsCard className="flex flex-col gap-2">
-					<ServersList
-						error={error}
-						loading={loading}
-						servers={filteredServers}
-					/>
-				</SettingsCard>
+				<ServersList
+					error={error}
+					loading={loading}
+					onRetry={refresh}
+					servers={filteredServers}
+				/>
 			</SettingsSection>
 
 			<SettingsSection
 				caption="Tools advertised by enabled servers, grouped by server. Per-agent allowlists are managed on the Tools page."
 				title="Available tools"
 			>
-				<SettingsCard className="flex flex-col gap-3">
-					<ToolsList
-						error={error}
-						loading={loading}
-						servers={servers}
-						tools={filteredTools}
-					/>
-				</SettingsCard>
+				<ToolsList
+					error={error}
+					loading={loading}
+					onRetry={refresh}
+					servers={servers}
+					tools={filteredTools}
+				/>
 			</SettingsSection>
 		</div>
 	);

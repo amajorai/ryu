@@ -49,12 +49,30 @@ pub trait InputMonitor: Send + Sync {
 #[cfg(target_os = "windows")]
 mod windows_impl {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Mutex, PoisonError};
     use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::*;
 
-    static INPUT_TX: OnceLock<Mutex<tokio::sync::mpsc::UnboundedSender<InputEvent>>> =
-        OnceLock::new();
+    // The hook callbacks send to whichever session's sender is current. `start`
+    // replaces it (dropping the previous session's sender, which closes that
+    // receiver) and `stop` clears it, so a later session receives events again.
+    static INPUT_TX: Mutex<Option<tokio::sync::mpsc::UnboundedSender<InputEvent>>> =
+        Mutex::new(None);
+    // The OS hook is process-global and installed once; later sessions reuse it.
+    static HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+    fn send_input(event: InputEvent) {
+        if let Ok(guard) = INPUT_TX.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(event);
+            }
+        }
+    }
+
+    fn set_input_tx(tx: Option<tokio::sync::mpsc::UnboundedSender<InputEvent>>) {
+        *INPUT_TX.lock().unwrap_or_else(PoisonError::into_inner) = tx;
+    }
 
     unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code >= 0 {
@@ -64,11 +82,7 @@ mod windows_impl {
             } else {
                 InputEvent::KeyUp { vk_code: kb.vkCode }
             };
-            if let Some(tx) = INPUT_TX.get() {
-                if let Ok(tx) = tx.lock() {
-                    let _ = tx.send(event);
-                }
-            }
+            send_input(event);
         }
         unsafe { CallNextHookEx(None, code, wparam, lparam) }
     }
@@ -120,22 +134,16 @@ mod windows_impl {
                 _ => None,
             };
             if let Some(ev) = event {
-                if let Some(tx) = INPUT_TX.get() {
-                    if let Ok(tx) = tx.lock() {
-                        let _ = tx.send(ev);
-                    }
-                }
+                send_input(ev);
             }
         }
         unsafe { CallNextHookEx(None, code, wparam, lparam) }
     }
 
-    pub struct WindowsInputMonitor {
-        stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    }
+    pub struct WindowsInputMonitor;
     impl WindowsInputMonitor {
         pub fn new() -> Result<Self> {
-            Ok(Self { stop_tx: None })
+            Ok(Self)
         }
     }
 
@@ -143,13 +151,24 @@ mod windows_impl {
     impl InputMonitor for WindowsInputMonitor {
         async fn start(&mut self) -> Result<UnboundedReceiver<InputEvent>> {
             let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
-            let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
-            INPUT_TX.get_or_init(|| Mutex::new(event_tx));
+            set_input_tx(Some(event_tx));
+            if HOOK_INSTALLED.swap(true, Ordering::SeqCst) {
+                return Ok(event_rx);
+            }
             std::thread::spawn(|| unsafe {
-                let kb_hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)
-                    .expect("keyboard hook");
-                let mouse_hook =
-                    SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0).expect("mouse hook");
+                let Ok(kb_hook) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)
+                else {
+                    tracing::warn!("SetWindowsHookExW(WH_KEYBOARD_LL) failed");
+                    HOOK_INSTALLED.store(false, Ordering::SeqCst);
+                    return;
+                };
+                let Ok(mouse_hook) = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0)
+                else {
+                    tracing::warn!("SetWindowsHookExW(WH_MOUSE_LL) failed");
+                    let _ = UnhookWindowsHookEx(kb_hook);
+                    HOOK_INSTALLED.store(false, Ordering::SeqCst);
+                    return;
+                };
                 let mut msg = MSG::default();
                 loop {
                     let ret = GetMessageW(&mut msg, None, 0, 0);
@@ -161,15 +180,14 @@ mod windows_impl {
                 }
                 let _ = UnhookWindowsHookEx(kb_hook);
                 let _ = UnhookWindowsHookEx(mouse_hook);
+                HOOK_INSTALLED.store(false, Ordering::SeqCst);
             });
-            self.stop_tx = Some(stop_tx);
             Ok(event_rx)
         }
 
         async fn stop(&mut self) -> Result<()> {
-            if let Some(tx) = self.stop_tx.take() {
-                let _ = tx.send(());
-            }
+            // Stop delivering events; the hook stays installed for the next session.
+            set_input_tx(None);
             Ok(())
         }
     }
@@ -184,10 +202,28 @@ pub use windows_impl::WindowsInputMonitor;
 mod macos_impl {
     use super::*;
     use std::ffi::c_void;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Mutex, PoisonError};
 
-    static INPUT_TX: OnceLock<Mutex<tokio::sync::mpsc::UnboundedSender<InputEvent>>> =
-        OnceLock::new();
+    // The hook callbacks send to whichever session's sender is current. `start`
+    // replaces it (dropping the previous session's sender, which closes that
+    // receiver) and `stop` clears it, so a later session receives events again.
+    static INPUT_TX: Mutex<Option<tokio::sync::mpsc::UnboundedSender<InputEvent>>> =
+        Mutex::new(None);
+    // The OS hook is process-global and installed once; later sessions reuse it.
+    static HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+    fn send_input(event: InputEvent) {
+        if let Ok(guard) = INPUT_TX.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(event);
+            }
+        }
+    }
+
+    fn set_input_tx(tx: Option<tokio::sync::mpsc::UnboundedSender<InputEvent>>) {
+        *INPUT_TX.lock().unwrap_or_else(PoisonError::into_inner) = tx;
+    }
 
     const KCG_EVENT_LEFT_MOUSE_DOWN: u32 = 1;
     const KCG_EVENT_LEFT_MOUSE_UP: u32 = 2;
@@ -302,22 +338,16 @@ mod macos_impl {
                 _ => None,
             };
             if let Some(e) = ev {
-                if let Some(tx) = INPUT_TX.get() {
-                    if let Ok(g) = tx.lock() {
-                        let _ = g.send(e);
-                    }
-                }
+                send_input(e);
             }
         }
         event
     }
 
-    pub struct MacOSInputMonitor {
-        stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    }
+    pub struct MacOSInputMonitor;
     impl MacOSInputMonitor {
         pub fn new() -> Result<Self> {
-            Ok(Self { stop_tx: None })
+            Ok(Self)
         }
     }
 
@@ -325,8 +355,10 @@ mod macos_impl {
     impl InputMonitor for MacOSInputMonitor {
         async fn start(&mut self) -> Result<UnboundedReceiver<InputEvent>> {
             let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
-            let (stop_tx, _stop_rx) = tokio::sync::oneshot::channel::<()>();
-            INPUT_TX.get_or_init(|| Mutex::new(event_tx));
+            set_input_tx(Some(event_tx));
+            if HOOK_INSTALLED.swap(true, Ordering::SeqCst) {
+                return Ok(event_rx);
+            }
             std::thread::spawn(|| unsafe {
                 let mask: u64 = (1u64 << KCG_EVENT_KEY_DOWN)
                     | (1 << KCG_EVENT_KEY_UP)
@@ -348,20 +380,21 @@ mod macos_impl {
                 );
                 if tap.is_null() {
                     tracing::warn!("CGEventTapCreate failed — grant Accessibility permission");
+                    // Let a later start retry once permission is granted.
+                    HOOK_INSTALLED.store(false, Ordering::SeqCst);
                     return;
                 }
                 let source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
                 CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
                 CGEventTapEnable(tap, true);
                 CFRunLoopRun();
+                HOOK_INSTALLED.store(false, Ordering::SeqCst);
             });
-            self.stop_tx = Some(stop_tx);
             Ok(event_rx)
         }
         async fn stop(&mut self) -> Result<()> {
-            if let Some(tx) = self.stop_tx.take() {
-                let _ = tx.send(());
-            }
+            // Stop delivering events; the tap stays installed for the next session.
+            set_input_tx(None);
             Ok(())
         }
     }

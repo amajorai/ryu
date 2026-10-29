@@ -16,5 +16,5 @@ export function MarkToolbarButton({
 	const state = useMarkToolbarButtonState({ clear, nodeType });
 	const { props: buttonProps } = useMarkToolbarButton(state);
 
-	return <ToolbarButton {...props} {...buttonProps} />;
+	return <ToolbarButton {...buttonProps} {...props} />;
 }

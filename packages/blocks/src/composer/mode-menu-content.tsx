@@ -3,9 +3,7 @@
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
-import { cn } from "@ryu/ui/lib/utils";
 import type { ComponentType } from "react";
-import { COMPOSER_SELECT_ITEM } from "./composer-select.ts";
 
 export interface ModeOption {
 	description?: string;
@@ -41,11 +39,7 @@ export function ModeMenuContent({
 		const Icon = mode.icon;
 		return (
 			<Button
-				className={cn(
-					COMPOSER_SELECT_ITEM,
-					"items-start",
-					isActive && "bg-accent"
-				)}
+				appearance={isActive ? "composer-mode-active" : "composer-mode"}
 				key={mode.id}
 				onClick={() => onSelect(mode.id)}
 				type="button"
@@ -53,7 +47,9 @@ export function ModeMenuContent({
 			>
 				{Icon ? <Icon className="mt-0.5 size-4 shrink-0" /> : null}
 				<span className="min-w-0 flex-1">
-					<span className="block truncate">{mode.label}</span>
+					<span className="block truncate" title={mode.label}>
+						{mode.label}
+					</span>
 					{mode.description ? (
 						<span className="block truncate font-normal text-muted-foreground text-sm">
 							{mode.description}
@@ -80,7 +76,7 @@ export function ModeMenuContent({
 			{groups.map((group) => (
 				<div key={group.label ?? "__ungrouped__"}>
 					{group.label ? (
-						<div className="px-3 pt-2 pb-1 font-medium text-[11px] text-muted-foreground">
+						<div className="type-caption px-3 pt-2 pb-1 font-medium text-muted-foreground">
 							{group.label}
 						</div>
 					) : null}

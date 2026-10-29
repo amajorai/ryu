@@ -1,3 +1,4 @@
+import type { RouteClaim } from "./rpc.ts";
 // Wiring test for the Ryu App WIDGET path (#446), WITHOUT a DOM/iframe.
 //
 // Two halves, both the pieces that are LOGIC rather than webview rendering:
@@ -16,14 +17,16 @@
 //       `toRpcError` serialization the live `ExtensionHost` runs (ExtensionHost.tsx
 //       lines 149/283). This is the round-trip the existing suite never exercised:
 //       a mounted widget's method call reaching the host service, and an ungranted
-//       call being denied. Host boundary (rpc.ts / ExtensionHost.tsx) is unchanged.
+//       call being denied. Local host capabilities are exercised without a manifest grant.
 
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import {
 	asRpcRequest,
 	type Capability,
+	capabilitiesFromGrants,
 	dispatchRpc,
 	type HostServices,
 	type RpcResponse,
@@ -91,6 +94,19 @@ interface PortError extends Error {
 	code?: string;
 }
 
+const portReplySchema = z.object({
+	kind: z.literal("ryu-plugin-rpc-result"),
+	id: z.number(),
+	result: z.json().optional(),
+	error: z
+		.union([
+			z.string().transform((message) => ({ message, code: undefined })),
+			z.object({ message: z.string(), code: z.string().optional() }),
+		])
+		.optional(),
+});
+type PortResult = z.infer<typeof portReplySchema>["result"];
+
 /** Attach the host's port handler — the SAME shape ExtensionHost runs: validate
  *  the envelope, gate-dispatch with `dispatchRpc`, and serialize errors with
  *  `toRpcError` so a coded error keeps its `{ code, message }` shape. */
@@ -113,11 +129,11 @@ function attachHost(
 				};
 				port.postMessage(reply);
 			})
-			.catch((err: unknown) => {
+			.catch((cause: unknown) => {
 				const reply: RpcResponse = {
 					kind: "ryu-plugin-rpc-result",
 					id: req.id,
-					error: toRpcError(err),
+					error: toRpcError(cause),
 				};
 				port.postMessage(reply);
 			});
@@ -131,14 +147,15 @@ function attachHost(
 function widgetCaller(port: MessagePort) {
 	const pending = new Map<
 		number,
-		{ resolve: (v: unknown) => void; reject: (e: PortError) => void }
+		{ resolve: (value: PortResult) => void; reject: (e: PortError) => void }
 	>();
 	let nextId = 1;
 	port.onmessage = (event: MessageEvent) => {
-		const msg = event.data as RpcResponse;
-		if (msg?.kind !== "ryu-plugin-rpc-result") {
+		const parsed = portReplySchema.safeParse(event.data);
+		if (!parsed.success) {
 			return;
 		}
+		const msg = parsed.data;
 		const p = pending.get(msg.id);
 		if (!p) {
 			return;
@@ -148,17 +165,13 @@ function widgetCaller(port: MessagePort) {
 			p.resolve(msg.result);
 			return;
 		}
-		if (typeof msg.error === "string") {
-			p.reject(new Error(msg.error));
-			return;
-		}
 		const err: PortError = new Error(msg.error.message);
 		err.code = msg.error.code;
 		p.reject(err);
 	};
 	port.start?.();
 	return (method: string, args: unknown[] = []) =>
-		new Promise<unknown>((resolve, reject) => {
+		new Promise<PortResult>((resolve, reject) => {
 			const id = nextId++;
 			pending.set(id, { resolve, reject });
 			port.postMessage({ kind: "ryu-plugin-rpc", id, method, args });
@@ -170,7 +183,7 @@ function recordingServices() {
 	const calls: { method: string; args: unknown[] }[] = [];
 	const svc: HostServices = {
 		listAgents: () => Promise.resolve([]),
-		registerRoute: () => Promise.resolve(null),
+		registerRoute: (claim: RouteClaim) => Promise.resolve({ path: claim.path }),
 		callTool: (name, args) => {
 			calls.push({ method: "callTool", args: [name, args] });
 			return Promise.resolve({ ok: true, echoed: name });
@@ -249,7 +262,7 @@ describe("widget → host callTool bridge over a real MessageChannel", () => {
 			await call("tool.call", [123, {}]);
 			throw new Error("expected rejection");
 		} catch (err) {
-			expect((err as PortError).code).toBe("invalid_args");
+			expect(err).toMatchObject({ code: "invalid_args" });
 		}
 		close();
 	});
@@ -257,15 +270,17 @@ describe("widget → host callTool bridge over a real MessageChannel", () => {
 	it("denies an ungranted tool.call as a plain CapabilityError (not in the coded set)", async () => {
 		const { svc } = recordingServices();
 		// No capabilities granted.
-		const { call, close } = channelPair(new Set<Capability>(), svc);
+		const { call, close } = channelPair(capabilitiesFromGrants([]), svc);
 		try {
 			await call("tool.call", ["my-app.save", {}]);
 			throw new Error("expected rejection");
 		} catch (err) {
 			// `tool.call` is NOT in CODED_ERROR_CAPABILITIES → plain-string error,
 			// so it survives the port WITHOUT a `.code`.
-			expect((err as PortError).code).toBeUndefined();
-			expect((err as Error).message).toMatch(/Capability not granted/);
+			expect(err).toMatchObject({ code: undefined });
+			expect(err).toMatchObject({
+				message: expect.stringMatching(/Capability not granted/),
+			});
 		}
 		close();
 	});
@@ -278,7 +293,7 @@ describe("widget → host callTool bridge over a real MessageChannel", () => {
 			await call("model.complete", [{ prompt: "x" }]);
 			throw new Error("expected rejection");
 		} catch (err) {
-			expect((err as PortError).code).toBe("denied");
+			expect(err).toMatchObject({ code: "denied" });
 		}
 		close();
 	});
@@ -290,10 +305,13 @@ describe("window.openai parity methods", () => {
 	const LOCAL_CAPS = new Set<Capability>(["ui.displayMode"]);
 
 	it("threads requestModal { template } to the host service (NOT dropped)", async () => {
-		let received: unknown = "unset";
+		let received: Parameters<
+			NonNullable<HostServices["requestModal"]>
+		>[0]["template"] = "unset";
 		const svc: HostServices = {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			requestModal: (input) => {
 				received = input.template;
 				return Promise.resolve({ mode: "fullscreen" });
@@ -306,25 +324,27 @@ describe("window.openai parity methods", () => {
 		close();
 	});
 
-	it("vets openExternal to http(s) and rejects other schemes at the gate", async () => {
+	it("allows local openExternal with no manifest grants and vets unsafe URL schemes", async () => {
 		const opened: string[] = [];
 		const svc: HostServices = {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			openExternal: ({ href }) => {
 				opened.push(href);
 				return Promise.resolve();
 			},
 		};
-		const { call, close } = channelPair(LOCAL_CAPS, svc);
+		const { call, close } = channelPair(new Set<Capability>(), svc);
 		await call("ui.openExternal", ["https://example.com/x"]);
 		expect(opened).toEqual(["https://example.com/x"]);
-		// A javascript: URL never reaches the host service — rejected as invalid_args.
-		try {
-			await call("ui.openExternal", ["javascript:alert(1)"]);
-			throw new Error("expected rejection");
-		} catch (err) {
-			expect((err as PortError).code).toBe("invalid_args");
+		for (const unsafeUrl of ["javascript:alert(1)", "file:///etc/passwd"]) {
+			try {
+				await call("ui.openExternal", [unsafeUrl]);
+				throw new Error("expected rejection");
+			} catch (err) {
+				expect(err).toMatchObject({ code: "invalid_args" });
+			}
 		}
 		expect(opened).toEqual(["https://example.com/x"]);
 		close();
@@ -333,7 +353,8 @@ describe("window.openai parity methods", () => {
 	it("file methods reject cleanly (not the unknown-method deny)", async () => {
 		const svc: HostServices = {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 		};
 		const { call, close } = channelPair(LOCAL_CAPS, svc);
 		try {
@@ -342,15 +363,19 @@ describe("window.openai parity methods", () => {
 		} catch (err) {
 			// A KNOWN-but-unimplemented method → structured server_error with a clear
 			// message, NOT the unknown-method CapabilityError.
-			expect((err as PortError).code).toBe("server_error");
-			expect((err as Error).message).toMatch(/not available/);
+			expect(err).toMatchObject({ code: "server_error" });
+			expect(err).toMatchObject({
+				message: expect.stringMatching(/not available/),
+			});
 		}
 		try {
 			await call("ui.selectFiles", [{}]);
 			throw new Error("expected rejection");
 		} catch (err) {
-			expect((err as PortError).code).toBe("server_error");
-			expect((err as Error).message).toMatch(/not supported/);
+			expect(err).toMatchObject({ code: "server_error" });
+			expect(err).toMatchObject({
+				message: expect.stringMatching(/not supported/),
+			});
 		}
 		close();
 	});
@@ -367,7 +392,8 @@ describe("window.openai parity methods", () => {
 		};
 		const svc: HostServices = {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			uploadFile: () => Promise.resolve(uploaded),
 		};
 		const { call, close } = channelPair(LOCAL_CAPS, svc);

@@ -1,3 +1,10 @@
+import {
+	type DownloadEvent,
+	type DownloadTask,
+	downloadControlResponseSchema,
+	downloadSnapshotResponseSchema,
+} from "@ryuhq/core-client/downloads";
+import { z } from "zod";
 // apps/desktop/src/lib/api/downloads.ts
 //
 // Typed client for Core's global download center (#456). Core owns the lifecycle
@@ -14,97 +21,41 @@
 import { type ApiTarget, request } from "./client.ts";
 import { streamChannel } from "./eventStream.ts";
 
-/** Lifecycle state of a single download (mirrors Core's `DownloadState`). */
-export type DownloadState =
-	| "queued"
-	| "active"
-	| "paused"
-	| "verifying"
-	| "completed"
-	| "failed"
-	| "cancelled";
+export type {
+	DownloadEvent,
+	DownloadKind,
+	DownloadRole,
+	DownloadState,
+	DownloadTask,
+} from "@ryuhq/core-client/downloads";
+export { isInFlight, isTerminal } from "@ryuhq/core-client/downloads";
 
-/** What kind of artifact a download fetches (mirrors Core's `DownloadKind`). */
-export type DownloadKind =
-	| "model"
-	| "engine"
-	| "agent"
-	| "tool"
-	| "skill"
-	| "embedding"
-	| "voice"
-	| "media"
-	| "mcp"
-	| "other";
-
-/**
- * What the artifact *is*, at the granularity a person reads it (mirrors Core's
- * `DownloadRole`). `kind` groups every weight file under `model`/`voice`; this is
- * what the row's type badge is derived from. Optional because a task persisted by
- * an older Core deserializes without one.
- */
-export type DownloadRole =
-	| "engine"
-	| "chat_model"
-	| "embedding_model"
-	| "reranker_model"
-	| "classifier_model"
-	| "vision_adapter"
-	| "draft_model"
-	| "speech_model"
-	| "voice_model"
-	| "image_model"
-	| "video_model"
-	| "agent"
-	| "tool"
-	| "skill"
-	| "plugin"
-	| "mcp_server"
-	| "extract"
-	| "other";
-
-/** One download's full state — the shape served by the snapshot + SSE deltas. */
-export interface DownloadTask {
-	created_at: number;
-	dest_path: string | null;
-	error: string | null;
-	etag?: string | null;
-	id: string;
-	kind: DownloadKind;
-	label: string;
-	received_bytes: number;
-	retryable: boolean;
-	role?: DownloadRole;
-	speed_bps: number | null;
-	state: DownloadState;
-	total_bytes: number | null;
-	updated_at: number;
-	url: string | null;
-}
-
-/** A streamed download event, discriminated by `type`. */
-export type DownloadEvent =
-	| { type: "snapshot"; tasks: DownloadTask[] }
-	| { type: "update"; task: DownloadTask }
-	| { type: "removed"; id: string };
-
-/** Terminal states never make further progress and can be cleared from the UI. */
-export function isTerminal(state: DownloadState): boolean {
-	return state === "completed" || state === "cancelled" || state === "failed";
-}
-
-/** States where the artifact is actively occupying a slot or queued for one. */
-export function isInFlight(state: DownloadState): boolean {
-	return state === "queued" || state === "active" || state === "verifying";
-}
+const downloadTaskSchema = z.custom<
+	NonNullable<
+		z.output<typeof downloadSnapshotResponseSchema>["downloads"]
+	>[number]
+>(
+	(value) =>
+		downloadSnapshotResponseSchema.safeParse({ downloads: [value] }).success
+);
+const downloadEventFields = z.discriminatedUnion("type", [
+	z.object({ type: z.literal("snapshot"), tasks: z.array(downloadTaskSchema) }),
+	z.object({ type: z.literal("update"), task: downloadTaskSchema }),
+	z.object({ type: z.literal("removed"), id: z.string() }),
+]);
+const downloadEventSchema = z.custom<z.output<typeof downloadEventFields>>(
+	(value) => downloadEventFields.safeParse(value).success
+);
 
 /** Fetch the current snapshot (used as a fallback / initial fill). */
 export async function listDownloads(
 	target: ApiTarget
 ): Promise<DownloadTask[]> {
-	const data = await request<{ downloads: DownloadTask[] }>(
+	const data = await request(
 		target,
-		"/api/downloads"
+		"/api/downloads",
+		undefined,
+		downloadSnapshotResponseSchema
 	);
 	return data.downloads ?? [];
 }
@@ -116,9 +67,11 @@ export async function listDownloadHistory(
 	target: ApiTarget
 ): Promise<DownloadTask[]> {
 	try {
-		const data = await request<{ history: DownloadTask[] }>(
+		const data = await request(
 			target,
-			"/api/downloads/history"
+			"/api/downloads/history",
+			undefined,
+			downloadHistorySchema
 		);
 		return data.history ?? [];
 	} catch {
@@ -145,10 +98,33 @@ export interface DownloadSettings {
 	mode: ConcurrencyMode;
 }
 
+const downloadSettingsSchema = z
+	.object({
+		effective_slots: z.number(),
+		env_locked: z.boolean(),
+		manual_slots: z.number(),
+		max_slots: z.number(),
+		measured_bps: z.number(),
+		min_slots: z.number(),
+		mode: z.enum(["auto", "manual"]),
+	})
+	.passthrough();
+const downloadHistorySchema = z
+	.object({ history: z.array(downloadTaskSchema).optional() })
+	.passthrough();
+const clearHistorySchema = z
+	.object({ cleared: z.number(), ok: z.boolean() })
+	.passthrough();
+
 export function getDownloadSettings(
 	target: ApiTarget
 ): Promise<DownloadSettings> {
-	return request<DownloadSettings>(target, "/api/downloads/settings");
+	return request(
+		target,
+		"/api/downloads/settings",
+		undefined,
+		downloadSettingsSchema
+	);
 }
 
 export function setDownloadSettings(
@@ -156,16 +132,38 @@ export function setDownloadSettings(
 	mode: ConcurrencyMode,
 	maxConcurrent?: number
 ): Promise<DownloadSettings> {
-	return request<DownloadSettings>(target, "/api/downloads/settings", {
-		body: { max_concurrent: maxConcurrent, mode },
-		method: "PUT",
-	});
+	return request(
+		target,
+		"/api/downloads/settings",
+		{
+			body: { max_concurrent: maxConcurrent, mode },
+			method: "PUT",
+		},
+		downloadSettingsSchema
+	);
+}
+
+async function acknowledged<T extends { ok: boolean }>(
+	response: Promise<T>
+): Promise<T> {
+	const result = await response;
+	if (!result.ok) {
+		throw new Error("Download action was rejected by Core");
+	}
+	return result;
 }
 
 const control = (id: string, action: string) => (target: ApiTarget) =>
-	request<{ ok: boolean }>(target, `/api/downloads/${id}/${action}`, {
-		method: "POST",
-	});
+	acknowledged(
+		request(
+			target,
+			`/api/downloads/${encodeURIComponent(id)}/${action}`,
+			{
+				method: "POST",
+			},
+			downloadControlResponseSchema
+		)
+	);
 
 export const pauseDownload = (target: ApiTarget, id: string) =>
 	control(id, "pause")(target);
@@ -178,9 +176,16 @@ export const cancelDownload = (target: ApiTarget, id: string) =>
 
 /** Clear (dismiss) a terminal download entry. */
 export const clearDownload = (target: ApiTarget, id: string) =>
-	request<{ ok: boolean }>(target, `/api/downloads/${id}`, {
-		method: "DELETE",
-	});
+	acknowledged(
+		request(
+			target,
+			`/api/downloads/${encodeURIComponent(id)}`,
+			{
+				method: "DELETE",
+			},
+			downloadControlResponseSchema
+		)
+	);
 
 /**
  * Empty the durable finished-downloads log.
@@ -191,9 +196,16 @@ export const clearDownload = (target: ApiTarget, id: string) =>
  * without the other is why "Clear finished" could look like it did nothing.
  */
 export const clearDownloadHistory = (target: ApiTarget) =>
-	request<{ cleared: number; ok: boolean }>(target, "/api/downloads/history", {
-		method: "DELETE",
-	});
+	acknowledged(
+		request(
+			target,
+			"/api/downloads/history",
+			{
+				method: "DELETE",
+			},
+			clearHistorySchema
+		)
+	);
 
 /**
  * Subscribe to download-center events and invoke `onEvent` for each. The first
@@ -206,5 +218,11 @@ export function streamDownloads(
 	onEvent: (event: DownloadEvent) => void,
 	signal?: AbortSignal
 ): Promise<void> {
-	return streamChannel(target, "downloads", onEvent, signal);
+	return streamChannel(
+		target,
+		"downloads",
+		onEvent,
+		signal,
+		downloadEventSchema
+	);
 }

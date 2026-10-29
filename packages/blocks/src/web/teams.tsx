@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Card,
@@ -30,10 +31,13 @@ export interface TeamCardViewProps {
 	error?: string | null;
 	/** Header rename/delete controls; the live page injects its rename dialog + delete button. */
 	headerActions?: ReactNode;
+	/** Header navigation shown to every viewer (e.g. a link to the team's policies). */
+	headerLinks?: ReactNode;
 	loadingMembers?: boolean;
 	members?: TeamMemberRow[];
 	name: string;
 	onRemoveMember?: (userId: string) => void;
+	onRetryMembers?: () => void;
 }
 
 /**
@@ -51,19 +55,38 @@ export function TeamCardView({
 	canManage = false,
 	busy = false,
 	onRemoveMember = noop,
+	onRetryMembers,
 	headerActions,
+	headerLinks,
 	addMemberSlot,
 }: TeamCardViewProps) {
+	const tl = useLiteralMessages();
 	return (
-		<Card>
-			<CardHeader className="flex flex-row items-start justify-between gap-4">
-				<CardTitle className="flex items-center gap-2 text-base">
+		<Card aria-label={tl("{teamName} team", { teamName: name })} role="region">
+			<CardHeader layout="summary">
+				<CardTitle layout="badge-row" variant="default">
 					<Users className="h-4 w-4" /> {name}
 				</CardTitle>
-				{canManage && headerActions}
+				{headerLinks || (canManage && headerActions) ? (
+					<div className="flex items-center gap-1">
+						{headerLinks}
+						{canManage && headerActions}
+					</div>
+				) : null}
 			</CardHeader>
-			<CardContent className="space-y-4">
-				{error && <p className="text-sm text-status-destructive">{error}</p>}
+			<CardContent spacing="relaxed">
+				{error && (
+					<div className="flex flex-wrap items-center justify-between gap-2">
+						<p className="text-sm text-status-destructive" role="alert">
+							{error}
+						</p>
+						{onRetryMembers && (
+							<Button onClick={onRetryMembers} size="sm" variant="outline">
+								Retry loading members
+							</Button>
+						)}
+					</div>
+				)}
 
 				{loadingMembers ? (
 					<Skeleton className="h-10 w-full" />
@@ -113,6 +136,7 @@ export interface TeamsLayoutProps {
 	isEmpty?: boolean;
 	loading?: boolean;
 	noActiveOrg?: boolean;
+	onRetry?: () => void;
 	organizationName?: string;
 }
 
@@ -131,7 +155,9 @@ export function TeamsLayout({
 	noActiveOrg = false,
 	createTeamSlot,
 	children,
+	onRetry,
 }: TeamsLayoutProps) {
+	const tl = useLiteralMessages();
 	if (noActiveOrg) {
 		return (
 			<div className="mx-auto w-full max-w-4xl">
@@ -154,8 +180,11 @@ export function TeamsLayout({
 				<div>
 					<h1 className="font-medium text-2xl">Teams</h1>
 					<p className="text-muted-foreground text-sm">
-						Group members of {organizationName ?? "your organization"} into
-						teams.
+						{organizationName === undefined
+							? "Group members of your organization into teams."
+							: tl("Group members of {organizationName} into teams.", {
+									organizationName,
+								})}
 					</p>
 				</div>
 				{canManage && createTeamSlot}
@@ -167,7 +196,19 @@ export function TeamsLayout({
 				</div>
 			) : null}
 
-			{error && <p className="text-sm text-status-destructive">{error}</p>}
+			{error && (
+				<div
+					className="flex flex-wrap items-center justify-between gap-2"
+					role="alert"
+				>
+					<p className="text-sm text-status-destructive">{error}</p>
+					{onRetry && (
+						<Button onClick={onRetry} size="sm" variant="outline">
+							Reload teams
+						</Button>
+					)}
+				</div>
+			)}
 
 			{loading && (
 				<div className="grid gap-3">

@@ -1,0 +1,16 @@
+/* The app graph imports this module before `index.css` declares Tailwind's
+   cascade layers, so the first `@layer` seen here would fix the global order.
+   Declare Tailwind's full order first; otherwise `utilities` becomes the lowest
+   layer and Preflight's reset erases every padding and margin utility. */
+@layer properties, theme, base, components, utilities;
+
+.markdownText {
+	composes: prose-sm from global;
+}
+
+@layer utilities {
+	.codeText {
+		--tw-leading: 1.55;
+		line-height: 1.55;
+	}
+}

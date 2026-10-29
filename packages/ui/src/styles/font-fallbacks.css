@@ -1,0 +1,24 @@
+/* Metric-matched local fallbacks for the self-hosted variable faces, so the swap
+ * from fallback to web font does not reflow text. Values come from next/font's
+ * getFallbackMetricsFromFontFile on the @fontsource-variable latin wght woff2
+ * files (Arial base); Liberation Sans is metric-compatible with Arial. A device
+ * with none of these faces skips the rule and uses the plain sans-serif that
+ * follows in the font stack. Geist Mono keeps a monospace fallback on purpose:
+ * aligned digits matter more than matched width. */
+@font-face {
+	font-family: "Inter Fallback";
+	src: local("Arial"), local("ArialMT"), local("Liberation Sans");
+	ascent-override: 89.79%;
+	descent-override: 22.36%;
+	line-gap-override: 0%;
+	size-adjust: 107.89%;
+}
+
+@font-face {
+	font-family: "Geist Fallback";
+	src: local("Arial"), local("ArialMT"), local("Liberation Sans");
+	ascent-override: 94.47%;
+	descent-override: 27.73%;
+	line-gap-override: 0%;
+	size-adjust: 106.39%;
+}

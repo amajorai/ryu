@@ -25,11 +25,10 @@
 //! route (loopback probe, returns no data), so Core's pre-auth health check
 //! succeeds — mirroring `ryu-finetune`.
 //!
-//! Port: `RYU_LEARNING_PORT` env, default `8002`. Data dir: resolved via the inlined
-//! `paths::ryu_dir` (`RYU_DIR`-env-first, injected by Core at spawn), so it opens the
-//! SAME `experience.db` the node uses.
-
-mod paths;
+//! Port: `RYU_LEARNING_PORT` env, default `8002`. Data dir: resolved via
+//! `ryu_sidecar_runtime::ryu_dir` (`RYU_DIR`-env-first, injected by Core at spawn,
+//! then the Storage pointer and the profile default), so it opens the SAME
+//! `db/experience.db` the node uses.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -158,8 +157,12 @@ async fn main() -> anyhow::Result<()> {
         "ryu-learning: SCAFFOLDING — the learning loop is welded to Core kernel subsystems and is SERVED IN-PROCESS BY CORE. This sidecar's LearningHost degrades to Err on every welded route until Core exposes broker-back endpoints."
     );
 
-    let ryu_dir = paths::ryu_dir();
+    let ryu_dir = ryu_sidecar_runtime::ryu_dir();
     ryu_learning::init_data_dir(ryu_dir.clone());
+    // `experience.db` seals its texts under the data folder's master key; this
+    // process resolves it like any standalone Ryu tool (`RYU_MASTER_KEY`, or the
+    // file key under `RYU_KEYCHAIN=off`). Without a key the store fails closed.
+    ryu_crypto::install_standalone_host();
 
     let store = ExperienceStore::open_default()?;
     let host: Arc<dyn LearningHost> = Arc::new(SidecarLearningHost);

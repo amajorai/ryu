@@ -58,7 +58,7 @@ const MESSAGES: UIMessage[] = [
 			},
 		],
 		role: "user",
-	} as unknown as UIMessage,
+	},
 	{
 		id: ASSISTANT_MESSAGE_ID,
 		parts: [
@@ -69,7 +69,7 @@ const MESSAGES: UIMessage[] = [
 			...MEMORY_PARTS,
 		],
 		role: "assistant",
-	} as unknown as UIMessage,
+	},
 ];
 
 function MemoryCitationsProof() {
@@ -84,7 +84,7 @@ function MemoryCitationsProof() {
 		>
 			<div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
 				<header className="space-y-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						@RYU/MEMORY · DESKTOP CHAT
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">

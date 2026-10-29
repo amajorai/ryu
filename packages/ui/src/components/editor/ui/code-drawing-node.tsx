@@ -29,6 +29,8 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/editor/ui/select.tsx";
 import { useIsMobile } from "@ryu/ui/hooks/use-mobile.ts";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import debounce from "lodash/debounce.js";
 import { DownloadIcon, Trash2 } from "lucide-react";
 import type { PlateElementProps } from "platejs/react";
@@ -41,6 +43,7 @@ import {
 	useReadOnly,
 	useSelected,
 } from "platejs/react";
+import type { CSSProperties as ReactCSSProperties } from "react";
 import {
 	type ChangeEvent,
 	type Dispatch,
@@ -52,6 +55,13 @@ import {
 	useRef,
 	useState,
 } from "react";
+import editorStyles from "../editor-lint.module.css";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editorcodeDrawingNode1-min-height"?: string | number;
+	"--editorcodeDrawingNode2-min-height"?: string | number;
+	"--editorcodeDrawingNode3-min-height"?: string | number;
+}
 
 function createDebouncedCodeDrawingRenderer(
 	setImage: Dispatch<SetStateAction<string>>,
@@ -61,7 +71,10 @@ function createDebouncedCodeDrawingRenderer(
 	let lastRequestId = 0;
 
 	return debounce(
-		async (code: string | undefined, drawingType: string | undefined) => {
+		async (
+			code: string | undefined,
+			drawingType: CodeDrawingType | undefined
+		) => {
 			lastRequestId += 1;
 			const requestId = lastRequestId;
 
@@ -76,10 +89,7 @@ function createDebouncedCodeDrawingRenderer(
 			setError(null);
 
 			try {
-				const imageData = await renderCodeDrawing(
-					drawingType as CodeDrawingType,
-					code
-				);
+				const imageData = await renderCodeDrawing(drawingType, code);
 
 				if (lastRequestId === requestId) {
 					setImage(imageData);
@@ -329,12 +339,20 @@ function CodeDrawingPreview({
 		/>
 	);
 
+	const editorcodeDrawingNode1Style: EditorVariableStyle = {
+		"--editorcodeDrawingNode1-min-height": isNativeNumber(
+			`${DEFAULT_MIN_HEIGHT}px`
+		)
+			? `${`${DEFAULT_MIN_HEIGHT}px`}px`
+			: `${DEFAULT_MIN_HEIGHT}px`,
+	};
 	return (
 		<div
-			className={`flex ${isMobile ? "flex-col-reverse" : "flex-col"} group my-4 w-full items-stretch border bg-muted/50 md:flex-row`}
-			style={{
-				minHeight: `${DEFAULT_MIN_HEIGHT}px`,
-			}}
+			className={cn(
+				`flex ${isMobile ? "flex-col-reverse" : "flex-col"} group my-4 w-full items-stretch border bg-muted/50 md:flex-row`,
+				editorStyles.editorcodeDrawingNode1
+			)}
+			style={editorcodeDrawingNode1Style}
 		>
 			{showCode && (
 				<CodeDrawingTextarea
@@ -412,7 +430,7 @@ function CodeDrawingToolbar({
 				>
 					<SelectTrigger
 						className={`h-8 w-[120px] border-0 bg-muted/50 text-xs shadow-none ${
-							isMobile ? "" : "transition-colors hover:bg-zinc-200"
+							isMobile ? "" : "transition-colors hover:bg-input"
 						}`}
 					>
 						<SelectValue />
@@ -436,7 +454,7 @@ function CodeDrawingToolbar({
 				>
 					<SelectTrigger
 						className={`h-8 w-[80px] border-0 bg-muted/50 text-xs shadow-none ${
-							isMobile ? "" : "transition-colors hover:bg-zinc-200"
+							isMobile ? "" : "transition-colors hover:bg-input"
 						}`}
 					>
 						<SelectValue />
@@ -493,6 +511,20 @@ function CodeDrawingTextarea({
 		[onCodeChange]
 	);
 
+	const editorcodeDrawingNode2Style: EditorVariableStyle = {
+		"--editorcodeDrawingNode2-min-height": isNativeNumber(
+			`${DEFAULT_MIN_HEIGHT}px`
+		)
+			? `${`${DEFAULT_MIN_HEIGHT}px`}px`
+			: `${DEFAULT_MIN_HEIGHT}px`,
+	};
+	const editorcodeDrawingNode3Style: EditorVariableStyle = {
+		"--editorcodeDrawingNode3-min-height": isNativeNumber(
+			`${DEFAULT_MIN_HEIGHT}px`
+		)
+			? `${`${DEFAULT_MIN_HEIGHT}px`}px`
+			: `${DEFAULT_MIN_HEIGHT}px`,
+	};
 	return (
 		<div
 			className={`${
@@ -515,20 +547,24 @@ function CodeDrawingTextarea({
 
 			<div className="relative flex-1 rounded-md">
 				<pre
-					className={
-						"m-0 overflow-x-auto p-8 pr-4 font-mono text-sm leading-[normal] [tab-size:2] print:break-inside-avoid"
-					}
-					style={{ minHeight: `${DEFAULT_MIN_HEIGHT}px`, height: "100%" }}
+					className={cn(
+						"m-0 overflow-x-auto p-8 pr-4 font-mono text-sm leading-[normal] [tab-size:2] print:break-inside-avoid",
+						editorStyles.editorcodeDrawingNode2
+					)}
+					style={editorcodeDrawingNode2Style}
 				>
 					<code className="block h-full w-full">
 						<textarea
-							className="m-0 h-full w-full resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-sm outline-none"
+							className={cn(
+								"m-0 h-full w-full resize-none overflow-auto border-0 bg-transparent p-0 font-mono text-sm outline-none",
+								editorStyles.editorcodeDrawingNode3
+							)}
 							onChange={handleChange}
-							placeholder="Enter your code here..."
+							placeholder="Enter your code here…"
 							readOnly={readOnly}
 							ref={textareaRef}
 							spellCheck={false}
-							style={{ minHeight: `${DEFAULT_MIN_HEIGHT}px` }}
+							style={editorcodeDrawingNode3Style}
 							value={internalCode}
 						/>
 					</code>
@@ -583,7 +619,7 @@ function CodeDrawingPreviewArea({
 						"flex flex-1 items-center justify-center rounded-md bg-muted/30 p-4"
 					}
 				>
-					{loading && <div className="text-muted-foreground">Loading...</div>}
+					{loading && <div className="text-muted-foreground">Loading…</div>}
 					{!loading && image && (
 						<img
 							alt="Code drawing"
@@ -593,7 +629,7 @@ function CodeDrawingPreviewArea({
 					)}
 					{!(loading || image) && (
 						<div className="text-muted-foreground">
-							{code.trim() ? "Rendering..." : "Preview will appear here"}
+							{code.trim() ? "Rendering…" : "Preview will appear here"}
 						</div>
 					)}
 				</div>

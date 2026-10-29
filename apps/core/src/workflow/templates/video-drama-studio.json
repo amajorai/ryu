@@ -1,0 +1,249 @@
+{
+  "meta": {
+    "id": "video-drama-studio",
+    "name": "Video Drama Studio",
+    "description": "A full production crew turns one video idea into a finished drama: producer, showrunner, casting, screenwriter and script editor, department heads, first AD, production unit, editor, and executive producer sign-off.",
+    "category": "automation",
+    "pattern": "production-pipeline",
+    "icon": "Clapperboard",
+    "node_count": 13,
+    "tags": [
+      "video",
+      "drama",
+      "screenplay",
+      "director",
+      "editor",
+      "producer",
+      "film-crew"
+    ]
+  },
+  "primary": {
+    "id": "video-drama-studio",
+    "name": "Video Drama Studio",
+    "description": "Pitch → development → writers' room → locked script → departments → production manifest → shoot → edit → sign-off.",
+    "nodes": [
+      {
+        "id": "in",
+        "type": "input",
+        "key": "input"
+      },
+      {
+        "id": "producer",
+        "type": "prompt",
+        "prompt": "You are the Producer of a short-form video drama. A pitch has just landed on your desk. Turn it into a development brief the whole crew will work from.\n\nReturn these sections, in order:\n1. TITLE (working title)\n2. LOGLINE (one sentence: protagonist, goal, obstacle, stakes)\n3. FORMAT: target runtime (default 60-90 seconds unless the pitch says otherwise), aspect ratio (default 9:16 vertical unless the pitch implies landscape), platform, language\n4. AUDIENCE and TONE (with two or three comparable titles)\n5. SCOPE: maximum number of scenes, speaking characters and locations that fit the runtime (keep it small; AI-generated footage favours few locations and consistent characters)\n6. MUST-HAVES and NO-GOES (content, brand or safety constraints from the pitch; avoid depicting real, identifiable people)\n7. RISKS the crew should watch for\n\nMake sensible assumptions where the pitch is silent and list them under ASSUMPTIONS.\n\nPitch:\n{{input}}",
+        "agent_id": null
+      },
+      {
+        "id": "showrunner",
+        "type": "prompt",
+        "prompt": "You are the Showrunner and head writer. Using the Producer's development brief, build the story bible.\n\nReturn:\n1. PREMISE and THEME (what the drama is really about)\n2. CHARACTERS: for each speaking role, name, age, want, need, flaw, and how they change\n3. BEAT SHEET: hook in the first 3 seconds, inciting incident, escalation, midpoint turn, climax, button/ending, each with a target timestamp that fits the runtime\n4. SCENE OUTLINE: numbered scenes with location, time of day, characters, purpose and estimated seconds; the total must match the brief's runtime\n\nRespect every scope limit, must-have and no-go in the brief.\n\nDevelopment brief:\n{{nodes.producer}}",
+        "agent_id": null
+      },
+      {
+        "id": "casting",
+        "type": "prompt",
+        "prompt": "You are the Casting Director. The cast will be generated, so continuity of each character's look and voice across every shot is your job.\n\nFor every character in the story bible, write a CHARACTER LOCK sheet:\n- Name and role\n- Fixed visual description to paste into every image/video generation prompt (apparent age range, build, hair, skin tone, distinguishing features, signature wardrobe and colours). Describe a fictional person; never base anyone on a real, identifiable individual.\n- Voice profile for text-to-speech (gender presentation, age, pitch, pace, accent, emotional baseline)\n- Performance notes (how they move, what they do with their hands, their tell)\n\nKeep descriptions concrete and reusable word-for-word.\n\nStory bible:\n{{nodes.showrunner}}",
+        "agent_id": null
+      },
+      {
+        "id": "writer",
+        "type": "prompt",
+        "prompt": "You are the Screenwriter. Write the first draft of the screenplay.\n\nStart with a PRODUCTION HEADER block that repeats the title, logline, runtime, aspect ratio and the character lock sheets verbatim, so later readers keep the full context. Then write the script in standard screenplay format: numbered scene headings (INT./EXT. LOCATION - TIME), concise visual action lines, character cues, parentheticals only where needed, and dialogue. Mark any voice-over as (V.O.).\n\nRules: hook in the first 3 seconds; show, don't tell; every line of dialogue must earn its seconds; at roughly 1 second per 2-3 spoken words, the script must fit the runtime.\n\nDevelopment brief:\n{{nodes.producer}}\n\nStory bible:\n{{nodes.showrunner}}\n\nCharacter lock sheets:\n{{nodes.casting}}",
+        "agent_id": null
+      },
+      {
+        "id": "writers_room",
+        "type": "while",
+        "expr": "input nonempty",
+        "body_workflow_id": "drama_writers_room_body",
+        "max_iterations": 2
+      },
+      {
+        "id": "lock",
+        "type": "prompt",
+        "prompt": "You are the Script Supervisor. The writers' room has finished revisions. Produce the LOCKED SHOOTING SCRIPT that every department will work from.\n\n- Keep the PRODUCTION HEADER block.\n- Keep scene numbers stable and give each scene an estimated duration in seconds; the total must match the runtime.\n- Add a CONTINUITY NOTES section per scene: wardrobe, props, time of day, character emotional state carried in and out.\n- Do not rewrite the story or dialogue; fix only formatting, timing and continuity errors.\n\nRevised script:\n{{nodes.writers_room}}",
+        "agent_id": null
+      },
+      {
+        "id": "departments",
+        "type": "agent_delegate",
+        "delegates": [
+          {
+            "id": "director",
+            "task": "You are the Director on a short-form video drama.\n\nRead the locked shooting script and write the DIRECTOR'S SHOT LIST. For every scene: the dramatic intention in one line, then numbered shots with shot size, angle, camera movement, blocking, the line or action it covers, the performance note for the actor, and its duration in seconds. Keep shots 2-6 seconds long so each can be generated as a single clip. Totals must match the scene timings.\n\nLocked shooting script:\n{{nodes.lock}}",
+            "agent_id": "ryu",
+            "preset": "summarise"
+          },
+          {
+            "id": "cinematographer",
+            "task": "You are the Director of Photography on a short-form video drama.\n\nRead the locked shooting script and define the LOOK BOOK: overall visual style, colour palette and grade, lighting approach per location and time of day, lens and depth-of-field feel, and texture (film grain, sharpness). Then write a reusable STYLE SUFFIX of one or two sentences that will be appended to every video generation prompt so all shots match.\n\nLocked shooting script:\n{{nodes.lock}}",
+            "agent_id": "ryu",
+            "preset": "summarise"
+          },
+          {
+            "id": "production_designer",
+            "task": "You are the Production Designer on a short-form video drama.\n\nRead the locked shooting script and write the DESIGN PACK: for every location, a fixed set description to reuse in every generation prompt (architecture, set dressing, era, colours, practical lights); a props list per scene; and wardrobe per character per scene that matches the character lock sheets and the continuity notes.\n\nLocked shooting script:\n{{nodes.lock}}",
+            "agent_id": "ryu",
+            "preset": "summarise"
+          },
+          {
+            "id": "sound",
+            "task": "You are the Composer and Sound Designer on a short-form video drama.\n\nRead the locked shooting script and write the SOUND PLAN: the musical identity (genre, instrumentation, tempo, mood arc), a cue sheet with in/out timestamps per scene, ambience and sound effects per scene, and a VOICE CAST list mapping each character's voice profile to the dialogue and V.O. lines they speak, in script order.\n\nLocked shooting script:\n{{nodes.lock}}",
+            "agent_id": "ryu",
+            "preset": "summarise"
+          }
+        ],
+        "caps": null
+      },
+      {
+        "id": "first_ad",
+        "type": "prompt",
+        "prompt": "You are the First Assistant Director. Merge every department's plan into one PRODUCTION MANIFEST the production unit can execute shot by shot without asking questions.\n\nReturn:\n1. PROJECT SETTINGS: title, aspect ratio, resolution, frame rate, runtime\n2. SHOT TABLE, in edit order. For each shot: shot id (scene-shot), duration in seconds, a self-contained video generation prompt (character lock description + location design + action + camera from the shot list + the DP's style suffix), dialogue or V.O. line with speaker and voice profile, sound effects, and music cue\n3. AUDIO TABLE: every dialogue/V.O. line with speaker, voice profile and target timing; every music cue with in/out times and description\n4. CAPTIONS: timed subtitle cues for all spoken lines\n5. A CALL SHEET summary: shot count, total runtime, and anything blocked or ambiguous\n\nLocked shooting script:\n{{nodes.lock}}\n\nDepartment plans (director, cinematographer, production designer, sound):\n{{nodes.departments}}",
+        "agent_id": null
+      },
+      {
+        "id": "production",
+        "type": "agent_delegate",
+        "delegates": [
+          {
+            "id": "production_unit",
+            "task": "You are the Production Unit for a short-form video drama. Execute the production manifest below and generate the raw media.\n\nUse the Ryu Video Studio app if it is installed: create a project with the manifest's project settings, then for each shot request a video generation with its prompt and duration, generate each dialogue/V.O. line with text-to-speech using the matching voice profile, and generate or source each music cue. Reuse the exact character, location and style wording for every shot so the cast stays consistent. Record every asset id.\n\nReturn a PRODUCTION REPORT: the Video Studio project id, a table of shot id -> asset id (or the failure reason), audio line -> asset id, music cue -> asset id, and any shots that need a retake. Only report assets that were actually created. If Video Studio or a generation model is unavailable, say so plainly and return the manifest as an unexecuted shot list instead of claiming any media exists.\n\nProduction manifest:\n{{nodes.first_ad}}",
+            "agent_id": "ryu",
+            "preset": "code_write"
+          }
+        ],
+        "caps": {
+          "max_tokens": 16384,
+          "wall_time_secs": 3600,
+          "max_concurrent": 1
+        }
+      },
+      {
+        "id": "editor",
+        "type": "agent_delegate",
+        "delegates": [
+          {
+            "id": "editor",
+            "task": "You are the Editor. Cut the drama from the production unit's media and deliver the finished video.\n\nIn the same Ryu Video Studio project: place the shots on the timeline in manifest order, trim each to its target duration, lay dialogue and V.O. under the right shots (use J- and L-cuts where they help performance), add the music cues and sound effects at their timestamps, balance loudness so dialogue stays clear, add the timed captions, apply the DP's look consistently, then run the project's readiness/preflight checks and render the final video.\n\nReturn an EDIT REPORT: the render id and output file, the final runtime, the edit decision list (shot order with in/out times), which shots were missing or substituted, and the readiness results. Only report a render that actually completed. If any step could not run, say exactly which one and why, and stop there rather than describing a video that does not exist.\n\nProduction manifest:\n{{nodes.first_ad}}\n\nProduction report:\n{{nodes.production}}",
+            "agent_id": "ryu",
+            "preset": "code_write"
+          }
+        ],
+        "caps": {
+          "max_tokens": 16384,
+          "wall_time_secs": 3600,
+          "max_concurrent": 1
+        }
+      },
+      {
+        "id": "executive_producer",
+        "type": "prompt",
+        "prompt": "You are the Executive Producer giving final sign-off. Review the delivery against the original development brief.\n\nReturn a DELIVERY REPORT:\n1. STATUS: DELIVERED if the editor reports a completed render, otherwise NOT DELIVERED with the blocking step\n2. The render id / output file, final runtime and aspect ratio as reported by the editor (do not invent any)\n3. BRIEF CHECK: logline, runtime, tone, must-haves and no-goes, each marked met / not met / unverified\n4. NOTES FOR THE NEXT CUT: the three highest-impact fixes, each assigned to the department that owns it (writing, casting, directing, camera, design, sound, editing)\n\nDevelopment brief:\n{{nodes.producer}}\n\nEdit report:\n{{nodes.editor}}",
+        "agent_id": null
+      },
+      {
+        "id": "out",
+        "type": "output",
+        "key": "result"
+      }
+    ],
+    "edges": [
+      {
+        "from": "in",
+        "to": "producer"
+      },
+      {
+        "from": "producer",
+        "to": "showrunner"
+      },
+      {
+        "from": "showrunner",
+        "to": "casting"
+      },
+      {
+        "from": "casting",
+        "to": "writer"
+      },
+      {
+        "from": "writer",
+        "to": "writers_room"
+      },
+      {
+        "from": "writers_room",
+        "to": "lock"
+      },
+      {
+        "from": "lock",
+        "to": "departments"
+      },
+      {
+        "from": "departments",
+        "to": "first_ad"
+      },
+      {
+        "from": "first_ad",
+        "to": "production"
+      },
+      {
+        "from": "production",
+        "to": "editor"
+      },
+      {
+        "from": "editor",
+        "to": "executive_producer"
+      },
+      {
+        "from": "executive_producer",
+        "to": "out"
+      }
+    ]
+  },
+  "bodies": [
+    [
+      "drama_writers_room_body",
+      {
+        "id": "drama_writers_room_body",
+        "name": "Writers' room pass",
+        "description": "The script editor gives notes on the current draft, then the screenwriter revises it; the revised script is the next carry.",
+        "nodes": [
+          {
+            "id": "rin",
+            "type": "input",
+            "key": "input"
+          },
+          {
+            "id": "script_editor",
+            "type": "prompt",
+            "prompt": "You are the Script Editor in the writers' room. Give the screenwriter notes on this draft. Do not rewrite it.\n\nReturn numbered notes, most important first, covering: is the hook landing in the first 3 seconds; is every scene turning; are the characters' wants clear and do they stay consistent with their lock sheets; dialogue that is on-the-nose, redundant or too long for the runtime; pacing against the target runtime (estimate the current runtime at 2-3 spoken words per second); and anything that breaks the production header's constraints. Mark each note MUST or SHOULD.\n\nDraft:\n{{input}}",
+            "agent_id": null
+          },
+          {
+            "id": "revise",
+            "type": "prompt",
+            "prompt": "You are the Screenwriter. Revise your script to address every MUST note and as many SHOULD notes as improve it. Keep the PRODUCTION HEADER block verbatim and keep standard screenplay format. Return ONLY the complete revised script, with no commentary.\n\nScript editor's notes:\n{{nodes.script_editor}}\n\nCurrent draft:\n{{nodes.rin}}",
+            "agent_id": null
+          },
+          {
+            "id": "rout",
+            "type": "output",
+            "key": "result"
+          }
+        ],
+        "edges": [
+          {
+            "from": "rin",
+            "to": "script_editor"
+          },
+          {
+            "from": "script_editor",
+            "to": "revise"
+          },
+          {
+            "from": "revise",
+            "to": "rout"
+          }
+        ]
+      }
+    ]
+  ]
+}

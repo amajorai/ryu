@@ -11,7 +11,9 @@ const { extractSubagents, subagentTaskTitle } = await import(
 	"@/src/components/panels/CoworkContextPanel.tsx"
 );
 
-function assistantMessage(parts: Record<string, unknown>[]) {
+function assistantMessage(
+	parts: NonNullable<Parameters<typeof extractSubagents>[0][number]["parts"]>
+) {
 	return { role: "assistant", parts };
 }
 

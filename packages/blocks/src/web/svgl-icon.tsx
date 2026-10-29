@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
 
 export type SvglSpec = string | { light: string; dark: string };
@@ -19,7 +20,7 @@ export function SvglIcon({
 	className?: string;
 	size?: number;
 }) {
-	if (typeof spec === "string") {
+	if (isNativeText(spec)) {
 		return (
 			<img
 				alt={alt}

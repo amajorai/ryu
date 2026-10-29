@@ -3,6 +3,7 @@ import {
 	businessEmailDecision,
 	businessEmailDomainDecision,
 	businessEmailMessage,
+	memberRoleChangeRefusal,
 } from "./organization-email-policy.ts";
 
 describe("Teams business-email policy", () => {
@@ -56,5 +57,42 @@ describe("Teams business-email policy", () => {
 				}
 			).reason
 		).toBe("domain_not_allowed");
+	});
+});
+
+describe("member role change admission for demotions", () => {
+	it("never refuses a change that grants no new permission", () => {
+		expect(
+			memberRoleChangeRefusal(
+				{ email: "lead@gmail.com", emailVerified: false },
+				{ grantsPermissions: false }
+			)
+		).toBeNull();
+		expect(
+			memberRoleChangeRefusal(
+				{ email: "lead@gmail.com", emailVerified: false },
+				{ grantsPermissions: true }
+			)
+		).not.toBeNull();
+	});
+});
+
+describe("member role change admission", () => {
+	it("is shared by the Better Auth hook and the Admin API route", () => {
+		expect(
+			memberRoleChangeRefusal({
+				email: "lead@example-corp.com",
+				emailVerified: true,
+			})
+		).toBeNull();
+		expect(
+			memberRoleChangeRefusal({
+				email: "lead@example-corp.com",
+				emailVerified: false,
+			})
+		).toContain("Verify your business email");
+		expect(
+			memberRoleChangeRefusal({ email: "lead@gmail.com", emailVerified: true })
+		).toContain("company email");
 	});
 });

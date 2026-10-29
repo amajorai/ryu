@@ -19,6 +19,13 @@
 // `requires`. Those come back here as "Set this up yourself", which is the whole
 // point: the agent asked, the user decides, in their own editor, on their own
 // accounts.
+//
+// One account setting does travel: the Identity setting ("Acts as you", "Its own
+// identity", "Both"). It names whose accounts the agent works with, never which,
+// and the installed agent starts with no account limit, exactly like an agent the
+// user creates. So the detail shows the mode BEFORE install, and the notice says
+// plainly that an "Acts as you" or "Both" agent can use the user's connected
+// accounts until they limit it under Account access.
 
 import {
 	Alert01Icon,
@@ -48,12 +55,35 @@ import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { useQuery } from "@tanstack/react-query";
 import { AgentBadgeCard } from "@/src/components/agents/AgentBadgeCard.tsx";
-import type { AgentInstallDisclosure } from "@/src/lib/api/agents.ts";
+import { AGENT_IDENTITY_MODE_OPTIONS } from "@/src/components/agents/AgentIdentityModePicker.tsx";
+import type {
+	AgentIdentityMode,
+	AgentInstallDisclosure,
+} from "@/src/lib/api/agents.ts";
 import {
 	fetchDetail,
 	formatPricingLabel,
 	type MarketplaceCard,
 } from "@/src/lib/api/marketplace.ts";
+
+/**
+ * The trust notice above the install control. Its account sentence follows the
+ * mode the agent arrives with; `null` (a listing that does not report one) gets
+ * the sentence that holds for every mode.
+ */
+export function communityAgentNotice(mode: AgentIdentityMode | null): string {
+	const lead =
+		"Written by another user, not by Ryu. Adding this Agent Template copies its instructions, model preference and Identity setting into a new agent of your own. It gets none of your credentials, Spaces or Composio actions.";
+	if (mode === "individual") {
+		return `${lead} Set to Its own identity, it works with accounts of its own and never uses yours.`;
+	}
+	const limit =
+		"You can limit which of your accounts it may use under Account access after adding it.";
+	if (mode === "managed" || mode === "mixed") {
+		return `${lead} Set to ${AGENT_IDENTITY_MODE_OPTIONS[mode].title}, it can use your connected accounts like an agent you create. ${limit}`;
+	}
+	return `${lead} ${limit}`;
+}
 
 /** Readable label for a listing's provenance verdict. */
 function verificationLabel(card: MarketplaceCard): string | null {
@@ -152,7 +182,7 @@ export function CommunityAgentsShelf({
 			<StoreShelfHeading
 				action={
 					loading && agents.length === 0 ? (
-						<Spinner className="size-3.5 text-muted-foreground" />
+						<Spinner className="size-3.5" />
 					) : null
 				}
 				className="mb-3"
@@ -181,7 +211,7 @@ export function CommunityAgentsShelf({
 								contextMenu={contextMenu}
 								employeeId={card.id}
 								footer={
-									<Badge className="font-normal" variant="outline">
+									<Badge typography="normal" variant="outline">
 										{card.author ?? "Community"}
 									</Badge>
 								}
@@ -222,7 +252,7 @@ function RequiresRow({ label, values }: { label: string; values: string[] }) {
 			<span className="font-medium text-xs">{label}</span>
 			<div className="flex flex-wrap gap-1">
 				{values.map((value) => (
-					<Badge className="font-normal" key={value} variant="outline">
+					<Badge key={value} typography="normal" variant="outline">
 						{value}
 					</Badge>
 				))}
@@ -234,8 +264,14 @@ function RequiresRow({ label, values }: { label: string; values: string[] }) {
 export interface CommunityAgentDetailProps {
 	busy: boolean;
 	card: MarketplaceCard;
+	/** The Identity setting of the agent this listing was installed as, read
+	 *  from the created record. Null until it is installed in this session. */
+	installedIdentityMode?: AgentIdentityMode | null;
 	onBuy: () => void;
 	onInstall: () => void;
+	/** Open the installed agent's editor at Account access. Omitted by hosts
+	 *  that cannot open a tab, which then show no link. */
+	onOpenAccountAccess?: () => void;
 	/** How many publisher Space bindings were dropped on that install. */
 	requestedSpaceCount: number;
 	/** What Core stripped when this listing was installed, or null if it has not
@@ -246,8 +282,10 @@ export interface CommunityAgentDetailProps {
 export function CommunityAgentDetail({
 	busy,
 	card,
+	installedIdentityMode = null,
 	onBuy,
 	onInstall,
+	onOpenAccountAccess,
 	requires,
 	requestedSpaceCount,
 }: CommunityAgentDetailProps) {
@@ -261,6 +299,15 @@ export function CommunityAgentDetail({
 	const detail = detailQuery.data ?? null;
 	const verification = verificationLabel(card);
 	const description = detail?.description ?? card.description;
+	// What the agent really got wins once installed; before that, the listing.
+	const identityMode =
+		installedIdentityMode ??
+		requires?.identityMode ??
+		detail?.identityMode ??
+		null;
+	const identityLabel = identityMode
+		? AGENT_IDENTITY_MODE_OPTIONS[identityMode].title
+		: null;
 
 	return (
 		<ListingDetailShell
@@ -287,6 +334,7 @@ export function CommunityAgentDetail({
 									</span>
 								),
 							},
+							{ label: "Identity", value: identityLabel ?? "Not stated" },
 							{ label: "Provenance", value: verification ?? "Unknown" },
 							{
 								label: "Reviews",
@@ -321,11 +369,7 @@ export function CommunityAgentDetail({
 						icon={Alert01Icon}
 					/>
 					<p className="text-muted-foreground">
-						Written by another user, not by Ryu. Adding this Agent Template
-						copies its instructions and model preference into a new agent of
-						your own. It never gains your credentials, your Spaces, or your
-						connected accounts — anything it needs, you grant yourself
-						afterwards.
+						{communityAgentNotice(identityMode)}
 					</p>
 				</div>
 			}
@@ -352,11 +396,28 @@ export function CommunityAgentDetail({
 				</p>
 			</ListingSection>
 
+			{identityMode ? (
+				<ListingSection title="Identity">
+					<div className="flex items-start gap-3">
+						<HugeiconsIcon
+							className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+							icon={AGENT_IDENTITY_MODE_OPTIONS[identityMode].icon}
+						/>
+						<div className="flex flex-col gap-0.5">
+							<span className="font-medium text-sm">{identityLabel}</span>
+							<p className="text-muted-foreground text-sm">
+								{AGENT_IDENTITY_MODE_OPTIONS[identityMode].description}
+							</p>
+						</div>
+					</div>
+				</ListingSection>
+			) : null}
+
 			{detail && detail.capabilities.length > 0 ? (
 				<ListingSection title="What it expects to use">
 					<div className="flex flex-wrap gap-1">
 						{detail.capabilities.map((capability) => (
-							<Badge className="font-normal" key={capability} variant="outline">
+							<Badge key={capability} typography="normal" variant="outline">
 								{capability}
 							</Badge>
 						))}
@@ -384,6 +445,18 @@ export function CommunityAgentDetail({
 						The agent is installed. These are the things it asked for that an
 						install cannot grant — open the agent to decide on each one.
 					</p>
+					{onOpenAccountAccess ? (
+						<div className="mt-3 flex flex-col items-start gap-2">
+							<p className="text-muted-foreground text-xs">
+								{identityMode === "individual"
+									? "Connect accounts of its own under Account access."
+									: "It can use your connected accounts until you limit which ones under Account access."}
+							</p>
+							<Button onClick={onOpenAccountAccess} size="sm" variant="outline">
+								Choose account access
+							</Button>
+						</div>
+					) : null}
 					<div className="mt-3 flex flex-col gap-3">
 						<RequiresRow label="Tools it expects" values={requires.tools} />
 						<RequiresRow

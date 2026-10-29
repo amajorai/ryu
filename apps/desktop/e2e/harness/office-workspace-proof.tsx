@@ -7,8 +7,8 @@ import {
 import { workbookToBytes } from "@office-kit/xlsx/io";
 import { addWorksheet, createWorkbook } from "@office-kit/xlsx/workbook";
 import { setCell } from "@office-kit/xlsx/worksheet";
-import { ChannelsView } from "@ryu/blocks/desktop/channels";
-import { Button } from "@ryu/ui/components/button";
+import { ChannelsView } from "@ryu/blocks/desktop/channels.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	FileSpreadsheet,
 	FileText,
@@ -69,14 +69,14 @@ async function makeSpreadsheet(): Promise<ArrayBuffer> {
 function StaticFilePreview({ kind }: { kind: "docx" | "pdf" }) {
 	return (
 		<div className="grid h-full place-items-center overflow-auto bg-muted/30 p-10">
-			<article className="min-h-[620px] w-full max-w-[780px] rounded-sm bg-white p-16 text-zinc-900 shadow-2xl">
-				<p className="text-xs text-zinc-500 uppercase tracking-[0.2em]">
+			<article className="min-h-[620px] w-full max-w-[780px] rounded-sm bg-space-paper p-16 text-space-paper-foreground shadow-2xl">
+				<p className="text-space-paper-foreground/60 text-xs uppercase tracking-section">
 					{kind === "pdf" ? "PDF viewer" : "Word document editor"}
 				</p>
 				<h1 className="mt-8 font-semibold text-4xl tracking-tight">
 					{kind === "pdf" ? "Workspace policy" : "Project proposal"}
 				</h1>
-				<p className="mt-6 text-base text-zinc-600 leading-7">
+				<p className="mt-6 text-base text-space-paper-foreground/75 leading-7">
 					Files stay inside their Space and open beside chats, apps and other
 					work. PDFs render as documents; Word files use the native rich-text
 					editor and save back to the same Space.
@@ -88,10 +88,12 @@ function StaticFilePreview({ kind }: { kind: "docx" | "pdf" }) {
 						"Save explicitly to the Space",
 					].map((item, index) => (
 						<div
-							className="flex gap-4 border-zinc-200 border-t py-4"
+							className="flex gap-4 border-space-paper-border border-t py-4"
 							key={item}
 						>
-							<span className="text-sm text-zinc-400">0{index + 1}</span>
+							<span className="text-sm text-space-paper-foreground/60">
+								0{index + 1}
+							</span>
 							<span className="font-medium">{item}</span>
 						</div>
 					))}
@@ -138,9 +140,9 @@ function OfficeWorkspaceProof() {
 			className="dark h-screen overflow-hidden bg-background text-foreground"
 			data-testid="office-workspace-proof"
 		>
-			<header className="flex h-12 items-end border-white/10 border-b bg-[#111113] px-2">
+			<header className="flex h-12 items-end border-white/10 border-b bg-background px-2">
 				<div className="mr-3 mb-1 flex h-8 items-center gap-2 rounded-lg px-2 text-muted-foreground text-xs">
-					<span className="grid size-5 place-items-center rounded-md bg-violet-500/20 text-violet-300">
+					<span className="grid size-5 place-items-center rounded-md bg-primary/20 text-primary">
 						R
 					</span>
 					Workspace

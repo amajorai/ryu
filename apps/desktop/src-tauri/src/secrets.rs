@@ -17,6 +17,9 @@
 //   - No cross-device sync — keys stay on this machine.  Cloud sync is a future concern.
 
 use keyring::Entry;
+use tauri::Emitter as _;
+
+use crate::desktop_seal::{self, DesktopSecret};
 
 const SERVICE: &str = "ryu";
 
@@ -79,6 +82,71 @@ pub async fn delete_provider_key(provider: String) -> Result<(), String> {
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+// ── Desktop-owned sealed secrets ─────────────────────────────────────────────
+//
+// The webview's auth vault (every signed-in account's bearer token) and the
+// license key. They used to sit in plaintext in the webview's localStorage and in
+// tauri-plugin-store JSON files (`auth.bin`, `entitlement.bin`). They now live
+// sealed (`enc:v1:`, the desktop's own keychain-held key) in one file per slot
+// under the data dir's `secrets/`; see `desktop_seal.rs`. The webview keeps the
+// opened values in memory only.
+
+/// Event every window receives after a slot changes, so each one reloads its
+/// in-memory copy (this replaces the cross-window `storage` event localStorage
+/// used to provide). The payload is the slot name only, never the value.
+pub const DESKTOP_SECRET_CHANGED_EVENT: &str = "desktop-secret-changed";
+
+/// Serializes slot reads and writes across windows.
+static DESKTOP_SECRET_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn with_secret_slot<T>(
+    name: &str,
+    operation: impl FnOnce(&std::path::Path) -> Result<T, String>,
+) -> Result<T, String> {
+    let slot = DesktopSecret::parse(name)?;
+    let _guard = DESKTOP_SECRET_LOCK
+        .lock()
+        .map_err(|_| "Desktop secret lock is unavailable".to_owned())?;
+    operation(&slot.path(&crate::profile::ryu_home_dir()))
+}
+
+/// Read one sealed desktop slot. `None` when nothing is stored.
+#[tauri::command]
+pub async fn desktop_secret_get(name: String) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || with_secret_slot(&name, desktop_seal::read_secret_file))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// Seal and store one desktop slot. Fails closed without a key: nothing is
+/// written in plaintext.
+#[tauri::command]
+pub async fn desktop_secret_set(
+    app: tauri::AppHandle,
+    name: String,
+    value: String,
+) -> Result<(), String> {
+    let slot = DesktopSecret::parse(&name)?;
+    tokio::task::spawn_blocking(move || {
+        with_secret_slot(&name, |path| desktop_seal::write_secret_file(path, &value))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let _ = app.emit(DESKTOP_SECRET_CHANGED_EVENT, slot.name());
+    Ok(())
+}
+
+/// Delete one desktop slot. Idempotent.
+#[tauri::command]
+pub async fn desktop_secret_delete(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let slot = DesktopSecret::parse(&name)?;
+    tokio::task::spawn_blocking(move || with_secret_slot(&name, desktop_seal::delete_secret_file))
+        .await
+        .map_err(|error| error.to_string())??;
+    let _ = app.emit(DESKTOP_SECRET_CHANGED_EVENT, slot.name());
+    Ok(())
 }
 
 #[cfg(test)]

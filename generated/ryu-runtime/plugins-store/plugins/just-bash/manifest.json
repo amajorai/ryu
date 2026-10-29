@@ -1,0 +1,73 @@
+{
+  "tags": ["shell", "bash", "sandbox", "cli", "local"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/just-bash",
+  "homepage": "https://github.com/vercel-labs/just-bash",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "license": "Apache-2.0",
+  "id": "@ryu/just-bash",
+  "name": "just-bash",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "A simulated bash shell for agents, powered by Vercel Labs' just-bash CLI and exposed as a Ryu command tool. Scripts run against a read-only view of a workspace folder: pipes, grep, sed, awk, jq, find and other common commands work, writes stay in memory and are discarded after the call, and there is no network access. No Docker or container runtime needed. BYO install; no API key.",
+  "icon": "computer-terminal-01",
+  "iconDither": { "from": 200, "to": "transparent", "direction": "down" },
+  "tagline": "Sandboxed bash over your workspace, no Docker needed",
+  "keywords": ["bash", "shell", "sandbox", "grep", "jq", "awk"],
+  "category": "Developer Tools",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-just-bash-run",
+      "name": "just-bash Run",
+      "kind": "tool",
+      "config": {
+        "slug": "just-bash.run",
+        "backend": "command",
+        "bin": "just-bash",
+        "command_args": [
+          "--json",
+          "--allow-write",
+          "--root",
+          "{path}",
+          "-c",
+          "{script}"
+        ],
+        "timeout_secs": 60,
+        "output": "json",
+        "description": "Run a bash script in a simulated shell over a read-only view of a workspace folder, mounted at the working directory /home/user/project. Supports pipes, redirection, loops, functions and common commands (ls, cat, find, grep, rg, sed, awk, jq, yq, sort, uniq, wc, head, tail, diff, tar, gzip, sqlite3). Files written during the call exist only in memory and are gone afterwards; the real workspace is never modified. There is no network, no python, and no host binaries such as git or node. Returns JSON with stdout, stderr and exitCode. Output beyond about 1 MiB in total is cut and returned as raw text with truncated set to true, so pipe large output through head or tail.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "script": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192,
+              "description": "The bash script to run, for example `find . -name '*.json' | xargs jq -r .name | sort | uniq -c`. Shell state (variables, functions, cwd) does not persist between calls. Core limits the script to 8192 bytes of UTF-8, so non-ASCII text (CJK, emoji) fits fewer than 8192 characters."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Existing directory inside the active Ryu workspace to mount read-only as the shell's working directory. Use `.` for the workspace root. Relative paths resolve from that workspace; absolute paths must still stay inside it."
+            }
+          },
+          "required": ["script", "path"]
+        },
+        "workspace_path_args": ["path"]
+      }
+    }
+  ],
+  "permission_grants": ["tool:command:just-bash"]
+}

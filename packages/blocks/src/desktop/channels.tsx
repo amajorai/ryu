@@ -1,4 +1,9 @@
 "use client";
+import {
+	isNativeBoolean,
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 
 // Presentational layer of the desktop Channels page. The live app
 // (`apps/desktop/src/pages/ChannelsPage.tsx`) is a thin container that loads
@@ -32,7 +37,9 @@ import {
 import { Spinner } from "@ryu/ui/components/spinner";
 import { Switch } from "@ryu/ui/components/switch";
 import { Textarea } from "@ryu/ui/components/textarea";
-import { useCallback, useEffect, useState } from "react";
+import type { AppRequestValue } from "@ryuhq/core-client/app-request-json.ts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
 
 // ── Channel type model (mirrors apps/desktop/src/lib/api/channels.ts) ─────────
 
@@ -45,17 +52,23 @@ export const CHANNEL_TYPES = [
 	"bluebubbles",
 ] as const;
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
+const channelTypeInputSchema = z.enum(
+	CHANNEL_TYPES
+) satisfies z.ZodType<ChannelType>;
 
 // When the bot replies inside a group/multi-user chat (DMs always reply).
 // Mirrors GROUP_REPLY_MODES in packages/db/src/models/channel.model.ts.
 export const GROUP_REPLY_MODES = ["mentions", "all"] as const;
 export type GroupReplyMode = (typeof GROUP_REPLY_MODES)[number];
+const groupReplyModeInputSchema = z.enum(
+	GROUP_REPLY_MODES
+) satisfies z.ZodType<GroupReplyMode>;
 export const DEFAULT_GROUP_REPLY_MODE: GroupReplyMode = "mentions";
 
-export const GROUP_REPLY_LABELS: Record<GroupReplyMode, string> = {
+export const GROUP_REPLY_LABELS = {
 	mentions: "Only when mentioned",
 	all: "Every message",
-};
+} satisfies Record<GroupReplyMode, string>;
 
 // Who may DM the bot, and how a stranger enrols. Mirrors DM_POLICIES in
 // packages/db/src/models/channel.model.ts and the gateway's pairing gate
@@ -67,35 +80,42 @@ export const DM_POLICIES = [
 	"disabled",
 ] as const;
 export type DmPolicy = (typeof DM_POLICIES)[number];
+const dmPolicyInputSchema = z.enum(DM_POLICIES) satisfies z.ZodType<DmPolicy>;
 export const DEFAULT_DM_POLICY: DmPolicy = "pairing";
 
-export const DM_POLICY_LABELS: Record<DmPolicy, string> = {
+export const DM_POLICY_LABELS = {
 	pairing: "Ask me to approve new people",
 	allowlist: "Only people on my list",
 	open: "Anyone (billed to you)",
 	disabled: "Nobody — groups only",
-};
+} satisfies Record<DmPolicy, string>;
 
 export const GROUP_POLICIES = ["allowlist", "open", "disabled"] as const;
 export type GroupPolicy = (typeof GROUP_POLICIES)[number];
+const groupPolicyInputSchema = z.enum(
+	GROUP_POLICIES
+) satisfies z.ZodType<GroupPolicy>;
 export const DEFAULT_GROUP_POLICY: GroupPolicy = "allowlist";
 
-export const GROUP_POLICY_LABELS: Record<GroupPolicy, string> = {
+export const GROUP_POLICY_LABELS = {
 	allowlist: "Only groups on my list",
 	open: "Any group it's added to",
 	disabled: "Never reply in groups",
-};
+} satisfies Record<GroupPolicy, string>;
 
 // When the bot answers with synthesized speech as well as text.
 export const VOICE_REPLY_MODES = ["never", "mirror", "always"] as const;
 export type VoiceReplyMode = (typeof VOICE_REPLY_MODES)[number];
+const voiceReplyModeInputSchema = z.enum(
+	VOICE_REPLY_MODES
+) satisfies z.ZodType<VoiceReplyMode>;
 export const DEFAULT_VOICE_REPLY_MODE: VoiceReplyMode = "never";
 
-export const VOICE_REPLY_LABELS: Record<VoiceReplyMode, string> = {
+export const VOICE_REPLY_LABELS = {
 	never: "Text only",
 	mirror: "Speak back to voice messages",
 	always: "Speak every reply",
-};
+} satisfies Record<VoiceReplyMode, string>;
 
 export interface ReactionLearningSettings {
 	allowGroup: boolean;
@@ -127,7 +147,7 @@ export function defaultReactionLearningSettings(): ReactionLearningSettings {
 //   whatsapp_personal → openwa.rs (openwa_url, openwa_api_key,
 //              openwa_session_id, webhook_url, webhook_secret)
 //   discord  → discord.rs (bot_token; channel ids are optional so DMs work)
-export const REQUIRED_SECRETS: Record<ChannelType, string[]> = {
+export const REQUIRED_SECRETS = {
 	telegram: ["bot_token"],
 	slack: ["app_token", "bot_token"],
 	whatsapp: ["access_token", "phone_number_id", "verify_token", "app_secret"],
@@ -142,19 +162,19 @@ export const REQUIRED_SECRETS: Record<ChannelType, string[]> = {
 	//   bluebubbles → bluebubbles.rs (server_url, password — the adapter bails on
 	//              either being blank, since both are needed for every call)
 	bluebubbles: ["server_url", "password"],
-};
+} satisfies Record<ChannelType, string[]>;
 
 /** Optional per-channel transport settings. These are kept in the same
  * encrypted map so two WhatsApp records can listen on different local routes
  * without turning node-local webhook plumbing into a global setting. */
-export const OPTIONAL_SECRETS: Record<ChannelType, string[]> = {
+export const OPTIONAL_SECRETS = {
 	telegram: ["webhook_secret"],
 	slack: [],
 	whatsapp: ["webhook_bind", "webhook_path", "graph_version"],
 	whatsapp_personal: ["webhook_bind", "webhook_path", "self_chat_only"],
 	discord: ["channel_ids"],
 	bluebubbles: [],
-};
+} satisfies Record<ChannelType, string[]>;
 
 type PlatformOptionKind = "boolean" | "list" | "number" | "text" | "url";
 
@@ -166,9 +186,17 @@ interface PlatformOptionField {
 }
 
 /** Non-secret transport and mention controls stored in platformOptions. */
-export const PLATFORM_OPTION_FIELDS: Partial<
-	Record<ChannelType, PlatformOptionField[]>
-> = {
+/** The complete six-platform authoring port; entries remain optional. */
+export interface PlatformOptionRegistry {
+	bluebubbles?: PlatformOptionField[];
+	discord?: PlatformOptionField[];
+	slack?: PlatformOptionField[];
+	telegram?: PlatformOptionField[];
+	whatsapp?: PlatformOptionField[];
+	whatsapp_personal?: PlatformOptionField[];
+}
+
+export const PLATFORM_OPTION_FIELDS: PlatformOptionRegistry = {
 	telegram: [
 		{
 			key: "webhook_url",
@@ -413,7 +441,30 @@ export const PLATFORM_OPTION_FIELDS: Partial<
 	],
 };
 
-export const SECRET_LABELS: Record<string, string> = {
+/** Authored labels plus the existing mutable extension-key port. */
+export interface ChannelSecretLabels {
+	access_token: string;
+	app_secret: string;
+	app_token: string;
+	bot_token: string;
+	channel_ids: string;
+	graph_version: string;
+	openwa_api_key: string;
+	openwa_session_id: string;
+	openwa_url: string;
+	password: string;
+	phone_number_id: string;
+	self_chat_only: string;
+	server_url: string;
+	verify_token: string;
+	webhook_bind: string;
+	webhook_path: string;
+	webhook_secret: string;
+	webhook_url: string;
+	[secret: string]: string;
+}
+
+export const SECRET_LABELS: ChannelSecretLabels = {
 	bot_token: "Bot token",
 	app_token: "App token",
 	access_token: "Access token",
@@ -434,14 +485,14 @@ export const SECRET_LABELS: Record<string, string> = {
 	password: "BlueBubbles password",
 };
 
-export const CHANNEL_LABELS: Record<ChannelType, string> = {
+export const CHANNEL_LABELS = {
 	telegram: "Telegram",
 	slack: "Slack",
 	whatsapp: "WhatsApp Business (Cloud API)",
 	whatsapp_personal: "WhatsApp Personal",
 	discord: "Discord",
 	bluebubbles: "iMessage (BlueBubbles)",
-};
+} satisfies Record<ChannelType, string>;
 
 /** Per-platform setup guidance shown in the credentials card. */
 interface ChannelSetup {
@@ -463,7 +514,16 @@ const WHATSAPP_WEBHOOK_PATH = "/webhooks/whatsapp";
 const WHATSAPP_PERSONAL_WEBHOOK_BIND = "0.0.0.0:8444";
 const WHATSAPP_PERSONAL_WEBHOOK_PATH = "/webhooks/whatsapp-personal";
 
-export const CHANNEL_SETUP: Record<ChannelType, ChannelSetup> = {
+interface ChannelSetupGuides {
+	bluebubbles: ChannelSetup;
+	discord: ChannelSetup;
+	slack: ChannelSetup;
+	telegram: ChannelSetup;
+	whatsapp: ChannelSetup;
+	whatsapp_personal: ChannelSetup;
+}
+
+export const CHANNEL_SETUP: ChannelSetupGuides = {
 	telegram: {
 		note: "Create a bot with @BotFather and paste its token. No public URL needed — the gateway long-polls Telegram.",
 		secretHelp: {
@@ -562,7 +622,7 @@ export interface ChannelBehaviorSettings {
 	groupPolicy: GroupPolicy;
 	/** Sender ids admitted inside groups. */
 	groupUserAllowlist: string[];
-	/** Add lightweight 👀/✅/❌ reactions around a turn where supported. */
+	/** Show 👀 while a turn runs and ❌ if it fails, where reactions are supported. */
 	lifecycleReactions: boolean;
 	/** Send Ryu's first welcome without waiting for a user message. */
 	proactiveOpening: boolean;
@@ -625,16 +685,7 @@ export function defaultBehaviorSettings(): ChannelBehaviorSettings {
  * rich text; only Discord opens a thread per message; only WhatsApp and
  * iMessage have read receipts.
  */
-export function supportedSettings(channelType: ChannelType): {
-	commandMenu: boolean;
-	profile: boolean;
-	reactionLearning: boolean;
-	readReceipts: boolean;
-	richText: boolean;
-	streaming: boolean;
-	threadReplies: boolean;
-	typing: boolean;
-} {
+export function supportedSettings(channelType: ChannelType) {
 	return {
 		commandMenu: channelType === "telegram",
 		richText: channelType === "telegram" || channelType === "slack",
@@ -669,7 +720,7 @@ export interface ChannelConfigView extends ChannelBehaviorSettings {
 	managedProvisioningState?: "ready" | "awaiting_provider" | null;
 	model: string | null;
 	name: string;
-	platformOptions?: Record<string, unknown>;
+	platformOptions?: Record<string, AppRequestValue>;
 	provisionedServerId?: string | null;
 	/** Credential keys already stored server-side (shown as "set"). */
 	secrets: Record<string, string>;
@@ -710,7 +761,7 @@ export interface ChannelSavePayload extends ChannelBehaviorSettings {
 	groupReplyMode: GroupReplyMode;
 	model: string | null;
 	name: string;
-	platformOptions: Record<string, unknown>;
+	platformOptions: AuthoredPlatformOptionValues;
 	secrets: Record<string, string>;
 	systemPrompt: string | null;
 	teamId: string | null;
@@ -817,20 +868,32 @@ function behaviorFromConfig(
 	};
 }
 
+/** Authored form cells are always strings; option keys follow the mutable
+ * platform field registry and may be extended by a host.
+ */
+interface PlatformOptionInputValues {
+	[key: string]: string;
+}
+
+/** Values produced by the local form parser's four native field kinds. */
+interface AuthoredPlatformOptionValues {
+	[key: string]: string | number | boolean | string[];
+}
+
 function platformOptionInputsFromConfig(
 	channelType: ChannelType,
-	options: Record<string, unknown> | undefined
-): Record<string, string> {
-	const inputs: Record<string, string> = {};
+	options: ChannelConfigView["platformOptions"]
+): PlatformOptionInputValues {
+	const inputs: PlatformOptionInputValues = {};
 	for (const field of PLATFORM_OPTION_FIELDS[channelType] ?? []) {
 		const value = options?.[field.key];
 		if (Array.isArray(value)) {
 			inputs[field.key] = value
-				.filter((entry): entry is string => typeof entry === "string")
+				.filter((entry): entry is string => isNativeText(entry))
 				.join(", ");
-		} else if (typeof value === "string" || typeof value === "number") {
+		} else if (isNativeText(value) || isNativeNumber(value)) {
 			inputs[field.key] = String(value);
-		} else if (typeof value === "boolean") {
+		} else if (isNativeBoolean(value)) {
 			inputs[field.key] = value ? "true" : "false";
 		}
 	}
@@ -839,9 +902,9 @@ function platformOptionInputsFromConfig(
 
 function parsePlatformOptions(
 	channelType: ChannelType,
-	inputs: Record<string, string>
-): Record<string, unknown> {
-	const options: Record<string, unknown> = {};
+	inputs: PlatformOptionInputValues
+): AuthoredPlatformOptionValues {
+	const options: AuthoredPlatformOptionValues = {};
 	for (const field of PLATFORM_OPTION_FIELDS[channelType] ?? []) {
 		const raw = inputs[field.key]?.trim() ?? "";
 		if (!raw) {
@@ -933,15 +996,27 @@ export function ChannelsView({
 	}, [initialSelectedId, initialNew]);
 
 	const selected = channels.find((c) => c.id === selectedId) ?? null;
+	// Hosts often rebuild `channels` inline on every render, so the selected
+	// object's identity is not a reliable "the channel changed" signal. Seed the
+	// form only when the edited channel id (or create mode) changes, or after a
+	// successful save bumps `reseedToken`; read the latest copy through a ref.
+	const selectedKey = selected?.id ?? null;
+	const selectedRef = useRef(selected);
+	const [reseedToken, setReseedToken] = useState(0);
 
 	useEffect(() => {
+		selectedRef.current = selected;
+	});
+
+	useEffect(() => {
+		const current = selectedRef.current;
 		if (isNew) {
 			setForm(emptyForm(initialChannelType));
-		} else if (selected) {
-			setForm(formFromConfig(selected));
+		} else if (current) {
+			setForm(formFromConfig(current));
 		}
 		setFormError(null);
-	}, [selected, isNew, initialChannelType]);
+	}, [selectedKey, isNew, initialChannelType, reseedToken]);
 
 	const openNew = useCallback(() => {
 		setSelectedId(null);
@@ -1027,6 +1102,9 @@ export function ChannelsView({
 		);
 		if (ok) {
 			setIsNew(false);
+			setReseedToken((token) => token + 1);
+		} else if (ok === false) {
+			setFormError("Couldn't save this channel. Please try again.");
 		}
 	}, [form, isNew, selected, requiredKeys, onSave]);
 
@@ -1177,7 +1255,7 @@ export function ChannelsView({
 							onChange={(e) =>
 								setForm((f) => ({
 									...f,
-									channelType: e.target.value as ChannelType,
+									channelType: channelTypeInputSchema.parse(e.target.value),
 									secrets: {},
 									platformOptionInputs: {},
 								}))
@@ -1461,7 +1539,9 @@ export function ChannelsView({
 							onChange={(e) =>
 								setForm((f) => ({
 									...f,
-									groupReplyMode: e.target.value as GroupReplyMode,
+									groupReplyMode: groupReplyModeInputSchema.parse(
+										e.target.value
+									),
 								}))
 							}
 							value={form.groupReplyMode}
@@ -1495,7 +1575,7 @@ export function ChannelsView({
 								onChange={(e) =>
 									setForm((f) => ({
 										...f,
-										dmPolicy: e.target.value as DmPolicy,
+										dmPolicy: dmPolicyInputSchema.parse(e.target.value),
 									}))
 								}
 								value={form.dmPolicy}
@@ -1527,7 +1607,7 @@ export function ChannelsView({
 								onChange={(e) =>
 									setForm((f) => ({
 										...f,
-										groupPolicy: e.target.value as GroupPolicy,
+										groupPolicy: groupPolicyInputSchema.parse(e.target.value),
 									}))
 								}
 								value={form.groupPolicy}
@@ -1870,7 +1950,7 @@ export function ChannelsView({
 								onChange={(e) =>
 									setForm((f) => ({
 										...f,
-										voiceReply: e.target.value as VoiceReplyMode,
+										voiceReply: voiceReplyModeInputSchema.parse(e.target.value),
 									}))
 								}
 								value={form.voiceReply}

@@ -52,6 +52,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -64,8 +65,9 @@ use crate::{
     claim_inbound_delivery, handle_turn_with_delivery, is_token_rejected, pack_thread,
     run_claimed_delivery, scoped_delivery_id, unpack_thread, BotProfile, Channel, ChannelCaps,
     ChannelHost, ChannelRuntime, ChannelTurnOutcome, GroupReplyMode, InboundMessage,
-    TelegramChannelConfig, TokenRejected,
+    InteractiveAction, InteractiveLayout, InteractiveMarkup, TelegramChannelConfig, TokenRejected,
 };
+use ryu_channel_contracts::{decode_callback_data, encode_callback_data};
 
 /// Seconds the Telegram server holds an open `getUpdates` request waiting for
 /// new messages (server-side long poll). Keeps request volume low.
@@ -78,6 +80,12 @@ const ERROR_BACKOFF: Duration = Duration::from_secs(3);
 /// How often the typing indicator is re-asserted. `sendChatAction` expires after
 /// **5 seconds**, so anything slower leaves visible gaps mid-answer.
 const TYPING_INTERVAL: Duration = Duration::from_secs(4);
+
+/// Longest Telegram flood-control wait (`parameters.retry_after`) that one Bot
+/// API call sits out before its single in-place retry. A longer wait fails the
+/// call instead of holding a turn slot for minutes; the delivery ledger and the
+/// provider stay the outer retry.
+const MAX_INLINE_RETRY_AFTER: Duration = Duration::from_secs(30);
 
 /// Marks a conversation key that belongs to a guest query rather than a chat.
 /// `#` (not `:`) so [`unpack_thread`] never mistakes the query id for a topic.
@@ -101,6 +109,24 @@ pub struct TelegramChannel {
 }
 
 impl TelegramChannel {
+    /// `setMessageReaction` with an explicit reaction list (empty clears).
+    async fn set_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        reaction: Value,
+    ) -> anyhow::Result<()> {
+        let (chat, _) = target(chat_id)?;
+        let message_id: i64 = message_id
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid telegram message id: {message_id}"))?;
+        self.call(
+            "setMessageReaction",
+            json!({ "chat_id": chat, "message_id": message_id, "reaction": reaction }),
+        )
+        .await?;
+        Ok(())
+    }
     /// Build an adapter with no liveness reporting (env-configured bots).
     ///
     /// `pairing` is a REQUIRED parameter on BOTH constructors rather than an
@@ -152,23 +178,60 @@ impl TelegramChannel {
     /// POST one Bot API method and return its `result`, treating `ok: false` as
     /// an error even though it arrives with HTTP 200.
     ///
+    /// A flood-control answer (HTTP 429 / `error_code: 429`) whose
+    /// `retry_after` is at most [`MAX_INLINE_RETRY_AFTER`] is waited out and the
+    /// same call retried once (see [`retry_delay`]). Failing instead would make
+    /// the delivery ledger re-run the whole turn sooner than Telegram allows,
+    /// resending every chunk that already went out.
+    ///
     /// # Errors
     /// Returns `Err` on transport failure, a non-2xx, or an `ok: false` envelope
     /// (carrying Telegram's `description`, which is the only useful diagnostic).
     async fn call(&self, method: &str, body: Value) -> anyhow::Result<Value> {
         let url = format!("{}/{method}", self.api_base);
-        let resp = self
-            .runtime
-            .http
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(reqwest::Error::without_url)?
-            .error_for_status()
-            .map_err(reqwest::Error::without_url)?;
-        let envelope: ApiEnvelope = resp.json().await?;
-        if !envelope.ok {
+        let mut waited_for_flood_control = false;
+        loop {
+            let resp = self
+                .runtime
+                .http
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(reqwest::Error::without_url)?;
+            let status = resp.status();
+            // A 429 carries the envelope with `retry_after`; every other non-2xx
+            // keeps failing on its status as before.
+            let resp = if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                resp
+            } else {
+                resp.error_for_status()
+                    .map_err(reqwest::Error::without_url)?
+            };
+            let envelope: ApiEnvelope = match resp.json().await {
+                Ok(envelope) => envelope,
+                // A 429 that is not a Bot API envelope (a proxy page) still
+                // reports its status, as `error_for_status` did before.
+                Err(_) if status == reqwest::StatusCode::TOO_MANY_REQUESTS => {
+                    anyhow::bail!("telegram {method} rate limited (HTTP 429) with no retry_after")
+                }
+                Err(error) => return Err(error.without_url().into()),
+            };
+            if envelope.ok {
+                return Ok(envelope.result.unwrap_or(Value::Null));
+            }
+            if !waited_for_flood_control {
+                if let Some(delay) = retry_delay(status, &envelope) {
+                    warn!(
+                        method,
+                        retry_after_secs = delay.as_secs(),
+                        "telegram flood control; waiting before one retry"
+                    );
+                    waited_for_flood_control = true;
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+            }
             anyhow::bail!(
                 "telegram {method} rejected: {}",
                 envelope
@@ -176,7 +239,6 @@ impl TelegramChannel {
                     .unwrap_or_else(|| "ok=false with no description".to_string())
             );
         }
-        Ok(envelope.result.unwrap_or(Value::Null))
     }
 
     async fn send_text_with_ids(&self, chat_id: &str, text: &str) -> anyhow::Result<Vec<String>> {
@@ -186,10 +248,22 @@ impl TelegramChannel {
             return Ok(Vec::new());
         }
         let (chat, thread) = target(chat_id)?;
+        self.send_plain_chunks(chat, thread, &split_message(text, 4096))
+            .await
+    }
+
+    /// Send already-split chunks as plain `sendMessage` calls, in order, and
+    /// return the message ids Telegram assigned.
+    async fn send_plain_chunks(
+        &self,
+        chat: i64,
+        thread: Option<&str>,
+        chunks: &[String],
+    ) -> anyhow::Result<Vec<String>> {
         let mut ids = Vec::new();
-        for chunk in split_message(text, 4096) {
+        for chunk in chunks {
             let result = self
-                .call("sendMessage", message_payload(chat, thread, &chunk))
+                .call("sendMessage", message_payload(chat, thread, chunk))
                 .await?;
             if let Some(message_id) = result.get("message_id").and_then(Value::as_i64) {
                 ids.push(message_id.to_string());
@@ -207,10 +281,11 @@ impl TelegramChannel {
             return self.send_text_with_ids(chat_id, markdown).await;
         }
         let (chat, thread) = target(chat_id)?;
+        let chunks = split_message(markdown, 4096);
         let mut ids = Vec::new();
-        for chunk in split_message(markdown, 4096) {
+        for (index, chunk) in chunks.iter().enumerate() {
             match self
-                .call("sendRichMessage", rich_payload(chat, thread, &chunk))
+                .call("sendRichMessage", rich_payload(chat, thread, chunk))
                 .await
             {
                 Ok(result) => {
@@ -219,8 +294,18 @@ impl TelegramChannel {
                     }
                 }
                 Err(error) => {
-                    warn!(%error, "telegram sendRichMessage failed; falling back to plain text");
-                    return self.send_text_with_ids(chat_id, markdown).await;
+                    warn!(
+                        %error,
+                        chunk = index,
+                        "telegram sendRichMessage failed; sending the rest as plain text"
+                    );
+                    // Chunks before `index` were already delivered; resending
+                    // the whole reply would show them to the user twice.
+                    let rest = self
+                        .send_plain_chunks(chat, thread, &chunks[index..])
+                        .await?;
+                    ids.extend(rest);
+                    return Ok(ids);
                 }
             }
         }
@@ -265,6 +350,11 @@ impl TelegramChannel {
             .query(&[
                 ("offset", offset.to_string()),
                 ("timeout", LONG_POLL_SECS.to_string()),
+                (
+                    "allowed_updates",
+                    "[\"message\",\"guest_message\",\"message_reaction\",\"callback_query\"]"
+                        .to_owned(),
+                ),
             ])
             // Allow the client a little longer than the server-side long poll.
             .timeout(Duration::from_secs(LONG_POLL_SECS + 10))
@@ -479,6 +569,61 @@ impl TelegramChannel {
             return;
         }
 
+        if let Some(callback) = update.callback_query {
+            let callback_id = callback.id.clone();
+            let channel = Arc::clone(self);
+            tokio::spawn(async move {
+                if let Err(error) = channel
+                    .call(
+                        "answerCallbackQuery",
+                        json!({ "callback_query_id": callback_id }),
+                    )
+                    .await
+                {
+                    debug!(%error, "telegram callback acknowledgement failed");
+                }
+            });
+
+            let Some(data) = callback.data.as_deref() else {
+                complete_claimed_delivery(Arc::clone(self), claimed_delivery_id);
+                return;
+            };
+            let action = match decode_callback_data(data) {
+                Ok(action) => action,
+                Err(error) => {
+                    debug!(%error, "telegram callback data was not issued by Ryu");
+                    complete_claimed_delivery(Arc::clone(self), claimed_delivery_id);
+                    return;
+                }
+            };
+            let Some(message) = callback.message else {
+                // Inline-mode messages have no chat id, so this channel session
+                // cannot safely route them to the originating conversation.
+                complete_claimed_delivery(Arc::clone(self), claimed_delivery_id);
+                return;
+            };
+            let mut action = action;
+            if let Some(label) = callback_button_label(&message, data) {
+                action.label = label;
+            }
+            let thread = thread_of(&message);
+            let inbound = InboundMessage {
+                chat_id: pack_thread(&message.chat.id.to_string(), thread.as_deref()),
+                access_chat_id: is_group_chat(&message.chat.chat_type)
+                    .then(|| message.chat.id.to_string()),
+                text: format!("Selected: {}", action.label),
+                author_name: (!callback.from.first_name.is_empty())
+                    .then_some(callback.from.first_name),
+                sender_id: Some(callback.from.id.to_string()),
+                message_id: (message.message_id != 0).then(|| message.message_id.to_string()),
+                is_group: is_group_chat(&message.chat.chat_type),
+                channel_action: Some(action),
+                ..Default::default()
+            };
+            self.spawn_turn(host, inbound, None, provider_id, claimed_delivery_id);
+            return;
+        }
+
         let Some(message) = update.message else {
             complete_claimed_delivery(Arc::clone(self), claimed_delivery_id);
             return;
@@ -533,6 +678,7 @@ impl TelegramChannel {
             message_id: (message.message_id != 0).then(|| message.message_id.to_string()),
             is_group: is_group_chat(&message.chat.chat_type),
             attachments,
+            channel_action: None,
         };
         self.spawn_turn(host, inbound, draft, provider_id, claimed_delivery_id);
     }
@@ -558,7 +704,7 @@ impl TelegramChannel {
             json!({
                 "url": public_url,
                 "secret_token": secret,
-                "allowed_updates": ["message", "guest_message", "message_reaction"],
+                "allowed_updates": ["message", "guest_message", "message_reaction", "callback_query"],
                 "drop_pending_updates": false,
             }),
         )
@@ -623,6 +769,8 @@ impl Channel for TelegramChannel {
             voice: true,
             attachments: true,
             reactions: true,
+            reply_keyboards: true,
+            inline_buttons: true,
         }
     }
 
@@ -654,12 +802,40 @@ impl Channel for TelegramChannel {
         }
     }
 
+    async fn send_reply_with_markup(
+        &self,
+        chat_id: &str,
+        text: &str,
+        rich_text: bool,
+        markup: Option<&InteractiveMarkup>,
+    ) -> anyhow::Result<Vec<String>> {
+        let Some(markup) = markup else {
+            return self.send_reply(chat_id, text, rich_text).await;
+        };
+        if guest_query_of(chat_id).is_some() {
+            return self.send_reply(chat_id, text, rich_text).await;
+        }
+        let (chat, thread) = target(chat_id)?;
+        let chunks = split_message(text, 4096);
+        let Some((last, preceding)) = chunks.split_last() else {
+            anyhow::bail!("interactive Telegram replies cannot be empty");
+        };
+        let mut ids = self.send_plain_chunks(chat, thread, preceding).await?;
+        let payload = interactive_payload(chat, thread, last, markup)?;
+        let result = self.call("sendMessage", payload).await?;
+        if let Some(message_id) = result.get("message_id").and_then(Value::as_i64) {
+            ids.push(message_id.to_string());
+        }
+        Ok(ids)
+    }
+
     /// Rich-text reply: `sendRichMessage` with `rich_message = { markdown }`.
     ///
     /// Agent replies are already markdown, so this is the cheap correct mapping.
     /// Any rejection — an older Bot API server that has no such method, a chat
-    /// that refuses rich messages — falls back to plain text: the reply matters
-    /// more than its formatting.
+    /// that refuses rich messages — falls back to plain text for the chunk that
+    /// failed and every chunk after it: the reply matters more than its
+    /// formatting, and chunks already delivered are never resent.
     async fn send_rich(&self, chat_id: &str, markdown: &str) -> anyhow::Result<()> {
         self.send_rich_with_ids(chat_id, markdown).await?;
         Ok(())
@@ -758,7 +934,7 @@ impl Channel for TelegramChannel {
             .map_err(reqwest::Error::without_url)?
             .error_for_status()
             .map_err(reqwest::Error::without_url)?;
-        let envelope: ApiEnvelope = resp.json().await?;
+        let envelope: ApiEnvelope = resp.json().await.map_err(reqwest::Error::without_url)?;
         if !envelope.ok {
             anyhow::bail!(
                 "telegram {method} rejected: {}",
@@ -771,24 +947,41 @@ impl Channel for TelegramChannel {
     }
 
     /// Place an emoji reaction (`setMessageReaction`).
+    ///
+    /// Bots may only use Telegram's fixed reaction set, and a bot holds one
+    /// reaction per message, so a new reaction replaces the previous one. An
+    /// emoji outside the set is mapped to its closest allowed form, or skipped.
     async fn react(&self, chat_id: &str, message_id: &str, emoji: &str) -> anyhow::Result<()> {
         if guest_query_of(chat_id).is_some() {
             return Ok(());
         }
-        let (chat, _) = target(chat_id)?;
-        let message_id: i64 = message_id
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid telegram message id: {message_id}"))?;
-        self.call(
-            "setMessageReaction",
-            json!({
-                "chat_id": chat,
-                "message_id": message_id,
-                "reaction": [{ "type": "emoji", "emoji": emoji }],
-            }),
+        let Some(emoji) = telegram_reaction(emoji) else {
+            debug!(
+                channel = "telegram",
+                emoji, "no Telegram bot reaction matches this emoji; skipping"
+            );
+            return Ok(());
+        };
+        self.set_reaction(
+            chat_id,
+            message_id,
+            json!([{ "type": "emoji", "emoji": emoji }]),
         )
-        .await?;
-        Ok(())
+        .await
+    }
+
+    /// Clear this bot's reaction. Telegram keeps one bot reaction per message,
+    /// so clearing is setting an empty list rather than naming the emoji.
+    async fn remove_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        _emoji: &str,
+    ) -> anyhow::Result<()> {
+        if guest_query_of(chat_id).is_some() {
+            return Ok(());
+        }
+        self.set_reaction(chat_id, message_id, json!([])).await
     }
 
     /// No-op: the Bot API has no way for a bot to mark a chat read. Stated
@@ -972,6 +1165,22 @@ struct PendingUpdate {
     delivery_id: String,
 }
 
+/// Constant-time check of the presented `X-Telegram-Bot-Api-Secret-Token`
+/// against the configured webhook secret. Both sides are hashed first so the
+/// comparison always runs over two fixed-width digests: how long a rejection
+/// takes reveals neither how many leading bytes matched nor the secret's
+/// length (the operator chooses it, so unlike a fixed-width token it is not
+/// public).
+fn webhook_secret_matches(expected: &str, presented: &str) -> bool {
+    let expected = Sha256::digest(expected.as_bytes());
+    let presented = Sha256::digest(presented.as_bytes());
+    let mut diff = 0u8;
+    for (x, y) in expected.iter().zip(presented.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 async fn telegram_webhook(
     State(state): State<TelegramWebhookState>,
     headers: HeaderMap,
@@ -981,7 +1190,7 @@ async fn telegram_webhook(
         .get("x-telegram-bot-api-secret-token")
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
-    if presented != state.secret {
+    if !webhook_secret_matches(&state.secret, presented) {
         return StatusCode::UNAUTHORIZED;
     }
     if body.len() > 1024 * 1024 {
@@ -1122,16 +1331,13 @@ fn spawn_reaction_delivery(
                 {
                     Ok(true) => {
                         info!(
-                            chat_id = %target,
                             message_id = reaction.message_id,
-                            user_id = user.id,
                             "telegram reaction recorded as Learning feedback"
                         );
                         ChannelTurnOutcome::Completed
                     }
                     Ok(false) => {
                         debug!(
-                            chat_id = %target,
                             message_id = reaction.message_id,
                             "telegram reaction was not linked to a Core assistant reply"
                         );
@@ -1139,7 +1345,6 @@ fn spawn_reaction_delivery(
                     }
                     Err(error) => {
                         warn!(
-                            chat_id = %target,
                             message_id = reaction.message_id,
                             %error,
                             "telegram reaction feedback failed"
@@ -1225,6 +1430,24 @@ fn is_unauthorized(status: Option<reqwest::StatusCode>, error_code: Option<i64>)
     status == Some(reqwest::StatusCode::UNAUTHORIZED) || error_code == Some(401)
 }
 
+/// How long to wait before retrying a Bot API call that hit flood control, or
+/// `None` when the call must fail now.
+///
+/// Telegram signals flood control as HTTP 429 and/or `error_code: 429`, with
+/// the required wait in `parameters.retry_after` seconds. A wait above
+/// [`MAX_INLINE_RETRY_AFTER`], or a 429 without a wait, is not retried in place.
+/// Pure over the two signals, like [`is_unauthorized`], so the rule is testable
+/// without a Telegram to talk to.
+fn retry_delay(status: reqwest::StatusCode, envelope: &ApiEnvelope) -> Option<Duration> {
+    let flood_control =
+        status == reqwest::StatusCode::TOO_MANY_REQUESTS || envelope.error_code == Some(429);
+    if !flood_control {
+        return None;
+    }
+    let delay = Duration::from_secs(envelope.parameters.as_ref()?.retry_after?);
+    (delay <= MAX_INLINE_RETRY_AFTER).then_some(delay)
+}
+
 /// The guest query id inside a conversation key, if this is a guest turn.
 fn guest_query_of(chat_id: &str) -> Option<&str> {
     chat_id.strip_prefix(GUEST_KEY_PREFIX)
@@ -1262,6 +1485,21 @@ fn thread_of(message: &Message) -> Option<String> {
         .map(|id| format!("{TOPIC_TAG}{id}"))
 }
 
+fn callback_button_label(message: &Message, callback_data: &str) -> Option<String> {
+    message
+        .reply_markup
+        .as_ref()?
+        .get("inline_keyboard")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_array)
+        .flatten()
+        .find(|button| button.get("callback_data").and_then(Value::as_str) == Some(callback_data))
+        .and_then(|button| button.get("text"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
 /// Decode a thread tag into `(message_thread_id, direct_messages_topic_id)`.
 /// An unrecognised or malformed tag yields neither, so a key written by an older
 /// build degrades to "reply in the room" instead of failing the send.
@@ -1296,6 +1534,65 @@ fn message_payload(chat: i64, thread: Option<&str>, text: &str) -> Value {
     obj.insert("text".to_string(), json!(text));
     insert_thread(&mut obj, thread);
     Value::Object(obj)
+}
+
+/// `sendMessage` payload with validated Telegram-native buttons.
+fn interactive_payload(
+    chat: i64,
+    thread: Option<&str>,
+    text: &str,
+    markup: &InteractiveMarkup,
+) -> anyhow::Result<Value> {
+    markup.validate().map_err(anyhow::Error::msg)?;
+    if text.trim().is_empty() || text.chars().count() > 4096 {
+        anyhow::bail!("an interactive Telegram message must contain 1..=4096 characters");
+    }
+
+    let rows = markup
+        .rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|button| match (&markup.layout, &button.action) {
+                    (InteractiveLayout::ReplyKeyboard, InteractiveAction::Reply) => {
+                        Ok(json!({ "text": button.label }))
+                    }
+                    (
+                        InteractiveLayout::Inline,
+                        InteractiveAction::Callback { action_id, payload },
+                    ) => {
+                        let callback_data =
+                            encode_callback_data(&ryu_channel_contracts::ChannelActionEvent {
+                                action_id: action_id.clone(),
+                                label: button.label.clone(),
+                                payload: payload.clone(),
+                            })
+                            .map_err(anyhow::Error::msg)?;
+                        Ok(json!({ "text": button.label, "callback_data": callback_data }))
+                    }
+                    (InteractiveLayout::Inline, InteractiveAction::OpenUrl { url }) => {
+                        Ok(json!({ "text": button.label, "url": url }))
+                    }
+                    _ => anyhow::bail!("button action does not match interactive layout"),
+                })
+                .collect::<anyhow::Result<Vec<_>>>()
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let mut payload = message_payload(chat, thread, text);
+    let object = payload
+        .as_object_mut()
+        .expect("message_payload always returns a JSON object");
+    let reply_markup = match markup.layout {
+        InteractiveLayout::ReplyKeyboard => json!({
+            "keyboard": rows,
+            "resize_keyboard": true,
+            "one_time_keyboard": true,
+        }),
+        InteractiveLayout::Inline => json!({ "inline_keyboard": rows }),
+    };
+    object.insert("reply_markup".to_owned(), reply_markup);
+    Ok(payload)
 }
 
 /// `sendRichMessage` payload. `InputRichMessage` takes EXACTLY ONE of
@@ -1408,6 +1705,7 @@ fn guest_inbound(message: &Message) -> Option<InboundMessage> {
         message_id: None,
         is_group: false,
         attachments: attachments_from(message),
+        channel_action: None,
     })
 }
 
@@ -1590,6 +1888,20 @@ struct ApiEnvelope {
     description: Option<String>,
     #[serde(default)]
     result: Option<Value>,
+    /// Telegram's numeric reason when `ok` is false; `429` is flood control.
+    #[serde(default)]
+    error_code: Option<i64>,
+    /// Extra detail on a failed call, such as the flood-control wait.
+    #[serde(default)]
+    parameters: Option<ResponseParameters>,
+}
+
+/// `ResponseParameters` from a failed Bot API call (only the fields we use).
+#[derive(Debug, Default, Deserialize)]
+struct ResponseParameters {
+    /// Seconds to wait before repeating a call that hit flood control.
+    #[serde(default)]
+    retry_after: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1632,6 +1944,19 @@ struct Update {
     /// has been confirmed.
     #[serde(default)]
     message_reaction: Option<MessageReactionUpdated>,
+    /// Callback button selected from an inline keyboard.
+    #[serde(default)]
+    callback_query: Option<CallbackQuery>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CallbackQuery {
+    id: String,
+    from: TgUser,
+    #[serde(default)]
+    message: Option<Message>,
+    #[serde(default)]
+    data: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Clone)]
@@ -1673,6 +1998,10 @@ struct Message {
     /// Forum topic (or private-chat topic) this message belongs to.
     #[serde(default)]
     message_thread_id: Option<i64>,
+    /// The callback's source keyboard lets us recover a button label when it
+    /// was omitted from compact callback data to stay within Telegram's limit.
+    #[serde(default)]
+    reply_markup: Option<Value>,
     /// Direct-messages topic, a DIFFERENT parameter from `message_thread_id`.
     #[serde(default)]
     direct_messages_topic: Option<DirectMessagesTopic>,
@@ -1727,10 +2056,131 @@ struct TgFile {
     file_size: Option<u64>,
 }
 
+/// Emoji a Telegram bot may react with (`ReactionTypeEmoji`), written without
+/// variation selectors. Anything else is refused by `setMessageReaction`.
+const TELEGRAM_BOT_REACTIONS: &[&str] = &[
+    "👍",
+    "👎",
+    "❤",
+    "🔥",
+    "🥰",
+    "👏",
+    "😁",
+    "🤔",
+    "🤯",
+    "😱",
+    "🤬",
+    "😢",
+    "🎉",
+    "🤩",
+    "🤮",
+    "💩",
+    "🙏",
+    "👌",
+    "🕊",
+    "🤡",
+    "🥱",
+    "🥴",
+    "😍",
+    "🐳",
+    "❤\u{200d}🔥",
+    "🌚",
+    "🌭",
+    "💯",
+    "🤣",
+    "⚡",
+    "🍌",
+    "🏆",
+    "💔",
+    "🤨",
+    "😐",
+    "🍓",
+    "🍾",
+    "💋",
+    "🖕",
+    "😈",
+    "😴",
+    "😭",
+    "🤓",
+    "👻",
+    "👨\u{200d}💻",
+    "👀",
+    "🎃",
+    "🙈",
+    "😇",
+    "😨",
+    "🤝",
+    "✍",
+    "🤗",
+    "🫡",
+    "🎅",
+    "🎄",
+    "☃",
+    "💅",
+    "🤪",
+    "🗿",
+    "🆒",
+    "💘",
+    "🙉",
+    "🦄",
+    "😘",
+    "💊",
+    "🙊",
+    "😎",
+    "👾",
+    "🤷\u{200d}♂",
+    "🤷",
+    "🤷\u{200d}♀",
+    "😡",
+];
+
+/// The Telegram bot reaction for `emoji`: the emoji itself when Telegram allows
+/// it, the nearest allowed one for common emoji it does not, otherwise `None`.
+fn telegram_reaction(emoji: &str) -> Option<&'static str> {
+    let bare: String = emoji.trim().chars().filter(|c| *c != '\u{fe0f}').collect();
+    if let Some(allowed) = TELEGRAM_BOT_REACTIONS
+        .iter()
+        .find(|allowed| **allowed == bare)
+    {
+        return Some(allowed);
+    }
+    let nearest = match bare.as_str() {
+        "✅" | "☑" | "✔" | "🆗" => "👌",
+        "❌" | "✖" | "🚫" => "👎",
+        "😂" | "😆" | "😹" => "🤣",
+        "😄" | "😃" | "😀" | "😊" | "🙂" | "😸" => "😁",
+        "😮" | "😲" | "😯" => "😱",
+        "💖" | "💗" | "💕" | "♥" | "🧡" | "💛" | "💚" | "💙" | "💜" | "🫶" => {
+            "❤"
+        }
+        "🥳" | "🎊" => "🎉",
+        "🙌" => "👏",
+        "🥲" | "😥" | "😞" | "😔" => "😢",
+        "🤞" | "🫂" => "🤗",
+        "💪" | "🚀" => "🔥",
+        "👋" => "🫡",
+        _ => return None,
+    };
+    TELEGRAM_BOT_REACTIONS
+        .iter()
+        .find(|allowed| **allowed == nearest)
+        .copied()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::CommonChannelConfig;
+    use ryu_channel_contracts::ChannelActionEvent;
+
+    struct TestHost;
+
+    #[async_trait]
+    impl ChannelHost for TestHost {
+        async fn run_pipeline(&self, _channel_name: &str, _body: Value) -> anyhow::Result<Value> {
+            Ok(Value::Null)
+        }
+    }
 
     fn make_cfg(token: &str) -> TelegramChannelConfig {
         TelegramChannelConfig {
@@ -1809,6 +2259,63 @@ mod tests {
                 .await
                 .unwrap(),
             crate::pairing::DeliveryClaim::InFlight
+        );
+    }
+
+    #[test]
+    fn webhook_secret_matches_only_the_exact_secret() {
+        assert!(webhook_secret_matches("s3cr3t-Token_9", "s3cr3t-Token_9"));
+        for wrong in [
+            "",
+            "s",
+            "s3cr3t-Token_",
+            "s3cr3t-Token_9x",
+            "s3cr3t-Token_8",
+            "S3CR3T-TOKEN_9",
+            " s3cr3t-Token_9",
+        ] {
+            assert!(
+                !webhook_secret_matches("s3cr3t-Token_9", wrong),
+                "{wrong:?} must not match the configured secret"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn webhook_rejects_a_wrong_or_missing_secret_token() {
+        let channel = Arc::new(
+            TelegramChannel::new(
+                make_cfg("token"),
+                reqwest::Client::new(),
+                PairingStore::ephemeral(),
+            )
+            .unwrap(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+        let state = TelegramWebhookState {
+            tx,
+            secret: "secret".to_string(),
+            channel: Arc::downgrade(&channel),
+        };
+        let body = Bytes::from_static(br#"{"update_id":7}"#);
+
+        assert_eq!(
+            telegram_webhook(State(state.clone()), HeaderMap::new(), body.clone()).await,
+            StatusCode::UNAUTHORIZED,
+            "a request without the header must be refused"
+        );
+        for wrong in ["secre", "secrets", "secreT"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-telegram-bot-api-secret-token", wrong.parse().unwrap());
+            assert_eq!(
+                telegram_webhook(State(state.clone()), headers, body.clone()).await,
+                StatusCode::UNAUTHORIZED,
+                "{wrong:?} must be refused"
+            );
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "a refused request must not enqueue an update"
         );
     }
 
@@ -2124,6 +2631,209 @@ mod tests {
     }
 
     #[test]
+    fn interactive_payloads_render_both_button_layouts() {
+        let reply = InteractiveMarkup {
+            layout: InteractiveLayout::ReplyKeyboard,
+            rows: vec![vec![crate::InteractiveButton {
+                label: "Option 1".to_owned(),
+                action: InteractiveAction::Reply,
+            }]],
+        };
+        let reply_payload = interactive_payload(42, None, "Choose an option", &reply).unwrap();
+        assert_eq!(
+            reply_payload["reply_markup"]["keyboard"][0][0]["text"],
+            "Option 1"
+        );
+        assert_eq!(reply_payload["reply_markup"]["resize_keyboard"], true);
+
+        let inline = InteractiveMarkup {
+            layout: InteractiveLayout::Inline,
+            rows: vec![vec![crate::InteractiveButton {
+                label: "Approve".to_owned(),
+                action: InteractiveAction::Callback {
+                    action_id: "review.approve".to_owned(),
+                    payload: json!({ "requestId": "7" }),
+                },
+            }]],
+        };
+        let inline_payload =
+            interactive_payload(42, Some("t7"), "Review this request", &inline).unwrap();
+        assert_eq!(inline_payload["message_thread_id"], 7);
+        let callback_data = inline_payload["reply_markup"]["inline_keyboard"][0][0]
+            ["callback_data"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            decode_callback_data(callback_data).unwrap(),
+            ChannelActionEvent {
+                action_id: "review.approve".to_owned(),
+                label: "Approve".to_owned(),
+                payload: json!({ "requestId": "7" }),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn callback_update_routes_typed_action_and_sends_returned_buttons() {
+        use crate::pairing::{AccessPolicy, DmPolicy};
+        use axum::extract::Path;
+
+        async fn telegram_api(
+            Path((_token, method)): Path<(String, String)>,
+            State(calls): State<mpsc::UnboundedSender<(String, Value)>>,
+            axum::Json(body): axum::Json<Value>,
+        ) -> axum::Json<Value> {
+            let result = if method == "sendMessage" {
+                json!({ "message_id": 89 })
+            } else {
+                json!(true)
+            };
+            let _ = calls.send((method, body));
+            axum::Json(json!({ "ok": true, "result": result }))
+        }
+
+        let (core_tx, mut core_rx) = mpsc::unbounded_channel();
+        let core_app = Router::new().route(
+            "/api/channels/run",
+            axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                let core_tx = core_tx.clone();
+                async move {
+                    let _ = core_tx.send(body);
+                    axum::Json(json!({
+                        "reply": "Choose what to do next.",
+                        "assistantMessageId": "assistant-1",
+                        "assistantMessageIds": ["assistant-1"],
+                        "interactiveMarkup": {
+                            "layout": "inline",
+                            "rows": [[{
+                                "label": "Continue",
+                                "action": {
+                                    "type": "callback",
+                                    "actionId": "workflow.continue",
+                                    "payload": { "ticketId": "42" }
+                                }
+                            }]]
+                        }
+                    }))
+                }
+            }),
+        );
+        let core_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let core_url = format!("http://{}", core_listener.local_addr().unwrap());
+        let core_server = tokio::spawn(async move {
+            axum::serve(core_listener, core_app).await.unwrap();
+        });
+
+        let (telegram_tx, mut telegram_rx) = mpsc::unbounded_channel();
+        let telegram_app = Router::new()
+            .route("/:token/:method", axum::routing::post(telegram_api))
+            .with_state(telegram_tx);
+        let telegram_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let telegram_base = format!(
+            "http://{}/bot-test",
+            telegram_listener.local_addr().unwrap()
+        );
+        let telegram_server = tokio::spawn(async move {
+            axum::serve(telegram_listener, telegram_app).await.unwrap();
+        });
+
+        let mut config = make_cfg("test-token");
+        config.common.core_url = core_url;
+        config.common.channel_id = Some("channel-test".to_owned());
+        config.common.access = AccessPolicy {
+            dm: DmPolicy::Open,
+            ..Default::default()
+        };
+        config.options.base_url = Some(telegram_base);
+        let channel = Arc::new(
+            TelegramChannel::new(
+                config,
+                reqwest::Client::new(),
+                crate::pairing::PairingStore::ephemeral(),
+            )
+            .unwrap(),
+        );
+
+        let action = ChannelActionEvent {
+            action_id: "workflow.continue".to_owned(),
+            label: "Continue".to_owned(),
+            payload: json!({ "ticketId": "42" }),
+        };
+        let callback_data = encode_callback_data(&action).unwrap();
+        channel.dispatch_update(
+            Arc::new(TestHost),
+            Update {
+                update_id: 54,
+                callback_query: Some(CallbackQuery {
+                    id: "callback-54".to_owned(),
+                    from: TgUser {
+                        id: 7,
+                        first_name: "Ada".to_owned(),
+                    },
+                    message: Some(Message {
+                        chat: Chat {
+                            id: 42,
+                            chat_type: "private".to_owned(),
+                        },
+                        message_id: 88,
+                        reply_markup: Some(json!({
+                            "inline_keyboard": [[{
+                                "text": "Continue",
+                                "callback_data": callback_data.clone()
+                            }]]
+                        })),
+                        ..Default::default()
+                    }),
+                    data: Some(callback_data),
+                }),
+                ..Default::default()
+            },
+            &me(),
+            None,
+        );
+
+        let core_request = tokio::time::timeout(Duration::from_secs(3), core_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(core_request["text"], "Selected: Continue");
+        assert_eq!(
+            core_request["channelAction"]["actionId"],
+            "workflow.continue"
+        );
+        assert_eq!(core_request["channelAction"]["payload"]["ticketId"], "42");
+
+        let mut methods = Vec::new();
+        let mut sent_markup = None;
+        for _ in 0..4 {
+            let (method, body) = tokio::time::timeout(Duration::from_secs(3), telegram_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if method == "sendMessage" {
+                sent_markup = Some(body["reply_markup"].clone());
+            }
+            methods.push(method);
+            if methods.iter().any(|method| method == "answerCallbackQuery") && sent_markup.is_some()
+            {
+                break;
+            }
+        }
+        assert!(methods.iter().any(|method| method == "answerCallbackQuery"));
+        assert!(
+            sent_markup.is_some(),
+            "Telegram methods called: {methods:?}"
+        );
+        assert_eq!(
+            sent_markup.unwrap()["inline_keyboard"][0][0]["text"],
+            "Continue"
+        );
+
+        core_server.abort();
+        telegram_server.abort();
+    }
+
+    #[test]
     fn rich_payload_sends_markdown_and_nothing_else() {
         let payload = rich_payload(42, Some("t7"), "# Title\n\n- a");
         assert_eq!(payload["chat_id"], 42);
@@ -2372,5 +3082,239 @@ mod tests {
         // than failing the whole getMe.
         let old: BotUser = serde_json::from_value(json!({ "id": 1 })).unwrap();
         assert!(!old.has_topics_enabled && !old.supports_guest_queries);
+    }
+
+    fn flood_envelope(retry_after: u64) -> ApiEnvelope {
+        serde_json::from_value(json!({
+            "ok": false,
+            "error_code": 429,
+            "description": format!("Too Many Requests: retry after {retry_after}"),
+            "parameters": { "retry_after": retry_after }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn retry_delay_waits_out_only_short_flood_control() {
+        assert_eq!(
+            retry_delay(reqwest::StatusCode::TOO_MANY_REQUESTS, &flood_envelope(7)),
+            Some(Duration::from_secs(7))
+        );
+        // The envelope alone is enough: a rejected call may arrive with HTTP 200.
+        assert_eq!(
+            retry_delay(reqwest::StatusCode::OK, &flood_envelope(7)),
+            Some(Duration::from_secs(7))
+        );
+        // Longer than the inline cap: fail now and leave it to the outer retry.
+        assert_eq!(
+            retry_delay(reqwest::StatusCode::TOO_MANY_REQUESTS, &flood_envelope(31)),
+            None
+        );
+        let bad_request: ApiEnvelope = serde_json::from_value(json!({
+            "ok": false,
+            "error_code": 400,
+            "description": "Bad Request: chat not found",
+            "parameters": { "retry_after": 7 }
+        }))
+        .unwrap();
+        assert_eq!(
+            retry_delay(reqwest::StatusCode::BAD_REQUEST, &bad_request),
+            None
+        );
+        let no_wait: ApiEnvelope =
+            serde_json::from_value(json!({ "ok": false, "error_code": 429 })).unwrap();
+        assert_eq!(
+            retry_delay(reqwest::StatusCode::TOO_MANY_REQUESTS, &no_wait),
+            None
+        );
+    }
+
+    type BotApiCalls = Arc<std::sync::Mutex<Vec<(String, Value)>>>;
+    type BotApiResponder = Arc<dyn Fn(&str, usize) -> (StatusCode, Value) + Send + Sync>;
+
+    #[derive(Clone)]
+    struct MockBotApi {
+        calls: BotApiCalls,
+        responder: BotApiResponder,
+    }
+
+    async fn mock_bot_api_method(
+        axum::extract::Path((_token, method)): axum::extract::Path<(String, String)>,
+        State(api): State<MockBotApi>,
+        axum::Json(body): axum::Json<Value>,
+    ) -> (StatusCode, axum::Json<Value>) {
+        let earlier_calls = {
+            let mut calls = api.calls.lock().unwrap();
+            let earlier = calls.iter().filter(|(name, _)| name == &method).count();
+            calls.push((method.clone(), body));
+            earlier
+        };
+        let (status, reply) = (api.responder)(&method, earlier_calls);
+        (status, axum::Json(reply))
+    }
+
+    /// A Bot API stand-in whose `responder` gets the method name and how many
+    /// earlier calls that method has seen. Returns the channel and the call log.
+    async fn channel_with_mock_bot_api(
+        responder: BotApiResponder,
+    ) -> (TelegramChannel, BotApiCalls, tokio::task::JoinHandle<()>) {
+        let calls = BotApiCalls::default();
+        let app = Router::new()
+            .route("/:token/:method", post(mock_bot_api_method))
+            .with_state(MockBotApi {
+                calls: Arc::clone(&calls),
+                responder,
+            });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/bot-test", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mut config = make_cfg("test-token");
+        config.options.base_url = Some(base);
+        let channel =
+            TelegramChannel::new(config, reqwest::Client::new(), PairingStore::ephemeral())
+                .unwrap();
+        (channel, calls, server)
+    }
+
+    fn sent(message_id: i64) -> (StatusCode, Value) {
+        (
+            StatusCode::OK,
+            json!({ "ok": true, "result": { "message_id": message_id } }),
+        )
+    }
+
+    fn flood_control() -> (StatusCode, Value) {
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            json!({
+                "ok": false,
+                "error_code": 429,
+                "description": "Too Many Requests: retry after 0",
+                "parameters": { "retry_after": 0 }
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn flood_control_is_waited_out_and_retried_once() {
+        let (channel, calls, server) = channel_with_mock_bot_api(Arc::new(|_, earlier| {
+            if earlier == 0 {
+                flood_control()
+            } else {
+                sent(5)
+            }
+        }))
+        .await;
+        let ids = channel.send_text_with_ids("42", "hello").await.unwrap();
+        assert_eq!(ids, vec!["5".to_owned()]);
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        server.abort();
+
+        let (channel, calls, server) =
+            channel_with_mock_bot_api(Arc::new(|_, _| flood_control())).await;
+        let error = channel
+            .send_text_with_ids("42", "hello")
+            .await
+            .expect_err("a second 429 must fail the call");
+        assert!(error.to_string().contains("Too Many Requests"));
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            2,
+            "flood control is retried in place exactly once"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_429_without_an_envelope_still_names_the_status_and_is_not_retried() {
+        let (channel, calls, server) = channel_with_mock_bot_api(Arc::new(|_, _| {
+            (StatusCode::TOO_MANY_REQUESTS, json!("Too Many Requests"))
+        }))
+        .await;
+        let error = channel
+            .send_text_with_ids("42", "hello")
+            .await
+            .expect_err("a 429 must fail the call");
+        assert!(error.to_string().contains("HTTP 429"), "{error}");
+        assert!(!error.to_string().contains("test-token"), "{error}");
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn rich_fallback_sends_only_the_undelivered_chunks_as_plain_text() {
+        let (channel, calls, server) =
+            channel_with_mock_bot_api(Arc::new(|method, earlier| match (method, earlier) {
+                ("sendRichMessage", 0) => sent(1),
+                ("sendRichMessage", _) => (
+                    StatusCode::OK,
+                    json!({ "ok": false, "description": "Bad Request: can't parse entities" }),
+                ),
+                (_, earlier) => sent(2 + i64::try_from(earlier).unwrap()),
+            }))
+            .await;
+        let reply = format!(
+            "{}\n{}\n{}",
+            "a".repeat(3000),
+            "b".repeat(3000),
+            "c".repeat(3000)
+        );
+        let ids = channel.send_rich_with_ids("42", &reply).await.unwrap();
+        assert_eq!(ids, vec!["1", "2", "3"]);
+
+        let calls = calls.lock().unwrap();
+        let methods: Vec<&str> = calls.iter().map(|(method, _)| method.as_str()).collect();
+        assert_eq!(
+            methods,
+            vec![
+                "sendRichMessage",
+                "sendRichMessage",
+                "sendMessage",
+                "sendMessage"
+            ]
+        );
+        let plain: Vec<&str> = calls
+            .iter()
+            .filter(|(method, _)| method == "sendMessage")
+            .filter_map(|(_, body)| body["text"].as_str())
+            .collect();
+        assert!(plain[0].starts_with('b') && plain[1].starts_with('c'));
+        assert!(
+            !plain.iter().any(|text| text.starts_with('a')),
+            "the chunk already delivered as rich text must not be resent"
+        );
+        drop(calls);
+        server.abort();
+    }
+}
+
+#[cfg(test)]
+mod reaction_tests {
+    use super::telegram_reaction;
+
+    #[test]
+    fn bot_reactions_pass_through_and_drop_variation_selectors() {
+        assert_eq!(telegram_reaction("👍"), Some("👍"));
+        assert_eq!(telegram_reaction(" 👀 "), Some("👀"));
+        assert_eq!(telegram_reaction("❤️"), Some("❤"));
+        assert_eq!(telegram_reaction("❤️‍🔥"), Some("❤\u{200d}🔥"));
+    }
+
+    #[test]
+    fn common_emoji_outside_the_bot_set_map_to_the_nearest_allowed_one() {
+        // `setMessageReaction` rejects these outright, which is why the old ✅
+        // completion marker never landed and left 👀 on every message.
+        assert_eq!(telegram_reaction("✅"), Some("👌"));
+        assert_eq!(telegram_reaction("❌"), Some("👎"));
+        assert_eq!(telegram_reaction("😂"), Some("🤣"));
+        assert_eq!(telegram_reaction("🥳"), Some("🎉"));
+    }
+
+    #[test]
+    fn unknown_emoji_are_skipped_rather_than_sent() {
+        assert_eq!(telegram_reaction("🦀"), None);
+        assert_eq!(telegram_reaction(""), None);
     }
 }

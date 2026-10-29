@@ -27,10 +27,19 @@ import { landingSurfaceCardFlexXlClass } from "./landing-card-tones.ts";
 import { landingSubheadlineClass } from "./landing-typography.ts";
 import { SectionTitle } from "./section-title.tsx";
 
+/**
+ * The `/products/[slug]` pages the story links. Typed routes accept a dynamic
+ * route only through its literal path, so `Route` alone would reject them.
+ */
+type PlatformProductHref =
+	| "/products/core"
+	| "/products/gateway"
+	| "/products/sdk";
+
 interface PlatformLayer {
 	description: string;
 	group: "Infra" | "Platform" | "Interfaces / surfaces";
-	href: string;
+	href: Route<PlatformProductHref>;
 	icon: LucideIcon;
 	id: string;
 	name: string;
@@ -92,10 +101,10 @@ const PLATFORM_LAYERS: readonly PlatformLayer[] = [
 	{
 		description: "Configure Ryu from the control panel.",
 		group: "Interfaces / surfaces",
-		href: "/console",
+		href: "/agent",
 		icon: Settings2,
 		id: "console",
-		name: "Console",
+		name: "Agent",
 		positioning: "Configure Ryu from the control panel.",
 		verb: "Configure",
 	},
@@ -311,22 +320,22 @@ const SHOWCASE: readonly ShowcaseItem[] = [
 ];
 
 function PlatformLayerCard({ layer }: { layer: PlatformLayer }) {
-	const Icon = layer.icon;
+	const Glyph = layer.icon;
 	return (
 		<li className="relative">
 			<Link
 				className="group flex items-start gap-3 rounded-xl bg-muted/50 p-3.5 transition-colors hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-				href={layer.href as Route}
+				href={layer.href}
 			>
 				<span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-background text-foreground/65 shadow-sm">
-					<Icon aria-hidden="true" className="size-4" />
+					<Glyph aria-hidden="true" className="size-4" />
 				</span>
 				<span className="min-w-0 flex-1">
 					<span className="flex flex-wrap items-center gap-x-2 gap-y-1">
 						<span className="font-medium text-foreground text-sm">
 							{layer.name}
 						</span>
-						<span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+						<span className="type-compact text-muted-foreground uppercase tracking-wider">
 							{layer.group} · {layer.verb}
 						</span>
 					</span>
@@ -336,7 +345,7 @@ function PlatformLayerCard({ layer }: { layer: PlatformLayer }) {
 				</span>
 				<ArrowUpRight
 					aria-hidden="true"
-					className="mt-0.5 size-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+					className="mt-0.5 size-4 shrink-0 text-muted-foreground/50 transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5"
 				/>
 			</Link>
 		</li>
@@ -346,21 +355,21 @@ function PlatformLayerCard({ layer }: { layer: PlatformLayer }) {
 function PlatformHierarchy() {
 	return (
 		<div
-			className="rounded-[1.75rem] bg-muted/30 p-4 sm:p-6"
+			className="rounded-4xl bg-muted/30 p-4 sm:p-6"
 			data-testid="platform-hierarchy"
 		>
 			<div className="flex items-center justify-between gap-3">
-				<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+				<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 					Product hierarchy
 				</p>
-				<span className="text-[10px] text-muted-foreground/70">
+				<span className="type-compact text-muted-foreground/70">
 					Deploy = Cloud
 				</span>
 			</div>
 
 			<div className="mt-6">
 				<div className="mx-auto max-w-xs rounded-2xl bg-foreground px-4 py-4 text-background shadow-lg">
-					<p className="text-[10px] text-background/55 uppercase tracking-[0.18em]">
+					<p className="type-compact text-background/55 uppercase tracking-(--tracking-section)">
 						Ryu
 					</p>
 					<p className="mt-1 font-medium text-lg tracking-tight">
@@ -379,7 +388,7 @@ function PlatformHierarchy() {
 			<ul aria-label="Ryu primitives" className="mt-6 flex flex-wrap gap-1.5">
 				{PRIMITIVES.map((primitive) => (
 					<li key={primitive}>
-						<span className="rounded-full bg-background px-2.5 py-1 text-[10px] text-muted-foreground">
+						<span className="type-compact rounded-full bg-background px-2.5 py-1 text-muted-foreground">
 							{primitive}
 						</span>
 					</li>
@@ -391,8 +400,8 @@ function PlatformHierarchy() {
 
 function RoleDistinction() {
 	return (
-		<div className="rounded-[1.75rem] bg-muted/30 p-4 sm:p-6">
-			<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+		<div className="rounded-4xl bg-muted/30 p-4 sm:p-6">
+			<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 				The distinction is simple
 			</p>
 			<h3 className="mt-3 max-w-sm text-balance font-medium text-2xl text-foreground tracking-tight">
@@ -400,12 +409,12 @@ function RoleDistinction() {
 			</h3>
 			<p className="mt-3 max-w-md text-muted-foreground text-sm leading-relaxed">
 				Deploy to Cloud. Integrate with SDK, run with Core, secure with Gateway.
-				Use Bot, Console, or Apps as the interface.
+				Use Bot, Agent, or Apps as the interface.
 			</p>
 			<dl className="mt-7 grid gap-2 sm:grid-cols-2">
 				{PLATFORM_LAYERS.map((layer) => (
 					<div className="rounded-xl bg-background/70 p-3" key={layer.id}>
-						<dt className="text-[10px] text-muted-foreground uppercase tracking-wider">
+						<dt className="type-compact text-muted-foreground uppercase tracking-wider">
 							{layer.group} · {layer.name} = {layer.verb}
 						</dt>
 						<dd className="mt-1 text-foreground/80 text-xs leading-relaxed">
@@ -415,7 +424,7 @@ function RoleDistinction() {
 				))}
 			</dl>
 			<div className="mt-7 rounded-xl bg-background/70 p-4">
-				<p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+				<p className="type-compact text-muted-foreground uppercase tracking-wider">
 					The invariant
 				</p>
 				<p className="mt-2 text-foreground text-sm leading-relaxed">
@@ -427,14 +436,14 @@ function RoleDistinction() {
 }
 
 function IntegrationCard({ path }: { path: IntegrationPath }) {
-	const Icon = path.icon;
+	const Glyph = path.icon;
 	return (
 		<li className={cn(landingSurfaceCardFlexXlClass, "group")}>
 			<div className="flex items-start justify-between gap-3">
 				<span className="flex size-9 items-center justify-center rounded-lg bg-background text-foreground/65 shadow-sm">
-					<Icon aria-hidden="true" className="size-4" />
+					<Glyph aria-hidden="true" className="size-4" />
 				</span>
-				<span className="rounded-full bg-background px-2 py-1 text-[10px] text-muted-foreground">
+				<span className="type-compact rounded-full bg-background px-2 py-1 text-muted-foreground">
 					{path.token}
 				</span>
 			</div>
@@ -446,7 +455,9 @@ function IntegrationCard({ path }: { path: IntegrationPath }) {
 			</div>
 			<Link
 				className="mt-5 inline-flex items-center gap-1.5 font-medium text-foreground text-xs underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-				href={path.href as Route}
+				href={
+					/* SAFETY: The private IntegrationCard only receives INTEGRATION_PATHS entries authored in this module: known product/platform paths or canonical docsHref URLs. Next requires a Route cast after those href strings lose literal types. */ path.href as Route
+				}
 			>
 				Explore path
 				<ArrowUpRight aria-hidden="true" className="size-3.5" />
@@ -456,14 +467,16 @@ function IntegrationCard({ path }: { path: IntegrationPath }) {
 }
 
 function CapabilityCard({ capability }: { capability: Capability }) {
-	const Icon = capability.icon;
+	const Glyph = capability.icon;
 	return (
 		<li>
 			<Link
 				className="group flex h-full items-start gap-3 rounded-xl bg-muted/40 p-4 transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-				href={capability.href as Route}
+				href={
+					/* SAFETY: The private CapabilityCard only receives this module's authored CAPABILITIES entries, whose hrefs are known product routes or canonical docsHref URLs; this is the documented Next nonliteral-href cast. */ capability.href as Route
+				}
 			>
-				<Icon
+				<Glyph
 					aria-hidden="true"
 					className="mt-0.5 size-4 shrink-0 text-foreground/65"
 				/>
@@ -477,7 +490,7 @@ function CapabilityCard({ capability }: { capability: Capability }) {
 				</span>
 				<ArrowUpRight
 					aria-hidden="true"
-					className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+					className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5"
 				/>
 			</Link>
 		</li>
@@ -485,19 +498,19 @@ function CapabilityCard({ capability }: { capability: Capability }) {
 }
 
 function ShowcaseCard({ item }: { item: ShowcaseItem }) {
-	const Icon = item.icon;
+	const Glyph = item.icon;
 	const content = (
 		<>
 			<div className="flex items-start justify-between gap-3">
 				<span className="flex size-9 items-center justify-center rounded-lg bg-background text-foreground/65 shadow-sm">
-					<Icon aria-hidden="true" className="size-4" />
+					<Glyph aria-hidden="true" className="size-4" />
 				</span>
 				<ArrowUpRight
 					aria-hidden="true"
-					className="size-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+					className="size-4 text-muted-foreground/50 transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5"
 				/>
 			</div>
-			<p className="mt-6 text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
+			<p className="type-compact mt-6 text-muted-foreground uppercase tracking-(--tracking-section)">
 				{item.label}
 			</p>
 			<h3 className="mt-2 font-medium text-foreground text-lg tracking-tight">
@@ -523,7 +536,9 @@ function ShowcaseCard({ item }: { item: ShowcaseItem }) {
 			) : (
 				<Link
 					className="group block h-full rounded-2xl bg-muted/50 p-5 transition-colors hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-					href={item.href as Route}
+					href={
+						/* SAFETY: The private ecosystem card renders this module's authored catalog; the external branch above handles GitHub, and this branch carries the canonical docsHref destinations outside local generated route types. */ item.href as Route
+					}
 				>
 					{content}
 				</Link>
@@ -535,15 +550,15 @@ function ShowcaseCard({ item }: { item: ShowcaseItem }) {
 function PlatformStoryHeading() {
 	return (
 		<div className="max-w-3xl">
-			<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+			<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 				The platform map
 			</p>
-			<h2 className="mt-4 text-balance font-medium text-4xl text-foreground leading-tight tracking-[-0.04em] md:text-5xl">
+			<h2 className="mt-4 text-balance font-medium text-4xl text-foreground leading-tight tracking-tight md:text-5xl">
 				Ryu connects deployment, platform, and interfaces.
 			</h2>
 			<p className={cn(landingSubheadlineClass, "max-w-2xl")}>
 				Deploy to Cloud. Integrate with SDK, run with Core, secure with Gateway,
-				and use Bot, Console, or Apps as the interface.
+				and use Bot, Agent, or Apps as the interface.
 			</p>
 		</div>
 	);
@@ -555,14 +570,14 @@ export function PlatformStory({ compact = false }: { compact?: boolean }) {
 			<section data-testid="platform-story-compact" id="platform-story">
 				<div className="mx-auto max-w-6xl px-6 py-20 md:py-28">
 					<div className="max-w-2xl">
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							The platform underneath
 						</p>
-						<h2 className="mt-4 text-balance font-medium text-4xl text-foreground leading-tight tracking-[-0.04em] md:text-5xl">
+						<h2 className="mt-4 text-balance font-medium text-4xl text-foreground leading-tight tracking-tight md:text-5xl">
 							Platform, interfaces, and Cloud.
 						</h2>
 						<p className="mt-5 max-w-xl text-muted-foreground leading-relaxed">
-							Use Bot, Console, or Apps as interfaces. Build with SDK, Core, and
+							Use Bot, Agent, or Apps as interfaces. Build with SDK, Core, and
 							Gateway.
 						</p>
 					</div>
@@ -571,18 +586,18 @@ export function PlatformStory({ compact = false }: { compact?: boolean }) {
 						{PLATFORM_LAYERS.map((layer) => (
 							<Link
 								className="group flex items-center gap-3 rounded-xl bg-muted/50 p-3.5 transition-colors hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-								href={layer.href as Route}
+								href={layer.href}
 								key={layer.id}
 							>
 								<span className="font-medium text-foreground text-sm">
 									{layer.name}
 								</span>
-								<span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+								<span className="type-compact text-muted-foreground uppercase tracking-wider">
 									{layer.group} · {layer.verb}
 								</span>
 								<ArrowUpRight
 									aria-hidden="true"
-									className="ml-auto size-3.5 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+									className="ml-auto size-3.5 text-muted-foreground/50 transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5"
 								/>
 							</Link>
 						))}
@@ -665,7 +680,11 @@ export function PlatformStory({ compact = false }: { compact?: boolean }) {
 							</div>
 							<Link
 								className="inline-flex items-center gap-2 font-medium text-foreground text-sm underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-								href={docsHref("/docs/showcase") as Route}
+								href={
+									/* SAFETY: resources.tsx owns docsHref and the configured docs host; this nonliteral cross-app documentation URL is intentionally outside the Web app's local generated route list. */ docsHref(
+										"/docs/showcase"
+									) as Route
+								}
 							>
 								Read the showcase guide
 								<ArrowUpRight aria-hidden="true" className="size-4" />

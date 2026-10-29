@@ -4,4 +4,20 @@
 export {
 	fetchRunTrace,
 	type RunSpan,
-} from "@ryuhq/core-client/runs";
+	type RunSpanStatus,
+} from "@ryuhq/core-client/runs.ts";
+export {
+	fetchRunTraceTree,
+	flattenTraceTree,
+	joinTraceUsage,
+	listTraces,
+	type RunTraceTree,
+	type TraceAuditRow,
+	type TraceListFilters,
+	type TraceNode,
+	type TraceSpanUsage,
+	type TraceSummary,
+	type TraceUsageTotals,
+	usageTotals,
+	type WaterfallRow,
+} from "@ryuhq/core-client/traces.ts";

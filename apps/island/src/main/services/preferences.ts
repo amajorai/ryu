@@ -3,13 +3,18 @@
 // `/api/preferences/stream` filtered to a single key. Used for the island agent
 // routing (`island-agents`) and speak-replies (`island-tts`) prefs the desktop
 // writes; the blob stays an opaque JSON string here, parsed by the matching
-// `shared/*.ts` (no `@ryu/ui` dep, the main process externalizes workspace deps).
+// `shared/*.ts` (no `@ryu/ui` dep: the main process inlines workspace packages and
+// `@ryu/ui` is renderer UI code).
 
+import { z } from "zod";
 import { coreHeaders, loadConfig } from "./config.ts";
 import { withResponseDeadline } from "./response-deadline.ts";
 
 /** Timeout for a one-shot preference read. */
 const GET_TIMEOUT_MS = 5000;
+const preferenceResponseSchema = z.object({
+	value: z.string().nullable().catch(null),
+});
 
 /** Write a preference value (raw JSON) by key. Returns success; never throws. */
 export async function setPreferenceRaw(
@@ -59,8 +64,7 @@ export async function getPreferenceRaw(key: string): Promise<string | null> {
 			if (!response.ok) {
 				return null;
 			}
-			const data = (await response.json()) as { value?: unknown };
-			return typeof data.value === "string" ? data.value : null;
+			return preferenceResponseSchema.parse(await response.json()).value;
 		}
 	)
 		.catch(() => null)

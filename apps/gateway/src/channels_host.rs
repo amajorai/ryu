@@ -30,7 +30,7 @@ use ryu_gw_channels::{
     is_token_rejected,
     media::VoiceReplyMode as ChannelVoiceReplyMode,
     openwa::OpenWaChannel,
-    pairing::{AccessPolicy, PairingStore},
+    pairing::{AccessPolicy, PairingSeal, PairingStore, PAIRING_STORE},
     policy_from_env, run_channel,
     slack::SlackChannel,
     spawn_channel,
@@ -259,7 +259,8 @@ fn to_channel_bluebubbles(
 // ─── The node's pairing store ───────────────────────────────────────────────
 
 /// Where the pairing store lives: the [`ENV_PAIRING_PATH`] override, else
-/// `<data dir>/ryu{profile suffix}/channel-pairing.json`.
+/// `<RYU_DIR>/state/channel-pairing.json` under Core, else the standalone
+/// `<data_local>/ryu{profile suffix}/channel-pairing.json`.
 ///
 /// The profile suffix matters here in a way it does not for, say, the audit db:
 /// a dev gateway must not inherit (or write into) the release node's approvals,
@@ -273,10 +274,17 @@ fn pairing_store_path() -> Option<PathBuf> {
             return Some(PathBuf::from(trimmed));
         }
     }
-    dirs::data_local_dir().map(|d| {
-        d.join(format!("ryu{}", crate::profile::suffix()))
-            .join("channel-pairing.json")
-    })
+    crate::profile::data_file(crate::profile::DataSlot::State, "channel-pairing.json")
+}
+
+/// The pairing file's at-rest protection: the Gateway component key's content
+/// cipher for [`PAIRING_STORE`], whatever path the file lives at. Without a key
+/// the store runs in memory only (it never writes plaintext).
+fn pairing_seal() -> PairingSeal {
+    match ryu_crypto::component_cipher_for_process(ryu_crypto::components::GATEWAY) {
+        Ok(component) => PairingSeal::Sealed(component.content_cipher(PAIRING_STORE)),
+        Err(error) => PairingSeal::Unavailable(error.to_string()),
+    }
 }
 
 /// Load the node's shared pairing store, falling back to an ephemeral one when
@@ -284,7 +292,7 @@ fn pairing_store_path() -> Option<PathBuf> {
 /// re-pair after a restart, so it is logged rather than passed over silently.
 async fn load_pairing_store() -> PairingStore {
     match pairing_store_path() {
-        Some(path) => PairingStore::load(path).await,
+        Some(path) => PairingStore::load(path, pairing_seal()).await,
         None => {
             warn!(
                 "no data directory available for the channel pairing store; \
@@ -321,6 +329,13 @@ impl ChannelHost for GatewayChannelHost {
 /// channel without requiring `auth.require_auth`.
 fn channel_context(channel_name: &str) -> RequestContext {
     RequestContext {
+        org_limits: None,
+        identity: None,
+        standing: None,
+        enforcement: None,
+        host_conversation: None,
+        authorized_operation: crate::config::ApiKeyOperation::Inference,
+        provider_snapshot: None,
         request_id: Uuid::new_v4().to_string(),
         api_key: format!("channel:{channel_name}"),
         owner_binding: ryu_gw_credentials::fingerprint(&format!("channel:{channel_name}")),
@@ -331,23 +346,29 @@ fn channel_context(channel_name: &str) -> RequestContext {
         user_name: Some(format!("{channel_name}-bot")),
         user_id: None,
         agent_id: None,
+        agent_provider_access: None,
         key_config: None,
         skill_ids: None,
         // Channel messages don't carry per-agent tool grants.
         tool_actions: None,
         tools_header_present: false,
+        capability_hints: None,
         // Channel messages don't carry per-agent slot selections; modality
         // routing falls back to the static modality_map for bot traffic.
         slot_provider: None,
         slot_model: None,
+        own_supply_route: None,
+        violation_attempt: Default::default(),
         // Channel messages don't have a session/conversation id.
         session_id: None,
         // Channel messages aren't tagged with a control-plane product surface.
         feature: None,
+        purpose: None,
         // Channel messages are not companion-sourced.
         companion_source: false,
         // Channel messages do not opt into the unified tool loop.
         tool_search_requested: false,
+        untrusted_caller: false,
         // Bot traffic is interactive (a user is waiting on the other end).
         priority: crate::concurrency::Priority::Interactive,
         // Channel messages don't select a named tool-policy profile.
@@ -361,9 +382,12 @@ fn channel_context(channel_name: &str) -> RequestContext {
         raw_tools: false,
         // Channel/bot traffic is not a dynamically-resolved managed tenant.
         managed_inference: false,
+        openrouter_routing_enabled: false,
         remaining_budget_micro_usd: None,
         unrestricted_budget_micro_usd: None,
         pool_budgets_micro_usd: std::collections::HashMap::new(),
+        credit_accounting_unavailable: false,
+        budget_resolved_at: None,
         resolved_policy: None,
     }
 }
@@ -1151,6 +1175,10 @@ pub async fn spawn_registered(state: SharedState) {
     // approval must take effect on every channel at once, and the file it is
     // backed by has a single writer.
     let pairing = load_pairing_store().await;
+    // Hand the same store to the admin approval route
+    // (`POST /v1/channels/pairing/approve`): pending codes are never logged, so
+    // that route is how an operator admits a sender.
+    let _ = state.channel_pairing.set(pairing.clone());
 
     // Attempt to load enabled configs from the control-plane store. An
     // empty result means the store is disabled or unreachable — fall back
@@ -1614,7 +1642,14 @@ mod tests {
                 .file_name()
                 .unwrap()
                 .to_string_lossy();
-            assert_eq!(parent, format!("ryu{}", crate::profile::suffix()));
+            // Under Core (`RYU_DIR` set) it lives in the data dir's `state/`;
+            // standalone, in the profile-suffixed OS data dir.
+            let expected = if std::env::var_os("RYU_DIR").is_some_and(|dir| !dir.is_empty()) {
+                "state".to_owned()
+            } else {
+                format!("ryu{}", crate::profile::suffix())
+            };
+            assert_eq!(parent, expected);
         }
 
         // The override wins outright, for state on a mounted volume.

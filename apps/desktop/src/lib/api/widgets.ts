@@ -15,9 +15,25 @@
 // are resolved server-side from the instance record (spec §4.1), never trusted
 // from the client.
 
-import { CodedRpcError, type WidgetRpcErrorCode } from "@ryu/app-host/rpc";
+import {
+	CodedRpcError,
+	type RpcJsonResponse,
+	type RyuJsonValue,
+	rpcJsonResponseSchema,
+	type WidgetRpcErrorCode,
+	widgetRpcErrorCodeSchema,
+} from "@ryu/app-host/rpc";
 import type { WidgetMessageAttribution } from "@ryu/blocks/desktop/agent-elements/types.ts";
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
+import {
+	type WidgetWireRequest,
+	widgetErrorBodySchema,
+	widgetErrorStringSchema,
+	widgetFollowUpResultSchema,
+	widgetNestedErrorSchema,
+	widgetToolResultSchema,
+	widgetWireRequestSchema,
+} from "./widget-wire-contracts.ts";
 
 /** Map an HTTP status to a widget error code when the response body carries none
  *  (defense so the widget always sees a closed code, D6). */
@@ -49,22 +65,22 @@ async function toCodedError(
 	try {
 		const text = await resp.text();
 		if (text) {
-			const body = JSON.parse(text) as {
-				code?: unknown;
-				error?: unknown;
-				message?: unknown;
-			};
-			const err =
-				body.error && typeof body.error === "object"
-					? (body.error as { code?: unknown; message?: unknown })
-					: body;
-			if (typeof err.code === "string") {
-				code = err.code as WidgetRpcErrorCode;
-			}
-			if (typeof err.message === "string") {
-				message = err.message;
-			} else if (typeof body.error === "string") {
-				message = body.error;
+			const body = widgetErrorBodySchema.safeParse(JSON.parse(text));
+			if (body.success) {
+				const nested = widgetNestedErrorSchema.safeParse(body.data.error);
+				const error = nested.success ? nested.data : body.data;
+				if (error.code !== undefined) {
+					const parsedCode = widgetRpcErrorCodeSchema.safeParse(error.code);
+					code = parsedCode.success ? parsedCode.data : "server_error";
+				}
+				const legacyMessage = widgetErrorStringSchema.safeParse(
+					body.data.error
+				);
+				if (error.message !== undefined) {
+					message = error.message;
+				} else if (legacyMessage.success) {
+					message = legacyMessage.data;
+				}
 			}
 		}
 	} catch {
@@ -75,26 +91,26 @@ async function toCodedError(
 
 /** POST a JSON body to a governed widget route, returning the parsed JSON (or
  *  `undefined` for an empty body). Throws a {@link CodedRpcError} on non-2xx. */
-async function postWidget<T>(
+async function postWidget(
 	target: ApiTarget,
 	path: string,
-	body: unknown
-): Promise<T> {
+	body: WidgetWireRequest
+): Promise<RpcJsonResponse> {
 	const resp = await authenticatedFetch(target, path, {
 		method: "POST",
-		body: JSON.stringify(body),
+		body: JSON.stringify(widgetWireRequestSchema.parse(body)),
 	});
 	if (!resp.ok) {
 		throw await toCodedError(resp, `${path} failed: ${resp.status}`);
 	}
 	const text = await resp.text();
-	return (text ? JSON.parse(text) : undefined) as T;
+	return rpcJsonResponseSchema.parse(text ? JSON.parse(text) : undefined);
 }
 
 /** The identifiers a governed tool call echoes back (spec §4.1). `serverId` is
  *  pinned by the host from the stream part, never supplied by the frame. */
 export interface WidgetCallToolInput {
-	args: unknown;
+	args: RpcJsonResponse;
 	instanceId: string;
 	name: string;
 	serverId: string;
@@ -104,7 +120,7 @@ export interface WidgetCallToolInput {
 /** Core's response to a governed widget tool call (spec §3.2 item 9). */
 export interface WidgetCallToolResult {
 	ok: boolean;
-	output: unknown;
+	output: RyuJsonValue;
 }
 
 /**
@@ -117,13 +133,13 @@ export function widgetCallTool(
 	target: ApiTarget,
 	input: WidgetCallToolInput
 ): Promise<WidgetCallToolResult> {
-	return postWidget<WidgetCallToolResult>(target, "/api/widgets/tools/call", {
+	return postWidget(target, "/api/widgets/tools/call", {
 		instance_id: input.instanceId,
 		server_id: input.serverId,
 		tool_id: input.name,
 		tool_call_id: input.toolCallId,
 		arguments: input.args,
-	});
+	}).then(widgetToolResultSchema.parse);
 }
 
 /** The identifiers a governed follow-up echoes back (spec §4.2). */
@@ -149,32 +165,6 @@ export interface WidgetFollowUpResult {
 	ticket: string;
 }
 
-function isWidgetFollowUpResult(value: unknown): value is WidgetFollowUpResult {
-	if (typeof value !== "object" || value === null) {
-		return false;
-	}
-	const result = value as { injected?: unknown; ok?: unknown };
-	if (
-		result.ok !== true ||
-		typeof (result as { ticket?: unknown }).ticket !== "string" ||
-		typeof result.injected !== "object" ||
-		result.injected === null
-	) {
-		return false;
-	}
-	const injected = result.injected as Partial<WidgetInjectedTurn>;
-	return (
-		injected.role === "user" &&
-		injected.source === "widget" &&
-		typeof injected.conversation_id === "string" &&
-		typeof injected.origin_server === "string" &&
-		typeof injected.prompt === "string" &&
-		(typeof injected.tool_call_id === "string" ||
-			injected.tool_call_id === null) &&
-		typeof injected.widget_instance_id === "string"
-	);
-}
-
 /**
  * Inject a widget-attributed user turn on the owning conversation through the
  * governed follow-up route (R4/D5). Core gates it (binding + `chat.sendFollowUp`
@@ -185,15 +175,16 @@ export async function widgetFollowUp(
 	target: ApiTarget,
 	input: WidgetFollowUpInput
 ): Promise<WidgetFollowUpResult> {
-	const result = await postWidget<unknown>(target, "/api/widgets/follow-up", {
+	const result = await postWidget(target, "/api/widgets/follow-up", {
 		instance_id: input.instanceId,
 		tool_call_id: input.toolCallId,
 		prompt: input.prompt,
 	});
-	if (!isWidgetFollowUpResult(result)) {
+	const parsed = widgetFollowUpResultSchema.safeParse(result);
+	if (!parsed.success) {
 		throw new Error("Core returned an invalid widget follow-up envelope");
 	}
-	return result;
+	return parsed.data;
 }
 
 /**
@@ -226,7 +217,7 @@ export async function submitWidgetFollowUp(
 /** The identifiers a state write echoes back (decisions doc D4). */
 export interface WidgetSetStateInput {
 	instanceId: string;
-	state: unknown;
+	state: RpcJsonResponse;
 	toolCallId: string;
 }
 
@@ -240,7 +231,7 @@ export async function widgetSetState(
 	target: ApiTarget,
 	input: WidgetSetStateInput
 ): Promise<void> {
-	await postWidget<unknown>(target, "/api/widgets/state", {
+	await postWidget(target, "/api/widgets/state", {
 		instance_id: input.instanceId,
 		tool_call_id: input.toolCallId,
 		state: input.state,

@@ -1,14 +1,19 @@
 import { expect, test } from "bun:test";
-import type { UIMessage } from "ai";
-import { getMessageAttachments } from "./message-attachments.ts";
+import {
+	type AttachmentMessageInput,
+	getMessageAttachments,
+} from "./message-attachments.ts";
 
-function message(parts: unknown[], extra?: Record<string, unknown>): UIMessage {
+function message(
+	parts: NonNullable<AttachmentMessageInput["parts"]>,
+	extra?: Pick<AttachmentMessageInput, "experimental_attachments">
+): AttachmentMessageInput {
 	return {
 		id: "message-1",
 		parts,
 		role: "user",
 		...extra,
-	} as unknown as UIMessage;
+	};
 }
 
 test("normalizes file parts with mediaType and preserves colored-icon metadata", () => {
@@ -96,4 +101,26 @@ test("does not render the same persisted attachment twice", () => {
 	);
 
 	expect(attachments).toHaveLength(1);
+});
+
+test("drops executable attachment URLs before they reach media sinks", () => {
+	const attachments = getMessageAttachments(
+		message([
+			{
+				mediaType: "image/png",
+				type: "file",
+				url: "javascript:alert(1)",
+			},
+			{
+				mediaType: "image/svg+xml",
+				type: "file",
+				url: "data:text/html,<script>alert(1)</script>",
+			},
+		])
+	);
+
+	expect(attachments).toHaveLength(2);
+	expect(attachments.every((attachment) => attachment.url === undefined)).toBe(
+		true
+	);
 });

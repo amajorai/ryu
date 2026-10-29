@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import type { RouteClaim } from "./rpc.ts";
 import {
+	type ActivityScoreResponse,
 	asModelCompleteArg,
 	asRpcRequest,
 	asSafeActionsRequestArg,
@@ -11,9 +13,43 @@ import {
 	GRANT_CAPABILITY,
 	type HostServices,
 	METHOD_CAPABILITY,
+	type WorkflowConnectBindingRecord,
 } from "./rpc.ts";
 
 const AGENTS = [{ id: "ryu", name: "Ryu" }];
+const CONNECT_BINDING = {
+	agentId: "",
+	composioTriggerId: null,
+	connectedAccountId: "account-a",
+	createdAt: "2026-10-06T00:00:00Z",
+	id: "binding-a",
+	targetKind: "workflow",
+	toolkit: "slack",
+	triggerSlug: "message_received",
+	workflowId: "workflow-a",
+} satisfies WorkflowConnectBindingRecord;
+const ONLINE_SCORE = {
+	kind: "online_score",
+	score: {
+		assertion_score: 1,
+		assertions: [],
+		assertions_pass: true,
+		latency_score: 1,
+		overall: 1,
+		policy_pass: true,
+		prompt: "Task",
+		response_text: "completed",
+		substring_match: null,
+		token_efficiency: 1,
+	},
+	scored_at: "2026-10-06T00:00:00Z",
+} satisfies ActivityScoreResponse;
+const REDTEAM_RESULT = {
+	campaign_id: "campaign-a",
+	model: "model-a",
+	strategies: [],
+	summary: { needs_attention: 0, protected: 0, total: 0 },
+};
 
 function services(): HostServices {
 	return {
@@ -65,7 +101,7 @@ function services(): HostServices {
 				conversation_id: `${conversationId}:${text}`,
 				status: "accepted" as const,
 			}),
-		registerRoute: () => Promise.resolve(null),
+		registerRoute: (claim: RouteClaim) => Promise.resolve({ path: claim.path }),
 	};
 }
 
@@ -113,39 +149,96 @@ describe("createI18nHostServices", () => {
 	});
 });
 
-function errorContract(value: unknown): {
+function errorContract(cause: unknown): {
 	code: unknown;
 	message: string;
 	name: string;
 } | null {
-	if (!(value instanceof Error)) {
+	if (!(cause instanceof Error)) {
 		return null;
 	}
 	return {
-		code: "code" in value ? value.code : null,
-		message: value.message,
-		name: value.name,
+		code: "code" in cause ? cause.code : null,
+		message: cause.message,
+		name: cause.name,
 	};
 }
 
 describe("dispatchRpc capability gate", () => {
 	it("Connect workflow mutation requires runstate and strips no caller identity overrides", async () => {
 		let calls = 0;
-		const svc: HostServices = {...services(),workflowsBindConnectTrigger: async input => { calls++; return input; }};
-		const input = {id:"workflow-a",connectTriggerId:"00000000-0000-4000-8000-000000000001"};
-		await expect(dispatchRpc("workflows.bindConnectTrigger",[input],new Set<Capability>(["workflows.catalogs"]),svc)).rejects.toThrow();
+		const svc: HostServices = {
+			...services(),
+			workflowsBindConnectTrigger: async (input) => {
+				calls++;
+				return { ...CONNECT_BINDING, request: input };
+			},
+		};
+		const input = {
+			id: "workflow-a",
+			connectTriggerId: "00000000-0000-4000-8000-000000000001",
+		};
+		await expect(
+			dispatchRpc(
+				"workflows.bindConnectTrigger",
+				[input],
+				new Set<Capability>(["workflows.catalogs"]),
+				svc
+			)
+		).rejects.toThrow();
 		expect(calls).toBe(0);
-		await expect(dispatchRpc("workflows.bindConnectTrigger",[{...input,ownerUserId:"other"}],new Set<Capability>(["workflows.runstate"]),svc)).rejects.toThrow();
+		await expect(
+			dispatchRpc(
+				"workflows.bindConnectTrigger",
+				[{ ...input, ownerUserId: "other" }],
+				new Set<Capability>(["workflows.runstate"]),
+				svc
+			)
+		).rejects.toThrow();
 		expect(calls).toBe(0);
-		await expect(dispatchRpc("workflows.bindConnectTrigger",[input],new Set<Capability>(["workflows.runstate"]),svc)).resolves.toEqual(input);
+		await expect(
+			dispatchRpc(
+				"workflows.bindConnectTrigger",
+				[input],
+				new Set<Capability>(["workflows.runstate"]),
+				svc
+			)
+		).resolves.toEqual({ ...CONNECT_BINDING, request: input });
 		expect(calls).toBe(1);
 	});
 
 	it("Connect workflow reads and removals use distinct existing grants", async () => {
-		const svc: HostServices = {...services(),workflowsConnectBindings:async input => [input],workflowsRemoveConnectBinding:async()=>undefined};
-		await expect(dispatchRpc("workflows.connectBindings",[{id:"workflow-a"}],new Set<Capability>(["workflows.catalogs"]),svc)).resolves.toEqual([{id:"workflow-a"}]);
-		await expect(dispatchRpc("workflows.removeConnectBinding",[{id:"workflow-a",bindingId:"binding-a"}],new Set<Capability>(["workflows.catalogs"]),svc)).rejects.toThrow();
-		await expect(dispatchRpc("workflows.removeConnectBinding",[{id:"workflow-a",bindingId:"binding-a"}],new Set<Capability>(["workflows.runstate"]),svc)).resolves.toBeUndefined();
+		const svc: HostServices = {
+			...services(),
+			workflowsConnectBindings: async (input) => [
+				{ ...CONNECT_BINDING, request: input },
+			],
+			workflowsRemoveConnectBinding: async () => undefined,
+		};
+		await expect(
+			dispatchRpc(
+				"workflows.connectBindings",
+				[{ id: "workflow-a" }],
+				new Set<Capability>(["workflows.catalogs"]),
+				svc
+			)
+		).resolves.toEqual([{ ...CONNECT_BINDING, request: { id: "workflow-a" } }]);
+		await expect(
+			dispatchRpc(
+				"workflows.removeConnectBinding",
+				[{ id: "workflow-a", bindingId: "binding-a" }],
+				new Set<Capability>(["workflows.catalogs"]),
+				svc
+			)
+		).rejects.toThrow();
+		await expect(
+			dispatchRpc(
+				"workflows.removeConnectBinding",
+				[{ id: "workflow-a", bindingId: "binding-a" }],
+				new Set<Capability>(["workflows.runstate"]),
+				svc
+			)
+		).resolves.toBeUndefined();
 	});
 
 	it("Connect workflow reads reject caller-supplied identity selectors", async () => {
@@ -203,11 +296,27 @@ describe("dispatchRpc capability gate", () => {
 		const svc: HostServices = {
 			...services(),
 			workflowsNotifyTargets: () =>
-				Promise.resolve([{ id: "user-ada", name: "Ada Lovelace" }]),
+				Promise.resolve([
+					{
+						email: null,
+						id: "user-ada",
+						image: null,
+						name: "Ada Lovelace",
+						role: null,
+					},
+				]),
 		};
 		await expect(
 			dispatchRpc("workflows.notifyTargets", [], catalogGrant, svc)
-		).resolves.toEqual([{ id: "user-ada", name: "Ada Lovelace" }]);
+		).resolves.toEqual([
+			{
+				email: null,
+				id: "user-ada",
+				image: null,
+				name: "Ada Lovelace",
+				role: null,
+			},
+		]);
 	});
 
 	it("dispatches Chat Broadcast list and send through the explicit grant", async () => {
@@ -234,6 +343,7 @@ describe("dispatchRpc capability gate", () => {
 		const readServices: HostServices = {
 			...services(),
 			activityAudit: async (input) => ({
+				count: 0,
 				entries: [],
 				filter: input,
 				reachable: true,
@@ -254,7 +364,7 @@ describe("dispatchRpc capability gate", () => {
 		const maintenanceServices: HostServices = {
 			...services(),
 			activityPrune: async () => ({ deleted_rows: 3 }),
-			activityScore: async (input) => ({ kind: "online_score", input }),
+			activityScore: async (input) => ({ ...ONLINE_SCORE, input }),
 		};
 		await expect(
 			dispatchRpc("activity.prune", [], runGrant, maintenanceServices)
@@ -273,7 +383,7 @@ describe("dispatchRpc capability gate", () => {
 			...services(),
 			activityRedteam: async (input) => {
 				called = true;
-				return input;
+				return { ...REDTEAM_RESULT, input };
 			},
 		};
 		await expect(
@@ -283,7 +393,7 @@ describe("dispatchRpc capability gate", () => {
 				runGrant,
 				runServices
 			)
-		).resolves.toEqual({ agent_id: "agent-1" });
+		).resolves.toEqual({ ...REDTEAM_RESULT, input: { agent_id: "agent-1" } });
 		expect(called).toBe(true);
 		await expect(
 			dispatchRpc(
@@ -314,7 +424,8 @@ describe("dispatchRpc capability gate", () => {
 				called = true;
 				return Promise.resolve(AGENTS);
 			},
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 		};
 		await expect(
 			dispatchRpc("core.listAgents", [], NONE, spy)
@@ -327,6 +438,7 @@ describe("dispatchRpc capability gate", () => {
 			if (
 				capability === "host.capabilities" ||
 				capability === "i18n" ||
+				capability === "ui.displayMode" ||
 				method === "node.shareOrigins"
 			) {
 				continue;
@@ -386,7 +498,8 @@ describe("Safe Actions fixed-mount bridge", () => {
 		let received: unknown;
 		const svc: HostServices = {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			safeActionsRequest: async (input) => {
 				received = input;
 				return { ok: true };
@@ -425,9 +538,11 @@ describe("Safe Actions fixed-mount bridge", () => {
 		await expect(
 			dispatchRpc("safeActions.request", [{ path: "/policies" }], NONE, {
 				listAgents: () => Promise.resolve([]),
-				registerRoute: () => Promise.resolve(null),
+				registerRoute: (claim: RouteClaim) =>
+					Promise.resolve({ path: claim.path }),
 				safeActionsRequest: async () => {
 					called = true;
+					return undefined;
 				},
 			})
 		).rejects.toMatchObject({ code: "denied" });
@@ -436,26 +551,44 @@ describe("Safe Actions fixed-mount bridge", () => {
 });
 
 describe("grant-mapping completeness invariant", () => {
-	// `widget.state`, `ui.displayMode`, and `host.capabilities` are LOCAL host caps
-	// added directly by the
-	// widget host on mount (never Gateway-sourced), so they intentionally have no
-	// grant-string mapping. Every OTHER capability a method gates MUST be unlockable
+	// Local host caps are supplied by the host contract, never Gateway-sourced.
+	// `file.access` is added only when PluginHostPanel receives host-owned access
+	// to an explicitly opened file. It intentionally has no manifest grant;
+	// the services independently enforce that mounted file's URI and editability. Every OTHER capability a method gates MUST be unlockable
 	// via some grant string in GRANT_CAPABILITY — otherwise the whole method family
 	// is functionally dead: the Gateway-approved grant maps to nothing, the granted
 	// set is empty, and every call is denied (the `timeline.read` regression).
+	// `file.access` is likewise added on mount, and only when the host wires a
+	// file-access service (app-widget.tsx, PluginHostPanel.tsx).
 	const LOCAL_HOST_CAPS = new Set<Capability>([
+		"file.access",
 		"host.capabilities",
 		"i18n",
 		"node.shareOrigins",
 		"widget.state",
 		"ui.displayMode",
 	]);
+	const HOST_CONTEXT_CAPS = new Set<Capability>(["file.access"]);
 
-	it("every capability reachable from METHOD_CAPABILITY has a grant mapping", () => {
+	it("selected-file access is exclusively host-provisioned for read and write", () => {
+		expect(
+			Object.entries(METHOD_CAPABILITY)
+				.filter(([, capability]) => capability === "file.access")
+				.map(([method]) => method)
+				.sort()
+		).toEqual(["files.read", "files.write"]);
+		expect(Object.values(GRANT_CAPABILITY)).not.toContain("file.access");
+	});
+
+	it("every capability is manifest-grantable or explicitly host-provisioned", () => {
 		const grantable = new Set<Capability>(Object.values(GRANT_CAPABILITY));
 		const unmapped: Array<{ capability: Capability; methods: string[] }> = [];
 		for (const capability of new Set(Object.values(METHOD_CAPABILITY))) {
-			if (LOCAL_HOST_CAPS.has(capability) || grantable.has(capability)) {
+			if (
+				LOCAL_HOST_CAPS.has(capability) ||
+				HOST_CONTEXT_CAPS.has(capability) ||
+				grantable.has(capability)
+			) {
 				continue;
 			}
 			unmapped.push({
@@ -466,6 +599,13 @@ describe("grant-mapping completeness invariant", () => {
 			});
 		}
 		expect(unmapped).toEqual([]);
+	});
+
+	it("attachment access stays host-context-only and denies ungranted calls", () => {
+		expect(Object.values(GRANT_CAPABILITY)).not.toContain("file.access");
+		for (const method of ["files.read", "files.write"]) {
+			expect(() => assertGranted(method, new Set())).toThrow(CapabilityError);
+		}
 	});
 });
 
@@ -479,7 +619,7 @@ describe("node share-origin host method", () => {
 				...services(),
 				nodeShareOrigins: () => Promise.resolve([...origins]),
 			})
-		).resolves.toEqual(origins);
+		).resolves.toEqual([...origins]);
 		await expect(
 			dispatchRpc("node.shareOrigins", [{}], new Set(), {
 				...services(),
@@ -526,7 +666,8 @@ describe("assistant bridge dispatch", () => {
 		const calls: string[] = [];
 		const svc: HostServices = {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			assistantPublishContext: async ({ items }) => {
 				calls.push(`publish:${items.length}`);
 			},
@@ -571,7 +712,8 @@ describe("assistant bridge dispatch", () => {
 		let touched = false;
 		const svc: HostServices = {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			assistantPublishContext: async () => {
 				touched = true;
 			},

@@ -4,19 +4,27 @@ import { useDraggable } from "@platejs/dnd";
 import { parseTwitterUrl, parseVideoUrl } from "@platejs/media";
 import { useMediaState } from "@platejs/media/react";
 import { ResizableProvider, useResizableValue } from "@platejs/resizable";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { TResizableProps, TVideoElement } from "platejs";
 import type { PlateElementProps } from "platejs/react";
 import { PlateElement, useEditorMounted, withHOC } from "platejs/react";
+import type { CSSProperties as ReactCSSProperties } from "react";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import ReactPlayer from "react-player";
-
+import editorStyles from "../editor-lint.module.css";
 import { Caption, CaptionTextarea } from "./caption.tsx";
+import { requireMediaEmbedId } from "./required-media-embed-id.ts";
 import {
 	mediaResizeHandleVariants,
 	Resizable,
 	ResizeHandle,
 } from "./resize-handle.tsx";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editormediaVideoNode1-width"?: string | number;
+}
 
 export const VideoElement = withHOC(
 	ResizableProvider,
@@ -35,6 +43,7 @@ export const VideoElement = withHOC(
 			urlParsers: [parseTwitterUrl, parseVideoUrl],
 		});
 		const width = useResizableValue("width");
+		const safeUrl = safeMediaUrl(unsafeUrl);
 
 		const isEditorMounted = useEditorMounted();
 		const shouldRenderEmbedPlayer =
@@ -47,6 +56,11 @@ export const VideoElement = withHOC(
 			element: props.element,
 		});
 
+		const editormediaVideoNode1Style: EditorVariableStyle = {
+			"--editormediaVideoNode1-width": isNativeNumber(width)
+				? `${width}px`
+				: width,
+		};
 		return (
 			<PlateElement className="py-2.5" {...props}>
 				<figure className="relative m-0 cursor-default" contentEditable={false}>
@@ -74,7 +88,7 @@ export const VideoElement = withHOC(
 							{!isUpload && isYoutube && (
 								<div ref={handleRef}>
 									<LiteYouTubeEmbed
-										id={embed?.id!}
+										id={requireMediaEmbedId(embed?.id)}
 										title="youtube"
 										wrapperClass={cn(
 											"aspect-video rounded-sm",
@@ -101,7 +115,7 @@ export const VideoElement = withHOC(
 									<video
 										className="w-full max-w-full rounded-sm object-cover px-0"
 										controls
-										src={unsafeUrl}
+										src={safeUrl ?? undefined}
 									/>
 								</div>
 							)}
@@ -111,7 +125,7 @@ export const VideoElement = withHOC(
 									<ReactPlayer
 										controls
 										height="100%"
-										src={unsafeUrl}
+										src={safeUrl ?? undefined}
 										width="100%"
 									/>
 								</div>
@@ -119,9 +133,13 @@ export const VideoElement = withHOC(
 						</div>
 					</Resizable>
 
-					<Caption align={align} style={{ width }}>
+					<Caption
+						align={align}
+						className={editorStyles.editormediaVideoNode1}
+						style={editormediaVideoNode1Style}
+					>
 						<CaptionTextarea
-							placeholder="Write a caption..."
+							placeholder="Write a caption…"
 							readOnly={readOnly}
 						/>
 					</Caption>

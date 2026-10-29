@@ -7,6 +7,8 @@ import {
 
 export const DEFAULT_GIT_SETTINGS: Required<GitGovernanceSettings> = {
 	alwaysForcePush: false,
+	autoAddressPullRequestComments: false,
+	autoArchiveClosedPullRequestChats: false,
 	autoMergeWhenReady: false,
 	branchPrefix: "codex/",
 	commitInstructions: "",

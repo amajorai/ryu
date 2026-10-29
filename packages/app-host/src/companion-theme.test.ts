@@ -7,11 +7,70 @@ import {
 } from "./companion-theme.ts";
 
 describe("companion theme seam", () => {
+	test("discovers the theme seam independently of app-specific bridges", () => {
+		const previousWindow = Object.getOwnPropertyDescriptor(
+			globalThis,
+			"window"
+		);
+		const previousRyu = Object.getOwnPropertyDescriptor(globalThis, "ryu");
+		let subscriptions = 0;
+		let disposals = 0;
+		const bridge = {
+			shell: {
+				subscribeTheme: () => {
+					subscriptions += 1;
+					return {
+						dispose: () => {
+							disposals += 1;
+						},
+					};
+				},
+			},
+		};
+		try {
+			Object.defineProperty(globalThis, "window", {
+				configurable: true,
+				value: { ryu: { ...bridge, skills: { getSource: () => "" } } },
+			});
+			subscribeCompanionTheme(undefined, null)();
+			Object.defineProperty(globalThis, "window", {
+				configurable: true,
+				value: {},
+			});
+			Object.defineProperty(globalThis, "ryu", {
+				configurable: true,
+				value: bridge,
+			});
+			subscribeCompanionTheme(undefined, null)();
+			Object.defineProperty(globalThis, "window", {
+				configurable: true,
+				value: { ryu: { shell: { subscribeTheme: "invalid" } } },
+			});
+			subscribeCompanionTheme(undefined, null)();
+			expect(subscriptions).toBe(2);
+			expect(disposals).toBe(2);
+		} finally {
+			for (const [key, descriptor] of [
+				["window", previousWindow],
+				["ryu", previousRyu],
+			] as const) {
+				if (descriptor) {
+					Object.defineProperty(globalThis, key, descriptor);
+				} else {
+					Reflect.deleteProperty(globalThis, key);
+				}
+			}
+		}
+	});
+
 	function root() {
 		const values = new Map<string, string>();
 		return {
 			values,
 			element: {
+				classList: { toggle: () => false },
+				setAttribute: () => {},
+				removeAttribute: () => {},
 				style: {
 					setProperty: (name: string, value: string) => values.set(name, value),
 				},
@@ -26,7 +85,7 @@ describe("companion theme seam", () => {
 				"--primary": "#0099ff",
 				foreground: "should-not-apply",
 			},
-			target.element as unknown as HTMLElement
+			target.element
 		);
 		expect(target.values.get("--primary")).toBe("#0099ff");
 		expect(target.values.get("foreground")).toBeUndefined();
@@ -45,7 +104,7 @@ describe("companion theme seam", () => {
 					},
 				},
 			},
-			target.element as unknown as HTMLElement
+			target.element
 		);
 		onChange?.({ "--background": "#101010" });
 		stop();
@@ -70,12 +129,13 @@ describe("companion theme seam", () => {
 					} else {
 						classes.add(name);
 					}
+					return classes.has(name);
 				},
 			},
 			setAttribute: (name: string, value: string) =>
 				attributes.set(name, value),
 			removeAttribute: (name: string) => attributes.delete(name),
-		} as unknown as HTMLElement;
+		};
 
 		applyCompanionThemeTokens(
 			{
@@ -114,6 +174,7 @@ describe("companion theme seam", () => {
 			getAttribute: () => null,
 			ownerDocument: {
 				defaultView: {
+					navigator: { language: "en-US" },
 					getComputedStyle: () => ({
 						getPropertyValue: (name: string) =>
 							name === "--primary"
@@ -129,7 +190,7 @@ describe("companion theme seam", () => {
 					},
 				},
 			},
-		} as unknown as HTMLElement;
+		};
 
 		const tokens = readCompanionThemeTokens(root, {
 			includeStoredPreferences: true,
@@ -152,9 +213,9 @@ describe("companion theme seam", () => {
 	test("marks a mounted app root with the fixed UI contract", () => {
 		const classes: string[] = [];
 		const element = {
-			dataset: {} as DOMStringMap,
+			dataset: { ryuAppUi: "", ryuSurface: "" },
 			classList: { add: (name: string) => classes.push(name) },
-		} as unknown as HTMLElement;
+		};
 
 		markCompanionAppRoot(element, { surface: "editor" });
 

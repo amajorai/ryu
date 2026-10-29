@@ -29,6 +29,7 @@ import {
 	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -55,6 +56,7 @@ import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@ryu/ui/components/native-select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import {
 	Table,
@@ -76,186 +78,52 @@ import {
 	formatCount as formatSharedCount,
 } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { ReactNode } from "react";
+import type { AppJsonValue } from "@ryuhq/core-client/app-request-json.ts";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { z } from "zod";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useApps } from "@/src/hooks/useApps.ts";
-import { apiUrl, makeHeaders } from "@/src/lib/api/client.ts";
+import { makeHeaders } from "@/src/lib/api/client.ts";
 import { formatDate as formatDateInZone } from "@/src/lib/timezone.ts";
+import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
+import ugcStyles from "./ugc.module.css";
+import { createUgcCall, type UgcCall } from "./ugc-request.ts";
+import {
+	type CampaignView as Campaign,
+	type CampaignStatus,
+	type CampaignSummaryView as CampaignSummary,
+	type CreatorView as Creator,
+	campaignSummaryViewSchema,
+	campaignViewSchema,
+	creatorViewSchema,
+	type LeaderboardView as LeaderboardRow,
+	leaderboardViewSchema,
+	type MetricSnapshotView as MetricSnapshot,
+	normalizedSubmissionRefreshSchema,
+	type PayoutView as Payout,
+	type PayoutRule,
+	type PlatformView as PlatformSource,
+	payoutViewSchema,
+	platformViewSchema,
+	type RefreshCounts,
+	readUgcList,
+	refreshCountsSchema,
+	type SubmissionView as Submission,
+	type SubmissionRefreshReport,
+	type SubmissionStatus,
+	submissionViewSchema,
+	type UgcOverview,
+	ugcDocumentSchema,
+	ugcOverviewSchema,
+} from "./ugc-wire-contracts.ts";
 
 /** The app that owns this panel. Feature detection keys off it, so a disabled
  *  app renders an enable hint instead of hammering a sidecar that is not there. */
 const UGC_PLUGIN_ID = "@ryu/ugc";
 
-/** The sidecar's public mount. Every path below is relative to this. */
-const UGC_BASE = "/api/ugc";
-
 /** Server caps this too; asking for a sane page keeps the panel snappy. */
 const LEADERBOARD_LIMIT = 10;
-
-// ── Wire types ───────────────────────────────────────────────────────────────
-// Snake_case because that is what the sidecar serializes. Optional fields are
-// optional on purpose: this panel degrades to "—" rather than crashing when the
-// sidecar is a version ahead of or behind this build.
-
-type CampaignStatus = "draft" | "active" | "paused" | "ended";
-type SubmissionStatus = "pending" | "approved" | "rejected" | "paid";
-type PayoutStatus = "accrued" | "approved" | "paid";
-
-/** Externally tagged, exactly as the sidecar's `PayoutRule` serializes. */
-type PayoutRule =
-	| { cpm_cents: number; type: "cpm" }
-	| { flat_cents: number; type: "flat" };
-
-interface Campaign {
-	brand: string;
-	brief?: string;
-	budget_cents: number;
-	ends_at?: string | null;
-	id: string;
-	/** Read back and DISPLAYED, not just round-tripped: the rule decides every
-	 *  accrual, so an operator must be able to see it without opening the API. */
-	payout?: PayoutRule;
-	platforms?: string[];
-	starts_at?: string | null;
-	status: CampaignStatus;
-}
-
-interface CampaignSummary {
-	accrued_cents: number;
-	approved_cents: number;
-	budget_cents: number;
-	creators: number;
-	paid_cents: number;
-	/** `budget_cents - committed_cents`, floored at 0 — and NULL, not 0, when the
-	 *  campaign is uncapped (`budget_cents == 0`). The sidecar serializes an
-	 *  `Option<i64>` here with no `skip_serializing_if`, so the key is always
-	 *  present and "unlimited" arrives as an explicit `null`. */
-	remaining_cents: number | null;
-	submissions: Record<SubmissionStatus, number>;
-	total_comments: number;
-	total_likes: number;
-	total_views: number;
-}
-
-interface MetricSnapshot {
-	captured_at: string;
-	comments: number;
-	likes: number;
-	saves: number;
-	shares: number;
-	source: "composio" | "manual";
-	views: number;
-}
-
-interface Submission {
-	/** What this post has accrued, from the payout row the list read joins in.
-	 *  NULL means no payout has accrued at all — a distinct fact from a real
-	 *  zero, which an unpriced campaign or a zero-view post genuinely produces.
-	 *  Optional as well as nullable because a sidecar older than this build does
-	 *  not send the key; that degrades to "—" exactly like a null. */
-	accrued_cents?: number | null;
-	campaign_id: string;
-	creator_id: string;
-	external_post_id?: string;
-	id: string;
-	latest?: MetricSnapshot | null;
-	/** The joined payout row's state, so the row says whether that money is still
-	 *  accruing, cleared for payment, or already paid. Null alongside a null
-	 *  `accrued_cents`. */
-	payout_status?: PayoutStatus | null;
-	platform: string;
-	post_url: string;
-	rejection_reason?: string | null;
-	status: SubmissionStatus;
-	submitted_at: string;
-}
-
-interface Creator {
-	contact_email?: string | null;
-	display_name: string;
-	id: string;
-}
-
-interface LeaderboardRow {
-	accrued_cents: number;
-	approved_submissions: number;
-	creator_id: string;
-	display_name?: string;
-	paid_cents: number;
-	views: number;
-}
-
-interface Payout {
-	amount_cents: number;
-	campaign_id: string;
-	creator_id: string;
-	id: string;
-	reason?: string;
-	status: PayoutStatus;
-	submission_id?: string | null;
-}
-
-/** One row of the sidecar's curated Composio action map, served verbatim by
- *  `GET /api/ugc/platforms`. The panel uses it for labels and to say honestly
- *  which platforms can auto-refresh at all. */
-interface PlatformSource {
-	action: string;
-	label: string;
-	platform: string;
-}
-
-/** The three answers a refresh gives about ONE submission.
- *
- *  `needs_connection` is a SUCCESS the operator can act on, not a failure: the
- *  account behind that platform is not linked to this node's Composio entity yet,
- *  so there were no counters to read. The sidecar writes nothing on that branch —
- *  no snapshot, no re-priced payout — which is why it can never be folded into
- *  the refreshed count. */
-type RefreshStatus = "error" | "needs_connection" | "ok";
-
-/** One submission's line in a refresh response. Both refresh routes report this
- *  identical shape, and the sidecar serializes `message`/`connect_url`/`snapshot`
- *  as explicit nulls rather than skipping them, so the panel switches on `status`
- *  instead of probing for keys. Optional here anyway: a sidecar a version behind
- *  this build may not send them at all. */
-interface SubmissionRefreshReport {
-	connect_url?: string | null;
-	message?: string | null;
-	snapshot?: MetricSnapshot | null;
-	status: RefreshStatus;
-	submission_id: string;
-}
-
-/** The campaign-level split, counted by the sidecar. `needs_connection` is
- *  counted apart from `error` because the two need different things done about
- *  them — link an account versus read what broke. */
-interface RefreshCounts {
-	error: number;
-	needs_connection: number;
-	ok: number;
-}
-
-/** Where the Composio API key this app refreshes with comes from. `app` is the
- *  one the operator saved here; `env` is this node's environment. */
-type ComposioKeySource = "app" | "env" | "none";
-
-/** `GET /api/ugc/settings`. The key itself is write-only on the wire — no route
- *  returns it, a prefix of it, or its length — so there is nothing to render but
- *  these two derived facts. */
-interface UgcSettings {
-	composio_configured: boolean;
-	composio_key_source: ComposioKeySource;
-}
-
-/** The bare mount's cross-campaign rollup, served by `GET /api/ugc`. */
-interface UgcOverview {
-	accrued_cents: number;
-	campaigns: number;
-	creators: number;
-	paid_cents: number;
-	submissions: Record<SubmissionStatus, number>;
-}
 
 // ── Formatting ───────────────────────────────────────────────────────────────
 
@@ -344,127 +212,40 @@ function spendPercent(spentCents: number, budgetCents: number): number | null {
  *  post already submitted to this campaign, a 409 for approving an already-paid
  *  payout, a 400 for a platform with no curated Composio source, a 502 carrying
  *  Composio's own error. Swallowing those into "409" would be a fake explanation. */
-function errorMessage(body: string, status: number): string {
-	const fallback = body.trim() || `Request failed (${status})`;
-	try {
-		const parsed = JSON.parse(body) as { error?: string; message?: string };
-		return parsed.error ?? parsed.message ?? fallback;
-	} catch {
-		return fallback;
-	}
-}
-
-/** Read a list out of a response that may be either a bare array or the usual
- *  `{ <key>: [...] }` envelope. The sidecar ships separately from this panel; a
- *  shape mismatch should render an empty table, not throw inside React. */
-function listOf<T>(data: unknown, key: string): T[] {
-	if (Array.isArray(data)) {
-		return data as T[];
-	}
-	if (data && typeof data === "object") {
-		const value = (data as Record<string, unknown>)[key];
-		if (Array.isArray(value)) {
-			return value as T[];
-		}
-	}
-	return [];
-}
-
-type UgcCall = <T>(path: string, init?: RequestInit) => Promise<T>;
-
-/** The one fetch seam, mirroring `BrowserSidecarPanel`'s: resolve the active node,
- *  attach its bearer, join the path onto the node URL. */
+/** Resolve the selected node and retain its native public-mount HTTP contract. */
 function useUgcCall(): UgcCall {
 	const node = useActiveNode();
 	const url = node.url;
 	const token = node.token ?? null;
 	const userJwt = node.userJwt ?? null;
 	const headers = useMemo(() => makeHeaders(token, userJwt), [token, userJwt]);
-	return useCallback(
-		async <T,>(path: string, init?: RequestInit): Promise<T> => {
-			const resp = await fetch(
-				apiUrl({ token, url, userJwt }, `${UGC_BASE}${path}`),
-				{
-					headers,
-					...init,
-				}
-			);
-			const text = await resp.text();
-			if (!resp.ok) {
-				throw new Error(errorMessage(text, resp.status));
-			}
-			return (text ? JSON.parse(text) : {}) as T;
-		},
-		[headers, token, url, userJwt]
-	);
+	return useCallback(createUgcCall({ token, url, userJwt }, headers), [
+		headers,
+		token,
+		url,
+		userJwt,
+	]);
 }
 
-function describeError(err: unknown): string {
-	return err instanceof Error ? err.message : "Request failed";
-}
+const describeError = z
+	.instanceof(Error)
+	.transform((error) => error.message)
+	.catch("Request failed").parse;
 
-// ── Refresh + settings readers ───────────────────────────────────────────────
+// ── Refresh + provider status readers ────────────────────────────────────────
 
-const COMPOSIO_KEY_SOURCES: readonly ComposioKeySource[] = [
-	"app",
-	"env",
-	"none",
-];
-
-/** Read the settings body, or null when the sidecar did not answer one this
- *  build understands.
- *
- *  Null means "unknown", and the panel then says nothing at all about the key —
- *  a sidecar older than this build has no `/settings` route, and guessing a
- *  source would put words in its mouth. */
-function readSettings(data: unknown): UgcSettings | null {
-	if (!data || typeof data !== "object") {
-		return null;
-	}
-	const row = data as {
-		composio_configured?: unknown;
-		composio_key_source?: unknown;
-	};
-	const source = COMPOSIO_KEY_SOURCES.find(
-		(candidate) => candidate === row.composio_key_source
-	);
-	if (typeof row.composio_configured !== "boolean" || !source) {
-		return null;
-	}
+/** `/platforms` owns both the curated metric sources and the managed provider
+ *  status. The satellite does not own a Composio credential or key-setting API. */
+function readPlatformCatalog(data: AppJsonValue) {
+	const document = ugcDocumentSchema.safeParse(data);
 	return {
-		composio_configured: row.composio_configured,
-		composio_key_source: source,
+		composioConfigured: z
+			.boolean()
+			.nullable()
+			.catch(null)
+			.parse(document.success ? document.data.composio_configured : null),
+		platforms: readUgcList(data, "platforms", platformViewSchema),
 	};
-}
-
-const REFRESH_STATUSES: readonly RefreshStatus[] = [
-	"error",
-	"needs_connection",
-	"ok",
-];
-
-/** Normalize one report line.
- *
- *  A status this build does not know is reported as `error` carrying whatever
- *  message came with it: it is certainly not a reading and certainly not a
- *  connect prompt, and dropping the row would quietly move a submission that did
- *  nothing into the refreshed count. */
-function readRefreshRow(row: SubmissionRefreshReport): SubmissionRefreshReport {
-	return REFRESH_STATUSES.includes(row.status)
-		? row
-		: { ...row, status: "error" };
-}
-
-function isRefreshCounts(value: unknown): value is RefreshCounts {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-	const counts = value as Record<string, unknown>;
-	return (
-		typeof counts.ok === "number" &&
-		typeof counts.needs_connection === "number" &&
-		typeof counts.error === "number"
-	);
 }
 
 /** Tally the rows this panel is about to render. Used when the sidecar sent no
@@ -506,44 +287,38 @@ function describeRefreshCounts(counts: RefreshCounts): string {
 
 // ── Small shared pieces ──────────────────────────────────────────────────────
 
-const CAMPAIGN_STATUS_VARIANT: Record<
-	CampaignStatus,
-	"default" | "destructive" | "outline" | "secondary"
-> = {
+const CAMPAIGN_STATUS_VARIANT = {
 	active: "default",
 	draft: "outline",
 	ended: "secondary",
 	paused: "secondary",
-};
+} satisfies Record<CampaignStatus, ComponentProps<typeof Badge>["variant"]>;
 
-const SUBMISSION_STATUS_VARIANT: Record<
-	SubmissionStatus,
-	"default" | "destructive" | "outline" | "secondary"
-> = {
+const SUBMISSION_STATUS_VARIANT = {
 	approved: "default",
 	paid: "secondary",
 	pending: "outline",
 	rejected: "destructive",
-};
+} satisfies Record<SubmissionStatus, ComponentProps<typeof Badge>["variant"]>;
 
-const PAYOUT_STATUS_VARIANT: Record<
-	PayoutStatus,
-	"default" | "destructive" | "outline" | "secondary"
-> = {
-	accrued: "outline",
-	approved: "default",
-	paid: "secondary",
-};
+const PAYOUT_STATUS_VARIANT = new Map<
+	string,
+	ComponentProps<typeof Badge>["variant"]
+>([
+	["accrued", "outline"],
+	["approved", "default"],
+	["paid", "secondary"],
+]);
 
 function StatusPill({
 	label,
 	variant,
 }: {
 	label: string;
-	variant: "default" | "destructive" | "outline" | "secondary";
+	variant: ComponentProps<typeof Badge>["variant"];
 }) {
 	return (
-		<Badge className="capitalize" variant={variant}>
+		<Badge casing="capitalized" variant={variant}>
 			{label}
 		</Badge>
 	);
@@ -560,12 +335,12 @@ function StatTile({
 }) {
 	return (
 		<div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
-			<div className="text-[11px] text-muted-foreground uppercase tracking-wide">
+			<div className="type-caption text-muted-foreground uppercase tracking-wide">
 				{label}
 			</div>
 			<div className="font-medium font-mono text-sm tabular-nums">{value}</div>
 			{hint ? (
-				<div className="text-[11px] text-muted-foreground">{hint}</div>
+				<div className="type-caption text-muted-foreground">{hint}</div>
 			) : null}
 		</div>
 	);
@@ -573,6 +348,10 @@ function StatTile({
 
 /** Spend against budget. An uncapped campaign gets the amount and an honest
  *  "no budget cap" rather than a bar that would imply a ceiling. */
+interface SpendStyle extends CSSProperties {
+	"--ugc-spend-width": string;
+}
+
 function SpendBar({
 	budgetCents,
 	spentCents,
@@ -581,9 +360,10 @@ function SpendBar({
 	spentCents: number;
 }) {
 	const pct = spendPercent(spentCents, budgetCents);
+	const spendStyle: SpendStyle = { "--ugc-spend-width": `${pct}%` };
 	if (pct === null) {
 		return (
-			<span className="text-[11px] text-muted-foreground">
+			<span className="type-caption text-muted-foreground">
 				<span className="font-mono tabular-nums">
 					{formatCents(spentCents)}
 				</span>{" "}
@@ -597,12 +377,13 @@ function SpendBar({
 				<span
 					className={cn(
 						"block h-full rounded-full",
+						ugcStyles.spendFill,
 						pct >= 100 ? "bg-destructive" : "bg-primary"
 					)}
-					style={{ width: `${pct}%` }}
+					style={spendStyle}
 				/>
 			</span>
-			<span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
+			<span className="type-caption shrink-0 font-mono text-muted-foreground tabular-nums">
 				{formatCents(spentCents)} / {formatCents(budgetCents)}
 			</span>
 		</span>
@@ -629,12 +410,7 @@ function PanelNotice({
 }
 
 function LoadingRow({ text = "Loading…" }: { text?: string }) {
-	return (
-		<div className="flex items-center gap-2 px-3 py-2 text-muted-foreground text-xs">
-			<Spinner className="size-3.5" />
-			<span>{text}</span>
-		</div>
-	);
+	return <SkeletonRows label={text} size="sm" spacing="compact-panel" />;
 }
 
 function ErrorBanner({ message }: { message: string }) {
@@ -646,27 +422,30 @@ function ErrorBanner({ message }: { message: string }) {
 	);
 }
 
-const URL_SCHEME_RE = /^https?:\/\//;
-
 /** A post link. External and untrusted, so `noopener noreferrer` is mandatory. */
 function PostLink({ url }: { url: string }) {
+	const safeUrl = safeHttpUrl(url);
+	if (!safeUrl) {
+		return null;
+	}
 	return (
 		<a
 			className="inline-flex items-center gap-1 text-primary hover:underline"
-			href={url}
+			href={safeUrl}
 			rel="noopener noreferrer"
 			target="_blank"
-			title={url}
+			title={safeUrl}
 		>
 			<HugeiconsIcon className="size-3" icon={LinkSquare01Icon} />
-			<span className="max-w-40 truncate">
-				{url.replace(URL_SCHEME_RE, "")}
+			<span
+				className="max-w-40 truncate"
+				title={safeUrl.replace(/^https?:\/\//, "")}
+			>
+				{safeUrl.replace(/^https?:\/\//, "")}
 			</span>
 		</a>
 	);
 }
-
-const HTTPS_URL_RE = /^https:\/\//;
 
 /** Composio's "connect this account" link, offered only when it is an `https:`
  *  URL.
@@ -677,16 +456,17 @@ const HTTPS_URL_RE = /^https:\/\//;
  *  the honest fallback — the operator can still connect the account from
  *  Composio, and a link that is not offered cannot run anything. */
 function ConnectLink({ url }: { url: string | null | undefined }) {
-	if (!(url && HTTPS_URL_RE.test(url))) {
+	const safeUrl = safeHttpUrl(url);
+	if (!safeUrl?.startsWith("https:")) {
 		return null;
 	}
 	return (
 		<a
 			className="inline-flex items-center gap-1 text-primary hover:underline"
-			href={url}
+			href={safeUrl}
 			rel="noopener noreferrer"
 			target="_blank"
-			title={url}
+			title={safeUrl}
 		>
 			<HugeiconsIcon className="size-3" icon={LinkSquare01Icon} />
 			Connect account
@@ -716,22 +496,20 @@ export function UgcPanel() {
 	return <UgcWorkspace />;
 }
 
-type UgcView = "campaigns" | "payouts";
+const ugcViewSchema = z.enum(["campaigns", "payouts"]);
+type UgcView = z.output<typeof ugcViewSchema>;
 
 function UgcWorkspace() {
 	const call = useUgcCall();
+	const openGateway = useGatewayDialog((state) => state.openGateway);
 	const [view, setView] = useState<UgcView>("campaigns");
 	const [revision, setRevision] = useState(0);
 	const [addingCreator, setAddingCreator] = useState(false);
 	const [creators, setCreators] = useState<Creator[]>([]);
 	const [platforms, setPlatforms] = useState<PlatformSource[]>([]);
-	/** The Composio credential's state, or null while it is unknown. `/settings`
-	 *  is the single read for it: `/platforms` reports the same `composio_configured`
-	 *  boolean, but only `/settings` also says which source backs it, and one fact
-	 *  read twice is a fact that can disagree with itself the moment the settings
-	 *  dialog stores a key. */
-	const [composio, setComposio] = useState<UgcSettings | null>(null);
-	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [composioConfigured, setComposioConfigured] = useState<boolean | null>(
+		null
+	);
 	const [overview, setOverview] = useState<UgcOverview | null>(null);
 
 	/** Anything that changes server state bumps this; every view re-reads. */
@@ -742,22 +520,19 @@ function UgcWorkspace() {
 		const load = async () => {
 			// The bare mount is the sidecar's cross-campaign rollup — the one read
 			// that answers "what is the state of everything" without a campaign.
-			const [overviewData, creatorData, platformData, settingsData] =
-				await Promise.all([
-					call<UgcOverview>(""),
-					call<unknown>("/creators"),
-					call<unknown>("/platforms"),
-					// Caught on its own: a sidecar without the settings route must cost
-					// the panel the key's state, not the whole first paint.
-					call<unknown>("/settings").catch(() => null),
-				]);
+			const [overviewData, creatorData, platformData] = await Promise.all([
+				call("").then(ugcOverviewSchema.parse),
+				call("/creators"),
+				call("/platforms"),
+			]);
 			if (cancelled) {
 				return;
 			}
 			setOverview(overviewData);
-			setCreators(listOf<Creator>(creatorData, "creators"));
-			setPlatforms(listOf<PlatformSource>(platformData, "platforms"));
-			setComposio(readSettings(settingsData));
+			setCreators(readUgcList(creatorData, "creators", creatorViewSchema));
+			const catalog = readPlatformCatalog(platformData);
+			setPlatforms(catalog.platforms);
+			setComposioConfigured(catalog.composioConfigured);
 		};
 		load().catch(() => {
 			// The views below each surface their own fetch error; a failure here only
@@ -767,9 +542,7 @@ function UgcWorkspace() {
 				setOverview(null);
 				setCreators([]);
 				setPlatforms([]);
-				// Back to "unknown" rather than to a stale answer: this build cannot
-				// tell whether the key state changed or the sidecar simply went away.
-				setComposio(null);
+				setComposioConfigured(null);
 			}
 		});
 		return () => {
@@ -792,7 +565,7 @@ function UgcWorkspace() {
 	return (
 		<Tabs
 			className="flex h-full min-h-0 flex-col"
-			onValueChange={(v) => setView(v as UgcView)}
+			onValueChange={(v) => setView(ugcViewSchema.parse(v))}
 			value={view}
 		>
 			<header className="flex shrink-0 items-center gap-2 border-border/60 border-b bg-sidebar px-2 py-1.5">
@@ -806,7 +579,7 @@ function UgcWorkspace() {
 				</TabsList>
 				<span className="flex-1" />
 				{overview ? (
-					<span className="hidden truncate text-[11px] text-muted-foreground tabular-nums sm:inline">
+					<span className="type-caption hidden truncate text-muted-foreground tabular-nums sm:inline">
 						{formatCount(overview.campaigns)} campaigns ·{" "}
 						{formatCount(overview.creators)} creators ·{" "}
 						{formatCount(overview.submissions.pending)} pending ·{" "}
@@ -845,17 +618,17 @@ function UgcWorkspace() {
 					<HugeiconsIcon icon={RefreshIcon} />
 					Reload
 				</Button>
-				{/* The Composio credential automated reads use. It lives in the header
-				    because it is node-wide, not per campaign. */}
+				{/* Composio credentials are owned by Gateway. Keep a direct path to the
+				    existing node-level key settings; the UGC sidecar has no key route. */}
 				<Button
-					onClick={() => setSettingsOpen(true)}
+					onClick={() => openGateway("keys")}
 					size="icon-sm"
-					title="Composio API key"
+					title="Composio settings in Gateway → Keys"
 					type="button"
 					variant="ghost"
 				>
 					<HugeiconsIcon icon={Settings01Icon} />
-					<span className="sr-only">Composio API key</span>
+					<span className="sr-only">Composio settings in Gateway → Keys</span>
 				</Button>
 			</header>
 			<NewCreatorDialog
@@ -863,19 +636,13 @@ function UgcWorkspace() {
 				onOpenChange={setAddingCreator}
 				open={addingCreator}
 			/>
-			<ComposioSettingsDialog
-				onOpenChange={setSettingsOpen}
-				onSettings={setComposio}
-				open={settingsOpen}
-				settings={composio}
-			/>
 			<TabsContent className="flex min-h-0 flex-1 flex-col" value="campaigns">
 				<CampaignsView
-					composio={composio}
+					composioConfigured={composioConfigured}
 					creatorName={creatorName}
 					creators={creators}
 					invalidate={invalidate}
-					onOpenSettings={() => setSettingsOpen(true)}
+					onOpenGatewayKeys={() => openGateway("keys")}
 					platformLabel={platformLabel}
 					platforms={platforms}
 					revision={revision}
@@ -903,20 +670,20 @@ const CAMPAIGN_STATUS_FILTERS: Array<{ label: string; value: string }> = [
 ];
 
 function CampaignsView({
-	composio,
+	composioConfigured,
 	creatorName,
 	creators,
 	invalidate,
-	onOpenSettings,
+	onOpenGatewayKeys,
 	platformLabel,
 	platforms,
 	revision,
 }: {
-	composio: UgcSettings | null;
+	composioConfigured: boolean | null;
 	creatorName: (id: string) => string;
 	creators: Creator[];
 	invalidate: () => void;
-	onOpenSettings: () => void;
+	onOpenGatewayKeys: () => void;
 	platformLabel: (platform: string) => string;
 	platforms: PlatformSource[];
 	revision: number;
@@ -933,19 +700,19 @@ function CampaignsView({
 		let cancelled = false;
 		setLoading(true);
 		const query = statusFilter ? `?status=${statusFilter}` : "";
-		call<unknown>(`/campaigns${query}`)
+		call(`/campaigns${query}`)
 			.then((data) => {
 				if (cancelled) {
 					return;
 				}
-				const rows = listOf<Campaign>(data, "campaigns");
+				const rows = readUgcList(data, "campaigns", campaignViewSchema);
 				setCampaigns(rows);
 				setError(null);
 				setSelectedId((prev) =>
 					prev && rows.some((c) => c.id === prev) ? prev : (rows[0]?.id ?? null)
 				);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (!cancelled) {
 					setCampaigns([]);
 					setError(describeError(err));
@@ -1027,7 +794,7 @@ function CampaignsView({
 											}
 										/>
 									</span>
-									<span className="mt-1 block text-[11px] text-muted-foreground">
+									<span className="type-caption mt-1 block text-muted-foreground">
 										{campaign.budget_cents > 0 ? (
 											<>
 												Budget{" "}
@@ -1049,11 +816,11 @@ function CampaignsView({
 				{selected ? (
 					<CampaignDetail
 						campaign={selected}
-						composio={composio}
+						composioConfigured={composioConfigured}
 						creatorName={creatorName}
 						creators={creators}
 						invalidate={invalidate}
-						onOpenSettings={onOpenSettings}
+						onOpenGatewayKeys={onOpenGatewayKeys}
 						platformLabel={platformLabel}
 						platforms={platforms}
 						revision={revision}
@@ -1090,21 +857,21 @@ interface CampaignDetailData {
 
 function CampaignDetail({
 	campaign,
-	composio,
+	composioConfigured,
 	creatorName,
 	creators,
 	invalidate,
-	onOpenSettings,
+	onOpenGatewayKeys,
 	platformLabel,
 	platforms,
 	revision,
 }: {
 	campaign: Campaign;
-	composio: UgcSettings | null;
+	composioConfigured: boolean | null;
 	creatorName: (id: string) => string;
 	creators: Creator[];
 	invalidate: () => void;
-	onOpenSettings: () => void;
+	onOpenGatewayKeys: () => void;
 	platformLabel: (platform: string) => string;
 	platforms: PlatformSource[];
 	revision: number;
@@ -1145,13 +912,11 @@ function CampaignDetail({
 		setLoading(true);
 		const query = statusFilter ? `?status=${statusFilter}` : "";
 		Promise.all([
-			call<CampaignSummary>(
-				`/campaigns/${encodeURIComponent(campaignId)}/summary`
+			call(`/campaigns/${encodeURIComponent(campaignId)}/summary`).then(
+				campaignSummaryViewSchema.parse
 			),
-			call<unknown>(
-				`/campaigns/${encodeURIComponent(campaignId)}/submissions${query}`
-			),
-			call<unknown>(
+			call(`/campaigns/${encodeURIComponent(campaignId)}/submissions${query}`),
+			call(
 				`/campaigns/${encodeURIComponent(campaignId)}/leaderboard?limit=${LEADERBOARD_LIMIT}`
 			),
 		])
@@ -1160,13 +925,21 @@ function CampaignDetail({
 					return;
 				}
 				setData({
-					leaderboard: listOf<LeaderboardRow>(leaderboard, "leaderboard"),
-					submissions: listOf<Submission>(submissions, "submissions"),
+					leaderboard: readUgcList(
+						leaderboard,
+						"leaderboard",
+						leaderboardViewSchema
+					),
+					submissions: readUgcList(
+						submissions,
+						"submissions",
+						submissionViewSchema
+					),
 					summary,
 				});
 				setError(null);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (!cancelled) {
 					setError(describeError(err));
 				}
@@ -1209,7 +982,7 @@ function CampaignDetail({
 		// would describe results this click did not get.
 		setRefreshReport(null);
 		try {
-			const resp = await call<{ counts?: unknown }>(
+			const resp = await call(
 				`/campaigns/${encodeURIComponent(campaignId)}/refresh`,
 				{
 					method: "POST",
@@ -1218,14 +991,16 @@ function CampaignDetail({
 			// A 200 here does NOT mean every submission was read: the route is
 			// best-effort per submission and reports each one's outcome as one of
 			// three, so the report is rendered rather than counted as a success.
-			const results = listOf<SubmissionRefreshReport>(resp, "results").map(
-				readRefreshRow
+			const results = readUgcList(
+				resp,
+				"results",
+				normalizedSubmissionRefreshSchema
 			);
+			const document = ugcDocumentSchema.parse(resp);
+			const counts = refreshCountsSchema.safeParse(document.counts);
 			setRefreshReport({
 				campaignId,
-				counts: isRefreshCounts(resp.counts)
-					? resp.counts
-					: tallyRefresh(results),
+				counts: counts.success ? counts.data : tallyRefresh(results),
 				results,
 			});
 			invalidate();
@@ -1245,7 +1020,7 @@ function CampaignDetail({
 			// a click that failed to produce one.
 			setRefreshReport(null);
 			try {
-				const resp = await call<SubmissionRefreshReport>(
+				const resp = await call(
 					`/submissions/${encodeURIComponent(submission.id)}/refresh`,
 					{
 						method: "POST",
@@ -1255,7 +1030,7 @@ function CampaignDetail({
 				// account comes back `needs_connection` having written nothing, so it
 				// goes through the same report as a campaign-wide run instead of
 				// looking like a refresh that worked.
-				const row = readRefreshRow(resp);
+				const row = normalizedSubmissionRefreshSchema.parse(resp);
 				setRefreshReport({
 					campaignId,
 					counts: tallyRefresh([row]),
@@ -1290,7 +1065,7 @@ function CampaignDetail({
 	const summary = data.summary;
 	const report =
 		refreshReport?.campaignId === campaignId ? refreshReport : null;
-	const composioMissing = composio?.composio_configured === false;
+	const composioMissing = composioConfigured === false;
 
 	return (
 		<section className="flex flex-col gap-3 p-3">
@@ -1302,10 +1077,10 @@ function CampaignDetail({
 					label={campaign.status}
 					variant={CAMPAIGN_STATUS_VARIANT[campaign.status] ?? "outline"}
 				/>
-				<span className="text-[11px] text-muted-foreground">
+				<span className="type-caption text-muted-foreground">
 					{formatDate(campaign.starts_at)} → {formatDate(campaign.ends_at)}
 				</span>
-				<span className="text-[11px] text-muted-foreground">
+				<span className="type-caption text-muted-foreground">
 					· {formatPayoutRule(campaign.payout)}
 				</span>
 				<span className="flex-1" />
@@ -1317,7 +1092,7 @@ function CampaignDetail({
 					size="xs"
 					title={
 						composioMissing
-							? "No Composio API key is configured — add one in the panel's settings, or record metrics by hand"
+							? "No managed Composio provider is configured — open Gateway → Keys, or record metrics by hand"
 							: "Refresh metrics for every approved submission"
 					}
 					type="button"
@@ -1406,25 +1181,23 @@ function CampaignDetail({
 					))}
 				</NativeSelect>
 			</div>
-			{/* Keyed on the one narrow question the sidecar can actually answer: does
-			    a Composio API key resolve in its process at all. So the copy claims
-			    only that, and names the fix. It does NOT promise the reads would
-			    otherwise succeed — whether each platform's account is linked is a
-			    separate fact, reported per submission as "needs a connection". */}
+			{/* The sidecar reports managed provider availability; it does not own a
+			    Composio key. Per-platform account connections remain a separate fact,
+			    reported per submission as "needs a connection". */}
 			{composioMissing ? (
 				<div className="flex flex-wrap items-center gap-2 px-3 py-2 text-muted-foreground text-xs">
 					<span className="min-w-0">
-						No Composio API key is configured, so automated refreshes have
-						nothing to read with. Record metrics by hand meanwhile.
+						No managed Composio provider is configured on this node. Configure
+						it in Gateway → Keys, or record metrics by hand meanwhile.
 					</span>
 					<Button
-						onClick={onOpenSettings}
+						onClick={onOpenGatewayKeys}
 						size="xs"
 						type="button"
 						variant="ghost"
 					>
 						<HugeiconsIcon icon={Settings01Icon} />
-						Add a key
+						Gateway keys
 					</Button>
 				</div>
 			) : null}
@@ -1562,9 +1335,9 @@ function AccruedCell({
 	status,
 }: {
 	cents: number | null | undefined;
-	status: PayoutStatus | null | undefined;
+	status: Submission["payout_status"];
 }) {
-	if (typeof cents !== "number") {
+	if (cents === null || cents === undefined) {
 		return <span className="text-muted-foreground">—</span>;
 	}
 	return (
@@ -1573,7 +1346,7 @@ function AccruedCell({
 			{status ? (
 				<StatusPill
 					label={status}
-					variant={PAYOUT_STATUS_VARIANT[status] ?? "outline"}
+					variant={PAYOUT_STATUS_VARIANT.get(status) ?? "outline"}
 				/>
 			) : null}
 		</span>
@@ -1610,16 +1383,20 @@ function SubmissionsTable({
 		);
 	}
 	return (
-		<Table className="text-xs">
+		<Table size="compact">
 			<TableHeader>
 				<TableRow>
-					<TableHead className="h-8 px-2 text-xs">Creator</TableHead>
-					<TableHead className="h-8 px-2 text-xs">Platform</TableHead>
-					<TableHead className="h-8 px-2 text-xs">Post</TableHead>
-					<TableHead className="h-8 px-2 text-xs">Status</TableHead>
-					<TableHead className="h-8 px-2 text-right text-xs">Views</TableHead>
-					<TableHead className="h-8 px-2 text-right text-xs">Accrued</TableHead>
-					<TableHead className="h-8 px-2 text-xs">
+					<TableHead size="compact">Creator</TableHead>
+					<TableHead size="compact">Platform</TableHead>
+					<TableHead size="compact">Post</TableHead>
+					<TableHead size="compact">Status</TableHead>
+					<TableHead className="text-right" size="compact">
+						Views
+					</TableHead>
+					<TableHead className="text-right" size="compact">
+						Accrued
+					</TableHead>
+					<TableHead size="compact">
 						<span className="sr-only">Review actions</span>
 					</TableHead>
 				</TableRow>
@@ -1627,16 +1404,16 @@ function SubmissionsTable({
 			<TableBody>
 				{submissions.map((submission) => (
 					<TableRow key={submission.id}>
-						<TableCell className="p-2">
+						<TableCell spacing="compact">
 							{creatorName(submission.creator_id)}
 						</TableCell>
-						<TableCell className="p-2">
+						<TableCell spacing="compact">
 							{platformLabel(submission.platform)}
 						</TableCell>
-						<TableCell className="p-2">
+						<TableCell spacing="compact">
 							<PostLink url={submission.post_url} />
 						</TableCell>
-						<TableCell className="p-2">
+						<TableCell spacing="compact">
 							<StatusPill
 								label={submission.status}
 								variant={
@@ -1644,16 +1421,24 @@ function SubmissionsTable({
 								}
 							/>
 						</TableCell>
-						<TableCell className="p-2 text-right tabular-nums">
+						<TableCell
+							className="text-right"
+							presentation="numeric"
+							spacing="compact"
+						>
 							{submission.latest ? formatCount(submission.latest.views) : "—"}
 						</TableCell>
-						<TableCell className="p-2 text-right tabular-nums">
+						<TableCell
+							className="text-right"
+							presentation="numeric"
+							spacing="compact"
+						>
 							<AccruedCell
 								cents={submission.accrued_cents}
 								status={submission.payout_status}
 							/>
 						</TableCell>
-						<TableCell className="p-2 text-right">
+						<TableCell className="text-right" spacing="compact">
 							<SubmissionRowActions
 								hasMetricSource={hasMetricSource}
 								onApprove={onApprove}
@@ -1771,16 +1556,22 @@ function LeaderboardTable({
 		);
 	}
 	return (
-		<Table className="text-xs">
+		<Table size="compact">
 			<TableHeader>
 				<TableRow>
-					<TableHead className="h-8 px-2 text-xs">Creator</TableHead>
-					<TableHead className="h-8 px-2 text-right text-xs">Views</TableHead>
-					<TableHead className="h-8 px-2 text-right text-xs">
+					<TableHead size="compact">Creator</TableHead>
+					<TableHead className="text-right" size="compact">
+						Views
+					</TableHead>
+					<TableHead className="text-right" size="compact">
 						Approved
 					</TableHead>
-					<TableHead className="h-8 px-2 text-right text-xs">Accrued</TableHead>
-					<TableHead className="h-8 px-2 text-right text-xs">Paid</TableHead>
+					<TableHead className="text-right" size="compact">
+						Accrued
+					</TableHead>
+					<TableHead className="text-right" size="compact">
+						Paid
+					</TableHead>
 				</TableRow>
 			</TableHeader>
 			<TableBody>
@@ -1790,19 +1581,35 @@ function LeaderboardTable({
 						    EMPTY when the creator row was deleted out from under the
 						    submissions, so a nullish fallback would never fire and the
 						    cell would render blank instead of the roster lookup. */}
-						<TableCell className="p-2">
+						<TableCell spacing="compact">
 							{row.display_name || creatorName(row.creator_id)}
 						</TableCell>
-						<TableCell className="p-2 text-right tabular-nums">
+						<TableCell
+							className="text-right"
+							presentation="numeric"
+							spacing="compact"
+						>
 							{formatCount(row.views)}
 						</TableCell>
-						<TableCell className="p-2 text-right tabular-nums">
+						<TableCell
+							className="text-right"
+							presentation="numeric"
+							spacing="compact"
+						>
 							{formatCount(row.approved_submissions)}
 						</TableCell>
-						<TableCell className="p-2 text-right font-mono tabular-nums">
+						<TableCell
+							className="text-right"
+							presentation="monospace-numeric"
+							spacing="compact"
+						>
 							{formatCents(row.accrued_cents)}
 						</TableCell>
-						<TableCell className="p-2 text-right font-mono tabular-nums">
+						<TableCell
+							className="text-right"
+							presentation="monospace-numeric"
+							spacing="compact"
+						>
 							{formatCents(row.paid_cents)}
 						</TableCell>
 					</TableRow>
@@ -1850,15 +1657,15 @@ function PayoutsView({
 		let cancelled = false;
 		setLoading(true);
 		const query = statusFilter ? `?status=${statusFilter}` : "";
-		call<unknown>(`/payouts${query}`)
+		call(`/payouts${query}`)
 			.then((data) => {
 				if (cancelled) {
 					return;
 				}
-				setPayouts(listOf<Payout>(data, "payouts"));
+				setPayouts(readUgcList(data, "payouts", payoutViewSchema));
 				setError(null);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (!cancelled) {
 					setPayouts([]);
 					setError(describeError(err));
@@ -1956,14 +1763,16 @@ function PayoutsTable({
 	payouts: Payout[];
 }) {
 	return (
-		<Table className="text-xs">
+		<Table size="compact">
 			<TableHeader>
 				<TableRow>
-					<TableHead className="h-8 px-2 text-xs">Creator</TableHead>
-					<TableHead className="h-8 px-2 text-xs">Reason</TableHead>
-					<TableHead className="h-8 px-2 text-xs">Status</TableHead>
-					<TableHead className="h-8 px-2 text-right text-xs">Amount</TableHead>
-					<TableHead className="h-8 px-2 text-xs">
+					<TableHead size="compact">Creator</TableHead>
+					<TableHead size="compact">Reason</TableHead>
+					<TableHead size="compact">Status</TableHead>
+					<TableHead className="text-right" size="compact">
+						Amount
+					</TableHead>
+					<TableHead size="compact">
 						<span className="sr-only">Payout actions</span>
 					</TableHead>
 				</TableRow>
@@ -1971,22 +1780,31 @@ function PayoutsTable({
 			<TableBody>
 				{payouts.map((payout) => (
 					<TableRow key={payout.id}>
-						<TableCell className="p-2">
+						<TableCell spacing="compact">
 							{creatorName(payout.creator_id)}
 						</TableCell>
-						<TableCell className="max-w-56 truncate p-2 text-muted-foreground">
+						<TableCell
+							className="max-w-56"
+							overflow="truncate"
+							presentation="muted"
+							spacing="compact"
+						>
 							{payout.reason || "—"}
 						</TableCell>
-						<TableCell className="p-2">
+						<TableCell spacing="compact">
 							<StatusPill
 								label={payout.status}
-								variant={PAYOUT_STATUS_VARIANT[payout.status] ?? "outline"}
+								variant={PAYOUT_STATUS_VARIANT.get(payout.status) ?? "outline"}
 							/>
 						</TableCell>
-						<TableCell className="p-2 text-right font-mono tabular-nums">
+						<TableCell
+							className="text-right"
+							presentation="monospace-numeric"
+							spacing="compact"
+						>
 							{formatCents(payout.amount_cents)}
 						</TableCell>
-						<TableCell className="p-2 text-right">
+						<TableCell className="text-right" spacing="compact">
 							<PayoutRowAction onAct={onAct} payout={payout} />
 						</TableCell>
 					</TableRow>
@@ -2077,199 +1895,7 @@ function ConfirmPayoutDialog({
 
 // ── Dialogs ──────────────────────────────────────────────────────────────────
 
-/** The honest state of the key, and nothing more.
- *
- *  An environment-provided key is reported as exactly that and NOT offered a
- *  clear button: this panel cannot unset a variable in the sidecar's process, so
- *  a button here could only fail. */
-function ComposioKeyState({ settings }: { settings: UgcSettings | null }) {
-	if (!settings) {
-		return (
-			<p className="text-[11px] text-muted-foreground">
-				This sidecar did not report whether a key is configured.
-			</p>
-		);
-	}
-	if (settings.composio_key_source === "app") {
-		return (
-			<p className="text-[11px] text-muted-foreground">
-				A key saved here is in use. Saving another replaces it.
-			</p>
-		);
-	}
-	if (settings.composio_key_source === "env") {
-		return (
-			<p className="text-[11px] text-muted-foreground">
-				This node&apos;s environment supplies the key, so it cannot be cleared
-				from here — unset it where it is set. A key saved here takes precedence
-				over it.
-			</p>
-		);
-	}
-	return (
-		<p className="text-[11px] text-muted-foreground">
-			No key is configured, so automated refreshes have nothing to read with.
-		</p>
-	);
-}
-
-/** The app's own Composio credential.
- *
- *  This app talks to Composio directly — Core injects no Composio key into a
- *  manifest sidecar — so the key is the app's to hold, and this dialog is the
- *  whole surface over it.
- *
- *  The key is WRITE-ONLY. `GET /settings` answers only whether one resolves and
- *  which source backs it, never the value, a prefix of it or its length, so
- *  there is nothing to prefill: the box starts empty every time and the typed
- *  value is dropped from state the moment the PUT returns. It goes in a request
- *  BODY, never a URL, and it is never logged. */
-function ComposioSettingsDialog({
-	onOpenChange,
-	onSettings,
-	open,
-	settings,
-}: {
-	onOpenChange: (open: boolean) => void;
-	onSettings: (settings: UgcSettings | null) => void;
-	open: boolean;
-	settings: UgcSettings | null;
-}) {
-	const call = useUgcCall();
-	const [apiKey, setApiKey] = useState("");
-	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	// Re-read on open: the environment behind an `env` key, or another window,
-	// may have changed what resolves since the panel first painted.
-	useEffect(() => {
-		if (!open) {
-			return;
-		}
-		let cancelled = false;
-		call<unknown>("/settings")
-			.then((data) => {
-				if (!cancelled) {
-					onSettings(readSettings(data));
-				}
-			})
-			.catch(() => undefined);
-		return () => {
-			cancelled = true;
-		};
-	}, [call, onSettings, open]);
-
-	const close = useCallback(() => {
-		setApiKey("");
-		setError(null);
-		onOpenChange(false);
-	}, [onOpenChange]);
-
-	const save = useCallback(async () => {
-		setError(null);
-		setBusy(true);
-		try {
-			const data = await call<unknown>("/settings/composio-key", {
-				body: JSON.stringify({ api_key: apiKey }),
-				method: "PUT",
-			});
-			// Held no longer than the request needs it: what is not in state cannot
-			// be re-rendered, and the route will never hand it back.
-			setApiKey("");
-			onSettings(readSettings(data));
-			onOpenChange(false);
-		} catch (err) {
-			setError(describeError(err));
-		} finally {
-			setBusy(false);
-		}
-	}, [apiKey, call, onOpenChange, onSettings]);
-
-	const clear = useCallback(async () => {
-		setError(null);
-		setBusy(true);
-		try {
-			const data = await call<unknown>("/settings/composio-key", {
-				method: "DELETE",
-			});
-			// The source AFTER the delete, which is `env` when this node's
-			// environment still supplies one — reporting that honestly is the point
-			// of re-reading the response rather than assuming "none".
-			onSettings(readSettings(data));
-		} catch (err) {
-			setError(describeError(err));
-		} finally {
-			setBusy(false);
-		}
-	}, [call, onSettings]);
-
-	return (
-		<Dialog
-			onOpenChange={(next) => {
-				if (next) {
-					onOpenChange(true);
-					return;
-				}
-				close();
-			}}
-			open={open}
-		>
-			<DialogContent>
-				<DialogHeader>
-					<DialogTitle>Composio API key</DialogTitle>
-					<DialogDescription>
-						Automated metric refreshes read each post&apos;s counters through
-						Composio with this key. It is stored by this app and never read
-						back, so the box below is always empty.
-					</DialogDescription>
-				</DialogHeader>
-				<div className="flex flex-col gap-3">
-					<ComposioKeyState settings={settings} />
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="ugc-composio-key">API key</Label>
-						<Input
-							autoComplete="off"
-							id="ugc-composio-key"
-							onChange={(e) => setApiKey(e.target.value)}
-							placeholder="Paste a Composio API key"
-							spellCheck={false}
-							type="password"
-							value={apiKey}
-						/>
-					</div>
-					{error ? <ErrorBanner message={error} /> : null}
-				</div>
-				<DialogFooter>
-					{settings?.composio_key_source === "app" ? (
-						<Button
-							disabled={busy}
-							onClick={() => {
-								clear().catch(() => undefined);
-							}}
-							type="button"
-							variant="ghost"
-						>
-							Clear stored key
-						</Button>
-					) : null}
-					<Button onClick={close} type="button" variant="ghost">
-						Cancel
-					</Button>
-					<Button
-						disabled={apiKey.trim().length === 0}
-						loading={busy}
-						onClick={() => {
-							save().catch(() => undefined);
-						}}
-						type="button"
-					>
-						Save key
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
-}
+const payoutRuleDraftKindSchema = z.enum(["cpm_cents", "flat_cents"]);
 
 interface PayoutRuleDraft {
 	amount: string;
@@ -2460,7 +2086,7 @@ function NewCampaignDialog({
 								onChange={(e) =>
 									setRule((prev) => ({
 										...prev,
-										kind: e.target.value as PayoutRuleDraft["kind"],
+										kind: payoutRuleDraftKindSchema.parse(e.target.value),
 									}))
 								}
 								value={rule.kind}
@@ -2796,9 +2422,7 @@ type MetricField = (typeof METRIC_FIELDS)[number]["key"];
 type MetricDraft = Record<MetricField, string>;
 type MetricCounts = Record<MetricField, number>;
 
-function draftFromSnapshot(
-	latest: MetricSnapshot | null | undefined
-): MetricDraft {
+function draftFromSnapshot(latest: MetricSnapshot | null | undefined) {
 	return {
 		comments: String(latest?.comments ?? 0),
 		likes: String(latest?.likes ?? 0),
@@ -2924,7 +2548,7 @@ function RecordMetricsDialog({
 						))}
 					</div>
 					{submission.latest ? (
-						<p className="text-[11px] text-muted-foreground">
+						<p className="type-caption text-muted-foreground">
 							Newest reading {formatDate(submission.latest.captured_at)},{" "}
 							{submission.latest.source === "composio"
 								? "read through Composio"
@@ -2932,7 +2556,7 @@ function RecordMetricsDialog({
 							.
 						</p>
 					) : (
-						<p className="text-[11px] text-muted-foreground">
+						<p className="type-caption text-muted-foreground">
 							No reading on this post yet — these are the first.
 						</p>
 					)}

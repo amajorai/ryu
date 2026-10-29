@@ -8,7 +8,7 @@
 //! evaluator that overrides a built-in by `id` is visible identically to the
 //! catalog API, the offline dataset runner, and the inline guardrail bridge.
 
-use super::{builtin_catalog, Evaluator};
+use super::{builtin_catalog, Evaluator, EvaluatorBinding, EvaluatorImpl, EvaluatorTarget};
 
 /// Holds the loaded evaluator catalog (built-ins merged with any custom entries).
 #[derive(Debug, Clone)]
@@ -45,6 +45,7 @@ impl EvaluatorRegistry {
         for c in custom {
             let mut entry = c.clone();
             entry.builtin = false;
+            entry.gate_unavailable_capabilities();
             match entries.iter().position(|e| e.id == entry.id) {
                 Some(pos) => entries[pos] = entry,
                 None => entries.push(entry),
@@ -58,6 +59,60 @@ impl EvaluatorRegistry {
     /// catalog entries — custom entries included, when built via [`Self::from_config`].
     pub fn get(&self, id: &str) -> Option<&Evaluator> {
         self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Reject active unavailable inline modes before processing live traffic.
+    /// An offline-only legacy binding does not claim to guard that traffic.
+    pub fn validate_inline_bindings(&self, bindings: &[EvaluatorBinding]) -> Result<(), String> {
+        for binding in bindings.iter().filter(|binding| binding.enabled) {
+            let Some(evaluator) = self.get(&binding.id) else {
+                continue;
+            };
+            // Explicit actions request inline execution. Bare legacy Code/Builtin
+            // and Image bindings formerly relied on a default inline action.
+            let requests_inline = binding.inline_action.is_some()
+                || (binding.offline.is_none()
+                    && (evaluator.target == EvaluatorTarget::Image
+                        || matches!(
+                            evaluator.impl_,
+                            EvaluatorImpl::Code { .. } | EvaluatorImpl::Builtin { .. }
+                        )));
+            if requests_inline {
+                if let Some(reason) = evaluator.unavailable_inline_reason() {
+                    return Err(format!("evaluator '{}' is unavailable inline: {reason}; disable or remove its binding", binding.id));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Configuration validates both modes; disabled bindings remain removable.
+    pub fn validate_bindings(&self, bindings: &[EvaluatorBinding]) -> Result<(), String> {
+        self.validate_inline_bindings(bindings)?;
+        for binding in bindings
+            .iter()
+            .filter(|binding| binding.enabled && binding.offline.is_some())
+        {
+            let Some(evaluator) = self.get(&binding.id) else {
+                continue;
+            };
+            if let Some(reason) = evaluator.unavailable_offline_reason() {
+                return Err(format!("evaluator '{}' is unavailable offline: {reason}; disable or remove its binding", binding.id));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_offline_ids(&self, ids: &[String]) -> Result<(), String> {
+        for id in ids {
+            let Some(evaluator) = self.get(id) else {
+                continue;
+            };
+            if let Some(reason) = evaluator.unavailable_offline_reason() {
+                return Err(format!("evaluator '{id}' is unavailable offline: {reason}"));
+            }
+        }
+        Ok(())
     }
 
     /// All registered evaluators, in catalog order (built-ins first, then any
@@ -94,6 +149,24 @@ pub fn validate_custom_evaluators(custom: &[Evaluator]) -> Result<(), String> {
             return Err(format!("duplicate custom evaluator id '{id}'"));
         }
         seen.push(id);
+        if let EvaluatorImpl::Regex { patterns } = &e.impl_ {
+            super::exec::validate_custom_patterns(patterns)
+                .map_err(|reason| format!("custom evaluator '{id}': {reason}"))?;
+        }
+        if e.capabilities.inline || e.inline.is_some() || e.enforced {
+            if let Some(reason) = e.unavailable_inline_reason() {
+                return Err(format!(
+                    "custom evaluator '{id}' is unavailable inline: {reason}"
+                ));
+            }
+        }
+        if e.capabilities.offline || e.offline.is_some() {
+            if let Some(reason) = e.unavailable_offline_reason() {
+                return Err(format!(
+                    "custom evaluator '{id}' is unavailable offline: {reason}"
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -194,5 +267,127 @@ mod tests {
 
         // Collision with a builtin id is ALLOWED (the override mechanism).
         assert!(validate_custom_evaluators(&[custom("toxicity")]).is_ok());
+    }
+    #[test]
+    fn unsupported_legacy_definitions_cannot_claim_execution() {
+        let mut legacy = custom("legacy_code");
+        legacy.impl_ = EvaluatorImpl::Code {
+            lang: super::super::CodeLang::Js,
+            source: "return 1".into(),
+        };
+        legacy.capabilities.inline = true;
+        legacy.inline = Some(super::super::InlineConfig {
+            action: crate::config::FirewallPolicy::Block,
+        });
+        legacy.enforced = true;
+        assert!(validate_custom_evaluators(&[legacy.clone()])
+            .unwrap_err()
+            .contains("unavailable"));
+        let registry = EvaluatorRegistry::from_custom(&[legacy]);
+        let projected = registry.get("legacy_code").unwrap();
+        assert!(!projected.capabilities.inline);
+        assert!(!projected.capabilities.offline);
+        assert!(!projected.enforced);
+        assert!(projected.inline.is_none() && projected.offline.is_none());
+        assert!(registry
+            .validate_offline_ids(&["legacy_code".into()])
+            .unwrap_err()
+            .contains("unavailable"));
+    }
+
+    #[test]
+    fn unavailable_bindings_fail_and_can_be_disabled_for_recovery() {
+        let registry = EvaluatorRegistry::new();
+        for id in [
+            "code_evaluator",
+            "code_checker",
+            "explicit_content",
+            "sensitive_imagery",
+        ] {
+            let mut binding = EvaluatorBinding {
+                id: id.into(),
+                enabled: true,
+                inline_action: None,
+                offline: None,
+                locked: false,
+            };
+            assert!(registry
+                .validate_bindings(&[binding.clone()])
+                .unwrap_err()
+                .contains("unavailable"));
+            binding.enabled = false;
+            assert!(registry.validate_bindings(&[binding]).is_ok());
+            assert!(registry.validate_offline_ids(&[id.into()]).is_err());
+        }
+        assert!(registry
+            .validate_offline_ids(&["audio_quality".into(), "user_interrupts".into()])
+            .is_err());
+        assert!(registry
+            .validate_offline_ids(&["correctness".into(), "pii_leakage".into()])
+            .is_ok());
+    }
+
+    #[test]
+    fn builtin_and_media_claims_are_rejected_but_supported_modes_remain_valid() {
+        let mut evaluator = custom("unsupported");
+        evaluator.impl_ = EvaluatorImpl::Builtin {
+            detector: "detector".into(),
+        };
+        assert!(validate_custom_evaluators(&[evaluator.clone()]).is_err());
+        // Named firewall detectors execute inline and offline.
+        evaluator.impl_ = EvaluatorImpl::Builtin {
+            detector: "secret".into(),
+        };
+        assert!(validate_custom_evaluators(&[evaluator.clone()]).is_ok());
+        evaluator.impl_ = EvaluatorImpl::Regex {
+            patterns: vec!["a{1000}{1000}".into()],
+        };
+        assert!(validate_custom_evaluators(&[evaluator.clone()]).is_err());
+        evaluator.impl_ = EvaluatorImpl::LlmJudge {
+            rubric: "Rate correctness".into(),
+        };
+        assert!(validate_custom_evaluators(&[evaluator.clone()]).is_ok());
+        evaluator.target = EvaluatorTarget::Image;
+        assert!(validate_custom_evaluators(&[evaluator.clone()]).is_err());
+        evaluator.target = EvaluatorTarget::Audio;
+        assert!(validate_custom_evaluators(&[evaluator.clone()]).is_err());
+        evaluator.target = EvaluatorTarget::Input;
+        evaluator.capabilities.offline = false;
+        evaluator.offline = None;
+        evaluator.capabilities.inline = true;
+        evaluator.inline = Some(super::super::InlineConfig {
+            action: crate::config::FirewallPolicy::Block,
+        });
+        evaluator.impl_ = EvaluatorImpl::Wasm {
+            module_base64: String::new(),
+            fail_open: false,
+        };
+        assert!(validate_custom_evaluators(&[evaluator.clone()]).is_ok());
+        evaluator.capabilities.offline = true;
+        assert!(validate_custom_evaluators(&[evaluator]).is_err());
+    }
+    #[test]
+    fn offline_only_unavailable_bindings_do_not_block_unrelated_traffic() {
+        let registry = EvaluatorRegistry::new();
+        let mut binding = EvaluatorBinding {
+            id: "code_checker".into(),
+            enabled: true,
+            inline_action: None,
+            offline: Some(OfflineConfig {
+                threshold: 0.5,
+                judge_model: None,
+            }),
+            locked: false,
+        };
+        assert!(registry
+            .validate_inline_bindings(&[binding.clone()])
+            .is_ok());
+        assert!(registry.validate_bindings(&[binding.clone()]).is_err());
+        binding.inline_action = Some(crate::config::FirewallPolicy::Block);
+        assert!(registry
+            .validate_inline_bindings(&[binding.clone()])
+            .is_err());
+        binding.enabled = false;
+        assert!(registry.validate_bindings(&[binding]).is_ok());
     }
 }

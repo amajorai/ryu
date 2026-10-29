@@ -36,6 +36,12 @@
 #                `stable` has no rolling tag, so it MUST be given one — e.g.
 #                `assemble-channel-feed.sh stable 0.1.0 amajorai/ryu v0.1.0`,
 #                which writes `latest.json`, the feed tauri.conf.json points at.
+#
+# FEED_PRODUCT (env, default `ryu`) picks the desktop product. `bot` assembles the
+# standalone Ryu Bot build's feed family (`latest-bot.json`,
+# `latest-bot-<channel>.json`) from its `Ryu Bot` artifacts. Both products can
+# share one release, so each mode only considers its OWN artifacts: a Ryu feed
+# that picked up a Bot bundle would replace Ryu with Ryu Bot on update.
 set -euo pipefail
 
 channel="${1:?usage: assemble-channel-feed.sh <channel> <version> [repo]}"
@@ -50,10 +56,20 @@ release_tag="${4:-$channel}"
 # `stable` is the app's own updater feed (`latest.json`), so it is named
 # differently and cannot infer its tag — a stable release has a real version tag,
 # not a rolling pointer.
+product="${FEED_PRODUCT:-ryu}"
+case "$product" in
+	ryu) feed_stem="latest" ;;
+	bot) feed_stem="latest-bot" ;;
+	*)
+		echo "assemble-channel-feed: unknown FEED_PRODUCT '$product' (ryu | bot)" >&2
+		exit 1
+		;;
+esac
+
 case "$channel" in
-	nightly | canary) feed_name="latest-$channel.json" ;;
+	nightly | canary) feed_name="$feed_stem-$channel.json" ;;
 	stable)
-		feed_name="latest.json"
+		feed_name="$feed_stem.json"
 		if [ "$release_tag" = "stable" ]; then
 			echo "assemble-channel-feed: 'stable' needs an explicit release tag" >&2
 			exit 1
@@ -68,7 +84,15 @@ esac
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-assets="$(gh release view "$release_tag" -R "$repo" --json assets --jq '.assets[].name')"
+all_assets="$(gh release view "$release_tag" -R "$repo" --json assets --jq '.assets[].name')"
+# Ryu Bot's productName is "Ryu Bot"; GitHub turns the space in an uploaded name
+# into a dot, so its artifacts start `Ryu.Bot` (or `Ryu Bot`/`Ryu_Bot`/`Ryu-Bot`).
+bot_prefix='^Ryu[._ -]Bot'
+if [ "$product" = "bot" ]; then
+	assets="$(echo "$all_assets" | grep -E -- "$bot_prefix" || true)"
+else
+	assets="$(echo "$all_assets" | grep -Ev -- "$bot_prefix" || true)"
+fi
 
 # Map a Tauri updater platform key to the artifact that serves it. macOS ships
 # the updater bundle as `.app.tar.gz`; the two arch legs would otherwise both be
@@ -91,15 +115,17 @@ platform_artifact() {
 		# only linux and windows — every macOS user was offered no update at all,
 		# and nothing failed. Suffix matching is what linux/windows already do.
 		darwin-aarch64)
-			match="$(echo "$assets" | grep -E -- '-aarch64\.app\.tar\.gz$' | head -n1 || true)"
+			# `-aarch64` from the overlay workflows' rename; `_aarch64` is
+			# tauri-action's own per-arch name (the private release's builds).
+			match="$(echo "$assets" | grep -E -- '[-_]aarch64\.app\.tar\.gz$' | head -n1 || true)"
 			if [ -z "$match" ]; then
 				# Pre-rename releases: a single bundle with no arch suffix.
 				match="$(echo "$assets" | grep -E '\.app\.tar\.gz$' \
-					| grep -Ev -- '-(aarch64|x86_64)\.app\.tar\.gz$' | head -n1 || true)"
+					| grep -Ev -- '[-_](aarch64|x86_64|x64)\.app\.tar\.gz$' | head -n1 || true)"
 			fi
 			echo "$match"
 			;;
-		darwin-x86_64) echo "$assets" | grep -E -- '-x86_64\.app\.tar\.gz$' | head -n1 || true ;;
+		darwin-x86_64) echo "$assets" | grep -E -- '[-_](x86_64|x64)\.app\.tar\.gz$' | head -n1 || true ;;
 		# Linux and Windows are single-arch in the rolling matrix. Matched by
 		# suffix because the filename carries the version, which changes per build.
 		#

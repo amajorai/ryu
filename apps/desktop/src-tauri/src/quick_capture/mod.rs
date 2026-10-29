@@ -31,10 +31,12 @@
 
 pub mod gesture;
 #[cfg(target_os = "macos")]
-mod mac;
+pub(crate) mod mac;
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
 /// Where a capture came from. Mirrors the `CaptureSource` the quests sidecar
@@ -68,7 +70,7 @@ impl Binding {
     }
 }
 
-/// The persisted settings, in `<ryu-home>/quick-capture.json`.
+/// The persisted settings, in `<data dir>/state/quick-capture.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     /// OFF until the user turns it on. Deliberate: switching this on is what
@@ -89,7 +91,7 @@ static STARTED: AtomicBool = AtomicBool::new(false);
 static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
 fn config_path() -> std::path::PathBuf {
-    crate::profile::ryu_home_dir().join("quick-capture.json")
+    ryu_sidecar_runtime::layout::state_path(&crate::profile::ryu_home_dir(), "quick-capture.json")
 }
 
 pub fn load_config() -> Config {

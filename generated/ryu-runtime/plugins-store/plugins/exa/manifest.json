@@ -45,8 +45,7 @@
         "fail_open": true,
         "unwrap_body": true,
         "body_defaults": {
-          "num_results": 10,
-          "use_autoprompt": true,
+          "numResults": 10,
           "contents": {
             "text": true
           }
@@ -59,15 +58,11 @@
               "type": "string",
               "description": "The search query. Supports natural-language and keyword queries."
             },
-            "num_results": {
+            "numResults": {
               "type": "integer",
               "description": "Number of results to return (default 10).",
               "minimum": 1,
               "maximum": 100
-            },
-            "use_autoprompt": {
-              "type": "boolean",
-              "description": "Let Exa rephrase the query for better neural search results (default true)."
             }
           },
           "required": ["query"]
@@ -130,7 +125,7 @@
         "fail_open": true,
         "unwrap_body": true,
         "body_defaults": {
-          "num_results": 10
+          "numResults": 10
         },
         "description": "Find pages similar to a given URL using Exa's neural search. Requires RYU_EXA_API_KEY.",
         "input_schema": {
@@ -140,7 +135,7 @@
               "type": "string",
               "description": "URL to find similar pages for."
             },
-            "num_results": {
+            "numResults": {
               "type": "integer",
               "description": "Number of similar results to return (default 10).",
               "minimum": 1,

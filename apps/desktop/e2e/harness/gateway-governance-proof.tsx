@@ -1,3 +1,11 @@
+import { z } from "zod";
+import { parseGatewayGovernanceSnapshot } from "../../src/lib/api/governance.ts";
+import { parseGovernanceValues } from "../../src/lib/api/governance-wire-contracts.ts";
+
+declare const window: Window;
+
+import { I18nProvider } from "@ryu/i18n/react";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { createRoot } from "react-dom/client";
@@ -10,15 +18,43 @@ import { NodeSelector } from "../../src/components/shell/NodeSelector.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { SystemStatusProvider } from "../../src/contexts/SystemStatusContext.tsx";
 import { TabsProvider } from "../../src/contexts/TabsContext.tsx";
+import type {
+	GatewayGovernanceSnapshot,
+	GitGovernanceSettings,
+	WorktreeGovernanceSettings,
+} from "../../src/lib/api/governance.ts";
+import type { HookInventory } from "../../src/lib/api/hooks.ts";
 import { LOCAL_FALLBACK, useNodeStore } from "../../src/store/useNodeStore.ts";
 import "../../src/index.css";
+
+interface GovernanceProofCall {
+	body: unknown;
+	method: string;
+	path: string;
+	status: number;
+}
+
+interface GovernanceProofWindow extends Window {
+	__GATEWAY_GOVERNANCE_PROOF__: {
+		armFailure: (kind: "git" | "worktrees") => void;
+		calls: () => GovernanceProofCall[];
+		releaseHeldRead: () => void;
+		snapshot: () => GatewayGovernanceSnapshot;
+	};
+}
+
+declare global {
+	interface Window {
+		__GATEWAY_GOVERNANCE_PROOF__?: GovernanceProofWindow["__GATEWAY_GOVERNANCE_PROOF__"];
+	}
+}
 
 const TARGET = {
 	token: null,
 	url: "http://127.0.0.1:7980",
 };
 
-const governance = {
+const governance: GatewayGovernanceSnapshot = {
 	layers: [
 		{
 			revision: 4,
@@ -30,7 +66,12 @@ const governance = {
 					mergeMethod: "merge",
 					reviewDelivery: "inline",
 				},
-				worktrees: { autoDelete: true, autoDeleteLimit: 15 },
+				worktrees: {
+					autoDelete: true,
+					autoDeleteLimit: 15,
+					fetchUpstream: false,
+					root: "/proof/managed-worktrees",
+				},
 			},
 			writable: true,
 		},
@@ -57,8 +98,65 @@ const governance = {
 	],
 	schemaVersion: 1,
 };
+const GOVERNANCE_STORAGE_KEY = "proof:gateway-governance";
+const storedGovernance = localStorage.getItem(GOVERNANCE_STORAGE_KEY);
+let governanceState: GatewayGovernanceSnapshot = storedGovernance
+	? parseGatewayGovernanceSnapshot(JSON.parse(storedGovernance))
+	: structuredClone(governance);
+const governanceCalls: GovernanceProofCall[] = [];
+const failedWrites = new Set<"git" | "worktrees">();
+const searchParams = new URLSearchParams(window.location.search);
+const failGovernanceReadOnce = searchParams.has("failGovernanceReadOnce");
+const holdGovernanceRead = searchParams.has("holdGovernanceRead");
+let readFailurePending = failGovernanceReadOnce;
+let heldReadPending = holdGovernanceRead;
+let releaseHeldRead: Parameters<
+	ConstructorParameters<typeof Promise<void>>[0]
+>[0] = () => undefined;
+const heldRead = new Promise<void>((resolve) => {
+	releaseHeldRead = resolve;
+});
 
-const hooks = {
+const cloneSnapshot = (snapshot: GatewayGovernanceSnapshot) =>
+	structuredClone(snapshot);
+
+const persistGovernance = () => {
+	localStorage.setItem(GOVERNANCE_STORAGE_KEY, JSON.stringify(governanceState));
+};
+
+const updateGovernanceLayer = (
+	scope: "node" | "user",
+	kind: "git" | "worktrees",
+	values: GitGovernanceSettings | WorktreeGovernanceSettings
+) => {
+	governanceState = {
+		...governanceState,
+		layers: governanceState.layers.map((layer) => {
+			if (layer.scope !== scope) {
+				return layer;
+			}
+			return {
+				...layer,
+				revision: layer.revision + 1,
+				values: { ...layer.values, [kind]: values },
+			};
+		}),
+	};
+	persistGovernance();
+};
+
+window.__GATEWAY_GOVERNANCE_PROOF__ = {
+	armFailure: (kind) => failedWrites.add(kind),
+	calls: () =>
+		governanceCalls.map((call) => ({
+			...call,
+			body: call.body === null ? null : JSON.parse(JSON.stringify(call.body)),
+		})),
+	releaseHeldRead: () => releaseHeldRead(),
+	snapshot: () => cloneSnapshot(governanceState),
+};
+
+const hooks: HookInventory = {
 	hooks: [
 		{
 			effectiveEnabled: false,
@@ -169,27 +267,139 @@ const connections = {
 	user_count: 2,
 };
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse<FixturePayload>(
+	body: FixturePayload,
+	status = 200
+): Response {
 	return new Response(JSON.stringify(body), {
 		headers: { "Content-Type": "application/json" },
-		status: 200,
+		status,
 	});
 }
 
-window.fetch = async (input) => {
-	const url =
-		typeof input === "string"
-			? input
-			: input instanceof Request
-				? input.url
-				: input.toString();
+const connectionsMode = new URLSearchParams(window.location.search).get(
+	"connections"
+);
+
+window.fetch = async (input, init) => {
+	const url = isNativeText(input)
+		? input
+		: input instanceof Request
+			? input.url
+			: input.toString();
+	const parsedUrl = new URL(url, window.location.href);
+	const method =
+		init?.method ?? (input instanceof Request ? input.method : "GET");
+	const recordGovernanceCall = <Body,>(body: Body, status: number) => {
+		governanceCalls.push({
+			body: body === undefined ? null : JSON.parse(JSON.stringify(body)),
+			method,
+			path: parsedUrl.pathname,
+			status,
+		});
+	};
 	if (url.endsWith("/api/hooks/management")) {
 		return jsonResponse(hooks);
 	}
-	if (url.endsWith("/api/gateway/governance")) {
-		return jsonResponse(governance);
+	if (
+		url.endsWith("/api/hooks/overrides") &&
+		init?.method === "PUT" &&
+		isNativeText(init.body)
+	) {
+		const update = z
+			.object({
+				hookKey: z.string(),
+				scope: z.enum(["node", "user"]),
+				policy: z.object({
+					enabled: z.boolean().optional(),
+					trusted: z.boolean().optional(),
+				}),
+			})
+			.parse(JSON.parse(init.body));
+		const hook = hooks.hooks.find((entry) => entry.hookKey === update.hookKey);
+		if (hook) {
+			const current = hook.localOverrides[update.scope] ?? {};
+			hook.localOverrides = {
+				...hook.localOverrides,
+				[update.scope]: { ...current, ...update.policy },
+			};
+		}
+		return jsonResponse(hooks);
+	}
+	if (
+		parsedUrl.pathname.endsWith("/api/gateway/governance/git") &&
+		method === "PUT"
+	) {
+		const input = z
+			.object({ scope: z.enum(["node", "user"]), values: z.json() })
+			.parse(JSON.parse(String(init?.body)));
+		const values = parseGovernanceValues({ git: input.values }).git;
+		if (!values) {
+			throw new Error("Missing git settings fixture contract");
+		}
+		const update = { scope: input.scope, values };
+		if (failedWrites.delete("git")) {
+			recordGovernanceCall(update, 503);
+			return jsonResponse(
+				{ message: "Git settings are temporarily unavailable" },
+				503
+			);
+		}
+		updateGovernanceLayer(update.scope, "git", update.values);
+		recordGovernanceCall(update, 200);
+		return jsonResponse(cloneSnapshot(governanceState));
+	}
+	if (
+		parsedUrl.pathname.endsWith("/api/gateway/governance/worktrees") &&
+		method === "PUT"
+	) {
+		const input = z
+			.object({ scope: z.enum(["node", "user"]), values: z.json() })
+			.parse(JSON.parse(String(init?.body)));
+		const values = parseGovernanceValues({ worktrees: input.values }).worktrees;
+		if (!values) {
+			throw new Error("Missing worktrees settings fixture contract");
+		}
+		const update = { scope: input.scope, values };
+		if (failedWrites.delete("worktrees")) {
+			recordGovernanceCall(update, 503);
+			return jsonResponse(
+				{ message: "Worktree settings are temporarily unavailable" },
+				503
+			);
+		}
+		updateGovernanceLayer(update.scope, "worktrees", update.values);
+		recordGovernanceCall(update, 200);
+		return jsonResponse(cloneSnapshot(governanceState));
+	}
+	if (parsedUrl.pathname.endsWith("/api/gateway/governance")) {
+		if (heldReadPending) {
+			heldReadPending = false;
+			await heldRead;
+		}
+		if (readFailurePending) {
+			readFailurePending = false;
+			recordGovernanceCall(null, 503);
+			return jsonResponse(
+				{ message: "Governance settings are temporarily unavailable" },
+				503
+			);
+		}
+		recordGovernanceCall(null, 200);
+		return jsonResponse(cloneSnapshot(governanceState));
 	}
 	if (url.endsWith("/api/connections")) {
+		if (connectionsMode === "error") {
+			return jsonResponse({ message: "presence unavailable" }, 503);
+		}
+		if (connectionsMode === "empty") {
+			return jsonResponse({
+				client_count: 0,
+				data: [],
+				ttl_secs: 90,
+				user_count: 0,
+			});
+		}
 		return jsonResponse(connections);
 	}
 	if (url.endsWith("/api/system/status")) {
@@ -228,48 +438,61 @@ const queryClient = new QueryClient({
 });
 
 function Proof() {
+	const canConfigure = searchParams.get("canConfigure") !== "false";
 	return (
 		<ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-			<QueryClientProvider client={queryClient}>
-				<EntitlementProvider>
-					<TabsProvider>
-						<SystemStatusProvider>
-							<main className="min-h-screen bg-background px-8 py-10 text-foreground">
-								<div className="mx-auto max-w-6xl space-y-8">
-									<header>
-										<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
-											Ryu · Gateway governance
-										</p>
-										<h1 className="mt-2 font-heading text-3xl tracking-tight">
-											Hooks, developer defaults, and connected clients
-										</h1>
-										<p className="mt-2 max-w-3xl text-muted-foreground text-sm">
-											Effective controls follow the same user → team →
-											organization → node hierarchy used by managed MCP and
-											skills.
-										</p>
-									</header>
-									<div className="rounded-2xl border border-border/70 bg-sidebar px-4 py-3">
-										<p className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
-											Node selector
-										</p>
-										<NodeSelector mode="compact-dropdown" />
-									</div>
-									<div className="grid gap-6 lg:grid-cols-2">
-										<div className="lg:col-span-2">
-											<HooksSection canConfigure target={TARGET} />
+			<I18nProvider>
+				<QueryClientProvider client={queryClient}>
+					<EntitlementProvider>
+						<TabsProvider>
+							<SystemStatusProvider>
+								<main className="min-h-screen bg-background px-8 py-10 text-foreground">
+									<div className="mx-auto max-w-6xl space-y-8">
+										<header>
+											<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
+												Ryu · Gateway governance
+											</p>
+											<h1 className="mt-2 font-heading text-3xl tracking-tight">
+												Hooks, developer defaults, and connected clients
+											</h1>
+											<p className="mt-2 max-w-3xl text-muted-foreground text-sm">
+												Effective controls follow the same user → team →
+												organization → node hierarchy used by managed MCP and
+												skills.
+											</p>
+										</header>
+										<div className="rounded-2xl border border-border/70 bg-sidebar px-4 py-3">
+											<p className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
+												Node selector
+											</p>
+											<NodeSelector mode="compact-dropdown" />
 										</div>
-										<GitSettingsSection canConfigure target={TARGET} />
-										<WorktreesSection canConfigure target={TARGET} />
-										<EnvironmentsSection />
-										<ConnectedDevicesSection />
+										<div className="grid gap-6 lg:grid-cols-2">
+											<div className="lg:col-span-2">
+												<HooksSection canConfigure target={TARGET} />
+											</div>
+											<div data-testid="proof-git">
+												<GitSettingsSection
+													canConfigure={canConfigure}
+													target={TARGET}
+												/>
+											</div>
+											<div data-testid="proof-worktrees">
+												<WorktreesSection
+													canConfigure={canConfigure}
+													target={TARGET}
+												/>
+											</div>
+											<EnvironmentsSection />
+											<ConnectedDevicesSection />
+										</div>
 									</div>
-								</div>
-							</main>
-						</SystemStatusProvider>
-					</TabsProvider>
-				</EntitlementProvider>
-			</QueryClientProvider>
+								</main>
+							</SystemStatusProvider>
+						</TabsProvider>
+					</EntitlementProvider>
+				</QueryClientProvider>
+			</I18nProvider>
 		</ThemeProvider>
 	);
 }

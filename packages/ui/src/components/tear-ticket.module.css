@@ -1,0 +1,15 @@
+.clipTransition {
+	transition: clip-path 100ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Applied on server and client alike so hydration matches; reduced motion is CSS-side. */
+@media (prefers-reduced-motion: reduce) {
+	.clipTransition {
+		transition: none;
+	}
+}
+.stubShadow {
+	filter: drop-shadow(0 3px 3px rgb(0 0 0 / 0.12));
+}
+.stubCorners {
+	border-radius: 1.75rem;
+}

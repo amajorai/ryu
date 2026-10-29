@@ -11,6 +11,7 @@
 
 import { Add01Icon, Message01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button, ButtonLabel } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
@@ -41,6 +42,7 @@ export function MergedThreadPicker({
 	onSelectThread: (conversationId: string) => void;
 	threads: Conversation[];
 }) {
+	const tl = useLiteralMessages();
 	const active = threads.find((t) => t.id === activeConversationId);
 	const label = active?.title ?? NEW_THREAD_LABEL;
 
@@ -50,17 +52,20 @@ export function MergedThreadPicker({
 				render={
 					<Button
 						aria-label="Choose which thread to send to"
-						className="min-w-0 max-w-48 text-muted-foreground"
+						className="min-w-0 max-w-48"
 						size="xs"
 						// A native title rather than a Tooltip wrapper: a Base UI tooltip
 						// trigger wrapping a menu trigger fights over the same child render
 						// slot, and the hint is not worth that risk.
-						title={`Sending to "${label}". Every thread with this agent is shown above; pick which one this message joins.`}
+						title={tl(
+							'Sending to "{label}". Every thread with this agent is shown above; pick which one this message joins.',
+							{ label }
+						)}
 						type="button"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						<HugeiconsIcon className="size-3.5 shrink-0" icon={Message01Icon} />
-						<ButtonLabel className="truncate">{label}</ButtonLabel>
+						<ButtonLabel>{label}</ButtonLabel>
 					</Button>
 				}
 			/>
@@ -75,7 +80,9 @@ export function MergedThreadPicker({
 					<DropdownMenuLabel>Send to thread</DropdownMenuLabel>
 					{threads.map((thread) => (
 						<DropdownMenuRadioItem key={thread.id} value={thread.id}>
-							<span className="truncate">{thread.title}</span>
+							<span className="truncate" title={thread.title}>
+								{thread.title}
+							</span>
 						</DropdownMenuRadioItem>
 					))}
 				</DropdownMenuRadioGroup>

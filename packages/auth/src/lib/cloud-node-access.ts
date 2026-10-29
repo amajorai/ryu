@@ -11,17 +11,18 @@ export const CLOUD_NODE_CHANGE_PLAN_IDS = [
 	"business",
 ] as const satisfies readonly PlanId[];
 
-/** Customer-facing list for the managed-server plan gate. */
-export const CLOUD_NODE_CHANGE_PLANS_LABEL =
-	"Business, Teams, Teams Lite, or Enterprise";
+/**
+ * Customer-facing list for the managed-server plan gate. Names only the
+ * publicly offered plans: Teams Lite stays in `CLOUD_NODE_CHANGE_PLAN_IDS` but
+ * is a private offer, so it is never named in customer-facing copy.
+ */
+export const CLOUD_NODE_CHANGE_PLANS_LABEL = "Business, Teams, or Enterprise";
 
 /** The plan half of the managed-server purchase/resize authorization rule. */
 export function planAllowsCloudNodeChanges(
 	plan: PlanId | null | undefined
 ): boolean {
-	return Boolean(
-		plan && (CLOUD_NODE_CHANGE_PLAN_IDS as readonly string[]).includes(plan)
-	);
+	return Boolean(plan && new Set<PlanId>(CLOUD_NODE_CHANGE_PLAN_IDS).has(plan));
 }
 
 /** Public, non-sensitive projection returned with an organization catalog. */
@@ -55,7 +56,7 @@ export function cloudNodeEntitlementFor(input: {
 		enterprise,
 		plan,
 		seats:
-			typeof input.seats === "number" && Number.isFinite(input.seats)
+			input.seats !== undefined && Number.isFinite(input.seats)
 				? Math.max(1, Math.floor(input.seats))
 				: 1,
 	};

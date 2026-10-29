@@ -6,7 +6,7 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { RunStreamFrame } from "@/src/lib/api/runStream.ts";
 import type { RunSummary } from "./useRuns.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);

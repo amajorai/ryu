@@ -13,12 +13,10 @@
 //! awaiting an answer — and feeding the user's answers back in.
 //!
 //! Reusing pi-ai's flows rather than reimplementing OAuth in Rust is deliberate:
-//! - the client ids and endpoints stay out of Ryu entirely (contrast
-//!   [`super::OAUTH_PROVIDERS`], which had to hardcode refresh parameters and
-//!   documents at length why that was defensible);
+//! - the client ids and endpoints stay out of Ryu entirely, including refresh;
 //! - Copilot works. Its credential is a bespoke GitHub-device → Copilot-token
-//!   exchange that the refresh table explicitly refuses to guess at; pi-ai
-//!   implements it, so bridging gets it for free;
+//!   exchange that Core refuses to guess at; pi-ai implements both login and
+//!   refresh, so bridging gets both;
 //! - the credential comes back in exactly the shape Pi stores, so
 //!   [`super::provider_configured`] flips to `true` with no translation.
 //!
@@ -30,7 +28,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin};
@@ -45,6 +43,12 @@ const BRIDGE_SOURCE: &str = include_str!("pi_oauth_login.mjs");
 
 /// Bridge filename inside the managed Pi prefix (`~/.ryu/pi`).
 const BRIDGE_FILE: &str = "ryu-oauth-login.mjs";
+
+/// The bridge's provider-route `fetch`, written beside it (the bridge imports it
+/// by this name).
+const BRIDGE_PROXY_SOURCE: &str = include_str!("pi_oauth_proxy.mjs");
+const BRIDGE_PROXY_FILE: &str = "ryu-oauth-proxy.mjs";
+static BRIDGE_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Ceiling on one login attempt. Generous — a user may need to find a password
 /// manager, switch devices, or complete an MFA challenge — but not unbounded, so
@@ -81,6 +85,8 @@ pub struct LoginSession {
     /// registered redirect URI depends on, so one leaked child makes every later
     /// ChatGPT login fail with `EADDRINUSE`. Every exit path kills.
     child: Mutex<Option<Child>>,
+    /// Native OAuth owns an async callback listener instead of a child process.
+    native_abort: Mutex<Option<tokio::task::AbortHandle>>,
     /// Set once the flow reached a terminal event, so late subscribers do not
     /// wait on a stream that will never speak again.
     finished: AtomicBool,
@@ -88,14 +94,8 @@ pub struct LoginSession {
     /// provider can retire the first before it re-binds the callback port.
     provider: String,
     /// The bridge's most recent stderr lines, bounded to [`STDERR_TAIL_LINES`].
-    ///
-    /// This is the only record of a HARD death — an unresolvable
-    /// `@earendil-works/pi-ai` import, a throw at module load, an OOM, an
-    /// external kill. It used to go nowhere but `tracing::debug!`, which is why
-    /// "the login flow exited before completing" was a dead end: one generic
-    /// sentence for every one of those causes, with the diagnosis thrown away
-    /// four lines from where the sentence was written. Keeping the tail here
-    /// lets [`exit_message`] say what actually happened.
+    /// This stays in process memory and is reduced to fixed diagnostics before
+    /// it reaches a client; vendor error text may contain credentials.
     stderr_tail: Mutex<VecDeque<String>>,
 }
 
@@ -177,6 +177,11 @@ impl LoginSession {
     /// bridge died" and "we killed it" — the two cases with opposite fixes.
     pub fn cancel(&self) {
         self.finished.store(true, Ordering::SeqCst);
+        if let Ok(mut guard) = self.native_abort.lock() {
+            if let Some(task) = guard.take() {
+                task.abort();
+            }
+        }
         if let Ok(mut guard) = self.child.lock() {
             if let Some(child) = guard.as_mut() {
                 let _ = child.start_kill();
@@ -190,21 +195,24 @@ impl LoginSession {
 }
 
 /// The message for a bridge whose stdout closed without a terminal event.
-///
-/// Both arguments are best-effort — a child killed by a signal has no exit code
-/// worth printing, and a process that died before it could write has no stderr —
-/// so this degrades to the bare sentence rather than inventing detail. When
-/// there IS evidence it goes in the message, because this string is all the user
-/// and the support thread ever see; the alternative is asking someone to reason
-/// about an OAuth failure from four words.
+/// Only fixed classifications of vendor stderr may reach a client.
 fn exit_message(status: Option<std::process::ExitStatus>, stderr: &str) -> String {
     let mut message = String::from("the login flow exited before completing");
     if let Some(status) = status {
         message.push_str(&format!(" ({status})"));
     }
-    let stderr = stderr.trim();
-    if !stderr.is_empty() {
-        message.push_str(&format!(" — the sign-in helper reported: {stderr}"));
+    // Vendor stderr is uncontrolled and can contain OAuth codes or credentials.
+    // Return only known, fixed diagnostics to clients.
+    let diagnostic =
+        if stderr.contains("Cannot find package") || stderr.contains("ERR_MODULE_NOT_FOUND") {
+            Some("the managed Pi package could not be loaded")
+        } else if stderr.contains("EADDRINUSE") {
+            Some("the sign-in callback port is already in use")
+        } else {
+            None
+        };
+    if let Some(diagnostic) = diagnostic {
+        message.push_str(&format!(" — {diagnostic}"));
     }
     message
 }
@@ -272,18 +280,25 @@ pub fn cancel(session_id: &str) -> bool {
 /// Write the Node bridge into the managed Pi prefix, refreshing it whenever the
 /// embedded copy differs (a Core upgrade must not leave a stale bridge behind).
 fn ensure_bridge() -> Result<std::path::PathBuf> {
+    let _write_guard = BRIDGE_WRITE_LOCK.lock().expect("OAuth bridge write lock");
     let dir = crate::sidecar::adapters::acp::managed_pi_dir();
     if !dir.join("node_modules").is_dir() {
         return Err(anyhow!(
             "the managed Pi engine is not installed yet, so there is no OAuth flow to run — install it from Settings first"
         ));
     }
-    let path = dir.join(BRIDGE_FILE);
-    let current = std::fs::read_to_string(&path).unwrap_or_default();
-    if current != BRIDGE_SOURCE {
-        std::fs::write(&path, BRIDGE_SOURCE)?;
+    // The module the bridge imports goes first, so a new bridge never runs
+    // beside a missing or stale one.
+    for (name, source) in [
+        (BRIDGE_PROXY_FILE, BRIDGE_PROXY_SOURCE),
+        (BRIDGE_FILE, BRIDGE_SOURCE),
+    ] {
+        let path = dir.join(name);
+        if std::fs::read_to_string(&path).unwrap_or_default() != source {
+            std::fs::write(&path, source)?;
+        }
     }
-    Ok(path)
+    Ok(dir.join(BRIDGE_FILE))
 }
 
 /// The runtimes that can host the bridge, in priority order. Node first,
@@ -381,8 +396,13 @@ fn well_known_runtime(binary: &str) -> Option<std::path::PathBuf> {
 /// Codex provider, but stores the resulting session under its own Ryu account
 /// scope.
 pub fn oauth_provider_id(ryu_provider_id: &str) -> Option<&'static str> {
+    if ryu_provider_id == super::CHATGPT_PLAN_PROVIDER_ID {
+        return Some(super::CHATGPT_PLAN_PROVIDER_ID);
+    }
     let meta = super::provider_meta(ryu_provider_id)?;
-    if meta.auth_kind != "subscription" || meta.auth_key.is_empty() {
+    let supports_login =
+        meta.auth_kind == "subscription" || matches!(ryu_provider_id, "openrouter" | "xai");
+    if !supports_login || meta.auth_key.is_empty() {
         return None;
     }
     if ryu_provider_id == super::CHATGPT_PROVIDER_ID {
@@ -392,31 +412,527 @@ pub fn oauth_provider_id(ryu_provider_id: &str) -> Option<&'static str> {
     }
 }
 
-fn oauth_auth_key(ryu_provider_id: &str) -> Option<&'static str> {
-    let meta = super::provider_meta(ryu_provider_id)?;
-    (meta.auth_kind == "subscription" && !meta.auth_key.is_empty()).then_some(meta.auth_key)
+/// Whether a Ryu provider is a subscription-plan OAuth integration rather
+/// than an OAuth-capable BYOK provider such as OpenRouter or xAI.
+pub fn is_subscription_oauth_provider(ryu_provider_id: &str) -> bool {
+    super::provider_meta(ryu_provider_id).is_some_and(|meta| {
+        meta.auth_kind == "subscription" && oauth_provider_id(ryu_provider_id).is_some()
+    })
 }
 
-/// Merge a completed credential into the managed Pi's `auth.json` under
-/// `auth_key`, preserving every other provider's entry. Also records the login
-/// as a NEW account in the sealed vault (so a provider can hold several
-/// accounts) and materializes the active account back into `auth.json`.
+fn oauth_auth_key(ryu_provider_id: &str) -> Option<&'static str> {
+    oauth_provider_id(ryu_provider_id)?;
+    Some(super::provider_meta(ryu_provider_id)?.auth_key)
+}
+
+/// When the sealed account vault is available, save there before updating the
+/// managed Pi's `auth.json`. A failed vault write must not report a successful
+/// login whose requests still select an older sealed account. A node that
+/// started without the vault retains the legacy single-account file fallback.
 fn store_credential(auth_key: &str, credential: &Value) -> Result<()> {
+    store_credential_with_vault(auth_key, credential, super::accounts::global())
+}
+
+fn store_credential_with_vault(
+    auth_key: &str,
+    credential: &Value,
+    vault: Option<&super::accounts::AccountVault>,
+) -> Result<()> {
+    let _selection_guard = super::ACCOUNT_SELECTION_LOCK
+        .lock()
+        .expect("account selection lock");
     super::ensure_dir()?;
+    if let Some(vault) = vault {
+        let scope = super::accounts::provider_scope(auth_key);
+        let label = super::vault_account_label(vault, &scope, auth_key);
+        vault.upsert(
+            &scope,
+            &super::new_account_id(),
+            &label,
+            super::accounts::KIND_OAUTH,
+            Some(credential.clone()),
+        )?;
+    }
     let mut auth = super::read_auth();
     auth.insert(auth_key.to_owned(), credential.clone());
     let body = serde_json::to_string_pretty(&auth)?;
     super::write_secret_file(&super::auth_path(), &body)?;
-    // A completed OAuth login is a real account: seal it into the vault under the
-    // provider's scope. The label defaults to the pi-ai provider id — the only
-    // identity the flow reliably exposes (an email/name is not guaranteed).
-    super::vault_upsert_credential(
-        &super::accounts::provider_scope(auth_key),
-        auth_key,
-        super::accounts::KIND_OAUTH,
-        credential.clone(),
-    );
     Ok(())
+}
+
+enum PlanLoginTarget {
+    New,
+    Existing {
+        account_id: String,
+        registration: super::chatgpt_plan::StoredAccount,
+    },
+}
+
+fn store_plan_registration(
+    vault: &super::accounts::AccountVault,
+    target: &PlanLoginTarget,
+    registration: &super::chatgpt_plan::StoredAccount,
+) -> Result<String> {
+    let _guard = super::ACCOUNT_SELECTION_LOCK
+        .lock()
+        .expect("account selection lock");
+    let scope = super::accounts::provider_scope(super::CHATGPT_PLAN_AUTH_KEY);
+    let updated = serde_json::to_value(registration)?;
+    match target {
+        PlanLoginTarget::Existing {
+            account_id,
+            registration: original,
+        } => {
+            if !original.matches_registration(registration) {
+                anyhow::bail!("ChatGPT returned another account registration; the saved account was not changed");
+            }
+            let current = vault
+                .credential(&scope, account_id)?
+                .ok_or_else(|| anyhow!("The saved ChatGPT account was removed during sign-in"))?;
+            let current_registration = super::chatgpt_plan::StoredAccount::from_value(&current)?;
+            if !current_registration.matches_registration(registration)
+                || !vault.replace_credential(&scope, account_id, &current, updated)?
+            {
+                anyhow::bail!("The saved ChatGPT registration changed during sign-in; retry");
+            }
+            // Reconnection renews this registration without changing a selection
+            // the user made while the browser was open.
+            Ok(account_id.clone())
+        }
+        PlanLoginTarget::New => {
+            for account in vault.list(&scope)? {
+                let Some(current) = vault.credential(&scope, &account.account_id)? else {
+                    continue;
+                };
+                let Ok(saved) = super::chatgpt_plan::StoredAccount::from_value(&current) else {
+                    continue;
+                };
+                if saved.matches_registration(registration) {
+                    if !vault.replace_credential(&scope, &account.account_id, &current, updated)? {
+                        anyhow::bail!(
+                            "The saved ChatGPT registration changed during sign-in; retry"
+                        );
+                    }
+                    vault.set_active(&scope, &account.account_id)?;
+                    return Ok(account.account_id);
+                }
+            }
+            let account_id = super::new_account_id();
+            let identity = registration.registration();
+            let label = super::vault_account_label(
+                vault,
+                &scope,
+                identity.email.as_deref().unwrap_or("ChatGPT plan"),
+            );
+            vault.upsert(
+                &scope,
+                &account_id,
+                &label,
+                super::accounts::KIND_OAUTH,
+                Some(updated),
+            )?;
+            Ok(account_id)
+        }
+    }
+}
+
+async fn start_chatgpt_plan(account_id: Option<&str>, enable_plan_use: bool) -> Result<String> {
+    static START_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _start_guard = START_LOCK.lock().await;
+    let vault = super::accounts::global().ok_or_else(|| {
+        anyhow!("The sealed account vault must be available before ChatGPT sign-in")
+    })?;
+    let scope = super::accounts::provider_scope(super::CHATGPT_PLAN_AUTH_KEY);
+    let target = match account_id {
+        Some(id) if !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control) => {
+            let value = vault
+                .credential(&scope, id)?
+                .ok_or_else(|| anyhow!("This ChatGPT account registration is not saved"))?;
+            PlanLoginTarget::Existing {
+                account_id: id.to_owned(),
+                registration: super::chatgpt_plan::StoredAccount::from_value(&value)?,
+            }
+        }
+        Some(_) => anyhow::bail!("Choose a valid saved ChatGPT account"),
+        None => PlanLoginTarget::New,
+    };
+    let stale: Vec<_> = sessions()
+        .lock()
+        .map_err(|_| anyhow!("Login session storage is unavailable"))?
+        .iter()
+        .filter(|(_, session)| session.provider == super::CHATGPT_PLAN_PROVIDER_ID)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in stale {
+        cancel(&id);
+    }
+    let existing = match &target {
+        PlanLoginTarget::New => None,
+        PlanLoginTarget::Existing { registration, .. } => Some(registration.clone()),
+    };
+    let attempt = super::chatgpt_plan::LoginAttempt::begin(existing, enable_plan_use).await?;
+    let url = attempt.authorization_url()?;
+    let (tx, _) = broadcast::channel(64);
+    let session = Arc::new(LoginSession {
+        tx,
+        history: Mutex::new(Vec::new()),
+        stdin: tokio::sync::Mutex::new(None),
+        child: Mutex::new(None),
+        native_abort: Mutex::new(None),
+        finished: AtomicBool::new(false),
+        provider: super::CHATGPT_PLAN_PROVIDER_ID.to_owned(),
+        stderr_tail: Mutex::new(VecDeque::new()),
+    });
+    session.emit(json!({ "type": "auth_url", "url": url,
+        "instructions": "Review identity and ChatGPT plan permissions in the browser. Complete sign-in on the host running Core." }));
+    let session_id = format!("login_{}", uuid::Uuid::new_v4().simple());
+    sessions()
+        .lock()
+        .map_err(|_| anyhow!("Login session storage is unavailable"))?
+        .insert(session_id.clone(), session.clone());
+    let task_session = session.clone();
+    let task = tokio::spawn(async move {
+        let result = async {
+            let mut attempt = attempt;
+            let mut retried = false;
+            let registration = loop {
+                match attempt.complete().await {
+                    Ok(registration) => break registration,
+                    Err(error) if !retried && super::chatgpt_plan::retry_registration(&error).is_some() => {
+                        retried = true;
+                        if task_session.is_finished() { anyhow::bail!("Sign-in was cancelled"); }
+                        attempt = match &target {
+                            PlanLoginTarget::New => super::chatgpt_plan::LoginAttempt::retry(
+                                super::chatgpt_plan::retry_registration(&error).expect("retry registration")).await?,
+                            PlanLoginTarget::Existing { registration, .. } =>
+                                super::chatgpt_plan::LoginAttempt::begin(Some(registration.clone()), enable_plan_use).await?,
+                        };
+                        task_session.emit(json!({ "type": "info", "message": "The code expired. Continue authorization again; your issued registration is retained." }));
+                        task_session.emit(json!({ "type": "auth_url", "url": attempt.authorization_url()?,
+                            "instructions": "Complete the fresh authorization attempt in your browser." }));
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            if task_session.is_finished() {
+                anyhow::bail!("Sign-in was cancelled");
+            }
+            let _refresh_guard = super::OAUTH_REFRESH_LOCK.lock().await;
+            let account_id = store_plan_registration(vault, &target, &registration)?;
+            Ok::<_, anyhow::Error>((account_id, registration.plan_authorized()))
+        }
+        .await;
+        if !task_session.is_finished() {
+            match result {
+                Ok((account_id, authorized)) => task_session.emit(json!({ "type": "success",
+                    "provider": super::CHATGPT_PLAN_AUTH_KEY, "accountId": account_id,
+                    "planUseAuthorized": authorized })),
+                Err(error) => {
+                    task_session.emit(json!({ "type": "error", "message": error.to_string() }))
+                }
+            }
+        }
+        task_session.finished.store(true, Ordering::SeqCst);
+        if let Ok(mut abort) = task_session.native_abort.lock() {
+            *abort = None;
+        }
+    });
+    *session
+        .native_abort
+        .lock()
+        .map_err(|_| anyhow!("Login cancellation is unavailable"))? = Some(task.abort_handle());
+    let timeout_id = session_id.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(LOGIN_TIMEOUT).await;
+        cancel(&timeout_id);
+    });
+    Ok(session_id)
+}
+
+async fn start_kiro(account_id: Option<&str>) -> Result<String> {
+    static START_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _start_guard = START_LOCK.lock().await;
+    let vault = super::accounts::global()
+        .ok_or_else(|| anyhow!("The sealed account vault is required for Kiro sign-in"))?;
+    let scope = super::accounts::provider_scope("kiro");
+    let original = match account_id {
+        Some(id) => Some((
+            id.to_owned(),
+            vault
+                .credential_revision(&scope, id)?
+                .ok_or_else(|| anyhow!("The saved Kiro account is unavailable"))?,
+            vault
+                .credential(&scope, id)?
+                .ok_or_else(|| anyhow!("The saved Kiro account is unavailable"))?,
+        )),
+        None => None,
+    };
+    let stale: Vec<_> = sessions()
+        .lock()
+        .map_err(|_| anyhow!("Login session storage is unavailable"))?
+        .iter()
+        .filter(|(_, session)| session.provider == "kiro")
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in stale {
+        cancel(&id);
+    }
+    let attempt = super::kiro_oauth::begin().await?;
+    let (tx, _) = broadcast::channel(64);
+    let session = Arc::new(LoginSession {
+        tx,
+        history: Mutex::new(Vec::new()),
+        stdin: tokio::sync::Mutex::new(None),
+        child: Mutex::new(None),
+        native_abort: Mutex::new(None),
+        finished: AtomicBool::new(false),
+        provider: "kiro".to_owned(),
+        stderr_tail: Mutex::new(VecDeque::new()),
+    });
+    session.emit(json!({"type":"auth_url", "url":attempt.auth_url, "instructions":format!("Sign in with AWS Builder ID. Enter code {} if requested.", attempt.device_code)}));
+    let session_id = format!("login_{}", uuid::Uuid::new_v4().simple());
+    sessions()
+        .lock()
+        .map_err(|_| anyhow!("Login session storage is unavailable"))?
+        .insert(session_id.clone(), session.clone());
+    let task_session = session.clone();
+    let task = tokio::spawn(async move {
+        let result = async {
+            let credential = attempt.complete().await?;
+            if task_session.is_finished() {
+                anyhow::bail!("Sign-in was cancelled");
+            }
+            let _guard = super::OAUTH_REFRESH_LOCK.lock().await;
+            if task_session.is_finished() {
+                anyhow::bail!("Sign-in was cancelled");
+            }
+            let id = if let Some((id, revision, previous)) = original {
+                if previous
+                    .get("profileArn")
+                    .and_then(Value::as_str)
+                    .zip(credential.get("profileArn").and_then(Value::as_str))
+                    .is_some_and(|(before, after)| before != after)
+                {
+                    anyhow::bail!(
+                        "Kiro returned another profile; the saved account was not changed"
+                    );
+                }
+                if !vault.finish_refresh(&scope, &id, &previous, &revision, credential)? {
+                    anyhow::bail!("The saved Kiro login changed during sign-in; retry");
+                }
+                id
+            } else {
+                let id = super::new_account_id();
+                let label = super::vault_account_label(vault, &scope, "kiro");
+                vault.upsert(
+                    &scope,
+                    &id,
+                    &label,
+                    super::accounts::KIND_OAUTH,
+                    Some(credential),
+                )?;
+                id
+            };
+            super::ensure_kiro_models_json(None)?;
+            Ok::<_, anyhow::Error>(id)
+        }
+        .await;
+        if !task_session.is_finished() {
+            match result {
+                Ok(id) => task_session.emit(json!({"type":"success", "provider":"kiro", "accountId":id})),
+                Err(_) => task_session.emit(json!({"type":"error", "message":"Kiro sign-in could not be saved. Try signing in again."})),
+            }
+        }
+        task_session.finished.store(true, Ordering::SeqCst);
+    });
+    *session
+        .native_abort
+        .lock()
+        .map_err(|_| anyhow!("Login cancellation is unavailable"))? = Some(task.abort_handle());
+    let timeout_id = session_id.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(LOGIN_TIMEOUT).await;
+        cancel(&timeout_id);
+    });
+    Ok(session_id)
+}
+
+/// Read the installed Pi provider's own model table without a network request.
+/// Discovery remains usable when models.dev is offline or has no cached entry.
+/// A missing managed Pi installation is normal during setup, so callers can
+/// continue to the remote registry and free-text model input.
+pub(super) fn builtin_catalog_provider_id(ryu_provider_id: &str) -> Option<&str> {
+    oauth_provider_id(ryu_provider_id).or_else(|| {
+        super::provider_meta(ryu_provider_id)
+            .filter(|meta| meta.auth_kind == "api-key" && !meta.auth_key.is_empty())
+            .map(|meta| meta.auth_key)
+    })
+}
+
+pub async fn builtin_models(ryu_provider_id: &str) -> Vec<Value> {
+    if ryu_provider_id == super::CHATGPT_PLAN_PROVIDER_ID {
+        return Vec::new();
+    }
+    let Some(provider) = builtin_catalog_provider_id(ryu_provider_id) else {
+        return Vec::new();
+    };
+    let pi_dir = crate::sidecar::adapters::acp::managed_pi_dir();
+    if !pi_dir
+        .join("node_modules/@earendil-works/pi-ai/package.json")
+        .is_file()
+    {
+        return Vec::new();
+    }
+    let Some(runtime) = js_runtime() else {
+        return Vec::new();
+    };
+    if ensure_bridge().is_err() {
+        return Vec::new();
+    }
+
+    let mut command = tokio::process::Command::new(runtime);
+    command
+        .arg(BRIDGE_FILE)
+        .arg(provider)
+        .arg("models")
+        .current_dir(pi_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .no_window();
+    let Ok(mut child) = command.spawn() else {
+        return Vec::new();
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.start_kill();
+        return Vec::new();
+    };
+    // Cold SDK imports can exceed five seconds on Windows under build/disk load.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut lines = BufReader::new(stdout).lines();
+        let Some(line) = lines.next_line().await.ok().flatten() else {
+            return Vec::new();
+        };
+        let Ok(event) = serde_json::from_str::<Value>(&line) else {
+            return Vec::new();
+        };
+        if event.get("type").and_then(Value::as_str) != Some("models") {
+            return Vec::new();
+        }
+        event
+            .get("models")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    })
+    .await;
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    result.unwrap_or_default()
+}
+
+/// Ask Pi's own OAuth implementation to rotate an account credential. The
+/// credential travels over the child's stdin/stdout pipes, never in argv, env,
+/// stderr, or a log line. Each provider owns its token exchange contract.
+pub async fn refresh_credential(auth_key: &str, credential: &Value) -> Result<Option<Value>> {
+    if auth_key == "kiro" {
+        return super::kiro_oauth::refresh(credential.clone())
+            .await
+            .map(Some)
+            .map_err(Into::into);
+    }
+    if auth_key == super::CHATGPT_PLAN_AUTH_KEY {
+        let saved = super::chatgpt_plan::StoredAccount::from_value(credential)?;
+        let rotated = super::chatgpt_plan::refresh(saved.credential()?.clone()).await?;
+        return Ok(Some(serde_json::to_value(rotated)?));
+    }
+    let provider = match auth_key {
+        super::CHATGPT_AUTH_KEY | "openai" => "openai-codex",
+        "anthropic" | "openai-codex" | "github-copilot" | "kimi-coding" | "radius"
+        | "openrouter" | "xai" => auth_key,
+        _ => return Ok(None),
+    };
+    // These preparation failures occur before any credential is dispatched.
+    let runtime = js_runtime().ok_or(super::accounts::RefreshFailure::Transient)?;
+    crate::sidecar::adapters::acp::ensure_managed_pi()
+        .await
+        .map_err(|_| super::accounts::RefreshFailure::Transient)?;
+    ensure_bridge().map_err(|_| super::accounts::RefreshFailure::Transient)?;
+
+    let mut child = tokio::process::Command::new(runtime);
+    child
+        .arg(BRIDGE_FILE)
+        .arg(provider)
+        .arg("refresh")
+        .current_dir(crate::sidecar::adapters::acp::managed_pi_dir())
+        .env("PI_CODING_AGENT_DIR", super::config_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .no_window();
+    if provider == "anthropic" {
+        // A Claude route through the owner's desktop covers token refresh too.
+        // A route that applies but cannot run refuses the refresh rather than
+        // sending it from the cloud.
+        child.envs(
+            crate::local_egress::providers::bridge_proxy_env(
+                crate::local_egress::providers::ProviderRoute::Claude,
+            )
+            .map_err(|_| super::accounts::RefreshFailure::Transient)?,
+        );
+    }
+    let mut child = child
+        .spawn()
+        .map_err(|_| super::accounts::RefreshFailure::Transient)?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or(super::accounts::RefreshFailure::Transient)?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or(super::accounts::RefreshFailure::Transient)?;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let input = format!(
+            "{}\n",
+            json!({ "type": "refresh", "credential": credential })
+        );
+        stdin.write_all(input.as_bytes()).await?;
+        stdin.flush().await?;
+        drop(stdin);
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines.next_line().await? {
+            let event: Value = serde_json::from_str(&line)
+                .context("OAuth refresh helper returned invalid JSON")?;
+            match event.get("type").and_then(Value::as_str) {
+                Some("done") => {
+                    let refreshed = event.get("credential").cloned().unwrap_or(Value::Null);
+                    if refreshed.get("type").and_then(Value::as_str) != Some("oauth")
+                        || refreshed.get("access").and_then(Value::as_str).is_none()
+                    {
+                        anyhow::bail!("OAuth refresh helper returned an invalid credential");
+                    }
+                    return Ok(refreshed);
+                }
+                Some("error") => {
+                    let failure = match event.get("refreshFailure").and_then(Value::as_str) {
+                        Some("revoked") => super::accounts::RefreshFailure::Revoked,
+                        Some("transient") => super::accounts::RefreshFailure::Transient,
+                        _ => super::accounts::RefreshFailure::Uncertain,
+                    };
+                    return Err(failure.into());
+                }
+                _ => {}
+            }
+        }
+        anyhow::bail!("OAuth refresh helper exited without a result")
+    })
+    .await;
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    Ok(Some(result.context("OAuth refresh helper timed out")??))
 }
 
 /// Begin a subscription login. Returns the session id the client streams from.
@@ -424,17 +940,40 @@ fn store_credential(auth_key: &str, credential: &Value) -> Result<()> {
 /// One login at a time per provider: a second attempt cancels the first rather
 /// than racing it for the callback port.
 pub async fn start(ryu_provider_id: &str) -> Result<String> {
+    start_for_account(ryu_provider_id, None).await
+}
+
+pub async fn start_for_account(ryu_provider_id: &str, account_id: Option<&str>) -> Result<String> {
+    start_with_options(ryu_provider_id, account_id, false).await
+}
+
+pub async fn start_with_options(
+    ryu_provider_id: &str,
+    account_id: Option<&str>,
+    enable_plan_use: bool,
+) -> Result<String> {
+    if ryu_provider_id == "kiro" {
+        return start_kiro(account_id).await;
+    }
+    if ryu_provider_id == super::CHATGPT_PLAN_PROVIDER_ID {
+        return start_chatgpt_plan(account_id, enable_plan_use).await;
+    }
+    if account_id.is_some() || enable_plan_use {
+        anyhow::bail!("This provider does not support reconnecting a selected registration");
+    }
     let provider = oauth_provider_id(ryu_provider_id)
         .ok_or_else(|| anyhow!("\"{ryu_provider_id}\" is not a subscription login provider"))?;
     let auth_key = oauth_auth_key(ryu_provider_id)
         .ok_or_else(|| anyhow!("\"{ryu_provider_id}\" has no OAuth account scope"))?;
-    let bridge = ensure_bridge()?;
     let runtime = js_runtime().ok_or_else(|| {
         anyhow!(
             "no JavaScript runtime found — Ryu looked on PATH and in the usual Node/Bun install \
              locations. Install Node, then try signing in again"
         )
     })?;
+
+    crate::sidecar::adapters::acp::ensure_managed_pi().await?;
+    ensure_bridge()?;
 
     // Retire any earlier attempt for this provider before binding its port again.
     let stale: Vec<String> = sessions()
@@ -453,7 +992,9 @@ pub async fn start(ryu_provider_id: &str) -> Result<String> {
 
     let mut command = tokio::process::Command::new(runtime);
     command
-        .arg(&bridge)
+        // The process already runs in the managed Pi prefix. Passing its
+        // filename keeps a Windows drive path out of Node's script argument.
+        .arg(BRIDGE_FILE)
         .arg(provider)
         .current_dir(crate::sidecar::adapters::acp::managed_pi_dir())
         // The flow writes nothing itself, but Pi's own dir is the right context
@@ -463,6 +1004,15 @@ pub async fn start(ryu_provider_id: &str) -> Result<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .no_window();
+    if provider == "anthropic" {
+        // The login's code exchange runs here too, so it takes the route.
+        command.envs(
+            crate::local_egress::providers::bridge_proxy_env(
+                crate::local_egress::providers::ProviderRoute::Claude,
+            )
+            .map_err(|reason| anyhow::anyhow!(reason))?,
+        );
+    }
 
     let mut child = command.spawn()?;
     let stdout = child
@@ -481,6 +1031,7 @@ pub async fn start(ryu_provider_id: &str) -> Result<String> {
         history: Mutex::new(Vec::new()),
         stdin: tokio::sync::Mutex::new(Some(stdin)),
         child: Mutex::new(Some(child)),
+        native_abort: Mutex::new(None),
         finished: AtomicBool::new(false),
         provider: provider.to_owned(),
         stderr_tail: Mutex::new(VecDeque::new()),
@@ -503,7 +1054,7 @@ pub async fn start(ryu_provider_id: &str) -> Result<String> {
                 continue;
             }
             let Ok(event) = serde_json::from_str::<Value>(trimmed) else {
-                tracing::debug!("pi oauth bridge: unparsable line: {trimmed}");
+                tracing::debug!("pi oauth bridge: unparsable line");
                 continue;
             };
             match event.get("type").and_then(Value::as_str) {
@@ -571,7 +1122,6 @@ pub async fn start(ryu_provider_id: &str) -> Result<String> {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                tracing::debug!("pi oauth bridge stderr: {line}");
                 stderr_session.push_stderr(line);
             }
         });
@@ -599,6 +1149,96 @@ pub async fn start(ryu_provider_id: &str) -> Result<String> {
 mod tests {
     use super::*;
 
+    fn plan_registration(client: &str, access: &str) -> super::super::chatgpt_plan::StoredAccount {
+        super::super::chatgpt_plan::StoredAccount::from_value(&json!({
+            "state": "connected", "type": "oauth", "flow": "chatgpt-plan",
+            "access": access, "refresh": "synthetic-refresh", "expires": 1_900_000_000_000_u64,
+            "clientId": client, "hostId": format!("urn:uuid:{}", uuid::Uuid::new_v4()),
+            "issuer": "https://auth.openai.com", "subject": "same-subject",
+            "idToken": "synthetic-id-token", "email": "same@example.com",
+            "scopes": ["openid", "offline_access", "resource.invoke", "chatgpt.tokens.use.direct"]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn native_registrations_are_sealed_and_reconnect_preserves_another_active_account() {
+        crate::pi_config::tests::with_temp_dir(|| {
+            let vault = super::super::accounts::AccountVault::in_memory().unwrap();
+            let scope = super::super::accounts::provider_scope(super::super::CHATGPT_PLAN_AUTH_KEY);
+            let first = plan_registration("oaiapp_first", "first-access");
+            let second = plan_registration("oaiapp_second", "second-access");
+            let first_id = store_plan_registration(&vault, &PlanLoginTarget::New, &first).unwrap();
+            let second_id =
+                store_plan_registration(&vault, &PlanLoginTarget::New, &second).unwrap();
+            assert_eq!(vault.count(&scope).unwrap(), 2);
+            assert!(!super::super::read_auth().contains_key(super::super::CHATGPT_PLAN_AUTH_KEY));
+            let target = PlanLoginTarget::Existing {
+                account_id: first_id.clone(),
+                registration: first,
+            };
+            let renewed = plan_registration("oaiapp_first", "renewed-access");
+            assert_eq!(
+                store_plan_registration(&vault, &target, &renewed).unwrap(),
+                first_id
+            );
+            assert_eq!(
+                vault.active_info(&scope).unwrap().unwrap().account_id,
+                second_id
+            );
+            assert_eq!(
+                vault.credential(&scope, &first_id).unwrap().unwrap()["access"],
+                "renewed-access"
+            );
+            assert_eq!(
+                vault.credential(&scope, &second_id).unwrap().unwrap()["access"],
+                "second-access"
+            );
+            assert!(store_plan_registration(&vault, &target, &second).is_err());
+            vault.remove(&scope, &first_id).unwrap();
+            assert!(store_plan_registration(&vault, &target, &renewed).is_err());
+            assert_eq!(vault.count(&scope).unwrap(), 1);
+        });
+    }
+
+    #[test]
+    fn completed_oauth_login_is_sealed_and_materialized_as_the_same_account() {
+        crate::pi_config::tests::with_temp_dir(|| {
+            let vault = super::super::accounts::AccountVault::in_memory().expect("vault");
+            let credential = json!({
+                "type": "oauth",
+                "access": "test-access",
+                "refresh": "test-refresh",
+                "expires": 1_900_000_000_000_u64
+            });
+            store_credential_with_vault("anthropic", &credential, Some(&vault))
+                .expect("store completed login");
+            let scope = super::super::accounts::provider_scope("anthropic");
+            assert_eq!(
+                vault
+                    .active_credential(&scope)
+                    .expect("sealed account")
+                    .map(|(_, value)| value),
+                Some(credential.clone())
+            );
+            assert_eq!(super::super::read_auth()["anthropic"], credential);
+
+            let another =
+                json!({"type":"oauth","access":"second-access","refresh":"second-refresh"});
+            store_credential_with_vault("anthropic", &another, Some(&vault))
+                .expect("add another login");
+            assert_eq!(vault.count(&scope).expect("account count"), 2);
+            assert_eq!(
+                vault
+                    .active_credential(&scope)
+                    .expect("active account")
+                    .map(|(_, value)| value),
+                Some(another.clone())
+            );
+            assert_eq!(super::super::read_auth()["anthropic"], another);
+        });
+    }
+
     /// A session with no child, for the bookkeeping the flow does around one.
     fn bare_session() -> LoginSession {
         let (tx, _rx) = broadcast::channel(8);
@@ -607,6 +1247,7 @@ mod tests {
             history: Mutex::new(Vec::new()),
             stdin: tokio::sync::Mutex::new(None),
             child: Mutex::new(None),
+            native_abort: Mutex::new(None),
             finished: AtomicBool::new(false),
             provider: "anthropic".to_owned(),
             stderr_tail: Mutex::new(VecDeque::new()),
@@ -756,6 +1397,13 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn");
+        // Establish the fixture's already-exited state before exercising the
+        // reap deadline, which must not include cold process startup.
+        let exited = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait())
+            .await
+            .expect("the fixture must exit before exercising reaping")
+            .expect("wait on the exited fixture");
+        assert_eq!(exited.code(), Some(3));
         let status = reap_or_kill(&mut child, EXIT_STATUS_WAIT)
             .await
             .expect("an exited child reports a status");
@@ -766,18 +1414,21 @@ mod tests {
         );
     }
 
-    /// With no evidence the message is exactly what it always was; with evidence
-    /// it carries it, because that string is all the user ever sees.
+    /// Vendor stderr can include a token. Preserve useful fixed diagnostics
+    /// without reflecting arbitrary helper output to the UI.
     #[test]
-    fn the_exit_message_folds_in_whatever_evidence_exists() {
+    fn the_exit_message_classifies_stderr_without_reflecting_secrets() {
         assert_eq!(
             exit_message(None, ""),
             "the login flow exited before completing"
         );
         assert_eq!(
             exit_message(None, "  Cannot find package '@earendil-works/pi-ai'  "),
-            "the login flow exited before completing — the sign-in helper reported: \
-             Cannot find package '@earendil-works/pi-ai'"
+            "the login flow exited before completing — the managed Pi package could not be loaded"
+        );
+        assert_eq!(
+            exit_message(None, "request failed; access_token=secret-value"),
+            "the login flow exited before completing"
         );
     }
 
@@ -791,9 +1442,44 @@ mod tests {
         assert_eq!(oauth_provider_id("openai-codex"), Some("openai-codex"));
         assert_eq!(oauth_provider_id("chatgpt"), Some("openai-codex"));
         assert_eq!(oauth_provider_id("github-copilot"), Some("github-copilot"));
+        assert_eq!(oauth_provider_id("kimi-coding"), Some("kimi-coding"));
+        assert_eq!(oauth_provider_id("radius"), Some("radius"));
+        assert_eq!(oauth_provider_id("openrouter"), Some("openrouter"));
+        assert_eq!(oauth_provider_id("xai"), Some("xai"));
         // Not a login provider: an api-key provider has nothing to log into.
         assert_eq!(oauth_provider_id("openai"), None);
         assert_eq!(oauth_provider_id("nope"), None);
+    }
+
+    #[test]
+    fn every_login_account_has_a_pre_turn_refresh_lane() {
+        for provider in super::super::PROVIDERS {
+            if oauth_provider_id(provider.id).is_some() {
+                assert!(
+                    super::super::OAUTH_REFRESH_KEYS.contains(&provider.auth_key),
+                    "{} has login but no refresh lane for {}",
+                    provider.id,
+                    provider.auth_key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn subscription_oauth_classifier_excludes_oauth_capable_byok_providers() {
+        for provider in [
+            "openai-codex",
+            "chatgpt",
+            "claude-pro-max",
+            "github-copilot",
+            "kimi-coding",
+            "radius",
+        ] {
+            assert!(is_subscription_oauth_provider(provider), "{provider}");
+        }
+        for provider in ["openrouter", "xai", "openai", "unknown"] {
+            assert!(!is_subscription_oauth_provider(provider), "{provider}");
+        }
     }
 
     /// The runtime probe must find an interpreter by its PLATFORM file name, not
@@ -823,7 +1509,13 @@ mod tests {
     #[test]
     fn storing_a_credential_connects_that_provider_and_preserves_others() {
         crate::pi_config::tests::with_temp_dir(|| {
-            super::super::set_auth_key("openai", "sk-existing").expect("seed api key");
+            // A legacy plaintext entry (as an older build or Pi itself wrote it).
+            super::super::ensure_dir().expect("config dir");
+            super::super::write_secret_file(
+                &super::super::auth_path(),
+                r#"{"openai":{"type":"api_key","key":"sk-existing"}}"#,
+            )
+            .expect("seed api key");
             assert_eq!(
                 super::super::subscription_login_present("claude-pro-max"),
                 Some(false),
@@ -851,4 +1543,146 @@ mod tests {
             );
         });
     }
+
+    #[test]
+    fn claude_login_and_anthropic_api_key_report_separate_connection_states() {
+        crate::pi_config::tests::with_temp_dir(|| {
+            super::super::ensure_dir().expect("config dir");
+            super::super::write_secret_file(
+                &super::super::auth_path(),
+                r#"{"anthropic":{"type":"api_key","key":"sk-test"}}"#,
+            )
+            .expect("seed API key");
+            assert_eq!(
+                super::super::subscription_login_present("claude-pro-max"),
+                Some(false),
+                "an Anthropic API key must not claim a Claude subscription login"
+            );
+
+            store_credential(
+                "anthropic",
+                &json!({ "type": "oauth", "access": "tok", "refresh": "ref" }),
+            )
+            .expect("store OAuth login");
+            assert_eq!(
+                super::super::subscription_login_present("claude-pro-max"),
+                Some(true)
+            );
+            assert!(
+                !super::super::provider_configured(
+                    super::super::provider_meta("anthropic").expect("API-key row")
+                ),
+                "an OAuth login must not claim an Anthropic API key"
+            );
+        });
+    }
+
+    #[test]
+    fn refreshed_claude_expiry_is_written_in_both_core_and_pi_units() {
+        crate::pi_config::tests::with_temp_dir(|| {
+            store_credential(
+                "anthropic",
+                &json!({ "type": "oauth", "access": "old", "refresh": "old-refresh", "expires": 1 }),
+            )
+            .expect("seed OAuth login");
+            super::super::persist_oauth_refresh(
+                "anthropic",
+                &super::super::read_auth()["anthropic"],
+                None,
+                "new",
+                Some("new-refresh"),
+                Some(1_900_000_000),
+            )
+            .expect("persist refresh");
+            let credential = super::super::read_auth()
+                .remove("anthropic")
+                .expect("stored credential");
+            assert_eq!(credential["expires_at"], json!(1_900_000_000));
+            assert_eq!(credential["expires"], json!(1_900_000_000_000_u64));
+            assert_eq!(credential["refresh"], json!("new-refresh"));
+        });
+    }
+
+    #[test]
+    fn refreshed_claude_token_replaces_only_the_active_sealed_account() {
+        crate::pi_config::tests::with_temp_dir(|| {
+            let vault = super::super::accounts::AccountVault::in_memory().expect("vault");
+            let scope = super::super::accounts::provider_scope("anthropic");
+            let first = json!({ "type": "oauth", "access": "first", "refresh": "first-refresh" });
+            let second =
+                json!({ "type": "oauth", "access": "second", "refresh": "second-refresh" });
+            vault
+                .upsert(
+                    &scope,
+                    "account-a",
+                    "First",
+                    super::super::accounts::KIND_OAUTH,
+                    Some(first.clone()),
+                )
+                .expect("first account");
+            vault
+                .upsert(
+                    &scope,
+                    "account-b",
+                    "Second",
+                    super::super::accounts::KIND_OAUTH,
+                    Some(second.clone()),
+                )
+                .expect("second account");
+            store_credential("anthropic", &second).expect("materialized active account");
+
+            super::super::persist_oauth_refresh_with_vault(
+                "anthropic",
+                &second,
+                Some("account-b"),
+                "rotated",
+                Some("rotated-refresh"),
+                Some(1_900_000_000),
+                Some(&vault),
+            )
+            .expect("persist rotated credential");
+
+            assert_eq!(vault.credential(&scope, "account-a").unwrap(), Some(first));
+            let rotated = vault
+                .credential(&scope, "account-b")
+                .unwrap()
+                .expect("active account credential");
+            assert_eq!(rotated["access"], json!("rotated"));
+            assert_eq!(rotated["refresh"], json!("rotated-refresh"));
+            assert_eq!(rotated["expires"], json!(1_900_000_000_000_u64));
+            assert_eq!(super::super::read_auth()["anthropic"], rotated);
+        });
+    }
+}
+#[test]
+fn builtin_catalog_maps_api_keys_without_advertising_oauth() {
+    for id in [
+        "baseten",
+        "ant-ling",
+        "minimax-cn",
+        "moonshotai-cn",
+        "opencode",
+        "opencode-go",
+        "qwen-token-plan",
+        "qwen-token-plan-cn",
+        "qwen-token-plan-individual",
+        "vercel-ai-gateway",
+        "xiaomi",
+        "xiaomi-token-plan-ams",
+        "xiaomi-token-plan-cn",
+        "xiaomi-token-plan-sgp",
+        "zai-coding-cn",
+    ] {
+        assert_eq!(builtin_catalog_provider_id(id), Some(id));
+        assert_eq!(oauth_provider_id(id), None);
+    }
+    assert_eq!(
+        builtin_catalog_provider_id("claude-pro-max"),
+        Some("anthropic")
+    );
+    assert_eq!(builtin_catalog_provider_id("custom-unknown"), None);
+    assert_eq!(
+        builtin_catalog_provider_id(crate::pi_config::GATEWAY_PROVIDER_ID),
+        None
+    );
 }

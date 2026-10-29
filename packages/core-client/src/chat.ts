@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
 // apps/desktop/src/lib/api/chat.ts
 //
 // Typed client for Core's chat streaming endpoint (`/api/chat/stream`). The chat
@@ -5,7 +7,63 @@
 // module exposes the endpoint URL + auth headers the transport needs. Centralizing
 // it here keeps base-URL + bearer handling out of the page.
 
-import { type ApiTarget, apiUrl, makeHeaders, request } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	makeHeaders,
+	request,
+	USER_JWT_HEADER,
+} from "./client.ts";
+
+// Complete actual proactive opening and turn-control publisher fields; raw
+// future metadata remains attached to the original decoded response.
+const openingFields = z.object({
+	conversation_id: z.string(),
+	reply: z.string().optional(),
+	status: z.enum(["already_completed", "completed", "pending"]),
+});
+const cancelledFields = z.object({ cancelled: z.boolean() });
+const answerNowFields = z.object({
+	accepted: z.boolean(),
+	action: z.string().optional(),
+	strategy: z.string().optional(),
+});
+const suggestionsFields = z.object({
+	suggestions: z.array(z.string()).optional(),
+});
+const predictionFields = z.object({
+	prediction: z.string().nullable().optional(),
+});
+const openingResponseSchema = z.custom<z.output<typeof openingFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		openingFields.safeParse(value).success
+);
+const cancelledResponseSchema = z.custom<z.output<typeof cancelledFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		cancelledFields.safeParse(value).success
+);
+const answerNowResponseSchema = z.custom<z.output<typeof answerNowFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		answerNowFields.safeParse(value).success
+);
+const suggestionsResponseSchema = z.custom<z.output<typeof suggestionsFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		suggestionsFields.safeParse(value).success
+);
+const predictionResponseSchema = z.custom<z.output<typeof predictionFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		predictionFields.safeParse(value).success
+);
+
+/** Cloud execution resolves setup and credentials on Core, using only this opaque ID. */
+export interface CloudChatRequestFields {
+	cloudEnvironmentId?: string;
+}
 
 /** Absolute URL of the streaming chat endpoint for a given node. */
 export function chatStreamUrl(target: ApiTarget): string {
@@ -13,13 +71,17 @@ export function chatStreamUrl(target: ApiTarget): string {
 }
 
 /** Auth headers (bearer token when present) for the chat transport. */
-export function chatHeaders(target: ApiTarget): Record<string, string> {
+export function chatHeaders(target: ApiTarget) {
 	const headers = makeHeaders(target.token, target.userJwt);
-	// The AI SDK transport sets its own content-type per request; only the
-	// Authorization header needs to be carried here.
+	// The AI SDK transport sets its own content-type per request, so carry only
+	// the credentials: the node bearer and, on a shared node, the user identity
+	// that lets Core attribute the turn and enforce per-member access.
 	const auth: Record<string, string> = {};
 	if (headers.Authorization) {
 		auth.Authorization = headers.Authorization;
+	}
+	if (headers[USER_JWT_HEADER]) {
+		auth[USER_JWT_HEADER] = headers[USER_JWT_HEADER];
 	}
 	return auth;
 }
@@ -48,25 +110,32 @@ export async function startProactiveOpening(
 	agentId = "ryu",
 	idempotencyKey?: string
 ): Promise<ProactiveOpeningResponse> {
-	return request<ProactiveOpeningResponse>(target, "/api/proactive/opening", {
-		method: "POST",
-		body: {
-			conversation_id: conversationId,
-			agent_id: agentId,
-			idempotency_key: idempotencyKey,
+	return request(
+		target,
+		"/api/proactive/opening",
+		{
+			method: "POST",
+			body: {
+				conversation_id: conversationId,
+				agent_id: agentId,
+				idempotency_key: idempotencyKey,
+			},
 		},
-	});
+		openingResponseSchema
+	);
 }
 
 /** Cancel a live chat turn. Aborting the client stream alone does not stop Core. */
 export async function cancelChat(
 	target: ApiTarget,
-	conversationId: string
+	conversationId: string,
+	signal?: AbortSignal
 ): Promise<boolean> {
-	const response = await request<{ cancelled: boolean }>(
+	const response = await request(
 		target,
 		"/api/chat/cancel",
-		{ method: "POST", body: { conversation_id: conversationId } }
+		{ method: "POST", body: { conversation_id: conversationId }, signal },
+		cancelledResponseSchema
 	);
 	return response.cancelled;
 }
@@ -77,7 +146,7 @@ export async function answerNowChat(
 	conversationId: string,
 	turnId: string
 ): Promise<boolean> {
-	const response = await request<{ accepted: boolean }>(
+	const response = await request(
 		target,
 		"/api/chat/control",
 		{
@@ -87,7 +156,8 @@ export async function answerNowChat(
 				conversation_id: conversationId,
 				turn_id: turnId,
 			},
-		}
+		},
+		answerNowResponseSchema
 	);
 	return response.accepted;
 }
@@ -99,17 +169,44 @@ export async function fetchNextPromptSuggestions(
 	signal?: AbortSignal
 ): Promise<string[]> {
 	try {
-		const response = await request<{ suggestions?: string[] }>(
+		const response = await request(
 			target,
 			"/api/chat/suggestions",
 			{
 				method: "POST",
 				body: { conversation_id: conversationId },
 				signal,
-			}
+			},
+			suggestionsResponseSchema
 		);
 		return response.suggestions ?? [];
 	} catch {
 		return [];
+	}
+}
+
+/**
+ * Fetch the composer prediction (the user's likely next message) for a settled
+ * turn. `null` when Core abstains, the plugin is off, or the request fails.
+ */
+export async function fetchComposerPrediction(
+	target: ApiTarget,
+	conversationId: string,
+	signal?: AbortSignal
+): Promise<string | null> {
+	try {
+		const response = await request(
+			target,
+			"/api/chat/prediction",
+			{
+				method: "POST",
+				body: { conversation_id: conversationId },
+				signal,
+			},
+			predictionResponseSchema
+		);
+		return response.prediction?.trim() || null;
+	} catch {
+		return null;
 	}
 }

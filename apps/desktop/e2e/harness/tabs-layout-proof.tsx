@@ -4,8 +4,10 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@ryu/ui/components/tabs.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import "../../src/index.css";
 
 const STORAGE_KEY = "ryu.tabs.layout.proof";
@@ -56,13 +58,18 @@ function readPersistedLayout() {
 		if (!value) {
 			return { hidden: [], order: [] };
 		}
-		const parsed = JSON.parse(value) as { hidden?: unknown; order?: unknown };
+		const parsed = z
+			.object({
+				hidden: z.array(z.json()).catch([]),
+				order: z.array(z.json()).catch([]),
+			})
+			.parse(JSON.parse(value));
 		return {
 			hidden: Array.isArray(parsed.hidden)
-				? parsed.hidden.filter((key): key is string => typeof key === "string")
+				? parsed.hidden.filter((key): key is string => isNativeText(key))
 				: [],
 			order: Array.isArray(parsed.order)
-				? parsed.order.filter((key): key is string => typeof key === "string")
+				? parsed.order.filter((key): key is string => isNativeText(key))
 				: [],
 		};
 	} catch {
@@ -210,7 +217,8 @@ function ProofStory() {
 							</TabsList>
 							{TAB_DEFINITIONS.map((tab) => (
 								<TabsContent
-									className="mt-4 rounded-lg border bg-muted/30 p-4 text-sm"
+									appearance="layout-proof"
+									className="mt-4"
 									key={tab.value}
 									value={tab.value}
 								>
@@ -229,7 +237,8 @@ function ProofStory() {
 						<h2 className="font-semibold">Component-level overflow strip</h2>
 						<p className="mt-1 text-muted-foreground text-xs">
 							With layout management disabled, the shared list keeps every tab
-							in a one-line scroll strip and exposes paging controls on hover.
+							in a one-line scroll strip with edge fades and directional paging
+							arrows.
 						</p>
 					</div>
 
@@ -249,7 +258,8 @@ function ProofStory() {
 								))}
 							</TabsList>
 							<TabsContent
-								className="mt-4 rounded-lg border bg-muted/30 p-4 text-sm"
+								appearance="layout-proof"
+								className="mt-4"
 								value={OVERFLOW_TAB_DEFINITIONS[0].value}
 							>
 								<strong>Overview</strong> content is active.

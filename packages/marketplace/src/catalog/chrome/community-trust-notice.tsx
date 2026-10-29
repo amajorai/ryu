@@ -16,7 +16,6 @@ import {
 	AlertDescription,
 	AlertTitle,
 } from "@ryu/ui/components/alert.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCatalogHost } from "../host.tsx";
 
 /** The GitHub topics Core's `github-topic` catalog source discovers. Kept in sync
@@ -58,12 +57,10 @@ export default function CommunityTrustNotice({
 
 	return (
 		<Alert
-			className={cn(
-				"border-warning/30 bg-warning/5 text-foreground",
-				tone === "inline" && "px-3 py-2.5",
-				className
-			)}
+			appearance="community-trust"
+			className={className}
 			data-testid="community-trust-notice"
+			inset={tone === "inline" ? "community-inline" : undefined}
 		>
 			<HugeiconsIcon className="text-status-warning" icon={Alert02Icon} />
 			<AlertTitle>Not reviewed by Ryu</AlertTitle>

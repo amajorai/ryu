@@ -19,9 +19,15 @@
 // dither style is present and first, at least one gradient style exists, every
 // tile is labelled, and picking a gradient paints the shared static gradient.
 
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
 import { expect, type Locator, test } from "@playwright/test";
 
 const STORY_URL = "/agent-banner-story.html";
+const MARKETPLACE_PROOF_DIR = path.resolve(
+	import.meta.dirname,
+	"../../docs/proof/marketplace-wallpaper-banners"
+);
 
 /** The shared static painter (`animatedGradientCss`) always emits two radial
  *  pools plus a linear ramp. Its signature, and what tells a real gradient
@@ -55,6 +61,28 @@ test.describe("agent banner dialog", () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto(STORY_URL);
 		await expect(page.getByTestId("banner-header")).toBeVisible();
+	});
+
+	test("profile banner feathers into its card body", async ({
+		page,
+	}, testInfo) => {
+		await expect(page.getByTestId("banner-body")).toBeVisible();
+		await page.screenshot({
+			fullPage: true,
+			path: testInfo.outputPath("agent-profile-banner-feather.png"),
+		});
+	});
+
+	test("profile banner feathers into its light card body", async ({
+		page,
+	}, testInfo) => {
+		await page.goto(`${STORY_URL}?theme=light`);
+		await expect(page.getByTestId("banner-header")).toBeVisible();
+		await expect(page.getByTestId("banner-body")).toBeVisible();
+		await page.screenshot({
+			fullPage: true,
+			path: testInfo.outputPath("agent-profile-banner-feather-light.png"),
+		});
 	});
 
 	test("defaults to the dither wash, painted on a canvas", async ({ page }) => {
@@ -140,6 +168,55 @@ test.describe("agent banner dialog", () => {
 		await expect(
 			page.getByTestId("banner-header").locator("canvas")
 		).toHaveCount(1);
+	});
+
+	test("chooses a Marketplace shader wallpaper and persists its portable node selection", async ({
+		page,
+	}) => {
+		await mkdir(MARKETPLACE_PROOF_DIR, { recursive: true });
+		await page.getByRole("button", { name: "Customize" }).click();
+		await page
+			.getByRole("button", { name: "Browse Marketplace wallpapers" })
+			.click();
+
+		const picker = page.getByRole("dialog").filter({
+			has: page.getByRole("heading", {
+				name: "Choose an agent banner wallpaper",
+			}),
+		});
+		await expect(picker).toBeVisible();
+		await expect(picker.getByText("260 of 260 wallpapers")).toBeVisible();
+		await page.screenshot({
+			fullPage: true,
+			path: path.join(MARKETPLACE_PROOF_DIR, "agent-wallpaper-picker.png"),
+		});
+
+		const meshGradientId = "com.ryu.marketplace-defaults:mesh-gradient";
+		await page.getByTestId(`banner-wallpaper-${meshGradientId}`).click();
+		await expect(page.getByTestId("banner-state")).toContainText(
+			`wallpaper=${meshGradientId}`
+		);
+		await expect(
+			page
+				.getByTestId("banner-header")
+				.locator(`[data-backdrop-id="${meshGradientId}"]`)
+		).toBeVisible();
+
+		const stored = await page.evaluate(() =>
+			localStorage.getItem("proof:node:agent-banner:banner-story-agent")
+		);
+		expect(stored).not.toBeNull();
+		const parsedStorage: unknown = JSON.parse(stored ?? "{}");
+		expect(parsedStorage).toMatchObject({
+			wallpaper: {
+				backdropId: "shader-mesh-gradient",
+				id: meshGradientId,
+			},
+		});
+		await page.getByRole("button", { name: "Done" }).click();
+		await page.getByTestId("banner-header").screenshot({
+			path: path.join(MARKETPLACE_PROOF_DIR, "agent-marketplace-banner.png"),
+		});
 	});
 });
 

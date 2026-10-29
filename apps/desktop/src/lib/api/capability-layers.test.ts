@@ -28,6 +28,11 @@
 //     provider that omits the field.
 
 import { describe, expect, it } from "bun:test";
+import type {
+	CapabilityLayerWire,
+	CapabilityProviderWire,
+	CapabilityReadModelWire,
+} from "./capability-layer-contracts.ts";
 import {
 	type CapabilityProvider,
 	canServe,
@@ -58,17 +63,14 @@ function provider(over: Partial<CapabilityProvider>): CapabilityProvider {
 
 /** Run `run` with `globalThis.fetch` answering every call with `payload`. */
 async function withPayload<T>(
-	payload: unknown,
+	payload: CapabilityReadModelWire,
 	run: () => Promise<T>
 ): Promise<T> {
 	const original = globalThis.fetch;
-	globalThis.fetch = (async () => ({
-		ok: true,
-		status: 200,
-		headers: new Headers({ "content-type": "application/json" }),
-		json: async () => payload,
-		text: async () => JSON.stringify(payload),
-	})) as unknown as typeof fetch;
+	globalThis.fetch = Object.assign(
+		async (..._args: Parameters<typeof original>) => Response.json(payload),
+		{ preconnect: original.preconnect }
+	);
 	try {
 		return await run();
 	} finally {
@@ -77,7 +79,7 @@ async function withPayload<T>(
 }
 
 /** `/api/capabilities` carrying one provider row exactly as given. */
-function payloadWith(row: Record<string, unknown>) {
+function payloadWith(row: CapabilityProviderWire) {
 	return {
 		capabilities: [
 			{
@@ -95,7 +97,7 @@ function payloadWith(row: Record<string, unknown>) {
 
 /** The single mapped provider from a one-row payload. */
 async function firstProvider(
-	row: Record<string, unknown>
+	row: CapabilityProviderWire
 ): Promise<CapabilityProvider> {
 	const model = await withPayload(payloadWith(row), () =>
 		fetchCapabilityLayers(TARGET)
@@ -184,7 +186,7 @@ describe("fetchCapabilityLayers provider flags", () => {
 // one provider, which is how four app-private capabilities became "toolkits".
 // Falling back to it would keep reproducing that against an older Core.
 describe("fetchCapabilityLayers toolkit flag", () => {
-	async function firstLayer(over: Record<string, unknown>) {
+	async function firstLayer(over: Partial<CapabilityLayerWire>) {
 		const payload = {
 			capabilities: [
 				{
@@ -229,6 +231,46 @@ describe("fetchCapabilityLayers toolkit flag", () => {
 		expect((await firstLayer({ title: "  Search  " })).title).toBe("Search");
 		expect((await firstLayer({ title: "   " })).title).toBeNull();
 		expect((await firstLayer({})).title).toBeNull();
+	});
+});
+
+describe("fetchCapabilityLayers decision-model flag", () => {
+	async function firstLayer(over: Partial<CapabilityLayerWire>) {
+		const payload = {
+			capabilities: [
+				{
+					available: [],
+					bound: null,
+					capability: "decision.typed",
+					overridden: false,
+					providers: [],
+					selectable: true,
+					...over,
+				},
+			],
+			verbs: [],
+		};
+		const model = await withPayload(payload, () =>
+			fetchCapabilityLayers(TARGET)
+		);
+		const layer = model.capabilities[0];
+		if (!layer) {
+			throw new Error("payload must map to exactly one layer");
+		}
+		return layer;
+	}
+
+	it("reads the distinct Decision Models layer classification", async () => {
+		expect((await firstLayer({ decisionModel: true })).decisionModel).toBe(
+			true
+		);
+		expect((await firstLayer({ decisionModel: false })).decisionModel).toBe(
+			false
+		);
+	});
+
+	it("defaults an absent layer classification to false", async () => {
+		expect((await firstLayer({})).decisionModel).toBe(false);
 	});
 });
 

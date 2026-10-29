@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/message-feedback.ts
 //
 // Typed client for thumbs 👍/👎 on an assistant message
@@ -49,7 +51,8 @@ export async function setMessageFeedback(
 			{
 				method: "POST",
 				body: { rating, allow_latest_fallback: allowLatestFallback },
-			}
+			},
+			responseCodec1
 		);
 		return {
 			ok: res.ok ?? true,
@@ -75,10 +78,31 @@ export async function getConversationFeedback(
 			feedback?: Record<string, FeedbackRating>;
 		}>(
 			target,
-			`/api/conversations/${encodeURIComponent(conversationId)}/feedback`
+			`/api/conversations/${encodeURIComponent(conversationId)}/feedback`,
+			undefined,
+			responseCodec2
 		);
 		return res.feedback ?? {};
 	} catch {
 		return {};
 	}
 }
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const feedbackRatingResponseCodec = z.union([
+	z.literal("up"),
+	z.literal("down"),
+]);
+const responseCodec1 = z
+	.object({
+		ok: z.boolean().optional(),
+		rating: z.union([feedbackRatingResponseCodec, z.null()]).optional(),
+		reward_captured: z.boolean().optional(),
+		memory_captured: z.boolean().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec2 = z
+	.object({
+		feedback: z.record(z.string(), feedbackRatingResponseCodec).optional(),
+	})
+	.catchall(gatewayJsonValueSchema);

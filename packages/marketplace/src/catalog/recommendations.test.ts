@@ -44,3 +44,35 @@ describe("normalizeRecommendations", () => {
 		).toBe(false);
 	});
 });
+
+test("normalization keeps valid rows and the nullish icon alias contract", () => {
+	const result = normalizeRecommendations({
+		items: [
+			{
+				id: "  first  ",
+				name: "First",
+				kind: " app ",
+				icon_url: null,
+				iconUrl: " alias ",
+				installed: "true",
+				reason: " ",
+			},
+			{
+				id: "second",
+				name: "Second",
+				kind: "skill",
+				icon_url: " ",
+				iconUrl: "ignored",
+			},
+			{ id: "invalid", name: "Invalid", kind: "private" },
+			null,
+		],
+	});
+	expect(result.items.map((item) => item.id)).toEqual(["first", "second"]);
+	expect(result.items[0]?.iconUrl).toBe("alias");
+	expect(result.items[0]?.installed).toBe(false);
+	expect(result.items[0]?.reason).toBe(
+		"A match for your current catalog setup."
+	);
+	expect(result.items[1]?.iconUrl).toBeNull();
+});

@@ -34,7 +34,7 @@ export function stopConversation(conversationId: string): boolean {
 		return false;
 	}
 
-	for (const handler of [...handlers]) {
+	for (const handler of Array.from(handlers)) {
 		handler();
 	}
 	return true;

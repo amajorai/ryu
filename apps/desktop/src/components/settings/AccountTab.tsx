@@ -7,16 +7,18 @@ import {
 	ShieldBanIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	settingsApi,
 	useEmailChangeStatus,
 	usePasswordStatus,
 } from "@ryu/settings";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useQueryClient } from "@tanstack/react-query";
 import { sileo } from "sileo";
+import { z } from "zod";
 import { useSession } from "@/lib/auth-client.ts";
 import { EmailChangeDialog } from "./dialogs/EmailChangeDialog.tsx";
 import { PasswordChangeDialog } from "./dialogs/PasswordChangeDialog.tsx";
@@ -29,19 +31,22 @@ import {
 	SettingsSection,
 } from "./shared/settings-items.tsx";
 
-const AUTH_METHOD_LABELS: Record<string, string> = {
-	"magic-link": "You sign in with a magic link",
-	google: "You sign in with Google",
-	github: "You sign in with GitHub",
-	apple: "You sign in with Apple",
-	discord: "You sign in with Discord",
-};
+const AUTH_METHOD_LABELS = new Map<string, string>([
+	["magic-link", "You sign in with a magic link"],
+	["google", "You sign in with Google"],
+	["github", "You sign in with GitHub"],
+	["apple", "You sign in with Apple"],
+	["discord", "You sign in with Discord"],
+]);
 
 function describeAuthMethod(method: string): string {
-	return AUTH_METHOD_LABELS[method] ?? "You sign in with a connected account";
+	return (
+		AUTH_METHOD_LABELS.get(method) ?? "You sign in with a connected account"
+	);
 }
 
 export function AccountTab() {
+	const tl = useLiteralMessages();
 	const queryClient = useQueryClient();
 	const { data: sessionData, isPending: sessionLoading } = useSession();
 	const user = sessionData?.user;
@@ -54,9 +59,11 @@ export function AccountTab() {
 		refetch: refetchEmailChange,
 	} = useEmailChangeStatus();
 
-	const twoFactorEnabled = !!(
-		sessionData?.user as { twoFactorEnabled?: boolean } | undefined
-	)?.twoFactorEnabled;
+	const twoFactorStatus = z
+		.object({ twoFactorEnabled: z.boolean().optional() })
+		.safeParse(user);
+	const twoFactorEnabled =
+		twoFactorStatus.success && twoFactorStatus.data.twoFactorEnabled === true;
 
 	const handleCancelEmailChange = async () => {
 		try {
@@ -113,7 +120,9 @@ export function AccountTab() {
 								</div>
 								<p className="text-status-warning text-xs dark:text-status-warning">
 									{emailChange.statusMessage ??
-										`Changing to ${emailChange.newEmail}`}
+										tl("Changing to {newEmail}", {
+											newEmail: emailChange.newEmail,
+										})}
 								</p>
 								<div className="flex items-center gap-3 text-xs">
 									<span className="flex items-center gap-1">
@@ -146,10 +155,11 @@ export function AccountTab() {
 									</span>
 								</div>
 								<Button
-									className="h-7 px-2 text-muted-foreground text-xs"
+									appearance="service-action"
 									onClick={handleCancelEmailChange}
 									size="sm"
-									variant="ghost"
+									typography="compact"
+									variant="ghost-muted"
 								>
 									Cancel change
 								</Button>
@@ -199,10 +209,7 @@ export function AccountTab() {
 									/>
 								)}
 								Two-Factor Authentication
-								<Badge
-									className="text-xs"
-									variant={twoFactorEnabled ? "default" : "secondary"}
-								>
+								<Badge variant={twoFactorEnabled ? "default" : "secondary"}>
 									{twoFactorEnabled ? "Enabled" : "Disabled"}
 								</Badge>
 							</span>

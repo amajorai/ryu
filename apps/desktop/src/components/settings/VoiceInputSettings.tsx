@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/components/settings/VoiceInputSettings.tsx
 //
 // Voice-input transcription settings for the island companion: the engine and
@@ -17,9 +18,15 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { useCallback, useEffect, useState } from "react";
-import { request, toTarget } from "@/src/lib/api/client.ts";
+} from "@ryu/ui/components/select.tsx";
+import { useEffect, useState } from "react";
+import {
+	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "@/src/components/settings/shared/settings-items.tsx";
+import { type ApiTarget, request } from "@/src/lib/api/client.ts";
 import {
 	DEFAULT_VOICE_PREFS,
 	getVoiceInputPrefs,
@@ -27,14 +34,13 @@ import {
 	setVoiceInputPrefs,
 	VOICE_ENGINES,
 	type VoiceEngine,
-	type VoiceInputPrefs,
 } from "@/src/lib/api/preferences.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import {
-	SettingsGroup,
-	SettingsItem,
-	SettingsSection,
-} from "./shared/settings-items.tsx";
+	useVoicePreference,
+	useVoicePreferenceScope,
+	type VoicePreferenceAuthority,
+	VoicePreferenceStatus,
+} from "./voice-preference-state.tsx";
 
 interface SidecarStatus {
 	name: string;
@@ -45,31 +51,50 @@ interface SidecarStatus {
 // elsewhere without reopening the screen.
 const STATUS_POLL_MS = 5000;
 
+const sidecarStatusResponseCodec: z.ZodType<SidecarStatus> = z
+	.object({ name: z.string(), running: z.boolean() })
+	.passthrough();
 export function VoiceInputSettings() {
-	const [prefs, setPrefs] = useState<VoiceInputPrefs>(DEFAULT_VOICE_PREFS);
-	const [statuses, setStatuses] = useState<SidecarStatus[]>([]);
+	const scope = useVoicePreferenceScope();
+	return (
+		<VoiceInputSettingsForTarget
+			key={scope.id}
+			resource={scope.resource}
+			target={scope.target}
+		/>
+	);
+}
 
-	// Load saved settings once on mount.
-	useEffect(() => {
-		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		getVoiceInputPrefs(target).then((saved) => {
-			if (!cancelled) {
-				setPrefs(saved);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
+function VoiceInputSettingsForTarget({
+	target,
+	resource,
+}: {
+	target: ApiTarget;
+	resource: VoicePreferenceAuthority;
+}) {
+	const { prefs, persist, disabled, error, retry, pending } =
+		useVoicePreference(
+			target,
+			DEFAULT_VOICE_PREFS,
+			getVoiceInputPrefs,
+			setVoiceInputPrefs,
+			resource
+		);
+	const [statuses, setStatuses] = useState<SidecarStatus[]>([]);
 
 	// Poll sidecar status so run state stays fresh after the engine is
 	// installed/started elsewhere while this screen is open.
 	useEffect(() => {
 		let cancelled = false;
 		const fetchStatus = () => {
-			const target = toTarget(useNodeStore.getState().getActiveNode());
-			request<{ sidecars?: SidecarStatus[] }>(target, "/api/sidecar/status")
+			request<{ sidecars?: SidecarStatus[] }>(
+				target,
+				"/api/sidecar/status",
+				{},
+				z
+					.object({ sidecars: z.array(sidecarStatusResponseCodec).optional() })
+					.passthrough()
+			)
 				.then((data) => {
 					if (!cancelled) {
 						setStatuses(data.sidecars ?? []);
@@ -85,14 +110,7 @@ export function VoiceInputSettings() {
 			cancelled = true;
 			clearInterval(interval);
 		};
-	}, []);
-
-	// Persist on every change, cross-process via Core.
-	const persist = useCallback((next: VoiceInputPrefs) => {
-		setPrefs(next);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setVoiceInputPrefs(target, next).catch(() => undefined);
-	}, []);
+	}, [target]);
 
 	const handleEngine = (value: string) => {
 		const entry =
@@ -116,9 +134,8 @@ export function VoiceInputSettings() {
 	// Derived from the engine list, not hand-written: a hardcoded pair silently
 	// rejected any engine added to `VOICE_ENGINES` — which is how the cloud slot
 	// stayed unreachable while Core had supported it all along.
-	// Base UI's Select hands back `string | null`, so the guard takes `unknown`
-	// and does the narrowing itself rather than the call site pre-asserting it.
-	const isEngine = (value: unknown): value is VoiceEngine =>
+	// Base UI's Select hands back `string | null`; preserve that owner contract.
+	const isEngine = (value: string | null): value is VoiceEngine =>
 		isVoiceEngine(value);
 
 	return (
@@ -126,10 +143,22 @@ export function VoiceInputSettings() {
 			caption="The push-to-talk shortcut and enable toggle live in the Island settings."
 			title="Voice Recognition"
 		>
+			{error ? (
+				// The shared status is a bare sentence + Retry; give it the card
+				// surface and lay it out as one row instead of floating on the pane.
+				<SettingsCard className="text-muted-foreground text-sm [&>[role=alert]]:flex [&>[role=alert]]:items-center [&>[role=alert]]:justify-between [&>[role=alert]]:gap-3">
+					<VoicePreferenceStatus
+						error={error}
+						pending={pending}
+						retry={retry}
+					/>
+				</SettingsCard>
+			) : null}
 			<SettingsGroup>
 				<SettingsItem
 					actions={
 						<Select
+							disabled={disabled}
 							items={VOICE_ENGINES.map((e) => ({
 								value: e.engine,
 								label: e.label,
@@ -143,7 +172,7 @@ export function VoiceInputSettings() {
 						>
 							<SelectTrigger
 								aria-label="Voice Recognition engine"
-								className="h-8 w-56 text-sm"
+								className="h-8 w-56"
 							>
 								<SelectValue />
 							</SelectTrigger>
@@ -180,10 +209,7 @@ export function VoiceInputSettings() {
 							items={[{ value: prefs.model, label: prefs.model }]}
 							value={prefs.model}
 						>
-							<SelectTrigger
-								aria-label="Voice model"
-								className="h-8 w-56 text-sm"
-							>
+							<SelectTrigger aria-label="Voice model" className="h-8 w-56">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>

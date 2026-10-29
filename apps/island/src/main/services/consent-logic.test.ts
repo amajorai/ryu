@@ -6,6 +6,7 @@ import {
 	contextReadAllowed,
 	engineAllowed,
 	normalizeConsent,
+	proactiveAllowed,
 } from "./consent-logic.ts";
 
 function state(partial: Partial<ConsentState>): ConsentState {
@@ -28,8 +29,8 @@ describe("normalizeConsent", () => {
 
 	it("coerces non-boolean tri-state values to null", () => {
 		const next = normalizeConsent({
-			contextRead: "yes" as unknown as boolean,
-			proactive: 1 as unknown as boolean,
+			contextRead: "yes",
+			proactive: 1,
 		});
 		expect(next.contextRead).toBeNull();
 		expect(next.proactive).toBeNull();
@@ -58,6 +59,17 @@ describe("engineAllowed", () => {
 		expect(engineAllowed(state({ contextRead: true, proactive: true }))).toBe(
 			true
 		);
+	});
+});
+
+describe("proactiveAllowed", () => {
+	it("allows notification-based suggestions without screen-context consent", () => {
+		expect(
+			proactiveAllowed(state({ contextRead: false, proactive: true }))
+		).toBe(true);
+		expect(
+			proactiveAllowed(state({ contextRead: true, proactive: false }))
+		).toBe(false);
 	});
 });
 

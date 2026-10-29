@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/ConnectionsTab.tsx",
+    "src/components/settings/IntegrationsTab.tsx",
+    "src/components/settings/CapabilityProvidersSettings.tsx",
+    "src/components/settings/LlmProvidersSettings.tsx",
+    "src/components/settings/composio-billing-view.tsx",
+    "src/components/settings/ComposioBillingSettings.tsx",
+    "src/components/settings/connections-providers.test-support.ts",
+    "src/components/settings/ConnectionsTab.coverage.native-http.test.tsx",
+    "src/components/settings/IntegrationsTab.coverage.native-http.test.tsx",
+    "src/components/settings/CapabilityProvidersSettings.coverage.native-http.test.tsx",
+    "src/components/settings/ComposioBillingSettings.coverage.native-http.test.tsx"
+  ]
+}

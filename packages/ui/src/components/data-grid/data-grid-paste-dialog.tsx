@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -63,6 +64,7 @@ function PasteDialogImpl({
 	onPasteDialogOpenChange,
 	onCellsPaste,
 }: PasteDialogProps) {
+	const tl = useLiteralMessages();
 	const propsRef = useAsRef({
 		onPasteDialogOpenChange,
 		onCellsPaste,
@@ -109,9 +111,13 @@ function PasteDialogImpl({
 								Create new rows
 							</span>
 							<span className="text-muted-foreground text-sm">
-								Add {pasteDialog.rowsNeeded} new row
-								{pasteDialog.rowsNeeded === 1 ? "" : "s"} to the table and paste
-								all data
+								{tl(
+									"{count, plural, one {Add {countText} new row to the table and paste all data} other {Add {countText} new rows to the table and paste all data}}",
+									{
+										count: pasteDialog.rowsNeeded,
+										countText: String(pasteDialog.rowsNeeded),
+									}
+								)}
 							</span>
 						</div>
 					</label>
@@ -143,7 +149,7 @@ function RadioItem({ className, ...props }: ComponentProps<"input">) {
 		<input
 			className={cn(
 				"relative size-4 shrink-0 appearance-none rounded-full border border-input bg-background shadow-xs outline-none transition-[color,box-shadow]",
-				"text-primary focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+				"text-primary focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring",
 				"disabled:cursor-not-allowed disabled:opacity-50",
 				"checked:before:absolute checked:before:start-1/2 checked:before:top-1/2 checked:before:size-2 checked:before:-translate-x-1/2 checked:before:-translate-y-1/2 checked:before:rounded-full checked:before:bg-primary checked:before:content-['']",
 				"dark:bg-input/30",

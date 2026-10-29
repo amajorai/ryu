@@ -46,11 +46,26 @@ export const TOKENS_PER_POINT_BLOCK = 100_000;
 export const POINTS_PER_TOKEN_BLOCK = 5;
 /** Daily cap on token-based points, to blunt farming. */
 export const POINTS_TOKEN_DAILY_CAP = 100;
+/**
+ * Ryu-metered spend (micro-USD) that must back EACH token point a user earns.
+ *
+ * Token points are paid out of spend Ryu itself metered and charged — never
+ * out of totals a gateway reported, because a self-hosted gateway can report
+ * any number it likes and the rewards store turns points into credit. Tying
+ * every point to $0.10 of charged usage keeps the payout a rebate of roughly a
+ * tenth of that spend at the store's best credit rate (2,200 points for $25), so
+ * even spend paid with free credit loses value on every lap instead of minting
+ * it. Both bounds hold: a block needs its tokens AND its spend.
+ */
+export const METERED_SPEND_MICRO_USD_PER_TOKEN_POINT = 100_000;
 /** Per streak-day points, multiplied by min(streak, {@link STREAK_POINTS_CAP_DAYS}). */
 export const POINTS_PER_STREAK_DAY = 2;
 /** Streak length past which the per-day bonus stops growing. */
 export const STREAK_POINTS_CAP_DAYS = 7;
-/** Points for a validated referral signup (awarded to both sides). */
+/**
+ * Points for a referral, awarded to both sides only once the referred account
+ * has made its first payment (a sign-up alone earns none).
+ */
 export const POINTS_REFERRAL = 200;
 /** Milestone award bounds (reason `milestone`); the exact value is per-milestone. */
 export const POINTS_MILESTONE_MIN = 50;
@@ -82,7 +97,11 @@ export type PointsReason = (typeof POINTS_REASONS)[number];
  */
 export interface PointAward {
 	readonly delta: number;
-	readonly meta?: Record<string, unknown>;
+	readonly meta?: {
+		readonly blocks?: number;
+		readonly streak?: number;
+		readonly tokens?: number;
+	};
 	readonly reason: PointsReason;
 	readonly refId: string;
 }
@@ -162,10 +181,13 @@ export const streakAward = (
 };
 
 /**
- * Compute every point award earned by a single daily rollup: daily-active,
- * token-based (capped), and the streak bonus. Pure — the API ingest step
- * appends the results to `PointsLedger` idempotently by `refId` and folds the
- * total into `UserStats.pointsBalance` (+ `xp`). Zero-value awards are omitted.
+ * Compute every award a single daily rollup's REPORTED totals would earn:
+ * daily-active, token-based (capped), and the streak bonus. Zero-value awards
+ * are omitted.
+ *
+ * NOT A POINTS SOURCE. The token half trusts reporter-supplied totals, so this
+ * is only the cosmetic agent-XP basis. Spendable user points come from
+ * {@link computeDailyActivityAwards} plus {@link meteredTokenAwards}.
  */
 export const computeDailyRollupAwards = (
 	input: DailyRollupInput
@@ -179,6 +201,80 @@ export const computeDailyRollupAwards = (
 	const streak_ = streakAward(userId, day, streak);
 	if (streak_) {
 		awards.push(streak_);
+	}
+	return awards;
+};
+
+/**
+ * The activity awards for one PERSONAL day: daily-active plus the streak bonus.
+ * Token points are deliberately NOT here — see {@link meteredTokenAwards}. The
+ * user ingest path calls this; {@link computeDailyRollupAwards} remains the
+ * cosmetic XP basis for agents, which hold no spendable points.
+ */
+export const computeDailyActivityAwards = (
+	input: Pick<DailyRollupInput, "day" | "streak" | "userId">
+): PointAward[] => {
+	const awards: PointAward[] = [dailyActiveAward(input.userId, input.day)];
+	const streak_ = streakAward(input.userId, input.day, input.streak);
+	if (streak_) {
+		awards.push(streak_);
+	}
+	return awards;
+};
+
+/** The usage Ryu itself metered and charged to one user on one UTC day. */
+export interface MeteredDailyUsage {
+	/** Micro-USD actually debited from a wallet for that usage. */
+	readonly spendMicroUsd: number;
+	/** Input + output tokens recorded on those charged ledger rows. */
+	readonly tokens: number;
+}
+
+/**
+ * How many token blocks a day of Ryu-metered usage has earned: the smallest of
+ * the whole token blocks, the blocks its charged spend can back, and the daily
+ * cap. Non-finite or negative inputs earn nothing.
+ */
+export const meteredTokenBlocks = (usage: MeteredDailyUsage): number => {
+	const tokens = Number.isFinite(usage.tokens) ? Math.max(usage.tokens, 0) : 0;
+	const spend = Number.isFinite(usage.spendMicroUsd)
+		? Math.max(usage.spendMicroUsd, 0)
+		: 0;
+	const tokenBlocks = Math.floor(tokens / TOKENS_PER_POINT_BLOCK);
+	const spendBlocks = Math.floor(
+		spend / (POINTS_PER_TOKEN_BLOCK * METERED_SPEND_MICRO_USD_PER_TOKEN_POINT)
+	);
+	const capBlocks = Math.floor(POINTS_TOKEN_DAILY_CAP / POINTS_PER_TOKEN_BLOCK);
+	return Math.max(0, Math.min(tokenBlocks, spendBlocks, capBlocks));
+};
+
+/** The refId of the `block`-th (1-based) metered token award on a day. */
+export const meteredTokenRefId = (
+	userId: string,
+	day: string,
+	block: number
+): string => `${userId}:${day}:metered-tokens:${block}`;
+
+/**
+ * One award per earned token block, each under its own refId. The day's
+ * metered total only grows as charges land, so re-evaluating it on every ingest
+ * awards exactly the blocks not yet paid: earlier blocks are no-ops by refId and
+ * nothing is locked in by an early, partial read of the day.
+ */
+export const meteredTokenAwards = (
+	userId: string,
+	day: string,
+	usage: MeteredDailyUsage
+): PointAward[] => {
+	const blocks = meteredTokenBlocks(usage);
+	const awards: PointAward[] = [];
+	for (let block = 1; block <= blocks; block++) {
+		awards.push({
+			delta: POINTS_PER_TOKEN_BLOCK,
+			reason: "usage_daily",
+			refId: meteredTokenRefId(userId, day, block),
+			meta: { blocks: block, tokens: usage.tokens },
+		});
 	}
 	return awards;
 };

@@ -70,7 +70,7 @@ test("reveals Stop on hover and sends the process stop request", async ({
 		.poll(() =>
 			page.evaluate(
 				() =>
-					(
+					/* SAFETY: pinned-background-processes-story.tsx installs __backgroundFixture before this proof page is evaluated. */ (
 						window as Window & {
 							__backgroundFixture?: { stopRequests: string[] };
 						}

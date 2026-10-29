@@ -13,13 +13,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 
 use crate::win_process::NoWindow;
+use ryu_sidecar_runtime::layout;
 
 // ── Platform helpers ──────────────────────────────────────────────────────────
 
@@ -27,19 +26,44 @@ pub(crate) fn ryu_dir() -> PathBuf {
     crate::paths::ryu_dir()
 }
 
+/// `<data dir>/bin` — small standalone tools. Inference engines live under
+/// `engines/<group>/<engine>/` instead (see [`engine_dir`]).
 pub(crate) fn bin_dir() -> PathBuf {
-    ryu_dir().join("bin")
+    layout::bin_dir(&ryu_dir())
 }
 
-fn tmp_dir() -> PathBuf {
-    ryu_dir().join("tmp")
+/// `<data dir>/engines/<group>/<engine>` — one folder per inference engine.
+pub(crate) fn engine_dir(group: layout::EngineGroup, engine: &str) -> PathBuf {
+    layout::engine_dir(&ryu_dir(), group, engine)
+}
+
+/// `<data dir>/models/<modality>` — the weights folder for one modality.
+pub(crate) fn models_dir(modality: layout::Modality) -> PathBuf {
+    layout::models_dir(&ryu_dir(), modality)
+}
+
+/// `<data dir>/models/<modality>/<family>` — one engine's/family's weights.
+pub(crate) fn model_family_dir(modality: layout::Modality, family: &str) -> PathBuf {
+    layout::model_family_dir(&ryu_dir(), modality, family)
+}
+
+/// `<data dir>/tmp/downloads` — staging for archives and partial downloads.
+pub(crate) fn tmp_dir() -> PathBuf {
+    layout::tmp_dir_for(&ryu_dir(), "downloads")
 }
 
 fn versions_path() -> PathBuf {
-    ryu_dir().join("versions.json")
+    layout::state_path(&ryu_dir(), "versions.json")
 }
 
 // ── Shared download utilities ─────────────────────────────────────────────────
+
+/// Deadline for the small metadata requests an install makes before its
+/// transfer starts (release JSON, checksum files). [`build_http_client`] sets no
+/// timeout and DownloadCenter's own deadlines only cover the transfer, so a
+/// stalled host here would otherwise hang the install indefinitely. A reqwest
+/// request timeout also covers reading the response body.
+const METADATA_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Build a shared `reqwest::Client` with the standard ryu user-agent.
 pub(crate) fn build_http_client() -> reqwest::Client {
@@ -88,8 +112,8 @@ where
 // executing bytes nobody checked, and this is the shared implementation every
 // downloader must use.
 //
-// This pair was duplicated byte-for-byte in `tools/ghost/downloader.rs` and
-// `tools/shadow/downloader.rs`, whose section comment asked for exactly this hoist
+// This pair was duplicated byte-for-byte in the Ghost and Shadow downloaders
+// (now `tools/satellite_downloader.rs`), whose section comment asked for this hoist
 // ("When `sidecar/download_manager.rs` is next opened, hoist this pair … into it").
 // `manifest_sidecar::fetch_release_sha256` deliberately stays separate: it is
 // `#[cfg(not(debug_assertions))]` (its download is release-only) and screens URLs
@@ -150,6 +174,7 @@ pub(crate) async fn fetch_sibling_sha256(
     }
     let body = client
         .get(sha256_sibling_url(archive_url))
+        .timeout(METADATA_FETCH_TIMEOUT)
         .send()
         .await
         .ok()?
@@ -161,15 +186,130 @@ pub(crate) async fn fetch_sibling_sha256(
     parse_sha256_digest(&body)
 }
 
+/// Common names of the checksum manifest an upstream GitHub release publishes
+/// alongside its assets (`<hex>  <filename>` per line).
+pub(crate) const RELEASE_SUMS_MANIFESTS: &[&str] = &[
+    "sha256sum.txt",
+    "sha256sums.txt",
+    "SHA256SUMS",
+    "SHA256SUMS.txt",
+    "SHA2-256SUMS",
+    "checksums.txt",
+];
+
+/// The SHA-256 of `asset` in a `sha256sum`-style manifest: one `<hex>  <name>`
+/// line per file, the name optionally prefixed with `*` (binary mode) or `./`.
+pub(crate) fn parse_sums_manifest(body: &str, asset: &str) -> Option<String> {
+    body.lines().find_map(|line| {
+        let mut columns = line.split_whitespace();
+        let digest = parse_sha256_digest(columns.next()?)?;
+        let name = columns.next()?.trim_start_matches('*');
+        let name = name.trim_start_matches("./");
+        (name == asset).then_some(digest)
+    })
+}
+
+/// The digest GitHub records for a release asset (`"digest": "sha256:<hex>"`
+/// in the releases API), when the release JSON carries one.
+pub(crate) fn release_asset_digest(release: &serde_json::Value, asset: &str) -> Option<String> {
+    release
+        .get("assets")?
+        .as_array()?
+        .iter()
+        .find(|entry| entry.get("name").and_then(serde_json::Value::as_str) == Some(asset))?
+        .get("digest")?
+        .as_str()?
+        .strip_prefix("sha256:")
+        .and_then(parse_sha256_digest)
+}
+
+/// The published SHA-256 of `asset` in an upstream GitHub release.
+///
+/// Engines, agents and tools are executed, so `DownloadCenter` refuses them
+/// without a checksum. Third-party releases Ryu does not build publish their
+/// digest one of two ways: GitHub's own per-asset `digest`, or a checksum
+/// manifest asset. Either is read from the release the asset came from, over
+/// https. `None` when neither is available — the caller then fails closed.
+pub(crate) async fn github_release_asset_sha256(
+    client: &reqwest::Client,
+    release: &serde_json::Value,
+    asset: &str,
+) -> Option<String> {
+    if let Some(digest) = release_asset_digest(release, asset) {
+        return Some(digest);
+    }
+    let assets = release.get("assets")?.as_array()?;
+    for manifest in RELEASE_SUMS_MANIFESTS {
+        let Some(url) = assets.iter().find_map(|entry| {
+            (entry.get("name").and_then(serde_json::Value::as_str) == Some(*manifest))
+                .then(|| entry.get("browser_download_url")?.as_str())
+                .flatten()
+        }) else {
+            continue;
+        };
+        if !url.starts_with("https://") {
+            continue;
+        }
+        // Bounded (see METADATA_FETCH_TIMEOUT): this runs before any
+        // DownloadCenter deadline applies, so a stalled manifest host would
+        // otherwise hang the install.
+        let Ok(response) = client.get(url).timeout(METADATA_FETCH_TIMEOUT).send().await else {
+            continue;
+        };
+        let Ok(body) = response.error_for_status().map(|r| r.text()) else {
+            continue;
+        };
+        if let Some(digest) = body.await.ok().and_then(|b| parse_sums_manifest(&b, asset)) {
+            return Some(digest);
+        }
+    }
+    None
+}
+
+/// Fetch one GitHub release's JSON (`tag` = `None` for `releases/latest`).
+pub(crate) async fn fetch_github_release(
+    client: &reqwest::Client,
+    repo: &str,
+    tag: Option<&str>,
+) -> Result<serde_json::Value> {
+    let url = match tag {
+        Some(tag) => format!("https://api.github.com/repos/{repo}/releases/tags/{tag}"),
+        None => format!("https://api.github.com/repos/{repo}/releases/latest"),
+    };
+    client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .timeout(METADATA_FETCH_TIMEOUT)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?
+        .error_for_status()
+        .with_context(|| format!("HTTP error fetching {url}"))?
+        .json::<serde_json::Value>()
+        .await
+        .with_context(|| format!("parsing release JSON from {url}"))
+}
+
+/// [`github_release_asset_sha256`] as a hard requirement, with an error that
+/// names the asset rather than the generic "requires a SHA-256 checksum".
+pub(crate) async fn require_release_asset_sha256(
+    client: &reqwest::Client,
+    release: &serde_json::Value,
+    asset: &str,
+) -> Result<String> {
+    github_release_asset_sha256(client, release, asset)
+        .await
+        .with_context(|| {
+            format!("the upstream release publishes no SHA-256 for {asset}; refusing to install it unverified")
+        })
+}
+
 /// Issue a GET, attaching the Hugging Face access token for Hub hosts and
 /// turning a gated `401`/`403` into an actionable error (token + license terms),
 /// rather than a bare HTTP status. Non-HF hosts pass through unchanged.
 async fn hf_aware_get(client: &reqwest::Client, url: &str) -> anyhow::Result<reqwest::Response> {
-    let mut req = client.get(url);
     let is_hf = crate::hf_auth::is_hf_url(url);
-    if is_hf {
-        req = crate::hf_auth::authorize(req);
-    }
+    let req = crate::hf_auth::authorize(url, client.get(url));
     let response = req.send().await.with_context(|| format!("GET {url}"))?;
     let status = response.status();
     if is_hf
@@ -264,6 +404,21 @@ pub(crate) fn extract_from_tar_gz(data: &[u8], binary_name: &str) -> anyhow::Res
 /// legitimately expand past this and must pass an explicit larger cap.
 pub(crate) const DEFAULT_EXTRACT_CAP_BYTES: u64 = 500 * 1024 * 1024;
 
+/// Whether an archive entry path stays inside the extraction directory when
+/// joined onto it: only plain names (and `.`) are allowed.
+///
+/// Checking for `..` and `is_absolute()` is not enough on Windows, where a
+/// rooted path without a drive (`\Windows\x`) and a drive-relative one (`C:x`)
+/// are not "absolute" yet still make `dest_dir.join(rel)` discard `dest_dir`.
+fn is_safe_archive_entry_path(rel: &std::path::Path) -> bool {
+    rel.components().all(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    })
+}
+
 /// Extract **every** file entry from a `.tar.gz` archive into `dest_dir`,
 /// preserving the archive's internal directory structure. Returns the list of
 /// written relative paths.
@@ -309,11 +464,7 @@ pub(crate) fn extract_tar_gz_to_dir(
         let rel = entry.path().context("getting entry path")?.into_owned();
 
         // Reject path traversal: skip any component that is `..` or absolute.
-        if rel
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-            || rel.is_absolute()
-        {
+        if !is_safe_archive_entry_path(&rel) {
             tracing::warn!("skipping unsafe tar entry path: {}", rel.display());
             continue;
         }
@@ -378,11 +529,7 @@ pub(crate) fn extract_tar_bz2_to_dir(
         let mut entry = entry.context("reading tar entry")?;
         let rel = entry.path().context("getting entry path")?.into_owned();
 
-        if rel
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-            || rel.is_absolute()
-        {
+        if !is_safe_archive_entry_path(&rel) {
             tracing::warn!("skipping unsafe tar entry path: {}", rel.display());
             continue;
         }
@@ -443,18 +590,17 @@ pub(crate) fn extract_zip_to_dir(
             anyhow::bail!("archive has too many entries (cap {MAX_ENTRIES})");
         }
         let mut file = archive.by_index(i).context("reading zip entry")?;
-        let entry_name = file.name().to_string();
+        let entry_name = file
+            .name()
+            .context("zip entry has an invalid name")?
+            .into_owned();
         if entry_name.ends_with('/') {
             let rel = std::path::Path::new(&entry_name);
             // Reject traversal AND absolute paths: an absolute directory entry
             // (`/abs/…/`) would make `dest_dir.join(rel)` replace the base and
             // `create_dir_all` outside the sandbox (`PathBuf::join` semantics).
             // Mirror the file branch below, which already guards both.
-            if rel
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-                || rel.is_absolute()
-            {
+            if !is_safe_archive_entry_path(&rel) {
                 continue;
             }
             std::fs::create_dir_all(dest_dir.join(rel))
@@ -462,11 +608,7 @@ pub(crate) fn extract_zip_to_dir(
             continue;
         }
         let rel = std::path::Path::new(&entry_name);
-        if rel
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-            || rel.is_absolute()
-        {
+        if !is_safe_archive_entry_path(&rel) {
             tracing::warn!("skipping unsafe zip entry path: {entry_name}");
             continue;
         }
@@ -505,7 +647,10 @@ pub(crate) fn extract_from_zip(data: &[u8], binary_name: &str) -> anyhow::Result
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).context("reading zip entry")?;
-        let name = file.name().to_string();
+        let name = file
+            .name()
+            .context("zip entry has an invalid name")?
+            .into_owned();
         if name.ends_with(binary_name) || name.ends_with(&format!("{binary_name}.exe")) {
             let mut bytes = Vec::new();
             file.take(MAX_NAMED_BINARY_BYTES + 1)
@@ -528,14 +673,24 @@ pub(crate) fn extract_from_zip(data: &[u8], binary_name: &str) -> anyhow::Result
 /// Unlike [`extract_from_zip`] (which pulls a single binary), this is for
 /// multi-file release archives — e.g. whisper.cpp's Windows build, where the
 /// server binary links against sibling DLLs that must land next to it.
+///
+/// In-memory form of [`extract_all_to_dir_from`].
 pub(crate) fn extract_all_to_dir(data: &[u8], dest_dir: &Path) -> anyhow::Result<Vec<String>> {
-    use std::io::{Cursor, Read};
+    extract_all_to_dir_from(std::io::Cursor::new(data), dest_dir)
+}
+
+/// Streaming form: reads the archive from any seekable reader (e.g. an open file).
+pub(crate) fn extract_all_to_dir_from(
+    data: impl std::io::Read + std::io::Seek,
+    dest_dir: &Path,
+) -> anyhow::Result<Vec<String>> {
+    use std::io::Read;
     use zip::ZipArchive;
 
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("creating {}", dest_dir.display()))?;
 
-    let reader = Cursor::new(data);
+    let reader = data;
     let mut archive = ZipArchive::new(reader).context("reading zip archive")?;
     let mut written = Vec::new();
     let mut total_bytes = 0u64;
@@ -546,7 +701,10 @@ pub(crate) fn extract_all_to_dir(data: &[u8], dest_dir: &Path) -> anyhow::Result
             anyhow::bail!("archive has too many entries (cap {MAX_ENTRIES})");
         }
         let mut file = archive.by_index(i).context("reading zip entry")?;
-        let entry_name = file.name().to_string();
+        let entry_name = file
+            .name()
+            .context("zip entry has an invalid name")?
+            .into_owned();
         // Skip directory entries (zip dirs end with '/').
         if entry_name.ends_with('/') {
             continue;
@@ -662,8 +820,20 @@ fn write_symlink_flattened(
 /// Windows DLLs) this co-locates the libs, but keeps the bin dir clean by skipping
 /// the archive's other CLI tools. Handles `.zip` (Windows) and `.tar.gz`
 /// (macOS/Linux).
+///
+/// In-memory form of [`extract_binary_with_libs_from`].
 pub(crate) fn extract_binary_with_libs(
     data: &[u8],
+    binary_name: &str,
+    dest_dir: &Path,
+    is_zip: bool,
+) -> anyhow::Result<PathBuf> {
+    extract_binary_with_libs_from(std::io::Cursor::new(data), binary_name, dest_dir, is_zip)
+}
+
+/// Streaming form: reads the archive from any seekable reader (e.g. an open file).
+pub(crate) fn extract_binary_with_libs_from(
+    data: impl std::io::Read + std::io::Seek,
     binary_name: &str,
     dest_dir: &Path,
     is_zip: bool,
@@ -679,20 +849,23 @@ pub(crate) fn extract_binary_with_libs(
 }
 
 fn extract_binary_with_libs_from_zip(
-    data: &[u8],
+    data: impl std::io::Read + std::io::Seek,
     binary_name: &str,
     dest_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
-    use std::io::{Cursor, Read};
+    use std::io::Read;
     use zip::ZipArchive;
 
-    let reader = Cursor::new(data);
+    let reader = data;
     let mut archive = ZipArchive::new(reader).context("reading zip archive")?;
     let mut binary_path = None;
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).context("reading zip entry")?;
-        let entry_name = file.name().to_string();
+        let entry_name = file
+            .name()
+            .context("zip entry has an invalid name")?
+            .into_owned();
         if entry_name.ends_with('/') {
             continue;
         }
@@ -714,7 +887,7 @@ fn extract_binary_with_libs_from_zip(
 }
 
 fn extract_binary_with_libs_from_tar_gz(
-    data: &[u8],
+    data: impl std::io::Read,
     binary_name: &str,
     dest_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
@@ -1091,7 +1264,11 @@ impl VersionStore {
             std::fs::create_dir_all(dir)?;
         }
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, json)?;
+        // Atomic: lock-free readers (`load`) must never see a half-written file,
+        // which parses as an empty store and reports every engine uninstalled. A
+        // crash mid-write must not leave a truncated `versions.json` either, and
+        // each save uses its own temp file, so two concurrent saves never share one.
+        crate::atomic_file::write_atomic(&path, json.as_bytes())?;
         Ok(())
     }
 
@@ -1152,7 +1329,7 @@ impl VersionStore {
 }
 
 /// The hoisted sibling-`.sha256` pair. Moved here verbatim (tests included) from
-/// `tools/ghost/downloader.rs`, whose section comment asked for the hoist.
+/// the Ghost downloader (now `tools/satellite_downloader.rs`), which asked for the hoist.
 ///
 /// These exercise the PURE half only, deliberately. A test that performed a live
 /// GET against a publisher would be green whenever that publisher is up and says
@@ -1160,6 +1337,36 @@ impl VersionStore {
 #[cfg(test)]
 mod sha256_sibling_tests {
     use super::*;
+
+    #[test]
+    fn sums_manifest_finds_the_named_asset_only() {
+        let a = "a".repeat(64);
+        let b = "B".repeat(64);
+        let body = format!("{a}  ollama-linux-amd64.tgz\n{b} *ollama-windows-amd64.zip\n");
+        assert_eq!(
+            parse_sums_manifest(&body, "ollama-windows-amd64.zip"),
+            Some("b".repeat(64))
+        );
+        assert_eq!(
+            parse_sums_manifest(&body, "ollama-linux-amd64.tgz"),
+            Some(a.clone())
+        );
+        assert_eq!(parse_sums_manifest(&body, "ollama-darwin.tgz"), None);
+        assert_eq!(parse_sums_manifest("not a digest  x.tgz", "x.tgz"), None);
+    }
+
+    #[test]
+    fn release_asset_digest_reads_githubs_per_asset_sha256() {
+        let hex = "c".repeat(64);
+        let release = serde_json::json!({"assets": [
+            {"name": "other.zip", "digest": format!("sha256:{}", "d".repeat(64))},
+            {"name": "yt-dlp", "digest": format!("sha256:{hex}")},
+            {"name": "nodigest.zip", "digest": null},
+        ]});
+        assert_eq!(release_asset_digest(&release, "yt-dlp"), Some(hex));
+        assert_eq!(release_asset_digest(&release, "nodigest.zip"), None);
+        assert_eq!(release_asset_digest(&release, "missing"), None);
+    }
 
     #[test]
     fn sha256_sibling_url_is_the_asset_plus_the_suffix() {
@@ -1304,435 +1511,27 @@ pub struct ProgressEvent {
 
 pub type ProgressCallback = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
 
-// ── Download status ───────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DownloadState {
-    NotInstalled,
-    Downloading,
-    Verifying,
-    Installed,
-    Failed(String),
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SidecarDownloadStatus {
-    pub name: String,
-    pub state: DownloadState,
-    pub installed_version: Option<String>,
-    pub target_version: String,
-}
-
 // ── Core download logic ───────────────────────────────────────────────────────
 
+/// SHA-256 of a file, streamed through a fixed buffer on the blocking pool so
+/// verifying a large engine or model archive never loads it whole into memory.
 pub(crate) async fn compute_sha256(path: &Path) -> Result<String> {
-    let bytes = tokio::fs::read(path).await?;
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    Ok(hex::encode(hasher.finalize()))
-}
-
-async fn download_file(
-    client: &reqwest::Client,
-    url: &str,
-    dest: &Path,
-    on_progress: Option<&ProgressCallback>,
-    name: &str,
-    pb: Option<&ProgressBar>,
-) -> Result<String> {
-    let response = hf_aware_get(client, url).await?;
-
-    let total = response.content_length();
-
-    if let Some(pb) = pb {
-        if let Some(t) = total {
-            pb.set_length(t);
-        }
-    }
-
-    // Ensure tmp dir exists
-    if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-
-    let tmp_path = dest.with_extension("tmp");
-    let mut file = tokio::fs::File::create(&tmp_path)
-        .await
-        .with_context(|| format!("creating {}", tmp_path.display()))?;
-
-    let mut hasher = Sha256::new();
-    let mut downloaded: u64 = 0;
-    let mut stream = response.bytes_stream();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("stream error")?;
-        hasher.update(&chunk);
-        file.write_all(&chunk).await?;
-        downloaded += chunk.len() as u64;
-
-        if let Some(pb) = pb {
-            pb.set_position(downloaded);
-        }
-        if let Some(cb) = on_progress {
-            cb(ProgressEvent {
-                name: name.to_string(),
-                total_bytes: total,
-                downloaded_bytes: downloaded,
-                done: false,
-            });
-        }
-    }
-
-    file.flush().await?;
-    drop(file);
-
-    let checksum = hex::encode(hasher.finalize());
-
-    if let Some(pb) = pb {
-        pb.finish_with_message(format!("{name} downloaded"));
-    }
-    if let Some(cb) = on_progress {
-        cb(ProgressEvent {
-            name: name.to_string(),
-            total_bytes: total,
-            downloaded_bytes: downloaded,
-            done: true,
-        });
-    }
-
-    // Atomic rename: tmp → final path
-    tokio::fs::rename(&tmp_path, dest)
-        .await
-        .with_context(|| format!("rename {} → {}", tmp_path.display(), dest.display()))?;
-
-    Ok(checksum)
-}
-
-// ── DownloadManager ───────────────────────────────────────────────────────────
-
-pub struct DownloadManager {
-    client: reqwest::Client,
-    manifests: Vec<Arc<dyn SidecarManifest>>,
-    build_deps: Vec<Arc<dyn BuildDependency>>,
-    on_progress: Option<ProgressCallback>,
-}
-
-impl DownloadManager {
-    pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .user_agent("ryu-core/0.1")
-                .build()
-                .expect("reqwest client"),
-            manifests: vec![
-                Arc::new(ZeroClawManifest),
-                Arc::new(LlamaCppManifest),
-                Arc::new(ScreenpipeManifest),
-            ],
-            build_deps: vec![Arc::new(GitDep), Arc::new(RustDep)],
-            on_progress: None,
-        }
-    }
-
-    /// Attach a progress callback (e.g. to forward events to a UI via SSE).
-    pub fn with_progress(mut self, cb: ProgressCallback) -> Self {
-        self.on_progress = Some(cb);
-        self
-    }
-
-    // ── Build dependency checks ───────────────────────────────────────────────
-
-    /// Verify git and Rust are available for building ZeroClaw from source.
-    /// Returns a list of errors (empty = all good).
-    pub fn check_build_deps(&self) -> Vec<String> {
-        self.build_deps
-            .iter()
-            .filter_map(|dep| match dep.check() {
-                Ok(ver) => {
-                    tracing::debug!("{} found: {ver}", dep.name());
-                    None
-                }
-                Err(e) => {
-                    let msg = format!("{} not found: {e}\n  → {}", dep.name(), dep.install_guide());
-                    tracing::warn!("{msg}");
-                    Some(msg)
-                }
-            })
-            .collect()
-    }
-
-    /// Ensure all build dependencies are installed, auto-installing any missing ones.
-    /// Returns a list of errors (empty = all good).
-    pub fn ensure_build_deps(&self) -> Vec<String> {
-        self.build_deps
-            .iter()
-            .filter_map(|dep| {
-                // First check if already installed
-                if let Ok(ver) = dep.check() {
-                    tracing::debug!("{} found: {ver}", dep.name());
-                    return None;
-                }
-
-                // Try to auto-install
-                tracing::info!("{} not found, attempting auto-install...", dep.name());
-                match dep.install() {
-                    Ok(()) => {
-                        // Re-check to confirm installation
-                        match dep.check() {
-                            Ok(ver) => {
-                                tracing::info!("{} auto-installed successfully: {ver}", dep.name());
-                                None
-                            }
-                            Err(e) => {
-                                let msg = format!(
-                                    "{} auto-install succeeded but check failed: {e}",
-                                    dep.name()
-                                );
-                                tracing::error!("{msg}");
-                                Some(msg)
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let msg = format!(
-                            "{} not found and auto-install failed: {e}\n  → {}",
-                            dep.name(),
-                            dep.install_guide()
-                        );
-                        tracing::error!("{msg}");
-                        Some(msg)
-                    }
-                }
-            })
-            .collect()
-    }
-
-    // ── Status ────────────────────────────────────────────────────────────────
-
-    pub fn status(&self) -> Vec<SidecarDownloadStatus> {
-        let store = VersionStore::load();
-        self.manifests
-            .iter()
-            .map(|m| {
-                let installed_version = store.installed_version(m.name()).map(|v| v.to_string());
-                let binary_exists = m.binary_path().exists();
-                let state = if binary_exists && installed_version.is_some() {
-                    DownloadState::Installed
-                } else {
-                    DownloadState::NotInstalled
-                };
-                SidecarDownloadStatus {
-                    name: m.name().to_string(),
-                    state,
-                    installed_version,
-                    target_version: m.target_version().to_string(),
-                }
-            })
-            .collect()
-    }
-
-    // ── Verify ────────────────────────────────────────────────────────────────
-
-    /// Check all binaries exist and their stored checksums match on-disk files.
-    pub async fn verify_all(&self) -> Vec<(String, Result<()>)> {
-        let store = VersionStore::load();
-        let mut results = Vec::new();
-
-        for m in &self.manifests {
-            let name = m.name().to_string();
-            let path = m.binary_path();
-
-            let outcome = async {
-                if !path.exists() {
-                    anyhow::bail!("{} binary not found at {}", name, path.display());
-                }
-                if let Some(stored) = store.installed_checksum(&name) {
-                    let actual = compute_sha256(&path).await?;
-                    if actual != stored {
-                        anyhow::bail!("{name} checksum mismatch: stored={stored} actual={actual}");
-                    }
-                }
-                Ok(())
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<String> {
+        use std::io::Read;
+        let mut file = std::fs::File::open(&path)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0_u8; 4 * 1024 * 1024];
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
             }
-            .await;
-
-            results.push((name, outcome));
+            hasher.update(&buffer[..read]);
         }
-
-        results
-    }
-
-    // ── Single download ───────────────────────────────────────────────────────
-
-    /// Download a specific sidecar by name. Skips if already installed with
-    /// a valid checksum.
-    pub async fn download_one(&self, name: &str) -> Result<()> {
-        let manifest = self
-            .manifests
-            .iter()
-            .find(|m| m.name() == name)
-            .with_context(|| format!("unknown sidecar: {name}"))?;
-
-        self.download_manifest(manifest.as_ref(), None).await
-    }
-
-    // ── Parallel download all ─────────────────────────────────────────────────
-
-    /// Download all sidecars in parallel. Skips those already installed.
-    pub async fn download_all(&self) -> Vec<(String, Result<()>)> {
-        let multi = MultiProgress::new();
-        let style = ProgressStyle::with_template(
-            "{spinner:.cyan} {msg:20} [{bar:40.cyan/blue}] {bytes}/{total_bytes}",
-        )
-        .unwrap_or_else(|_| ProgressStyle::default_bar())
-        .progress_chars("=>-");
-
-        let mut handles = tokio::task::JoinSet::new();
-
-        for manifest in &self.manifests {
-            let pb = multi.add(ProgressBar::new(0));
-            pb.set_style(style.clone());
-            pb.set_message(manifest.name().to_string());
-
-            let client = self.client.clone();
-            let on_progress = self.on_progress.clone();
-            let name = manifest.name().to_string();
-            let url = manifest.release_url();
-            let binary_path = manifest.binary_path();
-            let expected_checksum = manifest.expected_checksum().map(str::to_string);
-            let target_version = manifest.target_version().to_string();
-            let install_dir = manifest.install_dir();
-
-            handles.spawn(async move {
-                let result = run_download(
-                    &client,
-                    &name,
-                    &url,
-                    &binary_path,
-                    &install_dir,
-                    expected_checksum.as_deref(),
-                    &target_version,
-                    on_progress.as_ref(),
-                    Some(&pb),
-                )
-                .await;
-                (name, result)
-            });
-        }
-
-        let mut results = Vec::new();
-        while let Some(res) = handles.join_next().await {
-            match res {
-                Ok(pair) => results.push(pair),
-                Err(e) => results.push(("unknown".to_string(), Err(e.into()))),
-            }
-        }
-
-        // Add ~/.ryu/bin to PATH after successful downloads
-        if results.iter().any(|(_, r)| r.is_ok()) {
-            if let Err(e) = crate::sidecar::path_manager::PathManager::add_to_path() {
-                tracing::warn!("Failed to add ~/.ryu/bin to PATH: {}", e);
-            } else {
-                tracing::info!("Added ~/.ryu/bin to PATH");
-            }
-        }
-
-        results
-    }
-
-    // ── Internal ──────────────────────────────────────────────────────────────
-
-    async fn download_manifest(
-        &self,
-        manifest: &dyn SidecarManifest,
-        pb: Option<&ProgressBar>,
-    ) -> Result<()> {
-        run_download(
-            &self.client,
-            manifest.name(),
-            &manifest.release_url(),
-            &manifest.binary_path(),
-            &manifest.install_dir(),
-            manifest.expected_checksum(),
-            manifest.target_version(),
-            self.on_progress.as_ref(),
-            pb,
-        )
-        .await
-    }
-}
-
-impl Default for DownloadManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ── Shared download + verify + record logic ───────────────────────────────────
-
-#[allow(clippy::too_many_arguments)]
-async fn run_download(
-    client: &reqwest::Client,
-    name: &str,
-    url: &str,
-    binary_path: &Path,
-    install_dir: &Path,
-    expected_checksum: Option<&str>,
-    target_version: &str,
-    on_progress: Option<&ProgressCallback>,
-    pb: Option<&ProgressBar>,
-) -> Result<()> {
-    // Skip if already installed and checksum matches.
-    let store = VersionStore::load();
-    if binary_path.exists() {
-        if let Some(stored) = store.installed_checksum(name) {
-            let actual = compute_sha256(binary_path).await?;
-            if actual == stored {
-                tracing::info!("{name} already installed and checksum valid — skipping");
-                if let Some(pb) = pb {
-                    pb.finish_with_message(format!("{name} up-to-date"));
-                }
-                return Ok(());
-            }
-        }
-    }
-
-    tracing::info!("Downloading {name} from {url}");
-    tokio::fs::create_dir_all(install_dir).await?;
-
-    let tmp = install_dir.join(format!("{name}.tmp"));
-    let actual_checksum = download_file(client, url, &tmp, on_progress, name, pb).await?;
-
-    // Verify against expected checksum if provided.
-    if let Some(expected) = expected_checksum {
-        if actual_checksum != expected {
-            // Remove the corrupt download.
-            let _ = tokio::fs::remove_file(&binary_path).await;
-            anyhow::bail!("{name} checksum mismatch: expected={expected} actual={actual_checksum}");
-        }
-    }
-
-    // Make executable on Unix.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(binary_path)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(binary_path, perms)?;
-    }
-
-    // Persist version + checksum atomically (concurrency-safe; never clobbers a
-    // sibling engine installed in parallel).
-    VersionStore::record_persisted(name, target_version, &actual_checksum)
-        .with_context(|| "writing versions.json")?;
-
-    tracing::info!(
-        "{name} installed at {} ({})",
-        binary_path.display(),
-        target_version
-    );
-    Ok(())
+        Ok(hex::encode(hasher.finalize()))
+    })
+    .await?
 }
 
 #[cfg(test)]
@@ -1741,6 +1540,22 @@ mod download_tests {
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use std::io::Write;
+
+    #[test]
+    fn archive_entry_paths_must_stay_inside_the_destination() {
+        use std::path::Path;
+        assert!(is_safe_archive_entry_path(Path::new("bin/llama-server")));
+        assert!(is_safe_archive_entry_path(Path::new("./lib/libggml.so")));
+        assert!(!is_safe_archive_entry_path(Path::new("../evil")));
+        assert!(!is_safe_archive_entry_path(Path::new("/etc/passwd")));
+        assert!(!is_safe_archive_entry_path(Path::new("lib/../../evil")));
+        #[cfg(windows)]
+        {
+            assert!(!is_safe_archive_entry_path(Path::new("\\Windows\\Temp\\x")));
+            assert!(!is_safe_archive_entry_path(Path::new("C:evil.dll")));
+            assert!(!is_safe_archive_entry_path(Path::new("C:\\evil.dll")));
+        }
+    }
 
     // ── Archive builders (in-memory, hermetic) ──────────────────────────────
 
@@ -1790,10 +1605,10 @@ mod download_tests {
     /// can inject unsafe paths.
     fn make_zip(dir_entries: &[&str], file_entries: &[(&str, &[u8])]) -> Vec<u8> {
         use std::io::Cursor;
-        use zip::write::FileOptions;
+        use zip::write::SimpleFileOptions;
         use zip::ZipWriter;
         let mut zw = ZipWriter::new(Cursor::new(Vec::new()));
-        let opts = FileOptions::default();
+        let opts = SimpleFileOptions::default();
         for name in dir_entries {
             // `start_file` with a trailing-slash name writes a directory-shaped
             // record while preserving the raw name (unlike `add_directory`,
@@ -2299,39 +2114,6 @@ mod download_tests {
         .unwrap();
         assert_eq!(out, 7);
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
-    }
-
-    // ── DownloadState / status serialization ────────────────────────────────
-
-    #[test]
-    fn download_state_serializes_snake_case() {
-        assert_eq!(
-            serde_json::to_value(DownloadState::NotInstalled).unwrap(),
-            serde_json::json!("not_installed")
-        );
-        assert_eq!(
-            serde_json::to_value(DownloadState::Installed).unwrap(),
-            serde_json::json!("installed")
-        );
-        // The Failed variant carries its message as a single-field object.
-        assert_eq!(
-            serde_json::to_value(DownloadState::Failed("nope".into())).unwrap(),
-            serde_json::json!({ "failed": "nope" })
-        );
-    }
-
-    #[test]
-    fn sidecar_download_status_serializes() {
-        let s = SidecarDownloadStatus {
-            name: "llamacpp".into(),
-            state: DownloadState::Installed,
-            installed_version: Some("b10218".into()),
-            target_version: "b10218".into(),
-        };
-        let v = serde_json::to_value(&s).unwrap();
-        assert_eq!(v["name"], "llamacpp");
-        assert_eq!(v["state"], "installed");
-        assert_eq!(v["installed_version"], "b10218");
     }
 
     #[test]

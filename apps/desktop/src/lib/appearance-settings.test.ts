@@ -4,6 +4,11 @@ import {
 	APPEARANCE_DEFAULTS,
 	APPEARANCE_KEYS,
 } from "@/src/lib/appearance-settings.ts";
+import {
+	readInterfaceLevel,
+	setInterfaceLevel,
+} from "@/src/lib/interface-level.ts";
+import { setProductMode, useProductModeStore } from "@/src/lib/product-mode.ts";
 import { listSettingsByCategory } from "@/src/lib/settings-registry.ts";
 
 /**
@@ -99,6 +104,31 @@ describe("appearance settings registry", () => {
 			"appearance.timezone",
 		]) {
 			expect(ids.has(id)).toBe(true);
+		}
+	});
+
+	it("resets the interface level to the current surface's level so the response mode does not move", () => {
+		const entry = listSettingsByCategory("appearance").find(
+			(e) => e.id === "appearance.interface-level"
+		);
+		if (!entry) {
+			throw new Error("interface level is not registered");
+		}
+		const previous = useProductModeStore.getState().requestedMode;
+		useProductModeStore.getState().setConsoleAccess(true);
+		try {
+			setProductMode("console");
+			setInterfaceLevel("expert", { applyPrefs: false });
+			entry.reset();
+			expect(readInterfaceLevel()).toBe("expert");
+
+			setProductMode("bot");
+			setInterfaceLevel("expert", { applyPrefs: false });
+			entry.reset();
+			expect(readInterfaceLevel()).toBe("simple");
+		} finally {
+			setProductMode(previous);
+			useProductModeStore.getState().setConsoleAccess(false);
 		}
 	});
 });

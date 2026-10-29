@@ -1,3 +1,4 @@
+import { sidecarCatalogSchema } from "../../core/sidecar-catalog.ts";
 /* @jsxImportSource @opentui/react */
 // Setup surface (path /setup) - the guided onboarding wizard, the TUI port of
 // apps/cli's 4-screen setup flow (Screen::Setup{Dependencies,Providers,Tools,
@@ -19,12 +20,18 @@
 
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
-import { type ApiTarget, apiUrl, makeHeaders } from "@ryuhq/core-client/client";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "@ryuhq/core-client/client";
 import { installSidecar } from "@ryuhq/core-client/plugins";
 import { type ReactNode, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import type { ListRow } from "../../core/featureList.ts";
 import { useInputFocused } from "../../core/InputFocusContext.tsx";
+import { tf, tr } from "../../i18n/translate.ts";
 import { type ListLoader, ListTab } from "../../ui/ListTab.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
@@ -41,13 +48,6 @@ const DEPENDENCIES: { hint: string; name: string }[] = [
 // GET /api/catalog wire shape (the `sidecars` array). Core-client has no typed
 // reader for this endpoint, so it is fetched with the shared HTTP primitives -
 // the same approach as src/tabs/apps.tsx.
-interface CatalogItemWire {
-	category?: string;
-	description?: string;
-	install_state?: string;
-	name?: string;
-	recommended?: boolean;
-}
 
 // Build a ListTab loader over /api/catalog filtered to one category, mapped to the
 // generic ListRow (title=name, subtitle=description, badge=install state).
@@ -56,14 +56,14 @@ function catalogLoader(category: string): ListLoader {
 		target: ApiTarget,
 		signal?: AbortSignal
 	): Promise<ListRow[]> => {
-		const resp = await fetch(apiUrl(target, "/api/catalog"), {
-			headers: makeHeaders(target.token),
+		const resp = await fetchForTarget(target)(apiUrl(target, "/api/catalog"), {
+			headers: makeHeaders(target.token, target.userJwt),
 			signal,
 		});
 		if (!resp.ok) {
 			throw new Error(`/api/catalog failed: ${resp.status}`);
 		}
-		const json = (await resp.json()) as { sidecars?: CatalogItemWire[] };
+		const json = sidecarCatalogSchema.parse(await resp.json());
 		return (json.sidecars ?? [])
 			.filter((item) => item.category === category)
 			.map((item): ListRow => {
@@ -103,7 +103,7 @@ function DependencyStep() {
 		<box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
 			{DEPENDENCIES.map((dep) => (
 				<box flexDirection="row" gap={1} key={dep.name}>
-					<text fg={theme.colors.muted}>·</text>
+					<text fg={theme.colors.mutedForeground}>·</text>
 					<text fg={theme.colors.foreground}>{dep.name}</text>
 					<text fg={theme.colors.mutedForeground}>{dep.hint}</text>
 				</box>
@@ -153,6 +153,7 @@ function SetupSurface({ active, paneId }: SurfaceProps) {
 				<ListTab
 					active={f}
 					emptyLabel="No providers in catalog"
+					key="providers"
 					load={catalogLoader("provider")}
 					onActivate={installRow}
 				/>
@@ -165,6 +166,7 @@ function SetupSurface({ active, paneId }: SurfaceProps) {
 				<ListTab
 					active={f}
 					emptyLabel="No tools in catalog"
+					key="tools"
 					load={catalogLoader("tool")}
 					onActivate={installRow}
 				/>
@@ -177,6 +179,7 @@ function SetupSurface({ active, paneId }: SurfaceProps) {
 				<ListTab
 					active={f}
 					emptyLabel="No agents in catalog"
+					key="agents"
 					load={catalogLoader("agent")}
 					onActivate={installRow}
 				/>
@@ -187,15 +190,17 @@ function SetupSurface({ active, paneId }: SurfaceProps) {
 	const current = steps[step] ?? steps[0];
 
 	return (
-		<box flexDirection="column" flexGrow={1}>
-			<box flexDirection="column" paddingLeft={1} paddingTop={1}>
+		<box flexDirection="column" flexGrow={1} minHeight={0}>
+			<box flexDirection="column" flexShrink={0} paddingLeft={1} paddingTop={1}>
 				<text fg={theme.colors.foreground}>
 					<b>Setup</b>
 				</text>
 				<box flexDirection="row" gap={1}>
 					{steps.map((s, i) => (
 						<text
-							fg={i === step ? theme.colors.primary : theme.colors.muted}
+							fg={
+								i === step ? theme.colors.primary : theme.colors.mutedForeground
+							}
 							key={s.title}
 						>
 							{i === step ? `[${i + 1} ${s.title}]` : `${i + 1} ${s.title}`}
@@ -203,7 +208,9 @@ function SetupSurface({ active, paneId }: SurfaceProps) {
 					))}
 				</box>
 				<text fg={theme.colors.mutedForeground}>
-					{current.hint} · ←/→ step · Tab next · r reload
+					{tf("{hint} · ←/→ step · Tab next · r reload", {
+						hint: tr(current.hint),
+					})}
 				</text>
 			</box>
 			{current.body(focused)}

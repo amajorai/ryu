@@ -21,7 +21,9 @@
 // pre-grant UI when it gets nothing. A user with no grants must never see an
 // empty scaffold, a spinner or a toast for a feature they do not have.
 
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { activityJsonValueSchema } from "@ryuhq/core-client/activity.ts";
+import { z } from "zod";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 
 /**
  * One pool's remaining restricted balance, in the server's wire shape.
@@ -62,7 +64,7 @@ export interface MyCampaignsResponse {
 
 function authToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		// No storage — treated as signed out.
 		return null;
@@ -90,41 +92,43 @@ const BASE = `${BACKEND_URL.replace(/\/$/, "")}/api/campaigns`;
  *    A warning, not a throw or a toast: a user who cannot see their grant must
  *    still get a working Credits page.
  */
-function normalizePools(input: unknown): CampaignPoolBalance[] {
-	if (!Array.isArray(input)) {
-		if (input !== undefined && input !== null) {
+const campaignPoolsInputSchema = activityJsonValueSchema.optional();
+type CampaignPoolsInput = z.output<typeof campaignPoolsInputSchema>;
+const poolRowsSchema = z.array(activityJsonValueSchema);
+// This is the existing renderable projection, rather than the server's claim
+// or business-validation contract. Expiry and provider hints stay permissive.
+const renderablePoolSchema = z.object({
+	poolLabel: z.string().min(1),
+	remainingMicroUsd: z.number().finite(),
+	isFreeProvider: z.boolean().catch(false),
+	expiresAt: z.string().nullable().catch(null),
+});
+const emptyPoolsSchema = z.null().optional();
+const campaignEnvelopeSchema = z.object({ pools: campaignPoolsInputSchema });
+function normalizePools(input: CampaignPoolsInput): CampaignPoolBalance[] {
+	const rows = poolRowsSchema.safeParse(input);
+	if (!rows.success) {
+		if (!emptyPoolsSchema.safeParse(input).success) {
 			console.warn("[campaigns] /mine returned a non-array `pools`:", input);
 		}
 		return [];
 	}
 	const out: CampaignPoolBalance[] = [];
-	for (const raw of input) {
-		const row =
-			typeof raw === "object" && raw !== null
-				? (raw as Partial<CampaignPoolBalance>)
-				: null;
-		const label = row?.poolLabel;
-		const remaining = row?.remainingMicroUsd;
-		if (
-			typeof label !== "string" ||
-			label === "" ||
-			typeof remaining !== "number" ||
-			!Number.isFinite(remaining)
-		) {
+	for (const raw of rows.data) {
+		const parsed = renderablePoolSchema.safeParse(raw);
+		if (!parsed.success) {
 			console.warn("[campaigns] dropped an unreadable pool balance row:", raw);
 			continue;
 		}
-		if (remaining <= 0) {
+		const row = parsed.data;
+		if (row.remainingMicroUsd <= 0) {
 			continue;
 		}
 		out.push({
-			poolLabel: label,
-			remainingMicroUsd: remaining,
-			isFreeProvider: row?.isFreeProvider === true,
-			// Optional on the wire (a pool whose grants never lapse omits it), so a
-			// missing or non-string value is normalized to "no expiry" rather than
-			// treated as a malformed row.
-			expiresAt: typeof row?.expiresAt === "string" ? row.expiresAt : null,
+			poolLabel: row.poolLabel,
+			remainingMicroUsd: row.remainingMicroUsd,
+			isFreeProvider: row.isFreeProvider,
+			expiresAt: row.expiresAt,
 		});
 	}
 	return out;
@@ -151,6 +155,15 @@ export async function fetchMyCampaigns(): Promise<MyCampaignsResponse | null> {
 	if (!resp.ok) {
 		return null;
 	}
-	const body = (await resp.json()) as { pools?: unknown };
-	return { pools: normalizePools(body.pools) };
+	const body = activityJsonValueSchema.parse(await resp.json());
+	const envelope = campaignEnvelopeSchema.safeParse(body);
+	if (!envelope.success) {
+		// Preserve the old property-access failure for a null successful response;
+		// other primitive/array envelopes previously exposed no pools.
+		if (z.null().safeParse(body).success) {
+			throw new TypeError("Campaign response cannot be null");
+		}
+		return { pools: [] };
+	}
+	return { pools: normalizePools(envelope.data.pools) };
 }

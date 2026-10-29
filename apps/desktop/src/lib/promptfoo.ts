@@ -1,6 +1,75 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { z } from "zod";
 
-import type { Assertion, EvalMessage } from "@/src/lib/api/gateway.ts";
+import type {
+	Assertion,
+	AssertionOptions,
+	EvalMessage,
+} from "@/src/lib/api/gateway.ts";
+
+/** Promptfoo JSON/YAML documents retain additive fields and YAML numeric scalars. */
+export type PromptfooValue =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| PromptfooValue[]
+	| PromptfooDocument;
+export interface PromptfooDocument {
+	[key: string]: PromptfooValue;
+}
+const numericScalarSchema = z.union([
+	z.number(),
+	z.literal(Number.NaN),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+const promptfooValueSchema: z.ZodType<PromptfooValue> = z.lazy(() =>
+	z.union([
+		z.string(),
+		numericScalarSchema,
+		z.boolean(),
+		z.null(),
+		z.undefined(),
+		z.array(promptfooValueSchema),
+		z.record(z.string(), promptfooValueSchema),
+	])
+);
+const documentInputSchema = z.record(z.string(), promptfooValueSchema);
+const promptfooDocumentSchema = z.custom<PromptfooDocument>(
+	(value) => documentInputSchema.safeParse(value).success
+);
+const retainedValueSchema = z.custom<PromptfooValue>(
+	(value) => promptfooValueSchema.safeParse(value).success
+);
+const messageRoleSchema = z.enum(["assistant", "system", "user"]);
+function isString(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): value is string {
+	return z.string().safeParse(value).success;
+}
+function isNumber(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): value is number {
+	return numericScalarSchema.safeParse(value).success;
+}
+function isBoolean(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): value is boolean {
+	return z.boolean().safeParse(value).success;
+}
+
+export function parsePromptfooValue(
+	value: Parameters<typeof retainedValueSchema.parse>[0]
+): PromptfooValue {
+	return retainedValueSchema.parse(value);
+}
+export function parsePromptfooDocument(
+	value: Parameters<typeof promptfooDocumentSchema.parse>[0]
+): PromptfooDocument {
+	return promptfooDocumentSchema.parse(value);
+}
 
 export type PromptfooFormat = "csv" | "json" | "jsonl" | "yaml";
 
@@ -14,46 +83,49 @@ export interface PromptfooPrompt {
 
 export interface PromptfooTest {
 	assertions: Assertion[];
-	context?: unknown;
+	context?: PromptfooValue;
 	description: string;
 	expected?: string;
 	id?: string;
 	inheritDefaultTest?: boolean;
 	messages?: EvalMessage[];
-	metadata: Record<string, unknown>;
-	options: Record<string, unknown>;
+	metadata: PromptfooDocument;
+	options: PromptfooDocument;
 	prompt?: string;
 	provider?: string;
-	providerOutput?: unknown;
+	providerOutput?: PromptfooValue;
 	providers: string[];
 	threshold?: number;
-	vars: Record<string, unknown>;
+	vars: PromptfooDocument;
 }
 
 export interface PromptfooConfig {
-	defaultTest?: Record<string, unknown>;
+	defaultTest?: PromptfooValue;
 	prompts: PromptfooPrompt[];
 	providers: string[];
 	tests: PromptfooTest[];
-	[key: string]: unknown;
+	[key: string]: PromptfooValue | PromptfooPrompt[] | PromptfooTest[];
 }
 
 export type PromptfooRelatedFiles = Record<string, string>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+function isRecord(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): value is PromptfooDocument {
+	return promptfooDocumentSchema.safeParse(value).success;
 }
 
-function asString(value: unknown, fallback = ""): string {
-	return typeof value === "string" ? value : fallback;
+function asString(
+	value: Parameters<typeof promptfooValueSchema.parse>[0],
+	fallback = ""
+): string {
+	return isString(value) ? value : fallback;
 }
 
-function assertionValueText(value: unknown): string | null {
-	if (
-		typeof value === "string" ||
-		typeof value === "number" ||
-		typeof value === "boolean"
-	) {
+function assertionValueText(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): string | null {
+	if (isString(value) || isNumber(value) || isBoolean(value)) {
 		return String(value);
 	}
 	if (Array.isArray(value)) {
@@ -67,11 +139,15 @@ function assertionValueText(value: unknown): string | null {
 	return null;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
+function asRecord(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): PromptfooDocument {
 	return isRecord(value) ? value : {};
 }
 
-function asMessages(value: unknown): EvalMessage[] {
+function asMessages(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): EvalMessage[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
@@ -86,7 +162,7 @@ function asMessages(value: unknown): EvalMessage[] {
 		return [
 			{
 				content: asString(item.content),
-				role: role as EvalMessage["role"],
+				role: messageRoleSchema.parse(role),
 			},
 		];
 	});
@@ -100,8 +176,11 @@ function slug(value: string, fallback: string): string {
 	return result || fallback;
 }
 
-function normalizePrompt(value: unknown, index: number): PromptfooPrompt {
-	if (typeof value === "string") {
+function normalizePrompt(
+	value: Parameters<typeof promptfooValueSchema.parse>[0],
+	index: number
+): PromptfooPrompt {
+	if (isString(value)) {
 		return {
 			content: value,
 			id: `prompt-${index + 1}`,
@@ -125,60 +204,69 @@ function normalizePrompt(value: unknown, index: number): PromptfooPrompt {
 	};
 }
 
-function normalizeAssertion(value: unknown): Assertion | null {
-	if (typeof value === "string") {
+function normalizeAssertion(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): Assertion | null {
+	if (isString(value)) {
 		return { kind: "contains", value };
 	}
 	const item = asRecord(value);
 	const rawKind = asString(item.kind ?? item.type).replaceAll("-", "_");
 	const negatedKind = rawKind.startsWith("not_");
 	const kind = negatedKind ? rawKind.slice("not_".length) : rawKind;
-	const options = {
-		...(negatedKind && typeof item.not !== "boolean" ? { not: true } : {}),
-		...(typeof item.threshold === "number"
-			? { threshold: item.threshold }
-			: {}),
-		...(typeof item.weight === "number" ? { weight: item.weight } : {}),
-		...(typeof item.provider === "string" ? { provider: item.provider } : {}),
-		...(typeof item.rubric_prompt === "string"
-			? { rubric_prompt: item.rubric_prompt }
-			: typeof item.rubricPrompt === "string"
-				? { rubric_prompt: item.rubricPrompt }
-				: {}),
-		...(typeof item.transform === "string"
-			? { transform: item.transform }
-			: {}),
-		...(typeof item.metric === "string" ? { metric: item.metric } : {}),
-		...(isRecord(item.config) ? { config: item.config } : {}),
-		...(typeof item.not === "boolean" ? { not: item.not } : {}),
-	};
-	const withOptions = <T extends Assertion>(assertion: T): T =>
-		Object.keys(options).length > 0
-			? ({ ...assertion, options } as T)
-			: assertion;
-	if (
-		[
+	const nestedOptions = asRecord(item.options);
+	const options: AssertionOptions = {};
+	for (const source of [nestedOptions, item]) {
+		if (isNumber(source.threshold)) {
+			options.threshold = source.threshold;
+		}
+		if (isNumber(source.weight)) {
+			options.weight = source.weight;
+		}
+		if (isString(source.provider)) {
+			options.provider = source.provider;
+		}
+		if (isString(source.rubric_prompt)) {
+			options.rubric_prompt = source.rubric_prompt;
+		} else if (isString(source.rubricPrompt)) {
+			options.rubric_prompt = source.rubricPrompt;
+		}
+		if (isString(source.transform)) {
+			options.transform = source.transform;
+		}
+		if (isString(source.metric)) {
+			options.metric = source.metric;
+		}
+		if (isRecord(source.config)) {
+			options.config = source.config;
+		}
+		if (isBoolean(source.not)) {
+			options.not = source.not;
+		}
+	}
+	if (negatedKind && !isBoolean(item.not) && !isBoolean(nestedOptions.not)) {
+		options.not = true;
+	}
+	const withOptions = (assertion: Assertion): Assertion =>
+		Object.keys(options).length > 0 ? { ...assertion, options } : assertion;
+	const simpleKind = z
+		.enum([
 			"json_valid",
 			"is_json",
 			"is_html",
 			"is_xml",
 			"is_sql",
 			"is_refusal",
-		].includes(kind)
-	) {
-		return withOptions({
-			kind: kind as
-				| "json_valid"
-				| "is_json"
-				| "is_html"
-				| "is_xml"
-				| "is_sql"
-				| "is_refusal",
-		});
+		])
+		.safeParse(kind);
+	if (simpleKind.success) {
+		return withOptions({ kind: simpleKind.data });
 	}
 	if (kind === "assert_set") {
 		const nestedValue = item.assertions ?? item.value;
-		const nested: unknown[] = Array.isArray(nestedValue) ? nestedValue : [];
+		const nested: PromptfooValue[] = Array.isArray(nestedValue)
+			? nestedValue
+			: [];
 		return withOptions({
 			assertions: nested.flatMap((entry) => {
 				const normalized = normalizeAssertion(entry);
@@ -203,12 +291,15 @@ function normalizeAssertion(value: unknown): Assertion | null {
 				value: assertionValueText(item.value ?? item.expected) ?? "",
 			});
 		}
-		const rubricKind = kind as
-			| "llm_judge"
-			| "llm_rubric"
-			| "factuality"
-			| "context_faithfulness"
-			| "answer_relevance";
+		const rubricKind = z
+			.enum([
+				"llm_judge",
+				"llm_rubric",
+				"factuality",
+				"context_faithfulness",
+				"answer_relevance",
+			])
+			.parse(kind);
 		return withOptions({
 			kind: rubricKind,
 			rubric: asString(item.rubric ?? item.rubricPrompt ?? item.value),
@@ -218,40 +309,45 @@ function normalizeAssertion(value: unknown): Assertion | null {
 	if (valueText === null) {
 		return null;
 	}
-	const supported = [
-		"contains",
-		"not_contains",
-		"equals",
-		"regex",
-		"icontains",
-		"starts_with",
-		"contains_any",
-		"contains_all",
-		"icontains_any",
-		"icontains_all",
-		"contains_json",
-		"contains_html",
-		"contains_xml",
-		"contains_sql",
-		"levenshtein",
-		"latency",
-		"cost",
-		"moderation",
-		"javascript",
-		"python",
-		"ruby",
-		"webhook",
-	] as const;
-	if (!supported.includes(kind as (typeof supported)[number])) {
+	const supported = z
+		.enum([
+			"contains",
+			"not_contains",
+			"equals",
+			"regex",
+			"icontains",
+			"starts_with",
+			"contains_any",
+			"contains_all",
+			"icontains_any",
+			"icontains_all",
+			"contains_json",
+			"contains_html",
+			"contains_xml",
+			"contains_sql",
+			"levenshtein",
+			"latency",
+			"cost",
+			"moderation",
+			"javascript",
+			"python",
+			"ruby",
+			"webhook",
+		])
+		.safeParse(kind);
+	if (!supported.success) {
 		return null;
 	}
 	return withOptions({
-		kind: kind as (typeof supported)[number],
+		kind: supported.data,
 		value: valueText,
 	});
 }
 
-function normalizeTest(value: unknown, index: number): PromptfooTest {
+function normalizeTest(
+	value: Parameters<typeof promptfooValueSchema.parse>[0],
+	index: number
+): PromptfooTest {
 	const item = asRecord(value);
 	const rawAssertions = item.assertions ?? item.assert ?? item.assertion;
 	const assertionValues = Array.isArray(rawAssertions)
@@ -266,23 +362,21 @@ function normalizeTest(value: unknown, index: number): PromptfooTest {
 	const prompt = asString(item.prompt ?? item.input);
 	const messages = asMessages(item.messages);
 	const providers = Array.isArray(item.providers)
-		? item.providers.filter(
-				(provider): provider is string => typeof provider === "string"
+		? item.providers.filter((provider): provider is string =>
+				isString(provider)
 			)
 		: [];
-	const provider =
-		typeof item.provider === "string" ? item.provider : undefined;
+	const provider = isString(item.provider) ? item.provider : undefined;
 	if (provider && !providers.includes(provider)) {
 		providers.unshift(provider);
 	}
-	const threshold =
-		typeof item.threshold === "number" ? item.threshold : undefined;
+	const threshold = isNumber(item.threshold) ? item.threshold : undefined;
 	return {
 		assertions,
 		context: item.context,
 		description: asString(item.description ?? item.name, `Case ${index + 1}`),
-		id: typeof item.id === "string" ? item.id : undefined,
-		expected: typeof item.expected === "string" ? item.expected : undefined,
+		id: isString(item.id) ? item.id : undefined,
+		expected: isString(item.expected) ? item.expected : undefined,
 		inheritDefaultTest:
 			item.defaultTest === false ||
 			item.inheritDefaultTest === false ||
@@ -302,9 +396,9 @@ function normalizeTest(value: unknown, index: number): PromptfooTest {
 }
 
 function mergeDefaultTest(
-	defaultTest: Record<string, unknown>,
-	test: unknown
-): Record<string, unknown> {
+	defaultTest: PromptfooDocument,
+	test: PromptfooValue
+): PromptfooDocument {
 	const merged = { ...defaultTest, ...asRecord(test) };
 	if (isRecord(defaultTest.vars) && isRecord(asRecord(test).vars)) {
 		merged.vars = {
@@ -315,36 +409,40 @@ function mergeDefaultTest(
 	return merged;
 }
 
-function providerId(value: unknown): string | null {
-	if (typeof value === "string") {
+function providerId(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): string | null {
+	if (isString(value)) {
 		return value;
 	}
 	if (isRecord(value)) {
 		const id = value.id ?? value.name ?? value.provider;
-		return typeof id === "string" ? id : null;
+		return isString(id) ? id : null;
 	}
 	return null;
 }
 
-function fileReference(value: unknown): string | null {
-	if (typeof value === "string" && value.startsWith("file://")) {
+function fileReference(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): string | null {
+	if (isString(value) && value.startsWith("file://")) {
 		return value.slice("file://".length);
 	}
-	if (isRecord(value) && typeof value.file === "string") {
+	if (isRecord(value) && isString(value.file)) {
 		return value.file;
 	}
 	return null;
 }
 
 function selectedFileReference(
-	value: unknown,
+	value: Parameters<typeof promptfooValueSchema.parse>[0],
 	relatedFiles: PromptfooRelatedFiles
 ): string | null {
 	const explicit = fileReference(value);
 	if (explicit) {
 		return explicit;
 	}
-	if (typeof value !== "string") {
+	if (!isString(value)) {
 		return null;
 	}
 	const normalized = value.replaceAll("\\", "/");
@@ -396,22 +494,22 @@ function directPromptText(text: string, reference: string): string {
 	return text;
 }
 
-function parseStructuredFile(text: string, reference: string): unknown {
+function parseStructuredFile(text: string, reference: string): PromptfooValue {
 	const extension = reference.toLowerCase().split(".").at(-1);
 	if (extension === "yaml" || extension === "yml") {
-		return parseYaml(text);
+		return promptfooValueSchema.parse(parseYaml(text));
 	}
-	return JSON.parse(text);
+	return promptfooValueSchema.parse(JSON.parse(text));
 }
 
 function resolveFileBackedConfig(
-	value: unknown,
+	value: Parameters<typeof promptfooValueSchema.parse>[0],
 	relatedFiles: PromptfooRelatedFiles
-): Record<string, unknown> {
+): PromptfooDocument {
 	if (!isRecord(value)) {
 		return {};
 	}
-	const resolved = structuredClone(value) as Record<string, unknown>;
+	const resolved = structuredClone(value);
 	const defaultTestReference = selectedFileReference(
 		resolved.defaultTest,
 		relatedFiles
@@ -433,7 +531,7 @@ function resolveFileBackedConfig(
 				return prompt;
 			}
 			const text = relatedFileText(reference, relatedFiles);
-			if (typeof prompt === "string") {
+			if (isString(prompt)) {
 				return directPromptText(text, reference);
 			}
 			const object = Object.fromEntries(
@@ -456,7 +554,7 @@ function resolveFileBackedConfig(
 			text,
 			testsReference,
 			relatedFiles
-		).config.tests;
+		).config.tests.map((test) => promptfooDocumentSchema.parse(test));
 	} else if (Array.isArray(tests)) {
 		resolved.tests = tests.flatMap((test) => {
 			const reference = selectedFileReference(test, relatedFiles);
@@ -464,15 +562,19 @@ function resolveFileBackedConfig(
 				return [test];
 			}
 			const text = relatedFileText(reference, relatedFiles);
-			return parsePromptfooFile(text, reference, relatedFiles).config.tests;
+			return parsePromptfooFile(text, reference, relatedFiles).config.tests.map(
+				(test) => promptfooDocumentSchema.parse(test)
+			);
 		});
 	}
 	return resolved;
 }
 
 /** Normalize a Promptfoo YAML/JSON object into the editor's stable shape. */
-export function normalizePromptfooConfig(value: unknown): PromptfooConfig {
-	const raw = asRecord(value);
+export function normalizePromptfooConfig(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): PromptfooConfig {
+	const raw = asRecord(retainedValueSchema.parse(value));
 	const promptsRaw = Array.isArray(raw.prompts) ? raw.prompts : [];
 	const testsRaw = Array.isArray(raw.tests) ? raw.tests : [];
 	const defaultTest = isRecord(raw.defaultTest) ? raw.defaultTest : undefined;
@@ -492,7 +594,6 @@ export function normalizePromptfooConfig(value: unknown): PromptfooConfig {
 	});
 	return {
 		...raw,
-		...(isRecord(raw.defaultTest) ? { defaultTest: raw.defaultTest } : {}),
 		prompts,
 		providers,
 		tests: testsRaw.map((test, index) => {
@@ -511,21 +612,32 @@ export function normalizePromptfooConfig(value: unknown): PromptfooConfig {
 	};
 }
 
-function exportAssertion(assertion: Assertion): Record<string, unknown> {
+function exportAssertion(assertion: Assertion): PromptfooDocument {
 	const options = assertion.options ?? {};
 	const exportType = (kind: string): string =>
 		`${options.not === true ? "not-" : ""}${kind.replaceAll("_", "-")}`;
-	const exportedOptions = {
-		...(options.threshold === undefined
-			? {}
-			: { threshold: options.threshold }),
-		...(options.weight === undefined ? {} : { weight: options.weight }),
-		...(options.provider ? { provider: options.provider } : {}),
-		...(options.rubric_prompt ? { rubricPrompt: options.rubric_prompt } : {}),
-		...(options.transform ? { transform: options.transform } : {}),
-		...(options.metric ? { metric: options.metric } : {}),
-		...(options.config ? { config: options.config } : {}),
-	};
+	const exportedOptions: PromptfooDocument = {};
+	if (options.threshold !== undefined) {
+		exportedOptions.threshold = options.threshold;
+	}
+	if (options.weight !== undefined) {
+		exportedOptions.weight = options.weight;
+	}
+	if (options.provider) {
+		exportedOptions.provider = options.provider;
+	}
+	if (options.rubric_prompt) {
+		exportedOptions.rubricPrompt = options.rubric_prompt;
+	}
+	if (options.transform) {
+		exportedOptions.transform = options.transform;
+	}
+	if (options.metric) {
+		exportedOptions.metric = options.metric;
+	}
+	if (options.config) {
+		exportedOptions.config = promptfooDocumentSchema.parse(options.config);
+	}
 	if (
 		[
 			"json_valid",
@@ -577,23 +689,33 @@ function exportAssertion(assertion: Assertion): Record<string, unknown> {
 	};
 }
 
-function exportPrompt(
-	prompt: PromptfooPrompt
-): string | Record<string, unknown> {
+function exportPrompt(prompt: PromptfooPrompt): string | PromptfooDocument {
 	if (prompt.type === "chat") {
 		return {
 			id: prompt.id,
-			messages: prompt.messages,
+			messages: prompt.messages.map((message) => ({ ...message })),
 			name: prompt.name,
 		};
 	}
-	return prompt.content;
+	const generatedPromptId = /^prompt-(\d+)$/u.exec(prompt.id);
+	const generatedName = generatedPromptId
+		? `Prompt ${generatedPromptId[1]}`
+		: null;
+	if (
+		(prompt.id === "primary" && prompt.name === "Primary") ||
+		(prompt.name === generatedName && generatedName !== null)
+	) {
+		return prompt.content;
+	}
+	return {
+		content: prompt.content,
+		id: prompt.id,
+		name: prompt.name,
+	};
 }
 
 /** Convert the normalized editor state back to a Promptfoo-compatible config. */
-function promptfooEvaluateOptions(
-	config: PromptfooConfig
-): Record<string, unknown> {
+function promptfooEvaluateOptions(config: PromptfooConfig): PromptfooDocument {
 	const evaluateOptions = isRecord(config.evaluateOptions)
 		? { ...config.evaluateOptions }
 		: {};
@@ -613,9 +735,7 @@ function promptfooEvaluateOptions(
 	return evaluateOptions;
 }
 
-export function toPromptfooConfig(
-	config: PromptfooConfig
-): Record<string, unknown> {
+export function toPromptfooConfig(config: PromptfooConfig): PromptfooDocument {
 	const evaluateOptions = promptfooEvaluateOptions(config);
 	const base = Object.fromEntries(
 		Object.entries(config).filter(
@@ -623,38 +743,61 @@ export function toPromptfooConfig(
 				key !== "targets" && key !== "run_config" && key !== "evaluateOptions"
 		)
 	);
-	return {
-		...base,
-		...(Object.keys(evaluateOptions).length > 0 ? { evaluateOptions } : {}),
-		prompts: config.prompts.map(exportPrompt),
-		providers: config.providers,
-		tests: config.tests.map((test) => ({
-			...(test.description ? { description: test.description } : {}),
-			...(test.context === undefined ? {} : { context: test.context }),
-			...(test.id ? { id: test.id } : {}),
-			...(test.expected ? { expected: test.expected } : {}),
-			...(test.inheritDefaultTest === false ? { defaultTest: false } : {}),
-			...(test.messages ? { messages: test.messages } : {}),
-			...(Object.keys(test.metadata).length > 0
-				? { metadata: test.metadata }
-				: {}),
-			...(Object.keys(test.options).length > 0
-				? { options: test.options }
-				: {}),
-			...(test.prompt ? { prompt: test.prompt } : {}),
-			...(test.providerOutput === undefined
-				? {}
-				: { providerOutput: test.providerOutput }),
-			...(test.providers.length > 0 ? { providers: test.providers } : {}),
-			...(test.provider ? { provider: test.provider } : {}),
-			...(test.threshold === undefined ? {} : { threshold: test.threshold }),
-			vars: test.vars,
-			assert: test.assertions.map(exportAssertion),
-		})),
-	};
+	const result = promptfooDocumentSchema.parse(base);
+	if (Object.keys(evaluateOptions).length > 0) {
+		result.evaluateOptions = evaluateOptions;
+	}
+	result.prompts = config.prompts.map(exportPrompt);
+	result.providers = config.providers;
+	result.tests = config.tests.map((test) => {
+		const exported: PromptfooDocument = {};
+		if (test.description) {
+			exported.description = test.description;
+		}
+		if (test.context !== undefined) {
+			exported.context = test.context;
+		}
+		if (test.id) {
+			exported.id = test.id;
+		}
+		if (test.expected) {
+			exported.expected = test.expected;
+		}
+		if (test.inheritDefaultTest === false) {
+			exported.defaultTest = false;
+		}
+		if (test.messages) {
+			exported.messages = test.messages.map((message) => ({ ...message }));
+		}
+		if (Object.keys(test.metadata).length > 0) {
+			exported.metadata = test.metadata;
+		}
+		if (Object.keys(test.options).length > 0) {
+			exported.options = test.options;
+		}
+		if (test.prompt) {
+			exported.prompt = test.prompt;
+		}
+		if (test.providerOutput !== undefined) {
+			exported.providerOutput = test.providerOutput;
+		}
+		if (test.providers.length > 0) {
+			exported.providers = test.providers;
+		}
+		if (test.provider) {
+			exported.provider = test.provider;
+		}
+		if (test.threshold !== undefined) {
+			exported.threshold = test.threshold;
+		}
+		exported.vars = test.vars;
+		exported.assert = test.assertions.map(exportAssertion);
+		return exported;
+	});
+	return result;
 }
 
-function parseCsv(text: string): Record<string, unknown>[] {
+function parseCsv(text: string): PromptfooDocument[] {
 	const rows: string[][] = [];
 	let row: string[] = [];
 	let cell = "";
@@ -690,7 +833,7 @@ function parseCsv(text: string): Record<string, unknown>[] {
 	}
 	const headers = rows.shift() ?? [];
 	return rows.map((values) => {
-		const result: Record<string, unknown> = {};
+		const result: PromptfooDocument = {};
 		headers.forEach((header, index) => {
 			const value = values[index] ?? "";
 			if (
@@ -706,7 +849,7 @@ function parseCsv(text: string): Record<string, unknown>[] {
 				].includes(header)
 			) {
 				try {
-					result[header] = JSON.parse(value);
+					result[header] = promptfooValueSchema.parse(JSON.parse(value));
 				} catch {
 					result[header] = header === "providerOutput" ? value : {};
 				}
@@ -718,8 +861,10 @@ function parseCsv(text: string): Record<string, unknown>[] {
 	});
 }
 
-function csvCell(value: unknown): string {
-	const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
+function csvCell(
+	value: Parameters<typeof promptfooValueSchema.parse>[0]
+): string {
+	const text = isString(value) ? value : JSON.stringify(value ?? "");
 	return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
@@ -783,12 +928,17 @@ export function serializePromptfooConfig(
 	return JSON.stringify(exported, null, 2);
 }
 
+export interface ParsedPromptfooFile {
+	config: PromptfooConfig;
+	format: PromptfooFormat;
+}
+
 /** Parse Promptfoo config files and dataset files accepted by the editor. */
 export function parsePromptfooFile(
 	text: string,
 	filename: string,
 	relatedFiles: PromptfooRelatedFiles = {}
-): { config: PromptfooConfig; format: PromptfooFormat } {
+): ParsedPromptfooFile {
 	const extension = filename.toLowerCase().split(".").at(-1);
 	if (extension === "txt" || extension === "md" || extension === "j2") {
 		return {

@@ -1,3 +1,13 @@
+"use client";
+
+import {
+	isNativeFunction,
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import styles from "./elements-one.module.css";
+import type { AgentGeometryStyle } from "./elements-one-style.ts";
 // The WIDGET RENDERER (Ryu Apps). Mounted by the tool-renderer for a
 // `data-tool-widget-available` part, through the `WidgetHostContext` slot the
 // surface provides. It is the widget-specific sibling of `PluginHostPanel`:
@@ -30,6 +40,7 @@ import {
 	readCompanionThemeTokens,
 } from "@ryu/app-host/companion-theme";
 import { ExtensionHost } from "@ryu/app-host/ExtensionHost";
+import { useModelContextStore } from "@ryu/app-host/model-context";
 import {
 	type Capability,
 	CodedRpcError,
@@ -50,10 +61,10 @@ import {
 } from "@ryu/app-host/widget-bootstrap";
 import { useWidgetStateStore } from "@ryu/app-host/widget-state-store";
 import { useOptionalI18n } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo";
 import { useFriendlyMode } from "@ryu/ui/hooks/use-friendly-mode.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useChatDisplayPrefs } from "./chat-display-prefs.tsx";
 import { useWidgetHost } from "./widget-host-context.tsx";
 
@@ -71,12 +82,13 @@ interface WidgetCsp {
  *  fallback) so this renderer is robust to either shape U6 lands. */
 interface WidgetAvailableData {
 	approvedGrants?: string[];
+	conversationId?: string | null;
 	displayMode?: "inline" | "fullscreen" | "pip";
 	initialWidgetState?: unknown;
 	instanceId: string;
-	invoked?: string;
-	invoking?: string;
-	maxHeight?: number;
+	invoked?: string | null;
+	invoking?: string | null;
+	maxHeight?: number | null;
 	serverId: string;
 	templateUri?: string;
 	toolCallId: string;
@@ -114,7 +126,7 @@ function toBase64Utf8(input: string): string {
 
 /** The viewer's current theme, read from the app root (kept in sync via observer). */
 function detectTheme(): "light" | "dark" {
-	if (typeof document === "undefined") {
+	if (globalThis.document === undefined) {
 		return "dark";
 	}
 	const root = document.documentElement;
@@ -139,11 +151,20 @@ const DEFAULT_INLINE_HEIGHT = 360;
  *  would swallow the whole panel before the widget reports its own height. */
 const COMPACT_INLINE_HEIGHT = 220;
 
-export function AppWidget({ part }: { part: WidgetPartLike }) {
+export function AppWidget({
+	part,
+	fill = false,
+}: {
+	part: WidgetPartLike;
+	fill?: boolean;
+}) {
 	const host = useWidgetHost();
 	const i18n = useOptionalI18n();
 	const data = widgetData(part);
 	const stateStore = useWidgetStateStore();
+	const modelContext = useModelContextStore(
+		(store) => store.entries[data?.instanceId ?? ""]?.state ?? null
+	);
 	const { density } = useChatDisplayPrefs();
 	// `requestClose` from the widget dismisses this instance (renders inert).
 	const [closed, setClosed] = useState(false);
@@ -155,7 +176,7 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 	// One nonce per mount, host-generated (never widget/user input).
 	const nonce = useMemo(
 		() =>
-			typeof crypto?.randomUUID === "function"
+			isNativeFunction(crypto?.randomUUID)
 				? crypto.randomUUID()
 				: `nonce-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
 		[grantsKey]
@@ -175,6 +196,18 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 		"inline" | "fullscreen" | "pip"
 	>(data?.displayMode ?? "inline");
 	const [height, setHeight] = useState<number | null>(null);
+	useEffect(() => {
+		if (displayMode === "inline") {
+			return;
+		}
+		const handleEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setDisplayMode("inline");
+			}
+		};
+		window.addEventListener("keydown", handleEscape);
+		return () => window.removeEventListener("keydown", handleEscape);
+	}, [displayMode]);
 	const [theme, setTheme] = useState<"light" | "dark">(() => detectTheme());
 	const [themeTokens, setThemeTokens] = useState(readHostThemeTokens);
 	// The app-wide "Friendly names" toggle, read here so it can be baked into the
@@ -205,8 +238,11 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 		}
 		base.add("widget.state");
 		base.add("ui.displayMode");
+		if (host?.services.fileAccess) {
+			base.add("file.access");
+		}
 		return base;
-	}, [grantsKey, data?.widgetAccessible]);
+	}, [grantsKey, data?.widgetAccessible, host?.services.fileAccess]);
 
 	// The globals baked into the srcdoc ONCE (captured on first mount so the srcdoc
 	// stays stable and the iframe never remounts). Subsequent changes go via push.
@@ -218,7 +254,9 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 			displayMode: data.displayMode ?? "inline",
 			locale:
 				i18n?.locale ??
-				(typeof navigator === "undefined" ? "en" : navigator.language || "en"),
+				(globalThis.navigator === undefined
+					? "en"
+					: navigator.language || "en"),
 			maxHeight: data.maxHeight ?? null,
 			friendly,
 			safeArea: { bottom: 0, left: 0, right: 0, top: 0 },
@@ -255,10 +293,25 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 			globalsRef.current = {
 				...globalsRef.current,
 				...patch,
-			} as WidgetInitialGlobals;
+			};
 		}
 		pushRef.current?.({ globals: patch, kind: "ryu-widget-set-globals" });
 	}, []);
+	useEffect(() => {
+		pushGlobals({ modelContext });
+	}, [modelContext, pushGlobals]);
+
+	useEffect(() => {
+		const url = host?.env.appPath ?? "/";
+		if (
+			url.startsWith("/") &&
+			!url.startsWith("//") &&
+			!/[\\#]/.test(url) &&
+			![...url].some((character) => character.charCodeAt(0) < 32)
+		) {
+			pushGlobals({ deepLink: { url } });
+		}
+	}, [host?.env.appPath, pushGlobals]);
 
 	// Seed the client state store from the part on first mount (D4 hydration).
 	useEffect(() => {
@@ -310,6 +363,49 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 	}, [i18n, pushGlobals]);
 
 	const services = host?.services;
+	const fileAccess = services?.fileAccess;
+	useEffect(() => {
+		if (!fileAccess) {
+			return;
+		}
+		let disposed = false;
+		let revision: string | undefined;
+		const refresh = async () => {
+			try {
+				const snapshot = await fileAccess.read();
+				if (!disposed && snapshot.revision !== revision) {
+					revision = snapshot.revision;
+					pushGlobals({
+						openedFile: {
+							uri: fileAccess.uri,
+							name: fileAccess.name,
+							editable: fileAccess.editable,
+							revision,
+						},
+					});
+				}
+			} catch {
+				/* A failed poll retains the last confirmed snapshot; reads still reject. */
+			}
+		};
+		void refresh();
+		const timer = setInterval(() => void refresh(), 1500);
+		return () => {
+			disposed = true;
+			clearInterval(timer);
+		};
+	}, [fileAccess, pushGlobals]);
+	const modelContextOwner = data?.instanceId;
+	const clearModelContextRef = useRef(services?.clearModelContext);
+	clearModelContextRef.current = services?.clearModelContext;
+	useEffect(
+		() => () => {
+			if (modelContextOwner) {
+				clearModelContextRef.current?.(modelContextOwner);
+			}
+		},
+		[modelContextOwner, grantsKey]
+	);
 	const openExternalShell = host?.env.openExternal;
 
 	// Per-instance HostServices: close over the part identifiers (never
@@ -339,6 +435,60 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 		);
 		return {
 			...i18nServices,
+			readOpenedFile: fileAccess
+				? async ({ uri }) => {
+						if (uri !== fileAccess.uri) {
+							throw new CodedRpcError(
+								"denied",
+								"Only the opened file is accessible"
+							);
+						}
+						return await fileAccess.read();
+					}
+				: undefined,
+			writeOpenedFile:
+				fileAccess?.editable && (fileAccess.write || fileAccess.writeBlob)
+					? async (input) => {
+							if (input.uri !== fileAccess.uri) {
+								throw new CodedRpcError(
+									"denied",
+									"Only the opened file is editable"
+								);
+							}
+							if (isNativeText(input.text) && fileAccess.write) {
+								return await fileAccess.write(
+									input.text,
+									input.expectedRevision
+								);
+							}
+							if (isNativeText(input.blob) && fileAccess.writeBlob) {
+								return await fileAccess.writeBlob(
+									input.blob,
+									input.expectedRevision
+								);
+							}
+							throw new CodedRpcError(
+								"denied",
+								"This file representation is not editable"
+							);
+						}
+					: undefined,
+			getModelContext: () =>
+				services?.getModelContext?.(requireInstance().instanceId) ?? null,
+			updateModelContext: async (input) => {
+				if (!services?.updateModelContext) {
+					throw new CodedRpcError(
+						"server_error",
+						"Model context is unavailable"
+					);
+				}
+				const state = await services.updateModelContext({
+					owner: requireInstance().instanceId,
+					input,
+				});
+				pushGlobals({ modelContext: state });
+				return state;
+			},
 			uiToastDismiss: (input) => toastHost.dismiss(input),
 			uiToastShow: (input) => toastHost.show(input),
 			uiToastUpdate: (input) => toastHost.update(input),
@@ -378,7 +528,7 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 				),
 			notifyHeight: (px) => {
 				const cap = d?.maxHeight;
-				const capped = typeof cap === "number" ? Math.min(px, cap) : px;
+				const capped = isNativeNumber(cap) ? Math.min(px, cap) : px;
 				setHeight(capped > 0 ? capped : null);
 			},
 			requestDisplayMode: ({ mode }) => {
@@ -405,6 +555,7 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 			},
 			// Governed `window.openai.requestClose`: dismiss this widget instance.
 			requestClose: () => {
+				services?.clearModelContext?.(requireInstance().instanceId);
 				setClosed(true);
 				return Promise.resolve();
 			},
@@ -453,6 +604,7 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 		stateStore,
 		pushGlobals,
 		toastHost,
+		fileAccess,
 	]);
 
 	// Key the srcdoc on STABLE primitives only (the widget HTML + server), not the
@@ -495,39 +647,63 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 			services={hostServices}
 			srcdoc={srcdoc}
 			themeTokens={themeTokens}
-			title={`App widget: ${data.toolName}`}
+			title={`App widget: ${host.env.appTitle ?? data.toolName}`}
 		/>
 	);
 
-	if (displayMode === "fullscreen") {
-		return createPortal(
-			<div className="fixed inset-0 z-[100] flex flex-col bg-background">
-				<div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
-					<span className="font-medium text-sm">App · {data.serverId}</span>
-					<button
-						className="ml-auto rounded-md border px-2 py-1 text-xs hover:bg-muted"
-						onClick={() => setDisplayMode("inline")}
-						type="button"
-					>
-						Exit fullscreen
-					</button>
-				</div>
-				<div className="min-h-0 flex-1">{frame}</div>
-			</div>,
-			document.body
-		);
-	}
-
 	return (
-		<div className="overflow-hidden rounded-md border bg-background">
+		<div
+			className={
+				displayMode === "fullscreen"
+					? "fixed inset-0 z-[100] flex flex-col bg-background"
+					: displayMode === "pip"
+						? "fixed end-4 bottom-4 z-[100] flex w-[min(420px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border bg-background shadow-xl"
+						: fill
+							? "flex h-full min-h-0 flex-col overflow-hidden rounded-md border bg-background"
+							: "overflow-hidden rounded-md border bg-background"
+			}
+			data-display-mode={displayMode}
+			data-testid="app-widget"
+		>
+			{displayMode !== "inline" && (
+				<div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
+					<span className="min-w-0 flex-1 truncate font-medium text-sm">
+						{host.env.appTitle ?? data.toolName}
+					</span>
+					<Button
+						onClick={() => setDisplayMode("inline")}
+						size="sm"
+						variant="ghost"
+					>
+						{i18n?.t("common.back", {}, "Back") ?? "Back"}
+					</Button>
+					<Button
+						onClick={() => {
+							services?.clearModelContext?.(data.instanceId);
+							setClosed(true);
+						}}
+						size="sm"
+						variant="ghost"
+					>
+						{i18n?.t("common.close", {}, "Close") ?? "Close"}
+					</Button>
+				</div>
+			)}
 			<div
-				style={{
-					height:
-						height ??
-						(density === "compact"
-							? COMPACT_INLINE_HEIGHT
-							: DEFAULT_INLINE_HEIGHT),
-				}}
+				className={cn(styles.height, "min-h-0 flex-1")}
+				key="widget-frame"
+				style={
+					{
+						"--agent-height":
+							displayMode === "fullscreen"
+								? "100%"
+								: displayMode === "pip"
+									? "min(360px, calc(100dvh - 7rem))"
+									: fill
+										? "100%"
+										: `${height ?? (density === "compact" ? COMPACT_INLINE_HEIGHT : DEFAULT_INLINE_HEIGHT)}px`,
+					} satisfies AgentGeometryStyle as AgentGeometryStyle
+				}
 			>
 				{frame}
 			</div>

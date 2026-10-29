@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/QuickCaptureSettings.tsx",
+    "src/components/settings/ClipsQuickAttachSettings.tsx",
+    "src/components/settings/PredictSettings.tsx",
+    "src/components/settings/QuestsSettings.tsx",
+    "src/components/settings/MeetingsSettings.tsx",
+    "src/components/settings/PredictSettings.test.tsx",
+    "src/components/settings/QuickCaptureSettings.coverage.test.tsx",
+    "src/components/settings/ClipsQuickAttachSettings.coverage.test.tsx",
+    "src/components/settings/PredictSettings.coverage.native-http.test.tsx",
+    "src/components/settings/QuestsSettings.coverage.native-http.test.tsx",
+    "src/components/settings/MeetingsSettings.coverage.native-http.test.tsx"
+  ]
+}

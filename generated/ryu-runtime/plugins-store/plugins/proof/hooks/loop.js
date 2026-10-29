@@ -41,7 +41,7 @@ if (!raw) {
 let goal;
 try {
 	goal = JSON.parse(raw);
-} catch (e) {
+} catch  {
 	return { kind: "none" };
 }
 if (!goal || !goal.condition || goal.status !== "active") {
@@ -63,14 +63,20 @@ const task =
 	goal.condition +
 	"\n\nWhat the other agent said it did (claims only \u2014 verify, do not trust):\n" +
 	transcript +
-	"\n\nIf the workspace contains Ryu's formal verification lane (`formal/verification.json` and `tools/verify-lean.mjs`), run `node tools/verify-lean.mjs` when it is relevant to the goal. Treat a certificate with `status: \\\"proved\\\"` as formal-model evidence only; include its theorem, axiom, and snapshot-binding details in your report. A missing Lean toolchain, timeout, failed status, or unbound runtime snapshot is not proof.\n\n" +
+		"\n\nIf the workspace contains Ryu's formal verification lane (`formal/verification.json` and `tools/verify-lean.mjs`), run `node tools/verify-lean.mjs` when it is relevant to the goal; Lean remains the default. If the workspace has sibling `LAWS.bend` and `PROOF.bend` files, also run `node tools/verify-bend.mjs --project <Bend project directory>` when that Ryu wrapper is available, or run `bend PROOF.bend --verdict` from their directory. Accept a Bend result only when it exits successfully and prints `ALL PROOFS CHECK`. Keep Lean and Bend results separate. Treat `status: \\\"proved\\\"` as formal-model evidence only; report the system and version, theorem or law names, source and claim hashes, and whether `snapshotHash` is present. A missing toolchain, timeout, failed status, or missing Bend verdict marker means that lane did not prove its model. An absent snapshot does not bind a formal model to live runtime behavior.\n\n" +
 	"\n\nInvestigate the real state: read the actual files, run the tests or commands, and check the outputs that would exist ONLY IF the goal were truly done. Gather specific evidence (file contents, command output, test results). Then decide.\n\nEnd your reply with a single final line, exactly one of:\nVERIFIED: yes - <the concrete evidence that proves it>\nVERIFIED: no - <what is missing or wrong, with the evidence you found>";
 const verdict = await host.runAgent({
 	task: task,
 	agent_id: ctx.agent_id,
 	preset: "code_read",
 });
-const proven = /verified:\s*yes/i.test(verdict || "");
+// Only the verifier's required final verdict line is authoritative. A report may
+// quote an earlier `VERIFIED: yes` claim while ultimately rejecting it.
+const finalLine = (verdict || "")
+	.trim()
+	.split("\n")
+	.at(-1);
+const proven = /^VERIFIED:\s*yes\s+-\s+.+$/i.test(finalLine || "");
 goal.turns = turns + 1;
 goal.last_verdict = verdict;
 if (proven) {

@@ -162,6 +162,162 @@ export function textToDataUrl(text: string): string {
 	return `data:text/plain;base64,${btoa(binary)}`;
 }
 
+/**
+ * Extensions read as plain text without Core's `document.parse` facade. Core
+ * decodes any `text/*` file part straight into an `<attached-document>` block, so
+ * these ride the same staged list as images, today, on every node.
+ */
+const TEXT_ATTACHMENT_EXTENSIONS = new Set([
+	"c",
+	"cpp",
+	"css",
+	"csv",
+	"go",
+	"h",
+	"htm",
+	"html",
+	"ini",
+	"java",
+	"js",
+	"json",
+	"jsx",
+	"log",
+	"markdown",
+	"md",
+	"py",
+	"rb",
+	"rs",
+	"sh",
+	"sql",
+	"svelte",
+	"toml",
+	"ts",
+	"tsv",
+	"tsx",
+	"txt",
+	"vue",
+	"xml",
+	"yaml",
+	"yml",
+]);
+
+/** Picker `accept` for composers that stage images and readable text files. */
+export const IMAGE_AND_TEXT_ACCEPT = [
+	"image/*",
+	...Array.from(TEXT_ATTACHMENT_EXTENSIONS, (ext) => `.${ext}`),
+].join(",");
+
+/** Cap on a text file inlined into the turn (Core truncates far beyond this). */
+export const MAX_TEXT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+
+const TEXT_APPLICATION_TYPE =
+	/^application\/(?:json|xml|(?:x-)?yaml|toml|sql|(?:x-)?sh|javascript|typescript)$/;
+
+/** Whether `file` is plain text the composer can inline without a parser. */
+export function isTextAttachmentFile(file: File): boolean {
+	if (file.type.startsWith("text/") || TEXT_APPLICATION_TYPE.test(file.type)) {
+		return true;
+	}
+	const extension = file.name.split(".").at(-1)?.toLowerCase();
+	return Boolean(extension && TEXT_ATTACHMENT_EXTENSIONS.has(extension));
+}
+
+/** A staged image or text file; both paths always know the media type. */
+export type StagedComposerFile = AttachedImage & { mimeType: string };
+
+/** Bytes sampled from the head of a file to decide whether it is text. */
+const TEXT_SNIFF_BYTES = 8192;
+
+/**
+ * Whether the head of `file` is NUL-free, valid UTF-8. A text-like extension is
+ * not proof (`.ts` is also MPEG transport stream video), and `file.text()` would
+ * otherwise inline binary as replacement characters. UTF-16 files (FF FE / FE FF
+ * byte order mark) are refused on purpose: `file.text()` decodes as UTF-8, so
+ * they would arrive garbled anyway.
+ */
+async function looksLikeUtf8Text(file: File): Promise<boolean> {
+	const sample = new Uint8Array(
+		await file.slice(0, TEXT_SNIFF_BYTES).arrayBuffer()
+	);
+	if (sample.includes(0)) {
+		return false;
+	}
+	try {
+		// `stream: true` so a multibyte character cut at the sample edge is not
+		// counted as invalid.
+		new TextDecoder("utf-8", { fatal: true }).decode(sample, { stream: true });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Read a text file into a staged `text/plain` attachment. */
+export async function readTextAttachment(
+	file: File
+): Promise<StagedComposerFile> {
+	if (file.size > MAX_TEXT_ATTACHMENT_BYTES) {
+		throw new Error(
+			`${file.name} is too large to attach (max ${MAX_TEXT_ATTACHMENT_BYTES / (1024 * 1024)} MB)`
+		);
+	}
+	if (!(await looksLikeUtf8Text(file))) {
+		throw new Error(`${file.name} doesn't look like a text file`);
+	}
+	const text = await file.text();
+	return {
+		id: nextId("txt"),
+		filename: file.name,
+		url: textToDataUrl(text),
+		mimeType: "text/plain",
+		size: file.size,
+	};
+}
+
+/**
+ * Stage images (unchanged path: data URL plus best-effort Uploads persist) and
+ * readable text files into a composer's list. Returns the names of files neither
+ * path can read, so the surface can say so instead of dropping them silently.
+ */
+export function stageImageAndTextFiles(
+	target: ApiTarget,
+	files: File[],
+	add: (item: StagedComposerFile) => void,
+	onError: (message: string) => void
+): string[] {
+	const unsupported: string[] = [];
+	for (const file of files) {
+		if (file.type.startsWith("image/")) {
+			void stageImageUpload(target, file)
+				.then(({ dataUrl, upload }) =>
+					add({
+						id: upload?.id ?? nextId("img"),
+						filename: file.name,
+						url: dataUrl,
+						mimeType: file.type,
+						size: file.size,
+					})
+				)
+				.catch((err) =>
+					onError(
+						err instanceof Error ? err.message : `Could not read ${file.name}`
+					)
+				);
+		} else if (isTextAttachmentFile(file)) {
+			void readTextAttachment(file)
+				.then(add)
+				.catch((err) =>
+					onError(
+						err instanceof Error ? err.message : `Could not read ${file.name}`
+					)
+				);
+		} else {
+			unsupported.push(file.name);
+		}
+	}
+	return unsupported;
+}
+
 function patch(
 	update: Update,
 	id: string,
@@ -217,7 +373,7 @@ function stageImage(target: ApiTarget, file: File, update: Update): void {
 				},
 			]);
 		})
-		.catch((err: unknown) => {
+		.catch((err) => {
 			// The Uploads persist is already best-effort inside `stageImageUpload`;
 			// reaching here means the local read itself failed. Without this arm the
 			// promise rejected unhandled and the image vanished with no chip — the
@@ -291,7 +447,7 @@ function stageDocument(target: ApiTarget, file: File, update: Update): void {
 						: "Could not read this file"),
 			});
 		})
-		.catch((err: unknown) => {
+		.catch((err) => {
 			patch(update, id, {
 				state: "error",
 				error: err instanceof Error ? err.message : "Could not read this file",
@@ -308,10 +464,7 @@ function stageDocument(target: ApiTarget, file: File, update: Update): void {
  * next turn once it is ready. Sending a half-parsed document, or clearing a failed
  * one, would both be the silent-discard bug in a new costume.
  */
-export function partitionForSend(attachments: ComposerAttachment[]): {
-	keep: ComposerAttachment[];
-	send: ComposerAttachment[];
-} {
+export function partitionForSend(attachments: ComposerAttachment[]) {
 	const send: ComposerAttachment[] = [];
 	const keep: ComposerAttachment[] = [];
 	for (const item of attachments) {

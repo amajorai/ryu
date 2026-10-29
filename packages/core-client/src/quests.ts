@@ -5,7 +5,10 @@
 // plugin-host bridge services CRUD only), so any surface on `@ryuhq/core-client`
 // — native included — can drive the `@ryu/quests` companion host-direct.
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 export type QuestStatus = "open" | "done" | "dismissed";
 export type CompletionSource = "manual" | "detected";
@@ -69,6 +72,73 @@ export interface JudgeResult {
 	skipped?: boolean;
 }
 
+// All seventeen native Quest fields, including capture and detection state.
+function questResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+const questCaptureSource = questResponse(
+	z.object({
+		app: z.string().nullish(),
+		title: z.string().nullish(),
+		url: z.string().nullish(),
+	})
+);
+const questSuggestion = questResponse(
+	z.object({
+		confidence: z.number(),
+		evidence: z.string().nullish(),
+		reason: z.string(),
+		suggested_at: z.string(),
+	})
+);
+export const questResponseSchema = questResponse(
+	z.object({
+		id: z.string(),
+		title: z.string(),
+		kind: z.enum(["task", "note", "link", "prompt", "snippet"]).optional(),
+		body: z.string().nullish(),
+		source: questCaptureSource.nullish(),
+		used_at: z.string().nullish(),
+		pinned: z.boolean().optional(),
+		detail: z.string().nullish(),
+		completion_condition: z.string(),
+		status: z.enum(["open", "done", "dismissed"]),
+		created_at: z.string(),
+		updated_at: z.string(),
+		completed_at: z.string().nullish(),
+		completion_source: z.enum(["manual", "detected"]).nullish(),
+		last_judged_at: z.string().nullish(),
+		snoozed_until: z.string().nullish(),
+		suggestion: questSuggestion.nullish(),
+	})
+);
+const questListResponse = questResponse(
+	z.object({
+		quests: z.array(questResponseSchema).nullish(),
+		error: z.string().optional(),
+	})
+);
+const questEnvelopeResponse = questResponse(
+	z.object({
+		quest: questResponseSchema.nullish(),
+		error: z.string().optional(),
+	})
+);
+const questScratchpadResponse = questResponse(
+	z.object({ text: z.string().nullish(), error: z.string().optional() })
+);
+const questOkResponse = questResponse(z.object({ ok: z.boolean() }));
+export const questJudgeResponseSchema = questResponse(
+	z.union([
+		z.object({ met: z.boolean(), confidence: z.number(), reason: z.string() }),
+		z.object({ skipped: z.literal(true), reason: z.string() }),
+	])
+);
+
 export async function listQuests(
 	target: ApiTarget,
 	kind?: QuestKind
@@ -76,7 +146,7 @@ export async function listQuests(
 	const path = kind
 		? `/api/quests?kind=${encodeURIComponent(kind)}`
 		: "/api/quests";
-	const json = await request<{ quests?: Quest[] }>(target, path);
+	const json = await request(target, path, {}, questListResponse);
 	return json.quests ?? [];
 }
 
@@ -85,10 +155,11 @@ export async function captureQuest(
 	target: ApiTarget,
 	data: CaptureInput
 ): Promise<Quest> {
-	const json = await request<{ quest?: Quest; error?: string }>(
+	const json = await request(
 		target,
 		"/api/quests/capture",
-		{ method: "POST", body: data }
+		{ method: "POST", body: data },
+		questEnvelopeResponse
 	);
 	if (!json.quest) {
 		throw new Error(json.error ?? "failed to capture");
@@ -116,9 +187,11 @@ export async function pinQuest(
 
 /** The freeform brain-dump buffer. */
 export async function getScratchpad(target: ApiTarget): Promise<string> {
-	const json = await request<{ text?: string }>(
+	const json = await request(
 		target,
-		"/api/quests/scratchpad"
+		"/api/quests/scratchpad",
+		{},
+		questScratchpadResponse
 	);
 	return json.text ?? "";
 }
@@ -128,20 +201,26 @@ export async function setScratchpad(
 	target: ApiTarget,
 	text: string
 ): Promise<void> {
-	await request(target, "/api/quests/scratchpad", {
-		method: "PUT",
-		body: { text },
-	});
+	await request(
+		target,
+		"/api/quests/scratchpad",
+		{
+			method: "PUT",
+			body: { text },
+		},
+		questOkResponse
+	);
 }
 
 export async function createQuest(
 	target: ApiTarget,
 	data: QuestInput
 ): Promise<Quest> {
-	const json = await request<{ quest?: Quest; error?: string }>(
+	const json = await request(
 		target,
 		"/api/quests",
-		{ method: "POST", body: data }
+		{ method: "POST", body: data },
+		questEnvelopeResponse
 	);
 	if (!json.quest) {
 		throw new Error(json.error ?? "failed to create quest");
@@ -154,10 +233,11 @@ export async function updateQuest(
 	id: string,
 	data: QuestInput
 ): Promise<Quest> {
-	const json = await request<{ quest?: Quest; error?: string }>(
+	const json = await request(
 		target,
 		`/api/quests/${id}`,
-		{ method: "PUT", body: data }
+		{ method: "PUT", body: data },
+		questEnvelopeResponse
 	);
 	if (!json.quest) {
 		throw new Error(json.error ?? "failed to update quest");
@@ -169,18 +249,30 @@ export async function deleteQuest(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/quests/${id}`, { method: "DELETE" });
+	await request(
+		target,
+		`/api/quests/${id}`,
+		{ method: "DELETE" },
+		questOkResponse
+	);
 }
+
+type QuestMutationBody =
+	| { complete: Parameters<typeof useQuest>[2] }
+	| { pinned: Parameters<typeof pinQuest>[2] };
 
 async function mutateQuest(
 	target: ApiTarget,
 	path: string,
-	body?: Record<string, unknown>
+	body?: QuestMutationBody
 ): Promise<Quest> {
-	const json = await request<{ quest?: Quest; error?: string }>(target, path, {
+	const options: NonNullable<Parameters<typeof request>[2]> = {
 		method: "POST",
-		...(body ? { body } : {}),
-	});
+	};
+	if (body) {
+		options.body = body;
+	}
+	const json = await request(target, path, options, questEnvelopeResponse);
 	if (!json.quest) {
 		throw new Error(json.error ?? "quest update failed");
 	}
@@ -215,11 +307,81 @@ export async function dismissSuggestion(
 	return await mutateQuest(target, `/api/quests/${id}/suggestion/dismiss`);
 }
 
+const shadowEvidenceSchema = z.object({
+	available: z.boolean().optional(),
+	error: z.string().optional(),
+	entries: z.array(appResponseValueSchema).optional(),
+	results: z.array(appResponseValueSchema).optional(),
+});
+
+/** Read capture evidence through the active node's authenticated proxy. This runs
+ * with the user's existing credentials, never a sidecar's service secret. */
+async function questJudgeContext(
+	target: ApiTarget,
+	id: string
+): Promise<string | undefined> {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 10_000);
+	try {
+		const { quest } = await request(
+			target,
+			`/api/quests/${encodePathId(id)}`,
+			{ signal: controller.signal },
+			questEnvelopeResponse
+		);
+		if (quest?.status !== "open" || (quest.kind && quest.kind !== "task")) {
+			return undefined;
+		}
+		const condition = quest.completion_condition.trim() || quest.title;
+		const reads = await Promise.allSettled([
+			request(
+				target,
+				"/api/shadow/context/recent?q=10",
+				{ signal: controller.signal },
+				shadowEvidenceSchema
+			),
+			request(
+				target,
+				`/api/shadow/search/semantic?q=${encodeURIComponent(condition)}&limit=5`,
+				{ signal: controller.signal },
+				shadowEvidenceSchema
+			),
+		]);
+		const parts: string[] = [];
+		for (const [index, read] of reads.entries()) {
+			if (
+				read.status !== "fulfilled" ||
+				read.value.error ||
+				read.value.available === false
+			) {
+				continue;
+			}
+			const entries = index === 0 ? read.value.entries : read.value.results;
+			if (!entries?.length) {
+				continue;
+			}
+			parts.push(
+				`${index === 0 ? "Recent activity" : "Related history"}:\n${JSON.stringify(entries)}`
+			);
+		}
+		return parts.length ? parts.join("\n\n").slice(0, 16_000) : undefined;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 export async function judgeQuest(
 	target: ApiTarget,
 	id: string
 ): Promise<JudgeResult> {
-	return await request<JudgeResult>(target, `/api/quests/${id}/judge`, {
-		method: "POST",
-	});
+	const context = await questJudgeContext(target, id);
+	return await request(
+		target,
+		`/api/quests/${encodePathId(id)}/judge`,
+		{
+			method: "POST",
+			body: context ? { context } : {},
+		},
+		questJudgeResponseSchema
+	);
 }

@@ -1,0 +1,117 @@
+.localSearchProofShell {
+	width: min(900px, calc(100vw - 48px));
+	padding: 64px 0 80px;
+	margin: 0 auto;
+}
+
+.localSearchProofHeader {
+	max-width: 680px;
+	margin-bottom: 28px;
+}
+
+.localSearchProofHeader h1 {
+	max-width: 650px;
+	margin: 8px 0 12px;
+	font-family: var(--font-heading);
+	font-size: 36px;
+	font-weight: 600;
+	line-height: 1.08;
+	letter-spacing: -0.04em;
+}
+
+.localSearchProofHeader p:last-child {
+	margin: 0;
+	font-size: 15px;
+	line-height: 1.6;
+	color: var(--muted-foreground);
+}
+
+.localSearchCard {
+	padding: 24px;
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 20px;
+	box-shadow: 0 18px 48px rgb(15 23 42 / 8%);
+}
+
+.localSearchHeading {
+	display: flex;
+	gap: 20px;
+	align-items: flex-start;
+	justify-content: space-between;
+}
+
+.localSearchHeading h2 {
+	margin: 4px 0 0;
+	font-family: var(--font-heading);
+	font-size: 22px;
+	font-weight: 600;
+	letter-spacing: -0.02em;
+}
+
+.localSearchKicker {
+	margin: 0;
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--primary);
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+}
+
+.localSearchBadge {
+	padding: 6px 10px;
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--primary);
+	white-space: nowrap;
+	background: color-mix(in oklab, var(--primary) 8%, var(--card));
+	border: 1px solid color-mix(in oklab, var(--primary) 30%, var(--border));
+	border-radius: 999px;
+}
+
+.localSearchCopy {
+	max-width: 680px;
+	margin: 12px 0 20px;
+	font-size: 14px;
+	line-height: 1.55;
+	color: var(--muted-foreground);
+}
+
+.localSearchMetrics {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 18px;
+	margin-top: 16px;
+	font-size: 12px;
+	color: var(--muted-foreground);
+}
+
+.localSearchMetrics strong {
+	font-weight: 600;
+	color: var(--foreground);
+}
+
+.localSearchSelection {
+	min-height: 20px;
+	padding-top: 14px;
+	margin: 16px 0 0;
+	font-size: 13px;
+	color: var(--muted-foreground);
+	border-top: 1px solid var(--border);
+}
+
+@media (max-width: 760px) {
+	.localSearchProofShell {
+		width: calc(100vw - 28px);
+		padding-top: 32px;
+	}
+
+	.localSearchProofHeader h1 {
+		font-size: 30px;
+	}
+
+	.localSearchHeading {
+		flex-direction: column;
+		gap: 12px;
+	}
+}

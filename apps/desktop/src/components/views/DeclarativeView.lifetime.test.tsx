@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { DeclarativeView } from "./DeclarativeView.tsx";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -16,7 +16,7 @@ test("source replacement, refresh and unmount cancel reads and ignore late resul
 	const requests: {
 		path: string;
 		signal?: AbortSignal;
-		resolve: (value: unknown) => void;
+		resolve: <TValue>(value: TValue) => void;
 	}[] = [];
 	const fetchJson = (_method: string, path: string, signal?: AbortSignal) =>
 		new Promise<unknown>((resolve) => {

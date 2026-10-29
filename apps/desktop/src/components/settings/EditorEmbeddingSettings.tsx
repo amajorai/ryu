@@ -1,18 +1,19 @@
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
-import { setEditorAiConfig } from "@ryu/ui/lib/editor-ai";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { setEditorAiConfig } from "@ryu/ui/lib/editor-ai.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
@@ -31,6 +32,8 @@ import {
 	triggerReindex,
 } from "@/src/lib/api/spaces.ts";
 import { friendlyModelDisplay } from "@/src/lib/catalog/friendly.ts";
+import previewStyles from "./settings-preview.module.css";
+import type { PreviewStyle } from "./settings-preview-style.ts";
 
 /**
  * Settings for the in-app editor's AI (which model routes Cmd+J inline edits via
@@ -70,26 +73,50 @@ function EditorAiCard({
 	const [baseUrl, setBaseUrl] = useState("");
 	const [agentId, setAgentId] = useState("");
 	const [loaded, setLoaded] = useState(false);
+	const [loadError, setLoadError] = useState(false);
 	const [saving, setSaving] = useState(false);
 
-	useEffect(() => {
-		getPreference(target, EDITOR_AI_PREF_KEY).then((raw) => {
-			if (raw) {
-				try {
-					const pref = JSON.parse(raw) as EditorAiPref;
-					setEnabled(pref.enabled);
-					setModel(pref.model ?? "");
-					setBaseUrl(pref.baseUrl ?? "");
-					setAgentId(pref.agentId ?? "");
-				} catch {
-					// ignore malformed pref
-				}
+	const loadPreference = useCallback(async () => {
+		setLoaded(false);
+		setLoadError(false);
+		try {
+			const raw = await getPreference(target, EDITOR_AI_PREF_KEY);
+			if (!raw) {
+				setEnabled(false);
+				setModel("");
+				setBaseUrl("");
+				setAgentId("");
+				return;
 			}
+			try {
+				const pref = z
+					.object({
+						enabled: z.boolean().optional(),
+						model: z.string().optional(),
+						baseUrl: z.string().optional(),
+						agentId: z.string().optional(),
+					})
+					.parse(JSON.parse(raw));
+				setEnabled(pref.enabled === true);
+				setModel(pref.model ?? "");
+				setBaseUrl(pref.baseUrl ?? "");
+				setAgentId(pref.agentId ?? "");
+			} catch {
+				setEnabled(false);
+				setModel("");
+				setBaseUrl("");
+				setAgentId("");
+			}
+		} catch {
+			setLoadError(true);
+		} finally {
 			setLoaded(true);
-		});
-		// Only on node change.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [target.url, target]);
+		}
+	}, [target]);
+
+	useEffect(() => {
+		void loadPreference();
+	}, [loadPreference]);
 
 	const agentOptions = useMemo(
 		() => [
@@ -119,24 +146,28 @@ function EditorAiCard({
 
 	const save = useCallback(async () => {
 		setSaving(true);
-		const pref: EditorAiPref = {
-			enabled,
-			model: effectiveModel,
-			baseUrl,
-			agentId: agentId || undefined,
-		};
-		const ok = await setPreference(
-			target,
-			EDITOR_AI_PREF_KEY,
-			JSON.stringify(pref)
-		);
-		setSaving(false);
-		if (ok) {
+		try {
+			const normalizedBaseUrl = baseUrl.trim();
+			const pref: EditorAiPref = {
+				enabled,
+				model: effectiveModel,
+				baseUrl: normalizedBaseUrl,
+				agentId: agentId || undefined,
+			};
+			const ok = await setPreference(
+				target,
+				EDITOR_AI_PREF_KEY,
+				JSON.stringify(pref)
+			);
+			if (!ok) {
+				toast.error("Couldn't save editor AI settings");
+				return;
+			}
 			// Apply immediately so the open editor picks it up without a reload.
 			setEditorAiConfig({
 				enabled: enabled && effectiveModel.length > 0,
 				model: effectiveModel,
-				baseUrl: baseUrl.trim() ? baseUrl : deriveGatewayBase(nodeUrl),
+				baseUrl: normalizedBaseUrl || deriveGatewayBase(nodeUrl),
 				apiKey: target.token ?? undefined,
 				agentId: agentId || undefined,
 			});
@@ -150,24 +181,52 @@ function EditorAiCard({
 			} else {
 				toast.success("Editor AI settings saved");
 			}
-		} else {
+		} catch {
 			toast.error("Couldn't save editor AI settings");
+		} finally {
+			setSaving(false);
 		}
 	}, [enabled, effectiveModel, baseUrl, agentId, target, nodeUrl]);
 
 	if (!loaded) {
 		return (
-			<div className="flex justify-center rounded-lg bg-muted/40 p-6">
-				<Spinner />
+			<div aria-label="Inline AI editing" role="region">
+				<SkeletonRows spacing="library" />
+			</div>
+		);
+	}
+	if (loadError) {
+		return (
+			<div
+				aria-label="Inline AI editing"
+				className="flex items-center justify-between rounded-lg bg-muted/40 p-4"
+				role="region"
+			>
+				<p className="text-muted-foreground text-sm" role="alert">
+					Couldn't load editor AI settings.
+				</p>
+				<Button
+					onClick={() => void loadPreference()}
+					size="sm"
+					variant="outline"
+				>
+					Retry
+				</Button>
 			</div>
 		);
 	}
 
 	return (
-		<div className="space-y-4 rounded-lg bg-muted/40 p-4">
+		<div
+			aria-labelledby="editor-ai-settings-title"
+			className="space-y-4 rounded-lg bg-muted/40 p-4"
+			role="region"
+		>
 			<div className="flex items-center justify-between">
 				<div>
-					<p className="font-medium text-sm">Inline AI editing</p>
+					<p className="font-medium text-sm" id="editor-ai-settings-title">
+						Inline AI editing
+					</p>
 					<p className="text-muted-foreground text-xs">
 						Powers the editor's Cmd+J menu (continue, improve, fix, summarize),
 						routed through the Gateway.
@@ -188,7 +247,7 @@ function EditorAiCard({
 					}
 					value={agentId || CUSTOM_AGENT_VALUE}
 				>
-					<SelectTrigger className="h-8 text-sm" id="editor-ai-agent">
+					<SelectTrigger className="h-8" id="editor-ai-agent">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
@@ -251,6 +310,9 @@ function EmbeddingCard({ target }: { target: ApiTarget }) {
 	const [modelInput, setModelInput] = useState("");
 	const [baseUrlInput, setBaseUrlInput] = useState("");
 	const [dimsInput, setDimsInput] = useState("");
+	const [modelLoadError, setModelLoadError] = useState(false);
+	const [statusLoadError, setStatusLoadError] = useState(false);
+	const [dimsError, setDimsError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -258,25 +320,35 @@ function EmbeddingCard({ target }: { target: ApiTarget }) {
 		try {
 			const s = await fetchReindexStatus(target);
 			setStatus(s);
+			setStatusLoadError(false);
 			return s;
 		} catch {
+			setStatusLoadError(true);
 			return null;
 		}
 	}, [target]);
 
+	const loadModel = useCallback(async () => {
+		setModelLoadError(false);
+		try {
+			const model = await fetchEmbeddingModel(target);
+			setModelInput(model.modelId);
+			setBaseUrlInput(model.baseUrl ?? "");
+			setDimsInput(model.dims ? String(model.dims) : "");
+		} catch {
+			setModelLoadError(true);
+		}
+	}, [target]);
+
 	useEffect(() => {
-		fetchEmbeddingModel(target)
-			.then((m) => {
-				setModelInput(m.modelId);
-				setBaseUrlInput(m.baseUrl);
-				setDimsInput(m.dims ? String(m.dims) : "");
-			})
-			.catch(() => {
-				// ignore
-			});
-		refresh().catch(() => undefined);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [target.url, target, refresh]);
+		void loadModel();
+		void refresh();
+	}, [loadModel, refresh]);
+
+	const retryReads = useCallback(() => {
+		void loadModel();
+		void refresh();
+	}, [loadModel, refresh]);
 
 	// Poll while a reindex is running so the progress bar advances.
 	useEffect(() => {
@@ -299,9 +371,20 @@ function EmbeddingCard({ target }: { target: ApiTarget }) {
 	}, [status?.running, refresh]);
 
 	const applyModel = useCallback(async () => {
+		const rawDims = dimsInput.trim();
+		const dims = rawDims ? Number(rawDims) : undefined;
+		if (
+			rawDims &&
+			(dims === undefined || !Number.isSafeInteger(dims) || dims <= 0)
+		) {
+			const error = "Dimensions must be a positive whole number";
+			setDimsError(error);
+			toast.error(error);
+			return;
+		}
+		setDimsError(null);
 		setBusy(true);
 		try {
-			const dims = dimsInput.trim() ? Number(dimsInput) : undefined;
 			await setEmbeddingModel(
 				target,
 				modelInput.trim(),
@@ -337,10 +420,19 @@ function EmbeddingCard({ target }: { target: ApiTarget }) {
 	const pct =
 		totalChunks > 0 ? Math.round((doneChunks / totalChunks) * 100) : 0;
 
+	const progressStyle: PreviewStyle = {
+		"--settings-preview-progress": `${pct}%`,
+	};
 	return (
-		<div className="space-y-4 rounded-lg bg-muted/40 p-4">
+		<div
+			aria-labelledby="embedding-settings-title"
+			className="space-y-4 rounded-lg bg-muted/40 p-4"
+			role="region"
+		>
 			<div>
-				<p className="font-medium text-sm">Default embedding model</p>
+				<p className="font-medium text-sm" id="embedding-settings-title">
+					Default embedding model
+				</p>
 				<p className="text-muted-foreground text-xs">
 					Used to embed Spaces pages for RAG. Changing it re-embeds every
 					document (old vectors are not comparable across models).
@@ -368,19 +460,47 @@ function EmbeddingCard({ target }: { target: ApiTarget }) {
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor="embed-dims">Dimensions (optional)</Label>
 					<Input
+						aria-describedby={dimsError ? "embed-dims-error" : undefined}
+						aria-invalid={dimsError ? true : undefined}
 						id="embed-dims"
-						onChange={(e) => setDimsInput(e.target.value)}
+						onChange={(e) => {
+							setDimsInput(e.target.value);
+							setDimsError(null);
+						}}
 						placeholder="768"
 						value={dimsInput}
 					/>
+					{dimsError ? (
+						<p
+							className="text-status-destructive text-xs"
+							id="embed-dims-error"
+							role="alert"
+						>
+							{dimsError}
+						</p>
+					) : null}
 				</div>
 			</div>
+			{modelLoadError || statusLoadError ? (
+				<div className="flex items-center justify-between gap-3">
+					<p className="text-status-destructive text-xs" role="alert">
+						{modelLoadError && statusLoadError
+							? "Couldn't load embedding model or reindex status."
+							: modelLoadError
+								? "Couldn't load the embedding model."
+								: "Couldn't load reindex status."}
+					</p>
+					<Button onClick={retryReads} size="sm" variant="outline">
+						Retry
+					</Button>
+				</div>
+			) : null}
 			<div className="flex items-center gap-2">
 				<Button loading={busy} onClick={applyModel} size="sm">
 					Change & reindex
 				</Button>
 				<Button
-					disabled={busy || pending === 0}
+					disabled={busy || status?.running === true || pending === 0}
 					onClick={reindexNow}
 					size="sm"
 					variant="ghost"
@@ -399,12 +519,12 @@ function EmbeddingCard({ target }: { target: ApiTarget }) {
 									? `${pending} of ${totalChunks} chunks stale`
 									: "All embeddings up to date"}
 						</span>
-						<span>{pct}%</span>
+						<span className="tabular-nums">{pct}%</span>
 					</div>
 					<div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
 						<div
-							className="h-full rounded-full bg-primary transition-all"
-							style={{ width: `${pct}%` }}
+							className={`h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none ${previewStyles.progress}`}
+							style={progressStyle}
 						/>
 					</div>
 				</div>

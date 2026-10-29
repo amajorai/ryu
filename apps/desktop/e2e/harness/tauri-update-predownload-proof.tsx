@@ -26,7 +26,7 @@ function TauriUpdatePredownloadProof() {
 			<div className="mx-auto max-w-5xl space-y-6">
 				<header className="flex items-end justify-between gap-6">
 					<div>
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							Ryu desktop · Tauri
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
@@ -70,12 +70,12 @@ function TauriUpdatePredownloadProof() {
 									Native updater log
 								</p>
 							</div>
-							<span className="size-2 rounded-full bg-emerald-500" />
+							<span className="size-2 rounded-full bg-success" />
 						</div>
 						<ol className="mt-5 space-y-3" data-testid="proof-log">
 							{log.map((entry, index) => (
 								<li className="flex gap-3 text-sm" key={entry}>
-									<span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-[10px] text-muted-foreground">
+									<span className="type-compact flex size-5 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-muted-foreground">
 										{index + 1}
 									</span>
 									<span>{entry}</span>

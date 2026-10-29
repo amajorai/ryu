@@ -1,6 +1,6 @@
 [package]
 name = "ryu-learning"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Continual-learning loop (MetaClaw-style) + experience buffer for Ryu: the reward-filtered SFT/skill-synthesis engine (sweep conversations -> PRM-score -> distill skills / assemble a fine-tune dataset) and its durable experience store (SQLite `experience.db`), plus the `/api/learn/*` + `/api/experience/list` surface. An extracted Core capability crate — in-process default, consumed by Core as a path dependency. Every Core-owned callback (conversation-store sweep, Gateway PRM/synth side-model, skill-synthesis approvals inbox, skills-registry reload, fine-tune dispatch, preference store) is inverted through the `LearningHost` trait, so this crate has ZERO dependency on apps/core. The lone kernel coupling (the `~/.ryu` data directory) is inverted through `init_data_dir`."
@@ -27,7 +27,7 @@ path = "src/main.rs"
 # Versions match apps/core/Cargo.toml so the in-process merge into Core's axum
 # router has no version skew. This crate has ZERO dependency on apps/core.
 [dependencies]
-ryu-improvement-contracts = { path = "../improvement-contracts", version = "0.4.0" }
+ryu-improvement-contracts = { path = "../improvement-contracts", version = "0.5.0" }
 tokio = { version = "1", features = ["sync", "fs", "rt", "rt-multi-thread", "macros", "net"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
@@ -40,13 +40,19 @@ utoipa = { version = "5", features = ["axum_extras", "chrono"] }
 async-trait = "0.1"
 # The skill-synthesis path writes + validates `SKILL.md` files through the shared
 # skills crate (already a Core dependency; no new dependency in the merged build).
-ryu-skills = { path = "../skills", version = "0.4.0" }
-# Sidecar-binary-only deps (data-dir resolution + logging), mirroring `ryu-finetune`
-# and `ryu-mail`. Core already pulls all of these, so there is no new dependency
-# in the in-process build.
-dirs = "5"
+ryu-skills = { path = "../skills", version = "0.5.0" }
+# The data-dir layout + the shared pointer/profile-aware data-dir resolver.
+ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.0" }
+# Sidecar-binary-only deps (logging), mirroring `ryu-finetune` and `ryu-mail`.
+# Core already pulls all of these, so there is no new dependency in the
+# in-process build.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
+# backend from this crate: Core links it through its own dependency.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["sqlite"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+# Test builds only: lets unit tests construct sealing stores without a host.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["test-ephemeral-host"] }

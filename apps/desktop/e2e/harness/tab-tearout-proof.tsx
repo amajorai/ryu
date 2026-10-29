@@ -1,6 +1,8 @@
+declare const window: Window;
+
 // Native/browser proof of the shipping Layout, TabsProvider, TitleBar, drag
 // handlers and artifact renderer. Only backend data is isolated test data.
-import { Toaster } from "@ryu/ui/components/sileo";
+import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ThemeProvider } from "next-themes";
@@ -12,11 +14,12 @@ import Layout from "../../src/components/layout/Layout.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { useProductModeStore } from "../../src/lib/product-mode.ts";
+import { initializeTabTransfer } from "../../src/lib/tab-transfer.ts";
 import { useArtifactStore } from "../../src/store/useArtifactStore.ts";
 import "@fontsource-variable/geist";
 import "../../src/index.css";
 
-function recordProof(event: string, detail: unknown) {
+function recordProof<Detail>(event: string, detail: Detail) {
 	navigator.sendBeacon(
 		"/__tab-proof",
 		JSON.stringify({ event, detail, window: location.search || "main" })
@@ -41,8 +44,8 @@ for (const name of ["dragstart", "dragend"] as const) {
 		})
 	);
 }
-const nativeFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = (input, init) => {
+const nativeFetch = window.fetch.bind(globalThis);
+window.fetch = (input, init) => {
 	const url = new URL(
 		input instanceof Request ? input.url : String(input),
 		location.href
@@ -111,6 +114,7 @@ if (params.get("window") !== "tab") {
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
+await initializeTabTransfer();
 const root = document.getElementById("root");
 if (root) {
 	createRoot(root).render(

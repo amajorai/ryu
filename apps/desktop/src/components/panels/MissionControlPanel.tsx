@@ -26,19 +26,20 @@ import {
 	UserSharingIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@ryu/ui/components/collapsible";
+} from "@ryu/ui/components/collapsible.tsx";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useMemo, useState } from "react";
 import {
 	buildMissionDigest,
@@ -50,10 +51,7 @@ import {
 	type MissionTurnStatus,
 } from "@/src/lib/mission-control/turn-groups.ts";
 
-const STATUS_META: Record<
-	MissionTurnStatus,
-	{ className: string; icon: typeof CheckmarkCircle02Icon; label: string }
-> = {
+const STATUS_META = {
 	ok: {
 		className: "text-status-success",
 		icon: CheckmarkCircle02Icon,
@@ -69,19 +67,22 @@ const STATUS_META: Record<
 		icon: Loading03Icon,
 		label: "Still working",
 	},
-};
+} satisfies Record<
+	MissionTurnStatus,
+	{ className: string; icon: typeof CheckmarkCircle02Icon; label: string }
+>;
 
-const TOUCH_META: Record<
-	MissionFileTouch["kind"],
-	{ className: string; label: string }
-> = {
+const TOUCH_META = {
 	create: {
 		className: "text-status-success",
 		label: "new",
 	},
 	edit: { className: "text-status-warning", label: "edit" },
 	read: { className: "text-muted-foreground", label: "read" },
-};
+} satisfies Record<
+	MissionFileTouch["kind"],
+	{ className: string; label: string }
+>;
 
 /** Chips beyond this are collapsed into a "+N" count — a turn that grepped
  *  thirty times should read as one line, not thirty. */
@@ -93,7 +94,7 @@ function StatRow({ label, value }: { label: string; value: number }) {
 			<span className="font-medium text-sm tabular-nums">
 				{formatCount(value)}
 			</span>
-			<span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+			<span className="type-compact text-muted-foreground uppercase tracking-wide">
 				{label}
 			</span>
 		</div>
@@ -118,16 +119,16 @@ function ChipList({
 		<div className="flex flex-wrap items-center gap-1">
 			<Tooltip>
 				<TooltipTrigger
-					className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+					className="flex size-4 shrink-0 items-center justify-center"
 					render={<span />}
 				>
 					<HugeiconsIcon className="size-3.5" icon={icon} />
 				</TooltipTrigger>
-				<TooltipContent className="text-xs">{title}</TooltipContent>
+				<TooltipContent>{title}</TooltipContent>
 			</Tooltip>
 			{shown.map((item) => (
 				<span
-					className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+					className="type-caption max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-muted-foreground"
 					key={item}
 					title={item}
 				>
@@ -135,7 +136,7 @@ function ChipList({
 				</span>
 			))}
 			{hidden > 0 && (
-				<span className="text-[11px] text-muted-foreground">+{hidden}</span>
+				<span className="type-caption text-muted-foreground">+{hidden}</span>
 			)}
 		</div>
 	);
@@ -147,7 +148,7 @@ function FileRow({ touch }: { touch: MissionFileTouch }) {
 		<div className="flex items-center gap-2 py-0.5">
 			<span
 				className={cn(
-					"w-8 shrink-0 text-[10px] uppercase tracking-wide",
+					"type-compact w-8 shrink-0 uppercase tracking-wide",
 					meta.className
 				)}
 			>
@@ -157,7 +158,7 @@ function FileRow({ touch }: { touch: MissionFileTouch }) {
 				{touch.path}
 			</span>
 			{touch.count > 1 && (
-				<span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+				<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
 					×{formatCount(touch.count) ?? "—"}
 				</span>
 			)}
@@ -176,7 +177,7 @@ function CommandRow({ command }: { command: MissionCommand }) {
 				icon={CodeIcon}
 			/>
 			<code
-				className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
+				className="type-caption min-w-0 flex-1 truncate font-mono text-muted-foreground"
 				title={command.description ?? command.command}
 			>
 				{command.command}
@@ -206,7 +207,7 @@ function ProseBlock({
 				accent ? "border-primary/40" : "border-border"
 			)}
 		>
-			<div className="text-[10px] text-muted-foreground uppercase tracking-wide">
+			<div className="type-compact text-muted-foreground uppercase tracking-wide">
 				{label}
 			</div>
 			<p className="whitespace-pre-wrap text-xs leading-relaxed">{body}</p>
@@ -215,6 +216,7 @@ function ProseBlock({
 }
 
 function TurnCard({ turn }: { turn: MissionTurn }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const status = STATUS_META[turn.status];
 	const hasDetail =
@@ -238,11 +240,11 @@ function TurnCard({ turn }: { turn: MissionTurn }) {
 							icon={status.icon}
 						/>
 					</TooltipTrigger>
-					<TooltipContent className="text-xs">{status.label}</TooltipContent>
+					<TooltipContent>{status.label}</TooltipContent>
 				</Tooltip>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-baseline gap-1.5">
-						<span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
 							{turn.index}
 						</span>
 						<span className="min-w-0 flex-1 font-medium text-xs">
@@ -250,7 +252,7 @@ function TurnCard({ turn }: { turn: MissionTurn }) {
 						</span>
 					</div>
 					{turn.request.length > 0 && (
-						<p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+						<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground">
 							{turn.request}
 						</p>
 					)}
@@ -265,16 +267,17 @@ function TurnCard({ turn }: { turn: MissionTurn }) {
 			{hasDetail && (
 				<Collapsible onOpenChange={setOpen} open={open}>
 					<CollapsibleTrigger
-						className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+						appearance="mission-summary"
+						className="mt-2 flex items-center"
 						render={<button type="button" />}
 					>
 						<HugeiconsIcon
 							className={cn("size-3 transition-transform", open && "rotate-90")}
 							icon={ArrowRight01Icon}
 						/>
-						{open ? "Hide" : "Show"} what it touched
+						{open ? tl("Hide what it touched") : tl("Show what it touched")}
 					</CollapsibleTrigger>
-					<CollapsibleContent className="mt-1.5 space-y-1.5">
+					<CollapsibleContent className="mt-1.5" spacing="mission-events">
 						{turn.thinking.length > 0 && (
 							<ProseBlock body={turn.thinking} label="Reasoning" />
 						)}
@@ -317,7 +320,7 @@ function TodoSection({ todos }: { todos: MissionTodo[] }) {
 					icon={SparklesIcon}
 				/>
 				<span className="font-medium text-xs">Still to do</span>
-				<Badge className="ml-auto text-[10px]" variant="secondary">
+				<Badge className="ml-auto" size="compact" variant="secondary">
 					{todos.length}
 				</Badge>
 			</div>

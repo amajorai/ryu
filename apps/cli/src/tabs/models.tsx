@@ -5,6 +5,7 @@
 // installs the selected model (POST /api/models/catalog/install {id}); 'a' makes it
 // the active served chat model (POST /api/models/active {id}).
 
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { setActiveModel } from "@ryuhq/core-client/models";
 import { featureListLoader, type ListRow } from "../core/featureList.ts";
@@ -24,10 +25,15 @@ const installModel = async (
 	row: ListRow,
 	target: ApiTarget
 ): Promise<string> => {
-	await request(target, "/api/models/catalog/install", {
-		method: "POST",
-		body: { id: row.id },
-	});
+	await request(
+		target,
+		"/api/models/catalog/install",
+		{
+			method: "POST",
+			body: { id: row.id },
+		},
+		appResponseValueSchema
+	);
 	return `install queued: ${row.id}`;
 };
 

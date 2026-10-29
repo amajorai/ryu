@@ -6,10 +6,10 @@ import "../../src/index.css";
 
 const target: ApiTarget = { token: null, url: window.location.origin };
 
-const CONVERSATION_TITLES: Record<string, string> = {
-	"conversation-architecture": "Architecture chat",
-	"conversation-launch": "Launch planning chat",
-};
+const CONVERSATION_TITLES = new Map<string, string>([
+	["conversation-architecture", "Architecture chat"],
+	["conversation-launch", "Launch planning chat"],
+]);
 
 function Story() {
 	const [openedConversation, setOpenedConversation] = useState("");
@@ -19,7 +19,9 @@ function Story() {
 		<div className="min-h-screen bg-background px-6 py-10 text-foreground">
 			<div className="mx-auto max-w-3xl">
 				<MemoryChatSearch
-					conversationTitle={(id) => CONVERSATION_TITLES[id] ?? "Conversation"}
+					conversationTitle={(id) =>
+						CONVERSATION_TITLES.get(id) ?? "Conversation"
+					}
 					onOpenConversation={setOpenedConversation}
 					onOpenDream={() => setOpenedView("dream")}
 					target={target}

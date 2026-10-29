@@ -1,6 +1,6 @@
 "use client";
 
-import { EASE_OUT, SPRING_SWAP } from "@ryu/ui/lib/ease";
+import { EASE_OUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
 import { Check, Loader2, X } from "lucide-react";
 import {
 	AnimatePresence,
@@ -15,7 +15,8 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { Button, type ButtonProps } from "./base";
+import { isNativeText } from "../../../lib/native-primitive-observation.ts";
+import { Button, type ButtonProps } from "./base.tsx";
 
 export type ButtonState = "idle" | "loading" | "success" | "error";
 
@@ -88,7 +89,7 @@ function TextSlot({ value, children }: { value: string; children: ReactNode }) {
 	const reduce = useReducedMotion();
 	const measureRef = useRef<HTMLSpanElement>(null);
 	const [width, setWidth] = useState<number>();
-	const label = typeof children === "string" ? children : null;
+	const label = isNativeText(children) ? children : null;
 	const cascade = label !== null && !reduce;
 
 	// Measure strings with the same per-letter layout as the cascade. Measuring
@@ -116,11 +117,7 @@ function TextSlot({ value, children }: { value: string; children: ReactNode }) {
 			>
 				{cascade
 					? label.split("").map((char, index) => (
-							<span
-								className="inline-block whitespace-pre"
-								// biome-ignore lint/suspicious/noArrayIndexKey: position is the slot identity.
-								key={index}
-							>
+							<span className="inline-block whitespace-pre" key={index}>
 								{char}
 							</span>
 						))
@@ -143,7 +140,6 @@ function TextSlot({ value, children }: { value: string; children: ReactNode }) {
 								<motion.span
 									className="inline-block whitespace-pre will-change-[opacity,filter,transform]"
 									custom={index * CASCADE_STAGGER}
-									// biome-ignore lint/suspicious/noArrayIndexKey: position is the slot identity.
 									key={index}
 									variants={CASCADE_LETTER_VARIANTS}
 								>
@@ -206,8 +202,7 @@ export const StatefulButton = forwardRef<
 				: state === "error"
 					? errorText
 					: children;
-	const textKey =
-		typeof stateText === "string" ? `${state}-${stateText}` : state;
+	const textKey = isNativeText(stateText) ? `${state}-${stateText}` : state;
 
 	return (
 		<Button

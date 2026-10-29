@@ -13,6 +13,7 @@
 
 import { Delete02Icon, PencilEdit01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { useEffect, useState } from "react";
@@ -25,15 +26,26 @@ import {
 } from "./shared/settings-items.tsx";
 
 export function SplitPresetSettings() {
+	const tl = useLiteralMessages();
 	const { presets, renamePreset, deletePreset, reload } = useSplitPresetStore();
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [draft, setDraft] = useState("");
 	const [confirmId, setConfirmId] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
 
 	const beginRename = (id: string, name: string) => {
+		setError(null);
 		setConfirmId(null);
 		setDraft(name);
 		setEditingId(id);
+	};
+	const cancelRename = () => {
+		setError(null);
+		setEditingId(null);
+	};
+	const cancelDelete = () => {
+		setError(null);
+		setConfirmId(null);
 	};
 
 	// Settings sync writes the collection straight into localStorage without
@@ -44,8 +56,19 @@ export function SplitPresetSettings() {
 	}, [reload]);
 
 	const commitRename = (id: string) => {
-		renamePreset(id, draft);
-		setEditingId(null);
+		const name = draft.trim();
+		if (!name) {
+			return;
+		}
+		try {
+			renamePreset(id, name);
+			setError(null);
+			setEditingId(null);
+		} catch {
+			setError(
+				"Could not rename this layout. Check available storage and try again."
+			);
+		}
 	};
 
 	return (
@@ -54,12 +77,17 @@ export function SplitPresetSettings() {
 			title="Pane layouts"
 		>
 			<SettingsGroup>
+				{error && (
+					<p className="text-destructive text-sm" role="alert">
+						{error}
+					</p>
+				)}
 				<SettingsItem
 					actions={
 						<span className="text-muted-foreground text-xs">
 							{presets.length === 0
 								? "None saved yet"
-								: `${presets.length} saved`}
+								: tl("{count} saved", { count: presets.length })}
 						</span>
 					}
 					settingsId="general.tabs.split-layout-presets"
@@ -71,24 +99,25 @@ export function SplitPresetSettings() {
 							editingId === preset.id || confirmId === preset.id ? null : (
 								<>
 									<Button
-										aria-label={`Rename ${preset.name}`}
+										aria-label={tl("Rename {name}", { name: preset.name })}
 										className="size-8"
 										onClick={() => beginRename(preset.id, preset.name)}
 										size="icon"
-										title={`Rename ${preset.name}`}
+										title={tl("Rename {name}", { name: preset.name })}
 										variant="ghost"
 									>
 										<HugeiconsIcon icon={PencilEdit01Icon} size={14} />
 									</Button>
 									<Button
-										aria-label={`Delete ${preset.name}`}
+										aria-label={tl("Delete {name}", { name: preset.name })}
 										className="size-8"
 										onClick={() => {
+											setError(null);
 											setEditingId(null);
 											setConfirmId(preset.id);
 										}}
 										size="icon"
-										title={`Delete ${preset.name}`}
+										title={tl("Delete {name}", { name: preset.name })}
 										variant="ghost"
 									>
 										<HugeiconsIcon icon={Delete02Icon} size={14} />
@@ -98,7 +127,7 @@ export function SplitPresetSettings() {
 						}
 						key={preset.id}
 						title={
-							/* biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/noNoninteractiveElementInteractions: the adjacent rename button remains keyboard accessible; double-click is the pointer shortcut for the same inline editor */
+							/* the adjacent rename button remains keyboard accessible; double-click is the pointer shortcut for the same inline editor */
 							<span
 								className="flex min-w-0 cursor-text flex-col"
 								onDoubleClick={(event) => {
@@ -107,7 +136,9 @@ export function SplitPresetSettings() {
 									beginRename(preset.id, preset.name);
 								}}
 							>
-								<span className="truncate">{preset.name}</span>
+								<span className="truncate" title={preset.name}>
+									{preset.name}
+								</span>
 								<span className="font-normal text-muted-foreground text-xs">
 									{presetSummary(preset)}
 								</span>
@@ -117,8 +148,8 @@ export function SplitPresetSettings() {
 						{editingId === preset.id && (
 							<div className="flex items-center gap-2">
 								<Input
-									aria-label={`New name for ${preset.name}`}
-									// biome-ignore lint/a11y/noAutofocus: the row turned into this field on request
+									aria-label={tl("New name for {name}", { name: preset.name })}
+									// the row turned into this field on request
 									autoFocus
 									className="h-8"
 									onChange={(e) => setDraft(e.target.value)}
@@ -127,23 +158,23 @@ export function SplitPresetSettings() {
 											commitRename(preset.id);
 										}
 										if (e.key === "Escape") {
-											setEditingId(null);
+											cancelRename();
 										}
 									}}
 									value={draft}
 								/>
 								<Button
-									className="h-8 px-3 text-xs"
 									disabled={!draft.trim()}
 									onClick={() => commitRename(preset.id)}
 									size="sm"
+									typography="compact"
 								>
 									Rename
 								</Button>
 								<Button
-									className="h-8 px-3 text-xs"
-									onClick={() => setEditingId(null)}
+									onClick={cancelRename}
 									size="sm"
+									typography="compact"
 									variant="ghost"
 								>
 									Cancel
@@ -153,23 +184,32 @@ export function SplitPresetSettings() {
 						{confirmId === preset.id && (
 							<div className="flex items-center gap-2">
 								<span className="flex-1 text-muted-foreground text-xs">
-									Delete “{preset.name}”? Panes already open are not affected.
+									{tl("Delete “{name}”? Panes already open are not affected.", {
+										name: preset.name,
+									})}
 								</span>
 								<Button
-									className="h-8 px-3 text-xs"
 									onClick={() => {
-										deletePreset(preset.id);
-										setConfirmId(null);
+										try {
+											deletePreset(preset.id);
+											setError(null);
+											setConfirmId(null);
+										} catch {
+											setError(
+												"Could not delete this layout. Check available storage and try again."
+											);
+										}
 									}}
 									size="sm"
+									typography="compact"
 									variant="destructive"
 								>
 									Delete
 								</Button>
 								<Button
-									className="h-8 px-3 text-xs"
-									onClick={() => setConfirmId(null)}
+									onClick={cancelDelete}
 									size="sm"
+									typography="compact"
 									variant="ghost"
 								>
 									Cancel

@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/crm",
   "name": "Harbor",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Productivity",
   "description": "A CRM that starts as a data model rather than a fixed set of screens. Harbor ships the five objects every pipeline needs — companies, people, deals, notes, tasks — and then gets out of the way: add your own objects, give any of them typed fields (currency, status, rating, multi-select, or a relation to another object), and every view, filter, board, and report picks them up without a migration or a settings trip. Records are validated value bags, so a `stage` that used to be free text can become a status field with colours and the old rows keep working. Relations are materialised as real edges in both directions, which is why a company page can show its people, its open deals, and every note anyone wrote against any of them without you modelling the reverse side. Each record carries one unified timeline — notes, calls, meetings, tasks, and the field and stage changes the store writes itself — so \"what happened with this account\" is one read, not four. CSV import is a first-class flow, not an afterthought: drop a file, see inferred columns with sampled values, map each to an existing field or make a new one, pick a dedupe key, then read a dry run that tells you exactly how many rows would be created, updated, and skipped before anything is written. Duplicates get found and merged field by field, with activities, list memberships, and relation edges reparented onto the survivor. Everything lives in one SQLite database the node owns, indexed with FTS5 for search, and the whole app runs as a sidecar process reached over loopback — no cloud tenant, no seat count, and no third party holding your pipeline.",
@@ -307,6 +307,7 @@
       },
       "port": 8009,
       "health_path": "/health",
+      "host_api": { "grants": ["crypto:seal"] },
       "http": {
         "mount": "/api/crm",
         "public_mount": "/api/crm",
@@ -429,19 +430,6 @@
     }
   ],
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "crm.chat",
-        "title": "Harbor widget",
-        "description": "Harbor chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["harbor widget"],
-        "examples": ["Show me a harbor widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "dock_panels": [
       {
         "id": "crm",

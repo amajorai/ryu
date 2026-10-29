@@ -1,8 +1,8 @@
-/// <reference path="../../../island/src/preload/island.d.ts" />
-import { ContextPill } from "@ryu/blocks/island/context-pill";
+import { ContextPill } from "@ryu/blocks/island/context-pill.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import type {} from "../../../island/src/preload/island.d.ts";
 import { SidecarStatus } from "../../../island/src/renderer/components/SidecarStatus.tsx";
 import { useActiveContext } from "../../../island/src/renderer/hooks/use-active-context.ts";
 import type { ConsentState } from "../../../island/src/shared/ipc.ts";

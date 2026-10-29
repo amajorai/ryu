@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/AnalyticsInspector.tsx",
+    "src/components/settings/shared/CopyableId.tsx",
+    "src/components/settings/DeferredSettingsDialog.tsx",
+    "src/components/settings/RyuAppsTab.tsx",
+    "src/components/settings/ServicesOrgSwitcher.tsx",
+    "src/components/settings/unswept-a.test-support.ts",
+    "src/components/settings/AnalyticsInspector.coverage.test.tsx",
+    "src/components/settings/AnalyticsInspector.unconfigured.coverage.test.tsx",
+    "src/components/settings/CopyableId.coverage.test.tsx",
+    "src/components/settings/DeferredSettingsDialog.coverage.test.tsx",
+    "src/components/settings/RyuAppsTab.coverage.native-http.test.tsx",
+    "src/components/settings/ServicesOrgSwitcher.coverage.native-http.test.tsx",
+    "e2e/unswept-a-copyable-id.spec.ts",
+    "e2e/unswept-a-copyable-id.playwright.config.ts",
+    "e2e/harness/unswept-a-copyable-id.tsx",
+    "e2e/harness/vite.unswept-a-copyable-id.config.ts"
+  ]
+}

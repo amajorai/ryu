@@ -1,5 +1,5 @@
 import { createStepUpClient } from "@ryu/step-up";
-import { BACKEND_URL, TOKEN_KEY } from "./auth-client.ts";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 
 /**
  * The desktop app's step-up client.
@@ -15,7 +15,7 @@ import { BACKEND_URL, TOKEN_KEY } from "./auth-client.ts";
 export const stepUpClient = createStepUpClient({
 	baseUrl: BACKEND_URL,
 	headers: (): Record<string, string> => {
-		const token = localStorage.getItem(TOKEN_KEY);
+		const token = getActiveToken();
 		return token ? { Authorization: `Bearer ${token}` } : {};
 	},
 });

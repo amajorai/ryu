@@ -22,34 +22,41 @@ import {
 	type CreditLedgerRow,
 	CreditsView,
 } from "@ryu/blocks/desktop/credits.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { PlanBadge } from "@ryu/ui/components/plan-badge.tsx";
 import { formatMinorCurrency } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
-import { OrgBillingContext } from "@/src/components/billing/OrgBillingContext.tsx";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { CreditTransferCard } from "@/src/components/settings/CreditTransferCard.tsx";
-import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
 import {
-	CREDIT_LEDGER_REASONS,
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "@/src/components/settings/shared/settings-items.tsx";
+import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
+import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
+import {
 	CREDIT_PACKS,
 	type CreditPack,
-	type CreditsError,
+	CreditsError,
 	createTopup,
-	LEDGER_REASON_LABELS,
+	isCreditLedgerReason,
+	ledgerReasonLabel,
 	MAX_TOPUP_DOLLARS,
 	MIN_TOPUP_DOLLARS,
 } from "@/src/lib/api/credits.ts";
 import { formatDate, formatDateTime } from "@/src/lib/timezone.ts";
 
 /** A plan id → human label, for the included-pool line. */
-const PLAN_LABELS: Record<string, string> = {
-	"desktop-license": "Ryu Desktop",
-	pro: "Ryu Pro",
-	max: "Ryu Max",
-	teams: "Ryu Teams",
-};
+const PLAN_LABELS = new Map<string, string>([
+	["desktop-license", "Ryu Desktop"],
+	["pro", "Ryu Pro"],
+	["max", "Ryu Max"],
+	["teams", "Ryu Teams"],
+]);
 
 const LEDGER_PAGE_SIZE = 10;
 
@@ -68,14 +75,14 @@ const LEDGER_PAGE_SIZE = 10;
  * money: a grant against that pool is restricted to its own supply exactly like
  * every other grant.
  */
-const POOL_SPENDABLE_ON: Partial<Record<CreditPoolTier, string>> = {
-	free: "Fast, everyday models",
-	frontier: "The most capable models",
-};
+const POOL_SPENDABLE_ON = new Map<CreditPoolTier, string>([
+	["free", "Fast, everyday models"],
+	["frontier", "The most capable models"],
+]);
 
 function spendableOnForPool(poolId: string): string | undefined {
 	return isCreditPoolId(poolId)
-		? POOL_SPENDABLE_ON[CREDIT_POOLS[poolId].tier]
+		? POOL_SPENDABLE_ON.get(CREDIT_POOLS[poolId].tier)
 		: undefined;
 }
 
@@ -99,7 +106,31 @@ function formatExpiry(iso: string | null): string | null {
 /** Where a solo user goes to create or pick an organization. */
 const ORGANIZATIONS_URL = `${FRONTEND_URL.replace(/\/$/, "")}/organizations`;
 
+/**
+ * The organization these credits belong to, as one grouped settings row. Not
+ * the bordered `OrgBillingContext` banner: inside the Settings pane that read as
+ * a box above the cards instead of one of them.
+ */
+function BillingOrganizationSection({ caption }: { caption: string }) {
+	const { organization, plan } = useOrgBillingStatus();
+	return (
+		<SettingsSection caption={caption} title="Billing organization">
+			<SettingsGroup>
+				<SettingsItem
+					actions={<PlanBadge plan={plan} size="sm" />}
+					// User-controlled text, passed as a node so the settings formatter
+					// does not read braces in the name as placeholders.
+					title={
+						<span>{organization?.name ?? "No organization selected"}</span>
+					}
+				/>
+			</SettingsGroup>
+		</SettingsSection>
+	);
+}
+
 export default function CreditsPage() {
+	const tl = useLiteralMessages();
 	const {
 		wallet,
 		ledger,
@@ -133,15 +164,24 @@ export default function CreditsPage() {
 				const { url, quote } = topup;
 				await openExternal(url);
 				const feeNote = quote
-					? ` ${formatMinorCurrency(quote.faceCents)} credited, ${formatMinorCurrency(quote.feeCents)} deposit fee (${formatMinorCurrency(quote.chargeCents)} charged).`
+					? ` ${tl(
+							"{creditedAmount} credited, {depositFee} deposit fee ({chargedAmount} charged).",
+							{
+								creditedAmount: formatMinorCurrency(quote.faceCents),
+								depositFee: formatMinorCurrency(quote.feeCents),
+								chargedAmount: formatMinorCurrency(quote.chargeCents),
+							}
+						)}`
 					: "";
 				sileo.success({
 					title: "Opening checkout…",
-					description: `Complete payment in your browser.${feeNote} Your balance updates here once it clears.`,
+					description: tl(
+						"Complete payment in your browser.{feeNote} Your balance updates here once it clears.",
+						{ feeNote }
+					),
 				});
 			} catch (e) {
-				const isBilling =
-					e instanceof Error && (e as CreditsError).kind === "billing";
+				const isBilling = e instanceof CreditsError && e.kind === "billing";
 				if (isBilling) {
 					setBillingUnavailable(true);
 				}
@@ -155,7 +195,7 @@ export default function CreditsPage() {
 				setBusyPack(null);
 			}
 		},
-		[stepUp]
+		[stepUp, tl]
 	);
 
 	const handleCustomTopup = useCallback(() => {
@@ -166,21 +206,24 @@ export default function CreditsPage() {
 		}
 		if (dollars < MIN_TOPUP_DOLLARS || dollars > MAX_TOPUP_DOLLARS) {
 			sileo.error({
-				title: `Amount must be between $${MIN_TOPUP_DOLLARS} and $${MAX_TOPUP_DOLLARS}.`,
+				title: tl("Amount must be between {minAmount} and {maxAmount}.", {
+					minAmount: `$${MIN_TOPUP_DOLLARS}`,
+					maxAmount: `$${MAX_TOPUP_DOLLARS}`,
+				}),
 			});
 			return;
 		}
 		Promise.resolve(
 			startTopup({ amountCents: Math.round(dollars * 100) })
 		).catch(() => undefined);
-	}, [customAmount, startTopup]);
+	}, [customAmount, startTopup, tl]);
 
 	const pagedLedger = useMemo<CreditLedgerRow[]>(() => {
 		const start = safeLedgerPage * LEDGER_PAGE_SIZE;
 		return ledger.slice(start, start + LEDGER_PAGE_SIZE).map((entry) => ({
 			id: entry.id,
-			reasonLabel: LEDGER_REASON_LABELS[entry.reason] ?? entry.reason,
-			isCredit: CREDIT_LEDGER_REASONS.includes(entry.reason),
+			reasonLabel: ledgerReasonLabel(entry.reason) ?? entry.reason,
+			isCredit: isCreditLedgerReason(entry.reason),
 			delta: entry.delta,
 			balanceAfter: entry.balanceAfter,
 			createdAtLabel: formatDateTime(entry.createdAt, {
@@ -204,6 +247,7 @@ export default function CreditsPage() {
 	const grantPoolViews = useMemo<CreditGrantPoolView[]>(
 		() =>
 			grantPools.map((pool) => ({
+				expiresAt: pool.expiresAt,
 				id: pool.poolId ?? pool.label,
 				label: pool.label,
 				remainingMicroUsd: pool.remainingMicroUsd,
@@ -215,13 +259,11 @@ export default function CreditsPage() {
 	);
 
 	const noOrgMessage =
-		error !== null && (error as CreditsError).kind === "no_org"
-			? error.message
-			: null;
+		error !== null && error.kind === "no_org" ? error.message : null;
 
 	return (
-		<div className="space-y-4">
-			<OrgBillingContext description="Shared credits for managed inference, top-ups, and organization usage." />
+		<div className="space-y-6">
+			<BillingOrganizationSection caption="Shared credits for managed inference, top-ups, and organization usage." />
 			<CreditsView
 				authed={authed}
 				billingUnavailable={billingUnavailable}
@@ -235,7 +277,7 @@ export default function CreditsPage() {
 									entitlement.monthlyCreditPoolMicroUsd,
 								plan: entitlement.plan,
 								planLabel: entitlement.plan
-									? (PLAN_LABELS[entitlement.plan] ?? entitlement.plan)
+									? (PLAN_LABELS.get(entitlement.plan) ?? entitlement.plan)
 									: undefined,
 								seats: entitlement.seats,
 							}
@@ -268,7 +310,10 @@ export default function CreditsPage() {
 				}}
 				onTopupCustom={handleCustomTopup}
 				onTopupPack={(pack) => {
-					void startTopup({ pack: pack as CreditPack }).catch(() => undefined);
+					const selected = CREDIT_PACKS.find((candidate) => candidate === pack);
+					if (selected !== undefined) {
+						void startTopup({ pack: selected }).catch(() => undefined);
+					}
 				}}
 				packs={[...CREDIT_PACKS]}
 				totalPages={totalPages}
@@ -280,6 +325,7 @@ export default function CreditsPage() {
 								currency: wallet.currency,
 								providerAllocations: wallet.providerAllocations?.map(
 									(allocation) => ({
+										expiresAt: allocation.expiresAt,
 										expiresAtLabel: formatExpiry(allocation.expiresAt),
 										id: allocation.poolId,
 										isFreeProvider: allocation.isFreeProvider,

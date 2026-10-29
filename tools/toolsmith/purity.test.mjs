@@ -33,7 +33,7 @@ test("purity scan rejects every ambient nondeterminism source", () => {
 		["return require('fs');", "require()"],
 		["import x from 'y';\nreturn 1;", "import statement"],
 		["export const x = 1;\nreturn 1;", "export statement"],
-		["return Deno.env.get('HOME');", "the Deno global"],
+		["return childProcess.run('ls');", "the childProcess global"],
 	];
 	for (const [source, what] of bad) {
 		const violations = scanPurity(source);

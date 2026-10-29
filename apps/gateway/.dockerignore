@@ -1,6 +1,8 @@
-# Keep the Docker build context small + reproducible. The Rust build only needs
-# Cargo.toml, Cargo.lock, and src/. Everything below is either build output,
-# local state, or editor cruft that would bust the layer cache on every change.
+# NOT used by the supported image build. apps/gateway/Dockerfile is built with
+# the REPO ROOT as its context (`docker build -f apps/gateway/Dockerfile .`), so
+# the repo-root .dockerignore applies. apps/gateway alone cannot build: it has
+# path deps into crates/ and vendor/genai. This file only keeps local state and
+# build output out of an ad-hoc context rooted here.
 target/
 **/*.rs.bk
 *.pdb

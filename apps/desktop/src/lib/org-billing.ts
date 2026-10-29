@@ -1,4 +1,3 @@
-import type { PlanId } from "@ryu/auth/lib/plans";
 import type { PlanTier } from "@ryu/ui/components/plan-badge.tsx";
 import type { SubscriptionStatus } from "./api/billing.ts";
 
@@ -32,8 +31,6 @@ export function planTierForOrg(
 	) {
 		return null;
 	}
-	const plan = (status.plan ??
-		status.entitlement?.plan ??
-		null) as PlanId | null;
+	const plan = status.plan ?? status.entitlement?.plan ?? null;
 	return plan === "marketplace-membership" ? null : plan;
 }

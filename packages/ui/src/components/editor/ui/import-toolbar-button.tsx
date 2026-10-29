@@ -73,7 +73,7 @@ export function ImportToolbarButton(
 			const arrayBuffer = await plainFiles[0].arrayBuffer();
 			const result = await importDocx(editor, arrayBuffer);
 
-			editor.tf.insertNodes(result.nodes as typeof editor.children);
+			editor.tf.insertNodes(result.nodes);
 		},
 	});
 
@@ -88,7 +88,7 @@ export function ImportToolbarButton(
 			<DropdownMenuContent align="start">
 				<DropdownMenuGroup>
 					<DropdownMenuItem
-						onSelect={() => {
+						onClick={() => {
 							openHtmlFilePicker();
 						}}
 					>
@@ -96,7 +96,7 @@ export function ImportToolbarButton(
 					</DropdownMenuItem>
 
 					<DropdownMenuItem
-						onSelect={() => {
+						onClick={() => {
 							openMdFilePicker();
 						}}
 					>
@@ -104,7 +104,7 @@ export function ImportToolbarButton(
 					</DropdownMenuItem>
 
 					<DropdownMenuItem
-						onSelect={() => {
+						onClick={() => {
 							openDocxFilePicker();
 						}}
 					>

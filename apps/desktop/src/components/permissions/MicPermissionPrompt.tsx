@@ -4,9 +4,8 @@
 // ensureMicPermission() request/grant logic and adds a custom, in-app surface
 // instead of relying on the raw webview prompt:
 //
-//   - Windows: the in-page prompt is auto-accepted (additionalBrowserArgs in
-//     tauri.conf.json), so requesting either succeeds silently or throws when
-//     the OS-wide mic toggle is off. The "blocked" branch deep-links there.
+//   - Windows: the webview asks for microphone access; OS microphone privacy
+//     settings can also block it. The "blocked" branch deep-links there.
 //   - macOS: the request triggers the one-time TCC prompt (backed by
 //     NSMicrophoneUsageDescription); a prior denial deep-links to System
 //     Settings.
@@ -16,7 +15,7 @@
 
 import { Mic01Icon, Settings02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useCallback, useState } from "react";
 import { ensureMicPermission } from "@/src/lib/audio/devices.ts";
 import {

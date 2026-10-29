@@ -36,4 +36,6 @@ export default defineConfig({
 		port: Number(process.env.RYU_E2E_PORT ?? "5182"),
 		strictPort: true,
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

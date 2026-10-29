@@ -1,216 +1,151 @@
 //! Managed child process for the Ghost sidecar (MCP stdio server).
 
 use std::path::PathBuf;
-use std::process::Stdio;
-use std::time::Duration;
 
 use anyhow::Result;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 
-use crate::win_process::NoWindow;
+use crate::sidecar::tools::supervised_child::SupervisedChild;
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
 fn ghost_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".ghost")
+    super::data_dir()
 }
 
 fn pid_path() -> PathBuf {
     ghost_dir().join("ghost.pid")
 }
 
-// ── ProcessState ───────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ProcessState {
-    Starting,
-    Running,
-    Stopping,
-    Stopped,
-    Failed(String),
-}
-
 // ── GhostProcess ───────────────────────────────────────────────────────────────
 
 pub struct GhostProcess {
-    child: Option<Child>,
+    child: SupervisedChild,
     binary_path: PathBuf,
-    pid_path: PathBuf,
-    state: ProcessState,
-    /// Handles for stdout/stderr forwarding tasks.
-    log_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl GhostProcess {
     pub fn new(binary_path: PathBuf) -> Self {
         Self {
-            child: None,
+            child: SupervisedChild::new("ghost", pid_path()),
             binary_path,
-            pid_path: pid_path(),
-            state: ProcessState::Stopped,
-            log_tasks: Vec::new(),
         }
     }
 
     /// Spawn `ghost mcp` and begin forwarding its stdio to tracing.
     pub async fn start(&mut self) -> Result<()> {
-        self.cleanup_orphan().await;
-        self.state = ProcessState::Starting;
+        self.child.begin_start(&self.binary_path).await;
 
         let mut command = Command::new(&self.binary_path);
+        command.args(["mcp"]);
+        // Ghost's state lives in the profile-aware data dir: `services/ghost` (also
+        // its working dir) and `models/vision/ghost`, so a dev and a release Ghost
+        // keep their own recipes. Ghost reads both env vars (`ghost_core::paths`).
+        let data_dir = ghost_dir();
+        tokio::fs::create_dir_all(&data_dir).await?;
         command
-            .args(["mcp"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(false)
-            .no_window();
-        // Isolate Ghost's recipe/model state per profile (`~/.ryu{profile}/ghost`
-        // instead of the shared `~/.ghost`), so a dev and a release Ghost keep their
-        // own recipes. Ghost reads `GHOST_DATA_DIR` (crates/ghost recipe store); BYO wins.
-        if std::env::var_os("GHOST_DATA_DIR").is_none() {
-            command.env("GHOST_DATA_DIR", crate::paths::ryu_dir().join("ghost"));
-        }
-        let mut child = command.spawn()?;
-
-        // Write PID file so we can recover from a crash on next start.
-        if let Some(pid) = child.id() {
-            tokio::fs::write(&self.pid_path, pid.to_string()).await?;
+            .current_dir(&data_dir)
+            .env("RYU_DIR", crate::paths::ryu_dir())
+            .env("GHOST_DATA_DIR", &data_dir)
+            .env("GHOST_MODELS_DIR", super::models_dir());
+        // Ghost's own component subkey (HKDF of the master key, never the master
+        // key). Ghost captures it into memory before any thread starts and never
+        // forwards it to a child.
+        if let Err(error) = apply_seal_env(&mut command) {
+            tracing::warn!("ghost: no seal key for the child ({error})");
         }
 
-        // Forward stdout → tracing::info
-        if let Some(stdout) = child.stdout.take() {
-            let handle = tokio::spawn(async move {
-                let mut lines = BufReader::new(stdout).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::info!(target: "ghost", "{line}");
-                }
-            });
-            self.log_tasks.push(handle);
-        }
-
-        // Forward stderr → tracing::warn
-        if let Some(stderr) = child.stderr.take() {
-            let handle = tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::warn!(target: "ghost", "{line}");
-                }
-            });
-            self.log_tasks.push(handle);
-        }
-
-        self.child = Some(child);
-        self.state = ProcessState::Running;
-        Ok(())
+        self.child
+            .spawn(
+                &mut command,
+                |line| tracing::info!(target: "ghost", "{line}"),
+                |line| tracing::warn!(target: "ghost", "{line}"),
+            )
+            .await
     }
 
     /// Gracefully stop the process: SIGTERM → 5 s wait → SIGKILL.
     pub async fn stop(&mut self) -> Result<()> {
-        if self.child.is_none() {
-            return Ok(());
-        }
-        self.state = ProcessState::Stopping;
-
-        // Abort log forwarding tasks first.
-        for handle in self.log_tasks.drain(..) {
-            handle.abort();
-        }
-
-        let child = self.child.as_mut().unwrap();
-
-        // Send graceful termination signal.
-        #[cfg(unix)]
-        if let Some(raw_pid) = child.id() {
-            use nix::sys::signal::{kill, Signal};
-            use nix::unistd::Pid;
-            let _ = kill(Pid::from_raw(raw_pid as i32), Signal::SIGTERM);
-        }
-
-        #[cfg(windows)]
-        {
-            let _ = child.kill().await;
-        }
-
-        // Wait up to 5 s for the process to exit; force-kill on timeout.
-        let child = self.child.as_mut().unwrap();
-        match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
-            Ok(_) => {}
-            Err(_) => {
-                tracing::warn!("ghost did not exit within 5 s — sending SIGKILL");
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-            }
-        }
-
-        let _ = tokio::fs::remove_file(&self.pid_path).await;
-        self.state = ProcessState::Stopped;
-        self.child = None;
-        Ok(())
+        self.child.stop().await
     }
 
     /// Returns true if the child process is still alive.
     pub fn is_running(&mut self) -> bool {
-        let Some(child) = self.child.as_mut() else {
-            return false;
-        };
-        match child.try_wait() {
-            Ok(None) => true,
-            _ => {
-                self.state = ProcessState::Stopped;
-                self.child = None;
-                false
-            }
-        }
+        self.child.is_running()
     }
+}
 
-    /// Kill any leftover process whose PID is recorded in the PID file.
-    pub async fn cleanup_orphan(&self) {
-        let Ok(content) = tokio::fs::read_to_string(&self.pid_path).await else {
-            return;
-        };
-        let Ok(pid) = content.trim().parse::<i32>() else {
-            return;
-        };
-
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::{kill, Signal};
-            use nix::unistd::Pid;
-            let nix_pid = Pid::from_raw(pid);
-            let _ = kill(nix_pid, Signal::SIGTERM);
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            let _ = kill(nix_pid, Signal::SIGKILL);
-        }
-
-        #[cfg(windows)]
-        {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/PID", &pid.to_string()])
-                .no_window()
-                .output();
-        }
+/// Give the ghost child its component subkey and nothing else: every
+/// key-carrying variable inherited from Core (`RYU_MASTER_KEY` above all) is
+/// removed first, so the child's initial environment block, which stays in
+/// `/proc/<pid>/environ` whatever it later unsets, never holds the master key.
+fn apply_seal_env(command: &mut Command) -> anyhow::Result<()> {
+    for name in ryu_crypto::SEAL_ENV_VARS {
+        command.env_remove(name);
     }
+    command.envs(ryu_crypto::component_child_env(
+        ryu_crypto::components::GHOST,
+    )?);
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sidecar::tools::supervised_child::ProcessState;
+
+    /// Core keeps `RYU_MASTER_KEY` in its own environment (headless setups);
+    /// the ghost child must start with that variable removed and only its
+    /// component subkey and scope set.
+    #[test]
+    fn child_env_drops_the_master_key_and_carries_only_the_subkey() {
+        crate::server::gateway_seal_test_key();
+        let master = std::env::var("RYU_MASTER_KEY").expect("test master key set");
+        let mut command = Command::new("/bin/true");
+        apply_seal_env(&mut command).expect("a key is available");
+        let envs: std::collections::HashMap<_, _> = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            envs.get("RYU_MASTER_KEY"),
+            Some(&None),
+            "RYU_MASTER_KEY must be removed from the child"
+        );
+        assert_eq!(
+            envs.get("RYU_SEAL_SCOPE"),
+            Some(&Some("component:ghost".to_owned()))
+        );
+        let subkey = envs
+            .get("RYU_SEAL_KEY")
+            .cloned()
+            .flatten()
+            .expect("subkey delivered");
+        assert_ne!(subkey, master);
+        assert!(envs
+            .values()
+            .flatten()
+            .all(|value| !value.contains(&master)));
+    }
 
     // NOTE: these cover only the pure state-machine defaults and path helpers.
-    // `start`/`stop`/`cleanup_orphan` are deliberately NOT exercised — they spawn
-    // or signal real processes (cleanup_orphan would `taskkill`/SIGKILL a PID read
-    // from disk), which a unit test must never do.
+    // `start`/`stop` are deliberately NOT exercised — they spawn or signal real
+    // processes, which a unit test must never do. The orphan identity checks are
+    // covered in `sidecar::tools::orphan`.
 
     #[test]
     fn new_starts_in_stopped_state_with_no_child() {
         let mut proc = GhostProcess::new(PathBuf::from("/bin/ghost"));
-        assert_eq!(proc.state, ProcessState::Stopped);
+        assert_eq!(proc.child.state(), &ProcessState::Stopped);
         // No child was spawned, so it is not running and the state is unchanged.
         assert!(!proc.is_running());
-        assert_eq!(proc.state, ProcessState::Stopped);
+        assert_eq!(proc.child.state(), &ProcessState::Stopped);
     }
 
     #[test]
@@ -218,20 +153,6 @@ mod tests {
         let path = pid_path();
         assert!(path.ends_with("ghost.pid"));
         assert_eq!(path.parent().unwrap(), ghost_dir());
-        assert!(ghost_dir().ends_with(".ghost"));
-    }
-
-    #[test]
-    fn process_state_equality_and_failed_payload() {
-        assert_eq!(ProcessState::Running, ProcessState::Running);
-        assert_ne!(ProcessState::Running, ProcessState::Stopped);
-        assert_eq!(
-            ProcessState::Failed("boom".to_string()),
-            ProcessState::Failed("boom".to_string())
-        );
-        assert_ne!(
-            ProcessState::Failed("a".to_string()),
-            ProcessState::Failed("b".to_string())
-        );
+        assert!(ghost_dir().ends_with("services/ghost"));
     }
 }

@@ -4,7 +4,7 @@ import {
 	ColorPicker,
 	ColorPickerContent,
 	ColorPickerPanel,
-} from "@ryu/ui/components/color-picker";
+} from "@ryu/ui/components/color-picker.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -18,6 +18,7 @@ import {
 	useEditorSelector,
 } from "platejs/react";
 import React from "react";
+import { isNativeText } from "../../../lib/native-primitive-observation.ts";
 
 import { ToolbarButton, ToolbarMenuGroup } from "./toolbar.tsx";
 
@@ -26,12 +27,11 @@ function getEditorColorMarks(editor: PlateEditor, nodeType: string): string[] {
 	for (const [node] of editor.api.nodes({
 		at: [],
 		match: (candidate) =>
-			"text" in candidate &&
-			typeof (candidate as Record<string, unknown>)[nodeType] === "string",
+			"text" in candidate && isNativeText(candidate[nodeType]),
 		mode: "all",
 	})) {
-		const value = (node as Record<string, unknown>)[nodeType];
-		if (typeof value === "string") {
+		const value = node[nodeType];
+		if (isNativeText(value)) {
 			colors.add(value);
 		}
 	}
@@ -55,7 +55,11 @@ export function FontColorToolbarButton({
 	);
 
 	const color = useEditorSelector(
-		(editor) => editor.api.mark(nodeType) as string,
+		(editor) => {
+			const mark = editor.api.mark(nodeType);
+			// Only string marks are valid ColorPicker input; malformed marks are absent.
+			return isNativeText(mark) ? mark : undefined;
+		},
 		[nodeType]
 	);
 

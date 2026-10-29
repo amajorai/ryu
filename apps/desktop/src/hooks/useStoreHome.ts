@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/hooks/useStoreHome.ts
 //
 // The data behind the Store's "Home" tab — an app-store landing feed that pulls
@@ -22,15 +24,20 @@
 // Query — reusing the sections' query keys where they exist so the cache dedupes.
 
 import {
+	fitBlockReason,
+	isBlockedFit,
+	isBlockedRepoFit,
+} from "@ryu/blocks/desktop/model-fit.ts";
+import {
 	type NormalizedRecommendations,
 	normalizeRecommendations,
-	type RecommendationWire,
 } from "@ryu/marketplace/catalog/recommendations";
 import {
 	ALL_SKILL_SOURCES_ID,
 	type CardDither,
 } from "@ryu/marketplace/catalog/types";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { type QueryKey, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import { fetchAgentCatalog, installAgent } from "@/src/lib/api/agents.ts";
@@ -41,6 +48,8 @@ import {
 } from "@/src/lib/api/gateway.ts";
 import { installMcpServer, searchMcpCatalog } from "@/src/lib/api/mcp.ts";
 import {
+	fetchModelDetail,
+	installModelFile,
 	installModelSnapshot,
 	type ModelFormat,
 	searchModels,
@@ -52,9 +61,58 @@ import {
 	installPluginFromCatalog,
 } from "@/src/lib/api/plugins.ts";
 import { searchSkills } from "@/src/lib/api/skills.ts";
+import { pickRecommendedQuant } from "@/src/lib/deep-link.ts";
 import { beginInstall, endInstall } from "@/src/store/useInstallStore.ts";
 import { useActiveNode } from "./useActiveNode.ts";
+import { useStoreListingAllowed } from "./useFeatureFlag.ts";
 import type { StoreSearchRealm } from "./useStoreSearch.ts";
+
+/**
+ * The Home one-click model add. Fit is computed by the Core node that serves
+ * the request: GGUF picks the best quant that is NOT blocked (`too_big` /
+ * `no_space`), and a snapshot respects its repo verdict. When nothing fits it
+ * throws the plain-language reason instead of starting a download Core would
+ * refuse (or that could exhaust the machine's memory or disk).
+ */
+async function addModelFromHome(
+	modelTarget: ApiTarget,
+	card: HomeCard
+): Promise<void> {
+	const format = card.modelFormat ?? "gguf";
+	const detail = await fetchModelDetail(modelTarget, card.id, format);
+	if (format !== "gguf") {
+		if (isBlockedRepoFit(detail.repoFit, detail.device)) {
+			throw new Error(
+				fitBlockReason(detail.repoFit, detail.repoFitLabel, detail.device) ??
+					`${card.name} won't fit on this device.`
+			);
+		}
+		await installModelSnapshot(modelTarget, card.id, format);
+		return;
+	}
+	const file = pickRecommendedQuant(
+		detail.files.filter((candidate) => !candidate.installed)
+	);
+	if (!file) {
+		throw new Error(`No available GGUF file for ${card.id}`);
+	}
+	// The shared ranking puts blocked quants last, so a blocked pick means no
+	// quant of this model fits this device.
+	if (isBlockedFit(file.fit)) {
+		throw new Error(
+			fitBlockReason(file.fit, file.fitLabel, detail.device) ??
+				`${card.name} won't fit on this device.`
+		);
+	}
+	await installModelFile(modelTarget, card.id, file.filename);
+}
+
+const wireResponseSchema = z.looseObject({
+	cadence: z.string().optional(),
+	enabled: z.boolean().optional(),
+	hidden: z.boolean().optional(),
+	items: gatewayJsonValueSchema.optional(),
+});
 
 // Each home row is a browse teaser, not the full list — the realm's own tab is
 // where you go for depth ("See all" carries you there).
@@ -137,6 +195,9 @@ export function useStoreHome(): UseStoreHomeResult {
 		[activeNode.url, activeNode.token, activeNode.userJwt]
 	);
 	const { url, token, userJwt } = target;
+	// The same rollout discovery gate the Apps tab applies, on every Home path
+	// that lists catalog entries (the Apps/Plugins rows and For you).
+	const listingAllowed = useStoreListingAllowed();
 
 	// Node realms — Core (:7980). Each uses the realm's default ranking with no
 	// query, which is exactly the "browse the best of this realm" feed we want.
@@ -219,9 +280,11 @@ export function useStoreHome(): UseStoreHomeResult {
 			() => ({
 				queryKey: ["store-home", "recommendations", url],
 				queryFn: async () => {
-					const wire = await request<RecommendationWire>(
+					const wire = await request(
 						target,
-						"/api/marketplace/recommendations"
+						"/api/marketplace/recommendations",
+						undefined,
+						wireResponseSchema
 					);
 					return normalizeRecommendations(wire);
 				},
@@ -241,10 +304,11 @@ export function useStoreHome(): UseStoreHomeResult {
 		recommendationsQuery.data ?? normalizeRecommendations(undefined);
 	const refreshRecommendations = useCallback(async () => {
 		try {
-			await request<RecommendationWire>(
+			await request(
 				target,
 				"/api/marketplace/recommendations?refresh=true",
-				{ method: "POST" }
+				{ method: "POST" },
+				wireResponseSchema
 			);
 			await qc.invalidateQueries({
 				queryKey: ["store-home", "recommendations", url],
@@ -256,10 +320,15 @@ export function useStoreHome(): UseStoreHomeResult {
 	const setRecommendationHidden = useCallback(
 		async (hidden: boolean) => {
 			try {
-				await request(target, "/api/marketplace/recommendations/preference", {
-					body: { hidden },
-					method: "PUT",
-				});
+				await request(
+					target,
+					"/api/marketplace/recommendations/preference",
+					{
+						body: { hidden },
+						method: "PUT",
+					},
+					gatewayJsonValueSchema
+				);
 				await qc.invalidateQueries({
 					queryKey: ["store-home", "recommendations", url],
 				});
@@ -289,7 +358,11 @@ export function useStoreHome(): UseStoreHomeResult {
 		[qc, recommendationData.enabled, target, url]
 	);
 	const runAdd = useCallback(
-		async (id: string, call: () => Promise<unknown>, keys: unknown[][]) => {
+		async <TCall extends () => ReturnType<typeof Promise.resolve>>(
+			id: string,
+			call: TCall,
+			keys: QueryKey[]
+		) => {
 			beginInstall(id);
 			try {
 				await call();
@@ -332,7 +405,9 @@ export function useStoreHome(): UseStoreHomeResult {
 					() =>
 						installCatalogSkill({
 							id: card.id,
+							name: card.name,
 							source: card.registryId ?? undefined,
+							target,
 						}),
 					[["store-home", "skills", url], ["skills"]]
 				),
@@ -350,15 +425,22 @@ export function useStoreHome(): UseStoreHomeResult {
 				runAdd(
 					card.id,
 					() =>
-						installModelSnapshot(
-							{ url, token, userJwt },
-							card.id,
-							card.modelFormat ?? "gguf"
+						addModelFromHome({ url, token, userJwt }, card).catch(
+							(err: unknown) => {
+								// Home has no detail panel to explain a refusal, so the model
+								// realm surfaces it (including Core's 422 "won't fit").
+								toast.error({
+									title: `Couldn't add ${card.name}`,
+									description:
+										err instanceof Error ? err.message : "The add failed.",
+								});
+								throw err;
+							}
 						),
 					[["store-home", "models", url], ["models"]]
 				),
 		};
-	}, [installCatalogSkill, runAdd, url, token, userJwt]);
+	}, [installCatalogSkill, runAdd, target, url, token, userJwt]);
 
 	const rows = useMemo<HomeRow[]>(() => {
 		const result: HomeRow[] = [];
@@ -442,11 +524,13 @@ export function useStoreHome(): UseStoreHomeResult {
 		// One catalog fetch, split into the "Apps" vs "Plugins" rows the same way
 		// the Store's two sections do: prefer the explicit `type` discriminator,
 		// fall back to the legacy "ships a Companion" derivation for older wires.
-		const catalog = appsQuery.data ?? [];
 		const installedIds = new Set(
 			(appsInstalledQuery.data ?? [])
 				.filter((a) => a.installed)
 				.map((a) => a.id)
+		);
+		const catalog = (appsQuery.data ?? []).filter((e) =>
+			listingAllowed({ id: e.id, installed: installedIds.has(e.id) })
 		);
 		const isApp = (e: (typeof catalog)[number]) =>
 			e.type ? e.type === "app" : e.kinds.includes("companion");
@@ -518,6 +602,7 @@ export function useStoreHome(): UseStoreHomeResult {
 		appsInstalledQuery.data,
 		mcpQuery.data,
 		addByRealm,
+		listingAllowed,
 	]);
 
 	const loading =
@@ -528,7 +613,14 @@ export function useStoreHome(): UseStoreHomeResult {
 		agentsQuery.isLoading;
 
 	const forYou: StoreForYou = {
-		data: recommendationData,
+		data: {
+			...recommendationData,
+			items: recommendationData.items.filter(
+				(item) =>
+					(item.kind !== "app" && item.kind !== "plugin") ||
+					listingAllowed(item)
+			),
+		},
 		loading: recommendationsQuery.isLoading,
 		onCadenceChange: (cadence) => {
 			void setRecommendationCadence(cadence);

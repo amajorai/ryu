@@ -1,13 +1,24 @@
 mod app_icons;
 mod app_update;
+mod cli_setup;
+mod clips_quick_attach;
+mod cloud_environment_import;
 mod core;
+mod deep_link_profile;
+mod desktop_seal;
+mod distribution;
 mod hardware;
+mod hardware_acceleration;
 mod identifier_migration;
+mod installer_retention;
 mod keep_awake;
 mod midnight_wipe;
 mod nodes;
+mod os_notifications;
 mod permissions;
+mod plugin_file_resource;
 mod profile;
+mod projectless_task_folder;
 mod quick_capture;
 mod secrets;
 mod shadow_auth;
@@ -15,9 +26,13 @@ mod standalone;
 mod startup;
 mod tab_transfer;
 mod tray;
+mod update_handoff;
+mod update_install_worker;
+mod update_recovery;
 mod update_schedule;
 mod win_process;
 mod window_registry;
+mod workspace_move;
 use std::sync::Mutex;
 
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -26,6 +41,15 @@ use tauri_plugin_decorum::WebviewWindowExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
 use crate::core::process::RyuCoreProcess;
+
+/// Release gate for Island, the Electron companion overlay (loopback :7989).
+///
+/// Island is not part of the current release. While this is `false` the bundle
+/// is still kept installed and current (see the setup hook), but it is never
+/// autostarted and the tray "Show/Hide Companion" item is not shown. The webview
+/// side has the matching `ISLAND_ENABLED` in
+/// `apps/desktop/src/lib/island-availability.ts`; flip both together.
+pub(crate) const ISLAND_ENABLED: bool = false;
 
 /// Restore the macOS native title-bar buttons for the transparent shell.
 ///
@@ -132,6 +156,18 @@ fn apply_macos_vibrancy<R: tauri::Runtime>(window: &tauri::Window<R>) {
     }
 }
 
+/// The webview's content keys for one of its own stores (Yjs snapshots, sealed
+/// localStorage values), derived from the desktop key: the current key plus the
+/// keys derived from desktop keys the app used earlier, which only open. See
+/// `desktop_seal::webview_content_key`. Keychain access may block, so it runs
+/// off the async runtime.
+#[tauri::command]
+async fn desktop_content_key(store: String) -> Result<desktop_seal::WebviewContentKeys, String> {
+    tokio::task::spawn_blocking(move || desktop_seal::webview_content_key(&store))
+        .await
+        .map_err(|error| format!("The desktop encryption key is unavailable: {error}"))?
+}
+
 /// Match the native backdrop to the one visible CSS window silhouette.
 #[tauri::command]
 fn set_window_corner_radius(window: tauri::Window, radius: f64) -> Result<(), String> {
@@ -179,9 +215,11 @@ fn macos_titlebar_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 struct CoreState {
     process: Mutex<Option<RyuCoreProcess>>,
+    operation: tokio::sync::Mutex<()>,
 }
 
-/// Stop the managed `ryu-core` child, if one is running.
+/// Finish Desktop's Core lifecycle: stop packaged runtimes and detach local dev
+/// runtimes so a native rebuild cannot interrupt their active turns.
 ///
 /// Exists because the tray's Quit is now the ONLY path that reliably ends the
 /// app: with "stay in tray on close" on by default, closing the window no longer
@@ -190,7 +228,7 @@ struct CoreState {
 /// leave it holding its port, which this repo has already paid for once (a stale
 /// Core squatting 8980 with a pile of hung probes).
 ///
-/// Idempotent: `try_stop` runs against an `Option` that the Destroyed arm may
+/// Idempotent: `exit_desktop` runs against an `Option` that the Destroyed arm may
 /// also have taken, so calling both is safe.
 pub(crate) fn stop_managed_core<R: tauri::Runtime, M: Manager<R>>(app: &M) {
     let state = app.state::<CoreState>();
@@ -199,7 +237,7 @@ pub(crate) fn stop_managed_core<R: tauri::Runtime, M: Manager<R>>(app: &M) {
         Err(_) => return,
     };
     if let Some(ref mut process) = *guard {
-        if let Err(e) = process.try_stop() {
+        if let Err(e) = process.exit_desktop() {
             tracing::error!("Failed to stop Ryu Core on quit: {}", e);
         }
     }
@@ -221,7 +259,7 @@ fn resolve_core_binary() -> Option<std::path::PathBuf> {
         .filter(|p| p.exists())
         // 2. ~/.ryu{profile}/bin (installed) — profile-aware so a dev app resolves its
         //    OWN binary under ~/.ryu-dev/bin, never the release app's ~/.ryu/bin exe.
-        .or_else(|| Some(profile::ryu_home_dir().join("bin").join(bin_name)).filter(|p| p.exists()))
+        .or_else(crate::core::install::managed_core_path)
         // 3. PATH — but never another profile's installed binary. Installers put
         //    `~/.ryu/bin` AND `~/.ryu-dev/bin` on PATH, so a dev profile whose own
         //    `~/.ryu-dev/bin/ryu-core` is missing would otherwise fall through to the
@@ -231,6 +269,11 @@ fn resolve_core_binary() -> Option<std::path::PathBuf> {
         //    same hit, so the missing binary is downloaded rather than left unresolved.
         .or_else(|| {
             let hit = which::which(bin_name.strip_suffix(".exe").unwrap_or(bin_name)).ok()?;
+            if hit.starts_with(ryu_sidecar_runtime::layout::bin_dir(
+                &profile::ryu_home_dir(),
+            )) {
+                return None;
+            }
             if profile::is_foreign_profile_bin(&hit) {
                 tracing::warn!(
                     "ignoring {} on PATH — it belongs to another Ryu profile, not {}",
@@ -268,7 +311,17 @@ fn resolve_core_binary() -> Option<std::path::PathBuf> {
 }
 
 #[tauri::command]
-async fn start_ryu_core(state: tauri::State<'_, CoreState>) -> Result<String, String> {
+async fn start_ryu_core(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CoreState>,
+) -> Result<String, String> {
+    let _operation = state.operation.lock().await;
+    if crate::app_update::runtime_update_in_progress() {
+        return Err(
+            "Ryu is installing an app update; the local runtime will start after restart"
+                .to_owned(),
+        );
+    }
     // Check if we already have a running process we own
     {
         let mut guard = state.process.lock().map_err(|e| e.to_string())?;
@@ -302,7 +355,7 @@ async fn start_ryu_core(state: tauri::State<'_, CoreState>) -> Result<String, St
     };
 
     // Create new process manager
-    let mut process = RyuCoreProcess::new(binary);
+    let mut process = RyuCoreProcess::new_for_app(&app, binary);
 
     // Start the process (will connect to existing instance if already running)
     match process.start().await {
@@ -328,6 +381,9 @@ async fn start_ryu_core(state: tauri::State<'_, CoreState>) -> Result<String, St
 /// if missing. Returns the binary path. A no-op in dev (turbo owns the binary).
 #[tauri::command]
 async fn ensure_core_installed(app: tauri::AppHandle) -> Result<String, String> {
+    if crate::app_update::runtime_update_in_progress() {
+        return Err("Ryu is installing an app update; wait for the restart".to_owned());
+    }
     #[cfg(debug_assertions)]
     {
         let _ = app;
@@ -344,7 +400,7 @@ async fn ensure_core_installed(app: tauri::AppHandle) -> Result<String, String> 
     }
 }
 
-/// Ensure the Island Electron companion is installed under `~/.ryu/island/`, then
+/// Ensure the Island Electron companion is installed under `<data dir>/bin/island/`, then
 /// launch it, returning the launched bundle path. Dev is a no-op (`"dev"`): turbo
 /// owns Island in development (`bun run dev` starts electron-vite), so downloading a
 /// release build would fight it — same `debug_assertions` gate as
@@ -382,7 +438,7 @@ async fn get_ryu_status() -> String {
     }
 }
 
-// ── Safe Mode sentinel (`~/.ryu<suffix>/safe-mode`) ──────────────────────────
+// ── Safe Mode sentinel (`<data dir>/state/safe-mode`) ──────────────────────────
 //
 // Core owns Safe Mode and normally the desktop drives it over `PUT /api/safe-mode`.
 // These two commands exist for the case that motivates the feature: a Core that
@@ -395,7 +451,7 @@ async fn get_ryu_status() -> String {
 // never reaches into the release node's `~/.ryu`.
 
 fn safe_mode_sentinel_path() -> std::path::PathBuf {
-    profile::ryu_home_dir().join("safe-mode")
+    ryu_sidecar_runtime::layout::state_path(&profile::ryu_home_dir(), "safe-mode")
 }
 
 /// Whether the next Core boot will enter Safe Mode because of the sentinel.
@@ -434,6 +490,10 @@ async fn set_safe_mode_sentinel(enabled: bool) -> Result<bool, String> {
 
 #[tauri::command]
 async fn stop_ryu_core(state: tauri::State<'_, CoreState>) -> Result<(), String> {
+    let _operation = state.operation.lock().await;
+    if crate::app_update::runtime_update_in_progress() {
+        return Err("Ryu is installing an app update; wait for the restart".to_owned());
+    }
     // Extract the process from the state to avoid holding lock across await
     let process = {
         let mut guard = state.process.lock().map_err(|e| e.to_string())?;
@@ -444,10 +504,13 @@ async fn stop_ryu_core(state: tauri::State<'_, CoreState>) -> Result<(), String>
     // and by profile port, which is what makes reset work against turbo-owned Core.
     let mut process =
         process.unwrap_or_else(|| RyuCoreProcess::new(std::path::PathBuf::from("ryu-core")));
-    process
-        .stop()
-        .await
-        .map_err(|e| format!("Failed to stop Ryu Core: {}", e))?;
+    if let Err(error) = process.stop().await {
+        // A failed stop can leave a verified execution host alive. Retain the
+        // manager and its ownership evidence so status and retry remain honest.
+        let mut guard = state.process.lock().map_err(|e| e.to_string())?;
+        *guard = Some(process);
+        return Err(format!("Failed to stop Ryu Core: {error}"));
+    }
 
     Ok(())
 }
@@ -470,13 +533,33 @@ fn get_ryu_core_url() -> String {
 struct BuildProfile {
     dev: bool,
     profile: String,
+    #[serde(rename = "deepLinkProfile")]
+    deep_link_profile: Option<String>,
+}
+
+/// Launch flag that boots the window into the default chat, whatever
+/// interface was last open (a recovery path for a stuck interface).
+pub(crate) const RESET_INTERFACE_ARG: &str = "--reset-interface";
+/// Environment equivalent of [`RESET_INTERFACE_ARG`] (`RYU_RESET_INTERFACE=1`).
+pub(crate) const RESET_INTERFACE_ENV: &str = "RYU_RESET_INTERFACE";
+
+/// Whether this launch asked to start in the default chat.
+#[tauri::command]
+fn interface_reset_requested() -> bool {
+    std::env::args_os().any(|arg| arg == RESET_INTERFACE_ARG)
+        || std::env::var(RESET_INTERFACE_ENV).is_ok_and(|value| value == "1")
 }
 
 #[tauri::command]
-fn get_build_profile() -> BuildProfile {
+fn get_build_profile(app: tauri::AppHandle) -> BuildProfile {
     let profile = profile::name();
     BuildProfile {
         dev: profile == "dev",
+        deep_link_profile: deep_link_profile::link_profile_for_bundle(
+            &app.config().identifier,
+            &profile,
+            cfg!(debug_assertions),
+        ),
         profile,
     }
 }
@@ -487,6 +570,10 @@ fn get_build_profile() -> BuildProfile {
 /// Refuses (rather than copying a live database) if Core stays up — this covers
 /// dev, where Core is owned by the `core#dev` turbo task and we can't stop it.
 async fn stop_core_and_wait(state: &tauri::State<'_, CoreState>) -> Result<(), String> {
+    let _operation = state.operation.lock().await;
+    if crate::app_update::runtime_update_in_progress() {
+        return Err("Finish the app update before changing the data folder".to_owned());
+    }
     let process = {
         let mut guard = state.process.lock().map_err(|e| e.to_string())?;
         guard.take()
@@ -521,13 +608,20 @@ async fn run_data_path_subcommand(
     app: &tauri::AppHandle,
     binary: &std::path::Path,
     args: &[String],
+    secret_env: &[(&str, String)],
 ) -> Result<(), String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command;
 
     use crate::win_process::NoWindow;
 
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    // Secrets (the backup passphrase) travel in the child's environment, which
+    // only the same OS user can read, never on its command line.
+    for (name, value) in secret_env {
+        command.env(name, value);
+    }
+    let mut child = command
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -579,13 +673,10 @@ async fn run_data_path_subcommand(
     })
 }
 
-/// Remove the auxiliary roots a node reset never reaches — `~/.shadow`,
-/// `~/.ghost`, and the OS config dir holding `gateway.toml` + the data-path
-/// pointer.
-///
-/// Separate from `reset_data_path` because two of those are NOT profile-scoped:
-/// shadow and ghost use a plain `~/.shadow` / `~/.ghost` for every profile, so
-/// clearing them from one profile clears them for all. The confirm copy says so.
+/// Remove the auxiliary roots a node reset never reaches — the profile's OS
+/// config dir holding `gateway.toml` + the data-path pointer — optionally
+/// clearing the profile's data dir too (`depth`). Shadow and Ghost live under the
+/// data dir's `services/`, so there are no machine-wide shared roots to clear.
 ///
 /// Stops Core first, and does not restart: the data dir is untouched, so there is
 /// nothing for the running node to re-resolve.
@@ -595,7 +686,6 @@ async fn deep_clean_node(
     state: tauri::State<'_, CoreState>,
     profile: Option<String>,
     depth: Option<String>,
-    shared: Option<bool>,
 ) -> Result<(), String> {
     let binary =
         resolve_core_binary().ok_or_else(|| "Could not find ryu-core binary.".to_string())?;
@@ -609,12 +699,7 @@ async fn deep_clean_node(
     args.push(profile.unwrap_or_else(crate::profile::name));
     args.push("--depth".to_string());
     args.push(depth.unwrap_or_else(|| "none".to_string()));
-    // Shared roots default to INCLUDED, matching the previous behaviour; an
-    // explicit false opts out.
-    if shared == Some(false) {
-        args.push("--no-shared".to_string());
-    }
-    run_data_path_subcommand(&app, &binary, &args).await
+    run_data_path_subcommand(&app, &binary, &args, &[]).await
 }
 
 /// Copy THIS profile's data folder into another profile's, carrying the master
@@ -647,7 +732,7 @@ async fn copy_data_folder_to_profile(
         "--to-profile".to_string(),
         to_profile,
     ];
-    run_data_path_subcommand(&app, &binary, &args).await
+    run_data_path_subcommand(&app, &binary, &args, &[]).await
 }
 
 /// Copy-relocate the data folder to `to`, then restart the app to apply.
@@ -670,9 +755,13 @@ async fn migrate_data_folder(
     if move_source {
         args.push("--move".to_string());
     }
-    run_data_path_subcommand(&app, &binary, &args).await?;
+    run_data_path_subcommand(&app, &binary, &args, &[]).await?;
     app.restart();
 }
+
+/// Env var `ryu-core data-path import` reads an encrypted backup's passphrase from
+/// (`data_path::ARCHIVE_PASSPHRASE_ENV` in Core).
+const DATA_ARCHIVE_PASSPHRASE_ENV: &str = "RYU_DATA_ARCHIVE_PASSPHRASE";
 
 /// Restore the data folder from a backup zip, then restart the app to apply.
 #[tauri::command]
@@ -681,6 +770,7 @@ async fn import_data_folder(
     state: tauri::State<'_, CoreState>,
     archive: String,
     to: Option<String>,
+    passphrase: Option<String>,
 ) -> Result<(), String> {
     let binary =
         resolve_core_binary().ok_or_else(|| "Could not find ryu-core binary.".to_string())?;
@@ -695,7 +785,12 @@ async fn import_data_folder(
         args.push("--to".to_string());
         args.push(to);
     }
-    run_data_path_subcommand(&app, &binary, &args).await?;
+    let secret_env: Vec<(&str, String)> = passphrase
+        .filter(|value| !value.is_empty())
+        .map(|value| (DATA_ARCHIVE_PASSPHRASE_ENV, value))
+        .into_iter()
+        .collect();
+    run_data_path_subcommand(&app, &binary, &args, &secret_env).await?;
     app.restart();
 }
 
@@ -729,10 +824,7 @@ async fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String>
 #[cfg(debug_assertions)]
 fn localize_debug_device_url(parsed: &mut tauri::Url) -> Result<(), String> {
     const DEBUG_FRONTEND_ORIGIN: &str = "http://localhost:3001";
-    let is_loopback = matches!(
-        parsed.host_str(),
-        Some("localhost" | "127.0.0.1" | "[::1]")
-    );
+    let is_loopback = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
     let is_device_flow = parsed.path() == "/device"
         || (parsed.path() == "/login"
             && parsed.query().is_some_and(|query| query.contains("device")));
@@ -1283,6 +1375,27 @@ fn launch_default_app(app: &tauri::AppHandle, path: &std::path::Path) -> Result<
         app.shell().command("xdg-open").args([path]).spawn()
     };
     result.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// List existing workspace paths with Git ignore rules and without stale index entries.
+#[tauri::command]
+async fn list_workspace_files(root: String) -> Result<Vec<String>, String> {
+    workspace_move::list_files(std::path::Path::new(&root))
+}
+
+/// Move one user-selected workspace item without shell interpolation or replacing
+/// an occupied destination. The native helper owns confinement and atomicity.
+#[tauri::command]
+async fn move_workspace_item(
+    root: String,
+    source_path: String,
+    destination_path: String,
+) -> Result<(), String> {
+    workspace_move::move_item(
+        std::path::Path::new(&root),
+        std::path::Path::new(&source_path),
+        std::path::Path::new(&destination_path),
+    )
 }
 
 /// Open an existing file-tree item in its OS-default app or a detected editor.
@@ -1840,9 +1953,9 @@ async fn open_tab_window(
     } else {
         None
     };
-    let transfer_script = transfer
+    transfer
         .as_ref()
-        .map(tab_transfer::initialization_script)
+        .map(tab_transfer::validate_transfer)
         .transpose()?;
     let n = TAB_WINDOW_SEQ.fetch_add(1, Ordering::Relaxed);
     let label = format!("tab-{n}");
@@ -1885,13 +1998,14 @@ async fn open_tab_window(
         // title bar) instead of Tauri intercepting it — mirrors the main window's
         // `dragDropEnabled: false` in tauri.conf.json.
         .disable_drag_drop_handler()
-        .zoom_hotkeys_enabled(true);
-    if let Some(script) = transfer_script {
-        builder = builder.initialization_script(script).visible(false);
+        .zoom_hotkeys_enabled(true)
+        .on_navigation(tab_transfer::is_shell_navigation);
+    if transfer.is_some() {
+        builder = builder.visible(false);
     }
     let transfers = app.state::<tab_transfer::TabTransfers>();
-    let ready = if transfer.is_some() {
-        Some(transfers.begin(&label)?)
+    let ready = if let Some(payload) = transfer.as_ref() {
+        Some(transfers.begin(&label, payload.clone())?)
     } else {
         None
     };
@@ -1998,6 +2112,17 @@ fn is_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
 #[tauri::command]
 async fn read_project_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))
+}
+
+/// Bounded byte-preserving reads for a host-selected plugin file resource.
+#[tauri::command]
+async fn read_project_file_binary(path: String) -> Result<String, String> {
+    plugin_file_resource::read_binary(&path)
+}
+
+#[tauri::command]
+async fn write_project_file_binary(path: String, blob: String) -> Result<(), String> {
+    plugin_file_resource::write_binary(&path, &blob)
 }
 
 /// Read one committed workspace file without passing its path through a shell.
@@ -2201,16 +2326,40 @@ pub fn run() {
     // Standalone app builds must choose their private data root and port namespace
     // before identifier migration, node loading, or Core startup observes defaults.
     standalone::configure_environment();
+    let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+    if let Err(error) = deep_link_profile::before_boot(&context.config().identifier) {
+        eprintln!("{error:#}");
+        std::process::exit(64);
+    }
+    let update_startup = match update_recovery::before_boot(
+        &context.config().identifier,
+        &context.package_info().version.to_string(),
+    ) {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(78);
+        }
+    };
     // BEFORE the builder, deliberately: the bundle identifier keys the app-data
     // dir, so the 2026-08 rename would otherwise point a freshly-updated install
     // at an empty folder and silently sign the user out. Running here rather than
     // in `setup` removes the race against the webview, which can call
     // `load("auth.bin")` while `setup` is still executing.
-    identifier_migration::migrate_app_data();
+    identifier_migration::migrate_app_data(&context.config().identifier);
+    // The desktop's sealed stores (auth vault, license key, CLI-setup snapshots)
+    // resolve their keychain-held key through this host: this profile's data dir
+    // and keychain suffix. Before the builder, so no command can race it.
+    desktop_seal::install_crypto_host(profile::ryu_home_dir(), profile::suffix());
+    // Before the builder: the webview engines read their GPU switches when the
+    // first webview starts, so a later toggle would have no effect.
+    hardware_acceleration::apply_before_webview();
 
     let mut builder = tauri::Builder::default()
+        .manage(update_startup)
         .manage(CoreState {
             process: Mutex::new(None),
+            operation: tokio::sync::Mutex::new(()),
         })
         .manage(HttpClient(
             reqwest::Client::builder()
@@ -2234,7 +2383,13 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .max_file_size(1_048_576)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -2290,17 +2445,26 @@ pub fn run() {
             }
 
             tray::setup_tray(app)?;
+            update_recovery::schedule_retention(app.handle());
 
             // Register the `ryu://` scheme with the OS at runtime. Production
             // Windows builds register it via the NSIS installer (from the
             // tauri.conf.json scheme list), but dev builds and Linux need a
             // runtime call. Non-fatal: a registration failure must not abort
             // startup (the app still runs, deep links just won't route).
-            #[cfg(any(debug_assertions, target_os = "linux"))]
+            #[cfg(all(any(debug_assertions, target_os = "linux"), any(target_os = "windows", target_os = "linux")))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                if let Err(err) = app.deep_link().register_all() {
-                    eprintln!("warning: failed to register ryu:// deep-link scheme: {err}");
+                let configured: Vec<String> = app.config().plugins.0.get("deep-link")
+                    .and_then(|config| config.get("desktop"))
+                    .and_then(|desktop| desktop.get("schemes"))
+                    .and_then(serde_json::Value::as_array)
+                    .map(|schemes| schemes.iter().filter_map(serde_json::Value::as_str).map(str::to_owned).collect())
+                    .unwrap_or_default();
+                for scheme in deep_link_profile::registration_schemes(&app.config().identifier, &profile::name(), cfg!(debug_assertions), &configured) {
+                    if let Err(err) = app.deep_link().register(&scheme) {
+                        eprintln!("warning: failed to register {scheme}:// deep-link scheme: {err}");
+                    }
                 }
             }
 
@@ -2327,17 +2491,25 @@ pub fn run() {
                 );
             }
 
+            // Clips' Appshots-style bare-modifier gesture. It is opt-in from
+            // Keyboard Shortcuts because macOS needs Input Monitoring and both
+            // platforms observe modifier keys outside the Ryu window.
+            clips_quick_attach::init(app.handle());
+
             // Quick Capture (double-tap Shift → keep the selection on the Quests
             // board). A no-op unless the user has already switched it on: starting
             // the tap is what triggers the Input Monitoring prompt, and prompting
             // at launch would mostly get denied.
             quick_capture::init(app.handle());
 
-            // Watch <ryu-home>/nodes.json and emit "nodes-changed" when it changes.
-            // Profile-aware so the dev variant watches ~/.ryu-dev/nodes.json.
+            // Watch <data dir>/state/nodes.json and emit "nodes-changed" when it
+            // changes. Profile-aware so the dev variant watches ~/.ryu-dev/state/nodes.json.
             let watcher_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                let path = profile::ryu_home_dir().join("nodes.json");
+                let path = ryu_sidecar_runtime::layout::state_path(
+                    &profile::ryu_home_dir(),
+                    "nodes.json",
+                );
 
                 // Seed the baseline so the first poll doesn't fire spuriously on startup.
                 let mut last_modified: Option<std::time::SystemTime> =
@@ -2378,14 +2550,15 @@ pub fn run() {
                 // binary already on disk means this is a local user, and letting
                 // an old core linger is the bug that check exists to prevent.
                 #[cfg(not(debug_assertions))]
-                if (binary.is_none() && crate::nodes::default_node_is_local())
+                if (binary.is_none() && (crate::nodes::default_node_is_local() || crate::core::install::has_prepared_runtime()))
                     || (binary.is_some() && crate::core::install::is_managed_core_stale(&handle))
                 {
                     match crate::core::install::ensure_unified_installed(&handle).await {
                         Ok(p) => binary = Some(p),
-                        // Keep whatever resolve_core_binary found on failure: a download
-                        // error should degrade to the old-but-working core, not strand it.
-                        Err(e) => tracing::error!("Failed to auto-install/upgrade Ryu Core: {}", e),
+                        Err(e) => {
+                            binary = None;
+                            tracing::error!("Failed to install the matching Ryu stack; previous binaries retained: {}", e);
+                        }
                     }
                 }
                 // Ensure the ryu-gateway sidecar is on disk BEFORE Core starts: Core
@@ -2399,6 +2572,7 @@ pub fn run() {
                 #[cfg(not(debug_assertions))]
                 if binary.is_some() {
                     if let Err(e) = crate::core::install::ensure_gateway_installed(&handle).await {
+                        binary = None;
                         tracing::error!(
                             "Failed to auto-install ryu-gateway (chat will be degraded until it is installed to ~/.ryu/bin/ or RYU_GATEWAY_BIN is set): {}",
                             e
@@ -2406,7 +2580,12 @@ pub fn run() {
                     }
                 }
                 if let Some(binary) = binary {
-                    let mut process = RyuCoreProcess::new(binary);
+                    let lifecycle_state = handle.state::<CoreState>();
+                    let _operation = lifecycle_state.operation.lock().await;
+                    if crate::app_update::runtime_update_in_progress() {
+                        return;
+                    }
+                    let mut process = RyuCoreProcess::new_for_app(&handle, binary);
                     if let Err(e) = process.start().await {
                         tracing::error!("Failed to auto-start Ryu Core: {}", e);
                     } else {
@@ -2432,26 +2611,20 @@ pub fn run() {
                 // not before.
 
                 // Island (the Electron companion overlay, loopback :7989) — keep the
-                // bundle installed and current, but do not launch it yet. The install
-                // is routed through Core's global DownloadCenter, so a disabled
-                // companion still receives the same resumable/progress-visible update
-                // treatment as every other managed artifact.
-                //
-                // v1 / 0.1.0: island autostart is DISABLED to shrink the
-                // shippable surface (the Electron island is deferred out of
-                // the first release). Desktop UI entry points (NodeSelector row,
-                // Settings tab, onboarding install, tray Show/Hide Companion, and
-                // the User Nav Show/Hide Island control) are also
-                // commented with `# 0.1.0: Island disabled` — uncomment those
-                // and flip ISLAND_AUTOSTART to `true` to re-enable.
-                // TO RE-ENABLE: flip ISLAND_AUTOSTART to `true`.
+                // bundle installed and current. The install is routed through Core's
+                // global DownloadCenter, so a disabled companion still receives the
+                // same resumable/progress-visible update treatment as every other
+                // managed artifact. It is only launched when the `ISLAND_ENABLED`
+                // release gate is on; the desktop UI entry points (NodeSelector row,
+                // Preflight item, onboarding install, Keyboard Shortcuts rows, tray
+                // Show/Hide Companion, and the User Nav Show/Hide Island control)
+                // follow the same gate.
                 #[cfg(not(debug_assertions))]
                 {
-                    const ISLAND_AUTOSTART: bool = false;
                     let island_handle = handle.clone();
                     tauri::async_runtime::spawn(async move {
                         match crate::core::install::ensure_island_installed(&island_handle).await {
-                            Ok(_) if ISLAND_AUTOSTART => {
+                            Ok(_) if ISLAND_ENABLED => {
                                 if let Err(error) = crate::core::install::launch_island() {
                                     tracing::debug!("Ryu Island not launched: {}", error);
                                 }
@@ -2472,11 +2645,17 @@ pub fn run() {
             stop_ryu_core,
             ensure_core_installed,
             install_and_launch_island,
+            projectless_task_folder::get_default_projectless_task_folder,
+            cloud_environment_import::cloud_environment_variable_names,
+            cloud_environment_import::cloud_environment_selected_variables,
             get_ryu_status,
             get_safe_mode_sentinel,
             set_safe_mode_sentinel,
+            hardware_acceleration::get_hardware_acceleration,
+            hardware_acceleration::set_hardware_acceleration,
             get_ryu_core_url,
             get_build_profile,
+            interface_reset_requested,
             standalone::get_standalone_app_bundle,
             standalone::bootstrap_standalone_app,
             app_icons::resolve_timeline_app_icons,
@@ -2485,6 +2664,8 @@ pub fn run() {
             app_update::get_prepared_app_update,
             app_update::prepare_app_update,
             app_update::install_prepared_app_update,
+            update_recovery::get_update_startup_health,
+            update_recovery::acknowledge_update_startup,
             app_update::clear_prepared_app_update,
             copy_data_folder_to_profile,
             deep_clean_node,
@@ -2501,6 +2682,8 @@ pub fn run() {
             get_editor_availability,
             open_in_editor,
             open_workspace_item,
+            move_workspace_item,
+            list_workspace_files,
             reveal_workspace_item,
             open_media_pip,
             close_media_pip,
@@ -2509,6 +2692,7 @@ pub fn run() {
             close_current_window,
             open_tab_window,
             tab_transfer::tab_transfer_ready,
+            tab_transfer::claim_tab_transfer,
             tab_transfer::watch_tab_drag,
             window_registry::register_window_tabs,
             window_registry::route_entity_open,
@@ -2525,8 +2709,10 @@ pub fn run() {
             toggle_fullscreen,
             is_fullscreen,
             read_project_file,
+            read_project_file_binary,
             read_git_project_file,
             write_project_file,
+            write_project_file_binary,
             write_project_markdown,
             list_project_markdown,
             hardware::get_hardware_info,
@@ -2545,6 +2731,13 @@ pub fn run() {
             secrets::set_provider_key,
             secrets::get_provider_key,
             secrets::delete_provider_key,
+            secrets::desktop_secret_get,
+            secrets::desktop_secret_set,
+            secrets::desktop_secret_delete,
+            desktop_content_key,
+            cli_setup::apply_gateway_cli_setup,
+            cli_setup::reset_gateway_cli_setup,
+            cli_setup::gateway_cli_setup_status,
             permissions::check_accessibility_permission,
             permissions::request_accessibility_permission,
             permissions::check_screen_recording_permission,
@@ -2552,11 +2745,17 @@ pub fn run() {
             permissions::check_input_monitoring_permission,
             permissions::request_input_monitoring_permission,
             permissions::automation_permissions_required,
+            permissions::open_privacy_settings,
+            os_notifications::show_os_notification,
             // Quick Capture: the double-Shift keep gesture (macOS; no-ops elsewhere).
             set_window_corner_radius,
             quick_capture::quick_capture_status,
             quick_capture::quick_capture_set_enabled,
             quick_capture::quick_capture_set_binding,
+            clips_quick_attach::clips_quick_attach_status,
+            clips_quick_attach::clips_quick_attach_set_enabled,
+            clips_quick_attach::clips_quick_attach_set_destination,
+            clips_quick_attach::clips_quick_attach_focus,
         ])
         .on_window_event(|window, event| {
             #[cfg(target_os = "macos")]
@@ -2598,7 +2797,7 @@ pub fn run() {
                     .app_handle()
                     .state::<window_registry::WindowRegistry>()
                     .remove_window(window.label());
-                // Only stop Ryu Core when the main window is destroyed.
+                // Only finish the Core lifecycle when the main window is destroyed.
                 // Destroying the companion overlay must not kill the backend.
                 if window.label() != "main" {
                     return;
@@ -2606,14 +2805,14 @@ pub fn run() {
                 let state = window.state::<CoreState>();
                 if let Ok(mut guard) = state.process.lock() {
                     if let Some(ref mut process) = *guard {
-                        if let Err(e) = process.try_stop() {
+                        if let Err(e) = process.exit_desktop() {
                             tracing::error!("Failed to stop Ryu Core: {}", e);
                         }
                     }
                 };
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while running tauri application")
         .run(|_app, _event| {
             // App-level Quit (Cmd/Ctrl-Q, OS shutdown, or another native menu) can
@@ -2646,4 +2845,41 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Recovery copies this known-good executable under a distinct filename and
+/// enters this mode before any normal desktop initialization can open stores.
+pub fn run_recovery_mode() -> Option<i32> {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let guard_mode = args.first().is_some_and(|arg| arg == "--ryu-update-guard");
+    let install_mode = args
+        .first()
+        .is_some_and(|arg| arg == "--ryu-install-cached");
+    if !guard_mode && !install_mode {
+        return None;
+    }
+    let result = (|| -> anyhow::Result<()> {
+        anyhow::ensure!(args.len() == 2, "expected one update handoff directory");
+        if install_mode {
+            return update_install_worker::run(std::path::PathBuf::from(&args[1]));
+        }
+        let directory = std::fs::canonicalize(std::path::PathBuf::from(&args[1]))?;
+        let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+        let root = update_recovery::recovery_root(&context.config().identifier)
+            .map_err(anyhow::Error::msg)?;
+        let handoffs = std::fs::canonicalize(root.join("handoffs"))?;
+        anyhow::ensure!(
+            directory.parent() == Some(handoffs.as_path()),
+            "handoff belongs to another application namespace"
+        );
+        ryu_runtime_install::handoff::run_handoff(directory)?;
+        Ok(())
+    })();
+    Some(match result {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("Update recovery stopped: {error:#}");
+            1
+        }
+    })
 }

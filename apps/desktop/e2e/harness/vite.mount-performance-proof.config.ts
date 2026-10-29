@@ -57,7 +57,10 @@ export default defineConfig({
 	root: import.meta.dirname,
 	cacheDir: "/tmp/ryu-mount-stream-proof-cache",
 	css: { postcss: { plugins: [tailwindcss()] } },
-	optimizeDeps: { entries: ["mount-performance-proof.html"] },
+	optimizeDeps: {
+		entries: ["mount-performance-proof.html"],
+		esbuildOptions: { target: "esnext" },
+	},
 	resolve: {
 		dedupe: ["react", "react-dom"],
 		alias: { "@": path.resolve(import.meta.dirname, "../..") },

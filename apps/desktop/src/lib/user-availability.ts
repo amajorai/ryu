@@ -6,9 +6,11 @@
 // status through AgentAvailabilityProvider.
 
 import {
+	AGENT_AVAILABILITY_OPTIONS,
 	type AgentAvailabilityStatus,
-	isAgentAvailabilityStatus,
-} from "@ryu/blocks/desktop/agent-availability";
+} from "@ryu/blocks/desktop/agent-availability.tsx";
+import { z } from "zod";
+
 import { registerSetting } from "./settings-registry.ts";
 
 export const USER_AVAILABILITY_STORAGE_KEY = "ryu:user-availability";
@@ -22,12 +24,19 @@ export interface UserAvailabilitySettings {
 	manualStatus: AgentAvailabilityStatus;
 }
 
-export type AvailabilitySource = "afk" | "manual";
+/** Core detects games and streaming apps from the node-local process table. */
+export type AvailabilitySource = "afk" | "game" | "stream" | "manual";
 
 export interface UserAvailabilitySnapshot {
+	/** The game Core currently detects, when gaming detection is on. */
+	detectedGame: string | null;
+	/** Streaming app Core currently detects, when Streaming detection is enabled. */
+	detectedStreamingApp: string | null;
 	settings: UserAvailabilitySettings;
 	source: AvailabilitySource;
 	status: AgentAvailabilityStatus;
+	/** Core's shared privacy guard, including manual Streaming on organization nodes. */
+	streamingPrivacyActive: boolean;
 }
 
 export const DEFAULT_USER_AVAILABILITY_SETTINGS: UserAvailabilitySettings = {
@@ -35,6 +44,19 @@ export const DEFAULT_USER_AVAILABILITY_SETTINGS: UserAvailabilitySettings = {
 	afkTimeoutMinutes: 10,
 	manualStatus: "online",
 };
+
+const afkTimeoutMinutesSchema = z.literal(AFK_TIMEOUT_OPTIONS);
+export const userAvailabilitySettingsSchema = z.object({
+	afkDetectionEnabled: z
+		.boolean()
+		.catch(DEFAULT_USER_AVAILABILITY_SETTINGS.afkDetectionEnabled),
+	afkTimeoutMinutes: afkTimeoutMinutesSchema.catch(
+		DEFAULT_USER_AVAILABILITY_SETTINGS.afkTimeoutMinutes
+	),
+	manualStatus: z
+		.enum(AGENT_AVAILABILITY_OPTIONS.map((option) => option.value))
+		.catch(DEFAULT_USER_AVAILABILITY_SETTINGS.manualStatus),
+}) satisfies z.ZodType<UserAvailabilitySettings>;
 
 const STATUS_CHANGE_EVENTS = [
 	"pointerdown",
@@ -55,20 +77,18 @@ let tracking = false;
 let statusTimer: ReturnType<typeof setTimeout> | null = null;
 let snapshotCache: UserAvailabilitySnapshot | null = null;
 let lastScheduledActivityAt = 0;
+let detectedGame: string | null = null;
+let detectedStreamingApp: string | null = null;
+let streamingPrivacyActiveFromCore = false;
 
 const SERVER_SNAPSHOT: UserAvailabilitySnapshot = {
+	detectedGame: null,
+	detectedStreamingApp: null,
+	streamingPrivacyActive: false,
 	settings: DEFAULT_USER_AVAILABILITY_SETTINGS,
 	source: "manual",
 	status: "online",
 };
-
-function isAfkTimeoutMinutes(value: unknown): value is AfkTimeoutMinutes {
-	return (
-		typeof value === "number" &&
-		Number.isSafeInteger(value) &&
-		(AFK_TIMEOUT_OPTIONS as readonly number[]).includes(value)
-	);
-}
 
 function readSettings(): UserAvailabilitySettings {
 	try {
@@ -76,23 +96,8 @@ function readSettings(): UserAvailabilitySettings {
 		if (!raw) {
 			return DEFAULT_USER_AVAILABILITY_SETTINGS;
 		}
-		const value: unknown = JSON.parse(raw);
-		if (!value || typeof value !== "object") {
-			return DEFAULT_USER_AVAILABILITY_SETTINGS;
-		}
-		const record = value as Record<string, unknown>;
-		return {
-			afkDetectionEnabled:
-				typeof record.afkDetectionEnabled === "boolean"
-					? record.afkDetectionEnabled
-					: DEFAULT_USER_AVAILABILITY_SETTINGS.afkDetectionEnabled,
-			afkTimeoutMinutes: isAfkTimeoutMinutes(record.afkTimeoutMinutes)
-				? record.afkTimeoutMinutes
-				: DEFAULT_USER_AVAILABILITY_SETTINGS.afkTimeoutMinutes,
-			manualStatus: isAgentAvailabilityStatus(record.manualStatus)
-				? record.manualStatus
-				: DEFAULT_USER_AVAILABILITY_SETTINGS.manualStatus,
-		};
+		const parsed = userAvailabilitySettingsSchema.safeParse(JSON.parse(raw));
+		return parsed.success ? parsed.data : DEFAULT_USER_AVAILABILITY_SETTINGS;
 	} catch {
 		return DEFAULT_USER_AVAILABILITY_SETTINGS;
 	}
@@ -109,12 +114,38 @@ function writeSettings(settings: UserAvailabilitySettings): void {
 	}
 }
 
+/**
+ * Precedence: manual Do not disturb, manual or detected Streaming, manual
+ * Gaming, detected game, manual Away, AFK auto-away, then Online.
+ */
+export interface UserAvailabilityResolution {
+	source: AvailabilitySource;
+	status: AgentAvailabilityStatus;
+}
+
 export function resolveUserAvailability(
 	settings: UserAvailabilitySettings,
 	now: number,
 	lastActivity: number,
-	focused: boolean
-): { source: AvailabilitySource; status: AgentAvailabilityStatus } {
+	focused: boolean,
+	game: string | null = null,
+	streamingApp: string | null = null
+): UserAvailabilityResolution {
+	if (settings.manualStatus === "do-not-disturb") {
+		return { source: "manual", status: settings.manualStatus };
+	}
+	if (settings.manualStatus === "streaming") {
+		return { source: "manual", status: settings.manualStatus };
+	}
+	if (streamingApp) {
+		return { source: "stream", status: "streaming" };
+	}
+	if (settings.manualStatus === "gaming") {
+		return { source: "manual", status: settings.manualStatus };
+	}
+	if (game) {
+		return { source: "game", status: "gaming" };
+	}
 	if (settings.manualStatus !== "online") {
 		return { source: "manual", status: settings.manualStatus };
 	}
@@ -132,6 +163,9 @@ function snapshotEqual(
 	right: UserAvailabilitySnapshot
 ): boolean {
 	return (
+		left?.detectedGame === right.detectedGame &&
+		left?.detectedStreamingApp === right.detectedStreamingApp &&
+		left?.streamingPrivacyActive === right.streamingPrivacyActive &&
 		left?.source === right.source &&
 		left?.status === right.status &&
 		left?.settings.afkDetectionEnabled === right.settings.afkDetectionEnabled &&
@@ -222,7 +256,7 @@ function handleVisibilityChange(): void {
 }
 
 function startTracking(): void {
-	if (tracking || typeof window === "undefined") {
+	if (tracking || globalThis.window === undefined) {
 		return;
 	}
 	tracking = true;
@@ -240,7 +274,7 @@ function stopTracking(): void {
 	// The app has a long-lived subscriber, but keep the subscription lifecycle
 	// honest for isolated component tests and short-lived companion surfaces.
 	clearStatusTimer();
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		for (const eventName of STATUS_CHANGE_EVENTS) {
 			window.removeEventListener(eventName, markActivity);
 		}
@@ -268,9 +302,17 @@ export function getUserAvailabilitySnapshot(): UserAvailabilitySnapshot {
 		settingsCache,
 		Date.now(),
 		lastActivityAt,
-		windowFocused
+		windowFocused,
+		detectedGame,
+		detectedStreamingApp
 	);
 	const next: UserAvailabilitySnapshot = {
+		detectedGame,
+		detectedStreamingApp,
+		streamingPrivacyActive:
+			streamingPrivacyActiveFromCore ||
+			detectedStreamingApp !== null ||
+			settingsCache.manualStatus === "streaming",
 		settings: settingsCache,
 		source: resolution.source,
 		status: resolution.status,
@@ -304,12 +346,12 @@ export function subscribeUserAvailability(callback: () => void): () => void {
 		}
 		scheduleStatusTimer();
 	};
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.addEventListener("storage", onStorage);
 	}
 	return () => {
 		listeners.delete(callback);
-		if (typeof window !== "undefined") {
+		if (globalThis.window !== undefined) {
 			window.removeEventListener("storage", onStorage);
 		}
 		if (listeners.size === 0) {
@@ -332,10 +374,66 @@ export function setAfkDetectionEnabled(enabled: boolean): void {
 
 /** Set the allowlisted AFK timeout in minutes. */
 export function setAfkTimeoutMinutes(minutes: AfkTimeoutMinutes): void {
-	if (!isAfkTimeoutMinutes(minutes)) {
+	if (!afkTimeoutMinutesSchema.safeParse(minutes).success) {
 		return;
 	}
 	setSettings({ ...settingsCache, afkTimeoutMinutes: minutes });
+}
+
+/**
+ * The status reported to Core, which decides whether agent questions block.
+ *
+ * Window focus is deliberately ignored: switching to another app for a moment
+ * must not turn every question async. Only the idle timeout counts, and input
+ * outside the window does not reset it, so a user who has really left becomes
+ * Away for Core after the configured timeout. A detected game is left out
+ * because Core detects it itself.
+ */
+export function getCorePresenceStatus(): AgentAvailabilityStatus {
+	return resolveUserAvailability(
+		settingsCache,
+		Date.now(),
+		lastActivityAt,
+		true
+	).status;
+}
+
+/** Record the game Core detects (or `null` when none is running). */
+export function setDetectedGame(game: string | null): void {
+	const next = game?.trim() || null;
+	if (next === detectedGame) {
+		return;
+	}
+	const previous = getUserAvailabilitySnapshot();
+	detectedGame = next;
+	if (!snapshotEqual(previous, getUserAvailabilitySnapshot())) {
+		notify();
+	}
+}
+
+/** Record the streaming app Core detects (or `null` when none is running). */
+export function setDetectedStreamingApp(app: string | null): void {
+	const next = app?.trim() || null;
+	if (next === detectedStreamingApp) {
+		return;
+	}
+	const previous = getUserAvailabilitySnapshot();
+	detectedStreamingApp = next;
+	if (!snapshotEqual(previous, getUserAvailabilitySnapshot())) {
+		notify();
+	}
+}
+
+/** Record Core's node-wide Connect suggestion privacy state. */
+export function setStreamingPrivacyActive(active: boolean): void {
+	if (active === streamingPrivacyActiveFromCore) {
+		return;
+	}
+	const previous = getUserAvailabilitySnapshot();
+	streamingPrivacyActiveFromCore = active;
+	if (!snapshotEqual(previous, getUserAvailabilitySnapshot())) {
+		notify();
+	}
 }
 
 /** Restore the availability policy to its shipped defaults. */

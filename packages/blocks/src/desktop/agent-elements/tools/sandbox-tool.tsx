@@ -1,9 +1,17 @@
-import { CodeBlock } from "@ryu/ui/components/agents/code-block";
+import {
+	CodeBlock,
+	type CodeBlockProps,
+} from "@ryu/ui/components/agents/code-block";
 import {
 	ToolResult,
 	ToolResultOutput,
 } from "@ryu/ui/components/agents/tool-result";
+import {
+	isNativeObjectReceiver,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { memo, useMemo } from "react";
+import type { NativeSdkValue } from "../utils/native-sdk-observation.ts";
 import { unwrapMcpOutput } from "../utils/unwrap-mcp-output.ts";
 
 type SandboxStatus = "running" | "completed" | "error";
@@ -21,25 +29,36 @@ function deriveStatus(part: any, chatStatus?: string): SandboxStatus {
 	return part.output ? "completed" : "running";
 }
 
-function extractCode(part: any): string {
-	const input = (part.input ?? part.args ?? {}) as Record<string, unknown>;
-	const raw = input.code ?? input.command ?? input.script ?? input.source;
-	return typeof raw === "string" ? raw : "";
+/** Opaque cells read by the legacy code renderer, not a decoded tool-input DTO. */
+interface SandboxCodeObservation {
+	readonly code?: NativeSdkValue;
+	readonly command?: NativeSdkValue;
+	readonly script?: NativeSdkValue;
+	readonly source?: NativeSdkValue;
 }
 
-function extractLogs(output: unknown): string {
+function extractCode(part: any): string {
+	// SAFETY: the existing nullish fallback supplies a non-nil receiver. These
+	// optional cells describe native property reads/boxing only, with no claim
+	// that any field exists or contains a decoded string; raw getters stay live.
+	const input = (part.input ?? part.args ?? {}) as SandboxCodeObservation;
+	const raw = input.code ?? input.command ?? input.script ?? input.source;
+	return isNativeText(raw) ? raw : "";
+}
+
+function extractLogs(output: NativeSdkValue): string {
 	if (output == null) {
 		return "";
 	}
 	const unwrapped = unwrapMcpOutput(output);
-	if (typeof unwrapped === "string") {
+	if (isNativeText(unwrapped)) {
 		return unwrapped;
 	}
-	if (typeof unwrapped === "object") {
-		const record = unwrapped as Record<string, unknown>;
+	if (isNativeObjectReceiver(unwrapped) || unwrapped === null) {
+		const record = unwrapped;
 		const logs = Array.isArray(record.logs)
 			? record.logs.join("\n")
-			: typeof record.logs === "string"
+			: isNativeText(record.logs)
 				? record.logs
 				: "";
 		const result = record.result ?? record.value ?? record.returnValue;
@@ -49,7 +68,7 @@ function extractLogs(output: unknown): string {
 		}
 		if (result !== undefined && result !== null) {
 			segments.push(
-				typeof result === "string" ? result : JSON.stringify(result, null, 2)
+				isNativeText(result) ? result : JSON.stringify(result, null, 2)
 			);
 		}
 		if (segments.length > 0) {
@@ -70,7 +89,7 @@ function clampCode(code: string): string {
 
 export interface SandboxToolProps {
 	chatStatus?: string;
-	language?: string;
+	language?: CodeBlockProps["language"];
 	part: any;
 	title?: string;
 }
@@ -93,11 +112,10 @@ export const SandboxTool = memo(function SandboxTool({
 	const logs = useMemo(() => extractLogs(part.output), [part.output]);
 	const hasLogs = logs.trim().length > 0;
 
-	const headerTitle =
-		title ?? ((part.input?.filename as string | undefined) || "Code sandbox");
+	const headerTitle = title ?? (part.input?.filename || "Code sandbox");
 
 	return (
-		<div className="an-tool-sandbox">
+		<div>
 			<ToolResult
 				collapseOnComplete={false}
 				kind="terminal"
@@ -116,15 +134,7 @@ export const SandboxTool = memo(function SandboxTool({
 						<CodeBlock
 							code={code}
 							filename={headerTitle}
-							language={
-								language as
-									| "typescript"
-									| "bash"
-									| "json"
-									| "text"
-									| "tsx"
-									| "diff"
-							}
+							language={language}
 							maxHeight={360}
 							status={status === "running" ? "streaming" : "complete"}
 							wrap

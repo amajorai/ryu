@@ -50,7 +50,7 @@ export function ExpandedPanelShell({
 				<div className="flex items-center gap-1.5">
 					{onHome ? (
 						<Button
-							className="bg-muted text-foreground hover:bg-accent"
+							appearance="island-panel"
 							onClick={onHome}
 							size="xs"
 							variant="ghost"
@@ -60,10 +60,8 @@ export function ExpandedPanelShell({
 					) : null}
 					{TABS.map((tab) => (
 						<Button
-							className={
-								view === tab.target
-									? "bg-accent text-foreground hover:bg-accent"
-									: "bg-muted text-foreground hover:bg-accent"
+							appearance={
+								view === tab.target ? "island-tab-active" : "island-panel"
 							}
 							key={tab.target}
 							onClick={() => onSelect(tab.target)}
@@ -75,7 +73,7 @@ export function ExpandedPanelShell({
 					))}
 					{view === "chat" ? null : (
 						<Button
-							className="bg-muted text-foreground hover:bg-accent"
+							appearance="island-panel"
 							onClick={() => onSelect("chat")}
 							size="xs"
 							variant="ghost"
@@ -84,8 +82,8 @@ export function ExpandedPanelShell({
 						</Button>
 					)}
 					<Button
+						appearance="island-panel"
 						aria-label="Close panel"
-						className="bg-muted text-foreground hover:bg-accent"
 						onClick={onClose}
 						size="icon-xs"
 						variant="ghost"

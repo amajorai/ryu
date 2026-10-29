@@ -1,10 +1,11 @@
 {
   "name": "@ryu/portable-packages",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./bun-brotli-mitigation": "./src/bun-brotli-mitigation.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -12,7 +13,9 @@
   },
   "dependencies": {
     "@ryu/i18n": "workspace:*",
-    "fflate": "^0.8.3"
+    "@ryuhq/protocol": "workspace:*",
+    "fflate": "^0.8.3",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@ryu/config": "workspace:*",

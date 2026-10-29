@@ -58,7 +58,9 @@ export const GenericTool = memo(function GenericTool({
 			defaultOpen={!isPending}
 			icon={
 				Icon ? (
-					<Icon className="h-full w-full shrink-0 text-muted-foreground" />
+					<span className="flex size-full shrink-0 text-muted-foreground">
+						<Icon className="size-full" />
+					</span>
 				) : (
 					<Wrench className="size-4" />
 				)

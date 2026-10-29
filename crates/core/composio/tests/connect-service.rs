@@ -469,6 +469,96 @@ async fn rust_dispatch_reaches_native_connect_and_preserves_authorization() {
         .unwrap()
         .unwrap()
         .is_none());
+
+    // An agent's own account in tenant-d: the owner's credentials select the
+    // tenant, and the agent is named explicitly; Connect derives its user.
+    use ryu_composio::connect::Subject;
+    std::env::set_var(
+        "RYU_CONNECT_USER_TOKENS",
+        r#"{"user-a":"runtime-a","user-b":"runtime-b","user-c":"runtime-c","user-d":"runtime-d"}"#,
+    );
+    std::env::set_var(
+        "RYU_CONNECT_USER_MANAGEMENT_TOKENS",
+        r#"{"user-c":"manager-c","user-d":"manager-d"}"#,
+    );
+    let agent = Subject::Agent {
+        owner: "user-d",
+        agent_id: "agent_1",
+    };
+    // tenant-c's binding enables no agent accounts.
+    let unsupported = ryu_composio::connect::initiate_for(
+        &client,
+        "gmail",
+        Subject::Agent {
+            owner: "user-c",
+            agent_id: "agent_1",
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(ryu_composio::service::is_subject_unsupported(&unsupported));
+    let initiated = ryu_composio::connect::initiate_for(&client, "gmail", agent)
+        .await
+        .unwrap();
+    assert_eq!(
+        initiated,
+        json!({"connection_id":"account-d1", "redirect_url":"https://connect.composio.dev/fixture-agent-login", "status":"INITIATED"})
+    );
+    assert_eq!(
+        ryu_composio::connect::list_connections_for(&client, "", agent)
+            .await
+            .unwrap()["data"],
+        json!([{"id":"account-d1", "toolkit":"", "status":"pending", "active":false}])
+    );
+    // The tenant's own listing never shows its agent's account.
+    assert_eq!(
+        ryu_composio::connect::list_connections(&client, "", Some("user-d"))
+            .await
+            .unwrap()["data"],
+        json!([])
+    );
+    let no_arguments = json!({});
+    let run_as_agent = || {
+        ryu_composio::service::dispatch_as(
+            "GMAIL_GET_PROFILE",
+            &no_arguments,
+            Some("user-d"),
+            Some("agent_1"),
+            Some("account-d1"),
+        )
+    };
+    assert!(run_as_agent().await.unwrap().is_err(), "not completed yet");
+    let completed =
+        ryu_composio::service::complete_as("agent-session", Some("user-d"), Some("agent_1"))
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(completed["id"], "account-d1");
+    assert_eq!(
+        run_as_agent().await.unwrap().unwrap(),
+        json!({"account":"account-d1", "user":"provider-user-d:agent:agent_1", "version":"latest", "arguments":{}})
+    );
+    // The tenant's own lane cannot run on the agent's account.
+    assert!(ryu_composio::service::dispatch(
+        "GMAIL_GET_PROFILE",
+        &json!({}),
+        Some("user-d"),
+        Some("account-d1")
+    )
+    .await
+    .unwrap()
+    .is_err());
+    assert!(
+        ryu_composio::connect::owned_connection_for(&client, "account-d1", agent)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    ryu_composio::connect::delete_connection_for(&client, "account-d1", agent)
+        .await
+        .unwrap();
+    assert!(run_as_agent().await.unwrap().is_err(), "revoked");
+
     process.0.kill().unwrap();
     process.0.wait().unwrap();
     assert!(ryu_composio::service::claim_event(Some("user-a"))

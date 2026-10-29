@@ -1,4 +1,6 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { IconX as X } from "@tabler/icons-react";
 import { useRef, useState } from "react";
@@ -32,6 +34,42 @@ function formatFileSize(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Thumbnail wrapper: a real button when the image can be previewed so the
+ * lightbox opens from the keyboard too, a plain box otherwise.
+ */
+function PreviewTrigger({
+	canPreview,
+	children,
+	className,
+	filename,
+	onOpen,
+}: {
+	canPreview: boolean;
+	children: React.ReactNode;
+	className: string;
+	filename: string;
+	onOpen: (event: React.MouseEvent<HTMLElement>) => void;
+}) {
+	const tl = useLiteralMessages();
+	if (!canPreview) {
+		return <div className={className}>{children}</div>;
+	}
+	return (
+		<button
+			aria-label={tl("Preview {filename}", { filename })}
+			className={cn(
+				className,
+				"cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			)}
+			onClick={onOpen}
+			type="button"
+		>
+			{children}
+		</button>
+	);
+}
+
 export function FileAttachment({
 	id,
 	filename,
@@ -44,15 +82,17 @@ export function FileAttachment({
 	display = "chip",
 	enableImagePreview = true,
 }: FileAttachmentProps) {
+	const safeUrl = safeMediaUrl(url);
+	const tl = useLiteralMessages();
 	const [isHovered, setIsHovered] = useState(false);
 	const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 	const lightboxOriginRef = useRef<HTMLElement | null>(null);
-	const isImageOnly = display === "image-only" && isImage && !!url;
-	const canPreview = Boolean(enableImagePreview && isImage && url);
+	const isImageOnly = display === "image-only" && isImage && !!safeUrl;
+	const canPreview = Boolean(enableImagePreview && isImage && safeUrl);
 
-	const openLightbox = (event: React.MouseEvent) => {
+	const openLightbox = (event: React.MouseEvent<HTMLElement>) => {
 		event.stopPropagation();
-		lightboxOriginRef.current = event.currentTarget as HTMLElement;
+		lightboxOriginRef.current = event.currentTarget;
 		setIsLightboxOpen(true);
 	};
 
@@ -69,35 +109,33 @@ export function FileAttachment({
 			onMouseLeave={() => setIsHovered(false)}
 		>
 			{isImageOnly ? (
-				<div
-					className={cn(
-						"size-full shrink-0 overflow-hidden rounded-lg",
-						canPreview && "cursor-pointer"
-					)}
-					onClick={canPreview ? openLightbox : undefined}
+				<PreviewTrigger
+					canPreview={canPreview}
+					className="size-full shrink-0 overflow-hidden rounded-lg"
+					filename={filename}
+					onOpen={openLightbox}
 				>
 					<img
 						alt={filename}
 						className="h-full w-full object-cover"
-						src={url}
+						src={safeUrl ?? undefined}
 					/>
-				</div>
+				</PreviewTrigger>
 			) : (
 				<>
-					{isImage && url ? (
-						<div
-							className={cn(
-								"w-8 shrink-0 self-stretch overflow-hidden rounded-sm",
-								canPreview && "cursor-pointer"
-							)}
-							onClick={canPreview ? openLightbox : undefined}
+					{isImage && safeUrl ? (
+						<PreviewTrigger
+							canPreview={canPreview}
+							className="w-8 shrink-0 self-stretch overflow-hidden rounded-sm"
+							filename={filename}
+							onOpen={openLightbox}
 						>
 							<img
 								alt={filename}
 								className="aspect-square h-full w-full object-cover"
-								src={url}
+								src={safeUrl}
 							/>
-						</div>
+						</PreviewTrigger>
 					) : (
 						<div className="flex w-8 shrink-0 items-center justify-center self-stretch rounded-sm bg-muted">
 							<FileTypeIcon className="size-4" path={filename} />
@@ -112,7 +150,7 @@ export function FileAttachment({
 							{filename}
 						</span>
 						{size !== undefined && (
-							<span className="text-[10px] text-muted-foreground">
+							<span className="type-compact text-muted-foreground">
 								{formatFileSize(size)}
 							</span>
 						)}
@@ -122,10 +160,11 @@ export function FileAttachment({
 
 			{onRemove && (
 				<Button
-					className={cn(
-						"absolute -top-1.5 -right-1.5 z-10 size-4 rounded-full text-muted-foreground hover:text-foreground",
-						isHovered ? "opacity-100" : "opacity-0"
-					)}
+					appearance={
+						isHovered ? "attachment-remove-visible" : "attachment-remove-hidden"
+					}
+					aria-label={tl("Remove {filename}", { filename })}
+					className="absolute -top-1.5 -right-1.5 z-10 focus-visible:opacity-100"
 					onClick={(e) => {
 						e.stopPropagation();
 						onRemove();
@@ -138,9 +177,9 @@ export function FileAttachment({
 				</Button>
 			)}
 
-			{canPreview && url && (
+			{canPreview && safeUrl && (
 				<ImageLightbox
-					images={[{ id, url, filename }]}
+					images={[{ id, url: safeUrl, filename }]}
 					onAnnotate={onAnnotate}
 					onClose={() => setIsLightboxOpen(false)}
 					open={isLightboxOpen}

@@ -9,6 +9,7 @@ use minisign_verify::{PublicKey, Signature};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_store::StoreExt;
 use tauri_plugin_updater::UpdaterExt;
 use tempfile::NamedTempFile;
@@ -46,6 +47,45 @@ pub struct PrepareAppUpdateRequest {
 #[derive(Default)]
 pub struct AppUpdateState {
     operation: tokio::sync::Mutex<()>,
+}
+
+static RUNTIME_UPDATE_IN_PROGRESS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn runtime_update_in_progress() -> bool {
+    RUNTIME_UPDATE_IN_PROGRESS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+struct RuntimeUpdateGuard {
+    release_on_drop: bool,
+}
+
+impl RuntimeUpdateGuard {
+    fn enter() -> Result<Self, String> {
+        RUNTIME_UPDATE_IN_PROGRESS
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .map_err(|_| "An app update is already waiting for restart".to_owned())?;
+        Ok(Self {
+            release_on_drop: true,
+        })
+    }
+
+    fn wait_for_relaunch(&mut self) {
+        self.release_on_drop = false;
+    }
+}
+
+impl Drop for RuntimeUpdateGuard {
+    fn drop(&mut self) {
+        if self.release_on_drop {
+            RUNTIME_UPDATE_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -225,7 +265,11 @@ fn decode_base64_text(value: &str) -> Result<String, String> {
     String::from_utf8(decoded).map_err(|error| error.to_string())
 }
 
-fn verify_minisign(data: &[u8], signature: &str, public_key: &str) -> Result<(), String> {
+pub(crate) fn verify_minisign(
+    data: &[u8],
+    signature: &str,
+    public_key: &str,
+) -> Result<(), String> {
     let key_text = decode_base64_text(public_key)?;
     let signature_text = decode_base64_text(signature)?;
     let key = PublicKey::decode(&key_text).map_err(|error| error.to_string())?;
@@ -266,12 +310,91 @@ fn prepared_metadata_matches_feed(
 /// Install first, then remove the prepared bytes. A transient installer failure
 /// must leave the already-downloaded, signature-verified artifact available for
 /// retry instead of charging the user another full download.
+#[cfg(test)]
 fn install_then_clear(
     store: &PreparedUpdateStore,
     install: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
     install()?;
-    store.clear()
+    if let Err(error) = store.clear() {
+        tracing::warn!(%error, "installed app update cache cleanup failed");
+    }
+    Ok(())
+}
+
+async fn confirm_app_update(app: &tauri::AppHandle) -> Result<bool, String> {
+    let active = crate::tray::active_local_run_count().await;
+    let description = if active > 0 {
+        format!("{active} local tasks are running. Installing this app update restarts Ryu and stops local chats, tools, and workflows, including work waiting for approval. Finish your work first or update now. Remote nodes continue running.")
+    } else {
+        "Installing this app update restarts Ryu. Any local chats, tools, and workflows running when it restarts will stop. Finish your work first or update now. Remote nodes continue running.".to_owned()
+    };
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(description)
+        .title("Install update and restart Ryu?")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Update and restart".to_owned(),
+            "Keep working".to_owned(),
+        ))
+        .show(move |accepted| {
+            let _ = sender.send(accepted);
+        });
+    receiver.await.map_err(|error| error.to_string())
+}
+
+async fn stop_runtime_for_update(
+    app: &tauri::AppHandle,
+) -> Result<Option<crate::core::process::RyuCoreProcess>, String> {
+    let handle = app.clone();
+    let lifecycle_state = app.state::<crate::CoreState>();
+    let operation = lifecycle_state.operation.lock().await;
+    let process = tokio::task::spawn_blocking(move || {
+        let state = handle.state::<crate::CoreState>();
+        let mut guard = state.process.lock().map_err(|error| error.to_string())?;
+        if !guard.as_ref().is_some_and(|process| process.owns_process()) {
+            return Ok(None); // Operator-owned nodes are outside this update transaction.
+        }
+        let Some(mut process) = guard.take() else {
+            return Ok(None);
+        };
+        if let Err(error) = process.try_stop() {
+            *guard = Some(process);
+            return Err(format!(
+                "Could not stop the local runtime for the update: {error}"
+            ));
+        }
+        Ok(Some(process))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    drop(operation);
+    if let Some(process) = process {
+        if process.is_already_running().await {
+            restore_runtime_after_update_failure(app, process).await?;
+            return Err(
+                "The managed runtime is still running; the app update was not started".to_owned(),
+            );
+        }
+        return Ok(Some(process));
+    }
+    Ok(None)
+}
+
+async fn restore_runtime_after_update_failure(
+    app: &tauri::AppHandle,
+    mut process: crate::core::process::RyuCoreProcess,
+) -> Result<(), String> {
+    let state = app.state::<crate::CoreState>();
+    let _operation = state.operation.lock().await;
+    let restarted = process
+        .start()
+        .await
+        .map_err(|error| format!("The previous runtime could not restart: {error}"));
+    let mut guard = state.process.lock().map_err(|error| error.to_string())?;
+    *guard = Some(process);
+    restarted
 }
 
 fn cache_store(app: &tauri::AppHandle) -> Result<PreparedUpdateStore, String> {
@@ -301,7 +424,7 @@ fn updater_for_source(
     source: &AppUpdateSource,
 ) -> Result<tauri_plugin_updater::Updater, String> {
     let endpoint = source
-        .endpoint()?
+        .endpoint_for_app(app)?
         .parse()
         .map_err(|error| format!("invalid app-owned updater endpoint: {error}"))?;
     app.updater_builder()
@@ -316,6 +439,25 @@ fn parse_version(value: &str) -> Result<Version, String> {
         .map_err(|error| format!("invalid update version: {error}"))
 }
 
+pub(crate) fn require_update_window(label: &str) -> Result<(), String> {
+    if label == "main" {
+        Ok(())
+    } else {
+        Err("Only the main application can change app updates".into())
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    #[test]
+    fn auxiliary_windows_cannot_change_app_updates() {
+        assert!(super::require_update_window("main").is_ok());
+        for label in ["", "capture", "settings", "main-2"] {
+            assert!(super::require_update_window(label).is_err());
+        }
+    }
+}
+
 #[tauri::command]
 pub fn get_app_update_download_preference(app: tauri::AppHandle) -> bool {
     let value = app
@@ -327,9 +469,11 @@ pub fn get_app_update_download_preference(app: tauri::AppHandle) -> bool {
 
 #[tauri::command]
 pub fn set_app_update_download_preference(
+    window: tauri::Window,
     app: tauri::AppHandle,
     enabled: bool,
 ) -> Result<(), String> {
+    require_update_window(window.label())?;
     let store = app
         .store(crate::tray::SETTINGS_FILE)
         .map_err(|error| error.to_string())?;
@@ -368,19 +512,23 @@ pub async fn get_prepared_app_update(
 
 #[tauri::command]
 pub async fn clear_prepared_app_update(
+    window: tauri::Window,
     app: tauri::AppHandle,
     state: State<'_, AppUpdateState>,
 ) -> Result<(), String> {
+    require_update_window(window.label())?;
     let _guard = state.operation.lock().await;
     cache_store(&app)?.clear()
 }
 
 #[tauri::command]
 pub async fn prepare_app_update(
+    window: tauri::Window,
     app: tauri::AppHandle,
     state: State<'_, AppUpdateState>,
     request: PrepareAppUpdateRequest,
 ) -> Result<Option<PreparedAppUpdate>, String> {
+    require_update_window(window.label())?;
     let _guard = state.operation.lock().await;
     let expected_version = parse_version(&request.expected_version)?;
     let store = cache_store(&app)?;
@@ -391,6 +539,7 @@ pub async fn prepare_app_update(
             && store.verified_artifact(&prepared, &public_key).is_ok()
         {
             tracing::info!(version = %prepared.version, "app_update prepare_reused");
+            crate::core::install::prepare_app_runtime(&app, &prepared.version).await?;
             return Ok(Some(prepared));
         }
     }
@@ -417,6 +566,7 @@ pub async fn prepare_app_update(
         .await
         .map_err(|error| error.to_string())?;
     verify_minisign(&bytes, &signature, &public_key)?;
+    crate::core::install::prepare_app_runtime(&app, &offered_version.to_string()).await?;
     let prepared = store.commit(
         PreparedUpdateCandidate {
             version: offered_version.to_string(),
@@ -431,17 +581,19 @@ pub async fn prepare_app_update(
 
 #[tauri::command]
 pub async fn install_prepared_app_update(
+    window: tauri::Window,
     app: tauri::AppHandle,
     state: State<'_, AppUpdateState>,
-) -> Result<bool, String> {
+) -> Result<Option<bool>, String> {
+    require_update_window(window.label())?;
     let _guard = state.operation.lock().await;
     let store = cache_store(&app)?;
     let Some(prepared) = store.read()? else {
-        return Ok(false);
+        return Ok(Some(false));
     };
     if !is_prepared_newer(&prepared.version, &app.package_info().version.to_string()) {
         store.clear()?;
-        return Ok(false);
+        return Ok(Some(false));
     }
     let public_key = updater_public_key(&app)?;
     let bytes = store.verified_artifact(&prepared, &public_key)?;
@@ -450,7 +602,7 @@ pub async fn install_prepared_app_update(
         Ok(Some(update)) => update,
         Ok(None) => {
             store.clear()?;
-            return Ok(false);
+            return Ok(Some(false));
         }
         Err(error) => return Err(error.to_string()),
     };
@@ -467,45 +619,99 @@ pub async fn install_prepared_app_update(
         );
     }
 
+    crate::core::install::prepare_app_runtime(&app, &prepared.version).await?;
+    let mut handoff = crate::update_handoff::prepare(&app, &prepared, &update, &bytes).await?;
+    if !confirm_app_update(&app).await? {
+        tracing::info!(version = %prepared.version, "app_update install_cancelled; prepared update retained");
+        return Ok(None);
+    }
     tracing::info!(version = %prepared.version, "app_update install_explicit");
-    install_then_clear(&store, || {
-        update.install(&bytes).map_err(|error| error.to_string())
-    })?;
-    Ok(true)
+    let mut runtime_guard = RuntimeUpdateGuard::enter()?;
+    let stopped_runtime = stop_runtime_for_update(&app).await?;
+    let installed =
+        match crate::update_handoff::verify_quiesced(&handoff, stopped_runtime.is_some()).await {
+            Ok(()) => crate::update_handoff::accept(&mut handoff).await,
+            Err(error) => Err(error),
+        };
+    if let Err(error) = installed {
+        let cleanup = ryu_runtime_install::handoff::cancel_handoff(&handoff.request).err();
+        if let Some(process) = stopped_runtime {
+            if let Err(recovery) = restore_runtime_after_update_failure(&app, process).await {
+                return Err(format!("{error}. {recovery}"));
+            }
+        }
+        if let Some(cleanup) = cleanup {
+            return Err(format!(
+                "{error}. Could not release this update's startup fence: {cleanup:#}"
+            ));
+        }
+        return Err(error);
+    }
+    runtime_guard.wait_for_relaunch();
+    crate::tray::begin_quit();
+    app.exit(0);
+    Ok(Some(true))
 }
 
 impl AppUpdateSource {
-    fn endpoint(&self) -> Result<String, String> {
+    pub(crate) fn endpoint(&self) -> Result<String, String> {
+        self.endpoint_with_base(crate::distribution::DEFAULT_RELEASE_BASE)
+    }
+
+    pub(crate) fn endpoint_for_app(&self, app: &tauri::AppHandle) -> Result<String, String> {
+        self.endpoint_for_product(
+            &crate::distribution::release_base(app)?,
+            crate::distribution::feed_stem(&app.config().identifier),
+        )
+    }
+
+    fn endpoint_with_base(&self, base: &str) -> Result<String, String> {
+        self.endpoint_for_product(base, crate::distribution::DEFAULT_FEED_STEM)
+    }
+
+    /// The feed for this source. `stem` names the product's feed family
+    /// (`latest` for Ryu, `latest-bot` for the standalone Ryu Bot build), so a
+    /// product never installs another product's bundle over itself.
+    fn endpoint_for_product(&self, base: &str, stem: &str) -> Result<String, String> {
         match self {
-            Self::Stable => Ok(
-                "https://github.com/amajorai/ryu/releases/latest/download/latest.json".to_string(),
-            ),
-            Self::Channel { channel } if channel == "beta" => Ok(
-                "https://github.com/amajorai/ryu/releases/latest/download/latest-beta.json"
-                    .to_string(),
-            ),
+            Self::Stable => Ok(format!("{base}/latest/download/{stem}.json")),
+            Self::Channel { channel } if channel == "beta" => {
+                Ok(format!("{base}/latest/download/{stem}-beta.json"))
+            }
             Self::Channel { channel } if matches!(channel.as_str(), "nightly" | "canary") => {
-                Ok(format!(
-                    "https://github.com/amajorai/ryu/releases/download/{channel}/latest-{channel}.json"
-                ))
+                // Only Ryu has rolling nightly/canary trains; the standalone Bot
+                // build is published with stable releases (and beta, which
+                // tracks stable) alone. CI no longer publishes the rolling
+                // `nightly`/`canary` tags, so callers should send a `Tag` source
+                // with the build's versioned tag; this form is kept for
+                // previously persisted metadata.
+                if stem != crate::distribution::DEFAULT_FEED_STEM {
+                    return Err(format!("Ryu Bot has no {channel} builds"));
+                }
+                Ok(format!("{base}/download/{channel}/{stem}-{channel}.json"))
             }
             Self::Channel { channel } => Err(format!("unsupported release channel: {channel}")),
             Self::Tag { tag, channel } => {
                 if !is_safe_url_segment(tag, |character| {
-                    character.is_ascii_alphanumeric()
-                        || matches!(character, '.' | '_' | '+' | '-')
-                }) || !matches!(channel.as_str(), "stable" | "beta")
+                    character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '+' | '-')
+                }) || !matches!(channel.as_str(), "stable" | "beta" | "nightly" | "canary")
                 {
                     return Err("invalid release tag or channel".to_string());
                 }
+                // Each nightly/canary build publishes `{stem}-{channel}.json` on
+                // its own versioned tag (the rolling tags are retired), and only
+                // Ryu ships those trains.
+                if matches!(channel.as_str(), "nightly" | "canary")
+                    && stem != crate::distribution::DEFAULT_FEED_STEM
+                {
+                    return Err(format!("Ryu Bot has no {channel} builds"));
+                }
                 let file = if channel == "stable" {
-                    "latest.json".to_string()
+                    format!("{stem}.json")
                 } else {
-                    format!("latest-{channel}.json")
+                    format!("{stem}-{channel}.json")
                 };
-                Ok(format!(
-                    "https://github.com/amajorai/ryu/releases/download/{tag}/{file}"
-                ))
+                Ok(format!("{base}/download/{tag}/{file}"))
             }
         }
     }
@@ -545,6 +751,101 @@ mod tests {
             source: AppUpdateSource::Stable,
             version: version.to_string(),
         }
+    }
+
+    #[test]
+    fn packaged_distribution_routes_every_source_without_changing_validation() {
+        let base = "https://localhost:9443/releases";
+        assert_eq!(
+            AppUpdateSource::Stable.endpoint_with_base(base).unwrap(),
+            format!("{base}/latest/download/latest.json")
+        );
+        for channel in ["beta", "nightly", "canary"] {
+            let expected = if channel == "beta" {
+                format!("{base}/latest/download/latest-beta.json")
+            } else {
+                format!("{base}/download/{channel}/latest-{channel}.json")
+            };
+            assert_eq!(
+                AppUpdateSource::Channel {
+                    channel: channel.into()
+                }
+                .endpoint_with_base(base)
+                .unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            AppUpdateSource::Tag {
+                tag: "v0.4.0".into(),
+                channel: "stable".into()
+            }
+            .endpoint_with_base(base)
+            .unwrap(),
+            format!("{base}/download/v0.4.0/latest.json")
+        );
+        assert!(AppUpdateSource::Tag {
+            tag: "../v0.4.0".into(),
+            channel: "stable".into()
+        }
+        .endpoint_with_base(base)
+        .is_err());
+        for channel in ["nightly", "canary"] {
+            let tag = format!("v0.4.1-{channel}.20260804.36");
+            assert_eq!(
+                AppUpdateSource::Tag {
+                    tag: tag.clone(),
+                    channel: channel.into()
+                }
+                .endpoint_with_base(base)
+                .unwrap(),
+                format!("{base}/download/{tag}/latest-{channel}.json")
+            );
+        }
+    }
+
+    #[test]
+    fn bot_build_reads_its_own_feed_family() {
+        let base = "https://github.com/amajorai/ryu/releases";
+        let stem = crate::distribution::feed_stem("ai.amajor.ryu.bot");
+        assert_eq!(
+            AppUpdateSource::Stable
+                .endpoint_for_product(base, stem)
+                .unwrap(),
+            format!("{base}/latest/download/latest-bot.json")
+        );
+        assert_eq!(
+            AppUpdateSource::Channel {
+                channel: "beta".into()
+            }
+            .endpoint_for_product(base, stem)
+            .unwrap(),
+            format!("{base}/latest/download/latest-bot-beta.json")
+        );
+        assert!(AppUpdateSource::Channel {
+            channel: "nightly".into()
+        }
+        .endpoint_for_product(base, stem)
+        .is_err());
+        assert_eq!(
+            AppUpdateSource::Tag {
+                tag: "v0.4.0".into(),
+                channel: "beta".into()
+            }
+            .endpoint_for_product(base, stem)
+            .unwrap(),
+            format!("{base}/download/v0.4.0/latest-bot-beta.json")
+        );
+        assert!(AppUpdateSource::Tag {
+            tag: "v0.4.1-canary.1".into(),
+            channel: "canary".into()
+        }
+        .endpoint_for_product(base, stem)
+        .is_err());
+        assert_eq!(
+            crate::distribution::feed_stem("ai.amajor.ryu.desktop"),
+            "latest"
+        );
     }
 
     #[test]
@@ -656,6 +957,22 @@ mod tests {
         assert!(download_preference(Some(&serde_json::json!("invalid"))));
         assert!(download_preference(Some(&serde_json::json!(true))));
         assert!(!download_preference(Some(&serde_json::json!(false))));
+    }
+
+    #[test]
+    fn runtime_gate_reopens_on_failure_and_stays_closed_until_successful_relaunch() {
+        assert!(!super::runtime_update_in_progress());
+        {
+            let _guard = super::RuntimeUpdateGuard::enter().unwrap();
+            assert!(super::runtime_update_in_progress());
+            assert!(super::RuntimeUpdateGuard::enter().is_err());
+        }
+        assert!(!super::runtime_update_in_progress());
+        let mut guard = super::RuntimeUpdateGuard::enter().unwrap();
+        guard.wait_for_relaunch();
+        drop(guard);
+        assert!(super::runtime_update_in_progress());
+        super::RUNTIME_UPDATE_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     #[test]

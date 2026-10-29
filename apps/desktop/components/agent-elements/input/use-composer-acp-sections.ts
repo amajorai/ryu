@@ -34,8 +34,8 @@ import type {
 	ComposerModelSection,
 	StreamedAcpConfig,
 	StreamedAcpControl,
-} from "@ryu/blocks/composer/composer-acp-sections";
-import { useAcpSections } from "@ryu/blocks/composer/composer-acp-sections";
+} from "@ryu/blocks/composer/composer-acp-sections.ts";
+import { useAcpSections } from "@ryu/blocks/composer/composer-acp-sections.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef } from "react";
 import type { ComposerSettingItem } from "@/components/agent-elements/input/composer-settings-menu.tsx";
@@ -164,6 +164,8 @@ export interface ComposerAcpSectionsParams {
 	 * (Core's `data-ryu-acp-mode` part). Session-scoped surfaces leave it undefined.
 	 */
 	streamedMode?: string | null;
+	/** The emission identity (`messageId:partIndex`) of {@link streamedMode}. */
+	streamedModeKey?: string | null;
 }
 
 export interface ComposerAcpSectionsResult
@@ -186,6 +188,7 @@ export function useComposerAcpSections({
 	onSelectionApplied,
 	preferSimpleApprovalDefaults = false,
 	streamedMode,
+	streamedModeKey,
 	streamedConfig,
 	streamedConfigOptions,
 	streamedControl,
@@ -246,6 +249,8 @@ export function useComposerAcpSections({
 		)
 	);
 	const acpSelections = useMemo<Record<string, string> | null>(() => {
+		// SAFETY: selectionsKey is JSON.stringify of sorted Object.entries from
+		// getAcpConfig's string dictionary above, so parsing restores string pairs.
 		const entries = JSON.parse(selectionsKey) as [string, string][];
 		return entries.length > 0 ? Object.fromEntries(entries) : null;
 	}, [selectionsKey]);
@@ -329,6 +334,7 @@ export function useComposerAcpSections({
 		streamedConfig,
 		streamedControl,
 		streamedMode,
+		streamedModeKey,
 	});
 
 	return useMemo<ComposerAcpSectionsResult>(() => {

@@ -4,6 +4,9 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "lib": ["ESNext", "DOM"],
     "outDir": "dist",
     "composite": true,
     "strictNullChecks": true

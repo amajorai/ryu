@@ -214,6 +214,7 @@ fn provider_configured(config: &GatewayConfig, provider: &str) -> bool {
         "local" => config.providers.local.is_some(),
         "classify" => config.providers.classify.is_some(),
         "openrouter" => config.providers.openrouter.is_some(),
+        "litellm" => config.providers.litellm.is_some(),
         "core" => config.providers.core.is_some(),
         "modal" => config.providers.modal.is_some(),
         "genai" => config.providers.genai.is_some(),
@@ -223,6 +224,7 @@ fn provider_configured(config: &GatewayConfig, provider: &str) -> bool {
         "bedrock" => config.providers.bedrock.is_some(),
         "vertex" => config.providers.vertex.is_some(),
         "openai-credits" => config.providers.openai_credits.is_some(),
+        "anthropic-credits" => config.providers.anthropic_credits.is_some(),
         _ => false,
     }
 }
@@ -233,6 +235,7 @@ fn any_chat_provider_configured(config: &GatewayConfig) -> bool {
         || providers.anthropic.is_some()
         || providers.local.is_some()
         || providers.openrouter.is_some()
+        || providers.litellm.is_some()
         || providers.core.is_some()
         || providers.modal.is_some()
         || providers.genai.is_some()
@@ -242,12 +245,13 @@ fn any_chat_provider_configured(config: &GatewayConfig) -> bool {
         || providers.bedrock.is_some()
         || providers.vertex.is_some()
         || providers.openai_credits.is_some()
+        || providers.anthropic_credits.is_some()
 }
 
 fn drift_path(code: &str) -> Option<&'static str> {
     match code {
         "exec_without_firewall" | "locked_guardrails_firewall_off" => Some("firewall.enabled"),
-        "composio_wildcard_allowlist" | "composio_guardrails_advisory" => Some("composio.actions"),
+        "composio_guardrails_advisory" => Some("composio.actions"),
         "exec_budget_stop_ineffective" => Some("exec_budget.action"),
         "secret_redaction_disabled" => Some("firewall.redact_secrets"),
         _ => None,
@@ -618,18 +622,27 @@ pub async fn fix_doctor(
     if !request.dry_run {
         if let Some(firewall) = firewall_with_safe_fixes(&state, &before) {
             let patch = super::config::ConfigPatch {
+                composio_billing: None,
+                expected_revision: None,
+                provider_account_policies: None,
+                provider_account_strategies: None,
+                provider_account_drain_thresholds: None,
                 acp: None,
                 computer_use: None,
                 firewall: Some(firewall),
                 budgets: None,
                 auth: None,
                 routing: None,
+                egress: None,
                 tools: None,
                 firewall_org_overlays: None,
                 firewall_agent_overlays: None,
                 custom_evaluators: None,
                 backends: None,
+                resolved_backends: None,
+                screening: None,
                 marketplace_recommendations: None,
+                phone_calls: None,
             };
             let _ = super::config::put_config(
                 State(state.clone()),
@@ -709,6 +722,7 @@ mod tests {
             "anthropic": { "api_key": "sk-a" },
             "local": { "base_url": "http://127.0.0.1:1234" },
             "openrouter": { "api_key": "sk-or" },
+            "litellm": { "api_key": "sk-litellm" },
             "core": { "base_url": "http://127.0.0.1:7979", "token": "t" },
             "modal": { "api_key": "sk-m", "base_url": "https://modal.example" },
             "genai": { "keys": { "gemini": "sk-g" } },
@@ -728,6 +742,7 @@ mod tests {
             "local",
             "classify",
             "openrouter",
+            "litellm",
             "core",
             "modal",
             "genai",
@@ -746,3 +761,7 @@ mod tests {
         assert!(any_chat_provider_configured(&config));
     }
 }
+
+#[cfg(test)]
+#[path = "doctor_fix_tests.rs"]
+mod fix_tests;

@@ -1,30 +1,28 @@
 "use client";
 
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
+import {
+	AlertDialog,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogMedia,
+	AlertDialogPortal,
+	AlertDialogTrigger,
+} from "@ryu/ui/components/alert-dialog.tsx";
 import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
+// The root, trigger, portal, and header/footer/media layout slots are the
+// app-wide alert dialog's own. This editor copy keeps only the parts that
+// differ: its overlay and content (fixed `duration-100` motion, logical
+// `start-1/2` centering), unlocalized title and description, and the
+// action/cancel slots backed by the editor Button.
+
 const MOBILE_DRAWER_CONTENT_CLASSES =
-	"max-sm:!inset-x-0 max-sm:!top-auto max-sm:!bottom-0 max-sm:!start-0 max-sm:!w-full max-sm:!max-w-none max-sm:!translate-x-0 max-sm:!translate-y-0 max-sm:!rounded-t-4xl max-sm:!rounded-b-none max-sm:!max-h-[calc(100dvh-0.5rem)] max-sm:!overflow-y-auto max-sm:data-open:slide-in-from-bottom-4 max-sm:data-closed:slide-out-to-bottom-4 max-sm:data-open:zoom-in-100 max-sm:data-closed:zoom-out-100";
-
-function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
-	return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
-}
-
-function AlertDialogTrigger({ ...props }: AlertDialogPrimitive.Trigger.Props) {
-	return (
-		<AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />
-	);
-}
-
-function AlertDialogPortal({ ...props }: AlertDialogPrimitive.Portal.Props) {
-	return (
-		<AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
-	);
-}
+	"max-sm:!inset-x-0 max-sm:!top-auto max-sm:!bottom-0 max-sm:!start-0 max-sm:!w-full max-sm:!max-w-none max-sm:!translate-x-0 max-sm:!translate-y-0 max-sm:!rounded-t-4xl max-sm:!corner-t-squircle max-sm:!rounded-b-none max-sm:!max-h-[calc(100dvh-0.5rem)] max-sm:!overflow-y-auto max-sm:data-open:slide-in-from-bottom-4 max-sm:data-closed:slide-out-to-bottom-4 max-sm:data-open:zoom-in-100 max-sm:data-closed:zoom-out-100";
 
 function AlertDialogOverlay({
 	className,
@@ -33,7 +31,7 @@ function AlertDialogOverlay({
 	return (
 		<AlertDialogPrimitive.Backdrop
 			className={cn(
-				"ryu-dialog-overlay data-open:fade-in-0 data-closed:fade-out-0 fixed inset-0 isolate z-50 rounded-[var(--ryu-window-radius,0px)] duration-100 data-closed:animate-out data-open:animate-in",
+				"ryu-dialog-overlay data-open:fade-in-0 data-closed:fade-out-0 corner-squircle fixed inset-0 isolate z-50 rounded-[var(--ryu-window-radius,0px)] duration-100 data-closed:animate-out data-open:animate-in",
 				className
 			)}
 			data-slot="alert-dialog-overlay"
@@ -56,7 +54,7 @@ function AlertDialogContent({
 			<AlertDialogOverlay />
 			<AlertDialogPrimitive.Popup
 				className={cn(
-					"group/alert-dialog-content data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 fixed start-1/2 top-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 rounded-4xl bg-popover/90 p-4 text-popover-foreground shadow-xl outline-none backdrop-blur-xl duration-100 data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-closed:animate-out data-open:animate-in data-[size=default]:sm:max-w-md rtl:translate-x-1/2",
+					"group/alert-dialog-content data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 corner-squircle fixed start-1/2 top-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 rounded-4xl bg-popover/90 p-4 text-popover-foreground shadow-xl outline-none backdrop-blur-xl duration-100 data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-closed:animate-out data-open:animate-in data-[size=default]:sm:max-w-md rtl:translate-x-1/2",
 					className,
 					MOBILE_DRAWER_CONTENT_CLASSES
 				)}
@@ -72,54 +70,6 @@ function AlertDialogContent({
 				{children}
 			</AlertDialogPrimitive.Popup>
 		</AlertDialogPortal>
-	);
-}
-
-function AlertDialogHeader({
-	className,
-	...props
-}: React.ComponentProps<"div">) {
-	return (
-		<div
-			className={cn(
-				"grid grid-rows-[auto_1fr] place-items-center gap-1.5 text-center has-data-[slot=alert-dialog-media]:grid-rows-[auto_auto_1fr] has-data-[slot=alert-dialog-media]:gap-x-6 sm:group-data-[size=default]/alert-dialog-content:place-items-start sm:group-data-[size=default]/alert-dialog-content:text-start sm:group-data-[size=default]/alert-dialog-content:has-data-[slot=alert-dialog-media]:grid-rows-[auto_1fr]",
-				className
-			)}
-			data-slot="alert-dialog-header"
-			{...props}
-		/>
-	);
-}
-
-function AlertDialogFooter({
-	className,
-	...props
-}: React.ComponentProps<"div">) {
-	return (
-		<div
-			className={cn(
-				"flex flex-col-reverse gap-2 group-data-[size=sm]/alert-dialog-content:grid group-data-[size=sm]/alert-dialog-content:grid-cols-2 sm:flex-row sm:justify-end",
-				className
-			)}
-			data-slot="alert-dialog-footer"
-			{...props}
-		/>
-	);
-}
-
-function AlertDialogMedia({
-	className,
-	...props
-}: React.ComponentProps<"div">) {
-	return (
-		<div
-			className={cn(
-				"mb-2 inline-flex size-16 items-center justify-center rounded-full bg-muted sm:group-data-[size=default]/alert-dialog-content:row-span-2 *:[svg:not([class*='size-'])]:size-8",
-				className
-			)}
-			data-slot="alert-dialog-media"
-			{...props}
-		/>
 	);
 }
 

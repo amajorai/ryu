@@ -13,10 +13,23 @@ test("proves channel fallback, setup toggles, and protected deletion", async ({
 		}
 	});
 	page.on("pageerror", (error) => pageErrors.push(String(error)));
+	// The bare Vite harness serves no favicon; that 404 is not this proof's.
+	await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204 }));
 
 	await page.goto(STORY_URL);
 	await page.waitForSelector("body[data-harness-ready='1']");
 
+	// A new agent opens on the identity question; channel setup is on the
+	// details step after it.
+	const identityStep = page.getByRole("dialog", {
+		name: "How should this agent work?",
+	});
+	await expect(identityStep).toBeVisible();
+	await expect(identityStep.getByRole("radio")).toHaveCount(3);
+	await expect(
+		identityStep.getByRole("radio", { name: /^Acts as you/ })
+	).toHaveAttribute("aria-checked", "true");
+	await identityStep.getByRole("button", { name: "Continue" }).click();
 	await expect(page.getByRole("dialog", { name: "New agent" })).toBeVisible();
 	const setupSwitches = page.getByRole("switch");
 	await expect(setupSwitches).toHaveCount(3);
@@ -43,8 +56,12 @@ test("proves channel fallback, setup toggles, and protected deletion", async ({
 		name: "Delete Support Discord bot",
 	});
 	await expect(slider).toHaveAttribute("aria-valuenow", "0");
+	// The blade is a vertical slider: ArrowDown advances one of five steps, and
+	// ArrowRight is deliberately not bound.
+	await slider.press("ArrowRight");
+	await expect(slider).toHaveAttribute("aria-valuenow", "0");
 	for (let step = 0; step < 5; step += 1) {
-		await slider.press("ArrowRight");
+		await slider.press("ArrowDown");
 	}
 	await expect(
 		page.getByRole("alertdialog", { name: "Delete this channel?" })

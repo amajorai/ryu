@@ -1,11 +1,12 @@
 //! Built-in coordinator-threads tools (`threads.*`) — Codex-style cross-thread
 //! orchestration.
 //!
-//! A single *coordinator* agent thread can spin up and manage *worker* threads:
-//! create a thread, list/read threads, send a message that runs a worker's agent
-//! (optionally in the background, in its own git worktree), and pin / archive /
-//! title threads. In Ryu a Codex "thread" is a [`ConversationStore`] conversation,
-//! so workers are durable, searchable, and resumable exactly like any chat.
+//! A single *coordinator* agent thread can discover active Ryu conversations,
+//! spot shared workspaces, and manage *worker* threads: create a thread, list/read
+//! threads, send a message that runs a worker's agent (optionally in the background,
+//! with optional worktree isolation), wait for a run, and pin / archive / title threads. In
+//! Ryu a Codex "thread" is a [`ConversationStore`] conversation, so workers are
+//! durable, searchable, and resumable exactly like any chat.
 //!
 //! Registered as a reserved registry server (`threads`) like spider/exa/
 //! search_conversations, so the `<server>.<tool>` id scheme, per-agent allowlist,
@@ -20,15 +21,17 @@
 //! worker's history, so the coordinator can read them back). By default it runs in
 //! the **background** and returns immediately — the whole point of the feature is
 //! to "work on a lot more at once"; the coordinator polls with `read_thread`.
-//! Each worker runs in its own per-conversation git worktree so parallel workers
-//! never collide in the same checkout.
+//! By default workers use the thread's working directory. A Core preference can
+//! enable per-call git worktree isolation, and `isolate` can override that choice.
 //!
 //! Background concurrency is bounded by a process-global semaphore
 //! ([`MAX_CONCURRENT_WORKERS`]) so a coordinator (or a worker that itself holds the
 //! tool) cannot fan out without limit.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -39,6 +42,10 @@ use crate::server::conversations::ConversationStore;
 
 /// Reserved registry server name for the built-in coordinator-threads provider.
 pub const SERVER_NAME: &str = "threads";
+
+/// Core preference key for the default isolation choice on worker turns.
+pub const WORKTREE_ISOLATION_DEFAULT_PREF_KEY: &str = "threads-worktree-isolate-by-default";
+pub const DEFAULT_WORKTREE_ISOLATION: bool = false;
 
 /// Max number of worker turns running concurrently across the whole process.
 /// Mirrors the scheduler's `MAX_CONCURRENT_JOBS`. Excess background turns queue
@@ -52,6 +59,13 @@ const MAX_READ_LIMIT: usize = 100;
 /// Max characters of a single message body returned by `read_thread`, so a long
 /// worker turn doesn't blow the coordinator's context.
 const MESSAGE_MAX_CHARS: usize = 2000;
+
+/// A bounded wait lets an agent yield time for a concurrent thread without
+/// holding a tool call open forever.
+const DEFAULT_WAIT_TIMEOUT_MS: u64 = 30_000;
+const MAX_WAIT_TIMEOUT_MS: u64 = 300_000;
+const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const MAX_ACTIVE_SESSION_ROWS: usize = 100;
 
 /// The process-global background-worker concurrency limiter.
 fn worker_semaphore() -> &'static Arc<Semaphore> {
@@ -75,7 +89,20 @@ fn list_threads_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "include_archived": { "type": "boolean", "description": "Include archived threads (default false)." }
+            "include_archived": { "type": "boolean", "description": "Include archived threads (default false)." },
+            "active_only": { "type": "boolean", "description": "Show only conversations or Runnable sessions that are currently running (default false). Use this to see concurrent work before editing a shared workspace." }
+        },
+        "required": []
+    })
+}
+
+fn wait_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "thread_id": { "type": "string", "description": "Visible conversation/thread id to wait for." },
+            "session_id": { "type": "string", "description": "Visible Ryu Runnable session id to wait for. Provide exactly one of session_id or thread_id." },
+            "timeout_ms": { "type": "integer", "minimum": 0, "maximum": MAX_WAIT_TIMEOUT_MS, "description": "How long to wait (default 30000, maximum 300000). Use 0 to read the current status without waiting." }
         },
         "required": []
     })
@@ -96,10 +123,10 @@ fn send_message_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "thread_id": { "type": "string", "description": "Id of the worker thread to instruct." },
+            "thread_id": { "type": "string", "description": "Id from list_threads for the worker thread or active session's conversation." },
             "message": { "type": "string", "description": "The instruction to send. The worker's agent runs and its reply is persisted to the worker thread." },
             "wait": { "type": "boolean", "description": "Block until the worker replies and return the reply (default false: run in the background and return immediately so you can dispatch more work)." },
-            "isolate": { "type": "boolean", "description": "Run in a dedicated git worktree when cwd is a repo (default true), so parallel workers never collide." },
+            "isolate": { "type": "boolean", "description": "Run in a dedicated git worktree when cwd is a repo. If omitted, uses the Worktrees setting (off by default)." },
             "cwd": { "type": "string", "description": "Override the thread's working directory for this turn." }
         },
         "required": ["thread_id", "message"]
@@ -168,7 +195,7 @@ pub fn tools() -> Vec<RegistryTool> {
         ),
         def(
             "list_threads",
-            "List threads with their status, title, message count, and pinned/archived flags. Pinned threads sort first.",
+            "List visible threads and active Ryu Runnable sessions with their status, agent, workspace, branch, and pinned/archived flags. Set active_only=true to inspect concurrent work. A shared workspace path is marked as a possible file conflict.",
             list_threads_schema(),
         ),
         def(
@@ -178,8 +205,13 @@ pub fn tools() -> Vec<RegistryTool> {
         ),
         def(
             "send_message_to_thread",
-            "Send an instruction to a worker thread and run its agent. Runs in the background by default (returns immediately so you can dispatch more work); poll read_thread for the result. Each worker runs in its own git worktree.",
+            "Send an instruction to a worker thread or active session's conversation and run its agent. Runs in the background by default; use wait_for_thread or read_thread to check the result. Worktree isolation is off by default and can be changed in Worktrees settings or overridden with isolate.",
             send_message_schema(),
+        ),
+        def(
+            "wait_for_thread",
+            "Wait for a visible thread or Ryu Runnable session to finish. Provide exactly one of thread_id or session_id. Use after sending work in the background, then read_thread for the transcript.",
+            wait_schema(),
         ),
         def(
             "set_thread_title",
@@ -279,11 +311,53 @@ pub async fn dispatch(
     store: &ConversationStore,
     principal: &ToolPrincipal,
 ) -> Result<Value> {
+    dispatch_with_default_isolation(
+        tool,
+        arguments,
+        store,
+        principal,
+        DEFAULT_WORKTREE_ISOLATION,
+        None,
+    )
+    .await
+}
+
+/// `host_conversation_id` is the coordinator thread running this tool call. When
+/// present, threads it creates or drives record it as their spawning thread
+/// (`spawned_by_conversation_id`), which is what lets a main thread show its
+/// sessions and a session link back to the main thread that started it.
+pub async fn dispatch_with_default_isolation(
+    tool: &str,
+    arguments: Value,
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+    default_isolate: bool,
+    host_conversation_id: Option<&str>,
+) -> Result<Value> {
     match tool {
-        "create_thread" => create_thread(arguments, store, principal).await,
+        "create_thread" => {
+            let result = create_thread(arguments, store, principal).await?;
+            record_lineage(store, &result, host_conversation_id).await;
+            bind_worker_box(&result);
+            Ok(result)
+        }
         "list_threads" => list_threads(arguments, store, principal).await,
         "read_thread" => read_thread(arguments, store, principal).await,
-        "send_message_to_thread" => send_message_to_thread(arguments, store, principal).await,
+        "send_message_to_thread" => {
+            // Register the worker as a sub-agent of this coordinator before its
+            // turn starts, so its first machine verb already finds its child
+            // Box. Only a worker this principal owns is registered.
+            if let Some(thread_id) = opt_str(&arguments, "thread_id") {
+                if principal.owns(store, &thread_id).await {
+                    super::box_desktop::bind_child_conversation(&thread_id);
+                }
+            }
+            let result =
+                send_message_to_thread(arguments, store, principal, default_isolate).await?;
+            record_lineage(store, &result, host_conversation_id).await;
+            Ok(result)
+        }
+        "wait_for_thread" => wait_for_thread(arguments, store, principal).await,
         "set_thread_title" => {
             let id = require_str(&arguments, "thread_id")?;
             let title = require_str(&arguments, "title")?;
@@ -345,6 +419,52 @@ pub async fn dispatch(
     }
 }
 
+/// Register a worker thread this coordinator just created as one of its
+/// sub-agents (`SUBAGENT_BOX_SCOPE`, set by the registry around this dispatch):
+/// its `computer.*` and `browser.*` calls then run on the child Box
+/// `<coordinator>#sub:<n>`, or on the coordinator's Box when the plan cap
+/// refuses another one. Outside a scope (no host conversation) nothing changes.
+fn bind_worker_box(result: &Value) {
+    if result.get("ok").and_then(Value::as_bool) != Some(true) {
+        return;
+    }
+    if let Some(thread_id) = result.get("thread_id").and_then(Value::as_str) {
+        super::box_desktop::bind_child_conversation(thread_id);
+    }
+}
+
+/// Parse the string preference at the Core settings boundary. Missing,
+/// malformed, or unknown values retain the safe no-worktree default.
+/// Record the coordinator as the spawning thread of a worker it created or drove.
+/// Write-once in the store, so the first coordinator wins. Best-effort: lineage is
+/// presentation metadata, and a failure must never fail the tool call itself.
+async fn record_lineage(store: &ConversationStore, result: &Value, host: Option<&str>) {
+    let Some(host) = host.map(str::trim).filter(|host| !host.is_empty()) else {
+        return;
+    };
+    if result.get("ok").and_then(Value::as_bool) != Some(true) {
+        return;
+    }
+    let Some(thread_id) = result.get("thread_id").and_then(Value::as_str) else {
+        return;
+    };
+    if let Err(error) = store.mark_spawned_by(thread_id, host, None).await {
+        tracing::warn!(
+            thread_id,
+            host,
+            "could not record session lineage: {error:#}"
+        );
+    }
+}
+
+pub fn default_worktree_isolation(preference: Option<&str>) -> bool {
+    preference.is_some_and(|value| value.trim().eq_ignore_ascii_case("true"))
+}
+
+fn isolate_for_call(arguments: &Value, default_isolate: bool) -> bool {
+    opt_bool(arguments, "isolate", default_isolate)
+}
+
 async fn create_thread(
     arguments: Value,
     store: &ConversationStore,
@@ -387,34 +507,183 @@ async fn list_threads(
     principal: &ToolPrincipal,
 ) -> Result<Value> {
     let include_archived = opt_bool(&arguments, "include_archived", false);
+    let active_only = opt_bool(&arguments, "active_only", false);
     // Was `list_conversations()` — the UNFILTERED, every-row-on-the-node listing.
     // Now filtered in SQL by the same predicate the REST list uses.
     let (uid, org, bound) = principal.filter_args();
     let mut convs = store.list_conversations_visible(uid, org, bound).await?;
-    if !include_archived {
+    let active_sessions = store
+        .list_running_sessions_visible(uid, org, bound, MAX_ACTIVE_SESSION_ROWS)
+        .await?;
+    let active_session_list_truncated = active_sessions.len() == MAX_ACTIVE_SESSION_ROWS;
+    let mut sessions_by_conversation = HashMap::<String, Vec<Value>>::new();
+    for session in active_sessions {
+        sessions_by_conversation
+            .entry(session.conversation_id.clone())
+            .or_default()
+            .push(json!({
+                "session_id": session.id,
+                "runnable_id": session.runnable_id,
+                "runnable_kind": session.runnable_kind,
+                "status": "running",
+                "updated_at": session.updated_at,
+            }));
+    }
+    if !include_archived && !active_only {
         convs.retain(|c| !c.archived);
+    }
+    if active_only {
+        convs.retain(|c| {
+            c.run_status.as_deref() == Some("running")
+                || sessions_by_conversation.contains_key(&c.id)
+        });
     }
     // Pinned first, otherwise preserve the store's most-recently-updated order.
     convs.sort_by(|a, b| b.pinned.cmp(&a.pinned));
+
+    let mut workspace_counts = HashMap::new();
+    for conversation in &convs {
+        let session_count = sessions_by_conversation
+            .get(&conversation.id)
+            .map_or(0, Vec::len);
+        let conversation_run_count = if conversation.run_status.as_deref() == Some("running") {
+            1
+        } else {
+            0
+        };
+        let active_run_count = session_count.max(conversation_run_count);
+        if active_run_count == 0 {
+            continue;
+        }
+        if let Some(path) = conversation
+            .worktree_path
+            .as_deref()
+            .or(conversation.folder_path.as_deref())
+        {
+            *workspace_counts
+                .entry(workspace_key(path))
+                .or_insert(0usize) += active_run_count;
+        }
+    }
     let threads: Vec<Value> = convs
         .into_iter()
         .map(|c| {
+            let sessions = sessions_by_conversation.remove(&c.id).unwrap_or_default();
+            let is_active = c.run_status.as_deref() == Some("running") || !sessions.is_empty();
+            let run_status = if is_active {
+                Some("running")
+            } else {
+                c.run_status.as_deref()
+            };
+            let workspace_path = c.worktree_path.as_deref().or(c.folder_path.as_deref());
+            let workspace_overlap = is_active
+                && workspace_path.is_some_and(|path| {
+                    workspace_counts
+                        .get(&workspace_key(path))
+                        .is_some_and(|count| *count > 1)
+                });
             json!({
                 "thread_id": c.id,
                 "title": c.title,
                 "agent_id": c.agent_id,
-                "run_status": c.run_status,
+                "run_status": run_status,
+                "sessions": sessions,
                 "message_count": c.message_count,
                 "pinned": c.pinned,
                 "archived": c.archived,
                 "folder_path": c.folder_path,
+                "branch": c.branch,
                 "worktree_path": c.worktree_path,
+                "workspace_overlap": workspace_overlap,
                 "updated_at": c.updated_at,
             })
         })
         .collect();
     let count = threads.len();
-    Ok(json!({ "ok": true, "threads": threads, "count": count }))
+    Ok(json!({
+        "ok": true,
+        "threads": threads,
+        "count": count,
+        "active_sessions_may_be_truncated": active_session_list_truncated,
+    }))
+}
+
+fn workspace_key(path: &str) -> String {
+    let normalized = path
+        .trim()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_owned();
+    if cfg!(windows) {
+        normalized.to_lowercase()
+    } else {
+        normalized
+    }
+}
+
+async fn wait_for_thread(
+    arguments: Value,
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+) -> Result<Value> {
+    let thread_id = opt_str(&arguments, "thread_id");
+    let session_id = opt_str(&arguments, "session_id");
+    let (target_id, target_field, is_session) = match (thread_id, session_id) {
+        (Some(thread_id), None) => (thread_id, "thread_id", false),
+        (None, Some(session_id)) => (session_id, "session_id", true),
+        _ => anyhow::bail!("provide exactly one of thread_id or session_id"),
+    };
+    if target_id.len() > 512 {
+        anyhow::bail!("thread_id and session_id must be at most 512 bytes");
+    }
+    let timeout_ms = match arguments.get("timeout_ms") {
+        None => DEFAULT_WAIT_TIMEOUT_MS,
+        Some(value) => match value.as_u64() {
+            Some(value) if value <= MAX_WAIT_TIMEOUT_MS => value,
+            _ => anyhow::bail!("timeout_ms must be an integer between 0 and {MAX_WAIT_TIMEOUT_MS}"),
+        },
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let (owner_user_id, org_id, node_bound) = principal.filter_args();
+
+    loop {
+        let status = if is_session {
+            store
+                .get_session_status_visible(&target_id, owner_user_id, org_id, node_bound)
+                .await?
+                .map(Some)
+        } else {
+            store
+                .get_run_status_visible(&target_id, owner_user_id, org_id, node_bound)
+                .await?
+        };
+        match status {
+            None => return Ok(not_found()),
+            Some(None) => {
+                return Ok(wait_result(target_field, &target_id, "not_running", false));
+            }
+            Some(Some(status)) if status != "running" => {
+                return Ok(wait_result(target_field, &target_id, &status, false));
+            }
+            Some(Some(_)) => {}
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Ok(wait_result(target_field, &target_id, "running", true));
+        }
+        tokio::time::sleep(WAIT_POLL_INTERVAL.min(deadline - now)).await;
+    }
+}
+
+fn wait_result(target_field: &str, target_id: &str, status: &str, timed_out: bool) -> Value {
+    let mut result = json!({
+        "ok": true,
+        "status": status,
+        "timed_out": timed_out,
+    });
+    result[target_field] = json!(target_id);
+    result
 }
 
 async fn read_thread(
@@ -440,10 +709,10 @@ async fn read_thread(
     // Find this thread's run_status from the list (detail omits it).
     let (uid, org, bound) = principal.filter_args();
     let run_status = store
-        .list_conversations_visible(uid, org, bound)
+        .get_summary_visible(thread_id, uid, org, bound)
         .await
         .ok()
-        .and_then(|convs| convs.into_iter().find(|c| c.id == thread_id))
+        .flatten()
         .and_then(|c| c.run_status);
     let total = detail.messages.len();
     let messages: Vec<Value> = detail
@@ -474,11 +743,12 @@ async fn send_message_to_thread(
     arguments: Value,
     store: &ConversationStore,
     principal: &ToolPrincipal,
+    default_isolate: bool,
 ) -> Result<Value> {
     let thread_id = require_str(&arguments, "thread_id")?.to_owned();
     let message = require_str(&arguments, "message")?.to_owned();
     let wait = opt_bool(&arguments, "wait", false);
-    let isolate = opt_bool(&arguments, "isolate", true);
+    let isolate = isolate_for_call(&arguments, default_isolate);
     let cwd_override = opt_str(&arguments, "cwd");
 
     // THE WRITE GATE. This runs a REAL agent turn against the target thread (reading
@@ -499,23 +769,30 @@ async fn send_message_to_thread(
     // Resolve the worker's agent + working folder from its stored row.
     let (uid, org, bound) = principal.filter_args();
     let summary = store
-        .list_conversations_visible(uid, org, bound)
-        .await?
-        .into_iter()
-        .find(|c| c.id == thread_id);
+        .get_summary_visible(&thread_id, uid, org, bound)
+        .await?;
     let Some(summary) = summary else {
         return Ok(not_found());
     };
     let agent_id = summary.agent_id.clone();
+    // Echoed back so the coordinator's transcript can label the session card
+    // without a second read.
+    let title = summary.title.clone();
     let cwd = cwd_override.or_else(|| summary.folder_path.clone());
 
     if wait {
         // Blocking: bound concurrency with a permit, run, return the reply.
         let _permit = worker_semaphore().acquire().await;
         let reply = runner
-            .run_worker(agent_id, thread_id.clone(), message, cwd, isolate)
+            .run_worker(agent_id.clone(), thread_id.clone(), message, cwd, isolate)
             .await?;
-        return Ok(json!({ "ok": true, "thread_id": thread_id, "reply": reply }));
+        return Ok(json!({
+            "ok": true,
+            "thread_id": thread_id,
+            "title": title,
+            "agent_id": agent_id,
+            "reply": reply,
+        }));
     }
 
     // Background: spawn a permit-bounded task and return immediately. The chat
@@ -524,7 +801,8 @@ async fn send_message_to_thread(
     let sem = Arc::clone(worker_semaphore());
     let status_store = store.clone();
     let bg_thread_id = thread_id.clone();
-    tokio::spawn(async move {
+    let reported_agent_id = agent_id.clone();
+    let worker = async move {
         let _permit = sem.acquire().await;
         if let Err(e) = runner
             .run_worker(agent_id, bg_thread_id.clone(), message, cwd, isolate)
@@ -533,11 +811,19 @@ async fn send_message_to_thread(
             tracing::warn!("worker thread {bg_thread_id} turn failed: {e:#}");
             let _ = status_store.set_run_status(&bg_thread_id, "failed").await;
         }
-    });
+    };
+    // The worker turn is a sub-turn of the coordinator's: keep its attribution.
+    let attribution = crate::profile_activity::current_attribution();
+    tokio::spawn(crate::profile_activity::with_attribution(
+        attribution,
+        worker,
+    ));
 
     Ok(json!({
         "ok": true,
         "thread_id": thread_id,
+        "title": title,
+        "agent_id": reported_agent_id,
         "dispatched": true,
         "status": "running",
     }))
@@ -546,17 +832,36 @@ async fn send_message_to_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::conversations::Tenancy;
+    use crate::runnable::RunnableKind;
+    use crate::server::conversations::{SessionStatus, Tenancy};
 
     #[test]
-    fn lists_eight_tools_with_qualified_ids() {
+    fn worktree_isolation_defaults_off_and_reads_saved_preference() {
+        assert!(!DEFAULT_WORKTREE_ISOLATION);
+        assert!(!default_worktree_isolation(None));
+        assert!(!default_worktree_isolation(Some("false")));
+        assert!(default_worktree_isolation(Some(" TRUE ")));
+        assert!(!default_worktree_isolation(Some("unknown")));
+    }
+
+    #[test]
+    fn explicit_isolation_value_overrides_saved_default() {
+        assert!(isolate_for_call(&json!({}), true));
+        assert!(!isolate_for_call(&json!({}), false));
+        assert!(isolate_for_call(&json!({ "isolate": true }), false));
+        assert!(!isolate_for_call(&json!({ "isolate": false }), true));
+    }
+
+    #[test]
+    fn lists_nine_tools_with_qualified_ids() {
         let tools = tools();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 9);
         assert!(tools.iter().all(|t| t.server == SERVER_NAME));
         assert!(tools.iter().all(|t| t.id.starts_with("threads.")));
         assert!(tools
             .iter()
             .any(|t| t.id == "threads.send_message_to_thread"));
+        assert!(tools.iter().any(|t| t.id == "threads.wait_for_thread"));
     }
 
     #[tokio::test]
@@ -594,6 +899,215 @@ mod tests {
         .expect("read");
         assert_eq!(read["ok"], json!(true));
         assert_eq!(read["message_count"], json!(0));
+    }
+
+    #[tokio::test]
+    async fn active_thread_list_reports_shared_workspace_overlap() {
+        let store = ConversationStore::open_in_memory().expect("store");
+        for id in ["active-a", "active-b", "finished"] {
+            store
+                .ensure_conversation(id, Some("ryu"), Some(id), owner("alice"))
+                .await
+                .expect("conversation");
+        }
+        for id in ["active-a", "active-b"] {
+            store
+                .set_run_status(id, "running")
+                .await
+                .expect("run status");
+            store
+                .set_run_metadata(id, Some("D:\\work\\ryu"), Some("main"), None)
+                .await
+                .expect("workspace metadata");
+        }
+        let active_session = store
+            .create_session(
+                "agent-session",
+                RunnableKind::Agent,
+                Some("agent-session"),
+                Some("Runnable session"),
+                owner("alice"),
+            )
+            .await
+            .expect("create Runnable session");
+        store
+            .update_session_status(&active_session.id, SessionStatus::Running)
+            .await
+            .expect("start Runnable session");
+        store
+            .set_run_metadata(
+                &active_session.conversation_id,
+                Some("D:\\work\\ryu"),
+                Some("main"),
+                None,
+            )
+            .await
+            .expect("Runnable workspace metadata");
+        dispatch(
+            "set_thread_archived",
+            json!({ "thread_id": "active-a", "archived": true }),
+            &store,
+            &alice(),
+        )
+        .await
+        .expect("archive active thread");
+        store
+            .set_run_status("finished", "completed")
+            .await
+            .expect("run status");
+
+        let listed = dispatch(
+            "list_threads",
+            json!({ "active_only": true }),
+            &store,
+            &alice(),
+        )
+        .await
+        .expect("list active threads");
+
+        assert_eq!(listed["count"], json!(3));
+        for thread in listed["threads"].as_array().expect("threads") {
+            assert_eq!(thread["workspace_overlap"], json!(true));
+            assert_eq!(thread["branch"], json!("main"));
+        }
+        assert!(listed["threads"].as_array().unwrap().iter().any(|thread| {
+            thread["thread_id"] == "active-a" && thread["archived"] == json!(true)
+        }));
+        let session_thread = listed["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|thread| thread["thread_id"] == active_session.conversation_id)
+            .expect("active Runnable session thread");
+        assert_eq!(session_thread["run_status"], json!("running"));
+        assert_eq!(
+            session_thread["sessions"][0]["session_id"],
+            json!(active_session.id)
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_for_thread_observes_completion_and_timeout() {
+        let store = ConversationStore::open_in_memory().expect("store");
+        store
+            .ensure_conversation("worker", Some("ryu"), Some("worker"), owner("alice"))
+            .await
+            .expect("conversation");
+        store
+            .set_run_status("worker", "running")
+            .await
+            .expect("run status");
+
+        let timed_out = dispatch(
+            "wait_for_thread",
+            json!({ "thread_id": "worker", "timeout_ms": 0 }),
+            &store,
+            &alice(),
+        )
+        .await
+        .expect("wait snapshot");
+        assert_eq!(timed_out["status"], json!("running"));
+        assert_eq!(timed_out["timed_out"], json!(true));
+
+        let principal = alice();
+        let invalid_timeout = wait_for_thread(
+            json!({ "thread_id": "worker", "timeout_ms": -1 }),
+            &store,
+            &principal,
+        )
+        .await;
+        assert!(invalid_timeout.is_err());
+
+        let waiting_store = store.clone();
+        let waiter = tokio::spawn(async move {
+            let principal = alice();
+            wait_for_thread(
+                json!({ "thread_id": "worker", "timeout_ms": 1_000 }),
+                &waiting_store,
+                &principal,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        store
+            .set_run_status("worker", "completed")
+            .await
+            .expect("complete run");
+        let completed = waiter.await.expect("wait task").expect("wait result");
+        assert_eq!(completed["status"], json!("completed"));
+        assert_eq!(completed["timed_out"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn wait_does_not_reveal_another_users_thread() {
+        let (store, alice_id, _) = two_tenant_store().await;
+        let result = dispatch(
+            "wait_for_thread",
+            json!({ "thread_id": alice_id }),
+            &store,
+            &bob(),
+        )
+        .await
+        .expect("wait dispatch");
+
+        assert_eq!(result["ok"], json!(false));
+        assert_eq!(result["error"], json!("thread not found"));
+    }
+
+    #[tokio::test]
+    async fn wait_accepts_a_visible_runnable_session_id() {
+        let store = ConversationStore::open_in_memory().expect("store");
+        let session = store
+            .create_session(
+                "agent-session",
+                RunnableKind::Agent,
+                Some("agent-session"),
+                Some("worker"),
+                owner("alice"),
+            )
+            .await
+            .expect("create session");
+        store
+            .update_session_status(&session.id, SessionStatus::Running)
+            .await
+            .expect("start session");
+
+        let current = dispatch(
+            "wait_for_thread",
+            json!({ "session_id": session.id, "timeout_ms": 0 }),
+            &store,
+            &alice(),
+        )
+        .await
+        .expect("wait for session");
+        assert_eq!(current["session_id"], json!(session.id));
+        assert_eq!(current["status"], json!("running"));
+        assert_eq!(current["timed_out"], json!(true));
+
+        store
+            .update_session_status(&session.id, SessionStatus::Completed)
+            .await
+            .expect("complete session");
+        let completed = dispatch(
+            "wait_for_thread",
+            json!({ "session_id": session.id, "timeout_ms": 0 }),
+            &store,
+            &alice(),
+        )
+        .await
+        .expect("read completed session");
+        assert_eq!(completed["status"], json!("completed"));
+
+        let hidden = dispatch(
+            "wait_for_thread",
+            json!({ "session_id": session.id, "timeout_ms": 0 }),
+            &store,
+            &bob(),
+        )
+        .await
+        .expect("cross-tenant wait");
+        assert_eq!(hidden["ok"], json!(false));
+        assert_eq!(hidden["error"], json!("thread not found"));
     }
 
     #[tokio::test]
@@ -778,6 +1292,13 @@ mod tests {
     fn bob() -> ToolPrincipal {
         ToolPrincipal::Owned {
             user_id: "bob".to_owned(),
+            org_id: Some(ORG.to_owned()),
+        }
+    }
+
+    fn alice() -> ToolPrincipal {
+        ToolPrincipal::Owned {
+            user_id: "alice".to_owned(),
             org_id: Some(ORG.to_owned()),
         }
     }

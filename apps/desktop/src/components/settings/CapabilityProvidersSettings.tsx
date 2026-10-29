@@ -1,7 +1,8 @@
 // apps/desktop/src/components/settings/CapabilityProvidersSettings.tsx
 //
 // The non-chat half of Settings > Providers: which provider serves image
-// generation, voice recognition, audio and video, plus where embeddings
+// generation, voice recognition, audio, video and generated music/sound
+// effects, plus where embeddings
 // and reranking come from.
 //
 // # Why this is read-only
@@ -19,8 +20,9 @@
 // no answer outside a node dialog most people never open — and hands editing
 // back to the card that already owns it.
 
-import { Button } from "@ryu/ui/components/button";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -69,9 +71,16 @@ const ROUTED_CAPABILITIES: {
 		blurb:
 			"Serves POST /v1/videos/generations. Job-based: the client polls for the result.",
 	},
+	{
+		modality: "audio",
+		label: "Music and sound effects",
+		blurb:
+			"Serves POST /v1/audio/generations. Job-based like video; speech stays on Audio.",
+	},
 ];
 
 export function CapabilityProvidersSettings() {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const target = useMemo(() => toTarget(node), [node]);
 	const openGateway = useGatewayDialog((s) => s.openGateway);
@@ -119,7 +128,7 @@ export function CapabilityProvidersSettings() {
 				setConfig(cfg);
 				setLoading(false);
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (controller.signal.aborted) {
 					return;
 				}
@@ -147,16 +156,15 @@ export function CapabilityProvidersSettings() {
 				title="Other capabilities"
 			>
 				{loading ? (
-					<div className="flex items-center gap-2 text-muted-foreground text-sm">
-						<Spinner className="size-4" /> Reading routing…
-					</div>
+					<SkeletonRows label="Reading routing…" spacing="comfortable" />
 				) : null}
 
 				{!loading && error ? (
 					<p className="text-muted-foreground text-sm">
-						This node's gateway did not answer, so its per-capability routing
-						cannot be shown. Image, speech and video calls fall back to whatever
-						the gateway itself is configured with. ({error})
+						{tl(
+							"This node's gateway did not answer, so its per-capability routing cannot be shown. Image, speech and video calls fall back to whatever the gateway itself is configured with. ({error})",
+							{ error }
+						)}
 					</p>
 				) : null}
 
@@ -181,7 +189,9 @@ export function CapabilityProvidersSettings() {
 											{mapping
 												? `${mapping.provider}${mapping.model ? ` · ${mapping.model}` : ""}`
 												: defaultProvider
-													? `${defaultProvider} (default)`
+													? tl("{defaultProvider} (default)", {
+															defaultProvider,
+														})
 													: "Unrouted"}
 										</span>
 									}

@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // Unit tests for the collaborative data-grid Yjs model. These exercise the pure
 // shared-type model on plain `Y.Doc`s (no transport): seeding, the snapshot
 // round-trip, the mutators, and — the convergence guarantee the whole design
@@ -11,12 +12,16 @@ import {
 	addRow,
 	applyCellEdits,
 	type DatabaseDoc,
+	defaultDatabaseDoc,
+	insertRows,
 	isDatabaseEmpty,
 	orderKeyBetween,
+	parseDatabaseDoc,
 	removeColumn,
 	removeRows,
 	seedDatabase,
 	snapshotDatabase,
+	updateColumn,
 } from "./yjs-database.ts";
 
 /** Two-way sync `a` and `b` to convergence (small docs, one round is enough). */
@@ -36,6 +41,13 @@ const SAMPLE: DatabaseDoc = {
 	],
 };
 
+function requireRowId(row: { __id?: string }): string {
+	if (!row.__id) {
+		throw new Error("Snapshot row is missing its stable id");
+	}
+	return row.__id;
+}
+
 describe("yjs-database model", () => {
 	test("seed then snapshot round-trips columns and rows in order", () => {
 		const doc = new Doc();
@@ -47,7 +59,7 @@ describe("yjs-database model", () => {
 		expect(snap.columns.map((c) => c.id)).toEqual(["col_name", "col_done"]);
 		expect(snap.rows.map((r) => r.col_name)).toEqual(["Alpha", "Beta"]);
 		// Every snapshot row carries a stable id for addressing later edits.
-		expect(snap.rows.every((r) => typeof r.__id === "string")).toBe(true);
+		expect(snap.rows.every((r) => isNativeText(r.__id))).toBe(true);
 	});
 
 	test("seedDatabase is idempotent on column id (no duplicate columns)", () => {
@@ -67,7 +79,10 @@ describe("yjs-database model", () => {
 		const doc = new Doc();
 		seedDatabase(doc, SAMPLE);
 		const before = snapshotDatabase(doc);
-		const betaId = before.rows[1]?.__id as string;
+		const betaId = before.rows[1]?.__id;
+		if (!isNativeText(betaId)) {
+			throw new Error("Expected the seeded Beta row to have a string id");
+		}
 
 		applyCellEdits(doc, [
 			{ rowId: betaId, columnId: "col_name", value: "Beta!" },
@@ -76,6 +91,27 @@ describe("yjs-database model", () => {
 		const after = snapshotDatabase(doc);
 		expect(after.rows[1]?.col_name).toBe("Beta!");
 		expect(after.rows[0]?.col_name).toBe("Alpha");
+	});
+
+	test("insertRows places rows at a position and can restore an id", () => {
+		const doc = new Doc();
+		seedDatabase(doc, SAMPLE);
+		const { columns, rows } = snapshotDatabase(doc);
+		const [firstId, secondId] = rows.map((row) => row.__id);
+
+		const [middleA, middleB] = insertRows(doc, columns, 1, [{}, {}]);
+		const [head] = insertRows(doc, columns, 0, [{}]);
+		const [restored] = insertRows(doc, columns, 5, [{ __id: "row_kept" }]);
+
+		expect(restored).toBe("row_kept");
+		expect(snapshotDatabase(doc).rows.map((row) => row.__id)).toEqual([
+			head,
+			firstId,
+			middleA,
+			middleB,
+			secondId,
+			"row_kept",
+		]);
 	});
 
 	test("add/remove row and add/remove column mutate the doc", () => {
@@ -105,6 +141,29 @@ describe("yjs-database model", () => {
 		);
 	});
 
+	test("renaming a column rewrites formulas that name it", () => {
+		const doc = new Doc();
+		seedDatabase(doc, {
+			columns: [
+				...SAMPLE.columns,
+				{
+					id: "col_label",
+					label: "Label",
+					cell: { variant: "formula", expression: 'UPPER({Name}) & "{Name}"' },
+				},
+			],
+			rows: SAMPLE.rows,
+		});
+		updateColumn(doc, "col_name", { label: "Title" });
+		const formula = snapshotDatabase(doc).columns.find(
+			(column) => column.id === "col_label"
+		);
+		expect(formula?.cell).toEqual({
+			variant: "formula",
+			expression: 'UPPER({Title}) & "{Name}"',
+		});
+	});
+
 	test("concurrent edits to different cells merge", () => {
 		const base = new Doc();
 		seedDatabase(base, SAMPLE);
@@ -113,14 +172,12 @@ describe("yjs-database model", () => {
 		applyUpdate(a, encodeStateAsUpdate(base));
 		applyUpdate(b, encodeStateAsUpdate(base));
 
-		const ids = snapshotDatabase(a).rows.map((r) => r.__id as string);
+		const ids = snapshotDatabase(a).rows.map((r) => requireRowId(r));
 		// Peer A edits Alpha's name; peer B (concurrently) toggles Beta's checkbox.
 		applyCellEdits(a, [
-			{ rowId: ids[0] as string, columnId: "col_name", value: "Alpha-A" },
+			{ rowId: ids[0], columnId: "col_name", value: "Alpha-A" },
 		]);
-		applyCellEdits(b, [
-			{ rowId: ids[1] as string, columnId: "col_done", value: false },
-		]);
+		applyCellEdits(b, [{ rowId: ids[1], columnId: "col_done", value: false }]);
 		sync(a, b);
 
 		const snapA = snapshotDatabase(a);
@@ -164,8 +221,101 @@ describe("yjs-database model", () => {
 		const sorted = [...keys].sort();
 		expect(keys).toEqual(sorted);
 		// A midpoint insert between two neighbours sorts strictly between them.
-		const mid = orderKeyBetween(keys[0] as string, keys[1] as string);
-		expect((keys[0] as string) < mid).toBe(true);
-		expect(mid < (keys[1] as string)).toBe(true);
+		const mid = orderKeyBetween(keys[0], keys[1]);
+		expect(keys[0] < mid).toBe(true);
+		expect(mid < keys[1]).toBe(true);
+	});
+});
+
+describe("database source boundary", () => {
+	test("decodes persisted cell options and body page identity", () => {
+		const source = {
+			columns: [
+				{
+					id: "number",
+					label: "Number",
+					cell: { variant: "number", min: 0, max: 10, step: 2 },
+				},
+				{
+					id: "select",
+					label: "Select",
+					cell: {
+						variant: "select",
+						options: [
+							{ label: "Open", value: "open", color: "blue", count: 2 },
+						],
+					},
+				},
+				{
+					id: "formula",
+					label: "Formula",
+					cell: { variant: "formula", expression: "[Number] * 2" },
+				},
+				{
+					id: "file",
+					label: "File",
+					cell: {
+						variant: "file",
+						multiple: true,
+						maxFiles: 2,
+						accept: ".pdf",
+					},
+				},
+			],
+			rows: [
+				{
+					number: 2,
+					select: "open",
+					file: [{ name: "notes.pdf", size: 2 }],
+					__page: "page-1",
+				},
+			],
+			views: [
+				{
+					id: "board",
+					name: "Board",
+					kind: "board",
+					groupByColumnId: "select",
+				},
+			],
+		} satisfies DatabaseDoc;
+		expect(parseDatabaseDoc(JSON.stringify(source))).toEqual(source);
+	});
+	test("recovers malformed column, cell, row and view contracts", () => {
+		for (const source of [
+			{ columns: [null], rows: [] },
+			{
+				columns: [
+					{ id: "a", label: "A", cell: { variant: "select", options: "bad" } },
+				],
+				rows: [],
+			},
+			{ columns: [], rows: [null] },
+			{ columns: [], rows: [{ __page: 7 }] },
+			{
+				columns: [],
+				rows: [],
+				views: [{ id: "v", name: "V", kind: "invalid" }],
+			},
+		]) {
+			expect(parseDatabaseDoc(JSON.stringify(source))).toEqual(
+				defaultDatabaseDoc()
+			);
+		}
+	});
+	test("validates remote Yjs cell and view values before rendering", () => {
+		const doc = new Doc();
+		seedDatabase(doc, SAMPLE);
+		doc
+			.getArray<import("yjs").Map<unknown>>("columns")
+			.get(0)
+			.set("cell", { variant: "select", options: "bad" });
+		doc
+			.getArray<import("yjs").Map<unknown>>("views")
+			.get(0)
+			.set("kind", "invalid");
+		const snapshot = snapshotDatabase(doc);
+		expect(snapshot.columns[0].cell).toEqual({ variant: "short-text" });
+		expect(snapshot.views[0].kind).toBe("table");
 	});
 });

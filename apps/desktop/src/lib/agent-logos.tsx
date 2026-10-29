@@ -1,6 +1,6 @@
 import type { AvatarConversationState } from "@ryu/ui/components/avatar-conversation.tsx";
-import type { GradientDirection } from "@ryu/ui/components/dither-kit/gradient";
-import { isDitherColor } from "@ryu/ui/components/dither-kit/palette";
+import type { GradientDirection } from "@ryu/ui/components/dither-kit/gradient.tsx";
+import { isDitherColor } from "@ryu/ui/components/dither-kit/palette.ts";
 import type { ExpressiveExpressionSelection } from "@ryu/ui/components/expressive.ts";
 import type { ExpressiveAnimationSelection } from "@ryu/ui/components/expressive-animation.ts";
 import {
@@ -9,9 +9,10 @@ import {
 } from "@ryu/ui/components/ghost-avatar.ts";
 import type { GlyphDitherValue, GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
-import { Logo as RyuLogo } from "@ryu/ui/components/logo";
-import { cn } from "@ryu/ui/lib/utils";
-import type { ComponentType } from "react";
+import { Logo as RyuLogo } from "@ryu/ui/components/logo.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { ComponentType, CSSProperties } from "react";
+import { z } from "zod";
 
 type LogoConfig =
 	| { kind: "single"; src: string; invert: boolean }
@@ -37,10 +38,7 @@ type LogoConfig =
  * brand colours (amp's blue, jetbrains' gradient) stay single-asset — a dark
  * variant would only mis-colour them.
  */
-export const REGISTRY_LOGO_SLUGS: Record<
-	string,
-	string | { light: string; dark: string }
-> = {
+export const REGISTRY_LOGO_SLUGS = {
 	"amp-acp": "amp",
 	cursor: { light: "cursor_light", dark: "cursor_dark" },
 	"github-copilot-cli": { light: "copilot", dark: "copilot_dark" },
@@ -64,18 +62,28 @@ export const REGISTRY_LOGO_SLUGS: Record<
 	openhands: "openhands",
 	prime: "prime",
 	raxol: "raxol",
-};
+} satisfies Record<string, string | { light: string; dark: string }>;
 
 /** The registry brand mark for an agent id, as a {@link LogoConfig}. */
-function registryLogoConfig(key: string): LogoConfig | undefined {
-	const slug = REGISTRY_LOGO_SLUGS[key];
-	if (!slug) {
-		return undefined;
-	}
-	const url = (s: string) => `/assets/logos/${s}.svg`;
-	return typeof slug === "string"
-		? { kind: "single", src: url(slug), invert: false }
-		: { kind: "themed", light: url(slug.light), dark: url(slug.dark) };
+const registryLogoSchema = z.union([
+	z.string().transform((slug) => ({
+		kind: "single" as const,
+		src: `/assets/logos/${slug}.svg`,
+		invert: false,
+	})),
+	z.object({ light: z.string(), dark: z.string() }).transform((slugs) => ({
+		kind: "themed" as const,
+		light: `/assets/logos/${slugs.light}.svg`,
+		dark: `/assets/logos/${slugs.dark}.svg`,
+	})),
+]) satisfies z.ZodType<LogoConfig>;
+const registryLogos = new Map(
+	Object.entries(REGISTRY_LOGO_SLUGS).map(
+		([key, slug]): [string, LogoConfig] => [key, registryLogoSchema.parse(slug)]
+	)
+);
+function registryLogoConfig(key: string) {
+	return registryLogos.get(key);
 }
 
 /** Registry agents that ship a brand mark of their own. */
@@ -83,7 +91,7 @@ export function hasRegistryLogo(key: string | null | undefined): boolean {
 	return key != null && key in REGISTRY_LOGO_SLUGS;
 }
 
-const ENGINE_LOGOS: Record<string, LogoConfig> = {
+const ENGINE_LOGOS = {
 	claude: {
 		kind: "single",
 		src: "/assets/logos/claude.svg",
@@ -154,7 +162,7 @@ const ENGINE_LOGOS: Record<string, LogoConfig> = {
 		light: "/assets/logos/hermes_light.svg",
 		dark: "/assets/logos/hermes_dark.svg",
 	},
-};
+} satisfies Record<string, LogoConfig>;
 
 export function hasBrandedEngineLogo(
 	engine: string | null | undefined
@@ -191,6 +199,25 @@ export function engineForAgent(agent: {
 }
 
 /**
+ * Static light-theme logo path for an engine, for surfaces that need a bitmap
+ * source rather than a React node (OS notifications). Mirrors {@link AgentLogo}'s
+ * lookup order and falls back to the Ryu mark.
+ */
+export function agentLogoSrc(engine: string | null | undefined): string {
+	const key = normalizeEngine(engine);
+	const known =
+		(key
+			? Object.entries(ENGINE_LOGOS).find(
+					([engineKey]) => engineKey === key
+				)?.[1]
+			: undefined) ?? (key ? registryLogoConfig(key) : undefined);
+	if (!known) {
+		return ENGINE_LOGOS.ryu.light;
+	}
+	return known.kind === "single" ? known.src : known.light;
+}
+
+/**
  * Renders the provider logo for a given engine id. Unknown / unbranded engines
  * (custom agents, Factory droid, etc.) fall back to the Ryu logo — Ryu is the
  * car around any engine, so its own mark is the sensible default.
@@ -199,8 +226,12 @@ export function AgentLogo({
 	engine,
 	className,
 	size,
+	presentation = "default",
+	fit,
 }: {
 	engine?: string | null;
+	presentation?: "default" | "portrait" | "compact";
+	fit?: "cover" | "contain";
 	className?: string;
 	/** Explicit pixel size (e.g. "48px"). Required for the Ryu component path. */
 	size?: string;
@@ -215,36 +246,69 @@ export function AgentLogo({
 	// the catalog looked at it. `normalizeEngine` strips the `acp:` prefix, so an
 	// agent whose engine is `acp:cursor` matches the `cursor` entry directly.
 	const known =
-		(key ? ENGINE_LOGOS[key] : undefined) ??
-		(key ? registryLogoConfig(key) : undefined);
+		(key
+			? Object.entries(ENGINE_LOGOS).find(
+					([engineKey]) => engineKey === key
+				)?.[1]
+			: undefined) ?? (key ? registryLogoConfig(key) : undefined);
 
 	// Ryu (and any unbranded engine that falls back to it) renders via the logo
 	// component's `outline` variant on sized surfaces: the static SVG's tight
 	// `0 0 24 24` viewBox clips the stroked ghost's right edge, while the
 	// component sets overflow:visible.
 	if ((!known || key === "ryu") && size) {
-		return <RyuLogo className={className} size={size} variant="outline" />;
+		return (
+			<RyuLogo
+				className={className}
+				corners={
+					presentation === "portrait"
+						? "circle"
+						: presentation === "compact"
+							? "compact"
+							: "default"
+				}
+				size={size}
+				variant="outline"
+			/>
+		);
 	}
 
 	const config = known ?? ENGINE_LOGOS.ryu;
 	const alt = key ?? "ryu";
-	const style = size ? { width: size, height: size } : undefined;
+	const imageClassName = cn(
+		className,
+		presentation === "portrait" && "rounded-full object-cover",
+		presentation === "compact" && "rounded-glyph-compact object-contain",
+		fit === "contain" && "object-contain",
+		fit === "cover" && "object-cover"
+	);
+	const style: CSSProperties & { "--agent-logo-size"?: string } = size
+		? { "--agent-logo-size": size }
+		: {};
 
 	if (config.kind === "themed") {
 		return (
 			<>
-				{/* biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: bundled engine logo */}
+				{/* bundled engine logo */}
 				<img
 					alt={alt}
-					className={cn(className, "block dark:hidden")}
+					className={cn(
+						imageClassName,
+						size && "size-(--agent-logo-size)",
+						"block dark:hidden"
+					)}
 					draggable={false}
 					src={config.light}
 					style={style}
 				/>
-				{/* biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: bundled engine logo */}
+				{/* bundled engine logo */}
 				<img
 					alt={alt}
-					className={cn(className, "hidden dark:block")}
+					className={cn(
+						imageClassName,
+						size && "size-(--agent-logo-size)",
+						"hidden dark:block"
+					)}
 					draggable={false}
 					src={config.dark}
 					style={style}
@@ -254,10 +318,14 @@ export function AgentLogo({
 	}
 
 	return (
-		// biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: bundled engine logo
+		// bundled engine logo
 		<img
 			alt={alt}
-			className={cn(className, config.invert && "dark:invert")}
+			className={cn(
+				imageClassName,
+				size && "size-(--agent-logo-size)",
+				config.invert && "dark:invert"
+			)}
 			draggable={false}
 			src={config.src}
 			style={style}
@@ -319,19 +387,27 @@ export function personaToGlyph(persona: {
 				}
 			: undefined;
 	if (persona.emoji) {
-		return {
+		const glyph: Extract<GlyphValue, { kind: "emoji" }> = {
 			kind: "emoji",
 			emoji: persona.emoji,
-			...(ditherLayer ? { dither: ditherLayer } : {}),
 		};
+		if (ditherLayer) {
+			glyph.dither = ditherLayer;
+		}
+		return glyph;
 	}
 	if (persona.icon) {
-		return {
+		const glyph: Extract<GlyphValue, { kind: "icon" }> = {
 			kind: "icon",
 			id: persona.icon,
-			...(persona.iconColor ? { color: persona.iconColor } : {}),
-			...(ditherLayer ? { dither: ditherLayer } : {}),
 		};
+		if (persona.iconColor) {
+			glyph.color = persona.iconColor;
+		}
+		if (ditherLayer) {
+			glyph.dither = ditherLayer;
+		}
+		return glyph;
 	}
 	if (persona.dicebear?.style && persona.dicebear.seed) {
 		return {
@@ -366,8 +442,12 @@ export function AgentAvatar({
 	thinking = false,
 	conversationState,
 	size,
+	presentation = "default",
+	fit,
 }: {
 	avatarUrl?: string | null;
+	presentation?: "default" | "portrait" | "compact";
+	fit?: "cover" | "contain";
 	className?: string;
 	dicebear?: AvatarDicebearSpec | null;
 	dither?: AvatarDitherSpec | null;
@@ -396,18 +476,30 @@ export function AgentAvatar({
 			expressive,
 		});
 	if (resolvedGlyph) {
+		// A persona glyph always inherits its container's corners and fill:
+		// `presentation` and `fit` shape only the engine-logo fallback below, so a
+		// compact row or portrait tile cannot re-crop an uploaded avatar.
 		return (
 			<GlyphDisplay
 				alt="agent avatar"
-				className={cn(className, "rounded-[inherit] object-cover")}
+				className={className}
 				conversationState={conversationState}
+				corners="inherit"
 				size={px}
 				thinking={thinking}
 				value={resolvedGlyph}
 			/>
 		);
 	}
-	return <AgentLogo className={className} engine={engine} size={size} />;
+	return (
+		<AgentLogo
+			className={className}
+			engine={engine}
+			fit={fit}
+			presentation={presentation}
+			size={size}
+		/>
+	);
 }
 
 // Stable icon cache for AgentAvatar, keyed by avatar+engine so ModeOption.icon
@@ -440,7 +532,7 @@ export function getAgentIcon(
 			);
 			agentIconCache.set(cacheKey, AvatarIcon);
 		}
-		// biome-ignore lint/style/noNonNullAssertion: just set above when missing
+		// just set above when missing
 		return agentIconCache.get(cacheKey)!;
 	}
 	if (!(avatarUrl || icon || dither)) {
@@ -467,7 +559,7 @@ export function getAgentIcon(
 		);
 		agentIconCache.set(cacheKey, AvatarIcon);
 	}
-	// biome-ignore lint/style/noNonNullAssertion: just set above when missing
+	// just set above when missing
 	return agentIconCache.get(cacheKey)!;
 }
 
@@ -511,10 +603,14 @@ export function AgentAvatarStack({
 					className={cn(
 						"flex items-center justify-center rounded-full bg-background ring-1 ring-border",
 						outer,
-						i > 0 && overlap
+						i > 0 && overlap,
+						shown.length - i === 3
+							? "z-3"
+							: shown.length - i === 2
+								? "z-2"
+								: "z-1"
 					)}
 					key={member.id}
-					style={{ zIndex: shown.length - i }}
 				>
 					<AgentAvatar
 						avatarUrl={member.avatarUrl}
@@ -578,7 +674,7 @@ export function getTeamStackIcon(
 		const Icon = () => <AgentLogoStack className="mt-0.5" engines={list} />;
 		teamIconCache.set(cacheKey, Icon);
 	}
-	// biome-ignore lint/style/noNonNullAssertion: just set above when missing
+	// just set above when missing
 	return teamIconCache.get(cacheKey)!;
 }
 
@@ -598,7 +694,11 @@ export function getEngineIcon(
 	engine: string | null | undefined
 ): ComponentType<{ className?: string }> {
 	const cacheKey = normalizeEngine(engine) ?? "__fallback__";
-	if (!engineIconCache.has(cacheKey)) {
+	const cached = engineIconCache.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	{
 		const eng = engine;
 		const Icon = ({ className }: { className?: string }) => (
 			<AgentLogo className={className} engine={eng} size="16px" />
@@ -606,5 +706,4 @@ export function getEngineIcon(
 		engineIconCache.set(cacheKey, Icon);
 		return Icon;
 	}
-	return engineIconCache.get(cacheKey) as ComponentType<{ className?: string }>;
 }

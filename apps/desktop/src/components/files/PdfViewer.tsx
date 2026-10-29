@@ -1,5 +1,6 @@
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import { ChevronLeft, ChevronRight, Minus, Plus } from "lucide-react";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 import { useEffect, useRef, useState } from "react";
@@ -10,6 +11,7 @@ interface PdfViewerProps {
 }
 
 export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
+	const tl = useLiteralMessages();
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const [document, setDocument] = useState<PDFDocumentProxy | null>(null);
 	const [pageNumber, setPageNumber] = useState(1);
@@ -35,7 +37,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					setPageNumber(1);
 				}
 			})
-			.catch((error: unknown) => {
+			.catch((error) => {
 				if (!disposed) {
 					onLoadError(
 						error instanceof Error
@@ -89,7 +91,7 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 					setRendering(false);
 				}
 			})
-			.catch((error: unknown) => {
+			.catch((error) => {
 				if (
 					!(
 						cancelled ||
@@ -180,7 +182,9 @@ export function PdfViewer({ bytes, onLoadError }: PdfViewerProps) {
 			<div className="min-h-0 flex-1 overflow-auto p-6">
 				<div className="mx-auto w-fit bg-white shadow-xl">
 					<canvas
-						aria-label={`PDF page ${pageNumber}`}
+						aria-label={tl("PDF page {pageNumber}", {
+							pageNumber: String(pageNumber),
+						})}
 						className={rendering ? "opacity-60" : undefined}
 						ref={canvasRef}
 					/>

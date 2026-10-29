@@ -30,16 +30,32 @@ import { hasBillingAuth } from "@/src/lib/api/billing.ts";
  * them into `"pro"` so they get the paid (uncapped) limits, matching the plan's
  * "Trial = Pro" and "Lifetime gets all pro" rules. A signed-in free / paywalled
  * user (`proUnlocked` false, `plan` null) keeps the FREE caps. `"pro"` is
- * equivalent to `"desktop-license"` for every capped field, so we do not need to
- * distinguish the two here.
+ * equivalent to `"desktop-license"` for every count field this bridge enforces,
+ * so we do not need to distinguish the two here. (Hosted Space storage differs
+ * — Pro 10 GB, the license 20 GB — but it is not a desktop-enforced cap.)
+ *
+ * A verdict that has not resolved yet is `undefined` (unknown), NOT `null`
+ * (free): {@link capLimit} fails open on it so a payer is never capped at
+ * startup while the entitlement check is still in flight.
  */
 export function effectivePlan(
 	verdict: DesktopGateVerdict | null
-): PlanId | null {
+): PlanId | null | undefined {
 	if (!verdict) {
-		return null;
+		return undefined;
 	}
 	return verdict.plan ?? (verdict.proUnlocked ? "pro" : null);
+}
+
+/**
+ * The numeric limit for `field` on `plan`, failing open
+ * ({@link Number.POSITIVE_INFINITY}) while the plan is still unknown.
+ */
+export function capLimit(
+	plan: PlanId | null | undefined,
+	field: PlanLimitField
+): number {
+	return plan === undefined ? Number.POSITIVE_INFINITY : planLimit(plan, field);
 }
 
 interface PlanCapState {
@@ -60,7 +76,7 @@ const state: PlanCapState = {
  * desktop/Core resource quotas reach this plan-based helper.
  */
 export function syncPlanCapState(
-	plan: PlanId | null,
+	plan: PlanId | null | undefined,
 	requestUpgrade: () => void
 ): void {
 	state.plan = plan;
@@ -77,10 +93,7 @@ export function resolveCapLimit(field: PlanLimitField): number {
 	if (!hasBillingAuth()) {
 		return Number.POSITIVE_INFINITY;
 	}
-	if (state.plan === undefined) {
-		return Number.POSITIVE_INFINITY;
-	}
-	return planLimit(state.plan, field);
+	return capLimit(state.plan, field);
 }
 
 /** Thrown by {@link enforcePlanCap} when a create would exceed a numeric cap. */

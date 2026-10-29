@@ -9,6 +9,10 @@ const mesh = {
 	peers: [],
 	tailscaleIps: ["100.64.0.10"],
 	tailcatAddress: null,
+	cloudflaredUrl: null,
+	publicUrl: null,
+	tunnelProvider: null,
+	backendError: null,
 	enabled: true,
 	reachable: true,
 };

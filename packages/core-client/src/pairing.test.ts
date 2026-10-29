@@ -5,6 +5,8 @@ import {
 	pollPairing,
 	startPairing,
 } from "./pairing.ts";
+import type { HttpFixtureBody } from "./test-support/http-fixture.ts";
+import { parseJsonRequestBody } from "./test-support/http-fixture.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -13,17 +15,16 @@ afterEach(() => {
 });
 
 interface CapturedRequest {
-	body: unknown;
+	body: HttpFixtureBody | undefined;
 	url: string;
 }
 
-function respondOnce(payload: unknown, status = 200): CapturedRequest {
+function respondOnce(payload: HttpFixtureBody, status = 200): CapturedRequest {
 	const captured: CapturedRequest = { body: undefined, url: "" };
 	globalThis.fetch = Object.assign(
 		async (input: RequestInfo | URL, init?: RequestInit) => {
 			captured.url = String(input);
-			captured.body =
-				typeof init?.body === "string" ? JSON.parse(init.body) : null;
+			captured.body = parseJsonRequestBody(init?.body);
 			return Response.json(payload, { status });
 		},
 		{ preconnect: realFetch.preconnect }

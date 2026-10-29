@@ -1,3 +1,12 @@
+import type { z } from "zod";
+import {
+	nativeErrorMessage as errText,
+	humanizeError,
+} from "../core/native-errors.ts";
+import {
+	type sidecarCatalogItemSchema,
+	sidecarCatalogSchema,
+} from "../core/sidecar-catalog.ts";
 /* @jsxImportSource @opentui/react */
 // Apps tab - the TS port of apps/cli's "Apps" tab (apps/cli/src/{app.rs,ui.rs,main.rs}).
 // It browses Core's sidecar catalog and installs/uninstalls catalog items:
@@ -5,25 +14,35 @@
 //   - install: POST /api/setup/:name/install  (only when not installed/installing)
 //   - remove:  POST /api/setup/:name/uninstall (only when installed)
 //   - keys:    j/k or ↑/↓ navigate, i install, D uninstall, r refresh
+//   - D opens an inline ConfirmPrompt (Cancel by default; y confirms, n/Esc cancels)
+//     and the uninstall request is only sent once confirmed.
 // Each row mirrors the Rust layout: name, category, an installed marker, the
 // install-state status, and the resolved version. termcn is used for presentation;
 // interactive keys are owned here in a gated handler so the shell and this tab never
 // both react.
 
 import { useKeyboard } from "@opentui/react";
-import { type ApiTarget, apiUrl, makeHeaders } from "@ryuhq/core-client/client";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "@ryuhq/core-client/client";
 import { installSidecar } from "@ryuhq/core-client/plugins";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
+import { tf } from "../i18n/translate.ts";
+import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
+import { ListPosition, SelectableRow } from "../ui/SelectableRow.tsx";
 import { useToast } from "../ui/toast.tsx";
+import { useListWindow } from "../ui/useListWindow.ts";
 import type { TabProps } from "./types.ts";
 
 const NAME_WIDTH = 16;
 const CATEGORY_WIDTH = 10;
-const LIST_HEIGHT = 16;
 // Background poll cadence while an install is in flight, matching apps/cli's 2s
 // auto-refresh of the catalog while the Apps tab is active. The Rust loop polls
 // unconditionally; here it runs only while a row is "installing" so a Core-side
@@ -43,13 +62,7 @@ interface CatalogItem {
 
 // Wire shape (snake_case as serialized by Core), the `sidecars` array of
 // `GET /api/catalog`.
-interface CatalogItemWire {
-	category?: string;
-	install_state?: string;
-	installed_version?: string | null;
-	latest_version?: string | null;
-	name?: string;
-}
+type CatalogItemWire = z.infer<typeof sidecarCatalogItemSchema>;
 
 function toItem(wire: CatalogItemWire): CatalogItem {
 	return {
@@ -68,14 +81,14 @@ async function fetchCatalog(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<CatalogItem[]> {
-	const resp = await fetch(apiUrl(target, "/api/catalog"), {
-		headers: makeHeaders(target.token),
+	const resp = await fetchForTarget(target)(apiUrl(target, "/api/catalog"), {
+		headers: makeHeaders(target.token, target.userJwt),
 		signal,
 	});
 	if (!resp.ok) {
 		throw new Error(`/api/catalog failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as { sidecars?: CatalogItemWire[] };
+	const json = sidecarCatalogSchema.parse(await resp.json());
 	return (json.sidecars ?? []).map(toItem);
 }
 
@@ -86,17 +99,16 @@ async function uninstallSidecar(
 	target: ApiTarget,
 	name: string
 ): Promise<void> {
-	const resp = await fetch(apiUrl(target, `/api/setup/${name}/uninstall`), {
-		method: "POST",
-		headers: makeHeaders(target.token),
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, `/api/setup/${name}/uninstall`),
+		{
+			method: "POST",
+			headers: makeHeaders(target.token, target.userJwt),
+		}
+	);
 	if (!resp.ok) {
 		throw new Error(`/api/setup/${name}/uninstall failed: ${resp.status}`);
 	}
-}
-
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 export function AppsTab({ active }: TabProps) {
@@ -149,7 +161,7 @@ export function AppsTab({ active }: TabProps) {
 					);
 					setLoaded(true);
 				})
-				.catch((err: unknown) => {
+				.catch((err) => {
 					if (controller.signal.aborted || reqRef.current !== reqId) {
 						return;
 					}
@@ -204,7 +216,13 @@ export function AppsTab({ active }: TabProps) {
 				item.installState === "installed" ||
 				item.installState === "installing"
 			) {
-				notify(`${item.name} is already ${item.installState}`, "info");
+				notify(
+					tf("{name} is already {installState}", {
+						name: item.name,
+						installState: item.installState,
+					}),
+					"info"
+				);
 				return;
 			}
 			setBusy(item.name);
@@ -214,9 +232,12 @@ export function AppsTab({ active }: TabProps) {
 					setNotice(`Installed ${item.name}`);
 					runLoad();
 				})
-				.catch((err: unknown) => {
+				.catch((err) => {
 					setNotice(null);
-					notify(`install failed: ${errText(err)}`, "error");
+					notify(
+						tf("install failed: {error}", { error: errText(err) }),
+						"error"
+					);
 				})
 				.finally(() => setBusy(null));
 		},
@@ -229,7 +250,7 @@ export function AppsTab({ active }: TabProps) {
 	const doUninstall = useCallback(
 		(item: CatalogItem) => {
 			if (item.installState !== "installed") {
-				notify(`${item.name} is not installed`, "info");
+				notify(tf("{name} is not installed", { name: item.name }), "info");
 				return;
 			}
 			setBusy(item.name);
@@ -239,9 +260,12 @@ export function AppsTab({ active }: TabProps) {
 					setNotice(`Uninstalled ${item.name}`);
 					runLoad();
 				})
-				.catch((err: unknown) => {
+				.catch((err) => {
 					setNotice(null);
-					notify(`uninstall failed: ${errText(err)}`, "error");
+					notify(
+						tf("uninstall failed: {error}", { error: errText(err) }),
+						"error"
+					);
 				})
 				.finally(() => setBusy(null));
 		},
@@ -249,6 +273,18 @@ export function AppsTab({ active }: TabProps) {
 	);
 
 	const selected = items[index];
+
+	// The catalog item waiting on the uninstall ConfirmPrompt. While it is set, the
+	// tab's own keys are ignored so y/n/r reach only the prompt.
+	const [confirmItem, setConfirmItem] = useState<CatalogItem | null>(null);
+
+	const askUninstall = (item: CatalogItem) => {
+		if (item.installState !== "installed") {
+			notify(tf("{name} is not installed", { name: item.name }), "info");
+			return;
+		}
+		setConfirmItem(item);
+	};
 
 	// Run an install/uninstall action against the current row, ignoring the key
 	// while nothing is selected or another action is in-flight.
@@ -259,7 +295,7 @@ export function AppsTab({ active }: TabProps) {
 	};
 
 	useKeyboard((key) => {
-		if (!active) {
+		if (!active || confirmItem) {
 			return;
 		}
 		const { name } = key;
@@ -270,7 +306,7 @@ export function AppsTab({ active }: TabProps) {
 		} else if (name === "i") {
 			activate(doInstall);
 		} else if (name === "D" || (name === "d" && key.shift)) {
-			activate(doUninstall);
+			activate(askUninstall);
 		} else if (name === "r") {
 			runLoad();
 		}
@@ -280,18 +316,26 @@ export function AppsTab({ active }: TabProps) {
 		return <Loading label="Loading catalog…" />;
 	}
 	if (error) {
-		return <ErrorView message={error} />;
+		return (
+			<ErrorView message={humanizeError(error, { url: target.url })} onRetry />
+		);
 	}
 
 	return (
-		<box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
-			<box paddingBottom={1}>
+		<box
+			flexDirection="column"
+			flexGrow={1}
+			minHeight={0}
+			paddingLeft={1}
+			paddingTop={1}
+		>
+			<box flexShrink={0} paddingBottom={1}>
 				<text fg={theme.colors.foreground}>
 					<b>Apps</b>
 				</text>
 			</box>
 			{notice ? (
-				<box paddingBottom={1}>
+				<box flexShrink={0} paddingBottom={1}>
 					<text fg={theme.colors.success}>{notice}</text>
 				</box>
 			) : null}
@@ -302,11 +346,27 @@ export function AppsTab({ active }: TabProps) {
 			) : (
 				<CatalogList busy={busy} index={index} items={items} theme={theme} />
 			)}
-			<box paddingTop={1}>
-				<text fg={theme.colors.mutedForeground}>
-					↑↓ navigate · i install · D uninstall · r refresh
-				</text>
-			</box>
+			{confirmItem ? (
+				<box flexShrink={0} paddingTop={1}>
+					<ConfirmPrompt
+						active={active}
+						confirmLabel="Uninstall"
+						consequence={`${confirmItem.name} will be removed from this node; reinstall it to use it again.`}
+						onCancel={() => setConfirmItem(null)}
+						onConfirm={() => {
+							setConfirmItem(null);
+							doUninstall(confirmItem);
+						}}
+						title={tf("Uninstall {name}?", { name: confirmItem.name })}
+					/>
+				</box>
+			) : (
+				<box flexShrink={0} paddingTop={1}>
+					<text fg={theme.colors.mutedForeground}>
+						↑↓ navigate · i install · D uninstall · r refresh
+					</text>
+				</box>
+			)}
 		</box>
 	);
 }
@@ -344,25 +404,45 @@ function CatalogRow({
 	const version = item.installedVersion ?? item.latestVersion ?? "";
 	const name = item.name.padEnd(NAME_WIDTH);
 	const statusText = `${busy ? "◌" : status.icon} ${busy ? "working" : status.label}`;
+	const muted = selected
+		? theme.colors.selectionForeground
+		: theme.colors.mutedForeground;
+	// Status tones are tuned for the page background; on the selection
+	// background they fall below text contrast, so the selected row uses the
+	// selection foreground (the icon and label still carry the state).
+	const onSelection = (color: string) =>
+		selected ? theme.colors.selectionForeground : color;
 	return (
-		<box flexDirection="row" gap={1}>
-			<text fg={selected ? theme.colors.primary : theme.colors.muted}>
-				{selected ? "›" : " "}
-			</text>
-			<text fg={selected ? theme.colors.primary : theme.colors.foreground}>
+		<SelectableRow selected={selected}>
+			<text
+				fg={
+					selected ? theme.colors.selectionForeground : theme.colors.foreground
+				}
+				flexShrink={0}
+			>
 				{selected ? <b>{name}</b> : name}
 			</text>
-			<text fg={theme.colors.mutedForeground}>
+			<text fg={muted} flexShrink={0}>
 				{item.category.padEnd(CATEGORY_WIDTH)}
 			</text>
-			<text fg={installed ? theme.colors.success : theme.colors.muted}>
+			<text
+				fg={onSelection(installed ? theme.colors.success : muted)}
+				flexShrink={0}
+			>
 				{installed ? "[✓]" : "   "}
 			</text>
-			<text fg={busy ? theme.colors.info : status.color}>{statusText}</text>
+			<text
+				fg={onSelection(busy ? theme.colors.info : status.color)}
+				flexShrink={0}
+			>
+				{statusText}
+			</text>
 			{version ? (
-				<text fg={theme.colors.mutedForeground}>{version}</text>
+				<text fg={muted} truncate wrapMode="none">
+					{version}
+				</text>
 			) : null}
-		</box>
+		</SelectableRow>
 	);
 }
 
@@ -377,36 +457,44 @@ function CatalogList({
 	items: CatalogItem[];
 	theme: ThemeValue;
 }) {
-	// Window the rows so the selection stays visible without a focus-capturing
-	// scrollbox (which would fight the shell for arrow keys).
-	const start = Math.max(
-		0,
-		Math.min(
-			index - Math.floor(LIST_HEIGHT / 2),
-			Math.max(0, items.length - LIST_HEIGHT)
-		)
-	);
-	const visible = items.slice(start, start + LIST_HEIGHT);
+	// Window the rows to the measured space so the selection stays visible
+	// without a focus-capturing scrollbox (which would fight the shell for arrow
+	// keys).
+	const { start, end, onSizeChange } = useListWindow({
+		count: items.length,
+		index,
+		linesPerRow: 1,
+	});
+	const visible = items.slice(start, end);
 
 	return (
-		<box flexDirection="column">
-			{visible.map((item, i) => {
-				const absolute = start + i;
-				return (
-					<CatalogRow
-						busy={busy === item.name}
-						item={item}
-						key={`${item.name}-${absolute}`}
-						selected={absolute === index}
-						theme={theme}
-					/>
-				);
-			})}
-			{items.length > visible.length ? (
-				<text fg={theme.colors.mutedForeground}>
-					{`${index + 1}/${items.length}`}
-				</text>
-			) : null}
-		</box>
+		<>
+			<box
+				flexBasis={0}
+				flexDirection="column"
+				flexGrow={1}
+				minHeight={0}
+				onSizeChange={onSizeChange}
+				overflow="hidden"
+			>
+				{visible.map((item, i) => {
+					const absolute = start + i;
+					return (
+						<CatalogRow
+							busy={busy === item.name}
+							item={item}
+							key={`${item.name}-${absolute}`}
+							selected={absolute === index}
+							theme={theme}
+						/>
+					);
+				})}
+			</box>
+			<ListPosition
+				count={items.length}
+				index={index}
+				visible={visible.length}
+			/>
+		</>
 	);
 }

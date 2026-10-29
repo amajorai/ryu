@@ -1,12 +1,14 @@
 import { StatsFooter } from "@ryu/blocks/desktop/agent-elements/stats-footer.tsx";
-import type { StatsUsageSnapshot } from "@ryu/blocks/desktop/agent-elements/stats-model.ts";
-import type { UIMessage } from "ai";
+import type {
+	StatsMessage,
+	StatsUsageSnapshot,
+} from "@ryu/blocks/desktop/agent-elements/stats-model.ts";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 
 const NOW = Date.now();
 
-const DEMO_MESSAGES = [
+const DEMO_MESSAGES: (StatsMessage & { id: string })[] = [
 	{
 		id: "stats-user-1",
 		parts: [
@@ -80,7 +82,7 @@ const DEMO_MESSAGES = [
 		],
 		role: "assistant",
 	},
-] as unknown as UIMessage[];
+];
 
 const USAGE: StatsUsageSnapshot = {
 	available: true,
@@ -137,47 +139,47 @@ const USAGE: StatsUsageSnapshot = {
 
 function StatsPluginProof() {
 	return (
-		<main className="min-h-screen bg-[#0d1117] px-10 py-12 text-slate-100">
+		<main className="min-h-screen bg-background px-10 py-12 text-foreground">
 			<div className="mx-auto max-w-[1180px]">
 				<header className="mb-8 flex items-start justify-between gap-8">
 					<div>
-						<p className="mb-3 font-semibold text-[11px] text-cyan-300/80 uppercase tracking-[0.24em]">
+						<p className="type-caption mb-3 font-semibold text-primary/80 uppercase tracking-section">
 							RYU · PLUGIN PROOF
 						</p>
-						<h1 className="font-semibold text-4xl text-white tracking-tight">
+						<h1 className="font-semibold text-4xl text-foreground tracking-tight">
 							Session stats, provider-neutral.
 						</h1>
-						<p className="mt-3 max-w-2xl text-base text-slate-400 leading-7">
-							The extracted <span className="text-slate-200">@ryu/stats</span>{" "}
+						<p className="mt-3 max-w-2xl text-base text-muted-foreground leading-7">
+							The extracted <span className="text-foreground">@ryu/stats</span>{" "}
 							chat contribution rolls up turns, steps, tokens, prompt-cache
 							activity, throughput, context, compaction, cost, and provider
 							usage in one current-session surface.
 						</p>
 					</div>
-					<div className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 font-semibold text-[11px] text-emerald-300 uppercase tracking-wider">
+					<div className="type-caption rounded-full border border-success/30 bg-success/10 px-4 py-2 font-semibold text-success uppercase tracking-wider">
 						Rendered product proof
 					</div>
 				</header>
 
-				<section className="rounded-2xl border border-slate-700/80 bg-slate-900/90 p-6 shadow-2xl shadow-black/20">
-					<div className="mb-5 flex items-center justify-between gap-4 border-slate-700/70 border-b pb-5">
+				<section className="rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20">
+					<div className="mb-5 flex items-center justify-between gap-4 border-border/70 border-b pb-5">
 						<div>
-							<p className="font-semibold text-[10px] text-slate-500 uppercase tracking-[0.2em]">
+							<p className="type-compact font-semibold text-muted-foreground uppercase tracking-label">
 								Current assistant turn
 							</p>
-							<h2 className="mt-1 font-medium text-lg text-white">
+							<h2 className="mt-1 font-medium text-foreground text-lg">
 								Local model · Claude [1m] context hint
 							</h2>
 						</div>
-						<div className="text-right text-slate-500 text-xs">
+						<div className="text-right text-muted-foreground text-xs">
 							<p>session 2 turns · 3 tool steps</p>
-							<p className="mt-1 text-cyan-300/80">
+							<p className="mt-1 text-primary/80">
 								Hover the stats strip for the full breakdown
 							</p>
 						</div>
 					</div>
 					<div
-						className="rounded-xl border border-slate-700/70 bg-[#111827] px-5 py-4"
+						className="rounded-xl border border-border/70 bg-card px-5 py-4"
 						data-testid="stats-plugin-proof"
 					>
 						<StatsFooter
@@ -209,14 +211,16 @@ function StatsPluginProof() {
 						],
 					].map(([title, value, detail]) => (
 						<div
-							className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"
+							className="rounded-xl border border-border bg-card/60 p-4"
 							key={title}
 						>
-							<p className="font-semibold text-[10px] text-slate-500 uppercase tracking-[0.18em]">
+							<p className="type-compact font-semibold text-muted-foreground uppercase tracking-(--tracking-section)">
 								{title}
 							</p>
-							<p className="mt-2 font-medium text-slate-200 text-sm">{value}</p>
-							<p className="mt-1 text-slate-500 text-xs">{detail}</p>
+							<p className="mt-2 font-medium text-foreground text-sm">
+								{value}
+							</p>
+							<p className="mt-1 text-muted-foreground text-xs">{detail}</p>
 						</div>
 					))}
 				</div>
@@ -226,7 +230,7 @@ function StatsPluginProof() {
 }
 
 document.documentElement.classList.add("dark");
-document.body.className = "m-0 min-w-[1100px] bg-[#0d1117]";
+document.body.className = "m-0 min-w-[1100px] bg-background";
 const proofRoot = document.getElementById("root");
 if (!proofRoot) {
 	throw new Error("stats proof root missing");

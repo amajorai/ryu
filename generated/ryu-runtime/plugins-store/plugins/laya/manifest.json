@@ -1,0 +1,260 @@
+{
+  "tags": [
+    "models",
+    "huggingface",
+    "local",
+    "classification",
+    "routing",
+    "guardrails"
+  ],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://huggingface.co/convaiinnovations/laya",
+  "homepage": "https://huggingface.co/convaiinnovations/laya",
+  "license": "Apache-2.0",
+  "id": "@ryu/laya",
+  "name": "Laya Local Decisions",
+  "version": "0.2.0",
+  "stability": "experimental",
+  "description": "Run Convai Innovations' Apache-2.0 Laya decision models locally through authenticated Ryu tools and as a selectable Shadow computer-use planner. Laya classifies text, email, tickets, and JSON into typed choice, score, and boolean answers; it does not generate text. The plugin provisions its Python sidecar and all three pinned Hugging Face checkpoints (about 2.37 GB / 2.21 GiB) inside the plugin runtime.",
+  "tagline": "Fast local typed decisions for routing and guardrails",
+  "keywords": [
+    "models",
+    "huggingface",
+    "local",
+    "classification",
+    "routing",
+    "guardrails"
+  ],
+  "category": "Models",
+  "icon": "ai-brain-01",
+  "iconDither": { "from": 240, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-laya-predict",
+      "name": "Laya Predict",
+      "kind": "tool",
+      "config": {
+        "slug": "laya.predict",
+        "backend": "http",
+        "method": "POST",
+        "url": "core:/api/ext/@ryu/laya/predict",
+        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Run a local Laya typed-decision pass over text, email, tickets, or JSON. Returns choice, score, or calibrated boolean answers with routing metadata. This model never writes prose. Set model to router, english, multilingual, or typed-decisions when you need a specific checkpoint.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "description": "The text, JSON object, or list to classify.",
+              "oneOf": [
+                { "type": "string" },
+                { "type": "object" },
+                { "type": "array" }
+              ]
+            },
+            "questions": {
+              "type": "object",
+              "description": "Question id to typed-question definitions using choice, score, or noul.",
+              "additionalProperties": { "type": "object" }
+            },
+            "model": {
+              "type": "string",
+              "enum": ["router", "english", "multilingual", "typed-decisions"],
+              "description": "Checkpoint selection. router chooses English or multilingual from the input; typed-decisions is explicit only."
+            },
+            "task": {
+              "type": "string",
+              "description": "Optional Laya task alias. Use typed-decisions for the fine-tuned workflow checkpoint."
+            },
+            "lang": {
+              "type": "string",
+              "description": "Optional language hint such as en or hi."
+            }
+          },
+          "required": ["state", "questions"]
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "model": { "type": "string" },
+            "answers": { "type": "object" },
+            "routing": { "type": "object" },
+            "usage": { "type": "object" }
+          },
+          "required": ["answers"]
+        }
+      }
+    },
+    {
+      "id": "tool-laya-status",
+      "name": "Laya Status",
+      "kind": "tool",
+      "config": {
+        "slug": "laya.status",
+        "backend": "http",
+        "method": "GET",
+        "url": "core:/api/ext/@ryu/laya/capability",
+        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Report which pinned Laya checkpoints are installed on this node and whether the local classifier is available.",
+        "input_schema": { "type": "object", "properties": {} }
+      }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "decision.typed",
+      "version": "1.0.0",
+      "title": "Typed Decisions",
+      "selectable": true,
+      "default": true,
+      "layerKind": "decision-model",
+      "tools": {
+        "decision.predict": {
+          "tool": "laya.predict"
+        }
+      }
+    }
+  ],
+  "permission_grants": [
+    "sidecar:process",
+    "runtime:external",
+    "tool:http-egress:127.0.0.1"
+  ],
+  "permission_levels": [
+    {
+      "id": "laya.view",
+      "label": "Can view local model status",
+      "description": "See which Laya checkpoints are installed and whether the local sidecar is available."
+    },
+    {
+      "id": "laya.predict",
+      "label": "Can run local decisions",
+      "description": "Run bounded local classification over the state and questions supplied to Laya.",
+      "implies": ["laya.view"]
+    }
+  ],
+  "sidecars": [
+    {
+      "name": "laya",
+      "port": 8098,
+      "health_path": "/health",
+      "lazy": false,
+      "idle_stop_secs": 1800,
+      "process": {
+        "kind": "python",
+        "entry": "ryu_laya",
+        "port_env": "RYU_LAYA_PORT",
+        "python_version": "3.11",
+        "pyproject_extra": "server",
+        "source": {
+          "url": "",
+          "format": "directory",
+          "path": "sidecar"
+        },
+        "model_snapshots": [
+          {
+            "source": "hf:convaiinnovations/laya",
+            "revision": "1c5edc17a7acd8701df6fc341c0d179f1c62c982",
+            "dest_under_runtime": "models/laya",
+            "files": [
+              "encoder/config.json",
+              "model.safetensors",
+              "rl_agent_config.json",
+              "tokenizer/tokenizer.json",
+              "tokenizer/tokenizer_config.json",
+              "multilingual/encoder/config.json",
+              "multilingual/model.safetensors",
+              "multilingual/rl_agent_config.json",
+              "multilingual/tokenizer/tokenizer.json",
+              "multilingual/tokenizer/tokenizer_config.json",
+              "typed-decisions/encoder/config.json",
+              "typed-decisions/model.safetensors",
+              "typed-decisions/rl_agent_config.json",
+              "typed-decisions/tokenizer/tokenizer.json",
+              "typed-decisions/tokenizer/tokenizer_config.json"
+            ]
+          }
+        ],
+        "env": {
+          "RYU_LAYA_HOST": "127.0.0.1",
+          "RYU_LAYA_MODEL_ROOT": "${RYU_RUNTIME_DIR}/models/laya",
+          "HF_HOME": "${RYU_MODELS_DIR}/hf",
+          "HF_HUB_DISABLE_TELEMETRY": "1",
+          "HF_HUB_OFFLINE": "1",
+          "USE_TF": "0"
+        }
+      },
+      "http": {
+        "max_body_bytes": 524288,
+        "routes": [
+          { "path": "/health" },
+          { "path": "/capability", "permission": "laya.view" },
+          { "path": "/models", "permission": "laya.view" },
+          { "path": "/openapi.json", "permission": "laya.view" },
+          {
+            "path": "/predict",
+            "method": "POST",
+            "permission": "laya.predict"
+          },
+          {
+            "path": "/computer-use",
+            "method": "POST",
+            "permission": "laya.predict"
+          }
+        ]
+      }
+    }
+  ],
+  "contributes": {
+    "computer_use_planners": [
+      {
+        "id": "laya.router",
+        "label": "Laya · Router",
+        "model_id": "router",
+        "description": "Routes English or multilingual computer-use decisions."
+      },
+      {
+        "id": "laya.english",
+        "label": "Laya · English",
+        "model_id": "english"
+      },
+      {
+        "id": "laya.multilingual",
+        "label": "Laya · Multilingual",
+        "model_id": "multilingual"
+      },
+      {
+        "id": "laya.typed-decisions",
+        "label": "Laya · Typed decisions",
+        "model_id": "typed-decisions"
+      }
+    ],
+    "chat_widget_templates": [
+      {
+        "id": "laya.chat",
+        "title": "Laya decision widget",
+        "description": "Laya returns typed local decisions for a supplied state and question schema; it does not generate text.",
+        "triggers": ["laya decision", "local classification"],
+        "examples": ["Run a local Laya decision over this ticket"],
+        "backing": {},
+        "display_mode": "inline",
+        "safe_action_ids": [],
+        "availability": "coming-soon"
+      }
+    ]
+  }
+}

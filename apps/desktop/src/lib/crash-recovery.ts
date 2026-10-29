@@ -26,7 +26,9 @@ export const MAX_AUTO_RETRIES = 2;
  * (every retry spent, then the terminal UI) must still feel like a hitch rather
  * than a hang — here 0.3s + 1.2s = 1.5s.
  */
-export const RETRY_BACKOFF_MS: readonly number[] = [300, 1200];
+export const RETRY_BACKOFF_MS = [
+	300, 1200,
+] as const satisfies readonly number[];
 
 /**
  * How long the boundary must render its children without throwing before the

@@ -1,6 +1,7 @@
 "use client";
 
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useMotionValue, useSpring } from "motion/react";
 import { useEffect, useRef } from "react";
 
@@ -10,6 +11,7 @@ interface RollingNumberProps {
 	prefix?: string;
 	startValue?: number;
 	suffix?: string;
+	typography?: "default" | "statistic";
 	value: number;
 }
 
@@ -18,6 +20,7 @@ export function RollingNumber({
 	prefix = "",
 	suffix = "",
 	className,
+	typography = "default",
 	duration = 0.8,
 	startValue = 0,
 }: RollingNumberProps) {
@@ -46,7 +49,13 @@ export function RollingNumber({
 
 	// Initial render matching SSR to avoid hydration mismatch
 	return (
-		<span className={className} ref={ref}>
+		<span
+			className={cn(
+				typography === "statistic" && "font-semibold text-3xl tabular-nums",
+				className
+			)}
+			ref={ref}
+		>
 			{prefix}
 			{formatCount(value) ?? "—"}
 			{suffix}

@@ -2,7 +2,12 @@ import type { UIMessage } from "ai";
 import { createRoot } from "react-dom/client";
 import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
+import type { createMessageDecorator } from "../../src/lib/chat-message-decoration.ts";
 import "../../src/index.css";
+
+type DatedFixtureMessage = ReturnType<
+	ReturnType<typeof createMessageDecorator<UIMessage>>
+>[number];
 
 const startedAt = Date.UTC(2026, 0, 1, 0, 0, 0);
 const achievedAt = startedAt + 4 * 60 * 60 * 1000 + 2 * 1000;
@@ -25,7 +30,7 @@ const messages = [
 		],
 		role: "assistant",
 	},
-] as unknown as UIMessage[];
+] satisfies DatedFixtureMessage[];
 
 function Story() {
 	return (

@@ -22,7 +22,7 @@ export interface ApprovalShortcutProps {
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
 	return (
-		typeof Element !== "undefined" &&
+		globalThis.Element !== undefined &&
 		target instanceof Element &&
 		Boolean(
 			target.closest(

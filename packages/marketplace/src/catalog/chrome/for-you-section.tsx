@@ -45,6 +45,9 @@ export default function ForYouSection({
 					className="h-7 rounded-md border bg-transparent px-1.5 text-muted-foreground text-xs"
 					onChange={(event) =>
 						onCadenceChange(
+							// SAFETY: This native select authors exactly daily, weekly, and monthly
+							// option values, matching the complete cadence union. Supported browser
+							// selections retain that invariant; synthetic values remain unvalidated.
 							event.target.value as NormalizedRecommendations["cadence"]
 						)
 					}

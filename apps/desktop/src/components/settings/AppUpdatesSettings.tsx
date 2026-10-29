@@ -13,12 +13,14 @@
 // automatic-updates switch still governs the active node's Core binaries.
 
 import { UpdatesView } from "@ryu/blocks/desktop/updates.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { getVersion } from "@tauri-apps/api/app";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { sileo } from "sileo";
 import {
 	canDeferAppUpdate,
 	installUpdate,
+	isEligibleForAppUpdate,
 	prepareUpdate,
 	showDownloadUpdatePrompt,
 	showPreparedUpdatePrompt,
@@ -62,6 +64,7 @@ import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 import { ReleaseChannelPicker } from "./UpdatesSettings.tsx";
 
 export function AppUpdatesSettings() {
+	const tl = useLiteralMessages();
 	const getNode = useActiveNodeGetter();
 	const [version, setVersion] = useState<string | null>(null);
 	const [automaticDownload, setAutomaticDownload] = useState(true);
@@ -71,6 +74,16 @@ export function AppUpdatesSettings() {
 	// book. Not derivable from the toast, which is fire-and-forget.
 	const [available, setAvailable] = useState<UpdateCheck | null>(null);
 	const [pending, setPending] = useState<PendingAppUpdate | null>(null);
+	// Native preference commands complete independently, so a slow older write
+	// could land after a newer one. Issue them in order, so the newest choice
+	// is always the one written last.
+	const preferenceWrites = useRef<Promise<void>>(Promise.resolve());
+	// The value the native store last confirmed (initial read or accepted write)
+	// and the id of the newest queued write. A refusal rolls back to the saved
+	// value, never to a stale optimistic one, and only when no newer choice is
+	// queued behind it (that choice decides what the switch shows).
+	const savedAutomaticDownload = useRef(true);
+	const latestPreferenceWrite = useRef(0);
 	const preparedSnapshot = useSyncExternalStore(
 		subscribePreparedAppUpdate,
 		getPreparedAppUpdateSnapshot,
@@ -94,6 +107,7 @@ export function AppUpdatesSettings() {
 				return;
 			}
 			setVersion(appVersion ?? info?.ryu_version ?? null);
+			savedAutomaticDownload.current = enabled;
 			setAutomaticDownload(enabled);
 			setPending(booked);
 			await getPreparedAppUpdate().catch(() => null);
@@ -104,19 +118,26 @@ export function AppUpdatesSettings() {
 	}, [getNode]);
 
 	const onToggle = async (next: boolean) => {
-		const previous = automaticDownload;
 		setAutomaticDownload(next);
-		try {
-			const ok = await setAutomaticAppUpdateDownload(next);
-			if (ok) {
-				return;
-			}
-			setAutomaticDownload(previous);
-			sileo.error({ title: "Could not save the automatic-download setting" });
-		} catch {
-			setAutomaticDownload(previous);
-			sileo.error({ title: "Could not save the automatic-download setting" });
+		latestPreferenceWrite.current += 1;
+		const writeId = latestPreferenceWrite.current;
+		const write = preferenceWrites.current.then(() =>
+			setAutomaticAppUpdateDownload(next)
+		);
+		preferenceWrites.current = write.then(
+			() => undefined,
+			() => undefined
+		);
+		const saved = await write.catch(() => false);
+		if (saved) {
+			savedAutomaticDownload.current = next;
+			return;
 		}
+		if (writeId !== latestPreferenceWrite.current) {
+			return;
+		}
+		setAutomaticDownload(savedAutomaticDownload.current);
+		sileo.error({ title: "Could not save the automatic-download setting" });
 	};
 
 	const onCheck = async () => {
@@ -134,6 +155,9 @@ export function AppUpdatesSettings() {
 			// version strings, see update.ts) or Core's fail-open verdict with an
 			// `error` field. Both must never read as "you're up to date".
 			if (updateCheckFailed(verdict)) {
+				// Drop any earlier verdict so "Install later" cannot book a release
+				// this failed check could not confirm is still the newest.
+				setAvailable(null);
 				sileo.error({
 					title: "Couldn't check for updates",
 					description: verdict.error ?? "Check your connection and try again.",
@@ -164,11 +188,24 @@ export function AppUpdatesSettings() {
 					sileo.info({
 						title: "Ryu is up to date for your updates window",
 						description: verdict.cutoff_unresolved
-							? `v${verdict.latest_unrestricted ?? verdict.latest} has been released, after your updates window ended.`
+							? tl(
+									"v{latestVersion} has been released, after your updates window ended.",
+									{
+										latestVersion:
+											verdict.latest_unrestricted ?? verdict.latest,
+									}
+								)
 							: // `version` (the app's own, from Tauri) not `verdict.current`
 								// (the answering Core's) — this sentence names the build the
 								// user is looking at in the row right above it.
-								`You're on v${version ?? verdict.current}. v${verdict.latest_unrestricted ?? verdict.latest} was released after your updates window ended.`,
+								tl(
+									"You're on v{currentVersion}. v{latestVersion} was released after your updates window ended.",
+									{
+										currentVersion: version ?? verdict.current,
+										latestVersion:
+											verdict.latest_unrestricted ?? verdict.latest,
+									}
+								),
 						duration: 8000,
 						button: {
 							title: "Extend updates",
@@ -190,7 +227,9 @@ export function AppUpdatesSettings() {
 				const prepared = await prepareUpdate(verdict, { node });
 				if (prepared) {
 					showPreparedUpdatePrompt(verdict, { node });
-				} else {
+				} else if (isEligibleForAppUpdate(verdict)) {
+					// Outside the updates window `prepareUpdate` already said so; a
+					// second "Download update" toast on top would only repeat it.
 					showDownloadUpdatePrompt(verdict, { node });
 				}
 			} catch (error) {
@@ -230,7 +269,13 @@ export function AppUpdatesSettings() {
 	};
 
 	const onCancelDefer = async () => {
-		await clearPendingAppUpdate();
+		if (!(await clearPendingAppUpdate())) {
+			sileo.error({
+				title: "Couldn't cancel the scheduled update",
+				description: "The update is still scheduled. Try cancelling it again.",
+			});
+			return;
+		}
 		setPending(null);
 		sileo.info({ title: "Scheduled update cancelled", duration: 4000 });
 	};
@@ -243,6 +288,9 @@ export function AppUpdatesSettings() {
 				clamp: isLocalNode(node),
 			});
 			if (updateCheckFailed(verdict)) {
+				// Drop any earlier verdict so "Install later" cannot book a release
+				// this failed check could not confirm is still the newest.
+				setAvailable(null);
 				sileo.error({
 					title: "Couldn't verify the prepared update",
 					description: verdict.error ?? "Check your connection and try again.",
@@ -273,12 +321,22 @@ export function AppUpdatesSettings() {
 	let updatesWindowNotice: string | undefined;
 	if (windowEnd) {
 		updatesWindowNotice = restricted
-			? `Your lifetime updates ended on ${formatUpdatesCutoff(windowEnd)}. Ryu stays on the newest build they cover. Buy lifetime access again at the current price for another year, or post about Ryu at ryu.com/redeem to earn a free year.`
-			: `Updates included through ${formatUpdatesCutoff(windowEnd)}.`;
+			? tl(
+					"Your lifetime updates ended on {endDate}. Ryu stays on the newest build they cover. Buy lifetime access again at the current price for another year, or post about Ryu at ryu.com/redeem to earn a free year.",
+					{ endDate: formatUpdatesCutoff(windowEnd) }
+				)
+			: tl("Updates included through {endDate}.", {
+					endDate: formatUpdatesCutoff(windowEnd),
+				});
 	}
 
 	return (
 		<div className="space-y-6">
+			<p className="text-muted-foreground text-sm">
+				App updates can restart the local runtime and stop running chats, tools,
+				and workflows. Ryu asks before installation so you can keep working.
+				Remote nodes continue running.
+			</p>
 			<UpdatesView
 				automaticUpdateAriaLabel={APP_UPDATE_DOWNLOAD_ARIA_LABEL}
 				automaticUpdateDescription={APP_UPDATE_DOWNLOAD_DESCRIPTION}
@@ -327,7 +385,10 @@ export function AppUpdatesSettings() {
 				}}
 				preparedUpdateNotice={
 					preparedSnapshot.kind === "ready"
-						? `v${preparedSnapshot.update.version} is downloaded and signature-verified. Install it when you're ready.`
+						? tl(
+								"v{version} is downloaded and signature-verified. Install it when you're ready.",
+								{ version: preparedSnapshot.update.version }
+							)
 						: undefined
 				}
 				productName={appDisplayName(version)}

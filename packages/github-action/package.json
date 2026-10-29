@@ -1,7 +1,7 @@
 {
   "name": "@ryuhq/github-action",
-  "version": "0.4.0",
-  "description": "GitHub Action for running Ryu Core agents, teams, workflows, and tools",
+  "version": "0.5.0",
+  "description": "GitHub Action for running Ryu Core agents, teams, workflows, tools, and eval gates",
   "type": "module",
   "main": "./dist/index.cjs",
   "types": "./dist/index.d.ts",
@@ -26,7 +26,9 @@
     "verify-dist": "bun run build && git diff --exit-code -- dist"
   },
   "dependencies": {
-    "@actions/core": "^1.11.1"
+    "@actions/core": "^1.11.1",
+    "@ryuhq/core-client": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "tsup": "^8.5.0",

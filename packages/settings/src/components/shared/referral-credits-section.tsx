@@ -1,17 +1,21 @@
 "use client";
 
-import { Badge } from "@ryu/ui/components/badge";
-import { Card, CardContent } from "@ryu/ui/components/card";
-import { Progress } from "@ryu/ui/components/progress";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Progress } from "@ryu/ui/components/progress.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useQuery } from "@tanstack/react-query";
-import { Coins } from "lucide-react";
 import type {
 	CreditReferralDashboard,
 	CreditReferralReferee,
 	CreditReferralState,
 } from "../../utils/api-client.ts";
 import { settingsApi } from "../../utils/api-client.ts";
+import {
+	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "./settings-rows.tsx";
 
 /**
  * The CREDIT half of the referral program, rendered alongside the cash
@@ -65,24 +69,21 @@ function formatDate(iso: string): string {
  * now match the web dashboard's, so the same referral reads the same on both
  * surfaces.
  */
-const STATE_LABELS: Record<CreditReferralState, string> = {
+const STATE_LABELS = {
 	pending: "In progress",
 	activated: "On the way",
 	paid: "Earned",
 	denied: "Closed",
-};
+} satisfies Record<CreditReferralState, string>;
 
-const STATE_VARIANTS: Record<
-	CreditReferralState,
-	"default" | "secondary" | "outline"
-> = {
+const STATE_VARIANTS = {
 	pending: "secondary",
 	activated: "secondary",
 	// `outline` and not `destructive`: a closed referral is a payout that will
 	// not happen, not a verdict on the person who used the link.
 	denied: "outline",
 	paid: "default",
-};
+} satisfies Record<CreditReferralState, "default" | "secondary" | "outline">;
 
 /**
  * `deniedReason` is an internal code and one of its values is "fraud". A user
@@ -114,34 +115,31 @@ function stateDetail(referee: CreditReferralReferee): string {
 
 function RefereeRow({ referee }: { referee: CreditReferralReferee }) {
 	return (
-		<div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-			<div className="min-w-0 space-y-0.5">
-				<p className="truncate font-medium text-sm">{referee.label}</p>
-				<p className="text-muted-foreground text-xs">
-					{stateDetail(referee)}
-					{referee.joinedAt ? ` · Joined ${formatDate(referee.joinedAt)}` : ""}
-				</p>
-			</div>
-			<div className="flex shrink-0 items-center gap-2">
-				{referee.amountMicroUsd === null ? null : (
-					<span className="font-heading font-medium text-sm tabular-nums">
-						{formatCredits(referee.amountMicroUsd)}
-					</span>
-				)}
-				<Badge variant={STATE_VARIANTS[referee.state]}>
-					{STATE_LABELS[referee.state]}
-				</Badge>
-			</div>
-		</div>
+		<SettingsItem
+			actions={
+				<>
+					{referee.amountMicroUsd === null ? null : (
+						<span className="font-heading font-medium text-sm tabular-nums">
+							{formatCredits(referee.amountMicroUsd)}
+						</span>
+					)}
+					<Badge variant={STATE_VARIANTS[referee.state]}>
+						{STATE_LABELS[referee.state]}
+					</Badge>
+				</>
+			}
+			title={<span title={referee.label}>{referee.label}</span>}
+		>
+			<p className="text-muted-foreground text-xs">
+				{stateDetail(referee)}
+				{referee.joinedAt ? ` · Joined ${formatDate(referee.joinedAt)}` : ""}
+			</p>
+		</SettingsItem>
 	);
 }
 
 /** The reward terms, phrased from the campaign rows so a closed side goes quiet. */
-function RewardTerms({
-	reward,
-}: {
-	reward: CreditReferralDashboard["reward"];
-}) {
+function rewardTermsText(reward: CreditReferralDashboard["reward"]): string {
 	const parts: string[] = [];
 	if (reward.referrerMicroUsd !== null) {
 		parts.push(
@@ -153,13 +151,9 @@ function RewardTerms({
 			`Their new account starts with ${formatCredits(reward.refereeMicroUsd)} in credits.`
 		);
 	}
-	return (
-		<p className="text-muted-foreground text-sm">
-			{parts.length > 0
-				? parts.join(" ")
-				: "Credit rewards are paused right now. Anyone already waiting keeps their place."}
-		</p>
-	);
+	return parts.length > 0
+		? parts.join(" ")
+		: "Credit rewards are paused right now. Anyone already waiting keeps their place.";
 }
 
 function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
@@ -171,37 +165,33 @@ function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
 			: Math.min(Math.round((cap.earnedMicroUsd / cap.capMicroUsd) * 100), 100);
 
 	return (
-		<div className="space-y-3">
-			<div className="grid gap-3 sm:grid-cols-2">
-				<div className="space-y-1 rounded-lg border p-3">
-					<p className="text-muted-foreground text-xs uppercase">
-						Credits earned
-					</p>
-					<p className="font-heading font-semibold text-lg tabular-nums">
+		<SettingsCard className="space-y-3">
+			<dl className="grid gap-4 sm:grid-cols-2">
+				<div className="space-y-1">
+					<dt className="text-muted-foreground text-xs">Credits earned</dt>
+					<dd className="font-heading font-semibold text-lg tabular-nums">
 						{formatCredits(cap.earnedMicroUsd)}
-					</p>
-					<p className="text-muted-foreground text-xs">
+					</dd>
+					<dd className="text-muted-foreground text-xs">
 						{cap.paidCount === 1
 							? "1 referral paid out"
 							: `${cap.paidCount} referrals paid out`}
-					</p>
+					</dd>
 				</div>
-				<div className="space-y-1 rounded-lg border p-3">
-					<p className="text-muted-foreground text-xs uppercase">
-						Still available
-					</p>
-					<p className="font-heading font-semibold text-lg tabular-nums">
+				<div className="space-y-1">
+					<dt className="text-muted-foreground text-xs">Still available</dt>
+					<dd className="font-heading font-semibold text-lg tabular-nums">
 						{cap.remainingMicroUsd === null
 							? "Unlimited"
 							: formatCredits(cap.remainingMicroUsd)}
-					</p>
-					<p className="text-muted-foreground text-xs">
+					</dd>
+					<dd className="text-muted-foreground text-xs">
 						{cap.remainingMicroUsd === null
 							? "No limit on your account"
 							: `of ${formatCredits(cap.capMicroUsd)} lifetime limit`}
-					</p>
+					</dd>
 				</div>
-			</div>
+			</dl>
 			{cap.remainingMicroUsd === null ? null : (
 				<Progress
 					aria-label="Referral credits earned against your lifetime limit"
@@ -209,7 +199,7 @@ function CapSummary({ cap }: { cap: CreditReferralDashboard["cap"] }) {
 					value={usedPercent}
 				/>
 			)}
-		</div>
+		</SettingsCard>
 	);
 }
 
@@ -220,56 +210,50 @@ export function ReferralCreditsSection() {
 	});
 
 	return (
-		<Card>
-			<CardContent className="space-y-4">
-				<div className="flex items-start gap-3">
-					<div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-						<Coins className="size-5" />
-					</div>
-					<div className="min-w-0 space-y-1">
-						<h3 className="font-semibold text-base">Credit rewards</h3>
-						{isLoading || isError || !data ? (
-							<p className="text-muted-foreground text-sm">
-								Ryu credits for the friends you bring, on the same link as your
-								cash commission.
-							</p>
-						) : (
-							<RewardTerms reward={data.reward} />
-						)}
-					</div>
-				</div>
-
-				{isLoading ? (
+		<SettingsSection
+			caption={
+				isLoading || isError || !data
+					? "Ryu credits for the friends you bring, on the same link as your cash commission."
+					: rewardTermsText(data.reward)
+			}
+			title="Credit rewards"
+		>
+			{isLoading ? (
+				<SettingsCard>
 					<div className="flex items-center justify-center py-6">
 						<Spinner className="size-5" />
 					</div>
-				) : null}
+				</SettingsCard>
+			) : null}
 
-				{isError || !(isLoading || data) ? (
-					<p className="py-4 text-center text-muted-foreground text-sm">
+			{isError || !(isLoading || data) ? (
+				<SettingsCard>
+					<p className="text-muted-foreground text-sm">
 						Couldn't load your credit rewards. Nothing is lost — try again in a
 						moment.
 					</p>
-				) : null}
+				</SettingsCard>
+			) : null}
 
-				{data ? (
-					<>
-						<CapSummary cap={data.cap} />
-						{data.referrals.length === 0 ? (
-							<p className="py-4 text-center text-muted-foreground text-sm">
+			{data ? (
+				<div className="space-y-3">
+					<CapSummary cap={data.cap} />
+					{data.referrals.length === 0 ? (
+						<SettingsCard>
+							<p className="text-muted-foreground text-sm">
 								Nobody has signed up with your link yet. Share it above and
 								they'll show up here.
 							</p>
-						) : (
-							<div className="space-y-2">
-								{data.referrals.map((referee) => (
-									<RefereeRow key={referee.id} referee={referee} />
-								))}
-							</div>
-						)}
-					</>
-				) : null}
-			</CardContent>
-		</Card>
+						</SettingsCard>
+					) : (
+						<SettingsGroup>
+							{data.referrals.map((referee) => (
+								<RefereeRow key={referee.id} referee={referee} />
+							))}
+						</SettingsGroup>
+					)}
+				</div>
+			) : null}
+		</SettingsSection>
 	);
 }

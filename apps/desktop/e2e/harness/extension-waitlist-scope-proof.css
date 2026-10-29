@@ -1,0 +1,14 @@
+html,
+body,
+#root {
+	min-height: 100%;
+	margin: 0;
+}
+
+body {
+	min-width: 320px;
+	overflow: auto !important;
+	font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+	color: #17202f;
+	background: #f7f8fb;
+}

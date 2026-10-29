@@ -20,6 +20,35 @@ const GAP = z
 const ALIGN = z.enum(["start", "center", "end", "stretch"]);
 const JUSTIFY = z.enum(["start", "center", "end", "between", "around"]);
 
+/** Theme chart palette slots; series without a color cycle through them. */
+export const CHART_COLORS = [
+	"chart-1",
+	"chart-2",
+	"chart-3",
+	"chart-4",
+	"chart-5",
+] as const;
+
+/** Upper bounds the renderer enforces regardless of what the spec says. */
+export const CHART_MAX_POINTS = 500;
+/** One series per theme palette slot, so default colors never repeat. */
+export const CHART_MAX_SERIES = CHART_COLORS.length;
+
+const VALUE_FORMAT = z
+	.enum(["number", "compact", "percent", "currency"])
+	.describe(
+		"How values render on axes and tooltips. percent expects fractions (0.25 = 25%)"
+	);
+
+const ChartSeries = z.object({
+	key: z.string().describe("Field in each data row holding this series' value"),
+	label: z.string().optional().describe("Legend/tooltip label"),
+	color: z
+		.enum(CHART_COLORS)
+		.optional()
+		.describe("Theme palette slot; defaults to the next chart-N in order"),
+});
+
 const SelectOption = z.object({
 	label: z.string().describe("Visible option text"),
 	value: z.string().describe("Value written to state when chosen"),
@@ -155,6 +184,70 @@ export const agentUiCatalog = defineCatalog(schema, {
 			}),
 			description: "A simple data table from columns + rows.",
 		},
+		Chart: {
+			props: z.object({
+				type: z
+					.enum(["bar", "line", "area", "pie"])
+					.describe("bar/line/area plot series over xKey; pie uses series[0]"),
+				data: z
+					.array(
+						z.record(z.string(), z.union([z.string(), z.number(), z.null()]))
+					)
+					.max(CHART_MAX_POINTS)
+					.describe(
+						"Rows like { month: 'Jan', revenue: 120 }. May be { $state: '/path' }"
+					),
+				xKey: z
+					.string()
+					.describe("Row field for the x-axis category (pie: slice name)"),
+				series: z
+					.array(ChartSeries)
+					.min(1)
+					.max(CHART_MAX_SERIES)
+					.describe("One entry per plotted value field"),
+				stacked: z
+					.boolean()
+					.optional()
+					.describe("Stack bar/area series (default false)"),
+				height: z
+					.number()
+					.int()
+					.min(120)
+					.max(480)
+					.optional()
+					.describe("Plot height in px (default 240)"),
+				valueFormat: VALUE_FORMAT.optional(),
+				currency: z
+					.string()
+					.optional()
+					.describe("ISO currency for valueFormat currency (default USD)"),
+				showLegend: z
+					.boolean()
+					.optional()
+					.describe("Show a legend (default: when more than one series)"),
+			}),
+			description:
+				"A themed bar, line, area, or pie chart with tooltips. Use for trends, comparisons, and shares instead of a table of numbers.",
+		},
+		Stat: {
+			props: z.object({
+				label: z.string().describe("What the number measures"),
+				value: z
+					.union([z.string(), z.number()])
+					.describe("The headline value, pre-formatted or a number"),
+				delta: z
+					.string()
+					.optional()
+					.describe("Change vs. a baseline, e.g. '+12% vs last month'"),
+				trend: z
+					.enum(["up", "down", "neutral"])
+					.optional()
+					.describe("Colors and arrows the delta"),
+				description: z.string().optional().describe("Optional footnote"),
+			}),
+			description:
+				"A KPI tile: label, large value, optional delta. Put several in a Grid for a metric row.",
+		},
 		Progress: {
 			props: z.object({
 				value: z
@@ -195,7 +288,7 @@ export const agentUiCatalog = defineCatalog(schema, {
 				disabled: z.boolean().optional(),
 			}),
 			description:
-				"A clickable button. Attach an action with the element's `on.press` to mutate state (e.g. { action: 'setState', params: { path, value } }).",
+				"A clickable button. Attach an action with the element's `on.press` to mutate state (e.g. { action: 'setState', params: { statePath: '/path', value } }).",
 		},
 		Input: {
 			props: z.object({

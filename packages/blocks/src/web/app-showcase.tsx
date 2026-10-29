@@ -58,10 +58,10 @@ function MockupWindow({
 		>
 			<div className="flex h-8 items-center gap-2 border-border border-b bg-muted/50 px-3">
 				<TrafficLights />
-				<span className="min-w-0 truncate font-mono text-[9px] text-muted-foreground">
+				<span className="type-micro min-w-0 truncate font-mono text-muted-foreground">
 					{label}
 				</span>
-				<span className="ml-auto inline-flex shrink-0 items-center gap-1 font-mono text-[9px] text-muted-foreground">
+				<span className="type-micro ml-auto inline-flex shrink-0 items-center gap-1 font-mono text-muted-foreground">
 					<span className="size-1.5 rounded-full bg-success" />
 					ready
 				</span>
@@ -81,16 +81,16 @@ function MockupSidebar({
 	return (
 		<aside className="hidden border-border border-r bg-muted/20 p-2 sm:block">
 			<div className="mb-5 flex items-center gap-1.5 px-1.5">
-				<span className="flex size-4 items-center justify-center rounded bg-foreground font-semibold text-[8px] text-background">
+				<span className="type-tiny flex size-4 items-center justify-center rounded bg-foreground font-semibold text-background">
 					R
 				</span>
-				<span className="font-heading font-medium text-[10px]">Ryu</span>
+				<span className="type-compact font-heading font-medium">Ryu</span>
 			</div>
 			<div className="space-y-0.5">
 				{items.map((item) => (
 					<div
 						className={cn(
-							"flex items-center gap-1.5 rounded px-1.5 py-1.5 text-[9px]",
+							"type-micro flex items-center gap-1.5 rounded px-1.5 py-1.5",
 							item === active
 								? "bg-foreground/10 font-medium text-foreground"
 								: "text-muted-foreground"
@@ -113,7 +113,7 @@ function MockupSidebar({
 
 function MiniButton({ children }: { children: ReactNode }) {
 	return (
-		<span className="inline-flex items-center rounded border border-border bg-background px-2 py-1 font-medium text-[9px] text-foreground">
+		<span className="type-micro inline-flex items-center rounded border border-border bg-background px-2 py-1 font-medium text-foreground">
 			{children}
 		</span>
 	);
@@ -129,7 +129,7 @@ function MiniPill({
 	return (
 		<span
 			className={cn(
-				"inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[9px]",
+				"type-micro inline-flex items-center rounded-full border px-2 py-0.5 font-mono",
 				active
 					? "border-primary/30 bg-primary/10 text-foreground"
 					: "border-border bg-muted/40 text-muted-foreground"
@@ -177,7 +177,7 @@ function SitesMockup({ compact = false }: { compact?: boolean }) {
 				<div className="min-w-0 p-3 sm:p-4">
 					<div className="flex items-center justify-between gap-2">
 						<div className="min-w-0">
-							<p className="truncate font-mono text-[8px] text-muted-foreground">
+							<p className="type-tiny truncate font-mono text-muted-foreground">
 								PROJECT / NORTHSTAR
 							</p>
 							<p className="mt-1 truncate font-heading font-medium text-xs">
@@ -193,13 +193,13 @@ function SitesMockup({ compact = false }: { compact?: boolean }) {
 						)}
 					>
 						<div className="overflow-hidden rounded-lg border border-border bg-card">
-							<div className="flex items-center justify-between border-border border-b px-2.5 py-2 font-mono text-[8px] text-muted-foreground">
+							<div className="type-tiny flex items-center justify-between border-border border-b px-2.5 py-2 font-mono text-muted-foreground">
 								<span>northstar.studio</span>
 								<MiniPill active>Draft</MiniPill>
 							</div>
 							<div className="p-3 sm:p-4">
 								<div className="mb-5 flex items-center justify-between">
-									<span className="font-heading font-semibold text-[9px] tracking-[0.18em]">
+									<span className="type-micro font-heading font-semibold tracking-(--tracking-section)">
 										NORTHSTAR
 									</span>
 									<span className="size-2 rounded-full bg-primary/70" />
@@ -207,14 +207,14 @@ function SitesMockup({ compact = false }: { compact?: boolean }) {
 								<p className="max-w-[10rem] font-heading font-medium text-base leading-tight sm:text-xl">
 									Tools for a sharper launch.
 								</p>
-								<p className="mt-2 max-w-[13rem] text-[9px] text-muted-foreground leading-relaxed">
+								<p className="type-micro mt-2 max-w-[13rem] text-muted-foreground leading-relaxed">
 									A small studio for teams making the next useful thing.
 								</p>
 								<div className="mt-5 flex items-center gap-2">
-									<span className="rounded bg-foreground px-2 py-1 text-[8px] text-background">
+									<span className="type-tiny rounded bg-foreground px-2 py-1 text-background">
 										Start here
 									</span>
-									<span className="text-[8px] text-muted-foreground">
+									<span className="type-tiny text-muted-foreground">
 										Read the story →
 									</span>
 								</div>
@@ -228,10 +228,10 @@ function SitesMockup({ compact = false }: { compact?: boolean }) {
 						>
 							<div className="rounded-lg border border-border bg-muted/20 p-2.5">
 								<div className="mb-2 flex items-center justify-between">
-									<span className="font-medium text-[9px]">Pages</span>
+									<span className="type-micro font-medium">Pages</span>
 									<Plus className="size-3 text-muted-foreground" />
 								</div>
-								<div className="space-y-1.5 text-[8px] text-muted-foreground">
+								<div className="type-tiny space-y-1.5 text-muted-foreground">
 									<div className="flex items-center gap-1.5 text-foreground">
 										<FileText className="size-2.5" />
 										Home
@@ -247,11 +247,11 @@ function SitesMockup({ compact = false }: { compact?: boolean }) {
 								</div>
 							</div>
 							<div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5">
-								<p className="font-medium text-[9px]">Ready to publish</p>
-								<p className="mt-1 text-[8px] text-muted-foreground">
+								<p className="type-micro font-medium">Ready to publish</p>
+								<p className="type-tiny mt-1 text-muted-foreground">
 									Version 12 · private
 								</p>
-								<span className="mt-2 block rounded bg-primary px-2 py-1 text-center text-[8px] text-primary-foreground">
+								<span className="type-tiny mt-2 block rounded bg-primary px-2 py-1 text-center text-primary-foreground">
 									Publish
 								</span>
 							</div>
@@ -280,7 +280,7 @@ function DashboardsMockup() {
 				<div className="min-w-0 p-3 sm:p-4">
 					<div className="flex items-center justify-between gap-2">
 						<div>
-							<p className="font-mono text-[8px] text-muted-foreground">
+							<p className="type-tiny font-mono text-muted-foreground">
 								BOARD / OVERVIEW
 							</p>
 							<p className="mt-1 font-heading font-medium text-xs">
@@ -298,12 +298,12 @@ function DashboardsMockup() {
 								className="rounded-lg border border-border bg-card p-2.5"
 								key={label}
 							>
-								<p className="text-[8px] text-muted-foreground">{label}</p>
+								<p className="type-tiny text-muted-foreground">{label}</p>
 								<div className="mt-2 flex items-end justify-between gap-1">
 									<span className="font-mono text-base tabular-nums sm:text-lg">
 										{value}
 									</span>
-									<span className="font-mono text-[8px] text-status-success">
+									<span className="type-tiny font-mono text-status-success">
 										{note}
 									</span>
 								</div>
@@ -313,8 +313,8 @@ function DashboardsMockup() {
 					<div className="mt-2 grid gap-2 sm:grid-cols-[1.1fr_0.9fr]">
 						<div className="rounded-lg border border-border bg-card p-2.5">
 							<div className="flex items-center justify-between">
-								<span className="font-medium text-[9px]">Run volume</span>
-								<span className="font-mono text-[8px] text-muted-foreground">
+								<span className="type-micro font-medium">Run volume</span>
+								<span className="type-tiny font-mono text-muted-foreground">
 									7 days
 								</span>
 							</div>
@@ -339,7 +339,7 @@ function DashboardsMockup() {
 						</div>
 						<div className="rounded-lg border border-border bg-card p-2.5">
 							<div className="flex items-center justify-between">
-								<span className="font-medium text-[9px]">Recent activity</span>
+								<span className="type-micro font-medium">Recent activity</span>
 								<ChevronRight className="size-3 text-muted-foreground" />
 							</div>
 							<div className="mt-2 space-y-2">
@@ -355,7 +355,7 @@ function DashboardsMockup() {
 												index === 1 ? "bg-primary" : "bg-success"
 											)}
 										/>
-										<span className="truncate text-[8px] text-muted-foreground">
+										<span className="type-tiny truncate text-muted-foreground">
 											{item}
 										</span>
 									</div>
@@ -376,7 +376,7 @@ function VideoStudioMockup() {
 				<div className="grid min-h-0 grid-cols-[1fr_7.5rem]">
 					<div className="flex min-w-0 items-center justify-center bg-foreground/[0.04] p-3 sm:p-5">
 						<div className="relative aspect-video w-full max-w-[19rem] overflow-hidden rounded border border-border bg-muted/50">
-							<div className="absolute inset-x-0 top-0 flex items-center justify-between px-2 py-1.5 font-mono text-[7px] text-muted-foreground">
+							<div className="type-miniature absolute inset-x-0 top-0 flex items-center justify-between px-2 py-1.5 font-mono text-muted-foreground">
 								<span>00:18:42</span>
 								<span>16:9</span>
 							</div>
@@ -393,26 +393,24 @@ function VideoStudioMockup() {
 					</div>
 					<div className="border-border border-l bg-muted/15 p-2.5">
 						<div className="mb-3 flex items-center justify-between">
-							<span className="font-medium text-[9px]">Inspector</span>
+							<span className="type-micro font-medium">Inspector</span>
 							<Layers className="size-3 text-muted-foreground" />
 						</div>
 						<div className="space-y-3">
 							<div>
-								<p className="mb-1.5 text-[8px] text-muted-foreground">
+								<p className="type-tiny mb-1.5 text-muted-foreground">
 									Selected layer
 								</p>
-								<div className="rounded border border-primary/30 bg-primary/5 px-2 py-1.5 text-[8px]">
+								<div className="type-tiny rounded border border-primary/30 bg-primary/5 px-2 py-1.5">
 									Title / Intro
 								</div>
 							</div>
 							<div>
-								<p className="mb-1.5 text-[8px] text-muted-foreground">
-									Timing
-								</p>
+								<p className="type-tiny mb-1.5 text-muted-foreground">Timing</p>
 								<MiniLines count={2} widths={["w-full", "w-2/3"]} />
 							</div>
 							<div>
-								<p className="mb-1.5 text-[8px] text-muted-foreground">
+								<p className="type-tiny mb-1.5 text-muted-foreground">
 									Captions
 								</p>
 								<MiniPill active>synced</MiniPill>
@@ -421,7 +419,7 @@ function VideoStudioMockup() {
 					</div>
 				</div>
 				<div className="border-border border-t bg-muted/20 p-2.5">
-					<div className="mb-1.5 flex items-center justify-between font-mono text-[7px] text-muted-foreground">
+					<div className="type-miniature mb-1.5 flex items-center justify-between font-mono text-muted-foreground">
 						<span>00:00</span>
 						<span>00:10</span>
 						<span>00:20</span>
@@ -430,7 +428,7 @@ function VideoStudioMockup() {
 					</div>
 					<div className="space-y-1.5">
 						<div className="flex items-center gap-2">
-							<span className="w-8 shrink-0 font-mono text-[7px] text-muted-foreground">
+							<span className="type-miniature w-8 shrink-0 font-mono text-muted-foreground">
 								VIDEO
 							</span>
 							<div className="relative h-3 flex-1 overflow-hidden rounded-sm bg-foreground/[0.06]">
@@ -440,7 +438,7 @@ function VideoStudioMockup() {
 							</div>
 						</div>
 						<div className="flex items-center gap-2">
-							<span className="w-8 shrink-0 font-mono text-[7px] text-muted-foreground">
+							<span className="type-miniature w-8 shrink-0 font-mono text-muted-foreground">
 								VOICE
 							</span>
 							<div className="relative h-3 flex-1 overflow-hidden rounded-sm bg-foreground/[0.06]">
@@ -448,7 +446,7 @@ function VideoStudioMockup() {
 							</div>
 						</div>
 						<div className="flex items-center gap-2">
-							<span className="w-8 shrink-0 font-mono text-[7px] text-muted-foreground">
+							<span className="type-miniature w-8 shrink-0 font-mono text-muted-foreground">
 								TEXT
 							</span>
 							<div className="relative h-3 flex-1 overflow-hidden rounded-sm bg-foreground/[0.06]">
@@ -469,7 +467,7 @@ function SlidesMockup() {
 			<div className="grid min-h-[18rem] grid-cols-[5.5rem_1fr] bg-background">
 				<div className="border-border border-r bg-muted/20 p-2">
 					<div className="mb-2 flex items-center justify-between">
-						<span className="font-medium text-[8px]">Frames</span>
+						<span className="type-tiny font-medium">Frames</span>
 						<Plus className="size-3 text-muted-foreground" />
 					</div>
 					<div className="space-y-2">
@@ -484,7 +482,7 @@ function SlidesMockup() {
 								key={number}
 							>
 								<div className="flex aspect-[4/3] items-end rounded-sm bg-muted/60 p-1">
-									<span className="font-mono text-[7px] text-muted-foreground">
+									<span className="type-miniature font-mono text-muted-foreground">
 										{number}
 									</span>
 									<span className="ml-auto h-1 w-4 rounded-full bg-foreground/20" />
@@ -496,7 +494,7 @@ function SlidesMockup() {
 				<div className="min-w-0 p-3 sm:p-4">
 					<div className="flex items-center justify-between gap-2">
 						<div>
-							<p className="font-mono text-[8px] text-muted-foreground">
+							<p className="type-tiny font-mono text-muted-foreground">
 								PROJECT / LAUNCH-STORY
 							</p>
 							<p className="mt-1 font-heading font-medium text-xs">Frame 01</p>
@@ -509,15 +507,15 @@ function SlidesMockup() {
 					<div className="mt-3 flex min-h-[11rem] items-center justify-center rounded-lg border border-border bg-muted/20 p-3 sm:p-5">
 						<div className="relative aspect-[4/3] w-full max-w-[19rem] overflow-hidden rounded bg-foreground p-4 text-background shadow-sm sm:p-5">
 							<div className="flex items-center justify-between">
-								<span className="font-heading font-semibold text-[8px] tracking-[0.16em]">
+								<span className="type-tiny font-heading font-semibold tracking-(--tracking-section)">
 									NORTHSTAR
 								</span>
-								<span className="font-mono text-[7px] text-background/55">
+								<span className="type-miniature font-mono text-background/55">
 									01 / 04
 								</span>
 							</div>
 							<div className="absolute right-4 bottom-4 left-4 sm:right-5 sm:bottom-5 sm:left-5">
-								<p className="max-w-[11rem] font-heading font-medium text-base leading-[0.95] sm:text-xl">
+								<p className="max-w-[11rem] font-heading font-medium text-base leading-none sm:text-xl">
 									A clearer way to start.
 								</p>
 								<div className="mt-3 flex items-center gap-1.5">
@@ -529,7 +527,7 @@ function SlidesMockup() {
 					</div>
 					<div className="mt-3 flex items-center gap-2">
 						<Sparkles className="size-3 text-primary" />
-						<span className="text-[8px] text-muted-foreground">
+						<span className="type-tiny text-muted-foreground">
 							Media tools ready · 4 frames · saved locally
 						</span>
 					</div>
@@ -550,7 +548,7 @@ function SpacesMockup() {
 				<div className="min-w-0 p-3 sm:p-4">
 					<div className="flex items-center justify-between gap-2">
 						<div>
-							<p className="font-mono text-[8px] text-muted-foreground">
+							<p className="type-tiny font-mono text-muted-foreground">
 								SPACE / PRODUCT-NOTES
 							</p>
 							<p className="mt-1 font-heading font-medium text-xs">
@@ -564,7 +562,7 @@ function SpacesMockup() {
 					</div>
 					<div className="relative mt-3">
 						<Search className="absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground" />
-						<div className="rounded border border-border bg-muted/20 py-1.5 pr-2 pl-7 font-mono text-[8px] text-muted-foreground">
+						<div className="type-tiny rounded border border-border bg-muted/20 py-1.5 pr-2 pl-7 font-mono text-muted-foreground">
 							Search this Space…
 						</div>
 					</div>
@@ -586,20 +584,20 @@ function SpacesMockup() {
 								>
 									<FileText className="size-3 shrink-0 text-muted-foreground" />
 									<div className="min-w-0">
-										<p className="truncate font-mono text-[8px]">{name}</p>
-										<p className="mt-0.5 text-[7px] text-muted-foreground">
+										<p className="type-tiny truncate font-mono">{name}</p>
+										<p className="type-miniature mt-0.5 text-muted-foreground">
 											{note}
 										</p>
 									</div>
 								</div>
 							))}
-							<div className="flex items-center gap-2 rounded border border-border border-dashed px-2.5 py-2 text-[8px] text-muted-foreground">
+							<div className="type-tiny flex items-center gap-2 rounded border border-border border-dashed px-2.5 py-2 text-muted-foreground">
 								<Folder className="size-3" />3 folders
 							</div>
 						</div>
 						<div className="rounded-lg border border-border bg-card p-3">
 							<div className="flex items-center justify-between">
-								<span className="font-heading font-medium text-[10px]">
+								<span className="type-compact font-heading font-medium">
 									launch-brief.md
 								</span>
 								<MiniPill active>indexed</MiniPill>
@@ -615,7 +613,7 @@ function SpacesMockup() {
 								<MiniPill>launch</MiniPill>
 								<MiniPill>source</MiniPill>
 							</div>
-							<div className="mt-4 flex items-center gap-1.5 text-[8px] text-muted-foreground">
+							<div className="type-tiny mt-4 flex items-center gap-1.5 text-muted-foreground">
 								<span className="size-1.5 rounded-full bg-primary" />
 								Ready for agent recall
 							</div>
@@ -629,12 +627,12 @@ function SpacesMockup() {
 
 function CalendarMockup() {
 	const days = Array.from({ length: 35 }, (_, index) => index - 1);
-	const events: Record<number, { label: string; className: string }> = {
-		3: { label: "Research", className: "bg-primary/15 text-foreground" },
-		9: { label: "Digest", className: "bg-success/15 text-foreground" },
-		16: { label: "Review", className: "bg-foreground/10 text-foreground" },
-		23: { label: "Publish", className: "bg-primary/15 text-foreground" },
-	};
+	const events = new Map<number, { label: string; className: string }>([
+		[3, { label: "Research", className: "bg-primary/15 text-foreground" }],
+		[9, { label: "Digest", className: "bg-success/15 text-foreground" }],
+		[16, { label: "Review", className: "bg-foreground/10 text-foreground" }],
+		[23, { label: "Publish", className: "bg-primary/15 text-foreground" }],
+	]);
 	return (
 		<MockupWindow label="Calendar / scheduled runs">
 			<div className="grid min-h-[18rem] grid-cols-1 bg-background sm:grid-cols-[6.5rem_1fr]">
@@ -645,7 +643,7 @@ function CalendarMockup() {
 				<div className="min-w-0 p-3 sm:p-4">
 					<div className="flex items-center justify-between gap-2">
 						<div>
-							<p className="font-mono text-[8px] text-muted-foreground">
+							<p className="type-tiny font-mono text-muted-foreground">
 								SCHEDULE / SEPTEMBER
 							</p>
 							<p className="mt-1 font-heading font-medium text-xs">
@@ -665,7 +663,7 @@ function CalendarMockup() {
 						<div className="grid grid-cols-7 border-border border-b bg-muted/20">
 							{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
 								<span
-									className="py-1.5 text-center font-mono text-[8px] text-muted-foreground"
+									className="type-tiny py-1.5 text-center font-mono text-muted-foreground"
 									key={`${day}-${index}`}
 								>
 									{day}
@@ -674,7 +672,7 @@ function CalendarMockup() {
 						</div>
 						<div className="grid grid-cols-7">
 							{days.map((day, index) => {
-								const event = events[day];
+								const event = events.get(day);
 								return (
 									<div
 										className="min-h-[2.35rem] border-border border-r border-b p-1.5 last:border-r-0"
@@ -682,7 +680,7 @@ function CalendarMockup() {
 									>
 										<span
 											className={cn(
-												"font-mono text-[8px]",
+												"type-tiny font-mono",
 												day === 16
 													? "flex size-4 items-center justify-center rounded-full bg-foreground text-background"
 													: day < 1
@@ -695,7 +693,7 @@ function CalendarMockup() {
 										{event ? (
 											<span
 												className={cn(
-													"mt-1 block truncate rounded px-1 py-0.5 font-medium text-[7px]",
+													"type-miniature mt-1 block truncate rounded px-1 py-0.5 font-medium",
 													event.className
 												)}
 											>
@@ -710,9 +708,9 @@ function CalendarMockup() {
 					<div className="mt-2 flex items-center justify-between rounded border border-border bg-muted/20 px-2.5 py-2">
 						<div className="flex items-center gap-2">
 							<span className="size-1.5 rounded-full bg-success" />
-							<span className="text-[8px]">Next run · Research brief</span>
+							<span className="type-tiny">Next run · Research brief</span>
 						</div>
-						<span className="font-mono text-[8px] text-muted-foreground">
+						<span className="type-tiny font-mono text-muted-foreground">
 							tomorrow · 09:00
 						</span>
 					</div>
@@ -744,7 +742,7 @@ function CanvasNode({
 				<span className="flex size-4 items-center justify-center rounded bg-muted text-muted-foreground">
 					{icon}
 				</span>
-				<span className="font-medium text-[8px]">{label}</span>
+				<span className="type-tiny font-medium">{label}</span>
 				<Circle className="ml-auto size-2.5 text-success" />
 			</div>
 			<div className="mt-2">{children}</div>
@@ -807,7 +805,7 @@ function CanvasMockup() {
 						/>
 					</svg>
 					<div className="absolute inset-x-3 top-2 flex items-center justify-between">
-						<span className="font-mono text-[8px] text-muted-foreground">
+						<span className="type-tiny font-mono text-muted-foreground">
 							BOARD / LAUNCH-SYSTEM
 						</span>
 						<div className="flex gap-1.5">
@@ -846,11 +844,11 @@ function CanvasMockup() {
 				</div>
 				<div className="border-border border-l bg-muted/20 p-2.5">
 					<div className="mb-3 flex items-center justify-between">
-						<span className="font-medium text-[9px]">Node details</span>
+						<span className="type-micro font-medium">Node details</span>
 						<ChevronRight className="size-3 text-muted-foreground" />
 					</div>
-					<p className="text-[8px] text-muted-foreground">Selected</p>
-					<p className="mt-1 font-mono text-[9px]">compose-02</p>
+					<p className="type-tiny text-muted-foreground">Selected</p>
+					<p className="type-micro mt-1 font-mono">compose-02</p>
 					<div className="mt-4 space-y-2">
 						<MiniLines
 							count={4}
@@ -867,7 +865,7 @@ function CanvasMockup() {
 	);
 }
 
-const VISUALS: Record<AppShowcaseVisualKey, () => ReactNode> = {
+const VISUALS = {
 	calendar: CalendarMockup,
 	canvas: CanvasMockup,
 	dashboards: DashboardsMockup,
@@ -875,7 +873,7 @@ const VISUALS: Record<AppShowcaseVisualKey, () => ReactNode> = {
 	slides: SlidesMockup,
 	spaces: SpacesMockup,
 	"video-studio": VideoStudioMockup,
-};
+} satisfies Record<AppShowcaseVisualKey, () => ReactNode>;
 
 export function AppShowcaseVisual({
 	app,
@@ -902,7 +900,9 @@ export function AppShowcaseCard({ app }: { app: AppShowcase }) {
 			className="group block min-w-0 rounded-2xl outline-offset-8 focus-visible:outline-2 focus-visible:outline-ring"
 			data-app-showcase-card={app.slug}
 			data-testid={`app-showcase-card-${app.slug}`}
-			href={`/products/apps/${app.slug}` as Route}
+			href={
+				/* SAFETY: AppShowcase.slug is the closed AppShowcaseVisualKey union from the canonical authored catalog; /products/apps/[slug]/page.tsx owns these constructed nonliteral app routes. */ `/products/apps/${app.slug}` as Route
+			}
 		>
 			<div
 				aria-hidden="true"
@@ -913,7 +913,7 @@ export function AppShowcaseCard({ app }: { app: AppShowcase }) {
 			</div>
 			<div className="mt-5 flex items-start justify-between gap-4">
 				<div className="min-w-0">
-					<div className="mb-2 flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted-foreground">
+					<div className="type-compact mb-2 flex flex-wrap items-center gap-2 font-mono text-muted-foreground">
 						<span>{app.category}</span>
 						<span aria-hidden="true">·</span>
 						<span>{app.surfaceLabel}</span>
@@ -927,14 +927,22 @@ export function AppShowcaseCard({ app }: { app: AppShowcase }) {
 				</div>
 				<ArrowUpRight
 					aria-hidden="true"
-					className="mt-1 size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+					className="mt-1 size-5 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5"
 				/>
 			</div>
 		</Link>
 	);
 }
 
-export function AppShowcaseGallery() {
+export function AppShowcaseGallery({
+	apps = appShowcases,
+}: {
+	/**
+	 * The showcases to list. Defaults to every showcase; the web page passes
+	 * only those whose app rollout is open.
+	 */
+	apps?: readonly AppShowcase[];
+} = {}) {
 	return (
 		<div
 			className="bg-background text-foreground"
@@ -942,10 +950,10 @@ export function AppShowcaseGallery() {
 		>
 			<section className="container mx-auto px-4 pt-24 pb-16 md:pt-32 md:pb-20">
 				<div className="max-w-3xl">
-					<p className="font-mono text-[11px] text-muted-foreground tracking-[0.14em]">
+					<p className="type-caption font-mono text-muted-foreground tracking-(--tracking-table-label)">
 						RYU APPS / OFFICIAL SURFACES
 					</p>
-					<h1 className="mt-5 max-w-3xl font-heading font-medium text-4xl tracking-[-0.045em] md:text-6xl">
+					<h1 className="mt-5 max-w-3xl font-heading font-medium text-4xl tracking-tighter md:text-6xl">
 						Workspaces for the work agents make.
 					</h1>
 					<p className="mt-6 max-w-2xl text-lg text-muted-foreground leading-relaxed">
@@ -955,7 +963,7 @@ export function AppShowcaseGallery() {
 					</p>
 					<div className="mt-8 flex flex-wrap items-center gap-3">
 						<Link
-							className={cn(buttonVariants({ size: "lg" }))}
+							className={cn(buttonVariants({ size: "lg", variant: "mono" }))}
 							href="/download"
 						>
 							Get Ryu
@@ -973,22 +981,22 @@ export function AppShowcaseGallery() {
 			<section className="container mx-auto px-4 pb-24 md:pb-32">
 				<div className="mb-12 flex flex-wrap items-end justify-between gap-4">
 					<div>
-						<p className="font-mono text-[11px] text-muted-foreground tracking-[0.14em]">
+						<p className="type-caption font-mono text-muted-foreground tracking-(--tracking-table-label)">
 							BUILT BY RYU
 						</p>
 						<h2 className="mt-3 font-heading font-medium text-3xl tracking-tight md:text-4xl">
 							Choose a surface for the job.
 						</h2>
 					</div>
-					<p className="font-mono text-[11px] text-muted-foreground">
-						{appShowcases.length} featured apps
+					<p className="type-caption font-mono text-muted-foreground">
+						{apps.length} featured apps
 					</p>
 				</div>
 				<div
 					className="grid grid-cols-1 gap-x-8 gap-y-16 md:grid-cols-2 xl:grid-cols-3"
 					data-testid="app-showcase-grid"
 				>
-					{appShowcases.map((app) => (
+					{apps.map((app) => (
 						<AppShowcaseCard app={app} key={app.slug} />
 					))}
 				</div>
@@ -999,7 +1007,7 @@ export function AppShowcaseGallery() {
 
 function FeatureRow({ feature }: { feature: AppShowcaseFeature }) {
 	return (
-		<li className="border-border border-t py-5">
+		<li className="py-5">
 			<div className="flex items-start gap-3">
 				<span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
 					<Check aria-hidden="true" className="size-3" />
@@ -1019,7 +1027,9 @@ function RelatedAppLink({ app }: { app: AppShowcase }) {
 	return (
 		<Link
 			className="group flex items-center justify-between gap-4 py-3 outline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"
-			href={`/products/apps/${app.slug}` as Route}
+			href={
+				/* SAFETY: AppShowcase.slug is the closed AppShowcaseVisualKey union from the canonical authored catalog; /products/apps/[slug]/page.tsx owns these constructed nonliteral app routes. */ `/products/apps/${app.slug}` as Route
+			}
 		>
 			<span>
 				<span className="block font-heading font-medium text-lg group-hover:underline group-hover:underline-offset-4">
@@ -1031,7 +1041,7 @@ function RelatedAppLink({ app }: { app: AppShowcase }) {
 			</span>
 			<ArrowUpRight
 				aria-hidden="true"
-				className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+				className="size-4 shrink-0 text-muted-foreground transition-transform motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5"
 			/>
 		</Link>
 	);
@@ -1062,7 +1072,7 @@ export function AppShowcaseDetail({
 				</Link>
 				<div className="mt-10 grid items-center gap-12 lg:grid-cols-[0.78fr_1.22fr] lg:gap-16">
 					<div className="min-w-0">
-						<div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-muted-foreground">
+						<div className="type-compact flex flex-wrap items-center gap-2 font-mono text-muted-foreground">
 							<span className="flex size-7 items-center justify-center rounded-lg bg-muted text-foreground">
 								<Icon
 									aria-hidden="true"
@@ -1074,7 +1084,7 @@ export function AppShowcaseDetail({
 							<span aria-hidden="true">·</span>
 							<span>{app.surfaceLabel}</span>
 						</div>
-						<h1 className="mt-6 font-heading font-medium text-5xl tracking-[-0.045em] md:text-7xl">
+						<h1 className="mt-6 font-heading font-medium text-5xl tracking-tighter md:text-7xl">
 							{app.name}
 						</h1>
 						<p className="mt-5 max-w-xl font-heading text-2xl leading-tight tracking-tight md:text-3xl">
@@ -1085,7 +1095,7 @@ export function AppShowcaseDetail({
 						</p>
 						<div className="mt-8 flex flex-wrap items-center gap-3">
 							<Link
-								className={cn(buttonVariants({ size: "lg" }))}
+								className={cn(buttonVariants({ size: "lg", variant: "mono" }))}
 								href="/download"
 							>
 								Get Ryu
@@ -1099,7 +1109,7 @@ export function AppShowcaseDetail({
 								Read the docs
 							</a>
 						</div>
-						<p className="mt-5 font-mono text-[10px] text-muted-foreground">
+						<p className="type-compact mt-5 font-mono text-muted-foreground">
 							Official app · {app.manifestId}
 						</p>
 					</div>
@@ -1116,7 +1126,7 @@ export function AppShowcaseDetail({
 			<section className="container mx-auto px-4 pb-20 md:pb-28">
 				<div className="grid gap-10 lg:grid-cols-[0.72fr_1.28fr] lg:gap-20">
 					<div>
-						<p className="font-mono text-[11px] text-muted-foreground tracking-[0.14em]">
+						<p className="type-caption font-mono text-muted-foreground tracking-(--tracking-table-label)">
 							INSIDE {app.name.toUpperCase()}
 						</p>
 						<h2 className="mt-4 max-w-md font-heading font-medium text-3xl tracking-tight md:text-4xl">
@@ -1132,16 +1142,16 @@ export function AppShowcaseDetail({
 			</section>
 
 			<section className="container mx-auto px-4 pb-24 md:pb-32">
-				<div className="grid gap-10 border-border border-t pt-8 md:grid-cols-[0.72fr_1.28fr] md:gap-20">
+				<div className="grid gap-10 md:grid-cols-[0.72fr_1.28fr] md:gap-20">
 					<div>
-						<p className="font-mono text-[11px] text-muted-foreground tracking-[0.14em]">
+						<p className="type-caption font-mono text-muted-foreground tracking-(--tracking-table-label)">
 							KEEP EXPLORING
 						</p>
 						<h2 className="mt-3 font-heading font-medium text-2xl tracking-tight">
 							More places to put Ryu to work.
 						</h2>
 					</div>
-					<div className="divide-y divide-border">
+					<div>
 						{relatedApps.map((relatedApp) => (
 							<RelatedAppLink app={relatedApp} key={relatedApp.slug} />
 						))}

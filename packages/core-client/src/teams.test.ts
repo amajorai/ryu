@@ -9,6 +9,11 @@ import {
 	removeTeamMember,
 	updateTeam,
 } from "./teams.ts";
+import type { HttpFixtureBody } from "./test-support/http-fixture.ts";
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 
 const realFetch = globalThis.fetch;
 const target: ApiTarget = {
@@ -21,12 +26,17 @@ afterEach(() => {
 	globalThis.fetch = realFetch;
 });
 
-function stub(body: unknown) {
-	let captured: { url?: string; init?: RequestInit } = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+interface CapturedTeamRequest {
+	init?: RequestInit;
+	url?: string;
+}
+
+function stub(body: HttpFixtureBody) {
+	let captured: CapturedTeamRequest = {};
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		captured = { url, init };
 		return Promise.resolve(Response.json(body));
-	}) as typeof fetch;
+	});
 	return () => captured;
 }
 
@@ -67,7 +77,7 @@ describe("teams client", () => {
 			leadAgentId: "agent-1",
 		});
 		expect(read().init?.method).toBe("POST");
-		expect(JSON.parse(read().init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(read().init?.body)).toEqual({
 			name: "Review",
 			description: null,
 			members: ["agent-1"],
@@ -83,7 +93,7 @@ describe("teams client", () => {
 			leadAgentId: null,
 		});
 		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team/a");
-		expect(JSON.parse(read().init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(read().init?.body)).toEqual({
 			name: "Review 2",
 			lead_agent_id: null,
 		});
@@ -94,14 +104,14 @@ describe("teams client", () => {
 		await fetchTeam(target, "team/a");
 		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team/a");
 
-		read = stub("");
+		read = stub({ success: true });
 		await deleteTeam(target, "team/a");
 		expect(read().init?.method).toBe("DELETE");
 
 		read = stub({ team: wire });
 		await addTeamMember(target, "team/a", "agent/1");
 		expect(read().url).toBe("http://127.0.0.1:7980/api/teams/team/a/members");
-		expect(JSON.parse(read().init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(read().init?.body)).toEqual({
 			agent_id: "agent/1",
 		});
 

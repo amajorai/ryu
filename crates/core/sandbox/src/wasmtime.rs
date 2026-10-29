@@ -7,9 +7,12 @@
 //!
 //! `WasmtimeSandbox` maps [`SandboxCapabilities`] directly to WASIp1 context
 //! knobs:
-//!   - `fs_read_paths` → `WasiCtxBuilder::preopened_dir` with `READ` perms.
-//!   - `fs_write_paths` → `WasiCtxBuilder::preopened_dir` with `WRITE | CREATE |
-//!     TRUNCATE` perms (union with read set when the same path appears in both).
+//!   - `fs_read_paths` → `WasiCtxBuilder::preopened_dir` with
+//!     `FsPerms::ReadOnly` (read contents and metadata; no create, delete,
+//!     write, or truncate).
+//!   - `fs_write_paths` → `WasiCtxBuilder::preopened_dir` with
+//!     `FsPerms::ReadWrite` (union with read set when the same path appears in
+//!     both).
 //!   - `network` → not directly controllable via WASIp1 (the WASI socket ABI
 //!     is WASIp2); the standard WASIp1 linker does not expose socket syscalls
 //!     by default, so the default-deny is structural, not explicit.
@@ -56,6 +59,8 @@ pub struct WasmtimeSandbox {
 
 #[cfg(feature = "sandbox-wasmtime")]
 const EPOCH_TICK: Duration = Duration::from_millis(10);
+#[cfg(feature = "sandbox-wasmtime")]
+const MAX_GUEST_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 
 impl WasmtimeSandbox {
     /// Construct the sandbox, initialising the Cranelift JIT engine.
@@ -67,6 +72,9 @@ impl WasmtimeSandbox {
         {
             let mut config = wasmtime::Config::new();
             config.epoch_interruption(true);
+            // Only the two admitted workers compile; do not fan each module out
+            // into additional parallel compiler jobs.
+            config.parallel_compilation(false);
             let engine = wasmtime::Engine::new(&config)?;
             let weak = engine.weak();
             std::thread::Builder::new()
@@ -105,9 +113,22 @@ impl Sandbox for WasmtimeSandbox {
             // runtime so it cannot try to block the runtime worker that is
             // currently polling this future.
             Box::pin(async move {
-                tokio::task::spawn_blocking(move || exec_wasm(&engine, spec))
-                    .await
-                    .map_err(|error| anyhow!("wasmtime worker failed: {error}"))?
+                anyhow::ensure!(
+                    spec.stdin
+                        .as_ref()
+                        .is_none_or(|bytes| bytes.len() <= 4 * 1024 * 1024),
+                    "WASM module exceeds compilation input limit"
+                );
+                static WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+                let permit = WORKERS
+                    .try_acquire()
+                    .map_err(|_| anyhow!("WASM worker admission limit reached"))?;
+                tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    exec_wasm(&engine, spec)
+                })
+                .await
+                .map_err(|error| anyhow!("wasmtime worker failed: {error}"))?
             })
         }
         #[cfg(not(feature = "sandbox-wasmtime"))]
@@ -155,7 +176,7 @@ impl Sandbox for WasmtimeSandbox {
 
 #[cfg(feature = "sandbox-wasmtime")]
 fn exec_wasm(engine: &wasmtime::Engine, spec: ExecSpec) -> Result<ExecOutput> {
-    use wasmtime::{Linker, Module, Store};
+    use wasmtime::{Linker, Module, Store, StoreLimitsBuilder};
     use wasmtime_wasi::{p2::pipe::MemoryOutputPipe, WasiCtxBuilder};
 
     // Accept WASM bytecode from spec.stdin; the command field names the module
@@ -168,23 +189,36 @@ fn exec_wasm(engine: &wasmtime::Engine, spec: ExecSpec) -> Result<ExecOutput> {
         )
     })?;
 
+    anyhow::ensure!(
+        wasm_bytes.len() <= 4 * 1024 * 1024,
+        "WASM module exceeds compilation input limit"
+    );
+    validate_compilation_shape(&wasm_bytes)?;
+    let started = Instant::now();
     // Compile the module (Cranelift JIT — typically 40–120 ms for a small
     // module).  The engine caches compilations internally when possible.
     let module = Module::from_binary(engine, &wasm_bytes)?;
 
     // Wire WASIp1 into a linker.
-    let mut linker: Linker<wasmtime_wasi::p1::WasiP1Ctx> = Linker::new(engine);
-    wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |s| s)?;
+    struct GuestState {
+        wasi: wasmtime_wasi::p1::WasiP1Ctx,
+        limits: wasmtime::StoreLimits,
+    }
+    let mut linker: Linker<GuestState> = Linker::new(engine);
+    wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |s| &mut s.wasi)?;
 
     // Capture stdout/stderr in memory.
     let cap = 4 * 1024 * 1024; // 4 MiB cap
     let stdout_pipe = MemoryOutputPipe::new(cap);
     let stderr_pipe = MemoryOutputPipe::new(cap);
 
-    // Build the WASI context.  Default: no preopened dirs, no env, deny-all.
+    // Build the WASI context.  Default: no preopened dirs, deny-all.  The
+    // guest environment holds only the caller's explicit `spec.env` pairs;
+    // nothing is inherited from the host.
     let mut builder = WasiCtxBuilder::new();
     builder.stdout(stdout_pipe.clone());
     builder.stderr(stderr_pipe.clone());
+    builder.envs(&spec.env);
 
     // argv: [spec.command, ...spec.args]
     let argv: Vec<String> = std::iter::once(spec.command.clone())
@@ -199,19 +233,16 @@ fn exec_wasm(engine: &wasmtime::Engine, spec: ExecSpec) -> Result<ExecOutput> {
     // paths read-only, write paths read+write).
     let caps = &spec.capabilities;
     for (path, writable) in caps.effective_mounts() {
-        let dir = wasmtime_wasi::DirPerms::READ
-            | if writable {
-                wasmtime_wasi::DirPerms::MUTATE
-            } else {
-                wasmtime_wasi::DirPerms::empty()
-            };
-        let file = wasmtime_wasi::FilePerms::READ
-            | if writable {
-                wasmtime_wasi::FilePerms::WRITE
-            } else {
-                wasmtime_wasi::FilePerms::empty()
-            };
-        builder.preopened_dir(&path, path.to_string_lossy().as_ref(), dir, file)?;
+        // wasmtime-wasi 48 collapsed the separate dir/file permission bitsets
+        // into one `FsPerms`: `ReadOnly` (read contents + metadata; no create,
+        // delete, write, or truncate) and `ReadWrite` (all of the above) — the
+        // exact pair the old `DirPerms`/`FilePerms` combinations expressed.
+        let perms = if writable {
+            wasmtime_wasi::FsPerms::ReadWrite
+        } else {
+            wasmtime_wasi::FsPerms::ReadOnly
+        };
+        builder.preopened_dir(&path, path.to_string_lossy().as_ref(), perms)?;
     }
 
     let wasi = builder.build_p1();
@@ -219,17 +250,22 @@ fn exec_wasm(engine: &wasmtime::Engine, spec: ExecSpec) -> Result<ExecOutput> {
     // Instantiate and run the module. Epoch interruption is driven by the
     // engine ticker started in `new`; the store deadline is set per execution
     // so one request cannot influence another request's timeout.
-    let mut store = Store::new(engine, wasi);
-    let timeout_secs = spec.timeout_secs;
-    let deadline_ticks = timeout_secs
-        .map(|secs| {
-            secs.saturating_mul(1000)
-                .saturating_add(EPOCH_TICK.as_millis() as u64 - 1)
-                / EPOCH_TICK.as_millis() as u64
-        })
-        // Wasmtime adds this delta to the current engine epoch; keep headroom
-        // for that addition on the explicit no-timeout path.
-        .unwrap_or(u64::MAX / 2)
+    let limits = StoreLimitsBuilder::new()
+        .memory_size(MAX_GUEST_MEMORY_BYTES)
+        .table_elements(10_000)
+        .memories(1)
+        .tables(4)
+        .instances(1)
+        .build();
+    let mut store = Store::new(engine, GuestState { wasi, limits });
+    store.limiter(|state| &mut state.limits);
+    let timeout_secs = Some(spec.timeout_secs.unwrap_or(120));
+    let timeout = Duration::from_secs(timeout_secs.unwrap());
+    let remaining = timeout
+        .checked_sub(started.elapsed())
+        .ok_or_else(|| anyhow!("wasmtime compilation exceeded execution deadline"))?;
+    let deadline_ticks = (remaining.as_millis().min(u64::MAX as u128) as u64)
+        .div_ceil(EPOCH_TICK.as_millis() as u64)
         .max(1);
     store.set_epoch_deadline(deadline_ticks);
     linker.module(&mut store, "", &module)?;
@@ -239,7 +275,6 @@ fn exec_wasm(engine: &wasmtime::Engine, spec: ExecSpec) -> Result<ExecOutput> {
         .typed::<(), ()>(&store)?;
 
     // `proc_exit(0)` surfaces as a trap wrapping `I32Exit(0)` — normal WASI.
-    let started = Instant::now();
     let run_result = func.call(&mut store, ());
     let elapsed = started.elapsed();
     drop(store); // flush memory pipe buffers
@@ -274,6 +309,95 @@ fn exec_wasm(engine: &wasmtime::Engine, spec: ExecSpec) -> Result<ExecOutput> {
     })
 }
 
+#[cfg(feature = "sandbox-wasmtime")]
+fn validate_compilation_shape(bytes: &[u8]) -> Result<()> {
+    use wasmparser::{Parser, Payload};
+    let mut total_code = 0usize;
+    let mut types = 0usize;
+    let mut type_elements = 0usize;
+    for payload in Parser::new(0).parse_all(bytes) {
+        match payload? {
+            Payload::ImportSection(section) => {
+                // Compact imports group many names under one section entry.
+                for (index, import) in section.into_imports().enumerate() {
+                    import?;
+                    anyhow::ensure!(index < 4096, "WASM imports exceed compilation limit");
+                }
+            }
+            Payload::ExportSection(section) => {
+                anyhow::ensure!(
+                    section.count() <= 4096,
+                    "WASM exports exceed compilation limit"
+                );
+            }
+            Payload::GlobalSection(section) => {
+                anyhow::ensure!(
+                    section.count() <= 4096,
+                    "WASM globals exceed compilation limit"
+                );
+            }
+            Payload::ElementSection(section) => {
+                anyhow::ensure!(
+                    section.count() <= 4096,
+                    "WASM element segments exceed compilation limit"
+                );
+            }
+            Payload::FunctionSection(section) => {
+                anyhow::ensure!(
+                    section.count() <= 4096,
+                    "WASM function count exceeds compilation limit"
+                );
+            }
+            Payload::TypeSection(section) => {
+                anyhow::ensure!(
+                    section.count() <= 4096,
+                    "WASM type count exceeds compilation limit"
+                );
+                // The section counts groups, which may contain many types.
+                for group in section {
+                    let group = group?;
+                    types += group.types().len();
+                    anyhow::ensure!(
+                        types <= 4096,
+                        "WASM expanded type count exceeds compilation limit"
+                    );
+                    for subtype in group.types() {
+                        let elements = match &subtype.composite_type.inner {
+                            wasmparser::CompositeInnerType::Func(function) => {
+                                function.params().len() + function.results().len()
+                            }
+                            wasmparser::CompositeInnerType::Struct(structure) => {
+                                structure.fields.len()
+                            }
+                            _ => 1,
+                        };
+                        type_elements += elements;
+                        anyhow::ensure!(
+                            elements <= 4096 && type_elements <= 65_536,
+                            "WASM type shape exceeds compilation limit"
+                        );
+                    }
+                }
+            }
+            Payload::CodeSectionEntry(body) => {
+                let size = body.range().len();
+                total_code += size;
+                anyhow::ensure!(
+                    size <= 16 * 1024 && total_code <= 1024 * 1024,
+                    "WASM code exceeds compilation limit"
+                );
+                let mut locals = 0u64;
+                for local in body.get_locals_reader()? {
+                    locals += u64::from(local?.0);
+                    anyhow::ensure!(locals <= 4096, "WASM locals exceed compilation limit");
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -288,6 +412,7 @@ mod tests {
     fn exec_requires_wasm_in_stdin() {
         let sandbox = WasmtimeSandbox::new().expect("sandbox init");
         let spec = ExecSpec {
+            env: Vec::new(),
             command: "noop".to_owned(),
             args: vec![],
             capabilities: SandboxCapabilities::default(),
@@ -305,87 +430,157 @@ mod tests {
         assert!(result.is_err(), "exec without WASM bytes must fail");
     }
 
-    /// AC#5: default-deny — an ungranted FS/net attempt is rejected at the
-    /// WASI layer.  The probe below is a minimal WAT module that calls
-    /// `path_open` (via a POSIX-level open) on a path that was never preopened.
-    ///
-    /// With the `sandbox-wasmtime` feature the module runs and hits ENOENT
-    /// from the WASI host (preopened dir list is empty); without the feature
-    /// the test skips.
+    #[cfg(feature = "sandbox-wasmtime")]
     #[test]
-    fn default_deny_ungranted_fs_access() {
-        // WAT: a minimal WASI module that tries to open "/etc/passwd" and
-        // writes a line to stdout regardless of the result.  We verify that
-        // the module receives no preopened FD for the path.
-        //
-        // The real test is compile-and-run: wasmtime will not expose any
-        // preopened directory to the module because SandboxCapabilities::default()
-        // has empty fs_read_paths.  The module's fd_prestat_get call returns
-        // EBADF, so any attempt to path_open relative to a preopened dir fails.
-        //
-        // We use a pre-compiled "hello" WAT module and assert no crash occurs
-        // (the module just exits 0), verifying the deny-all default is stable.
-        //
-        // NOTE: this test only validates the *capability builder* path (no
-        // preopens = deny FS).  A deeper test (module actually calling
-        // path_open and asserting the errno) lives in `apps/core/src/sandbox`
-        // (the spike tests with probe.wasm).
-        let sandbox = WasmtimeSandbox::new().expect("sandbox init");
-
-        // Minimal WAT: print a line and exit 0.
-        // (generated with `wat2wasm` inline — no external toolchain needed)
-        let wat = r#"
-(module
-  (import "wasi_snapshot_preview1" "fd_write"
-    (func $fd_write (param i32 i32 i32 i32) (result i32)))
-  (import "wasi_snapshot_preview1" "proc_exit"
-    (func $proc_exit (param i32)))
-  (memory (export "memory") 1)
-  (data (i32.const 8) "deny-all-ok\n")
-  (func $main
-    ;; iov at 0: ptr=8, len=12
-    (i32.store (i32.const 0) (i32.const 8))
-    (i32.store (i32.const 4) (i32.const 12))
-    ;; fd_write(stdout=1, iov=0, iov_len=1, nwritten=24)
-    (drop (call $fd_write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 24)))
-    (call $proc_exit (i32.const 0)))
-  (export "_start" (func $main)))
-"#;
-
-        #[cfg(feature = "sandbox-wasmtime")]
-        {
-            // Convert WAT to WASM bytes using wasmtime's built-in wat feature.
-            let wasm_bytes = wat::parse_str(wat).expect("WAT parse");
-
-            let spec = ExecSpec {
-                command: "deny-all-probe".to_owned(),
-                args: vec![],
-                capabilities: SandboxCapabilities::default(), // deny-all
-                stdin: Some(wasm_bytes),
-                timeout_secs: None,
+    fn wasi_guest_file_access_enforces_explicit_grants_and_workspace_clamps() {
+        use crate::WorkspaceAccess;
+        // Exercise the actual guest syscall and observe both its errno and the
+        // host file, rather than inferring isolation from an empty mount list.
+        fn guest(path: &str, write: bool) -> Vec<u8> {
+            let action = if write {
+                r#"(i32.store (i32.const 0) (i32.const 64))
+                    (i32.store (i32.const 4) (i32.const 7))
+                    (call $exit (call $write (local.get $fd) (i32.const 0) (i32.const 1) (i32.const 16)))"#
+            } else {
+                r#"(i32.store (i32.const 0) (i32.const 256))
+                    (i32.store (i32.const 4) (i32.const 128))
+                    (local.set $error (call $read (local.get $fd) (i32.const 0) (i32.const 1) (i32.const 16)))
+                    (if (local.get $error) (then (call $exit (local.get $error))))
+                    (i32.store (i32.const 4) (i32.load (i32.const 16)))
+                    (call $exit (call $write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 16)))"#
             };
-
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .unwrap();
-            let result = rt.block_on(sandbox.exec(spec)).expect("exec must succeed");
-            assert_eq!(result.exit_code, 0, "probe module must exit 0");
-            let stdout = String::from_utf8_lossy(&result.stdout);
-            assert!(
-                stdout.contains("deny-all-ok"),
-                "expected probe output, got: {stdout:?}"
+            wat::parse_str(format!(r#"(module
+                (import "wasi_snapshot_preview1" "path_open" (func $open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "fd_read" (func $read (param i32 i32 i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "fd_write" (func $write (param i32 i32 i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 32) "{path}")
+                (data (i32.const 64) "updated")
+                (func (export "_start") (local $fd i32) (local $error i32)
+                    (local.set $error (call $open (i32.const 3) (i32.const 0) (i32.const 32)
+                        (i32.const {length}) (i32.const 0) (i64.const {rights}) (i64.const 0) (i32.const 0) (i32.const 96)))
+                    (if (local.get $error) (then (call $exit (local.get $error))))
+                    (local.set $fd (i32.load (i32.const 96)))
+                    {action}))"#, length=path.len(), rights=if write {64} else {2})).unwrap()
+        }
+        let root = tempfile::tempdir().unwrap();
+        let granted = root.path().join("granted");
+        std::fs::create_dir(&granted).unwrap();
+        let file = granted.join("allowed.txt");
+        std::fs::write(&file, b"before!").unwrap();
+        std::fs::write(root.path().join("outside.txt"), b"private").unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let sandbox = WasmtimeSandbox::new().unwrap();
+        let execute = |path: &str, write: bool, capabilities| {
+            runtime
+                .block_on(sandbox.exec(ExecSpec {
+                    env: Vec::new(),
+                    command: "file-permissions-proof".into(),
+                    args: vec![],
+                    capabilities,
+                    stdin: Some(guest(path, write)),
+                    timeout_secs: Some(5),
+                }))
+                .expect("actual WASI guest must execute and return its syscall result")
+        };
+        let denied = execute("allowed.txt", false, SandboxCapabilities::default());
+        assert_ne!(denied.exit_code, 0, "no preopen must deny actual path_open");
+        assert!(denied.stdout.is_empty());
+        let mut read = SandboxCapabilities::default();
+        read.fs_read_paths.insert(granted.clone());
+        let allowed = execute("allowed.txt", false, read.clone());
+        assert_eq!(allowed.exit_code, 0);
+        assert_eq!(allowed.stdout, b"before!");
+        let denied = execute("allowed.txt", true, read.clone());
+        assert_ne!(
+            denied.exit_code, 0,
+            "read-only grant must reject actual write rights"
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), b"before!");
+        let escape = execute("../outside.txt", false, read);
+        assert_ne!(
+            escape.exit_code, 0,
+            "a preopen must not expose its parent directory"
+        );
+        assert!(escape.stdout.is_empty());
+        let mut write = SandboxCapabilities::default();
+        write.fs_write_paths.insert(granted);
+        for clamp in [WorkspaceAccess::ReadOnly, WorkspaceAccess::None] {
+            write.workspace_access = clamp;
+            let denied = execute("allowed.txt", true, write.clone());
+            assert_ne!(
+                denied.exit_code, 0,
+                "workspace clamp {clamp:?} must override an explicit write path"
             );
-            // No FS was preopened — the module could not have opened any path.
-            // The deny is structural (empty preopen list).
+            assert_eq!(std::fs::read(&file).unwrap(), b"before!");
         }
+        write.workspace_access = WorkspaceAccess::ReadWrite;
+        let allowed = execute("allowed.txt", true, write);
+        assert_eq!(
+            allowed.exit_code, 0,
+            "explicit write grant must permit actual guest mutation"
+        );
+        assert_eq!(std::fs::read(file).unwrap(), b"updated");
+    }
 
-        #[cfg(not(feature = "sandbox-wasmtime"))]
-        {
-            // Feature is absent — sandbox init succeeds but exec fails gracefully.
-            let _ = wat;
+    #[cfg(feature = "sandbox-wasmtime")]
+    #[test]
+    fn compiler_rejects_compressed_resource_bombs_before_jit() {
+        for source in [
+            format!("(module (func {}))", "nop ".repeat(20_000)),
+            format!("(module (func (local {})))", "i32 ".repeat(100_000)),
+            format!("(module {})", "(func) ".repeat(4097)),
+            format!("(module {})", "(import \"m\" \"f\" (func)) ".repeat(4097)),
+            format!("(module (rec {}))", "(type (struct)) ".repeat(4097)),
+            format!("(module (type (func (param {}))))", "i32 ".repeat(100_000)),
+        ] {
+            let bytes = wat::parse_str(source).unwrap();
+            assert!(bytes.len() < 4 * 1024 * 1024);
+            assert!(validate_compilation_shape(&bytes).is_err());
         }
+        let bytes = wat::parse_str("(module (memory 1) (func (export \"_start\")))").unwrap();
+        validate_compilation_shape(&bytes).unwrap();
+    }
+
+    #[cfg(feature = "sandbox-wasmtime")]
+    #[test]
+    fn guest_memory_and_table_allocations_are_bounded() {
+        let sandbox = WasmtimeSandbox::new().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        for source in [
+            r#"(module (memory 1025) (func (export "_start")))"#,
+            r#"(module (table 100001 funcref) (func (export "_start")))"#,
+        ] {
+            let spec = ExecSpec {
+                env: Vec::new(),
+                command: "probe".into(),
+                args: vec![],
+                capabilities: SandboxCapabilities::default(),
+                stdin: Some(wat::parse_str(source).unwrap()),
+                timeout_secs: Some(1),
+            };
+            assert!(exec_wasm(&sandbox.engine, spec)
+                .map(|output| output.exit_code != 0)
+                .unwrap_or(true));
+        }
+        let spec = ExecSpec {
+            env: Vec::new(),
+            command: "probe".into(),
+            args: vec![],
+            capabilities: SandboxCapabilities::default(),
+            stdin: Some(vec![0; 4 * 1024 * 1024 + 1]),
+            timeout_secs: Some(1),
+        };
+        assert!(runtime
+            .block_on(sandbox.exec(spec))
+            .unwrap_err()
+            .to_string()
+            .contains("compilation input limit"));
     }
 
     #[test]
@@ -402,6 +597,7 @@ mod tests {
             )
             .expect("WAT parse");
             let spec = ExecSpec {
+                env: Vec::new(),
                 command: "timeout-probe".to_owned(),
                 args: Vec::new(),
                 capabilities: SandboxCapabilities::default(),
@@ -420,5 +616,86 @@ mod tests {
             assert!(error.to_string().contains("timed out"));
             assert!(started.elapsed() < Duration::from_secs(3));
         }
+    }
+
+    #[cfg(feature = "sandbox-wasmtime")]
+    #[test]
+    fn guest_memory_growth_stops_at_store_limit() {
+        let sandbox = WasmtimeSandbox::new().expect("sandbox init");
+        let wasm_bytes = wat::parse_str(
+            r#"
+            (module
+              (memory 1)
+              (func (export "_start")
+                i32.const 1024
+                memory.grow
+                i32.const -1
+                i32.ne
+                if unreachable end))
+            "#,
+        )
+        .expect("WAT parse");
+        let spec = ExecSpec {
+            env: Vec::new(),
+            command: "memory-limit-probe".to_owned(),
+            args: Vec::new(),
+            capabilities: SandboxCapabilities::default(),
+            stdin: Some(wasm_bytes),
+            timeout_secs: Some(5),
+        };
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let output = rt.block_on(sandbox.exec(spec)).expect("exec must complete");
+        assert_eq!(output.exit_code, 0, "oversized memory.grow must be denied");
+    }
+
+    #[cfg(feature = "sandbox-wasmtime")]
+    #[test]
+    fn spec_env_is_the_guest_environment() {
+        // The guest copies its whole WASI environment block (NUL-separated
+        // `KEY=VALUE` strings) to stdout.
+        let wasm_bytes = wat::parse_str(
+            r#"
+            (module
+              (import "wasi_snapshot_preview1" "environ_sizes_get"
+                (func $sizes (param i32 i32) (result i32)))
+              (import "wasi_snapshot_preview1" "environ_get"
+                (func $get (param i32 i32) (result i32)))
+              (import "wasi_snapshot_preview1" "fd_write"
+                (func $write (param i32 i32 i32 i32) (result i32)))
+              (memory (export "memory") 1)
+              (func (export "_start")
+                (drop (call $sizes (i32.const 0) (i32.const 4)))
+                (drop (call $get (i32.const 64) (i32.const 1024)))
+                (i32.store (i32.const 16) (i32.const 1024))
+                (i32.store (i32.const 20) (i32.load (i32.const 4)))
+                (drop (call $write (i32.const 1) (i32.const 16) (i32.const 1) (i32.const 24)))))
+            "#,
+        )
+        .expect("WAT parse");
+        let run = |env: Vec<(String, String)>| {
+            let sandbox = WasmtimeSandbox::new().expect("sandbox init");
+            let spec = ExecSpec {
+                env,
+                command: "env-probe".to_owned(),
+                args: Vec::new(),
+                capabilities: SandboxCapabilities::default(),
+                stdin: Some(wasm_bytes.clone()),
+                timeout_secs: Some(5),
+            };
+            let output = exec_wasm(&sandbox.engine, spec).expect("exec must complete");
+            assert_eq!(output.exit_code, 0);
+            output.stdout
+        };
+
+        let stdout = run(vec![("GREETING".to_owned(), "hi".to_owned())]);
+        assert_eq!(stdout, b"GREETING=hi\0");
+        assert!(
+            run(Vec::new()).is_empty(),
+            "host env must not leak into the guest"
+        );
     }
 }

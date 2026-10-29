@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { normalizeConsentBlob } from "../../shared/consent.ts";
 // Pure consent predicates, free of any Electron/filesystem dependency so they can
 // be unit-tested in isolation. `consent.ts` wraps these around the persisted
 // store; the privacy HARD GATE and the engine gate both derive from here.
@@ -11,21 +13,19 @@ export const DEFAULT_CONSENT: ConsentState = {
 	proactive: null,
 };
 
+const triStateSchema = z.boolean().nullable().catch(null);
 /** Coerce arbitrary persisted JSON into a strict tri-state value. */
-export function coerceTriState(value: unknown): boolean | null {
-	if (value === true || value === false) {
-		return value;
-	}
-	return null;
+export function coerceTriState(
+	value: Parameters<typeof triStateSchema.parse>[0]
+): boolean | null {
+	return triStateSchema.parse(value);
 }
 
-/** Normalize a partial/untrusted consent object to the canonical shape. */
-export function normalizeConsent(partial: Partial<ConsentState>): ConsentState {
-	return {
-		chat: partial.chat === false ? false : DEFAULT_CONSENT.chat,
-		contextRead: coerceTriState(partial.contextRead),
-		proactive: coerceTriState(partial.proactive),
-	};
+/** Use the same persisted consent contract as desktop synchronization. */
+export function normalizeConsent(
+	partial: Parameters<typeof normalizeConsentBlob>[0]
+): ConsentState {
+	return normalizeConsentBlob(partial);
 }
 
 /**
@@ -47,6 +47,11 @@ export function chatAllowed(consent: ConsentState): boolean {
  */
 export function engineAllowed(consent: ConsentState): boolean {
 	return consent.contextRead === true && consent.proactive === true;
+}
+
+/** Connection events need proactive consent, but never screen/context consent. */
+export function proactiveAllowed(consent: ConsentState): boolean {
+	return consent.proactive === true;
 }
 
 /** True while the first-run consent card still needs an answer. */

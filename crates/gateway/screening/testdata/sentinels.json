@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "note": "Spec 00.9 test sentinels. Deterministic markers only: no real harmful text is ever committed.",
+  "sentinels": [
+    { "text": "RYU_TEST_LEXICON", "layer": "lexicon", "code": "hazard.S4" },
+    {
+      "text": "RYU_TEST_HAZARD_S4",
+      "layer": "classifier",
+      "code": "hazard.S4"
+    },
+    {
+      "text": "RYU_TEST_HAZARD_S9",
+      "layer": "classifier",
+      "code": "hazard.S9"
+    },
+    {
+      "text": "RYU_TEST_HAZARD_S1",
+      "layer": "classifier",
+      "code": "hazard.S1"
+    },
+    {
+      "text": "RYU_TEST_PROMPT_ATTACK",
+      "layer": "classifier",
+      "code": "security.prompt_injection"
+    }
+  ]
+}

@@ -28,12 +28,13 @@
 //     app-registered and correctly hid itself when the (not pre-installed) app was
 //     disabled, while the route stayed live — the exact disagreement
 //     `companion-alias.ts` exists to prevent. See `app-shell-routes.ts`.
-//   - The scaffold "extras" the old `TabContent` never handled (`/graph`,
-//     `/spaces/:id/graph`, `/profile`): the old chain returned `null` (blank) for those
-//     paths, so mounting a real page here would be a regression, not a refactor. Left
-//     for a separate PR. (`/skills/new` + `/skills/:id/edit` ARE now handled below — the
-//     W7 frontend extraction landed the SKILL.md editor as the @ryu/skill-editor
-//     companion; both previously resolved to blank.)
+//   - `/profile`: the account profile and stats live in the App Settings dialog
+//     (Profile / Stats tabs), and the user menu's "Profile" opens the public web
+//     profile. `/graph` + `/spaces/:id/graph` (the knowledge graph) ARE registered
+//     below: the Space doc editor's "Graph" button already opened the per-space path,
+//     which used to resolve to blank. (`/skills/new` + `/skills/:id/edit` ARE also
+//     handled below — the W7 frontend extraction landed the SKILL.md editor as the
+//     @ryu/skill-editor companion; both previously resolved to blank.)
 //
 // No COMPANION ID is named here. This file used to carry twelve hardcoded aliases of the
 // shape `createElement(PluginCompanionPage, { companionId: "app__<x>-companion" })`
@@ -54,13 +55,20 @@
 // first navigation. Long-tail editors, settings and secondary pages below are
 // lazy components; `RouteOutlet` owns the shared loading boundary.
 
-import { createElement, lazy, type ReactNode } from "react";
-import type { AttachedImage } from "@/components/agent-elements/input-bar.tsx";
+import { createElement, type ReactNode } from "react";
 import { CrashBoundary } from "@/src/components/CrashBoundary.tsx";
 import {
 	MemoryDreamPage,
 	MemoryReflectPage,
 } from "@/src/components/memory/MemoryLibrary.tsx";
+import { queryClient } from "@/src/lib/query-client.ts";
+import {
+	downloadsHistoryQuery,
+	prefetchRouteQueries,
+	REVIEW_DEFAULT_DAYS,
+	vaultSecretsQuery,
+	weeklyReviewQuery,
+} from "@/src/lib/route-queries.ts";
 import { PANE_CHOOSER_PATH } from "@/src/lib/splitPresets.ts";
 import { WHITEBOARD_PLUGIN_ID } from "@/src/lib/whiteboard/app.ts";
 import ChatPage from "@/src/pages/ChatPage.tsx";
@@ -74,45 +82,66 @@ import {
 	SKILL_EDITOR_ALIAS,
 	topLevelAlias,
 } from "./companion-alias.ts";
-import { contributionRegistry, type RouteTab } from "./registry.ts";
+import { lazyRoute } from "./lazy-route.ts";
+import {
+	contributionRegistry,
+	type RoutePreload,
+	type RouteRender,
+	type RouteTab,
+} from "./registry.ts";
 import { useCompanionAlias } from "./use-companion-alias.ts";
 
-const AgentEditPage = lazy(() => import("@/src/pages/AgentEditPage.tsx"));
-const ArtifactViewPage = lazy(() => import("@/src/pages/ArtifactViewPage.tsx"));
-const ChannelsPage = lazy(() => import("@/src/pages/ChannelsPage.tsx"));
-const ComputePage = lazy(() => import("@/src/pages/ComputePage.tsx"));
-const DownloadsPage = lazy(() => import("@/src/pages/DownloadsPage.tsx"));
-const FileEditorPage = lazy(() => import("@/src/pages/FileEditorPage.tsx"));
-const IdentitiesPage = lazy(() => import("@/src/pages/IdentitiesPage.tsx"));
-const PaneChooserPage = lazy(() =>
+const AgentEditPage = lazyRoute(() => import("@/src/pages/AgentEditPage.tsx"));
+const ArtifactViewPage = lazyRoute(
+	() => import("@/src/pages/ArtifactViewPage.tsx")
+);
+const ChannelsPage = lazyRoute(() => import("@/src/pages/ChannelsPage.tsx"));
+const ComputePage = lazyRoute(() => import("@/src/pages/ComputePage.tsx"));
+const DownloadsPage = lazyRoute(() => import("@/src/pages/DownloadsPage.tsx"));
+const FileEditorPage = lazyRoute(
+	() => import("@/src/pages/FileEditorPage.tsx")
+);
+const IdentitiesPage = lazyRoute(
+	() => import("@/src/pages/IdentitiesPage.tsx")
+);
+const KnowledgeGraphPage = lazyRoute(
+	() => import("@/src/pages/KnowledgeGraphPage.tsx")
+);
+const PaneChooserPage = lazyRoute(() =>
 	import("@/src/pages/PaneChooserPage.tsx").then((module) => ({
 		default: module.PaneChooserPage,
 	}))
 );
-const ProjectDiffPage = lazy(() => import("@/src/pages/ProjectDiffPage.tsx"));
-const ProjectFilesPage = lazy(() => import("@/src/pages/ProjectFilesPage.tsx"));
-const ProjectGitGraphPage = lazy(
+const ProjectDiffPage = lazyRoute(
+	() => import("@/src/pages/ProjectDiffPage.tsx")
+);
+const ProjectFilesPage = lazyRoute(
+	() => import("@/src/pages/ProjectFilesPage.tsx")
+);
+const ProjectGitGraphPage = lazyRoute(
 	() => import("@/src/pages/ProjectGitGraphPage.tsx")
 );
-const ReviewPage = lazy(() => import("@/src/pages/ReviewPage.tsx"));
-const SettingsPage = lazy(() => import("@/src/pages/SettingsPage.tsx"));
-const SharePage = lazy(() => import("@/src/pages/SharePage.tsx"));
-const SpaceAppDocPage = lazy(() => import("@/src/pages/SpaceAppDocPage.tsx"));
-const SpaceDatabaseEditorPage = lazy(
+const ReviewPage = lazyRoute(() => import("@/src/pages/ReviewPage.tsx"));
+const SettingsPage = lazyRoute(() => import("@/src/pages/SettingsPage.tsx"));
+const SharePage = lazyRoute(() => import("@/src/pages/SharePage.tsx"));
+const SpaceAppDocPage = lazyRoute(
+	() => import("@/src/pages/SpaceAppDocPage.tsx")
+);
+const SpaceDatabaseEditorPage = lazyRoute(
 	() => import("@/src/pages/SpaceDatabaseEditorPage.tsx")
 );
-const SpaceDatabaseRowPage = lazy(
+const SpaceDatabaseRowPage = lazyRoute(
 	() => import("@/src/pages/SpaceDatabaseRowPage.tsx")
 );
-const SpaceDocEditorPage = lazy(
+const SpaceDocEditorPage = lazyRoute(
 	() => import("@/src/pages/SpaceDocEditorPage.tsx")
 );
-const SpaceFileViewerPage = lazy(
+const SpaceFileViewerPage = lazyRoute(
 	() => import("@/src/pages/SpaceFileViewerPage.tsx")
 );
-const SpacesPage = lazy(() => import("@/src/pages/SpacesPage.tsx"));
-const VaultPage = lazy(() => import("@/src/pages/VaultPage.tsx"));
-const WorkflowsPage = lazy(() => import("@/src/pages/WorkflowsPage.tsx"));
+const SpacesPage = lazyRoute(() => import("@/src/pages/SpacesPage.tsx"));
+const VaultPage = lazyRoute(() => import("@/src/pages/VaultPage.tsx"));
+const WorkflowsPage = lazyRoute(() => import("@/src/pages/WorkflowsPage.tsx"));
 
 // /channels/:id — manage a channel bot ("new" opens create mode).
 const CHANNEL_DETAIL = /^\/channels\/[^/]+$/;
@@ -126,6 +155,8 @@ const SPACE_FILE = /^\/spaces\/[^/]+\/file\/[^/]+$/;
 const SPACE_DB_ROW = /^\/spaces\/[^/]+\/db\/[^/]+\/row\/[^/]+$/;
 // A Space's data-grid database: /spaces/:spaceId/db/:databaseId
 const SPACE_DB = /^\/spaces\/[^/]+\/db\/[^/]+$/;
+// A Space's document-link graph: /spaces/:spaceId/graph
+const SPACE_GRAPH = /^\/spaces\/[^/]+\/graph$/;
 // A Space's whiteboard (ported to the Whiteboard Ryu App): /spaces/:spaceId/wb/:documentId
 const SPACE_WB = /^\/spaces\/[^/]+\/wb\/[^/]+$/;
 // A Space document owned by a Ryu App: /spaces/:spaceId/app/:pluginId/:documentId
@@ -135,6 +166,8 @@ const SPACE_APP = /^\/spaces\/[^/]+\/app\/[^/]+\/[^/]+$/;
 const SPACE_DETAIL = /^\/spaces\/[^/]+$/;
 // /library/<section> — opens the unified Library on a specific collection tab.
 const LIBRARY_SECTION = /^\/library\/([^/]+)$/;
+// A Store section without its own exact route: /store/:section
+const STORE_SECTION = /^\/store\/([^/]+)$/;
 // Memory keeps its Dream and Reflect views as deep links so a review can be
 // reopened from notifications, command palette results, or a shared tab.
 const MEMORY_VIEW = /^\/library\/memory\/(dream|reflect)$/;
@@ -221,8 +254,10 @@ function CompanionAliasRoute({
 }
 
 /** Element factory for a route that mounts an app by short path rather than by id. */
-const companionAlias = (alias: string, mountContext?: unknown) =>
-	createElement(CompanionAliasRoute, { alias, mountContext });
+const companionAlias = <TMountContext>(
+	alias: string,
+	mountContext?: TMountContext
+) => createElement(CompanionAliasRoute, { alias, mountContext });
 
 // SKILL_EDITOR_ALIAS + APPROVALS_ALIAS — the two legacy paths no app can derive from
 // its own id — moved to `companion-alias.ts`, because the surfaces that decide whether
@@ -269,18 +304,21 @@ const chatBoundary = (tab: RouteTab, children: ReactNode) =>
 let seeded = false;
 
 /** Register all built-in routes exactly once. Idempotent. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one-time flat registration of the built-in route table, mirroring the old tab router branch-for-branch.
+// one-time flat registration of the built-in route table, mirroring the old tab router branch-for-branch.
 export function seedBuiltinRoutes(): void {
 	if (seeded) {
 		return;
 	}
 	seeded = true;
 
-	const exact = (path: string, render: (tab: RouteTab) => unknown) =>
+	// `preload` is passed for lazy pages so a hovered sidebar/palette link can
+	// fetch the chunk before the click (see `lazy-route.ts`).
+	const exact = (path: string, render: RouteRender, preload?: RoutePreload) =>
 		contributionRegistry.registerRoute({
 			kind: "exact",
 			path,
-			render: render as never,
+			preload,
+			render,
 		});
 
 	// ── Exact routes (matched first via the O(1) map) ─────────────────────────
@@ -295,7 +333,7 @@ export function seedBuiltinRoutes(): void {
 				initialTeamId: tab.initialTeamId,
 				initialGhost: tab.initialGhost,
 				initialPluginFlags: tab.initialPluginFlags,
-				initialImages: tab.initialImages as AttachedImage[] | undefined,
+				initialImages: tab.initialImages,
 				initialProject: tab.initialProject,
 				initialPrompt: tab.initialPrompt,
 				initialQuote: tab.initialQuote,
@@ -307,8 +345,8 @@ export function seedBuiltinRoutes(): void {
 			})
 		)
 	);
-	exact("/compute", () => createElement(ComputePage));
-	exact("/share", () => createElement(SharePage));
+	exact("/compute", () => createElement(ComputePage), ComputePage.preload);
+	exact("/share", () => createElement(SharePage), SharePage.preload);
 	// Agents/Spaces/Workflows no longer have standalone list pages — they're
 	// consolidated into the unified Library; the bare routes redirect there.
 	exact("/agents", () =>
@@ -318,6 +356,9 @@ export function seedBuiltinRoutes(): void {
 		createElement(StorePage, { initialSection: "engines" })
 	);
 	exact("/store", () => createElement(StorePage));
+	exact("/store/wallpapers", () =>
+		createElement(StorePage, { initialSection: "wallpapers" })
+	);
 	// The plugin catalog's two slices: companion-UI apps vs plain plugins.
 	exact("/store/apps", () =>
 		createElement(StorePage, { initialSection: "apps" })
@@ -338,6 +379,9 @@ export function seedBuiltinRoutes(): void {
 		createElement(StorePage, { initialSection: "connections" })
 	);
 	exact("/library", () => createElement(LibraryPage));
+	exact("/library/wallpapers", () =>
+		createElement(LibraryPage, { initialSection: "wallpapers" })
+	);
 	// Channels/Identities: bare routes open the Library collection tab; manage
 	// CRUD lives on `/channels/:id`, `/channels/new`, `/identities/new`, and
 	// `/identities/profile/:profileId` (profiles are named strings, not UUIDs).
@@ -347,10 +391,24 @@ export function seedBuiltinRoutes(): void {
 	exact("/identities", () =>
 		createElement(LibraryPage, { initialSection: "identity" })
 	);
-	exact("/identities/new", () =>
-		createElement(IdentitiesPage, { initialNew: true })
+	exact(
+		"/identities/new",
+		() => createElement(IdentitiesPage, { initialNew: true }),
+		IdentitiesPage.preload
 	);
-	exact("/vault", () => createElement(VaultPage));
+	// Pages whose first read is a shared query also warm that data on hover, so
+	// the click renders from cache instead of a skeleton.
+	exact(
+		"/vault",
+		() => createElement(VaultPage),
+		() =>
+			Promise.all([
+				VaultPage.preload(),
+				prefetchRouteQueries((target) => [
+					queryClient.prefetchQuery(vaultSecretsQuery(target)),
+				]),
+			]).then<void>(() => undefined)
+	);
 	exact("/models", () =>
 		createElement(StorePage, { initialSection: "models" })
 	);
@@ -369,14 +427,30 @@ export function seedBuiltinRoutes(): void {
 	// `/tools` (not redirected to `/library/tools`) to match the other bare
 	// collection routes (`/spaces`, `/workflows`) and so every existing sidebar
 	// entry, palette command and deep link keeps working.
+	exact(
+		"/graph",
+		() => createElement(KnowledgeGraphPage),
+		KnowledgeGraphPage.preload
+	);
 	exact("/tools", () =>
 		createElement(LibraryPage, { initialSection: "tools" })
 	);
 	exact("/workflows", () =>
 		createElement(LibraryPage, { initialSection: "workflow" })
 	);
-	exact("/review", () => createElement(ReviewPage));
+	exact(
+		"/review",
+		() => createElement(ReviewPage),
+		() =>
+			Promise.all([
+				ReviewPage.preload(),
+				queryClient.prefetchQuery(weeklyReviewQuery(REVIEW_DEFAULT_DAYS)),
+			]).then<void>(() => undefined)
+	);
 	// Marketplace folded into the store: the legacy route opens the store.
+	exact("/marketplace/wallpapers", () =>
+		createElement(StorePage, { initialSection: "wallpapers" })
+	);
 	exact("/marketplace", (tab) =>
 		createElement(StorePage, {
 			initialMarketplaceItem: tab.initialStoreItem,
@@ -388,19 +462,35 @@ export function seedBuiltinRoutes(): void {
 	// The NL workflow builder (fresh draft). The visual canvas is the
 	// @ryu/workflows companion (see the /workflows/:id pattern route below); the
 	// builder is architecturally shell-only, so it keeps its own shell page.
-	exact("/workflows/build", () =>
-		createElement(WorkflowsPage, { initialWorkflowId: null })
+	exact(
+		"/workflows/build",
+		() => createElement(WorkflowsPage, { initialWorkflowId: null }),
+		WorkflowsPage.preload
 	);
 	// `/approvals` itself needs no entry — the catch-all derives it from the app's
 	// companion id — but `/inbox` is the historic alias of the same surface, and no
 	// convention can get there from "approvals".
 	exact("/inbox", () => companionAlias(APPROVALS_ALIAS));
-	exact("/downloads", () => createElement(DownloadsPage));
+	exact(
+		"/downloads",
+		() => createElement(DownloadsPage),
+		() =>
+			Promise.all([
+				DownloadsPage.preload(),
+				prefetchRouteQueries((target) => [
+					queryClient.prefetchQuery(downloadsHistoryQuery(target)),
+				]),
+			]).then<void>(() => undefined)
+	);
 	// An empty split pane: the picker that replaces itself with whatever the
 	// user chooses. Reached only by applying a layout preset (and by a session
 	// restore that revives one), never from the sidebar or the palette.
-	exact(PANE_CHOOSER_PATH, () => createElement(PaneChooserPage));
-	exact("/settings", () => createElement(SettingsPage));
+	exact(
+		PANE_CHOOSER_PATH,
+		() => createElement(PaneChooserPage),
+		PaneChooserPage.preload
+	);
+	exact("/settings", () => createElement(SettingsPage), SettingsPage.preload);
 	// Apps + Extensions + Fleet all used to open the Store's "Added" section. That
 	// section is gone — it was a tab that was not a category — and its view is now
 	// the shell's "Installed only" switch over a real realm. Each legacy route
@@ -430,12 +520,14 @@ export function seedBuiltinRoutes(): void {
 	// preserved to mirror the old chain exactly) ─
 	const pattern = (
 		test: RegExp | { startsWith: string },
-		render: (tab: RouteTab, ctx: { onClose: () => void }) => unknown
+		render: RouteRender,
+		preload?: RoutePreload
 	) =>
 		contributionRegistry.registerRoute({
 			kind: "pattern",
+			preload,
 			test,
-			render: render as never,
+			render,
 		});
 
 	// /store/mcp and /store/mcp/q/<query> — open the store's MCP catalog,
@@ -456,6 +548,13 @@ export function seedBuiltinRoutes(): void {
 			initialSection: "mcp",
 			initialQuery: query,
 		});
+	});
+	// /store/<section> — every other Store section (skills, engines, models, the
+	// legacy `account` alias, contributed `plugin:` tabs, …). StorePage resolves the
+	// section itself and falls back to Home, so callers never land on a blank tab.
+	pattern(STORE_SECTION, (tab) => {
+		const match = tab.path.match(STORE_SECTION);
+		return createElement(StorePage, { initialSection: match?.[1] });
 	});
 	// /chat/agent/<agentId> — the merged agent view. Same ChatPage, seeded with
 	// the agent whose threads it stitches; `mergedAgentId` also pins the composer
@@ -483,108 +582,167 @@ export function seedBuiltinRoutes(): void {
 		createElement(LibraryPage, { initialSection: tab.path.split("/")[2] })
 	);
 	// /channels/:id ("new" => create form) — channel-bot manage page.
-	pattern(CHANNEL_DETAIL, (tab) => {
-		const id = tab.path.split("/")[2];
-		return createElement(ChannelsPage, {
-			initialNew: id === "new",
-			initialSelectedId: id === "new" ? null : id,
-		});
-	});
+	pattern(
+		CHANNEL_DETAIL,
+		(tab) => {
+			const id = tab.path.split("/")[2];
+			return createElement(ChannelsPage, {
+				initialNew: id === "new",
+				initialSelectedId: id === "new" ? null : id,
+			});
+		},
+		ChannelsPage.preload
+	);
 	// /identities/profile/:profileId — manage page focused on a profile.
-	pattern(IDENTITY_PROFILE, (tab) => {
-		let profileId = tab.path.split("/")[3] ?? "";
-		try {
-			profileId = decodeURIComponent(profileId);
-		} catch {
-			// keep raw segment
-		}
-		return createElement(IdentitiesPage, { initialProfileId: profileId });
-	});
+	pattern(
+		IDENTITY_PROFILE,
+		(tab) => {
+			let profileId = tab.path.split("/")[3] ?? "";
+			try {
+				profileId = decodeURIComponent(profileId);
+			} catch {
+				// keep raw segment
+			}
+			return createElement(IdentitiesPage, { initialProfileId: profileId });
+		},
+		IdentitiesPage.preload
+	);
 	// /spaces/:spaceId/doc/:docId
-	pattern(SPACE_DOC, (tab) => {
-		const segments = tab.path.split("/");
-		return createElement(SpaceDocEditorPage, {
-			documentId: segments[4],
-			spaceId: segments[2],
-		});
-	});
+	pattern(
+		SPACE_DOC,
+		(tab) => {
+			const segments = tab.path.split("/");
+			return createElement(SpaceDocEditorPage, {
+				documentId: segments[4],
+				spaceId: segments[2],
+			});
+		},
+		SpaceDocEditorPage.preload
+	);
 	// /spaces/:spaceId/file/:docId
-	pattern(SPACE_FILE, (tab) => {
-		const segments = tab.path.split("/");
-		return createElement(SpaceFileViewerPage, {
-			documentId: segments[4],
-			spaceId: segments[2],
-		});
-	});
+	pattern(
+		SPACE_FILE,
+		(tab) => {
+			const segments = tab.path.split("/");
+			return createElement(SpaceFileViewerPage, {
+				documentId: segments[4],
+				spaceId: segments[2],
+			});
+		},
+		SpaceFileViewerPage.preload
+	);
 	// /spaces/:spaceId/db/:databaseId/row/:rowId
-	pattern(SPACE_DB_ROW, (tab) => {
-		const segments = tab.path.split("/");
-		return createElement(SpaceDatabaseRowPage, {
-			databaseId: segments[4],
-			rowId: segments[6],
-			spaceId: segments[2],
-		});
-	});
+	pattern(
+		SPACE_DB_ROW,
+		(tab) => {
+			const segments = tab.path.split("/");
+			return createElement(SpaceDatabaseRowPage, {
+				databaseId: segments[4],
+				rowId: segments[6],
+				spaceId: segments[2],
+			});
+		},
+		SpaceDatabaseRowPage.preload
+	);
 	// /spaces/:spaceId/db/:databaseId
-	pattern(SPACE_DB, (tab) => {
-		const segments = tab.path.split("/");
-		return createElement(SpaceDatabaseEditorPage, {
-			databaseId: segments[4],
-			spaceId: segments[2],
-		});
-	});
+	pattern(
+		SPACE_GRAPH,
+		(tab) =>
+			createElement(KnowledgeGraphPage, { spaceId: tab.path.split("/")[2] }),
+		KnowledgeGraphPage.preload
+	);
+	pattern(
+		SPACE_DB,
+		(tab) => {
+			const segments = tab.path.split("/");
+			return createElement(SpaceDatabaseEditorPage, {
+				databaseId: segments[4],
+				spaceId: segments[2],
+			});
+		},
+		SpaceDatabaseEditorPage.preload
+	);
 	// /spaces/:spaceId/wb/:documentId — a legacy whiteboard link mounts the
 	// Whiteboard Ryu App's Companion (which owns the document) via SpaceAppDocPage.
-	pattern(SPACE_WB, (tab) => {
-		const segments = tab.path.split("/");
-		return createElement(SpaceAppDocPage, {
-			documentId: segments[4],
-			pluginId: WHITEBOARD_PLUGIN_ID,
-			spaceId: segments[2],
-		});
-	});
+	pattern(
+		SPACE_WB,
+		(tab) => {
+			const segments = tab.path.split("/");
+			return createElement(SpaceAppDocPage, {
+				documentId: segments[4],
+				pluginId: WHITEBOARD_PLUGIN_ID,
+				spaceId: segments[2],
+			});
+		},
+		SpaceAppDocPage.preload
+	);
 	// /spaces/:spaceId/app/:pluginId/:documentId — a Space doc owned by a Ryu App.
-	pattern(SPACE_APP, (tab) => {
-		const segments = tab.path.split("/");
-		return createElement(SpaceAppDocPage, {
-			documentId: segments[5],
-			pluginId: segments[4],
-			spaceId: segments[2],
-		});
-	});
+	pattern(
+		SPACE_APP,
+		(tab) => {
+			const segments = tab.path.split("/");
+			return createElement(SpaceAppDocPage, {
+				documentId: segments[5],
+				pluginId: segments[4],
+				spaceId: segments[2],
+			});
+		},
+		SpaceAppDocPage.preload
+	);
 	// /spaces/:spaceId — open Spaces with that space pre-selected.
-	pattern(SPACE_DETAIL, (tab) =>
-		createElement(SpacesPage, { initialSpaceId: tab.path.split("/")[2] })
+	pattern(
+		SPACE_DETAIL,
+		(tab) =>
+			createElement(SpacesPage, { initialSpaceId: tab.path.split("/")[2] }),
+		SpacesPage.preload
 	);
 	// /file/<encoded abs path>
-	pattern({ startsWith: "/file/" }, (tab) => {
-		const filePath = decodeURIComponent(tab.path.slice("/file/".length));
-		return createElement(FileEditorPage, { filePath });
-	});
+	pattern(
+		{ startsWith: "/file/" },
+		(tab) => {
+			const filePath = decodeURIComponent(tab.path.slice("/file/".length));
+			return createElement(FileEditorPage, { filePath });
+		},
+		FileEditorPage.preload
+	);
 	// /project/diff/<encoded folder>, /project/files/<encoded folder>, and
 	// /project/graph/<encoded folder>
-	pattern(PROJECT_VIEW, (tab) => {
-		const match = tab.path.match(PROJECT_VIEW);
-		let folder = match?.[2] ?? "";
-		try {
-			folder = decodeURIComponent(folder);
-		} catch {
-			// Keep the encoded segment so a malformed deep link fails as an empty
-			// project surface rather than crashing the whole tab shell.
-		}
-		return createElement(
-			match?.[1] === "files"
-				? ProjectFilesPage
-				: match?.[1] === "graph"
-					? ProjectGitGraphPage
-					: ProjectDiffPage,
-			{ folder }
-		);
-	});
+	pattern(
+		PROJECT_VIEW,
+		(tab) => {
+			const match = tab.path.match(PROJECT_VIEW);
+			let folder = match?.[2] ?? "";
+			try {
+				folder = decodeURIComponent(folder);
+			} catch {
+				// Keep the encoded segment so a malformed deep link fails as an empty
+				// project surface rather than crashing the whole tab shell.
+			}
+			return createElement(
+				match?.[1] === "files"
+					? ProjectFilesPage
+					: match?.[1] === "graph"
+						? ProjectGitGraphPage
+						: ProjectDiffPage,
+				{ folder }
+			);
+		},
+		() =>
+			Promise.all([
+				ProjectDiffPage.preload(),
+				ProjectFilesPage.preload(),
+				ProjectGitGraphPage.preload(),
+			]).then<void>(() => undefined)
+	);
 	// /workflows/build/:id — NL builder for an existing workflow (registered before
 	// WORKFLOW_DETAIL for clarity; the two regexes are disjoint by segment count).
-	pattern(WORKFLOW_BUILD, (tab) =>
-		createElement(WorkflowsPage, { initialWorkflowId: tab.path.split("/")[3] })
+	pattern(
+		WORKFLOW_BUILD,
+		(tab) =>
+			createElement(WorkflowsPage, {
+				initialWorkflowId: tab.path.split("/")[3],
+			}),
+		WorkflowsPage.preload
 	);
 	// /workflows/:id ("new" => blank canvas) — the visual canvas belongs to whichever
 	// app answers to `/workflows` (its own exact route above is the Library list, so
@@ -663,16 +821,28 @@ export function seedBuiltinRoutes(): void {
 		companionAlias(SKILL_EDITOR_ALIAS, { skillId: tab.path.split("/")[2] })
 	);
 	// /agents/:id/edit (carries onClose from the render context)
-	pattern(AGENT_EDIT, (tab, ctx) =>
-		createElement(AgentEditPage, {
-			agentIdProp: tab.path.split("/")[2],
-			onClose: ctx.onClose,
-		})
+	pattern(
+		AGENT_EDIT,
+		(tab, ctx) =>
+			createElement(AgentEditPage, {
+				agentIdProp: tab.path.split("/")[2],
+				// A host may open the editor on one setting (the Store opens an
+				// added Agent Template at Account access).
+				initialSettingId:
+					typeof tab.mountContext?.setting === "string"
+						? tab.mountContext.setting
+						: undefined,
+				onClose: ctx.onClose,
+			}),
+		AgentEditPage.preload
 	);
 	// /artifact/:id — a workspace tab showing an artifact the agent surfaced this
 	// session (session-local store, so a restored tab renders "no longer available").
-	pattern(ARTIFACT_VIEW, (tab) =>
-		createElement(ArtifactViewPage, { artifactId: tab.path.split("/")[2] })
+	pattern(
+		ARTIFACT_VIEW,
+		(tab) =>
+			createElement(ArtifactViewPage, { artifactId: tab.path.split("/")[2] }),
+		ArtifactViewPage.preload
 	);
 	// The legacy short paths (`/calendar`, `/timeline`, `/inbox`, `/mail`, …), minted
 	// from the contributions feed instead of a hardcoded table — registered LAST so

@@ -8,7 +8,7 @@
 import {
 	type ComposerShortcutBindings,
 	composerBindingsFromMap,
-} from "@ryu/blocks/composer/composer-shortcuts";
+} from "@ryu/blocks/composer/composer-shortcuts.ts";
 import { useHotkeysAdmin } from "@ryu/hotkeys/react";
 import { useMemo } from "react";
 

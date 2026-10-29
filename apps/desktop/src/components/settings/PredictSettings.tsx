@@ -10,18 +10,20 @@
 // The in-editor copilot ghost text (PlateJS, inside Spaces docs) is a SEPARATE
 // surface configured by Settings → Editor & Embeddings ("Inline AI editing").
 
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { useCallback, useEffect, useMemo, useState } from "react";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import {
@@ -31,7 +33,6 @@ import {
 	setPredictConfig,
 } from "@/src/lib/api/predict.ts";
 import type { SideModelConfig } from "@/src/lib/api/preferences.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { SideModelPicker } from "./shared/SideModelPicker.tsx";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
@@ -40,10 +41,6 @@ const DEFAULT_MODEL_OPTION = "__default_model__";
 
 // Allowlist entries are separated by newlines or commas.
 const ALLOWLIST_SEP = /[\n,]/;
-
-function activeTarget(): ApiTarget {
-	return toTarget(useNodeStore.getState().getActiveNode());
-}
 
 /** A newline/comma-separated textarea ⇄ a clean app-name list. */
 function parseAllowlist(text: string): string[] {
@@ -54,45 +51,103 @@ function parseAllowlist(text: string): string[] {
 }
 
 export function PredictSettings() {
+	const { url, token, userJwt } = toTarget(useActiveNode());
+	const target = useMemo(
+		() => ({ url, token, userJwt }),
+		[url, token, userJwt]
+	);
+	return (
+		<LoadedPredictSettings
+			key={JSON.stringify([url, token, userJwt ?? null])}
+			target={target}
+		/>
+	);
+}
+
+function LoadedPredictSettings({ target }: { target: ApiTarget }) {
 	const [cfg, setCfg] = useState<PredictConfig>(DEFAULT_PREDICT_CONFIG);
 	const [allowlistText, setAllowlistText] = useState("");
+	const [debounceText, setDebounceText] = useState(
+		String(DEFAULT_PREDICT_CONFIG.debounceMs)
+	);
+	const [loaded, setLoaded] = useState(false);
+	const [readError, setReadError] = useState(false);
+	const [readAttempt, setReadAttempt] = useState(0);
+	const [saving, setSaving] = useState(false);
+	const [failedChange, setFailedChange] = useState<PredictConfig | null>(null);
+	const savedConfig = useRef<PredictConfig | null>(null);
+	const savingRef = useRef(false);
+	const mounted = useRef(true);
 	const { agents } = useAgents();
 
 	useEffect(() => {
-		let cancelled = false;
-		getPredictConfig(activeTarget()).then((value) => {
-			if (!cancelled) {
-				setCfg(value);
-				setAllowlistText(value.appAllowlist.join("\n"));
-			}
-		});
+		mounted.current = true;
 		return () => {
-			cancelled = true;
+			mounted.current = false;
 		};
 	}, []);
 
-	const persist = useCallback((next: PredictConfig) => {
-		setCfg(next);
-		void setPredictConfig(activeTarget(), next)
-			.then((ok) => {
-				if (ok) {
-					toast.success("Autocomplete settings saved");
-				} else {
-					toast.error("Couldn't save autocomplete settings", {
-						description: "Your change wasn't saved. Please try again.",
-					});
+	useEffect(() => {
+		let cancelled = false;
+		setReadError(false);
+		getPredictConfig(target, { fallbackOnError: false })
+			.then((value) => {
+				if (!cancelled) {
+					savedConfig.current = value;
+					setCfg(value);
+					setAllowlistText(value.appAllowlist.join("\n"));
+					setDebounceText(String(value.debounceMs));
+					setLoaded(true);
 				}
 			})
 			.catch(() => {
+				if (!cancelled) setReadError(true);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [target, readAttempt]);
+
+	const persist = useCallback(
+		async (next: PredictConfig) => {
+			if (!loaded || savingRef.current) return;
+			savingRef.current = true;
+			setSaving(true);
+			setFailedChange(null);
+			setCfg(next);
+			setAllowlistText(next.appAllowlist.join("\n"));
+			setDebounceText(String(next.debounceMs));
+			try {
+				const ok = await setPredictConfig(target, next);
+				if (!mounted.current) return;
+				if (!ok) throw new Error("Autocomplete write refused");
+				savedConfig.current = next;
+				toast.success("Autocomplete settings saved");
+			} catch {
+				if (!mounted.current) return;
+				const previous = savedConfig.current;
+				if (previous) {
+					setCfg(previous);
+					setAllowlistText(previous.appAllowlist.join("\n"));
+					setDebounceText(String(previous.debounceMs));
+				}
+				setFailedChange(next);
 				toast.error("Couldn't save autocomplete settings", {
 					description: "Your change wasn't saved. Please try again.",
 				});
-			});
-	}, []);
+			} finally {
+				if (mounted.current) {
+					savingRef.current = false;
+					setSaving(false);
+				}
+			}
+		},
+		[loaded, target]
+	);
 
 	const update = useCallback(
 		(patch: Partial<PredictConfig>) => {
-			persist({ ...cfg, ...patch });
+			void persist({ ...cfg, ...patch });
 		},
 		[cfg, persist]
 	);
@@ -132,127 +187,151 @@ export function PredictSettings() {
 		update({ debounceMs: ms });
 	};
 
-	const target = activeTarget();
+	const disabled = !loaded || saving;
 
 	return (
 		<div className="space-y-6">
-			<SettingsSection
-				caption={
-					<>
-						Inline ghost-text autocomplete in <strong>any</strong> text field.
-						press <kbd className="rounded bg-muted px-1">Tab</kbd> to accept.
-						The companion reads the text before your cursor, asks the model
-						below for a continuation (through the Gateway, like every model
-						call), and shows it inline. Password and secure fields are never
-						read.
-					</>
-				}
-				title="Autocomplete (everywhere)"
-			>
-				<SettingsCard>
-					<p className="text-muted-foreground text-sm">
-						Autocomplete is on because the <strong>Autocomplete</strong> plugin
-						is enabled. To turn it off everywhere, disable the plugin in{" "}
-						<strong>Settings → Plugins</strong>. The settings below tune what it
-						does once it is on.
-					</p>
-				</SettingsCard>
-			</SettingsSection>
-
-			<SettingsSection
-				caption="Choose what writes the suggestions. Pick an agent to use its own model and settings, or choose Default model and set one below. Leave the model blank to use the model built into the app."
-				title="Agent / model"
-			>
-				<SettingsCard className="space-y-4">
-					<div className="space-y-1.5">
-						<Label htmlFor="predict-agent">Agent</Label>
-						<Select
-							items={agentOptions}
-							onValueChange={(v) =>
-								update({
-									agentId: v && v !== DEFAULT_MODEL_OPTION ? v : undefined,
-								})
-							}
-							value={agentValue}
-						>
-							<SelectTrigger className="h-9 w-full text-sm" id="predict-agent">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								{agentOptions.map((o) => (
-									<SelectItem key={o.value} value={o.value}>
-										{o.label}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-						<p className="text-muted-foreground text-xs">
-							When you pick an agent, it uses the agent's own model instead of
-							the model chosen below.
+			{readError ? (
+				<div role="alert">
+					We couldn't load autocomplete settings.
+					<Button onClick={() => setReadAttempt((attempt) => attempt + 1)}>
+						Retry
+					</Button>
+				</div>
+			) : null}
+			{failedChange ? (
+				<div role="alert">
+					We couldn't save autocomplete settings. Your saved settings are still
+					active.
+					<Button
+						onClick={() => {
+							void persist(failedChange);
+						}}
+					>
+						Retry
+					</Button>
+				</div>
+			) : null}
+			<fieldset disabled={disabled} className="space-y-6">
+				<SettingsSection
+					caption={
+						<>
+							Inline ghost-text autocomplete in <strong>any</strong> text field.
+							press <kbd className="rounded bg-muted px-1">Tab</kbd> to accept.
+							The companion reads the text before your cursor, asks the model
+							below for a continuation (through the Gateway, like every model
+							call), and shows it inline. Password and secure fields are never
+							read.
+						</>
+					}
+					title="Autocomplete (everywhere)"
+				>
+					<SettingsCard>
+						<p className="text-muted-foreground text-sm">
+							Autocomplete is on because the <strong>Autocomplete</strong>{" "}
+							plugin is enabled. To turn it off everywhere, disable the plugin
+							in <strong>Settings → Plugins</strong>. The settings below tune
+							what it does once it is on.
 						</p>
-					</div>
-					<SideModelPicker
-						onChange={onSideModelChange}
-						target={target}
-						value={sideModel}
-					/>
-				</SettingsCard>
-			</SettingsSection>
+					</SettingsCard>
+				</SettingsSection>
 
-			<SettingsSection
-				caption="Limit autocomplete to specific apps, or leave empty to allow every app. Enter one app name per line (for example, Chrome or Notes). Password and secure fields are always excluded, whatever you list here."
-				title="App allowlist"
-			>
-				<SettingsCard className="space-y-4">
-					<div className="space-y-1.5">
-						<Label htmlFor="predict-allowlist">Allowed apps</Label>
-						<Textarea
-							className="min-h-24 font-mono text-sm"
-							id="predict-allowlist"
-							onBlur={saveAllowlist}
-							onChange={(e) => setAllowlistText(e.target.value)}
-							placeholder="Leave empty to allow every app. One app name per line."
-							value={allowlistText}
+				<SettingsSection
+					caption="Choose what writes the suggestions. Pick an agent to use its own model and settings, or choose Default model and set one below. Leave the model blank to use the model built into the app."
+					title="Agent / model"
+				>
+					<SettingsCard className="space-y-4">
+						<div className="space-y-1.5">
+							<Label htmlFor="predict-agent">Agent</Label>
+							<Select
+								disabled={disabled}
+								items={agentOptions}
+								onValueChange={(v) =>
+									update({
+										agentId: v && v !== DEFAULT_MODEL_OPTION ? v : undefined,
+									})
+								}
+								value={agentValue}
+							>
+								<SelectTrigger className="h-9 w-full" id="predict-agent">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{agentOptions.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							<p className="text-muted-foreground text-xs">
+								When you pick an agent, it uses the agent's own model instead of
+								the model chosen below.
+							</p>
+						</div>
+						<SideModelPicker
+							onChange={onSideModelChange}
+							target={target}
+							value={sideModel}
 						/>
-					</div>
-					<div className="space-y-1.5">
-						<Label htmlFor="predict-debounce">Debounce (ms)</Label>
-						<Input
-							className="h-9"
-							id="predict-debounce"
-							inputMode="numeric"
-							onBlur={(e) => saveDebounce(e.target.value)}
-							onChange={(e) =>
-								setCfg((p) => ({
-									...p,
-									debounceMs: Number.parseInt(e.target.value, 10) || 0,
-								}))
-							}
-							value={String(cfg.debounceMs)}
-						/>
-						<p className="text-muted-foreground text-xs">
-							How long to wait after you stop typing before suggesting (0–5000).
+					</SettingsCard>
+				</SettingsSection>
+
+				<SettingsSection
+					caption="Limit autocomplete to specific apps, or leave empty to allow every app. Enter one app name per line (for example, Chrome or Notes). Password and secure fields are always excluded, whatever you list here."
+					title="App allowlist"
+				>
+					<SettingsCard className="space-y-4">
+						<div className="space-y-1.5">
+							<Label htmlFor="predict-allowlist">Allowed apps</Label>
+							<Textarea
+								disabled={disabled}
+								className="min-h-24"
+								id="predict-allowlist"
+								onBlur={saveAllowlist}
+								onChange={(e) => setAllowlistText(e.target.value)}
+								placeholder="Leave empty to allow every app. One app name per line."
+								typography="small"
+								variant="code"
+								value={allowlistText}
+							/>
+						</div>
+						<div className="space-y-1.5">
+							<Label htmlFor="predict-debounce">Debounce (ms)</Label>
+							<Input
+								disabled={disabled}
+								className="h-9"
+								id="predict-debounce"
+								inputMode="numeric"
+								onBlur={(e) => saveDebounce(e.target.value)}
+								onChange={(e) => setDebounceText(e.target.value)}
+								value={debounceText}
+							/>
+							<p className="text-muted-foreground text-xs">
+								How long to wait after you stop typing before suggesting
+								(0–5000).
+							</p>
+						</div>
+					</SettingsCard>
+				</SettingsSection>
+
+				<SettingsSection
+					caption="The inline ghost text inside Spaces documents is a separate surface."
+					title="In-editor autocomplete"
+				>
+					<SettingsCard>
+						<p className="text-muted-foreground text-sm">
+							To configure the model behind the editor's own ghost-text
+							completion, open{" "}
+							<strong>
+								Settings → Editor &amp; Embeddings → Inline AI editing
+							</strong>
+							. That picker drives autocomplete inside Spaces documents; this
+							page drives system-wide autocomplete.
 						</p>
-					</div>
-				</SettingsCard>
-			</SettingsSection>
-
-			<SettingsSection
-				caption="The inline ghost text inside Spaces documents is a separate surface."
-				title="In-editor autocomplete"
-			>
-				<SettingsCard>
-					<p className="text-muted-foreground text-sm">
-						To configure the model behind the editor's own ghost-text
-						completion, open{" "}
-						<strong>
-							Settings → Editor &amp; Embeddings → Inline AI editing
-						</strong>
-						. That picker drives autocomplete inside Spaces documents; this page
-						drives system-wide autocomplete.
-					</p>
-				</SettingsCard>
-			</SettingsSection>
+					</SettingsCard>
+				</SettingsSection>
+			</fieldset>
 		</div>
 	);
 }

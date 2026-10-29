@@ -8,7 +8,10 @@ export type PendingAction = {
 	kind: "delete" | "rotate";
 } | null;
 
-export function errorMessage(error: unknown, fallback: string): string {
+export function errorMessage(
+	error: Error | null | undefined,
+	fallback: string
+): string {
 	return error instanceof Error && error.message ? error.message : fallback;
 }
 

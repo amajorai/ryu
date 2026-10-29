@@ -11,7 +11,7 @@ import "../../src/index.css";
 
 type ProviderName = "BYOK · admin" | "BYOK · member" | "Claude subscription";
 
-const INITIAL_ACCOUNTS: Record<ProviderName, ProviderAccount[]> = {
+const INITIAL_ACCOUNTS = {
 	"Claude subscription": [
 		{
 			accountId: "claude-ada",
@@ -53,7 +53,7 @@ const INITIAL_ACCOUNTS: Record<ProviderName, ProviderAccount[]> = {
 			label: "Member OpenAI",
 		},
 	],
-};
+} satisfies Record<ProviderName, ProviderAccount[]>;
 
 function updateAccounts(
 	accounts: ProviderAccount[],
@@ -90,38 +90,55 @@ function Story() {
 		);
 	};
 
+	const renameAccount = async (
+		provider: ProviderName,
+		accountId: string,
+		label: string
+	): Promise<boolean> => {
+		setAccounts((current) => ({
+			...current,
+			[provider]: current[provider].map((account) =>
+				account.accountId === accountId ? { ...account, label } : account
+			),
+		}));
+		setLastAction(`Renamed: ${label}`);
+		return true;
+	};
+
 	return (
 		<main className="min-h-screen bg-background p-8 text-foreground sm:p-12">
 			<div className="mx-auto flex max-w-3xl flex-col gap-6">
 				<header className="flex flex-col gap-3 border-b pb-5">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
-						Provider command dialog proof
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
+						Provider account presentation fixture
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">
-						Switch accounts without changing the wrong scope
+						Render account targets and selector callbacks
 					</h1>
 					<p className="max-w-2xl text-muted-foreground text-sm leading-6">
-						Subscription sign-ins and BYOK keys share one account-level picker.
-						A personal choice stays personal; the shared Gateway choice is
-						visible and admin-controlled.
+						Supplied subscription and BYOK accounts exercise the shipping
+						selector. Callbacks update this fixture only. Core persistence,
+						authorization and retry require separate transport tests.
 					</p>
 				</header>
 
 				<div className="grid gap-3 sm:grid-cols-3">
 					<div className="rounded-xl border bg-card p-4">
-						<p className="text-muted-foreground text-xs">Current action</p>
+						<p className="text-muted-foreground text-xs">
+							Fixture callback result
+						</p>
 						<p className="mt-2 font-medium text-sm" data-testid="last-action">
 							{lastAction}
 						</p>
 					</div>
 					<div className="rounded-xl border bg-card p-4">
 						<p className="text-muted-foreground text-xs">Personal scope</p>
-						<p className="mt-2 font-medium text-sm">Available to agent.run</p>
+						<p className="mt-2 font-medium text-sm">Supplied personal target</p>
 					</div>
 					<div className="rounded-xl border bg-card p-4">
 						<p className="text-muted-foreground text-xs">Gateway scope</p>
 						<p className="mt-2 font-medium text-sm">
-							Requires gateway.configure
+							Supplied admin visibility flag
 						</p>
 					</div>
 				</div>
@@ -133,6 +150,9 @@ function Story() {
 								<ProviderAccountSection
 									accounts={accounts["Claude subscription"]}
 									onRemove={() => undefined}
+									onRename={(accountId, label) =>
+										renameAccount("Claude subscription", accountId, label)
+									}
 									onSwitch={(account, target) =>
 										switchAccount("Claude subscription", account, target)
 									}

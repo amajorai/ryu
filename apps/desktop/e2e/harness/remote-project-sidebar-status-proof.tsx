@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { SubSection } from "../../src/components/layout/AppSidebar.tsx";
 import { RemoteProjectStatus } from "../../src/components/layout/remote-project-status.tsx";
 import "../../src/index.css";
+import { IDLE_REORDER_SHIFT } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 
 type RemoteState = "checking" | "offline" | "online";
 
@@ -21,6 +22,7 @@ const DND = {
 	onDragOver: () => undefined,
 	onDragStart: () => undefined,
 	onDrop: () => undefined,
+	shift: IDLE_REORDER_SHIFT,
 	order: [],
 } satisfies ComponentProps<typeof SubSection>["dnd"];
 
@@ -40,7 +42,7 @@ function Story() {
 			data-testid="remote-project-sidebar-status-proof"
 		>
 			<div className="mx-auto w-full max-w-sm">
-				<p className="px-2 text-muted-foreground text-xs uppercase tracking-[0.16em]">
+				<p className="px-2 text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 					Sidebar preview
 				</p>
 				<div className="mt-3 rounded-2xl border border-border bg-sidebar p-2 shadow-lg">

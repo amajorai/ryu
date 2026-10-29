@@ -1,9 +1,15 @@
-import { Separator } from "@ryu/ui/components/separator";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../../utils/api-client.ts";
+import {
+	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "../shared/settings-rows.tsx";
 import { AuthorizedOAuthAppList } from "./authorized-oauth-app-list.tsx";
 import { errorMessage } from "./shared.ts";
 
@@ -41,6 +47,7 @@ export function AuthorizedAppsSection() {
 				isLoading={authorizedQuery.isLoading}
 				isRevoking={revokeMutation.isPending}
 				onConfirmRevoke={() => setConfirmRevoke(null)}
+				onRetry={() => void authorizedQuery.refetch()}
 				onRevoke={(clientId) => revokeMutation.mutate(clientId)}
 				onStartRevoke={setConfirmRevoke}
 				title="Authorized Ryu Apps"
@@ -53,6 +60,7 @@ export function AuthorizedAppsSection() {
 				isLoading={authorizedQuery.isLoading}
 				isRevoking={revokeMutation.isPending}
 				onConfirmRevoke={() => setConfirmRevoke(null)}
+				onRetry={() => void authorizedQuery.refetch()}
 				onRevoke={(clientId) => revokeMutation.mutate(clientId)}
 				onStartRevoke={setConfirmRevoke}
 				title="Authorized OAuth Apps"
@@ -69,6 +77,7 @@ function AuthorizedAppsListSection({
 	isLoading,
 	isRevoking,
 	onConfirmRevoke,
+	onRetry,
 	onRevoke,
 	onStartRevoke,
 	title,
@@ -76,29 +85,48 @@ function AuthorizedAppsListSection({
 	apps: Parameters<typeof AuthorizedOAuthAppList>[0]["apps"];
 	confirmRevoke: string | null;
 	description: string;
-	error: unknown;
+	error: Error | null;
 	isLoading: boolean;
 	isRevoking: boolean;
 	onConfirmRevoke: () => void;
+	onRetry: () => void;
 	onRevoke: (clientId: string) => void;
 	onStartRevoke: (clientId: string) => void;
 	title: string;
 }) {
+	const titleId = useId();
 	return (
-		<section className="space-y-4">
-			<div>
-				<h3 className="font-medium text-sm">{title}</h3>
-				<p className="mt-0.5 text-muted-foreground text-xs">{description}</p>
-			</div>
-			<Separator />
+		<SettingsSection
+			as="section"
+			caption={description}
+			title={title}
+			titleId={titleId}
+		>
 			{isLoading ? (
-				<div className="flex justify-center py-4">
+				<SettingsCard className="flex justify-center py-6">
 					<Spinner className="size-5" />
-				</div>
+				</SettingsCard>
 			) : error ? (
-				<p className="text-sm text-status-destructive">
-					{errorMessage(error, "Failed to load authorized apps")}
-				</p>
+				// A plain sentence, the server's reason in view, and a retry.
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Button
+								onClick={onRetry}
+								size="sm"
+								type="button"
+								variant="outline"
+							>
+								Retry
+							</Button>
+						}
+						title="Couldn't load authorized apps."
+					>
+						<p className="text-status-destructive text-xs" role="alert">
+							{errorMessage(error, "Failed to load authorized apps")}
+						</p>
+					</SettingsItem>
+				</SettingsGroup>
 			) : (
 				<AuthorizedOAuthAppList
 					apps={apps}
@@ -109,6 +137,6 @@ function AuthorizedAppsListSection({
 					onStartRevoke={onStartRevoke}
 				/>
 			)}
-		</section>
+		</SettingsSection>
 	);
 }

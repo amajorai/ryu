@@ -104,7 +104,7 @@ pub fn write_state(state: &MidnightWipeState) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_vec_pretty(state).map_err(std::io::Error::other)?;
-    std::fs::write(&path, json)
+    crate::atomic_file::write_atomic(&path, &json)
 }
 
 /// Today's local date as `YYYY-MM-DD`.
@@ -274,11 +274,11 @@ pub fn arm_if_due() {
 
     if let Err(reason) = decision {
         if reason.is_noteworthy() {
-            eprintln!(
+            crate::log_rotation::write_diagnostic(format!(
                 "ryu-core: midnight wipe not armed — {} (profile '{profile}', data dir {})",
                 reason.as_str(),
                 data_dir.display()
-            );
+            ));
         }
         return;
     }
@@ -293,23 +293,23 @@ pub fn arm_if_due() {
         last_wipe_date: Some(today.clone()),
     };
     if let Err(e) = write_state(&next) {
-        eprintln!(
+        crate::log_rotation::write_diagnostic(format!(
             "ryu-core: midnight wipe NOT armed — could not record the wipe date at {} ({e}). \
              Refusing to delete data whose completion cannot be recorded.",
             state_file.display()
-        );
+        ));
         return;
     }
 
     match crate::paths::request_node_reset() {
-        Ok(()) => eprintln!(
+        Ok(()) => crate::log_rotation::write_diagnostic(format!(
             "ryu-core: midnight wipe armed for {today} — resetting the '{profile}' profile data dir {}",
             data_dir.display()
-        ),
-        Err(e) => eprintln!(
+        )),
+        Err(e) => crate::log_rotation::write_diagnostic(format!(
             "ryu-core: midnight wipe could not write the reset marker in {} ({e})",
             data_dir.display()
-        ),
+        )),
     }
 }
 

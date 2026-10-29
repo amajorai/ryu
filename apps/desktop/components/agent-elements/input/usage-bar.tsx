@@ -7,24 +7,32 @@ import {
 } from "@ryu/ui/components/tooltip.tsx";
 import { formatCount, formatCurrency } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { memo } from "react";
+import { type CSSProperties, memo } from "react";
 import { useAgentUsage } from "@/src/hooks/useAgentUsage.ts";
 import { useProviderCredits } from "@/src/hooks/useProviderCredits.ts";
+import { useSubscriptions } from "@/src/hooks/useSubscriptions.ts";
 import {
 	type UsageBarMode,
 	type UsageBarStyle,
 	useUsageBarPrefs,
 } from "@/src/hooks/useUsageBarPrefs.ts";
-import type {
-	UsageMeter,
-	UsageValue,
-	UsageWindow,
+import {
+	type SubscriptionAccount,
+	type UsageMeter,
+	type UsageValue,
+	type UsageWindow,
+	usageSnapshotFromReading,
 } from "@/src/lib/api/usage.ts";
 import {
 	expiryClass,
 	formatCountdown,
 	formatExpiryDate,
 } from "@/src/lib/expiry.ts";
+import styles from "./usage-bar.module.css";
+
+interface UsageFillStyle extends CSSProperties {
+	"--usage-fill": string;
+}
 
 /**
  * Compact subscription usage meters for the active chat agent (à la CodexBar /
@@ -516,7 +524,7 @@ function MeterChip({
 					/>
 				) : null}
 				<span
-					className={cn("text-[10px] tabular-nums", isMoney && "font-mono")}
+					className={cn("type-compact tabular-nums", isMoney && "font-mono")}
 				>
 					{text}
 				</span>
@@ -570,7 +578,7 @@ function OverflowChip({
 				render={
 					<span
 						aria-label={`${count} more usage meters`}
-						className="shrink-0 text-[10px] text-muted-foreground/70 tabular-nums"
+						className="type-compact shrink-0 text-muted-foreground/70 tabular-nums"
 					/>
 				}
 			>
@@ -650,6 +658,7 @@ function CompactUsageMeter({
 				{segments.map((usageWindow) => {
 					const used = Math.max(0, Math.min(100, usageWindow.usedPercent));
 					const shown = mode === "remaining" ? 100 - used : used;
+					const fillStyle: UsageFillStyle = { "--usage-fill": `${shown}%` };
 					if (isRing) {
 						return (
 							<UsageRing
@@ -668,8 +677,12 @@ function CompactUsageMeter({
 							key={windowKey(usageWindow)}
 						>
 							<span
-								className={cn("block h-full rounded-full", fillClass(used))}
-								style={{ width: `${shown}%` }}
+								className={cn(
+									styles.linearFill,
+									"block h-full rounded-full",
+									fillClass(used)
+								)}
+								style={fillStyle}
 							/>
 						</span>
 					);
@@ -714,6 +727,7 @@ function UsageWindowMeter({
 	const used = Math.max(0, Math.min(100, usageWindow.usedPercent));
 	// What the user chose to read off the meter: percent used, or percent left.
 	const shown = mode === "remaining" ? 100 - used : used;
+	const fillStyle: UsageFillStyle = { "--usage-fill": `${shown}%` };
 	const noun = mode === "remaining" ? "left" : "used";
 	// Color always reflects danger (high usage → red), regardless of which
 	// number is displayed; the bar fill matches the displayed number.
@@ -725,8 +739,12 @@ function UsageWindowMeter({
 			className={cn("h-1 w-8 overflow-hidden rounded-full", trackClass(used))}
 		>
 			<span
-				className={cn("block h-full rounded-full", fillClass(used))}
-				style={{ width: `${shown}%` }}
+				className={cn(
+					styles.linearFill,
+					"block h-full rounded-full",
+					fillClass(used)
+				)}
+				style={fillStyle}
 			/>
 		</span>
 	);
@@ -740,7 +758,7 @@ function UsageWindowMeter({
 					/>
 				}
 			>
-				<span className="text-[10px] tabular-nums">
+				<span className="type-compact tabular-nums">
 					{shortLabel(usageWindow)}
 				</span>
 				{pace ? (
@@ -756,7 +774,9 @@ function UsageWindowMeter({
 						linearBar
 					))}
 				{showPercent ? (
-					<span className="text-[10px] tabular-nums">{Math.round(shown)}%</span>
+					<span className="type-compact tabular-nums">
+						{Math.round(shown)}%
+					</span>
 				) : null}
 			</TooltipTrigger>
 			<TooltipContent>
@@ -832,7 +852,7 @@ export const AgentUsageBadge = memo(function AgentUsageBadge({
 								: "Subscription usage"
 						}
 						className={cn(
-							"shrink-0 text-[10px] tabular-nums",
+							"type-compact shrink-0 tabular-nums",
 							worst ? usageTextClass(used) : "text-muted-foreground/70",
 							className
 						)}
@@ -863,9 +883,74 @@ export const AgentUsageBadge = memo(function AgentUsageBadge({
 });
 
 /**
- * The equivalent picker badge for a Ryu provider logged in through the managed
- * Pi. It deliberately shares the ACP implementation so both surfaces expose
- * the same percent, color, and tooltip breakdown.
+ * The worst account-wide window of one saved account's reading, as the picker's
+ * one-number read. `null` when there is no live account-wide window.
+ */
+function accountWorstWindow(account: SubscriptionAccount): UsageWindow | null {
+	if (!account.usage?.available) {
+		return null;
+	}
+	return worstWindow(
+		usageSnapshotFromReading(account.usage).windows.filter(
+			(usageWindow) => usageWindow.model === null
+		)
+	);
+}
+
+/** Why an account has no number, in the words the tooltip uses. */
+function accountStateText(account: SubscriptionAccount): string {
+	switch (account.state) {
+		case "needs_reauth":
+			return "needs a new sign-in";
+		case "pool_disabled":
+			return "off in account routing";
+		case "unsupported":
+			return "no usage reported";
+		case "pending":
+			return "checking…";
+		default:
+			return account.usage?.available === false
+				? "usage unavailable"
+				: "no reading yet";
+	}
+}
+
+/** One account's line in a provider tooltip: "Work (active): 61% used". */
+function AccountTooltipRow({ account }: { account: SubscriptionAccount }) {
+	const worst = accountWorstWindow(account);
+	const name = account.label ?? "Saved account";
+	return (
+		<span className="font-medium">
+			{name}
+			{account.active ? (
+				<span className="font-normal text-muted-foreground"> (active)</span>
+			) : null}
+			:{" "}
+			{worst ? (
+				<span className="tabular-nums">
+					{Math.round(Math.max(0, Math.min(100, worst.usedPercent)))}% used
+					<span className="ml-1 font-normal text-muted-foreground">
+						· {worst.label}
+					</span>
+				</span>
+			) : (
+				<span className="font-normal text-muted-foreground">
+					{accountStateText(account)}
+				</span>
+			)}
+		</span>
+	);
+}
+
+/**
+ * The picker badge for a Ryu subscription provider logged in through the
+ * managed Pi: the ACTIVE account's tightest account-wide window as `NN%`, with a
+ * tooltip listing every saved account. Shares the ACP badge's colour scale.
+ *
+ * Reads Core's subscriptions snapshot for this provider, so every account's
+ * number comes from one request and the same cached readings the usage page and
+ * account-routing settings show. Renders nothing when Core reports no
+ * per-account usage for the provider.
  */
 export const ProviderUsageBadge = memo(function ProviderUsageBadge({
 	className,
@@ -874,7 +959,116 @@ export const ProviderUsageBadge = memo(function ProviderUsageBadge({
 	className?: string;
 	providerId: string;
 }) {
-	return <AgentUsageBadge agentId={providerId} className={className} />;
+	const { data } = useSubscriptions({ providerId, usage: "refresh" });
+	const provider = data?.providers.find(
+		(entry) => entry.providerId === providerId
+	);
+	if (!(provider?.capabilities.accountUsage && provider.accounts.length > 0)) {
+		return null;
+	}
+	const activeAccount =
+		provider.accounts.find((account) => account.active) ?? null;
+	const worst = activeAccount ? accountWorstWindow(activeAccount) : null;
+	const used = worst ? Math.max(0, Math.min(100, worst.usedPercent)) : 0;
+	const label = activeAccount?.label ?? provider.label;
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<span
+						aria-label={
+							worst
+								? `${label}: ${worst.label} ${Math.round(used)}% used`
+								: `${provider.label} account usage`
+						}
+						className={cn(
+							"type-compact shrink-0 tabular-nums",
+							worst ? usageTextClass(used) : "text-muted-foreground/70",
+							className
+						)}
+					/>
+				}
+			>
+				{worst ? `${Math.round(used)}%` : "—"}
+			</TooltipTrigger>
+			<TooltipContent>
+				<div className="flex flex-col gap-0.5 text-xs">
+					{provider.accounts.map((account) => (
+						<AccountTooltipRow account={account} key={account.accountId} />
+					))}
+				</div>
+			</TooltipContent>
+		</Tooltip>
+	);
+});
+
+/**
+ * One saved account's usage as the same `NN%` badge, for a per-account list.
+ * Purely presentational: it renders the reading Core put in the subscriptions
+ * snapshot and never asks for one itself, so an account Core will not read (a
+ * login that needs a new sign-in, one switched off in routing) stays unread.
+ */
+export const AccountUsageBadge = memo(function AccountUsageBadge({
+	account,
+	className,
+}: {
+	account: SubscriptionAccount;
+	className?: string;
+}) {
+	const worst = accountWorstWindow(account);
+	const snapshot =
+		account.usage?.available === true
+			? usageSnapshotFromReading(account.usage)
+			: null;
+	const name = account.label ?? "Saved account";
+	if (!(worst && snapshot)) {
+		return (
+			<span
+				className={cn(
+					"type-compact shrink-0 text-muted-foreground/70",
+					className
+				)}
+			>
+				{accountStateText(account)}
+			</span>
+		);
+	}
+	const used = Math.max(0, Math.min(100, worst.usedPercent));
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<span
+						aria-label={`${name}: ${worst.label} ${Math.round(used)}% used`}
+						className={cn(
+							"type-compact shrink-0 tabular-nums",
+							usageTextClass(used),
+							className
+						)}
+					/>
+				}
+			>
+				{Math.round(used)}%
+			</TooltipTrigger>
+			<TooltipContent>
+				<div className="flex flex-col gap-0.5 text-xs">
+					{snapshot.windows.map((usageWindow) => (
+						<WindowTooltipRow
+							key={windowKey(usageWindow)}
+							mode="used"
+							window={usageWindow}
+						/>
+					))}
+					{snapshot.meters.map((meter) => (
+						<MeterTooltipRow key={meter.label} meter={meter} />
+					))}
+					{snapshot.plan ? (
+						<span className="text-muted-foreground">Plan: {snapshot.plan}</span>
+					) : null}
+				</div>
+			</TooltipContent>
+		</Tooltip>
+	);
 });
 
 /**
@@ -965,7 +1159,7 @@ export const ModelUsageBadge = memo(function ModelUsageBadge({
 					<span
 						aria-label={`${scoped.label}: ${Math.round(used)}% used`}
 						className={cn(
-							"shrink-0 text-[10px] tabular-nums",
+							"type-compact shrink-0 tabular-nums",
 							usageTextClass(used)
 						)}
 					/>
@@ -1022,7 +1216,7 @@ export const ProviderCreditsBadge = memo(function ProviderCreditsBadge({
 				render={
 					<span
 						aria-label={`${label}: ${text} of API credit left`}
-						className="shrink-0 font-mono text-[10px] text-muted-foreground/70 tabular-nums"
+						className="type-compact shrink-0 font-mono text-muted-foreground/70 tabular-nums"
 					/>
 				}
 			>

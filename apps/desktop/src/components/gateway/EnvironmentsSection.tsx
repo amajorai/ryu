@@ -1,11 +1,16 @@
 import { Add01Icon, Folder03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { SettingsNavRow } from "@ryu/blocks/desktop/settings-nav.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { NodeFolderBrowser } from "@/src/components/chat/NodeFolderBrowser.tsx";
 import { ProjectSettingsDialog } from "@/src/components/layout/ProjectSettingsDialog.tsx";
-import { SettingsSection } from "@/src/components/settings/shared/settings-items.tsx";
+import {
+	SettingsCard,
+	SettingsGroup,
+	SettingsSection,
+} from "@/src/components/settings/shared/settings-items.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { fetchGatewayGovernance } from "@/src/lib/api/governance.ts";
 import { basename } from "@/src/lib/files.ts";
@@ -57,54 +62,57 @@ export function EnvironmentsSection() {
 					caption="Local environments tell Ryu how to set up worktrees for a project. Scripts and variables stay with the project on this node."
 					title="Environments"
 				>
-					<div className="space-y-4 px-3">
-						<GovernanceScopeSwitcher
-							layers={governance.data?.layers ?? []}
-							onValueChange={setScope}
-							value={scope}
-						/>
-						<div className="flex items-center justify-between">
-							<h3 className="font-medium text-sm">Select a project</h3>
-							<Button
-								onClick={() => setBrowserOpen(true)}
-								size="sm"
-								variant="ghost"
-							>
-								<HugeiconsIcon className="size-4" icon={Add01Icon} />
-								Add project
-							</Button>
-						</div>
-						{paths.length === 0 ? (
-							<div className="rounded-2xl border border-dashed px-6 py-10 text-center text-muted-foreground text-sm">
+					<GovernanceScopeSwitcher
+						layers={governance.data?.layers ?? []}
+						onValueChange={setScope}
+						value={scope}
+					/>
+				</SettingsSection>
+				<SettingsSection
+					headerAction={
+						<Button
+							onClick={() => setBrowserOpen(true)}
+							size="sm"
+							variant="ghost"
+						>
+							<HugeiconsIcon className="size-4" icon={Add01Icon} />
+							Add project
+						</Button>
+					}
+					title="Select a project"
+				>
+					{paths.length === 0 ? (
+						<SettingsCard>
+							<p className="text-center text-muted-foreground text-sm">
 								No projects yet
-							</div>
-						) : (
-							<div className="overflow-hidden rounded-2xl border border-border/80 bg-card/45">
-								{paths.map((path) => (
-									<button
-										className="flex w-full items-center gap-3 border-border/65 border-b px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-										key={path}
-										onClick={() => setEditingPath(path)}
-										type="button"
-									>
-										<HugeiconsIcon
-											className="size-4 shrink-0 text-muted-foreground"
-											icon={Folder03Icon}
-										/>
-										<span className="min-w-0 flex-1">
-											<span className="block font-medium text-sm">
-												{basename(path)}
-											</span>
-											<span className="mt-0.5 block truncate font-mono text-muted-foreground text-xs">
-												{path}
-											</span>
+							</p>
+						</SettingsCard>
+					) : (
+						<SettingsGroup>
+							{paths.map((path) => (
+								<SettingsNavRow
+									icon={Folder03Icon}
+									key={path}
+									onClick={() => setEditingPath(path)}
+									tint="blue"
+									title={
+										<>
+											{basename(path)}
+											<span className="sr-only"> Edit</span>
+										</>
+									}
+									value={
+										<span
+											className="block max-w-56 truncate font-mono text-xs"
+											title={path}
+										>
+											{path}
 										</span>
-										<span className="text-muted-foreground text-xs">Edit</span>
-									</button>
-								))}
-							</div>
-						)}
-					</div>
+									}
+								/>
+							))}
+						</SettingsGroup>
+					)}
 				</SettingsSection>
 			</div>
 			<NodeFolderBrowser

@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/components/marketplace/PublishDialog.tsx
 //
 // Seller-side GitHub bridge. A listing is created from the seller's own
@@ -7,6 +8,7 @@
 
 import { Rocket01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { MarketplacePublishPreflightReport } from "@ryu/marketplace/catalog/publish-preflight";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -34,6 +36,7 @@ import {
 	MarketplaceError,
 	publishGithubPackage,
 } from "@/src/lib/api/marketplace.ts";
+import { marketplacePublishPreflightReportSchema } from "@/src/lib/api/marketplace-response-contracts.ts";
 
 type OfferModel = "free" | GithubPublishPricing["model"];
 
@@ -47,9 +50,21 @@ function buildOfferPricing(input: {
 	if (input.model === "free") {
 		return undefined;
 	}
-	const amount = Number(input.amount);
-	const amountMinor = Math.round(amount * 100);
-	if (!Number.isFinite(amount) || amountMinor <= 0) {
+	const amountText = input.amount.trim();
+	if (!amountText) {
+		throw new Error("Enter a positive price in your selected currency.");
+	}
+	const amountParts = /^(-?\d+)(?:\.(\d{1,2}))?$/u.exec(amountText);
+	if (!amountParts) {
+		throw new Error("Price must use no more than two decimal places.");
+	}
+	const wholeUnits = Number(amountParts[1]);
+	const fractionalUnits = Number((amountParts[2] ?? "").padEnd(2, "0"));
+	const amountMinor = wholeUnits * 100 + fractionalUnits;
+	if (!Number.isSafeInteger(amountMinor)) {
+		throw new Error("Price is too large to represent safely in minor units.");
+	}
+	if (amountMinor <= 0) {
 		throw new Error("Enter a positive price in your selected currency.");
 	}
 	const currency = input.currency.trim().toLowerCase();
@@ -66,9 +81,12 @@ function buildOfferPricing(input: {
 		pricing.interval = input.interval;
 	}
 	if (input.model === "bounded_updates") {
-		const maxUpdates = Number.parseInt(input.maxUpdates, 10);
+		const maxUpdatesText = input.maxUpdates.trim();
+		const maxUpdates = /^\d+$/u.test(maxUpdatesText)
+			? Number(maxUpdatesText)
+			: Number.NaN;
 		if (
-			!Number.isInteger(maxUpdates) ||
+			!Number.isSafeInteger(maxUpdates) ||
 			maxUpdates < 1 ||
 			maxUpdates > 10_000
 		) {
@@ -106,11 +124,20 @@ function githubInstallPrompt(
 	const installationUrl = error.details.installationUrl;
 	const repository = error.details.repository;
 	const state = error.details.installationState;
-	return typeof installationUrl === "string" &&
-		typeof repository === "string" &&
-		typeof state === "string"
+	return isNativeText(installationUrl) &&
+		isNativeText(repository) &&
+		isNativeText(state)
 		? { installationUrl, repository, state }
 		: null;
+}
+
+function publishPreflightFromError(
+	error: MarketplaceError
+): MarketplacePublishPreflightReport | null {
+	const parsed = marketplacePublishPreflightReportSchema.safeParse(
+		error.details.preflight
+	);
+	return parsed.success ? parsed.data : null;
 }
 
 export function PublishDialog({
@@ -134,7 +161,10 @@ export function PublishDialog({
 		id: string;
 		kind: string;
 		version: string;
+		preflight: MarketplacePublishPreflightReport | null;
 	} | null>(null);
+	const [preflightReport, setPreflightReport] =
+		useState<MarketplacePublishPreflightReport | null>(null);
 	const signedIn = hasMarketplaceAuth();
 
 	const handlePublish = useCallback(
@@ -154,6 +184,7 @@ export function PublishDialog({
 			}
 			setSubmitting(true);
 			setError(null);
+			setPreflightReport(null);
 			try {
 				const pricing = buildOfferPricing({
 					amount: offerAmount,
@@ -172,9 +203,11 @@ export function PublishDialog({
 					id: result.id,
 					kind: result.kind,
 					version: result.version,
+					preflight: result.preflight,
 				});
 			} catch (cause) {
 				if (cause instanceof MarketplaceError) {
+					setPreflightReport(publishPreflightFromError(cause));
 					const prompt = githubInstallPrompt(cause);
 					if (prompt) {
 						setInstallPrompt(prompt);
@@ -244,8 +277,10 @@ export function PublishDialog({
 		(next: boolean) => {
 			if (!next) {
 				setError(null);
+				setRepositoryUrl("");
 				setInstallPrompt(null);
 				setPublished(null);
+				setPreflightReport(null);
 				setOfferModel("free");
 				setOfferAmount("");
 				setOfferCurrency("USD");
@@ -261,14 +296,14 @@ export function PublishDialog({
 		<Dialog onOpenChange={handleOpenChange} open={open}>
 			<DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
 				<DialogHeader>
-					<DialogTitle className="flex items-center gap-2">
+					<DialogTitle layout="inline">
 						<HugeiconsIcon className="size-4" icon={Rocket01Icon} />
 						Publish {kindLabel} from GitHub
 					</DialogTitle>
 					<DialogDescription>
 						Paste the repository or package URL. Ryu validates the package
-						manifest and immutable release, while GitHub remains the source of
-						truth.
+						manifest and immutable release, detects UI automatically, and runs a
+						Grade A preflight before sending it to Ryu admins.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -278,9 +313,19 @@ export function PublishDialog({
 							<p className="font-medium">Submitted for review</p>
 							<p className="mt-1 text-muted-foreground">
 								<span className="font-mono">{published.id}</span> ({kindLabel}{" "}
-								{published.version}) is pending moderation. Future releases stay
-								in the linked GitHub repository.
+								{published.version}){" "}
+								{published.preflight?.passed
+									? `passed Grade ${published.preflight.grade} preflight and is in the Ryu admin review queue.`
+									: "is in the Ryu admin review queue, but its preflight report was not returned."}{" "}
+								Future releases stay in the linked GitHub repository.
 							</p>
+							{published.preflight ? (
+								<p className="mt-2 text-status-success text-xs">
+									Grade {published.preflight.grade} ·{" "}
+									{published.preflight.score}/100 ·{" "}
+									{published.preflight.rulesetVersion}
+								</p>
+							) : null}
 						</div>
 						<DialogFooter>
 							<Button onClick={() => handleOpenChange(false)}>Done</Button>
@@ -326,7 +371,7 @@ export function PublishDialog({
 						<div className="flex flex-col gap-3 rounded-xl border p-3">
 							<div className="flex flex-col gap-1.5">
 								<Label htmlFor="publish-offer-model">Offer</Label>
-								<Select
+								<Select<OfferModel>
 									items={[
 										{ label: "Free", value: "free" },
 										{ label: "One-time purchase", value: "one_time" },
@@ -335,7 +380,7 @@ export function PublishDialog({
 									]}
 									onValueChange={(value) => {
 										if (value) {
-											setOfferModel(value as OfferModel);
+											setOfferModel(value);
 										}
 									}}
 									value={offerModel}
@@ -473,8 +518,36 @@ export function PublishDialog({
 							</div>
 						) : null}
 
-						{error ? (
-							<p className="text-sm text-status-destructive">{error}</p>
+						{preflightReport ? (
+							<section
+								aria-live="polite"
+								className="flex flex-col gap-2 rounded-xl border border-status-destructive/30 bg-destructive/5 p-3"
+								role="alert"
+							>
+								<p className="font-medium text-sm">
+									Preflight: Grade {preflightReport.grade ?? "unavailable"} ·{" "}
+									{preflightReport.score ?? "—"}/100
+								</p>
+								<p className="text-muted-foreground text-xs">
+									Only Grade A packages enter Ryu's admin review queue. Fix the
+									items below and submit again.
+								</p>
+								<ul className="flex flex-col gap-1 text-xs">
+									{preflightReport.checks
+										.filter((check) => check.status !== "pass")
+										.map((check) => (
+											<li className="text-status-destructive" key={check.id}>
+												<span className="font-medium">{check.label}:</span>{" "}
+												{check.detail}
+											</li>
+										))}
+								</ul>
+							</section>
+						) : null}
+						{error && !preflightReport ? (
+							<p className="text-sm text-status-destructive" role="alert">
+								{error}
+							</p>
 						) : null}
 
 						<DialogFooter>
@@ -486,7 +559,9 @@ export function PublishDialog({
 								loading={submitting}
 								onClick={() => handlePublish()}
 							>
-								{submitting ? "Validating…" : "Submit GitHub package"}
+								{submitting
+									? "Checking Grade A preflight…"
+									: "Submit GitHub package"}
 							</Button>
 						</DialogFooter>
 					</div>

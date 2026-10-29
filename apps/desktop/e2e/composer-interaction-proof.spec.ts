@@ -2,6 +2,20 @@ import { expect, type Page, test } from "@playwright/test";
 
 test.describe.configure({ timeout: 90_000 });
 
+interface VoiceProcessorObservation {
+	onaudioprocess:
+		| ((event: {
+				inputBuffer: { getChannelData: (channel: number) => Float32Array };
+		  }) => void)
+		| null;
+}
+
+declare global {
+	interface Window {
+		__ryuVoiceProcessor?: VoiceProcessorObservation | null;
+	}
+}
+
 const STORY_URL = "/composer-interaction-proof.html";
 
 async function installVoiceMocks(page: Page) {
@@ -104,19 +118,7 @@ test("transcribes into the Other answer input", async ({ page }) => {
 		shell.getByRole("button", { name: "Stop recording" })
 	).toBeVisible();
 	await page.evaluate(() => {
-		const processor = (
-			window as typeof window & {
-				__ryuVoiceProcessor?: {
-					onaudioprocess:
-						| ((event: {
-								inputBuffer: {
-									getChannelData: (channel: number) => Float32Array;
-								};
-						  }) => void)
-						| null;
-				};
-			}
-		).__ryuVoiceProcessor;
+		const processor = window.__ryuVoiceProcessor;
 		processor?.onaudioprocess?.({
 			inputBuffer: { getChannelData: () => new Float32Array(512) },
 		});

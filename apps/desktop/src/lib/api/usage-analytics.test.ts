@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { UsageEvent } from "@ryu/blocks/desktop/usage-analytics.ts";
 import {
+	type PluginDocument,
+	type PluginValue,
+	pluginValueSchema,
+} from "./plugin-wire-values.ts";
+import {
 	fetchUsageAnalytics,
 	type UsageAnalyticsQuery,
 	withoutDuplicateManagedCharges,
@@ -22,8 +27,8 @@ const QUERY: UsageAnalyticsQuery = {
 const realFetch = globalThis.fetch;
 const realLocalStorage = globalThis.localStorage;
 
-function jsonResponse(body: unknown, status = 200): Response {
-	return Response.json(body, { status });
+function jsonResponse(body: PluginValue, status = 200): Response {
+	return Response.json(pluginValueSchema.parse(body), { status });
 }
 
 function setStorage(token: string | null): void {
@@ -59,9 +64,7 @@ function mockFetch(
 	return fetchMock;
 }
 
-function usageRollup(
-	overrides: Record<string, unknown> = {}
-): Record<string, unknown> {
+function usageRollup(overrides: PluginDocument = {}) {
 	return {
 		bucketSeconds: 900,
 		events: [
@@ -157,6 +160,52 @@ describe("fetchUsageAnalytics canonical rollups", () => {
 		expect(calls[0]).toContain("provider=openrouter");
 		expect(calls[0]).toContain("model=gpt-5");
 		expect(calls[0]).not.toContain("limit=");
+	});
+
+	it("keeps purpose and prompt-cache counters from node rollups", async () => {
+		setStorage(null);
+		mockFetch(async () =>
+			jsonResponse({
+				...usageRollup({
+					cacheReadTokens: 90,
+					cacheWriteTokens: 30,
+					purpose: "compaction",
+				}),
+				reachable: true,
+			})
+		);
+
+		const data = await fetchUsageAnalytics(QUERY, {
+			activeNode: TARGET,
+			activeOrgId: null,
+			scope: "node",
+		});
+
+		expect(data.totals).toMatchObject({
+			cacheReadTokens: 90,
+			cacheWriteTokens: 30,
+		});
+		expect(data.byPurpose).toEqual([
+			expect.objectContaining({
+				key: "compaction",
+				label: "Context compaction",
+				requests: 3,
+			}),
+		]);
+	});
+
+	it("leaves purpose and cache empty for rollups from older Gateways", async () => {
+		setStorage(null);
+		mockFetch(async () => jsonResponse({ ...usageRollup(), reachable: true }));
+
+		const data = await fetchUsageAnalytics(QUERY, {
+			activeNode: TARGET,
+			activeOrgId: null,
+			scope: "node",
+		});
+
+		expect(data.byPurpose).toBeUndefined();
+		expect(data.totals.cacheReadTokens + data.totals.cacheWriteTokens).toBe(0);
 	});
 
 	it("rejects malformed rollup events", async () => {
@@ -309,6 +358,53 @@ describe("fetchUsageAnalytics canonical rollups", () => {
 		expect(calls[1]).toContain("/api/gateway/audit?");
 		expect(calls[1]).not.toContain("limit=");
 		expect(data.totals).toMatchObject({ requests: 1, averageLatencyMs: 25 });
+	});
+
+	it("keeps purpose from raw node audit rows when the rollup is unavailable", async () => {
+		setStorage(null);
+		mockFetch(async (url) => {
+			if (url.includes("/api/gateway/audit/usage")) {
+				return jsonResponse({
+					bucketSeconds: 900,
+					events: [],
+					kind: "rollup",
+					reachable: false,
+					status: 404,
+				});
+			}
+			const row = {
+				cost_micro_usd: null,
+				error: null,
+				feature: "chat",
+				input_tokens: 4,
+				latency_ms: 25,
+				model: "gpt-5",
+				output_tokens: 2,
+				provider: "openrouter",
+				timestamp: "2026-08-21T00:15:00.000Z",
+				user_id: "member-1",
+			};
+			return jsonResponse({
+				count: 2,
+				entries: [
+					{ ...row, purpose: "compaction" },
+					{ ...row, purpose: null },
+				],
+				reachable: true,
+			});
+		});
+
+		const data = await fetchUsageAnalytics(QUERY, {
+			activeNode: TARGET,
+			activeOrgId: null,
+			scope: "node",
+		});
+
+		expect(data.byPurpose).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ key: "compaction", requests: 1 }),
+			])
+		);
 	});
 
 	it("returns the supported offline empty state", async () => {

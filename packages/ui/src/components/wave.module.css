@@ -1,0 +1,16 @@
+.inlineBar,
+.loadingBar {
+	width: 12.5%;
+}
+.liveBar,
+.loadingBar {
+	height: var(--wave-bar-height);
+}
+.liveBar {
+	transition: height 90ms linear;
+}
+.loadingBar {
+	--wave-motion: loading-ui-wave var(--duration, 1s) ease-in-out infinite;
+	animation: var(--wave-motion);
+	animation-delay: var(--wave-bar-delay);
+}

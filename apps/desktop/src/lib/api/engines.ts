@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/engines.ts
 //
 // Typed client for Core's engine endpoints (`/api/engines`, `/api/engine/active`).
@@ -8,6 +9,60 @@
 import type { ModelOption } from "@/components/agent-elements/types.ts";
 import { track } from "@/src/lib/analytics.ts";
 import { type ApiTarget, request } from "./client.ts";
+
+const enginesResponseSchema = z.looseObject({
+	description: z.union([z.null(), z.string()]).optional(),
+	id: z.string(),
+	install_hint: z.union([z.null(), z.string()]).optional(),
+	installed: z.union([z.null(), z.literal(false), z.literal(true)]).optional(),
+	name: z.string(),
+});
+const jsonResponseSchema = z.looseObject({
+	engines: z.array(enginesResponseSchema).optional(),
+});
+const modelsResponseSchema = z.looseObject({
+	id: z.string(),
+	name: z.string(),
+});
+const jsonResponseSchema2 = z.looseObject({
+	models: z.record(z.string(), z.array(modelsResponseSchema)).optional(),
+});
+const jsonResponseSchema3 = z.looseObject({
+	active: z.union([z.null(), z.string()]).optional(),
+	running: z.boolean().optional(),
+	available: z.array(z.string()).optional(),
+	llamacpp_variant: z.union([z.null(), z.string()]).optional(),
+});
+const optionsResponseSchema = z.looseObject({
+	available: z.boolean().optional(),
+	description: z.string().optional(),
+	id: z.string(),
+	label: z.string().optional(),
+	unavailable_reason: z.union([z.null(), z.string()]).optional(),
+});
+const jsonResponseSchema4 = z.looseObject({
+	selected: z.string().optional(),
+	resolved: z.string().optional(),
+	resolved_label: z.string().optional(),
+	installed: z.union([z.null(), z.string()]).optional(),
+	has_gpu: z.boolean().optional(),
+	gpu_name: z.union([z.null(), z.string()]).optional(),
+	vram: z.string().optional(),
+	options: z.array(optionsResponseSchema).optional(),
+});
+const jsonResponseSchema5 = z.looseObject({
+	success: z.boolean().optional(),
+	error: z.string().optional(),
+});
+const jsonResponseSchema6 = z.looseObject({
+	success: z.boolean().optional(),
+	error: z.string().optional(),
+	active: z.union([z.null(), z.string()]).optional(),
+	stopped: z.union([z.null(), z.string()]).optional(),
+	running: z.boolean().optional(),
+	unchanged: z.boolean().optional(),
+	gateway_refreshed: z.boolean().optional(),
+});
 
 /** A built-in engine (runtime) an agent can be bound to. */
 export interface Engine {
@@ -62,18 +117,12 @@ export interface LlamacppAcceleration {
 	vram: string;
 }
 
-interface EngineWire {
-	description?: string | null;
-	id: string;
-	install_hint?: string | null;
-	installed?: boolean | null;
-	name: string;
-}
-
 export async function fetchEngines(target: ApiTarget): Promise<Engine[]> {
-	const json = await request<{ engines?: EngineWire[] }>(
+	const json = await request(
 		target,
-		"/api/engines"
+		"/api/engines",
+		undefined,
+		jsonResponseSchema
 	);
 	return (json.engines ?? []).map(
 		(e): Engine => ({
@@ -94,21 +143,24 @@ export async function fetchEngines(target: ApiTarget): Promise<Engine[]> {
 export async function fetchEngineModels(
 	target: ApiTarget
 ): Promise<Record<string, ModelOption[]>> {
-	const json = await request<{
-		models?: Record<string, { id: string; name: string }[]>;
-	}>(target, "/api/engines/models");
+	const json = await request(
+		target,
+		"/api/engines/models",
+		undefined,
+		jsonResponseSchema2
+	);
 	return json.models ?? {};
 }
 
 export async function fetchActiveEngine(
 	target: ApiTarget
 ): Promise<ActiveEngine> {
-	const json = await request<{
-		active?: string | null;
-		running?: boolean;
-		available?: string[];
-		llamacpp_variant?: string | null;
-	}>(target, "/api/engine/active");
+	const json = await request(
+		target,
+		"/api/engine/active",
+		undefined,
+		jsonResponseSchema3
+	);
 	return {
 		active: json.active ?? null,
 		running: json.running ?? false,
@@ -117,28 +169,16 @@ export async function fetchActiveEngine(
 	};
 }
 
-interface AccelerationOptionWire {
-	available?: boolean;
-	description?: string;
-	id: string;
-	label?: string;
-	unavailable_reason?: string | null;
-}
-
 /** Read the llama.cpp acceleration choice and what this machine supports. */
 export async function fetchLlamacppAcceleration(
 	target: ApiTarget
 ): Promise<LlamacppAcceleration> {
-	const json = await request<{
-		selected?: string;
-		resolved?: string;
-		resolved_label?: string;
-		installed?: string | null;
-		has_gpu?: boolean;
-		gpu_name?: string | null;
-		vram?: string;
-		options?: AccelerationOptionWire[];
-	}>(target, "/api/engine/llamacpp/acceleration");
+	const json = await request(
+		target,
+		"/api/engine/llamacpp/acceleration",
+		undefined,
+		jsonResponseSchema4
+	);
 	return {
 		selected: json.selected ?? "auto",
 		resolved: json.resolved ?? "cpu",
@@ -168,10 +208,11 @@ export async function setLlamacppAcceleration(
 	target: ApiTarget,
 	variant: string
 ): Promise<void> {
-	const json = await request<{ success?: boolean; error?: string }>(
+	const json = await request(
 		target,
 		"/api/engine/llamacpp/acceleration",
-		{ method: "POST", body: { variant } }
+		{ method: "POST", body: { variant } },
+		jsonResponseSchema5
 	);
 	if (json.success === false) {
 		throw new Error(json.error ?? `Failed to switch to "${variant}"`);
@@ -201,15 +242,12 @@ export async function setActiveEngine(
 	target: ApiTarget,
 	name: string
 ): Promise<EngineSwap> {
-	const json = await request<{
-		success?: boolean;
-		error?: string;
-		active?: string | null;
-		stopped?: string | null;
-		running?: boolean;
-		unchanged?: boolean;
-		gateway_refreshed?: boolean;
-	}>(target, "/api/engine/active", { method: "POST", body: { name } });
+	const json = await request(
+		target,
+		"/api/engine/active",
+		{ method: "POST", body: { name } },
+		jsonResponseSchema6
+	);
 	if (json.success === false) {
 		throw new Error(json.error ?? `Failed to activate engine "${name}"`);
 	}

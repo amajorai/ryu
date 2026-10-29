@@ -1,11 +1,12 @@
+import { requireTestValue } from "../../test-required.ts";
 import { describe, expect, it } from "bun:test";
 import { extractCitations, linkifyCitationMarkers } from "./citations.ts";
 
-function webFetch(input: unknown, output: unknown) {
+function webFetch<Input, Output>(input: Input, output: Output) {
 	return { type: "tool-WebFetch", input, output };
 }
 
-function webSearch(output: unknown) {
+function webSearch<Output>(output: Output) {
 	return { type: "tool-WebSearch", output };
 }
 
@@ -30,16 +31,23 @@ describe("extractCitations - WebFetch", () => {
 	it("falls back to the hostname title when output has none", () => {
 		const parts = [webFetch({ url: "https://www.example.com/x" }, {})];
 		const [c] = extractCitations(parts);
+		if (!c) throw new Error("Expected extracted citation");
 		expect(c.title).toBe("example.com");
 		expect(c.description).toBeUndefined();
 	});
 
 	it("accepts link/uri as url aliases", () => {
 		expect(
-			extractCitations([webFetch({ link: "https://a.io" }, {})])[0].url
+			requireTestValue(
+				extractCitations([webFetch({ link: "https://a.io" }, {})])[0],
+				"first citation"
+			).url
 		).toBe("https://a.io");
 		expect(
-			extractCitations([webFetch({ uri: "https://b.io" }, {})])[0].url
+			requireTestValue(
+				extractCitations([webFetch({ uri: "https://b.io" }, {})])[0],
+				"first citation"
+			).url
 		).toBe("https://b.io");
 	});
 
@@ -47,6 +55,7 @@ describe("extractCitations - WebFetch", () => {
 		const [c] = extractCitations([
 			webFetch({ url: "https://x.io" }, "plain body text"),
 		]);
+		if (!c) throw new Error("Expected extracted citation");
 		expect(c.description).toBe("plain body text");
 	});
 
@@ -57,6 +66,7 @@ describe("extractCitations - WebFetch", () => {
 				JSON.stringify({ title: "T", text: "B" })
 			),
 		]);
+		if (!c) throw new Error("Expected extracted citation");
 		expect(c.title).toBe("T");
 		expect(c.description).toBe("B");
 	});
@@ -66,6 +76,7 @@ describe("extractCitations - WebFetch", () => {
 		const [c] = extractCitations([
 			webFetch({ url: "https://x.io" }, { summary: long }),
 		]);
+		if (!c) throw new Error("Expected extracted citation");
 		expect(c.description).toHaveLength(240);
 	});
 
@@ -101,7 +112,7 @@ describe("extractCitations - WebSearch", () => {
 		];
 		const cs = extractCitations(parts);
 		expect(cs).toHaveLength(1);
-		expect(cs[0].url).toBe("https://a.io");
+		expect(requireTestValue(cs[0], "first citation").url).toBe("https://a.io");
 	});
 
 	it("returns nothing when results is not an array", () => {
@@ -123,7 +134,7 @@ describe("extractCitations - aggregate behavior", () => {
 		const cs = extractCitations(parts);
 		expect(cs.map((c) => c.url)).toEqual(["https://a.io", "https://c.io"]);
 		expect(cs.map((c) => c.number)).toEqual([1, 2]);
-		expect(cs[0].title).toBe("first");
+		expect(requireTestValue(cs[0], "first citation").title).toBe("first");
 	});
 
 	it("ignores non-web tool parts and non-record entries", () => {
@@ -145,7 +156,9 @@ describe("extractCitations - aggregate behavior", () => {
 				output: {},
 			},
 		];
-		expect(extractCitations(parts)[0].url).toBe("https://dyn.io");
+		expect(
+			requireTestValue(extractCitations(parts)[0], "first citation").url
+		).toBe("https://dyn.io");
 	});
 
 	it("returns an empty array when no web tools were used", () => {
@@ -197,5 +210,67 @@ describe("linkifyCitationMarkers", () => {
 	it("is a no-op without citations", () => {
 		expect(linkifyCitationMarkers("hello [1]", undefined)).toBe("hello [1]");
 		expect(linkifyCitationMarkers("hello [1]", [])).toBe("hello [1]");
+	});
+});
+
+describe("extractCitations - native carriers", () => {
+	it("reads inherited fields independently without traversing unrelated metadata", () => {
+		class SearchResult {
+			get url() {
+				return false;
+			}
+			get link() {
+				return "https://native.example/result";
+			}
+			get title() {
+				return " ";
+			}
+			get snippet() {
+				return null;
+			}
+			get description() {
+				return "native description";
+			}
+			get metadata() {
+				throw new Error("unrelated metadata must remain unread");
+			}
+		}
+		const rows = [new SearchResult()];
+		expect(extractCitations([webSearch(rows)])).toEqual([
+			{
+				number: 1,
+				url: "https://native.example/result",
+				title: "native.example",
+				description: "native description",
+			},
+		]);
+	});
+
+	it("retains native input getter read order and original kind reads", () => {
+		let inputReads = 0;
+		let kindReads = 0;
+		const part = {
+			get type() {
+				kindReads += 1;
+				return "tool-WebFetch";
+			},
+			get input() {
+				inputReads += 1;
+				return inputReads === 1
+					? { url: "https://first.example" }
+					: { uri: "https://second.example" };
+			},
+			output: { title: "Second read", summary: false, text: "fallback body" },
+		};
+		expect(extractCitations([part])).toEqual([
+			{
+				number: 1,
+				url: "https://second.example",
+				title: "Second read",
+				description: "fallback body",
+			},
+		]);
+		expect(inputReads).toBe(2);
+		expect(kindReads).toBe(4);
 	});
 });

@@ -70,7 +70,7 @@ import {
 	EmptyTitle,
 } from "@ryu/ui/components/empty.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	StatusBadge,
 	UNAVAILABLE_ROW_CLASS,
@@ -78,6 +78,11 @@ import {
 import { useMemo, useState } from "react";
 import { AgentBadgeCard } from "@/src/components/agents/AgentBadgeCard.tsx";
 import { useMarketplacePurchase } from "@/src/components/marketplace/useMarketplacePurchase.ts";
+import { NativeProviderAccounts } from "@/src/components/settings/NativeProviderAccounts.tsx";
+import {
+	AgentMysteryBox,
+	AgentMysteryBoxBanner,
+} from "@/src/components/store/AgentMysteryBox.tsx";
 import {
 	CommunityAgentDetail,
 	CommunityAgentsShelf,
@@ -91,10 +96,12 @@ import {
 } from "@/src/hooks/usePluginSettingsOpener.ts";
 import { groupAgents } from "@/src/lib/agent-catalog-groups.ts";
 import { AgentCatalogLogo } from "@/src/lib/agent-catalog-logo.tsx";
+import type { MysteryAgent } from "@/src/lib/agent-mystery-box.ts";
 import type {
 	AgentCatalogEntry,
 	PublishedAgentInstallResult,
 } from "@/src/lib/api/agents.ts";
+import { ApiError } from "@/src/lib/api/client.ts";
 import type { MarketplaceCard } from "@/src/lib/api/marketplace.ts";
 import { useInstallProgress } from "@/src/store/useDownloadsStore.ts";
 
@@ -276,7 +283,7 @@ function AgentCards({
 							// annotation rather than as whose card this is.
 							logo={
 								<AgentCatalogLogo
-									className="size-20 opacity-90"
+									className="size-20"
 									entry={entry}
 									size="80px"
 								/>
@@ -339,15 +346,11 @@ function AgentList({
 	settingsOpener: PluginSettingsOpener;
 }) {
 	if (loading && agents.length === 0) {
-		return (
-			<div className="flex items-center justify-center p-8 text-muted-foreground">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows inset="catalog" />;
 	}
 	if (error && agents.length === 0) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={Target01Icon} />
@@ -365,7 +368,7 @@ function AgentList({
 	}
 	if (agents.length === 0) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={Target01Icon} />
@@ -489,11 +492,7 @@ function AgentDetailPanel({
 						updateAvailable ? "Update available" : null,
 					].filter((b): b is string => Boolean(b))}
 					icon={
-						<AgentCatalogLogo
-							className="size-9 opacity-90"
-							entry={entry}
-							size="36px"
-						/>
+						<AgentCatalogLogo className="size-9" entry={entry} size="36px" />
 					}
 					name={entry.name}
 					tagline={entry.description}
@@ -540,6 +539,9 @@ function AgentDetailPanel({
 					<p className="text-muted-foreground text-sm">{entry.installHint}</p>
 				</ListingSection>
 			) : null}
+			{entry.added && entry.id !== FLAGSHIP_AGENT_ID ? (
+				<NativeProviderAccounts agentId={entry.id} key={entry.id} />
+			) : null}
 		</ListingDetailShell>
 	);
 }
@@ -547,11 +549,15 @@ function AgentDetailPanel({
 export default function AgentsCatalogSection({
 	initialQuery = "",
 	initialSelectedId,
+	onOpenAgentAccountAccess,
 }: {
 	initialQuery?: string;
 	/** Open this item's preview on arrival — the id of a card clicked on the
 	 *  Store's Home shelves. */
 	initialSelectedId?: string;
+	/** Open an installed Agent Template's editor at Account access. Hosts
+	 *  without tabs omit it and the detail shows no link. */
+	onOpenAgentAccountAccess?: (agent: { id: string; name: string }) => void;
 } = {}) {
 	const [query, setQuery] = useState(initialQuery);
 	const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
@@ -582,6 +588,7 @@ export default function AgentsCatalogSection({
 	>({});
 
 	const sorted = useMemo(() => sortAgents(agents), [agents]);
+	const [mysteryOpen, setMysteryOpen] = useState(false);
 
 	// The Store shell's "installed only" switch (the retired "Added" tab,
 	// inverted). This catalog is fetched whole and filtered here, so it applies to
@@ -625,12 +632,24 @@ export default function AgentsCatalogSection({
 		[filtered, selectedId]
 	);
 
-	const run = async (id: string, action: () => Promise<void>) => {
+	const run = async (
+		id: string,
+		action: () => Promise<void>,
+		failureTitle: string
+	) => {
 		setErrorId(null);
 		try {
 			await action();
-		} catch {
+		} catch (cause) {
 			setErrorId(id);
+			toast.error(failureTitle, {
+				description:
+					cause instanceof ApiError && cause.serverMessage
+						? cause.serverMessage
+						: cause instanceof Error
+							? cause.message
+							: String(cause),
+			});
 		}
 	};
 
@@ -654,6 +673,32 @@ export default function AgentsCatalogSection({
 		}
 	};
 
+	// The Mystery Box reports failures itself, so these reject instead of toasting.
+	const addTemplateFromBox = async (card: MarketplaceCard) => {
+		const result = await community.install(card.id);
+		setInstalledRequires((prev) => ({ ...prev, [card.id]: result }));
+		toast.success(`${result.agent.name} is now one of your agents`, {
+			description:
+				"Open its details to grant anything it asked for, and to choose which of your accounts it may use under Account access — nothing was enabled for you.",
+		});
+	};
+
+	const viewFromBox = (agent: MysteryAgent) => {
+		setMysteryOpen(false);
+		if (agent.kind === "runtime") {
+			setSelectedCommunity(null);
+			setSelectedId(agent.entry.id);
+		} else {
+			setSelectedId(null);
+			setSelectedCommunity(agent.card);
+		}
+	};
+
+	const showMysteryBanner =
+		debouncedQuery.trim().length === 0 &&
+		!installedOnly &&
+		(agents.length > 0 || community.agents.length > 0);
+
 	const communityInstall = selectedCommunity
 		? (installedRequires[selectedCommunity.id] ?? null)
 		: null;
@@ -668,8 +713,14 @@ export default function AgentsCatalogSection({
 							buying === selectedCommunity.id
 						}
 						card={selectedCommunity}
+						installedIdentityMode={communityInstall?.agent.identityMode ?? null}
 						onBuy={() => buy({ id: selectedCommunity.id, kind: "agent" })}
 						onInstall={() => installCommunity(selectedCommunity)}
+						onOpenAccountAccess={
+							communityInstall && onOpenAgentAccountAccess
+								? () => onOpenAgentAccountAccess(communityInstall.agent)
+								: undefined
+						}
 						requestedSpaceCount={communityInstall?.requestedSpaceCount ?? 0}
 						requires={communityInstall?.requires ?? null}
 					/>
@@ -680,12 +731,20 @@ export default function AgentsCatalogSection({
 						error={errorId === selectedId ? error : null}
 						onInstall={() => {
 							if (selectedId) {
-								run(selectedId, () => install(selectedId));
+								run(
+									selectedId,
+									() => install(selectedId),
+									"Couldn't add agent"
+								);
 							}
 						}}
 						onUninstall={() => {
 							if (selectedId) {
-								run(selectedId, () => uninstall(selectedId));
+								run(
+									selectedId,
+									() => uninstall(selectedId),
+									"Couldn't remove agent"
+								);
 							}
 						}}
 					/>
@@ -695,13 +754,26 @@ export default function AgentsCatalogSection({
 			hasSelection={selectedCommunity != null || selectedEntry != null}
 			list={
 				<>
+					{showMysteryBanner ? (
+						<AgentMysteryBoxBanner onOpen={() => setMysteryOpen(true)} />
+					) : null}
+					<AgentMysteryBox
+						onAddRuntime={install}
+						onAddTemplate={addTemplateFromBox}
+						onBuyTemplate={(card) => buy({ id: card.id, kind: "agent" })}
+						onOpenChange={setMysteryOpen}
+						onViewDetails={viewFromBox}
+						open={mysteryOpen}
+						runtimes={agents}
+						templates={community.agents}
+					/>
 					<AgentList
 						agents={filtered}
 						error={error}
 						grouped={debouncedQuery.trim().length === 0}
 						loading={loading}
 						onClearSearch={() => setQuery("")}
-						onInstall={(id) => run(id, () => install(id))}
+						onInstall={(id) => run(id, () => install(id), "Couldn't add agent")}
 						onRetry={() => {
 							void reload();
 						}}
@@ -709,7 +781,9 @@ export default function AgentsCatalogSection({
 							setSelectedCommunity(null);
 							setSelectedId(id);
 						}}
-						onUninstall={(id) => run(id, () => uninstall(id))}
+						onUninstall={(id) =>
+							run(id, () => uninstall(id), "Couldn't remove agent")
+						}
 						pendingId={pendingId}
 						selectedId={selectedId}
 						settingsOpener={settingsOpener}

@@ -20,7 +20,7 @@ function user(): StatsMessage {
 	return { parts: [{ text: "prompt", type: "text" }], role: "user" };
 }
 
-function ryuStats(data: Record<string, unknown>) {
+function ryuStats<Data extends object>(data: Data) {
 	return { data, type: "data-ryu-stats" };
 }
 
@@ -174,4 +174,48 @@ describe("deriveSessionStats", () => {
 		expect(resolveContextFallback(123_456)).toBe(123_456);
 		expect(resolveContextFallback(0)).toBe(200_000);
 	});
+});
+
+test("keeps independent legacy numeric aliases and ignores unrelated native metadata", () => {
+	const data = Object.create({
+		inputTokens: "invalid",
+		promptTokens: "0x10",
+		outputTokens: Number.NaN,
+		completionTokens: "2e1",
+		cacheReadTokens: " ",
+		cachedTokens: "4",
+		durationMs: "1000",
+	});
+	Object.defineProperty(data, "opaqueMetadata", {
+		get() {
+			throw new Error("Statistics must not inspect unrelated metadata");
+		},
+	});
+	const stats = deriveSessionStats([assistant([ryuStats(data)])], { now: NOW });
+	expect(stats.inputTokens).toBe(16);
+	expect(stats.outputTokens).toBe(20);
+	expect(stats.totalTokens).toBe(36);
+	expect(stats.cacheRead).toBe(4);
+	expect(stats.outputSpeed).toBe(20);
+});
+
+test("retains native class carriers and the original part kind read ordering", () => {
+	const nativeData = Object.assign(new Map([["native", "metadata"]]), {
+		promptTokens: "7",
+		completionTokens: "3",
+	});
+	let reads = 0;
+	const part = {
+		get type() {
+			reads += 1;
+			return "data-ryu-stats";
+		},
+		data: nativeData,
+	};
+	const stats = deriveSessionStats([assistant([part])], { now: NOW });
+	expect(stats.inputTokens).toBe(7);
+	expect(stats.outputTokens).toBe(3);
+	expect(stats.totalTokens).toBe(10);
+	expect(nativeData.get("native")).toBe("metadata");
+	expect(reads).toBe(14);
 });

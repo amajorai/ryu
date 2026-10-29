@@ -13,7 +13,7 @@
 // progress columns pin the component milestones emitted by the public installer
 // after the "Run AI locally" pick.
 
-import { OnboardingView } from "@ryu/blocks/desktop/onboarding";
+import { OnboardingView } from "@ryu/blocks/desktop/onboarding.tsx";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 
@@ -95,7 +95,7 @@ const storyParams = new URLSearchParams(window.location.search);
 const chooseOnly = storyParams.has("choose-only");
 const singleTheme = storyParams.has("single");
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	chooseOnly ? (
 		singleTheme ? (
 			<div className="flex min-h-screen">

@@ -1,6 +1,15 @@
 "use client";
 
+import { cn } from "@ryu/ui/lib/utils";
 import type { CSSProperties } from "react";
+import { cssDimension } from "./css-dimension.ts";
+import styles from "./iframe.module.css";
+
+interface IframeDimensionsStyle extends CSSProperties {
+	"--assistant-iframe-border": string | undefined;
+	"--assistant-iframe-height": string | undefined;
+	"--assistant-iframe-width": string | undefined;
+}
 
 export interface RyuAssistantWidgetIframeProps {
 	/** Optional permissions requested by the hosted widget, kept explicit. */
@@ -29,15 +38,27 @@ export function RyuAssistantWidgetIframe({
 	title = "Ryu assistant",
 	width = "100%",
 }: RyuAssistantWidgetIframeProps) {
+	const dimensions: IframeDimensionsStyle = {
+		...style,
+		"--assistant-iframe-border": cssDimension(
+			Object.hasOwn(style ?? {}, "border") ? style?.border : 0
+		),
+		"--assistant-iframe-height": cssDimension(
+			Object.hasOwn(style ?? {}, "height") ? style?.height : height
+		),
+		"--assistant-iframe-width": cssDimension(
+			Object.hasOwn(style ?? {}, "width") ? style?.width : width
+		),
+	};
 	return (
 		<iframe
 			allow={allow}
-			className={className}
+			className={cn(styles.frame, className)}
 			loading={loading}
 			referrerPolicy="strict-origin-when-cross-origin"
 			sandbox="allow-scripts"
 			src={src}
-			style={{ border: 0, height, width, ...style }}
+			style={dimensions}
 			title={title}
 		/>
 	);

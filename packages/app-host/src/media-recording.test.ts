@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { parseMediaRecordingInput } from "./media-recording.ts";
+import type { RouteClaim } from "./rpc.ts";
 import { capabilitiesFromGrants, dispatchRpc } from "./rpc.ts";
 
 test("microphone action parser rejects path traversal and extra authority", () => {
@@ -14,6 +15,41 @@ test("microphone action parser rejects path traversal and extra authority", () =
 		parseMediaRecordingInput({ action: "stop", id: "recording-1" })
 	).toEqual({ action: "stop", id: "recording-1" });
 });
+test("microphone action parser returns canonical actions and preserves rewind bounds", () => {
+	for (const action of ["status", "start"] as const) {
+		expect(
+			parseMediaRecordingInput({ action, id: undefined, seconds: undefined })
+		).toEqual({ action });
+	}
+	for (const action of ["ack", "stop", "read", "discard"] as const) {
+		expect(
+			parseMediaRecordingInput({
+				action,
+				id: "recording-1",
+				seconds: undefined,
+			})
+		).toEqual({ action, id: "recording-1" });
+	}
+	for (const seconds of [15, 300] as const) {
+		expect(
+			parseMediaRecordingInput({ action: "rewind", id: "recording-1", seconds })
+		).toEqual({ action: "rewind", id: "recording-1", seconds });
+	}
+	expect(
+		parseMediaRecordingInput({
+			action: "rewind",
+			id: "recording-1",
+			seconds: 16,
+		})
+	).toBeNull();
+	expect(
+		parseMediaRecordingInput({ action: "status", id: "recording-1" })
+	).toBeNull();
+	expect(
+		parseMediaRecordingInput({ action: "read", id: "recording-1", seconds: 15 })
+	).toBeNull();
+});
+
 test("recording requires its own approved grant before requesting the OS microphone", async () => {
 	let calls = 0;
 	const services = {
@@ -26,7 +62,7 @@ test("recording requires its own approved grant before requesting the OS microph
 				state: "recording" as const,
 			};
 		},
-		registerRoute: async () => ({}),
+		registerRoute: async (claim: RouteClaim) => ({ path: claim.path }),
 	};
 	await expect(
 		dispatchRpc(
@@ -51,7 +87,10 @@ test("missing capture implementation reports unavailable without claiming record
 			"media.recording",
 			[{ action: "status" }],
 			capabilitiesFromGrants(["media:record"]),
-			{ listAgents: async () => [], registerRoute: async () => ({}) }
+			{
+				listAgents: async () => [],
+				registerRoute: async (claim: RouteClaim) => ({ path: claim.path }),
+			}
 		)
 	).toMatchObject({ available: false, state: "idle" });
 });
@@ -59,7 +98,7 @@ test("speech history rejects unbounded requests before touching Shadow", async (
 	let called = false;
 	const service = {
 		listAgents: async () => [],
-		registerRoute: async () => ({}),
+		registerRoute: async (claim: RouteClaim) => ({ path: claim.path }),
 		timelineTranscripts: async () => {
 			called = true;
 			return { segments: [], nextOffset: null };

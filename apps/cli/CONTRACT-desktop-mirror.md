@@ -220,7 +220,7 @@ To **extend** the sidebar (rarely needed): add a source + mapping in
 
 | Primitive | Import | Key API |
 | --- | --- | --- |
-| `useWorkspace()` | `src/workspace/WorkspaceContext.tsx` | `{ tabs, panes, focusedPaneId, openTab(path, opts?), closeTab(id), restoreTab(), pinTab(id), splitActive(), focusPane(paneId), cycleTab(dir), activateTab(paneId, tabId) }` |
+| `useWorkspace()` | `src/workspace/WorkspaceContext.tsx` | `{ tabs, panes, focusedPaneId, focusedRegion, regionGroups, state, openTab(path, opts?), closeTab(id), closeActiveTab(), restoreTab(), pinTab(id), splitActive(), focusPane(paneId), focusDirection(dir), cycleTab(dir), activateTab(paneId, tabId), moveActiveTo(region), showRegion(region), hideRegion(region), resetLayout() }` |
 | `useCore()` | `src/core/CoreContext.tsx` | `{ url, token, target, setTarget(next) }` — pass `target` to core-client |
 | `useOverlay()` | `src/overlays/OverlayHost.tsx` | `{ openId, openOverlay(id), closeOverlay() }` |
 | `useToast()` | `src/ui/toast.tsx` | `notify(message, "info"\|"success"\|"warning"\|"error"\|"loading")` |
@@ -228,7 +228,7 @@ To **extend** the sidebar (rarely needed): add a source + mapping in
 | `useSetInputFocused()` | `src/core/InputFocusContext.tsx` | `(focused: boolean) => void` |
 | `useInputFocused()` | `src/core/InputFocusContext.tsx` | `boolean` |
 | `ListTab` | `src/ui/ListTab.tsx` | props `{ active, load(target, signal?) => Promise<ListRow[]>, onActivate?, onSecondary?, emptyLabel?, height? }` — a full data-driven list (lazy load, j/k nav, Enter/`a`/`r`, error/loading). Wrap it in a surface and pass `active={focused}`. |
-| `StatusBar` | `src/ui/StatusBar.tsx` | `{ hints: {keys,label}[], left?: string }` (already mounted by the shell) |
+| `StatusBar` | `src/ui/StatusBar.tsx` | `{ hints: {keys,label}[], left?: string, leftSuffix?: string }` (already mounted by the shell; one row, trims `left` before `leftSuffix`) |
 | `registerPaletteAction` | `src/palette/CommandPalette.tsx` | `(action: { id; label; run }) => void` — contribute extra palette actions |
 
 `ListRow` (`src/core/featureList.ts`): `{ id, title, subtitle?, badge? }`.
@@ -242,9 +242,24 @@ openTab(path: string, opts?: { forceNew?: boolean; title?: string }): string; //
 cycleTab(dir: 1 | -1): void;
 ```
 
+The workspace runs the shared `@ryu/workbench` reducer (the same model as
+Desktop): Left (the sidebar's Navigation), Center (split panes), Right, and
+Bottom, each a group with its own active tab, and one focused group across all
+of them. `panes` lists the Center panes in split order; `regionGroups.right` /
+`regionGroups.bottom` are the side groups while they are open and non-empty.
+`focusedPaneId` is the focused group's id in any region, so a surface gates its
+keys on `active && focusedPaneId === paneId` wherever it is placed.
+
 Singleton paths (everything except `/chat`) are revealed if already open in the
-focused pane; `/chat` always opens a new tab. `forceNew: true` forces a new tab
-for any path. The workspace supports **one** split (two panes).
+target Center pane or in a side region; `/chat` always opens a new tab.
+`forceNew: true` forces a new tab for any path. Center is never blank: moving or
+closing its last page seeds a new chat. `splitActive()` toggles one extra Center
+pane seeded with the active page.
+
+The entry point (`src/index.tsx`) renders `<App persistLayout />`, which saves the
+layout to `workbench-layout.json` under `ryuHomeDir()` (atomic temp-file rename,
+`0o600`). Tests and embedded renders omit `persistLayout`, so they never read or
+write a profile.
 
 ---
 
@@ -260,8 +275,9 @@ palette / an overlay / the node picker is open, the shell yields to it.
 | `Ctrl+T` | New chat tab (`openTab("/chat", { forceNew: true })`) |
 | `Ctrl+W` | Close the focused pane's active tab |
 | `Ctrl+Shift+T` | Restore the last-closed tab |
-| `Ctrl+Alt+S` | Toggle a two-pane split (`splitActive`) |
-| `Alt+Left` / `Alt+Right` | Move focus between panes |
+| `Ctrl+Alt+S` | Split Center or join its panes (`splitActive`) |
+| `Alt+Arrow` | Focus the nearest visible group in that direction (`focusDirection`) |
+| `Ctrl+Shift+Right` / `Down` / `Up` | Move the focused tab to Right / Bottom / Center (`moveActiveTo`) |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle tabs in the focused pane |
 | `Esc` | Close the open palette / overlay / node picker |
 

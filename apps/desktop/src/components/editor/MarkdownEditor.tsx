@@ -1,4 +1,4 @@
-import { Spinner } from "@ryu/ui/components/spinner";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { type ComponentProps, lazy, Suspense } from "react";
 
 export type { MarkdownCollab } from "./MarkdownEditorContent.tsx";
@@ -15,13 +15,7 @@ const EditorContent = lazy(() =>
 /** Load the editor toolkit only when a real editor is mounted. */
 export function MarkdownEditor(props: MarkdownEditorProps) {
 	return (
-		<Suspense
-			fallback={
-				<div className="grid min-h-32 w-full flex-1 place-items-center">
-					<Spinner />
-				</div>
-			}
-		>
+		<Suspense fallback={<SkeletonRows rows={6} spacing="library" />}>
 			<EditorContent {...props} />
 		</Suspense>
 	);

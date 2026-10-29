@@ -10,6 +10,24 @@ use regex::Regex;
 use std::sync::OnceLock;
 
 const MAX_NESTED_SHELL_DEPTH: usize = 4;
+const MAX_COMMAND_BYTES: usize = 2 * 1024 * 1024;
+const MAX_SCAN_WORK: usize = 8 * 1024 * 1024;
+
+struct ScanBudget {
+    remaining: usize,
+}
+
+impl ScanBudget {
+    fn reserve(&mut self, bytes: usize) -> bool {
+        match self.remaining.checked_sub(bytes) {
+            Some(remaining) => {
+                self.remaining = remaining;
+                true
+            }
+            None => false,
+        }
+    }
+}
 
 /// Detect a command that would permanently remove a file or directory.
 ///
@@ -18,8 +36,14 @@ const MAX_NESTED_SHELL_DEPTH: usize = 4;
 /// false negative could remove user data. Unknown shell syntax is not decoded,
 /// but common literal nested wrappers are recursively inspected.
 pub fn detect_command(command: &str) -> Option<&'static str> {
+    if command.len() > MAX_COMMAND_BYTES {
+        return Some("scan_work_limit");
+    }
+    let mut budget = ScanBudget {
+        remaining: MAX_SCAN_WORK,
+    };
     for segment in split_shell_segments(command) {
-        if let Some(rule) = detect_segment(&segment, 0) {
+        if let Some(rule) = detect_segment(&segment, 0, &mut budget) {
             return Some(rule);
         }
     }
@@ -136,7 +160,10 @@ fn split_shell_segments(command: &str) -> Vec<String> {
     }
 }
 
-fn detect_segment(segment: &str, depth: usize) -> Option<&'static str> {
+fn detect_segment(segment: &str, depth: usize, budget: &mut ScanBudget) -> Option<&'static str> {
+    if !budget.reserve(segment.len()) {
+        return Some("scan_work_limit");
+    }
     let words = match shell_words::split(segment) {
         Ok(words) => words,
         Err(_) => return detect_unparsed_command(segment),
@@ -145,8 +172,27 @@ fn detect_segment(segment: &str, depth: usize) -> Option<&'static str> {
         return None;
     }
 
+    // Charge every potential suffix scan in O(1), including token bytes and
+    // comparisons. The budget is shared across segments and nested wrappers;
+    // it cannot be reset by repeatedly quoting the same large script.
+    let mut suffix_work = vec![0usize; words.len() + 1];
+    for index in (0..words.len()).rev() {
+        suffix_work[index] = suffix_work[index + 1] + words[index].len() + 1;
+    }
+
     for (index, word) in words.iter().enumerate() {
         let base = executable_basename(word);
+        if matches!(base.as_str(), "find" | "rsync" | "git")
+            || (depth < MAX_NESTED_SHELL_DEPTH
+                && matches!(
+                    base.as_str(),
+                    "bash" | "sh" | "zsh" | "ksh" | "dash" | "cmd" | "powershell" | "pwsh"
+                ))
+        {
+            if !budget.reserve(suffix_work[index + 1]) {
+                return Some("scan_work_limit");
+            }
+        }
         match base.as_str() {
             "rm" | "unlink" | "rmdir" | "shred" | "del" | "erase" | "rd" => {
                 return Some("direct_delete_command");
@@ -184,7 +230,7 @@ fn detect_segment(segment: &str, depth: usize) -> Option<&'static str> {
                 if script.contains('$') || script.contains('`') {
                     return Some("dynamic_shell_wrapper");
                 }
-                if let Some(rule) = detect_segment(script, depth + 1) {
+                if let Some(rule) = detect_segment(script, depth + 1, budget) {
                     return Some(rule);
                 }
             }
@@ -217,10 +263,9 @@ fn nested_shell_script<'a>(words: &'a [String], index: usize, base: &str) -> Opt
         if is_cmd_shell {
             matches!(word.as_str(), "/c" | "/k")
         } else if is_powershell {
-            matches!(
-                word.to_ascii_lowercase().as_str(),
-                "-command" | "-c" | "-encodedcommand"
-            )
+            word.eq_ignore_ascii_case("-command")
+                || word.eq_ignore_ascii_case("-c")
+                || word.eq_ignore_ascii_case("-encodedcommand")
         } else {
             word.starts_with('-') && word.contains('c')
         }
@@ -411,6 +456,53 @@ fn deletion_api_patterns() -> &'static [(&'static str, Regex)] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_suffix_scans_fail_closed_for_every_command_family() {
+        for word in ["pwsh", "PoWeRsHeLl", "bash", "cmd", "find", "rsync", "git"] {
+            let count = 200_000.min((MAX_COMMAND_BYTES - 4) / (word.len() + 1));
+            let command = format!("// {}", format!("{word} ").repeat(count));
+            assert!(command.len() < MAX_COMMAND_BYTES);
+            assert_eq!(detect_command(&command), Some("scan_work_limit"), "{word}");
+        }
+        let command = format!("git {}status", "-C git ".repeat(100_000));
+        assert_eq!(detect_command(&command), Some("scan_work_limit"));
+    }
+
+    #[test]
+    fn large_ordinary_scripts_and_recoverable_controls_remain_allowed() {
+        let script = format!("// {}\nconsole.info('ready');", "ordinary ".repeat(200_000));
+        assert_eq!(detect_command(&script), None);
+        assert_eq!(
+            detect_command("pwsh -NoProfile -COMMAND 'Write-Output ready'"),
+            None
+        );
+        assert_eq!(detect_command("git -C project status"), None);
+        assert_eq!(detect_command("gio trash /tmp/owned-fixture"), None);
+        assert_eq!(
+            detect_command("bash -c 'gio trash /tmp/owned-fixture'"),
+            None
+        );
+        assert_eq!(
+            detect_command(&"x".repeat(MAX_COMMAND_BYTES + 1)),
+            Some("scan_work_limit")
+        );
+    }
+
+    #[test]
+    fn nested_and_compound_commands_share_the_work_budget() {
+        let mut budget = ScanBudget { remaining: 10 };
+        assert_eq!(detect_segment("echo ok", 0, &mut budget), None);
+        assert_eq!(
+            detect_segment("echo ok", 0, &mut budget),
+            Some("scan_work_limit")
+        );
+        let mut budget = ScanBudget { remaining: 26 };
+        assert_eq!(
+            detect_segment("bash -c 'echo ok'", 0, &mut budget),
+            Some("scan_work_limit")
+        );
+    }
 
     #[test]
     fn direct_deletion_commands_are_detected() {

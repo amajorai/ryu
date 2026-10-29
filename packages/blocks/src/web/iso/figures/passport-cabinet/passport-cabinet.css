@@ -1,0 +1,9 @@
+/*
+ * Passport cabinet figure. The shared quiet tokens (../shared/quiet.css) set the look;
+ * the one accent is the taken key and its empty box.
+ */
+
+.ppc-live {
+	-webkit-tap-highlight-color: transparent;
+	user-select: none;
+}

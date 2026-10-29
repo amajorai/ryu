@@ -1,241 +1,236 @@
 "use client";
 
 import { useLocalizedText } from "@ryu/i18n/react";
-import { Logo } from "@ryu/ui/components/logo.tsx";
+import { Heart } from "lucide-react";
 import type { ReactNode } from "react";
-
-import Aurora from "./aurora.tsx";
+import { BackToTop } from "./back-to-top.tsx";
+import { DOCS_URL } from "./data/resources.tsx";
 import FooterBuildInfo from "./footer-build-info.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
-import "./footer.css";
+
+const footerContainerClass = "w-full px-6 md:px-10 lg:px-16";
+const legalLinkClass =
+	"inline-flex min-h-10 items-center transition-colors hover:text-foreground sm:min-h-0";
 
 // Cache Components requires client prerenders to be deterministic.
 const COPYRIGHT_YEAR = 2026;
+
+interface FooterLink {
+	external?: boolean;
+	href: string;
+	label: string;
+}
+
+/* Link columns follow the header's product taxonomy. Each href appears once;
+ * Contact stays in the legal row below. Products lists released products only
+ * (early-access ones stay reachable from /products); Platform leads with the
+ * infrastructure and ends with the managed services. */
+export const FOOTER_COLUMNS: readonly {
+	links: readonly FooterLink[];
+	title: string;
+}[] = [
+	{
+		title: "Products",
+		links: [
+			{ href: "/products/desktop", label: "Ryu Desktop" },
+			{ href: "/bot", label: "Bot" },
+			{ href: "/agent", label: "Agent" },
+			{ href: "/marketplace", label: "Marketplace" },
+			{ href: "/products", label: "All products" },
+		],
+	},
+	{
+		title: "Platform",
+		links: [
+			{ href: "/products/core", label: "Ryu Core" },
+			{ href: "/products/gateway", label: "Ryu Gateway" },
+			{ href: "/products/cloud", label: "Ryu Cloud" },
+			{
+				href: "/products/agents-as-a-service",
+				label: "Agents as a Service",
+			},
+			{ href: "/products/red-team", label: "Red Teaming" },
+		],
+	},
+	{
+		title: "Resources",
+		links: [
+			{ href: DOCS_URL, label: "Docs", external: true },
+			{ href: "/academy", label: "Academy" },
+			{ href: "/guides", label: "Guides" },
+			{ href: "/changelog", label: "Changelog" },
+			{ href: "/help", label: "Help Center" },
+			{ href: "/platform#infra", label: "Self-hosted" },
+		],
+	},
+	{
+		title: "Company",
+		links: [
+			{ href: "/enterprise", label: "Enterprise" },
+			{ href: "/security", label: "Security" },
+			{ href: "/partners", label: "Partners" },
+			{ href: "/blog", label: "Blog" },
+		],
+	},
+	{
+		title: "Get started",
+		links: [
+			{ href: "/download", label: "Download" },
+			{ href: "/pricing", label: "Pricing" },
+			{ href: "/compare", label: "Compare" },
+			{ href: "/subscriptions", label: "Bring your subscription" },
+			{ href: "/login", label: "Sign in" },
+		],
+	},
+];
+
+const PRODUCT_PAGE_HREF = /^\/products\/([^/?#]+)$/u;
+const NO_HIDDEN_PRODUCTS: readonly string[] = [];
+
+/**
+ * `FOOTER_COLUMNS` without the product pages in `hiddenProductIds` (the host's
+ * closed or unlaunched product slugs, the list the header hides). A column
+ * left empty is dropped; the shared column data is never edited.
+ */
+export function footerColumnsFor(hiddenProductIds: readonly string[] = []) {
+	const hidden = new Set(hiddenProductIds);
+	return FOOTER_COLUMNS.flatMap((column) => {
+		const links = column.links.filter(
+			(link) => !hidden.has(PRODUCT_PAGE_HREF.exec(link.href)?.[1] ?? "")
+		);
+		return links.length > 0 ? [{ ...column, links }] : [];
+	});
+}
 
 function LocalizedFooterCopy({ value }: { value: string }) {
 	return <>{useLocalizedText(value, { literal: true })}</>;
 }
 
 export default function Footer({
+	cookieSettings,
 	githubStargazersCount,
+	hiddenProductIds = NO_HIDDEN_PRODUCTS,
 	languagePicker,
 	soundToggle,
 }: {
+	cookieSettings?: ReactNode;
 	githubStargazersCount?: number | null;
+	/** Product slugs the host has not rolled out; their links are left out. */
+	hiddenProductIds?: readonly string[];
 	languagePicker?: ReactNode;
 	soundToggle?: ReactNode;
 }) {
 	const localizedHeroTitle = useLocalizedText(
-		"The universal AI integration layer",
-		{ literal: true }
-	);
-	const localizedHeroDescription = useLocalizedText(
-		"We deploy and keep your agents running for you. Connect the tools it needs and integrate where you want it to run.",
+		"Run agents with the tools and rules they need.",
 		{ literal: true }
 	);
 	return (
-		<footer className="relative overflow-x-clip pt-16">
-			{/* Content sits above the Aurora and outline mark and stays on shared surfaces. */}
-			<div className="container relative z-10 mx-auto px-4">
-				{/* Two column links */}
-				<div className="mb-12 grid grid-cols-1 gap-12 md:grid-cols-2">
-					<div className="space-y-4">
-						<h3 className="font-medium text-2xl">{localizedHeroTitle}</h3>
-						<p className="max-w-md text-muted-foreground">
-							{localizedHeroDescription}
+		<footer className="pt-8 pb-16 md:pt-16">
+			{/* Full-bleed shell: the link columns spread across the whole viewport. */}
+			<div className={footerContainerClass}>
+				{/* Positioning line, then the link columns */}
+				<div className="mb-12 grid grid-cols-1 gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+					<div className="hidden lg:block">
+						{/* A tagline, not a heading. The column titles below are h3, one
+						    step under the page's h2 sections; they were h4 under this
+						    line, which is hidden below lg, so mobile skipped a level. */}
+						<p className="max-w-sm text-balance font-medium text-2xl">
+							{localizedHeroTitle}
 						</p>
 					</div>
 
-					<div className="grid grid-cols-2 gap-x-8 gap-y-8 sm:grid-cols-3 sm:gap-x-12 lg:gap-x-16">
-						<div>
-							<h4 className="mb-4 font-medium">
-								<LocalizedFooterCopy value="Platform" />
-							</h4>
-							<div className="space-y-2">
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/products/sdk"
-								>
-									<LocalizedFooterCopy value="SDK" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/products/core"
-								>
-									<LocalizedFooterCopy value="Core" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/products/gateway"
-								>
-									<LocalizedFooterCopy value="Gateway" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/products/apps"
-								>
-									<LocalizedFooterCopy value="Ryu Apps" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/platform#infra"
-								>
-									<LocalizedFooterCopy value="Ryu Infra" />
-								</a>
-							</div>
-						</div>
-
-						<div>
-							<h4 className="mb-4 font-medium">
-								<LocalizedFooterCopy value="Learn" />
-							</h4>
-							<div className="space-y-2">
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/academy"
-								>
-									<LocalizedFooterCopy value="Academy" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/certifications"
-								>
-									<LocalizedFooterCopy value="Certifications" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/products/cli"
-								>
-									<LocalizedFooterCopy value="CLI" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/products/sdk"
-								>
-									<LocalizedFooterCopy value="SDK" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/products/mcp"
-								>
-									<LocalizedFooterCopy value="MCP" />
-								</a>
-							</div>
-						</div>
-
-						<div>
-							<h4 className="mb-4 font-medium">
-								<LocalizedFooterCopy value="Company" />
-							</h4>
-							<div className="space-y-2">
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/for/agent-operators"
-								>
-									<LocalizedFooterCopy value="AI operators" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/startups"
-								>
-									<LocalizedFooterCopy value="Programs" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/security"
-								>
-									<LocalizedFooterCopy value="Security" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/partners"
-								>
-									<LocalizedFooterCopy value="Partners" />
-								</a>
-								<a
-									className="block text-muted-foreground transition-colors hover:text-foreground"
-									href="/perks"
-								>
-									<LocalizedFooterCopy value="Perks" />
-								</a>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				{/* Horizontal links + copyright */}
-				<div className="mt-32 space-y-4 text-center">
-					<FooterBuildInfo githubStargazersCount={githubStargazersCount} />
-					<div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-muted-foreground text-sm">
-						<ThemeToggle />
-						{soundToggle}
-						{languagePicker}
-						<a
-							className="transition-colors hover:text-foreground"
-							href="/privacy"
-						>
-							<LocalizedFooterCopy value="Privacy" />
-						</a>
-						<a
-							className="transition-colors hover:text-foreground"
-							href="/terms"
-						>
-							<LocalizedFooterCopy value="Terms" />
-						</a>
-						<a
-							className="transition-colors hover:text-foreground"
-							href="/contact"
-						>
-							<LocalizedFooterCopy value="Contact" />
-						</a>
-						<a className="transition-colors hover:text-foreground" href="/dpa">
-							<span className="hidden lg:block">
-								<LocalizedFooterCopy value="Data Processing Agreement" />
-							</span>
-							<span className="block lg:hidden">
-								<LocalizedFooterCopy value="DPA" />
-							</span>
-						</a>
-					</div>
-
-					<p
-						className="pb-20 text-muted-foreground text-sm"
-						itemScope
-						itemType="https://schema.org/Organization"
+					<nav
+						aria-label="Footer"
+						className="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3 lg:grid-cols-5"
 					>
-						© {COPYRIGHT_YEAR} <span itemProp="name">A Major Pte. Ltd.</span>,{" "}
-						<span itemProp="location">Singapore</span>. <br />
-						(UEN: <span itemProp="taxID">202616096G</span>)
-						<meta content="2026-04-12" itemProp="foundingDate" />
-						<meta content="https://amajor.ai" itemProp="url" />
-						<meta
-							content="A Major is a Singapore-based software agency specialising in web design, software development, and digital solutions for businesses."
-							itemProp="description"
-						/>
-					</p>
+						{footerColumnsFor(hiddenProductIds).map((column) => (
+							<div key={column.title}>
+								<h3 className="mb-4 font-medium">
+									<LocalizedFooterCopy value={column.title} />
+								</h3>
+								<div className="space-y-0">
+									{column.links.map((link) => (
+										<a
+											className="block py-2.5 text-muted-foreground text-sm transition-colors hover:text-foreground md:py-1.5"
+											href={link.href}
+											key={link.href}
+											rel={link.external ? "noopener noreferrer" : undefined}
+											target={link.external ? "_blank" : undefined}
+										>
+											<LocalizedFooterCopy value={link.label} />
+										</a>
+									))}
+								</div>
+							</div>
+						))}
+					</nav>
 				</div>
-			</div>
 
-			<div
-				aria-hidden="true"
-				className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[38rem] [mask-image:linear-gradient(to_top,black_72%,transparent)]"
-			>
-				<Aurora amplitude={0.2} blend={0.65} fan={0.65} speed={2.5} />
-			</div>
+				{/* Bottom bar: two balanced rows instead of a stacked left column.
+				    Row 1: legal links | display controls. Row 2: company | build + credit. */}
+				<div className="mt-16 flex flex-col gap-6 text-muted-foreground text-sm md:mt-24">
+					<div className="flex flex-col-reverse items-start justify-between gap-4 sm:flex-row sm:items-center">
+						<nav
+							aria-label="Legal"
+							className="flex flex-wrap items-center gap-x-6 gap-y-2"
+						>
+							<a className={legalLinkClass} href="/privacy">
+								<LocalizedFooterCopy value="Privacy" />
+							</a>
+							<a className={legalLinkClass} href="/terms">
+								<LocalizedFooterCopy value="Terms" />
+							</a>
+							<a className={legalLinkClass} href="/dpa">
+								<LocalizedFooterCopy value="DPA" />
+							</a>
+							<a className={legalLinkClass} href="/contact">
+								<LocalizedFooterCopy value="Contact" />
+							</a>
+							{cookieSettings}
+						</nav>
+						{/* The theme, sound and back-to-top buttons are outlined circles; the language
+						    trigger sizes to its label so the chevron sits beside it. */}
+						<div className="flex items-center gap-2 [&>button]:size-10 [&>button]:rounded-full [&>button]:border [&>button]:border-border sm:[&>button]:size-8 [&_[data-slot=select-trigger]]:w-auto [&_[data-slot=select-trigger]]:gap-1.5 [&_[data-slot=select-trigger]]:border [&_[data-slot=select-trigger]]:border-border">
+							{languagePicker}
+							{soundToggle}
+							<ThemeToggle />
+							<BackToTop />
+						</div>
+					</div>
 
-			{/* Giant Ryu outline — only the top half rises into view; the eyes track the cursor. */}
-			<div className="relative z-10 -mt-6 flex h-[clamp(10rem,20vw,16rem)] -translate-y-20 items-start justify-center overflow-hidden sm:translate-y-0">
-				<div
-					aria-hidden="true"
-					className="pointer-events-none origin-top -translate-x-16 scale-90 select-none text-foreground/15 sm:scale-110 md:scale-125 lg:scale-150"
-					data-testid="footer-ryu-logo"
-				>
-					<Logo
-						animated
-						className="footer-ryu-logo__mark"
-						size="360px"
-						variant="outline"
-					/>
+					<div className="flex flex-col items-start justify-between gap-3 text-xs sm:flex-row sm:items-center">
+						<p itemScope itemType="https://schema.org/Organization">
+							© {COPYRIGHT_YEAR} <span itemProp="name">A Major Pte. Ltd.</span>
+							<span className="hidden md:inline">
+								{" "}
+								· <span itemProp="location">Singapore</span> · UEN{" "}
+								<span itemProp="taxID">202616096G</span>
+							</span>
+							<meta content="2026-04-12" itemProp="foundingDate" />
+							<meta content="https://amajor.ai" itemProp="url" />
+							<meta
+								content="A Major is a Singapore-based software agency specialising in web design, software development, and digital solutions for businesses."
+								itemProp="description"
+							/>
+						</p>
+						<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+							{/* Below sm the GitHub and release links get a 40px tap target. */}
+							<div className="max-sm:[&_a[aria-label]]:min-w-10 max-sm:[&_a[aria-label]]:justify-center max-sm:[&_a]:inline-flex max-sm:[&_a]:min-h-10 max-sm:[&_a]:items-center">
+								<FooterBuildInfo
+									githubStargazersCount={githubStargazersCount}
+								/>
+							</div>
+							<span className="inline-flex items-center gap-1">
+								<LocalizedFooterCopy value="Designed with" />
+								<Heart
+									aria-label="love"
+									className="size-3 fill-red-400 text-red-400 dark:fill-red-400/90 dark:text-red-400/90"
+									role="img"
+								/>
+								<LocalizedFooterCopy value="& powered by Ryu" />
+							</span>
+						</div>
+					</div>
 				</div>
 			</div>
 		</footer>

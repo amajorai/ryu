@@ -1,7 +1,12 @@
 "use client";
 
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { AnimatePresence, motion, type Transition } from "motion/react";
+import {
+	AnimatePresence,
+	motion,
+	type TargetAndTransition,
+	type Transition,
+} from "motion/react";
 import {
 	Children,
 	type ComponentProps,
@@ -14,7 +19,6 @@ import {
 	type ReactNode,
 	type Ref,
 	type RefCallback,
-	type RefObject,
 	useCallback,
 	useContext,
 	useEffect,
@@ -23,6 +27,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { isNativeFunction } from "../lib/native-primitive-observation.ts";
 
 type HighlightMode = "children" | "parent";
 
@@ -31,6 +36,30 @@ interface Bounds {
 	left: number;
 	top: number;
 	width: number;
+}
+
+function isSameBounds(previous: Bounds | null, next: Bounds): boolean {
+	return (
+		previous !== null &&
+		previous.top === next.top &&
+		previous.left === next.left &&
+		previous.width === next.width &&
+		previous.height === next.height
+	);
+}
+
+/** Fade the highlight out on its own transition, held back by `exitDelay`. */
+function delayedFadeOut(
+	transition: Transition | undefined,
+	exitDelay: number
+): TargetAndTransition {
+	return {
+		opacity: 0,
+		transition: {
+			...transition,
+			delay: (transition?.delay ?? 0) + exitDelay,
+		},
+	};
 }
 
 interface HighlightContextType<T extends string> {
@@ -55,12 +84,14 @@ const HighlightContext = createContext<
 	HighlightContextType<string> | undefined
 >(undefined);
 
-function useHighlight<T extends string>(): HighlightContextType<T> {
+function useHighlight<T extends string = string>(): HighlightContextType<T> {
 	const context = useContext(HighlightContext);
 	if (!context) {
 		throw new Error("useHighlight must be used within a HighlightProvider");
 	}
-	return context as unknown as HighlightContextType<T>;
+	// SAFETY: Provider and consumer share the item identifier domain T; the non-generic React context erases only that identifier type.
+	const activeValue = context.activeValue as T | null;
+	return { ...context, activeValue };
 }
 
 interface BaseHighlightProps<T extends string> {
@@ -115,7 +146,7 @@ type UncontrolledChildrenModeHighlightProps<T extends string> =
 	};
 
 type HighlightProps<T extends string> = ComponentProps<"div"> &
-	(
+	ParentModeHighlightProps & { itemsClassName?: string } & (
 		| ControlledParentModeHighlightProps<T>
 		| ControlledChildrenModeHighlightProps<T>
 		| UncontrolledParentModeHighlightProps<T>
@@ -141,13 +172,14 @@ function Highlight<T extends string>({ ref, ...props }: HighlightProps<T>) {
 		boundsOffset = { top: 0, left: 0, width: 0, height: 0 },
 		containerClassName,
 		forceUpdateBounds,
-	} = props as ParentModeHighlightProps;
-	const { itemsClassName } = props as {
-		itemsClassName?: string;
-	};
+	} = props;
+	const { itemsClassName } = props;
 
 	const localRef = useRef<HTMLDivElement>(null);
-	useImperativeHandle(ref, () => localRef.current as HTMLDivElement);
+	useImperativeHandle<HTMLDivElement | null, HTMLDivElement | null>(
+		ref,
+		() => localRef.current
+	);
 
 	const [activeValue, setActiveValue] = useState<T | null>(
 		value ?? defaultValue ?? null
@@ -158,8 +190,10 @@ function Highlight<T extends string>({ ref, ...props }: HighlightProps<T>) {
 	function safeSetActiveValue(id: string | null) {
 		setActiveValue((prev) => {
 			if (prev !== id) {
+				// SAFETY: HighlightItem identifiers belong to the provider's T domain, which the non-generic React context erases.
 				onValueChange?.(id as T);
 			}
+			// SAFETY: The context forwards the provider's item identifier domain or null.
 			return prev === id ? prev : (id as T | null);
 		});
 	}
@@ -177,18 +211,9 @@ function Highlight<T extends string>({ ref, ...props }: HighlightProps<T>) {
 			height: bounds.height + (boundsOffset.height ?? 0),
 		};
 
-		setBoundsState((prev) => {
-			if (
-				prev &&
-				prev.top === newBounds.top &&
-				prev.left === newBounds.left &&
-				prev.width === newBounds.width &&
-				prev.height === newBounds.height
-			) {
-				return prev;
-			}
-			return newBounds;
-		});
+		setBoundsState((prev) =>
+			isSameBounds(prev, newBounds) ? prev : newBounds
+		);
 	}
 
 	function clearBounds() {
@@ -241,33 +266,15 @@ function Highlight<T extends string>({ ref, ...props }: HighlightProps<T>) {
 					<AnimatePresence initial={false}>
 						{boundsState && (
 							<motion.div
-								animate={{
-									top: boundsState.top,
-									left: boundsState.left,
-									width: boundsState.width,
-									height: boundsState.height,
-									opacity: 1,
-								}}
+								animate={{ ...boundsState, opacity: 1 }}
 								className={cn(
 									"absolute z-0 bg-muted",
 									className,
 									activeClassNameState
 								)}
 								data-slot="motion-highlight"
-								exit={{
-									opacity: 0,
-									transition: {
-										...transition,
-										delay: (transition?.delay ?? 0) + (exitDelay ?? 0),
-									},
-								}}
-								initial={{
-									top: boundsState.top,
-									left: boundsState.left,
-									width: boundsState.width,
-									height: boundsState.height,
-									opacity: 0,
-								}}
+								exit={delayedFadeOut(transition, exitDelay ?? 0)}
+								initial={{ ...boundsState, opacity: 0 }}
 								transition={transition}
 							/>
 						)}
@@ -305,13 +312,10 @@ function Highlight<T extends string>({ ref, ...props }: HighlightProps<T>) {
 					? render(children)
 					: render(
 							Children.map(children, (child, index) =>
-								isValidElement(child) ? (
+								isValidElement<{ id?: string }>(child) ? (
 									<HighlightItem
 										className={itemsClassName}
-										key={
-											(child as ReactElement<{ id?: string }>).props?.id ??
-											index
-										}
+										key={child.props?.id ?? index}
 									>
 										{child}
 									</HighlightItem>
@@ -325,30 +329,50 @@ function Highlight<T extends string>({ ref, ...props }: HighlightProps<T>) {
 	);
 }
 
+type HighlightDataAttributes = Pick<
+	ExtendedChildProps,
+	| "data-active"
+	| "data-disabled"
+	| "data-value"
+	| "data-highlight"
+	| "data-slot"
+	| "aria-selected"
+>;
 function getNonOverridingDataAttributes(
-	element: ReactElement,
-	dataAttributes: Record<string, unknown>
-): Record<string, unknown> {
-	return Object.keys(dataAttributes).reduce<Record<string, unknown>>(
-		(acc, key) => {
-			if ((element.props as Record<string, unknown>)[key] === undefined) {
-				acc[key] = dataAttributes[key];
-			}
-			return acc;
-		},
-		{}
-	);
+	element: ReactElement<ExtendedChildProps>,
+	dataAttributes: HighlightDataAttributes
+): HighlightDataAttributes {
+	const result: HighlightDataAttributes = {};
+	if (element.props["data-active"] === undefined) {
+		result["data-active"] = dataAttributes["data-active"];
+	}
+	if (element.props["data-disabled"] === undefined) {
+		result["data-disabled"] = dataAttributes["data-disabled"];
+	}
+	if (element.props["data-value"] === undefined) {
+		result["data-value"] = dataAttributes["data-value"];
+	}
+	if (element.props["data-highlight"] === undefined) {
+		result["data-highlight"] = dataAttributes["data-highlight"];
+	}
+	if (element.props["aria-selected"] === undefined) {
+		result["aria-selected"] = dataAttributes["aria-selected"];
+	}
+	if (element.props["data-slot"] === undefined) {
+		result["data-slot"] = dataAttributes["data-slot"];
+	}
+	return result;
 }
 
 function assignRef<T>(ref: Ref<T> | undefined, node: T | null) {
 	if (!ref) {
 		return;
 	}
-	if (typeof ref === "function") {
+	if (isNativeFunction(ref)) {
 		ref(node);
 		return;
 	}
-	(ref as RefObject<T | null>).current = node;
+	ref.current = node;
 }
 
 function useComposedRefs<T>(
@@ -434,13 +458,12 @@ function HighlightItem({
 	const itemTransition = transition ?? contextTransition;
 
 	const localRef = useRef<HTMLDivElement>(null);
-	useImperativeHandle(ref, () => localRef.current as HTMLDivElement);
-	const childRef = element?.props.ref;
-	const composedRef = useComposedRefs<HTMLElement>(
-		childRef,
-		localRef as RefObject<HTMLElement | null>,
-		ref as Ref<HTMLElement>
+	useImperativeHandle<HTMLDivElement | null, HTMLDivElement | null>(
+		ref,
+		() => localRef.current
 	);
+	const childRef = element?.props.ref;
+	const composedRef = useComposedRefs<HTMLElement>(childRef, localRef, ref);
 
 	useEffect(() => {
 		if (mode !== "parent") {
@@ -460,13 +483,7 @@ function HighlightItem({
 			const bounds = localRef.current.getBoundingClientRect();
 
 			if (shouldUpdateBounds) {
-				if (
-					previousBounds &&
-					previousBounds.top === bounds.top &&
-					previousBounds.left === bounds.left &&
-					previousBounds.width === bounds.width &&
-					previousBounds.height === bounds.height
-				) {
+				if (isSameBounds(previousBounds, bounds)) {
 					rafId = requestAnimationFrame(updateBounds);
 					return;
 				}
@@ -529,9 +546,33 @@ function HighlightItem({
 				},
 			};
 
+	// The children-mode backdrop; parent mode draws one shared backdrop instead.
+	const renderHighlight = () => (
+		<AnimatePresence initial={false}>
+			{isActive && !isDisabled && (
+				<motion.div
+					animate={{ opacity: 1 }}
+					className={cn(
+						"absolute inset-0 z-0 bg-muted",
+						contextClassName,
+						activeClassName
+					)}
+					data-slot="motion-highlight"
+					exit={delayedFadeOut(
+						itemTransition,
+						exitDelay ?? contextExitDelay ?? 0
+					)}
+					initial={{ opacity: 0 }}
+					layoutId={`transition-background-${contextId}`}
+					transition={itemTransition}
+					{...dataAttributes}
+				/>
+			)}
+		</AnimatePresence>
+	);
+
 	if (asChild) {
-		const { ref: _childRef, ...childProps } =
-			element.props as ExtendedChildProps;
+		const { ref: _childRef, ...childProps } = element.props;
 
 		if (mode === "children") {
 			return createElement(
@@ -549,32 +590,7 @@ function HighlightItem({
 					...props,
 				},
 				<>
-					<AnimatePresence initial={false}>
-						{isActive && !isDisabled && (
-							<motion.div
-								animate={{ opacity: 1 }}
-								className={cn(
-									"absolute inset-0 z-0 bg-muted",
-									contextClassName,
-									activeClassName
-								)}
-								data-slot="motion-highlight"
-								exit={{
-									opacity: 0,
-									transition: {
-										...itemTransition,
-										delay:
-											(itemTransition?.delay ?? 0) +
-											(exitDelay ?? contextExitDelay ?? 0),
-									},
-								}}
-								initial={{ opacity: 0 }}
-								layoutId={`transition-background-${contextId}`}
-								transition={itemTransition}
-								{...dataAttributes}
-							/>
-						)}
-					</AnimatePresence>
+					{renderHighlight()}
 
 					<div
 						className={cn("relative z-1", className)}
@@ -608,34 +624,7 @@ function HighlightItem({
 			{...props}
 			{...commonHandlers}
 		>
-			{mode === "children" && (
-				<AnimatePresence initial={false}>
-					{isActive && !isDisabled && (
-						<motion.div
-							animate={{ opacity: 1 }}
-							className={cn(
-								"absolute inset-0 z-0 bg-muted",
-								contextClassName,
-								activeClassName
-							)}
-							data-slot="motion-highlight"
-							exit={{
-								opacity: 0,
-								transition: {
-									...itemTransition,
-									delay:
-										(itemTransition?.delay ?? 0) +
-										(exitDelay ?? contextExitDelay ?? 0),
-								},
-							}}
-							initial={{ opacity: 0 }}
-							layoutId={`transition-background-${contextId}`}
-							transition={itemTransition}
-							{...dataAttributes}
-						/>
-					)}
-				</AnimatePresence>
-			)}
+			{mode === "children" && renderHighlight()}
 
 			{cloneElement(element, {
 				className: cn("relative z-1", element.props.className),

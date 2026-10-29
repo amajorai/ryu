@@ -7,6 +7,7 @@
 // actions are gated behind the master switch — flipping it off hides everything
 // immediately.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
@@ -31,6 +32,7 @@ import {
 } from "./shared/settings-items.tsx";
 
 export function DeveloperTab() {
+	const tl = useLiteralMessages();
 	const [devMode, setDevMode] = useDeveloperMode();
 	const [consoleActive, setConsoleActive] = useState(isConsoleCaptureActive);
 	const activeNode = useActiveNode();
@@ -56,7 +58,7 @@ export function DeveloperTab() {
 			// has to invalidate it or recording would not start until a reload.
 			refreshDevMetricsGate();
 			if (next && !isConsoleCaptureActive()) {
-				installConsoleCapture(true);
+				installConsoleCapture();
 				setConsoleActive(true);
 			}
 		},
@@ -191,7 +193,10 @@ export function DeveloperTab() {
 			    because there is no isolated data folder for it to act on. */}
 			{midnightWipe.status?.supported ? (
 				<SettingsSection
-					caption={`Returns this ${channelLabel(midnightWipe.status.profile)} build to a just-installed state on the first launch of each day, so first-run and onboarding paths get exercised the way a new user meets them. Off by default, stored outside the folder it clears, and it never touches your stable install.`}
+					caption={tl(
+						"Returns this {channel} build to a just-installed state on the first launch of each day, so first-run and onboarding paths get exercised the way a new user meets them. Off by default, stored outside the folder it clears, and it never touches your stable install.",
+						{ channel: channelLabel(midnightWipe.status.profile) }
+					)}
 					title="Daily data reset"
 				>
 					<SettingsGroup>
@@ -215,7 +220,15 @@ export function DeveloperTab() {
 									}}
 								/>
 							}
-							description={`Deletes everything in ${midnightWipe.status.data_dir} (chats, agents, spaces, installed apps and downloads) at the first launch after midnight. Your encryption key survives so the node still boots, and several missed days still clear it exactly once.${midnightWipe.status.last_wipe_date ? ` Last cleared ${midnightWipe.status.last_wipe_date}.` : ""}`}
+							description={
+								tl(
+									"Deletes everything in {dataDir} (chats, agents, spaces, installed apps and downloads) at the first launch after midnight. Your encryption key survives so the node still boots, and several missed days still clear it exactly once.",
+									{ dataDir: midnightWipe.status.data_dir }
+								) +
+								(midnightWipe.status.last_wipe_date
+									? ` ${tl("Last cleared {date}.", { date: midnightWipe.status.last_wipe_date })}`
+									: "")
+							}
 							title="Wipe this data folder at midnight"
 						/>
 						{midnightWipe.error ? (

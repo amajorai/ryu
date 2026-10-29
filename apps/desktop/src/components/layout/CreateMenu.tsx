@@ -1,3 +1,5 @@
+import { cn } from "@ryu/ui/lib/utils.ts";
+import layoutStyles from "./CreateMenu.module.css";
 // apps/desktop/src/components/layout/CreateMenu.tsx
 //
 // The sidebar-footer "+" create menu. The trigger IS the panel: a 28px circle
@@ -34,6 +36,11 @@ import {
 	type CreateMenuAction,
 	useContributedCreateActions,
 } from "./contributed-create-actions.ts";
+
+interface CreateMorphStyle extends CSSProperties {
+	"--morph-open-h": string;
+	"--morph-open-w": string;
+}
 
 // The open box has to be declared, not measured: `.t-morph` animates width and
 // height, and a ResizeObserver feeding those back never settles (the hazard the
@@ -78,7 +85,11 @@ export function CreateMenu() {
 			return;
 		}
 		const onPointerDown = (e: PointerEvent) => {
-			if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+			if (
+				rootRef.current &&
+				e.target instanceof Node &&
+				!rootRef.current.contains(e.target)
+			) {
 				setOpen(false);
 			}
 		};
@@ -135,10 +146,11 @@ export function CreateMenu() {
 	];
 
 	const items = [...builtIns, ...contributed];
-	const morphVars = {
-		"--morph-open-w": `${MORPH_OPEN_W}px`,
-		"--morph-open-h": `${items.length * ROW_H + PANEL_PAD * 2}px`,
-	} as CSSProperties;
+	const morphVars =
+		/* SAFETY: ReactDOM forwards these exact custom properties with style.setProperty; the complete CreateMorphStyle producer checks all standard CSS fields and app slots, which React CSSProperties omits. */ {
+			"--morph-open-w": `${MORPH_OPEN_W}px`,
+			"--morph-open-h": `${items.length * ROW_H + PANEL_PAD * 2}px`,
+		} satisfies CreateMorphStyle as CSSProperties;
 
 	return (
 		<>
@@ -177,13 +189,15 @@ export function CreateMenu() {
 						    the rows sit still while the box grows past them instead of
 						    travelling with its top-left corner. */}
 						<div
-							className="t-morph-menu absolute right-0 bottom-0 flex flex-col justify-start rounded-[20px] border border-border bg-popover p-2 text-popover-foreground"
+							className={cn(
+								cn(
+									"t-morph-menu absolute right-0 bottom-0 flex flex-col justify-start border border-border bg-popover p-2 text-popover-foreground",
+									layoutStyles.authored1
+								),
+								layoutStyles.inline2
+							)}
 							id={panelId}
 							inert={!open}
-							style={{
-								width: "var(--morph-open-w)",
-								height: "var(--morph-open-h)",
-							}}
 						>
 							{items.map((item) => (
 								<button

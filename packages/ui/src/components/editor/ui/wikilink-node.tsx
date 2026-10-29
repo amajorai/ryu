@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type DocLinkItem,
 	getDocLinkProvider,
@@ -133,6 +134,7 @@ export function WikiLinkInputElement(
 		editor.tf.move({ unit: "offset" });
 	};
 
+	const tl = useLiteralMessages();
 	const query = search.trim();
 	const hasExact = items.some(
 		(item) => item.title.toLowerCase() === query.toLowerCase()
@@ -171,7 +173,7 @@ export function WikiLinkInputElement(
 								onClick={() => insertWiki(query)}
 								value={query}
 							>
-								{`Create "${query}"`}
+								{tl('Create "{query}"', { query })}
 							</InlineComboboxItem>
 						) : null}
 					</InlineComboboxGroup>

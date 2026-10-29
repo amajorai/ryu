@@ -4,6 +4,8 @@
 //! delimited text is mapped directly into the database grid schema. Composio imports
 //! are intentionally read-only: the action is catalog-verified and screened before
 //! execution, then its result follows the same page/database creation path.
+//! Connector imports ([`connectors`]) read Notion, Google Drive, Confluence, GitHub,
+//! and web URLs natively with a vault-held credential and feed the same pipeline.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -26,6 +28,11 @@ use serde_json::{json, Map, Value};
 
 use super::ServerState;
 
+mod connectors;
+mod html_markdown;
+#[cfg(test)]
+mod routes_test;
+
 const MAX_ARCHIVE_ENTRIES: usize = 1_000;
 const MAX_ARCHIVE_EXPANDED_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_DATABASE_ROWS: usize = 25_000;
@@ -40,6 +47,7 @@ pub(super) fn routes() -> Router<ServerState> {
             super::uploads::SPACE_FILE_BODY_LIMIT.apply(post(import_file)),
         )
         .route("/api/spaces/:id/imports/composio", post(import_composio))
+        .route("/api/spaces/:id/imports/connector", post(import_connector))
 }
 
 #[derive(Debug, Deserialize)]
@@ -271,6 +279,107 @@ async fn import_composio(
     (StatusCode::ACCEPTED, Json(json!({ "import": record }))).into_response()
 }
 
+/// `POST /api/spaces/:id/imports/connector` — import from Notion, Google Drive,
+/// Confluence, GitHub, or web URLs. The credential is a vault reference resolved
+/// for the caller before the job starts, so a missing or unreadable secret is a
+/// 400 here rather than a failed import later.
+async fn import_connector(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Path(space_id): Path<String>,
+    Json(body): Json<connectors::ConnectorImportBody>,
+) -> Response {
+    if let Err(response) = require_import_write(&state, &caller, &space_id).await {
+        return response;
+    }
+    let request = match connectors::validate(body) {
+        Ok(request) => request,
+        Err(error) => return super::json_error(StatusCode::BAD_REQUEST, error),
+    };
+    let credential = match request.credential_ref.as_deref() {
+        Some(reference) => match connectors::resolve_credential(caller.as_ref(), reference).await {
+            Ok(credential) => Some(credential),
+            Err(error) => return super::json_error(StatusCode::BAD_REQUEST, error),
+        },
+        None => None,
+    };
+    let record = match state
+        .spaces
+        .create_import_record(
+            &space_id,
+            "connector",
+            &request.label,
+            request.provider.as_str(),
+            "auto",
+            0,
+        )
+        .await
+    {
+        Ok(record) => record,
+        Err(error) => {
+            return super::json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+        }
+    };
+    let import_id = record.id.clone();
+    let owner = super::spaces::owner_of(&super::caller_tenancy(&caller));
+    tokio::spawn(async move {
+        run_connector_import(state, space_id, import_id, request, credential, owner).await;
+    });
+    (StatusCode::ACCEPTED, Json(json!({ "import": record }))).into_response()
+}
+
+async fn run_connector_import(
+    state: ServerState,
+    space_id: String,
+    import_id: String,
+    request: connectors::ConnectorRequest,
+    credential: Option<connectors::ConnectorCredential>,
+    owner: DocOwner,
+) {
+    if let Err(error) = state.spaces.start_import(&import_id).await {
+        tracing::warn!(import_id, "cannot start import: {error:#}");
+        return;
+    }
+    let fetched =
+        connectors::fetch_sources(&connectors::GuardedHttp, &request, credential.as_ref()).await;
+    let result = match fetched {
+        Ok(fetched) => {
+            let skipped = fetched.failures;
+            if fetched.sources.is_empty() {
+                Err(if skipped.is_empty() {
+                    "the connector returned nothing to import".to_owned()
+                } else {
+                    skipped.join("; ")
+                })
+            } else {
+                import_many(&state, &space_id, fetched.sources, &owner)
+                    .await
+                    .map_err(|error| {
+                        // Keep the fetch failures too: they are why fewer sources
+                        // reached the pipeline than the request named.
+                        if skipped.is_empty() {
+                            error
+                        } else {
+                            format!("{error}; {}", skipped.join("; "))
+                        }
+                    })
+                    .map(|(destination, documents, count, message)| {
+                        let message = match (message, skipped.is_empty()) {
+                            (message, true) => message,
+                            (Some(message), false) => {
+                                Some(format!("{message}; {}", skipped.join("; ")))
+                            }
+                            (None, false) => Some(format!("Skipped {}", skipped.join("; "))),
+                        };
+                        (destination, documents, count, message)
+                    })
+            }
+        }
+        Err(error) => Err(error),
+    };
+    finish_import(&state, &import_id, result).await;
+}
+
 async fn require_import_write(
     state: &ServerState,
     caller: &Option<crate::identity_verify::VerifiedCaller>,
@@ -331,7 +440,7 @@ async fn run_composio_import(
         tracing::warn!(import_id, "cannot start import: {error:#}");
         return;
     }
-    let result = match ryu_composio::execute::dispatch(
+    let result = match crate::sidecar::mcp::composio::dispatch(
         &state.client,
         &action,
         arguments,
@@ -339,26 +448,82 @@ async fn run_composio_import(
     )
     .await
     {
-        Ok(ryu_composio::execute::ExecOutcome::Ok(value)) => {
-            import_composio_value(
-                &state,
-                &space_id,
-                &title,
-                &requested_destination,
-                value,
-                &owner,
-            )
-            .await
+        Ok(output) => match composio_import_output(output) {
+            Ok(output) => {
+                // The action already executed. Accounting failure must not replay it
+                // or persist its transport envelope as imported content.
+                if let Err(error) = crate::sidecar::gateway::record_tool_charge(
+                    &state.client,
+                    None,
+                    user_id.as_deref(),
+                    None,
+                    1,
+                    output.billing.as_ref().and_then(|receipt| receipt.as_ref()),
+                    matches!(output.billing, Some(None)),
+                )
+                .await
+                {
+                    tracing::warn!(import_id, error = %error, "Space import Composio charge notification failed");
+                }
+                import_composio_value(
+                    &state,
+                    &space_id,
+                    &title,
+                    &requested_destination,
+                    output.data,
+                    &owner,
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        },
+        Err(error) => {
+            // Composio bills a failure it logged; charge that receipt and still
+            // fail the import with the same message.
+            if let Some(receipt) = ryu_composio::service::failed_execution_receipt(&error) {
+                if let Err(charge_error) = crate::sidecar::gateway::record_tool_charge(
+                    &state.client,
+                    None,
+                    user_id.as_deref(),
+                    None,
+                    1,
+                    Some(receipt),
+                    false,
+                )
+                .await
+                {
+                    tracing::warn!(import_id, error = %charge_error, "Space import Composio charge notification failed");
+                }
+            }
+            Err(error.to_string())
         }
-        Ok(ryu_composio::execute::ExecOutcome::NeedsConnection { message, url }) => {
-            let suffix = url
-                .map(|value| format!(" Connect: {value}"))
-                .unwrap_or_default();
-            Err(format!("{message}{suffix}"))
-        }
-        Err(error) => Err(error.to_string()),
     };
     finish_import(&state, &import_id, result).await;
+}
+
+struct ComposioImportOutput {
+    data: Value,
+    billing: Option<Option<ryu_composio::receipt::ComposioReceipt>>,
+}
+
+fn composio_import_output(mut output: Value) -> Result<ComposioImportOutput, String> {
+    let billing = crate::sidecar::mcp::composio::take_receipt(&mut output);
+    if let Some(elicitation) = output.get("__ryu_elicitation__") {
+        let message = elicitation
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("Composio connection required");
+        let suffix = elicitation
+            .get("url")
+            .and_then(Value::as_str)
+            .map(|url| format!(" Connect: {url}"))
+            .unwrap_or_default();
+        return Err(format!("{message}{suffix}"));
+    }
+    Ok(ComposioImportOutput {
+        data: output,
+        billing,
+    })
 }
 
 async fn finish_import(
@@ -447,7 +612,7 @@ async fn import_one(
     match import_kind(&source.name) {
         Some(ImportKind::Database) if is_delimited(&source.name) => {
             let delimiter = delimiter_for(&source.name, &source.bytes);
-            let rows = parse_delimited(&source.bytes, delimiter)?;
+            let (rows, row_count) = parse_delimited(&source.bytes, delimiter)?;
             let document = create_database_document(
                 state,
                 space_id,
@@ -456,7 +621,7 @@ async fn import_one(
                 owner,
             )
             .await?;
-            Ok((vec![document], document_row_count(&source.bytes, delimiter)))
+            Ok((vec![document], row_count))
         }
         Some(ImportKind::Database) => {
             let markdown = parse_document(state, source).await?;
@@ -534,6 +699,7 @@ async fn parse_document(state: &ServerState, source: &ImportSource) -> Result<St
                     return Ok(outcome.markdown);
                 }
             }
+            crate::document_parse::release_input(&job_id);
             Err("document conversion timed out".to_owned())
         }
     }
@@ -752,9 +918,12 @@ fn extract_archive(bytes: &[u8]) -> Result<Vec<ImportSource>, String> {
         if entry.is_dir() {
             continue;
         }
-        let path = entry
-            .enclosed_name()
-            .ok_or_else(|| format!("ZIP entry {} has an unsafe path", entry.name()))?;
+        let path = entry.enclosed_name().ok_or_else(|| {
+            format!(
+                "ZIP entry {} has an unsafe path",
+                String::from_utf8_lossy(entry.name_raw())
+            )
+        })?;
         let name = path.to_string_lossy().replace('\\', "/");
         if name.starts_with("__MACOSX/") || name.split('/').any(|part| part.starts_with('.')) {
             continue;
@@ -767,11 +936,21 @@ fn extract_archive(bytes: &[u8]) -> Result<Vec<ImportSource>, String> {
         }
         let mut contents = Vec::with_capacity(entry.size().min(8 * 1024 * 1024) as usize);
         let remaining = MAX_ARCHIVE_EXPANDED_BYTES.saturating_sub(total);
+        let entry_limit = if is_delimited(&name) {
+            remaining.min(super::uploads::MAX_UPLOAD_BYTES as u64)
+        } else {
+            remaining
+        };
         entry
             .by_ref()
-            .take(remaining.saturating_add(1))
+            .take(entry_limit.saturating_add(1))
             .read_to_end(&mut contents)
             .map_err(|error| error.to_string())?;
+        if is_delimited(&name) && contents.len() > super::uploads::MAX_UPLOAD_BYTES {
+            return Err(format!(
+                "delimited ZIP member {name} exceeds the upload size limit"
+            ));
+        }
         if contents.len() as u64 > remaining {
             return Err("expanded ZIP content is over the 256 MB limit".to_owned());
         }
@@ -812,7 +991,10 @@ fn detect_delimiter(bytes: &[u8]) -> u8 {
         .unwrap_or(b',')
 }
 
-fn parse_delimited(bytes: &[u8], delimiter: u8) -> Result<Vec<Vec<String>>, String> {
+fn parse_delimited(bytes: &[u8], delimiter: u8) -> Result<(Vec<Vec<String>>, usize), String> {
+    if bytes.len() > super::uploads::MAX_UPLOAD_BYTES {
+        return Err("delimited file exceeds the upload size limit".to_owned());
+    }
     let text = std::str::from_utf8(bytes)
         .map_err(|_| "delimited imports must use UTF-8 text".to_owned())?
         .trim_start_matches('\u{feff}');
@@ -820,53 +1002,96 @@ fn parse_delimited(bytes: &[u8], delimiter: u8) -> Result<Vec<Vec<String>>, Stri
     let mut row = Vec::new();
     let mut cell = String::new();
     let mut quoted = false;
+    let mut column_index = 0_usize;
+    let mut cell_has_content = false;
+    let mut row_nonblank = false;
+    let mut data_row_count = 0_usize;
     let mut chars = text.chars().peekable();
     while let Some(character) = chars.next() {
         if quoted {
             if character == '"' {
                 if chars.peek() == Some(&'"') {
                     chars.next();
-                    cell.push('"');
+                    row_nonblank = true;
+                    cell_has_content = true;
+                    if rows.len() <= MAX_DATABASE_ROWS && column_index < MAX_DATABASE_COLUMNS {
+                        cell.push('"');
+                    }
                 } else {
                     quoted = false;
                 }
             } else {
-                cell.push(character);
+                row_nonblank |= !character.is_whitespace();
+                cell_has_content = true;
+                if rows.len() <= MAX_DATABASE_ROWS && column_index < MAX_DATABASE_COLUMNS {
+                    cell.push(character);
+                }
             }
             continue;
         }
         match character {
-            '"' if cell.is_empty() => quoted = true,
+            '"' if !cell_has_content => quoted = true,
             value if value as u32 == delimiter as u32 => {
-                row.push(std::mem::take(&mut cell));
+                if rows.len() <= MAX_DATABASE_ROWS && column_index < MAX_DATABASE_COLUMNS {
+                    row.push(std::mem::take(&mut cell));
+                } else {
+                    cell.clear();
+                }
+                column_index += 1;
+                cell_has_content = false;
             }
             '\n' => {
-                row.push(std::mem::take(&mut cell));
-                rows.push(std::mem::take(&mut row));
+                if rows.len() <= MAX_DATABASE_ROWS && column_index < MAX_DATABASE_COLUMNS {
+                    row.push(std::mem::take(&mut cell));
+                } else {
+                    cell.clear();
+                }
+                if row_nonblank {
+                    if rows.is_empty() {
+                        rows.push(std::mem::take(&mut row));
+                    } else {
+                        data_row_count += 1;
+                        if rows.len() <= MAX_DATABASE_ROWS {
+                            rows.push(std::mem::take(&mut row));
+                        }
+                    }
+                }
+                row.clear();
+                column_index = 0;
+                cell_has_content = false;
+                row_nonblank = false;
             }
             '\r' if chars.peek() == Some(&'\n') => {}
-            value => cell.push(value),
+            value => {
+                row_nonblank |= !value.is_whitespace();
+                cell_has_content = true;
+                if rows.len() <= MAX_DATABASE_ROWS && column_index < MAX_DATABASE_COLUMNS {
+                    cell.push(value);
+                }
+            }
         }
     }
     if quoted {
         return Err("delimited file has an unclosed quoted field".to_owned());
     }
-    if !cell.is_empty() || !row.is_empty() {
-        row.push(cell);
-        rows.push(row);
+    if row_nonblank {
+        if rows.len() <= MAX_DATABASE_ROWS && column_index < MAX_DATABASE_COLUMNS {
+            row.push(cell);
+        }
+        if rows.is_empty() {
+            rows.push(row);
+        } else {
+            data_row_count += 1;
+            if rows.len() <= MAX_DATABASE_ROWS {
+                rows.push(row);
+            }
+        }
     }
-    rows.retain(|values| values.iter().any(|value| !value.trim().is_empty()));
     if rows.is_empty() {
         Err("delimited file is empty".to_owned())
     } else {
-        Ok(rows)
+        Ok((rows, data_row_count))
     }
-}
-
-fn document_row_count(bytes: &[u8], delimiter: u8) -> usize {
-    parse_delimited(bytes, delimiter)
-        .map(|rows| rows.len().saturating_sub(1))
-        .unwrap_or(0)
 }
 
 fn database_source(table: &[Vec<String>]) -> Result<String, String> {
@@ -1148,6 +1373,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn composio_import_unwraps_receipt_without_importing_billing_metadata() {
+        let receipt = ryu_composio::receipt::ComposioReceipt {
+            auth_config_id: None,
+            connected_account_id: None,
+            transaction_id: "execution_123".to_owned(),
+            usage: Default::default(),
+        };
+        let data = json!({"records": [{"title": "Imported page"}]});
+        let output = composio_import_output(crate::sidecar::mcp::composio::billing_envelope(
+            data.clone(),
+            Some(receipt.clone()),
+        ))
+        .unwrap_or_else(|error| panic!("expected executed data: {error}"));
+        assert_eq!(output.data, data);
+        assert_eq!(output.billing, Some(Some(receipt)));
+    }
+
+    #[test]
+    fn composio_import_preserves_unavailable_accounting_and_unmetered_data() {
+        let data = json!({"title": "Imported page"});
+        let metered = composio_import_output(crate::sidecar::mcp::composio::billing_envelope(
+            data.clone(),
+            None,
+        ))
+        .unwrap_or_else(|error| panic!("expected executed data: {error}"));
+        assert_eq!(metered.data, data);
+        assert_eq!(metered.billing, Some(None));
+        let unmetered = composio_import_output(data.clone())
+            .unwrap_or_else(|error| panic!("expected executed data: {error}"));
+        assert_eq!(unmetered.data, data);
+        assert_eq!(unmetered.billing, None);
+    }
+
+    #[test]
+    fn composio_import_connection_prompt_keeps_message_and_optional_url() {
+        for url in [None, Some("https://connect.example.test")] {
+            let elicitation = crate::tool_exec::Elicitation {
+                kind: "url".to_owned(),
+                message: "Connect your account".to_owned(),
+                url: url.map(str::to_owned),
+                requested_schema: None,
+            };
+            let expected = url
+                .map(|url| format!("Connect your account Connect: {url}"))
+                .unwrap_or_else(|| "Connect your account".to_owned());
+            let prompt = crate::identity::to_envelope(&elicitation);
+            // A registered service can wrap the prompt in unavailable-accounting
+            // metadata. Neither form represents an executed, chargeable action.
+            for output in [
+                prompt.clone(),
+                crate::sidecar::mcp::composio::billing_envelope(prompt, None),
+            ] {
+                assert_eq!(composio_import_output(output).err(), Some(expected.clone()));
+            }
+        }
+    }
+
+    #[test]
     fn recognizes_every_supported_import_family() {
         for name in [
             "a.txt", "a.md", "a.docx", "a.pdf", "a.html", "a.epub", "a.opml", "a.csv", "a.tsv",
@@ -1160,13 +1443,50 @@ mod tests {
 
     #[test]
     fn delimited_parser_handles_quotes_newlines_and_bom() {
-        let rows = parse_delimited(
+        let (rows, count) = parse_delimited(
             "\u{feff}name,note\r\nAda,\"one, two\"\r\nLin,\"line 1\nline 2\"".as_bytes(),
             b',',
         )
         .expect("valid csv");
+        assert_eq!(count, 2);
         assert_eq!(rows[1], ["Ada", "one, two"]);
         assert_eq!(rows[2][1], "line 1\nline 2");
+    }
+
+    #[test]
+    fn delimited_parser_caps_materialized_rows_and_columns_but_counts_all_data() {
+        let mut source = String::from("name,score\n");
+        for index in 0..=MAX_DATABASE_ROWS {
+            source.push_str(&format!("row-{index},1\n"));
+        }
+        let (rows, count) = parse_delimited(source.as_bytes(), b',').unwrap();
+        assert_eq!(rows.len(), MAX_DATABASE_ROWS + 1);
+        assert_eq!(count, MAX_DATABASE_ROWS + 1);
+        assert_eq!(
+            rows.last().unwrap()[0],
+            format!("row-{}", MAX_DATABASE_ROWS - 1)
+        );
+
+        let mut wide = vec![String::new(); MAX_DATABASE_COLUMNS + 1];
+        wide[MAX_DATABASE_COLUMNS] = "only-after-limit".to_owned();
+        let text = format!("name\n{}\n", wide.join(","));
+        let (rows, count) = parse_delimited(text.as_bytes(), b',').unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(rows[1].len(), MAX_DATABASE_COLUMNS);
+        assert!(rows[1].iter().all(String::is_empty));
+    }
+
+    #[test]
+    fn delimited_parser_validates_quotes_after_the_materialized_row_limit() {
+        let mut source = String::from("name\n");
+        for _ in 0..MAX_DATABASE_ROWS {
+            source.push_str("valid\n");
+        }
+        source.push_str("\"unfinished");
+        assert_eq!(
+            parse_delimited(source.as_bytes(), b',').unwrap_err(),
+            "delimited file has an unclosed quoted field"
+        );
     }
 
     #[test]

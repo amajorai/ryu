@@ -7,6 +7,7 @@ import VaultPage from "../../src/pages/VaultPage.tsx";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import "../../src/index.css";
 
+// SAFETY: Native Vite loadEnv publishes custom VITE_ values as dotenv/process-environment strings, with undefined for an absent key; this proof configuration does not override VITE_CORE_URL with a non-string define.
 const coreUrl =
 	(import.meta.env.VITE_CORE_URL as string | undefined) ??
 	"http://127.0.0.1:8980";

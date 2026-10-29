@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Main-process client for Ryu Core's marketplace catalog (skills + MCP).
 //
 // Like the rest of the Core client (services/core.ts), all HTTP runs here (the
@@ -22,7 +23,11 @@ import { withResponseDeadline } from "./response-deadline.ts";
 
 const PROBE_TIMEOUT_MS = 8000;
 
-function reasonFromError(error: unknown): string {
+const catalogFailureSchema = z
+	.union([z.instanceof(DOMException), z.instanceof(Error)])
+	.catch(new Error("unreachable"));
+
+function reasonFromError(error: z.infer<typeof catalogFailureSchema>): string {
 	if (error instanceof DOMException && error.name === "AbortError") {
 		return "timeout";
 	}
@@ -32,12 +37,23 @@ function reasonFromError(error: unknown): string {
 	return "unreachable";
 }
 
-interface SourceWire {
-	base_url?: string | null;
-	builtin?: boolean;
-	display_name: string;
-	id: string;
-}
+const sourceWireSchema = z.object({
+	base_url: z.string().nullable().optional(),
+	builtin: z.boolean().optional(),
+	display_name: z.string(),
+	id: z.string(),
+});
+type SourceWire = z.infer<typeof sourceWireSchema>;
+const catalogSourcesSchema = z.object({
+	active: z.string().optional(),
+	sources: z.array(sourceWireSchema).optional(),
+});
+const catalogInstallSchema = z.object({
+	success: z.boolean().optional(),
+	error: z.string().optional(),
+	result: z.json().optional(),
+	server: z.json().optional(),
+});
 
 function toSource(w: SourceWire): CatalogSource {
 	return {
@@ -62,10 +78,7 @@ export async function sources(
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as {
-					active?: string;
-					sources?: SourceWire[];
-				};
+				const data = catalogSourcesSchema.parse(await resp.json());
 				return {
 					available: true,
 					active: data.active ?? "",
@@ -74,7 +87,10 @@ export async function sources(
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(catalogFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -105,20 +121,27 @@ export async function selectSource(
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(catalogFailureSchema.parse(error)),
+		};
 	}
 }
 
 // ── Skills ─────────────────────────────────────────────────────────────────--
 
-interface SkillCardWire {
-	id: string;
-	installed?: boolean;
-	installs?: number;
-	name?: string;
-	slug?: string;
-	source?: string;
-}
+const skillCardSchema = z.object({
+	id: z.string(),
+	installed: z.boolean().optional(),
+	installs: z.number().optional(),
+	name: z.string().optional(),
+	slug: z.string().optional(),
+	source: z.string().optional(),
+});
+type SkillCardWire = z.infer<typeof skillCardSchema>;
+const skillCatalogSchema = z.object({
+	skills: z.array(skillCardSchema).optional(),
+});
 
 function skillToItem(w: SkillCardWire): CatalogItem {
 	const installs = w.installs ?? 0;
@@ -146,12 +169,15 @@ async function listSkills(query: string): Promise<CatalogListResult> {
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as { skills?: SkillCardWire[] };
+				const data = skillCatalogSchema.parse(await resp.json());
 				return { available: true, items: (data.skills ?? []).map(skillToItem) };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(catalogFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -167,33 +193,37 @@ async function installSkill(id: string): Promise<CatalogActionResult> {
 			},
 			PROBE_TIMEOUT_MS,
 			async (resp) => {
-				const data = (await resp.json().catch(() => ({}))) as {
-					success?: boolean;
-					error?: string;
-					result?: unknown;
-				};
+				const data = catalogInstallSchema.parse(
+					await resp.json().catch(() => ({}))
+				);
 				const ok = resp.ok && data.success !== false && Boolean(data.result);
 				return { available: true, ok, error: ok ? undefined : data.error };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(catalogFailureSchema.parse(error)),
+		};
 	}
 }
 
 // ── MCP ──────────────────────────────────────────────────────────────────────
 
-interface McpCardWire {
-	description?: string | null;
-	id: string;
-	name?: string;
-	transports?: string[];
-	version?: string | null;
-}
-
-interface McpServerWire {
-	name: string;
-}
+const mcpCardSchema = z.object({
+	description: z.string().nullable().optional(),
+	id: z.string(),
+	name: z.string().optional(),
+	transports: z.array(z.string()).optional(),
+	version: z.string().nullable().optional(),
+});
+type McpCardWire = z.infer<typeof mcpCardSchema>;
+const mcpCatalogSchema = z.object({
+	servers: z.array(mcpCardSchema).optional(),
+});
+const mcpServersSchema = z.object({
+	servers: z.array(z.object({ name: z.string() })).optional(),
+});
 
 /** Fetch the set of registered MCP server names (for installed-state derivation). */
 async function mcpServerNames(coreBaseUrl: string): Promise<Set<string>> {
@@ -209,7 +239,7 @@ async function mcpServerNames(coreBaseUrl: string): Promise<Set<string>> {
 				if (!resp.ok) {
 					return new Set();
 				}
-				const data = (await resp.json()) as { servers?: McpServerWire[] };
+				const data = mcpServersSchema.parse(await resp.json());
 				return new Set((data.servers ?? []).map((s) => s.name));
 			}
 		);
@@ -250,8 +280,7 @@ async function listMcp(query: string): Promise<CatalogListResult> {
 					ok: response.ok,
 					status: response.status,
 					servers: response.ok
-						? (((await response.json()) as { servers?: McpCardWire[] })
-								.servers ?? [])
+						? (mcpCatalogSchema.parse(await response.json()).servers ?? [])
 						: [],
 				})
 			),
@@ -265,7 +294,10 @@ async function listMcp(query: string): Promise<CatalogListResult> {
 			items: resp.servers.map((s) => mcpToItem(s, installed)),
 		};
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(catalogFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -281,17 +313,18 @@ async function installMcp(id: string): Promise<CatalogActionResult> {
 			},
 			PROBE_TIMEOUT_MS,
 			async (resp) => {
-				const data = (await resp.json().catch(() => ({}))) as {
-					success?: boolean;
-					error?: string;
-					server?: unknown;
-				};
+				const data = catalogInstallSchema.parse(
+					await resp.json().catch(() => ({}))
+				);
 				const ok = resp.ok && data.success !== false && Boolean(data.server);
 				return { available: true, ok, error: ok ? undefined : data.error };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(catalogFailureSchema.parse(error)),
+		};
 	}
 }
 

@@ -18,11 +18,15 @@ import { ChevronDown } from "lucide-react";
 import {
 	type ComponentProps,
 	type ComponentPropsWithoutRef,
-	type ElementType,
+	type ComponentType,
 	type ReactNode,
 	useEffect,
 	useState,
 } from "react";
+import {
+	isNativeBoolean,
+	isNativeText,
+} from "../../../lib/native-primitive-observation.ts";
 
 export function Toolbar({
 	className,
@@ -74,7 +78,7 @@ export function ToolbarSeparator({
 
 // From toggleVariants
 const toolbarButtonVariants = cva(
-	"inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium text-sm outline-none transition-[color,box-shadow] hover:bg-muted hover:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+	"corner-squircle inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium text-sm outline-none transition-[color,box-shadow] hover:bg-muted hover:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 	{
 		defaultVariants: {
 			size: "default",
@@ -97,7 +101,7 @@ const toolbarButtonVariants = cva(
 
 const dropdownArrowVariants = cva(
 	cn(
-		"inline-flex items-center justify-center rounded-r-md font-medium text-foreground text-sm transition-colors disabled:pointer-events-none disabled:opacity-50"
+		"corner-r-squircle inline-flex items-center justify-center rounded-r-md font-medium text-foreground text-sm transition-colors disabled:pointer-events-none disabled:opacity-50"
 	),
 	{
 		defaultVariants: {
@@ -146,7 +150,7 @@ export const ToolbarButton = withTooltip(function ToolbarButton({
 	// `nativeButton` dev check because the trigger expects a native button.
 	// Keeping a lone button lets the tooltip/dropdown trigger's `render` prop
 	// merge cleanly onto one real button element.
-	return typeof pressed === "boolean" ? (
+	return isNativeBoolean(pressed) ? (
 		<ToolbarPrimitive.Button
 			aria-pressed={pressed}
 			className={cn(
@@ -284,16 +288,23 @@ export function ToolbarToggleItem({
 	);
 }
 
-export function ToolbarGroup({ children, className }: ComponentProps<"div">) {
+export function ToolbarGroup({
+	children,
+	className,
+	wrap = false,
+}: ComponentProps<"div"> & { wrap?: boolean }) {
 	return (
 		<div
 			className={cn(
 				"group/toolbar-group",
 				"relative hidden has-[button]:flex",
+				wrap && "max-w-full",
 				className
 			)}
 		>
-			<div className="flex items-center">{children}</div>
+			<div className={cn("flex items-center", wrap && "flex-wrap")}>
+				{children}
+			</div>
 
 			<div className="group-last/toolbar-group:hidden! mx-1.5 py-0.5">
 				<Separator orientation="vertical" />
@@ -302,7 +313,7 @@ export function ToolbarGroup({ children, className }: ComponentProps<"div">) {
 	);
 }
 
-type TooltipProps<T extends ElementType> = {
+type TooltipProps = {
 	tooltip?: ReactNode;
 	tooltipContentProps?: Omit<
 		ComponentPropsWithoutRef<typeof TooltipContent>,
@@ -310,23 +321,27 @@ type TooltipProps<T extends ElementType> = {
 	>;
 	tooltipProps?: Omit<ComponentPropsWithoutRef<typeof Tooltip>, "children">;
 	tooltipTriggerProps?: ComponentPropsWithoutRef<typeof TooltipTrigger>;
-} & ComponentProps<T>;
+} & ToolbarButtonProps;
 
-function withTooltip<T extends ElementType>(Component: T) {
+function withTooltip(Component: ComponentType<ToolbarButtonProps>) {
 	return function ExtendComponent({
 		tooltip,
 		tooltipContentProps,
 		tooltipProps,
 		tooltipTriggerProps,
 		...props
-	}: TooltipProps<T>) {
+	}: TooltipProps) {
 		const [mounted, setMounted] = useState(false);
 
 		useEffect(() => {
 			setMounted(true);
 		}, []);
 
-		const component = <Component {...(props as ComponentProps<T>)} />;
+		const accessibleProps =
+			isNativeText(tooltip) && !("aria-label" in props)
+				? { ...props, "aria-label": tooltip }
+				: props;
+		const component = <Component {...accessibleProps} />;
 
 		if (tooltip && mounted) {
 			return (

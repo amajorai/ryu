@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 pub use ryu_storage::PluginStorage;
 
 fn default_db_path() -> PathBuf {
-    crate::paths::ryu_dir().join("plugin-storage.db")
+    crate::paths::db_path("plugin-storage.db")
 }
 
 /// Open (or create) the store at the default path (`~/.ryu/plugin-storage.db`).

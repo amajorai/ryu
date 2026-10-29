@@ -26,10 +26,8 @@
 //   - `mainBinaryName` — renaming the executable renames the updater artifacts
 //                        that `install_update_from_channel` (src-tauri/src/lib.rs)
 //                        and assemble-channel-feed.sh both address by name.
-//   - `identifier`     — a per-channel identifier would enable side-by-side
-//                        installs. That is a separate decision with its own data
-//                        migration; per-channel data dirs and ports already exist
-//                        (apps/core/src/profile.rs).
+// Profile builds also stamp a distinct identifier and deep-link scheme. Stable
+// retains the original identity and ryu://; other builds cannot claim it.
 //
 // ONE-TIME RENAME: the first build of a channel that runs this renames that
 // channel's bundle (`Ryu.app` → `Ryu (Nightly).app`, and the installer file name
@@ -57,6 +55,27 @@ const SOURCE_DIR = join(TAURI_DIR, "icons/channel");
 
 const APP_NAME = "Ryu";
 const STABLE = "stable";
+const PROFILE_SCHEMES = JSON.parse(
+	readFileSync(
+		join(REPO, "packages/protocol/src/deep-link-profiles.json"),
+		"utf8"
+	)
+);
+
+export function applyProfileIdentity(config, channel) {
+	const profile = channel === STABLE ? "release" : channel;
+	if (!Object.hasOwn(PROFILE_SCHEMES, profile)) {
+		throw new Error(`Unsupported desktop profile: ${profile}`);
+	}
+	config.identifier =
+		profile === "release"
+			? "ai.amajor.ryu.desktop"
+			: `ai.amajor.ryu.desktop.${profile}`;
+	config.plugins ??= {};
+	config.plugins["deep-link"] ??= {};
+	config.plugins["deep-link"].desktop = { schemes: [PROFILE_SCHEMES[profile]] };
+	return config;
+}
 
 const die = (msg) => {
 	process.stderr.write(`channel-brand: ${msg}\n`);
@@ -299,6 +318,7 @@ function buildIconSet(channel) {
 
 function stamp(channel, table, configPath) {
 	const config = JSON.parse(readFileSync(configPath, "utf8"));
+	applyProfileIdentity(config, channel);
 	const name = `${APP_NAME} (${labelFor(channel, table)})`;
 	config.productName = name;
 	if (config.app?.windows?.[0]) {

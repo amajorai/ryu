@@ -9,7 +9,7 @@
 //! Effective permissions for a member are the built-in set of their Better Auth
 //! role (mapped via [`OrgRole::from_ba_str`]) UNION every permission granted by a
 //! custom role assigned to them in the org. Core resolves the custom-role slice
-//! by asking the control plane ([`crate::sidecar::control_plane::resolve_permissions`]);
+//! by asking the control plane ([`crate::sidecar::control_plane::resolve_permission_context`]);
 //! the built-in tier here is the fail-closed fallback when that lookup fails.
 
 use std::collections::HashSet;
@@ -38,6 +38,8 @@ pub const NOTIFICATIONS_VIEW: &str = "notifications.view";
 pub const NOTIFICATIONS_MANAGE: &str = "notifications.manage";
 pub const MAIL_READ: &str = "mail.read";
 pub const MAIL_MANAGE: &str = "mail.manage";
+pub const MESSAGING_READ: &str = "messaging.read";
+pub const MESSAGING_MANAGE: &str = "messaging.manage";
 pub const TEAMS_MANAGE: &str = "teams.manage";
 pub const PROJECTS_MANAGE: &str = "projects.manage";
 pub const REGISTRY_MANAGE: &str = "registry.manage";
@@ -48,6 +50,11 @@ pub const ROLES_MANAGE: &str = "roles.manage";
 pub const FEATURES_MANAGE: &str = "features.manage";
 pub const BILLING_MANAGE: &str = "billing.manage";
 pub const AUDIT_VIEW: &str = "audit.view";
+/// Organization sign-in and access policy (IP allowlist, required two-factor,
+/// session lifetime) and SSO/SCIM identity configuration.
+pub const ACCESS_MANAGE: &str = "access.manage";
+/// Organization data controls: retention horizons and SIEM audit export.
+pub const DATA_MANAGE: &str = "data.manage";
 pub const APP_INSTALL: &str = "app.install";
 pub const APP_UPDATE: &str = "app.update";
 pub const APP_ENABLE: &str = "app.enable";
@@ -56,6 +63,12 @@ pub const APP_UNINSTALL: &str = "app.uninstall";
 pub const MARKETPLACE_VIEW: &str = "marketplace.view";
 pub const MARKETPLACE_PUBLISH: &str = "marketplace.publish";
 pub const MARKETPLACE_TRANSFER: &str = "marketplace.transfer";
+/// Read the node's approval inbox and its live event feeds. Approval rows carry
+/// the proposed action's title, summary, and arguments.
+pub const APPROVALS_VIEW: &str = "approvals.view";
+/// Approve or reject a pending approval and change the node's approval mode.
+/// A governance action, so only `owner` and `admin` hold it by default.
+pub const APPROVALS_DECIDE: &str = "approvals.decide";
 
 /// Every permission key, in the same order as the shared contract's `PERMISSIONS`
 /// array. `owner` is derived from this full set; `admin` from this set minus
@@ -81,6 +94,8 @@ pub const PERMISSIONS: &[&str] = &[
     NOTIFICATIONS_MANAGE,
     MAIL_READ,
     MAIL_MANAGE,
+    MESSAGING_READ,
+    MESSAGING_MANAGE,
     TEAMS_MANAGE,
     PROJECTS_MANAGE,
     REGISTRY_MANAGE,
@@ -91,6 +106,8 @@ pub const PERMISSIONS: &[&str] = &[
     FEATURES_MANAGE,
     BILLING_MANAGE,
     AUDIT_VIEW,
+    ACCESS_MANAGE,
+    DATA_MANAGE,
     APP_INSTALL,
     APP_UPDATE,
     APP_ENABLE,
@@ -99,6 +116,8 @@ pub const PERMISSIONS: &[&str] = &[
     MARKETPLACE_VIEW,
     MARKETPLACE_PUBLISH,
     MARKETPLACE_TRANSFER,
+    APPROVALS_VIEW,
+    APPROVALS_DECIDE,
 ];
 
 /// The `member` built-in set (a working teammate: run and author, but no
@@ -114,6 +133,7 @@ const MEMBER_PERMISSIONS: &[&str] = &[
     TOOL_EXEC,
     NOTIFICATIONS_VIEW,
     MAIL_READ,
+    MESSAGING_READ,
     PROJECTS_MANAGE,
     NODES_VIEW,
     MARKETPLACE_VIEW,
@@ -127,6 +147,7 @@ const VIEWER_PERMISSIONS: &[&str] = &[
     AGENT_VIEW,
     NOTIFICATIONS_VIEW,
     MAIL_READ,
+    MESSAGING_READ,
     NODES_VIEW,
     MARKETPLACE_VIEW,
 ];
@@ -150,6 +171,31 @@ pub fn permissions_for_role(role: OrgRole) -> HashSet<&'static str> {
         OrgRole::Member => MEMBER_PERMISSIONS.iter().copied().collect(),
         OrgRole::Viewer => VIEWER_PERMISSIONS.iter().copied().collect(),
     }
+}
+
+/// The additive grant of the built-in `billing` Better Auth member role. The
+/// role is not a rung on the owner/admin/member/viewer ladder:
+/// [`OrgRole::from_ba_str`] floors `"billing"` at `Viewer`, and this set is
+/// layered on top. MUST match the TS `BILLING_ROLE_PERMISSIONS`.
+pub const BILLING_ROLE_KEY: &str = "billing";
+pub const BILLING_ROLE_PERMISSIONS: &[&str] = &[BILLING_MANAGE];
+
+/// True when a Better Auth role string carries the additive `billing` role.
+pub fn ba_role_has_billing(ba_role: &str) -> bool {
+    ba_role
+        .split(',')
+        .any(|part| part.trim().eq_ignore_ascii_case(BILLING_ROLE_KEY))
+}
+
+/// The built-in permission set for a raw Better Auth role string: the ladder
+/// tier of [`OrgRole::from_ba_str`] UNION the additive `billing` grant when
+/// present. Mirrors the TS `resolveEffectivePermissions` built-in tier.
+pub fn permissions_for_ba_role(ba_role: &str) -> HashSet<&'static str> {
+    let mut set = permissions_for_role(OrgRole::from_ba_str(ba_role));
+    if ba_role_has_billing(ba_role) {
+        set.extend(BILLING_ROLE_PERMISSIONS.iter().copied());
+    }
+    set
 }
 
 /// Whether a role's built-in tier grants `perm`. This is the role-tier half of an
@@ -197,6 +243,7 @@ mod tests {
             "tool.exec",
             "notifications.view",
             "mail.read",
+            "messaging.read",
             "projects.manage",
             "nodes.view",
             "marketplace.view",
@@ -216,12 +263,30 @@ mod tests {
             "agent.view",
             "notifications.view",
             "mail.read",
+            "messaging.read",
             "nodes.view",
             "marketplace.view",
         ]
         .into_iter()
         .collect();
         assert_eq!(viewer, expected);
+    }
+
+    #[test]
+    fn billing_role_is_viewer_plus_billing_manage() {
+        let billing = permissions_for_ba_role("billing");
+        let mut expected = permissions_for_role(OrgRole::Viewer);
+        expected.insert(BILLING_MANAGE);
+        assert_eq!(billing, expected);
+        assert!(!billing.contains(MEMBERS_MANAGE));
+        assert!(!billing.contains(GATEWAY_CONFIGURE));
+        // Combined with a ladder role, billing only adds billing.manage.
+        let admin_billing = permissions_for_ba_role("admin, Billing");
+        assert_eq!(admin_billing.len(), PERMISSIONS.len());
+        assert_eq!(
+            permissions_for_ba_role("member"),
+            permissions_for_role(OrgRole::Member)
+        );
     }
 
     #[test]
@@ -262,5 +327,92 @@ mod tests {
             assert!(!can(OrgRole::Member, permission), "member has {permission}");
             assert!(!can(OrgRole::Viewer, permission), "viewer has {permission}");
         }
+    }
+
+    #[test]
+    fn access_and_data_controls_are_admin_only_by_default() {
+        for permission in [ACCESS_MANAGE, DATA_MANAGE] {
+            assert!(
+                can(OrgRole::Owner, permission),
+                "owner missing {permission}"
+            );
+            assert!(
+                can(OrgRole::Admin, permission),
+                "admin missing {permission}"
+            );
+            assert!(!can(OrgRole::Member, permission), "member has {permission}");
+            assert!(!can(OrgRole::Viewer, permission), "viewer has {permission}");
+            assert!(
+                !permissions_for_ba_role("billing").contains(permission),
+                "billing has {permission}"
+            );
+        }
+    }
+
+    /// Owners and admins review and decide approvals on an organization node
+    /// through their built-in role, without a custom-role grant.
+    #[test]
+    fn approvals_are_admin_only_by_default() {
+        for permission in [APPROVALS_VIEW, APPROVALS_DECIDE] {
+            assert!(
+                can(OrgRole::Owner, permission),
+                "owner missing {permission}"
+            );
+            assert!(
+                can(OrgRole::Admin, permission),
+                "admin missing {permission}"
+            );
+            assert!(!can(OrgRole::Member, permission), "member has {permission}");
+            assert!(!can(OrgRole::Viewer, permission), "viewer has {permission}");
+            assert!(
+                !permissions_for_ba_role("billing").contains(permission),
+                "billing has {permission}"
+            );
+        }
+    }
+
+    /// The quoted keys of a TypeScript `export const PERMISSIONS = [ ... ] as const;`.
+    fn ts_permission_keys(source: &str) -> Vec<String> {
+        let start = source
+            .find("export const PERMISSIONS = [")
+            .expect("PERMISSIONS array");
+        let body = &source[start..];
+        let end = body.find("] as const;").expect("PERMISSIONS terminator");
+        body[..end]
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with('"'))
+            .map(|line| line.trim_end_matches(',').trim_matches('"').to_owned())
+            .collect()
+    }
+
+    /// The vocabulary is a byte-for-byte contract with the control plane and the
+    /// Desktop roles editor. A key added on one side only would be dropped by the
+    /// control plane's effective-permission filter or be ungrantable in the UI.
+    ///
+    /// The control-plane model is read at run time, not with `include_str!`:
+    /// `packages/db` is not part of the public mirror (`tools/mirror-public.sh`
+    /// refuses a tree with an unresolved include), so it is compared only where
+    /// the package exists.
+    #[test]
+    fn vocabulary_matches_the_typescript_mirrors() {
+        let rust: Vec<String> = PERMISSIONS.iter().map(|p| (*p).to_owned()).collect();
+        assert_eq!(
+            ts_permission_keys(include_str!("../../../desktop/src/lib/api/org.ts")),
+            rust,
+            "apps/desktop lib/api/org.ts drifted"
+        );
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        if !repo.join("packages/db").is_dir() {
+            return;
+        }
+        let model =
+            std::fs::read_to_string(repo.join("packages/db/src/models/control-plane.model.ts"))
+                .expect("packages/db control-plane.model.ts");
+        assert_eq!(
+            ts_permission_keys(&model),
+            rust,
+            "packages/db control-plane.model.ts drifted"
+        );
     }
 }

@@ -40,13 +40,16 @@
 //! | `RYU_SANDBOX_MICROSANDBOX_IMAGE`     | `python`  | Default image for exec + WS    |
 //! | `RYU_SANDBOX_MICROSANDBOX_DETECT_SECS`| `3`      | Detection probe timeout (s)   |
 
+use crate::capture::BoundedCommand;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use tokio::process::Command;
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 use super::{ExecOutput, ExecSpec, Sandbox, SandboxCapabilities, WorkspaceId};
+use crate::process_output::output_capped;
 use crate::win_process::NoWindow;
 use crate::BoxFuture;
 
@@ -99,7 +102,10 @@ pub async fn detect() -> DetectResult {
 
     let probe = timeout(
         deadline,
-        Command::new(&binary).arg("--version").no_window().output(),
+        Command::new(&binary)
+            .arg("--version")
+            .no_window()
+            .bounded_output(),
     )
     .await;
 
@@ -163,45 +169,99 @@ async fn run_command(
     timeout_secs: Option<u64>,
     ctx: &'static str,
 ) -> Result<std::process::Output> {
-    let has_stdin = stdin.is_some();
-    if has_stdin {
-        cmd.stdin(std::process::Stdio::piped());
+    cmd.stdin(if stdin.is_some() {
+        std::process::Stdio::piped()
     } else {
-        cmd.stdin(std::process::Stdio::null());
+        std::process::Stdio::null()
+    })
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped())
+    .no_window();
+
+    let label = format!("msb {ctx}");
+    output_capped(&mut cmd, stdin, timeout_secs, &label).await
+}
+
+async fn stop_remove_workspace(binary: &str, name: &str) -> Result<()> {
+    force_remove_ephemeral(binary, name).await
+}
+
+async fn force_remove_ephemeral(binary: &str, name: &str) -> Result<()> {
+    let mut cmd = Command::new(binary);
+    cmd.arg("rm").arg("--force").arg(name).no_window();
+    let output = run_command(cmd, None, Some(5), "rm --force").await?;
+    if !output.status.success() {
+        let detail: String = String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(256)
+            .collect();
+        return Err(anyhow!(
+            "msb rm --force failed for {name}: {} {detail}",
+            output.status
+        ));
     }
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
+    Ok(())
+}
+
+async fn exec_named(
+    spec: ExecSpec,
+    binary: String,
+    cancelled: Option<oneshot::Receiver<()>>,
+) -> Result<ExecOutput> {
+    crate::process_output::execution_timeout(spec.timeout_secs, 30)?;
+    ensure_capabilities_supported(&spec.capabilities)?;
+    // A named VM remains addressable after the CLI is killed on timeout.
+    // Always remove it explicitly so guest work cannot outlive our run.
+    let name = format!("ryu-run-{}", uuid::Uuid::new_v4());
+    let mut cmd = Command::new(&binary);
+    cmd.arg("run").arg("--name").arg(&name);
+    cmd.arg(image());
+    cmd.arg("--");
+    cmd.arg(&spec.command);
+    for arg in &spec.args {
+        cmd.arg(arg);
+    }
     cmd.no_window();
 
-    let run = async move {
-        if let Some(bytes) = stdin {
-            let mut child = cmd
-                .spawn()
-                .map_err(|e| anyhow!("msb {ctx} spawn failed: {e}"))?;
-            if let Some(mut writer) = child.stdin.take() {
-                use tokio::io::AsyncWriteExt as _;
-                writer
-                    .write_all(&bytes)
-                    .await
-                    .map_err(|e| anyhow!("msb {ctx} stdin write failed: {e}"))?;
-            }
-            child
-                .wait_with_output()
-                .await
-                .map_err(|e| anyhow!("msb {ctx} wait failed: {e}"))
-        } else {
-            cmd.output()
-                .await
-                .map_err(|e| anyhow!("msb {ctx} failed: {e}"))
+    let mut run = Box::pin(run_command(cmd, spec.stdin, spec.timeout_secs, "run"));
+    let output = if let Some(mut cancelled) = cancelled {
+        tokio::select! {
+            output = &mut run => output,
+            _ = &mut cancelled => Err(anyhow!("msb run cancelled")),
+        }
+    } else {
+        (&mut run).await
+    };
+    // Drop the CLI future before VM removal; kill_on_drop terminates its child.
+    drop(run);
+    let removal = force_remove_ephemeral(&binary, &name).await;
+    // A cleanup failure means the guest may still be consuming resources.
+    let output = match (output, removal) {
+        (Ok(output), Ok(())) => output,
+        (Err(run_error), Ok(())) => return Err(run_error),
+        (Ok(_), Err(removal_error)) => return Err(removal_error),
+        (Err(run_error), Err(removal_error)) => {
+            return Err(anyhow!("{run_error}; VM cleanup failed: {removal_error}"));
         }
     };
+    Ok(ExecOutput {
+        exit_code: output.status.code().unwrap_or(-1),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
 
-    match timeout_secs {
-        Some(secs) => timeout(Duration::from_secs(secs), run)
+fn spawn_owned_exec(spec: ExecSpec, binary: String) -> BoxFuture<Result<ExecOutput>> {
+    Box::pin(async move {
+        // Cancellation drops this sender. The owner then kills the CLI and
+        // removes the named VM before it exits.
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let result = tokio::spawn(exec_named(spec, binary, Some(cancel_rx)))
             .await
-            .map_err(|_| anyhow!("msb {ctx} timed out after {secs}s"))?,
-        None => run.await,
-    }
+            .map_err(|error| anyhow!("msb execution task failed: {error}"));
+        drop(cancel_tx);
+        result?
+    })
 }
 
 impl Sandbox for MicrosandboxSandbox {
@@ -212,25 +272,7 @@ impl Sandbox for MicrosandboxSandbox {
     // ── Ephemeral exec: `msb run <image> -- <command> [args]` ─────────────────
 
     fn exec(&self, spec: ExecSpec) -> BoxFuture<Result<ExecOutput>> {
-        Box::pin(async move {
-            ensure_capabilities_supported(&spec.capabilities)?;
-            let mut cmd = Command::new(binary());
-            cmd.arg("run");
-            cmd.arg(image());
-            cmd.arg("--");
-            cmd.arg(&spec.command);
-            for arg in &spec.args {
-                cmd.arg(arg);
-            }
-            cmd.no_window();
-
-            let output = run_command(cmd, spec.stdin, spec.timeout_secs, "run").await?;
-            Ok(ExecOutput {
-                exit_code: output.status.code().unwrap_or(-1),
-                stdout: output.stdout,
-                stderr: output.stderr,
-            })
-        })
+        spawn_owned_exec(spec, binary())
     }
 
     // ── Long-lived workspace ──────────────────────────────────────────────────
@@ -242,13 +284,16 @@ impl Sandbox for MicrosandboxSandbox {
         Box::pin(async move {
             ensure_capabilities_supported(&capabilities)?;
             let name = format!("ryu-{}", uuid::Uuid::new_v4());
+            let mut cleanup = crate::WorkspaceCleanup::new(
+                MicrosandboxSandbox::new().destroy_workspace(&WorkspaceId(name.clone())),
+            );
             let mut cmd = Command::new(binary());
             cmd.arg("create").arg("--name").arg(&name);
             cmd.arg(image());
             cmd.no_window();
 
             let output = cmd
-                .output()
+                .bounded_output()
                 .await
                 .map_err(|e| anyhow!("msb create failed: {e}"))?;
             if !output.status.success() {
@@ -264,9 +309,10 @@ impl Sandbox for MicrosandboxSandbox {
                 .arg("start")
                 .arg(&name)
                 .no_window()
-                .output()
+                .bounded_output()
                 .await;
 
+            cleanup.disarm();
             Ok(WorkspaceId(name))
         })
     }
@@ -274,15 +320,26 @@ impl Sandbox for MicrosandboxSandbox {
     fn exec_in_workspace(&self, id: &WorkspaceId, spec: ExecSpec) -> BoxFuture<Result<ExecOutput>> {
         let name = id.0.clone();
         Box::pin(async move {
+            crate::process_output::execution_timeout(spec.timeout_secs, 30)?;
             ensure_capabilities_supported(&spec.capabilities)?;
-            let mut cmd = Command::new(binary());
+            let binary = binary();
+            let mut cmd = Command::new(&binary);
             cmd.arg("exec").arg(&name).arg("--").arg(&spec.command);
             for arg in &spec.args {
                 cmd.arg(arg);
             }
             cmd.no_window();
 
-            let output = run_command(cmd, spec.stdin, spec.timeout_secs, "exec").await?;
+            let mut cleanup = crate::WorkspaceCleanup::new(
+                MicrosandboxSandbox::new().destroy_workspace(&WorkspaceId(name.clone())),
+            );
+            let result = run_command(cmd, spec.stdin, spec.timeout_secs, "exec").await;
+            if result.is_err() {
+                cleanup.finish().await?;
+            } else {
+                cleanup.disarm();
+            }
+            let output = result?;
             Ok(ExecOutput {
                 exit_code: output.status.code().unwrap_or(-1),
                 stdout: output.stdout,
@@ -293,31 +350,7 @@ impl Sandbox for MicrosandboxSandbox {
 
     fn destroy_workspace(&self, id: &WorkspaceId) -> BoxFuture<Result<()>> {
         let name = id.0.clone();
-        Box::pin(async move {
-            // Best-effort stop, then remove.
-            let _ = Command::new(binary())
-                .arg("stop")
-                .arg(&name)
-                .no_window()
-                .output()
-                .await;
-
-            let output = Command::new(binary())
-                .arg("rm")
-                .arg(&name)
-                .no_window()
-                .output()
-                .await
-                .map_err(|e| anyhow!("msb rm failed: {e}"))?;
-            if !output.status.success() {
-                return Err(anyhow!(
-                    "msb rm failed (exit {}): {}",
-                    output.status.code().unwrap_or(-1),
-                    String::from_utf8_lossy(&output.stderr).trim()
-                ));
-            }
-            Ok(())
-        })
+        Box::pin(async move { force_remove_ephemeral(&binary(), &name).await })
     }
 }
 
@@ -326,6 +359,124 @@ impl Sandbox for MicrosandboxSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timed_out_run_force_removes_the_named_guest() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!("ryu-msb-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let binary = directory.join("fake-msb");
+        let log = directory.join("commands.log");
+        std::fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = run ]; then sleep 3; fi\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut spec = ExecSpec::new("echo", vec!["hello".to_owned()]);
+        spec.timeout_secs = Some(1);
+        let result = exec_named(spec, binary.to_string_lossy().into_owned(), None).await;
+        let commands = std::fs::read_to_string(&log).unwrap();
+        let lines: Vec<_> = commands.lines().collect();
+        assert!(result.unwrap_err().to_string().contains("timed out"));
+        assert_eq!(lines.len(), 2, "run and forced removal must both occur");
+        let name = lines[0].split_whitespace().nth(2).unwrap();
+        assert!(lines[0].starts_with("run --name ryu-run-"));
+        assert_eq!(lines[1], format!("rm --force {name}"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelled_wait_still_removes_the_named_guest() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!("ryu-msb-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let binary = directory.join("fake-msb");
+        let log = directory.join("commands.log");
+        std::fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = run ]; then sleep 3; fi\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let spec = ExecSpec::new("echo", vec!["hello".to_owned()]);
+        let waiting = tokio::spawn(spawn_owned_exec(
+            spec,
+            binary.to_string_lossy().into_owned(),
+        ));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !log.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        waiting.abort();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if std::fs::read_to_string(&log).is_ok_and(|commands| {
+                    commands.lines().any(|line| line.starts_with("rm --force"))
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("cancelled owner must force-remove before the guest finishes");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn completed_run_removes_guest_and_reports_cleanup_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!("ryu-msb-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let binary = directory.join("fake-msb");
+        let log = directory.join("commands.log");
+        let fail_marker = directory.join("fail-removal");
+        std::fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = rm ] && [ -f '{}' ]; then exit 7; fi\nif [ \"$1\" = run ]; then cat; printf 'guest stdout'; printf 'guest stderr' >&2; fi\n",
+                log.display(),
+                fail_marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let binary = binary.to_string_lossy().into_owned();
+        let mut spec = ExecSpec::new("echo", vec!["ok".to_owned()]);
+        spec.stdin = Some(b"guest stdin\n".to_vec());
+        let output = exec_named(spec, binary.clone(), None).await.unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, b"guest stdin\nguest stdout");
+        assert_eq!(output.stderr, b"guest stderr");
+        std::fs::write(&fail_marker, "1").unwrap();
+        let error = exec_named(
+            ExecSpec::new("echo", vec!["again".to_owned()]),
+            binary,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("rm --force failed"));
+        let commands = std::fs::read_to_string(log).unwrap();
+        assert_eq!(commands.lines().count(), 4);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn backend_name_is_microsandbox() {

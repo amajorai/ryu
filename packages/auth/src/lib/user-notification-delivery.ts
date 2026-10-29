@@ -9,16 +9,23 @@ import {
 	type UserNotificationChannel,
 } from "@ryu/db/models/user-notification.model";
 import { type EmailOptions, PlatformInboxEmail, sendEmail } from "@ryu/email";
+import { emailDeliveryIdempotencyKey } from "@ryu/email/lib/delivery-idempotency.ts";
+import { z } from "zod";
 
 const STALE_CLAIM_MS = 15 * 60 * 1000;
+/**
+ * Promotional kinds go out as marketing mail: the provider contact book is
+ * checked for an unsubscribe and the legal unsubscribe footer is appended. A
+ * re-engagement nudge is promotional; usage recaps and spend alerts describe
+ * the recipient's own account and stay transactional.
+ */
+const MARKETING_NOTIFICATION_KINDS: ReadonlySet<string> = new Set([
+	"announcement",
+	"re-engagement",
+]);
 const MAX_EMAIL = 320;
 const MAX_ID = 300;
 const MAX_TEXT = 600;
-
-interface UserLike {
-	_id?: unknown;
-	email?: unknown;
-}
 
 export interface UserNotificationEmailInput {
 	actionLabel?: string | null;
@@ -35,13 +42,30 @@ export interface UserNotificationEmailInput {
 	userId?: string | null;
 }
 
-const text = (value: unknown, max: number): string =>
-	typeof value === "string" ? value.trim().slice(0, max) : "";
+const text = z
+	.function({
+		input: [
+			z
+				.string()
+				.nullish()
+				.catch("")
+				.transform((value) => value ?? ""),
+			z.number(),
+		],
+		output: z.string(),
+	})
+	.implement((value, max) => value.trim().slice(0, max));
+const normalizeEmail = z
+	.string()
+	.catch("")
+	.transform((value) => value.trim().slice(0, MAX_EMAIL).toLowerCase()).parse;
+const userSchema = z.object({
+	_id: z.string().catch(""),
+	email: z.string().catch(""),
+});
+const duplicateDeliverySchema = z.object({ code: z.literal(11_000) });
 
-const normalizeEmail = (value: unknown): string =>
-	text(value, MAX_EMAIL).toLowerCase();
-
-function safeActionUrl(value: unknown): string | null {
+function safeActionUrl(value: string | null | undefined): string | null {
 	const candidate = text(value, MAX_TEXT);
 	if (!candidate) {
 		return null;
@@ -75,7 +99,9 @@ async function resolveEmail(
 	if (!userId) {
 		return "";
 	}
-	const user = (await User.findById(userId).select("email")) as UserLike | null;
+	const user = userSchema
+		.nullable()
+		.parse(await User.findById(userId).select("email"));
 	return normalizeEmail(user?.email);
 }
 
@@ -122,11 +148,22 @@ async function claimEmailDelivery(input: {
 		});
 		return true;
 	} catch (error) {
-		if ((error as { code?: number }).code === 11_000) {
+		if (duplicateDeliverySchema.safeParse(error).success) {
 			return false;
 		}
 		throw error;
 	}
+}
+
+/**
+ * The delivery-ledger key for one event and recipient. Exported so scheduled
+ * producers can skip an event whose email already went out without claiming.
+ */
+export function userNotificationDeliveryKey(
+	dedupeKey: string,
+	recipient: string
+): string {
+	return `inbox:${text(dedupeKey, MAX_ID)}:${recipient}`;
 }
 
 /**
@@ -164,7 +201,10 @@ export async function deliverUserNotificationEmail(
 		return false;
 	}
 
-	const dedupeKey = `inbox:${text(input.dedupeKey, MAX_ID)}:${userId ?? recipient}`;
+	const dedupeKey = userNotificationDeliveryKey(
+		input.dedupeKey,
+		userId ?? recipient
+	);
 	if (
 		!(await claimEmailDelivery({
 			dedupeKey,
@@ -178,6 +218,11 @@ export async function deliverUserNotificationEmail(
 
 	try {
 		await sendEmail({
+			idempotencyKey: emailDeliveryIdempotencyKey(dedupeKey),
+			deliveryClass: "notification",
+			purpose: MARKETING_NOTIFICATION_KINDS.has(input.kind)
+				? "marketing"
+				: "transactional",
 			react:
 				input.react ??
 				PlatformInboxEmail({
@@ -187,7 +232,6 @@ export async function deliverUserNotificationEmail(
 					heading: subject,
 					preview: subject,
 				}),
-			skipRateLimit: true,
 			subject,
 			to: recipient,
 		});

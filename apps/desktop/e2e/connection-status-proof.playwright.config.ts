@@ -6,6 +6,7 @@ export default defineConfig({
 	testDir: ".",
 	testMatch: /connection-status-proof\.spec\.ts$/,
 	fullyParallel: false,
+	preserveOutput: "always",
 	retries: 0,
 	reporter: "list",
 	use: {

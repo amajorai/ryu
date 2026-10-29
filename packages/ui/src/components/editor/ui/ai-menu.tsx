@@ -22,6 +22,7 @@ import {
 	PopoverAnchor,
 	PopoverContent,
 } from "@ryu/ui/components/editor/ui/popover.tsx";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { Command as CommandPrimitive } from "cmdk";
 import {
@@ -58,6 +59,7 @@ import {
 	useHotkeys,
 	usePluginOption,
 } from "platejs/react";
+import type { CSSProperties as ReactCSSProperties } from "react";
 import {
 	type ComponentType,
 	type ReactNode,
@@ -65,8 +67,12 @@ import {
 	useMemo,
 	useState,
 } from "react";
-
+import editorStyles from "../editor-lint.module.css";
 import { AIChatEditor } from "./ai-chat-editor.tsx";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editoraiMenu1-width"?: string | number;
+}
 
 /**
  * The editor AI fails closed: when it is unconfigured or the Gateway call fails,
@@ -93,7 +99,9 @@ export function AIMenu() {
 	const chat = usePluginOption(AIChatPlugin, "chat");
 
 	const { clearError, error, messages, status } = chat;
-	const [anchorElement, setAnchorElement] = useState<HTMLElement | null>(null);
+	const [anchorElement, setAnchorElement] = useState<ReturnType<
+		typeof editor.api.toDOMNode
+	> | null>(null);
 
 	const content = useLastAssistantMessage()?.parts.find(
 		(part) => part.type === "text"
@@ -109,7 +117,7 @@ export function AIMenu() {
 			return;
 		}
 
-		const anchorDom = editor.api.toDOMNode(anchorEntry[0])!;
+		const anchorDom = editor.api.toDOMNode(anchorEntry[0]);
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- Position the popover from editor DOM while the edit stream is active.
 		setAnchorElement(anchorDom);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,7 +131,7 @@ export function AIMenu() {
 		}
 	};
 
-	const show = (anchorElement: HTMLElement) => {
+	const show = (anchorElement: ReturnType<typeof editor.api.toDOMNode>) => {
 		setAnchorElement(anchorElement);
 		setOpen(true);
 	};
@@ -134,7 +142,7 @@ export function AIMenu() {
 			if (!lastBlock) {
 				return;
 			}
-			show(editor.api.toDOMNode(lastBlock[0])!);
+			show(editor.api.toDOMNode(lastBlock[0]));
 		},
 		onOpenChange: (open) => {
 			if (!open) {
@@ -152,6 +160,9 @@ export function AIMenu() {
 			const [ancestor] = editor.api.block({ highest: true })!;
 
 			if (!(editor.api.isAt({ end: true }) || editor.api.isEmpty(ancestor))) {
+				// SAFETY: Native blockSelection.set normalizes arrays into their entries
+				// and scalars into a one-entry Set; retain that original normalization.
+				// Its string annotation is narrower; no string membership is proved.
 				editor
 					.getApi(BlockSelectionPlugin)
 					.blockSelection.set(ancestor.id as string);
@@ -164,7 +175,7 @@ export function AIMenu() {
 			if (!lastBlock) {
 				return;
 			}
-			show(editor.api.toDOMNode(lastBlock[0])!);
+			show(editor.api.toDOMNode(lastBlock[0]));
 		},
 	});
 
@@ -199,7 +210,19 @@ export function AIMenu() {
 
 		const block = editor.api.block({ at: anchorNode[1] });
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- Position the popover from editor DOM after the edit stream completes.
-		setAnchorElement(editor.api.toDOMNode(block?.[0]!)!);
+		setAnchorElement(
+			// SAFETY: the installed Plate toDOMNode implementation delegates to
+			// DOMEditor inside try/catch and returns undefined for a missing node.
+			// Retain its complete declared method and only admit that actual extra
+			// input overload. The original direct member call preserves the API
+			// receiver and callee-before-argument evaluation order.
+			(
+				editor.api.toDOMNode as typeof editor.api.toDOMNode &
+					((
+						node: Parameters<typeof editor.api.toDOMNode>[0] | undefined
+					) => ReturnType<typeof editor.api.toDOMNode>)
+			)(block?.[0])
+		);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
 		isLoading,
@@ -223,22 +246,28 @@ export function AIMenu() {
 		return null;
 	}
 
+	const editoraiMenu1Style: EditorVariableStyle = {
+		"--editoraiMenu1-width": isNativeNumber(anchorElement?.offsetWidth)
+			? `${anchorElement?.offsetWidth}px`
+			: anchorElement?.offsetWidth,
+	};
 	return (
 		<Popover modal={false} onOpenChange={setOpen} open={open}>
-			<PopoverAnchor virtualRef={{ current: anchorElement! }} />
+			<PopoverAnchor virtualRef={{ current: anchorElement }} />
 
 			<PopoverContent
 				align="center"
-				className="border-none bg-transparent p-0 shadow-none"
+				className={cn(
+					"border-none bg-transparent p-0 shadow-none",
+					editorStyles.editoraiMenu1
+				)}
 				onEscapeKeyDown={(e) => {
 					e.preventDefault();
 
 					api.aiChat.hide();
 				}}
 				side="bottom"
-				style={{
-					width: anchorElement?.offsetWidth,
-				}}
+				style={editoraiMenu1Style}
 			>
 				<Command
 					className="w-full rounded-lg border shadow-md"
@@ -263,7 +292,7 @@ export function AIMenu() {
 					{isLoading ? (
 						<div className="flex grow select-none items-center gap-2 p-2 text-muted-foreground text-sm">
 							<Loader2Icon className="size-4 animate-spin" />
-							{messages.length > 1 ? "Editing..." : "Thinking..."}
+							{messages.length > 1 ? "Editing…" : "Thinking…"}
 						</div>
 					) : (
 						<CommandPrimitive.Input
@@ -288,7 +317,7 @@ export function AIMenu() {
 								}
 							}}
 							onValueChange={setInput}
-							placeholder="Ask AI anything..."
+							placeholder="Ask AI anything…"
 							value={input}
 						/>
 					)}
@@ -573,13 +602,17 @@ Start writing a new paragraph AFTER <Document> ONLY ONE SENTENCE`
 	}
 >;
 
-const menuStateItems: Record<
-	EditorChatState,
-	{
-		items: (typeof aiChatItems)[keyof typeof aiChatItems][];
-		heading?: string;
-	}[]
-> = {
+interface AIMenuGroup {
+	heading?: string;
+	items: (typeof aiChatItems)[keyof typeof aiChatItems][];
+}
+interface AIMenuStateItems {
+	cursorCommand: AIMenuGroup[];
+	cursorSuggestion: AIMenuGroup[];
+	selectionCommand: AIMenuGroup[];
+	selectionSuggestion: AIMenuGroup[];
+}
+const menuStateItems: AIMenuStateItems = {
 	cursorCommand: [
 		{
 			items: [
@@ -756,12 +789,12 @@ export function AILoadingBar() {
 	) {
 		return (
 			<div
-				className={cn(
-					"absolute start-1/2 bottom-4 z-20 flex -translate-x-1/2 items-center gap-3 rounded-md border border-border bg-muted px-3 py-1.5 text-muted-foreground text-sm shadow-md transition-all duration-300 rtl:translate-x-1/2"
-				)}
+				className={
+					"absolute start-1/2 bottom-4 z-20 flex -translate-x-1/2 items-center gap-3 rounded-md border border-border bg-muted px-3 py-1.5 text-muted-foreground text-sm shadow-md rtl:translate-x-1/2"
+				}
 			>
 				<span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-				<span>{status === "submitted" ? "Thinking..." : "Writing..."}</span>
+				<span>{status === "submitted" ? "Thinking…" : "Writing…"}</span>
 				<Button
 					className="flex items-center gap-1 text-xs"
 					onClick={() => api.aiChat.stop()}
@@ -770,7 +803,7 @@ export function AILoadingBar() {
 				>
 					<PauseIcon className="h-4 w-4" />
 					Stop
-					<kbd className="ms-1 rounded bg-border px-1 font-mono text-[10px] text-muted-foreground shadow-sm">
+					<kbd className="type-compact ms-1 rounded bg-border px-1 font-mono text-muted-foreground shadow-sm">
 						Esc
 					</kbd>
 				</Button>

@@ -46,7 +46,9 @@ export const useDownloadsStore = create<DownloadsState>((set) => ({
 }));
 
 /** Tasks as a list, newest first. */
-export function selectOrderedTasks(s: DownloadsState): DownloadTask[] {
+export function selectOrderedTasks(
+	s: Pick<DownloadsState, "tasks">
+): DownloadTask[] {
 	return Object.values(s.tasks).sort((a, b) => b.created_at - a.created_at);
 }
 
@@ -116,7 +118,7 @@ export function selectInstallProgress(
 	kinds: readonly DownloadKind[],
 	nameHint: string,
 	taskId?: string
-): (s: DownloadsState) => InstallProgress {
+): (s: Pick<DownloadsState, "tasks">) => InstallProgress {
 	const wanted = new Set(kinds);
 	const hint = normalizeName(nameHint);
 	return (s) => {
@@ -169,7 +171,9 @@ export function useInstallProgress(
 	);
 }
 
-export function selectAggregate(s: DownloadsState): DownloadsAggregate {
+export function selectAggregate(
+	s: Pick<DownloadsState, "tasks">
+): DownloadsAggregate {
 	const tasks = Object.values(s.tasks);
 	let inFlight = 0;
 	let failed = 0;

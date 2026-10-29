@@ -34,10 +34,7 @@ export type StoreGroup = (typeof STORE_GROUP_ORDER)[number];
 
 /** The nav group a contributed tab joins. */
 export function storeTabGroup(tab: PluginStoreTab): StoreGroup {
-	const declared = tab.group as StoreGroup | undefined;
-	return declared && STORE_GROUP_ORDER.includes(declared)
-		? declared
-		: "catalog";
+	return STORE_GROUP_ORDER.find((group) => group === tab.group) ?? "catalog";
 }
 
 /** The Store section value a contributed tab occupies. */

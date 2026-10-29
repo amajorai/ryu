@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/NodeRoutingSettings.tsx",
+    "src/components/settings/NodeRoutingSettings.authority.test.tsx",
+    "src/components/settings/NodeRoutingSettings.coverage.native-http.test.tsx",
+    "e2e/node-routing-coverage.spec.ts",
+    "e2e/node-routing-coverage.playwright.config.ts",
+    "e2e/managed-openrouter-routing-proof.spec.ts",
+    "e2e/node-routing-settings-proof.spec.ts",
+    "e2e/harness/vite.node-routing-coverage.config.ts"
+  ]
+}

@@ -33,4 +33,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "stats-plugin-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

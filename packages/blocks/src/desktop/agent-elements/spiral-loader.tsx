@@ -11,6 +11,8 @@ import {
 	useRef,
 	useState,
 } from "react";
+import styles from "./elements-one.module.css";
+import type { AgentGeometryStyle } from "./elements-one-style.ts";
 import { spiralFastData, spiralSlowData } from "./spiral-loader-data.ts";
 
 const LottieLib = lazy(() => import("lottie-react"));
@@ -82,8 +84,12 @@ export function SpiralLoader({ size = 16, className }: SpiralLoaderProps) {
 
 	return (
 		<div
-			className={cn("relative shrink-0", className)}
-			style={{ width: size, height: size }}
+			className={cn(styles.square, "relative shrink-0", className)}
+			style={
+				{
+					"--agent-size": `${size}px`,
+				} satisfies AgentGeometryStyle as AgentGeometryStyle
+			}
 		>
 			<div
 				className={cn(
@@ -95,10 +101,10 @@ export function SpiralLoader({ size = 16, className }: SpiralLoaderProps) {
 				<Lottie
 					animationData={spiralFastData}
 					autoplay={true}
+					className={styles.full}
 					loop={false}
 					lottieRef={fastRef}
 					onComplete={handleFastComplete}
-					style={{ width: "100%", height: "100%" }}
 				/>
 			</div>
 			<div
@@ -111,10 +117,10 @@ export function SpiralLoader({ size = 16, className }: SpiralLoaderProps) {
 				<Lottie
 					animationData={spiralSlowData}
 					autoplay={false}
+					className={styles.full}
 					loop={false}
 					lottieRef={slowRef}
 					onComplete={handleSlowComplete}
-					style={{ width: "100%", height: "100%" }}
 				/>
 			</div>
 		</div>

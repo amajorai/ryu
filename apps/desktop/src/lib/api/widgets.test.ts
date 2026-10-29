@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { submitWidgetFollowUp, type WidgetFollowUpInput } from "./widgets.ts";
 
+const originalFetch = globalThis.fetch;
+
 const target = { token: "node-token", url: "http://127.0.0.1:7980" };
 const input: WidgetFollowUpInput = {
 	instanceId: "wgt-instance",
@@ -10,6 +12,7 @@ const input: WidgetFollowUpInput = {
 
 afterEach(() => {
 	mock.restore();
+	globalThis.fetch = originalFetch;
 });
 
 describe("submitWidgetFollowUp", () => {
@@ -33,7 +36,9 @@ describe("submitWidgetFollowUp", () => {
 				})
 			);
 		});
-		globalThis.fetch = fetchMock as unknown as typeof fetch;
+		globalThis.fetch = Object.assign(fetchMock, {
+			preconnect: originalFetch.preconnect,
+		});
 		const sendMessage = mock(async () => undefined);
 
 		await submitWidgetFollowUp(target, input, sendMessage);
@@ -60,9 +65,10 @@ describe("submitWidgetFollowUp", () => {
 	});
 
 	test("does not submit an untrusted or malformed Core response", async () => {
-		globalThis.fetch = mock(() =>
-			Promise.resolve(Response.json({ ok: true, injected: {} }))
-		) as unknown as typeof fetch;
+		globalThis.fetch = Object.assign(
+			mock(() => Promise.resolve(Response.json({ ok: true, injected: {} }))),
+			{ preconnect: originalFetch.preconnect }
+		);
 		const sendMessage = mock(async () => undefined);
 
 		await expect(

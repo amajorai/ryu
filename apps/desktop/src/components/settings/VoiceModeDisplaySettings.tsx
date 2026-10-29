@@ -1,9 +1,9 @@
-// Desktop voice-mode display preference: show the live transcript like normal
-// chat (default) instead of the full-screen orb. When on, voice mode also renders
-// any UI components the assistant emits on its blank canvas. Client-only pref
+// Desktop voice-mode display preference: stream the call's turns into the chat as
+// normal messages and show any UI cards the assistant emits above the call
+// composer (default), or keep the call to its single composer row. Client-only
 // (localStorage, cross-window synced) — no node round-trip needed.
 
-import { Switch } from "@ryu/ui/components/switch";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import { VOICE_SHOW_TRANSCRIPT_KEY } from "@/src/lib/voice-prefs.ts";
 import {
@@ -20,7 +20,7 @@ export function VoiceModeDisplaySettings() {
 
 	return (
 		<SettingsSection
-			caption="When on, live voice mode keeps the conversation readable as chat and renders any UI cards the assistant sends. When off, it shows the classic full-screen voice orb."
+			caption="When on, live voice mode adds what you and the agent say to the chat as you talk and renders any UI cards the assistant sends. When off, the call stays a single row in the composer."
 			title="Voice mode display"
 		>
 			<SettingsGroup>
@@ -31,7 +31,7 @@ export function VoiceModeDisplaySettings() {
 							onCheckedChange={setShowTranscript}
 						/>
 					}
-					description="See the transcript like normal chat instead of the voice screen."
+					description="Show call turns in the chat while the call is live."
 					title="Show transcript in voice mode"
 				/>
 			</SettingsGroup>

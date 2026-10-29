@@ -1,9 +1,11 @@
 "use client";
 
 import { SPRING_MORPH } from "@ryu/ui/lib/ease.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { motion, type Transition, useReducedMotion } from "framer-motion";
+import type { CSSProperties as LayoutCSSProperties } from "react";
 import { useState } from "react";
+import layoutStyles from "./SidebarSectionNav.module.css";
 
 /**
  * A "peek" tab pinned to the sidebar's left edge that morphs open on hover into
@@ -59,6 +61,9 @@ export function SidebarSectionNav({
 		PANEL_MAX_HEIGHT
 	);
 
+	const cssVariables1: LayoutCssVariables = {
+		"--desktop-inline1-pointer-Events": open ? "auto" : "none",
+	};
 	return (
 		// Wrapper widens the hover hit-area so the thin peek sliver is easy to grab.
 		<div
@@ -84,9 +89,12 @@ export function SidebarSectionNav({
 				<motion.nav
 					animate={{ opacity: open ? 1 : 0 }}
 					aria-label="Jump to sidebar section"
-					className="scroll-fade no-scrollbar flex h-full flex-col gap-0.5 overflow-y-auto p-1.5"
+					className={cn(
+						"scroll-fade no-scrollbar flex h-full flex-col gap-0.5 overflow-y-auto p-1.5",
+						layoutStyles.inline1
+					)}
 					initial={false}
-					style={{ pointerEvents: open ? "auto" : "none" }}
+					style={cssVariables1}
 					transition={{ duration: 0.12, delay: open ? 0.05 : 0 }}
 				>
 					{items.map((item) => (
@@ -103,4 +111,8 @@ export function SidebarSectionNav({
 			</motion.div>
 		</div>
 	);
+}
+
+interface LayoutCssVariables extends LayoutCSSProperties {
+	"--desktop-inline1-pointer-Events"?: string | number;
 }

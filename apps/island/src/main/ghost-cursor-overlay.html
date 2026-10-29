@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<style>
+		html,
+		body {
+			width: 100%;
+			height: 100%;
+			padding: 0;
+			margin: 0;
+			overflow: hidden;
+			font-family: system-ui, -apple-system, sans-serif;
+			pointer-events: none;
+			cursor: default;
+			user-select: none;
+			background: transparent;
+		}
+		#cursor {
+			position: absolute;
+			top: 0;
+			left: 0;
+			opacity: 0;
+			transform: translate(-100px, -100px);
+			transition:
+				transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+				opacity 0.42s ease;
+			will-change: transform, opacity;
+		}
+		#pointer {
+			position: absolute;
+			top: -5px;
+			left: -5px;
+			transform-origin: 5px 5px;
+			transition: transform 0.16s ease;
+		}
+		#pointer svg {
+			display: block;
+			width: 36px;
+			height: 36px;
+			overflow: visible;
+			filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.34));
+		}
+		#pointer .cursor-body {
+			fill: var(--cursor-color, hsl(var(--hue, 210), 95%, 54%));
+			stroke: none;
+		}
+		#cursor.pressing #pointer {
+			transform: scale(0.86);
+		}
+		/* The short intent chip floating beside the cursor. */
+		#label {
+			position: absolute;
+			top: -42px;
+			left: 36px;
+			box-sizing: border-box;
+			display: inline-flex;
+			gap: 7px;
+			align-items: center;
+			max-width: min(280px, calc(100vw - 64px));
+			padding: 4px 9px 4px 7px;
+			overflow: hidden;
+			font-size: 11px;
+			font-weight: 500;
+			line-height: 1.2;
+			color: var(--cursor-ink, #fff);
+			white-space: nowrap;
+			background: var(--cursor-color, hsl(var(--hue, 210), 95%, 54%));
+			border: 0;
+			border-radius: 999px;
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.26);
+		}
+		#label::before {
+			flex: 0 0 auto;
+			width: 6px;
+			height: 6px;
+			content: "";
+			background: var(--cursor-ink, #fff);
+			border-radius: 50%;
+		}
+		#label.has-identity::before {
+			display: none;
+		}
+		#label-avatar {
+			display: none;
+			flex: 0 0 auto;
+			align-items: center;
+			justify-content: center;
+			width: 20px;
+			height: 20px;
+			overflow: hidden;
+			font-size: 10px;
+			font-weight: 700;
+			line-height: 1;
+			color: var(--cursor-ink, #fff);
+			background: rgba(255, 255, 255, 0.36);
+			border: 0;
+			border-radius: 50%;
+		}
+		#label-avatar img {
+			display: block;
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+		}
+		#label-copy {
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+			min-width: 0;
+		}
+		#label-title {
+			display: block;
+			overflow: hidden;
+			font-weight: 700;
+			white-space: nowrap;
+		}
+		#label-title.has-overflow {
+			-webkit-mask-image: linear-gradient(
+				90deg,
+				#000 0,
+				#000 calc(100% - 18px),
+				transparent 100%
+			);
+			mask-image: linear-gradient(
+				90deg,
+				#000 0,
+				#000 calc(100% - 18px),
+				transparent 100%
+			);
+		}
+		#label-subtitle {
+			display: block;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			font-size: 9px;
+			font-weight: 500;
+			color: var(--cursor-ink, #fff);
+			white-space: nowrap;
+		}
+		#label-subtitle:empty {
+			display: none;
+		}
+		#label.flip-x {
+			right: 36px;
+			left: auto;
+		}
+		#label.flip-y {
+			top: auto;
+			bottom: -42px;
+		}
+		.ripple {
+			position: absolute;
+			pointer-events: none;
+			background: hsla(var(--hue, 210), 90%, 62%, 0.28);
+			border-radius: 50%;
+			opacity: 0.9;
+			transform: translate(-50%, -50%) scale(0.2);
+			animation: rip 0.5s ease-out forwards;
+		}
+		@keyframes rip {
+			to {
+				transform: translate(-50%, -50%) scale(1);
+				opacity: 0;
+			}
+		}
+		</style>
+	</head>
+	<body>
+		<div id="cursor">
+			<div id="pointer" aria-hidden="true">
+				<!-- Hugeicons Cursor02Icon silhouette, filled with this agent's color. -->
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<path
+						class="cursor-body"
+						d="M9.80282 4.62973L15.8364 6.99069C19.3164 8.35243 21.0564 9.03329 20.9987 10.1133C20.941 11.1934 19.1251 11.6886 15.4933 12.6791C14.412 12.974 13.8713 13.1215 13.4964 13.4963C13.1215 13.8712 12.9741 14.4119 12.6791 15.4933C11.6887 19.125 11.1934 20.9409 10.1134 20.9986C9.03335 21.0563 8.35249 19.3163 6.99075 15.8363L4.62979 9.80276C3.20411 6.15934 2.49127 4.33764 3.41448 3.41442C4.3377 2.49121 6.15941 3.20405 9.80282 4.62973Z"
+					/>
+				</svg>
+			</div>
+			<div id="label">
+				<span id="label-avatar" aria-hidden="true"></span>
+				<span id="label-copy">
+					<span id="label-title">Working</span>
+					<span id="label-subtitle"></span>
+				</span>
+			</div>
+		</div>
+		<script>
+		"use strict";
+		const cursor = document.getElementById("cursor");
+		const label = document.getElementById("label");
+		const labelAvatar = document.getElementById("label-avatar");
+		const labelTitle = document.getElementById("label-title");
+		const labelSubtitle = document.getElementById("label-subtitle");
+		let fadeTimer = null;
+		let hasPosition = false;
+		const cursorPalette = [
+			"#ff6b78",
+			"#ffd43b",
+			"#4bd89b",
+			"#37c4d7",
+			"#5c8cff",
+			"#bf78f4",
+			"#ff83d6",
+			"#c3cede",
+		];
+		function contrastInk(fill) {
+			const red = Number.parseInt(fill.slice(1, 3), 16) / 255;
+			const green = Number.parseInt(fill.slice(3, 5), 16) / 255;
+			const blue = Number.parseInt(fill.slice(5, 7), 16) / 255;
+			function linear(channel) {
+				return channel <= 0.040_45
+					? channel / 12.92
+					: ((channel + 0.055) / 1.055) ** 2.4;
+			}
+			const luminance =
+				0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+			const darkContrast = (luminance + 0.05) / (0.01 + 0.05);
+			const lightContrast = 1.05 / (luminance + 0.05);
+			return darkContrast >= lightContrast ? "#101828" : "#ffffff";
+		}
+		function setCursorColor(hue) {
+			const colorIndex = Math.floor(
+				((((hue % 360) + 360) % 360) / 360) * cursorPalette.length
+			);
+			const color = cursorPalette[colorIndex];
+			cursor.style.setProperty("--hue", hue);
+			cursor.style.setProperty("--cursor-color", color);
+			cursor.style.setProperty("--cursor-ink", contrastInk(color));
+		}
+		function ripple(x, y, hue) {
+			const r = document.createElement("div");
+			r.className = "ripple";
+			r.style.left = `${x}px`;
+			r.style.top = `${y}px`;
+			r.style.width = "34px";
+			r.style.height = "34px";
+			r.style.setProperty("--hue", hue);
+			document.body.appendChild(r);
+			setTimeout(() => {
+				r.remove();
+			}, 520);
+		}
+		function positionLabel(x, y) {
+			const labelWidth = label.getBoundingClientRect().width || 320;
+			label.classList.toggle("flip-x", x > window.innerWidth - labelWidth - 48);
+			label.classList.toggle("flip-y", y < 32);
+		}
+		function setAvatar(identity) {
+			labelAvatar.replaceChildren();
+			labelAvatar.style.display = "none";
+			if (!identity) {
+				return;
+			}
+			const fallback =
+				identity.avatarEmoji || identity.agentName || identity.agentTitle;
+			if (!(identity.avatarUrl || fallback)) {
+				return;
+			}
+			labelAvatar.style.display = "flex";
+			if (identity.avatarUrl) {
+				const image = document.createElement("img");
+				image.alt = "";
+				image.draggable = false;
+				image.referrerPolicy = "no-referrer";
+				image.src = identity.avatarUrl;
+				image.onerror = () => {
+					labelAvatar.replaceChildren();
+					labelAvatar.textContent = Array.from(
+						fallback || "A"
+					)[0].toUpperCase();
+				};
+				labelAvatar.appendChild(image);
+				return;
+			}
+			labelAvatar.textContent =
+				identity.avatarEmoji || Array.from(fallback || "A")[0].toUpperCase();
+		}
+		function setLabel(intent, identity) {
+			const agentLabel = identity
+				? [identity.agentName, identity.agentTitle].filter(Boolean).join(" · ")
+				: "";
+			const title =
+				identity &&
+				(identity.sessionTitle || identity.agentTitle || identity.agentName);
+			labelTitle.textContent = title || intent || "Working";
+			labelTitle.classList.toggle(
+				"has-overflow",
+				labelTitle.scrollWidth > labelTitle.clientWidth
+			);
+			const subtitle = [];
+			if (agentLabel && agentLabel !== labelTitle.textContent) {
+				subtitle.push(agentLabel);
+			}
+			if (intent && intent !== labelTitle.textContent) {
+				subtitle.push(intent);
+			}
+			labelSubtitle.textContent = subtitle.join(" · ");
+			const hasAvatar =
+				identity &&
+				(identity.avatarUrl ||
+					identity.avatarEmoji ||
+					identity.agentName ||
+					identity.agentTitle);
+			label.classList.toggle("has-identity", Boolean(hasAvatar));
+			setAvatar(identity);
+		}
+		function ghost(phase, x, y, hue, intent, identity) {
+			setCursorColor(hue);
+			setLabel(intent || "Working", identity || null);
+			// Reposition for pointer-bearing phases. A typed event may carry a real
+			// target, while legacy sidecars use (0, 0) and should keep the last point.
+			const hasTarget =
+				phase === "move" ||
+				phase === "down" ||
+				phase === "up" ||
+				phase === "scroll" ||
+				(phase === "type" && (x !== 0 || y !== 0));
+			if (hasTarget) {
+				hasPosition = true;
+				cursor.style.transform = `translate(${x}px, ${y}px)`;
+				positionLabel(x, y);
+			}
+			if (!hasPosition) {
+				return;
+			}
+			// Keep the marker visibly distinct from the user's physical pointer.
+			cursor.style.opacity = String(0.68);
+			cursor.classList.toggle("pressing", phase === "down");
+			if (phase === "down") {
+				ripple(x, y, hue);
+			}
+			if (fadeTimer) {
+				clearTimeout(fadeTimer);
+			}
+			// Keep the action legible long enough to read, then let the compositor fade
+			// it rather than leaving a permanent second cursor on the desktop.
+			fadeTimer = setTimeout(() => {
+				cursor.style.opacity = "0";
+				cursor.classList.remove("pressing");
+			}, 2400);
+		}
+		window.__ghost = ghost;
+		</script>
+	</body>
+</html>

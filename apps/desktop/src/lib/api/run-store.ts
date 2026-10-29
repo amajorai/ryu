@@ -1,5 +1,9 @@
 import type { RunSummary } from "@/src/hooks/useRuns.ts";
 import { abortableDelay } from "../abortable-delay.ts";
+import {
+	resolveNotificationSender,
+	showOsNotification,
+} from "../notifications/os-notify.ts";
 import type { ApiTarget } from "./client.ts";
 import { type RunStreamFrame, streamRuns } from "./runStream.ts";
 
@@ -59,12 +63,14 @@ function receive(feed: RunFeed, frame: RunStreamFrame) {
 		}
 	}
 	feed.loaded = true;
-	for (const listener of [...feed.frames]) {
+	const frameCallbacks = [...feed.frames];
+	for (const listener of frameCallbacks) {
 		if (feed.frames.has(listener)) {
 			listener(frame);
 		}
 	}
-	for (const listener of [...feed.listeners]) {
+	const changeCallbacks = [...feed.listeners];
+	for (const listener of changeCallbacks) {
 		if (feed.listeners.has(listener)) {
 			listener();
 		}
@@ -161,11 +167,10 @@ function fireRunNotification(
 	status: string,
 	isCurrent: () => boolean
 ) {
-	if (!("Notification" in window)) {
+	if (!isCurrent()) {
 		return;
 	}
-
-	const title = status === "completed" ? "Run completed" : "Run failed";
+	const completed = status === "completed";
 	const folder = run.folder_path?.split(PATH_SEPARATOR_RE).pop() ?? "";
 	const branch = run.branch ?? "";
 	const body = [
@@ -176,28 +181,30 @@ function fireRunNotification(
 		.filter(Boolean)
 		.join(" · ");
 
-	const fire = () => {
-		if (!isCurrent()) {
-			return;
-		}
-		const n = new Notification(title, { body, tag: run.id });
-		n.onclick = () => {
-			window.focus();
-			window.dispatchEvent(
-				new CustomEvent("ryu:run-notification-click", {
-					detail: { runId: run.id },
-				})
-			);
-		};
-	};
-
-	if (Notification.permission === "granted") {
-		fire();
-	} else if (Notification.permission === "default") {
-		Notification.requestPermission().then((perm) => {
-			if (perm === "granted") {
-				fire();
+	resolveNotificationSender(run.agent_id)
+		.then((sender) => {
+			// Like other chat apps, a reply is announced by the agent that wrote
+			// it: its name is the title and its avatar the image. Unknown agents
+			// keep the run-centric titles.
+			let title: string;
+			if (sender) {
+				title = completed ? sender.name : `${sender.name} · Run failed`;
+			} else {
+				title = completed ? "Run completed" : "Run failed";
 			}
-		});
-	}
+			return showOsNotification({
+				title,
+				body,
+				tag: run.id,
+				sender,
+				onClick: () => {
+					window.dispatchEvent(
+						new CustomEvent("ryu:run-notification-click", {
+							detail: { runId: run.id },
+						})
+					);
+				},
+			});
+		})
+		.catch(() => undefined);
 }

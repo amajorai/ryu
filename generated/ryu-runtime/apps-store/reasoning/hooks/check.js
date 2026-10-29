@@ -94,9 +94,7 @@ try {
 
 // The bridge hands back the sub-agent's final text; coerce defensively so a
 // non-string never reaches the user as "[object Object]".
-const text = (
-	typeof report === "string" ? report : String(report ?? "")
-).trim();
+const text = String(report ?? "").trim();
 const marker = text.match(/SOLVER:\s*([a-z_]+)\s*$/im);
 if (!marker) {
 	return {

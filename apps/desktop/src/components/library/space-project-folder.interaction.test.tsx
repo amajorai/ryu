@@ -8,7 +8,7 @@ import type {
 	SpaceDocumentContent,
 } from "@/src/lib/api/spaces.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 if (document.compatMode === "BackCompat") {
@@ -30,7 +30,7 @@ Reflect.set(window, "matchMedia", (query: string) => {
 
 function deferred<Value>() {
 	let resolve = (_value: Value) => undefined;
-	let reject = (_reason?: unknown) => undefined;
+	let reject = (_reason?: Parameters<typeof Promise.reject>[0]) => undefined;
 	const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
 		resolve = (value) => {
 			resolvePromise(value);
@@ -118,8 +118,9 @@ mock.module("@/src/contexts/SpacesContext.tsx", () => ({
 	}),
 }));
 mock.module("@/src/contexts/TabsContext.tsx", () => ({
-	useTabSelector: (selector: (state: { openTab: typeof openTab }) => unknown) =>
-		selector({ openTab }),
+	useTabSelector: <TResult,>(
+		selector: (state: { openTab: typeof openTab }) => TResult
+	) => selector({ openTab }),
 }));
 
 // This interaction suite exercises an already visible folder. Real observer and

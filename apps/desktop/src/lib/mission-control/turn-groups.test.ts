@@ -11,6 +11,8 @@
 import { describe, expect, it } from "bun:test";
 import {
 	buildMissionDigest,
+	firstString,
+	type MissionRawInput,
 	type MissionStreamMessage,
 	type MissionStreamPart,
 	toolNameOf,
@@ -23,7 +25,7 @@ const text = (body: string): MissionStreamPart => ({
 
 const tool = (
 	name: string,
-	input: unknown,
+	input: MissionRawInput,
 	state = "output-available"
 ): MissionStreamPart => ({
 	type: `tool-${name}`,
@@ -333,4 +335,31 @@ describe("buildMissionDigest — totals", () => {
 		expect(digest.files).toEqual([]);
 		expect(digest.totals.turns).toBe(0);
 	});
+});
+
+it("tool field projection preserves own prototype keys and live optional transport values", () => {
+	const input = {
+		...JSON.parse('{"__proto__":" source path ","file_path":" src/owner.ts "}'),
+		future: {
+			omitted: undefined,
+			count: Number.POSITIVE_INFINITY,
+			nested: [undefined, null],
+		},
+	};
+	expect(firstString(input, ["__proto__"])).toBe("source path");
+	expect(firstString(input, ["missing", "file_path"])).toBe("src/owner.ts");
+	expect(
+		firstString({ file_path: 1, path: "fallback.ts" }, ["file_path", "path"])
+	).toBe("fallback.ts");
+	expect(firstString(["path"], ["0"])).toBeUndefined();
+	expect(firstString(null, ["file_path"])).toBeUndefined();
+	const digest = buildMissionDigest([
+		user("Read the file"),
+		assistant("fixture", [tool("Read", input)]),
+	]);
+	expect(digest.turns[0]?.files).toEqual([
+		{ path: "src/owner.ts", kind: "read", count: 1 },
+	]);
+	expect(input.future.nested[0]).toBeUndefined();
+	expect(Object.hasOwn(input, "__proto__")).toBe(true);
 });

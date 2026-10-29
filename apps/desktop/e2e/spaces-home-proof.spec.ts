@@ -149,14 +149,16 @@ test("loads recent page previews through the live SpacesPage container", async (
 			updated_at: updatedAt - 345_600_000,
 		},
 	];
-	const sources: Record<string, string> = {
-		page_interviews:
-			"# Interview notes\n\nCustomers want the answer and the source together.",
-		page_launch:
-			"# Launch brief\n\nThe next release should feel calm, fast, and grounded in the work already done.\n\n- Make the first run obvious",
-		page_roadmap:
-			"# Q4 roadmap\n\nA small set of durable bets for the quarter.",
-	};
+	const sources = new Map<string, string>(
+		Object.entries({
+			page_interviews:
+				"# Interview notes\n\nCustomers want the answer and the source together.",
+			page_launch:
+				"# Launch brief\n\nThe next release should feel calm, fast, and grounded in the work already done.\n\n- Make the first run obvious",
+			page_roadmap:
+				"# Q4 roadmap\n\nA small set of durable bets for the quarter.",
+		})
+	);
 
 	await page.route("**/*", async (route) => {
 		const url = new URL(route.request().url());
@@ -209,7 +211,7 @@ test("loads recent page previews through the live SpacesPage container", async (
 			return route.fulfill({
 				json: {
 					...document,
-					source: sources[documentMatch[1]] ?? "",
+					source: sources.get(documentMatch[1]) ?? "",
 				},
 			});
 		}

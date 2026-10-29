@@ -1,0 +1,56 @@
+.layout {
+	grid-template-rows: var(--workbench-rows);
+	grid-template-columns: var(--workbench-columns);
+}
+.layout > [data-region="left"] {
+	grid-row: var(--workbench-left-row, 1 / 2);
+	grid-column: 1 / 2;
+}
+.layout > [data-region="center"] {
+	grid-row: 1 / 2;
+	grid-column: 3 / 4;
+}
+.layout > [data-region="right"] {
+	grid-row: var(--workbench-right-row, 1 / 2);
+	grid-column: 5 / 6;
+}
+.layout > [data-region="bottom"] {
+	grid-row: 3 / 4;
+	grid-column: var(--workbench-bottom-column);
+}
+.layout > [aria-label="Resize Left"] {
+	grid-row: var(--workbench-left-row, 1 / 2);
+	grid-column: 2 / 3;
+}
+.layout > [aria-label="Resize Right"] {
+	grid-row: var(--workbench-right-row, 1 / 2);
+	grid-column: 4 / 5;
+}
+.layout > [aria-label="Resize Bottom"] {
+	grid-row: 2 / 3;
+	grid-column: var(--workbench-bottom-column);
+}
+
+/* Overlay sheet geometry in a narrow window; sizes never exceed the window.
+   The sheet is positioned against the whole layout, not a grid area. */
+.layout > [data-region].overlay {
+	position: absolute;
+	bottom: 0;
+	grid-row: auto;
+	grid-column: auto;
+}
+.layout > [data-region="left"].overlay {
+	top: 0;
+	left: 0;
+	width: min(88%, var(--workbench-left-size));
+}
+.layout > [data-region="right"].overlay {
+	top: 0;
+	right: 0;
+	width: min(88%, var(--workbench-right-size));
+}
+.layout > [data-region="bottom"].overlay {
+	right: 0;
+	left: 0;
+	height: min(70%, var(--workbench-bottom-size));
+}

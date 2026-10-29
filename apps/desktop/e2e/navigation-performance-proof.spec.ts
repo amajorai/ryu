@@ -60,13 +60,21 @@ test("warm switching avoids unrelated route renders and preserves working state"
 	page,
 	browserName,
 }, testInfo) => {
-	const proofDir = path.resolve(
-		import.meta.dirname,
-		"../../../docs/proof/navigation-performance",
-		process.env.RYU_NAV_PROOF_RUN ?? "",
-		browserName === "chromium" ? "" : browserName,
-		testInfo.repeatEachIndex === 0 ? "" : `run-${testInfo.repeatEachIndex}`
-	);
+	// Ordinary runs write the ledger and screenshot to this test's Playwright
+	// output directory so the committed proof is never rewritten as a side
+	// effect. Set RYU_REFRESH_NAV_PROOF=1 to deliberately regenerate it.
+	const proofDir =
+		process.env.RYU_REFRESH_NAV_PROOF === "1"
+			? path.resolve(
+					import.meta.dirname,
+					"../../../docs/proof/navigation-performance",
+					process.env.RYU_NAV_PROOF_RUN ?? "",
+					browserName === "chromium" ? "" : browserName,
+					testInfo.repeatEachIndex === 0
+						? ""
+						: `run-${testInfo.repeatEachIndex}`
+				)
+			: testInfo.outputPath("navigation-performance");
 	const errors: string[] = [];
 	page.on("pageerror", (error) => errors.push(error.message));
 	page.on("console", (message) => {
@@ -74,6 +82,10 @@ test("warm switching avoids unrelated route renders and preserves working state"
 			errors.push(message.text());
 		}
 	});
+	// The installed full Chromium build (PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH)
+	// requests /favicon.ico, which the harness does not serve; the headless
+	// shell does not. Answer it so the console-error check covers the app only.
+	await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204 }));
 	await page.goto("/navigation-performance-proof.html");
 	await expect(page.locator("[data-workspace]")).toHaveCount(12);
 	const draft = page.getByRole("textbox", { name: "Working draft" });

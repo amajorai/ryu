@@ -1,15 +1,20 @@
 [package]
 name = "ryu-gw-budget"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
-description = "Ryu Gateway charged-spend stage: per-user / per-agent / per-session USD caps plus the per-window exec budget, as a swappable BudgetBackend trait + registry with an in-memory built-in."
+description = "Ryu Gateway charged-spend stage: per-user / per-agent / per-session USD caps plus the per-window exec budget, as a swappable BudgetBackend trait + registry with an in-memory built-in and durable windowed spend counters."
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 dashmap = "6"
-ryu-gw-contracts = { path = "../contracts", version = "0.4.0" }
+ryu-gw-contracts = { path = "../contracts", version = "0.5.0" }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+tracing = "0.1"
+# Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
+# backend: the key arrives from Core (RYU_SEAL_KEY) or RYU_MASTER_KEY.
+ryu-crypto = { path = "../../core/crypto", version = "0.5.0", default-features = false, features = ["sqlite"] }
 
 [dev-dependencies]
 serde_json = "1"

@@ -14,29 +14,27 @@
 
 import { expect, test } from "@playwright/test";
 
-// The story pulls a large module graph; vite compiles it on first navigation, so
-// allow generous headroom over the 30s default for cold-start CI runs.
-test.describe.configure({ timeout: 90_000 });
+// The universal InputBar pulls a large module graph; Vite compiles it on first
+// navigation, so allow generous headroom for cold-start CI runs.
+test.describe.configure({ timeout: 180_000 });
 
 const STORY_URL = "/command-palette-story.html";
 
 async function openPalette(page: import("@playwright/test").Page) {
 	await page.goto(STORY_URL);
 	await page.getByTestId("open-palette").click();
-	await expect(
-		page.getByPlaceholder("Search or run a command...")
-	).toBeVisible();
+	await expect(page.getByPlaceholder("Search or run a command…")).toBeVisible();
 }
 
 test.describe("shared command palette — real component in isolation", () => {
 	test("the palette is closed until the trigger opens it", async ({ page }) => {
 		await page.goto(STORY_URL);
-		await expect(
-			page.getByPlaceholder("Search or run a command...")
-		).toHaveCount(0);
+		await expect(page.getByPlaceholder("Search or run a command…")).toHaveCount(
+			0
+		);
 		await page.getByTestId("open-palette").click();
 		await expect(
-			page.getByPlaceholder("Search or run a command...")
+			page.getByPlaceholder("Search or run a command…")
 		).toBeVisible();
 	});
 
@@ -87,9 +85,7 @@ test.describe("shared command palette — real component in isolation", () => {
 
 	test("typing filters the rows via cmdk", async ({ page }) => {
 		await openPalette(page);
-		await page
-			.getByPlaceholder("Search or run a command...")
-			.fill("marketplace");
+		await page.getByPlaceholder("Search or run a command…").fill("marketplace");
 		await expect(
 			page.getByRole("option", { name: "Open Marketplace" })
 		).toBeVisible();
@@ -102,14 +98,14 @@ test.describe("shared command palette — real component in isolation", () => {
 	test("a query matching nothing shows the empty label", async ({ page }) => {
 		await openPalette(page);
 		await page
-			.getByPlaceholder("Search or run a command...")
+			.getByPlaceholder("Search or run a command…")
 			.fill("zzz-no-such-command");
 		await expect(page.getByText("No results.")).toBeVisible();
 	});
 
 	test("selecting a row invokes its onSelect", async ({ page }) => {
 		await openPalette(page);
-		const input = page.getByPlaceholder("Search or run a command...");
+		const input = page.getByPlaceholder("Search or run a command…");
 		await input.fill("settings");
 		// cmdk auto-highlights the sole match; it is keyboard-first (the dialog's
 		// inert backdrop intercepts synthetic clicks), so commit with Enter.
@@ -118,5 +114,88 @@ test.describe("shared command palette — real component in isolation", () => {
 		).toBeVisible();
 		await input.press("Enter");
 		await expect(page.getByTestId("last-selected")).toHaveText("settings");
+	});
+
+	test("Tab switches to Compose and the composer sends the draft", async ({
+		page,
+	}, testInfo) => {
+		await openPalette(page);
+		const searchTab = page.getByRole("tab", { name: "Search" });
+		const composeTab = page.getByRole("tab", { name: "Compose" });
+		const input = page.getByPlaceholder("Search or run a command…");
+
+		await input.press("Tab");
+		await expect(composeTab).toHaveAttribute("aria-selected", "true");
+		const composer = page.getByPlaceholder("Write a message…");
+		await expect(page.locator('[data-composer-layout="full"]')).toBeVisible();
+		const dialog = page.getByRole("dialog");
+		const dialogTop = await dialog.evaluate(
+			(element) => element.getBoundingClientRect().top
+		);
+		const entryTop = await dialog
+			.locator(".composer-container")
+			.evaluate((element) => element.getBoundingClientRect().top);
+		const topInset = entryTop - dialogTop;
+		expect(topInset).toBeGreaterThanOrEqual(9);
+		expect(topInset).toBeLessThanOrEqual(10.5);
+		await composer.focus();
+		await expect(composer).toBeFocused();
+		const sendHint = page.getByTestId("compose-send-shortcut");
+		const sendButton = page.getByRole("button", { name: "Send" });
+		await expect(sendHint).toBeVisible();
+		await expect(sendButton).toBeVisible();
+		const sendHintLeft = await sendHint.evaluate(
+			(element) => element.getBoundingClientRect().left
+		);
+		const sendButtonLeft = await sendButton.evaluate(
+			(element) => element.getBoundingClientRect().left
+		);
+		expect(sendHintLeft).toBeLessThan(sendButtonLeft);
+		await composer.fill("Plan the next release");
+		await expect(sendButton).toBeEnabled();
+		const proofPath = process.env.RYU_GLOBAL_SEARCH_COMPOSE_PROOF_PATH;
+		await page.screenshot({
+			path: proofPath ?? testInfo.outputPath("global-search-compose-proof.png"),
+			fullPage: true,
+		});
+
+		await composer.press("Tab");
+		await expect(searchTab).toHaveAttribute("aria-selected", "true");
+		await expect(input).toBeFocused();
+		await input.press("Tab");
+		await expect(composeTab).toHaveAttribute("aria-selected", "true");
+		await expect(composer).toHaveValue("Plan the next release");
+		await composer.press("Enter");
+		await expect(page.getByTestId("last-selected")).toHaveText(
+			"compose:Plan the next release"
+		);
+
+		await page.getByTestId("open-palette").click();
+		await page.getByRole("tab", { name: "Compose" }).click();
+		await composer.fill("Send from the button");
+		await expect(sendButton).toBeEnabled();
+		await sendButton.click();
+		await expect(page.getByTestId("last-selected")).toHaveText(
+			"compose:Send from the button"
+		);
+	});
+
+	test("the Compose attachment action invokes its handler", async ({
+		page,
+	}) => {
+		await openPalette(page);
+		await page.getByRole("tab", { name: "Compose" }).click();
+		const addButton = page.getByRole("button", { exact: true, name: "Add" });
+		await expect(addButton).toBeVisible();
+		await addButton.click();
+		const attachAction = page.getByRole("option", {
+			exact: true,
+			name: "Files and images",
+		});
+		await expect(attachAction).toBeVisible();
+		await attachAction.click();
+		await expect(page.getByTestId("last-selected")).toHaveText(
+			"compose:attach"
+		);
 	});
 });

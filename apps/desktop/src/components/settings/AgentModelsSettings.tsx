@@ -20,14 +20,16 @@
 
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@ryu/ui/components/collapsible";
-import { Label } from "@ryu/ui/components/label";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/collapsible.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { sileo } from "sileo";
@@ -47,7 +49,7 @@ interface AgentModel {
 	name: string;
 }
 
-function errMessage(e: unknown, fallback: string): string {
+function errMessage<TError>(e: TError, fallback: string): string {
 	return e instanceof Error && e.message ? e.message : fallback;
 }
 
@@ -65,9 +67,10 @@ function AgentCard({
 		provider: string,
 		model: string,
 		enabled: boolean
-	) => Promise<unknown>;
+	) => Promise<void>;
 	overrides: Record<string, boolean> | undefined;
 }) {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const [open, setOpen] = useState(false);
 	const [toggling, setToggling] = useState<string | null>(null);
@@ -107,7 +110,15 @@ function AgentCard({
 		return [];
 	}, [configQuery.data]);
 
-	const hiddenCount = models.filter((m) => overrides?.[m.id] === false).length;
+	// The card starts collapsed and only probes on expand, so until the agent
+	// answers, the persisted overrides are the only truth. Counting probed models
+	// alone told every reopened Settings page "All models visible" while the
+	// composer was already hiding the models switched off here.
+	const hiddenCount =
+		models.length > 0
+			? models.filter((m) => overrides?.[m.id] === false).length
+			: Object.values(overrides ?? {}).filter((enabled) => enabled === false)
+					.length;
 
 	const handleToggle = async (modelId: string, enabled: boolean) => {
 		setToggling(modelId);
@@ -126,7 +137,10 @@ function AgentCard({
 	return (
 		<SettingsCard className="p-0">
 			<Collapsible onOpenChange={setOpen} open={open}>
-				<CollapsibleTrigger className="flex w-full items-center justify-between gap-3 rounded-lg p-3.5 text-left hover:bg-muted/40">
+				<CollapsibleTrigger
+					appearance="provider-group"
+					className="flex w-full items-center justify-between text-left"
+				>
 					<div className="flex min-w-0 items-center gap-2.5">
 						<AgentAvatar
 							className="size-4 shrink-0"
@@ -137,7 +151,10 @@ function AgentCard({
 							<span className="font-medium text-sm">{agent.name}</span>
 							<span className="text-muted-foreground text-xs">
 								{hiddenCount > 0
-									? `${hiddenCount} model${hiddenCount === 1 ? "" : "s"} hidden`
+									? tl(
+											"{hiddenCount, plural, one {# model} other {# models}} hidden",
+											{ hiddenCount }
+										)
 									: "All models visible"}
 							</span>
 						</div>
@@ -148,16 +165,23 @@ function AgentCard({
 					/>
 				</CollapsibleTrigger>
 
-				<CollapsibleContent className="flex flex-col gap-2 px-3.5 pt-1 pb-3.5">
+				<CollapsibleContent className="flex flex-col" spacing="model-list">
 					{configQuery.isPending ? (
 						<span className="flex items-center gap-1.5 text-muted-foreground text-xs">
-							<Spinner className="size-3" /> Asking {agent.name} what it offers…
+							<Spinner className="size-3" />{" "}
+							{tl("Asking {agentName} what it offers…", {
+								agentName: agent.name,
+							})}
 						</span>
 					) : null}
 					{!configQuery.isPending && configQuery.isError ? (
 						<span className="text-status-destructive text-xs">
-							Could not read this agent's models:{" "}
-							{errMessage(configQuery.error, "the agent did not respond.")}
+							{tl("Could not read this agent's models: {error}", {
+								error: errMessage(
+									configQuery.error,
+									"the agent did not respond."
+								),
+							})}
 						</span>
 					) : null}
 					{!(configQuery.isPending || configQuery.isError) &&
@@ -176,9 +200,18 @@ function AgentCard({
 										className="flex items-center justify-between gap-2 px-1.5 py-1"
 										key={m.id}
 									>
-										<span className="min-w-0 truncate text-xs">{m.name}</span>
+										<span className="min-w-0 truncate text-xs" title={m.name}>
+											{m.name}
+										</span>
 										<Switch
 											// Absent from the overrides map ⇒ visible.
+											aria-label={tl(
+												"Show {modelName} in {agentName}'s model picker",
+												{
+													agentName: agent.name,
+													modelName: m.name,
+												}
+											)}
 											checked={overrides?.[m.id] !== false}
 											disabled={toggling === m.id}
 											onCheckedChange={(next) => handleToggle(m.id, next)}
@@ -203,8 +236,9 @@ export function AgentModelsSettings({
 		provider: string,
 		model: string,
 		enabled: boolean
-	) => Promise<unknown>;
+	) => Promise<void>;
 }) {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const agentsQuery = useQuery({
 		queryKey: ["agents", node.url],
@@ -234,7 +268,30 @@ export function AgentModelsSettings({
 					<Spinner className="size-4" /> Loading agents…
 				</div>
 			) : null}
-			{agents.length === 0 && !agentsQuery.isPending ? (
+			{agentsQuery.isError ? (
+				<div
+					className="flex flex-wrap items-center gap-3 text-destructive text-sm"
+					role="alert"
+				>
+					<span>
+						{tl("Could not load agents: {error}", {
+							error: errMessage(
+								agentsQuery.error,
+								"Core did not return the agent list."
+							),
+						})}
+					</span>
+					<Button
+						disabled={agentsQuery.isFetching}
+						onClick={() => void agentsQuery.refetch()}
+						size="sm"
+						variant="outline"
+					>
+						{agentsQuery.isFetching ? "Retrying…" : "Retry"}
+					</Button>
+				</div>
+			) : null}
+			{agents.length === 0 && !agentsQuery.isPending && !agentsQuery.isError ? (
 				<p className="text-muted-foreground text-sm">No agents installed.</p>
 			) : null}
 			<div className="space-y-2.5">

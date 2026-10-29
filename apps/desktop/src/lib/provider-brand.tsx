@@ -21,17 +21,25 @@ export const PROVIDER_SVGL: [string, SvglSpec][] = [
 	["codex", { light: "openai", dark: "openai_dark" }],
 	["openai", { light: "openai", dark: "openai_dark" }],
 	["gemini", "gemini"],
-	["vertex", "gemini"],
+	["google-tts", "google-cloud"],
+	["google-cloud", "google-cloud"],
+	["vertex", "google-cloud"],
 	["google", "gemini"],
 	["mistral", "mistral-ai_logo"],
 	["copilot", { light: "copilot", dark: "copilot_dark" }],
+	["github-models", { light: "github_light", dark: "github_dark" }],
 	["github", { light: "copilot", dark: "copilot_dark" }],
 	["cursor", { light: "cursor_light", dark: "cursor_dark" }],
 	["grok", { light: "grok-light", dark: "grok-dark" }],
 	["xai", { light: "grok-light", dark: "grok-dark" }],
 	["deepseek", "deepseek"],
 	["perplexity", "perplexity"],
+	["opencode", { light: "opencode", dark: "opencode-dark" }],
+	["vercel-ai-gateway", { light: "vercel", dark: "vercel_dark" }],
+	["brave", "brave"],
+	["firecrawl", { light: "firecrawl", dark: "firecrawl-dark" }],
 	["cohere", "cohere"],
+	["stability", "stability-ai"],
 	["groq", "groq"],
 	["cerebras", { light: "cerebras_light", dark: "cerebras_dark" }],
 	["together", { light: "togetherai_light", dark: "togetherai_dark" }],
@@ -39,10 +47,13 @@ export const PROVIDER_SVGL: [string, SvglSpec][] = [
 	["moonshot", { light: "kimi-icon", dark: "kimi-icon-dark" }],
 	["kimi", { light: "kimi-icon", dark: "kimi-icon-dark" }],
 	["minimax", "minimax"],
+	["runway", "runway"],
 	["huggingface", "huggingface"],
 	["zai", "zai"],
 	["glm", "zai"],
 	["qwen", { light: "qwen_light", dark: "qwen_dark" }],
+	["edge-tts", "edge"],
+	["polly", { light: "aws_light", dark: "aws_dark" }],
 	["bedrock", { light: "aws_light", dark: "aws_dark" }],
 	["amazon", { light: "aws_light", dark: "aws_dark" }],
 	["aws", { light: "aws_light", dark: "aws_dark" }],
@@ -52,7 +63,20 @@ export const PROVIDER_SVGL: [string, SvglSpec][] = [
 ];
 
 /** Resolve a provider id/label/api string onto a bundled brand mark, else null. */
+/**
+ * Ryu-managed rows (`managed`, `managed-bedrock`, `managed-anthropic-credits`, …)
+ * are sold as Ryu tiers — Ryu Fast, Ryu Frontier, Ryu Code — and must never show
+ * the supplier behind them. Callers render the Ryu mark for these instead.
+ */
+export function isRyuManagedProvider(haystack: string): boolean {
+	const id = haystack.trim().toLowerCase().split(/\s+/)[0] ?? "";
+	return id === "managed" || id.startsWith("managed-");
+}
+
 export function svglForProvider(haystack: string): SvglSpec | null {
+	if (isRyuManagedProvider(haystack)) {
+		return null;
+	}
 	const hay = haystack.toLowerCase();
 	for (const [needle, spec] of PROVIDER_SVGL) {
 		if (hay.includes(needle)) {

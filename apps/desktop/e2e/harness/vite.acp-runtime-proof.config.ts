@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
@@ -9,6 +10,7 @@ const desktopRoot = path.resolve(harnessDir, "../..");
 /** Isolated build for the ACP runtime proof; unrelated stories stay out of its graph. */
 export default defineConfig({
 	plugins: [react()],
+	cacheDir: path.join(tmpdir(), "ryu-acp-runtime-settings-proof-vite-cache"),
 	css: {
 		postcss: {
 			plugins: [tailwindcss()],
@@ -22,7 +24,7 @@ export default defineConfig({
 		},
 	},
 	build: {
-		outDir: path.resolve(harnessDir, "dist-acp-runtime-proof"),
+		outDir: path.join(tmpdir(), "ryu-acp-runtime-settings-proof-build"),
 		emptyOutDir: true,
 		rollupOptions: {
 			input: path.resolve(harnessDir, "acp-runtime-settings-proof.html"),

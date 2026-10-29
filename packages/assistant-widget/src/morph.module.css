@@ -1,0 +1,23 @@
+.panel {
+	max-width: var(--assistant-morph-max-width, none);
+	max-height: var(--assistant-morph-max-height, none);
+}
+.trigger {
+	width: var(--assistant-morph-trigger-size);
+	height: var(--assistant-morph-trigger-size);
+	pointer-events: auto;
+}
+.trigger[aria-expanded="true"] {
+	pointer-events: none;
+}
+.content {
+	width: 100%;
+	height: 100%;
+	pointer-events: auto;
+}
+.content[aria-hidden="true"] {
+	pointer-events: none;
+}
+.content[hidden] {
+	display: none;
+}

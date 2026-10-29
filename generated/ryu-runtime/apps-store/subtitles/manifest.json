@@ -109,6 +109,9 @@
           { "path": "/jobs/:id/retry", "permission": "subtitles.create" },
           { "path": "/jobs/:id/cancel", "permission": "subtitles.create" }
         ]
+      },
+      "host_api": {
+        "grants": ["crypto:seal"]
       }
     }
   ],

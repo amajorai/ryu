@@ -1,0 +1,44 @@
+ Ryu New chat                                                                                                                               
+                                                                                                                                            
+ ● 127.0.0.1:7980 ⌄      Ask anything                                                                                                       
+ Ryu · Con╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮oup /     
+          │                                                                                                                      │          
+   Home   │  Settings                                                                                                 Esc close  │          
+ › New cha│                                                                                                                      │          
+   Search │   General              █   Authorized Apps                                                                           │          
+   Library│   Features             █   Applications granted access to your account                                               │          
+   Customi│   Appearance           █                                                                                             │          
+   Tasks  │   Island               █   No authorized applications.                                                               │          
+   Timelin│   Shadow               █                                                                                             │          
+          │   Voice                █                                                                                             │          
+          │   Memory               █                                                                                             │          
+ ▾ AGENTS │   Meetings             █                                                                                             │          
+ empty    │   Tasks                █                                                                                             │          
+          │   Autocomplete         █                                                                                             │          
+ ▾ GROUPS │                        █                                                                                             │          
+ empty    │ ACCOUNT                █                                                                                             │          
+          │   Profile              █                                                                                             │          
+ ▾ SPACES │   Account              █                                                                                             │          
+ empty    │   Sessions             █                                                                                             │          
+          │ › Authorized Apps      █                                                                                             │          
+ ▾ MEETING│                        █   Authorization revoked and confirmed.                                                      │          
+ empty    │ SERVICES               █   ↑↓ applications · x revoke · r reload · j/k panels                                        │          
+          │   Connections          █                                                                                             │          
+ ▾ WORKFLO│   Integrations         █                                                                                             │          
+ empty    │   Billing                                                                                                            │          
+          │   Teams                                                                                                              │          
+ ▾ PINNED │   Credits                                                                                                            │          
+ empty    │                                                                                                                      │          
+          │ SYSTEM                                                                                                               │          
+ ▾ PROJECT│   Privacy                                                                                                            │          
+ empty    │   Storage                                                                                                            │          
+          │   Updates                                                                                                            │          
+ ▾ CHATS 0│   Danger Zone                                                                                                        │          
+ empty    │   Inference                                                                                                          │          
+          │                                                                                                                      │          
+ ▾ ARCHIVE│ j / k panels · ↑↓ select account · Esc close                                                                         │          
+ empty    │                                                                                                                      │          
+          ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯          
+                        ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ ◆ Account              │ › Message · Ctrl+A agent · Ctrl+R ACP · /help                                                                    │
+ CONSOLED·whttp://127.0.0.1:7980───────────────────────────────────────────────────^K─palette──^N─node──^⇧M─mode──^T─new──^W─close──^C─quit╯

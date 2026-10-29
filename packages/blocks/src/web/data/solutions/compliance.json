@@ -1,37 +1,10 @@
 {
   "slug": "compliance",
   "name": "Compliance",
-  "navLabel": "Compliance",
-  "category": "Legal & Compliance",
   "icon": "ShieldCheck",
   "tagline": "Compare policies and evidence against your control requirements for a reviewer to check.",
-  "heroEyebrow": "Ryu for Compliance",
   "heroTitle": "Ryu for compliance",
-  "heroSubtitle": "Compare policies and evidence against your control requirements for a reviewer to check.",
-  "visualKey": "RedTeamVisual",
-  "intro": "Compliance lives and dies by control: who saw what, what an answer was based on, and whether it can be shown to a regulator. A public chatbot offers none of that. Ryu runs capable agents locally, governs every call through the Gateway with redaction and a full audit trail, and grounds answers on your own framework, so you accelerate the work without losing the paper trail.",
-  "highlights": [
-    {
-      "title": "Governed by the Gateway",
-      "description": "Every model and tool call routes through the Gateway with PII and DLP redaction, budgets, and policy controls on egress.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Auditable by default",
-      "description": "Every call is logged in the Gateway audit trail, so you can show a regulator exactly what an agent saw and produced.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Grounded in your framework",
-      "description": "Ground agents on your policies, regulations, and control library with Spaces and RAG, so answers cite the requirement.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Data stays on your machine",
-      "description": "Run a local Gemma 4 on install for fully private analysis, or route to a cloud model with redaction when you need more power.",
-      "icon": "Shield"
-    }
-  ],
+  "visualKey": "GatewayVisual",
   "useCases": [
     {
       "title": "Regulation-to-control mapping",
@@ -47,39 +20,29 @@
     },
     {
       "title": "Obligation monitoring",
-      "description": "Track regulatory and contractual obligations on a schedule and surface upcoming deadlines and changes for review."
+      "description": "Track regulatory and contractual obligations on a schedule and flag upcoming deadlines and changes for review."
     },
     {
       "title": "Audit and questionnaire response",
-      "description": "Draft answers to auditor and vendor security questionnaires grounded in your actual policies and evidence."
+      "description": "Draft answers to auditor and vendor security questionnaires from your policies and evidence."
     },
     {
       "title": "Incident and finding triage",
       "description": "Turn a finding or incident report into a structured record with affected controls, severity, and a remediation draft."
     }
   ],
-  "examplePrompts": [
-    "Map this updated regulation to our control library and list every control gap you find.",
-    "Review this data retention policy against current requirements and draft the changes needed, citing each rule.",
-    "Check the evidence in this Space against the control requirements and tell me what is still missing.",
-    "Draft answers to this vendor security questionnaire grounded in our existing policies.",
-    "Turn this audit finding into a structured record with affected controls and a remediation plan for review."
-  ],
   "faq": [
     {
       "q": "Can I prove what an agent did for an audit?",
-      "a": "Yes. Every model and tool call routes through the Gateway and is recorded in the audit trail, so you can show a regulator or auditor exactly what an agent saw, what it produced, and which model was used."
+      "a": "Partly. Model calls routed through the Gateway are logged with model, timing, and outcome; pair them with workflow history for audits. Audit records hold metadata, not prompt or response content."
     },
     {
       "q": "Is regulated data safe with Ryu?",
-      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress, so regulated data stays governed end to end."
+      "a": "Yes. With a local model, regulated data stays on your machine. For cloud models, Gateway rules can block or redact personal data. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Does Ryu guarantee we are compliant?",
-      "a": "No. Ryu accelerates mapping, review, and monitoring for a compliance professional to verify; it does not certify compliance or replace your judgment. The audit trail and source citations make that review fast and defensible."
+      "a": "No. Ryu speeds up mapping, review, and monitoring for a compliance professional to verify. It does not certify compliance."
     }
-  ],
-  "ctaTitle": "Give your team an AI compliance partner.",
-  "ctaSubtitle": "Map, review, and monitor faster, with regulated data kept private and every call on the record.",
-  "ctaNote": "Gateway-governed · PII/DLP redaction · Full audit trail"
+  ]
 }

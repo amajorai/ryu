@@ -25,6 +25,7 @@ const DETAIL = {
 	firstParty: false,
 	iconUrl: null,
 	id: "com.example.research",
+	// SAFETY: The authored app literal is an actual MarketplaceKind member; this fixture record is not derived from an unchecked runtime kind.
 	kind: "app" as MarketplaceKind,
 	name: "Research Desk",
 	orgVerified: false,

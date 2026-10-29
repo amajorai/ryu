@@ -1,3 +1,4 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/safe-mode.ts
 //
 // Typed client for Core's Safe Mode switch — the OS-style "boot with the whole
@@ -16,8 +17,16 @@
 //     already spawned still running, so the switch would report success while the
 //     CPU cost it exists to remove kept being paid.
 
+import { isLocalNode } from "@/src/store/useNodeStore.ts";
 import { invokeWhenReady } from "../tauri-ready.ts";
 import { ApiError, type ApiTarget, request } from "./client.ts";
+import {
+	type RawSafeModeState,
+	type SafeModeSentinelInput,
+	safeModeSentinelSchema,
+	safeModeSourceSchema,
+	safeModeWireSchema,
+} from "./safe-mode-wire-contracts.ts";
 
 /** Which of the three resolution tiers turned Safe Mode on. */
 export type SafeModeSource = "off" | "env" | "sentinel" | "preference";
@@ -45,27 +54,6 @@ export interface SafeModeState {
 	userClearable: boolean;
 }
 
-/** Core's snake_case wire shape, before normalisation. */
-interface RawSafeModeState {
-	enabled?: boolean;
-	preference_enabled?: boolean;
-	source?: string;
-	suppressed?: {
-		kernel_plugins?: number;
-		mcp_servers?: number;
-		plugins?: number;
-		skills?: number;
-	};
-	user_clearable?: boolean;
-}
-
-const SOURCES: readonly SafeModeSource[] = [
-	"off",
-	"env",
-	"sentinel",
-	"preference",
-];
-
 /**
  * Normalise at the boundary, defaulting every field the UI dereferences. Same
  * defensive convention as the rest of this domain: a missing `suppressed` object
@@ -75,9 +63,8 @@ const SOURCES: readonly SafeModeSource[] = [
 function toState(raw: RawSafeModeState): SafeModeState {
 	const r = raw ?? {};
 	const s = r.suppressed ?? {};
-	const source = SOURCES.includes(r.source as SafeModeSource)
-		? (r.source as SafeModeSource)
-		: "off";
+	const parsedSource = safeModeSourceSchema.safeParse(r.source);
+	const source = parsedSource.success ? parsedSource.data : "off";
 	return {
 		enabled: r.enabled ?? false,
 		preferenceEnabled: r.preference_enabled ?? false,
@@ -95,8 +82,20 @@ function toState(raw: RawSafeModeState): SafeModeState {
 }
 
 /** Read the node's Safe Mode state and what it suppresses. */
-export async function fetchSafeMode(target: ApiTarget): Promise<SafeModeState> {
-	return toState(await request<RawSafeModeState>(target, "/api/safe-mode"));
+export async function fetchSafeMode(
+	target: ApiTarget,
+	signal?: AbortSignal
+): Promise<SafeModeState> {
+	return toState(
+		safeModeWireSchema.parse(
+			await request(
+				target,
+				"/api/safe-mode",
+				{ signal },
+				gatewayJsonValueSchema
+			)
+		)
+	);
 }
 
 /**
@@ -108,12 +107,19 @@ export async function fetchSafeMode(target: ApiTarget): Promise<SafeModeState> {
  */
 export async function setSafeMode(
 	target: ApiTarget,
-	enabled: boolean
+	enabled: boolean,
+	signal?: AbortSignal
 ): Promise<void> {
-	await request(target, "/api/safe-mode", {
-		body: { enabled },
-		method: "PUT",
-	});
+	await request(
+		target,
+		"/api/safe-mode",
+		{
+			body: { enabled },
+			method: "PUT",
+			signal,
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /**
@@ -126,7 +132,9 @@ export async function setSafeMode(
  */
 export async function readSafeModeSentinel(): Promise<boolean> {
 	try {
-		return await invokeWhenReady<boolean>("get_safe_mode_sentinel");
+		return safeModeSentinelSchema.parse(
+			await invokeWhenReady<SafeModeSentinelInput>("get_safe_mode_sentinel")
+		);
 	} catch {
 		// Not running under Tauri (webapp, harness) — no sentinel to speak of.
 		return false;
@@ -145,7 +153,8 @@ export async function writeSafeModeSentinel(enabled: boolean): Promise<void> {
 
 /**
  * The one way the UI should change Safe Mode: ask Core, and fall back to the
- * sentinel only when Core cannot be reached.
+ * desktop sentinel only when the local Core cannot be reached. Remote failures
+ * remain failures: the desktop filesystem cannot represent a remote node.
  *
  * Going straight to the sentinel would be a correctness bug, not just a shortcut.
  * Core persists BOTH tiers, and the preference outlives a sentinel delete — so a
@@ -158,10 +167,11 @@ export async function writeSafeModeSentinel(enabled: boolean): Promise<void> {
  */
 export async function applySafeMode(
 	target: ApiTarget,
-	enabled: boolean
+	enabled: boolean,
+	signal?: AbortSignal
 ): Promise<"core" | "sentinel"> {
 	try {
-		await setSafeMode(target, enabled);
+		await setSafeMode(target, enabled, signal);
 		return "core";
 	} catch (e) {
 		// An `ApiError` means Core ANSWERED and refused — most importantly the 409
@@ -171,6 +181,10 @@ export async function applySafeMode(
 		// sentinel path, which is the case the sentinel exists for.
 		if (e instanceof ApiError) {
 			throw new Error(e.serverMessage ?? e.message);
+		}
+		signal?.throwIfAborted();
+		if (!isLocalNode(target)) {
+			throw e;
 		}
 		await writeSafeModeSentinel(enabled);
 		return "sentinel";

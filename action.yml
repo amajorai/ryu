@@ -20,14 +20,14 @@ inputs:
     description: "Managed Ryu Core bearer token. Falls back to RYU_MANAGED_NODE_TOKEN."
     required: false
   operation:
-    description: "Action operation: setup, run, or tool."
+    description: "Action operation: setup, run, tool, or eval."
     required: false
     default: setup
   prompt:
     description: "Prompt to send when operation is run."
     required: false
   agent:
-    description: "Saved Ryu agent id for a run or required allowlist for a tool call."
+    description: "Saved Ryu agent id for a run or eval, or the required allowlist for a tool call."
     required: false
   team:
     description: "Saved Ryu team id for a run. Mutually exclusive with agent/workflow."
@@ -69,6 +69,24 @@ inputs:
     description: "Ask Core to isolate the run in a git worktree when cwd is set."
     required: false
     default: "false"
+  eval-dataset:
+    description: "Runner-relative eval dataset file (JSON, JSONL, or CSV) for the eval operation. The Gateway's built-in dataset is used when omitted."
+    required: false
+  eval-model:
+    description: "Model the eval dataset is replayed against. Defaults to the Gateway's configured eval model."
+    required: false
+  eval-judge-model:
+    description: "Judge model for model-graded eval assertions and evaluators."
+    required: false
+  eval-scorers:
+    description: "Comma- or newline-separated Gateway evaluator ids (or overall, assertions, policy, substring, latency) to score and gate."
+    required: false
+  eval-threshold:
+    description: "Comma- or newline-separated minimums: a bare number applies to every eval-scorer (or overall when none), scorer=n sets one. The job fails below any threshold."
+    required: false
+  eval-junit-file:
+    description: "Optional runner-relative path for a JUnit XML eval report."
+    required: false
   timeout-ms:
     description: "Per-request timeout in milliseconds."
     required: false
@@ -84,6 +102,21 @@ inputs:
     description: "Write a metadata-only report to GITHUB_STEP_SUMMARY."
     required: false
     default: "true"
+  secrets:
+    description: "Newline-separated Ryu Vault values to export as masked environment variables: NAME, /folder/NAME, ENV:NAME, or ENV:/folder/NAME. Requires vault-role-id/vault-secret-id or vault-jwt-identity."
+    required: false
+  vault-role-id:
+    description: "AppRole role id of a Ryu Vault machine identity (with vault-secret-id)."
+    required: false
+  vault-secret-id:
+    description: "AppRole secret id of a Ryu Vault machine identity (with vault-role-id)."
+    required: false
+  vault-jwt-identity:
+    description: "Ryu Vault machine identity that accepts this job's GitHub OIDC token. The job needs permissions id-token write."
+    required: false
+  vault-jwt-audience:
+    description: "Audience requested for the GitHub OIDC token used with vault-jwt-identity."
+    required: false
 
 outputs:
   response:
@@ -108,6 +141,12 @@ outputs:
     description: "Run id reported by Core stream frames, when available."
   tool-calls:
     description: "Tool input/output events observed during a run as JSON."
+  vault-secrets:
+    description: "JSON array of the environment variable names exported from Ryu Vault (never values)."
+  eval-passed:
+    description: "Whether every eval threshold passed (true or false)."
+  eval-json:
+    description: "The Gateway eval run with its threshold gate as JSON."
 
 runs:
   using: node20

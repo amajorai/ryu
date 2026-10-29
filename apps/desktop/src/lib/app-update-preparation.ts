@@ -1,23 +1,57 @@
+import {
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "@ryuhq/core-client/app-request-json.ts";
 import { invoke } from "@tauri-apps/api/core";
+import { z } from "zod";
+import { isNewerVersion } from "./app-version.ts";
 
-export type AppUpdateSource =
-	| { kind: "stable" }
-	| { channel: "beta" | "canary" | "nightly"; kind: "channel" }
-	| { channel: "beta" | "stable"; kind: "tag"; tag: string };
+const appUpdateSourceSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("stable") }),
+	z.object({
+		channel: z.enum(["beta", "canary", "nightly"]),
+		kind: z.literal("channel"),
+	}),
+	z.object({
+		channel: z.enum(["beta", "canary", "nightly", "stable"]),
+		kind: z.literal("tag"),
+		tag: z.string().min(1),
+	}),
+]);
+export type AppUpdateSource = z.output<typeof appUpdateSourceSchema>;
 
 export interface PrepareAppUpdateRequest {
 	expectedVersion: string;
 	source: AppUpdateSource;
 }
 
-export interface PreparedAppUpdate {
-	artifactFile: string;
-	artifactSize: number;
-	schemaVersion: 1;
-	signature: string;
-	source: AppUpdateSource;
-	version: string;
-}
+/** Complete public PreparedAppUpdate from native app_update.rs. Strip extra
+ * fields as the previous projection did; preserve all known metadata exactly. */
+const preparedAppUpdateSchema = z.object({
+	artifactFile: z
+		.string()
+		.min(1)
+		.refine((value) => !(value.includes("/") || value.includes("\\"))),
+	artifactSize: z.number().int().nonnegative(),
+	schemaVersion: z.literal(1),
+	signature: z.string().min(1),
+	source: appUpdateSourceSchema,
+	version: z.string().min(1),
+});
+export type PreparedAppUpdate = z.output<typeof preparedAppUpdateSchema>;
+type AppUpdateNativeReplyInput = Parameters<
+	typeof appResponseValueSchema.parse
+>[0];
+type AppUpdateNativeCommand =
+	| "get_app_update_download_preference"
+	| "set_app_update_download_preference"
+	| "get_prepared_app_update"
+	| "prepare_app_update"
+	| "install_prepared_app_update"
+	| "clear_prepared_app_update";
+type AppUpdateNativeArgs =
+	| { enabled: boolean }
+	| { request: PrepareAppUpdateRequest };
 
 export type PreparedAppUpdateSnapshot =
 	| { kind: "empty" }
@@ -25,85 +59,21 @@ export type PreparedAppUpdateSnapshot =
 	| { kind: "ready"; update: PreparedAppUpdate };
 
 type InvokeNative = (
-	command: string,
-	args?: Record<string, unknown>
-) => Promise<unknown>;
+	command: AppUpdateNativeCommand,
+	args?: AppUpdateNativeArgs
+) => Promise<AppResponseValue>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseSource(value: unknown): AppUpdateSource | null {
-	if (!(isRecord(value) && typeof value.kind === "string")) {
-		return null;
-	}
-	switch (value.kind) {
-		case "stable":
-			return { kind: "stable" };
-		case "channel":
-			if (
-				value.channel === "beta" ||
-				value.channel === "canary" ||
-				value.channel === "nightly"
-			) {
-				return { channel: value.channel, kind: "channel" };
-			}
-			return null;
-		case "tag":
-			if (
-				(value.channel === "beta" || value.channel === "stable") &&
-				typeof value.tag === "string" &&
-				value.tag.length > 0
-			) {
-				return { channel: value.channel, kind: "tag", tag: value.tag };
-			}
-			return null;
-		default:
-			return null;
-	}
-}
-
-function parsePreparedAppUpdate(value: unknown): PreparedAppUpdate | null {
-	if (!isRecord(value)) {
-		return null;
-	}
-	const source = parseSource(value.source);
-	if (
-		value.schemaVersion !== 1 ||
-		typeof value.version !== "string" ||
-		value.version.length === 0 ||
-		typeof value.signature !== "string" ||
-		value.signature.length === 0 ||
-		typeof value.artifactFile !== "string" ||
-		value.artifactFile.length === 0 ||
-		value.artifactFile.includes("/") ||
-		value.artifactFile.includes("\\") ||
-		typeof value.artifactSize !== "number" ||
-		!Number.isSafeInteger(value.artifactSize) ||
-		value.artifactSize < 0 ||
-		source === null
-	) {
-		return null;
-	}
-	return {
-		artifactFile: value.artifactFile,
-		artifactSize: value.artifactSize,
-		schemaVersion: 1,
-		signature: value.signature,
-		source,
-		version: value.version,
-	};
-}
-
-function parsePreparedResult(value: unknown): PreparedAppUpdate | null {
+function parsePreparedResult(
+	value: AppUpdateNativeReplyInput
+): PreparedAppUpdate | null {
 	if (value === null || value === undefined) {
 		return null;
 	}
-	const prepared = parsePreparedAppUpdate(value);
-	if (!prepared) {
+	const prepared = preparedAppUpdateSchema.safeParse(value);
+	if (!prepared.success) {
 		throw new Error("Invalid prepared app update returned by Tauri");
 	}
-	return prepared;
+	return prepared.data;
 }
 
 export class AppUpdatePreparationCoordinator {
@@ -111,8 +81,11 @@ export class AppUpdatePreparationCoordinator {
 		string,
 		Promise<PreparedAppUpdate | null>
 	>();
+	private readonly inFlightOperationIds = new Map<string, number>();
 	private readonly listeners = new Set<() => void>();
 	private snapshot: PreparedAppUpdateSnapshot = { kind: "loading" };
+	private nextOperationId = 0;
+	private lastPublishedOperationId = 0;
 
 	constructor(private readonly invokeNative: InvokeNative) {}
 
@@ -130,12 +103,25 @@ export class AppUpdatePreparationCoordinator {
 		}
 	}
 
+	private publish(
+		operationId: number,
+		snapshot: PreparedAppUpdateSnapshot
+	): boolean {
+		if (operationId < this.lastPublishedOperationId) {
+			return false;
+		}
+		this.lastPublishedOperationId = operationId;
+		this.setSnapshot(snapshot);
+		return true;
+	}
+
 	async getAutomaticDownload(): Promise<boolean> {
 		try {
 			const value = await this.invokeNative(
 				"get_app_update_download_preference"
 			);
-			return typeof value === "boolean" ? value : true;
+			const parsed = z.boolean().safeParse(value);
+			return parsed.success ? parsed.data : true;
 		} catch {
 			return true;
 		}
@@ -153,12 +139,14 @@ export class AppUpdatePreparationCoordinator {
 	}
 
 	async refresh(): Promise<PreparedAppUpdate | null> {
+		const operationId = ++this.nextOperationId;
 		const value = await this.invokeNative("get_prepared_app_update");
 		const prepared = parsePreparedResult(value);
-		this.setSnapshot(
+		const published = this.publish(
+			operationId,
 			prepared ? { kind: "ready", update: prepared } : { kind: "empty" }
 		);
-		return prepared;
+		return published ? prepared : null;
 	}
 
 	prepare(request: PrepareAppUpdateRequest): Promise<PreparedAppUpdate | null> {
@@ -167,38 +155,65 @@ export class AppUpdatePreparationCoordinator {
 		if (existing) {
 			return existing;
 		}
+		const operationId = ++this.nextOperationId;
 		const operation = this.invokeNative("prepare_app_update", { request })
 			.then(parsePreparedResult)
 			.then((prepared) => {
-				this.setSnapshot(
+				if (
+					prepared &&
+					(!(
+						isNewerVersion("", request.expectedVersion) &&
+						isNewerVersion("", prepared.version)
+					) ||
+						isNewerVersion(request.expectedVersion, prepared.version) ||
+						isNewerVersion(prepared.version, request.expectedVersion))
+				) {
+					throw new Error(
+						"Prepared app update returned a different version; check again before installing"
+					);
+				}
+				const published = this.publish(
+					operationId,
 					prepared ? { kind: "ready", update: prepared } : { kind: "empty" }
 				);
-				return prepared;
+				return published ? prepared : null;
 			})
 			.finally(() => {
 				if (this.inFlight.get(key) === operation) {
 					this.inFlight.delete(key);
+					this.inFlightOperationIds.delete(key);
 				}
 			});
 		this.inFlight.set(key, operation);
+		this.inFlightOperationIds.set(key, operationId);
 		return operation;
 	}
 
-	async install(): Promise<boolean> {
+	async install(): Promise<boolean | null> {
+		const operationId = ++this.nextOperationId;
 		const value = await this.invokeNative("install_prepared_app_update");
-		if (value !== true && value !== false) {
+		const installed = z.boolean().nullable().safeParse(value);
+		if (!installed.success) {
 			throw new Error("Invalid prepared app update install result from Tauri");
 		}
-		if (value) {
-			this.setSnapshot({ kind: "empty" });
+		if (installed.data) {
+			this.publish(operationId, { kind: "empty" });
 		}
-		return value;
+		return installed.data;
 	}
 
 	async clear(): Promise<boolean> {
+		const operationId = ++this.nextOperationId;
 		try {
 			await this.invokeNative("clear_prepared_app_update");
-			this.setSnapshot({ kind: "empty" });
+			this.publish(operationId, { kind: "empty" });
+			// A new preparation after clearing must not join a superseded promise.
+			for (const [key, preparationId] of this.inFlightOperationIds) {
+				if (preparationId <= operationId) {
+					this.inFlight.delete(key);
+					this.inFlightOperationIds.delete(key);
+				}
+			}
 			return true;
 		} catch {
 			return false;
@@ -213,7 +228,9 @@ export function createAppUpdatePreparationCoordinator(
 }
 
 const coordinator = createAppUpdatePreparationCoordinator((command, args) =>
-	invoke<unknown>(command, args)
+	invoke<AppUpdateNativeReplyInput>(command, args).then(
+		appResponseValueSchema.parse
+	)
 );
 
 export const getAutomaticAppUpdateDownload = (): Promise<boolean> =>
@@ -226,7 +243,7 @@ export const getPreparedAppUpdate = (): Promise<PreparedAppUpdate | null> =>
 export const prepareAppUpdate = (
 	request: PrepareAppUpdateRequest
 ): Promise<PreparedAppUpdate | null> => coordinator.prepare(request);
-export const installPreparedAppUpdate = (): Promise<boolean> =>
+export const installPreparedAppUpdate = (): Promise<boolean | null> =>
 	coordinator.install();
 export const clearPreparedAppUpdate = (): Promise<boolean> =>
 	coordinator.clear();

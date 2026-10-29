@@ -80,6 +80,15 @@ test.describe("onboarding agent suggestions proof", () => {
 		await expect(page.getByRole("button", { name: "Add 1 agent" })).toHaveCount(
 			0
 		);
+		// Each draft shows how it will work, starting as "Acts as you".
+		await expect(
+			page
+				.getByTestId("agent-suggestion-identity-agent-suggestion-release-desk")
+				.getByText("Acts as you", { exact: true })
+		).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: "Change how Inbox Triage works" })
+		).toBeVisible();
 	});
 
 	test("adds only the selected drafts with one confirmation", async ({
@@ -105,6 +114,28 @@ test.describe("onboarding agent suggestions proof", () => {
 		await page
 			.getByRole("checkbox", { name: "I reviewed Release Desk" })
 			.click();
+		await page
+			.getByRole("button", { name: "Change how Release Desk works" })
+			.click();
+		const identityCards = page.getByRole("radiogroup", {
+			name: "How should Release Desk work?",
+		});
+		await expect(identityCards.getByRole("radio")).toHaveCount(3);
+		await identityCards.getByText("Its own identity", { exact: true }).click();
+		await page
+			.getByRole("button", { name: "Done choosing how Release Desk works" })
+			.click();
+		await expect(identityCards).toHaveCount(0);
+		await expect(
+			page
+				.getByTestId("agent-suggestion-identity-agent-suggestion-release-desk")
+				.getByText("Its own identity", { exact: true })
+		).toBeVisible();
+		await expect(
+			page
+				.getByTestId("agent-suggestion-identity-agent-suggestion-inbox-triage")
+				.getByText("Acts as you", { exact: true })
+		).toBeVisible();
 		await expect(
 			page.getByRole("button", { name: "Add 1 agent" })
 		).toBeVisible();
@@ -118,6 +149,15 @@ test.describe("onboarding agent suggestions proof", () => {
 		await expect(page.getByText("Agents added", { exact: true })).toHaveCount(
 			0
 		);
+		const createdIdentityModes = await page.evaluate(
+			() =>
+				/* SAFETY: onboarding-agent-suggestions-proof.tsx sets this when Add is clicked. */ (
+					window as Window & {
+						__agentSuggestionsProof?: Record<string, string>;
+					}
+				).__agentSuggestionsProof
+		);
+		expect(createdIdentityModes).toEqual({ "Release Desk": "individual" });
 		await expect(
 			page.getByRole("heading", { name: "Suggested agents for your work" })
 		).toHaveCSS("filter", "none");
@@ -130,6 +170,7 @@ test.describe("onboarding agent suggestions proof", () => {
 					consoleErrors,
 					failedRequests,
 					createdAgents: ["Release Desk"],
+					identityModes: createdIdentityModes,
 					selection: ["Release Desk"],
 					safetyProfile: "Trial/read-only",
 				},

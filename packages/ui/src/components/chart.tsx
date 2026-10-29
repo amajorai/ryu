@@ -2,6 +2,7 @@
 
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import get from "lodash/get.js";
 import {
 	type ComponentProps,
 	type ComponentType,
@@ -10,16 +11,33 @@ import {
 	type ReactNode,
 	useContext,
 	useId,
+	useLayoutEffect,
 	useMemo,
 } from "react";
-import type { TooltipValueType } from "recharts";
+import type {
+	LegendPayload,
+	TooltipPayloadEntry,
+	TooltipValueType,
+} from "recharts";
 import * as RechartsPrimitive from "recharts";
+import {
+	isNativeNumber,
+	isNativeObjectReceiver,
+	isNativeText,
+} from "../lib/native-primitive-observation.ts";
+import {
+	chartColorVariableName,
+	safeChartColor,
+	sanitizeChartIdentifier,
+} from "./chart-safety.ts";
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const;
 
 const INITIAL_DIMENSION = { width: 320, height: 200 } as const;
 type TooltipNameType = number | string;
+
+export { chartColorVariableName, safeChartColor } from "./chart-safety.ts";
 
 export type ChartConfig = Record<
 	string,
@@ -36,6 +54,13 @@ interface ChartContextProps {
 	config: ChartConfig;
 }
 
+interface ChartColorStyle extends CSSProperties {
+	[key: `--color-${string}`]: string;
+}
+interface ChartSwatchStyle extends CSSProperties {
+	"--chart-swatch": string | undefined;
+}
+
 const ChartContext = createContext<ChartContextProps | null>(null);
 
 function useChart() {
@@ -48,12 +73,25 @@ function useChart() {
 	return context;
 }
 
+function chartColors(config: ChartConfig): ChartColorStyle {
+	return Object.fromEntries(
+		Object.entries(config).flatMap(([key, item]) => {
+			const light = safeChartColor(item.theme?.light ?? item.color);
+			const dark = safeChartColor(item.theme?.dark ?? item.color);
+			return light && dark
+				? [[chartColorVariableName(key), `light-dark(${light}, ${dark})`]]
+				: [];
+		})
+	);
+}
+
 function ChartContainer({
 	id,
 	className,
 	children,
 	config,
 	initialDimension = INITIAL_DIMENSION,
+	style,
 	...props
 }: ComponentProps<"div"> & {
 	config: ChartConfig;
@@ -66,20 +104,23 @@ function ChartContainer({
 	};
 }) {
 	const uniqueId = useId();
-	const chartId = `chart-${id ?? uniqueId.replace(/:/g, "")}`;
+	const chartId = `chart-${sanitizeChartIdentifier(id ?? uniqueId)}`;
+	// Sanitized color variables go on the wrapper during render so server-rendered
+	// charts are colored before hydration; config colors win over caller style.
+	const chartStyle: ChartColorStyle = { ...style, ...chartColors(config) };
 
 	return (
 		<ChartContext.Provider value={{ config }}>
 			<div
 				className={cn(
-					"flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-hidden [&_.recharts-surface]:outline-hidden",
+					"flex aspect-video justify-center text-xs [color-scheme:light] dark:[color-scheme:dark] [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-sector]:outline-hidden [&_.recharts-surface]:outline-hidden",
 					className
 				)}
 				data-chart={chartId}
 				data-slot="chart"
 				{...props}
+				style={chartStyle}
 			>
-				<ChartStyle config={config} id={chartId} />
 				<RechartsPrimitive.ResponsiveContainer
 					initialDimension={initialDimension}
 				>
@@ -90,38 +131,28 @@ function ChartContainer({
 	);
 }
 
-const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
-	const colorConfig = Object.entries(config).filter(
-		([, config]) => config.theme ?? config.color
-	);
-
-	if (!colorConfig.length) {
-		return null;
-	}
-
-	return (
-		<style
-			dangerouslySetInnerHTML={{
-				__html: Object.entries(THEMES)
-					.map(
-						([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-	.map(([key, itemConfig]) => {
-		const color =
-			itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ??
-			itemConfig.color;
-		return color ? `  --color-${key}: ${color};` : null;
-	})
-	.join("\n")}
+// Preserve the exported style helper for chart hosts that own their wrapper.
+function ChartStyle({ id, config }: { id: string; config: ChartConfig }) {
+	const colorStyle: ChartColorStyle = chartColors(config);
+	useLayoutEffect(() => {
+		const element = document.querySelector(
+			`[data-chart="${sanitizeChartIdentifier(id)}"]`
+		);
+		if (!(element instanceof HTMLElement)) {
+			return;
+		}
+		element.classList.add("[color-scheme:light]", "dark:[color-scheme:dark]");
+		for (const [name, color] of Object.entries(colorStyle)) {
+			element.style.setProperty(name, color);
+		}
+		return () => {
+			for (const name of Object.keys(colorStyle)) {
+				element.style.removeProperty(name);
+			}
+		};
+	}, [colorStyle, id]);
+	return null;
 }
-`
-					)
-					.join("\n"),
-			}}
-		/>
-	);
-};
 
 const ChartTooltip = RechartsPrimitive.Tooltip;
 
@@ -164,7 +195,7 @@ function ChartTooltipContent({
 		const key = `${labelKey ?? item?.dataKey ?? item?.name ?? "value"}`;
 		const itemConfig = getPayloadConfigFromPayload(config, item, key);
 		const value =
-			!labelKey && typeof label === "string"
+			!labelKey && isNativeText(label)
 				? (config[label]?.label ?? label)
 				: itemConfig?.label;
 
@@ -200,7 +231,7 @@ function ChartTooltipContent({
 	return (
 		<div
 			className={cn(
-				"relative grid min-w-32 items-start gap-1.5 rounded-xl bg-popover/70 px-2.5 py-1.5 text-popover-foreground text-xs backdrop-blur-2xl backdrop-saturate-150 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit]",
+				"corner-squircle before:corner-squircle relative grid min-w-32 items-start gap-1.5 rounded-xl bg-popover/70 px-2.5 py-1.5 text-popover-foreground text-xs backdrop-blur-2xl backdrop-saturate-150 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit]",
 				className
 			)}
 		>
@@ -231,7 +262,7 @@ function ChartTooltipContent({
 											!hideIndicator && (
 												<div
 													className={cn(
-														"shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
+														"corner-squircle shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
 														{
 															"h-2.5 w-2.5": indicator === "dot",
 															"w-1": indicator === "line",
@@ -241,6 +272,9 @@ function ChartTooltipContent({
 														}
 													)}
 													style={
+														// SAFETY: These two authored custom-property slots are sent to
+														// native React style.setProperty unchanged; CSSProperties omits
+														// them. This does not validate the caller/payload color value.
 														{
 															"--color-bg": indicatorColor,
 															"--color-border": indicatorColor,
@@ -263,7 +297,7 @@ function ChartTooltipContent({
 											</div>
 											{item.value != null && (
 												<span className="font-medium font-mono text-foreground tabular-nums">
-													{typeof item.value === "number"
+													{isNativeNumber(item.value)
 														? formatNumber(item.value)
 														: String(item.value)}
 												</span>
@@ -310,6 +344,9 @@ function ChartLegendContent({
 				.map((item, index) => {
 					const key = `${nameKey ?? item.dataKey ?? "value"}`;
 					const itemConfig = getPayloadConfigFromPayload(config, item, key);
+					const swatchStyle: ChartSwatchStyle = {
+						"--chart-swatch": item.color,
+					};
 
 					return (
 						<div
@@ -322,10 +359,8 @@ function ChartLegendContent({
 								<itemConfig.icon />
 							) : (
 								<div
-									className="h-2 w-2 shrink-0 rounded-[2px]"
-									style={{
-										backgroundColor: item.color,
-									}}
+									className="corner-squircle h-2 w-2 shrink-0 rounded-[2px] bg-(--chart-swatch)"
+									style={swatchStyle}
 								/>
 							)}
 							{itemConfig?.label}
@@ -338,35 +373,40 @@ function ChartLegendContent({
 
 function getPayloadConfigFromPayload(
 	config: ChartConfig,
-	payload: unknown,
+	payload:
+		| TooltipPayloadEntry<TooltipValueType, TooltipNameType>
+		| LegendPayload
+		| undefined,
 	key: string
 ) {
-	if (typeof payload !== "object" || payload === null) {
+	if (!isNativeObjectReceiver(payload) || payload === null) {
 		return undefined;
 	}
 
+	// Capture the raw nested receiver once before checking its object brand.
+	// Recharts deliberately leaves this payload opaque; no DTO is inferred.
+	const rawPayload: unknown =
+		"payload" in payload ? payload.payload : undefined;
 	const payloadPayload =
-		"payload" in payload &&
-		typeof payload.payload === "object" &&
-		payload.payload !== null
-			? payload.payload
+		isNativeObjectReceiver(rawPayload) && rawPayload !== null
+			? rawPayload
 			: undefined;
 
-	let configLabelKey: string = key;
+	let configLabelKey = key;
+	let outerMatches = false;
 
-	if (
-		key in payload &&
-		typeof payload[key as keyof typeof payload] === "string"
-	) {
-		configLabelKey = payload[key as keyof typeof payload] as string;
-	} else if (
-		payloadPayload &&
-		key in payloadPayload &&
-		typeof payloadPayload[key as keyof typeof payloadPayload] === "string"
-	) {
-		configLabelKey = payloadPayload[
-			key as keyof typeof payloadPayload
-		] as string;
+	if (key in payload) {
+		const rawLabel: unknown = get(payload, [key]);
+		if (isNativeText(rawLabel)) {
+			configLabelKey = rawLabel;
+			outerMatches = true;
+		}
+	}
+	if (!outerMatches && payloadPayload && key in payloadPayload) {
+		const rawNestedLabel: unknown = get(payloadPayload, [key]);
+		if (isNativeText(rawNestedLabel)) {
+			configLabelKey = rawNestedLabel;
+		}
 	}
 
 	return configLabelKey in config ? config[configLabelKey] : config[key];

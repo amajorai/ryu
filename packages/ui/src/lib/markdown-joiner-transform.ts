@@ -23,7 +23,7 @@ export const markdownJoinerTransform =
 							id: lastTextDeltaId,
 							text: remaining,
 							type: "text-delta",
-						} as TextStreamPart<TOOLS>);
+						});
 					}
 				}
 			},
@@ -46,7 +46,7 @@ export const markdownJoinerTransform =
 							id: lastTextDeltaId,
 							text: remaining,
 							type: "text-delta",
-						} as TextStreamPart<TOOLS>);
+						});
 					}
 					textStreamEnded = true;
 					controller.enqueue(chunk);

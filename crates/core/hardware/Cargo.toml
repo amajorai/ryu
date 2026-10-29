@@ -1,15 +1,15 @@
 [package]
 name = "ryu-hardware"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Ryu Hardware Protocol (RHP v1) node backend — an extracted Core capability crate: the paired-device registry (SQLite store + revocable per-device tokens), pairing nonce verification, the Opus/WAV codec edge, the per-connection realtime session state machine (audio buffering + ambient meeting bridge), the live device-sender registry, the display-nudge loop, and the device-registry + TRMNL display HTTP surface. In-process default; Core consumes it as a NON-optional path dependency (the codec is also used by the voice module, the store backs ServerState in every build). The public ws/pair ingress route + the chat-turn orchestration (welded to Core's run_text_turn/voice/TTS session loop) stay Core-side as consumers of this crate's types."
+description = "Ryu Hardware Protocol (RHP v1.1) node backend — an extracted Core capability crate: the paired-device registry (SQLite store, revocable per-device and relay tokens, the sealed node identity), legacy and v2 press-to-confirm pairing, the hand-written Noise XX secure session layer (RHN framing, rekey and limits), device capability validation and the live invoke registry, the Opus/WAV codec edge, the per-connection realtime session state machine (audio buffering + ambient meeting bridge), the display-nudge loop, and the device-registry + TRMNL display HTTP surface. In-process default; Core consumes it as a NON-optional path dependency (the codec is also used by the voice module, the store backs ServerState in every build). The public ws ingress, the protected pair routes and the chat-turn orchestration (welded to Core's run_text_turn/voice/TTS session loop) stay Core-side as consumers of this crate's types."
 repository = "https://github.com/amajorai/ryu"
 
 # Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
 # axum router has no version skew. This crate has ZERO dependency on apps/core.
 [dependencies]
-tokio = { version = "1", features = ["sync", "rt", "macros"] }
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 axum = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -22,6 +22,15 @@ tracing = "0.1"
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
+# RHP v1.1 secure layer + pairing v2. Every one is already in Cargo.lock (no new
+# packages): the hand-written Noise XX (`noise.rs`) and pairing crypto
+# (`pair_crypto.rs`) use these primitives directly instead of `snow`.
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+aes-gcm = "0.10"
+hmac = "0.12"
+subtle = "2"
+zeroize = { version = "1", features = ["derive"] }
+base64 = "0.22"
 opus = "0.3"
 hound = "3"
 async-trait = "0.1"
@@ -32,4 +41,4 @@ async-trait = "0.1"
 # Core supplies in-process or sidecar-backed impls of each.
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time"] }

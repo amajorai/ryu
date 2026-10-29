@@ -1,8 +1,16 @@
 "use client";
 
-import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable";
-import { SPRING_MOUSE } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import type { MotionStyle } from "motion/react";
+import css from "./magnetic.module.css";
+
+interface Inline1Style extends MotionStyle {
+	"--magnetic-1-x"?: MotionStyle["x"];
+	"--magnetic-1-y"?: MotionStyle["y"];
+}
+
+import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable.ts";
+import { SPRING_MOUSE } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	motion,
 	useMotionValue,
@@ -47,13 +55,17 @@ export function Magnetic({
 		y.set(0);
 	};
 
+	const inline1Style: Inline1Style = {
+		"--magnetic-1-x": sx,
+		"--magnetic-1-y": sy,
+	};
 	return (
 		<motion.div
-			className={cn("inline-block", className)}
+			className={[css.inline1, cn("inline-block", className)].join(" ")}
 			onMouseLeave={onLeave}
 			onMouseMove={onMove}
 			ref={ref}
-			style={{ x: sx, y: sy }}
+			style={inline1Style}
 		>
 			{children}
 		</motion.div>

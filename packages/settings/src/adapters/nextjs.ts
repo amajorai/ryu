@@ -9,8 +9,14 @@ export function useNextJsAdapter(): NavigationAdapter {
 	const pathname = usePathname();
 
 	return {
-		navigate: (path: string) => router.push(path as Route),
+		navigate: (path: string) =>
+			router.push(
+				/* SAFETY: NavigationAdapter is router-agnostic, so callers pass paths the host app owns as plain strings; this is the documented Next nonliteral-href cast. */ path as Route
+			),
 		getQueryParam: (param: string) => searchParams.get(param),
-		clearQueryParams: () => router.replace(pathname as Route),
+		clearQueryParams: () =>
+			router.replace(
+				/* SAFETY: usePathname returns the pathname of the page being rendered, which is always one of this app's routes. */ pathname as Route
+			),
 	};
 }

@@ -28,12 +28,12 @@ import {
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
-} from "@ryu/blocks/desktop/settings-items";
+} from "@ryu/blocks/desktop/settings-items.tsx";
 import {
 	SettingsIconTile,
 	SettingsSubpages,
-} from "@ryu/blocks/desktop/settings-nav";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/blocks/desktop/settings-nav.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
@@ -165,25 +165,27 @@ function Story() {
 					Sidebar rows
 				</h2>
 				<div className="flex flex-col gap-0.5">
-					{[
-						{ icon: TextFontIcon, label: "Appearance", tint: "purple" },
-						{ icon: ComputerIcon, label: "This device", tint: "gray" },
-						{
-							icon: SparklesIcon,
-							label: "Default agent & model",
-							tint: "blue",
-						},
-						{ icon: Delete02Icon, label: "Danger zone", tint: "red" },
-					].map((row) => (
+					{(
+						[
+							{ icon: TextFontIcon, label: "Appearance", tint: "purple" },
+							{ icon: ComputerIcon, label: "This device", tint: "gray" },
+							{
+								icon: SparklesIcon,
+								label: "Default agent & model",
+								tint: "blue",
+							},
+							{ icon: Delete02Icon, label: "Danger zone", tint: "red" },
+						] satisfies {
+							icon: typeof TextFontIcon;
+							label: string;
+							tint: React.ComponentProps<typeof SettingsIconTile>["tint"];
+						}[]
+					).map((row) => (
 						<div
 							className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"
 							key={row.label}
 						>
-							<SettingsIconTile
-								icon={row.icon}
-								size="sm"
-								tint={row.tint as "blue"}
-							/>
+							<SettingsIconTile icon={row.icon} size="sm" tint={row.tint} />
 							{row.label}
 						</div>
 					))}

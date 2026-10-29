@@ -139,8 +139,7 @@ describe("isCommunityEntry", () => {
 		// instead, this must stay false so the mismatch surfaces as a test failure
 		// rather than as a silently missing notice in production.
 		const camel = item({});
-		(camel.entry as unknown as Record<string, unknown>).communityOrigin =
-			"community";
+		Object.assign(camel.entry, { communityOrigin: "community" });
 		expect(isCommunityEntry(camel)).toBe(false);
 	});
 
@@ -182,9 +181,7 @@ describe("priceLabel", () => {
 
 	test("null when the amount is not a number (malformed upstream card)", () => {
 		const malformed = item({});
-		(malformed.entry as unknown as Record<string, unknown>).pricing = {
-			amountMinor: "1500",
-		};
+		Object.assign(malformed.entry, { pricing: { amountMinor: "1500" } });
 		expect(priceLabel(malformed.entry)).toBeNull();
 	});
 });

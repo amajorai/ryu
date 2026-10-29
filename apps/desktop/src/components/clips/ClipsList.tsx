@@ -4,13 +4,13 @@
 // recordings on the active node. Picking one hands its id to `onPick`, which the
 // composer controls turn into a chat attachment (context summary + key frames).
 
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import { IconMovie } from "@tabler/icons-react";
 import { useMemo } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -48,7 +48,8 @@ export function ClipsList({ onPick }: ClipsListProps) {
 				render={
 					<Button
 						aria-label="Attach recording"
-						className="size-7 rounded-full"
+						className="size-7"
+						radius="pill"
 						size="icon"
 						title="Attach recording"
 						type="button"
@@ -66,7 +67,10 @@ export function ClipsList({ onPick }: ClipsListProps) {
 						<DropdownMenuItem key={clip.id} onClick={() => onPick(clip.id)}>
 							<span className="flex min-w-0 flex-1 items-center gap-2">
 								<IconMovie className="size-4 shrink-0 text-muted-foreground" />
-								<span className="truncate">
+								<span
+									className="truncate"
+									title={clip.title || "Untitled clip"}
+								>
 									{clip.title || "Untitled clip"}
 								</span>
 							</span>

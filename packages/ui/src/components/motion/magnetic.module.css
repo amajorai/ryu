@@ -1,0 +1,6 @@
+.inline1 {
+	transform: translate(
+		calc(var(--magnetic-1-x) * 1px),
+		calc(var(--magnetic-1-y) * 1px)
+	);
+}

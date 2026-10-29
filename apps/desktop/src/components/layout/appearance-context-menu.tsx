@@ -6,6 +6,7 @@ import {
 } from "@ryu/ui/components/context-menu.tsx";
 import type { ReactNode } from "react";
 import type { AgentRowStyle } from "@/src/hooks/useAgentRowStyle.ts";
+import { useCompactRailPreference } from "@/src/hooks/useCompactRail.ts";
 import {
 	TAB_LAYOUT_OPTIONS,
 	type TabLayout,
@@ -160,6 +161,18 @@ export function SidebarListAppearanceMenuItems({
 			>
 				Messaging-style agent rows
 			</ContextMenuCheckboxItem>
+			<CompactRailMenuItem />
 		</>
+	);
+}
+
+/** The compact-rail switch. It reads its own preference so the sidebar menu and
+ *  the rail's menu offer the same row without threading state through either. */
+export function CompactRailMenuItem() {
+	const [enabled, setEnabled] = useCompactRailPreference();
+	return (
+		<ContextMenuCheckboxItem checked={enabled} onCheckedChange={setEnabled}>
+			Agent rail in narrow windows
+		</ContextMenuCheckboxItem>
 	);
 }

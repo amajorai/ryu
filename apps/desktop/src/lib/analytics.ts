@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/analytics.ts
 //
 // Closed-UI product analytics for the desktop shell (P3 of
@@ -26,15 +27,21 @@
 //
 // Nothing hardcoded: the PostHog key/host come from VITE_POSTHOG_KEY /
 // VITE_POSTHOG_HOST. With no key the whole module is a graceful no-op.
+//
+// The SDK is downloaded only when the first event is tracked after
+// initAnalytics(), once the main thread is idle, so screens that send nothing
+// never load it. The gate above applies before, during and after that import.
+// Events tracked meanwhile wait in a small queue that opting out clears, and
+// reach the egress log only when they are handed to the client.
 
-import posthog from "posthog-js";
+import type { PostHog } from "posthog-js";
+import { runWhenIdle } from "./idle.ts";
 
 // --- Config (swappable, env-driven) -----------------------------------------
 
-const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined;
+const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY;
 const POSTHOG_HOST =
-	(import.meta.env.VITE_POSTHOG_HOST as string | undefined) ??
-	"https://eu.i.posthog.com";
+	import.meta.env.VITE_POSTHOG_HOST ?? "https://eu.i.posthog.com";
 
 // localStorage keys (under the repo's `ryu:` namespace).
 const INSTALL_ID_KEY = "ryu:analytics-install-id";
@@ -91,10 +98,7 @@ export const ANALYTICS_EVENT_NAMES = [
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
 
 /** A human-readable description of each event type, shown in the inspector. */
-export const ANALYTICS_EVENT_CATALOG: Record<
-	AnalyticsEventName,
-	{ description: string; props: string[] }
-> = {
+export const ANALYTICS_EVENT_CATALOG = {
 	onboarding_completed: {
 		description: "Sent once when first-run onboarding finishes.",
 		props: [],
@@ -144,7 +148,10 @@ export const ANALYTICS_EVENT_CATALOG: Record<
 			"Onboarding could not read the agent catalog, so the 'Add your agents' step fell back to its curated list.",
 		props: ["reason"],
 	},
-};
+} satisfies Record<
+	AnalyticsEventName,
+	{ description: string; props: string[] }
+>;
 
 // --- Egress audit log -------------------------------------------------------
 
@@ -161,8 +168,18 @@ function readEgressLog(): EgressLogEntry[] {
 		if (!raw) {
 			return [];
 		}
-		const parsed = JSON.parse(raw) as unknown;
-		return Array.isArray(parsed) ? (parsed as EgressLogEntry[]) : [];
+		return z
+			.array(
+				z.object({
+					at: z.number(),
+					event: z.enum(ANALYTICS_EVENT_NAMES),
+					props: z.record(
+						z.string(),
+						z.union([z.string(), z.number(), z.boolean()])
+					),
+				})
+			)
+			.parse(JSON.parse(raw));
 	} catch {
 		return [];
 	}
@@ -216,6 +233,17 @@ export function getInstallId(): string {
 // --- Runtime state + gate ---------------------------------------------------
 
 let initialized = false;
+// The live client once the SDK has loaded, and the one in-flight load.
+let client: PostHog | null = null;
+let loading: Promise<PostHog | null> | null = null;
+let loadScheduled = false;
+let loadFailed = false;
+// Events tracked after initAnalytics() but before the SDK arrived. They reach
+// the egress log only when they are actually handed to the client.
+const pending: AnalyticsEvent[] = [];
+const MAX_PENDING_EVENTS = 50;
+// A Privacy toggle made while the SDK was not loaded, replayed on the client.
+let toggledBeforeLoad: boolean | null = null;
 // In-memory mirror of the opt-out gate. Seeded synchronously from the localStorage
 // mirror so egress is gated before the async Core read resolves.
 let enabled = readEnabledMirror();
@@ -247,49 +275,135 @@ export function isAnalyticsEnabled(): boolean {
 	return enabled;
 }
 
+/** Hand one event to the live client and record it in the egress log. */
+function send(posthog: PostHog, payload: AnalyticsEvent): void {
+	const { event, ...props } = payload;
+	posthog.capture(event, props);
+	appendEgressLog({
+		event,
+		props: props satisfies EgressLogEntry["props"],
+		at: Date.now(),
+	});
+}
+
+/** Bring the SDK's persisted opt-in state in line with the gate. A toggle made
+ *  while the SDK was not loaded never reached its storage, so replay it; with
+ *  no toggle, only a stored state that disagrees with the gate is corrected. */
+function syncConsent(posthog: PostHog): void {
+	if (
+		toggledBeforeLoad === null &&
+		posthog.has_opted_out_capturing() !== enabled
+	) {
+		return;
+	}
+	if (enabled) {
+		posthog.opt_in_capturing();
+	} else {
+		posthog.opt_out_capturing();
+	}
+}
+
+function loadPostHog(key: string): Promise<PostHog | null> {
+	loading ??= import("posthog-js")
+		.then(({ default: posthog }) => {
+			posthog.init(key, {
+				disable_session_recording: true,
+				api_host: POSTHOG_HOST,
+				// No automatic event collection: we send only the typed enum below.
+				autocapture: false,
+				capture_pageview: false,
+				capture_pageleave: false,
+				// Anonymous until an explicit identify() (which this module never calls).
+				person_profiles: "identified_only",
+				// Random, account-unlinked install id as the distinct id.
+				bootstrap: { distinctID: getInstallId() },
+				// Respect the opt-out from the very first event (the gate as it is
+				// now, after any toggle made before the SDK loaded).
+				opt_out_capturing_by_default: !enabled,
+			});
+			// Tag all events from this surface so we can separate product (desktop) users
+			// from marketing (landing page) visitors in PostHog dashboards.
+			posthog.register({ $source: "desktop" });
+			syncConsent(posthog);
+			client = posthog;
+			for (const queued of pending.splice(0)) {
+				if (!enabled) {
+					break;
+				}
+				try {
+					send(posthog, queued);
+				} catch {
+					// Never let an analytics failure surface to the user.
+				}
+			}
+			return posthog;
+		})
+		.catch(() => {
+			// The queued events were never sent, so they are dropped unlogged.
+			loadFailed = true;
+			pending.length = 0;
+			return null;
+		});
+	return loading;
+}
+
+/** Start the SDK download once, when the main thread is next idle. */
+function scheduleLoad(key: string): void {
+	if (loadScheduled) {
+		return;
+	}
+	loadScheduled = true;
+	runWhenIdle(() => {
+		loadPostHog(key).catch(() => undefined);
+	});
+}
+
 /**
  * Initialize PostHog once. Safe to call when no key is set (graceful no-op). The
  * install id is the bootstrap distinct id, and identify() is never called — events
- * stay anonymous and account-unlinked.
+ * stay anonymous and account-unlinked. The SDK itself loads only when the first
+ * event is tracked, once the main thread is idle.
  */
 export function initAnalytics(): void {
 	if (initialized || !POSTHOG_KEY) {
 		return;
 	}
 	initialized = true;
-	posthog.init(POSTHOG_KEY, {
-		api_host: POSTHOG_HOST,
-		// No automatic event collection: we send only the typed enum below.
-		autocapture: false,
-		capture_pageview: false,
-		capture_pageleave: false,
-		// Anonymous until an explicit identify() (which this module never calls).
-		person_profiles: "identified_only",
-		// Random, account-unlinked install id as the distinct id.
-		bootstrap: { distinctID: getInstallId() },
-		// Respect the opt-out from the very first event.
-		opt_out_capturing_by_default: !enabled,
-	});
-	// Tag all events from this surface so we can separate product (desktop) users
-	// from marketing (landing page) visitors in PostHog dashboards.
-	posthog.register({ $source: "desktop" });
+}
+
+/** Resolves once the SDK is live: false when unconfigured, not initialised, or
+ *  when it failed to load. Loads it now instead of waiting for an event. */
+export async function analyticsReady(): Promise<boolean> {
+	if (!(initialized && POSTHOG_KEY)) {
+		return false;
+	}
+	return (await loadPostHog(POSTHOG_KEY)) !== null;
 }
 
 /**
  * Flip the live gate from the Privacy settings toggle. Flips the in-memory flag,
  * mirrors it to localStorage for the next reload, and opt_out/opt_in's the PostHog
  * client so toggling off stops egress immediately (no async Core re-read needed).
+ * Before the SDK has loaded, turning it off drops the queued events and the
+ * client starts with the gate as it then stands.
  */
 export function setAnalyticsEnabled(next: boolean): void {
 	enabled = next;
 	writeEnabledMirror(next);
+	if (!next) {
+		pending.length = 0;
+	}
 	if (!(initialized && POSTHOG_KEY)) {
 		return;
 	}
+	if (!client) {
+		toggledBeforeLoad = next;
+		return;
+	}
 	if (next) {
-		posthog.opt_in_capturing();
+		client.opt_in_capturing();
 	} else {
-		posthog.opt_out_capturing();
+		client.opt_out_capturing();
 	}
 }
 
@@ -297,20 +411,34 @@ export function setAnalyticsEnabled(next: boolean): void {
 
 /**
  * Send one typed, content-free event. A no-op unless a project is configured AND
- * the gate is on. Records the egress in the local audit log when it actually sends.
+ * the gate is on. The egress log records an event when it is handed to the
+ * client; one queued for the SDK and then dropped (opt-out, queue cap, failed
+ * load) is never logged. Before initAnalytics() nothing loads the SDK and the
+ * event is logged as it was before the lazy load.
  */
 export function track(payload: AnalyticsEvent): void {
 	if (!(enabled && POSTHOG_KEY)) {
 		return;
 	}
-	const { event, ...props } = payload;
 	try {
-		posthog.capture(event, props);
-		appendEgressLog({
-			event,
-			props: props as Record<string, string | number | boolean>,
-			at: Date.now(),
-		});
+		if (client) {
+			send(client, payload);
+			return;
+		}
+		if (!initialized) {
+			const { event, ...props } = payload;
+			appendEgressLog({
+				event,
+				props: props satisfies EgressLogEntry["props"],
+				at: Date.now(),
+			});
+			return;
+		}
+		if (loadFailed || pending.length >= MAX_PENDING_EVENTS) {
+			return;
+		}
+		pending.push(payload);
+		scheduleLoad(POSTHOG_KEY);
 	} catch {
 		// Never let an analytics failure surface to the user.
 	}

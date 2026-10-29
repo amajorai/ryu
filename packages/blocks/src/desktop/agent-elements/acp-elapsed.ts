@@ -1,3 +1,4 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 /**
  * Elapsed-time rule for an ACP turn's footer meter.
  *
@@ -38,7 +39,7 @@ export function resolveAcpElapsedMs({
 }): number | null {
 	const isTerminal = done === true || !isLive;
 	if (isTerminal) {
-		if (typeof durationMs === "number") {
+		if (isNativeNumber(durationMs)) {
 			return durationMs;
 		}
 		return frozenMs;

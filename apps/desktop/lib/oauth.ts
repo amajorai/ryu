@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { FRONTEND_URL } from "@/lib/app-urls.ts";
 import { addAccount } from "@/lib/auth-client.ts";
 import { localizeDevVerificationUrl } from "./device-verification-url.ts";
@@ -29,7 +30,7 @@ export function localizeVerificationUrl(rawUrl: string): string {
 	return localizeDevVerificationUrl(
 		rawUrl,
 		FRONTEND_URL,
-		import.meta.env.DEV || LOCAL_FRONTEND_CONFIGURED
+		Boolean(import.meta.env.DEV) || LOCAL_FRONTEND_CONFIGURED
 	);
 }
 
@@ -44,6 +45,19 @@ export interface DeviceAuthInfo {
 	verificationUri: string;
 	verificationUriComplete: string;
 }
+
+const deviceCodeResponseSchema = z.object({
+	device_code: z.string().min(1),
+	user_code: z.string().min(1),
+	verification_uri: z.string().optional().catch(undefined),
+	verification_uri_complete: z.string().optional().catch(undefined),
+	interval: z.number().optional().catch(undefined),
+	expires_in: z.number().optional().catch(undefined),
+});
+const deviceTokenResponseSchema = z.object({
+	access_token: z.string().optional().catch(undefined),
+	error: z.string().optional().catch(undefined),
+});
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,23 +87,19 @@ export async function startDeviceAuth(
 		throw new Error(`Device code request failed (${res.status}): ${text}`);
 	}
 
-	const data = (await res.json()) as Record<string, unknown>;
-	const deviceCode =
-		typeof data.device_code === "string" ? data.device_code : "";
-	const userCode = typeof data.user_code === "string" ? data.user_code : "";
-	if (!(deviceCode && userCode)) {
+	const result = deviceCodeResponseSchema.safeParse(await res.json());
+	if (!result.success) {
 		throw new Error("Malformed device code response");
 	}
+	const data = result.data;
+	const deviceCode = data.device_code;
+	const userCode = data.user_code;
 
 	const verificationUri = localizeVerificationUrl(
-		typeof data.verification_uri === "string"
-			? data.verification_uri
-			: `${base}/device`
+		data.verification_uri ?? `${base}/device`
 	);
 	let verificationUriComplete = localizeVerificationUrl(
-		typeof data.verification_uri_complete === "string"
-			? data.verification_uri_complete
-			: verificationUri
+		data.verification_uri_complete ?? verificationUri
 	);
 	if (returnTo) {
 		const sep = verificationUriComplete.includes("?") ? "&" : "?";
@@ -102,12 +112,8 @@ export async function startDeviceAuth(
 		verificationUriComplete,
 		deviceCode,
 		backendUrl: base,
-		interval:
-			typeof data.interval === "number" ? data.interval : DEFAULT_INTERVAL_SECS,
-		expiresIn:
-			typeof data.expires_in === "number"
-				? data.expires_in
-				: DEFAULT_EXPIRES_SECS,
+		interval: data.interval ?? DEFAULT_INTERVAL_SECS,
+		expiresIn: data.expires_in ?? DEFAULT_EXPIRES_SECS,
 	};
 }
 
@@ -136,7 +142,7 @@ export function pollAuthStatus(
 				return;
 			}
 
-			let data: Record<string, unknown>;
+			let data: z.output<typeof deviceTokenResponseSchema>;
 			try {
 				// This Better Auth deployment enforces application/json on every auth
 				// route (form-urlencoded → 415), so the RFC 8628 token request goes as
@@ -150,21 +156,21 @@ export function pollAuthStatus(
 						client_id: DEVICE_CLIENT_ID,
 					}),
 				});
-				data = (await res.json()) as Record<string, unknown>;
+				data = deviceTokenResponseSchema.parse(await res.json());
 			} catch {
 				// Transient network error — keep polling until the deadline.
 				continue;
 			}
 
 			const token = data.access_token;
-			if (typeof token === "string" && token) {
+			if (token) {
 				if (!cancelled) {
 					onSuccess(token);
 				}
 				return;
 			}
 
-			const error = typeof data.error === "string" ? data.error : null;
+			const error = data.error;
 			if (error === "authorization_pending") {
 				continue;
 			}
@@ -253,7 +259,7 @@ export function addAccountViaDeviceAuth(
 				handlers.onError
 			);
 		})
-		.catch((err: unknown) => {
+		.catch((err) => {
 			if (!cancelled) {
 				handlers.onError(
 					err instanceof Error ? err : new Error("Failed to start sign-in")

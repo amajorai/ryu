@@ -60,8 +60,12 @@ import {
 	TabsTrigger,
 } from "@ryu/ui/components/tabs";
 import { useFriendlyMode } from "@ryu/ui/hooks/use-friendly-mode.ts";
-import type { ChangeEvent, FormEvent, ReactNode } from "react";
+import type { ChangeEvent, ReactNode, SyntheticEvent } from "react";
 import { useMemo, useRef, useState } from "react";
+import { z } from "zod";
+
+const spaceVisibilitySchema = z.enum(["org", "private"]);
+const spaceRetrievalModeSchema = z.enum(["graph", "vector"]);
 
 /**
  * Which retrieval algorithm a Space uses. Structurally identical to the desktop
@@ -110,9 +114,10 @@ export function SpaceVisibilityChoice({
 		<RadioGroup
 			aria-label="Space visibility"
 			disabled={disabled}
-			onValueChange={(next: unknown) => {
-				if (next === "private" || next === "org") {
-					onVisibilityChange(next);
+			onValueChange={(next) => {
+				const parsed = spaceVisibilitySchema.safeParse(next);
+				if (parsed.success) {
+					onVisibilityChange(parsed.data);
 				}
 			}}
 			value={visibility}
@@ -127,7 +132,7 @@ export function SpaceVisibilityChoice({
 							icon={option.icon}
 						/>
 						<div className="flex flex-col gap-0.5">
-							<Label className="font-medium text-sm" htmlFor={id}>
+							<Label htmlFor={id} variant="choice">
 								{option.label}
 							</Label>
 							<p className="text-muted-foreground text-xs">{option.blurb}</p>
@@ -225,7 +230,7 @@ export function retrievalModeLabel(
  *    search box hits and which the `ryu_search_space` MCP tool calls when an agent
  *    is told to search a named space;
  *  - the automatic recall on a chat turn. `RetrievalStore::retrieve`
- *    (`crates/core/rag/src/lib.rs`) delegates the Spaces half of a recall back to
+ *    (`crates/core/rag/src/store/retrieve.rs`) delegates the Spaces half of a recall back to
  *    `search_ext` via its `SpaceRecall` hook (implemented in
  *    `apps/core/src/rag_host.rs`), so an agent's allowlisted spaces are answered
  *    under their own mode.
@@ -250,11 +255,6 @@ export function retrievalModeLabel(
  */
 export const RETRIEVAL_MODE_SCOPE =
 	"Applies whenever this space is searched — from a Spaces search box, when an agent is told to search it, and during the automatic recall an agent does in a chat.";
-
-/** Narrow an untyped radio value to a mode; `null` for anything unexpected. */
-function asRetrievalMode(value: unknown): SpaceRetrievalMode | null {
-	return value === "graph" || value === "vector" ? value : null;
-}
 
 /**
  * The Vector-vs-Graph picker, shared by the create dialog and the Space detail so
@@ -297,10 +297,10 @@ export function RetrievalModeChoice({
 			<RadioGroup
 				aria-describedby={scopeId}
 				disabled={disabled}
-				onValueChange={(next: unknown) => {
-					const picked = asRetrievalMode(next);
-					if (picked) {
-						onModeChange(picked);
+				onValueChange={(next) => {
+					const parsed = spaceRetrievalModeSchema.safeParse(next);
+					if (parsed.success) {
+						onModeChange(parsed.data);
 					}
 				}}
 				value={mode}
@@ -311,7 +311,7 @@ export function RetrievalModeChoice({
 						<div className="flex items-start gap-2.5" key={option.value}>
 							<RadioGroupItem className="mt-0.5" id={id} value={option.value} />
 							<div className="flex flex-col gap-0.5">
-								<Label className="font-medium text-sm" htmlFor={id}>
+								<Label htmlFor={id} variant="choice">
 									{friendly ? option.friendlyLabel : option.label}
 								</Label>
 								<p className="text-muted-foreground text-xs">
@@ -442,9 +442,7 @@ export const FILE_CONTENTS_PENDING_BADGE = "Reading…";
  * still surfaced — a parse that half-worked and says nothing is the silent-drop bug
  * wearing a hat.
  */
-export const FILE_INDEX_NOTES: Readonly<
-	Record<Exclude<SpaceFileIndexState, "indexed">, string>
-> = {
+export const FILE_INDEX_NOTES = {
 	unattempted:
 		"Files marked “Name only” are stored and open normally, but a search of this space only matches their name and file type — not the text inside them. Nothing has tried to read these yet: upload one again to have it read now, or add it through the “Drop files here” zone above.",
 	skipped:
@@ -453,7 +451,9 @@ export const FILE_INDEX_NOTES: Readonly<
 		"Files marked “Name only” are stored and open normally, but reading their text did not finish, so a search only matches their name and file type. Upload the file again to retry — the reason is shown on each file.",
 	pending:
 		"Files marked “Reading…” are being read now. Their text becomes searchable when that finishes; reopen this space to check.",
-};
+} as const satisfies Readonly<
+	Record<Exclude<SpaceFileIndexState, "indexed">, string>
+>;
 
 /** A space row as the view needs it. */
 export interface SpaceRow {
@@ -529,6 +529,8 @@ export interface SpaceMatchRow {
 
 export interface SpacesDetailProps {
 	backupPanel?: ReactNode;
+	/** Node-scoped Marketplace cover controls owned by the desktop host. */
+	bannerSlot?: ReactNode;
 	documents: SpaceDocumentRow[];
 	documentsError?: string | null;
 	/** Desktop-owned import workflow. Shared renderers omit it and keep one Content view. */
@@ -725,24 +727,24 @@ function MarkdownThumbnail({ document }: { document: SpaceDocumentRow }) {
 	return (
 		<div
 			aria-hidden="true"
-			className="relative h-[76px] w-14 shrink-0 overflow-hidden rounded-[3px] border border-[#d9d1c5] bg-[#fffdfa] p-1.5 text-left text-[#37332d] shadow-[0_2px_6px_rgba(44,39,30,0.14)] dark:border-[#49443d] dark:bg-[#292722] dark:text-[#f2eee5]"
+			className="relative h-[76px] w-14 shrink-0 overflow-hidden rounded-glyph-compact border border-space-paper-border bg-space-paper p-1.5 text-left text-space-paper-foreground shadow-space-paper dark:border-space-paper-border-dark dark:bg-space-paper-dark dark:text-space-paper-foreground-dark"
 		>
-			<div className="absolute inset-y-0 left-0 w-0.5 bg-[#a88de8]" />
+			<div className="absolute inset-y-0 left-0 w-0.5 bg-space-paper-accent" />
 			{document.previewLoading && !document.preview ? (
 				<div className="space-y-1.5 pt-1">
-					<Skeleton className="h-1.5 w-4/5 bg-[#e0d9ce] dark:bg-[#4a453e]" />
-					<Skeleton className="h-1 w-full bg-[#e7e0d5] dark:bg-[#3f3b35]" />
-					<Skeleton className="h-1 w-5/6 bg-[#e7e0d5] dark:bg-[#3f3b35]" />
-					<Skeleton className="h-1 w-2/3 bg-[#e7e0d5] dark:bg-[#3f3b35]" />
+					<Skeleton className="h-1.5 w-4/5" tone="paper-heading" />
+					<Skeleton className="h-1 w-full" tone="paper-line" />
+					<Skeleton className="h-1 w-5/6" tone="paper-line" />
+					<Skeleton className="h-1 w-2/3" tone="paper-line" />
 				</div>
 			) : (
-				<div className="space-y-1 pt-0.5 text-[6px] leading-[1.25]">
+				<div className="type-diagram space-y-1 pt-0.5 leading-tight">
 					{previewLines(document.preview)
 						.slice(0, 5)
 						.map((line, index) => (
 							<p
 								className={
-									index === 0 ? "font-semibold text-[7px]" : "opacity-75"
+									index === 0 ? "type-miniature font-semibold" : "opacity-75"
 								}
 								key={`${line}-${index}`}
 							>
@@ -751,7 +753,7 @@ function MarkdownThumbnail({ document }: { document: SpaceDocumentRow }) {
 						))}
 				</div>
 			)}
-			<div className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-[#fffdfa] to-transparent dark:from-[#292722]" />
+			<div className="pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t from-space-paper to-transparent dark:from-space-paper-dark" />
 		</div>
 	);
 }
@@ -776,29 +778,29 @@ function SpaceTemplateCard({
 			onClick={onClick}
 			type="button"
 		>
-			<div className="relative flex h-24 items-center justify-center overflow-hidden rounded-md border border-black/10 bg-white shadow-sm dark:border-white/10 dark:bg-[#292a2d]">
+			<div className="relative flex h-24 items-center justify-center overflow-hidden rounded-md border border-black/10 bg-white shadow-sm dark:border-white/10 dark:bg-space-template-surface-dark">
 				{kind === "table" ? (
-					<div className="grid w-20 grid-cols-3 gap-px border border-[#b9b9b9] bg-[#b9b9b9] opacity-80">
+					<div className="grid w-20 grid-cols-3 gap-px border border-space-template-grid bg-space-template-grid opacity-80">
 						{Array.from({ length: 12 }, (_, index) => (
 							<span className="h-3 bg-white" key={index} />
 						))}
 					</div>
 				) : kind === "board" ? (
-					<div className="flex size-16 items-center justify-center rounded-md border border-[#b9b9b9] border-dashed bg-[#fbfbfb] dark:bg-[#242528]">
+					<div className="flex size-16 items-center justify-center rounded-md border border-space-template-grid border-dashed bg-space-template-board dark:bg-space-template-board-dark">
 						<HugeiconsIcon
-							className="size-6 text-[#a78bfa]"
+							className="size-6 text-space-template-accent"
 							icon={CanvasIcon}
 						/>
 					</div>
 				) : (
-					<div className="flex h-[76px] w-14 flex-col gap-1 rounded-[2px] border border-[#d9d1c5] bg-[#fffdfa] p-2 text-[#3d3932] shadow-sm dark:border-[#49443d] dark:bg-[#24221f] dark:text-[#f2eee5]">
+					<div className="flex h-[76px] w-14 flex-col gap-1 rounded-xs border border-space-paper-border bg-space-paper p-2 text-space-template-paper-foreground shadow-sm dark:border-space-paper-border-dark dark:bg-space-template-paper-dark dark:text-space-paper-foreground-dark">
 						{kind === "blank" ? null : (
-							<span className="h-1.5 w-4/5 rounded bg-[#77716a] opacity-70" />
+							<span className="h-1.5 w-4/5 rounded bg-space-template-heading opacity-70" />
 						)}
-						<span className="h-1 w-full rounded bg-[#b9b1a6] opacity-70" />
-						<span className="h-1 w-5/6 rounded bg-[#b9b1a6] opacity-50" />
+						<span className="h-1 w-full rounded bg-space-template-line opacity-70" />
+						<span className="h-1 w-5/6 rounded bg-space-template-line opacity-50" />
 						{kind === "welcome" ? (
-							<span className="mt-1 h-7 rounded-sm bg-[#a78bfa]/25" />
+							<span className="mt-1 h-7 rounded-sm bg-space-template-accent/25" />
 						) : null}
 					</div>
 				)}
@@ -827,7 +829,9 @@ function RecentDocumentRow({
 		>
 			<MarkdownThumbnail document={document} />
 			<span className="flex min-w-0 flex-1 flex-col">
-				<span className="truncate font-medium text-sm">{title}</span>
+				<span className="truncate font-medium text-sm" title={title}>
+					{title}
+				</span>
 				<span className="mt-1 truncate text-muted-foreground text-xs">
 					{spaceName} · {documentTypeLabel(document)}
 				</span>
@@ -886,7 +890,7 @@ function FilesTableSection({
 					</h2>
 				</div>
 			</div>
-			<div className="overflow-hidden rounded-[24px] border border-border/70 bg-card/70 shadow-sm">
+			<div className="overflow-hidden rounded-3xl border border-border/70 bg-card/70 shadow-sm">
 				<div className="flex flex-wrap items-center justify-between gap-3 border-border/60 border-b px-4 py-4 sm:px-6">
 					<p className="text-muted-foreground text-xs">
 						{filteredDocuments.length} of {documents.length} visible
@@ -899,7 +903,7 @@ function FilesTableSection({
 						/>
 						<Input
 							aria-label="Search files"
-							className="pl-9"
+							leadingAdornment="default"
 							onChange={(event: ChangeEvent<HTMLInputElement>) =>
 								onQueryChange(event.target.value)
 							}
@@ -933,20 +937,14 @@ function FilesTableSection({
 				<div className="hidden sm:block">
 					<Table aria-label="Files in this Space" className="min-w-[760px]">
 						<TableHeader>
-							<TableRow className="hover:bg-transparent">
-								<TableHead className="h-10 px-6 text-[10px] uppercase tracking-[0.14em]">
+							<TableRow appearance="header">
+								<TableHead inset="wide" presentation="file-label">
 									Name
 								</TableHead>
-								<TableHead className="h-10 text-[10px] uppercase tracking-[0.14em]">
-									Type
-								</TableHead>
-								<TableHead className="h-10 text-[10px] uppercase tracking-[0.14em]">
-									Size
-								</TableHead>
-								<TableHead className="h-10 text-[10px] uppercase tracking-[0.14em]">
-									Modified
-								</TableHead>
-								<TableHead className="h-10 pr-6 text-[10px] uppercase tracking-[0.14em]">
+								<TableHead presentation="file-label">Type</TableHead>
+								<TableHead presentation="file-label">Size</TableHead>
+								<TableHead presentation="file-label">Modified</TableHead>
+								<TableHead inset="end" presentation="file-label">
 									Search reach
 								</TableHead>
 							</TableRow>
@@ -959,7 +957,7 @@ function FilesTableSection({
 									const badge = indexBadgeLabel(document.indexState);
 									return (
 										<TableRow className="group" key={document.id}>
-											<TableCell className="min-w-[19rem] px-6">
+											<TableCell className="min-w-[19rem]" inset="wide">
 												<button
 													aria-label={`Open ${title}`}
 													className="flex min-w-0 items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -973,7 +971,10 @@ function FilesTableSection({
 														/>
 													</span>
 													<span className="flex min-w-0 flex-col">
-														<span className="truncate font-medium text-sm">
+														<span
+															className="truncate font-medium text-sm"
+															title={title}
+														>
 															{title}
 														</span>
 														<span className="truncate text-muted-foreground text-xs">
@@ -982,16 +983,16 @@ function FilesTableSection({
 													</span>
 												</button>
 											</TableCell>
-											<TableCell className="text-muted-foreground text-xs">
+											<TableCell presentation="metadata">
 												{documentTypeLabel(document)}
 											</TableCell>
-											<TableCell className="font-mono text-muted-foreground text-xs">
+											<TableCell presentation="numeric-metadata">
 												{formatDocumentSize(document.byteSize)}
 											</TableCell>
-											<TableCell className="text-muted-foreground text-xs">
+											<TableCell presentation="metadata">
 												{formatDocumentDate(document.updatedAt)}
 											</TableCell>
-											<TableCell className="pr-6">
+											<TableCell inset="end">
 												{badge ? (
 													<Badge variant="outline">{badge}</Badge>
 												) : (
@@ -1007,10 +1008,7 @@ function FilesTableSection({
 								})
 							) : (
 								<TableRow>
-									<TableCell
-										className="py-10 text-center text-muted-foreground"
-										colSpan={5}
-									>
+									<TableCell colSpan={5} presentation="empty">
 										{query ? `No files match “${query}”.` : "No documents yet."}
 									</TableCell>
 								</TableRow>
@@ -1055,18 +1053,18 @@ function SpaceHomeRail({
 	return (
 		<aside
 			aria-label="Space navigation"
-			className="hidden w-[94px] shrink-0 flex-col border-border/80 border-r bg-[#f7f7f7] py-3 text-[#464646] sm:flex dark:bg-[#222326] dark:text-[#d5d5d5]"
+			className="hidden w-[94px] shrink-0 flex-col border-border/80 border-r bg-space-rail py-3 text-space-rail-foreground sm:flex dark:bg-space-rail-dark dark:text-space-rail-foreground-dark"
 			data-testid="spaces-home-rail"
 		>
 			<div className="flex flex-col gap-2 px-2">
 				<button
 					aria-current="page"
-					className="flex min-h-16 flex-col items-center justify-center gap-1 rounded-md border-2 border-[#e45d57] bg-white text-[#b7443e] shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-[#2b2c30] dark:text-[#ff8c84]"
+					className="flex min-h-16 flex-col items-center justify-center gap-1 rounded-md border-2 border-space-navigation-active bg-white text-space-navigation-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-space-navigation-surface-dark dark:text-space-navigation-foreground-dark"
 					onClick={onHome}
 					type="button"
 				>
 					<HugeiconsIcon className="size-5" icon={Home01Icon} />
-					<span className="text-[11px]">Home</span>
+					<span className="type-caption">Home</span>
 				</button>
 				<button
 					className="flex min-h-16 flex-col items-center justify-center gap-1 rounded-md border border-transparent outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/5"
@@ -1074,7 +1072,7 @@ function SpaceHomeRail({
 					type="button"
 				>
 					<HugeiconsIcon className="size-5" icon={Add01Icon} />
-					<span className="text-[11px]">New</span>
+					<span className="type-caption">New</span>
 				</button>
 				<button
 					className="flex min-h-16 flex-col items-center justify-center gap-1 rounded-md border border-transparent outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-white/5"
@@ -1082,15 +1080,15 @@ function SpaceHomeRail({
 					type="button"
 				>
 					<HugeiconsIcon className="size-5" icon={FolderOpenIcon} />
-					<span className="text-[11px]">Open</span>
+					<span className="type-caption">Open</span>
 				</button>
 			</div>
 			<div className="mt-auto flex flex-col gap-3 border-border/70 border-t px-2 pt-3">
 				<div className="flex flex-col items-center gap-1 text-center">
-					<div className="flex size-7 items-center justify-center rounded-md bg-[#e9e9e9] text-muted-foreground dark:bg-[#34353a]">
+					<div className="flex size-7 items-center justify-center rounded-md bg-space-rail-icon text-muted-foreground dark:bg-space-rail-icon-dark">
 						<HugeiconsIcon className="size-4" icon={LibraryIcon} />
 					</div>
-					<span className="max-w-16 truncate text-[10px]">{spaceName}</span>
+					<span className="type-compact max-w-16 truncate">{spaceName}</span>
 				</div>
 			</div>
 		</aside>
@@ -1147,7 +1145,7 @@ function SpaceHomeShell({
 
 	return (
 		<div
-			className="flex min-h-full bg-[#f4f4f4] text-[#242424] dark:bg-[#1b1c1f] dark:text-[#f1f1f1]"
+			className="flex min-h-full bg-space-home text-space-home-foreground dark:bg-space-home-dark dark:text-space-home-foreground-dark"
 			data-testid="spaces-home"
 		>
 			<SpaceHomeRail
@@ -1168,7 +1166,7 @@ function SpaceHomeShell({
 						<div className="flex flex-wrap items-start justify-between gap-4">
 							<div>
 								<p className="text-muted-foreground text-sm">{space.name}</p>
-								<h1 className="mt-1 font-heading font-semibold text-2xl tracking-[-0.03em] sm:text-3xl">
+								<h1 className="mt-1 font-heading font-semibold text-2xl tracking-space-greeting sm:text-3xl">
 									{greetingLabel()}
 								</h1>
 							</div>
@@ -1234,12 +1232,14 @@ function SpaceHomeShell({
 							/>
 							<Input
 								aria-label="Search documents"
-								className="h-10 rounded-md border-border/80 bg-white pl-9 dark:bg-[#292a2e]"
+								className="h-10"
+								leadingAdornment="default"
 								onChange={(event: ChangeEvent<HTMLInputElement>) =>
 									setQuery(event.target.value)
 								}
 								placeholder="Search"
 								value={query}
+								variant="document-search"
 							/>
 						</div>
 						<div className="mt-6">
@@ -1264,7 +1264,7 @@ function SpaceHomeShell({
 							).map(([value, label]) => (
 								<button
 									aria-selected={activeTab === value}
-									className={`border-b-2 px-0.5 py-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === value ? "border-[#e45d57] font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+									className={`border-b-2 px-0.5 py-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${activeTab === value ? "border-space-navigation-active font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
 									onClick={() => setActiveTab(value)}
 									role="tab"
 									type="button"
@@ -1274,7 +1274,7 @@ function SpaceHomeShell({
 							))}
 						</div>
 						<div
-							className="mt-2 overflow-hidden rounded-md border border-border/70 bg-white/80 dark:bg-[#25262a]"
+							className="mt-2 overflow-hidden rounded-md border bg-card"
 							data-testid="spaces-recent-list"
 						>
 							{activeTab === "recent" && recentDocuments.length > 0 ? (
@@ -1353,9 +1353,14 @@ function DocumentRow({
 					icon={docIcon(doc.kind)}
 				/>
 				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate text-sm">{doc.title}</span>
+					<span className="truncate text-sm" title={doc.title}>
+						{doc.title}
+					</span>
 					{detail ? (
-						<span className="truncate text-muted-foreground text-xs">
+						<span
+							className="truncate text-muted-foreground text-xs"
+							title={detail}
+						>
 							{detail}
 						</span>
 					) : null}
@@ -1424,7 +1429,7 @@ function SpaceDetail(props: SpacesDetailProps) {
 		retrievalMode !== undefined && onRetrievalModeChange !== undefined;
 	const portableInput = useRef<HTMLInputElement>(null);
 
-	const handleSearch = (e: FormEvent) => {
+	const handleSearch = (e: SyntheticEvent) => {
 		e.preventDefault();
 		onSearchSubmit?.();
 	};
@@ -1446,17 +1451,18 @@ function SpaceDetail(props: SpacesDetailProps) {
 			space={space}
 			uploadPanel={uploadPanel}
 		>
+			{props.bannerSlot}
 			{props.backupPanel}
 			{onExportPackage || onImportPackage ? (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-sm">Share this Space</CardTitle>
+						<CardTitle variant="section">Share this Space</CardTitle>
 						<CardDescription>
 							Pages and database rows export as Markdown with frontmatter.
 							Embeddings and binary files stay on this node.
 						</CardDescription>
 					</CardHeader>
-					<CardContent className="flex flex-col gap-3">
+					<CardContent layout="stack">
 						<input
 							accept=".ryupack,.zip,application/zip"
 							aria-label="Portable Space package"
@@ -1508,7 +1514,7 @@ function SpaceDetail(props: SpacesDetailProps) {
 			{canEditRetrieval && retrievalMode !== undefined ? (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-sm">Retrieval</CardTitle>
+						<CardTitle variant="section">Retrieval</CardTitle>
 						{/* Names the CHOICE only. Where it applies is a line down, in
 						    RETRIEVAL_MODE_SCOPE, which the picker renders; restating it
 						    here would either duplicate it or (worse) let the two drift into
@@ -1528,7 +1534,7 @@ function SpaceDetail(props: SpacesDetailProps) {
 								: "Which algorithm this space is searched with."}
 						</CardDescription>
 					</CardHeader>
-					<CardContent className="flex flex-col gap-3">
+					<CardContent layout="stack">
 						<RetrievalModeChoice
 							disabled={retrievalModeBusy}
 							idPrefix="space-retrieval-mode"

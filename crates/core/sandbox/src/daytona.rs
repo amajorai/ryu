@@ -78,6 +78,68 @@ pub const ENV_DAYTONA_OS: &str = "RYU_SANDBOX_DAYTONA_OS";
 
 const DEFAULT_DAYTONA_URL: &str = "https://app.daytona.io/api";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
+// Covers two 4 MiB output streams plus their JSON envelope while bounding the
+// provider response before deserialization.
+const MAX_DAYTONA_RESPONSE_BYTES: usize = 12 * 1024 * 1024;
+const MAX_DAYTONA_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_DAYTONA_ERROR_EXCERPT_BYTES: usize = 1024;
+
+fn append_response_chunk(body: &mut Vec<u8>, chunk: &[u8], operation: &str) -> Result<()> {
+    if chunk.len() > MAX_DAYTONA_RESPONSE_BYTES.saturating_sub(body.len()) {
+        return Err(anyhow!(
+            "daytona {operation} response exceeded the 12 MiB body limit"
+        ));
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
+}
+
+async fn read_response_capped(mut response: reqwest::Response, operation: &str) -> Result<Vec<u8>> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_DAYTONA_RESPONSE_BYTES as u64)
+    {
+        return Err(anyhow!(
+            "daytona {operation} response exceeded the 12 MiB body limit"
+        ));
+    }
+
+    let mut body = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(MAX_DAYTONA_RESPONSE_BYTES as u64) as usize,
+    );
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| anyhow!("daytona {operation} response read failed: {error}"))?
+    {
+        append_response_chunk(&mut body, &chunk, operation)?;
+    }
+    Ok(body)
+}
+
+fn response_excerpt(body: &[u8]) -> String {
+    String::from_utf8_lossy(&body[..body.len().min(MAX_DAYTONA_ERROR_EXCERPT_BYTES)]).into_owned()
+}
+
+fn output_bytes(value: &serde_json::Value, fields: &[&str], stream: &str) -> Result<Vec<u8>> {
+    let mut selected = None;
+    for field in fields {
+        if let Some(value) = value.get(*field) {
+            selected = Some(value);
+            break;
+        }
+    }
+    let output = selected
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if output.len() > MAX_DAYTONA_OUTPUT_BYTES {
+        return Err(anyhow!("daytona {stream} exceeded the 4 MiB output limit"));
+    }
+    Ok(output.as_bytes().to_vec())
+}
 
 fn daytona_base_url() -> String {
     std::env::var(ENV_DAYTONA_URL)
@@ -254,11 +316,14 @@ impl DaytonaClient {
             .map_err(|e| anyhow!("daytona create request failed: {e}"))?;
 
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
+        let body = read_response_capped(resp, "create").await?;
         if !status.is_success() {
-            return Err(anyhow!("daytona create failed (HTTP {status}): {text}"));
+            return Err(anyhow!(
+                "daytona create failed (HTTP {status}): {}",
+                response_excerpt(&body)
+            ));
         }
-        let value: serde_json::Value = serde_json::from_str(&text)
+        let value: serde_json::Value = serde_json::from_slice(&body)
             .map_err(|e| anyhow!("daytona create returned unparseable body: {e}"))?;
         // Accept `id` or `sandboxId` for forward-compat with the provider.
         value
@@ -267,7 +332,12 @@ impl DaytonaClient {
             .and_then(|v| v.as_str())
             .map(str::to_owned)
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| anyhow!("daytona create response had no sandbox id: {text}"))
+            .ok_or_else(|| {
+                anyhow!(
+                    "daytona create response had no sandbox id: {}",
+                    response_excerpt(&body)
+                )
+            })
     }
 
     /// Execute a command inside an existing sandbox.
@@ -302,11 +372,14 @@ impl DaytonaClient {
             .map_err(|e| anyhow!("daytona exec request failed: {e}"))?;
 
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
+        let body = read_response_capped(resp, "exec").await?;
         if !status.is_success() {
-            return Err(anyhow!("daytona exec failed (HTTP {status}): {text}"));
+            return Err(anyhow!(
+                "daytona exec failed (HTTP {status}): {}",
+                response_excerpt(&body)
+            ));
         }
-        let value: serde_json::Value = serde_json::from_str(&text)
+        let value: serde_json::Value = serde_json::from_slice(&body)
             .map_err(|e| anyhow!("daytona exec returned unparseable body: {e}"))?;
         let exit_code = value
             .get("exitCode")
@@ -314,20 +387,10 @@ impl DaytonaClient {
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(0) as i32;
         // The toolbox returns combined output under `result`/`output`/`stdout`.
-        let stdout = value
-            .get("result")
-            .or_else(|| value.get("output"))
-            .or_else(|| value.get("stdout"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .as_bytes()
-            .to_vec();
-        let stderr = value
-            .get("stderr")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .as_bytes()
-            .to_vec();
+        // Match the local process backend's per-stream cap after bounding the
+        // serialized provider body above.
+        let stdout = output_bytes(&value, &["result", "output", "stdout"], "stdout")?;
+        let stderr = output_bytes(&value, &["stderr"], "stderr")?;
         Ok(ExecOutput {
             exit_code,
             stdout,
@@ -350,8 +413,11 @@ impl DaytonaClient {
         if status.is_success() || status.as_u16() == 404 {
             return Ok(());
         }
-        let text = resp.text().await.unwrap_or_default();
-        Err(anyhow!("daytona destroy failed (HTTP {status}): {text}"))
+        let body = read_response_capped(resp, "destroy").await?;
+        Err(anyhow!(
+            "daytona destroy failed (HTTP {status}): {}",
+            response_excerpt(&body)
+        ))
     }
 }
 
@@ -455,12 +521,13 @@ impl Sandbox for DaytonaSandbox {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    /// Serializes tests that mutate the process-global Daytona env vars.
+    /// Serializes tests that mutate the process-global Daytona env vars,
+    /// including the heartbeat kill tests that point Daytona at a mock server.
     static DAYTONA_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    pub(crate) fn lock_env() -> std::sync::MutexGuard<'static, ()> {
         DAYTONA_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -508,6 +575,35 @@ mod tests {
         assert_eq!(spec.gpu, GpuKind::None);
         assert_eq!(spec.gpu_count, 0, "no GPU class means zero billable GPUs");
         unsafe { std::env::remove_var(ENV_DAYTONA_GPU_COUNT) };
+    }
+
+    #[test]
+    fn provider_response_chunks_are_bounded_before_buffer_growth() {
+        let mut body = Vec::new();
+        let at_limit = vec![b'x'; MAX_DAYTONA_RESPONSE_BYTES];
+        append_response_chunk(&mut body, &at_limit, "test").expect("limit is accepted");
+        assert_eq!(body.len(), MAX_DAYTONA_RESPONSE_BYTES);
+
+        assert!(append_response_chunk(&mut body, b"x", "test").is_err());
+        assert_eq!(body.len(), MAX_DAYTONA_RESPONSE_BYTES);
+    }
+
+    #[test]
+    fn provider_output_fields_match_the_local_stream_cap() {
+        let at_limit = serde_json::json!({
+            "stdout": "x".repeat(MAX_DAYTONA_OUTPUT_BYTES),
+        });
+        assert_eq!(
+            output_bytes(&at_limit, &["stdout"], "stdout")
+                .expect("output at the cap is accepted")
+                .len(),
+            MAX_DAYTONA_OUTPUT_BYTES
+        );
+
+        let oversized = serde_json::json!({
+            "stdout": "x".repeat(MAX_DAYTONA_OUTPUT_BYTES + 1),
+        });
+        assert!(output_bytes(&oversized, &["stdout"], "stdout").is_err());
     }
 
     #[tokio::test]

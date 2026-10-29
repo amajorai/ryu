@@ -19,6 +19,14 @@ describe("Bot terminology", () => {
 		).toBe("Bot bot Bots bots BOT BOTS Bot's bots' multi-bot");
 	});
 
+	it("keeps the article grammatical", () => {
+		expect(
+			replaceAgentTerms(
+				"Add an agent. An agent's tools. AN AGENT. a plan, an idea"
+			)
+		).toBe("Add a bot. A bot's tools. A BOT. a plan, an idea");
+	});
+
 	it("does not rewrite larger words or technical identifiers", () => {
 		expect(replaceAgentTerms("agentic Agentation agent_id subagents")).toBe(
 			"agentic Agentation agent_id subagents"

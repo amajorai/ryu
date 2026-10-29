@@ -6,6 +6,8 @@
 // conversation and how they ended); creation/status mutation is driven by Core
 // itself during a run, not by the user.
 
+import { z } from "zod";
+
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
 
 export type SessionStatus = "idle" | "running" | "completed" | "failed";
@@ -21,15 +23,19 @@ export interface Session {
 	updatedAt: number;
 }
 
-interface SessionWire {
-	conversation_id: string;
-	created_at: number;
-	id: string;
-	runnable_id: string;
-	runnable_kind: string;
-	status: SessionStatus;
-	updated_at: number;
-}
+const sessionWireSchema = z.object({
+	conversation_id: z.string(),
+	created_at: z.number(),
+	id: z.string(),
+	runnable_id: z.string(),
+	runnable_kind: z.string(),
+	status: z.enum(["idle", "running", "completed", "failed"]),
+	updated_at: z.number(),
+});
+type SessionWire = z.infer<typeof sessionWireSchema>;
+const sessionsResponseSchema = z.object({
+	sessions: z.array(sessionWireSchema).nullish(),
+});
 
 function toSession(s: SessionWire): Session {
 	return {
@@ -55,7 +61,7 @@ export async function listSessionsForConversation(
 	if (!resp.ok) {
 		throw new Error(`Failed to load sessions: ${resp.status}`);
 	}
-	const body = (await resp.json()) as { sessions?: SessionWire[] };
+	const body = sessionsResponseSchema.parse(await resp.json());
 	return (body.sessions ?? [])
 		.map(toSession)
 		.sort((a, b) => b.updatedAt - a.updatedAt);

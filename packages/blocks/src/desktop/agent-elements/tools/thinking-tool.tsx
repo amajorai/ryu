@@ -1,7 +1,10 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { AgentActivity } from "@ryu/ui/components/agents/agent-activity";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { memo, useMemo } from "react";
 import { useToolComplete } from "../hooks/use-tool-complete.ts";
 import type { StepState, TimelineStep } from "../types/timeline.ts";
+import type { NativeSdkValue } from "../utils/native-sdk-observation.ts";
 import {
 	mapToolInvocationToStep,
 	mapToolStateToStepState,
@@ -24,11 +27,11 @@ export interface ThinkingCollapsedProps {
 	expanded?: boolean;
 	onComplete: () => void;
 	onToggleExpand?: () => void;
-	outputDurationMs?: number;
+	outputDurationMs?: NativeSdkValue;
 	startedAt?: number;
 	state: StepState;
 	step: Extract<TimelineStep, { type: "tool-call" }>;
-	tokenCount?: number;
+	tokenCount?: NativeSdkValue;
 }
 
 export function ThinkingCollapsed({
@@ -39,6 +42,7 @@ export function ThinkingCollapsed({
 	outputDurationMs,
 	tokenCount,
 }: ThinkingCollapsedProps) {
+	const tl = useLiteralMessages();
 	useToolComplete(state === "animating", step.duration, onComplete);
 
 	const isAnimating = state === "animating";
@@ -49,14 +53,14 @@ export function ThinkingCollapsed({
 	// elapsed time measured while streaming. A thought loaded from history with
 	// no reported duration yields null so no bogus badge is shown.
 	const durationLabel = useMemo(() => {
-		if (typeof outputDurationMs === "number" && outputDurationMs > 0) {
+		if (isNativeNumber(outputDurationMs) && outputDurationMs > 0) {
 			return formatDuration(outputDurationMs);
 		}
 		return null;
 	}, [outputDurationMs]);
 
 	const sizeHint = useMemo(() => {
-		if (typeof tokenCount === "number" && tokenCount > 0) {
+		if (isNativeNumber(tokenCount) && tokenCount > 0) {
 			return `${tokenCount} tokens`;
 		}
 		const trimmed = reasoningText.trim();
@@ -66,7 +70,9 @@ export function ThinkingCollapsed({
 		return `${trimmed.split(/\s+/).filter(Boolean).length} words`;
 	}, [reasoningText, tokenCount]);
 
-	const summary = durationLabel ? `Thought for ${durationLabel}` : "Thought";
+	const summary = durationLabel
+		? tl("Thought for {durationLabel}", { durationLabel })
+		: "Thought";
 
 	const items = useMemo(
 		() => [
@@ -172,12 +178,12 @@ export const ThinkingTool = memo(function ThinkingTool({
 	// (see subagent-tool.tsx): the engine may stamp `startedAt` in provider
 	// metadata and report a final duration / reasoning-token count on the output.
 	const outputDurationMs =
-		(part?.output?.totalDurationMs as number | undefined) ??
-		(part?.output?.duration as number | undefined) ??
-		(part?.output?.duration_ms as number | undefined);
+		part?.output?.totalDurationMs ??
+		part?.output?.duration ??
+		part?.output?.duration_ms;
 	const tokenCount =
-		(part?.output?.reasoningTokens as number | undefined) ??
-		(part?.callProviderMetadata?.custom?.reasoningTokens as number | undefined);
+		part?.output?.reasoningTokens ??
+		part?.callProviderMetadata?.custom?.reasoningTokens;
 
 	return (
 		<ThinkingCollapsed

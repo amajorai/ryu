@@ -1,5 +1,6 @@
-import { setEditorAiConfig } from "@ryu/ui/lib/editor-ai";
+import { setEditorAiConfig } from "@ryu/ui/lib/editor-ai.ts";
 import { useEffect } from "react";
+import { z } from "zod";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -132,7 +133,14 @@ export function useRegisterEditorAi(): void {
 			// An explicit preference: honour it exactly, including an explicit "off".
 			if (raw) {
 				try {
-					const pref = JSON.parse(raw) as EditorAiPref;
+					const pref = z
+						.object({
+							agentId: z.string().optional(),
+							baseUrl: z.string().optional(),
+							enabled: z.boolean(),
+							model: z.string(),
+						})
+						.parse(JSON.parse(raw));
 					if (cancelled) {
 						return;
 					}

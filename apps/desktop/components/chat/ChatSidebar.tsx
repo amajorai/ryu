@@ -4,13 +4,13 @@ import {
 	MoreVerticalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 
 import {
 	formatDistanceToNow,
@@ -34,8 +34,15 @@ type DateGroup = "Today" | "Yesterday" | "This Week" | "Older";
 
 const GROUP_ORDER: DateGroup[] = ["Today", "Yesterday", "This Week", "Older"];
 
-function groupByDate(convs: Conversation[]): Record<DateGroup, Conversation[]> {
-	const groups: Record<DateGroup, Conversation[]> = {
+interface ConversationDateGroups {
+	Older: Conversation[];
+	"This Week": Conversation[];
+	Today: Conversation[];
+	Yesterday: Conversation[];
+}
+
+function groupByDate(convs: Conversation[]): ConversationDateGroups {
+	const groups: ConversationDateGroups = {
 		Today: [],
 		Yesterday: [],
 		"This Week": [],
@@ -125,18 +132,18 @@ export function ChatSidebar({
 
 										<DropdownMenu>
 											<DropdownMenuTrigger
-												className="inline-flex h-6 w-6 items-center justify-center rounded opacity-0 hover:bg-accent group-hover:opacity-100"
 												onClick={(e) => e.stopPropagation()}
+												variant="sidebar-options"
 											>
 												<HugeiconsIcon icon={MoreVerticalIcon} size={12} />
 											</DropdownMenuTrigger>
 											<DropdownMenuContent align="end">
 												<DropdownMenuItem
-													className="text-status-destructive"
 													onClick={(e) => {
 														e.stopPropagation();
 														onDeleteConversation(conv.id);
 													}}
+													tone="destructive"
 												>
 													<HugeiconsIcon
 														className="mr-2"

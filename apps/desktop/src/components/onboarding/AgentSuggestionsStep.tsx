@@ -1,10 +1,16 @@
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Logo as RyuLogo } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
+import { useLiteralMessages, useLocalizedText } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Logo as RyuLogo } from "@ryu/ui/components/logo.tsx";
 import { Check, ChevronDown, Sparkles, Wrench } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import {
+	AGENT_IDENTITY_MODE_OPTIONS,
+	AgentIdentityModePicker,
+} from "@/src/components/agents/AgentIdentityModePicker.tsx";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
+import { suggestionIdentityMode } from "@/src/lib/agent-suggestion.ts";
+import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
 import type { OnboardingAgentSuggestion } from "@/src/lib/api/onboarding-profile.ts";
 
 export interface OnboardingConnectedApp {
@@ -46,26 +52,26 @@ const EXPRESSIVE_PALETTES = [
 	},
 ] as const;
 
-const TOOL_LABELS: Record<string, string> = {
-	"memory.search": "Memory search",
-	"memory.store": "Save memories",
-	"routines.create": "Create routines",
-	"routines.list": "View routines",
-	"search_conversations.search": "Search past chats",
-	"skills.load": "Load skills",
-	"skills.search": "Search skills",
-	"spaces.list_documents": "List Space documents",
-	"spaces.search": "Search Spaces",
-	"web.crawl": "Crawl the web",
-	"web.extract": "Read web pages",
-	"web.search": "Search the web",
-	"workspace.open_panel": "Open a Ryu panel",
-	"workspace.open_tab": "Open a Ryu page",
-};
+const TOOL_LABELS = new Map<string, string>([
+	["memory.search", "Memory search"],
+	["memory.store", "Save memories"],
+	["routines.create", "Create routines"],
+	["routines.list", "View routines"],
+	["search_conversations.search", "Search past chats"],
+	["skills.load", "Load skills"],
+	["skills.search", "Search skills"],
+	["spaces.list_documents", "List Space documents"],
+	["spaces.search", "Search Spaces"],
+	["web.crawl", "Crawl the web"],
+	["web.extract", "Read web pages"],
+	["web.search", "Search the web"],
+	["workspace.open_panel", "Open a Ryu panel"],
+	["workspace.open_tab", "Open a Ryu page"],
+]);
 
 function toolLabel(tool: string): string {
 	return (
-		TOOL_LABELS[tool] ??
+		TOOL_LABELS.get(tool) ??
 		tool
 			.split(".")
 			.at(-1)
@@ -130,9 +136,71 @@ function RyuExpressiveAvatar({
 	);
 }
 
+/**
+ * How a suggested agent will work: the chosen mode as a pill, and a Change
+ * control that opens the same compact cards the agent editor shows.
+ */
+function SuggestionIdentity({
+	disabled,
+	identityMode,
+	onIdentityModeChange,
+	suggestion,
+}: {
+	disabled: boolean;
+	identityMode: AgentIdentityMode;
+	onIdentityModeChange: (mode: AgentIdentityMode) => void;
+	suggestion: OnboardingAgentSuggestion;
+}) {
+	const tl = useLiteralMessages();
+	const [choosing, setChoosing] = useState(false);
+	return (
+		<div
+			className="flex flex-col gap-2"
+			data-testid={`agent-suggestion-identity-${suggestion.id}`}
+		>
+			<div className="flex items-center gap-2 text-xs">
+				<span className="text-muted-foreground">Identity</span>
+				<span className="rounded-full bg-muted px-3 py-1 font-medium">
+					{AGENT_IDENTITY_MODE_OPTIONS[identityMode].title}
+				</span>
+				<Button
+					aria-expanded={choosing}
+					aria-label={
+						choosing
+							? tl("Done choosing how {name} works", {
+									name: suggestion.name,
+								})
+							: tl("Change how {name} works", { name: suggestion.name })
+					}
+					disabled={disabled}
+					onClick={() => setChoosing((open) => !open)}
+					size="sm"
+					type="button"
+					variant="link"
+				>
+					{choosing ? "Done" : "Change"}
+				</Button>
+			</div>
+			{choosing ? (
+				<AgentIdentityModePicker
+					aria-label={tl("How should {name} work?", {
+						name: suggestion.name,
+					})}
+					disabled={disabled}
+					onChange={onIdentityModeChange}
+					size="compact"
+					value={identityMode}
+				/>
+			) : null}
+		</div>
+	);
+}
+
 function SuggestionCard({
 	connectedApps,
 	disabled,
+	identityMode,
+	onIdentityModeChange,
 	onToggle,
 	onReview,
 	reviewed,
@@ -141,13 +209,20 @@ function SuggestionCard({
 }: {
 	connectedApps: readonly OnboardingConnectedApp[];
 	disabled: boolean;
+	identityMode: AgentIdentityMode;
+	onIdentityModeChange: (mode: AgentIdentityMode) => void;
 	onToggle: () => void;
 	onReview: (reviewed: boolean) => void;
 	reviewed: boolean;
 	selected: boolean;
 	suggestion: OnboardingAgentSuggestion;
 }) {
+	const tl = useLiteralMessages();
 	const palette = paletteForSuggestion(suggestion.id);
+	const title = useLocalizedText(suggestion.name, { literal: true });
+	const description = useLocalizedText(suggestion.description, {
+		literal: true,
+	});
 	return (
 		<div data-testid={`agent-suggestion-${suggestion.id}`}>
 			<SettingsCard
@@ -164,15 +239,12 @@ function SuggestionCard({
 					type="button"
 				>
 					<RyuExpressiveAvatar palette={palette} suggestionId={suggestion.id} />
-					<PageHeader
-						as="h2"
-						className="min-w-0 flex-1"
-						stagger={false}
-						subtitle={suggestion.description}
-						subtitleClassName="text-sm leading-relaxed"
-						title={suggestion.name}
-						titleClassName="text-base"
-					/>
+					<div className="min-w-0 flex-1 space-y-1">
+						<h2 className="font-medium text-base">{title}</h2>
+						<p className="font-medium text-muted-foreground text-sm leading-relaxed">
+							{description}
+						</p>
+					</div>
 					<span
 						className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40"}`}
 					>
@@ -182,12 +254,12 @@ function SuggestionCard({
 
 				{connectedApps.length > 0 ? (
 					<div className="mt-3 ml-14 flex flex-wrap items-center gap-1.5">
-						<span className="mr-1 text-[11px] text-muted-foreground">
+						<span className="type-caption mr-1 text-muted-foreground">
 							Connected apps
 						</span>
 						{connectedApps.map((app) => (
 							<span
-								className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground"
+								className="type-caption inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/60 px-2 py-1 text-muted-foreground"
 								data-testid={`connected-app-${app.slug}`}
 								key={app.slug}
 							>
@@ -202,7 +274,7 @@ function SuggestionCard({
 
 				<div className="mt-3 ml-14 flex flex-col gap-3">
 					<div className="rounded-lg bg-background/50 px-3 py-2">
-						<div className="flex items-center gap-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+						<div className="type-caption flex items-center gap-1.5 font-medium text-muted-foreground uppercase tracking-wide">
 							<Sparkles className="size-3" />
 							Why this showed up
 						</div>
@@ -217,7 +289,7 @@ function SuggestionCard({
 						>
 							{suggestion.tools.map((tool) => (
 								<span
-									className="rounded-full border border-border/70 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground"
+									className="type-caption rounded-full border border-border/70 bg-background/60 px-2 py-1 text-muted-foreground"
 									key={tool}
 								>
 									{toolLabel(tool)}
@@ -225,6 +297,13 @@ function SuggestionCard({
 							))}
 						</div>
 					</div>
+
+					<SuggestionIdentity
+						disabled={disabled}
+						identityMode={identityMode}
+						onIdentityModeChange={onIdentityModeChange}
+						suggestion={suggestion}
+					/>
 
 					<details
 						className="group rounded-lg border border-border/60 bg-background/40"
@@ -244,7 +323,7 @@ function SuggestionCard({
 
 					<div className="flex items-start gap-2 text-muted-foreground text-xs leading-relaxed">
 						<Checkbox
-							aria-label={`I reviewed ${suggestion.name}`}
+							aria-label={tl("I reviewed {name}", { name: suggestion.name })}
 							checked={reviewed}
 							disabled={disabled}
 							onCheckedChange={(checked) => onReview(checked === true)}
@@ -263,7 +342,9 @@ export function AgentSuggestionsStep({
 	busy,
 	connectedApps,
 	error,
+	identityModes,
 	onCreate,
+	onIdentityModeChange,
 	onSkip,
 	onToggle,
 	onReview,
@@ -274,7 +355,10 @@ export function AgentSuggestionsStep({
 	busy: boolean;
 	connectedApps: readonly OnboardingConnectedApp[];
 	error?: string | null;
+	/** The identity mode chosen per suggestion id; a missing one acts as you. */
+	identityModes: ReadonlyMap<string, AgentIdentityMode>;
 	onCreate: () => void;
+	onIdentityModeChange: (id: string, mode: AgentIdentityMode) => void;
 	onSkip: () => void;
 	onToggle: (id: string) => void;
 	onReview: (id: string, reviewed: boolean) => void;
@@ -282,6 +366,7 @@ export function AgentSuggestionsStep({
 	selected: ReadonlySet<string>;
 	suggestions: readonly OnboardingAgentSuggestion[];
 }) {
+	const tl = useLiteralMessages();
 	const selectedCount = selected.size;
 	const pendingReviewCount = suggestions.filter(
 		(suggestion) => selected.has(suggestion.id) && !reviewed.has(suggestion.id)
@@ -293,7 +378,11 @@ export function AgentSuggestionsStep({
 					<SuggestionCard
 						connectedApps={connectedApps}
 						disabled={busy}
+						identityMode={suggestionIdentityMode(identityModes, suggestion.id)}
 						key={suggestion.id}
+						onIdentityModeChange={(mode) =>
+							onIdentityModeChange(suggestion.id, mode)
+						}
 						onReview={(next) => onReview(suggestion.id, next)}
 						onToggle={() => onToggle(suggestion.id)}
 						reviewed={reviewed.has(suggestion.id)}
@@ -321,9 +410,15 @@ export function AgentSuggestionsStep({
 					variant="mono"
 				>
 					{pendingReviewCount > 0
-						? `Review ${pendingReviewCount} selected draft${pendingReviewCount === 1 ? "" : "s"}`
+						? tl(
+								"Review {pendingReviewCount, plural, one {# selected draft} other {# selected drafts}}",
+								{ pendingReviewCount }
+							)
 						: selectedCount > 0
-							? `Add ${selectedCount} agent${selectedCount === 1 ? "" : "s"}`
+							? tl(
+									"Add {selectedCount, plural, one {# agent} other {# agents}}",
+									{ selectedCount }
+								)
 							: "Select an agent"}
 				</Button>
 			</div>

@@ -1,4 +1,4 @@
-import type { AgentOption } from "@ryu/blocks/desktop/channels";
+import type { AgentOption } from "@ryu/blocks/desktop/channels.tsx";
 import {
 	CHANNEL_LABELS,
 	CHANNEL_SETUP,
@@ -12,24 +12,24 @@ import {
 	REQUIRED_SECRETS,
 	type ReactionLearningSettings,
 	SECRET_LABELS,
-} from "@ryu/blocks/desktop/channels";
-import { Alert, AlertDescription } from "@ryu/ui/components/alert";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/blocks/desktop/channels.tsx";
+import { Alert, AlertDescription } from "@ryu/ui/components/alert.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/native-select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TelegramManagedBotPanel } from "@/src/components/channels/TelegramManagedBotPanel.tsx";
 import { ScrollFadeEffect } from "@/src/components/ui/scroll-fade-effect.tsx";
@@ -67,10 +67,7 @@ interface FormState {
  * the server takes. Shared by the manual submit and the managed pairing, so a bot
  * created either way answers as the same thing.
  */
-function splitBinding(value: string): {
-	agentId: string | null;
-	teamId: string | null;
-} {
+function splitBinding(value: string) {
 	if (value.startsWith(TEAM_PREFIX)) {
 		return { agentId: null, teamId: value.slice(TEAM_PREFIX.length) };
 	}
@@ -152,11 +149,11 @@ export function AddChannelDialog({
 		}
 		setForm((current) => ({
 			...current,
-			...(initialAgentId ? { agentId: initialAgentId } : {}),
-			...(initialAgentName ? { name: initialAgentName } : {}),
+			...(initialAgentId ? { agentId: initialAgentId } : undefined),
+			...(initialAgentName ? { name: initialAgentName } : undefined),
 			...(initialChannelType
 				? { channelType: initialChannelType, secrets: {} }
-				: {}),
+				: undefined),
 		}));
 		if (initialChannelType) {
 			setConnectMode(initialChannelType === "telegram" ? "managed" : "manual");
@@ -273,6 +270,15 @@ export function AddChannelDialog({
 		form.systemPrompt,
 	]);
 
+	const handleDialogOpenChange = (nextOpen: boolean) => {
+		if (!nextOpen) {
+			setForm(emptyForm());
+			setConnectMode("managed");
+			setManagedNotice(null);
+		}
+		onOpenChange(nextOpen);
+	};
+
 	/**
 	 * The managed pairing finished. Two shapes are possible and both are terminal:
 	 * the node handed the token back (submit it through the normal form path), or
@@ -319,17 +325,7 @@ export function AddChannelDialog({
 	}, []);
 
 	return (
-		<Dialog
-			onOpenChange={(v) => {
-				if (!v) {
-					setForm(emptyForm());
-					setConnectMode("managed");
-					setManagedNotice(null);
-				}
-				onOpenChange(v);
-			}}
-			open={open}
-		>
+		<Dialog onOpenChange={handleDialogOpenChange} open={open}>
 			<DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
 				<DialogHeader>
 					<DialogTitle>New channel bot</DialogTitle>
@@ -361,7 +357,9 @@ export function AddChannelDialog({
 									setManagedNotice(null);
 									setForm((f) => ({
 										...f,
-										channelType: e.target.value as ChannelType,
+										channelType:
+											/* SAFETY: This NativeSelect renders only the typed CHANNEL_TYPES option values. This is a native UI selection, not a decoder for arbitrary synthetic events. */ e
+												.target.value as ChannelType,
 										secrets: {},
 									}));
 								}}
@@ -534,7 +532,9 @@ export function AddChannelDialog({
 								onChange={(e) =>
 									setForm((f) => ({
 										...f,
-										groupReplyMode: e.target.value as GroupReplyMode,
+										groupReplyMode:
+											/* SAFETY: This NativeSelect renders only the typed GROUP_REPLY_MODES option values. This is a native UI selection, not a decoder for arbitrary synthetic events. */ e
+												.target.value as GroupReplyMode,
 									}))
 								}
 								value={form.groupReplyMode}
@@ -698,7 +698,7 @@ export function AddChannelDialog({
 				</ScrollFadeEffect>
 
 				<DialogFooter>
-					<Button onClick={() => onOpenChange(false)} variant="ghost">
+					<Button onClick={() => handleDialogOpenChange(false)} variant="ghost">
 						Cancel
 					</Button>
 					{/* The managed path submits itself the moment Telegram hands over a

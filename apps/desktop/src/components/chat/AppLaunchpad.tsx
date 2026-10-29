@@ -1,3 +1,10 @@
+import type { CSSProperties } from "react";
+
+interface LaunchpadStyle extends CSSProperties {
+	"--launchpad-columns": number;
+	"--launchpad-rows": number;
+}
+
 // apps/desktop/src/components/chat/AppLaunchpad.tsx
 //
 // The macOS-Launchpad grid on the empty chat start page: every app the user can
@@ -7,7 +14,7 @@
 //
 // WHAT IS LISTED. The source is `usePluginContributions().companions` — the
 // full-page surfaces of ENABLED apps, already enabled-filtered server-side —
-// narrowed further to `hasUi`. It is deliberately NOT the apps catalog: most
+// narrowed further to navigable UI companions. It is deliberately NOT the apps catalog: most
 // feature apps are install-on-demand, and a sidecar-only app (`@ryu/social`) has no UI
 // at all, so gridding the catalog would paint a dozen tiles that do nothing when
 // clicked. If it has a tile here, it opens. Same list, same order, same launch
@@ -26,6 +33,7 @@
 // component in real Chromium. The deliverable here is a laid-out, paginated grid —
 // a rendered-geometry fact a type-check cannot see — and the hooks the wrapper
 // uses need the app's whole node/provider tree, which a story cannot supply.
+import { useLiteralMessages } from "@ryu/i18n/react";
 import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
 import { iconCacheKey } from "@ryu/marketplace/catalog/icon-cache";
 import type { CardDither } from "@ryu/marketplace/catalog/types";
@@ -53,6 +61,8 @@ import {
 	usePluginContributions,
 } from "@/src/hooks/usePluginContributions.ts";
 import { useStandaloneApps } from "@/src/hooks/useStandaloneApps.ts";
+import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
+import layout from "./chat-layout.module.css";
 
 /** Two rows, like Launchpad's own grid — enough to read as a grid, short enough
  *  that the composer above it stays the centre of the page. */
@@ -127,6 +137,7 @@ export function AppLaunchpadGrid({
 	onOpenStandalone,
 	onRemoveStandalone,
 }: AppLaunchpadGridProps) {
+	const tl = useLiteralMessages();
 	const scrollerRef = useRef<HTMLDivElement | null>(null);
 	const [width, setWidth] = useState(0);
 	const [page, setPage] = useState(0);
@@ -178,6 +189,10 @@ export function AppLaunchpadGrid({
 		return null;
 	}
 
+	const pageGeometry: LaunchpadStyle = {
+		"--launchpad-columns": columns,
+		"--launchpad-rows": ROWS,
+	};
 	return (
 		// Deliberately NOT height-constrained. An earlier revision tried to make this
 		// the child that gives way in a short pane (`min-h-0` + `1fr` rows), which
@@ -197,13 +212,13 @@ export function AppLaunchpadGrid({
 			>
 				{pages.map((pageItems) => (
 					<div
-						className="grid w-full shrink-0 snap-start gap-x-1 gap-y-2"
+						className={cn(
+							layout.launchpadPage,
+							"grid w-full shrink-0 snap-start gap-x-1 gap-y-2"
+						)}
 						data-testid="launchpad-page"
 						key={pageItems[0]?.id ?? "page"}
-						style={{
-							gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-							gridTemplateRows: `repeat(${ROWS}, minmax(0, 1fr))`,
-						}}
+						style={pageGeometry}
 					>
 						{pageItems.map((item) => (
 							<ContextMenu key={item.id}>
@@ -225,7 +240,7 @@ export function AppLaunchpadGrid({
 								    wherever it is seen. */}
 										<AppIcon
 											cacheKey={item.cacheKey}
-											className="size-12 rounded-[12px] transition-transform group-active:scale-95"
+											className="size-12 group-active:scale-95"
 											dither={item.dither}
 											iconBackground={item.iconBackground}
 											iconId={item.iconId}
@@ -235,7 +250,7 @@ export function AppLaunchpadGrid({
 											seedId={item.seedId}
 											size={22}
 										/>
-										<span className="w-full truncate text-center text-[11px] text-muted-foreground leading-tight group-hover:text-foreground">
+										<span className="type-caption w-full truncate text-center text-muted-foreground leading-tight group-hover:text-foreground">
 											{item.label}
 										</span>
 									</button>
@@ -275,7 +290,9 @@ export function AppLaunchpadGrid({
 				<div className="mt-2 flex items-center justify-center gap-1.5">
 					{pages.map((pageItems, index) => (
 						<button
-							aria-label={`Apps page ${index + 1}`}
+							aria-label={tl("Apps page {pageNumber}", {
+								pageNumber: index + 1,
+							})}
 							className={cn(
 								"size-1.5 rounded-full transition-colors",
 								index === page ? "bg-foreground/60" : "bg-foreground/20"
@@ -315,31 +332,29 @@ export function AppLaunchpad({ className }: AppLaunchpadProps) {
 
 	const items = useMemo<LaunchpadItem[]>(
 		() =>
-			companions
-				.filter((c) => c.hasUi !== false)
-				.map((c) => {
-					const owner = c.pluginId ? appsById.get(c.pluginId) : undefined;
-					const seedId = c.pluginId || c.id;
-					return {
-						cacheKey: iconCacheKey(
-							seedId,
-							owner?.installedVersion ?? owner?.version
-						),
-						dither: owner?.iconDither,
-						iconBackground: owner?.iconBackground,
-						iconId: c.icon ?? owner?.icon,
-						iconPadding: owner?.iconPadding,
-						iconUrl: owner?.iconUrl,
-						id: c.id,
-						label: c.label || c.name,
+			companions.filter(isNavigablePluginCompanion).map((c) => {
+				const owner = c.pluginId ? appsById.get(c.pluginId) : undefined;
+				const seedId = c.pluginId || c.id;
+				return {
+					cacheKey: iconCacheKey(
 						seedId,
-						appId: c.pluginId ?? undefined,
-						standaloneInstalled: c.pluginId
-							? installedAppIds.has(c.pluginId)
-							: false,
-						version: owner?.version ?? "unknown",
-					};
-				}),
+						owner?.installedVersion ?? owner?.version
+					),
+					dither: owner?.iconDither,
+					iconBackground: owner?.iconBackground,
+					iconId: c.icon ?? owner?.icon,
+					iconPadding: owner?.iconPadding,
+					iconUrl: owner?.iconUrl,
+					id: c.id,
+					label: c.label || c.name,
+					seedId,
+					appId: c.pluginId ?? undefined,
+					standaloneInstalled: c.pluginId
+						? installedAppIds.has(c.pluginId)
+						: false,
+					version: owner?.version ?? "unknown",
+				};
+			}),
 		[companions, appsById, installedAppIds]
 	);
 
@@ -365,7 +380,7 @@ export function AppLaunchpad({ className }: AppLaunchpadProps) {
 			};
 			installStandalone(target)
 				.then(() => openStandalone(target))
-				.catch((error: unknown) => {
+				.catch((error) => {
 					toast.error("Couldn't install the standalone app", {
 						description:
 							error instanceof Error ? error.message : "Please try again.",
@@ -384,7 +399,7 @@ export function AppLaunchpad({ className }: AppLaunchpadProps) {
 				appId: item.appId,
 				name: item.label,
 				version: item.version ?? "unknown",
-			}).catch((error: unknown) => {
+			}).catch((error) => {
 				toast.error("Couldn't open the standalone app", {
 					description:
 						error instanceof Error ? error.message : "Please try again.",
@@ -399,7 +414,7 @@ export function AppLaunchpad({ className }: AppLaunchpadProps) {
 			if (!item.appId) {
 				return;
 			}
-			uninstallStandalone(item.appId).catch((error: unknown) => {
+			uninstallStandalone(item.appId).catch((error) => {
 				toast.error("Couldn't remove the standalone app", {
 					description:
 						error instanceof Error ? error.message : "Please try again.",

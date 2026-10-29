@@ -1,3 +1,4 @@
+pub mod derived;
 pub mod downloader;
 pub use downloader::OllamaDownloader;
 
@@ -11,6 +12,8 @@ use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
 /// Default host:port that `ollama serve` binds to.
 const OLLAMA_ADDR: &str = "127.0.0.1:11434";
 const OLLAMA_HEALTH_URL: &str = "http://127.0.0.1:11434/api/version";
+/// Native (non-OpenAI) API root, used for `/api/show` and `/api/create`.
+const OLLAMA_API_BASE: &str = "http://127.0.0.1:11434";
 
 /// Lifecycle manager for the ollama sidecar process.
 ///
@@ -47,12 +50,23 @@ impl OllamaManager {
     }
 
     fn binary_path() -> std::path::PathBuf {
-        let name = if cfg!(target_os = "windows") {
-            "ollama.exe"
-        } else {
-            "ollama"
-        };
-        crate::paths::ryu_dir().join("bin").join(name)
+        downloader::bin_path()
+    }
+
+    /// Env for a Ryu-spawned `ollama serve`: point `OLLAMA_MODELS` at the data
+    /// dir's `models/chat/ollama`, unless the user set `OLLAMA_MODELS`
+    /// themselves (then the inherited value wins).
+    fn serve_env() -> anyhow::Result<Vec<(String, String)>> {
+        if std::env::var_os("OLLAMA_MODELS").is_some_and(|v| !v.is_empty()) {
+            return Ok(Vec::new());
+        }
+        let models = downloader::models_dir();
+        std::fs::create_dir_all(&models)
+            .with_context(|| format!("creating {}", models.display()))?;
+        Ok(vec![(
+            "OLLAMA_MODELS".to_string(),
+            models.to_string_lossy().into_owned(),
+        )])
     }
 
     /// Returns `true` if an ollama server is already answering on its port.
@@ -61,6 +75,65 @@ impl OllamaManager {
             client.get(OLLAMA_HEALTH_URL).send().await,
             Ok(resp) if resp.status().is_success()
         )
+    }
+}
+
+/// Apply the per-model launch config (#mtp-advanced-inference) to the Ollama
+/// model Ryu serves.
+///
+/// Ollama's daemon serves many models and takes no per-model launch CLI flags,
+/// and its OpenAI-compat endpoint accepts no `options` passthrough, so launch
+/// knobs are baked into a derived model (`FROM <base>` + `PARAMETER` lines, see
+/// [`derived`]). Inference for the base name is then routed to the derived name
+/// (Core's OpenAI proxy and, through the Gateway spawn env, the Gateway's
+/// `local` provider). Fail-soft: on any error the base model keeps serving and
+/// the sidecar reports `Degraded` with the reason the settings were not applied.
+async fn apply_launch_config(client: &reqwest::Client) {
+    derived::clear_routes();
+    derived::set_launch_status(None);
+
+    let base = crate::model_catalog::active_model_ref_for_engine("ollama").await;
+    let prefs = match crate::server::preferences::PreferencesStore::open_default() {
+        Ok(prefs) => prefs,
+        Err(e) => {
+            tracing::warn!("could not open preferences for ollama launch config: {e}");
+            return;
+        }
+    };
+    let cfg = prefs
+        .resolve_launch_config(base.as_deref().unwrap_or(""), "ollama")
+        .await;
+    let params = cfg.to_ollama_modelfile();
+    if params.is_empty() {
+        return;
+    }
+    let Some(base) = base else {
+        tracing::info!(
+            "ollama launch config present ({params:?}) but no Ollama model is selected; \
+             it is applied when a model is activated on the Ollama engine"
+        );
+        return;
+    };
+
+    match derived::ensure_derived_model(client, OLLAMA_API_BASE, &base, &params).await {
+        Ok(name) => {
+            tracing::info!(
+                base = %base,
+                derived = %name,
+                "ollama launch config applied via derived model"
+            );
+            derived::set_routes(&base, &name);
+        }
+        Err(e) => {
+            tracing::warn!(
+                base = %base,
+                "could not create ollama derived model ({e:#}); serving the base model \
+                 without launch settings"
+            );
+            derived::set_launch_status(Some(format!(
+                "launch settings for '{base}' were not applied: {e:#}"
+            )));
+        }
     }
 }
 
@@ -88,10 +161,20 @@ impl Sidecar for OllamaManager {
             // If a server is already up (e.g. a system ollama service), adopt it
             // rather than spawning a competing process that would fail to bind.
             if Self::server_reachable(&client).await {
-                adopted_external.store(true, Ordering::Relaxed);
+                // The answering server may be our own child from an earlier start;
+                // only a server we did not spawn counts as adopted, or the next
+                // stop() would leave our child running.
+                let own_child = process.is_running();
+                adopted_external.store(!own_child, Ordering::Relaxed);
                 tracing::info!(
-                    "ollama already running on {OLLAMA_ADDR} — adopting existing server"
+                    "ollama already running on {OLLAMA_ADDR} — {}",
+                    if own_child {
+                        "our child is serving it"
+                    } else {
+                        "adopting existing server"
+                    }
                 );
+                apply_launch_config(&client).await;
                 return Ok(());
             }
             adopted_external.store(false, Ordering::Relaxed);
@@ -107,8 +190,18 @@ impl Sidecar for OllamaManager {
             tracing::info!("ollama sidecar starting ({})", binary_path.display());
 
             // `ollama serve` starts the HTTP server; the bare binary just prints help.
+            let mut env = Self::serve_env()?;
+            // Saved server environment (flash attention, KV cache type, parallel
+            // requests, keep-alive, …). Only a Ryu-started daemon receives it;
+            // an inherited variable of the same name stays authoritative.
+            let launch = super::engine_launch_config("ollama").await;
+            env.extend(
+                crate::inference::native_env("ollama", &launch.native)
+                    .into_iter()
+                    .filter(|(name, _)| std::env::var_os(name).is_none()),
+            );
             process
-                .start_with_args(&binary_path, &["serve"])
+                .start_path_with_env(&binary_path.to_string_lossy(), &["serve".to_string()], &env)
                 .await
                 .context("spawning ollama serve process")?;
 
@@ -124,25 +217,7 @@ impl Sidecar for OllamaManager {
             .await
             .context("ollama did not start within 30s")?;
 
-            // Advanced inference (#mtp-advanced-inference): Ollama's daemon serves
-            // many models and takes no per-model launch CLI flags, and its
-            // OpenAI-compat endpoint accepts no `options` passthrough. Launch +
-            // non-standard sampling knobs therefore have to be baked into a
-            // Modelfile (`ollama create` with PARAMETER directives) per model.
-            // That derived-model generation is not wired yet; surface what would
-            // be applied so the config is never a silent no-op.
-            if let Ok(prefs) = crate::server::preferences::PreferencesStore::open_default() {
-                let cfg = prefs.resolve_launch_config("", "ollama").await;
-                let params = cfg.to_ollama_modelfile();
-                if !params.is_empty() {
-                    tracing::warn!(
-                        "ollama launch config present ({params:?}) but Ollama tuning requires a \
-                         Modelfile (`ollama create` PARAMETER ...); derived-model generation is \
-                         not yet implemented, so these are NOT applied. Set them in a Modelfile \
-                         for now (tracked as a follow-up)."
-                    );
-                }
-            }
+            apply_launch_config(&client).await;
 
             tracing::info!("ollama sidecar started");
             Ok(())
@@ -153,6 +228,9 @@ impl Sidecar for OllamaManager {
         let process = self.process.clone();
         let adopted_external = Arc::clone(&self.adopted_external);
         Box::pin(async move {
+            // Derived-model routes only make sense while this engine serves them.
+            derived::clear_routes();
+            derived::set_launch_status(None);
             // We never spawned the adopted external server, so we must not kill it.
             if adopted_external.swap(false, Ordering::Relaxed) {
                 tracing::info!("ollama was an adopted external server — leaving it running");
@@ -175,7 +253,10 @@ impl Sidecar for OllamaManager {
             }
 
             match client.get(OLLAMA_HEALTH_URL).send().await {
-                Ok(resp) if resp.status().is_success() => HealthStatus::Healthy,
+                Ok(resp) if resp.status().is_success() => match derived::launch_status_message() {
+                    Some(message) => HealthStatus::Degraded(message),
+                    None => HealthStatus::Healthy,
+                },
                 Ok(resp) => {
                     HealthStatus::Unhealthy(format!("health endpoint returned {}", resp.status()))
                 }
@@ -190,15 +271,13 @@ impl Sidecar for OllamaManager {
 
     fn uninstall(&self, delete_data: bool) -> crate::sidecar::BoxFuture<anyhow::Result<()>> {
         Box::pin(async move {
-            crate::sidecar::remove_ryu_binary("ollama").await;
+            crate::sidecar::remove_dir(&downloader::install_dir()).await;
             crate::sidecar::remove_from_version_store("ollama");
 
             if delete_data {
-                // Ollama stores models and config in ~/.ollama on all platforms
-                // (Linux, macOS, and Windows %HOMEPATH%\.ollama).
-                if let Some(home) = dirs::home_dir() {
-                    crate::sidecar::remove_dir(&home.join(".ollama")).await;
-                }
+                // Only the model store a Ryu-spawned `ollama serve` wrote. Never
+                // `~/.ollama`: that belongs to the user's own Ollama install.
+                crate::sidecar::remove_dir(&downloader::models_dir()).await;
             }
 
             tracing::info!("ollama uninstalled");

@@ -4,7 +4,7 @@ test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/provider-account-switch-proof.html";
 
-test("switches subscription and BYOK accounts with an admin-gated Gateway target", async ({
+test("renders account-target callbacks and the supplied admin-disabled Gateway option", async ({
 	page,
 }, testInfo) => {
 	await page.goto(STORY_URL);
@@ -58,6 +58,47 @@ test("switches subscription and BYOK accounts with an admin-gated Gateway target
 	await expect(lockedGateway).toHaveAttribute("data-disabled", "true");
 	await page.screenshot({
 		path: testInfo.outputPath("provider-account-switch-target-proof.png"),
+		fullPage: true,
+	});
+});
+
+test("renders rename callbacks and retains fixture labels while reopening the picker", async ({
+	page,
+}, testInfo) => {
+	await page.goto(STORY_URL);
+	await page.getByTestId("provider-account-trigger").click();
+
+	await page
+		.getByRole("button", { name: "Rename account ada@acme.example" })
+		.click();
+	await page
+		.getByRole("textbox", { name: "Label for ada@acme.example" })
+		.fill("Work Claude");
+	await page.getByRole("button", { name: "Save" }).click();
+	await expect(page.getByRole("option", { name: /Work Claude/ })).toBeVisible();
+	await expect(page.getByTestId("last-action")).toHaveText(
+		"Renamed: Work Claude"
+	);
+
+	await page
+		.getByRole("button", { name: "Rename account grace@acme.example" })
+		.click();
+	await page
+		.getByRole("textbox", { name: "Label for grace@acme.example" })
+		.fill("Personal Claude");
+	await page.getByRole("button", { name: "Save" }).click();
+	await expect(
+		page.getByRole("option", { name: "Personal Claude" })
+	).toBeVisible();
+
+	await page.keyboard.press("Escape");
+	await page.getByTestId("provider-account-trigger").click();
+	await expect(page.getByRole("option", { name: /Work Claude/ })).toBeVisible();
+	await expect(
+		page.getByRole("option", { name: "Personal Claude" })
+	).toBeVisible();
+	await page.screenshot({
+		path: testInfo.outputPath("provider-account-labels-proof.png"),
 		fullPage: true,
 	});
 });

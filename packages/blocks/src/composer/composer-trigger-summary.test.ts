@@ -11,6 +11,15 @@ function source(
 	return { decorated: false, effort: false, loading: false, ...partial };
 }
 
+function requireSegment(
+	segments: ReturnType<typeof composeTriggerSummary>,
+	key: string
+) {
+	const segment = segments.find((candidate) => candidate.key === key);
+	if (!segment) throw new Error(`Expected composer trigger segment ${key}`);
+	return segment;
+}
+
 // The order the composer hook actually produces: agent, model, approval, then
 // the agent-advertised config options (reasoning among them).
 const AGENT = source({ key: "agent", name: "Ryu" });
@@ -26,7 +35,7 @@ describe("composeTriggerSummary", () => {
 	it("folds effort onto the model segment even across the approval section", () => {
 		const segments = composeTriggerSummary([AGENT, MODEL, APPROVAL, EFFORT]);
 		expect(segments.map((s) => s.key)).toEqual(["agent", "model", "approval"]);
-		expect(segments[1].effortName).toBe("High");
+		expect(requireSegment(segments, "model").effortName).toBe("High");
 	});
 
 	it("renders a decorated mode as icon-only but keeps its name for a11y", () => {
@@ -49,22 +58,24 @@ describe("composeTriggerSummary", () => {
 	it("gives effort its own segment when there is no model to ride on", () => {
 		const segments = composeTriggerSummary([AGENT, EFFORT]);
 		expect(segments.map((s) => s.key)).toEqual(["agent", "cfg-thought_level"]);
-		expect(segments[1].effortName).toBeUndefined();
-		expect(segments[1].name).toBe("High");
+		expect(
+			requireSegment(segments, "cfg-thought_level").effortName
+		).toBeUndefined();
+		expect(requireSegment(segments, "cfg-thought_level").name).toBe("High");
 	});
 
 	it("does not fold effort onto a model still being probed", () => {
 		const probing = source({ key: "model", name: "Detecting…", loading: true });
 		const segments = composeTriggerSummary([AGENT, probing, EFFORT]);
 		expect(segments).toHaveLength(3);
-		expect(segments[1].effortName).toBeUndefined();
+		expect(requireSegment(segments, "model").effortName).toBeUndefined();
 	});
 
 	it("folds only the first effort scale, so a second keeps its own segment", () => {
 		const second = source({ key: "cfg-depth", name: "Deep", effort: true });
 		const segments = composeTriggerSummary([MODEL, EFFORT, second]);
 		expect(segments.map((s) => s.key)).toEqual(["model", "cfg-depth"]);
-		expect(segments[0].effortName).toBe("High");
+		expect(requireSegment(segments, "model").effortName).toBe("High");
 	});
 
 	it("never marks a loading section icon-only (the spinner is its content)", () => {
@@ -74,7 +85,9 @@ describe("composeTriggerSummary", () => {
 			decorated: true,
 			loading: true,
 		});
-		expect(composeTriggerSummary([probing])[0].iconOnly).toBe(false);
+		expect(
+			requireSegment(composeTriggerSummary([probing]), "approval").iconOnly
+		).toBe(false);
 	});
 });
 

@@ -10,27 +10,20 @@
 // with the cadence (cron expr or "every <interval>") as the leading column and the
 // job's run target (workflow or agent) as the subtitle. Where Tasks emphasises the
 // last outcome, Calendar emphasises the cadence/what-runs. Enter opens Tasks for the
-// run history. Keys are gated on being the focused pane's active tab.
+// run history. The screen itself is shared with Tasks (../ScheduledJobsSurface.tsx).
 
-import { useKeyboard } from "@opentui/react";
-import { fetchJobs, type ScheduledJob } from "@ryuhq/core-client/schedules";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	type ScheduledJob,
+	systemTargetLabel,
+} from "@ryuhq/core-client/schedules";
 import { Badge } from "@/components/ui/badge.tsx";
-import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { useSurfaceView } from "../../core/ContributionsContext.tsx";
-import { useCore } from "../../core/CoreContext.tsx";
-import { ContributedViewPanel } from "../../ui/ContributedView.tsx";
-import { ErrorView } from "../../ui/ErrorView.tsx";
-import { Loading } from "../../ui/Loading.tsx";
-import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
-import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
+import type { SurfaceModule } from "../../workspace/router.ts";
+import {
+	type ScheduledJobRowProps,
+	scheduledJobsSurface,
+} from "../ScheduledJobsSurface.tsx";
 
-const VISIBLE_ROWS = 14;
-
-// The surface id — and therefore the `views` id an app declares to claim this
-// screen, as the reserved `surface:<id>` token (see viewClaimingSurface in
-// src/core/contributions.ts).
 const SURFACE_ID = "calendar";
 
 function cadenceLabel(job: ScheduledJob): string {
@@ -48,6 +41,9 @@ function targetLabel(job: ScheduledJob): string {
 	if (target.type === "workflow") {
 		return `workflow ${target.workflowId}`;
 	}
+	if (target.type === "system") {
+		return systemTargetLabel(target);
+	}
 	return `agent ${target.agentId}`;
 }
 
@@ -55,180 +51,14 @@ function sortByName(a: ScheduledJob, b: ScheduledJob): number {
 	return a.name.localeCompare(b.name);
 }
 
-function CalendarSurface({ active, paneId }: SurfaceProps) {
-	const { target, url, token } = useCore();
-	const theme = useTheme();
-	const { focusedPaneId, openTab } = useWorkspace();
-	const focused = active && focusedPaneId === paneId;
-	const contributed = useSurfaceView(SURFACE_ID);
-
-	const [jobs, setJobs] = useState<ScheduledJob[]>([]);
-	const [index, setIndex] = useState(0);
-	const [loading, setLoading] = useState(false);
-	const [loaded, setLoaded] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	// Track the latest request so a stale resolve cannot clobber fresh data.
-	const reqRef = useRef(0);
-
-	const runLoad = useCallback(() => {
-		const reqId = ++reqRef.current;
-		setLoading(true);
-		setError(null);
-		fetchJobs(target)
-			.then((next) => {
-				if (reqRef.current !== reqId) {
-					return;
-				}
-				const sorted = [...next].sort(sortByName);
-				setJobs(sorted);
-				setIndex((i) =>
-					sorted.length === 0 ? 0 : Math.min(i, sorted.length - 1)
-				);
-				setLoaded(true);
-			})
-			.catch((err: unknown) => {
-				if (reqRef.current !== reqId) {
-					return;
-				}
-				setError(err instanceof Error ? err.message : String(err));
-				setLoaded(true);
-			})
-			.finally(() => {
-				if (reqRef.current === reqId) {
-					setLoading(false);
-				}
-			});
-	}, [target]);
-
-	// Lazy load on activation, and reload on node switch (url/token). Skipped while
-	// a contributed view owns the screen — the built-in agenda is not rendered then,
-	// so fetching its data would be pure waste.
-	useEffect(() => {
-		if (active && !contributed) {
-			runLoad();
-		}
-	}, [active, contributed, runLoad]);
-
-	useKeyboard((key) => {
-		if (!focused || contributed) {
-			return;
-		}
-		if (key.name === "up" || key.name === "k") {
-			setIndex((i) => Math.max(0, i - 1));
-		} else if (key.name === "down" || key.name === "j") {
-			setIndex((i) => Math.min(Math.max(0, jobs.length - 1), i + 1));
-		} else if (key.name === "r") {
-			runLoad();
-		} else if (key.name === "return") {
-			openTab("/tasks");
-		}
-	});
-
-	const header = (
-		<box flexDirection="row" gap={2} paddingBottom={1} paddingLeft={1}>
-			<text fg={theme.colors.foreground}>
-				<b>Calendar</b>
-			</text>
-			<text fg={theme.colors.mutedForeground}>
-				{contributed ? "" : "agenda · ↑↓ nav · Enter open Tasks · r refresh"}
-			</text>
-		</box>
-	);
-
-	// An app claimed this surface: render its declarative view in place of the
-	// built-in agenda, keeping the page frame so the shell still looks like itself.
-	if (contributed) {
-		return (
-			<box flexDirection="column" flexGrow={1} paddingTop={1}>
-				{header}
-				<box flexDirection="column" paddingLeft={1}>
-					<ContributedViewPanel focused={focused} view={contributed} />
-				</box>
-			</box>
-		);
-	}
-
-	if (loading && !loaded) {
-		return (
-			<box flexDirection="column" flexGrow={1} paddingTop={1}>
-				{header}
-				<Loading label="Loading schedule…" />
-			</box>
-		);
-	}
-
-	if (error) {
-		return (
-			<box flexDirection="column" flexGrow={1} paddingTop={1}>
-				{header}
-				<ErrorView message={error} />
-			</box>
-		);
-	}
-
-	if (jobs.length === 0) {
-		return (
-			<box flexDirection="column" flexGrow={1} paddingTop={1}>
-				{header}
-				<box paddingLeft={1}>
-					<Card title="agenda">
-						<text fg={theme.colors.mutedForeground}>
-							nothing scheduled — schedule a job to see it here
-						</text>
-					</Card>
-				</box>
-			</box>
-		);
-	}
-
-	const selected = Math.min(index, jobs.length - 1);
-	const start = Math.max(
-		0,
-		Math.min(
-			selected - Math.floor(VISIBLE_ROWS / 2),
-			Math.max(0, jobs.length - VISIBLE_ROWS)
-		)
-	);
-	const visible = jobs.slice(start, start + VISIBLE_ROWS);
-
-	return (
-		<box flexDirection="column" flexGrow={1} paddingTop={1}>
-			{header}
-			<box paddingLeft={1}>
-				<Card title="agenda">
-					{visible.map((job, i) => (
-						<AgendaRow
-							job={job}
-							key={job.id}
-							selected={start + i === selected}
-						/>
-					))}
-					{jobs.length > visible.length ? (
-						<text fg={theme.colors.mutedForeground}>
-							{`${selected + 1}/${jobs.length}`}
-						</text>
-					) : null}
-				</Card>
-			</box>
-		</box>
-	);
-}
-
-function AgendaRow({
-	job,
-	selected,
-}: {
-	job: ScheduledJob;
-	selected: boolean;
-}) {
+function AgendaRow({ job, selected }: ScheduledJobRowProps) {
 	const theme = useTheme();
 	const cadenceColor = job.enabled
 		? theme.colors.info
 		: theme.colors.mutedForeground;
 	return (
 		<box flexDirection="row" gap={1}>
-			<text fg={selected ? theme.colors.primary : theme.colors.muted}>
+			<text fg={selected ? theme.colors.primary : theme.colors.mutedForeground}>
 				{selected ? "›" : " "}
 			</text>
 			<box flexDirection="column" flexGrow={1}>
@@ -250,6 +80,19 @@ function AgendaRow({
 		</box>
 	);
 }
+
+const CalendarSurface = scheduledJobsSurface({
+	cardTitle: "agenda",
+	emptyText: "nothing scheduled — schedule a job to see it here",
+	hint: "agenda · ↑↓ nav · Enter open Tasks · r refresh",
+	loadingLabel: "Loading schedule…",
+	openPath: "/tasks",
+	Row: AgendaRow,
+	sort: sortByName,
+	surfaceId: SURFACE_ID,
+	title: "Calendar",
+	visibleRows: 14,
+});
 
 /** The Calendar surface module (path /calendar). Registered by the Integrate step. */
 export const calendarSurface: SurfaceModule = {

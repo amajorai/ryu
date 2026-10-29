@@ -1,4 +1,13 @@
+import type {
+	ConversationRow,
+	ResumedConversationMessage,
+} from "../../core/conversations.ts";
 /* @jsxImportSource @opentui/react */
+import { readMemoryConsent } from "../../core/memoryConsent.ts";
+import {
+	nativeErrorMessage as errText,
+	humanizeError,
+} from "../../core/native-errors.ts";
 // Chat surface - the reference home surface (path /chat), restructured toward the
 // desktop AgentChat layout: an empty-state header with an agent/group mode picker,
 // a scrolling message list, a WorkspaceBar (project + model) above the composer,
@@ -15,47 +24,64 @@
 // and gated on being the active tab of the FOCUSED pane, so a split with two chat
 // panes only routes keys to the focused one.
 
-import type { KeyEvent } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
+import {
+	type BoxRenderable,
+	decodePasteBytes,
+	type KeyBinding,
+	type KeyEvent,
+	type PasteEvent,
+	type ScrollBoxRenderable,
+	stripAnsiSequences,
+	type TextareaRenderable,
+} from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { fetchAcpConfig } from "@ryuhq/core-client/acp";
 import { fetchAgents } from "@ryuhq/core-client/agents";
 import { askBtw } from "@ryuhq/core-client/btw";
-import {
-	listSessionsForConversation,
-	type Session,
-} from "@ryuhq/core-client/sessions";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge.tsx";
-import { Card } from "@/components/ui/card.tsx";
-import { Markdown } from "@/components/ui/markdown.tsx";
-import { StatusMessage } from "@/components/ui/status-message.tsx";
+import type { MentionTargetUser } from "@ryuhq/core-client/notifications";
+import { type AppInfo, fetchApps } from "@ryuhq/core-client/plugins";
+import { listSessionsForConversation } from "@ryuhq/core-client/sessions";
+import { fetchTeams } from "@ryuhq/core-client/teams";
+import { fetchWorkflows, type Workflow } from "@ryuhq/core-client/workflows";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { ChatQueueBar } from "../../components/ChatQueueBar.tsx";
 import { ChatQueueOverlay } from "../../components/ChatQueueOverlay.tsx";
-import { TranscriptParts } from "../../components/TranscriptParts.tsx";
 import {
-	type AcpPickerChoice,
 	acpPickerChoices,
 	applyAcpPickerChoice,
 } from "../../core/acpPicker.ts";
 import {
 	type AutocompleteState,
+	type AutocompleteSuggestion,
 	agentSuggestions,
 	applyAutocomplete,
+	appPluginSuggestions,
 	commandSuggestions,
 	getAutocompleteContext,
+	humanSuggestions,
 	moveAutocompleteIndex,
+	resolveWorkflowMention,
+	runsOnEnter,
+	slashArgumentSuggestions,
+	workflowSuggestions,
 } from "../../core/autocomplete.ts";
+import { isLocal } from "../../core/bootstrap.ts";
 import { useChatIntent } from "../../core/ChatIntentContext.tsx";
+import { useContributions } from "../../core/ContributionsContext.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { useCoreHealth } from "../../core/CoreHealthContext.tsx";
+import { chatActivity } from "../../core/chatActivity.ts";
 import {
 	type ChatPermission,
+	type ChatPermissionOption,
+	isRejectPermissionOption,
 	parseChatPermission,
-	permissionToolTitle,
+	permissionToolCallId,
+	permissionToolDetail,
 	respondToChatPermission,
 } from "../../core/chatPermission.ts";
 import {
-	type ChatQuestion,
 	type ChatQuestionAnswer,
 	parseChatQuestion,
 	respondToChatQuestion,
@@ -71,129 +97,587 @@ import {
 import {
 	type ChatStreamOptions,
 	type ChatTurn,
+	coalesceStreamDeltas,
+	stopChatTurn,
 	streamChat,
+	type TurnUsage,
 } from "../../core/chatStream.ts";
 import {
+	appendContinuationText,
+	appendErrorPart,
 	appendReasoningPart,
 	appendTextPart,
 	appendToolInputPart,
 	appendToolOutputPart,
+	asRecord,
 	type ChatPart,
+	chatPartsSchema,
+	closeReasoningPart,
 	readTodos,
 	replaceTodoPart,
+	settleRunningToolParts,
+	type ToolSettleOutcome,
 } from "../../core/chatTranscript.ts";
 import {
 	type CommandAction,
-	commandHelpRows,
 	dispatchCommand,
-	renderCommandHelp,
+	isAdvertisedAgentCommand,
+	isContributedPluginCommand,
 } from "../../core/commands.ts";
+import {
+	expandPastePlaceholders,
+	normalizePastedText,
+	pastePlaceholderToken,
+	shouldCollapsePaste,
+} from "../../core/composerPaste.ts";
+import {
+	type AgentSlashCommand,
+	acpSlashCommandsFromData,
+} from "../../core/contributions.ts";
 import {
 	deleteConversation,
 	forkConversation,
+	listRecentConversations,
 	renameConversation,
 	resumeConversation,
 	setConversationPinned,
 } from "../../core/conversations.ts";
-import { useSetInputFocused } from "../../core/InputFocusContext.tsx";
-import { keymapGroups } from "../../core/keymap.ts";
+import { searchFiles } from "../../core/fileMentions.ts";
+import {
+	type HerdrState,
+	herdrErrorMessage,
+	herdrReporter,
+	takeStartupResume,
+} from "../../core/herdr.ts";
+import {
+	type ActiveAccountIdentity,
+	fetchActiveAccountIdentity,
+	inboxEnabled,
+	listMentionTargetUsers,
+	notifyMentionedUsers,
+	type SelectedHumanMention,
+	selectHumanNotificationTargets,
+} from "../../core/humanMentions.ts";
+import {
+	useInterruptHandler,
+	useSetInputFocused,
+	useShellKeyboardCaptured,
+} from "../../core/InputFocusContext.tsx";
 import {
 	acpModelPickerChoices,
 	agentModelPickerChoices,
 	type ModelPickerChoice,
 	withDefaultModelChoice,
 } from "../../core/modelPicker.ts";
+import { useCliProductMode } from "../../core/ProductModeContext.tsx";
 import {
-	loadPromptHistory,
+	coreHistorySealer,
+	historyEntryFor,
+	initialPromptHistory,
+	loadAndMigratePromptHistory,
+	mergeLoadedHistory,
 	nextPrompt,
+	type PromptHistoryState,
 	previousPrompt,
 	recordPrompt,
 	resetPromptNavigation,
-	savePromptHistory,
+	saveSealedPromptHistory,
 } from "../../core/promptHistory.ts";
 import { RYU_THEME_PRESETS } from "../../core/themePreferences.ts";
+import {
+	formatSessionMeter,
+	mergeUsage,
+	summarizeSessionUsage,
+} from "../../core/turnReceipt.ts";
+import { useOverlay } from "../../overlays/OverlayHost.tsx";
+import { useStatusContribution } from "../../ui/StatusContext.tsx";
 import { useTerminalTheme } from "../../ui/TerminalThemeProvider.tsx";
 import { useToast } from "../../ui/toast.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
+import { AutocompleteView } from "./autocomplete.tsx";
+import { OverlayView } from "./overlays.tsx";
+import { PermissionPrompt } from "./PermissionPrompt.tsx";
+import { busyActivityLabel, StatusLine, WorkspaceBar } from "./statusBar.tsx";
+import { Transcript } from "./transcript.tsx";
+import {
+	JumpToLatestStrip,
+	transcriptScrollForKey,
+	useTranscriptScroll,
+} from "./transcriptScroll.tsx";
+import type { Message, Overlay } from "./types.ts";
 
-type Role = "user" | "assistant";
+const EMPTY_APPS: AppInfo[] = [];
+const EMPTY_AGENT_COMMANDS: AgentSlashCommand[] = [];
+const EMPTY_MENTION_USERS: MentionTargetUser[] = [];
+const EMPTY_WORKFLOWS: Workflow[] = [];
+const EMPTY_RECENTS: ConversationRow[] = [];
+/** Recent conversations offered on the empty state (Alt+1..3 resumes one). */
+const RECENT_CONVERSATION_LIMIT = 3;
+/** Typing pause before an `@path` directory listing runs. */
+const FILE_SEARCH_DEBOUNCE_MS = 80;
 
-interface Message {
-	content: string;
-	id: number;
-	parts: ChatPart[];
-	role: Role;
+// Enter sends; Shift+Enter and Alt+Enter (where the terminal reports the
+// modifier) and Ctrl+J (always: it arrives as a line feed) insert a newline.
+const COMPOSER_KEY_BINDINGS: KeyBinding[] = [
+	{ name: "return", action: "submit" },
+	{ name: "kpenter", action: "submit" },
+	{ name: "return", shift: true, action: "newline" },
+	{ name: "return", meta: true, action: "newline" },
+	{ name: "kpenter", meta: true, action: "newline" },
+	{ name: "linefeed", action: "newline" },
+	{ name: "j", ctrl: true, action: "newline" },
+];
+const COMPOSER_MIN_MAX_ROWS = 6;
+
+/**
+ * The composer grows with its draft up to a third of the terminal (at least
+ * six rows), but never past half of it so the transcript keeps some room.
+ */
+function composerMaxHeight(terminalHeight: number): number {
+	const preferred = Math.max(
+		COMPOSER_MIN_MAX_ROWS,
+		Math.floor(terminalHeight / 3)
+	);
+	return Math.max(1, Math.min(preferred, Math.floor(terminalHeight / 2) - 2));
+}
+/**
+ * Real starter tasks for the empty Console/OS composer, one per conversation
+ * (no timer). Each keeps the "Message ·" lead the idle composer always shows.
+ */
+const STARTER_PLACEHOLDERS = [
+	"Message · e.g. plan a feature, then hand it off",
+	"Message · e.g. explain an error you're stuck on",
+	"Message · e.g. draft a workflow from a goal",
+	"Message · e.g. summarise recent changes",
+] as const;
+let starterCounter = 0;
+function nextStarterPlaceholder(): string {
+	const starter =
+		STARTER_PLACEHOLDERS[starterCounter % STARTER_PLACEHOLDERS.length] ??
+		STARTER_PLACEHOLDERS[0];
+	starterCounter += 1;
+	return starter;
 }
 
-type Overlay =
-	| { kind: "none" }
-	| { kind: "agents"; agents: { id: string; name: string }[]; index: number }
-	| { kind: "models"; choices: ModelPickerChoice[]; index: number }
-	| { kind: "acp"; choices: AcpPickerChoice[]; index: number }
-	| { kind: "sessions"; sessions: Session[] }
-	| { kind: "btw"; question: string; answer: string | null }
-	| { kind: "permission"; permission: ChatPermission; index: number }
-	| {
-			kind: "question";
-			question: ChatQuestion;
-			questionIndex: number;
-			selected: number;
-			answers: ChatQuestionAnswer[];
-			text: string;
-	  }
-	| { kind: "delete"; conversationId: string }
-	| { kind: "help"; command?: string }
-	| { kind: "queue"; index: number }
-	| { kind: "theme"; argument?: string }
-	| { kind: "keymap" }
-	| { kind: "plugin_note"; notes: string[] };
+/** The model a configured agent runs, so "default" can name a real model. */
+interface ConfiguredModel {
+	agentId: string;
+	model: string;
+}
+
+/** Receipt label for the turn's route: the agent or group it went to. */
+function receiptRouteLabel(options: ChatStreamOptions): string | undefined {
+	if (options.teamId) {
+		return `team:${options.teamId}`;
+	}
+	return options.agentId;
+}
+
+/** Permission prompt navigation: arrows and vim keys in both orientations. */
+const PERMISSION_PREVIOUS_KEYS = new Set(["up", "k", "left", "h"]);
+const PERMISSION_NEXT_KEYS = new Set(["down", "j", "right", "l"]);
+const PERMISSION_DIGIT = /^[1-9]$/;
+/** Rows a page key moves the permission prompt's detail body. */
+const PERMISSION_BODY_PAGE_ROWS = 5;
 
 let nextMessageId = 1;
+const BOT_ROUTING_NOTICE =
+	"Bot chats are pinned to Ryu; agent and group routing is available in Agent or OS.";
+
+function commandRouteKey(options: ChatStreamOptions): string {
+	return options.teamId
+		? `team:${options.teamId}`
+		: `agent:${options.agentId ?? "ryu"}`;
+}
+
+/** Chat's contribution to the shell status bar (Ctrl+A opens the agent picker). */
+const CHAT_AGENT_HINT = { keys: "^A", label: "agent" };
 
 function ChatSurface({ active, paneId }: SurfaceProps) {
 	const { target } = useCore();
+	const health = useCoreHealth();
+	const recheckHealth = health?.recheck;
+	// Only a confirmed outage of the current node shows the banner; "unknown"
+	// (first check in flight) and a stale node's result never do.
+	const coreDown = health?.state === "down" && health.url === target.url;
+	const {
+		reload: reloadContributions,
+		slashCommands: contributedSlashCommands,
+		slashCommandState,
+	} = useContributions();
+	const { effectiveMode } = useCliProductMode();
+	const simpleInterface = effectiveMode === "bot";
 	const theme = useTheme();
 	const {
 		availableModes,
 		availablePresets,
-		preference: themePreference,
-		reset: resetTheme,
 		setMode: setThemeMode,
 		setPreset: setThemePreset,
 	} = useTerminalTheme();
 	const { notify } = useToast();
-	const { focusedPaneId } = useWorkspace();
+	const shellKeyboardCaptured = useShellKeyboardCaptured();
+	const { openId: externalOverlayId, openOverlay } = useOverlay();
+	const { focusedPaneId, panes } = useWorkspace();
+	// With several tabs in this pane, Alt+1..9 belongs to the shell's tab strip.
+	const paneHasManyTabs =
+		(panes.find((pane) => pane.id === paneId)?.tabIds.length ?? 0) > 1;
 	const setInputFocused = useSetInputFocused();
 	const { pending: chatIntent, clear: clearChatIntent } = useChatIntent();
 
 	// Focused = this surface is the active tab AND its pane owns the keyboard.
 	const focused = active && focusedPaneId === paneId;
+	const [startupResume] = useState(takeStartupResume);
+	const herdrId = useRef(Symbol("chat"));
+	const herdrTurn = useRef<{
+		id: symbol;
+		report: (state: HerdrState, message?: string) => void;
+	} | null>(null);
 
 	const [messages, setMessages] = useState<Message[]>([]);
+	// Conversation usage for the workspace bar. It derives from the messages,
+	// so /new, /resume, and /fork (which replace them) reset it.
+	const sessionMeter = useMemo(
+		() =>
+			formatSessionMeter(
+				summarizeSessionUsage(messages.map((message) => message.usage))
+			),
+		[messages]
+	);
+	const transcriptScroll = useTranscriptScroll(messages);
+	const scrollTranscript = transcriptScroll.scroll;
 	const [composer, setComposer] = useState("");
-	const [promptHistory, setPromptHistory] = useState(loadPromptHistory);
+	const [promptHistory, setPromptHistoryState] = useState(() =>
+		initialPromptHistory()
+	);
+	// History navigation runs inside key handlers that also rewrite the
+	// composer buffer, so it reads and writes this ref synchronously instead of
+	// relying on a (possibly deferred) state updater.
+	const promptHistoryRef = useRef(promptHistory);
+	const updatePromptHistory = useCallback(
+		(update: (state: PromptHistoryState) => PromptHistoryState) => {
+			const next = update(promptHistoryRef.current);
+			promptHistoryRef.current = next;
+			setPromptHistoryState(next);
+		},
+		[]
+	);
+	// The history file is sealed by the local Core. Without a reachable Core
+	// the history is kept in memory only and nothing is written.
+	const historySealer = useMemo(
+		() => (coreDown ? null : coreHistorySealer(target)),
+		[coreDown, target]
+	);
+	// The node URL whose sealed history was loaded. Saves are allowed only for
+	// that node: after a node switch the file is re-read through the new Core
+	// (which may not hold the key) before anything is written back.
+	const historyLoadedUrlRef = useRef<string | null>(null);
+	const historyTargetUrl = target.url;
+	useEffect(() => {
+		if (!historySealer || historyLoadedUrlRef.current === historyTargetUrl) {
+			return;
+		}
+		historyLoadedUrlRef.current = null;
+		let cancelled = false;
+		loadAndMigratePromptHistory(historySealer)
+			.then((loaded) => {
+				if (cancelled) {
+					return;
+				}
+				historyLoadedUrlRef.current = historyTargetUrl;
+				updatePromptHistory((current) => mergeLoadedHistory(loaded, current));
+			})
+			.catch(() => {
+				// Core is unreachable or could not open the sealed file: stay
+				// in memory-only mode and never save over the existing file. A
+				// later Core reconnect retries the load.
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [historySealer, historyTargetUrl, updatePromptHistory]);
+	const composerInputRef = useRef<TextareaRenderable | null>(null);
+	// Collapsed bracketed pastes: placeholder token -> pasted text, expanded
+	// back into the prompt when it is sent.
+	const pastedTextRef = useRef(new Map<string, string>());
+	const pasteSequenceRef = useRef(0);
 	const [streaming, setStreaming] = useState(false);
+	// The last turn's failure, as a Herdr attention message. It keeps the pane
+	// "blocked" until the user engages again (types, submits, or starts over);
+	// an abort or Esc-cancel never sets it.
+	const [turnError, setTurnError] = useState<string | null>(null);
+	// The conversation title once resume or /rename provides one; the shell
+	// shows it in the terminal title.
+	const [conversationTitle, setConversationTitle] = useState<string | null>(
+		null
+	);
+	// Status-row activity for the in-flight turn: when it started (for the
+	// elapsed counter) and the tool it is running, newest first.
+	const [streamStartedAt, setStreamStartedAt] = useState<number | null>(null);
+	const [activeTool, setActiveTool] = useState<string | null>(null);
+	const activeToolsRef = useRef(new Map<string, string>());
+	// Ctrl+O: show long user prompts in full instead of their first lines.
+	const [expandPrompts, setExpandPrompts] = useState(false);
 	const [queuedMessages, setQueuedMessages] = useState<QueuedChatTurn[]>([]);
-	const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-	const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
-	const [acpModel, setAcpModel] = useState<string | null>(null);
-	const [acpMode, setAcpMode] = useState<string | null>(null);
-	const [acpConfig, setAcpConfig] = useState<Record<string, string>>({});
-	const [doubleCheckOn, setDoubleCheckOn] = useState(false);
+	// Esc mid-turn pauses the queue: nothing auto-dispatches until Enter on an
+	// empty composer (send next), a typed prompt, or Esc again (clear).
+	const [queuePaused, setQueuePaused] = useState(false);
+	const [selectedAgent, setSelectedAgent] = useState<string | null>(
+		startupResume?.options.agentId ?? null
+	);
+	const [selectedTeam, setSelectedTeam] = useState<string | null>(
+		startupResume?.options.teamId ?? null
+	);
+	const [advertisedAcpCommands, setAdvertisedAcpCommands] = useState<
+		Record<string, AgentSlashCommand[]>
+	>({});
+	const routeAgent = simpleInterface ? "ryu" : selectedAgent;
+	const routeTeam = simpleInterface ? null : selectedTeam;
+	const activeCommandRouteKey = selectedTeam
+		? `team:${selectedTeam}`
+		: `agent:${routeAgent ?? "ryu"}`;
+	const activeAcpCommands =
+		advertisedAcpCommands[activeCommandRouteKey] ?? EMPTY_AGENT_COMMANDS;
+	const [acpModel, setAcpModel] = useState<string | null>(
+		startupResume?.options.acpModel ?? null
+	);
+	// The model the routed agent is configured with, resolved from Core so the
+	// workspace bar and turn receipts name it instead of "default".
+	const [configuredModel, setConfiguredModel] =
+		useState<ConfiguredModel | null>(null);
+	const configuredModelRef = useRef<ConfiguredModel | null>(null);
+	configuredModelRef.current = configuredModel;
+	useEffect(() => {
+		if (simpleInterface || routeTeam || !routeAgent) {
+			setConfiguredModel(null);
+			return;
+		}
+		let cancelled = false;
+		fetchAgents(target)
+			.then((agents) => {
+				if (cancelled) {
+					return;
+				}
+				const model = agents
+					.find((agent) => agent.id === routeAgent)
+					?.model?.trim();
+				setConfiguredModel(model ? { agentId: routeAgent, model } : null);
+			})
+			.catch(() => {
+				if (!cancelled) {
+					setConfiguredModel(null);
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [routeAgent, routeTeam, simpleInterface, target]);
+	const [acpMode, setAcpMode] = useState<string | null>(
+		startupResume?.options.acpMode ?? null
+	);
+	const [acpConfig, setAcpConfig] = useState<Record<string, string>>(
+		startupResume?.options.acpConfig ?? {}
+	);
+	const [doubleCheckOn, setDoubleCheckOn] = useState(
+		startupResume?.options.pluginFlags?.["io.ryu.double-check"] ?? false
+	);
 	const [overlay, setOverlay] = useState<Overlay>({ kind: "none" });
 	const [queueFocused, setQueueFocused] = useState(false);
 	const [queueSelectedIndex, setQueueSelectedIndex] = useState(0);
 	const [autocomplete, setAutocomplete] = useState<AutocompleteState | null>(
 		null
 	);
+	const [dismissedSlashArgumentValue, setDismissedSlashArgumentValue] =
+		useState<string | null>(null);
+	const [workflowDirectory, setWorkflowDirectory] = useState<{
+		target: { token: string | null; url: string; userJwt: string | null };
+		workflows: Workflow[];
+	} | null>(null);
 
 	const conversationIdRef = useRef<string>(crypto.randomUUID());
+	const resumeRequestSequence = useRef(0);
+	const resumeIdentity = JSON.stringify([
+		target.url,
+		target.token ?? null,
+		target.userJwt ?? null,
+	]);
+	const latestResumeIdentity = useRef(resumeIdentity);
+	latestResumeIdentity.current = resumeIdentity;
+	useEffect(
+		() => () => {
+			resumeRequestSequence.current += 1;
+		},
+		[resumeIdentity]
+	);
+	// Recent conversations for the empty state: best effort, keyed to the node
+	// that answered so a node switch never shows another node's history.
+	const [recentConversations, setRecentConversations] = useState<{
+		identity: string;
+		rows: ConversationRow[];
+	} | null>(null);
+	const transcriptEmpty = messages.length === 0;
+	useEffect(() => {
+		if (!(active && transcriptEmpty)) {
+			return;
+		}
+		let cancelled = false;
+		const identity = resumeIdentity;
+		listRecentConversations(target, RECENT_CONVERSATION_LIMIT)
+			.catch(() => EMPTY_RECENTS)
+			.then((rows) => {
+				if (!cancelled && identity === latestResumeIdentity.current) {
+					setRecentConversations({ identity, rows });
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [active, transcriptEmpty, resumeIdentity, target]);
+	const recentRows =
+		recentConversations?.identity === resumeIdentity
+			? recentConversations.rows
+			: EMPTY_RECENTS;
+	// How many of those rows the hero fits on screen; Alt+N reaches only these.
+	const [visibleRecentCount, setVisibleRecentCount] = useState(0);
+	const [starterPlaceholder, setStarterPlaceholder] = useState(
+		nextStarterPlaceholder
+	);
+	const teamPickerRequestRef = useRef(0);
 	const abortRef = useRef<AbortController | null>(null);
+	// The conversation the in-flight turn was sent on, so Stop cancels that turn
+	// on Core even after /new has minted a fresh conversation id.
+	const turnConversationRef = useRef<string | undefined>(undefined);
+	// An Esc Stop still waiting for Core to confirm the cancel (see the Esc key).
+	const pendingStopRef = useRef<Promise<void> | null>(null);
 	const composerRef = useRef(composer);
 	composerRef.current = composer;
+	// The textarea owns its buffer; app-driven changes (history, completion,
+	// reset, submit) go through here so the buffer, ref, and state agree. The
+	// ref is updated first so the resulting content-change event is recognised
+	// as app-driven and keeps the history cursor.
+	const setComposerText = useCallback((value: string) => {
+		composerRef.current = value;
+		setComposer(value);
+		const editor = composerInputRef.current;
+		if (editor && editor.plainText !== value) {
+			editor.setText(value);
+			editor.gotoBufferEnd();
+		}
+	}, []);
 	const messagesRef = useRef(messages);
 	messagesRef.current = messages;
+	const workflowsRef = useRef<Workflow[]>([]);
+	const availableWorkflows =
+		!simpleInterface &&
+		workflowDirectory?.target.url === target.url &&
+		workflowDirectory.target.token === (target.token ?? null) &&
+		workflowDirectory.target.userJwt === (target.userJwt ?? null)
+			? workflowDirectory.workflows
+			: EMPTY_WORKFLOWS;
+	workflowsRef.current = availableWorkflows;
+	const mentionRequestIdRef = useRef(0);
+	const mentionAppsCacheRef = useRef<{
+		apps: AppInfo[];
+		targetKey: string;
+	} | null>(null);
+	const mentionAppsRequestRef = useRef<{
+		promise: Promise<AppInfo[]>;
+		targetKey: string;
+	} | null>(null);
+	const mentionPeopleCacheRef = useRef<{
+		directory: {
+			identity: ActiveAccountIdentity | null;
+			users: MentionTargetUser[];
+		};
+		targetKey: string;
+	} | null>(null);
+	const mentionPeopleRequestRef = useRef<{
+		promise: Promise<{
+			identity: ActiveAccountIdentity | null;
+			users: MentionTargetUser[];
+		}>;
+		targetKey: string;
+	} | null>(null);
+	const selectedHumanMentionsRef = useRef<SelectedHumanMention[]>([]);
+	const mentionTargetKey = JSON.stringify([
+		target.url,
+		target.token ?? null,
+		target.userJwt ?? null,
+	]);
+	const loadMentionApps = useCallback(() => {
+		if (mentionAppsCacheRef.current?.targetKey === mentionTargetKey) {
+			return Promise.resolve(mentionAppsCacheRef.current.apps);
+		}
+		if (mentionAppsRequestRef.current?.targetKey === mentionTargetKey) {
+			return mentionAppsRequestRef.current.promise;
+		}
+
+		const promise = fetchApps(target).then((apps) => {
+			if (mentionAppsRequestRef.current?.promise === promise) {
+				mentionAppsCacheRef.current = { apps, targetKey: mentionTargetKey };
+			}
+			return apps;
+		});
+		mentionAppsRequestRef.current = { promise, targetKey: mentionTargetKey };
+		const clearPending = () => {
+			if (mentionAppsRequestRef.current?.promise === promise) {
+				mentionAppsRequestRef.current = null;
+			}
+		};
+		void promise.then(clearPending, clearPending);
+		return promise;
+	}, [mentionTargetKey, target]);
+	const loadHumanMentionDirectory = useCallback(() => {
+		if (mentionPeopleCacheRef.current?.targetKey === mentionTargetKey) {
+			return Promise.resolve(mentionPeopleCacheRef.current.directory);
+		}
+		if (mentionPeopleRequestRef.current?.targetKey === mentionTargetKey) {
+			return mentionPeopleRequestRef.current.promise;
+		}
+
+		const promise = Promise.all([
+			listMentionTargetUsers(target),
+			fetchActiveAccountIdentity(target),
+		]).then(([users, identity]) => {
+			const directory = { identity, users };
+			if (mentionPeopleRequestRef.current?.promise === promise) {
+				mentionPeopleCacheRef.current = {
+					directory,
+					targetKey: mentionTargetKey,
+				};
+			}
+			return directory;
+		});
+		mentionPeopleRequestRef.current = { promise, targetKey: mentionTargetKey };
+		const clearPending = () => {
+			if (mentionPeopleRequestRef.current?.promise === promise) {
+				mentionPeopleRequestRef.current = null;
+			}
+		};
+		void promise.then(clearPending, clearPending);
+		return promise;
+	}, [mentionTargetKey, target]);
+
+	useEffect(() => {
+		if (simpleInterface) {
+			setWorkflowDirectory(null);
+			return;
+		}
+		const controller = new AbortController();
+		const source = {
+			token: target.token ?? null,
+			url: target.url,
+			userJwt: target.userJwt ?? null,
+		};
+		fetchWorkflows(target, controller.signal)
+			.then((workflows) => setWorkflowDirectory({ target: source, workflows }))
+			.catch(() => {
+				if (!controller.signal.aborted) {
+					setWorkflowDirectory({ target: source, workflows: [] });
+				}
+			});
+		return () => controller.abort();
+	}, [simpleInterface, target]);
 
 	const overlayOpen = overlay.kind !== "none";
 
@@ -201,6 +685,7 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		if (queuedMessages.length === 0) {
 			setQueueSelectedIndex(0);
 			setQueueFocused(false);
+			setQueuePaused(false);
 			if (overlay.kind === "queue") {
 				setOverlay({ kind: "none" });
 			}
@@ -215,68 +700,272 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 	// same Core agent catalog as Ctrl+A, but stale responses never replace newer
 	// input.
 	useEffect(() => {
-		const context = getAutocompleteContext(composer);
+		const requestId = mentionRequestIdRef.current + 1;
+		mentionRequestIdRef.current = requestId;
+		const context = getAutocompleteContext(composer, contributedSlashCommands);
 		if (!context) {
 			setAutocomplete(null);
 			return;
 		}
-		if (context.kind === "slash") {
-			const suggestions = commandSuggestions(context.query);
+		if (context.kind === "slash-argument") {
+			if (dismissedSlashArgumentValue === composer) {
+				setAutocomplete(null);
+				return;
+			}
+			const suggestions: AutocompleteSuggestion[] =
+				slashArgumentSuggestions(context);
+			if (slashCommandState === "error") {
+				suggestions.push({ kind: "retry-slash-commands" });
+			}
 			setAutocomplete({ context, suggestions, index: 0 });
 			return;
 		}
-		setAutocomplete({ context, suggestions: [], index: 0 });
-		fetchAgents(target)
-			.then((agents) => {
-				if (composerRef.current !== composer) {
-					return;
-				}
-				const latest = getAutocompleteContext(composer);
-				if (latest?.kind !== "mention") {
-					return;
-				}
+		if (context.kind === "slash") {
+			const suggestions: AutocompleteSuggestion[] = commandSuggestions(
+				context.query,
+				contributedSlashCommands,
+				activeAcpCommands
+			).filter(
+				(suggestion) =>
+					!simpleInterface ||
+					suggestion.kind !== "command" ||
+					(suggestion.name !== "model" &&
+						suggestion.name !== "reasoning" &&
+						suggestion.name !== "agent" &&
+						suggestion.name !== "group")
+			);
+			if (slashCommandState === "error") {
+				suggestions.push({ kind: "retry-slash-commands" });
+			}
+			setAutocomplete({ context, suggestions, index: 0 });
+			return;
+		}
+		if (simpleInterface) {
+			setAutocomplete(null);
+			return;
+		}
+		if (context.kind === "file") {
+			// File paths come from this machine, so they only describe the node's
+			// workspace when Core runs locally.
+			if (!isLocal(target.url)) {
 				setAutocomplete({
-					context: latest,
-					suggestions: agentSuggestions(agents, latest.query),
+					context,
 					index: 0,
+					notice: "File mentions need a local node",
+					suggestions: [],
 				});
-			})
-			.catch(() => {
-				if (composerRef.current === composer) {
-					setAutocomplete(null);
-				}
+				return;
+			}
+			setAutocomplete({ context, index: 0, loading: true, suggestions: [] });
+			let cancelled = false;
+			const timer = setTimeout(() => {
+				void searchFiles(process.cwd(), context.query).then((paths) => {
+					if (cancelled || mentionRequestIdRef.current !== requestId) {
+						return;
+					}
+					setAutocomplete({
+						context,
+						index: 0,
+						suggestions: paths.map((path) => ({ kind: "file", path })),
+					});
+				});
+			}, FILE_SEARCH_DEBOUNCE_MS);
+			return () => {
+				cancelled = true;
+				clearTimeout(timer);
+			};
+		}
+		setAutocomplete({ context, index: 0, loading: true, suggestions: [] });
+		void Promise.all([
+			fetchAgents(target).catch(() => []),
+			loadMentionApps().catch(() => EMPTY_APPS),
+		]).then(async ([agents, mentionApps]) => {
+			const inboxIsEnabled = mentionApps.some(
+				(app) => app.id === "@ryu/approvals" && app.enabled
+			);
+			const people = inboxIsEnabled
+				? await loadHumanMentionDirectory().catch(() => ({
+						identity: null,
+						users: EMPTY_MENTION_USERS,
+					}))
+				: { identity: null, users: EMPTY_MENTION_USERS };
+			if (
+				composerRef.current !== composer ||
+				mentionRequestIdRef.current !== requestId
+			) {
+				return;
+			}
+			const latest = getAutocompleteContext(composer);
+			if (latest?.kind !== "mention") {
+				return;
+			}
+			const workflows = workflowSuggestions(workflowsRef.current, latest.query);
+			const appsAndPlugins = appPluginSuggestions(mentionApps, latest.query);
+			const humans = humanSuggestions(
+				people.users,
+				latest.query,
+				people.identity?.userId ?? null
+			);
+			setAutocomplete({
+				context: latest,
+				suggestions: [
+					...agentSuggestions(agents, latest.query),
+					...humans,
+					...appsAndPlugins,
+					...workflows,
+				],
+				index: 0,
 			});
-	}, [composer, target]);
+		});
+	}, [
+		activeAcpCommands,
+		availableWorkflows,
+		composer,
+		contributedSlashCommands,
+		dismissedSlashArgumentValue,
+		loadHumanMentionDirectory,
+		loadMentionApps,
+		slashCommandState,
+		simpleInterface,
+		target,
+	]);
 
-	// Claim raw input while focused so shell plain-key globals stay quiet.
+	const notifySelectedHumanMentions = useCallback(
+		(content: string) => {
+			const directory =
+				mentionPeopleCacheRef.current?.targetKey === mentionTargetKey
+					? mentionPeopleCacheRef.current.directory
+					: null;
+			const mentions = selectHumanNotificationTargets({
+				content,
+				currentUserId: directory?.identity?.userId ?? null,
+				selected: selectedHumanMentionsRef.current,
+			});
+			selectedHumanMentionsRef.current = [];
+			if (simpleInterface || mentions.length === 0) {
+				return;
+			}
+			const senderName =
+				directory?.identity?.name?.trim() ||
+				directory?.identity?.email?.trim() ||
+				"Someone";
+			void inboxEnabled(target)
+				.then((enabled) =>
+					enabled
+						? notifyMentionedUsers({
+								content,
+								mentions,
+								senderName,
+								target,
+							})
+						: { failedNames: [] }
+				)
+				.then(({ failedNames }) => {
+					if (failedNames.length > 0) {
+						notify(
+							`Couldn't notify ${failedNames.join(", ")}`.slice(0, 180),
+							"error"
+						);
+					}
+				})
+				.catch(() => {
+					notify(
+						`Couldn't notify ${mentions.map((mention) => mention.label).join(", ")}`.slice(
+							0,
+							180
+						),
+						"error"
+					);
+				});
+		},
+		[mentionTargetKey, notify, simpleInterface, target]
+	);
+
+	// Claim raw input while focused so shell plain-key globals (the bare "?"
+	// shortcuts key) stay quiet, including while a chat-local overlay such as a
+	// free-text question answer owns typing.
 	useEffect(() => {
-		setInputFocused(focused && !overlayOpen && !queueFocused);
+		setInputFocused(
+			focused && !queueFocused && !shellKeyboardCaptured && !externalOverlayId
+		);
 		return () => setInputFocused(false);
-	}, [focused, overlayOpen, queueFocused, setInputFocused]);
+	}, [
+		externalOverlayId,
+		focused,
+		shellKeyboardCaptured,
+		queueFocused,
+		setInputFocused,
+	]);
+
+	// Stop the in-flight turn: abort the local read and cancel the turn on Core,
+	// which otherwise keeps generating a persisted turn (and any goal or
+	// auto-continue loop) after the client stops reading. Resolves once Core has
+	// answered; `null` when no turn is in flight.
+	const cancelActiveTurn = useCallback((): Promise<void> | null => {
+		const controller = abortRef.current;
+		if (!controller) {
+			return null;
+		}
+		abortRef.current = null;
+		return stopChatTurn(target, turnConversationRef.current, controller);
+	}, [target]);
+
+	const clearTurnActivity = useCallback(() => {
+		activeToolsRef.current.clear();
+		setActiveTool(null);
+		setStreamStartedAt(null);
+	}, []);
 
 	const resetChat = useCallback(() => {
-		abortRef.current?.abort();
-		abortRef.current = null;
+		resumeRequestSequence.current += 1;
+		// The new chat gets a new conversation id, so its first turn cannot be
+		// hit by this cancel; no need to wait for it.
+		cancelActiveTurn();
 		conversationIdRef.current = crypto.randomUUID();
+		setConversationTitle(null);
+		setTurnError(null);
 		setMessages([]);
-		setComposer("");
-		setPromptHistory((state) => resetPromptNavigation(state));
+		setComposerText("");
+		pastedTextRef.current.clear();
+		updatePromptHistory(resetPromptNavigation);
 		setQueuedMessages([]);
+		setQueuePaused(false);
 		setStreaming(false);
+		clearTurnActivity();
 		setOverlay({ kind: "none" });
 		setAutocomplete(null);
+		setAdvertisedAcpCommands({});
+		setDismissedSlashArgumentValue(null);
+		setStarterPlaceholder(nextStarterPlaceholder());
+		selectedHumanMentionsRef.current = [];
 		notify("Started a new chat", "info");
-	}, [notify]);
+	}, [
+		cancelActiveTurn,
+		notify,
+		clearTurnActivity,
+		setComposerText,
+		updatePromptHistory,
+	]);
 
 	const buildOptions = useCallback((): ChatStreamOptions => {
 		const conversationId = conversationIdRef.current;
+		const enableLongTerm = readMemoryConsent();
 		// Arm Core's double-check turn-hook for this turn when the toggle is on.
 		const pluginFlags = doubleCheckOn
 			? { "io.ryu.double-check": true }
 			: undefined;
+		if (simpleInterface) {
+			return {
+				conversationId,
+				enableLongTerm,
+				agentId: "ryu",
+				pluginFlags,
+			};
+		}
 		if (selectedTeam) {
 			return {
 				conversationId,
+				enableLongTerm,
 				teamId: selectedTeam,
 				acpModel: acpModel ?? undefined,
 				acpMode: acpMode ?? undefined,
@@ -286,6 +975,7 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		}
 		return {
 			conversationId,
+			enableLongTerm,
 			agentId: selectedAgent ?? undefined,
 			acpModel: acpModel ?? undefined,
 			acpMode: acpMode ?? undefined,
@@ -299,32 +989,67 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		acpMode,
 		acpConfig,
 		doubleCheckOn,
+		simpleInterface,
 	]);
 
-	const updateLastAssistant = useCallback(
-		(update: (message: Message) => Message) => {
-			setMessages((prev) => {
-				const last = prev.at(-1);
-				if (last?.role !== "assistant") {
-					return prev;
-				}
-				return [...prev.slice(0, -1), update(last)];
-			});
+	const buildOptionsForPrompt = useCallback(
+		(text: string): ChatStreamOptions => {
+			const options = buildOptions();
+			if (simpleInterface) {
+				return options;
+			}
+			const workflowId = resolveWorkflowMention(text, workflowsRef.current);
+			return workflowId ? { ...options, workflowId } : options;
 		},
-		[]
-	);
-	const appendToLast = useCallback(
-		(delta: string) =>
-			updateLastAssistant((message) => ({
-				...message,
-				content: message.content + delta,
-				parts: appendTextPart(message.parts, delta),
-			})),
-		[updateLastAssistant]
+		[buildOptions, simpleInterface]
 	);
 
-	// Append a plugin note (goal/proof/double-check hook output) into the note
-	// overlay, accumulating across the several notes a single turn can emit.
+	useEffect(() => {
+		const blocked =
+			overlay.kind === "permission" || overlay.kind === "question";
+		herdrReporter?.update(
+			herdrId.current,
+			{
+				focused,
+				state: blocked
+					? "blocked"
+					: streaming
+						? "working"
+						: turnError
+							? "blocked"
+							: "idle",
+				message: blocked
+					? overlay.kind === "permission"
+						? "Waiting for tool permission"
+						: "Waiting for an answer"
+					: (turnError ?? undefined),
+				options: messages.length > 0 ? buildOptions() : undefined,
+			},
+			target.url
+		);
+	});
+	useEffect(() => {
+		const id = herdrId.current;
+		return () => herdrReporter?.remove(id);
+	}, []);
+
+	const activityModel = simpleInterface
+		? null
+		: (acpModel ??
+			(configuredModel?.agentId === routeAgent ? configuredModel.model : null));
+	useEffect(() => {
+		chatActivity.update(herdrId.current, {
+			focused,
+			streaming,
+			title: conversationTitle,
+			model: activityModel,
+		});
+	}, [focused, streaming, conversationTitle, activityModel]);
+	useEffect(() => {
+		const id = herdrId.current;
+		return () => chatActivity.remove(id);
+	}, []);
+
 	const pushPluginNote = useCallback((text: string) => {
 		setOverlay((o) =>
 			o.kind === "plugin_note"
@@ -339,51 +1064,219 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			if (trimmed.length === 0) {
 				return;
 			}
-			const priorTurns: ChatTurn[] = messagesRef.current.map((m) => ({
-				role: m.role,
-				content: m.content,
-			}));
+			resumeRequestSequence.current += 1;
+			// A failed turn leaves an assistant message with no content (its error
+			// lives in an `error` part); drop it so providers never see an empty
+			// assistant turn and the error text never reaches the model.
+			const priorTurns: ChatTurn[] = messagesRef.current
+				.filter((m) => m.role !== "assistant" || m.content.trim() !== "")
+				.map((m) => ({
+					role: m.role,
+					content: m.content,
+				}));
 			const turns: ChatTurn[] = [
 				...priorTurns,
 				{ role: "user", content: trimmed },
 			];
+			const options = optionsOverride ?? buildOptions();
+			const routeKey = commandRouteKey(options);
+			turnConversationRef.current = options.conversationId;
 
+			const userMessageId = nextMessageId++;
+			const assistantMessageId = nextMessageId++;
 			setMessages((prev) => [
 				...prev,
 				{
-					id: nextMessageId++,
+					id: userMessageId,
 					role: "user",
 					content: trimmed,
 					parts: [{ type: "text", text: trimmed }],
 				},
-				{ id: nextMessageId++, role: "assistant", content: "", parts: [] },
+				{ id: assistantMessageId, role: "assistant", content: "", parts: [] },
 			]);
 			setStreaming(true);
+			setTurnError(null);
+			activeToolsRef.current.clear();
+			setActiveTool(null);
+			setStreamStartedAt(Date.now());
 
 			const controller = new AbortController();
 			abortRef.current = controller;
+			const ownsTurn = () => abortRef.current === controller;
+			const acceptsEvent = () => ownsTurn() && !controller.signal.aborted;
+			const updateTurnAssistant = (update: (message: Message) => Message) => {
+				if (!acceptsEvent()) {
+					return;
+				}
+				setMessages((previous) =>
+					previous.map((message) =>
+						message.id === assistantMessageId && message.role === "assistant"
+							? update(message)
+							: message
+					)
+				);
+			};
+			// Settled turns (done, error, or Esc abort) stamp the trailing reasoning
+			// part and settle every still-running tool so no row keeps spinning.
+			// This bypasses acceptsEvent() on purpose (an aborted turn must still
+			// settle) but stays scoped to this turn's assistant message, so a
+			// superseded turn never rewrites a newer turn's parts.
+			const settleTurn = (outcome: ToolSettleOutcome, reason?: string) => {
+				const now = Date.now();
+				setMessages((previous) =>
+					previous.map((message) =>
+						message.id === assistantMessageId && message.role === "assistant"
+							? {
+									...message,
+									parts: settleRunningToolParts(
+										closeReasoningPart(message.parts, now),
+										outcome,
+										reason,
+										now
+									),
+								}
+							: message
+					)
+				);
+			};
+			// Esc and chat resets abort synchronously; settle in the same tick so
+			// interrupted rows go static immediately instead of after the fetch
+			// promise unwinds.
+			controller.signal.addEventListener(
+				"abort",
+				() => settleTurn("interrupted"),
+				{ once: true }
+			);
+			const startedAt = Date.now();
+			// ACP re-sends its usage meter many times a turn; keep the latest
+			// snapshot here and write it to the message only when the turn
+			// settles, so usage never forces a transcript redraw mid-stream.
+			let latestUsage: TurnUsage | undefined;
+			let turnFailed = false;
+			const stampUsage = () => {
+				const usage = latestUsage;
+				if (!usage) {
+					return;
+				}
+				setMessages((previous) =>
+					previous.map((message) =>
+						message.id === assistantMessageId && message.role === "assistant"
+							? { ...message, usage }
+							: message
+					)
+				);
+			};
+			const stampReceipt = () => {
+				const configured = configuredModelRef.current;
+				const modelLabel =
+					options.acpModel ??
+					(configured &&
+					!options.teamId &&
+					configured.agentId === options.agentId
+						? configured.model
+						: undefined);
+				const agentLabel = receiptRouteLabel(options);
+				updateTurnAssistant((message) => ({
+					...message,
+					receipt: {
+						elapsedMs: Date.now() - startedAt,
+						...(agentLabel ? { agentLabel } : {}),
+						...(modelLabel ? { modelLabel } : {}),
+					},
+				}));
+			};
+			controller.signal.addEventListener("abort", stampUsage, { once: true });
+			// Set when Core starts a continuation turn in this response; its first
+			// text opens a new paragraph instead of running into the last turn.
+			let continuationPending = false;
+			const appendToTurn = (delta: string) => {
+				if (continuationPending) {
+					continuationPending = false;
+					updateTurnAssistant((message) => ({
+						...message,
+						...appendContinuationText(message, delta),
+					}));
+					return;
+				}
+				updateTurnAssistant((message) => ({
+					...message,
+					content: message.content + delta,
+					parts: appendTextPart(message.parts, delta),
+				}));
+			};
+
+			const turnId = Symbol("turn");
+			let turnState: HerdrState | "closed" | null = null;
+			let turnMessage: string | undefined;
+			const reportTurn = (state: HerdrState, message?: string) => {
+				if (
+					turnState === "closed" ||
+					(turnState === state && turnMessage === message)
+				) {
+					return;
+				}
+				turnState = state;
+				turnMessage = message;
+				herdrReporter?.update(
+					turnId,
+					{ focused: false, state, message, options },
+					target.url
+				);
+			};
+			herdrTurn.current = { id: turnId, report: reportTurn };
+			reportTurn("working");
+			const finishTurn = () => {
+				turnState = "closed";
+				herdrReporter?.remove(turnId);
+				if (herdrTurn.current?.id === turnId) {
+					herdrTurn.current = null;
+				}
+			};
 
 			streamChat(
 				target,
 				turns,
-				optionsOverride ?? buildOptions(),
-				{
-					onTextDelta: appendToLast,
+				options,
+				coalesceStreamDeltas({
+					onAcpCommands: (data) => {
+						if (!acceptsEvent()) {
+							return;
+						}
+						const commands = acpSlashCommandsFromData(data);
+						if (commands) {
+							setAdvertisedAcpCommands((current) => ({
+								...current,
+								[routeKey]: commands,
+							}));
+						}
+					},
+					onTextDelta: appendToTurn,
+					onTurnBoundary: () => {
+						continuationPending = true;
+					},
 					onToolInput: (name, input, toolCallId) => {
-						updateLastAssistant((message) => ({
+						if (!acceptsEvent()) {
+							return;
+						}
+						const activeTools = activeToolsRef.current;
+						// Untracked calls share a key; their output clears every entry.
+						const toolKey = toolCallId ?? "untracked";
+						activeTools.delete(toolKey);
+						activeTools.set(toolKey, name);
+						setActiveTool(name);
+						updateTurnAssistant((message) => ({
 							...message,
 							parts: appendToolInputPart(
 								message.parts,
 								name,
-								input && typeof input === "object" && !Array.isArray(input)
-									? (input as Record<string, unknown>)
-									: undefined,
+								asRecord(input),
 								toolCallId
 							),
 						}));
 						const question =
 							name === "Question" ? parseChatQuestion(input) : null;
 						if (question) {
+							reportTurn("blocked", "Waiting for an answer");
 							setOverlay({
 								kind: "question",
 								question,
@@ -394,8 +1287,18 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 							});
 						}
 					},
-					onToolOutput: (status, output, toolCallId) =>
-						updateLastAssistant((message) => ({
+					onToolOutput: (status, output, toolCallId) => {
+						if (!acceptsEvent()) {
+							return;
+						}
+						const activeTools = activeToolsRef.current;
+						if (toolCallId === undefined) {
+							activeTools.clear();
+						} else {
+							activeTools.delete(toolCallId);
+						}
+						setActiveTool([...activeTools.values()].at(-1) ?? null);
+						updateTurnAssistant((message) => ({
 							...message,
 							parts: appendToolOutputPart(
 								message.parts,
@@ -403,58 +1306,117 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 								output,
 								toolCallId
 							),
-						})),
+						}));
+					},
 					onReasoningDelta: (delta) =>
-						updateLastAssistant((message) => ({
+						updateTurnAssistant((message) => ({
 							...message,
 							parts: appendReasoningPart(message.parts, delta),
 						})),
 					onTodo: (input) =>
-						updateLastAssistant((message) => ({
+						updateTurnAssistant((message) => ({
 							...message,
 							parts: replaceTodoPart(message.parts, readTodos(input)),
 						})),
-					onPluginNote: pushPluginNote,
+					onPluginNote: (text) => {
+						if (acceptsEvent()) {
+							pushPluginNote(text);
+						}
+					},
+					onUsage: (usage) => {
+						if (acceptsEvent()) {
+							latestUsage = mergeUsage(latestUsage, usage);
+						}
+					},
 					onPermission: (value) => {
+						if (!acceptsEvent()) {
+							return;
+						}
 						const permission = parseChatPermission(value);
 						if (permission) {
-							setOverlay({ kind: "permission", index: 0, permission });
+							reportTurn("blocked", "Waiting for tool permission");
+							setOverlay({
+								kind: "permission",
+								index: 0,
+								permission,
+								detail: permissionToolDetail(permission.toolCall),
+							});
 						}
 					},
 					onError: (message) => {
-						appendToLast(`\n[error: ${message}]`);
-						notify(message, "error");
+						if (!acceptsEvent()) {
+							return;
+						}
+						turnFailed = true;
+						const readable = humanizeError(message, { url: target.url });
+						setTurnError(herdrErrorMessage(readable));
+						// The error renders inline in the transcript; a toast would
+						// only repeat it.
+						updateTurnAssistant((current) => ({
+							...current,
+							parts: appendErrorPart(current.parts, readable),
+						}));
+						settleTurn("error", readable);
 					},
 					onDone: () => {
 						/* finalize handled after the promise resolves */
 					},
-				},
+				}),
 				controller.signal
 			)
 				.then(() => {
-					setStreaming(false);
-					abortRef.current = null;
+					finishTurn();
+					if (!controller.signal.aborted) {
+						stampUsage();
+						if (!turnFailed) {
+							stampReceipt();
+						}
+					}
+					// A finish without tool output settles as done (grok's
+					// finalizeActiveTurn); an abort already settled as interrupted.
+					settleTurn(controller.signal.aborted ? "interrupted" : "success");
+					if (ownsTurn()) {
+						setStreaming(false);
+						clearTurnActivity();
+						abortRef.current = null;
+					}
 				})
-				.catch((err: unknown) => {
-					setStreaming(false);
-					abortRef.current = null;
-					notify(errText(err), "error");
+				.catch((err) => {
+					finishTurn();
+					const readable = humanizeError(err, { url: target.url });
+					if (!controller.signal.aborted && ownsTurn()) {
+						setTurnError(herdrErrorMessage(readable));
+					}
+					if (!controller.signal.aborted) {
+						stampUsage();
+						updateTurnAssistant((current) => ({
+							...current,
+							parts: appendErrorPart(current.parts, readable),
+						}));
+					}
+					settleTurn(
+						controller.signal.aborted ? "interrupted" : "error",
+						controller.signal.aborted ? undefined : readable
+					);
+					if (ownsTurn()) {
+						setStreaming(false);
+						clearTurnActivity();
+						abortRef.current = null;
+					}
+					if (!controller.signal.aborted) {
+						// A failed turn may mean Core went away; refresh shared health.
+						recheckHealth?.();
+					}
 				});
 		},
-		[
-			target,
-			buildOptions,
-			appendToLast,
-			updateLastAssistant,
-			pushPluginNote,
-			notify,
-		]
+		[target, buildOptions, pushPluginNote, clearTurnActivity, recheckHealth]
 	);
 
 	// Keep Core single-flight: once a turn settles, submit the oldest queued
 	// prompt. The effect also handles a queue populated by rapid key presses.
+	// An Esc interrupt pauses the drain so the queue never fires on its own.
 	useEffect(() => {
-		if (streaming || queuedMessages.length === 0) {
+		if (streaming || queuePaused || queuedMessages.length === 0) {
 			return;
 		}
 		const { turn, queue } = dequeueChatTurn(queuedMessages);
@@ -463,9 +1425,13 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		}
 		setQueuedMessages(queue);
 		send(turn.text, turn.options);
-	}, [queuedMessages, send, streaming]);
+	}, [queuePaused, queuedMessages, send, streaming]);
 
 	const openAgentPicker = useCallback(() => {
+		if (simpleInterface) {
+			notify(BOT_ROUTING_NOTICE, "info");
+			return;
+		}
 		fetchAgents(target)
 			.then((agents) =>
 				setOverlay({
@@ -474,10 +1440,51 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 					index: 0,
 				})
 			)
-			.catch((err: unknown) =>
-				notify(`agents failed: ${errText(err)}`, "error")
-			);
-	}, [target, notify]);
+			.catch((err) => notify(`agents failed: ${errText(err)}`, "error"));
+	}, [notify, simpleInterface, target]);
+
+	const loadTeams = useCallback(
+		(requestId: number) => {
+			fetchTeams(target)
+				.then((teams) => {
+					if (teamPickerRequestRef.current !== requestId) {
+						return;
+					}
+					setOverlay((current) =>
+						current.kind === "teams"
+							? { ...current, teams, index: 0, loading: false, error: null }
+							: current
+					);
+				})
+				.catch((err) => {
+					if (teamPickerRequestRef.current !== requestId) {
+						return;
+					}
+					setOverlay((current) =>
+						current.kind === "teams"
+							? { ...current, loading: false, error: errText(err) }
+							: current
+					);
+				});
+		},
+		[target]
+	);
+
+	const openTeamPicker = useCallback(() => {
+		if (simpleInterface) {
+			notify(BOT_ROUTING_NOTICE, "info");
+			return;
+		}
+		const requestId = ++teamPickerRequestRef.current;
+		setOverlay({
+			kind: "teams",
+			teams: [],
+			index: 0,
+			loading: true,
+			error: null,
+		});
+		loadTeams(requestId);
+	}, [loadTeams, notify, simpleInterface]);
 
 	const openAcpPicker = useCallback(() => {
 		if (!selectedAgent || selectedTeam) {
@@ -496,9 +1503,7 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 				}
 				setOverlay({ kind: "acp", choices, index: 0 });
 			})
-			.catch((err: unknown) =>
-				notify(`ACP settings failed: ${errText(err)}`, "error")
-			);
+			.catch((err) => notify(`ACP settings failed: ${errText(err)}`, "error"));
 	}, [selectedAgent, selectedTeam, target, notify]);
 
 	const openModelPicker = useCallback(() => {
@@ -528,9 +1533,7 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 					index: 0,
 				});
 			})
-			.catch((err: unknown) =>
-				notify(`models failed: ${errText(err)}`, "error")
-			);
+			.catch((err) => notify(`models failed: ${errText(err)}`, "error"));
 	}, [selectedAgent, selectedTeam, target, notify]);
 
 	const runBtw = useCallback(
@@ -544,7 +1547,7 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 				.then((res) =>
 					setOverlay({ kind: "btw", question: arg, answer: res.answer })
 				)
-				.catch((err: unknown) => {
+				.catch((err) => {
 					setOverlay({ kind: "none" });
 					notify(`btw failed: ${errText(err)}`, "error");
 				});
@@ -554,6 +1557,10 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 
 	const runTeam = useCallback(
 		(arg: string) => {
+			if (simpleInterface) {
+				notify(BOT_ROUTING_NOTICE, "info");
+				return;
+			}
 			if (arg.length === 0 || arg === "clear") {
 				setSelectedTeam(null);
 				notify("Group routing cleared", "info");
@@ -563,15 +1570,13 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			setSelectedAgent(null);
 			notify(`Group: ${arg}`, "info");
 		},
-		[notify]
+		[notify, simpleInterface]
 	);
 
 	const runSessions = useCallback(() => {
 		listSessionsForConversation(target, conversationIdRef.current)
 			.then((sessions) => setOverlay({ kind: "sessions", sessions }))
-			.catch((err: unknown) =>
-				notify(`sessions failed: ${errText(err)}`, "error")
-			);
+			.catch((err) => notify(`sessions failed: ${errText(err)}`, "error"));
 	}, [target, notify]);
 
 	const runFork = useCallback(
@@ -587,13 +1592,13 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			)
 				.then((newConversationId) => {
 					conversationIdRef.current = newConversationId;
+					setConversationTitle(null);
+					setTurnError(null);
 					setMessages([]);
 					setQueuedMessages([]);
 					notify(`Forked chat: ${newConversationId}`, "info");
 				})
-				.catch((err: unknown) =>
-					notify(`fork failed: ${errText(err)}`, "error")
-				);
+				.catch((err) => notify(`fork failed: ${errText(err)}`, "error"));
 		},
 		[target, notify, streaming]
 	);
@@ -602,7 +1607,7 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		(pinned: boolean) => {
 			setConversationPinned(target, conversationIdRef.current, pinned)
 				.then(() => notify(pinned ? "Chat pinned" : "Chat unpinned", "info"))
-				.catch((err: unknown) =>
+				.catch((err) =>
 					notify(`${pinned ? "pin" : "unpin"} failed: ${errText(err)}`, "error")
 				);
 		},
@@ -622,18 +1627,26 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 				);
 				return;
 			}
+			const requestSequence = ++resumeRequestSequence.current;
+			const sourceConversationId = conversationIdRef.current;
+			const isCurrentResume = () =>
+				requestSequence === resumeRequestSequence.current &&
+				resumeIdentity === latestResumeIdentity.current &&
+				sourceConversationId === conversationIdRef.current;
 			resumeConversation(target, conversationId)
 				.then((conversation) => {
+					if (!isCurrentResume()) {
+						return;
+					}
 					conversationIdRef.current = conversation.id;
+					setConversationTitle(conversation.title || null);
+					setTurnError(null);
 					setMessages(
 						conversation.messages.map((message) => ({
 							id: nextMessageId++,
 							role: message.role === "user" ? "user" : "assistant",
 							content: message.content,
-							parts:
-								Array.isArray(message.parts) && message.parts.length > 0
-									? (message.parts as ChatPart[])
-									: [{ type: "text", text: message.content }],
+							parts: resumedChatParts(message),
 						}))
 					);
 					setQueuedMessages([]);
@@ -645,12 +1658,22 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 						"info"
 					);
 				})
-				.catch((err: unknown) =>
-					notify(`resume failed: ${errText(err)}`, "error")
-				);
+				.catch((err) => {
+					if (isCurrentResume()) {
+						notify(`resume failed: ${errText(err)}`, "error");
+					}
+				});
 		},
-		[target, notify, streaming]
+		[target, notify, streaming, resumeIdentity]
 	);
+
+	const startupApplied = useRef(false);
+	useEffect(() => {
+		if (startupResume && !startupApplied.current) {
+			startupApplied.current = true;
+			runResume(startupResume.id);
+		}
+	}, [runResume, startupResume]);
 
 	const runRename = useCallback(
 		(title: string) => {
@@ -658,11 +1681,15 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 				notify("usage: /rename <title>", "warning");
 				return;
 			}
-			renameConversation(target, conversationIdRef.current, title)
-				.then((nextTitle) => notify(`Renamed: ${nextTitle}`, "info"))
-				.catch((err: unknown) =>
-					notify(`rename failed: ${errText(err)}`, "error")
-				);
+			const conversationId = conversationIdRef.current;
+			renameConversation(target, conversationId, title)
+				.then((nextTitle) => {
+					if (conversationIdRef.current === conversationId) {
+						setConversationTitle(nextTitle);
+					}
+					notify(`Renamed: ${nextTitle}`, "info");
+				})
+				.catch((err) => notify(`rename failed: ${errText(err)}`, "error"));
 		},
 		[target, notify]
 	);
@@ -673,17 +1700,16 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 	}, []);
 
 	const toggleDoubleCheck = useCallback(() => {
-		setDoubleCheckOn((on) => {
-			notify(on ? "Double-check off" : "Double-check armed", "info");
-			return !on;
-		});
-	}, [notify]);
+		setDoubleCheckOn(!doubleCheckOn);
+		notify(doubleCheckOn ? "Double-check off" : "Double-check armed", "info");
+	}, [doubleCheckOn, notify]);
 
 	const clearQueuedMessages = useCallback(() => {
 		if (queuedMessages.length === 0) {
 			return;
 		}
 		setQueuedMessages(clearChatQueue(queuedMessages));
+		setQueuePaused(false);
 		setOverlay({ kind: "none" });
 		setQueueFocused(false);
 		notify("Queue cleared", "info");
@@ -759,8 +1785,9 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			if (normalized.length === 0) {
 				return false;
 			}
-			if (availableModes.some((mode) => mode === normalized)) {
-				setThemeMode(normalized as "system" | "light" | "dark");
+			const mode = availableModes.find((candidate) => candidate === normalized);
+			if (mode) {
+				setThemeMode(mode);
 				notify(`Theme mode: ${normalized}`, "info");
 				return true;
 			}
@@ -782,6 +1809,24 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			if (action.kind === "passthrough") {
 				return false;
 			}
+			if (
+				simpleInterface &&
+				((action.kind === "overlay" &&
+					(action.overlay === "acp-settings" ||
+						action.overlay === "model-picker")) ||
+					(action.kind === "local" &&
+						(action.action === "set-model" || action.action === "set-team")))
+			) {
+				if (action.kind === "local" && action.action === "set-team") {
+					notify(BOT_ROUTING_NOTICE, "info");
+				} else {
+					notify(
+						"Model and approval controls are available in Agent or OS.",
+						"info"
+					);
+				}
+				return true;
+			}
 			if (action.kind === "overlay") {
 				switch (action.overlay) {
 					case "agent-picker":
@@ -797,10 +1842,13 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 						runDelete(action.argument);
 						return true;
 					case "help":
-						setOverlay({
-							kind: "help",
-							command: action.argument || undefined,
-						});
+						// Bare /help opens the shell's keyboard-shortcuts overlay (keys
+						// and every command); /help <command> shows that command's usage.
+						if (action.argument) {
+							setOverlay({ kind: "help", command: action.argument });
+						} else {
+							openOverlay("keymap");
+						}
 						return true;
 					case "model-picker":
 						openModelPicker();
@@ -870,11 +1918,13 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		[
 			applyThemeArgument,
 			clearQueuedMessages,
+			simpleInterface,
 			moveQueuedMessage,
 			notify,
 			openAcpPicker,
 			openAgentPicker,
 			openModelPicker,
+			openOverlay,
 			openQueue,
 			openTheme,
 			queuedMessages,
@@ -895,8 +1945,19 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 
 	const handleCommand = useCallback(
 		(raw: string): boolean => {
+			if (/^\/(?:group|team)\s*$/i.test(raw.trim())) {
+				openTeamPicker();
+				return true;
+			}
 			const dispatch = dispatchCommand(raw);
 			if (!dispatch) {
+				return false;
+			}
+			if (
+				dispatch.kind === "unknown" &&
+				(isContributedPluginCommand(raw, contributedSlashCommands) ||
+					isAdvertisedAgentCommand(raw, activeAcpCommands))
+			) {
 				return false;
 			}
 			if (dispatch.kind === "unknown" || dispatch.kind === "usage") {
@@ -905,27 +1966,66 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			}
 			return applyCommandAction(dispatch.action);
 		},
-		[applyCommandAction, notify]
+		[
+			activeAcpCommands,
+			applyCommandAction,
+			contributedSlashCommands,
+			notify,
+			openTeamPicker,
+		]
 	);
 
 	const submitComposer = useCallback(() => {
-		const text = composer;
-		setComposer("");
+		// Read the editor buffer directly: typing and Enter can land in one
+		// batch before the content-change event has updated the ref.
+		const draft = composerInputRef.current?.plainText ?? composerRef.current;
+		const text = expandPastePlaceholders(draft, pastedTextRef.current);
+		// Enter on an empty composer resumes a paused queue: the drain effect
+		// then sends the oldest queued prompt.
+		if (
+			text.trim() === "" &&
+			!streaming &&
+			queuePaused &&
+			queuedMessages.length > 0
+		) {
+			setQueuePaused(false);
+			return;
+		}
+		// Nothing to send (e.g. a stray second Enter after a command ran).
+		if (text.trim() === "") {
+			return;
+		}
+		setTurnError(null);
+		setComposerText("");
+		pastedTextRef.current.clear();
 		setAutocomplete(null);
-		setPromptHistory((state) => {
-			const next = recordPrompt(state, text);
-			savePromptHistory(next.entries);
+		updatePromptHistory((state) => {
+			// The composer text, not the expanded prompt: collapsed pastes and
+			// slash-command arguments are never recorded.
+			const next = recordPrompt(state, historyEntryFor(draft));
+			if (historySealer && historyLoadedUrlRef.current === historyTargetUrl) {
+				saveSealedPromptHistory(next.entries, historySealer).catch(() => {
+					// Best-effort; the history stays in memory.
+				});
+			}
 			return next;
 		});
 		if (handleCommand(text)) {
+			selectedHumanMentionsRef.current = [];
 			return;
 		}
 		if (streaming) {
-			const result = enqueueChatTurn(queuedMessages, text, buildOptions());
+			const result = enqueueChatTurn(
+				queuedMessages,
+				text,
+				buildOptionsForPrompt(text)
+			);
 			if (result.accepted) {
 				setQueuedMessages(result.queue);
 				notify(`Queued prompt (${result.queue.length})`, "info");
+				notifySelectedHumanMentions(text);
 			} else {
+				selectedHumanMentionsRef.current = [];
 				notify(
 					"Prompt queue is full (50); wait for the current turn",
 					"warning"
@@ -933,15 +2033,27 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			}
 			return;
 		}
-		send(text);
+		// A typed prompt goes first ("send now"); the paused queue drains after.
+		setQueuePaused(false);
+		// Sending is a request to follow the new turn: leave any scrolled-back
+		// position so the prompt and its reply are not hidden behind the strip.
+		scrollTranscript("bottom");
+		send(text, buildOptionsForPrompt(text));
+		notifySelectedHumanMentions(text);
 	}, [
-		composer,
 		handleCommand,
+		queuePaused,
 		queuedMessages,
 		streaming,
 		send,
 		notify,
-		buildOptions,
+		buildOptionsForPrompt,
+		notifySelectedHumanMentions,
+		historySealer,
+		historyTargetUrl,
+		scrollTranscript,
+		setComposerText,
+		updatePromptHistory,
 	]);
 
 	const applySelectedAutocomplete = useCallback(() => {
@@ -952,10 +2064,38 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		if (!suggestion) {
 			return false;
 		}
-		setComposer(applyAutocomplete(composer, autocomplete.context, suggestion));
+		if (suggestion.kind === "retry-slash-commands") {
+			setAutocomplete(null);
+			reloadContributions();
+			return true;
+		}
+		if (
+			suggestion.kind === "human" &&
+			!selectedHumanMentionsRef.current.some(
+				(mention) => mention.id === suggestion.id
+			)
+		) {
+			selectedHumanMentionsRef.current.push({
+				id: suggestion.id,
+				label: suggestion.name,
+			});
+		}
+		const nextComposer = applyAutocomplete(
+			composer,
+			autocomplete.context,
+			suggestion
+		);
+		setDismissedSlashArgumentValue(
+			autocomplete.context.kind === "slash-argument" &&
+				suggestion.kind === "slash-argument-option" &&
+				!autocomplete.context.hasNextArgument
+				? nextComposer
+				: null
+		);
+		setComposerText(nextComposer);
 		setAutocomplete(null);
 		return true;
-	}, [autocomplete, composer]);
+	}, [autocomplete, composer, reloadContributions, setComposerText]);
 
 	// Apply a palette-issued chat intent once this surface is the active tab.
 	useEffect(() => {
@@ -1001,6 +2141,56 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 				setSelectedAgent(chosen.id);
 				setSelectedTeam(null);
 				notify(`Agent: ${chosen.name}`, "info");
+			}
+			setOverlay({ kind: "none" });
+		}
+	};
+
+	const handleTeamKey = (key: KeyEvent) => {
+		if (overlay.kind !== "teams") {
+			return;
+		}
+		if (key.name === "escape") {
+			teamPickerRequestRef.current += 1;
+			setOverlay({ kind: "none" });
+			return;
+		}
+		if (overlay.loading) {
+			return;
+		}
+		if (overlay.error) {
+			if (key.name === "r") {
+				const requestId = ++teamPickerRequestRef.current;
+				setOverlay((current) =>
+					current.kind === "teams"
+						? { ...current, loading: true, error: null }
+						: current
+				);
+				loadTeams(requestId);
+			}
+			return;
+		}
+		if (key.name === "up" || key.name === "k") {
+			setOverlay((current) =>
+				current.kind === "teams"
+					? { ...current, index: Math.max(0, current.index - 1) }
+					: current
+			);
+		} else if (key.name === "down" || key.name === "j") {
+			setOverlay((current) =>
+				current.kind === "teams"
+					? {
+							...current,
+							index: Math.min(current.teams.length - 1, current.index + 1),
+						}
+					: current
+			);
+		} else if (key.name === "return") {
+			const selected = overlay.teams[overlay.index];
+			if (selected) {
+				setSelectedTeam(selected.id);
+				setSelectedAgent(null);
+				notify(`Group: ${selected.name}`, "info");
 			}
 			setOverlay({ kind: "none" });
 		}
@@ -1066,25 +2256,79 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		}
 	};
 
+	// A rejected permission strikes the tool row through instead of leaving it
+	// spinning until the turn ends. Without an ACP toolCallId nothing changes.
+	const markPermissionDenied = (toolCall: ChatPermission["toolCall"]) => {
+		const toolCallId = permissionToolCallId(toolCall);
+		if (!toolCallId) {
+			return;
+		}
+		setMessages((previous) => {
+			const index = previous.findLastIndex(
+				(message) => message.role === "assistant"
+			);
+			const message = previous[index];
+			if (!message) {
+				return previous;
+			}
+			const parts = appendToolOutputPart(
+				message.parts,
+				"denied",
+				undefined,
+				toolCallId
+			);
+			return parts === message.parts
+				? previous
+				: previous.with(index, { ...message, parts });
+		});
+	};
+
+	const submitPermission = (
+		permission: ChatPermission,
+		option: ChatPermissionOption
+	) => {
+		const report = herdrTurn.current?.report;
+		if (isRejectPermissionOption(option)) {
+			markPermissionDenied(permission.toolCall);
+		}
+		setOverlay({ kind: "none" });
+		respondToChatPermission(target, permission.requestId, option.optionId)
+			.then((resolved) => {
+				if (resolved) {
+					report?.("working");
+				}
+			})
+			.catch((err) => notify(`permission failed: ${errText(err)}`, "error"));
+	};
+
+	const permissionBodyRef = useRef<ScrollBoxRenderable | null>(null);
 	const handlePermissionKey = (key: KeyEvent) => {
 		if (overlay.kind !== "permission") {
 			return;
 		}
 		if (key.name === "escape") {
+			const report = herdrTurn.current?.report;
 			const requestId = overlay.permission.requestId;
+			markPermissionDenied(overlay.permission.toolCall);
 			setOverlay({ kind: "none" });
-			respondToChatPermission(target, requestId, null).catch((err: unknown) =>
-				notify(`permission rejected: ${errText(err)}`, "error")
-			);
+			respondToChatPermission(target, requestId, null)
+				.then((resolved) => {
+					if (resolved) {
+						report?.("working");
+					}
+				})
+				.catch((err) =>
+					notify(`permission rejected: ${errText(err)}`, "error")
+				);
 			return;
 		}
-		if (key.name === "up" || key.name === "k") {
+		if (PERMISSION_PREVIOUS_KEYS.has(key.name)) {
 			setOverlay((o) =>
 				o.kind === "permission" ? { ...o, index: Math.max(0, o.index - 1) } : o
 			);
 			return;
 		}
-		if (key.name === "down" || key.name === "j") {
+		if (PERMISSION_NEXT_KEYS.has(key.name)) {
 			setOverlay((o) =>
 				o.kind === "permission"
 					? {
@@ -1095,16 +2339,28 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			);
 			return;
 		}
+		if (key.name === "pageup" || key.name === "pagedown") {
+			permissionBodyRef.current?.scrollBy(
+				key.name === "pageup"
+					? -PERMISSION_BODY_PAGE_ROWS
+					: PERMISSION_BODY_PAGE_ROWS
+			);
+			return;
+		}
+		// 1-9 choose and submit at once; a digit past the last option is ignored.
+		const plainDigit =
+			!(key.ctrl || key.meta || key.option) && PERMISSION_DIGIT.test(key.name);
+		const digit = plainDigit ? Number(key.name) : 0;
+		const digitOption = overlay.permission.options[digit - 1];
+		if (digit > 0 && digitOption) {
+			submitPermission(overlay.permission, digitOption);
+			return;
+		}
 		if (key.name === "return") {
 			const option = overlay.permission.options[overlay.index];
-			if (!option) {
-				return;
+			if (option) {
+				submitPermission(overlay.permission, option);
 			}
-			const requestId = overlay.permission.requestId;
-			setOverlay({ kind: "none" });
-			respondToChatPermission(target, requestId, option.optionId).catch(
-				(err: unknown) => notify(`permission failed: ${errText(err)}`, "error")
-			);
 		}
 	};
 
@@ -1117,15 +2373,20 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			return;
 		}
 		if (key.name === "escape") {
+			const report = herdrTurn.current?.report;
 			setOverlay({ kind: "none" });
 			void respondToChatQuestion(
 				target,
 				conversationIdRef.current,
 				overlay.question,
 				[{ kind: "skip", question_id: current.id }]
-			).catch((err: unknown) =>
-				notify(`question rejected: ${errText(err)}`, "error")
-			);
+			)
+				.then((resolved) => {
+					if (resolved) {
+						report?.("working");
+					}
+				})
+				.catch((err) => notify(`question rejected: ${errText(err)}`, "error"));
 			return;
 		}
 		if (current.kind === "text") {
@@ -1193,6 +2454,7 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			return;
 		}
 		setOverlay({ kind: "none" });
+		const report = herdrTurn.current?.report;
 		void respondToChatQuestion(
 			target,
 			conversationIdRef.current,
@@ -1200,13 +2462,14 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			answers
 		)
 			.then((resolved) => {
+				if (resolved) {
+					report?.("working");
+				}
 				if (!resolved) {
 					notify("Question expired before it was answered", "warning");
 				}
 			})
-			.catch((err: unknown) =>
-				notify(`question failed: ${errText(err)}`, "error")
-			);
+			.catch((err) => notify(`question failed: ${errText(err)}`, "error"));
 	};
 
 	const confirmDelete = useCallback(() => {
@@ -1225,10 +2488,77 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 					"info"
 				);
 			})
-			.catch((err: unknown) =>
-				notify(`delete failed: ${errText(err)}`, "error")
-			);
+			.catch((err) => notify(`delete failed: ${errText(err)}`, "error"));
 	}, [overlay, notify, resetChat, target]);
+
+	// Alt+1..3 on an empty chat with an empty composer resumes the listed
+	// recent conversation; anywhere else the keys fall through untouched. When
+	// the pane holds several tabs the shell's Alt+1..9 tab jump owns them.
+	const recentResumeIndex = (key: KeyEvent): number | null => {
+		if (!(key.meta || key.option) || key.ctrl || paneHasManyTabs) {
+			return null;
+		}
+		const index = Number.parseInt(key.name, 10) - 1;
+		if (
+			Number.isNaN(index) ||
+			index < 0 ||
+			index >= Math.min(recentRows.length, visibleRecentCount) ||
+			messages.length > 0 ||
+			composer.length > 0
+		) {
+			return null;
+		}
+		return index;
+	};
+	const resumeRecent = (index: number | null): boolean => {
+		const row = index === null ? undefined : recentRows[index];
+		if (!row) {
+			return false;
+		}
+		runResume(row.id);
+		return true;
+	};
+
+	// Up/Down walk prompt history only from the top or bottom visual row of the
+	// draft, so the arrows still move the cursor through wrapped and multi-line
+	// text in the middle of it.
+	const historyKeyAllowed = (key: KeyEvent): boolean => {
+		if (key.name !== "up" && key.name !== "down") {
+			return false;
+		}
+		if (key.ctrl || key.meta || key.shift || key.super) {
+			return false;
+		}
+		const editor = composerInputRef.current;
+		if (!editor || editor.plainText === "") {
+			return true;
+		}
+		const row = editor.scrollY + editor.visualCursor.visualRow;
+		const lastRow = Math.max(
+			0,
+			editor.editorView.getTotalVirtualLineCount() - 1
+		);
+		return key.name === "up" ? row === 0 : row === lastRow;
+	};
+
+	const handleComposerPaste = (event: PasteEvent) => {
+		const editor = composerInputRef.current;
+		if (!editor) {
+			return;
+		}
+		event.preventDefault();
+		const text = normalizePastedText(
+			stripAnsiSequences(decodePasteBytes(event.bytes))
+		);
+		if (!shouldCollapsePaste(text)) {
+			editor.insertText(text);
+			return;
+		}
+		pasteSequenceRef.current += 1;
+		const token = pastePlaceholderToken(text, pasteSequenceRef.current);
+		pastedTextRef.current.set(token, text);
+		editor.insertText(token);
+	};
 
 	const handleComposeKey = (key: KeyEvent) => {
 		if (queueFocused) {
@@ -1238,6 +2568,15 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			if (key.name === "escape") {
 				setAutocomplete(null);
 				return;
+			}
+			if (
+				key.name === "up" ||
+				key.name === "down" ||
+				(key.ctrl && key.name === "j")
+			) {
+				// The arrows (and Ctrl+J) belong to the suggestion list, not the
+				// editor cursor or its newline binding.
+				key.preventDefault();
 			}
 			if (key.name === "up" || key.name === "k") {
 				setAutocomplete((state) =>
@@ -1270,46 +2609,113 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 				return;
 			}
 			if (
+				key.name === "return" &&
+				runsOnEnter(
+					composerInputRef.current?.plainText ?? composer,
+					autocomplete.suggestions[autocomplete.index]
+				)
+			) {
+				// A bare no-argument built-in (`/new`) runs on the first Enter;
+				// Tab still completes it.
+				key.preventDefault();
+				submitComposer();
+				return;
+			}
+			if (
 				(key.name === "tab" || key.name === "return") &&
 				applySelectedAutocomplete()
 			) {
+				// Stop the textarea from also submitting (or inserting a newline).
+				key.preventDefault();
 				return;
 			}
 		}
 		if (key.ctrl && key.name === "q" && queuedMessages.length > 0) {
 			setQueueFocused(true);
 			setQueueSelectedIndex(0);
-		} else if (key.ctrl && (key.name === "?" || key.name === "/")) {
-			setOverlay({ kind: "keymap" });
 		} else if (key.ctrl && key.name === "a") {
 			openAgentPicker();
 		} else if (key.ctrl && key.name === "r") {
-			openAcpPicker();
+			if (simpleInterface) {
+				notify(
+					"Model and approval controls are available in Agent or OS.",
+					"info"
+				);
+			} else {
+				openAcpPicker();
+			}
 		} else if (key.ctrl && key.name === "l") {
 			resetChat();
-		} else if (key.name === "return") {
-			submitComposer();
-		} else if (key.name === "up") {
-			setPromptHistory((state) => {
-				const next = previousPrompt(state, composer);
-				setComposer(next.value);
-				return next.state;
-			});
-		} else if (key.name === "down") {
-			setPromptHistory((state) => {
-				const next = nextPrompt(state, composer);
-				setComposer(next.value);
+		} else if (key.ctrl && key.name === "o") {
+			setExpandPrompts((value) => !value);
+		} else if (resumeRecent(recentResumeIndex(key))) {
+			// Resumed a recent conversation from the empty state.
+		} else if (historyKeyAllowed(key)) {
+			// Enter is the textarea's own submit binding; only history lives here.
+			key.preventDefault();
+			const draft = composerRef.current;
+			updatePromptHistory((state) => {
+				const next =
+					key.name === "up"
+						? previousPrompt(state, draft)
+						: nextPrompt(state, draft);
+				setComposerText(next.value);
 				return next.state;
 			});
 		} else if (key.name === "escape" && streaming) {
-			abortRef.current?.abort();
-			setStreaming(false);
+			interruptTurn();
+		} else if (
+			key.name === "escape" &&
+			queuePaused &&
+			queuedMessages.length > 0
+		) {
+			clearQueuedMessages();
 		}
 	};
 
+	// Esc mid-turn: stop the turn on Core, keep the partial reply, mark it
+	// interrupted, and pause any queued prompts instead of auto-dispatching the
+	// next one. The flag is set directly because updateTurnAssistant drops
+	// writes once the turn aborts.
+	function interruptTurn() {
+		setMessages((previous) =>
+			previous.map((message, index) =>
+				index === previous.length - 1 && message.role === "assistant"
+					? { ...message, interrupted: true }
+					: message
+			)
+		);
+		if (queuedMessages.length > 0) {
+			setQueuePaused(true);
+		}
+		const stopped = cancelActiveTurn();
+		if (!stopped) {
+			// A second Esc while a Stop still waits for Core must not end the
+			// wait early; that Stop clears `streaming` itself.
+			if (!pendingStopRef.current) {
+				setStreaming(false);
+				clearTurnActivity();
+			}
+			return;
+		}
+		clearTurnActivity();
+		// Stay busy until Core has answered the cancel: a prompt sent or
+		// dequeued before then would start a turn on this conversation that the
+		// late cancel could stop instead. Prompts entered meanwhile are queued.
+		pendingStopRef.current = stopped;
+		stopped.then(() => {
+			if (pendingStopRef.current === stopped) {
+				pendingStopRef.current = null;
+			}
+			if (abortRef.current === null) {
+				setStreaming(false);
+			}
+		});
+	}
+
 	// Keyboard gated on being the focused pane's active tab.
 	useKeyboard((key) => {
-		if (!focused) {
+		if (!focused || shellKeyboardCaptured || externalOverlayId) {
 			return;
 		}
 		if (overlay.kind === "queue" || queueFocused) {
@@ -1317,6 +2723,10 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 		}
 		if (overlay.kind === "agents") {
 			handleAgentKey(key);
+			return;
+		}
+		if (overlay.kind === "teams") {
+			handleTeamKey(key);
 			return;
 		}
 		if (overlay.kind === "models") {
@@ -1343,15 +2753,6 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			}
 			return;
 		}
-		if (overlay.kind === "keymap") {
-			if (
-				key.name === "escape" ||
-				(key.ctrl && (key.name === "?" || key.name === "/"))
-			) {
-				setOverlay({ kind: "none" });
-			}
-			return;
-		}
 		if (overlay.kind === "help") {
 			if (key.name === "escape" || key.name === "return") {
 				setOverlay({ kind: "none" });
@@ -1371,29 +2772,106 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 			}
 			return;
 		}
+		// Transcript scrolling never conflicts with text entry, so it works while
+		// the composer is focused. Plain Home/End stay with the input.
+		const scrollKind = transcriptScrollForKey(key);
+		if (scrollKind && messages.length > 0) {
+			// The composer must not also act: an option-reported Ctrl+Alt+U
+			// matches its Ctrl+U (delete to line start) binding.
+			key.preventDefault();
+			transcriptScroll.scroll(scrollKind);
+			return;
+		}
 		handleComposeKey(key);
 	});
 
-	const composerFocused = focused && !overlayOpen && !queueFocused;
+	const terminal = useTerminalDimensions();
+	// The completion list floats upward from the composer dock, so its height
+	// budget is the dock's distance from the top of the screen.
+	const composerDockRef = useRef<BoxRenderable | null>(null);
+	const [composerDockTop, setComposerDockTop] = useState<number | null>(null);
+	const measureComposerDock = useCallback(() => {
+		const top = composerDockRef.current?.y;
+		if (top !== undefined) {
+			setComposerDockTop(top);
+		}
+	}, []);
+	const autocompleteOpen = autocomplete !== null;
+	useEffect(() => {
+		if (autocompleteOpen && terminal.height > 0) {
+			measureComposerDock();
+		}
+	}, [autocompleteOpen, measureComposerDock, terminal.height]);
+	const permissionPrompt = overlay.kind === "permission" ? overlay : null;
+	// This pane owns the keyboard: no shell layer (palette, node picker,
+	// sidebar focus mode, shell overlay) has taken it.
+	const keysOwned = focused && !shellKeyboardCaptured && !externalOverlayId;
+	const composerFocused = keysOwned && !overlayOpen && !queueFocused;
+
+	// Ctrl+C (offered by the shell): stop a running stream, else clear a draft.
+	// Returning false lets the shell arm its two-press quit. The shell decides;
+	// this surface never handles Ctrl+C in its own useKeyboard.
+	useInterruptHandler(() => {
+		if (streaming) {
+			// The same stop as Esc: keep the partial reply, mark it interrupted
+			// and pause the queue.
+			interruptTurn();
+			return true;
+		}
+		const draft = composerInputRef.current?.plainText ?? composerRef.current;
+		if (draft === "") {
+			return false;
+		}
+		setComposerText("");
+		pastedTextRef.current.clear();
+		setAutocomplete(null);
+		return true;
+	}, composerFocused);
+
+	// The busy clock lives in the pane's own StatusLine (activity, elapsed and
+	// the esc hint), so Chat publishes only its key hints to the shell bar; a
+	// second spinner there would repeat the row right above it.
+	// The shortcuts overlay hint (F1 keys) is a shell global.
+	useStatusContribution(paneId, {
+		hints: simpleInterface ? [] : [CHAT_AGENT_HINT],
+	});
 
 	return (
 		<box flexDirection="column" flexGrow={1}>
 			<Transcript
-				agent={selectedAgent}
+				agent={routeAgent}
+				coreDown={coreDown}
+				expandPrompts={expandPrompts}
 				messages={messages}
+				onScrollActivity={transcriptScroll.sync}
+				onVisibleRecentsChange={setVisibleRecentCount}
+				pendingPermissionToolCallId={permissionPrompt?.detail.toolCallId}
+				recents={recentRows}
+				scrollRef={transcriptScroll.ref}
+				simpleInterface={simpleInterface}
 				streaming={streaming}
-				team={selectedTeam}
+				team={routeTeam}
 			/>
+			{messages.length > 0 ? (
+				<JumpToLatestStrip
+					awayFromBottom={transcriptScroll.awayFromBottom}
+					newCount={transcriptScroll.newCount}
+					onJump={() => transcriptScroll.scroll("bottom")}
+				/>
+			) : null}
 			<StatusLine
-				agent={selectedAgent}
+				activity={busyActivityLabel(overlay.kind, activeTool)}
 				doubleCheckOn={doubleCheckOn}
-				model={acpModel}
-				streaming={streaming}
-				team={selectedTeam}
+				interruptible={composerFocused}
+				startedAt={streaming ? streamStartedAt : null}
 			/>
 			{queuedMessages.length > 0 ? (
 				<ChatQueueBar
-					focused={queueFocused && !overlayOpen}
+					clearHint={queueBarClearHint(queuePaused, streaming)}
+					focused={keysOwned && queueFocused && !overlayOpen}
+					focusHint={
+						queuePaused ? "Paused · Enter send next" : "Ctrl+Q inspect"
+					}
 					items={queuedMessages}
 					onCancel={() => setQueueFocused(false)}
 					onClear={clearQueuedMessages}
@@ -1405,38 +2883,118 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 				/>
 			) : null}
 			<WorkspaceBar
-				agent={selectedAgent}
-				model={acpModel}
-				team={selectedTeam}
-			/>
-			{autocomplete ? <AutocompleteView state={autocomplete} /> : null}
-			<box
-				borderColor={
-					composerFocused ? theme.colors.focusRing : theme.colors.border
+				agent={routeAgent}
+				meter={simpleInterface ? "" : sessionMeter}
+				model={
+					simpleInterface
+						? null
+						: (acpModel ??
+							(configuredModel?.agentId === routeAgent
+								? configuredModel.model
+								: null))
 				}
-				borderStyle="rounded"
-				flexDirection="row"
-				gap={1}
-				paddingLeft={1}
-				paddingRight={1}
-			>
-				<text fg={theme.colors.primary}>{"›"}</text>
-				<input
-					cursorColor={theme.colors.primary}
-					focused={composerFocused}
-					onChange={(value) => {
-						setComposer(value);
-						setPromptHistory(resetPromptNavigation);
+				showModel={!simpleInterface}
+				team={routeTeam}
+			/>
+			{/* A pending tool permission takes the composer's place. The composer
+			    stays mounted but hidden so its draft and cursor survive. */}
+			{permissionPrompt ? (
+				<PermissionPrompt
+					bodyScrollRef={permissionBodyRef}
+					detail={permissionPrompt.detail}
+					index={permissionPrompt.index}
+					onChoose={(index) => {
+						const option = permissionPrompt.permission.options[index];
+						if (option) {
+							submitPermission(permissionPrompt.permission, option);
+						}
 					}}
-					placeholder="Message, or /help /queue /theme /resume /rename /delete /sessions /fork /new (Ctrl+A agent, Ctrl+R ACP, Ctrl+Q queue)"
-					placeholderColor={theme.colors.mutedForeground}
-					textColor={theme.colors.foreground}
-					value={composer}
+					permission={permissionPrompt.permission}
+					terminal={terminal}
 				/>
+			) : null}
+			{/* The completion list floats above the composer, so the transcript
+			    keeps its height while suggestions change. */}
+			<box
+				flexDirection="column"
+				flexShrink={1}
+				minHeight={3}
+				onSizeChange={measureComposerDock}
+				ref={composerDockRef}
+				visible={permissionPrompt === null}
+			>
+				{autocomplete ? (
+					<AutocompleteView
+						maxHeight={composerDockTop ?? Math.max(0, terminal.height - 4)}
+						state={autocomplete}
+					/>
+				) : null}
+				<box
+					borderColor={
+						composerFocused ? theme.colors.focusRing : theme.colors.border
+					}
+					borderStyle="rounded"
+					flexDirection="row"
+					// Only the composer shrinks when a tall draft, the busy row and the
+					// queue overflow a short terminal; it keeps one text row and its border.
+					flexShrink={1}
+					gap={1}
+					minHeight={3}
+					paddingLeft={1}
+					paddingRight={1}
+				>
+					<text alignSelf="flex-start" fg={theme.colors.primary} flexShrink={0}>
+						{"›"}
+					</text>
+					<textarea
+						cursorColor={theme.colors.primary}
+						flexGrow={1}
+						focused={composerFocused}
+						// The textarea copies textColor into its focused colour only at
+						// construction; pass both so a theme loaded or picked after mount
+						// (light theme) recolours the draft instead of leaving it white.
+						focusedTextColor={theme.colors.foreground}
+						keyBindings={COMPOSER_KEY_BINDINGS}
+						maxHeight={composerMaxHeight(terminal.height)}
+						minHeight={1}
+						onContentChange={() => {
+							const value = composerInputRef.current?.plainText ?? "";
+							const previousValue = composerRef.current;
+							if (value === previousValue) {
+								// App-driven updates (history, reset, completion) set the ref
+								// first; they keep the history cursor and dismissal state.
+								return;
+							}
+							setDismissedSlashArgumentValue(null);
+							setTurnError(null);
+							composerRef.current = value;
+							setComposer(value);
+							updatePromptHistory(resetPromptNavigation);
+						}}
+						onPaste={handleComposerPaste}
+						onSubmit={submitComposer}
+						placeholder={
+							streaming
+								? composerFocused
+									? "Queue a follow-up… (Enter queue · Esc interrupt)"
+									: "Queue a follow-up…"
+								: simpleInterface
+									? "Message · pinned to Ryu · /help"
+									: messages.length === 0
+										? starterPlaceholder
+										: "Message · Ctrl+A agent · Ctrl+R ACP · /help"
+						}
+						placeholderColor={theme.colors.mutedForeground}
+						ref={composerInputRef}
+						textColor={theme.colors.foreground}
+						wrapMode="word"
+					/>
+				</box>
 			</box>
-			{overlay.kind === "none" ? null : overlay.kind === "queue" ? (
+			{overlay.kind === "none" ||
+			overlay.kind === "permission" ? null : overlay.kind === "queue" ? (
 				<ChatQueueOverlay
-					focused
+					focused={keysOwned}
 					items={queuedMessages}
 					onCancel={() => setOverlay({ kind: "none" })}
 					onClear={clearQueuedMessages}
@@ -1451,7 +3009,10 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 					selectedIndex={queueSelectedIndex}
 				/>
 			) : (
+				// Pickers, help and the keymap render as a pane-local Modal (absolute
+				// over this surface); permission and question stay docked in flow.
 				<OverlayView
+					focused={keysOwned}
 					onClose={() => setOverlay({ kind: "none" })}
 					overlay={overlay}
 				/>
@@ -1460,633 +3021,13 @@ function ChatSurface({ active, paneId }: SurfaceProps) {
 	);
 }
 
-// Empty-state header shown before the first turn: the desktop AgentChat greeting
-// with the current agent/group mode. Once messages exist it yields to the list.
-function EmptyStateHeader({
-	agent,
-	team,
-}: {
-	agent: string | null;
-	team: string | null;
-}) {
-	const theme = useTheme();
-	let mode = "Ask anything";
-	if (team) {
-		mode = `Group: ${team}`;
-	} else if (agent) {
-		mode = `Agent: ${agent}`;
+/** The unfocused queue bar's second hint: Esc pauses mid-turn, clears when
+ * paused. While unfocused, `c` types into the composer, so it is not shown. */
+function queueBarClearHint(paused: boolean, streaming: boolean): string {
+	if (paused) {
+		return "Esc clear queue";
 	}
-	return (
-		<box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
-			<text fg={theme.colors.primary}>
-				<b>{mode}</b>
-			</text>
-			<text fg={theme.colors.mutedForeground}>
-				Ctrl+A pick agent · Ctrl+Q queue · slash commands /help /queue /theme
-				/btw /goal /proof /check /model /group /sessions /fork /new
-			</text>
-		</box>
-	);
-}
-
-function Transcript({
-	messages,
-	streaming,
-	agent,
-	team,
-}: {
-	agent: string | null;
-	messages: Message[];
-	streaming: boolean;
-	team: string | null;
-}) {
-	const theme = useTheme();
-	if (messages.length === 0) {
-		return <EmptyStateHeader agent={agent} team={team} />;
-	}
-	return (
-		<scrollbox flexGrow={1} paddingLeft={1} paddingTop={1}>
-			{messages.map((message, i) => {
-				const isLast = i === messages.length - 1;
-				const isStreamingAssistant =
-					isLast && streaming && message.role === "assistant";
-				return (
-					<box flexDirection="column" key={message.id} marginBottom={1}>
-						<text
-							fg={
-								message.role === "user"
-									? theme.colors.primary
-									: theme.colors.success
-							}
-						>
-							<b>{message.role === "user" ? "you" : "assistant"}</b>
-						</text>
-						{message.parts.length > 0 ? (
-							<TranscriptParts parts={message.parts} />
-						) : (
-							<text fg={theme.colors.mutedForeground}>
-								{isStreamingAssistant ? "…" : ""}
-							</text>
-						)}
-					</box>
-				);
-			})}
-		</scrollbox>
-	);
-}
-
-// WorkspaceBar - the desktop project-folder + model row that sits above the
-// composer. The TUI has no folder picker yet, so it surfaces the routing target
-// (agent/group) and the model selection as read-only chips (set via /model,
-// /group, Ctrl+A) so the composer always shows what a turn will run against.
-function WorkspaceBar({
-	agent,
-	team,
-	model,
-}: {
-	agent: string | null;
-	model: string | null;
-	team: string | null;
-}) {
-	const theme = useTheme();
-	const routeLabel = routeChip(agent, team);
-	return (
-		<box flexDirection="row" gap={2} paddingLeft={1}>
-			<box flexDirection="row" gap={1}>
-				<text fg={theme.colors.mutedForeground}>route</text>
-				<text fg={theme.colors.foreground}>{routeLabel}</text>
-			</box>
-			<box flexDirection="row" gap={1}>
-				<text fg={theme.colors.mutedForeground}>model</text>
-				<text fg={theme.colors.foreground}>{model ?? "default"}</text>
-			</box>
-		</box>
-	);
-}
-
-function StatusLine({
-	agent,
-	team,
-	model,
-	doubleCheckOn,
-	streaming,
-}: {
-	agent: string | null;
-	doubleCheckOn: boolean;
-	model: string | null;
-	streaming: boolean;
-	team: string | null;
-}) {
-	const chips: { key: string; label: string }[] = [];
-	if (team) {
-		chips.push({ key: "team", label: `team:${team}` });
-	} else if (agent) {
-		chips.push({ key: "agent", label: `agent:${agent}` });
-	}
-	if (model) {
-		chips.push({ key: "model", label: `model:${model}` });
-	}
-	if (doubleCheckOn) {
-		chips.push({ key: "dc", label: "double-check" });
-	}
-	if (chips.length === 0 && !streaming) {
-		return null;
-	}
-	return (
-		<box flexDirection="row" gap={1} paddingLeft={1}>
-			{streaming ? (
-				<StatusMessage variant="loading">streaming</StatusMessage>
-			) : null}
-			{chips.map((chip) => (
-				<Badge bordered={false} key={chip.key} variant="secondary">
-					{chip.label}
-				</Badge>
-			))}
-		</box>
-	);
-}
-
-function AutocompleteView({ state }: { state: AutocompleteState }) {
-	const theme = useTheme();
-	if (state.suggestions.length === 0) {
-		return null;
-	}
-	return (
-		<box paddingLeft={1} paddingRight={1}>
-			<Card
-				subtitle="↑/↓ move · Tab/Enter choose · Esc cancel"
-				title="Complete"
-			>
-				{state.suggestions.map((suggestion, index) => {
-					const selected = index === state.index;
-					return (
-						<box
-							flexDirection="row"
-							gap={1}
-							key={
-								suggestion.kind === "command" ? suggestion.name : suggestion.id
-							}
-						>
-							<text fg={selected ? theme.colors.primary : theme.colors.muted}>
-								{selected ? "›" : " "}
-							</text>
-							<text
-								fg={selected ? theme.colors.primary : theme.colors.foreground}
-							>
-								{suggestion.kind === "command"
-									? `/${suggestion.name} — ${suggestion.description}`
-									: `@${suggestion.id} — ${suggestion.name}`}
-							</text>
-						</box>
-					);
-				})}
-			</Card>
-		</box>
-	);
-}
-
-function ThemePickerOverlay({
-	argument,
-	onClose,
-}: {
-	argument?: string;
-	onClose: () => void;
-}) {
-	const theme = useTheme();
-	const { notify } = useToast();
-	const {
-		availableModes,
-		availablePresets,
-		preference,
-		reset,
-		setMode,
-		setPreset,
-	} = useTerminalTheme();
-	const options = [
-		...availableModes.map((mode) => ({
-			id: mode,
-			kind: "mode" as const,
-			label: mode === "system" ? "System (terminal)" : mode,
-		})),
-		...availablePresets.map((preset) => ({
-			id: preset,
-			kind: "preset" as const,
-			label: RYU_THEME_PRESETS[preset].label,
-		})),
-	];
-	const requested = argument?.trim().toLowerCase();
-	const initialIndex = Math.max(
-		0,
-		options.findIndex(
-			(option) =>
-				option.id === requested ||
-				(option.kind === "mode" && option.id === preference.mode) ||
-				(option.kind === "preset" && option.id === preference.preset)
-		)
-	);
-	const [index, setIndex] = useState(initialIndex);
-
-	useKeyboard((key) => {
-		if (key.name === "escape") {
-			onClose();
-			return;
-		}
-		if (key.name === "up" || key.name === "k") {
-			setIndex((current) => Math.max(0, current - 1));
-			return;
-		}
-		if (key.name === "down" || key.name === "j") {
-			setIndex((current) => Math.min(options.length - 1, current + 1));
-			return;
-		}
-		if (key.name === "r") {
-			reset();
-			notify("Terminal theme reset", "info");
-			return;
-		}
-		if (key.name !== "return") {
-			return;
-		}
-		const selected = options[index];
-		if (!selected) {
-			return;
-		}
-		if (selected.kind === "mode") {
-			setMode(selected.id);
-			notify(`Theme mode: ${selected.id}`, "info");
-		} else {
-			setPreset(selected.id);
-			notify(`Theme preset: ${selected.label}`, "info");
-		}
-		onClose();
-	});
-
-	return (
-		<box padding={1}>
-			<Card
-				subtitle="↑/↓ move · Enter apply · r reset · Esc cancel"
-				title="Terminal theme"
-			>
-				{options.map((option, optionIndex) => {
-					const selected = optionIndex === index;
-					const active =
-						(option.kind === "mode" && option.id === preference.mode) ||
-						(option.kind === "preset" && option.id === preference.preset);
-					return (
-						<box
-							backgroundColor={selected ? theme.colors.selection : undefined}
-							flexDirection="row"
-							gap={1}
-							key={`${option.kind}-${option.id}`}
-						>
-							<text
-								fg={
-									selected
-										? theme.colors.selectionForeground
-										: theme.colors.primary
-								}
-							>
-								{selected ? "›" : active ? "●" : " "}
-							</text>
-							<text
-								fg={
-									selected
-										? theme.colors.selectionForeground
-										: theme.colors.foreground
-								}
-							>
-								{option.label}
-							</text>
-						</box>
-					);
-				})}
-			</Card>
-		</box>
-	);
-}
-
-function OverlayView({
-	onClose,
-	overlay,
-}: {
-	onClose: () => void;
-	overlay: Overlay;
-}) {
-	const theme = useTheme();
-	if (overlay.kind === "agents") {
-		return (
-			<box padding={1}>
-				<Card
-					subtitle="↑/↓ move · Enter choose · Esc cancel"
-					title="Select agent"
-				>
-					{overlay.agents.length === 0 ? (
-						<text fg={theme.colors.mutedForeground}>No agents</text>
-					) : (
-						overlay.agents.map((agentItem, i) => (
-							<box flexDirection="row" gap={1} key={agentItem.id}>
-								<text
-									fg={
-										i === overlay.index
-											? theme.colors.primary
-											: theme.colors.muted
-									}
-								>
-									{i === overlay.index ? "›" : " "}
-								</text>
-								<text
-									fg={
-										i === overlay.index
-											? theme.colors.primary
-											: theme.colors.foreground
-									}
-								>
-									{agentItem.name}
-								</text>
-							</box>
-						))
-					)}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "models") {
-		return (
-			<box padding={1}>
-				<Card
-					subtitle="↑/↓ move · Enter choose · Esc cancel"
-					title="Select model"
-				>
-					{overlay.choices.map((choice, i) => (
-						<box flexDirection="row" gap={1} key={choice.id ?? "default"}>
-							<text
-								fg={
-									i === overlay.index
-										? theme.colors.primary
-										: theme.colors.muted
-								}
-							>
-								{i === overlay.index ? "›" : " "}
-							</text>
-							<text
-								fg={
-									i === overlay.index
-										? theme.colors.primary
-										: theme.colors.foreground
-								}
-							>
-								{choice.label}
-							</text>
-						</box>
-					))}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "sessions") {
-		return (
-			<box padding={1}>
-				<Card subtitle="Esc to close" title="Sessions">
-					{overlay.sessions.length === 0 ? (
-						<text fg={theme.colors.mutedForeground}>No runs yet</text>
-					) : (
-						overlay.sessions.map((session) => (
-							<box flexDirection="row" gap={1} key={session.id}>
-								<text fg={theme.colors.foreground}>{session.runnableKind}</text>
-								<text fg={theme.colors.mutedForeground}>
-									{session.runnableId}
-								</text>
-								<Badge bordered={false} variant="secondary">
-									{session.status}
-								</Badge>
-							</box>
-						))
-					)}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "acp") {
-		return (
-			<box padding={1}>
-				<Card
-					subtitle="↑/↓ move · Enter choose · Esc cancel"
-					title="ACP settings"
-				>
-					{overlay.choices.map((choice, i) => (
-						<box
-							flexDirection="row"
-							gap={1}
-							key={`${choice.kind}-${choice.id}-${i}`}
-						>
-							<text
-								fg={
-									i === overlay.index
-										? theme.colors.primary
-										: theme.colors.muted
-								}
-							>
-								{i === overlay.index ? "›" : " "}
-							</text>
-							<text
-								fg={
-									i === overlay.index
-										? theme.colors.primary
-										: theme.colors.foreground
-								}
-							>
-								{choice.label}
-							</text>
-						</box>
-					))}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "btw") {
-		return (
-			<box padding={1}>
-				<Card subtitle={overlay.question} title="btw">
-					{overlay.answer === null ? (
-						<StatusMessage variant="loading">thinking…</StatusMessage>
-					) : (
-						<Markdown>{overlay.answer}</Markdown>
-					)}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "permission") {
-		return (
-			<box padding={1}>
-				<Card
-					subtitle="↑/↓ move · Enter choose · Esc reject"
-					title="Permission required"
-				>
-					<text fg={theme.colors.mutedForeground}>
-						{`Allow the agent to ${permissionToolTitle(overlay.permission.toolCall)}?`}
-					</text>
-					{overlay.permission.options.map((option, i) => (
-						<box flexDirection="row" gap={1} key={option.optionId}>
-							<text
-								fg={
-									i === overlay.index
-										? theme.colors.primary
-										: theme.colors.muted
-								}
-							>
-								{i === overlay.index ? "›" : " "}
-							</text>
-							<text
-								fg={
-									i === overlay.index
-										? theme.colors.primary
-										: theme.colors.foreground
-								}
-							>
-								{option.name}
-							</text>
-						</box>
-					))}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "question") {
-		const current = overlay.question.questions[overlay.questionIndex];
-		if (!current) {
-			return null;
-		}
-		return (
-			<box padding={1}>
-				<Card subtitle="↑/↓ move · Enter submit · Esc skip" title="Question">
-					<text fg={theme.colors.foreground}>{current.title}</text>
-					{current.description ? (
-						<text fg={theme.colors.mutedForeground}>{current.description}</text>
-					) : null}
-					{current.kind === "text" ? (
-						<text fg={theme.colors.primary}>
-							{overlay.text || "Type an answer…"}
-						</text>
-					) : (
-						current.options.map((option, i) => (
-							<box flexDirection="row" gap={1} key={option.id}>
-								<text
-									fg={
-										i === overlay.selected
-											? theme.colors.primary
-											: theme.colors.muted
-									}
-								>
-									{i === overlay.selected ? "›" : " "}
-								</text>
-								<text
-									fg={
-										i === overlay.selected
-											? theme.colors.primary
-											: theme.colors.foreground
-									}
-								>
-									{option.label}
-								</text>
-							</box>
-						))
-					)}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "delete") {
-		return (
-			<box padding={1}>
-				<Card
-					subtitle="Enter/Y confirm · Esc/N cancel"
-					title="Delete conversation?"
-				>
-					<text fg={theme.colors.warning}>{overlay.conversationId}</text>
-					<text fg={theme.colors.mutedForeground}>
-						This permanently removes the conversation.
-					</text>
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "help") {
-		const command = overlay.command;
-		const matchingRows = command
-			? commandHelpRows().filter(
-					(row) => row.name === command || row.aliases.includes(command)
-				)
-			: [];
-		const lines =
-			matchingRows.length > 0
-				? matchingRows.map((row) => `${row.usage} — ${row.description}`)
-				: renderCommandHelp().split("\n");
-		return (
-			<box padding={1}>
-				<Card subtitle="Esc or Enter to close" title="Slash commands">
-					{lines.map((line) => (
-						<text fg={theme.colors.foreground} key={line}>
-							{line}
-						</text>
-					))}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "theme") {
-		return <ThemePickerOverlay argument={overlay.argument} onClose={onClose} />;
-	}
-	if (overlay.kind === "keymap") {
-		return (
-			<box padding={1}>
-				<Card subtitle="Ctrl+? or Esc to close" title="Keyboard shortcuts">
-					{keymapGroups().map((group) => (
-						<box flexDirection="column" key={group.group} marginBottom={1}>
-							<text fg={theme.colors.primary}>{group.group}</text>
-							{group.entries.map((entry) => (
-								<box
-									flexDirection="row"
-									gap={2}
-									key={`${entry.group}-${entry.keys}`}
-								>
-									<text fg={theme.colors.foreground}>{entry.keys}</text>
-									<text fg={theme.colors.mutedForeground}>{entry.label}</text>
-								</box>
-							))}
-						</box>
-					))}
-				</Card>
-			</box>
-		);
-	}
-	if (overlay.kind === "plugin_note") {
-		return (
-			<box padding={1}>
-				<Card subtitle="from a plugin hook · Esc to close" title="Note">
-					{overlay.notes.map((note, i) => (
-						// biome-ignore lint/suspicious/noArrayIndexKey: notes are append-only text with no stable id
-						<Markdown key={i}>{note}</Markdown>
-					))}
-				</Card>
-			</box>
-		);
-	}
-	return null;
-}
-
-function routeChip(agent: string | null, team: string | null): string {
-	if (team) {
-		return `team:${team}`;
-	}
-	if (agent) {
-		return `agent:${agent}`;
-	}
-	return "auto";
-}
-
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+	return streaming ? "Esc interrupt (queue pauses)" : "";
 }
 
 /** The Chat surface module. Registered by src/workspace/router.ts as the home
@@ -2098,3 +3039,12 @@ export const chatSurface: SurfaceModule = {
 	match: (path) => path === "/chat" || path.startsWith("/chat/"),
 	Component: ChatSurface,
 };
+
+function resumedChatParts(message: ResumedConversationMessage): ChatPart[] {
+	const parsed = chatPartsSchema.safeParse(message.parts);
+	// A resumed turn is never streaming live, so a tool persisted mid-call
+	// can only have been cut off; show it as interrupted instead of spinning.
+	return parsed.success && parsed.data.length > 0
+		? settleRunningToolParts(parsed.data, "interrupted")
+		: [{ type: "text", text: message.content }];
+}

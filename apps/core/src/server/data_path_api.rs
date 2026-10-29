@@ -13,6 +13,11 @@ pub(super) struct DataPathTarget {
 #[derive(serde::Deserialize)]
 pub(super) struct DataPathExportReq {
     out: String,
+    /// Passphrase the archive is encrypted under (at least 12 characters). The
+    /// export carries the data folder's key custody file and every store, so it
+    /// is never written unencrypted. Not stored or echoed.
+    #[serde(default)]
+    passphrase: String,
 }
 
 /// `GET /api/data-path` — current data-folder location, default, size, free space.
@@ -112,7 +117,8 @@ pub(super) async fn reset_data_path() -> impl IntoResponse {
     }
 }
 
-/// `POST /api/data-path/export` — zip the current data folder to `out`. Read-only
+/// `POST /api/data-path/export` — zip the current data folder to `out`, encrypted
+/// under the request's `passphrase` (refused without one). Read-only
 /// on the data folder, so it runs online (no restart). Import/restore is offline
 /// (the `data-path import` subcommand) because it overwrites the live DB files.
 #[utoipa::path(
@@ -147,12 +153,20 @@ pub(super) async fn export_data_path(
             .into_response();
     }
     let out = std::path::PathBuf::from(&req.out);
+    let passphrase = req.passphrase;
     let res = tokio::task::spawn_blocking(move || {
-        crate::data_path::export_zip(&crate::paths::ryu_dir(), &out)
+        crate::data_path::export_zip(&crate::paths::ryu_dir(), &out, &passphrase)
     })
     .await;
     match res {
-        Ok(Ok(bytes)) => Json(json!({ "ok": true, "bytes": bytes })).into_response(),
+        Ok(Ok(bytes)) => {
+            Json(json!({ "ok": true, "bytes": bytes, "encrypted": true })).into_response()
+        }
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::InvalidInput => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": e.to_string() })),
+        )
+            .into_response(),
         Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "ok": false, "error": e.to_string() })),

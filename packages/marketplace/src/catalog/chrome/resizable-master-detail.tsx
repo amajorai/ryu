@@ -1,22 +1,42 @@
+import {
+	isNativeNumber,
+	isNativeObjectLike,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/chrome/resizable-master-detail.tsx
 //
-// Moved verbatim from apps/desktop/src/components/store/ResizableMasterDetail.tsx
+// Formerly apps/desktop/src/components/store/ResizableMasterDetail.tsx (since removed)
 // so the shared catalog sections (apps/models/skills) are self-contained and
-// render identically on desktop and web. The desktop path re-exports this.
+// render identically on desktop and web.
 
 import {
 	ResizableHandle,
 	ResizablePanel,
 	ResizablePanelGroup,
 } from "@ryu/ui/components/resizable.tsx";
-import { useCallback, useState } from "react";
+import { type ComponentProps, useCallback, useState } from "react";
+import { z } from "zod";
 
 const LIST_PANEL_ID = "list";
 const DETAIL_PANEL_ID = "detail";
 const DEFAULT_LIST_SIZE = 28;
 const DEFAULT_DETAIL_SIZE = 72;
 
-type Layout = Record<string, number>;
+type Layout = NonNullable<
+	ComponentProps<typeof ResizablePanelGroup>["defaultLayout"]
+>;
+
+// localStorage is decoded with native JSON.parse below. A stored layout is the
+// complete panel-id-to-number map owned by the installed panel group. Retain
+// that decoded object, including every own key, after validating all its cells.
+const storedLayoutSchema = z.custom<Layout>((value) => {
+	const object = z.instanceof(Object).safeParse(value);
+	return (
+		object.success &&
+		isNativeObjectLike(object.data) &&
+		!Array.isArray(object.data) &&
+		Object.values(object.data).every(isNativeNumber)
+	);
+});
 
 function loadLayout(storageKey: string): Layout | undefined {
 	try {
@@ -24,13 +44,9 @@ function loadLayout(storageKey: string): Layout | undefined {
 		if (!raw) {
 			return;
 		}
-		const parsed = JSON.parse(raw) as unknown;
-		if (
-			parsed &&
-			typeof parsed === "object" &&
-			typeof (parsed as Layout)[LIST_PANEL_ID] === "number"
-		) {
-			return parsed as Layout;
+		const parsed = storedLayoutSchema.safeParse(JSON.parse(raw));
+		if (parsed.success && isNativeNumber(parsed.data[LIST_PANEL_ID])) {
+			return parsed.data;
 		}
 	} catch {
 		// Corrupt or unavailable storage falls back to defaults.
@@ -88,7 +104,7 @@ export default function ResizableMasterDetail({
 			</ResizablePanel>
 			{/* No visible divider — the floating detail card's edge separates the
 			    panes. The handle stays draggable via its invisible hit area. */}
-			<ResizableHandle className="w-2 bg-transparent" />
+			<ResizableHandle appearance="transparent" className="w-2" />
 			<ResizablePanel
 				defaultSize={DEFAULT_DETAIL_SIZE}
 				id={DETAIL_PANEL_ID}

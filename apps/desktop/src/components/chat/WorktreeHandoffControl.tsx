@@ -60,7 +60,8 @@ export function WorktreeHandoffControl({
 	return (
 		<>
 			<Button
-				className="flex w-full items-center justify-center gap-1.5 border-border/70 text-muted-foreground text-xs hover:bg-muted/60 hover:text-foreground"
+				appearance="worktree-handoff"
+				className="flex w-full items-center justify-center"
 				data-testid="open-worktree-handoff"
 				onClick={() => setOpen(true)}
 				type="button"
@@ -72,10 +73,10 @@ export function WorktreeHandoffControl({
 
 			<Dialog onOpenChange={setOpen} open={open}>
 				<DialogContent
-					className="gap-5 px-6 py-7 sm:max-w-[31.5rem]"
+					appearance="worktree-handoff"
 					data-testid="worktree-handoff-dialog"
 				>
-					<DialogHeader className="gap-2 pr-8">
+					<DialogHeader purpose="marketplace-guide">
 						<div className="flex items-center gap-3">
 							<HugeiconsIcon
 								aria-hidden
@@ -83,11 +84,11 @@ export function WorktreeHandoffControl({
 								icon={FolderTreeIcon}
 								strokeWidth={1.7}
 							/>
-							<DialogTitle className="text-xl leading-7">
+							<DialogTitle typography="explanation">
 								Hand off chat to worktree
 							</DialogTitle>
 						</div>
-						<DialogDescription className="leading-6">
+						<DialogDescription>
 							Create and check out a branch in a new worktree to continue
 							working in parallel.
 						</DialogDescription>
@@ -99,7 +100,6 @@ export function WorktreeHandoffControl({
 						</label>
 						<Input
 							autoFocus
-							className="h-11 text-sm"
 							id={inputId}
 							onChange={(event) => setDraftBranchName(event.target.value)}
 							onKeyDown={(event) => {
@@ -109,6 +109,7 @@ export function WorktreeHandoffControl({
 								}
 							}}
 							placeholder="codex/my-feature"
+							purpose="worktree-branch"
 							spellCheck={false}
 							value={draftBranchName}
 						/>
@@ -133,7 +134,7 @@ export function WorktreeHandoffControl({
 					)}
 
 					<Button
-						className="h-13 w-full text-base"
+						className="h-13 w-full"
 						disabled={!trimmedBranchName}
 						onClick={handleHandOff}
 						type="button"

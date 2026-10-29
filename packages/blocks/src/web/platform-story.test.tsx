@@ -13,7 +13,7 @@ test("platform story exposes the hierarchy, integration paths, capabilities, and
 		"Core",
 		"Gateway",
 		"Bot",
-		"Console",
+		"Agent",
 		"Apps",
 		"Gateway endpoint",
 		"ACP + A2A",

@@ -1,0 +1,15 @@
+[data-calendar-event] {
+	top: var(--calendar-event-top);
+	left: var(--calendar-event-left);
+	width: var(--calendar-event-width);
+	height: var(--calendar-event-height);
+}
+[data-calendar-now] {
+	top: var(--calendar-event-top);
+}
+[data-calendar-hour] {
+	height: var(--calendar-hour-height);
+}
+[data-calendar-heading] {
+	padding-right: var(--scrollbar, 0);
+}

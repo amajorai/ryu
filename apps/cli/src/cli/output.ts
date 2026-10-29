@@ -1,17 +1,42 @@
 // Formatting helpers for the non-interactive `ryu` CLI: a minimal column table for
-// human output and the typed-lifecycle-error renderer so a 409 (dependents /
-// built-in / grants / gateway-down) reads as a clear sentence, never a raw dump.
+// human output and the typed-error renderers so a 409 (dependents / built-in /
+// grants / gateway-down) or the control plane's second-factor refusal reads as a
+// clear sentence, never a raw dump.
 
-import type { AppLifecycleError } from "@ryuhq/core-client/plugins";
+import {
+	isMfaEnrollmentRequiredError,
+	MFA_ENROLLMENT_REQUIRED_CODE,
+} from "@ryuhq/core-client/mfa-enrollment";
+import {
+	type AppLifecycleError,
+	dependencyErrorSchema,
+} from "@ryuhq/core-client/plugins";
+import { z } from "zod";
+import {
+	MFA_ENROLLMENT_SETUP_URL,
+	mfaEnrollmentCommandMessage,
+} from "../core/mfaEnrollment.ts";
+import { accessRefusalHint } from "../core/native-errors.ts";
+import { tr } from "../i18n/translate.ts";
+import { localizedTextOf, renderLocalized } from "./localizedText.ts";
+
+/** Terminal columns a cell occupies, so CJK and emoji cells keep alignment. */
+function displayWidth(value: string): number {
+	return Bun.stringWidth(value);
+}
 
 /** Render a header row + body rows as a left-aligned, space-padded table. */
 export function formatTable(headers: string[], rows: string[][]): string {
 	const widths = headers.map((h, i) =>
-		Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length))
+		Math.max(displayWidth(h), ...rows.map((r) => displayWidth(r[i] ?? "")))
 	);
 	const line = (cells: string[]): string =>
 		cells
-			.map((c, i) => (c ?? "").padEnd(widths[i] ?? 0))
+			.map((c, i) => {
+				const cell = c ?? "";
+				const pad = Math.max(0, (widths[i] ?? 0) - displayWidth(cell));
+				return `${cell}${" ".repeat(pad)}`;
+			})
 			.join("  ")
 			.trimEnd();
 	return [line(headers), ...rows.map(line)].join("\n");
@@ -22,45 +47,97 @@ export function truncate(s: string, max: number): string {
 	return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-/** The extra structured fields core-client attaches to a thrown lifecycle Error
- *  (`Object.assign(new Error(message), AppLifecycleError)`). */
-type LifecycleErrorLike = Error & Partial<AppLifecycleError>;
+const nativeErrorSchema = z.instanceof(Error);
+const lifecycleDetailsSchema = z.object({
+	dependencyError: dependencyErrorSchema.nullable().catch(null),
+	gatewayUnreachable: z.boolean().catch(false),
+	grantsDenied: z.boolean().catch(false),
+	builtIn: z.boolean().catch(false),
+	hint: z.string().nullable().catch(null),
+});
 
-/** True when a caught value carries the AppLifecycleError shape. */
-function isLifecycleError(e: unknown): e is LifecycleErrorLike {
+/** Core attaches these markers to its native lifecycle errors. */
+function hasLifecycleDetails(error: Error): boolean {
 	return (
-		e instanceof Error &&
-		("dependencyError" in e ||
-			"gatewayUnreachable" in e ||
-			"grantsDenied" in e ||
-			"builtIn" in e)
+		"dependencyError" in error ||
+		"gatewayUnreachable" in error ||
+		"grantsDenied" in error ||
+		"builtIn" in error
 	);
 }
 
-/** A human-readable one-line message for a caught error. The lifecycle `.message`
- *  is already the actionable sentence (describeDependencyError / grants / gateway);
- *  we append Core's `hint` when present. */
-export function formatError(e: unknown): string {
-	if (isLifecycleError(e)) {
-		return e.hint ? `${e.message} (${e.hint})` : e.message;
+/**
+ * Parse caught native errors before displaying Core's optional lifecycle hint.
+ * Human output only: an error built with `localize` renders its whole sentence
+ * in the CLI locale, a message that is known UI copy (a static `Error`/
+ * `UsageError` sentence the extractor collected) is looked up in the catalog,
+ * and anything else, such as a server's own text, stays as sent. `--json` uses
+ * {@link errorToJson}, which keeps the English `message`.
+ */
+export function formatError(
+	error: Parameters<typeof nativeErrorSchema.safeParse>[0]
+): string {
+	const parsed = nativeErrorSchema.safeParse(error);
+	if (!parsed.success) {
+		return String(error);
 	}
-	if (e instanceof Error) {
-		return e.message;
+	if (isMfaEnrollmentRequiredError(parsed.data)) {
+		return tr(mfaEnrollmentCommandMessage());
 	}
-	return String(e);
+	const refusal = accessRefusalHint(parsed.data);
+	if (refusal) {
+		return tr(refusal.hint);
+	}
+	const localized = localizedTextOf(parsed.data);
+	const message = localized
+		? renderLocalized(localized)
+		: tr(parsed.data.message);
+	if (hasLifecycleDetails(parsed.data)) {
+		const details = lifecycleDetailsSchema.parse(parsed.data);
+		return details.hint ? `${message} (${tr(details.hint)})` : message;
+	}
+	return message;
 }
 
-/** A machine-readable object for a caught error under `--json`. */
-export function errorToJson(e: unknown): Record<string, unknown> {
-	if (isLifecycleError(e)) {
+interface CliErrorEnvelope {
+	builtIn?: AppLifecycleError["builtIn"];
+	/** Machine-readable reason, set for the second-factor and access refusals. */
+	code?: string;
+	dependencyError?: AppLifecycleError["dependencyError"];
+	error: string;
+	gatewayUnreachable?: AppLifecycleError["gatewayUnreachable"];
+	grantsDenied?: AppLifecycleError["grantsDenied"];
+	hint?: AppLifecycleError["hint"];
+	/** The website page that resolves `code`. */
+	setupUrl?: string;
+}
+
+/** A machine-readable envelope for a caught error under `--json`. */
+export function errorToJson(
+	error: Parameters<typeof nativeErrorSchema.safeParse>[0]
+): CliErrorEnvelope {
+	const parsed = nativeErrorSchema.safeParse(error);
+	if (!parsed.success) {
+		return { error: String(error) };
+	}
+	if (isMfaEnrollmentRequiredError(parsed.data)) {
 		return {
-			error: e.message,
-			dependencyError: e.dependencyError ?? null,
-			gatewayUnreachable: e.gatewayUnreachable ?? false,
-			grantsDenied: e.grantsDenied ?? false,
-			builtIn: e.builtIn ?? false,
-			hint: e.hint ?? null,
+			code: MFA_ENROLLMENT_REQUIRED_CODE,
+			error: mfaEnrollmentCommandMessage(),
+			setupUrl: MFA_ENROLLMENT_SETUP_URL,
 		};
 	}
-	return { error: e instanceof Error ? e.message : String(e) };
+	const refusal = accessRefusalHint(parsed.data);
+	if (refusal) {
+		return {
+			code: refusal.code,
+			error: parsed.data.message,
+			hint: refusal.hint,
+		};
+	}
+	if (hasLifecycleDetails(parsed.data)) {
+		const details = lifecycleDetailsSchema.parse(parsed.data);
+		return { error: parsed.data.message, ...details };
+	}
+	return { error: parsed.data.message };
 }

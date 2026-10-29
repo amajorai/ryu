@@ -45,7 +45,7 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useFullAccessSelectionGuard } from "@ryu/blocks/composer/full-access-warning";
+import { useFullAccessSelectionGuard } from "@ryu/blocks/composer/full-access-warning.tsx";
 import { SvglIcon } from "@ryu/blocks/web/svgl-icon.tsx";
 import { AgentTitleBadge } from "@ryu/ui/components/agent-title-badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -72,6 +72,7 @@ import type {
 	ComposerSettingsSection,
 } from "@/components/agent-elements/input/composer-settings-menu.tsx";
 import { EffortSliderRow } from "@/components/agent-elements/input/effort-slider-row.tsx";
+import { tagFreeModels } from "@/components/agent-elements/input/free-model-tag.ts";
 import { groupModelItems } from "@/components/agent-elements/input/model-groups.ts";
 import { createModelMenuRenderer } from "@/components/agent-elements/input/model-menu-content.tsx";
 import { modelMenuItem } from "@/components/agent-elements/input/model-router.ts";
@@ -82,7 +83,9 @@ import {
 } from "@/components/agent-elements/input/provider-account-section.tsx";
 import { useProviderCommandNavigation } from "@/components/agent-elements/input/provider-command-dialog.tsx";
 import {
+	AccountUsageBadge,
 	ProviderCreditsBadge,
+	ProviderUsageBadge,
 	UsageBar,
 } from "@/components/agent-elements/input/usage-bar.tsx";
 import { useComposerAcpSections } from "@/components/agent-elements/input/use-composer-acp-sections.ts";
@@ -90,6 +93,7 @@ import type { ModelOption } from "@/components/agent-elements/types.ts";
 import { TabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
+import { useSubscriptions } from "@/src/hooks/useSubscriptions.ts";
 import { AgentCatalogLogo } from "@/src/lib/agent-catalog-logo.tsx";
 import { AgentAvatar, AgentLogo } from "@/src/lib/agent-logos.tsx";
 import type { AgentCatalogEntry, AgentSummary } from "@/src/lib/api/agents.ts";
@@ -109,6 +113,7 @@ import {
 } from "@/src/lib/interface-level.ts";
 import type { PickerRef } from "@/src/lib/picker-favorites.ts";
 import { svglForProvider } from "@/src/lib/provider-brand.tsx";
+import pickerStyles from "./universal-picker-body.module.css";
 
 /** A Pi provider row for the Providers section (built by `useUniversalPicker`). */
 export interface ProviderEntry {
@@ -143,6 +148,12 @@ export interface ProviderEntry {
 	discoveryProviderId?: string;
 	/** Engine key for the brand logo (anthropic / openai / gemini / …). */
 	engineKey: string;
+	/**
+	 * Models to tag "Free" in this row's model list: the Ryu Router models free
+	 * credit pays for, set only on the Ryu Router row and only while the user
+	 * holds free credit.
+	 */
+	freeModelIds?: ReadonlySet<string>;
 	/** Whether API-key accounts for this provider can be installed in the Gateway. */
 	gatewayAccountSupported?: boolean;
 	id: string;
@@ -158,16 +169,12 @@ export interface ProviderEntry {
 	 * are merged in on open for discovery-capable providers like OpenRouter). */
 	models: ComposerSettingItem[];
 	/**
-	 * This row's remaining POOL-RESTRICTED granted credit, when it is a pool-backed
-	 * Ryu row and the account holds a grant in that pool. Absent otherwise.
+	 * The user's FREE CREDIT (every active grant, summed; nearest expiry), shown
+	 * on the Ryu Router row. Absent when there is none.
 	 *
-	 * Strictly the pool's OWN money — the wallet's shared subscription/top-up
-	 * buckets are deliberately NOT folded in. Those are spendable once but would
-	 * appear on every pool row, so a user holding $12 shared and a $50 Frontier
-	 * grant would read three rows totalling $74 for $62 of actual credit. The
-	 * shared balance has its own single home (the account menu / node selector);
-	 * this row answers only "how much Frontier is left", which is the question a
-	 * segregated pool exists to make answerable.
+	 * Strictly granted money — the wallet's subscription/top-up buckets have
+	 * their own home (the account menu / node selector). Free credit is spent
+	 * automatically, first, on models tagged "Free".
 	 */
 	poolGrant?: {
 		/** When this pool's grant money lapses, ISO, or null if it does not. */
@@ -300,7 +307,7 @@ function SectionHeader({
 	tooltip?: string;
 }) {
 	return (
-		<div className="sticky top-0 z-10 flex items-center gap-1 border-border/40 border-b bg-popover/95 px-3 pt-2 pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wide backdrop-blur supports-backdrop-filter:bg-popover/80">
+		<div className="type-caption sticky top-0 z-10 flex items-center gap-1 border-border/40 border-b bg-popover/95 px-3 pt-2 pb-1 font-medium text-muted-foreground uppercase tracking-wide backdrop-blur supports-backdrop-filter:bg-popover/80">
 			<span>{label}</span>
 			{tooltip && (
 				<Tooltip>
@@ -315,9 +322,7 @@ function SectionHeader({
 					>
 						<HugeiconsIcon icon={HelpCircleIcon} size={13} />
 					</TooltipTrigger>
-					<TooltipContent className="max-w-56 text-xs">
-						{tooltip}
-					</TooltipContent>
+					<TooltipContent className="max-w-56">{tooltip}</TooltipContent>
 				</Tooltip>
 			)}
 		</div>
@@ -326,7 +331,7 @@ function SectionHeader({
 
 function LoadingRow({ text = "Detecting…" }: { text?: string }) {
 	return (
-		<div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-muted-foreground">
+		<div className="text-(length:--text-detail) flex items-center gap-2 px-2.5 py-2 text-muted-foreground">
 			<HugeiconsIcon
 				className="shrink-0 animate-spin"
 				icon={Loading03Icon}
@@ -352,13 +357,12 @@ function SettingItemRow({
 }) {
 	return (
 		<DropdownMenuItem
-			className={cn(
-				"flex-col items-start gap-0.5",
-				isActive && "bg-foreground/10"
-			)}
+			active={isActive}
+			className="flex-col items-start"
 			closeOnClick={false}
 			key={item.id}
 			onClick={() => onSelect(item.id)}
+			spacing="tight"
 		>
 			<span className="flex w-full items-center gap-2.5">
 				<span className={cn("flex-1 truncate", decoClassName)}>
@@ -476,12 +480,12 @@ function SettingSub({ section }: { section: ComposerSettingsSection }) {
 	return (
 		<DropdownMenuSub>
 			<DropdownMenuSubTrigger>
-				<span className="flex-1 text-[13px] text-muted-foreground">
+				<span className="text-(length:--text-detail) flex-1 text-muted-foreground">
 					{section.label}
 				</span>
 				<span
 					className={cn(
-						"flex max-w-[140px] items-center gap-1.5 text-[13px] text-muted-foreground",
+						"text-(length:--text-detail) flex max-w-[140px] items-center gap-1.5 text-muted-foreground",
 						!loadingEmpty && activeDeco?.className
 					)}
 				>
@@ -515,7 +519,7 @@ function SettingSub({ section }: { section: ComposerSettingsSection }) {
 				    and unreachable. */}
 			<DropdownMenuSubContent
 				className={cn(
-					"max-h-80 min-w-[220px] max-w-[300px] p-0",
+					"max-h-80 min-w-[220px] max-w-[300px]",
 					section.renderContent ? "overflow-hidden" : "overflow-y-auto"
 				)}
 			>
@@ -567,7 +571,11 @@ function UseTargetItem({
 		);
 	}
 	return (
-		<DropdownMenuItem className="gap-2" closeOnClick={false} onClick={onSelect}>
+		<DropdownMenuItem
+			closeOnClick={false}
+			onClick={onSelect}
+			spacing="comfortable"
+		>
 			<HugeiconsIcon
 				className={cn(
 					"shrink-0",
@@ -587,6 +595,39 @@ function UseTargetItem({
 				/>
 			)}
 		</DropdownMenuItem>
+	);
+}
+
+/**
+ * One external ACP agent's sign-in accounts (sealed vault, labels only). Fetched
+ * lazily: it mounts only inside an open agent submenu, for the active agent as
+ * well as any other. For the managed Pi agent these are its provider accounts;
+ * for any other agent its native or opaque sign-ins.
+ */
+function ExternalAgentAccounts({
+	agentId,
+	onRemoveAccount,
+	onSwitchAccount,
+}: {
+	agentId: string;
+	onRemoveAccount: (accountId: string) => void;
+	onSwitchAccount: (account: ProviderAccount) => void;
+}) {
+	const node = useActiveNode();
+	const accountsQuery = useQuery({
+		queryKey: ["agent-accounts", node.url, agentId],
+		queryFn: () => fetchAgentAccounts(toTarget(node), agentId),
+		staleTime: 30_000,
+	});
+	const accounts: ProviderAccount[] = accountsQuery.data ?? [];
+	return (
+		<ProviderAccountSection
+			accounts={accounts}
+			canSetGateway={false}
+			gatewaySupported={false}
+			onRemove={onRemoveAccount}
+			onSwitch={(account) => onSwitchAccount(account)}
+		/>
 	);
 }
 
@@ -652,16 +693,6 @@ function ExternalAgentSettings({
 		renderContent: modelSection.renderContent,
 		loading: modelSection.loading,
 	};
-	// The agent's sign-in accounts (sealed vault, labels only). Fetched lazily —
-	// this component only mounts when its submenu opens. For the managed Pi agent
-	// these are its provider accounts; for any other agent its opaque sign-ins.
-	const node = useActiveNode();
-	const accountsQuery = useQuery({
-		queryKey: ["agent-accounts", node.url, agent.id],
-		queryFn: () => fetchAgentAccounts(toTarget(node), agent.id),
-		staleTime: 30_000,
-	});
-	const accounts: ProviderAccount[] = accountsQuery.data ?? [];
 	return (
 		<>
 			<UseTargetItem
@@ -671,12 +702,10 @@ function ExternalAgentSettings({
 					onSelect();
 				}}
 			/>
-			<ProviderAccountSection
-				accounts={accounts}
-				canSetGateway={false}
-				gatewaySupported={false}
-				onRemove={onRemoveAccount}
-				onSwitch={(account) => onSwitchAccount(account)}
+			<ExternalAgentAccounts
+				agentId={agent.id}
+				onRemoveAccount={onRemoveAccount}
+				onSwitchAccount={onSwitchAccount}
 			/>
 			{showModelSection && <SettingSub section={modelAsSection} />}
 			{showTuningSections &&
@@ -716,8 +745,9 @@ function ActionRow({
 }) {
 	return (
 		<DropdownMenuItem
-			className="flex-col items-start gap-0.5"
+			className="flex-col items-start"
 			onClick={onClick}
+			spacing="tight"
 		>
 			<span className="flex w-full items-center gap-2">
 				<HugeiconsIcon
@@ -775,6 +805,23 @@ function ProviderSubBody({
 }) {
 	const node = useActiveNode();
 	const interfaceLevel = useInterfaceLevel();
+	// Per-account usage for a provider with several saved logins, from the same
+	// snapshot the row badge reads (this body only mounts while open).
+	const accountUsage = useSubscriptions({
+		enabled:
+			provider.configured &&
+			provider.authKind === "subscription" &&
+			!provider.managed &&
+			(provider.accounts?.length ?? 0) > 1,
+		providerId: provider.id,
+		usage: "refresh",
+	});
+	const usageProvider = accountUsage.data?.providers.find(
+		(entry) => entry.providerId === provider.id
+	);
+	const usageAccounts = usageProvider?.capabilities.accountUsage
+		? usageProvider.accounts
+		: [];
 	const showModelSection = forceModelPicker || showsModelPicker(interfaceLevel);
 	const showTuningSections = showsComposerTuning(interfaceLevel);
 	const [customBrowserModelId, setCustomBrowserModelId] = useState("");
@@ -831,10 +878,11 @@ function ProviderSubBody({
 		for (const it of provider.models) {
 			push(it.id, it.name);
 		}
-		return out;
+		return tagFreeModels(out, provider.freeModelIds);
 	}, [
 		discovery.data,
 		provider.currentModel,
+		provider.freeModelIds,
 		provider.modelOverrides,
 		provider.models,
 	]);
@@ -948,6 +996,24 @@ function ProviderSubBody({
 				onRemove={onRemoveAccount}
 				onSwitch={onSwitchAccount}
 			/>
+			{usageAccounts.length > 1 ? (
+				<section aria-label="Usage by account" className="space-y-1 px-3 py-2">
+					<p className="type-caption text-muted-foreground">Usage by account</p>
+					<ul className="space-y-0.5">
+						{usageAccounts.map((account) => (
+							<li
+								className="flex items-center justify-between gap-2 text-xs"
+								key={account.accountId}
+							>
+								<span className="truncate">
+									{account.label ?? "Saved account"}
+								</span>
+								<AccountUsageBadge account={account} />
+							</li>
+						))}
+					</ul>
+				</section>
+			) : null}
 			{/* Same interface-mode gate as the external-agent body above: Ryu Work
 			    offers the provider itself and nothing to tune inside it. */}
 			{showModelSection && <SettingSub section={modelSection} />}
@@ -987,6 +1053,34 @@ function ProviderSubBody({
 				<SettingSub section={thinkingSection} />
 			)}
 		</>
+	);
+}
+
+/**
+ * A configured subscription provider row's usage: the same bar an ACP agent
+ * row shows for one saved login, or the active login's number with every login
+ * in the tooltip when there are several. Which providers can report
+ * per-account usage comes from Core's subscriptions listing (no usage read, one
+ * shared request for every row); until it loads, the row stays quiet rather
+ * than guessing.
+ */
+function SubscriptionProviderUsage({ provider }: { provider: ProviderEntry }) {
+	const listing = useSubscriptions({ usage: "none" });
+	const listed = listing.data?.providers.find(
+		(entry) => entry.providerId === provider.id
+	);
+	if (
+		!supportsSubscriptionProviderUsage({
+			...provider,
+			accountUsage: listed?.capabilities.accountUsage,
+		})
+	) {
+		return null;
+	}
+	return (listed?.accounts.length ?? 0) > 1 ? (
+		<ProviderUsageBadge className="shrink-0" providerId={provider.id} />
+	) : (
+		<UsageBar agentId={provider.id} className="shrink-0" />
 	);
 }
 
@@ -1043,18 +1137,18 @@ function TargetSub({
 
 	return (
 		<DropdownMenuSub>
-			<DropdownMenuSubTrigger className={cn(isActive && "bg-foreground/10")}>
+			<DropdownMenuSubTrigger active={isActive}>
 				<span className="flex min-w-0 flex-1 items-center gap-2">
 					{glyph ? (
 						<AgentAvatar
-							className="size-4 shrink-0 rounded-full object-contain"
+							className="size-4 shrink-0 object-contain"
 							engine={engineKey}
 							glyph={glyph}
 							size="16px"
 						/>
 					) : avatarUrl ? (
-						// biome-ignore lint/performance/noImgElement: Tauri/Vite, data URL avatar
-						// biome-ignore lint/correctness/useImageSize: sized via class
+						// Tauri/Vite, data URL avatar
+						// sized via class
 						<img
 							alt=""
 							className="size-4 shrink-0 rounded-full object-cover"
@@ -1086,7 +1180,10 @@ function TargetSub({
 					/>
 				)}
 			</DropdownMenuSubTrigger>
-			<DropdownMenuSubContent className="max-h-96 min-w-[220px] max-w-[320px] overflow-y-auto p-1">
+			<DropdownMenuSubContent
+				className="max-h-96 min-w-[220px] max-w-[320px] overflow-y-auto"
+				data-desktop-picker-inset="true"
+			>
 				{children}
 			</DropdownMenuSubContent>
 		</DropdownMenuSub>
@@ -1094,10 +1191,10 @@ function TargetSub({
 }
 
 /**
- * A Ryu pool row's remaining granted credit, in dollars, on the picker row.
+ * The user's free credit, in dollars, on the Ryu Router row.
  *
- * The number is the pool's own segregated grant balance and nothing else (see
- * `ProviderEntry.poolGrant`). Campaign grants lapse, so when this money has a
+ * The number is granted money and nothing else (see `ProviderEntry.poolGrant`).
+ * Campaign grants lapse, so when this money has a
  * date the badge wears the shared expiry urgency hue and the tooltip says when —
  * the same convention the composer's banked-reset timeline uses, from the same
  * helpers, so two "expires in" readings on one screen can't disagree.
@@ -1116,8 +1213,8 @@ function PoolGrantBadge({
 			<TooltipTrigger
 				render={
 					<span
-						aria-label={`${label}: ${amount} of granted credit left`}
-						className="flex shrink-0 items-center gap-1 font-mono text-[10px] text-muted-foreground/70 tabular-nums"
+						aria-label={`${label}: ${amount} of free credit left`}
+						className="type-compact flex shrink-0 items-center gap-1 font-mono text-muted-foreground/70 tabular-nums"
 					/>
 				}
 			>
@@ -1131,16 +1228,14 @@ function PoolGrantBadge({
 			</TooltipTrigger>
 			<TooltipContent>
 				<div className="flex flex-col gap-0.5 text-xs">
-					<span className="font-medium">
-						{amount} of {label} credit left
-					</span>
+					<span className="font-medium">{amount} of free credit left</span>
 					{expiry ? (
 						<span className="text-muted-foreground">
 							Expires {formatExpiryDate(expiry)} · {formatCountdown(expiry)}
 						</span>
 					) : null}
 					<span className="text-muted-foreground">
-						Only spendable on {label}.
+						Used automatically on models marked Free.
 					</span>
 				</div>
 			</TooltipContent>
@@ -1159,24 +1254,25 @@ function AvailableAgentRow({
 	onInstall: () => void;
 }) {
 	return (
-		<div className="flex items-center gap-2 rounded-md px-2 py-1.5">
-			<AgentCatalogLogo
-				className="size-4 shrink-0 opacity-50"
-				entry={entry}
-				size="16px"
-			/>
-			<span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
+		<div
+			className={cn(
+				"flex items-center gap-2 rounded-md px-2 py-1.5",
+				pickerStyles.availableAgent
+			)}
+		>
+			<AgentCatalogLogo className="size-4 shrink-0" entry={entry} size="16px" />
+			<span className="text-(length:--text-detail) min-w-0 flex-1 truncate text-muted-foreground">
 				{entry.name}
 			</span>
 			<Button
-				className="h-6 shrink-0 gap-1 px-2 text-xs"
+				className="shrink-0"
 				disabled={!entry.available}
 				loading={installing}
 				onClick={(e) => {
 					e.stopPropagation();
 					onInstall();
 				}}
-				size="sm"
+				size="tiny"
 				type="button"
 				variant="ghost"
 			>
@@ -1202,15 +1298,14 @@ function AutoTargetRow({
 }) {
 	return (
 		<DropdownMenuItem
-			className={cn(
-				"min-w-0 flex-col items-start gap-0.5",
-				isActive && "bg-foreground/10"
-			)}
+			active={isActive}
+			className="min-w-0 flex-col items-start"
 			closeOnClick={false}
 			onClick={onSelect}
+			spacing="tight"
 		>
 			<span className="flex w-full items-center gap-2">
-				<IconGitBranch className="size-4 shrink-0 text-purple-500" />
+				<IconGitBranch className="size-4 shrink-0 text-chart-4" />
 				<span className="flex-1 truncate font-medium">Auto</span>
 				{isActive && (
 					<HugeiconsIcon
@@ -1303,7 +1398,7 @@ function RecentEffortMeter({ effort }: { effort?: string }) {
 	return (
 		<span
 			aria-label={`Effort: ${label}`}
-			className="composer-effort-meter inline-flex h-4 shrink-0 items-end gap-px text-primary"
+			className="inline-flex h-4 shrink-0 items-end gap-px text-primary"
 			data-composer-effort-meter="true"
 			role="img"
 			title={`Effort: ${label}`}
@@ -1312,11 +1407,12 @@ function RecentEffortMeter({ effort }: { effort?: string }) {
 				<span
 					aria-hidden="true"
 					className={cn(
-						"w-1 rounded-[1px]",
+						"w-1",
+						pickerStyles.effortPip,
 						index <= activeIndex ? "bg-current" : "bg-muted-foreground/25"
 					)}
+					data-effort-index={index}
 					key={level}
-					style={{ height: `${5 + index * 2}px` }}
 				/>
 			))}
 		</span>
@@ -1356,8 +1452,9 @@ function RecentModelRow({
 			</span>
 			{onRemove ? (
 				<Button
+					appearance="picker-remove"
 					aria-label={`Remove ${model.name} from recent`}
-					className="size-6 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/recent:opacity-100"
+					className="shrink-0"
 					onClick={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
@@ -1375,7 +1472,7 @@ function RecentModelRow({
 	if (commandNavigation) {
 		return (
 			<CommandItem
-				className="group/recent min-w-0 gap-2"
+				className="group/recent min-w-0"
 				data-testid={testId ?? "recent-model-row"}
 				onSelect={() => onSelect(modelRef)}
 				value={`recent ${model.name} ${provider.label}`}
@@ -1386,10 +1483,11 @@ function RecentModelRow({
 	}
 	return (
 		<DropdownMenuItem
-			className="group/recent min-w-0 gap-2"
+			className="group/recent min-w-0"
 			closeOnClick={false}
 			data-testid={testId ?? "recent-model-row"}
 			onClick={() => onSelect(modelRef)}
+			spacing="comfortable"
 		>
 			{content}
 		</DropdownMenuItem>
@@ -1413,7 +1511,7 @@ function RecentAgentRow({
 	const content = (
 		<>
 			<AgentAvatar
-				className="size-4 shrink-0 rounded-full object-contain"
+				className="size-4 shrink-0 object-contain"
 				engine={agent.engine ?? agent.id}
 				glyph={agent.avatarGlyph}
 				size="16px"
@@ -1421,8 +1519,9 @@ function RecentAgentRow({
 			<span className="min-w-0 flex-1 truncate">{agent.name}</span>
 			{onRemove ? (
 				<Button
+					appearance="picker-remove"
 					aria-label={`Remove ${agent.name} from recent`}
-					className="size-6 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/recent:opacity-100"
+					className="shrink-0"
 					onClick={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
@@ -1440,7 +1539,7 @@ function RecentAgentRow({
 	if (commandNavigation) {
 		return (
 			<CommandItem
-				className="group/recent min-w-0 gap-2"
+				className="group/recent min-w-0"
 				data-testid={testId ?? "recent-agent-row"}
 				onSelect={() => onSelect(agentRef)}
 				value={`recent ${agent.name}`}
@@ -1451,10 +1550,11 @@ function RecentAgentRow({
 	}
 	return (
 		<DropdownMenuItem
-			className="group/recent min-w-0 gap-2"
+			className="group/recent min-w-0"
 			closeOnClick={false}
 			data-testid={testId ?? "recent-agent-row"}
 			onClick={() => onSelect(agentRef)}
+			spacing="comfortable"
 		>
 			{content}
 		</DropdownMenuItem>
@@ -1471,6 +1571,7 @@ export function UniversalPickerBody({
 	mode?: "agents" | "models" | "all";
 }) {
 	const [query, setQuery] = useState("");
+	const commandNavigation = useProviderCommandNavigation();
 	const q = query.trim().toLowerCase();
 	// Read the tabs context RAW rather than through `useTabsContext`, which throws
 	// outside a provider. This body is also mounted by settings-shaped fields
@@ -1513,7 +1614,6 @@ export function UniversalPickerBody({
 	} = data;
 	const showAgents = mode !== "models";
 	const showProviders = mode !== "agents";
-
 	// Total rows across all sections — the search box only earns its space once the
 	// list is long enough to need filtering. Counts the FLATTENED search space
 	// (providers, installable agents), not the compact root.
@@ -1578,7 +1678,7 @@ export function UniversalPickerBody({
 			providerId={provider.id}
 			trailing={
 				provider.id === "browser" ? (
-					<span className="shrink-0 text-[11px] text-muted-foreground">
+					<span className="type-caption shrink-0 text-muted-foreground">
 						{provider.status === "ready"
 							? "Ready"
 							: provider.status === "preparing"
@@ -1587,8 +1687,10 @@ export function UniversalPickerBody({
 									? "Retry"
 									: "Browser"}
 					</span>
-				) : supportsSubscriptionProviderUsage(provider) ? (
-					<UsageBar agentId={provider.id} className="shrink-0" />
+				) : provider.authKind === "subscription" &&
+					provider.configured &&
+					!provider.managed ? (
+					<SubscriptionProviderUsage provider={provider} />
 				) : provider.poolGrant ? (
 					// A pool row shows the pool's granted credit; a BYOK row shows what's
 					// left on the key the user pasted. Never both — a pool has no key and
@@ -1647,6 +1749,19 @@ export function UniversalPickerBody({
 							label={`Use ${agent.name}`}
 							onSelect={() => onSelectAgent(agent.id)}
 						/>
+						<ExternalAgentAccounts
+							agentId={agent.id}
+							onRemoveAccount={(accountId) =>
+								onRemoveAgentAccount(agent.id, accountId)
+							}
+							onSwitchAccount={(account) =>
+								onSwitchAgentAccount(
+									agent.id,
+									account.accountId,
+									account.provider
+								)
+							}
+						/>
 						{activeSections.map((section) => (
 							<SettingSub key={section.key} section={section} />
 						))}
@@ -1679,25 +1794,18 @@ export function UniversalPickerBody({
 
 	const customAgentRow = (agent: AgentSummary) => {
 		const isActive = agent.id === data.activeAgentId;
-		return (
-			<DropdownMenuItem
-				className={cn("gap-2", isActive && "bg-foreground/10")}
-				closeOnClick={false}
-				key={agent.id}
-				onClick={() => {
-					onSelectAgent(agent.id);
-				}}
-			>
+		const content = (
+			<>
 				{agent.avatarGlyph ? (
 					<AgentAvatar
-						className="size-4 shrink-0 rounded-full object-contain"
+						className="size-4 shrink-0 object-contain"
 						engine={agent.engine ?? null}
 						glyph={agent.avatarGlyph}
 						size="16px"
 					/>
 				) : agent.avatarUrl ? (
-					// biome-ignore lint/performance/noImgElement: Tauri/Vite, data URL avatar
-					// biome-ignore lint/correctness/useImageSize: sized via class
+					// Tauri/Vite, data URL avatar
+					// sized via class
 					<img
 						alt=""
 						className="size-4 shrink-0 rounded-full object-cover"
@@ -1722,6 +1830,34 @@ export function UniversalPickerBody({
 						strokeWidth={2}
 					/>
 				)}
+			</>
+		);
+		if (commandNavigation) {
+			return (
+				<CommandItem
+					data-picker-active={isActive}
+					key={agent.id}
+					onSelect={() => {
+						onSelectAgent(agent.id);
+						commandNavigation.close();
+					}}
+					value={`agent ${agent.name} ${agent.id}`}
+				>
+					{content}
+				</CommandItem>
+			);
+		}
+		return (
+			<DropdownMenuItem
+				active={isActive}
+				closeOnClick={false}
+				key={agent.id}
+				onClick={() => {
+					onSelectAgent(agent.id);
+				}}
+				spacing="comfortable"
+			>
+				{content}
 			</DropdownMenuItem>
 		);
 	};
@@ -1786,7 +1922,6 @@ export function UniversalPickerBody({
 				<div className="px-2 pb-1">
 					<Input
 						aria-label="Search agents, providers and models"
-						className="h-8 border-0 bg-transparent px-1 text-[13px] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
 						onChange={(e) => setQuery(e.target.value)}
 						onClick={(e) => e.stopPropagation()}
 						onKeyDown={(e) => e.stopPropagation()}
@@ -1794,11 +1929,15 @@ export function UniversalPickerBody({
 						placeholder="Search agents, providers…"
 						spellCheck={false}
 						value={query}
+						variant="picker-search"
 					/>
 				</div>
 			)}
 
 			<div className="min-h-0 flex-1">
+				{mode === "models" && activeModelSection && (
+					<SettingSub section={activeModelSection} />
+				)}
 				{nothingMatches && (
 					<p className="px-3 py-4 text-center text-muted-foreground text-xs">
 						No matches for &ldquo;{query.trim()}&rdquo;
@@ -1897,11 +2036,11 @@ export function UniversalPickerBody({
 							openAgentsCatalog &&
 							availableExternal.length > 0 && (
 								<DropdownMenuItem
-									className="gap-2"
 									onClick={() => {
 										openAgentsCatalog();
 										close();
 									}}
+									spacing="comfortable"
 								>
 									<HugeiconsIcon
 										className="shrink-0 text-muted-foreground"
@@ -1921,12 +2060,13 @@ export function UniversalPickerBody({
 						<SectionHeader label="Groups" />
 						{filteredTeams.map((team) => (
 							<DropdownMenuItem
-								className={cn("gap-2", team.isActive && "bg-foreground/10")}
+								active={team.isActive}
 								closeOnClick={false}
 								key={team.id}
 								onClick={() => {
 									onSelectTeam(team.id);
 								}}
+								spacing="comfortable"
 							>
 								<AgentLogo
 									className="size-4 shrink-0"
@@ -1952,11 +2092,11 @@ export function UniversalPickerBody({
 				    somewhere" and collided with the row above it. */}
 				{showAgents && onCreateAgent && !q && (
 					<DropdownMenuItem
-						className="gap-2"
 						onClick={() => {
 							onCreateAgent();
 							close();
 						}}
+						spacing="comfortable"
 					>
 						<HugeiconsIcon
 							className="shrink-0 text-muted-foreground"

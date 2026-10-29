@@ -309,7 +309,7 @@ impl Default for Vad {
 // model's ONNX is not usable standalone (its feature extraction lives in a closed
 // precompiled native lib), so Silero VAD (fully open) is used instead.
 
-/// Filename of the Silero VAD ONNX model in `~/.ryu/models/`.
+/// Filename of the Silero VAD ONNX model in `<data dir>/models/vad/`.
 pub const SILERO_MODEL_FILE: &str = "silero_vad_v4.onnx";
 
 /// Default Silero VAD v4 model URL (snakers4/silero-vad, MIT/Apache). This is the
@@ -323,11 +323,15 @@ pub const SILERO_MODEL_URL: &str =
 pub const SILERO_MODEL_SHA256: &str =
     "a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28";
 
-/// Resolved path of the Silero VAD model on disk (`~/.ryu/models/…`). Resolves the
+/// Resolved path of the Silero VAD model on disk (`models/vad/silero_vad_v4.onnx`). Resolves the
 /// data dir through the installed [`VadHost`] (panics if the host is not yet set —
 /// only reachable post-boot).
 pub fn silero_model_path() -> std::path::PathBuf {
-    host().ryu_dir().join("models").join(SILERO_MODEL_FILE)
+    ryu_sidecar_runtime::layout::models_dir(
+        &host().ryu_dir(),
+        ryu_sidecar_runtime::layout::Modality::Vad,
+    )
+    .join(SILERO_MODEL_FILE)
 }
 
 /// Download spec for the Silero VAD model (used by onboarding). Honors the
@@ -380,7 +384,7 @@ pub mod silero {
     }
 
     impl SileroModel {
-        /// Load the model from `~/.ryu/models/silero_vad_v4.onnx`. Errors (missing
+        /// Load the model from `models/vad/silero_vad_v4.onnx`. Errors (missing
         /// file, bad model) propagate so [`super::Vad`] falls back to energy.
         pub fn load() -> Result<Self> {
             let path = silero_model_path();
@@ -419,6 +423,105 @@ pub mod silero {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "voice-vad")]
+    #[test]
+    #[ignore = "requires verified local voice assets; run explicitly with RYU_VOICE_PROOF_DIR"]
+    fn genuine_silero_inference_and_voice_endpointing_runtime_proof() {
+        struct ProofHost(Arc<std::sync::Mutex<PathBuf>>);
+        impl VadHost for ProofHost {
+            fn ryu_dir(&self) -> PathBuf {
+                self.0.lock().unwrap().clone()
+            }
+        }
+        let assets = PathBuf::from(std::env::var_os("RYU_VOICE_PROOF_DIR")
+            .expect("prepare STT runtime_assets/prepare.py and set RYU_VOICE_PROOF_DIR; missing assets never skip this proof"));
+        let missing = assets.join("nonexistent-vad-proof-directory");
+        assert!(!missing.exists());
+        let directory = Arc::new(std::sync::Mutex::new(missing));
+        set_global_host(Arc::new(ProofHost(directory.clone())));
+        assert!(
+            silero::SileroModel::load().is_err(),
+            "missing ONNX weights must fail strict engine initialization"
+        );
+        assert!(
+            matches!(Vad::new().probe, SpeechProbe::Energy),
+            "missing model must retain the documented fallback"
+        );
+
+        *directory.lock().unwrap() = assets.clone();
+        let mut reader = hound::WavReader::open(assets.join("jfk.wav"))
+            .expect("verified authentic speech fixture");
+        assert_eq!(reader.spec().sample_rate, VAD_RATE);
+        assert_eq!(reader.spec().channels, 1);
+        let speech = reader
+            .samples::<i16>()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let silence = vec![0_i16; VAD_RATE as usize * 2];
+        let mut strict = silero::SileroModel::load().expect("real Silero v4 ONNX weights must initialize; energy fallback is not a passing inference proof");
+        for hop in silence.chunks(HOP_SAMPLES) {
+            let probability = strict.probability(hop).expect("Silero silence inference");
+            assert!(
+                probability.is_finite() && (0.0..0.1).contains(&probability),
+                "silence probability {probability}"
+            );
+        }
+        let mut peak = 0.0_f32;
+        for hop in speech.chunks(HOP_SAMPLES) {
+            let probability = strict
+                .probability(hop)
+                .expect("Silero speech inference must never be replaced by energy");
+            assert!(probability.is_finite() && (0.0..=1.0).contains(&probability));
+            peak = peak.max(probability);
+        }
+        assert!(
+            peak > 0.8,
+            "real speech must rank above silence; peak={peak}"
+        );
+        let mut final_probability = 1.0;
+        for hop in silence.chunks(HOP_SAMPLES) {
+            final_probability = strict
+                .probability(hop)
+                .expect("Silero endpoint silence inference");
+        }
+        assert!(
+            final_probability < 0.1,
+            "speech state must decay during silence: {final_probability}"
+        );
+
+        let mut vad = Vad::new();
+        assert!(
+            matches!(vad.probe, SpeechProbe::Silero(_)),
+            "full voice path must use actual Silero, not silently pass on energy"
+        );
+        assert!(
+            vad.push(&silence).is_empty(),
+            "silence must not start a turn"
+        );
+        let mut events = Vec::new();
+        // Actual client frames rarely align to the model's 480-sample window
+        // or the voice gate's 256-sample hop.
+        for frame in speech.chunks(113) {
+            events.extend(vad.push(frame));
+        }
+        assert!(
+            events.contains(&VadEvent::SpeechStart),
+            "spoken JFK recording must start a voice turn"
+        );
+        events.extend(vad.push(&silence));
+        assert_eq!(
+            events.last(),
+            Some(&VadEvent::SpeechEnd),
+            "silence after speech must finish the turn"
+        );
+        assert!(!vad.in_speech());
+        vad.reset();
+        assert!(
+            vad.push(&silence).is_empty(),
+            "reset must not manufacture a new onset"
+        );
+    }
 
     /// Feed a sequence of probabilities one hop at a time; collect events.
     fn run(gate: &mut VadGate, probs: &[f32]) -> Vec<VadEvent> {

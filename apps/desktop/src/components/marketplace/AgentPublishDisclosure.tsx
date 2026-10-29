@@ -22,9 +22,11 @@ import {
 	Share08Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import type { ReactNode } from "react";
+import { AGENT_IDENTITY_MODE_OPTIONS } from "@/src/components/agents/AgentIdentityModePicker.tsx";
 import type {
 	AgentDescriptor,
 	AgentPublishNotes,
@@ -36,16 +38,17 @@ const MAX_CHIPS = 8;
 function ChipRow({ values }: { values: string[] }) {
 	const shown = values.slice(0, MAX_CHIPS);
 	const rest = values.length - shown.length;
+	const tl = useLiteralMessages();
 	return (
 		<div className="flex flex-wrap gap-1">
 			{shown.map((value) => (
-				<Badge className="font-normal" key={value} variant="outline">
+				<Badge key={value} typography="normal" variant="outline">
 					{value}
 				</Badge>
 			))}
 			{rest > 0 ? (
-				<Badge className="font-normal" variant="outline">
-					+{rest} more
+				<Badge typography="normal" variant="outline">
+					{tl("+{rest} more", { rest })}
 				</Badge>
 			) : null}
 		</div>
@@ -85,6 +88,7 @@ export function AgentPublishDisclosure({
 		(connection) => connection.provider
 	);
 	const avatarLabel = describeAvatar(descriptor);
+	const tl = useLiteralMessages();
 
 	return (
 		<div className="flex flex-col gap-3">
@@ -97,8 +101,10 @@ export function AgentPublishDisclosure({
 					<SharedRow label="Instructions">
 						{promptChars > 0 ? (
 							<span className="text-muted-foreground">
-								{formatNumber(promptChars)} characters, shared in full — read
-								them before publishing.
+								{tl(
+									"{characterCount} characters, shared in full — read them before publishing.",
+									{ characterCount: formatNumber(promptChars) }
+								)}
 							</span>
 						) : (
 							<span className="text-status-destructive">None</span>
@@ -112,6 +118,15 @@ export function AgentPublishDisclosure({
 								No preference — it runs on the installer's default.
 							</span>
 						)}
+					</SharedRow>
+					<SharedRow label="Identity">
+						<span>
+							{AGENT_IDENTITY_MODE_OPTIONS[descriptor.identity_mode].title}
+						</span>
+						<p className="mt-1 text-muted-foreground">
+							Whose accounts it works with, not which ones. Installers choose
+							which of their own accounts it may use.
+						</p>
 					</SharedRow>
 					<SharedRow label="Tools">
 						{descriptor.tools.length > 0 ? (
@@ -209,6 +224,7 @@ export function AgentPublishDisclosure({
 const STAYS_HERE = [
 	"API keys and provider credentials — an agent record never holds one.",
 	"Identity Vault profiles this agent is bound to.",
+	"Which of your accounts this agent may use (its account access).",
 	"The contents of your Spaces — every document, note, and file in them.",
 	"Stored memories and the memory scopes this agent can recall from.",
 	"Chat history, conversations, and anything this agent has run.",
@@ -238,6 +254,9 @@ function describeAvatar(descriptor: AgentDescriptor): string | null {
 		parts.push(
 			`an expressive ${avatar.expressive.expression ?? "random"} ghost avatar${avatar.expressive.animation ? ` with ${avatar.expressive.animation} animation` : ""}`
 		);
+	}
+	if (avatar.avatar_style) {
+		parts.push(`a Marketplace avatar style (${avatar.avatar_style.style})`);
 	}
 	if (avatar.avatar_url) {
 		parts.push("a linked image");

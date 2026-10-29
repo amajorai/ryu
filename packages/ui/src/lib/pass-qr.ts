@@ -13,10 +13,11 @@ const hex = ([red, green, blue]: Rgb): string =>
 		.map((channel) => channel.toString(16).padStart(2, "0"))
 		.join("")}`;
 
-const mix = (from: Rgb, to: Rgb, amount: number): Rgb =>
-	from.map((channel, index) =>
-		Math.round(channel + ((to[index] ?? channel) - channel) * amount)
-	) as [number, number, number];
+const mix = (from: Rgb, to: Rgb, amount: number): Rgb => [
+	Math.round(from[0] + (to[0] - from[0]) * amount),
+	Math.round(from[1] + (to[1] - from[1]) * amount),
+	Math.round(from[2] + (to[2] - from[2]) * amount),
+];
 
 /**
  * A QR palette that borrows the pass's seeded hue without sacrificing the

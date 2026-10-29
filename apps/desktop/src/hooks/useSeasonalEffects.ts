@@ -16,6 +16,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import {
 	getCurrentSeason,
 	getSeasonById,
+	SEASONS,
 	type SeasonalTheme,
 	type SeasonConfig,
 } from "@/src/components/layout/SeasonalEffects.tsx";
@@ -53,7 +54,7 @@ const themeListeners = new Set<() => void>();
 
 function isSeasonalThemeSetting(v: string | null): v is SeasonalThemeSetting {
 	return (
-		v === "auto" || (v !== null && getSeasonById(v as SeasonalTheme) !== null)
+		v === "auto" || (v !== null && SEASONS.some((season) => season.id === v))
 	);
 }
 

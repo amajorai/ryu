@@ -1,0 +1,22 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	.artwork {
+		background-image: url("/background.png");
+	}
+}
+
+.grid {
+	background-image:
+		linear-gradient(
+			color-mix(in srgb, var(--foreground) 3.5%, transparent) 1px,
+			transparent 1px
+		),
+		linear-gradient(
+			90deg,
+			color-mix(in srgb, var(--foreground) 3.5%, transparent) 1px,
+			transparent 1px
+		);
+	background-size: 28px 28px;
+}

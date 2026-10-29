@@ -23,8 +23,9 @@ export function VoiceInputButton({
 	if (isTranscribing) {
 		return (
 			<Button
+				appearance="dictation-pending"
 				aria-label="Transcribing"
-				className={cn("size-7 text-muted-foreground", className)}
+				className={cn(className)}
 				loading
 				size="icon"
 				title="Transcribing…"
@@ -36,11 +37,9 @@ export function VoiceInputButton({
 	if (isRecording) {
 		return (
 			<Button
+				appearance="dictation-recording"
 				aria-label="Stop recording"
-				className={cn(
-					"size-7 text-status-destructive hover:text-status-destructive",
-					className
-				)}
+				className={cn(className)}
 				onClick={onStop}
 				size="icon"
 				title="Stop recording"
@@ -53,11 +52,9 @@ export function VoiceInputButton({
 	}
 	return (
 		<Button
+			appearance="dictation-ready"
 			aria-label="Start voice input"
-			className={cn(
-				"size-7 text-muted-foreground hover:text-foreground",
-				className
-			)}
+			className={cn(className)}
 			disabled={disabled}
 			onClick={onStart}
 			size="icon"

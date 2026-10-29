@@ -4,6 +4,7 @@ import { useLocalizedString } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	AnimatePresence,
+	type MotionStyle,
 	type MotionValue,
 	motion,
 	type SpringOptions,
@@ -16,7 +17,6 @@ import {
 	cloneElement,
 	createContext,
 	isValidElement,
-	type ReactElement,
 	type ReactNode,
 	useContext,
 	useEffect,
@@ -25,6 +25,11 @@ import {
 	useState,
 } from "react";
 
+interface DockMotionStyle extends MotionStyle {
+	"--dock-height"?: MotionValue<string> | string;
+	"--dock-width"?: MotionValue<string>;
+}
+
 const DOCK_HEIGHT = 128;
 const DEFAULT_MAGNIFICATION = 80;
 const DEFAULT_DISTANCE = 150;
@@ -32,6 +37,7 @@ const DEFAULT_PANEL_HEIGHT = 64;
 const DEFAULT_ITEM_SIZE = 40;
 
 export interface DockProps {
+	appearance?: "default" | "os-desktop";
 	children: ReactNode;
 	className?: string;
 	distance?: number;
@@ -48,6 +54,7 @@ export interface DockItemProps {
 	"data-testid"?: string;
 	onClick?: () => void;
 	title?: string;
+	tone?: "default" | "inverse";
 }
 
 export interface DockLabelProps {
@@ -93,6 +100,7 @@ function useDock(): DockContextValue {
 export function Dock({
 	children,
 	className,
+	appearance = "default",
 	distance = DEFAULT_DISTANCE,
 	magnification = DEFAULT_MAGNIFICATION,
 	panelHeight = DEFAULT_PANEL_HEIGHT,
@@ -107,16 +115,20 @@ export function Dock({
 	);
 	const heightRow = useTransform(isHovered, [0, 1], [panelHeight, maxHeight]);
 	const height = useSpring(heightRow, spring);
+	const heightPx = useTransform(height, (value) => `${value}px`);
+	const wrapperStyle: DockMotionStyle = { "--dock-height": heightPx };
+	const panelStyle: DockMotionStyle = { "--dock-height": `${panelHeight}px` };
 
 	return (
 		<motion.div
-			className="mx-2 flex max-w-full items-end overflow-x-auto"
-			style={{ height, scrollbarWidth: "none" }}
+			className="mx-2 flex h-(--dock-height) max-w-full items-end overflow-x-auto [scrollbar-width:none]"
+			style={wrapperStyle}
 		>
 			<motion.div
 				aria-label={localizedDockLabel}
 				className={cn(
-					"mx-auto flex w-fit gap-2 rounded-2xl border border-white/15 bg-black/25 px-3 shadow-2xl backdrop-blur-2xl",
+					"mx-auto flex h-(--dock-height) w-fit gap-2 rounded-2xl border border-white/15 bg-black/25 px-3 shadow-2xl backdrop-blur-2xl",
+					appearance === "os-desktop" && "py-1.5",
 					className
 				)}
 				onMouseLeave={() => {
@@ -128,7 +140,7 @@ export function Dock({
 					mouseX.set(pageX);
 				}}
 				role="toolbar"
-				style={{ height: panelHeight }}
+				style={panelStyle}
 			>
 				<DockContext.Provider
 					value={{ distance, magnification, mouseX, spring }}
@@ -144,6 +156,7 @@ export function DockItem({
 	"aria-label": ariaLabel,
 	children,
 	className,
+	tone = "default",
 	"data-open": dataOpen,
 	"data-testid": dataTestId,
 	onClick,
@@ -165,11 +178,14 @@ export function DockItem({
 	);
 	const width = useSpring(widthTransform, spring);
 
+	const widthPx = useTransform(width, (value) => `${value}px`);
+	const itemStyle: DockMotionStyle = { "--dock-width": widthPx };
 	return (
 		<motion.div
 			aria-label={localizedAriaLabel}
 			className={cn(
-				"relative inline-flex aspect-square shrink-0 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-white/80",
+				"relative inline-flex aspect-square w-(--dock-width) shrink-0 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-white/80",
+				tone === "inverse" && "text-white/65 hover:text-white",
 				className
 			)}
 			data-open={dataOpen}
@@ -187,7 +203,7 @@ export function DockItem({
 			}}
 			ref={ref}
 			role="button"
-			style={{ width }}
+			style={itemStyle}
 			tabIndex={0}
 			title={localizedTitle}
 		>
@@ -196,12 +212,12 @@ export function DockItem({
 					return child;
 				}
 				if (child.type === DockLabel) {
-					return cloneElement(child as ReactElement<DockLabelProps>, {
+					return cloneElement(child, {
 						isHovered,
 					});
 				}
 				if (child.type === DockIcon) {
-					return cloneElement(child as ReactElement<DockIconProps>, {
+					return cloneElement(child, {
 						width,
 					});
 				}
@@ -226,7 +242,7 @@ export function DockLabel({ children, className, isHovered }: DockLabelProps) {
 				<motion.div
 					animate={{ opacity: 1, y: -10 }}
 					className={cn(
-						"absolute -top-6 left-1/2 w-fit -translate-x-1/2 whitespace-pre rounded-lg border border-white/15 bg-black/65 px-2 py-1 font-medium text-[11px] text-white shadow-xl backdrop-blur-xl",
+						"type-caption absolute -top-6 left-1/2 w-fit -translate-x-1/2 whitespace-pre rounded-lg border border-white/15 bg-black/65 px-2 py-1 font-medium text-white shadow-xl backdrop-blur-xl",
 						className
 					)}
 					exit={{ opacity: 0, y: 0 }}
@@ -248,12 +264,19 @@ export function DockIcon({
 }: DockIconProps) {
 	const fallbackWidth = useMotionValue(DEFAULT_ITEM_SIZE);
 	const itemWidth = width ?? fallbackWidth;
-	const iconWidth = useTransform(itemWidth, (value) => value * scale);
+	const iconWidth = useTransform(itemWidth, (value) => `${value * scale}px`);
+	const iconStyle: DockMotionStyle = {
+		"--dock-height": iconWidth,
+		"--dock-width": iconWidth,
+	};
 
 	return (
 		<motion.div
-			className={cn("flex items-center justify-center", className)}
-			style={{ height: iconWidth, width: iconWidth }}
+			className={cn(
+				"flex h-(--dock-height) w-(--dock-width) items-center justify-center",
+				className
+			)}
+			style={iconStyle}
 		>
 			{children}
 		</motion.div>

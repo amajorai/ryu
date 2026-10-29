@@ -1,3 +1,5 @@
+import { piConfigResponseSchema } from "@ryuhq/core-client/pi-config.ts";
+import { z } from "zod";
 // apps/desktop/src/lib/api/pi-config.ts
 //
 // Typed client for Core's Ryu-managed Pi configuration endpoints
@@ -9,7 +11,9 @@
 // "gateway" provider => Gateway-routed (governed egress, no keys stored in Pi).
 // Any other provider  => direct egress to that provider (a deliberate bypass).
 
+import type { PiProvider as CorePiProvider } from "@ryuhq/core-client/pi-config.ts";
 import { openSse, type SseMessage } from "@ryuhq/protocol/sse";
+import { piLoginEventSchema } from "./billing-login-stream-contracts.ts";
 import { type ApiTarget, apiUrl, request } from "./client.ts";
 
 /** The current Pi configuration. Never contains secrets. */
@@ -28,6 +32,12 @@ export interface PiConfig {
 
 /** A provider Pi supports, as surfaced by the catalog endpoint. */
 export interface PiProvider {
+	/** Core-advertised selection modes and account kinds for new conversations. */
+	accountRouting?: {
+		credentialKinds: ("api_key" | "oauth")[];
+		quotaObservations: boolean;
+		strategies: OAuthAccountStrategy[];
+	} | null;
 	/** Every account this provider holds in the sealed vault (labels only —
 	 *  never a credential). Lets the picker list + switch sign-ins. */
 	accounts?: PiAccount[];
@@ -41,6 +51,13 @@ export interface PiProvider {
 	authKind: string;
 	/** Whether a usable credential is already available (auth.json/env/models.json). */
 	configured: boolean;
+	connectionState?:
+		| "authorized"
+		| "identity-only"
+		| "reconnect-required"
+		| "unavailable"
+		| "disconnected"
+		| null;
 	/** The credit pool this provider's spend attributes to, or `""` for BYOK.
 	 *
 	 *  A SEGREGATED pool (`cloudflare`, `bedrock`) is where grants land — a
@@ -52,6 +69,10 @@ export interface PiProvider {
 	creditPool?: string;
 	/** True for user-defined custom providers from models.json. */
 	custom: boolean;
+	/** Ryu Router models free credit pays for (the picker's "Free" tag). Core
+	 *  reads them from the Gateway router's equivalence table, the same table
+	 *  the Gateway routes on. Empty/absent on every other row. */
+	freeModels?: string[];
 	id: string;
 	label: string;
 	/** True for any Ryu-managed provider (Ryu supplies the capacity, no key
@@ -70,6 +91,8 @@ export interface PiProvider {
 	suggestedModels: string[];
 	/** Whether Core can dynamically discover this provider's model list. */
 	supportsDiscovery?: boolean;
+	/** Whether the managed Pi engine exposes an OAuth sign-in for this provider. */
+	supportsOAuth?: boolean;
 }
 
 export interface PiCatalog {
@@ -82,6 +105,7 @@ export interface PiCatalog {
 	agentModelOverrides?: Record<string, Record<string, boolean>>;
 	apiTypes: string[];
 	providers: PiProvider[];
+	sessionRevocationStatus?: "confirmed" | "not-required" | "unconfirmed";
 	thinkingLevels: string[];
 }
 
@@ -93,22 +117,63 @@ export function isPiModelEnabled(
 	return modelOverrides?.[modelId] !== false;
 }
 
-/** One account a Pi provider holds in the sealed vault (labels only). */
-export interface PiAccount {
-	accountId: string;
-	/** Whether this is the account Pi will use this turn. */
-	active: boolean;
-	/** Whether this is the account installed in the shared Gateway. */
-	gatewayActive?: boolean;
-	/** "api_key" | "oauth" | "opaque". */
-	kind: string;
-	/** Display name (email, provider label, or "Account N"). */
-	label: string;
-	/** Epoch millis of the last write. */
-	updatedAt: number;
-}
+/**
+ * One account a Pi provider holds in the sealed vault (labels only — never a
+ * credential): `accountId`, `label` (email, provider label, or "Account N"),
+ * `kind` ("api_key" | "oauth" | "opaque"), `active` (the account Pi uses this
+ * turn), `gatewayActive`, `updatedAt` (epoch millis), and optional
+ * `needsReauth` / `connectionState`. The shape is Core-client's catalog schema,
+ * so desktop and every other surface validate the same contract.
+ */
+export type PiAccount = NonNullable<CorePiProvider["accounts"]>[number];
 
 export type ProviderAccountTarget = "gateway" | "self";
+
+export type OAuthAccountStrategy =
+	| "manual"
+	| "round_robin"
+	| "quota_first"
+	| "fill_first"
+	| "reset_first";
+
+export interface OAuthAccountPoolPolicy {
+	accounts: Record<
+		string,
+		{
+			enabled: boolean;
+			priority: number;
+			drainThresholdPercent?: number | null;
+		}
+	>;
+	drainThresholdPercent: number;
+	strategy: OAuthAccountStrategy;
+}
+
+/** Routing for new sessions of supported provider account pools. */
+export async function fetchOAuthAccountPoolPolicy(
+	target: ApiTarget,
+	providerId: string
+): Promise<OAuthAccountPoolPolicy> {
+	return await request<OAuthAccountPoolPolicy>(
+		target,
+		`/api/pi-config/providers/${encodeURIComponent(providerId)}/account-pool`,
+		{},
+		oAuthAccountPoolPolicyResponseSchema
+	);
+}
+
+export async function updateOAuthAccountPoolPolicy(
+	target: ApiTarget,
+	providerId: string,
+	policy: OAuthAccountPoolPolicy
+): Promise<OAuthAccountPoolPolicy> {
+	return await request<OAuthAccountPoolPolicy>(
+		target,
+		`/api/pi-config/providers/${encodeURIComponent(providerId)}/account-pool`,
+		{ method: "PUT", body: policy },
+		oAuthAccountPoolPolicyResponseSchema
+	);
+}
 
 /** Map a Pi provider id to the local Gateway provider-key slot, when supported. */
 export function gatewayProviderSlug(
@@ -139,7 +204,8 @@ export async function switchProviderAccount(
 		{
 			method: "POST",
 			body: { accountId, target: accountTarget },
-		}
+		},
+		piCatalogResponseSchema
 	);
 }
 
@@ -155,7 +221,26 @@ export async function removeProviderAccount(
 		{
 			method: "POST",
 			body: { accountId },
-		}
+		},
+		piCatalogResponseSchema
+	);
+}
+
+/** Rename a saved provider account without exposing its credential. */
+export async function renameProviderAccount(
+	target: ApiTarget,
+	providerId: string,
+	accountId: string,
+	label: string
+): Promise<PiCatalog> {
+	return await request<PiCatalog>(
+		target,
+		`/api/pi-config/providers/${encodeURIComponent(providerId)}/accounts/rename`,
+		{
+			method: "POST",
+			body: { accountId, label },
+		},
+		piCatalogResponseSchema
 	);
 }
 
@@ -201,22 +286,37 @@ export interface PiConfigInput {
 }
 
 export async function fetchPiConfig(target: ApiTarget): Promise<PiConfig> {
-	const data = await request<{ config: PiConfig }>(target, "/api/pi-config");
+	const data = await request<{ config: PiConfig }>(
+		target,
+		"/api/pi-config",
+		{},
+		updatePiConfigResponseSchema
+	);
 	return data.config;
 }
 
 export async function fetchPiCatalog(target: ApiTarget): Promise<PiCatalog> {
-	return await request<PiCatalog>(target, "/api/pi-config/catalog");
+	return await request<PiCatalog>(
+		target,
+		"/api/pi-config/catalog",
+		{},
+		piCatalogResponseSchema
+	);
 }
 
 export async function updatePiConfig(
 	target: ApiTarget,
 	input: PiConfigInput
 ): Promise<PiConfig> {
-	const data = await request<{ config: PiConfig }>(target, "/api/pi-config", {
-		method: "PUT",
-		body: input,
-	});
+	const data = await request<{ config: PiConfig }>(
+		target,
+		"/api/pi-config",
+		{
+			method: "PUT",
+			body: input,
+		},
+		updatePiConfigResponseSchema
+	);
 	return data.config;
 }
 
@@ -241,10 +341,15 @@ export async function configureProvider(
 	target: ApiTarget,
 	input: ProviderConfigInput
 ): Promise<PiCatalog> {
-	return await request<PiCatalog>(target, "/api/pi-config/providers", {
-		method: "POST",
-		body: input,
-	});
+	return await request<PiCatalog>(
+		target,
+		"/api/pi-config/providers",
+		{
+			method: "POST",
+			body: input,
+		},
+		piCatalogResponseSchema
+	);
 }
 
 /** Remove a stored credential / custom provider. Returns the refreshed catalog. */
@@ -255,7 +360,8 @@ export async function deleteProvider(
 	return await request<PiCatalog>(
 		target,
 		`/api/pi-config/providers/${encodeURIComponent(id)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		piCatalogResponseSchema
 	);
 }
 
@@ -275,11 +381,13 @@ export interface DiscoverModelsInput {
 
 export interface DiscoverModelsResult {
 	models: DiscoveredModel[];
-	/** "discovery" when the list came from the provider, "fallback" otherwise. */
+	/** "discovery" for the live provider, "saved" for previously discovered custom models,
+	 * "pi" for the installed engine, "models.dev" for the cached registry,
+	 * or "fallback" for static suggestions. */
 	source: string;
 }
 
-/** Ask Core to enumerate a provider's models (live, with a suggested fallback). */
+/** Ask Core to enumerate a provider's models with local and remote fallbacks. */
 export async function discoverModels(
 	target: ApiTarget,
 	input: DiscoverModelsInput
@@ -287,7 +395,8 @@ export async function discoverModels(
 	return await request<DiscoverModelsResult>(
 		target,
 		"/api/pi-config/discover-models",
-		{ method: "POST", body: input }
+		{ method: "POST", body: input },
+		oAuthAccountPoolPolicyResponseSchema1
 	);
 }
 
@@ -317,7 +426,8 @@ export async function checkProvider(
 	return await request<CheckProviderResult>(
 		target,
 		"/api/pi-config/providers/check",
-		{ method: "POST", body: input }
+		{ method: "POST", body: input },
+		oAuthAccountPoolPolicyResponseSchema2
 	);
 }
 
@@ -338,7 +448,8 @@ export async function setModelEnabled(
 	return await request<PiCatalog>(
 		target,
 		"/api/pi-config/providers/model-enabled",
-		{ method: "POST", body: input }
+		{ method: "POST", body: input },
+		piCatalogResponseSchema
 	);
 }
 
@@ -364,23 +475,18 @@ export interface PiLoginPrompt {
 
 /** One frame of a login flow. `success` and `error` are terminal. */
 export interface PiLoginEvent {
+	accountId?: string;
 	/** `prompt`: the id to quote when answering. */
 	id?: string;
 	/** `auth_url`: extra guidance from the provider's flow. */
 	instructions?: string;
 	/** `error`: what went wrong. `progress`/`info`: a status line. */
 	message?: string;
+	planUseAuthorized?: boolean;
 	prompt?: PiLoginPrompt;
 	/** `success`: the auth.json key that now holds a credential. */
 	provider?: string;
-	type:
-		| "auth_url"
-		| "device_code"
-		| "error"
-		| "info"
-		| "progress"
-		| "prompt"
-		| "success";
+	type: string;
 	/** `auth_url`: open this to authorize. */
 	url?: string;
 	/** `device_code`: the code to type on the verification page. */
@@ -396,12 +502,22 @@ export interface PiLoginEvent {
  */
 export async function startProviderLogin(
 	target: ApiTarget,
-	providerId: string
+	providerId: string,
+	options?: { accountId?: string; enablePlanUse?: boolean }
 ): Promise<{ sessionId: string }> {
+	const query = new URLSearchParams();
+	if (options?.accountId) {
+		query.set("accountId", options.accountId);
+	}
+	if (options?.enablePlanUse) {
+		query.set("enablePlanUse", "true");
+	}
+	const suffix = query.size > 0 ? `?${query.toString()}` : "";
 	return await request<{ sessionId: string }>(
 		target,
-		`/api/pi-config/providers/${encodeURIComponent(providerId)}/login`,
-		{ method: "POST" }
+		`/api/pi-config/providers/${encodeURIComponent(providerId)}/login${suffix}`,
+		{ method: "POST" },
+		oAuthAccountPoolPolicyResponseSchema4
 	);
 }
 
@@ -419,7 +535,7 @@ export function openProviderLoginStream(
 			target,
 			`/api/pi-config/login/${encodeURIComponent(sessionId)}/events`
 		),
-		{ token: target.token, signal }
+		{ token: target.token, signal, decode: piLoginEventSchema.parse }
 	);
 }
 
@@ -433,7 +549,8 @@ export async function answerProviderLogin(
 	return await request<{ accepted: boolean; error?: string }>(
 		target,
 		`/api/pi-config/login/${encodeURIComponent(sessionId)}/answer`,
-		{ method: "POST", body: { prompt_id: promptId, value } }
+		{ method: "POST", body: { prompt_id: promptId, value } },
+		oAuthAccountPoolPolicyResponseSchema5
 	);
 }
 
@@ -449,6 +566,176 @@ export async function cancelProviderLogin(
 	return await request<{ cancelled: boolean }>(
 		target,
 		`/api/pi-config/login/${encodeURIComponent(sessionId)}/cancel`,
-		{ method: "POST" }
+		{ method: "POST" },
+		oAuthAccountPoolPolicyResponseSchema6
 	);
+}
+
+const oAuthAccountPoolPolicyResponseSchema: z.ZodType<OAuthAccountPoolPolicy> =
+	retainValidatedResponse(
+		z
+			.object({
+				accounts: z.record(
+					z.string(),
+					z
+						.object({
+							enabled: z.boolean(),
+							priority: z.number(),
+							drainThresholdPercent: z.union([z.number(), z.null()]).optional(),
+						})
+						.passthrough()
+				),
+				drainThresholdPercent: z.number(),
+				strategy: z.union([
+					z.literal("manual"),
+					z.literal("round_robin"),
+					z.literal("quota_first"),
+					z.literal("fill_first"),
+					z.literal("reset_first"),
+				]),
+			})
+			.passthrough()
+	);
+const piCatalogResponseSchema: z.ZodType<PiCatalog> = retainValidatedResponse(
+	z
+		.object({
+			agentModelOverrides: z
+				.record(z.string(), z.record(z.string(), z.boolean()))
+				.optional(),
+			apiTypes: z.array(z.string()),
+			providers: z.array(
+				z
+					.object({
+						accountRouting: z
+							.union([
+								z
+									.object({
+										credentialKinds: z.array(
+											z.union([z.literal("api_key"), z.literal("oauth")])
+										),
+										quotaObservations: z.boolean(),
+										strategies: z.array(
+											z.union([
+												z.literal("manual"),
+												z.literal("round_robin"),
+												z.literal("quota_first"),
+												z.literal("fill_first"),
+												z.literal("reset_first"),
+											])
+										),
+									})
+									.passthrough(),
+								z.null(),
+							])
+							.optional(),
+						accounts: z
+							.array(
+								z
+									.object({
+										accountId: z.string(),
+										active: z.boolean(),
+										connectionState: z
+											.union([
+												z.literal("authorized"),
+												z.literal("identity-only"),
+												z.literal("reconnect-required"),
+												z.literal("unavailable"),
+											])
+											.optional(),
+										// Absent from older Core: not installed in the Gateway.
+										gatewayActive: z
+											.boolean()
+											.optional()
+											.transform((active) => active ?? false),
+										kind: z.string(),
+										label: z.string(),
+										needsReauth: z.boolean().optional(),
+										updatedAt: z.number(),
+									})
+									.passthrough()
+							)
+							.optional(),
+						active: z.boolean().optional(),
+						api: z.string(),
+						authEnv: z.string(),
+						authKind: z.string(),
+						configured: z.boolean(),
+						connectionState: z
+							.union([
+								z.literal("authorized"),
+								z.literal("identity-only"),
+								z.literal("reconnect-required"),
+								z.literal("unavailable"),
+								z.literal("disconnected"),
+								z.null(),
+							])
+							.optional(),
+						creditPool: z.string().optional(),
+						custom: z.boolean(),
+						id: z.string(),
+						label: z.string(),
+						managed: z.boolean().optional(),
+						modelOverrides: z.record(z.string(), z.boolean()).optional(),
+						routing: z.string(),
+						routingLocked: z.boolean().optional(),
+						suggestedModels: z.array(z.string()),
+						supportsDiscovery: z.boolean().optional(),
+						supportsOAuth: z.boolean().optional(),
+					})
+					.passthrough()
+			),
+			sessionRevocationStatus: z
+				.union([
+					z.literal("confirmed"),
+					z.literal("not-required"),
+					z.literal("unconfirmed"),
+				])
+				.optional(),
+			thinkingLevels: z.array(z.string()),
+		})
+		.passthrough()
+);
+const updatePiConfigResponseSchema: z.ZodType<{ config: PiConfig }> =
+	retainValidatedResponse(
+		z.object({ config: piConfigResponseSchema }).passthrough()
+	);
+const oAuthAccountPoolPolicyResponseSchema1: z.ZodType<DiscoverModelsResult> =
+	retainValidatedResponse(
+		z
+			.object({
+				models: z.array(
+					z
+						.object({ id: z.string(), name: z.string().optional() })
+						.passthrough()
+				),
+				source: z.string(),
+			})
+			.passthrough()
+	);
+const oAuthAccountPoolPolicyResponseSchema2: z.ZodType<CheckProviderResult> =
+	retainValidatedResponse(
+		z
+			.object({
+				error: z.string().optional(),
+				latencyMs: z.number(),
+				modelCount: z.number(),
+				ok: z.boolean(),
+			})
+			.passthrough()
+	);
+const oAuthAccountPoolPolicyResponseSchema4: z.ZodType<{ sessionId: string }> =
+	retainValidatedResponse(z.object({ sessionId: z.string() }).passthrough());
+const oAuthAccountPoolPolicyResponseSchema5: z.ZodType<{
+	accepted: boolean;
+	error?: string;
+}> = retainValidatedResponse(
+	z
+		.object({ accepted: z.boolean(), error: z.string().optional() })
+		.passthrough()
+);
+const oAuthAccountPoolPolicyResponseSchema6: z.ZodType<{ cancelled: boolean }> =
+	retainValidatedResponse(z.object({ cancelled: z.boolean() }).passthrough());
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

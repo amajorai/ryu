@@ -1,8 +1,9 @@
 "use client";
 
 import { cn } from "@ryu/ui/lib/utils";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import styles from "./hero-stack.module.css";
 
 const SURFACES = [
 	{ id: "desktop", label: "Desktop" },
@@ -80,115 +81,122 @@ export default function HeroStack() {
 	const backActive = phase === "back";
 
 	return (
-		<div className="mx-auto w-full max-w-3xl select-none rounded-3xl bg-muted/40 p-5 backdrop-blur-sm md:p-8">
-			{/* Surfaces row */}
-			<div className="mb-2 flex flex-wrap items-center justify-center gap-2">
-				{SURFACES.map((s, i) => {
-					const active = i === surface;
-					return (
-						<button
-							className={cn(
-								"rounded-full px-3.5 py-1.5 font-medium text-xs transition-all duration-300",
-								active
-									? "bg-foreground text-background"
-									: "bg-muted/60 text-foreground/55 hover:bg-muted/80"
-							)}
-							key={s.id}
-							onClick={() => run(i)}
-							type="button"
-						>
-							{s.label}
-						</button>
-					);
-				})}
-			</div>
-
-			{/* Up channel */}
-			<Channel
-				active={upActive || backActive}
-				dir={backActive ? "down" : "up"}
-				label="request"
-			/>
-
-			{/* Core + Gateway */}
-			<div className="relative overflow-hidden rounded-2xl bg-foreground/5 p-4 md:p-5">
-				<motion.div
-					animate={{
-						opacity: routeActive ? 0.5 : 0.16,
-						scale: routeActive ? 1.04 : 1,
-					}}
-					className="pointer-events-none absolute inset-0 -z-0 bg-[radial-gradient(circle_at_50%_50%,var(--color-foreground)_0%,transparent_65%)]"
-					transition={{ duration: 0.6, ease: "easeInOut" }}
-				/>
-				<div className="relative z-10">
-					<div className="mb-3 flex items-center justify-center gap-2">
-						<span className="font-medium text-[11px] text-foreground uppercase tracking-[0.2em]">
-							Ryu Core + Gateway
-						</span>
-						<AnimatePresence>
-							{routeActive ? (
-								<motion.span
-									animate={{ opacity: 1, scale: 1 }}
-									className="rounded-full bg-foreground px-2 py-0.5 font-medium text-[10px] text-background"
-									exit={{ opacity: 0, scale: 0.9 }}
-									initial={{ opacity: 0, scale: 0.9 }}
-									key="routing"
-								>
-									routing →
-								</motion.span>
-							) : null}
-						</AnimatePresence>
-					</div>
-					<div className="flex flex-wrap justify-center gap-1.5">
-						{CONCERNS.map((c, i) => (
-							<motion.span
-								animate={{
-									backgroundColor: routeActive
-										? "color-mix(in oklch, var(--color-foreground) 14%, transparent)"
-										: "color-mix(in oklch, var(--color-foreground) 6%, transparent)",
-								}}
-								className="rounded-md px-2.5 py-1 text-[11px] text-foreground/70"
-								key={c}
-								transition={{
-									duration: 0.4,
-									delay: routeActive ? i * 0.05 : 0,
-								}}
+		<MotionConfig reducedMotion="user">
+			<div className="mx-auto w-full max-w-3xl select-none rounded-3xl bg-muted/40 p-5 backdrop-blur-sm md:p-8">
+				{/* Surfaces row */}
+				<div className="mb-2 flex flex-wrap items-center justify-center gap-2">
+					{SURFACES.map((s, i) => {
+						const active = i === surface;
+						return (
+							<button
+								aria-pressed={active}
+								className={cn(
+									"rounded-full px-3.5 py-1.5 font-medium text-xs transition-colors duration-300",
+									active
+										? "bg-foreground text-background"
+										: "bg-muted/60 text-foreground/55 hover:bg-muted/80"
+								)}
+								key={s.id}
+								onClick={() => run(i)}
+								type="button"
 							>
-								{c}
-							</motion.span>
-						))}
+								{s.label}
+							</button>
+						);
+					})}
+				</div>
+
+				{/* Up channel */}
+				<Channel
+					active={upActive || backActive}
+					dir={backActive ? "down" : "up"}
+					label="request"
+				/>
+
+				{/* Core + Gateway */}
+				<div className="relative overflow-hidden rounded-2xl bg-foreground/5 p-4 md:p-5">
+					<motion.div
+						animate={{
+							opacity: routeActive ? 0.5 : 0.16,
+							scale: routeActive ? 1.04 : 1,
+						}}
+						className={`pointer-events-none absolute inset-0 -z-0 ${styles.glow}`}
+						transition={{ duration: 0.6, ease: "easeInOut" }}
+					/>
+					<div className="relative z-10">
+						<div className="mb-3 flex items-center justify-center gap-2">
+							<span className="type-caption font-medium text-foreground uppercase tracking-(--tracking-section)">
+								Ryu Core + Gateway
+							</span>
+							<AnimatePresence>
+								{routeActive ? (
+									<motion.span
+										animate={{ opacity: 1, scale: 1 }}
+										className="type-compact rounded-full bg-foreground px-2 py-0.5 font-medium text-background"
+										exit={{ opacity: 0, scale: 0.9 }}
+										initial={{ opacity: 0, scale: 0.9 }}
+										key="routing"
+									>
+										routing →
+									</motion.span>
+								) : null}
+							</AnimatePresence>
+						</div>
+						<div className="flex flex-wrap justify-center gap-1.5">
+							{CONCERNS.map((c, i) => (
+								<motion.span
+									animate={{
+										backgroundColor: routeActive
+											? "color-mix(in oklch, var(--color-foreground) 14%, transparent)"
+											: "color-mix(in oklch, var(--color-foreground) 6%, transparent)",
+									}}
+									className="type-caption rounded-md px-2.5 py-1 text-foreground/70"
+									key={c}
+									transition={{
+										duration: 0.4,
+										delay: routeActive ? i * 0.05 : 0,
+									}}
+								>
+									{c}
+								</motion.span>
+							))}
+						</div>
 					</div>
 				</div>
-			</div>
 
-			{/* Down channel */}
-			<Channel active={downActive} dir="down" label="cheapest capable model" />
+				{/* Down channel */}
+				<Channel
+					active={downActive}
+					dir="down"
+					label="cheapest capable model"
+				/>
 
-			{/* Engines row */}
-			<div className="flex flex-wrap items-center justify-center gap-2">
-				{ENGINES.map((e, i) => {
-					const active = i === engine && (downActive || backActive);
-					return (
-						<motion.div
-							animate={{
-								backgroundColor: active
-									? "var(--color-foreground)"
-									: "color-mix(in oklch, var(--color-foreground) 6%, transparent)",
-								color: active
-									? "var(--color-background)"
-									: "color-mix(in oklch, var(--color-foreground) 55%, transparent)",
-							}}
-							className="flex flex-col items-center rounded-xl px-3 py-1.5"
-							key={e.id}
-							transition={{ duration: 0.3 }}
-						>
-							<span className="font-medium text-xs">{e.label}</span>
-							<span className="text-[10px] opacity-60">{e.tone}</span>
-						</motion.div>
-					);
-				})}
+				{/* Engines row */}
+				<div className="flex flex-wrap items-center justify-center gap-2">
+					{ENGINES.map((e, i) => {
+						const active = i === engine && (downActive || backActive);
+						return (
+							<motion.div
+								animate={{
+									backgroundColor: active
+										? "var(--color-foreground)"
+										: "color-mix(in oklch, var(--color-foreground) 6%, transparent)",
+									color: active
+										? "var(--color-background)"
+										: "color-mix(in oklch, var(--color-foreground) 55%, transparent)",
+								}}
+								className="flex flex-col items-center rounded-xl px-3 py-1.5"
+								key={e.id}
+								transition={{ duration: 0.3 }}
+							>
+								<span className="font-medium text-xs">{e.label}</span>
+								<span className="type-compact opacity-60">{e.tone}</span>
+							</motion.div>
+						);
+					})}
+				</div>
 			</div>
-		</div>
+		</MotionConfig>
 	);
 }
 
@@ -217,7 +225,7 @@ function Channel({
 						/>
 						<motion.span
 							animate={{ opacity: 1, x: 0 }}
-							className="absolute left-[calc(50%+0.75rem)] whitespace-nowrap text-[10px] text-foreground/40"
+							className="type-compact absolute left-[calc(50%+0.75rem)] whitespace-nowrap text-foreground/40"
 							exit={{ opacity: 0 }}
 							initial={{ opacity: 0, x: -4 }}
 							key="label"

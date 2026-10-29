@@ -1,3 +1,4 @@
+import { isNativeText } from "../lib/native-primitive-observation.ts";
 import {
 	blendExpressiveFrames,
 	type ExpressiveExpressionSelection,
@@ -258,7 +259,7 @@ function eyePatch(
 	index: 0 | 1,
 	patch: Partial<ExpressiveEye>
 ): ResolvedExpressiveFrame {
-	const eyes = [...frame.eyes] as [ExpressiveEye, ExpressiveEye];
+	const eyes: [ExpressiveEye, ExpressiveEye] = [...frame.eyes];
 	eyes[index] = { ...eyes[index], ...patch };
 	return { ...frame, eyes };
 }
@@ -515,15 +516,15 @@ function poseForState(
 	};
 }
 
-export function isExpressiveAnimation(
-	value: unknown
-): value is ExpressiveAnimation {
-	return typeof value === "string" && EXPRESSIVE_ANIMATION_SET.has(value);
+export function isExpressiveAnimation<T>(
+	value: T
+): value is T & ExpressiveAnimation {
+	return isNativeText(value) && EXPRESSIVE_ANIMATION_SET.has(value);
 }
 
-export function isExpressiveAnimationSelection(
-	value: unknown
-): value is ExpressiveAnimationSelection {
+export function isExpressiveAnimationSelection<T>(
+	value: T
+): value is T & ExpressiveAnimationSelection {
 	return value === "random" || isExpressiveAnimation(value);
 }
 
@@ -619,10 +620,9 @@ export function sampleExpressiveAnimation(
 		totalDuration > 0
 			? ((safeTime(time) % totalDuration) + totalDuration) % totalDuration
 			: 0;
-	const selected =
-		typeof expression === "string"
-			? expressiveFrame(expression === "random" ? "neutral" : expression)
-			: expression;
+	const selected = isNativeText(expression)
+		? expressiveFrame(expression === "random" ? "neutral" : expression)
+		: expression;
 
 	let offset = 0;
 	let index = states.length - 1;

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { z } from "zod";
 import {
 	listMessageReadReceipts,
 	markMessageRead,
@@ -13,27 +14,30 @@ afterEach(() => {
 
 describe("message read receipt API", () => {
 	test("loads the camelCase receipt projection", async () => {
-		globalThis.fetch = (() =>
-			Promise.resolve(
-				Response.json({
-					receipts: [
-						{
-							messageId: "m1",
-							readAt: "2026-09-14T10:00:00.000Z",
-							userId: "ada",
-						},
-						{ messageId: 42 },
-					],
-					users: [
-						{
-							avatar: "https://cdn.example.test/ada.webp",
-							id: "ada",
-							name: "Ada Lovelace",
-						},
-						{ id: 42, name: "ignored" },
-					],
-				})
-			)) as unknown as typeof fetch;
+		globalThis.fetch = Object.assign(
+			() =>
+				Promise.resolve(
+					Response.json({
+						receipts: [
+							{
+								messageId: "m1",
+								readAt: "2026-09-14T10:00:00.000Z",
+								userId: "ada",
+							},
+							{ messageId: 42 },
+						],
+						users: [
+							{
+								avatar: "https://cdn.example.test/ada.webp",
+								id: "ada",
+								name: "Ada Lovelace",
+							},
+							{ id: 42, name: "ignored" },
+						],
+					})
+				),
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		expect(await listMessageReadReceipts(target, "chat-1")).toEqual({
 			receipts: [
@@ -54,21 +58,26 @@ describe("message read receipt API", () => {
 	});
 
 	test("posts a deduplicated visible-message batch", async () => {
-		let requestBody: unknown;
+		let requestBody: { messageIds: string[] } | undefined;
 		let requestUrl = "";
-		globalThis.fetch = (async (input, init) => {
-			requestUrl = String(input);
-			requestBody = JSON.parse(String(init?.body));
-			return Response.json({
-				receipts: [
-					{
-						messageId: "m1",
-						readAt: "2026-09-14T10:00:00.000Z",
-						userId: "bob",
-					},
-				],
-			});
-		}) as typeof globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				requestUrl = String(input);
+				requestBody = z
+					.object({ messageIds: z.array(z.string()) })
+					.parse(JSON.parse(String(init?.body)));
+				return Response.json({
+					receipts: [
+						{
+							messageId: "m1",
+							readAt: "2026-09-14T10:00:00.000Z",
+							userId: "bob",
+						},
+					],
+				});
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		expect(await markMessageRead(target, "chat-1", ["m1", "m1", "m2"])).toEqual(
 			[

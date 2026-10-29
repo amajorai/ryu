@@ -17,7 +17,7 @@ test("switching companion owners remounts host state instead of reusing another 
 		await writeFile(
 			join(dir, "panel.tsx"),
 			source.replaceAll(
-				/from "(?:\.\.\/(?:hooks|host|store)\/[^"]+|\.\/(?:ContributedView|chat\/IslandChat)\.tsx)"/g,
+				/from "(?:\.\.\/(?:hooks|host|store)\/[^"]+|\.\/(?:ContributedView|IslandMorphingPage|chat\/IslandChat)\.tsx)"/g,
 				'from "./adapters.tsx"'
 			)
 		);
@@ -28,6 +28,7 @@ import {useState,useEffect} from "react";
 export const mounts=[];export const unmounts=[];
 const companions=[{id:"a",pluginId:"alpha",name:"Alpha",label:"Alpha",hasUi:true},{id:"b",pluginId:"beta",name:"Beta",label:"Beta",hasUi:true}];
 export const usePluginContributions=()=>({companions,views:[]});const setExpandedTall=()=>{};export const useIslandState=selector=>selector({setExpandedTall});
+export const IslandMorphingPage=({children})=><div data-testid="morphing-page">{children}</div>;
 export const IslandChat=()=> <div>Chat fixture</div>;export const ContributedView=()=>null;
 export function IslandPluginHost({companion}){const [owner]=useState(companion.id);useEffect(()=>{mounts.push(companion.id);return()=>unmounts.push(companion.id);},[]);return <div data-testid="owner" data-owner={owner}>{companion.name}</div>;}
 `

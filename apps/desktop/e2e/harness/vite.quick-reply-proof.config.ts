@@ -42,4 +42,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "quick-reply-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

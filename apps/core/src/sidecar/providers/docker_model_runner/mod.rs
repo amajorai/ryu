@@ -41,9 +41,12 @@ const DMR_MODELS_URL: &str = "http://127.0.0.1:12434/engines/v1/models";
 /// the last `start`/`health_check`, so the sync `is_running()` can answer without
 /// a network probe (mirrors ollama's `adopted_external` flag).
 pub struct DockerModelRunnerManager {
-    /// `true` once DMR has been observed reachable on its TCP endpoint.
+    /// `true` once DMR has been adopted by `start` and is still reachable.
+    /// Only `start` sets it; `stop` clears it and the health monitor must not
+    /// re-adopt a stopped engine (mirrors llama-swap's `adopted` guard).
     running: Arc<AtomicBool>,
     client: reqwest::Client,
+    models_url: String,
 }
 
 impl DockerModelRunnerManager {
@@ -55,13 +58,24 @@ impl DockerModelRunnerManager {
                 .timeout(std::time::Duration::from_secs(3))
                 .build()
                 .expect("reqwest client"),
+            models_url: DMR_MODELS_URL.to_owned(),
         }
+    }
+
+    #[cfg(test)]
+    fn with_models_url(mut self, models_url: String) -> Self {
+        self.models_url = models_url;
+        self
     }
 
     /// Returns `true` if DMR is answering on its OpenAI-compatible endpoint.
     pub async fn server_reachable(client: &reqwest::Client) -> bool {
+        Self::models_reachable(client, DMR_MODELS_URL).await
+    }
+
+    async fn models_reachable(client: &reqwest::Client, models_url: &str) -> bool {
         matches!(
-            client.get(DMR_MODELS_URL).send().await,
+            client.get(models_url).send().await,
             Ok(resp) if resp.status().is_success()
         )
     }
@@ -85,10 +99,11 @@ impl Sidecar for DockerModelRunnerManager {
     fn start(&self) -> BoxFuture<anyhow::Result<()>> {
         let running = Arc::clone(&self.running);
         let client = self.client.clone();
+        let models_url = self.models_url.clone();
         Box::pin(async move {
             // Adopt-only: Docker Desktop / Docker Engine owns the model runner.
             // We never spawn or install it — we only verify it is reachable.
-            if Self::server_reachable(&client).await {
+            if Self::models_reachable(&client, &models_url).await {
                 running.store(true, Ordering::Relaxed);
                 tracing::info!("docker-model-runner reachable on {DMR_HOST} — adopting");
                 return Ok(());
@@ -117,9 +132,15 @@ impl Sidecar for DockerModelRunnerManager {
     fn health_check(&self) -> BoxFuture<HealthStatus> {
         let running = Arc::clone(&self.running);
         let client = self.client.clone();
+        let models_url = self.models_url.clone();
         Box::pin(async move {
-            if Self::server_reachable(&client).await {
-                running.store(true, Ordering::Relaxed);
+            // A stopped engine must not be re-adopted by the health monitor.
+            if !running.load(Ordering::Relaxed) {
+                return HealthStatus::Unhealthy(
+                    "docker-model-runner is not active in Ryu".to_owned(),
+                );
+            }
+            if Self::models_reachable(&client, &models_url).await {
                 HealthStatus::Healthy
             } else {
                 running.store(false, Ordering::Relaxed);
@@ -167,5 +188,37 @@ mod tests {
         let m = DockerModelRunnerManager::new();
         assert!(!m.is_required());
         assert!(!m.is_running());
+    }
+
+    #[tokio::test]
+    async fn health_check_does_not_readopt_after_stop() {
+        use axum::{routing::get, Json, Router};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let app = Router::new().route(
+            "/engines/v1/models",
+            get(|| async { Json(serde_json::json!({ "data": [] })) }),
+        );
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let manager = DockerModelRunnerManager::new()
+            .with_models_url(format!("http://127.0.0.1:{port}/engines/v1/models"));
+
+        manager.start().await.expect("reachable DMR is adopted");
+        assert!(manager.is_running());
+        assert!(matches!(
+            manager.health_check().await,
+            HealthStatus::Healthy
+        ));
+
+        manager.stop().await.unwrap();
+        // DMR is still reachable, but a stopped engine stays stopped.
+        assert!(matches!(
+            manager.health_check().await,
+            HealthStatus::Unhealthy(_)
+        ));
+        assert!(!manager.is_running());
+        server.abort();
     }
 }

@@ -1,0 +1,13 @@
+/* Publisher identity marks retain the existing palette and glow on card and
+ * hero surfaces. These semantic tokens share one owner across hosts. */
+@theme inline {
+	--color-publisher-verification-gold: var(--color-yellow-500);
+	--color-publisher-verification-gold-dark: var(--color-yellow-300);
+	--color-publisher-verification-gold-hero: var(--color-yellow-100);
+	--color-publisher-verification-blue-hero: var(--color-sky-100);
+}
+
+:root {
+	--publisher-verification-gold-shadow: 0 0 3px rgba(250, 200, 0, 0.7);
+	--publisher-verification-gold-hero-shadow: 0 0 4px rgba(250, 200, 0, 0.75);
+}

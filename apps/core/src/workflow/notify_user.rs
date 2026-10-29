@@ -12,16 +12,19 @@
 //! own `state` map so it survives a restart like every other checkpoint.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use serde::{Deserialize, Serialize};
 
 use super::store::WorkflowRun;
 use super::{AckMode, NotifyTargetSpec};
 
+/// Reserved `run.state` namespace for NotifyUser gate ack bookkeeping.
+pub(crate) const ACK_STATE_PREFIX: &str = "__notify_ack_";
+
 /// Reserved `run.state` key holding a NotifyUser gate's ack bookkeeping.
-fn ack_state_key(node_id: &str) -> String {
-    format!("__notify_ack_{node_id}")
+pub(crate) fn ack_state_key(node_id: &str) -> String {
+    format!("{ACK_STATE_PREFIX}{node_id}")
 }
 
 /// Whether a run still carries the durable state of a NotifyUser gate. The
@@ -56,26 +59,38 @@ impl AckState {
     }
 }
 
+/// The ack bookkeeping of a gate that was already delivered and is still waiting
+/// for acknowledgements, if `run` holds one for `node_id`.
+fn pending_ack_state(run: &WorkflowRun, node_id: &str) -> Option<AckState> {
+    run.state
+        .get(&ack_state_key(node_id))
+        .and_then(|encoded| serde_json::from_str::<AckState>(encoded).ok())
+        .filter(|state| !state.satisfied())
+}
+
 /// The in-process lock registry prevents two members acknowledging the same
 /// run at once from loading the same stale JSON snapshot and losing one ack.
 /// Locks are keyed per run so unrelated workflows can continue acknowledging
-/// independently. The map intentionally lives for the Core process lifetime;
-/// entries are tiny and retaining them avoids a lock-removal race that could
-/// create two locks for one run.
-fn ack_locks() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
-    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+/// independently. The registry holds `Weak` handles and prunes dead ones, so it
+/// does not grow by one entry per run for the life of an always-on node. A lock
+/// is only replaced once nobody holds it, so two acknowledgers can never end up
+/// holding different locks for the same run.
+fn ack_locks() -> &'static Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
     LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn ack_lock(run_id: &str) -> Arc<tokio::sync::Mutex<()>> {
     let mut locks = ack_locks()
         .lock()
-        .expect("NotifyUser ack lock registry is not poisoned");
-    Arc::clone(
-        locks
-            .entry(run_id.to_owned())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-    )
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(run_id).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(run_id.to_owned(), Arc::downgrade(&lock));
+    lock
 }
 
 fn unique_user_ids<I>(ids: I) -> Vec<String>
@@ -175,11 +190,18 @@ pub async fn run(
     node_id: &str,
     run: &mut WorkflowRun,
 ) -> Result<String, String> {
+    let ack_required = !matches!(ack_mode, AckMode::None);
+    // Concurrent branches can each deliver a gate while the run routes only the
+    // first suspension; the node then runs again once that gate is released. Its
+    // members were already notified, so keep their inbox rows and bookkeeping and
+    // wait on them instead of delivering a second set.
+    if ack_required && pending_ack_state(run, node_id).is_some() {
+        return Err(super::executor::SUSPEND_SENTINEL.to_string());
+    }
     let recipients = resolve_recipients(target).await?;
     if recipients.is_empty() {
         return Err("NotifyUser: target resolved to zero members".to_string());
     }
-    let ack_required = !matches!(ack_mode, AckMode::None);
 
     let store =
         crate::notify::global_store().ok_or("NotifyUser: notification store unavailable")?;
@@ -297,6 +319,7 @@ pub async fn record_ack(run: &mut WorkflowRun, user_id: &str) -> Result<AckAckRe
 mod tests {
     use super::super::store::{RunStatus, WorkflowRun};
     use super::super::AckMode;
+    use super::super::NotifyTargetSpec;
     use super::*;
     use std::collections::HashMap;
 
@@ -420,9 +443,11 @@ mod tests {
                 },
                 retry: None,
                 timeout_ms: None,
+                repeat: None,
             }],
             edges: Vec::new(),
             triggers: Vec::new(),
+            max_concurrency: None,
             created_at: None,
             updated_at: None,
         };
@@ -445,7 +470,10 @@ mod tests {
         );
         super::super::store::save_run(&run).expect("run should persist");
 
-        let (first, second) = tokio::join!(ack_gate(&run_id, "u1"), ack_gate(&run_id, "u2"));
+        let (first, second) = tokio::join!(
+            ack_gate(&run_id, "u1", Some("approval")),
+            ack_gate(&run_id, "u2", Some("approval"))
+        );
         let outcomes = [
             first.expect("first ack should succeed"),
             second.expect("second ack should succeed"),
@@ -462,11 +490,70 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_ack_for_another_gate_is_refused() {
+        let mut run = gate_run("legal", &["u1"], &AckMode::First);
+        assert!(check_gate_node(&run, Some("legal")).is_ok());
+        assert!(check_gate_node(&run, None).is_ok());
+        assert!(check_gate_node(&run, Some("finance")).is_err());
+        run.awaiting_node = None;
+        assert!(check_gate_node(&run, Some("finance")).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_gate_already_delivered_waits_without_notifying_again() {
+        let mut run = gate_run("finance", &["u1"], &AckMode::First);
+        let before = run.state.clone();
+        let target = NotifyTargetSpec::Members {
+            user_ids: vec!["u1".into()],
+        };
+        let outcome = run_node(&target, &mut run).await;
+        assert_eq!(
+            outcome.expect_err("suspends"),
+            super::super::executor::SUSPEND_SENTINEL
+        );
+        assert_eq!(run.state, before, "the bookkeeping is reused untouched");
+    }
+
+    async fn run_node(target: &NotifyTargetSpec, run: &mut WorkflowRun) -> Result<String, String> {
+        super::run(target, "Review", "Approve", &AckMode::First, "finance", run).await
+    }
+
     #[tokio::test]
     async fn non_target_cannot_ack() {
         let mut run = gate_run("n1", &["u1"], &AckMode::First);
         assert!(record_ack(&mut run, "intruder").await.is_err());
     }
+}
+
+/// Refuse an acknowledgement addressed to a different gate than the one the run
+/// is waiting on. A run with concurrent NotifyUser gates routes one at a time, and
+/// an ack always counts toward the routed gate, so one for another gate (its
+/// notification row's node) must not be recorded, or the wrong gate is approved.
+fn check_gate_node(run: &WorkflowRun, node_id: Option<&str>) -> Result<(), String> {
+    match (node_id, run.awaiting_node.as_deref()) {
+        (Some(wanted), Some(awaiting)) if wanted != awaiting => Err(
+            "this notification belongs to another approval step, which is not waiting for acknowledgements yet"
+                .to_string(),
+        ),
+        _ => Ok(()),
+    }
+}
+
+/// Whether an acknowledgement of the notification row for `node_id` may be
+/// applied to run `run_id` now. Checked before the inbox row is marked acked, so a
+/// refused ack leaves the row open for when its own gate is routed. A run that is
+/// missing or no longer awaiting is left to [`ack_gate`] to report.
+pub async fn check_gate(run_id: &str, node_id: Option<&str>) -> Result<(), String> {
+    use super::store;
+
+    let Ok(run) = store::load_run(run_id) else {
+        return Ok(());
+    };
+    if run.status != store::RunStatus::AwaitingInput {
+        return Ok(());
+    }
+    check_gate_node(&run, node_id)
 }
 
 /// Outcome of [`record_ack`].
@@ -483,7 +570,11 @@ pub struct AckAckResult {
 /// This is the reusable core behind the inbox Ack action / `POST
 /// /api/notifications/:id/ack`. Returns the ack outcome (`satisfied` = the run was
 /// resumed). Errors when the run is missing or not awaiting an ack.
-pub async fn ack_gate(run_id: &str, user_id: &str) -> Result<AckAckResult, String> {
+pub async fn ack_gate(
+    run_id: &str,
+    user_id: &str,
+    node_id: Option<&str>,
+) -> Result<AckAckResult, String> {
     use super::store;
 
     let lock = ack_lock(run_id);
@@ -492,6 +583,7 @@ pub async fn ack_gate(run_id: &str, user_id: &str) -> Result<AckAckResult, Strin
     if run.status != store::RunStatus::AwaitingInput {
         return Err("run is not awaiting a notification ack".to_string());
     }
+    check_gate_node(&run, node_id)?;
     let result = record_ack(&mut run, user_id).await?;
     // Persist the ack progress before any resume so it survives a crash mid-resume.
     store::save_run(&run).map_err(|e| format!("failed to persist ack: {e}"))?;

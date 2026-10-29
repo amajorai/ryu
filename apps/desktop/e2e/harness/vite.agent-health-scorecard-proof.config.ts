@@ -37,4 +37,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "agent-health-scorecard-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

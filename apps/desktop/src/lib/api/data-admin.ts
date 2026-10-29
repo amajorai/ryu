@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/data-admin.ts
 //
 // Typed client for Core's "danger zone" bulk-delete endpoints (`/api/data/*`).
@@ -30,10 +31,27 @@ export async function resetNode(
 	const json = await request<{ ok?: boolean; restart_required?: boolean }>(
 		target,
 		"/api/node/reset",
-		{ method: "POST", body: { confirm } }
+		{ method: "POST", body: { confirm } },
+		resetNodeResponseSchema
 	);
 	return {
 		ok: json?.ok ?? false,
 		restartRequired: json?.restart_required ?? false,
 	};
+}
+
+const resetNodeResponseSchema: z.ZodType<{
+	ok?: boolean;
+	restart_required?: boolean;
+}> = retainValidatedResponse(
+	z
+		.object({
+			ok: z.boolean().optional(),
+			restart_required: z.boolean().optional(),
+		})
+		.passthrough()
+);
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

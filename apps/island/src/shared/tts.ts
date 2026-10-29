@@ -1,9 +1,11 @@
+import { z } from "zod";
+
 // Island text-to-speech preference: the cross-process contract persisted in Core
 // under the `island-tts` key. The desktop writes it from its Island settings; the
 // island companion reads it on startup, subscribes to live changes, and uses it
 // to decide whether to speak assistant replies aloud and which engine/voice to
 // use. Mirrors `shared/voice.ts`: a plain schema with no `@ryu/ui` dependency
-// (the main process externalizes workspace deps).
+// (the main process inlines workspace packages and `@ryu/ui` is renderer UI code).
 //
 // The default engine is Kokoro 82M (`kokoro`) — an open-weight, CPU-friendly ONNX
 // TTS served by the Ryu TTS sidecar, whose model is fetched during onboarding
@@ -38,20 +40,20 @@ export const DEFAULT_ISLAND_TTS_PREFS: IslandTtsPrefs = {
  * into {@link IslandTtsPrefs}. Falls back to the default for any missing/unknown
  * field so a malformed blob never breaks playback.
  */
+const preferenceSchema = z
+	.object({
+		enabled: z.boolean().catch(true),
+		engine: z.string().min(1).catch(DEFAULT_ISLAND_TTS_ENGINE),
+		voice: z.string().catch(""),
+	})
+	.catch(DEFAULT_ISLAND_TTS_PREFS);
+
 export function parseIslandTtsPrefs(raw: string | null): IslandTtsPrefs {
 	if (!raw) {
 		return DEFAULT_ISLAND_TTS_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<IslandTtsPrefs>;
-		return {
-			enabled: parsed.enabled !== false,
-			engine:
-				typeof parsed.engine === "string" && parsed.engine.length > 0
-					? parsed.engine
-					: DEFAULT_ISLAND_TTS_ENGINE,
-			voice: typeof parsed.voice === "string" ? parsed.voice : "",
-		};
+		return preferenceSchema.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_ISLAND_TTS_PREFS;
 	}

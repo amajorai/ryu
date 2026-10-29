@@ -5,6 +5,7 @@
 
 import { type BrowserWindow, ipcMain } from "electron";
 import { IPC } from "../../shared/ipc.ts";
+import { forwardThemeToScreenSurface } from "../screen-surface.ts";
 import { getThemePrefsRaw, subscribeThemeChanges } from "../services/theme.ts";
 
 /**
@@ -20,5 +21,6 @@ export function registerThemeIpc(getWindow: () => BrowserWindow | null): void {
 		if (win && !win.isDestroyed()) {
 			win.webContents.send(IPC.theme.changed, value);
 		}
+		forwardThemeToScreenSurface(IPC.theme.changed, value);
 	});
 }

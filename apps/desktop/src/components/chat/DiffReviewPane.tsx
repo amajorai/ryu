@@ -22,6 +22,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { FileContents } from "@pierre/diffs";
+import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import {
 	Tooltip,
 	TooltipContent,
@@ -279,7 +280,7 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 		return () => {
 			cancelled = true;
 		};
-	}, [selectedFile?.path, worktreeStatus.path]);
+	}, [selectedFile?.path, worktreeStatus.path, diff.unified_diff]);
 	const totalAdditions = diff.files.reduce((sum, f) => sum + f.additions, 0);
 	const totalDeletions = diff.files.reduce((sum, f) => sum + f.deletions, 0);
 	const saveEditedFile = useCallback(
@@ -387,7 +388,10 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 									className="size-3.5 text-muted-foreground"
 									icon={FileCodeIcon}
 								/>
-								<span className="min-w-0 flex-1 truncate font-mono">
+								<span
+									className="min-w-0 flex-1 truncate font-mono"
+									title={selectedFile?.path ?? "Changes"}
+								>
 									{selectedFile?.path ?? "Changes"}
 								</span>
 								{selectedFile && (
@@ -523,9 +527,10 @@ export function DiffReviewPane({ target, runId }: DiffReviewPaneProps) {
 						/>
 						<a
 							className="truncate text-status-info underline underline-offset-2"
-							href={applyState.prUrl}
+							href={safeHttpUrl(applyState.prUrl) ?? undefined}
 							rel="noopener noreferrer"
 							target="_blank"
+							title={applyState.prUrl}
 						>
 							{applyState.prUrl}
 						</a>

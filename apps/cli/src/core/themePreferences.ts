@@ -1,7 +1,9 @@
+import { z } from "zod";
 import type { Theme } from "@/components/ui/theme-provider.tsx";
 import {
 	RYU_THEME_PRESETS,
-	type RyuThemePreset,
+	ryuNoColorDarkTheme,
+	ryuNoColorLightTheme,
 	ryuTheme,
 	THEME_CATALOG,
 	THEME_PRESET_IDS,
@@ -36,45 +38,37 @@ export const DEFAULT_THEME_PREFERENCE: Readonly<ThemePreference> =
 
 export const DEFAULT_THEME_PREFERENCES = DEFAULT_THEME_PREFERENCE;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
+const themeModeSchema = z.enum(THEME_MODES);
+const themeColorSchemeSchema = z.enum(THEME_COLOR_SCHEMES);
+const themePresetIdSchema = z.enum(THEME_PRESET_IDS);
+const themePreferenceSchema = z.object({
+	mode: themeModeSchema,
+	preset: themePresetIdSchema,
+});
+const persistedThemePreferenceSchema = z.object({
+	mode: themeModeSchema.catch(DEFAULT_THEME_MODE),
+	preset: themePresetIdSchema.catch(DEFAULT_THEME_PRESET),
+});
 
-export function isThemeMode(value: unknown): value is ThemeMode {
-	return value === "system" || value === "light" || value === "dark";
+export function isThemeMode(
+	value: Parameters<typeof themeModeSchema.safeParse>[0]
+): value is ThemeMode {
+	return themeModeSchema.safeParse(value).success;
 }
-
-export function isThemeColorScheme(value: unknown): value is ThemeColorScheme {
-	return value === "light" || value === "dark";
+export function isThemeColorScheme(
+	value: Parameters<typeof themeColorSchemeSchema.safeParse>[0]
+): value is ThemeColorScheme {
+	return themeColorSchemeSchema.safeParse(value).success;
 }
-
-export function isThemePresetId(value: unknown): value is ThemePresetId {
-	return (
-		typeof value === "string" &&
-		THEME_PRESET_IDS.includes(value as ThemePresetId)
-	);
+export function isThemePresetId(
+	value: Parameters<typeof themePresetIdSchema.safeParse>[0]
+): value is ThemePresetId {
+	return themePresetIdSchema.safeParse(value).success;
 }
-
-export function isThemePreference(value: unknown): value is ThemePreference {
-	return (
-		isRecord(value) && isThemeMode(value.mode) && isThemePresetId(value.preset)
-	);
-}
-
-function parsePersistedPreference(value: unknown): unknown {
-	if (typeof value !== "string") {
-		return value;
-	}
-
-	const trimmed = value.trim();
-	if (trimmed.length === 0) {
-		return undefined;
-	}
-
-	try {
-		return JSON.parse(trimmed) as unknown;
-	} catch {
-		return undefined;
-	}
+export function isThemePreference(
+	value: Parameters<typeof themePreferenceSchema.safeParse>[0]
+): value is ThemePreference {
+	return themePreferenceSchema.safeParse(value).success;
 }
 
 export function defaultThemePreference(): ThemePreference {
@@ -92,16 +86,23 @@ export function defaultThemePreference(): ThemePreference {
  * validated independently so one bad value cannot make the terminal choose an
  * unreadable theme.
  */
-export function loadThemePreference(value: unknown): ThemePreference {
-	const raw = parsePersistedPreference(value);
-	if (!isRecord(raw)) {
-		return defaultThemePreference();
+export function loadThemePreference(
+	value: Parameters<typeof persistedThemePreferenceSchema.safeParse>[0]
+): ThemePreference {
+	const text = z.string().safeParse(value);
+	let parsed: ReturnType<typeof persistedThemePreferenceSchema.safeParse>;
+	if (text.success) {
+		try {
+			parsed = persistedThemePreferenceSchema.safeParse(
+				JSON.parse(text.data.trim())
+			);
+		} catch {
+			return defaultThemePreference();
+		}
+	} else {
+		parsed = persistedThemePreferenceSchema.safeParse(value);
 	}
-
-	return {
-		mode: isThemeMode(raw.mode) ? raw.mode : DEFAULT_THEME_MODE,
-		preset: isThemePresetId(raw.preset) ? raw.preset : DEFAULT_THEME_PRESET,
-	};
+	return parsed.success ? parsed.data : defaultThemePreference();
 }
 
 /** Plural spelling for callers that treat the pair as a preferences record. */
@@ -116,22 +117,47 @@ export const saveThemePreference = loadThemePreference;
 
 export const saveThemePreferences = saveThemePreference;
 
-export function serializeThemePreference(value: unknown): string {
+export function serializeThemePreference(
+	value: Parameters<typeof persistedThemePreferenceSchema.safeParse>[0]
+): string {
 	return JSON.stringify(saveThemePreference(value));
 }
 
+function resolveColorScheme(
+	preference: ThemePreference,
+	systemColorScheme: Parameters<typeof themeColorSchemeSchema.safeParse>[0]
+): ThemeColorScheme {
+	if (preference.mode !== "system") {
+		return preference.mode;
+	}
+	return isThemeColorScheme(systemColorScheme)
+		? systemColorScheme
+		: DEFAULT_SYSTEM_COLOR_SCHEME;
+}
+
+/**
+ * Whether the environment opts out of color under the NO_COLOR convention
+ * (https://no-color.org): the variable is present and not empty.
+ */
+export function noColorRequested(
+	env: Readonly<Record<string, string | undefined>> = process.env
+): boolean {
+	return Boolean(env.NO_COLOR);
+}
+
 export function resolveThemePreference(
-	value: unknown,
-	systemColorScheme: unknown = DEFAULT_SYSTEM_COLOR_SCHEME
+	value: Parameters<typeof persistedThemePreferenceSchema.safeParse>[0],
+	systemColorScheme: Parameters<
+		typeof themeColorSchemeSchema.safeParse
+	>[0] = DEFAULT_SYSTEM_COLOR_SCHEME,
+	noColor = false
 ): Theme {
 	const preference = loadThemePreference(value);
-	const colorScheme: ThemeColorScheme =
-		preference.mode === "system"
-			? isThemeColorScheme(systemColorScheme)
-				? systemColorScheme
-				: DEFAULT_SYSTEM_COLOR_SCHEME
-			: preference.mode;
-	const preset: RyuThemePreset | undefined = THEME_CATALOG[preference.preset];
+	const colorScheme = resolveColorScheme(preference, systemColorScheme);
+	if (noColor) {
+		return colorScheme === "light" ? ryuNoColorLightTheme : ryuNoColorDarkTheme;
+	}
+	const preset = THEME_CATALOG[preference.preset];
 
 	return preset?.[colorScheme] ?? THEME_CATALOG.ryu.dark ?? ryuTheme;
 }

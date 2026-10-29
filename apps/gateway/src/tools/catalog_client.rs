@@ -205,6 +205,12 @@ pub struct DescribedTool {
     pub shallow: bool,
     #[serde(default)]
     pub parameters: Option<Value>,
+    /// Core sets this only for a tool whose MCP annotations declare it read-only
+    /// (`readOnlyHint: true`, not `destructiveHint: true`). The unified tool loop
+    /// may then run it concurrently with adjacent read-only calls. Absent (an older
+    /// Core, a write, Composio, a skill, an ext-API route) ⇒ `false` ⇒ sequential.
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 impl DescribedTool {
@@ -314,6 +320,11 @@ pub trait CoreCatalog: Send + Sync {
     /// `host_conversation_proof` is the process-local proof Core attaches before
     /// the Gateway forward; it is relayed separately so a direct node-token caller
     /// cannot opt into this internal context.
+    ///
+    /// `untrusted_caller` asks Core to narrow the agent's allowlist to its
+    /// untrusted-caller profile before dispatch. It can only restrict a call,
+    /// so it needs no proof.
+    #[allow(clippy::too_many_arguments)]
     async fn call_tool(
         &self,
         tool_id: &str,
@@ -322,6 +333,7 @@ pub trait CoreCatalog: Send + Sync {
         user_id: Option<&str>,
         host_conversation_id: Option<&str>,
         host_conversation_proof: Option<&str>,
+        untrusted_caller: bool,
     ) -> Result<Value, String>;
 
     /// Forward a PTC `execute`/`resume` to Core (Contract 4, P4). `path` is the
@@ -353,6 +365,15 @@ impl ToolSearchClient {
     }
 
     fn with_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        // W3C trace context, so Core's `tools/call` dispatch span nests under the
+        // calling span. No-op without an exportable context (consent off).
+        let mut trace_headers = reqwest::header::HeaderMap::new();
+        crate::telemetry::propagation::inject_current(&mut trace_headers);
+        let req = if trace_headers.is_empty() {
+            req
+        } else {
+            req.headers(trace_headers)
+        };
         match &self.token {
             Some(t) if !t.is_empty() => req.bearer_auth(t),
             _ => req,
@@ -438,19 +459,23 @@ impl CoreCatalog for ToolSearchClient {
         user_id: Option<&str>,
         host_conversation_id: Option<&str>,
         host_conversation_proof: Option<&str>,
+        untrusted_caller: bool,
     ) -> Result<Value, String> {
-        let body = json!({
-            "tool": tool_id,
-            "arguments": arguments,
-            "agent_id": agent_id,
-            "user_id": user_id,
-            // Server-derived host conversation → Core's `ToolPrincipal`. Omitted-as-
-            // null preserves the fail-closed default on a bound node.
-            "host_conversation_id": host_conversation_id,
-            "host_conversation_proof": host_conversation_proof,
-        });
-        let resp = self
-            .with_auth(self.http.post(self.url("/api/mcp/tools/call")).json(&body))
+        let body = call_tool_body(
+            tool_id,
+            arguments,
+            agent_id,
+            user_id,
+            host_conversation_id,
+            host_conversation_proof,
+            untrusted_caller,
+        );
+        let mut request =
+            self.with_auth(self.http.post(self.url("/api/mcp/tools/call")).json(&body));
+        if let Some(timeout) = interactive_tool_timeout(host_conversation_id) {
+            request = request.timeout(timeout);
+        }
+        let resp = request
             .send()
             .await
             .map_err(|e| format!("tools/call request failed: {e}"))?;
@@ -482,6 +507,39 @@ impl CoreCatalog for ToolSearchClient {
         }
         Ok(value)
     }
+}
+
+/// The `POST /api/mcp/tools/call` body. `untrusted_caller` is sent only when
+/// set, so every other call keeps its existing shape.
+fn call_tool_body(
+    tool_id: &str,
+    arguments: Value,
+    agent_id: Option<&str>,
+    user_id: Option<&str>,
+    host_conversation_id: Option<&str>,
+    host_conversation_proof: Option<&str>,
+    untrusted_caller: bool,
+) -> Value {
+    let mut body = json!({
+        "tool": tool_id,
+        "arguments": arguments,
+        "agent_id": agent_id,
+        "user_id": user_id,
+        // Server-derived host conversation → Core's `ToolPrincipal`. Omitted-as-
+        // null preserves the fail-closed default on a bound node.
+        "host_conversation_id": host_conversation_id,
+        "host_conversation_proof": host_conversation_proof,
+    });
+    if untrusted_caller {
+        body["untrusted_caller"] = Value::Bool(true);
+    }
+    body
+}
+
+fn interactive_tool_timeout(host_conversation_id: Option<&str>) -> Option<std::time::Duration> {
+    host_conversation_id
+        .filter(|id| !id.trim().is_empty())
+        .map(|_| std::time::Duration::from_secs(360))
 }
 
 /// Decode a `GET /api/tools/search` body into descriptors, **row-tolerantly**.
@@ -562,6 +620,42 @@ pub fn map_core_ok(value: Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn call_tool_body_marks_only_untrusted_caller_calls() {
+        let owner = call_tool_body(
+            "notify.desktop",
+            json!({}),
+            Some("a"),
+            None,
+            None,
+            None,
+            false,
+        );
+        assert!(owner.get("untrusted_caller").is_none());
+        let caller = call_tool_body(
+            "notify.desktop",
+            json!({}),
+            Some("a"),
+            None,
+            None,
+            None,
+            true,
+        );
+        assert_eq!(caller["untrusted_caller"], Value::Bool(true));
+        assert_eq!(caller["tool"], "notify.desktop");
+    }
+
+    #[test]
+    fn interactive_timeout_requires_a_nonempty_conversation_scope() {
+        assert_eq!(
+            interactive_tool_timeout(Some("conversation")),
+            Some(std::time::Duration::from_secs(360))
+        );
+        assert_eq!(interactive_tool_timeout(None), None);
+        assert_eq!(interactive_tool_timeout(Some("")), None);
+        assert_eq!(interactive_tool_timeout(Some("  ")), None);
+    }
 
     /// Build a minimally-valid search row of a given kind.
     fn row(id: &str, kind: &str) -> Value {
@@ -716,6 +810,7 @@ mod tests {
             args: Vec::new(),
             shallow: true,
             parameters: None,
+            read_only: false,
         };
         assert_eq!(
             described.to_tool_def()["function"]["name"],

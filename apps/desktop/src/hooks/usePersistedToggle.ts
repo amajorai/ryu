@@ -5,7 +5,7 @@
 // any of them flips it (within and across windows). Generalizes the catalog's
 // "Friendly names" / "Show tags" switches.
 
-import { THEME_APPEARANCE_CHANGE_EVENT } from "@ryu/ui/theme/prefs";
+import { THEME_APPEARANCE_CHANGE_EVENT } from "@ryu/ui/theme/prefs.ts";
 import { useCallback, useSyncExternalStore } from "react";
 
 const listeners = new Map<string, Set<() => void>>();

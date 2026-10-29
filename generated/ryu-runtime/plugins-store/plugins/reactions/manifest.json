@@ -1,32 +1,88 @@
 {
   "tags": ["chat", "emoji", "reactions", "messages"],
-  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "author": {
+    "name": "Ryu",
+    "url": "https://ryuhq.com"
+  },
   "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/reactions",
   "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/reactions",
   "privacyPolicyUrl": "https://ryuhq.com/privacy",
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/reactions",
   "name": "Message Reactions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "stability": "experimental",
   "category": "Productivity",
-  "description": "Adds emoji reactions to persisted chat messages through the shared message-action contribution surface.",
+  "description": "Emoji reactions on chat messages. People react from the message toolbar or right-click menu, and agents react with the agents.react tool, for example a 👍 on a quick instruction instead of a \"Got it\" reply. On a channel bot, the agent's reaction is mirrored onto the message it answered on platforms that support bot reactions.",
   "tagline": "React to messages with emoji",
   "keywords": ["chat", "emoji", "reactions", "messages"],
   "icon": "smile",
-  "iconDither": { "from": 50, "to": "transparent", "direction": "down" },
-  "surfaces": {
-    "gateway": { "support": "none" },
-    "core": { "support": "full" },
-    "desktop": { "support": "full" },
-    "island": { "support": "limited" },
-    "mobile": { "support": "limited" },
-    "extension": { "support": "limited" },
-    "web": { "support": "limited" },
-    "cli": { "support": "none" }
+  "iconDither": {
+    "from": 50,
+    "to": "transparent",
+    "direction": "down"
   },
-  "engines": { "ryu": ">=0.1.0" },
-  "runnables": [],
+  "surfaces": {
+    "gateway": {
+      "support": "none"
+    },
+    "core": {
+      "support": "full"
+    },
+    "desktop": {
+      "support": "full"
+    },
+    "island": {
+      "support": "limited"
+    },
+    "mobile": {
+      "support": "limited"
+    },
+    "extension": {
+      "support": "limited"
+    },
+    "web": {
+      "support": "limited"
+    },
+    "cli": {
+      "support": "none"
+    }
+  },
+  "engines": {
+    "ryu": ">=0.1.0"
+  },
+  "runnables": [
+    {
+      "id": "tool-agents-react",
+      "name": "React to a Message",
+      "kind": "tool",
+      "config": {
+        "slug": "agents.react",
+        "backend": "inline_js",
+        "description": "Put an emoji reaction on a message in the current conversation, the way a person reacts in a messaging app. Omit message_id to react to the user's latest message: use it to acknowledge a quick instruction (👍), thank (🙏), laugh (😂), celebrate (🎉) or empathise (😢) without padding your reply with \"Got it\". React only when a person would; most messages need none, and a reaction never replaces an answer the user is waiting for. Pass an exact persisted message_id (for example from search_conversations.search) to react to an earlier message or to another agent's message. Repeating the same reaction is idempotent. Core resolves the conversation and the reacting agent; neither can be supplied here.",
+        "input_schema": {
+          "type": "object",
+          "required": ["emoji"],
+          "properties": {
+            "message_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "Optional. The exact persisted Core message id to react to. Omit it to react to the user's latest message. Streaming/client-generated ids and ids from another conversation are rejected; messages authored by other agents are allowed."
+            },
+            "emoji": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "One emoji, such as 👍, 🙏, 😂, 🎉, ❤️ or 👀. Prefer common emoji: chat platforms such as Telegram only accept a fixed set."
+            }
+          },
+          "additionalProperties": false
+        },
+        "code": "// Tool body for `agents.react`, run in Core's JS sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// (`build_inline_tool_program` in crates/core/tool-exec/src/lib.rs) with `input`\n// (the call arguments), `caller` (the DISPATCHING agent, host-derived) and `host`\n// (the capability bridge) already bound, and the body `return`s the tool result.\n// A top-level `return` is therefore correct here and `export` is not. The\n// manifest's `runnables[].config.code` is sealed from this file with\n// `node tools/toolsmith/index.mjs sync plugins-store/plugins/reactions`.\n//\n// Reactions are scoped to the agent's current host conversation. The Core bridge\n// supplies that conversation and the agent actor from the dispatch context, so a\n// model cannot redirect the reaction to another chat or react as another agent.\n// An omitted `message_id` is resolved by Core to the latest user message: the\n// model is never shown persisted ids, and acknowledging what the user just said\n// is the common case.\n\nconst MAX_MESSAGE_ID_BYTES = 200;\nconst MAX_EMOJI_BYTES = 64;\nconst AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;\nconst byteLength = (value) => new TextEncoder().encode(value).length;\n\nconst messageId = String(input.message_id ?? \"\").trim();\nif (byteLength(messageId) > MAX_MESSAGE_ID_BYTES) {\n\tthrow new Error(\n\t\t`agents.react: 'message_id' must be at most ${MAX_MESSAGE_ID_BYTES} bytes`\n\t);\n}\n\nconst emoji = String(input.emoji ?? \"\").trim();\nif (emoji === \"\") {\n\tthrow new Error(\"agents.react: 'emoji' is required\");\n}\nif (byteLength(emoji) > MAX_EMOJI_BYTES) {\n\tthrow new Error(\n\t\t`agents.react: 'emoji' must be at most ${MAX_EMOJI_BYTES} bytes`\n\t);\n}\n\nconst agentId = String(caller.agent_id ?? \"\").trim();\nif (!AGENT_ID.test(agentId)) {\n\tthrow new Error(\"agents.react: the calling agent could not be identified\");\n}\nif (!String(caller.conversation_id ?? \"\").trim()) {\n\tthrow new Error(\n\t\t\"agents.react: a current conversation is required to set a reaction\"\n\t);\n}\n\n// Core derives the conversation and actor from the dispatch context. Only the\n// exact persisted message id (when one was named) and the normalized emoji cross\n// the sandbox boundary.\nreturn await host.reactions.add(\n\tmessageId === \"\" ? { emoji } : { message_id: messageId, emoji }\n);\n"
+      }
+    }
+  ],
   "activation_events": ["*"],
   "contributes": {
     "message_actions": [
@@ -44,5 +100,6 @@
         "order": 100
       }
     ]
-  }
+  },
+  "permission_grants": ["tool:execute", "conversation:reactions"]
 }

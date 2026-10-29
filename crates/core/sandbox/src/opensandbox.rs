@@ -34,6 +34,7 @@
 //! | `RYU_SANDBOX_OPENSANDBOX_TIMEOUT`  | `30m`          | Sandbox lifetime            |
 //! | `RYU_SANDBOX_OPENSANDBOX_DETECT_SECS`| `3`          | Detection probe timeout (s) |
 
+use crate::capture::BoundedCommand;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -42,6 +43,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use super::{ExecOutput, ExecSpec, Sandbox, SandboxCapabilities, WorkspaceId};
+use crate::process_output::output_capped;
 use crate::win_process::NoWindow;
 use crate::BoxFuture;
 
@@ -93,7 +95,10 @@ pub async fn detect() -> DetectResult {
 
     let probe = timeout(
         deadline,
-        Command::new(&binary).arg("--version").no_window().output(),
+        Command::new(&binary)
+            .arg("--version")
+            .no_window()
+            .bounded_output(),
     )
     .await;
 
@@ -123,6 +128,9 @@ pub struct OpenSandboxSandbox;
 impl OpenSandboxSandbox {
     pub fn new() -> Self {
         Self
+    }
+    pub fn governed() -> crate::governed::GovernedOpenSandbox {
+        crate::governed::GovernedOpenSandbox::new(binary().into(), image(), lifetime())
     }
 }
 
@@ -155,7 +163,7 @@ async fn create_sandbox(caps: &SandboxCapabilities) -> Result<String> {
         .arg("-o")
         .arg("json")
         .no_window()
-        .output()
+        .bounded_output()
         .await
         .map_err(|e| anyhow!("osb sandbox create failed: {e}"))?;
 
@@ -198,8 +206,12 @@ fn extract_sandbox_id(stdout: &str) -> Option<String> {
 
 /// Run a command in an existing sandbox via `osb command run <id> -o raw`.
 async fn run_in(id: &str, spec: &ExecSpec) -> Result<ExecOutput> {
+    run_in_with_binary(id, spec, binary()).await
+}
+
+async fn run_in_with_binary(id: &str, spec: &ExecSpec, binary: String) -> Result<ExecOutput> {
     ensure_capabilities_supported(&spec.capabilities)?;
-    let mut cmd = Command::new(binary());
+    let mut cmd = Command::new(&binary);
     cmd.arg("command")
         .arg("run")
         .arg(id)
@@ -211,46 +223,32 @@ async fn run_in(id: &str, spec: &ExecSpec) -> Result<ExecOutput> {
         cmd.arg(arg);
     }
 
-    let has_stdin = spec.stdin.is_some();
-    if has_stdin {
-        cmd.stdin(std::process::Stdio::piped());
+    cmd.stdin(if spec.stdin.is_some() {
+        std::process::Stdio::piped()
     } else {
-        cmd.stdin(std::process::Stdio::null());
+        std::process::Stdio::null()
+    })
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped())
+    .no_window();
+    let cleanup_id = id.to_owned();
+    let mut cleanup = crate::WorkspaceCleanup::new(Box::pin(async move {
+        delete_sandbox_with_binary(&cleanup_id, &binary).await;
+        Ok(())
+    }));
+    let output = output_capped(
+        &mut cmd,
+        spec.stdin.clone(),
+        spec.timeout_secs,
+        "osb command run",
+    )
+    .await;
+    if output.is_err() {
+        cleanup.finish().await?;
+    } else {
+        cleanup.disarm();
     }
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-    cmd.no_window();
-
-    let stdin = spec.stdin.clone();
-    let run = async move {
-        if let Some(bytes) = stdin {
-            let mut child = cmd
-                .spawn()
-                .map_err(|e| anyhow!("osb command run spawn failed: {e}"))?;
-            if let Some(mut writer) = child.stdin.take() {
-                use tokio::io::AsyncWriteExt as _;
-                writer
-                    .write_all(&bytes)
-                    .await
-                    .map_err(|e| anyhow!("osb command run stdin write failed: {e}"))?;
-            }
-            child
-                .wait_with_output()
-                .await
-                .map_err(|e| anyhow!("osb command run wait failed: {e}"))
-        } else {
-            cmd.output()
-                .await
-                .map_err(|e| anyhow!("osb command run failed: {e}"))
-        }
-    };
-
-    let output = match spec.timeout_secs {
-        Some(secs) => timeout(Duration::from_secs(secs), run)
-            .await
-            .map_err(|_| anyhow!("osb command run timed out after {secs}s"))?,
-        None => run.await,
-    }?;
+    let output = output?;
 
     Ok(ExecOutput {
         exit_code: output.status.code().unwrap_or(-1),
@@ -262,13 +260,17 @@ async fn run_in(id: &str, spec: &ExecSpec) -> Result<ExecOutput> {
 /// Best-effort sandbox deletion. Errors are swallowed: a leaked sandbox is the
 /// runtime's own timeout to reap, and a delete failure must not mask a result.
 async fn delete_sandbox(id: &str) {
-    let _ = Command::new(binary())
-        .arg("sandbox")
-        .arg("delete")
-        .arg(id)
-        .no_window()
-        .output()
-        .await;
+    delete_sandbox_with_binary(id, &binary()).await;
+}
+
+async fn delete_sandbox_with_binary(id: &str, binary: &str) {
+    let mut cmd = Command::new(binary);
+    cmd.args(["sandbox", "delete", id])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .no_window();
+    let _ = timeout(Duration::from_secs(3), cmd.status()).await;
 }
 
 impl Sandbox for OpenSandboxSandbox {
@@ -280,9 +282,13 @@ impl Sandbox for OpenSandboxSandbox {
 
     fn exec(&self, spec: ExecSpec) -> BoxFuture<Result<ExecOutput>> {
         Box::pin(async move {
+            crate::process_output::execution_timeout(spec.timeout_secs, 30)?;
             let id = create_sandbox(&spec.capabilities).await?;
+            let mut cleanup = crate::WorkspaceCleanup::new(
+                OpenSandboxSandbox::new().destroy_workspace(&WorkspaceId(id.clone())),
+            );
             let result = run_in(&id, &spec).await;
-            delete_sandbox(&id).await;
+            cleanup.finish().await?;
             result
         })
     }
@@ -301,7 +307,14 @@ impl Sandbox for OpenSandboxSandbox {
 
     fn exec_in_workspace(&self, id: &WorkspaceId, spec: ExecSpec) -> BoxFuture<Result<ExecOutput>> {
         let id = id.0.clone();
-        Box::pin(async move { run_in(&id, &spec).await })
+        Box::pin(async move {
+            crate::process_output::execution_timeout(spec.timeout_secs, 30)?;
+            let result = run_in(&id, &spec).await;
+            if result.is_err() {
+                delete_sandbox(&id).await;
+            }
+            result
+        })
     }
 
     fn destroy_workspace(&self, id: &WorkspaceId) -> BoxFuture<Result<()>> {
@@ -318,6 +331,55 @@ impl Sandbox for OpenSandboxSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_command_captures_stdin_streams_and_guest_exit_without_deleting_workspace() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let binary = directory.path().join("fake-osb");
+        let log = directory.path().join("commands.log");
+        std::fs::write(&binary, format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncat; printf 'guest stdout'; printf 'guest stderr' >&2; exit 7\n", log.display()
+        )).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut spec = ExecSpec::new("echo", vec!["hello".to_owned()]);
+        spec.stdin = Some(b"guest stdin\n".to_vec());
+        let output =
+            run_in_with_binary("workspace-1", &spec, binary.to_string_lossy().into_owned())
+                .await
+                .unwrap();
+        assert_eq!(output.exit_code, 7);
+        assert_eq!(output.stdout, b"guest stdin\nguest stdout");
+        assert_eq!(output.stderr, b"guest stderr");
+        assert_eq!(
+            std::fs::read_to_string(log).unwrap(),
+            "command run workspace-1 -o raw -- echo hello\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timed_out_workspace_command_deletes_its_exact_workspace() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let binary = directory.path().join("fake-osb");
+        let log = directory.path().join("commands.log");
+        std::fs::write(&binary, format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = command ]; then sleep 3; fi\n", log.display()
+        )).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut spec = ExecSpec::new("echo", vec!["hello".to_owned()]);
+        spec.timeout_secs = Some(1);
+        let error = run_in_with_binary("workspace-1", &spec, binary.to_string_lossy().into_owned())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("timed out"));
+        assert_eq!(
+            std::fs::read_to_string(log).unwrap(),
+            "command run workspace-1 -o raw -- echo hello\nsandbox delete workspace-1\n"
+        );
+    }
 
     #[test]
     fn backend_name_is_opensandbox() {

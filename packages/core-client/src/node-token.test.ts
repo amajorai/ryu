@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,8 +17,9 @@ const SAVED = { ...process.env };
 function reset() {
 	for (const key of [
 		"RYU_DIR",
-		"RYU_HOME",
 		"RYU_PROFILE",
+		"XDG_CONFIG_HOME",
+		"APPDATA",
 		"RYU_TOKEN",
 		"RYU_CORE_TOKEN",
 	]) {
@@ -36,6 +37,8 @@ describe("ryuHomeDir", () => {
 	it("gives each non-release profile its own directory", () => {
 		// A `bun dev` stack must not read the INSTALLED release node's token —
 		// that is the profile collision `RYU_PROFILE` exists to prevent.
+		process.env.XDG_CONFIG_HOME = join(tmpdir(), "ryu-no-pointer-here");
+		process.env.APPDATA = process.env.XDG_CONFIG_HOME;
 		process.env.RYU_PROFILE = "dev";
 		expect(ryuHomeDir().endsWith(".ryu-dev")).toBe(true);
 
@@ -46,18 +49,35 @@ describe("ryuHomeDir", () => {
 		expect(ryuHomeDir().endsWith(".ryu")).toBe(true);
 	});
 
-	it("honours an explicit RYU_HOME", () => {
-		process.env.RYU_HOME = "/tmp/custom-ryu";
-		expect(ryuHomeDir()).toBe("/tmp/custom-ryu");
+	it("honours an explicit RYU_DIR and keeps the token in secrets/", () => {
+		process.env.RYU_DIR = "/tmp/core-data";
+		expect(ryuHomeDir()).toBe("/tmp/core-data");
 		expect(nodeAuthTokenPath()).toBe(
-			join("/tmp/custom-ryu", "node-auth.token")
+			join("/tmp/core-data", "secrets", "node-auth.token")
 		);
 	});
 
-	it("prefers Core's relocated RYU_DIR", () => {
-		process.env.RYU_HOME = "/tmp/js-home";
-		process.env.RYU_DIR = "/tmp/core-data";
-		expect(ryuHomeDir()).toBe("/tmp/core-data");
+	it("follows the Storage pointer when RYU_DIR is unset", () => {
+		if (process.platform === "darwin") {
+			return; // macOS config dir is not overridable from the environment.
+		}
+		const config = mkdtempSync(join(tmpdir(), "ryu-config-"));
+		try {
+			process.env.XDG_CONFIG_HOME = config;
+			process.env.APPDATA = config;
+			process.env.RYU_PROFILE = "dev";
+			mkdirSync(join(config, "ryu-dev"), { recursive: true });
+			writeFileSync(
+				join(config, "ryu-dev", "data-path.json"),
+				JSON.stringify({ data_dir: "/tmp/relocated" })
+			);
+			expect(ryuHomeDir()).toBe("/tmp/relocated");
+			// RYU_DIR still wins over the pointer, exactly like Core.
+			process.env.RYU_DIR = "/tmp/explicit";
+			expect(ryuHomeDir()).toBe("/tmp/explicit");
+		} finally {
+			rmSync(config, { force: true, recursive: true });
+		}
 	});
 });
 
@@ -66,7 +86,8 @@ describe("resolveLocalNodeToken", () => {
 
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "ryu-token-"));
-		process.env.RYU_HOME = home;
+		process.env.RYU_DIR = home;
+		mkdirSync(join(home, "secrets"));
 	});
 
 	afterEach(() => {
@@ -80,17 +101,17 @@ describe("resolveLocalNodeToken", () => {
 	});
 
 	it("reads the minted token file and trims it", () => {
-		writeFileSync(join(home, "node-auth.token"), "ryu_minted\n");
+		writeFileSync(join(home, "secrets", "node-auth.token"), "ryu_minted\n");
 		expect(resolveLocalNodeToken(LOCAL)).toBe("ryu_minted");
 	});
 
 	it("treats an empty or whitespace-only file as no token", () => {
-		writeFileSync(join(home, "node-auth.token"), "   \n");
+		writeFileSync(join(home, "secrets", "node-auth.token"), "   \n");
 		expect(resolveLocalNodeToken(LOCAL)).toBeNull();
 	});
 
 	it("mirrors Core's precedence: RYU_CORE_TOKEN > RYU_TOKEN > file", () => {
-		writeFileSync(join(home, "node-auth.token"), "from-file");
+		writeFileSync(join(home, "secrets", "node-auth.token"), "from-file");
 		expect(resolveLocalNodeToken(LOCAL)).toBe("from-file");
 
 		// An inherited node token (what a Core-spawned child sees) beats the file.
@@ -137,8 +158,9 @@ describe("resolveLocalNodeToken locality gate", () => {
 
 	beforeEach(() => {
 		home2 = mkdtempSync(join(tmpdir(), "ryu-token-gate-"));
-		process.env.RYU_HOME = home2;
-		writeFileSync(join(home2, "node-auth.token"), "minted-secret");
+		process.env.RYU_DIR = home2;
+		mkdirSync(join(home2, "secrets"));
+		writeFileSync(join(home2, "secrets", "node-auth.token"), "minted-secret");
 	});
 
 	afterEach(() => {

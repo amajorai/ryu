@@ -37,8 +37,8 @@ if (!GlobalRegistrator.isRegistered) {
 	GlobalRegistrator.register();
 }
 
-import { beforeEach, describe, expect, test } from "bun:test";
-import { DEFAULT_THEME_MODE, defaultThemePrefs } from "@ryu/ui/theme/prefs";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { DEFAULT_THEME_MODE, defaultThemePrefs } from "@ryu/ui/theme/prefs.ts";
 import {
 	DEFAULT_DARK_ID,
 	DEFAULT_LIGHT_ID,
@@ -46,18 +46,27 @@ import {
 } from "@/src/lib/themes/presets.ts";
 import { initTheme } from "./useThemePreset.ts";
 
-/** Force the OS preference, which is what "system" (and only "system") reads. */
+const originalMatchMedia = window.matchMedia;
+afterAll(() => {
+	window.matchMedia = originalMatchMedia;
+});
+
+/** Use the real DOM MediaQueryList, controlling only this fixture's OS signal. */
 function stubPrefersDark(prefersDark: boolean) {
-	window.matchMedia = ((query: string) => ({
-		matches: query.includes("dark") ? prefersDark : false,
-		media: query,
-		addEventListener: () => undefined,
-		removeEventListener: () => undefined,
-		addListener: () => undefined,
-		removeListener: () => undefined,
-		dispatchEvent: () => false,
-		onchange: null,
-	})) as unknown as typeof window.matchMedia;
+	window.matchMedia = (query) => {
+		const media = originalMatchMedia.call(window, query);
+		Object.defineProperty(media, "matches", {
+			configurable: true,
+			value: query.includes("dark") ? prefersDark : false,
+		});
+		media.addEventListener = () => undefined;
+		media.removeEventListener = () => undefined;
+		media.addListener = () => undefined;
+		media.removeListener = () => undefined;
+		media.dispatchEvent = () => false;
+		media.onchange = null;
+		return media;
+	};
 }
 
 function appliedBackground(): string {

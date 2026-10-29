@@ -14,9 +14,9 @@ let savedToken: string | undefined;
 beforeEach(() => {
 	savedUrl = process.env.RYU_CORE_URL;
 	savedToken = process.env.RYU_CORE_TOKEN;
-	// biome-ignore lint/performance/noDelete: must genuinely unset so the `?? DEFAULT` fallback path runs.
+	// must genuinely unset so the `?? DEFAULT` fallback path runs.
 	delete process.env.RYU_CORE_URL;
-	// biome-ignore lint/performance/noDelete: must genuinely unset so the `?? DEFAULT` fallback path runs.
+	// must genuinely unset so the `?? DEFAULT` fallback path runs.
 	delete process.env.RYU_CORE_TOKEN;
 });
 
@@ -34,7 +34,10 @@ afterEach(() => {
 });
 
 test("falls back to DEFAULT_CORE_URL with no token when nothing is set", () => {
-	expect(buildTarget()).toEqual({ url: DEFAULT_CORE_URL, token: null });
+	const { fetch: transport, ...target } = buildTarget();
+	expect(target).toEqual({ url: DEFAULT_CORE_URL, token: null });
+	// The tokenless loopback default gets a transport that strips credentials.
+	expect(transport).toBeFunction();
 });
 
 test("RYU_CORE_URL overrides the default", () => {

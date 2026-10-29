@@ -4,7 +4,12 @@ import { useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
+import type { createMessageDecorator } from "../../src/lib/chat-message-decoration.ts";
 import "../../src/index.css";
+
+type DatedFixtureMessage = ReturnType<
+	ReturnType<typeof createMessageDecorator<UIMessage>>
+>[number];
 
 const ALEX_AVATAR =
 	"https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=96&q=80";
@@ -50,7 +55,7 @@ const MESSAGES = [
 		parts: [{ text: "Perfect. I am marking the handoff ready.", type: "text" }],
 		role: "user",
 	},
-] as unknown as UIMessage[];
+] satisfies DatedFixtureMessage[];
 
 function AvatarMark({ letter }: { letter: string }) {
 	return (
@@ -100,7 +105,7 @@ function ReadReceiptsProof() {
 		>
 			<div className="mx-auto max-w-4xl space-y-6">
 				<header className="max-w-3xl space-y-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						TEAM CHAT · READ RECEIPTS
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">

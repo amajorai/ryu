@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // @ryuhq/protocol — the canonical, surface-agnostic parser/builder for `ryu://`
 // deep links: the scheme that lets a link on any website (or another Ryu surface)
 // open the app and jump straight to a destination or action. This is the SINGLE
@@ -26,6 +28,30 @@
 // `ryu://nodes/connect?url=https://node.example.com&name=prod`.
 
 import { normalizeRnpNodeUrl } from "./continuity.ts";
+import profileSchemes from "./deep-link-profiles.json" with { type: "json" };
+
+export const RYU_DEEP_LINK_SCHEMES = Object.freeze(profileSchemes);
+export type RyuDeepLinkProfile = keyof typeof profileSchemes;
+
+const profileKeySchema = z.custom<RyuDeepLinkProfile>((value) => {
+	const text = z.string().safeParse(value);
+	return text.success && Object.hasOwn(profileSchemes, text.data);
+});
+export function isRyuDeepLinkProfile(
+	value: Parameters<typeof profileKeySchema.safeParse>[0]
+): value is RyuDeepLinkProfile {
+	return profileKeySchema.safeParse(value).success;
+}
+
+export function ryuDeepLinkProfile(raw: string): RyuDeepLinkProfile | null {
+	const scheme = raw.trim().split("://", 1)[0]?.toLowerCase();
+	for (const profile of Object.keys(profileSchemes)) {
+		if (isRyuDeepLinkProfile(profile) && profileSchemes[profile] === scheme) {
+			return raw.trim().includes("://") ? profile : null;
+		}
+	}
+	return null;
+}
 //
 // For models/skills, `<source>` names the catalog (huggingface, skills.sh, …) and
 // everything after it is the verbatim catalog id (joined by "/", so a Hugging Face
@@ -54,6 +80,7 @@ import { normalizeRnpNodeUrl } from "./continuity.ts";
 // custom-scheme `URL` support historically differs.
 
 export type DeepLinkIntent =
+	| { kind: "plugin-app"; pluginId: string; toolName: string; appPath: string }
 	| { kind: "model"; source: string; id: string; node: string | null }
 	| { kind: "skill"; source: string; id: string; node: string | null }
 	| { kind: "app"; id: string; node: string | null }
@@ -80,6 +107,7 @@ export type DeepLinkIntent =
  * always returns the strict {@link DeepLinkIntent} with every field present.
  */
 export type DeepLinkBuildInput =
+	| { kind: "plugin-app"; pluginId: string; toolName: string; appPath?: string }
 	| { kind: "model"; source: string; id: string; node?: string | null }
 	| { kind: "skill"; source: string; id: string; node?: string | null }
 	| { kind: "app"; id: string; node?: string | null }
@@ -132,7 +160,10 @@ export const DEEP_LINK_PAGES = [
 
 export type DeepLinkPage = (typeof DEEP_LINK_PAGES)[number];
 
-const SCHEME_PREFIX = /^ryu:\/\//i;
+const SCHEME_PREFIX = new RegExp(
+	`^(?:${Object.values(profileSchemes).join("|")}):\\/\\/`,
+	"i"
+);
 const HTTP_PREFIX = /^https?:\/\//;
 const NON_NAME_CHARS = /[^a-zA-Z0-9-]/g;
 const TRAILING_SLASHES = /\/+$/;
@@ -302,6 +333,28 @@ export function parseRyuDeepLink(raw: string): DeepLinkIntent | null {
 	}
 	const { category, pathStr, query } = parts;
 	const params = parseQuery(query);
+	if (category === "plugins") {
+		const segments = pathStr.split("/").filter(Boolean).map(decodeSafe);
+		const pluginId = segments[0];
+		const toolName = segments[2];
+		const appPath = params.get("path") ?? "/";
+		if (
+			segments.length !== 3 ||
+			segments[1] !== "app" ||
+			!pluginId ||
+			!toolName ||
+			pluginId.length > 512 ||
+			toolName.length > 512 ||
+			!appPath.startsWith("/") ||
+			appPath.startsWith("//") ||
+			/[\\#]/.test(appPath) ||
+			[...appPath].some((character) => character.charCodeAt(0) < 32) ||
+			appPath.length > 4096
+		) {
+			return null;
+		}
+		return { kind: "plugin-app", pluginId, toolName, appPath };
+	}
 	if (category === "nodes") {
 		return parseNode(params);
 	}
@@ -343,7 +396,28 @@ export function parseRyuDeepLink(raw: string): DeepLinkIntent | null {
 }
 
 /** Build a `ryu://` deep link from an intent (used to render "Open in Ryu"). */
-export function buildRyuDeepLink(intent: DeepLinkBuildInput): string {
+export function buildRyuDeepLink(
+	intent: DeepLinkBuildInput,
+	profile: RyuDeepLinkProfile = "release"
+): string {
+	if (!isRyuDeepLinkProfile(profile)) {
+		throw new Error("Unknown Ryu deep-link profile");
+	}
+	return buildStableDeepLink(intent).replace(
+		/^ryu:/,
+		`${profileSchemes[profile]}:`
+	);
+}
+
+function buildStableDeepLink(intent: DeepLinkBuildInput): string {
+	if (intent.kind === "plugin-app") {
+		const path = intent.appPath ?? "/";
+		const link = `ryu://plugins/${encodeURIComponent(intent.pluginId)}/app/${encodeURIComponent(intent.toolName)}?path=${encodeURIComponent(path)}`;
+		if (!parseRyuDeepLink(link)) {
+			throw new Error("Plugin app link requires a safe app-relative path");
+		}
+		return link;
+	}
 	if (intent.kind === "handoff") {
 		const sourceNodeUrl = normalizeRnpNodeUrl(intent.sourceNodeUrl);
 		if (!sourceNodeUrl) {
@@ -457,9 +531,15 @@ export function parseConnectCallbackDeepLink(
 	return validConnectSession(sessionUri) ? { sessionUri } : null;
 }
 
-export function buildConnectCallbackDeepLink(sessionUri: string): string {
+export function buildConnectCallbackDeepLink(
+	sessionUri: string,
+	profile: RyuDeepLinkProfile = "release"
+): string {
+	if (!isRyuDeepLinkProfile(profile)) {
+		throw new Error("Unknown Ryu deep-link profile");
+	}
 	if (!validConnectSession(sessionUri)) {
 		throw new Error("Invalid Connect callback session");
 	}
-	return `ryu://connect/complete?session_uri=${encodeURIComponent(sessionUri)}`;
+	return `${profileSchemes[profile]}://connect/complete?session_uri=${encodeURIComponent(sessionUri)}`;
 }

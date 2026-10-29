@@ -1,13 +1,13 @@
 // Ryu ↔ pi-ai OAuth login bridge.
 //
-// Drives ONE subscription login (`anthropic` / `openai-codex` / `github-copilot`
-// / …) using pi-ai's own flow modules, and speaks JSONL over stdio so Core can
-// surface the flow in the desktop instead of a terminal nobody can see.
+// Drives one subscription login, credential refresh, or local model listing (`anthropic` /
+// `openai-codex` / `github-copilot` / …) using pi-ai's own flow modules. JSONL
+// over stdio lets Core surface login in the desktop and persist rotated tokens.
 //
 // Why a Node helper rather than three OAuth flows reimplemented in Rust: pi-ai
 // already ships and maintains them (`dist/auth/oauth/*.js`), including Copilot's
-// bespoke GitHub-device → Copilot-token exchange that `OAUTH_PROVIDERS` in
-// pi_config deliberately refuses to guess at. Bridging the vendor flow keeps the
+// bespoke GitHub-device → Copilot-token exchange that Core deliberately refuses
+// to guess at. Bridging the vendor flow keeps the
 // client ids and endpoints out of Ryu entirely.
 //
 // This file is `include_str!`-embedded in Core and written into the managed Pi
@@ -22,6 +22,7 @@
 //           {type:"done", credential:{…}}
 //           {type:"error", message}
 //   stdin:  {id, value}     — the answer to a "prompt" event
+//           {type:"refresh", credential:{…}} — credential for refresh mode
 //
 // It deliberately does NOT write auth.json. The CLI this mirrors
 // (`pi-ai/dist/cli.js`) writes a CWD-relative "auth.json", which would land the
@@ -31,6 +32,57 @@
 
 import { createInterface } from "node:readline";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { proxiedFetch } from "./ryu-oauth-proxy.mjs";
+
+// These native intrinsics admit only primitive JSON string fields; they neither
+// coerce values nor accept boxed strings. Capture them before running a flow.
+const intrinsicApply = Reflect.apply;
+const intrinsicStringValue = String.prototype.valueOf;
+const intrinsicBox = Object;
+
+/** Admit exactly the bridge's consumed refresh fields; the SDK owns token metadata. */
+function parseRefreshCredential(credential) {
+	if (credential?.type !== "oauth") {
+		return null;
+	}
+	const refresh = credential.refresh;
+	if (intrinsicBox(refresh) === refresh) {
+		return null;
+	}
+	try {
+		intrinsicApply(intrinsicStringValue, refresh, []);
+	} catch {
+		return null;
+	}
+	return credential.refresh ? { credential } : null;
+}
+
+/** Classify only the documented revocation codes from an actual rejected reply. */
+function classifyRefreshError(body) {
+	const error = body?.error;
+	let stringError = false;
+	if (intrinsicBox(error) !== error) {
+		try {
+			intrinsicApply(intrinsicStringValue, error, []);
+			stringError = true;
+		} catch {
+			/* Structured OAuth errors expose their code instead. */
+		}
+	}
+	const code = stringError ? body.error : body?.error?.code;
+	return [
+		"invalid_grant",
+		"refresh_token_reused",
+		"refresh_token_revoked",
+	].includes(code)
+		? "revoked"
+		: undefined;
+}
+
+// Provider route through the owner's desktop (see ryu-oauth-proxy.mjs).
+if (process.env.RYU_OAUTH_PROXY_URL) {
+	globalThis.fetch = proxiedFetch(process.env.RYU_OAUTH_PROXY_URL);
+}
 
 /** Emit one event. Every write is a single line — Core parses line-by-line. */
 const emit = (event) => {
@@ -41,6 +93,8 @@ const emit = (event) => {
 // comes back. Keyed by id so a flow that prompts twice cannot cross its answers.
 const pending = new Map();
 let nextPromptId = 0;
+let acceptRefreshCredential;
+let refreshFailure = "uncertain";
 
 const rl = createInterface({ input: process.stdin });
 rl.on("line", (line) => {
@@ -52,6 +106,12 @@ rl.on("line", (line) => {
 	try {
 		message = JSON.parse(trimmed);
 	} catch {
+		return;
+	}
+	if (message.type === "refresh" && acceptRefreshCredential) {
+		const accept = acceptRefreshCredential;
+		acceptRefreshCredential = undefined;
+		accept(message.credential);
 		return;
 	}
 	const resolve = pending.get(message.id);
@@ -68,9 +128,22 @@ rl.on("line", (line) => {
  */
 const prompt = (authPrompt) => {
 	const id = `p${nextPromptId++}`;
-	return new Promise((resolve) => {
-		pending.set(id, resolve);
-		emit({ type: "prompt", id, prompt: authPrompt });
+	const { signal, ...visiblePrompt } = authPrompt;
+	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(signal.reason);
+			return;
+		}
+		const onAbort = () => {
+			pending.delete(id);
+			reject(signal.reason);
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+		pending.set(id, (value) => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve(value);
+		});
+		emit({ type: "prompt", id, prompt: visiblePrompt });
 	});
 };
 
@@ -154,9 +227,36 @@ const exitWhenFlushed = (code) => {
 
 async function main() {
 	const providerId = process.argv[2];
+	const mode = process.argv[3] ?? "login";
 	if (!providerId) {
 		emit({ type: "error", message: "no provider id given" });
 		return 2;
+	}
+	if (mode === "models") {
+		const provider = builtinProviders().find(
+			(entry) => entry.id === providerId
+		);
+		// The pinned pi-ai0.84.4 Provider owner requires getModels(); builtinProviders
+		// returns that installed owner, rather than an untrusted runtime plugin.
+		if (!provider) {
+			emit({ type: "error", message: "provider has no local model catalog" });
+			return 2;
+		}
+		const models = await provider.getModels();
+		emit({
+			type: "models",
+			models: models.slice(0, 512).flatMap((model) =>
+				model.id.length <= 256
+					? [
+							{
+								id: model.id,
+								name: model.name.length <= 256 ? model.name : model.id,
+							},
+						]
+					: []
+			),
+		});
+		return 0;
 	}
 	const provider = builtinProviders().find(
 		(entry) => entry.id === providerId && entry.auth?.oauth !== undefined
@@ -168,7 +268,64 @@ async function main() {
 		});
 		return 2;
 	}
-	const credential = await provider.auth.oauth.login({ prompt, notify });
+	if (mode === "refresh") {
+		const credential = await new Promise((resolve) => {
+			acceptRefreshCredential = resolve;
+		});
+		const refreshInput = parseRefreshCredential(credential);
+		if (!refreshInput) {
+			emit({ type: "error", message: "invalid stored OAuth credential" });
+			return 2;
+		}
+		// Observe an actual rejected response rather than guessing from exception
+		// text (which can contain tokens). A lost response stays uncertain.
+		const originalFetch = globalThis.fetch;
+		let refreshMayHaveConsumed = false;
+		globalThis.fetch = async (...args) => {
+			refreshFailure = "uncertain";
+			const response = await originalFetch(...args);
+			if (response.ok) {
+				refreshMayHaveConsumed = true;
+			} else if (
+				!refreshMayHaveConsumed &&
+				(response.status === 429 || response.status === 503)
+			) {
+				refreshFailure = "transient";
+			} else if (response.status === 400 || response.status === 401) {
+				const body = await response
+					.clone()
+					.json()
+					.catch(() => null);
+				if (classifyRefreshError(body) === "revoked") {
+					refreshFailure = "revoked";
+				}
+			}
+			return response;
+		};
+		let refreshed;
+		try {
+			refreshed = await provider.auth.oauth.refresh(
+				refreshInput.credential,
+				new AbortController().signal
+			);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+		emit({ type: "done", credential: refreshed });
+		return 0;
+	}
+	if (mode !== "login") {
+		emit({ type: "error", message: "unsupported OAuth bridge mode" });
+		return 2;
+	}
+	// Pi's provider login contract requires a flow-wide AbortSignal. Claude's
+	// callback flow uses it before emitting its authorization URL; without it,
+	// login fails immediately at signal.addEventListener.
+	const credential = await provider.auth.oauth.login({
+		prompt,
+		notify,
+		signal: new AbortController().signal,
+	});
 	emit({ type: "done", credential });
 	return 0;
 }
@@ -176,6 +333,14 @@ async function main() {
 main()
 	.then((code) => exitWhenFlushed(code))
 	.catch((error) => {
-		emit({ type: "error", message: error?.message ?? String(error) });
+		// Vendor errors may embed refresh tokens or response bodies. Keep the
+		// diagnostic useful without sending those bytes to Core logs or the UI.
+		const detail = String(error?.message ?? "");
+		const message = /EADDRINUSE/.test(detail)
+			? "OAuth callback port is already in use"
+			: /invalid_grant|revoked|expired/i.test(detail)
+				? "OAuth credential expired or was revoked"
+				: "Provider OAuth request failed";
+		emit({ type: "error", message, refreshFailure });
 		exitWhenFlushed(1);
 	});

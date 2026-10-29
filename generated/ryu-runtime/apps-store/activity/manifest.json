@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/activity",
   "name": "Activity",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "stability": "experimental",
   "category": "Productivity",
   "description": "The unified activity feed and agent observability workspace: inspect local audits, correlated traces, quality, and security evidence alongside monitor alerts, finished tasks, runs, approvals, meetings, and notes.",
@@ -56,20 +56,5 @@
   "companion": {
     "label": "Activity",
     "icon": "activity-03"
-  },
-  "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "activity.chat",
-        "title": "Activity widget",
-        "description": "Activity chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["activity widget"],
-        "examples": ["Show me a activity widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ]
   }
 }

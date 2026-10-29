@@ -3,7 +3,7 @@
 // beui.dev/components/motion/range-slider
 
 import { type SliderOptions, useSlider } from "@ryu/ui/hooks/use-slider.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { motion, useReducedMotion } from "motion/react";
 import { useMemo } from "react";
 

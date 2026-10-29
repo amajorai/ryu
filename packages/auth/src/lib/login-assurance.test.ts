@@ -5,7 +5,9 @@ import {
 	LOGIN_PENDING_COOKIE,
 	LOGIN_TRUST_COOKIE,
 	LOGIN_TRUST_MAX_AGE_SECONDS,
+	type LoginAssuranceChallenge,
 	loginAssuranceAfterFactor,
+	loginAssuranceAfterMagicLinkRequest,
 	loginAssuranceAfterPassword,
 } from "./login-assurance.ts";
 
@@ -13,6 +15,7 @@ interface MockContextOptions {
 	body?: unknown;
 	passkeyCount?: number;
 	path?: string;
+	rememberDevice?: boolean;
 	trustedDevice?: string;
 	twoFactorEnabled?: boolean;
 }
@@ -40,10 +43,17 @@ function mockContext(options: MockContextOptions = {}) {
 			twoFactorEnabled: options.twoFactorEnabled ?? false,
 		},
 	};
+	let currentSession: typeof newSession | null = newSession;
 	const context = {
 		adapter: {
-			findMany: async () => Array.from({ length: options.passkeyCount ?? 0 }),
-			findOne: async () => ({ userId: "user-1" }),
+			findMany: async () =>
+				Array.from({ length: options.passkeyCount ?? 0 }, () => ({
+					id: "fixture",
+				})),
+			findOne: async ({ model }: { model: string }) =>
+				model === "user"
+					? { email: "user@example.com", id: "user-1" }
+					: { userId: "user-1" },
 		},
 		authCookies: {
 			accountData: cookie("account_data"),
@@ -63,12 +73,14 @@ function mockContext(options: MockContextOptions = {}) {
 				deletedSessions.push(token);
 			},
 		},
-		newSession,
+		get newSession() {
+			return currentSession;
+		},
 		options: { account: { storeAccountCookie: false } },
-		oauthConfig: { storeStateStrategy: "database" },
+		oauthConfig: { storeStateStrategy: "database" as const },
 		secret: "test-secret",
-		setNewSession: (value: unknown) => {
-			context.newSession = value as typeof newSession | null;
+		setNewSession: (value: null) => {
+			currentSession = value;
 		},
 	};
 	const ctx = {
@@ -80,7 +92,12 @@ function mockContext(options: MockContextOptions = {}) {
 			}
 			return signedCookies.get(name) ?? null;
 		},
-		json: (body: unknown) => ({ body }),
+		request: new Request("https://ryu.test/api/auth", {
+			headers: options.rememberDevice
+				? { "x-ryu-remember-device": "true" }
+				: undefined,
+		}),
+		json: async (body: LoginAssuranceChallenge) => body,
 		path: options.path ?? "/sign-in/email",
 		setCookie: (
 			name: string,
@@ -97,6 +114,7 @@ function mockContext(options: MockContextOptions = {}) {
 		) => {
 			signedCookies.set(name, value);
 			responseCookies.set(name, { maxAge: valueOptions.maxAge, value });
+			return value;
 		},
 	};
 	return { ctx, deletedSessions, responseCookies, signedCookies };
@@ -177,13 +195,22 @@ test("trusted-device retention is 30 days", () => {
 	expect(LOGIN_TRUST_MAX_AGE_SECONDS).toBe(30 * 24 * 60 * 60);
 });
 
+test("username passwords require the same passkey or email factor as email passwords", async () => {
+	for (const passkeyCount of [0, 1]) {
+		const mock = mockContext({ path: "/sign-in/username", passkeyCount });
+		expect(await loginAssuranceAfterPassword(mock.ctx)).toEqual({
+			fallbackFactor: "email",
+			loginFactor: passkeyCount ? "passkey" : "email",
+		});
+		expect(mock.deletedSessions).toEqual(["session-token"]);
+	}
+});
+
 test("replaces a password session with a passkey challenge", async () => {
 	const mock = mockContext({ passkeyCount: 1 });
 	const response = await loginAssuranceAfterPassword(mock.ctx);
 
-	expect(response).toEqual({
-		body: { fallbackFactor: "email", loginFactor: "passkey" },
-	});
+	expect(response).toEqual({ fallbackFactor: "email", loginFactor: "passkey" });
 	expect(mock.deletedSessions).toEqual(["session-token"]);
 	expect(mock.ctx.context.newSession).toBeNull();
 	expect(mock.signedCookies.has(LOGIN_PENDING_COOKIE)).toBe(true);
@@ -202,9 +229,7 @@ test("replaces a password session with email OTP when no stronger factor exists"
 	const mock = mockContext();
 	const response = await loginAssuranceAfterPassword(mock.ctx);
 
-	expect(response).toEqual({
-		body: { fallbackFactor: "email", loginFactor: "email" },
-	});
+	expect(response).toEqual({ fallbackFactor: "email", loginFactor: "email" });
 	expect(mock.deletedSessions).toEqual(["session-token"]);
 });
 
@@ -216,6 +241,67 @@ test("a trusted device skips the factor challenge", async () => {
 	expect(await loginAssuranceAfterPassword(mock.ctx)).toBeUndefined();
 	expect(mock.deletedSessions).toEqual([]);
 	expect(mock.signedCookies.has(LOGIN_PENDING_COOKIE)).toBe(false);
+});
+
+test("a trust cookie minted after factor success skips the next challenge", async () => {
+	const password = mockContext({ body: { rememberDevice: true } });
+	await loginAssuranceAfterPassword(password.ctx);
+	const factor = mockContext({ path: "/sign-in/email-otp" });
+	factor.signedCookies.set(
+		LOGIN_PENDING_COOKIE,
+		password.signedCookies.get(LOGIN_PENDING_COOKIE) ?? ""
+	);
+	await loginAssuranceAfterFactor(factor.ctx);
+	const trust = factor.signedCookies.get(LOGIN_TRUST_COOKIE);
+	expect(trust).toBeString();
+
+	const next = mockContext({ passkeyCount: 1, trustedDevice: trust ?? "" });
+	expect(await loginAssuranceAfterPassword(next.ctx)).toBeUndefined();
+	expect(next.deletedSessions).toEqual([]);
+});
+
+test("a password-login pending cookie replayed as the trust cookie still requires the factor", async () => {
+	const password = mockContext({ body: { rememberDevice: true } });
+	await loginAssuranceAfterPassword(password.ctx);
+	const pending = password.signedCookies.get(LOGIN_PENDING_COOKIE);
+	expect(pending).toBeString();
+
+	// Both cookies share one signing secret and the signature does not cover
+	// the cookie name, so only the payload separates the two purposes.
+	const replay = mockContext({
+		body: { rememberDevice: true },
+		trustedDevice: pending ?? "",
+	});
+	expect(await loginAssuranceAfterPassword(replay.ctx)).toEqual({
+		fallbackFactor: "email",
+		loginFactor: "email",
+	});
+	expect(replay.deletedSessions).toEqual(["session-token"]);
+	expect(replay.signedCookies.has(LOGIN_TRUST_COOKIE)).toBe(false);
+	expect(replay.responseCookies.get(LOGIN_TRUST_COOKIE)?.maxAge).toBe(0);
+});
+
+test("a magic-link pending cookie replayed as the trust cookie still requires the factor", async () => {
+	const request = mockContext({
+		body: { email: "user@example.com" },
+		path: "/sign-in/magic-link",
+		rememberDevice: true,
+	});
+	await loginAssuranceAfterMagicLinkRequest(request.ctx);
+	const pending = request.signedCookies.get(LOGIN_PENDING_COOKIE);
+	expect(pending).toBeString();
+
+	const replay = mockContext({
+		body: { rememberDevice: true },
+		passkeyCount: 1,
+		trustedDevice: pending ?? "",
+	});
+	expect(await loginAssuranceAfterPassword(replay.ctx)).toEqual({
+		fallbackFactor: "email",
+		loginFactor: "passkey",
+	});
+	expect(replay.deletedSessions).toEqual(["session-token"]);
+	expect(replay.signedCookies.has(LOGIN_TRUST_COOKIE)).toBe(false);
 });
 
 test("binds the pending passkey assertion to the password account", async () => {
@@ -251,4 +337,57 @@ test("trusts and clears the pending login only after factor success", async () =
 
 	expect(factor.signedCookies.has(LOGIN_TRUST_COOKIE)).toBe(true);
 	expect(factor.responseCookies.get(LOGIN_PENDING_COOKIE)?.maxAge).toBe(0);
+});
+
+test("remembers a magic-link browser only after the same browser verifies the link", async () => {
+	const request = mockContext({
+		body: { email: " USER@example.com " },
+		path: "/sign-in/magic-link",
+		rememberDevice: true,
+	});
+	await loginAssuranceAfterMagicLinkRequest(request.ctx);
+	const pending = request.signedCookies.get(LOGIN_PENDING_COOKIE);
+	expect(pending).toContain('"flow":"magic-link"');
+	expect(pending).toContain('"rememberDevice":true');
+
+	const callback = mockContext({ path: "/magic-link/verify" });
+	callback.signedCookies.set(LOGIN_PENDING_COOKIE, pending ?? "");
+	await loginAssuranceAfterFactor(callback.ctx);
+
+	expect(callback.signedCookies.has(LOGIN_TRUST_COOKIE)).toBe(true);
+	expect(callback.responseCookies.get(LOGIN_TRUST_COOKIE)?.maxAge).toBe(
+		LOGIN_TRUST_MAX_AGE_SECONDS
+	);
+	expect(callback.responseCookies.get(LOGIN_PENDING_COOKIE)?.maxAge).toBe(0);
+});
+
+test("does not remember a magic-link login opened in another browser", async () => {
+	const request = mockContext({
+		body: { email: "user@example.com" },
+		path: "/sign-in/magic-link",
+		rememberDevice: true,
+	});
+	await loginAssuranceAfterMagicLinkRequest(request.ctx);
+
+	const otherBrowser = mockContext({ path: "/magic-link/verify" });
+	await loginAssuranceAfterFactor(otherBrowser.ctx);
+
+	expect(otherBrowser.signedCookies.has(LOGIN_TRUST_COOKIE)).toBe(false);
+});
+
+test("does not reuse password-login trust consent for a magic-link callback", async () => {
+	const password = mockContext({
+		body: { rememberDevice: true },
+		passkeyCount: 1,
+	});
+	await loginAssuranceAfterPassword(password.ctx);
+
+	const callback = mockContext({ path: "/magic-link/verify" });
+	callback.signedCookies.set(
+		LOGIN_PENDING_COOKIE,
+		password.signedCookies.get(LOGIN_PENDING_COOKIE) ?? ""
+	);
+	await loginAssuranceAfterFactor(callback.ctx);
+
+	expect(callback.signedCookies.has(LOGIN_TRUST_COOKIE)).toBe(false);
 });

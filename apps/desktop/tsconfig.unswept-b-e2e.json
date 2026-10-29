@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/unswept-b-settings.playwright.config.ts",
+    "e2e/harness/vite.unswept-b-settings.config.ts",
+    "e2e/unswept-b-settings.spec.ts",
+    "e2e/harness/unswept-b-settings.tsx",
+    "e2e/settings-dialog-shell-proof.spec.ts"
+  ]
+}

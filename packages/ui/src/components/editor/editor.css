@@ -45,3 +45,42 @@
 .scrollbar-hide::-webkit-scrollbar {
 	display: none;
 }
+
+/* Marker and comment paint belongs to the editor stylesheet. Each color is
+   computed on its actual element so local --highlight overrides are retained.
+   The shared component defaults provide native mark/border/transparent paint
+   on surfaces that do not load this plugin stylesheet. */
+@layer components {
+	.ryu-editor-highlight {
+		background-color: color-mix(in oklab, var(--highlight) 30%, transparent);
+	}
+
+	.ryu-editor-comment {
+		background-color: color-mix(in oklab, var(--highlight) 13%, transparent);
+		border-bottom-color: color-mix(in oklab, var(--highlight) 36%, transparent);
+	}
+
+	.ryu-editor-comment-active {
+		background-color: color-mix(in oklab, var(--highlight) 25%, transparent);
+		border-bottom-color: var(--highlight);
+	}
+
+	.ryu-editor-comment-overlap {
+		background-color: color-mix(in oklab, var(--highlight) 25%, transparent);
+		border-bottom-color: color-mix(in oklab, var(--highlight) 70%, transparent);
+	}
+
+	.ryu-editor-comment-overlap-active {
+		background-color: color-mix(in oklab, var(--highlight) 45%, transparent);
+		border-bottom-color: var(--highlight);
+	}
+
+	.ryu-editor-comment-static {
+		background-color: color-mix(in oklab, var(--highlight) 15%, transparent);
+		border-bottom-color: color-mix(in oklab, var(--highlight) 35%, transparent);
+	}
+
+	.ryu-editor-comment-accent {
+		background-color: var(--highlight);
+	}
+}

@@ -1,0 +1,15 @@
+{
+  "provider": "openai",
+  "status": 400,
+  "expectRow": "openai.invalid_prompt",
+  "provenance": "reconstructed from public reports, not captured from a live request (spec Q-03-1)",
+  "source": "https://community.openai.com/t/invalid-prompt-your-prompt-was-flagged-as-potentially-violating-our-usage-policy/1391512",
+  "body": {
+    "error": {
+      "message": "RYU_TEST_FIXTURE upstream refusal message",
+      "type": "invalid_request_error",
+      "param": null,
+      "code": "invalid_prompt"
+    }
+  }
+}

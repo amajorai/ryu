@@ -1,11 +1,13 @@
 import { CloudServerIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useSystemStatusContext } from "@/src/contexts/SystemStatusContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 
 /** Read-only connection state for Bot. Node selection stays a Build concern. */
 export function BotConnectionBadge() {
 	const activeNode = useActiveNode();
+	const tl = useLiteralMessages();
 	const { coreReachable, gatewayReachable, loading } = useSystemStatusContext();
 	const connected = coreReachable && gatewayReachable;
 	const statusLabel = loading
@@ -21,7 +23,9 @@ export function BotConnectionBadge() {
 
 	return (
 		<div
-			aria-label={`Ryu Cloud managed workspace: ${statusLabel}`}
+			aria-label={tl("Ryu Cloud managed workspace: {statusLabel}", {
+				statusLabel,
+			})}
 			className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5"
 			data-testid="bot-connection-status"
 		>
@@ -37,7 +41,7 @@ export function BotConnectionBadge() {
 			</span>
 			<span className="min-w-0 truncate">
 				<span className="block truncate font-medium text-xs">Ryu Cloud</span>
-				<span className="block truncate text-[10px] text-muted-foreground">
+				<span className="type-compact block truncate text-muted-foreground">
 					{activeNode.managed ? statusLabel : "Preparing managed workspace"}
 				</span>
 			</span>

@@ -1,0 +1,11379 @@
+{
+  "(UTC).": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "UTC abbreviation is identical in these locales"
+  },
+  "(optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'optional' is the German word"
+  },
+  "(personal)": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'personal' is the Spanish word"
+  },
+  "(test)": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'test' is the French word"
+  },
+  "+ Image": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'image' is the French word"
+  },
+  "+ Telegram": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name Telegram"
+  },
+  "+ Text": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Text' is the German word"
+  },
+  "+ Webhook": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Webhook' is the established loanword in these locales"
+  },
+  ".csv": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "file extension"
+  },
+  ".env": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "file name"
+  },
+  "03 / Problem": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Problem' is the German word"
+  },
+  "05 / Solution": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Solution' is the French word"
+  },
+  "1 chat": {
+    "locales": [
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'chat' is the established term in these locales (glossary Chat)"
+  },
+  "1 message": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "1 minute": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "1 transaction": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "1 — Minimal": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Minimal' is the German word"
+  },
+  "15 min": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'min' unit abbreviation is the same"
+  },
+  "15 minutes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "1Password & Bitwarden": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand names"
+  },
+  "2 minutes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "2 sessions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "2 vCPU, 4 GB": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "hardware units vCPU/GB are written identically in these locales"
+  },
+  "3 store": {
+    "locales": [
+      "it"
+    ],
+    "reason": "glossary: Store stays 'Store' in Italian"
+  },
+  "3 — Normal": {
+    "locales": [
+      "de",
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'Normal' is the same word in these languages"
+  },
+  "30 minutes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "4 vCPU, 8 GB": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "hardware units vCPU/GB are written identically in these locales"
+  },
+  "4:5 portrait": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "5 minutes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "51+ · Enterprise": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Enterprise plan name with seat count"
+  },
+  "8 vCPU, 16 GB": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "hardware units vCPU/GB are written identically in these locales"
+  },
+  "9:16 vertical": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'vertical' is the same word in these languages"
+  },
+  "<1 min": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'min' unit abbreviation is the same"
+  },
+  "A Major": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company name"
+  },
+  "A Major Pass": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "AAC (M4A)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "audio format"
+  },
+  "ACP + A2A": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "protocol names"
+  },
+  "AWS Activate": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "AWS program name"
+  },
+  "Accelerate": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "pricing plan tier name (Prototype/Accelerate)"
+  },
+  "Accent {index}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "Account": {
+    "locales": [
+      "it"
+    ],
+    "reason": "glossary: Italian uses 'Account'"
+  },
+  "Account:": {
+    "locales": [
+      "it"
+    ],
+    "reason": "glossary: Italian uses 'Account'"
+  },
+  "Actions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "Activation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "Actor": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Actor' is the Spanish word"
+  },
+  "Advent": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Advent' is the German word"
+  },
+  "Agda": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Agenda": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Agenda' is the same word in these languages"
+  },
+  "Agent": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Agent' is the German/French word (glossary)"
+  },
+  "Agent (optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Agent'/'optional' are German words (glossary)"
+  },
+  "Agent ({agentCount})": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Agent' is the German/French word (glossary)"
+  },
+  "Agent + Ryu": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Agent' is the German/French word (glossary)"
+  },
+  "Agent Browser": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name of the Agent Browser tool"
+  },
+  "Agent:": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Agent'/'optional' are German words (glossary)"
+  },
+  "Agent: {name}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Agent'/'optional' are German words (glossary)"
+  },
+  "Agents": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical French word"
+  },
+  "Alt": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "keyboard key name"
+  },
+  "Alt / Option": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "keyboard key names (Alt / Option key)"
+  },
+  "Alternative": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Alternative' is the native word in German and French"
+  },
+  "Amazon": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company name"
+  },
+  "Amazon Polly": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Amazon S3": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Ambient": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "music genre name 'Ambient' is used as-is in German and Italian"
+  },
+  "Andromeeda": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "code theme name"
+  },
+  "Angle": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Angle' is the French word"
+  },
+  "Animation": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Animation' is the German and French word"
+  },
+  "Animations": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Animations' is the French word"
+  },
+  "Anthropic Messages": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Anthropic API endpoint/product name"
+  },
+  "Anthropic Messages API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Anthropic API product name"
+  },
+  "Anton": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font name"
+  },
+  "App": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'App' is the standard German word"
+  },
+  "App Studio": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu app product name (@ryu/app-studio)"
+  },
+  "App ·": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'App' is the standard German word"
+  },
+  "App · {name}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'App' is the standard German word"
+  },
+  "App: {name}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'App' is the standard German word"
+  },
+  "Apple Silicon": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Apple product/platform name"
+  },
+  "Apple Silicon (MLX)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Apple platform and MLX framework names"
+  },
+  "Apps": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Apps' is the standard German plural"
+  },
+  "Aquarium": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Aquarium' is the German and French word"
+  },
+  "Aquarium:": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Aquarium' is the German word"
+  },
+  "Architecture": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Architecture' is the French word"
+  },
+  "Archives": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Archives' is the French word"
+  },
+  "Arduino": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "hardware platform brand name"
+  },
+  "Arena": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Arena' is the native word in German, Spanish, Italian and Portuguese"
+  },
+  "Arguments": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Arguments' is the French word"
+  },
+  "Arguments (JSON)": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Arguments' is the French word; JSON is a format name"
+  },
+  "Arize Phoenix": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Arpeggio": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Arpeggio' is the Italian word and the standard German music term"
+  },
+  "Article": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Article' is the French word"
+  },
+  "Artificial Analysis": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/benchmark provider name"
+  },
+  "Assertions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Assertions' is the French word"
+  },
+  "Assistant": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Assistant' is the French word"
+  },
+  "Assistants": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Assistants' is the French word"
+  },
+  "Audio": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it"
+    ],
+    "reason": "'Audio' is the native word in German, Spanish, French and Italian"
+  },
+  "Audio (optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Audio' and 'optional' are German words with the same spelling"
+  },
+  "Audit": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Audit' is the native term in German, French and Italian"
+  },
+  "Audits": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Audits' is the German and French plural"
+  },
+  "Aurora X": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "code theme name"
+  },
+  "Australia": {
+    "locales": [
+      "es",
+      "it"
+    ],
+    "reason": "country name is spelled 'Australia' in Spanish and Italian"
+  },
+  "Austria": {
+    "locales": [
+      "es",
+      "it"
+    ],
+    "reason": "country name is spelled 'Austria' in Spanish and Italian"
+  },
+  "Autopilot": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Autopilot' is the German word"
+  },
+  "Avatar": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Avatar' is the native word in these languages"
+  },
+  "Avatar {number}": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Avatar' is the native word in these languages"
+  },
+  "Avatar {number} {field}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Avatar' is the German word; rest are placeholders"
+  },
+  "Avatars": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Avatars' is the French plural"
+  },
+  "Ayu Dark": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "code theme name"
+  },
+  "Ayu Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "code theme name"
+  },
+  "Ayu Mirage": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "code theme name"
+  },
+  "BATTLE PASS": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Battle Pass' is the established German gaming term"
+  },
+  "Backend": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it"
+    ],
+    "reason": "'Backend' is the standard IT loanword in these languages"
+  },
+  "Backend / API": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Backend' is the standard IT loanword in these languages; API is an acronym"
+  },
+  "Backup": {
+    "locales": [
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Backup' is the standard word in Italian and Brazilian Portuguese"
+  },
+  "Backups": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'Backups' is the standard Brazilian Portuguese word"
+  },
+  "Badge": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "'Badge' is the native word in French and Italian"
+  },
+  "Banner": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Banner' is the established word in these languages"
+  },
+  "Bar": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Bar' (venue / music bar) is the same word in these languages"
+  },
+  "Base": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Base' is the native word in these languages"
+  },
+  "Bash": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "shell name"
+  },
+  "Bass": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Bass' is the German word"
+  },
+  "Bcc": {
+    "locales": [
+      "de",
+      "ja"
+    ],
+    "reason": "email header abbreviation conventionally kept as Bcc in German and Japanese mail clients"
+  },
+  "Bebas Neue": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font name"
+  },
+  "Benchmarks": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Benchmarks' is the standard German word"
+  },
+  "Bend": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Bengali": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "language name is spelled 'Bengali' in French and Portuguese"
+  },
+  "BiRefNet v2": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model name"
+  },
+  "BiRefNet v2 video": {
+    "locales": [
+      "it"
+    ],
+    "reason": "model name plus Italian word 'video'"
+  },
+  "Bing": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Search engine brand name"
+  },
+  "Black Forest Labs": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Company name"
+  },
+  "Blog": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Blog' is the standard native word in these languages"
+  },
+  "BlueBubbles (iMessage)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product names BlueBubbles and iMessage"
+  },
+  "Bluesky": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Social network brand name"
+  },
+  "Bluetooth": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "ja",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Bluetooth is a trademark written in Latin script in official localizations of these languages (Apple/Google/Microsoft)"
+  },
+  "Bonus": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Bonus' is the native word in German, French and Italian"
+  },
+  "Bot": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Bot' is the standard native word in these languages"
+  },
+  "Bot ·": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Bot' is the standard native word in these languages"
+  },
+  "Bots": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Bots' is the standard native plural in these languages"
+  },
+  "Box": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Box product name"
+  },
+  "Braintrust": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Company/product name"
+  },
+  "Branches": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Branches' is the native French plural"
+  },
+  "Brave Search": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Search engine product name"
+  },
+  "Browser": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Browser' is the standard native term in German and Italian"
+  },
+  "Browserbase": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Company/product name"
+  },
+  "Budget": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Budget' is the native word in German, French and Italian"
+  },
+  "Budget (USD)": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Budget' is the native word in German, French and Italian; USD is a currency code"
+  },
+  "Budgets": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Budgets' is the native plural in German and French"
+  },
+  "Builds": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Builds' is the established German software term (Apple/Microsoft de)"
+  },
+  "Bus": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Bus' is the native word in German and French"
+  },
+  "Business/Enterprise": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Plan tier names Business and Enterprise"
+  },
+  "Cache": {
+    "locales": [
+      "de",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Cache' is the standard native technical term in these languages"
+  },
+  "Cache:": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Cache' is the standard native technical term in these languages"
+  },
+  "Cafe": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Part of the Cafe 41 logotype (brand name)"
+  },
+  "Cafe 41": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Cafe 41 brand name"
+  },
+  "Cafe 41 ·": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Cafe 41 brand name"
+  },
+  "Café": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Café' is the native word in these languages"
+  },
+  "Canary": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German software localizations keep 'Canary' as the release channel name (e.g. Chrome Canary)"
+  },
+  "Capture": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Capture' is the native French word"
+  },
+  "Catalogue": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Catalogue' is the native French spelling"
+  },
+  "Catppuccin Frappé": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Catppuccin Latte": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Catppuccin Macchiato": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Catppuccin Mocha": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Cerebras": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Company name"
+  },
+  "Certification": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Certification' is the native French word"
+  },
+  "Certifications": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Certifications' is the native French word"
+  },
+  "Chat": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Chat' is the standard native word in these languages"
+  },
+  "ChatGPT (Plus/Pro)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product and plan names"
+  },
+  "Chats": {
+    "locales": [
+      "de",
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'Chats' is the standard native plural in these languages"
+  },
+  "Chef": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Chef' is a native dictionary word in Spanish, French, Italian and Portuguese"
+  },
+  "Chile": {
+    "locales": [
+      "de",
+      "es",
+      "pt-BR"
+    ],
+    "reason": "Country name is spelled 'Chile' in German, Spanish and Portuguese"
+  },
+  "Chorus": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Chorus' is the standard German audio-effect term"
+  },
+  "Claude (Pro/Max)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product and plan names"
+  },
+  "Client": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Client' is the native French word and the standard German software term"
+  },
+  "Client — Acme": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Client' is the native French word; Acme is a sample name"
+  },
+  "Cline CLI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product name"
+  },
+  "Clip": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it"
+    ],
+    "reason": "'Clip' is the standard native word in these languages"
+  },
+  "Clips": {
+    "locales": [
+      "de",
+      "es",
+      "fr"
+    ],
+    "reason": "'Clips' is the standard native plural in these languages"
+  },
+  "Clojure": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Programming language name"
+  },
+  "Cloud": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Cloud' is the standard native term in German, French and Italian software"
+  },
+  "Cloud · {executorLabel}": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Cloud' is the standard native term in German, French and Italian software"
+  },
+  "Cloud · {when}": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Cloud' is the standard native term in German, French and Italian software"
+  },
+  "Cloudflare Quick Tunnel": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Cloudflare product/tool name"
+  },
+  "Cloudflare R2": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Cloudflare product/tool name"
+  },
+  "Cloudflare Tunnel": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Cloudflare product/tool name"
+  },
+  "Cloudflared": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Cloudflare product/tool name"
+  },
+  "Code": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Code is the native German/French word"
+  },
+  "Code (⌘+E)": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Code is the native German/French word"
+  },
+  "Codes": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Codes is the native German/French plural"
+  },
+  "Codex CLI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Cohere": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company name"
+  },
+  "Collection": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Collection is the French word"
+  },
+  "Collections": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Collections is the French word"
+  },
+  "Color": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Color is the Spanish word"
+  },
+  "Commissions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Commissions is the French word"
+  },
+  "Compact": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Compact is the French word"
+  },
+  "Companion": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product surface name, kept untranslated in all locale files"
+  },
+  "Compressor": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "Compressor is the Portuguese word"
+  },
+  "Computer": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "Computer is the standard German and Italian word"
+  },
+  "Condition": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Condition is the French word"
+  },
+  "Configuration": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Configuration is the French word"
+  },
+  "Confluence": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Console": {
+    "locales": [
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Console is the standard French, Italian and Portuguese word"
+  },
+  "Contact": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Contact is the French word"
+  },
+  "Contacts": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Contacts is the French word"
+  },
+  "Control": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "keyboard key name (Control modifier)"
+  },
+  "Coordination": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Coordination is the French word"
+  },
+  "Copilot": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Coq": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Corpus": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Corpus is the standard term in these languages"
+  },
+  "Correct": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Correct is the French word"
+  },
+  "Costume": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Costume is the Italian word"
+  },
+  "Credits": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Credits is the established German term (glossary de: Credits)"
+  },
+  "Cron": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "scheduler technical name"
+  },
+  "Ctrl": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "keyboard key name"
+  },
+  "Ctrl Shift F": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "keyboard shortcut key names"
+  },
+  "Cyan": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Cyan is the German and French colour name"
+  },
+  "Danger": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Danger is the French word"
+  },
+  "Dark Plus": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Dart": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Database": {
+    "locales": [
+      "it"
+    ],
+    "reason": "database is the standard Italian term"
+  },
+  "Datadog": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company name"
+  },
+  "Datadog for Startups": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "vendor program name"
+  },
+  "Date": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Date is the French word"
+  },
+  "Dates": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Dates is the French word"
+  },
+  "Debate": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "Debate is the Spanish and Portuguese word"
+  },
+  "Decimal (1, 2, 3)": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "Decimal is the Spanish and Portuguese word"
+  },
+  "Decks": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu app name (@ryu/decks), kept untranslated in locale files"
+  },
+  "Deep Read": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu app name (RLM app heading)"
+  },
+  "Deepgram": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company name"
+  },
+  "Description": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Description is the French word"
+  },
+  "Description (": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Description is the French word"
+  },
+  "Descriptor": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Descriptor is the Spanish word"
+  },
+  "Design": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Design is the standard German, Italian and Portuguese word"
+  },
+  "Desktop": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Desktop is the standard German, Italian and Portuguese term"
+  },
+  "Destination": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Destination is the French word"
+  },
+  "Details": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Details is the German word"
+  },
+  "Details (I)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Details is the German word"
+  },
+  "Details (optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Details and optional are German words"
+  },
+  "Detector": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "Detector is the Spanish and Portuguese word"
+  },
+  "Dhall": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Diagnostics": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Diagnostics is the French word"
+  },
+  "DigitalOcean Hatch": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "vendor program name"
+  },
+  "Direct": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Direct is the French word"
+  },
+  "Directive": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Directive is the French word"
+  },
+  "Distance": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Distance is the French word"
+  },
+  "Dither": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German uses the loanword Dither as the standard imaging term"
+  },
+  "Dithering": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Dithering is the standard German imaging term"
+  },
+  "Dock": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Dock is the established term in these languages (Apple localizations)"
+  },
+  "Document": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is spelled identically"
+  },
+  "Documentation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is spelled identically"
+  },
+  "Documents": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is spelled identically"
+  },
+  "Domain": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German IT term Domain is spelled identically"
+  },
+  "Domain:": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German IT term Domain is spelled identically"
+  },
+  "Domains": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German plural Domains is spelled identically"
+  },
+  "Dots": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product name of an import source"
+  },
+  "Downloads": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "Downloads is the standard German and Brazilian Portuguese term (as in glossary)"
+  },
+  "Dracula": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Dracula Soft": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Drawesome": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product/tool name"
+  },
+  "Dress code": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Dress code is the standard Italian term"
+  },
+  "Echo": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German word Echo is spelled identically"
+  },
+  "Edge TTS": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product name"
+  },
+  "Editor": {
+    "locales": [
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Editor is the same word in Spanish, Italian and Portuguese"
+  },
+  "Editorial": {
+    "locales": [
+      "de",
+      "es",
+      "pt-BR"
+    ],
+    "reason": "Editorial is the same word in German, Spanish and Portuguese"
+  },
+  "Elixir": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Programming language name"
+  },
+  "Ellipse": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Ellipse is the same word in German and French"
+  },
+  "Elm": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Programming language name"
+  },
+  "Embedding": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Embedding is the established Italian ML term, matching the existing Italian Embeddings string"
+  },
+  "Emoji": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Emoji is the standard word in these languages"
+  },
+  "En route": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French phrase, spelled identically"
+  },
+  "Endpoint": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Endpoint is the standard Italian technical term"
+  },
+  "Engine": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Engine is the standard German software term"
+  },
+  "Engine / Hardware": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Engine and Hardware are standard German terms"
+  },
+  "Engines": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Engines is the standard German plural software term"
+  },
+  "Enter": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "Brazilian keyboards label this key Enter"
+  },
+  "Erlang": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Programming language name"
+  },
+  "Error": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Spanish word Error is spelled identically"
+  },
+  "Error:": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Spanish word Error is spelled identically"
+  },
+  "Error: {message}": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Spanish word Error is spelled identically"
+  },
+  "Esc": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Keycap label printed as Esc on keyboards in these locales"
+  },
+  "Escalation": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Escalation is the standard Italian loanword in support workflows"
+  },
+  "Europe/London": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "IANA time zone identifier"
+  },
+  "Everforest Dark": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Everforest Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Exa": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product name"
+  },
+  "Excalidraw": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product name"
+  },
+  "Exclamation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is spelled identically"
+  },
+  "Exclusion": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is spelled identically"
+  },
+  "Expression": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is spelled identically"
+  },
+  "Extension": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is spelled identically"
+  },
+  "FLUX dev (Fal)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Model name"
+  },
+  "FLUX schnell": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Model name"
+  },
+  "Facebook": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Brand name"
+  },
+  "Factory Droid": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product name"
+  },
+  "Fal": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Brand name"
+  },
+  "Falkenstein, DE": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Place name and country code are written identically in Latin-script locales"
+  },
+  "Feed": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "Feed is the standard German and Brazilian Portuguese term"
+  },
+  "Feedback": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "Feedback is the standard German and Italian word"
+  },
+  "Feeds": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "Feeds is the standard German and Brazilian Portuguese term"
+  },
+  "File": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Italian uses the word file"
+  },
+  "Filter": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German word Filter is spelled identically"
+  },
+  "Filter ({filterCount})": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German word Filter is spelled identically"
+  },
+  "Finale": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "Finale is the same word in German and Italian"
+  },
+  "Fira Code": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Font name"
+  },
+  "Firecrawl": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product name"
+  },
+  "Firewall": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Firewall is the standard term in German, Italian and Brazilian Portuguese"
+  },
+  "Fireworks AI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Company name"
+  },
+  "Fish": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Shell name (fish)"
+  },
+  "Flanger": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Audio effect name used unchanged in these languages"
+  },
+  "Forces": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "\"Forces\" is the French word"
+  },
+  "Formal": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "\"Formal\" is the Spanish/Portuguese word"
+  },
+  "Format": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "\"Format\" is the German/French word"
+  },
+  "Formats": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "\"Formats\" is the French plural"
+  },
+  "Formula": {
+    "locales": [
+      "it"
+    ],
+    "reason": "\"Formula\" is the Italian word"
+  },
+  "Fortran": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Fusion": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "\"Fusion\" is the German/French word"
+  },
+  "GIFs": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "\"GIFs\" is the normal plural of the format name in German and Portuguese"
+  },
+  "GMT+00:00": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "UTC offset notation"
+  },
+  "GPT-5 mini": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model name"
+  },
+  "Gain": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "\"Gain\" is the French audio term"
+  },
+  "Gateways": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "plural of the Ryu product name Gateway, kept untranslated in every locale per glossary"
+  },
+  "Geist": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font name"
+  },
+  "General": {
+    "locales": [
+      "es"
+    ],
+    "reason": "\"General\" is the Spanish word"
+  },
+  "Gherkin": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "language name"
+  },
+  "Ghost": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product/component name"
+  },
+  "Git": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "tool name"
+  },
+  "Git Bash": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "tool name"
+  },
+  "GitHub Actions": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "GitHub App": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "GitHub product term"
+  },
+  "GitHub Copilot": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "GitHub Dark": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "GitHub Dark Default": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "GitHub Dark Dimmed": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "GitHub Dark High Contrast": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "GitHub Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "GitHub Light Default": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "GitHub Light High Contrast": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Global": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "\"Global\" is the same word in these languages"
+  },
+  "Golden Gate": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "place name (wallpaper set)"
+  },
+  "Golden Kitty Awards": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "award name"
+  },
+  "Google Cloud Text-to-Speech": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Google Custom Search": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Google Drive": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Google Gemini": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Google Maps": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Google Play": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Google TTS": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Google Translate TTS": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Google for Startups": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Google product name"
+  },
+  "Governance": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "\"Governance\" is the established term in German and Italian"
+  },
+  "Graph": {
+    "locales": [
+      "de"
+    ],
+    "reason": "\"Graph\" is the German word"
+  },
+  "Grill": {
+    "locales": [
+      "de"
+    ],
+    "reason": "\"Grill\" is the German word"
+  },
+  "Groovy": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "language name"
+  },
+  "Gruvbox Dark Hard": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Gruvbox Dark Medium": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Gruvbox Dark Soft": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Gruvbox Light Hard": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Gruvbox Light Medium": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Gruvbox Light Soft": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Guides": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "\"Guides\" is the French word"
+  },
+  "H.265 (HEVC)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "codec name"
+  },
+  "H.265 · HEVC": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "codec name"
+  },
+  "HTTP + SSE": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "protocol names"
+  },
+  "Hackathon": {
+    "locales": [
+      "de",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "\"Hackathon\" is the established word in these languages"
+  },
+  "Hackathons": {
+    "locales": [
+      "de",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "\"Hackathons\" is the established plural in these languages"
+  },
+  "Halloween": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "\"Halloween\" is the holiday name used in these languages"
+  },
+  "Hand": {
+    "locales": [
+      "de"
+    ],
+    "reason": "\"Hand\" is the German word (hand tool)"
+  },
+  "Handler": {
+    "locales": [
+      "de"
+    ],
+    "reason": "\"Handler\" is the established German developer term"
+  },
+  "Hardware": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "\"Hardware\" is the standard word in these languages"
+  },
+  "Hash": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "\"Hash\" is the standard technical term in these languages"
+  },
+  "Haskell": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "language name"
+  },
+  "Headscale": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Helicone": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Helsinki, FI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "city name and country code, spelled the same in these locales"
+  },
+  "Hermes": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "agent product name"
+  },
+  "Hermes Agent": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "third-party agent product name (Nous Research)"
+  },
+  "Hindi": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it"
+    ],
+    "reason": "the language name is spelled Hindi in German, Spanish, French and Italian"
+  },
+  "Hobby": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Hobby is a native/standard word in German, Italian and Portuguese"
+  },
+  "Hong Kong": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Hong Kong is the standard place name spelling in Spanish, French, Italian and Portuguese"
+  },
+  "Hook": {
+    "locales": [
+      "de"
+    ],
+    "reason": "\"Hook\" is the established German term (software hooks and video hooks alike); \"Hook-Ereignis\" had the wrong sense"
+  },
+  "Hooks": {
+    "locales": [
+      "de"
+    ],
+    "reason": "\"Hooks\" is the established German term (software hooks and video hooks alike); \"Hook-Ereignis\" had the wrong sense"
+  },
+  "Horizon": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor/UI theme name"
+  },
+  "Horizon Bright": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor/UI theme name"
+  },
+  "Horizontal": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "horizontal is spelled identically in German, Spanish, French and Portuguese"
+  },
+  "Hosting": {
+    "locales": [
+      "it"
+    ],
+    "reason": "hosting is the standard Italian IT term"
+  },
+  "Hostname": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Hostname is the standard German term"
+  },
+  "Houston": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor/UI theme name"
+  },
+  "Hybrid": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Hybrid is the standard German word"
+  },
+  "Idea": {
+    "locales": [
+      "es",
+      "it"
+    ],
+    "reason": "Idea is the correct word in Spanish and Italian"
+  },
+  "Ideas": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Ideas is the correct Spanish word"
+  },
+  "Idris": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Image": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Image is the correct French word"
+  },
+  "Images": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Images is the correct French word"
+  },
+  "Impact": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Impact is the correct French word"
+  },
+  "Importance": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Importance is the correct French word"
+  },
+  "Importance {importance}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Importance is the correct French word"
+  },
+  "Incidents": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Incidents is the correct French word"
+  },
+  "Incorrect": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Incorrect is the correct French word"
+  },
+  "Indigo": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Indigo is the correct color name in German and French"
+  },
+  "Individual": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "Individual is the correct word in Spanish and Portuguese"
+  },
+  "Infrastructure": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Infrastructure is the correct French word"
+  },
+  "Insertion": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Insertion is the correct French word"
+  },
+  "Inspector": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Inspector is the correct Spanish word"
+  },
+  "Instagram": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name"
+  },
+  "Instagram Reels": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand/product name"
+  },
+  "Instructions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Instructions is the correct French word"
+  },
+  "Integration": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Integration is the correct German word"
+  },
+  "Intel": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/brand name"
+  },
+  "Intelligence": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Intelligence is the correct French word"
+  },
+  "Inter": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font family name"
+  },
+  "Interface": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "Interface is the correct word in French and Portuguese"
+  },
+  "Interfaces": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "Interfaces is the correct word in Spanish, French and Portuguese"
+  },
+  "Interfaces / surfaces": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Both words are correct French spellings"
+  },
+  "Introduction": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Introduction is the correct French word"
+  },
+  "Investor": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Investor is the correct German word"
+  },
+  "Invitation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Invitation is the correct French word"
+  },
+  "Invitations": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Invitations is the correct French word"
+  },
+  "Inworld": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/provider name (Inworld AI)"
+  },
+  "Island": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product name kept untranslated per glossary"
+  },
+  "Item": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "Item is the correct Portuguese word"
+  },
+  "JSON UI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "format label (paired with A2UI)"
+  },
+  "JSON ↔ CSV ↔ YAML": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "file format names"
+  },
+  "Java": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "JetBrains Mono": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font family name"
+  },
+  "Jev Ultrafast": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model/engine product name"
+  },
+  "Jina AI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company name"
+  },
+  "Jina Reader": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Journal": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Journal is the correct French word"
+  },
+  "Julia": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Kanagawa Dragon": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor/UI theme name"
+  },
+  "Kanagawa Lotus": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor/UI theme name"
+  },
+  "Kanagawa Wave": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor/UI theme name"
+  },
+  "Karaoke": {
+    "locales": [
+      "de",
+      "es",
+      "it"
+    ],
+    "reason": "Karaoke is the standard spelling in German, Spanish and Italian"
+  },
+  "Kilo Code": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product/framework brand name"
+  },
+  "Kling v1.6": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model/engine name"
+  },
+  "Kokoro 82M": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model/engine name"
+  },
+  "Kotlin": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Kubernetes Secret": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Kubernetes resource type name (export target)"
+  },
+  "LLVM IR": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "LM Studio": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product/framework brand name"
+  },
+  "LangChain / Mastra": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product/framework brand name"
+  },
+  "Langfuse": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product/framework brand name"
+  },
+  "LatentSync (Fal)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model/engine name"
+  },
+  "LatentSync (Replicate)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model/engine name"
+  },
+  "Launch Control 3": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "hardware controller model name"
+  },
+  "Launch Control XL 3": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "hardware controller model name"
+  },
+  "Layout": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Layout' is the standard native term in German, Italian and Brazilian Portuguese UI"
+  },
+  "Layouts": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "'Layouts' is the standard native plural in German and Brazilian Portuguese UI"
+  },
+  "Lean 4": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Lean, Bend & BAML": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Levenshtein": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "surname of the mathematician; Latin-script locales write it unchanged"
+  },
+  "Life Recorder": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "@ryu/life-recorder app product name"
+  },
+  "Light Plus": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Linear": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "'Linear' is the identical native word in German and Portuguese"
+  },
+  "Link (optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "both 'Link' and 'optional' are standard German words"
+  },
+  "LinkedIn, Threads": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "social network brand names"
+  },
+  "Links": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "'Links' is the native plural in German and standard in Brazilian Portuguese UI"
+  },
+  "Linkup": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product/framework brand name"
+  },
+  "Lisp": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Live": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Live' is the standard German term (e.g. Live-Übertragung)"
+  },
+  "Llama 4 70B (local)": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "model name plus 'local', which is the same word in Spanish, French and Portuguese"
+  },
+  "Lobby": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Lobby' is the established native word in German, Italian and Brazilian Portuguese"
+  },
+  "Lobster": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font name"
+  },
+  "Local": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Local' is the identical native word in Spanish, French and Portuguese"
+  },
+  "Local (sd)": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Local' is the identical native word; 'sd' is an engine id"
+  },
+  "Logo": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Logo' is the native word in German, French and Italian"
+  },
+  "Logos": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Logos' is the native plural in German and French"
+  },
+  "Lua": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Luma Ray 2 Modify": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model/engine name"
+  },
+  "MLX-VLM": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model/engine name"
+  },
+  "MPK mini IV": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "hardware controller model name"
+  },
+  "MPK mini Plus II": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "hardware controller model name"
+  },
+  "MTP (draft-mtp)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "technical speculative-decoding mode identifier"
+  },
+  "Maintenance": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Maintenance' is the native French word"
+  },
+  "Makefile": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Manual": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'Manual' is the identical native word in Spanish and Portuguese"
+  },
+  "Markdown": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Marketing": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Marketing' is the standard native term in these languages (in RAE, Duden, etc.)"
+  },
+  "Mastra": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product/framework brand name"
+  },
+  "Material Theme": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Material Theme Darker": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Material Theme Lighter": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Material Theme Ocean": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Material Theme Palenight": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Mathematica": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Max": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Max' is the standard Italian abbreviation of massimo"
+  },
+  "Max → Teams": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Max and Teams are Ryu plan names; 'Teams' is also a German loanword"
+  },
+  "Mediabunny: MP4 · MOV · MKV · WebM · WAV · MP3 · Ogg · FLAC · AAC · MPEG-TS": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "library name plus file format list"
+  },
+  "Mediabunny: MP4 · WebM · WAV · MP3": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "library name plus file format list"
+  },
+  "Median": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Median' is the native German word"
+  },
+  "Mention": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Mention' is the native French word"
+  },
+  "Mentions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Mentions' is the native French plural"
+  },
+  "Menu": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Menu' is the native Italian word"
+  },
+  "Mermaid": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language/format name"
+  },
+  "Merriweather": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font name"
+  },
+  "Message": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'Message' is spelled identically"
+  },
+  "Message · Ctrl+A agent · Ctrl+R ACP · /help": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Message' and 'agent' are identical words; rest are shortcuts/commands"
+  },
+  "Messages": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French plural 'Messages' is identical"
+  },
+  "Metaballs": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 3D graphics uses the term 'Metaballs' as is"
+  },
+  "Metal": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Apple Metal GPU backend name"
+  },
+  "Min Dark": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Min Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Min P": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Sampling parameter name conventionally left in English"
+  },
+  "Minimum": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Minimum' is the same word in German and French"
+  },
+  "Mirostat": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Sampling algorithm name"
+  },
+  "Mirostat 1": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Sampling algorithm mode name"
+  },
+  "Mirostat 2": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Sampling algorithm mode name"
+  },
+  "Mission Control": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Name of the Mission Control app (Store app); zh-CN and others keep it inside translated sentences"
+  },
+  "Mobile": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Mobile' is the standard native term"
+  },
+  "Modal": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Modal cloud provider name"
+  },
+  "Mode": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Mode' is identical"
+  },
+  "Moderation": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Moderation' is identical"
+  },
+  "Module": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Module' is identical"
+  },
+  "Moment": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Moment' is the same word in German and French"
+  },
+  "Moment 1": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Moment' is the same word in German and French"
+  },
+  "Moment 2": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Moment' is the same word in German and French"
+  },
+  "Moment 3": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Moment' is the same word in German and French"
+  },
+  "Moment 4": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Moment' is the same word in German and French"
+  },
+  "Moments": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French plural 'Moments' is identical"
+  },
+  "Monokai": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Montage": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Montage' is the native video-editing term in German and French"
+  },
+  "Montserrat": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Font name"
+  },
+  "Moonshot / Kimi": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Company/model names"
+  },
+  "Moonshot AI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Company name"
+  },
+  "Muse": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Meta Muse agent product name"
+  },
+  "NVIDIA Inception": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "NVIDIA program name"
+  },
+  "NVIDIA NIM": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "NVIDIA product name"
+  },
+  "NVIDIA Nemotron 3": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Model name"
+  },
+  "Name": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Name' is identical"
+  },
+  "Name (A–Z)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Name' is identical"
+  },
+  "Name (optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Name' and 'optional' are identical words"
+  },
+  "Name A–Z": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Name' is identical"
+  },
+  "Name Z–A": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Name' is identical"
+  },
+  "Name: {name}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Name' is identical"
+  },
+  "Narration": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Narration' is identical"
+  },
+  "Nature": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Nature' is identical"
+  },
+  "Navigation": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Navigation' is identical in German and French"
+  },
+  "Neutral": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Neutral' is identical"
+  },
+  "Night Owl": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Night Owl Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Nightly": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Release channel brand suffix (Ryu Nightly)"
+  },
+  "Nix": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Nix package manager/language name"
+  },
+  "Nord": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Normal": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Normal' is identical in German, Spanish, French and Portuguese"
+  },
+  "Note": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Note' is identical"
+  },
+  "Notes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Notes' is identical"
+  },
+  "Notification": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Notification' is identical"
+  },
+  "Notifications": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Notifications' is identical"
+  },
+  "Nuremberg, DE": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Nuremberg' is the established French and Brazilian Portuguese city name"
+  },
+  "OAuth": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Protocol name"
+  },
+  "OCaml": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Programming language name"
+  },
+  "OIDC (Okta, Entra ID, Google Workspace)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Protocol and product names"
+  },
+  "Objective-C": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Programming language name"
+  },
+  "Occasion": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French 'Occasion' is identical"
+  },
+  "Offline": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German UI standard term is 'Offline'"
+  },
+  "Ogg Vorbis": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Audio format name"
+  },
+  "One Dark Pro": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "One Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Online": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German UI standard term is 'Online'"
+  },
+  "OpenClaw / Hermes": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product names"
+  },
+  "OpenTUI / Chat": {
+    "locales": [
+      "de",
+      "es",
+      "it"
+    ],
+    "reason": "OpenTUI is a product name and 'Chat' is the native word in German, Spanish and Italian"
+  },
+  "Openverse": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Openverse service name"
+  },
+  "Operator": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Operator' is a native word and matches existing 'Zertifizierter Operator' for this Academy certification track"
+  },
+  "Option": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Option' is identical in German and French"
+  },
+  "Option {position}": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Option' is identical in German and French"
+  },
+  "Optional": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German 'Optional' is identical"
+  },
+  "Options": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Options' is the French word"
+  },
+  "Orange": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Orange' is the German/French color word"
+  },
+  "Orchestration": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Orchestration' is the French word"
+  },
+  "Original": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Original' is the correct word in these languages"
+  },
+  "Oswald": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font family name"
+  },
+  "Outpost": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu social app product name"
+  },
+  "Outreach": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu app product name (@ryu/outreach)"
+  },
+  "PNG · JPG · WebP · AVIF · PDF": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "list of file formats"
+  },
+  "PRODUCT HUNT": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product Hunt brand name on award badge"
+  },
+  "Page": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Page' is the French word"
+  },
+  "Page {pageNumber} / {totalPages}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Page' is the French word"
+  },
+  "Pages": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Pages' is the French word"
+  },
+  "Parakeet + Kokoro": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "speech model names"
+  },
+  "Parakeet v3": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "speech model name"
+  },
+  "Parallel": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Parallel' is the German word"
+  },
+  "Participant": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Participant' is the French word"
+  },
+  "Participants": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Participants' is the French word"
+  },
+  "Partner": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Partner' is the standard German word and established Italian loanword"
+  },
+  "Pascal": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Passkey": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Passkey' is the platform-standard term in German and Italian (Apple/Google localizations)"
+  },
+  "Passkeys": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Passkeys' is the platform-standard German term"
+  },
+  "Password": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Password' is the standard Italian term"
+  },
+  "Patch": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "identical word is the standard native/loan term in that language"
+  },
+  "Pause": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Pause' is the French word"
+  },
+  "Pause (HITL)": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Pause' is the French word"
+  },
+  "Perl": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Permanent": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Permanent' is the French word"
+  },
+  "Permanent Marker": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font family name"
+  },
+  "Perplexity Search": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Perplexity product name"
+  },
+  "Person": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Person' is the German word"
+  },
+  "Persona": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Persona' is the established word in these languages (native in es/it/pt, standard UX loanword in de/fr)"
+  },
+  "Personal": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Personal' is the Spanish word"
+  },
+  "Personas": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Personas' is the correct plural in these languages"
+  },
+  "Pexels": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "stock media service brand"
+  },
+  "Pierre Dark": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Pierre Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Pipeline": {
+    "locales": [
+      "de",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Pipeline' is the standard term in these languages (matches existing locale usage)"
+  },
+  "Pirate": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Pirate' is the French word"
+  },
+  "Pixabay": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "stock media service brand"
+  },
+  "Place": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Place' is the French word for a ranking position"
+  },
+  "Place {awardPlace}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Place' is the French word for a ranking position"
+  },
+  "Plan": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Plan' is the Spanish word"
+  },
+  "Plan:": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Plan' is the Spanish word"
+  },
+  "Plan: {planName}": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'Plan' is the Spanish word"
+  },
+  "Planet {description}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Planet' is the German word"
+  },
+  "Plans": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Plans' is the French word"
+  },
+  "Plastic": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Playfair Display": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font family name"
+  },
+  "Playwright": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "testing framework product name"
+  },
+  "Plugin": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "glossary keeps 'Plugin' in these locales"
+  },
+  "Plugin ·": {
+    "locales": [
+      "de",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "glossary keeps 'Plugin' in these locales"
+  },
+  "Plugin · {pluginId}": {
+    "locales": [
+      "it",
+      "pt-BR"
+    ],
+    "reason": "glossary keeps 'Plugin' in these locales"
+  },
+  "Plugins": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "glossary keeps 'Plugins' in these locales"
+  },
+  "Plus": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Plus plan name"
+  },
+  "Podcast": {
+    "locales": [
+      "de",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Podcast' is the standard word in these languages"
+  },
+  "Podcast (−16 LUFS)": {
+    "locales": [
+      "de",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Podcast' is the standard word; LUFS is a unit"
+  },
+  "Poimandres": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Points": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Points' is the French word"
+  },
+  "Polly": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Amazon Polly product name"
+  },
+  "Polygon": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Polygon' is the German word"
+  },
+  "Pool": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Pool' is the standard German word"
+  },
+  "Pool (USD)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Pool' is the standard German word; USD is a currency code"
+  },
+  "Poppins": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font family name"
+  },
+  "Population": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Population' is the French word"
+  },
+  "Port": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Port' is the standard German/French networking term"
+  },
+  "Portal": {
+    "locales": [
+      "de",
+      "es",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Portrait": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French orientation term is 'Portrait'"
+  },
+  "Portugal": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "country name spelled identically in these languages"
+  },
+  "Pose": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Position": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "PostHog for Startups": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "name of PostHog's startup program (brand)"
+  },
+  "Pot": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Pot' is the standard poker term in German and French"
+  },
+  "Privacy": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Italian software UI uses 'Privacy' as the standard term"
+  },
+  "Pro": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "plan name"
+  },
+  "Pro → Max": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "plan names"
+  },
+  "Pro → Teams": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Teams' is the plural of the German word 'Team'"
+  },
+  "ProRes 422 HQ": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "video codec name"
+  },
+  "ProRes 422 · MOV": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "video codec and file format"
+  },
+  "ProRes 4444": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "video codec name"
+  },
+  "ProRes 4444 · MOV": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "video codec and file format"
+  },
+  "Product Hunt — {label}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Product Hunt brand plus placeholder"
+  },
+  "Prolog": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Prompt": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Prompt' is the established loanword in these locales (cf. existing System prompt translations)"
+  },
+  "Prompt: {systemPrompt}": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Prompt' is the established loanword in these locales"
+  },
+  "Prompts": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Prompts' is the established loanword plural in these locales"
+  },
+  "Propagation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Prose": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Protocol Buffers": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "technology name (Google Protocol Buffers)"
+  },
+  "Prototype": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "startup program tier name alongside 'Accelerate' (kept untranslated)"
+  },
+  "Provenance": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Province": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Psst…": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "interjection spelled the same in these languages"
+  },
+  "Public": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Publication": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Qualifications": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Question": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Question {position}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Questions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Quota": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Qwen (Singapore)": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Singapore is the Italian name of the city; Qwen is a model name"
+  },
+  "Qwen3 32B (local)": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'local' is the native word in these languages; rest is a model name"
+  },
+  "REST API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "technical term/acronym"
+  },
+  "RTX 4090": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "GPU model name"
+  },
+  "RTX 5090": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "GPU model name"
+  },
+  "RTX Pro 6000": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "GPU model name"
+  },
+  "Racket": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Radio": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Rare": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Ratio": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Ratio' is a standard French word"
+  },
+  "Recraft": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand / model provider name"
+  },
+  "Rectangle": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Reddit": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name"
+  },
+  "Region": {
+    "locales": [
+      "de"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Relation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Replica": {
+    "locales": [
+      "it"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Replicate": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name (Replicate inference provider)"
+  },
+  "Repository": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Repository' is the standard term in German and Italian developer UIs"
+  },
+  "Reproducible": {
+    "locales": [
+      "es"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Reranker": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Reranker' is the established German technical term"
+  },
+  "Reserve": {
+    "locales": [
+      "de"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Restaurant": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Restaurant is the native German and French word"
+  },
+  "RoPE / YaRN": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Technical RoPE/YaRN method names, left in English"
+  },
+  "Robot": {
+    "locales": [
+      "es",
+      "fr",
+      "it"
+    ],
+    "reason": "Robot is the native Spanish, French and Italian word"
+  },
+  "Roboto": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Font family name"
+  },
+  "Roles": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Roles is the native Spanish plural"
+  },
+  "Rose": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Rose is the native French color name"
+  },
+  "Rosé Pine": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Rosé Pine Dawn": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Rosé Pine Moon": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Theme name"
+  },
+  "Rotation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Rotation is the native French word"
+  },
+  "Rotation X": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Rotation is the native French word; axis letter unchanged"
+  },
+  "Rotation Y": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Rotation is the native French word; axis letter unchanged"
+  },
+  "Rotation Z": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Rotation is the native French word; axis letter unchanged"
+  },
+  "Route": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Route is the native German word"
+  },
+  "Router": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "Router is the standard German and Italian word for the device/component"
+  },
+  "Routines": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "Routines is the native French plural"
+  },
+  "Ruby": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Programming language / name"
+  },
+  "Runway": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Company/provider name"
+  },
+  "Ryu / Tests": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "Tests is the native German and French word; Ryu is a brand"
+  },
+  "Ryu A Major Pass": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Academy": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Bot": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Box": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Business": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu CLI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Challenges": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German locale uses the loanword Challenges for this feature (e.g. 'Meine Beiträge | Ryu Challenges')"
+  },
+  "Ryu Cloud": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Cloud · Scout": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Compute": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Connect": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Core": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Core + Gateway": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Credits": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German uses Credits (glossary de: Credits)"
+  },
+  "Ryu Desktop": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Enterprise": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Essentials": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Game Display": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Font family name"
+  },
+  "Ryu Gateway": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Hire": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Island": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Lobby Display": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Font family name"
+  },
+  "Ryu MCP": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Mail": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Marketplace": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Marketplace ·": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Max": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Messaging": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Mono": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "CLI theme name"
+  },
+  "Ryu Notify": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Passport": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Platform": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Plus": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Points": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Pro": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Router": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu SDK": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Share": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Sites": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Teams": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Teams Lite": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Village Pixel": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Place names in the Ryu Village world map"
+  },
+  "Ryu Watch": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu Work": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu product/plan/service name kept untranslated per existing locale usage"
+  },
+  "Ryu · local · Gemma 4": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "local is the native Spanish, French and Portuguese word; Ryu and Gemma 4 are names"
+  },
+  "Ryu · {label}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Brand plus ICU argument only; nothing translatable"
+  },
+  "SAML 2.0": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Standard protocol name and version"
+  },
+  "SGLang": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Inference engine name"
+  },
+  "SGLang 0.0–1.0": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "engine name plus numeric range hint"
+  },
+  "Sampling": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Sampling' is the established German term for model token sampling"
+  },
+  "Sandbox": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Sandbox' is the standard German/Italian term"
+  },
+  "Sandboxes": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Sandboxes' is the standard German plural"
+  },
+  "Sass": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Saturation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Saved Places.json": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "file name"
+  },
+  "Scala": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Scans": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Scans' is the standard German plural of Scan"
+  },
+  "Scheme": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Score": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Scout": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "sample agent persona name"
+  },
+  "Scout · agent": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Scout' is a name and 'agent' is the French word"
+  },
+  "Screenshot": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Screenshot' is the standard Italian UI term"
+  },
+  "Script": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Secret": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Secrets": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Section": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Sections": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Sentry for Startups": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "third-party program name"
+  },
+  "Sepia": {
+    "locales": [
+      "de",
+      "es"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "September 2026": {
+    "locales": [
+      "de"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Serper": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name"
+  },
+  "Server": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Service": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Service' is the German/French word for restaurant service"
+  },
+  "Services": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Session": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Sessions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Sessions (": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Sessions ({sessionCount})": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Shadow": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "name of the Shadow node/service"
+  },
+  "Shell": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Shell' is the standard German term"
+  },
+  "Shift": {
+    "locales": [
+      "ar",
+      "hi",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "keyboard key label printed as Shift on keyboards in this locale"
+  },
+  "Sidecar": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "established technical term (sidecar process) kept in this locale, as in existing translations"
+  },
+  "Sidecars": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "established technical term (sidecar process) kept in this locale, as in existing translations"
+  },
+  "Signal": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Signal:": {
+    "locales": [
+      "de"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Signature": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Similar": {
+    "locales": [
+      "es"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Simple": {
+    "locales": [
+      "es",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Singapore": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Italian name of the country is Singapore"
+  },
+  "Singapore, SG": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Italian name of the country is Singapore"
+  },
+  "Single sign-on": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Single sign-on' is the standard Italian term"
+  },
+  "Site {siteVersion}": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Sites": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Sites product name"
+  },
+  "Skill": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Skill' is the established Italian term, matching existing 'Skills' translation"
+  },
+  "Skyline": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Skyline' is the standard word in German and Italian"
+  },
+  "Slack Dark": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Slack Ochin": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Slides": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'Slides' is the standard Brazilian Portuguese word for presentation slides"
+  },
+  "Slime": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Slime' is the common French word for the toy slime"
+  },
+  "Slot machine": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Slot machine' is the standard Italian term"
+  },
+  "Slug": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'slug' is the established web term kept in this locale"
+  },
+  "Slug *": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'slug' is the established web term kept in this locale"
+  },
+  "Smalltalk": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Snazzy Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Social": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Social' is the common Italian term (i social)"
+  },
+  "Social media": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'Social media' is the standard Italian term"
+  },
+  "Solarized Dark": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Solarized Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "Solidity": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Solo": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Solutions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Source": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Source Code Pro": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "font name"
+  },
+  "Sources": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Spam": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct word in this language"
+  },
+  "Stability AI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company name"
+  },
+  "Stable": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Stable' is the correct French word"
+  },
+  "Stable Audio": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model name"
+  },
+  "Stable Diffusion, optional": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'optional' is the correct German word; Stable Diffusion is a model name"
+  },
+  "Stack Overflow": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "website/brand name"
+  },
+  "Standard": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Standard' is the correct native word in German, French and Italian"
+  },
+  "Start (s)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Start' is the correct German word; s is a unit"
+  },
+  "Status": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "'Status' is the standard native word in German and Brazilian Portuguese"
+  },
+  "Status: {statusSummary}": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "'Status' is the standard native word in German and Brazilian Portuguese"
+  },
+  "Status: {status}": {
+    "locales": [
+      "de",
+      "pt-BR"
+    ],
+    "reason": "'Status' is the standard native word in German and Brazilian Portuguese"
+  },
+  "Stereo": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Stereo' is the native spelling in German and Italian"
+  },
+  "Store": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Store' is the established German/Italian term used for the Ryu Store surface per glossary"
+  },
+  "Stories, Reels, TikTok": {
+    "locales": [
+      "de",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "Instagram's own German, French and Brazilian Portuguese UI uses 'Stories' and 'Reels' as the localized feature names; TikTok is a brand"
+  },
+  "Storyboard": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Storyboard' is the standard term in German and Italian film production"
+  },
+  "Streamable HTTP": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "MCP transport protocol name"
+  },
+  "Structure": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Structure' is the correct French word"
+  },
+  "Studio": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "'Studio' is the native word in German, French and Italian"
+  },
+  "Style": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Style' is the correct French word"
+  },
+  "Styles": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Styles' is the correct French word"
+  },
+  "SubRip (.srt)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "subtitle file format name"
+  },
+  "Subtotal": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'Subtotal' is the correct Spanish and Portuguese word"
+  },
+  "Suggestion": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Suggestion' is the correct French word"
+  },
+  "Suggestions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Suggestions' is the correct French word"
+  },
+  "Support": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Support' is the standard German term for customer support"
+  },
+  "Surfaces": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Surfaces' is the correct French word"
+  },
+  "Suspense": {
+    "locales": [
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Suspense' is the native genre name in French, Italian and Brazilian Portuguese"
+  },
+  "Swift": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language name"
+  },
+  "Symbol": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Symbol' is the correct German word"
+  },
+  "Sync Lipsync": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model name (Sync Labs lipsync model)"
+  },
+  "Synthwave '84": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "theme name"
+  },
+  "System": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'System' is the correct German word"
+  },
+  "Tab": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "keyboard key name"
+  },
+  "Tailcat": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "mesh backend product name"
+  },
+  "Tailscale": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Tailscale Funnel": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Tailscale product feature name"
+  },
+  "Tavily": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "search provider name"
+  },
+  "Team": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Team' is the standard native word in German and Italian UI"
+  },
+  "Team (optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Team' and 'optional' are correct German words"
+  },
+  "Team ·": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Team' is the standard native word in German and Italian UI"
+  },
+  "Team:": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Team' is the standard native word in German and Italian UI"
+  },
+  "Team: {teamName}": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Team' is the standard native word in German and Italian UI"
+  },
+  "Teams": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Teams' is the correct German plural"
+  },
+  "Teams Lite": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu plan name"
+  },
+  "Teleprompter": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Teleprompter' is the standard German and Italian term"
+  },
+  "Tempo (BPM)": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it"
+    ],
+    "reason": "'Tempo' is the native musical term in these languages; BPM is a unit"
+  },
+  "Terminal": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'Terminal' is the native word in these languages"
+  },
+  "Test:": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Test' is the correct German word"
+  },
+  "Tests": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "'Tests' is the correct German and French word"
+  },
+  "Text": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Text' is the correct German word"
+  },
+  "Text / Markdown": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Text' is the correct German word; Markdown is a format name"
+  },
+  "Theme": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Theme' is the established German UI term per the glossary"
+  },
+  "Themes": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Themes' is the established German UI term per the glossary"
+  },
+  "Threads": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Threads' is the standard German computing term for CPU threads"
+  },
+  "Ticket": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Ticket' is the standard German support term"
+  },
+  "Together AI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/brand name"
+  },
+  "Token": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Token' is the standard native term in these locales"
+  },
+  "Tokens": {
+    "locales": [
+      "de",
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'Tokens' is the standard native term in these locales"
+  },
+  "Tokens:": {
+    "locales": [
+      "de",
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'Tokens' is the standard native term in these locales"
+  },
+  "Tokyo Night": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Top K": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "sampling parameter name conventionally left in English"
+  },
+  "Top P": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "sampling parameter name conventionally left in English"
+  },
+  "Topaz Labs": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/brand name"
+  },
+  "Total": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Total/s": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Trace": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Train": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Transaction": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Transactions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Transport": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Treg": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/brand name"
+  },
+  "Tremolo": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "musical term spelled identically in German and Italian"
+  },
+  "Trend": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Trend' is the standard German word"
+  },
+  "Triage": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Triage' is a standard German word"
+  },
+  "Triangle": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Twemoji": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "emoji set brand name"
+  },
+  "Type": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "TypeScript SDK": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language / product name"
+  },
+  "Typical P": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "sampling parameter name conventionally left in English"
+  },
+  "UI + API": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "technical acronyms only"
+  },
+  "URL (https)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ko",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "contains only the acronym URL and protocol name https"
+  },
+  "Unsloth": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/brand name"
+  },
+  "Unsplash": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/brand name"
+  },
+  "Upgrade": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Upgrade' is an established German word (Duden)"
+  },
+  "Urgent": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Use": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'Use' is the correct pt-BR imperative (você)"
+  },
+  "VP9 · WebM": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "codec and file format names"
+  },
+  "Validation": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Vampire": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Variables": {
+    "locales": [
+      "es",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Vectorscope": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'Vectorscope' is the standard French video term"
+  },
+  "Vercel AI Gateway": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/brand name"
+  },
+  "Verdict": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Verilog": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language / product name"
+  },
+  "Version": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Version {revision} · {codec}": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Version {version}": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Versions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Vertical": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Vesper": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Vibrato": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "musical term spelled identically in these languages"
+  },
+  "Video": {
+    "locales": [
+      "de",
+      "es",
+      "it"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Video Studio": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu app product name"
+  },
+  "Video Studio / launch-cut": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "mockup window label: product name plus project slug"
+  },
+  "Videos": {
+    "locales": [
+      "de"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Vignette": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Vignette' is the standard German photography term"
+  },
+  "Violet": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Visible": {
+    "locales": [
+      "es",
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Vision": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Visual Basic": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "programming language / product name"
+  },
+  "Vitesse Black": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Vitesse Dark": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Vitesse Light": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "editor theme name"
+  },
+  "Voice Studio": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu app product name (Voice app title)"
+  },
+  "Volume": {
+    "locales": [
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Volume (dB) · {volume}": {
+    "locales": [
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Voronoi": {
+    "locales": [
+      "de",
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "mathematical term named after Voronoi, spelled identically"
+  },
+  "Voyage AI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "company/brand name"
+  },
+  "Vulkan": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "graphics API name"
+  },
+  "Wan T2V (Fal)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model name"
+  },
+  "Wan VACE 14B": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model name"
+  },
+  "Warm": {
+    "locales": [
+      "de"
+    ],
+    "reason": "identical spelling is the correct native word in this locale"
+  },
+  "Web": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Web' is the native term in these locales"
+  },
+  "Web + Desktop": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'Web' and 'Desktop' are standard German words"
+  },
+  "Web + browser": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'browser' is the standard Italian term"
+  },
+  "Web / UI": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'Web' is native and UI is an acronym in these locales"
+  },
+  "WebGPU → WASM": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "technology names (backend fallback)"
+  },
+  "WebVTT (.vtt)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "file format name"
+  },
+  "Webhook": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Webhook is the established loanword in these languages (existing locale strings use it)"
+  },
+  "Webhooks": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "Webhooks is the established loanword in these languages"
+  },
+  "Website": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German word is 'Website'"
+  },
+  "Website (optional)": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German: 'Website (optional)' is correct German"
+  },
+  "Website / LinkedIn": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German word is 'Website'; LinkedIn is a brand"
+  },
+  "West End": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "place name, kept in Latin-script languages"
+  },
+  "WhatsApp Business (Cloud API)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Whisper": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model name"
+  },
+  "Whiteboard": {
+    "locales": [
+      "de"
+    ],
+    "reason": "Whiteboard is the standard German word"
+  },
+  "Widget ·": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Widget is the standard word in these languages"
+  },
+  "Wikimedia Commons": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "proper name of a site"
+  },
+  "Wikipedia": {
+    "locales": [
+      "de",
+      "es",
+      "it"
+    ],
+    "reason": "Wikipedia is the site's name in these languages"
+  },
+  "Worker": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German uses 'Worker' (existing de plural is 'Worker')"
+  },
+  "Workflow": {
+    "locales": [
+      "de",
+      "fr",
+      "it"
+    ],
+    "reason": "glossary keeps 'Workflow' in de/fr/it"
+  },
+  "Workflow: {workflowName}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "glossary keeps 'Workflow' in German"
+  },
+  "Workflows": {
+    "locales": [
+      "de",
+      "fr"
+    ],
+    "reason": "glossary: de/fr 'Workflows'"
+  },
+  "Worktree": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "git term kept as the loanword \"worktree\" in all existing de/es/fr/it/pt-BR strings (e.g. \"Chat handed off to worktree\"); a literal calque would be inconsistent"
+  },
+  "Worktrees": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "git term kept as the loanword \"worktree\" in all existing de/es/fr/it/pt-BR strings (e.g. \"Chat handed off to worktree\"); a literal calque would be inconsistent"
+  },
+  "Wrapped": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Wrapped feature name"
+  },
+  "Wrapped · {year}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu Wrapped feature name with year"
+  },
+  "X, YouTube": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "list of brand names only"
+  },
+  "Yosemite": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "place/wallpaper name, kept in Latin-script languages"
+  },
+  "YouTube 1080p": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand plus resolution preset"
+  },
+  "YouTube 4K": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand plus resolution preset"
+  },
+  "YouTube Shorts": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "Zoom": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "Zoom is the standard word in these languages"
+  },
+  "Zsh": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "shell name"
+  },
+  "[token]": {
+    "locales": [
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "glossary keeps 'Token' in es/it/pt-BR"
+  },
+  "account": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'account' is the standard Italian term"
+  },
+  "actor {actorId}": {
+    "locales": [
+      "es"
+    ],
+    "reason": "'actor' is the Spanish word"
+  },
+  "agent": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'agent' is the French word"
+  },
+  "agent {actorId}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'agent' is the French word"
+  },
+  "agent {agentId}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'agent' is the French word"
+  },
+  "agents": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'agents' is the French word"
+  },
+  "app": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'app' is the standard Italian term"
+  },
+  "arc": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "monome arc device name"
+  },
+  "auto": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'auto' is the standard French abbreviation"
+  },
+  "autopilot": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "app brand name"
+  },
+  "btw": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "/btw command name"
+  },
+  "budget": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "'budget' is the French/Italian word"
+  },
+  "budgets": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'budgets' is the French word"
+  },
+  "cache": {
+    "locales": [
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'cache' is the standard term in these languages"
+  },
+  "chat": {
+    "locales": [
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'chat' is the standard term in these languages"
+  },
+  "chats": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'chats' is the standard term in es/pt-BR"
+  },
+  "dev": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "release profile name"
+  },
+  "dlp": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "DLP inspector mode identifier/acronym"
+  },
+  "documents": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'documents' is spelled identically"
+  },
+  "downloads": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'downloads' is the standard pt-BR word (Windows/macOS pt-BR folder name)"
+  },
+  "entry.": {
+    "locales": [
+      "ar",
+      "ko",
+      "ru"
+    ],
+    "reason": "sentence fragment after an inline <code> element: this locale's word order already places the noun in the preceding fragment, so only the punctuation remains here (adding the word would duplicate it)"
+  },
+  "error": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Spanish word 'error' is spelled identically"
+  },
+  "file": {
+    "locales": [
+      "it"
+    ],
+    "reason": "Italian uses 'file' (il file) as the standard word"
+  },
+  "firewall": {
+    "locales": [
+      "es",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'firewall' is the standard term in es/it/pt-BR software localization"
+  },
+  "follower": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'follower' is the standard Italian social-media term"
+  },
+  "gateway": {
+    "locales": [
+      "es",
+      "it",
+      "pt-BR",
+      "ru"
+    ],
+    "reason": "Ryu Gateway product name, kept untranslated per glossary"
+  },
+  "gemma-4 · local": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "model name plus 'local', identical word in es/fr/pt-BR"
+  },
+  "governance": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'governance' is the standard Italian business term"
+  },
+  "iFlow CLI": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product name"
+  },
+  "iMessage (BlueBubbles)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "product names"
+  },
+  "image": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'image' is spelled identically"
+  },
+  "in Ryu Credits": {
+    "locales": [
+      "de",
+      "it"
+    ],
+    "reason": "'Ryu Credits' is a brand currency name and 'in' is the same preposition in German and Italian"
+  },
+  "in the previous step.": {
+    "locales": [
+      "ko"
+    ],
+    "reason": "sentence fragment: Korean puts 'in the previous step ... accepted' in the preceding fragment 'You accepted our' (이전 단계에서 다음에 동의하셨습니다:), so only the period remains; translating here would duplicate the clause"
+  },
+  "input + output": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'input'/'output' are standard Italian tech terms (Treccani)"
+  },
+  "interfaces": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "same spelling in es/fr/pt-BR"
+  },
+  "item": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'item' is a standard Portuguese word"
+  },
+  "links.": {
+    "locales": [
+      "ar",
+      "ru"
+    ],
+    "reason": "sentence fragment after an inline <code> element: this locale's word order already places the noun in the preceding fragment, so only the punctuation remains here (adding the word would duplicate it)"
+  },
+  "live": {
+    "locales": [
+      "de"
+    ],
+    "reason": "'live' is the standard German word for live broadcasts"
+  },
+  "local": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "same spelling in es/fr/pt-BR"
+  },
+  "macOS · Windows x64 · Linux x64": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "OS/platform names"
+  },
+  "message": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'message' is spelled identically"
+  },
+  "messages": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'messages' is spelled identically"
+  },
+  "messages,": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'messages' is spelled identically"
+  },
+  "min": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "unit abbreviation for minutes, identical in these locales"
+  },
+  "minutes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'minutes' is spelled identically"
+  },
+  "module": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'module' is spelled identically"
+  },
+  "modules": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'modules' is spelled identically"
+  },
+  "n-gram mod": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "llama.cpp speculative decoding method name (ngram-mod)"
+  },
+  "optional": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German word 'optional' is spelled identically"
+  },
+  "output": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'output' is the standard Italian tech term (Treccani)"
+  },
+  "page": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'page' is spelled identically"
+  },
+  "pass^k": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "benchmark metric name"
+  },
+  "point": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'point' is spelled identically"
+  },
+  "points": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'points' is spelled identically"
+  },
+  "post": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'post' is the standard Italian social-media term"
+  },
+  "provider": {
+    "locales": [
+      "it"
+    ],
+    "reason": "glossary keeps 'Provider' in Italian"
+  },
+  "pyannote 3.1": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "model name and version"
+  },
+  "questions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'questions' is spelled identically"
+  },
+  "routine": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "'routine' is a native French and Italian word"
+  },
+  "routines": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word 'routines' is spelled identically"
+  },
+  "ryu": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Ryu brand name"
+  },
+  "secrets": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'secrets'"
+  },
+  "session {sessionId}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'session'"
+  },
+  "skill": {
+    "locales": [
+      "it",
+      "pt-BR"
+    ],
+    "reason": "official glossary uses 'Skill' in it and pt-BR"
+  },
+  "slide": {
+    "locales": [
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'slide' is the standard Italian and Brazilian Portuguese term for a presentation slide"
+  },
+  "source": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'source'"
+  },
+  "status": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "'status' is a Portuguese word used in pt-BR UI"
+  },
+  "suggestion": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'suggestion'"
+  },
+  "tests": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'tests'"
+  },
+  "tokens": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'tokens' is the established term in es/pt-BR AI UI"
+  },
+  "total (p95)": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'total' is the same word in es/fr/pt-BR; p95 is a metric name"
+  },
+  "transport": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'transport'"
+  },
+  "type": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'type'"
+  },
+  "url": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "technical term URL"
+  },
+  "vLLM / SGLang": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "engine names"
+  },
+  "vLLM 0.0–1.0": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "engine name with numeric range"
+  },
+  "variables": {
+    "locales": [
+      "es",
+      "fr"
+    ],
+    "reason": "same word in Spanish and French"
+  },
+  "version 3": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'version'"
+  },
+  "via Artificial Analysis (": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'via' is used in fr/pt-BR; Artificial Analysis is a company name"
+  },
+  "via {source}": {
+    "locales": [
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'via' is used in fr/pt-BR"
+  },
+  "votes": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'votes'"
+  },
+  "youtube": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "brand name YouTube"
+  },
+  "{amount} micro-USD": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "currency unit micro-USD"
+  },
+  "{count, plural, one {# clip} other {# clips}} · {layout}": {
+    "locales": [
+      "es",
+      "fr"
+    ],
+    "reason": "'clip/clips' are the standard es/fr words"
+  },
+  "{count, plural, one {# session} other {# sessions}}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'session(s)'"
+  },
+  "{count} notifications. {expandedLabel}.": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'notifications'"
+  },
+  "{diskGb} GB SSD": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "units and hardware term"
+  },
+  "{environment} · version {version}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'version'"
+  },
+  "{environment} · {path} · version {version}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'version'"
+  },
+  "{format} · {durationMinutes} min": {
+    "locales": [
+      "es",
+      "fr",
+      "it",
+      "pt-BR"
+    ],
+    "reason": "'min' is the standard minute abbreviation"
+  },
+  "{fps} fps": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "unit"
+  },
+  "{frameRate} fps ·": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "unit"
+  },
+  "{hookCount, plural, one {# hook} other {# hooks}}": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "plugin 'hook' is a technical term kept as 'Hooks' in es/fr/pt-BR locale files; 'crochet'/'gancho' is the wrong sense"
+  },
+  "{itemName} · Version {itemVersion}": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German word is 'Version'"
+  },
+  "{label} (Esc)": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "placeholder plus key name Esc"
+  },
+  "{label} — {tokenCount} tokens": {
+    "locales": [
+      "es",
+      "pt-BR"
+    ],
+    "reason": "'tokens' is the established term in es/pt-BR AI UI"
+  },
+  "{memberCount, plural, one {# skill} other {# skills}}": {
+    "locales": [
+      "pt-BR"
+    ],
+    "reason": "official glossary uses 'Skills' in pt-BR"
+  },
+  "{memoryGb} GB RAM": {
+    "locales": [
+      "de"
+    ],
+    "reason": "German UI writes 'GB RAM' as is"
+  },
+  "{messageCount} messages · commit {commit}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "'messages' is French and 'commit' is the standard French git term"
+  },
+  "{minutes} min": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "unit abbreviation"
+  },
+  "{planName} ({billingPeriod})": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "only placeholders and punctuation"
+  },
+  "{planName} ({billingPeriod}, {seats})": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "only placeholders and punctuation"
+  },
+  "{planName}: {effectiveOn}": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "only placeholders and punctuation"
+  },
+  "{points} points": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'points'"
+  },
+  "{presetLabel} · {provider} (preset)": {
+    "locales": [
+      "it"
+    ],
+    "reason": "'preset' is the standard Italian term"
+  },
+  "{scope} · {category} · importance {importance} · {tags}": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'importance'"
+  },
+  "{speed} tok/s": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "unit"
+  },
+  "{tokenCount} tokens": {
+    "locales": [
+      "es",
+      "fr",
+      "pt-BR"
+    ],
+    "reason": "'tokens' is the established term in es/fr/pt-BR AI UI"
+  },
+  "{transactionCount} transactions": {
+    "locales": [
+      "fr"
+    ],
+    "reason": "French word is 'transactions'"
+  },
+  "· Actor": {
+    "locales": [
+      "es"
+    ],
+    "reason": "Spanish word is 'Actor'"
+  },
+  "· Audio": {
+    "locales": [
+      "de",
+      "es",
+      "fr",
+      "it"
+    ],
+    "reason": "'Audio' is the same word in de/es/fr/it"
+  },
+  "· Tab:": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "Tab is a keyboard key name (CLI hint), kept untranslated per guide"
+  },
+  "· UEN": {
+    "locales": [
+      "ar",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "pt-BR",
+      "ru",
+      "zh-CN"
+    ],
+    "reason": "UEN is the Singapore Unique Entity Number registration acronym, an identifier"
+  },
+  "· cloud": {
+    "locales": [
+      "fr",
+      "it"
+    ],
+    "reason": "\"cloud\" is the standard dictionary loanword in French and Italian software UI"
+  }
+}

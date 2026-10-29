@@ -19,33 +19,41 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::sidecar::download_manager::{ryu_dir, VersionStore};
+use ryu_sidecar_runtime::layout::Modality;
+
+use crate::sidecar::download_manager::{model_family_dir, VersionStore};
 
 /// Kokoro 82M v1.0 ONNX weights (~310 MB). Override the source via `RYU_KOKORO_MODEL_URL`.
 const MODEL_FILE: &str = "kokoro-v1.0.onnx";
 const MODEL_URL: &str = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx";
-const MODEL_STORE_KEY: &str = "kokoro-model:kokoro-82m-v1.0";
+pub(crate) const MODEL_STORE_KEY: &str = "kokoro-model:kokoro-82m-v1.0";
 
 /// Kokoro voice pack (~27 MB) — the styles for every preset voice. Override the
 /// source via `RYU_KOKORO_VOICES_URL`.
 const VOICES_FILE: &str = "kokoro-voices-v1.0.bin";
 const VOICES_URL: &str = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin";
-const VOICES_STORE_KEY: &str = "kokoro-voices:kokoro-82m-v1.0";
+pub(crate) const VOICES_STORE_KEY: &str = "kokoro-voices:kokoro-82m-v1.0";
 
-/// Resolved path for the Kokoro ONNX weights (`~/.ryu/models/kokoro-v1.0.onnx`).
+/// `<data dir>/models/text-to-speech/kokoro` — the Kokoro weights and voices.
+pub fn models_dir() -> PathBuf {
+    model_family_dir(Modality::TextToSpeech, "kokoro")
+}
+
+/// Resolved path for the Kokoro ONNX weights
+/// (`models/text-to-speech/kokoro/kokoro-v1.0.onnx`).
 /// Overridable via `RYU_KOKORO_MODEL` (this is also the value injected into the
 /// sidecar's `kokoro` backend).
 pub fn model_path() -> PathBuf {
     std::env::var("RYU_KOKORO_MODEL")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| ryu_dir().join("models").join(MODEL_FILE))
+        .unwrap_or_else(|_| models_dir().join(MODEL_FILE))
 }
 
 /// Resolved path for the Kokoro voice pack. Overridable via `RYU_KOKORO_VOICES`.
 pub fn voices_path() -> PathBuf {
     std::env::var("RYU_KOKORO_VOICES")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| ryu_dir().join("models").join(VOICES_FILE))
+        .unwrap_or_else(|_| models_dir().join(VOICES_FILE))
 }
 
 /// Whether both Kokoro artifacts are present on disk (used to gate the sidecar
@@ -116,10 +124,11 @@ impl KokoroDownloader {
         }
 
         tracing::info!("downloading {file_name} from {url}");
-        let models_dir = ryu_dir().join("models");
-        tokio::fs::create_dir_all(&models_dir)
-            .await
-            .context("creating ~/.ryu/models")?;
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
 
         let downloaded = downloads
             .download_blocking(crate::downloads::DownloadSpec {

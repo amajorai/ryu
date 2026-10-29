@@ -4,11 +4,14 @@ import {
 	createCollabEditorKit,
 	EditorKit,
 	type MyEditor,
-} from "@ryu/ui/components/editor/editor-kit";
-import { discussionPlugin } from "@ryu/ui/components/editor/plugins/discussion-kit";
-import { Editor, EditorContainer } from "@ryu/ui/components/editor/ui/editor";
-import { FixedToolbar } from "@ryu/ui/components/editor/ui/fixed-toolbar";
-import { FixedToolbarButtons } from "@ryu/ui/components/editor/ui/fixed-toolbar-buttons";
+} from "@ryu/ui/components/editor/editor-kit.tsx";
+import { discussionPlugin } from "@ryu/ui/components/editor/plugins/discussion-kit.tsx";
+import {
+	Editor,
+	EditorContainer,
+} from "@ryu/ui/components/editor/ui/editor.tsx";
+import { FixedToolbar } from "@ryu/ui/components/editor/ui/fixed-toolbar.tsx";
+import { FixedToolbarButtons } from "@ryu/ui/components/editor/ui/fixed-toolbar-buttons.tsx";
 import { Plate, usePlateEditor } from "platejs/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { XmlText } from "yjs";
@@ -75,6 +78,7 @@ export function MarkdownEditor({
 	collab,
 	compact = false,
 	toolbar = "fixed",
+	readOnly: readOnlyOverride = false,
 }: {
 	collab?: MarkdownCollab;
 	/**
@@ -84,7 +88,10 @@ export function MarkdownEditor({
 	compact?: boolean;
 	initialMarkdown: string;
 	onChangeMarkdown: (markdown: string) => void;
-	toolbar?: "fixed" | "inline";
+	/** Compact quick actions with the full Space-page toolbar in a two-row grid. */
+	toolbar?: "fixed" | "inline" | "two-row";
+	/** Host-owned access can also lock a non-collaborative editor. */
+	readOnly?: boolean;
 }) {
 	// Keep the page's sync callback fresh without rebuilding the provider/editor.
 	const onSyncedChangeRef = useRef(collab?.onSyncedChange);
@@ -95,7 +102,7 @@ export function MarkdownEditor({
 	// locally too — otherwise an edit would appear to apply, broadcast, get dropped,
 	// and vanish on reload (silent data loss). Mirrors the grid's `readOnly` gate.
 	const [access, setAccess] = useState<"read" | "write" | null>(null);
-	const readOnly = access === "read";
+	const readOnly = readOnlyOverride || access === "read";
 
 	// Whether the server granted THIS client the one-shot seed claim. Captured from
 	// join_ack (which always precedes the first sync) and read inside the init
@@ -133,21 +140,35 @@ export function MarkdownEditor({
 		// `collab` is memoized by the caller, so this rebuilds only when the room
 		// identity / node / token actually changes.
 	}, [collab]);
+	const omitFixedToolbarPlugin = toolbar !== "fixed";
+	const collabPlugins = useMemo(() => {
+		if (!(provider && collab)) {
+			return null;
+		}
+		const plugins = createCollabEditorKit({
+			cursor: collab.user,
+			provider,
+		});
+		return omitFixedToolbarPlugin
+			? plugins.filter((plugin) => plugin.key !== "fixed-toolbar")
+			: plugins;
+	}, [collab, omitFixedToolbarPlugin, provider]);
+	const standalonePlugins = useMemo(
+		() =>
+			omitFixedToolbarPlugin
+				? EditorKit.filter((plugin) => plugin.key !== "fixed-toolbar")
+				: EditorKit,
+		[omitFixedToolbarPlugin]
+	);
 
 	const editor = usePlateEditor(
-		provider && collab
+		provider && collab && collabPlugins
 			? {
-					plugins: createCollabEditorKit({
-						cursor: collab.user,
-						provider,
-					}),
+					plugins: collabPlugins,
 					skipInitialization: true,
 				}
 			: {
-					plugins:
-						toolbar === "inline"
-							? EditorKit.filter((plugin) => plugin.key !== "fixed-toolbar")
-							: EditorKit,
+					plugins: standalonePlugins,
 					// `value` may be a function of the editor, which is how we reach the
 					// MarkdownPlugin's deserializer to turn stored Markdown into nodes.
 					value: (ed) =>
@@ -270,6 +291,10 @@ export function MarkdownEditor({
 						<FixedToolbarButtons placement="inline" />
 					</FixedToolbar>
 				</div>
+			) : toolbar === "two-row" ? (
+				<FixedToolbar>
+					<FixedToolbarButtons expandedLayout="grid" />
+				</FixedToolbar>
 			) : null}
 			<EditorContainer
 				className={compact ? "max-h-[min(50vh,360px)] min-h-48" : undefined}

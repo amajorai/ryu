@@ -61,6 +61,7 @@
 //! Every code path here is detection-only + CLI invocation; there are no
 //! `docker pull` calls without explicit user request.
 
+use crate::capture::BoundedCommand;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -68,6 +69,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use super::{ExecOutput, ExecSpec, Sandbox, SandboxCapabilities, WorkspaceId};
+use crate::process_output::output_capped;
 use crate::win_process::NoWindow;
 use crate::BoxFuture;
 
@@ -87,6 +89,15 @@ const DEFAULT_DOCKER_IMAGE: &str = "alpine:3.20";
 const DEFAULT_DOCKER_BINARY: &str = "docker";
 /// Default probe timeout.
 const DEFAULT_DETECT_SECS: u64 = 3;
+async fn force_remove_container(binary: &str, id: &str) {
+    let mut cmd = Command::new(binary);
+    cmd.args(["rm", "-f", id])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .no_window();
+    let _ = timeout(Duration::from_secs(3), cmd.status()).await;
+}
 
 fn docker_binary() -> String {
     std::env::var(ENV_DOCKER_BINARY).unwrap_or_else(|_| DEFAULT_DOCKER_BINARY.to_owned())
@@ -136,7 +147,7 @@ pub async fn detect() -> DetectResult {
             .arg("--format")
             .arg("{{json .SecurityOptions}}")
             .no_window()
-            .output(),
+            .bounded_output(),
     )
     .await;
 
@@ -233,6 +244,146 @@ impl DockerSandbox {
     pub fn new() -> Self {
         Self
     }
+
+    /// A deterministic resource name lets Core persist its lease before Docker
+    /// effects. Expiry also bounds the container lifetime if Core never restarts.
+    pub async fn create_leased_workspace(
+        &self,
+        lease_id: &str,
+        expires_at: u64,
+        capabilities: SandboxCapabilities,
+    ) -> Result<WorkspaceId> {
+        let name = cloud_task_name(lease_id)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+        anyhow::ensure!(
+            expires_at > now && expires_at - now <= 3600,
+            "Invalid cloud task resource expiry"
+        );
+        anyhow::ensure!(
+            capabilities.fs_read_paths.is_empty() && capabilities.fs_write_paths.is_empty(),
+            "Cloud tasks cannot mount host paths"
+        );
+        ensure_rootless_daemon().await?;
+        let image = docker_image();
+        let expiry = expires_at.to_string();
+        let seconds = (expires_at - now).to_string();
+        let mut command = Command::new(docker_binary());
+        command.args([
+            "run",
+            "-d",
+            "--rm",
+            "--pull=never",
+            "--name",
+            &name,
+            "--label",
+            "com.ryu.cloud-task=1",
+            "--label",
+            &format!("com.ryu.cloud-task-id={lease_id}"),
+            "--label",
+            &format!("com.ryu.cloud-task-expiry={expiry}"),
+        ]);
+        command
+            .args(caps_to_flags(&capabilities))
+            .arg(image)
+            .args(["sleep", &seconds])
+            .no_window()
+            .kill_on_drop(true);
+        let output = timeout(Duration::from_secs(30), command.bounded_output())
+            .await
+            .map_err(|_| anyhow!("Cloud Docker creation timed out"))??;
+        anyhow::ensure!(output.status.success(), "Cloud Docker creation failed");
+        let id = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        anyhow::ensure!(
+            id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "Cloud Docker returned invalid resource identity"
+        );
+        Ok(WorkspaceId(id))
+    }
+
+    /// Never remove a name or id from untrusted lease metadata. Derive the name
+    /// from a canonical UUID and verify exact owner/identity/expiry labels.
+    pub async fn destroy_leased_workspace(&self, lease_id: &str, expires_at: u64) -> Result<()> {
+        let name = cloud_task_name(lease_id)?;
+        ensure_rootless_daemon().await?;
+        let mut inspect = Command::new(docker_binary());
+        inspect
+            .args(["container", "inspect", &name])
+            .no_window()
+            .kill_on_drop(true);
+        let output = timeout(Duration::from_secs(10), inspect.bounded_output())
+            .await
+            .map_err(|_| anyhow!("Cloud Docker cleanup probe timed out"))??;
+        if !output.status.success() {
+            let mut list = Command::new(docker_binary());
+            list.args([
+                "container",
+                "ls",
+                "--all",
+                "--filter",
+                &format!("name=^/{name}$"),
+                "--format",
+                "{{json .}}",
+            ])
+            .no_window()
+            .kill_on_drop(true);
+            let output = timeout(Duration::from_secs(10), list.bounded_output())
+                .await
+                .map_err(|_| anyhow!("Cloud Docker cleanup inventory timed out"))??;
+            anyhow::ensure!(
+                output.status.success() && output.stdout.iter().all(u8::is_ascii_whitespace),
+                "Cloud Docker cleanup could not prove resource absence"
+            );
+            return Ok(());
+        }
+        anyhow::ensure!(
+            output.stdout.len() <= 1_048_576,
+            "Cloud Docker cleanup metadata exceeded limit"
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        verify_cloud_task_container(&value, &name, lease_id, expires_at)?;
+        let mut remove = Command::new(docker_binary());
+        remove
+            .args(["rm", "--force", "--volumes", &name])
+            .no_window()
+            .kill_on_drop(true);
+        let output = timeout(Duration::from_secs(10), remove.bounded_output())
+            .await
+            .map_err(|_| anyhow!("Cloud Docker cleanup timed out"))??;
+        anyhow::ensure!(output.status.success(), "Cloud Docker cleanup failed");
+        Ok(())
+    }
+}
+
+fn cloud_task_name(lease_id: &str) -> Result<String> {
+    let id = uuid::Uuid::parse_str(lease_id)?;
+    anyhow::ensure!(
+        id.to_string() == lease_id,
+        "Invalid cloud task lease identity"
+    );
+    Ok(format!("ryu-cloud-task-{lease_id}"))
+}
+fn verify_cloud_task_container(
+    value: &serde_json::Value,
+    name: &str,
+    lease_id: &str,
+    expires_at: u64,
+) -> Result<()> {
+    let records = value
+        .as_array()
+        .ok_or_else(|| anyhow!("Invalid cloud Docker metadata"))?;
+    anyhow::ensure!(records.len() == 1, "Invalid cloud Docker metadata");
+    let container = &records[0];
+    let labels = &container["Config"]["Labels"];
+    anyhow::ensure!(
+        container["Name"] == format!("/{name}")
+            && labels["com.ryu.cloud-task"] == "1"
+            && labels["com.ryu.cloud-task-id"] == lease_id
+            && labels["com.ryu.cloud-task-expiry"] == expires_at.to_string(),
+        "Cloud Docker lease ownership mismatch"
+    );
+    Ok(())
 }
 
 impl Default for DockerSandbox {
@@ -250,13 +401,21 @@ impl Sandbox for DockerSandbox {
 
     fn exec(&self, spec: ExecSpec) -> BoxFuture<Result<ExecOutput>> {
         Box::pin(async move {
+            crate::process_output::execution_timeout(spec.timeout_secs, 30)?;
             ensure_rootless_daemon().await?;
             let binary = docker_binary();
             let image = docker_image();
             let cap_flags = caps_to_flags(&spec.capabilities);
+            let container_name = format!("ryu-sandbox-{}", uuid::Uuid::new_v4());
 
             let mut cmd = Command::new(&binary);
-            cmd.arg("run").arg("--rm");
+            cmd.arg("run")
+                .arg("--rm")
+                .arg("--name")
+                .arg(&container_name);
+            let mut cleanup = crate::WorkspaceCleanup::new(
+                DockerSandbox::new().destroy_workspace(&WorkspaceId(container_name.clone())),
+            );
 
             // Pipe stdin if bytes are provided.
             let has_stdin = spec.stdin.is_some();
@@ -284,40 +443,10 @@ impl Sandbox for DockerSandbox {
             cmd.stderr(std::process::Stdio::piped());
             cmd.no_window();
 
-            let run = async move {
-                if let Some(stdin_bytes) = spec.stdin.clone() {
-                    // Spawn, write stdin, then wait.
-                    let mut child = cmd
-                        .spawn()
-                        .map_err(|e| anyhow!("docker spawn failed: {e}"))?;
-                    if let Some(mut writer) = child.stdin.take() {
-                        use tokio::io::AsyncWriteExt as _;
-                        writer
-                            .write_all(&stdin_bytes)
-                            .await
-                            .map_err(|e| anyhow!("docker stdin write failed: {e}"))?;
-                    }
-                    let output = child
-                        .wait_with_output()
-                        .await
-                        .map_err(|e| anyhow!("docker wait failed: {e}"))?;
-                    Ok::<_, anyhow::Error>(output)
-                } else {
-                    let output = cmd
-                        .output()
-                        .await
-                        .map_err(|e| anyhow!("docker run failed: {e}"))?;
-                    Ok(output)
-                }
-            };
-
-            let output = if let Some(secs) = spec.timeout_secs {
-                timeout(Duration::from_secs(secs), run)
-                    .await
-                    .map_err(|_| anyhow!("docker exec timed out after {secs}s"))?
-            } else {
-                run.await
-            }?;
+            let result = output_capped(&mut cmd, spec.stdin, spec.timeout_secs, "docker run").await;
+            // --rm may already have removed a successful ephemeral workspace.
+            let _ = cleanup.finish().await;
+            let output = result?;
 
             let exit_code = output.status.code().unwrap_or(-1);
             Ok(ExecOutput {
@@ -340,8 +469,16 @@ impl Sandbox for DockerSandbox {
             let image = docker_image();
             let cap_flags = caps_to_flags(&capabilities);
 
+            let name = format!("ryu-workspace-{}", uuid::Uuid::new_v4());
+            let mut cleanup = crate::WorkspaceCleanup::new(
+                DockerSandbox::new().destroy_workspace(&WorkspaceId(name.clone())),
+            );
             let mut cmd = Command::new(&binary);
-            cmd.arg("run").arg("-d").arg("--rm"); // auto-remove when stopped
+            cmd.arg("run")
+                .arg("-d")
+                .arg("--rm")
+                .arg("--name")
+                .arg(&name); // auto-remove when stopped
 
             for flag in &cap_flags {
                 cmd.arg(flag);
@@ -353,7 +490,7 @@ impl Sandbox for DockerSandbox {
             cmd.no_window();
 
             let output = cmd
-                .output()
+                .bounded_output()
                 .await
                 .map_err(|e| anyhow!("docker run (workspace) failed: {e}"))?;
 
@@ -372,6 +509,7 @@ impl Sandbox for DockerSandbox {
                 return Err(anyhow!("docker run returned empty container id"));
             }
 
+            cleanup.disarm();
             Ok(WorkspaceId(id))
         })
     }
@@ -379,6 +517,7 @@ impl Sandbox for DockerSandbox {
     fn exec_in_workspace(&self, id: &WorkspaceId, spec: ExecSpec) -> BoxFuture<Result<ExecOutput>> {
         let container_id = id.0.clone();
         Box::pin(async move {
+            crate::process_output::execution_timeout(spec.timeout_secs, 30)?;
             ensure_rootless_daemon().await?;
             let binary = docker_binary();
 
@@ -404,39 +543,18 @@ impl Sandbox for DockerSandbox {
             cmd.stderr(std::process::Stdio::piped());
             cmd.no_window();
 
-            let run = async move {
-                if let Some(stdin_bytes) = spec.stdin.clone() {
-                    let mut child = cmd
-                        .spawn()
-                        .map_err(|e| anyhow!("docker exec spawn failed: {e}"))?;
-                    if let Some(mut writer) = child.stdin.take() {
-                        use tokio::io::AsyncWriteExt as _;
-                        writer
-                            .write_all(&stdin_bytes)
-                            .await
-                            .map_err(|e| anyhow!("docker exec stdin write failed: {e}"))?;
-                    }
-                    let output = child
-                        .wait_with_output()
-                        .await
-                        .map_err(|e| anyhow!("docker exec wait failed: {e}"))?;
-                    Ok::<_, anyhow::Error>(output)
-                } else {
-                    let output = cmd
-                        .output()
-                        .await
-                        .map_err(|e| anyhow!("docker exec failed: {e}"))?;
-                    Ok(output)
-                }
-            };
-
-            let output = if let Some(secs) = spec.timeout_secs {
-                timeout(Duration::from_secs(secs), run)
-                    .await
-                    .map_err(|_| anyhow!("docker exec timed out after {secs}s"))?
+            let mut cleanup = crate::WorkspaceCleanup::new(
+                DockerSandbox::new().destroy_workspace(&WorkspaceId(container_id.clone())),
+            );
+            let result =
+                output_capped(&mut cmd, spec.stdin, spec.timeout_secs, "docker exec").await;
+            if result.is_err() {
+                cleanup.finish().await?;
             } else {
-                run.await
-            }?;
+                cleanup.disarm();
+            }
+
+            let output = result?;
 
             let exit_code = output.status.code().unwrap_or(-1);
             Ok(ExecOutput {
@@ -457,7 +575,7 @@ impl Sandbox for DockerSandbox {
                 .arg("-f")
                 .arg(&container_id)
                 .no_window()
-                .output()
+                .bounded_output()
                 .await
                 .map_err(|e| anyhow!("docker rm failed: {e}"))?;
 
@@ -480,6 +598,111 @@ impl Sandbox for DockerSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cloud_task_cleanup_requires_exact_resource_labels() {
+        let id = "00000000-0000-4000-8000-000000000001";
+        let name = cloud_task_name(id).unwrap();
+        let owned = serde_json::json!([{"Name":format!("/{name}"),"Config":{"Labels":{"com.ryu.cloud-task":"1","com.ryu.cloud-task-id":id,"com.ryu.cloud-task-expiry":"123"}}}]);
+        assert!(verify_cloud_task_container(&owned, &name, id, 123).is_ok());
+        assert!(verify_cloud_task_container(&owned, &name, id, 124).is_err());
+        assert!(verify_cloud_task_container(&owned, "foreign", id, 123).is_err());
+        assert!(cloud_task_name("--force").is_err());
+        assert!(cloud_task_name("../../foreign").is_err());
+    }
+
+    #[tokio::test]
+    async fn invalid_timeouts_do_not_execute_or_destroy_existing_workspaces() {
+        let backends: Vec<Box<dyn crate::Sandbox>> = vec![
+            Box::new(DockerSandbox::new()),
+            Box::new(crate::microsandbox::MicrosandboxSandbox::new()),
+            Box::new(crate::opensandbox::OpenSandboxSandbox::new()),
+        ];
+        for backend in backends {
+            for seconds in [0, 301, u64::MAX] {
+                let mut spec = crate::ExecSpec::new("must-not-execute", Vec::new());
+                spec.timeout_secs = Some(seconds);
+                let error = backend
+                    .exec_in_workspace(&crate::WorkspaceId("existing-workspace".to_owned()), spec)
+                    .await
+                    .unwrap_err();
+                assert!(
+                    error.to_string().contains("timeout must"),
+                    "{}: {error}",
+                    backend.name()
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn output_reader_stops_an_unbounded_guest_stream() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "yes output"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let error = output_capped(&mut cmd, None, Some(5), "docker")
+            .await
+            .expect_err("unbounded stdout must fail");
+        assert!(error.to_string().contains("4 MiB stream limit"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn output_reader_terminates_a_quiet_timeout() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "exec sleep 30"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let error = output_capped(&mut cmd, None, Some(1), "docker")
+            .await
+            .expect_err("quiet command must time out");
+        assert!(error.to_string().contains("timed out"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timed_out_run_forcibly_removes_its_named_container() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = lock_docker_env();
+        let dir = std::env::temp_dir().join(format!("ryu-docker-cleanup-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("docker");
+        let marker = dir.join("removed");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ncase \"$1\" in\ninfo) echo '[\"name=rootless\"]';;\nrun) exec sleep 30;;\nrm) printf '%s' \"$3\" > '{}';;\nesac\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let previous = std::env::var_os(ENV_DOCKER_BINARY);
+        std::env::set_var(ENV_DOCKER_BINARY, &script);
+        let result = DockerSandbox::new()
+            .exec(ExecSpec {
+                env: Vec::new(),
+                command: "sleep".to_owned(),
+                args: vec!["30".to_owned()],
+                capabilities: SandboxCapabilities::default(),
+                stdin: None,
+                timeout_secs: Some(1),
+            })
+            .await;
+        if let Some(value) = previous {
+            std::env::set_var(ENV_DOCKER_BINARY, value);
+        } else {
+            std::env::remove_var(ENV_DOCKER_BINARY);
+        }
+        assert!(result.unwrap_err().to_string().contains("timed out"));
+        let removed = std::fs::read_to_string(&marker).expect("docker rm -f must run");
+        assert!(removed.starts_with("ryu-sandbox-"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Serializes the tests that override the process-global `RYU_SANDBOX_DOCKER_BINARY`
     /// env var — otherwise one removing it mid-test can let the other resolve the

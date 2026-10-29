@@ -40,7 +40,7 @@ use core_graphics::event::{
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use objc::{class, msg_send, sel, sel_impl};
 
-use super::gesture::{Detector, Input, Side, Trigger};
+use super::gesture::{Detector, Input, Modifier, Trigger};
 use super::CaptureContext;
 
 /// Virtual keycode for `C`, for the synthetic ⌘C fallback.
@@ -68,7 +68,7 @@ static SYNTHESIZING: AtomicBool = AtomicBool::new(false);
 /// the life of the process once created (a `CFMachPort` cannot be moved off the
 /// thread that owns it), so this is what "off" means: the callback returns before
 /// looking at anything.
-static LISTENING: AtomicBool = AtomicBool::new(false);
+static LISTENING: std::sync::OnceLock<std::sync::Arc<AtomicBool>> = std::sync::OnceLock::new();
 
 thread_local! {
     /// The tap's own `CFMachPortRef`, so the callback can re-enable itself after a
@@ -78,11 +78,17 @@ thread_local! {
 }
 
 pub fn set_listening(on: bool) {
-    LISTENING.store(on, Ordering::SeqCst);
+    listening_gate().store(on, Ordering::SeqCst);
 }
 
 pub fn is_listening() -> bool {
-    LISTENING.load(Ordering::SeqCst)
+    listening_gate().load(Ordering::SeqCst)
+}
+
+fn listening_gate() -> std::sync::Arc<AtomicBool> {
+    LISTENING
+        .get_or_init(|| std::sync::Arc::new(AtomicBool::new(false)))
+        .clone()
 }
 
 /// Create the event tap on its own thread and stream triggers to `tx`.
@@ -91,14 +97,25 @@ pub fn is_listening() -> bool {
 /// Monitoring grant surfaces as an error to the caller instead of a thread that
 /// quietly does nothing. The thread then owns a CFRunLoop for the process's life.
 pub fn spawn_listener(tx: Sender<Trigger>) -> Result<(), String> {
+    spawn_modifier_listener(tx, Modifier::Shift, "ryu-quick-capture", listening_gate())
+}
+
+/// Create a listener for another bare modifier, sharing the same event-tap
+/// implementation as Quests' legacy Shift gesture.
+pub fn spawn_modifier_listener(
+    tx: Sender<Trigger>,
+    modifier: Modifier,
+    thread_name: &'static str,
+    listening: std::sync::Arc<AtomicBool>,
+) -> Result<(), String> {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
 
     std::thread::Builder::new()
-		.name("ryu-quick-capture".into())
+		.name(thread_name.into())
 		.spawn(move || {
 			// The detector lives on this thread and is only ever touched by the
 			// callback, so a RefCell is the right amount of synchronization.
-			let detector = std::cell::RefCell::new(Detector::default());
+			let detector = std::cell::RefCell::new(Detector::for_modifier(modifier));
 
 			let tap = CGEventTap::new(
 				CGEventTapLocation::HID,
@@ -114,7 +131,7 @@ pub fn spawn_listener(tx: Sender<Trigger>) -> Result<(), String> {
 					CGEventType::TapDisabledByUserInput,
 				],
 				move |_proxy, event_type, event| {
-					on_event(&detector, &tx, event_type, event);
+					on_event(&detector, &tx, &listening, modifier, event_type, event);
 					None
 				},
 			);
@@ -163,6 +180,8 @@ pub fn spawn_listener(tx: Sender<Trigger>) -> Result<(), String> {
 fn on_event(
     detector: &std::cell::RefCell<Detector>,
     tx: &Sender<Trigger>,
+    listening: &AtomicBool,
+    modifier: Modifier,
     event_type: CGEventType,
     event: &CGEvent,
 ) {
@@ -185,7 +204,7 @@ fn on_event(
         return;
     }
 
-    if !is_listening() || SYNTHESIZING.load(Ordering::SeqCst) {
+    if !listening.load(Ordering::SeqCst) || SYNTHESIZING.load(Ordering::SeqCst) {
         return;
     }
 
@@ -197,17 +216,21 @@ fn on_event(
         CGEventType::KeyDown => Some(Input::KeyDown),
         CGEventType::FlagsChanged => {
             let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-            match Side::from_keycode(keycode) {
-                Some(side) => {
-                    // FlagsChanged does not say "up" or "down" — the Shift bit in the
-                    // post-change flags does. Set = this event pressed it.
-                    if flags.contains(CGEventFlags::CGEventFlagShift) {
-                        Some(Input::ShiftDown {
+            match Modifier::from_keycode(keycode) {
+                Some((event_modifier, side)) => {
+                    // FlagsChanged does not say "up" or "down". The matching
+                    // modifier bit in the post-change flags does.
+                    if is_modifier_down(flags, event_modifier) {
+                        Some(Input::ModifierDown {
+                            modifier: event_modifier,
                             side,
-                            other_modifiers: has_other_modifiers(flags),
+                            other_modifiers: has_other_modifiers(flags, event_modifier),
                         })
                     } else {
-                        Some(Input::ShiftUp { side })
+                        Some(Input::ModifierUp {
+                            modifier: event_modifier,
+                            side,
+                        })
                     }
                 }
                 // Command/Option/Control/Fn/CapsLock moving is what breaks a chord
@@ -228,13 +251,36 @@ fn on_event(
     }
 }
 
-fn has_other_modifiers(flags: CGEventFlags) -> bool {
-    flags.intersects(
-        CGEventFlags::CGEventFlagCommand
-            | CGEventFlags::CGEventFlagControl
-            | CGEventFlags::CGEventFlagAlternate
-            | CGEventFlags::CGEventFlagSecondaryFn,
-    )
+fn is_modifier_down(flags: CGEventFlags, modifier: Modifier) -> bool {
+    match modifier {
+        Modifier::Shift => flags.contains(CGEventFlags::CGEventFlagShift),
+        Modifier::Command => flags.contains(CGEventFlags::CGEventFlagCommand),
+        Modifier::Alt => flags.contains(CGEventFlags::CGEventFlagAlternate),
+    }
+}
+
+fn has_other_modifiers(flags: CGEventFlags, modifier: Modifier) -> bool {
+    let other_flags = match modifier {
+        Modifier::Shift => {
+            CGEventFlags::CGEventFlagCommand
+                | CGEventFlags::CGEventFlagControl
+                | CGEventFlags::CGEventFlagAlternate
+                | CGEventFlags::CGEventFlagSecondaryFn
+        }
+        Modifier::Command => {
+            CGEventFlags::CGEventFlagShift
+                | CGEventFlags::CGEventFlagControl
+                | CGEventFlags::CGEventFlagAlternate
+                | CGEventFlags::CGEventFlagSecondaryFn
+        }
+        Modifier::Alt => {
+            CGEventFlags::CGEventFlagShift
+                | CGEventFlags::CGEventFlagCommand
+                | CGEventFlags::CGEventFlagControl
+                | CGEventFlags::CGEventFlagSecondaryFn
+        }
+    };
+    flags.intersects(other_flags)
 }
 
 fn now_millis() -> u64 {

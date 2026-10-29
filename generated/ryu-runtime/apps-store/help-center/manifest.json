@@ -14,6 +14,7 @@
   "tagline": "Resolve support questions with your whole team",
   "keywords": ["support", "tickets", "knowledge", "help center"],
   "icon": "customer-service-01",
+  "iconDither": { "from": 211, "to": "transparent", "direction": "down" },
   "surfaces": {
     "gateway": { "support": "none" },
     "core": { "support": "none" },

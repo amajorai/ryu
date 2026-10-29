@@ -153,6 +153,53 @@ describe("live activity vocabulary", () => {
 		expect(validateLiveActivity(42).ok).toBe(false);
 	});
 
+	it("reports missing required labels individually", () => {
+		expect(validateLiveActivity({})).toEqual({
+			ok: false,
+			errors: [
+				'live activity: "id" must be a non-empty string',
+				'live activity: "title" must be a non-empty string',
+			],
+		});
+		expect(validateLiveActivity({ id: "activity", title: 0 }).errors).toEqual([
+			'live activity: "title" must be a non-empty string',
+		]);
+	});
+	it("renders JSON field values and leaves absent values empty", () => {
+		const contribution = {
+			...helloLiveActivity,
+			spec: {
+				target: "/{{item.obj}}/{{item.flag}}/{{item.count}}/{{item.missing}}",
+			},
+		};
+		expect(
+			renderLiveActivityTarget(contribution, {
+				obj: { nested: [1, "a"] },
+				flag: false,
+				count: 0,
+			})
+		).toBe(
+			`/${encodeURIComponent(JSON.stringify({ nested: [1, "a"] }))}/false/0/`
+		);
+	});
+	it("keeps a card when its optional progress field is not finite", () => {
+		const contribution: LiveActivityContribution = {
+			id: "progress",
+			title: "Progress",
+			spec: {
+				source: { http: { method: "GET", path: "/api/runs" }, items: "runs" },
+				map: { progress: "percent" },
+			},
+		};
+		const [row] = liveActivitiesFromResponse(
+			contribution,
+			{ runs: [{ id: "r1", title: "Run", percent: Number.NaN }] },
+			0
+		);
+		expect(row?.activity.title).toBe("Run");
+		expect(row?.activity.progress).toBeUndefined();
+	});
+
 	it("carries a renderable canned example", () => {
 		const rows = helloLiveActivityRows();
 		expect(rows).toHaveLength(1);

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
+	agentMessageDelivery,
 	isAgentMessageToolPart,
 	readAgentMessagePayload,
+	summarizeAgentMessageRun,
 } from "./agent-message-tool-logic.ts";
 
 describe("agent message transcript tool", () => {
@@ -75,5 +77,62 @@ describe("agent message transcript tool", () => {
 	it("waits for both the recipient and message before rendering a bubble", () => {
 		expect(readAgentMessagePayload({ input: { to: "reviewer" } })).toBeNull();
 		expect(readAgentMessagePayload({ input: { text: "hello" } })).toBeNull();
+	});
+
+	it("treats a Switchboard refusal and an unfinished call outside a live turn as undelivered", () => {
+		const refused = {
+			input: { text: "Loop back", to: "builder" },
+			output: { ok: false, refused: "hop_limit" },
+			state: "output-available",
+		};
+		expect(agentMessageDelivery(refused)).toBe("failed");
+		const unfinished = {
+			input: { text: "Hi", to: "builder" },
+			state: "input-available",
+		};
+		expect(agentMessageDelivery(unfinished, "streaming")).toBe("sending");
+		expect(agentMessageDelivery(unfinished)).toBe("failed");
+		expect(
+			agentMessageDelivery({ ...unfinished, state: "output-available" })
+		).toBe("sent");
+	});
+
+	it("folds a fan-out into one conversation per recipient in first-contact order", () => {
+		const summary = summarizeAgentMessageRun(
+			[
+				{
+					input: { text: "Ship it?", to: "reviewer" },
+					output: { from: "builder", ok: true, to: "reviewer" },
+					state: "output-available",
+					toolCallId: "call-1",
+				},
+				{
+					input: { text: "Draft the post", to: "marketing" },
+					output: { ok: false, refused: "hop_limit" },
+					state: "output-available",
+					toolCallId: "call-2",
+				},
+				{
+					input: { text: "Also check the migration", to: "reviewer" },
+					state: "input-available",
+					toolCallId: "call-3",
+				},
+				{ input: { to: "ops" }, state: "input-streaming" },
+			],
+			"streaming"
+		);
+		expect(summary.peers.map((peer) => peer.peer)).toEqual([
+			"reviewer",
+			"marketing",
+		]);
+		const [reviewer, marketing] = summary.peers;
+		expect(reviewer?.from).toBe("builder");
+		expect(reviewer?.delivery).toBe("sending");
+		expect(reviewer?.entries.map((entry) => entry.key)).toEqual([
+			"call-1",
+			"call-3",
+		]);
+		expect(marketing?.delivery).toBe("failed");
+		expect(summary.unreadable).toEqual([{ delivery: "sending" }]);
 	});
 });

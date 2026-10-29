@@ -50,14 +50,20 @@ const SURFACES = [
 ] as const;
 type SurfaceId = (typeof SURFACES)[number]["id"];
 
-const SURFACE_ICONS: Record<SurfaceId, IconType> = {
+type ArchitectureSurfaceNode = Node<
+	{ label: string; surfaceId: SurfaceId },
+	"surface"
+>;
+type ArchitectureEngineNode = Node<{ label: string }, "engine">;
+
+const SURFACE_ICONS = {
 	bots: MessageCircle,
 	cli: TerminalSquare,
 	desktop: Monitor,
 	extension: Puzzle,
 	mobile: Smartphone,
 	web: Globe,
-};
+} satisfies Record<SurfaceId, IconType>;
 
 const ENGINES = [
 	"OpenAI",
@@ -86,12 +92,12 @@ const CORE_PILLS = [
 	"Sidecars",
 ] as const;
 
-function SurfaceNode({ data }: NodeProps) {
-	const { label, surfaceId } = data as { label: string; surfaceId: SurfaceId };
-	const Icon = SURFACE_ICONS[surfaceId];
+function SurfaceNode({ data }: NodeProps<ArchitectureSurfaceNode>) {
+	const { label, surfaceId } = data;
+	const Glyph = SURFACE_ICONS[surfaceId];
 	return (
 		<div className="flex w-[150px] items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
-			<Icon className="size-4 shrink-0 text-muted-foreground" />
+			<Glyph className="size-4 shrink-0 text-muted-foreground" />
 			<span className="font-medium text-foreground text-sm">{label}</span>
 			<Handle
 				className={HANDLE_CLASS}
@@ -103,8 +109,8 @@ function SurfaceNode({ data }: NodeProps) {
 	);
 }
 
-function EngineNode({ data }: NodeProps) {
-	const { label } = data as { label: string };
+function EngineNode({ data }: NodeProps<ArchitectureEngineNode>) {
+	const { label } = data;
 	return (
 		<div className="flex w-[150px] items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
 			<Cpu className="size-4 shrink-0 text-muted-foreground" />
@@ -130,7 +136,7 @@ function GatewayNode() {
 			/>
 			<div className="flex items-start justify-between gap-2">
 				<div>
-					<p className="font-medium text-[10px] text-background/60 uppercase tracking-widest">
+					<p className="type-compact font-medium text-background/60 uppercase tracking-widest">
 						Control
 					</p>
 					<h3 className="font-medium text-lg tracking-tight">Ryu Gateway</h3>
@@ -142,7 +148,7 @@ function GatewayNode() {
 			<div className="mt-3 grid grid-cols-2 gap-1.5">
 				{GATEWAY_PILLS.map((pill) => (
 					<span
-						className="rounded-md bg-background px-2 py-1.5 text-center font-medium text-[11px] text-foreground"
+						className="type-caption rounded-md bg-background px-2 py-1.5 text-center font-medium text-foreground"
 						key={pill}
 					>
 						{pill}
@@ -168,7 +174,7 @@ function CoreNode() {
 				position={Position.Left}
 				type="target"
 			/>
-			<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-widest">
+			<p className="type-compact font-medium text-muted-foreground uppercase tracking-widest">
 				Orchestration
 			</p>
 			<h3 className="font-medium text-foreground text-lg tracking-tight">
@@ -180,7 +186,7 @@ function CoreNode() {
 			<div className="mt-3 grid grid-cols-2 gap-1.5">
 				{CORE_PILLS.map((pill) => (
 					<span
-						className="rounded-md bg-muted px-2 py-1.5 text-center font-medium text-[11px] text-foreground"
+						className="type-caption rounded-md bg-muted px-2 py-1.5 text-center font-medium text-foreground"
 						key={pill}
 					>
 						{pill}
@@ -209,7 +215,7 @@ const GATEWAY_Y = 70;
 
 const initialNodes: Node[] = [
 	...SURFACES.map(
-		(surface, i): Node => ({
+		(surface, i): ArchitectureSurfaceNode => ({
 			id: surface.id,
 			type: "surface",
 			position: { x: 0, y: i * SURFACE_STEP },
@@ -224,7 +230,7 @@ const initialNodes: Node[] = [
 	},
 	{ id: "core", type: "core", position: { x: 660, y: GATEWAY_Y }, data: {} },
 	...ENGINES.map(
-		(label, i): Node => ({
+		(label, i): ArchitectureEngineNode => ({
 			id: `engine-${i}`,
 			type: "engine",
 			position: { x: 1000, y: i * SURFACE_STEP },

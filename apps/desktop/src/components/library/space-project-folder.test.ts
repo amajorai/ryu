@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { UseSpacesResult } from "@/src/hooks/useSpaces.ts";
 import type {
 	SpaceDocument,
 	SpaceDocumentContent,
@@ -117,9 +118,10 @@ describe("SpaceProjectFolder", () => {
 });
 
 test("preview caches follow their reader scope and refresh recency", () => {
-	const ownerA = {};
+	const ownerA: UseSpacesResult["getDocument"] = async () =>
+		contentFixture("owner-a");
 	const a = spaceDocumentPreviewCacheFor(ownerA);
-	const b = spaceDocumentPreviewCacheFor({});
+	const b = spaceDocumentPreviewCacheFor(async () => contentFixture("owner-b"));
 	expect(spaceDocumentPreviewCacheFor(ownerA)).toBe(a);
 	storeSpaceDocumentPreview(
 		a,

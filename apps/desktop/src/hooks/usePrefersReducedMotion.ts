@@ -9,7 +9,7 @@ import { useSyncExternalStore } from "react";
 const REDUCE_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 function subscribe(cb: () => void): () => void {
-	if (typeof window === "undefined" || !window.matchMedia) {
+	if (globalThis.window === undefined || !window.matchMedia) {
 		return () => {
 			// nothing to unsubscribe from
 		};
@@ -20,7 +20,7 @@ function subscribe(cb: () => void): () => void {
 }
 
 function read(): boolean {
-	if (typeof window === "undefined" || !window.matchMedia) {
+	if (globalThis.window === undefined || !window.matchMedia) {
 		return false;
 	}
 	return window.matchMedia(REDUCE_MOTION_QUERY).matches;

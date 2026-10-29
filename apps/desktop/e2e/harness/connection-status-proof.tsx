@@ -4,26 +4,33 @@ import "../../src/index.css";
 import {
 	ConnectionStatusToastView,
 	type ConnectionStatusToastViewProps,
-} from "@ryu/ui/components/connection-status";
+} from "@ryu/ui/components/connection-status.tsx";
 import type { ConnectionPhase } from "@ryuhq/protocol/connection-status";
 
-type ProofState = "checking" | "node-unreachable" | "offline" | "restored";
+type ProofState =
+	| "checking"
+	| "node-unreachable"
+	| "offline"
+	| "restored"
+	| "online";
 
 const STATE_OPTIONS: Array<{ key: ProofState; label: string }> = [
 	{ key: "node-unreachable", label: "Simulate node outage" },
 	{ key: "offline", label: "Simulate no Wi-Fi" },
 	{ key: "checking", label: "Reconnect" },
 	{ key: "restored", label: "Confirm restored" },
+	{ key: "online", label: "Finish recovery" },
 ];
 
-const stateCopy: Record<ProofState, string> = {
+const stateCopy = {
+	online: "The connection status leaves once recovery is complete.",
 	checking: "The shell stays usable while the active node is checked.",
 	"node-unreachable":
 		"Only the selected node is unavailable; the rest of the workspace remains mounted.",
 	offline:
 		"The device has no network connection; Ryu waits without replacing the workspace.",
 	restored: "The node answered again and the shell confirms recovery briefly.",
-};
+} satisfies Record<ProofState, string>;
 
 function toToastProps(
 	state: ProofState,
@@ -41,6 +48,7 @@ function toToastProps(
 
 function Story() {
 	const [state, setState] = useState<ProofState>("node-unreachable");
+	const [stacked, setStacked] = useState(false);
 
 	return (
 		<main
@@ -49,9 +57,12 @@ function Story() {
 			data-testid="connection-status-proof"
 		>
 			<ConnectionStatusToastView {...toToastProps(state, setState)} />
+			{stacked && (
+				<ConnectionStatusToastView nodeName="Network" phase="offline" />
+			)}
 			<div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-24 sm:px-10">
 				<header className="max-w-2xl">
-					<p className="font-medium text-muted-foreground text-sm uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-sm uppercase tracking-(--tracking-section)">
 						Desktop reliability
 					</p>
 					<h1 className="mt-3 font-semibold text-4xl tracking-tight sm:text-5xl">
@@ -96,6 +107,13 @@ function Story() {
 						</span>
 					</div>
 					<div className="mt-3 flex flex-wrap gap-2">
+						<button
+							className="rounded-full border border-border px-3 py-2 text-sm"
+							onClick={() => setStacked(!stacked)}
+							type="button"
+						>
+							Toggle second status
+						</button>
 						{STATE_OPTIONS.map((option) => (
 							<button
 								className="rounded-full border border-border px-3 py-2 text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

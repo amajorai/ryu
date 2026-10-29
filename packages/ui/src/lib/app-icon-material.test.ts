@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appIconMaterialSvg, iconSeedHue } from "./app-icon-material";
+import { appIconMaterialSvg, iconSeedHue } from "./app-icon-material.ts";
 
 describe("app icon material", () => {
 	test("is deterministic and uses stable package identity", () => {

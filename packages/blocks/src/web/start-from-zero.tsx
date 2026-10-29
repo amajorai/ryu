@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@ryu/ui/lib/utils";
-import { motion } from "motion/react";
+import { MotionConfig, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { SubscriptionProvidersGrid } from "./bring-your-subscription.tsx";
 import { landingSubheadlineBodyClass } from "./landing-typography.ts";
@@ -64,64 +64,66 @@ function ImportViz() {
 	}, []);
 
 	return (
-		<div className="rounded-3xl bg-muted/50 p-4">
-			<div className="mb-4 flex items-center gap-2">
-				<span className="size-2 rounded-full bg-foreground/30" />
-				<span className="text-[11px] text-foreground/50 uppercase tracking-widest">
-					Importing context
-				</span>
-			</div>
+		<MotionConfig reducedMotion="user">
+			<div className="rounded-3xl bg-muted/50 p-4">
+				<div className="mb-4 flex items-center gap-2">
+					<span className="size-2 rounded-full bg-foreground/30" />
+					<span className="type-caption text-foreground/50 uppercase tracking-widest">
+						Importing context
+					</span>
+				</div>
 
-			<div className="flex flex-col gap-2">
-				{HISTORY.map((h, i) => {
-					const shown = i < n;
-					return (
-						<motion.div
-							animate={{
-								opacity: shown ? 1 : 0.25,
-								x: shown ? 0 : -8,
-							}}
-							className="flex items-center gap-3 rounded-xl bg-foreground/5 px-3 py-2.5"
-							key={h.text}
-							transition={{ duration: 0.4 }}
-						>
-							<span className="rounded-md bg-foreground/10 px-2 py-0.5 font-medium text-[10px] text-foreground/60">
-								{h.src}
-							</span>
-							<span className="text-foreground/70 text-xs">{h.text}</span>
-							{shown ? (
-								<motion.span
-									animate={{ scale: 1 }}
-									className="ml-auto text-foreground/40 text-xs"
-									initial={{ scale: 0 }}
-								>
-									✓
-								</motion.span>
-							) : null}
-						</motion.div>
-					);
-				})}
-			</div>
+				<div className="flex flex-col gap-2">
+					{HISTORY.map((h, i) => {
+						const shown = i < n;
+						return (
+							<motion.div
+								animate={{
+									opacity: shown ? 1 : 0.25,
+									x: shown ? 0 : -8,
+								}}
+								className="flex items-center gap-3 rounded-xl bg-foreground/5 px-3 py-2.5"
+								key={h.text}
+								transition={{ duration: 0.4 }}
+							>
+								<span className="type-compact rounded-md bg-foreground/10 px-2 py-0.5 font-medium text-foreground/60">
+									{h.src}
+								</span>
+								<span className="text-foreground/70 text-xs">{h.text}</span>
+								{shown ? (
+									<motion.span
+										animate={{ scale: 1 }}
+										className="ml-auto text-foreground/40 text-xs"
+										initial={{ scale: 0 }}
+									>
+										✓
+									</motion.span>
+								) : null}
+							</motion.div>
+						);
+					})}
+				</div>
 
-			<div className="my-3 flex justify-center">
-				<div className="h-4 w-px bg-foreground/15" />
-			</div>
+				<div className="my-3 flex justify-center">
+					<div className="h-4 w-px bg-foreground/15" />
+				</div>
 
-			<motion.div
-				animate={{
-					backgroundColor:
-						n >= HISTORY.length
-							? "var(--color-foreground)"
-							: "color-mix(in oklch, var(--color-foreground) 6%, transparent)",
-					color:
-						n >= HISTORY.length
-							? "var(--color-background)"
-							: "color-mix(in oklch, var(--color-foreground) 70%, transparent)",
-				}}
-				className="rounded-xl px-4 py-3 text-center font-medium text-sm"
-			>
-				Ryu continues the thread →
-			</motion.div>
-		</div>
+				<motion.div
+					animate={{
+						backgroundColor:
+							n >= HISTORY.length
+								? "var(--color-foreground)"
+								: "color-mix(in oklch, var(--color-foreground) 6%, transparent)",
+						color:
+							n >= HISTORY.length
+								? "var(--color-background)"
+								: "color-mix(in oklch, var(--color-foreground) 70%, transparent)",
+					}}
+					className="rounded-xl px-4 py-3 text-center font-medium text-sm"
+				>
+					Ryu continues the thread →
+				</motion.div>
+			</div>
+		</MotionConfig>
 	);
 }

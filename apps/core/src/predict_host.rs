@@ -71,6 +71,14 @@ impl ryu_predict::PredictHost for CorePredictHost {
         system: &str,
         user: &str,
     ) -> Result<String, String> {
-        crate::server::call_side_model(&self.state, model, effort, system, user).await
+        crate::server::call_side_model(
+            &self.state,
+            &crate::sidecar::gateway::SidePurpose::Predict,
+            model,
+            effort,
+            system,
+            user,
+        )
+        .await
     }
 }

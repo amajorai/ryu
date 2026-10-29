@@ -2,19 +2,21 @@ import {
 	Alert02Icon,
 	CheckmarkCircle02Icon,
 	Copy01Icon,
-	Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AgentAuditPanel } from "@ryu/marketplace/catalog/detail/agent-audit-panel";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { RangeSlider } from "@ryu/ui/components/motion/range-slider";
+import { RangeSlider } from "@ryu/ui/components/motion/range-slider.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
+	SettingsCard,
+	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
@@ -64,7 +66,7 @@ function severityVariant(
 function DoctorFindingRow({ finding }: { finding: GatewayDoctorFinding }) {
 	return (
 		<div
-			className="flex items-start gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-3"
+			className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0"
 			data-doctor-check-id={finding.checkId}
 		>
 			<HugeiconsIcon
@@ -82,7 +84,7 @@ function DoctorFindingRow({ finding }: { finding: GatewayDoctorFinding }) {
 					{finding.detail}
 				</p>
 				{finding.settingPath ? (
-					<p className="font-mono text-[11px] text-muted-foreground/80">
+					<p className="type-caption font-mono text-muted-foreground/80">
 						{finding.settingPath}
 					</p>
 				) : null}
@@ -107,16 +109,16 @@ function DoctorSummary({
 		report?.findings.slice(0, compact ? 2 : undefined) ?? [];
 	if (!report) {
 		return (
-			<div className="flex items-center gap-2 px-3 text-muted-foreground text-sm">
+			<SettingsCard className="flex items-center gap-2 text-muted-foreground text-sm">
 				<Spinner className="size-4" />
 				Running Doctor…
-			</div>
+			</SettingsCard>
 		);
 	}
 
 	return (
-		<div className="space-y-3 px-3" data-doctor-report="true">
-			<div className="flex flex-wrap items-center gap-2">
+		<div className="space-y-1.5" data-doctor-report="true">
+			<SettingsCard className="flex flex-wrap items-center gap-2">
 				<Badge
 					variant={
 						report.counts.errors > 0
@@ -138,22 +140,19 @@ function DoctorSummary({
 						{report.counts.info === 1 ? "" : "s"}
 					</span>
 				) : null}
-			</div>
+				{visibleFindings.length > 0 ? null : (
+					<span className="text-muted-foreground text-xs">
+						No configuration, security, or performance issues found.
+					</span>
+				)}
+			</SettingsCard>
 			{visibleFindings.length > 0 ? (
-				<div className="space-y-2">
+				<SettingsCard className="divide-y divide-border/60">
 					{visibleFindings.map((finding) => (
 						<DoctorFindingRow finding={finding} key={finding.checkId} />
 					))}
-				</div>
-			) : (
-				<div className="flex items-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-3 text-muted-foreground text-sm">
-					<HugeiconsIcon
-						className="size-4 text-status-success"
-						icon={CheckmarkCircle02Icon}
-					/>
-					No configuration, security, or performance issues found.
-				</div>
-			)}
+				</SettingsCard>
+			) : null}
 		</div>
 	);
 }
@@ -347,24 +346,28 @@ export function GatewayPostureCard({
 		<div className="space-y-4" data-gateway-posture="true">
 			<SettingsSection caption={caption} title="Safety posture">
 				{loading && !snapshot ? (
-					<div className="flex items-center gap-2 px-3 text-muted-foreground text-sm">
-						<Spinner className="size-4" />
-						Loading posture…
-					</div>
+					<SettingsCard>
+						<SkeletonRows label="Loading posture…" spacing="panel" />
+					</SettingsCard>
 				) : error && !snapshot ? (
-					<div className="space-y-2 px-3 text-sm">
-						<p className="text-muted-foreground">{error}</p>
-						<Button onClick={() => void refresh()} size="sm" variant="ghost">
-							Retry
-						</Button>
-					</div>
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<Button
+									onClick={() => void refresh()}
+									size="sm"
+									variant="ghost"
+								>
+									Retry
+								</Button>
+							}
+							title={<span className="text-muted-foreground">{error}</span>}
+						/>
+					</SettingsGroup>
 				) : (
-					<div className="space-y-4 px-3">
-						<div className="flex items-start gap-3">
-							<div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-								<HugeiconsIcon className="size-5" icon={Shield01Icon} />
-							</div>
-							<div className="min-w-0 flex-1">
+					<>
+						<SettingsCard className="space-y-4">
+							<div className="min-w-0">
 								<div className="flex flex-wrap items-center gap-2">
 									<span className="font-medium text-sm">
 										{shownOption.label}
@@ -377,79 +380,78 @@ export function GatewayPostureCard({
 									{shownOption.description}
 								</p>
 							</div>
-						</div>
-						<div className={LEVEL_RAMP_CLASS}>
-							<RangeSlider
-								aria-label="Gateway safety posture"
-								className="h-9"
-								disabled={!canConfigure}
-								fillColor={levelFillColor(
-									levelIndex(shownPosture),
-									GATEWAY_POSTURE_OPTIONS.length
-								)}
-								formatValueText={(value) =>
-									GATEWAY_POSTURE_OPTIONS[Math.round(value)]
-										?.accessibilityLabel ?? String(value)
-								}
-								max={GATEWAY_POSTURE_OPTIONS.length - 1}
-								min={0}
-								onValueChange={(value) => {
-									const next =
-										GATEWAY_POSTURE_OPTIONS[Math.round(value)]?.level;
-									if (next) {
-										setPending(next);
+							<div className={LEVEL_RAMP_CLASS}>
+								<RangeSlider
+									aria-label="Gateway safety posture"
+									className="h-9"
+									disabled={!canConfigure}
+									fillColor={levelFillColor(
+										levelIndex(shownPosture),
+										GATEWAY_POSTURE_OPTIONS.length
+									)}
+									formatValueText={(value) =>
+										GATEWAY_POSTURE_OPTIONS[Math.round(value)]
+											?.accessibilityLabel ?? String(value)
 									}
-								}}
-								step={1}
-								value={levelIndex(shownPosture)}
-							/>
-							<div className="flex items-center justify-between gap-2 pt-1 text-[11px] text-muted-foreground">
-								{GATEWAY_POSTURE_OPTIONS.map((option) => (
-									<span
-										className={
-											option.level === shownPosture
-												? "font-medium text-foreground"
-												: ""
+									max={GATEWAY_POSTURE_OPTIONS.length - 1}
+									min={0}
+									onValueChange={(value) => {
+										const next =
+											GATEWAY_POSTURE_OPTIONS[Math.round(value)]?.level;
+										if (next) {
+											setPending(next);
 										}
-										key={option.level}
-									>
-										{option.label}
-									</span>
-								))}
+									}}
+									step={1}
+									value={levelIndex(shownPosture)}
+								/>
+								<div className="type-caption flex items-center justify-between gap-2 pt-1 text-muted-foreground">
+									{GATEWAY_POSTURE_OPTIONS.map((option) => (
+										<span
+											className={
+												option.level === shownPosture
+													? "font-medium text-foreground"
+													: ""
+											}
+											key={option.level}
+										>
+											{option.label}
+										</span>
+									))}
+								</div>
 							</div>
-						</div>
-						<p className="text-muted-foreground text-xs">{shownOption.risk}</p>
+							<p className="text-muted-foreground text-xs">
+								{shownOption.risk}
+							</p>
+						</SettingsCard>
 						{pending ? (
-							<div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-3">
-								<div>
-									<p className="font-medium text-sm">
-										Apply {GATEWAY_POSTURE_OPTIONS[levelIndex(pending)].label}?
-									</p>
-									<p className="mt-1 text-muted-foreground text-xs">
-										This updates Gateway firewall behavior and Core approval
-										mode together.
-									</p>
-								</div>
-								<div className="flex flex-wrap gap-2">
-									<Button
-										loading={applying}
-										onClick={() => void apply()}
-										size="sm"
-									>
-										Apply posture
-									</Button>
-									<Button
-										disabled={applying}
-										onClick={() => setPending(null)}
-										size="sm"
-										variant="ghost"
-									>
-										Cancel
-									</Button>
-								</div>
-							</div>
+							<SettingsGroup>
+								<SettingsItem
+									actions={
+										<div className="flex flex-wrap gap-2">
+											<Button
+												loading={applying}
+												onClick={() => void apply()}
+												size="sm"
+											>
+												Apply posture
+											</Button>
+											<Button
+												disabled={applying}
+												onClick={() => setPending(null)}
+												size="sm"
+												variant="ghost"
+											>
+												Cancel
+											</Button>
+										</div>
+									}
+									description="This updates Gateway firewall behavior and Core approval mode together."
+									title={`Apply ${GATEWAY_POSTURE_OPTIONS[levelIndex(pending)].label}?`}
+								/>
+							</SettingsGroup>
 						) : null}
-					</div>
+					</>
 				)}
 			</SettingsSection>
 
@@ -457,61 +459,65 @@ export function GatewayPostureCard({
 				caption="Supported subscription agents remain direct until you explicitly change this. Restart the affected agent after changing it."
 				title="Gateway coverage"
 			>
-				<SettingsItem
-					actions={
-						<Switch
-							checked={routeBoth}
-							disabled={!canConfigure || coverageSaving || !coverage}
-							onCheckedChange={(checked) => void toggleCoverage(checked)}
-						/>
-					}
-					description={
-						coverage?.genericAgentCount
-							? `Claude and Codex are ${routeBoth ? "covered" : "not covered"}; ${coverage.genericAgentCount} other agent route${coverage.genericAgentCount === 1 ? " is" : "s are"} enabled.`
-							: `Claude and Codex are ${routeBoth ? "covered" : "not covered"} by Gateway firewall, budget, and audit controls.`
-					}
-					title="Route Claude & Codex through Gateway"
-				/>
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={routeBoth}
+								disabled={!canConfigure || coverageSaving || !coverage}
+								onCheckedChange={(checked) => void toggleCoverage(checked)}
+							/>
+						}
+						description={
+							coverage?.genericAgentCount
+								? `Claude and Codex are ${routeBoth ? "covered" : "not covered"}; ${coverage.genericAgentCount} other agent route${coverage.genericAgentCount === 1 ? " is" : "s are"} enabled.`
+								: `Claude and Codex are ${routeBoth ? "covered" : "not covered"} by Gateway firewall, budget, and audit controls.`
+						}
+						title="Route Claude & Codex through Gateway"
+					/>
+				</SettingsGroup>
 			</SettingsSection>
 
 			<SettingsSection
 				caption="Run checks for configuration, security, performance, connectivity, and agent coverage. Safe fixes are always previewed before they change settings."
-				title="Doctor"
-			>
-				<DoctorSummary compact={compact} report={doctor} />
-				<div className="flex flex-wrap items-center gap-2 px-3 pt-1">
-					<Button
-						disabled={doctorFixing}
-						loading={loading}
-						onClick={() => void refresh()}
-						size="sm"
-						variant="ghost"
-					>
-						Run audit
-					</Button>
-					{canConfigure && autoFixCount > 0 && !doctorFix ? (
-						<Button
-							loading={doctorFixing}
-							onClick={() => void runDoctorFix(true)}
-							size="sm"
-						>
-							Preview safe fixes
-						</Button>
-					) : null}
-					{doctor ? (
+				headerAction={
+					<div className="flex flex-wrap items-center gap-1">
 						<Button
 							disabled={doctorFixing}
-							onClick={() => void copyDoctor()}
+							loading={loading}
+							onClick={() => void refresh()}
 							size="sm"
 							variant="ghost"
 						>
-							<HugeiconsIcon className="size-4" icon={Copy01Icon} />
-							Copy report
+							Run audit
 						</Button>
-					) : null}
-				</div>
+						{canConfigure && autoFixCount > 0 && !doctorFix ? (
+							<Button
+								loading={doctorFixing}
+								onClick={() => void runDoctorFix(true)}
+								size="sm"
+							>
+								Preview safe fixes
+							</Button>
+						) : null}
+						{doctor ? (
+							<Button
+								disabled={doctorFixing}
+								onClick={() => void copyDoctor()}
+								size="sm"
+								variant="ghost"
+							>
+								<HugeiconsIcon className="size-4" icon={Copy01Icon} />
+								Copy report
+							</Button>
+						) : null}
+					</div>
+				}
+				title="Doctor"
+			>
+				<DoctorSummary compact={compact} report={doctor} />
 				{doctor && reachable && !loading ? (
-					<div className="px-3 pt-3">
+					<div>
 						<AgentAuditPanel
 							key={JSON.stringify([target.url, doctor])}
 							onOpenConversation={
@@ -534,7 +540,7 @@ export function GatewayPostureCard({
 					</div>
 				) : null}
 				{doctorFix?.dryRun && doctorFix.plannedFixes.length > 0 ? (
-					<div className="mx-3 mt-3 space-y-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-3">
+					<SettingsCard className="space-y-3">
 						<div>
 							<p className="font-medium text-sm">Safe fixes ready to review</p>
 							<p className="mt-1 text-muted-foreground text-xs">
@@ -569,10 +575,10 @@ export function GatewayPostureCard({
 								Dismiss
 							</Button>
 						</div>
-					</div>
+					</SettingsCard>
 				) : null}
 				{doctorFix && !doctorFix.dryRun && doctorFix.appliedFixes.length > 0 ? (
-					<p className="px-3 pt-2 text-status-success text-xs">
+					<p className="px-3.5 text-status-success text-xs">
 						Applied {doctorFix.appliedFixes.length} safe fix
 						{doctorFix.appliedFixes.length === 1 ? "" : "es"}; the report above
 						is current.

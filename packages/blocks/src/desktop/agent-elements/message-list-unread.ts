@@ -7,7 +7,7 @@ export interface UnreadMessageState {
 }
 
 export function getIncomingMessageIds(
-	messages: readonly UIMessage[]
+	messages: readonly Pick<UIMessage, "id" | "role">[]
 ): string[] {
 	const seen = new Set<string>();
 	const ids: string[] = [];

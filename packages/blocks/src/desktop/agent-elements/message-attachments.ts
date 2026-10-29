@@ -1,4 +1,22 @@
+import {
+	isNativeNumber,
+	isNativeObject,
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import type { UIMessage } from "ai";
+import { z } from "zod";
+import { nativeSdkSchemaAdmits } from "./utils/native-sdk-admission.ts";
+import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
+
+/** Attachment normalization receives modern SDK messages and older persisted
+ * messages. This is its input projection, not a claim that historical parts
+ * satisfy the current full UIMessage union. Every other authored field stays on the complete SDK surface. */
+export interface AttachmentMessageInput extends Omit<UIMessage, "parts"> {
+	experimental_attachments?: NativeSdkValue;
+	parts?: readonly NativeSdkValue[];
+}
 
 export interface MessageAttachment {
 	filename: string;
@@ -9,16 +27,40 @@ export interface MessageAttachment {
 	url?: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+/** A read projection of live/legacy SDK attachment cells, not a file DTO.
+ * Every cell stays opaque until the existing text/finite-size observation. */
+interface AttachmentObservation {
+	contentType?: NativeSdkValue;
+	data?: NativeSdkValue;
+	fileName?: NativeSdkValue;
+	filename?: NativeSdkValue;
+	image?: NativeSdkValue;
+	mediaType?: NativeSdkValue;
+	mimeType?: NativeSdkValue;
+	name?: NativeSdkValue;
+	size?: NativeSdkValue;
+	type?: NativeSdkValue;
+	url?: NativeSdkValue;
+}
+const attachmentObservationSchema =
+	z.custom<AttachmentObservation>(isNativeObjectLike);
+function isRecord(value: NativeSdkValue): value is AttachmentObservation {
+	return nativeSdkSchemaAdmits(attachmentObservationSchema, value);
+}
+/** Old SDK messages can carry this optional opaque side slot. Callable SDK
+ * receivers remain admissible; unrelated message fields are never examined. */
+interface LegacyAttachmentObservation {
+	experimental_attachments?: NativeSdkValue;
+}
+const legacyAttachmentObservationSchema =
+	z.custom<LegacyAttachmentObservation>(isNativeObject);
+
+function stringValue(value: NativeSdkValue): string | undefined {
+	return isNativeText(value) && value.length > 0 ? value : undefined;
 }
 
-function stringValue(value: unknown): string | undefined {
-	return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function finiteSize(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0
+function finiteSize(value: NativeSdkValue): number | undefined {
+	return isNativeNumber(value) && Number.isFinite(value) && value >= 0
 		? value
 		: undefined;
 }
@@ -52,18 +94,17 @@ function toDataUrl(value: string | undefined, mimeType: string | undefined) {
 	if (!value) {
 		return undefined;
 	}
-	if (
-		value.startsWith("data:") ||
-		value.startsWith("blob:") ||
-		value.startsWith("http")
-	) {
-		return value;
-	}
-	return mimeType ? `data:${mimeType};base64,${value}` : value;
+	const candidate =
+		/^[a-z][a-z\d+.-]*:/iu.test(value) || value.startsWith("//")
+			? value
+			: mimeType
+				? `data:${mimeType};base64,${value}`
+				: value;
+	return safeMediaUrl(candidate) ?? undefined;
 }
 
 function attachmentFromRecord(
-	record: Record<string, unknown>,
+	record: AttachmentObservation,
 	id: string,
 	index: number
 ): MessageAttachment | null {
@@ -139,7 +180,7 @@ function attachmentFromRecord(
 }
 
 function attachmentFromExperimental(
-	value: unknown,
+	value: NativeSdkValue,
 	id: string,
 	index: number
 ): MessageAttachment | null {
@@ -166,7 +207,9 @@ function attachmentFromExperimental(
 }
 
 /** Normalize every attachment shape used by persisted and streamed messages. */
-export function getMessageAttachments(message: UIMessage): MessageAttachment[] {
+export function getMessageAttachments(
+	message: AttachmentMessageInput
+): MessageAttachment[] {
 	const attachments: MessageAttachment[] = [];
 	const seen = new Set<string>();
 
@@ -192,8 +235,12 @@ export function getMessageAttachments(message: UIMessage): MessageAttachment[] {
 		);
 	}
 
-	const rawExperimental = (message as { experimental_attachments?: unknown })
-		.experimental_attachments;
+	const rawExperimental = nativeSdkSchemaAdmits(
+		legacyAttachmentObservationSchema,
+		message
+	)
+		? message.experimental_attachments
+		: undefined;
 	if (Array.isArray(rawExperimental)) {
 		for (const [index, attachment] of rawExperimental.entries()) {
 			push(

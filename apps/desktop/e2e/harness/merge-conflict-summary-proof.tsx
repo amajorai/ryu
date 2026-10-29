@@ -43,10 +43,10 @@ function Story() {
 		>
 			<main className="flex min-h-screen items-start justify-center bg-background px-6 py-12 text-foreground">
 				<section className="w-full max-w-sm" data-testid="environment-preview">
-					<p className="mb-2 px-1 font-medium text-muted-foreground text-xs uppercase tracking-[0.14em]">
+					<p className="mb-2 px-1 font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-table-label)">
 						Pinned summary
 					</p>
-					<div className="rounded-2xl border border-sidebar-border/80 bg-sidebar p-3 shadow-[0_20px_48px_-30px_black]">
+					<div className="rounded-2xl border border-sidebar-border/80 bg-sidebar p-3 shadow-xl">
 						<div className="mb-3 border-sidebar-border/70 border-b pb-3 font-semibold text-sm">
 							Environment
 						</div>
@@ -77,7 +77,7 @@ function Story() {
 						{fixMessage ? (
 							<div
 								aria-live="polite"
-								className="mt-3 rounded-lg bg-emerald-500/10 px-2.5 py-2 text-emerald-700 text-xs dark:text-emerald-300"
+								className="mt-3 rounded-lg bg-success/10 px-2.5 py-2 text-success text-xs dark:text-success"
 								role="status"
 							>
 								{fixMessage}

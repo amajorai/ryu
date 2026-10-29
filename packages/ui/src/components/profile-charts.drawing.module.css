@@ -1,0 +1,7 @@
+.categoryBar {
+	height: var(--profile-charts-1-height);
+	background-color: var(--profile-charts-1-background-color);
+}
+.featureShare {
+	width: var(--profile-charts-2-width);
+}

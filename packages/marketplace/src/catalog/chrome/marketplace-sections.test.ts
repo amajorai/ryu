@@ -19,6 +19,7 @@ describe("Marketplace surface contract", () => {
 			"skills",
 			"mcp",
 			"agents",
+			"creators",
 			"engines",
 			"workflows",
 			"themes",
@@ -51,6 +52,7 @@ describe("Marketplace surface contract", () => {
 			"plugin",
 			"mcp",
 			"model",
+			"knowledge",
 			"agent",
 			"stack_template",
 			"workflow",
@@ -66,7 +68,8 @@ describe("Marketplace surface contract", () => {
 		).toBe("Agent Templates");
 		expect(
 			MARKETPLACE_SECTION_TABS.find((tab) => tab.value === "agents")?.label
-		).toBe("Agents");
+		).toBe("Coding agents");
 		expect(marketplaceBrowseKindLabel("agent")).toBe("Agent Templates");
+		expect(marketplaceBrowseKindLabel("knowledge")).toBe("Knowledge");
 	});
 });

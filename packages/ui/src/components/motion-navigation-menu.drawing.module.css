@@ -1,0 +1,6 @@
+.overlayLayer {
+	z-index: var(--motion-navigation-menu-1-z-index);
+}
+.backdropLayer {
+	z-index: var(--motion-navigation-menu-2-z-index);
+}

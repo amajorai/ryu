@@ -2,6 +2,7 @@ import {
 	ALL_PLUGIN_SOURCES_ID,
 	ALL_SKILL_SOURCES_ID,
 } from "@ryu/marketplace/catalog/types";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -26,7 +27,7 @@ interface CountablePage {
 }
 
 function finiteTotal(value: number | null | undefined): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0
+	return isNativeNumber(value) && Number.isFinite(value) && value >= 0
 		? Math.floor(value)
 		: undefined;
 }
@@ -176,27 +177,31 @@ export function useStoreSectionCounts(
 				: enginesQuery.isLoading || sandbox.loading
 					? undefined
 					: 0;
-		const counts: Record<string, number | undefined> = {
-			agents: agentsQuery.data?.length,
-			apps:
-				appTotal === undefined && communityAppTotal === undefined
-					? undefined
-					: (appTotal ?? 0) + (communityAppTotal ?? 0),
-			engines: engineTotal,
-			integrations: integrationsTotal,
-			mcp: mcpTotal,
-			models: modelTotal,
-			plugins:
-				pluginTotal === undefined && communityPluginTotal === undefined
-					? undefined
-					: (pluginTotal ?? 0) + (communityPluginTotal ?? 0),
-			skills: skillsTotal,
-		};
+		const counts = new Map<string, number | undefined>(
+			Object.entries({
+				agents: agentsQuery.data?.length,
+				apps:
+					appTotal === undefined && communityAppTotal === undefined
+						? undefined
+						: (appTotal ?? 0) + (communityAppTotal ?? 0),
+				engines: engineTotal,
+				integrations: integrationsTotal,
+				mcp: mcpTotal,
+				models: modelTotal,
+				plugins:
+					pluginTotal === undefined && communityPluginTotal === undefined
+						? undefined
+						: (pluginTotal ?? 0) + (communityPluginTotal ?? 0),
+				skills: skillsTotal,
+			})
+		);
 		for (const [index, tab] of contributedTabs.entries()) {
-			counts[`plugin:${tab.plugin}:${tab.id}`] =
-				contributedQueries[index]?.data?.total ?? undefined;
+			counts.set(
+				`plugin:${tab.plugin}:${tab.id}`,
+				contributedQueries[index]?.data?.total ?? undefined
+			);
 		}
-		return counts;
+		return Object.fromEntries(counts);
 	}, [
 		agentsQuery.data,
 		communityPluginsQuery.data?.pages,

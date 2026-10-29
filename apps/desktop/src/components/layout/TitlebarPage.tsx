@@ -1,9 +1,7 @@
-import {
-	type CSSProperties,
-	type ReactNode,
-	useLayoutEffect,
-	useRef,
-} from "react";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { CSSProperties as LayoutCSSProperties } from "react";
+import { type ReactNode, useLayoutEffect, useRef } from "react";
+import layoutStyles from "./TitlebarPage.module.css";
 
 /** Expand top-aligned scrollports into the titlebar inset without moving their
  * initial content. Intermediate clipping wrappers need the same overlap so
@@ -135,19 +133,28 @@ export function TitlebarPage({
 			restore();
 		};
 	}, [inset, selfInset]);
+	const cssVariables1: LayoutCssVariables = {
+		"--ryu-titlebar-inset": `calc(var(--spacing) * ${inset / 4})`,
+		"--desktop-inline1-padding-Top": selfInset
+			? "0px"
+			: `calc(var(--spacing) * ${inset / 4})`,
+	};
 	return (
 		<div
-			className="relative min-h-0 flex-1 overflow-auto"
+			className={cn(
+				"relative min-h-0 flex-1 overflow-auto",
+				layoutStyles.inline1
+			)}
 			data-titlebar-page=""
 			ref={ref}
-			style={
-				{
-					"--ryu-titlebar-inset": `calc(var(--spacing) * ${inset / 4})`,
-					paddingTop: selfInset ? 0 : `calc(var(--spacing) * ${inset / 4})`,
-				} as CSSProperties
-			}
+			style={cssVariables1}
 		>
 			{children}
 		</div>
 	);
+}
+
+interface LayoutCssVariables extends LayoutCSSProperties {
+	"--desktop-inline1-padding-Top"?: string | number;
+	"--ryu-titlebar-inset"?: string | number;
 }

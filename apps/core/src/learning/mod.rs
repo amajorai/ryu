@@ -8,7 +8,9 @@
 //!
 //! - [`CoreLearningHost`] — the concrete [`LearningHost`] impl over [`ServerState`]
 //!   the engine calls back through (conversation store, Gateway side-model, approvals
-//!   inbox, skills registry, fine-tune dispatch, preference store).
+//!   inbox, skills registry, fine-tune dispatch, preference store). Fine-tune
+//!   dispatch names no app: it calls the `finetune.start` / `finetune.merge`
+//!   capabilities through the generic Core-as-consumer broker helper.
 //! - [`learning_ctx`] — builds a [`ryu_learning::LearningCtx`] (the durable store +
 //!   a boxed host) for a call site.
 //! - [`apply_message_feedback`] — the thumbs 👍/👎 fan-out, which writes the RAG
@@ -24,7 +26,7 @@
 //! Wave 4 extracted the engine + durable store into the zero-`apps/core`-dependency
 //! `ryu-learning` capability crate. The remaining question was whether the scheduled
 //! [`ryu_learning::run_cycle`] / [`ryu_learning::run_skills_pass`] should also run
-//! OUT-OF-PROCESS (Design B, the `healing_client`/`quests_client` sidecar model). The
+//! OUT-OF-PROCESS (Design B, the Self-Healing / app-capability sidecar model). The
 //! honest verdict is **no — keep it compiled-in**, for a concrete, non-cosmetic reason:
 //!
 //! The healing/quests split works because the sidecar's compute is *self-contained*
@@ -73,6 +75,54 @@ use serde_json::Value;
 use ryu_learning::{ConvMeta, Experience, LearningCtx, LearningHost, Msg, QueuedApproval};
 
 use crate::server::ServerState;
+use crate::sidecar::capability_consumer::{
+    CapabilityCallError, CapabilityConsumer, CapabilityReply,
+};
+
+/// Start a fine-tune job (the reward-filtered retrain). Request is the job spec the
+/// provider's `/start` route takes verbatim; reply `2xx { "job_id": ... }`.
+pub(crate) const CAP_FINETUNE_START: &str = "finetune.start";
+/// Merge a trained adapter into a registered model artifact. Request is the merge
+/// spec verbatim; reply `2xx { "stem": ..., "gguf_path": ... }`.
+pub(crate) const CAP_FINETUNE_MERGE: &str = "finetune.merge";
+
+/// Invoke a fine-tune capability on whichever enabled app provides it and return the
+/// provider's JSON reply, or the error string [`LearningHost`] expects.
+async fn call_finetune_capability(
+    capabilities: &CapabilityConsumer,
+    capability: &str,
+    body: &Value,
+) -> Result<Value, String> {
+    let reply = capabilities
+        .call_capability(capability, body)
+        .await
+        .map_err(finetune_refusal)?;
+    finetune_reply(capability, reply)
+}
+
+/// A missing provider is the common refusal (the fine-tuning app is disabled or not
+/// installed), so say so instead of surfacing a binding code.
+fn finetune_refusal(error: CapabilityCallError) -> String {
+    match error {
+        CapabilityCallError::Unbound { capability, .. } => format!(
+            "no enabled app provides the '{capability}' capability; install or enable an \
+             app that runs fine-tunes"
+        ),
+        other => other.to_string(),
+    }
+}
+
+/// `Ok(body)` on 2xx; otherwise the provider's own `{"error": ...}` text when it sent
+/// one, else the status.
+fn finetune_reply(capability: &str, reply: CapabilityReply) -> Result<Value, String> {
+    if reply.is_success() {
+        return Ok(reply.body);
+    }
+    Err(reply.body.get("error").and_then(Value::as_str).map_or_else(
+        || format!("'{capability}' returned HTTP {}", reply.status),
+        str::to_owned,
+    ))
+}
 
 // ---------------------------------------------------------------------------
 // Published ServerState handle (scheduler + two unrelated borrowers)
@@ -227,7 +277,15 @@ impl LearningHost for CoreLearningHost {
         system: &str,
         user: &str,
     ) -> Result<String, String> {
-        crate::server::call_side_model(&self.state, model, effort, system, user).await
+        crate::server::call_side_model(
+            &self.state,
+            &crate::sidecar::gateway::SidePurpose::LearningJudge,
+            model,
+            effort,
+            system,
+            user,
+        )
+        .await
     }
 
     fn default_prm_model(&self) -> String {
@@ -235,7 +293,7 @@ impl LearningHost for CoreLearningHost {
     }
 
     fn default_synth_model(&self) -> String {
-        crate::registry::DEFAULT_LOCAL_CHAT_MODEL_ID.to_string()
+        crate::registry::local_chat_model_id()
     }
 
     async fn queue_skill_approval(
@@ -271,11 +329,13 @@ impl LearningHost for CoreLearningHost {
     }
 
     async fn dispatch_finetune(&self, body: Value) -> Result<Value, String> {
-        self.state.finetune.start(body).await
+        let capabilities = CapabilityConsumer::from_state(&self.state);
+        call_finetune_capability(&capabilities, CAP_FINETUNE_START, &body).await
     }
 
     async fn merge_finetune(&self, body: Value) -> Result<Value, String> {
-        self.state.finetune.merge(body).await
+        let capabilities = CapabilityConsumer::from_state(&self.state);
+        call_finetune_capability(&capabilities, CAP_FINETUNE_MERGE, &body).await
     }
 }
 
@@ -510,6 +570,98 @@ fn truncate_snippet(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use serde_json::json;
+
+    use crate::plugin_manifest::{PluginManifestLoader, FINETUNE_PLUGIN_ID};
+    use crate::plugins::PluginStore;
+    use crate::sidecar::SidecarManager;
+
+    /// A consumer over the REAL compiled fine-tuning manifest, so the test proves the
+    /// manifest's `provides` rows bind the capabilities Core calls.
+    async fn finetune_consumer(enabled: bool) -> CapabilityConsumer {
+        let manifest = PluginManifestLoader::load_install_catalog()
+            .into_iter()
+            .find(|manifest| manifest.id == FINETUNE_PLUGIN_ID)
+            .expect("the fine-tuning manifest is compiled into Core");
+        let store = PluginStore::open_in_memory().unwrap();
+        store.insert(FINETUNE_PLUGIN_ID, "1.0.0").await.unwrap();
+        if enabled {
+            store.set_enabled(FINETUNE_PLUGIN_ID, &[]).await.unwrap();
+        }
+        CapabilityConsumer::new(
+            SidecarManager::new_noop(),
+            Arc::new(tokio::sync::RwLock::new(vec![manifest])),
+            store,
+        )
+    }
+
+    #[tokio::test]
+    async fn finetune_dispatch_refuses_cleanly_when_the_app_is_disabled() {
+        let capabilities = finetune_consumer(false).await;
+        for capability in [CAP_FINETUNE_START, CAP_FINETUNE_MERGE] {
+            let error = call_finetune_capability(&capabilities, capability, &json!({}))
+                .await
+                .unwrap_err();
+            assert!(
+                error.contains(&format!(
+                    "no enabled app provides the '{capability}' capability"
+                )),
+                "{error}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn finetune_capabilities_bind_to_the_app_sidecar_when_enabled() {
+        // Enabled + bound, but the sidecar is not registered with the (noop) manager:
+        // the refusal is "unavailable", proving resolution got past binding and the
+        // `provides` route onto the provider's sidecar without dialing anything.
+        let capabilities = finetune_consumer(true).await;
+        for capability in [CAP_FINETUNE_START, CAP_FINETUNE_MERGE] {
+            let error = call_finetune_capability(&capabilities, capability, &json!({}))
+                .await
+                .unwrap_err();
+            assert!(
+                error.contains(&format!(
+                    "capability '{capability}' provider is unavailable"
+                )),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn finetune_reply_returns_the_body_on_success() {
+        let reply = CapabilityReply {
+            status: 200,
+            body: json!({ "job_id": "job-1" }),
+        };
+        assert_eq!(
+            finetune_reply(CAP_FINETUNE_START, reply),
+            Ok(json!({ "job_id": "job-1" }))
+        );
+    }
+
+    #[test]
+    fn finetune_reply_prefers_the_provider_error_text() {
+        let reply = CapabilityReply {
+            status: 409,
+            body: json!({ "error": "no CUDA device on this node" }),
+        };
+        assert_eq!(
+            finetune_reply(CAP_FINETUNE_START, reply),
+            Err("no CUDA device on this node".to_owned())
+        );
+        let reply = CapabilityReply {
+            status: 502,
+            body: Value::Null,
+        };
+        assert_eq!(
+            finetune_reply(CAP_FINETUNE_MERGE, reply),
+            Err("'finetune.merge' returned HTTP 502".to_owned())
+        );
+    }
 
     #[test]
     fn truncate_snippet_trims_and_leaves_short_text_unchanged() {

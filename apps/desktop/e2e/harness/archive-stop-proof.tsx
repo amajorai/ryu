@@ -1,3 +1,5 @@
+declare const window: Window;
+
 // Browser proof for the archive/stop contract. It uses the shipping
 // conversation-flags store and chat-stop registry; only Core's HTTP response is
 // stubbed because this isolated story has no running node.
@@ -11,16 +13,16 @@ import "../../src/index.css";
 const CHAT_ID = "archive-stop-proof-chat";
 let archiveWrites = 0;
 
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
 	if (url.includes(`/api/conversations/${CHAT_ID}/archived`)) {
 		archiveWrites += 1;
 		window.dispatchEvent(new Event("archive-proof-write"));
 		return Response.json({ archived: true, ok: true });
 	}
-	return realFetch(input as RequestInfo, init);
-}) as typeof fetch;
+	return realFetch(input, init);
+};
 
 useConversationFlagsStore.setState({ archivedIds: new Set() });
 
@@ -68,7 +70,7 @@ function Proof() {
 						</p>
 					</div>
 					<span
-						className={`rounded-full px-3 py-1 font-medium text-xs ${status === "streaming" ? "bg-amber-500/15 text-amber-700" : "bg-emerald-500/15 text-emerald-700"}`}
+						className={`rounded-full px-3 py-1 font-medium text-xs ${status === "streaming" ? "bg-warning/15 text-warning" : "bg-success/15 text-success"}`}
 						data-testid="proof-status"
 					>
 						{status === "streaming"

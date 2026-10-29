@@ -7,9 +7,9 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/finetune",
   "name": "Fine-tuning",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
-  "description": "A LoRA/QLoRA training studio: launch fine-tune jobs on this node's GPU or a remote Ryu Cloud GPU node, track them durably, merge the trained adapter to GGUF, and register the result as a swappable local model.",
+  "description": "A local SFT and DPO training studio: launch LoRA/QLoRA jobs on this node's GPU or a remote Ryu Cloud GPU node, compare preferred and rejected answers, merge the trained adapter to GGUF, and register the result as a swappable local model.",
   "tagline": "Train a model on your own data, on your own GPU",
   "keywords": ["finetune", "lora", "training", "gpu", "models"],
   "category": "Developer Tools",
@@ -38,7 +38,25 @@
       }
     }
   ],
-  "permission_grants": ["finetune:runs"],
+  "provides": [
+    {
+      "capability": "finetune.start",
+      "version": "1.0.0",
+      "title": "Fine-tune job start",
+      "sidecar": "ryu-finetune",
+      "route": "/start",
+      "grant": "finetune:runs"
+    },
+    {
+      "capability": "finetune.merge",
+      "version": "1.0.0",
+      "title": "Fine-tune adapter merge",
+      "sidecar": "ryu-finetune",
+      "route": "/merge",
+      "grant": "finetune:runs"
+    }
+  ],
+  "permission_grants": ["app:http", "finetune:runs"],
   "permission_levels": [
     {
       "id": "finetune.view",
@@ -79,19 +97,6 @@
         "order": 52
       }
     ],
-    "chat_widget_templates": [
-      {
-        "id": "finetune.chat",
-        "title": "Fine-tuning widget",
-        "description": "Fine-tuning chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["fine-tuning widget"],
-        "examples": ["Show me a fine-tuning widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "hook_events": [
       {
         "id": "@ryu/finetune#job.started",
@@ -108,14 +113,14 @@
       {
         "id": "@ryu/finetune#job.succeeded",
         "title": "Fine-tune succeeded",
-        "description": "Fires once, when a job finishes training and the adapter it produced has been added to the adapter catalog. `adapter_name` is the stem it is filed under, which is exactly what POST /api/finetune/merge takes as `adapter_name` — so \"when a fine-tune finishes, merge it into a GGUF\" needs nothing else from the payload. TIMING: this crate has no background poller, so the event fires when Ryu next READS the job's state (a job list or a job detail fetch), not the instant the worker finished. A remote job is refreshed only by a detail fetch — the list refreshes local jobs only — so a remote job's completion is announced when someone opens it.",
+        "description": "Fires once, when a job finishes training and, for a local job, the adapter it produced has been added to the adapter catalog. `adapter_name` is the stem it is filed under (the adapter's server-generated folder name, not `output_name`), which is exactly what POST /api/finetune/merge takes as `adapter_name` — so \"when a fine-tune finishes, merge it into a GGUF\" needs nothing else from the payload. A remote job's adapter stays on the remote node, so its `adapter_name` is null. TIMING: this crate has no background poller, so the event fires when Ryu next READS the job's state (a job list or a job detail fetch), not the instant the worker finished. A remote job is refreshed only by a detail fetch — the list refreshes local jobs only — so a remote job's completion is announced when someone opens it.",
         "payload_example": {
           "job_id": "9f2c41a8c1f04e2f9d1e6b0a7c3d5e11",
           "base_model": "unsloth/llama-3.2-3b-instruct-bnb-4bit",
           "output_name": "support-tone",
           "target": "local",
-          "adapter_name": "support-tone",
-          "adapter_path": "/Users/me/.ryu/models/support-tone"
+          "adapter_name": "ft-4b1e0f6c2a9d4e7f8c3b5a6d7e8f9012",
+          "adapter_path": "/Users/me/.ryu/models/adapters/ft-4b1e0f6c2a9d4e7f8c3b5a6d7e8f9012"
         }
       },
       {
@@ -143,10 +148,7 @@
         "kind": "local",
         "command": "ryu-finetune",
         "command_env": "RYU_FINETUNE_BIN",
-        "port_env": "RYU_FINETUNE_PORT",
-        "env": {
-          "RYU_UNSLOTH_URL": "http://127.0.0.1:8086"
-        }
+        "port_env": "RYU_FINETUNE_PORT"
       },
       "port": 7990,
       "health_path": "/health",
@@ -159,8 +161,18 @@
           { "path": "/list", "permission": "finetune.view" },
           { "path": "/adapters", "permission": "finetune.view" },
           { "path": "/merge", "permission": "finetune.run" },
-          { "path": "/:id", "method": "GET", "permission": "finetune.view", "resource_param": "id" },
-          { "path": "/:id", "method": "DELETE", "permission": "finetune.run", "resource_param": "id" },
+          {
+            "path": "/:id",
+            "method": "GET",
+            "permission": "finetune.view",
+            "resource_param": "id"
+          },
+          {
+            "path": "/:id",
+            "method": "DELETE",
+            "permission": "finetune.run",
+            "resource_param": "id"
+          },
           {
             "path": "/:id/stream",
             "method": "GET",
@@ -183,11 +195,6 @@
         "source": {
           "url": "https://github.com/amajorai/ryu/releases/download/unsloth-sidecar-v1/ryu-unsloth-sidecar.tar.gz",
           "format": "tar.gz"
-        },
-        "env": {
-          "RYU_UNSLOTH_HOST": "127.0.0.1",
-          "HF_HOME": "${RYU_DIR}/models/hf",
-          "RYU_UNSLOTH_OUTPUT_DIR": "${RYU_DIR}/models"
         }
       }
     }

@@ -1,164 +1,69 @@
 // apps/desktop/src/lib/api/usage.ts
 //
-// Per-agent subscription usage (the chat "usage bar"). When a subscription ACP
-// agent is active in chat (Claude Code, Codex, Copilot, Grok, GLM), Core reads
-// that CLI's own local credential and calls the vendor's usage endpoint,
-// returning its rolling rate-limit windows plus the non-percent figures — credit
-// balances, Codex's banked rate-limit resets and their per-credit expiry dates —
-// à la CodexBar / openusage. Core also exposes the same normalized contract for
-// each saved Ryu provider account without switching the active account. Core owns
-// all provider logic + the never-refresh token safety; this is a thin typed reader.
+// Subscription usage for the desktop: the per-agent usage bar, and the owner-only
+// subscriptions primitive (provider → saved accounts → one usage reading each).
 //
-// The endpoint always returns 200: refusals carry `available: false` + a
+// When a subscription ACP agent is active in chat (Claude Code, Codex, Copilot,
+// Grok, GLM, Devin, OpenCode Go, or Ollama Cloud), Core reads that provider's
+// existing local credential and calls the vendor's usage endpoint, returning its
+// rolling rate-limit windows plus the non-percent figures — credit balances,
+// Codex's banked rate-limit resets and their per-credit expiry dates — à la
+// CodexBar / openusage. Ryu's own saved provider accounts are read through
+// `GET /api/usage/subscriptions*`, which reports per provider which accounts can
+// report usage (`capabilities.accountUsage`) so this side keeps no provider list.
+//
+// The wire model and its schemas live in `@ryuhq/core-client/usage.ts`; Core owns
+// all provider logic + the never-refresh token safety. This module only routes
+// the requests through the desktop's authenticated `request`.
+//
+// The agent route always returns 200: refusals carry `available: false` + a
 // `reason` rather than an error, so callers never branch on HTTP status — they
 // hide the bar on `unsupported` and show a hint otherwise.
 
+import {
+	type ProviderUsageReading,
+	providerUsageReadingSchema,
+	type SubscriptionProvider,
+	type SubscriptionsSnapshot,
+	type SubscriptionUsageMode,
+	subscriptionsSnapshotSchema,
+	toUsageSnapshot,
+	type UsageReason,
+	type UsageSnapshot,
+	usageSnapshotWireSchema,
+} from "@ryuhq/core-client/usage.ts";
+import { z } from "zod";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { request } from "@/src/lib/api/client.ts";
 
-/** Why a snapshot has no live windows (mirrors Core's `UsageUnavailable`). */
-export type UsageReason =
-	| "unsupported"
-	| "not_logged_in"
-	| "token_expired"
-	| "missing_scope"
-	| "no_plan"
-	| "rate_limited"
-	| "error";
-
-/** One rolling rate-limit window. `usedPercent` is 0–100. */
-export interface UsageWindow {
-	label: string;
-	/**
-	 * The model this window limits, when it is a per-model window rather than an
-	 * account-wide one (Claude's Sonnet/Opus weekly limits, Codex's Spark pair).
-	 * `null` = account-wide.
-	 *
-	 * Core reports this rather than leaving the client to infer it from the label:
-	 * "a label that isn't Session or Weekly names a model" needs a closed set of
-	 * non-model labels, and Copilot's `Chat`/`Completions` and Z.ai's `Daily` are
-	 * exactly the entries that would be missed.
-	 */
-	model: string | null;
-	resetsAt: string | null;
-	usedPercent: number;
-	/**
-	 * The window's own length in seconds, when the vendor reports it. Lets the
-	 * short label ("5h" / "7d") come from the data instead of matching a closed
-	 * set of English labels.
-	 */
-	windowSeconds: number | null;
-}
-
-/** What a {@link UsageValue}'s number means, so it can be formatted correctly. */
-export type UsageValueKind = "percent" | "dollars" | "count";
-
-/** One figure on a {@link UsageMeter} row. */
-export interface UsageValue {
-	/** Billing currency when the provider reports one; absent for unitless values. */
-	currency?: string | null;
-	kind: UsageValueKind;
-	number: number;
-	/** Unit noun for the label ("credits", "available", "cap"), when it adds anything. */
-	unit: string | null;
-}
+export type {
+	PoolStrategy,
+	ProviderUsageReading,
+	ProviderUsageWindow,
+	SubscriptionAccount,
+	SubscriptionAccountState,
+	SubscriptionProvider,
+	SubscriptionsSnapshot,
+	SubscriptionUsageMode,
+	UsageMeter,
+	UsageReason,
+	UsageSnapshot,
+	UsageValue,
+	UsageValueKind,
+	UsageWindow,
+} from "@ryuhq/core-client/usage.ts";
+export {
+	eligiblePoolAccounts,
+	hasReadableAccountWindows,
+	subscriptionQueryKeys,
+} from "@ryuhq/core-client/usage.ts";
 
 /**
- * A usage row that is NOT a 0–100 bar: a credit balance, the count of banked
- * rate-limit resets, extra-usage dollars, a web-search count. `expiresAt` carries
- * one date per underlying item — Codex's banked resets each expire on their own
- * date, so a single reset timestamp can't represent them.
- */
-export interface UsageMeter {
-	expiresAt: string[];
-	label: string;
-	resetsAt: string | null;
-	values: UsageValue[];
-}
-
-/** Normalized usage snapshot for one agent. */
-export interface UsageSnapshot {
-	agentId: string;
-	available: boolean;
-	engine: string;
-	extraUsageUsd: number | null;
-	meters: UsageMeter[];
-	plan: string | null;
-	reason: UsageReason | null;
-	/** Seconds to wait, from a rate-limited vendor's `Retry-After`. */
-	retryAfterSeconds: number | null;
-	windows: UsageWindow[];
-}
-
-/** Raw snake_case wire shape from Core. */
-interface WireWindow {
-	label: string;
-	model?: string | null;
-	resets_at?: string | null;
-	used_percent: number;
-	window_seconds?: number | null;
-}
-
-interface WireValue {
-	currency?: string | null;
-	kind: UsageValueKind;
-	number: number;
-	unit?: string | null;
-}
-
-interface WireMeter {
-	expires_at?: string[] | null;
-	label: string;
-	resets_at?: string | null;
-	values: WireValue[];
-}
-
-interface WireSnapshot {
-	agent_id: string;
-	available: boolean;
-	engine: string;
-	extra_usage_usd?: number | null;
-	meters?: WireMeter[] | null;
-	plan?: string | null;
-	reason?: UsageReason | null;
-	retry_after_seconds?: number | null;
-	windows: WireWindow[];
-}
-
-function toSnapshot(wire: WireSnapshot): UsageSnapshot {
-	return {
-		agentId: wire.agent_id,
-		engine: wire.engine,
-		available: wire.available,
-		plan: wire.plan ?? null,
-		reason: wire.reason ?? null,
-		windows: wire.windows.map((w) => ({
-			label: w.label,
-			usedPercent: w.used_percent,
-			resetsAt: w.resets_at ?? null,
-			windowSeconds: w.window_seconds ?? null,
-			model: w.model ?? null,
-		})),
-		meters: (wire.meters ?? []).map((m) => ({
-			label: m.label,
-			values: m.values.map((v) => ({
-				number: v.number,
-				kind: v.kind,
-				currency: v.currency ?? null,
-				unit: v.unit ?? null,
-			})),
-			expiresAt: m.expires_at ?? [],
-			resetsAt: m.resets_at ?? null,
-		})),
-		extraUsageUsd: wire.extra_usage_usd ?? null,
-		retryAfterSeconds: wire.retry_after_seconds ?? null,
-	};
-}
-
-/**
- * The engine substrings Core's `engine_for_agent` recognizes. Kept in lockstep
- * with that list: this side is only a poll filter, but a missing entry silently
- * hides a provider's bar.
+ * The engine substrings Core's `engine_for_agent` recognizes, for ACP agents.
+ * Kept in lockstep with that list: this side is only a poll filter, but a
+ * missing entry silently hides an agent's bar. Ryu's own provider accounts do
+ * not use this list; Core reports their capability in the subscriptions
+ * snapshot.
  */
 const USAGE_ENGINE_HINTS = [
 	"claude",
@@ -168,6 +73,12 @@ const USAGE_ENGINE_HINTS = [
 	"grok",
 	"glm",
 	"zai",
+	"devin",
+	"opencode",
+	"ollama",
+	"cursor",
+	"gemini",
+	"antigravity",
 ] as const;
 
 /**
@@ -185,26 +96,85 @@ export function supportsUsage(agentId: string | null | undefined): boolean {
 }
 
 /**
- * Whether a configured Ryu provider is eligible for the same subscription
- * usage badge as an installed ACP agent. Managed Ryu pool rows have their own
- * grant badge, and unconfigured rows should stay quiet until a login exists.
+ * A configured Ryu provider row (picker, settings). `accountUsage` is Core's
+ * `capabilities.accountUsage` for the provider, from the subscriptions
+ * snapshot; absent means "not known", which keeps the row quiet.
  */
 export interface SubscriptionUsageProviderRef {
+	accountUsage?: boolean;
 	authKind: string;
 	configured: boolean;
 	id: string;
 	managed: boolean;
 }
 
+/**
+ * Whether a Ryu provider is eligible for the same subscription usage badge as
+ * an installed ACP agent. Managed Ryu pool rows have their own grant badge,
+ * unconfigured rows stay quiet until a login exists, and only providers whose
+ * saved accounts Core can read (`capabilities.accountUsage`) qualify.
+ */
 export function supportsSubscriptionProviderUsage(
-	provider: SubscriptionUsageProviderRef
+	provider: SubscriptionUsageProviderRef | SubscriptionProvider
 ): boolean {
+	if ("capabilities" in provider) {
+		return (
+			provider.kind === "subscription" &&
+			!provider.managed &&
+			provider.capabilities.accountUsage &&
+			provider.accounts.length > 0
+		);
+	}
 	return (
 		provider.authKind === "subscription" &&
 		provider.configured &&
 		!provider.managed &&
-		supportsUsage(provider.id)
+		provider.accountUsage === true
 	);
+}
+
+/**
+ * The usage-bar model for one {@link ProviderUsageReading}, so a saved provider
+ * account renders through exactly the same components as an ACP agent. An
+ * `account_not_found` reading has no bar-level meaning beyond "no data".
+ */
+export function usageSnapshotFromReading(
+	reading: ProviderUsageReading
+): UsageSnapshot {
+	const reason: UsageReason | null =
+		reading.reason === "account_not_found" ? "error" : (reading.reason ?? null);
+	const snapshot: UsageSnapshot = {
+		agentId: reading.agentId ?? reading.providerId,
+		engine: reading.engine ?? "",
+		available: reading.available,
+		plan: reading.plan ?? null,
+		reason,
+		windows: reading.windows.map((window) => ({
+			label: window.label,
+			model: window.model ?? null,
+			resetsAt: window.resetsAt ?? null,
+			usedPercent: window.usedPercent,
+			windowSeconds: window.windowSeconds ?? null,
+		})),
+		meters: reading.meters.map((meter) => ({
+			label: meter.label,
+			expiresAt: meter.expiresAt,
+			resetsAt: meter.resetsAt ?? null,
+			values: meter.values.map((value) => ({
+				kind: value.kind,
+				number: value.number,
+				unit: value.unit ?? null,
+				currency: null,
+			})),
+		})),
+		extraUsageUsd: reading.extraUsageUsd ?? null,
+		retryAfterSeconds: reading.retryAfterSeconds ?? null,
+		providerId: reading.providerId,
+	};
+	if (reading.accountId) {
+		snapshot.accountId = reading.accountId;
+	}
+	return snapshot;
 }
 
 /**
@@ -216,18 +186,19 @@ export async function fetchAgentUsage(
 	agentId: string,
 	signal?: AbortSignal
 ): Promise<UsageSnapshot> {
-	const wire = await request<WireSnapshot>(
+	const wire = await request(
 		target,
 		`/api/agents/${encodeURIComponent(agentId)}/usage`,
-		{ signal }
+		{ signal },
+		usageSnapshotWireSchema
 	);
-	return toSnapshot(wire);
+	return toUsageSnapshot(wire);
 }
 
 /**
- * Fetch the live subscription meters for one saved Ryu provider account. The
- * account credential stays in Core's sealed vault; only normalized usage data
- * crosses this boundary.
+ * Fetch the live subscription meters for one saved Ryu provider account, in the
+ * snake_case `UsageSnapshot` shape. The account credential stays in Core's
+ * sealed vault; only normalized usage data crosses this boundary.
  */
 export async function fetchProviderAccountUsage(
 	target: ApiTarget,
@@ -235,10 +206,120 @@ export async function fetchProviderAccountUsage(
 	accountId: string,
 	signal?: AbortSignal
 ): Promise<UsageSnapshot> {
-	const wire = await request<WireSnapshot>(
+	const wire = await request(
 		target,
 		`/api/pi-config/providers/${encodeURIComponent(providerId)}/accounts/${encodeURIComponent(accountId)}/usage`,
-		{ signal }
+		{ signal },
+		usageSnapshotWireSchema
 	);
-	return toSnapshot(wire);
+	return toUsageSnapshot(wire);
+}
+
+export interface FetchSubscriptionsOptions {
+	providerId?: string;
+	signal?: AbortSignal;
+	usage?: SubscriptionUsageMode;
+}
+
+/**
+ * Every subscription provider with its saved accounts and their usage
+ * (owner-only). Labels may be email addresses: display them, never persist them.
+ */
+export async function fetchSubscriptionsSnapshot(
+	target: ApiTarget,
+	opts: FetchSubscriptionsOptions = {}
+): Promise<SubscriptionsSnapshot> {
+	const params = new URLSearchParams();
+	if (opts.providerId) {
+		params.set("provider", opts.providerId);
+	}
+	if (opts.usage) {
+		params.set("usage", opts.usage);
+	}
+	const query = params.toString();
+	return await request(
+		target,
+		`/api/usage/subscriptions${query ? `?${query}` : ""}`,
+		{ signal: opts.signal },
+		subscriptionsSnapshotSchema
+	);
+}
+
+export interface FetchProviderUsageReadingOptions {
+	/** Omitted reads the provider's active account; `accountId` echoes which. */
+	accountId?: string | null;
+	providerId: string;
+	/** `"force"` always reads the vendor; omitted serves a fresh cached reading. */
+	refresh?: "force";
+	signal?: AbortSignal;
+}
+
+/** One account's usage reading. An unknown account reads `account_not_found`. */
+export async function fetchProviderUsageReading(
+	target: ApiTarget,
+	opts: FetchProviderUsageReadingOptions
+): Promise<ProviderUsageReading> {
+	const params = new URLSearchParams();
+	if (opts.accountId) {
+		params.set("account", opts.accountId);
+	}
+	if (opts.refresh) {
+		params.set("refresh", opts.refresh);
+	}
+	const query = params.toString();
+	return await request(
+		target,
+		`/api/usage/subscriptions/${encodeURIComponent(opts.providerId)}/reading${query ? `?${query}` : ""}`,
+		{ signal: opts.signal },
+		providerUsageReadingSchema
+	);
+}
+
+/**
+ * Where {@link ConversationProviderAccount.accountId} came from: the
+ * conversation's own SDK affinity, the Claude proxy's session binding, the
+ * provider's active account (what the next turn would normally start on), or
+ * nothing known.
+ */
+export type ConversationAccountSource =
+	| "affinity"
+	| "proxy_binding"
+	| "active"
+	| "unknown";
+
+const conversationProviderAccountSchema = z.looseObject({
+	providerId: z.string().nullish(),
+	accountId: z.string().nullish(),
+	source: z
+		.enum(["affinity", "proxy_binding", "active", "unknown"])
+		.catch("unknown"),
+});
+
+/** The subscription provider and saved account a conversation runs on (ids only). */
+export interface ConversationProviderAccount {
+	accountId: string | null;
+	providerId: string | null;
+	source: ConversationAccountSource;
+}
+
+/**
+ * Which subscription provider and saved account a conversation runs on, as far
+ * as Core can tell without creating or refreshing a binding. Never a label.
+ */
+export async function fetchConversationProviderAccount(
+	target: ApiTarget,
+	conversationId: string,
+	signal?: AbortSignal
+): Promise<ConversationProviderAccount> {
+	const parsed = await request(
+		target,
+		`/api/conversations/${encodeURIComponent(conversationId)}/provider-account`,
+		{ signal },
+		conversationProviderAccountSchema
+	);
+	return {
+		providerId: parsed.providerId ?? null,
+		accountId: parsed.accountId ?? null,
+		source: parsed.source,
+	};
 }

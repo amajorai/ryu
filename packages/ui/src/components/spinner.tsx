@@ -4,18 +4,18 @@ import { useId } from "react";
 type SpinnerSize = "sm" | "default" | "md" | "lg";
 type SpinnerSpeed = "slow" | "normal" | "fast";
 
-const sizeClasses: Record<SpinnerSize, string> = {
+const sizeClasses = {
 	sm: "size-4",
 	default: "size-5",
 	md: "size-6",
 	lg: "size-8",
-};
+} satisfies Record<SpinnerSize, string>;
 
-const speedClasses: Record<SpinnerSpeed, string> = {
+const speedClasses = {
 	slow: "animate-[spin_2s_linear_infinite]",
 	normal: "animate-spin",
 	fast: "animate-[spin_0.5s_linear_infinite]",
-};
+} satisfies Record<SpinnerSpeed, string>;
 
 /** Spell UI's gradient spinner, adapted to the shared Ryu component API. */
 function Spinner({
@@ -23,9 +23,11 @@ function Spinner({
 	size = "sm",
 	speed = "normal",
 	animated = true,
+	presentation = "default",
 	...props
 }: Omit<React.ComponentProps<"svg">, "strokeWidth"> & {
 	animated?: boolean;
+	presentation?: "default" | "sidebar-tab";
 	size?: SpinnerSize;
 	speed?: SpinnerSpeed;
 }) {
@@ -37,6 +39,8 @@ function Spinner({
 				"inline-block",
 				sizeClasses[size],
 				animated ? speedClasses[speed] : "animate-none",
+				presentation === "sidebar-tab" &&
+					"transition-[scale,opacity] duration-150 group-hover/row:scale-50 group-hover/row:opacity-0 group-focus-visible/row:scale-50 group-focus-visible/row:opacity-0 group-has-[button:focus-visible]/row:scale-50 group-has-[button:focus-visible]/row:opacity-0",
 				className
 			)}
 			role="status"

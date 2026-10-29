@@ -131,7 +131,7 @@ export default function ItemLikeButton({
 				// The ONLY hover affordance: the glyph warms toward the like colour.
 				// No background, no border, no pill.
 				"transition-colors hover:text-foreground",
-				like.liked && "text-[color:var(--like-color)]",
+				like.liked && "text-(--like-color)",
 				// Added on a like and REMOVED after BURST_MAX_MS — see `fire`.
 				bursting && "is-bursting",
 				className

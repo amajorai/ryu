@@ -2,7 +2,9 @@
 
 import { motion, useReducedMotion } from "motion/react";
 import type { CSSProperties, ReactNode } from "react";
+import { z } from "zod";
 import { cn } from "../lib/utils.ts";
+import styles from "./announcement-visual.module.css";
 import { ditherAvatarHue } from "./dither-kit/avatar.tsx";
 import { Icon } from "./icon.tsx";
 import { ShaderBackground } from "./motion/shader-background.tsx";
@@ -37,8 +39,65 @@ const HEX_COLOR = /^#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i;
 const MAX_LAYERS = 24;
 const MAX_PARTICLES = 32;
 
-interface RawRecord {
-	[key: string]: unknown;
+const optionalSceneNumber = z.number().optional().catch(undefined);
+const optionalSceneString = z.string().optional().catch(undefined);
+const rawPointSchema = z
+	.object({
+		color: optionalSceneString,
+		delay: optionalSceneNumber,
+		size: optionalSceneNumber,
+		x: optionalSceneNumber,
+		y: optionalSceneNumber,
+	})
+	.nullable()
+	.catch(null);
+const rawLayerSchema = z
+	.object({
+		angle: optionalSceneNumber,
+		color: optionalSceneString,
+		count: optionalSceneNumber,
+		direction: optionalSceneString,
+		dotSize: optionalSceneNumber,
+		duration: optionalSceneNumber,
+		opacity: optionalSceneNumber,
+		points: z
+			.array(z.unknown())
+			.transform((entries) => entries.slice(0, MAX_PARTICLES))
+			.pipe(z.array(rawPointSchema))
+			.optional()
+			.catch(undefined),
+		radius: optionalSceneNumber,
+		size: optionalSceneNumber,
+		type: z
+			.enum(["rings", "orbit", "bars", "particles", "beam"])
+			.optional()
+			.catch(undefined),
+	})
+	.nullable()
+	.catch(null);
+const authoredSceneSchema = z
+	.object({
+		layers: z
+			.array(z.unknown())
+			.transform((entries) => entries.slice(0, MAX_LAYERS))
+			.pipe(z.array(rawLayerSchema)),
+		version: z.literal(1),
+	})
+	.nullable()
+	.catch(null);
+type RawVisualPoint = z.infer<typeof rawPointSchema>;
+type RawVisualLayer = z.infer<typeof rawLayerSchema>;
+interface AnnouncementAccentStyle extends CSSProperties {
+	"--announcement-accent": string;
+}
+
+interface SceneGeometryStyle extends CSSProperties {
+	"--scene-color"?: string;
+	"--scene-height"?: string;
+	"--scene-left"?: string;
+	"--scene-margin"?: string;
+	"--scene-size"?: string;
+	"--scene-top"?: string;
 }
 
 interface VisualPoint {
@@ -104,6 +163,7 @@ export interface AnnouncementVisualScene {
 export interface AnnouncementVisualProps {
 	/** Optional admin accent used when the scene does not specify a layer color. */
 	accent?: string | null;
+	appearance?: "default" | "marketplace-guide";
 	/** Admin-authored hex color stops for the shared waitlist warp background. */
 	backgroundColors?: readonly string[];
 	className?: string;
@@ -121,41 +181,40 @@ export interface AnnouncementVisualProps {
 	visualCode?: string | null;
 }
 
-function isRecord(value: unknown): value is RawRecord {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function numberInRange(
-	value: unknown,
+	value: number | undefined,
 	fallback: number,
 	min: number,
 	max: number
 ): number {
-	if (typeof value !== "number" || !Number.isFinite(value)) {
+	if (value === undefined || !Number.isFinite(value)) {
 		return fallback;
 	}
 	return Math.min(max, Math.max(min, value));
 }
 
-function stringValue(value: unknown, fallback: string): string {
-	return typeof value === "string" && value.trim().length > 0
+function stringValue(value: string | undefined, fallback: string): string {
+	return value !== undefined && value.trim().length > 0
 		? value.trim()
 		: fallback;
 }
 
-function hexColor(value: unknown, fallback: string): string {
+function hexColor(value: string | undefined, fallback: string): string {
 	const candidate = stringValue(value, fallback);
 	return HEX_COLOR.test(candidate) ? candidate : fallback;
 }
 
-function normalizePoints(value: unknown, fallbackColor: string): VisualPoint[] {
-	if (!Array.isArray(value)) {
+function normalizePoints(
+	value: readonly RawVisualPoint[] | undefined,
+	fallbackColor: string
+): VisualPoint[] {
+	if (value === undefined) {
 		return defaultParticles(fallbackColor);
 	}
 
 	const points: VisualPoint[] = [];
 	for (const entry of value.slice(0, MAX_PARTICLES)) {
-		if (!isRecord(entry)) {
+		if (entry === null) {
 			continue;
 		}
 		points.push({
@@ -180,10 +239,10 @@ function defaultParticles(color: string): VisualPoint[] {
 }
 
 function normalizeLayer(
-	value: unknown,
+	value: RawVisualLayer,
 	fallbackColor: string
 ): VisualLayer | null {
-	if (!isRecord(value) || typeof value.type !== "string") {
+	if (value === null) {
 		return null;
 	}
 
@@ -242,12 +301,8 @@ export function parseAnnouncementVisualCode(
 		return null;
 	}
 	try {
-		const parsed: unknown = JSON.parse(value);
-		if (
-			!isRecord(parsed) ||
-			parsed.version !== 1 ||
-			!Array.isArray(parsed.layers)
-		) {
+		const parsed = authoredSceneSchema.parse(JSON.parse(value));
+		if (parsed === null) {
 			return null;
 		}
 		const layers = parsed.layers
@@ -288,6 +343,10 @@ function OrbitLayer({
 	reducedMotion: boolean;
 }) {
 	const diameter = layer.radius * 2;
+	const orbitStyle: SceneGeometryStyle = {
+		"--scene-size": `${diameter}px`,
+		"--scene-margin": `${-layer.radius}px`,
+	};
 	return (
 		<motion.div
 			animate={
@@ -295,14 +354,9 @@ function OrbitLayer({
 					? undefined
 					: { rotate: layer.direction === "reverse" ? -360 : 360 }
 			}
-			className="absolute top-1/2 left-1/2"
+			className={cn("absolute top-1/2 left-1/2", styles.orbit)}
 			initial={false}
-			style={{
-				height: diameter,
-				marginLeft: -layer.radius,
-				marginTop: -layer.radius,
-				width: diameter,
-			}}
+			style={orbitStyle}
 			transition={{
 				duration: layer.duration,
 				ease: "linear",
@@ -313,19 +367,18 @@ function OrbitLayer({
 				const angle = (index / layer.count) * Math.PI * 2;
 				const x = Math.cos(angle) * layer.radius;
 				const y = Math.sin(angle) * layer.radius;
+				const dotStyle: SceneGeometryStyle = {
+					"--scene-color": layer.color,
+					"--scene-size": `${layer.dotSize}px`,
+					"--scene-left": `calc(50% + ${x}px - ${layer.dotSize / 2}px)`,
+					"--scene-top": `calc(50% + ${y}px - ${layer.dotSize / 2}px)`,
+				};
 				return (
 					<span
 						aria-hidden="true"
-						className="absolute rounded-full shadow-[0_0_18px_currentColor]"
+						className={cn("absolute rounded-full", styles.orbitDot)}
 						key={`${x}-${y}`}
-						style={{
-							backgroundColor: layer.color,
-							color: layer.color,
-							height: layer.dotSize,
-							left: `calc(50% + ${x}px - ${layer.dotSize / 2}px)`,
-							top: `calc(50% + ${y}px - ${layer.dotSize / 2}px)`,
-							width: layer.dotSize,
-						}}
+						style={dotStyle}
 					/>
 				);
 			})}
@@ -344,6 +397,10 @@ function RingsLayer({
 		<div className="absolute inset-0 grid place-items-center">
 			{Array.from({ length: layer.count }, (_, index) => {
 				const size = layer.size - index * (layer.size / (layer.count + 1));
+				const ringStyle: SceneGeometryStyle = {
+					"--scene-color": layer.color,
+					"--scene-size": `${size}px`,
+				};
 				return (
 					<motion.span
 						animate={
@@ -359,10 +416,10 @@ function RingsLayer({
 									}
 						}
 						aria-hidden="true"
-						className="absolute rounded-full border"
+						className={cn("absolute rounded-full border", styles.ring)}
 						initial={false}
 						key={size}
-						style={{ borderColor: layer.color, height: size, width: size }}
+						style={ringStyle}
 						transition={{
 							delay: index * 0.28,
 							duration: layer.duration,
@@ -385,27 +442,30 @@ function BarsLayer({
 }) {
 	return (
 		<div className="absolute inset-x-[18%] bottom-[22%] flex h-24 items-end justify-center gap-1.5 opacity-75">
-			{Array.from({ length: layer.count }, (_, index) => (
-				<motion.span
-					animate={
-						reducedMotion ? undefined : { scaleY: [0.35, 1, 0.55, 0.8, 0.35] }
-					}
-					aria-hidden="true"
-					className="w-1.5 origin-bottom rounded-full"
-					initial={false}
-					key={index}
-					style={{
-						backgroundColor: layer.color,
-						height: `${35 + (index % 5) * 12}%`,
-					}}
-					transition={{
-						delay: index * 0.08,
-						duration: layer.duration,
-						ease: "easeInOut",
-						repeat: Number.POSITIVE_INFINITY,
-					}}
-				/>
-			))}
+			{Array.from({ length: layer.count }, (_, index) => {
+				const barStyle: SceneGeometryStyle = {
+					"--scene-color": layer.color,
+					"--scene-height": `${35 + (index % 5) * 12}%`,
+				};
+				return (
+					<motion.span
+						animate={
+							reducedMotion ? undefined : { scaleY: [0.35, 1, 0.55, 0.8, 0.35] }
+						}
+						aria-hidden="true"
+						className={cn("w-1.5 origin-bottom rounded-full", styles.bar)}
+						initial={false}
+						key={index}
+						style={barStyle}
+						transition={{
+							delay: index * 0.08,
+							duration: layer.duration,
+							ease: "easeInOut",
+							repeat: Number.POSITIVE_INFINITY,
+						}}
+					/>
+				);
+			})}
 		</div>
 	);
 }
@@ -419,33 +479,34 @@ function ParticlesLayer({
 }) {
 	return (
 		<div className="absolute inset-0">
-			{layer.points.map((point, index) => (
-				<motion.span
-					animate={
-						reducedMotion
-							? undefined
-							: { opacity: [0.35, 1, 0.35], y: [0, -7, 0] }
-					}
-					aria-hidden="true"
-					className="absolute rounded-full shadow-[0_0_12px_currentColor]"
-					initial={false}
-					key={`${point.x}-${point.y}-${index}`}
-					style={{
-						backgroundColor: point.color,
-						color: point.color,
-						height: point.size,
-						left: `${point.x}%`,
-						top: `${point.y}%`,
-						width: point.size,
-					}}
-					transition={{
-						delay: point.delay,
-						duration: layer.duration,
-						ease: "easeInOut",
-						repeat: Number.POSITIVE_INFINITY,
-					}}
-				/>
-			))}
+			{layer.points.map((point, index) => {
+				const pointStyle: SceneGeometryStyle = {
+					"--scene-color": point.color,
+					"--scene-size": `${point.size}px`,
+					"--scene-left": `${point.x}%`,
+					"--scene-top": `${point.y}%`,
+				};
+				return (
+					<motion.span
+						animate={
+							reducedMotion
+								? undefined
+								: { opacity: [0.35, 1, 0.35], y: [0, -7, 0] }
+						}
+						aria-hidden="true"
+						className={cn("absolute rounded-full", styles.particle)}
+						initial={false}
+						key={`${point.x}-${point.y}-${index}`}
+						style={pointStyle}
+						transition={{
+							delay: point.delay,
+							duration: layer.duration,
+							ease: "easeInOut",
+							repeat: Number.POSITIVE_INFINITY,
+						}}
+					/>
+				);
+			})}
 		</div>
 	);
 }
@@ -457,6 +518,7 @@ function BeamLayer({
 	layer: BeamLayer;
 	reducedMotion: boolean;
 }) {
+	const beamStyle: SceneGeometryStyle = { "--scene-color": layer.color };
 	return (
 		<motion.div
 			animate={
@@ -465,9 +527,15 @@ function BeamLayer({
 					: { opacity: [0.2, 0.85, 0.2], x: ["-35%", "35%", "-35%"] }
 			}
 			aria-hidden="true"
-			className="absolute top-1/2 left-1/2 h-px w-[75%] -translate-x-1/2 bg-linear-to-r from-transparent via-current to-transparent"
+			className={cn(
+				"absolute top-1/2 left-1/2 h-px w-[75%] -translate-x-1/2 bg-linear-to-r from-transparent via-current to-transparent",
+				styles.beam
+			)}
 			initial={false}
-			style={{ color: layer.color, rotate: layer.angle }}
+			style={beamStyle}
+			transformTemplate={(_transform, generated) =>
+				`${generated === "none" ? "" : generated} rotate(${layer.angle}deg)`
+			}
 			transition={{
 				duration: layer.duration,
 				ease: "easeInOut",
@@ -545,6 +613,7 @@ function validBackgroundColors(
 
 export function AnnouncementVisual({
 	accent,
+	appearance = "default",
 	backgroundColors,
 	className,
 	iconContent,
@@ -557,8 +626,9 @@ export function AnnouncementVisual({
 	const reducedMotion = Boolean(useReducedMotion());
 	const isDark = useIsDarkFace("auto");
 	const hue = ditherAvatarHue(seed);
-	const defaultColor = HEX_COLOR.test(accent ?? "")
-		? (accent as string)
+	const candidateAccent = accent ?? "";
+	const defaultColor = HEX_COLOR.test(candidateAccent)
+		? candidateAccent
 		: hueHex(hue);
 	const colors = validBackgroundColors(backgroundColors);
 	const warpColors =
@@ -575,12 +645,16 @@ export function AnnouncementVisual({
 	const customIcon = safeImageUrl(iconImageUrl);
 	const universalIcon = safeIconId(iconId);
 	const hasIcon = Boolean(iconContent || customIcon || universalIcon);
-	const style = { "--announcement-accent": defaultColor } as CSSProperties;
+	const style: AnnouncementAccentStyle = {
+		"--announcement-accent": defaultColor,
+	};
 
 	return (
 		<div
 			className={cn(
 				"relative isolate min-h-60 overflow-hidden rounded-3xl bg-card",
+				appearance === "marketplace-guide" &&
+					"min-h-[13rem] rounded-none sm:min-h-[16rem] sm:rounded-t-4xl",
 				className
 			)}
 			data-slot="announcement-visual"
@@ -603,7 +677,7 @@ export function AnnouncementVisual({
 			</div>
 			<div
 				aria-hidden="true"
-				className="pointer-events-none absolute inset-0 bg-linear-to-b from-black/5 via-transparent to-black/45"
+				className="scrim-t pointer-events-none absolute inset-0 [--scrim-alpha:0.45]"
 			/>
 			{scene ? (
 				<VisualLayers layers={scene.layers} reducedMotion={reducedMotion} />

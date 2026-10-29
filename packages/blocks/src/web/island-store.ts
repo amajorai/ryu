@@ -53,7 +53,7 @@ function emit(): void {
 
 /** Read the browser-local opt-out without making the store depend on SSR globals. */
 export function hasIslandPromoBeenDismissed(): boolean {
-	if (typeof window === "undefined") {
+	if (globalThis.window === undefined) {
 		return false;
 	}
 	try {
@@ -65,7 +65,7 @@ export function hasIslandPromoBeenDismissed(): boolean {
 
 /** Permanently hide this browser's surprise promo and close any active panel. */
 export function dismissIslandPromo(): void {
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		try {
 			window.localStorage.setItem(PROMO_DISMISSED_STORAGE_KEY, "1");
 		} catch {

@@ -123,8 +123,73 @@ pub struct EmailTransportConfig {
     pub password: String,
     /// The `From` mailbox, e.g. `"Ryu <alerts@your-node.example>"`.
     pub from: String,
-    /// STARTTLS on a submission port (587) vs implicit TLS (465).
+    /// STARTTLS on a submission port (587). When off, the connection uses
+    /// implicit TLS (465), except that a relay on this host (loopback) on any
+    /// port other than 465 is reached in plaintext; see [`smtp_security`].
     pub starttls: bool,
+}
+
+/// How [`send_email`] secures the SMTP connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SmtpSecurity {
+    /// Plain connect, then a required STARTTLS upgrade (submission, port 587).
+    Starttls,
+    /// TLS from the first byte (SMTPS, port 465).
+    ImplicitTls,
+    /// No encryption. Only ever chosen for a relay on this host (a local mail
+    /// catcher such as Mailpit), where nothing crosses the network.
+    LoopbackPlaintext,
+}
+
+/// Whether `host` names this machine (mirrors the mail satellite's check).
+fn loopback_host(host: &str) -> bool {
+    let host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Pick the connection security. `starttls=false` never sends credentials in
+/// clear to a remote relay: it means implicit TLS there, and plaintext only for a
+/// local MTA or dev sink on a non-SMTPS port (matching the Mail app's
+/// `RYU_SMTP_STARTTLS=false` behaviour).
+fn smtp_security(cfg: &EmailTransportConfig) -> SmtpSecurity {
+    if cfg.starttls {
+        SmtpSecurity::Starttls
+    } else if cfg.port != 465 && loopback_host(&cfg.host) {
+        SmtpSecurity::LoopbackPlaintext
+    } else {
+        SmtpSecurity::ImplicitTls
+    }
+}
+
+/// Build the lettre transport for `cfg` under `security`. The plaintext arm
+/// re-checks the host, so an unencrypted connection never reaches a remote relay.
+fn smtp_transport(
+    cfg: &EmailTransportConfig,
+    security: SmtpSecurity,
+) -> Result<AsyncSmtpTransport<Tokio1Executor>, EmailError> {
+    let builder = match security {
+        SmtpSecurity::Starttls => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.host)
+            .map_err(|e| EmailError::Transport(e.to_string()))?,
+        // Implicit TLS (`Tls::Wrapper`). A remote relay never gets a plaintext
+        // session: the credentials and body would cross the wire in clear.
+        SmtpSecurity::ImplicitTls => AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.host)
+            .map_err(|e| EmailError::Transport(e.to_string()))?,
+        // A local MTA or dev sink on this host: nothing leaves the machine.
+        SmtpSecurity::LoopbackPlaintext if loopback_host(&cfg.host) => {
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
+        }
+        SmtpSecurity::LoopbackPlaintext => {
+            return Err(EmailError::Transport(format!(
+                "refusing to send SMTP credentials without TLS to {}",
+                cfg.host
+            )));
+        }
+    };
+    let creds = Credentials::new(cfg.username.clone(), cfg.password.clone());
+    Ok(builder.port(cfg.port).credentials(creds).build())
 }
 
 /// A file attached to an outbound email.
@@ -376,19 +441,7 @@ pub async fn send_email(
     }
     .map_err(|e| EmailError::Build(e.to_string()))?;
 
-    let creds = Credentials::new(cfg.username.clone(), cfg.password.clone());
-    let transport = if cfg.starttls {
-        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.host)
-            .map_err(|e| EmailError::Transport(e.to_string()))?
-            .port(cfg.port)
-            .credentials(creds)
-            .build()
-    } else {
-        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
-            .port(cfg.port)
-            .credentials(creds)
-            .build()
-    };
+    let transport = smtp_transport(cfg, smtp_security(cfg))?;
 
     match tokio::time::timeout(SEND_TIMEOUT, transport.send(email)).await {
         Err(_) => Err(EmailError::Timeout),
@@ -762,7 +815,8 @@ mod tests {
     // a loopback listener that accepts then immediately closes. This is fully
     // hermetic (loopback only, ephemeral port, no DNS, no external egress, no
     // secret leaves the box); the reset surfaces as `EmailError::Send`. Covers
-    // both transport-build branches (STARTTLS submission vs implicit-TLS relay).
+    // the STARTTLS and loopback-plaintext transport-build branches; the
+    // implicit-TLS choice is covered by `smtp_security`'s decision test.
 
     fn accept_then_close_listener() -> u16 {
         use std::net::TcpListener;
@@ -819,8 +873,158 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_email_implicit_tls_singlepart_send_failure() {
-        // Implicit-TLS branch *and* the singlepart send branch.
+    async fn send_email_loopback_plaintext_singlepart_send_failure() {
+        // Loopback plaintext branch *and* the singlepart send branch.
         expect_send_failure(false, false).await;
+    }
+
+    #[test]
+    fn starttls_off_is_implicit_tls_unless_the_relay_is_local() {
+        let cfg = |host: &str, port: u16, starttls: bool| EmailTransportConfig {
+            host: host.into(),
+            port,
+            username: "u".into(),
+            password: "p".into(),
+            from: "from@node.example".into(),
+            starttls,
+        };
+        assert_eq!(
+            smtp_security(&cfg("smtp.example.com", 587, true)),
+            SmtpSecurity::Starttls
+        );
+        assert_eq!(
+            smtp_security(&cfg("127.0.0.1", 25, true)),
+            SmtpSecurity::Starttls
+        );
+        // A remote relay never gets plaintext, on any port.
+        for port in [25, 465, 587, 2525] {
+            assert_eq!(
+                smtp_security(&cfg("smtp.example.com", port, false)),
+                SmtpSecurity::ImplicitTls,
+                "remote port {port}"
+            );
+        }
+        for host in [
+            "10.0.0.5",
+            "2001:db8::1",
+            "localhost.example.com",
+            "127.0.0.1.example.com",
+            "::ffff:127.0.0.1",
+        ] {
+            assert_eq!(
+                smtp_security(&cfg(host, 25, false)),
+                SmtpSecurity::ImplicitTls,
+                "{host} is remote"
+            );
+        }
+        // A local MTA / dev sink keeps working in plaintext...
+        for host in [
+            "127.0.0.1",
+            "localhost",
+            "LOCALHOST",
+            "::1",
+            "[::1]",
+            "127.0.0.2",
+        ] {
+            assert_eq!(
+                smtp_security(&cfg(host, 1025, false)),
+                SmtpSecurity::LoopbackPlaintext,
+                "{host}"
+            );
+        }
+        // ...except on the SMTPS port, which always speaks implicit TLS.
+        assert_eq!(
+            smtp_security(&cfg("localhost", 465, false)),
+            SmtpSecurity::ImplicitTls
+        );
+        // A hostname merely containing "localhost" is not loopback.
+        assert_eq!(
+            smtp_security(&cfg("localhost.evil.example", 25, false)),
+            SmtpSecurity::ImplicitTls
+        );
+    }
+
+    fn remote_config() -> EmailTransportConfig {
+        EmailTransportConfig {
+            host: "smtp.example.com".into(),
+            port: 465,
+            username: "u".into(),
+            password: "p".into(),
+            from: "from@node.example".into(),
+            starttls: false,
+        }
+    }
+
+    #[test]
+    fn smtp_transport_refuses_plaintext_to_a_remote_relay() {
+        // Defence in depth: even if the plaintext mode were asked for directly,
+        // the builder will not open an unencrypted connection to a remote host.
+        match smtp_transport(&remote_config(), SmtpSecurity::LoopbackPlaintext) {
+            Err(EmailError::Transport(reason)) => {
+                assert!(reason.contains("smtp.example.com"), "reason: {reason}");
+            }
+            Err(other) => panic!("expected a Transport refusal, got {other:?}"),
+            Ok(_) => panic!("expected a Transport refusal, got a transport"),
+        }
+        // The encrypted modes build without touching the network.
+        assert!(smtp_transport(&remote_config(), SmtpSecurity::ImplicitTls).is_ok());
+        assert!(smtp_transport(&remote_config(), SmtpSecurity::Starttls).is_ok());
+    }
+
+    /// A loopback listener that greets like a plaintext SMTP server and reports
+    /// the first bytes the client sends back.
+    fn first_bytes_listener() -> (u16, std::sync::mpsc::Receiver<Vec<u8>>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().expect("addr").port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let _ = stream.write_all(b"220 relay.test ESMTP\r\n");
+                let mut buf = [0u8; 16];
+                let read = stream.read(&mut buf).unwrap_or(0);
+                let _ = tx.send(buf[..read].to_vec());
+            }
+        });
+        (port, rx)
+    }
+
+    async fn first_bytes_sent(security: SmtpSecurity) -> Vec<u8> {
+        let (port, rx) = first_bytes_listener();
+        let cfg = EmailTransportConfig {
+            host: "127.0.0.1".into(),
+            port,
+            ..remote_config()
+        };
+        let transport = smtp_transport(&cfg, security).expect("transport builds");
+        // The listener drops the connection after one read, so this fails; only
+        // what reached the wire matters.
+        let _ = tokio::time::timeout(Duration::from_secs(10), transport.test_connection()).await;
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("listener saw a connection")
+    }
+
+    #[tokio::test]
+    async fn implicit_tls_opens_with_a_tls_handshake_not_smtp() {
+        // Offered a plaintext greeting (the on-path attacker's move), the
+        // implicit-TLS transport still opens with a TLS ClientHello record
+        // (content type 0x16), so no EHLO or AUTH is ever sent in the clear.
+        let first = first_bytes_sent(SmtpSecurity::ImplicitTls).await;
+        assert_eq!(
+            first.first(),
+            Some(&0x16),
+            "TLS handshake record: {first:?}"
+        );
+        assert!(!first.starts_with(b"EHLO"), "no plaintext SMTP: {first:?}");
+    }
+
+    #[tokio::test]
+    async fn loopback_plaintext_speaks_smtp_in_the_clear() {
+        // Control for the test above: the listener does see plaintext SMTP when
+        // the transport is unencrypted (allowed only for a loopback relay).
+        let first = first_bytes_sent(SmtpSecurity::LoopbackPlaintext).await;
+        assert!(first.starts_with(b"EHLO"), "plaintext EHLO: {first:?}");
     }
 }

@@ -1,5 +1,6 @@
 import { cn } from "@ryu/ui/lib/utils";
 import React from "react";
+import styles from "./text-shimmer.module.css";
 
 export interface TextShimmerProps {
 	as?: React.ElementType;
@@ -10,27 +11,32 @@ export interface TextShimmerProps {
 	spread?: number;
 }
 
+interface TextShimmerStyle extends React.CSSProperties {
+	"--an-shimmer-duration": string;
+	"--an-shimmer-spread": string;
+}
+
 function TextShimmerComponent({
 	children,
 	as: Component = "p",
 	className,
-	duration = 2,
+	duration = 0.9,
 	spread = 100,
 	delay = 0,
 }: TextShimmerProps) {
-	const style = {
+	const style: TextShimmerStyle = {
 		"--an-shimmer-duration": `${duration}s`,
 		"--an-shimmer-spread": `${spread}px`,
 		animationDelay: delay > 0 ? `${delay}s` : undefined,
 		animationDuration: `${duration}s`,
 		animationIterationCount: "infinite",
 		animationTimingFunction: "linear",
-	} as React.CSSProperties;
+	};
 
 	return React.createElement(
 		Component,
 		{
-			className: cn("an-text-shimmer", "an-text-shimmer--active", className),
+			className: cn(styles.shimmer, styles.active, className),
 			style,
 		},
 		children

@@ -78,7 +78,7 @@ test("proves the sidebar inbox bell rings and rolls its count", async ({
 		fullPage: true,
 		path:
 			process.env.RYU_PROOF_SCREENSHOT ??
-			"/private/tmp/ryu-notification-inbox-bell-proof.png",
+			test.info().outputPath("ryu-notification-inbox-bell-proof.png"),
 	});
 
 	await bell.click();
@@ -91,7 +91,7 @@ test("proves the sidebar inbox bell rings and rolls its count", async ({
 		fullPage: true,
 		path:
 			process.env.RYU_TRAY_PROOF_SCREENSHOT ??
-			"/private/tmp/ryu-notification-inbox-tray-proof.png",
+			test.info().outputPath("ryu-notification-inbox-tray-proof.png"),
 	});
 
 	await page.keyboard.press("Escape");

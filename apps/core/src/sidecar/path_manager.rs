@@ -147,10 +147,31 @@ fn per_tool_bin_dirs(home: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// Only the user's own data folder (the profile default, or the folder they
+/// relocated it to) belongs on their permanent PATH. An explicit `RYU_DIR`
+/// override is a test, headless run or standalone app product: every test run
+/// with a temp dir used to append another `<tmp>/bin` to the user PATH for good.
+fn persists_bin_on_user_path(ryu_dir_override: Option<&std::ffi::OsStr>) -> bool {
+    ryu_dir_override.is_none_or(|value| value.is_empty())
+}
+
 impl PathManager {
     /// Add ~/.ryu/bin to PATH permanently
     pub fn add_to_path() -> Result<()> {
-        let bin_dir = crate::paths::ryu_dir().join("bin");
+        // Isolated headless runs must not append to the user's shell profile.
+        if skip_path_profile_update(
+            std::env::var("RYU_SKIP_PATH_PROFILE_UPDATE")
+                .ok()
+                .as_deref(),
+        ) {
+            return Ok(());
+        }
+
+        if !persists_bin_on_user_path(std::env::var_os(crate::paths::RYU_DIR_ENV).as_deref()) {
+            tracing::debug!("RYU_DIR override set; not adding its bin dir to the user PATH");
+            return Ok(());
+        }
+        let bin_dir = crate::paths::bin_dir();
 
         #[cfg(target_os = "windows")]
         {
@@ -171,14 +192,30 @@ impl PathManager {
         use winapi::um::winuser::{
             SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
         };
-        use winreg::{enums::*, RegKey};
+        use winreg::{enums::*, RegKey, RegValue};
 
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let env = hkcu
             .open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)
             .context("opening Environment registry key")?;
 
-        let current_path: String = env.get_value("Path").unwrap_or_default();
+        // Read the raw value so its type survives the rewrite. The default user
+        // Path is REG_EXPAND_SZ and holds `%USERPROFILE%\...` entries; writing it
+        // back as REG_SZ (what `set_value(&String)` does) stops Windows expanding
+        // them, which breaks every such entry (WindowsApps aliases, winget, ...).
+        let (current_path, vtype) = match env.get_raw_value("Path") {
+            Ok(value) if value.vtype == REG_SZ || value.vtype == REG_EXPAND_SZ => {
+                (decode_reg_string(&value.bytes), value.vtype)
+            }
+            Ok(value) => anyhow::bail!(
+                "user Path has unexpected registry type {:?}; not modifying it",
+                value.vtype
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                (String::new(), REG_EXPAND_SZ)
+            }
+            Err(error) => return Err(error).context("reading Path registry value"),
+        };
 
         // Check if already in PATH
         if current_path.split(';').any(|p| Path::new(p) == bin_dir) {
@@ -193,19 +230,29 @@ impl PathManager {
             format!("{};{}", current_path, bin_dir.display())
         };
 
-        env.set_value("Path", &new_path)
-            .context("setting Path registry value")?;
+        env.set_raw_value(
+            "Path",
+            &RegValue {
+                bytes: encode_reg_string(&new_path),
+                vtype,
+            },
+        )
+        .context("setting Path registry value")?;
 
-        // Notify other processes of the change
+        // Notify other processes of the change. WM_SETTINGCHANGE's lParam is an
+        // LPCWSTR for the W variant, so the area name must be UTF-16 (and stay
+        // alive for the duration of the call).
+        let area: Vec<u16> = "Environment\0".encode_utf16().collect();
+        let mut result = 0usize;
         unsafe {
             SendMessageTimeoutW(
                 HWND_BROADCAST,
                 WM_SETTINGCHANGE,
                 0,
-                "Environment\0".as_ptr() as LPARAM,
+                area.as_ptr() as LPARAM,
                 SMTO_ABORTIFHUNG,
                 5000,
-                std::ptr::null_mut(),
+                &mut result,
             );
         }
 
@@ -270,11 +317,61 @@ impl PathManager {
     }
 }
 
+fn skip_path_profile_update(value: Option<&str>) -> bool {
+    matches!(value, Some("1"))
+}
+
+/// Decode a REG_SZ / REG_EXPAND_SZ payload (UTF-16LE, NUL-terminated).
+#[cfg(any(target_os = "windows", test))]
+fn decode_reg_string(bytes: &[u8]) -> String {
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    let end = units
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(units.len());
+    String::from_utf16_lossy(&units[..end])
+}
+
+/// Encode a string as a REG_SZ / REG_EXPAND_SZ payload (UTF-16LE plus NUL).
+#[cfg(any(target_os = "windows", test))]
+fn encode_reg_string(value: &str) -> Vec<u8> {
+    value
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
 #[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     use std::collections::HashSet;
 
     use super::*;
+
+    #[test]
+    fn registry_strings_round_trip_with_expand_references_intact() {
+        let path = r"%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;C:\Users\a\.ryu\bin";
+        let bytes = encode_reg_string(path);
+        // UTF-16LE with a terminating NUL, as the registry stores it.
+        assert_eq!(bytes.len(), (path.len() + 1) * 2);
+        assert_eq!(&bytes[bytes.len() - 2..], &[0, 0]);
+        assert_eq!(decode_reg_string(&bytes), path);
+        // Trailing NULs (and an odd stray byte) are not part of the value.
+        let mut padded = bytes.clone();
+        padded.extend_from_slice(&[0, 0, 7]);
+        assert_eq!(decode_reg_string(&padded), path);
+        assert_eq!(decode_reg_string(&[]), "");
+    }
+
+    #[test]
+    fn headless_runs_can_skip_persistent_path_changes() {
+        assert!(skip_path_profile_update(Some("1")));
+        assert!(!skip_path_profile_update(None));
+        assert!(!skip_path_profile_update(Some("0")));
+    }
 
     /// The bug this guards: a desktop-launched Core inherits launchd's minimal
     /// PATH, so a `claude` installed by its own installer into `~/.local/bin` —
@@ -332,5 +429,21 @@ mod tests {
             .filter(|d| **d == home.path().join(".cargo/bin"))
             .count();
         assert_eq!(hits, 1);
+    }
+}
+
+#[cfg(test)]
+mod persist_policy_tests {
+    use super::persists_bin_on_user_path;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn only_the_users_own_data_folder_is_persisted_on_path() {
+        assert!(persists_bin_on_user_path(None));
+        // Core treats an empty override as unset when resolving the data dir.
+        assert!(persists_bin_on_user_path(Some(OsStr::new(""))));
+        assert!(!persists_bin_on_user_path(Some(OsStr::new(
+            "/tmp/.tmpAbC123"
+        ))));
     }
 }

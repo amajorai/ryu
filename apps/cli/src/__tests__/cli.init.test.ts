@@ -1,4 +1,4 @@
-// Tests for `ryu init <name> [--template <t>]` (cli/commands.ts initCommand).
+// Tests for `ryu init <name> [--template <t>]` (cli/builtins/lifecycle.ts initCommand).
 //
 // `init` owns no templates: it shells out to create-ryu-app, the scaffolding source
 // of truth. So what these tests pin is the CONTRACT with that child — the argv it is
@@ -7,6 +7,7 @@
 // fake-injection seam as CoreApi), so no process is ever spawned here.
 
 import { expect, test } from "bun:test";
+import { z } from "zod";
 import { runCli } from "../cli/dispatch.ts";
 import type {
 	CliIO,
@@ -15,15 +16,23 @@ import type {
 	ScaffoldRunner,
 } from "../cli/types.ts";
 
-function makeIo(): { io: CliIO; out: () => string; err: () => string } {
+const initOutputSchema = z.looseObject({
+	name: z.string(),
+	template: z.string().nullable(),
+	exitCode: z.number(),
+	stdout: z.string(),
+	stderr: z.string(),
+});
+
+function makeIo() {
 	let outBuf = "";
 	let errBuf = "";
 	return {
 		io: {
-			out: (s) => {
+			out: (s: Parameters<CliIO["out"]>[0]) => {
 				outBuf += s;
 			},
-			err: (s) => {
+			err: (s: Parameters<CliIO["err"]>[0]) => {
 				errBuf += s;
 			},
 		},
@@ -50,15 +59,11 @@ function noNetworkApi(): CoreApi {
 }
 
 /** A fake scaffolder recording the argv it was handed. */
-function fakeScaffold(result: Partial<ScaffoldResult> = {}): {
-	run: ScaffoldRunner;
-	argv: () => string[] | null;
-	calls: () => number;
-} {
+function fakeScaffold(result: Partial<ScaffoldResult> = {}) {
 	let seen: string[] | null = null;
 	let calls = 0;
 	return {
-		run: (argv) => {
+		run: (argv: Parameters<ScaffoldRunner>[0]) => {
 			seen = argv;
 			calls += 1;
 			return Promise.resolve({
@@ -150,12 +155,7 @@ test("init --json: one machine-readable envelope carrying the child's output", a
 	expect(code).toBe(0);
 	// Parseable: the child's text is INSIDE the envelope because its output is
 	// captured, never inherited onto the real stdout.
-	const parsed = JSON.parse(cap.out()) as {
-		exitCode: number;
-		name: string;
-		stdout: string;
-		template: string | null;
-	};
+	const parsed = initOutputSchema.parse(JSON.parse(cap.out()));
 	expect(parsed.name).toBe("my-app");
 	expect(parsed.template).toBe("app");
 	expect(parsed.exitCode).toBe(0);
@@ -171,7 +171,7 @@ test("init without a name is a usage error (exit 2) and never spawns", async () 
 		scaffold: scaffold.run,
 	});
 	expect(code).toBe(2);
-	expect(cap.err()).toContain("Usage: ryu init <name>");
+	expect(cap.err()).toContain("Usage: ryu-cli init <name>");
 	expect(scaffold.calls()).toBe(0);
 });
 
@@ -179,6 +179,6 @@ test("help lists init and the --template flag", async () => {
 	const cap = makeIo();
 	const code = await runCli(["--help"], { io: cap.io, api: noNetworkApi() });
 	expect(code).toBe(0);
-	expect(cap.out()).toContain("ryu init <name>");
+	expect(cap.out()).toContain("ryu-cli init <name>");
 	expect(cap.out()).toContain("--template <t>");
 });

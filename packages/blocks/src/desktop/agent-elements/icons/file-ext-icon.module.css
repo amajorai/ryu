@@ -1,0 +1,18 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+/* TypeScript and JavaScript artwork retain their identifying upstream colors. */
+@layer components {
+	.typescript path {
+		fill: #007acc;
+	}
+	.javascript rect {
+		fill: #f5de19;
+	}
+	.javascript path {
+		fill: #000;
+	}
+	.json path {
+		fill: var(--warning);
+	}
+}

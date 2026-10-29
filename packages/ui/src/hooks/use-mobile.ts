@@ -6,7 +6,7 @@ const MOBILE_BREAKPOINT = 768;
 const COMPACT_BREAKPOINT = 1024;
 
 function matches(query: string): boolean {
-	if (typeof window === "undefined" || !window.matchMedia) {
+	if (globalThis.window === undefined || !window.matchMedia) {
 		return false;
 	}
 	return window.matchMedia(query).matches;
@@ -21,7 +21,7 @@ export function useMediaQuery(query: string): boolean {
 	const [value, setValue] = useState(() => matches(query));
 
 	useEffect(() => {
-		if (typeof window === "undefined" || !window.matchMedia) {
+		if (globalThis.window === undefined || !window.matchMedia) {
 			return;
 		}
 		const mql = window.matchMedia(query);

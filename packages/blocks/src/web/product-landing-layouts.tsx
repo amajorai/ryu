@@ -1,71 +1,139 @@
 import type { ReactNode } from "react";
+import { StageFade } from "./backgrounds/stage-fade.tsx";
 import { landingVisualFrameClass } from "./landing-card-tones.ts";
 import {
+	landingCtaRowClass,
 	landingHeadlineClass,
+	landingHeroSectionClass,
 	landingSubheadlineClass,
 } from "./landing-typography.ts";
-import type { BentoItem } from "./sections.tsx";
 
-export function ProductHeroFrame({
+/**
+ * The stage hero: one centred column over an animated backdrop, filling the
+ * first viewport under the floating site header, like the landing hero. It is
+ * always in the dark scheme, because the backdrops are light drawn on black. A
+ * soft scrim behind the copy keeps it legible over the busier effects.
+ */
+function ProductStageHero({
 	actions,
+	background,
+	eyebrow,
 	subtitle,
 	title,
-	visual,
 }: {
 	actions: ReactNode;
+	background: ReactNode;
+	eyebrow: string;
 	subtitle: string;
 	title: string;
-	visual: ReactNode;
 }) {
 	return (
 		<section
-			className="mx-auto max-w-6xl px-6 pt-16 pb-12 md:pt-24 md:pb-16"
-			data-product-hero-layout="showcase"
+			className="relative isolate flex min-h-svh flex-col overflow-hidden bg-background text-foreground"
+			data-product-hero-layout="stage"
 		>
-			<div className="grid items-center gap-10 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-16">
-				<div className="min-w-0 max-w-2xl">
-					<h1 className={landingHeadlineClass}>{title}</h1>
-					<p className={landingSubheadlineClass}>{subtitle}</p>
-					<div className="mt-8 flex flex-wrap items-center gap-3">
-						{actions}
-					</div>
-				</div>
-				<div
-					className={`${landingVisualFrameClass} flex min-h-72 min-w-0 items-center justify-center md:min-h-[22rem] [&>*]:w-full [&>*]:max-w-3xl`}
-					data-product-visual
-				>
-					{visual}
+			{background}
+			<div
+				aria-hidden="true"
+				className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_60%_45%_at_50%_50%,color-mix(in_oklab,var(--background)_55%,transparent),transparent)]"
+			/>
+			<StageFade />
+			<div className="pointer-events-none relative z-[2] mx-auto flex w-full max-w-4xl flex-1 flex-col items-center justify-center px-6 pt-28 pb-20 text-center [&_a]:pointer-events-auto [&_button]:pointer-events-auto">
+				<p className="mb-4 font-medium text-muted-foreground text-sm">
+					{eyebrow}
+				</p>
+				<h1 className={landingHeadlineClass}>{title}</h1>
+				<p className={`${landingSubheadlineClass} mx-auto`}>{subtitle}</p>
+				<div className={`mt-10 ${landingCtaRowClass} sm:justify-center`}>
+					{actions}
 				</div>
 			</div>
 		</section>
 	);
 }
 
-export function ProductBentoFrame({ items }: { items: BentoItem[] }) {
+export function ProductHeroFrame({
+	actions,
+	background,
+	eyebrow,
+	subtitle,
+	title,
+	visual,
+}: {
+	actions: ReactNode;
+	/** An animated backdrop: the hero becomes a full-viewport stage without the visual. */
+	background?: ReactNode;
+	eyebrow: string;
+	subtitle: string;
+	title: string;
+	/** Optional: without a visual the hero is a single text column. */
+	visual?: ReactNode;
+}) {
+	if (background) {
+		return (
+			<ProductStageHero
+				actions={actions}
+				background={background}
+				eyebrow={eyebrow}
+				subtitle={subtitle}
+				title={title}
+			/>
+		);
+	}
+	const hasVisual = Boolean(visual);
 	return (
-		<div
-			className="grid gap-x-12 gap-y-12 md:grid-cols-2"
-			data-product-bento-layout="grid"
+		<section
+			className={landingHeroSectionClass}
+			data-product-hero-layout="showcase"
 		>
-			{items.map((item) => (
-				<article className="flex min-w-0 flex-col" key={item.title}>
-					{item.visual ? (
-						<div
-							className={`${landingVisualFrameClass} mb-6 flex min-h-52 items-center justify-center [&>*]:w-full`}
-							data-product-visual
-						>
-							{item.visual}
-						</div>
-					) : null}
-					<h3 className="font-heading font-medium text-xl tracking-tight">
-						{item.title}
-					</h3>
-					<p className="mt-2 max-w-lg text-muted-foreground text-sm leading-relaxed">
-						{item.description}
+			<div
+				className={
+					hasVisual
+						? "grid items-center gap-10 lg:grid-cols-2 lg:gap-16"
+						: undefined
+				}
+			>
+				{/* Without a visual the hero is one centred column, so the empty half reads as intentional. */}
+				<div
+					className={
+						hasVisual
+							? "min-w-0 max-w-2xl"
+							: "mx-auto min-w-0 max-w-3xl text-center"
+					}
+				>
+					<p className="mb-4 font-medium text-muted-foreground text-sm">
+						{eyebrow}
 					</p>
-					{item.action ? <div className="mt-4">{item.action}</div> : null}
-				</article>
-			))}
-		</div>
+					<h1 className={landingHeadlineClass}>{title}</h1>
+					<p
+						className={
+							hasVisual
+								? landingSubheadlineClass
+								: `${landingSubheadlineClass} mx-auto`
+						}
+					>
+						{subtitle}
+					</p>
+					<div
+						className={
+							hasVisual
+								? `mt-10 ${landingCtaRowClass}`
+								: `mt-10 ${landingCtaRowClass} sm:justify-center`
+						}
+					>
+						{actions}
+					</div>
+				</div>
+				{/* Visuals stretch to the frame, except a fixed-width phone (PhoneFrame's w-56), which keeps its portrait size. */}
+				{hasVisual ? (
+					<div
+						className={`${landingVisualFrameClass} flex min-w-0 items-center justify-center [&>*]:w-full [&>*]:max-w-3xl [&>.w-56]:w-56 [&>[data-minimal-card]]:bg-transparent`}
+						data-product-visual
+					>
+						{visual}
+					</div>
+				) : null}
+			</div>
+		</section>
 	);
 }

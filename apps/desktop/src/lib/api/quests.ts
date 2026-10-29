@@ -1,3 +1,8 @@
+import { z } from "zod";
+import {
+	type GatewayJsonValue,
+	gatewayJsonValueSchema,
+} from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/quests.ts
 //
 // Typed client for the Core quests API (`/api/quests/*`): the auto-detecting
@@ -5,64 +10,32 @@
 // The event SSE stream uses fetch + ReadableStream (not EventSource) so the
 // bearer token can be attached, mirroring the monitors alert stream.
 
-import { type ApiTarget, request } from "./client.ts";
+import {
+	type CaptureInput,
+	type JudgeResult,
+	judgeQuest as judgeQuestWithEvidence,
+	type Quest,
+	type QuestInput,
+	type QuestKind,
+	questResponseSchema,
+} from "@ryuhq/core-client/quests";
+import { type ApiTarget, authenticatedFetch, request } from "./client.ts";
 import { streamChannel } from "./eventStream.ts";
+import { encodePathId } from "./path-id.ts";
 
-export type QuestStatus = "open" | "done" | "dismissed";
-export type CompletionSource = "manual" | "detected";
-/** What a board item IS. Only `task` is judged on the detection schedule; the
- *  rest are captures — things kept while working. */
-export type QuestKind = "task" | "note" | "link" | "prompt" | "snippet";
+export type {
+	CaptureInput,
+	CaptureSource,
+	CompletionSource,
+	JudgeResult,
+	Quest,
+	QuestInput,
+	QuestKind,
+	QuestStatus,
+	Suggestion,
+} from "@ryuhq/core-client/quests";
+
 export type DetectionMode = "off" | "suggest" | "auto_high" | "auto_all";
-
-export interface Suggestion {
-	confidence: number;
-	evidence?: string | null;
-	reason: string;
-	suggested_at: string;
-}
-
-/** Where a capture came from, so a kept snippet is never an orphan quote. */
-export interface CaptureSource {
-	app?: string | null;
-	title?: string | null;
-	url?: string | null;
-}
-
-export interface Quest {
-	body?: string | null;
-	completed_at?: string | null;
-	completion_condition: string;
-	completion_source?: CompletionSource | null;
-	created_at: string;
-	detail?: string | null;
-	id: string;
-	kind?: QuestKind;
-	last_judged_at?: string | null;
-	pinned?: boolean;
-	snoozed_until?: string | null;
-	source?: CaptureSource | null;
-	status: QuestStatus;
-	suggestion?: Suggestion | null;
-	title: string;
-	updated_at: string;
-	used_at?: string | null;
-}
-
-/** The capture payload. Only `body` is required — the kind and the title are
- *  inferred server-side from the body when absent. */
-export interface CaptureInput {
-	body: string;
-	kind?: QuestKind;
-	source?: CaptureSource;
-	title?: string;
-}
-
-export interface QuestInput {
-	completion_condition: string;
-	detail?: string | null;
-	title: string;
-}
 
 export interface DetectionConfig {
 	effort: string;
@@ -78,6 +51,46 @@ export type QuestEvent =
 	| { type: "updated"; quest: Quest }
 	| { type: "deleted"; id: string };
 
+const questEventFields = z.discriminatedUnion("type", [
+	z.object({
+		type: z.literal("suggested"),
+		quest: questResponseSchema,
+		confidence: z.number().int().min(0).max(255),
+		reason: z.string(),
+	}),
+	z.object({
+		type: z.literal("completed"),
+		quest: questResponseSchema,
+		auto: z.boolean(),
+	}),
+	z.object({ type: z.literal("updated"), quest: questResponseSchema }),
+	z.object({ type: z.literal("deleted"), id: z.string() }),
+]);
+const questEventSchema = z.custom<z.output<typeof questEventFields>>(
+	(value) => questEventFields.safeParse(value).success
+);
+
+const questListSchema = z
+	.object({ quests: z.array(questResponseSchema).optional() })
+	.passthrough();
+const questEnvelopeSchema = z
+	.object({
+		quest: questResponseSchema.optional(),
+		error: z.string().optional(),
+	})
+	.passthrough();
+const scratchpadSchema = z
+	.object({ text: z.string().optional() })
+	.passthrough();
+const detectionConfigSchema = z
+	.object({
+		effort: z.string(),
+		interval: z.string(),
+		mode: z.enum(["off", "suggest", "auto_high", "auto_all"]),
+		model: z.string(),
+	})
+	.passthrough();
+
 export async function listQuests(
 	target: ApiTarget,
 	kind?: QuestKind
@@ -85,7 +98,7 @@ export async function listQuests(
 	const path = kind
 		? `/api/quests?kind=${encodeURIComponent(kind)}`
 		: "/api/quests";
-	const json = await request<{ quests?: Quest[] }>(target, path);
+	const json = await request(target, path, undefined, questListSchema);
 	return json.quests ?? [];
 }
 
@@ -94,10 +107,11 @@ export async function captureQuest(
 	target: ApiTarget,
 	data: CaptureInput
 ): Promise<Quest> {
-	const json = await request<{ quest?: Quest; error?: string }>(
+	const json = await request(
 		target,
 		"/api/quests/capture",
-		{ method: "POST", body: data }
+		{ method: "POST", body: data },
+		questEnvelopeSchema
 	);
 	if (!json.quest) {
 		throw new Error(json.error ?? "failed to capture");
@@ -111,7 +125,9 @@ export async function useQuest(
 	id: string,
 	complete = false
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/use`, { complete });
+	return await mutateQuest(target, `/api/quests/${encodePathId(id)}/use`, {
+		complete,
+	});
 }
 
 /** Pin or unpin an item to the top of the board. */
@@ -120,14 +136,18 @@ export async function pinQuest(
 	id: string,
 	pinned: boolean
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/pin`, { pinned });
+	return await mutateQuest(target, `/api/quests/${encodePathId(id)}/pin`, {
+		pinned,
+	});
 }
 
 /** The freeform brain-dump buffer. */
 export async function getScratchpad(target: ApiTarget): Promise<string> {
-	const json = await request<{ text?: string }>(
+	const json = await request(
 		target,
-		"/api/quests/scratchpad"
+		"/api/quests/scratchpad",
+		undefined,
+		scratchpadSchema
 	);
 	return json.text ?? "";
 }
@@ -137,20 +157,26 @@ export async function setScratchpad(
 	target: ApiTarget,
 	text: string
 ): Promise<void> {
-	await request(target, "/api/quests/scratchpad", {
-		method: "PUT",
-		body: { text },
-	});
+	await request(
+		target,
+		"/api/quests/scratchpad",
+		{
+			method: "PUT",
+			body: { text },
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 export async function createQuest(
 	target: ApiTarget,
 	data: QuestInput
 ): Promise<Quest> {
-	const json = await request<{ quest?: Quest; error?: string }>(
+	const json = await request(
 		target,
 		"/api/quests",
-		{ method: "POST", body: data }
+		{ method: "POST", body: data },
+		questEnvelopeSchema
 	);
 	if (!json.quest) {
 		throw new Error(json.error ?? "failed to create quest");
@@ -163,10 +189,11 @@ export async function updateQuest(
 	id: string,
 	data: QuestInput
 ): Promise<Quest> {
-	const json = await request<{ quest?: Quest; error?: string }>(
+	const json = await request(
 		target,
-		`/api/quests/${id}`,
-		{ method: "PUT", body: data }
+		`/api/quests/${encodePathId(id)}`,
+		{ method: "PUT", body: data },
+		questEnvelopeSchema
 	);
 	if (!json.quest) {
 		throw new Error(json.error ?? "failed to update quest");
@@ -178,93 +205,127 @@ export async function deleteQuest(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/quests/${id}`, { method: "DELETE" });
+	await request(
+		target,
+		`/api/quests/${encodePathId(id)}`,
+		{ method: "DELETE" },
+		gatewayJsonValueSchema
+	);
 }
 
 export async function completeQuest(
 	target: ApiTarget,
 	id: string
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/complete`);
+	return await mutateQuest(target, `/api/quests/${encodePathId(id)}/complete`);
 }
 
 export async function dismissQuest(
 	target: ApiTarget,
 	id: string
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/dismiss`);
+	return await mutateQuest(target, `/api/quests/${encodePathId(id)}/dismiss`);
 }
 
 export async function acceptSuggestion(
 	target: ApiTarget,
 	id: string
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/suggestion/accept`);
+	return await mutateQuest(
+		target,
+		`/api/quests/${encodePathId(id)}/suggestion/accept`
+	);
 }
 
 export async function dismissSuggestion(
 	target: ApiTarget,
 	id: string
 ): Promise<Quest> {
-	return await mutateQuest(target, `/api/quests/${id}/suggestion/dismiss`);
+	return await mutateQuest(
+		target,
+		`/api/quests/${encodePathId(id)}/suggestion/dismiss`
+	);
 }
 
 async function mutateQuest(
 	target: ApiTarget,
 	path: string,
-	body?: Record<string, unknown>
+	body?: Record<string, GatewayJsonValue>
 ): Promise<Quest> {
-	const json = await request<{ quest?: Quest; error?: string }>(target, path, {
-		method: "POST",
-		...(body ? { body } : {}),
-	});
+	const json = await request(
+		target,
+		path,
+		{
+			method: "POST",
+			...(body ? { body } : undefined),
+		},
+		questEnvelopeSchema
+	);
 	if (!json.quest) {
 		throw new Error(json.error ?? "quest update failed");
 	}
 	return json.quest;
 }
 
-export interface JudgeResult {
-	confidence?: number;
-	met?: boolean;
-	reason?: string;
-	skipped?: boolean;
-}
-
 export async function judgeQuest(
 	target: ApiTarget,
 	id: string
 ): Promise<JudgeResult> {
-	return await request<JudgeResult>(target, `/api/quests/${id}/judge`, {
-		method: "POST",
-	});
+	return await judgeQuestWithEvidence(
+		{
+			...target,
+			fetch: (input, init) => {
+				const url = new URL(String(input));
+				return authenticatedFetch(target, `${url.pathname}${url.search}`, {
+					...init,
+					headers: Object.fromEntries(new Headers(init?.headers)),
+				});
+			},
+		},
+		id
+	);
 }
 
 export async function getDetectionConfig(
 	target: ApiTarget
 ): Promise<DetectionConfig> {
-	return await request<DetectionConfig>(target, "/api/quests/detection-config");
+	return await request(
+		target,
+		"/api/quests/detection-config",
+		undefined,
+		detectionConfigSchema
+	);
 }
 
 export async function setDetectionConfig(
 	target: ApiTarget,
 	data: Partial<DetectionConfig>
 ): Promise<void> {
-	await request(target, "/api/quests/detection-config", {
-		method: "PUT",
-		body: data,
-	});
+	await request(
+		target,
+		"/api/quests/detection-config",
+		{
+			method: "PUT",
+			body: data,
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /**
  * Subscribe to quest events and invoke `onEvent` for every event. Resolves when
  * `signal` aborts. Shares the single multiplexed node connection
  * (`/api/events/all`, see eventStream.ts) instead of its own HTTP socket.
+ * `onResync` runs after that connection re-opens, since events emitted while it
+ * was down are not replayed.
  */
 export function streamQuestEvents(
 	target: ApiTarget,
 	onEvent: (event: QuestEvent) => void,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	onResync?: () => void
 ): Promise<void> {
-	return streamChannel(target, "quests", onEvent, signal);
+	return streamChannel(target, "quests", onEvent, signal, questEventSchema, {
+		onResync,
+	});
 }

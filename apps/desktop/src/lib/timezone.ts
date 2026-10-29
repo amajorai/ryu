@@ -66,7 +66,7 @@ function supportedZones(): string[] {
 /** `"GMT+01:00"` for a zone right now, or `"GMT+00:00"` if it can't be read. */
 export function zoneOffsetLabel(
 	timeZone: string,
-	now: Date = new Date()
+	now: Date = new Date(),
 ): string {
 	try {
 		const parts = new Intl.DateTimeFormat("en-US", {
@@ -115,7 +115,7 @@ function buildTimezoneOptions(at: number): TimezoneOption[] {
 		})
 		.sort(
 			(a, b) =>
-				a.offsetMinutes - b.offsetMinutes || a.value.localeCompare(b.value)
+				a.offsetMinutes - b.offsetMinutes || a.value.localeCompare(b.value),
 		);
 
 	return [
@@ -128,25 +128,24 @@ function buildTimezoneOptions(at: number): TimezoneOption[] {
 	];
 }
 
-const MS_PER_DAY = 86_400_000;
+const MS_PER_MINUTE = 60_000;
 
 let optionsCache: TimezoneOption[] | null = null;
-let optionsBuiltOnDay = -1;
+let optionsBuiltOnMinute = -1;
 
 /**
  * The picker's items — ~450 entries built once and reused, never per render.
  *
- * The cache is keyed by the UTC day because the offsets in the labels are not
- * constant: a desktop window left open across a DST transition would otherwise
- * show an hour-old offset for every zone that just shifted. Transitions always
- * land on a day boundary, so a day key catches every zone's, not just the
- * machine's, and still rebuilds at most once a day.
+ * Offset transitions can happen within a UTC day. Refresh once per minute so
+ * the next call after a minute boundary recomputes current offsets. Rerenders
+ * within the minute reuse the list; historical transitions
+ * with second precision can retain the earlier offset for the rest of that minute.
  */
 export function timezoneOptions(now: number = Date.now()): TimezoneOption[] {
-	const day = Math.floor(now / MS_PER_DAY);
-	if (!optionsCache || day !== optionsBuiltOnDay) {
+	const minute = Math.floor(now / MS_PER_MINUTE);
+	if (!optionsCache || minute !== optionsBuiltOnMinute) {
 		optionsCache = buildTimezoneOptions(now);
-		optionsBuiltOnDay = day;
+		optionsBuiltOnMinute = minute;
 	}
 	return optionsCache;
 }

@@ -1,0 +1,264 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+/* Private SVG paint belongs to the native lowest Tailwind layer.
+   Zero specificity does not claim detached serialization or universal cascade parity. */
+@layer theme {
+	:where(.eyesStarPaint) {
+		fill: #ffd34d;
+	}
+
+	:where(.eyesHeartPaint) {
+		fill: #ff3d6e;
+	}
+
+	:where(.eyesGlowPaint) {
+		fill: #ffe27a;
+	}
+
+	:where(.eyesGlowPaint2) {
+		fill: #fff6c4;
+	}
+
+	:where(.eyesPaint) {
+		fill: #fff;
+	}
+
+	:where(.mouthFangsPaint) {
+		fill: #fff;
+	}
+
+	:where(.mouthTonguePaint) {
+		fill: #ff6f9a;
+	}
+
+	:where(.earsCatPaint) {
+		fill: #ff9ec4;
+	}
+
+	:where(.earsBatPaint) {
+		fill: #2a1d3a;
+	}
+
+	:where(.earsBunnyPaint) {
+		fill: #ff9ec4;
+	}
+
+	:where(.earsHornsPaint) {
+		fill: #e0352b;
+	}
+
+	:where(.earsBoltsPaint) {
+		fill: #9aa3ad;
+	}
+
+	:where(.headwearWitchPaint) {
+		fill: #1d1430;
+	}
+
+	:where(.headwearWitchPaint2) {
+		fill: #ff8a2b;
+	}
+
+	:where(.headwearWitchPaint3) {
+		fill: #ffd34d;
+	}
+
+	:where(.headwearPumpkinPaint) {
+		fill: #ff8a2b;
+	}
+
+	:where(.headwearPumpkinPaint2) {
+		stroke: #d65a12;
+	}
+
+	:where(.headwearPumpkinPaint3) {
+		stroke: #3f6b2a;
+	}
+
+	:where(.headwearPumpkinPaint4) {
+		fill: #5aa62c;
+	}
+
+	:where(.headwearCrownPaint) {
+		fill: #ffd34d;
+	}
+
+	:where(.headwearCrownPaint2) {
+		fill: #ff3d6e;
+	}
+
+	:where(.headwearCrownPaint3) {
+		fill: #5cc6ff;
+	}
+
+	:where(.headwearTophatPaint) {
+		fill: #1d1430;
+	}
+
+	:where(.headwearTophatPaint2) {
+		fill: #a46bff;
+	}
+
+	:where(.headwearHaloPaint) {
+		stroke: #ffe27a;
+	}
+
+	:where(.headwearHaloPaint2) {
+		stroke: #ffd34d;
+	}
+
+	:where(.headwearPartyPaint) {
+		fill: #5cc6ff;
+	}
+
+	:where(.headwearPartyPaint2) {
+		stroke: #ffd34d;
+	}
+
+	:where(.headwearPartyPaint3) {
+		fill: #ff8a2b;
+	}
+
+	:where(.glassesRoundPaint) {
+		fill: rgb(255 255 255 / 0.18);
+	}
+
+	:where(.glassesStarPaint) {
+		fill: rgb(255 211 77 / 0.55);
+	}
+
+	:where(.glassesHeartPaint) {
+		fill: rgb(255 61 110 / 0.55);
+	}
+
+	:where(.glassesMonoclePaint) {
+		fill: rgb(255 255 255 / 0.2);
+		stroke: #c99a2e;
+	}
+
+	:where(.glassesMonoclePaint2) {
+		stroke: #c99a2e;
+	}
+
+	:where(.glassesThreeDPaint) {
+		fill: #1d1430;
+	}
+
+	:where(.glassesThreeDPaint2) {
+		fill: #ff3d4d;
+	}
+
+	:where(.glassesThreeDPaint3) {
+		fill: #3db8ff;
+	}
+
+	:where(.glassesShadesPaint) {
+		fill: #120a1c;
+	}
+
+	:where(.glassesShadesPaint2) {
+		stroke: #fff;
+	}
+
+	:where(.behindPaint) {
+		fill: #1d1430;
+	}
+
+	:where(.behindPaint2) {
+		fill: #c2342a;
+	}
+
+	:where(.frontBowtiePaint) {
+		fill: #ff8a2b;
+	}
+
+	:where(.frontBowtiePaint2) {
+		fill: #d65a12;
+	}
+
+	:where(.frontScarfPaint) {
+		fill: #a46bff;
+	}
+
+	:where(.frontScarfPaint2) {
+		stroke: #ffd34d;
+	}
+
+	:where(.frontBucketPaint) {
+		fill: #ff8a2b;
+	}
+
+	:where(.frontBucketPaint2) {
+		fill: #ffd34d;
+	}
+
+	:where(.frontBucketPaint3) {
+		fill: #ff3d6e;
+	}
+
+	:where(.frontBucketPaint4) {
+		fill: #5cc6ff;
+	}
+
+	:where(.frontWandPaint) {
+		stroke: #3a2213;
+	}
+
+	:where(.frontWandPaint2) {
+		fill: #ffd34d;
+	}
+
+	:where(.frontWandPaint3) {
+		fill: #fff6c4;
+	}
+
+	:where(.frontLanternPaint) {
+		fill: #2a2420;
+	}
+
+	:where(.frontLanternPaint2) {
+		fill: #ffb340;
+	}
+
+	:where(.frontLanternPaint3) {
+		fill: #fff1c9;
+	}
+
+	:where(.patternMummyPaint) {
+		fill: #efe6d2;
+		stroke: #b9a98a;
+	}
+
+	:where(.patternSkeletonPaint) {
+		fill: #f2e8d5;
+	}
+
+	:where(.patternWebPaint) {
+		stroke: #f2e8d5;
+	}
+
+	:where(.bodyPaint) {
+		stop-color: #ffb3d9;
+	}
+
+	:where(.bodyPaint2) {
+		stop-color: #a9dcff;
+	}
+
+	:where(.bodyPaint3) {
+		stop-color: #d4ff8a;
+	}
+
+	:where(.bodyPaint4) {
+		stop-color: #c9a8ff;
+	}
+
+	:where(.bodyPaint5) {
+		fill: #fff;
+	}
+
+	:where(.bodyPaint6) {
+		stroke: #fff;
+	}
+}

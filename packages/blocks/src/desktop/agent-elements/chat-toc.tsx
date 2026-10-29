@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
 	HoverCardContent,
@@ -9,6 +10,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { motion, useReducedMotion } from "motion/react";
 import { memo, type ReactNode, useEffect, useState } from "react";
 import { FileTypeIcon } from "./file-type-icon.tsx";
+import type { TranscriptScrollEvent } from "./utils/transcript-scroll-event.ts";
 
 export interface ChatTocFileChange {
 	/** Basename or relative path shown in the popover. */
@@ -73,14 +75,14 @@ export const ChatToc = memo(function ChatToc({
 	onScrollToMessage?: (messageId: string) => void;
 	className?: string;
 }) {
+	const tl = useLiteralMessages();
 	const [hoveredIndex, setHoveredIndex] = useState(NO_HOVER);
 	const reduceMotion = useReducedMotion();
 
 	// Sidebar / deep-link jump: ChatPage dispatches this once messages hydrate.
 	useEffect(() => {
-		const onJump = (event: Event) => {
-			const messageId = (event as CustomEvent<{ messageId?: string }>).detail
-				?.messageId;
+		const onJump = (event: TranscriptScrollEvent) => {
+			const messageId = event.detail?.messageId;
 			if (messageId) {
 				onScrollToMessage?.(messageId);
 			}
@@ -112,8 +114,8 @@ export const ChatToc = memo(function ChatToc({
 				return (
 					<HoverCard key={item.id}>
 						<HoverCardTrigger
+							appearance="chat-navigation"
 							aria-current={isActive ? "true" : undefined}
-							className="group/toc-item relative flex h-6 cursor-pointer items-center gap-2 py-1 text-left"
 							closeDelay={0}
 							delay={0}
 							onBlur={() => setHoveredIndex(NO_HOVER)}
@@ -131,15 +133,16 @@ export const ChatToc = memo(function ChatToc({
 										: { type: "spring", stiffness: 200, damping: 20 }
 								}
 							/>
-							<span className="max-w-[220px] truncate whitespace-nowrap text-muted-foreground text-xs opacity-0 transition-opacity duration-200 group-hover/toc-item:text-foreground group-hover/toc:opacity-100 group-aria-[current=true]/toc-item:text-foreground">
+							<span className="max-w-[220px] truncate whitespace-nowrap text-muted-foreground text-xs opacity-0 transition-opacity duration-200 group-hover/toc-item:text-foreground group-hover/toc:opacity-100 group-has-focus-visible/toc:opacity-100 group-aria-[current=true]/toc-item:text-foreground">
 								{item.title}
 							</span>
 						</HoverCardTrigger>
 						<HoverCardContent
 							align="start"
-							className="w-72 max-w-[min(18rem,calc(100vw-2rem))] p-3"
+							className="w-72 max-w-[min(18rem,calc(100vw-2rem))]"
 							side="right"
 							sideOffset={10}
+							spacing="rail"
 						>
 							<div className="flex flex-col gap-2">
 								<p className="font-medium text-sm leading-snug">{item.title}</p>
@@ -152,7 +155,7 @@ export const ChatToc = memo(function ChatToc({
 										) : null}
 										<div className="min-w-0 flex-1">
 											{item.agentName ? (
-												<p className="mb-0.5 text-[11px] text-muted-foreground">
+												<p className="type-caption mb-0.5 text-muted-foreground">
 													{item.agentName}
 												</p>
 											) : null}
@@ -166,7 +169,7 @@ export const ChatToc = memo(function ChatToc({
 								)}
 								{item.files && item.files.length > 0 ? (
 									<div className="border-border/60 border-t pt-2">
-										<p className="mb-1.5 text-[11px] text-muted-foreground">
+										<p className="type-caption mb-1.5 text-muted-foreground">
 											Files changed
 										</p>
 										<ul className="flex flex-col gap-1">
@@ -175,7 +178,7 @@ export const ChatToc = memo(function ChatToc({
 													className="flex min-w-0 items-baseline justify-between gap-2 text-xs"
 													key={file.name}
 												>
-													<span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-[11px]">
+													<span className="type-caption flex min-w-0 items-center gap-1.5 truncate font-mono">
 														<FileTypeIcon
 															className="size-3.5"
 															path={file.name}
@@ -183,7 +186,7 @@ export const ChatToc = memo(function ChatToc({
 														{file.name}
 													</span>
 													{file.stats ? (
-														<span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+														<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
 															{file.stats}
 														</span>
 													) : null}
@@ -191,8 +194,10 @@ export const ChatToc = memo(function ChatToc({
 											))}
 										</ul>
 										{extraFiles > 0 ? (
-											<p className="mt-1 text-[10px] text-muted-foreground">
-												+{extraFiles} more
+											<p className="type-compact mt-1 text-muted-foreground">
+												{tl("+{extraFiles} more", {
+													extraFiles: String(extraFiles),
+												})}
 											</p>
 										) : null}
 									</div>

@@ -51,6 +51,14 @@ function bundle(): RnpContinuityBundleV0 {
 	};
 }
 
+function firstItem<T>(items: readonly T[]) {
+	const item = items[0];
+	if (item === undefined) {
+		throw new Error("Expected a complete continuity fixture item");
+	}
+	return item;
+}
+
 describe("RNP continuity bundle", () => {
 	it("round-trips a bounded v0 bundle", () => {
 		const value = bundle();
@@ -85,7 +93,7 @@ describe("RNP continuity bundle", () => {
 	it("measures Unicode payload limits in UTF-8 bytes", () => {
 		const oversized = bundle();
 		oversized.messages[0] = {
-			...oversized.messages[0],
+			...firstItem(oversized.messages),
 			text: "🙂".repeat(RNP_CONTINUITY_LIMITS.maxMessageBytes / 4 + 1),
 		};
 		expect(parseRnpContinuityBundle(oversized)).toMatchObject({
@@ -96,7 +104,7 @@ describe("RNP continuity bundle", () => {
 
 	it("rejects duplicate message and context ids", () => {
 		const duplicateMessage = bundle();
-		duplicateMessage.messages.push({ ...duplicateMessage.messages[0] });
+		duplicateMessage.messages.push({ ...firstItem(duplicateMessage.messages) });
 		expect(parseRnpContinuityBundle(duplicateMessage)).toMatchObject({
 			ok: false,
 			error: { path: "messages[2].sourceId" },
@@ -104,12 +112,15 @@ describe("RNP continuity bundle", () => {
 
 		expect(() =>
 			createRnpContextBundle({
-				items: [bundle().context.items[0], bundle().context.items[0]],
+				items: [
+					firstItem(bundle().context.items),
+					firstItem(bundle().context.items),
+				],
 			})
 		).toThrow("Context ids must be unique");
 
 		const reservedMessageId = bundle();
-		reservedMessageId.messages[0].sourceId = "rnp-context-reserved";
+		firstItem(reservedMessageId.messages).sourceId = "rnp-context-reserved";
 		expect(parseRnpContinuityBundle(reservedMessageId).ok).toBe(false);
 	});
 });
@@ -137,11 +148,76 @@ describe("RNP node routing", () => {
 		const nodes = [{ name: "studio", url: "https://node.example.com/" }];
 		expect(resolveRnpNode("https://node.example.com", nodes)).toEqual({
 			kind: "ready",
-			node: nodes[0],
+			node: firstItem(nodes),
 		});
 		expect(resolveRnpNode("https://unknown.example.com", nodes)).toEqual({
 			kind: "blocked",
 			reason: "node-not-configured",
 		});
+	});
+});
+
+describe("ordered continuity failure and projection contracts", () => {
+	it("reports a duplicate before a later malformed message", () => {
+		const value = bundle();
+		const first = firstItem(value.messages);
+		expect(
+			parseRnpContinuityBundle({ ...value, messages: [first, first, {}] })
+		).toEqual({
+			ok: false,
+			error: {
+				code: "invalid-shape",
+				message: "Message ids must be unique",
+				path: "messages[1].sourceId",
+			},
+		});
+	});
+	it("checks array count before malformed rows and reports the full context path", () => {
+		expect(
+			parseRnpContinuityBundle({
+				...bundle(),
+				messages: Array.from({ length: 201 }, () => ({})),
+			})
+		).toEqual({
+			ok: false,
+			error: {
+				code: "limit-exceeded",
+				message: "Too many messages",
+				path: "messages",
+			},
+		});
+		expect(
+			parseRnpContinuityBundle({
+				...bundle(),
+				context: { version: 0, items: [{ kind: "wrong" }] },
+			})
+		).toEqual({
+			ok: false,
+			error: {
+				code: "invalid-shape",
+				message: "Expected a text context item",
+				path: "context.items[0]",
+			},
+		});
+	});
+	it("retains inherited fields and omits absent optional source properties", () => {
+		const value = bundle();
+		const source = Object.assign(
+			Object.create({ conversationId: value.source.conversationId }),
+			{ updatedAt: value.source.updatedAt }
+		);
+		const parsed = parseRnpContinuityBundle({ ...value, source });
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) {
+			throw new Error(parsed.error.message);
+		}
+		expect(parsed.value.source).toEqual({
+			conversationId: value.source.conversationId,
+			updatedAt: value.source.updatedAt,
+		});
+		expect(Object.keys(parsed.value.source)).toEqual([
+			"conversationId",
+			"updatedAt",
+		]);
 	});
 });

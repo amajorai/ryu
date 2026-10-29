@@ -33,16 +33,26 @@
 //! *what is allowed/measured/paid*, so Spaces belong in Core. This mirrors the
 //! U10 `ConversationStore` shape exactly.
 //!
-//! Encryption-at-rest direction: when `RYU_SPACES_KEY` is set we issue a
-//! `PRAGMA key`. On a stock (non-SQLCipher) SQLite build this pragma is silently
-//! ignored, so it compiles and runs cleanly today; flipping rusqlite to
-//! `bundled-sqlcipher` later turns it into real at-rest encryption with no code
-//! change. We also restrict the db file permissions on Unix. See `apply_encryption`.
+//! Encryption at rest: free text (chunk text and chunk metadata included) and
+//! embeddings are sealed per value under the `spaces.db` content key and blob
+//! files are sealed `RYU-SF01` files; equality lookups use blind tokens and body
+//! search a blind term index. See [`seal`] for the formats and the SQL
+//! functions every statement uses to reach the cipher.
 
+mod database_formula;
+mod database_query;
 mod history;
+mod retrieval;
+mod seal;
+
+use retrieval::{embed_text_chunks, EmbeddedChunk};
+pub use retrieval::{ParentExpansion, SpaceSearchOptions, MAX_SEARCH_QUERIES};
 
 #[cfg(test)]
 mod version_history_tests;
+
+#[cfg(test)]
+mod seal_tests;
 
 pub mod backup;
 
@@ -64,6 +74,8 @@ use tokio::sync::Mutex;
 // Space's markdown pages get the same real semantic embeddings (the local
 // `llamacpp-embed` nomic server by default) the retrieval store uses, and a
 // single swap changes the model everywhere.
+use ryu_crypto::content_sqlite::{self, StoreKeyState};
+use ryu_crypto::{ContentContext, VectorIndex};
 use ryu_kernel_contracts::ResourceKey;
 use ryu_rag::{Embedder, Reranker};
 use ryu_workspace::source_history::{SourceHistory, SourceHistoryVersion};
@@ -90,11 +102,18 @@ pub fn set_source_history_root(root: PathBuf) {
 }
 
 fn source_history() -> SourceHistory {
-    let root = SOURCE_HISTORY_ROOT
-        .get()
-        .cloned()
-        .or_else(|| std::env::var_os("RYU_DIR").map(PathBuf::from))
-        .unwrap_or_else(|| std::env::temp_dir().join("ryu-spaces"));
+    let root = SOURCE_HISTORY_ROOT.get().cloned().unwrap_or_else(|| {
+        if cfg!(test) {
+            // Per process: the history is sealed under this process's master
+            // key, and a test run with a fresh RYU_DIR has a different one.
+            std::env::temp_dir().join(format!("ryu-spaces-{}", std::process::id()))
+        } else {
+            ryu_sidecar_runtime::layout::files_path(
+                &ryu_sidecar_runtime::ryu_dir(),
+                "source-history",
+            )
+        }
+    });
     SourceHistory::new(root)
 }
 
@@ -440,14 +459,17 @@ pub const UPLOADS_SPACE_NAME: &str = "Uploads";
 
 /// Document visibility filter — the SQL twin of `resource_access` for the
 /// `documents` table (alias `d`). Mirrors `conversations.rs::TENANCY_VISIBLE_PREDICATE`:
-///   - `:bound = 0` (node UNBOUND / personal): no restriction — one principal, the
-///     node token is the boundary. Byte-identical to the pre-ACL behaviour.
+///   - `:bound = 0` (node UNBOUND, the single local principal): no restriction.
+///     Byte-identical to the pre-ACL behaviour.
+///   - `:bound = 2` (node UNBOUND, see [`DocFilter::restricted_when_unbound`]):
+///     untenanted legacy rows plus the caller's own and shared rows.
 ///   - node ORG-BOUND: a document is visible iff the caller OWNS it, or it is
 ///     explicitly shared (`visibility` in `org`/`team`) within the caller's org. An
 ///     untenanted (NULL-owner) document is INVISIBLE on a bound node — matching the
 ///     by-id ACL's fail-closed reading of an unattributable legacy row.
 const DOC_TENANCY_VISIBLE_PREDICATE: &str = "(
         :bound = 0
+        OR (:bound = 2 AND d.owner_user_id IS NULL AND d.org_id IS NULL)
         OR (:uid IS NOT NULL AND d.owner_user_id = :uid)
         OR (:uid IS NOT NULL AND :org IS NOT NULL AND d.org_id = :org
             AND (d.visibility = 'org'
@@ -475,6 +497,7 @@ const DOC_TENANCY_VISIBLE_PREDICATE: &str = "(
 const SPACE_TENANCY_VISIBLE_PREDICATE: &str = "(
         s.system = 1
         OR :bound = 0
+        OR (:bound = 2 AND s.owner_user_id IS NULL AND s.org_id IS NULL)
         OR (:uid IS NOT NULL AND s.owner_user_id = :uid)
         OR (:uid IS NOT NULL AND :org IS NOT NULL AND s.org_id = :org
             AND (s.visibility = 'org'
@@ -496,6 +519,10 @@ pub struct DocFilter<'a> {
     /// All verified team memberships, encoded once for SQLite's `json_each`.
     /// Owning this value avoids order-dependent authorization for multi-team users.
     team_ids_json: String,
+    /// On an UNBOUND node, whether the caller is narrower than the node's single
+    /// local principal (a verified user, or an anonymous remote request). Ignored
+    /// on a bound node. See [`Self::restricted_when_unbound`].
+    restricted_when_unbound: bool,
 }
 
 impl<'a> DocFilter<'a> {
@@ -507,6 +534,7 @@ impl<'a> DocFilter<'a> {
             owner_user_id: None,
             org_id: None,
             team_ids_json: "[]".to_owned(),
+            restricted_when_unbound: false,
         }
     }
 
@@ -545,11 +573,30 @@ impl<'a> DocFilter<'a> {
             org_id,
             team_ids_json: serde_json::to_string(team_ids)
                 .expect("serializing verified team ids cannot fail"),
+            restricted_when_unbound: false,
         }
     }
 
+    /// Narrow an UNBOUND-node filter from the single local principal's full view
+    /// to untenanted legacy rows plus the rows this caller owns or was shared.
+    /// Core applies it to verified callers and to anonymous remote requests, the
+    /// same boundary its by-id ACL and realtime gateway draw.
+    #[must_use]
+    pub fn restricted_when_unbound(mut self) -> Self {
+        self.restricted_when_unbound = true;
+        self
+    }
+
+    /// `:bound` for the tenancy predicates: `1` bound, `0` unbound full view, `2`
+    /// unbound restricted view.
     fn bound_flag(&self) -> i64 {
-        i64::from(self.node_bound)
+        if self.node_bound {
+            1
+        } else if self.restricted_when_unbound {
+            2
+        } else {
+            0
+        }
     }
 }
 
@@ -643,9 +690,11 @@ fn upsert_document_row(
     let (owner_user_id, org_id) = tenancy.parts();
     conn.execute(
         "INSERT INTO documents
-            (id, space_id, title, created_at, source, updated_at, kind, parent_id,
+            (id, space_id, title, title_bi, created_at, source, updated_at, kind, parent_id,
              mime, blob_sha256, byte_size, owner_user_id, org_id)
-         VALUES (:id, :space_id, :title, :now, :source, :now, :kind, :parent_id,
+         VALUES (:id, :space_id, ryu_seal('documents.title', :id, :title),
+             ryu_bi('documents.title', :title), :now,
+             ryu_seal('documents.source', :id, :source), :now, :kind, :parent_id,
              :mime, :blob_sha256, :byte_size, :owner, :org)
          ON CONFLICT(id) DO UPDATE SET
              owner_user_id = COALESCE(documents.owner_user_id, excluded.owner_user_id),
@@ -711,10 +760,11 @@ fn upsert_space_row_with_visibility(
     let (owner_user_id, org_id) = tenancy.parts();
     conn.execute(
         "INSERT INTO spaces
-            (id, name, description, created_at, updated_at, retrieval_mode, system,
+            (id, name, name_bi, description, created_at, updated_at, retrieval_mode, system,
              owner_user_id, org_id, visibility, team_id)
-         VALUES (:id, :name, :description, :now, :now, :mode, :system, :owner, :org,
-                 :visibility, :team_id)
+         VALUES (:id, ryu_seal('spaces.name', :id, :name), ryu_bi('spaces.name', :name),
+                 ryu_seal('spaces.description', :id, :description), :now, :now, :mode,
+                 :system, :owner, :org, :visibility, :team_id)
          ON CONFLICT(id) DO UPDATE SET
              owner_user_id = COALESCE(spaces.owner_user_id, excluded.owner_user_id),
              org_id        = COALESCE(spaces.org_id, excluded.org_id)",
@@ -747,7 +797,7 @@ fn upsert_space_row_with_visibility(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalMode {
-    /// Cosine KNN over the `chunk_vectors` vec0 table (default, unchanged).
+    /// Cosine KNN over the Space's sealed embeddings, scored in memory (default).
     #[default]
     Vector,
     /// Entity/relation graph traversal over the `graph_nodes`/`graph_edges` tables.
@@ -1241,6 +1291,21 @@ pub struct EmbeddingModelInfo {
     pub dims: usize,
 }
 
+/// One vector returned by the active Space embedder, in request order.
+#[derive(Debug, Clone, Serialize)]
+pub struct EmbeddedText {
+    pub index: usize,
+    pub embedding: Vec<f32>,
+}
+
+/// A batch of text vectors produced by one active embedding-model snapshot.
+#[derive(Debug, Clone, Serialize)]
+pub struct EmbeddingBatch {
+    pub model_id: String,
+    pub dims: usize,
+    pub embeddings: Vec<EmbeddedText>,
+}
+
 /// Progress/state of a background re-index pass.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReindexStatus {
@@ -1279,15 +1344,29 @@ pub struct EmbeddingModelPref {
 pub const EMBEDDING_MODEL_PREF_KEY: &str = "embedding-model";
 
 /// A single chunk returned from a similarity search (used by U17 retrieval).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChunkMatch {
     pub chunk_id: String,
     pub document_id: String,
     pub content: String,
-    /// Squared L2 distance from the query vector (smaller is closer).
+    /// Cosine distance from the query vector (`1 - cosine similarity`; smaller
+    /// is closer). Term-index fallback and link-expanded hits use `1.0`.
     /// For graph-mode results this is set to a synthetic value of `0.0`
-    /// (exact match via graph traversal — distance is not meaningful).
+    /// (exact match via graph traversal — distance is not meaningful), and so it
+    /// is for keyword-only hits of a hybrid search.
     pub distance: f32,
+    /// Fusion score (higher is better) when the result came from hybrid or
+    /// multi-query fusion, or a bounded BM25 relevance for a keyword hit.
+    /// Comparable only within one result set. Absent for plain searches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+    /// The chunk's splitter metadata (`index`, `token_count`, `header_path`)
+    /// plus its `ordinal` in the document. Filled by `search_with`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// The widened context when a `parent` expansion was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_content: Option<String>,
 }
 
 // ── Embedder ───────────────────────────────────────────────────────────────────
@@ -1556,7 +1635,7 @@ fn store_doc_links(
         let dst_doc_id: Option<String> = conn
             .query_row(
                 "SELECT id FROM documents
-                 WHERE space_id = ?1 AND title = ?2 COLLATE NOCASE AND id != ?3
+                 WHERE space_id = ?1 AND title_bi = ryu_bi('documents.title', ?2) AND id != ?3
                  LIMIT 1",
                 params![space_id, link.title, src_doc_id],
                 |row| row.get(0),
@@ -1566,8 +1645,10 @@ fn store_doc_links(
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO document_links
-                 (id, space_id, src_doc_id, dst_doc_id, dst_title, link_kind, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 (id, space_id, src_doc_id, dst_doc_id, dst_title, dst_title_bi, link_kind,
+                  created_at)
+             VALUES (?1, ?2, ?3, ?4, ryu_seal('document_links.dst_title', ?1, ?5),
+                     ryu_bi('document_links.dst_title', ?5), ?6, ?7)",
             params![id, space_id, src_doc_id, dst_doc_id, link.title, link.kind, now],
         )
         .context("inserting document link")?;
@@ -1586,7 +1667,8 @@ fn reresolve_pending_links(
 ) -> Result<()> {
     conn.execute(
         "UPDATE document_links SET dst_doc_id = ?1
-         WHERE space_id = ?2 AND dst_doc_id IS NULL AND dst_title = ?3 COLLATE NOCASE",
+         WHERE space_id = ?2 AND dst_doc_id IS NULL
+           AND dst_title_bi = ryu_bi('document_links.dst_title', ?3)",
         params![doc_id, space_id, doc_title],
     )
     .context("re-resolving pending links")?;
@@ -1645,8 +1727,8 @@ pub struct SpaceStore {
     /// swapped at runtime; cloned (cheap) for each embed call so the lock is never
     /// held across network I/O.
     embedder: Arc<Mutex<Embedder>>,
-    /// Current width of the `chunk_vectors` vec0 table. Equals the active
-    /// embedder's dims; updated when a model change recreates the table.
+    /// Width of the indexed vectors. Equals the active embedder's dims; updated
+    /// when a model change re-embeds the store.
     vec_dims: Arc<AtomicUsize>,
     /// Validated graph extractor. Unsupported configured ids fail store creation,
     /// so this value always names the algorithm that writes and queries graph rows.
@@ -1665,7 +1747,108 @@ pub struct SpaceStore {
     /// Retrieval-mode rebuild coordination. This is a std mutex because the
     /// worker updates progress from `spawn_blocking` at chunk boundaries.
     retrieval_mode: Arc<StdMutex<RetrievalModeInner>>,
+    /// Content sealing: keys, writability (a store sealed under a key this
+    /// process does not hold refuses writes), unreadable-row counter, migration
+    /// progress. The same state backs the SQL sealing functions.
+    seal: seal::SealState,
+    /// On-disk database path (`None` for the in-memory store), for the
+    /// background migration's own connection.
+    db_path: Option<PathBuf>,
+    /// The decrypted vectors, one partition per Space, under the process-wide
+    /// vector budget (least-recently-used partitions are evicted).
+    vectors: VectorIndex,
+    /// Per Space: what its in-memory partition reflects (see
+    /// [`PartitionState`]). Shared with the connection's `ryu_vec_tracked`
+    /// function, which decides which writes the vector journal records.
+    vector_state: VectorStates,
+    /// Spaces whose partition is being hydrated in the background.
+    hydrating: Arc<StdMutex<std::collections::HashSet<String>>>,
+    /// Hands out the token of each full hydration.
+    hydration_token: Arc<std::sync::atomic::AtomicU64>,
+    /// Full hydrations started (every sealed vector of a partition read and
+    /// opened); writes are applied from the journal instead.
+    full_hydrations: Arc<std::sync::atomic::AtomicU64>,
 }
+
+/// The [`PartitionState`] of every Space with one.
+type VectorStates = Arc<StdMutex<HashMap<String, PartitionState>>>;
+
+/// What one Space's in-memory vector partition reflects.
+///
+/// Every write to `chunk_embeddings` bumps the Space's `space_vector_gen` (a
+/// persistent trigger), and, while the Space is `Ready` or `Hydrating`, also
+/// records the chunk id in this connection's TEMP `space_vector_journal`
+/// ([`SpaceStore::install_vector_journal`]). A search applies the journal to
+/// the partition (opening only the vectors written since) when the journal
+/// accounts for every generation bump; anything else (a write from another
+/// connection, a journal lost to a temp-store change, an evicted partition)
+/// reloads the whole partition.
+///
+/// The journal lives in process memory, so it is bounded: the write that
+/// takes a Space past [`VECTOR_JOURNAL_APPLY_MAX`] journaled entries (more
+/// than a search would apply) drops the Space's state and its journal, and
+/// an evicted partition's journal is dropped by the next search on any Space
+/// ([`SpaceStore::retire_evicted_partitions`]). Either way the next search on
+/// it reloads it once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PartitionState {
+    /// Hydrated at `gen` for `model`/`dims`; `journaled` writes since.
+    Ready {
+        gen: i64,
+        model: String,
+        dims: usize,
+        journaled: usize,
+    },
+    /// Full hydration `token` read the rows at `gen` and is opening them;
+    /// `journaled` writes since.
+    Hydrating {
+        token: u64,
+        gen: i64,
+        model: String,
+        dims: usize,
+        journaled: usize,
+    },
+    /// `total` vectors of `model`/`dims` did not fit in the whole vector
+    /// budget: served by the term index, without opening the vectors again,
+    /// until the partition has fewer vectors than that.
+    Refused {
+        model: String,
+        dims: usize,
+        total: i64,
+    },
+}
+
+impl PartitionState {
+    /// Whether writes to this Space are journaled.
+    fn tracked(&self) -> bool {
+        matches!(self, Self::Ready { .. } | Self::Hydrating { .. })
+    }
+}
+
+/// Count one write to `space_id` against its journal. Returns whether the
+/// write was tracked (the journal trigger fires). The write that overflows
+/// [`VECTOR_JOURNAL_APPLY_MAX`] drops the Space's state, so the trigger's
+/// purge statement then deletes its journal and later writes are not
+/// journaled until a full reload.
+fn count_journaled_write(states: &mut HashMap<String, PartitionState>, space_id: &str) -> bool {
+    let overflowed = match states.get_mut(space_id) {
+        Some(
+            PartitionState::Ready { journaled, .. } | PartitionState::Hydrating { journaled, .. },
+        ) => {
+            *journaled += 1;
+            *journaled > VECTOR_JOURNAL_APPLY_MAX
+        }
+        _ => return false,
+    };
+    if overflowed {
+        states.remove(space_id);
+    }
+    true
+}
+
+/// The most journaled writes a search applies to a partition; more than that
+/// reload it (on a blocking thread, or in the background when large).
+const VECTOR_JOURNAL_APPLY_MAX: usize = 4_096;
 
 /// Internal re-index run state.
 #[derive(Default)]
@@ -1710,61 +1893,45 @@ impl Drop for DirectRetrievalModeGuard {
     }
 }
 
+/// History label for a local body kept aside by a cross-device sync conflict.
+pub const SYNC_CONFLICT_LABEL: &str = "Kept from this device before a sync from another device";
+
+/// `document_versions.capture_type` of a version kept by a sync conflict.
+pub const SYNC_CONFLICT_CAPTURE_TYPE: &str = "sync_conflict";
+
+/// The local state of a document an incoming sync snapshot is about to replace.
+struct LocalSyncedDocument {
+    updated_at: i64,
+    sync_base_updated_at: Option<i64>,
+    title: String,
+    source: String,
+    kind: String,
+    space_id: String,
+    revision: i64,
+    updated_by: Option<String>,
+}
+
+impl LocalSyncedDocument {
+    /// Whether replacing this row with `incoming` would drop work: the row was
+    /// edited here since the last snapshot it received from another device, and
+    /// the incoming body is different.
+    fn has_unsynced_edits_diverging_from(&self, incoming: &DocumentContent) -> bool {
+        let edited_locally = self.sync_base_updated_at != Some(self.updated_at);
+        edited_locally && (self.source != incoming.source || self.title != incoming.title)
+    }
+}
+
 fn now_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// On-disk path for a blob given its lowercase hex sha256 (`blobs/ab/abcd…`),
-/// under the store's injected `blob_root`. Sharded by the first two hex chars of
-/// the sha256 so a single directory never holds unbounded entries.
-fn blob_path(blob_root: &Path, sha256: &str) -> PathBuf {
-    let shard = sha256.get(0..2).unwrap_or("00");
-    blob_root.join(shard).join(sha256)
-}
-
-/// Lowercase hex sha256 of `bytes`.
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    let mut out = String::with_capacity(digest.len() * 2);
-    for b in digest {
-        out.push_str(&format!("{b:02x}"));
-    }
-    out
-}
-
-/// Write `bytes` into the content-addressed blob store under `blob_root` and
-/// return its sha256. Content-addressed, so writing identical bytes twice is a
-/// no-op (dedupe).
-fn write_blob(blob_root: &Path, bytes: &[u8]) -> Result<String> {
-    let sha = sha256_hex(bytes);
-    let path = blob_path(blob_root, &sha);
-    if path.exists() {
-        return Ok(sha);
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating blob dir {}", parent.display()))?;
-    }
-    // Write to a temp sibling then rename so a reader never sees a partial blob.
-    let tmp = path.with_extension("part");
-    std::fs::write(&tmp, bytes).with_context(|| format!("writing blob {sha}"))?;
-    std::fs::rename(&tmp, &path).with_context(|| format!("finalizing blob {sha}"))?;
-    Ok(sha)
-}
-
-/// Read a blob's bytes back by its sha256 under `blob_root`. Returns `Ok(None)`
-/// when absent.
-fn read_blob(blob_root: &Path, sha256: &str) -> Result<Option<Vec<u8>>> {
-    let path = blob_path(blob_root, sha256);
-    match std::fs::read(&path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("reading blob {sha256}")),
-    }
-}
+#[cfg(test)]
+pub(crate) use seal::sha256_hex;
+pub(crate) use seal::{blob_path, embedding_context, vec_to_bytes};
+pub use seal::{
+    decrypt_blob_to_path, open_blob, read_blob_at, seal_legacy_blobs, BlobReader, BlobSweepReport,
+    SealStatus, SpacesKeys, BLOB_STORE, SPACES_STORE,
+};
 
 impl SpaceStore {
     /// Open (or create) the store at `path` with a fully-resolved embedder,
@@ -1786,14 +1953,56 @@ impl SpaceStore {
         blob_root: PathBuf,
         backfill_owner: Option<(String, String)>,
     ) -> Result<Self> {
+        // Validate the extractor before resolving keys or touching the disk.
+        GraphExtractionModel::parse(&graph_extraction_model)?;
+        let keys = SpacesKeys::resolve()?;
+        let store = Self::open_at_with_keys(
+            path,
+            embedder,
+            embed_dims,
+            graph_extraction_model,
+            reranker,
+            blob_root,
+            backfill_owner,
+            keys,
+        )?;
+        store.start_background_migration();
+        Ok(store)
+    }
+
+    /// [`Self::open_at`] under explicit keys (tests), without starting the
+    /// background migration (call [`Self::migrate_now`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_at_with_keys(
+        path: PathBuf,
+        embedder: Embedder,
+        embed_dims: usize,
+        graph_extraction_model: String,
+        reranker: Reranker,
+        blob_root: PathBuf,
+        backfill_owner: Option<(String, String)>,
+        keys: SpacesKeys,
+    ) -> Result<Self> {
         let graph_extraction_model = GraphExtractionModel::parse(&graph_extraction_model)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating db dir {}", parent.display()))?;
         }
         let conn = open_vec_connection(&path)?;
-        apply_encryption(&conn, Some(&path))?;
+        restrict_db_permissions(&path);
+        let seal = Self::prepare_sealed_connection(&conn, Some(&path), keys)?;
+        // Too large to compact while Core boots: compacted in the background.
+        let compaction_owed = matches!(Self::migration_finished(&conn), Ok(true))
+            && content_sqlite::compaction_owed(&conn, SPACES_STORE).unwrap_or(false);
         Self::init_schema(&conn, embed_dims)?;
+        let vector_state = VectorStates::default();
+        Self::register_vector_journal(&conn, &vector_state)?;
+        // A graph rebuild interrupted by a crash leaves its staging tables.
+        cleanup_retrieval_staging(&conn)?;
+        // So does an embedding reindex that failed or was interrupted. No reindex
+        // can be running before the store is open.
+        drop_embedding_reindex_staging(&conn)?;
+        Self::reconcile_blind_generation(&conn, &seal)?;
         // One-shot tenancy backfill for spaces/documents that pre-date the ACL.
         // Deliberately NOT in `init_schema` (the in-memory test store runs that and
         // must never read the real account vault) and best-effort: a failure here
@@ -1801,8 +2010,12 @@ impl SpaceStore {
         if let Err(e) = Self::backfill_tenancy(&conn, backfill_owner) {
             tracing::warn!("spaces tenancy backfill skipped: {e:#}");
         }
+        let conn = Arc::new(Mutex::new(conn));
+        if compaction_owed {
+            Self::defer_compaction(&conn, path.clone());
+        }
         Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
+            conn,
             embedder: Arc::new(Mutex::new(embedder)),
             vec_dims: Arc::new(AtomicUsize::new(embed_dims)),
             graph_extraction_model,
@@ -1810,6 +2023,13 @@ impl SpaceStore {
             blob_root,
             reindex: Arc::new(Mutex::new(ReindexInner::default())),
             retrieval_mode: Arc::new(StdMutex::new(RetrievalModeInner::default())),
+            seal,
+            db_path: Some(path),
+            vectors: VectorIndex::new(SPACES_STORE),
+            vector_state,
+            hydrating: Arc::new(StdMutex::new(std::collections::HashSet::new())),
+            hydration_token: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            full_hydrations: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 
@@ -1819,9 +2039,18 @@ impl SpaceStore {
     /// crate boundary, where this crate is compiled without `--cfg test`. Uses a
     /// per-store temp blob root so file-document tests never touch `~/.ryu`.
     pub fn open_in_memory() -> Result<Self> {
+        Self::open_in_memory_with_keys(SpacesKeys::resolve()?)
+    }
+
+    /// [`Self::open_in_memory`] under explicit keys (tests).
+    pub fn open_in_memory_with_keys(keys: SpacesKeys) -> Result<Self> {
         let dims = DEFAULT_EMBED_DIMS;
         let conn = open_vec_connection(std::path::Path::new(":memory:"))?;
+        let seal = Self::prepare_sealed_connection(&conn, None, keys)?;
         Self::init_schema(&conn, dims)?;
+        let vector_state = VectorStates::default();
+        Self::register_vector_journal(&conn, &vector_state)?;
+        Self::reconcile_blind_generation(&conn, &seal)?;
         let blob_root =
             std::env::temp_dir().join(format!("ryu-spaces-mem-{}", uuid::Uuid::new_v4()));
         Ok(Self {
@@ -1835,7 +2064,653 @@ impl SpaceStore {
             blob_root,
             reindex: Arc::new(Mutex::new(ReindexInner::default())),
             retrieval_mode: Arc::new(StdMutex::new(RetrievalModeInner::default())),
+            seal,
+            db_path: None,
+            vectors: VectorIndex::new(SPACES_STORE),
+            vector_state,
+            hydrating: Arc::new(StdMutex::new(std::collections::HashSet::new())),
+            hydration_token: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            full_hydrations: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
+    }
+
+    /// Turn on `secure_delete`, run a compaction a previous run deferred when
+    /// the store is small enough to compact before it serves anything (a larger
+    /// one gets its freelist scrub now and is compacted later by
+    /// [`Self::defer_compaction`]), check the store's recorded key, and register
+    /// the SQL sealing functions.
+    fn prepare_sealed_connection(
+        conn: &Connection,
+        path: Option<&Path>,
+        keys: SpacesKeys,
+    ) -> Result<seal::SealState> {
+        content_sqlite::enable_secure_delete(conn)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .context("setting the spaces busy timeout")?;
+        if let Some(path) = path {
+            // The deferred VACUUM builds its transient copy in temp storage,
+            // on disk (temp_store = FILE) so a multi-GB store is not copied
+            // into RAM. That copy lands outside the data folder, where nothing
+            // scrubs it, so it runs only once the migration has finished and
+            // the database holds no legacy plaintext (the freelist scrub runs
+            // first). Until then the scrub is still owed and the migration's
+            // own `finish_store` runs it after the last value is sealed. Spaces
+            // opens on Core's boot path, so only a store up to
+            // `VACUUM_NOW_MAX_BYTES` is vacuumed here; a larger one is handed to
+            // the background worker once the store is open.
+            let vacuum = match Self::migration_finished(conn) {
+                Ok(true) => with_file_temp_store(conn, |conn| {
+                    content_sqlite::run_pending_vacuum_gated(conn, path, SPACES_STORE)
+                })
+                .and_then(|result| result)
+                .map(|_| ()),
+                Ok(false) => Ok(()),
+                Err(error) => Err(error),
+            };
+            if let Err(error) = vacuum {
+                tracing::warn!("spaces store: deferred compaction failed: {error:#}");
+            }
+        }
+        // MEMORY from here on, before any TEMP object (triggers) is created.
+        secure_connection(conn)?;
+        let writable = match content_sqlite::check_store_key(conn, &keys.cipher)? {
+            StoreKeyState::Mismatch { .. } => false,
+            StoreKeyState::Retired => {
+                content_sqlite::reset_items(conn, SPACES_STORE, &seal::seal_plans()?)?;
+                true
+            }
+            StoreKeyState::Recorded | StoreKeyState::Current => true,
+        };
+        let state = seal::SealState::new(keys, writable);
+        seal::register_sql_functions(conn, &state)?;
+        Ok(state)
+    }
+
+    /// Hand a compaction too large for Core's boot path to the background
+    /// compaction worker (`ryu-compaction`, a couple of minutes after start). It
+    /// runs under this store's connection lock, so requests wait for it instead
+    /// of the boot, and only once the sealing migration has finished (its
+    /// transient copy is never scrubbed). The `VACUUM` needs file-backed temp
+    /// storage, which drops the connection's TEMP triggers, so the connection
+    /// is secured again and the term-index triggers reinstalled afterwards.
+    fn defer_compaction(conn: &Arc<Mutex<Connection>>, path: PathBuf) {
+        let weak = Arc::downgrade(conn);
+        content_sqlite::defer_compaction(
+            SPACES_STORE,
+            Box::new(move || {
+                let conn = weak.upgrade()?;
+                let conn = conn.blocking_lock();
+                Some(Self::compact_deferred(&conn, &path))
+            }),
+        );
+    }
+
+    /// The deferred compaction's body (see [`Self::defer_compaction`]).
+    fn compact_deferred(conn: &Connection, path: &Path) -> Result<bool> {
+        if !Self::migration_finished(conn)? {
+            return Ok(false);
+        }
+        let compacted = with_file_temp_store(conn, |conn| {
+            content_sqlite::compact_deferred(conn, path, SPACES_STORE)
+        })
+        .and_then(|result| result);
+        let restored = secure_connection(conn)
+            .and_then(|()| Self::install_term_triggers(conn))
+            .and_then(|()| Self::install_vector_journal(conn));
+        if let Err(error) = &restored {
+            tracing::error!(
+                "spaces store: could not restore the connection after compaction: {error:#}"
+            );
+        }
+        let compacted = compacted?;
+        restored?;
+        Ok(compacted)
+    }
+
+    /// Whether the sealing migration has finished: every sealed column item is
+    /// `sealed`, the legacy plaintext `vec0` tables are gone, and both derived
+    /// indexes are in the sorted token format. Only then may the deferred
+    /// compaction copy the database (its transient copy is never scrubbed).
+    fn migration_finished(conn: &Connection) -> Result<bool> {
+        for plan in seal::seal_plans()? {
+            let state = content_sqlite::item_state(conn, SPACES_STORE, &plan.item())?;
+            if state.as_deref() != Some(content_sqlite::states::SEALED) {
+                return Ok(false);
+            }
+        }
+        let legacy_vectors: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master
+                 WHERE name IN ('chunk_vectors', 'chunk_vectors_rebuild') LIMIT 1",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if legacy_vectors {
+            return Ok(false);
+        }
+        for item in [TERMS_FORMAT_ITEM, GRAPH_FORMAT_ITEM] {
+            if derived_format(conn, item)?.as_deref() != Some(DERIVED_FORMAT_SORTED) {
+                return Ok(false);
+            }
+        }
+        if derived_format(conn, TERMS_SECURE_ITEM)?.as_deref() != Some(TERMS_SECURE_DONE) {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// Sealing health: unreadable rows skipped, writability, migration and blob
+    /// sweep progress (`spaces.db` health item).
+    pub fn seal_status(&self) -> SealStatus {
+        self.seal.snapshot()
+    }
+
+    /// Start [`Self::migrate_now`] on a background thread (production open).
+    fn start_background_migration(&self) {
+        let store = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("spaces-seal-migration".to_owned())
+            .spawn(move || {
+                if let Err(error) = store.migrate_now() {
+                    tracing::warn!("spaces store: sealing migration stopped: {error:#}");
+                    store.seal.set_migration(format!("error: {error:#}"));
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::warn!("spaces store: could not start the sealing migration: {error}");
+        }
+    }
+
+    /// Seal everything written before sealing, on its own connection, without
+    /// blocking requests for long: legacy `vec0` vectors are converted to sealed
+    /// rows, graph entities become blind tokens, the term index is filled, every
+    /// sealed column is migrated (cursor-paginated, compare-and-swap,
+    /// resumable, idempotent: [`content_sqlite::migrate_columns`]), freed
+    /// plaintext is scrubbed ([`content_sqlite::finish_store`]; a store too large
+    /// to vacuum now is compacted at the next start), then legacy blob files are
+    /// sealed in place one at a time ([`seal_legacy_blobs`]). Plaintext is only
+    /// replaced after its sealed copy is written and (for files) verified.
+    pub fn migrate_now(&self) -> Result<content_sqlite::MigrationReport> {
+        let Some(path) = self.db_path.clone() else {
+            self.seal.set_migration(content_sqlite::states::SEALED);
+            return Ok(content_sqlite::MigrationReport::default());
+        };
+        if !self.seal.writable.load(Ordering::Relaxed) {
+            self.seal
+                .set_migration("refused: the store is sealed under another key");
+            return Err(content_sqlite::mismatch_error(SPACES_STORE));
+        }
+        self.seal.set_migration(content_sqlite::states::SEALING);
+        let mut conn = open_vec_connection(&path)?;
+        secure_connection(&conn)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
+        seal::register_sql_functions(&conn, &self.seal)?;
+        Self::install_term_triggers(&conn)?;
+
+        Self::convert_legacy_vectors(&mut conn)?;
+        Self::drop_legacy_vector_staging(&conn)?;
+        Self::tokenize_legacy_graph(&conn)?;
+        let kcv = self.seal.keys.cipher.kcv().to_owned();
+        let reindex =
+            blind_generation(&conn)?.is_some_and(|(_, state)| state == blind_states::REINDEXING);
+        if reindex {
+            self.seal.set_migration(blind_states::REINDEXING);
+            Self::rebuild_derived_indexes(&mut conn, &kcv)?;
+        }
+        Self::clear_unsorted_term_index(&mut conn, reindex)?;
+        Self::fill_term_index(&conn)?;
+        set_derived_format(&conn, TERMS_FORMAT_ITEM, DERIVED_FORMAT_SORTED)?;
+        Self::optimize_term_index_once(&mut conn)?;
+        if reindex {
+            let tx = conn.transaction()?;
+            record_blind_generation(&tx, &kcv, blind_states::OK)?;
+            clear_reindex_progress(&tx)?;
+            // The rebuild above wrote every graph row in the sorted format.
+            set_derived_format(&tx, GRAPH_FORMAT_ITEM, DERIVED_FORMAT_SORTED)?;
+            tx.commit()?;
+            tracing::info!(
+                "spaces store: rebuilt the blind term index and graph under the current key"
+            );
+            self.seal.set_migration(content_sqlite::states::SEALING);
+        }
+        Self::rebuild_unsorted_graph(&mut conn, &kcv)?;
+        let report = content_sqlite::migrate_columns(
+            &mut conn,
+            &self.seal.keys.cipher,
+            &seal::seal_plans()?,
+        )?;
+        if report.sealed > 0 || report.unreadable > 0 {
+            tracing::info!(
+                sealed = report.sealed,
+                unreadable = report.unreadable,
+                "spaces store: sealed legacy values"
+            );
+        }
+        let readdressed = Self::rekey_history_blobs(&mut conn, &self.seal)?;
+        if readdressed > 0 {
+            tracing::info!(
+                rows = readdressed,
+                "spaces store: moved history snapshots to keyed addresses"
+            );
+        }
+        let owed = content_sqlite::read_store_record(&conn, SPACES_STORE)?
+            .is_some_and(|record| record.state == content_sqlite::states::VACUUM_PENDING);
+        if owed {
+            self.seal.set_migration("compacting");
+            // File-backed temp storage for the VACUUM (see
+            // `prepare_sealed_connection`). This drops the connection's TEMP
+            // triggers, which is fine: it is closed right after.
+            let finished = with_file_temp_store(&conn, |conn| {
+                content_sqlite::finish_store(conn, &path, SPACES_STORE)
+            })
+            .and_then(|result| result);
+            match finished {
+                Ok(outcome) if outcome.vacuum_pending => {
+                    tracing::info!("spaces store: compaction deferred to the next start");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!("spaces store: scrub deferred to the next start: {error:#}");
+                }
+            }
+        }
+        drop(conn);
+        self.seal.set_migration(content_sqlite::states::SEALED);
+
+        let status = self.seal.status.clone();
+        let sweep = seal_legacy_blobs(&self.blob_root, &self.seal.keys.blob_cipher, |progress| {
+            if let Ok(mut status) = status.lock() {
+                status.blobs_sealed = progress.sealed;
+                status.blobs_total = progress.total;
+            }
+        });
+        if let Err(error) = sweep {
+            tracing::warn!("spaces store: blob sealing paused until the next start: {error:#}");
+            if let Ok(mut status) = self.seal.status.lock() {
+                status.blobs_pending = Some(format!("{error:#}"));
+            }
+        }
+        Ok(report)
+    }
+
+    /// Move vectors out of the legacy plaintext `vec0` table into sealed
+    /// `chunk_embeddings` rows (bound to the chunk id and its model), in
+    /// batches, then drop the `vec0` table. Resumable: converted chunks are
+    /// skipped, and the `vec0` table is dropped only when every vector that has
+    /// a chunk was converted.
+    fn convert_legacy_vectors(conn: &mut Connection) -> Result<()> {
+        let legacy: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE name = 'chunk_vectors'",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !legacy {
+            return Ok(());
+        }
+        loop {
+            let tx = conn.transaction()?;
+            let moved = tx
+                .execute(
+                    "INSERT INTO chunk_embeddings (chunk_id, space_id, model, dims, embedding)
+                     SELECT c.id, c.space_id, c.embed_model, c.embed_dims,
+                            ryu_seal_vec(c.id, c.embed_model, v.embedding)
+                     FROM chunks c JOIN chunk_vectors v ON v.rowid = c.rowid
+                     WHERE NOT EXISTS (SELECT 1 FROM chunk_embeddings e WHERE e.chunk_id = c.id)
+                     LIMIT 500",
+                    [],
+                )
+                .context("sealing legacy vectors")?;
+            tx.commit()?;
+            if moved == 0 {
+                break;
+            }
+        }
+        conn.execute_batch("DROP TABLE chunk_vectors;")
+            .context("dropping the legacy vector table")?;
+        Ok(())
+    }
+
+    /// Drop the reindex staging table of builds before sealing.
+    ///
+    /// Those builds staged an embedding reindex (after an embedder or dims
+    /// change) in a plaintext `vec0` table, `chunk_vectors_rebuild`, and
+    /// dropped it only after a successful swap: a failed reindex (provider
+    /// error, contents changed meanwhile) left a full plaintext copy of every
+    /// embedding behind. Nothing reads it any more (the sealed staging table is
+    /// `chunk_embeddings_rebuild`), so it is dropped; sqlite-vec is registered
+    /// on this connection, so the drop removes its shadow tables too, and
+    /// `secure_delete` zeroes the freed pages. The scrub is marked owed so the
+    /// compaction runs.
+    fn drop_legacy_vector_staging(conn: &Connection) -> Result<()> {
+        let present: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE name = 'chunk_vectors_rebuild'",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !present {
+            return Ok(());
+        }
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch("DROP TABLE IF EXISTS chunk_vectors_rebuild;")
+            .context("dropping the legacy vector staging table")?;
+        mark_scrub_owed(&tx)?;
+        tx.commit()?;
+        tracing::info!("spaces store: dropped a plaintext embedding reindex left by a failed run");
+        Ok(())
+    }
+
+    /// Empty a term index written in the plaintext word order (before
+    /// [`seal::term_document`] sorted each row by token), once: the rows are
+    /// refilled by [`Self::fill_term_index`]. `secure_delete` zeroes the
+    /// deleted content rows, the FTS5 `optimize` merges the index segments
+    /// (freeing the old pages), and the scrub is marked owed so the compaction
+    /// runs. The format record moves to `filling` with the clear, so a restart
+    /// during the refill does not clear again. A key reindex in this run
+    /// (`reindexed`) already cleared the index.
+    fn clear_unsorted_term_index(conn: &mut Connection, reindexed: bool) -> Result<()> {
+        if derived_format(conn, TERMS_FORMAT_ITEM)?.is_some() {
+            return Ok(());
+        }
+        let tx = conn.transaction()?;
+        if !reindexed {
+            let rows: i64 = tx.query_row("SELECT COUNT(*) FROM spaces_terms_map", [], |row| {
+                row.get(0)
+            })?;
+            if rows > 0 {
+                tx.execute_batch(
+                    "DELETE FROM spaces_terms;
+                     DELETE FROM spaces_terms_map;
+                     INSERT INTO spaces_terms (spaces_terms) VALUES ('optimize');",
+                )
+                .context("clearing the unsorted Spaces term index")?;
+                mark_scrub_owed(&tx)?;
+            }
+        }
+        set_derived_format(&tx, TERMS_FORMAT_ITEM, DERIVED_FORMAT_FILLING)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Rebuild, once, the graph rows of every graph-mode Space written before
+    /// [`entity_tokens`] sorted each chunk's tokens (their row ids replay the
+    /// order the terms occur in the text). Uses the bounded, resumable
+    /// per-Space rebuild of a key adoption ([`Self::rebuild_space_graph`]);
+    /// the deleted rows are zeroed by `secure_delete` and the scrub is marked
+    /// owed.
+    fn rebuild_unsorted_graph(conn: &mut Connection, kcv: &str) -> Result<()> {
+        if derived_format(conn, GRAPH_FORMAT_ITEM)?.as_deref() == Some(DERIVED_FORMAT_SORTED) {
+            return Ok(());
+        }
+        let has_rows: bool = conn
+            .query_row("SELECT 1 FROM graph_nodes LIMIT 1", [], |_| Ok(true))
+            .optional()?
+            .unwrap_or(false);
+        if has_rows {
+            mark_scrub_owed(conn)?;
+            let graph_spaces: Vec<String> = {
+                let mut stmt =
+                    conn.prepare("SELECT id FROM spaces WHERE retrieval_mode = ?1 ORDER BY id")?;
+                let rows =
+                    stmt.query_map(params![RetrievalMode::Graph.as_str()], |row| row.get(0))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            for space_id in graph_spaces {
+                Self::rebuild_space_graph(conn, kcv, &space_id)?;
+            }
+            // Rows of a Space that is not (or no longer) in graph mode are
+            // never read; remove them rather than leave them in text order.
+            for table in ["graph_edges", "graph_nodes"] {
+                let sql = format!(
+                    "DELETE FROM {table} WHERE rowid IN
+                         (SELECT t.rowid FROM {table} t
+                          WHERE NOT EXISTS (SELECT 1 FROM spaces s
+                                            WHERE s.id = t.space_id AND s.retrieval_mode = ?1)
+                          LIMIT 5000)"
+                );
+                while conn
+                    .execute(&sql, params![RetrievalMode::Graph.as_str()])
+                    .with_context(|| format!("removing stray {table} rows"))?
+                    > 0
+                {}
+            }
+            tracing::info!("spaces store: rebuilt graph rows in token order");
+        }
+        let tx = conn.transaction()?;
+        clear_reindex_progress(&tx)?;
+        set_derived_format(&tx, GRAPH_FORMAT_ITEM, DERIVED_FORMAT_SORTED)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Replace plaintext graph entities of rows written before sealing with
+    /// their blind tokens, in batches (the graph is a derived index; no sealed
+    /// copy of the text is kept).
+    fn tokenize_legacy_graph(conn: &Connection) -> Result<()> {
+        for sql in [
+            "UPDATE graph_nodes SET entity = ryu_bi('graph.entity', entity)
+             WHERE id IN (SELECT id FROM graph_nodes WHERE entity NOT LIKE 'bi1:%' LIMIT 2000)",
+            "UPDATE graph_edges
+                 SET src_entity = CASE WHEN src_entity LIKE 'bi1:%' THEN src_entity
+                                       ELSE ryu_bi('graph.entity', src_entity) END,
+                     dst_entity = CASE WHEN dst_entity LIKE 'bi1:%' THEN dst_entity
+                                       ELSE ryu_bi('graph.entity', dst_entity) END
+             WHERE id IN (SELECT id FROM graph_edges
+                          WHERE src_entity NOT LIKE 'bi1:%' OR dst_entity NOT LIKE 'bi1:%'
+                          LIMIT 2000)",
+        ] {
+            while conn
+                .execute(sql, [])
+                .context("tokenizing legacy graph rows")?
+                > 0
+            {}
+        }
+        Ok(())
+    }
+
+    /// Keep every blind token under the key the store is sealed with now.
+    /// Tokens are HMACs under the store root, so after a key adoption (the
+    /// store's record names a retired root) tokens written earlier never
+    /// match again: Space-by-name lookups, wiki-link resolution, body search
+    /// and graph retrieval would all miss existing content. The root that
+    /// produced the stored tokens is recorded as its own key check value
+    /// ([`BLIND_STORE`]); when it differs from the current root, the equality
+    /// tokens (cheap, and needed by the very first request, e.g. the system
+    /// Spaces lookup at startup) are recomputed here from the opened values,
+    /// before the store serves anything, and the term index and graph rows
+    /// are marked for a rebuild by the background migration
+    /// ([`Self::rebuild_derived_indexes`], reported as `reindexing`).
+    fn reconcile_blind_generation(conn: &Connection, seal: &seal::SealState) -> Result<()> {
+        if !seal.writable.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let current = seal.keys.cipher.kcv().to_owned();
+        let recorded = blind_generation(conn)?;
+        // Before this record existed, tokens were written under the root the
+        // store record names (a retired root after a key adoption).
+        let generation = match &recorded {
+            Some((Some(kcv), _)) => Some(kcv.clone()),
+            _ => content_sqlite::read_store_record(conn, SPACES_STORE)?.and_then(|r| r.kcv),
+        };
+        if generation.as_deref().is_none_or(|kcv| kcv == current) {
+            if recorded.is_none() {
+                record_blind_generation(conn, &current, blind_states::OK)?;
+            }
+            return Ok(());
+        }
+        tracing::info!("spaces store: blind tokens predate the current key; recomputing them");
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "UPDATE spaces
+                 SET name_bi = COALESCE(
+                     ryu_bi('spaces.name', ryu_open_soft('spaces.name', id, name)), '');
+             UPDATE documents
+                 SET title_bi = COALESCE(
+                     ryu_bi('documents.title', ryu_open_soft('documents.title', id, title)), '');
+             UPDATE document_links
+                 SET dst_title_bi = COALESCE(
+                     ryu_bi('document_links.dst_title',
+                            ryu_open_soft('document_links.dst_title', id, dst_title)), '');",
+        )
+        .context("recomputing Spaces blind tokens under the current key")?;
+        record_blind_generation(&tx, &current, blind_states::REINDEXING)?;
+        // A rebuild of an earlier adoption that never finished starts over.
+        clear_reindex_progress(&tx)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Rebuild the derived indexes that hold only blind tokens (after a key
+    /// adoption): the body/chunk term index is emptied (refilled by
+    /// [`Self::fill_term_index`]), and the graph rows of every graph-mode Space
+    /// are rebuilt from the opened chunk text.
+    ///
+    /// Bounded and resumable, like the staged retrieval-mode rebuild: a Space's
+    /// old graph rows are deleted in bounded batches, then its chunks are
+    /// processed [`RETRIEVAL_REBUILD_BATCH_SIZE`] at a time, each batch in its
+    /// own short `IMMEDIATE` transaction that also records the Space's rowid
+    /// cursor (`reindex:graph:<space>` in the state table, bound to the current
+    /// key check value). The write lock is released between batches, so page
+    /// saves and uploads on the main connection proceed, and a restart resumes
+    /// from the cursor instead of starting over. Old-key rows match nothing
+    /// under the new key, so a partly rebuilt graph is never wrong, only
+    /// incomplete. A chunk that already has graph rows when its batch runs was
+    /// written by the live path under the new key after the clear, and is
+    /// skipped (no duplicates). Progress rows are removed with the final
+    /// generation record ([`clear_reindex_progress`]).
+    fn rebuild_derived_indexes(conn: &mut Connection, kcv: &str) -> Result<()> {
+        if reindex_progress(conn, kcv, REINDEX_TERMS_ITEM)?.is_none() {
+            let tx = conn.transaction()?;
+            tx.execute_batch(
+                "DELETE FROM spaces_terms;
+                 DELETE FROM spaces_terms_map;
+                 INSERT INTO spaces_terms (spaces_terms) VALUES ('optimize');",
+            )
+            .context("clearing the Spaces term index")?;
+            set_reindex_progress(&tx, kcv, REINDEX_TERMS_ITEM, 0)?;
+            tx.commit()?;
+        }
+        let graph_spaces: Vec<String> = {
+            let mut stmt =
+                conn.prepare("SELECT id FROM spaces WHERE retrieval_mode = ?1 ORDER BY id")?;
+            let rows = stmt.query_map(params![RetrievalMode::Graph.as_str()], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for space_id in graph_spaces {
+            Self::rebuild_space_graph(conn, kcv, &space_id)?;
+        }
+        Ok(())
+    }
+
+    /// One Space of [`Self::rebuild_derived_indexes`].
+    fn rebuild_space_graph(conn: &mut Connection, kcv: &str, space_id: &str) -> Result<()> {
+        const CLEAR_BATCH: i64 = 5_000;
+        let item = format!("{REINDEX_GRAPH_ITEM_PREFIX}{space_id}");
+        let mut last_rowid = match reindex_progress(conn, kcv, &item)? {
+            Some(cursor) => cursor,
+            None => {
+                // Clear the old-key rows in bounded deletes; the cursor row is
+                // written only once the Space is empty, so a crash here simply
+                // clears again.
+                for table in ["graph_edges", "graph_nodes"] {
+                    let sql = format!(
+                        "DELETE FROM {table} WHERE rowid IN
+                             (SELECT rowid FROM {table} WHERE space_id = ?1 LIMIT ?2)"
+                    );
+                    while conn
+                        .execute(&sql, params![space_id, CLEAR_BATCH])
+                        .with_context(|| format!("clearing {table} for a rebuild"))?
+                        > 0
+                    {}
+                }
+                set_reindex_progress(conn, kcv, &item, 0)?;
+                0
+            }
+        };
+        loop {
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let still_graph = tx
+                .query_row(
+                    "SELECT retrieval_mode FROM spaces WHERE id = ?1",
+                    params![space_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .is_some_and(|mode| RetrievalMode::from_str(&mode) == RetrievalMode::Graph);
+            if !still_graph {
+                // Deleted or switched to vector mode meanwhile: nothing to build.
+                tx.commit()?;
+                return Ok(());
+            }
+            let rows: Vec<(i64, String, String)> = {
+                let mut stmt = tx.prepare(
+                    "SELECT c.rowid, c.id, COALESCE(ryu_open_soft('chunks.content', c.id, c.content), '')
+                     FROM chunks c
+                     WHERE c.space_id = ?1 AND c.rowid > ?2
+                       AND NOT EXISTS (SELECT 1 FROM graph_nodes n WHERE n.chunk_id = c.id)
+                     ORDER BY c.rowid LIMIT ?3",
+                )?;
+                let mapped = stmt.query_map(
+                    params![space_id, last_rowid, RETRIEVAL_REBUILD_BATCH_SIZE as i64],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+                mapped.collect::<rusqlite::Result<_>>()?
+            };
+            let Some(batch_last) = rows.last().map(|(rowid, _, _)| *rowid) else {
+                tx.commit()?;
+                return Ok(());
+            };
+            let pairs: Vec<(&str, &str)> = rows
+                .iter()
+                .map(|(_, id, content)| (id.as_str(), content.as_str()))
+                .collect();
+            build_graph_for_chunks(&tx, space_id, &pairs)?;
+            set_reindex_progress(&tx, kcv, &item, batch_last)?;
+            tx.commit().context("committing a graph rebuild batch")?;
+            last_rowid = batch_last;
+        }
+    }
+
+    /// Index bodies and chunks written before the term index existed (the
+    /// triggers keep it current afterwards). Rewriting the column with itself
+    /// fires the index trigger; batches keep each write short.
+    fn fill_term_index(conn: &Connection) -> Result<()> {
+        for sql in [
+            "UPDATE documents SET source = source WHERE id IN (
+                 SELECT d.id FROM documents d
+                 WHERE NOT EXISTS (SELECT 1 FROM spaces_terms_map m
+                                   WHERE m.kind = 'doc' AND m.ref_id = d.id)
+                 LIMIT 500)",
+            "UPDATE chunks SET content = content WHERE id IN (
+                 SELECT c.id FROM chunks c
+                 WHERE NOT EXISTS (SELECT 1 FROM spaces_terms_map m
+                                   WHERE m.kind = 'chunk' AND m.ref_id = c.id)
+                 LIMIT 500)",
+        ] {
+            while conn
+                .execute(sql, [])
+                .context("filling the Spaces term index")?
+                > 0
+            {}
+        }
+        Ok(())
+    }
+
+    /// Fail a write early when the store is sealed under a key this process
+    /// does not hold.
+    fn ensure_writable(&self) -> Result<()> {
+        if self.seal.writable.load(Ordering::Relaxed) {
+            Ok(())
+        } else {
+            Err(content_sqlite::mismatch_error(SPACES_STORE))
+        }
     }
 
     /// Snapshot the active embedder (cheap clone) so embedding I/O happens without
@@ -1853,9 +2728,42 @@ impl SpaceStore {
         }
     }
 
+    /// Embed caller-provided text with one snapshot of the active model.
+    ///
+    /// This is the shared transient embedding primitive for browser page search
+    /// and other clients that rank data they do not want to store as Space docs.
+    /// It performs no persistence; only the returned vectors leave this method.
+    pub async fn embed_texts(&self, texts: &[String]) -> Result<EmbeddingBatch> {
+        let embedder = self.embedder_snapshot().await;
+        let model_id = embedder.model_id().to_owned();
+        let dims = embedder.dims();
+        let vectors = embedder.embed_batch(texts).await?;
+        anyhow::ensure!(
+            vectors.len() == texts.len(),
+            "embedding provider returned an unexpected vector count"
+        );
+        anyhow::ensure!(
+            vectors.iter().all(|vector| {
+                vector.len() == dims && vector.iter().all(|value| value.is_finite())
+            }),
+            "embedding provider returned an invalid vector"
+        );
+
+        Ok(EmbeddingBatch {
+            model_id,
+            dims,
+            embeddings: vectors
+                .into_iter()
+                .enumerate()
+                .map(|(index, embedding)| EmbeddedText { index, embedding })
+                .collect(),
+        })
+    }
+
     fn init_schema(conn: &Connection, embed_dims: usize) -> Result<()> {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
              PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS spaces (
                  id             TEXT PRIMARY KEY,
@@ -1928,14 +2836,11 @@ impl SpaceStore {
         )
         .context("initializing spaces schema")?;
 
-        // vec0 virtual table holds only the vector, keyed by the chunk's rowid.
-        // Declared with the embedder's configured dims so inserts and queries are
-        // always consistent.
-        conn.execute_batch(&format!(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors
-                 USING vec0(rowid INTEGER PRIMARY KEY, embedding float[{embed_dims}]);"
-        ))
-        .context("initializing vec0 virtual table")?;
+        // Embeddings are content: each vector is sealed (`RYU-CB01`, bound to the
+        // chunk id and model) in `chunk_embeddings` (see `init_sealed_schema`) and
+        // searched in the shared in-memory vector index. The legacy `vec0`
+        // `chunk_vectors` table is converted and dropped by the migration.
+        let _ = embed_dims;
 
         // Idempotent migration: add retrieval_mode column to spaces if absent.
         // ALTER TABLE … ADD COLUMN fails with "duplicate column name" on SQLite
@@ -2007,9 +2912,7 @@ impl SpaceStore {
              CREATE INDEX IF NOT EXISTS idx_document_links_src
                  ON document_links(space_id, src_doc_id);
              CREATE INDEX IF NOT EXISTS idx_document_links_dst
-                 ON document_links(space_id, dst_doc_id);
-             CREATE INDEX IF NOT EXISTS idx_document_links_title
-                 ON document_links(space_id, dst_title COLLATE NOCASE);",
+                 ON document_links(space_id, dst_doc_id);",
         )
         .context("initializing document_links schema")?;
 
@@ -2076,7 +2979,9 @@ impl SpaceStore {
         // the blob table so every read and restore uses one codec from now on.
         let legacy_versions: Vec<(String, String, String, String)> = {
             let mut stmt = conn.prepare(
-                "SELECT id, title, source, kind FROM document_versions
+                "SELECT id, ryu_open('document_versions.title', id, title),
+                        ryu_open('document_versions.source', id, source), kind
+                 FROM document_versions
                  WHERE blob_hash IS NULL",
             )?;
             let rows = stmt.query_map([], |row| {
@@ -2090,12 +2995,14 @@ impl SpaceStore {
                 source,
                 title,
             })?;
+            let hash = history_hash(conn, &encoded.raw)?;
             conn.execute(
                 "INSERT OR IGNORE INTO document_version_blobs
                      (hash, codec, payload, raw_bytes, stored_bytes, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                 VALUES (?1, ?2, ryu_seal_blob('document_version_blobs.payload', ?1, ?3),
+                         ?4, ?5, ?6)",
                 params![
-                    encoded.hash,
+                    hash,
                     SNAPSHOT_CODEC,
                     encoded.payload,
                     encoded.raw_bytes,
@@ -2108,7 +3015,7 @@ impl SpaceStore {
                  SET blob_hash = ?1,
                      updated_at = CASE WHEN updated_at = 0 THEN created_at ELSE updated_at END
                  WHERE id = ?2",
-                params![encoded.hash, id],
+                params![hash, id],
             )?;
         }
 
@@ -2141,6 +3048,13 @@ impl SpaceStore {
             (
                 "updated_by",
                 "ALTER TABLE documents ADD COLUMN updated_by TEXT",
+            ),
+            // `updated_at` of the last snapshot applied from another device. A
+            // row whose `updated_at` differs has local edits the incoming sync
+            // has not seen; see `apply_synced_document_blocking`.
+            (
+                "sync_base_updated_at",
+                "ALTER TABLE documents ADD COLUMN sync_base_updated_at INTEGER",
             ),
         ] {
             if !existing_doc_columns.contains(col) {
@@ -2199,7 +3113,295 @@ impl SpaceStore {
             }
         }
 
+        retrieval::init_retrieval_schema(conn)?;
+        Self::init_sealed_schema(conn)
+    }
+
+    /// Schema of the sealed store: blind equality columns (titles, link titles,
+    /// Space names) and their indexes, and the blind term index `spaces_terms`
+    /// kept current by per-connection TEMP triggers on `documents.source` and
+    /// `chunks.content` ([`Self::install_term_triggers`]; `ryu_terms` opens the
+    /// stored value, so the triggers work on legacy plaintext and on sealed
+    /// values alike). Legacy rows get their tokens and
+    /// terms from the background migration.
+    fn init_sealed_schema(conn: &Connection) -> Result<()> {
+        for (table, column) in [
+            ("documents", "title_bi"),
+            ("document_links", "dst_title_bi"),
+            ("spaces", "name_bi"),
+        ] {
+            let exists: bool = conn
+                .query_row(
+                    &format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"),
+                    params![column],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if !exists {
+                conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT"))
+                    .with_context(|| format!("adding column {column} to {table}"))?;
+            }
+        }
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_document_links_title;
+             CREATE INDEX IF NOT EXISTS idx_document_links_title_bi
+                 ON document_links(space_id, dst_title_bi);
+             CREATE INDEX IF NOT EXISTS idx_documents_title_bi
+                 ON documents(space_id, title_bi);
+             CREATE INDEX IF NOT EXISTS idx_spaces_name_bi ON spaces(name_bi);
+             CREATE VIRTUAL TABLE IF NOT EXISTS spaces_terms
+                 USING fts5(terms, detail=none, tokenize='ascii');
+             CREATE TABLE IF NOT EXISTS spaces_terms_map (
+                 term_rowid INTEGER PRIMARY KEY,
+                 kind       TEXT NOT NULL,
+                 ref_id     TEXT NOT NULL,
+                 doc_id     TEXT NOT NULL,
+                 UNIQUE (kind, ref_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_spaces_terms_map_doc
+                 ON spaces_terms_map(doc_id);
+             CREATE TABLE IF NOT EXISTS chunk_embeddings (
+                 chunk_id  TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+                 space_id  TEXT NOT NULL,
+                 model     TEXT NOT NULL,
+                 dims      INTEGER NOT NULL,
+                 embedding BLOB NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_space
+                 ON chunk_embeddings(space_id, model, dims);
+             CREATE TABLE IF NOT EXISTS space_vector_gen (
+                 space_id TEXT PRIMARY KEY,
+                 gen      INTEGER NOT NULL
+             );
+             CREATE TRIGGER IF NOT EXISTS chunk_embeddings_gen_ai AFTER INSERT ON chunk_embeddings BEGIN
+                 INSERT OR IGNORE INTO space_vector_gen (space_id, gen) VALUES (NEW.space_id, 0);
+                 UPDATE space_vector_gen SET gen = gen + 1 WHERE space_id = NEW.space_id;
+             END;
+             CREATE TRIGGER IF NOT EXISTS chunk_embeddings_gen_au AFTER UPDATE ON chunk_embeddings BEGIN
+                 INSERT OR IGNORE INTO space_vector_gen (space_id, gen) VALUES (NEW.space_id, 0);
+                 UPDATE space_vector_gen SET gen = gen + 1 WHERE space_id = NEW.space_id;
+             END;
+             CREATE TRIGGER IF NOT EXISTS chunk_embeddings_gen_ad AFTER DELETE ON chunk_embeddings BEGIN
+                 INSERT OR IGNORE INTO space_vector_gen (space_id, gen) VALUES (OLD.space_id, 0);
+                 UPDATE space_vector_gen SET gen = gen + 1 WHERE space_id = OLD.space_id;
+             END;
+             CREATE TRIGGER IF NOT EXISTS spaces_terms_doc_ad AFTER DELETE ON documents BEGIN
+                 DELETE FROM spaces_terms WHERE rowid IN
+                     (SELECT term_rowid FROM spaces_terms_map WHERE kind = 'doc' AND ref_id = OLD.id);
+                 DELETE FROM spaces_terms_map WHERE kind = 'doc' AND ref_id = OLD.id;
+             END;
+             CREATE TRIGGER IF NOT EXISTS spaces_terms_chunk_ad AFTER DELETE ON chunks BEGIN
+                 DELETE FROM spaces_terms WHERE rowid IN
+                     (SELECT term_rowid FROM spaces_terms_map WHERE kind = 'chunk' AND ref_id = OLD.id);
+                 DELETE FROM spaces_terms_map WHERE kind = 'chunk' AND ref_id = OLD.id;
+             END;",
+        )
+        .context("initializing the sealed spaces schema")?;
+        Self::enable_term_secure_delete(conn)?;
+        Self::install_term_triggers(conn)?;
+        // Blind tokens of rows written before sealing (equality lookups need
+        // them at once; '' marks a value that does not open and never matches).
+        conn.execute_batch(
+            "UPDATE spaces
+                 SET name_bi = COALESCE(
+                     ryu_bi('spaces.name', ryu_open_soft('spaces.name', id, name)), '')
+                 WHERE name_bi IS NULL;
+             UPDATE documents
+                 SET title_bi = COALESCE(
+                     ryu_bi('documents.title', ryu_open_soft('documents.title', id, title)), '')
+                 WHERE title_bi IS NULL;
+             UPDATE document_links
+                 SET dst_title_bi = COALESCE(
+                     ryu_bi('document_links.dst_title',
+                            ryu_open_soft('document_links.dst_title', id, dst_title)), '')
+                 WHERE dst_title_bi IS NULL;",
+        )
+        .context("backfilling Spaces blind tokens")?;
         Ok(())
+    }
+
+    /// Turn on FTS5 secure-delete for `spaces_terms`, so deleting a page or
+    /// chunk removes its blind tokens from the segment b-tree. A regular FTS5
+    /// table otherwise only writes delete markers and keeps the original
+    /// postings until a merge (SQLite's `secure_delete` pragma frees no page
+    /// there, so it does not help). The setting persists in
+    /// `spaces_terms_config`; it is read first so a connection that finds it set
+    /// writes nothing.
+    fn enable_term_secure_delete(conn: &Connection) -> Result<()> {
+        let enabled: bool = conn
+            .query_row(
+                "SELECT 1 FROM spaces_terms_config WHERE k = 'secure-delete' AND v = 1",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !enabled {
+            conn.execute(
+                "INSERT INTO spaces_terms (spaces_terms, rank) VALUES ('secure-delete', 1)",
+                [],
+            )
+            .context("enabling FTS5 secure-delete on spaces_terms")?;
+        }
+        Ok(())
+    }
+
+    /// Merge away the postings of a store written before secure-delete was on
+    /// (deleted rows left tombstones, not removals), once, and mark the scrub
+    /// owed so the freed pages are zeroed and compacted.
+    fn optimize_term_index_once(conn: &mut Connection) -> Result<()> {
+        if derived_format(conn, TERMS_SECURE_ITEM)?.as_deref() == Some(TERMS_SECURE_DONE) {
+            return Ok(());
+        }
+        let tx = conn.transaction()?;
+        let has_rows: bool = tx
+            .query_row("SELECT 1 FROM spaces_terms_map LIMIT 1", [], |_| Ok(true))
+            .optional()?
+            .unwrap_or(false);
+        if has_rows {
+            tx.execute(
+                "INSERT INTO spaces_terms (spaces_terms) VALUES ('optimize')",
+                [],
+            )
+            .context("merging the Spaces term index segments")?;
+            mark_scrub_owed(&tx)?;
+        }
+        set_derived_format(&tx, TERMS_SECURE_ITEM, TERMS_SECURE_DONE)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Keep `spaces_terms` current on this connection: per-connection TEMP
+    /// triggers on body and chunk writes. They call `ryu_terms`, which only
+    /// exists where [`seal::register_sql_functions`] ran, so they must never be
+    /// stored in the database: a stored trigger would make every page write
+    /// fail with "no such function" on a downgraded build or in the sqlite3
+    /// CLI. Persistent copies left by an earlier build are dropped here. The
+    /// delete triggers use plain SQL and stay persistent. Call after
+    /// [`secure_connection`] (changing `temp_store` drops TEMP triggers).
+    fn install_term_triggers(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "DROP TRIGGER IF EXISTS main.spaces_terms_doc_ai;
+             DROP TRIGGER IF EXISTS main.spaces_terms_doc_au;
+             DROP TRIGGER IF EXISTS main.spaces_terms_chunk_ai;
+             DROP TRIGGER IF EXISTS main.spaces_terms_chunk_au;
+             CREATE TEMP TRIGGER IF NOT EXISTS spaces_terms_doc_ai AFTER INSERT ON main.documents BEGIN
+                 INSERT OR IGNORE INTO spaces_terms_map (kind, ref_id, doc_id)
+                     VALUES ('doc', NEW.id, NEW.id);
+                 DELETE FROM spaces_terms WHERE rowid =
+                     (SELECT term_rowid FROM spaces_terms_map WHERE kind = 'doc' AND ref_id = NEW.id);
+                 INSERT INTO spaces_terms (rowid, terms)
+                     SELECT term_rowid, ryu_terms('documents.source', NEW.id, NEW.source)
+                     FROM spaces_terms_map WHERE kind = 'doc' AND ref_id = NEW.id;
+             END;
+             CREATE TEMP TRIGGER IF NOT EXISTS spaces_terms_doc_au AFTER UPDATE OF source ON main.documents BEGIN
+                 INSERT OR IGNORE INTO spaces_terms_map (kind, ref_id, doc_id)
+                     VALUES ('doc', NEW.id, NEW.id);
+                 DELETE FROM spaces_terms WHERE rowid =
+                     (SELECT term_rowid FROM spaces_terms_map WHERE kind = 'doc' AND ref_id = NEW.id);
+                 INSERT INTO spaces_terms (rowid, terms)
+                     SELECT term_rowid, ryu_terms('documents.source', NEW.id, NEW.source)
+                     FROM spaces_terms_map WHERE kind = 'doc' AND ref_id = NEW.id;
+             END;
+             CREATE TEMP TRIGGER IF NOT EXISTS spaces_terms_chunk_ai AFTER INSERT ON main.chunks BEGIN
+                 INSERT OR IGNORE INTO spaces_terms_map (kind, ref_id, doc_id)
+                     VALUES ('chunk', NEW.id, NEW.document_id);
+                 DELETE FROM spaces_terms WHERE rowid =
+                     (SELECT term_rowid FROM spaces_terms_map WHERE kind = 'chunk' AND ref_id = NEW.id);
+                 INSERT INTO spaces_terms (rowid, terms)
+                     SELECT term_rowid, ryu_terms('chunks.content', NEW.id, NEW.content)
+                     FROM spaces_terms_map WHERE kind = 'chunk' AND ref_id = NEW.id;
+             END;
+             CREATE TEMP TRIGGER IF NOT EXISTS spaces_terms_chunk_au AFTER UPDATE OF content ON main.chunks BEGIN
+                 INSERT OR IGNORE INTO spaces_terms_map (kind, ref_id, doc_id)
+                     VALUES ('chunk', NEW.id, NEW.document_id);
+                 DELETE FROM spaces_terms WHERE rowid =
+                     (SELECT term_rowid FROM spaces_terms_map WHERE kind = 'chunk' AND ref_id = NEW.id);
+                 INSERT INTO spaces_terms (rowid, terms)
+                     SELECT term_rowid, ryu_terms('chunks.content', NEW.id, NEW.content)
+                     FROM spaces_terms_map WHERE kind = 'chunk' AND ref_id = NEW.id;
+             END;",
+        )
+        .context("installing the Spaces term-index triggers")
+    }
+
+    /// Register `ryu_vec_tracked(space_id)` (whether a Space's write is
+    /// journaled; counts it, see [`count_journaled_write`]) and
+    /// `ryu_vec_untracked(space_id)` (whether its journal is to be dropped)
+    /// on the store's own connection and install the vector journal. Not on
+    /// the migration connection: its writes are not journaled, so they reload
+    /// the partitions they touch.
+    fn register_vector_journal(conn: &Connection, states: &VectorStates) -> Result<()> {
+        let counted = Arc::clone(states);
+        conn.create_scalar_function(
+            "ryu_vec_tracked",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |ctx| {
+                let space_id: String = ctx.get(0)?;
+                Ok(counted
+                    .lock()
+                    .map(|mut states| count_journaled_write(&mut states, &space_id))
+                    .unwrap_or(false))
+            },
+        )
+        .context("registering ryu_vec_tracked")?;
+        let read = Arc::clone(states);
+        conn.create_scalar_function(
+            "ryu_vec_untracked",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |ctx| {
+                let space_id: String = ctx.get(0)?;
+                Ok(read
+                    .lock()
+                    .map(|states| !states.get(&space_id).is_some_and(PartitionState::tracked))
+                    .unwrap_or(true))
+            },
+        )
+        .context("registering ryu_vec_untracked")?;
+        Self::install_vector_journal(conn)
+    }
+
+    /// The TEMP vector journal and its triggers (see [`PartitionState`]).
+    /// Per connection, like the term triggers, because `ryu_vec_tracked` only
+    /// exists here. A temp-store change drops them; reinstall after
+    /// [`secure_connection`] (the lost entries make the generation check fail,
+    /// so those partitions reload).
+    fn install_vector_journal(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS space_vector_journal (
+                 seq      INTEGER PRIMARY KEY,
+                 space_id TEXT NOT NULL,
+                 chunk_id TEXT NOT NULL,
+                 put      INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS temp.idx_space_vector_journal
+                 ON space_vector_journal(space_id, seq);
+             CREATE TEMP TRIGGER IF NOT EXISTS space_vector_journal_ai
+                 AFTER INSERT ON main.chunk_embeddings WHEN ryu_vec_tracked(NEW.space_id) BEGIN
+                 INSERT INTO space_vector_journal (space_id, chunk_id, put)
+                     VALUES (NEW.space_id, NEW.chunk_id, 1);
+                 DELETE FROM space_vector_journal WHERE space_id = NEW.space_id
+                     AND (SELECT ryu_vec_untracked(NEW.space_id));
+             END;
+             CREATE TEMP TRIGGER IF NOT EXISTS space_vector_journal_au
+                 AFTER UPDATE ON main.chunk_embeddings WHEN ryu_vec_tracked(NEW.space_id) BEGIN
+                 INSERT INTO space_vector_journal (space_id, chunk_id, put)
+                     VALUES (NEW.space_id, NEW.chunk_id, 1);
+                 DELETE FROM space_vector_journal WHERE space_id = NEW.space_id
+                     AND (SELECT ryu_vec_untracked(NEW.space_id));
+             END;
+             CREATE TEMP TRIGGER IF NOT EXISTS space_vector_journal_ad
+                 AFTER DELETE ON main.chunk_embeddings WHEN ryu_vec_tracked(OLD.space_id) BEGIN
+                 INSERT INTO space_vector_journal (space_id, chunk_id, put)
+                     VALUES (OLD.space_id, OLD.chunk_id, 0);
+                 DELETE FROM space_vector_journal WHERE space_id = OLD.space_id
+                     AND (SELECT ryu_vec_untracked(OLD.space_id));
+             END;",
+        )
+        .context("installing the Spaces vector journal")
     }
 
     /// Decide, once, what a pre-existing NULL-tenancy space/document row MEANS —
@@ -2398,7 +3600,9 @@ impl SpaceStore {
         )?;
         conn.execute(
             "UPDATE spaces
-             SET name = ?1, description = ?2, created_at = ?3, updated_at = ?4,
+             SET name = ryu_seal('spaces.name', id, ?1), name_bi = ryu_bi('spaces.name', ?1),
+                 description = ryu_seal('spaces.description', id, ?2),
+                 created_at = ?3, updated_at = ?4,
                  retrieval_mode = ?5, visibility = ?6, team_id = ?7
              WHERE id = ?8",
             params![
@@ -2422,7 +3626,9 @@ impl SpaceStore {
     pub async fn list_spaces(&self, filter: DocFilter<'_>) -> Result<Vec<Space>> {
         let conn = self.conn.lock().await;
         let sql = format!(
-            "SELECT s.id, s.name, s.description, s.created_at, s.updated_at,
+            "SELECT s.id, ryu_open_soft('spaces.name', s.id, s.name),
+                    ryu_open_soft('spaces.description', s.id, s.description),
+                    s.created_at, s.updated_at,
                     (SELECT COUNT(*) FROM documents d
                         WHERE d.space_id = s.id AND d.parent_id IS NULL
                           AND {DOC_TENANCY_VISIBLE_PREDICATE}),
@@ -2442,9 +3648,13 @@ impl SpaceStore {
             |row| {
                 let mode_str: String = row.get(6)?;
                 let icon_raw: Option<String> = row.get(8)?;
-                Ok(Space {
+                // A name that does not open skips the Space (counted).
+                let Some(name) = row.get::<_, Option<String>>(1)? else {
+                    return Ok(None);
+                };
+                Ok(Some(Space {
                     id: row.get(0)?,
-                    name: row.get(1)?,
+                    name,
                     description: row.get(2)?,
                     created_at: row.get(3)?,
                     updated_at: row.get(4)?,
@@ -2454,12 +3664,12 @@ impl SpaceStore {
                     icon: icon_raw.and_then(|s| serde_json::from_str(&s).ok()),
                     visibility: row.get(9)?,
                     team_id: row.get(10)?,
-                })
+                }))
             },
         )?;
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            out.extend(row?);
         }
         Ok(out)
     }
@@ -2475,7 +3685,8 @@ impl SpaceStore {
     ) -> Result<Vec<Document>> {
         let conn = self.conn.lock().await;
         let sql = format!(
-            "SELECT d.id, d.space_id, d.title, d.created_at, d.updated_at,
+            "SELECT d.id, d.space_id, ryu_open_soft('documents.title', d.id, d.title),
+                    d.created_at, d.updated_at,
                     (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id),
                     d.kind, d.parent_id, d.mime, d.byte_size, d.icon
              FROM documents d
@@ -2494,10 +3705,13 @@ impl SpaceStore {
             },
             |row| {
                 let icon_raw: Option<String> = row.get(10)?;
-                Ok(Document {
+                let Some(title) = row.get::<_, Option<String>>(2)? else {
+                    return Ok(None);
+                };
+                Ok(Some(Document {
                     id: row.get(0)?,
                     space_id: row.get(1)?,
-                    title: row.get(2)?,
+                    title,
                     created_at: row.get(3)?,
                     updated_at: row.get(4)?,
                     chunk_count: row.get(5)?,
@@ -2506,12 +3720,12 @@ impl SpaceStore {
                     mime: row.get(8)?,
                     byte_size: row.get(9)?,
                     icon: icon_raw.and_then(|s| serde_json::from_str(&s).ok()),
-                })
+                }))
             },
         )?;
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            out.extend(row?);
         }
         Ok(out)
     }
@@ -2529,7 +3743,8 @@ impl SpaceStore {
     ) -> Result<Vec<DocumentContent>> {
         let conn = self.conn.lock().await;
         let sql = format!(
-            "SELECT d.id, d.space_id, d.title, d.source, d.created_at, d.updated_at,
+            "SELECT d.id, d.space_id, ryu_open_soft('documents.title', d.id, d.title),
+                    ryu_open_soft('documents.source', d.id, d.source), d.created_at, d.updated_at,
                     (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id),
                     d.kind, d.parent_id, d.icon, d.revision
              FROM documents d
@@ -2548,11 +3763,17 @@ impl SpaceStore {
             },
             |row| {
                 let icon_raw: Option<String> = row.get(9)?;
-                Ok(DocumentContent {
+                let (Some(title), Some(source)) = (
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ) else {
+                    return Ok(None);
+                };
+                Ok(Some(DocumentContent {
                     id: row.get(0)?,
                     space_id: row.get(1)?,
-                    title: row.get(2)?,
-                    source: row.get(3)?,
+                    title,
+                    source,
                     created_at: row.get(4)?,
                     updated_at: row.get(5)?,
                     revision: row.get(10)?,
@@ -2560,30 +3781,39 @@ impl SpaceStore {
                     kind: row.get(7)?,
                     parent_id: row.get(8)?,
                     icon: icon_raw.and_then(|value| serde_json::from_str(&value).ok()),
-                })
+                }))
             },
         )?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("listing Space source documents for export")
+        let rows = rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("listing Space source documents for export")?;
+        Ok(rows.into_iter().flatten().collect())
     }
 
     /// List every non-binary document for cross-device sync, including child pages.
     pub async fn list_documents_for_sync(&self) -> Result<Vec<DocumentSyncRecord>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT d.id, d.space_id, d.title, d.source, d.created_at, d.updated_at,
+            "SELECT d.id, d.space_id, ryu_open_soft('documents.title', d.id, d.title),
+                    ryu_open_soft('documents.source', d.id, d.source), d.created_at, d.updated_at,
                     (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id),
                     d.kind, d.parent_id, d.icon, d.revision, d.owner_user_id
              FROM documents d WHERE d.kind != 'file' ORDER BY d.created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             let icon_raw: Option<String> = row.get(9)?;
-            Ok(DocumentSyncRecord {
+            let (Some(title), Some(source)) = (
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ) else {
+                return Ok(None);
+            };
+            Ok(Some(DocumentSyncRecord {
                 document: DocumentContent {
                     id: row.get(0)?,
                     space_id: row.get(1)?,
-                    title: row.get(2)?,
-                    source: row.get(3)?,
+                    title,
+                    source,
                     created_at: row.get(4)?,
                     updated_at: row.get(5)?,
                     revision: row.get(10)?,
@@ -2593,17 +3823,19 @@ impl SpaceStore {
                     icon: icon_raw.and_then(|value| serde_json::from_str(&value).ok()),
                 },
                 owner_user_id: row.get(11)?,
-            })
+            }))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            out.extend(row?);
         }
         Ok(out)
     }
 
     /// Search page titles, Space metadata, editable source, and extracted chunk
-    /// text using literal substring matching. This intentionally sits beside the
+    /// text. Titles and Space names/descriptions match as case-insensitive
+    /// substrings; bodies and extracted chunk text match as whole words through
+    /// the blind `spaces_terms` index. This intentionally sits beside the
     /// vector/graph RAG path: a global palette needs predictable lexical recall
     /// without starting an embedder or reranker, while normal Space answers keep
     /// their richer retrieval behavior.
@@ -2642,89 +3874,170 @@ impl SpaceStore {
         Ok(matches)
     }
 
+    /// One term of [`Self::search_documents_lexical`]. Space names, descriptions
+    /// and document titles are sealed, so they are opened and matched in memory
+    /// (case-insensitive substring, as before). Bodies and chunk text are found
+    /// through the blind term index `spaces_terms` (whole words: a term matches
+    /// a document whose body contains every word of the term). Ranking is
+    /// unchanged: an exact title match, then an exact Space name match, then
+    /// the most recently updated.
     async fn search_documents_lexical_term(
         &self,
         term: &str,
         limit: usize,
         filter: DocFilter<'_>,
     ) -> Result<Vec<LexicalDocumentMatch>> {
-        let escaped = term
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let pattern = format!("%{escaped}%");
+        struct Candidate {
+            hit: LexicalDocumentMatch,
+            description: Option<String>,
+            doc_hit: bool,
+            chunk_hit: Option<String>,
+        }
+        let needle = term.to_lowercase();
+        let body_query = self.seal.keys.terms_query(term);
+        let body_columns = if body_query.is_some() {
+            "d.id IN (SELECT m.doc_id FROM spaces_terms_map m
+                      WHERE m.kind = 'doc' AND m.term_rowid IN
+                          (SELECT rowid FROM spaces_terms WHERE spaces_terms MATCH :query)),
+             (SELECT c.id FROM chunks c
+              JOIN spaces_terms_map m ON m.kind = 'chunk' AND m.ref_id = c.id
+              WHERE c.document_id = d.id AND m.term_rowid IN
+                  (SELECT rowid FROM spaces_terms WHERE spaces_terms MATCH :query)
+              ORDER BY c.ordinal ASC LIMIT 1)"
+        } else {
+            "0, NULL"
+        };
         let conn = self.conn.lock().await;
         let sql = format!(
-            "SELECT d.id, d.space_id, s.name, d.title, d.created_at,
+            "SELECT d.id, d.space_id, ryu_open_soft('spaces.name', s.id, s.name),
+                    ryu_open_soft('spaces.description', s.id, s.description),
+                    ryu_open_soft('documents.title', d.id, d.title), d.created_at,
                     CASE WHEN d.updated_at > 0 THEN d.updated_at ELSE d.created_at END,
-                    CASE
-                        WHEN lower(COALESCE(s.name, '')) LIKE lower(:pattern) ESCAPE '\\'
-                            THEN s.name
-                        WHEN lower(COALESCE(s.description, '')) LIKE lower(:pattern) ESCAPE '\\'
-                            THEN COALESCE(s.description, s.name)
-                        WHEN lower(COALESCE(d.title, '')) LIKE lower(:pattern) ESCAPE '\\'
-                            THEN d.title
-                        WHEN lower(COALESCE(d.source, '')) LIKE lower(:pattern) ESCAPE '\\'
-                            THEN substr(d.source, 1, 280)
-                        ELSE COALESCE(
-                            (SELECT substr(c.content, 1, 280)
-                             FROM chunks c
-                             WHERE c.document_id = d.id
-                               AND lower(c.content) LIKE lower(:pattern) ESCAPE '\\'
-                             ORDER BY c.ordinal ASC
-                             LIMIT 1),
-                            d.title
-                        )
-                    END AS snippet
+                    {body_columns}
              FROM documents d
              JOIN spaces s ON s.id = d.space_id
              WHERE {SPACE_TENANCY_VISIBLE_PREDICATE}
-               AND {DOC_TENANCY_VISIBLE_PREDICATE}
-               AND (
-                    lower(COALESCE(s.name, '')) LIKE lower(:pattern) ESCAPE '\\'
-                    OR lower(COALESCE(s.description, '')) LIKE lower(:pattern) ESCAPE '\\'
-                    OR lower(COALESCE(d.title, '')) LIKE lower(:pattern) ESCAPE '\\'
-                    OR lower(COALESCE(d.source, '')) LIKE lower(:pattern) ESCAPE '\\'
-                    OR EXISTS (
-                        SELECT 1 FROM chunks c
-                        WHERE c.document_id = d.id
-                          AND lower(c.content) LIKE lower(:pattern) ESCAPE '\\'
-                    )
-               )
-             ORDER BY CASE
-                        WHEN lower(d.title) = lower(:term) THEN 0
-                        WHEN lower(s.name) = lower(:term) THEN 1
-                        ELSE 2
-                      END,
-                      CASE WHEN d.updated_at > 0 THEN d.updated_at ELSE d.created_at END DESC
-             LIMIT :limit"
+               AND {DOC_TENANCY_VISIBLE_PREDICATE}"
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(
-            named_params! {
-                ":bound": filter.bound_flag(),
-                ":uid": filter.owner_user_id,
-                ":org": filter.org_id,
-                ":teams": filter.team_ids_json.as_str(),
-                ":pattern": pattern,
-                ":term": term,
-                ":limit": limit as i64,
-            },
-            |row| {
-                Ok(LexicalDocumentMatch {
-                    document_id: row.get(0)?,
-                    space_id: row.get(1)?,
-                    space_name: row.get(2)?,
-                    title: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
-                    snippet: row.get(6)?,
-                })
-            },
-        )?;
-        let mut out = Vec::new();
+        let mut params: Vec<(&str, &dyn rusqlite::ToSql)> = vec![];
+        let bound = filter.bound_flag();
+        let teams = filter.team_ids_json.as_str();
+        params.push((":bound", &bound));
+        params.push((":uid", &filter.owner_user_id));
+        params.push((":org", &filter.org_id));
+        params.push((":teams", &teams));
+        if let Some(query) = body_query.as_ref() {
+            params.push((":query", query));
+        }
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, bool>(7)?,
+                row.get::<_, Option<String>>(8)?,
+            ))
+        })?;
+        let mut candidates = Vec::new();
         for row in rows {
-            out.push(row?);
+            let (
+                id,
+                space_id,
+                name,
+                description,
+                title,
+                created_at,
+                updated_at,
+                doc_hit,
+                chunk_hit,
+            ) = row?;
+            let (Some(space_name), Some(title)) = (name, title) else {
+                continue;
+            };
+            let contains = |value: &str| value.to_lowercase().contains(&needle);
+            let metadata_hit = contains(&space_name)
+                || description.as_deref().is_some_and(contains)
+                || contains(&title);
+            if !(metadata_hit || doc_hit || chunk_hit.is_some()) {
+                continue;
+            }
+            candidates.push(Candidate {
+                hit: LexicalDocumentMatch {
+                    document_id: id,
+                    space_id,
+                    space_name,
+                    title,
+                    snippet: String::new(),
+                    created_at,
+                    updated_at,
+                },
+                description,
+                doc_hit,
+                chunk_hit,
+            });
+        }
+        let rank = |candidate: &Candidate| {
+            if candidate.hit.title.to_lowercase() == needle {
+                0
+            } else if candidate.hit.space_name.to_lowercase() == needle {
+                1
+            } else {
+                2
+            }
+        };
+        candidates.sort_by(|left, right| {
+            rank(left)
+                .cmp(&rank(right))
+                .then(right.hit.updated_at.cmp(&left.hit.updated_at))
+        });
+        candidates.truncate(limit);
+        let first_chars = |value: &str| value.chars().take(280).collect::<String>();
+        let mut out = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            let Candidate {
+                mut hit,
+                description,
+                doc_hit,
+                chunk_hit,
+            } = candidate;
+            let contains = |value: &str| value.to_lowercase().contains(&needle);
+            hit.snippet = if contains(&hit.space_name) {
+                hit.space_name.clone()
+            } else if description.as_deref().is_some_and(contains) {
+                description.unwrap_or_else(|| hit.space_name.clone())
+            } else if contains(&hit.title) {
+                hit.title.clone()
+            } else if doc_hit {
+                conn.query_row(
+                    "SELECT ryu_open_soft('documents.source', id, source) FROM documents
+                     WHERE id = ?1",
+                    params![hit.document_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten()
+                .map(|source| first_chars(&source))
+                .unwrap_or_else(|| hit.title.clone())
+            } else if let Some(chunk_id) = chunk_hit {
+                conn.query_row(
+                    "SELECT ryu_open_soft('chunks.content', id, content) FROM chunks
+                     WHERE id = ?1",
+                    params![chunk_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten()
+                .map(|content| first_chars(&content))
+                .unwrap_or_else(|| hit.title.clone())
+            } else {
+                hit.title.clone()
+            };
+            out.push(hit);
         }
         Ok(out)
     }
@@ -2774,7 +4087,7 @@ impl SpaceStore {
         tenancy: &DocOwner,
     ) -> Result<String> {
         validate_document_metadata(title, None)?;
-        let chunks = chunk_text(content);
+        let chunks = self.split_for_space(space_id, content).await?;
         let mode = {
             let conn = self.conn.lock().await;
             conn.query_row(
@@ -2798,10 +4111,7 @@ impl SpaceStore {
         let emb = self.embedder_snapshot().await;
         let model_id = emb.model_id().to_string();
         let dims = emb.dims();
-        let mut embedded: Vec<(String, Vec<f32>)> = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
-            embedded.push((chunk.clone(), emb.embed(chunk).await?));
-        }
+        let embedded = embed_text_chunks(&emb, chunks).await?;
 
         let document_id = uuid::Uuid::new_v4().to_string();
         let now = now_millis();
@@ -2857,7 +4167,7 @@ impl SpaceStore {
         now: i64,
         model_id: &str,
         dims: usize,
-        embedded: &[(String, Vec<f32>)],
+        embedded: &[EmbeddedChunk],
         tenancy: &DocOwner,
     ) -> Result<String> {
         let conn = &mut *guard;
@@ -3055,7 +4365,10 @@ impl SpaceStore {
         let updated = conn
             .execute(
                 "UPDATE documents
-                 SET title = ?1, source = ?2, updated_at = ?3, revision = revision + 1
+                 SET title = ryu_seal('documents.title', id, ?1),
+                     title_bi = ryu_bi('documents.title', ?1),
+                     source = ryu_seal('documents.source', id, ?2),
+                     updated_at = ?3, revision = revision + 1
                  WHERE id = ?4",
                 params![title, source, now, doc_id],
             )
@@ -3192,23 +4505,27 @@ impl SpaceStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, updated_at FROM documents
+                "SELECT id, ryu_open_soft('documents.title', id, title), updated_at
+                 FROM documents
                  WHERE space_id = ?1 AND kind = ?2
                  ORDER BY updated_at DESC, id DESC",
             )
             .context("preparing app doc list")?;
         let rows = stmt
             .query_map(params![space_id, want], |row| {
-                Ok(AppDocSummary {
+                let Some(title) = row.get::<_, Option<String>>(1)? else {
+                    return Ok(None);
+                };
+                Ok(Some(AppDocSummary {
                     id: row.get(0)?,
-                    title: row.get(1)?,
+                    title,
                     updated_at: row.get(2)?,
-                })
+                }))
             })
             .context("querying app docs")?;
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            out.extend(row?);
         }
         Ok(out)
     }
@@ -3240,14 +4557,16 @@ impl SpaceStore {
     ) -> Result<Vec<AppSpaceUsage>> {
         let conn = self.conn.lock().await;
         let sql = format!(
-            "SELECT s.id, s.name, COUNT(d.id),
-                    COALESCE(SUM(COALESCE(d.byte_size, length(d.source))), 0), s.system
+            "SELECT s.id, ryu_open_soft('spaces.name', s.id, s.name), COUNT(d.id),
+                    COALESCE(SUM(COALESCE(d.byte_size,
+                        length(ryu_open_soft('documents.source', d.id, d.source)))), 0),
+                    s.system
              FROM spaces s
              JOIN documents d ON d.space_id = s.id
              WHERE d.kind = :kind
                AND {SPACE_TENANCY_VISIBLE_PREDICATE}
                AND {DOC_TENANCY_VISIBLE_PREDICATE}
-             GROUP BY s.id, s.name, s.system
+             GROUP BY s.id, s.system
              ORDER BY MAX(s.updated_at) DESC, s.id ASC"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -3260,17 +4579,20 @@ impl SpaceStore {
                 ":teams": filter.team_ids_json.as_str(),
             },
             |row| {
-                Ok(AppSpaceUsage {
+                let Some(name) = row.get::<_, Option<String>>(1)? else {
+                    return Ok(None);
+                };
+                Ok(Some(AppSpaceUsage {
                     id: row.get(0)?,
-                    name: row.get(1)?,
+                    name,
                     document_count: row.get(2)?,
                     storage_bytes: row.get(3)?,
                     system: row.get(4)?,
-                })
+                }))
             },
         )?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
+        let rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows.into_iter().flatten().collect())
     }
 
     /// Delete all visible documents owned by an app, preserving the normal
@@ -3379,14 +4701,26 @@ impl SpaceStore {
         description: Option<&str>,
     ) -> Result<String> {
         let conn = self.conn.lock().await;
-        let existing: Option<String> = conn
-            .query_row(
-                "SELECT id FROM spaces WHERE name = ?1",
-                params![name],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("looking up system space")?;
+        // `name` is sealed: find candidates by blind token, then keep the old
+        // exact (case-sensitive) comparison on the opened names.
+        let existing: Option<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT id, ryu_open_soft('spaces.name', id, name) FROM spaces
+                 WHERE name_bi = ryu_bi('spaces.name', ?1)",
+            )?;
+            let rows = stmt.query_map(params![name], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?;
+            let mut found = None;
+            for row in rows {
+                let (id, opened) = row.context("looking up system space")?;
+                if opened.as_deref() == Some(name) {
+                    found = Some(id);
+                    break;
+                }
+            }
+            found
+        };
         if let Some(id) = existing {
             conn.execute("UPDATE spaces SET system = 1 WHERE id = ?1", params![id])
                 .context("asserting system flag")?;
@@ -3436,20 +4770,33 @@ impl SpaceStore {
     ) -> Result<String> {
         let (owner_user_id, org_id) = tenancy.parts();
         let conn = self.conn.lock().await;
-        let existing: Option<String> = conn
-            .query_row(
-                "SELECT id FROM spaces
-                 WHERE name = :name AND owner_user_id IS :owner AND org_id IS :org
-                 ORDER BY created_at ASC LIMIT 1",
+        // Blind-token candidates, then the old exact comparison on the opened
+        // names, oldest first.
+        let existing: Option<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT id, ryu_open_soft('spaces.name', id, name) FROM spaces
+                 WHERE name_bi = ryu_bi('spaces.name', :name)
+                   AND owner_user_id IS :owner AND org_id IS :org
+                 ORDER BY created_at ASC",
+            )?;
+            let rows = stmt.query_map(
                 named_params! {
                     ":name": name,
                     ":owner": owner_user_id,
                     ":org": org_id,
                 },
-                |row| row.get(0),
-            )
-            .optional()
-            .context("looking up named space")?;
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )?;
+            let mut found = None;
+            for row in rows {
+                let (id, opened) = row.context("looking up named space")?;
+                if opened.as_deref() == Some(name) {
+                    found = Some(id);
+                    break;
+                }
+            }
+            found
+        };
         if let Some(id) = existing {
             return Ok(id);
         }
@@ -3516,9 +4863,6 @@ impl SpaceStore {
         tenancy: &DocOwner,
     ) -> Result<String> {
         validate_document_metadata(title, Some(mime))?;
-        // Persist the bytes first (content-addressed, deduped). Done outside the
-        // db lock — filesystem I/O should not hold the sqlite mutex.
-        let sha = write_blob(&self.blob_root, bytes)?;
         let byte_size = bytes.len() as i64;
 
         // A file has no editable markdown, but a short descriptor keeps it findable
@@ -3538,6 +4882,10 @@ impl SpaceStore {
         let title = title.to_owned();
         let mime = mime.to_owned();
         let tenancy = tenancy.clone();
+        let blob_root = self.blob_root.clone();
+        let blob_cipher = self.seal.keys.blob_cipher.clone();
+        let blob_bytes = bytes.to_vec();
+        self.ensure_writable()?;
         let guard = self.conn.clone().lock_owned().await;
         tokio::task::spawn_blocking(move || {
             Self::create_file_blocking(
@@ -3546,7 +4894,9 @@ impl SpaceStore {
                 &space_id,
                 &title,
                 &mime,
-                &sha,
+                &blob_root,
+                &blob_cipher,
+                &blob_bytes,
                 byte_size,
                 &descriptor,
                 vector,
@@ -3567,7 +4917,8 @@ impl SpaceStore {
     /// `document.parse` facade. Content addressing makes retries idempotent and lets
     /// parser sidecars read the same allowlisted blob path as ordinary Space files.
     pub fn stage_import_blob(&self, bytes: &[u8]) -> Result<String> {
-        write_blob(&self.blob_root, bytes)
+        self.ensure_writable()?;
+        seal::write_blob(&self.blob_root, &self.seal.keys.blob_cipher, bytes)
     }
 
     /// Create the durable history row before an import worker is spawned.
@@ -3597,7 +4948,9 @@ impl SpaceStore {
                 (id, space_id, source_type, source_name, source_format,
                  destination_kind, status, result_documents, item_count,
                  byte_size, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', '[]', 0, ?7, ?8, ?8)",
+             VALUES (?1, ?2, ?3, ryu_seal('space_imports.source_name', ?1, ?4), ?5, ?6,
+                     'pending', ryu_seal('space_imports.result_documents', ?1, '[]'), 0, ?7,
+                     ?8, ?8)",
             params![
                 id,
                 space_id,
@@ -3661,7 +5014,8 @@ impl SpaceStore {
             .execute(
                 "UPDATE space_imports
              SET status = 'completed', destination_kind = ?1,
-                 result_documents = ?2, item_count = ?3, message = ?4,
+                 result_documents = ryu_seal('space_imports.result_documents', id, ?2),
+                 item_count = ?3, message = ryu_seal('space_imports.message', id, ?4),
                  updated_at = ?5, completed_at = ?5
              WHERE id = ?6 AND status = 'running'",
                 params![
@@ -3687,7 +5041,8 @@ impl SpaceStore {
         let failed = conn
             .execute(
                 "UPDATE space_imports
-             SET status = 'failed', message = ?1, updated_at = ?2, completed_at = ?2
+             SET status = 'failed', message = ryu_seal('space_imports.message', id, ?1),
+                 updated_at = ?2, completed_at = ?2
              WHERE id = ?3 AND status IN ('pending', 'running')",
                 params![message, now, import_id],
             )
@@ -3709,29 +5064,39 @@ impl SpaceStore {
         let now = now_millis();
         conn.execute(
             "UPDATE space_imports
-             SET status = 'failed', message = 'Core restarted before this import finished',
+             SET status = 'failed',
+                 message = ryu_seal('space_imports.message', id,
+                     'Core restarted before this import finished'),
                  updated_at = ?1, completed_at = ?1
              WHERE space_id = ?2 AND status IN ('pending', 'running') AND updated_at < ?3",
             params![now, space_id, now - 10 * 60 * 1000],
         )
         .context("expiring abandoned space imports")?;
         let mut stmt = conn.prepare(
-            "SELECT id, space_id, source_type, source_name, source_format,
-                    destination_kind, status, result_documents, item_count,
-                    byte_size, message, created_at, updated_at, completed_at
+            "SELECT id, space_id, source_type,
+                    ryu_open_soft('space_imports.source_name', id, source_name), source_format,
+                    destination_kind, status,
+                    ryu_open_soft('space_imports.result_documents', id, result_documents),
+                    item_count, byte_size, ryu_open_soft('space_imports.message', id, message),
+                    created_at, updated_at, completed_at
              FROM space_imports
              WHERE space_id = ?1
              ORDER BY created_at DESC
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![space_id, limit.clamp(1, 200) as i64], |row| {
-            let encoded: String = row.get(7)?;
-            let result_documents = serde_json::from_str(&encoded).unwrap_or_default();
-            Ok(SpaceImportRecord {
+            let encoded: Option<String> = row.get(7)?;
+            let result_documents = encoded
+                .and_then(|encoded| serde_json::from_str(&encoded).ok())
+                .unwrap_or_default();
+            let Some(source_name) = row.get::<_, Option<String>>(3)? else {
+                return Ok(None);
+            };
+            Ok(Some(SpaceImportRecord {
                 id: row.get(0)?,
                 space_id: row.get(1)?,
                 source_type: row.get(2)?,
-                source_name: row.get(3)?,
+                source_name,
                 source_format: row.get(4)?,
                 destination_kind: row.get(5)?,
                 status: row.get(6)?,
@@ -3742,10 +5107,12 @@ impl SpaceStore {
                 created_at: row.get(11)?,
                 updated_at: row.get(12)?,
                 completed_at: row.get(13)?,
-            })
+            }))
         })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("listing space imports")
+        let rows = rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("listing space imports")?;
+        Ok(rows.into_iter().flatten().collect())
     }
 
     /// The blocking body of [`SpaceStore::create_file`]. Split out only so the
@@ -3759,7 +5126,9 @@ impl SpaceStore {
         space_id: &str,
         title: &str,
         mime: &str,
-        sha: &str,
+        blob_root: &Path,
+        blob_cipher: &ryu_crypto::ContentCipher,
+        bytes: &[u8],
         byte_size: i64,
         descriptor: &str,
         vector: Vec<f32>,
@@ -3787,6 +5156,9 @@ impl SpaceStore {
         let mode = RetrievalMode::from_str(&mode_str);
 
         ensure_file_quota(&tx, byte_size, tenancy, None)?;
+        // The transaction and mutex serialize quota decisions before any new
+        // content-addressed bytes are persisted. A rejected upload writes none.
+        let sha = seal::write_blob(blob_root, blob_cipher, bytes)?;
 
         upsert_document_row(
             &tx,
@@ -3798,7 +5170,7 @@ impl SpaceStore {
             "file",
             None,
             Some(mime),
-            Some(sha),
+            Some(&sha),
             Some(byte_size),
             tenancy,
         )?;
@@ -3808,7 +5180,11 @@ impl SpaceStore {
             &tx,
             document_id,
             space_id,
-            &[(descriptor.to_owned(), vector)],
+            &[EmbeddedChunk {
+                content: descriptor.to_owned(),
+                embedding: vector,
+                metadata: None,
+            }],
             now,
             model_id,
             dims,
@@ -3826,18 +5202,16 @@ impl SpaceStore {
     /// Replace a file document's bytes and reset its searchable content to the new
     /// `{title}\n{mime}` descriptor in one transaction.
     ///
-    /// The content-addressed blob is written before the database lock is taken. The
-    /// row pointer, MIME, byte size, descriptor and chunk/vector/graph rows then move
-    /// together, so an editor save can never expose new bytes with text extracted
-    /// from the previous revision. Core may replace the descriptor chunks again after
-    /// its document parser finishes.
+    /// The content-addressed blob is written only after the replacement quota
+    /// passes inside the database transaction. The row pointer, MIME, byte size,
+    /// descriptor and chunk/vector/graph rows then move together. Core may
+    /// replace the descriptor chunks again after its document parser finishes.
     pub async fn replace_file_blob(
         &self,
         doc_id: &str,
         bytes: &[u8],
         mime: &str,
     ) -> Result<FileMeta> {
-        let sha = write_blob(&self.blob_root, bytes)?;
         let byte_size = bytes.len() as i64;
 
         // Resolve the title before embedding, then verify the same row again inside
@@ -3857,6 +5231,10 @@ impl SpaceStore {
         let mime = mime.to_owned();
         let title = current.title;
         let now = now_millis();
+        let blob_root = self.blob_root.clone();
+        let blob_cipher = self.seal.keys.blob_cipher.clone();
+        let blob_bytes = bytes.to_vec();
+        self.ensure_writable()?;
         let mut guard = self.conn.clone().lock_owned().await;
         tokio::task::spawn_blocking(move || {
             let conn = &mut *guard;
@@ -3874,7 +5252,8 @@ impl SpaceStore {
                 Option<i64>,
             )> = tx
                 .query_row(
-                    "SELECT d.space_id, d.kind, s.retrieval_mode, d.created_at, d.title,
+                    "SELECT d.space_id, d.kind, s.retrieval_mode, d.created_at,
+                            ryu_open('documents.title', d.id, d.title),
                             d.owner_user_id, d.org_id, d.byte_size
                      FROM documents d JOIN spaces s ON s.id = d.space_id
                      WHERE d.id = ?1",
@@ -3906,10 +5285,11 @@ impl SpaceStore {
             }
             let tenancy = DocOwner::owned(owner_user_id.as_deref(), org_id.as_deref());
             ensure_file_quota(&tx, byte_size, &tenancy, Some(&doc_id))?;
+            let sha = seal::write_blob(&blob_root, &blob_cipher, &blob_bytes)?;
 
             tx.execute(
-                "DELETE FROM chunk_vectors WHERE rowid IN
-                     (SELECT rowid FROM chunks WHERE document_id = ?1)",
+                "DELETE FROM chunk_embeddings WHERE chunk_id IN
+                 (SELECT id FROM chunks WHERE document_id = ?1)",
                 params![doc_id],
             )
             .context("deleting old file chunk vectors")?;
@@ -3929,7 +5309,7 @@ impl SpaceStore {
             tx.execute(
                 "UPDATE documents
                  SET mime = ?1, blob_sha256 = ?2, byte_size = ?3,
-                     source = ?4, updated_at = ?5
+                     source = ryu_seal('documents.source', id, ?4), updated_at = ?5
                  WHERE id = ?6",
                 params![mime, sha, byte_size, descriptor, now, doc_id],
             )
@@ -3938,7 +5318,11 @@ impl SpaceStore {
                 &tx,
                 &doc_id,
                 &space_id,
-                &[(descriptor, vector)],
+                &[EmbeddedChunk {
+                    content: descriptor,
+                    embedding: vector,
+                    metadata: None,
+                }],
                 now,
                 &model_id,
                 dims,
@@ -4026,16 +5410,13 @@ impl SpaceStore {
         if text.trim().is_empty() {
             anyhow::bail!("refusing to replace file chunks with empty text");
         }
-        let chunks = chunk_text(text);
+        let chunks = self.split_for_document(doc_id, text).await?;
 
         // Embed outside the lock — the embedder may do network I/O.
         let emb = self.embedder_snapshot().await;
         let model_id = emb.model_id().to_string();
         let dims = emb.dims();
-        let mut embedded: Vec<(String, Vec<f32>)> = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
-            embedded.push((chunk.clone(), emb.embed(chunk).await?));
-        }
+        let embedded = embed_text_chunks(&emb, chunks).await?;
 
         let written = embedded.len();
         let doc_id = doc_id.to_owned();
@@ -4059,7 +5440,7 @@ impl SpaceStore {
         now: i64,
         model_id: &str,
         dims: usize,
-        embedded: &[(String, Vec<f32>)],
+        embedded: &[EmbeddedChunk],
     ) -> Result<()> {
         let conn = &mut *guard;
         let tx = conn.transaction().context("starting file re-chunk")?;
@@ -4088,8 +5469,8 @@ impl SpaceStore {
         // Drop the old chunk set — vectors and graph rows first, since both are keyed
         // off the chunk rows this is about to delete.
         tx.execute(
-            "DELETE FROM chunk_vectors WHERE rowid IN
-                 (SELECT rowid FROM chunks WHERE document_id = ?1)",
+            "DELETE FROM chunk_embeddings WHERE chunk_id IN
+                 (SELECT id FROM chunks WHERE document_id = ?1)",
             params![doc_id],
         )
         .context("deleting old file chunk vectors")?;
@@ -4130,7 +5511,7 @@ impl SpaceStore {
         let conn = self.conn.lock().await;
         let meta = conn
             .query_row(
-                "SELECT id, space_id, title,
+                "SELECT id, space_id, ryu_open('documents.title', id, title),
                         COALESCE(mime, 'application/octet-stream'),
                         blob_sha256, COALESCE(byte_size, 0), created_at
                  FROM documents WHERE id = ?1 AND kind = 'file'",
@@ -4162,7 +5543,13 @@ impl SpaceStore {
         if meta.sha256.is_empty() {
             return Ok(None);
         }
-        match read_blob(&self.blob_root, &meta.sha256)? {
+        let root = self.blob_root.clone();
+        let cipher = self.seal.keys.blob_cipher.clone();
+        let sha = meta.sha256.clone();
+        let read = tokio::task::spawn_blocking(move || seal::read_blob(&root, &cipher, &sha))
+            .await
+            .context("blob read task panicked")??;
+        match read {
             Some(bytes) => Ok(Some((meta.mime, bytes))),
             None => Ok(None),
         }
@@ -4292,7 +5679,8 @@ impl SpaceStore {
         let conn = self.conn.lock().await;
         let doc = conn
             .query_row(
-                "SELECT d.id, d.space_id, d.title, d.source, d.created_at, d.updated_at,
+                "SELECT d.id, d.space_id, ryu_open('documents.title', d.id, d.title),
+                        ryu_open('documents.source', d.id, d.source), d.created_at, d.updated_at,
                         (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id),
                         d.kind, d.parent_id, d.icon, d.revision
                  FROM documents d WHERE d.id = ?1",
@@ -4342,7 +5730,8 @@ impl SpaceStore {
         }
         let updated = conn
             .execute(
-                "UPDATE spaces SET name = ?1, updated_at = ?2 WHERE id = ?3",
+                "UPDATE spaces SET name = ryu_seal('spaces.name', id, ?1),
+                     name_bi = ryu_bi('spaces.name', ?1), updated_at = ?2 WHERE id = ?3",
                 params![name, now, space_id],
             )
             .context("renaming space")?;
@@ -4593,17 +5982,7 @@ impl SpaceStore {
 
         {
             let conn = store.conn.blocking_lock();
-            conn.execute_batch(
-                "CREATE TEMP TABLE IF NOT EXISTS retrieval_rebuild_nodes (
-                   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, entity TEXT NOT NULL, chunk_id TEXT NOT NULL
-                 );
-                 CREATE TEMP TABLE IF NOT EXISTS retrieval_rebuild_edges (
-                   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, src_entity TEXT NOT NULL,
-                   dst_entity TEXT NOT NULL, chunk_id TEXT NOT NULL
-                 );
-                 DELETE FROM retrieval_rebuild_nodes;
-                 DELETE FROM retrieval_rebuild_edges;",
-            )?;
+            create_retrieval_staging(&conn)?;
         }
 
         let mut fingerprint = Sha256::new();
@@ -4618,7 +5997,8 @@ impl SpaceStore {
             let mut conn = store.conn.blocking_lock();
             let rows: Vec<(i64, String, String)> = {
                 let mut stmt = conn.prepare(
-                    "SELECT rowid, id, content FROM chunks
+                    "SELECT rowid, id, COALESCE(ryu_open_soft('chunks.content', id, content), '')
+                     FROM chunks
                      WHERE space_id = ?1 AND rowid > ?2 ORDER BY rowid LIMIT ?3",
                 )?;
                 let rows = stmt
@@ -4990,7 +6370,10 @@ impl SpaceStore {
         if mode == RetrievalMode::Graph {
             let rows: Vec<(String, String)> = {
                 let mut stmt = tx
-                    .prepare("SELECT id, content FROM chunks WHERE space_id = ?1 ORDER BY rowid")
+                    .prepare(
+                        "SELECT id, COALESCE(ryu_open_soft('chunks.content', id, content), '')
+                         FROM chunks WHERE space_id = ?1 ORDER BY rowid",
+                    )
                     .context("preparing chunk scan for graph rebuild")?;
                 let mapped =
                     stmt.query_map(params![space_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
@@ -5094,14 +6477,13 @@ impl SpaceStore {
             kind if kind.starts_with("app:") => flatten_app_source(&document.source),
             _ => document.source.clone(),
         };
-        let chunks = chunk_text(&chunk_source);
+        let chunks = self
+            .split_for_space(&document.space_id, &chunk_source)
+            .await?;
         let emb = self.embedder_snapshot().await;
         let model_id = emb.model_id().to_string();
         let dims = emb.dims();
-        let mut embedded: Vec<(String, Vec<f32>)> = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
-            embedded.push((chunk.clone(), emb.embed(chunk).await?));
-        }
+        let embedded = embed_text_chunks(&emb, chunks).await?;
 
         let record = record.clone();
         let tenancy = tenancy.clone();
@@ -5135,22 +6517,69 @@ impl SpaceStore {
         icon: Option<&str>,
         model_id: &str,
         dims: usize,
-        embedded: &[(String, Vec<f32>)],
+        embedded: &[EmbeddedChunk],
     ) -> Result<bool> {
         let document = &record.document;
         let conn = &mut *guard;
         let tx = conn
             .transaction()
             .context("starting synced document transaction")?;
-        let existing: Option<i64> = tx
+        let existing: Option<LocalSyncedDocument> = tx
             .query_row(
-                "SELECT updated_at FROM documents WHERE id = ?1",
+                "SELECT updated_at, sync_base_updated_at, ryu_open('documents.title', id, title),
+                        ryu_open('documents.source', id, source), kind, space_id,
+                        revision, updated_by
+                 FROM documents WHERE id = ?1",
                 params![document.id],
-                |row| row.get(0),
+                |row| {
+                    Ok(LocalSyncedDocument {
+                        updated_at: row.get(0)?,
+                        sync_base_updated_at: row.get(1)?,
+                        title: row.get(2)?,
+                        source: row.get(3)?,
+                        kind: row.get(4)?,
+                        space_id: row.get(5)?,
+                        revision: row.get(6)?,
+                        updated_by: row.get(7)?,
+                    })
+                },
             )
             .optional()?;
-        if existing.is_some_and(|updated_at| updated_at >= document.updated_at) {
+        if existing
+            .as_ref()
+            .is_some_and(|local| local.updated_at >= document.updated_at)
+        {
             return Ok(false);
+        }
+        // Newest-wins decides what the document shows, but it must not destroy
+        // concurrent work: when this device edited the document since the last
+        // snapshot it received and the incoming body differs, keep the local body
+        // as a pinned history version the owner can compare and restore.
+        if let Some(local) = existing.as_ref() {
+            if local.has_unsynced_edits_diverging_from(document) {
+                Self::insert_history_version(
+                    &tx,
+                    &document.id,
+                    &local.space_id,
+                    &SnapshotPayload {
+                        kind: local.kind.clone(),
+                        source: local.source.clone(),
+                        title: local.title.clone(),
+                    },
+                    Some(SYNC_CONFLICT_LABEL),
+                    SYNC_CONFLICT_CAPTURE_TYPE,
+                    "exact",
+                    local.revision,
+                    local.updated_by.as_deref(),
+                    None,
+                    true,
+                    now_millis(),
+                )?;
+                tracing::warn!(
+                    document_id = %document.id,
+                    "spaces sync: kept this device's concurrent edit as a history version"
+                );
+            }
         }
 
         upsert_document_row(
@@ -5175,8 +6604,8 @@ impl SpaceStore {
         let mode = RetrievalMode::from_str(&mode_str);
 
         tx.execute(
-            "DELETE FROM chunk_vectors WHERE rowid IN
-                 (SELECT rowid FROM chunks WHERE document_id = ?1)",
+            "DELETE FROM chunk_embeddings WHERE chunk_id IN
+                 (SELECT id FROM chunks WHERE document_id = ?1)",
             params![document.id],
         )?;
         tx.execute(
@@ -5205,8 +6634,11 @@ impl SpaceStore {
         )?;
         tx.execute(
             "UPDATE documents
-             SET space_id = ?1, title = ?2, source = ?3, created_at = ?4,
-                 updated_at = ?5, kind = ?6, parent_id = ?7, icon = ?8
+             SET space_id = ?1, title = ryu_seal('documents.title', id, ?2),
+                 title_bi = ryu_bi('documents.title', ?2),
+                 source = ryu_seal('documents.source', id, ?3), created_at = ?4,
+                 updated_at = ?5, kind = ?6, parent_id = ?7, icon = ?8,
+                 sync_base_updated_at = ?5
              WHERE id = ?9",
             params![
                 document.space_id,
@@ -5233,7 +6665,8 @@ impl SpaceStore {
         )?;
         tx.execute(
             "UPDATE document_links SET dst_doc_id = NULL
-             WHERE dst_doc_id = ?1 AND dst_title != ?2 COLLATE NOCASE",
+             WHERE dst_doc_id = ?1
+               AND dst_title_bi IS NOT ryu_bi('document_links.dst_title', ?2)",
             params![document.id, document.title],
         )?;
         reresolve_pending_links(&tx, &document.space_id, &document.id, &document.title)?;
@@ -5313,15 +6746,12 @@ impl SpaceStore {
             Some(k) if k.starts_with("app:") => flatten_app_source(source),
             _ => source.to_string(),
         };
-        let chunks = chunk_text(&chunk_source);
+        let chunks = self.split_for_document(doc_id, &chunk_source).await?;
         // Embed outside the lock — the embedder may do network I/O.
         let emb = self.embedder_snapshot().await;
         let model_id = emb.model_id().to_string();
         let dims = emb.dims();
-        let mut embedded: Vec<(String, Vec<f32>)> = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
-            embedded.push((chunk.clone(), emb.embed(chunk).await?));
-        }
+        let embedded = embed_text_chunks(&emb, chunks).await?;
 
         let now = now_millis();
         // Same reasoning (and the same three caveats) as [`Self::ingest_document`]:
@@ -5387,7 +6817,7 @@ impl SpaceStore {
         now: i64,
         model_id: &str,
         dims: usize,
-        embedded: &[(String, Vec<f32>)],
+        embedded: &[EmbeddedChunk],
         expected_revision: Option<i64>,
         operation_id: Option<&str>,
         created_by: Option<&str>,
@@ -5427,7 +6857,8 @@ impl SpaceStore {
         // it. The revision check happens here, after embeddings were prepared.
         let row: Option<DocumentHistoryHead> = tx
             .query_row(
-                "SELECT d.space_id, s.retrieval_mode, d.title, d.source, d.kind,
+                "SELECT d.space_id, s.retrieval_mode, ryu_open('documents.title', d.id, d.title),
+                        ryu_open('documents.source', d.id, d.source), d.kind,
                         d.revision, d.updated_by,
                         (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id)
                  FROM documents d JOIN spaces s ON s.id = d.space_id
@@ -5483,8 +6914,8 @@ impl SpaceStore {
 
         // Drop the document's old chunks, vectors, and graph rows.
         tx.execute(
-            "DELETE FROM chunk_vectors WHERE rowid IN
-                 (SELECT rowid FROM chunks WHERE document_id = ?1)",
+            "DELETE FROM chunk_embeddings WHERE chunk_id IN
+                 (SELECT id FROM chunks WHERE document_id = ?1)",
             params![doc_id],
         )
         .context("deleting old chunk vectors")?;
@@ -5506,7 +6937,9 @@ impl SpaceStore {
         let new_revision = current_revision.saturating_add(1);
         tx.execute(
             "UPDATE documents
-             SET title = ?1, source = ?2, updated_at = ?3, revision = ?4,
+             SET title = ryu_seal('documents.title', id, ?1),
+                 title_bi = ryu_bi('documents.title', ?1),
+                 source = ryu_seal('documents.source', id, ?2), updated_at = ?3, revision = ?4,
                  updated_by = COALESCE(?5, updated_by)
              WHERE id = ?6",
             params![title, source, now, new_revision, created_by, doc_id],
@@ -5524,7 +6957,8 @@ impl SpaceStore {
         store_doc_links(&tx, &space_id, doc_id, source, now)?;
         tx.execute(
             "UPDATE document_links SET dst_doc_id = NULL
-             WHERE dst_doc_id = ?1 AND dst_title != ?2 COLLATE NOCASE",
+             WHERE dst_doc_id = ?1
+               AND dst_title_bi IS NOT ryu_bi('document_links.dst_title', ?2)",
             params![doc_id, title],
         )
         .context("unresolving stale inbound links on rename")?;
@@ -5593,12 +7027,14 @@ impl SpaceStore {
         now: i64,
     ) -> Result<String> {
         let encoded = encode_snapshot(snapshot)?;
+        let hash = history_hash(tx, &encoded.raw)?;
         tx.execute(
             "INSERT OR IGNORE INTO document_version_blobs
                  (hash, codec, payload, raw_bytes, stored_bytes, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             VALUES (?1, ?2, ryu_seal_blob('document_version_blobs.payload', ?1, ?3),
+                     ?4, ?5, ?6)",
             params![
-                encoded.hash,
+                hash,
                 SNAPSHOT_CODEC,
                 encoded.payload,
                 encoded.raw_bytes,
@@ -5607,7 +7043,81 @@ impl SpaceStore {
             ],
         )
         .context("storing document history blob")?;
-        Ok(encoded.hash)
+        Ok(hash)
+    }
+
+    /// Move history snapshots stored under the unkeyed digest of older builds
+    /// (64 hex of `SHA-256(raw)`, confirmable offline for short pages) to the
+    /// keyed address (32 hex, [`seal::SpacesKeys::history_hash`]). Per row, in
+    /// one transaction: open the payload under its old id, insert it resealed
+    /// under the new id, repoint `document_versions.blob_hash`, delete the old
+    /// row (`secure_delete` is on) and mark the store's scrub owed. Resumable
+    /// (a cursor over the old ids; finished rows no longer match) and
+    /// idempotent. A payload that does not open is left in place and counted.
+    /// Returns the rows moved.
+    fn rekey_history_blobs(conn: &mut Connection, seal: &seal::SealState) -> Result<u64> {
+        const PURPOSE: &str = "document_version_blobs.payload";
+        let mut moved = 0u64;
+        let mut cursor = String::new();
+        loop {
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let rows: Vec<(String, String, Vec<u8>)> = {
+                let mut stmt = tx.prepare(
+                    "SELECT hash, codec, payload FROM document_version_blobs
+                     WHERE length(hash) = 64 AND hash > ?1 ORDER BY hash LIMIT 64",
+                )?;
+                let mapped = stmt.query_map(params![cursor], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })?;
+                mapped.collect::<rusqlite::Result<_>>()?
+            };
+            let Some(last) = rows.last().map(|(hash, _, _)| hash.clone()) else {
+                tx.commit()?;
+                return Ok(moved);
+            };
+            for (old, codec, stored) in rows {
+                let opened = match seal
+                    .keys
+                    .cipher
+                    .open_bytes(&stored, &ContentContext::for_id(PURPOSE, old.as_str()))
+                {
+                    Ok(opened) => opened.value,
+                    Err(error) => {
+                        tracing::warn!("spaces store: a history snapshot does not open: {error:#}");
+                        seal.note_unreadable(PURPOSE);
+                        continue;
+                    }
+                };
+                let raw = history::snapshot_raw(&codec, &opened)?;
+                let new = seal.keys.history_hash(&raw)?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO document_version_blobs
+                         (hash, codec, payload, raw_bytes, stored_bytes, created_at)
+                     SELECT ?1, codec, ryu_seal_blob(?2, ?1, ?3), raw_bytes, stored_bytes,
+                            created_at
+                     FROM document_version_blobs WHERE hash = ?4",
+                    params![new, PURPOSE, opened, old],
+                )
+                .context("storing a history snapshot under its keyed address")?;
+                tx.execute(
+                    "UPDATE document_versions SET blob_hash = ?1 WHERE blob_hash = ?2",
+                    params![new, old],
+                )?;
+                tx.execute(
+                    "DELETE FROM document_version_blobs WHERE hash = ?1",
+                    params![old],
+                )?;
+                moved += 1;
+            }
+            if moved > 0 {
+                // The old rows' cells are zeroed by secure_delete; the
+                // compaction (finish_store) is owed for the rest.
+                mark_scrub_owed(&tx)?;
+            }
+            tx.commit()
+                .context("committing a history re-address batch")?;
+            cursor = last;
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5632,7 +7142,9 @@ impl SpaceStore {
                  (id, document_id, space_id, title, source, label, kind, created_at,
                   blob_hash, capture_type, granularity, revision, updated_at,
                   created_by, group_key, pinned)
-             VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+             VALUES (?1, ?2, ?3, ryu_seal('document_versions.title', ?1, ?4),
+                     ryu_seal('document_versions.source', ?1, ''),
+                     ryu_seal('document_versions.label', ?1, ?5), ?6, ?7, ?8, ?9, ?10, ?11,
                      ?7, ?12, ?13, ?14)",
             params![
                 version_id,
@@ -5718,7 +7230,8 @@ impl SpaceStore {
         if let Some(version_id) = existing_id {
             tx.execute(
                 "UPDATE document_versions
-                 SET title = ?1, blob_hash = ?2, revision = ?3, updated_at = ?4,
+                 SET title = ryu_seal('document_versions.title', id, ?1), blob_hash = ?2,
+                     revision = ?3, updated_at = ?4,
                      created_by = ?5, granularity = 'ten_minute'
                  WHERE id = ?6",
                 params![
@@ -5867,7 +7380,8 @@ impl SpaceStore {
         let (space_id, title, source, kind, revision): (String, String, String, String, i64) = {
             let conn = self.conn.lock().await;
             conn.query_row(
-                "SELECT space_id, title, source, kind, revision
+                "SELECT space_id, ryu_open('documents.title', id, title),
+                        ryu_open('documents.source', id, source), kind, revision
                  FROM documents WHERE id = ?1",
                 params![doc_id],
                 |row| {
@@ -5911,7 +7425,8 @@ impl SpaceStore {
         let current: Option<(String, String, String, i64)> = {
             let conn = self.conn.lock().await;
             conn.query_row(
-                "SELECT space_id, title, kind, revision FROM documents WHERE id = ?1",
+                "SELECT space_id, ryu_open('documents.title', id, title), kind, revision
+                 FROM documents WHERE id = ?1",
                 params![doc_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
@@ -5941,17 +7456,21 @@ impl SpaceStore {
             .collect::<Vec<_>>();
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, document_id, title, label, kind, created_at,
+            "SELECT id, document_id, ryu_open_soft('document_versions.title', id, title),
+                    ryu_open_soft('document_versions.label', id, label), kind, created_at,
                     updated_at, capture_type, granularity, revision, created_by
              FROM document_versions
              WHERE document_id = ?1
              ORDER BY updated_at DESC, id DESC",
         )?;
         let rows = stmt.query_map(params![doc_id], |row| {
-            Ok(DocumentVersionMeta {
+            let Some(title) = row.get::<_, Option<String>>(2)? else {
+                return Ok(None);
+            };
+            Ok(Some(DocumentVersionMeta {
                 id: row.get(0)?,
                 document_id: row.get(1)?,
-                title: row.get(2)?,
+                title,
                 label: row.get(3)?,
                 kind: row.get(4)?,
                 created_at: row.get(5)?,
@@ -5960,9 +7479,12 @@ impl SpaceStore {
                 granularity: row.get(8)?,
                 revision: row.get(9)?,
                 created_by: row.get(10)?,
-            })
+            }))
         })?;
-        let legacy = rows.filter_map(std::result::Result::ok).collect::<Vec<_>>();
+        let legacy = rows
+            .filter_map(std::result::Result::ok)
+            .flatten()
+            .collect::<Vec<_>>();
         if versions.is_empty() {
             // Pre-Git documents keep their complete legacy history as a
             // compatibility fallback.
@@ -5970,8 +7492,13 @@ impl SpaceStore {
         } else {
             // Once a document has Git checkpoints, SQLite snapshots remain the
             // multiplayer/conflict primitive but are not duplicated in the
-            // user-facing history list.
-            let _ = legacy;
+            // user-facing history list. A body kept from a sync conflict exists
+            // only here, so it stays listed or the owner could never find it.
+            versions.extend(
+                legacy
+                    .into_iter()
+                    .filter(|version| version.capture_type == SYNC_CONFLICT_CAPTURE_TYPE),
+            );
         }
         versions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
         Ok(versions)
@@ -5982,7 +7509,9 @@ impl SpaceStore {
         let conn = self.conn.lock().await;
         let row = conn
             .query_row(
-                "SELECT id, document_id, title, source, label, kind, created_at,
+                "SELECT id, document_id, ryu_open('document_versions.title', id, title),
+                        ryu_open('document_versions.source', id, source),
+                        ryu_open('document_versions.label', id, label), kind, created_at,
                         updated_at, capture_type, granularity, revision, created_by,
                         blob_hash
                  FROM document_versions WHERE id = ?1",
@@ -6028,7 +7557,8 @@ impl SpaceStore {
         let source = if let Some(blob_hash) = blob_hash {
             let (codec, payload): (String, Vec<u8>) = conn
                 .query_row(
-                    "SELECT codec, payload FROM document_version_blobs WHERE hash = ?1",
+                    "SELECT codec, ryu_open_blob('document_version_blobs.payload', hash, payload)
+                     FROM document_version_blobs WHERE hash = ?1",
                     params![blob_hash],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
@@ -6067,7 +7597,7 @@ impl SpaceStore {
         let current: Option<(String, String, String, String, i64)> = {
             let conn = self.conn.lock().await;
             conn.query_row(
-                "SELECT id, space_id, title, kind, revision
+                "SELECT id, space_id, ryu_open('documents.title', id, title), kind, revision
                  FROM documents WHERE id = ?1",
                 params![doc_id],
                 |row| {
@@ -6216,8 +7746,8 @@ impl SpaceStore {
         // Delete vec0 vectors for the target AND every child (vec0 has no cascade).
         for id in std::iter::once(doc_id.to_string()).chain(child_ids.iter().cloned()) {
             tx.execute(
-                "DELETE FROM chunk_vectors WHERE rowid IN
-                     (SELECT rowid FROM chunks WHERE document_id = ?1)",
+                "DELETE FROM chunk_embeddings WHERE chunk_id IN
+                 (SELECT id FROM chunks WHERE document_id = ?1)",
                 params![id],
             )
             .context("deleting doc chunk vectors")?;
@@ -6299,70 +7829,17 @@ impl SpaceStore {
         link_expansion: Option<bool>,
         filter: DocFilter<'_>,
     ) -> Result<Vec<ChunkMatch>> {
-        let mode = self.space_mode(space_id).await?;
         // Over-fetch candidates so the neural reranker (bge cross-encoder, served
         // by the lazily-started `llamacpp-rerank` sidecar) has a fuller set to
-        // re-score. Capped so we never balloon the KNN/graph query.
-        const RERANK_FANOUT: usize = 4;
-        const RERANK_MAX_CANDIDATES: usize = 50;
-        let requested_limit = limit.min(RERANK_MAX_CANDIDATES);
-        let candidate_limit = requested_limit
-            .saturating_mul(RERANK_FANOUT)
-            .clamp(requested_limit, RERANK_MAX_CANDIDATES);
-        let mut candidates = match mode {
-            RetrievalMode::Vector => {
-                self.vector_search(space_id, query, candidate_limit, &filter)
-                    .await?
-            }
-            RetrievalMode::Graph => {
-                self.graph_search(space_id, query, candidate_limit, &filter)
-                    .await?
-            }
+        // re-score, expand seed hits along resolved `[[page]]` links (wiki
+        // GraphRAG, fail-open), then rerank and truncate. The pipeline lives in
+        // `search_with`; this is it with no hybrid, filter, or parent options.
+        let opts = SpaceSearchOptions {
+            limit,
+            link_expansion,
+            ..SpaceSearchOptions::default()
         };
-
-        // Wiki GraphRAG: expand seed hits along resolved `[[page]]` links so the
-        // reranker sees context from documents the hits reference, not only the
-        // closest vectors. Applies to both retrieval modes; fail-open.
-        if link_expansion.unwrap_or_else(link_expansion_default) {
-            const LINK_HOPS: usize = 2;
-            const LINK_PER_DOC_CHUNKS: usize = 3;
-            let mut seed_doc_ids: Vec<String> = Vec::new();
-            let mut seen_docs: std::collections::HashSet<String> = std::collections::HashSet::new();
-            for c in &candidates {
-                if seen_docs.insert(c.document_id.clone()) {
-                    seed_doc_ids.push(c.document_id.clone());
-                }
-            }
-            match self
-                .expand_by_links(
-                    space_id,
-                    &seed_doc_ids,
-                    LINK_HOPS,
-                    LINK_PER_DOC_CHUNKS,
-                    MAX_LINK_EXPANDED_DOCUMENTS,
-                    MAX_LINK_EXPANDED_CHUNKS
-                        .min(RERANK_MAX_CANDIDATES.saturating_sub(candidates.len())),
-                    &filter,
-                )
-                .await
-            {
-                Ok(extra) => {
-                    let mut existing: std::collections::HashSet<String> =
-                        candidates.iter().map(|c| c.chunk_id.clone()).collect();
-                    for c in extra {
-                        if existing.insert(c.chunk_id.clone()) {
-                            candidates.push(c);
-                            if candidates.len() >= RERANK_MAX_CANDIDATES {
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(e) => tracing::debug!("Spaces link-expansion skipped ({e:#})"),
-            }
-        }
-
-        Ok(self.apply_reranking(query, candidates, limit).await)
+        self.search_with(space_id, query, &opts, filter).await
     }
 
     /// Re-score retrieval `candidates` with the neural reranker and truncate to
@@ -6420,13 +7897,17 @@ impl SpaceStore {
         ))
     }
 
-    /// KNN cosine-similarity search (vector mode).
+    /// KNN cosine-similarity search (vector mode), restricted to the chunk
+    /// rowids in `allowed_rowids` (a JSON array) when it is `Some` — the metadata
+    /// filter's allowlist, applied inside the KNN so a filtered search still
+    /// returns its `limit` nearest matching chunks.
     async fn vector_search(
         &self,
         space_id: &str,
         query: &str,
         limit: usize,
         filter: &DocFilter<'_>,
+        allowed_rowids: Option<&str>,
     ) -> Result<Vec<ChunkMatch>> {
         let emb = self.embedder_snapshot().await;
         // A caller can temporarily install a new embedder before its reindex has
@@ -6437,134 +7918,501 @@ impl SpaceStore {
             return Ok(Vec::new());
         }
         let model_id = emb.model_id().to_string();
+        let dims = emb.dims();
         let query_vec = emb.embed(query).await?;
-        let bytes = vec_to_bytes(&query_vec);
+        // Vectors are sealed at rest and scored in memory. A partition that is
+        // not hydrated (evicted, too large to load inline, or still being
+        // migrated) is served by the blind term index while it loads in the
+        // background; `vector_coverage` reports the gap.
+        if !self.ensure_partition(space_id, &model_id, dims).await? {
+            return self
+                .term_fallback_search(space_id, query, limit, filter, allowed_rowids)
+                .await;
+        }
         let conn = self.conn.lock().await;
-        // Filter to chunks embedded by the *current* model: a vector produced by a
-        // different embedding model lives in an incomparable space, so matching it
-        // would yield meaningless distances. Stale chunks are excluded until a
-        // re-index re-embeds them (see `reindex_all`).
-        let visible_predicate = DOC_TENANCY_VISIBLE_PREDICATE.replace("d.", "visible_document.");
-        let sql = format!(
-            "SELECT c.id, c.document_id, c.content, v.distance
-             FROM chunk_vectors v
-             JOIN chunks c ON c.rowid = v.rowid
-             WHERE v.embedding MATCH :embedding
-               AND k = :limit
-               AND v.rowid IN (
-                   SELECT visible_chunk.rowid
-                   FROM chunks visible_chunk
-                   JOIN documents visible_document
-                     ON visible_document.id = visible_chunk.document_id
-                   WHERE visible_chunk.space_id = :space_id
-                     AND {visible_predicate}
-               )
-               AND c.space_id = :space_id
+        // Only chunks embedded by the *current* model and visible to the caller:
+        // a vector from another model lives in an incomparable space, and the
+        // tenancy filter applies before the limit (as the old KNN query did).
+        let visible_sql = format!(
+            "SELECT c.id FROM chunks c
+             JOIN documents d ON d.id = c.document_id
+             WHERE c.space_id = :space_id
                AND c.embed_model = :model_id
                AND c.embed_dims = :dims
-             ORDER BY v.distance"
+               AND (:allowed IS NULL OR c.rowid IN (SELECT value FROM json_each(:allowed)))
+               AND {DOC_TENANCY_VISIBLE_PREDICATE}"
+        );
+        let visible: std::collections::HashSet<String> = {
+            let mut stmt = conn.prepare(&visible_sql)?;
+            let rows = stmt.query_map(
+                named_params! {
+                    ":space_id": space_id,
+                    ":model_id": model_id,
+                    ":dims": dims as i64,
+                    ":allowed": allowed_rowids,
+                    ":bound": filter.bound_flag(),
+                    ":uid": filter.owner_user_id,
+                    ":org": filter.org_id,
+                    ":teams": filter.team_ids_json.as_str(),
+                },
+                |row| row.get::<_, String>(0),
+            )?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        if visible.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let Some(ranked) = self.vectors.search(space_id, &query_vec, usize::MAX) else {
+            drop(conn);
+            return self
+                .term_fallback_search(space_id, query, limit, filter, allowed_rowids)
+                .await;
+        };
+        let mut out = Vec::new();
+        for (chunk_id, score) in ranked {
+            if out.len() >= limit {
+                break;
+            }
+            if !visible.contains(&chunk_id) {
+                continue;
+            }
+            let row = conn
+                .query_row(
+                    "SELECT id, document_id, ryu_open_soft('chunks.content', id, content)
+                     FROM chunks WHERE id = ?1",
+                    params![chunk_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            if let Some((chunk_id, document_id, Some(content))) = row {
+                out.push(ChunkMatch {
+                    chunk_id,
+                    document_id,
+                    content,
+                    // Cosine distance (0 = identical direction).
+                    distance: 1.0 - score,
+                    ..Default::default()
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Make sure the Space's vector partition reflects the current embeddings
+    /// of `model_id`/`dims`. A hydrated partition takes the writes made since
+    /// from the vector journal (opening only those vectors); a missing or
+    /// stale one is reloaded on a blocking thread, or in the background when
+    /// large (or while legacy vectors are still being converted), and this
+    /// returns `false` meanwhile. A partition larger than the whole budget is
+    /// not opened again until it shrinks.
+    async fn ensure_partition(&self, space_id: &str, model_id: &str, dims: usize) -> Result<bool> {
+        const INLINE_HYDRATE_MAX: i64 = 50_000;
+        {
+            let conn = self.conn.lock().await;
+            let legacy: bool = conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE name = 'chunk_vectors'",
+                    [],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if legacy {
+                // Legacy vectors are being sealed by the background migration.
+                return Ok(false);
+            }
+            self.retire_evicted_partitions(&conn)?;
+            let generation = space_vector_gen(&conn, space_id)?;
+            let total: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM chunk_embeddings
+                 WHERE space_id = ?1 AND model = ?2 AND dims = ?3",
+                params![space_id, model_id, dims as i64],
+                |row| row.get(0),
+            )?;
+            match self.partition_state(space_id) {
+                Some(PartitionState::Refused {
+                    model,
+                    dims: refused_dims,
+                    total: refused_total,
+                }) if model == model_id && refused_dims == dims && total >= refused_total => {
+                    return Ok(false);
+                }
+                Some(PartitionState::Ready {
+                    gen,
+                    model,
+                    dims: ready_dims,
+                    ..
+                }) if model == model_id
+                    && ready_dims == dims
+                    && self.vectors.is_hydrated(space_id) =>
+                {
+                    if gen == generation
+                        || self.apply_vector_journal(
+                            &conn, space_id, gen, generation, model_id, dims,
+                        )?
+                    {
+                        return Ok(true);
+                    }
+                }
+                _ => {}
+            }
+            if total > INLINE_HYDRATE_MAX {
+                self.vectors.set_partition_total(space_id, total as u64);
+                drop(conn);
+                self.spawn_hydration(space_id, model_id, dims);
+                return Ok(false);
+            }
+        }
+        Ok(self.hydrate_partition(space_id, model_id, dims).await)
+    }
+
+    /// Stop journaling the Spaces whose `Ready` partition was evicted (by
+    /// any index sharing the vector budget) and drop their journals: a
+    /// search on one reloads it anyway. Called under the connection lock, so
+    /// no write interleaves.
+    fn retire_evicted_partitions(&self, conn: &Connection) -> Result<()> {
+        let evicted: Vec<String> = {
+            let Ok(mut states) = self.vector_state.lock() else {
+                return Ok(());
+            };
+            let evicted: Vec<String> = states
+                .iter()
+                .filter(|(space_id, state)| {
+                    matches!(state, PartitionState::Ready { .. })
+                        && !self.vectors.is_hydrated(space_id)
+                })
+                .map(|(space_id, _)| space_id.clone())
+                .collect();
+            for space_id in &evicted {
+                states.remove(space_id);
+            }
+            evicted
+        };
+        for space_id in evicted {
+            conn.execute(
+                "DELETE FROM temp.space_vector_journal WHERE space_id = ?1",
+                params![space_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn partition_state(&self, space_id: &str) -> Option<PartitionState> {
+        self.vector_state
+            .lock()
+            .ok()
+            .and_then(|states| states.get(space_id).cloned())
+    }
+
+    /// Open one sealed embedding (bound to its chunk id and model); `None`
+    /// (counted) when it does not open or has the wrong width.
+    fn open_embedding(
+        &self,
+        chunk_id: &str,
+        model_id: &str,
+        dims: usize,
+        sealed: &[u8],
+    ) -> Option<Vec<f32>> {
+        let vector = self
+            .seal
+            .keys
+            .cipher
+            .open_bytes(sealed, &embedding_context(chunk_id, model_id))
+            .ok()
+            .and_then(|opened| seal::bytes_to_vec(&opened.value))
+            .filter(|vector| vector.len() == dims);
+        if vector.is_none() {
+            self.seal.note_unreadable("chunk_embeddings.embedding");
+        }
+        vector
+    }
+
+    /// Apply the journaled writes since `from_gen` to the Space's hydrated
+    /// partition, under the connection lock (so no write interleaves), and
+    /// record it as current at `to_gen`. `false` (nothing recorded) when the
+    /// journal does not account for every generation bump, is too long, or
+    /// the partition was evicted meanwhile: the caller reloads it.
+    fn apply_vector_journal(
+        &self,
+        conn: &Connection,
+        space_id: &str,
+        from_gen: i64,
+        to_gen: i64,
+        model_id: &str,
+        dims: usize,
+    ) -> Result<bool> {
+        let journal: Vec<(String, bool)> = {
+            let mut stmt = conn.prepare_cached(
+                "SELECT chunk_id, put FROM temp.space_vector_journal
+                 WHERE space_id = ?1 ORDER BY seq",
+            )?;
+            let rows = stmt.query_map(params![space_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        if from_gen + journal.len() as i64 != to_gen || journal.len() > VECTOR_JOURNAL_APPLY_MAX {
+            return Ok(false);
+        }
+        // The last write to a chunk decides.
+        let mut last: HashMap<String, bool> = HashMap::with_capacity(journal.len());
+        for (chunk_id, put) in journal {
+            last.insert(chunk_id, put);
+        }
+        let mut read = conn.prepare_cached(
+            "SELECT embedding FROM chunk_embeddings
+             WHERE chunk_id = ?1 AND space_id = ?2 AND model = ?3 AND dims = ?4",
+        )?;
+        for (chunk_id, put) in last {
+            let sealed: Option<Vec<u8>> = if put {
+                read.query_row(params![chunk_id, space_id, model_id, dims as i64], |row| {
+                    row.get(0)
+                })
+                .optional()?
+            } else {
+                None
+            };
+            match sealed.and_then(|sealed| self.open_embedding(&chunk_id, model_id, dims, &sealed))
+            {
+                Some(vector) => {
+                    if !self.vectors.upsert(space_id, &chunk_id, &vector) {
+                        return Ok(false);
+                    }
+                }
+                // Deleted, embedded by another model, or not opening.
+                None => self.vectors.remove(space_id, &chunk_id),
+            }
+        }
+        conn.execute(
+            "DELETE FROM temp.space_vector_journal WHERE space_id = ?1",
+            params![space_id],
+        )?;
+        if let Ok(mut states) = self.vector_state.lock() {
+            states.insert(
+                space_id.to_owned(),
+                PartitionState::Ready {
+                    gen: to_gen,
+                    model: model_id.to_owned(),
+                    dims,
+                    journaled: 0,
+                },
+            );
+        }
+        Ok(true)
+    }
+
+    fn spawn_hydration(&self, space_id: &str, model_id: &str, dims: usize) {
+        let inserted = self
+            .hydrating
+            .lock()
+            .map(|mut set| set.insert(space_id.to_owned()))
+            .unwrap_or(false);
+        if !inserted {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            if let Ok(mut set) = self.hydrating.lock() {
+                set.remove(space_id);
+            }
+            return;
+        };
+        let store = self.clone();
+        let space_id = space_id.to_owned();
+        let model_id = model_id.to_owned();
+        handle.spawn(async move {
+            store.hydrate_partition(&space_id, &model_id, dims).await;
+            if let Ok(mut set) = store.hydrating.lock() {
+                set.remove(&space_id);
+            }
+        });
+    }
+
+    /// Load and open all of a Space's sealed vectors into its partition, on a
+    /// blocking thread. Vectors that do not open are skipped and counted.
+    /// Writes made while it runs are journaled and applied by the next search.
+    /// Returns whether the partition is now hydrated and recorded (a partition
+    /// larger than the whole budget is not, and is recorded as refused).
+    async fn hydrate_partition(&self, space_id: &str, model_id: &str, dims: usize) -> bool {
+        let token = self.hydration_token.fetch_add(1, Ordering::Relaxed) + 1;
+        let (generation, rows) = {
+            let conn = self.conn.lock().await;
+            let result = (|| -> Result<(i64, Vec<(String, Vec<u8>)>)> {
+                let generation = space_vector_gen(&conn, space_id)?;
+                let mut stmt = conn.prepare(
+                    "SELECT chunk_id, embedding FROM chunk_embeddings
+                     WHERE space_id = ?1 AND model = ?2 AND dims = ?3",
+                )?;
+                let rows = stmt.query_map(params![space_id, model_id, dims as i64], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?;
+                let rows = rows.collect::<rusqlite::Result<_>>()?;
+                // Everything journaled so far is in `rows`.
+                conn.execute(
+                    "DELETE FROM temp.space_vector_journal WHERE space_id = ?1",
+                    params![space_id],
+                )?;
+                Ok((generation, rows))
+            })();
+            match result {
+                Ok(read) => {
+                    if let Ok(mut states) = self.vector_state.lock() {
+                        states.insert(
+                            space_id.to_owned(),
+                            PartitionState::Hydrating {
+                                token,
+                                gen: read.0,
+                                model: model_id.to_owned(),
+                                dims,
+                                journaled: 0,
+                            },
+                        );
+                    }
+                    read
+                }
+                Err(error) => {
+                    tracing::warn!("spaces: reading sealed vectors failed: {error:#}");
+                    return false;
+                }
+            }
+        };
+        self.full_hydrations.fetch_add(1, Ordering::Relaxed);
+        let total = rows.len() as i64;
+        let store = self.clone();
+        let partition = space_id.to_owned();
+        let model = model_id.to_owned();
+        let built = tokio::task::spawn_blocking(move || {
+            let vectors: Vec<(String, Vec<f32>)> = rows
+                .into_iter()
+                .filter_map(|(chunk_id, sealed)| {
+                    store
+                        .open_embedding(&chunk_id, &model, dims, &sealed)
+                        .map(|vector| (chunk_id, vector))
+                })
+                .collect();
+            store.vectors.set_partition_total(&partition, total as u64);
+            store.vectors.hydrate_partition(&partition, vectors)
+        })
+        .await;
+        let Ok(mut states) = self.vector_state.lock() else {
+            return false;
+        };
+        let journaled = match states.get(space_id) {
+            Some(PartitionState::Hydrating {
+                token: running,
+                journaled,
+                ..
+            }) if *running == token => *journaled,
+            // Another hydration replaced this one, the Space was deleted, or
+            // its journal overflowed.
+            _ => return false,
+        };
+        match built {
+            Ok(Ok(())) => {
+                states.insert(
+                    space_id.to_owned(),
+                    PartitionState::Ready {
+                        gen: generation,
+                        model: model_id.to_owned(),
+                        dims,
+                        journaled,
+                    },
+                );
+                true
+            }
+            Ok(Err(error)) => {
+                tracing::warn!("spaces: vector partition not cached: {error}");
+                states.insert(
+                    space_id.to_owned(),
+                    PartitionState::Refused {
+                        model: model_id.to_owned(),
+                        dims,
+                        total,
+                    },
+                );
+                false
+            }
+            Err(error) => {
+                tracing::warn!("spaces: vector hydration task failed: {error}");
+                states.remove(space_id);
+                false
+            }
+        }
+    }
+
+    /// Serve a semantic query from the blind term index (any query word),
+    /// best match first, when the Space's vectors are not in memory.
+    async fn term_fallback_search(
+        &self,
+        space_id: &str,
+        query: &str,
+        limit: usize,
+        filter: &DocFilter<'_>,
+        allowed_rowids: Option<&str>,
+    ) -> Result<Vec<ChunkMatch>> {
+        let tokens = self.seal.keys.terms.term_tokens(query);
+        if tokens.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let match_expr = tokens.join(" OR ");
+        let conn = self.conn.lock().await;
+        let sql = format!(
+            "SELECT c.id, c.document_id, ryu_open_soft('chunks.content', c.id, c.content)
+             FROM spaces_terms
+             JOIN spaces_terms_map m ON m.term_rowid = spaces_terms.rowid AND m.kind = 'chunk'
+             JOIN chunks c ON c.id = m.ref_id
+             JOIN documents d ON d.id = c.document_id
+             WHERE spaces_terms MATCH :query
+               AND c.space_id = :space_id
+               AND (:allowed IS NULL OR c.rowid IN (SELECT value FROM json_each(:allowed)))
+               AND {DOC_TENANCY_VISIBLE_PREDICATE}
+             ORDER BY bm25(spaces_terms)
+             LIMIT :limit"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(
             named_params! {
-                ":embedding": bytes,
-                ":limit": limit as i64,
+                ":query": match_expr,
+                ":allowed": allowed_rowids,
                 ":space_id": space_id,
-                ":model_id": model_id,
-                ":dims": emb.dims() as i64,
+                ":limit": limit as i64,
                 ":bound": filter.bound_flag(),
                 ":uid": filter.owner_user_id,
                 ":org": filter.org_id,
                 ":teams": filter.team_ids_json.as_str(),
             },
             |row| {
-                Ok(ChunkMatch {
-                    chunk_id: row.get(0)?,
-                    document_id: row.get(1)?,
-                    content: row.get(2)?,
-                    distance: row.get::<_, f64>(3)? as f32,
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
             },
         )?;
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            if let (chunk_id, document_id, Some(content)) = row? {
+                out.push(ChunkMatch {
+                    chunk_id,
+                    document_id,
+                    content,
+                    distance: 1.0,
+                    ..Default::default()
+                });
+            }
         }
         Ok(out)
     }
 
-    /// Graph traversal search (graph mode).
-    ///
-    /// Algorithm:
-    /// 1. Extract query entities (same extractor used at ingest time).
-    /// 2. Seed the BFS frontier with all chunks that contain those entities.
-    /// 3. For each frontier entity, follow all outgoing edges to neighbour
-    ///    entities, then find chunks containing those neighbours.
-    /// 4. Continue until `limit` unique chunks are collected or no new frontier.
-    /// 5. Return the collected chunks ordered: direct hits first, then 1-hop, etc.
-    ///
-    /// # Why the traversal is explicitly bounded
-    ///
-    /// The edges this walks are **co-occurrence**, not semantics: every pair of
-    /// entities in a chunk is joined (see [`build_graph_for_chunks`]), so with the
-    /// ≈57 entities measured in a 1,000-char chunk of prose each entity has ≈56
-    /// neighbours *from one chunk alone*, plus every entity of every other chunk it
-    /// appears in. An
-    /// unbounded 3-hop BFS over that is not a search, it is a table scan with extra
-    /// steps: hop 1 is thousands of entities, hop 2 is most of the Space.
-    ///
-    /// Three bounds hold it, and all three are load-bearing rather than defensive:
-    ///
-    /// - `max_hops = 3` — pre-existing, and the reason the multi-hop fixture
-    ///   (Alice→Acme→Paris) resolves at all.
-    /// - [`MAX_FRONTIER_ENTITIES`] per hop — new. Without it a hop's frontier is
-    ///   `Σ out-degree` over the previous hop, which on real prose is unbounded in
-    ///   the Space's size.
-    /// - `limit` is now checked **inside** the per-entity loop, not only between
-    ///   hops. It used to keep walking (and re-preparing SQL) long after the caller
-    ///   had all the chunks it asked for.
-    ///
-    /// # The frontier cap is lossy — this is a retrieval trade, not a speed knob
-    ///
-    /// When a hop's frontier saturates, the neighbours past the cap are simply not
-    /// expanded, and the survivors are whichever sort first (`ORDER BY
-    /// e.dst_entity`) — alphabetical order, which has nothing to do with relevance.
-    /// A chunk whose *only* path runs through a dropped entity is not returned. In a
-    /// dense Space the dropped entity is usually rediscovered a hop later through a
-    /// chunk it shares with a survivor, so the loss is often invisible; in a sparse
-    /// one it is permanent within `max_hops`.
-    /// `graph_search_frontier_truncation_can_drop_a_reachable_chunk` pins exactly
-    /// that case, and `graph_search_reaches_a_two_hop_chunk_through_a_truncated_frontier`
-    /// pins the other side: truncation alone does not break a two-hop answer. See
-    /// [`MAX_FRONTIER_ENTITIES`] for the per-hop-vs-cumulative semantics.
-    ///
-    /// # Determinism
-    ///
-    /// The frontier was a `HashSet`, so the traversal visited entities in
-    /// randomised order; whenever a Space had more reachable chunks than `limit`,
-    /// **which** chunks came back varied run to run. It is now insertion-ordered
-    /// (seeded in [`extract_entities`] order) and both queries carry an explicit
-    /// `ORDER BY`, so the same query over the same Space returns the same chunks in
-    /// the same order. Entities are also expanded at most once across all hops —
-    /// re-expanding one can only re-collect chunks already collected, so this drops
-    /// work without dropping reachable chunks.
-    ///
-    /// # The seeds carry a relevance floor; the traversal does not
-    ///
-    /// Query entities are filtered by [`SEED_MAX_CHUNK_FRACTION`] before the first
-    /// hop, so a word that appears in most of the Space cannot seed the walk while a
-    /// rarer query word can. Read that constant for why, for the two cases in which
-    /// it deliberately does nothing, and for the failing-without-it test.
-    ///
-    /// **Everything after the seed is still unfiltered**, and that is the accepted
-    /// trade rather than an oversight: hop-1..3 chunks come back with no relevance
-    /// requirement of their own (a multi-hop answer has none by construction — see
-    /// `graphrag_multi_hop_finds_connected_chunk_that_vector_misses`, where the
-    /// correct chunk shares no word with the query), carrying a synthetic
-    /// `distance` of 0.0. What orders them is BFS depth, then
-    /// [`Self::apply_reranking`]'s cross-encoder pass — which reorders but never
-    /// drops. The consequence for the chat path is documented on
-    /// `ryu_rag::SpaceRecall`.
+    /// Coverage of the in-memory vector index (hydrated vs total vectors,
+    /// evicted partitions), for the recall API and health.
+    pub fn vector_coverage(&self) -> ryu_crypto::VectorCoverage {
+        self.vectors.coverage()
+    }
+
     async fn graph_search(
         &self,
         space_id: &str,
@@ -6572,7 +8420,12 @@ impl SpaceStore {
         limit: usize,
         filter: &DocFilter<'_>,
     ) -> Result<Vec<ChunkMatch>> {
-        let query_entities = extract_entities(query);
+        // Graph rows hold blind entity tokens, never entity text: the query's
+        // entities are tokenized the same way and the traversal runs on tokens.
+        let query_entities: Vec<String> = extract_entities(query)
+            .iter()
+            .map(|entity| self.seal.keys.entity_token(entity))
+            .collect();
         if query_entities.is_empty() || limit == 0 {
             return Ok(Vec::new());
         }
@@ -6679,19 +8532,24 @@ impl SpaceStore {
         let mut results = Vec::new();
         for chunk_id in visited_chunks.iter().take(limit) {
             let row = conn.query_row(
-                "SELECT c.id, c.document_id, c.content FROM chunks c WHERE c.id = ?1",
+                "SELECT c.id, c.document_id, ryu_open_soft('chunks.content', c.id, c.content)
+                 FROM chunks c WHERE c.id = ?1",
                 params![chunk_id],
                 |row| {
-                    Ok(ChunkMatch {
+                    let Some(content) = row.get::<_, Option<String>>(2)? else {
+                        return Ok(None);
+                    };
+                    Ok(Some(ChunkMatch {
                         chunk_id: row.get(0)?,
                         document_id: row.get(1)?,
-                        content: row.get(2)?,
+                        content,
                         // Synthetic distance: 0.0 = direct entity hit.
                         distance: 0.0,
-                    })
+                        ..Default::default()
+                    }))
                 },
             );
-            if let Ok(chunk_match) = row {
+            if let Ok(Some(chunk_match)) = row {
                 results.push(chunk_match);
             }
         }
@@ -6700,36 +8558,59 @@ impl SpaceStore {
 
     /// Documents that link **to** `doc_id` (backlinks / "linked references").
     /// Each result carries the source document's title and a context snippet.
-    pub async fn get_backlinks(&self, doc_id: &str) -> Result<Vec<DocLink>> {
+    pub async fn get_backlinks(&self, doc_id: &str, filter: DocFilter<'_>) -> Result<Vec<DocLink>> {
         let conn = self.conn.lock().await;
         let target_title: String = conn
             .query_row(
-                "SELECT title FROM documents WHERE id = ?1",
+                "SELECT ryu_open('documents.title', id, title) FROM documents WHERE id = ?1",
                 params![doc_id],
                 |row| row.get(0),
             )
             .optional()
             .context("reading target title")?
             .unwrap_or_default();
-        let mut stmt = conn.prepare(
-            "SELECT l.src_doc_id, l.dst_title, l.link_kind, d.title, d.source
+        // Titles are sealed: open, then order by the source title in memory
+        // (byte order, as SQLite's BINARY collation did).
+        let sql = format!(
+            "SELECT l.src_doc_id, ryu_open_soft('document_links.dst_title', l.id, l.dst_title),
+                    l.link_kind, ryu_open_soft('documents.title', d.id, d.title),
+                    ryu_open_soft('documents.source', d.id, d.source)
              FROM document_links l
              JOIN documents d ON d.id = l.src_doc_id
-             WHERE l.dst_doc_id = ?1
-             ORDER BY d.title ASC",
+             WHERE l.dst_doc_id = :doc_id
+               AND {DOC_TENANCY_VISIBLE_PREDICATE}"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            named_params! {
+                ":doc_id": doc_id,
+                ":bound": filter.bound_flag(),
+                ":uid": filter.owner_user_id,
+                ":org": filter.org_id,
+                ":teams": filter.team_ids_json.as_str(),
+            },
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
         )?;
-        let rows = stmt.query_map(params![doc_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })?;
-        let mut out = Vec::new();
+        let mut opened = Vec::new();
         for row in rows {
             let (src_doc_id, dst_title, kind, src_title, source) = row?;
+            let (Some(dst_title), Some(src_title), Some(source)) = (dst_title, src_title, source)
+            else {
+                continue;
+            };
+            opened.push((src_doc_id, dst_title, kind, src_title, source));
+        }
+        opened.sort_by(|left, right| left.3.cmp(&right.3));
+        let mut out = Vec::new();
+        for (src_doc_id, dst_title, kind, src_title, source) in opened {
             let snippet = link_snippet(&source, &target_title);
             out.push(DocLink {
                 src_doc_id,
@@ -6747,24 +8628,28 @@ impl SpaceStore {
     pub async fn get_outgoing_links(&self, doc_id: &str) -> Result<Vec<DocLink>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT dst_doc_id, dst_title, link_kind
-             FROM document_links WHERE src_doc_id = ?1
-             ORDER BY dst_title ASC",
+            "SELECT dst_doc_id, ryu_open_soft('document_links.dst_title', id, dst_title),
+                    link_kind
+             FROM document_links WHERE src_doc_id = ?1",
         )?;
         let rows = stmt.query_map(params![doc_id], |row| {
-            Ok(DocLink {
+            let Some(dst_title) = row.get::<_, Option<String>>(1)? else {
+                return Ok(None);
+            };
+            Ok(Some(DocLink {
                 src_doc_id: doc_id.to_string(),
                 dst_doc_id: row.get(0)?,
-                dst_title: row.get(1)?,
+                dst_title,
                 kind: row.get(2)?,
                 src_title: None,
                 snippet: None,
-            })
+            }))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            out.extend(row?);
         }
+        out.sort_by(|left, right| left.dst_title.cmp(&right.dst_title));
         Ok(out)
     }
 
@@ -6792,7 +8677,9 @@ impl SpaceStore {
         // Nodes: every document the caller may read (top-level and child row-pages
         // are all real pages).
         let doc_sql = format!(
-            "SELECT d.id, d.space_id, d.title, d.kind, d.parent_id FROM documents d
+            "SELECT d.id, d.space_id, ryu_open_soft('documents.title', d.id, d.title), d.kind,
+                    d.parent_id
+             FROM documents d
              WHERE (:space IS NULL OR d.space_id = :space)
                AND {DOC_TENANCY_VISIBLE_PREDICATE}"
         );
@@ -6809,7 +8696,7 @@ impl SpaceStore {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                 ))
@@ -6820,6 +8707,11 @@ impl SpaceStore {
         let mut pending_parent_edges: Vec<(String, String)> = Vec::new();
         for row in doc_rows {
             let (id, space_id, title, kind, parent_id) = row?;
+            // A title that does not open drops the node (counted); its edges
+            // are dropped below with it.
+            let Some(title) = title else {
+                continue;
+            };
             graph.nodes.push(DocGraphNode {
                 id: id.clone(),
                 title,
@@ -6852,7 +8744,8 @@ impl SpaceStore {
         let src_visible = DOC_TENANCY_VISIBLE_PREDICATE.replace("d.", "src.");
         let dst_visible = DOC_TENANCY_VISIBLE_PREDICATE.replace("d.", "dst.");
         let link_sql = format!(
-            "SELECT l.space_id, l.src_doc_id, l.dst_doc_id, l.dst_title, l.link_kind
+            "SELECT l.space_id, l.src_doc_id, l.dst_doc_id,
+                    ryu_open_soft('document_links.dst_title', l.id, l.dst_title), l.link_kind
              FROM document_links l
              JOIN documents src ON src.id = l.src_doc_id
              WHERE (:space IS NULL OR l.space_id = :space)
@@ -6879,15 +8772,22 @@ impl SpaceStore {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
                 ))
             },
         )?;
         for row in link_rows {
             let (space_id, src, dst_doc_id, dst_title, kind) = row?;
+            let Some(dst_title) = dst_title else {
+                continue;
+            };
+            if !visible.contains(&src) {
+                continue;
+            }
             let dst = match dst_doc_id {
-                Some(id) => id,
+                Some(id) if visible.contains(&id) => id,
+                Some(_) => continue,
                 None => {
                     let pending_id = pending_node_id(&space_id, &dst_title);
                     if seen_pending.insert(pending_id.clone()) {
@@ -6992,20 +8892,24 @@ impl SpaceStore {
                 break;
             }
             let mut stmt = conn.prepare(
-                "SELECT id, document_id, content FROM chunks
+                "SELECT id, document_id, ryu_open_soft('chunks.content', id, content) FROM chunks
                  WHERE document_id = ?1 ORDER BY ordinal LIMIT ?2",
             )?;
             let rows = stmt.query_map(params![doc, per_doc_cap.min(remaining) as i64], |row| {
-                Ok(ChunkMatch {
+                let Some(content) = row.get::<_, Option<String>>(2)? else {
+                    return Ok(None);
+                };
+                Ok(Some(ChunkMatch {
                     chunk_id: row.get(0)?,
                     document_id: row.get(1)?,
-                    content: row.get(2)?,
+                    content,
                     // Synthetic: link-reached chunks re-scored by the reranker.
                     distance: 1.0,
-                })
+                    ..Default::default()
+                }))
             })?;
             for row in rows {
-                out.push(row?);
+                out.extend(row?);
             }
         }
         Ok(out)
@@ -7028,11 +8932,13 @@ impl SpaceStore {
             anyhow::bail!("space '{space_id}' is a system space and cannot be deleted");
         }
         let tx = conn.transaction().context("starting delete transaction")?;
-        // Remove vectors first (vec0 has no foreign-key cascade).
+        // Remove vectors first (explicit, whatever the connection's FK setting).
+        if let Ok(mut states) = self.vector_state.lock() {
+            states.remove(space_id);
+        }
+        self.vectors.drop_partition(space_id);
         tx.execute(
-            "DELETE FROM chunk_vectors WHERE rowid IN (
-                 SELECT rowid FROM chunks WHERE space_id = ?1
-             )",
+            "DELETE FROM chunk_embeddings WHERE space_id = ?1",
             params![space_id],
         )
         .context("deleting chunk vectors")?;
@@ -7051,7 +8957,8 @@ impl SpaceStore {
     pub async fn count_spaces(&self) -> Result<u64> {
         let conn = self.conn.lock().await;
         let n: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM spaces WHERE system = 0 AND name != ?1",
+            "SELECT COUNT(*) FROM spaces WHERE system = 0
+               AND COALESCE(ryu_open_soft('spaces.name', id, name), '') != ?1",
             params![MEETINGS_SPACE_NAME],
             |r| r.get(0),
         )?;
@@ -7072,17 +8979,19 @@ impl SpaceStore {
         // via ON DELETE CASCADE. The Meetings space (and its chunks/vectors) is
         // skipped on both passes.
         tx.execute(
-            "DELETE FROM chunk_vectors WHERE rowid IN (
-                 SELECT c.rowid FROM chunks c
+            "DELETE FROM chunk_embeddings WHERE chunk_id IN (
+                 SELECT c.id FROM chunks c
                  JOIN spaces s ON s.id = c.space_id
-                 WHERE s.system = 0 AND s.name != ?1
+                 WHERE s.system = 0
+                   AND COALESCE(ryu_open_soft('spaces.name', s.id, s.name), '') != ?1
              )",
             params![MEETINGS_SPACE_NAME],
         )
         .context("deleting chunk vectors")?;
         let removed = tx
             .execute(
-                "DELETE FROM spaces WHERE system = 0 AND name != ?1",
+                "DELETE FROM spaces WHERE system = 0
+                   AND COALESCE(ryu_open_soft('spaces.name', id, name), '') != ?1",
                 params![MEETINGS_SPACE_NAME],
             )
             .context("deleting spaces")?;
@@ -7141,9 +9050,8 @@ impl SpaceStore {
     }
 
     /// Re-embed every chunk whose stored embedding was produced by a different
-    /// model/dims, into the current model. If the dimensionality changed, the
-    /// `chunk_vectors` vec0 table (whose width is fixed at creation) is dropped and
-    /// recreated first. Idempotent + resumable: re-running only touches chunks that
+    /// model/dims, into the current model. The new sealed vectors are staged and
+    /// swapped in with the chunk metadata in one transaction. Idempotent + resumable: re-running only touches chunks that
     /// are still stale. Guarded so only one pass runs at a time.
     pub async fn reindex_all(&self) -> Result<()> {
         let embedder = self.embedder_snapshot().await;
@@ -7151,25 +9059,53 @@ impl SpaceStore {
     }
 
     async fn index_unindexed_documents(&self) -> Result<()> {
+        self.index_unindexed_documents_where(None).await.map(|_| ())
+    }
+
+    /// Embed the pages and databases in one Space that have source text but no
+    /// chunks yet, i.e. documents written by [`Self::import_document`]. Returns
+    /// how many were indexed. The node-wide pass inside [`Self::reindex_all`]
+    /// covers the same rows; this lets a seeder index its own Space without
+    /// touching every other Space's pending imports.
+    pub async fn index_unindexed_documents_in_space(&self, space_id: &str) -> Result<usize> {
+        self.index_unindexed_documents_where(Some(space_id)).await
+    }
+
+    async fn index_unindexed_documents_where(&self, space_id: Option<&str>) -> Result<usize> {
         let documents: Vec<(String, String, String)> = {
             let conn = self.conn.lock().await;
             let mut stmt = conn.prepare(
-                "SELECT d.id, d.title, d.source
+                "SELECT d.id, ryu_open_soft('documents.title', d.id, d.title),
+                        ryu_open_soft('documents.source', d.id, d.source)
                  FROM documents d
                  WHERE d.kind IN ('page', 'database')
-                   AND d.source != ''
+                   AND (?1 IS NULL OR d.space_id = ?1)
                    AND NOT EXISTS (
                        SELECT 1 FROM chunks c WHERE c.document_id = d.id
                    )
                  ORDER BY d.created_at ASC, d.id ASC",
             )?;
-            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            let rows = stmt.query_map(params![space_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })?;
+            // `source` is sealed, so the old `source != ''` filter runs here.
             rows.collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .filter_map(|(id, title, source)| match (title, source) {
+                    (Some(title), Some(source)) if !source.is_empty() => Some((id, title, source)),
+                    _ => None,
+                })
+                .collect()
         };
+        let indexed = documents.len();
         for (id, title, source) in documents {
             self.update_document(&id, &title, &source).await?;
         }
-        Ok(())
+        Ok(indexed)
     }
 
     async fn run_reindex(&self, embedder: Embedder) -> Result<bool> {
@@ -7186,6 +9122,16 @@ impl SpaceStore {
             g.target_dims = Some(target_dims);
         }
         let result = self.reindex_inner(&embedder).await.map(|_| true);
+        if result.is_err() {
+            // The staged table holds a sealed copy of every vector; a failed run
+            // must not leave it behind.
+            let conn = self.conn.lock().await;
+            if let Err(error) = drop_embedding_reindex_staging(&conn) {
+                tracing::warn!(
+                    "spaces store: could not drop the staged embedding table: {error:#}"
+                );
+            }
+        }
         let mut g = self.reindex.lock().await;
         g.running = false;
         if let Err(e) = &result {
@@ -7208,7 +9154,9 @@ impl SpaceStore {
         let snapshot: Vec<(String, i64, String, String, i64)> = {
             let conn = self.conn.lock().await;
             let mut stmt = conn.prepare(
-                "SELECT id, rowid, content, embed_model, embed_dims FROM chunks ORDER BY rowid",
+                "SELECT id, rowid, COALESCE(ryu_open_soft('chunks.content', id, content), ''),
+                        embed_model, embed_dims
+                 FROM chunks ORDER BY rowid",
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
@@ -7216,27 +9164,36 @@ impl SpaceStore {
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
 
-        let rebuild_table = "chunk_vectors_rebuild";
+        // The staged table is an ordinary table of sealed vectors (bound to the
+        // chunk id and the target model), swapped in with the chunk metadata in
+        // one transaction.
+        let rebuild_table = EMBEDDING_REBUILD_TABLE;
         {
             let conn = self.conn.lock().await;
             conn.execute_batch(&format!(
                 "DROP TABLE IF EXISTS {rebuild_table};
-                 CREATE VIRTUAL TABLE {rebuild_table}
-                     USING vec0(rowid INTEGER PRIMARY KEY, embedding float[{dims}]);"
+                 CREATE TABLE {rebuild_table} (
+                     chunk_id  TEXT PRIMARY KEY,
+                     space_id  TEXT NOT NULL,
+                     model     TEXT NOT NULL,
+                     dims      INTEGER NOT NULL,
+                     embedding BLOB NOT NULL
+                 );"
             ))
             .context("creating staged embedding table")?;
 
-            // Same-dimension vectors produced by the target can be copied without
-            // a provider call. A dimension change cannot copy anything safely.
+            // Vectors the target model already produced are copied as stored: the
+            // chunk id and model they are bound to do not change. A dimension
+            // change cannot copy anything safely.
             if old_dims == dims {
                 conn.execute(
                     &format!(
-                        "INSERT INTO {rebuild_table} (rowid, embedding)
-                         SELECT rowid, embedding FROM chunk_vectors
-                         WHERE rowid IN (
-                           SELECT rowid FROM chunks
-                           WHERE embed_model = ?1 AND embed_dims = ?2
-                         )"
+                        "INSERT INTO {rebuild_table} (chunk_id, space_id, model, dims, embedding)
+                         SELECT e.chunk_id, e.space_id, e.model, e.dims, e.embedding
+                         FROM chunk_embeddings e
+                         JOIN chunks c ON c.id = e.chunk_id
+                         WHERE c.embed_model = ?1 AND c.embed_dims = ?2
+                           AND e.model = ?1 AND e.dims = ?2"
                     ),
                     params![model_id, dims as i64],
                 )?;
@@ -7247,22 +9204,36 @@ impl SpaceStore {
         // fails, the staged table is discarded and the active index remains
         // searchable with the previous model.
         for batch in snapshot.chunks(64) {
-            let mut embedded = Vec::new();
-            for (id, rowid, content, stored_model, stored_dims) in batch {
-                if old_dims == dims && stored_model == &model_id && *stored_dims == dims as i64 {
-                    continue;
-                }
-                embedded.push((id, rowid, embedder.embed(content).await?));
-            }
+            let stale: Vec<_> = batch
+                .iter()
+                .filter(|(_, _, _, stored_model, stored_dims)| {
+                    !(old_dims == dims && stored_model == &model_id && *stored_dims == dims as i64)
+                })
+                .collect();
+            let contents: Vec<String> = stale
+                .iter()
+                .map(|(_, _, content, _, _)| content.clone())
+                .collect();
+            let vectors = embedder.embed_batch(&contents).await?;
+            let embedded: Vec<_> = stale
+                .into_iter()
+                .zip(vectors)
+                .map(|((id, _, _, _, _), vector)| (id.clone(), vector))
+                .collect();
             if embedded.is_empty() {
                 continue;
             }
             let mut conn = self.conn.lock().await;
             let tx = conn.transaction()?;
-            for (_id, rowid, vector) in embedded {
+            for (id, vector) in embedded {
                 tx.execute(
-                    &format!("INSERT INTO {rebuild_table} (rowid, embedding) VALUES (?1, ?2)"),
-                    params![rowid, vec_to_bytes(&vector)],
+                    &format!(
+                        "INSERT OR REPLACE INTO {rebuild_table}
+                             (chunk_id, space_id, model, dims, embedding)
+                         SELECT id, space_id, ?2, ?3, ryu_seal_vec(id, ?2, ?4)
+                         FROM chunks WHERE id = ?1"
+                    ),
+                    params![id, model_id, dims as i64, vec_to_bytes(&vector)],
                 )?;
             }
             tx.commit()?;
@@ -7270,7 +9241,10 @@ impl SpaceStore {
 
         let mut conn = self.conn.lock().await;
         let current: Vec<(String, i64, String)> = {
-            let mut stmt = conn.prepare("SELECT id, rowid, content FROM chunks ORDER BY rowid")?;
+            let mut stmt = conn.prepare(
+                "SELECT id, rowid, COALESCE(ryu_open_soft('chunks.content', id, content), '')
+                 FROM chunks ORDER BY rowid",
+            )?;
             let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
@@ -7291,18 +9265,13 @@ impl SpaceStore {
             "staged embedding index is incomplete; active index was preserved"
         );
 
-        // DDL and metadata swap together. sqlite-vec virtual tables carry shadow
-        // tables, so renaming the virtual table is not safe: the module would
-        // still look for shadow tables under the old name. Recreate the live
-        // table inside this transaction and copy the fully-built staged table;
-        // rollback restores the old table if any DDL or copy step fails.
+        // Swap the staged vectors and the chunk metadata together; rollback
+        // keeps the previous index if any step fails.
         let tx = conn.transaction()?;
         tx.execute_batch(&format!(
-            "DROP TABLE chunk_vectors;
-             CREATE VIRTUAL TABLE chunk_vectors
-                 USING vec0(rowid INTEGER PRIMARY KEY, embedding float[{dims}]);
-             INSERT INTO chunk_vectors (rowid, embedding)
-                 SELECT rowid, embedding FROM {rebuild_table};
+            "DELETE FROM chunk_embeddings;
+             INSERT INTO chunk_embeddings (chunk_id, space_id, model, dims, embedding)
+                 SELECT chunk_id, space_id, model, dims, embedding FROM {rebuild_table};
              DROP TABLE {rebuild_table};"
         ))?;
         tx.execute(
@@ -7314,11 +9283,6 @@ impl SpaceStore {
         Ok(true)
     }
 
-    /// Apply a resolved default `embedder` and, if it differs from what the store
-    /// opened with, kick a background re-index. The Core-side shim
-    /// (`spaces::apply_saved_embedding_pref`) reads the saved `EmbeddingModelPref`
-    /// and resolves it into an `Embedder` (through the single RAG resolver) before
-    /// calling this — keeping the model-registry read out of the crate.
     pub async fn apply_embedder_change(&self, embedder: Embedder) {
         let changed = {
             let g = self.embedder.lock().await;
@@ -7385,20 +9349,217 @@ pub(crate) fn open_vec_connection(path: &std::path::Path) -> Result<Connection> 
     Ok(conn)
 }
 
-/// Apply the encryption-at-rest *direction* (see module docs). Issues a
-/// `PRAGMA key` when `RYU_SPACES_KEY` is set (a no-op on non-SQLCipher builds),
-/// and tightens db file permissions on Unix.
-fn apply_encryption(conn: &Connection, path: Option<&std::path::Path>) -> Result<()> {
-    if let Ok(key) = std::env::var("RYU_SPACES_KEY") {
-        if !key.is_empty() {
-            // Escape single quotes to keep the pragma well-formed.
-            let escaped = key.replace('\'', "''");
-            // Ignored by stock SQLite; activates real encryption under SQLCipher.
-            let _ = conn.execute_batch(&format!("PRAGMA key = '{escaped}';"));
-        }
-    }
+/// Content-seal state "store" that records which root the blind tokens of
+/// `spaces.db` were computed under (kept apart from the store's own items so
+/// it never counts as an unfinished column migration).
+const BLIND_STORE: &str = "spaces.db#blind";
+const BLIND_ITEM: &str = "__blind__";
+
+mod blind_states {
+    /// Every blind token was computed under the recorded root.
+    pub(crate) const OK: &str = "ok";
+    /// Equality tokens are current; the term index and graph still need a
+    /// rebuild (background migration).
+    pub(crate) const REINDEXING: &str = "reindexing";
+}
+
+/// The recorded blind-token generation (key check value) and its state.
+fn blind_generation(conn: &Connection) -> Result<Option<(Option<String>, String)>> {
+    content_sqlite::ensure_state_table(conn)?;
+    conn.query_row(
+        &format!(
+            "SELECT kcv, state FROM {} WHERE store = ?1 AND item = ?2",
+            content_sqlite::STATE_TABLE
+        ),
+        params![BLIND_STORE, BLIND_ITEM],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .context("reading the Spaces blind-token generation")
+}
+
+fn record_blind_generation(conn: &Connection, kcv: &str, state: &str) -> Result<()> {
+    content_sqlite::ensure_state_table(conn)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO {} (store, item, state, kcv, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(store, item) DO UPDATE SET
+                state = excluded.state, kcv = excluded.kcv, updated_at = excluded.updated_at",
+            content_sqlite::STATE_TABLE
+        ),
+        params![BLIND_STORE, BLIND_ITEM, state, kcv, now_millis() / 1000],
+    )
+    .context("recording the Spaces blind-token generation")?;
+    Ok(())
+}
+
+/// Settings every `spaces.db` connection needs before it touches sealed
+/// content: `secure_delete` (rewritten cells leave no plaintext behind) and
+/// `temp_store = MEMORY`. Values are opened inside SQL (`ryu_open_soft` in a
+/// select list), so a sort no index serves runs decrypted rows through the
+/// sorter, which with file temp storage spills them to an unlinked temp file.
+/// With MEMORY the sorter never writes to disk. Set it before creating TEMP
+/// objects: changing `temp_store` drops them.
+pub(crate) fn secure_connection(conn: &Connection) -> Result<()> {
+    content_sqlite::enable_secure_delete(conn)?;
+    conn.pragma_update(None, "temp_store", "MEMORY")
+        .context("keeping SQLite temp storage in memory")?;
+    Ok(())
+}
+
+/// Record that `spaces.db` owes a scrub (`vacuum_pending`): rows holding
+/// plaintext or order-revealing data were removed, so [`content_sqlite::finish_store`]
+/// (or the deferred compaction at the next start) must run. The store record
+/// exists from the first open ([`content_sqlite::check_store_key`]).
+fn mark_scrub_owed(conn: &Connection) -> Result<()> {
+    conn.execute(
+        &format!(
+            "UPDATE {} SET state = ?1 WHERE store = ?2 AND item = ?3 AND state != ?1",
+            content_sqlite::STATE_TABLE
+        ),
+        params![
+            content_sqlite::states::VACUUM_PENDING,
+            SPACES_STORE,
+            content_sqlite::STORE_ITEM
+        ],
+    )
+    .context("recording the Spaces scrub as owed")?;
+    Ok(())
+}
+
+/// State-table item of the `spaces_terms` row format (tokens sorted by token
+/// value, [`seal::term_document`]).
+const TERMS_FORMAT_ITEM: &str = "format:terms";
+/// State-table item of the graph row format (tokens sorted by token value per
+/// chunk, [`entity_tokens`]).
+const GRAPH_FORMAT_ITEM: &str = "format:graph";
+/// State-table item recording that `spaces_terms` has FTS5 secure-delete on and
+/// its pre-existing tombstoned postings were merged away once.
+const TERMS_SECURE_ITEM: &str = "format:terms-secure";
+const TERMS_SECURE_DONE: &str = "secure-delete-v1";
+/// The current format of both derived indexes.
+const DERIVED_FORMAT_SORTED: &str = "sorted-v1";
+/// A term-index rebuild that cleared the old rows and is still refilling.
+const DERIVED_FORMAT_FILLING: &str = "filling";
+
+/// The recorded format of a derived index (`None`: written by a build that
+/// stored tokens in plaintext order).
+fn derived_format(conn: &Connection, item: &str) -> Result<Option<String>> {
+    content_sqlite::ensure_state_table(conn)?;
+    conn.query_row(
+        &format!(
+            "SELECT state FROM {} WHERE store = ?1 AND item = ?2",
+            content_sqlite::STATE_TABLE
+        ),
+        params![BLIND_STORE, item],
+        |row| row.get(0),
+    )
+    .optional()
+    .context("reading the Spaces derived-index format")
+}
+
+fn set_derived_format(conn: &Connection, item: &str, state: &str) -> Result<()> {
+    content_sqlite::ensure_state_table(conn)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO {} (store, item, state, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(store, item) DO UPDATE SET
+                state = excluded.state, updated_at = excluded.updated_at",
+            content_sqlite::STATE_TABLE
+        ),
+        params![BLIND_STORE, item, state, now_millis() / 1000],
+    )
+    .context("recording the Spaces derived-index format")?;
+    Ok(())
+}
+
+/// The keyed content address of a serialized history snapshot, computed by
+/// the connection's `ryu_history_hash` (registered with the store's keys).
+fn history_hash(conn: &Connection, raw: &[u8]) -> Result<String> {
+    conn.query_row("SELECT ryu_history_hash(?1)", params![raw], |row| {
+        row.get(0)
+    })
+    .context("computing a history snapshot address")
+}
+
+/// State-table item of the term-index clear of a blind-token rebuild.
+const REINDEX_TERMS_ITEM: &str = "reindex:terms";
+/// State-table item prefix of one Space's graph rebuild cursor.
+const REINDEX_GRAPH_ITEM_PREFIX: &str = "reindex:graph:";
+
+/// The recorded cursor of one rebuild step under the key `kcv` (`None`: not
+/// started under this key).
+fn reindex_progress(conn: &Connection, kcv: &str, item: &str) -> Result<Option<i64>> {
+    content_sqlite::ensure_state_table(conn)?;
+    let cursor: Option<Option<String>> = conn
+        .query_row(
+            &format!(
+                "SELECT cursor FROM {} WHERE store = ?1 AND item = ?2 AND kcv = ?3",
+                content_sqlite::STATE_TABLE
+            ),
+            params![BLIND_STORE, item, kcv],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("reading the Spaces rebuild progress")?;
+    Ok(cursor.map(|value| value.and_then(|v| v.parse().ok()).unwrap_or(0)))
+}
+
+fn set_reindex_progress(conn: &Connection, kcv: &str, item: &str, cursor: i64) -> Result<()> {
+    content_sqlite::ensure_state_table(conn)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO {} (store, item, state, cursor, kcv, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(store, item) DO UPDATE SET
+                state = excluded.state, cursor = excluded.cursor, kcv = excluded.kcv,
+                updated_at = excluded.updated_at",
+            content_sqlite::STATE_TABLE
+        ),
+        params![
+            BLIND_STORE,
+            item,
+            blind_states::REINDEXING,
+            cursor.to_string(),
+            kcv,
+            now_millis() / 1000
+        ],
+    )
+    .context("recording the Spaces rebuild progress")?;
+    Ok(())
+}
+
+fn clear_reindex_progress(conn: &Connection) -> Result<()> {
+    content_sqlite::ensure_state_table(conn)?;
+    conn.execute(
+        &format!(
+            "DELETE FROM {} WHERE store = ?1 AND item LIKE 'reindex:%'",
+            content_sqlite::STATE_TABLE
+        ),
+        params![BLIND_STORE],
+    )
+    .context("clearing the Spaces rebuild progress")?;
+    Ok(())
+}
+
+/// Run `body` with `temp_store = FILE` (for `VACUUM`, whose transient copy of
+/// the whole database lives in temp storage: with MEMORY a large store would
+/// be copied into RAM). The connection stays on FILE afterwards and its TEMP
+/// objects are gone (changing `temp_store` drops them): call
+/// [`secure_connection`] again before using it for sealed reads.
+pub(crate) fn with_file_temp_store<T>(
+    conn: &Connection,
+    body: impl FnOnce(&Connection) -> T,
+) -> Result<T> {
+    conn.pragma_update(None, "temp_store", "FILE")
+        .context("using file temp storage for a compaction")?;
+    Ok(body(conn))
+}
+
+/// Owner-only permissions on the database file (Unix).
+fn restrict_db_permissions(path: &std::path::Path) {
     #[cfg(unix)]
-    if let Some(path) = path {
+    {
         use std::os::unix::fs::PermissionsExt;
         if let Ok(meta) = std::fs::metadata(path) {
             let mut perms = meta.permissions();
@@ -7406,8 +9567,8 @@ fn apply_encryption(conn: &Connection, path: Option<&std::path::Path>) -> Result
             let _ = std::fs::set_permissions(path, perms);
         }
     }
+    #[cfg(not(unix))]
     let _ = path;
-    Ok(())
 }
 
 /// Split text into chunks of at most `CHUNK_CHAR_SIZE` characters, breaking on
@@ -7567,53 +9728,23 @@ fn json_cell_to_text(value: &serde_json::Value) -> String {
     }
 }
 
+/// The historical splitter (`ChunkingStrategy::Default`), kept as the name the
+/// tests and graph budget calculations use.
+#[cfg(test)]
 fn chunk_text(content: &str) -> Vec<String> {
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        return vec![String::new()];
-    }
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    for paragraph in trimmed.split("\n\n") {
-        for word in paragraph.split_whitespace() {
-            let word_characters = word.chars().count();
-            if word_characters > CHUNK_CHAR_SIZE {
-                if !current.is_empty() {
-                    chunks.push(std::mem::take(&mut current));
-                }
-                let mut piece = String::new();
-                let mut piece_characters = 0usize;
-                for character in word.chars() {
-                    piece.push(character);
-                    piece_characters += 1;
-                    if piece_characters == CHUNK_CHAR_SIZE {
-                        chunks.push(std::mem::take(&mut piece));
-                        piece_characters = 0;
-                    }
-                }
-                if !piece.is_empty() {
-                    current = piece;
-                }
-                continue;
-            }
-            if current.chars().count() + word_characters + 1 > CHUNK_CHAR_SIZE
-                && !current.is_empty()
-            {
-                chunks.push(std::mem::take(&mut current));
-            }
-            if !current.is_empty() {
-                current.push(' ');
-            }
-            current.push_str(word);
-        }
-        if !current.is_empty() {
-            chunks.push(std::mem::take(&mut current));
-        }
-    }
-    if chunks.is_empty() {
-        chunks.push(trimmed.to_owned());
-    }
-    chunks
+    ryu_rag::splitter::legacy_word_chunks(content, CHUNK_CHAR_SIZE)
+}
+
+/// The Space's `space_vector_gen` generation (0 before its first vector write).
+fn space_vector_gen(conn: &Connection, space_id: &str) -> Result<i64> {
+    Ok(conn
+        .query_row(
+            "SELECT gen FROM space_vector_gen WHERE space_id = ?1",
+            params![space_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(0))
 }
 
 /// Insert a document's chunks + their vectors (and, in graph mode, the entity
@@ -7624,7 +9755,7 @@ fn insert_chunks(
     tx: &rusqlite::Transaction<'_>,
     document_id: &str,
     space_id: &str,
-    embedded: &[(String, Vec<f32>)],
+    embedded: &[EmbeddedChunk],
     now: i64,
     model_id: &str,
     dims: usize,
@@ -7636,8 +9767,8 @@ fn insert_chunks(
             "document has {} chunks; graph mode supports at most {MAX_GRAPH_CHUNKS_PER_DOCUMENT} chunks per document",
             embedded.len()
         );
-        let new_rows = embedded.iter().try_fold(0usize, |total, (content, _)| {
-            let terms = extract_entities(content).len();
+        let new_rows = embedded.iter().try_fold(0usize, |total, chunk| {
+            let terms = extract_entities(&chunk.content).len();
             total
                 .checked_add(terms.saturating_mul(terms))
                 .context("graph row estimate overflow")
@@ -7655,28 +9786,37 @@ fn insert_chunks(
         );
     }
     let mut chunk_ids: Vec<String> = Vec::with_capacity(embedded.len());
-    for (ordinal, (content, embedding)) in embedded.iter().enumerate() {
+    for (ordinal, chunk) in embedded.iter().enumerate() {
         let chunk_id = uuid::Uuid::new_v4().to_string();
         tx.execute(
             "INSERT INTO chunks
-                 (id, document_id, space_id, ordinal, content, created_at, embed_model, embed_dims)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (id, document_id, space_id, ordinal, content, created_at, embed_model, embed_dims,
+                  metadata)
+             VALUES (?1, ?2, ?3, ?4, ryu_seal('chunks.content', ?1, ?5), ?6, ?7, ?8,
+                     ryu_seal('chunks.metadata', ?1, ?9))",
             params![
                 chunk_id,
                 document_id,
                 space_id,
                 ordinal as i64,
-                content,
+                chunk.content,
                 now,
                 model_id,
-                dims as i64
+                dims as i64,
+                chunk.metadata
             ],
         )
         .context("inserting chunk")?;
-        let rowid = tx.last_insert_rowid();
         tx.execute(
-            "INSERT INTO chunk_vectors (rowid, embedding) VALUES (?1, ?2)",
-            params![rowid, vec_to_bytes(embedding)],
+            "INSERT INTO chunk_embeddings (chunk_id, space_id, model, dims, embedding)
+             VALUES (?1, ?2, ?3, ?4, ryu_seal_vec(?1, ?3, ?5))",
+            params![
+                chunk_id,
+                space_id,
+                model_id,
+                dims as i64,
+                vec_to_bytes(&chunk.embedding)
+            ],
         )
         .context("inserting chunk vector")?;
         chunk_ids.push(chunk_id);
@@ -7686,11 +9826,33 @@ fn insert_chunks(
         let pairs: Vec<(&str, &str)> = chunk_ids
             .iter()
             .map(String::as_str)
-            .zip(embedded.iter().map(|(c, _)| c.as_str()))
+            .zip(embedded.iter().map(|c| c.content.as_str()))
             .collect();
         build_graph_for_chunks(tx, space_id, &pairs)?;
     }
     Ok(())
+}
+
+/// The blind tokens of extracted entities, sorted by token value: graph rows
+/// store only these (one HMAC per entity per chunk, not per edge).
+///
+/// [`extract_entities`] returns a chunk's terms in the order they first occur
+/// in the text, and graph row ids and rowids grow with each insert, so rows
+/// written in that order would let anyone with the file read each chunk's
+/// token sequence back (`ORDER BY id`): word-order statistics on the tokens.
+/// Sorting by token keeps only the set. Traversal is order-independent, and
+/// the entity cap is applied before this, so the graph's content is unchanged.
+fn entity_tokens(conn: &Connection, entities: &[String]) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare_cached("SELECT ryu_bi('graph.entity', ?1)")?;
+    let mut tokens = entities
+        .iter()
+        .map(|entity| {
+            stmt.query_row(params![entity], |row| row.get::<_, String>(0))
+                .context("tokenizing a graph entity")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    tokens.sort_unstable();
+    Ok(tokens)
 }
 
 /// Monotonic row-id source for `graph_nodes` / `graph_edges`.
@@ -7872,7 +10034,7 @@ type GraphCounts = (usize, usize);
 ///
 /// (The table above is *not* a measurement of ingest — it times a cold
 /// `set_retrieval_mode` rebuild over already-stored chunks, whereas ingest also
-/// embeds and writes `chunk_vectors`. Nobody has measured ingest end to end; if you
+/// embeds and writes the sealed `chunk_embeddings`. Nobody has measured ingest end to end; if you
 /// need its real number, measure it rather than reusing these digits.)
 ///
 /// The per-row work is a bound-and-step on ONE prepared statement per table,
@@ -8026,7 +10188,7 @@ fn build_graph_for_tables(
         if should_cancel() {
             return Err(RetrievalModeCancelled.into());
         }
-        let entities = extract_entities(content);
+        let entities = entity_tokens(tx, &extract_entities(content))?;
         for entity in &entities {
             nodes += node_stmt.execute(params![graph_row_id(), space_id, entity, chunk_id])?;
         }
@@ -8065,8 +10227,10 @@ fn finalize_chunked_retrieval_mode(
 ) -> Result<Option<RetrievalModeChange>> {
     let tx = conn.transaction()?;
     let mut actual = Sha256::new();
-    let mut stmt =
-        tx.prepare("SELECT rowid, id, content FROM chunks WHERE space_id = ?1 ORDER BY rowid")?;
+    let mut stmt = tx.prepare(
+        "SELECT rowid, id, COALESCE(ryu_open_soft('chunks.content', id, content), '')
+             FROM chunks WHERE space_id = ?1 ORDER BY rowid",
+    )?;
     let mut rows = stmt.query(params![space_id])?;
     let mut actual_chunks = 0usize;
     while let Some(row) = rows.next()? {
@@ -8173,10 +10337,62 @@ fn copy_staged_graph_table(
     Ok(())
 }
 
+/// Create (or empty) the staging tables of a graph retrieval-mode rebuild.
+///
+/// They are ordinary `main`-schema tables, not TEMP: the main connection runs
+/// with `temp_store = MEMORY` (see [`secure_connection`]), and a rebuild can
+/// stage up to [`MAX_GRAPH_ROWS_PER_SPACE`] rows, which must spill to disk, not
+/// sit in RAM. The rows hold only ids and blind tokens (what `graph_nodes` and
+/// `graph_edges` store on disk anyway), and `secure_delete` zeroes their pages
+/// when they are dropped ([`cleanup_retrieval_staging`]; leftovers of a crash
+/// are dropped at open).
+fn create_retrieval_staging(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS main.retrieval_rebuild_nodes (
+           id TEXT PRIMARY KEY, space_id TEXT NOT NULL, entity TEXT NOT NULL, chunk_id TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS main.retrieval_rebuild_edges (
+           id TEXT PRIMARY KEY, space_id TEXT NOT NULL, src_entity TEXT NOT NULL,
+           dst_entity TEXT NOT NULL, chunk_id TEXT NOT NULL
+         );
+         DELETE FROM main.retrieval_rebuild_nodes;
+         DELETE FROM main.retrieval_rebuild_edges;",
+    )
+    .context("creating the retrieval-mode staging tables")?;
+    Ok(())
+}
+
+/// Name of the sealed staging table of an embedding reindex.
+const EMBEDDING_REBUILD_TABLE: &str = "chunk_embeddings_rebuild";
+
+/// Drop the staged embedding table of a reindex that did not finish. It holds a
+/// sealed copy of every chunk vector, including chunks of Spaces deleted later,
+/// so it must not outlive the run. The scrub is marked owed only when a table
+/// was actually there.
+fn drop_embedding_reindex_staging(conn: &Connection) -> Result<()> {
+    let present: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![EMBEDDING_REBUILD_TABLE],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !present {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(&format!("DROP TABLE IF EXISTS {EMBEDDING_REBUILD_TABLE};"))
+        .context("dropping the staged embedding table")?;
+    mark_scrub_owed(&tx)?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn cleanup_retrieval_staging(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "DROP TABLE IF EXISTS temp.retrieval_rebuild_nodes;
-         DROP TABLE IF EXISTS temp.retrieval_rebuild_edges;",
+        "DROP TABLE IF EXISTS main.retrieval_rebuild_nodes;
+         DROP TABLE IF EXISTS main.retrieval_rebuild_edges;",
     )?;
     Ok(())
 }
@@ -8211,7 +10427,7 @@ fn build_graph_for_chunks_with_control(
         if should_cancel() {
             return Err(RetrievalModeCancelled.into());
         }
-        let entities = extract_entities(chunk_content);
+        let entities = entity_tokens(tx, &extract_entities(chunk_content))?;
         for entity in &entities {
             let node_id = graph_row_id();
             nodes += node_stmt
@@ -8248,19 +10464,100 @@ fn build_graph_for_chunks_with_control(
 }
 
 /// Serialize an `f32` vector to little-endian bytes for the `vec0` BLOB binding.
-fn vec_to_bytes(vec: &[f32]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(vec.len() * 4);
-    for value in vec {
-        bytes.extend_from_slice(&value.to_le_bytes());
-    }
-    bytes
-}
-
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn transient_text_embeddings_use_one_active_model_snapshot() {
+        let store = SpaceStore::open_in_memory().expect("in-memory store");
+        let batch = store
+            .embed_texts(&["oak tree".to_owned(), "river stone".to_owned()])
+            .await
+            .expect("transient embedding batch");
+
+        assert_eq!(batch.model_id, "local-hashing");
+        assert_eq!(batch.dims, DEFAULT_EMBED_DIMS);
+        assert_eq!(batch.embeddings.len(), 2);
+        assert_eq!(batch.embeddings[0].index, 0);
+        assert_eq!(batch.embeddings[1].index, 1);
+        assert!(batch
+            .embeddings
+            .iter()
+            .all(|item| item.embedding.len() == batch.dims));
+
+        let conn = store.conn.lock().await;
+        let document_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
+            .expect("read transient store");
+        assert_eq!(document_count, 0, "transient embeddings are not persisted");
+    }
+
+    #[tokio::test]
+    async fn index_unindexed_documents_in_space_embeds_only_that_space() {
+        let store = SpaceStore::open_in_memory().expect("in-memory store");
+        let owner = DocOwner::unattributed();
+        let seeded = store
+            .create_space("Seeded", None, &owner)
+            .await
+            .expect("seeded space");
+        let other = store
+            .create_space("Other", None, &owner)
+            .await
+            .expect("other space");
+        let page = store
+            .import_document(
+                &seeded,
+                "Profile",
+                "Builds things in Singapore.",
+                "page",
+                None,
+                &owner,
+            )
+            .await
+            .expect("import seeded page");
+        let untouched = store
+            .import_document(
+                &other,
+                "Notes",
+                "Pending until reindex.",
+                "page",
+                None,
+                &owner,
+            )
+            .await
+            .expect("import other page");
+
+        let indexed = store
+            .index_unindexed_documents_in_space(&seeded)
+            .await
+            .expect("index seeded space");
+        assert_eq!(indexed, 1);
+        let chunk_count = |doc_id: String| {
+            let store = store.clone();
+            async move {
+                let conn = store.conn.lock().await;
+                conn.query_row(
+                    "SELECT COUNT(*) FROM chunks WHERE document_id = ?1",
+                    params![doc_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count chunks")
+            }
+        };
+        assert!(chunk_count(page).await > 0);
+        assert_eq!(chunk_count(untouched).await, 0);
+        assert_eq!(
+            store
+                .index_unindexed_documents_in_space(&seeded)
+                .await
+                .expect("second pass"),
+            0,
+            "an indexed document is not embedded again"
+        );
+    }
 
     #[test]
     fn file_quota_is_atomic_and_replacement_excludes_current_row() {
@@ -9080,14 +11377,17 @@ mod tests {
         // sha256 is deterministic and content-addressed.
         let root = std::env::temp_dir().join(format!("ryu-spaces-blob-{}", uuid::Uuid::new_v4()));
         let bytes = b"hello artifact";
-        let sha1 = write_blob(&root, bytes).unwrap();
-        let sha2 = write_blob(&root, bytes).unwrap();
+        let cipher = SpacesKeys::from_root(&[7; 32]).blob_cipher;
+        let sha1 = seal::write_blob(&root, &cipher, bytes).unwrap();
+        let sha2 = seal::write_blob(&root, &cipher, bytes).unwrap();
         assert_eq!(sha1, sha2, "identical bytes dedupe to one blob");
         assert_eq!(sha1, sha256_hex(bytes), "returned sha matches content hash");
-        let read = read_blob(&root, &sha1).unwrap();
+        let read = seal::read_blob(&root, &cipher, &sha1).unwrap();
         assert_eq!(read.as_deref(), Some(&bytes[..]));
         // Unknown sha reads as absent, not error.
-        assert!(read_blob(&root, "0".repeat(64).as_str()).unwrap().is_none());
+        assert!(seal::read_blob(&root, &cipher, "0".repeat(64).as_str())
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -9138,6 +11438,69 @@ mod tests {
         store.clear_all_spaces().await.unwrap();
         let remaining = store.list_spaces(DocFilter::unrestricted()).await.unwrap();
         assert!(remaining.iter().any(|s| s.id == artifacts));
+    }
+
+    #[tokio::test]
+    async fn rejected_file_quota_writes_no_new_blob_bytes() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let owner = owned("alice");
+        let space = store.create_space("Files", None, &owner).await.unwrap();
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "INSERT INTO documents
+                 (id, space_id, title, created_at, source, updated_at, kind,
+                  byte_size, owner_user_id, org_id)
+                 VALUES ('quota-fill', ?1, 'existing', 1, '', 1, 'file', ?2, 'alice', 'org1')",
+                rusqlite::params![space, MAX_FILE_BYTES_PER_OWNER],
+            )
+            .unwrap();
+        }
+        let bytes = b"rejected-new-blob";
+        let path = blob_path(&store.blob_root, &sha256_hex(bytes));
+        assert!(!path.exists());
+        let error = store
+            .create_file(&space, "rejected.txt", bytes, "text/plain", &owner)
+            .await
+            .expect_err("quota-full upload must fail");
+        assert!(error.to_string().contains("file quota exceeded"));
+        assert!(
+            !path.exists(),
+            "quota rejection must not persist blob bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_file_replacement_keeps_old_blob_and_writes_no_new_bytes() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let owner = owned("alice");
+        let space = store.create_space("Files", None, &owner).await.unwrap();
+        let doc = store
+            .create_file(&space, "kept.txt", b"old", "text/plain", &owner)
+            .await
+            .unwrap();
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "INSERT INTO documents
+                 (id, space_id, title, created_at, source, updated_at, kind,
+                  byte_size, owner_user_id, org_id)
+                 VALUES ('quota-fill', ?1, 'existing', 1, '', 1, 'file', ?2, 'alice', 'org1')",
+                rusqlite::params![space, MAX_FILE_BYTES_PER_OWNER - 1],
+            )
+            .unwrap();
+        }
+        let replacement = b"new content exceeding the remaining byte";
+        let path = blob_path(&store.blob_root, &sha256_hex(replacement));
+        assert!(!path.exists());
+        let error = store
+            .replace_file_blob(&doc, replacement, "text/plain")
+            .await
+            .expect_err("quota-full replacement must fail");
+        assert!(error.to_string().contains("file quota exceeded"));
+        assert!(!path.exists());
+        let (_, current_bytes) = store.read_file_blob(&doc).await.unwrap().unwrap();
+        assert_eq!(current_bytes, b"old");
     }
 
     #[tokio::test]
@@ -9396,11 +11759,69 @@ mod tests {
         assert_eq!(out[0].dst_title, "Bravo");
 
         // Backlink on B points to A with a snippet.
-        let back = store.get_backlinks(&b).await.unwrap();
+        let back = store
+            .get_backlinks(&b, DocFilter::unrestricted())
+            .await
+            .unwrap();
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].src_doc_id, a);
         assert_eq!(back[0].src_title.as_deref(), Some("Alpha"));
         assert!(back[0].snippet.as_deref().unwrap_or("").contains("Bravo"));
+    }
+
+    #[tokio::test]
+    async fn backlinks_hide_private_source_documents_from_other_callers() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let space = store
+            .create_space("Shared target", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let private_source = store
+            .create_page(
+                &space,
+                "Alice secret",
+                &DocOwner::owned(Some("alice"), Some("org1")),
+            )
+            .await
+            .unwrap();
+        let target = store
+            .create_page(
+                &space,
+                "Team page",
+                &DocOwner::owned(Some("bob"), Some("org1")),
+            )
+            .await
+            .unwrap();
+        store
+            .update_document(
+                &private_source,
+                "Alice secret",
+                "private launch detail links to [[Team page]]",
+            )
+            .await
+            .unwrap();
+
+        let alice = store
+            .get_backlinks(
+                &target,
+                DocFilter::for_caller(Some("alice"), Some("org1"), true),
+            )
+            .await
+            .unwrap();
+        assert_eq!(alice.len(), 1);
+        assert_eq!(alice[0].src_doc_id, private_source);
+
+        let bob = store
+            .get_backlinks(
+                &target,
+                DocFilter::for_caller(Some("bob"), Some("org1"), true),
+            )
+            .await
+            .unwrap();
+        assert!(
+            bob.is_empty(),
+            "private source metadata must not leak through backlinks"
+        );
     }
 
     #[tokio::test]
@@ -9462,11 +11883,22 @@ mod tests {
             .update_document(&a, "Alpha", "Points at [[Bravo]].")
             .await
             .unwrap();
-        assert_eq!(store.get_backlinks(&b).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .get_backlinks(&b, DocFilter::unrestricted())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         // Rename B → its inbound link (matched by old title) unresolves to pending.
         store.update_document(&b, "Charlie", "").await.unwrap();
-        assert!(store.get_backlinks(&b).await.unwrap().is_empty());
+        assert!(store
+            .get_backlinks(&b, DocFilter::unrestricted())
+            .await
+            .unwrap()
+            .is_empty());
         assert!(store.get_outgoing_links(&a).await.unwrap()[0]
             .dst_doc_id
             .is_none());
@@ -9476,7 +11908,14 @@ mod tests {
             .update_document(&a, "Alpha", "Points at [[Charlie]].")
             .await
             .unwrap();
-        assert_eq!(store.get_backlinks(&b).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .get_backlinks(&b, DocFilter::unrestricted())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -9694,6 +12133,37 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(store.reindex_status().await.unwrap().errored.is_some());
+        let staged: i64 = store
+            .conn
+            .lock()
+            .await
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                params![EMBEDDING_REBUILD_TABLE],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(staged, 0, "a failed reindex must drop its staged vectors");
+    }
+
+    #[test]
+    fn a_leftover_embedding_staging_table_is_dropped_and_marks_the_scrub_owed() {
+        let store = SpaceStore::open_in_memory().unwrap();
+        let conn = store.conn.blocking_lock();
+        drop_embedding_reindex_staging(&conn).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE {EMBEDDING_REBUILD_TABLE} (chunk_id TEXT PRIMARY KEY);"
+        ))
+        .unwrap();
+        drop_embedding_reindex_staging(&conn).unwrap();
+        let left: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                params![EMBEDDING_REBUILD_TABLE],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
     }
 
     #[tokio::test]
@@ -10454,15 +12924,7 @@ mod tests {
 
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let mut conn = store.conn.lock().await;
-        conn.execute_batch(
-            "CREATE TEMP TABLE retrieval_rebuild_nodes (
-               id TEXT PRIMARY KEY, space_id TEXT NOT NULL, entity TEXT NOT NULL, chunk_id TEXT NOT NULL
-             );
-             CREATE TEMP TABLE retrieval_rebuild_edges (
-               id TEXT PRIMARY KEY, space_id TEXT NOT NULL, src_entity TEXT NOT NULL,
-               dst_entity TEXT NOT NULL, chunk_id TEXT NOT NULL
-             );",
-        )?;
+        create_retrieval_staging(&conn)?;
         for index in 0..(RETRIEVAL_REBUILD_BATCH_SIZE + 1) {
             conn.execute(
                 "INSERT INTO retrieval_rebuild_nodes
@@ -10489,8 +12951,10 @@ mod tests {
         }
 
         let mut fingerprint = Sha256::new();
-        let mut stmt = conn
-            .prepare("SELECT rowid, id, content FROM chunks WHERE space_id = ?1 ORDER BY rowid")?;
+        let mut stmt = conn.prepare(
+            "SELECT rowid, id, COALESCE(ryu_open_soft('chunks.content', id, content), '')
+                 FROM chunks WHERE space_id = ?1 ORDER BY rowid",
+        )?;
         let rows = stmt.query_map(params![&space], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -11150,15 +13614,7 @@ mod tests {
             .create_space("Deleted", None, &DocOwner::unattributed())
             .await?;
         let mut conn = store.conn.lock().await;
-        conn.execute_batch(
-            "CREATE TEMP TABLE retrieval_rebuild_nodes (
-               id TEXT PRIMARY KEY, space_id TEXT NOT NULL, entity TEXT NOT NULL, chunk_id TEXT NOT NULL
-             );
-             CREATE TEMP TABLE retrieval_rebuild_edges (
-               id TEXT PRIMARY KEY, space_id TEXT NOT NULL, src_entity TEXT NOT NULL,
-               dst_entity TEXT NOT NULL, chunk_id TEXT NOT NULL
-             );",
-        )?;
+        create_retrieval_staging(&conn)?;
         conn.execute("DELETE FROM spaces WHERE id = ?1", params![&space])?;
         let empty_fingerprint = format!("{:x}", Sha256::new().finalize());
         let result = finalize_chunked_retrieval_mode(
@@ -11544,8 +14000,8 @@ mod tests {
             let conn = store.conn.lock().await;
             conn.query_row(
                 "SELECT COUNT(DISTINCT dst_entity) FROM graph_edges
-                 WHERE space_id = ?1 AND src_entity = 'hubentity'",
-                params![space],
+                 WHERE space_id = ?1 AND src_entity = ?2",
+                params![space, store.seal.keys.entity_token("hubentity")],
                 |r| r.get(0),
             )
             .unwrap()
@@ -11604,14 +14060,37 @@ mod tests {
     /// Returns `(store, space_id, answer_chunk_content)`.
     async fn hub_fixture(
         satellite_prefix: &str,
-        bridge: &str,
-    ) -> (SpaceStore, String, &'static str) {
+        bridge_sorts_first: bool,
+    ) -> (SpaceStore, String, &'static str, String) {
         const UNIQUE_PER_DOC: usize = 30;
         // Comfortably past the cap whatever the cap is, so the truncation branch is
         // reached and enough entities are left over to be dropped.
         let docs = (MAX_FRONTIER_ENTITIES + 64).div_ceil(UNIQUE_PER_DOC);
 
         let store = SpaceStore::open_in_memory().unwrap();
+        // The traversal orders neighbours by their blind token (entities are
+        // stored only as tokens), so pick a bridge name whose token sorts before
+        // (or after) every satellite's.
+        let satellite_tokens: Vec<String> = (0..docs)
+            .flat_map(|doc| {
+                (0..UNIQUE_PER_DOC).map(move |tok| format!("{satellite_prefix}{doc}x{tok}"))
+            })
+            .map(|name| store.seal.keys.entity_token(&name))
+            .collect();
+        let lowest = satellite_tokens.iter().min().cloned().unwrap();
+        let highest = satellite_tokens.iter().max().cloned().unwrap();
+        let bridge = (0..1_000_000)
+            .map(|n| format!("bridge{n}"))
+            .find(|name| {
+                let token = store.seal.keys.entity_token(name);
+                if bridge_sorts_first {
+                    token < lowest
+                } else {
+                    token > highest
+                }
+            })
+            .expect("a bridge name with the wanted token order");
+        let bridge = bridge.as_str();
         let space = store
             .create_space_with_mode("Hub", None, RetrievalMode::Graph, &DocOwner::unattributed())
             .await
@@ -11653,8 +14132,8 @@ mod tests {
             let conn = store.conn.lock().await;
             conn.query_row(
                 "SELECT COUNT(DISTINCT dst_entity) FROM graph_edges
-                 WHERE space_id = ?1 AND src_entity = 'hubentity'",
-                params![space],
+                 WHERE space_id = ?1 AND src_entity = ?2",
+                params![space, store.seal.keys.entity_token("hubentity")],
                 |r| r.get(0),
             )
             .unwrap()
@@ -11664,13 +14143,13 @@ mod tests {
             "fixture must overflow the frontier cap; hub degree was {hub_degree}, \
              cap is {MAX_FRONTIER_ENTITIES}"
         );
-        (store, space, ANSWER)
+        (store, space, ANSWER, bridge.to_owned())
     }
 
     /// **The cap truncates, and the grounded chunk still comes back.**
     ///
-    /// The bridge is named so it sorts *before* every satellite, so it survives the
-    /// truncation and the two-hop path `hubentity → aaabridge → answer chunk`
+    /// The bridge is named so its token sorts *before* every satellite's, so it survives the
+    /// truncation and the two-hop path `hubentity → bridge → answer chunk`
     /// resolves. This is the half that proves the cap bounds the traversal without
     /// breaking it: the search terminates and returns the chunk that a full
     /// traversal would have returned — even though hop 1 threw away every neighbour
@@ -11683,7 +14162,7 @@ mod tests {
     /// the lossiness one below.
     #[tokio::test]
     async fn graph_search_reaches_a_two_hop_chunk_through_a_truncated_frontier() {
-        let (store, space, answer) = hub_fixture("sat", "aaabridge").await;
+        let (store, space, answer, _bridge) = hub_fixture("sat", true).await;
         let hits = store
             .graph_search(&space, "hubentity", 10_000, &DocFilter::unrestricted())
             .await
@@ -11705,7 +14184,7 @@ mod tests {
 
     /// **The cap is LOSSY, and that is a retrieval claim, not a performance one.**
     ///
-    /// Identical fixture to the test above with one change: the bridge sorts *after*
+    /// Identical fixture to the test above with one change: the bridge token sorts *after*
     /// every satellite, so hop 1 fills its [`MAX_FRONTIER_ENTITIES`] budget with
     /// satellites and the bridge is dropped. The chunk behind it then becomes
     /// unreachable — permanently, not just later: the bridge shares a chunk with the
@@ -11721,13 +14200,13 @@ mod tests {
     /// value.
     #[tokio::test]
     async fn graph_search_frontier_truncation_can_drop_a_reachable_chunk() {
-        let (store, space, answer) = hub_fixture("aaa", "zzzbridge").await;
+        let (store, space, answer, bridge) = hub_fixture("aaa", false).await;
 
         // Reachable in principle: seeded directly at the bridge, the traversal finds
         // the answer chunk in one hop. So the fixture is connected, and the miss
         // below is the cap's doing.
         let direct = store
-            .graph_search(&space, "zzzbridge", 10_000, &DocFilter::unrestricted())
+            .graph_search(&space, &bridge, 10_000, &DocFilter::unrestricted())
             .await
             .unwrap();
         assert!(
@@ -11740,7 +14219,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            hits.iter().any(|c| c.content.contains("zzzbridge")),
+            hits.iter().any(|c| c.content.contains(bridge.as_str())),
             "the bridge's own chunk is a direct hop-1 hit and must still be returned"
         );
         assert!(

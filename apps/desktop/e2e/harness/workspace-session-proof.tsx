@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import {
 	parseWorkspaceSessionState,
 	sameWorkspaceSessionState,
 	type WorkspaceSessionDock,
 	type WorkspaceSessionState,
 } from "../../src/lib/workspace-session.ts";
+import styles from "./workspace-session-proof.module.css";
 import "../../src/index.css";
 
 const STORAGE_KEY = "ryu-workspace-session-proof";
+const persistedSnapshotSchema = z.object({
+	workspaceSession: z.json().optional(),
+});
 
 const EXPECTED_SESSION: WorkspaceSessionState = {
 	bottom: {
@@ -48,8 +53,10 @@ function readSavedSession(): WorkspaceSessionState | undefined {
 		if (!raw) {
 			return;
 		}
-		const parsed = JSON.parse(raw) as { workspaceSession?: unknown };
-		return parseWorkspaceSessionState(parsed.workspaceSession);
+		const parsed = persistedSnapshotSchema.safeParse(JSON.parse(raw));
+		return parsed.success
+			? parseWorkspaceSessionState(parsed.data.workspaceSession)
+			: undefined;
 	} catch {
 		return;
 	}
@@ -72,12 +79,12 @@ function DockCard({
 			<div className="flex items-center justify-between gap-4">
 				<div>
 					<p className="font-semibold text-lg">{label} dock</p>
-					<p className="mt-1 text-slate-400 text-sm">
+					<p className={`mt-1 text-sm ${styles.muted}`}>
 						{dock.tabs.length} open tabs · selected tab is restored by identity
 					</p>
 				</div>
 				<span
-					className={`rounded-full px-3 py-1 font-semibold text-xs ${open ? "bg-emerald-400/15 text-emerald-200" : "bg-slate-400/15 text-slate-300"}`}
+					className={`rounded-full px-3 py-1 font-semibold text-xs ${open ? styles.openState : styles.closedState}`}
 					data-testid={`${label.toLowerCase()}-dock-state`}
 				>
 					{open ? "Open" : "Closed"}
@@ -86,7 +93,7 @@ function DockCard({
 			<ul className="mt-4 grid gap-2 sm:grid-cols-2">
 				{dock.tabs.map((tab, index) => (
 					<li
-						className={`rounded-xl border px-3 py-3 ${index === dock.activeIndex ? "border-cyan-300/70 bg-cyan-300/10" : "border-white/10 bg-black/10"}`}
+						className={`rounded-xl border px-3 py-3 ${index === dock.activeIndex ? styles.activeTab : "border-white/10 bg-black/10"}`}
 						data-active={index === dock.activeIndex ? "true" : "false"}
 						data-testid={`${label.toLowerCase()}-tab-${index}`}
 						key={`${tab.kind}-${tab.label}-${index}`}
@@ -94,12 +101,12 @@ function DockCard({
 						<div className="flex items-center justify-between gap-3">
 							<span className="font-medium text-sm">{tab.label}</span>
 							{index === dock.activeIndex && (
-								<span className="font-semibold text-cyan-200 text-xs">
+								<span className={`font-semibold text-xs ${styles.selection}`}>
 									Selected
 								</span>
 							)}
 						</div>
-						<p className="mt-1 text-slate-400 text-xs">
+						<p className={`mt-1 text-xs ${styles.muted}`}>
 							{tab.project ? "Project workspace tab" : "Chat workspace tab"}
 							{tab.pinned ? " · pinned" : ""}
 						</p>
@@ -169,17 +176,17 @@ function WorkspaceSessionProof() {
 	};
 
 	return (
-		<main className="min-h-screen bg-[#0b0f14] p-6 text-slate-100 sm:p-10">
+		<main className={`min-h-screen p-6 sm:p-10 ${styles.surface}`}>
 			<div className="mx-auto flex max-w-5xl flex-col gap-6">
 				<header className="flex flex-col gap-4 border-white/10 border-b pb-6 sm:flex-row sm:items-start sm:justify-between">
 					<div>
-						<p className="font-medium text-slate-400 text-xs uppercase tracking-[0.18em]">
+						<p className={`font-medium text-xs uppercase ${styles.eyebrow}`}>
 							React verification artifact
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
 							Chat workspace tabs survive relaunch
 						</h1>
-						<p className="mt-2 max-w-2xl text-slate-400 text-sm leading-6">
+						<p className={`mt-2 max-w-2xl text-sm leading-6 ${styles.muted}`}>
 							This proof uses the production workspace-session parser and
 							compares a saved chat snapshot after a browser reload. It covers
 							every open tab, selected tab, dock visibility, and project pin
@@ -187,7 +194,7 @@ function WorkspaceSessionProof() {
 						</p>
 					</div>
 					<div
-						className={`rounded-full px-4 py-2 font-semibold text-sm ${proofPassed ? "bg-emerald-400/15 text-emerald-200" : "bg-amber-400/15 text-amber-200"}`}
+						className={`rounded-full px-4 py-2 font-semibold text-sm ${proofPassed ? styles.openState : styles.pendingState}`}
 						data-testid="proof-status"
 					>
 						{proofPassed ? "PASS · full workspace restored" : status}
@@ -199,7 +206,7 @@ function WorkspaceSessionProof() {
 					data-testid="proof-controls"
 				>
 					<button
-						className="rounded-xl bg-cyan-300 px-4 py-3 font-semibold text-[#071017] text-sm transition hover:bg-cyan-200"
+						className={`rounded-xl px-4 py-3 font-semibold text-sm transition ${styles.saveButton}`}
 						data-testid="save-session"
 						onClick={saveSession}
 						type="button"
@@ -215,7 +222,7 @@ function WorkspaceSessionProof() {
 						Simulate relaunch
 					</button>
 					<button
-						className="rounded-xl border border-white/15 px-4 py-3 font-semibold text-slate-300 text-sm transition hover:bg-white/[0.06]"
+						className={`rounded-xl border border-white/15 px-4 py-3 font-semibold text-sm transition hover:bg-white/[0.06] ${styles.secondary}`}
 						data-testid="reset-session"
 						onClick={reset}
 						type="button"
@@ -229,7 +236,7 @@ function WorkspaceSessionProof() {
 					data-testid="proof-summary"
 				>
 					<div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-						<p className="text-slate-400 text-xs uppercase tracking-wide">
+						<p className={`text-xs uppercase tracking-wide ${styles.muted}`}>
 							Chat state
 						</p>
 						<p className="mt-2 font-semibold text-lg" data-testid="chat-state">
@@ -237,7 +244,7 @@ function WorkspaceSessionProof() {
 						</p>
 					</div>
 					<div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-						<p className="text-slate-400 text-xs uppercase tracking-wide">
+						<p className={`text-xs uppercase tracking-wide ${styles.muted}`}>
 							Open tabs
 						</p>
 						<p className="mt-2 font-semibold text-lg" data-testid="tab-count">
@@ -245,7 +252,7 @@ function WorkspaceSessionProof() {
 						</p>
 					</div>
 					<div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-						<p className="text-slate-400 text-xs uppercase tracking-wide">
+						<p className={`text-xs uppercase tracking-wide ${styles.muted}`}>
 							Session storage
 						</p>
 						<p className="mt-2 font-semibold text-lg">Per-chat snapshot</p>
@@ -268,16 +275,16 @@ function WorkspaceSessionProof() {
 				<section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
 					<div className="flex items-center justify-between gap-4">
 						<h2 className="font-semibold text-lg">Browser activity</h2>
-						<span className="text-slate-400 text-xs">
+						<span className={`text-xs ${styles.muted}`}>
 							localStorage → parser → React
 						</span>
 					</div>
 					<ul
-						className="mt-3 space-y-2 text-slate-300 text-sm"
+						className={`mt-3 space-y-2 text-sm ${styles.secondary}`}
 						data-testid="activity-log"
 					>
 						{activity.length === 0 ? (
-							<li className="text-slate-500">No relaunch yet</li>
+							<li className={` ${styles.emptyActivity}`}>No relaunch yet</li>
 						) : (
 							activity.map((entry, index) => (
 								<li key={`${entry}-${index}`}>• {entry}</li>
@@ -290,6 +297,4 @@ function WorkspaceSessionProof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
-	<WorkspaceSessionProof />
-);
+createRoot(document.getElementById("root")!).render(<WorkspaceSessionProof />);

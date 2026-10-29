@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/reactions.ts
 //
 // Typed client for Core's emoji-reaction surface on a conversation's messages.
@@ -11,6 +13,16 @@
 // the read — so a client cannot react as someone else by shaping a body.
 
 import { type ApiTarget, request } from "./client.ts";
+
+const reactionsResponseSchema = z.looseObject({
+	count: z.number().optional(),
+	emoji: z.string().optional(),
+	message_id: z.string().optional(),
+	reacted_by_me: z.boolean().optional(),
+});
+const bodyResponseSchema = z.looseObject({
+	reactions: z.array(reactionsResponseSchema).optional(),
+});
 
 /**
  * One `(message_id, emoji)` bucket: how many people used that emoji on that
@@ -54,9 +66,11 @@ export async function listReactions(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<ReactionBucket[]> {
-	const body = await request<{ reactions?: RawBucket[] }>(
+	const body = await request(
 		target,
-		`/api/conversations/${encodeURIComponent(conversationId)}/reactions`
+		`/api/conversations/${encodeURIComponent(conversationId)}/reactions`,
+		undefined,
+		bodyResponseSchema
 	);
 	return (body.reactions ?? []).map(normalizeBucket);
 }
@@ -82,10 +96,15 @@ export async function addReaction(
 	messageId: string,
 	emoji: string
 ): Promise<void> {
-	await request<unknown>(target, messagePath(conversationId, messageId), {
-		method: "POST",
-		body: { emoji },
-	});
+	await request(
+		target,
+		messagePath(conversationId, messageId),
+		{
+			method: "POST",
+			body: { emoji },
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /** Remove the caller's own `emoji` from a message. Same id rule as {@link addReaction}. */
@@ -95,10 +114,15 @@ export async function removeReaction(
 	messageId: string,
 	emoji: string
 ): Promise<void> {
-	await request<unknown>(target, messagePath(conversationId, messageId), {
-		method: "DELETE",
-		body: { emoji },
-	});
+	await request(
+		target,
+		messagePath(conversationId, messageId),
+		{
+			method: "DELETE",
+			body: { emoji },
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 // The "is this id server-assigned?" gate that keeps callers off the 404 path

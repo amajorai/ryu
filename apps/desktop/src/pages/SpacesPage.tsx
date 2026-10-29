@@ -9,11 +9,12 @@ import {
 	type SpacesDetailProps,
 	SpacesView,
 } from "@ryu/blocks/desktop/spaces.tsx";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppDisabledNotice } from "@/src/components/AppDisabledNotice.tsx";
 import { BackupSettings } from "@/src/components/settings/BackupSettings.tsx";
 import { SpaceImportsPanel } from "@/src/components/spaces/SpaceImportsPanel.tsx";
 import { SpaceUploadPanel } from "@/src/components/spaces/SpaceUploadPanel.tsx";
+import { SpaceWallpaperCover } from "@/src/components/spaces/SpaceWallpaperCover.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -70,6 +71,10 @@ export default function SpacesPage({
 	// documents, previews, ingest and search all go through `useSpacesContext`, which
 	// owns the target. No `nodeUrl`/`nodeToken` split is needed here.
 	const node = useActiveNode();
+	const nodeTarget = useMemo(
+		() => toTarget(node),
+		[node.url, node.token, node.userJwt]
+	);
 
 	const [selectedId, setSelectedId] = useState<string | null>(
 		initialSpaceId ?? null
@@ -396,6 +401,7 @@ export default function SpacesPage({
 			// capability, then open it in the app's Companion. This REPLACES the
 			// built-in `create_whiteboard` — one implementation, still a first-class
 			// Space document (persisted, search-embedded, backlinked, versioned).
+			// SAFETY: Core maps this exact spaces.createDoc method to spaces_create_doc; app_create_doc returns Rust Result<String>, the successful bridge serializes that ID into result, and pluginHostInvoke unwraps it after rejecting error responses.
 			const docId = (await pluginHostInvoke(
 				toTarget(node),
 				WHITEBOARD_PLUGIN_ID,
@@ -478,6 +484,13 @@ export default function SpacesPage({
 
 	const detail: SpacesDetailProps | null = selected
 		? {
+				bannerSlot: (
+					<SpaceWallpaperCover
+						key={`${node.url}:${selected.id}`}
+						spaceId={selected.id}
+						target={nodeTarget}
+					/>
+				),
 				backupPanel: (
 					<BackupSettings
 						key={`${node.url}:${selected.id}`}

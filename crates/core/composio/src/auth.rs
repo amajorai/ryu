@@ -17,8 +17,33 @@
 //! Placement note (Core vs Gateway): this is a user-supplied credential for
 //! reaching the user's own Composio account — *what the user picked*, not org
 //! policy — so it lives in Core. The key is never logged.
+//!
+//! Managed nodes (D8): a Ryu-managed node never holds a Ryu Composio key. Its
+//! process env is provisioned by Ryu, so a key found there would be Ryu's, and
+//! the env fallback is therefore ignored when [`MANAGED_NODE_ENV`] is truthy.
+//! Composio on a managed node runs through the Connect service
+//! ([`crate::service`]), which holds the tenant credential off the node. A key
+//! the tenant saved in Settings (the preference cache) is the tenant's own and
+//! still resolves.
 
 use std::sync::RwLock;
+
+/// Env flag marking this Core as a Ryu-managed node. Same name and truthy rule
+/// as Core's `sidecar::gateway::managed_node`; this crate cannot depend on
+/// `apps/core`, so it reads the flag itself.
+pub const MANAGED_NODE_ENV: &str = "RYU_MANAGED_NODE";
+
+/// Whether [`MANAGED_NODE_ENV`] is truthy (`1` / `true` / `yes`, any case).
+pub fn managed_node() -> bool {
+    matches!(
+        std::env::var(MANAGED_NODE_ENV)
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
 
 /// Preferences key the desktop writes; Core loads it on startup and on change.
 pub const COMPOSIO_API_KEY_PREF_KEY: &str = "composio-api-key";
@@ -51,12 +76,16 @@ pub fn set_key(key: &str) {
 
 /// Resolve the active key: preferences (in-process) first, then env
 /// (`RYU_COMPOSIO_API_KEY` preferred so an operator override beats a stray
-/// `COMPOSIO_API_KEY`).
+/// `COMPOSIO_API_KEY`). On a managed node only the preference source counts;
+/// an env key there is Ryu's and is never used (see the module docs).
 pub fn key() -> Option<String> {
     if let Ok(guard) = COMPOSIO_KEY.read() {
         if let Some(k) = guard.as_ref() {
             return Some(k.clone());
         }
+    }
+    if managed_node() {
+        return None;
     }
     std::env::var("RYU_COMPOSIO_API_KEY")
         .or_else(|_| std::env::var("COMPOSIO_API_KEY"))
@@ -74,23 +103,56 @@ pub fn is_configured() -> bool {
 mod tests {
     use super::*;
 
-    /// Snapshot + restore the two key env vars so a test that mutates them does
-    /// not leak into another test in the same binary.
-    fn take_key_env() -> (Option<String>, Option<String>) {
-        (
+    type KeyEnv = (Option<String>, Option<String>, Option<String>);
+
+    /// Snapshot + restore the two key env vars and the managed-node flag so a
+    /// test that mutates them does not leak into another test in the same
+    /// binary. The flag is cleared on capture so a runner that exports it
+    /// cannot flip the self-hosted assertions below.
+    fn take_key_env() -> KeyEnv {
+        let prev = (
             std::env::var("RYU_COMPOSIO_API_KEY").ok(),
             std::env::var("COMPOSIO_API_KEY").ok(),
-        )
+            std::env::var(MANAGED_NODE_ENV).ok(),
+        );
+        std::env::remove_var(MANAGED_NODE_ENV);
+        prev
     }
-    fn restore_key_env(prev: (Option<String>, Option<String>)) {
-        match prev.0 {
-            Some(v) => std::env::set_var("RYU_COMPOSIO_API_KEY", v),
-            None => std::env::remove_var("RYU_COMPOSIO_API_KEY"),
+    fn restore_key_env(prev: KeyEnv) {
+        for (name, value) in [
+            ("RYU_COMPOSIO_API_KEY", prev.0),
+            ("COMPOSIO_API_KEY", prev.1),
+            (MANAGED_NODE_ENV, prev.2),
+        ] {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
         }
-        match prev.1 {
-            Some(v) => std::env::set_var("COMPOSIO_API_KEY", v),
-            None => std::env::remove_var("COMPOSIO_API_KEY"),
-        }
+    }
+
+    #[test]
+    fn managed_node_ignores_ryu_env_key_and_keeps_tenant_preference() {
+        let _lock = test_env_lock();
+        let prev = take_key_env();
+        set_key("");
+        std::env::set_var("RYU_COMPOSIO_API_KEY", "env_prefixed_key");
+        std::env::set_var("COMPOSIO_API_KEY", "env_plain_key");
+        std::env::set_var(MANAGED_NODE_ENV, " Yes ");
+        assert!(managed_node());
+        // Env keys on a managed node are Ryu's: never resolved, never configured,
+        // so every Core-direct Composio path falls through to Connect.
+        assert_eq!(key(), None);
+        assert!(!is_configured());
+        // A key the tenant saved in Settings is the tenant's own and resolves.
+        set_key("tenant_pref_key");
+        assert_eq!(key().as_deref(), Some("tenant_pref_key"));
+        set_key("");
+        // Falsy flag values leave the self-hosted env fallback in place.
+        std::env::set_var(MANAGED_NODE_ENV, "0");
+        assert!(!managed_node());
+        assert_eq!(key().as_deref(), Some("env_prefixed_key"));
+        restore_key_env(prev);
     }
 
     #[test]

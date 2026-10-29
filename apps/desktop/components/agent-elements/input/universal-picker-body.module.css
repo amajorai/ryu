@@ -1,0 +1,30 @@
+[data-slot="popover-content"][data-desktop-picker-popover="true"] {
+	gap: 0;
+}
+[data-desktop-picker-inset="true"][data-slot="dropdown-menu-content"],
+[data-desktop-picker-inset="true"][data-slot="dropdown-menu-sub-content"] {
+	padding: var(--spacing);
+}
+.availableAgent > :first-child,
+.availableAgent > img {
+	opacity: 0.5;
+}
+[data-slot="command-item"][data-picker-active="true"] {
+	background-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+.effortPip {
+	height: 5px;
+	border-radius: 1px;
+}
+.effortPip[data-effort-index="1"] {
+	height: 7px;
+}
+.effortPip[data-effort-index="2"] {
+	height: 9px;
+}
+.effortPip[data-effort-index="3"] {
+	height: 11px;
+}
+.effortPip[data-effort-index="4"] {
+	height: 13px;
+}

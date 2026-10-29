@@ -23,7 +23,9 @@ export function notifyWorkflowsChanged() {
 }
 
 export interface UseWorkflowsResult {
-	create: (definition: unknown) => Promise<Workflow>;
+	create: (
+		definition: Parameters<typeof apiCreateWorkflow>[1]
+	) => Promise<Workflow>;
 	error: string | null;
 	loading: boolean;
 	reload: () => Promise<void>;
@@ -81,7 +83,7 @@ export function useWorkflows(): UseWorkflowsResult {
 	}, [reload]);
 
 	const create = useCallback(
-		async (definition: unknown) => {
+		async (definition: Parameters<typeof apiCreateWorkflow>[1]) => {
 			const workflow = await apiCreateWorkflow(
 				{ url, token, userJwt },
 				definition

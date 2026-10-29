@@ -1,10 +1,18 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
-function MessageGroup({ className, ...props }: React.ComponentProps<"div">) {
+function MessageGroup({
+	className,
+	spacing = "default",
+	...props
+}: React.ComponentProps<"div"> & { spacing?: "default" | "relaxed" }) {
 	return (
 		<div
-			className={cn("flex min-w-0 flex-col gap-2", className)}
+			className={cn(
+				"flex min-w-0 flex-col gap-2",
+				spacing === "relaxed" && "gap-3",
+				className
+			)}
 			data-slot="message-group"
 			{...props}
 		/>
@@ -29,11 +37,19 @@ function Message({
 	);
 }
 
-function MessageAvatar({ className, ...props }: React.ComponentProps<"div">) {
+function MessageAvatar({
+	className,
+	variant = "default",
+	...props
+}: React.ComponentProps<"div"> & {
+	variant?: "default" | "primary" | "transparent";
+}) {
 	return (
 		<div
 			className={cn(
 				"flex w-fit min-w-8 shrink-0 items-center justify-center self-end overflow-hidden rounded-full bg-muted group-has-data-[slot=message-footer]/message:-translate-y-8",
+				variant === "primary" && "bg-primary/10 text-primary text-xs",
+				variant === "transparent" && "bg-transparent",
 				className
 			)}
 			data-slot="message-avatar"
@@ -42,11 +58,16 @@ function MessageAvatar({ className, ...props }: React.ComponentProps<"div">) {
 	);
 }
 
-function MessageContent({ className, ...props }: React.ComponentProps<"div">) {
+function MessageContent({
+	className,
+	spacing = "default",
+	...props
+}: React.ComponentProps<"div"> & { spacing?: "default" | "compact" }) {
 	return (
 		<div
 			className={cn(
 				"wrap-break-word flex w-full min-w-0 flex-col gap-2.5 group-data-[align=end]/message:*:data-slot:self-end",
+				spacing === "compact" && "gap-1.5",
 				className
 			)}
 			data-slot="message-content"
@@ -55,11 +76,21 @@ function MessageContent({ className, ...props }: React.ComponentProps<"div">) {
 	);
 }
 
-function MessageHeader({ className, ...props }: React.ComponentProps<"div">) {
+function MessageHeader({
+	className,
+	inset = "default",
+	spacing = "default",
+	...props
+}: React.ComponentProps<"div"> & {
+	inset?: "default" | "none";
+	spacing?: "default" | "relaxed";
+}) {
 	return (
 		<div
 			className={cn(
 				"flex min-w-0 max-w-full items-center px-3.5 font-medium text-muted-foreground text-xs group-has-data-[variant=ghost]/message:px-0",
+				inset === "none" && "px-0",
+				spacing === "relaxed" && "gap-2",
 				className
 			)}
 			data-slot="message-header"
@@ -68,11 +99,21 @@ function MessageHeader({ className, ...props }: React.ComponentProps<"div">) {
 	);
 }
 
-function MessageFooter({ className, ...props }: React.ComponentProps<"div">) {
+function MessageFooter({
+	className,
+	inset = "default",
+	spacing = "default",
+	...props
+}: React.ComponentProps<"div"> & {
+	inset?: "default" | "none";
+	spacing?: "default" | "relaxed";
+}) {
 	return (
 		<div
 			className={cn(
 				"flex min-w-0 max-w-full items-center px-3.5 font-medium text-muted-foreground text-xs group-has-data-[variant=ghost]/message:px-0 group-data-[align=end]/message:justify-end",
+				inset === "none" && "px-0",
+				spacing === "relaxed" && "gap-3",
 				className
 			)}
 			data-slot="message-footer"

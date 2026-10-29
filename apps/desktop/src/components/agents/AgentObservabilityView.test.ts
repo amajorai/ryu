@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { AuditEntry } from "@/src/lib/api/gateway.ts";
 import {
 	filterAuditEntries,
+	promptCacheStatus,
 	summarizeAudit,
 } from "./AgentObservabilityView.tsx";
 
@@ -12,6 +13,8 @@ function entry(overrides: Partial<AuditEntry> = {}): AuditEntry {
 		backend: null,
 		command: null,
 		cost_micro_usd: 1250,
+		cache_read_tokens: null,
+		cache_write_tokens: null,
 		duration_ms: null,
 		error: null,
 		eval_score: 0.8,
@@ -22,6 +25,9 @@ function entry(overrides: Partial<AuditEntry> = {}): AuditEntry {
 		latency_ms: 500,
 		model: "gpt-4o-mini",
 		output_tokens: 50,
+		prompt_cache_outcome: null,
+		prompt_cache_read_tokens: null,
+		prompt_cache_write_tokens: null,
 		provider: "openai",
 		request_id: "req-1",
 		session_id: "run-1",
@@ -49,13 +55,94 @@ describe("agent observability aggregates", () => {
 
 		expect(summary).toEqual({
 			averageLatencyMs: 1000,
+			promptCacheHitRate: null,
+			promptCacheHitRequests: 0,
+			promptCacheMissRequests: 0,
+			promptCacheReadTokens: null,
+			promptCacheWriteTokens: null,
 			costMicroUsd: 1250,
 			errorCount: 1,
 			qualityScore: 0.8,
 			totalInputTokens: 125,
 			totalOutputTokens: 60,
+			totalCacheReadTokens: null,
+			totalCacheWriteTokens: null,
+			totalCacheMissTokens: null,
 			totalRequests: 2,
 		});
+	});
+
+	test("summarizes reported prompt cache hits, misses, reads, and writes", () => {
+		const summary = summarizeAudit([
+			entry({
+				prompt_cache_outcome: "injected",
+				prompt_cache_read_tokens: 800,
+				prompt_cache_write_tokens: 200,
+			}),
+			entry({
+				id: "audit-2",
+				prompt_cache_outcome: "injected",
+				prompt_cache_read_tokens: 0,
+				prompt_cache_write_tokens: 500,
+			}),
+			entry({
+				id: "audit-3",
+				prompt_cache_outcome: "disabled",
+				prompt_cache_read_tokens: 0,
+				prompt_cache_write_tokens: 0,
+			}),
+		]);
+
+		expect(summary).toMatchObject({
+			promptCacheHitRate: 800 / 1500,
+			promptCacheHitRequests: 1,
+			promptCacheMissRequests: 1,
+			promptCacheReadTokens: 800,
+			promptCacheWriteTokens: 700,
+		});
+	});
+
+	test("labels reads and cold writes without treating unreported usage as a miss", () => {
+		expect(
+			promptCacheStatus(
+				entry({
+					prompt_cache_outcome: "injected",
+					prompt_cache_read_tokens: 1200,
+					prompt_cache_write_tokens: 0,
+				})
+			)
+		).toBe("Hit");
+		expect(
+			promptCacheStatus(
+				entry({
+					prompt_cache_outcome: "injected",
+					prompt_cache_read_tokens: 0,
+					prompt_cache_write_tokens: 100,
+				})
+			)
+		).toBe("Miss + write");
+		expect(promptCacheStatus(entry())).toBeNull();
+	});
+
+	test("reports OpenRouter cache hits, writes, and uncached prompt tokens", () => {
+		const summary = summarizeAudit([
+			entry({
+				cache_read_tokens: 800,
+				cache_write_tokens: 100,
+				input_tokens: 1000,
+				provider: "openrouter",
+			}),
+			entry({
+				cache_read_tokens: 0,
+				cache_write_tokens: 0,
+				input_tokens: 250,
+				provider: "openrouter",
+			}),
+		]);
+
+		expect(summary.totalCacheReadTokens).toBe(800);
+		expect(summary.totalCacheWriteTokens).toBe(100);
+		expect(summary.totalCacheMissTokens).toBe(350);
 	});
 
 	test("filters errors, slow calls, event kind, and search terms", () => {

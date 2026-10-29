@@ -1,0 +1,27 @@
+/* Shared registered-icon treatment for host surfaces and bundled Companions.
+   `Icon` (packages/ui/src/components/icon.tsx) supplies only the mask URL and
+   size as custom properties, so every entrypoint that can render it must
+   import these rules. */
+
+/* Registered icons own their mask and dimensions. Keep these declarations
+   outside utility layers so ordinary caller utilities cannot change the
+   geometry previously supplied by inline styles; important utilities retain
+   their existing precedence. */
+.ryu-registered-icon {
+	display: inline-block;
+	background-color: currentColor;
+	-webkit-mask-image: var(--ryu-icon-mask);
+	mask-image: var(--ryu-icon-mask);
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+}
+
+/* React ignored invalid inline lengths, leaving caller sizing in force. */
+.ryu-registered-icon-sized {
+	width: var(--ryu-icon-size);
+	height: var(--ryu-icon-size);
+}

@@ -1,29 +1,30 @@
 // Live usage for every saved Ryu provider subscription account.
 //
-// The catalog is the source of truth for which provider/account rows exist. Each
-// query is keyed by the node, provider, and sealed-vault account id, so switching
-// nodes cannot reuse a snapshot from another machine and switching accounts does
-// not require mutating the active Pi configuration.
+// Rows come from Core's subscriptions snapshot (`useSubscriptions`), which owns
+// which providers and accounts exist, which of them can report usage, and the
+// probe rules: Core never asks the vendor for an account that needs a new
+// sign-in, is turned off in the pool, or cannot report usage, so this hook no
+// longer probes those itself. One request per node replaces the per-account
+// fan-out; the query key carries the node and credentials, so switching nodes
+// cannot reuse another machine's snapshot.
 
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { useIsActiveTab } from "@/src/contexts/TabsContext.tsx";
 import { toTarget } from "@/src/lib/api/client.ts";
-import type {
-	PiAccount,
-	PiCatalog,
-	PiProvider,
-} from "@/src/lib/api/pi-config.ts";
-import type { UsageSnapshot } from "@/src/lib/api/usage.ts";
-import { fetchProviderAccountUsage } from "@/src/lib/api/usage.ts";
+import type { PiCatalog } from "@/src/lib/api/pi-config.ts";
+import {
+	fetchSubscriptionsSnapshot,
+	type SubscriptionAccount,
+	type UsageSnapshot,
+	usageSnapshotFromReading,
+} from "@/src/lib/api/usage.ts";
 import { useActiveNode } from "./useActiveNode.ts";
-
-const FIVE_MINUTES_MS = 1000 * 60 * 5;
-
-interface SubscriptionAccountRef {
-	account: PiAccount;
-	provider: PiProvider;
-}
+import {
+	seedAccountReadings,
+	subscriptionsSnapshotKey,
+	useSubscriptions,
+} from "./useSubscriptions.ts";
 
 export interface SubscriptionUsageAccount {
 	accountId: string;
@@ -45,22 +46,48 @@ export interface UseSubscriptionUsageResult {
 	refreshing: boolean;
 }
 
-function subscriptionAccountRefs(
-	catalog: PiCatalog | null
-): SubscriptionAccountRef[] {
-	if (!catalog) {
-		return [];
+/** Whether the catalog holds any saved login a subscription row could show. */
+function hasSubscriptionAccounts(catalog: PiCatalog | null): boolean {
+	return (
+		catalog?.providers.some(
+			(provider) =>
+				provider.authKind === "subscription" &&
+				!provider.managed &&
+				(provider.accounts?.length ?? 0) > 0
+		) ?? false
+	);
+}
+
+/**
+ * The bar model for an account Core deliberately did not read, so the
+ * dashboard says why instead of "no response yet".
+ */
+function unreadSnapshot(
+	providerId: string,
+	account: SubscriptionAccount
+): UsageSnapshot | null {
+	const reason =
+		account.state === "needs_reauth"
+			? "token_expired"
+			: account.state === "unsupported"
+				? "unsupported"
+				: null;
+	if (!reason) {
+		return null;
 	}
-	const refs: SubscriptionAccountRef[] = [];
-	for (const provider of catalog.providers) {
-		if (provider.authKind !== "subscription" || provider.managed) {
-			continue;
-		}
-		for (const account of provider.accounts ?? []) {
-			refs.push({ account, provider });
-		}
-	}
-	return refs;
+	return {
+		agentId: providerId,
+		engine: "",
+		available: false,
+		plan: null,
+		reason,
+		windows: [],
+		meters: [],
+		extraUsageUsd: null,
+		retryAfterSeconds: null,
+		providerId,
+		accountId: account.accountId,
+	};
 }
 
 export function useSubscriptionUsage(
@@ -73,70 +100,69 @@ export function useSubscriptionUsage(
 		[node.token, node.url, node.userJwt]
 	);
 	const queryClient = useQueryClient();
-	const refs = useMemo(() => subscriptionAccountRefs(catalog), [catalog]);
-	const queries = useMemo(
-		() =>
-			refs.map(({ account, provider }) => ({
-				enabled: active && account.kind === "oauth",
-				queryFn: ({ signal }: { signal: AbortSignal }) =>
-					fetchProviderAccountUsage(
-						target,
-						provider.id,
-						account.accountId,
-						signal
-					),
-				queryKey: [
-					"provider-account-usage",
-					node.url,
-					node.token ?? null,
-					node.userJwt ?? null,
-					provider.id,
-					account.accountId,
-				],
-				refetchInterval: FIVE_MINUTES_MS,
-				refetchOnWindowFocus: true,
-				staleTime: FIVE_MINUTES_MS,
-			})),
-		[active, node.token, node.url, node.userJwt, refs, target]
-	);
-	const results = useQueries({ subscribed: active, queries });
-
-	const accounts = refs.map(({ account, provider }, index) => {
-		const query = results[index];
-		return {
-			accountId: account.accountId,
-			accountLabel: account.label,
-			active: account.active,
-			category: provider.label.replace(/\s*\([^)]*\)\s*$/, "").trim(),
-			gatewayActive: account.gatewayActive === true,
-			kind: account.kind,
-			loading: query?.isLoading ?? false,
-			providerId: provider.id,
-			providerLabel: provider.label,
-			snapshot: query?.data ?? null,
-			error:
-				query?.error instanceof Error
-					? query.error.message
-					: query?.error
-						? "Unable to refresh this account."
-						: null,
-		};
+	// The catalog only gates the request: a node with no saved subscription
+	// login costs nothing.
+	const query = useSubscriptions({
+		enabled: active && hasSubscriptionAccounts(catalog),
+		target,
+		usage: "refresh",
 	});
 
+	const error =
+		query.error instanceof Error
+			? query.error.message
+			: query.error
+				? "Unable to refresh subscription usage."
+				: null;
+	const accounts = useMemo(() => {
+		const rows: SubscriptionUsageAccount[] = [];
+		for (const provider of query.data?.providers ?? []) {
+			if (provider.kind !== "subscription" || provider.managed) {
+				continue;
+			}
+			for (const account of provider.accounts) {
+				rows.push({
+					accountId: account.accountId,
+					accountLabel: account.label ?? account.accountId,
+					active: account.active,
+					category: provider.label.replace(/\s*\([^)]*\)\s*$/, "").trim(),
+					gatewayActive: account.gatewayActive,
+					kind: account.kind,
+					loading: query.isLoading || account.state === "pending",
+					providerId: provider.providerId,
+					providerLabel: provider.label,
+					snapshot: account.usage
+						? usageSnapshotFromReading(account.usage)
+						: unreadSnapshot(provider.providerId, account),
+					error,
+				});
+			}
+		}
+		return rows;
+	}, [error, query.data, query.isLoading]);
+
+	// A manual refresh always reads the vendor, like the old per-account
+	// re-fetch did; the result replaces the cached snapshot.
 	const refresh = useCallback(() => {
-		void queryClient.invalidateQueries({
-			queryKey: [
-				"provider-account-usage",
-				node.url,
-				node.token ?? null,
-				node.userJwt ?? null,
-			],
-		});
-	}, [node.url, node.token, node.userJwt, queryClient]);
+		void queryClient
+			.fetchQuery({
+				queryKey: subscriptionsSnapshotKey(target, undefined, "refresh"),
+				queryFn: async ({ signal }) => {
+					const snapshot = await fetchSubscriptionsSnapshot(target, {
+						usage: "force",
+						signal,
+					});
+					seedAccountReadings(queryClient, target, snapshot);
+					return snapshot;
+				},
+				staleTime: 0,
+			})
+			.catch(() => undefined);
+	}, [queryClient, target]);
 
 	return {
 		accounts,
 		refresh,
-		refreshing: results.some((query) => query.isFetching),
+		refreshing: query.isFetching,
 	};
 }

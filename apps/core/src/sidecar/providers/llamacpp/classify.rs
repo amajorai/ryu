@@ -26,15 +26,10 @@
 //! as "no verdict": allow + warn), so a classify server that is not warm yet degrades
 //! to no guardrail verdict, never to a broken request.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
-use anyhow::Context;
-
-use crate::sidecar::providers::llamacpp::{
-    process::{LlamaCppProcess, LlamaCppStartOptions},
-    LlamaCppDownloader,
-};
+use crate::sidecar::providers::llamacpp::process::LlamaCppStartOptions;
+use crate::sidecar::providers::llamacpp::satellite::{Satellite, SatelliteTier};
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 
 /// The name this sidecar is registered under, and therefore the only string that
@@ -63,11 +58,6 @@ pub const CLASSIFY_PORT_BASE: u16 = 8083;
 /// this function in `gateway::gateway_spawn_env`, so spawn and client never diverge.
 pub fn classify_port() -> u16 {
     crate::profile::port(CLASSIFY_PORT_BASE)
-}
-
-/// Loopback `host:port` the classify server binds to (profile-aware).
-fn classify_addr() -> String {
-    format!("127.0.0.1:{}", classify_port())
 }
 
 // ── Lazy-start failure record ───────────────────────────────────────────────────
@@ -116,10 +106,10 @@ pub fn record_lazy_start_failure(reason: String) {
     }
 }
 
-/// Forget any recorded failure. Called by the success paths ([`Sidecar::start`]'s
-/// adopt and spawn branches) so the record can only ever describe the CURRENT state
-/// — the same self-clearing contract that lets a reader treat any entry in
-/// `manifest_sidecar::missing_sidecar_binary_reports` as actionable.
+/// Forget any recorded failure. The tier's `on_serving` hook, so both success paths
+/// of [`Sidecar::start`] (adopt and spawn) clear it: the record can only ever describe
+/// the CURRENT state — the same self-clearing contract that lets a reader treat any
+/// entry in `manifest_sidecar::missing_sidecar_binary_reports` as actionable.
 fn clear_lazy_start_failure() {
     if let Ok(mut slot) = lazy_start_failure().lock() {
         *slot = None;
@@ -129,8 +119,11 @@ fn clear_lazy_start_failure() {
 /// The recorded reason, if the last lazy start failed or was skipped in a state that
 /// cannot be told apart from a misconfiguration.
 ///
-/// The READ half. Its only consumer today is this module's [`Sidecar::health_check`],
-/// which is why it is not `pub`: the `/api/sidecar/status` key that would put this in
+/// The READ half. Its only consumer today is this module's [`Sidecar::health_check`]:
+/// it is the tier's `failure_reason`, which `satellite.rs` appends to the not-running
+/// status — the same treatment `ManifestSidecar::health_check` gives a missing binary,
+/// riding the `HealthStatus` reason channel rather than adding a second one. That is
+/// why it is not `pub`: the `/api/sidecar/status` key that would put this in
 /// front of a user lives in `server/mod.rs`, outside this change set. That followup is
 /// the point of the seam — mirroring the note on
 /// `SidecarManager::native_sidecar_permissions`. Be honest about the reach today: a
@@ -174,78 +167,30 @@ pub(crate) fn clear_lazy_start_failure_for_test() {
     clear_lazy_start_failure();
 }
 
-/// Who owns the classify server that answered the port probe — the question the
-/// adopt branch of [`Sidecar::start`] has to answer, and the one it used to get wrong.
-///
-/// The lazy start fires on EVERY gateway config push that selects the tier, so after
-/// the first one the port is normally already answering. Before this enum, *any*
-/// answering port was recorded as `adopted_external = true`, including the server
-/// **this manager spawned on the previous push** — which made the next [`Sidecar::stop`]
-/// a no-op that left our own llama-server resident and unstoppable, and made
-/// [`Sidecar::is_running`] return `true` unconditionally instead of reflecting the child
-/// we hold. That flows straight to the user: `deriveClassifyTierState` maps a `true` in
-/// `/api/sidecar/status` to `"running"` with no second opinion, and `"running"` prints
-/// the badge "Local classifier running" (`apps/desktop/src/lib/api/gateway.ts:606-628`
-/// and `:672`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ReachableServer {
-    /// The child this manager spawned on an earlier start is still held: we own it,
-    /// so `stop` must kill it and `is_running` must report the handle's state.
-    OurChild,
-    /// A server this manager did not spawn — an operator's own `llama-server`, a
-    /// leftover from a previous Core process, another profile pointed at this port.
-    /// Hands off: we hold no `Child` for it, so we could not stop it even if we tried.
-    Foreign,
-}
+static TIER: SatelliteTier = SatelliteTier {
+    name: CLASSIFY_SIDECAR_NAME,
+    kind: "classify",
+    port: classify_port,
+    on_serving: clear_lazy_start_failure,
+    failure_reason: lazy_start_failure_reason,
+};
 
 /// Lifecycle manager for the dedicated llama.cpp classify sidecar.
 pub struct LlamaCppClassifyManager {
-    running: Arc<AtomicBool>,
-    process: Arc<Mutex<Option<LlamaCppProcess>>>,
-    /// `true` when the server on the classify port is one this manager did **not**
-    /// spawn ([`ReachableServer::Foreign`]) — never merely because a server was up
-    /// (our own child from a previous lazy start is the common case for that).
-    ///
-    /// It is load-bearing for [`Sidecar::is_running`] / the desktop badge, which is
-    /// the only way a foreign server can be reported as "the tier is up" when we hold
-    /// no child handle. It is NOT what keeps `stop` from killing a foreign process:
-    /// `stop` only ever kills the [`LlamaCppProcess`] in `process`, and for a foreign
-    /// server that slot is empty. So do not "simplify" the flag away as redundant with
-    /// the empty slot — and do not treat its early return in `stop` as the safety
-    /// mechanism.
-    adopted_external: Arc<AtomicBool>,
-    client: reqwest::Client,
-    /// Global download center (#456), injected at construction in `main.rs`.
-    downloads: Option<crate::downloads::DownloadCenter>,
+    satellite: Satellite,
 }
 
 impl LlamaCppClassifyManager {
     pub fn new() -> Self {
         Self {
-            running: Arc::new(AtomicBool::new(false)),
-            process: Arc::new(Mutex::new(None)),
-            adopted_external: Arc::new(AtomicBool::new(false)),
-            client: reqwest::Client::builder()
-                .user_agent("ryu-core/0.1")
-                .timeout(std::time::Duration::from_secs(3))
-                .build()
-                .expect("reqwest client"),
-            downloads: None,
+            satellite: Satellite::new(&TIER),
         }
     }
 
     /// Inject the global download center (called at the `main.rs` build site).
     pub fn with_downloads(mut self, downloads: crate::downloads::DownloadCenter) -> Self {
-        self.downloads = Some(downloads);
+        self.satellite.downloads = Some(downloads);
         self
-    }
-
-    /// The installed `llama-server`. Resolved through the shared variant
-    /// resolver, so this tier always runs the SAME build as the chat engine —
-    /// the binary lives inside a per-variant directory (`~/.ryu/bin/llamacpp/`)
-    /// next to that backend's own `ggml-*` libraries.
-    fn binary_path() -> std::path::PathBuf {
-        super::variant::server_path()
     }
 
     /// The injected download center, as an `Err` rather than a panic when it is
@@ -260,8 +205,8 @@ impl LlamaCppClassifyManager {
     /// as a missing binary. Kept as a named accessor so the bare-`new()` case is
     /// unit-testable without touching the port or the filesystem.
     fn downloads_or_err(
-        downloads: Option<crate::downloads::DownloadCenter>,
-    ) -> anyhow::Result<crate::downloads::DownloadCenter> {
+        downloads: Option<&crate::downloads::DownloadCenter>,
+    ) -> anyhow::Result<&crate::downloads::DownloadCenter> {
         downloads.ok_or_else(|| {
             anyhow::anyhow!(
                 "{CLASSIFY_SIDECAR_NAME}: download center not wired — the manager was built \
@@ -269,93 +214,6 @@ impl LlamaCppClassifyManager {
                  llama.cpp cannot be installed for the classify tier"
             )
         })
-    }
-
-    /// Classify a reachable classify port: is the server that answered the child we
-    /// spawned, or one we do not own?
-    ///
-    /// The predicate is "do we hold an OS child handle" — `pid()`, which is `Some`
-    /// exactly while `LlamaCppProcess::child` is `Some` (`process.rs`). We spawned that
-    /// child on this very port and llama-server holds its listener for its whole life,
-    /// so a held handle plus an answering port means the answer came from us.
-    ///
-    /// It is a *presumption*, not a proof: if our child exited and something else then
-    /// bound the port, this says [`ReachableServer::OurChild`] for a server we do not
-    /// own. That direction is harmless — `stop` kills the pid in the handle we hold and
-    /// nothing else, so it reaps our dead child and never touches the squatter. The
-    /// opposite mistake is the one that costs a resident process, which is why the
-    /// predicate errs toward "ours".
-    ///
-    /// **Why not `LlamaCppProcess::is_running()`** (the obvious call): it is
-    /// `child.is_some() && binary_path.exists()` (`process.rs:188`), so a llama.cpp
-    /// binary deleted or moved under a running server flips it to `false` while our
-    /// child is still very much alive and serving. That would classify our own child as
-    /// [`ReachableServer::Foreign`] and leak the process on `stop` — the same
-    /// unstoppable-server bug from the other direction. Ownership is about the handle,
-    /// not about the binary.
-    ///
-    /// **Why not `Option::is_some()`**: a `LlamaCppProcess` that never spawned (or was
-    /// stopped, which `take()`s the handle out) owns nothing, and `pid()` says so
-    /// without assuming the slot is only ever filled by the spawn path.
-    fn reachable_server_owner(process: &Mutex<Option<LlamaCppProcess>>) -> ReachableServer {
-        if Self::holds_own_child(process) {
-            ReachableServer::OurChild
-        } else {
-            ReachableServer::Foreign
-        }
-    }
-
-    /// Do we hold an OS child handle for a server we spawned?
-    ///
-    /// One predicate, two callers on purpose: [`Self::reachable_server_owner`] (who
-    /// owns the answering port) and the own-child arm of [`Sidecar::is_running`] (is
-    /// the tier up). They ask the same question of the same slot, and when they were
-    /// written separately they disagreed — ownership used `pid()`, liveness used
-    /// `LlamaCppProcess::is_running()`, which additionally requires the llama.cpp
-    /// binary to still exist on disk. See the "why not" paragraphs above; both apply
-    /// here verbatim.
-    ///
-    /// What this does NOT claim: that the child is alive. `LlamaCppProcess` never
-    /// reaps (`stop` is the only thing that clears the handle), so a child that
-    /// exited on its own still reads `true` until something calls `stop`. That is
-    /// pre-existing and unchanged by sharing the predicate.
-    ///
-    /// Scope note: the CHAT engine's `LlamaCppManager` (`llamacpp/mod.rs`) still calls
-    /// `LlamaCppProcess::is_running()` for its own liveness. It was left alone — it is
-    /// outside this change's files — so the binary-existence term survives there. This
-    /// is a statement about these three satellites, not about the whole directory.
-    fn holds_own_child(process: &Mutex<Option<LlamaCppProcess>>) -> bool {
-        process
-            .lock()
-            .unwrap()
-            .as_ref()
-            .and_then(|p| p.pid())
-            .is_some()
-    }
-
-    /// Record that the port is serving, tagged with who owns the server. Pure over the
-    /// two flags (no port, no process) so both arms are unit-testable.
-    ///
-    /// `store` rather than `fetch_or`: a manager that adopted a foreign server on an
-    /// earlier start and later spawned its own child must stop claiming the server is
-    /// foreign, or `stop` keeps skipping the child it now owns.
-    fn record_reachable_server(
-        running: &AtomicBool,
-        adopted_external: &AtomicBool,
-        owner: ReachableServer,
-    ) {
-        adopted_external.store(owner == ReachableServer::Foreign, Ordering::Relaxed);
-        running.store(true, Ordering::Relaxed);
-    }
-
-    /// `true` if a classify server already answers on the port.
-    async fn server_reachable(client: &reqwest::Client) -> bool {
-        client
-            .get(format!("http://{}/health", classify_addr()))
-            .send()
-            .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
     }
 }
 
@@ -375,60 +233,31 @@ impl Sidecar for LlamaCppClassifyManager {
     }
 
     fn start(&self) -> BoxFuture<anyhow::Result<()>> {
-        let process = Arc::clone(&self.process);
-        let running = Arc::clone(&self.running);
-        let adopted_external = Arc::clone(&self.adopted_external);
-        let client = self.client.clone();
-        let downloads = self.downloads.clone();
+        let satellite = self.satellite.clone();
         Box::pin(async move {
-            let addr = classify_addr();
             // A server already answering `/health` on the port means there is nothing
             // to spawn — but WHO owns it decides what `stop`/`is_running` may do, so
-            // classify it instead of assuming "already up ⇒ someone else's". The lazy
-            // start hook fires on EVERY config push that selects the tier, so the
-            // common case after the first push is that the answering server is our own
-            // child from the previous push.
+            // `already_up` classifies it instead of assuming "already up ⇒ someone
+            // else's". The lazy start hook fires on EVERY config push that selects the
+            // tier, so the common case after the first push is that the answering
+            // server is our own child from the previous push. A serving tier makes any
+            // earlier failure history wrong, so the adopt branch clears the record too
+            // (the tier's `on_serving`) — not just the spawn branch.
             //
             // **Scope of "safe to call on every push".** Adoption makes a repeat start
-            // a no-op *for the process* only once `/health` answers 2xx — that is what
-            // `server_reachable` tests. This start's own readiness gate is weaker: a
-            // TCP connect (below), so between "port bound" and "`/health` 2xx" a repeat
-            // push still takes the spawn branch, where the loser of the bind race
-            // replaces the handle of the child that is actually serving and orphans it.
-            // That window is still OPEN: closing it means gating the start on `/health`
-            // (the same predicate adoption uses) instead of on a TCP connect, which is a
-            // change to the 120s readiness loop below, not to this branch.
+            // a no-op *for the process* once `/health` answers 2xx. Between "port
+            // bound" and "`/health` 2xx" (the model-load window), the live-child gate
+            // in `already_up` keeps a repeat push from spawning a competitor that would
+            // replace, and so kill, the loading child.
             // *For the manager*, a repeat start no longer leaks a health monitor either:
             // `SidecarManager::spawn_health_monitor` (`sidecar/manager.rs`) aborts the
             // monitor it displaces, which it did not do before this change.
-            if Self::server_reachable(&client).await {
-                let owner = Self::reachable_server_owner(&process);
-                Self::record_reachable_server(&running, &adopted_external, owner);
-                // A serving tier makes any earlier failure history wrong, so the
-                // adopt branch clears the record too — not just the spawn branch.
-                clear_lazy_start_failure();
-                match owner {
-                    ReachableServer::OurChild => tracing::info!(
-                        "classify server already running on {addr} — our own child is \
-                         serving it, nothing to start"
-                    ),
-                    ReachableServer::Foreign => tracing::info!(
-                        "classify server already running on {addr} — adopting a server \
-                         we did not spawn"
-                    ),
-                }
+            if satellite.already_up().await {
                 return Ok(());
             }
-            // Nothing is answering, so nothing external is being adopted. Whatever we
-            // spawn below is ours to stop.
-            adopted_external.store(false, Ordering::Relaxed);
 
-            // Ensure the llama.cpp binary is installed (shared with the chat engine).
-            let downloads = Self::downloads_or_err(downloads)?;
-            LlamaCppDownloader::new()
-                .ensure_installed(&downloads)
-                .await
-                .context("installing llama.cpp for classify server")?;
+            let downloads = Self::downloads_or_err(satellite.downloads.as_ref())?;
+            satellite.install_llamacpp(downloads).await?;
 
             // Serve the classifier GGUF downloaded by onboarding. Like the embeddings
             // and reranker servers, this engine does NOT download the model itself —
@@ -439,19 +268,9 @@ impl Sidecar for LlamaCppClassifyManager {
             // predicate uses to decide whether to start us. If the two resolved the
             // registry differently the hook could fire for a model we do not serve.
             let registry = crate::registry::ModelRegistry::from_env();
-            let model_path = registry.local_classifier_model.weight_path();
-            if !model_path.exists() {
-                anyhow::bail!(
-                    "classifier model not found at {} — onboarding may still be downloading it, \
-                     or the download failed. The classify server will start once the model is \
-                     present (it is fetched by default during onboarding).",
-                    model_path.display()
-                );
-            }
-            tracing::info!("classify server will serve model: {}", model_path.display());
+            let model_path = satellite
+                .require_model(registry.local_classifier_model.weight_path(), "classifier")?;
 
-            tracing::info!("{CLASSIFY_SIDECAR_NAME} sidecar starting on {addr}");
-            let mut proc = LlamaCppProcess::new(Self::binary_path());
             let opts = LlamaCppStartOptions {
                 port: classify_port(),
                 model_path: Some(model_path),
@@ -472,151 +291,41 @@ impl Sidecar for LlamaCppClassifyManager {
                 // provider dials.
                 embeddings: false,
                 reranking: false,
-                launch: crate::inference::LaunchConfig::default(),
+                // Saved classify-tier settings; a saved context size replaces
+                // the 4096 default above.
+                launch: crate::sidecar::providers::engine_launch_config("llamacpp-classify").await,
             };
-            proc.start_with(opts)
-                .await
-                .context("spawning llama-server (classify)")?;
-            *process.lock().unwrap() = Some(proc);
-
-            // Wait for the HTTP port to accept connections. A 241 MB model loads in
-            // a couple of seconds, but keep the same 120s ceiling as the other
-            // llama.cpp sidecars so a cold page-cache on slow disks is not a failure.
-            tokio::time::timeout(std::time::Duration::from_secs(120), async {
-                loop {
-                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-            })
-            .await
-            .context(format!("{CLASSIFY_SIDECAR_NAME} did not start within 120s"))?;
-
-            running.store(true, Ordering::Relaxed);
-            clear_lazy_start_failure();
-            tracing::info!("{CLASSIFY_SIDECAR_NAME} sidecar started on {addr}");
-            Ok(())
+            // A 241 MB model loads in a couple of seconds; the shared 120s ceiling
+            // keeps a cold page-cache on slow disks from being a failure.
+            satellite.spawn(opts, "classify").await
         })
     }
 
+    /// Only a server we did NOT spawn is left alone. Our own child — including one a
+    /// later lazy start found already serving — is killed; that is the whole point of
+    /// distinguishing the two, since a mislabelled child made this an unconditional
+    /// no-op after the second push.
     fn stop(&self) -> BoxFuture<anyhow::Result<()>> {
-        let process = Arc::clone(&self.process);
-        let running = Arc::clone(&self.running);
-        let adopted_external = Arc::clone(&self.adopted_external);
-        Box::pin(async move {
-            running.store(false, Ordering::Relaxed);
-            // Only a server we did NOT spawn is left alone. Our own child — including
-            // one a later lazy start found already serving — is killed here; that is
-            // the whole point of distinguishing the two, since a mislabelled child made
-            // this an unconditional no-op after the second push.
-            if adopted_external.swap(false, Ordering::Relaxed) {
-                tracing::info!(
-                    "classify server was not spawned by us — leaving it running, we hold no child"
-                );
-                return Ok(());
-            }
-            let proc = process.lock().unwrap().take();
-            if let Some(mut p) = proc {
-                if let Err(e) = p.stop().await {
-                    tracing::warn!("{CLASSIFY_SIDECAR_NAME} stop error: {e}");
-                }
-            }
-            Ok(())
-        })
+        self.satellite.stop()
     }
 
     fn health_check(&self) -> BoxFuture<HealthStatus> {
-        let running = Arc::clone(&self.running);
-        let client = self.client.clone();
-        Box::pin(async move {
-            if !running.load(Ordering::Relaxed) {
-                // Carry the recorded lazy-start reason when there is one, so
-                // "not running" says WHY instead of only that. Same treatment
-                // `ManifestSidecar::health_check` gives a missing binary: ride the
-                // `HealthStatus` reason channel rather than adding a second one.
-                return HealthStatus::Unhealthy(match lazy_start_failure_reason() {
-                    Some(reason) => format!("classify process not running: {reason}"),
-                    None => "classify process not running".to_owned(),
-                });
-            }
-            match client
-                .get(format!("http://{}/health", classify_addr()))
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => HealthStatus::Healthy,
-                Ok(resp) => {
-                    HealthStatus::Unhealthy(format!("health endpoint returned {}", resp.status()))
-                }
-                Err(e) => HealthStatus::Unhealthy(format!("health check failed: {e}")),
-            }
-        })
+        self.satellite.health_check()
     }
 
-    /// Whether the tier can serve, as far as this manager can tell **synchronously**
-    /// (`Sidecar::is_running` is not async, so there is no `/health` probe here).
-    ///
-    /// Two different claims, deliberately:
-    /// * a **foreign** server we adopted — `true` until [`Sidecar::stop`] clears the
-    ///   flag. Unverifiable by construction: we hold no handle and cannot probe, so this
-    ///   is the adoption decision being remembered, not a liveness check.
-    /// * otherwise — whether we hold our own child's handle ([`Self::holds_own_child`]).
-    ///   Before the ownership fix a repeat start put our own child in the first arm, so
-    ///   this returned `true` forever regardless of the child's fate.
-    ///
-    /// The own-child arm asks [`Self::holds_own_child`], **not**
-    /// `LlamaCppProcess::is_running()`, which is `child.is_some() &&
-    /// binary_path.exists()` (`process.rs:188`). The binary-existence term does not
-    /// belong in a liveness predicate we can only answer from a handle we hold, and
-    /// the way it goes wrong was traced rather than imagined:
-    /// `LlamaCppManager::uninstall` (the CHAT engine, `llamacpp/mod.rs`) calls
-    /// `remove_ryu_binary("llama-server")` → `tokio::fs::remove_file` on the very path
-    /// this tier's `binary_path()` points at. This sidecar's own `uninstall`
-    /// deliberately leaves that file alone because it is *shared* — so uninstalling
-    /// the chat engine unlinks the binary while our classify child keeps running and
-    /// serving (unlinking an executable does not kill the process that is running it).
-    /// With the old term that live tier reported `false` → `/api/sidecar/status.running
-    /// = false` → the desktop badge drops "Local classifier running"
-    /// (`deriveClassifyTierState` in `apps/desktop/src/lib/api/gateway.ts` maps
-    /// `running` straight through). A status that says "dead" about a live server is
-    /// the same defect as one that says "healthy" about a dead one.
-    /// `reachable_server_owner` already refused the same term for the same reason
-    /// ("ownership is about the handle, not about the binary"); this is that argument
-    /// applied to liveness.
-    ///
-    /// One claim NOT to make here, because it was checked and is false: a llama.cpp
-    /// *upgrade* does not open this window. `download_manager::write_flattened` writes
-    /// `llama-server.download-tmp` and `std::fs::rename`s it over the destination, so
-    /// the path keeps resolving throughout (`write_flattened_writes_via_temp_rename`
-    /// pins that). Only an unlink — uninstall, or an operator moving the file — makes
-    /// it vanish.
-    ///
-    /// Be exact about what changed and in which direction. The ONLY state that reads
-    /// differently is *handle held + binary gone*: previously `false`, now `true`.
-    /// Within it, the sub-case where our child is also dead used to be accidentally
-    /// right and is now over-reported — but that sub-case was ALREADY over-reported
-    /// whenever the binary was present, because `LlamaCppProcess` does not reap, so
-    /// this predicate has never been able to see a child that exited on its own. No
-    /// liveness information is lost here; a term about a file is.
     fn is_running(&self) -> bool {
-        if self.adopted_external.load(Ordering::Relaxed) {
-            return true;
-        }
-        Self::holds_own_child(&self.process)
+        self.satellite.is_running()
     }
 
     fn pid(&self) -> Option<u32> {
-        // `None` when the serving classify server is one we did not spawn — we hold no
-        // `Child`, so there is no pid to report (and nothing for `stop` to kill).
-        self.process.lock().unwrap().as_ref().and_then(|p| p.pid())
+        self.satellite.pid()
     }
 
     fn uninstall(&self, _delete_data: bool) -> BoxFuture<anyhow::Result<()>> {
         Box::pin(async move {
             // The binary is shared with the chat engine — do NOT remove it here.
             // Only drop the version-store marker for this sidecar. The classifier
-            // GGUF under ~/.ryu/models is left intact.
+            // GGUF under `models/classifier/` is left intact.
             crate::sidecar::remove_from_version_store(CLASSIFY_SIDECAR_NAME);
             tracing::info!(
                 "{CLASSIFY_SIDECAR_NAME} uninstalled (shared binary + models left intact)"
@@ -698,207 +407,7 @@ mod tests {
             "the reason has to name the sidecar and the cause, it is what gets recorded: {msg}"
         );
         // And the wired case passes the value straight through.
-        assert!(LlamaCppClassifyManager::new().downloads.is_none());
-    }
-
-    /// A port that answers is only an *external* adoption when we hold no child of our
-    /// own. With no handle (fresh manager, or a `LlamaCppProcess` that never spawned /
-    /// was already stopped) there is nothing of ours it could be.
-    #[test]
-    fn a_reachable_port_is_foreign_only_when_we_hold_no_child() {
-        let empty: Mutex<Option<LlamaCppProcess>> = Mutex::new(None);
-        assert_eq!(
-            LlamaCppClassifyManager::reachable_server_owner(&empty),
-            ReachableServer::Foreign
-        );
-
-        // A process struct with no spawned child owns nothing either — `stop()` takes
-        // the handle out, so this is also the post-stop state.
-        let never_spawned = Mutex::new(Some(LlamaCppProcess::new(
-            LlamaCppClassifyManager::binary_path(),
-        )));
-        assert_eq!(
-            LlamaCppClassifyManager::reachable_server_owner(&never_spawned),
-            ReachableServer::Foreign
-        );
-    }
-
-    /// The flag write, both arms. `store` (not a one-way latch) is what lets a manager
-    /// that once adopted a foreign server go back to owning its own child.
-    #[test]
-    fn recording_a_reachable_server_tracks_ownership_in_both_directions() {
-        let running = AtomicBool::new(false);
-        let adopted = AtomicBool::new(false);
-
-        LlamaCppClassifyManager::record_reachable_server(
-            &running,
-            &adopted,
-            ReachableServer::Foreign,
-        );
-        assert!(running.load(Ordering::Relaxed));
-        assert!(
-            adopted.load(Ordering::Relaxed),
-            "a foreign server is adopted"
-        );
-
-        // Our own child later serves the port: the stale "foreign" claim MUST clear, or
-        // `stop` keeps skipping the child we now own.
-        LlamaCppClassifyManager::record_reachable_server(
-            &running,
-            &adopted,
-            ReachableServer::OurChild,
-        );
-        assert!(running.load(Ordering::Relaxed));
-        assert!(
-            !adopted.load(Ordering::Relaxed),
-            "our own child must never be recorded as an external adoption"
-        );
-    }
-
-    /// A genuinely foreign server stays untouched by `stop`, and the manager reports the
-    /// tier up while the adoption is remembered.
-    #[tokio::test]
-    async fn stop_leaves_a_server_we_did_not_spawn_alone() {
-        let mgr = LlamaCppClassifyManager::new();
-        LlamaCppClassifyManager::record_reachable_server(
-            &mgr.running,
-            &mgr.adopted_external,
-            ReachableServer::Foreign,
-        );
-        assert!(
-            mgr.is_running(),
-            "an adopted server reads as the tier being up"
-        );
-        assert_eq!(mgr.pid(), None, "we hold no child, so there is no pid");
-
-        mgr.stop().await.unwrap();
-        assert!(
-            !mgr.adopted_external.load(Ordering::Relaxed),
-            "stop forgets the adoption"
-        );
-        assert!(mgr.process.lock().unwrap().is_none());
-        assert!(!mgr.is_running());
-    }
-
-    /// The regression: a repeat lazy start that finds the port answered by OUR OWN child
-    /// must leave that child stoppable.
-    ///
-    /// Before the ownership fix the adopt branch set `adopted_external = true` for it, so
-    /// `stop()` returned early without touching the child (leaving a resident
-    /// llama-server nothing could shut down) and `is_running()` returned `true`
-    /// unconditionally — which is what the desktop's classify badge prints.
-    ///
-    /// A real OS child handle is required (that is the predicate), so this spawns
-    /// `/bin/sleep` through the same `LlamaCppProcess` API the start path uses; it
-    /// exits immediately on the llama-server flags, which is fine — ownership is about
-    /// holding the handle, not about the child still living.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_repeat_start_over_our_own_child_keeps_it_stoppable() {
-        let mgr = LlamaCppClassifyManager::new();
-        let mut proc = LlamaCppProcess::new(std::path::PathBuf::from("/bin/sleep"));
-        proc.start_with(LlamaCppStartOptions {
-            port: classify_port(),
-            model_path: None,
-            mmproj_path: None,
-            ctx_size: 0,
-            embeddings: false,
-            reranking: false,
-            launch: crate::inference::LaunchConfig::default(),
-        })
-        .await
-        .expect("/bin/sleep must spawn, so we hold a real child handle");
-        assert!(proc.pid().is_some());
-        *mgr.process.lock().unwrap() = Some(proc);
-
-        // What the adopt branch does when the port answers on a repeat push.
-        let owner = LlamaCppClassifyManager::reachable_server_owner(&mgr.process);
-        assert_eq!(owner, ReachableServer::OurChild);
-        LlamaCppClassifyManager::record_reachable_server(
-            &mgr.running,
-            &mgr.adopted_external,
-            owner,
-        );
-        assert!(
-            !mgr.adopted_external.load(Ordering::Relaxed),
-            "our own child is not an external adoption"
-        );
-        assert!(mgr.is_running());
-        assert!(mgr.pid().is_some(), "our own child reports its pid");
-
-        // The point of the fix: stop actually reaps it instead of returning early.
-        mgr.stop().await.unwrap();
-        assert!(
-            mgr.process.lock().unwrap().is_none(),
-            "stop must take and kill our own child, not skip it"
-        );
-        assert!(!mgr.is_running());
-    }
-
-    /// A liveness answer must not be a function of the llama.cpp binary FILE.
-    ///
-    /// `LlamaCppProcess::is_running()` is `child.is_some() && binary_path.exists()`,
-    /// and uninstalling the CHAT engine unlinks `~/.ryu/bin/llama-server` — the binary
-    /// this sidecar shares with it and deliberately never removes itself
-    /// (`LlamaCppManager::uninstall` → `remove_ryu_binary`). While the file is gone,
-    /// that predicate reports a classifier that is up
-    /// and serving as stopped — `/api/sidecar/status.running = false`, and the
-    /// desktop's badge drops out of "Local classifier running" for a tier that never
-    /// stopped answering.
-    ///
-    /// Unix-only, and it really spawns: `LlamaCppProcess::child` is private and only
-    /// `start_with` fills it, so a held handle cannot be faked. The throwaway
-    /// executable is a temp-dir shell script (nothing to bind, exits at once) so the
-    /// test can delete it out from under the handle, which is the whole point.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn is_running_ignores_the_shared_binary_being_unlinked_under_a_held_child() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let fake_server = dir.path().join("llama-server");
-        std::fs::write(&fake_server, "#!/bin/sh\nexit 0\n").expect("write throwaway server");
-        std::fs::set_permissions(&fake_server, std::fs::Permissions::from_mode(0o755))
-            .expect("chmod throwaway server");
-
-        let mgr = LlamaCppClassifyManager::new();
-        let mut proc = LlamaCppProcess::new(fake_server.clone());
-        proc.start_with(LlamaCppStartOptions {
-            // Port 0 is never bound — the script ignores its flags and exits. This
-            // test is about the handle, not about a listener.
-            port: 0,
-            model_path: None,
-            mmproj_path: None,
-            ctx_size: 0,
-            embeddings: false,
-            reranking: false,
-            launch: crate::inference::LaunchConfig::default(),
-        })
-        .await
-        .expect("the throwaway script must spawn, so we hold a real child handle");
-        assert!(proc.pid().is_some());
-        *mgr.process.lock().unwrap() = Some(proc);
-        assert!(mgr.is_running(), "a held child means the tier is up");
-
-        // The window: the shared binary is unlinked (what the chat engine's uninstall
-        // does), so the path stops resolving. On unix that does not touch a process
-        // already running it — nothing about our child changed.
-        std::fs::remove_file(&fake_server).expect("remove the binary");
-        assert!(!fake_server.exists());
-        assert!(
-            mgr.is_running(),
-            "unlinking the shared binary must not report a serving classifier as stopped"
-        );
-        assert!(mgr.pid().is_some(), "and the pid stays reportable");
-        // The ownership predicate must keep agreeing with it — they are one function.
-        assert_eq!(
-            LlamaCppClassifyManager::reachable_server_owner(&mgr.process),
-            ReachableServer::OurChild
-        );
-
-        // `stop` is still the only thing that takes the handle out, binary or no binary.
-        mgr.stop().await.unwrap();
-        assert!(!mgr.is_running());
+        assert!(LlamaCppClassifyManager::new().satellite.downloads.is_none());
     }
 
     /// The lazy-start failure record is what turns an invisible fire-and-forget

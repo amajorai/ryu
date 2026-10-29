@@ -138,7 +138,7 @@ function buildHistory(surfaceId: string): UIMessage[] {
 				},
 			],
 			role: "user",
-		} as unknown as UIMessage);
+		});
 		messages.push({
 			id: `${surfaceId}-assistant-${index}`,
 			parts:
@@ -151,6 +151,7 @@ function buildHistory(surfaceId: string): UIMessage[] {
 							{
 								input: { spec: sharedUiSpec, title: "Tool UI preview" },
 								state: "output-available",
+								output: null,
 								toolCallId: `${surfaceId}-ui-render`,
 								type: "tool-ui.render",
 							},
@@ -161,6 +162,7 @@ function buildHistory(surfaceId: string): UIMessage[] {
 									title: "A2UI tool preview",
 								},
 								state: "output-available",
+								output: null,
 								toolCallId: `${surfaceId}-a2ui-render`,
 								type: "tool-ui.render",
 							},
@@ -172,7 +174,7 @@ function buildHistory(surfaceId: string): UIMessage[] {
 							},
 						],
 			role: "assistant",
-		} as unknown as UIMessage);
+		});
 	}
 	return messages;
 }
@@ -203,7 +205,7 @@ function SurfaceCard({ density, label, surfaceId }: SurfaceCardProps) {
 						Shared transcript · composer · tool renderer
 					</p>
 				</div>
-				<span className="rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+				<span className="type-compact rounded-full bg-muted px-2 py-1 text-muted-foreground">
 					{density === "compact" ? "compact" : "comfortable"}
 				</span>
 			</div>
@@ -234,7 +236,7 @@ function Story() {
 			<div className="mx-auto max-w-[1440px]">
 				<div className="mb-5 flex items-end justify-between gap-4">
 					<div>
-						<p className="font-semibold text-primary text-xs uppercase tracking-[0.18em]">
+						<p className="font-semibold text-primary text-xs uppercase tracking-(--tracking-section)">
 							Ryu chat surfaces
 						</p>
 						<h1 className="mt-1 font-semibold text-2xl tracking-tight">

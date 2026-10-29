@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/learn.ts
 //
 // Typed client for Core's continual-learning surface (`/api/learn/*` +
@@ -51,12 +53,22 @@ export interface SynthOutcome {
 
 /** Read the current learning config (both opt-ins, models, skill generation). */
 export function getLearningConfig(target: ApiTarget): Promise<LearningConfig> {
-	return request<LearningConfig>(target, "/api/learn/config");
+	return request<LearningConfig>(
+		target,
+		"/api/learn/config",
+		undefined,
+		learningConfigResponseCodec
+	);
 }
 
 /** Read the experience buffer + its scored/trainable counts. */
 export function listExperience(target: ApiTarget): Promise<ExperienceList> {
-	return request<ExperienceList>(target, "/api/experience/list");
+	return request<ExperienceList>(
+		target,
+		"/api/experience/list",
+		undefined,
+		experienceListResponseCodec
+	);
 }
 
 /** Read whether one conversation is excluded from capture and synthesis. */
@@ -66,7 +78,9 @@ export function getConversationLearningExclusion(
 ): Promise<{ conversation_id: string; excluded: boolean }> {
 	return request(
 		target,
-		`/api/learn/exclude/${encodeURIComponent(conversationId)}`
+		`/api/learn/exclude/${encodeURIComponent(conversationId)}`,
+		undefined,
+		responseCodec1
 	);
 }
 
@@ -80,10 +94,15 @@ export function setConversationLearningExclusion(
 	excluded: boolean;
 	rows_updated: number;
 }> {
-	return request(target, "/api/learn/exclude", {
-		method: "POST",
-		body: { conversation_id: conversationId, excluded },
-	});
+	return request(
+		target,
+		"/api/learn/exclude",
+		{
+			method: "POST",
+			body: { conversation_id: conversationId, excluded },
+		},
+		responseCodec2
+	);
 }
 
 /**
@@ -97,8 +116,67 @@ export function synthesizeSkill(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<SynthOutcome> {
-	return request<SynthOutcome>(target, "/api/learn/synthesize", {
-		method: "POST",
-		body: { conversation_id: conversationId, force: true },
-	});
+	return request<SynthOutcome>(
+		target,
+		"/api/learn/synthesize",
+		{
+			method: "POST",
+			body: { conversation_id: conversationId, force: true },
+		},
+		synthOutcomeResponseCodec
+	);
 }
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const learningConfigResponseCodec = z
+	.object({
+		base_model: z.union([z.string(), z.null()]),
+		enabled: z.boolean(),
+		min_reward: z.number(),
+		prm_model: z.string(),
+		prm_via_byo: z.boolean(),
+		skill_generation: z.number(),
+		skills_enabled: z.boolean(),
+		synth_model: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const experienceResponseCodec = z
+	.object({
+		agent_id: z.union([z.string(), z.null()]),
+		assistant_text: z.string(),
+		base_model: z.union([z.string(), z.null()]),
+		conversation_id: z.string(),
+		excluded: z.boolean(),
+		id: z.string(),
+		outcome: z.string(),
+		reward: z.union([z.number(), z.null()]),
+		skill_generation: z.number(),
+		user_text: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const experienceListResponseCodec = z
+	.object({
+		experiences: z.array(experienceResponseCodec),
+		min_reward: z.number(),
+		scored: z.number(),
+		total: z.number(),
+		trainable: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec1 = z
+	.object({ conversation_id: z.string(), excluded: z.boolean() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec2 = z
+	.object({
+		conversation_id: z.string(),
+		excluded: z.boolean(),
+		rows_updated: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const synthOutcomeResponseCodec = z
+	.object({
+		created: z.boolean(),
+		reason: z.string(),
+		slug: z.union([z.string(), z.null()]),
+	})
+	.catchall(gatewayJsonValueSchema);

@@ -18,6 +18,9 @@
 
 import {
 	type AppRequestMethod,
+	type AppRequestValue,
+	type AppResponseValue,
+	type MountedAppPathInput,
 	requestValidatedMountedApp,
 	resolveMountedAppPath,
 	validateMountedAppRequest,
@@ -47,7 +50,7 @@ export type SubtitlesMethod = "DELETE" | "GET" | "POST" | "PUT";
 
 export interface SubtitlesRequestInput {
 	/** JSON body. Omit for GET/DELETE. */
-	body?: unknown;
+	body?: AppRequestValue;
 	/** Defaults to `"GET"`. */
 	method?: SubtitlesMethod;
 	/** Path RELATIVE to `/api/subtitles`, leading slash included, query string and
@@ -79,7 +82,7 @@ export interface SubtitlesRequestInput {
  * frame's raw string — so the host and the parser cannot disagree about what was
  * requested.
  */
-export function resolveSubtitlesPath(path: unknown): null | string {
+export function resolveSubtitlesPath(path: MountedAppPathInput): null | string {
 	return resolveMountedAppPath(SUBTITLES_MOUNT, path);
 }
 
@@ -106,7 +109,7 @@ function isDownloadPath(path: string): boolean {
 export async function subtitlesRequest(
 	target: ApiTarget,
 	input: SubtitlesRequestInput
-): Promise<unknown> {
+): Promise<AppResponseValue> {
 	const validated = validateMountedAppRequest(input, {
 		allowedMethods: ALLOWED_METHODS,
 		invalidMethodMessage: (method) =>

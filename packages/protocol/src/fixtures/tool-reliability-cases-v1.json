@@ -1,0 +1,263 @@
+{
+  "version": 1,
+  "description": "Shared cases for tool reliability evidence (Treg parity B9). Read by packages/protocol/src/tool-reliability.test.ts and apps/connect/src/tool-reliability.test.ts.",
+  "keys": [
+    {
+      "toolId": "composio.GITHUB_GET_AN_ISSUE",
+      "key": "github.GITHUB_GET_AN_ISSUE"
+    },
+    {
+      "toolId": "composio__GITHUB_GET_AN_ISSUE",
+      "key": "github.GITHUB_GET_AN_ISSUE"
+    },
+    {
+      "toolId": "composio.SLACK_SEND_MESSAGE",
+      "key": "slack.SLACK_SEND_MESSAGE"
+    },
+    { "toolId": "exa.search.auto", "key": "exa.search.auto" },
+    { "toolId": "docs.lookup", "key": "docs.lookup" },
+    { "toolId": "composio.", "key": null },
+    { "toolId": "has space", "key": null },
+    { "toolId": "", "key": null }
+  ],
+  "buckets": [
+    { "latencyMs": 0, "bucket": 0 },
+    { "latencyMs": 100, "bucket": 0 },
+    { "latencyMs": 101, "bucket": 1 },
+    { "latencyMs": 999.5, "bucket": 3 },
+    { "latencyMs": 120000, "bucket": 9 },
+    { "latencyMs": 900000, "bucket": 9 }
+  ],
+  "percentiles": [
+    {
+      "name": "empty",
+      "latency": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "q": 0.5,
+      "ms": null
+    },
+    {
+      "name": "median in the second bucket",
+      "latency": [1, 2, 0, 0, 0, 0, 0, 0, 0, 0],
+      "q": 0.5,
+      "ms": 250
+    },
+    {
+      "name": "p95 reaches the slow tail",
+      "latency": [18, 0, 0, 0, 0, 1, 0, 0, 0, 1],
+      "q": 0.95,
+      "ms": 5000
+    },
+    {
+      "name": "p95 of twenty with two slow",
+      "latency": [18, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+      "q": 0.95,
+      "ms": 120000
+    }
+  ],
+  "validation": [
+    {
+      "name": "an empty tally is valid",
+      "tally": {
+        "calls": 0,
+        "failures": 0,
+        "lastFailure": null,
+        "lastFailureAt": null,
+        "lastSuccessAt": null,
+        "latency": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "problem": null
+    },
+    {
+      "name": "more failures than calls",
+      "tally": {
+        "calls": 1,
+        "failures": 2,
+        "lastFailure": "timeout",
+        "lastFailureAt": "2026-10-21T10:00:00.000Z",
+        "lastSuccessAt": null,
+        "latency": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "problem": "failures_exceed_calls"
+    },
+    {
+      "name": "histogram does not add up to calls",
+      "tally": {
+        "calls": 2,
+        "failures": 0,
+        "lastFailure": null,
+        "lastFailureAt": null,
+        "lastSuccessAt": "2026-10-21T10:00:00.000Z",
+        "latency": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "problem": "latency_count_mismatch"
+    },
+    {
+      "name": "failure class without its date",
+      "tally": {
+        "calls": 1,
+        "failures": 1,
+        "lastFailure": "timeout",
+        "lastFailureAt": null,
+        "lastSuccessAt": null,
+        "latency": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "problem": "last_failure_incomplete"
+    },
+    {
+      "name": "failure date with no failures",
+      "tally": {
+        "calls": 1,
+        "failures": 0,
+        "lastFailure": "timeout",
+        "lastFailureAt": "2026-10-21T10:00:00.000Z",
+        "lastSuccessAt": "2026-10-21T10:00:00.000Z",
+        "latency": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "problem": "failure_date_without_failures"
+    },
+    {
+      "name": "success date when every call failed",
+      "tally": {
+        "calls": 1,
+        "failures": 1,
+        "lastFailure": "tool_error",
+        "lastFailureAt": "2026-10-21T10:00:00.000Z",
+        "lastSuccessAt": "2026-10-21T09:00:00.000Z",
+        "latency": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "problem": "success_date_without_successes"
+    },
+    {
+      "name": "wrong histogram length",
+      "tally": {
+        "calls": 1,
+        "failures": 0,
+        "lastFailure": null,
+        "lastFailureAt": null,
+        "lastSuccessAt": "2026-10-21T10:00:00.000Z",
+        "latency": [1]
+      },
+      "problem": "shape"
+    },
+    {
+      "name": "unknown failure class",
+      "tally": {
+        "calls": 1,
+        "failures": 1,
+        "lastFailure": "flaky",
+        "lastFailureAt": "2026-10-21T10:00:00.000Z",
+        "lastSuccessAt": null,
+        "latency": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "problem": "shape"
+    }
+  ],
+  "records": [
+    {
+      "name": "successes and a timeout, out of order",
+      "outcomes": [
+        { "ok": true, "latencyMs": 80, "at": "2026-10-21T10:00:00.000Z" },
+        {
+          "ok": false,
+          "latencyMs": 30000,
+          "at": "2026-10-21T10:05:00.000Z",
+          "failure": "timeout"
+        },
+        { "ok": true, "latencyMs": 420, "at": "2026-10-21T09:59:00.000Z" },
+        {
+          "ok": false,
+          "latencyMs": 900,
+          "at": "2026-10-21T10:01:00.000Z",
+          "failure": "upstream_error"
+        }
+      ],
+      "tally": {
+        "calls": 4,
+        "failures": 2,
+        "lastFailure": "timeout",
+        "lastFailureAt": "2026-10-21T10:05:00.000Z",
+        "lastSuccessAt": "2026-10-21T10:00:00.000Z",
+        "latency": [1, 0, 1, 1, 0, 0, 0, 1, 0, 0]
+      }
+    }
+  ],
+  "summaries": [
+    {
+      "name": "too few calls carry no rate or percentiles",
+      "sources": {
+        "connect": {
+          "calls": 3,
+          "failures": 1,
+          "lastFailure": "tool_error",
+          "lastFailureAt": "2026-10-20T08:00:00.000Z",
+          "lastSuccessAt": "2026-10-21T08:00:00.000Z",
+          "latency": [2, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+        }
+      },
+      "evidence": {
+        "failures": 1,
+        "lastFailure": "tool_error",
+        "lastFailureAt": "2026-10-20T08:00:00.000Z",
+        "lastSuccessAt": "2026-10-21T08:00:00.000Z",
+        "p50Ms": null,
+        "p95Ms": null,
+        "samples": 3,
+        "sources": { "connect": 3 },
+        "successRate": null,
+        "sufficient": false,
+        "windowDays": 7
+      }
+    },
+    {
+      "name": "connect and gateway fold into one row",
+      "sources": {
+        "connect": {
+          "calls": 12,
+          "failures": 1,
+          "lastFailure": "timeout",
+          "lastFailureAt": "2026-10-19T08:00:00.000Z",
+          "lastSuccessAt": "2026-10-21T08:00:00.000Z",
+          "latency": [6, 4, 1, 0, 0, 0, 0, 1, 0, 0]
+        },
+        "gateway": {
+          "calls": 8,
+          "failures": 2,
+          "lastFailure": "upstream_error",
+          "lastFailureAt": "2026-10-20T12:00:00.000Z",
+          "lastSuccessAt": "2026-10-21T09:00:00.000Z",
+          "latency": [2, 3, 2, 1, 0, 0, 0, 0, 0, 0]
+        }
+      },
+      "evidence": {
+        "failures": 3,
+        "lastFailure": "upstream_error",
+        "lastFailureAt": "2026-10-20T12:00:00.000Z",
+        "lastSuccessAt": "2026-10-21T09:00:00.000Z",
+        "p50Ms": 250,
+        "p95Ms": 1000,
+        "samples": 20,
+        "sources": { "connect": 12, "gateway": 8 },
+        "successRate": 0.85,
+        "sufficient": true,
+        "windowDays": 7
+      }
+    },
+    {
+      "name": "no sources is an empty row",
+      "sources": {},
+      "evidence": {
+        "failures": 0,
+        "lastFailure": null,
+        "lastFailureAt": null,
+        "lastSuccessAt": null,
+        "p50Ms": null,
+        "p95Ms": null,
+        "samples": 0,
+        "sources": {},
+        "successRate": null,
+        "sufficient": false,
+        "windowDays": 7
+      }
+    }
+  ]
+}

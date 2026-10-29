@@ -1,17 +1,18 @@
 import { WaitlistShareDialog } from "@ryu/blocks/web/waitlist-share-dialog.tsx";
-import { toast } from "@ryu/ui/components/sileo";
+import { HalloweenPassCompanion } from "@ryu/ui/components/halloween-pass-companion.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import {
 	linkedInShareUrl,
 	waitlistShareText,
 	xShareIntentUrl,
-} from "@ryu/ui/components/waitlist-pass";
-import { WaitlistQueue } from "@ryu/ui/components/waitlist-queue";
+} from "@ryu/ui/components/waitlist-pass.tsx";
+import { WaitlistQueue } from "@ryu/ui/components/waitlist-queue.tsx";
 import {
 	normalizeWaitlistUsername,
 	WAITLIST_USERNAME_RE,
-} from "@ryu/ui/components/waitlist-username-field";
-import { passPageUrl } from "@ryu/ui/lib/pass-share";
-import { waitlistShareFacts } from "@ryu/ui/lib/waitlist-share-facts";
+} from "@ryu/ui/components/waitlist-username-field.tsx";
+import { passPageUrl } from "@ryu/ui/lib/pass-share.ts";
+import { waitlistShareFacts } from "@ryu/ui/lib/waitlist-share-facts.ts";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -331,7 +332,7 @@ export default function WaitlistPage({
 	}
 
 	return (
-		// biome-ignore lint/a11y/noAriaHiddenOnFocusable: top area used as drag region
+		// top area used as drag region
 		<div
 			className="scroll-fade size-full overflow-y-auto"
 			data-tauri-drag-region="true"
@@ -367,6 +368,7 @@ export default function WaitlistPage({
 				onSignOut={handleSignOut}
 				onUnreserve={unreserveHandle}
 				onUpgrade={() => openExternal(`${SHARE_ORIGIN}/pricing`)}
+				passCompanion={<HalloweenPassCompanion />}
 				position={me?.position ?? null}
 				referralCount={me?.referralCount ?? 0}
 				referralUrl={me?.referralUrl}

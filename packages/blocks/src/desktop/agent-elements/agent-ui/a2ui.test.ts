@@ -190,3 +190,159 @@ describe("normalizeA2ui", () => {
 
 const A2UI_BASIC_CATALOG_ID =
 	"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json";
+
+describe("A2UI native transport compatibility", () => {
+	it("retains native state leaves and scalar literal values", () => {
+		const token = Symbol("native state");
+		const callback = () => "native callback";
+		const result = normalizeA2ui([
+			{ createSurface: { surfaceId: "native" } },
+			{
+				updateDataModel: {
+					surfaceId: "native",
+					value: {
+						token,
+						callback,
+						createdAt: new Date(0),
+						infinite: Number.POSITIVE_INFINITY,
+					},
+				},
+			},
+			{
+				updateComponents: {
+					surfaceId: "native",
+					components: [
+						{
+							id: "root",
+							component: "Slider",
+							value: { literalNumber: Number.POSITIVE_INFINITY },
+						},
+					],
+				},
+			},
+		]);
+		expect(result.spec?.state).toEqual({
+			token,
+			callback,
+			createdAt: {},
+			infinite: Number.POSITIVE_INFINITY,
+		});
+		expect(result.spec?.elements.root?.props.value).toBe(
+			Number.POSITIVE_INFINITY
+		);
+		expect(result.issues).toEqual([]);
+	});
+
+	it("degrades malformed fields independently while retaining usable components", () => {
+		const result = normalizeA2ui([
+			{ createSurface: { surfaceId: "native" } },
+			{
+				version: "future",
+				updateComponents: {
+					surfaceId: "native",
+					components: [
+						null,
+						{ id: "", component: "Text" },
+						{
+							id: "root",
+							component: "Column",
+							children: ["label", false, "missing"],
+						},
+						{
+							id: "label",
+							component: "Text",
+							text: { literalStringList: ["visible", 42, null, "label"] },
+						},
+					],
+				},
+			},
+		]);
+		expect(result.spec?.elements.root?.children).toEqual(["label"]);
+		expect(result.spec?.elements.label?.props.text).toEqual([
+			"visible",
+			"label",
+		]);
+		expect(result.issues).toEqual([
+			"Unsupported A2UI protocol version: future",
+			"A2UI component 1 in message 2 must be an object",
+			"A2UI component 2 needs bounded id and component fields",
+		]);
+	});
+
+	it("applies pointer updates and deletion without modifying the original state", () => {
+		const original = {
+			reservation: { guests: "2", note: "original" },
+			rows: ["one", "two"],
+		};
+		const result = normalizeA2ui([
+			{ createSurface: { surfaceId: "native" } },
+			{ updateDataModel: { surfaceId: "native", value: original } },
+			{
+				updateDataModel: {
+					surfaceId: "native",
+					path: "/reservation/guests",
+					value: "3",
+				},
+			},
+			{ updateDataModel: { surfaceId: "native", path: "/reservation/note" } },
+			{
+				updateDataModel: {
+					surfaceId: "native",
+					path: "/rows/1",
+					value: "changed",
+				},
+			},
+			{
+				updateComponents: {
+					surfaceId: "native",
+					components: [
+						{
+							id: "root",
+							component: "Text",
+							text: { path: "/reservation/guests" },
+						},
+					],
+				},
+			},
+		]);
+		expect(result.spec?.state).toEqual({
+			reservation: { guests: "3" },
+			rows: ["one", "changed"],
+		});
+		expect(original).toEqual({
+			reservation: { guests: "2", note: "original" },
+			rows: ["one", "two"],
+		});
+		expect(result.spec?.elements.root?.props.text).toEqual({
+			$state: "/reservation/guests",
+		});
+		expect(result.issues).toEqual([]);
+	});
+
+	it("rejects array indices past the end so a stream cannot allocate a huge sparse array", () => {
+		for (const path of ["/rows/4294967294", "/rows/4294967294/label"]) {
+			const result = normalizeA2ui([
+				{ createSurface: { surfaceId: "native" } },
+				{ updateDataModel: { surfaceId: "native", value: { rows: ["one"] } } },
+				{ updateDataModel: { surfaceId: "native", path, value: "x" } },
+				{
+					updateDataModel: {
+						surfaceId: "native",
+						path: "/rows/1",
+						value: "two",
+					},
+				},
+				{
+					updateComponents: {
+						surfaceId: "native",
+						components: [{ id: "root", component: "Text", text: "ok" }],
+					},
+				},
+			]);
+			expect(result.spec?.state).toEqual({ rows: ["one", "two"] });
+			expect(result.issues).toEqual([
+				"A2UI array path segment is out of range: 4294967294",
+			]);
+		}
+	});
+});

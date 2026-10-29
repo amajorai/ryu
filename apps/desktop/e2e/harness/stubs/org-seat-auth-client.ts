@@ -25,7 +25,7 @@ const members = [
 	},
 ] as const;
 
-const invitations = [
+export const invitations = [
 	{
 		email: "finance@northstar.example",
 		id: "inv-finance",
@@ -46,7 +46,6 @@ export const authClient = {
 	organization: {
 		getActiveMember: async () => ok({ role: "owner", userId: "user-owner" }),
 		inviteMember: async () => ok({}),
-		listInvitations: async () => ok(invitations),
 		listMembers: async () => ok({ members }),
 		listTeams: async () => ok(teams),
 		removeMember: async () => ok({}),

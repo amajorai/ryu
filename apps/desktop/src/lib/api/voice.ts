@@ -1,7 +1,27 @@
+import type { VoiceEngineInstallRecord } from "@ryu/app-host/rpc";
 import {
 	parseTranscriptionDetail,
+	type SpeakEffect,
+	type SpeakFormat,
+	type SpeakNormalize,
+	type SpeechProcessingEngine,
+	type SpeechProcessingOptions,
+	speakRequestBody,
+	speechResponseBlob,
 	type TranscriptionDetail,
-} from "@ryuhq/core-client/voice";
+	type TtsEngine,
+	type TtsModel,
+} from "@ryuhq/core-client/voice.ts";
+import {
+	speechProcessingEnginesWireSchema,
+	transcriptionTextProjectionSchema,
+	ttsEnginesWireSchema,
+	ttsModelsWireSchema,
+	voiceEngineInstallErrorProjectionSchema,
+	voiceEngineInstallWireSchema,
+	voiceErrorProjectionSchema,
+	voiceTextProjectionSchema,
+} from "./voice-wire-contracts.ts";
 // apps/desktop/src/lib/api/voice.ts
 //
 // Typed client for Core's Voice Recognition data path (`POST /api/voice/transcribe`).
@@ -16,19 +36,42 @@ import {
 
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
 
+export type {
+	SpeechProcessingEngine,
+	SpeechProcessingOptions,
+	SpeechProcessingStyling,
+	TtsEngine,
+	TtsModel,
+} from "@ryuhq/core-client/voice.ts";
+
+/** `/api/voice/transcribe` with the optional engine and language hint. */
+function transcriptionPath(engine?: string, language?: string): string {
+	const query = new URLSearchParams();
+	const selectedEngine = engine?.trim();
+	if (selectedEngine) {
+		query.set("engine", selectedEngine);
+	}
+	// An explicit `auto` is forwarded: it overrides a saved engine language
+	// and asks the engine to detect the language.
+	const hint = language?.trim();
+	if (hint) {
+		query.set("language", hint);
+	}
+	const search = query.toString();
+	return search ? `/api/voice/transcribe?${search}` : "/api/voice/transcribe";
+}
+
 /** Transcribe a recorded audio blob via Core's selected STT runtime. */
 async function transcriptionResponse(
 	target: ApiTarget,
 	audio: Blob,
 	filename = "recording.wav",
-	engine?: string
-): Promise<unknown> {
+	engine?: string,
+	language?: string
+): Promise<Response> {
 	const form = new FormData();
 	form.append("file", audio, filename);
-	const selectedEngine = engine?.trim();
-	const path = selectedEngine
-		? `/api/voice/transcribe?engine=${encodeURIComponent(selectedEngine)}`
-		: "/api/voice/transcribe";
+	const path = transcriptionPath(engine, language);
 
 	const resp = await authenticatedFetch(target, path, {
 		method: "POST",
@@ -39,7 +82,7 @@ async function transcriptionResponse(
 	if (!resp.ok) {
 		let detail = `transcribe failed: ${resp.status}`;
 		try {
-			const body = (await resp.json()) as { error?: string };
+			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
 				detail = body.error;
 			}
@@ -49,60 +92,45 @@ async function transcriptionResponse(
 		throw new Error(detail);
 	}
 
-	return await resp.json();
+	return resp;
 }
 
+/**
+ * `language` is an optional BCP-47 hint for multilingual engines (empty sends
+ * none and keeps the saved engine language; `auto` asks for detection and
+ * overrides it); engines without language support ignore it.
+ */
 export async function transcribeAudioDetailed(
 	target: ApiTarget,
 	audio: Blob,
 	filename = "recording.wav",
-	engine?: string
+	engine?: string,
+	language?: string
 ): Promise<TranscriptionDetail> {
 	return parseTranscriptionDetail(
-		await transcriptionResponse(target, audio, filename, engine)
+		await (
+			await transcriptionResponse(target, audio, filename, engine, language)
+		).json()
 	);
 }
 export async function transcribeAudio(
 	target: ApiTarget,
 	audio: Blob,
 	filename = "recording.wav",
-	engine?: string
+	engine?: string,
+	language?: string
 ): Promise<string> {
-	const result = await transcriptionResponse(target, audio, filename, engine);
-	return result &&
-		typeof result === "object" &&
-		"text" in result &&
-		typeof result.text === "string"
-		? result.text.trim()
-		: "";
-}
-
-/** S1-mini styling controls exposed by the Speech Processing layer. */
-export type SpeechProcessingStyling =
-	| "casual"
-	| "semi-casual"
-	| "semi-formal"
-	| "formal";
-
-/** One node-local engine that can clean a raw Voice Recognition transcript. */
-export interface SpeechProcessingEngine {
-	description: string;
-	display_name: string;
-	id: string;
-	installed: boolean;
-	languages: string[];
-	loaded: boolean;
-	model: string;
-	sidecar: string;
-	size_mb: number;
-}
-
-/** S1-mini request controls. The defaults are applied by Core when omitted. */
-export interface SpeechProcessingOptions {
-	context?: "general" | "email";
-	engine?: string;
-	structure?: "prose" | "lists";
-	styling?: SpeechProcessingStyling;
+	const response = await transcriptionResponse(
+		target,
+		audio,
+		filename,
+		engine,
+		language
+	);
+	const result = transcriptionTextProjectionSchema.safeParse(
+		await response.json()
+	);
+	return result.success ? result.data.text.trim() : "";
 }
 
 /** List the node's Speech Processing engines and their install/load state. */
@@ -116,9 +144,7 @@ export async function listSpeechProcessingEngines(
 	if (!resp.ok) {
 		throw new Error(`Speech Processing engines failed: ${resp.status}`);
 	}
-	const body = (await resp.json()) as {
-		data?: SpeechProcessingEngine[];
-	};
+	const body = speechProcessingEnginesWireSchema.parse(await resp.json());
 	return body.data ?? [];
 }
 
@@ -138,7 +164,7 @@ export async function installSpeechProcessingModel(
 	if (!resp.ok) {
 		let detail = `Speech Processing install failed: ${resp.status}`;
 		try {
-			const body = (await resp.json()) as { error?: string };
+			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
 				detail = body.error;
 			}
@@ -172,7 +198,7 @@ export async function processSpeechText(
 	if (!resp.ok) {
 		let detail = `Speech Processing failed: ${resp.status}`;
 		try {
-			const body = (await resp.json()) as { error?: string };
+			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
 				detail = body.error;
 			}
@@ -181,24 +207,8 @@ export async function processSpeechText(
 		}
 		throw new Error(detail);
 	}
-	const body = (await resp.json()) as { text?: string };
+	const body = voiceTextProjectionSchema.parse(await resp.json());
 	return (body.text ?? "").trim();
-}
-
-/** One selectable Audio engine, as Core's `/api/voice/tts-engines`
- * returns it (built-in OuteTTS, native audio.cpp, and RyuTTS entries). */
-export interface TtsEngine {
-	default_voice: string;
-	description: string;
-	display_name: string;
-	id: string;
-	installed: boolean;
-	languages: string[];
-	loaded: boolean;
-	sample_rate: number;
-	size_mb: number;
-	supports_cloning: boolean;
-	voices: string[];
 }
 
 /** List the Audio engines available on this node. Core owns the built-in/native
@@ -208,21 +218,56 @@ export async function listTtsEngines(target: ApiTarget): Promise<TtsEngine[]> {
 	if (!resp.ok) {
 		throw new Error(`audio engines failed: ${resp.status}`);
 	}
-	const body = (await resp.json()) as { data?: TtsEngine[] };
+	const body = ttsEnginesWireSchema.parse(await resp.json());
 	return body.data ?? [];
 }
 
-/** One curated, installable Audio model (voicebox-style), bound to its engine. */
-export interface TtsModel {
-	default: boolean;
-	display_name: string;
-	engine: string;
-	engine_display_name: string;
-	hf_repo_id: string;
-	installed: boolean;
-	languages: string[];
-	model_name: string;
-	size_mb: number;
+/** Install one registered TTS runtime through Core's managed sidecar. */
+export async function installTtsEngine(
+	target: ApiTarget,
+	engine: string,
+	options: { appId?: string; appPermission?: string } = {}
+): Promise<VoiceEngineInstallRecord> {
+	const headers =
+		options.appId && options.appPermission
+			? {
+					"x-ryu-app-id": options.appId,
+					"x-ryu-app-permission": options.appPermission,
+				}
+			: undefined;
+	const resp = await authenticatedFetch(
+		target,
+		"/api/voice/tts-engines/install",
+		{
+			method: "POST",
+			headers,
+			body: JSON.stringify({ engine }),
+		}
+	);
+	if (!resp.ok) {
+		let detail = `TTS engine install failed: ${resp.status}`;
+		try {
+			const body = voiceEngineInstallErrorProjectionSchema.parse(
+				await resp.json()
+			);
+			if (body.detail || body.error) {
+				detail = [body.error, body.detail].filter(Boolean).join(": ");
+			}
+		} catch {
+			// Keep the status-based message for a non-JSON response.
+		}
+		throw new Error(detail);
+	}
+	const parsed = voiceEngineInstallWireSchema.safeParse(await resp.json());
+	const body = parsed.success ? parsed.data : null;
+	if (body?.engine !== engine || body?.installed !== true) {
+		throw new Error("Core did not confirm the speech engine install.");
+	}
+	return {
+		already_installed: body.already_installed === true,
+		engine,
+		installed: true,
+	};
 }
 
 /** List the curated, installable Audio models (the known-good set Core can install
@@ -232,7 +277,7 @@ export async function listTtsModels(target: ApiTarget): Promise<TtsModel[]> {
 	if (!resp.ok) {
 		throw new Error(`audio models failed: ${resp.status}`);
 	}
-	const body = (await resp.json()) as { data?: TtsModel[] };
+	const body = ttsModelsWireSchema.parse(await resp.json());
 	return body.data ?? [];
 }
 
@@ -254,7 +299,7 @@ export async function installTtsModel(
 	if (!resp.ok) {
 		let detail = `install failed: ${resp.status}`;
 		try {
-			const body = (await resp.json()) as { error?: string };
+			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
 				detail = body.error;
 			}
@@ -271,21 +316,31 @@ export interface SpeakOptions {
 	appId?: string;
 	/** Human-facing app permission required for this host-direct call. */
 	appPermission?: string;
+	/** Studio fields, forwarded to the Ryu Audio sidecar (see core-client). */
+	effects?: SpeakEffect[];
 	/** Engine id; omit (or `"outetts"`) for the built-in default. */
 	engine?: string;
+	format?: SpeakFormat;
+	instruct?: string;
 	/** Language hint for multilingual engines. */
 	language?: string;
+	normalize?: SpeakNormalize;
 	/** Reference wav path/URL for cloning-capable engines. */
 	referenceAudio?: string;
+	/** Core-validated in-memory WAV sample for a Companion voice clone. */
+	referenceAudioDataUrl?: string;
+	referenceText?: string;
 	/** Correlates this narration with an app-owned Gateway audit request. */
 	requestId?: string;
+	seed?: number;
 	/** Speaking-rate multiplier where supported. */
 	speed?: number;
 	/** Voice id (engine-specific); defaults to the engine's default voice. */
 	voice?: string;
 }
 
-/** Synthesize speech via Core's `/api/voice/speak`, returning a playable WAV blob.
+/** Synthesize speech via Core's `/api/voice/speak`, returning a playable blob
+ * typed with the container Core served (WAV unless `format` chose another).
  * The engine is whatever the caller selects — Core routes it to the matching
  * built-in, native audio.cpp, cloud, or RyuTTS runtime. */
 export async function speakText(
@@ -302,21 +357,13 @@ export async function speakText(
 						"x-ryu-app-permission": options.appPermission,
 					}
 				: undefined,
-		body: JSON.stringify({
-			text,
-			request_id: options.requestId,
-			engine: options.engine,
-			voice: options.voice,
-			speed: options.speed,
-			language: options.language,
-			reference_audio: options.referenceAudio,
-		}),
+		body: JSON.stringify(speakRequestBody(text, options)),
 	});
 
 	if (!resp.ok) {
 		let detail = `speak failed: ${resp.status}`;
 		try {
-			const body = (await resp.json()) as { error?: string };
+			const body = voiceErrorProjectionSchema.parse(await resp.json());
 			if (body.error) {
 				detail = body.error;
 			}
@@ -326,5 +373,5 @@ export async function speakText(
 		throw new Error(detail);
 	}
 
-	return await resp.blob();
+	return await speechResponseBlob(resp);
 }

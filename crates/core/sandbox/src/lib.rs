@@ -6,6 +6,9 @@
 //! - [`microsandbox`] — microVMs via the `msb` CLI (detect-only)
 //! - [`opensandbox`] — gVisor/Kata/Firecracker via the `osb` CLI (detect-only)
 //! - [`daytona`] — remote sandboxes via the Daytona REST API (token-gated)
+//! - [`local`] — host subprocess in a temp dir; **no isolation**, explicit opt-in
+//! - [`ssh`] — remote host via the system `ssh` client (config-gated)
+//! - [`singularity`] — Apptainer/Singularity containers via the host CLI (detect-only)
 //! - [`box_backend`] — durable Box service over its public REST API
 //!
 //! Sandboxing is "what runs" (an execution context), so this lives in Core per
@@ -26,15 +29,30 @@
 //! [`select_backend`]. The only hard rule: `select_backend` never returns an
 //! unknown backend silently — it errors out so callers can surface the problem.
 
+mod capture;
+pub use capture::WorkspaceCleanup;
 pub mod box_backend;
+pub mod box_credential;
+pub mod box_session;
+pub mod box_types;
 pub mod daytona;
 pub mod docker;
+pub mod governed;
+pub mod governed_vpn;
 pub mod heartbeat;
 pub mod host;
+pub mod local;
 pub mod microsandbox;
+pub mod mxc;
 pub mod opensandbox;
+pub mod os_isolation;
+mod process_output;
 pub mod session;
+pub mod singularity;
 pub mod spec;
+pub mod ssh;
+#[cfg(test)]
+mod test_http;
 pub mod wasmtime;
 pub mod win_process;
 
@@ -55,7 +73,7 @@ pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// How long a sandbox context lives and how widely it is shared.
 ///
-/// Ryu's built-in sandboxes (wasmtime, Deno PTC) are historically **per-exec**:
+/// Ryu's built-in sandboxes (wasmtime, the JS sandbox) are historically **per-exec**:
 /// each call spins up a fresh context that is torn down the moment the command
 /// exits. `SandboxScope` lets an agent *declare* a broader lifetime so a future
 /// scheduler can reuse one context across calls (mirroring OpenClaw's
@@ -189,15 +207,16 @@ impl SandboxCapabilities {
     /// Lower a manifest-declared [`PermissionSet`] into the sandbox capability
     /// descriptor the wasmtime/Docker backends enforce.
     ///
-    /// This is the wasmtime/Docker arm of the unified permission grammar (the Deno
-    /// PTC arm lives in `ryu-tool-exec`, whose backend takes the same
-    /// [`PermissionSet`] and emits `--allow-*` flags). The mapping:
+    /// This is the wasmtime/Docker arm of the unified permission grammar (the JS
+    /// sandbox arm lives in `ryu-tool-exec`, which takes the same [`PermissionSet`],
+    /// refuses filesystem/network grants and maps `child_process` to its
+    /// `childProcess.run` allow-list). The mapping:
     ///
     /// - `fs.read` / `fs.write` → [`Self::fs_read_paths`] / [`Self::fs_write_paths`]
     ///   (lowered by wasmtime to WASI preopens and by Docker to `--mount` flags).
     /// - `network` → [`Self::network`], a single boolean: **any** permitted network
     ///   (`true` or a non-empty host list) lowers to `true`. Host-scoped egress
-    ///   (`network: ["h:443"]`) only lowers precisely to Deno's `--allow-net=…`; the
+    ///   (`network: ["h:443"]`) has no precise lowering here: the
     ///   WASI/Docker knob is all-or-nothing, so a host list opens the network broadly
     ///   here — tighten host-scoping at the Gateway egress layer, not the sandbox.
     /// - `child_process` / `tool` have **no** representation in a `SandboxCapabilities`
@@ -254,7 +273,13 @@ pub struct ExecSpec {
     pub capabilities: SandboxCapabilities,
     /// Optional stdin bytes piped to the command.
     pub stdin: Option<Vec<u8>>,
-    /// Timeout in seconds. `None` means no timeout (use with care).
+    /// Environment variables exposed to the workload, as `(key, value)` pairs.
+    /// Only the wasmtime backend honors these (as the guest's WASI
+    /// environment); the process backends start from a cleared environment
+    /// and ignore this field.
+    pub env: Vec<(String, String)>,
+    /// Host commands accept 1–300 seconds. Local/SSH default to 120 seconds;
+    /// Docker, microsandbox and OpenSandbox default to 30 seconds.
     pub timeout_secs: Option<u64>,
 }
 
@@ -266,6 +291,7 @@ impl ExecSpec {
             args,
             capabilities: SandboxCapabilities::default(),
             stdin: None,
+            env: Vec::new(),
             timeout_secs: None,
         }
     }
@@ -285,7 +311,8 @@ pub struct ExecOutput {
 // ── Workspace handle ─────────────────────────────────────────────────────────
 
 /// An opaque identifier for a long-lived workspace created by a backend.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct WorkspaceId(pub String);
 
 // ── Sandbox trait ────────────────────────────────────────────────────────────
@@ -347,6 +374,10 @@ pub trait Sandbox: Send + Sync {
 /// `RYU_SANDBOX_BACKEND=subprocess` silently disabled every sandboxed exec on the
 /// node. `"subprocess"` is not in the vocabulary and is rejected as an honest
 /// `unknown sandbox backend` error, like any other unrecognised name.
+///
+/// [`SandboxBackend::Local`] is the honest successor for the rare operator who
+/// really wants host execution: it reports `isolation: none`, refuses to run
+/// until `RYU_SANDBOX_LOCAL_ENABLE=1` is set, and is never a default or fallback.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SandboxBackend {
     /// wasmtime backend: run a WASM/WASI module with strict capability limits.
@@ -354,17 +385,19 @@ pub enum SandboxBackend {
     Wasmtime,
     /// Docker/OCI backend: run a container image. Opt-in; requires Docker daemon.
     Docker,
-    /// Host-local generic backend vocabulary. It is intentionally not an
-    /// implementation: running directly on the host is not an isolation
-    /// boundary and must never become an implicit fallback.
+    /// Host subprocess in a fresh temp dir. Running directly on the host is
+    /// not an isolation boundary, so it requires an explicit operator opt-in
+    /// (`RYU_SANDBOX_LOCAL_ENABLE=1`) and never becomes an implicit fallback.
     Local,
-    /// SSH-backed remote provider vocabulary. Provider wiring is external.
+    /// Remote host over the system `ssh` client (`RYU_SANDBOX_SSH_HOST`, …).
     Ssh,
-    /// Modal remote provider vocabulary. Provider wiring is external.
+    /// Modal remote provider vocabulary. Not implemented in Core; see
+    /// [`unimplemented_backend_hint`].
     Modal,
-    /// Vercel Sandbox remote provider vocabulary. Provider wiring is external.
+    /// Vercel Sandbox remote provider vocabulary. Not implemented in Core; see
+    /// [`unimplemented_backend_hint`].
     VercelSandbox,
-    /// Singularity/Apptainer local provider vocabulary. Provider wiring is external.
+    /// Apptainer/Singularity containers via the host `apptainer`/`singularity` CLI.
     Singularity,
     /// Daytona remote sandbox backend.
     Daytona,
@@ -374,6 +407,8 @@ pub enum SandboxBackend {
     Microsandbox,
     /// OpenSandbox backend.
     Opensandbox,
+    /// Microsoft eXecution Container (MXC) Windows process container.
+    Mxc,
     /// Custom backend identified by name.
     Custom(String),
 }
@@ -393,6 +428,7 @@ impl SandboxBackend {
             "box" => Ok(Self::Box),
             "microsandbox" => Ok(Self::Microsandbox),
             "opensandbox" => Ok(Self::Opensandbox),
+            "mxc" => Ok(Self::Mxc),
             "" => Err(anyhow!("sandbox backend name must not be empty")),
             other => Err(anyhow!("unknown sandbox backend '{other}'")),
         }
@@ -412,6 +448,7 @@ impl SandboxBackend {
             Self::Box => "box",
             Self::Microsandbox => "microsandbox",
             Self::Opensandbox => "opensandbox",
+            Self::Mxc => "mxc",
             Self::Custom(name) => name.as_str(),
         }
     }
@@ -476,7 +513,8 @@ pub fn configured_backend() -> SandboxBackend {
 }
 
 /// The sandbox backends Ryu knows how to select, in display order. `wasmtime` is
-/// the built-in default; the rest are detect-only external CLIs.
+/// the built-in default; the rest are detect-gated swaps (external CLIs, remote
+/// services, opt-in host execution) or recognised-but-unimplemented vocabulary.
 pub const KNOWN_BACKENDS: &[&str] = &[
     "wasmtime",
     "docker",
@@ -487,6 +525,7 @@ pub const KNOWN_BACKENDS: &[&str] = &[
     "singularity",
     "microsandbox",
     "opensandbox",
+    "mxc",
     "daytona",
     "box",
 ];
@@ -521,16 +560,16 @@ fn backend_conformance(name: &str) -> Option<(bool, bool, &'static str, &'static
             "OCI container boundary",
         ),
         "local" => (
+            true,
             false,
-            false,
-            "not available",
-            "none; host execution is not isolation",
+            "ephemeral temp dir by default; workspace lifecycle supported",
+            "none; host execution as the Core user (explicit opt-in)",
         ),
         "ssh" => (
-            false,
             true,
-            "provider-defined remote persistence",
-            "provider-defined remote isolation",
+            true,
+            "ephemeral remote temp dir by default; workspace lifecycle supported",
+            "remote host user account; no Ryu sandbox boundary",
         ),
         "modal" => (
             false,
@@ -545,10 +584,10 @@ fn backend_conformance(name: &str) -> Option<(bool, bool, &'static str, &'static
             "provider-defined remote isolation",
         ),
         "singularity" => (
+            true,
             false,
-            false,
-            "provider-defined local persistence",
-            "provider-defined container isolation",
+            "ephemeral by default; workspace lifecycle via instances",
+            "Apptainer/Singularity container (--containall; network none unless granted)",
         ),
         "daytona" => (
             true,
@@ -573,6 +612,12 @@ fn backend_conformance(name: &str) -> Option<(bool, bool, &'static str, &'static
             false,
             "ephemeral by default; workspace lifecycle supported",
             "gVisor/Kata/Firecracker boundary",
+        ),
+        "mxc" => (
+            true,
+            false,
+            "ephemeral temp dir by default; workspace lifecycle supported",
+            "Windows OS process container (AppContainer/BaseContainer)",
         ),
         _ => return None,
     })
@@ -601,8 +646,10 @@ pub async fn discover_backends() -> Vec<SandboxBackendDescriptor> {
         let mut descriptor = backend_descriptor(name).expect("KNOWN_BACKENDS has descriptors");
         descriptor.available = descriptor.implemented && detect_backend(name).await;
         if !descriptor.implemented {
-            descriptor.diagnostic =
-                Some("recognized but not implemented; no provider SDK is wired".to_owned());
+            descriptor.diagnostic = Some(format!(
+                "recognized but not implemented: {}",
+                unimplemented_backend_hint(name)
+            ));
         } else if !descriptor.available {
             descriptor.diagnostic = Some(format!("{name} is not available on this node"));
         }
@@ -616,13 +663,14 @@ pub fn backend_display_name(name: &str) -> &str {
     match name {
         "wasmtime" => "Wasmtime (WASM · built-in)",
         "docker" => "Docker",
-        "local" => "Local host (unavailable)",
-        "ssh" => "SSH (provider)",
+        "local" => "Local host (no isolation)",
+        "ssh" => "SSH (remote host)",
         "modal" => "Modal (provider)",
         "vercel_sandbox" => "Vercel Sandbox (provider)",
-        "singularity" => "Singularity (provider)",
+        "singularity" => "Apptainer / Singularity",
         "microsandbox" => "microsandbox",
         "opensandbox" => "OpenSandbox",
+        "mxc" => "MXC (Windows process container)",
         "daytona" => "Daytona (remote)",
         "box" => "Ryu Box (persistent)",
         other => other,
@@ -647,10 +695,17 @@ pub async fn detect_backend(name: &str) -> bool {
             opensandbox::detect().await,
             opensandbox::DetectResult::Available
         ),
+        "mxc" => matches!(mxc::detect().await, mxc::DetectResult::Available),
         "daytona" => matches!(daytona::detect().await, daytona::DetectResult::Available),
+        "local" => matches!(local::detect().await, local::DetectResult::Available),
+        "ssh" => matches!(ssh::detect().await, ssh::DetectResult::Available),
         "box" => matches!(
             box_backend::detect().await,
             box_backend::DetectResult::Available
+        ),
+        "singularity" => matches!(
+            singularity::detect().await,
+            singularity::DetectResult::Available
         ),
         _ => false,
     }
@@ -658,11 +713,11 @@ pub async fn detect_backend(name: &str) -> bool {
 
 /// Path of the persisted default-backend selection.
 fn sandbox_backend_path() -> PathBuf {
-    crate::host::ryu_dir().join("sandbox-backend.json")
+    ryu_sidecar_runtime::layout::state_path(&crate::host::ryu_dir(), "sandbox-backend.json")
 }
 
 /// Durable record of the picker-selected default sandbox backend, persisted to
-/// `~/.ryu/sandbox-backend.json`. Mirrors `ActiveEngineStore`'s load/save shape.
+/// `<data dir>/state/sandbox-backend.json`. Mirrors `ActiveEngineStore`'s load/save shape.
 /// Distinct from the engine swap: this is a *default*, not an exclusive resident
 /// slot — a per-call `backend` argument always overrides it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -703,7 +758,10 @@ impl SandboxBackendStore {
 /// Returns `Err` for [`SandboxBackend::Wasmtime`] (use the wasmtime path with a
 /// WASM module instead) and for unknown `Custom` names — including
 /// `"subprocess"`, which is not a backend (see [`SandboxBackend`]). Recognised
-/// command backends: `docker`, `microsandbox`, `opensandbox`, `daytona`.
+/// command backends: `docker`, `microsandbox`, `opensandbox`, `mxc`, `daytona`, `box`,
+/// `local` (opt-in, no isolation), `ssh`, and `singularity`. `modal` and
+/// `vercel_sandbox` are recognised vocabulary but not implemented and error here
+/// with an actionable hint ([`unimplemented_backend_hint`]).
 ///
 /// The CLI wrappers (`docker`/`microsandbox`/`opensandbox`) and the remote HTTP
 /// backend (`daytona`) all construct without I/O and never install/provision
@@ -713,15 +771,44 @@ pub fn build_command_backend(backend: &SandboxBackend) -> Result<Box<dyn Sandbox
         SandboxBackend::Docker => Ok(Box::new(docker::DockerSandbox::new())),
         SandboxBackend::Microsandbox => Ok(Box::new(microsandbox::MicrosandboxSandbox::new())),
         SandboxBackend::Opensandbox => Ok(Box::new(opensandbox::OpenSandboxSandbox::new())),
+        SandboxBackend::Mxc => Ok(Box::new(mxc::MxcSandbox::new())),
         SandboxBackend::Daytona => Ok(Box::new(daytona::DaytonaSandbox::new())),
         SandboxBackend::Box => Ok(Box::new(box_backend::BoxSandbox::new())),
+        SandboxBackend::Local => Ok(Box::new(local::LocalSandbox::new())),
+        SandboxBackend::Ssh => Ok(Box::new(ssh::SshSandbox::new())),
+        SandboxBackend::Singularity => Ok(Box::new(singularity::SingularitySandbox::new())),
         SandboxBackend::Wasmtime => Err(anyhow!(
             "wasmtime is not a command backend — pass a WASM module via `wasm_b64`"
         )),
         other => Err(anyhow!(
-            "sandbox backend '{}' is recognized but not implemented",
-            other.as_str()
+            "sandbox backend '{}' is recognized but not implemented: {}",
+            other.as_str(),
+            unimplemented_backend_hint(other.as_str())
         )),
+    }
+}
+
+/// Operator-facing guidance for a recognised-but-unimplemented backend. Core
+/// never falls back to another backend, so the error has to say what to do.
+///
+/// Modal sandboxes are created through Modal's Python SDK (there is no stable
+/// CLI verb for create/exec/terminate), and Vercel Sandbox is driven through
+/// its TypeScript SDK/REST API with a Vercel OIDC or access token; neither has
+/// a contract Core can exercise without the provider, so both stay unwired
+/// rather than shipping an untested remote-execution path.
+pub fn unimplemented_backend_hint(name: &str) -> &'static str {
+    match name {
+        "modal" => {
+            "Core has no Modal driver (Modal sandboxes are created through Modal's Python SDK). \
+             Provide it as a backend plugin that owns the Modal token, or select an implemented \
+             backend such as `docker`, `singularity`, `daytona`, or `box`"
+        }
+        "vercel_sandbox" => {
+            "Core has no Vercel Sandbox driver (Vercel Sandbox is driven by its SDK/REST API with \
+             a Vercel token). Provide it as a backend plugin that owns the Vercel credentials, or \
+             select an implemented backend such as `docker`, `singularity`, `daytona`, or `box`"
+        }
+        _ => "no provider driver is wired in Core; select an implemented backend",
     }
 }
 
@@ -788,7 +875,7 @@ mod tests {
     #[test]
     fn from_permissions_host_scoped_network_lowers_to_true() {
         // The WASI/Docker network knob is all-or-nothing: a host list opens the
-        // boolean (host-scoping only lowers precisely to Deno's --allow-net).
+        // boolean (this backend cannot scope egress by host).
         use ryu_kernel_contracts::manifest::{NetworkPermission, PermissionSet};
         let mut perms = PermissionSet::default();
         perms.network = NetworkPermission::Hosts(vec!["api.example.com:443".to_string()]);
@@ -1044,6 +1131,12 @@ mod tests {
             "opensandbox"
         );
         assert_eq!(
+            build_command_backend(&SandboxBackend::from_name("mxc").unwrap())
+                .unwrap()
+                .name(),
+            "mxc"
+        );
+        assert_eq!(
             build_command_backend(&SandboxBackend::Box).unwrap().name(),
             "box"
         );
@@ -1119,5 +1212,60 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("not implemented"));
+        let local = discovered.iter().find(|b| b.name == "local").unwrap();
+        assert!(local.implemented);
+        assert!(!local.remote);
+        assert!(local.isolation.starts_with("none"));
+        let ssh = discovered.iter().find(|b| b.name == "ssh").unwrap();
+        assert!(ssh.implemented);
+        assert!(ssh.remote);
+    }
+
+    #[test]
+    fn unimplemented_providers_are_reported_and_refuse_to_build() {
+        for name in ["modal", "vercel_sandbox"] {
+            let descriptor = backend_descriptor(name).unwrap();
+            assert!(!descriptor.implemented, "{name}");
+            let err = build_command_backend(&SandboxBackend::from_name(name).unwrap())
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(err.contains("not implemented"), "{name}: {err}");
+            assert!(
+                err.contains("plugin"),
+                "{name}: actionable hint missing: {err}"
+            );
+            assert!(
+                err.contains("`docker`"),
+                "{name}: alternatives missing: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn singularity_is_an_implemented_local_command_backend() {
+        let descriptor = backend_descriptor("singularity").unwrap();
+        assert!(descriptor.implemented);
+        assert!(!descriptor.remote);
+        assert_eq!(
+            build_command_backend(&SandboxBackend::Singularity)
+                .unwrap()
+                .name(),
+            "singularity"
+        );
+    }
+
+    #[test]
+    fn build_command_backend_builds_local_and_ssh() {
+        assert_eq!(
+            build_command_backend(&SandboxBackend::Local)
+                .unwrap()
+                .name(),
+            "local"
+        );
+        assert_eq!(
+            build_command_backend(&SandboxBackend::Ssh).unwrap().name(),
+            "ssh"
+        );
     }
 }

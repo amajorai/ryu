@@ -4,7 +4,7 @@ test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/voice-mode-call-proof.html";
 
-test("proves the compact call screen and its live controls", async ({
+test("proves the call morphs into the composer with its live controls", async ({
 	page,
 }, testInfo) => {
 	await page.goto(STORY_URL);
@@ -18,27 +18,40 @@ test("proves the compact call screen and its live controls", async ({
 	await expect(page.getByTestId("voice-call-duration")).toHaveText(
 		/^\d{2}:\d{2}$/
 	);
-	await expect(page.getByTestId("voice-call-transcript")).toContainText(
+
+	// The call replaces the text field inside the same composer card: no second
+	// composer, no textbox, no Send, but the "+" menu stays put.
+	const card = page.locator(".composer-container");
+	await expect(card).toHaveCount(1);
+	await expect(card.getByTestId("voice-call-screen")).toBeVisible();
+	await expect(card.getByRole("textbox")).toHaveCount(0);
+	await expect(card.getByRole("button", { name: "Send" })).toHaveCount(0);
+	await expect(card.getByRole("button", { name: "Add" })).toBeVisible();
+
+	// The libraries.dev voice glow wraps the input card itself.
+	const glow = page.locator("[data-voice-beam]").filter({ has: card });
+	await expect(glow).toHaveCount(1);
+	await expect(page.getByTestId("aurora")).toHaveCount(0);
+
+	// Call turns read as normal chat messages, not a panel inside the composer.
+	await expect(card.getByTestId("voice-call-transcript")).toHaveCount(0);
+	await expect(card).not.toContainText(
 		"Can you walk me through the next step?"
 	);
-	const historyToggle = page.getByTestId("voice-call-transcript-toggle");
-	await expect(historyToggle).toHaveAttribute("aria-expanded", "true");
-	await historyToggle.click();
-	await expect(historyToggle).toHaveAttribute("aria-expanded", "false");
-	await expect(page.getByTestId("voice-call-transcript")).toHaveCount(0);
-	await historyToggle.click();
-	await expect(historyToggle).toHaveAttribute("aria-expanded", "true");
-	await expect(page.getByTestId("voice-call-transcript")).toBeVisible();
-	await historyToggle.click();
-	await expect(historyToggle).toHaveAttribute("aria-expanded", "false");
-	await expect(page.getByTestId("voice-call-transcript")).toHaveCount(0);
+	await expect(
+		page.getByText("Can you walk me through the next step?")
+	).toBeVisible();
+	await expect(
+		page.getByText(
+			"Absolutely. I will keep the next step focused and easy to follow."
+		)
+	).toBeVisible();
 	await expect(page.getByRole("button", { name: "End call" })).toBeVisible();
-	const composer = page.getByTestId("voice-call-composer");
-	await expect(composer).toBeVisible();
-	const textbox = composer.getByRole("textbox");
-	await expect(textbox).toHaveAttribute("placeholder", "Send a message");
-	await textbox.fill("Use text chat for this turn");
-	await expect(composer.getByRole("button", { name: "Send" })).toBeVisible();
+
+	await page.screenshot({
+		path: testInfo.outputPath("voice-mode-call-live.png"),
+		fullPage: true,
+	});
 
 	const mute = page.getByRole("button", { name: "Mute microphone" });
 	await mute.click();
@@ -52,12 +65,6 @@ test("proves the compact call screen and its live controls", async ({
 		fullPage: true,
 	});
 
-	await composer.getByRole("button", { name: "Send" }).click();
-	await expect(page.getByTestId("voice-text-sent")).toHaveText(
-		"Use text chat for this turn"
-	);
-	await expect(textbox).toHaveValue("");
-
 	await page.getByRole("button", { name: "Unmute microphone" }).click();
 	await expect(
 		page.getByRole("button", { name: "Mute microphone" })
@@ -65,5 +72,5 @@ test("proves the compact call screen and its live controls", async ({
 
 	await page.getByRole("button", { name: "End call" }).click();
 	await expect(page.getByTestId("voice-call-screen")).toHaveCount(0);
-	await expect(page.getByPlaceholder("Ask a follow up")).toBeVisible();
+	await expect(page.getByPlaceholder("Send a message")).toBeVisible();
 });

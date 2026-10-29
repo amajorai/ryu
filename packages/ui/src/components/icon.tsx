@@ -1,6 +1,9 @@
 "use client";
 
+import { iconifyPath } from "@ryu/ui/components/glyph.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import type { CSSProperties } from "react";
+import { cn } from "../lib/utils.ts";
 
 // Iconify's public SVG API. icons0.dev is Iconify-powered (it redistributes the
 // same collections via a shadcn registry), so a single Iconify resolver covers
@@ -19,7 +22,7 @@ const URL_OR_DATA = /^(https?:|data:)/;
  *  - Bare name — `"ai-image"`, `"mic-01"`, `"shapes"` — treated as the Hugeicons
  *    set (`hugeicons:<name>`), which is how the built-in app manifests author
  *    their `companion.icon`.
- *  - A ready image URL or inline `data:` URI — returned unchanged.
+ *  - A ready HTTP(S) image URL or a safe raster `data:image` URI.
  *
  * Returns `null` for an empty id so callers can fall back to a default glyph.
  */
@@ -32,11 +35,18 @@ export function iconToUrl(
 		return null;
 	}
 	if (URL_OR_DATA.test(trimmed)) {
-		return trimmed;
+		const safeUrl = safeMediaUrl(trimmed);
+		return safeUrl &&
+			(safeUrl.startsWith("http:") ||
+				safeUrl.startsWith("https:") ||
+				safeUrl.startsWith("data:image/"))
+			? safeUrl
+			: null;
 	}
-	// `prefix:name` → that Iconify collection; a bare name → the Hugeicons set.
-	const id = trimmed.includes(":") ? trimmed : `hugeicons:${trimmed}`;
-	const path = id.replace(":", "/");
+	const path = iconifyPath(trimmed);
+	if (!path) {
+		return null;
+	}
 	const params = new URLSearchParams();
 	if (opts.size) {
 		params.set("width", String(opts.size));
@@ -49,14 +59,38 @@ export function iconToUrl(
 	return `${ICONIFY_API}/${path}.svg${qs ? `?${qs}` : ""}`;
 }
 
+/** CSS inputs owned by the registered icon mask stylesheet. */
+interface IconVariables extends CSSProperties {
+	"--ryu-icon-mask": string;
+	"--ryu-icon-size": string;
+}
+
+export type PanelIconPresentation = "panel-tab" | "panel-launchpad";
+
+/** Exact shared glyph treatment on each native dock-tab/icon root. */
+export function panelIconPresentationClasses(
+	presentation: PanelIconPresentation | undefined
+) {
+	return cn(
+		presentation === "panel-tab" &&
+			"transition-[scale,opacity] duration-150 group-focus-within/tab:scale-50 group-focus-within/tab:opacity-0 group-hover/tab:scale-50 group-hover/tab:opacity-0",
+		presentation === "panel-launchpad" &&
+			"text-muted-foreground transition-colors group-hover:text-foreground"
+	);
+}
+
 interface IconProps {
 	className?: string;
 	/** Icon id — an Iconify/icons0 `prefix:name`, a bare Hugeicons name, or a URL. */
 	icon: string | null | undefined;
 	/** Accessible label; omit (or "") for a decorative icon. */
 	label?: string;
+	motion?: "opacity";
+	presentation?: PanelIconPresentation;
 	/** Rendered edge length in px (drives both the box and the fetched size). */
 	size?: number;
+	tone?: "default" | "muted";
+	visibility?: "concealed" | "row-hover";
 }
 
 /**
@@ -69,30 +103,43 @@ interface IconProps {
  * Shared primitive so apps (companions, spaces, marketplace cards) all render
  * icons the same way rather than each re-implementing name→glyph resolution.
  */
-export function Icon({ icon, size = 16, className, label }: IconProps) {
+export function Icon({
+	icon,
+	size = 16,
+	className,
+	label,
+	tone = "default",
+	motion,
+	visibility,
+	presentation,
+}: IconProps) {
 	const url = iconToUrl(icon, { size });
 	if (!url) {
 		return null;
 	}
-	const style: CSSProperties = {
-		backgroundColor: "currentColor",
-		display: "inline-block",
-		height: size,
-		maskImage: `url("${url}")`,
-		maskPosition: "center",
-		maskRepeat: "no-repeat",
-		maskSize: "contain",
-		WebkitMaskImage: `url("${url}")`,
-		WebkitMaskPosition: "center",
-		WebkitMaskRepeat: "no-repeat",
-		WebkitMaskSize: "contain",
-		width: size,
+	const hasValidSize = Number.isFinite(size) && size >= 0;
+	const presentationClasses = cn(
+		tone === "muted" && "text-muted-foreground",
+		motion === "opacity" && "transition-opacity",
+		visibility === "concealed" && "opacity-0",
+		visibility === "row-hover" &&
+			"opacity-100 group-hover/row:opacity-0 group-focus-visible/row:opacity-0 group-has-[button:focus-visible]/row:opacity-0"
+	);
+	const style: IconVariables = {
+		"--ryu-icon-size": `${size}px`,
+		"--ryu-icon-mask": `url("${url}")`,
 	};
 	return (
 		<span
 			aria-hidden={label ? undefined : true}
 			aria-label={label || undefined}
-			className={className}
+			className={cn(
+				"ryu-registered-icon",
+				hasValidSize && "ryu-registered-icon-sized",
+				presentationClasses,
+				panelIconPresentationClasses(presentation),
+				className
+			)}
 			role={label ? "img" : undefined}
 			style={style}
 		/>

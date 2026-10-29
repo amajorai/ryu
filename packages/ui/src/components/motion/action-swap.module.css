@@ -1,0 +1,4 @@
+.inline1 {
+	width: var(--action-swap-1-width);
+	transition: var(--action-swap-1-transition);
+}

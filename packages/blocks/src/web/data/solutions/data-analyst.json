@@ -1,37 +1,10 @@
 {
   "slug": "data-analyst",
   "name": "Data Analysis",
-  "navLabel": "Data Analysis",
-  "category": "Engineering & Product",
   "icon": "BarChart3",
-  "tagline": "Ask questions of your connected data. Review the generated query and its results.",
-  "heroEyebrow": "Ryu for Data Analysis",
+  "tagline": "Ask questions of your connected data, then check the query and results.",
   "heroTitle": "Ryu for data analysis",
-  "heroSubtitle": "Ask questions of your connected data. Review the generated query and its results.",
   "visualKey": "CoreVisual",
-  "intro": "Analysts lose hours translating vague requests into SQL and rebuilding the same pulls. Ryu connects to your databases through MCP, turns a question into a query you can read, and grounds answers in your real schema. Sensitive customer data can stay governed by the Gateway or never leave your machine at all.",
-  "highlights": [
-    {
-      "title": "Plain language to SQL",
-      "description": "Ask a question and get a query you can read and run, so you keep the rigor while skipping the boilerplate.",
-      "icon": "Sparkles"
-    },
-    {
-      "title": "Connected to your stack",
-      "description": "Wire Postgres, your warehouse, and Slack through MCP and Connections, so an agent pulls live numbers instead of guessing.",
-      "icon": "Plug"
-    },
-    {
-      "title": "Governed access",
-      "description": "The Gateway logs every query and tool call and can redact sensitive fields, so analytics on customer data stays auditable.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Knows your schema",
-      "description": "Ground agents on your data dictionary and past queries with Spaces, so results use the right tables and definitions.",
-      "icon": "Bot"
-    }
-  ],
   "useCases": [
     {
       "title": "Ad hoc data pulls",
@@ -39,7 +12,7 @@
     },
     {
       "title": "Metric investigation",
-      "description": "Ask why a KPI moved; the agent slices by dimension, compares periods, and surfaces the segments driving the change."
+      "description": "Ask why a KPI moved; the agent slices by dimension, compares periods, and finds the segments behind the change."
     },
     {
       "title": "Dashboard summaries",
@@ -55,31 +28,21 @@
     },
     {
       "title": "Query explanation",
-      "description": "Paste a complex SQL query and get a clear breakdown of joins, filters, and what each CTE actually computes."
+      "description": "Paste a complex SQL query and get a clear breakdown of joins, filters, and what each CTE computes."
     }
-  ],
-  "examplePrompts": [
-    "Pull weekly active users by plan tier for the last 8 weeks from the warehouse and show me the SQL.",
-    "Signups dropped 12 percent week over week, break it down by channel and country to find the cause.",
-    "Check the orders table for duplicate order IDs and rows with negative totals.",
-    "Summarize this revenue dashboard for the exec update in three sentences with the key deltas.",
-    "Explain what this 40-line query does and whether the left join could be dropping rows."
   ],
   "faq": [
     {
       "q": "Can it connect to my database?",
-      "a": "Yes. Ryu connects to Postgres, warehouses, and BI tools through MCP and Connections, so an agent runs real queries against your live data rather than making numbers up."
+      "a": "Yes. Connect Postgres, your warehouse, or BI tools through MCP or Connections, and the agent queries your live data."
     },
     {
       "q": "Will I see the query it ran?",
-      "a": "Yes. Ryu shows the SQL it wrote and ran for every answer, and the Gateway logs each query, so you can verify the logic and audit access before trusting a result."
+      "a": "Yes. Review the SQL behind an answer, and the Gateway logs the model calls that produced it, so you can check the logic before trusting a result."
     },
     {
-      "q": "Is sensitive customer data exposed?",
-      "a": "You control it. Run a local model with no telemetry to keep data on your machine, or route to a cloud model with the Gateway redacting sensitive fields and recording every call."
+      "q": "Is customer data kept private?",
+      "a": "Yes. With a local model, customer data stays on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     }
-  ],
-  "ctaTitle": "Spend less time writing SQL and more time finding answers.",
-  "ctaSubtitle": "Ask in plain language, see the query, and ship numbers you can stand behind.",
-  "ctaNote": "Warehouse connectors · Query shown · Governed access"
+  ]
 }

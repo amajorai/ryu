@@ -1,4 +1,4 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -6,14 +6,14 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/native-select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useMemo, useState } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -131,6 +131,26 @@ export function NewAutomationDialog({
 		}
 	};
 
+	const resetForm = () => {
+		setAgentId(defaultAgentId ?? "");
+		setPhrase("daily");
+		setDailyTime("09:00");
+		setWeeklyDay("monday");
+		setWeeklyTime("09:00");
+		setCustomCron("");
+		setDestination(defaultConversationId ? "existing" : "new");
+		setConversationId(defaultConversationId ?? "");
+		setRequireApproval(false);
+		setError(null);
+	};
+
+	const handleOpenChange = (nextOpen: boolean) => {
+		if (!nextOpen) {
+			resetForm();
+		}
+		onOpenChange(nextOpen);
+	};
+
 	const handleCreate = async () => {
 		const agent = activeAgents.find((a) => a.id === selectedAgentId);
 		if (!agent) {
@@ -167,7 +187,7 @@ export function NewAutomationDialog({
 				requireApproval,
 			});
 			onCreated();
-			onOpenChange(false);
+			handleOpenChange(false);
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Failed to create automation");
 		} finally {
@@ -179,7 +199,7 @@ export function NewAutomationDialog({
 		phrase === "daily" || phrase === "weekdays" || phrase === "weekends";
 
 	return (
-		<Dialog onOpenChange={onOpenChange} open={open}>
+		<Dialog onOpenChange={handleOpenChange} open={open}>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
 					<DialogTitle>New automation</DialogTitle>
@@ -217,7 +237,12 @@ export function NewAutomationDialog({
 						<NativeSelect
 							className="w-full"
 							id="automation-schedule"
-							onChange={(e) => setPhrase(e.target.value as SchedulePhrase)}
+							onChange={(e) =>
+								setPhrase(
+									/* SAFETY: This NativeSelect renders only PHRASE_OPTIONS values, whose owner type is SchedulePhrase. This is a native UI selection, not a decoder for arbitrary synthetic events. */ e
+										.target.value as SchedulePhrase
+								)
+							}
 							value={phrase}
 						>
 							{PHRASE_OPTIONS.map((o) => (
@@ -289,7 +314,10 @@ export function NewAutomationDialog({
 							className="w-full"
 							id="automation-destination"
 							onChange={(e) =>
-								handleDestinationChange(e.target.value as "new" | "existing")
+								handleDestinationChange(
+									/* SAFETY: This authored NativeSelect offers only new and existing transcript destinations. This is a native UI selection, not a decoder for arbitrary synthetic events. */ e
+										.target.value as "new" | "existing"
+								)
 							}
 							value={destination}
 						>
@@ -363,7 +391,7 @@ export function NewAutomationDialog({
 				<DialogFooter>
 					<Button
 						disabled={saving}
-						onClick={() => onOpenChange(false)}
+						onClick={() => handleOpenChange(false)}
 						variant="ghost"
 					>
 						Cancel

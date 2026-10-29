@@ -1,11 +1,14 @@
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { z } from "zod";
 import { type FetchLike, RyuNodeClient } from "./client.ts";
+import { evalSummary, runEvalOperation } from "./eval.ts";
 import {
 	parseActionInputs,
 	resolveTarget,
 	validateOperationInputs,
 } from "./input.ts";
+import { JsonRecordSchema, type JsonValue } from "./json.ts";
 import { type ActionRuntime, githubRuntime } from "./runtime.ts";
 import type {
 	ActionInputs,
@@ -14,6 +17,7 @@ import type {
 	NodeSnapshot,
 	ToolRequest,
 } from "./types.ts";
+import { exportVaultSecrets } from "./vault.ts";
 
 export interface RunnerOptions {
 	environment?: Record<string, string | undefined>;
@@ -22,11 +26,12 @@ export interface RunnerOptions {
 	workingDirectory?: string;
 }
 
-function outputText(value: unknown): string {
-	if (typeof value === "string") {
-		return value;
+function outputText(value: JsonValue | undefined): string {
+	const text = z.string().safeParse(value);
+	if (text.success) {
+		return text.data;
 	}
-	return JSON.stringify(value);
+	return JSON.stringify(value) ?? "";
 }
 
 function setNodeOutputs(runtime: ActionRuntime, node: NodeSnapshot): void {
@@ -172,11 +177,18 @@ export async function executeAction(
 	}
 	runtime.info(`Connecting to Ryu ${target.mode} node at ${target.url}.`);
 	const client = new RyuNodeClient(target, options.fetchImpl);
-	const node = await client.validate(target.mode, inputs.timeoutMs);
+	const node = await client.validate(target.mode, inputs.timeoutMs, {
+		infoOptional:
+			inputs.secrets.length > 0 &&
+			inputs.operation === "setup" &&
+			target.token === null,
+	});
 	setNodeOutputs(runtime, node);
 	if (inputs.exportEnv) {
 		exportNodeEnvironment(runtime, node, target.token);
 	}
+	const vaultNames = await exportVaultSecrets(client, inputs, runtime);
+	runtime.setOutput("vault-secrets", JSON.stringify(vaultNames));
 
 	const base: ActionResult = {
 		conversationId: null,
@@ -216,6 +228,41 @@ export async function executeAction(
 		}
 		setResultOutputs(runtime, result);
 		await writeSummary(inputs, node, result, environment);
+		return result;
+	}
+
+	if (inputs.operation === "eval") {
+		const evaluation = await runEvalOperation(
+			client,
+			inputs,
+			options.workingDirectory ?? process.cwd()
+		);
+		const result: ActionResult = {
+			...base,
+			result: {
+				gate: evaluation.gate,
+				run: JsonRecordSchema.parse(evaluation.run),
+			},
+			text: evaluation.gate.ok
+				? "eval passed"
+				: `eval failed: ${evaluation.gate.failures.join("; ")}`,
+		};
+		setResultOutputs(runtime, result);
+		runtime.setOutput("eval-passed", String(evaluation.gate.ok));
+		runtime.setOutput(
+			"eval-json",
+			JSON.stringify({ ...evaluation.run, gate: evaluation.gate })
+		);
+		await writeSummary(inputs, node, result, environment);
+		const summaryPath = environment.GITHUB_STEP_SUMMARY;
+		if (inputs.writeSummary && summaryPath) {
+			await appendFile(summaryPath, evalSummary(evaluation), "utf8");
+		}
+		if (!evaluation.gate.ok) {
+			throw new Error(
+				`Ryu eval gate failed: ${evaluation.gate.failures.join("; ")}`
+			);
+		}
 		return result;
 	}
 

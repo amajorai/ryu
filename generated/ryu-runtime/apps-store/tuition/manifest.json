@@ -256,7 +256,7 @@
         ]
       },
       "host_api": {
-        "grants": ["hook:side-model", "storage:kv"]
+        "grants": ["hook:side-model", "storage:kv", "crypto:seal"]
       }
     }
   ],

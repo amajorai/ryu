@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "video-preview-regression.spec.ts",
+    "video-preview-regression.host.ts",
+    "video-preview-regression.playwright.config.ts",
+    "harness/video-preview-regression.tsx",
+    "harness/video-preview-regression.types.ts",
+    "harness/video-preview-widget-entry.tsx",
+    "harness/vite.video-preview-regression.config.ts",
+    "harness/vite.video-preview-widget.config.ts"
+  ],
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  }
+}

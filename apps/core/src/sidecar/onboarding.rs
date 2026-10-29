@@ -19,7 +19,7 @@ pub struct SetupStatus {
 
 impl SetupStatus {
     pub fn new() -> Self {
-        let installation_path = crate::paths::ryu_dir().join("bin");
+        let installation_path = ryu_sidecar_runtime::layout::bin_dir(&crate::paths::ryu_dir());
 
         Self {
             installed_sidecars: HashSet::new(),
@@ -56,6 +56,11 @@ const LLAMACPP_DERIVED_SIDECARS: &[&str] = &[
     crate::sidecar::providers::llamacpp::classify::CLASSIFY_SIDECAR_NAME,
     // Speech Processing — lazily started by the dictation cleanup route.
     crate::sidecar::providers::llamacpp::speech::SPEECH_PROCESSING_SIDECAR_NAME,
+    // Guard tier for the node's own hazard screener. Marked installed so the
+    // opt-in start in `sidecar::node_screener` is not refused; it is not in
+    // `startup_order` and onboarding downloads no guard weights, so this alone
+    // starts and fetches nothing.
+    crate::sidecar::providers::llamacpp::guard::GUARD_SIDECAR_NAME,
 ];
 
 /// First-party desktop tools that are part of the default local closure. They
@@ -85,7 +90,168 @@ pub(crate) const PREINSTALLED_SIDECARS: &[&str] = &[];
 /// (`ryu_mesh::is_enabled()`) right after the seed call; keep that the single
 /// source, and see also `POST /api/mesh/config`.
 pub(crate) fn seeds_from_version_store(name: &str) -> bool {
-    !matches!(name, "tailscale" | "tailcat")
+    !matches!(
+        name,
+        "tailscale" | "tailcat" | "cloudflared" | "opentunnel" | "tunnel-plugin"
+    )
+}
+
+/// Environment variable that turns off every automatic local engine, model and
+/// companion download.
+///
+/// Set it to `1` on a node that should only ever use provider keys (the
+/// Codespaces playground, CI and cloud-provider hosts). Core then never starts a
+/// local engine or model download on its own: not the first-run local stack,
+/// not the eager Shadow/Ghost/Island preinstalls, and not a lazy fetch such as
+/// the Needle tool-router runtime on a chat turn. An install the user asks for
+/// through the Store or the install API still downloads.
+/// Every automatic download site asks [`local_stack_auto_install_skipped`]
+/// instead of reading the variable itself.
+pub const SKIP_LOCAL_STACK_INSTALL_ENV: &str = "RYU_SKIP_LOCAL_STACK_INSTALL";
+
+/// Whether `RYU_SKIP_LOCAL_STACK_INSTALL` turns automatic local downloads off.
+/// Unset (the default) keeps them on.
+pub fn local_stack_auto_install_skipped() -> bool {
+    skip_local_stack_value(std::env::var(SKIP_LOCAL_STACK_INSTALL_ENV).ok().as_deref())
+}
+
+/// Parse a `RYU_SKIP_LOCAL_STACK_INSTALL` value. `1`, `true`, `yes` and `on`
+/// (any case) skip; anything else, or no value, does not.
+pub(crate) fn skip_local_stack_value(value: Option<&str>) -> bool {
+    value.is_some_and(|raw| {
+        matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// The refusal an automatic download site returns instead of fetching `what`
+/// when [`local_stack_auto_install_skipped`] is set, or `None` when it may
+/// download.
+pub fn automatic_download_refusal(what: &str) -> Option<String> {
+    automatic_download_refusal_for(local_stack_auto_install_skipped(), what)
+}
+
+pub(crate) fn automatic_download_refusal_for(skipped: bool, what: &str) -> Option<String> {
+    skipped.then(|| {
+        format!(
+            "{what} is not installed, and {SKIP_LOCAL_STACK_INSTALL_ENV} turns off automatic \
+             downloads"
+        )
+    })
+}
+
+/// The tools [`SetupManager::seed_installed_from_disk`] treats as installed on
+/// a fresh node, whose `start()` then downloads them. Empty when automatic
+/// local downloads are off.
+fn eager_preinstalled_sidecars(skipped: bool) -> &'static [&'static str] {
+    if skipped {
+        &[]
+    } else {
+        PREINSTALLED_SIDECARS
+    }
+}
+
+/// Serializes tests that set `RYU_SKIP_LOCAL_STACK_INSTALL`, in this module and
+/// at the download sites that read it.
+#[cfg(test)]
+pub(crate) static SKIP_LOCAL_STACK_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Run `body` with `RYU_SKIP_LOCAL_STACK_INSTALL` set to `value` (or unset),
+/// restoring the previous value afterwards.
+#[cfg(test)]
+pub(crate) fn with_skip_local_stack_env<T>(value: Option<&str>, body: impl FnOnce() -> T) -> T {
+    let _guard = SKIP_LOCAL_STACK_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let previous = std::env::var_os(SKIP_LOCAL_STACK_INSTALL_ENV);
+    match value {
+        Some(value) => std::env::set_var(SKIP_LOCAL_STACK_INSTALL_ENV, value),
+        None => std::env::remove_var(SKIP_LOCAL_STACK_INSTALL_ENV),
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+    match previous {
+        Some(previous) => std::env::set_var(SKIP_LOCAL_STACK_INSTALL_ENV, previous),
+        None => std::env::remove_var(SKIP_LOCAL_STACK_INSTALL_ENV),
+    }
+    result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+#[cfg(test)]
+mod skip_local_stack_tests {
+    use super::*;
+
+    #[test]
+    fn skip_value_accepts_only_affirmative_values() {
+        for value in ["1", "true", "TRUE", "yes", "on", " 1 "] {
+            assert!(skip_local_stack_value(Some(value)), "{value:?} must skip");
+        }
+        for value in ["0", "false", "no", "off", "", "2", "skip"] {
+            assert!(
+                !skip_local_stack_value(Some(value)),
+                "{value:?} must not skip"
+            );
+        }
+        assert!(
+            !skip_local_stack_value(None),
+            "unset keeps the default stack"
+        );
+    }
+
+    #[test]
+    fn helper_reads_the_environment_variable() {
+        assert!(with_skip_local_stack_env(
+            Some("1"),
+            local_stack_auto_install_skipped
+        ));
+        assert!(!with_skip_local_stack_env(
+            Some("0"),
+            local_stack_auto_install_skipped
+        ));
+        assert!(!with_skip_local_stack_env(
+            None,
+            local_stack_auto_install_skipped
+        ));
+    }
+
+    #[test]
+    fn refusal_names_the_artifact_and_the_variable_only_when_skipped() {
+        let refusal = automatic_download_refusal_for(true, "The Needle 3 runtime")
+            .expect("skipped downloads are refused");
+        assert!(refusal.starts_with("The Needle 3 runtime is not installed"));
+        assert!(refusal.contains(SKIP_LOCAL_STACK_INSTALL_ENV));
+        assert_eq!(automatic_download_refusal_for(false, "anything"), None);
+        assert!(with_skip_local_stack_env(None, || automatic_download_refusal("x")).is_none());
+        assert!(with_skip_local_stack_env(Some("1"), || automatic_download_refusal("x")).is_some());
+    }
+
+    #[test]
+    fn skipping_empties_the_eager_preinstall_set() {
+        assert!(eager_preinstalled_sidecars(true).is_empty());
+        assert_eq!(eager_preinstalled_sidecars(false), PREINSTALLED_SIDECARS);
+    }
+
+    // The seed is what makes `start_all` download Shadow and Ghost on a fresh
+    // release node. With the eager set emptied, neither is marked installed, so
+    // `start_all` skips them and nothing is fetched.
+    #[tokio::test]
+    async fn seed_without_eager_preinstalls_leaves_tools_uninstalled() {
+        let names = ["shadow".to_string(), "ghost".to_string()];
+        let skipped = SetupManager::new();
+        skipped
+            .seed_installed_with_preinstalled(&names, eager_preinstalled_sidecars(true))
+            .await;
+        assert!(!skipped.is_installed("shadow").await);
+        assert!(!skipped.is_installed("ghost").await);
+
+        let eager = SetupManager::new();
+        eager
+            .seed_installed_with_preinstalled(&names, &["shadow", "ghost"])
+            .await;
+        assert!(eager.is_installed("shadow").await);
+        assert!(eager.is_installed("ghost").await);
+    }
 }
 
 /// Outcome of the `install_local_stack` routine.
@@ -138,14 +304,20 @@ pub struct LocalStackStatus {
     /// here by default — like the Gemma chat GGUF — so the default voice works with
     /// no setup; the Python TTS sidecar's `kokoro-onnx` backend only serves them.
     pub kokoro_installed: bool,
-    /// True if the stable-diffusion.cpp image engine (server binary + default
-    /// diffusion model) is present. Downloaded here by default so text-to-image
-    /// works with no setup on platforms with a prebuilt server (Windows x64,
-    /// macOS arm64, Linux x86_64); the sidecar stays opt-in to *run* (lazily
-    /// started on the first `/api/images/generate`). Heaviest bundled default
-    /// (~4.6 GB SDXL base incl. text encoders + VAE), so its failure is
+    /// True if the stable-diffusion.cpp image engine (server binary + this
+    /// node's image default, see [`Self::image_tier`]) is present. Downloaded
+    /// here by default so text-to-image works with no setup on platforms with a
+    /// prebuilt server (Windows x64, macOS arm64, Linux x86_64); the sidecar
+    /// stays opt-in to *run* (lazily started on the first
+    /// `/api/images/generate`). The heaviest bundled default, so its failure is
     /// non-fatal and never blocks anything.
     pub sdcpp_installed: bool,
+    /// Which image default this node chose from its RAM and free disk:
+    /// `"standard"` (Qwen Image 2.1 with its Qwen3-VL encoders and VAE,
+    /// ~11.1 GB), `"lite"` (single-file SDXL base, ~2.8 GB) or `"none"` (no local
+    /// image model fits; image generation needs a cloud provider). A choice
+    /// below `"standard"` also adds a warning that says why, with the numbers.
+    pub image_tier: crate::sidecar::providers::sdcpp::downloader::ImageTier,
     /// Non-fatal warning messages surfaced to the UI (e.g. download failed).
     pub warnings: Vec<String>,
 }
@@ -201,10 +373,20 @@ impl SetupManager {
     /// derivation a Core restart would leave their lazy starts permanently
     /// "not installed".
     pub async fn seed_installed_from_disk(&self, names: &[String]) {
+        self.seed_installed_with_preinstalled(
+            names,
+            eager_preinstalled_sidecars(local_stack_auto_install_skipped()),
+        )
+        .await;
+    }
+
+    /// [`Self::seed_installed_from_disk`] with the eager preinstall set passed in,
+    /// so tests do not depend on the process environment.
+    async fn seed_installed_with_preinstalled(&self, names: &[String], preinstalled: &[&str]) {
         let store = crate::sidecar::download_manager::VersionStore::load();
         let mut status = self.status.write().await;
         for name in names {
-            if PREINSTALLED_SIDECARS.contains(&name.as_str()) {
+            if preinstalled.contains(&name.as_str()) {
                 status.installed_sidecars.insert(name.clone());
                 continue;
             }
@@ -243,13 +425,12 @@ impl SetupManager {
         tracing::info!("Sidecar '{}' uninstalled", name);
     }
 
-    /// Remove a sidecar and its data directory
+    /// Forget a sidecar that was uninstalled with its data. The data itself is
+    /// deleted by the sidecar's own `uninstall(delete_data = true)` — for a
+    /// plugin sidecar that is its `plugin-data/<dir>` folder — so this only
+    /// clears the install status.
     pub async fn uninstall_with_data(&self, name: &str) -> anyhow::Result<()> {
         self.status.write().await.installed_sidecars.remove(name);
-
-        let data_dir = crate::paths::ryu_dir().join("data").join(name);
-        crate::sidecar::remove_dir(&data_dir).await;
-
         tracing::info!("Sidecar '{}' uninstalled with data", name);
         Ok(())
     }
@@ -314,6 +495,9 @@ impl SetupManager {
         // always falls back to bare `pi` on PATH → ENOENT when none is present.
         if agent_id == "ryu" {
             self.ensure_ryu_managed_pi().await;
+            // The managed bridge is installed and checked with its engine.
+            // Only the operator-managed acp:pi path uses the global npx cache.
+            return;
         }
 
         // AC3 idempotency guard 1: process-level cache (fast path).
@@ -391,80 +575,9 @@ impl SetupManager {
     /// `node_modules/.bin/` (see [`acp::managed_pi_binary`]) rather than copying
     /// it, because bun/npm bin shims are not relocatable.
     async fn ensure_ryu_managed_pi(&self) {
-        use crate::sidecar::adapters::acp;
-        let pi_bin = acp::managed_pi_binary();
-        if pi_bin.exists() {
-            tracing::debug!("ensure_ryu_managed_pi: managed Pi already installed; skipping");
-            return;
-        }
-        let pi_dir = acp::managed_pi_dir();
-        if let Err(e) = std::fs::create_dir_all(&pi_dir) {
-            tracing::warn!(error = %e, "ensure_ryu_managed_pi: could not create managed Pi dir");
-            return;
-        }
-
-        tracing::info!(
-            dir = %pi_dir.display(),
-            "ensure_ryu_managed_pi: installing @earendil-works/pi-coding-agent via bun"
-        );
-
-        // On Windows `bun` is `bun.exe`; wrap in `cmd /c` so PATH resolution and
-        // the `.exe` extension are handled by the shell, mirroring the npx warm
-        // above. POSIX invokes `bun` directly.
-        #[cfg(target_os = "windows")]
-        let (prog, args): (&str, Vec<&str>) = (
-            "cmd",
-            vec!["/c", "bun", "add", "@earendil-works/pi-coding-agent"],
-        );
-        #[cfg(not(target_os = "windows"))]
-        let (prog, args): (&str, Vec<&str>) =
-            ("bun", vec!["add", "@earendil-works/pi-coding-agent"]);
-
-        let result = tokio::process::Command::new(prog)
-            .args(&args)
-            .current_dir(&pi_dir)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .no_window()
-            .status()
-            .await;
-
-        // bun produces a `pi.exe` shim, but pi-acp can only spawn a `.cmd`/`.bat`
-        // reliably on Windows (it uses `shell:true` for those; a bare `.exe` is
-        // spawned `shell:false` and fails to launch the bun trampoline in Core's
-        // process context). So synthesize a tiny `.cmd` wrapper next to the bun
-        // shim that forwards to it — this is the path `managed_pi_binary` resolves.
-        #[cfg(target_os = "windows")]
-        if matches!(&result, Ok(s) if s.success()) {
-            let bin_dir = pi_dir.join("node_modules").join(".bin");
-            if bin_dir.join("pi.exe").exists() {
-                // `%~dp0` is the wrapper's own directory, so it resolves the
-                // sibling bun shim no matter where pi-acp invokes the wrapper.
-                if let Err(e) = std::fs::write(bin_dir.join("pi.cmd"), "@\"%~dp0pi.exe\" %*\r\n") {
-                    tracing::warn!(error = %e, "ensure_ryu_managed_pi: could not write pi.cmd wrapper");
-                }
-            }
-        }
-
-        match result {
-            Ok(status) if status.success() && pi_bin.exists() => {
-                tracing::info!("ensure_ryu_managed_pi: managed Pi engine installed");
-            }
-            Ok(status) => {
-                tracing::warn!(
-                    exit_code = ?status.code(),
-                    shim_present = pi_bin.exists(),
-                    "ensure_ryu_managed_pi: bun add did not produce the Pi shim; \
-                     Ryu will fall back to the user's pi until installed"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "ensure_ryu_managed_pi: bun add failed (bun not on PATH?); \
-                     Ryu will fall back to the user's pi"
-                );
-            }
+        match crate::sidecar::adapters::acp::ensure_managed_pi().await {
+            Ok(()) => self.mark_installed("pi-acp").await,
+            Err(error) => tracing::warn!(%error, "could not prepare managed Pi engine"),
         }
     }
 
@@ -495,6 +608,9 @@ impl SetupManager {
     ) -> LocalStackStatus {
         let registry = ModelRegistry::from_env();
         let mut warnings = Vec::<String>::new();
+        // Probed fresh (not the per-process cache): free disk changes, and every
+        // default below is checked against the disk it is about to fill.
+        let device = crate::model_catalog::device::DeviceInfo::detect();
 
         // Step 1 — llama-server binary.
         let llamacpp_installed = match LlamaCppDownloader::new().ensure_installed(downloads).await {
@@ -540,12 +656,43 @@ impl SetupManager {
         //
         // `tokio::join!` polls in argument order, and the gate hands out permits
         // first-come-first-served, so the chat model — the one thing that unblocks
-        // actually using the app — still claims the first slot.
+        // actually using the app — still claims the first slot. The image step
+        // (step 8) is the exception: it is awaited after the rest, so it can size
+        // its tier against the disk they leave.
+        let chat_block = if registry.local_chat_model.weight_path().exists() {
+            None
+        } else {
+            crate::model_catalog::device::install_block_reason(
+                crate::registry::local_chat_default_bytes(&registry.local_chat_model.id),
+                &device,
+            )
+        };
         let chat_step = async {
             let mut warnings = Vec::<String>::new();
             // Step 2 — GGUF weight file. Only attempted if binary installed.
             // If the binary failed, downloading the model is pointless — skip and warn.
-            let gguf_installed = if llamacpp_installed {
+            //
+            // The built-in default is hardware-tiered by the registry (Gemma 4 E2B,
+            // or Gemma 3 1B when RAM is known too small for it); say so when the
+            // node got the fallback. A built-in default that still cannot fit this
+            // node's memory or free disk is never downloaded — loading it would
+            // freeze the machine. An operator-chosen id has no known size and is
+            // never blocked.
+            if registry.local_chat_model.id == crate::registry::FALLBACK_LOCAL_CHAT_MODEL_ID {
+                if let Some(reason) = crate::registry::local_chat_fallback_reason(
+                    crate::sidecar::providers::llamacpp::variant::device(),
+                ) {
+                    warnings.push(reason);
+                }
+            }
+            let gguf_installed = if let Some(reason) = chat_block.clone() {
+                warnings.push(format!(
+                    "Local chat model {} was not installed: {reason} Chat will use a cloud \
+                     provider instead.",
+                    registry.local_chat_model.id
+                ));
+                false
+            } else if llamacpp_installed {
                 let model_id = registry.local_chat_model.id.clone();
                 match downloads
                     .resume_and_download_blocking(crate::model_catalog::gguf_download_spec(
@@ -1036,7 +1183,7 @@ impl SetupManager {
             //
             // That ordering is the fix for a real waste: the weights used to download
             // unconditionally while `ensure_kokoro_runtime` bailed on literally every
-            // install (nothing ever created `~/.ryu/tts-sidecar` — see the WHY on that
+            // install (nothing ever created the TTS runtime dir — see the WHY on that
             // function). Every user paid for a model that was never once served. A node
             // with no usable Python still pays nothing now, and still speaks: the
             // built-in OuteTTS engine from Step 6 is the runtime fallback, and
@@ -1098,27 +1245,56 @@ impl SetupManager {
         };
 
         let sdcpp_step = async {
+            use crate::sidecar::providers::sdcpp::downloader::{
+                image_tier_warning, select_image_tier, ImageTier, ImageTierInputs,
+            };
             let mut warnings = Vec::<String>::new();
             // Step 8 — stable-diffusion.cpp image engine (server binary + default model).
             //
             // Bundled-by-default so text-to-image works zero-setup, mirroring the STT/
-            // TTS engines. `ensure_installed` fetches the prebuilt sd-server binary for
-            // the platform (Windows x64 / macOS arm64 / Linux x86_64) plus the default
-            // SDXL base model — a stable-diffusion.cpp-compatible Q4_K GGUF with
-            // optional CLIP-L / CLIP-G text encoders and VAE (~4.6 GB total). The video default (Wan2.1) is not part
-            // of onboarding; it is downloaded lazily on first use. Non-fatal and
-            // independent of everything else — on a platform with no prebuilt server
-            // (Intel mac, arm Linux) it warns and never blocks. The engine stays opt-in
-            // to *run* (not in `startup_order`); the `/api/images/generate` route
-            // lazily starts it.
-            let sdcpp_installed =
+            // TTS engines. The image default is tiered by this node's RAM and free
+            // disk (`select_image_tier`): Standard is Qwen Image 2.1 — a
+            // stable-diffusion.cpp-compatible Q4_K GGUF with its Qwen3-VL
+            // text/vision encoders and matching VAE (~11.1 GB, ~13.9 GiB of RAM on
+            // the CPU build); Lite is the single-file SDXL base checkpoint (~2.8 GB,
+            // ~4.6 GiB of RAM); None downloads nothing, not even the binary, and
+            // image generation needs a cloud provider. Only the chosen tier's files
+            // are fetched, with the prebuilt sd-server binary for the platform
+            // (Windows x64 / macOS arm64 / Linux x86_64). The video default (Wan2.1)
+            // is not part of onboarding; it is downloaded lazily on first use.
+            // Non-fatal and independent of everything else — on a platform with no
+            // prebuilt server (Intel mac, arm Linux) it warns and never blocks. The
+            // engine stays opt-in to *run* (not in `startup_order`); the
+            // `/api/images/generate` route lazily starts it.
+            //
+            // This step is awaited after every other default has finished (see the
+            // join below), and probes the disk then. Choosing the tier up front would
+            // size it against free space the concurrent chat, speech and voice
+            // downloads are still filling, so Standard could be admitted and then
+            // refused mid-stack, stranding its first files on disk.
+            let image_device = crate::model_catalog::device::DeviceInfo::detect();
+            let choice = select_image_tier(&image_device, &ImageTierInputs::from_disk());
+            // An existing `RYU_SD_MODEL` is the operator's own model: it only needs
+            // the binary, and no bundled-default warning applies to it.
+            let sd_override =
+                crate::sidecar::providers::sdcpp::downloader::sd_model_override_present();
+            let tier_warning = image_tier_warning(&choice).filter(|_| !sd_override);
+            let sdcpp_installed = if choice.tier == ImageTier::None && !sd_override {
+                tracing::warn!("onboarding: no local image model fits this node");
+                warnings.extend(tier_warning);
+                false
+            } else {
                 match crate::sidecar::providers::sdcpp::StableDiffusionDownloader::new()
-                    .ensure_installed(downloads)
+                    .ensure_installed_for_tier(downloads, choice.tier)
                     .await
                 {
                     Ok(_version) => {
                         self.mark_installed("sdcpp").await;
-                        tracing::info!("onboarding: stable-diffusion.cpp image engine installed");
+                        tracing::info!(
+                            "onboarding: stable-diffusion.cpp image engine installed ({} tier)",
+                            choice.tier.as_str()
+                        );
+                        warnings.extend(tier_warning);
                         true
                     }
                     Err(e) => {
@@ -1127,8 +1303,9 @@ impl SetupManager {
                         warnings.push(msg);
                         false
                     }
-                };
-            (sdcpp_installed, warnings)
+                }
+            };
+            (sdcpp_installed, choice.tier, warnings)
         };
 
         let (
@@ -1142,7 +1319,6 @@ impl SetupManager {
             (vad_installed, w_vad),
             (outetts_installed, w_outetts),
             (kokoro_installed, w_kokoro),
-            (sdcpp_installed, w_sdcpp),
         ) = tokio::join!(
             chat_step,
             embed_step,
@@ -1154,8 +1330,10 @@ impl SetupManager {
             vad_step,
             outetts_step,
             kokoro_step,
-            sdcpp_step,
         );
+        // The image stack is the largest default, so it runs once the others have
+        // landed and sizes its tier against the disk that is actually left.
+        let (sdcpp_installed, image_tier, w_sdcpp) = sdcpp_step.await;
         // Merged in step order, so the warning list a user reads stays stable even
         // though the steps themselves no longer finish in that order.
         for w in [
@@ -1187,6 +1365,7 @@ impl SetupManager {
             outetts_installed,
             kokoro_installed,
             sdcpp_installed,
+            image_tier,
             warnings,
         };
 
@@ -1210,6 +1389,7 @@ impl SetupManager {
 #[cfg(test)]
 mod onboarding_tests {
     use super::*;
+    use crate::sidecar::providers::sdcpp::downloader::ImageTier;
 
     // ── LocalStackStatus::is_ready ──────────────────────────────────────────
 
@@ -1227,6 +1407,7 @@ mod onboarding_tests {
             outetts_installed: false,
             kokoro_installed: false,
             sdcpp_installed: false,
+            image_tier: ImageTier::Standard,
             warnings: Vec::new(),
         }
     }
@@ -1276,7 +1457,9 @@ mod onboarding_tests {
         s.llamacpp_installed = true;
         s.warnings.push("gguf failed".into());
         let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains(r#""image_tier":"standard""#), "{json}");
         let back: LocalStackStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.image_tier, ImageTier::Standard);
         assert!(back.llamacpp_installed);
         assert!(!back.gguf_installed);
         assert_eq!(back.warnings, vec!["gguf failed".to_string()]);
@@ -1325,6 +1508,11 @@ mod onboarding_tests {
         // failure this test exists to catch.
         assert!(LLAMACPP_DERIVED_SIDECARS
             .contains(&crate::sidecar::providers::llamacpp::classify::CLASSIFY_SIDECAR_NAME));
+        assert!(
+            LLAMACPP_DERIVED_SIDECARS.contains(&crate::sidecar::Sidecar::name(
+                &crate::sidecar::providers::llamacpp::guard::LlamaCppGuardManager::new()
+            ))
+        );
         assert!(
             LLAMACPP_DERIVED_SIDECARS.contains(&crate::sidecar::Sidecar::name(
                 &crate::sidecar::providers::llamacpp::classify::LlamaCppClassifyManager::new()
@@ -1404,6 +1592,14 @@ mod onboarding_tests {
             !seeds_from_version_store("tailcat"),
             "a tailcat binary must never enable the point-to-point listener by itself"
         );
+        assert!(
+            !seeds_from_version_store("cloudflared"),
+            "a Cloudflared binary must never expose a public tunnel by itself"
+        );
+        assert!(
+            !seeds_from_version_store("opentunnel"),
+            "an OpenTunnel binary must never expose a public tunnel by itself"
+        );
         // Everything else still seeds, or a restart loses its installed engines.
         for name in ["llamacpp", "whispercpp", "ollama", "ryutts", "parakeet"] {
             assert!(seeds_from_version_store(name), "{name} must seed from disk");
@@ -1415,10 +1611,15 @@ mod onboarding_tests {
     #[tokio::test]
     async fn seed_installed_from_disk_never_marks_network_backends() {
         let mgr = SetupManager::new();
-        mgr.seed_installed_from_disk(&["tailscale".to_string(), "tailcat".to_string()])
-            .await;
+        mgr.seed_installed_from_disk(&[
+            "tailscale".to_string(),
+            "tailcat".to_string(),
+            "cloudflared".to_string(),
+        ])
+        .await;
         assert!(!mgr.is_installed("tailscale").await);
         assert!(!mgr.is_installed("tailcat").await);
+        assert!(!mgr.is_installed("cloudflared").await);
     }
 
     #[test]
@@ -1436,8 +1637,11 @@ mod onboarding_tests {
             return;
         }
         let mgr = SetupManager::new();
-        mgr.seed_installed_from_disk(&["shadow".to_string(), "ghost".to_string()])
-            .await;
+        mgr.seed_installed_with_preinstalled(
+            &["shadow".to_string(), "ghost".to_string()],
+            eager_preinstalled_sidecars(false),
+        )
+        .await;
         assert!(mgr.is_installed("shadow").await);
         assert!(mgr.is_installed("ghost").await);
     }

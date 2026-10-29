@@ -1,0 +1,35 @@
+.split {
+	gap: var(--hero-workflow-loop-gap);
+}
+.logoCircle {
+	width: var(--hero-workflow-loop-width);
+	height: var(--hero-workflow-loop-height);
+	border-radius: var(--hero-workflow-loop-border-radius);
+}
+.islandBand {
+	height: var(--hero-workflow-loop-height);
+}
+.scaledIsland {
+	transform: var(--hero-workflow-loop-transform);
+	transform-origin: var(--hero-workflow-loop-transform-origin);
+}
+.frameHeight {
+	height: var(--hero-workflow-loop-height);
+}
+.stage {
+	width: var(--hero-workflow-loop-width);
+	height: var(--hero-workflow-loop-height);
+	transform: var(--hero-workflow-loop-transform);
+}
+.pointer {
+	filter: drop-shadow(
+		0 2px 7px color-mix(in srgb, var(--color-logo-mask-clear) 70%, transparent)
+	);
+}
+.trail {
+	background: var(--warning);
+	box-shadow: 0 0 12px 2px color-mix(in srgb, var(--warning) 55%, transparent);
+}
+.frame {
+	transition-property: box-shadow, --tw-ring-color;
+}

@@ -4,6 +4,7 @@ import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import { useLocalizedText } from "@ryu/i18n/react";
 import { useDirection } from "@ryu/ui/components/direction.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import { usePortalContainer } from "./portal-container.tsx";
 
 function TooltipProvider({
 	delay = 0,
@@ -42,18 +43,19 @@ function TooltipContent({
 	const direction = useDirection();
 	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
-		<TooltipPrimitive.Portal>
+		<TooltipPrimitive.Portal container={usePortalContainer()}>
 			<TooltipPrimitive.Positioner
 				align={align}
 				alignOffset={alignOffset}
-				className="isolate z-50"
+				className="pointer-events-none isolate z-50"
 				side={side}
 				sideOffset={sideOffset}
 			>
 				<TooltipPrimitive.Popup
 					className={cn(
-						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-xl border border-border/50 bg-muted/80 px-3 py-1.5 text-foreground text-xs backdrop-blur-2xl backdrop-saturate-150 duration-150 ease-(--dropdown-ease) before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] has-data-[slot=kbd]:pe-1.5 data-[state=delayed-open]:animate-in data-closed:animate-out data-open:animate-in data-closed:duration-(--dropdown-close-dur) **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-lg",
-						className
+						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 corner-squircle before:corner-squircle **:data-[slot=kbd]:corner-squircle relative z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-xl border border-border/50 bg-muted/80 px-3 py-1.5 text-foreground text-xs backdrop-blur-2xl backdrop-saturate-150 duration-150 ease-(--dropdown-ease) before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] has-data-[slot=kbd]:pe-1.5 data-[state=delayed-open]:animate-in data-closed:animate-out data-open:animate-in data-closed:duration-(--dropdown-close-dur) **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-lg",
+						className,
+						"pointer-events-none"
 					)}
 					data-slot="tooltip-content"
 					{...props}

@@ -14,14 +14,15 @@
 // every keystroke, so every injected prop rides a ref the memoized slot reads — the
 // same pattern as ChatPage's `councilInputBar`.
 
-import { createComposerDirectory } from "@ryu/blocks/composer/composer-directory";
-import { handleComposerSettingsShortcut } from "@ryu/blocks/composer/composer-shortcuts";
+import { createComposerDirectory } from "@ryu/blocks/composer/composer-directory.ts";
+import { handleComposerSettingsShortcut } from "@ryu/blocks/composer/composer-shortcuts.ts";
 import type {
 	ComposerMenuGroup,
 	ComposerMenuItem,
-} from "@ryu/blocks/desktop/agent-elements/input/composer-menu";
-import type { ChatVoiceMode } from "@ryu/blocks/desktop/agent-elements/types";
+} from "@ryu/blocks/desktop/agent-elements/input/composer-menu.tsx";
+import type { ChatVoiceMode } from "@ryu/blocks/desktop/agent-elements/types.ts";
 import { toast } from "@ryu/ui/components/sileo.tsx";
+import type { RvpCallEnded } from "@ryuhq/protocol/voice";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useComposerAgentControls } from "@/components/agent-elements/input/composer-agent-controls.tsx";
@@ -41,7 +42,7 @@ import type {
 	MentionItem,
 	ModelOption,
 } from "@/components/agent-elements/types.ts";
-import { VoiceModeSurface } from "@/src/components/voice/VoiceModeSurface.tsx";
+import { useVoiceLiveCall } from "@/src/components/voice/VoiceCallComposer.tsx";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import {
 	composerSelectionToastDescription,
@@ -58,9 +59,12 @@ import {
 	VOICE_PREF_KEY,
 } from "@/src/lib/api/preferences.ts";
 import type { Team } from "@/src/lib/api/teams.ts";
-import { stageImageUpload } from "@/src/lib/api/uploads.ts";
 import { transcribeAudio } from "@/src/lib/api/voice.ts";
 import type { SimpleApprovalDefaults } from "@/src/lib/chat-routing.ts";
+import {
+	IMAGE_AND_TEXT_ACCEPT,
+	stageImageAndTextFiles,
+} from "@/src/lib/composer/attachments.ts";
 import type { BrowserSurface } from "@/src/lib/extension-host.ts";
 import { recordRecent } from "@/src/lib/picker-favorites.ts";
 
@@ -181,6 +185,7 @@ export interface ComposerSlotOptions {
 	 * full settings menu remains available from the floating header.
 	 */
 	minimal?: boolean;
+	onCallEnded?: (summary: RvpCallEnded) => void;
 	/**
 	 * Offer "Create new agent" in the agent picker. The surface routes it (a tab, a
 	 * dialog), so it's a callback rather than a slot-owned navigation.
@@ -209,6 +214,12 @@ export interface ComposerSlotOptions {
 	teamId?: string | null;
 	/** Live groups for the picker's Groups section. */
 	teams?: Team[];
+	/**
+	 * Offer the realtime voice-mode button (default true). Surfaces whose turns
+	 * must go through their own request contract (app-defined assistant
+	 * surfaces) turn it off; push-to-talk dictation into the composer stays.
+	 */
+	voiceMode?: boolean;
 }
 
 /**
@@ -238,6 +249,7 @@ export function useComposerSlot(
 		teamId,
 		teams,
 		pluginControls,
+		voiceMode: voiceModeEnabled = true,
 	} = options;
 	const { agents } = useAgents();
 	const interfaceLevel = useInterfaceLevel();
@@ -363,24 +375,23 @@ export function useComposerSlot(
 		[sections]
 	);
 
-	// Staged image attachments (the composer "+"). Data URL for the model turn;
-	// also persisted into the Uploads system space (best-effort), matching ChatPage.
+	// Staged attachments (the composer "+"): images as data URLs (also persisted
+	// into the Uploads system space, best-effort) and readable text files as
+	// `text/plain` parts, matching ChatPage.
 	const [images, setImages] = useState<AttachedImage[]>([]);
 	const addImages = useCallback(
 		(files: File[]) => {
-			const imageFiles = files.filter((f) => f.type.startsWith("image/"));
-			for (const file of imageFiles) {
-				void stageImageUpload(target, file).then(({ dataUrl, upload }) => {
-					setImages((prev) => [
-						...prev,
-						{
-							id: upload?.id ?? `img-${Date.now()}-${Math.random()}`,
-							filename: file.name,
-							url: dataUrl,
-							mimeType: file.type,
-							size: file.size,
-						},
-					]);
+			const unsupported = stageImageAndTextFiles(
+				target,
+				files,
+				(item) => setImages((prev) => [...prev, item]),
+				(message) =>
+					toast.error({ title: "Could not attach file", description: message })
+			);
+			if (unsupported.length > 0) {
+				toast.error({
+					title: "Can't attach these files yet",
+					description: `${unsupported.join(", ")} — images and text files are supported.`,
 				});
 			}
 		},
@@ -389,7 +400,7 @@ export function useComposerSlot(
 	const onAttach = useCallback(() => {
 		const input = document.createElement("input");
 		input.type = "file";
-		input.accept = "image/*";
+		input.accept = IMAGE_AND_TEXT_ACCEPT;
 		input.multiple = true;
 		input.onchange = () => {
 			if (input.files) {
@@ -504,6 +515,7 @@ export function useComposerSlot(
 		agentName: agents.find((agent) => agent.id === runtime.agentId)?.name,
 		conversationId,
 		sttEngine: voiceInputEngine,
+		onCallEnded: options.onCallEnded,
 	});
 	const composerShortcuts = useComposerShortcutBindings();
 
@@ -514,7 +526,7 @@ export function useComposerSlot(
 		left: ReactNode;
 		minimal: boolean;
 		onGenerateImage?: (prompt: string) => void | Promise<void>;
-		onStartVoiceMode: () => void;
+		onStartVoiceMode: (() => void) | undefined;
 		infoBar: InputBarInfoBar | undefined;
 		placeholder?: string;
 		pluginControls?: PluginComposerControlRow[];
@@ -530,7 +542,7 @@ export function useComposerSlot(
 		left: leftActions,
 		minimal,
 		onGenerateImage,
-		onStartVoiceMode: voiceModeState.start,
+		onStartVoiceMode: voiceModeEnabled ? voiceModeState.start : undefined,
 		placeholder,
 		pluginControls,
 		right: rightActions,
@@ -544,7 +556,7 @@ export function useComposerSlot(
 		left: leftActions,
 		minimal,
 		onGenerateImage,
-		onStartVoiceMode: voiceModeState.start,
+		onStartVoiceMode: voiceModeEnabled ? voiceModeState.start : undefined,
 		placeholder,
 		pluginControls,
 		right: rightActions,
@@ -581,7 +593,9 @@ export function useComposerSlot(
 						rightActions={live.minimal ? null : live.right}
 						voice={{ transcribe }}
 						voiceMode={
-							live.minimal ? undefined : { onStart: live.onStartVoiceMode }
+							live.minimal || !live.onStartVoiceMode
+								? undefined
+								: { onStart: live.onStartVoiceMode }
 						}
 					/>
 				);
@@ -589,14 +603,7 @@ export function useComposerSlot(
 		[transcribe]
 	);
 
-	const voiceMode: ChatVoiceMode = voiceModeState.active
-		? {
-				active: true,
-				render: (composer) => (
-					<VoiceModeSurface composer={composer} voice={voiceModeState} />
-				),
-			}
-		: { active: false };
+	const voiceMode: ChatVoiceMode = useVoiceLiveCall(voiceModeState);
 
 	return {
 		attachClip,

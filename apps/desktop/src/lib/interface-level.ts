@@ -21,14 +21,12 @@
 //     survives the upgrade. The Ryu Work vocabulary is the one intentional
 //     exception: it remains forced on whenever Ryu Work is already selected.
 //
-// What the level itself gates live (no write involved) is two surfaces:
-//
-//   - The composer: at Ryu Work the chat bar offers the agent picker and nothing
-//     else — no model, no approval mode, no thinking budget, no profile picker.
-//     See `composer-agent-controls.tsx`.
-//   - The node dropdown: at Ryu Work the Engines, Voice & Sandbox and Toolkits
-//     blocks start folded behind their own headings rather than listing flat.
-//     See `NodeSelector.tsx`.
+// What the level itself gates live (no write involved) is the composer: at Ryu
+// Work the chat bar offers the agent picker and nothing else — no model, no
+// approval mode, no thinking budget, no profile picker. See
+// `composer-agent-controls.tsx`. (The node dropdown no longer needs a gate: its
+// Engines, Voice & Sandbox and Toolkits blocks moved to the expanded computer
+// dialog at every level. See `NodeSelector.tsx`.)
 
 import { setBotTerminology } from "@ryu/ui/hooks/use-bot-terminology.ts";
 import { setPersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
@@ -70,15 +68,15 @@ export type InterfaceLevel = (typeof INTERFACE_LEVELS)[number]["id"];
 export const DEFAULT_INTERFACE_LEVEL: InterfaceLevel = "simple";
 
 /** The transcript density each level implies, applied when the level moves. */
-const LEVEL_TOOL_DETAIL: Record<
-	InterfaceLevel,
-	{ hidden: boolean; preset: keyof typeof TOOL_DETAIL_PRESETS }
-> = {
+const LEVEL_TOOL_DETAIL = {
 	// `preset` is still carried at Ryu Work even though nothing is shown: switching
 	// back up must land somewhere sane rather than on whatever was last stored.
 	simple: { hidden: true, preset: "compact" },
 	expert: { hidden: false, preset: "detailed" },
-};
+} satisfies Record<
+	InterfaceLevel,
+	{ hidden: boolean; preset: keyof typeof TOOL_DETAIL_PRESETS }
+>;
 
 function normalizeStoredLevel(value: string | null): InterfaceLevel | null {
 	if (value === "simple" || value === "expert") {
@@ -262,22 +260,6 @@ export function showsModelPicker(level: InterfaceLevel): boolean {
  */
 export function showsComposerTuning(level: InterfaceLevel): boolean {
 	return level === "expert";
-}
-
-/**
- * Does this level fold the node dropdown's technical blocks — Engines, Voice &
- * Sandbox, Toolkits — behind a disclosure?
- *
- * Ryu Work folds them; Code lists them flat, exactly as before. Same
- * trade as the composer gates above, one notch softer: collapsing is not even
- * hiding. The heading stays on screen, the block is one click away, and every
- * row inside it still works — so someone who manages engines from this menu
- * raises the level once and never meets the disclosure again, and someone who
- * does not gets a node menu about the node (who it is, what it costs, what is
- * connected) instead of three blocks of runtime plumbing.
- */
-export function collapsesNodeSections(level: InterfaceLevel): boolean {
-	return level === "simple";
 }
 
 seedInterfaceLevel();

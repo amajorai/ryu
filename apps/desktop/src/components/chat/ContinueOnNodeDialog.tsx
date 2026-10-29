@@ -17,23 +17,59 @@ import {
 	createRnpContextBundle,
 	normalizeRnpNodeUrl,
 	parseRnpContinuityBundle,
+	RNP_WORKSPACE_LIMITS,
 	type RnpContinuityBundleV0,
 	type RnpResumeResultV0,
+	type RnpWorkspaceDestinationV0,
+	type RnpWorkspaceInspectionV0,
+	type RnpWorkspaceManifestV0,
+	type RnpWorkspaceResumeResultV0,
 } from "@ryuhq/protocol/continuity";
 import { buildRyuDeepLink } from "@ryuhq/protocol/deep-link";
 import { useEffect, useMemo, useState } from "react";
+import {
+	ContinueOnNodeWorkspace,
+	defaultUntrackedSelection,
+	selectedUntrackedBytes,
+} from "@/src/components/chat/ContinueOnNodeWorkspace.tsx";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	exportRnpConversation,
 	resumeRnpConversation,
 } from "@/src/lib/api/continuity.ts";
+import {
+	continueRnpWorkspace,
+	exportRnpWorkspace,
+	inspectRnpWorkspace,
+	markRnpContinued,
+	probeRnpCapabilities,
+	type WorkspaceRelayProgress,
+	workspaceErrorMessage,
+} from "@/src/lib/api/continuity-workspace.ts";
 import type { Node } from "@/src/store/useNodeStore.ts";
+
+/**
+ * v1 resumes into a new clone only. A worktree added to an existing, trusted
+ * checkout would inherit that checkout's workspace trust, so the destination
+ * refuses existing-checkout mode until handed-off worktrees are excluded.
+ */
+const NEW_CLONE_DESTINATION: RnpWorkspaceDestinationV0 = { mode: "new-clone" };
+
+/** The working-tree half of a frozen handoff: resent unchanged on retry. */
+interface AttemptedWorkspace {
+	destination: RnpWorkspaceDestinationV0;
+	manifest: RnpWorkspaceManifestV0;
+}
 
 export interface ContinueOnNodeDialogProps {
 	conversationId: string;
 	conversationTitle: string;
 	nodes: readonly Node[];
-	onCompleted: (node: Node, result: RnpResumeResultV0) => Promise<void> | void;
+	onCompleted: (
+		node: Node,
+		result: RnpResumeResultV0,
+		workspace?: RnpWorkspaceResumeResultV0
+	) => Promise<void> | void;
 	onOpenChange: (open: boolean) => void;
 	open: boolean;
 	resolveNodes?: () => readonly Node[];
@@ -41,7 +77,7 @@ export interface ContinueOnNodeDialogProps {
 	sourceUpdatedAt?: number;
 }
 
-function errorMessage(error: unknown): string {
+function errorMessage<TError>(error: TError): string {
 	return error instanceof Error
 		? error.message
 		: "The handoff could not finish.";
@@ -84,8 +120,8 @@ function buildResumeBundle(
 				updatedAt: preview.source.updatedAt,
 				...(preview.source.checkpointMessageId
 					? { checkpointMessageId: preview.source.checkpointMessageId }
-					: {}),
-				...(preview.source.title ? { title: preview.source.title } : {}),
+					: undefined),
+				...(preview.source.title ? { title: preview.source.title } : undefined),
 			};
 	const parsed = parseRnpContinuityBundle({ ...preview, source, context });
 	if (!parsed.ok) {
@@ -119,6 +155,18 @@ export function ContinueOnNodeDialog({
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [copied, setCopied] = useState(false);
+	const [inspection, setInspection] = useState<RnpWorkspaceInspectionV0 | null>(
+		null
+	);
+	const [workspaceSupported, setWorkspaceSupported] = useState(false);
+	const [workspaceEnabled, setWorkspaceEnabled] = useState(true);
+	const [selectedUntracked, setSelectedUntracked] = useState<Set<string>>(
+		() => new Set()
+	);
+	const [attemptedWorkspace, setAttemptedWorkspace] =
+		useState<AttemptedWorkspace | null>(null);
+	const [relayProgress, setRelayProgress] =
+		useState<WorkspaceRelayProgress | null>(null);
 
 	useEffect(() => {
 		if (!open) {
@@ -143,6 +191,11 @@ export function ContinueOnNodeDialog({
 		setError(null);
 		setCopied(false);
 		setPreviewPending(true);
+		setInspection(null);
+		setWorkspaceEnabled(true);
+		setSelectedUntracked(new Set());
+		setAttemptedWorkspace(null);
+		setRelayProgress(null);
 
 		const availableNodes = resolveNodes?.() ?? nodes;
 		const currentSource = currentNode(sourceNode, availableNodes);
@@ -151,6 +204,16 @@ export function ContinueOnNodeDialog({
 			setPreviewPending(false);
 			return;
 		}
+		// The working tree is optional: an older source, a thread without a git
+		// folder or a running turn simply hides the section.
+		inspectRnpWorkspace(toTarget(currentSource), conversationId)
+			.then((inspected) => {
+				if (!cancelled) {
+					setInspection(inspected);
+					setSelectedUntracked(defaultUntrackedSelection(inspected));
+				}
+			})
+			.catch(() => undefined);
 		void exportRnpConversation(toTarget(currentSource), conversationId, {
 			version: 0,
 			ifUpdatedAt: sourceUpdatedAt,
@@ -162,7 +225,7 @@ export function ContinueOnNodeDialog({
 					setPreview(bundle);
 				}
 			})
-			.catch((cause: unknown) => {
+			.catch((cause) => {
 				if (!cancelled) {
 					setError(errorMessage(cause));
 				}
@@ -178,7 +241,74 @@ export function ContinueOnNodeDialog({
 		};
 	}, [conversationId, nodes, open, resolveNodes, sourceNode, sourceUpdatedAt]);
 
+	useEffect(() => {
+		const destination = destinations.find((node) => node.name === selectedName);
+		if (!(open && destination)) {
+			setWorkspaceSupported(false);
+			return;
+		}
+		let cancelled = false;
+		setWorkspaceSupported(false);
+		probeRnpCapabilities(toTarget(destination))
+			.then((supported) => {
+				if (!cancelled) {
+					setWorkspaceSupported(supported);
+				}
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, [destinations, open, selectedName]);
+
 	const locked = pending || attemptedBundle !== null;
+	const workspaceAvailable = Boolean(inspection && workspaceSupported);
+	const workspaceBlocked =
+		workspaceAvailable &&
+		workspaceEnabled &&
+		attemptedWorkspace === null &&
+		inspection !== null &&
+		(selectedUntracked.size > RNP_WORKSPACE_LIMITS.untrackedCount ||
+			selectedUntrackedBytes(inspection, selectedUntracked) >
+				RNP_WORKSPACE_LIMITS.untrackedTotalBytes);
+	const toggleUntracked = (path: string) => {
+		setSelectedUntracked((current) => {
+			const next = new Set(current);
+			if (next.has(path)) {
+				next.delete(path);
+			} else {
+				next.add(path);
+			}
+			return next;
+		});
+	};
+
+	/** Export once, then reuse the same manifest and folder choice on retry. */
+	const workspaceForAttempt = async (
+		source: Node
+	): Promise<AttemptedWorkspace | null> => {
+		if (attemptedWorkspace) {
+			return attemptedWorkspace;
+		}
+		if (!(workspaceAvailable && workspaceEnabled && inspection)) {
+			return null;
+		}
+		const manifest = await exportRnpWorkspace(
+			toTarget(source),
+			conversationId,
+			{
+				version: 0,
+				ifHead: inspection.repo.baseCommit,
+				includeUntracked: [...selectedUntracked].sort(),
+				...(sourceUpdatedAt === undefined
+					? undefined
+					: { ifUpdatedAt: sourceUpdatedAt }),
+			}
+		);
+		const attempt = { manifest, destination: NEW_CLONE_DESTINATION };
+		setAttemptedWorkspace(attempt);
+		return attempt;
+	};
 	const handleContinue = async () => {
 		if (!preview) {
 			return;
@@ -201,11 +331,37 @@ export function ContinueOnNodeDialog({
 			if (!attemptedBundle) {
 				setAttemptedBundle(bundle);
 			}
+			const workspace = await workspaceForAttempt(currentSource);
+			// Transcript first (idempotent), then the working tree, then the
+			// source marking, which only runs once the destination rebuilt the tree.
 			const result = await resumeRnpConversation(toTarget(destination), bundle);
-			await onCompleted(destination, result);
+			let workspaceResult: RnpWorkspaceResumeResultV0 | undefined;
+			if (workspace) {
+				workspaceResult = await continueRnpWorkspace({
+					conversationId,
+					source: toTarget(currentSource),
+					destination: toTarget(destination),
+					manifest: workspace.manifest,
+					destinationChoice: workspace.destination,
+					nodeLabel: destination.name,
+					bundleId: bundle.bundleId,
+					onProgress: setRelayProgress,
+				});
+			} else {
+				try {
+					await markRnpContinued(toTarget(currentSource), conversationId, {
+						nodeLabel: destination.name,
+						bundleId: bundle.bundleId,
+						at: Date.now(),
+					});
+				} catch {
+					// An older source cannot record the marker; the transcript moved.
+				}
+			}
+			await onCompleted(destination, result, workspaceResult);
 			onOpenChange(false);
 		} catch (cause) {
-			setError(errorMessage(cause));
+			setError(workspaceErrorMessage(cause, errorMessage(cause)));
 		} finally {
 			setPending(false);
 		}
@@ -238,14 +394,14 @@ export function ContinueOnNodeDialog({
 			}}
 			open={open}
 		>
-			<DialogContent className="gap-5 sm:max-w-[36rem]">
+			<DialogContent appearance="continue-on-node">
 				<DialogHeader>
 					<DialogTitle>Continue on another node</DialogTitle>
 					<DialogDescription>
 						Review the exact visible transcript from {sourceNode.name} before
-						copying it. Node credentials, structured authentication data, files,
-						tool state, workspace paths, and the running agent session stay
-						behind.
+						copying it. Node credentials, structured authentication data, tool
+						state, workspace paths, and the running agent session stay behind.
+						Files move only when you bring the reviewed working tree.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -308,6 +464,18 @@ export function ContinueOnNodeDialog({
 						</p>
 					</div>
 
+					{workspaceAvailable && inspection ? (
+						<ContinueOnNodeWorkspace
+							enabled={workspaceEnabled}
+							inspection={inspection}
+							locked={locked}
+							onEnabledChange={setWorkspaceEnabled}
+							onToggleUntracked={toggleUntracked}
+							progress={relayProgress}
+							selectedUntracked={selectedUntracked}
+						/>
+					) : null}
+
 					<div className="grid gap-2">
 						<Label htmlFor="rnp-context-note">Context note (optional)</Label>
 						<Textarea
@@ -348,7 +516,7 @@ export function ContinueOnNodeDialog({
 					) : null}
 				</div>
 
-				<DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+				<DialogFooter className="flex-col-reverse sm:flex-row sm:justify-between">
 					<Button
 						disabled={pending}
 						onClick={() => void handleCopyLink()}
@@ -357,7 +525,7 @@ export function ContinueOnNodeDialog({
 						{copied ? "Handoff link copied" : "Copy handoff link"}
 					</Button>
 					<Button
-						disabled={!(preview && selectedName) || pending}
+						disabled={!(preview && selectedName) || pending || workspaceBlocked}
 						onClick={() => void handleContinue()}
 					>
 						{pending

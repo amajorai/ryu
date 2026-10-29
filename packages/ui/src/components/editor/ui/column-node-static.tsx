@@ -1,12 +1,29 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { CSSProperties as ReactCSSProperties } from "react";
+import "../docx-nodes.css";
 import type { TColumnElement } from "platejs";
 import type { SlateElementProps } from "platejs/static";
 import { SlateElement } from "platejs/static";
 
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editorcolumnNodeStatic1-width"?: string | number;
+	"--editorcolumnNodeStatic2-width"?: string | number;
+}
+
 export function ColumnElementStatic(props: SlateElementProps<TColumnElement>) {
 	const { width } = props.element;
 
+	const editorcolumnNodeStatic1Style: EditorVariableStyle = {
+		"--editorcolumnNodeStatic1-width": isNativeNumber(width ?? "100%")
+			? `${width ?? "100%"}px`
+			: (width ?? "100%"),
+	};
 	return (
-		<div className="group/column relative" style={{ width: width ?? "100%" }}>
+		<div
+			className={"group/column relative"}
+			data-docx-style="editorcolumnNodeStatic1"
+			style={editorcolumnNodeStatic1Style}
+		>
 			<SlateElement
 				className="h-full px-2 pt-2 group-first/column:ps-0 group-last/column:pe-0"
 				{...props}
@@ -33,16 +50,20 @@ export function ColumnGroupElementStatic(props: SlateElementProps) {
 export function ColumnElementDocx(props: SlateElementProps<TColumnElement>) {
 	const { width } = props.element;
 
+	const editorcolumnNodeStatic2Style: EditorVariableStyle = {
+		"--editorcolumnNodeStatic2-width": isNativeNumber(width ?? "auto")
+			? `${width ?? "auto"}px`
+			: (width ?? "auto"),
+	};
 	return (
 		<SlateElement
 			{...props}
 			as="td"
-			style={{
-				width: width ?? "auto",
-				verticalAlign: "top",
-				padding: "4px 8px",
-				border: "none",
+			attributes={{
+				...props.attributes,
+				"data-docx-style": "editorcolumnNodeStatic2",
 			}}
+			style={editorcolumnNodeStatic2Style}
 		>
 			{props.children}
 		</SlateElement>
@@ -55,14 +76,7 @@ export function ColumnElementDocx(props: SlateElementProps<TColumnElement>) {
 export function ColumnGroupElementDocx(props: SlateElementProps) {
 	return (
 		<SlateElement {...props}>
-			<table
-				style={{
-					width: "100%",
-					borderCollapse: "collapse",
-					border: "none",
-					tableLayout: "fixed",
-				}}
-			>
+			<table data-docx-style="editorcolumnNodeStatic3">
 				<tbody>
 					<tr>{props.children}</tr>
 				</tbody>

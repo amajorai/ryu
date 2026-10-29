@@ -12,7 +12,10 @@ export default defineConfig({
 	css: { postcss: { plugins: [tailwindcss()] } },
 	define: { "process.env": {} },
 	plugins: [react()],
-	optimizeDeps: { entries: ["agent-observability-proof.html"] },
+	optimizeDeps: {
+		entries: ["agent-observability-proof.html"],
+		esbuildOptions: { target: "esnext" },
+	},
 	resolve: { alias: { "@": desktopRoot } },
 	root: harnessDir,
 	server: { host: "127.0.0.1", port: 5189, strictPort: true },

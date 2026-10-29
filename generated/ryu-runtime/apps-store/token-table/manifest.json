@@ -10,13 +10,14 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/token-table",
   "name": "Token Table",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "stability": "experimental",
   "category": "Games",
-  "description": "A catalog preview of a planned cosmetic six-max Texas Hold'em table with simulated tokens.",
+  "description": "A cosmetic six-max no-limit Texas Hold'em table played with simulated tokens, run by a local sidecar. It never touches billing, quotas, wallets, or real money.",
   "tagline": "Play a friendly hand with simulated tokens",
   "keywords": ["poker", "texas-holdem", "table", "simulated-tokens"],
   "icon": "wallet-cards",
+  "iconDither": { "from": 156, "to": "transparent", "direction": "down" },
   "surfaces": {
     "gateway": {
       "support": "none"
@@ -91,6 +92,16 @@
             "permission": "token-table.view"
           },
           {
+            "path": "/tables/:table_id/view",
+            "method": "POST",
+            "permission": "token-table.view"
+          },
+          {
+            "path": "/tables/:table_id/upgrade",
+            "method": "POST",
+            "permission": "token-table.play"
+          },
+          {
             "path": "/tables/:table_id/join",
             "method": "POST",
             "permission": "token-table.play"
@@ -141,20 +152,5 @@
   "companion": {
     "label": "Token Table",
     "icon": "wallet-cards"
-  },
-  "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "token-table.chat",
-        "title": "Token Table widget",
-        "description": "Token Table chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["token table widget"],
-        "examples": ["Show me a token table widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ]
   }
 }

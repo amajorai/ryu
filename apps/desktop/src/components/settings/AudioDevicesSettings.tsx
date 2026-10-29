@@ -6,13 +6,14 @@
 
 import { Mic01Icon, VolumeHighIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
+} from "@ryu/ui/components/select.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	type AudioDevice,
@@ -29,6 +30,7 @@ import {
 	openMicrophoneSettings,
 } from "@/src/lib/os/permissions.ts";
 import {
+	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -48,13 +50,21 @@ export function AudioDevicesSettings() {
 	const [permission, setPermission] = useState<
 		"unknown" | "granted" | "denied"
 	>("unknown");
+	const [deviceError, setDeviceError] = useState(false);
 
 	const refresh = useCallback(async () => {
+		setDeviceError(false);
 		const granted = await ensureMicPermission();
 		setPermission(granted ? "granted" : "denied");
-		const { inputs: ins, outputs: outs } = await listAudioDevices();
-		setInputs(ins);
-		setOutputs(outs);
+		try {
+			const { inputs: ins, outputs: outs } = await listAudioDevices();
+			setInputs(ins);
+			setOutputs(outs);
+		} catch {
+			setInputs([]);
+			setOutputs([]);
+			setDeviceError(true);
+		}
 	}, []);
 
 	useEffect(() => {
@@ -102,7 +112,7 @@ export function AudioDevicesSettings() {
 						<Select items={micOptions} onValueChange={handleMic} value={micId}>
 							<SelectTrigger
 								aria-label="Default microphone"
-								className="h-8 w-56 text-sm"
+								className="h-8 w-56"
 							>
 								<SelectValue />
 							</SelectTrigger>
@@ -134,10 +144,7 @@ export function AudioDevicesSettings() {
 							onValueChange={handleSpeaker}
 							value={speakerId}
 						>
-							<SelectTrigger
-								aria-label="Default speaker"
-								className="h-8 w-56 text-sm"
-							>
+							<SelectTrigger aria-label="Default speaker" className="h-8 w-56">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -168,34 +175,58 @@ export function AudioDevicesSettings() {
 			</SettingsGroup>
 
 			{permission === "denied" && (
-				<div className="space-y-2 px-3 pt-2">
-					<p className="text-status-destructive text-xs">
+				<SettingsCard className="flex flex-wrap items-center justify-between gap-3">
+					<p className="min-w-0 flex-1 text-muted-foreground text-sm">
 						Microphone access is blocked, so device names are hidden. Turn it on
 						in your system settings, then retry.
 					</p>
-					<div className="flex items-center gap-2">
+					<div className="flex shrink-0 items-center gap-2">
 						{canOpenMicrophoneSettings() && (
-							<button
-								className="rounded-md px-2 py-1 text-xs hover:bg-muted/50"
+							<Button
 								onClick={() => {
 									openMicrophoneSettings().catch(() => undefined);
 								}}
+								size="sm"
 								type="button"
+								variant="outline"
 							>
 								Open settings
-							</button>
+							</Button>
 						)}
-						<button
-							className="rounded-md px-2 py-1 text-xs hover:bg-muted/50"
+						<Button
 							onClick={() => {
 								refresh().catch(() => undefined);
 							}}
+							size="sm"
 							type="button"
+							variant="ghost"
 						>
 							Retry
-						</button>
+						</Button>
 					</div>
-				</div>
+				</SettingsCard>
+			)}
+			{deviceError && permission !== "denied" && (
+				<SettingsCard className="flex items-center justify-between gap-3">
+					<p
+						aria-live="polite"
+						className="text-muted-foreground text-sm"
+						role="alert"
+					>
+						Couldn't list audio devices. Retry to check again.
+					</p>
+					<Button
+						className="shrink-0"
+						onClick={() => {
+							refresh().catch(() => undefined);
+						}}
+						size="sm"
+						type="button"
+						variant="outline"
+					>
+						Retry
+					</Button>
+				</SettingsCard>
 			)}
 		</SettingsSection>
 	);

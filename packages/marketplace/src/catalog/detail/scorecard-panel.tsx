@@ -19,6 +19,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
@@ -36,10 +37,7 @@ import { AgentAuditPanel } from "./agent-audit-panel.tsx";
 /** Per-status presentation. Kept as one table so the badge, the rows, and the
  *  category headers can never drift into disagreeing about what a status looks
  *  like. */
-const STATUS_STYLE: Record<
-	CheckStatus,
-	{ className: string; icon: IconSvgElement; label: string }
-> = {
+const STATUS_STYLE = {
 	fail: {
 		className: "text-status-destructive",
 		icon: Alert01Icon,
@@ -60,16 +58,19 @@ const STATUS_STYLE: Record<
 		icon: CircleIcon,
 		label: "Worth knowing",
 	},
-};
+} satisfies Record<
+	CheckStatus,
+	{ className: string; icon: IconSvgElement; label: string }
+>;
 
 /** Grade → badge treatment. A/B read as fine, C/D as caution, F as a stop sign. */
-const GRADE_STYLE: Record<ScorecardGrade, string> = {
+const GRADE_STYLE = {
 	A: "border-success/40 text-status-success",
 	B: "border-success/40 text-status-success",
 	C: "border-warning/40 text-status-warning",
 	D: "border-warning/40 text-status-warning",
 	F: "border-destructive/40 text-status-destructive",
-};
+} satisfies Record<ScorecardGrade, string>;
 
 /**
  * The compact grade pill for the detail header.
@@ -85,10 +86,15 @@ export function ScorecardBadge({
 	onClick?: () => void;
 	scorecard: Scorecard;
 }) {
+	const tl = useLiteralMessages();
 	if (scorecard.grade === null || scorecard.score === null) {
 		return null;
 	}
-	const label = `Health ${scorecard.grade} — ${scorecard.score} out of 100. ${scorecard.summary}`;
+	const label = tl("Health {grade} — {score} out of 100. {summary}", {
+		grade: scorecard.grade,
+		score: scorecard.score,
+		summary: scorecard.summary,
+	});
 	const content = (
 		<>
 			<HugeiconsIcon className="size-3.5" icon={ShieldKeyIcon} />
@@ -171,6 +177,7 @@ export function ScorecardPanel({
 	scorecard: Scorecard;
 	title?: string;
 }) {
+	const tl = useLiteralMessages();
 	const unknownCount = scorecard.checks.length - scorecard.evaluated;
 
 	return (
@@ -197,14 +204,20 @@ export function ScorecardPanel({
 						{scorecard.summary}
 					</p>
 					<p className="mt-1 text-muted-foreground text-xs">
-						{scorecard.evaluated} check
-						{scorecard.evaluated === 1 ? "" : "s"} scored
 						{unknownCount > 0
-							? `, ${unknownCount} not answerable from this source (excluded).`
-							: "."}
+							? tl(
+									"{evaluated, plural, one {# check} other {# checks}} scored, {unknownCount} not answerable from this source (excluded).",
+									{ evaluated: scorecard.evaluated, unknownCount }
+								)
+							: tl(
+									"{evaluated, plural, one {# check} other {# checks}} scored.",
+									{
+										evaluated: scorecard.evaluated,
+									}
+								)}
 					</p>
 					<p
-						className="mt-1 text-[11px] text-muted-foreground"
+						className="type-caption mt-1 text-muted-foreground"
 						data-scorecard-ruleset={scorecard.rulesetVersion}
 					>
 						{rulesetLabel} {scorecard.rulesetVersion}
@@ -235,7 +248,7 @@ export function ScorecardPanel({
 								{CATEGORY_LABELS[category.category]}
 							</h3>
 							{category.score === null ? null : (
-								<Badge className="shrink-0 text-xs" variant="secondary">
+								<Badge className="shrink-0" variant="secondary">
 									{category.score}/100
 								</Badge>
 							)}

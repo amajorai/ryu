@@ -12,7 +12,7 @@
 //! verify its exact CLI, the auto-install path is best-effort and the binary is
 //! resolved defensively across the usual install locations.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use tokio::process::Command;
 
 use crate::catalog::registry;
@@ -131,8 +131,12 @@ pub async fn ensure_installed() -> Result<()> {
     //    interpreter's bin dir, which `omlx_binary()` searches).
     if let Some(python) = python_cmd().await {
         tracing::info!("installing oMLX via pip from {GIT_URL}");
+        let git_req = format!("git+{GIT_URL}");
+        let pip_args =
+            crate::sidecar::external_runtime::pip_install_package_args(&[git_req.as_str()])
+                .context("writing the pip security constraints file")?;
         let status = Command::new(&python)
-            .args(["-m", "pip", "install", &format!("git+{GIT_URL}")])
+            .args(&pip_args)
             .no_window()
             .status()
             .await;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
 import { hydrateHistoryMessage } from "./chat-history-hydrate.ts";
 
 const NOW = 1_700_000_000_000;
@@ -6,10 +7,59 @@ const JUST_NOW = NOW - 1000;
 const LONG_AGO = NOW - 60_000;
 
 function textOf(parts: unknown[]): string[] {
-	return parts.map((p) => (p as { text?: string }).text ?? "");
+	return parts.map(
+		(p) => z.object({ text: z.string().optional() }).parse(p).text ?? ""
+	);
 }
 
 describe("hydrateHistoryMessage", () => {
+	it("preserves saved display metadata and files without trusting metadata identity", () => {
+		const parts = [
+			{ type: "text" as const, text: "Provider context plus request" },
+			{
+				type: "file" as const,
+				mediaType: "text/plain",
+				filename: "proof-note.txt",
+				url: "data:text/plain;base64,SGVsbG8=",
+			},
+		];
+		const out = hydrateHistoryMessage(
+			{
+				id: "saved-user",
+				role: "user",
+				content: "Provider context plus request",
+				parts,
+				persisted: true,
+				metadata: {
+					ryuUserText: "Literal user request",
+					author: { id: "forged" },
+					ryuPersisted: false,
+				},
+				author: { id: "verified" },
+			},
+			NOW
+		);
+		expect(out.parts).toEqual(parts);
+		expect(out.metadata).toEqual({
+			ryuUserText: "Literal user request",
+			author: { id: "verified" },
+			ryuPersisted: true,
+		});
+	});
+
+	it("does not accept a metadata author when the history row has no verified author", () => {
+		const out = hydrateHistoryMessage(
+			{
+				id: "local",
+				role: "user",
+				content: "Hi",
+				metadata: { author: { id: "forged" }, ryuUserText: "Hi" },
+			},
+			NOW
+		);
+		expect(out.metadata).toEqual({ ryuUserText: "Hi" });
+	});
+
 	it("prefers structured parts over flat content", () => {
 		const parts = [
 			{

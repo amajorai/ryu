@@ -1,4 +1,6 @@
 "use client";
+import type { CSSProperties } from "react";
+import styles from "./agent-edit.module.css";
 
 // Presentational layer of the desktop one-page agent editor. The live app
 // (`apps/desktop/src/pages/AgentEditPage.tsx` + its `components/agents/*`
@@ -34,11 +36,14 @@ import {
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
+import {
+	type RenderableBackdrop,
+	resolveMarketplaceWallpaperSelection,
+} from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Checkbox } from "@ryu/ui/components/checkbox";
-import type { GradientDirection } from "@ryu/ui/components/dither-kit/gradient";
-import type { DitherColor } from "@ryu/ui/components/dither-kit/palette";
 import { Input } from "@ryu/ui/components/input";
 import {
 	InputGroup,
@@ -74,9 +79,10 @@ import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-	AGENT_BANNER_BASE,
 	AgentBannerDialog,
+	type AgentBannerPreferenceStore,
 	AgentBannerWash,
+	AgentProfileBannerFade,
 	resolveAgentBanner,
 	useAgentBannerPrefs,
 } from "./agent-banner-dialog.tsx";
@@ -86,13 +92,14 @@ import {
 	type AgentIntegrationSnippetLang,
 } from "./agent-integration-snippets.ts";
 import {
+	AGENT_ACCOUNT_ACCESS_SETTING_ID,
+	AGENT_SETTINGS_ENTRIES,
 	AGENT_TAB_LABELS,
 	type AgentSettingsEntry,
 	type AgentSettingsTab,
 	revealAgentSetting,
 	searchAgentSettings,
 } from "./agent-settings-search.ts";
-import { GuidedSetup } from "./guided-setup.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -142,6 +149,9 @@ export interface MemorySpacesCardProps {
 	onMemoryWriteEnabledChange?: (v: boolean) => void;
 	onToggleMemoryReadLevel?: (level: string) => void;
 	onToggleMemorySpace?: (id: string) => void;
+	/** Show the per-scope recall checkboxes. The simple editor hides them and
+	 *  keeps Core's default (all personal levels). */
+	showReadLevels?: boolean;
 	spaces: SpaceRow[];
 }
 
@@ -157,10 +167,15 @@ export function MemorySpacesCard({
 	memoryWriteEnabled,
 	onMemoryWriteEnabledChange,
 	disabled = false,
+	showReadLevels = true,
 }: MemorySpacesCardProps) {
 	return (
 		<SettingsSection
-			caption="Give this agent long-term memory. Choose which Spaces it may read for retrieval, which memory levels it may recall, and whether it may record new memories."
+			caption={
+				showReadLevels
+					? "Give this agent long-term memory. Choose which Spaces it may read for retrieval, which memory levels it may recall, and whether it may record new memories."
+					: "Choose which Spaces this agent may read, and whether it may remember new things."
+			}
 			headerAction={
 				memorySpaceIds.size > 0 ? (
 					<Badge variant="secondary">{memorySpaceIds.size}</Badge>
@@ -191,10 +206,7 @@ export function MemorySpacesCard({
 											id={checkId}
 											onCheckedChange={() => onToggleMemorySpace?.(space.id)}
 										/>
-										<Label
-											className="cursor-pointer font-normal text-sm"
-											htmlFor={checkId}
-										>
+										<Label htmlFor={checkId} variant="agent-choice">
 											{space.name}
 										</Label>
 									</div>
@@ -204,41 +216,41 @@ export function MemorySpacesCard({
 					)}
 				</div>
 
-				<Separator />
+				{showReadLevels ? <Separator /> : null}
 
-				<div className="flex flex-col gap-2">
-					<span className="font-medium text-sm">Memory levels</span>
-					<p className="text-muted-foreground text-xs">
-						Which memory scopes this agent may recall from. Leave all unchecked
-						to allow all personal levels (agent, user, node, and project).
-					</p>
+				{showReadLevels ? (
 					<div className="flex flex-col gap-2">
-						{MEMORY_READ_LEVELS.map((level) => {
-							const checkId = `memory-level-${level.value}`;
-							return (
-								<div className="flex items-start gap-3" key={level.value}>
-									<Checkbox
-										checked={memoryReadLevels.has(level.value)}
-										disabled={disabled}
-										id={checkId}
-										onCheckedChange={() =>
-											onToggleMemoryReadLevel?.(level.value)
-										}
-									/>
-									<Label
-										className="cursor-pointer font-normal text-sm"
-										htmlFor={checkId}
-									>
-										<span className="font-medium">{level.label}</span>
-										<span className="block text-muted-foreground text-xs">
-											{level.hint}
-										</span>
-									</Label>
-								</div>
-							);
-						})}
+						<span className="font-medium text-sm">Memory levels</span>
+						<p className="text-muted-foreground text-xs">
+							Which memory scopes this agent may recall from. Leave all
+							unchecked to allow all personal levels (agent, user, node, and
+							project).
+						</p>
+						<div className="flex flex-col gap-2">
+							{MEMORY_READ_LEVELS.map((level) => {
+								const checkId = `memory-level-${level.value}`;
+								return (
+									<div className="flex items-start gap-3" key={level.value}>
+										<Checkbox
+											checked={memoryReadLevels.has(level.value)}
+											disabled={disabled}
+											id={checkId}
+											onCheckedChange={() =>
+												onToggleMemoryReadLevel?.(level.value)
+											}
+										/>
+										<Label htmlFor={checkId} variant="agent-choice">
+											<span className="font-medium">{level.label}</span>
+											<span className="block text-muted-foreground text-xs">
+												{level.hint}
+											</span>
+										</Label>
+									</div>
+								);
+							})}
+						</div>
 					</div>
-				</div>
+				) : null}
 			</SettingsCard>
 
 			<SettingsGroup>
@@ -320,14 +332,14 @@ export function AgentPreviewCard({
 	let badge: ReactNode = null;
 	if (builtIn) {
 		badge = (
-			<Badge className="ml-auto shrink-0 gap-1" variant="secondary">
+			<Badge className="ml-auto shrink-0" variant="secondary">
 				<HugeiconsIcon className="size-3" icon={LockedIcon} />
 				Built-in
 			</Badge>
 		);
 	} else if (locked) {
 		badge = (
-			<Badge className="ml-auto shrink-0 gap-1" variant="secondary">
+			<Badge className="ml-auto shrink-0" variant="secondary">
 				<HugeiconsIcon className="size-3" icon={LockedIcon} />
 				Locked
 			</Badge>
@@ -338,7 +350,7 @@ export function AgentPreviewCard({
 		<div className="flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-sm">
 			<div className="flex items-center gap-3">
 				<div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-muted">
-					<RyuLogo className="text-foreground" size="24px" variant="outline" />
+					<RyuLogo size="24px" tone="foreground" variant="outline" />
 				</div>
 				<div className="flex min-w-0 flex-col">
 					<span className="truncate font-medium text-base leading-tight">
@@ -414,12 +426,16 @@ export function AgentPreviewCard({
 
 export interface ClaudeGatewayConfigViewProps {
 	enabled?: boolean;
+	/** A line shown under the switch while the agent's account access is
+	 * limited, since this routing can decide whether its engine starts. */
+	limitedNotice?: string | null;
 	loaded?: boolean;
 	onToggle?: (next: boolean) => void;
 }
 
 export function ClaudeGatewayConfigView({
 	enabled = true,
+	limitedNotice = null,
 	loaded = true,
 	onToggle,
 }: ClaudeGatewayConfigViewProps) {
@@ -453,6 +469,14 @@ export function ClaudeGatewayConfigView({
 					title="Route through Ryu Gateway"
 				/>
 			</SettingsGroup>
+			{limitedNotice ? (
+				<p
+					className="px-3.5 text-status-warning text-xs leading-snug"
+					role="status"
+				>
+					{limitedNotice}
+				</p>
+			) : null}
 		</SettingsSection>
 	);
 }
@@ -464,12 +488,16 @@ export function ClaudeGatewayConfigView({
 
 export interface CodexGatewayConfigViewProps {
 	enabled?: boolean;
+	/** A line shown under the switch while the agent's account access is
+	 * limited, since this routing can decide whether its engine starts. */
+	limitedNotice?: string | null;
 	loaded?: boolean;
 	onToggle?: (next: boolean) => void;
 }
 
 export function CodexGatewayConfigView({
 	enabled = true,
+	limitedNotice = null,
 	loaded = true,
 	onToggle,
 }: CodexGatewayConfigViewProps) {
@@ -502,6 +530,14 @@ export function CodexGatewayConfigView({
 					title="Route through Ryu Gateway"
 				/>
 			</SettingsGroup>
+			{limitedNotice ? (
+				<p
+					className="px-3.5 text-status-warning text-xs leading-snug"
+					role="status"
+				>
+					{limitedNotice}
+				</p>
+			) : null}
 		</SettingsSection>
 	);
 }
@@ -514,12 +550,16 @@ export function CodexGatewayConfigView({
 
 export interface GatewayRoutingConfigViewProps {
 	enabled?: boolean;
+	/** A line shown under the switch while the agent's account access is
+	 * limited, since this routing can decide whether its engine starts. */
+	limitedNotice?: string | null;
 	loaded?: boolean;
 	onToggle?: (next: boolean) => void;
 }
 
 export function GatewayRoutingConfigView({
 	enabled = true,
+	limitedNotice = null,
 	loaded = true,
 	onToggle,
 }: GatewayRoutingConfigViewProps) {
@@ -554,6 +594,14 @@ export function GatewayRoutingConfigView({
 					title="Route through Ryu Gateway"
 				/>
 			</SettingsGroup>
+			{limitedNotice ? (
+				<p
+					className="px-3.5 text-status-warning text-xs leading-snug"
+					role="status"
+				>
+					{limitedNotice}
+				</p>
+			) : null}
 		</SettingsSection>
 	);
 }
@@ -745,7 +793,7 @@ function PiModelPicker({
 		const isActive = model.id === value;
 		return (
 			<Button
-				className="h-auto w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left font-medium text-sm"
+				appearance="agent-model-option"
 				key={model.id}
 				onClick={() => {
 					onValueChange?.(model.id);
@@ -756,7 +804,9 @@ function PiModelPicker({
 				variant={isActive ? "secondary" : "ghost"}
 			>
 				<span className="flex w-full items-center gap-2">
-					<span className="flex-1 truncate">{model.name}</span>
+					<span className="flex-1 truncate" title={model.name}>
+						{model.name}
+					</span>
 					{isActive ? (
 						<HugeiconsIcon
 							className="shrink-0 text-muted-foreground"
@@ -775,8 +825,8 @@ function PiModelPicker({
 			<PopoverTrigger
 				render={
 					<Button
+						appearance="agent-model-picker"
 						aria-labelledby={id}
-						className="w-full justify-between font-normal"
 						id={id}
 						type="button"
 						variant="outline"
@@ -792,15 +842,16 @@ function PiModelPicker({
 			/>
 			<PopoverContent
 				align="start"
-				className="w-[min(300px,var(--available-width))] p-0"
+				className="w-[min(300px,var(--available-width))]"
+				spacing="flush"
 			>
 				<div className="flex max-h-80 flex-col">
 					<div className="sticky top-0 z-10">
 						<Input
 							aria-label="Filter models"
-							className="h-8 text-[13px]"
 							onChange={(e) => setQuery(e.target.value)}
 							placeholder="Search models…"
+							size="agent-detail"
 							value={query}
 						/>
 					</div>
@@ -819,7 +870,7 @@ function PiModelPicker({
 							? groups.map((group) => (
 									<div key={group.label ?? "__ungrouped__"}>
 										{group.label ? (
-											<div className="px-3 pt-2 pb-1 font-medium text-[11px] text-muted-foreground">
+											<div className="type-caption px-3 pt-2 pb-1 font-medium text-muted-foreground">
 												{group.label}
 											</div>
 										) : null}
@@ -893,7 +944,7 @@ export function RyuPiConfigView({
 			}
 			headerAction={
 				<Badge
-					className="text-[10px]"
+					size="compact"
 					variant={routing === "gateway" ? "default" : "secondary"}
 				>
 					{routing === "gateway" ? "Gateway governed" : "Direct egress"}
@@ -1016,7 +1067,10 @@ export function RyuPiConfigView({
 						</span>
 					) : null}
 					{configDir ? (
-						<span className="ml-auto truncate text-[10px] text-muted-foreground">
+						<span
+							className="type-compact ml-auto truncate text-muted-foreground"
+							title={configDir}
+						>
 							{configDir}
 						</span>
 					) : null}
@@ -1042,7 +1096,6 @@ export interface AgentByoaViewProps {
 	saving?: boolean;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
 export function AgentByoaView({
 	agentId,
 	loading,
@@ -1078,15 +1131,20 @@ export function AgentByoaView({
 					<div className="flex flex-col gap-3">
 						{gatewayUrl ? (
 							<div className="flex flex-col gap-1.5">
-								<Label className="text-xs">Gateway base URL</Label>
+								<Label size="compact">Gateway base URL</Label>
 								<div className="flex items-center gap-2">
 									<Input
-										className="h-8 font-mono text-xs"
 										readOnly
+										size="compact"
 										value={`${gatewayUrl}/v1`}
+										variant="code"
 									/>
 									<Button
-										className="shrink-0"
+										aria-label={
+											copied === "url"
+												? "Copied gateway URL"
+												: "Copy gateway URL"
+										}
 										onClick={onCopyUrl}
 										size="icon-sm"
 										variant="ghost"
@@ -1103,11 +1161,11 @@ export function AgentByoaView({
 								</div>
 								<p className="text-muted-foreground text-xs">
 									Set this as your agent's{" "}
-									<code className="rounded bg-muted px-1 font-mono text-[11px]">
+									<code className="type-caption rounded bg-muted px-1 font-mono">
 										base_url
 									</code>{" "}
 									or{" "}
-									<code className="rounded bg-muted px-1 font-mono text-[11px]">
+									<code className="type-caption rounded bg-muted px-1 font-mono">
 										OPENAI_BASE_URL
 									</code>
 									.
@@ -1117,20 +1175,23 @@ export function AgentByoaView({
 
 						{generatedKey ? (
 							<div className="flex flex-col gap-1.5">
-								<Label className="flex items-center gap-1 text-xs">
+								<Label size="compact" spacing="tight">
 									Gateway API key
-									<span className="rounded bg-warning/10 px-1 text-[10px] text-status-warning dark:bg-warning/30">
+									<span className="type-compact rounded bg-warning/10 px-1 text-status-warning dark:bg-warning/30">
 										Copy now — not shown again
 									</span>
 								</Label>
 								<div className="flex items-center gap-2">
 									<Input
-										className="h-8 font-mono text-xs"
 										readOnly
+										size="compact"
 										value={generatedKey}
+										variant="code"
 									/>
 									<Button
-										className="shrink-0"
+										aria-label={
+											copied === "key" ? "Copied API key" : "Copy API key"
+										}
 										onClick={onCopyKey}
 										size="icon-sm"
 										variant="ghost"
@@ -1147,16 +1208,16 @@ export function AgentByoaView({
 								</div>
 								<p className="text-muted-foreground text-xs">
 									Set this as your agent's{" "}
-									<code className="rounded bg-muted px-1 font-mono text-[11px]">
+									<code className="type-caption rounded bg-muted px-1 font-mono">
 										api_key
 									</code>{" "}
 									or{" "}
-									<code className="rounded bg-muted px-1 font-mono text-[11px]">
+									<code className="type-caption rounded bg-muted px-1 font-mono">
 										OPENAI_API_KEY
 									</code>
 									. The gateway applies Ryu's firewall and per-agent budget to
 									all requests tagged with{" "}
-									<code className="rounded bg-muted px-1 font-mono text-[11px]">
+									<code className="type-caption rounded bg-muted px-1 font-mono">
 										x-ryu-agent-id: {agentId}
 									</code>
 									.
@@ -1214,7 +1275,7 @@ function IntegrationCard({
 			<p className="text-muted-foreground text-xs leading-relaxed">
 				{description}
 			</p>
-			<pre className="max-h-40 overflow-auto rounded-md bg-muted/70 p-2.5 font-mono text-[10px] leading-relaxed">
+			<pre className="type-compact max-h-40 overflow-auto rounded-md bg-muted/70 p-2.5 font-mono leading-relaxed">
 				<code translate="no">{code}</code>
 			</pre>
 		</div>
@@ -1254,7 +1315,7 @@ export function AgentIntegrationsView({
 				caption="Call the saved agent from a Node app, Python service, Go program, or any client that can send JSON over HTTP. The agent's tools, rules, and Gateway policies still apply."
 				headerAction={
 					<div className="flex items-center gap-1.5">
-						<Badge className="font-mono" variant="secondary">
+						<Badge typography="code" variant="secondary">
 							<span translate="no">{agentId}</span>
 						</Badge>
 						<Badge variant="outline">HTTP + SSE</Badge>
@@ -1300,20 +1361,20 @@ export function AgentIntegrationsView({
 						</Button>
 					</div>
 
-					<pre className="max-h-[28rem] overflow-auto rounded-md border bg-background p-3 font-mono text-[11px] leading-relaxed">
+					<pre className="type-caption max-h-[28rem] overflow-auto rounded-md border bg-background p-3 font-mono leading-relaxed">
 						<code translate="no">{snippet}</code>
 					</pre>
 					<p className="text-muted-foreground text-xs">
 						The TypeScript example uses{" "}
 						<code
-							className="rounded bg-muted px-1 font-mono text-[11px]"
+							className="type-caption rounded bg-muted px-1 font-mono"
 							translate="no"
 						>
 							@ryuhq/client
 						</code>{" "}
 						to call a saved agent. Use{" "}
 						<code
-							className="rounded bg-muted px-1 font-mono text-[11px]"
+							className="type-caption rounded bg-muted px-1 font-mono"
 							translate="no"
 						>
 							@ryuhq/sdk
@@ -1325,7 +1386,7 @@ export function AgentIntegrationsView({
 						<p className="text-muted-foreground">
 							Endpoint{" "}
 							<code
-								className="rounded bg-muted px-1 font-mono text-[11px]"
+								className="type-caption rounded bg-muted px-1 font-mono"
 								translate="no"
 							>
 								{coreUrl}/api/chat/stream
@@ -1348,7 +1409,7 @@ export function AgentIntegrationsView({
 							<>
 								This node requires auth. Keep its token in{" "}
 								<code
-									className="rounded bg-muted px-1 font-mono text-[11px]"
+									className="type-caption rounded bg-muted px-1 font-mono"
 									translate="no"
 								>
 									RYU_TOKEN
@@ -1473,6 +1534,11 @@ export interface AgentEvalsViewProps {
 	historyLoading?: boolean;
 	historyReachable?: boolean | null;
 	model?: string;
+	/**
+	 * Why Run is disabled when no model is set (e.g. the node has no default
+	 * model configured). Shown under the model field; `null` hides it.
+	 */
+	modelHint?: string | null;
 	onModelChange?: (v: string) => void;
 	onReloadHistory?: () => void;
 	onRun?: () => void;
@@ -1484,7 +1550,7 @@ export interface AgentEvalsViewProps {
 function EvalStatCard({ label, value, tone }: EvalStat) {
 	return (
 		<div className="flex flex-col gap-0.5 rounded-lg border bg-muted/30 p-2">
-			<span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+			<span className="type-compact text-muted-foreground uppercase tracking-wide">
 				{label}
 			</span>
 			<span className={`font-medium text-sm ${tone ?? ""}`}>{value}</span>
@@ -1494,6 +1560,7 @@ function EvalStatCard({ label, value, tone }: EvalStat) {
 
 export function AgentEvalsView({
 	model = "",
+	modelHint = null,
 	running,
 	runError,
 	stats = [],
@@ -1516,14 +1583,15 @@ export function AgentEvalsView({
 				<SettingsCard className="flex flex-col gap-3">
 					<div className="flex flex-wrap items-end gap-2">
 						<div className="flex flex-col gap-1">
-							<Label className="text-xs" htmlFor="eval-model">
+							<Label htmlFor="eval-model" size="compact">
 								Model
 							</Label>
 							<Input
-								className="h-8 w-56 text-xs"
+								className="w-56"
 								id="eval-model"
 								onChange={(e) => onModelChange?.(e.target.value)}
 								placeholder="Model id"
+								size="compact"
 								value={model}
 							/>
 						</div>
@@ -1536,6 +1604,10 @@ export function AgentEvalsView({
 							{running ? "Running…" : "Run evals"}
 						</Button>
 					</div>
+
+					{modelHint ? (
+						<p className="text-muted-foreground text-xs">{modelHint}</p>
+					) : null}
 
 					{runError ? (
 						<p className="text-status-destructive text-xs">{runError}</p>
@@ -1577,20 +1649,25 @@ export function AgentEvalsView({
 									{cases.map((c, i) => (
 										<tr
 											className="border-t align-top"
-											// biome-ignore lint/suspicious/noArrayIndexKey: cases are positional and stable per run
 											key={`${c.prompt.slice(0, 16)}-${i}`}
 										>
-											<td className="max-w-40 truncate px-2 py-1.5">
+											<td
+												className="max-w-40 truncate px-2 py-1.5"
+												title={c.prompt}
+											>
 												{c.prompt}
 											</td>
-											<td className="max-w-64 truncate px-2 py-1.5 text-muted-foreground">
+											<td
+												className="max-w-64 truncate px-2 py-1.5 text-muted-foreground"
+												title={c.responseText}
+											>
 												{c.responseText}
 											</td>
-											<td className="px-2 py-1.5 text-right">
+											<td className="px-2 py-1.5 text-right tabular-nums">
 												{c.matchLabel ?? "—"}
 											</td>
 											<td
-												className={`px-2 py-1.5 text-right font-medium ${c.scoreTone ?? ""}`}
+												className={`px-2 py-1.5 text-right font-medium tabular-nums ${c.scoreTone ?? ""}`}
 											>
 												{c.scoreLabel}
 											</td>
@@ -1625,7 +1702,8 @@ export function AgentEvalsView({
 												<span className="font-medium">{r.name}</span>
 												{r.didExecute === false ? (
 													<Badge
-														className="ml-1.5 px-1 py-0 text-[10px]"
+														appearance="agent-count"
+														className="ml-1.5"
 														variant="outline"
 													>
 														not run
@@ -1633,14 +1711,14 @@ export function AgentEvalsView({
 												) : null}
 											</td>
 											<td
-												className={`px-2 py-1.5 text-right font-medium ${r.tone ?? ""}`}
+												className={`px-2 py-1.5 text-right font-medium tabular-nums ${r.tone ?? ""}`}
 											>
 												{r.meanScore}
 											</td>
-											<td className="px-2 py-1.5 text-right text-muted-foreground">
+											<td className="px-2 py-1.5 text-right text-muted-foreground tabular-nums">
 												{r.passRate}
 											</td>
-											<td className="px-2 py-1.5 text-right text-muted-foreground">
+											<td className="px-2 py-1.5 text-right text-muted-foreground tabular-nums">
 												{r.executed}
 											</td>
 										</tr>
@@ -1656,6 +1734,7 @@ export function AgentEvalsView({
 				caption="Recent model calls through the gateway."
 				headerAction={
 					<Button
+						aria-label="Reload run history"
 						loading={historyLoading}
 						onClick={onReloadHistory}
 						size="icon-sm"
@@ -1705,19 +1784,19 @@ export function AgentEvalsView({
 											</td>
 											<td className="max-w-40 truncate px-2 py-1.5">
 												{e.isError ? (
-													<Badge className="gap-1" variant="destructive">
-														error
-													</Badge>
+													<Badge variant="destructive">error</Badge>
 												) : null}
 												{e.model}
 											</td>
-											<td className="px-2 py-1.5 text-right text-muted-foreground">
+											<td className="px-2 py-1.5 text-right text-muted-foreground tabular-nums">
 												{formatCount(e.tokens) ?? "—"}
 											</td>
-											<td className="px-2 py-1.5 text-right text-muted-foreground">
+											<td className="px-2 py-1.5 text-right text-muted-foreground tabular-nums">
 												{e.latencyLabel}
 											</td>
-											<td className="px-2 py-1.5 text-right">{e.scoreLabel}</td>
+											<td className="px-2 py-1.5 text-right tabular-nums">
+												{e.scoreLabel}
+											</td>
 										</tr>
 									))}
 								</tbody>
@@ -1761,13 +1840,45 @@ export interface ComposioTriggerRow {
 	name: string;
 }
 
+/** One connected account an event trigger may watch (already filtered to the
+ *  accounts this agent may use). */
+export interface ComposioAccountOption {
+	id: string;
+	/** Short human label, e.g. "gmail · Active". */
+	label: string;
+	/** Whose account it is: one of yours (the default), or one connected to
+	 *  this agent's own identity. */
+	owner?: "agent" | "you";
+	toolkit: string;
+}
+
+/** The picker label of a trigger account, naming whose account it is when the
+ *  agent may watch both kinds. */
+export function triggerAccountLabel(account: ComposioAccountOption): string {
+	if (account.owner === "agent") {
+		return `This agent's account · ${account.label}`;
+	}
+	if (account.owner === "you") {
+		return `Your account · ${account.label}`;
+	}
+	return account.label;
+}
+
 export interface TriggerSubRow {
 	id: string;
+	/** Whether it watches an account connected to the agent's own identity. */
+	ownAccount?: boolean;
+	/** Whether the identity and account access on screen stop its events
+	 *  (the account it watches is no longer allowed). */
+	paused?: boolean;
 	toolkit: string;
 	triggerSlug: string;
 }
 
 export interface AgentSettingsFormProps {
+	/** Injected: which accounts this agent may use (the allowlist editor),
+	 *  rendered under Connections in place of `identityPanel`. */
+	accountAccessPanel?: ReactNode;
 	acpCommand: string;
 	/** Injected: ACP auth ("Login with X") + session list controls for external
 	 *  agents. Self-hides for agents that report no auth methods or sessions. */
@@ -1781,13 +1892,16 @@ export interface AgentSettingsFormProps {
 	agentSetupComposer?: ReactNode;
 	/** Optional role/title badge shown beside the agent name. */
 	agentTitle?: string;
+	/** Stable id and node preference store for the shared agent banner. */
+	bannerAgentId?: string;
+	bannerPreferenceStore?: AgentBannerPreferenceStore;
 	/** Injected: the current agent's Gateway token budget editor. */
 	budgetPanel?: ReactNode;
 	/** Injected: the per-agent Calendar view, rendered as its own tab. Omit to
 	 *  hide the tab. */
 	calendarPanel?: ReactNode;
-	/** Injected: the per-agent capability controls (tools / thinking / vision),
-	 *  rendered at the top of the Tools tab. */
+	/** Injected: the per-agent capability controls (tools / thinking / vision,
+	 *  orchestration), rendered in the Advanced tab. */
 	capabilitiesPanel?: ReactNode;
 	/** Injected: the per-agent Channels panel (control-plane bot bindings). */
 	channelsPanel?: ReactNode;
@@ -1801,6 +1915,9 @@ export interface AgentSettingsFormProps {
 	claudeConfig?: ReactNode;
 	/** Injected: CodexGatewayConfig for `acp:codex`. */
 	codexConfig?: ReactNode;
+	/** Connected accounts the trigger picker may offer. Omit to keep the
+	 *  free-text account id field (hosts without a connection list). */
+	composioAccounts?: ComposioAccountOption[];
 	composioActions: ComposioActionRow[];
 	composioActionsLoading?: boolean;
 
@@ -1820,11 +1937,19 @@ export interface AgentSettingsFormProps {
 	engineOptions: SlotOption[];
 	/** Injected: the Evals view, rendered as its own tab. Omit to hide the tab. */
 	evalsPanel?: ReactNode;
+	/** Injected: lifecycle (draft/trial/active) and safety profile controls,
+	 *  rendered at the top of Tools & knowledge in every mode — schedules need an
+	 *  Active agent, so the simple editor cannot hide it. */
+	executionPolicyPanel?: ReactNode;
 
 	// Save
 	formError?: string | null;
 	/** Injected: generic GatewayRoutingConfig for BYO/other ACP agents. */
 	gatewayRoutingConfig?: ReactNode;
+
+	/** Injected: the bot's optional goal and main-thread reply length, which
+	 *  persist on their own (scope guidance). Rendered under the instructions. */
+	goalPanel?: ReactNode;
 	/** Compact health grade shown in the agent profile header. */
 	healthBadge?: ReactNode;
 	/** Injected deterministic configuration health scorecard. */
@@ -1832,8 +1957,15 @@ export interface AgentSettingsFormProps {
 	/** Injected: the per-agent run-history view (chats + automated runs),
 	 *  rendered as its own tab. Omit to hide the tab. */
 	historyPanel?: ReactNode;
-	/** Injected: the per-agent Identity Vault profile picker (empty = none). */
+	/** Injected: whether the agent acts as you, has its own identity, or both.
+	 *  Rendered at the top of Tools & knowledge in every mode. */
+	identityModePanel?: ReactNode;
+	/** Injected: the per-agent Identity Vault profile picker (empty = none).
+	 *  Superseded by `accountAccessPanel`, which carries the same picker. */
 	identityPanel?: ReactNode;
+	/** Open on this indexed setting (an `AGENT_SETTINGS_ENTRIES` id): switch to
+	 *  the tab that holds it once that tab is shown, and flash the row once. */
+	initialSettingId?: string;
 	/** Optional starting tab for storyboards and other presentational hosts. */
 	initialTab?: AgentSettingsTab;
 	/** Injected rich editor node for Instructions; falls back to a textarea. */
@@ -1846,6 +1978,7 @@ export interface AgentSettingsFormProps {
 	isNew: boolean;
 	/** Injected: ModelLaunchConfigSection when a tunable local engine is picked. */
 	launchConfig?: ReactNode;
+	marketplaceWallpapers?: readonly RenderableBackdrop[];
 
 	// Memory / Spaces slot
 	/** Memory scope levels the agent may recall from (subset of
@@ -1878,8 +2011,14 @@ export interface AgentSettingsFormProps {
 	onDailyTimeChange?: (v: string) => void;
 	onDeleteTrigger?: (id: string) => void;
 	onDescriptionChange?: (v: string) => void;
+	onInstallWallpaper?: (
+		wallpaper: RenderableBackdrop
+	) => boolean | Promise<boolean>;
 	onMemoryWriteEnabledChange?: (v: boolean) => void;
 	onNameChange?: (v: string) => void;
+	/** Simple mode only: open the advanced editor (the Agent workspace). Omit when the
+	 *  viewer has no Console access; the link is then not offered. */
+	onOpenAdvanced?: () => void;
 	onOpenPromptStudio?: () => void;
 	onPersonaDisplayNameChange?: (v: string) => void;
 	/** Select the reusable personality profile assigned to this agent. */
@@ -1901,6 +2040,12 @@ export interface AgentSettingsFormProps {
 	onTriggerSlugChange?: (v: string) => void;
 	onWeeklyDayChange?: (v: string) => void;
 	onWeeklyTimeChange?: (v: string) => void;
+	/** Injected: history-backed cost optimizations (cheaper model, unused
+	 *  tools), rendered beside Quality tests. Omit to hide the view. */
+	optimizationsPanel?: ReactNode;
+	/** Whether the identity on screen gives the agent accounts of its own, so
+	 *  the trigger picker can point to them when it has none to offer. */
+	ownAccountsAllowed?: boolean;
 	passportPanel?: ReactNode;
 
 	// Persona
@@ -1940,6 +2085,9 @@ export interface AgentSettingsFormProps {
 	showComposioTriggers?: boolean;
 	/** Hide the model tab/step for the simplified interface preset. */
 	showModelPanel?: boolean;
+	/** Essentials only (Bot): Behavior, Tools & knowledge, and Triggers.
+	 *  Every other tab stays in the advanced editor (the Agent workspace). */
+	simple?: boolean;
 	skills: SkillRow[];
 
 	// Skills
@@ -2008,6 +2156,11 @@ function squarePixelTileDataUri(): string {
 	return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
+interface ProfileDitherStyle extends CSSProperties {
+	"--agent-profile-dither-fade"?: string;
+	"--agent-profile-dither-image"?: string;
+	"--agent-profile-dither-size"?: string;
+}
 function DitherLayer({ className }: { className?: string }) {
 	const spacing =
 		PROFILE_DITHER_SETTINGS.pixelSize *
@@ -2016,227 +2169,252 @@ function DitherLayer({ className }: { className?: string }) {
 	return (
 		<div
 			aria-hidden
-			className={cn("pointer-events-none absolute inset-0", className)}
-			style={{
-				backgroundImage: squarePixelTileDataUri(),
-				backgroundPosition: "0 0",
-				backgroundSize: `${spacing}px ${spacing}px`,
-				maskImage: `radial-gradient(circle at 50% 50%, black ${Math.round(
-					(1 - PROFILE_DITHER_SETTINGS.edgeFade) * 100
-				)}%, transparent 100%)`,
-				WebkitMaskImage: `radial-gradient(circle at 50% 50%, black ${Math.round(
-					(1 - PROFILE_DITHER_SETTINGS.edgeFade) * 100
-				)}%, transparent 100%)`,
-				opacity: 0.38,
-			}}
+			className={cn(
+				"pointer-events-none absolute inset-0",
+				styles.dither,
+				className
+			)}
+			style={
+				{
+					"--agent-profile-dither-image": squarePixelTileDataUri(),
+					"--agent-profile-dither-size": `${spacing}px ${spacing}px`,
+					"--agent-profile-dither-fade": `${Math.round((1 - PROFILE_DITHER_SETTINGS.edgeFade) * 100)}%`,
+				} satisfies ProfileDitherStyle as ProfileDitherStyle
+			}
 		/>
 	);
 }
 
-function ProfileStat({ label, value }: { label: string; value: ReactNode }) {
-	return (
-		<span className="inline-flex items-baseline gap-1 text-sm">
-			<span className="font-medium text-foreground">{value}</span>
-			<span className="text-muted-foreground">{label}</span>
-		</span>
-	);
-}
-
+/** The editor's identity row: picture, name, one-line description, and the save
+ *  actions. Deliberately small — the profile card (banner, badge, lanyard) is a
+ *  cosmetic extra and lives under Advanced, not above every setting. */
 function ProfileHeader({
 	agentIcon,
-	agentTitle,
-	badge,
-	bannerColor,
-	bannerDirection,
 	builtIn,
 	description,
 	healthBadge,
-	isNew,
 	isLocked,
+	isNew,
 	modelLabel,
 	name,
-	onAgentTitleChange,
+	onCreateAndChat,
 	onDescriptionChange,
 	onNameChange,
+	onSave,
 	saveDisabled,
 	saving,
-	selectedSkills,
-	selectedTools,
-	onCreateAndChat,
-	onSave,
 }: {
 	agentIcon?: ReactNode;
-	badge?: ReactNode;
-	/** Banner wash colour. Omit to derive one from `name` (stable per agent). */
-	bannerColor?: DitherColor;
-	/** Banner wash direction. Omit to derive one from `name`. */
-	bannerDirection?: GradientDirection;
 	builtIn: boolean;
-	agentTitle: string;
 	description?: string;
 	healthBadge?: ReactNode;
-	isNew: boolean;
 	isLocked: boolean;
+	isNew: boolean;
 	modelLabel: string;
 	name: string;
 	onCreateAndChat?: () => void;
 	onDescriptionChange?: (v: string) => void;
-	onAgentTitleChange?: (v: string) => void;
 	onNameChange?: (v: string) => void;
 	onSave?: () => void;
 	saveDisabled?: boolean;
 	saving?: boolean;
-	selectedSkills: Set<string>;
-	selectedTools: Set<string>;
 }) {
-	// Prefs live in their own module with the dialog that edits them, so the
-	// header only has to know how to PAINT one.
-	const { prefs, reset, update } = useAgentBannerPrefs(name);
-	const banner = resolveAgentBanner(name, prefs, {
-		color: bannerColor,
-		direction: bannerDirection,
-	});
-
 	return (
-		<section
-			aria-label="Agent profile"
-			className="overflow-hidden rounded-lg bg-card"
-		>
-			<div
-				className="relative min-h-48 overflow-hidden"
-				style={{ background: AGENT_BANNER_BASE }}
-			>
-				<AgentBannerWash banner={banner} />
-				{/* Customisation moved off the banner and into a dialog: the swatch
-				    strip that used to sit here was permanently parked over the
-				    top-left corner and could only offer colour + direction. The
-				    dialog carries a live preview, so the effect is still visible
-				    while choosing. Unlocked agents only — a locked/built-in agent's
-				    chrome is not editable. */}
-				{isLocked ? null : (
-					<div className="absolute top-3 left-3 z-10">
-						<AgentBannerDialog
-							agent={name}
-							onReset={reset}
-							onUpdate={update}
-							prefs={prefs}
-						/>
-					</div>
-				)}
-				<div
-					aria-hidden
-					className="absolute inset-0 opacity-30"
-					style={{
-						backgroundImage:
-							"repeating-linear-gradient(120deg, transparent 0 18px, rgba(255,255,255,0.08) 18px 19px, transparent 19px 34px)",
-						transform: `translateX(${PROFILE_DITHER_SETTINGS.speed * 12}px)`,
-					}}
+		<section aria-label="Agent profile" className="flex items-start gap-4">
+			<div className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-card">
+				{agentIcon ?? <RyuLogo size="28px" tone="foreground" />}
+			</div>
+			<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+				<Label className="sr-only" htmlFor="agent-name">
+					Name
+				</Label>
+				<Input
+					disabled={isLocked}
+					id="agent-name"
+					onChange={(e) => onNameChange?.(e.target.value)}
+					placeholder="Name your agent"
+					value={name}
+					variant="agent-profile-name"
 				/>
-				<div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-background/78 to-transparent" />
-				<div className="absolute right-4 bottom-4 hidden h-48 w-44 sm:block">
-					{badge ? (
-						<div className="relative h-full overflow-hidden rounded-lg border border-white/25 bg-background/12 shadow-2xl backdrop-blur">
-							<DitherLayer className="opacity-45" />
-							<div className="absolute inset-0">{badge}</div>
-						</div>
+				<Label className="sr-only" htmlFor="agent-description">
+					Description
+				</Label>
+				<Input
+					disabled={isLocked}
+					id="agent-description"
+					onChange={(e) => onDescriptionChange?.(e.target.value)}
+					placeholder="What is it for? e.g. Drafts replies to support email"
+					value={description ?? ""}
+					variant="agent-profile-description"
+				/>
+				<div className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
+					<span className="truncate">{modelLabel || "No model selected"}</span>
+					{builtIn ? <Badge variant="outline">Core</Badge> : null}
+					{healthBadge}
+					{isLocked ? (
+						<Badge variant="secondary">
+							<HugeiconsIcon className="size-3" icon={LockedIcon} />
+							Locked
+						</Badge>
 					) : null}
 				</div>
 			</div>
-
-			<div className="px-4 pb-5 sm:px-6">
-				<div className="-mt-12 flex items-end justify-between gap-3">
-					<div className="relative flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-background bg-card shadow-sm">
-						{agentIcon ?? <RyuLogo className="text-foreground" size="42px" />}
-					</div>
-					<div className="flex shrink-0 items-center gap-2 pb-3">
-						<Button
-							disabled={saveDisabled}
-							loading={saving}
-							onClick={onCreateAndChat}
-							size="sm"
-							variant="ghost"
-						>
-							{saving ? <Spinner className="size-3" /> : null}
-							{isNew ? "Create & chat" : "Chat"}
-						</Button>
-						<Button
-							disabled={saveDisabled}
-							loading={saving}
-							onClick={onSave}
-							size="sm"
-						>
-							{isNew ? "Create agent" : "Save"}
-						</Button>
-					</div>
-				</div>
-
-				<div className="mt-3 flex flex-col gap-3">
-					<div className="min-w-0">
-						<Label className="sr-only" htmlFor="agent-name">
-							Name
-						</Label>
-						<Input
-							className="h-auto border-0 bg-transparent px-0 font-medium text-2xl shadow-none focus-visible:ring-0"
-							disabled={isLocked}
-							id="agent-name"
-							onChange={(e) => onNameChange?.(e.target.value)}
-							placeholder="Name your agent"
-							value={name}
-						/>
-						<p className="truncate text-muted-foreground text-sm">
-							{modelLabel || "No model selected"}
-						</p>
-					</div>
-					<Label className="sr-only" htmlFor="agent-description">
-						Description
-					</Label>
-					<Input
-						className="h-auto border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
-						disabled={isLocked}
-						id="agent-description"
-						onChange={(e) => onDescriptionChange?.(e.target.value)}
-						placeholder="Add a short description"
-						value={description ?? ""}
-					/>
-					<div className="flex items-center gap-2">
-						<Label
-							className="shrink-0 text-muted-foreground text-xs"
-							htmlFor="agent-title"
-						>
-							Badge
-						</Label>
-						<Input
-							className="h-8 max-w-xs text-sm"
-							disabled={isLocked}
-							id="agent-title"
-							maxLength={48}
-							onChange={(e) => onAgentTitleChange?.(e.target.value)}
-							placeholder="e.g. CTO"
-							value={agentTitle}
-						/>
-						<span className="text-muted-foreground text-xs">
-							Shown beside the name.
-						</span>
-					</div>
-					<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-						<ProfileStat label="tools" value={selectedTools.size} />
-						<ProfileStat label="skills" value={selectedSkills.size} />
-						<ProfileStat label="status" value={builtIn ? "Core" : "Custom"} />
-						{healthBadge}
-						{isLocked ? (
-							<Badge className="gap-1" variant="secondary">
-								<HugeiconsIcon className="size-3" icon={LockedIcon} />
-								Locked
-							</Badge>
-						) : null}
-					</div>
-				</div>
+			<div className="flex shrink-0 items-center gap-2">
+				<Button
+					disabled={saveDisabled}
+					onClick={onCreateAndChat}
+					size="sm"
+					variant="ghost"
+				>
+					{isNew ? "Create & chat" : "Chat"}
+				</Button>
+				<Button
+					disabled={saveDisabled}
+					loading={saving}
+					onClick={onSave}
+					size="sm"
+				>
+					{isNew ? "Create agent" : "Save"}
+				</Button>
 			</div>
 		</section>
 	);
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
+/** Cosmetic profile extras: the banner (with its customise dialog), the
+ *  lanyard badge, the short badge text, and the persona display name. Advanced
+ *  only — none of it changes what the agent does. */
+function ProfileCardSection({
+	agentTitle,
+	badge,
+	bannerAgentId,
+	bannerPreferenceStore,
+	isLocked,
+	marketplaceWallpapers = [],
+	name,
+	onAgentTitleChange,
+	onInstallWallpaper,
+	onPersonaDisplayNameChange,
+	personaDisplayName,
+}: {
+	agentTitle: string;
+	badge?: ReactNode;
+	bannerAgentId?: string;
+	bannerPreferenceStore?: AgentBannerPreferenceStore;
+	isLocked: boolean;
+	marketplaceWallpapers?: readonly RenderableBackdrop[];
+	name: string;
+	onAgentTitleChange?: (v: string) => void;
+	onInstallWallpaper?: (
+		wallpaper: RenderableBackdrop
+	) => boolean | Promise<boolean>;
+	onPersonaDisplayNameChange?: (v: string) => void;
+	personaDisplayName: string;
+}) {
+	// Prefs live in their own module with the dialog that edits them, so this
+	// section only has to know how to PAINT one.
+	const {
+		error: bannerStorageError,
+		loading: bannerLoading,
+		prefs,
+		reset,
+		update,
+	} = useAgentBannerPrefs(bannerAgentId ?? name, bannerPreferenceStore, name);
+	const bannerIdentity = bannerAgentId ?? name;
+	const banner = resolveAgentBanner(bannerIdentity, prefs);
+	const marketplaceWallpaper = resolveMarketplaceWallpaperSelection(
+		prefs.wallpaper
+	);
+
+	return (
+		<SettingsSection
+			caption="How this agent looks on its profile and badge. Nothing here changes what it does."
+			title="Profile card"
+		>
+			<div
+				className={cn(
+					"relative min-h-36 overflow-hidden rounded-lg",
+					styles.banner
+				)}
+			>
+				{marketplaceWallpaper ? (
+					<Backdrop
+						className="absolute inset-0"
+						definition={marketplaceWallpaper}
+						live={false}
+						params={marketplaceWallpaper.initialParams}
+					/>
+				) : (
+					<AgentBannerWash banner={banner} />
+				)}
+				{isLocked ? null : (
+					<div className="absolute top-3 left-3 z-10">
+						<AgentBannerDialog
+							agent={bannerIdentity}
+							loading={bannerLoading}
+							marketplaceWallpapers={marketplaceWallpapers}
+							onInstallWallpaper={onInstallWallpaper}
+							onReset={reset}
+							onUpdate={update}
+							prefs={prefs}
+							storageError={bannerStorageError}
+						/>
+					</div>
+				)}
+				<AgentProfileBannerFade />
+				{badge ? (
+					<div className="absolute top-3 right-3 bottom-3 hidden w-32 sm:block">
+						<div className="relative h-full overflow-hidden rounded-lg border border-white/25 bg-background/12 shadow-2xl backdrop-blur">
+							<DitherLayer className="opacity-45" />
+							<div className="absolute inset-0">{badge}</div>
+						</div>
+					</div>
+				) : null}
+			</div>
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<Input
+							className="w-56"
+							disabled={isLocked}
+							id="agent-title"
+							maxLength={48}
+							onChange={(e) => onAgentTitleChange?.(e.target.value)}
+							placeholder="e.g. CTO"
+							size="agent-row"
+							value={agentTitle}
+						/>
+					}
+					description="Shown beside the name."
+					title="Badge"
+				/>
+				<SettingsItem
+					actions={
+						<Input
+							className="w-56"
+							disabled={isLocked}
+							id="persona-display-name"
+							onChange={(e) => onPersonaDisplayNameChange?.(e.target.value)}
+							placeholder="e.g. Aria"
+							size="agent-row"
+							value={personaDisplayName}
+						/>
+					}
+					description="The name it introduces itself with, if different."
+					title="Display name"
+				/>
+			</SettingsGroup>
+		</SettingsSection>
+	);
+}
+
+interface EditorTab {
+	content: ReactNode;
+	hint: string;
+	id: AgentSettingsTab;
+	label: string;
+}
+
 export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	const {
 		name,
@@ -2252,7 +2430,9 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		isLocked,
 		instructionsEditor,
 		initialTab,
+		initialSettingId,
 		agentSetupComposer,
+		goalPanel,
 		promptStudioPanel,
 		rulesPanel,
 		evalsPanel,
@@ -2261,6 +2441,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		healthPanel,
 		healthBadge,
 		observabilityPanel,
+		optimizationsPanel,
 		passportPanel,
 		routinesPanel,
 		systemPrompt,
@@ -2307,7 +2488,11 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		memoryWriteEnabled,
 		onMemoryWriteEnabledChange,
 		capabilitiesPanel,
+		executionPolicyPanel,
+		identityModePanel,
 		identityPanel,
+		accountAccessPanel,
+		composioAccounts,
 		chatModel,
 		chatModelPicker,
 		showModelPanel = true,
@@ -2318,7 +2503,6 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		acpCommand,
 		acpSessionPanel,
 		onAcpCommandChange,
-		launchConfig,
 		piConfig,
 		claudeConfig,
 		codexConfig,
@@ -2356,6 +2540,9 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		onCreateAndChat,
 		onSave,
 		onCancel,
+		onOpenAdvanced,
+		ownAccountsAllowed = false,
+		simple = false,
 	} = props;
 
 	// Single tab strip for the whole editor: the config sections plus the
@@ -2379,19 +2566,6 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		() => searchAgentSettings(settingsQuery),
 		[settingsQuery]
 	);
-	// New agents start in the guided flow; "Set it up myself" drops the guide and
-	// reveals the same panels as tabs.
-	const [guided, setGuided] = useState(true);
-	// The desktop reuses one tab per route, so this component can go from editing a
-	// saved agent to creating a fresh one without remounting. Re-arm the guide on
-	// that transition, or the second "New agent" silently opens the tabbed editor
-	// because someone escaped the guide an hour ago.
-	useEffect(() => {
-		if (isNew) {
-			setGuided(true);
-		}
-	}, [isNew]);
-
 	const showTimeField =
 		schedulePhrase === "daily" ||
 		schedulePhrase === "weekdays" ||
@@ -2400,14 +2574,21 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		engineOptions.find((option) => option.id === chatModel)?.label ?? chatModel;
 	const hasMergedSetup = Boolean(agentSetupComposer);
 	const showStandaloneModelPanel = showModelPanel && !hasMergedSetup;
-	const guidedStepCount =
-		(hasMergedSetup ? 3 : showStandaloneModelPanel ? 4 : 3) +
-		(healthPanel ? 1 : 0);
+	// Simple mode keeps three tabs. Without the merged composer, the model
+	// picker sits inside Behavior instead of earning a fourth tab.
+	const showModelTab = showStandaloneModelPanel && !simple;
+	// The simple editor drops the Connections tab, so Account access moves
+	// under Identity there and the copy names that place.
+	const simpleAccountAccess =
+		simple && Boolean(identityModePanel) && Boolean(accountAccessPanel);
+	const accountAccessPath = simpleAccountAccess
+		? "Tools & knowledge → Identity"
+		: "Connections → Account access";
+	const showInlineModel = showStandaloneModelPanel && simple;
 
 	// ── Panels ───────────────────────────────────────────────────────────────────
-	// Each panel is built once and then placed twice: into the tab strip below
-	// (editing an existing agent) and into the guided steps (creating a new one).
-	// Same nodes, same state — only the framing differs.
+	// Each panel is built once and placed into the tab strip below. New and
+	// existing agents share the same editor: a short form, not a wizard.
 
 	const modelPanel = (
 		<>
@@ -2435,7 +2616,8 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 									value={chatModel}
 								>
 									<SelectTrigger
-										className="h-8 w-64 flex-shrink-0 text-sm"
+										appearance="editor-row"
+										className="w-64 shrink-0"
 										id="slot-chat-model"
 									>
 										<SelectValue placeholder="Select chat model" />
@@ -2454,7 +2636,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 					/>
 					{onAddMoreAgentProviders ? (
 						<Button
-							className="h-auto w-full justify-start gap-2 rounded-none px-3.5 py-2.5 font-normal text-sm"
+							appearance="agent-integration-option"
 							onClick={onAddMoreAgentProviders}
 							type="button"
 							variant="ghost"
@@ -2494,7 +2676,6 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 				</SettingsSection>
 			) : null}
 
-			{launchConfig}
 			{piConfig}
 			{claudeConfig}
 			{codexConfig}
@@ -2502,6 +2683,13 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 			{gatewayRoutingConfig}
 			{acpSessionPanel}
 		</>
+	);
+
+	// Accounts the trigger picker offers: those for the integration picked under
+	// Connections. Toolkit slugs compare case-insensitively, as Core keys them.
+	const triggerToolkit = composioToolkit?.toLowerCase() ?? "";
+	const triggerAccounts = (composioAccounts ?? []).filter(
+		(account) => account.toolkit.toLowerCase() === triggerToolkit
 	);
 
 	const triggersPanel = (
@@ -2534,7 +2722,8 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 										value={schedulePhrase}
 									>
 										<SelectTrigger
-											className="h-8 w-44 flex-shrink-0 text-sm"
+											appearance="editor-row"
+											className="w-44 shrink-0"
 											id="schedule-phrase"
 										>
 											<SelectValue />
@@ -2580,7 +2769,8 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 										value={weeklyDay}
 									>
 										<SelectTrigger
-											className="h-8 w-36 flex-shrink-0 text-sm"
+											appearance="editor-row"
+											className="w-36 shrink-0"
 											id="weekly-day"
 										>
 											<SelectValue />
@@ -2618,12 +2808,14 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 								actions={
 									<Input
 										aria-label="Cron expression"
-										className="h-8 w-44 font-mono"
+										className="w-44"
 										disabled={isLocked}
 										id="custom-cron"
 										onChange={(e) => onCustomCronChange?.(e.target.value)}
 										placeholder="e.g. 0 9 * * 1-5"
+										size="agent-row"
 										value={customCron}
+										variant="code"
 									/>
 								}
 								description="Standard 5-field cron: minute hour day month weekday."
@@ -2636,7 +2828,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 
 			{showComposioTriggers ? (
 				<SettingsSection
-					caption="Fire this agent when a Composio event arrives (a new Slack message, a GitHub commit, …)."
+					caption="Choose exact connected-app events to watch. Ryu redacts likely secrets, then the node's default model uses these instructions to decide whether to show a private Island suggestion. For channel messages or actions, bind the event to an explicit workflow. Trigger checks cannot use tools."
 					title="Event triggers"
 				>
 					<SettingsCard className="flex flex-col gap-3">
@@ -2655,6 +2847,14 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 												({sub.toolkit})
 											</span>
 										</span>
+										{sub.ownAccount ? (
+											<Badge variant="secondary">Its own account</Badge>
+										) : null}
+										{sub.paused ? (
+											<Badge variant="outline">
+												Paused: account not allowed
+											</Badge>
+										) : null}
 										<Button
 											aria-label="Remove trigger"
 											onClick={() => onDeleteTrigger?.(sub.id)}
@@ -2695,19 +2895,58 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 								</div>
 								<div className="flex flex-col gap-1.5">
 									<Label htmlFor="composio-account">Account to watch</Label>
-									<Input
-										disabled={isLocked}
-										id="composio-account"
-										onChange={(e) =>
-											onConnectedAccountIdChange?.(e.target.value)
-										}
-										placeholder="Paste the account id from your Composio dashboard"
-										value={connectedAccountId}
-									/>
-									<p className="text-muted-foreground text-xs">
-										The id of the account whose events should start this agent.
-										You'll find it in your Composio dashboard.
-									</p>
+									{composioAccounts ? (
+										triggerAccounts.length > 0 ? (
+											<Select
+												disabled={isLocked}
+												items={triggerAccounts.map((account) => ({
+													value: account.id,
+													label: triggerAccountLabel(account),
+												}))}
+												onValueChange={(v) =>
+													onConnectedAccountIdChange?.(v ?? "")
+												}
+												value={connectedAccountId}
+											>
+												<SelectTrigger className="w-full" id="composio-account">
+													<SelectValue placeholder="Pick a connected account" />
+												</SelectTrigger>
+												<SelectContent>
+													{triggerAccounts.map((account) => (
+														<SelectItem key={account.id} value={account.id}>
+															{triggerAccountLabel(account)}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										) : (
+											<p className="text-muted-foreground text-xs">
+												No connected {composioToolkit} account this agent may
+												use. Connect one in Store → Connections
+												{ownAccountsAllowed
+													? `, connect one for the agent under ${accountAccessPath} → Agent's own accounts,`
+													: ""}{" "}
+												or allow one under {accountAccessPath}.
+											</p>
+										)
+									) : (
+										<>
+											<Input
+												disabled={isLocked}
+												id="composio-account"
+												onChange={(e) =>
+													onConnectedAccountIdChange?.(e.target.value)
+												}
+												placeholder="Paste the account id from your Composio dashboard"
+												value={connectedAccountId}
+											/>
+											<p className="text-muted-foreground text-xs">
+												The id of the connected account whose selected events
+												this agent should watch. You'll find it in your Composio
+												dashboard.
+											</p>
+										</>
+									)}
 								</div>
 								{triggerError ? (
 									<p className="text-status-destructive text-xs">
@@ -2776,8 +3015,34 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	};
 	const toolsPanel = (
 		<>
-			{/* Capabilities (tools / thinking / vision) — gates the controls below. */}
-			{capabilitiesPanel}
+			{/* Identity: whose accounts the agent works with. Essential tab, so the
+			    simple editor (Ryu Bot) keeps it too. The simple editor has no
+			    Connections tab, so Account access renders here instead. */}
+			{identityModePanel ? (
+				<div data-setting-id="agent.identity-mode">
+					<SettingsSection
+						caption={
+							simpleAccountAccess
+								? "Whose accounts this agent works with, and which accounts exactly."
+								: "Whose accounts this agent works with. Choose which accounts exactly under Connections → Account access."
+						}
+						title="Identity"
+					>
+						{simpleAccountAccess ? (
+							<div className="flex flex-col gap-5">
+								{identityModePanel}
+								<div data-setting-id="agent.account-access">
+									{accountAccessPanel}
+								</div>
+							</div>
+						) : (
+							identityModePanel
+						)}
+					</SettingsSection>
+				</div>
+			) : null}
+			{/* Lifecycle + safety: what an available agent may do. */}
+			{executionPolicyPanel}
 			{/* 4. Tools + skills — one readable settings surface. */}
 			<SettingsSection
 				caption="New agents start with every available tool and enabled skill. Turn off anything this agent should not use."
@@ -2836,13 +3101,17 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 										key={toolName}
 									>
 										<Label
-											className="min-w-0 cursor-pointer font-normal text-sm"
+											className="min-w-0"
 											htmlFor={checkId}
+											variant="agent-choice"
 										>
 											<span className="block truncate">
 												{formatToolDisplayName(toolName)}
 											</span>
-											<span className="block truncate text-muted-foreground text-xs">
+											<span
+												className="block truncate text-muted-foreground text-xs"
+												title={toolName}
+											>
 												{toolName}
 											</span>
 										</Label>
@@ -2889,14 +3158,21 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 											key={skill.id}
 										>
 											<Label
-												className="min-w-0 cursor-pointer font-normal text-sm"
+												className="min-w-0"
 												htmlFor={checkId}
+												variant="agent-choice"
 											>
-												<span className="block truncate font-medium">
+												<span
+													className="block truncate font-medium"
+													title={skill.name}
+												>
 													{skill.name}
 												</span>
 												{skill.description ? (
-													<span className="block truncate text-muted-foreground text-xs">
+													<span
+														className="block truncate text-muted-foreground text-xs"
+														title={skill.description}
+													>
 														{skill.description}
 													</span>
 												) : null}
@@ -2932,6 +3208,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 				onMemoryWriteEnabledChange={onMemoryWriteEnabledChange}
 				onToggleMemoryReadLevel={onToggleMemoryReadLevel}
 				onToggleMemorySpace={onToggleMemorySpace}
+				showReadLevels={!simple}
 				spaces={spaces}
 			/>
 		</>
@@ -3053,10 +3330,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 															onToggleComposio?.(action.name)
 														}
 													/>
-													<Label
-														className="cursor-pointer font-normal text-sm"
-														htmlFor={checkId}
-													>
+													<Label htmlFor={checkId} variant="agent-choice">
 														<span className="font-medium">
 															{action.displayName}
 														</span>
@@ -3076,7 +3350,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 						{selectedComposio.size > 0 ? (
 							<div className="flex flex-wrap gap-1.5 border-t pt-3">
 								{Array.from(selectedComposio).map((cname) => (
-									<Badge className="gap-1" key={cname} variant="outline">
+									<Badge key={cname} variant="outline">
 										{cname}
 										<button
 											aria-label={`Remove ${cname}`}
@@ -3095,7 +3369,18 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 				) : null}
 			</SettingsSection>
 
-			{identityPanel}
+			{accountAccessPanel ? (
+				<div data-setting-id="agent.account-access">
+					<SettingsSection
+						caption="Which of your accounts and the agent's own accounts it may use. What is offered here follows its Identity setting."
+						title="Account access"
+					>
+						{accountAccessPanel}
+					</SettingsSection>
+				</div>
+			) : (
+				identityPanel
+			)}
 			{channelsPanel}
 		</>
 	);
@@ -3109,12 +3394,9 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 			>
 				<SettingsCard className="flex flex-col gap-2">
 					{rules.map((rule, index) => (
-						<div
-							className="flex items-center gap-2"
-							// biome-ignore lint/suspicious/noArrayIndexKey: rules are positional and edited in place
-							key={`rule-${index}`}
-						>
+						<div className="flex items-center gap-2" key={`rule-${index}`}>
 							<Input
+								aria-label={`Rule ${index + 1}`}
 								disabled={isLocked}
 								onChange={(e) => onRuleChange?.(index, e.target.value)}
 								placeholder="e.g. Always cite your sources"
@@ -3188,6 +3470,10 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 				</SettingsCard>
 			</SettingsSection>
 
+			{goalPanel}
+
+			{showInlineModel ? modelPanel : null}
+
 			<SettingsSection title="Personality & tone">
 				<SettingsGroup>
 					{personalityProfiles.length > 1 ? (
@@ -3203,7 +3489,8 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 									value={personalityProfile}
 								>
 									<SelectTrigger
-										className="h-8 w-56 flex-shrink-0 text-sm"
+										appearance="editor-row"
+										className="w-56 shrink-0"
 										id="agent-personality-profile"
 									>
 										<SelectValue />
@@ -3222,19 +3509,6 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 					) : null}
 					<SettingsItem
 						actions={
-							<Input
-								className="h-8 w-56"
-								disabled={isLocked}
-								id="persona-display-name"
-								onChange={(e) => onPersonaDisplayNameChange?.(e.target.value)}
-								placeholder="e.g. Aria"
-								value={personaDisplayName}
-							/>
-						}
-						title="Display name"
-					/>
-					<SettingsItem
-						actions={
 							<Select
 								disabled={isLocked}
 								items={toneOptions}
@@ -3242,7 +3516,8 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 								value={tone}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									appearance="editor-row"
+									className="w-56 shrink-0"
 									id="persona-tone"
 								>
 									<SelectValue />
@@ -3283,46 +3558,23 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	);
 
 	const advancedPanel = (
-		<section aria-label="Advanced" className="flex flex-col gap-5">
+		<section aria-label="Advanced" className="flex flex-col gap-6">
+			<ProfileCardSection
+				agentTitle={agentTitle}
+				badge={employeeBadge}
+				bannerAgentId={props.bannerAgentId}
+				bannerPreferenceStore={props.bannerPreferenceStore}
+				isLocked={isLocked}
+				marketplaceWallpapers={props.marketplaceWallpapers}
+				name={name}
+				onAgentTitleChange={onAgentTitleChange}
+				onInstallWallpaper={props.onInstallWallpaper}
+				onPersonaDisplayNameChange={onPersonaDisplayNameChange}
+				personaDisplayName={personaDisplayName}
+			/>
+			{capabilitiesPanel}
 			{advancedInference}
 		</section>
-	);
-
-	// Name + picture + description. In the tabbed editor these live in the profile
-	// header; the guided flow needs them as a first step of their own.
-	const basicsPanel = (
-		<SettingsSection
-			caption="You can change any of this later."
-			title="Name & picture"
-		>
-			<SettingsCard className="flex items-center gap-4">
-				<div className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-card">
-					{agentIcon ?? <RyuLogo className="text-foreground" size="28px" />}
-				</div>
-				<div className="flex min-w-0 flex-1 flex-col gap-2">
-					<Label className="sr-only" htmlFor="guided-agent-name">
-						Name
-					</Label>
-					<Input
-						disabled={isLocked}
-						id="guided-agent-name"
-						onChange={(e) => onNameChange?.(e.target.value)}
-						placeholder="Name your agent"
-						value={name}
-					/>
-					<Label className="sr-only" htmlFor="guided-agent-description">
-						Description
-					</Label>
-					<Input
-						disabled={isLocked}
-						id="guided-agent-description"
-						onChange={(e) => onDescriptionChange?.(e.target.value)}
-						placeholder="What is it for? e.g. Drafts replies to support email"
-						value={description ?? ""}
-					/>
-				</div>
-			</SettingsCard>
-		</SettingsSection>
 	);
 
 	// Evals / Calendar / History are all read-only views of what the agent has
@@ -3350,6 +3602,13 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 			label: "Quality tests",
 		});
 	}
+	if (optimizationsPanel) {
+		activityViews.push({
+			content: optimizationsPanel,
+			id: "optimizations",
+			label: "Optimizations",
+		});
+	}
 	if (historyPanel) {
 		activityViews.push({
 			content: historyPanel,
@@ -3365,148 +3624,175 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		});
 	}
 
-	const activityPanel =
-		activityViews.length > 0 ? (
-			<Tabs className="gap-4" defaultValue={activityViews[0].id}>
-				<TabsList variant="line">
-					{activityViews.map((view) => (
-						<TabsTrigger key={view.id} value={view.id}>
-							{view.label}
-						</TabsTrigger>
-					))}
-				</TabsList>
+	const firstActivityView = activityViews[0];
+	const activityPanel = firstActivityView ? (
+		<Tabs defaultValue={firstActivityView.id} spacing="comfortable">
+			<TabsList variant="line">
 				{activityViews.map((view) => (
-					<TabsContent
-						className="flex flex-col gap-5"
-						key={view.id}
-						value={view.id}
-					>
-						{view.content}
-					</TabsContent>
+					<TabsTrigger key={view.id} value={view.id}>
+						{view.label}
+					</TabsTrigger>
 				))}
-			</Tabs>
-		) : null;
+			</TabsList>
+			{activityViews.map((view) => (
+				<TabsContent key={view.id} layout="agent-activity" value={view.id}>
+					{view.content}
+				</TabsContent>
+			))}
+		</Tabs>
+	) : null;
 
-	// Editor groups each answer one question a person actually has, with the
-	// answer spelled out under the strip. This replaces an eleven-pill row whose
-	// labels (Behavior · Health · Model · Tools & knowledge · Connections · Integrations ·
-	// Triggers · Activity · Advanced) gave no hint which
-	// one held the setting you were looking for.
-	const editorTabs: {
-		content: ReactNode;
-		hint: string;
-		id: string;
-		label: string;
-	}[] = [
+	// Two tiers, like the agent profiles in Grok, Notion, and Meta: a few
+	// essentials everyone needs (what it does, what it can use, when it runs),
+	// then everything else behind them. Simple mode (Bot) shows only the
+	// essentials; the advanced tier lives in the Agent workspace.
+	const essentialTabs: EditorTab[] = [
 		{
 			content: behaviorPanel,
-			hint: "What this agent does, how it answers, and the rules it always follows.",
+			hint: "What this agent does, which model runs it, and how it answers.",
 			id: "behavior",
 			label: "Behavior",
 		},
-		...(healthPanel
-			? [
-					{
-						content: healthPanel,
-						hint: "Common setup checks that update as you edit this agent.",
-						id: "health",
-						label: "Health",
-					},
-				]
-			: []),
-		...(showStandaloneModelPanel
+		...(showModelTab
 			? [
 					{
 						content: modelPanel,
 						hint: "Which AI runs this agent.",
-						id: "model",
+						id: "model" as const,
 						label: "Model",
 					},
 				]
 			: []),
 		{
 			content: toolsPanel,
-			hint: "What it is allowed to use, and what it is allowed to read and remember.",
+			hint: "What it may use, read, and remember.",
 			id: "tools",
 			label: "Tools & knowledge",
 		},
-		{
-			content: connectionsPanel,
-			hint: "Apps it acts through, the accounts it acts as, and where you can reach it.",
-			id: "connections",
-			label: "Connections",
-		},
-		...(integrationsPanel
-			? [
-					{
-						content: integrationsPanel,
-						hint: "Call this agent from code, CI, MCP hosts, or a Ryu App.",
-						id: "integrations",
-						label: "Integrations",
-					},
-				]
-			: []),
 		{
 			content: triggersPanel,
 			hint: "When it should run on its own, without you asking.",
 			id: "triggers",
 			label: "Triggers",
 		},
-		...(activityPanel
-			? [
-					{
-						content: activityPanel,
-						hint: "What this agent has done, and how well it scored.",
-						id: "activity",
-						label: "Activity",
-					},
-				]
-			: []),
-		...(promptStudioPanel
-			? [
-					{
-						content: promptStudioPanel,
-						hint: "Write and version the full instructions with the editor.",
-						id: "prompt-studio",
-						label: "Prompt Studio",
-					},
-				]
-			: []),
-		...(versionHistoryPanel
-			? [
-					{
-						content: versionHistoryPanel,
-						hint: "Compare and restore complete saved agent configurations for regression testing.",
-						id: "versions",
-						label: "Versions",
-					},
-				]
-			: []),
-		{
-			content: advancedPanel,
-			hint: "Sampling, extra model slots, and other low-level controls. Safe to ignore.",
-			id: "advanced",
-			label: "Advanced",
-		},
 	];
+	const advancedTabs: EditorTab[] = simple
+		? []
+		: [
+				{
+					content: connectionsPanel,
+					hint: "Apps it acts through, the accounts it may use, and where you can reach it.",
+					id: "connections",
+					label: "Connections",
+				},
+				...(integrationsPanel
+					? [
+							{
+								content: integrationsPanel,
+								hint: "Call this agent from code, CI, MCP hosts, or a Ryu App.",
+								id: "integrations" as const,
+								label: "Integrations",
+							},
+						]
+					: []),
+				...(healthPanel
+					? [
+							{
+								content: healthPanel,
+								hint: "Common setup checks that update as you edit this agent.",
+								id: "health" as const,
+								label: "Health",
+							},
+						]
+					: []),
+				...(activityPanel
+					? [
+							{
+								content: activityPanel,
+								hint: "What this agent has done, and how well it scored.",
+								id: "activity" as const,
+								label: "Activity",
+							},
+						]
+					: []),
+				...(promptStudioPanel
+					? [
+							{
+								content: promptStudioPanel,
+								hint: "Write and version the full instructions with the editor.",
+								id: "prompt-studio" as const,
+								label: "Prompt Studio",
+							},
+						]
+					: []),
+				...(versionHistoryPanel
+					? [
+							{
+								content: versionHistoryPanel,
+								hint: "Compare and restore complete saved agent configurations.",
+								id: "versions" as const,
+								label: "Versions",
+							},
+						]
+					: []),
+				{
+					content: advancedPanel,
+					hint: "Profile card, model capabilities, orchestration, and engine defaults.",
+					id: "advanced",
+					label: "Advanced",
+				},
+			];
+	const editorTabs = [...essentialTabs, ...advancedTabs];
+	const availableTabIds = new Set(editorTabs.map((tab) => tab.id));
+
+	// A tab can disappear underneath the selection (the model panel merges into
+	// the composer, an injected panel is withdrawn, or the editor switches to
+	// simple mode). Fall back to Behavior instead of rendering an empty body.
+	const activeTabAvailable = editorTabs.some((tab) => tab.id === activeTab);
 	useEffect(() => {
-		if (!showStandaloneModelPanel && activeTab === "model") {
+		if (!activeTabAvailable) {
 			setActiveTab("behavior");
 		}
-	}, [activeTab, showStandaloneModelPanel]);
-	useEffect(() => {
-		if (!integrationsPanel && activeTab === "integrations") {
-			setActiveTab("behavior");
+	}, [activeTabAvailable]);
+
+	// A host asked to open on one setting. Its tab can arrive a render late (the
+	// panel waits on the record), so this waits for the tab, then reveals once.
+	// The simple editor shows Account access under Identity instead.
+	const initialSettingTab = (() => {
+		const entry = AGENT_SETTINGS_ENTRIES.find(
+			(candidate) => candidate.id === initialSettingId
+		);
+		if (!entry) {
+			return null;
 		}
-	}, [activeTab, integrationsPanel]);
+		const tab =
+			entry.id === AGENT_ACCOUNT_ACCESS_SETTING_ID && simpleAccountAccess
+				? "tools"
+				: entry.tab;
+		return availableTabIds.has(tab) ? { entry, tab } : null;
+	})();
+	const initialSettingShown = useRef(false);
+	const cancelInitialReveal = useRef<(() => void) | null>(null);
+	useEffect(() => {
+		if (initialSettingShown.current || !initialSettingTab) {
+			return;
+		}
+		initialSettingShown.current = true;
+		setActiveTab(initialSettingTab.tab);
+		cancelInitialReveal.current = revealAgentSetting(
+			initialSettingTab.entry,
+			editorRef.current ?? document
+		);
+	}, [initialSettingTab]);
+	useEffect(() => () => cancelInitialReveal.current?.(), []);
 
 	const activeHint = editorTabs.find((tab) => tab.id === activeTab)?.hint ?? "";
 
-	// Activity and Prompt Studio only exist when their panels were injected, so a
-	// hit filed under an absent tab would switch to a pill that isn't there and
-	// leave the editor showing nothing. Drop those instead of showing a dead row.
-	const availableTabs = new Set(editorTabs.map((tab) => tab.id));
-	const visibleHits = settingsHits.filter((hit) => availableTabs.has(hit.tab));
+	// A hit filed under an absent tab would switch to a pill that isn't there
+	// and leave the editor showing nothing. Drop those instead of a dead row.
+	const visibleHits = settingsHits.filter((hit) =>
+		availableTabIds.has(hit.tab)
+	);
 
 	// Switch to the hit's tab, then flash the row. The reveal polls, because the
 	// panel is a commit (or, for one that fetches first, a few hundred ms) away
@@ -3524,8 +3810,6 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 			) : null}
 
 			<div className="flex gap-2">
-				{/* An unsaved agent is created, not "saved" — this footer is reachable
-				    with isNew still true via "Set it up myself". */}
 				{isNew ? (
 					<>
 						<Button
@@ -3557,97 +3841,9 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		</>
 	);
 
-	// A brand-new agent starts in the guided flow: four named steps over the same
-	// panels, so nobody has to guess which setup step is mandatory. "Set it up
-	// myself" drops straight into the full editor for anyone who'd rather browse.
-	if (isNew && guided) {
-		return (
-			<GuidedSetup
-				busy={saving}
-				error={formError}
-				finishDisabled={saveDisabled}
-				finishLabel="Create & chat"
-				footnote={
-					<p className="text-muted-foreground text-xs">
-						Every step is optional except the name — you can come back and
-						change all of it after the agent exists.
-					</p>
-				}
-				header={
-					<div className="flex flex-col gap-1">
-						<h1 className="font-medium text-xl">Create an agent</h1>
-						<p className="text-muted-foreground text-sm">
-							{guidedStepCount} steps. Nothing here is permanent.
-						</p>
-					</div>
-				}
-				onCancel={onCancel}
-				onFinish={() => onCreateAndChat?.()}
-				onSkip={() => setGuided(false)}
-				secondaryFinish={{
-					label: "Create agent",
-					onClick: () => onSave?.(),
-				}}
-				steps={[
-					{
-						blockedReason: name.trim()
-							? null
-							: "Give your agent a name to continue.",
-						content: basicsPanel,
-						hint: "Give it a name you'll recognise in a list, and a line about what it's for.",
-						id: "basics",
-						label: "Basics",
-						title: "Name your agent",
-					},
-					...(showStandaloneModelPanel
-						? [
-								{
-									blockedReason:
-										engineOptions.length > 0 && !chatModel
-											? "Pick a model to continue."
-											: null,
-									content: modelPanel,
-									hint: "This is the AI that does the thinking. You can swap it later at any time.",
-									id: "model",
-									label: "Model",
-									title: "Pick the model",
-								},
-							]
-						: []),
-					{
-						content: behaviorPanel,
-						hint: "Tell it what to do, in your own words. Rules are short lines it must always follow.",
-						id: "behavior",
-						label: "Behavior",
-						title: "Say how it should behave",
-					},
-					{
-						content: toolsPanel,
-						hint: "Tick only what it needs. You can add more once you see how it works.",
-						id: "abilities",
-						label: "Abilities",
-						title: "Choose what it can use",
-					},
-					...(healthPanel
-						? [
-								{
-									content: healthPanel,
-									hint: "Review common setup checks before you create the agent.",
-									id: "health",
-									label: "Health",
-									title: "Check the setup",
-								},
-							]
-						: []),
-				]}
-			/>
-		);
-	}
-
-	// The search field + its result list. Sits at the top right of the tab strip,
-	// where macOS Settings puts it, and collapses to a full-width row of its own
-	// once the pills wrap.
-	const settingsSearch = (
+	// Search only earns its place once the advanced tier is there; four
+	// essentials tabs are short enough to scan.
+	const settingsSearch = simple ? null : (
 		<div className="relative w-full shrink-0 sm:w-56">
 			<HugeiconsIcon
 				className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -3655,7 +3851,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 			/>
 			<Input
 				aria-label="Search agent settings"
-				className="h-8 pl-8 text-sm"
+				leadingAdornment="compact"
 				onChange={(e) => setSettingsQuery(e.target.value)}
 				onKeyDown={(e) => {
 					if (e.key === "Escape") {
@@ -3663,12 +3859,14 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 					}
 					// Enter takes the top hit — the shortest path when you already know
 					// the name of the setting and just typed enough of it.
-					if (e.key === "Enter" && visibleHits.length > 0) {
+					const firstHit = visibleHits[0];
+					if (e.key === "Enter" && firstHit) {
 						e.preventDefault();
-						handleSelectSetting(visibleHits[0]);
+						handleSelectSetting(firstHit);
 					}
 				}}
 				placeholder="Search settings…"
+				size="settings-search"
 				value={settingsQuery}
 			/>
 			{settingsQuery.trim() ? (
@@ -3687,8 +3885,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 							>
 								<span className="font-medium text-sm">{hit.label}</span>
 								{/* Where it lives, so a hit is a direction and not just a
-								    name — the breadcrumb is the whole point of searching for
-								    a setting you have never opened. */}
+								    name. */}
 								<span className="text-muted-foreground text-xs">
 									{AGENT_TAB_LABELS[hit.tab]}
 									{hit.group ? ` › ${hit.group}` : ""}
@@ -3702,54 +3899,66 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	);
 
 	return (
-		<div className="mx-auto w-full max-w-5xl" ref={editorRef}>
-			<div className="flex min-w-0 flex-col gap-7">
+		<div className="mx-auto w-full max-w-3xl" ref={editorRef}>
+			<div className="flex min-w-0 flex-col gap-6">
 				<ProfileHeader
 					agentIcon={agentIcon}
-					agentTitle={agentTitle}
-					badge={employeeBadge}
 					builtIn={isBuiltIn}
 					description={description}
-					healthBadge={healthBadge}
+					healthBadge={simple ? undefined : healthBadge}
 					isLocked={isLocked}
 					isNew={isNew}
 					modelLabel={modelLabel}
 					name={name}
-					onAgentTitleChange={onAgentTitleChange}
 					onCreateAndChat={onCreateAndChat}
 					onDescriptionChange={onDescriptionChange}
 					onNameChange={onNameChange}
 					onSave={onSave}
 					saveDisabled={saveDisabled}
 					saving={saving}
-					selectedSkills={selectedSkills}
-					selectedTools={selectedTools}
 				/>
 
-				<Tabs className="gap-3" onValueChange={setActiveTab} value={activeTab}>
+				<Tabs onValueChange={setActiveTab} spacing="relaxed" value={activeTab}>
 					<div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-						<TabsList className="flex-wrap" variant="pills">
-							{editorTabs.map((tab) => (
+						{/* Unmanaged: children render in order, so the divider stays between
+						    the two tiers, and an overflowing strip scrolls with arrows instead
+						    of folding tabs into a menu. */}
+						<TabsList
+							className="min-w-0 max-w-full"
+							manageLayout={false}
+							variant="pills"
+						>
+							{essentialTabs.map((tab) => (
 								<TabsTrigger key={tab.id} value={tab.id}>
+									{tab.label}
+								</TabsTrigger>
+							))}
+							{advancedTabs.length > 0 ? (
+								<Separator
+									className="mx-1 h-4 self-center"
+									orientation="vertical"
+								/>
+							) : null}
+							{advancedTabs.map((tab) => (
+								<TabsTrigger key={tab.id} tone="muted" value={tab.id}>
 									{tab.label}
 								</TabsTrigger>
 							))}
 						</TabsList>
 						{settingsSearch}
+						{simple && onOpenAdvanced ? (
+							<Button onClick={onOpenAdvanced} size="sm" variant="ghost-muted">
+								Advanced settings in the Agent workspace
+							</Button>
+						) : null}
 					</div>
 
-					{/* One line telling you what this group holds — the cheapest fix for
-					    "I can't find the setting I need". */}
 					{activeHint ? (
 						<p className="px-1 text-muted-foreground text-xs">{activeHint}</p>
 					) : null}
 
 					{editorTabs.map((tab) => (
-						<TabsContent
-							className="flex flex-col gap-6 pt-1"
-							key={tab.id}
-							value={tab.id}
-						>
+						<TabsContent key={tab.id} layout="agent-settings" value={tab.id}>
 							{tab.content}
 						</TabsContent>
 					))}

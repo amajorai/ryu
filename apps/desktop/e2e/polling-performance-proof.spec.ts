@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import type { PluginValue } from "../src/lib/api/plugin-wire-values.ts";
 
 const proofDir = path.resolve(
 	import.meta.dirname,
@@ -30,32 +31,34 @@ test("polls avoid overlap, pause when hidden and discard stale context", async (
 		if (held) {
 			await new Promise<void>((resolve) => releases.push(resolve));
 		}
-		const bodies: Record<string, unknown> = {
-			"/api/inbox/unread-count": { counts: { all: 7 } },
-			"/api/control-plane/nodes/sandboxes": {
-				nodes: [
-					{
-						id: "edge",
-						name: "Edge server",
-						reachableUrl: "https://node.example.com",
-						status: "online",
-						hasGpu: false,
-						sandboxes: [],
-					},
-				],
-			},
-			"/proof/health": { available: true },
-			"/proof/sidecars": {
-				available: true,
-				sidecars: [{ name: "shadow", running: true }],
-			},
-			"/proof/control": { available: true, control: { paused: false } },
-			"/proof/context": {
-				available: true,
-				context: { app_name: "Editor", capture_active: true, paused: false },
-			},
-		};
-		await route.fulfill({ json: bodies[key] ?? {} }).catch(() => undefined);
+		const bodies = new Map<string, PluginValue>(
+			Object.entries<PluginValue>({
+				"/api/inbox/unread-count": { counts: { all: 7 } },
+				"/api/control-plane/nodes/sandboxes": {
+					nodes: [
+						{
+							id: "edge",
+							name: "Edge server",
+							reachableUrl: "https://node.example.com",
+							status: "online",
+							hasGpu: false,
+							sandboxes: [],
+						},
+					],
+				},
+				"/proof/health": { available: true },
+				"/proof/sidecars": {
+					available: true,
+					sidecars: [{ name: "shadow", running: true }],
+				},
+				"/proof/control": { available: true, control: { paused: false } },
+				"/proof/context": {
+					available: true,
+					context: { app_name: "Editor", capture_active: true, paused: false },
+				},
+			})
+		);
+		await route.fulfill({ json: bodies.get(key) ?? {} }).catch(() => undefined);
 	});
 	await page.goto("/polling-performance-proof.html");
 	await expect(page.getByText("Edge server", { exact: true })).toBeVisible();

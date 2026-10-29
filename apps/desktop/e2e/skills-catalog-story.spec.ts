@@ -12,6 +12,7 @@
 // The bug: `hasSelection={selectedId != null}` with a close that sets `""`. The
 // dialog reopened itself on close and could not be dismissed at all.
 
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 // The story pulls the shared marketplace module graph; vite compiles it on first
@@ -19,6 +20,10 @@ import { expect, test } from "@playwright/test";
 test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/skills-catalog-story.html";
+const PACK_PROOF_PATH = path.resolve(
+	import.meta.dirname,
+	"../../../docs/proof/marketplace-skill-packs/jakubkrehel-featured.png"
+);
 
 const dialog = (page: import("@playwright/test").Page) =>
 	page.locator('[data-slot="dialog-content"]');
@@ -64,6 +69,21 @@ test.describe("skills catalog preview — open and close", () => {
 		await card(page, "CSV Tidy").click();
 		await expect(dialog(page)).toBeVisible();
 	});
+});
+
+test("the marketplace featured pack shelf includes Jakub Krehel's skills", async ({
+	page,
+}) => {
+	await page.goto(STORY_URL);
+	await expect(
+		page.getByText("Featured skill packs", { exact: true })
+	).toBeVisible();
+	await expect(
+		page.getByRole("button", {
+			name: "Open the Jakubkrehel Skills pack (11 skills)",
+		})
+	).toBeVisible();
+	await page.screenshot({ path: PACK_PROOF_PATH, fullPage: true });
 });
 
 test("all marketplaces stays visible while the popover manages sources", async ({

@@ -1,0 +1,43 @@
+/*
+ * Core engines figure. The shared quiet tokens (../shared/quiet.css) set the look; the
+ * one lit accent is the loaded cartridge. This file adds only the pointer and the slow
+ * health-check ring.
+ */
+
+.ce-live {
+	cursor: pointer;
+}
+
+/* One slow loop: a ring on the player widens and fades once per (sped-up) health check. */
+.ce-pulse {
+	opacity: 0;
+	transform-box: view-box;
+	animation: ce-pulse var(--ce-pulse, 6s) cubic-bezier(0.22, 0.61, 0.36, 1)
+		infinite;
+}
+
+.iso-stage:not([data-inview]) .ce-pulse {
+	animation-play-state: paused;
+}
+
+@keyframes ce-pulse {
+	0% {
+		opacity: 0;
+		transform: scale(0.8);
+	}
+	12% {
+		opacity: 0.9;
+	}
+	60%,
+	100% {
+		opacity: 0;
+		transform: scale(1.3);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ce-pulse {
+		opacity: 0.6;
+		animation: none;
+	}
+}

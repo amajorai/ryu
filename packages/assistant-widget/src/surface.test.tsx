@@ -4,7 +4,7 @@ import {
 	RyuAssistantRecentChats,
 	RyuAssistantWidgetFrame,
 	RyuAssistantWidgetHeader,
-} from "./surface";
+} from "./surface.tsx";
 
 describe("assistant widget surface primitives", () => {
 	test("renders a semantic docked frame and shared header", () => {
@@ -19,10 +19,23 @@ describe("assistant widget surface primitives", () => {
 		);
 
 		expect(html).toContain('data-ryu-assistant-widget="true"');
+		// The website's Lenis smooth scroll must let wheel and touch scroll the panel natively.
+		expect(html).toContain("data-lenis-prevent");
 		expect(html).toContain('data-placement="docked"');
 		expect(html).toContain('aria-label="Ask Ryu assistant"');
 		expect(html).toContain("New chat");
 		expect(html).toContain('aria-label="Close assistant"');
+	});
+
+	test("names non-docked assistant frames as regions", () => {
+		const html = renderToStaticMarkup(
+			<RyuAssistantWidgetFrame ariaLabel="Ryu assistant" placement="floating">
+				<p>Chat content</p>
+			</RyuAssistantWidgetFrame>
+		);
+
+		expect(html).toContain('aria-label="Ryu assistant"');
+		expect(html).toContain('role="region"');
 	});
 
 	test("limits recent chats to the compact surface's four-row handoff", () => {

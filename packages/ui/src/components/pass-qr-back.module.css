@@ -1,0 +1,37 @@
+/* Finite invite-pass drawing roles. The real seed-derived palette is supplied
+   through native custom properties; QRCode's native geometry/fill props remain. */
+.glow {
+	background: radial-gradient(circle, var(--pass-qr-glow), transparent 70%);
+}
+.frame {
+	background-color: var(--pass-qr-surface);
+	border-radius: 1.65rem;
+	box-shadow:
+		0 0 0 1px var(--pass-qr-glow),
+		0 18px 45px -28px var(--pass-qr-glow);
+}
+.logoTile {
+	background-color: var(--pass-qr-surface);
+	box-shadow: 0 0 0 3px var(--pass-qr-surface);
+}
+.foreground {
+	color: var(--pass-qr-foreground);
+}
+.caption {
+	color: var(--pass-qr-foreground);
+	letter-spacing: 0.24em;
+}
+.placeholder {
+	width: 13rem;
+	height: 13rem;
+	color: var(--pass-qr-foreground);
+	background-color: var(--pass-qr-surface);
+	border-color: var(--pass-qr-glow);
+	border-radius: 1.65rem;
+}
+.pendingDots {
+	letter-spacing: 0.35em;
+}
+.pendingCaption {
+	letter-spacing: 0.18em;
+}

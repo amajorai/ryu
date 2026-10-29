@@ -1,0 +1,116 @@
+# Hosted fleet gateway with its hazard screener (managed guardrails screener
+# addendum section 10, build step G7). Runbook: docs/deploy-gateway-fleet.md.
+#
+#   docker compose -f apps/gateway/docker-compose.fleet.yml up -d --build
+#
+# Two containers:
+#
+# * gateway: the same image and security profile as the single-container
+#   Dokploy application (apps/gateway/Dockerfile, built from the repo root).
+# * screener: a local closed-choice decision model on the `systemone` wire
+#   (Ollaya on CPU, apps/gateway/screener.Dockerfile), the primary screener.
+#   There is no GPU on the fleet, so there is no guard-model or vision service
+#   and every image or other media input is refused with media_unscreenable.
+#
+# The screener sits only on the internal `screening` network: no published
+# port and no egress. Its weights are baked in at build time and pinned by
+# digest. The gateway deliberately has NO depends_on the screener: a screener
+# outage opens the gateway's breaker and puts the replica in degraded mode
+# (regex floor plus throttle), it never stops the gateway from starting, and
+# the gateway's /health never reflects the screener.
+#
+# The gateway reads its backend table from /data/gateway.toml; paste
+# apps/gateway/fleet/screening.toml into it. Without that table the replica
+# screens in degraded mode only.
+#
+# Every other gateway variable in the runbook (provider vault, credits loop,
+# identity secrets, analytics relay) is read from an optional .env file next
+# to this file, which is where Dokploy writes a compose application's
+# environment.
+#
+# Validated here for syntax only. The image builds, the model pull and a
+# running stack are unverified.
+
+name: ryu-gateway-fleet
+
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: apps/gateway/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY}
+      RYU_GATEWAY_FLEET: "1"
+      GATEWAY_CONFIG: /data/gateway.toml
+      # The decision screener on the internal network. The model and digest
+      # are the same values the screener image is built with, so the gateway
+      # pins exactly the weights the container serves.
+      RYU_SCREENER_DECISION_URL: http://screener:11435/v1/systemone
+      RYU_SCREENER_DECISION_MODEL: ${RYU_SCREENER_DECISION_MODEL:?set RYU_SCREENER_DECISION_MODEL}
+      RYU_SCREENER_DECISION_SHA256: ${RYU_SCREENER_DECISION_SHA256:?set RYU_SCREENER_DECISION_SHA256}
+    networks:
+      - edge
+      - screening
+    expose:
+      - "7981"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    volumes:
+      - gateway-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7981/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  screener:
+    build:
+      context: .
+      dockerfile: screener.Dockerfile
+      args:
+        OLLAYA_IMAGE: ${RYU_SCREENER_OLLAYA_IMAGE:?set RYU_SCREENER_OLLAYA_IMAGE to ghcr.io/ollaya-dev/ollaya@sha256:<digest>}
+        SCREENER_MODEL: ${RYU_SCREENER_DECISION_MODEL:?set RYU_SCREENER_DECISION_MODEL}
+        SCREENER_MODEL_SHA256: ${RYU_SCREENER_DECISION_SHA256:?set RYU_SCREENER_DECISION_SHA256}
+        SCREENER_EXTRA_PINS: ${RYU_SCREENER_EXTRA_PINS:-}
+    environment:
+      OLLAYA_THREADS: ${RYU_SCREENER_THREADS:-4}
+    # Internal network only: no ports published, no egress.
+    networks:
+      - screening
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+      - /home/ollaya:rw,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: ${RYU_SCREENER_MEMORY:-6g}
+    cpus: ${RYU_SCREENER_CPUS:-4}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollaya", "list"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 5
+
+networks:
+  edge: {}
+  screening:
+    internal: true
+
+volumes:
+  gateway-data:

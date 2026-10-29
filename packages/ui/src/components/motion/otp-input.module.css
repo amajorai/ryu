@@ -1,0 +1,4 @@
+.inline1 {
+	transform-origin: var(--otp-input-1-transform-origin);
+	transform-style: var(--otp-input-1-transform-style);
+}

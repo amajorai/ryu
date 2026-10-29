@@ -14,6 +14,10 @@ import {
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
+import {
+	skillDisplayName,
+	skillToggleChangesSet,
+} from "@/src/components/skills/skill-set-change.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type AddMarketplaceParams,
@@ -81,7 +85,11 @@ export interface UseSkillsCatalogResult {
 	setInstalledOnly: (v: boolean) => void;
 	setOrg: (o: string) => void;
 	setQuery: (q: string) => void;
-	/** Enable or disable an installed skill (global activation). */
+	/**
+	 * Enable or disable an installed skill (global activation). A change to the
+	 * enabled set asks first, because it resets the prompt cache of every thread
+	 * that loads skills; cancelling leaves the skill as it was.
+	 */
 	setSkillEnabled: (id: string, active: boolean) => Promise<void>;
 	setSort: (s: SkillSort) => void;
 	skills: SkillCard[];
@@ -150,7 +158,8 @@ export function installedSkillsQuery(target: ApiTarget) {
 }
 
 export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
-	const { installCatalogSkill } = useSkillDistributionFlow();
+	const { confirmSkillSetChange, installCatalogSkill } =
+		useSkillDistributionFlow();
 	const activeNode = useActiveNode();
 	const target = useMemo<ApiTarget>(
 		() => ({
@@ -271,12 +280,16 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 		useMemo(
 			() => ({
 				queryKey: ["skills", "detail", url, selectedId, detailSource],
-				queryFn: () =>
-					fetchSkillDetail(
+				queryFn: () => {
+					if (selectedId === null) {
+						throw new Error("Select a skill before requesting its details.");
+					}
+					return fetchSkillDetail(
 						target,
-						selectedId as string,
+						selectedId,
 						detailSource === ALL_SKILL_SOURCES_ID ? undefined : detailSource
-					),
+					);
+				},
 				enabled: selectedId !== null,
 			}),
 			[target, url, selectedId, detailSource]
@@ -285,7 +298,8 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 
 	const installMutation = useMutation({
 		mutationFn: (vars: { id: string; source?: string }) =>
-			installCatalogSkill(vars),
+			// `install` asked before the optimistic update below.
+			installCatalogSkill({ ...vars, promptCacheConfirmed: true, target }),
 		onMutate: async (vars) => {
 			const key = ["skills", "detail", url, vars.id, detailSource];
 			await qc.cancelQueries({ queryKey: key });
@@ -317,6 +331,9 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 			Promise.resolve(
 				qc.invalidateQueries({ queryKey: ["skills", "list", url] })
 			).catch(() => undefined);
+			Promise.resolve(
+				qc.invalidateQueries({ queryKey: ["skills", "installed", url] })
+			).catch(() => undefined);
 		},
 	});
 
@@ -340,12 +357,6 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 			).catch(() => undefined);
 		},
 	});
-	const setSkillEnabled = useCallback(
-		(id: string, active: boolean) =>
-			setActiveMutation.mutateAsync({ id, active }),
-		[setActiveMutation]
-	);
-
 	const installedSkills = useMemo(
 		() => installedQuery.data ?? [],
 		[installedQuery.data]
@@ -357,6 +368,22 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 		}
 		return map;
 	}, [installedSkills]);
+
+	const setSkillEnabled = useCallback(
+		async (id: string, active: boolean) => {
+			if (skillToggleChangesSet(enabledByKey[id], active)) {
+				const name = installedSkills.find((skill) => skill.id === id)?.name;
+				const confirmed = await confirmSkillSetChange([
+					skillDisplayName(id, name),
+				]);
+				if (!confirmed) {
+					return;
+				}
+			}
+			await setActiveMutation.mutateAsync({ id, active });
+		},
+		[confirmSkillSetChange, enabledByKey, installedSkills, setActiveMutation]
+	);
 
 	// Sort client-side over the FULL fetched batch: install counts are already on
 	// each card, so re-ordering needs no refetch (and keeps the same cached list
@@ -384,10 +411,13 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 		[sortedSkills, visibleCount]
 	);
 	const hasNextPage = visibleCount < sortedSkills.length;
-	const fetchNextPage = useCallback(
-		() => setVisibleCount((c) => c + PAGE_SIZE),
-		[]
-	);
+	const fetchNextPage = useCallback(() => {
+		if (listQuery.isError) {
+			void listQuery.refetch();
+			return;
+		}
+		setVisibleCount((current) => current + PAGE_SIZE);
+	}, [listQuery.isError, listQuery.refetch]);
 
 	// An empty id means "nothing selected" — the store sections close a preview by
 	// calling `select("")`. Storing that verbatim left a selection that is neither
@@ -413,8 +443,27 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 		}
 		const source =
 			detailSource === ALL_SKILL_SOURCES_ID ? undefined : detailSource;
+		const name =
+			(detailQuery.data?.card.id === selectedId
+				? detailQuery.data.card.name
+				: undefined) ?? skills.find((card) => card.id === selectedId)?.name;
+		// Ask before the optimistic "installed" update, so cancelling never
+		// flashes the skill as added.
+		const confirmed = await confirmSkillSetChange([
+			skillDisplayName(selectedId, name),
+		]);
+		if (!confirmed) {
+			return;
+		}
 		await installMutation.mutateAsync({ id: selectedId, source });
-	}, [detailSource, installMutation, selectedId]);
+	}, [
+		confirmSkillSetChange,
+		detailQuery.data,
+		detailSource,
+		installMutation,
+		selectedId,
+		skills,
+	]);
 
 	return {
 		skills,

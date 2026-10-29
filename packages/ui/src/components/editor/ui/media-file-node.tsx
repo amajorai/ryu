@@ -2,6 +2,7 @@
 
 import { useMediaState } from "@platejs/media/react";
 import { ResizableProvider } from "@platejs/resizable";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { FileUp } from "lucide-react";
 import type { TFileElement } from "platejs";
@@ -14,6 +15,7 @@ export const FileElement = withHOC(
 	function FileElement(props: PlateElementProps<TFileElement>) {
 		const readOnly = useReadOnly();
 		const { name, unsafeUrl } = useMediaState();
+		const safeUrl = safeMediaUrl(unsafeUrl);
 
 		return (
 			<PlateElement className="my-px rounded-sm" {...props}>
@@ -23,7 +25,7 @@ export const FileElement = withHOC(
 					)}
 					contentEditable={false}
 					download={name}
-					href={unsafeUrl}
+					href={safeUrl ?? undefined}
 					rel="noopener noreferrer"
 					role="button"
 					target="_blank"
@@ -36,7 +38,7 @@ export const FileElement = withHOC(
 					<Caption align="left">
 						<CaptionTextarea
 							className="text-start"
-							placeholder="Write a caption..."
+							placeholder="Write a caption…"
 							readOnly={readOnly}
 						/>
 					</Caption>

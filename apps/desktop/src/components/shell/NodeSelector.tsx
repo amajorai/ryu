@@ -6,6 +6,7 @@ import {
 	BrainIcon,
 	BrowserIcon,
 	Cancel01Icon,
+	CheckmarkBadge02Icon,
 	CloudServerIcon,
 	Copy01Icon,
 	CpuIcon,
@@ -14,6 +15,7 @@ import {
 	Delete01Icon,
 	DollarCircleIcon,
 	Download04Icon,
+	ExpandIcon,
 	File01Icon,
 	FileSearchIcon,
 	GlobeIcon,
@@ -25,12 +27,14 @@ import {
 	Mic01Icon,
 	PackageIcon,
 	RankingIcon,
+	RefreshIcon,
 	Router01Icon,
 	Search01Icon,
 	ServerStack01Icon,
 	Settings01Icon,
 	Share08Icon,
 	SparklesIcon,
+	Tick02Icon,
 	ViewIcon,
 	ViewOffSlashIcon,
 	VolumeHighIcon,
@@ -38,14 +42,26 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
+	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "@ryu/blocks/desktop/settings-items.tsx";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@ryu/ui/components/alert-dialog.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
+	DialogDescription,
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
@@ -67,11 +83,11 @@ import {
 } from "@ryu/ui/components/tooltip.tsx";
 import { buildRyuDeepLink, parseRyuDeepLink } from "@ryuhq/protocol/deep-link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CSSProperties as LayoutCSSProperties } from "react";
 import {
 	type ComponentProps,
 	type ReactNode,
 	useEffect,
-	useId,
 	useState,
 } from "react";
 import { sileo } from "sileo";
@@ -109,8 +125,7 @@ import {
 import { formatMicroUsd } from "@/src/lib/api/credits.ts";
 import { fetchActiveEngine, setActiveEngine } from "@/src/lib/api/engines.ts";
 import { fetchGatewayStatus } from "@/src/lib/api/gateway.ts";
-// # 0.1.0: Island disabled — uncomment with the Island ServiceRow below
-// import { installAndLaunchIsland } from "@/src/lib/api/island.ts";
+import { installAndLaunchIsland } from "@/src/lib/api/island.ts";
 import type {
 	MeshPeerEntry,
 	MeshPeersResult,
@@ -122,7 +137,11 @@ import {
 	fetchMeshStatus,
 	fetchWebhookIngressStatus,
 	ingressLabel,
+	isPublicTunnelBackend,
+	MESH_BACKEND_CLOUDFLARED,
 	MESH_BACKEND_HEADSCALE,
+	MESH_BACKEND_OPENTUNNEL,
+	MESH_BACKEND_PLUGIN,
 	MESH_BACKEND_PREF,
 	MESH_BACKEND_TAILCAT,
 	MESH_BACKEND_TAILSCALE,
@@ -131,6 +150,7 @@ import {
 	parseMeshBackend,
 	setMeshBackend,
 	setMeshEnabled,
+	TUNNEL_CAPABILITY,
 	type WebhookIngressStatus,
 } from "@/src/lib/api/mesh.ts";
 import {
@@ -147,6 +167,7 @@ import {
 	DEFAULT_VOICE_PREFS,
 	DESKTOP_TTS_ENGINE_KEY,
 	DESKTOP_TTS_VOICE_KEY,
+	getDesktopTtsEngineOptions,
 	getDesktopTtsPrefs,
 	getPreference,
 	getSpeechProcessingPrefs,
@@ -155,6 +176,7 @@ import {
 	type SpeechProcessingContext,
 	type SpeechProcessingStructure,
 	type SpeechProcessingStyling,
+	setDesktopTtsEngineOptions,
 	setDesktopTtsPref,
 	setSpeechProcessingPrefs,
 	setVoiceInputPrefs,
@@ -176,15 +198,15 @@ import {
 	installSpeechProcessingModel,
 	listSpeechProcessingEngines,
 	listTtsEngines,
-	type SpeechProcessingEngine as SpeechProcessingEngineInfo,
 	type TtsEngine,
 } from "@/src/lib/api/voice.ts";
 import {
 	connectionDisplayName,
 	connectionSurfaceMeta,
 } from "@/src/lib/connection-surface.ts";
+import { triggerGlobalRefresh } from "@/src/lib/core-refresh.ts";
 import { creditBalanceStatus } from "@/src/lib/credit-warning.ts";
-import { collapsesNodeSections } from "@/src/lib/interface-level.ts";
+import { ISLAND_ENABLED } from "@/src/lib/island-availability.ts";
 import {
 	type CatalogItem,
 	fetchCatalog,
@@ -210,6 +232,16 @@ import {
 	NodeLayerMenu,
 	startStopAction,
 } from "./NodeLayerMenu.tsx";
+import {
+	NodePanelNav,
+	PanelBackButton,
+	PanelGroup,
+	PanelPageLink,
+	PanelRow,
+	PanelSection,
+} from "./NodePanelNav.tsx";
+import layoutStyles from "./NodeSelector.module.css";
+import { WebSearchAccessMenu } from "./WebSearchAccessMenu.tsx";
 
 interface NodeSelectorProps {
 	mode: "persistent-sidebar" | "compact-dropdown";
@@ -253,28 +285,39 @@ function resolveTone(
 	return "green";
 }
 
-const TONE_DOT: Record<Tone, string> = {
+const TONE_DOT = {
 	green: "bg-success",
 	amber: "bg-warning",
 	red: "bg-destructive",
 	pending: "bg-muted-foreground/40",
-};
+} satisfies Record<Tone, string>;
 
 const displayName = (name: string) =>
 	name.charAt(0).toUpperCase() + name.slice(1);
 
+const computerName = (node: Node) =>
+	isLocalNode(node) ? "Your computer" : displayName(node.name);
+
 function StatusDot({ online }: { online: boolean | null }) {
+	// The dot's hue is the only visual cue, so name the state for assistive tech
+	// and expose it on hover.
+	let status = "Offline";
 	if (online === null) {
-		return (
-			<span className="size-2 shrink-0 rounded-full bg-muted-foreground/40" />
-		);
+		status = "Checking status";
+	} else if (online) {
+		status = "Online";
 	}
 	return (
 		<span
+			aria-label={status}
 			className={cn(
 				"size-2 shrink-0 rounded-full",
-				online ? "bg-success" : "bg-warning"
+				online === null && "bg-muted-foreground/40",
+				online === true && "bg-success",
+				online === false && "bg-warning"
 			)}
+			role="img"
+			title={status}
 		/>
 	);
 }
@@ -369,9 +412,12 @@ function UsageBar({
 		total && total > 0 && used !== null
 			? Math.min(100, Math.round((used / total) * 100))
 			: null;
+	const cssVariables1: LayoutCssVariables = {
+		"--desktop-inline1-width": `${pct}%`,
+	};
 	return (
 		<div className="space-y-0.5">
-			<div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/70">
+			<div className="type-compact flex items-center justify-between gap-2 text-muted-foreground/70">
 				<span>{label}</span>
 				<span className="tabular-nums">
 					{compactUsage(usedHuman, totalHuman) || "—"}
@@ -380,8 +426,11 @@ function UsageBar({
 			{pct !== null && (
 				<div className="h-1 overflow-hidden rounded-full bg-muted-foreground/15">
 					<div
-						className={cn("h-full rounded-full", barColor(pct))}
-						style={{ width: `${pct}%` }}
+						className={cn(
+							cn("h-full rounded-full", barColor(pct)),
+							layoutStyles.inline1
+						)}
+						style={cssVariables1}
 					/>
 				</div>
 			)}
@@ -408,7 +457,7 @@ function NodeStats({ info }: { info: SystemInfo }) {
 					<Tooltip>
 						<TooltipTrigger
 							render={
-								<p className="truncate text-[10px] text-muted-foreground/70">
+								<p className="type-compact relative truncate text-muted-foreground/70">
 									{specs.join(" · ")}
 								</p>
 							}
@@ -416,7 +465,7 @@ function NodeStats({ info }: { info: SystemInfo }) {
 						<TooltipContent>{info.cpuName}</TooltipContent>
 					</Tooltip>
 				) : (
-					<p className="truncate text-[10px] text-muted-foreground/70">
+					<p className="type-compact truncate text-muted-foreground/70">
 						{specs.join(" · ")}
 					</p>
 				))}
@@ -512,7 +561,7 @@ function NodeHardwareBody({ info }: { info: SystemInfo }) {
 							value={
 								<div className="flex items-center gap-2">
 									<Progress className="h-1.5 w-20" value={ramPct} />
-									<span>{ramPct}%</span>
+									<span className="tabular-nums">{ramPct}%</span>
 								</div>
 							}
 						/>
@@ -535,7 +584,7 @@ function NodeHardwareBody({ info }: { info: SystemInfo }) {
 							value={
 								<div className="flex items-center gap-2">
 									<Progress className="h-1.5 w-20" value={diskPct} />
-									<span>{diskPct}%</span>
+									<span className="tabular-nums">{diskPct}%</span>
 								</div>
 							}
 						/>
@@ -650,15 +699,44 @@ function NodeHardwareDialog({
 		token: node?.token ?? null,
 		userJwt: node?.userJwt ?? null,
 	};
-	const { data: info, isLoading } = useNodeSystemInfo(
-		target,
-		open && node !== null
+	return (
+		<Dialog onOpenChange={(v) => !v && onClose()} open={open}>
+			<DialogContent className="flex max-h-[85vh] max-w-md flex-col">
+				<DialogHeader>
+					<DialogTitle>
+						Hardware{node ? ` · ${computerName(node)}` : ""}
+					</DialogTitle>
+				</DialogHeader>
+				<div className="scroll-fade -mr-2 min-h-0 flex-1 space-y-5 overflow-y-auto pr-2">
+					<NodeHardwareContent
+						enabled={open && node !== null}
+						target={target}
+					/>
+				</div>
+			</DialogContent>
+		</Dialog>
 	);
+}
+
+/** Hardware specs + dependency checks for one node: the body of the Hardware
+ *  dialog and of the expanded node dialog's Hardware page. */
+function NodeHardwareContent({
+	target,
+	enabled,
+	pending = false,
+}: {
+	target: ApiTarget;
+	enabled: boolean;
+	/** The node's reachability is still being probed: read as loading, not as
+	 *  unreachable, until `enabled` settles. */
+	pending?: boolean;
+}) {
+	const { data: info, isLoading } = useNodeSystemInfo(target, enabled);
 
 	let body: ReactNode;
 	if (info) {
 		body = <NodeHardwareBody info={info} />;
-	} else if (isLoading) {
+	} else if (isLoading || pending) {
 		body = (
 			<div className="flex h-32 items-center justify-center text-muted-foreground text-sm">
 				Loading hardware…
@@ -667,25 +745,16 @@ function NodeHardwareDialog({
 	} else {
 		body = (
 			<div className="flex h-32 items-center justify-center text-muted-foreground text-sm">
-				Node unreachable — couldn't load hardware.
+				Computer unreachable — couldn't load hardware.
 			</div>
 		);
 	}
 
 	return (
-		<Dialog onOpenChange={(v) => !v && onClose()} open={open}>
-			<DialogContent className="flex max-h-[85vh] max-w-md flex-col">
-				<DialogHeader>
-					<DialogTitle>
-						Hardware{node ? ` · ${displayName(node.name)}` : ""}
-					</DialogTitle>
-				</DialogHeader>
-				<div className="scroll-fade -mr-2 min-h-0 flex-1 space-y-5 overflow-y-auto pr-2">
-					{body}
-					{node !== null && <NodeDependenciesSection target={target} />}
-				</div>
-			</DialogContent>
-		</Dialog>
+		<>
+			{body}
+			{enabled && <NodeDependenciesSection target={target} />}
+		</>
 	);
 }
 
@@ -785,25 +854,25 @@ export function AddNodeDialog({
 		<Dialog onOpenChange={(v) => !v && onClose()} open={open}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>Add Node</DialogTitle>
+					<DialogTitle>Add computer</DialogTitle>
 				</DialogHeader>
 				<div className="space-y-3">
 					<div className="space-y-1">
 						<Input
 							aria-label="Connection string"
-							className="font-mono text-xs"
 							id="node-link"
 							onChange={(e) => handleLinkChange(e.target.value)}
 							placeholder="ryu://nodes/connect?url=…"
 							size="lg"
 							value={link}
+							variant="code-caption"
 						/>
-						<p className="text-[11px] text-muted-foreground">
+						<p className="type-caption text-muted-foreground">
 							Paste a connection string to fill the fields below — copy one from
-							the web dashboard or another node's Share menu.
+							Console on the web or another computer's Share menu.
 						</p>
 					</div>
-					<div className="flex items-center gap-2 text-[11px] text-muted-foreground/60">
+					<div className="type-caption flex items-center gap-2 text-muted-foreground/60">
 						<span className="h-px flex-1 bg-border/60" />
 						or enter it manually
 						<span className="h-px flex-1 bg-border/60" />
@@ -846,8 +915,8 @@ export function AddNodeDialog({
 							{scanning ? "Scanning local network…" : "Scan local network"}
 						</button>
 						{discovered !== null && discovered.length === 0 && !scanning && (
-							<p className="text-[11px] text-muted-foreground/60">
-								No new Core nodes found
+							<p className="type-caption text-muted-foreground/60">
+								No new computers found
 							</p>
 						)}
 						{discovered?.map((d) => (
@@ -863,10 +932,13 @@ export function AddNodeDialog({
 									aria-hidden
 									className="size-2 shrink-0 rounded-full bg-success"
 								/>
-								<span className="flex-1 truncate text-left">
+								<span
+									className="flex-1 truncate text-left"
+									title={d.url.replace(URL_SCHEME, "")}
+								>
 									{d.url.replace(URL_SCHEME, "")}
 								</span>
-								<span className="shrink-0 text-[10px] text-muted-foreground/60 tabular-nums">
+								<span className="type-compact shrink-0 text-muted-foreground/60 tabular-nums">
 									{d.latency_ms}ms
 								</span>
 							</button>
@@ -878,7 +950,7 @@ export function AddNodeDialog({
 						Cancel
 					</Button>
 					<Button disabled={!(name.trim() && url.trim())} onClick={handleAdd}>
-						Add Node
+						Add computer
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -956,14 +1028,12 @@ function ShareNodeDialog({
 		<Dialog onOpenChange={(v) => !v && onClose()} open={open}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>
-						Connect a device to {displayName(node.name)}
-					</DialogTitle>
+					<DialogTitle>Connect a computer to {computerName(node)}</DialogTitle>
 				</DialogHeader>
 				<div className="space-y-3">
 					<div className="space-y-1">
-						<p className="text-[11px] text-muted-foreground">
-							Address other devices use to reach this node
+						<p className="type-caption text-muted-foreground">
+							Address other computers use to reach this computer
 						</p>
 						<Input
 							aria-label="Shareable address"
@@ -973,7 +1043,7 @@ function ShareNodeDialog({
 							value={host}
 						/>
 						{isLoopback && (
-							<p className="text-[11px] text-status-warning">
+							<p className="type-caption text-status-warning">
 								Other devices can't reach a localhost address. Enter this
 								machine's LAN IP (e.g. 192.168.1.50) or Tailscale name.
 							</p>
@@ -983,11 +1053,11 @@ function ShareNodeDialog({
 					{node.token && (
 						<div className="space-y-1">
 							<div className="flex items-center justify-between">
-								<p className="text-[11px] text-muted-foreground">
+								<p className="type-caption text-muted-foreground">
 									Token (included in the link)
 								</p>
 								<button
-									className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+									className="type-caption flex items-center gap-1 text-muted-foreground hover:text-foreground"
 									onClick={() => setRevealToken((v) => !v)}
 									type="button"
 								>
@@ -998,7 +1068,7 @@ function ShareNodeDialog({
 									{revealToken ? "Hide" : "Show"}
 								</button>
 							</div>
-							<p className="truncate rounded-md bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+							<p className="type-caption truncate rounded-md bg-muted/40 px-2 py-1 font-mono text-muted-foreground">
 								{revealToken ? node.token : "•".repeat(16)}
 							</p>
 						</div>
@@ -1009,10 +1079,11 @@ function ShareNodeDialog({
 							<div className="flex items-center gap-2">
 								<Input
 									aria-label="Connect link"
-									className="font-mono text-[11px]"
 									readOnly
 									size="lg"
+									typography="caption"
 									value={link}
+									variant="code"
 								/>
 								<Button onClick={copy} size="sm" variant="secondary">
 									<HugeiconsIcon icon={Copy01Icon} size={14} />
@@ -1021,7 +1092,7 @@ function ShareNodeDialog({
 							</div>
 							<div className="flex flex-col items-center gap-2 pt-1">
 								<ExpandableQRCode size={160} value={link} />
-								<p className="text-[11px] text-muted-foreground">
+								<p className="type-caption text-muted-foreground">
 									Scan with the Ryu mobile app
 								</p>
 							</div>
@@ -1054,6 +1125,7 @@ function NodeItem({
 	onHardware?: () => void;
 }) {
 	const [online, setOnline] = useState<boolean | null>(null);
+	const [confirmRemove, setConfirmRemove] = useState(false);
 
 	useEffect(() => {
 		const check = async () => {
@@ -1079,97 +1151,137 @@ function NodeItem({
 	);
 
 	return (
-		<div
-			className={cn(
-				"group cursor-pointer rounded-xl text-sm",
-				isActive
-					? "bg-accent text-accent-foreground"
-					: "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-			)}
-			onClick={onSelect}
-		>
-			<div className="flex items-center gap-2 px-2 py-1.5">
-				<StatusDot online={online} />
-				<span className="flex-1 truncate">{displayName(node.name)}</span>
-				{(node.managed || info?.managed) && (
-					<Tooltip>
-						<TooltipTrigger
-							render={
-								<span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 font-medium text-[9px] text-accent-foreground uppercase tracking-wide">
-									Cloud
-								</span>
-							}
-						/>
-						<TooltipContent>
-							{info?.orgName
-								? `Managed node · ${info.orgName}`
-								: "Managed (Ryu Cloud) node"}
-						</TooltipContent>
-					</Tooltip>
+		<>
+			{/* The row is a plain container: the name is the select button, and its
+			    ::after stretches over the whole row so a click anywhere selects. The
+			    badges and action buttons are positioned siblings painted above that
+			    overlay, so no interactive control is nested inside another. */}
+			<div
+				className={cn(
+					"group relative rounded-xl text-sm",
+					isActive
+						? "bg-accent text-accent-foreground"
+						: "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
 				)}
-				{/* Mark org nodes that carry a GPU, so a user picking where to run
+			>
+				<div className="flex items-center gap-2 px-2 py-1.5">
+					<StatusDot online={online} />
+					<button
+						aria-pressed={isActive}
+						className="min-w-0 flex-1 cursor-pointer truncate text-left outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-ring"
+						onClick={onSelect}
+						title={computerName(node)}
+						type="button"
+					>
+						{computerName(node)}
+					</button>
+					{(node.managed || info?.managed) && (
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<span className="type-micro relative shrink-0 rounded-full bg-accent px-1.5 py-0.5 font-medium text-accent-foreground">
+										Cloud Computers
+									</span>
+								}
+							/>
+							<TooltipContent>
+								{info?.orgName
+									? `Cloud Computers · ${info.orgName}`
+									: "Cloud Computers"}
+							</TooltipContent>
+						</Tooltip>
+					)}
+					{/* Mark org nodes that carry a GPU, so a user picking where to run
 				    GPU work can scan for it at the name level (NodeStats also prints
 				    the GPU model lower in the row). GPU-ness is read from the node's
 				    own `/api/system/info` gpuName — the Node model has no GPU field —
 				    so an offline node (no snapshot) shows no badge. */}
-				{info?.gpuName && (
-					<Tooltip>
-						<TooltipTrigger
-							render={
-								<span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 font-medium text-[9px] text-accent-foreground uppercase tracking-wide">
-									GPU
-								</span>
-							}
-						/>
-						<TooltipContent>{info.gpuName}</TooltipContent>
-					</Tooltip>
-				)}
-				{onHardware && (
-					<button
-						aria-label={`Hardware for ${node.name}`}
-						className="shrink-0 opacity-0 hover:text-foreground group-hover:opacity-100"
-						onClick={(e) => {
-							e.stopPropagation();
-							onHardware();
-						}}
-						type="button"
-					>
-						<HugeiconsIcon icon={CpuIcon} size={12} />
-					</button>
-				)}
-				{onShare && (
-					<button
-						aria-label={`Share ${node.name}`}
-						className="shrink-0 opacity-0 hover:text-foreground group-hover:opacity-100"
-						onClick={(e) => {
-							e.stopPropagation();
-							onShare();
-						}}
-						type="button"
-					>
-						<HugeiconsIcon icon={Share08Icon} size={12} />
-					</button>
-				)}
-				{node.name !== "local" && onRemove && (
-					<button
-						aria-label={`Remove ${node.name}`}
-						className="shrink-0 opacity-0 hover:text-status-destructive group-hover:opacity-100"
-						onClick={(e) => {
-							e.stopPropagation();
-							onRemove();
-						}}
-						type="button"
-					>
-						<HugeiconsIcon icon={Delete01Icon} size={12} />
-					</button>
+					{info?.gpuName && (
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<span className="type-micro relative shrink-0 rounded-full bg-accent px-1.5 py-0.5 font-medium text-accent-foreground">
+										GPU
+									</span>
+								}
+							/>
+							<TooltipContent>{info.gpuName}</TooltipContent>
+						</Tooltip>
+					)}
+					{onHardware && (
+						<button
+							aria-label={`Hardware for ${computerName(node)}`}
+							className="relative shrink-0 opacity-0 after:absolute after:-inset-1.5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+							onClick={(e) => {
+								e.stopPropagation();
+								onHardware();
+							}}
+							type="button"
+						>
+							<HugeiconsIcon icon={CpuIcon} size={12} />
+						</button>
+					)}
+					{onShare && (
+						<button
+							aria-label={`Share ${computerName(node)}`}
+							className="relative shrink-0 opacity-0 after:absolute after:-inset-1.5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+							onClick={(e) => {
+								e.stopPropagation();
+								onShare();
+							}}
+							type="button"
+						>
+							<HugeiconsIcon icon={Share08Icon} size={12} />
+						</button>
+					)}
+					{node.name !== "local" && onRemove && (
+						<button
+							aria-label={`Remove ${computerName(node)}`}
+							className="relative shrink-0 opacity-0 after:absolute after:-inset-1.5 hover:text-status-destructive focus-visible:opacity-100 group-hover:opacity-100"
+							onClick={(e) => {
+								e.stopPropagation();
+								setConfirmRemove(true);
+							}}
+							type="button"
+						>
+							<HugeiconsIcon icon={Delete01Icon} size={12} />
+						</button>
+					)}
+				</div>
+				{info && (
+					<div className="px-2 pb-2">
+						<NodeStats info={info} />
+					</div>
 				)}
 			</div>
-			{info && (
-				<div className="px-2 pb-2">
-					<NodeStats info={info} />
-				</div>
+			{/* Rendered outside the row so portal clicks never bubble into its
+		    select handler. */}
+			{onRemove && (
+				<AlertDialog onOpenChange={setConfirmRemove} open={confirmRemove}>
+					<AlertDialogContent>
+						<AlertDialogHeader>
+							<AlertDialogTitle>Remove {computerName(node)}?</AlertDialogTitle>
+							<AlertDialogDescription>
+								This computer is removed from your list. You can add it again
+								later with its address or pairing link.
+							</AlertDialogDescription>
+						</AlertDialogHeader>
+						<AlertDialogFooter>
+							<AlertDialogCancel>Cancel</AlertDialogCancel>
+							<AlertDialogAction
+								onClick={() => {
+									setConfirmRemove(false);
+									onRemove();
+								}}
+								variant="destructive"
+							>
+								Remove computer
+							</AlertDialogAction>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				</AlertDialog>
 			)}
-		</div>
+		</>
 	);
 }
 
@@ -1414,101 +1526,6 @@ const RETRIEVAL_ENGINES: Array<{
 ];
 
 /**
- * A block of the node dropdown whose body folds away at the Ryu Work interface
- * level.
- *
- * Above Ryu Work this is byte-for-byte the flat block it always was — same
- * wrapper, same heading, no chevron, no disclosure — so the audience that
- * manages engines and toolkits from this menu sees no change at all. At Ryu Work
- * the heading BECOMES the trigger and the rows below it start closed, which
- * turns a 300px column of runtime plumbing back into a node menu about the node
- * (who it is, what it costs, what is connected). Collapsing, not hiding: the
- * heading still names what is in there and one click still gets it.
- *
- * `collapsesNodeSections` rather than an inline `level === "simple"` so the gate
- * is named and test-locked next to the composer's, in `interface-level.ts`.
- *
- * The trigger MUST be a `DropdownMenuItem`, not a plain `<button>` inside the
- * popup. Base UI drives the menu's arrow-key roving focus off the composite list
- * that `Menu.Item` registers into (`useCompositeListItem`, by context — nesting
- * depth does not matter); a non-item control is simply not in that list, so a
- * plain disclosure button would make three whole blocks keyboard-unreachable at
- * the level that is the DEFAULT for every fresh install. `closeOnClick={false}`
- * is what makes an item safe here — without it Base UI shuts the whole dropdown
- * on the press that was supposed to open the block. Same escape hatch
- * `NodeLayerMenu` and `NavUser` already use for their in-menu toggles.
- *
- * That is also why this is hand-rolled rather than `Collapsible`: composing
- * `Collapsible.Trigger` with `Menu.Item` puts two `useButton` instances on one
- * element (double Enter/Space activation — toggle twice, nothing moves), and
- * `Collapsible.Trigger`'s `data-slot="collapsible-trigger"` matches the popup's
- * `**:data-[slot$=-trigger]:aria-expanded:bg-foreground/10!` rule, which would
- * stamp a submenu-trigger pill on an open heading. `aria-expanded` +
- * `aria-controls` are set by hand instead; the panel is plain conditional
- * rendering, which the menu wants anyway so closed rows do not register as
- * arrow-navigable items.
- *
- * Open state is plain `useState`, so the block is closed on every open of the
- * menu. `DropdownMenuContent` unmounts on close anyway; persisting the choice
- * would need `usePersistedToggle`, and at Ryu Work "it stayed open from last time"
- * is the outcome the level is trying to avoid.
- */
-function CollapsibleSection({
-	children,
-	heading,
-	trailing,
-}: {
-	children: ReactNode;
-	heading: string;
-	trailing?: ReactNode;
-}) {
-	const level = useInterfaceLevel();
-	const [open, setOpen] = useState(false);
-	const panelId = useId();
-	const collapsible = collapsesNodeSections(level);
-
-	if (!collapsible) {
-		return (
-			<div className="px-1 py-0.5">
-				<div className="flex items-center justify-between px-2 pt-0.5 pb-1">
-					<p className="font-medium text-[10px] text-muted-foreground/50 uppercase tracking-wider">
-						{heading}
-					</p>
-					{trailing}
-				</div>
-				{children}
-			</div>
-		);
-	}
-
-	return (
-		<div className="px-1 py-0.5">
-			<div className="flex items-center justify-between gap-2 px-2 pt-0.5 pb-1">
-				{/* -mx-1 px-1 keeps the label on the same 8px gutter as the flat
-				    heading above while giving the item its own highlight box. */}
-				<DropdownMenuItem
-					aria-controls={open ? panelId : undefined}
-					aria-expanded={open}
-					className="-mx-1 min-w-0 rounded-md px-1 py-0 text-[10px] text-muted-foreground/50 uppercase tracking-wider"
-					closeOnClick={false}
-					onClick={() => setOpen((v) => !v)}
-				>
-					<span className="truncate">{heading}</span>
-					<HugeiconsIcon
-						className={cn("size-3 shrink-0 transition-transform", {
-							"rotate-180": open,
-						})}
-						icon={ArrowDown01Icon}
-					/>
-				</DropdownMenuItem>
-				{trailing}
-			</div>
-			{open && <div id={panelId}>{children}</div>}
-		</div>
-	);
-}
-
-/**
  * The "Engines" block in the node dropdown: every installed engine runtime
  * (chat / speech / image / embeddings) with its running state, live memory/CPU
  * usage, and a start/stop toggle. Joins the catalog (what's installed + its
@@ -1539,7 +1556,7 @@ function EngineQueueBadge({
 	}
 	const slots = total > 0 ? `${busy}/${total} slots` : `${busy} busy`;
 	return (
-		<span className="font-medium text-[10px] text-muted-foreground/60 tabular-nums">
+		<span className="type-compact font-medium text-muted-foreground/60 tabular-nums">
 			{slots}
 			{queued > 0 ? ` · ${queued} queued` : ""}
 		</span>
@@ -1560,7 +1577,11 @@ function useNodeEngines(target: ApiTarget) {
 			const [catalog, details, active, concurrency] = await Promise.all([
 				fetchCatalog(target.url, target.token, undefined, target.userJwt),
 				fetchSidecarDetails(target).catch(
-					() => ({}) as Record<string, SidecarDetail>
+					() =>
+						/* SAFETY: This failure fallback constructs an empty object locally; there are no sidecar entries to violate SidecarDetail. */ ({}) as Record<
+							string,
+							SidecarDetail
+						>
 				),
 				// The resident chat (mutually-exclusive slot). Best-effort:
 				// on failure we fall back to the running provider below.
@@ -1731,8 +1752,8 @@ function EnginesSection({ target }: { target: ApiTarget }) {
 	}
 
 	return (
-		<CollapsibleSection
-			heading="Engines"
+		<PanelSection
+			title="Engines"
 			trailing={<EngineQueueBadge concurrency={concurrency} />}
 		>
 			{providers.length > 0 && (
@@ -1831,7 +1852,7 @@ function EnginesSection({ target }: { target: ApiTarget }) {
 					target={target}
 				/>
 			))}
-		</CollapsibleSection>
+		</PanelSection>
 	);
 }
 
@@ -1912,15 +1933,15 @@ function SandboxRow({
 				{summarizeSandboxSpec(run.spec)}
 			</AutoScrollText>
 			{run.spec.gpu && (
-				<span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 font-medium text-[9px] text-accent-foreground uppercase tracking-wide">
+				<span className="type-micro shrink-0 rounded-full bg-accent px-1.5 py-0.5 font-medium text-accent-foreground">
 					GPU
 				</span>
 			)}
-			<span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums">
+			<span className="type-compact shrink-0 text-muted-foreground/50 tabular-nums">
 				{formatElapsed(run.elapsedSeconds)}
 			</span>
 			<button
-				className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-status-destructive disabled:opacity-50"
+				className="type-compact shrink-0 rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-status-destructive disabled:opacity-50"
 				disabled={stopping}
 				onClick={handleStop}
 				type="button"
@@ -1972,11 +1993,11 @@ function SandboxesSection({
 	return (
 		<div className="px-1 py-0.5">
 			<div className="flex items-center justify-between px-2 pt-0.5 pb-1">
-				<p className="font-medium text-[10px] text-muted-foreground/50 uppercase tracking-wider">
-					Running Sandboxes · {sandboxes.length}
+				<p className="type-compact font-medium text-muted-foreground/50">
+					Running sandboxes · {sandboxes.length}
 				</p>
 				<button
-					className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+					className="type-compact flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
 					disabled={creating}
 					onClick={handleCreate}
 					type="button"
@@ -1986,7 +2007,7 @@ function SandboxesSection({
 				</button>
 			</div>
 			{sandboxes.length === 0 ? (
-				<p className="px-2 pb-0.5 text-[10px] text-muted-foreground/50">
+				<p className="type-compact px-2 pb-0.5 text-muted-foreground/50">
 					No sandboxes running
 				</p>
 			) : (
@@ -2047,11 +2068,9 @@ function VoiceAndSandboxSection({
 				speechProcessingPrefs,
 				sandboxBackends,
 			] = await Promise.all([
-				listTtsEngines(target).catch(() => [] as TtsEngine[]),
+				listTtsEngines(target).catch(() => []),
 				getVoiceInputPrefs(target).catch(() => DEFAULT_VOICE_PREFS),
-				listSpeechProcessingEngines(target).catch(
-					() => [] as SpeechProcessingEngineInfo[]
-				),
+				listSpeechProcessingEngines(target).catch(() => []),
 				getSpeechProcessingPrefs(target).catch(
 					() => DEFAULT_SPEECH_PROCESSING_PREFS
 				),
@@ -2145,11 +2164,17 @@ function VoiceAndSandboxSection({
 	const activeVoice = ttsPrefs.voice || selectedTts?.default_voice || "";
 
 	const pickTtsEngine = (engine: TtsEngine) => {
+		const engineOptions = getDesktopTtsEngineOptions(engine.id);
+		const savedVoice = engineOptions.voice;
+		const voice =
+			savedVoice && engine.voices.includes(savedVoice)
+				? savedVoice
+				: engine.voices.includes(activeVoice)
+					? activeVoice
+					: (engine.default_voice ?? "");
 		setDesktopTtsPref(DESKTOP_TTS_ENGINE_KEY, engine.id);
-		// Reset the voice when the current one doesn't exist on the new engine.
-		if (!engine.voices.includes(activeVoice)) {
-			setDesktopTtsPref(DESKTOP_TTS_VOICE_KEY, engine.default_voice ?? "");
-		}
+		setDesktopTtsPref(DESKTOP_TTS_VOICE_KEY, voice);
+		setDesktopTtsEngineOptions(engine.id, { voice });
 	};
 
 	// The multi-engine Audio sidecar that serves every non-built-in voice.
@@ -2306,7 +2331,7 @@ function VoiceAndSandboxSection({
 	}
 
 	return (
-		<CollapsibleSection heading="Voice & Sandbox">
+		<PanelSection>
 			{ttsEngines.length > 0 && (
 				<NodeLayerMenu
 					// The extra (non-built-in) voices only exist once the `ryutts`
@@ -2316,7 +2341,7 @@ function VoiceAndSandboxSection({
 					caption={
 						selectedTts
 							? `Speaks as ${activeVoice || "default voice"}`
-							: "Engine not available on this node"
+							: "Engine not available on this computer"
 					}
 					currentLabel={selectedTts?.display_name ?? ttsPrefs.engine}
 					icon={VolumeHighIcon}
@@ -2345,7 +2370,11 @@ function VoiceAndSandboxSection({
 									name: voice,
 									label: voice,
 									active: voice === activeVoice,
-									select: () => setDesktopTtsPref(DESKTOP_TTS_VOICE_KEY, voice),
+									select: () => {
+										setDesktopTtsPref(DESKTOP_TTS_VOICE_KEY, voice);
+										setDesktopTtsEngineOptions(ttsPrefs.engine, { voice });
+										return Promise.resolve();
+									},
 								})
 							)}
 							label="Voice"
@@ -2371,7 +2400,7 @@ function VoiceAndSandboxSection({
 					caption={
 						speechInstalled
 							? "Optional cleanup after Voice Recognition · off in Dictation settings"
-							: "S1-mini model is not installed on this node"
+							: "S1-mini model is not installed on this computer"
 					}
 					currentLabel={
 						selectedSpeech?.display_name ?? selectedSpeechMeta.label
@@ -2441,7 +2470,7 @@ function VoiceAndSandboxSection({
 				caption={
 					sttInstalled
 						? `Transcribes with ${sttPrefs.model}`
-						: "Engine not installed on this node"
+						: "Engine not installed on this computer"
 				}
 				currentLabel={selectedStt.label}
 				icon={Mic01Icon}
@@ -2485,7 +2514,7 @@ function VoiceAndSandboxSection({
 					caption={
 						activeBackend?.detected
 							? "Default runtime for sandboxed execution"
-							: "Runtime not detected on this node"
+							: "Runtime not detected on this computer"
 					}
 					currentLabel={activeBackend?.displayName ?? "None"}
 					icon={PackageIcon}
@@ -2504,7 +2533,7 @@ function VoiceAndSandboxSection({
 					running={activeBackend?.detected ?? null}
 				/>
 			)}
-		</CollapsibleSection>
+		</PanelSection>
 	);
 }
 
@@ -2555,6 +2584,11 @@ const CAPABILITY_LAYERS: Array<{
 		capability: "document.parse",
 		fallbackLabel: "Document Parsing",
 		icon: File01Icon,
+	},
+	{
+		capability: "verify.claim",
+		fallbackLabel: "Verification",
+		icon: CheckmarkBadge02Icon,
 	},
 ];
 
@@ -2706,20 +2740,24 @@ function layerCaption(entry: CapabilityLayerEntry): string {
 }
 
 /** Human label for a tunnel backend. */
-const TUNNEL_LABEL: Record<MeshBackend, string> = {
+const TUNNEL_LABEL = {
+	[MESH_BACKEND_CLOUDFLARED]: "Cloudflare Quick Tunnel",
 	[MESH_BACKEND_HEADSCALE]: "Headscale",
+	[MESH_BACKEND_OPENTUNNEL]: "OpenTunnel",
+	[MESH_BACKEND_PLUGIN]: "Plugin tunnel",
 	[MESH_BACKEND_TAILSCALE]: "Tailscale",
 	[MESH_BACKEND_TAILCAT]: "Tailcat",
-};
+} satisfies Record<MeshBackend, string>;
 
 /**
  * The **Tunnel** toolkit: which network backend this node uses, and the
  * enable/disable for the network itself.
  *
  * It sits in the Toolkits block because that is what the user is picking — the
- * thing behind "can my nodes reach each other" — but it is NOT a capability
- * contribution: no plugin provides a tunnel, so it reads the node's own
- * `mesh-backend` pref instead of the capability ladder. Tailcat is the fresh
+ * thing behind "can my nodes reach each other". The built-in backends read the
+ * node's own `mesh-backend` pref; plugin tunnel adapters (apps providing the
+ * `network.tunnel` capability) are listed beside them, and picking one pins the
+ * capability binding and selects the `plugin` backend. Tailcat is the fresh
  * install default because it needs no account or control server. Tailcat is point-to-point:
  * it exposes this Core through a short-lived address and does not provide peer
  * discovery or a persistent tailnet.
@@ -2762,14 +2800,26 @@ type TunnelQuery = ReturnType<typeof useTunnel>;
 function TunnelLayer({
 	target,
 	query,
+	plugins,
+	selectPlugin,
+	enablePlugin,
 }: {
+	enablePlugin: (provider: CapabilityProvider) => Promise<void>;
+	plugins: CapabilityLayerEntry | null;
 	query: TunnelQuery;
+	selectPlugin: (providerId: string) => Promise<void>;
 	target: ApiTarget;
 }) {
 	const openGateway = useGatewayDialog((s) => s.openGateway);
 
 	const status = query.data?.status ?? null;
 	const backend = query.data?.backend ?? MESH_BACKEND_TAILCAT;
+	const pluginName =
+		plugins?.boundProvider?.name ??
+		status?.tunnelProvider?.name ??
+		TUNNEL_LABEL[MESH_BACKEND_PLUGIN];
+	const backendLabel = (value: MeshBackend) =>
+		value === MESH_BACKEND_PLUGIN ? pluginName : TUNNEL_LABEL[value];
 	const loginServer = query.data?.loginServer ?? "";
 	const enabled = status?.enabled ?? false;
 	const needsControlServer =
@@ -2787,10 +2837,12 @@ function TunnelLayer({
 			if (next && result.startError) {
 				sileo.warning({
 					title: result.canInstall
-						? "Mesh on, but the tunnel didn't connect"
+						? "Tunnel enabled, but it did not start"
 						: backend === MESH_BACKEND_TAILCAT
 							? "Tailcat could not be installed automatically"
-							: "Mesh client could not be installed automatically",
+							: isPublicTunnelBackend(backend)
+								? `${backendLabel(backend)} could not start`
+								: "Mesh client could not be installed automatically",
 					description: result.startError,
 				});
 				return;
@@ -2799,9 +2851,13 @@ function TunnelLayer({
 				title: next ? "Tunnel on" : "Tunnel off",
 				description: next
 					? backend === MESH_BACKEND_TAILCAT
-						? "This node now has a short-lived Tailcat address to share."
-						: "This node joins the selected private network."
-					: "This node has left the private network.",
+						? "This computer now has a short-lived Tailcat address to share."
+						: backend === MESH_BACKEND_CLOUDFLARED
+							? "A temporary public URL is ready. Protected Core routes still require RYU_TOKEN."
+							: isPublicTunnelBackend(backend)
+								? "A public URL is being prepared. Protected Core routes still require RYU_TOKEN."
+								: "This computer joins the selected private network."
+					: "This computer has left the private network.",
 			});
 		} catch (e) {
 			sileo.error({
@@ -2811,8 +2867,8 @@ function TunnelLayer({
 		}
 	};
 
-	const pickBackend = async (next: MeshBackend) => {
-		if (next === backend) {
+	const pickBackend = async (next: MeshBackend, restart = false) => {
+		if (next === backend && !restart) {
 			return;
 		}
 		let result: Awaited<ReturnType<typeof setMeshBackend>>;
@@ -2845,7 +2901,7 @@ function TunnelLayer({
 				});
 			} else {
 				sileo.warning({
-					title: `${TUNNEL_LABEL[next]} selected, but it did not start`,
+					title: `${backendLabel(next)} selected, but it did not start`,
 					description: result.startError,
 				});
 			}
@@ -2866,13 +2922,50 @@ function TunnelLayer({
 			return;
 		}
 		sileo.success({
-			title: `Network → ${TUNNEL_LABEL[next]}`,
+			title: `Network → ${backendLabel(next)}`,
 			description: enabled
 				? next === MESH_BACKEND_TAILCAT
 					? "The listener was restarted with a new short-lived address."
-					: "The selected network backend was restarted. An already-enrolled Tailscale or Headscale node keeps its current tailnet until it re-enrols with a new auth key."
+					: next === MESH_BACKEND_CLOUDFLARED
+						? "A temporary public URL is active. Anyone with the URL can reach Core's public routes."
+						: isPublicTunnelBackend(next)
+							? "A public URL is being prepared. Anyone with the URL can reach Core's public routes."
+							: "The selected network backend was restarted. An already-enrolled Tailscale or Headscale computer keeps its current tailnet until it re-enrols with a new auth key."
 				: undefined,
 		});
+	};
+
+	// A plugin tunnel row pins the `network.tunnel` binding, then selects the
+	// `plugin` backend. Re-posting the backend while it is already on makes Core
+	// stop the previously started provider and start the newly bound one.
+	const pickPlugin = async (provider: CapabilityProvider) => {
+		const alreadyActive =
+			backend === MESH_BACKEND_PLUGIN && plugins?.bound === provider.id;
+		if (alreadyActive) {
+			return;
+		}
+		try {
+			if (plugins?.bound !== provider.id) {
+				await selectPlugin(provider.id);
+			}
+		} catch (error) {
+			sileo.error({ title: describeBindingFailure(error, provider.name) });
+			return;
+		}
+		await pickBackend(MESH_BACKEND_PLUGIN, backend === MESH_BACKEND_PLUGIN);
+	};
+
+	// Enabling a disabled tunnel app from this menu is a selection, not just a
+	// lifecycle change: pin it and switch the VPN layer to it in the same click.
+	const enableAndPickPlugin = async (provider: CapabilityProvider) => {
+		try {
+			await enablePlugin(provider);
+			await selectPlugin(provider.id);
+		} catch (error) {
+			sileo.error({ title: describeBindingFailure(error, provider.name) });
+			return;
+		}
+		await pickBackend(MESH_BACKEND_PLUGIN, backend === MESH_BACKEND_PLUGIN);
 	};
 
 	// No mesh plane on this Core (an older binary) — no row, rather than a fake one.
@@ -2883,8 +2976,16 @@ function TunnelLayer({
 	const actions: LayerAction[] = [
 		{
 			id: enabled ? "disable" : "enable",
-			label: enabled ? "Turn off" : "Turn on",
-			busyLabel: enabled ? "Turning off…" : "Connecting…",
+			label: enabled
+				? "Turn off"
+				: isPublicTunnelBackend(backend)
+					? "Start public tunnel"
+					: "Turn on",
+			busyLabel: enabled
+				? "Turning off…"
+				: isPublicTunnelBackend(backend)
+					? "Starting public tunnel…"
+					: "Connecting…",
 			// No download icon on "Turn on": most nodes already have the client, and
 			// promising a download on a machine that just starts a daemon is the kind
 			// of small lie that makes a UI untrustworthy.
@@ -2900,12 +3001,36 @@ function TunnelLayer({
 			run: () => openGateway("network"),
 		});
 	}
+	const publicUrl = status.publicUrl;
+	if (isPublicTunnelBackend(backend) && publicUrl) {
+		actions.push({
+			id: "copy-public-url",
+			label: "Copy public URL",
+			run: async () => {
+				try {
+					await navigator.clipboard.writeText(publicUrl);
+					sileo.success({ title: "Public URL copied" });
+				} catch {
+					sileo.error({ title: "Couldn't copy the public URL" });
+				}
+			},
+		});
+	}
 
 	const caption = (() => {
 		if (needsControlServer) {
 			return "Needs a control server URL";
 		}
 		if (!enabled) {
+			if (backend === MESH_BACKEND_CLOUDFLARED) {
+				return "Off · public temporary URL";
+			}
+			if (backend === MESH_BACKEND_OPENTUNNEL) {
+				return "Off · public stable URL";
+			}
+			if (backend === MESH_BACKEND_PLUGIN) {
+				return `Off · ${pluginName}`;
+			}
 			if (backend === MESH_BACKEND_HEADSCALE) {
 				return `Off · ${loginServer}`;
 			}
@@ -2913,7 +3038,21 @@ function TunnelLayer({
 				? "Off · Tailcat"
 				: "Off · Tailscale SaaS";
 		}
+		if (status.backendError && !status.reachable) {
+			return status.backendError;
+		}
 		if (status.reachable) {
+			if (backend === MESH_BACKEND_CLOUDFLARED) {
+				return status.cloudflaredUrl
+					? "Cloudflare URL ready"
+					: "Cloudflare connected";
+			}
+			if (
+				backend === MESH_BACKEND_OPENTUNNEL ||
+				backend === MESH_BACKEND_PLUGIN
+			) {
+				return status.publicUrl ? "Public URL ready" : "Connected";
+			}
 			if (backend === MESH_BACKEND_TAILCAT) {
 				return status.tailcatAddress
 					? "Tailcat address ready"
@@ -2923,16 +3062,54 @@ function TunnelLayer({
 				? `Connected as ${status.magicDnsName}`
 				: "Connected";
 		}
+		if (status.backendState === "Provisioning") {
+			// First OpenTunnel start waits on certificate issuance (minutes).
+			return "Creating tunnel certificate…";
+		}
 		return "Connecting…";
 	})();
+
+	const pluginRows = (plugins?.providers ?? []).map(
+		(provider): LayerOption => ({
+			name: `plugin:${provider.id}`,
+			label: provider.name,
+			active: backend === MESH_BACKEND_PLUGIN && plugins?.bound === provider.id,
+			detail: "plugin · public URL",
+			select: () => pickPlugin(provider),
+		})
+	);
+	const availablePlugins = (plugins?.available ?? []).map(
+		(provider): LayerOption => ({
+			name: `plugin:${provider.id}`,
+			label: provider.name,
+			active: false,
+			detail: "plugin · not enabled",
+			select: () => enableAndPickPlugin(provider),
+		})
+	);
 
 	return (
 		<NodeLayerMenu
 			actions={actions}
+			available={availablePlugins}
 			caption={caption}
-			currentLabel={TUNNEL_LABEL[backend]}
+			currentLabel={backendLabel(backend)}
 			icon={WifiConnected01Icon}
 			installed={[
+				{
+					name: MESH_BACKEND_CLOUDFLARED,
+					label: TUNNEL_LABEL[MESH_BACKEND_CLOUDFLARED],
+					active: backend === MESH_BACKEND_CLOUDFLARED,
+					detail: "public · temporary · anyone with URL",
+					select: () => pickBackend(MESH_BACKEND_CLOUDFLARED),
+				},
+				{
+					name: MESH_BACKEND_OPENTUNNEL,
+					label: TUNNEL_LABEL[MESH_BACKEND_OPENTUNNEL],
+					active: backend === MESH_BACKEND_OPENTUNNEL,
+					detail: "public · stable URL · macOS & Linux",
+					select: () => pickBackend(MESH_BACKEND_OPENTUNNEL),
+				},
 				{
 					name: MESH_BACKEND_HEADSCALE,
 					label: TUNNEL_LABEL[MESH_BACKEND_HEADSCALE],
@@ -2956,8 +3133,9 @@ function TunnelLayer({
 					detail: "point-to-point",
 					select: () => pickBackend(MESH_BACKEND_TAILCAT),
 				},
+				...pluginRows,
 			]}
-			label="Tunnel"
+			label="VPN"
 			// The mesh is a real process, so the dot means connected — not "a backend
 			// is selected". A selected-but-off tunnel is honestly down.
 			running={enabled ? status.reachable : false}
@@ -2991,7 +3169,12 @@ function LayersSection({
 	enabled: boolean;
 	target: ApiTarget;
 }) {
-	const { layers, refresh, select } = useCapabilityLayers(target, enabled);
+	const {
+		layers,
+		refresh,
+		select,
+		tunnel: tunnelPlugins,
+	} = useCapabilityLayers(target, enabled);
 	const rows = orderCapabilityLayers(layers);
 	// Hoisted out of `TunnelLayer` so the block knows whether it has ANY row
 	// before drawing its header — a Core with no mesh plane and no capability
@@ -3050,8 +3233,16 @@ function LayersSection({
 	}
 
 	return (
-		<CollapsibleSection heading="Toolkits">
-			<TunnelLayer query={tunnel} target={target} />
+		<PanelSection>
+			<TunnelLayer
+				enablePlugin={async (provider) => {
+					await enableApp(target, provider.id);
+				}}
+				plugins={tunnelPlugins}
+				query={tunnel}
+				selectPlugin={(providerId) => select(TUNNEL_CAPABILITY, providerId)}
+				target={target}
+			/>
 			{rows.map(({ entry, icon, label }) => (
 				<NodeLayerMenu
 					// Candidates that exist but are not enabled. Load-bearing for
@@ -3112,9 +3303,114 @@ function LayersSection({
 					// engine rows above show a real build. The provider app's own version
 					// would be meaningful, but the read model does not carry it.
 					version={null}
-				/>
+				>
+					{entry.capability === "web.search" ? (
+						<WebSearchAccessMenu enabled={enabled} target={target} />
+					) : null}
+				</NodeLayerMenu>
 			))}
-		</CollapsibleSection>
+		</PanelSection>
+	);
+}
+
+/** Typed-decision providers share the binding contract but stay out of Toolkits. */
+function DecisionModelsSection({
+	target,
+	enabled,
+}: {
+	enabled: boolean;
+	target: ApiTarget;
+}) {
+	const { decisionModels, refresh, select } = useCapabilityLayers(
+		target,
+		enabled
+	);
+	if (!enabled || decisionModels.length === 0) {
+		return null;
+	}
+
+	const enableProvider = async (
+		entry: CapabilityLayerEntry,
+		provider: CapabilityProvider,
+		label: string
+	) => {
+		try {
+			await enableApp(target, provider.id);
+			try {
+				// Enabling an available provider is an explicit selection, including
+				// when Core had no unique provider bound before this choice.
+				await select(entry.capability, provider.id);
+			} finally {
+				await refresh();
+			}
+			sileo.success({ title: `${label} → ${provider.name}` });
+		} catch (error) {
+			sileo.error({
+				title:
+					error instanceof Error
+						? error.message
+						: `Couldn't enable ${provider.name}`,
+			});
+		}
+	};
+
+	const pickProvider = async (
+		entry: CapabilityLayerEntry,
+		provider: CapabilityProvider,
+		label: string
+	) => {
+		if (provider.id === entry.bound) {
+			return;
+		}
+		try {
+			await select(entry.capability, provider.id);
+			sileo.success({ title: `${label} → ${provider.name}` });
+		} catch (error) {
+			sileo.error({ title: describeBindingFailure(error, provider.name) });
+		}
+	};
+
+	return (
+		<PanelSection title="Decision Models">
+			{decisionModels.map((entry) => {
+				const label = capabilityLabel(entry, "Typed Decisions");
+				return (
+					<NodeLayerMenu
+						available={entry.available.map(
+							(provider): LayerOption => ({
+								name: provider.id,
+								label: provider.name,
+								active: false,
+								detail: provider.isDefault
+									? "default · not enabled"
+									: "not enabled",
+								select: () => enableProvider(entry, provider, label),
+							})
+						)}
+						caption={layerCaption(entry)}
+						currentLabel={entry.boundProvider?.name ?? "None"}
+						icon={BrainIcon}
+						installed={entry.providers.map(
+							(provider): LayerOption => ({
+								name: provider.id,
+								label: provider.name,
+								active: provider.id === entry.bound,
+								detail: providerDetail(provider, entry.providers),
+								disabled: !canServe(provider),
+								disabledReason: canServe(provider)
+									? null
+									: "declares no verbs or route",
+								select: () => pickProvider(entry, provider, label),
+							})
+						)}
+						key={entry.capability}
+						label={label}
+						selectionMode="swap"
+						version={null}
+					/>
+				);
+			})}
+		</PanelSection>
 	);
 }
 
@@ -3159,10 +3455,13 @@ function MeshPeerRow({
 		return (
 			<div className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs opacity-70">
 				{dot}
-				<span className="flex-1 truncate text-left text-muted-foreground">
+				<span
+					className="flex-1 truncate text-left text-muted-foreground"
+					title={label}
+				>
 					{label}
 				</span>
-				<span className="shrink-0 text-[10px] text-status-warning">
+				<span className="type-compact shrink-0 text-status-warning">
 					needs token
 				</span>
 			</div>
@@ -3176,7 +3475,10 @@ function MeshPeerRow({
 			type="button"
 		>
 			{dot}
-			<span className="flex-1 truncate text-left text-muted-foreground">
+			<span
+				className="flex-1 truncate text-left text-muted-foreground"
+				title={label}
+			>
 				{label}
 			</span>
 			<HugeiconsIcon
@@ -3223,16 +3525,27 @@ function MeshSection({
 		peerList.length > 0 &&
 		peers.bearerSource === BEARER_SOURCE_NONE;
 	const networkLabel =
-		status.backend === MESH_BACKEND_TAILCAT
-			? status.tailcatAddress
-				? "Tailcat address ready"
-				: reachable
-					? "Tailcat connected"
-					: "Tailcat starting…"
-			: (status.magicDnsName ?? (reachable ? "Connected" : "Connecting…"));
+		status.backend === MESH_BACKEND_OPENTUNNEL ||
+		status.backend === MESH_BACKEND_PLUGIN
+			? status.publicUrl
+				? "Public URL ready"
+				: (status.backendError ?? "Tunnel starting…")
+			: status.backend === MESH_BACKEND_CLOUDFLARED
+				? status.cloudflaredUrl
+					? "Cloudflare URL ready"
+					: reachable
+						? "Cloudflare connected"
+						: "Cloudflare starting…"
+				: status.backend === MESH_BACKEND_TAILCAT
+					? status.tailcatAddress
+						? "Tailcat address ready"
+						: reachable
+							? "Tailcat connected"
+							: "Tailcat starting…"
+					: (status.magicDnsName ?? (reachable ? "Connected" : "Connecting…"));
 	return (
 		<div className="px-1 py-0.5">
-			<p className="px-2 pt-0.5 pb-1 font-medium text-[10px] text-muted-foreground/50 uppercase tracking-wider">
+			<p className="type-compact px-2 pt-0.5 pb-1 font-medium text-muted-foreground/50">
 				Network
 			</p>
 			<div className="flex items-center gap-2 px-2 py-1 text-xs">
@@ -3240,22 +3553,38 @@ function MeshSection({
 					aria-hidden
 					className={cn("size-1.5 shrink-0 rounded-full", dotColor)}
 				/>
-				<span className="flex-1 truncate text-muted-foreground">
+				<span
+					className="flex-1 truncate text-muted-foreground"
+					title={networkLabel}
+				>
 					{networkLabel}
 				</span>
 				{status.backend && (
-					<span className="shrink-0 text-[10px] text-muted-foreground/60">
+					<span className="type-compact shrink-0 text-muted-foreground/60">
 						{status.backend}
 					</span>
 				)}
 			</div>
+			{status.publicUrl && (
+				<p className="type-compact truncate px-2 pb-0.5 text-muted-foreground/60">
+					<a
+						className="underline-offset-2 hover:underline"
+						href={status.publicUrl}
+						rel="noopener noreferrer"
+						target="_blank"
+						title={status.publicUrl}
+					>
+						{status.publicUrl}
+					</a>
+				</p>
+			)}
 			{ingress?.up && ingress.kind && (
 				// Through `ingressLabel`, not raw: Core serializes this as
 				// `IngressKind::as_str()`, which is kebab-case (`own-relay`,
 				// `tailscale-funnel`), and rendering that verbatim showed the wire
 				// value in the UI. The same helper backs the Integrations tab picker,
 				// so the two surfaces name a backend identically.
-				<p className="px-2 pb-0.5 text-[10px] text-muted-foreground/60">
+				<p className="type-compact px-2 pb-0.5 text-muted-foreground/60">
 					Ingress: {ingressLabel(ingress.kind)}
 				</p>
 			)}
@@ -3271,9 +3600,9 @@ function MeshSection({
 				</div>
 			)}
 			{noBearer && (
-				<p className="px-2 pt-0.5 pb-0.5 text-[10px] text-muted-foreground/60">
+				<p className="type-compact px-2 pt-0.5 pb-0.5 text-muted-foreground/60">
 					{peers?.note ??
-						"Peer needs an enrollment token — provision the same RYU_TOKEN on both nodes, or add the peer's own token by hand."}
+						"Peer needs an enrollment token — provision the same RYU_TOKEN on both computers, or add the peer's own token by hand."}
 				</p>
 			)}
 		</div>
@@ -3312,7 +3641,7 @@ function ConnectedSection({
 	}
 	return (
 		<div className="px-1 py-0.5">
-			<p className="px-2 pt-0.5 pb-1 font-medium text-[10px] text-muted-foreground/50 uppercase tracking-wider">
+			<p className="type-compact px-2 pt-0.5 pb-1 font-medium text-muted-foreground/50">
 				Connected · {clients.length}
 			</p>
 			{clients.map((c) => {
@@ -3341,10 +3670,10 @@ function ConnectedSection({
 								<span className="text-muted-foreground/50"> (you)</span>
 							)}
 						</AutoScrollText>
-						<span className="shrink-0 text-[10px] text-muted-foreground/60">
+						<span className="type-compact shrink-0 text-muted-foreground/60">
 							{surface.label}
 						</span>
-						<span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums">
+						<span className="type-compact shrink-0 text-muted-foreground/50 tabular-nums">
 							{relativeAge(c.lastSeen)}
 						</span>
 					</div>
@@ -3417,6 +3746,9 @@ function ManagedNodeWallet({ node }: { node: Node | undefined }) {
 				: "Cloud credits";
 	const openCredits = () => openSettings("credits");
 
+	const cssVariables2: LayoutCssVariables = {
+		"--desktop-inline2-width": `${status?.remainingPercent ?? 0}%`,
+	};
 	return (
 		<div
 			className={cn(
@@ -3439,8 +3771,13 @@ function ManagedNodeWallet({ node }: { node: Node | undefined }) {
 					size={13}
 				/>
 				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate">{warningLabel}</span>
-					<span className="truncate text-[10px] text-muted-foreground/70">
+					<span className="truncate" title={warningLabel}>
+						{warningLabel}
+					</span>
+					<span
+						className="type-compact truncate text-muted-foreground/70"
+						title={organizationLabel}
+					>
 						{organizationLabel}
 					</span>
 				</span>
@@ -3459,11 +3796,14 @@ function ManagedNodeWallet({ node }: { node: Node | undefined }) {
 						role="progressbar"
 					>
 						<div
-							className="h-full rounded-full bg-warning transition-[width]"
-							style={{ width: `${status.remainingPercent}%` }}
+							className={cn(
+								cn("h-full rounded-full bg-warning", layoutStyles.authored1),
+								layoutStyles.inline2
+							)}
+							style={cssVariables2}
 						/>
 					</div>
-					<div className="flex items-center justify-between gap-2 text-[10px]">
+					<div className="type-compact flex items-center justify-between gap-2">
 						<span className="truncate text-muted-foreground/80">
 							{resetDate ? `Resets ${resetDate}` : "Shared organization wallet"}
 						</span>
@@ -3509,7 +3849,7 @@ function CloudSuggestions({ compact = false }: { compact?: boolean }) {
 			await addSuggestedNode(node);
 			sileo.success({ title: `Added ${cloudLabel(node.name)}` });
 		} catch {
-			sileo.error({ title: "Couldn't add cloud node" });
+			sileo.error({ title: "Couldn't add cloud computer" });
 		} finally {
 			setAddingUrl(null);
 		}
@@ -3517,7 +3857,7 @@ function CloudSuggestions({ compact = false }: { compact?: boolean }) {
 
 	return (
 		<div className={cn("space-y-0.5", compact ? "px-1 py-0.5" : "mt-1")}>
-			<p className="px-2 pt-0.5 pb-1 font-medium text-[10px] text-muted-foreground/50 uppercase tracking-wider">
+			<p className="type-compact px-2 pt-0.5 pb-1 font-medium text-muted-foreground/50">
 				Available in your workspace
 			</p>
 			{suggestions.map((node) => {
@@ -3536,7 +3876,7 @@ function CloudSuggestions({ compact = false }: { compact?: boolean }) {
 							{cloudLabel(node.name)}
 						</span>
 						<button
-							className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-[11px] text-primary hover:bg-primary/10 disabled:opacity-50"
+							className="type-caption shrink-0 rounded-md px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
 							disabled={busy}
 							onClick={() => handleAdd(node)}
 							type="button"
@@ -3545,7 +3885,7 @@ function CloudSuggestions({ compact = false }: { compact?: boolean }) {
 						</button>
 						<button
 							aria-label={`Dismiss ${cloudLabel(node.name)}`}
-							className="shrink-0 rounded-md p-0.5 text-muted-foreground/60 hover:bg-muted hover:text-foreground disabled:opacity-50"
+							className="relative shrink-0 rounded-md p-0.5 text-muted-foreground/60 after:absolute after:-inset-1 hover:bg-muted hover:text-foreground disabled:opacity-50"
 							disabled={busy}
 							onClick={() => dismissSuggestion(node.url)}
 							title="Dismiss"
@@ -3561,7 +3901,8 @@ function CloudSuggestions({ compact = false }: { compact?: boolean }) {
 }
 
 /** The policy, in one line — used for both the OFF-state hint and the a11y label. */
-const AUTO_SELECT_POLICY = "Prefer a reachable remote node, else run locally";
+const AUTO_SELECT_POLICY =
+	"Prefer a reachable remote computer, else use your computer";
 
 /**
  * Subline under the auto-select switch: what the setting is actually DOING right
@@ -3570,7 +3911,7 @@ const AUTO_SELECT_POLICY = "Prefer a reachable remote node, else run locally";
  */
 function autoSelectSubline(autoSelect: boolean, picked: Node | null): string {
 	if (!autoSelect) {
-		return "Always use your default node";
+		return "Always use your default computer";
 	}
 	if (!picked) {
 		return AUTO_SELECT_POLICY;
@@ -3578,7 +3919,7 @@ function autoSelectSubline(autoSelect: boolean, picked: Node | null): string {
 	// Branch on the URL, not the name: a remote node someone named "local" must not
 	// be reported as local compute.
 	if (isLocalNode(picked)) {
-		return "No remote reachable — running locally";
+		return "No remote computer reachable — using your computer";
 	}
 	return `Using ${displayName(picked.name)}`;
 }
@@ -3596,7 +3937,14 @@ function autoSelectSubline(autoSelect: boolean, picked: Node | null): string {
  * preference, not a single decision. OFF (the default) keeps selection byte-
  * identical to the manual path — a picked tab override still always wins.
  */
-function AutoSelectRow({ compact = false }: { compact?: boolean }) {
+function AutoSelectRow({
+	compact = false,
+	variant = "menu",
+}: {
+	compact?: boolean;
+	/** `settings`: the computer dialog's App Settings switch row + caption. */
+	variant?: "menu" | "settings";
+}) {
 	const autoSelect = useNodeStore((s) => s.autoSelect);
 	const setAutoSelect = useNodeStore((s) => s.setAutoSelect);
 	const autoSelectedNode = useNodeStore((s) => s.autoSelectedNode);
@@ -3609,12 +3957,33 @@ function AutoSelectRow({ compact = false }: { compact?: boolean }) {
 		picked = nodes.find((n) => n.name === autoSelectedNode) ?? LOCAL_FALLBACK;
 	}
 
+	if (variant === "settings") {
+		return (
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<Switch
+							aria-label={AUTO_SELECT_POLICY}
+							checked={autoSelect}
+							onCheckedChange={setAutoSelect}
+						/>
+					}
+					description={autoSelectSubline(autoSelect, picked)}
+					title="Auto-select computer"
+				/>
+			</SettingsGroup>
+		);
+	}
+
 	return (
 		<div className={cn(compact ? "px-1 py-0.5" : "mt-1")}>
 			<div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
 				<div className="min-w-0 flex-1">
-					<p className="truncate font-medium text-xs">Auto-select node</p>
-					<p className="truncate text-[10px] text-muted-foreground">
+					<p className="truncate font-medium text-xs">Auto-select computer</p>
+					<p
+						className="type-compact truncate text-muted-foreground"
+						title={autoSelectSubline(autoSelect, picked)}
+					>
 						{autoSelectSubline(autoSelect, picked)}
 					</p>
 				</div>
@@ -3672,6 +4041,41 @@ function NodeMenuGateway({
 	return <ServiceRow {...props} label={label} target={target} />;
 }
 
+/** How long Core may miss status polls before the dialog's Core-backed pages
+ *  treat it as gone. Covers a couple of polls of a reconnect blip. */
+const CORE_BLIP_GRACE_MS = 12_000;
+
+/**
+ * `reachable`, but a drop only counts once it has lasted
+ * {@link CORE_BLIP_GRACE_MS}. Recovery counts at once, and a new `key` (another
+ * computer) starts from its own reading instead of inheriting the last one's.
+ */
+function useSteadyReachable(reachable: boolean, key: string): boolean {
+	const [steady, setSteady] = useState({ key, reachable });
+	if (steady.key !== key) {
+		setSteady({ key, reachable });
+	}
+	useEffect(() => {
+		if (reachable) {
+			setSteady({ key, reachable: true });
+			return;
+		}
+		const timer = setTimeout(
+			() => setSteady({ key, reachable: false }),
+			CORE_BLIP_GRACE_MS
+		);
+		return () => clearTimeout(timer);
+	}, [reachable, key]);
+	return reachable || (steady.key === key && steady.reachable);
+}
+
+const TONE_LABEL = {
+	green: "Online",
+	amber: "Online · some services need attention",
+	red: "Unreachable",
+	pending: "Checking…",
+} satisfies Record<Tone, string>;
+
 export function NodeSelector({ mode }: NodeSelectorProps) {
 	const { nodes, defaultNode, setDefault, removeNode, addNode } =
 		useNodeStore();
@@ -3685,15 +4089,24 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 	const openGateway = useGatewayDialog((s) => s.openGateway);
 	const [shareNode, setShareNode] = useState<Node | null>(null);
 	const [hardwareNode, setHardwareNode] = useState<Node | null>(null);
+	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [showDetail] = useNodeSelectorDetail();
+	// Panel actions can open the Gateway or App Settings dialog (a toolkit's
+	// "Set control server URL…", the wallet's credits link). Hand the screen over
+	// instead of stacking a second modal on top of the computer dialog.
+	const appSettingsOpen = useSettingsDialog((s) => s.open);
+	useEffect(() => {
+		if (gatewayOpen || appSettingsOpen) {
+			setSettingsOpen(false);
+		}
+	}, [gatewayOpen, appSettingsOpen]);
 	const activeNode = nodes.find((n) => n.name === defaultNode) ?? nodes[0];
 
 	const {
 		coreReachable,
 		gatewayReachable,
 		shadowReachable,
-		// # 0.1.0: Island disabled — restore with the Island ServiceRow below
-		// islandReachable,
+		islandReachable,
 		meshReachable,
 		meshStatus,
 		loading,
@@ -3713,13 +4126,13 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 		userJwt: activeNode?.userJwt ?? null,
 	};
 
-	// # 0.1.0: Island disabled — uncomment when re-enabling the Island ServiceRow
 	// Island is a device-local Electron companion the shell installs + launches
 	// (Core can't — it's not a Core sidecar). The Island row surfaces this only when
 	// the local island isn't reachable; the status dot goes green on the next probe.
-	// const handleIslandLaunch = async () => {
-	// 	await installAndLaunchIsland();
-	// };
+	// The row itself is behind the ISLAND_ENABLED release gate.
+	const handleIslandLaunch = async () => {
+		await installAndLaunchIsland();
+	};
 
 	// Installed version + update verdict for Core/Gateway (single release train):
 	// drives the version badge on both rows and the shared app-wide "Update"
@@ -3730,7 +4143,7 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 		update: handleAppUpdate,
 	} = useNodeVersion(target, coreReachable === true);
 
-	// Connected-client presence (the "who's on this node" view). Soft dependency:
+	// Connected-client presence (the "who's on this computer" view). Soft dependency:
 	// an older Core without the surface 404s → caught → null → section hidden.
 	const { data: connections } = useQuery({
 		queryKey: ["node-connections", target.url],
@@ -3794,11 +4207,346 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 		}
 	};
 
+	// Service health in one line, for the dropdown's Services row and the
+	// dialog's Services link: the dot already says "something is off", this says
+	// WHAT.
+	const services: Array<{ label: string; up: boolean | null }> = [
+		{ label: "Core", up: coreReachable },
+		{ label: "Gateway", up: gatewayReachable },
+		{ label: "Shadow", up: shadowReachable },
+	];
+	if (ISLAND_ENABLED && islandReachable !== null) {
+		services.push({ label: "Island", up: islandReachable });
+	}
+	// Mesh feeds the same amber tone as the services, so the line must name it
+	// too — otherwise an amber dot sits next to "All running".
+	if (meshStatus !== null) {
+		services.push({ label: "Network", up: meshReachable });
+	}
+	const stoppedServices = services.filter((svc) => svc.up === false);
+	let servicesSummary = "All running";
+	if (loading) {
+		servicesSummary = "Checking…";
+	} else if (stoppedServices.length > 0) {
+		servicesSummary = `${stoppedServices.map((svc) => svc.label).join(", ")} stopped`;
+	}
+
+	const openSettings = () => setSettingsOpen(true);
+
+	const serviceRows = (
+		<>
+			<ServiceRow
+				icon={ServerStack01Icon}
+				label="Core"
+				onChanged={refresh}
+				onUpdate={handleAppUpdate}
+				running={coreReachable}
+				sidecarKey="core"
+				target={target}
+				updateAvailable={appUpdateAvailable}
+				version={appVersion}
+			/>
+			<NodeMenuGateway
+				coreReachable={coreReachable === true}
+				icon={Router01Icon}
+				onChanged={refresh}
+				onUpdate={handleAppUpdate}
+				running={gatewayReachable}
+				sidecarKey="gateway"
+				target={target}
+				updateAvailable={appUpdateAvailable}
+				version={appVersion}
+			/>
+			{/* Shadow is preinstalled and managed by Core's normal sidecar lifecycle. */}
+			<ServiceRow
+				label="Shadow"
+				onChanged={refresh}
+				running={shadowReachable}
+				sidecarKey="shadow"
+				target={target}
+			/>
+			{/* Island is a device-local Electron companion (loopback :7989), not
+			    a Core sidecar — Core can't start/stop it, so the row is
+			    read-only status only. Hidden on remote nodes (islandReachable
+			    is null = not relevant for another machine) and while the
+			    ISLAND_ENABLED release gate is off. */}
+			{ISLAND_ENABLED && islandReachable !== null && (
+				<ServiceRow
+					label="Island"
+					onChanged={refresh}
+					onLaunch={handleIslandLaunch}
+					readOnly
+					running={islandReachable}
+					sidecarKey="island"
+					target={target}
+				/>
+			)}
+		</>
+	);
+
+	// Engines, voice and toolkits are all read from Core; with Core down their
+	// pages would open blank, so the rows say why instead of opening. They read
+	// the STEADY reachability: one missed status poll must not unmount the
+	// sections and throw the user off the layer page they are on.
+	const coreSteady = useSteadyReachable(coreReachable === true, target.url);
+	let coreUnavailable: string | null = null;
+	if (loading) {
+		coreUnavailable = "Checking…";
+	} else if (!coreSteady) {
+		coreUnavailable = "Unavailable — Core isn't reachable";
+	}
+
+	// Steady like the rows above: a failed status poll nulls `meshStatus`, and an
+	// unmounted row would send a user mid-task on this page back to the root.
+	const hasNetwork = useSteadyReachable(
+		meshStatus !== null || (connections?.clients.length ?? 0) > 0,
+		target.url
+	);
+
+	// The expanded node selector: an iOS-Settings-style page stack. The root lists
+	// computers and one row per area; every area — and every layer inside it —
+	// pushes its own page instead of nesting a submenu in a 380px popover.
+	const settingsRoot = (
+		<>
+			<SettingsCard>
+				<div className="flex items-center gap-3">
+					<span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground/5">
+						<NodeStatusIcon
+							borderClassName="border-muted"
+							icon={
+								isLocalNode(activeNode ?? LOCAL_FALLBACK)
+									? LaptopIcon
+									: Link01Icon
+							}
+							tone={tone}
+						/>
+					</span>
+					<div className="min-w-0 flex-1">
+						<p
+							className="truncate font-medium text-sm"
+							title={computerName(activeNode ?? LOCAL_FALLBACK)}
+						>
+							{computerName(activeNode ?? LOCAL_FALLBACK)}
+						</p>
+						<p className="type-caption truncate text-muted-foreground">
+							{TONE_LABEL[tone]}
+							{activeNode && !isLocalNode(activeNode)
+								? ` · ${activeNode.managed ? "Cloud Computers" : activeNode.url}`
+								: ""}
+						</p>
+					</div>
+				</div>
+				<NodeMenuHardware enabled={coreReachable === true} target={target} />
+			</SettingsCard>
+			<PanelSection title="This computer">
+				<PanelPageLink
+					icon={ServerStack01Icon}
+					label="Services"
+					tint="green"
+					trailing={
+						<>
+							<span
+								aria-hidden
+								className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone])}
+							/>
+							<span className="truncate">{servicesSummary}</span>
+						</>
+					}
+				>
+					<PanelSection footer="Core runs Ryu on this computer; Gateway routes model and tool calls.">
+						{serviceRows}
+					</PanelSection>
+				</PanelPageLink>
+				<PanelPageLink
+					disabled={coreUnavailable !== null}
+					icon={LayerIcon}
+					label="Engines & models"
+					tint="purple"
+					trailing={coreUnavailable ?? undefined}
+				>
+					<EnginesSection target={target} />
+					<DecisionModelsSection enabled={coreSteady} target={target} />
+				</PanelPageLink>
+				<PanelPageLink
+					disabled={coreUnavailable !== null}
+					icon={VolumeHighIcon}
+					label="Voice & sandbox"
+					tint="pink"
+					trailing={coreUnavailable ?? undefined}
+				>
+					<VoiceAndSandboxSection enabled={coreSteady} target={target} />
+					<SettingsCard className="py-1.5 empty:hidden">
+						<SandboxesSection enabled={coreSteady} target={target} />
+					</SettingsCard>
+				</PanelPageLink>
+				<PanelPageLink
+					disabled={coreUnavailable !== null}
+					icon={Layers01Icon}
+					label="Toolkits"
+					tint="orange"
+					trailing={coreUnavailable ?? undefined}
+				>
+					<LayersSection enabled={coreSteady} target={target} />
+				</PanelPageLink>
+				{hasNetwork && (
+					<PanelPageLink
+						icon={WifiConnected01Icon}
+						label="Network & devices"
+						tint="blue"
+					>
+						<SettingsCard className="space-y-2 py-1.5 empty:hidden">
+							<MeshSection
+								ingress={ingress ?? null}
+								onAddPeer={handleAddPeer}
+								peers={meshPeers ?? null}
+								reachable={meshReachable}
+								status={meshStatus}
+							/>
+							<ConnectedSection
+								clients={connections?.clients ?? []}
+								selfClientId={currentClientId()}
+							/>
+						</SettingsCard>
+					</PanelPageLink>
+				)}
+				<PanelPageLink icon={CpuIcon} label="Hardware" tint="gray">
+					<NodeHardwareContent
+						enabled={coreReachable === true}
+						pending={loading}
+						target={target}
+					/>
+				</PanelPageLink>
+			</PanelSection>
+			<PanelSection title="Computers">
+				{nodes.map((node) => {
+					const active = node.name === defaultNode;
+					return (
+						<PanelRow
+							current={active}
+							icon={isLocalNode(node) ? LaptopIcon : Link01Icon}
+							key={node.name}
+							onClick={() => setDefault(node.name)}
+							sideAction={
+								<button
+									aria-label={`Share ${computerName(node)}`}
+									className="relative z-10 shrink-0 rounded-md p-1 text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+									onClick={() => setShareNode(node)}
+									type="button"
+								>
+									<HugeiconsIcon className="size-4" icon={Share08Icon} />
+								</button>
+							}
+							tint={isLocalNode(node) ? "blue" : "teal"}
+							trailing={
+								active ? (
+									<HugeiconsIcon
+										aria-label="Active"
+										className="size-4 shrink-0 text-primary"
+										icon={Tick02Icon}
+										strokeWidth={2.5}
+									/>
+								) : null
+							}
+							value={
+								isLocalNode(node)
+									? undefined
+									: node.managed
+										? "Cloud Computers"
+										: node.url
+							}
+						>
+							{computerName(node)}
+						</PanelRow>
+					);
+				})}
+				<PanelRow
+					icon={Add01Icon}
+					onClick={() => setAddOpen(true)}
+					tint="gray"
+					tone="accent"
+				>
+					Add computer
+				</PanelRow>
+			</PanelSection>
+			{/* Prefer whichever node is actually reachable (opt-in, OFF by default). */}
+			<AutoSelectRow variant="settings" />
+			{/* The wallet belongs to the active managed node's organization. */}
+			{activeNode?.managed && <ManagedNodeWallet node={activeNode} />}
+			{/* Auto-detected cloud instances tied to this workspace, not yet added. */}
+			<CloudSuggestions compact />
+			<PanelGroup>
+				<PanelRow
+					icon={RefreshIcon}
+					onClick={() => {
+						refresh()
+							.catch(() => undefined)
+							.finally(triggerGlobalRefresh);
+					}}
+					tint="gray"
+				>
+					Refresh all data
+				</PanelRow>
+				<PanelRow
+					icon={Settings01Icon}
+					onClick={() => {
+						setSettingsOpen(false);
+						openGateway(simpleInterface ? "computer" : undefined);
+					}}
+					tint="gray"
+				>
+					{simpleInterface ? "Device settings" : "Gateway settings"}
+				</PanelRow>
+				<PanelRow
+					icon={Share08Icon}
+					onClick={openManageCloudServers}
+					tint="gray"
+				>
+					Manage cloud computers
+				</PanelRow>
+			</PanelGroup>
+		</>
+	);
+
+	const settingsDialog = (
+		<Dialog onOpenChange={setSettingsOpen} open={settingsOpen}>
+			{/* A grouped pane, like App Settings: Apple's grouped background with
+			    the settings cards raised onto it. On the bare popover surface
+			    (`--popover` is `--muted`) the cards had no visible edge. */}
+			<DialogContent className="grouped-pane flex h-[min(85vh,720px)] max-w-lg flex-col gap-3 bg-grouped">
+				<NodePanelNav
+					bodyClassName="scroll-fade -me-2 min-h-0 flex-1 overflow-y-auto pe-2 pb-2"
+					renderHeader={({ back, backLabel, title }) => (
+						<DialogHeader className="min-h-12 gap-1 pe-10">
+							{back && backLabel ? (
+								<>
+									<PanelBackButton label={backLabel} onClick={back} />
+									<DialogTitle className="truncate px-0.5 font-medium text-base">
+										{title}
+									</DialogTitle>
+								</>
+							) : (
+								<>
+									<DialogTitle className="font-medium text-base">
+										Computer
+									</DialogTitle>
+									<DialogDescription>
+										Where Ryu runs, and everything running on it.
+									</DialogDescription>
+								</>
+							)}
+						</DialogHeader>
+					)}
+					root={settingsRoot}
+				/>
+			</DialogContent>
+		</Dialog>
+	);
+
 	if (mode === "persistent-sidebar") {
 		return (
 			<div className="space-y-0.5">
-				<p className="mb-1 px-2 font-medium text-[10px] text-muted-foreground/60 uppercase tracking-wider">
-					{simpleInterface ? "Devices" : "Nodes"}
+				<p className="type-compact mb-1 px-2 font-medium text-muted-foreground/60">
+					Computers
 				</p>
 				<div className="space-y-0.5">
 					{nodes.map((node) => (
@@ -3821,11 +4569,19 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 				<AutoSelectRow />
 				<button
 					className="flex w-full items-center gap-1.5 px-2 py-1.5 text-muted-foreground/60 text-xs hover:text-muted-foreground"
+					onClick={() => openSettings()}
+					type="button"
+				>
+					<HugeiconsIcon icon={Settings01Icon} size={11} />
+					Computer settings
+				</button>
+				<button
+					className="flex w-full items-center gap-1.5 px-2 py-1.5 text-muted-foreground/60 text-xs hover:text-muted-foreground"
 					onClick={() => setAddOpen(true)}
 					type="button"
 				>
 					<HugeiconsIcon icon={Add01Icon} size={11} />
-					{simpleInterface ? "Add device" : "Add node"}
+					Add computer
 				</button>
 				<button
 					className="flex w-full items-center gap-1.5 px-2 py-1.5 text-muted-foreground/60 text-xs hover:text-muted-foreground"
@@ -3833,8 +4589,9 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 					type="button"
 				>
 					<HugeiconsIcon icon={Share08Icon} size={11} />
-					{simpleInterface ? "Manage cloud devices" : "Manage cloud servers"}
+					Manage cloud computers
 				</button>
+				{settingsDialog}
 				<AddNodeDialog onClose={() => setAddOpen(false)} open={addOpen} />
 				<ShareNodeDialog
 					magicDnsName={meshStatus?.magicDnsName ?? null}
@@ -3851,17 +4608,16 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 		);
 	}
 
-	// compact-dropdown mode — trigger dot reflects system health
+	// compact-dropdown mode — trigger dot reflects system health. The dropdown is
+	// the quick switcher (pick a computer, see its health); everything else —
+	// engines, voice, toolkits, network — lives one click away in the expanded
+	// settings dialog, so the popover stays short.
 	return (
 		<>
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					render={
-						<Button
-							className="max-w-[160px] gap-1.5 px-2"
-							size="sm"
-							variant="ghost"
-						/>
+						<Button className="max-w-[160px]" size="sm" variant="ghost" />
 					}
 				>
 					{isLocalNode(activeNode ?? LOCAL_FALLBACK) ? (
@@ -3877,8 +4633,11 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 							tone={tone}
 						/>
 					)}
-					<span className="min-w-0 truncate">
-						{displayName(activeNode?.name ?? "local")}
+					<span
+						className="min-w-0 truncate"
+						title={computerName(activeNode ?? LOCAL_FALLBACK)}
+					>
+						{computerName(activeNode ?? LOCAL_FALLBACK)}
 					</span>
 					<HugeiconsIcon
 						className="shrink-0 text-muted-foreground"
@@ -3888,36 +4647,39 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 				</DropdownMenuTrigger>
 				<DropdownMenuContent
 					align="start"
-					className="w-[380px] overflow-hidden p-0"
+					className="w-[340px] overflow-hidden"
 				>
 					<div className="border-border/60 border-b bg-muted/20 px-3 py-3">
 						<div className="flex items-start justify-between gap-3">
-							<div>
-								<p className="font-medium text-sm">
-									Choose a {simpleInterface ? "device" : "node"}
-								</p>
+							<div className="min-w-0">
+								<p className="font-medium text-sm">Choose a computer</p>
 								<p className="mt-0.5 text-muted-foreground text-xs">
 									Where should Ryu run this conversation?
 								</p>
 							</div>
-							<span className="rounded-full bg-primary/10 px-2 py-1 font-medium text-[10px] text-primary uppercase tracking-wide">
-								{nodes.length} {simpleInterface ? "device" : "node"}
-								{nodes.length === 1 ? "" : "s"} connected
-							</span>
+							{/* A menu item, not a bare button: Base UI's arrow-key roving
+							    focus only reaches controls registered as menu items. */}
+							<DropdownMenuItem
+								aria-label="Expand computer settings"
+								className="size-7 shrink-0 justify-center p-0"
+								onClick={() => openSettings()}
+								title="Expand"
+							>
+								<HugeiconsIcon icon={ExpandIcon} size={14} />
+							</DropdownMenuItem>
 						</div>
 					</div>
 					<div className="max-h-[min(68vh,520px)] overflow-y-auto p-2">
-						<p className="px-2 pt-0.5 pb-1 font-medium text-[10px] text-muted-foreground/60 uppercase tracking-wider">
-							Available {simpleInterface ? "devices" : "nodes"}
+						<p className="type-compact px-2 pt-0.5 pb-1 font-medium text-muted-foreground/60">
+							Computers
 						</p>
 						{nodes.map((node) => (
 							<DropdownMenuItem
-								className={cn(
-									"mb-1 items-start gap-2 rounded-lg px-2.5 py-2.5",
-									node.name === defaultNode && "bg-accent"
-								)}
+								className="mb-1"
 								key={node.name}
 								onClick={() => setDefault(node.name)}
+								purpose="node-choice"
+								selected={node.name === defaultNode}
 							>
 								{isLocalNode(node) ? (
 									<NodeStatusIcon
@@ -3935,27 +4697,26 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 									/>
 								)}
 								<span className="min-w-0 flex-1">
-									<span className="block truncate font-medium">
-										{displayName(node.name)}
+									<span
+										className="block truncate font-medium"
+										title={computerName(node)}
+									>
+										{computerName(node)}
 									</span>
-									{showDetail && (
-										<span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-											{node.managed
-												? "Ryu Cloud"
-												: isLocalNode(node)
-													? "This device"
-													: node.url}
+									{showDetail && !isLocalNode(node) && (
+										<span className="type-caption mt-0.5 block truncate text-muted-foreground">
+											{node.managed ? "Cloud Computers" : node.url}
 										</span>
 									)}
 								</span>
 								{node.name === defaultNode && (
-									<span className="rounded-full bg-primary/10 px-1.5 py-0.5 font-medium text-[10px] text-primary">
+									<span className="type-compact rounded-full bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
 										Active
 									</span>
 								)}
 								<button
-									aria-label={`Share ${node.name}`}
-									className="shrink-0 text-muted-foreground hover:text-foreground"
+									aria-label={`Share ${computerName(node)}`}
+									className="relative shrink-0 text-muted-foreground after:absolute after:-inset-1.5 hover:text-foreground"
 									onClick={(e) => {
 										// Don't switch the active node or close the menu — just share.
 										e.preventDefault();
@@ -3994,103 +4755,59 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 					{/* Prefer whichever node is actually reachable (opt-in, OFF by default). */}
 					<AutoSelectRow compact />
 					<div className="px-1 py-0.5">
-						<p className="px-2 pt-0.5 pb-1 font-medium text-[10px] text-muted-foreground/50 uppercase tracking-wider">
+						<p className="type-compact px-2 pt-0.5 pb-1 font-medium text-muted-foreground/50">
 							Services
 						</p>
-						<ServiceRow
-							icon={ServerStack01Icon}
-							label="Core"
-							onChanged={refresh}
-							onUpdate={handleAppUpdate}
-							running={coreReachable}
-							sidecarKey="core"
-							target={target}
-							updateAvailable={appUpdateAvailable}
-							version={appVersion}
-						/>
-						<NodeMenuGateway
-							coreReachable={coreReachable === true}
-							icon={Router01Icon}
-							onChanged={refresh}
-							onUpdate={handleAppUpdate}
-							running={gatewayReachable}
-							sidecarKey="gateway"
-							target={target}
-							updateAvailable={appUpdateAvailable}
-							version={appVersion}
-						/>
-						{/* Shadow is preinstalled and managed by Core's normal sidecar lifecycle. */}
-						<ServiceRow
-							label="Shadow"
-							onChanged={refresh}
-							running={shadowReachable}
-							sidecarKey="shadow"
-							target={target}
-						/>
-						{/* # 0.1.0: Island disabled — uncomment when re-enabling Island
-						    Island is a device-local Electron companion (loopback :7989), not
-						    a Core sidecar — Core can't start/stop it, so the row is
-						    read-only status only. Hidden on remote nodes (islandReachable
-						    is null = not relevant for another machine).
-						{islandReachable !== null && (
-							<ServiceRow
-								label="Island"
-								onChanged={refresh}
-								onLaunch={handleIslandLaunch}
-								readOnly
-								running={islandReachable}
-								sidecarKey="island"
-								target={target}
-							/>
-						)}
-						*/}
+						{serviceRows}
 					</div>
-					<EnginesSection target={target} />
-					<VoiceAndSandboxSection
-						enabled={coreReachable === true}
-						target={target}
-					/>
-					<LayersSection enabled={coreReachable === true} target={target} />
-					<SandboxesSection enabled={coreReachable === true} target={target} />
-					<MeshSection
-						ingress={ingress ?? null}
-						onAddPeer={handleAddPeer}
-						peers={meshPeers ?? null}
-						reachable={meshReachable}
-						status={meshStatus}
-					/>
-					<ConnectedSection
-						clients={connections?.clients ?? []}
-						selfClientId={currentClientId()}
-					/>
-					<DropdownMenuItem onClick={() => setAddOpen(true)}>
-						<HugeiconsIcon icon={Add01Icon} size={12} />
-						<span className="flex-1">
-							{simpleInterface ? "Add device" : "Add node"}
-						</span>
-					</DropdownMenuItem>
-					<DropdownMenuItem
-						onClick={() =>
-							openGateway(simpleInterface ? "computer" : undefined)
-						}
-						onFocus={preloadGatewayDialog}
-						onPointerEnter={preloadGatewayDialog}
-					>
-						<HugeiconsIcon icon={Settings01Icon} size={12} />
-						<span className="flex-1">
-							{simpleInterface ? "Device settings" : "Gateway settings"}
-						</span>
-					</DropdownMenuItem>
-					<DropdownMenuItem onClick={openManageCloudServers}>
-						<HugeiconsIcon icon={Share08Icon} size={12} />
-						<span className="flex-1">
-							{simpleInterface
-								? "Manage cloud devices"
-								: "Manage cloud servers"}
-						</span>
-					</DropdownMenuItem>
+					<div className="border-border/60 border-t p-1">
+						<DropdownMenuItem onClick={() => openSettings()}>
+							<HugeiconsIcon icon={Settings01Icon} size={12} />
+							<span className="flex-1">Engines, voice, toolkits…</span>
+							<HugeiconsIcon
+								className="text-muted-foreground/60"
+								icon={ExpandIcon}
+								size={12}
+							/>
+						</DropdownMenuItem>
+						{/* One action to re-check Core and refetch every data source, so after
+						    Core recovers nobody has to press "Try again" section by section.
+						    Reconnects already fire this automatically (useSystemStatus). */}
+						<DropdownMenuItem
+							closeOnClick={false}
+							onClick={() => {
+								refresh()
+									.catch(() => undefined)
+									.finally(triggerGlobalRefresh);
+							}}
+						>
+							<HugeiconsIcon icon={RefreshIcon} size={12} />
+							<span className="flex-1">Refresh all data</span>
+						</DropdownMenuItem>
+						<DropdownMenuItem onClick={() => setAddOpen(true)}>
+							<HugeiconsIcon icon={Add01Icon} size={12} />
+							<span className="flex-1">Add computer</span>
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							onClick={() =>
+								openGateway(simpleInterface ? "computer" : undefined)
+							}
+							onFocus={preloadGatewayDialog}
+							onPointerEnter={preloadGatewayDialog}
+						>
+							<HugeiconsIcon icon={Settings01Icon} size={12} />
+							<span className="flex-1">
+								{simpleInterface ? "Device settings" : "Gateway settings"}
+							</span>
+						</DropdownMenuItem>
+						<DropdownMenuItem onClick={openManageCloudServers}>
+							<HugeiconsIcon icon={Share08Icon} size={12} />
+							<span className="flex-1">Manage cloud computers</span>
+						</DropdownMenuItem>
+					</div>
 				</DropdownMenuContent>
 			</DropdownMenu>
+			{settingsDialog}
 			<AddNodeDialog onClose={() => setAddOpen(false)} open={addOpen} />
 			<GatewayDialog
 				defaultSection={gatewaySection}
@@ -4114,4 +4831,9 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 			/>
 		</>
 	);
+}
+
+interface LayoutCssVariables extends LayoutCSSProperties {
+	"--desktop-inline1-width"?: string | number;
+	"--desktop-inline2-width"?: string | number;
 }

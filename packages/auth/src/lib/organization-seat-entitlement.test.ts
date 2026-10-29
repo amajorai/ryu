@@ -31,7 +31,7 @@ describe("Teams negotiated seat allowance", () => {
 		expect(teamsSeatMinimum()).toBe(5);
 		expect(
 			teamsSeatAllowanceFromContract({
-				contractedSeats: "not-a-number" as unknown as number,
+				contractedSeats: "not-a-number",
 				bonusSeats: -10,
 			})
 		).toMatchObject({ billedSeats: 5, bonusSeats: 0, includedSeats: 5 });

@@ -12,6 +12,37 @@ import {
 } from "./standalone.ts";
 
 describe("standalone app contract", () => {
+	test("normalizes bundle labels and retains manifest and sidecar metadata", () => {
+		const bundle = {
+			appId: " @ryu/expenses ",
+			appName: " Expenses ",
+			manifest: { permissions: ["file:access"], extension: { enabled: true } },
+			schemaVersion: 1 as const,
+			sidecars: [
+				{
+					command: null,
+					mode: "embedded" as const,
+					name: "processor",
+					extension: "kept",
+				},
+			],
+			uiCode: "",
+			version: " 1.0.0 ",
+		};
+		expect(parseStandaloneAppBundle(bundle)).toEqual({
+			...bundle,
+			appId: "@ryu/expenses",
+			appName: "Expenses",
+			version: "1.0.0",
+		});
+		expect(
+			parseStandaloneAppBundle({
+				...bundle,
+				sidecars: [{ ...bundle.sidecars[0], commandEnv: 1 }],
+			})
+		).toBeNull();
+	});
+
 	test("derives a stable isolated port namespace", () => {
 		const first = standalonePortOffset("@ryu/expenses");
 

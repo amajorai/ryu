@@ -1,0 +1,26 @@
+# Hosted fleet screener backend (managed guardrails screener addendum
+# sections 5.2 and 10, build step G7). Paste this into the fleet's
+# gateway.toml on the /data volume (GATEWAY_CONFIG=/data/gateway.toml in
+# apps/gateway/docker-compose.fleet.yml). Endpoints only: which backend fills
+# which role, thresholds, qualifications and remote-processor records come
+# from the platform floor's `screener` field, never from this file.
+#
+# The values come from the environment the fleet compose sets on the gateway:
+#   RYU_SCREENER_DECISION_URL     http://screener:11435/v1/systemone
+#   RYU_SCREENER_DECISION_MODEL   the Ollaya model baked into the screener image
+#   RYU_SCREENER_DECISION_SHA256  that model's manifest digest, 64 hex, no prefix
+#
+# `private_network = true` is required: the screener is reached by service name
+# on the internal screening network, and a non-loopback host is refused unless
+# it is declared a private-network endpoint.
+#
+# There is deliberately no `decision_remote` (Jev) table here. A remote
+# processor is never part of the fleet baseline.
+
+[screening.backends.decision_local]
+kind = "decision_local"
+base_url_env = "RYU_SCREENER_DECISION_URL"
+model_env = "RYU_SCREENER_DECISION_MODEL"
+weights_sha256_env = "RYU_SCREENER_DECISION_SHA256"
+private_network = true
+template_version = 1

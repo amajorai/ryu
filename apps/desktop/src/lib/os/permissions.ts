@@ -6,9 +6,8 @@
 // with no recoverable in-app dialog, so the only fix is to send the user to the
 // right settings pane.
 //
-// On Windows the webview's in-page permission prompt is auto-accepted via the
-// window's additionalBrowserArgs (--use-fake-ui-for-media-stream); the OS-wide
-// "let apps use your microphone" toggle is the only remaining gate. On macOS the
+// On Windows both the webview permission and the OS microphone privacy settings
+// can block access. On macOS the
 // one-time TCC prompt fires from the bundle's NSMicrophoneUsageDescription, and a
 // prior denial is only reversible from System Settings.
 
@@ -27,12 +26,12 @@ function detectOs(): OsKind {
 	return "other";
 }
 
-const MIC_SETTINGS_URI: Record<OsKind, string | null> = {
+const MIC_SETTINGS_URI = {
 	windows: "ms-settings:privacy-microphone",
 	macos:
 		"x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
 	other: null,
-};
+} satisfies Record<OsKind, string | null>;
 
 /** Whether a microphone settings deep-link exists for the current OS. */
 export function canOpenMicrophoneSettings(): boolean {
@@ -50,7 +49,38 @@ export async function openMicrophoneSettings(): Promise<boolean> {
 		return false;
 	}
 	try {
-		await invokeWhenReady("open_external", { url: uri });
+		await invokeWhenReady("open_privacy_settings", {
+			capability: "microphone",
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+const NOTIFICATION_SETTINGS_URI = {
+	windows: "ms-settings:notifications",
+	macos: "x-apple.systempreferences:com.apple.preference.notifications",
+	other: null,
+} satisfies Record<OsKind, string | null>;
+
+/** Whether a notification settings deep-link exists for the current OS. */
+export function canOpenNotificationSettings(): boolean {
+	return NOTIFICATION_SETTINGS_URI[detectOs()] !== null;
+}
+
+/**
+ * Open the OS notification settings pane (desktop app only). Desktop OSes never
+ * tell an app it was muted, so this is how a user fixes missing banners.
+ */
+export async function openNotificationSettings(): Promise<boolean> {
+	if (!NOTIFICATION_SETTINGS_URI[detectOs()]) {
+		return false;
+	}
+	try {
+		await invokeWhenReady("open_privacy_settings", {
+			capability: "notifications",
+		});
 		return true;
 	} catch {
 		return false;
@@ -66,29 +96,29 @@ export async function openMicrophoneSettings(): Promise<boolean> {
 //
 // `check*` never prompts (safe to poll on a settings screen); `request*` fires
 // the one-time system prompt and registers the app in System Settings. A fresh
-// grant only takes effect after the app restarts. On non-macOS the backing
-// commands return true (no equivalent gate).
+// grant may require restarting the app. Windows has no equivalent toggles;
+// Linux reports session and input-device availability instead.
 
-const ACCESSIBILITY_SETTINGS_URI: Record<OsKind, string | null> = {
+const ACCESSIBILITY_SETTINGS_URI = {
 	windows: null,
 	macos:
 		"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
 	other: null,
-};
+} satisfies Record<OsKind, string | null>;
 
-const SCREEN_RECORDING_SETTINGS_URI: Record<OsKind, string | null> = {
+const SCREEN_RECORDING_SETTINGS_URI = {
 	windows: null,
 	macos:
 		"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
 	other: null,
-};
+} satisfies Record<OsKind, string | null>;
 
-const INPUT_MONITORING_SETTINGS_URI: Record<OsKind, string | null> = {
+const INPUT_MONITORING_SETTINGS_URI = {
 	windows: null,
 	macos:
 		"x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
 	other: null,
-};
+} satisfies Record<OsKind, string | null>;
 
 /** Whether Accessibility is currently granted. Never prompts. */
 export async function checkAccessibilityPermission(): Promise<boolean> {
@@ -143,7 +173,9 @@ export async function openAccessibilitySettings(): Promise<boolean> {
 		return false;
 	}
 	try {
-		await invokeWhenReady("open_external", { url: uri });
+		await invokeWhenReady("open_privacy_settings", {
+			capability: "accessibility",
+		});
 		return true;
 	} catch {
 		return false;
@@ -157,7 +189,9 @@ export async function openScreenRecordingSettings(): Promise<boolean> {
 		return false;
 	}
 	try {
-		await invokeWhenReady("open_external", { url: uri });
+		await invokeWhenReady("open_privacy_settings", {
+			capability: "screenRecording",
+		});
 		return true;
 	} catch {
 		return false;
@@ -195,7 +229,9 @@ export async function openInputMonitoringSettings(): Promise<boolean> {
 		return false;
 	}
 	try {
-		await invokeWhenReady("open_external", { url: uri });
+		await invokeWhenReady("open_privacy_settings", {
+			capability: "inputMonitoring",
+		});
 		return true;
 	} catch {
 		return false;

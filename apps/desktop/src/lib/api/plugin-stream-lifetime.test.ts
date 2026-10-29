@@ -1,13 +1,19 @@
 import { expect, mock, test } from "bun:test";
 
 let response: Response;
+let requestedPath = "";
 mock.module("./client.ts", () => ({
-	authenticatedFetch: () => Promise.resolve(response),
+	ApiError: class ApiError extends Error {},
+	authenticatedFetch: (_target: unknown, path: string) => {
+		requestedPath = path;
+		return Promise.resolve(response);
+	},
+	buyerTokenHeader: () => ({}),
 	makeHeaders: () => ({}),
 	identityHeaders: () => ({}),
 	request: () => Promise.resolve({}),
 }));
-const { pluginHostInvokeStream, pluginFinetuneStream } = await import(
+const { pluginHostInvokeStream, ownAppEventStream } = await import(
 	"./plugins.ts"
 );
 const target = { url: "http://fixture.test", token: null };
@@ -30,13 +36,13 @@ function source(text: string, closed = false) {
 const delta = (value: string) =>
 	`data: ${JSON.stringify({ type: "text-delta", delta: value })}\n\n`;
 const invoke = (
-	kind: "host" | "finetune",
+	kind: "host" | "app",
 	onChunk: (value: string) => void,
 	signal?: AbortSignal
 ) =>
 	kind === "host"
 		? pluginHostInvokeStream(target, "fixture", {}, { onChunk, signal })
-		: pluginFinetuneStream(target, "fixture", "job", {
+		: ownAppEventStream(target, "@ryu/fixture", "/job/stream", {
 				onFrame: onChunk,
 				signal,
 			});
@@ -59,7 +65,19 @@ test("host error frames release the response before rejecting", async () => {
 	expect(stream.cancelled()).toBe(1);
 	expect(stream.body.locked).toBe(false);
 });
-for (const kind of ["host", "finetune"] as const) {
+test("own-app streams read the companion's own ext-proxy mount", async () => {
+	source(delta("first"), true);
+	await invoke("app", () => undefined);
+	expect(requestedPath).toBe("/api/ext/@ryu/fixture/job/stream");
+});
+test("own-app streams refuse a path outside the companion's mount", async () => {
+	await expect(
+		ownAppEventStream(target, "@ryu/fixture", "/../../plugins", {
+			onFrame: () => undefined,
+		})
+	).rejects.toThrow("outside its own sidecar mount");
+});
+for (const kind of ["host", "app"] as const) {
 	test(`${kind} consumer errors cancel and unlock the reader`, async () => {
 		const stream = source(delta("first"));
 		await expect(

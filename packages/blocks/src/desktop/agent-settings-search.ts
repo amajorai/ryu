@@ -44,7 +44,7 @@ export interface AgentSettingsEntry {
 }
 
 /** Human labels for the tab ids, so a hit can say where it lives. */
-export const AGENT_TAB_LABELS: Record<AgentSettingsTab, string> = {
+export const AGENT_TAB_LABELS = {
 	behavior: "Behavior",
 	model: "Model",
 	tools: "Tools & knowledge",
@@ -56,7 +56,11 @@ export const AGENT_TAB_LABELS: Record<AgentSettingsTab, string> = {
 	"prompt-studio": "Prompt Studio",
 	advanced: "Advanced",
 	versions: "Versions",
-};
+} satisfies Record<AgentSettingsTab, string>;
+
+/** The Account access row's id. Hosts open the editor on it (for example after
+ *  adding a Store Agent Template) through `initialSettingId`. */
+export const AGENT_ACCOUNT_ACCESS_SETTING_ID = "agent.account-access";
 
 export const AGENT_SETTINGS_ENTRIES: AgentSettingsEntry[] = [
 	// ── Behavior ──────────────────────────────────────────────────────────────
@@ -77,9 +81,16 @@ export const AGENT_SETTINGS_ENTRIES: AgentSettingsEntry[] = [
 	{
 		id: "agent.display-name",
 		label: "Display name",
-		group: "Personality & tone",
-		tab: "behavior",
-		keywords: "nickname how it introduces itself",
+		group: "Profile card",
+		tab: "advanced",
+		keywords: "nickname how it introduces itself persona",
+	},
+	{
+		id: "agent.badge",
+		label: "Badge",
+		group: "Profile card",
+		tab: "advanced",
+		keywords: "title role banner wallpaper lanyard appearance",
 	},
 	{
 		id: "agent.tone",
@@ -142,6 +153,14 @@ export const AGENT_SETTINGS_ENTRIES: AgentSettingsEntry[] = [
 
 	// ── Tools & knowledge ─────────────────────────────────────────────────────
 	{
+		id: "agent.identity-mode",
+		label: "Identity",
+		group: "",
+		tab: "tools",
+		keywords:
+			"acts as you own identity both managed individual mixed accounts on my behalf",
+	},
+	{
 		id: "agent.tools",
 		label: "Tools",
 		group: "",
@@ -180,6 +199,28 @@ export const AGENT_SETTINGS_ENTRIES: AgentSettingsEntry[] = [
 		group: "",
 		tab: "connections",
 		keywords: "apps accounts integrations composio slack gmail",
+	},
+	{
+		id: AGENT_ACCOUNT_ACCESS_SETTING_ID,
+		label: "Account access",
+		group: "",
+		tab: "connections",
+		keywords:
+			"composio treg connected accounts credentials oauth mcp vault allowlist which accounts limit",
+	},
+	{
+		id: "agent.identities",
+		label: "Identities",
+		group: "",
+		tab: "connections",
+		keywords: "identity vault profiles logged-in passport",
+	},
+	{
+		id: "agent.channels",
+		label: "Channels",
+		group: "",
+		tab: "connections",
+		keywords: "slack telegram discord whatsapp reach",
 	},
 	{
 		id: "agent.connect-with-code",

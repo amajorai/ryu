@@ -43,7 +43,12 @@ export function useAcpConfig(
 	const enabled = Boolean(agentId);
 	const query = useQuery({
 		queryKey: ["acp-config", node.url, agentId, selectionKey],
-		queryFn: () => fetchAcpConfig(target, agentId as string, selections),
+		queryFn: () => {
+			if (!agentId) {
+				throw new Error("Select an agent before requesting ACP configuration.");
+			}
+			return fetchAcpConfig(target, agentId, selections);
+		},
 		enabled,
 		// Switching model changes the key, and a probe of the new selection can
 		// take seconds. Keep the previous answer on screen while it runs so the
@@ -67,6 +72,6 @@ export function useAcpConfig(
 	return {
 		config: query.data ?? null,
 		loading: enabled && query.isLoading,
-		error: (query.error as Error | null)?.message ?? null,
+		error: query.error?.message ?? null,
 	};
 }

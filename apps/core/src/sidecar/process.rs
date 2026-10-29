@@ -21,6 +21,10 @@ pub struct ProcessHandle {
     /// cannot hold this lock, so every async transition re-checks liveness after
     /// acquiring it before spawning or taking the child.
     lifecycle: Arc<tokio::sync::Mutex<()>>,
+    /// The Job Object containing an OS-isolated child (Windows, `enforce` mode
+    /// only). Dropping it on `stop` terminates the whole process tree.
+    #[cfg(windows)]
+    job: Arc<Mutex<Option<ryu_sandbox::os_isolation::JobGuard>>>,
 }
 
 impl ProcessHandle {
@@ -29,6 +33,8 @@ impl ProcessHandle {
             running: Arc::new(AtomicBool::new(false)),
             child: Arc::new(Mutex::new(None)),
             lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            #[cfg(windows)]
+            job: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -38,9 +44,10 @@ impl ProcessHandle {
         if self.is_running() {
             return Ok(());
         }
-        let child = tokio::process::Command::new(binary)
-            .kill_on_drop(true)
-            .no_window()
+        let mut command = tokio::process::Command::new(binary);
+        command.kill_on_drop(true).no_window();
+        remove_seal_env(&mut command);
+        let child = command
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {}: {e}", binary.display()))?;
         *self.child.lock().unwrap() = Some(child);
@@ -54,10 +61,10 @@ impl ProcessHandle {
         if self.is_running() {
             return Ok(());
         }
-        let child = tokio::process::Command::new(binary)
-            .args(args)
-            .kill_on_drop(true)
-            .no_window()
+        let mut command = tokio::process::Command::new(binary);
+        command.args(args).kill_on_drop(true).no_window();
+        remove_seal_env(&mut command);
+        let child = command
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {}: {e}", binary.display()))?;
         *self.child.lock().unwrap() = Some(child);
@@ -95,12 +102,57 @@ impl ProcessHandle {
         }
         let mut command = tokio::process::Command::new(program);
         command.args(args).kill_on_drop(true).no_window();
+        // The child inherits Core's environment, but never its sealing keys:
+        // with `RYU_MASTER_KEY` set (the headless/server setup) an inherited
+        // copy would hand every sidecar the master key. A child that needs a
+        // key gets its own scoped subkey through `env`, layered after this.
+        remove_seal_env(&mut command);
         for (key, value) in env {
             command.env(key, value);
         }
         let child = command
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {program}: {e}"))?;
+        *self.child.lock().unwrap() = Some(child);
+        self.running.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Like [`ProcessHandle::start_path_with_args`], but pipes the child's stderr:
+    /// each line is forwarded to tracing (tagged with `label`) and kept in `tail`
+    /// so a readiness probe can report why a child died during startup.
+    pub async fn start_path_with_args_capturing_stderr(
+        &self,
+        program: &str,
+        args: &[String],
+        label: &'static str,
+        tail: crate::sidecar::providers::readiness::StderrTail,
+    ) -> Result<()> {
+        use tokio::io::AsyncBufReadExt;
+
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.is_running() {
+            return Ok(());
+        }
+        let mut command = tokio::process::Command::new(program);
+        command
+            .args(args)
+            .kill_on_drop(true)
+            .no_window()
+            .stderr(std::process::Stdio::piped());
+        remove_seal_env(&mut command);
+        let mut child = command
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("failed to spawn {program}: {e}"))?;
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let mut lines = tokio::io::BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::info!(target: "ryu_core::sidecar::stderr", sidecar = label, "{line}");
+                    tail.push(&line);
+                }
+            });
+        }
         *self.child.lock().unwrap() = Some(child);
         self.running.store(true, Ordering::Relaxed);
         Ok(())
@@ -131,6 +183,7 @@ impl ProcessHandle {
         for (key, value) in crate::sidecar::env_scrub::scrub_child_env(std::env::vars(), &[]) {
             command.env(key, value);
         }
+        remove_seal_env(&mut command);
         for (key, value) in env {
             command.env(key, value);
         }
@@ -171,6 +224,7 @@ impl ProcessHandle {
         for (key, value) in crate::sidecar::env_scrub::scrub_child_env(std::env::vars(), &[]) {
             command.env(key, value);
         }
+        remove_seal_env(&mut command);
         for (key, value) in env {
             command.env(key, value);
         }
@@ -203,22 +257,102 @@ impl ProcessHandle {
         args: &[String],
         env: &[(String, String)],
     ) -> Result<()> {
+        self.start_clean_env_inner(program, args, env, false, None)
+            .await
+    }
+
+    /// [`Self::start_path_with_clean_env`] plus the conservative per-process
+    /// resource limits of [`apply_sidecar_rlimits`] (Unix only). Used for
+    /// manifest-declared (plugin-owned) native sidecars, which otherwise run with
+    /// no OS-level restriction at all. This is NOT a sandbox — see
+    /// `docs/native-sidecar-resource-limits.md` for what remains unenforced.
+    pub async fn start_path_with_clean_env_limited(
+        &self,
+        program: &str,
+        args: &[String],
+        env: &[(String, String)],
+    ) -> Result<()> {
+        self.start_clean_env_inner(program, args, env, true, None)
+            .await
+    }
+
+    /// [`Self::start_path_with_clean_env_limited`] under an OS isolation launch
+    /// prepared by [`ryu_sandbox::os_isolation::prepare`]: the program/args come
+    /// from `isolation` (on macOS, the Seatbelt launcher wrapping the original
+    /// command), the Linux Landlock + `no_new_privs` hook runs after the rlimit
+    /// hook, and on Windows the child is placed in a kill-on-close Job Object.
+    /// An inactive launch (`off`/`audit`) spawns exactly as the limited variant.
+    pub async fn start_path_with_clean_env_isolated(
+        &self,
+        env: &[(String, String)],
+        isolation: &ryu_sandbox::os_isolation::PreparedIsolation,
+    ) -> Result<()> {
+        let program = isolation.program().to_owned();
+        let args = isolation.args().to_vec();
+        self.start_clean_env_inner(&program, &args, env, true, Some(isolation))
+            .await
+    }
+
+    async fn start_clean_env_inner(
+        &self,
+        program: &str,
+        args: &[String],
+        env: &[(String, String)],
+        resource_limits: bool,
+        isolation: Option<&ryu_sandbox::os_isolation::PreparedIsolation>,
+    ) -> Result<()> {
         let _lifecycle = self.lifecycle.lock().await;
         if self.is_running() {
             return Ok(());
         }
         let mut command = tokio::process::Command::new(program);
         command.args(args).kill_on_drop(true).no_window();
+        #[cfg(unix)]
+        if resource_limits {
+            // SAFETY: the closure runs in the forked child before `exec` and only
+            // issues `getrlimit`/`setrlimit` syscalls (async-signal-safe); it
+            // allocates nothing and touches no locks.
+            unsafe {
+                command.pre_exec(|| {
+                    apply_sidecar_rlimits();
+                    Ok(())
+                });
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = resource_limits;
+        // Registered after the rlimit hook so the limits are set before the
+        // process loses the privilege to change them.
+        #[cfg(target_os = "linux")]
+        if let Some(isolation) = isolation {
+            isolation.install_pre_exec(&mut command);
+        }
         command.env_clear();
         for (key, value) in crate::sidecar::env_scrub::mcp_safe_env(std::env::vars()) {
             command.env(key, value);
         }
+        remove_seal_env(&mut command);
         for (key, value) in env {
             command.env(key, value);
         }
         let child = command
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {program}: {e}"))?;
+        #[cfg(windows)]
+        if let Some(isolation) = isolation {
+            match isolation.contain(&child) {
+                Ok(job) => *self.job.lock().unwrap() = job,
+                Err(e) => {
+                    let mut child = child;
+                    let _ = child.start_kill();
+                    return Err(anyhow::anyhow!(
+                        "failed to place {program} in a Job Object: {e}"
+                    ));
+                }
+            }
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        let _ = isolation;
         *self.child.lock().unwrap() = Some(child);
         self.running.store(true, Ordering::Relaxed);
         Ok(())
@@ -228,6 +362,36 @@ impl ProcessHandle {
         let _lifecycle = self.lifecycle.lock().await;
         let child = { self.child.lock().unwrap().take() };
         if let Some(mut c) = child {
+            let _ = c.kill().await;
+        }
+        #[cfg(windows)]
+        {
+            self.job.lock().unwrap().take();
+        }
+        self.running.store(false, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Stop the child cooperatively: SIGTERM first (Unix), wait up to `grace`
+    /// for it to exit — so it can drain and flush buffered telemetry — then
+    /// SIGKILL. On other platforms this is [`Self::stop`].
+    pub async fn stop_graceful(&self, grace: std::time::Duration) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        let child = { self.child.lock().unwrap().take() };
+        if let Some(mut c) = child {
+            #[cfg(unix)]
+            if let Some(pid) = c.id().and_then(|pid| i32::try_from(pid).ok()) {
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+                if kill(Pid::from_raw(pid), Signal::SIGTERM).is_ok()
+                    && tokio::time::timeout(grace, c.wait()).await.is_ok()
+                {
+                    self.running.store(false, Ordering::Relaxed);
+                    return Ok(());
+                }
+            }
+            #[cfg(not(unix))]
+            let _ = grace;
             let _ = c.kill().await;
         }
         self.running.store(false, Ordering::Relaxed);
@@ -319,11 +483,305 @@ impl ProcessHandle {
     pub fn pid(&self) -> Option<u32> {
         self.child.lock().unwrap().as_ref().and_then(|c| c.id())
     }
+
+    /// Verify the actual listener belongs to this live child before forwarding
+    /// any bytes. Health responses are never evidence of process ownership.
+    pub async fn owns_loopback_listener(&self, port: u16) -> bool {
+        self.owns_loopback_socket(port, "LISTEN", None).await
+    }
+
+    /// The accepted socket in the child must match the already-connected
+    /// forwarding socket's reverse tuple. A listener at the same port could
+    /// have appeared after a different process accepted this connection.
+    pub async fn owns_loopback_connection(
+        &self,
+        local: std::net::SocketAddr,
+        peer: std::net::SocketAddr,
+    ) -> bool {
+        if local.ip() != std::net::Ipv4Addr::LOCALHOST || peer.ip() != std::net::Ipv4Addr::LOCALHOST
+        {
+            return false;
+        }
+        let expected = format!("{peer}->{local}");
+        self.owns_loopback_socket(peer.port(), "ESTABLISHED", Some(&expected))
+            .await
+    }
+
+    async fn owns_loopback_socket(&self, port: u16, state: &str, expected: Option<&str>) -> bool {
+        let Some(pid) = self.pid().filter(|_| self.is_running()) else {
+            return false;
+        };
+        #[cfg(target_os = "macos")]
+        {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                tokio::process::Command::new("/usr/sbin/lsof")
+                    .args([
+                        "-nP",
+                        "-a",
+                        "-p",
+                        &pid.to_string(),
+                        &format!("-iTCP@127.0.0.1:{port}"),
+                        &format!("-sTCP:{state}"),
+                        "-Fpn",
+                    ])
+                    .env_clear()
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await;
+            return matches!(result, Ok(Ok(output)) if output.status.success()
+                && listener_pid_matches(&output.stdout, pid)
+                && expected.is_none_or(|expected| established_socket_matches(&output.stdout, pid, expected)))
+                && self.pid() == Some(pid)
+                && self.is_running();
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (pid, port, state, expected);
+            false
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn listener_pid_matches(output: &[u8], pid: u32) -> bool {
+    let Ok(output) = std::str::from_utf8(output) else {
+        return false;
+    };
+    let expected = format!("p{pid}");
+    output.lines().any(|line| line == expected)
+        && output
+            .lines()
+            .filter(|line| line.starts_with('p'))
+            .all(|line| line == expected)
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn established_socket_matches(output: &[u8], pid: u32, expected: &str) -> bool {
+    listener_pid_matches(output, pid)
+        && std::str::from_utf8(output).is_ok_and(|output| {
+            output
+                .lines()
+                .any(|line| line.strip_prefix('n') == Some(expected))
+        })
+}
+
+/// Upper bound on open file descriptors for a plugin-owned native sidecar.
+/// Generous enough for servers, headless browsers and Python/Node runtimes,
+/// while bounding a descriptor leak/exhaustion to the sidecar itself.
+pub const SIDECAR_MAX_OPEN_FILES: u64 = 16_384;
+
+/// The `(soft, hard)` descriptor limit to apply given the inherited one: never
+/// RAISES anything (an inherited lower limit is kept), only caps at
+/// [`SIDECAR_MAX_OPEN_FILES`]. `u64::MAX` stands for `RLIM_INFINITY`.
+pub fn capped_nofile(soft: u64, hard: u64) -> (u64, u64) {
+    let hard = hard.min(SIDECAR_MAX_OPEN_FILES);
+    (soft.min(hard), hard)
+}
+
+/// Conservative, best-effort resource limits for a plugin-owned native sidecar,
+/// applied in the child between `fork` and `exec`:
+///
+/// - `RLIMIT_CORE = 0` (soft and hard): a crashing sidecar never writes a core
+///   dump, which would otherwise persist its injected per-process secrets
+///   (`RYU_EXT_TOKEN`, provider keys it was handed) to disk.
+/// - `RLIMIT_NOFILE` capped via [`capped_nofile`].
+///
+/// Deliberately NOT set: `RLIMIT_AS`/`RLIMIT_DATA` (break V8/JIT and mmap-heavy
+/// ML runtimes), `RLIMIT_NPROC` (per-USER, would starve Core itself),
+/// `RLIMIT_FSIZE` (fine-tune/model sidecars legitimately write very large files),
+/// `RLIMIT_CPU` (long-lived servers). Failures are ignored: a limit that cannot be
+/// applied must not stop an existing sidecar from starting.
+#[cfg(unix)]
+fn apply_sidecar_rlimits() {
+    // SAFETY (for the libc calls): plain syscalls on stack-owned structs.
+    unsafe {
+        let no_core = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        let _ = libc::setrlimit(libc::RLIMIT_CORE, &no_core);
+
+        let mut current = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut current) == 0 {
+            #[allow(clippy::unnecessary_cast)]
+            let (soft, hard) = capped_nofile(current.rlim_cur as u64, current.rlim_max as u64);
+            let capped = libc::rlimit {
+                rlim_cur: soft as libc::rlim_t,
+                rlim_max: hard as libc::rlim_t,
+            };
+            let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &capped);
+        }
+    }
+}
+
+/// Drop every key-carrying variable ([`ryu_crypto::SEAL_ENV_VARS`]:
+/// `RYU_MASTER_KEY`, `RYU_SEAL_KEY`, `RYU_SEAL_SCOPE`, `RYU_SEAL_RETIRED_KEYS`)
+/// from a child command, the
+/// `tokio::process::Command` counterpart of [`ryu_crypto::scrub_seal_env`].
+fn remove_seal_env(command: &mut tokio::process::Command) {
+    for name in ryu_crypto::SEAL_ENV_VARS {
+        command.env_remove(name);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nofile_cap_never_raises_and_bounds_unlimited() {
+        assert_eq!(capped_nofile(256, 10_240), (256, 10_240));
+        assert_eq!(
+            capped_nofile(1_024, u64::MAX),
+            (1_024, SIDECAR_MAX_OPEN_FILES)
+        );
+        assert_eq!(
+            capped_nofile(1_048_576, 1_048_576),
+            (SIDECAR_MAX_OPEN_FILES, SIDECAR_MAX_OPEN_FILES)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn limited_spawn_applies_core_and_nofile_limits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = dir.path().join("limits.txt");
+        let script = format!("ulimit -c > '{0}'; ulimit -H -n >> '{0}'", out.display());
+        let handle = ProcessHandle::new();
+        handle
+            .start_path_with_clean_env_limited("/bin/sh", &["-c".to_owned(), script], &[])
+            .await
+            .expect("spawn");
+        for _ in 0..100 {
+            if std::fs::read_to_string(&out).is_ok_and(|text| text.lines().count() >= 2) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let text = std::fs::read_to_string(&out).expect("limits written");
+        let mut lines = text.lines();
+        assert_eq!(lines.next(), Some("0"));
+        let hard: u64 = lines
+            .next()
+            .and_then(|line| line.trim().parse().ok())
+            .expect("numeric hard nofile");
+        assert!(hard <= SIDECAR_MAX_OPEN_FILES, "hard nofile {hard}");
+        let _ = handle.stop().await;
+    }
+
+    /// The isolated spawn path composes the rlimit hook with the Landlock hook:
+    /// the sandboxed child writes in its own dir and is refused outside it.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn isolated_spawn_confines_writes_and_keeps_rlimits() {
+        use ryu_sandbox::os_isolation::{
+            derive_policy, landlock_abi_version, prepare, IsolationMode, IsolationRoots,
+        };
+        if landlock_abi_version().is_none() {
+            eprintln!(
+                "SKIPPED isolated_spawn_confines_writes_and_keeps_rlimits: \
+                 Landlock is not available on this kernel"
+            );
+            return;
+        }
+        let base = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(base.path()).expect("canonical tempdir");
+        let ryu_dir = root.join("ryu");
+        let plugins_dir = ryu_dir.join("plugins");
+        let app_data = plugins_dir.join("demo");
+        let plugin_data = ryu_dir.join("plugin-data").join("demo");
+        let temp = root.join("tmp");
+        let outside = root.join("outside");
+        for dir in [&app_data, &temp, &outside] {
+            std::fs::create_dir_all(dir).expect("mkdir");
+        }
+        let roots = IsolationRoots {
+            app_data: app_data.clone(),
+            plugin_data,
+            ryu_dir,
+            plugins_dir,
+            home: None,
+            temp,
+        };
+        let policy =
+            derive_policy(None, &roots, Some(std::path::Path::new("/bin/sh"))).expect("policy");
+        let script = format!(
+            "ulimit -c > '{own}/limits.txt'; echo no > '{out}/escape.txt'; echo done > '{own}/done.txt'",
+            own = app_data.display(),
+            out = outside.display()
+        );
+        let prepared = prepare(
+            IsolationMode::Enforce,
+            &policy,
+            "/bin/sh",
+            &["-c".to_owned(), script],
+        )
+        .expect("prepare");
+        let handle = ProcessHandle::new();
+        handle
+            .start_path_with_clean_env_isolated(&[], &prepared)
+            .await
+            .expect("spawn");
+        for _ in 0..100 {
+            if app_data.join("done.txt").exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            app_data.join("done.txt").exists(),
+            "own-dir write must succeed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(app_data.join("limits.txt")).expect("limits"),
+            "0\n"
+        );
+        assert!(
+            !outside.join("escape.txt").exists(),
+            "a write outside the policy must be refused"
+        );
+        let _ = handle.stop().await;
+    }
+
+    #[test]
+    fn listener_identity_requires_the_exact_owned_pid() {
+        assert!(listener_pid_matches(b"p123\nf9\n", 123));
+        assert!(!listener_pid_matches(b"p1234\nf9\n", 123));
+        assert!(!listener_pid_matches(b"p123\np456\n", 123));
+        assert!(!listener_pid_matches(b"", 123));
+        assert!(!listener_pid_matches(b"HTTP/1.1 200 OK\n", 123));
+        assert!(!listener_pid_matches(&[255], 123));
+    }
+
+    #[test]
+    fn established_socket_requires_the_owned_peer_tuple_not_a_new_listener() {
+        let tuple = "127.0.0.1:11234->127.0.0.1:50123";
+        assert!(established_socket_matches(
+            b"p123\nf9\nn127.0.0.1:11234->127.0.0.1:50123\n",
+            123,
+            tuple
+        ));
+        assert!(!established_socket_matches(
+            b"p123\nf9\nn127.0.0.1:11234\n",
+            123,
+            tuple
+        ));
+        assert!(!established_socket_matches(
+            b"p123\nf9\nn127.0.0.1:11234->127.0.0.1:50124\n",
+            123,
+            tuple
+        ));
+        assert!(!established_socket_matches(
+            b"p456\nf9\nn127.0.0.1:11234->127.0.0.1:50123\n",
+            123,
+            tuple
+        ));
+    }
 
     /// Poll `f` until it holds or the deadline passes. A freshly-killed child is not
     /// reaped instantly, so a bare assert right after `kill` is a coin flip; every
@@ -366,6 +824,56 @@ mod tests {
         // Idempotent: tokio fuses the exit status, so repeated polls keep agreeing.
         assert!(!handle.is_running());
         assert!(handle.has_exited());
+    }
+
+    /// Core's managed children (the Gateway's local-plane spawn goes through
+    /// `start_path_with_env`) inherit Core's environment but never its sealing
+    /// keys: with `RYU_MASTER_KEY` set in Core, the child sees only the scoped
+    /// subkey passed explicitly through `env`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spawned_child_env_carries_the_subkey_not_the_master_key() {
+        // Same fixed test key every caller of this helper sets, so concurrent
+        // tests reading `RYU_MASTER_KEY` see a consistent value.
+        crate::server::gateway_seal_test_key();
+        let master = std::env::var("RYU_MASTER_KEY").expect("test master key set");
+        let dir = tempfile::tempdir().expect("tempdir");
+        for scrubbed in [false, true] {
+            let out = dir.path().join(format!("env-{scrubbed}.txt"));
+            let script = format!("env > '{}'", out.display());
+            let env = vec![
+                ("RYU_SEAL_KEY".to_owned(), "delivered-subkey".to_owned()),
+                ("RYU_SEAL_SCOPE".to_owned(), "component:gateway".to_owned()),
+            ];
+            let handle = ProcessHandle::new();
+            let args = ["-c".to_owned(), script];
+            if scrubbed {
+                handle
+                    .start_path_with_scrubbed_env("/bin/sh", &args, &env)
+                    .await
+                    .expect("spawn /bin/sh");
+            } else {
+                handle
+                    .start_path_with_env("/bin/sh", &args, &env)
+                    .await
+                    .expect("spawn /bin/sh");
+            }
+            eventually("child exits", || handle.has_exited()).await;
+            let child_env = std::fs::read_to_string(&out).expect("child env dump");
+            assert!(
+                !child_env
+                    .lines()
+                    .any(|line| line.starts_with("RYU_MASTER_KEY=")),
+                "child (scrubbed={scrubbed}) inherited RYU_MASTER_KEY"
+            );
+            assert!(!child_env.contains(&master));
+            assert!(child_env
+                .lines()
+                .any(|line| line == "RYU_SEAL_KEY=delivered-subkey"));
+            assert!(child_env
+                .lines()
+                .any(|line| line == "RYU_SEAL_SCOPE=component:gateway"));
+        }
     }
 
     /// A deliberate `stop()` TAKES the child, so it is not a crash. This pins the

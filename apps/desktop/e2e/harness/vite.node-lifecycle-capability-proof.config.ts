@@ -23,4 +23,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "node-lifecycle-capability-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-backup"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "S3-compatible encrypted backup transport and consistent filesystem snapshots for Ryu. No dependency on Core or app satellites."
@@ -13,9 +13,12 @@ chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 hex = "0.4"
 hkdf = "0.12"
-object_store = { version = "0.12.4", default-features = false, features = ["aws", "tls-webpki-roots"] }
+# 0.14.2+ is the first line on quick-xml >= 0.41 (RUSTSEC-2026-0194/0195). Its
+# `aws` feature brings reqwest 0.13 with rustls (aws-lc-rs + the platform
+# verifier), so the client built in `s3.rs` must be a reqwest 0.13 client.
+object_store = { version = "0.14.2", default-features = false, features = ["aws"] }
 rand = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 rusqlite = { version = "0.40.0", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -25,7 +28,8 @@ tokio = { version = "1", features = ["fs", "io-util", "rt", "macros", "sync"] }
 url = "2"
 utoipa = { version = "5", features = ["chrono"] }
 uuid = { version = "1", features = ["v4"] }
-zip = "0.6"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
+async-trait = "0.1"
 axum = "0.7"

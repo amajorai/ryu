@@ -1,16 +1,17 @@
-import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useActiveTargetGetter } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { useShadowCapture } from "@/src/hooks/useShadowCapture.ts";
-import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	clampIslandEdgeOffset,
 	DEFAULT_AGENT_ID,
@@ -29,6 +30,7 @@ import {
 	getIslandConsent,
 	getIslandEdgeOffset,
 	getIslandHideOnFullscreen,
+	getIslandNotchMode,
 	getIslandScreenPrivacy,
 	getIslandTtsPrefs,
 	getVoiceInputPrefs,
@@ -45,6 +47,7 @@ import {
 	setIslandConsent,
 	setIslandEdgeOffset,
 	setIslandHideOnFullscreen,
+	setIslandNotchMode,
 	setIslandScreenPrivacy,
 	setIslandTtsPrefs,
 	setVoiceInputPrefs,
@@ -54,7 +57,6 @@ import {
 	type VoiceInputPrefs,
 } from "@/src/lib/api/preferences.ts";
 import { listTtsEngines, type TtsEngine } from "@/src/lib/api/voice.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { ShortcutCapture } from "./shared/ShortcutCapture.tsx";
 import {
 	SettingsCard,
@@ -88,16 +90,73 @@ const IS_WINDOWS = navigator.userAgent.includes("Windows");
  * live overlay (the offset re-docks it; the background recreates its window).
  */
 export function IslandSettings() {
+	// The dialog's scoped computer, or the active node outside one. Effects keep
+	// `[]` deps: the node settings dialog remounts its content per computer.
+	const getTarget = useActiveTargetGetter();
 	// Shadow capture controls — the island surfaces Shadow's screen context, so
 	// the most relevant toggles are mirrored here as well as in the Shadow tab.
 	const shadow = useShadowCapture();
+	const [preferenceWriteError, setPreferenceWriteError] = useState(false);
+	const preferenceWriteVersions = useRef(new Map<string, number>());
+	const persistPreferenceChange = useCallback(
+		(
+			key: string,
+			write: Promise<boolean>,
+			onFailure: () => void,
+			onSuccess?: () => void
+		) => {
+			const version = (preferenceWriteVersions.current.get(key) ?? 0) + 1;
+			preferenceWriteVersions.current.set(key, version);
+			void write
+				.then((saved) => {
+					if (!saved) {
+						throw new Error("Island preference was not saved");
+					}
+					if (preferenceWriteVersions.current.get(key) === version) {
+						setPreferenceWriteError(false);
+						onSuccess?.();
+					}
+				})
+				.catch(() => {
+					if (preferenceWriteVersions.current.get(key) !== version) {
+						return;
+					}
+					onFailure();
+					setPreferenceWriteError(true);
+				});
+		},
+		[]
+	);
 
-	// Background. Stored in Core (cross-process), so we load it async on mount and
-	// write it back on change; the island picks up the change live via SSE.
-	const [islandBg, setIslandBg] = useState<IslandBackground>("translucent");
+	const [notchMode, setNotchMode] = useState(false);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
+		void getIslandNotchMode(target).then((value) => {
+			if (!cancelled) {
+				setNotchMode(value);
+			}
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+	const handleNotchMode = (enabled: boolean) => {
+		const previous = notchMode;
+		setNotchMode(enabled);
+		const target = getTarget();
+		persistPreferenceChange(
+			"island-notch-mode",
+			setIslandNotchMode(target, enabled),
+			() => setNotchMode(previous)
+		);
+	};
+	// Background. Stored in Core (cross-process), so we load it async on mount and
+	// write it back on change; the island picks up the change live via SSE.
+	const [islandBg, setIslandBg] = useState<IslandBackground>("acrylic");
+	useEffect(() => {
+		let cancelled = false;
+		const target = getTarget();
 		getIslandBackground(target).then((bg) => {
 			if (!cancelled) {
 				setIslandBg(bg);
@@ -111,9 +170,14 @@ export function IslandSettings() {
 		if (value !== "translucent" && value !== "acrylic" && value !== "mica") {
 			return;
 		}
+		const previous = islandBg;
 		setIslandBg(value);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setIslandBackground(target, value).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange(
+			"island-appearance",
+			setIslandBackground(target, value),
+			() => setIslandBg(previous)
+		);
 	};
 
 	// Edge offset (gap from a docked screen edge). The slider fires continuously
@@ -122,11 +186,13 @@ export function IslandSettings() {
 	const [islandEdgeOffset, setIslandEdgeOffsetState] = useState<number>(
 		DEFAULT_ISLAND_EDGE_OFFSET
 	);
+	const persistedEdgeOffset = useRef(DEFAULT_ISLAND_EDGE_OFFSET);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getIslandEdgeOffset(target).then((offset) => {
 			if (!cancelled) {
+				persistedEdgeOffset.current = offset;
 				setIslandEdgeOffsetState(offset);
 			}
 		});
@@ -137,18 +203,29 @@ export function IslandSettings() {
 	const edgeOffsetWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(
 		null
 	);
-	const writeIslandEdgeOffset = useCallback((offset: number) => {
-		if (edgeOffsetWriteTimer.current) {
-			clearTimeout(edgeOffsetWriteTimer.current);
-		}
-		edgeOffsetWriteTimer.current = setTimeout(() => {
-			const target = toTarget(useNodeStore.getState().getActiveNode());
-			setIslandEdgeOffset(target, offset).catch(() => undefined);
-		}, EDGE_OFFSET_WRITE_DEBOUNCE_MS);
-	}, []);
+	const writeIslandEdgeOffset = useCallback(
+		(offset: number) => {
+			if (edgeOffsetWriteTimer.current) {
+				clearTimeout(edgeOffsetWriteTimer.current);
+			}
+			edgeOffsetWriteTimer.current = setTimeout(() => {
+				const target = getTarget();
+				persistPreferenceChange(
+					"island-edge-offset",
+					setIslandEdgeOffset(target, offset),
+					() => setIslandEdgeOffsetState(persistedEdgeOffset.current),
+					() => {
+						persistedEdgeOffset.current = offset;
+					}
+				);
+			}, EDGE_OFFSET_WRITE_DEBOUNCE_MS);
+		},
+		[persistPreferenceChange]
+	);
 	const handleIslandEdgeOffset = (vals: number | readonly number[]) => {
+		// SAFETY: This callback's complete numeric port is number | readonly number[]. Native Array.isArray distinguishes those two runtime alternatives, but its mutable-array predicate does not eliminate the readonly array from the declared false branch. Both assertions retain the original numeric values; the array branch only reads index zero and never mutates it.
 		const value = Array.isArray(vals)
-			? ((vals as number[])[0] ?? DEFAULT_ISLAND_EDGE_OFFSET)
+			? ((vals as readonly number[])[0] ?? DEFAULT_ISLAND_EDGE_OFFSET)
 			: (vals as number);
 		const clamped = clampIslandEdgeOffset(value);
 		setIslandEdgeOffsetState(clamped);
@@ -162,7 +239,7 @@ export function IslandSettings() {
 	);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getIslandAutoJump(target).then((value) => {
 			if (!cancelled) {
 				setAutoJumpState(value);
@@ -173,9 +250,14 @@ export function IslandSettings() {
 		};
 	}, []);
 	const handleAutoJump = (value: boolean) => {
+		const previous = autoJump;
 		setAutoJumpState(value);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setIslandAutoJump(target, value).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange(
+			"island-auto-jump",
+			setIslandAutoJump(target, value),
+			() => setAutoJumpState(previous)
+		);
 	};
 
 	// Hide-on-fullscreen. When on, the island hides itself while another app is
@@ -187,7 +269,7 @@ export function IslandSettings() {
 	);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getIslandHideOnFullscreen(target).then((value) => {
 			if (!cancelled) {
 				setHideOnFullscreenState(value);
@@ -198,9 +280,14 @@ export function IslandSettings() {
 		};
 	}, []);
 	const handleHideOnFullscreen = (value: boolean) => {
+		const previous = hideOnFullscreen;
 		setHideOnFullscreenState(value);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setIslandHideOnFullscreen(target, value).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange(
+			"island-hide-on-fullscreen",
+			setIslandHideOnFullscreen(target, value),
+			() => setHideOnFullscreenState(previous)
+		);
 	};
 
 	// Screen privacy. When on, the island is excluded from screen capture — still
@@ -211,7 +298,7 @@ export function IslandSettings() {
 	);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getIslandScreenPrivacy(target).then((value) => {
 			if (!cancelled) {
 				setScreenPrivacyState(value);
@@ -222,9 +309,14 @@ export function IslandSettings() {
 		};
 	}, []);
 	const handleScreenPrivacy = (value: boolean) => {
+		const previous = screenPrivacy;
 		setScreenPrivacyState(value);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setIslandScreenPrivacy(target, value).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange(
+			"island-screen-privacy",
+			setIslandScreenPrivacy(target, value),
+			() => setScreenPrivacyState(previous)
+		);
 	};
 
 	// Agent routing for the island's chat (voice + typed) and its proactive
@@ -238,7 +330,7 @@ export function IslandSettings() {
 	});
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getIslandAgentPrefs(target).then((prefs) => {
 			if (!cancelled) {
 				setIslandAgentsState(prefs);
@@ -249,9 +341,14 @@ export function IslandSettings() {
 		};
 	}, []);
 	const writeIslandAgents = (next: IslandAgentPrefs) => {
+		const previous = islandAgents;
 		setIslandAgentsState(next);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setIslandAgentPrefs(target, next).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange(
+			"island-agents",
+			setIslandAgentPrefs(target, next),
+			() => setIslandAgentsState(previous)
+		);
 	};
 	const agentOptions = useMemo(
 		() => [
@@ -273,7 +370,7 @@ export function IslandSettings() {
 		useState<VoiceInputPrefs>(DEFAULT_VOICE_PREFS);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getVoiceInputPrefs(target).then((prefs) => {
 			if (!cancelled) {
 				setVoicePrefsState(prefs);
@@ -284,9 +381,14 @@ export function IslandSettings() {
 		};
 	}, []);
 	const writeVoicePrefs = (next: VoiceInputPrefs) => {
+		const previous = voicePrefs;
 		setVoicePrefsState(next);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setVoiceInputPrefs(target, next).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange(
+			"voice-input",
+			setVoiceInputPrefs(target, next),
+			() => setVoicePrefsState(previous)
+		);
 	};
 	const handleSttEngine = (engine: VoiceEngine) => {
 		const model =
@@ -304,7 +406,7 @@ export function IslandSettings() {
 	);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getIslandCommandShortcut(target).then((value) => {
 			if (!cancelled) {
 				setCommandShortcutState(value);
@@ -315,9 +417,14 @@ export function IslandSettings() {
 		};
 	}, []);
 	const writeCommandShortcut = (value: string) => {
+		const previous = commandShortcut;
 		setCommandShortcutState(value);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setIslandCommandShortcut(target, value).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange(
+			"island-command-shortcut",
+			setIslandCommandShortcut(target, value),
+			() => setCommandShortcutState(previous)
+		);
 	};
 
 	// Audio: whether the island speaks replies aloud, and which engine + voice.
@@ -327,7 +434,7 @@ export function IslandSettings() {
 	const [ttsEngines, setTtsEngines] = useState<TtsEngine[]>([]);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getIslandTtsPrefs(target).then((prefs) => {
 			if (!cancelled) {
 				setTtsState(prefs);
@@ -347,9 +454,12 @@ export function IslandSettings() {
 		};
 	}, []);
 	const writeTts = (next: IslandTtsPrefs) => {
+		const previous = tts;
 		setTtsState(next);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setIslandTtsPrefs(target, next).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange("island-tts", setIslandTtsPrefs(target, next), () =>
+			setTtsState(previous)
+		);
 	};
 	const selectedTtsEngine = useMemo(
 		() => ttsEngines.find((e) => e.id === tts.engine),
@@ -372,13 +482,16 @@ export function IslandSettings() {
 		}
 		// Engines not loaded yet: label the current engine from its id (the default
 		// is Kokoro 82M; OuteTTS is the built-in fallback).
-		const fallbackLabels: Record<string, string> = {
-			kokoro: "Kokoro 82M",
-			outetts: "OuteTTS (fallback)",
-			gateway: "Cloud (via gateway)",
-		};
+		const fallbackLabels = new Map([
+			["kokoro", "Kokoro 82M"],
+			["outetts", "OuteTTS (fallback)"],
+			["gateway", "Cloud (via gateway)"],
+		]);
 		return [
-			{ value: tts.engine, label: fallbackLabels[tts.engine] ?? tts.engine },
+			{
+				value: tts.engine,
+				label: fallbackLabels.get(tts.engine) ?? tts.engine,
+			},
 		];
 	}, [ttsEngines, tts.engine]);
 	const ttsVoiceOptions = useMemo(
@@ -409,7 +522,7 @@ export function IslandSettings() {
 	);
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		getIslandConsent(target).then((prefs) => {
 			if (!cancelled) {
 				setConsentState(prefs);
@@ -420,13 +533,27 @@ export function IslandSettings() {
 		};
 	}, []);
 	const writeConsent = (next: IslandConsentPrefs) => {
+		const previous = consent;
 		setConsentState(next);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setIslandConsent(target, next).catch(() => undefined);
+		const target = getTarget();
+		persistPreferenceChange(
+			"island-consent",
+			setIslandConsent(target, next),
+			() => setConsentState(previous)
+		);
 	};
 
 	return (
 		<div className="space-y-6">
+			{preferenceWriteError ? (
+				<div
+					className="rounded-lg border border-status-destructive/40 bg-status-destructive/10 p-3 text-sm text-status-destructive"
+					role="alert"
+				>
+					Couldn't save Island setting. The previous value was restored. Choose
+					the setting again to retry.
+				</div>
+			) : null}
 			<SettingsSection
 				caption="What Shadow records for the island's context. Full controls live in the Shadow tab."
 				title="Shadow capture"
@@ -435,8 +562,9 @@ export function IslandSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Screen recording (frames)"
 								checked={shadow.frames}
-								disabled={!shadow.ready}
+								disabled={!shadow.ready || shadow.captureApplying}
 								onCheckedChange={(v) => {
 									shadow.setFrames(v).catch(() => undefined);
 								}}
@@ -447,8 +575,9 @@ export function IslandSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Pause all capture (incognito)"
 								checked={shadow.paused}
-								disabled={!shadow.ready}
+								disabled={!shadow.ready || shadow.captureApplying}
 								onCheckedChange={(v) => {
 									shadow.setPaused(v).catch(() => undefined);
 								}}
@@ -457,6 +586,41 @@ export function IslandSettings() {
 						title="Pause all capture (incognito)"
 					/>
 				</SettingsGroup>
+				{shadow.captureApplying ? (
+					<p className="px-3 text-muted-foreground text-xs" role="status">
+						Applying capture settings…
+					</p>
+				) : null}
+				{shadow.captureReadError ? (
+					<p className="px-3 text-status-destructive text-xs" role="alert">
+						Could not read saved capture preferences. Capture has not been
+						changed. Retry to load the saved preferences first.
+					</p>
+				) : null}
+				{shadow.captureError ? (
+					<p className="px-3 text-status-destructive text-xs" role="alert">
+						Capture settings could not be applied. The selected preferences do
+						not confirm that capture has changed.
+					</p>
+				) : null}
+				{shadow.persistenceError ? (
+					<p className="px-3 text-status-destructive text-xs" role="alert">
+						Could not save capture preferences. An accepted capture change may
+						still be active for this session, but these preferences may not
+						survive a restart.
+					</p>
+				) : null}
+				{shadow.captureReadError ||
+				shadow.captureError ||
+				shadow.persistenceError ? (
+					<Button
+						disabled={shadow.captureApplying}
+						onClick={shadow.retryCaptureSettings}
+						variant="outline"
+					>
+						Retry capture settings
+					</Button>
+				) : null}
 			</SettingsSection>
 
 			<SettingsSection
@@ -467,6 +631,7 @@ export function IslandSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Chat"
 								checked={consent.chat}
 								onCheckedChange={(v) => writeConsent({ ...consent, chat: v })}
 							/>
@@ -477,6 +642,7 @@ export function IslandSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Screen context"
 								checked={consent.contextRead === true}
 								onCheckedChange={(v) =>
 									writeConsent({ ...consent, contextRead: v })
@@ -489,6 +655,7 @@ export function IslandSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Proactive suggestions"
 								checked={consent.proactive === true}
 								disabled={consent.contextRead !== true}
 								onCheckedChange={(v) =>
@@ -519,7 +686,10 @@ export function IslandSettings() {
 								}
 								value={toAgentValue(islandAgents.voiceAgent)}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger
+									aria-label="Chat agent (Voice Recognition)"
+									className="h-8 w-56"
+								>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -546,7 +716,10 @@ export function IslandSettings() {
 								}
 								value={toAgentValue(islandAgents.proactiveAgent)}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger
+									aria-label="Proactive suggestion agent"
+									className="h-8 w-56"
+								>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -596,62 +769,65 @@ export function IslandSettings() {
 						description="Press the shortcut to dictate into the island; a live waveform shows while listening, then the transcript drops into chat."
 						title="Push-to-talk Voice Recognition"
 					/>
+					{/* Each row is a direct group child (never a Fragment): the group
+					    reads a row's description to render it as the card footer, and
+					    it cannot see rows nested inside a Fragment. */}
 					{voicePrefs.enabled ? (
-						<>
-							<SettingsItem
-								actions={
-									<ShortcutCapture
-										ariaLabel="Set push-to-talk shortcut"
-										onChange={(acc) =>
-											writeVoicePrefs({ ...voicePrefs, shortcut: acc })
-										}
-										onReset={() =>
-											writeVoicePrefs({
-												...voicePrefs,
-												shortcut: DEFAULT_VOICE_PREFS.shortcut,
-											})
-										}
-										value={voicePrefs.shortcut}
-									/>
-								}
-								description="Global key to dictate into the island."
-								title="Push-to-talk shortcut"
-							/>
-							<SettingsItem
-								actions={
-									<Select
-										items={VOICE_MODE_OPTIONS}
-										onValueChange={(v) =>
-											writeVoicePrefs({
-												...voicePrefs,
-												mode: v as VoiceInputMode,
-											})
-										}
-										value={voicePrefs.mode}
+						<SettingsItem
+							actions={
+								<ShortcutCapture
+									ariaLabel="Set push-to-talk shortcut"
+									onChange={(acc) =>
+										writeVoicePrefs({ ...voicePrefs, shortcut: acc })
+									}
+									onReset={() =>
+										writeVoicePrefs({
+											...voicePrefs,
+											shortcut: DEFAULT_VOICE_PREFS.shortcut,
+										})
+									}
+									value={voicePrefs.shortcut}
+								/>
+							}
+							description="Global key to dictate into the island."
+							title="Push-to-talk shortcut"
+						/>
+					) : null}
+					{voicePrefs.enabled ? (
+						<SettingsItem
+							actions={
+								<Select<VoiceInputMode>
+									items={VOICE_MODE_OPTIONS}
+									onValueChange={(v) =>
+										writeVoicePrefs({
+											...voicePrefs,
+											mode: v,
+										})
+									}
+									value={voicePrefs.mode}
+								>
+									<SelectTrigger
+										aria-label="Voice activation mode"
+										className="h-8 w-56"
 									>
-										<SelectTrigger
-											aria-label="Voice activation mode"
-											className="h-8 w-56 text-sm"
-										>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{VOICE_MODE_OPTIONS.map((option) => (
-												<SelectItem key={option.value} value={option.value}>
-													{option.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								}
-								description={
-									voicePrefs.mode === "push-to-talk"
-										? "Hold the shortcut to record; release to stop and transcribe. While recording, press Tab to switch which agent handles the task."
-										: "Press the shortcut once to start, again to stop. While recording, press Tab to switch which agent handles the task."
-								}
-								title="Activation"
-							/>
-						</>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{VOICE_MODE_OPTIONS.map((option) => (
+											<SelectItem key={option.value} value={option.value}>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							}
+							description={
+								voicePrefs.mode === "push-to-talk"
+									? "Hold the shortcut to record; release to stop and transcribe. While recording, press Tab to switch which agent handles the task."
+									: "Press the shortcut once to start, again to stop. While recording, press Tab to switch which agent handles the task."
+							}
+							title="Activation"
+						/>
 					) : null}
 				</SettingsGroup>
 			</SettingsSection>
@@ -672,14 +848,14 @@ export function IslandSettings() {
 				<SettingsGroup>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<VoiceEngine>
 								items={sttEngineOptions}
-								onValueChange={(v) => handleSttEngine(v as VoiceEngine)}
+								onValueChange={(v) => handleSttEngine(v)}
 								value={voicePrefs.engine}
 							>
 								<SelectTrigger
 									aria-label="Voice input engine"
-									className="h-8 w-56 text-sm"
+									className="h-8 w-56"
 								>
 									<SelectValue />
 								</SelectTrigger>
@@ -698,6 +874,7 @@ export function IslandSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Always read back responses"
 								checked={tts.enabled}
 								onCheckedChange={(v) => writeTts({ ...tts, enabled: v })}
 							/>
@@ -713,10 +890,7 @@ export function IslandSettings() {
 									onValueChange={handleTtsEngine}
 									value={tts.engine}
 								>
-									<SelectTrigger
-										aria-label="Audio engine"
-										className="h-8 w-56 text-sm"
-									>
+									<SelectTrigger aria-label="Audio engine" className="h-8 w-56">
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
@@ -746,10 +920,7 @@ export function IslandSettings() {
 										}}
 										value={tts.voice || selectedTtsEngine.default_voice || ""}
 									>
-										<SelectTrigger
-											aria-label="Voice"
-											className="h-8 w-56 text-sm"
-										>
+										<SelectTrigger aria-label="Voice" className="h-8 w-56">
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
@@ -768,8 +939,20 @@ export function IslandSettings() {
 				</SettingsGroup>
 			</SettingsSection>
 
-			<SettingsSection caption="How the island's transparent window looks. Translucent works everywhere and keeps the smooth floating shape with a dark tint (CSS blur stays inside the island). Acrylic and Mica use a transparent native window so the operating system can blur your desktop behind it; the island then shows as a rounded rectangle. Mica is a richer blur on Windows 11 and falls back to the standard native blur on other systems.">
+			<SettingsSection caption="Native glass is the default: it uses Liquid Glass on newer macOS, vibrancy on older macOS, and Acrylic on Windows while the split gap stays clear. Translucent keeps a CSS-only floating surface whose blur reaches the Island's own contents. Mica uses a native material on Windows 11 and falls back to Acrylic elsewhere.">
 				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Switch
+								aria-label="Notch mode"
+								checked={notchMode}
+								onCheckedChange={handleNotchMode}
+							/>
+						}
+						description="Attach Island to the camera notch on supported Macs. Uses a black surface and keeps controls below the camera. Falls back to floating mode when no notched display is available."
+						title="Notch mode"
+					/>
+
 					<SettingsItem
 						actions={
 							<Select
@@ -778,13 +961,13 @@ export function IslandSettings() {
 										value: "translucent",
 										label: "Translucent (tinted glass)",
 									},
-									{ value: "acrylic", label: "Acrylic glass (native blur)" },
+									{ value: "acrylic", label: "Native glass (default)" },
 									{ value: "mica", label: "Mica (Windows 11 native blur)" },
 								]}
 								onValueChange={handleIslandBg}
 								value={islandBg}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger aria-label="Background" className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -792,7 +975,7 @@ export function IslandSettings() {
 										Translucent (tinted glass)
 									</SelectItem>
 									<SelectItem value="acrylic">
-										Acrylic glass (native blur)
+										Native glass (default)
 									</SelectItem>
 									<SelectItem value="mica">
 										Mica (Windows 11 native blur)
@@ -828,7 +1011,11 @@ export function IslandSettings() {
 				<SettingsGroup>
 					<SettingsItem
 						actions={
-							<Switch checked={autoJump} onCheckedChange={handleAutoJump} />
+							<Switch
+								aria-label="Auto-jump to active monitor"
+								checked={autoJump}
+								onCheckedChange={handleAutoJump}
+							/>
 						}
 						title="Auto-jump to active monitor"
 					/>
@@ -843,6 +1030,7 @@ export function IslandSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Hide on fullscreen apps"
 								checked={IS_WINDOWS && hideOnFullscreen}
 								disabled={!IS_WINDOWS}
 								onCheckedChange={handleHideOnFullscreen}
@@ -858,6 +1046,7 @@ export function IslandSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Hide from screen capture"
 								checked={screenPrivacy}
 								onCheckedChange={handleScreenPrivacy}
 							/>

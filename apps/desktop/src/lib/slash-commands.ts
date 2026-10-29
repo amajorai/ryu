@@ -6,6 +6,25 @@
  * the desktop turns unknown records into the small typed model the UI trusts.
  */
 
+import {
+	type AppRequestValue,
+	appRequestValueSchema,
+} from "@ryuhq/core-client/app-request-json.ts";
+import { z } from "zod";
+
+// Contributions are JSON on Core, with optional fields still undefined while
+// assembled locally. Keep all valid transport values until field normalization.
+const slashRecordFieldsSchema = z.record(z.string(), appRequestValueSchema);
+const slashRecordSchema = z
+	.custom<z.output<typeof slashRecordFieldsSchema>>(
+		(value) =>
+			slashRecordFieldsSchema.safeParse(value).success &&
+			appRequestValueSchema.safeParse(value).success
+	)
+	.transform((record) => Object.fromEntries(Object.entries(record)));
+type SlashContributionInput = Parameters<typeof slashRecordSchema.parse>[0];
+const slashArgumentArraySchema = z.array(appRequestValueSchema);
+
 export type SlashCommandSource =
 	| "agent"
 	| "local"
@@ -95,20 +114,20 @@ export type SlashCommandMenuState =
 			query: string;
 	  };
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		return null;
-	}
-	return Object.fromEntries(Object.entries(value));
+function asRecord(value: SlashContributionInput) {
+	const record = slashRecordSchema.safeParse(value);
+	return record.success ? record.data : null;
 }
 
-function nonEmptyString(value: unknown): string | null {
-	return typeof value === "string" && value.trim() ? value.trim() : null;
+function nonEmptyString(value: AppRequestValue): string | null {
+	const parsed = z.string().safeParse(value);
+	return parsed.success && parsed.data.trim() ? parsed.data.trim() : null;
 }
 
-function readOption(value: unknown): SlashCommandOption | null {
-	if (typeof value === "string" && value.trim()) {
-		const option = value.trim();
+function readOption(value: AppRequestValue): SlashCommandOption | null {
+	const text = nonEmptyString(value);
+	if (text) {
+		const option = text;
 		return { label: option, value: option };
 	}
 	const record = asRecord(value);
@@ -129,7 +148,7 @@ function readOption(value: unknown): SlashCommandOption | null {
 }
 
 function readCustomOption(
-	value: unknown
+	value: AppRequestValue
 ): SlashCommandCustomOption | undefined {
 	if (value === true || value === "true") {
 		return {
@@ -150,7 +169,7 @@ function readCustomOption(
 }
 
 function readArgument(
-	value: unknown,
+	value: AppRequestValue,
 	index: number
 ): SlashCommandArgument | null {
 	const record = asRecord(value);
@@ -158,8 +177,9 @@ function readArgument(
 		return null;
 	}
 	const optionsValue = record.options ?? record.choices ?? record.values;
-	const options = Array.isArray(optionsValue)
-		? optionsValue.flatMap((option) => {
+	const optionArray = slashArgumentArraySchema.safeParse(optionsValue);
+	const options = optionArray.success
+		? optionArray.data.flatMap((option) => {
 				const parsed = readOption(option);
 				return parsed ? [parsed] : [];
 			})
@@ -177,11 +197,12 @@ function readArgument(
 	};
 }
 
-function readArguments(value: unknown): SlashCommandArgument[] {
-	if (!Array.isArray(value)) {
+function readArguments(value: AppRequestValue): SlashCommandArgument[] {
+	const argumentsValue = slashArgumentArraySchema.safeParse(value);
+	if (!argumentsValue.success) {
 		return [];
 	}
-	return value.flatMap((argument, index) => {
+	return argumentsValue.data.flatMap((argument, index) => {
 		const parsed = readArgument(argument, index);
 		return parsed ? [parsed] : [];
 	});
@@ -189,7 +210,7 @@ function readArguments(value: unknown): SlashCommandArgument[] {
 
 /** Parse one plugin/app contribution at the untrusted API boundary. */
 export function parseSlashCommandContribution(
-	value: unknown
+	value: SlashContributionInput
 ): SlashCommand | null {
 	const record = asRecord(value);
 	if (!record) {

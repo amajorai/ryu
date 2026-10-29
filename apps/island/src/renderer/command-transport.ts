@@ -14,6 +14,7 @@ import type {
 	ChatStreamHandlers,
 } from "@ryu/command/types";
 import type { CoreStreamEndEvent, CoreStreamPartEvent } from "../shared/ipc.ts";
+import { commandStreamPartSchema } from "./lib/core-stream-boundary.ts";
 
 export interface CommandTransportOptions {
 	/** Agent to route to (`null` = Core's default local model). */
@@ -49,14 +50,15 @@ export function createCommandTransport(
 			if (event.streamId !== streamId) {
 				return;
 			}
-			const { part } = event;
-			if (part.type === "text-delta" && typeof part.delta === "string") {
+			const parsed = commandStreamPartSchema.safeParse(event.part);
+			if (!parsed.success) {
+				return;
+			}
+			const part = parsed.data;
+			if (part.type === "text-delta") {
 				handlers.onDelta(part.delta);
-			} else if (
-				part.type === "error" &&
-				typeof (part as { errorText?: unknown }).errorText === "string"
-			) {
-				handlers.onError((part as { errorText: string }).errorText);
+			} else {
+				handlers.onError(part.errorText);
 			}
 		});
 
@@ -92,7 +94,7 @@ export function createCommandTransport(
 					});
 				}
 			})
-			.catch((error: unknown) => {
+			.catch((error) => {
 				if (settled) {
 					return;
 				}

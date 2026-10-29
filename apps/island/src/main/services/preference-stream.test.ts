@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdir,
+	mkdtemp,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,6 +54,11 @@ test("preference consumers share one reconnecting stream and release it after th
 		},
 	});
 	try {
+		await symlink(
+			join(import.meta.dirname, "../../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
+		);
 		const services = join(root, "main/services");
 		const shared = join(root, "shared");
 		await mkdir(services, { recursive: true });
@@ -54,6 +66,7 @@ test("preference consumers share one reconnecting stream and release it after th
 		for (const name of [
 			"preferences",
 			"preference-stream",
+			"sse-reader",
 			"reconnect-delay",
 			"response-deadline",
 			"theme",
@@ -108,7 +121,13 @@ process.stdout.write(JSON.stringify({initial,values,partial,reconnected,rotated,
 		expect(await child.exited).toBe(0);
 		expect(result.initial).toEqual({ opened: 1, active: 1 });
 		expect(result.values.sort()).toEqual(
-			[...new Array(10).fill("custom"), "dark", "dark", "voice", "voice"].sort()
+			[
+				...Array.from({ length: 10 }, () => "custom"),
+				"dark",
+				"dark",
+				"voice",
+				"voice",
+			].sort()
 		);
 		expect(result.partial).toEqual({ opened: 1, active: 1 });
 		expect(result.reconnected).toEqual({ opened: 2, active: 1 });

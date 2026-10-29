@@ -51,13 +51,15 @@ export interface SettingsEntry {
 	keywords?: string;
 	/** The row's visible title, verbatim — this is also the DOM anchor. */
 	label: string;
+	/** Hidden when the user cannot open any workspace interface. */
+	requiresWorkspace?: boolean;
 	/** The dialog section value (`general`, `appearance`, `routing`, …). */
 	section: string;
 	/**
 	 * The sub-page inside that section, for a pane that drills in
 	 * ({@link SettingsSubpages}) instead of scrolling. Load-bearing for search: a
 	 * row inside a closed sub-page is not in the DOM, and the reveal gives up
-	 * after two seconds of polling — so without this a hit would land on the
+	 * after five seconds of polling — so without this a hit would land on the
 	 * section and highlight nothing.
 	 *
 	 * Most entries leave it unset and let {@link subpageFor} derive it from the
@@ -75,44 +77,58 @@ export interface SettingsEntry {
  * "On startup") stays on the pane's own index page, which is where a pane's
  * headline settings belong.
  */
-const SUBPAGE_BY_GROUP: Record<string, Record<string, string>> = {
-	appearance: {
-		"Language & vibe": "language",
-		"Layout & sizing": "layout",
-		Typography: "layout",
-		Motion: "motion",
-		"Seasonal effects": "motion",
-		Interface: "interface",
-		Chat: "chat",
-		"Usage meter": "usage",
-		"Diff viewer": "diff",
-		"File tree": "files",
-		Reset: "reset",
-	},
+const SUBPAGE_BY_GROUP = new Map<string, Map<string, string>>([
+	[
+		"appearance",
+		new Map<string, string>([
+			["Language & vibe", "language"],
+			["Layout & sizing", "layout"],
+			["Typography", "layout"],
+			["Motion", "motion"],
+			["Seasonal effects", "motion"],
+			["Interface", "interface"],
+			["Chat view", "chat"],
+			["Interfaces", "interfaces"],
+			["Every interface", "interfaces"],
+			["Usage meter", "usage"],
+			["Diff viewer", "diff"],
+			["File tree", "files"],
+			["Reset", "reset"],
+		]),
+	],
 	// Not 1:1 with the sections here: the three "what we collect" groups share
 	// one page, because three rows asking the same question is a longer index,
 	// not a clearer one.
-	privacy: {
-		"Product analytics": "sharing",
-		"Community stats": "sharing",
-		"Crash reports": "sharing",
-		"Diagnostics export": "diagnostics",
-		"Support access (local)": "diagnostics",
-		"Self-healing": "healing",
-	},
-	general: {
-		Tabs: "tabs",
-		"Pane layouts": "tabs",
-		Interface: "tabs",
-		Chats: "chats",
-		"Availability & prompts": "chats",
-		Language: "language",
-		Terminal: "terminal",
-		Files: "files",
-		System: "system",
-		Setup: "setup",
-	},
-};
+	[
+		"privacy",
+		new Map<string, string>([
+			["Device permissions", "device-permissions"],
+			["Product analytics", "sharing"],
+			["Community stats", "sharing"],
+			["Profile activity", "sharing"],
+			["Crash reports", "sharing"],
+			["Diagnostics export", "diagnostics"],
+			["Support access (local)", "diagnostics"],
+			["Self-healing", "healing"],
+			["Custom app security", "security"],
+		]),
+	],
+	[
+		"general",
+		new Map<string, string>([
+			["Tabs", "tabs"],
+			["Pane layouts", "tabs"],
+			["Interface", "tabs"],
+			["Chats", "chats"],
+			["Availability & prompts", "chats"],
+			["Language", "language"],
+			["Terminal", "terminal"],
+			["Files", "files"],
+			["System", "system"],
+			["Setup", "setup"],
+		]),
+	],
+]);
 
 /**
  * Which sub-page holds this setting, or null when its section is a flat scroll.
@@ -123,11 +139,11 @@ export function subpageFor(entry: SettingsEntry): string | null {
 	if (entry.subpage) {
 		return entry.subpage;
 	}
-	return SUBPAGE_BY_GROUP[entry.section]?.[entry.group] ?? null;
+	return SUBPAGE_BY_GROUP.get(entry.section)?.get(entry.group) ?? null;
 }
 
 /** Human labels for section values, so a result can say where it lives. */
-export const SETTINGS_SECTION_LABELS: Record<string, string> = {
+export const SETTINGS_SECTION_LABELS = {
 	// App dialog
 	general: "General",
 	appearance: "Appearance",
@@ -137,6 +153,8 @@ export const SETTINGS_SECTION_LABELS: Record<string, string> = {
 	developer: "Developer",
 	sync: "Settings Sync",
 	account: "Account",
+	profile: "Profile",
+	stats: "Stats",
 	sessions: "Sessions & devices",
 	"ryu-apps": "Ryu apps",
 	"authorized-apps": "OAuth apps",
@@ -154,6 +172,8 @@ export const SETTINGS_SECTION_LABELS: Record<string, string> = {
 	permissions: "Permissions",
 	budgets: "Spending limits",
 	guardrails: "Safety filters",
+	"traffic-map": "Traffic map",
+	policies: "Guardrail policies",
 	runtime: "Agent runtime",
 	routing: "Model routing",
 	integrations: "Integrations",
@@ -163,6 +183,7 @@ export const SETTINGS_SECTION_LABELS: Record<string, string> = {
 	git: "Git",
 	worktrees: "Worktrees",
 	environments: "Environments",
+	"cloud-environments": "Cloud environments",
 	"email-alerts": "Email & alerts",
 	privacy: "Privacy",
 	storage: "Storage",
@@ -170,9 +191,12 @@ export const SETTINGS_SECTION_LABELS: Record<string, string> = {
 	usage: "Usage & cost",
 	audit: "Activity log",
 	evals: "Quality tests",
-	health: "Health",
+	health: "Diagnostics",
 	danger: "Danger zone",
 };
+const SETTINGS_SECTION_LABELS_BY_KEY = new Map(
+	Object.entries(SETTINGS_SECTION_LABELS)
+);
 
 export const SETTINGS_ENTRIES: SettingsEntry[] = [
 	// ─────────────────────────── App dialog ───────────────────────────────────
@@ -201,7 +225,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		section: "general",
 		group: "On startup",
 		label: "Realm on startup",
-		keywords: "bot console os last used product mode launch",
+		keywords: "bot agent console os last used product mode launch",
 	},
 	{
 		id: "general.on-startup.account-and-node-selection",
@@ -310,7 +334,8 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		section: "general",
 		group: "Availability & prompts",
 		label: "Manual status",
-		keywords: "online away do not disturb presence interrupt availability",
+		keywords:
+			"online away do not disturb gaming streaming obs live broadcast presence interrupt availability async questions",
 	},
 	{
 		id: "general.chats.afk-detection",
@@ -329,12 +354,69 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		keywords: "afk idle timeout minutes questions prompts",
 	},
 	{
+		id: "general.chats.gaming-detection",
+		dialog: "app",
+		section: "general",
+		group: "Availability & prompts",
+		label: "Detect games",
+		keywords: "gaming mode game detection discord steam process status",
+	},
+	{
+		id: "general.chats.gaming-free-models",
+		dialog: "app",
+		section: "general",
+		group: "Availability & prompts",
+		label: "Free memory for games",
+		keywords: "gaming unload local models ram vram memory performance",
+	},
+	{
+		id: "general.chats.gaming-processes",
+		dialog: "app",
+		section: "general",
+		group: "Availability & prompts",
+		label: "Extra games",
+		keywords: "gaming custom executable process list",
+	},
+	{
+		id: "general.chats.gaming-ignored",
+		dialog: "app",
+		section: "general",
+		group: "Availability & prompts",
+		label: "Not games",
+		keywords: "gaming ignore exclude false positive executable process",
+	},
+	{
+		id: "general.chats.streaming-detection",
+		dialog: "app",
+		section: "general",
+		group: "Availability & prompts",
+		label: "Detect streaming apps",
+		keywords:
+			"streaming stream live broadcast obs obs64 streamlabs tiktok privacy connected apps",
+	},
+	{
+		id: "general.chats.streaming-apps",
+		dialog: "app",
+		section: "general",
+		group: "Availability & prompts",
+		label: "Streaming apps",
+		keywords: "streaming process names executable obs live detection list",
+	},
+	{
 		id: "general.chats.auto-import-agent-threads",
 		dialog: "app",
 		section: "general",
 		group: "Chats",
 		label: "Auto-import agent threads",
 		keywords: "claude codex acp history import",
+	},
+	{
+		id: "general.chats.resume-interrupted-chats",
+		dialog: "app",
+		section: "general",
+		group: "Chats",
+		label: "Resume interrupted chats",
+		keywords: "crash restart reboot power loss auto resume continue recover",
 	},
 	{
 		id: "general.chats.send-shortcut",
@@ -433,6 +515,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		desktopOnly: true,
 	},
 	{
+		id: "general.system.hardware-acceleration",
+		dialog: "app",
+		section: "general",
+		group: "System",
+		label: "Use hardware acceleration",
+		keywords: "gpu graphics rendering acceleration flicker blank window glitch",
+		desktopOnly: true,
+	},
+	{
 		id: "general.system.prevent-sleep-while-running",
 		dialog: "app",
 		section: "general",
@@ -506,6 +597,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		group: "Typography",
 		label: "Code font",
 		keywords: "monospace mono editor",
+	},
+	{
+		id: "appearance.wallpaper",
+		dialog: "app",
+		section: "appearance",
+		group: "Wallpaper",
+		label: "Wallpaper",
+		keywords:
+			"background backdrop desktop ryu os unsplash photo image upload lock screen login account chooser shuffle",
 	},
 	{
 		id: "appearance.layout.scale",
@@ -747,7 +847,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		id: "appearance.chat.detail-level",
 		dialog: "app",
 		section: "appearance",
-		group: "Chat",
+		group: "Chat view",
 		label: "Detail level",
 		// "none" and its synonyms live here rather than as their own row: a
 		// search result reading just "None" says nothing, and the row a user
@@ -759,14 +859,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		id: "appearance.chat.group-tool-uses",
 		dialog: "app",
 		section: "appearance",
-		group: "Chat",
+		group: "Chat view",
 		label: "Group tool uses",
 	},
 	{
 		id: "appearance.chat.show-file-edits-expanded",
 		dialog: "app",
 		section: "appearance",
-		group: "Chat",
+		group: "Chat view",
 		label: "Show file edits expanded",
 		keywords: "diff collapse",
 	},
@@ -774,21 +874,21 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		id: "appearance.chat.auto-expand-commands",
 		dialog: "app",
 		section: "appearance",
-		group: "Chat",
+		group: "Chat view",
 		label: "Auto-expand commands",
 	},
 	{
 		id: "appearance.chat.expand-code-blocks",
 		dialog: "app",
 		section: "appearance",
-		group: "Chat",
+		group: "Chat view",
 		label: "Expand code blocks",
 	},
 	{
 		id: "appearance.chat.pin-user-message-while-scrolling",
 		dialog: "app",
 		section: "appearance",
-		group: "Chat",
+		group: "Chat view",
 		label: "Pin user message while scrolling",
 		keywords: "sticky header scroll",
 	},
@@ -796,9 +896,37 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		id: "appearance.chat.open-chats-at-the-latest-message",
 		dialog: "app",
 		section: "appearance",
-		group: "Chat",
+		group: "Chat view",
 		label: "Open chats at the latest message",
 		keywords: "scroll bottom restore position",
+	},
+	{
+		id: "appearance.interfaces.interface",
+		dialog: "app",
+		section: "appearance",
+		group: "Interfaces",
+		label: "Interface",
+		keywords:
+			"interface settings world game board calendar canvas feed options",
+		requiresWorkspace: true,
+	},
+	{
+		id: "appearance.interfaces.reset-to-defaults",
+		dialog: "app",
+		section: "appearance",
+		group: "Interfaces",
+		label: "Reset to defaults",
+		keywords: "interface settings restore",
+		requiresWorkspace: true,
+	},
+	{
+		id: "appearance.interfaces.hide-work-details",
+		dialog: "app",
+		section: "appearance",
+		group: "Every interface",
+		label: "Hide work details",
+		keywords: "privacy redact shared screen streaming interface",
+		requiresWorkspace: true,
 	},
 	{
 		id: "appearance.usage-meter.show-usage-meter",
@@ -1259,6 +1387,42 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		keywords: "sync chats spaces pages documents cloud devices",
 	},
 	{
+		id: "desktop.privacy.device-permissions.microphone",
+		dialog: "gateway",
+		label: "Microphone",
+		section: "privacy",
+		group: "Device permissions",
+		keywords: "mic audio voice onboarding",
+		desktopOnly: true,
+	},
+	{
+		id: "desktop.privacy.device-permissions.screen-recording",
+		dialog: "gateway",
+		label: "Screen Recording",
+		section: "privacy",
+		group: "Device permissions",
+		keywords: "clips shadow ghost screenshot capture",
+		desktopOnly: true,
+	},
+	{
+		id: "desktop.privacy.device-permissions.accessibility",
+		dialog: "gateway",
+		label: "Accessibility",
+		section: "privacy",
+		group: "Device permissions",
+		keywords: "ghost automation shadow",
+		desktopOnly: true,
+	},
+	{
+		id: "desktop.privacy.device-permissions.input-monitoring",
+		dialog: "gateway",
+		label: "Input Monitoring",
+		section: "privacy",
+		group: "Device permissions",
+		keywords: "ghost learn keyboard shortcuts capture",
+		desktopOnly: true,
+	},
+	{
 		id: "gw.privacy.product-analytics.share-anonymous-usage-analytics",
 		dialog: "gateway",
 		section: "privacy",
@@ -1281,6 +1445,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		label: "Share anonymous community stats",
 	},
 	{
+		id: "gw.privacy.profile-activity.sync-activity-on-this-device-to-your-profile",
+		dialog: "gateway",
+		section: "privacy",
+		group: "Profile activity",
+		label: "Sync activity on this device to your profile",
+		keywords:
+			"profile streak chat agents scheduled account usage tokens stats heatmap opt out",
+	},
+	{
 		id: "gw.privacy.crash-reports.send-crash-and-error-reports",
 		dialog: "gateway",
 		section: "privacy",
@@ -1295,6 +1468,22 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		group: "Diagnostics export",
 		label: "Export local diagnostics over OTLP",
 		keywords: "opentelemetry traces metrics axiom",
+	},
+	{
+		id: "gw.privacy.diagnostics-export.content-mode",
+		dialog: "gateway",
+		section: "privacy",
+		group: "Diagnostics export",
+		label: "Content mode",
+		keywords: "otlp opentelemetry prompts responses full content gen_ai",
+	},
+	{
+		id: "gw.privacy.diagnostics-export.test-destination",
+		dialog: "gateway",
+		section: "privacy",
+		group: "Diagnostics export",
+		label: "Test destination",
+		keywords: "otlp test span verify endpoint collector",
 	},
 	{
 		id: "gw.privacy.support-access-local.grant-local-support-access",
@@ -1323,6 +1512,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		section: "privacy",
 		group: "Self-healing",
 		label: "Auto-fix without asking",
+	},
+	{
+		id: "gw.privacy.custom-app-security.enforce-csp-for-custom-apps",
+		dialog: "gateway",
+		section: "privacy",
+		group: "Custom app security",
+		label: "Enforce CSP for custom apps",
+		keywords: "content security policy network sandbox iframe",
 	},
 	{
 		id: "gw.storage.s3-backups",
@@ -1451,7 +1648,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		dialog: "gateway",
 		section: "network",
 		group: "Network (Tailscale / Headscale / Tailcat)",
-		label: "Enable private network",
+		label: "Enable tunnel",
 		keywords: "tailscale headscale tailcat vpn tailnet remote",
 	},
 	{
@@ -1460,6 +1657,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		section: "network",
 		group: "Network (Tailscale / Headscale / Tailcat)",
 		label: "Status",
+	},
+	{
+		id: "gw.network.traffic-routing.route-traffic-through-this-computer",
+		dialog: "gateway",
+		section: "network",
+		group: "Traffic routing",
+		label: "Route traffic through this computer",
+		keywords: "egress ip address proxy cloud node exit residential",
 	},
 	{
 		id: "gw.routing.smart-routing.enable-smart-routing",
@@ -1546,7 +1751,8 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		section: "worktrees",
 		group: "Worktrees",
 		label: "Worktree defaults",
-		keywords: "root fetch upstream cleanup retention auto delete",
+		keywords:
+			"root fetch upstream cleanup retention auto delete coordinator workers isolate worktree default",
 	},
 	{
 		id: "gw.environments.projects",
@@ -1555,6 +1761,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		group: "Environments",
 		label: "Project environments",
 		keywords: "setup cleanup variables actions worktree",
+	},
+	{
+		id: "gw.cloud-environments.settings",
+		dialog: "gateway",
+		section: "cloud-environments",
+		group: "Cloud environments",
+		label: "Cloud environments",
+		keywords:
+			"repositories install script start instructions internet domains personal vault secrets variables privacy tailscale vpn",
 	},
 	// Group-level entries for the bespoke panes (see COVERAGE above).
 	{
@@ -1582,6 +1797,42 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		keywords: "guardrails pii moderation firewall egress block",
 	},
 	{
+		id: "gw.traffic-map.canvas",
+		dialog: "gateway",
+		section: "traffic-map",
+		group: "",
+		label: "Traffic map",
+		keywords:
+			"traffic map canvas live topology flow requests blocked pulses layer platform floor policy provider",
+	},
+	{
+		id: "gw.traffic-map.table",
+		dialog: "gateway",
+		section: "traffic-map",
+		group: "",
+		label: "Traffic table",
+		keywords:
+			"traffic table keyboard screen reader nodes counts requests blocked links",
+	},
+	{
+		id: "gw.policies.named",
+		dialog: "gateway",
+		section: "policies",
+		group: "",
+		label: "Guardrail policies",
+		keywords:
+			"guardrail policy policies named assign assignment organization team member key agent permissions allowlist",
+	},
+	{
+		id: "gw.policies.effective",
+		dialog: "gateway",
+		section: "policies",
+		group: "",
+		label: "Effective policy",
+		keywords:
+			"effective policy preview provenance scope eligible models providers platform locked",
+	},
+	{
 		id: "gw.providers.list",
 		dialog: "gateway",
 		section: "providers",
@@ -1596,6 +1847,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		group: "",
 		label: "Default agent & model",
 		keywords: "default model agent fallback global",
+	},
+	{
+		id: "gw.defaults.models",
+		dialog: "gateway",
+		section: "defaults",
+		group: "",
+		label: "Coordinator & thread models",
+		keywords:
+			"models coordinator thread session main thread effort project bot default",
 	},
 	{
 		id: "gw.access.devices",
@@ -1703,7 +1963,7 @@ function scoreToken(entry: SettingsEntry, token: string): number {
 		return 22;
 	}
 	const section = (
-		SETTINGS_SECTION_LABELS[entry.section] ?? entry.section
+		SETTINGS_SECTION_LABELS_BY_KEY.get(entry.section) ?? entry.section
 	).toLowerCase();
 	if (section.includes(token)) {
 		return 12;
@@ -1754,14 +2014,17 @@ export function searchSettings(query: string, limit = 40): SettingsEntry[] {
 
 export function visibleSettingsEntries(
 	entries: readonly SettingsEntry[],
-	isDesktop: boolean
+	isDesktop: boolean,
+	workspace = true
 ): SettingsEntry[] {
-	return isDesktop
-		? [...entries]
-		: entries.filter((entry) => !entry.desktopOnly);
+	return entries.filter(
+		(entry) =>
+			(isDesktop || !entry.desktopOnly) &&
+			(workspace || !entry.requiresWorkspace)
+	);
 }
 
 /** The section label a result should print as its "where it lives" line. */
 export function sectionLabel(entry: SettingsEntry): string {
-	return SETTINGS_SECTION_LABELS[entry.section] ?? entry.section;
+	return SETTINGS_SECTION_LABELS_BY_KEY.get(entry.section) ?? entry.section;
 }

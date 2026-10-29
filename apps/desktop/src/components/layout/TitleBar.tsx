@@ -61,25 +61,27 @@ import {
 	ContextMenuSubContent,
 	ContextMenuSubTrigger,
 	ContextMenuTrigger,
-} from "@ryu/ui/components/context-menu";
+} from "@ryu/ui/components/context-menu.tsx";
 import { EdgeScrollChevrons } from "@ryu/ui/components/edge-scroller.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
 import { Icon } from "@ryu/ui/components/icon.tsx";
-import { Logo as RyuLogo } from "@ryu/ui/components/logo";
-import { ProgressiveBlur } from "@ryu/ui/components/progressive-blur";
-import { useSidebar } from "@ryu/ui/components/sidebar";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Logo as RyuLogo } from "@ryu/ui/components/logo.tsx";
+import { ProgressiveBlur } from "@ryu/ui/components/progressive-blur.tsx";
+import { useSidebar } from "@ryu/ui/components/sidebar.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import { useIsMobile } from "@ryu/ui/hooks/use-mobile.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { CSSProperties as LayoutCSSProperties } from "react";
 import {
 	type DragEvent,
+	type ReactNode,
 	useEffect,
 	useRef,
 	useState,
@@ -95,7 +97,10 @@ import { MorphingTabSurface } from "@/src/components/layout/MorphingTabSurface.t
 import { TabDropdown } from "@/src/components/layout/tab-dropdown.tsx";
 import { TabSearchDialog } from "@/src/components/layout/tab-search-dialog.tsx";
 import { isDockableRoutePath } from "@/src/components/panels/dock-panels.ts";
-import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
+import {
+	useChatHistoryContext,
+	useOptionalChatHistoryContext,
+} from "@/src/contexts/ChatHistoryContext.tsx";
 import type {
 	ShellRoute,
 	Split,
@@ -131,14 +136,16 @@ import { toggleFullscreen, useFullscreen } from "@/src/lib/fullscreen.ts";
 import { conversationEntityKey } from "@/src/lib/window-routing.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSidePanelRouteStore } from "@/src/store/useSidePanelRouteStore.ts";
+import { useOptionalDesktopWorkbench } from "@/src/workbench/DesktopWorkbenchContext.tsx";
 import { MoveTabToWindowMenuItem } from "./MoveTabToWindowMenuItem.tsx";
 import { OpenInNewWindowContextMenuItem } from "./OpenInNewWindowMenuItem.tsx";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
 import { SeasonalParticles } from "./SeasonalEffects.tsx";
 import { SplitPresetMenuItems } from "./SplitPresetMenu.tsx";
+import layoutStyles from "./TitleBar.module.css";
 import { TabEntityMenuSection } from "./tab-entity-menu.tsx";
 import { TabRenameInput, useTabRename } from "./tab-rename.tsx";
-import { useTabDnd, useTabDragProps } from "./tabDnd.tsx";
+import { useTabBracketShift, useTabDnd, useTabDragProps } from "./tabDnd.tsx";
 
 // Radio value used for the "follow the default node" choice in the per-tab node
 // picker, distinct from any real node name.
@@ -146,14 +153,20 @@ const DEFAULT_NODE_VALUE = "__default__";
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-// The vertical bar drawn in the gap beside the hovered tab to preview where the
-// dragged tab will land. The host element must be `relative`.
+// The vertical bar drawn in the gap beside the hovered tab when the strip cannot
+// preview the landing spot by sliding tabs apart (a drop into another bracket).
+// The host element must be `relative`.
 function DropIndicator({ side }: { side: "left" | "right" }) {
 	return (
 		<span
 			aria-hidden
 			className={cn(
-				"reorder-drop-indicator pointer-events-none absolute inset-y-1 z-20 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--primary)_55%,transparent)] transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
+				cn(
+					"reorder-drop-indicator pointer-events-none absolute inset-y-1 z-20 w-0.5 rounded-full bg-primary duration-150",
+					layoutStyles.authored1,
+					layoutStyles.authored2,
+					layoutStyles.authored3
+				),
 				side === "left" ? "-left-1" : "-right-1"
 			)}
 		/>
@@ -162,10 +175,7 @@ function DropIndicator({ side }: { side: "left" | "right" }) {
 
 // Static Tailwind classes per group color. Kept literal (not interpolated) so
 // the compiler actually emits these utilities.
-const GROUP_COLOR_CLASSES: Record<
-	TabGroupColor,
-	{ dot: string; pill: string; container: string }
-> = {
+const GROUP_COLOR_CLASSES = {
 	grey: {
 		dot: "bg-slate-500",
 		pill: "bg-slate-500/20 text-slate-700 dark:text-slate-200",
@@ -211,9 +221,12 @@ const GROUP_COLOR_CLASSES: Record<
 		pill: "bg-orange-500/20 text-orange-700 dark:text-orange-200",
 		container: "bg-orange-500/10 ring-orange-500/25",
 	},
-};
+} satisfies Record<
+	TabGroupColor,
+	{ dot: string; pill: string; container: string }
+>;
 
-const COLOR_LABELS: Record<TabGroupColor, string> = {
+const COLOR_LABELS = {
 	grey: "Grey",
 	blue: "Blue",
 	red: "Red",
@@ -223,7 +236,7 @@ const COLOR_LABELS: Record<TabGroupColor, string> = {
 	purple: "Purple",
 	cyan: "Cyan",
 	orange: "Orange",
-};
+} satisfies Record<TabGroupColor, string>;
 
 // Tab icons for the routes that are their own page — the glyph half of
 // `PATH_TITLES` in TabsContext. The two multi-section shells (the Library and
@@ -248,50 +261,50 @@ const COLOR_LABELS: Record<TabGroupColor, string> = {
 // Each glyph mirrors the matching sidebar entry (AppSidebar's SECTION_ICONS +
 // the NavTabButton chrome) so a page's tab and its sidebar row read as the same
 // thing.
-const PATH_ICONS: Record<string, IconSvgElement> = {
+const PATH_ICONS = new Map<string, IconSvgElement>([
 	// No Home/dashboard entry: that page's path is declared by `@ryu/dashboards`
 	// (`contributes.sidebar_buttons[].target`), and its tab icon comes from the same
 	// contribution via `usePluginContributionTabIcons` — which `resolveTabIcon`
 	// consults before this map. A path key here would go stale the moment the app
 	// moved itself.
-	"/chat": Chat01Icon,
-	"/compute": CpuIcon,
+	["/chat", Chat01Icon],
+	["/compute", CpuIcon],
 	// Bare `/agents` is a Library route now (TabsContext's `LIBRARY_ALIAS_PATHS`),
 	// so this row is read only for the agent routes UNDER it: the explicit
 	// agent-edit branch in `pathIcon`, plus any other `/agents/*` deep link that
 	// lands on the leading-segment fallback.
-	"/agents": Target01Icon,
-	"/channels": Tv01Icon,
-	"/identities": FingerPrintIcon,
-	"/identities/new": FingerPrintIcon,
-	"/skills": PotionIcon,
-	"/spaces": DeliverySecure01Icon,
-	"/meetings": AudioWave01Icon,
-	"/workflows": WorkflowCircle06Icon,
-	"/workflows/build": WorkflowCircle06Icon,
-	"/quests": CheckmarkBadge02Icon,
-	"/timeline": Activity01Icon,
-	"/review": PieChartIcon,
-	"/activity": Pulse01Icon,
-	"/calendar": Calendar04Icon,
-	"/inbox": InboxIcon,
-	"/approvals": InboxIcon,
-	"/downloads": Download01Icon,
-	"/project": GitBranchIcon,
-	"/settings": Settings01Icon,
-	"/share": Share01Icon,
-	"/vault": ShieldKeyIcon,
-};
+	["/agents", Target01Icon],
+	["/channels", Tv01Icon],
+	["/identities", FingerPrintIcon],
+	["/identities/new", FingerPrintIcon],
+	["/skills", PotionIcon],
+	["/spaces", DeliverySecure01Icon],
+	["/meetings", AudioWave01Icon],
+	["/workflows", WorkflowCircle06Icon],
+	["/workflows/build", WorkflowCircle06Icon],
+	["/quests", CheckmarkBadge02Icon],
+	["/timeline", Activity01Icon],
+	["/review", PieChartIcon],
+	["/activity", Pulse01Icon],
+	["/calendar", Calendar04Icon],
+	["/inbox", InboxIcon],
+	["/approvals", InboxIcon],
+	["/downloads", Download01Icon],
+	["/project", GitBranchIcon],
+	["/settings", Settings01Icon],
+	["/share", Share01Icon],
+	["/vault", ShieldKeyIcon],
+]);
 
 /** One glyph per multi-section shell, the exact counterpart of the one title
     `shellRoute` hands back. The Library book is the sidebar's own Library
     chrome; `PackageIcon` is the `store` NavTabButton's Customize glyph. Keyed
     off the SHELL, never the section, because a tab that names the page must not
     change its icon when the user switches section inside it. */
-const SHELL_ICONS: Record<ShellRoute["family"], IconSvgElement> = {
+const SHELL_ICONS = {
 	library: LibraryIcon,
 	store: PackageIcon,
-};
+} satisfies Record<ShellRoute["family"], IconSvgElement>;
 
 const AGENT_EDIT_PATH_RE = /^\/agents\/.+\/edit$/;
 
@@ -299,7 +312,7 @@ function pathIcon(path: string): IconSvgElement {
 	const base = path.split("?")[0];
 	// Agent edit paths (/agents/:id/edit) share the agents icon.
 	if (AGENT_EDIT_PATH_RE.test(base)) {
-		return PATH_ICONS["/agents"];
+		return PATH_ICONS.get("/agents") ?? Target01Icon;
 	}
 	// A shell route takes its family's glyph, before any per-path lookup: every
 	// section of the Library / the Customize store is the same page under the
@@ -314,12 +327,12 @@ function pathIcon(path: string): IconSvgElement {
 	// Exact route wins; otherwise fall back to the leading path segment so
 	// detail subpaths (e.g. /spaces/:id, /workflows/:id) keep their page icon
 	// instead of silently dropping to the chat fallback.
-	const exact = PATH_ICONS[base];
+	const exact = PATH_ICONS.get(base);
 	if (exact) {
 		return exact;
 	}
 	const root = base.split("/").filter(Boolean)[0];
-	return (root ? PATH_ICONS[`/${root}`] : undefined) ?? Message01Icon;
+	return (root ? PATH_ICONS.get(`/${root}`) : undefined) ?? Message01Icon;
 }
 
 // The agent editor uses the static Ryu ghost logo instead of a HugeIcons glyph;
@@ -348,6 +361,7 @@ export function TabGlyph({
 	busySpeed,
 	className,
 	logoSize,
+	presentation = "default",
 }: {
 	path: string;
 	icon?: GlyphValue;
@@ -356,6 +370,7 @@ export function TabGlyph({
 	busySpeed?: "slow" | "normal" | "fast";
 	className?: string;
 	logoSize: string;
+	presentation?: "default" | "sidebar-tab";
 }) {
 	const inProgressLabel = useLocalizedString("In progress");
 	// Re-render when apps register/unregister default path icons.
@@ -379,10 +394,16 @@ export function TabGlyph({
 			<Spinner
 				aria-label={inProgressLabel}
 				className={className}
+				presentation={presentation}
 				speed={busySpeed}
 			/>
 		);
 	}
+	const glyphClassName = cn(
+		className,
+		presentation === "sidebar-tab" &&
+			"transition-[opacity,scale] duration-150 group-hover/row:scale-50 group-hover/row:opacity-0 motion-reduce:transition-opacity"
+	);
 	if (!unloaded && icon) {
 		const parsed = Number.parseInt(logoSize, 10);
 		const px = Number.isNaN(parsed) ? 14 : parsed;
@@ -390,7 +411,7 @@ export function TabGlyph({
 			<span
 				className={cn(
 					"inline-flex shrink-0 items-center justify-center",
-					className
+					glyphClassName
 				)}
 			>
 				<GlyphDisplay fallback={null} size={px} value={icon} />
@@ -404,7 +425,7 @@ export function TabGlyph({
 			<span
 				className={cn(
 					"inline-flex shrink-0 items-center justify-center",
-					className
+					glyphClassName
 				)}
 			>
 				<Icon className="size-full" icon={registeredIcon} size={px} />
@@ -413,12 +434,17 @@ export function TabGlyph({
 	}
 	if (!unloaded && isAgentsTab(path)) {
 		return (
-			<RyuLogo className={className} size={logoSize} variant="outline-static" />
+			<RyuLogo
+				className={className}
+				presentation={presentation}
+				size={logoSize}
+				variant="outline-static"
+			/>
 		);
 	}
 	return (
 		<HugeiconsIcon
-			className={className}
+			className={glyphClassName}
 			icon={unloaded ? ZzzIcon : pathIcon(path)}
 		/>
 	);
@@ -434,6 +460,19 @@ export function useTabBusy(tab: Tab): boolean {
 		return false;
 	}
 	return getConversation(tab.conversationId)?.runStatus === "running";
+}
+
+/** Pointer/focus handler for a tab chip: an unloaded chat tab remounts cold and
+ * refetches its history when activated, so start that fetch as soon as the
+ * pointer reaches the chip. */
+export function useColdChatTabPrefetch(tab: Tab): () => void {
+	const prefetchConversation =
+		useOptionalChatHistoryContext()?.prefetchConversation;
+	return () => {
+		if (tab.unloaded && tab.path === "/chat" && tab.conversationId) {
+			prefetchConversation?.(tab.conversationId);
+		}
+	};
 }
 
 // Per-tab "Connect to node" submenu, shared by pinned and regular tabs.
@@ -562,7 +601,10 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 					<>
 						<ContextMenuRadioGroup
 							onValueChange={(value) =>
-								setSplitOrientation(split.id, value as SplitOrientation)
+								setSplitOrientation(
+									split.id,
+									/* SAFETY: This native ContextMenuRadioGroup publishes the value of its two authored RadioItems, columns and rows, matching SplitOrientation. This is a private mounted radio callback, not an external event payload. */ value as SplitOrientation
+								)
 							}
 							value={split.root.orientation}
 						>
@@ -773,6 +815,35 @@ async function openTabInNewWindow(tab: Tab) {
 	}
 }
 
+function MoveTabToRegionMenu({ tabId }: { tabId: string }) {
+	const workbench = useOptionalDesktopWorkbench();
+	if (!workbench) {
+		return null;
+	}
+	return (
+		<ContextMenuSub>
+			<ContextMenuSubTrigger>Move to pane</ContextMenuSubTrigger>
+			<ContextMenuSubContent>
+				{(["center", "right", "bottom"] as const).map((region) => (
+					<ContextMenuItem
+						key={region}
+						onClick={() => {
+							workbench.dispatch({ type: "region/show", region });
+							workbench.moveItem(tabId, { region });
+						}}
+					>
+						{region === "center"
+							? "Center"
+							: region === "right"
+								? "Right"
+								: "Bottom"}
+					</ContextMenuItem>
+				))}
+			</ContextMenuSubContent>
+		</ContextMenuSub>
+	);
+}
+
 // Compact, icon-only chip for a pinned tab (Chrome-style — no title, no X).
 function PinnedTab({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 	const activateTab = useTabSelector((state) => state.activateTab);
@@ -783,10 +854,10 @@ function PinnedTab({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 	const unloadTab = useTabSelector((state) => state.unloadTab);
 	const [floatingTabs] = useFloatingTabs();
 	const tabLayout = useTabLayout();
-	const { isDragging, showBefore, showAfter, dragHandlers } = useTabDragProps(
-		tab.id
-	);
+	const { isDragging, showBefore, showAfter, dragHandlers, shiftProps } =
+		useTabDragProps(tab.id);
 	const busy = useTabBusy(tab);
+	const prefetchColdChat = useColdChatTabPrefetch(tab);
 	return (
 		<ContextMenu>
 			<Tooltip>
@@ -795,6 +866,7 @@ function PinnedTab({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 						<TooltipTrigger
 							render={
 								<button
+									aria-label={tab.title}
 									className={cn(
 										"group/tab relative isolate flex size-8 shrink-0 items-center justify-center transition-colors",
 										floatingTabs
@@ -803,25 +875,32 @@ function PinnedTab({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 													isActive ? "bg-muted" : "hover:bg-muted/50"
 												)
 											: cn(
-													"rounded-t-[12px]",
+													cn("", layoutStyles.authored4),
 													isActive
 														? "text-foreground"
 														: "hover:bg-background/40"
 												),
 										tab.unloaded && "opacity-50",
 										isDragging &&
-											"scale-[0.97] opacity-40 shadow-lg transition-[opacity,transform,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transform-none"
+											cn(
+												"scale-[0.97] opacity-40 shadow-lg duration-150 motion-reduce:transform-none",
+												layoutStyles.authored5,
+												layoutStyles.authored6
+											)
 									)}
 									data-active={isActive}
 									onClick={() => activateTab(tab.id)}
+									onFocus={prefetchColdChat}
 									onMouseDown={(e) => {
 										if (e.button === 1) {
 											e.preventDefault();
 											closeTab(tab.id);
 										}
 									}}
+									onPointerEnter={prefetchColdChat}
 									type="button"
 									{...dragHandlers}
+									{...shiftProps}
 								>
 									<MorphingTabSurface
 										floatingTabs={floatingTabs}
@@ -829,18 +908,26 @@ function PinnedTab({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 									/>
 									{showBefore && <DropIndicator side="left" />}
 									{showAfter && <DropIndicator side="right" />}
-									<TabGlyph
-										busy={busy}
-										busySpeed={tab.busySpeed}
+									{/* Color stays on the wrapper (TabGlyph forwards className to
+									    Spinner, which owns its color); the size goes on TabGlyph
+									    itself so the Hugeicons fallback and the busy Spinner, which
+									    default to 24px / size-4, fit the 14px slot. */}
+									<span
 										className={cn(
-											"relative z-10 size-3.5",
+											"relative z-10 flex size-3.5 items-center justify-center",
 											isActive ? "text-foreground" : "text-muted-foreground"
 										)}
-										icon={tab.icon}
-										logoSize="14px"
-										path={tab.path}
-										unloaded={tab.unloaded}
-									/>
+									>
+										<TabGlyph
+											busy={busy}
+											busySpeed={tab.busySpeed}
+											className="size-3.5"
+											icon={tab.icon}
+											logoSize="14px"
+											path={tab.path}
+											unloaded={tab.unloaded}
+										/>
+									</span>
 								</button>
 							}
 						/>
@@ -882,6 +969,7 @@ function PinnedTab({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 					onClick={() => openTabInNewWindow(tab)}
 				/>
 				<MoveTabToWindowMenuItem tabId={tab.id} />
+				<MoveTabToRegionMenu tabId={tab.id} />
 				<OpenInSidePanelItem tab={tab} />
 				<TabLayoutMenuItems onChange={setTabLayout} value={tabLayout} />
 				<ContextMenuSeparator />
@@ -920,10 +1008,10 @@ function RegularTab({
 	const togglePin = useTabSelector((state) => state.togglePin);
 	const unloadTab = useTabSelector((state) => state.unloadTab);
 	const [floatingTabs] = useFloatingTabs();
-	const { isDragging, showBefore, showAfter, dragHandlers } = useTabDragProps(
-		tab.id
-	);
+	const { isDragging, showBefore, showAfter, dragHandlers, shiftProps } =
+		useTabDragProps(tab.id);
 	const busy = useTabBusy(tab);
+	const prefetchColdChat = useColdChatTabPrefetch(tab);
 	// A pane in the currently-visible split must not be unloadable — it's on
 	// screen — so the Unload item is disabled for it.
 	const activeSplit = findSplit(tabs, splits, activeTabId);
@@ -1007,19 +1095,23 @@ function RegularTab({
 						: "max-w-[180px] shrink-0"
 				)}
 			>
-				{/* biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/noNoninteractiveElementInteractions: custom drag/resize interaction */}
+				{/* custom drag/resize interaction */}
 				<div
 					className={cn(
 						"group/tab relative flex h-8 w-full min-w-0 items-center transition-colors",
 						floatingTabs
 							? cn("rounded-full", isActive ? activeBg : "hover:bg-muted/50")
 							: cn(
-									"rounded-t-[12px]",
+									cn("", layoutStyles.authored7),
 									isActive ? "text-foreground" : "hover:bg-background/40"
 								),
 						tab.unloaded && "opacity-60",
 						isDragging &&
-							"scale-[0.97] opacity-40 shadow-lg transition-[opacity,transform,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transform-none"
+							cn(
+								"scale-[0.97] opacity-40 shadow-lg duration-150 motion-reduce:transform-none",
+								layoutStyles.authored8,
+								layoutStyles.authored9
+							)
 					)}
 					data-active={isActive}
 					data-tab-appearance={floatingTabs ? "floating" : "morphing"}
@@ -1029,7 +1121,9 @@ function RegularTab({
 							closeTab(tab.id);
 						}
 					}}
+					onPointerEnter={prefetchColdChat}
 					{...dragHandlers}
+					{...shiftProps}
 				>
 					{showBefore && <DropIndicator side="left" />}
 					{showAfter && <DropIndicator side="right" />}
@@ -1048,17 +1142,22 @@ function RegularTab({
 						onClick={() => closeTab(tab.id)}
 						type="button"
 					>
-						<TabGlyph
-							busy={busy}
-							busySpeed={tab.busySpeed}
-							className="absolute size-3 transition-all duration-150 group-hover/tab:scale-50 group-hover/tab:opacity-0"
-							icon={tab.icon}
-							logoSize="12px"
-							path={tab.path}
-							unloaded={tab.unloaded}
-						/>
+						{/* Motion stays on the wrapper (TabGlyph forwards className to
+						    Spinner, which owns its motion); the size goes on TabGlyph so
+						    its Hugeicons fallback and busy Spinner fit the 12px slot. */}
+						<span className="absolute flex size-3 items-center justify-center transition-[opacity,scale] duration-150 group-hover/tab:scale-50 group-hover/tab:opacity-0 motion-reduce:transition-opacity">
+							<TabGlyph
+								busy={busy}
+								busySpeed={tab.busySpeed}
+								className="size-3"
+								icon={tab.icon}
+								logoSize="12px"
+								path={tab.path}
+								unloaded={tab.unloaded}
+							/>
+						</span>
 						<HugeiconsIcon
-							className="absolute size-3 scale-50 opacity-0 transition-all duration-150 group-hover/tab:scale-100 group-hover/tab:opacity-100"
+							className="absolute size-3 scale-50 opacity-0 transition-[opacity,scale] duration-150 group-hover/tab:scale-100 group-hover/tab:opacity-100 motion-reduce:transition-opacity"
 							icon={Cancel01Icon}
 						/>
 					</button>
@@ -1134,6 +1233,7 @@ function RegularTab({
 					onClick={() => openTabInNewWindow(tab)}
 				/>
 				<MoveTabToWindowMenuItem tabId={tab.id} />
+				<MoveTabToRegionMenu tabId={tab.id} />
 				<OpenInSidePanelItem tab={tab} />
 				<ContextMenuItem disabled={!hasClosedTabs} onClick={restoreTab}>
 					<HugeiconsIcon className="size-4" icon={ArrowTurnBackwardIcon} />
@@ -1160,6 +1260,7 @@ function RegularTab({
 // The colored pill that brackets a group — click to collapse/expand, double-click
 // or right-click for rename, and right-click for color/ungroup/close.
 export function GroupHeaderPill({ group }: { group: TabGroup }) {
+	const { t } = useI18n();
 	const tabs = useTabSelector((state) => state.tabs);
 	const toggleGroupCollapsed = useTabSelector(
 		(state) => state.toggleGroupCollapsed
@@ -1170,7 +1271,7 @@ export function GroupHeaderPill({ group }: { group: TabGroup }) {
 	const closeGroup = useTabSelector((state) => state.closeGroup);
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState(group.name);
-	const memberCount = tabs.filter((t) => t.groupId === group.id).length;
+	const memberCount = tabs.filter((tab) => tab.groupId === group.id).length;
 	const colors = GROUP_COLOR_CLASSES[group.color];
 	const startEditing = () => {
 		setDraft(group.name);
@@ -1190,7 +1291,8 @@ export function GroupHeaderPill({ group }: { group: TabGroup }) {
 	if (editing) {
 		return (
 			<input
-				// biome-ignore lint/a11y/noAutofocus: rename is an explicit user action
+				aria-label={t("shell.tab-group-name", undefined, "Tab group name")}
+				// rename is an explicit user action
 				autoFocus
 				className={cn(
 					"h-6 w-24 rounded-full px-2 font-medium text-xs outline-none ring-1",
@@ -1275,7 +1377,10 @@ export function GroupHeaderPill({ group }: { group: TabGroup }) {
 					<ContextMenuSubContent>
 						<ContextMenuRadioGroup
 							onValueChange={(value) =>
-								setGroupColor(group.id, value as TabGroupColor)
+								setGroupColor(
+									group.id,
+									/* SAFETY: This private native radio group is populated from TAB_GROUP_COLORS. Its item publisher forwards the selected authored value, matching TabGroupColor; no arbitrary stored group color is validated here. */ value as TabGroupColor
+								)
 							}
 							value={group.color}
 						>
@@ -1339,6 +1444,7 @@ function SplitBracketHeader({
 						<TooltipTrigger
 							render={
 								<button
+									aria-label="Split view"
 									className={cn(
 										"flex h-6 shrink-0 items-center justify-center rounded-full px-1.5 text-muted-foreground/70 transition-colors hover:text-muted-foreground",
 										joinHover && "bg-muted/50 text-muted-foreground"
@@ -1378,7 +1484,10 @@ function SplitBracketHeader({
 			<ContextMenuContent>
 				<ContextMenuRadioGroup
 					onValueChange={(value) =>
-						setSplitOrientation(split.id, value as SplitOrientation)
+						setSplitOrientation(
+							split.id,
+							/* SAFETY: This native ContextMenuRadioGroup publishes the value of its two authored RadioItems, columns and rows, matching SplitOrientation. This is a private mounted radio callback, not an external event payload. */ value as SplitOrientation
+						)
 					}
 					value={split.root.orientation}
 				>
@@ -1399,6 +1508,25 @@ function SplitBracketHeader({
 	);
 }
 
+// A group or split bracket in the strip. It slides as one item when a loose tab
+// is dragged past it.
+function TabBracket({
+	bracketId,
+	children,
+	className,
+}: {
+	bracketId: string;
+	children: ReactNode;
+	className: string;
+}) {
+	const shift = useTabBracketShift(bracketId);
+	return (
+		<div className={className} ref={shift.ref} style={shift.style}>
+			{children}
+		</div>
+	);
+}
+
 // A contiguous run of unpinned tabs: a single ungrouped tab, a group bracket, or
 // a split bracket — each with its members.
 type Segment =
@@ -1406,7 +1534,7 @@ type Segment =
 	| { type: "group"; group: TabGroup; members: Tab[] }
 	| { type: "split"; split: Split; members: Tab[] };
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
+// legacy component
 function buildSegments(
 	unpinned: Tab[],
 	groups: TabGroup[],
@@ -1452,7 +1580,7 @@ function buildSegments(
 	return segments;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
+// legacy component
 interface TitleBarProps {
 	navClusterReserve: string;
 	pageActionsMargin: string;
@@ -1472,9 +1600,9 @@ export function TitleBar({
 	const isMobile = useIsMobile();
 	const { actions } = useTitleBarContext();
 	const activateTab = useTabSelector((state) => state.activateTab);
-	const tabs = useTabSelector((state) => state.tabs);
+	const allTabs = useTabSelector((state) => state.tabs);
 	const groups = useTabSelector((state) => state.groups);
-	const activeTabId = useTabSelector((state) => state.activeTabId);
+	const globalActiveTabId = useTabSelector((state) => state.activeTabId);
 	const openTab = useTabSelector((state) => state.openTab);
 	const closeTab = useTabSelector((state) => state.closeTab);
 	const restoreTab = useTabSelector((state) => state.restoreTab);
@@ -1484,6 +1612,25 @@ export function TitleBar({
 	const splits = useTabSelector((state) => state.splits);
 	const splitTabs = useTabSelector((state) => state.splitTabs);
 	const unsplit = useTabSelector((state) => state.unsplit);
+	const workbench = useOptionalDesktopWorkbench();
+	const workbenchState = workbench?.state;
+	const focusedCenterGroup = workbenchState?.groups.find(
+		(group) =>
+			group.id === workbenchState?.focusedGroupId &&
+			group.region === "center" &&
+			group.activeItemId !== null
+	);
+	const displayedCenterGroup =
+		focusedCenterGroup ??
+		workbenchState?.groups.find(
+			(group) => group.region === "center" && group.activeItemId !== null
+		) ??
+		workbenchState?.groups.find((group) => group.region === "center");
+	const focusedItemIds = new Set(displayedCenterGroup?.itemIds ?? []);
+	const tabs = workbenchState
+		? allTabs.filter((tab) => focusedItemIds.has(tab.id))
+		: allTabs;
+	const activeTabId = displayedCenterGroup?.activeItemId ?? globalActiveTabId;
 	const scrollRef = useRef<HTMLDivElement>(null);
 	// Only the compact horizontal mode owns a title-bar tab strip. Vertical tabs
 	// move the list into the sidebar; scroll and canvas modes own the live center
@@ -1598,9 +1745,9 @@ export function TitleBar({
 		if (!effectiveAutoHide) {
 			return;
 		}
-		const container = document.querySelector(
+		const container = document.querySelector<HTMLElement>(
 			"[data-tauri-decorum-tb]"
-		) as HTMLElement | null;
+		);
 		if (!container) {
 			return;
 		}
@@ -1628,13 +1775,12 @@ export function TitleBar({
 	const unpinnedTabs = tabs.filter((t) => !t.pinned);
 	const segments = buildSegments(unpinnedTabs, groups, splits);
 
-	// Hide the special actions bar when the active tab is in a split — each
-	// focused pane shows those actions beside its title pill instead.
-	const activeInSplit = activeTabId
-		? !!findSplit(tabs, splits, activeTabId)
-		: false;
+	// Route actions stay with the focused Center group's TitleBar. Additional
+	// groups have local strips, so there is no duplicate pane badge to host them.
+	const activeInSplit = false;
 
 	const activeTab = tabs.find((t) => t.id === activeTabId);
+	const activeTabIndex = tabs.findIndex((t) => t.id === activeTabId);
 
 	// The Tauri decorum titlebar fix lives in App.tsx now — it runs permanently
 	// (a MutationObserver + window focus/resize) from the always-mounted root, so
@@ -1647,9 +1793,7 @@ export function TitleBar({
 		if (!scrollRef.current) {
 			return;
 		}
-		const activeEl = scrollRef.current.querySelector(
-			"[data-active='true']"
-		) as HTMLElement | null;
+		const activeEl = scrollRef.current.querySelector("[data-active='true']");
 		activeEl?.scrollIntoView({
 			block: "nearest",
 			inline: "nearest",
@@ -1707,6 +1851,16 @@ export function TitleBar({
 	useHotkey("nav.forward", goForward);
 	useMouseNavigationButtons(goBack, goForward);
 
+	const cssVariables1: LayoutCssVariables = {
+		"--desktop-inline1-pointer-Events": titleBarVisible ? "none" : "auto",
+	};
+	const cssVariables2: LayoutCssVariables = {
+		"--desktop-inline2-transform": titleBarVisible
+			? "translateY(0)"
+			: "translateY(calc(-100% - 12px))",
+		"--desktop-inline2-opacity": titleBarVisible ? 1 : 0,
+		"--desktop-inline2-pointer-Events": titleBarVisible ? "auto" : "none",
+	};
 	return (
 		<>
 			{/* Top-edge hover zone — catches the cursor when the bar is tucked away
@@ -1715,10 +1869,13 @@ export function TitleBar({
 			{effectiveAutoHide && (
 				<div
 					aria-hidden
-					className="absolute top-0 left-0 z-10 h-4 w-full"
+					className={cn(
+						"absolute top-0 left-0 z-10 h-4 w-full",
+						layoutStyles.inline1
+					)}
 					onMouseEnter={showTitleBarPeek}
 					onMouseLeave={scheduleTitleBarHide}
-					style={{ pointerEvents: titleBarVisible ? "none" : "auto" }}
+					style={cssVariables1}
 				/>
 			)}
 			<div
@@ -1736,26 +1893,21 @@ export function TitleBar({
 				// centres the row at exactly the same 32px from the window top while
 				// keeping the band inside the drag region.
 				className={cn(
-					"absolute top-0 left-0 z-10 flex w-full items-center px-2",
-					floatingChromeOffset ? "h-14 pt-2" : "h-12"
+					cn(
+						"absolute top-0 left-0 z-10 flex w-full items-center px-2",
+						floatingChromeOffset ? "h-14 pt-2" : "h-12"
+					),
+					// The auto-hide rule reads variables set only while auto-hide is
+					// on. Without them `pointer-events` is invalid and inherits, so
+					// inside the workbench overlay (`pointer-events-none`) the bar
+					// would render but never take a click.
+					effectiveAutoHide && layoutStyles.inline2
 				)}
 				data-tab-appearance={floatingTabs ? "floating" : "morphing"}
 				data-tauri-drag-region
 				onMouseEnter={effectiveAutoHide ? showTitleBarPeek : undefined}
 				onMouseLeave={effectiveAutoHide ? scheduleTitleBarHide : undefined}
-				style={
-					effectiveAutoHide
-						? {
-								transform: titleBarVisible
-									? "translateY(0)"
-									: "translateY(calc(-100% - 12px))",
-								opacity: titleBarVisible ? 1 : 0,
-								pointerEvents: titleBarVisible ? "auto" : "none",
-								transition:
-									"transform 280ms cubic-bezier(0.34,1.2,0.64,1), opacity 240ms ease-out",
-							}
-						: undefined
-				}
+				style={effectiveAutoHide ? cssVariables2 : undefined}
 			>
 				{/* The shared page inset includes this short fade below the controls.
 				    Resting content starts clear; scrolling content fades under the glass. */}
@@ -1783,7 +1935,7 @@ export function TitleBar({
 					/>
 				)}
 				<div
-					className="relative z-10 flex w-full flex-row items-center gap-2"
+					className="relative z-10 flex h-full w-full flex-row items-center gap-2"
 					data-tauri-drag-region
 				>
 					{/* Back/forward + the sidebar toggle are pinned at the window's
@@ -1842,7 +1994,7 @@ export function TitleBar({
 												)}
 												className={cn(
 													"ml-0.5 flex size-7 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:bg-background/50 hover:text-muted-foreground",
-													floatingTabs ? "rounded-full" : "rounded-t-[10px]"
+													floatingTabs ? "rounded-full" : "rounded-t-lg"
 												)}
 												data-tauri-drag-region={false}
 												onClick={handleNewTab}
@@ -1870,8 +2022,10 @@ export function TitleBar({
 								    trim to fit, in "fixed" mode they keep size and the strip
 								    scrolls. */}
 											<div
-												className="flex min-w-0 items-center"
-												style={{ flex: "0 1 max-content", maxWidth: "100%" }}
+												className={cn(
+													"flex min-w-0 items-center",
+													layoutStyles.inline3
+												)}
 											>
 												{/* Fixed h-8 clip wrapper: the inner strip is allowed to grow
 								    taller than h-8 (via pb-8) so the horizontal scrollbar renders
@@ -1917,7 +2071,8 @@ export function TitleBar({
 															}
 															if (seg.type === "split") {
 																return (
-																	<div
+																	<TabBracket
+																		bracketId={seg.split.id}
 																		className="flex shrink-0 items-center gap-1 rounded-2xl px-1 py-0.5 ring-1 ring-border/40"
 																		key={seg.split.id}
 																	>
@@ -1933,13 +2088,14 @@ export function TitleBar({
 																				tab={tab}
 																			/>
 																		))}
-																	</div>
+																	</TabBracket>
 																);
 															}
 															const colors =
 																GROUP_COLOR_CLASSES[seg.group.color];
 															return (
-																<div
+																<TabBracket
+																	bracketId={seg.group.id}
 																	className={cn(
 																		"flex shrink-0 items-center gap-1 rounded-2xl px-1 py-0.5 ring-1",
 																		colors.container
@@ -1956,7 +2112,7 @@ export function TitleBar({
 																				tab={tab}
 																			/>
 																		))}
-																</div>
+																</TabBracket>
 															);
 														})}
 													</div>
@@ -1971,7 +2127,7 @@ export function TitleBar({
 													)}
 													className={cn(
 														"ml-0.5 flex size-7 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:bg-background/50 hover:text-muted-foreground",
-														floatingTabs ? "rounded-full" : "rounded-t-[10px]"
+														floatingTabs ? "rounded-full" : "rounded-t-lg"
 													)}
 													data-tauri-drag-region={false}
 													onClick={handleNewTab}
@@ -1998,6 +2154,7 @@ export function TitleBar({
 								)}
 							</div>
 							<ContextMenuContent>
+								<MoveTabToRegionMenu tabId={activeTabId} />
 								<ContextMenuItem onClick={handleNewTab}>
 									<HugeiconsIcon className="size-4" icon={Add01Icon} />
 									New tab
@@ -2059,10 +2216,12 @@ export function TitleBar({
 								</ContextMenuItem>
 								<ContextMenuSeparator />
 								<ContextMenuItem
-									disabled={tabs.findIndex((t) => t.id === activeTabId) === 0}
+									disabled={
+										activeTabIndex <= 0 ||
+										!tabs.slice(0, activeTabIndex).some((tab) => !tab.pinned)
+									}
 									onClick={() => {
-										const idx = tabs.findIndex((t) => t.id === activeTabId);
-										for (const t of tabs.slice(0, idx)) {
+										for (const t of tabs.slice(0, activeTabIndex)) {
 											if (!t.pinned) {
 												closeTab(t.id);
 											}
@@ -2074,12 +2233,11 @@ export function TitleBar({
 								</ContextMenuItem>
 								<ContextMenuItem
 									disabled={
-										tabs.findIndex((t) => t.id === activeTabId) ===
-										tabs.length - 1
+										activeTabIndex < 0 ||
+										!tabs.slice(activeTabIndex + 1).some((tab) => !tab.pinned)
 									}
 									onClick={() => {
-										const idx = tabs.findIndex((t) => t.id === activeTabId);
-										for (const t of tabs.slice(idx + 1)) {
+										for (const t of tabs.slice(activeTabIndex + 1)) {
 											if (!t.pinned) {
 												closeTab(t.id);
 											}
@@ -2093,7 +2251,7 @@ export function TitleBar({
 								<ContextMenuItem
 									disabled={tabs.length === 0}
 									onClick={() => {
-										for (const t of [...tabs]) {
+										for (const t of Array.from(tabs)) {
 											closeTab(t.id);
 										}
 									}}
@@ -2106,10 +2264,10 @@ export function TitleBar({
 					) : (
 						<ContextMenu onOpenChange={onTitleBarMenuOpenChange}>
 							<ContextMenuTrigger
-								className="min-w-0 flex-1"
+								className="h-full min-w-0 flex-1"
 								data-tauri-drag-region
 							>
-								<div className="min-w-0 flex-1" data-tauri-drag-region />
+								<div className="h-full min-w-0 flex-1" data-tauri-drag-region />
 							</ContextMenuTrigger>
 							<ContextMenuContent>
 								<ContextMenuCheckboxItem
@@ -2133,9 +2291,8 @@ export function TitleBar({
 
 					{/* Spacer so actions hug the right edge */}
 					<div
-						className="flex-shrink-0 flex-grow-0"
+						className={cn("flex-shrink-0 flex-grow-0", layoutStyles.inline4)}
 						data-tauri-drag-region
-						style={{ minWidth: 0 }}
 					/>
 
 					{/* Right-side page actions — offset clears Windows titlebar buttons.
@@ -2162,4 +2319,11 @@ export function TitleBar({
 			</div>
 		</>
 	);
+}
+
+interface LayoutCssVariables extends LayoutCSSProperties {
+	"--desktop-inline1-pointer-Events"?: string | number;
+	"--desktop-inline2-opacity"?: string | number;
+	"--desktop-inline2-pointer-Events"?: string | number;
+	"--desktop-inline2-transform"?: string | number;
 }

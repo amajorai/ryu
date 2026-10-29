@@ -1,3 +1,8 @@
+import { z } from "zod";
+import {
+	type ConversationWire,
+	conversationListResponseSchema,
+} from "../core/conversation-response.ts";
 // Sidebar data layer - loads every live-data section's source from Core and maps
 // it to a uniform SidebarItem shape. Wired in the FOUNDATION (not per-surface) so
 // the section loaders live in one place and downstream surface builders never
@@ -61,7 +66,7 @@ export const emptySidebarData: SidebarData = {
 
 const DATE_SPLIT = "T";
 // Max absolute epoch (ms) the ECMAScript Date can represent (±8.64e15). A finite
-// number past this makes `new Date(raw).toISOString()` throw RangeError; since
+// number past this makes `new Date(numeric).toISOString()` throw RangeError; since
 // bucketConversations runs OUTSIDE `settled`, an unguarded throw would reject the
 // entire sidebar load. Treat an out-of-range timestamp as "no badge".
 const MAX_EPOCH_MS = 8.64e15;
@@ -69,16 +74,6 @@ const MAX_EPOCH_MS = 8.64e15;
 // GET /api/conversations wire shape (snake_case). The flag/folder fields are
 // optional: Core may not serialize them, in which case the derived buckets are
 // simply empty (graceful degradation).
-interface ConversationWire {
-	archived?: boolean | null;
-	folder?: string | null;
-	id: string;
-	message_count?: number | null;
-	pinned?: boolean | null;
-	project?: string | null;
-	title?: string | null;
-	updated_at?: string | number | null;
-}
 
 function convLabel(wire: ConversationWire): string {
 	const trimmed = wire.title?.trim();
@@ -89,13 +84,18 @@ function convBadge(wire: ConversationWire): string | undefined {
 	const raw = wire.updated_at;
 	// Core serializes updated_at as epoch milliseconds (number); older shapes used
 	// an ISO string. Normalise both to a YYYY-MM-DD badge, and ignore anything else.
-	if (typeof raw === "number" && Number.isFinite(raw)) {
-		if (Math.abs(raw) > MAX_EPOCH_MS) {
+	const parsedNumber = conversationDateNumberSchema.safeParse(raw);
+	if (parsedNumber.success) {
+		const numeric = parsedNumber.data;
+		if (Math.abs(numeric) > MAX_EPOCH_MS) {
 			return undefined;
 		}
-		return new Date(raw).toISOString().split(DATE_SPLIT)[0];
+		return new Date(numeric).toISOString().split(DATE_SPLIT)[0];
 	}
-	const date = typeof raw === "string" ? raw.split(DATE_SPLIT)[0] : undefined;
+	const parsedString = conversationDateStringSchema.safeParse(raw);
+	const date = parsedString.success
+		? parsedString.data.split(DATE_SPLIT)[0]
+		: undefined;
 	return date && date.length > 0 ? date : undefined;
 }
 
@@ -111,20 +111,23 @@ function toConversationItem(wire: ConversationWire): SidebarItem {
 async function fetchConversations(
 	target: ApiTarget
 ): Promise<ConversationWire[]> {
-	const json = await request<
-		ConversationWire[] | { conversations?: ConversationWire[] }
-	>(target, "/api/conversations");
+	const json = await request(
+		target,
+		"/api/conversations",
+		{},
+		conversationListResponseSchema
+	);
 	return Array.isArray(json) ? json : (json.conversations ?? []);
 }
 
 // Group conversations into projects (by folder/project field) + folderless chats
 // + pinned/archived flag buckets. Absent fields collapse to empty buckets.
-function bucketConversations(convs: ConversationWire[]): {
-	archived: SidebarItem[];
-	chats: SidebarItem[];
-	pinned: SidebarItem[];
-	projects: ProjectGroup[];
-} {
+type ConversationBuckets = Pick<
+	SidebarData,
+	"archived" | "chats" | "pinned" | "projects"
+>;
+
+function bucketConversations(convs: ConversationWire[]): ConversationBuckets {
 	const projectMap = new Map<string, SidebarItem[]>();
 	const chats: SidebarItem[] = [];
 	const pinned: SidebarItem[] = [];
@@ -193,7 +196,7 @@ export async function loadSidebarData(target: ApiTarget): Promise<SidebarData> {
 			label: space.name,
 			path: "/spaces",
 			badge:
-				typeof space.documentCount === "number"
+				space.documentCount !== undefined && space.documentCount !== null
 					? `${space.documentCount}`
 					: undefined,
 		})),
@@ -210,3 +213,6 @@ export async function loadSidebarData(target: ApiTarget): Promise<SidebarData> {
 		...buckets,
 	};
 }
+
+const conversationDateNumberSchema = z.number();
+const conversationDateStringSchema = z.string();

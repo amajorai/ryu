@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/lib/preflight.ts
 //
 // The preflight/health page's diagnostics bundle + issue reporter. Assembles one
@@ -14,7 +15,12 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { fetchHealth, fetchSystemStatus } from "@/src/lib/api/system.ts";
 import { getVersionInfo } from "@/src/lib/api/update.ts";
 import { getConsoleBufferText } from "@/src/lib/console-buffer.ts";
-import { reportError } from "@/src/lib/crash.ts";
+import {
+	crashReportingReady,
+	isCrashReportingConfigured,
+	isCrashReportingEnabled,
+	reportError,
+} from "@/src/lib/crash.ts";
 import { getDevMetricsText } from "@/src/lib/dev-metrics.ts";
 import { fetchCatalog } from "@/src/lib/services-api.ts";
 
@@ -25,8 +31,7 @@ async function section<T>(
 ): Promise<string> {
 	try {
 		const value = await fn();
-		const body =
-			typeof value === "string" ? value : JSON.stringify(value, null, 2);
+		const body = isNativeText(value) ? value : JSON.stringify(value, null, 2);
 		return `## ${label}\n${body}`;
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
@@ -92,7 +97,7 @@ export async function collectDiagnostics(
 /** Collect diagnostics and copy them to the clipboard. Returns the text. */
 export async function copyDiagnostics(target: ApiTarget): Promise<string> {
 	const text = await collectDiagnostics(target);
-	await navigator.clipboard.writeText(text).catch(() => undefined);
+	await navigator.clipboard.writeText(text);
 	return text;
 }
 
@@ -100,11 +105,29 @@ export async function copyDiagnostics(target: ApiTarget): Promise<string> {
  * Report the diagnostics bundle through the already-wired, privacy-gated sinks:
  * the crash tier (Sentry, PII-scrubbed, gated by `crash-reports-enabled`) carries
  * the bundle; a content-free analytics signal (gated by `product-analytics-enabled`)
- * records that a report happened. Both are no-ops when their consent is off or no
- * DSN/key is configured.
+ * records that a report was queued. A receipt confirms local queueing only,
+ * not delivery to the reporting service. Unavailable reporting rejects visibly.
  */
 export async function reportIssue(target: ApiTarget): Promise<void> {
+	if (!isCrashReportingEnabled()) {
+		throw new Error(
+			"Crash reporting is off. Enable it in Settings, Privacy, or copy diagnostics to share manually."
+		);
+	}
+	if (!isCrashReportingConfigured()) {
+		throw new Error(
+			"Crash reporting is unavailable in this build. Copy diagnostics to share manually."
+		);
+	}
+	// The SDK loads at idle after startup; a report made before then waits for
+	// it, so the receipt below is real (null when it could not load).
+	await crashReportingReady();
 	const text = await collectDiagnostics(target, { includeConsole: false });
-	reportError(new Error(`[preflight-report]\n${text}`));
+	const eventId = reportError(new Error(`[preflight-report]\n${text}`));
+	if (!eventId) {
+		throw new Error(
+			"The issue report could not be queued. Copy diagnostics to share manually."
+		);
+	}
 	track({ event: "error_shown", code: "preflight_report" });
 }

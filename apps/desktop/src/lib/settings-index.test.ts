@@ -14,8 +14,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	SETTINGS_ENTRIES,
+	SETTINGS_SECTION_LABELS,
 	searchSettings,
 	sectionLabel,
+	subpageFor,
 	visibleSettingsEntries,
 } from "./settings-index.ts";
 
@@ -28,21 +30,36 @@ const GATEWAY_DIALOG = join(
 	"gateway",
 	"GatewayDialog.tsx"
 );
+const SETTINGS_DIALOG = join(
+	HERE,
+	"..",
+	"components",
+	"settings",
+	"SettingsDialog.tsx"
+);
 
 /**
  * Every file that can legitimately own a row for a given section. A section can
  * have several (Voice is five sub-panels; Gateway sections live either in their
  * own component file or inline in GatewayDialog.tsx).
  */
-const SECTION_SOURCES: Record<string, string[]> = {
+const SECTION_LABELS_BY_KEY = new Map(Object.entries(SETTINGS_SECTION_LABELS));
+
+const SECTION_SOURCES = {
 	// The Tabs settings, plus the pane-layout preset manager rendered beside
 	// them from its own file (same pattern as Voice's sub-panels).
 	general: [
 		"GeneralTab.tsx",
 		"AvailabilitySettings.tsx",
+		"ResumeInterruptedChatsSetting.tsx",
 		"SplitPresetSettings.tsx",
 	],
-	appearance: ["AppearanceTab.tsx", "../../lib/appearance-settings.ts"],
+	appearance: [
+		"AppearanceTab.tsx",
+		"InterfaceSettingsPanel.tsx",
+		"WallpaperSetting.tsx",
+		"../../lib/appearance-settings.ts",
+	],
 	developer: ["DeveloperTab.tsx", "DevMetricsPanel.tsx"],
 	account: ["AccountTab.tsx"],
 	sessions: ["SessionsTab.tsx"],
@@ -54,19 +71,25 @@ const SECTION_SOURCES: Record<string, string[]> = {
 		"VoiceReadbackSettings.tsx",
 		"TtsEngineSettings.tsx",
 	],
-	privacy: ["PrivacySettings.tsx"],
+	privacy: [
+		"PrivacySettings.tsx",
+		"DevicePermissionsSettings.tsx",
+		"CustomAppSecuritySettings.tsx",
+	],
 	storage: ["StorageSettings.tsx", "BackupSettings.tsx"],
 	encryption: ["EncryptionSettings.tsx"],
 	danger: ["DangerZoneSettings.tsx"],
-	network: ["NetworkSettings.tsx"],
+	network: ["NetworkSettings.tsx", "DesktopRouteSettings.tsx"],
 	integrations: ["IntegrationsTab.tsx"],
-	connections: ["ConnectionsTab.tsx"],
+	connections: ["ConnectionsTab.tsx", "CloudSyncSection.tsx"],
 	hooks: ["../gateway/HooksSection.tsx"],
 	git: ["../gateway/GitSettingsSection.tsx"],
 	worktrees: ["../gateway/WorktreesSection.tsx"],
 	environments: ["../gateway/EnvironmentsSection.tsx"],
+	"cloud-environments": ["../gateway/CloudEnvironmentsSettings.tsx"],
 	runtime: ["../gateway/AcpRuntimeSection.tsx"],
 };
+const SECTION_SOURCES_BY_KEY = new Map(Object.entries(SECTION_SOURCES));
 
 /**
  * Entries whose label is deliberately NOT a verbatim row title — the
@@ -79,6 +102,10 @@ const UNANCHORED_SECTIONS = new Set([
 	"updates",
 	"keys",
 	"guardrails",
+	// Rendered by the shared policy workspace in @ryu/blocks.
+	"policies",
+	// Rendered by the shared gateway canvas in @ryu/blocks.
+	"traffic-map",
 	"providers",
 	"defaults",
 	"access",
@@ -97,8 +124,37 @@ const UNANCHORED_SECTIONS = new Set([
 	"environments",
 ]);
 
+const escapeRegExp = (value: string): string =>
+	value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+describe("settings index navigation integrity", () => {
+	it("uses the visible label for each destination section", () => {
+		const sources = {
+			app: readFileSync(SETTINGS_DIALOG, "utf8"),
+			gateway: readFileSync(GATEWAY_DIALOG, "utf8"),
+		};
+		const stale: string[] = [];
+
+		for (const entry of SETTINGS_ENTRIES) {
+			const sectionLabel =
+				SECTION_LABELS_BY_KEY.get(entry.section) ?? entry.section;
+			const navItem = new RegExp(
+				`\\{[^{}]*\\bvalue:\\s*"${escapeRegExp(entry.section)}"[^{}]*\\blabel:\\s*"${escapeRegExp(sectionLabel)}"[^{}]*\\}`,
+				"s"
+			);
+			if (!navItem.test(sources[entry.dialog])) {
+				stale.push(
+					`${entry.id} → ${entry.dialog}/${entry.section}: ${sectionLabel}`
+				);
+			}
+		}
+
+		expect(stale).toEqual([]);
+	});
+});
+
 const readSection = (section: string): string | null => {
-	const files = SECTION_SOURCES[section];
+	const files = SECTION_SOURCES_BY_KEY.get(section);
 	if (!files) {
 		return null;
 	}
@@ -138,6 +194,44 @@ describe("settings index integrity", () => {
 });
 
 describe("searchSettings", () => {
+	it.each(
+		SETTINGS_ENTRIES.map((entry) => [entry.id, entry] as const)
+	)("finds %s by its displayed label and applies the correct host scope", (_id, entry) => {
+		// Exercise the user query, including case and whitespace normalization,
+		// for every current setting rather than checking a source declaration.
+		const query = `  ${entry.label.toUpperCase().replace(/\s+/g, "   ")}  `;
+		const results = searchSettings(query);
+		expect(results.map((result) => result.id)).toContain(entry.id);
+		expect(
+			visibleSettingsEntries(results, true).map((result) => result.id)
+		).toContain(entry.id);
+		const browserIds = visibleSettingsEntries(results, false).map(
+			(result) => result.id
+		);
+		if (entry.desktopOnly) {
+			expect(browserIds).not.toContain(entry.id);
+		} else {
+			expect(browserIds).toContain(entry.id);
+		}
+	});
+	it("hides the Interfaces entries when no workspace interface can be opened", () => {
+		const interfaceEntries = SETTINGS_ENTRIES.filter((entry) =>
+			entry.id.startsWith("appearance.interfaces.")
+		);
+		expect(interfaceEntries).toHaveLength(3);
+		const results = interfaceEntries.flatMap((entry) =>
+			searchSettings(entry.label)
+		);
+		for (const entry of interfaceEntries) {
+			expect(entry.requiresWorkspace).toBe(true);
+			expect(
+				visibleSettingsEntries(results, true, true).map((result) => result.id)
+			).toContain(entry.id);
+			expect(
+				visibleSettingsEntries(results, true, false).map((result) => result.id)
+			).not.toContain(entry.id);
+		}
+	});
 	it("returns nothing for an empty query", () => {
 		expect(searchSettings("")).toEqual([]);
 		expect(searchSettings("   ")).toEqual([]);
@@ -228,5 +322,116 @@ describe("searchSettings", () => {
 			"appearance.interface.transparent-window"
 		);
 		expect(browserResults).toEqual([]);
+	});
+});
+
+describe("settings subpage ownership", () => {
+	it("uses the known grouping and keeps explicit subpages authoritative", () => {
+		expect(
+			subpageFor({
+				dialog: "app",
+				group: "Motion",
+				id: "motion",
+				label: "Motion",
+				section: "appearance",
+			})
+		).toBe("motion");
+		expect(
+			subpageFor({
+				dialog: "app",
+				group: "constructor",
+				id: "custom",
+				label: "Custom",
+				section: "constructor",
+				subpage: "owned-page",
+			})
+		).toBe("owned-page");
+	});
+
+	it("keeps missing and inherited-name groups on the section index", () => {
+		for (const section of [
+			"appearance",
+			"general",
+			"missing",
+			"constructor",
+			"__proto__",
+		]) {
+			for (const group of ["missing", "constructor", "toString", "__proto__"]) {
+				expect(
+					subpageFor({
+						dialog: "app",
+						group,
+						id: "custom",
+						label: "Custom",
+						section,
+					})
+				).toBeNull();
+			}
+		}
+	});
+});
+
+describe("OTLP diagnostics export entries", () => {
+	const CONTENT_MODE = "gw.privacy.diagnostics-export.content-mode";
+	const TEST_DESTINATION = "gw.privacy.diagnostics-export.test-destination";
+	const entryFor = (id: string) => {
+		const found = SETTINGS_ENTRIES.find((entry) => entry.id === id);
+		if (!found) {
+			throw new Error(`Missing indexed entry ${id}`);
+		}
+		return found;
+	};
+
+	it("indexes the content mode and the test destination on the Diagnostics & support page, in the browser too", () => {
+		for (const id of [CONTENT_MODE, TEST_DESTINATION]) {
+			const entry = entryFor(id);
+			expect({
+				dialog: entry.dialog,
+				group: entry.group,
+				section: entry.section,
+				subpage: subpageFor(entry),
+				desktopOnly: entry.desktopOnly ?? false,
+			}).toEqual({
+				dialog: "gateway",
+				group: "Diagnostics export",
+				section: "privacy",
+				subpage: "diagnostics",
+				desktopOnly: false,
+			});
+		}
+		expect(entryFor(CONTENT_MODE).label).toBe("Content mode");
+		expect(entryFor(TEST_DESTINATION).label).toBe("Test destination");
+	});
+
+	it("finds the content mode by what people type for it", () => {
+		for (const query of [
+			"content mode",
+			"full content",
+			"prompts responses",
+			"opentelemetry",
+		]) {
+			expect(searchSettings(query).map((entry) => entry.id)).toContain(
+				CONTENT_MODE
+			);
+		}
+	});
+
+	it("finds the test destination by what people type for it", () => {
+		for (const query of [
+			"test destination",
+			"test span",
+			"verify endpoint",
+			"collector",
+		]) {
+			expect(searchSettings(query).map((entry) => entry.id)).toContain(
+				TEST_DESTINATION
+			);
+		}
+	});
+
+	it("keeps the two rows out of unrelated queries", () => {
+		const ids = searchSettings("send shortcut").map((entry) => entry.id);
+		expect(ids).not.toContain(CONTENT_MODE);
+		expect(ids).not.toContain(TEST_DESTINATION);
 	});
 });

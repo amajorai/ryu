@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/boxes/bx_ffffffffffffffffffffffffffffffff"
+  },
+  "status": 404,
+  "body": {
+    "code": "not_found",
+    "error": {
+      "code": "not_found",
+      "message": "Box not found.",
+      "requestId": "req_00000000000000000000000000000001",
+      "status": 404
+    },
+    "message": "Box not found.",
+    "ok": false,
+    "requestId": "req_00000000000000000000000000000001",
+    "status": 404,
+    "type": "box.error"
+  }
+}

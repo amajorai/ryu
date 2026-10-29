@@ -6,7 +6,7 @@ import {
 	type BrowserContextResult,
 	type BrowserElementContext,
 	type BrowserRect,
-} from "../../src/components/panels/BrowserAnnotationSurface";
+} from "../../src/components/panels/BrowserAnnotationSurface.tsx";
 import "../../src/index.css";
 
 const viewport = { height: 900, scroll_x: 0, scroll_y: 0, width: 1440 };
@@ -160,19 +160,19 @@ function Story() {
 	};
 
 	return (
-		<main className="min-h-screen bg-slate-100 px-6 py-8 text-slate-950">
-			<div className="mx-auto flex h-[900px] max-w-[1220px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
-				<header className="flex shrink-0 items-center justify-between border-slate-200 border-b px-5 py-4">
+		<main className="min-h-screen bg-muted px-6 py-8 text-foreground">
+			<div className="mx-auto flex h-[900px] max-w-[1220px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl">
+				<header className="flex shrink-0 items-center justify-between border-border border-b px-5 py-4">
 					<div>
-						<p className="font-semibold text-slate-950 text-sm">
+						<p className="font-semibold text-foreground text-sm">
 							Embedded browser
 						</p>
-						<p className="text-slate-500 text-xs">
+						<p className="text-muted-foreground text-xs">
 							{context.page.title} · context bridge connected
 						</p>
 					</div>
-					<div className="flex items-center gap-2 text-slate-500 text-xs">
-						<span className="size-2 rounded-full bg-emerald-500" />
+					<div className="flex items-center gap-2 text-muted-foreground text-xs">
+						<span className="size-2 rounded-full bg-success" />
 						Live tab
 					</div>
 				</header>

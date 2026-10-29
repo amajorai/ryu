@@ -11,10 +11,19 @@ import type {
 	UsageGranularity,
 	UsageScope,
 } from "@ryu/blocks/desktop/usage-analytics.ts";
+import { usagePresetRange } from "@ryu/blocks/desktop/usage-range-days.ts";
+import { PlanBadge } from "@ryu/ui/components/plan-badge.tsx";
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { OrgBillingContext } from "@/src/components/billing/OrgBillingContext.tsx";
+import {
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "@/src/components/settings/shared/settings-items.tsx";
 import { SubscriptionUsageDashboard } from "@/src/components/usage/SubscriptionUsageDashboard.tsx";
+import { UsageHistoryDashboard } from "@/src/components/usage/UsageHistoryDashboard.tsx";
 import { useLlmProviders } from "@/src/hooks/useLlmProviders.ts";
+import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
+import { useSubscriptionCostUsage } from "@/src/hooks/useSubscriptionCostUsage.ts";
 import { useSubscriptionUsage } from "@/src/hooks/useSubscriptionUsage.ts";
 import { useUsageStatement } from "@/src/hooks/useUsageStatement.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -23,25 +32,39 @@ import { fetchUsageAnalytics } from "@/src/lib/api/usage-analytics.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
 import { isLocalNode, useNodeStore } from "@/src/store/useNodeStore.ts";
 
-function startOfDay(date: Date): Date {
-	return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function addDays(date: Date, days: number): Date {
-	const next = new Date(date);
-	next.setDate(next.getDate() + days);
-	return next;
-}
-
+// The dashboard opens on the last 30 civil days in the display time zone,
+// today included, the same range its "30 days" preset picks.
 function initialRange(): UsageDateRange {
-	const to = addDays(startOfDay(new Date()), 1);
-	return { from: addDays(to, -30), to };
+	return usagePresetRange(30);
 }
 
-function errorMessageFor(error: unknown): string {
+function errorMessageFor<TError>(error: TError): string {
 	return error instanceof Error
 		? error.message
 		: "Unable to load usage analytics.";
+}
+
+/**
+ * The organization these credits belong to, as one grouped settings row. Not
+ * the bordered `OrgBillingContext` banner: inside the Settings pane that read as
+ * a box above the cards instead of one of them.
+ */
+function BillingOrganizationSection({ caption }: { caption: string }) {
+	const { organization, plan } = useOrgBillingStatus();
+	return (
+		<SettingsSection caption={caption} title="Billing organization">
+			<SettingsGroup>
+				<SettingsItem
+					actions={<PlanBadge plan={plan} size="sm" />}
+					// User-controlled text, passed as a node so the settings formatter
+					// does not read braces in the name as placeholders.
+					title={
+						<span>{organization?.name ?? "No organization selected"}</span>
+					}
+				/>
+			</SettingsGroup>
+		</SettingsSection>
+	);
 }
 
 export default function UsageTab() {
@@ -79,6 +102,7 @@ export default function UsageTab() {
 		}),
 		[activeNode]
 	);
+	const subscriptionCostUsage = useSubscriptionCostUsage(activeNodeTarget);
 	const [analyticsScope, setAnalyticsScope] =
 		useState<UsageScope>("organization");
 	const [analyticsGranularity, setAnalyticsGranularity] =
@@ -141,7 +165,7 @@ export default function UsageTab() {
 					[...new Set([...previous, ...next.modelOptions])].sort()
 				);
 			})
-			.catch((error: unknown) => {
+			.catch((error) => {
 				if (!cancelled) {
 					setAnalyticsError(errorMessageFor(error));
 				}
@@ -170,6 +194,7 @@ export default function UsageTab() {
 		refresh();
 		reloadProviderCatalog();
 		subscriptionUsage.refresh();
+		subscriptionCostUsage.refresh();
 		setAnalyticsRefreshNonce((nonce) => nonce + 1);
 	};
 
@@ -187,6 +212,7 @@ export default function UsageTab() {
 				balanceAfter: entry.balanceAfter,
 				model: entry.model,
 				provider: entry.provider,
+				upstreamProvider: entry.upstreamProvider,
 				inputTokens: entry.inputTokens,
 				outputTokens: entry.outputTokens,
 				durationMs: entry.durationMs,
@@ -196,14 +222,23 @@ export default function UsageTab() {
 	);
 
 	return (
-		<div className="space-y-4">
-			<OrgBillingContext description="Credits stay scoped to the organization; usage analytics also include BYOK, self-hosted, and local traffic." />
+		<div className="space-y-6">
+			<BillingOrganizationSection caption="Credits stay scoped to the organization; usage analytics also include BYOK, self-hosted, and local traffic." />
+			<UsageHistoryDashboard target={activeNodeTarget} />
 			<SubscriptionUsageDashboard
 				accounts={subscriptionUsage.accounts}
 				catalogError={providerCatalogError}
 				catalogLoading={providerCatalogLoading}
+				costTrackingError={subscriptionCostUsage.trackingError}
+				costTrackingUpdating={subscriptionCostUsage.trackingUpdating}
+				costUsage={subscriptionCostUsage.usage}
+				costUsageError={subscriptionCostUsage.error}
+				costUsageLoading={subscriptionCostUsage.loading}
 				onRefresh={refreshAll}
-				refreshing={subscriptionUsage.refreshing}
+				onSetCostTracking={subscriptionCostUsage.setTrackingEnabled}
+				refreshing={
+					subscriptionUsage.refreshing || subscriptionCostUsage.refreshing
+				}
 			/>
 			<UsageView
 				analyticsDashboard={{

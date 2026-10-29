@@ -44,8 +44,8 @@ impl ModelCatalogHost for CoreModelCatalogHost {
         crate::paths::ryu_dir()
     }
 
-    fn authorize_hf(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        crate::hf_auth::authorize(req)
+    fn authorize_hf(&self, url: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        crate::hf_auth::authorize(url, req)
     }
 
     fn supported_on_node(&self, engine: &str) -> bool {

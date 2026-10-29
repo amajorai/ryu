@@ -1,13 +1,20 @@
 "use client";
 
 import { cn } from "@ryu/ui/lib/utils";
+import {
+	Calendar,
+	FileText,
+	GitBranch,
+	type LucideIcon,
+	Mail,
+	MessageSquare,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import {
 	AppShell,
 	CodePane,
 	MinimalCard,
 	Node,
-	Pill,
 	Terminal,
 	WindowFrame,
 	Wire,
@@ -18,56 +25,35 @@ import {
 /* All monochrome + minimal to match the design system.                */
 /* ================================================================== */
 
-const RUN_DOT: Record<string, string> = {
-	running: "animate-pulse bg-foreground",
-	done: "bg-foreground/40",
-	queued: "bg-foreground/20",
-};
+const RUN_DOT = new Map(
+	Object.entries({
+		running: "animate-pulse bg-foreground",
+		done: "bg-foreground/40",
+		queued: "bg-foreground/20",
+	})
+);
 
 export function CoreVisual() {
 	const runs = [
-		{ name: "refactor-auth", state: "running" },
-		{ name: "summarize-inbox", state: "done" },
-		{ name: "draft-release-notes", state: "done" },
-		{ name: "triage-issues", state: "queued" },
+		{ name: "Refactor auth", state: "running" },
+		{ name: "Summarize inbox", state: "done" },
+		{ name: "Triage issues", state: "queued" },
 	];
 	return (
-		<AppShell
-			active="Runs"
-			nav={["Chat", "Agents", "Runs", "Models", "Spaces"]}
-		>
-			<div className="space-y-3">
-				<div className="flex items-center justify-between">
-					<span className="font-medium text-foreground text-sm">Runs</span>
-					<span className="rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
-						local · :7980
-					</span>
-				</div>
-				<div className="space-y-2">
-					{runs.map((r) => (
-						<div
-							className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2"
-							key={r.name}
-						>
-							<span className="font-mono text-foreground/80 text-xs">
-								{r.name}
-							</span>
-							<span
-								className={cn(
-									"inline-flex items-center gap-1.5 text-[11px]",
-									r.state === "running"
-										? "text-foreground"
-										: "text-muted-foreground"
-								)}
-							>
-								<span
-									className={cn("size-1.5 rounded-full", RUN_DOT[r.state])}
-								/>
-								{r.state}
-							</span>
-						</div>
-					))}
-				</div>
+		<AppShell>
+			<div className="space-y-2">
+				{runs.map((r) => (
+					<div
+						className="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5"
+						key={r.name}
+					>
+						<span
+							aria-hidden="true"
+							className={cn("size-1.5 rounded-full", RUN_DOT.get(r.state))}
+						/>
+						<span className="text-foreground/80 text-sm">{r.name}</span>
+					</div>
+				))}
 			</div>
 		</AppShell>
 	);
@@ -76,33 +62,15 @@ export function CoreVisual() {
 export function GatewayVisual() {
 	return (
 		<MinimalCard>
-			<div className="space-y-4">
-				<div className="flex items-center gap-2">
-					<Node>Your Agent</Node>
-					<Wire className="flex-1" />
-					<Node emphasis>GATEWAY</Node>
-					<Wire className="flex-1" delays={[0.2, 0.6]} />
-					<div className="space-y-1">
-						<Node className="px-2 py-1">OpenAI</Node>
-						<Node className="px-2 py-1">Claude</Node>
-						<Node className="px-2 py-1">Local</Node>
-					</div>
-				</div>
-				<div className="grid grid-cols-4 gap-2">
-					{["Firewall", "Routing", "Budgets", "Audit"].map((m) => (
-						<div
-							className="rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-center text-[11px] text-foreground/70"
-							key={m}
-						>
-							{m}
-						</div>
-					))}
-				</div>
-				<div className="flex items-center gap-2 rounded-md border border-border bg-foreground/[0.03] px-3 py-2">
-					<span className="size-2 rounded-full bg-foreground/30" />
-					<span className="font-mono text-[11px] text-muted-foreground">
-						blocked prompt-injection · routed to claude-opus · $0.012
-					</span>
+			<div className="flex items-center gap-2 py-2">
+				<Node>Your agent</Node>
+				<Wire className="flex-1" />
+				<Node emphasis>Gateway</Node>
+				<Wire className="flex-1" delays={[0.2, 0.6]} />
+				<div className="space-y-1">
+					<Node className="px-2 py-1">OpenAI</Node>
+					<Node className="px-2 py-1">Claude</Node>
+					<Node className="px-2 py-1">Local</Node>
 				</div>
 			</div>
 		</MinimalCard>
@@ -113,13 +81,14 @@ export function CliVisual() {
 	return (
 		<Terminal
 			lines={[
-				{ prompt: true, text: "ryu chat" },
-				{ text: "◆ Pi · gemma-4 (local) · gateway on", muted: true },
-				{ prompt: true, text: "ryu run refactor-auth --worktree" },
-				{ text: "→ spawned acp session · 3 tools allowed", muted: true },
-				{ text: "→ diff ready · 12 files · ryu apply", muted: true },
-				{ prompt: true, text: "ryu servers" },
-				{ text: "● localhost  ● studio.lan  ○ cloud", muted: true },
+				{ prompt: true, text: 'ryu-cli chat "summarize today\'s PRs"' },
+				{ text: "3 merged, 1 waiting on review.", muted: true },
+				{ prompt: true, text: "ryu-cli node ls" },
+				{ text: "* localhost   studio   cloud", muted: true },
+				{ prompt: true, text: "ryu-cli node use studio" },
+				{ text: "Active node set to studio.", muted: true },
+				{ prompt: true, text: "ryu-cli doctor" },
+				{ text: "0 errors · 0 warnings · 0 info", muted: true },
 			]}
 		/>
 	);
@@ -128,17 +97,10 @@ export function CliVisual() {
 export function SdkVisual() {
 	return (
 		<CodePane
-			code={`import { defineAgent, defineTool } from "@ryuhq/sdk";
-
-export const search = defineTool({
-  name: "search",
-  run: async ({ q }) => web.find(q),
-});
-
-export default defineAgent({
-  model: "gemma-4",      // swappable
-  tools: [search],       // any MCP / Runnable
-  gateway: true,         // every call governed
+			code={`export default defineAgent({
+  id: "agent", name: "Researcher",
+  chat: "gemma-4",
+  tools: [search],
 });`}
 			filename="agent.ts"
 		/>
@@ -150,20 +112,22 @@ export function CodePaneSplit() {
 	return (
 		<CodePane
 			className="h-full"
-			code={`defineAgent({ model, tools });
+			code={`defineAgent({ id, name, chat, tools });
 defineWorkflow({ steps });
-defineTool({ name, run });
+defineTool({ id, name, schema, run });
 defineSkill({ md });`}
-			filename="runnables.ts"
+			filename="agent.ts"
 		/>
 	);
 }
 
 function Slot({ label, value }: { label: string; value: string }) {
 	return (
-		<div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2">
-			<span className="text-[11px] text-muted-foreground">{label}</span>
-			<span className="font-mono text-[11px] text-foreground/80">{value}</span>
+		<div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
+			<span className="text-foreground/80 text-xs">{label}</span>
+			<span className="shrink-0 text-foreground/80 text-xs md:text-sm">
+				{value}
+			</span>
 		</div>
 	);
 }
@@ -171,105 +135,162 @@ function Slot({ label, value }: { label: string; value: string }) {
 export function AgentsVisual() {
 	return (
 		<MinimalCard>
-			<div className="space-y-3">
-				<div className="flex items-center gap-3">
-					<div className="flex size-10 items-center justify-center rounded-lg border border-border bg-foreground/5 font-medium text-foreground text-sm">
-						Pi
-					</div>
-					<div>
-						<p className="font-medium text-foreground text-sm">Pi</p>
-						<p className="text-[11px] text-muted-foreground">
-							swappable slots · zero lock-in
-						</p>
-					</div>
-				</div>
-				<div className="grid gap-2">
-					<Slot label="Chat" value="gemma-4" />
-					<Slot label="Voice" value="kokoro-tts" />
-					<Slot label="Memory" value="spaces + rag" />
-					<Slot label="Tools" value="ghost · spider" />
-					<Slot label="Policy" value="gateway:strict" />
-				</div>
+			<div className="grid gap-2">
+				<Slot label="Model" value="Gemma 4" />
+				<Slot label="Memory" value="Your Spaces" />
+				<Slot label="Tools" value="Web search" />
 			</div>
 		</MinimalCard>
 	);
 }
 
+/** A small workflow run: a trigger delegates to two sub-agents, then the results are summarized. */
 export function WorkflowsVisual() {
-	const nodes = ["Trigger", "Classify", "Agent A", "Agent B", "Summarize"];
 	return (
-		<MinimalCard>
-			<div className="relative flex min-h-44 items-center">
-				<svg
-					aria-hidden="true"
-					className="pointer-events-none absolute inset-0 hidden h-full w-full text-foreground sm:block"
-					fill="none"
-				>
-					{[0, 1, 2, 3].map((i) => (
-						<line
-							className="animate-edge-trace"
-							key={`edge-${i}`}
-							stroke="currentColor"
-							strokeDasharray="80"
-							strokeOpacity="0.3"
-							strokeWidth="1"
-							style={{ animationDelay: `${i * 0.5}s` }}
-							x1={`${(i / 4) * 100 + 8}%`}
-							x2={`${((i + 1) / 4) * 100}%`}
-							y1="50%"
-							y2="50%"
-						/>
-					))}
-				</svg>
-				<div className="grid w-full grid-cols-1 items-center gap-3 sm:grid-cols-5 sm:gap-2">
-					{nodes.map((n) => (
-						<div
-							className="min-w-0 rounded-md bg-muted/50 px-2 py-1.5 text-center text-[11px] text-foreground"
-							key={n}
-						>
-							{n}
-						</div>
-					))}
-				</div>
+		<div className="flex w-full flex-col items-stretch gap-2 px-1 py-6 sm:flex-row sm:items-center">
+			<Node className="sm:flex-1">Trigger</Node>
+			<span
+				aria-hidden="true"
+				className="mx-auto h-3 w-px shrink-0 bg-border sm:mx-0 sm:h-px sm:w-3"
+			/>
+			<Node className="sm:flex-1" emphasis>
+				Delegate
+			</Node>
+			<span
+				aria-hidden="true"
+				className="mx-auto h-3 w-px shrink-0 bg-border sm:mx-0 sm:h-px sm:w-3"
+			/>
+			<div className="grid grid-cols-2 gap-2 sm:flex sm:flex-1 sm:flex-col">
+				<Node>Research</Node>
+				<Node>Draft</Node>
 			</div>
-		</MinimalCard>
+			<span
+				aria-hidden="true"
+				className="mx-auto h-3 w-px shrink-0 bg-border sm:mx-0 sm:h-px sm:w-3"
+			/>
+			<Node className="sm:flex-1">Summarize</Node>
+		</div>
 	);
 }
 
-export function SkillsVisual() {
-	const skills = [
-		{ name: "pdf-extract", by: "ryu" },
-		{ name: "lighthouse", by: "vercel" },
-		{ name: "security-review", by: "amajor" },
-		{ name: "e2e-tests", by: "ryu" },
+/** Connecting an existing agent to the Gateway: change the base URL, keep the provider. */
+export function GatewayBaseUrlVisual() {
+	return (
+		<div className="flex h-full w-full flex-col justify-center px-1 py-2">
+			<div className="space-y-1.5 whitespace-pre-wrap break-words px-2 font-mono text-[13px] leading-6 sm:text-sm sm:leading-relaxed">
+				<p className="text-muted-foreground">const client = new OpenAI({"{"}</p>
+				<p className="break-all pl-4 text-muted-foreground line-through">
+					baseURL: "https://api.openai.com/v1",
+				</p>
+				<p className="-mx-2 break-all rounded-md bg-foreground/[0.06] px-2 py-0.5 pl-6 text-foreground">
+					baseURL: "https://your-gateway/v1",
+				</p>
+				<p className="pl-4 text-muted-foreground">
+					apiKey: process.env.API_KEY,
+				</p>
+				<p className="text-muted-foreground">{"});"}</p>
+				<p className="pt-2 text-muted-foreground">
+					await client.chat.completions.create(…);
+				</p>
+			</div>
+		</div>
+	);
+}
+
+/** Passport's vault: per-site sign-ins with their status, sealed credential state. */
+export function PassportVaultVisual() {
+	const connections = [
+		{ site: "github.com", status: "Signed in" },
+		{ site: "linear.app", status: "Signed in" },
+		{ site: "notion.so", status: "Needs sign-in" },
 	];
+	return (
+		<div className="w-full space-y-3 px-1 py-2">
+			<div className="flex items-center justify-between">
+				<span className="font-medium text-foreground text-sm">
+					Work profile
+				</span>
+				<span className="type-compact text-muted-foreground">
+					Credentials sealed
+				</span>
+			</div>
+			<div className="space-y-2">
+				{connections.map((c) => (
+					<div
+						className="flex items-center justify-between rounded-lg border border-border px-3 py-2"
+						key={c.site}
+					>
+						<span className="text-foreground/80 text-xs">{c.site}</span>
+						<span
+							className={cn(
+								"type-compact",
+								c.status === "Signed in"
+									? "text-foreground"
+									: "text-muted-foreground"
+							)}
+						>
+							{c.status}
+						</span>
+					</div>
+				))}
+			</div>
+			<div className="flex items-center gap-2">
+				<Node>Agent</Node>
+				<Wire className="flex-1" delays={[0.2, 0.6]} />
+				<Node emphasis>Audited call</Node>
+				<Wire className="flex-1" delays={[0.4, 0.8]} />
+				<Node>Session</Node>
+			</div>
+		</div>
+	);
+}
+
+/** Two tenants reaching different allowlisted tool sets through one Connect endpoint. */
+export function ConnectTenantsVisual() {
+	const tenants = [
+		{ name: "Customer A", tools: ["Gmail", "Slack"] },
+		{ name: "Customer B", tools: ["GitHub", "Linear"] },
+	];
+	return (
+		<div className="w-full space-y-6 px-2 py-8 sm:px-6">
+			<div className="flex justify-center">
+				<Node className="w-48 py-2.5 text-sm" emphasis>
+					Ryu Connect
+				</Node>
+			</div>
+			<div className="grid grid-cols-2 gap-4 sm:gap-6">
+				{tenants.map((t) => (
+					<div className="space-y-3" key={t.name}>
+						<p className="font-medium text-foreground text-sm">{t.name}</p>
+						<div className="grid gap-2">
+							{t.tools.map((tool) => (
+								<Node className="py-2 text-sm" key={tool}>
+									{tool}
+								</Node>
+							))}
+						</div>
+					</div>
+				))}
+			</div>
+		</div>
+	);
+}
+
+/** Public document skills from the open Agent Skills registry, installable in one click. */
+export function SkillsVisual() {
+	const skills = ["pdf", "docx", "xlsx", "pptx"];
 	return (
 		<MinimalCard>
 			<div className="space-y-2">
-				{skills.map((s, i) => (
+				{skills.map((name, i) => (
 					<div
-						className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2"
-						key={s.name}
+						className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5"
+						key={name}
 					>
-						<div className="flex items-center gap-2.5">
-							<div className="flex size-7 items-center justify-center rounded-md border border-border bg-muted/50 font-mono text-[10px] text-foreground/60">
-								MD
-							</div>
-							<div>
-								<p className="font-mono text-foreground/80 text-xs">{s.name}</p>
-								<p className="text-[10px] text-muted-foreground">@{s.by}</p>
-							</div>
-						</div>
-						<span
-							className={cn(
-								"rounded-md px-2 py-1 text-[10px]",
-								i === 0
-									? "bg-foreground font-medium text-background"
-									: "border border-border bg-muted/50 text-foreground/70"
-							)}
-						>
-							{i === 0 ? "Installed" : "Install"}
-						</span>
+						<span className="text-foreground/80 text-sm">{name}</span>
+						{i === 0 ? (
+							<span className="text-muted-foreground text-sm">Installed</span>
+						) : null}
 					</div>
 				))}
 			</div>
@@ -277,64 +298,64 @@ export function SkillsVisual() {
 	);
 }
 
+/** Ryu over MCP: each agent gets an allowlist of MCP tools, and risky ones wait for approval. */
 export function McpVisual() {
 	const tools = [
-		"GitHub",
-		"Slack",
-		"Postgres",
-		"Browser",
-		"Email",
-		"Cal",
-		"Notion",
-		"Linear",
-		"Stripe",
+		{ name: "Screen capture", access: "Allowed" },
+		{ name: "Desktop clicks", access: "Needs approval" },
+		{ name: "Delete tickets", access: "Off" },
 	];
 	return (
 		<MinimalCard>
 			<div className="space-y-4">
-				<div className="flex flex-wrap gap-2">
-					{tools.map((t, i) => (
-						<span
-							className="inline-flex animate-tool-float items-center rounded-full border border-border bg-muted/50 px-2.5 py-1 text-foreground/70 text-xs"
-							key={t}
-							style={{ animationDelay: `${i * 0.25}s` }}
+				<span className="block font-medium text-foreground text-sm">
+					Researcher
+				</span>
+				<div className="space-y-3">
+					{tools.map((tool) => (
+						<div
+							className="flex items-center justify-between gap-3"
+							key={tool.name}
 						>
-							{t}
-						</span>
+							<span className="min-w-0 truncate text-foreground/80 text-sm">
+								{tool.name}
+							</span>
+							<span
+								className={cn(
+									"shrink-0 whitespace-nowrap text-sm",
+									tool.access === "Allowed"
+										? "text-foreground"
+										: "text-muted-foreground"
+								)}
+							>
+								{tool.access}
+							</span>
+						</div>
 					))}
-				</div>
-				<div className="flex items-center gap-2">
-					<Node>Agent</Node>
-					<Wire className="flex-1" />
-					<Node emphasis>MCP bridge</Node>
-					<Wire className="flex-1" delays={[0.3, 0.7]} />
-					<Node>Tools</Node>
 				</div>
 			</div>
 		</MinimalCard>
 	);
 }
 
+/** Real catalog entries with their manifest display names, across several kinds. */
 export function MarketplaceVisual() {
-	const apps = [
-		"agentbrowser",
-		"spider",
-		"claw-patrol",
-		"promptfoo",
-		"ghost",
-		"shadow",
-	];
+	const items = ["Browser", "Calendar", "PDF", "Spider"];
 	return (
 		<MinimalCard contentClassName="p-3">
 			<div className="grid grid-cols-2 gap-2.5">
-				{apps.map((a) => (
+				{items.map((name) => (
 					<div
-						className="rounded-lg border border-border bg-muted/30 p-3"
-						key={a}
+						className="flex items-center gap-2.5 rounded-lg border border-border bg-background p-4"
+						key={name}
 					>
-						<div className="mb-2 size-7 rounded-md border border-border bg-muted/50" />
-						<p className="font-mono text-foreground/80 text-xs">{a}</p>
-						<p className="text-[10px] text-muted-foreground">app · ryu.json</p>
+						<span
+							aria-hidden="true"
+							className="size-6 shrink-0 rounded-md bg-foreground/10"
+						/>
+						<span className="min-w-0 truncate text-foreground/80 text-sm">
+							{name}
+						</span>
 					</div>
 				))}
 			</div>
@@ -342,18 +363,28 @@ export function MarketplaceVisual() {
 	);
 }
 
+/** A plugin adds tools, model providers, and screens to Ryu. */
 export function ExtensionsVisual() {
+	const parts = ["Tool", "Model", "Screen"];
 	return (
-		<CodePane
-			code={`{
-  "name": "spider",
-  "kind": "tool",
-  "runnables": ["scrape", "crawl"],
-  "permissions": ["net:read"],
-  "gateway": { "policy": "strict" }
-}`}
-			filename="ryu.json"
-		/>
+		<div className="flex w-full flex-col items-center px-1 py-6">
+			<Node className="w-40 py-2.5 text-sm" emphasis>
+				Plugin
+			</Node>
+			<span aria-hidden="true" className="h-5 w-px bg-foreground/30" />
+			<div className="relative grid w-full max-w-sm grid-cols-3 gap-3">
+				<span
+					aria-hidden="true"
+					className="absolute inset-x-[16.67%] top-0 h-px bg-foreground/30"
+				/>
+				{parts.map((name) => (
+					<div className="flex flex-col items-center" key={name}>
+						<span aria-hidden="true" className="h-5 w-px bg-foreground/30" />
+						<Node className="w-full py-2.5 text-sm">{name}</Node>
+					</div>
+				))}
+			</div>
+		</div>
 	);
 }
 
@@ -367,11 +398,11 @@ export function PhoneFrame({
 	return (
 		<div
 			className={cn(
-				"mx-auto w-56 overflow-hidden rounded-[2rem] border border-border bg-muted/30 p-2 shadow-sm backdrop-blur-sm",
+				"mx-auto w-56 overflow-hidden rounded-4xl border border-border bg-background p-2",
 				className
 			)}
 		>
-			<div className="overflow-hidden rounded-[1.5rem] border border-border/60 bg-muted/20">
+			<div className="overflow-hidden rounded-3xl border border-border/60 bg-background">
 				<div className="flex items-center justify-center py-2">
 					<span className="h-1 w-12 rounded-full bg-foreground/15" />
 				</div>
@@ -383,53 +414,58 @@ export function PhoneFrame({
 
 export function MobileVisual() {
 	return (
-		<PhoneFrame>
-			<div className="space-y-3">
-				<p className="font-medium text-foreground text-xs">Ryu</p>
-				<div className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-[11px] text-background">
-					Summarize today's standup
+		<div className="flex w-full justify-center py-4 md:py-6">
+			<PhoneFrame className="w-64 sm:w-72">
+				<div className="flex min-h-64 flex-col gap-3">
+					<p className="font-medium text-foreground text-sm">Ryu</p>
+					<div className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-background text-sm">
+						Draft a reply
+					</div>
+					<div
+						aria-hidden="true"
+						className="w-4/5 space-y-2 rounded-2xl rounded-tl-sm border border-border/60 px-3 py-3"
+					>
+						<span className="block h-1.5 w-full rounded-full bg-foreground/15" />
+						<span className="block h-1.5 w-5/6 rounded-full bg-foreground/10" />
+						<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
+					</div>
+					<div
+						aria-hidden="true"
+						className="mt-auto flex items-center gap-2 rounded-full border border-border/60 px-3 py-2"
+					>
+						<span className="block h-1.5 w-1/3 rounded-full bg-foreground/10" />
+						<span className="ml-auto size-5 rounded-full bg-foreground/80" />
+					</div>
 				</div>
-				<div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-border/60 bg-background/60 px-3 py-2 text-[11px] text-foreground/80">
-					On-device with Cactus. 3 blockers, 2 shipped. Want the thread?
-				</div>
-				<div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/60 px-3 py-2">
-					<span className="text-[11px] text-muted-foreground">Message…</span>
-					<span className="ml-auto size-5 rounded-full bg-foreground/80" />
-				</div>
-			</div>
-		</PhoneFrame>
+			</PhoneFrame>
+		</div>
 	);
 }
 
 export function ChromeVisual() {
 	return (
 		<MinimalCard contentClassName="p-0">
-			<div className="flex min-h-48">
-				<div className="flex-1 space-y-2 p-4">
-					<div className="h-2.5 w-2/3 rounded bg-foreground/10" />
-					<div className="h-2 w-full rounded bg-foreground/[0.06]" />
-					<div className="h-2 w-5/6 rounded bg-foreground/[0.06]" />
-					<div className="h-2 w-3/4 rounded bg-foreground/[0.06]" />
+			<div
+				aria-hidden="true"
+				className="flex min-h-56 flex-col gap-2 p-4 sm:aspect-[16/10] sm:flex-row sm:items-center sm:gap-6 sm:p-8"
+			>
+				<div className="flex-1 space-y-2.5">
+					<span className="block h-2.5 w-1/2 rounded-full bg-foreground/25" />
+					<span className="block h-1.5 w-11/12 rounded-full bg-foreground/10" />
+					<span className="block h-1.5 w-4/5 rounded-full bg-foreground/30" />
+					<span className="block h-1.5 w-full rounded-full bg-foreground/10" />
+					<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
+					<span className="block h-1.5 w-5/6 rounded-full bg-foreground/10" />
+					<span className="block h-1.5 w-3/5 rounded-full bg-foreground/10" />
 				</div>
-				<div className="w-44 shrink-0 space-y-2.5 bg-muted/40 p-3">
-					<div className="flex items-center gap-2">
-						<span className="size-2 animate-pulse rounded-full bg-foreground/60" />
-						<span className="font-medium text-[11px] text-foreground">
-							Ryu sidebar
-						</span>
-					</div>
-					<div className="rounded-lg border border-border bg-card px-2.5 py-2 text-[10px] text-foreground/70">
+				<div className="w-full shrink-0 space-y-2.5 sm:w-48">
+					<div className="ml-auto w-fit rounded-lg bg-foreground px-2.5 py-1.5 text-background text-xs">
 						Summarize this page
 					</div>
-					<div className="rounded-lg border border-border bg-card px-2.5 py-2 text-[10px] text-muted-foreground">
-						Reads the tab · DLP on egress
-					</div>
-					<div className="flex flex-wrap gap-1.5">
-						{["Summarize", "Extract", "Ask"].map((c) => (
-							<Pill className="text-[10px]" key={c}>
-								{c}
-							</Pill>
-						))}
+					<div className="space-y-2 rounded-lg border border-border px-2.5 py-2.5">
+						<span className="block h-1.5 w-5/6 rounded-full bg-foreground/20" />
+						<span className="block h-1.5 w-full rounded-full bg-foreground/20" />
+						<span className="block h-1.5 w-2/3 rounded-full bg-foreground/20" />
 					</div>
 				</div>
 			</div>
@@ -437,148 +473,276 @@ export function ChromeVisual() {
 	);
 }
 
-export function DesktopVisual() {
+/** The desktop app: a short request and a reply drawn as placeholder lines. */
+export function DesktopVisual({
+	prompt = null,
+}: {
+	/** `null` (the default) draws the message as a text-free bar. */
+	prompt?: string | null;
+} = {}) {
 	return (
-		<AppShell
-			active="Chat"
-			nav={["Chat", "Agents", "Runs", "Spaces", "Gateway"]}
-		>
-			<div className="flex h-full flex-col gap-3">
-				<div className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-[11px] text-background">
-					Refactor the auth module and open a PR
+		<WindowFrame className="w-full rounded-2xl" contentClassName="p-0">
+			<div className="flex min-h-56 flex-col gap-3 p-4">
+				{prompt === null ? (
+					<div
+						aria-hidden="true"
+						className="ml-auto w-2/5 max-w-40 rounded-2xl rounded-tr-sm bg-foreground px-3 py-3"
+					>
+						<span className="block h-1.5 w-full rounded-full bg-background/40" />
+					</div>
+				) : (
+					<div className="ml-auto max-w-[85%] rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-background text-sm">
+						{prompt}
+					</div>
+				)}
+				<div
+					aria-hidden="true"
+					className="w-3/4 max-w-xs space-y-2 rounded-2xl rounded-tl-sm border border-border px-3 py-3"
+				>
+					<span className="block h-1.5 w-full rounded-full bg-foreground/15" />
+					<span className="block h-1.5 w-5/6 rounded-full bg-foreground/10" />
+					<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
 				</div>
-				<div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[11px] text-foreground/80">
-					Working in a worktree. Edited 12 files, tests green. PR #482 ready to
-					review.
-				</div>
-				<div className="mt-auto flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2">
-					<span className="text-[11px] text-muted-foreground">
-						Message your agent…
-					</span>
+				<div
+					aria-hidden="true"
+					className="mt-auto flex items-center gap-2 rounded-full border border-border px-3 py-2"
+				>
+					<span className="block h-1.5 w-1/3 rounded-full bg-foreground/10" />
 					<span className="ml-auto size-5 rounded-full bg-foreground/80" />
 				</div>
 			</div>
-		</AppShell>
+		</WindowFrame>
+	);
+}
+
+const CLAUSE_BARS = ["w-full", "w-5/6", "w-11/12", "w-2/3", "w-4/5", "w-3/4"];
+
+/** One document column of placeholder lines, with the compared clause highlighted. */
+function ClauseColumn({ highlight }: { highlight: number }) {
+	return (
+		<div className="flex-1 space-y-2.5 rounded-lg border border-border bg-background p-4">
+			{CLAUSE_BARS.map((width, i) => (
+				<span
+					className={cn(
+						"block h-1.5 rounded-full",
+						width,
+						i === highlight ? "bg-foreground/70" : "bg-foreground/10"
+					)}
+					key={width}
+				/>
+			))}
+		</div>
+	);
+}
+
+/** Legal work: two agreements side by side with one matching clause marked in each. */
+export function LegalDesktopVisual() {
+	return (
+		<WindowFrame contentClassName="p-0" title="Ryu">
+			<div aria-hidden="true" className="flex min-h-56 items-center gap-3 p-4">
+				<ClauseColumn highlight={2} />
+				<ClauseColumn highlight={3} />
+			</div>
+		</WindowFrame>
+	);
+}
+
+const INTAKE_FIELDS = [
+	{ label: "w-1/4", field: "w-3/4", missing: false },
+	{ label: "w-1/3", field: "w-1/2", missing: false },
+	{ label: "w-1/5", field: "w-2/3", missing: true },
+	{ label: "w-1/4", field: "w-3/5", missing: false },
+];
+
+/** Clinical admin: an intake form drawn as label and field bars, with one field flagged missing. */
+export function HealthcareDesktopVisual() {
+	return (
+		<WindowFrame contentClassName="p-0" title="Ryu">
+			<div
+				aria-hidden="true"
+				className="flex min-h-56 flex-col justify-center gap-3 p-4"
+			>
+				{INTAKE_FIELDS.map((row) => (
+					<div
+						className={cn(
+							"flex items-center gap-3 rounded-lg border px-3 py-3",
+							row.missing
+								? "border-foreground/50 border-dashed"
+								: "border-border"
+						)}
+						key={`${row.label}-${row.field}`}
+					>
+						<span
+							className={cn(
+								"block h-1.5 shrink-0 rounded-full bg-foreground/25",
+								row.label
+							)}
+						/>
+						{row.missing ? (
+							<span className="ml-auto size-2 rounded-full bg-foreground" />
+						) : (
+							<span
+								className={cn(
+									"ml-auto block h-1.5 rounded-full bg-foreground/10",
+									row.field
+								)}
+							/>
+						)}
+					</div>
+				))}
+			</div>
+		</WindowFrame>
 	);
 }
 
 export function IslandVisual() {
 	return (
-		<MinimalCard contentClassName="p-4">
-			<div className="relative flex min-h-52 items-start justify-center">
-				{/* the island overlay */}
-				<div className="w-full max-w-xs space-y-2 rounded-2xl border border-border bg-foreground px-4 py-3 text-background shadow-md">
-					<div className="flex items-center gap-2">
-						<span className="size-2 animate-pulse rounded-full bg-background/80" />
-						<span className="font-medium text-[11px]">Ryu noticed</span>
-					</div>
-					<p className="text-[11px] text-background/80">
-						You've been debugging this stack trace for 20 min. Want me to search
-						the repo for the root cause?
-					</p>
-					<div className="flex items-center gap-1.5 pt-1">
-						<span className="rounded-full bg-background px-2.5 py-1 text-[10px] text-foreground">
-							Yes, dig in
-						</span>
-						<span className="rounded-full border border-background/30 px-2.5 py-1 text-[10px] text-background/80">
-							Dismiss
-						</span>
-						<span className="ml-auto inline-flex items-center gap-1 text-[10px] text-background/70">
-							<span className="size-1.5 animate-pulse rounded-full bg-background/80" />
-							listening
-						</span>
+		<div className="w-full px-1 py-2">
+			{/* a mock screen with the island overlay pinned to its top edge;
+			    text-free: a filled and an outline pill stand in for its two actions */}
+			<div className="flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
+				<div aria-hidden="true" className="px-3 pt-3">
+					<WindowDots />
+				</div>
+				<div aria-hidden="true" className="flex justify-center px-4 pt-2">
+					<div className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-2">
+						<span className="size-2 animate-pulse rounded-full bg-foreground/70" />
+						<span className="h-6 w-20 rounded-full bg-foreground" />
+						<span className="h-6 w-14 rounded-full border border-border" />
 					</div>
 				</div>
+				<div aria-hidden="true" className="space-y-2.5 px-6 pt-6 pb-6">
+					<span className="block h-1.5 w-2/5 rounded-full bg-foreground/30" />
+					<span className="block h-1.5 w-3/4 rounded-full bg-foreground/10" />
+					<span className="block h-1.5 w-1/2 rounded-full bg-foreground/10" />
+					<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
+				</div>
 			</div>
-		</MinimalCard>
+		</div>
 	);
 }
 
-export function ConnectionsVisual() {
-	const apps = [
-		{ name: "Gmail", on: true },
-		{ name: "Slack", on: true },
-		{ name: "Notion", on: true },
-		{ name: "GitHub", on: false },
-		{ name: "Stripe", on: false },
-	];
+const DEFAULT_CONNECTIONS = [
+	{ name: "Mail", Icon: Mail, on: true },
+	{ name: "Chat", Icon: MessageSquare, on: true },
+	{ name: "Docs", Icon: FileText, on: true },
+	{ name: "Code", Icon: GitBranch, on: false },
+	{ name: "Calendar", Icon: Calendar, on: false },
+] as const;
+
+/**
+ * Connected apps as one outlined card: a monochrome app icon, a placeholder
+ * bar, and an on/off switch per row. Text-free; whitespace separates rows.
+ */
+export function ConnectionsVisual({
+	apps = DEFAULT_CONNECTIONS,
+}: {
+	apps?: ReadonlyArray<{ name: string; Icon: LucideIcon; on: boolean }>;
+}) {
 	return (
-		<MinimalCard>
-			<div className="space-y-2">
-				{apps.map((a) => (
-					<div
-						className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2"
-						key={a.name}
+		<div
+			aria-hidden="true"
+			className="w-full space-y-4 rounded-2xl border border-border bg-card p-5"
+		>
+			{apps.map(({ name, Icon, on }) => (
+				<div className="flex items-center gap-3" key={name}>
+					<span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground/60">
+						<Icon className="size-4" />
+					</span>
+					<span
+						className={cn(
+							"block h-1.5 w-1/3 rounded-full",
+							on ? "bg-foreground/20" : "bg-foreground/10"
+						)}
+					/>
+					<span
+						className={cn(
+							"ml-auto flex h-4 w-7 items-center rounded-full p-0.5",
+							on
+								? "justify-end bg-foreground"
+								: "justify-start bg-foreground/20"
+						)}
 					>
-						<div className="flex items-center gap-2.5">
-							<div className="size-6 rounded-md border border-border bg-card" />
-							<span className="text-foreground/80 text-xs">{a.name}</span>
-						</div>
-						<span
-							className={cn(
-								"flex h-4 w-7 items-center rounded-full p-0.5 transition-colors",
-								a.on
-									? "justify-end bg-foreground"
-									: "justify-start bg-foreground/20"
-							)}
-						>
-							<span className="size-3 rounded-full bg-background" />
+						<span className="size-3 rounded-full bg-background" />
+					</span>
+				</div>
+			))}
+		</div>
+	);
+}
+
+/** Ryu Cloud hosts the servers; each client connects to it. */
+export function CloudVisual() {
+	const clients = ["a", "b", "c"];
+	return (
+		<div className="flex w-full flex-col items-center px-1 py-6">
+			<Node className="w-44 py-2.5 text-sm" emphasis>
+				Ryu Cloud
+			</Node>
+			<span aria-hidden="true" className="h-5 w-px bg-foreground/30" />
+			<div className="relative grid w-full max-w-sm grid-cols-3 gap-3">
+				<span
+					aria-hidden="true"
+					className="absolute inset-x-[16.67%] top-0 h-px bg-foreground/30"
+				/>
+				{clients.map((id) => (
+					<div
+						aria-hidden="true"
+						className="flex flex-col items-center"
+						key={id}
+					>
+						<span className="h-5 w-px bg-foreground/30" />
+						<span className="flex w-full items-center gap-2 rounded-md border border-border bg-background px-2.5 py-3">
+							<span className="size-3 shrink-0 rounded-full bg-foreground/25" />
+							<span className="flex-1 space-y-1.5">
+								<span className="block h-1.5 w-full rounded-full bg-foreground/15" />
+								<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
+							</span>
 						</span>
 					</div>
 				))}
 			</div>
-		</MinimalCard>
+		</div>
 	);
 }
 
-export function CloudVisual() {
-	const nodes = [
-		{ name: "cloud", on: true },
-		{ name: "mac-mini", on: true },
-		{ name: "raspberry-pi", on: true },
-		{ name: "laptop", on: false },
-	];
+/** One row of a segmented choice, with the first matching option selected. */
+function Segmented({
+	label,
+	options,
+	selected,
+}: {
+	label: string;
+	options: readonly string[];
+	selected: string;
+}) {
 	return (
-		<MinimalCard>
-			<div className="space-y-3">
-				<div className="flex items-center justify-between">
-					<span className="font-medium text-foreground text-sm">Servers</span>
-					<span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-						<span className="size-1.5 animate-pulse rounded-full bg-foreground" />
-						24/7 · agents that don't sleep
+		<div className="space-y-1.5">
+			<p className="text-muted-foreground text-xs">{label}</p>
+			<div className="grid auto-cols-fr grid-flow-col gap-1 rounded-lg border border-border p-1">
+				{options.map((option) => (
+					<span
+						className={cn(
+							"whitespace-nowrap rounded-md px-2 py-1.5 text-center text-xs md:text-sm",
+							option === selected
+								? "bg-foreground/[0.08] font-medium text-foreground"
+								: "text-foreground/80"
+						)}
+						key={option}
+					>
+						{option}
 					</span>
-				</div>
-				<div className="grid grid-cols-2 gap-2">
-					{nodes.map((n) => (
-						<div
-							className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2"
-							key={n.name}
-						>
-							<span
-								className={cn(
-									"size-1.5 rounded-full",
-									n.on ? "bg-foreground" : "bg-foreground/20"
-								)}
-							/>
-							<span className="font-mono text-[11px] text-foreground/80">
-								{n.name}
-							</span>
-						</div>
-					))}
-				</div>
-				<div className="flex items-center gap-2">
-					<Node>You</Node>
-					<Wire className="flex-1" />
-					<Node emphasis>Ryu Cloud</Node>
-					<Wire className="flex-1" delays={[0.3, 0.7]} />
-					<Node>Fleet</Node>
-				</div>
+				))}
 			</div>
-		</MinimalCard>
+		</div>
 	);
 }
 
-/** Early-access exchange visual shared by the Compute and Share product pages. */
+/**
+ * The exchange setup shared by the Compute and Share pages, mirroring the
+ * desktop preview: hardware and lease choices for renters, an offer and an
+ * availability choice for providers. Neither can be submitted yet.
+ */
 export function ComputeExchangeVisual({
 	mode = "compute",
 }: {
@@ -586,139 +750,152 @@ export function ComputeExchangeVisual({
 }) {
 	const compute = mode === "compute";
 	return (
-		<MinimalCard>
-			<div className="space-y-3">
-				<div className="flex items-center justify-between">
-					<span className="font-medium text-foreground text-sm">
-						Ryu {compute ? "Compute" : "Share"}
-					</span>
-					<span className="font-mono text-[10px] text-muted-foreground">
-						early access
-					</span>
-				</div>
-				<div className="flex items-center gap-2">
-					<Node emphasis>{compute ? "Workcell" : "Your node"}</Node>
-					<Wire className="flex-1" delays={[0.2, 0.7]} />
-					<Node>{compute ? "GPU lane" : "Idle window"}</Node>
-				</div>
-				<div className="grid grid-cols-3 gap-2">
-					{(compute
-						? ["15 min", "1 hour", "4 hours"]
-						: ["Compute", "Agent", "Payout"]
-					).map((label, index) => (
-						<div
-							className={cn(
-								"rounded-md border px-2 py-2 text-center font-mono text-[10px]",
-								index === 0
-									? "border-foreground/30 bg-foreground/[0.04] text-foreground"
-									: "border-border bg-muted/30 text-muted-foreground"
-							)}
-							key={label}
-						>
-							{label}
-						</div>
-					))}
+		<MinimalCard className="mx-auto w-full max-w-md">
+			<div className="space-y-5">
+				{compute ? (
+					<>
+						<Segmented
+							label="Hardware"
+							options={["CPU", "GPU"]}
+							selected="GPU"
+						/>
+						<Segmented
+							label="Lease"
+							options={["15 min", "1 hour", "4 hours"]}
+							selected="1 hour"
+						/>
+					</>
+				) : (
+					<>
+						<Segmented
+							label="Offer"
+							options={["Spare compute", "Hosted agent"]}
+							selected="Spare compute"
+						/>
+						<Segmented
+							label="Availability"
+							options={["When idle", "On a schedule"]}
+							selected="When idle"
+						/>
+					</>
+				)}
+				{/* Disabled in the desktop preview (ComputeShareSurface.tsx), so it
+				    is drawn as an unavailable action, not a button. */}
+				<div
+					aria-disabled="true"
+					className="rounded-lg border border-border border-dashed px-3 py-2 text-center text-muted-foreground text-xs md:text-sm"
+				>
+					{compute ? "Find capacity" : "Publish listing"}
 				</div>
 			</div>
 		</MinimalCard>
 	);
 }
 
+/** The Desktop "Security sweep" result: the ten built-in red-team strategies, one case each. */
 export function RedTeamVisual() {
-	const rows = [
-		{ name: "prompt-injection", verdict: "BLOCKED" },
-		{ name: "data-exfiltration", verdict: "BLOCKED" },
-		{ name: "tool-abuse", verdict: "BLOCKED" },
-		{ name: "jailbreak (BoN)", verdict: "FLAGGED" },
-		{ name: "system-prompt-leak", verdict: "BLOCKED" },
+	const strategies = [
+		{ name: "Prompt injection", protected: true },
+		{ name: "Jailbreak resistance", protected: false },
+		{ name: "Personal data leak", protected: true },
+		{ name: "Tool misuse", protected: true },
+		{ name: "Toxic output", protected: true },
+		{ name: "System-prompt leak", protected: true },
+		{ name: "Indirect prompt injection", protected: true },
+		{ name: "SQL injection", protected: true },
+		{ name: "Shell injection", protected: true },
+		{ name: "Bias and fairness", protected: true },
 	];
+	/* Text-free: nine quiet outline tiles held, and one stronger dashed outline
+	   for the probe that got through, so the odd one out reads as the failure. */
 	return (
-		<Terminal
-			lines={[
-				{ prompt: true, text: "ryu redteam run --target my-agent" },
-				{ text: "running 240 adversarial probes…", muted: true },
-			]}
-			title="ryu red-team · agent.target"
-		>
-			<div className="mt-2 space-y-1">
-				{rows.map((r) => (
-					<div
-						className="flex items-center justify-between text-[12px]"
-						key={r.name}
-					>
-						<span className="text-foreground/70">{r.name}</span>
-						<span
-							className={cn(
-								"font-mono text-[11px]",
-								r.verdict === "BLOCKED"
-									? "text-foreground/50"
-									: "text-foreground"
-							)}
-						>
-							{r.verdict}
-						</span>
-					</div>
+		<div className="w-full rounded-2xl border border-border bg-card">
+			<div aria-hidden="true" className="px-3 pt-3">
+				<WindowDots />
+			</div>
+			<div aria-hidden="true" className="grid grid-cols-5 gap-3 p-5 pt-3">
+				{strategies.map((strategy) => (
+					<span
+						className={cn(
+							"block h-12 rounded-lg",
+							strategy.protected
+								? "border border-border bg-muted/40"
+								: "border-2 border-foreground/50 border-dashed"
+						)}
+						data-protected={strategy.protected}
+						key={strategy.name}
+					/>
 				))}
 			</div>
-		</Terminal>
+		</div>
 	);
 }
 
 export function DevicesVisual() {
 	return (
-		<WindowFrame title="ryu devices">
-			<div className="flex min-h-52 flex-col items-center justify-center gap-5 rounded-lg bg-muted/30 p-6">
-				<div className="relative flex items-center justify-center">
-					<span className="absolute size-24 animate-ping rounded-full border border-foreground/10" />
-					<span className="absolute size-16 rounded-full border border-foreground/20" />
-					<span className="size-10 rounded-full border-2 border-foreground/60" />
-				</div>
-				<div className="text-center">
-					<p className="font-medium text-foreground text-sm">
-						Always-aware, on-device
-					</p>
-					<p className="mt-1 text-[11px] text-muted-foreground">
-						Rings · pendants · local AI · coming soon
-					</p>
-				</div>
+		<div className="flex w-full flex-col items-center gap-6 px-2 py-8">
+			<div className="flex items-end justify-center gap-4 sm:gap-8">
+				<figure className="flex flex-col items-center gap-2">
+					<div className="flex flex-col items-center">
+						<span className="h-5 w-10 rounded-t-md border border-foreground/40 border-b-0" />
+						<span className="relative flex size-20 items-center justify-center rounded-full border-2 border-foreground/50">
+							<span className="size-1.5 rounded-full bg-foreground motion-safe:animate-pulse" />
+						</span>
+						<span className="h-5 w-10 rounded-b-md border border-foreground/40 border-t-0" />
+					</div>
+					<figcaption className="text-muted-foreground text-sm">
+						Watch
+					</figcaption>
+				</figure>
+				<figure className="flex flex-col items-center gap-2">
+					<div className="flex flex-col items-center">
+						<span className="h-16 w-20 rounded-b-full border border-foreground/40 border-t-0" />
+						<span className="-mt-1 size-9 rounded-full border-2 border-foreground/50" />
+					</div>
+					<figcaption className="text-muted-foreground text-sm">
+						Necklace
+					</figcaption>
+				</figure>
+				<figure className="flex flex-col items-center gap-2">
+					<div className="flex flex-col items-center">
+						<span className="flex h-20 w-32 flex-col justify-center gap-2 rounded-md border-2 border-foreground/50 px-4">
+							<span className="h-1 w-3/4 rounded-full bg-foreground/25" />
+							<span className="h-1 w-1/2 rounded-full bg-foreground/15" />
+						</span>
+						<span className="h-3 w-12 rounded-b-sm border border-foreground/40 border-t-0" />
+					</div>
+					<figcaption className="text-muted-foreground text-sm">
+						Desk display
+					</figcaption>
+				</figure>
 			</div>
-		</WindowFrame>
+		</div>
 	);
 }
 
 export function CommandBarVisual() {
-	const results = [
-		{ icon: "▸", text: "Ask: summarize my unread email", hint: "Enter" },
-		{ icon: "⌘", text: "Run agent · triage-issues", hint: "↵" },
-		{ icon: "◷", text: "Resume · draft release notes", hint: "" },
-		{ icon: "🎙", text: "Dictate a task…", hint: "⌥Space" },
-	];
+	const results = ["Chat", "Spaces", "Skills", "Mission Control"];
 	return (
-		<WindowFrame contentClassName="bg-muted/30 p-6" title="desktop">
-			<div className="mx-auto max-w-sm overflow-hidden rounded-xl border border-border bg-card shadow-md">
-				<div className="flex items-center gap-2 border-border border-b px-3 py-2.5">
-					<span className="text-muted-foreground text-xs">⌘</span>
-					<span className="text-foreground/80 text-xs">Ask Ryu anything…</span>
-					<span className="ml-auto inline-block h-3 w-px animate-pulse bg-foreground/50" />
+		<WindowFrame contentClassName="p-6" title="OS">
+			<div className="mx-auto max-w-sm overflow-hidden rounded-xl border border-border bg-card">
+				<div className="flex items-center gap-2 px-3 pt-3 pb-2">
+					<span className="text-muted-foreground text-sm">⌘</span>
+					<span className="text-muted-foreground text-sm">Search apps…</span>
+					<span
+						aria-hidden="true"
+						className="ml-auto inline-block h-3.5 w-px animate-pulse bg-foreground/50"
+					/>
 				</div>
 				<div className="p-1.5">
-					{results.map((r, i) => (
+					{results.map((name, i) => (
 						<div
 							className={cn(
-								"flex items-center gap-2.5 rounded-lg px-2.5 py-1.5",
-								i === 0 ? "bg-foreground/10" : ""
+								"rounded-lg px-2.5 py-2 text-foreground/80 text-sm",
+								i === 0 ? "bg-foreground/10 text-foreground" : ""
 							)}
-							key={r.text}
+							key={name}
 						>
-							<span className="w-4 text-center text-[11px] text-muted-foreground">
-								{r.icon}
-							</span>
-							<span className="text-[11px] text-foreground/80">{r.text}</span>
-							{r.hint ? (
-								<span className="ml-auto rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
-									{r.hint}
-								</span>
-							) : null}
+							{name}
 						</div>
 					))}
 				</div>
@@ -728,249 +905,305 @@ export function CommandBarVisual() {
 }
 
 export function AgentsAsServiceVisual() {
-	const steps = ["Your workflow", "We build it", "Shipped, live"];
+	const steps = ["Your task", "We scope it", "Set up"];
 	return (
-		<WindowFrame title="agents as a service">
+		<MinimalCard>
 			<div className="space-y-4">
-				<div className="flex items-center gap-2">
-					{steps.map((s, i) => (
-						<div className="flex flex-1 items-center gap-2" key={s}>
-							<Node emphasis={i === 1}>{s}</Node>
-							{i < steps.length - 1 ? <Wire className="flex-1" /> : null}
-						</div>
-					))}
-				</div>
-				<div className="rounded-lg border border-border bg-muted/30 p-3">
-					<div className="mb-2 flex items-center justify-between">
-						<span className="font-medium text-foreground text-xs">
-							Build engagement
-						</span>
-						<span className="rounded-full bg-foreground px-2 py-0.5 text-[10px] text-background">
-							Free
-						</span>
-					</div>
-					<div className="space-y-1.5">
-						{[
-							"Scoped to your workflows",
-							"Built on the open Ryu platform",
-							"Yours to keep, zero lock-in",
-						].map((t) => (
-							<div
-								className="flex items-center gap-2 text-[11px] text-muted-foreground"
-								key={t}
-							>
-								<span className="size-1.5 rounded-full bg-foreground/40" />
-								{t}
-							</div>
-						))}
-					</div>
-				</div>
-			</div>
-		</WindowFrame>
-	);
-}
-
-/** The public Ryu OS story: app windows are opened from one workspace dock. */
-export function OsVisual() {
-	const apps = ["Chat", "Spaces", "Tools", "Skills", "Apps"];
-	return (
-		<WindowFrame title="Ryu OS">
-			<div className="relative min-h-52 overflow-hidden rounded-lg bg-muted p-4 text-foreground">
-				<div className="relative flex items-center justify-between text-[10px] text-muted-foreground">
-					<span>Ryu workspace</span>
-					<span>App Launcher · ⌘K</span>
-				</div>
-				<div className="relative mt-6 rounded-xl border border-border bg-card p-3 shadow-sm">
-					<div className="flex items-center gap-1.5">
-						<span className="size-2 rounded-full bg-destructive" />
-						<span className="size-2 rounded-full bg-warning" />
-						<span className="size-2 rounded-full bg-success" />
-						<span className="ml-2 text-[10px] text-muted-foreground">
-							Policy Summary
-						</span>
-					</div>
-					<div className="mt-5 h-2 w-2/3 rounded-full bg-foreground/15" />
-					<div className="mt-2 h-2 w-5/6 rounded-full bg-foreground/10" />
-					<div className="mt-2 h-2 w-1/2 rounded-full bg-foreground/10" />
-				</div>
-				<div className="relative mx-auto mt-5 flex w-fit items-center gap-1.5 rounded-2xl border border-border bg-background/80 px-2 py-1.5">
-					{apps.map((app, index) => (
-						<span
+				<ol className="flex items-center gap-2 text-muted-foreground text-xs">
+					{steps.map((step, i) => (
+						<li
 							className={cn(
-								"flex size-7 items-center justify-center rounded-lg font-medium text-[8px]",
-								index === 0
-									? "bg-primary text-primary-foreground"
-									: "bg-muted text-muted-foreground"
+								"flex items-center gap-2",
+								i === 1 ? "font-medium text-foreground" : ""
 							)}
-							key={app}
+							key={step}
 						>
-							{app.slice(0, 1)}
-						</span>
+							{i > 0 ? <span aria-hidden="true">→</span> : null}
+							{step}
+						</li>
 					))}
+				</ol>
+				<div className="space-y-2">
+					<p className="font-medium text-foreground text-sm">
+						Weekly sales summary
+					</p>
+					<Slot label="Task" value="Summarize the pipeline" />
+					<Slot label="Tools" value="CRM · Email" />
+					<Slot label="Runs on" value="Ryu Cloud or your machines" />
 				</div>
 			</div>
+		</MinimalCard>
+	);
+}
+
+/** A mock window's title-bar strip: three quiet dots, no label. */
+function WindowDots() {
+	return (
+		<span className="flex h-5 shrink-0 items-center gap-1 px-2">
+			<span className="size-1.5 rounded-full bg-foreground/20" />
+			<span className="size-1.5 rounded-full bg-foreground/20" />
+			<span className="size-1.5 rounded-full bg-foreground/20" />
+		</span>
+	);
+}
+
+/** The public OS story: app windows are opened from one workspace dock. */
+export function OsVisual() {
+	const apps = ["Launcher", "Chat", "Spaces", "Skills", "Review"];
+	return (
+		<WindowFrame title="OS">
+			<div aria-hidden="true" className="relative h-36 sm:h-44">
+				<span className="absolute top-2 left-0 flex h-24 w-3/5 flex-col overflow-hidden rounded-lg border border-border bg-muted/50 sm:h-28">
+					<WindowDots />
+				</span>
+				<span className="absolute top-8 right-0 flex h-24 w-1/2 flex-col overflow-hidden rounded-lg border border-foreground/30 bg-background sm:top-10 sm:h-28">
+					<WindowDots />
+					<span className="flex flex-1 flex-col justify-center gap-1.5 px-3 pb-2">
+						<span className="ml-auto block h-3 w-2/5 rounded-full rounded-tr-sm bg-foreground/80" />
+						<span className="block h-3 w-3/5 rounded-full rounded-tl-sm border border-border bg-foreground/5" />
+						<span className="ml-auto block h-3 w-1/3 rounded-full rounded-tr-sm bg-foreground/80" />
+					</span>
+				</span>
+			</div>
+			<ul
+				aria-label="Dock"
+				className="mx-auto mt-4 flex w-fit max-w-full items-center justify-center gap-1.5 rounded-2xl border border-border px-2 py-1.5"
+			>
+				{apps.map((app) => (
+					<li
+						className={cn(
+							"rounded-lg px-2.5 py-1 text-xs",
+							app === "Chat"
+								? "bg-foreground text-background"
+								: "text-muted-foreground",
+							app === "Review" ? "hidden sm:block" : ""
+						)}
+						key={app}
+					>
+						{app}
+					</li>
+				))}
+			</ul>
 		</WindowFrame>
 	);
 }
 
-/** A visual for the standalone tool/Skill execution gateway. */
-export function ToolGatewayVisual({
-	serviceName = "Ryu Gateway",
-}: {
-	serviceName?: string;
-}) {
-	return (
-		<MinimalCard>
-			<div className="space-y-3">
-				<div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2">
-					<span className="font-mono text-[11px] text-foreground/70">
-						POST /v1/exec/tool
-					</span>
-					<span className="rounded-full bg-foreground px-2 py-0.5 font-mono text-[10px] text-background">
-						200
-					</span>
-				</div>
-				<div className="flex items-center gap-2">
-					<Node>Any system</Node>
-					<Wire className="flex-1" />
-					<Node emphasis>{serviceName}</Node>
-					<Wire className="flex-1" delays={[0.25, 0.65]} />
-					<Node>Tool + Skill</Node>
-				</div>
-				<div className="rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 font-mono text-[11px] text-muted-foreground">
-					tools.github.create_issue({"{ title }"})
-				</div>
-			</div>
-		</MinimalCard>
-	);
-}
-
-/** The four-lane standalone integration boundary: MCP, Skills, tools, and Composio. */
+/** Ryu Connect: one API between your app and hosted MCP servers, Skills, and tools. */
 export function ConnectVisual() {
-	const lanes = [
-		{ label: "MCP hosting", value: "/mcp/*" },
-		{ label: "Skills", value: "SKILL.md" },
-		{ label: "Tool gateway", value: "/v1/exec/tool" },
-		{ label: "Composio", value: "provider call" },
-	];
+	const kinds = ["MCP servers", "Skills", "Tools"];
 	return (
-		<MinimalCard>
-			<div className="space-y-3">
-				<div className="flex items-center justify-between">
-					<span className="font-medium text-foreground text-sm">
-						Ryu Connect
-					</span>
-					<span className="font-mono text-[10px] text-muted-foreground">
-						one tenant edge
-					</span>
-				</div>
-				<div className="grid grid-cols-2 gap-2">
-					{lanes.map((lane) => (
-						<div
-							className="rounded-lg border border-border bg-muted/30 px-3 py-2"
-							key={lane.label}
-						>
-							<p className="text-foreground/80 text-xs">{lane.label}</p>
-							<p className="mt-1 font-mono text-[10px] text-muted-foreground">
-								{lane.value}
-							</p>
-						</div>
-					))}
-				</div>
-				<div className="flex items-center gap-2">
-					<Node>Product</Node>
-					<Wire className="flex-1" delays={[0.2, 0.6]} />
-					<Node emphasis>Connect</Node>
-					<Wire className="flex-1" delays={[0.4, 0.8]} />
-					<Node>MCP + Composio</Node>
-				</div>
+		<div className="flex w-full flex-col items-center px-1 py-6">
+			<Node className="w-44 py-2.5 text-sm">Your app</Node>
+			<span aria-hidden="true" className="h-6 w-px bg-foreground/30" />
+			<Node className="w-44 py-2.5 text-sm" emphasis>
+				Connect
+			</Node>
+			<span aria-hidden="true" className="h-5 w-px bg-foreground/30" />
+			<div className="relative grid w-full max-w-sm grid-cols-3 gap-3">
+				<span
+					aria-hidden="true"
+					className="absolute inset-x-[16.67%] top-0 h-px bg-foreground/30"
+				/>
+				{kinds.map((kind) => (
+					<div className="flex flex-col items-center" key={kind}>
+						<span aria-hidden="true" className="h-5 w-px bg-foreground/30" />
+						<Node className="w-full whitespace-nowrap py-2.5 text-sm">
+							{kind}
+						</Node>
+					</div>
+				))}
 			</div>
-		</MinimalCard>
+		</div>
 	);
 }
 
 /** The isolated, persistent workspace behind a Ryu Box run. */
 export function BoxVisual() {
 	return (
-		<WindowFrame title="Ryu Box · isolated workspace">
-			<div className="space-y-3">
-				<div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2">
-					<span className="font-mono text-[11px] text-foreground/75">
-						box_7f3a
-					</span>
-					<span className="inline-flex items-center gap-1.5 text-[10px] text-foreground/55">
-						<span className="size-1.5 rounded-full bg-success" />
-						ready
-					</span>
-				</div>
-				<div className="rounded-lg border border-border bg-foreground/[0.03] p-3 font-mono text-[11px] leading-relaxed">
-					<p className="text-muted-foreground">
-						$ ryu box exec --cwd /workspace
-					</p>
-					<p className="mt-1 text-foreground/75">→ preview server listening</p>
-					<p className="text-foreground/45">→ filesystem persisted</p>
-				</div>
-				<div className="grid grid-cols-3 gap-2 text-center text-[10px] text-muted-foreground">
-					<span className="rounded-md border border-border px-2 py-1.5">
-						Files
-					</span>
-					<span className="rounded-md border border-border px-2 py-1.5">
-						Preview
-					</span>
-					<span className="rounded-md border border-border px-2 py-1.5">
-						Events
-					</span>
-				</div>
-			</div>
-		</WindowFrame>
+		<div className="flex w-full items-center justify-center gap-0 px-2 py-8 sm:px-6">
+			<BoxWindow />
+			<span
+				aria-hidden="true"
+				className="h-px w-6 shrink-0 bg-foreground/30 sm:w-10"
+			/>
+			<BoxWindow forked />
+		</div>
 	);
 }
 
-/** The standalone event inbox and live stream behind Ryu Notify. */
+/** One Box workspace drawn as a small window of file lines; the fork carries its only label. */
+function BoxWindow({ forked = false }: { forked?: boolean }) {
+	return (
+		<div
+			className={cn(
+				"relative flex w-full max-w-44 flex-col overflow-hidden rounded-lg border bg-background",
+				forked ? "border-foreground/40" : "border-border"
+			)}
+		>
+			<WindowDots />
+			<span aria-hidden="true" className="space-y-2 px-3 pt-2 pb-4">
+				<span className="block h-1.5 w-3/4 rounded-full bg-foreground/15" />
+				<span className="block h-1.5 w-1/2 rounded-full bg-foreground/10" />
+				<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
+			</span>
+			{forked ? (
+				<span className="absolute top-1 right-2 rounded-md border border-border px-1.5 py-0.5 text-muted-foreground text-xs">
+					Fork
+				</span>
+			) : null}
+		</div>
+	);
+}
+
+/** The standalone event inbox behind Ryu Notify: delivery, live updates, and replies. */
 export function NotifyVisual() {
 	const events = [
-		{ label: "Deploy complete", source: "github-actions", tone: "success" },
-		{ label: "Payment received", source: "billing", tone: "info" },
-		{ label: "Backup failed", source: "infra", tone: "error" },
+		{ label: "Deploy complete", dot: "bg-foreground/40" },
+		{ label: "Build 62%", dot: "animate-pulse bg-foreground" },
+		{ label: "Restore backup?", dot: "bg-foreground/20" },
 	];
 	return (
-		<WindowFrame title="Ryu Notify · event inbox">
-			<div className="space-y-3">
-				<div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2">
-					<span className="font-mono text-[11px] text-foreground/75">
-						/v1/events
-					</span>
-					<span className="inline-flex items-center gap-1.5 text-[10px] text-foreground/55">
-						<span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-						live
+		<MinimalCard>
+			<div className="space-y-2">
+				{events.map((event) => (
+					<div
+						className="flex items-center gap-2.5 rounded-lg border border-border px-3 py-3"
+						key={event.label}
+					>
+						<span
+							aria-hidden="true"
+							className={cn("size-1.5 shrink-0 rounded-full", event.dot)}
+						/>
+						<span className="truncate text-foreground/80 text-sm">
+							{event.label}
+						</span>
+					</div>
+				))}
+			</div>
+		</MinimalCard>
+	);
+}
+
+/** Standalone Ryu Sites: a saved version passes its deploy scan and goes live. */
+export function SitesVisual() {
+	const rows = ["Saved", "Secret scan", "Live"];
+	return (
+		<MinimalCard>
+			<div className="flex min-h-48 flex-col justify-center space-y-2">
+				{rows.map((label, i) => (
+					<div
+						className={cn(
+							"flex items-center gap-2.5 rounded-lg border px-3 py-3",
+							i === rows.length - 1 ? "border-foreground/40" : "border-border"
+						)}
+						key={label}
+					>
+						<span
+							aria-hidden="true"
+							className={cn(
+								"size-1.5 shrink-0 rounded-full",
+								i === rows.length - 1 ? "bg-foreground" : "bg-foreground/40"
+							)}
+						/>
+						<span className="text-foreground/80 text-sm">{label}</span>
+					</div>
+				))}
+			</div>
+		</MinimalCard>
+	);
+}
+
+/** The API-first Agent Inboxes product, distinct from the event inbox. */
+export function MailVisual() {
+	const flows = [
+		{ label: "Received", arrow: "↓" },
+		{ label: "Sent", arrow: "↑" },
+	];
+	return (
+		<MinimalCard>
+			<div className="space-y-4">
+				<div className="flex items-center gap-2.5">
+					<Node className="py-2 text-sm" emphasis>
+						Agent
+					</Node>
+					<span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground text-sm">
+						research@…
 					</span>
 				</div>
 				<div className="space-y-2">
-					{events.map((event) => (
+					{flows.map((flow) => (
+						<div
+							className="flex items-center gap-3 rounded-lg border border-border px-3 py-3"
+							key={flow.label}
+						>
+							<span
+								aria-hidden="true"
+								className="text-muted-foreground text-sm"
+							>
+								{flow.arrow}
+							</span>
+							<span className="text-foreground/80 text-sm">{flow.label}</span>
+							<span
+								aria-hidden="true"
+								className="ml-auto block h-1.5 w-1/3 rounded-full bg-foreground/10"
+							/>
+						</div>
+					))}
+				</div>
+			</div>
+		</MinimalCard>
+	);
+}
+
+/**
+ * Ryu Messaging: one conversation across channels, with each send's hold and
+ * settled charge shown as states, not prices (rates come from AWS).
+ */
+export function MessagingVisual() {
+	const messages = [
+		{
+			channel: "SMS",
+			to: "+65 •••• 4821",
+			state: "delivered",
+			tone: "success",
+		},
+		{ channel: "WhatsApp", to: "+44 •••• 1907", state: "held", tone: "info" },
+		{ channel: "Voice", to: "+1 •••• 5530", state: "settled", tone: "success" },
+	];
+	return (
+		<WindowFrame title="Ryu Messaging · outbound">
+			<div className="space-y-3">
+				<div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2">
+					<span className="type-caption font-mono text-foreground/75">
+						/api/messaging
+					</span>
+					<span className="type-compact inline-flex items-center gap-1.5 text-foreground/55">
+						<span className="size-1.5 rounded-full bg-success" />
+						AWS price, no markup
+					</span>
+				</div>
+				<div className="space-y-2">
+					{messages.map((message) => (
 						<div
 							className="flex items-center gap-2 rounded-lg border border-border bg-foreground/[0.03] px-3 py-2"
-							key={event.label}
+							key={message.channel}
 						>
 							<span
 								className={cn(
 									"size-1.5 rounded-full",
-									event.tone === "error"
-										? "bg-red-500"
-										: event.tone === "success"
-											? "bg-emerald-500"
-											: "bg-sky-500"
+									message.tone === "success" ? "bg-success" : "bg-info"
 								)}
 							/>
 							<span className="min-w-0 flex-1">
-								<span className="block truncate text-[11px] text-foreground/75">
-									{event.label}
+								<span className="type-caption block truncate text-foreground/75">
+									{message.channel}
 								</span>
-								<span className="block truncate font-mono text-[9px] text-muted-foreground">
-									{event.source}
+								<span className="type-micro block truncate font-mono text-muted-foreground">
+									{message.to}
 								</span>
 							</span>
-							<span className="font-mono text-[9px] text-muted-foreground/70">
-								ack
+							<span className="type-micro font-mono text-muted-foreground/70">
+								{message.state}
 							</span>
 						</div>
 					))}
@@ -980,88 +1213,84 @@ export function NotifyVisual() {
 	);
 }
 
-/** The API-first Agent Inboxes product, distinct from the event inbox. */
-export function MailVisual() {
-	const messages = [
-		{ from: "claims@client.co", subject: "Documents attached" },
-		{ from: "ops@example.com", subject: "Re: weekly report" },
-		{ from: "agent@ryu.mail", subject: "Draft ready to review" },
-	];
-	return (
-		<WindowFrame title="Ryu Mail · agent inbox">
-			<div className="space-y-2">
-				<div className="flex items-center justify-between px-1 pb-1">
-					<span className="font-medium text-[11px] text-foreground/75">
-						Agent Inboxes
-					</span>
-					<span className="font-mono text-[9px] text-muted-foreground">
-						mail API
-					</span>
-				</div>
-				{messages.map((message, index) => (
-					<div
-						className={cn(
-							"rounded-lg border px-3 py-2",
-							index === 0
-								? "border-foreground/25 bg-foreground/[0.04]"
-								: "border-border bg-muted/30"
-						)}
-						key={message.from}
-					>
-						<span className="block truncate font-mono text-[9px] text-muted-foreground">
-							{message.from}
-						</span>
-						<span className="mt-0.5 block truncate text-[11px] text-foreground/75">
-							{message.subject}
-						</span>
-					</div>
-				))}
-			</div>
-		</WindowFrame>
-	);
-}
-
-/** Pay-per-run hiring: choose a specialist, see the estimate, run once. */
+/**
+ * Ryu Hire is early access: an illustrative specialist list with no prices,
+ * because no Hire run, estimate, or charge exists yet.
+ */
 export function HireVisual() {
-	const hires = [
-		{ name: "Policy analyst", cost: "18 credits", state: "Ready" },
-		{ name: "Inbox triage", cost: "6 credits", state: "Run once" },
-		{ name: "Release reviewer", cost: "12 credits", state: "Run once" },
-	];
+	const hires = ["Policy analyst", "Release reviewer", "Inbox triage"];
 	return (
 		<MinimalCard>
 			<div className="space-y-2">
-				<div className="flex items-center justify-between text-[10px] text-muted-foreground">
-					<span>Specialists for the next job</span>
-					<span className="font-mono text-foreground/60">42 credits</span>
-				</div>
-				{hires.map((hire, index) => (
+				{hires.map((name, index) => (
 					<div
 						className={cn(
-							"flex items-center gap-2 rounded-lg border px-3 py-2",
-							index === 0
-								? "border-foreground/30 bg-foreground/[0.04]"
-								: "border-border bg-muted/30"
+							"rounded-lg border px-3 py-3 text-foreground/80 text-sm",
+							index === 0 ? "border-foreground/30" : "border-border"
 						)}
-						key={hire.name}
+						key={name}
 					>
-						<span className="flex size-6 items-center justify-center rounded-md bg-foreground/10 font-mono text-[10px] text-foreground/65">
-							{hire.name.slice(0, 1)}
-						</span>
-						<span className="min-w-0 flex-1">
-							<span className="block truncate text-foreground/75 text-xs">
-								{hire.name}
-							</span>
-							<span className="block text-[10px] text-muted-foreground">
-								{hire.state}
-							</span>
-						</span>
-						<span className="font-mono text-[10px] text-foreground/60">
-							{hire.cost}
-						</span>
+						{name}
 					</div>
 				))}
 			</div>
 		</MinimalCard>
+	);
+}
+
+const BOT_THREADS = [
+	{ id: "a", tone: "bg-foreground/60", bar: "w-3/4" },
+	{ id: "b", tone: "bg-foreground/35", bar: "w-2/3" },
+	{ id: "c", tone: "bg-foreground/25", bar: "w-4/5" },
+	{ id: "d", tone: "bg-foreground/15", bar: "w-1/2" },
+	{ id: "e", tone: "bg-foreground/15", bar: "w-3/5" },
+];
+
+/**
+ * The Bot workspace, text-free: a thread list on the left and the open thread
+ * on the right, with a request, the returned result, and a review action.
+ */
+export function BotHeroVisual() {
+	return (
+		<WindowFrame className="w-full rounded-2xl" contentClassName="p-0">
+			<div aria-hidden="true" className="grid min-h-64 grid-cols-[38%_1fr]">
+				<div className="space-y-3 bg-muted/30 p-4">
+					{BOT_THREADS.map((thread, index) => (
+						<div
+							className={cn(
+								"flex items-center gap-2.5 rounded-lg px-2 py-2",
+								index === 0 && "bg-background"
+							)}
+							key={thread.id}
+						>
+							<span
+								className={cn("size-6 shrink-0 rounded-full", thread.tone)}
+							/>
+							<span
+								className={cn(
+									"block h-1.5 rounded-full bg-foreground/15",
+									thread.bar
+								)}
+							/>
+						</div>
+					))}
+				</div>
+				<div className="flex flex-col gap-3 p-4">
+					<div className="ml-auto w-2/5 rounded-2xl rounded-tr-sm bg-foreground px-3 py-3">
+						<span className="block h-1.5 w-full rounded-full bg-background/40" />
+					</div>
+					<div className="w-4/5 space-y-2 rounded-2xl rounded-tl-sm bg-muted px-3 py-3">
+						<span className="block h-1.5 w-full rounded-full bg-foreground/15" />
+						<span className="block h-1.5 w-5/6 rounded-full bg-foreground/10" />
+						<span className="block h-1.5 w-2/3 rounded-full bg-foreground/10" />
+					</div>
+					<span className="h-6 w-16 rounded-full border border-border" />
+					<div className="mt-auto flex items-center gap-2 rounded-full border border-border px-3 py-2">
+						<span className="block h-1.5 w-1/3 rounded-full bg-foreground/10" />
+						<span className="ml-auto size-5 rounded-full bg-foreground/80" />
+					</div>
+				</div>
+			</div>
+		</WindowFrame>
 	);
 }

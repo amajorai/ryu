@@ -10,6 +10,7 @@
 // so this file only decides typography — no HTML is constructed from network
 // text, and no markdown engine is pulled into a toast.
 
+import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import type { ReactNode } from "react";
 import {
 	type NoteSection,
@@ -28,7 +29,7 @@ function Segments({ segments }: { segments: NoteSegment[] }) {
 				if (segment.code) {
 					return (
 						<code
-							className="rounded bg-black/10 px-1 py-px font-mono text-[0.9em] dark:bg-white/10"
+							className="rounded bg-black/10 px-1 py-px font-mono text-sm dark:bg-white/10"
 							key={key}
 						>
 							{segment.text}
@@ -52,9 +53,7 @@ function Section({ section }: { section: NoteSection }) {
 	return (
 		<div className="space-y-0.5">
 			{section.title ? (
-				<div className="font-medium text-[0.95em] opacity-70">
-					{section.title}
-				</div>
+				<div className="font-medium text-sm opacity-70">{section.title}</div>
 			) : null}
 			<ul className="space-y-0.5">
 				{section.items.map((item, index) => (
@@ -83,6 +82,7 @@ export interface ReleaseNotesProps {
 }
 
 export function ReleaseNotes({ htmlUrl, summary }: ReleaseNotesProps) {
+	const safeHtmlUrl = safeHttpUrl(htmlUrl);
 	return (
 		<div className="space-y-1.5">
 			{summary.sections.map((section, index) => (
@@ -90,10 +90,10 @@ export function ReleaseNotes({ htmlUrl, summary }: ReleaseNotesProps) {
 			))}
 			{/* sileo's `button` slot is singular and already spent on "Update now",
 			    so the escape to the unabridged notes has to be an inline link. */}
-			{summary.truncated && htmlUrl ? (
+			{summary.truncated && safeHtmlUrl ? (
 				<a
 					className="inline-block underline underline-offset-2 opacity-70 hover:opacity-100"
-					href={htmlUrl}
+					href={safeHtmlUrl}
 					rel="noopener"
 					target="_blank"
 				>

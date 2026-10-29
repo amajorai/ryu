@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { buildSuggestedAgentInput } from "./agent-suggestion.ts";
+import {
+	buildSuggestedAgentInput,
+	suggestionIdentityMode,
+} from "./agent-suggestion.ts";
 import type { OnboardingAgentSuggestion } from "./api/onboarding-profile.ts";
 import { EMPTY_AGENT_SELECTION } from "./api/preferences.ts";
 
@@ -27,6 +30,7 @@ describe("onboarding agent recipe payload", () => {
 				modelId: "openai/gpt-5-mini",
 			},
 			engine: "acp:pi",
+			identityMode: "managed",
 			model: "openai/gpt-5-mini",
 			name: "Release Desk",
 			safetyProfile: "read_only",
@@ -44,5 +48,26 @@ describe("onboarding agent recipe payload", () => {
 
 		expect(input.tools).toEqual(["search_conversations.search"]);
 		expect(input.safetyProfile).toBe("read_only");
+	});
+
+	test("carries the identity mode chosen on the card", () => {
+		for (const mode of ["managed", "individual", "mixed"] as const) {
+			const input = buildSuggestedAgentInput(
+				suggestion,
+				EMPTY_AGENT_SELECTION,
+				mode
+			);
+			expect(input.identityMode).toBe(mode);
+			// Account access stays unset: no limit within the mode.
+			expect(input.accountAccess).toBeUndefined();
+		}
+	});
+
+	test("a suggestion without a choice acts as you", () => {
+		const modes = new Map([["agent-suggestion-other", "individual" as const]]);
+		expect(suggestionIdentityMode(modes, suggestion.id)).toBe("managed");
+		expect(suggestionIdentityMode(modes, "agent-suggestion-other")).toBe(
+			"individual"
+		);
 	});
 });

@@ -1,0 +1,3 @@
+[test]
+# Bun only implements CSS Modules in its bundler; see the preload for details.
+preload = ["./scripts/css-modules-preload.ts"]

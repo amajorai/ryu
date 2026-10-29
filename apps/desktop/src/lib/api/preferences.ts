@@ -1,3 +1,4 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/preferences.ts
 //
 // Typed client for Core's key-value preferences store (`/api/preferences/:key`).
@@ -5,19 +6,18 @@
 // with the exact same preset. Core is the cross-process channel; localStorage
 // stays the local cache.
 
-import { THEME_PREF_KEY, type ThemePrefs } from "@ryu/ui/theme/prefs";
+import {
+	THEME_PREF_KEY,
+	type ThemePrefs,
+	themePrefsSchema,
+} from "@ryu/ui/theme/prefs.ts";
+import { z } from "zod";
 import { ApiError, type ApiTarget, request } from "./client.ts";
 import type {
 	CustomPattern,
-	CustomPatternKind,
 	RouteStrategy,
 	SmartRoutingConfig,
 } from "./gateway.ts";
-
-interface PreferenceWire {
-	key: string;
-	value: string;
-}
 
 /** Notifications for in-process consumers that need a saved preference to take
  * effect immediately (for example, a plugin-owned audio controller). */
@@ -34,15 +34,18 @@ export function subscribePreferenceChanges(
 	};
 }
 
-/** Read a raw preference value, or null only when the key is genuinely unset. */
+/** Read the node's preference value. Core resolves privacy booleans and built-in
+ * selections; ordinary optional keys return null only when genuinely unset. */
 export async function getPreference(
 	target: ApiTarget,
 	key: string
 ): Promise<string | null> {
 	try {
-		const data = await request<PreferenceWire>(
+		const data = await request(
 			target,
-			`/api/preferences/${key}`
+			`/api/preferences/${encodeURIComponent(key)}`,
+			undefined,
+			preferenceWireResponseSchema
 		);
 		return data.value;
 	} catch (error) {
@@ -59,10 +62,15 @@ export async function setPreference(
 	key: string,
 	value: string
 ): Promise<boolean> {
-	await request(target, `/api/preferences/${key}`, {
-		method: "PUT",
-		body: { value },
-	});
+	await request(
+		target,
+		`/api/preferences/${encodeURIComponent(key)}`,
+		{
+			method: "PUT",
+			body: { value },
+		},
+		gatewayJsonValueSchema
+	);
 	for (const listener of preferenceChangeListeners) {
 		try {
 			listener(key, value);
@@ -74,19 +82,11 @@ export async function setPreference(
 	return true;
 }
 
-export const USER_PERSONALIZATION_PREF_KEY = "user-personalization";
-export interface UserPersonalization {
-	aboutOrganization: string;
-	aboutYou: string;
-	nickname: string;
-	occupation: string;
-}
-export const DEFAULT_USER_PERSONALIZATION: UserPersonalization = {
-	aboutOrganization: "",
-	aboutYou: "",
-	nickname: "",
-	occupation: "",
-};
+export {
+	DEFAULT_USER_PERSONALIZATION,
+	USER_PERSONALIZATION_PREF_KEY,
+	type UserPersonalization,
+} from "@ryuhq/core-client/personalization.ts";
 
 // --- Managed per-request routing ------------------------------------------
 
@@ -99,33 +99,46 @@ export interface NodeRoutingPreferences {
 	fallback: string[];
 	/** Extra patterns are additive; the fleet still owns all enforcement dials. */
 	firewall: { custom_patterns: CustomPattern[] } | null;
+	/** OpenRouter's request `provider` options, forwarded only through Ryu Gateway. */
+	openrouter: OpenRouterOptions | null;
+	/** OpenRouter models to try after the request's primary model. */
+	openrouter_model_fallbacks: string[];
 }
+
+/** Must stay in sync with Gateway's node_routing.max_doc_bytes default. */
+export const NODE_ROUTING_PREFS_MAX_BYTES = 3072;
 
 export const EMPTY_NODE_ROUTING_PREFERENCES: NodeRoutingPreferences = {
 	fallback: [],
 	firewall: null,
+	openrouter: null,
+	openrouter_model_fallbacks: [],
 };
 
-const NODE_ROUTING_PATTERN_KINDS: readonly CustomPatternKind[] = [
-	"pii",
-	"secret",
-	"prompt_injection",
-];
+export const openRouterOptionsSchema = z.record(z.string(), z.json());
+export type OpenRouterOptions = z.infer<typeof openRouterOptionsSchema>;
+export type OpenRouterOption = OpenRouterOptions[string];
 
-function isCustomPattern(value: unknown): value is CustomPattern {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-	const pattern = value as Record<string, unknown>;
-	return (
-		typeof pattern.kind === "string" &&
-		NODE_ROUTING_PATTERN_KINDS.includes(pattern.kind as CustomPatternKind) &&
-		typeof pattern.name === "string" &&
-		pattern.name.trim().length > 0 &&
-		typeof pattern.regex === "string" &&
-		pattern.regex.trim().length > 0
-	);
-}
+const customPatternSchema = z
+	.object({
+		kind: z.enum(["pii", "secret", "prompt_injection"]),
+		name: z.string().refine((value) => value.trim().length > 0),
+		regex: z.string().refine((value) => value.trim().length > 0),
+	})
+	.passthrough();
+const routingStringListSchema = z.array(z.string().catch("")).catch([]);
+const nodeRoutingPreferencesSchema = z.object({
+	fallback: routingStringListSchema,
+	firewall: z
+		.object({
+			custom_patterns: z
+				.array(customPatternSchema.optional().catch(undefined))
+				.catch([]),
+		})
+		.catch({ custom_patterns: [] }),
+	openrouter: openRouterOptionsSchema.nullable().catch(null),
+	openrouter_model_fallbacks: routingStringListSchema,
+});
 
 /** Parse the node-routing preference defensively; invalid edits mean no prefs. */
 export function parseNodeRoutingPreferences(
@@ -135,29 +148,24 @@ export function parseNodeRoutingPreferences(
 		return EMPTY_NODE_ROUTING_PREFERENCES;
 	}
 	try {
-		const value = JSON.parse(raw) as Record<string, unknown>;
-		const fallback = Array.isArray(value.fallback)
-			? value.fallback
-					.filter(
-						(entry): entry is string =>
-							typeof entry === "string" && entry.trim().length > 0
-					)
-					.map((entry) => entry.trim())
-			: [];
-		const rawPatterns =
-			value.firewall && typeof value.firewall === "object"
-				? (value.firewall as Record<string, unknown>).custom_patterns
-				: undefined;
-		const custom_patterns = Array.isArray(rawPatterns)
-			? rawPatterns.filter(isCustomPattern).map((pattern) => ({
-					...pattern,
-					name: pattern.name.trim(),
-					regex: pattern.regex.trim(),
-				}))
-			: [];
+		const value = nodeRoutingPreferencesSchema.parse(JSON.parse(raw));
+		const custom_patterns = value.firewall.custom_patterns
+			.filter((pattern) => pattern !== undefined)
+			.map((pattern) => ({
+				...pattern,
+				name: pattern.name.trim(),
+				regex: pattern.regex.trim(),
+			}));
 		return {
-			fallback,
+			fallback: value.fallback.map((entry) => entry.trim()).filter(Boolean),
 			firewall: custom_patterns.length > 0 ? { custom_patterns } : null,
+			openrouter:
+				value.openrouter && Object.keys(value.openrouter).length > 0
+					? value.openrouter
+					: null,
+			openrouter_model_fallbacks: value.openrouter_model_fallbacks
+				.map((entry) => entry.trim())
+				.filter(Boolean),
 		};
 	} catch {
 		return EMPTY_NODE_ROUTING_PREFERENCES;
@@ -170,15 +178,37 @@ export function serializeNodeRoutingPreferences(
 ): string {
 	const fallback = prefs.fallback.map((entry) => entry.trim()).filter(Boolean);
 	const custom_patterns = (prefs.firewall?.custom_patterns ?? []).filter(
-		isCustomPattern
+		(pattern) => customPatternSchema.safeParse(pattern).success
 	);
-	if (fallback.length === 0 && custom_patterns.length === 0) {
+	const openrouter =
+		prefs.openrouter && Object.keys(prefs.openrouter).length > 0
+			? prefs.openrouter
+			: null;
+	const openrouterModelFallbacks = prefs.openrouter_model_fallbacks
+		.map((entry) => entry.trim())
+		.filter(Boolean);
+	if (
+		fallback.length === 0 &&
+		custom_patterns.length === 0 &&
+		!openrouter &&
+		openrouterModelFallbacks.length === 0
+	) {
 		return "";
 	}
-	return JSON.stringify({
-		...(fallback.length > 0 ? { fallback } : {}),
-		...(custom_patterns.length > 0 ? { firewall: { custom_patterns } } : {}),
-	});
+	const envelope: Partial<NodeRoutingPreferences> = {};
+	if (fallback.length > 0) {
+		envelope.fallback = fallback;
+	}
+	if (custom_patterns.length > 0) {
+		envelope.firewall = { custom_patterns };
+	}
+	if (openrouter) {
+		envelope.openrouter = openrouter;
+	}
+	if (openrouterModelFallbacks.length > 0) {
+		envelope.openrouter_model_fallbacks = openrouterModelFallbacks;
+	}
+	return JSON.stringify(envelope);
 }
 
 export async function getNodeRoutingPreferences(
@@ -250,9 +280,15 @@ export function isAgentSelectionEmpty(selection: AgentSelection): boolean {
 	);
 }
 
-function selectionString(value: unknown): string {
-	return typeof value === "string" ? value.trim() : "";
-}
+const selectionStringSchema = z.string().trim().catch("");
+const agentSelectionSchema = z.object({
+	agent_id: selectionStringSchema,
+	provider: selectionStringSchema,
+	model: selectionStringSchema,
+	thinking_level: selectionStringSchema,
+	effort: selectionStringSchema,
+	access_mode: selectionStringSchema,
+});
 
 /**
  * Parse a stored preference value into a selection. Accepts the JSON object
@@ -269,15 +305,7 @@ export function parseAgentSelection(raw: string | null): AgentSelection {
 		return { ...EMPTY_AGENT_SELECTION, model: trimmed };
 	}
 	try {
-		const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-		return {
-			agent_id: selectionString(parsed.agent_id),
-			provider: selectionString(parsed.provider),
-			model: selectionString(parsed.model),
-			thinking_level: selectionString(parsed.thinking_level),
-			effort: selectionString(parsed.effort),
-			access_mode: selectionString(parsed.access_mode),
-		};
+		return agentSelectionSchema.parse(JSON.parse(trimmed));
 	} catch {
 		return EMPTY_AGENT_SELECTION;
 	}
@@ -303,7 +331,9 @@ export const DEFAULT_CLOUD_AGENT_SELECTION_PREF_KEY =
 
 export type AgentLane = "local" | "cloud";
 
-/** Core's installed local Gemma used by a fresh Ryu lane. */
+/** Offline fallback for a fresh Ryu lane. Core answers the real default (the
+ *  1B Gemma fallback on low-RAM nodes) through the default-agent-selection
+ *  preference; this id is used only when that read fails. */
 export const DEFAULT_LOCAL_RYU_MODEL_ID = "gemma-4-E2B-it-Q4_K_M";
 /** Persisted logical provider id for paid managed Ryu inference. */
 export const MANAGED_RYU_PROVIDER_ID = "managed-openrouter";
@@ -393,25 +423,22 @@ export const ISLAND_APPEARANCE_PREF_KEY = "island-appearance";
 /** The island background treatment: tinted glass vs native OS material. */
 export type IslandBackground = "translucent" | "acrylic" | "mica";
 
-/** Read the island background, defaulting to `translucent`. */
+/** Read the island background, defaulting to native-blur `acrylic`. */
 export async function getIslandBackground(
 	target: ApiTarget
 ): Promise<IslandBackground> {
 	const raw = await getPreference(target, ISLAND_APPEARANCE_PREF_KEY);
 	if (!raw) {
-		return "translucent";
+		return "acrylic";
 	}
 	try {
-		const parsed = JSON.parse(raw) as { background?: unknown };
-		if (parsed.background === "acrylic") {
-			return "acrylic";
-		}
-		if (parsed.background === "mica") {
-			return "mica";
-		}
-		return "translucent";
+		return z
+			.object({
+				background: z.enum(["translucent", "acrylic", "mica"]).catch("acrylic"),
+			})
+			.parse(JSON.parse(raw)).background;
 	} catch {
-		return "translucent";
+		return "acrylic";
 	}
 }
 
@@ -658,10 +685,7 @@ export async function getKeybindings(
 		return {};
 	}
 	try {
-		const parsed = JSON.parse(raw) as unknown;
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			return parsed as KeybindingOverrides;
-		}
+		return z.record(z.string(), z.string().nullable()).parse(JSON.parse(raw));
 	} catch {
 		// Corrupt blob: fall back to defaults rather than throwing.
 	}
@@ -715,17 +739,12 @@ export async function getIslandAgentPrefs(
 		return DEFAULT_ISLAND_AGENT_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<IslandAgentPrefs>;
-		return {
-			voiceAgent:
-				typeof parsed.voiceAgent === "string"
-					? parsed.voiceAgent
-					: DEFAULT_AGENT_ID,
-			proactiveAgent:
-				typeof parsed.proactiveAgent === "string"
-					? parsed.proactiveAgent
-					: DEFAULT_AGENT_ID,
-		};
+		return z
+			.object({
+				voiceAgent: z.string().catch(DEFAULT_AGENT_ID),
+				proactiveAgent: z.string().catch(DEFAULT_AGENT_ID),
+			})
+			.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_ISLAND_AGENT_PREFS;
 	}
@@ -781,15 +800,13 @@ export async function getIslandTtsPrefs(
 		return DEFAULT_ISLAND_TTS_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<IslandTtsPrefs>;
-		return {
-			enabled: parsed.enabled !== false,
-			engine:
-				typeof parsed.engine === "string" && parsed.engine.length > 0
-					? parsed.engine
-					: DEFAULT_ISLAND_TTS_ENGINE,
-			voice: typeof parsed.voice === "string" ? parsed.voice : "",
-		};
+		return z
+			.object({
+				enabled: z.boolean().catch(true),
+				engine: z.string().min(1).catch(DEFAULT_ISLAND_TTS_ENGINE),
+				voice: z.string().catch(""),
+			})
+			.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_ISLAND_TTS_PREFS;
 	}
@@ -831,7 +848,9 @@ export async function getVoiceModeReadbackPrefs(
 		return DEFAULT_VOICE_MODE_READBACK_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<VoiceModeReadbackPrefs>;
+		const parsed = z
+			.object({ enabled: z.boolean().catch(false) })
+			.parse(JSON.parse(raw));
 		return { enabled: parsed.enabled === true };
 	} catch {
 		return DEFAULT_VOICE_MODE_READBACK_PREFS;
@@ -857,10 +876,87 @@ export function setVoiceModeReadbackPrefs(
 
 export const DESKTOP_TTS_ENGINE_KEY = "ryu.tts.engine";
 export const DESKTOP_TTS_VOICE_KEY = "ryu.tts.voice";
+export const DESKTOP_TTS_ENGINE_OPTIONS_KEY = "ryu.tts.engine-options";
 export const DEFAULT_DESKTOP_TTS_ENGINE = "kokoro";
 
+/** Request defaults retained separately for each desktop speech engine. */
+export interface DesktopTtsEngineOptions {
+	language?: string;
+	referenceAudio?: string;
+	speed?: number;
+	voice?: string;
+}
+
+const desktopTtsEngineOptionsSchema = z.object({
+	language: z.string().max(64).optional().catch(undefined),
+	referenceAudio: z.string().max(4096).optional().catch(undefined),
+	speed: z.number().min(0.25).max(4).optional().catch(undefined),
+	voice: z.string().max(256).optional().catch(undefined),
+});
+const desktopTtsEngineOptionsMapSchema = z.record(z.string(), z.json());
+type DesktopTtsEngineOptionsMap = z.infer<
+	typeof desktopTtsEngineOptionsMapSchema
+>;
+
+function readDesktopTtsEngineOptionsMap(): DesktopTtsEngineOptionsMap {
+	try {
+		const raw = localStorage.getItem(DESKTOP_TTS_ENGINE_OPTIONS_KEY);
+		return raw ? desktopTtsEngineOptionsMapSchema.parse(JSON.parse(raw)) : {};
+	} catch {
+		return {};
+	}
+}
+
+function isDesktopTtsEngineId(value: string): boolean {
+	return /^[a-z0-9][a-z0-9_-]{0,79}$/.test(value);
+}
+
+/** Read request defaults saved for one speech engine. */
+export function getDesktopTtsEngineOptions(
+	engine: string
+): DesktopTtsEngineOptions {
+	if (!isDesktopTtsEngineId(engine)) {
+		return {};
+	}
+	return desktopTtsEngineOptionsSchema
+		.catch({})
+		.parse(readDesktopTtsEngineOptionsMap()[engine]);
+}
+
+/** Persist request defaults separately per speech engine. */
+export function setDesktopTtsEngineOptions(
+	engine: string,
+	patch: Partial<DesktopTtsEngineOptions>
+): void {
+	if (!isDesktopTtsEngineId(engine)) {
+		return;
+	}
+	const options = desktopTtsEngineOptionsSchema.parse({
+		...getDesktopTtsEngineOptions(engine),
+		...patch,
+	});
+	const allOptions = readDesktopTtsEngineOptionsMap();
+	allOptions[engine] = z.json().parse(JSON.parse(JSON.stringify(options)));
+	try {
+		localStorage.setItem(
+			DESKTOP_TTS_ENGINE_OPTIONS_KEY,
+			JSON.stringify(allOptions)
+		);
+	} catch {
+		// The active page still reflects the draft if browser storage is unavailable.
+	}
+	for (const listener of desktopTtsListeners) {
+		listener();
+	}
+}
+
 /** Desktop default TTS engine + voice from localStorage. */
-export function getDesktopTtsPrefs(): { engine: string; voice: string } {
+interface DesktopTtsPrefs {
+	engine: string;
+	voice: string;
+}
+
+export function getDesktopTtsPrefs(): DesktopTtsPrefs {
 	try {
 		return {
 			engine:
@@ -933,11 +1029,6 @@ export const DEFAULT_ISLAND_CONSENT: IslandConsentPrefs = {
 	proactive: null,
 };
 
-/** Coerce arbitrary persisted JSON into a strict tri-state value. */
-function coerceTriState(value: unknown): boolean | null {
-	return value === true || value === false ? value : null;
-}
-
 /** Read the island consent, falling back to {@link DEFAULT_ISLAND_CONSENT}. */
 export async function getIslandConsent(
 	target: ApiTarget
@@ -947,12 +1038,13 @@ export async function getIslandConsent(
 		return DEFAULT_ISLAND_CONSENT;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<IslandConsentPrefs>;
-		return {
-			chat: parsed.chat !== false,
-			contextRead: coerceTriState(parsed.contextRead),
-			proactive: coerceTriState(parsed.proactive),
-		};
+		return z
+			.object({
+				chat: z.boolean().catch(true),
+				contextRead: z.boolean().nullable().catch(null),
+				proactive: z.boolean().nullable().catch(null),
+			})
+			.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_ISLAND_CONSENT;
 	}
@@ -1120,10 +1212,12 @@ export const VOICE_ENGINES: {
  * EVERY unrecognised value onto parakeet, so adding an engine to the list left
  * it unselectable and, worse, quietly rewrote a saved pick for it.
  */
-export function isVoiceEngine(value: unknown): value is VoiceEngine {
-	return (
-		typeof value === "string" && VOICE_ENGINES.some((e) => e.engine === value)
-	);
+const voiceEngineCandidateSchema = z.json().optional();
+type VoiceEngineCandidate = z.infer<typeof voiceEngineCandidateSchema>;
+export function isVoiceEngine(
+	value: VoiceEngineCandidate
+): value is VoiceEngine {
+	return VOICE_ENGINES.some((entry) => entry.engine === value);
 }
 
 /** Default voice-input settings (mirrors the island's `DEFAULT_VOICE_PREFS`). */
@@ -1144,21 +1238,25 @@ export async function getVoiceInputPrefs(
 		return DEFAULT_VOICE_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<VoiceInputPrefs>;
-		const engine = isVoiceEngine(parsed.engine) ? parsed.engine : "parakeet";
+		const parsed = z
+			.object({
+				enabled: z.boolean().catch(true),
+				engine: z.string().catch(""),
+				mode: z.enum(["toggle", "push-to-talk"]).catch("toggle"),
+				model: z.string().min(1).optional().catch(undefined),
+				shortcut: z.string().trim().min(1).catch(DEFAULT_VOICE_PREFS.shortcut),
+			})
+			.parse(JSON.parse(raw));
+		const engine =
+			VOICE_ENGINES.find((entry) => entry.engine === parsed.engine)?.engine ??
+			"parakeet";
 		return {
-			enabled: parsed.enabled !== false,
+			...parsed,
 			engine,
-			mode: parsed.mode === "push-to-talk" ? "push-to-talk" : "toggle",
 			model:
-				typeof parsed.model === "string" && parsed.model.length > 0
-					? parsed.model
-					: (VOICE_ENGINES.find((e) => e.engine === engine)?.model ??
-						DEFAULT_VOICE_PREFS.model),
-			shortcut:
-				typeof parsed.shortcut === "string" && parsed.shortcut.trim().length > 0
-					? parsed.shortcut.trim()
-					: DEFAULT_VOICE_PREFS.shortcut,
+				parsed.model ??
+				VOICE_ENGINES.find((entry) => entry.engine === engine)?.model ??
+				DEFAULT_VOICE_PREFS.model,
 		};
 	} catch {
 		return DEFAULT_VOICE_PREFS;
@@ -1220,15 +1318,6 @@ export const DEFAULT_SPEECH_PROCESSING_PREFS: SpeechProcessingPrefs = {
 	styling: "semi-formal",
 };
 
-function isSpeechProcessingEngine(
-	value: unknown
-): value is SpeechProcessingEngine {
-	return (
-		typeof value === "string" &&
-		SPEECH_PROCESSING_ENGINES.some((entry) => entry.engine === value)
-	);
-}
-
 /** Parse the shared Speech Processing preference defensively. */
 export function parseSpeechProcessingPrefs(
 	raw: string | null
@@ -1237,27 +1326,22 @@ export function parseSpeechProcessingPrefs(
 		return DEFAULT_SPEECH_PROCESSING_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<SpeechProcessingPrefs>;
-		return {
-			context:
-				parsed.context === "email"
-					? "email"
-					: DEFAULT_SPEECH_PROCESSING_PREFS.context,
-			engine: isSpeechProcessingEngine(parsed.engine)
-				? parsed.engine
-				: DEFAULT_SPEECH_PROCESSING_PREFS.engine,
-			structure:
-				parsed.structure === "lists"
-					? "lists"
-					: DEFAULT_SPEECH_PROCESSING_PREFS.structure,
-			styling:
-				parsed.styling === "casual" ||
-				parsed.styling === "semi-casual" ||
-				parsed.styling === "semi-formal" ||
-				parsed.styling === "formal"
-					? parsed.styling
-					: DEFAULT_SPEECH_PROCESSING_PREFS.styling,
-		};
+		return z
+			.object({
+				context: z
+					.enum(["general", "email"])
+					.catch(DEFAULT_SPEECH_PROCESSING_PREFS.context),
+				engine: z
+					.literal("s1-mini")
+					.catch(DEFAULT_SPEECH_PROCESSING_PREFS.engine),
+				structure: z
+					.enum(["prose", "lists"])
+					.catch(DEFAULT_SPEECH_PROCESSING_PREFS.structure),
+				styling: z
+					.enum(["casual", "semi-casual", "semi-formal", "formal"])
+					.catch(DEFAULT_SPEECH_PROCESSING_PREFS.styling),
+			})
+			.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_SPEECH_PROCESSING_PREFS;
 	}
@@ -1379,73 +1463,85 @@ export const DEFAULT_DICTATION_PREFS: DictationPrefs = {
 	shortcut: DEFAULT_DICTATION_SHORTCUT,
 };
 
-function coerceDictationMode(value: unknown): DictationMode {
-	return value === "toggle" ? "toggle" : "push-to-talk";
-}
-
-function coerceDictationInsertMode(value: unknown): DictationInsertMode {
-	return value === "paste" ? "paste" : "type";
-}
-
-function parseAgentSelectionValue(value: unknown): AgentSelection {
-	if (value == null) {
-		return EMPTY_AGENT_SELECTION;
-	}
-	if (typeof value === "object") {
-		return parseAgentSelection(JSON.stringify(value));
-	}
-	if (typeof value === "string") {
-		return parseAgentSelection(value);
-	}
-	return EMPTY_AGENT_SELECTION;
-}
+const dictationSelectionSchema = z
+	.union([z.string(), agentSelectionSchema])
+	.optional()
+	.catch(undefined);
+type DictationSelection = z.infer<typeof dictationSelectionSchema>;
 
 function parseAgentSelectionWithLegacyAgent(
-	selection: unknown,
-	legacyAgent: unknown
+	selection: DictationSelection,
+	legacyAgent: string
 ): AgentSelection {
-	const fromSelection = parseAgentSelectionValue(selection);
+	const candidate = z.string().safeParse(selection);
+	const fromSelection = candidate.success
+		? parseAgentSelection(candidate.data)
+		: agentSelectionSchema.catch(EMPTY_AGENT_SELECTION).parse(selection);
 	if (!isAgentSelectionEmpty(fromSelection)) {
 		return fromSelection;
 	}
-	const agent = typeof legacyAgent === "string" ? legacyAgent.trim() : "";
-	if (agent.length > 0) {
-		return { ...EMPTY_AGENT_SELECTION, agent_id: agent };
-	}
-	return EMPTY_AGENT_SELECTION;
+	const agent = legacyAgent.trim();
+	return agent
+		? { ...EMPTY_AGENT_SELECTION, agent_id: agent }
+		: EMPTY_AGENT_SELECTION;
 }
 
-function parseDictationPostProcess(value: unknown): DictationPostProcess {
-	const raw = (value ?? {}) as Record<string, unknown>;
-	const prompt =
-		typeof raw.prompt === "string" && raw.prompt.trim().length > 0
-			? raw.prompt
-			: DEFAULT_DICTATION_POSTPROCESS_PROMPT;
-	return {
-		enabled: value == null ? true : raw.enabled === true,
-		prompt,
-		selection: parseAgentSelectionWithLegacyAgent(raw.selection, raw.agent),
-	};
-}
-
-function parseDictationAsk(value: unknown): DictationAskPrefs {
-	const raw = (value ?? {}) as Record<string, unknown>;
-	const shortcut =
-		typeof raw.shortcut === "string" && raw.shortcut.trim().length > 0
-			? raw.shortcut.trim()
-			: DEFAULT_DICTATION_ASK_SHORTCUT;
-	const prompt =
-		typeof raw.prompt === "string" && raw.prompt.trim().length > 0
-			? raw.prompt
-			: DEFAULT_DICTATION_ASK_PROMPT;
-	return {
-		enabled: raw.enabled === true,
-		mode: coerceDictationMode(raw.mode),
-		prompt,
-		selection: parseAgentSelectionWithLegacyAgent(raw.selection, raw.agent),
-		shortcut,
-	};
-}
+const dictationPostProcessSchema = z
+	.object({
+		enabled: z.boolean().catch(false),
+		prompt: z
+			.string()
+			.refine((value) => value.trim().length > 0)
+			.catch(DEFAULT_DICTATION_POSTPROCESS_PROMPT),
+		selection: dictationSelectionSchema,
+		agent: z.string().catch(""),
+	})
+	.catch({
+		enabled: false,
+		prompt: DEFAULT_DICTATION_POSTPROCESS_PROMPT,
+		selection: undefined,
+		agent: "",
+	});
+const dictationAskSchema = z
+	.object({
+		enabled: z.boolean().catch(false),
+		mode: z.enum(["toggle", "push-to-talk"]).catch("push-to-talk"),
+		prompt: z
+			.string()
+			.refine((value) => value.trim().length > 0)
+			.catch(DEFAULT_DICTATION_ASK_PROMPT),
+		shortcut: z.string().trim().min(1).catch(DEFAULT_DICTATION_ASK_SHORTCUT),
+		selection: dictationSelectionSchema,
+		agent: z.string().catch(""),
+	})
+	.catch({
+		enabled: false,
+		mode: "push-to-talk",
+		prompt: DEFAULT_DICTATION_ASK_PROMPT,
+		shortcut: DEFAULT_DICTATION_ASK_SHORTCUT,
+		selection: undefined,
+		agent: "",
+	});
+const dictationPreferencesSchema = z.object({
+	ask: dictationAskSchema,
+	autoSend: z.boolean().catch(false),
+	enabled: z.boolean().catch(true),
+	engine: z.string().catch(""),
+	insertMode: z.enum(["type", "paste"]).catch("type"),
+	mode: z.enum(["toggle", "push-to-talk"]).catch("push-to-talk"),
+	pasteKeys: z.string().trim().catch(""),
+	postProcess: dictationPostProcessSchema.nullish().transform(
+		(value) =>
+			value ?? {
+				enabled: true,
+				prompt: DEFAULT_DICTATION_POSTPROCESS_PROMPT,
+				selection: undefined,
+				agent: "",
+			}
+	),
+	restoreClipboard: z.boolean().catch(true),
+	shortcut: z.string().trim().min(1).catch(DEFAULT_DICTATION_SHORTCUT),
+});
 
 /** Read the saved dictation settings, falling back to defaults. */
 export async function getDictationPrefs(
@@ -1456,24 +1552,30 @@ export async function getDictationPrefs(
 		return DEFAULT_DICTATION_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<DictationPrefs>;
-		const shortcut =
-			typeof parsed.shortcut === "string" && parsed.shortcut.trim().length > 0
-				? parsed.shortcut.trim()
-				: DEFAULT_DICTATION_SHORTCUT;
-		const engine = isVoiceEngine(parsed.engine) ? parsed.engine : "parakeet";
+		const parsed = dictationPreferencesSchema.parse(JSON.parse(raw));
+		const engine =
+			VOICE_ENGINES.find((entry) => entry.engine === parsed.engine)?.engine ??
+			"parakeet";
+		const { agent: askAgent, selection: askSelection, ...ask } = parsed.ask;
+		const {
+			agent: postProcessAgent,
+			selection: postProcessSelection,
+			...postProcess
+		} = parsed.postProcess;
 		return {
-			ask: parseDictationAsk(parsed.ask),
-			autoSend: parsed.autoSend === true,
-			enabled: parsed.enabled !== false,
+			...parsed,
 			engine,
-			insertMode: coerceDictationInsertMode(parsed.insertMode),
-			mode: coerceDictationMode(parsed.mode),
-			pasteKeys:
-				typeof parsed.pasteKeys === "string" ? parsed.pasteKeys.trim() : "",
-			postProcess: parseDictationPostProcess(parsed.postProcess),
-			restoreClipboard: parsed.restoreClipboard !== false,
-			shortcut,
+			ask: {
+				...ask,
+				selection: parseAgentSelectionWithLegacyAgent(askSelection, askAgent),
+			},
+			postProcess: {
+				...postProcess,
+				selection: parseAgentSelectionWithLegacyAgent(
+					postProcessSelection,
+					postProcessAgent
+				),
+			},
 		};
 	} catch {
 		return DEFAULT_DICTATION_PREFS;
@@ -1746,8 +1848,8 @@ export async function getPromptCacheMode(
 	target: ApiTarget
 ): Promise<PromptCacheMode | null> {
 	const raw = await getPreference(target, PROMPT_CACHE_PREF_KEY);
-	const v = raw?.trim().toLowerCase() as PromptCacheMode | undefined;
-	return v && PROMPT_CACHE_MODES.includes(v) ? v : null;
+	const value = raw?.trim().toLowerCase();
+	return PROMPT_CACHE_MODES.find((mode) => mode === value) ?? null;
 }
 
 export function setPromptCacheMode(
@@ -1762,8 +1864,8 @@ export async function getPromptCacheTtl(
 	target: ApiTarget
 ): Promise<PromptCacheTtl | null> {
 	const raw = await getPreference(target, PROMPT_CACHE_TTL_PREF_KEY);
-	const v = raw?.trim().toLowerCase() as PromptCacheTtl | undefined;
-	return v && PROMPT_CACHE_TTLS.includes(v) ? v : null;
+	const value = raw?.trim().toLowerCase();
+	return PROMPT_CACHE_TTLS.find((ttl) => ttl === value) ?? null;
 }
 
 export function setPromptCacheTtl(
@@ -2050,13 +2152,25 @@ export function setChatMemoryEnabled(
 // prompt, injected memory, skills) survives, plus the option to summarize the
 // turns that fall out instead of dropping them.
 //
-// Five keys, all read per turn:
+// Six keys, all read per turn:
 //   `context.max-tokens`        total budget: ""/"0"/"off" = off, "auto", or a
 //                               positive integer
 //   `context.max-output-tokens` tokens held back for the reply (Core default 1024)
 //   `context.auto-compact`      summarize dropped turns instead of dropping them
 //   `context.compact-model`     summarizer model (blank = inherit, see below)
 //   `context.compact-effort`    summarizer reasoning effort
+//   `context.compact-on-cache-expire` with auto-compact on, compact harder once
+//                               the thread's provider prompt cache has expired
+//
+// Core also reads two scoped overrides of `context.max-tokens`:
+// `context.max-tokens.local` (local-engine agents only) and
+// `context.max-tokens.engine.{engine}`. A set scoped key wins over the global
+// one, so a turn can be trimmed while this card reads "Off". The card does not
+// edit them, but it surfaces any that are set through
+// {@link getScopedContextBudgetOverrides}: `.local` always, plus the per-engine
+// key for every engine id the caller already knows. Core has no list route for
+// preferences, so a per-engine key for an id the caller does not pass (an
+// unknown or cloud engine) stays unreadable from here.
 //
 // The keys are stored raw (bare strings), because Core parses them with
 // `str::parse` / literal comparison; a JSON-wrapped value reads as "unset".
@@ -2068,10 +2182,15 @@ export function setChatMemoryEnabled(
 // writing "off" makes the pref `Some`, which takes the env fallback out of play.
 
 export const CONTEXT_MAX_TOKENS_PREF_KEY = "context.max-tokens";
+export const CONTEXT_MAX_TOKENS_LOCAL_PREF_KEY = "context.max-tokens.local";
+export const CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX =
+	"context.max-tokens.engine.";
 export const CONTEXT_MAX_OUTPUT_PREF_KEY = "context.max-output-tokens";
 export const CONTEXT_AUTO_COMPACT_PREF_KEY = "context.auto-compact";
 export const CONTEXT_COMPACT_MODEL_PREF_KEY = "context.compact-model";
 export const CONTEXT_COMPACT_EFFORT_PREF_KEY = "context.compact-effort";
+export const CONTEXT_COMPACT_ON_CACHE_EXPIRE_PREF_KEY =
+	"context.compact-on-cache-expire";
 
 /** Reply reserve Core applies when `context.max-output-tokens` is unset. */
 export const CONTEXT_DEFAULT_OUTPUT_RESERVE = 1024;
@@ -2193,6 +2312,47 @@ export async function getContextBudget(
 	);
 }
 
+/** A scoped `context.max-tokens` override that is set on the node. */
+export interface ScopedContextBudgetOverride {
+	key: string;
+	value: string;
+}
+
+/**
+ * Read the scoped overrides of `context.max-tokens` that Core gives precedence
+ * over the global key: `context.max-tokens.local`, plus
+ * `context.max-tokens.engine.<id>` for each (deduplicated) id in `engineIds`.
+ * Returns only the keys whose value is non-blank after trimming, which is
+ * exactly the set Core's `pick_context_budget_raw` treats as set (a blank
+ * scoped value falls through to the global key). Values are returned trimmed
+ * and verbatim, so an explicit `off` override is reported too.
+ */
+export async function getScopedContextBudgetOverrides(
+	target: ApiTarget,
+	engineIds: readonly string[] = []
+): Promise<ScopedContextBudgetOverride[]> {
+	const keys = [
+		CONTEXT_MAX_TOKENS_LOCAL_PREF_KEY,
+		...new Set(
+			engineIds
+				.map((id) => id.trim())
+				.filter((id) => id !== "")
+				.map((id) => `${CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX}${id}`)
+		),
+	];
+	const values = await Promise.all(
+		keys.map((key) => getPreference(target, key))
+	);
+	const overrides: ScopedContextBudgetOverride[] = [];
+	for (const [index, key] of keys.entries()) {
+		const value = values[index]?.trim() ?? "";
+		if (value !== "") {
+			overrides.push({ key, value });
+		}
+	}
+	return overrides;
+}
+
 /** Persist the context budget (raw "off" / "auto" / a clamped integer). */
 export function setContextBudget(
 	target: ApiTarget,
@@ -2263,6 +2423,31 @@ export function setContextAutoCompact(
 }
 
 /**
+ * Read whether compaction also runs once the thread's provider prompt cache
+ * has expired. Default OFF; Core ignores it unless auto-compact is on.
+ */
+export async function getContextCompactOnCacheExpire(
+	target: ApiTarget
+): Promise<boolean> {
+	return parsePrefBool(
+		await getPreference(target, CONTEXT_COMPACT_ON_CACHE_EXPIRE_PREF_KEY),
+		false
+	);
+}
+
+/** Persist the compact-on-cache-expire flag (raw "true"/"false"). */
+export function setContextCompactOnCacheExpire(
+	target: ApiTarget,
+	enabled: boolean
+): Promise<boolean> {
+	return setPreference(
+		target,
+		CONTEXT_COMPACT_ON_CACHE_EXPIRE_PREF_KEY,
+		String(enabled)
+	);
+}
+
+/**
  * Read the summarizer's {model, effort} (provider is not persisted).
  *
  * Blank does NOT mean "the model you are chatting with". Core resolves this
@@ -2292,6 +2477,60 @@ export function setContextCompactConfig(
 		},
 		cfg
 	);
+}
+
+// --- Context handoff on model change ----------------------------------------
+// When a conversation switches models, Core can hand the earlier history to the
+// new model as a one-time summary instead of replaying it
+// (`apps/core/src/sidecar/adapters/context_handoff.rs`). Independent of the
+// context budget above: it is ON by default, for the case that would otherwise
+// break the chat, a switch to a model with a smaller context window that the
+// conversation no longer fits. Stored raw; unknown values read as the default.
+
+export const CONTEXT_HANDOFF_PREF_KEY = "context.handoff-on-model-change";
+
+export type ContextHandoffPolicy =
+	| "always"
+	| "different-provider"
+	| "off"
+	| "smaller-context";
+
+export const CONTEXT_HANDOFF_DEFAULT: ContextHandoffPolicy = "smaller-context";
+
+/** Mirror of Core's `HandoffPolicy::parse`, including its accepted aliases. PURE. */
+export function parseContextHandoffPolicy(
+	raw: string | null
+): ContextHandoffPolicy {
+	switch ((raw ?? "").trim().toLowerCase()) {
+		case "off":
+		case "never":
+		case "false":
+		case "0":
+			return "off";
+		case "different-provider":
+		case "provider":
+			return "different-provider";
+		case "always":
+		case "all":
+			return "always";
+		default:
+			return CONTEXT_HANDOFF_DEFAULT;
+	}
+}
+
+export async function getContextHandoffPolicy(
+	target: ApiTarget
+): Promise<ContextHandoffPolicy> {
+	return parseContextHandoffPolicy(
+		await getPreference(target, CONTEXT_HANDOFF_PREF_KEY)
+	);
+}
+
+export function setContextHandoffPolicy(
+	target: ApiTarget,
+	policy: ContextHandoffPolicy
+): Promise<boolean> {
+	return setPreference(target, CONTEXT_HANDOFF_PREF_KEY, policy);
 }
 
 // --- Meeting notes generator ------------------------------------------------
@@ -2346,12 +2585,32 @@ export function setMeetingNotesPrompt(
 
 // The selected notes template (a prompt preset over the fixed notes schema) and
 // whether speaker diarization runs at finalize. Template is a bare id string
-// (blank = the `default` template); diarization is a bare boolean, default OFF
-// (the model is heavy + HF-gated, so nothing runs until opted in).
+// (blank = the `default` template); diarization is a bare boolean, default OFF.
 
 export const MEETING_NOTES_TEMPLATE_PREF_KEY = "meeting-notes-template";
 export const MEETING_DIARIZATION_ENABLED_PREF_KEY =
 	"meeting-diarization-enabled";
+export const MEETING_DIARIZATION_MODEL_PREF_KEY = "meeting-diarization-model";
+
+export const MEETING_DIARIZATION_MODELS = ["pyannote", "nemotron"] as const;
+export type MeetingDiarizationModel =
+	(typeof MEETING_DIARIZATION_MODELS)[number];
+
+export function isMeetingDiarizationModel(
+	value: string
+): value is MeetingDiarizationModel {
+	return MEETING_DIARIZATION_MODELS.some((model) => model === value);
+}
+
+/** Unknown or unset values use the stable default selected by Meetings Core. */
+export function parseMeetingDiarizationModel(
+	value: string | null
+): MeetingDiarizationModel {
+	const normalized = value?.trim();
+	return normalized && isMeetingDiarizationModel(normalized)
+		? normalized
+		: "pyannote";
+}
 
 /** Read the selected notes template id (blank = the default template). */
 export async function getMeetingNotesTemplate(
@@ -2390,6 +2649,23 @@ export function setMeetingDiarizationEnabled(
 		MEETING_DIARIZATION_ENABLED_PREF_KEY,
 		String(enabled)
 	);
+}
+
+/** Read the selected local speaker model. Defaults to the pyannote adapter. */
+export async function getMeetingDiarizationModel(
+	target: ApiTarget
+): Promise<MeetingDiarizationModel> {
+	return parseMeetingDiarizationModel(
+		await getPreference(target, MEETING_DIARIZATION_MODEL_PREF_KEY)
+	);
+}
+
+/** Write the selected local speaker model by its stable adapter id. */
+export function setMeetingDiarizationModel(
+	target: ApiTarget,
+	model: MeetingDiarizationModel
+): Promise<boolean> {
+	return setPreference(target, MEETING_DIARIZATION_MODEL_PREF_KEY, model);
 }
 
 // --- Composio API key -------------------------------------------------------
@@ -2536,6 +2812,145 @@ export function setExecApprovalEnabled(
 	);
 }
 
+// --- Workspace trust -------------------------------------------------------
+// Folders the user trusts with full agent autonomy, as a JSON array of
+// absolute paths in the `trusted-workspaces` Core preference. An agent working
+// anywhere else keeps asking before it runs commands, cannot switch into a
+// mode that skips those prompts, and runs in Core's OS sandbox (credentials
+// hidden, network limited to the Ryu Gateway). A trusted folder covers every
+// folder beneath it. Core applies a change on the agent's next turn.
+
+export const TRUSTED_WORKSPACES_PREF_KEY = "trusted-workspaces";
+
+/** `ConfigWarning.field` Core streams when it limits an agent for trust. */
+export const WORKSPACE_TRUST_WARNING_FIELD = "workspace_trust";
+
+function parseTrustedWorkspaces(raw: string | null): string[] {
+	if (!raw?.trim()) {
+		return [];
+	}
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (!Array.isArray(parsed)) {
+			return [];
+		}
+		return parsed.filter(
+			(entry): entry is string =>
+				typeof entry === "string" && entry.trim() !== ""
+		);
+	} catch {
+		return [];
+	}
+}
+
+/** Read the trusted folders (empty when none are trusted). */
+export async function getTrustedWorkspaces(
+	target: ApiTarget
+): Promise<string[]> {
+	return parseTrustedWorkspaces(
+		await getPreference(target, TRUSTED_WORKSPACES_PREF_KEY)
+	);
+}
+
+/** Replace the trusted folders. */
+export function setTrustedWorkspaces(
+	target: ApiTarget,
+	folders: readonly string[]
+): Promise<boolean> {
+	const unique = [...new Set(folders.map((folder) => folder.trim()))].filter(
+		(folder) => folder !== ""
+	);
+	return setPreference(
+		target,
+		TRUSTED_WORKSPACES_PREF_KEY,
+		JSON.stringify(unique)
+	);
+}
+
+const trustedWorkspacesResponseSchema = z.object({
+	folders: z.array(z.string()),
+});
+
+/** Run one Core-side trusted-list edit and notify in-process observers. */
+async function editTrustedWorkspaces(
+	target: ApiTarget,
+	path: string,
+	body: Record<string, unknown>
+): Promise<boolean> {
+	const { folders } = await request(
+		target,
+		path,
+		{ method: "POST", body },
+		trustedWorkspacesResponseSchema
+	);
+	const value = JSON.stringify(folders);
+	for (const listener of preferenceChangeListeners) {
+		try {
+			listener(TRUSTED_WORKSPACES_PREF_KEY, value);
+		} catch {
+			// An observer must not turn a saved change into a reported failure.
+		}
+	}
+	return true;
+}
+
+/**
+ * Add folders to the trusted list (no-op for folders already present). Core
+ * reads, changes, and writes the list under one lock, so two windows trusting
+ * or untrusting at once cannot overwrite each other's change.
+ */
+export function trustWorkspaces(
+	target: ApiTarget,
+	folders: readonly string[]
+): Promise<boolean> {
+	return editTrustedWorkspaces(target, "/api/workspace-trust/trust", {
+		folders: [...folders],
+	});
+}
+
+/** Remove one folder from the trusted list (atomic on Core, as above). */
+export function untrustWorkspace(
+	target: ApiTarget,
+	folder: string
+): Promise<boolean> {
+	return editTrustedWorkspaces(target, "/api/workspace-trust/untrust", {
+		folder,
+	});
+}
+
+const keybindingEntryResponseSchema = z.object({ value: z.string() });
+
+/**
+ * Set (`string`), disable (`null`) or remove (`undefined`) one plugin shortcut
+ * (a `plugin:<id>` entry of the `keybindings` document). Core reads, changes
+ * and writes the document under one lock, so two windows editing different
+ * shortcuts cannot overwrite each other's change. Resolves with the stored
+ * document (raw JSON) and notifies in-process observers.
+ */
+export async function setKeybindingEntry(
+	target: ApiTarget,
+	entry: string,
+	value: string | null | undefined
+): Promise<string> {
+	const { value: document } = await request(
+		target,
+		"/api/keybindings/entry",
+		{
+			method: "POST",
+			body: value === undefined ? { entry, remove: true } : { entry, value },
+		},
+		keybindingEntryResponseSchema
+	);
+	for (const listener of preferenceChangeListeners) {
+		try {
+			listener("keybindings", document);
+		} catch {
+			// An observer must not turn a saved change into a reported failure.
+		}
+	}
+	return document;
+}
+
 // --- Codex gateway routing ---------------------------------------------------
 // Gateway-governed by default: route Codex's ChatGPT-login (subscription) Responses egress through the
 // Ryu gateway's transparent passthrough proxy (firewall/DLP/audit) while
@@ -2595,41 +3010,43 @@ export const AGENT_GATEWAY_ROUTING_PREF_KEY = "agent-gateway-routing";
 /** Default: on, so a new routable ACP agent is Gateway-governed. */
 export const DEFAULT_AGENT_GATEWAY_ROUTING = DEFAULT_GATEWAY_ROUTING;
 
-function parseAgentGatewayMap(raw: string | null): Record<string, boolean> {
-	if (!raw || raw.trim() === "") {
+const agentGatewayValueSchema = z
+	.union([
+		z.boolean(),
+		z.number().transform((value) => value !== 0),
+		z
+			.string()
+			.trim()
+			.toLowerCase()
+			.transform((value) => {
+				if (["true", "1", "on", "yes"].includes(value)) {
+					return true;
+				}
+				if (["false", "0", "off", "no"].includes(value)) {
+					return false;
+				}
+				return undefined;
+			}),
+	])
+	.optional()
+	.catch(undefined);
+const agentGatewayMapSchema = z.record(z.string(), agentGatewayValueSchema);
+type AgentGatewayMap = Record<string, boolean>;
+
+function parseAgentGatewayMap(raw: string | null): AgentGatewayMap {
+	if (!raw?.trim()) {
 		return {};
 	}
 	try {
-		const parsed = JSON.parse(raw) as unknown;
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			const out: Record<string, boolean> = {};
-			for (const [id, value] of Object.entries(
-				parsed as Record<string, unknown>
-			)) {
-				if (typeof value === "boolean") {
-					out[id] = value;
-					continue;
-				}
-				if (typeof value === "number" && Number.isFinite(value)) {
-					out[id] = value !== 0;
-					continue;
-				}
-				if (typeof value === "string") {
-					const normalized = value.trim().toLowerCase();
-					if (["true", "1", "on", "yes"].includes(normalized)) {
-						out[id] = true;
-					} else if (["false", "0", "off", "no"].includes(normalized)) {
-						out[id] = false;
-					}
-				}
-			}
-			return out;
-		}
+		const parsed = agentGatewayMapSchema.parse(JSON.parse(raw));
+		return Object.fromEntries(
+			Object.entries(parsed).filter(
+				(entry): entry is [string, boolean] => entry[1] !== undefined
+			)
+		);
 	} catch {
-		// Unparseable → treat as empty (missing entries use the governed default), never
-		// throw on the settings path.
+		return {};
 	}
-	return {};
 }
 
 /** Read the full per-agent gateway-routing map from Core preferences. */
@@ -2874,28 +3291,20 @@ export const DEFAULT_AGENT_AUTO_ROUTING: AgentAutoRoutingConfig = {
 	cache_by_session: true,
 };
 
-function coerceStrategy(value: unknown): RouteStrategy {
-	return value === "embedding" || value === "keyword" ? value : "llm";
-}
-
-function coerceAgentAutoRules(value: unknown): AgentAutoRule[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	const out: AgentAutoRule[] = [];
-	for (const raw of value) {
-		if (raw && typeof raw === "object") {
-			const r = raw as Record<string, unknown>;
-			const description =
-				typeof r.description === "string" ? r.description : "";
-			const agent_id = typeof r.agent_id === "string" ? r.agent_id : "";
-			if (description && agent_id) {
-				out.push({ description, agent_id });
-			}
-		}
-	}
-	return out;
-}
+const agentAutoRuleSchema = z.object({
+	description: z.string().min(1),
+	agent_id: z.string().min(1),
+});
+const agentAutoRoutingSchema = z.object({
+	enabled: z.boolean().catch(false),
+	strategy: z.enum(["llm", "embedding", "keyword"]).catch("llm"),
+	classifier_model: z.string().catch(""),
+	embedding_model: z.string().catch(""),
+	similarity_threshold: z.json().optional().catch(undefined),
+	rules: z.array(agentAutoRuleSchema.optional().catch(undefined)).catch([]),
+	default_agent_id: z.string().min(1).catch(DEFAULT_AGENT_ID),
+	cache_by_session: z.boolean().catch(true),
+});
 
 /** Read the agent-auto routing config, falling back to {@link DEFAULT_AGENT_AUTO_ROUTING}. */
 export async function getAgentAutoRouting(
@@ -2906,27 +3315,12 @@ export async function getAgentAutoRouting(
 		return DEFAULT_AGENT_AUTO_ROUTING;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<AgentAutoRoutingConfig>;
+		const parsed = agentAutoRoutingSchema.parse(JSON.parse(raw));
 		const threshold = Number(parsed.similarity_threshold);
 		return {
-			enabled: parsed.enabled === true,
-			strategy: coerceStrategy(parsed.strategy),
-			classifier_model:
-				typeof parsed.classifier_model === "string"
-					? parsed.classifier_model
-					: "",
-			embedding_model:
-				typeof parsed.embedding_model === "string"
-					? parsed.embedding_model
-					: "",
+			...parsed,
 			similarity_threshold: Number.isFinite(threshold) ? threshold : 0.35,
-			rules: coerceAgentAutoRules(parsed.rules),
-			default_agent_id:
-				typeof parsed.default_agent_id === "string" &&
-				parsed.default_agent_id.length > 0
-					? parsed.default_agent_id
-					: DEFAULT_AGENT_ID,
-			cache_by_session: parsed.cache_by_session !== false,
+			rules: parsed.rules.filter((rule) => rule !== undefined),
 		};
 	} catch {
 		return DEFAULT_AGENT_AUTO_ROUTING;
@@ -2956,21 +3350,67 @@ export function setAgentAutoRouting(
 
 export const AGENT_SMART_ROUTE_PREF_KEY = "agent-smart-route";
 
-function parseAgentSmartRouteMap(
-	raw: string | null
-): Record<string, SmartRoutingConfig> {
-	if (!raw || raw.trim() === "") {
+const smartRoutingConfigSchema = z
+	.object({
+		allowed_models: z.array(z.string()).optional(),
+		allowed_providers: z.array(z.string()).optional(),
+		cache_by_session: z.boolean(),
+		classifier_model: z.string(),
+		default_model: z.string().nullable().optional(),
+		embedding_model: z.string(),
+		enabled: z.boolean(),
+		escalation_confirmations: z.number().optional(),
+		escalation_judge_model: z.string().optional(),
+		escalation_message_chars: z.number().optional(),
+		escalation_recent_message_window: z.number().optional(),
+		escalation_strong_model: z.string().optional(),
+		escalation_weak_model: z.string().optional(),
+		random_seed: z.number().nullable().optional(),
+		router_type: z
+			.enum([
+				"llm_classifier",
+				"passthrough",
+				"random",
+				"stage_router",
+				"escalation",
+			])
+			.optional(),
+		rules: z.array(
+			z.object({
+				description: z.string(),
+				model: z.string(),
+				weight: z.number().optional(),
+			})
+		),
+		similarity_threshold: z.number(),
+		stage_capable_model: z.string().optional(),
+		stage_confidence_threshold: z.number().optional(),
+		stage_efficient_model: z.string().optional(),
+		stage_picker: z.enum(["capable_first", "efficient_first"]).optional(),
+		stage_recent_message_window: z.number().optional(),
+		strategy: z.enum(["llm", "embedding", "keyword"]),
+		timeout_ms: z.number(),
+	})
+	.passthrough();
+const agentSmartRouteMapSchema = z.record(
+	z.string(),
+	smartRoutingConfigSchema.optional().catch(undefined)
+);
+type AgentSmartRouteMap = Record<string, SmartRoutingConfig>;
+function parseAgentSmartRouteMap(raw: string | null): AgentSmartRouteMap {
+	if (!raw?.trim()) {
 		return {};
 	}
 	try {
-		const parsed = JSON.parse(raw) as unknown;
-		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-			return parsed as Record<string, SmartRoutingConfig>;
-		}
+		const parsed = agentSmartRouteMapSchema.parse(JSON.parse(raw));
+		return Object.fromEntries(
+			Object.entries(parsed).flatMap(([id, config]) =>
+				config === undefined ? [] : [[id, config] as const]
+			)
+		);
 	} catch {
-		// Unparseable → treat as empty (no overrides), never throw on this path.
+		return {};
 	}
-	return {};
 }
 
 /** Read the per-agent model-route override for one agent id, or null when unset. */
@@ -3015,20 +3455,40 @@ export async function setAgentSmartRoute(
 
 export const PRODUCT_ANALYTICS_ENABLED_PREF_KEY = "product-analytics-enabled";
 export const COMMUNITY_STATS_ENABLED_PREF_KEY = "community-stats-enabled";
+/** Lets Core tell Ryu Cloud which days this signed-in account used Ryu, so
+ *  agent runs (scheduled ones too) count toward the profile streak, plus this
+ *  device's content-free daily usage totals when its Gateway does not report
+ *  usage itself. */
+export const PROFILE_ACTIVITY_ENABLED_PREF_KEY = "profile-activity-enabled";
 export const CRASH_REPORTS_ENABLED_PREF_KEY = "crash-reports-enabled";
 export const DIAGNOSTICS_EXPORT_ENABLED_PREF_KEY = "diagnostics-export-enabled";
 export const DIAGNOSTICS_OTLP_ENDPOINT_PREF_KEY = "diagnostics-otlp-endpoint";
+export const DIAGNOSTICS_OTLP_CONTENT_MODE_PREF_KEY =
+	"diagnostics-otlp-content-mode";
+export const DIAGNOSTICS_OTLP_PRESET_PREF_KEY = "diagnostics-otlp-preset";
+export const DIAGNOSTICS_OTLP_PROJECT_PREF_KEY = "diagnostics-otlp-project";
+export const DIAGNOSTICS_OTLP_REGION_PREF_KEY = "diagnostics-otlp-region";
+export const DIAGNOSTICS_OTLP_API_KEY_REF_PREF_KEY =
+	"diagnostics-otlp-api-key-ref";
+export const DIAGNOSTICS_OTLP_PUBLIC_KEY_REF_PREF_KEY =
+	"diagnostics-otlp-public-key-ref";
 export const SUPPORT_ACCESS_LOCAL_ENABLED_PREF_KEY =
 	"support-access-local-enabled";
 export const SUPPORT_ACCESS_LOCAL_EXPIRY_PREF_KEY =
 	"support-access-local-expiry";
+export const ENFORCE_CUSTOM_APP_CSP_PREF_KEY = "enforce-custom-app-csp";
 
-/** Defaults mirror Core + the §6 table (two opt-out, the rest opt-in/empty). */
+/** Defaults mirror Core + the §6 table (the sharing toggles are opt-out, the
+ *  diagnostics/support ones opt-in/empty). */
 export const DEFAULT_PRODUCT_ANALYTICS_ENABLED = true;
 export const DEFAULT_COMMUNITY_STATS_ENABLED = true;
+export const DEFAULT_PROFILE_ACTIVITY_ENABLED = true;
 export const DEFAULT_CRASH_REPORTS_ENABLED = true;
 export const DEFAULT_DIAGNOSTICS_EXPORT_ENABLED = false;
+export const DEFAULT_DIAGNOSTICS_CONTENT_MODE: DiagnosticsContentMode =
+	"metadata_only";
 export const DEFAULT_SUPPORT_ACCESS_LOCAL_ENABLED = false;
+export const DEFAULT_ENFORCE_CUSTOM_APP_CSP = true;
 
 /** Tolerant boolean parse: only explicit forms decide, else the default. */
 function parsePrefBool(raw: string | null, fallback: boolean): boolean {
@@ -3043,6 +3503,26 @@ function parsePrefBool(raw: string | null, fallback: boolean): boolean {
 		return false;
 	}
 	return fallback;
+}
+
+/** Read whether custom apps without a trusted CSP use the restricted default. */
+export async function getEnforceCustomAppCsp(
+	target: ApiTarget
+): Promise<boolean> {
+	const raw = await getPreference(target, ENFORCE_CUSTOM_APP_CSP_PREF_KEY);
+	return parsePrefBool(raw, DEFAULT_ENFORCE_CUSTOM_APP_CSP);
+}
+
+/** Save the custom-app default CSP setting as a bare boolean string. */
+export function setEnforceCustomAppCsp(
+	target: ApiTarget,
+	enabled: boolean
+): Promise<boolean> {
+	return setPreference(
+		target,
+		ENFORCE_CUSTOM_APP_CSP_PREF_KEY,
+		String(enabled)
+	);
 }
 
 /** Read whether closed-UI product analytics is enabled (default ON, opt-out). */
@@ -3081,6 +3561,26 @@ export function setCommunityStatsEnabled(
 	return setPreference(
 		target,
 		COMMUNITY_STATS_ENABLED_PREF_KEY,
+		String(enabled)
+	);
+}
+
+/** Read whether daily profile-activity pings are enabled (default ON, opt-out). */
+export async function getProfileActivityEnabled(
+	target: ApiTarget
+): Promise<boolean> {
+	const raw = await getPreference(target, PROFILE_ACTIVITY_ENABLED_PREF_KEY);
+	return parsePrefBool(raw, DEFAULT_PROFILE_ACTIVITY_ENABLED);
+}
+
+/** Write the profile-activity toggle (as a bare boolean string). */
+export function setProfileActivityEnabled(
+	target: ApiTarget,
+	enabled: boolean
+): Promise<boolean> {
+	return setPreference(
+		target,
+		PROFILE_ACTIVITY_ENABLED_PREF_KEY,
 		String(enabled)
 	);
 }
@@ -3142,6 +3642,164 @@ export function setDiagnosticsOtlpEndpoint(
 	);
 }
 
+/**
+ * What exported spans may carry. `metadata_only` (the default) sends model,
+ * token counts, timings, and status; `content` also sends prompts, responses,
+ * and tool arguments/results. A separate opt-in from diagnostics export: Core
+ * never exports content while export consent is off.
+ */
+export type DiagnosticsContentMode = "metadata_only" | "content";
+
+/** Tolerant parse mirroring Core's `ContentMode::parse`: only an explicit
+ * `content` (or `full`) opts in; anything else keeps metadata only. */
+export function parseDiagnosticsContentMode(
+	raw: string | null
+): DiagnosticsContentMode {
+	const value = raw?.trim().toLowerCase();
+	return value === "content" || value === "full"
+		? "content"
+		: DEFAULT_DIAGNOSTICS_CONTENT_MODE;
+}
+
+/** Read the OTLP content mode (default `metadata_only`). */
+export async function getDiagnosticsContentMode(
+	target: ApiTarget
+): Promise<DiagnosticsContentMode> {
+	const raw = await getPreference(
+		target,
+		DIAGNOSTICS_OTLP_CONTENT_MODE_PREF_KEY
+	);
+	return parseDiagnosticsContentMode(raw);
+}
+
+/** Write the OTLP content mode. Core applies it live (no restart). */
+export function setDiagnosticsContentMode(
+	target: ApiTarget,
+	mode: DiagnosticsContentMode
+): Promise<boolean> {
+	return setPreference(target, DIAGNOSTICS_OTLP_CONTENT_MODE_PREF_KEY, mode);
+}
+
+/**
+ * Where diagnostics spans go. `otlp` (the default) is any OTLP/HTTP endpoint;
+ * the others are hosted LLM-observability backends Core maps onto OTLP with
+ * their documented endpoint, auth headers, and resource attributes.
+ */
+export type DiagnosticsExporterPreset =
+	| "otlp"
+	| "langfuse"
+	| "langsmith"
+	| "braintrust"
+	| "phoenix"
+	| "helicone"
+	| "datadog";
+
+export const DIAGNOSTICS_EXPORTER_PRESETS: readonly DiagnosticsExporterPreset[] =
+	[
+		"otlp",
+		"langfuse",
+		"langsmith",
+		"braintrust",
+		"phoenix",
+		"helicone",
+		"datadog",
+	];
+
+/** Tolerant parse mirroring Core's `ExporterPreset::parse` (blank → `otlp`). */
+export function parseDiagnosticsExporterPreset(
+	raw: string | null
+): DiagnosticsExporterPreset {
+	const value = raw?.trim().toLowerCase().replaceAll("_", "-") ?? "";
+	if (value === "arize" || value === "arize-phoenix") {
+		return "phoenix";
+	}
+	return (
+		DIAGNOSTICS_EXPORTER_PRESETS.find((preset) => preset === value) ?? "otlp"
+	);
+}
+
+/** The exporter-preset fields as stored. Credentials are references only. */
+export interface DiagnosticsExporterSettings {
+	/** `env:NAME`, `file:/absolute/path`, or `secret:NAME`. */
+	apiKeyRef: string;
+	preset: DiagnosticsExporterPreset;
+	project: string;
+	/** Langfuse public key reference (same reference forms). */
+	publicKeyRef: string;
+	region: string;
+}
+
+/** The text fields of {@link DiagnosticsExporterSettings}. */
+export type DiagnosticsExporterField = Exclude<
+	keyof DiagnosticsExporterSettings,
+	"preset"
+>;
+
+export const DIAGNOSTICS_EXPORTER_FIELD_PREF_KEYS: Record<
+	DiagnosticsExporterField,
+	string
+> = {
+	apiKeyRef: DIAGNOSTICS_OTLP_API_KEY_REF_PREF_KEY,
+	project: DIAGNOSTICS_OTLP_PROJECT_PREF_KEY,
+	publicKeyRef: DIAGNOSTICS_OTLP_PUBLIC_KEY_REF_PREF_KEY,
+	region: DIAGNOSTICS_OTLP_REGION_PREF_KEY,
+};
+
+const SECRET_REFERENCE_PATTERN =
+	/^(env:[A-Za-z_][A-Za-z0-9_]*|file:\/.+|secret:.+)$/;
+
+/**
+ * Whether a credential field holds a secret reference (or is blank). Core
+ * refuses anything else, so a pasted key never lands in plain preferences.
+ */
+export function isSecretReference(value: string): boolean {
+	const trimmed = value.trim();
+	return trimmed === "" || SECRET_REFERENCE_PATTERN.test(trimmed);
+}
+
+/** Read the exporter preset and its fields (blank when unset). */
+export async function getDiagnosticsExporterSettings(
+	target: ApiTarget
+): Promise<DiagnosticsExporterSettings> {
+	const [preset, project, region, apiKeyRef, publicKeyRef] = await Promise.all(
+		[
+			DIAGNOSTICS_OTLP_PRESET_PREF_KEY,
+			DIAGNOSTICS_OTLP_PROJECT_PREF_KEY,
+			DIAGNOSTICS_OTLP_REGION_PREF_KEY,
+			DIAGNOSTICS_OTLP_API_KEY_REF_PREF_KEY,
+			DIAGNOSTICS_OTLP_PUBLIC_KEY_REF_PREF_KEY,
+		].map((key) => getPreference(target, key))
+	);
+	return {
+		preset: parseDiagnosticsExporterPreset(preset),
+		project: project ?? "",
+		region: region ?? "",
+		apiKeyRef: apiKeyRef ?? "",
+		publicKeyRef: publicKeyRef ?? "",
+	};
+}
+
+/** Write the exporter preset. Takes effect after a Core restart. */
+export function setDiagnosticsExporterPreset(
+	target: ApiTarget,
+	preset: DiagnosticsExporterPreset
+): Promise<boolean> {
+	return setPreference(target, DIAGNOSTICS_OTLP_PRESET_PREF_KEY, preset);
+}
+
+/** Write one exporter-preset text field (trimmed; blank clears it). */
+export function setDiagnosticsExporterField(
+	target: ApiTarget,
+	field: DiagnosticsExporterField,
+	value: string
+): Promise<boolean> {
+	return setPreference(
+		target,
+		DIAGNOSTICS_EXPORTER_FIELD_PREF_KEYS[field],
+		value.trim()
+	);
+}
+
 /** Read whether the local Core support-access channel is granted (default OFF). */
 export async function getSupportAccessLocalEnabled(
 	target: ApiTarget
@@ -3167,17 +3825,8 @@ export function setSupportAccessLocalEnabled(
 
 /**
  * Read the local support-access hard expiry (unix ms; 0 = no expiry set).
- *
- * Deliberately NOT the `usize` mirror {@link parseRustUsize}: Core reads this
- * key with `s.trim().parse::<i64>()` (`privacy::support_access_local`), a
- * SIGNED parse, so the grammars differ. `Number()` is looser than either —
- * `1e3` and `5.9` read as 1000 and 5.9 here while Core's parse errors and
- * `.unwrap_or(0)` treats the grant as never-expiring. Left as-is because the
- * divergence only shows for values this UI cannot produce (the setter writes
- * `Math.max(0, Math.round(...))`), and both sides agree on everything it can.
- * Not "impossible", though — anyone can `PUT /api/preferences/{key}`, and the
- * docs tell operators to do exactly that; if this ever grows a control that
- * renders the expiry as authoritative, close the gap the same way.
+ * Mirror Core's trimmed signed-i64 parse: malformed and overflowing values
+ * resolve to no expiry, while valid negative values remain expired.
  */
 export async function getSupportAccessLocalExpiry(
 	target: ApiTarget
@@ -3186,8 +3835,16 @@ export async function getSupportAccessLocalExpiry(
 	if (raw === null) {
 		return 0;
 	}
-	const value = Number(raw.trim());
-	return Number.isFinite(value) ? value : 0;
+	// Rust trims Unicode White_Space; JavaScript trim also removes U+FEFF.
+	const value = raw.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
+	if (!/^[+-]?\d+$/.test(value)) {
+		return 0;
+	}
+	const expiry = BigInt(value);
+	if (expiry < -9223372036854775808n || expiry > 9223372036854775807n) {
+		return 0;
+	}
+	return Number(expiry);
 }
 
 /** Write the local support-access hard expiry (unix ms). */
@@ -3257,10 +3914,7 @@ export async function getSandboxDefaultRunBudgetMicroUsd(
 		return 0;
 	}
 	try {
-		const parsed = JSON.parse(raw) as unknown;
-		if (typeof parsed === "number" && Number.isFinite(parsed) && parsed >= 0) {
-			return Math.round(parsed);
-		}
+		return Math.round(z.number().nonnegative().parse(JSON.parse(raw)));
 	} catch {
 		// Corrupt value → treat as no cap rather than throwing on the settings path.
 	}
@@ -3323,7 +3977,7 @@ export async function getThemePrefs(
 		return null;
 	}
 	try {
-		return JSON.parse(raw) as ThemePrefs;
+		return themePrefsSchema.parse(JSON.parse(raw));
 	} catch {
 		return null;
 	}
@@ -3335,3 +3989,22 @@ export function setThemePrefs(
 ): Promise<boolean> {
 	return setPreference(target, THEME_PREF_KEY, JSON.stringify(prefs));
 }
+
+// Host-only Island placement; absent/invalid values preserve floating mode.
+export const ISLAND_NOTCH_PREF_KEY = "island-notch-mode";
+export async function getIslandNotchMode(target: ApiTarget): Promise<boolean> {
+	return (await getPreference(target, ISLAND_NOTCH_PREF_KEY)) === "true";
+}
+export function setIslandNotchMode(
+	target: ApiTarget,
+	enabled: boolean
+): Promise<boolean> {
+	return setPreference(target, ISLAND_NOTCH_PREF_KEY, String(enabled));
+}
+
+const preferenceWireResponseSchema = z
+	.object({
+		key: z.string().optional(),
+		value: z.union([z.null(), z.string()]),
+	})
+	.passthrough();

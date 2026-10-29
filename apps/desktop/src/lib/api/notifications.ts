@@ -1,3 +1,4 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/notifications.ts
 //
 // Typed client for Core's app-inbox notification API (`/api/notifications/*`):
@@ -13,46 +14,33 @@
 // SSE socket keyed by `user_id`, read with fetch + ReadableStream so the bearer
 // token can be attached (EventSource can't set headers).
 
+import { activityJsonValueSchema } from "@ryuhq/core-client/activity.ts";
+import {
+	type AppNotification,
+	type MentionTargetUser,
+	mentionTargetUserSchema,
+	notificationAckReplySchema,
+	notificationsListReplySchema,
+	type UserNotificationEvent,
+	userNotificationEventSchema,
+} from "@ryuhq/core-client/notifications.ts";
+import { z } from "zod";
 import { type ApiTarget, authenticatedFetch, request } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
-/** A stored inbox notification row (newest first from the list endpoint). */
-export interface AppNotification {
-	ack_required: boolean;
-	acked: boolean;
-	/** When the user archived this row; null = live in the inbox. */
-	archived_at?: string | null;
-	body?: string | null;
-	created_at: string;
-	id: string;
-	level: string;
-	node_id?: string | null;
-	read_at?: string | null;
-	/** The app/plugin that raised this notification (empty for legacy Core rows),
-	 *  resolved to a name/icon by the surface. */
-	source_app_id?: string | null;
-	title: string;
-	user_id: string;
-	workflow_run_id?: string | null;
-}
+const mentionRosterReplySchema = z.object({
+	users: z.array(activityJsonValueSchema).nullish(),
+});
 
-/** A live, user-targeted notification ping from `/api/notifications/stream`. */
-export interface UserNotificationEvent {
-	body?: string | null;
-	level: string;
-	notification_id?: string | null;
-	source_app_id?: string | null;
-	target_user_id?: string | null;
-	title: string;
-}
-
-/** A human the active node may notify, already scoped by Core to its org/team. */
-export interface MentionTargetUser {
-	email: string | null;
-	id: string;
-	image: string | null;
-	name: string;
-	role: string | null;
-}
+export {
+	redactConnectSuggestionEvent,
+	redactConnectSuggestionNotifications,
+} from "@ryu/app-host/notification-privacy";
+export type {
+	AppNotification,
+	MentionTargetUser,
+	UserNotificationEvent,
+} from "@ryuhq/core-client/notifications.ts";
 
 const DEFAULT_LIMIT = 50;
 
@@ -61,44 +49,34 @@ export async function listMentionTargetUsers(
 	target: ApiTarget
 ): Promise<MentionTargetUser[]> {
 	try {
-		const json = await request<{
-			users?: Array<{
-				email?: unknown;
-				image?: unknown;
-				name?: unknown;
-				role?: unknown;
-				userId?: unknown;
-			}>;
-		}>(target, "/api/notifications/mention-targets");
-		return (json.users ?? []).flatMap((user) => {
-			const id = typeof user.userId === "string" ? user.userId.trim() : "";
-			if (!id) {
+		const json = mentionRosterReplySchema.parse(
+			await request(
+				target,
+				"/api/notifications/mention-targets",
+				{},
+				gatewayJsonValueSchema
+			)
+		);
+		const users: MentionTargetUser[] = [];
+		for (const raw of json.users ?? []) {
+			// A null roster row previously aborted the whole roster; retain that fallback.
+			if (raw === null) {
 				return [];
 			}
-			const email =
-				typeof user.email === "string" && user.email.trim()
-					? user.email.trim()
-					: null;
-			const name =
-				typeof user.name === "string" && user.name.trim()
-					? user.name.trim()
-					: (email?.split("@")[0] ?? id);
-			return [
-				{
-					email,
-					id,
-					image:
-						typeof user.image === "string" && user.image.trim()
-							? user.image.trim()
-							: null,
-					name,
-					role:
-						typeof user.role === "string" && user.role.trim()
-							? user.role.trim()
-							: null,
-				},
-			];
-		});
+			const parsed = mentionTargetUserSchema.safeParse(raw);
+			if (!(parsed.success && parsed.data.userId)) {
+				continue;
+			}
+			const user = parsed.data;
+			users.push({
+				id: user.userId,
+				email: user.email,
+				image: user.image,
+				name: user.name ?? user.email?.split("@")[0] ?? user.userId,
+				role: user.role,
+			});
+		}
+		return users;
 	} catch {
 		return [];
 	}
@@ -119,9 +97,13 @@ export async function listNotifications(
 	if (archived !== undefined) {
 		params.set("archived", String(archived));
 	}
-	const json = await request<{ notifications?: AppNotification[] }>(
-		target,
-		`/api/notifications?${params.toString()}`
+	const json = notificationsListReplySchema.parse(
+		await request(
+			target,
+			`/api/notifications?${params.toString()}`,
+			{},
+			gatewayJsonValueSchema
+		)
 	);
 	return json.notifications ?? [];
 }
@@ -131,7 +113,12 @@ export async function markNotificationRead(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/notifications/${id}/read`, { method: "POST" });
+	await request(
+		target,
+		`/api/notifications/${encodePathId(id)}/read`,
+		{ method: "POST" },
+		gatewayJsonValueSchema
+	);
 }
 
 /** Archive a notification (also marks it read). Idempotent server-side. */
@@ -139,7 +126,12 @@ export async function archiveNotification(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/notifications/${id}/archive`, { method: "POST" });
+	await request(
+		target,
+		`/api/notifications/${encodePathId(id)}/archive`,
+		{ method: "POST" },
+		gatewayJsonValueSchema
+	);
 }
 
 /** Restore an archived notification to the live inbox. Idempotent server-side. */
@@ -147,9 +139,14 @@ export async function unarchiveNotification(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/notifications/${id}/unarchive`, {
-		method: "POST",
-	});
+	await request(
+		target,
+		`/api/notifications/${encodePathId(id)}/unarchive`,
+		{
+			method: "POST",
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /**
@@ -160,10 +157,13 @@ export async function ackNotification(
 	target: ApiTarget,
 	id: string
 ): Promise<boolean> {
-	const json = await request<{ ok?: boolean; resumed?: boolean }>(
-		target,
-		`/api/notifications/${id}/ack`,
-		{ method: "POST" }
+	const json = notificationAckReplySchema.parse(
+		await request(
+			target,
+			`/api/notifications/${encodePathId(id)}/ack`,
+			{ method: "POST" },
+			gatewayJsonValueSchema
+		)
 	);
 	return json.resumed ?? false;
 }
@@ -183,7 +183,7 @@ function parseFrame(frame: string): UserNotificationEvent | null {
 		return null;
 	}
 	try {
-		return JSON.parse(dataLines.join("\n")) as UserNotificationEvent;
+		return userNotificationEventSchema.parse(JSON.parse(dataLines.join("\n")));
 	} catch {
 		// Keep-alive comments / malformed frames carry no payload — ignore them.
 		return null;

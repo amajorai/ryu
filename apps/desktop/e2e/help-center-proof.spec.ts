@@ -15,7 +15,6 @@ const HOST_PROOF_ARTIFACT = path.resolve(
 
 declare global {
 	interface Window {
-		__ryuCompanion?: { mount: (options: unknown) => void };
 		__ryuHelpCenterCompanion?: {
 			connected: () => boolean;
 			mount: (
@@ -50,17 +49,17 @@ test("Help Center companion completes the support workflow in Chromium", async (
 	await page.waitForLoadState("networkidle");
 	await page.waitForSelector("body[data-harness-ready='1']");
 	await page.locator("main").evaluate((element) => {
-		const main = element as HTMLElement;
+		const main = element;
 		main.style.maxWidth = "1320px";
 	});
 	await page.locator("#host-root").evaluate((element) => {
-		const hostRoot = element as HTMLElement;
+		const hostRoot = element;
 		hostRoot.style.height = "720px";
 		hostRoot.style.width = "1280px";
 	});
-	await page.evaluate(async () => {
-		await import("/help-center-host-story.tsx");
-	});
+	await page.evaluate(async (hostEntry) => {
+		await import(hostEntry);
+	}, "/help-center-host-story.tsx");
 	await page.waitForFunction(() =>
 		Boolean(window.__ryuHelpCenterCompanion?.mount)
 	);

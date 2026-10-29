@@ -5,20 +5,18 @@ export type NodeDisplayMode = "compact-dropdown" | "persistent-sidebar";
 const KEY_DISPLAY_MODE = "ryu_node_display_mode";
 const KEY_TAB_OVERRIDE = "ryu_node_tab_override_enabled";
 
+function readNodeDisplayMode(): NodeDisplayMode {
+	return localStorage.getItem(KEY_DISPLAY_MODE) === "persistent-sidebar"
+		? "persistent-sidebar"
+		: "compact-dropdown";
+}
+
 export function useNodeDisplayMode(): NodeDisplayMode {
-	const [mode, setMode] = useState<NodeDisplayMode>(() => {
-		return (
-			(localStorage.getItem(KEY_DISPLAY_MODE) as NodeDisplayMode) ??
-			"compact-dropdown"
-		);
-	});
+	const [mode, setMode] = useState<NodeDisplayMode>(readNodeDisplayMode);
 
 	useEffect(() => {
 		const handler = () => {
-			setMode(
-				(localStorage.getItem(KEY_DISPLAY_MODE) as NodeDisplayMode) ??
-					"compact-dropdown"
-			);
+			setMode(readNodeDisplayMode());
 		};
 		window.addEventListener("storage", handler);
 		return () => window.removeEventListener("storage", handler);

@@ -12,5 +12,8 @@
   "devDependencies": {
     "@ryu/config": "workspace:*",
     "typescript": "^5"
+  },
+  "dependencies": {
+    "zod": "catalog:"
   }
 }

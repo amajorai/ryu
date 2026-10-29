@@ -18,6 +18,12 @@ use std::{
 const MAX_FILES: usize = 512;
 const MAX_TOTAL_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DEPTH: usize = 32;
+/// Directory-visit budget for one discovery pass. The file cap alone does not
+/// bound a scan of a huge tree with few rules (for example `$HOME` or `/`).
+/// Real monorepos reach several thousand directories outside the skipped
+/// dependency/build trees, so the budget sits well above any project and only
+/// stops runaway scans; a pass that hits it reports `truncated`.
+const MAX_DIRS: usize = 100_000;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -54,8 +60,12 @@ pub struct RuleEntry {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct RuleDiscoveryResponse {
-    pub cwd: String,
+    /// `None` when the caller named no project directory.
+    pub cwd: Option<String>,
     pub rules: Vec<RuleEntry>,
+    /// `true` when the directory-visit budget stopped the walk early, so
+    /// `rules` may be missing entries from directories that were not reached.
+    pub truncated: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,23 +74,31 @@ pub struct DiscoverQuery {
 }
 
 /// `GET /api/rules/discover`.
+///
+/// Without a `cwd` there is no project to scan, so the answer is empty. Core's
+/// own process working directory is not a project (it is often `/` for a
+/// launchd/systemd-started node), and walking it would scan the whole disk.
 pub async fn discover(Query(query): Query<DiscoverQuery>) -> impl IntoResponse {
-    let requested = query.cwd.filter(|value| !value.trim().is_empty());
-    let cwd = match requested {
-        Some(value) => PathBuf::from(value),
-        None => {
-            match std::env::current_dir() {
-                Ok(path) => path,
-                Err(error) => {
-                    return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("cannot determine current directory: {error}") })),
-                )
-                    .into_response();
-                }
-            }
-        }
+    let Some(requested) = query.cwd.filter(|value| !value.trim().is_empty()) else {
+        return Json(RuleDiscoveryResponse {
+            cwd: None,
+            rules: Vec::new(),
+            truncated: false,
+        })
+        .into_response();
     };
+    match tokio::task::spawn_blocking(move || discover_requested(PathBuf::from(requested))).await {
+        Ok(response) => response,
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("rule discovery failed: {error}") })),
+        )
+            .into_response(),
+    }
+}
+
+/// Blocking half of [`discover`]: validate the directory and walk it.
+fn discover_requested(cwd: PathBuf) -> axum::response::Response {
     let cwd = match fs::canonicalize(&cwd) {
         Ok(path) if path.is_dir() => path,
         Ok(_) => {
@@ -103,8 +121,12 @@ pub async fn discover(Query(query): Query<DiscoverQuery>) -> impl IntoResponse {
 
 /// Discover rules below `cwd`, returning a stable path-sorted result.
 pub fn discover_rules(cwd: &Path) -> RuleDiscoveryResponse {
+    discover_rules_with_budget(cwd, MAX_DIRS)
+}
+
+fn discover_rules_with_budget(cwd: &Path, dir_budget: usize) -> RuleDiscoveryResponse {
     let root = fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    let mut state = DiscoveryState::default();
+    let mut state = DiscoveryState::new(dir_budget);
 
     // Walk the project once for nested AGENTS/CLAUDE files. Rule directories
     // get targeted walks: Cursor never follows links, while Claude follows
@@ -115,17 +137,45 @@ pub fn discover_rules(cwd: &Path) -> RuleDiscoveryResponse {
         .rules
         .sort_by(|left, right| left.path.cmp(&right.path));
     RuleDiscoveryResponse {
-        cwd: root.to_string_lossy().into_owned(),
+        cwd: Some(root.to_string_lossy().into_owned()),
         rules: state.rules,
+        truncated: state.truncated,
     }
 }
 
-#[derive(Default)]
 struct DiscoveryState {
     rules: Vec<RuleEntry>,
     seen_paths: HashSet<PathBuf>,
     seen_files: HashSet<PathBuf>,
     bytes: usize,
+    dirs_visited: usize,
+    dir_budget: usize,
+    truncated: bool,
+}
+
+impl DiscoveryState {
+    fn new(dir_budget: usize) -> Self {
+        Self {
+            rules: Vec::new(),
+            seen_paths: HashSet::new(),
+            seen_files: HashSet::new(),
+            bytes: 0,
+            dirs_visited: 0,
+            dir_budget,
+            truncated: false,
+        }
+    }
+
+    /// Spend one directory visit; `false` (and `truncated`) once the budget
+    /// is exhausted.
+    fn visit_dir(&mut self) -> bool {
+        if self.dirs_visited >= self.dir_budget {
+            self.truncated = true;
+            return false;
+        }
+        self.dirs_visited += 1;
+        true
+    }
 }
 
 fn walk_project(
@@ -138,7 +188,7 @@ fn walk_project(
     if depth > MAX_DEPTH || state.rules.len() >= MAX_FILES {
         return;
     }
-    if !visited_dirs.insert(dir.to_path_buf()) {
+    if !visited_dirs.insert(dir.to_path_buf()) || !state.visit_dir() {
         return;
     }
     let Ok(entries) = fs::read_dir(dir) else {
@@ -167,11 +217,11 @@ fn walk_project(
         if !metadata.is_dir() {
             continue;
         }
-        // Keep common dependency/build trees out of a recursive scan. A rule
-        // may still live under a hidden directory such as `.claude`.
+        // Keep common dependency/build/cache trees out of a recursive scan. A
+        // rule may still live under a hidden directory such as `.claude`.
         if matches!(
             entry.file_name().to_str(),
-            Some(".git" | "node_modules" | "target")
+            Some(".git" | "node_modules" | "target" | ".venv" | "__pycache__" | ".next" | ".turbo")
         ) {
             continue;
         }
@@ -223,7 +273,7 @@ fn walk_rule_dir(
     if !canonical_dir.starts_with(project_root) {
         return;
     }
-    if !visited_dirs.insert(canonical_dir) {
+    if !visited_dirs.insert(canonical_dir) || !state.visit_dir() {
         return;
     }
     let Ok(entries) = fs::read_dir(dir) else {
@@ -557,6 +607,83 @@ mod tests {
             .unwrap();
         assert_eq!(nested.apply_mode, RuleApplyMode::Path);
         assert_eq!(nested.globs, vec!["nested/**"]);
+    }
+
+    #[tokio::test]
+    async fn missing_cwd_returns_empty_without_scanning_the_process_cwd() {
+        for cwd in [None, Some("   ".to_owned())] {
+            let response = discover(Query(DiscoverQuery { cwd })).await.into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            let body: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+            assert_eq!(
+                body,
+                json!({ "cwd": null, "rules": [], "truncated": false })
+            );
+        }
+    }
+
+    #[test]
+    fn directory_visits_are_budgeted_and_report_truncation() {
+        let root = tempfile::tempdir().expect("tempdir");
+        for name in ["a", "b", "c"] {
+            fs::create_dir_all(root.path().join(name)).unwrap();
+            fs::write(root.path().join(name).join("AGENTS.md"), name).unwrap();
+        }
+
+        // The default budget covers a normal project: every nested rule is
+        // found and the result is complete.
+        let full = discover_rules(root.path());
+        let paths: Vec<_> = full.rules.iter().map(|rule| rule.path.as_str()).collect();
+        assert_eq!(paths, vec!["a/AGENTS.md", "b/AGENTS.md", "c/AGENTS.md"]);
+        assert!(!full.truncated);
+
+        // A budget of root + one child stops the walk and says so.
+        let partial = discover_rules_with_budget(root.path(), 2);
+        let paths: Vec<_> = partial
+            .rules
+            .iter()
+            .map(|rule| rule.path.as_str())
+            .collect();
+        assert_eq!(paths, vec!["a/AGENTS.md"]);
+        assert!(partial.truncated);
+    }
+
+    #[test]
+    fn more_directories_than_the_old_cap_are_still_walked() {
+        let root = tempfile::tempdir().expect("tempdir");
+        // 4,200 early-sorting directories used to exhaust a 4,096 budget
+        // before the walk reached `zz/`.
+        for index in 0..4_200 {
+            fs::create_dir_all(root.path().join(format!("aa/{index:05}"))).unwrap();
+        }
+        fs::create_dir_all(root.path().join("zz")).unwrap();
+        fs::write(root.path().join("zz/AGENTS.md"), "late rule").unwrap();
+
+        let response = discover_rules(root.path());
+        assert!(response
+            .rules
+            .iter()
+            .any(|rule| rule.path == "zz/AGENTS.md"));
+        assert!(!response.truncated);
+    }
+
+    #[test]
+    fn heavy_cache_directories_are_skipped() {
+        let root = tempfile::tempdir().expect("tempdir");
+        for name in [".venv", "__pycache__", ".next", ".turbo", "src"] {
+            fs::create_dir_all(root.path().join(name)).unwrap();
+            fs::write(root.path().join(name).join("AGENTS.md"), name).unwrap();
+        }
+        let response = discover_rules(root.path());
+        let paths: Vec<_> = response
+            .rules
+            .iter()
+            .map(|rule| rule.path.as_str())
+            .collect();
+        assert_eq!(paths, vec!["src/AGENTS.md"]);
     }
 
     #[cfg(unix)]

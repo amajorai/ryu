@@ -1,0 +1,19 @@
+{
+  "provider": "openrouter",
+  "status": 403,
+  "expectRow": "openrouter.moderation",
+  "provenance": "shape from the provider's error documentation (ModerationErrorMetadata), not captured from a live request (spec Q-03-1)",
+  "source": "https://openrouter.ai/docs/api-reference/errors",
+  "body": {
+    "error": {
+      "code": 403,
+      "message": "RYU_TEST_FIXTURE upstream refusal message",
+      "metadata": {
+        "reasons": ["RYU_TEST_FIXTURE"],
+        "flagged_input": "RYU_TEST_FIXTURE",
+        "provider_name": "RYU_TEST_FIXTURE",
+        "model_slug": "ryu-test/fixture"
+      }
+    }
+  }
+}

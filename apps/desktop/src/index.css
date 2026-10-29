@@ -22,9 +22,27 @@
    to nothing: `lg:w-72` on the detail rail was absent, so the preview's two-column
    body collapsed its main column to a few characters wide. A missing utility has
    no error and no warning — it just doesn't lay out. */
+@source "../../../packages/command/src";
 @source "../../../packages/marketplace/src";
+/* The Ask Ryu glass skin and surface primitives live in `@ryu/assistant-widget` so
+   Desktop and the public-site widget share one source; scan it the same way. */
+@source "../../../packages/assistant-widget/src";
+/* Streamdown's code blocks color each Shiki token with its own utility classes
+   (`text-[var(--sdm-c,inherit)]` and the `dark:` twin). Node packages are not
+   scanned automatically, so without this every chat code block rendered in the
+   foreground color even though highlighting ran. */
+@source "../../../packages/blocks/node_modules/streamdown/dist";
 
 @theme inline {
+	--color-wallpaper-base: #121126;
+	--color-wallpaper-gradient-start: #2b3a8c;
+	--color-wallpaper-gradient-mid: #1d1f4a;
+	--color-wallpaper-gradient-end: #0d0c1d;
+}
+
+/* Fonts are runtime preferences. Keep utilities reading the variables rather
+   than baking these defaults into body and font-heading at build time. */
+@theme {
 	--font-sans: "Inter Variable", sans-serif;
 	--font-heading: "Geist Variable", sans-serif;
 	--font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
@@ -613,4 +631,22 @@ div[data-tauri-decorum-tb] .decorum-tb-btn {
 	.ryu-seasonal-particle {
 		display: none;
 	}
+}
+
+/* React Flow's default interaction opt-outs (`noDragClassName` /
+   `noPanClassName`), also the dashboard grid's drag `cancel` selector. A control
+   inside a draggable widget (WidgetCard's actions menu) carries them so a press
+   opens the control instead of dragging the widget or panning the canvas. The
+   default cursor marks that region as not a grab handle. */
+@utility nodrag {
+	cursor: default;
+}
+@utility nopan {
+	cursor: default;
+}
+
+/* Skip offscreen animated wallpaper previews while reserving card height. */
+@utility wallpaper-catalog-card {
+	contain-intrinsic-size: 0 19rem;
+	content-visibility: auto;
 }

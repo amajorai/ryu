@@ -21,6 +21,7 @@
 // the sidebar's buckets about where a day starts.
 
 import { formatDate, startOfTodayMs } from "@ryu/ui/lib/timezone.ts";
+import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
 
 /** The one field of a message this module reads, when it is there at all. */
 export interface DatedMessage {
@@ -78,13 +79,21 @@ function dayStartDaysBefore(startOfToday: number, days: number): number {
 }
 
 /** `createdAt` as epoch ms, or `null` when it is absent or unparseable. */
-function readCreatedAt(msg: object | undefined): number | null {
-	const value = (msg as DatedMessage | undefined)?.createdAt;
+function readCreatedAt(msg: NativeSdkValue): number | null {
+	// SAFETY: This is only an optional native member observation. It does not
+	// classify the receiver or its timestamp; the cell stays in the full SDK
+	// opaque domain, with ordinary scalar boxing/nullish behavior unchanged.
+	const value = (msg as { createdAt?: NativeSdkValue } | undefined)?.createdAt;
 	if (value === undefined || value === null) {
 		return null;
 	}
+	// SAFETY: The native Date constructor owns coercion and rejection here.
+	// Its declared input slot annotates this immediate call only; the opaque
+	// operand is not promised to be a decoded Date/string/number elsewhere.
 	const ms =
-		value instanceof Date ? value.getTime() : new Date(value).getTime();
+		value instanceof Date
+			? value.getTime()
+			: new Date(value as ConstructorParameters<typeof Date>[0]).getTime();
 	return Number.isNaN(ms) ? null : ms;
 }
 
@@ -158,9 +167,11 @@ export function groupTurnsByDay(
  * spring-forward case is what would otherwise print last Friday as plain
  * "Friday" on a Friday.
  *
- * There is deliberately NO midnight timer refreshing "Today": the next message
- * (or any other render) re-evaluates it, and a background interval per open
- * transcript costs more than the staleness it fixes.
+ * This function owns no timer. A mounted `MessageList` passes a
+ * `startOfToday` that follows the shared display-day store
+ * (`@ryu/ui/lib/display-day.ts`): one bounded timer plus focus/visibility
+ * wakes for every mounted consumer, so "Today" becomes "Yesterday" at the
+ * display-zone midnight without a per-transcript interval.
  */
 export function dayLabel(dayKey: string, startOfToday: number): string {
 	const dayStart = Number(dayKey);

@@ -6,6 +6,7 @@ import { fontWeights } from "@ryu/ui/lib/font-weight.ts";
 import { spring } from "@ryu/ui/lib/springs.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { AnimatePresence, motion } from "motion/react";
+import type { CSSProperties } from "react";
 import {
 	type ComponentType,
 	createContext,
@@ -18,10 +19,18 @@ import {
 	useRef,
 	useState,
 } from "react";
+import {
+	isNativeFunction,
+	isNativeNumber,
+} from "../lib/native-primitive-observation.ts";
 
 // A lucide-shaped icon component: called with `size`/`strokeWidth`/`className`.
 // Kept local so the tabs don't drag in a full icon-library map just for a type —
 // any icon that renders from these props (lucide, or a hugeicons adapter) fits.
+interface LabelWeightStyle extends CSSProperties {
+	"--label-weight": string;
+}
+
 export type IconComponent = ComponentType<{
 	size?: number;
 	strokeWidth?: number;
@@ -31,8 +40,8 @@ export type IconComponent = ComponentType<{
 // Rounded shape tokens for the selection pill and the focus ring. The upstream
 // registry sources these from a swappable "shape context"; we inline the
 // rounded variant to match the rest of the design system.
-const SHAPE_BG = "rounded-lg";
-const SHAPE_FOCUS = "rounded-[10px]";
+const PILL_RADIUS = "rounded-lg corner-squircle";
+const FOCUS_RADIUS = "rounded-[10px] corner-squircle";
 
 interface TabsSubtleContextValue {
 	activeLabel: boolean;
@@ -56,6 +65,7 @@ interface TabsSubtleProps
 	extends Omit<HTMLAttributes<HTMLDivElement>, "onSelect"> {
 	/** When true, only the selected tab shows its text label. Requires icons on tabs. */
 	activeLabel?: boolean;
+	appearance?: "default" | "bot-feed";
 	children: ReactNode;
 	idPrefix?: string;
 	onSelect: (index: number) => void;
@@ -70,6 +80,7 @@ const TabsSubtle = forwardRef<HTMLDivElement, TabsSubtleProps>(
 			onSelect,
 			idPrefix,
 			activeLabel = false,
+			appearance = "default",
 			className,
 			...props
 		},
@@ -80,7 +91,7 @@ const TabsSubtle = forwardRef<HTMLDivElement, TabsSubtleProps>(
 		const setContainerRef = useCallback(
 			(node: HTMLDivElement | null) => {
 				containerRef.current = node;
-				if (typeof ref === "function") {
+				if (isNativeFunction(ref)) {
 					ref(node);
 				} else if (ref) {
 					ref.current = node;
@@ -166,7 +177,7 @@ const TabsSubtle = forwardRef<HTMLDivElement, TabsSubtleProps>(
             focus, Enter/Space selects. */}
 				<Tabs.Root
 					onValueChange={(value) => {
-						if (typeof value === "number") {
+						if (isNativeNumber(value)) {
 							onSelect(value);
 						}
 					}}
@@ -177,10 +188,11 @@ const TabsSubtle = forwardRef<HTMLDivElement, TabsSubtleProps>(
 								// -mx-1 px-1 / -my-1 py-1 give the 2px-outset focus ring room
 								// to draw without being clipped by overflow-x-auto
 								"scrollbar-hide relative -mx-1 -my-1 flex max-w-full select-none items-center gap-0.5 overflow-x-auto px-1 py-1",
+								appearance === "bot-feed" && "rounded-lg bg-muted/60",
 								className
 							)}
 							onBlur={(e: React.FocusEvent<HTMLDivElement>) => {
-								if (containerRef.current?.contains(e.relatedTarget as Node)) {
+								if (containerRef.current?.contains(e.relatedTarget)) {
 									return;
 								}
 								setFocusedIndex(null);
@@ -190,16 +202,14 @@ const TabsSubtle = forwardRef<HTMLDivElement, TabsSubtleProps>(
 								setHoveredIndex(null);
 							}}
 							onFocus={(e: React.FocusEvent<HTMLDivElement>) => {
-								const indexAttr = (e.target as HTMLElement)
+								const indexAttr = e.target
 									.closest("[data-proximity-index]")
 									?.getAttribute("data-proximity-index");
 								if (indexAttr != null) {
 									const idx = Number(indexAttr);
 									setHoveredIndex(idx);
 									setFocusedIndex(
-										(e.target as HTMLElement).matches(":focus-visible")
-											? idx
-											: null
+										e.target.matches(":focus-visible") ? idx : null
 									);
 								}
 							}}
@@ -220,7 +230,7 @@ const TabsSubtle = forwardRef<HTMLDivElement, TabsSubtleProps>(
 									}}
 									className={cn(
 										"pointer-events-none absolute bg-accent",
-										SHAPE_BG
+										PILL_RADIUS
 									)}
 									initial={false}
 									transition={{
@@ -243,7 +253,7 @@ const TabsSubtle = forwardRef<HTMLDivElement, TabsSubtleProps>(
 										}}
 										className={cn(
 											"pointer-events-none absolute bg-accent",
-											SHAPE_BG
+											PILL_RADIUS
 										)}
 										exit={
 											isMouseInside.current
@@ -287,7 +297,7 @@ const TabsSubtle = forwardRef<HTMLDivElement, TabsSubtleProps>(
 										}}
 										className={cn(
 											"pointer-events-none absolute z-20 border border-[color:var(--focus-ring,#6B97FF)]",
-											SHAPE_FOCUS
+											FOCUS_RADIUS
 										)}
 										exit={{ opacity: 0, transition: spring.fast.exit }}
 										initial={false}
@@ -324,9 +334,10 @@ const TabsSubtleItem = forwardRef<HTMLButtonElement, TabsSubtleItemProps>(
 			useTabsSubtle();
 		const setInternalRef = useCallback(
 			(node: HTMLElement | null) => {
+				// SAFETY: This private callback is only the ref of the default Tabs.Tab below. Installed Base UI renders a native button when no render override is supplied, and this wrapper exposes only complete HTMLButtonElement attributes. The SDK widens its reusable ref to HTMLElement for render overrides; this exact receiver publishes the native button or detach null.
 				const button = node as HTMLButtonElement | null;
 				internalRef.current = button;
-				if (typeof ref === "function") {
+				if (isNativeFunction(ref)) {
 					ref(button);
 				} else if (ref) {
 					ref.current = button;
@@ -345,27 +356,29 @@ const TabsSubtleItem = forwardRef<HTMLButtonElement, TabsSubtleItemProps>(
 		const collapseLabel = activeLabel && !!Icon;
 		const showLabel = !collapseLabel || isSelected;
 
+		const sizerStyle: LabelWeightStyle = {
+			"--label-weight": fontWeights.medium,
+		};
+		const labelStyle: LabelWeightStyle = {
+			"--label-weight": isSelected ? fontWeights.medium : fontWeights.normal,
+		};
 		const labelContent = (
 			// Both stacked spans carry the text-box trim so the invisible bold
 			// sizer and the visible label keep identical boxes.
-			<span className="inline-grid whitespace-nowrap text-[13px]">
+			<span className="type-detail inline-grid whitespace-nowrap">
 				<span
 					aria-hidden="true"
-					className="invisible col-start-1 row-start-1 [text-box:trim-both_cap_alphabetic]"
-					style={{ fontVariationSettings: fontWeights.medium }}
+					className="invisible col-start-1 row-start-1 [font-variation-settings:var(--label-weight)] [text-box:trim-both_cap_alphabetic]"
+					style={sizerStyle}
 				>
 					{label}
 				</span>
 				<span
 					className={cn(
-						"col-start-1 row-start-1 transition-[color,font-variation-settings] duration-80 [text-box:trim-both_cap_alphabetic]",
+						"col-start-1 row-start-1 transition-[color,font-variation-settings] duration-80 [font-variation-settings:var(--label-weight)] [text-box:trim-both_cap_alphabetic]",
 						isActive ? "text-foreground" : "text-muted-foreground"
 					)}
-					style={{
-						fontVariationSettings: isSelected
-							? fontWeights.medium
-							: fontWeights.normal,
-					}}
+					style={labelStyle}
 				>
 					{label}
 				</span>
@@ -385,7 +398,7 @@ const TabsSubtleItem = forwardRef<HTMLButtonElement, TabsSubtleItemProps>(
 					// text-box trim on the label doesn't shrink the tab.
 					"relative z-10 flex cursor-pointer items-center border-none bg-transparent px-3 outline-none",
 					collapseLabel ? "h-8" : "h-9 gap-2",
-					SHAPE_BG,
+					PILL_RADIUS,
 					className
 				)}
 				data-proximity-index={index}

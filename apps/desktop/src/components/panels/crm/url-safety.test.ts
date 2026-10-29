@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { safeHref } from "@/src/components/panels/crm/url-safety.ts";
+import {
+	safeHref,
+	safeMailtoHref,
+} from "@/src/components/panels/crm/url-safety.ts";
 
 // Control characters are built rather than written literally, so the vectors
 // survive a copy/paste or a formatter run that would otherwise eat them.
@@ -60,5 +63,23 @@ describe("safeHref", () => {
 		// one by the fallback path.
 		expect(safeHref("javascript:alert(1)")).toBeNull();
 		expect(safeHref("data:text/html,x")).toBeNull();
+	});
+});
+
+describe("safeMailtoHref", () => {
+	it("accepts a plain address", () => {
+		expect(safeMailtoHref("sales+ryu@example.com")).toBe(
+			"mailto:sales+ryu@example.com"
+		);
+	});
+
+	it("rejects header injection and non-address content", () => {
+		expect(
+			safeMailtoHref("sales@example.com?bcc=attacker@example.com")
+		).toBeNull();
+		expect(
+			safeMailtoHref("sales@example.com\r\nBcc:attacker@example.com")
+		).toBeNull();
+		expect(safeMailtoHref("javascript:alert(1)")).toBeNull();
 	});
 });

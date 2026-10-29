@@ -25,6 +25,8 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { TabsSubtle, TabsSubtleItem } from "@ryu/ui/components/tabs-subtle.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -33,10 +35,10 @@ import {
 	getGoal,
 	pauseGoal,
 	resumeGoal,
-} from "@ryuhq/core-client/goals";
+} from "@ryuhq/core-client/goals.ts";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useApprovals } from "@/src/hooks/useApprovals.ts";
 import { type ActivityItem, listActivity } from "@/src/lib/api/activity.ts";
@@ -61,21 +63,21 @@ type BotProfileTab = "overview" | "approvals" | "goals" | "feed";
 const BOT_PROFILE_COLLAPSED_KEY = "ryu:bot-profile-card-collapsed:v1";
 const GOAL_QUERY_PREFIX = "bot-profile-goal";
 
-const FEED_SOURCE_LABELS: Record<BotFeedSource, string> = {
+const FEED_SOURCE_LABELS = {
 	approvals: "Approvals",
 	goals: "Goals",
 	notes: "Notes",
 	runs: "Work",
 	watch: "Watch",
-};
+} satisfies Record<BotFeedSource, string>;
 
-const FEED_SOURCE_ICONS: Record<BotFeedSource, typeof Activity01Icon> = {
+const FEED_SOURCE_ICONS = {
 	approvals: Shield01Icon,
 	goals: Target01Icon,
 	notes: Message01Icon,
 	runs: Activity01Icon,
 	watch: ViewIcon,
-};
+} satisfies Record<BotFeedSource, typeof Activity01Icon>;
 
 const FEED_SOURCE_OPTIONS: { id: BotFeedSource; description: string }[] = [
 	{ id: "runs", description: "Work Ryu completed or continued" },
@@ -162,8 +164,10 @@ function useBotGoalRows(conversations: Conversation[], target: ApiTarget) {
 		];
 	});
 	return {
+		error: queries.some((query) => query.isError),
 		loading: queries.some((query) => query.isPending),
 		rows,
+		retry: () => Promise.all(queries.map((query) => query.refetch())),
 	};
 }
 
@@ -209,14 +213,14 @@ function GoalRow({
 					<span className="line-clamp-2 block font-medium text-xs">
 						{goal.goal}
 					</span>
-					<span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+					<span className="type-compact mt-0.5 block truncate text-muted-foreground">
 						{conversation.title ?? "Untitled chat"}
 						{goal.last_reason ? ` · ${goal.last_reason}` : ""}
 					</span>
 				</span>
 			</button>
 			{achieved ? (
-				<span className="shrink-0 pt-0.5 text-[10px] text-status-success">
+				<span className="type-compact shrink-0 pt-0.5 text-status-success">
 					Done
 				</span>
 			) : (
@@ -261,7 +265,7 @@ function ApprovalRow({
 				</span>
 				<div className="min-w-0 flex-1">
 					<p className="line-clamp-2 font-medium text-xs">{approval.title}</p>
-					<p className="mt-0.5 line-clamp-2 text-[10px] text-muted-foreground">
+					<p className="type-compact mt-0.5 line-clamp-2 text-muted-foreground">
 						{approval.summary ||
 							approval.question ||
 							statusLabel(approval.status)}
@@ -270,7 +274,7 @@ function ApprovalRow({
 			</div>
 			<div className="mt-2 flex items-center justify-end gap-1.5">
 				<Button
-					className="h-7 px-2 text-[11px]"
+					appearance="bot-decision"
 					disabled={busy}
 					onClick={onReject}
 					size="sm"
@@ -279,7 +283,7 @@ function ApprovalRow({
 					Deny
 				</Button>
 				<Button
-					className="h-7 px-2 text-[11px]"
+					appearance="bot-decision"
 					disabled={busy}
 					onClick={onApprove}
 					size="sm"
@@ -307,9 +311,14 @@ function FeedPreferences({
 			>
 				<HugeiconsIcon className="size-3.5" icon={Settings01Icon} />
 			</PopoverTrigger>
-			<PopoverContent align="end" className="w-64 p-3" sideOffset={8}>
+			<PopoverContent
+				align="end"
+				className="w-64"
+				sideOffset={8}
+				spacing="rail"
+			>
 				<p className="font-medium text-xs">Customize your feed</p>
-				<p className="mt-1 text-[11px] text-muted-foreground">
+				<p className="type-caption mt-1 text-muted-foreground">
 					Choose which kinds of agent work show up here.
 				</p>
 				<div className="mt-3 flex flex-col gap-2">
@@ -326,7 +335,7 @@ function FeedPreferences({
 								<span className="block font-medium text-xs">
 									{FEED_SOURCE_LABELS[option.id]}
 								</span>
-								<span className="block text-[10px] text-muted-foreground">
+								<span className="type-compact block text-muted-foreground">
 									{option.description}
 								</span>
 							</span>
@@ -356,12 +365,14 @@ function ActivityPreview({
 			</span>
 			<span className="min-w-0 flex-1">
 				<span className="flex items-center gap-1.5">
-					<span className="truncate font-medium text-xs">{item.title}</span>
-					<span className="shrink-0 text-[10px] text-muted-foreground">
+					<span className="truncate font-medium text-xs" title={item.title}>
+						{item.title}
+					</span>
+					<span className="type-compact shrink-0 text-muted-foreground">
 						{relativeAge(item.created_at)}
 					</span>
 				</span>
-				<span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+				<span className="type-compact mt-0.5 block truncate text-muted-foreground">
 					{item.body || sourceLabel(item)}
 				</span>
 			</span>
@@ -402,24 +413,24 @@ function FeedPost({
 					<HugeiconsIcon className="size-3.5" icon={sourceIcon(item)} />
 				</span>
 				<span className="min-w-0 flex-1">
-					<span className="block font-medium text-[11px]">
-						Ryu Bot · {sourceLabel(item)}
+					<span className="type-caption block font-medium">
+						Bot · {sourceLabel(item)}
 					</span>
-					<span className="block text-[10px] text-muted-foreground">
+					<span className="type-compact block text-muted-foreground">
 						{relativeAge(item.created_at)} ago
 					</span>
 				</span>
 			</header>
 			<h4 className="mt-2 font-medium text-xs leading-relaxed">{item.title}</h4>
 			{item.body ? (
-				<p className="mt-1 line-clamp-4 text-[11px] text-muted-foreground leading-relaxed">
+				<p className="type-caption mt-1 line-clamp-4 text-muted-foreground leading-relaxed">
 					{item.body}
 				</p>
 			) : null}
 			<div className="mt-2 flex items-center gap-1 border-border/60 border-t pt-2">
 				<Button
+					appearance={liked ? "bot-feed-action-liked" : "bot-feed-action"}
 					aria-pressed={liked}
-					className={cn("h-7 gap-1 px-2 text-[10px]", liked && "text-primary")}
 					onClick={onLike}
 					size="sm"
 					variant="ghost"
@@ -431,8 +442,8 @@ function FeedPost({
 					{liked ? "Liked" : "Like"}
 				</Button>
 				<Button
+					appearance="bot-feed-action"
 					aria-expanded={commentOpen}
-					className="h-7 gap-1 px-2 text-[10px]"
 					onClick={() => setCommentOpen((value) => !value)}
 					size="sm"
 					variant="ghost"
@@ -441,7 +452,8 @@ function FeedPost({
 					Comment{comments.length > 0 ? ` · ${comments.length}` : ""}
 				</Button>
 				<Button
-					className="ml-auto h-7 gap-1 px-2 text-[10px]"
+					appearance="bot-feed-action"
+					className="ml-auto"
 					onClick={onReply}
 					size="sm"
 					variant="ghost"
@@ -454,7 +466,7 @@ function FeedPost({
 				<div className="mt-2 flex flex-col gap-1">
 					{comments.map((comment, index) => (
 						<p
-							className="rounded-md bg-muted/70 px-2 py-1.5 text-[10px] text-muted-foreground"
+							className="type-compact rounded-md bg-muted/70 px-2 py-1.5 text-muted-foreground"
 							key={`${item.id}-comment-${index}`}
 						>
 							{comment}
@@ -466,12 +478,12 @@ function FeedPost({
 				<form className="mt-2 flex gap-1.5" onSubmit={submitComment}>
 					<input
 						aria-label="Comment on this activity"
-						className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-[11px] outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+						className="type-caption min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
 						onChange={(event) => setDraft(event.target.value)}
 						placeholder="Leave a note for Ryu"
 						value={draft}
 					/>
-					<Button className="h-7 px-2 text-[10px]" size="sm" type="submit">
+					<Button appearance="bot-feed-submit" size="sm" type="submit">
 						Post
 					</Button>
 				</form>
@@ -496,19 +508,56 @@ function EmptyPanel({
 				icon={icon}
 			/>
 			<p className="mt-2 font-medium text-xs">{title}</p>
-			<p className="mt-1 text-[10px] text-muted-foreground leading-relaxed">
+			<p className="type-compact mt-1 text-muted-foreground leading-relaxed">
 				{description}
 			</p>
 		</div>
 	);
 }
 
+function QueryErrorPanel({
+	description,
+	icon,
+	onRetry,
+	title,
+}: {
+	description: string;
+	icon: typeof Activity01Icon;
+	onRetry: () => void;
+	title: string;
+}) {
+	return (
+		<div className="rounded-lg border border-border/70 border-dashed px-3 py-4 text-center">
+			<HugeiconsIcon
+				className="mx-auto size-5 text-muted-foreground/70"
+				icon={icon}
+			/>
+			<p className="mt-2 font-medium text-xs">{title}</p>
+			<p className="type-compact mt-1 text-muted-foreground leading-relaxed">
+				{description}
+			</p>
+			<Button
+				appearance="bot-retry"
+				className="mt-3"
+				onClick={onRetry}
+				size="sm"
+				variant="outline"
+			>
+				Try again
+			</Button>
+		</div>
+	);
+}
+
 function BotProfileContent({
 	activity,
+	activityError,
+	activityLoading,
 	approvals,
 	engagement,
 	feedPreferences,
 	goalRows,
+	goalError,
 	goalLoading,
 	liveActivities,
 	onApprove,
@@ -519,16 +568,21 @@ function BotProfileContent({
 	onOpenChat,
 	onOpenGoal,
 	onReject,
+	onRetryActivity,
+	onRetryGoals,
 	onToggleGoal,
 	decidingApproval,
 	togglingGoal,
 	view,
 }: {
 	activity: ActivityItem[];
+	activityError: boolean;
+	activityLoading: boolean;
 	approvals: ReturnType<typeof useApprovals>;
 	engagement: BotFeedEngagement;
 	feedPreferences: BotFeedPreferences;
 	goalRows: { conversation: Conversation; goal: GoalState }[];
+	goalError: boolean;
 	goalLoading: boolean;
 	liveActivities: ReturnType<typeof useLiveActivities>;
 	onApprove: (id: string) => void;
@@ -539,6 +593,8 @@ function BotProfileContent({
 	onOpenChat: (prompt?: string, title?: string) => void;
 	onOpenGoal: (conversation: Conversation) => void;
 	onReject: (id: string) => void;
+	onRetryActivity: () => void;
+	onRetryGoals: () => void;
 	onToggleGoal: (conversationId: string, goal: GoalState) => void;
 	decidingApproval: string | null;
 	togglingGoal: string | null;
@@ -579,7 +635,7 @@ function BotProfileContent({
 					/>
 				))}
 				{pendingApprovals.length > 4 ? (
-					<p className="text-center text-[10px] text-muted-foreground">
+					<p className="type-compact text-center text-muted-foreground">
 						+{pendingApprovals.length - 4} more waiting in the queue
 					</p>
 				) : null}
@@ -595,7 +651,17 @@ function BotProfileContent({
 
 	if (view === "goals") {
 		if (goalLoading && goalRows.length === 0) {
-			return <Spinner className="mx-auto my-8 size-4" />;
+			return <SkeletonRows spacing="generous" />;
+		}
+		if (goalError && goalRows.length === 0) {
+			return (
+				<QueryErrorPanel
+					description="Ryu couldn’t load the goals attached to these conversations. Try again to check their latest state."
+					icon={Target01Icon}
+					onRetry={onRetryGoals}
+					title="Goals are unavailable"
+				/>
+			);
 		}
 		if (goalRows.length === 0) {
 			return (
@@ -606,7 +672,8 @@ function BotProfileContent({
 						title="No goals yet"
 					/>
 					<Button
-						className="h-8 w-full text-xs"
+						appearance="bot-goal-action"
+						className="w-full"
 						onClick={() =>
 							onOpenChat(
 								"I want to set a goal. Help me turn what I want into a clear outcome and a next step.",
@@ -623,6 +690,14 @@ function BotProfileContent({
 		}
 		return (
 			<div className="flex flex-col gap-3">
+				{goalError ? (
+					<QueryErrorPanel
+						description="Some conversation goals couldn’t be loaded. Try again to check their latest state."
+						icon={Target01Icon}
+						onRetry={onRetryGoals}
+						title="Some goals are unavailable"
+					/>
+				) : null}
 				<GoalGroup
 					label={`Active · ${activeGoals.length}`}
 					onOpen={onOpenGoal}
@@ -638,7 +713,7 @@ function BotProfileContent({
 					togglingGoal={togglingGoal}
 				/>
 				{completedGoals.length > 0 ? (
-					<p className="text-[10px] text-status-success">
+					<p className="type-compact text-status-success">
 						{completedGoals.length} recently completed goal
 						{completedGoals.length === 1 ? "" : "s"}
 					</p>
@@ -648,10 +723,23 @@ function BotProfileContent({
 	}
 
 	if (view === "feed") {
+		if (activityError && activity.length === 0) {
+			return (
+				<QueryErrorPanel
+					description="Ryu couldn’t load the activity feed. Try again to reload it from this node."
+					icon={Activity01Icon}
+					onRetry={onRetryActivity}
+					title="Activity is unavailable"
+				/>
+			);
+		}
+		if (activityLoading && activity.length === 0) {
+			return <Spinner className="mx-auto my-8 size-4" />;
+		}
 		return (
 			<div className="flex flex-col gap-2">
 				<div className="flex items-center justify-between gap-2">
-					<p className="text-[10px] text-muted-foreground">
+					<p className="type-compact text-muted-foreground">
 						Reactions are saved on this device for now.
 					</p>
 					<FeedPreferences
@@ -697,8 +785,8 @@ function BotProfileContent({
 			{liveActivities.length > 0 ? (
 				<div className="flex flex-col gap-1.5">
 					<div className="flex items-center gap-1.5 px-0.5">
-						<span className="size-1.5 animate-pulse rounded-full bg-primary" />
-						<span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+						<span className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse" />
+						<span className="type-compact font-medium text-muted-foreground uppercase tracking-wide">
 							Live now
 						</span>
 					</div>
@@ -718,10 +806,13 @@ function BotProfileContent({
 						>
 							<span className="mt-0.5 size-2 shrink-0 rounded-full bg-primary" />
 							<span className="min-w-0">
-								<span className="block truncate font-medium text-xs">
+								<span
+									className="block truncate font-medium text-xs"
+									title={activity.title}
+								>
 									{activity.title}
 								</span>
-								<span className="mt-0.5 line-clamp-2 block text-[10px] text-muted-foreground">
+								<span className="type-compact mt-0.5 line-clamp-2 block text-muted-foreground">
 									{activity.detail}
 								</span>
 							</span>
@@ -732,11 +823,11 @@ function BotProfileContent({
 			{recentActivity.length > 0 ? (
 				<div className="flex flex-col gap-1.5">
 					<div className="flex items-center justify-between px-0.5">
-						<span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+						<span className="type-compact font-medium text-muted-foreground uppercase tracking-wide">
 							Recent work
 						</span>
 						<Button
-							className="h-6 px-1.5 text-[10px]"
+							appearance="bot-summary"
 							onClick={() =>
 								onOpenChat("Summarize my recent Ryu activity.", "Recent work")
 							}
@@ -754,6 +845,13 @@ function BotProfileContent({
 						/>
 					))}
 				</div>
+			) : activityError ? (
+				<QueryErrorPanel
+					description="Ryu couldn’t load recent activity. Try again to reload it from this node."
+					icon={Activity01Icon}
+					onRetry={onRetryActivity}
+					title="Recent activity is unavailable"
+				/>
 			) : null}
 			<div className="flex items-center gap-2 rounded-lg border border-border/70 border-dashed px-2.5 py-2">
 				<HugeiconsIcon
@@ -762,7 +860,7 @@ function BotProfileContent({
 				/>
 				<div className="min-w-0 flex-1">
 					<p className="font-medium text-xs">Mission Control, at a glance</p>
-					<p className="mt-0.5 text-[10px] text-muted-foreground">
+					<p className="type-compact mt-0.5 text-muted-foreground">
 						Cross-chat summaries and open work stay one conversation away.
 					</p>
 				</div>
@@ -803,7 +901,7 @@ function GoalGroup({
 	}
 	return (
 		<section className="flex flex-col gap-1.5">
-			<h4 className="px-0.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+			<h4 className="type-compact px-0.5 font-medium text-muted-foreground uppercase tracking-wide">
 				{label}
 			</h4>
 			{rows.map(({ conversation, goal }) => (
@@ -824,7 +922,7 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
 	return (
 		<div className="rounded-lg border border-border/60 bg-card/40 px-2 py-1.5 text-center">
 			<div className="font-medium text-sm tabular-nums">{value}</div>
-			<div className="text-[9px] text-muted-foreground">{label}</div>
+			<div className="type-micro text-muted-foreground">{label}</div>
 		</div>
 	);
 }
@@ -834,7 +932,7 @@ export function BotProfileCard({
 }: {
 	conversations: Conversation[];
 }) {
-	const { openTab } = useTabsContext();
+	const openTab = useTabSelector((state) => state.openTab);
 	const node = useActiveNode();
 	const target = useMemo<ApiTarget>(
 		() => ({
@@ -947,7 +1045,7 @@ export function BotProfileCard({
 		}));
 	}, []);
 	const decideApproval = useCallback(
-		(id: string, decide: (approvalId: string) => Promise<unknown>) => {
+		(id: string, decide: ReturnType<typeof useApprovals>["approve"]) => {
 			setDecidingApproval(id);
 			decide(id)
 				.catch(() => undefined)
@@ -965,7 +1063,13 @@ export function BotProfileCard({
 						queryKey: [GOAL_QUERY_PREFIX, target.url, conversationId],
 					})
 				)
-				.catch(() => undefined)
+				.catch(() => {
+					toast.error({
+						description:
+							"This goal hasn’t changed. Check the connection and try again.",
+						title: "Goal",
+					});
+				})
 				.finally(() => setTogglingGoal(null));
 		},
 		[queryClient, target]
@@ -978,7 +1082,7 @@ export function BotProfileCard({
 
 	return (
 		<section
-			aria-label="Ryu Bot activity"
+			aria-label="Bot activity"
 			className="mx-2 mb-2 overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-sm"
 			data-testid="bot-profile-card"
 		>
@@ -987,9 +1091,9 @@ export function BotProfileCard({
 					<Logo size="18px" variant="outline" />
 				</div>
 				<div className="min-w-0 flex-1">
-					<p className="font-medium text-xs">Ryu Bot</p>
+					<p className="font-medium text-xs">Bot</p>
 					<p
-						className="truncate text-[10px] text-muted-foreground"
+						className="type-compact truncate text-muted-foreground"
 						title={statusText}
 					>
 						{statusText}
@@ -1020,8 +1124,9 @@ export function BotProfileCard({
 			{collapsed ? null : (
 				<div className="scroll-fade max-h-[min(45vh,25rem)] overflow-y-auto border-border/60 border-t px-2.5 py-2.5">
 					<TabsSubtle
+						appearance="bot-feed"
 						aria-label="Bot activity views"
-						className="w-full justify-between rounded-lg bg-muted/60"
+						className="w-full justify-between"
 						onSelect={(index) => {
 							const next = ["overview", "approvals", "goals", "feed"][index];
 							if (
@@ -1045,10 +1150,13 @@ export function BotProfileCard({
 					<div className="mt-2.5">
 						<BotProfileContent
 							activity={activity}
+							activityError={activityQuery.isError}
+							activityLoading={activityQuery.isPending}
 							approvals={approvals}
 							decidingApproval={decidingApproval}
 							engagement={engagement}
 							feedPreferences={feedPreferences}
+							goalError={goalState.error}
 							goalLoading={goalState.loading}
 							goalRows={goalState.rows}
 							liveActivities={liveActivities}
@@ -1060,6 +1168,8 @@ export function BotProfileCard({
 							onOpenChat={openChat}
 							onOpenGoal={openGoal}
 							onReject={(id) => decideApproval(id, approvals.reject)}
+							onRetryActivity={() => void activityQuery.refetch()}
+							onRetryGoals={() => void goalState.retry()}
 							onToggleGoal={toggleGoal}
 							togglingGoal={togglingGoal}
 							view={view}

@@ -72,7 +72,7 @@ function ProofStory() {
 			<div className="mx-auto flex min-h-screen max-w-5xl flex-col px-8 py-10">
 				<header className="flex items-start justify-between gap-6">
 					<div>
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							Ryu desktop interaction proof
 						</p>
 						<h1 className="mt-3 font-semibold text-3xl tracking-tight">
@@ -87,8 +87,8 @@ function ProofStory() {
 					<div
 						className={`rounded-full border px-3 py-1.5 font-medium text-xs ${
 							proofPassed
-								? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
-								: "border-amber-400/30 bg-amber-400/10 text-amber-200"
+								? "border-success/30 bg-success/10 text-success"
+								: "border-warning/30 bg-warning/10 text-warning"
 						}`}
 						data-proof-status={proofPassed ? "pass" : "pending"}
 						data-testid="proof-status"
@@ -157,7 +157,7 @@ function ProofStory() {
 
 						<div className="flex flex-1 flex-col justify-between p-8">
 							<div>
-								<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+								<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 									Active page
 								</p>
 								<h2

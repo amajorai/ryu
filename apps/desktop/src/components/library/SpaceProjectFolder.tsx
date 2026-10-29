@@ -1,6 +1,7 @@
 import { Database01Icon, StickyNote01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { FavoriteStar } from "@ryu/blocks/desktop/library.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ContextMenu,
@@ -12,8 +13,10 @@ import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { useInView } from "motion/react";
 import type { ReactNode } from "react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
+import type { UseSpacesResult } from "@/src/hooks/useSpaces.ts";
 import type {
 	Space,
 	SpaceDocument,
@@ -32,7 +35,7 @@ const MAX_PREVIEW_SOURCE_BYTES = 4 * 1024 * 1024;
 
 /** useSpaces keeps this reader stable only within one URL/token/user-JWT scope. */
 export function spaceDocumentPreviewCacheFor(
-	reader: object
+	reader: UseSpacesResult["getDocument"]
 ): Map<string, SpaceDocumentContent> {
 	let cache = previewCaches.get(reader);
 	if (!cache) {
@@ -136,12 +139,17 @@ function databaseCounts(
 	}
 
 	try {
-		const parsed: unknown = JSON.parse(source);
-		if (!isRecord(parsed)) {
+		const parsed = z
+			.object({
+				columns: z.array(z.json()).catch([]),
+				rows: z.array(z.json()).catch([]),
+			})
+			.safeParse(JSON.parse(source));
+		if (!parsed.success) {
 			return null;
 		}
-		const columns = Array.isArray(parsed.columns) ? parsed.columns.length : 0;
-		const rows = Array.isArray(parsed.rows) ? parsed.rows.length : 0;
+		const columns = parsed.data.columns.length;
+		const rows = parsed.data.rows.length;
 		if (columns === 0 && rows === 0) {
 			return null;
 		}
@@ -149,10 +157,6 @@ function databaseCounts(
 	} catch {
 		return null;
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
 }
 
 function DatabasePreview({ source }: { source: string }) {
@@ -186,9 +190,12 @@ function FailedPreview({ document }: { document: SpaceDocument }) {
 }
 
 function LoadingPreview({ document }: { document: SpaceDocument }) {
+	const tl = useLiteralMessages();
 	return (
 		<div
-			aria-label={`Loading preview for ${document.title || "Untitled"}`}
+			aria-label={tl("Loading preview for {title}", {
+				title: document.title || tl("Untitled"),
+			})}
 			className="flex min-h-32 flex-col gap-3 bg-muted/30 p-4"
 		>
 			<Skeleton className="h-4 w-2/3" />
@@ -243,7 +250,7 @@ export function SpaceProjectFolder({
 	const nearViewport = useInView(folderRef, {
 		once: true,
 		margin: "200px",
-		initial: typeof IntersectionObserver === "undefined",
+		initial: globalThis.IntersectionObserver === undefined,
 	});
 	const [opened, setOpened] = useState(false);
 	const shouldLoad = nearViewport || opened;
@@ -447,7 +454,7 @@ export function SpaceProjectFolder({
 				title={space.name}
 			/>
 			<FavoriteStar
-				className="absolute top-2 right-2 bg-background/70 backdrop-blur-sm"
+				className="absolute top-2 right-2"
 				favorited={favorited}
 				onToggle={onToggleFavorite}
 			/>

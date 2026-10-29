@@ -27,6 +27,8 @@
 // (ExtensionHost) plus the host-side capability gate (rpc.ts); this file adds the
 // content-level defenses (nonce-only scripts, no eval, pinned CSP, proxied egress).
 
+import { z } from "zod";
+
 import { HOST_API_VERSION } from "./rpc.ts";
 import {
 	buildCompanionThemeLayoutCss,
@@ -58,16 +60,23 @@ export interface WidgetAssetProxy {
 	templateUri: string;
 }
 
+const proxyOriginSchema = z
+	.unknown()
+	.pipe(z.string().refine((origin) => !/[\s;'"]/.test(origin)));
+
 /** Validate the Core PROXY origin to a bare `scheme://host[:port]`, accepting
  *  loopback **http** (which {@link sanitizeCspOrigin} rejects, being public-https
  *  only). Still rejects CSP-delimiter chars so the (host-controlled, trusted) node
  *  URL can never inject extra directives. Returns null for anything unparseable. */
-export function sanitizeProxyOrigin(origin: string): string | null {
-	if (typeof origin !== "string" || /[\s;'"]/.test(origin)) {
+export function sanitizeProxyOrigin(
+	origin: z.input<typeof proxyOriginSchema>
+): string | null {
+	const parsed = proxyOriginSchema.safeParse(origin);
+	if (!parsed.success) {
 		return null;
 	}
 	try {
-		const u = new URL(origin.trim());
+		const u = new URL(parsed.data.trim());
 		if (u.protocol !== "http:" && u.protocol !== "https:") {
 			return null;
 		}
@@ -112,6 +121,7 @@ export interface WidgetInitialGlobals {
 	friendly?: boolean;
 	locale: string;
 	maxHeight: number | null;
+	modelContext?: import("./model-context.ts").ModelContextState | null;
 	safeArea: { bottom: number; left: number; right: number; top: number };
 	theme: "light" | "dark";
 	/** The complete host appearance snapshot, including custom palette values. */
@@ -161,7 +171,7 @@ export function buildWidgetCsp(
 /** JSON literal safe to embed inside a `<script>` body: escapes `<` so a value
  *  containing `</script>` cannot break out of the tag (defense in depth; the
  *  null-origin sandbox is the real boundary). */
-function scriptLiteral(value: unknown): string {
+function scriptLiteral(value: string | WidgetInitialGlobals): string {
 	return JSON.stringify(value ?? null).replace(/</g, "\\u003c");
 }
 
@@ -274,6 +284,8 @@ function bridgeSource(
     // that reads them at module top-level does not crash; host-pushable via setGlobals.
     view: (G.view != null ? G.view : { displayMode: G.displayMode, maxHeight: G.maxHeight }),
     userAgent: (G.userAgent != null ? G.userAgent : { app: "ryu", locale: G.locale }),
+    modelContext: G.modelContext || null,
+    updateModelContext: function(input){ return call("ui.updateModelContext", [input]); },
     setWidgetState: function(s){ api.widgetState = s; return call("widget.setState", [s]); },
     callTool: function(name, args){ return call("tool.call", [name, args]); },
     sendFollowUpMessage: function(a){ return call("ui.sendMessage", [a]); },
@@ -314,6 +326,12 @@ function bridgeSource(
     }
   };
   window.ryu = api; window.openai = api;
+  window.addEventListener("keydown", function(event){
+    if(event.key === "Escape" && api.displayMode !== "inline") {
+      event.preventDefault();
+      api.requestDisplayMode({ mode: "inline" }).catch(function(){});
+    }
+  });
   // Detection contract (shared with installRyuBridge): mark THIS bootstrap as the
   // authoritative bridge so the frame-side installRyuBridge() adopts it as a no-op
   // instead of clobbering window.ryu with a port-less runtime.

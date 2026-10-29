@@ -1,9 +1,15 @@
 import { type Chord, chordMatches, normalizeChord } from "@ryu/hotkeys/chord";
-import type { ComposerSettingsSection } from "./composer-settings-menu.tsx";
+import type {
+	ComposerSettingItem,
+	ComposerSettingsSection,
+} from "./composer-settings-menu.tsx";
+import { isFullAccessEquivalent } from "./full-access-warning.tsx";
 
 const NON_CYCLABLE_AGENT_IDS = new Set(["__create_agent__"]);
 
 /** Stable action ids shared with the desktop hotkey registry + Core keybindings. */
+// SAFETY: This authored literal inventory defines the exact action-id union and
+// iteration order. Const captures those catalog literals, not decoded input.
 export const COMPOSER_SHORTCUT_IDS = [
 	"composer.cycle-agent",
 	"composer.cycle-mode",
@@ -14,15 +20,22 @@ export const COMPOSER_SHORTCUT_IDS = [
 export type ComposerShortcutId = (typeof COMPOSER_SHORTCUT_IDS)[number];
 
 /** Default chords — focus-scoped (fire only inside the composer input). */
-export const COMPOSER_SHORTCUT_DEFAULTS: Record<ComposerShortcutId, Chord> = {
+export const COMPOSER_SHORTCUT_DEFAULTS = {
 	"composer.cycle-agent": "Tab",
 	"composer.cycle-mode": "Shift+Tab",
 	"composer.cycle-model": "Shift+M",
 	"composer.cycle-thinking": "Shift+T",
-};
+} satisfies Record<ComposerShortcutId, Chord>;
 
 /** Effective bindings for the four composer cycle actions (`null` = unbound). */
-export type ComposerShortcutBindings = Record<ComposerShortcutId, Chord | null>;
+interface AuthoredComposerShortcutBindings {
+	"composer.cycle-agent": Chord | null;
+	"composer.cycle-mode": Chord | null;
+	"composer.cycle-model": Chord | null;
+	"composer.cycle-thinking": Chord | null;
+}
+
+export type ComposerShortcutBindings = AuthoredComposerShortcutBindings;
 
 export interface ComposerShortcutEvent {
 	altKey: boolean;
@@ -38,7 +51,7 @@ export interface ComposerShortcutEvent {
 export function resolveComposerShortcutBindings(
 	overrides: Partial<Record<string, Chord | null>> = {}
 ): ComposerShortcutBindings {
-	const bindings = {} as ComposerShortcutBindings;
+	const bindings: Partial<ComposerShortcutBindings> = {};
 	for (const id of COMPOSER_SHORTCUT_IDS) {
 		if (Object.hasOwn(overrides, id)) {
 			const override = overrides[id];
@@ -47,14 +60,17 @@ export function resolveComposerShortcutBindings(
 			bindings[id] = normalizeChord(COMPOSER_SHORTCUT_DEFAULTS[id]);
 		}
 	}
-	return bindings;
+	// SAFETY: The canonical four-id inventory above is exhaustive for this
+	// mapped type. Each loop iteration assigns its key on both branches, using
+	// the native normalizeChord result or null; construction is now complete.
+	return bindings as ComposerShortcutBindings;
 }
 
 /** Pick the four composer bindings out of a full hotkey id → chord map. */
 export function composerBindingsFromMap(
 	bindings: ReadonlyMap<string, Chord | null>
 ): ComposerShortcutBindings {
-	const overrides: Partial<Record<string, Chord | null>> = {};
+	const overrides: Partial<ComposerShortcutBindings> = {};
 	for (const id of COMPOSER_SHORTCUT_IDS) {
 		if (bindings.has(id)) {
 			overrides[id] = bindings.get(id) ?? null;
@@ -71,20 +87,45 @@ function currentIndex(section: ComposerSettingsSection): number {
 
 function cycleSection(
 	section: ComposerSettingsSection | undefined,
-	filterItem: (id: string) => boolean = () => true
+	filterItem: (
+		item: ComposerSettingItem,
+		section: ComposerSettingsSection
+	) => boolean = () => true
 ): boolean {
 	if (!section) {
 		return false;
 	}
-	const items = section.items.filter((item) => filterItem(item.id));
-	if (items.length < 2) {
-		return false;
-	}
+	const items = section.items.filter((item) => filterItem(item, section));
 	const selected = section.value ?? section.items[currentIndex(section)]?.id;
 	const selectedIndex = items.findIndex((item) => item.id === selected);
+	const selectedIsFilteredOut =
+		selectedIndex < 0 && section.items.some((item) => item.id === selected);
+	// Leaving a filtered-out value (e.g. full access) needs only one remaining
+	// item to step to; cycling among allowed items needs at least two.
+	if (items.length < (selectedIsFilteredOut ? 1 : 2)) {
+		return false;
+	}
 	const nextIndex = selectedIndex >= 0 ? selectedIndex + 1 : 0;
-	section.onChange(items[nextIndex % items.length].id);
+	const nextItem = items[nextIndex % items.length];
+	if (!nextItem) {
+		return false;
+	}
+	section.onChange(nextItem.id);
 	return true;
+}
+
+/**
+ * A keyboard cycle never lands on a Full Access–equivalent item: the settings
+ * menu routes those picks through the confirmation dialog, which a shortcut
+ * cannot show. Full access stays reachable from the menu. When the current
+ * value is itself full access it drops out of the list, so the next press steps
+ * down to the first non-full-access item, even when that is the only one left.
+ */
+function isCyclableWithoutConfirmation(
+	item: ComposerSettingItem,
+	section: ComposerSettingsSection
+): boolean {
+	return !isFullAccessEquivalent(item, section.label);
 }
 
 function findSection(
@@ -140,7 +181,7 @@ function runComposerShortcut(
 		case "composer.cycle-agent":
 			return cycleSection(
 				findSection(sections, (section) => section.key === "agent"),
-				(itemId) => {
+				({ id: itemId }) => {
 					if (NON_CYCLABLE_AGENT_IDS.has(itemId)) {
 						return false;
 					}
@@ -148,7 +189,10 @@ function runComposerShortcut(
 				}
 			);
 		case "composer.cycle-mode":
-			return cycleSection(findSection(sections, isApprovalSection));
+			return cycleSection(
+				findSection(sections, isApprovalSection),
+				isCyclableWithoutConfirmation
+			);
 		case "composer.cycle-model":
 			return cycleSection(
 				findSection(sections, (section) => section.key === "model")
@@ -156,7 +200,8 @@ function runComposerShortcut(
 		case "composer.cycle-thinking":
 			return cycleSection(
 				findSection(sections, isThinkingSection) ??
-					firstExtraConfigSection(sections)
+					firstExtraConfigSection(sections),
+				isCyclableWithoutConfirmation
 			);
 		default:
 			return false;

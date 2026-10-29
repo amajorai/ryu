@@ -28,7 +28,7 @@ const MESSAGES = [
 		parts: [{ text: "Alex's message in the shared chat", type: "text" }],
 		role: "user",
 	},
-] as unknown as UIMessage[];
+] satisfies UIMessage[];
 
 function AssistantAvatar() {
 	return (
@@ -51,7 +51,7 @@ function Story() {
 		>
 			<div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
 				<header className="space-y-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Chat message actions
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">

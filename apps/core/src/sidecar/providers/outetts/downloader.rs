@@ -12,8 +12,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
+use ryu_sidecar_runtime::layout::Modality;
+
 use crate::sidecar::download_manager::{
-    build_http_client, ryu_dir, ProgressCallback, VersionStore,
+    build_http_client, model_family_dir, ProgressCallback, VersionStore,
 };
 use crate::sidecar::providers::llamacpp::LlamaCppDownloader;
 
@@ -21,24 +23,30 @@ use crate::sidecar::providers::llamacpp::LlamaCppDownloader;
 const MODEL_FILE: &str = "OuteTTS-0.2-500M-Q4_K_M.gguf";
 const MODEL_URL: &str =
     "https://huggingface.co/OuteAI/OuteTTS-0.2-500M-GGUF/resolve/main/OuteTTS-0.2-500M-Q4_K_M.gguf";
-const MODEL_STORE_KEY: &str = "outetts-model:oute-0.2-500m-q4_k_m";
+pub(crate) const MODEL_STORE_KEY: &str = "outetts-model:oute-0.2-500m-q4_k_m";
 
 /// WavTokenizer vocoder (F16 GGUF — ~130 MB) that decodes OuteTTS output to audio.
 const VOCODER_FILE: &str = "WavTokenizer-Large-75-F16.gguf";
 const VOCODER_URL: &str =
     "https://huggingface.co/ggml-org/WavTokenizer/resolve/main/WavTokenizer-Large-75-F16.gguf";
-const VOCODER_STORE_KEY: &str = "outetts-vocoder:wavtokenizer-large-75-f16";
+pub(crate) const VOCODER_STORE_KEY: &str = "outetts-vocoder:wavtokenizer-large-75-f16";
+
+/// `<data dir>/models/text-to-speech/outetts` — the OuteTTS language model and
+/// its WavTokenizer vocoder.
+pub fn models_dir() -> PathBuf {
+    model_family_dir(Modality::TextToSpeech, "outetts")
+}
 
 pub fn model_path() -> PathBuf {
     std::env::var("RYU_OUTETTS_MODEL")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| ryu_dir().join("models").join(MODEL_FILE))
+        .unwrap_or_else(|_| models_dir().join(MODEL_FILE))
 }
 
 pub fn vocoder_path() -> PathBuf {
     std::env::var("RYU_OUTETTS_VOCODER")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| ryu_dir().join("models").join(VOCODER_FILE))
+        .unwrap_or_else(|_| models_dir().join(VOCODER_FILE))
 }
 
 pub struct OuteTtsDownloader {
@@ -113,10 +121,11 @@ impl OuteTtsDownloader {
         }
 
         tracing::info!("downloading {file_name} from {url}");
-        let models_dir = ryu_dir().join("models");
-        tokio::fs::create_dir_all(&models_dir)
-            .await
-            .context("creating ~/.ryu/models")?;
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
 
         let downloaded = downloads
             .download_blocking(crate::downloads::DownloadSpec {

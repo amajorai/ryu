@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom", "vite/client"]
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/components/settings/StorageSettings.tsx",
+    "src/components/settings/StorageSettings.authority.native-http.test.tsx",
+    "src/components/settings/AgentModelsSettings.tsx",
+    "src/components/settings/AgentModelsSettings.consumer.native-http.test.tsx"
+  ]
+}

@@ -14,13 +14,14 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/checks",
   "name": "Tests",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "stability": "experimental",
   "category": "Developer Tools",
   "description": "A node-local agentic verification workspace for exploring live targets, generating UI/API plans, running evidence-backed checks, and keeping failure bundles, collections, schedules, and coverage in one place.",
   "tagline": "Turn every change into evidence",
   "keywords": ["testing", "quality", "e2e", "regression", "playwright", "api"],
   "icon": "test-tube",
+  "iconDither": { "from": 174, "to": "transparent", "direction": "down" },
   "surfaces": {
     "gateway": { "support": "none" },
     "core": { "support": "full" },
@@ -38,8 +39,16 @@
     "core:list_agents",
     "hook:side-model",
     "hook:run-agent",
-    "mcp:checks"
+    "mcp:checks",
+    "authorization:defer",
+    "browser:control"
   ],
+  "requires": {
+    "capabilities": [
+      { "capability": "browser.control", "min_version": "1.0.0" }
+    ],
+    "grants": ["browser:control"]
+  },
   "runnables": [
     {
       "id": "checks-companion",
@@ -117,6 +126,7 @@
       "health_path": "/health",
       "lazy": true,
       "idle_stop_secs": 900,
+      "host_api": { "grants": ["authorization:defer", "crypto:seal"] },
       "http": {
         "mount": "/api/checks",
         "public_mount": "/api/checks",
@@ -184,6 +194,11 @@
             "permission": "checks.run"
           },
           { "path": "/runs/:id", "method": "GET", "permission": "checks.view" },
+          {
+            "path": "/evidence/:id",
+            "method": "GET",
+            "permission": "checks.view"
+          },
           {
             "path": "/runs/:id/failures/:failure_id/heal",
             "method": "POST",
@@ -344,19 +359,6 @@
         "target": "/plugin/app__checks-companion",
         "context": { "screen": "settings-capabilities" },
         "order": 49
-      }
-    ],
-    "chat_widget_templates": [
-      {
-        "id": "checks.chat",
-        "title": "Tests widget",
-        "description": "Tests chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["tests widget"],
-        "examples": ["Show me a tests widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
       }
     ]
   }

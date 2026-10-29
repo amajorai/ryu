@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/IslandSettings.tsx",
+    "src/components/settings/IslandSettings.coverage.native-http.test.tsx",
+    "src/components/settings/SplitPresetSettings.coverage.test.tsx",
+    "e2e/island-background-keys-backgrounds.spec.ts",
+    "e2e/island-background-keys-timezone.spec.ts",
+    "e2e/island-background-keys-click-modifiers.spec.ts",
+    "e2e/harness/island-background-keys-click-modifiers.tsx",
+    "e2e/island-background-keys.playwright.config.ts",
+    "e2e/harness/vite.island-background-keys.config.ts",
+    "e2e/island-settings-proof.spec.ts",
+    "e2e/background-customization-proof.spec.ts"
+  ]
+}

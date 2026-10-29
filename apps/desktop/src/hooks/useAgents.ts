@@ -165,6 +165,8 @@ export function useAgents(): UseAgentsResult {
 
 	const remove = useCallback(
 		async (id: string) => {
+			// Core drops the agent's gateway routing pool and override as part of
+			// the delete, so no client-side routing cleanup is needed here.
 			await apiDeleteAgent({ url, token, userJwt }, id);
 			await queryClient.cancelQueries({ queryKey, exact: true });
 			setAgents((prev) => prev.filter((a) => a.id !== id));

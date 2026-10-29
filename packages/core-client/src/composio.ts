@@ -4,7 +4,117 @@
 // Connect's tenant-scoped service in remote mode, with embedded compatibility
 // otherwise. These descriptors feed the agent editor's Tools/Triggers pickers.
 
+import { z } from "zod";
+import {
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
+
+const composioConfigSchema = z.custom<Record<string, AppResponseValue>>(
+	(value) =>
+		z.record(z.string(), appResponseValueSchema).safeParse(value).success
+);
+const completionSchema = z.object({
+	id: z.string().min(1),
+	toolkit: z.string(),
+	status: z.literal("ACTIVE"),
+	active: z.literal(true),
+});
+
 import { type ApiTarget, request } from "./client.ts";
+
+// Complete controlled catalog/status/connection publisher footprints. Older
+// optional fields retain the original normalizers; native metadata stays raw.
+const statusResponseFields = z.object({
+	configured: z.boolean().optional(),
+	base_url: z.string().optional(),
+	execution_owner: z.string().optional(),
+});
+const toolkitFields = z.object({
+	description: z.string().nullable().optional(),
+	logo: z.string().nullable().optional(),
+	name: z.string().optional(),
+	slug: z.string().optional(),
+	categories: appResponseValueSchema.optional(),
+});
+const actionFields = z.object({
+	description: z.string().nullable().optional(),
+	display_name: z.string().optional(),
+	name: z.string().optional(),
+	no_auth: z.boolean().optional(),
+	toolkit: z.string().optional(),
+	tags: appResponseValueSchema.optional(),
+	input_schema: appResponseValueSchema.optional(),
+	version: z.string().optional(),
+});
+const triggerFields = z.object({
+	config: appResponseValueSchema.optional(),
+	description: z.string().nullable().optional(),
+	display_name: z.string().optional(),
+	name: z.string().optional(),
+	toolkit: z.string().optional(),
+});
+const connectionFields = z.object({
+	access_level: appResponseValueSchema.optional(),
+	active: z.boolean().optional(),
+	id: z.string().optional(),
+	status: z.string().optional(),
+	toolkit: z.string().optional(),
+});
+const toolkitsResponseFields = z.object({
+	object: z.string().optional(),
+	data: z.array(toolkitFields).optional(),
+	error: z.string().optional(),
+});
+const actionsResponseFields = z.object({
+	object: z.string().optional(),
+	toolkit: z.string().optional(),
+	data: z.array(actionFields).optional(),
+	error: z.string().optional(),
+});
+const triggersResponseFields = z.object({
+	object: z.string().optional(),
+	toolkit: z.string().optional(),
+	data: z.array(triggerFields).optional(),
+	error: z.string().optional(),
+});
+const connectionsResponseFields = z.object({
+	object: z.string().optional(),
+	configured: z.boolean().optional(),
+	data: z.array(connectionFields).optional(),
+	error: z.string().optional(),
+});
+const statusResponseSchema = z.custom<z.output<typeof statusResponseFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		statusResponseFields.safeParse(value).success
+);
+const toolkitsResponseSchema = z.custom<
+	z.output<typeof toolkitsResponseFields>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		toolkitsResponseFields.safeParse(value).success
+);
+const actionsResponseSchema = z.custom<z.output<typeof actionsResponseFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		actionsResponseFields.safeParse(value).success
+);
+const triggersResponseSchema = z.custom<
+	z.output<typeof triggersResponseFields>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		triggersResponseFields.safeParse(value).success
+);
+const connectionsResponseSchema = z.custom<
+	z.output<typeof connectionsResponseFields>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		connectionsResponseFields.safeParse(value).success
+);
 
 /** Whether a Composio key is configured + the active REST base. */
 export interface ComposioStatus {
@@ -32,59 +142,40 @@ export interface ComposioAction {
 
 /** A Composio trigger type (an event a toolkit can fire). */
 export interface ComposioTrigger {
-	config?: Record<string, unknown> | null;
+	config?: Record<string, AppResponseValue> | null;
 	description: string | null;
 	displayName: string;
 	name: string;
 	toolkit: string;
 }
 
-interface ToolkitWire {
-	description?: string | null;
-	logo?: string | null;
-	name?: string;
-	slug?: string;
-}
-
-interface ActionWire {
-	description?: string | null;
-	display_name?: string;
-	name?: string;
-	no_auth?: boolean;
-	toolkit?: string;
-}
-
-interface TriggerWire {
-	config?: unknown;
-	description?: string | null;
-	display_name?: string;
-	name?: string;
-	toolkit?: string;
-}
-
 export async function fetchComposioStatus(
 	target: ApiTarget
 ): Promise<ComposioStatus> {
-	const json = await request<{
-		configured?: boolean;
-		base_url?: string;
-		execution_owner?: string;
-	}>(target, "/api/composio/status");
-	return {
+	const json = await request(
+		target,
+		"/api/composio/status",
+		undefined,
+		statusResponseSchema
+	);
+	const status: ComposioStatus = {
 		configured: json.configured ?? false,
 		baseUrl: json.base_url ?? "",
-		...(json.execution_owner === "connect"
-			? { executionOwner: "connect" as const }
-			: {}),
 	};
+	if (json.execution_owner === "connect") {
+		status.executionOwner = "connect";
+	}
+	return status;
 }
 
 export async function fetchComposioToolkits(
 	target: ApiTarget
 ): Promise<ComposioToolkit[]> {
-	const json = await request<{ data?: ToolkitWire[] }>(
+	const json = await request(
 		target,
-		"/api/composio/toolkits"
+		"/api/composio/toolkits",
+		undefined,
+		toolkitsResponseSchema
 	);
 	return (json.data ?? []).map((t) => ({
 		slug: t.slug ?? "",
@@ -103,9 +194,11 @@ export async function fetchComposioActions(
 	if (query) {
 		params.set("q", query);
 	}
-	const json = await request<{ data?: ActionWire[] }>(
+	const json = await request(
 		target,
-		`/api/composio/actions?${params.toString()}`
+		`/api/composio/actions?${params.toString()}`,
+		undefined,
+		actionsResponseSchema
 	);
 	return (json.data ?? []).map((a) => ({
 		name: a.name ?? "",
@@ -120,20 +213,22 @@ export async function fetchComposioTriggers(
 	target: ApiTarget,
 	toolkit: string
 ): Promise<ComposioTrigger[]> {
-	const json = await request<{ data?: TriggerWire[] }>(
+	const json = await request(
 		target,
-		`/api/composio/triggers?toolkit=${encodeURIComponent(toolkit)}`
+		`/api/composio/triggers?toolkit=${encodeURIComponent(toolkit)}`,
+		undefined,
+		triggersResponseSchema
 	);
-	return (json.data ?? []).map((t) => ({
-		config:
-			t.config && typeof t.config === "object" && !Array.isArray(t.config)
-				? (t.config as Record<string, unknown>)
-				: null,
-		name: t.name ?? "",
-		displayName: t.display_name ?? t.name ?? "",
-		description: t.description ?? null,
-		toolkit: t.toolkit ?? toolkit,
-	}));
+	return (json.data ?? []).map((t) => {
+		const config = composioConfigSchema.safeParse(t.config);
+		return {
+			config: config.success ? config.data : null,
+			name: t.name ?? "",
+			displayName: t.display_name ?? t.name ?? "",
+			description: t.description ?? null,
+			toolkit: t.toolkit ?? toolkit,
+		};
+	});
 }
 
 /** One of the user's Composio connected accounts. */
@@ -156,13 +251,7 @@ export interface ComposioConnection {
 	toolkit: string;
 }
 
-interface ConnectionWire {
-	access_level?: unknown;
-	active?: boolean;
-	id?: string;
-	status?: string;
-	toolkit?: string;
-}
+type ConnectionWire = z.output<typeof connectionFields>;
 
 /** List the user's connections, optionally filtered to one toolkit. */
 export async function fetchComposioConnections(
@@ -172,7 +261,12 @@ export async function fetchComposioConnections(
 	const path = toolkit
 		? `/api/composio/connections?toolkit=${encodeURIComponent(toolkit)}`
 		: "/api/composio/connections";
-	const json = await request<{ data?: ConnectionWire[] }>(target, path);
+	const json = await request(
+		target,
+		path,
+		undefined,
+		connectionsResponseSchema
+	);
 	return (json.data ?? []).map((c) => ({
 		accessLevel: normalizeAccessLevel(c.access_level),
 		id: c.id ?? "",
@@ -182,7 +276,9 @@ export async function fetchComposioConnections(
 	}));
 }
 
-function normalizeAccessLevel(value: unknown): ConnectionAccessLevel {
+function normalizeAccessLevel(
+	value: ConnectionWire["access_level"]
+): ConnectionAccessLevel {
 	if (
 		value === "risk_based" ||
 		value === "read_only" ||
@@ -210,27 +306,24 @@ export async function completeComposioConnection(
 	if (!sessionUri || new TextEncoder().encode(sessionUri).byteLength > 4096) {
 		throw new Error("Invalid callback session URI");
 	}
-	const value = await send<Record<string, unknown>>(
-		target,
-		"/api/composio/connections/complete",
-		{
-			method: "POST",
-			body: { sessionUri },
-			signal: AbortSignal.timeout(45_000),
-		}
+	const completion = completionSchema.safeParse(
+		await send(
+			target,
+			"/api/composio/connections/complete",
+			{
+				method: "POST",
+				body: { sessionUri },
+				signal: AbortSignal.timeout(45_000),
+			},
+			appResponseValueSchema
+		)
 	);
-	if (
-		typeof value.id !== "string" ||
-		!value.id ||
-		typeof value.toolkit !== "string" ||
-		value.status !== "ACTIVE" ||
-		value.active !== true
-	) {
+	if (!completion.success) {
 		throw new Error("Core did not confirm an active connection");
 	}
 	return {
-		id: value.id,
-		toolkit: value.toolkit,
+		id: completion.data.id,
+		toolkit: completion.data.toolkit,
 		status: "ACTIVE",
 		active: true,
 	};

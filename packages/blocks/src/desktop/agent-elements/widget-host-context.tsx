@@ -1,3 +1,4 @@
+import type { RpcJsonResponse, RyuJsonValue } from "@ryu/app-host/rpc";
 import { createContext, useContext } from "react";
 import type { WidgetRendererComponent } from "./types.ts";
 
@@ -12,7 +13,7 @@ import type { WidgetRendererComponent } from "./types.ts";
  *  `apps/desktop` `WidgetCallToolResult`; blocks cannot import from the app). */
 export interface WidgetCallToolResult {
 	ok: boolean;
-	output: unknown;
+	output: RyuJsonValue;
 }
 
 export interface WidgetHostServices {
@@ -22,8 +23,13 @@ export interface WidgetHostServices {
 		serverId: string;
 		toolCallId: string;
 		name: string;
-		args: unknown;
+		args: RpcJsonResponse;
 	}): Promise<WidgetCallToolResult>;
+	clearModelContext?(owner: string): void;
+	fileAccess?: import("@ryu/app-host/opened-file").OpenedFileAccess;
+	getModelContext?(
+		owner: string
+	): import("@ryu/app-host/model-context").ModelContextState | null;
 	/** Inject a follow-up user turn on the owning conversation ->
 	 *  `POST /api/widgets/follow-up` (governed, R4) — not the raw chat transport. */
 	sendFollowUpMessage(args: {
@@ -35,8 +41,12 @@ export interface WidgetHostServices {
 	setWidgetState(args: {
 		instanceId: string;
 		toolCallId: string;
-		state: unknown;
+		state: RpcJsonResponse;
 	}): Promise<void>;
+	updateModelContext?(args: {
+		owner: string;
+		input: import("@ryu/app-host/model-context").ModelContextInput;
+	}): Promise<import("@ryu/app-host/model-context").ModelContextState>;
 }
 
 /**
@@ -45,6 +55,8 @@ export interface WidgetHostServices {
  * through the context instead of importing an app module.
  */
 export interface WidgetHostEnv {
+	appPath?: string;
+	appTitle?: string;
 	/**
 	 * Open an http(s) URL in the user's real browser (the rpc gate has already
 	 * vetted the scheme). NEVER inside the sandboxed frame.

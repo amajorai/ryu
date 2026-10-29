@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// How often to snapshot + report (5 min). Matches the sync loop cadence.
 const BEACON_INTERVAL: Duration = Duration::from_secs(300);
@@ -68,15 +68,104 @@ struct MarketplaceStatsSnapshot {
 
 static MARKETPLACE_STATS: OnceLock<Mutex<BTreeMap<String, MarketplaceStatsSnapshot>>> =
     OnceLock::new();
-static MARKETPLACE_RUNTIME_IDS: OnceLock<Mutex<BTreeMap<String, (String, String)>>> =
-    OnceLock::new();
+
+#[derive(Default, Deserialize, Serialize)]
+struct PublicItemWitnesses {
+    version: u32,
+    authority: String,
+    listing_ids: std::collections::BTreeSet<String>,
+    runtime_ids: BTreeMap<String, (String, String)>,
+    #[serde(default)]
+    definitions: BTreeMap<String, String>,
+}
+
+fn public_items_path() -> std::path::PathBuf {
+    crate::paths::state_path("marketplace-public-statistics.json")
+}
+
+fn public_items_store() -> &'static Mutex<PublicItemWitnesses> {
+    static ITEMS: OnceLock<Mutex<PublicItemWitnesses>> = OnceLock::new();
+    ITEMS.get_or_init(|| {
+        Mutex::new(
+            std::fs::read(public_items_path())
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<PublicItemWitnesses>(&bytes).ok())
+                .filter(|store| store.version == 1 && store.authority == "https://api.ryuhq.com")
+                .unwrap_or_else(|| PublicItemWitnesses {
+                    version: 1,
+                    authority: "https://api.ryuhq.com".into(),
+                    ..Default::default()
+                }),
+        )
+    })
+}
+
+pub(crate) fn public_listing_witnessed(kind: &str, id: &str) -> bool {
+    public_items_store()
+        .lock()
+        .ok()
+        .is_some_and(|items| items.listing_ids.contains(&format!("{kind}:{id}")))
+}
+
+fn save_public_items(items: &PublicItemWitnesses) -> anyhow::Result<()> {
+    use std::io::Write;
+    let path = public_items_path();
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("missing public witness directory"))?;
+    std::fs::create_dir_all(parent)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(&serde_json::to_vec(items)?)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path)?;
+    Ok(())
+}
+
+/// Only a successful install from the canonical Marketplace may call this;
+/// arbitrary usage events never trigger a network lookup of a private identifier.
+pub async fn witness_public_marketplace_install(kind: &str, id: &str) {
+    let Some((kind, id)) = marketplace_id(kind, id) else {
+        return;
+    };
+    let public = crate::catalog_source::sources::public_marketplace_listing(&kind, &id).await;
+    let Ok(mut items) = public_items_store().lock() else {
+        return;
+    };
+    if public {
+        items.listing_ids.insert(format!("{kind}:{id}"));
+    } else {
+        items.listing_ids.remove(&format!("{kind}:{id}"));
+        items
+            .runtime_ids
+            .retain(|_, (listed_kind, listed_id)| listed_kind != &kind || listed_id != &id);
+    }
+    if let Err(error) = save_public_items(&items) {
+        tracing::warn!(%error, "public Marketplace witness could not be saved");
+    }
+}
+
+/// Explicit install preparation fetches only a public category, never a private
+/// candidate ID. Arbitrary usage messages use the local witness store only.
+pub async fn refresh_public_marketplace_catalog(kind: &str) {
+    let Some((kind, _)) = marketplace_id(kind, "catalog") else {
+        return;
+    };
+    let ids = crate::catalog_source::sources::public_marketplace_catalog(&kind).await;
+    let Ok(mut items) = public_items_store().lock() else {
+        return;
+    };
+    for id in ids {
+        if let Some((kind, id)) = marketplace_id(&kind, &id) {
+            items.listing_ids.insert(format!("{kind}:{id}"));
+        }
+    }
+    if let Err(error) = save_public_items(&items) {
+        tracing::warn!(%error, "public catalog witness could not be saved");
+    }
+}
 
 fn marketplace_stats_store() -> &'static Mutex<BTreeMap<String, MarketplaceStatsSnapshot>> {
     MARKETPLACE_STATS.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
-fn marketplace_runtime_store() -> &'static Mutex<BTreeMap<String, (String, String)>> {
-    MARKETPLACE_RUNTIME_IDS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 fn marketplace_id(kind: &str, id: &str) -> Option<(String, String)> {
@@ -96,26 +185,30 @@ fn marketplace_id(kind: &str, id: &str) -> Option<(String, String)> {
 }
 
 fn marketplace_runtime_identity(kind: &str, id: &str) -> Option<(String, String)> {
-    if let Ok(store) = marketplace_runtime_store().lock() {
-        if let Some((marketplace_kind, listing_id)) = store.get(&format!("{kind}:{id}")) {
-            return marketplace_id(marketplace_kind, listing_id);
-        }
+    if kind.trim().eq_ignore_ascii_case("skill") {
+        let listing = crate::skills_catalog::public_stats::download_identity(id)?;
+        return marketplace_id("skill", &listing);
     }
-    if kind != "agent" && kind != "workflow" {
-        return marketplace_id(kind, id);
+    let (kind, id) = marketplace_id(kind, id)?;
+    let items = public_items_store().lock().ok()?;
+    resolve_public_identity(&items, kind, id)
+}
+
+fn resolve_public_identity(
+    items: &PublicItemWitnesses,
+    kind: String,
+    id: String,
+) -> Option<(String, String)> {
+    if let Some((listed_kind, listing_id)) = items.runtime_ids.get(&format!("{kind}:{id}")) {
+        return items
+            .listing_ids
+            .contains(&format!("{listed_kind}:{listing_id}"))
+            .then(|| (listed_kind.clone(), listing_id.clone()));
     }
-    if let Ok(packages) = crate::portable_packages::list() {
-        if let Some(package) = packages.into_iter().find(|package| {
-            package.kind == kind
-                && package
-                    .runtime_ids
-                    .iter()
-                    .any(|runtime_id| runtime_id == id)
-        }) {
-            return marketplace_id(kind, &package.id);
-        }
-    }
-    marketplace_id(kind, id)
+    items
+        .listing_ids
+        .contains(&format!("{kind}:{id}"))
+        .then_some((kind, id))
 }
 
 /// Associate a host-created runtime id with its Marketplace listing id. This is
@@ -129,17 +222,92 @@ pub fn associate_marketplace_runtime(kind: &str, marketplace: &str, runtime: &st
     if runtime.is_empty() || runtime.len() > MARKETPLACE_STATS_MAX_ID_BYTES {
         return;
     }
-    if let Ok(mut store) = marketplace_runtime_store().lock() {
-        store.insert(format!("{kind}:{runtime}"), (kind, marketplace));
+    if let Ok(mut items) = public_items_store().lock() {
+        if items.listing_ids.contains(&format!("{kind}:{marketplace}")) {
+            items
+                .runtime_ids
+                .insert(format!("{kind}:{runtime}"), (kind, marketplace));
+            if let Err(error) = save_public_items(&items) {
+                tracing::warn!(%error, "public runtime witness could not be saved");
+            }
+        }
     }
+}
+
+fn definition_fingerprint(definition: &impl Serialize) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    Some(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(definition).ok()?)
+    ))
+}
+
+pub fn witness_runtime_definition(
+    kind: &str,
+    listing: &str,
+    runtime: &str,
+    definition: &impl Serialize,
+) {
+    let Some(fingerprint) = definition_fingerprint(definition) else {
+        return;
+    };
+    associate_marketplace_runtime(kind, listing, runtime);
+    if let Ok(mut items) = public_items_store().lock() {
+        if items.listing_ids.contains(&format!("{kind}:{listing}")) {
+            items
+                .definitions
+                .insert(format!("{kind}:{runtime}"), fingerprint);
+            if let Err(error) = save_public_items(&items) {
+                tracing::warn!(%error, "public definition witness could not be saved");
+            }
+        }
+    }
+}
+
+pub fn record_definition_run(kind: &str, runtime: &str, definition: &impl Serialize) {
+    let Some(fingerprint) = definition_fingerprint(definition) else {
+        return;
+    };
+    let verified = public_items_store().lock().ok().is_some_and(|items| {
+        items.definitions.get(&format!("{kind}:{runtime}")) == Some(&fingerprint)
+    });
+    if !verified {
+        return;
+    }
+    let Some((kind, id)) = marketplace_runtime_identity(kind, runtime) else {
+        return;
+    };
+    record_identity(kind, id, false);
 }
 
 /// Record one local, content-free Marketplace event. Counters stay in Core until
 /// the consent-gated beacon sends a snapshot; no account or organization is read.
 pub fn record_marketplace_event(kind: &str, id: &str, download: bool) {
+    if !download
+        && (kind.trim().eq_ignore_ascii_case("agent")
+            || kind.trim().eq_ignore_ascii_case("workflow"))
+    {
+        return;
+    }
     let Some((kind, id)) = marketplace_runtime_identity(kind, id) else {
         return;
     };
+    record_identity(kind, id, download);
+}
+
+/// Only the exact loaded artifact from a witnessed public installation may
+/// contribute a skill ID. Private discovery still leaves aggregate usage intact.
+pub fn record_skill_load(record: &ryu_skills::SkillRecord) {
+    let Some(listing) = crate::skills_catalog::public_stats::loaded_identity(record) else {
+        return;
+    };
+    let Some((kind, id)) = marketplace_id("skill", &listing) else {
+        return;
+    };
+    record_identity(kind, id, false);
+}
+
+fn record_identity(kind: String, id: String, download: bool) {
     let key = format!("{kind}:{id}");
     let Ok(mut store) = marketplace_stats_store().lock() else {
         return;
@@ -354,6 +522,59 @@ mod tests {
         );
         assert!(marketplace_id("agent", "../secret").is_none());
         assert!(marketplace_id("unknown", "demo").is_none());
+    }
+
+    #[test]
+    fn private_discovered_skills_never_enter_the_per_listing_snapshot() {
+        let private_id = "private-local-skill-0320a115a6c8819188e4edb47a4756ea";
+        for kind in ["skill", "SKILL", " skill "] {
+            assert!(marketplace_runtime_identity(kind, private_id).is_none());
+            record_marketplace_event(kind, private_id, false);
+            record_marketplace_event(kind, private_id, true);
+        }
+        let record = ryu_skills::parse_skill_md(
+            private_id,
+            "---\nname: Private review\n---\nPrivate instructions",
+        )
+        .expect("private record");
+        record_skill_load(&record);
+        let payload = serde_json::to_value(marketplace_stats_snapshot()).expect("snapshot");
+        assert!(!payload.to_string().contains(private_id));
+        assert!(!payload.to_string().contains("Private instructions"));
+    }
+
+    #[test]
+    fn private_agent_workflow_plugin_and_usage_ids_need_public_source_witnesses() {
+        let mut items = PublicItemWitnesses {
+            version: 1,
+            authority: "https://api.ryuhq.com".into(),
+            ..Default::default()
+        };
+        items
+            .listing_ids
+            .insert("agent:publisher/public-agent".into());
+        items.runtime_ids.insert(
+            "agent:installed-runtime".into(),
+            ("agent".into(), "publisher/public-agent".into()),
+        );
+        assert_eq!(
+            resolve_public_identity(&items, "agent".into(), "installed-runtime".into()),
+            Some(("agent".into(), "publisher/public-agent".into()))
+        );
+        items.runtime_ids.insert(
+            "agent:private-runtime".into(),
+            ("agent".into(), "private/company-secret".into()),
+        );
+        assert!(
+            resolve_public_identity(&items, "agent".into(), "private-runtime".into()).is_none()
+        );
+        for kind in ["agent", "workflow", "plugin", "app", "model", "bundle"] {
+            assert!(
+                resolve_public_identity(&items, kind.into(), "private-company-name".into())
+                    .is_none()
+            );
+            assert!(marketplace_runtime_identity(kind, "private-company-0320-unknown").is_none());
+        }
     }
 
     #[test]

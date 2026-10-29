@@ -9,7 +9,7 @@
   "name": "AGENTS.md Tail",
   "version": "0.1.14",
   "stability": "experimental",
-  "description": "Experimental context hook that keeps the active AGENTS.md instructions at the head and repeats the latest copy at the tail of each model turn without adding either injection to chat history.",
+  "description": "Experimental context hook that repeats the active AGENTS.md instructions at the end of the latest message on each model turn, without editing the system prompt or chat history.",
   "tagline": "Keep project instructions fresh at the end of every turn",
   "keywords": ["agents.md", "context", "instructions", "prompt", "acp"],
   "category": "Developer Tools",
@@ -27,25 +27,9 @@
   },
   "engines": { "ryu": ">=0.1.0" },
   "runnables": [],
-  "permission_grants": ["preferences:read"],
+  "permission_grants": [],
   "activation_events": ["*"],
   "contributes": {
-    "settings_tabs": [
-      {
-        "id": "agents-md-tail.settings",
-        "title": "AGENTS.md Tail",
-        "scope": "node",
-        "fields": [
-          {
-            "type": "toggle",
-            "pref_key": "agents-md-tail-remove-head",
-            "label": "Remove the head injection",
-            "description": "Keep only the latest hidden AGENTS.md copy at the end of each turn. The default keeps both the original head and the latest tail copy.",
-            "default": false
-          }
-        ]
-      }
-    ],
     "turn_hooks": [
       {
         "id": "agents-md-tail.context",

@@ -719,7 +719,7 @@ fn read_yaml_file(
     issues: &mut Vec<EvalIssue>,
 ) -> Option<Value> {
     let raw = read_text_file(root, path, &format!("{relative_path}/case.yaml"), issues)?;
-    match serde_yml::from_str::<serde_yml::Value>(&raw)
+    match noyalib::compat::serde_yaml::from_str::<noyalib::compat::serde_yaml::Value>(&raw)
         .ok()
         .and_then(|value| serde_json::to_value(value).ok())
     {
@@ -764,8 +764,9 @@ fn split_frontmatter(raw: &str, path: &str) -> Result<(Value, String), String> {
         .find('\n')
         .map(|offset| close_offset + offset + 1)
         .unwrap_or(raw.len());
-    let frontmatter = serde_yml::from_str::<serde_yml::Value>(header)
-        .map_err(|error| format!("{path} frontmatter is not valid YAML: {error}"))?;
+    let frontmatter =
+        noyalib::compat::serde_yaml::from_str::<noyalib::compat::serde_yaml::Value>(header)
+            .map_err(|error| format!("{path} frontmatter is not valid YAML: {error}"))?;
     let frontmatter = serde_json::to_value(frontmatter)
         .map_err(|error| format!("{path} frontmatter could not be represented as JSON: {error}"))?;
     Ok((frontmatter, raw[body_start..].to_owned()))

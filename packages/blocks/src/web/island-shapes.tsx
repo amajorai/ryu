@@ -15,16 +15,27 @@
  */
 
 import { cn } from "@ryu/ui/lib/utils";
-import { motion } from "motion/react";
+import { MotionConfig, motion } from "motion/react";
+import type { CSSProperties } from "react";
+import styles from "./island-shapes.module.css";
 import type { IslandState } from "./island-store.ts";
 
 /* ── island-config (inlined from apps/island/.../island-config.ts) ─────────── */
 
 export const LOGO_CIRCLE = { width: 40, height: 40, radius: 20 } as const;
 export const SPLIT_GAP = 8;
-export const DETAIL_SIZES: Partial<
-	Record<IslandState, { width: number; height: number; radius: number }>
-> = {
+interface IslandDetailSize {
+	height: number;
+	radius: number;
+	width: number;
+}
+
+/** Complete authored state catalogue; collapsed has no detail panel by default.
+ * The public optional mutable slots retain existing consumer extension behavior.
+ */
+type IslandDetailSizes = { [State in IslandState]?: IslandDetailSize };
+
+export const DETAIL_SIZES: IslandDetailSizes = {
 	idle: { width: 96, height: 40, radius: 20 },
 	suggestion: { width: 300, height: 62, radius: 20 },
 	expanded: { width: 400, height: 480, radius: 28 },
@@ -46,68 +57,16 @@ export const CONTENT_SPRING = {
 
 /* ── shape skins (verbatim from Island.tsx — the "latest" Siri-border look) ── */
 
-export const SHAPE_BASE =
-	"island-siri-border relative shrink-0 overflow-hidden shadow-2xl";
+export const ISLAND_SURFACE_BASE = `${styles.siriBorder} relative shrink-0 overflow-hidden shadow-2xl`;
 export const TRANSLUCENT_SKIN =
 	"bg-gradient-to-b from-neutral-950/85 via-neutral-950/65 to-neutral-900/35 text-neutral-100 backdrop-blur-2xl";
-export const ACTION_PILL_BASE =
-	"island-siri-border relative flex shrink-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-full font-medium text-xs shadow-xl backdrop-blur-2xl";
+export const ACTION_PILL_BASE = `${styles.siriBorder} relative flex shrink-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-full font-medium text-xs shadow-xl backdrop-blur-2xl`;
 export const ACTION_PILL_PRIMARY =
-	"bg-amber-400/25 text-amber-50 hover:bg-amber-400/40";
+	"bg-warning/25 text-primary-foreground hover:bg-warning/40";
 export const ACTION_PILL_DEFAULT =
-	"bg-neutral-900/70 text-neutral-200 hover:bg-neutral-800/85";
+	"bg-space-home-dark/70 text-space-rail-icon hover:bg-space-template-board-dark/85";
 
 /* ── the Siri border + snap-zone overlay CSS, mirrored from the real app ────── */
-
-export const ISLAND_CSS = `
-.island-siri-border::after {
-	content: "";
-	position: absolute;
-	inset: 0;
-	z-index: 2;
-	border-radius: inherit;
-	padding: 1.5px;
-	background: radial-gradient(
-		130% 150% at 50% 118%,
-		rgba(255, 255, 255, 0.9) 0%,
-		rgba(255, 255, 255, 0.45) 28%,
-		rgba(255, 255, 255, 0.12) 48%,
-		transparent 64%
-	);
-	-webkit-mask:
-		linear-gradient(#000 0 0) content-box,
-		linear-gradient(#000 0 0);
-	-webkit-mask-composite: xor;
-	mask-composite: exclude;
-	pointer-events: none;
-}
-.island-zone-overlay {
-	opacity: 0;
-	transition: opacity 0.14s ease;
-}
-.island-zone-overlay[data-shown="true"] {
-	opacity: 1;
-}
-.island-zone-backdrop {
-	position: absolute;
-	inset: 0;
-	background: rgba(0, 0, 0, 0.4);
-}
-.island-zone-ghost {
-	position: absolute;
-	box-sizing: border-box;
-	border: 1.5px dashed rgba(255, 255, 255, 0.35);
-	background: rgba(255, 255, 255, 0.04);
-	transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
-}
-.island-zone-ghost.active {
-	border: 2px solid rgba(255, 255, 255, 0.95);
-	background: rgba(130, 175, 255, 0.18);
-	box-shadow:
-		0 0 0 1px rgba(8, 10, 16, 0.3),
-		0 10px 44px rgba(60, 110, 220, 0.5);
-}
-`;
 
 /* ── action mini-islands (verbatim morph from Island.tsx) ──────────────────── */
 
@@ -132,36 +91,53 @@ export function IslandActionPills({
 	pressedKey?: string | null;
 }) {
 	return (
-		<div
-			className="flex"
-			style={{
-				gap: SPLIT_GAP,
-				marginLeft: LOGO_CIRCLE.width + SPLIT_GAP,
-				marginTop: SUGGESTION_STACK_GAP,
-			}}
-		>
-			{actions.map((action, index) => (
-				<motion.button
-					animate={{
-						width: action.width ?? ACTION_PILL_WIDTH,
-						opacity: 1,
-						scale: pressedKey === action.key ? 0.92 : 1,
-					}}
-					className={cn(
-						ACTION_PILL_BASE,
-						action.primary ? ACTION_PILL_PRIMARY : ACTION_PILL_DEFAULT,
-						pressedKey === action.key && "ring-2 ring-amber-200/70"
-					)}
-					initial={{ width: 0, opacity: 0 }}
-					key={action.key}
-					onClick={action.onClick}
-					style={{ height: ACTION_PILL_HEIGHT }}
-					transition={{ ...ISLAND_SPRING, delay: index * 0.05 }}
-					type="button"
-				>
-					{action.label}
-				</motion.button>
-			))}
-		</div>
+		<MotionConfig reducedMotion="user">
+			<div
+				className={cn("flex", styles.dynamic1)}
+				style={
+					{
+						"--blocks-gap": `${SPLIT_GAP}px`,
+						"--blocks-marginLeft": `${LOGO_CIRCLE.width + SPLIT_GAP}px`,
+						"--blocks-marginTop": `${SUGGESTION_STACK_GAP}px`,
+					} satisfies PrivateStyle as PrivateStyle
+				}
+			>
+				{actions.map((action, index) => (
+					<motion.button
+						animate={{
+							width: action.width ?? ACTION_PILL_WIDTH,
+							opacity: 1,
+							scale: pressedKey === action.key ? 0.92 : 1,
+						}}
+						className={cn(
+							ACTION_PILL_BASE,
+							action.primary ? ACTION_PILL_PRIMARY : ACTION_PILL_DEFAULT,
+							pressedKey === action.key &&
+								"ring-2 ring-space-paper-line-placeholder/70",
+							styles.dynamic4
+						)}
+						initial={{ width: 0, opacity: 0 }}
+						key={action.key}
+						onClick={action.onClick}
+						style={
+							{
+								"--blocks-height": `${ACTION_PILL_HEIGHT}px`,
+							} satisfies PrivateStyle as PrivateStyle
+						}
+						transition={{ ...ISLAND_SPRING, delay: index * 0.05 }}
+						type="button"
+					>
+						{action.label}
+					</motion.button>
+				))}
+			</div>
+		</MotionConfig>
 	);
+}
+
+interface PrivateStyle extends CSSProperties {
+	"--blocks-gap"?: CSSProperties["gap"];
+	"--blocks-height"?: CSSProperties["height"];
+	"--blocks-marginLeft"?: CSSProperties["marginLeft"];
+	"--blocks-marginTop"?: CSSProperties["marginTop"];
 }

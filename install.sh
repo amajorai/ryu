@@ -21,6 +21,9 @@
 #   RYU_CORE_URL      Core health URL (default: http://127.0.0.1:7980)
 #   RYU_PROGRESS_FORMAT json to emit RYU_INSTALL_EVENT JSON lines for callers
 #   RYU_INSTALL_MARKER version marker written beside installed binaries
+#                     (default: $RYU_VERSION; an unpinned install always reinstalls)
+#   RYU_FORCE_INSTALL 1 to reinstall even when the marker already matches
+# Desktop supplies --release-base from its packaged distribution configuration.
 set -eu
 
 REPO="amajorai/ryu"
@@ -30,7 +33,9 @@ PROGRESS_FORMAT="${RYU_PROGRESS_FORMAT:-human}"
 START_CORE="${RYU_START_CORE:-1}"
 CORE_BIND="${RYU_CORE_BIND:-127.0.0.1:7980}"
 CORE_URL="${RYU_CORE_URL:-http://127.0.0.1:7980}"
-INSTALL_MARKER="${RYU_INSTALL_MARKER:-latest}"
+# `latest` names no fixed release, so it never matches an existing install: a
+# re-run of the one-liner must upgrade rather than report "already installed".
+INSTALL_MARKER="${RYU_INSTALL_MARKER:-${RYU_VERSION:-latest}}"
 FORCE_INSTALL="${RYU_FORCE_INSTALL:-0}"
 EVENT_PREFIX="RYU_INSTALL_EVENT:"
 
@@ -52,6 +57,28 @@ fail() {
   err "$message"
 }
 
+RELEASE_BASE="https://github.com/amajorai/ryu/releases"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --release-base)
+      [ "$#" -ge 2 ] || err "--release-base requires an HTTPS URL"
+      RELEASE_BASE="$2"
+      shift 2
+      ;;
+    *) err "unknown installer argument: $1" ;;
+  esac
+done
+# This argument is native-owned in Desktop. Headless callers receive the same
+# transport guard without adding a mutable environment override.
+printf '%s\n' "$RELEASE_BASE" | LC_ALL=C grep -Eq '^https://([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:]+\])(:[0-9]+)?(/[A-Za-z0-9._~!$&()+,;=:%/-]*)?$' \
+  || err "release base must be HTTPS without credentials, query, or fragment"
+case "$RELEASE_BASE" in
+  *[[:space:][:cntrl:]]*) err "release base contains whitespace or control characters" ;;
+esac
+while [ "${RELEASE_BASE%/}" != "$RELEASE_BASE" ]; do
+  RELEASE_BASE="${RELEASE_BASE%/}"
+done
+
 # --- detect OS/arch and map to release-asset suffix -------------------------
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -59,7 +86,8 @@ case "$os" in
   Darwin)
     case "$arch" in
       arm64|aarch64) suffix="macos-aarch64" ;;
-      *) err "Intel Macs are not supported by the prebuilt binaries. Build from source: https://github.com/$REPO#quick-start-self-host" ;;
+      x86_64) suffix="macos-x86_64" ;;
+      *) err "macOS $arch is not supported by the prebuilt binaries. Build from source: https://github.com/$REPO#quick-start-self-host" ;;
     esac
     ;;
   Linux)
@@ -82,9 +110,9 @@ else
 fi
 
 if [ -n "${RYU_VERSION:-}" ]; then
-  base="https://github.com/$REPO/releases/download/$RYU_VERSION"
+  base="$RELEASE_BASE/download/$RYU_VERSION"
 else
-  base="https://github.com/$REPO/releases/latest/download"
+  base="$RELEASE_BASE/latest/download"
 fi
 
 # --- sha256 verification (fail closed) ---------------------------------------
@@ -129,6 +157,7 @@ printf 'Installing Ryu (%s) into %s\n' "$suffix" "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
+REPLACED_EXISTING=0
 
 install_binary() {
   bin="$1"
@@ -140,7 +169,8 @@ install_binary() {
   before=$(( (ordinal - 1) * 15 ))
   after=$(( ordinal * 15 ))
 
-  if [ "$FORCE_INSTALL" != "1" ] && [ -x "$dest" ] && [ -f "$dest.version" ] \
+  if [ "$FORCE_INSTALL" != "1" ] && [ "$INSTALL_MARKER" != "latest" ] \
+    && [ -x "$dest" ] && [ -f "$dest.version" ] \
     && [ "$(cat "$dest.version")" = "$INSTALL_MARKER" ]; then
     info "$bin already installed"
     emit "binary" "$bin" "skipped" "$after"
@@ -152,7 +182,12 @@ install_binary() {
   dl "$url" "$out" || fail "$bin" "download failed: $url"
   verify "$out" "$url.sha256" || fail "$bin" "verification failed: $url"
   chmod +x "$out"
-  mv "$out" "$dest"
+  if [ -e "$dest" ]; then REPLACED_EXISTING=1; fi
+  # Stage beside the destination, then rename: $tmp can be on another
+  # filesystem, where mv may fall back to copying over a running Core/gateway
+  # image (ETXTBSY) instead of swapping the directory entry.
+  mv "$out" "$dest.new"
+  mv -f "$dest.new" "$dest"
   printf '%s\n' "$INSTALL_MARKER" > "$dest.version"
   emit "binary" "$bin" "complete" "$after"
 }
@@ -188,7 +223,8 @@ if [ "$START_CORE" = "1" ]; then
   # Core process owns the default model/engine/skill installers and continues
   # those downloads in the background after its health endpoint is ready.
   emit "core" "ryu-core" "started" 55
-  core_log="${RYU_CORE_LOG:-$HOME/.ryu/ryu-core.log}"
+  # RYU_CORE_LOG: legacy name the desktop installer still passes.
+  core_log="${RYU_CORE_LOG_PATH:-${RYU_CORE_LOG:-$HOME/.ryu/ryu-core.log}}"
   core_dir="$(dirname "$core_log")"
   mkdir -p "$core_dir"
 
@@ -202,10 +238,15 @@ if [ "$START_CORE" = "1" ]; then
 
   if ! http_ok; then
     info "starting Ryu Core"
-    nohup "$INSTALL_DIR/ryu-core" "--bind=$CORE_BIND" \
-      >>"$core_log" 2>&1 </dev/null &
+    RYU_CORE_LOG_PATH="$core_log" nohup "$INSTALL_DIR/ryu-core" "--bind=$CORE_BIND" \
+      >/dev/null 2>&1 </dev/null &
   else
     info "Ryu Core is already running"
+    if [ "$REPLACED_EXISTING" = "1" ]; then
+      # The running process keeps executing the previous build; only a restart
+      # picks up the binaries this run just installed.
+      info "Restart Ryu Core to run the upgraded binaries; the running process is still the previous build"
+    fi
   fi
 
   healthy=0

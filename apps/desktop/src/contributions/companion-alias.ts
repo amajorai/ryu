@@ -14,6 +14,7 @@
 // can assert it without dragging the whole desktop page graph into the test runner.
 
 import type { PluginContributions } from "@/src/lib/api/plugins.ts";
+import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
 
 // A path segment is only ever compared after this normalisation, so casing or
 // punctuation in a runnable id can never decide whether a legacy link resolves.
@@ -80,7 +81,9 @@ export function resolveCompanionAlias(
 	const { companions, sidebar_buttons: buttons } = feed;
 	const declared = buttons.find((b) => b.target === alias);
 	if (declared) {
-		const owned = companions.find((c) => c.pluginId === declared.plugin);
+		const owned = companions.find(
+			(c) => c.pluginId === declared.plugin && isNavigablePluginCompanion(c)
+		);
 		if (owned) {
 			return owned.id;
 		}

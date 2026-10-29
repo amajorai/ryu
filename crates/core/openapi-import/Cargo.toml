@@ -1,0 +1,16 @@
+[package]
+name = "ryu-openapi-import"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Pure OpenAPI/Swagger to HTTP tool descriptor transform shared by Ryu Core's install-time importer and the generated tool catalog tier. Part of the Ryu monorepo (github.com/amajorai/ryu)."
+repository = "https://github.com/amajorai/ryu"
+
+# The parse rules here are also ported to TypeScript for the generated catalog
+# tier (tools/tool-catalog-generate/openapi-rules.ts). Both sides assert the
+# same golden cases, fixtures/openapi-import-cases-v1.json, so a rule changed
+# on one side fails the other's test.
+
+[dependencies]
+serde_json = "1"
+noyalib = { version = "0.0.58", default-features = false, features = ["std", "compat-serde-yaml"] }

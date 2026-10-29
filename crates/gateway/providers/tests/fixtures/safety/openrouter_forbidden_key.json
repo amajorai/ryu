@@ -1,0 +1,13 @@
+{
+  "provider": "openrouter",
+  "status": 403,
+  "expectRow": null,
+  "provenance": "negative control: a 403 the error documentation lists for insufficient permissions, with no moderation metadata",
+  "source": "https://openrouter.ai/docs/api-reference/errors",
+  "body": {
+    "error": {
+      "code": 403,
+      "message": "RYU_TEST_FIXTURE forbidden"
+    }
+  }
+}

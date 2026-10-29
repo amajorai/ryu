@@ -12,6 +12,7 @@ import {
 	THEME_MODES,
 	THEME_PRESET_IDS,
 } from "../core/themePreferences.ts";
+import { tf } from "../i18n/translate.ts";
 import { ryuTheme } from "../ui/theme.ts";
 
 const PROOF_QUEUE = [
@@ -129,7 +130,7 @@ function ProofFrame({ showQueueOverlay }: TerminalParityProofProps) {
 					</Card>
 					<Card subtitle="saved per active Core node" title="Themes">
 						<text fg={theme.colors.mutedForeground}>
-							{`Modes: ${THEME_MODES.join(" · ")}`}
+							{tf("Modes: {modes}", { modes: THEME_MODES.join(" · ") })}
 						</text>
 						{THEME_PRESET_IDS.map((preset) => (
 							<text fg={theme.colors.foreground} key={preset}>

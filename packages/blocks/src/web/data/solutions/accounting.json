@@ -1,37 +1,10 @@
 {
   "slug": "accounting",
   "name": "Accounting",
-  "navLabel": "Accounting",
-  "category": "Finance & Risk",
   "icon": "Calculator",
   "tagline": "Reconcile accounts and prepare draft financial statements for review.",
-  "heroEyebrow": "Ryu for Accounting",
   "heroTitle": "Ryu for accounting",
-  "heroSubtitle": "Reconcile accounts and prepare draft financial statements for review.",
   "visualKey": "GatewayVisual",
-  "intro": "Accounting runs on sensitive financial data that can't be pasted into a public chatbot that trains on what it sees. Ryu runs capable agents locally, connects into your accounting tools to pull real transactions, and writes down every step it takes, so you can speed up the close without exposing a single client ledger.",
-  "highlights": [
-    {
-      "title": "Books stay on your machine",
-      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Connects to your ledger",
-      "description": "Agents authenticate into QuickBooks, Xero, and spreadsheets to pull real transactions and post drafts for your review.",
-      "icon": "Plug"
-    },
-    {
-      "title": "Auditable by default",
-      "description": "Every step is written down as it happens, so you can show exactly what was touched.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Cites the source",
-      "description": "Ground agents on your chart of accounts and policy docs with Spaces and RAG, so answers point back to the record.",
-      "icon": "Eye"
-    }
-  ],
   "useCases": [
     {
       "title": "Bank reconciliation",
@@ -55,20 +28,13 @@
     },
     {
       "title": "Client query response",
-      "description": "Turn a client question into a grounded answer that cites the exact ledger entries and invoices behind the number."
+      "description": "Answer a client's question, citing the ledger entries and invoices behind the number."
     }
-  ],
-  "examplePrompts": [
-    "Reconcile this bank statement against the ledger in Xero and list every unmatched transaction.",
-    "Explain the three largest variances between this month's actuals and budget, with the transactions behind each.",
-    "Categorize the uncategorized expenses in this export against our chart of accounts and flag anything unusual.",
-    "Draft a first-pass P&L and balance sheet from this trial balance for me to review.",
-    "Summarize what is still blocking the month-end close and which accruals are missing."
   ],
   "faq": [
     {
       "q": "Is client financial data safe with Ryu?",
-      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the call, so client books stay governed end to end."
+      "a": "Yes. With a local model, client books stay on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Can it work with my accounting software?",
@@ -76,10 +42,7 @@
     },
     {
       "q": "Will it post entries on its own?",
-      "a": "No. Ryu drafts reconciliations, entries, and statements for a qualified accountant to review and approve. The record shows what was looked at and proposed, so that review is fast and defensible."
+      "a": "No. Ryu drafts reconciliations, entries, and statements for a qualified accountant to review and approve. The audit trail records which model ran and when."
     }
-  ],
-  "ctaTitle": "Give your practice an AI accountant.",
-  "ctaSubtitle": "Reconcile, analyze, and close faster, with client books kept private and every call on the record.",
-  "ctaNote": "Runs on your machines · Personal details stripped · Every action logged"
+  ]
 }

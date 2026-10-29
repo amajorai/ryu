@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	type ConnectionAccessLevel,
 	connectionAccessLabel,
 	connectionAccessOption,
 	DEFAULT_CONNECTION_ACCESS_LEVEL,
@@ -27,4 +28,28 @@ describe("connection access policy", () => {
 		);
 		expect(connectionAccessOption("full").label).toContain("including delete");
 	});
+});
+
+test("policy parsing retains exact valid enum values and rejects representation lookalikes", () => {
+	for (const level of [
+		"risk_based",
+		"read_only",
+		"write",
+		"full",
+	] satisfies ConnectionAccessLevel[]) {
+		expect(normalizeConnectionAccessLevel(level)).toBe(level);
+	}
+	for (const invalid of [
+		null,
+		false,
+		0,
+		[],
+		{},
+		["full"],
+		"FULL",
+		" full",
+		"full ",
+	]) {
+		expect(normalizeConnectionAccessLevel(invalid)).toBe("risk_based");
+	}
 });

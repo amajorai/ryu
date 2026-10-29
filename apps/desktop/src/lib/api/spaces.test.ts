@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/spaces.test.ts
 //
 // The Spaces retrieval-mode control, pinned to the Core contract it drives.
@@ -31,15 +32,17 @@
 // and why each failure names the file, the item, and what to do about it.
 
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	describeRetrievalModeChange,
 	FILE_DOCUMENT_KIND,
+	fetchEmbeddingModel,
 	formatBytes,
 	isFileDocument,
 	NODE_UPLOAD_MAX_BYTES,
 	NOT_CONTENT_SEARCHABLE_STATES,
+	querySpaceDatabase,
 	type RetrievalMode,
 	type RetrievalModeChange,
 	type RetrievalModeProgress,
@@ -148,13 +151,44 @@ function rustContains(
 
 const SERVER_RS = "apps/core/src/server/mod.rs";
 const SPACES_RS = "crates/core/spaces/src/lib.rs";
-const RAG_RS = "crates/core/rag/src/lib.rs";
+const SPACES_RETRIEVAL_RS = "crates/core/spaces/src/retrieval.rs";
+const RAG_RS = "crates/core/rag/src (every module except memory_graph.rs)";
+/** The RAG crate's source root; every module under it is scanned. */
+const RAG_SRC_DIR = "crates/core/rag/src";
+/**
+ * Modules under {@link RAG_SRC_DIR} the scan leaves out. `memory_graph.rs` is the
+ * agent-memory graph, a different graph from a Space's term graph, so it is the one
+ * file the "ONE term graph" guard below must not read.
+ */
+const RAG_RS_EXCLUDED = new Set(["memory_graph.rs"]);
+/**
+ * Every `*.rs` under the RAG crate's `src/`, found by walking the directory rather
+ * than kept by hand, so a module added or split out later is scanned by the
+ * anchors and the term-graph guard without anyone editing this list. `lib.rs`
+ * comes first and the rest in sorted order, so the concatenation is stable.
+ */
+const RAG_RS_FILES = readdirSync(join(REPO_ROOT, RAG_SRC_DIR), {
+	recursive: true,
+	encoding: "utf8",
+})
+	.map((file) => file.replaceAll("\\", "/"))
+	.filter((file) => file.endsWith(".rs") && !RAG_RS_EXCLUDED.has(file))
+	.sort((a, b) => {
+		if (a === "lib.rs") {
+			return -1;
+		}
+		if (b === "lib.rs") {
+			return 1;
+		}
+		return a.localeCompare(b);
+	})
+	.map((file) => `${RAG_SRC_DIR}/${file}`);
 /** Core's RAG wiring module — home of the ONE `SpaceRecall` implementation. */
 const RAG_HOST_RS = "apps/core/src/rag_host.rs";
 
 const serverRs = rustSource(SERVER_RS);
 const spacesRs = rustSource(SPACES_RS);
-const ragRs = rustSource(RAG_RS);
+const ragRs = RAG_RS_FILES.map(rustSource).join("\n");
 
 describe("retrieval-mode wire spellings mirror Core", () => {
 	it("uses exactly the two spellings RetrievalMode::as_str emits", () => {
@@ -344,45 +378,48 @@ describe("retrieval-mode job ownership", () => {
 		const controller = new AbortController();
 		const requests: Array<{ method: string; url: string; body?: string }> = [];
 
-		globalThis.fetch = (async (input, init) => {
-			const url = String(input);
-			const method = init?.method ?? "GET";
-			requests.push({
-				method,
-				url,
-				body: typeof init?.body === "string" ? init.body : undefined,
-			});
-			if (method === "POST" && url.endsWith("/retrieval-mode")) {
-				// Model Core having accepted the job while the response is still in
-				// flight. Fetch loses the response if the caller's signal is attached.
-				if (init?.signal) {
-					return new Promise<Response>((_resolve, reject) => {
-						init.signal?.addEventListener(
-							"abort",
-							() =>
-								reject(
-									new DOMException("The request was aborted.", "AbortError")
-								),
-							{ once: true }
-						);
-						controller.abort();
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+				const url = String(input);
+				const method = init?.method ?? "GET";
+				requests.push({
+					method,
+					url,
+					body: z.string().optional().catch(undefined).parse(init?.body),
+				});
+				if (method === "POST" && url.endsWith("/retrieval-mode")) {
+					// Model Core having accepted the job while the response is still in
+					// flight. Fetch loses the response if the caller's signal is attached.
+					if (init?.signal) {
+						return new Promise<Response>((_resolve, reject) => {
+							init.signal?.addEventListener(
+								"abort",
+								() =>
+									reject(
+										new DOMException("The request was aborted.", "AbortError")
+									),
+								{ once: true }
+							);
+							controller.abort();
+						});
+					}
+					controller.abort();
+					return Response.json({ job_id: acceptedJobId, space_id: "space" });
+				}
+				if (method === "POST" && url.endsWith("/retrieval-mode/cancel")) {
+					return Response.json({ cancelled: true });
+				}
+				if (url.includes("/retrieval-mode/status")) {
+					return Response.json({
+						job_id: acceptedJobId,
+						space_id: "space",
+						state: "cancelled",
 					});
 				}
-				controller.abort();
-				return Response.json({ job_id: acceptedJobId, space_id: "space" });
-			}
-			if (method === "POST" && url.endsWith("/retrieval-mode/cancel")) {
-				return Response.json({ cancelled: true });
-			}
-			if (url.includes("/retrieval-mode/status")) {
-				return Response.json({
-					job_id: acceptedJobId,
-					space_id: "space",
-					state: "cancelled",
-				});
-			}
-			throw new Error(`unexpected request: ${method} ${url}`);
-		}) as typeof globalThis.fetch;
+				throw new Error(`unexpected request: ${method} ${url}`);
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		try {
 			await expect(
@@ -405,22 +442,25 @@ describe("retrieval-mode job ownership", () => {
 		const urls: string[] = [];
 		const acceptedJobId = "accepted-job";
 		let statusCalls = 0;
-		globalThis.fetch = (async (input) => {
-			const url = String(input);
-			urls.push(url);
-			if (url.endsWith("/retrieval-mode")) {
-				return Response.json({ job_id: acceptedJobId, space_id: "space" });
-			}
-			if (url.includes("/retrieval-mode/status")) {
-				statusCalls += 1;
-				return Response.json(
-					statusCalls === 1
-						? completedRetrievalStatus("other-job")
-						: completedRetrievalStatus(acceptedJobId)
-				);
-			}
-			throw new Error(`unexpected request: ${url}`);
-		}) as typeof globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0]) => {
+				const url = String(input);
+				urls.push(url);
+				if (url.endsWith("/retrieval-mode")) {
+					return Response.json({ job_id: acceptedJobId, space_id: "space" });
+				}
+				if (url.includes("/retrieval-mode/status")) {
+					statusCalls += 1;
+					return Response.json(
+						statusCalls === 1
+							? completedRetrievalStatus("other-job")
+							: completedRetrievalStatus(acceptedJobId)
+					);
+				}
+				throw new Error(`unexpected request: ${url}`);
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		try {
 			await expect(
@@ -445,33 +485,39 @@ describe("retrieval-mode job ownership", () => {
 			listener: EventListenerOrEventListenerObject,
 			options?: boolean | EventListenerOptions
 		) {
-			if (type === "abort" && typeof listener === "function") {
-				removedListeners.push(listener);
+			const callback = z
+				.custom<EventListener>((value) => z.function().safeParse(value).success)
+				.safeParse(listener);
+			if (type === "abort" && callback.success) {
+				removedListeners.push(callback.data);
 			}
 			return originalRemoveEventListener.call(this, type, listener, options);
 		};
-		globalThis.fetch = (async (input) => {
-			const url = String(input);
-			if (url.endsWith("/retrieval-mode")) {
-				return Response.json({
-					job_id: "listener-cleanup-job",
-					space_id: "space",
-				});
-			}
-			if (url.includes("/retrieval-mode/status")) {
-				statusCalls += 1;
-				return Response.json(
-					statusCalls === 1
-						? {
-								job_id: "listener-cleanup-job",
-								space_id: "space",
-								state: "running",
-							}
-						: completedRetrievalStatus("listener-cleanup-job")
-				);
-			}
-			throw new Error(`unexpected request: ${url}`);
-		}) as typeof globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0]) => {
+				const url = String(input);
+				if (url.endsWith("/retrieval-mode")) {
+					return Response.json({
+						job_id: "listener-cleanup-job",
+						space_id: "space",
+					});
+				}
+				if (url.includes("/retrieval-mode/status")) {
+					statusCalls += 1;
+					return Response.json(
+						statusCalls === 1
+							? {
+									job_id: "listener-cleanup-job",
+									space_id: "space",
+									state: "running",
+								}
+							: completedRetrievalStatus("listener-cleanup-job")
+					);
+				}
+				throw new Error(`unexpected request: ${url}`);
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		try {
 			await setSpaceRetrievalMode(RETRIEVAL_TARGET, "space", "graph", {
@@ -490,35 +536,38 @@ describe("retrieval-mode job ownership", () => {
 		const controller = new AbortController();
 		const requests: Array<{ method: string; url: string; body?: string }> = [];
 		let statusCalls = 0;
-		globalThis.fetch = (async (input, init) => {
-			const url = String(input);
-			const method = init?.method ?? "GET";
-			requests.push({
-				method,
-				url,
-				body: typeof init?.body === "string" ? init.body : undefined,
-			});
-			if (method === "POST" && url.endsWith("/retrieval-mode")) {
-				return Response.json({ job_id: acceptedJobId, space_id: "space" });
-			}
-			if (method === "POST" && url.endsWith("/retrieval-mode/cancel")) {
-				return Response.json({ cancelled: false, finalizing: true });
-			}
-			if (url.includes("/retrieval-mode/status")) {
-				statusCalls += 1;
-				if (statusCalls === 1) {
-					return Response.json({
-						job_id: acceptedJobId,
-						space_id: "space",
-						state: "running",
-						processed_chunks: 1,
-						total_chunks: 2,
-					});
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+				const url = String(input);
+				const method = init?.method ?? "GET";
+				requests.push({
+					method,
+					url,
+					body: z.string().optional().catch(undefined).parse(init?.body),
+				});
+				if (method === "POST" && url.endsWith("/retrieval-mode")) {
+					return Response.json({ job_id: acceptedJobId, space_id: "space" });
 				}
-				return Response.json(completedRetrievalStatus(acceptedJobId));
-			}
-			throw new Error(`unexpected request: ${method} ${url}`);
-		}) as typeof globalThis.fetch;
+				if (method === "POST" && url.endsWith("/retrieval-mode/cancel")) {
+					return Response.json({ cancelled: false, finalizing: true });
+				}
+				if (url.includes("/retrieval-mode/status")) {
+					statusCalls += 1;
+					if (statusCalls === 1) {
+						return Response.json({
+							job_id: acceptedJobId,
+							space_id: "space",
+							state: "running",
+							processed_chunks: 1,
+							total_chunks: 2,
+						});
+					}
+					return Response.json(completedRetrievalStatus(acceptedJobId));
+				}
+				throw new Error(`unexpected request: ${method} ${url}`);
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		try {
 			const result = await setSpaceRetrievalMode(
@@ -549,27 +598,30 @@ describe("retrieval-mode job ownership", () => {
 		const acceptedJobId = "accepted-cancel-job";
 		const controller = new AbortController();
 		let statusCalls = 0;
-		globalThis.fetch = (async (input, init) => {
-			const url = String(input);
-			const method = init?.method ?? "GET";
-			if (method === "POST" && url.endsWith("/retrieval-mode")) {
-				return Response.json({ job_id: acceptedJobId, space_id: "space" });
-			}
-			if (method === "POST" && url.endsWith("/retrieval-mode/cancel")) {
-				return Response.json({ cancelled: true });
-			}
-			if (url.includes("/retrieval-mode/status")) {
-				statusCalls += 1;
-				return Response.json({
-					job_id: acceptedJobId,
-					space_id: "space",
-					state: statusCalls === 1 ? "cancelling" : "cancelled",
-					processed_chunks: 1,
-					total_chunks: 2,
-				});
-			}
-			throw new Error(`unexpected request: ${method} ${url}`);
-		}) as typeof globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+				const url = String(input);
+				const method = init?.method ?? "GET";
+				if (method === "POST" && url.endsWith("/retrieval-mode")) {
+					return Response.json({ job_id: acceptedJobId, space_id: "space" });
+				}
+				if (method === "POST" && url.endsWith("/retrieval-mode/cancel")) {
+					return Response.json({ cancelled: true });
+				}
+				if (url.includes("/retrieval-mode/status")) {
+					statusCalls += 1;
+					return Response.json({
+						job_id: acceptedJobId,
+						space_id: "space",
+						state: statusCalls === 1 ? "cancelling" : "cancelled",
+						processed_chunks: 1,
+						total_chunks: 2,
+					});
+				}
+				throw new Error(`unexpected request: ${method} ${url}`);
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		try {
 			await expect(
@@ -589,7 +641,7 @@ describe("retrieval-mode job ownership", () => {
 //
 // The Spaces sidebar disables its Delete item for `space.system` and explains
 // why in a tooltip (`SpaceSidebarRow`, apps/desktop/src/components/layout/
-// AppSidebar.tsx). That is a claim about Core, and an unusually load-bearing
+// sidebar-space-row.tsx). That is a claim about Core, and an unusually load-bearing
 // one: get it wrong in the "false" direction and the user gets the action back
 // plus the failure toast it always produced; get it wrong in the "true"
 // direction and a perfectly deletable Space becomes undeletable from the UI.
@@ -671,27 +723,43 @@ describe("the system-Space flag the delete action is gated on", () => {
 // recall path must be shown to reach it. If either link goes, the picker is again
 // a control that writes a field somebody's path ignores.
 describe("what the retrieval mode is claimed to govern", () => {
-	it("is still read in exactly one place — search_ext", () => {
-		// `search_ext` → `space_mode()` is the single branch point between
-		// `vector_search` and `graph_search`. Every claim below is a claim that some
-		// caller reaches THIS function; if the read moves, they all need re-pointing.
+	it("is still read in exactly one place — collect_candidates", () => {
+		// `search_ext` is `search_with` with default options, and every Space
+		// search (`search_ext`, `search_with`, `search_multi`) gathers its
+		// candidates in `collect_candidates` → `space_mode()`, the single branch
+		// point between `vector_search` and `graph_search`. Every claim below is a
+		// claim that some caller reaches THIS function; if the read moves, they all
+		// need re-pointing.
+		expect(
+			rustAnchor(
+				rustSource(SPACES_RETRIEVAL_RS),
+				SPACES_RETRIEVAL_RS,
+				"async fn collect_candidates(",
+				"let mode = self.space_mode(space_id).await?;"
+			)
+		).toBe(ANCHOR_PRESENT);
 		expect(
 			rustAnchor(
 				spacesRs,
 				SPACES_RS,
 				"pub async fn search_ext(",
-				"let mode = self.space_mode(space_id).await?;"
+				"self.search_with(space_id, query, &opts, filter)"
 			)
 		).toBe(ANCHOR_PRESENT);
 	});
 
-	it("still reaches search_ext from the route the client posts to", () => {
+	it("still reaches the Space search pipeline from the route the client posts to", () => {
 		expect(
-			rustAnchor(serverRs, SERVER_RS, "async fn search_space(", ".search_ext(")
+			rustAnchor(
+				serverRs,
+				SERVER_RS,
+				"async fn search_space(",
+				".search_multi("
+			)
 		).toBe(ANCHOR_PRESENT);
 	});
 
-	it("also reaches search_ext from the chat-turn recall path", () => {
+	it("also reaches the Space search pipeline from the chat-turn recall path", () => {
 		// The chain the copy now promises, one link at a time. `retrieve` is what
 		// `sidecar/adapters` calls to build a turn's context from memory + the
 		// agent's Spaces; it delegates the Spaces half rather than scanning
@@ -704,11 +772,29 @@ describe("what the retrieval mode is claimed to govern", () => {
 			RAG_RS,
 			"pub async fn retrieve(&self, query: &str, opts: &RetrievalOptions)"
 		);
-		// Positive control: assert we extracted the ranker before asserting what it
-		// delegates to.
-		expect(retrieve).toContain(
-			"cosine_similarity(&query_embedding, &embedding)"
+		// Positive control: local retrieval still performs cosine ranking after the
+		// local and Spaces branches were split into concurrent work.
+		const localRetrieve = rustItemBody(
+			ragRs,
+			RAG_RS,
+			"async fn retrieve_local("
 		);
+		expect(squeeze(localRetrieve)).toContain(
+			"score_candidates(&query_embedding, opts)"
+		);
+		const scoreCandidates = rustItemBody(
+			ragRs,
+			RAG_RS,
+			"async fn score_candidates("
+		);
+		// The scan runs on a blocking `CandidateScorer`, which ranks by cosine.
+		expect(squeeze(scoreCandidates)).toContain(
+			"scorer.score(&conn, &model, &query, &opts)"
+		);
+		expect(
+			squeeze(rustItemBody(ragRs, RAG_RS, "impl CandidateScorer"))
+		).toContain("cosine_similarity(query, &vector)");
+		expect(retrieve).toContain("self.retrieve_local(query, opts)");
 		expect(retrieve).toContain("self.recall_spaces(query, opts)");
 
 		// …which calls the delegate…
@@ -721,7 +807,7 @@ describe("what the retrieval mode is claimed to govern", () => {
 			)
 		).toBe(ANCHOR_PRESENT);
 
-		// …whose ONE production implementation calls `search_ext`, closing the chain
+		// …whose ONE production implementation calls `search_with`, closing the chain
 		// back onto the column read pinned above.
 		const ragHostRs = rustSource(RAG_HOST_RS);
 		expect(
@@ -729,7 +815,7 @@ describe("what the retrieval mode is claimed to govern", () => {
 				ragHostRs,
 				RAG_HOST_RS,
 				"impl SpaceRecall for SpacesRecall",
-				".search_ext(&space_id, query, per_space_limit, None, filter.clone())"
+				".search_with(&space_id, query, &search_options, filter.clone())"
 			)
 		).toBe(ANCHOR_PRESENT);
 	});
@@ -1194,7 +1280,10 @@ describe("global lexical Spaces search mirrors Core", () => {
 			"async fn search_documents_lexical_term("
 		);
 		expect(termSearch).toContain("DOC_TENANCY_VISIBLE_PREDICATE");
-		expect(termSearch).toContain("LIKE lower(:pattern)");
+		// Titles and descriptions are sealed at rest, so the term is matched in Rust
+		// against opened values (case-folded), and body hits come from the blind index.
+		expect(termSearch).toContain("let needle = term.to_lowercase();");
+		expect(termSearch).toContain("terms_query(term)");
 		expect(termSearch).toContain("LexicalDocumentMatch");
 
 		const client = rustSource(SPACES_TS);
@@ -1363,5 +1452,102 @@ describe("the upload ceiling this client reports", () => {
 		// Never renders "NaN undefined" into a settings row.
 		expect(formatBytes(0)).toBe("0 B");
 		expect(formatBytes(Number.NaN)).toBe("0 B");
+	});
+});
+
+describe("Space database SQL queries", () => {
+	it("uses the mounted route and sends bound parameters", async () => {
+		const originalFetch = globalThis.fetch;
+		let requestUrl = "";
+		let requestBody: unknown;
+		globalThis.fetch = Object.assign(
+			async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+				requestUrl = String(input);
+				requestBody = JSON.parse(String(init?.body));
+				return Response.json({
+					columns: ["task_name"],
+					rows: [["Review"]],
+					schema: [{ id: "name", label: "Task Name", name: "task_name" }],
+					truncated: false,
+				});
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
+		try {
+			const result = await querySpaceDatabase(
+				RETRIEVAL_TARGET,
+				"space/one",
+				"database two",
+				"SELECT task_name FROM data WHERE task_name = ?",
+				["Review"]
+			);
+			expect(requestUrl).toContain(
+				"/api/spaces/space%2Fone/databases/database%20two/query"
+			);
+			expect(requestBody).toEqual({
+				query: "SELECT task_name FROM data WHERE task_name = ?",
+				parameters: ["Review"],
+			});
+			expect(result.rows).toEqual([["Review"]]);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+});
+
+describe("embedding model read mirrors Core's GET /api/embeddings/model", () => {
+	it("Core's EmbeddingModelInfo publishes model_id and dims, not base_url", () => {
+		const header = "pub struct EmbeddingModelInfo";
+		expect(rustContains(spacesRs, SPACES_RS, header, "pub model_id:")).toBe(
+			ANCHOR_PRESENT
+		);
+		expect(rustContains(spacesRs, SPACES_RS, header, "pub dims:")).toBe(
+			ANCHOR_PRESENT
+		);
+		// If Core starts publishing base_url, the client may read it as required
+		// again; until then the field must stay optional in spaces.ts.
+		expect(rustItemBody(spacesRs, SPACES_RS, header)).not.toContain("base_url");
+	});
+
+	it("reads Core's real {model_id, dims} body without a base_url", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async () =>
+				Response.json({ model_id: "nomic-embed-text-v1.5", dims: 768 }),
+			{ preconnect: originalFetch.preconnect }
+		);
+		try {
+			const model = await fetchEmbeddingModel(RETRIEVAL_TARGET);
+			expect(model).toEqual({
+				modelId: "nomic-embed-text-v1.5",
+				baseUrl: undefined,
+				dims: 768,
+			});
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it("still reads base_url when a publisher sends it", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async () =>
+				Response.json({
+					base_url: "http://127.0.0.1:8081/v1",
+					dims: 512,
+					model_id: "text-embedding-3-small",
+				}),
+			{ preconnect: originalFetch.preconnect }
+		);
+		try {
+			const model = await fetchEmbeddingModel(RETRIEVAL_TARGET);
+			expect(model).toEqual({
+				modelId: "text-embedding-3-small",
+				baseUrl: "http://127.0.0.1:8081/v1",
+				dims: 512,
+			});
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 });

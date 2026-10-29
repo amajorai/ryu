@@ -9,6 +9,7 @@
 // deprecates the `Cell` API they would otherwise need); the activity trend line
 // uses the shared shadcn chart wrapper.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type ChartConfig,
 	ChartContainer,
@@ -17,20 +18,33 @@ import {
 } from "@ryu/ui/components/chart.tsx";
 import { formatCount as formatSharedCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { isNativeNumber } from "../lib/native-primitive-observation.ts";
+import drawingStyles from "./profile-charts.drawing.module.css";
+
+interface CategoryBarStyle extends CSSProperties {
+	"--profile-charts-1-background-color"?: CSSProperties["backgroundColor"];
+	"--profile-charts-1-height"?: string | undefined;
+}
+interface FeatureShareStyle extends CSSProperties {
+	"--profile-charts-2-width"?: string | undefined;
+}
+function drawingLength(value: CSSProperties["width"]): string | undefined {
+	return isNativeNumber(value) ? `${value}px` : value;
+}
 
 // Vibrant, theme-agnostic palette. The app's global `--chart-*` tokens are
 // intentionally monochrome, so these define their own colors (the same family
 // the desktop dashboard chart widgets use). Mid-lightness oklch values read
 // well on both light and dark backgrounds.
 const PALETTE = [
-	"oklch(0.62 0.19 256)", // blue
-	"oklch(0.56 0.18 306)", // purple
-	"oklch(0.64 0.21 1)", // pink
-	"oklch(0.78 0.16 76)", // amber
-	"oklch(0.7 0.12 182)", // teal
-	"oklch(0.63 0.19 149)", // green
+	"var(--color-profile-chart-1)", // blue
+	"var(--color-profile-chart-2)", // purple
+	"var(--color-profile-chart-3)", // pink
+	"var(--color-profile-chart-4)", // amber
+	"var(--color-profile-chart-5)", // teal
+	"var(--color-profile-chart-6)", // green
 ];
 
 const formatSharedCountValue = (value: number): string =>
@@ -179,6 +193,11 @@ export function FeatureMixBar({
 					maxValue > 0
 						? Math.max((entry.value / maxValue) * BAR_CHART_HEIGHT, 4)
 						: 4;
+				const categoryBarStyle: CategoryBarStyle = {
+					"--profile-charts-1-background-color":
+						PALETTE[index % PALETTE.length],
+					"--profile-charts-1-height": drawingLength(`${height}px`),
+				};
 				return (
 					<div
 						className="flex h-full flex-col items-center justify-end gap-2"
@@ -186,11 +205,11 @@ export function FeatureMixBar({
 					>
 						<div
 							aria-hidden="true"
-							className="w-8 rounded-t-lg transition-all"
-							style={{
-								backgroundColor: PALETTE[index % PALETTE.length],
-								height: `${height}px`,
-							}}
+							className={cn(
+								"w-8 rounded-t-lg transition-[height,background-color]",
+								drawingStyles.categoryBar
+							)}
+							style={categoryBarStyle}
 							title={`${entry.name}: ${formatSharedCount(entry.value)}`}
 						/>
 						<span className="text-muted-foreground text-xs">{entry.name}</span>
@@ -221,13 +240,13 @@ export function ActivityArea({
 }) {
 	const recent = data.slice(-days);
 
-	if (recent.length === 0 || recent.every((entry) => entry.count === 0)) {
+	if (recent.every((entry) => entry.count === 0)) {
 		return <EmptyPanel text="No recent activity yet." />;
 	}
 
 	const chartConfig = {
 		count: {
-			color: "oklch(0.62 0.19 256)",
+			color: "var(--color-profile-chart-7)",
 			label: "Requests",
 		},
 	} satisfies ChartConfig;
@@ -305,6 +324,7 @@ export function RankedList({
 	items: RankedItem[];
 	title: string;
 }) {
+	const tl = useLiteralMessages();
 	const maxCount = items.reduce((max, item) => Math.max(max, item.count), 0);
 
 	return (
@@ -317,12 +337,15 @@ export function RankedList({
 				<div className="space-y-2.5">
 					{items.map((item) => {
 						const share = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
+						const featureShareStyle: FeatureShareStyle = {
+							"--profile-charts-2-width": drawingLength(`${share}%`),
+						};
 						return (
 							<div className="space-y-1" key={item.id}>
 								<div className="flex items-center justify-between gap-3 text-sm">
 									<span className="truncate font-medium">{item.id}</span>
 									<span className="shrink-0 text-muted-foreground tabular-nums">
-										{formatCount(item.count)} runs
+										{tl("{count} runs", { count: formatCount(item.count) })}
 									</span>
 								</div>
 								<div
@@ -330,8 +353,11 @@ export function RankedList({
 									className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
 								>
 									<div
-										className="h-full rounded-full bg-primary transition-all"
-										style={{ width: `${share}%` }}
+										className={cn(
+											"h-full rounded-full bg-primary transition-[width]",
+											drawingStyles.featureShare
+										)}
+										style={featureShareStyle}
 									/>
 								</div>
 							</div>

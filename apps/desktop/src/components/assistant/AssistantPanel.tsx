@@ -1,18 +1,25 @@
 import { useChat } from "@ai-sdk/react";
 import {
+	modelContextParts,
+	useModelContextStore,
+} from "@ryu/app-host/model-context";
+import {
 	RyuAssistantRecentChats,
 	RyuAssistantWidgetFrame,
 	RyuAssistantWidgetHeader,
 } from "@ryu/assistant-widget/surface";
-import { Button } from "@ryu/ui/components/button";
+import { AgentUiStateHostContext } from "@ryu/blocks/desktop/agent-elements/agent-ui/state-host-context.tsx";
+import { ModelContextAttachments } from "@ryu/blocks/desktop/agent-elements/model-context-attachments.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/dropdown-menu.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import {
 	Maximize2,
@@ -32,13 +39,16 @@ import {
 import { ComposerSettingsMenu } from "@/components/agent-elements/input/composer-settings-menu.tsx";
 import {
 	type ActivePermission,
+	activePermissionSchema,
 	PermissionPrompt,
 } from "@/src/components/chat/PermissionPrompt.tsx";
 import { ClipComposerControls } from "@/src/components/clips/ClipComposerControls.tsx";
+import { foldFinishedCall } from "@/src/components/voice/voice-call.ts";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
+import { useAgentUiStateHost } from "@/src/hooks/useAgentUiStateHost.ts";
 import {
 	type BuilderBodyFields,
 	useBuilderRuntime,
@@ -52,12 +62,15 @@ import { useSpeechPlayback } from "@/src/hooks/useSpeechPlayback.ts";
 import { useTitleBarClearsContent } from "@/src/hooks/useTitleBarClearsContent.ts";
 import { engineForAgent } from "@/src/lib/agent-logos.tsx";
 import { respondPermission } from "@/src/lib/api/acp.ts";
-import { chatHeaders, chatStreamUrl } from "@/src/lib/api/chat.ts";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { cancelChat, chatHeaders, chatStreamUrl } from "@/src/lib/api/chat.ts";
+import { type ApiTarget, accountJwtForTarget } from "@/src/lib/api/client.ts";
 import { generateImage } from "@/src/lib/api/images.ts";
-import { getDesktopTtsPrefs } from "@/src/lib/api/preferences.ts";
+import {
+	getDesktopTtsEngineOptions,
+	getDesktopTtsPrefs,
+} from "@/src/lib/api/preferences.ts";
 import { speakText } from "@/src/lib/api/voice.ts";
-import { getRealtimeJwt } from "@/src/lib/realtime/jwt.ts";
+import { hydrateHistoryMessage } from "@/src/lib/chat-history-hydrate.ts";
 import { compactAge } from "@/src/lib/time.ts";
 import {
 	type AssistantBuilderSession,
@@ -65,6 +78,10 @@ import {
 	useAssistantStore,
 } from "@/src/store/useAssistantStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import {
+	assistantDisplayMessages,
+	composeAssistantContext,
+} from "./assistant-message-display.ts";
 import { buildBuilderPreamble, injectPreamble } from "./builderPreamble.ts";
 import { ASSISTANT_SURFACE_CONTENT } from "./skin.ts";
 import { type ComposerSendFile, useComposerSlot } from "./useComposerSlot.tsx";
@@ -137,18 +154,6 @@ function contextBlock(
 }
 
 /**
- * Build the user-message text, embedding the active page context inline (the
- * established "ask about what you're looking at" convention — Core has no
- * structured context field, so context rides in the message).
- */
-function composeWithContext(content: string, block: string): string {
-	if (!block) {
-		return content;
-	}
-	return `The user is working in Ryu and currently has this open. Use it as context for their request.\n\n<page-context>\n${block}\n</page-context>\n\n${content}`;
-}
-
-/**
  * Build the chat-stream request body for one turn. In builder mode it injects the
  * builder preamble + drives the `*_builder.*` tools with `persist: false`; in
  * generic mode it carries the workspace cwd and persists normally. Top-level so
@@ -160,8 +165,10 @@ function buildChatRequestBody(params: {
 	genericBodyFields: () => BuilderBodyFields;
 	outgoing: UIMessage[];
 	session: AssistantBuilderSession | null;
+	/** The session's chat id — an app surface's per-thread id. */
+	sessionConvId: string;
 	targetId: string | null;
-}): { body: Record<string, unknown> } {
+}) {
 	const { outgoing, session, targetId } = params;
 	if (session) {
 		const id = targetId ?? session.targetId;
@@ -175,7 +182,7 @@ function buildChatRequestBody(params: {
 			body: {
 				messages,
 				...params.builderBodyFields(),
-				conversation_id: session.conversationId,
+				conversation_id: params.sessionConvId,
 				persist: false,
 				enable_long_term: false,
 			},
@@ -247,8 +254,9 @@ function BuilderEmptyState({
 }
 
 /**
- * The generic assistant's page-context chips — shown only when NOT in builder
- * mode. Extracted so the panel's render stays lean.
+ * The page-context chips — shown in generic chat and on app-defined surfaces,
+ * not in the built-in agent/workflow builders. Extracted so the panel's render
+ * stays lean.
  */
 function GenericAssistantExtras(props: {
 	divider: string;
@@ -271,7 +279,9 @@ function GenericAssistantExtras(props: {
 					className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs"
 					key={c.id}
 				>
-					<span className="truncate">{c.title}</span>
+					<span className="truncate" title={c.title}>
+						{c.title}
+					</span>
 					{/* Shell-set attribution — an app feeding the assistant says so. */}
 					{c.source ? (
 						<span className="shrink-0 opacity-60">· {c.source}</span>
@@ -322,11 +332,12 @@ function findActivePermission(
 			continue;
 		}
 		for (let j = message.parts.length - 1; j >= 0; j--) {
-			const part = message.parts[j] as { type?: string; data?: unknown };
+			const part = message.parts[j];
 			if (part.type !== "data-ryu-permission") {
 				continue;
 			}
-			const data = part.data as ActivePermission | undefined;
+			const parsed = activePermissionSchema.safeParse(part.data);
+			const data = parsed.success ? parsed.data : undefined;
 			if (data?.requestId && !resolved.has(data.requestId)) {
 				return data;
 			}
@@ -368,6 +379,13 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	const builder = useAssistantStore((s) => s.builder);
 	const storeConvId = useAssistantStore((s) => s.conversationId);
 	const pageContext = useAssistantStore((s) => s.pageContext);
+	const hasAppContext = useModelContextStore((store) =>
+		Object.values(store.entries).some(
+			(entry) =>
+				entry.scope === "assistant" &&
+				(entry.state.content?.length || entry.state.structuredContent)
+		)
+	);
 	const contextDismissed = useAssistantStore((s) => s.contextDismissed);
 	const setLayout = useAssistantStore((s) => s.setLayout);
 	const close = useAssistantStore((s) => s.close);
@@ -384,6 +402,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		seedTitleFromFirstMessage,
 		setActiveConversationId,
 		loadMessages,
+		loadMessagesResult,
 		refresh,
 	} = useChatHistoryContext();
 
@@ -394,7 +413,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 			token: activeNode.token,
 			userJwt: activeNode.userJwt ?? null,
 		}),
-		[activeNode.url, activeNode.token]
+		[activeNode.url, activeNode.token, activeNode.userJwt]
 	);
 
 	// Agent + model selection, shared with the main chat composer via the same
@@ -404,6 +423,12 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	const genericRuntime = useBuilderRuntime(DEFAULT_AGENT_KEY);
 	const builderRuntime = useBuilderRuntime(BUILDER_AGENT_KEY);
 	const isBuilder = builder !== null;
+	// An app-defined surface (Code Review, Weekly review, a dashboard, any
+	// Companion) is about the page under it, so the page context stays visible,
+	// removable, and attached to its turns. Only the two built-in builders are
+	// scoped to the record they edit instead.
+	const isAppSurface =
+		builder !== null && builder.kind !== "agent" && builder.kind !== "workflow";
 
 	// The big empty-state mark for the generic assistant — the driving agent's own
 	// logo (or custom avatar), peeking out from behind the composer, exactly like
@@ -438,7 +463,23 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		});
 	}, [storeConvId]);
 
-	const activeConvId = builder ? builder.conversationId : convId;
+	// An app-defined surface gets one thread per `thread` value (e.g. one per pull
+	// request); the built-in builders keep one thread per page.
+	const surfaceThreadId =
+		builder &&
+		builder.kind !== "agent" &&
+		builder.kind !== "workflow" &&
+		builder.thread
+			? `${builder.conversationId}::${builder.thread}`
+			: null;
+	const activeConvId = builder
+		? (surfaceThreadId ?? builder.conversationId)
+		: convId;
+	const activeConvIdRef = useRef(activeConvId);
+	activeConvIdRef.current = activeConvId;
+	// Generative-UI widget state is saved for normal threads; a builder session
+	// is ephemeral, so its widgets keep state in memory.
+	const agentUiStateHost = useAgentUiStateHost(builder ? null : convId);
 	const conversations = useMemo(() => listConversations(), [listConversations]);
 	const floatingRecentChats = useMemo(
 		() =>
@@ -487,26 +528,63 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 				api: chatStreamUrl(chatTarget),
 				headers: async (): Promise<Record<string, string>> => {
 					const base = chatHeaders(chatTarget);
-					const jwt = await getRealtimeJwt();
+					const jwt = await accountJwtForTarget(chatTarget);
 					return jwt ? { ...base, "X-Ryu-User-Jwt": jwt } : base;
 				},
-				prepareSendMessagesRequest: ({ messages: outgoingMessages }) =>
-					buildChatRequestBody({
-						outgoing: outgoingMessages,
+				prepareSendMessagesRequest: ({ messages: outgoingMessages }) => {
+					const context = modelContextParts("assistant");
+					let latestUser = -1;
+					for (const [index, message] of outgoingMessages.entries()) {
+						if (message.role === "user") {
+							latestUser = index;
+						}
+					}
+					return buildChatRequestBody({
+						outgoing: outgoingMessages.map((message, index) =>
+							index === latestUser && context.length > 0
+								? { ...message, parts: [...message.parts, ...context] }
+								: message
+						),
 						session: builderRef.current,
+						sessionConvId: activeConvIdRef.current,
 						targetId: targetIdRef.current,
 						builderBodyFields: builderBodyFieldsRef.current,
 						genericBodyFields: genericBodyFieldsRef.current,
 						convId: convIdRef.current,
-					}),
+					});
+				},
 			}),
 		[chatTarget]
 	);
 
+	// App surfaces resume their in-memory thread when the panel remounts (it
+	// unmounts on close) or when the user returns to an earlier thread.
+	const isAppSurfaceThread =
+		builder !== null && builder.kind !== "agent" && builder.kind !== "workflow";
+	const resumedMessages = useMemo(
+		() =>
+			isAppSurfaceThread
+				? useAssistantStore.getState().surfaceThreads[activeConvId]
+				: undefined,
+		[isAppSurfaceThread, activeConvId]
+	);
 	const { messages, sendMessage, setMessages, stop, status, error } = useChat({
 		id: activeConvId,
+		messages: resumedMessages,
 		transport,
 	});
+	const statusRef = useRef(status);
+	statusRef.current = status;
+	const saveSurfaceThread = useAssistantStore((s) => s.saveSurfaceThread);
+	useEffect(() => {
+		if (isAppSurfaceThread && messages.length > 0) {
+			saveSurfaceThread(activeConvId, messages);
+		}
+	}, [isAppSurfaceThread, activeConvId, messages, saveSurfaceThread]);
+	const displayMessages = useMemo(
+		() => assistantDisplayMessages(messages),
+		[messages]
+	);
 
 	// Multimodal (image): generate from the composer text and surface the result
 	// inline, mirroring ChatPage's handler exactly so the Ask Ryu dock reads the
@@ -520,11 +598,9 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	// rather than echoing the prompt a second time — same split as ChatPage.
 	const runImageGeneration = useCallback(
 		async (assistantId: string, prompt: string) => {
-			const settle = (parts: unknown[]) => {
+			const settle = (parts: UIMessage["parts"]) => {
 				setMessages((prev) =>
-					prev.map((m) =>
-						m.id === assistantId ? ({ ...m, parts } as typeof m) : m
-					)
+					prev.map((m) => (m.id === assistantId ? { ...m, parts } : m))
 				);
 			};
 			// Back to the in-flight frame first: on a retry the message still holds
@@ -556,7 +632,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 						type: "data-image-generation",
 						data: { status: "complete", prompt, url: first },
 					},
-					...rest.map((url) => ({
+					...rest.map((url): UIMessage["parts"][number] => ({
 						type: "file",
 						mediaType: "image/png",
 						url,
@@ -593,7 +669,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 					id: userId,
 					role: "user",
 					parts: [{ type: "text", text: prompt }],
-				} as (typeof prev)[number],
+				} satisfies (typeof prev)[number],
 				{
 					id: assistantId,
 					role: "assistant",
@@ -603,7 +679,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 							data: { status: "generating", prompt },
 						},
 					],
-				} as unknown as (typeof prev)[number],
+				} satisfies (typeof prev)[number],
 			]);
 			await runImageGeneration(assistantId, prompt);
 		},
@@ -624,6 +700,19 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		[runImageGeneration]
 	);
 
+	// Stop aborts the stream AND cancels the turn on Core: a saved (generic-mode)
+	// turn keeps running there after its request is gone. Builder turns are not
+	// persisted, so the abort alone ends them.
+	const handleStop = useCallback(() => {
+		void stop();
+		const conversationId = convIdRef.current;
+		if (!builderRef.current && conversationId) {
+			cancelChat(chatTarget, conversationId).catch(() => {
+				// No live turn, or Core is unreachable; the abort above still stands.
+			});
+		}
+	}, [chatTarget, stop]);
+
 	// Multimodal (speak): synthesize an assistant reply via Core's `/api/voice/speak`
 	// and play it, honouring the Voice-tab Audio engine/voice. A second click on the
 	// same turn toggles playback off (`audio.play()` resolves at start, so the hover
@@ -639,13 +728,62 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 			}
 			await playSpeech(trimmed, () => {
 				const prefs = getDesktopTtsPrefs();
+				const engineOptions = getDesktopTtsEngineOptions(prefs.engine);
 				return speakText(chatTarget, trimmed, {
 					engine: prefs.engine,
-					voice: prefs.voice || undefined,
+					language: engineOptions.language,
+					referenceAudio: engineOptions.referenceAudio,
+					speed: engineOptions.speed,
+					voice: engineOptions.voice || prefs.voice || undefined,
 				});
 			});
 		},
 		[chatTarget, playSpeech]
+	);
+
+	// A call's spoken turns render as ephemeral `voice-call-*` rows only while it
+	// is live; Core persisted the real rows as it went. Once it ends, pull them
+	// back (as ChatPage does) so the exchange stays on screen with persisted ids
+	// instead of vanishing until the panel reopens. A generic thread is stored in
+	// full, so its stored history replaces the transcript. A builder thread chats
+	// with `persist: false`, so only this call's stored rows are folded in ahead
+	// of its summary. Nothing is replaced while a new text turn is in flight.
+	const reconcileCallHistory = useCallback(
+		async (
+			summary: { conversationId: string; messageId: string },
+			builderThread: boolean
+		) => {
+			const result = await loadMessagesResult(summary.conversationId);
+			const stillCurrent = builderThread
+				? builderRef.current?.conversationId === summary.conversationId
+				: !builderRef.current && convIdRef.current === summary.conversationId;
+			const turnInFlight =
+				statusRef.current === "streaming" || statusRef.current === "submitted";
+			if (
+				result.status === "error" ||
+				result.messages.length === 0 ||
+				!stillCurrent ||
+				turnInFlight
+			) {
+				return;
+			}
+			const now = Date.now();
+			if (builderThread) {
+				setMessages((current) =>
+					foldFinishedCall<UIMessage, (typeof result.messages)[number]>(
+						current,
+						result.messages,
+						summary.messageId,
+						(row) => hydrateHistoryMessage(row, now)
+					)
+				);
+				return;
+			}
+			setMessages(
+				result.messages.map((message) => hydrateHistoryMessage(message, now))
+			);
+		},
+		[loadMessagesResult, setMessages]
 	);
 
 	// The full chat composer — the SAME one the main chat page renders (Agent ·
@@ -660,6 +798,28 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		compact: bare && !isBuilder,
 		compactTrigger: true,
 		conversationId: convId,
+		onCallEnded: (summary) => {
+			if (convIdRef.current && convIdRef.current !== summary.conversationId) {
+				return;
+			}
+			setConversationId(summary.conversationId);
+			setMessages((current) =>
+				current.some((message) => message.id === summary.messageId)
+					? current
+					: [
+							...current,
+							{
+								id: summary.messageId,
+								role: "user",
+								parts: [{ type: "text", text: summary.content }],
+							},
+						]
+			);
+			refresh();
+			reconcileCallHistory(summary, false).catch(() => {
+				// The summary is already on screen; the turns return on the next reload.
+			});
+		},
 		isWorking: status === "streaming" || status === "submitted",
 		minimal: bare && !isBuilder,
 		// Image-gen only on the chat composer — the builder pane describes what to
@@ -672,6 +832,31 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		compactTrigger: true,
 		placeholder: BUILDER_PLACEHOLDER,
 		conversationId: activeConvId,
+		// Voice mode talks to Core directly under the conversation id, without
+		// the app's preamble, page context, or `persist: false`; an app surface's
+		// turns must go through its own send path instead.
+		voiceMode: !isAppSurface,
+		onCallEnded: (summary) => {
+			if (builderRef.current?.conversationId !== summary.conversationId) {
+				return;
+			}
+			setMessages((current) =>
+				current.some((message) => message.id === summary.messageId)
+					? current
+					: [
+							...current,
+							{
+								id: summary.messageId,
+								role: "user",
+								parts: [{ type: "text", text: summary.content }],
+							},
+						]
+			);
+			refresh();
+			reconcileCallHistory(summary, true).catch(() => {
+				// The summary is already on screen; the turns are simply not folded in.
+			});
+		},
 		isWorking: status === "streaming" || status === "submitted",
 	});
 	const activeComposer = isBuilder ? builderComposer : genericComposer;
@@ -711,14 +896,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 				return;
 			}
 			setMessages(
-				history.map(
-					(m) =>
-						({
-							id: m.id,
-							role: m.role,
-							parts: [{ type: "text" as const, text: m.content }],
-						}) as (typeof messages)[number]
-				)
+				history.map((message) => hydrateHistoryMessage(message, Date.now()))
 			);
 		});
 		return () => {
@@ -750,44 +928,112 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 	// Active tool-permission prompt (Zed-style allow/deny) — passed into the
 	// shared composer surface whenever the agent builder gates
 	// `agent_builder.configure_agent`. It is also available in generic chat.
-	const [resolvedPermissions, setResolvedPermissions] = useState<Set<string>>(
-		() => new Set()
+	const permissionScope = JSON.stringify([
+		activeConvId,
+		chatTarget.url,
+		chatTarget.token,
+		chatTarget.userJwt,
+	]);
+	const permissionScopeRef = useRef(permissionScope);
+	permissionScopeRef.current = permissionScope;
+	const resolvedInScope = useAssistantStore(
+		(s) => s.resolvedPermissions[permissionScope]
+	);
+	const markPermissionResolved = useAssistantStore(
+		(s) => s.markPermissionResolved
 	);
 	const activePermission = useMemo(
-		() => findActivePermission(messages, resolvedPermissions),
-		[messages, resolvedPermissions]
+		() => findActivePermission(messages, new Set(resolvedInScope)),
+		[messages, resolvedInScope]
 	);
+	const respondingPermissions = useRef(new Set<string>());
+	const [permissionError, setPermissionError] = useState<{
+		key: string;
+		message: string;
+	} | null>(null);
+	const [permissionPending, setPermissionPending] = useState<Set<string>>(
+		() => new Set()
+	);
+	const activePermissionKey = JSON.stringify([
+		permissionScope,
+		activePermission?.requestId,
+	]);
 	const handleRespondPermission = useCallback(
 		(optionId: string | null) => {
 			const requestId = activePermission?.requestId;
-			if (!requestId) {
+			const key = JSON.stringify([permissionScope, requestId]);
+			if (!requestId || respondingPermissions.current.has(key)) {
 				return;
 			}
-			setResolvedPermissions((prev) => {
-				const next = new Set(prev);
-				next.add(requestId);
-				return next;
-			});
-			respondPermission(chatTarget, requestId, optionId).catch(() => undefined);
+			respondingPermissions.current.add(key);
+			setPermissionPending((previous) => new Set([...previous, key]));
+			setPermissionError(null);
+			void respondPermission(chatTarget, requestId, optionId)
+				// Kept in the store, so it holds after the panel closes or the
+				// surface thread switches; a reply that lands after the auth scope
+				// moved is stale and resolves nothing.
+				.then(() => {
+					if (permissionScopeRef.current !== permissionScope) {
+						return;
+					}
+					markPermissionResolved(permissionScope, requestId);
+				})
+				.catch(() => {
+					if (permissionScopeRef.current !== permissionScope) {
+						return;
+					}
+					setPermissionError({
+						key,
+						message: "Could not send your permission response. Try again.",
+					});
+				})
+				.finally(() => {
+					respondingPermissions.current.delete(key);
+					setPermissionPending((previous) => {
+						const next = new Set(previous);
+						next.delete(key);
+						return next;
+					});
+				});
 		},
-		[activePermission, chatTarget]
+		[activePermission, chatTarget, markPermissionResolved, permissionScope]
 	);
 	const permissionComposerPrompt = useMemo(
 		() =>
 			activePermission
 				? {
 						content: (
-							<PermissionPrompt
-								embedded
-								onRespond={handleRespondPermission}
-								permission={activePermission}
-								showTechnicalDetails={interfaceLevel !== "simple"}
-							/>
+							<fieldset
+								className="min-w-0 border-0 p-0"
+								disabled={permissionPending.has(activePermissionKey)}
+							>
+								<PermissionPrompt
+									embedded
+									onRespond={handleRespondPermission}
+									permission={activePermission}
+									showTechnicalDetails={interfaceLevel !== "simple"}
+								/>
+								{permissionError?.key === activePermissionKey ? (
+									<p
+										className="px-3 pb-2 text-destructive text-xs"
+										role="alert"
+									>
+										{permissionError.message}
+									</p>
+								) : null}
+							</fieldset>
 						),
 						id: `permission:${activePermission.requestId}`,
 					}
 				: undefined,
-		[activePermission, handleRespondPermission]
+		[
+			activePermission,
+			activePermissionKey,
+			handleRespondPermission,
+			interfaceLevel,
+			permissionError,
+			permissionPending,
+		]
 	);
 
 	// The generic "current page" context derived from the focused tab, offered
@@ -838,28 +1084,70 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		lastSentContextRef.current = "";
 	}, [activeConvId]);
 
-	const handleSend = useCallback(
-		(msg: { role: "user"; content: string }) => {
+	// What an app-defined surface's thread was last told, keyed by that surface's
+	// conversation so switching surfaces re-sends the full context.
+	const surfaceContextSentRef = useRef<{ block: string; owner: string }>({
+		block: "",
+		owner: "",
+	});
+
+	// Resolves once the message was handed to the chat transport and rejects
+	// when it could not be sent, so callers that must know (an in-chat consent
+	// card waiting to tell the agent) can retry. `handleSend` keeps the
+	// fire-and-forget behavior for the composer.
+	const sendUserMessage = useCallback(
+		(msg: { role: "user"; content: string }): Promise<void> => {
 			const session = builderRef.current;
+			if (session && session.kind !== "agent" && session.kind !== "workflow") {
+				// App-defined surface: its preamble rides the transport, and the page
+				// context the user can see (and remove) rides the turn — the same
+				// change-only rule as generic chat.
+				const clipText = takeClipTextRef.current();
+				const files = takeImagesRef.current();
+				// The thread this question was asked in. Resolving context or the id
+				// may await; if the user switches topic or tab meanwhile, the question
+				// must not land in the new thread under its preamble.
+				const threadId = activeConvIdRef.current;
+				return Promise.all([
+					session.resolveId(),
+					resolveContext(effectiveContextRef.current),
+				]).then(([id, resolved]) => {
+					if (!id) {
+						throw new Error("This assistant surface isn't ready yet.");
+					}
+					if (activeConvIdRef.current !== threadId) {
+						throw new Error("The assistant moved to another thread.");
+					}
+					targetIdRef.current = id;
+					const block = contextBlock(resolved);
+					const sent = surfaceContextSentRef.current;
+					const changed = sent.owner !== threadId || sent.block !== block;
+					const baseText = changed
+						? composeAssistantContext(msg.content, block)
+						: msg.content;
+					if (changed) {
+						surfaceContextSentRef.current = { block, owner: threadId };
+					}
+					const text = clipText ? `${clipText}\n\n${baseText}` : baseText;
+					const metadata = { ryuUserText: msg.content };
+					return sendMessage(
+						files ? { text, files, metadata } : { text, metadata }
+					);
+				});
+			}
 			if (session) {
 				// Ensure a record exists (creates a draft for brand-new agents/
 				// workflows) before the transport builds the preamble referencing its id.
-				session
-					.resolveId()
-					.then((id) => {
-						if (!id) {
-							return;
-						}
-						targetIdRef.current = id;
-						const files = takeImagesRef.current();
-						const clipText = takeClipTextRef.current();
-						const text = clipText
-							? `${clipText}\n\n${msg.content}`
-							: msg.content;
-						sendMessage(files ? { text, files } : { text });
-					})
-					.catch(() => undefined);
-				return;
+				return session.resolveId().then((id) => {
+					if (!id) {
+						throw new Error("This builder session isn't ready yet.");
+					}
+					targetIdRef.current = id;
+					const files = takeImagesRef.current();
+					const clipText = takeClipTextRef.current();
+					const text = clipText ? `${clipText}\n\n${msg.content}` : msg.content;
+					return sendMessage(files ? { text, files } : { text });
+				});
 			}
 			if (!convIdRef.current || messages.length === 0) {
 				// First turn of this thread: register the conversation locally and
@@ -881,17 +1169,20 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 			const files = takeImagesRef.current();
 			// Resolving `getText` is async, so the send is too. The composer has
 			// already cleared its input by now, so nothing user-visible waits on it.
-			void resolveContext(effectiveContextRef.current).then((resolved) => {
+			return resolveContext(effectiveContextRef.current).then((resolved) => {
 				const block = contextBlock(resolved);
 				const changed = block !== lastSentContextRef.current;
 				const baseText = changed
-					? composeWithContext(msg.content, block)
+					? composeAssistantContext(msg.content, block)
 					: msg.content;
 				if (changed) {
 					lastSentContextRef.current = block;
 				}
 				const text = clipText ? `${clipText}\n\n${baseText}` : baseText;
-				sendMessage(files ? { text, files } : { text });
+				const metadata = { ryuUserText: msg.content };
+				return sendMessage(
+					files ? { text, files, metadata } : { text, metadata }
+				);
 			});
 		},
 		[
@@ -905,15 +1196,21 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 			sendMessage,
 		]
 	);
-	const handleAgentUiSubmit = useCallback(
-		(value: unknown) => {
-			const content =
-				typeof value === "string"
-					? value
-					: (JSON.stringify(value) ?? String(value));
-			return handleSend({ role: "user", content });
+
+	const handleSend = useCallback(
+		(msg: { role: "user"; content: string }) => {
+			sendUserMessage(msg).catch(() => undefined);
 		},
-		[handleSend]
+		[sendUserMessage]
+	);
+	const handleAgentUiSubmit = useCallback(
+		<TValue,>(value: TValue) => {
+			const content = isNativeText(value)
+				? value
+				: (JSON.stringify(value) ?? String(value));
+			return sendUserMessage({ role: "user", content });
+		},
+		[sendUserMessage]
 	);
 
 	// An app asked a question on the user's behalf (`assistant.open({ prompt })`)
@@ -1009,7 +1306,9 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 					}
 				/>
 			) : null}
-			{bare ? (
+			{/* A surface thread is `persist: false`, so a full-screen hand-off would
+			    open an empty conversation; only generic chat offers it. */}
+			{bare && isBuilder ? null : bare ? (
 				<Button
 					aria-label="Open assistant in full screen"
 					className="size-7"
@@ -1077,11 +1376,13 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 				title={bare ? floatingTitle : "Chat"}
 			/>
 
-			{/* Page-context chips belong to the generic assistant only — a builder is
-			    scoped to the record it edits, not the page it happens to sit over.
-			    Floating mode also drops them: the minimal window is just the
-			    conversation + composer islands, no top chrome band. */}
-			{isBuilder || bare ? null : (
+			{/* Page-context chips belong to generic chat and app-defined surfaces —
+			    the built-in agent/workflow builders are scoped to the record they
+			    edit, not the page they happen to sit over. Generic floating chat drops
+			    them (the minimal window is just the conversation + composer islands),
+			    but an app surface keeps them there too: its context (a PR diff, an
+			    activity summary) rides the turn, so its removal control must show. */}
+			{(isBuilder && !isAppSurface) || (bare && !isAppSurface) ? null : (
 				<GenericAssistantExtras
 					divider={divider}
 					effectiveContext={effectiveContext}
@@ -1103,35 +1404,42 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 			)}
 
 			<div className="relative min-h-0 flex-1 overflow-hidden">
-				<AgentChat
-					attachments={activeComposer.attachments}
-					composerMenuGroups={activeComposer.composerMenuGroups}
-					composerPrompt={permissionComposerPrompt}
-					emptyStateFooter={
-						bare && !isBuilder ? (
-							<RyuAssistantRecentChats
-								items={floatingRecentChats}
-								onSelect={handleSelectRecentConversation}
-							/>
-						) : undefined
-					}
-					emptyStateHeader={bare ? undefined : emptyHeader}
-					emptyStatePosition={bare ? "default" : "center"}
-					error={error ?? undefined}
-					key={`${activeNode.url}-${activeConvId}`}
-					mentionItems={activeComposer.mentionItems}
-					messages={messages}
-					onAgentUiSubmit={handleAgentUiSubmit}
-					onComposerMenuSelect={activeComposer.onComposerMenuSelect}
-					onRetryGeneration={handleRetryGeneration}
-					onSend={handleSend}
-					onSpeak={handleSpeak}
-					onStop={stop}
-					showCopyToolbar
-					slots={{ InputBar: composerSlot }}
-					status={status}
-					voiceMode={activeComposer.voiceMode}
-				/>
+				<AgentUiStateHostContext.Provider value={agentUiStateHost}>
+					<AgentChat
+						attachments={activeComposer.attachments}
+						composerHeader={
+							hasAppContext ? (
+								<ModelContextAttachments scope="assistant" />
+							) : undefined
+						}
+						composerMenuGroups={activeComposer.composerMenuGroups}
+						composerPrompt={permissionComposerPrompt}
+						emptyStateFooter={
+							bare && !isBuilder ? (
+								<RyuAssistantRecentChats
+									items={floatingRecentChats}
+									onSelect={handleSelectRecentConversation}
+								/>
+							) : undefined
+						}
+						emptyStateHeader={bare ? undefined : emptyHeader}
+						emptyStatePosition={bare ? "default" : "center"}
+						error={error ?? undefined}
+						key={`${activeNode.url}-${activeConvId}`}
+						mentionItems={activeComposer.mentionItems}
+						messages={displayMessages}
+						onAgentUiSubmit={handleAgentUiSubmit}
+						onComposerMenuSelect={activeComposer.onComposerMenuSelect}
+						onRetryGeneration={handleRetryGeneration}
+						onSend={handleSend}
+						onSpeak={handleSpeak}
+						onStop={handleStop}
+						showCopyToolbar
+						slots={{ InputBar: composerSlot }}
+						status={status}
+						voiceMode={activeComposer.voiceMode}
+					/>
+				</AgentUiStateHostContext.Provider>
 			</div>
 		</>
 	);
@@ -1160,7 +1468,7 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 		<RyuAssistantWidgetFrame
 			ariaLabel={builder ? "Ryu builder" : "Ask Ryu assistant"}
 			className={cn(
-				"fixed z-[55] flex flex-col overflow-hidden bg-sidebar text-sidebar-foreground md:left-auto md:w-[380px]",
+				"fixed z-40 flex flex-col overflow-hidden bg-sidebar text-sidebar-foreground md:left-auto md:w-[380px]",
 				titleBarClearsContent
 					? floatingChrome
 						? cn("top-12 right-2 bottom-2 left-2", sidebarFloatingChrome)

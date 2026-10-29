@@ -1,4 +1,4 @@
-import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar";
+import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import {
 	Select,
 	SelectContent,
@@ -8,6 +8,7 @@ import {
 } from "@ryu/ui/components/select.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import { ChatDisplayPrefs } from "@/src/components/chat/ChatDisplayPrefsProvider.tsx";
 import {
 	SettingsGroup,
@@ -44,23 +45,15 @@ const REQUIRED_COMPLETED_CHECKS = [
 	"reload-persistence",
 ] as const;
 
-function isProofCompletionDetail(
-	value: unknown
-): value is ProofCompletionDetail {
-	if (typeof value !== "object" || value === null) {
-		return false;
-	}
-	const detail = value as {
-		completedChecks?: unknown;
-		expectedShortcut?: unknown;
-	};
-	return (
-		Array.isArray(detail.completedChecks) &&
-		detail.completedChecks.every((check) => typeof check === "string") &&
-		(detail.expectedShortcut === "enter" ||
-			detail.expectedShortcut === "shift-enter" ||
-			detail.expectedShortcut === "command-enter")
-	);
+function isProofCompletionDetail<RawInput>(
+	value: RawInput
+): value is RawInput & ProofCompletionDetail {
+	return z
+		.object({
+			completedChecks: z.array(z.string()),
+			expectedShortcut: z.enum(["enter", "shift-enter", "command-enter"]),
+		})
+		.safeParse(value).success;
 }
 
 function SendShortcutProof() {
@@ -139,7 +132,7 @@ function SendShortcutProof() {
 		<main className="min-h-screen bg-background px-6 py-8 text-foreground">
 			<div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
 				<header className="space-y-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Desktop proof
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">
@@ -173,8 +166,9 @@ function SendShortcutProof() {
 										value={composerSendShortcut}
 									>
 										<SelectTrigger
+											appearance="editor-row"
 											aria-label="Send shortcut"
-											className="h-8 w-56 flex-shrink-0 text-sm"
+											className="w-56 shrink-0"
 											id="composer-send-shortcut-select"
 										>
 											<SelectValue />
@@ -196,7 +190,7 @@ function SendShortcutProof() {
 				</SettingsSection>
 
 				<section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-					<div className="rounded-[28px] border border-border/70 bg-card/40 p-4 shadow-sm">
+					<div className="rounded-3xl border border-border/70 bg-card/40 p-4 shadow-sm">
 						<div className="mb-3 space-y-1">
 							<h2 className="font-semibold text-lg">Composer</h2>
 							<p className="text-muted-foreground text-sm">
@@ -274,8 +268,8 @@ function SendShortcutProof() {
 							<output
 								className={`mt-4 inline-flex rounded-full px-3 py-1 font-semibold text-sm ${
 									status === "VERIFIED"
-										? "bg-emerald-500/15 text-emerald-600"
-										: "bg-amber-500/15 text-amber-600"
+										? "bg-success/15 text-success"
+										: "bg-warning/15 text-warning"
 								}`}
 								data-testid="composer-proof-status"
 							>

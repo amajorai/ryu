@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -51,6 +52,7 @@ export default function AcceptInvitation({
 	onReject = noop,
 	onRetry = noop,
 }: AcceptInvitationProps) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="mx-auto flex w-full max-w-md justify-center py-12">
 			<Card className="w-full">
@@ -61,14 +63,16 @@ export default function AcceptInvitation({
 					<CardTitle>Organization invitation</CardTitle>
 					<CardDescription>
 						{loading
-							? "Loading the invitation..."
+							? "Loading the invitation…"
 							: invitation?.organizationName
-								? `You've been invited to join ${invitation.organizationName}.`
+								? tl("You've been invited to join {organizationName}.", {
+										organizationName: invitation.organizationName,
+									})
 								: "Review and respond to this invitation."}
 					</CardDescription>
 				</CardHeader>
 
-				<CardContent className="space-y-3">
+				<CardContent spacing="comfortable">
 					{loading && (
 						<div className="space-y-2">
 							<Skeleton className="h-5 w-3/4" />
@@ -108,7 +112,7 @@ export default function AcceptInvitation({
 					)}
 				</CardContent>
 
-				<CardFooter className="flex justify-end gap-2">
+				<CardFooter className="flex justify-end" spacing="actions">
 					{error && !invitation ? (
 						<Button onClick={onRetry} variant="outline">
 							Retry
@@ -121,11 +125,11 @@ export default function AcceptInvitation({
 								variant="outline"
 							>
 								<X className="h-4 w-4" />
-								{working === "reject" ? "Declining..." : "Decline"}
+								{working === "reject" ? "Declining…" : "Decline"}
 							</Button>
 							<Button disabled={loading || working !== null} onClick={onAccept}>
 								<Check className="h-4 w-4" />
-								{working === "accept" ? "Accepting..." : "Accept invitation"}
+								{working === "accept" ? "Accepting…" : "Accept invitation"}
 							</Button>
 						</>
 					)}

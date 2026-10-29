@@ -24,14 +24,16 @@ const LEVEL_GAIN = 5;
 /** How often (ms) a new amplitude sample is pushed — sets the scroll speed. */
 const SAMPLE_INTERVAL_MS = 50;
 
-const SILENT_LEVELS = new Array<number>(BAR_COUNT).fill(0);
+const SILENT_LEVELS = Array.from({ length: BAR_COUNT }, () => 0);
 
 /** Sidecar name (for `sidecarStart`) per transcription engine. */
-const ENGINE_SIDECARS: Record<string, string> = {
-	whisper: "whispercpp",
-	parakeet: "parakeet",
-	audiocpp: "audiocpp",
-};
+const ENGINE_SIDECARS = new Map(
+	Object.entries({
+		whisper: "whispercpp",
+		parakeet: "parakeet",
+		audiocpp: "audiocpp",
+	})
+);
 
 /** How long a transient error message stays on the pill before collapsing. */
 const ERROR_DISPLAY_MS = 4000;
@@ -143,6 +145,12 @@ export function useVoiceInput(): UseVoiceInput {
 
 	const prefsRef = useRef<VoiceInputPrefs | null>(null);
 	const recordingRef = useRef(false);
+	// A start is in flight while `getUserMedia` is pending; a stop that lands in
+	// that window (fast hold-to-talk release) is recorded so the opened stream is
+	// released instead of capturing with no key held.
+	const startingRef = useRef(false);
+	const stopRequestedRef = useRef(false);
+	const mountedRef = useRef(true);
 
 	const streamRef = useRef<MediaStream | null>(null);
 	const ctxRef = useRef<AudioContext | null>(null);
@@ -247,9 +255,23 @@ export function useVoiceInput(): UseVoiceInput {
 		if (recordingRef.current || !navigator.mediaDevices?.getUserMedia) {
 			return;
 		}
+		if (startingRef.current) {
+			// A fresh press while the mic is still opening re-arms the hold.
+			stopRequestedRef.current = false;
+			return;
+		}
+		startingRef.current = true;
+		stopRequestedRef.current = false;
 		clearError();
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			if (stopRequestedRef.current || !mountedRef.current) {
+				// Released (or unmounted) before the mic opened: never arm capture.
+				for (const track of stream.getTracks()) {
+					track.stop();
+				}
+				return;
+			}
 			streamRef.current = stream;
 
 			const ctx = new AudioContext();
@@ -305,11 +327,16 @@ export function useVoiceInput(): UseVoiceInput {
 			recordingRef.current = false;
 			setRecording(false);
 			flashError("Couldn't access the microphone. Check OS permissions.");
+		} finally {
+			startingRef.current = false;
 		}
 	}, [teardown, clearError, flashError]);
 
 	const stopRecording = useCallback((): void => {
 		if (!recordingRef.current) {
+			if (startingRef.current) {
+				stopRequestedRef.current = true;
+			}
 			return;
 		}
 		recordingRef.current = false;
@@ -337,7 +364,7 @@ export function useVoiceInput(): UseVoiceInput {
 				}
 				// The engine sidecar likely isn't running (voice engines are opt-in
 				// to start). Kick it off so the next attempt works, and say so.
-				const sidecar = ENGINE_SIDECARS[engine];
+				const sidecar = ENGINE_SIDECARS.get(engine);
 				if (sidecar) {
 					window.island.core.sidecarStart(sidecar).catch(() => {
 						// Best-effort; the error message already tells the user to retry.
@@ -353,7 +380,7 @@ export function useVoiceInput(): UseVoiceInput {
 	// Start when idle, stop when recording — shared by the hotkey and the mic
 	// action island so both drive the exact same capture path.
 	const toggle = useCallback((): void => {
-		if (recordingRef.current) {
+		if (recordingRef.current || startingRef.current) {
 			stopRecording();
 		} else {
 			startRecording().catch(() => undefined);
@@ -366,6 +393,7 @@ export function useVoiceInput(): UseVoiceInput {
 	//  - start/stop: push-to-talk key-down / key-release (hold-to-talk mode), where
 	//    the release is seen through the main process's global key hook.
 	useEffect(() => {
+		mountedRef.current = true;
 		const offToggle = window.island.voice.onToggle(toggle);
 		const offStart = window.island.voice.onStart(() => {
 			startRecording().catch(() => undefined);
@@ -375,6 +403,7 @@ export function useVoiceInput(): UseVoiceInput {
 			offToggle();
 			offStart();
 			offStop();
+			mountedRef.current = false;
 			teardown();
 		};
 	}, [toggle, startRecording, stopRecording, teardown]);

@@ -53,24 +53,99 @@ pub fn is_messages_path(path: &str) -> bool {
         || p.ends_with("/v1/messages/count_tokens")
 }
 
-/// True for the Codex Responses endpoint (`.../responses`), the path carrying the
-/// prompt body. Other sub-paths are proxied untouched.
+/// True for the Codex Responses prompt endpoints (`.../responses` and
+/// `.../responses/compact`, which carries the same Responses body shape).
 pub fn is_responses_path(path: &str) -> bool {
     let p = path.trim_end_matches('/');
-    p == "responses" || p.ends_with("/responses")
+    p == "responses"
+        || p.ends_with("/responses")
+        || p == "responses/compact"
+        || p.ends_with("/responses/compact")
+}
+
+/// How the passthrough treats one request, decided from its method and path
+/// before any byte is forwarded. Classification is deny-by-default: a path that
+/// is neither a known prompt endpoint nor on the short inert allow-list is
+/// [`PassthroughRoute::Unknown`], and the gateway refuses it while any prompt
+/// policy (firewall, locked guardrail, model allowlist) is in force.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassthroughRoute {
+    /// A prompt endpoint whose body is one native request (model + messages or
+    /// input). The model allowlist and request-side DLP apply to it.
+    Prompt,
+    /// Anthropic Message Batches create (`POST v1/messages/batches`): every
+    /// `requests[].params` is a Messages body and is governed like a prompt.
+    MessageBatch,
+    /// A known endpoint that carries no prompt (model listing, batch status,
+    /// results, cancel and delete). Proxied uninspected when its body is empty.
+    Inert,
+    /// Any other method or path. It cannot be evaluated against prompt policy.
+    Unknown,
+}
+
+/// Classify a passthrough request. `method` is the upper-case HTTP method.
+/// Prompt endpoints match whatever the method, so they are always inspected;
+/// inert endpoints match exactly (no prefix) and only for their read or
+/// lifecycle methods.
+pub fn classify_path(format: WireFormat, method: &str, path: &str) -> PassthroughRoute {
+    let p = path.trim_matches('/');
+    let segments: Vec<&str> = p.split('/').collect();
+    let read = matches!(method, "GET" | "HEAD");
+    match format {
+        WireFormat::Anthropic => {
+            if is_messages_path(p) {
+                return PassthroughRoute::Prompt;
+            }
+            if p == "v1/messages/batches" || p.ends_with("/v1/messages/batches") {
+                return if read {
+                    PassthroughRoute::Inert
+                } else if method == "POST" {
+                    PassthroughRoute::MessageBatch
+                } else {
+                    PassthroughRoute::Unknown
+                };
+            }
+            let inert = match (method, segments.as_slice()) {
+                (_, ["v1", "models"] | ["v1", "models", _]) => read,
+                (_, ["v1", "messages", "batches", _])
+                | (_, ["v1", "messages", "batches", _, "results"]) => {
+                    read || (method == "DELETE" && segments.len() == 4)
+                }
+                ("POST", ["v1", "messages", "batches", _, "cancel"]) => true,
+                _ => false,
+            };
+            if inert {
+                PassthroughRoute::Inert
+            } else {
+                PassthroughRoute::Unknown
+            }
+        }
+        WireFormat::OpenAiResponses => {
+            if is_responses_path(p) {
+                PassthroughRoute::Prompt
+            } else if read && p == "models" {
+                PassthroughRoute::Inert
+            } else {
+                PassthroughRoute::Unknown
+            }
+        }
+    }
 }
 
 /// Accept only unambiguous relative paths before endpoint classification.
 /// Axum has already decoded the route parameter; another decode or URL parser
-/// normalization must not change the destination after the DLP decision.
+/// normalization must not change the destination after the DLP decision. An
+/// interior empty segment (`v1//messages`) is refused because an upstream may
+/// collapse it into a prompt path the classifier did not see.
 pub fn is_safe_upstream_path(path: &str) -> bool {
     !path.is_empty()
         && !path
             .chars()
             .any(|c| c.is_control() || matches!(c, '%' | '\\' | '?' | '#'))
         && path
+            .trim_matches('/')
             .split('/')
-            .all(|segment| segment != "." && segment != "..")
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 pub fn build_upstream_url(base: &str, path: &str, query: Option<&str>) -> String {
@@ -83,74 +158,261 @@ pub fn build_upstream_url(base: &str, path: &str, query: Option<&str>) -> String
 }
 
 /// Redact a request body in place per its wire format. Both reuse the firewall's
-/// config-gated `sanitize` over the prompt-bearing fields.
+/// config-gated `sanitize` over every prompt-bearing string (see
+/// [`visit_request_strings_mut`]).
 pub fn redact_request_body<F: PassthroughFirewall + ?Sized>(
     format: WireFormat,
     fw: &F,
     body: &mut Value,
 ) {
+    visit_request_strings_mut(format, body, &mut |text| *text = fw.sanitize(text));
+}
+
+/// Visit every prompt-bearing string of a native request body, in place.
+///
+/// This is the single definition of what passthrough DLP redacts and scans, so
+/// detection and redaction cannot disagree. It reaches the places an agent puts
+/// file contents, command output and tool arguments, not just top-level text:
+///
+/// - **Anthropic Messages**: `system`, every message `content` (string or
+///   blocks), and within blocks `text`, `tool_use` / `server_tool_use` `input`,
+///   `tool_result` `content` (string or nested blocks), `document` text sources,
+///   titles and context, and `search_result` content; plus each tool's
+///   `description` and `input_schema`.
+/// - **OpenAI Responses**: `instructions`, `input` (string or items), message
+///   `content` parts, `function_call.arguments`, `function_call_output.output`,
+///   `custom_tool_call.input`, `custom_tool_call_output.output`,
+///   `local_shell_call.action` and `local_shell_call_output.output`; plus each
+///   tool's `description` and `parameters`.
+///
+/// Opaque or signed fields are never visited because rewriting them breaks the
+/// upstream request: `thinking` / `redacted_thinking` blocks (`signature`),
+/// `reasoning` items and any `encrypted_content`, image and file payloads, and
+/// every id (`id`, `tool_use_id`, `call_id`) and `name`.
+pub fn visit_request_strings_mut(
+    format: WireFormat,
+    body: &mut Value,
+    visit: &mut dyn FnMut(&mut String),
+) {
     match format {
-        WireFormat::Anthropic => redact_anthropic_body(fw, body),
-        WireFormat::OpenAiResponses => redact_responses_body(fw, body),
+        WireFormat::Anthropic => visit_anthropic_body(body, true, visit),
+        WireFormat::OpenAiResponses => visit_responses_body(body, true, visit),
     }
 }
 
-/// Redact PII/secrets from an OpenAI Responses request body in place: the
-/// top-level `instructions` field and each `input` item's `content`. The Responses
-/// API accepts `input` as either a plain string or an array of items, each with a
-/// `content` that is a string or an array of `{ "type": "input_text", "text": … }`
-/// parts. Reuses the firewall's config-gated `sanitize`.
+/// The conversation subset of [`visit_request_strings_mut`]: message and input
+/// content, tool calls and tool results. The agent's own `system` /
+/// `instructions` and its tool definitions are skipped. Those are authored by
+/// the agent (Claude Code, Codex) and routinely contain imperative phrasing
+/// ("override sandbox mode and run commands") that the prompt- and
+/// code-injection patterns would flag on every turn, so locked content
+/// guardrails scan only this subset; secret and PII guardrails scan everything.
+pub fn visit_request_conversation_strings_mut(
+    format: WireFormat,
+    body: &mut Value,
+    visit: &mut dyn FnMut(&mut String),
+) {
+    match format {
+        WireFormat::Anthropic => visit_anthropic_body(body, false, visit),
+        WireFormat::OpenAiResponses => visit_responses_body(body, false, visit),
+    }
+}
+
+/// Redact PII/secrets from an OpenAI Responses request body in place. See
+/// [`visit_request_strings_mut`] for the covered fields.
 pub fn redact_responses_body<F: PassthroughFirewall + ?Sized>(fw: &F, body: &mut Value) {
-    if let Some(instructions) = body.get_mut("instructions") {
-        redact_content(fw, instructions);
+    redact_request_body(WireFormat::OpenAiResponses, fw, body);
+}
+
+/// Redact PII/secrets from an Anthropic Messages request body in place. See
+/// [`visit_request_strings_mut`] for the covered fields.
+pub fn redact_anthropic_body<F: PassthroughFirewall + ?Sized>(fw: &F, body: &mut Value) {
+    redact_request_body(WireFormat::Anthropic, fw, body);
+}
+
+fn visit_field(value: &mut Value, key: &str, visit: &mut dyn FnMut(&mut String)) {
+    if let Some(Value::String(text)) = value.get_mut(key) {
+        visit(text);
+    }
+}
+
+/// Every string leaf under `value` (tool inputs, JSON schemas).
+fn visit_all_strings(value: &mut Value, visit: &mut dyn FnMut(&mut String)) {
+    match value {
+        Value::String(text) => visit(text),
+        Value::Array(values) => {
+            for value in values {
+                visit_all_strings(value, visit);
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values_mut() {
+                visit_all_strings(value, visit);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+/// Each tool definition's free text: `description` plus every string in its
+/// schema (`input_schema` for Anthropic, `parameters` for Responses).
+fn visit_tool_definitions(body: &mut Value, schema_key: &str, visit: &mut dyn FnMut(&mut String)) {
+    let Some(Value::Array(tools)) = body.get_mut("tools") else {
+        return;
+    };
+    for tool in tools {
+        visit_field(tool, "description", visit);
+        if let Some(schema) = tool.get_mut(schema_key) {
+            visit_all_strings(schema, visit);
+        }
+    }
+}
+
+fn visit_anthropic_body(
+    body: &mut Value,
+    include_agent_text: bool,
+    visit: &mut dyn FnMut(&mut String),
+) {
+    if include_agent_text {
+        if let Some(system) = body.get_mut("system") {
+            visit_anthropic_content(system, visit);
+        }
+    }
+    if let Some(Value::Array(messages)) = body.get_mut("messages") {
+        for message in messages {
+            if let Some(content) = message.get_mut("content") {
+                visit_anthropic_content(content, visit);
+            }
+        }
+    }
+    if include_agent_text {
+        visit_tool_definitions(body, "input_schema", visit);
+    }
+}
+
+/// An Anthropic content node: a plain string or an array of content blocks.
+fn visit_anthropic_content(content: &mut Value, visit: &mut dyn FnMut(&mut String)) {
+    match content {
+        Value::String(text) => visit(text),
+        Value::Array(blocks) => {
+            for block in blocks {
+                visit_anthropic_block(block, visit);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn visit_anthropic_block(block: &mut Value, visit: &mut dyn FnMut(&mut String)) {
+    let block_type = block
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    match block_type.as_str() {
+        // Signed or opaque: rewriting breaks the upstream signature check.
+        "thinking" | "redacted_thinking" | "image" => {}
+        "tool_use" | "server_tool_use" => {
+            if let Some(input) = block.get_mut("input") {
+                visit_all_strings(input, visit);
+            }
+        }
+        "tool_result" => {
+            if let Some(content) = block.get_mut("content") {
+                visit_anthropic_content(content, visit);
+            }
+        }
+        "document" => {
+            visit_field(block, "title", visit);
+            visit_field(block, "context", visit);
+            if let Some(source) = block.get_mut("source") {
+                match source.get("type").and_then(Value::as_str) {
+                    Some("text") => visit_field(source, "data", visit),
+                    Some("content") => {
+                        if let Some(content) = source.get_mut("content") {
+                            visit_anthropic_content(content, visit);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        "search_result" => {
+            visit_field(block, "title", visit);
+            if let Some(content) = block.get_mut("content") {
+                visit_anthropic_content(content, visit);
+            }
+        }
+        // `text` blocks, and any other block that carries plain text.
+        _ => visit_field(block, "text", visit),
+    }
+}
+
+fn visit_responses_body(
+    body: &mut Value,
+    include_agent_text: bool,
+    visit: &mut dyn FnMut(&mut String),
+) {
+    if include_agent_text {
+        if let Some(instructions) = body.get_mut("instructions") {
+            visit_responses_content(instructions, visit);
+        }
     }
     match body.get_mut("input") {
-        Some(Value::String(s)) => {
-            *s = fw.sanitize(s);
-        }
+        Some(Value::String(text)) => visit(text),
         Some(Value::Array(items)) => {
-            for item in items.iter_mut() {
-                if let Some(content) = item.get_mut("content") {
-                    redact_content(fw, content);
-                }
+            for item in items {
+                visit_responses_item(item, visit);
             }
         }
         _ => {}
     }
-}
-
-/// Redact PII/secrets from an Anthropic Messages request body in place: the
-/// top-level `system` field and each message's `content` (string or content-block
-/// array). Reuses the firewall's config-gated `sanitize`.
-pub fn redact_anthropic_body<F: PassthroughFirewall + ?Sized>(fw: &F, body: &mut Value) {
-    if let Some(sys) = body.get_mut("system") {
-        redact_content(fw, sys);
-    }
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for msg in messages.iter_mut() {
-            if let Some(content) = msg.get_mut("content") {
-                redact_content(fw, content);
-            }
-        }
+    if include_agent_text {
+        visit_tool_definitions(body, "parameters", visit);
     }
 }
 
-/// Redact a content node that may be a plain string or an array of content blocks
-/// (`[{ "type": "text", "text": "…" }, …]`).
-fn redact_content<F: PassthroughFirewall + ?Sized>(fw: &F, content: &mut Value) {
+/// A Responses content node: a plain string or an array of parts
+/// (`input_text` / `output_text` carry `text`; images and files are skipped).
+fn visit_responses_content(content: &mut Value, visit: &mut dyn FnMut(&mut String)) {
     match content {
-        Value::String(s) => {
-            *s = fw.sanitize(s);
-        }
+        Value::String(text) => visit(text),
         Value::Array(parts) => {
-            for part in parts.iter_mut() {
-                if let Some(text) = part.get("text").and_then(Value::as_str) {
-                    let redacted = fw.sanitize(text);
-                    part["text"] = Value::String(redacted);
-                }
+            for part in parts {
+                visit_field(part, "text", visit);
             }
         }
         _ => {}
+    }
+}
+
+fn visit_responses_item(item: &mut Value, visit: &mut dyn FnMut(&mut String)) {
+    let item_type = item
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    match item_type.as_str() {
+        // Encrypted / opaque replay items.
+        "reasoning" | "item_reference" | "web_search_call" => {}
+        "function_call" => visit_field(item, "arguments", visit),
+        "custom_tool_call" => visit_field(item, "input", visit),
+        "function_call_output" | "custom_tool_call_output" | "local_shell_call_output" => {
+            if let Some(output) = item.get_mut("output") {
+                visit_responses_content(output, visit);
+            }
+        }
+        "local_shell_call" => {
+            if let Some(action) = item.get_mut("action") {
+                visit_all_strings(action, visit);
+            }
+        }
+        // `message` items (and untyped `{ role, content }` items).
+        _ => {
+            if let Some(content) = item.get_mut("content") {
+                visit_responses_content(content, visit);
+            }
+        }
     }
 }
 
@@ -449,8 +711,43 @@ mod tests {
         assert!(is_responses_path("responses"));
         assert!(is_responses_path("responses/"));
         assert!(is_responses_path("v1/responses"));
+        assert!(is_responses_path("responses/compact"));
         assert!(!is_responses_path("v1/models"));
         assert!(!is_responses_path("responses/123/cancel"));
+    }
+
+    #[test]
+    fn path_classification_is_deny_by_default() {
+        use PassthroughRoute::*;
+        let anthropic = |method, path| classify_path(WireFormat::Anthropic, method, path);
+        let codex = |method, path| classify_path(WireFormat::OpenAiResponses, method, path);
+        assert_eq!(anthropic("POST", "v1/messages"), Prompt);
+        assert_eq!(anthropic("POST", "/v1/messages/count_tokens/"), Prompt);
+        assert_eq!(anthropic("GET", "v1/messages"), Prompt);
+        assert_eq!(anthropic("POST", "v1/messages/batches"), MessageBatch);
+        assert_eq!(anthropic("GET", "v1/messages/batches"), Inert);
+        assert_eq!(anthropic("GET", "v1/messages/batches/b1/results"), Inert);
+        assert_eq!(anthropic("POST", "v1/messages/batches/b1/cancel"), Inert);
+        assert_eq!(anthropic("DELETE", "v1/messages/batches/b1"), Inert);
+        assert_eq!(anthropic("GET", "v1/models"), Inert);
+        assert_eq!(anthropic("GET", "v1/models/claude-x"), Inert);
+        assert_eq!(anthropic("POST", "v1/models"), Unknown);
+        assert_eq!(anthropic("POST", "v1/complete"), Unknown);
+        assert_eq!(anthropic("POST", "v1/messages/batches/b1"), Unknown);
+        assert_eq!(anthropic("PUT", "v1/messages/batches"), Unknown);
+        assert_eq!(codex("POST", "responses"), Prompt);
+        assert_eq!(codex("POST", "responses/compact"), Prompt);
+        assert_eq!(codex("GET", "models"), Inert);
+        assert_eq!(codex("POST", "models"), Unknown);
+        assert_eq!(codex("POST", "responses/123/cancel"), Unknown);
+        assert_eq!(codex("POST", "chat/completions"), Unknown);
+    }
+
+    #[test]
+    fn interior_empty_segments_are_refused() {
+        assert!(!is_safe_upstream_path("v1//messages"));
+        assert!(!is_safe_upstream_path("/"));
+        assert!(is_safe_upstream_path("/v1/messages/"));
     }
 
     #[test]
@@ -484,6 +781,141 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("SECRET"));
+    }
+
+    /// The conversation visitor reads messages and tool traffic but not the
+    /// agent-authored `system` / `instructions` or tool definitions.
+    #[test]
+    fn conversation_visitor_skips_agent_system_and_tool_definitions() {
+        let collect = |format: WireFormat, mut body: Value| {
+            let mut seen = Vec::new();
+            visit_request_conversation_strings_mut(format, &mut body, &mut |text| {
+                seen.push(text.clone());
+            });
+            seen
+        };
+        let anthropic = collect(
+            WireFormat::Anthropic,
+            serde_json::json!({
+                "system": "agent system",
+                "tools": [{ "name": "Bash", "description": "agent tool",
+                            "input_schema": { "description": "agent schema" } }],
+                "messages": [
+                    { "role": "user", "content": "user turn" },
+                    { "role": "user", "content": [
+                        { "type": "tool_result", "tool_use_id": "t", "content": "tool output" }
+                    ] }
+                ]
+            }),
+        );
+        assert_eq!(anthropic, ["user turn", "tool output"]);
+        let responses = collect(
+            WireFormat::OpenAiResponses,
+            serde_json::json!({
+                "instructions": "agent instructions",
+                "tools": [{ "type": "function", "name": "shell", "description": "agent tool" }],
+                "input": [
+                    { "type": "message", "role": "user", "content": [
+                        { "type": "input_text", "text": "user turn" }
+                    ] },
+                    { "type": "function_call_output", "call_id": "c", "output": "tool output" }
+                ]
+            }),
+        );
+        assert_eq!(responses, ["user turn", "tool output"]);
+    }
+
+    /// Agent tool traffic carries file contents and command output in
+    /// `tool_result` / `tool_use` blocks, documents and tool definitions; all of
+    /// it reaches the firewall, while signed and id fields stay byte-identical.
+    #[test]
+    fn anthropic_redaction_reaches_tool_traffic_and_skips_signed_fields() {
+        let fw = StubFirewall;
+        let mut body = serde_json::json!({
+            "system": [{ "type": "text", "text": "system SECRET" }],
+            "messages": [
+                { "role": "assistant", "content": [
+                    { "type": "thinking", "thinking": "SECRET thought", "signature": "sig-SECRET" },
+                    { "type": "redacted_thinking", "data": "SECRET-opaque" },
+                    { "type": "tool_use", "id": "toolu_SECRET", "name": "Bash",
+                      "input": { "command": "cat .env SECRET", "nested": ["SECRET"] } }
+                ] },
+                { "role": "user", "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_SECRET",
+                      "content": "AWS SECRET from .env" },
+                    { "type": "tool_result", "tool_use_id": "toolu_SECRET",
+                      "content": [{ "type": "text", "text": "nested SECRET" }] },
+                    { "type": "document", "title": "SECRET title", "context": "SECRET ctx",
+                      "source": { "type": "text", "media_type": "text/plain", "data": "doc SECRET" } },
+                    { "type": "search_result", "title": "SECRET", "source": "https://example.com",
+                      "content": [{ "type": "text", "text": "found SECRET" }] }
+                ] }
+            ],
+            "tools": [{ "name": "Bash", "description": "run SECRET",
+                        "input_schema": { "type": "object", "properties": {
+                            "command": { "type": "string", "description": "SECRET cmd" } } } }]
+        });
+        redact_anthropic_body(&fw, &mut body);
+        let assistant = &body["messages"][0]["content"];
+        assert_eq!(assistant[0]["thinking"], "SECRET thought");
+        assert_eq!(assistant[0]["signature"], "sig-SECRET");
+        assert_eq!(assistant[1]["data"], "SECRET-opaque");
+        assert_eq!(assistant[2]["id"], "toolu_SECRET");
+        assert_eq!(
+            body["messages"][1]["content"][0]["tool_use_id"],
+            "toolu_SECRET"
+        );
+        // Everything else that mentioned the sentinel was rewritten.
+        let mut rest = body.clone();
+        rest["messages"][0]["content"][0] = Value::Null;
+        rest["messages"][0]["content"][1] = Value::Null;
+        rest["messages"][0]["content"][2]["id"] = Value::Null;
+        rest["messages"][1]["content"][0]["tool_use_id"] = Value::Null;
+        rest["messages"][1]["content"][1]["tool_use_id"] = Value::Null;
+        let rest = rest.to_string();
+        assert!(!rest.contains("SECRET"), "unredacted prompt text: {rest}");
+        assert_eq!(rest.matches("[REDACTED:test]").count(), 12, "{rest}");
+    }
+
+    /// Codex replays tool calls and their output as Responses items; arguments,
+    /// outputs and tool definitions are redacted, reasoning and ids are not.
+    #[test]
+    fn responses_redaction_reaches_tool_items_and_skips_opaque_fields() {
+        let fw = StubFirewall;
+        let mut body = serde_json::json!({
+            "instructions": "be careful SECRET",
+            "input": [
+                { "type": "message", "role": "user",
+                  "content": [{ "type": "input_text", "text": "hi SECRET" }] },
+                { "type": "reasoning", "id": "rs_SECRET", "encrypted_content": "SECRET-enc",
+                  "summary": [{ "type": "summary_text", "text": "SECRET summary" }] },
+                { "type": "function_call", "call_id": "call_SECRET", "name": "shell",
+                  "arguments": "{\"cmd\":\"cat SECRET\"}" },
+                { "type": "function_call_output", "call_id": "call_SECRET", "output": "out SECRET" },
+                { "type": "custom_tool_call", "call_id": "call_SECRET", "name": "apply_patch",
+                  "input": "patch SECRET" },
+                { "type": "custom_tool_call_output", "call_id": "call_SECRET",
+                  "output": [{ "type": "input_text", "text": "patched SECRET" }] },
+                { "type": "local_shell_call", "call_id": "call_SECRET",
+                  "action": { "type": "exec", "command": ["echo", "SECRET"] } },
+                { "type": "local_shell_call_output", "call_id": "call_SECRET", "output": "SECRET" }
+            ],
+            "tools": [{ "type": "function", "name": "shell", "description": "SECRET tool",
+                        "parameters": { "type": "object" } }]
+        });
+        redact_responses_body(&fw, &mut body);
+        let items = &body["input"];
+        assert_eq!(items[1]["encrypted_content"], "SECRET-enc");
+        assert_eq!(items[1]["summary"][0]["text"], "SECRET summary");
+        let mut rest = body.clone();
+        rest["input"][1] = Value::Null;
+        for index in 2..8 {
+            assert_eq!(rest["input"][index]["call_id"], "call_SECRET");
+            rest["input"][index]["call_id"] = Value::Null;
+        }
+        let rest = rest.to_string();
+        assert!(!rest.contains("SECRET"), "unredacted prompt text: {rest}");
+        assert_eq!(rest.matches("[REDACTED:test]").count(), 9, "{rest}");
     }
 
     /// Feed `raw` through the redactor one chunk at a time (mimicking arbitrary

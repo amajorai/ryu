@@ -1,11 +1,11 @@
-//! Tests for P4 code evaluators. Runtime-dependent cases (deno for JS, python
-//! for Python) are **skip-if-absent** so CI without those binaries still passes;
+//! Tests for P4 code evaluators. Runtime-dependent cases (the JS sandbox, python
+//! for Python) are **skip-if-absent** so a lean build or CI without python still passes;
 //! the pure merge/re-aggregate machinery is covered without any runtime.
 
 use super::*;
 use serde_json::json;
 
-fn deno_available() -> bool {
+fn js_sandbox_available() -> bool {
     ryu_tool_exec::is_available()
 }
 
@@ -17,8 +17,8 @@ fn sample_payload() -> Value {
 
 #[tokio::test]
 async fn js_evaluator_returning_score_one_scores_the_case() {
-    if !deno_available() {
-        eprintln!("skipping js_evaluator_returning_score_one: no deno backend available");
+    if !js_sandbox_available() {
+        eprintln!("skipping js_evaluator_returning_score_one: no JS sandbox available");
         return;
     }
     let out = run_code_evaluator(
@@ -36,8 +36,8 @@ async fn js_evaluator_returning_score_one_scores_the_case() {
 
 #[tokio::test]
 async fn js_evaluator_that_throws_is_not_executed() {
-    if !deno_available() {
-        eprintln!("skipping js_evaluator_that_throws: no deno backend available");
+    if !js_sandbox_available() {
+        eprintln!("skipping js_evaluator_that_throws: no JS sandbox available");
         return;
     }
     let out = run_code_evaluator(
@@ -55,8 +55,8 @@ async fn js_evaluator_that_throws_is_not_executed() {
 
 #[tokio::test]
 async fn js_evaluator_returning_non_result_is_malformed() {
-    if !deno_available() {
-        eprintln!("skipping js_evaluator_returning_non_result: no deno backend available");
+    if !js_sandbox_available() {
+        eprintln!("skipping js_evaluator_returning_non_result: no JS sandbox available");
         return;
     }
     // Strings are not one of Promptfoo's supported assertion return shapes.
@@ -73,10 +73,8 @@ async fn js_evaluator_returning_non_result_is_malformed() {
 
 #[tokio::test]
 async fn js_evaluator_accepts_promptfoo_output_alias_and_boolean_result() {
-    if !deno_available() {
-        eprintln!(
-            "skipping js_evaluator_accepts_promptfoo_output_alias: no deno backend available"
-        );
+    if !js_sandbox_available() {
+        eprintln!("skipping js_evaluator_accepts_promptfoo_output_alias: no JS sandbox available");
         return;
     }
     let payload = json!({ "input": "q", "output": "the answer is 4", "expected": "4", "vars": {} });
@@ -113,8 +111,8 @@ fn promptfoo_scalar_results_are_normalized() {
 
 #[tokio::test]
 async fn js_evaluator_reads_ctx_fields() {
-    if !deno_available() {
-        eprintln!("skipping js_evaluator_reads_ctx_fields: no deno backend available");
+    if !js_sandbox_available() {
+        eprintln!("skipping js_evaluator_reads_ctx_fields: no JS sandbox available");
         return;
     }
     let payload = json!({ "input": "q", "output": "the answer is 4", "expected": "4", "vars": {} });
@@ -285,8 +283,8 @@ async fn no_code_evaluators_is_unchanged_passthrough() {
 
 #[tokio::test]
 async fn merge_two_case_dataset_with_js_evaluator() {
-    if !deno_available() {
-        eprintln!("skipping merge_two_case_dataset: no deno backend available");
+    if !js_sandbox_available() {
+        eprintln!("skipping merge_two_case_dataset: no JS sandbox available");
         return;
     }
     let mut response = json!({

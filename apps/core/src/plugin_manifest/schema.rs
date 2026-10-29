@@ -129,16 +129,16 @@ mod tests {
     }
 
     #[test]
-    fn tool_backend_resolves_inline_deno_and_http() {
-        let deno: ToolConfig = serde_json::from_value(json!({
+    fn tool_backend_resolves_inline_js_and_http() {
+        let inline: ToolConfig = serde_json::from_value(json!({
             "slug": "weather",
-            "backend": "inline_deno",
+            "backend": "inline_js",
             "code": "return await ((input, host) => ({ ok: true }))(input, host);",
         }))
         .unwrap();
         assert!(matches!(
-            deno.resolve_backend().unwrap(),
-            ToolBackend::InlineDeno { .. }
+            inline.resolve_backend().unwrap(),
+            ToolBackend::InlineJs { .. }
         ));
 
         let http: ToolConfig = serde_json::from_value(json!({
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn tool_backend_rejects_missing_code_or_url() {
-        let no_code = json!({ "slug": "x", "backend": "inline_deno" });
+        let no_code = json!({ "slug": "x", "backend": "inline_js" });
         assert!(validate_runnable(&entry("t", RunnableKind::Tool, Some(no_code))).is_err());
         let no_url = json!({ "slug": "x", "backend": "http" });
         assert!(validate_runnable(&entry("t", RunnableKind::Tool, Some(no_url))).is_err());
@@ -299,6 +299,7 @@ mod tests {
             lazy: false,
             idle_stop_secs: None,
             provides_provider: None,
+            sandbox: None,
         }
     }
 
@@ -415,6 +416,7 @@ mod tests {
             lazy: false,
             idle_stop_secs: None,
             provides_provider: None,
+            sandbox: None,
         };
         assert!(validate_sidecar_spec(&spec).unwrap_err().contains("entry"));
     }

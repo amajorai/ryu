@@ -1,4 +1,5 @@
 use super::*;
+use crate::sidecar::{HealthStatus, Sidecar};
 use axum::{http::StatusCode, routing::get, Json, Router};
 use serde_json::json;
 

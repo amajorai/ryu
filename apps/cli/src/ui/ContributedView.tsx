@@ -16,11 +16,18 @@
 // Failures go to the shared toast surface (the TUI's error convention) and leave the
 // view on its last good data; the next reload re-renders from truth.
 
-import { type ApiTarget, apiUrl, makeHeaders } from "@ryuhq/core-client/client";
-import { useCallback, useEffect, useState } from "react";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "@ryuhq/core-client/client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { z } from "zod";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import type { ContributedView as ContributedViewModel } from "../core/contributions.ts";
+import { useShellKeyboardCaptured } from "../core/InputFocusContext.tsx";
 import type {
 	SourceItem,
 	ViewAction,
@@ -31,9 +38,15 @@ import {
 	isCoreApiPath,
 	renderActionHttp,
 	sourceItemsFromResponse,
+	viewSpecSchema,
 } from "../core/views.ts";
+import { tf } from "../i18n/translate.ts";
+import { useOverlay } from "../overlays/OverlayHost.tsx";
 import { DeclarativeView } from "./DeclarativeView.tsx";
 import { useToast } from "./toast.tsx";
+
+const coreViewPayloadSchema = z.json();
+type CoreViewPayload = z.infer<typeof coreViewPayloadSchema>;
 
 /** GET/POST a Core-relative path with the active node's credentials, returning the
  *  parsed JSON body. Refuses a path outside `/api/` before a request is made. */
@@ -41,14 +54,14 @@ async function coreJson(
 	target: ApiTarget,
 	method: string,
 	path: string,
-	body?: unknown
-): Promise<unknown> {
+	body?: Parameters<typeof JSON.stringify>[0]
+): Promise<CoreViewPayload> {
 	if (!isCoreApiPath(path)) {
 		throw new Error(`declarative view path must start with /api/: ${path}`);
 	}
-	const resp = await fetch(apiUrl(target, path), {
+	const resp = await fetchForTarget(target)(apiUrl(target, path), {
 		method,
-		headers: makeHeaders(target.token),
+		headers: makeHeaders(target.token, target.userJwt),
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
 	if (!resp.ok) {
@@ -56,7 +69,7 @@ async function coreJson(
 	}
 	// A 204 / empty body is a perfectly good action result; don't fail on it.
 	const text = await resp.text();
-	return text.length > 0 ? JSON.parse(text) : null;
+	return text.length > 0 ? coreViewPayloadSchema.parse(JSON.parse(text)) : null;
 }
 
 export interface ContributedViewProps {
@@ -70,13 +83,26 @@ export function ContributedViewPanel({ focused, view }: ContributedViewProps) {
 	const { target, url, token } = useCore();
 	const { notify } = useToast();
 	const theme = useTheme();
+	// Every mounted useKeyboard sees every key, so the view yields while the
+	// palette, node picker, sidebar focus mode or a shell overlay owns them
+	// (otherwise Enter in the sidebar would also fire the view's primary action).
+	const shellKeyboardCaptured = useShellKeyboardCaptured();
+	const { openId: overlayOpenId } = useOverlay();
+	const keysActive =
+		focused && !shellKeyboardCaptured && overlayOpenId === null;
 	// Bumped after a successful action so the source re-fetches and the view
 	// re-renders from truth (mirrors the desktop/island `reloadToken`).
 	const [reloadToken, setReloadToken] = useState(0);
 	const [sourceItems, setSourceItems] = useState<SourceItem[] | null>(null);
 
+	const parsedSpec = useMemo(
+		() => viewSpecSchema.safeParse(view.spec),
+		[view.spec]
+	);
 	const source: ViewSource | undefined =
-		view.spec?.view === "list-detail" ? view.spec.source : undefined;
+		parsedSpec.success && parsedSpec.data.view === "list-detail"
+			? parsedSpec.data.source
+			: undefined;
 
 	useEffect(() => {
 		if (!source) {
@@ -143,14 +169,16 @@ export function ContributedViewPanel({ focused, view }: ContributedViewProps) {
 		// A title-only manifest entry (or a spec in a shape this shell cannot read).
 		return (
 			<text fg={theme.colors.mutedForeground}>
-				{`${view.title ?? view.id}: view unavailable`}
+				{tf("{viewTitle}: view unavailable", {
+					viewTitle: view.title ?? view.id,
+				})}
 			</text>
 		);
 	}
 
 	return (
 		<DeclarativeView
-			focused={focused}
+			focused={keysActive}
 			onAction={(action, ctx) => {
 				void runAction(action, { ...ctx, viewId: view.id });
 			}}

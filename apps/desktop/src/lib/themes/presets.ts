@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Desktop theme presets. The variant data + pure helpers now live in the
 // shared `@ryu/ui/theme` module (single source of truth across desktop +
 // island). This file re-exports them and keeps only the desktop-local,
@@ -7,10 +8,10 @@ import {
 	findVariantIn,
 	THEME_VARIANTS,
 	type ThemeVariant,
-} from "@ryu/ui/theme/presets";
+} from "@ryu/ui/theme/presets.ts";
 
-export type { CustomTokens, ThemeVariant } from "@ryu/ui/theme/presets";
-// biome-ignore lint/performance/noBarrelFile: thin compatibility shim re-exporting the shared @ryu/ui/theme module for existing desktop call sites, alongside the localStorage helpers below.
+export type { CustomTokens, ThemeVariant } from "@ryu/ui/theme/presets.ts";
+// thin compatibility shim re-exporting the shared @ryu/ui/theme module for existing desktop call sites, alongside the localStorage helpers below.
 export {
 	customTokensToVariant,
 	DARK_VARIANTS,
@@ -19,7 +20,7 @@ export {
 	LIGHT_VARIANTS,
 	THEME_VARIANTS,
 	variantToCustomTokens,
-} from "@ryu/ui/theme/presets";
+} from "@ryu/ui/theme/presets.ts";
 
 export const STORAGE_KEYS = {
 	lightPreset: "ryu_light_preset",
@@ -38,14 +39,64 @@ export const STORAGE_KEYS = {
 	highContrast: "ryu_high_contrast",
 } as const;
 
+const themeAppearanceSchema = z.object({
+	cardRadius: z.number().optional(),
+	codeFont: z.string().optional(),
+	contentScale: z.number().optional(),
+	contentWidth: z.string().optional(),
+	density: z.enum(["compact", "comfortable", "spacious"]).optional(),
+	fontSizes: z
+		.object({
+			xs: z.string().optional(),
+			sm: z.string().optional(),
+			base: z.string().optional(),
+			lg: z.string().optional(),
+			xl: z.string().optional(),
+			"2xl": z.string().optional(),
+		})
+		.optional(),
+	fontWeights: z
+		.object({
+			normal: z.number().optional(),
+			medium: z.number().optional(),
+			semibold: z.number().optional(),
+			bold: z.number().optional(),
+		})
+		.optional(),
+	headingFont: z.string().optional(),
+	layout: z
+		.object({
+			navigation: z.enum(["sidebar", "topbar", "minimal"]).optional(),
+			contentAlign: z.enum(["start", "center", "wide"]).optional(),
+			panelStyle: z.enum(["flat", "card", "outline"]).optional(),
+		})
+		.optional(),
+	panelRadius: z.number().optional(),
+	radius: z.number().optional(),
+	spacingScale: z.number().optional(),
+	uiFont: z.string().optional(),
+});
+const themeVariantSchema = z.object({
+	id: z.string(),
+	label: z.string(),
+	mode: z.enum(["light", "dark"]),
+	preview: z.object({
+		bg: z.string(),
+		surface: z.string(),
+		primary: z.string(),
+		text: z.string(),
+	}),
+	tokens: z.record(z.string(), z.string()),
+	appearance: themeAppearanceSchema.optional(),
+});
+
 function loadVariantList(key: string): ThemeVariant[] {
 	try {
 		const raw = localStorage.getItem(key);
 		if (!raw) {
 			return [];
 		}
-		const parsed = JSON.parse(raw);
-		return Array.isArray(parsed) ? (parsed as ThemeVariant[]) : [];
+		return z.array(themeVariantSchema).parse(JSON.parse(raw));
 	} catch {
 		return [];
 	}

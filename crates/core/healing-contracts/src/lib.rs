@@ -1,12 +1,15 @@
 //! Wire contract for the Ryu **self-healing** loop — the shapes that cross the
-//! loopback boundary between Core and the out-of-process `ryu-healing` sidecar.
+//! boundary between Core and the out-of-process `ryu-healing` sidecar.
 //!
-//! When a run fails, Core posts its instruction + failure output to the sidecar's
-//! `POST /api/healing/report-failure`. The sidecar owns the whole decision side —
-//! the per-source attempt cap, the cooldown, the Gateway diagnosis call, the
-//! `healing.*` prefs — and answers with a [`HealVerdict`]. Core owns the *action*
-//! side, because every action is a kernel coupling the sidecar cannot reach: the
-//! approvals-inbox write and the agent / workflow re-run.
+//! When a run fails, Core raises the `core#run.failed` kernel event (payload: the
+//! run's instruction + failure output, truncated with [`truncate_context`]), which
+//! the sidecar receives on `POST /api/healing/report-failure`. The sidecar owns the
+//! whole decision side — the per-source attempt cap, the cooldown, the Gateway
+//! diagnosis call, the `healing.*` prefs — and turns it into a [`HealVerdict`],
+//! which it applies by calling Core's grant-gated kernel capabilities. Core owns
+//! the *actions* themselves (the approvals-inbox write and the agent / workflow
+//! re-run) and mints the re-run id. (An older Core posted the flat payload and
+//! applied the returned verdict itself; the sidecar still answers that form.)
 //!
 //! So the two halves need the same verdict vocabulary and neither may link the
 //! other. This crate is that shared middle: `serde`-only, no `apps/core`

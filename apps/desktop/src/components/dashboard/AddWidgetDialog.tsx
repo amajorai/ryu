@@ -1,27 +1,30 @@
+import { type JsonValue, jsonValueSchema } from "./widgets/data.ts";
 // Full "Add widget" picker: choose any of the 10 widget kinds and configure any
 // of the 7 data sources from the UI (parity with what the AI builder can create).
 // Uses the shared shadcn Select/Input/Textarea so the picker matches the rest of
 // the app. The Base UI Select needs an `items` prop for SelectValue to render the
 // selected label, and onValueChange is typed `(value: string | null)`.
 
-import { Button } from "@ryu/ui/components/button";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/select.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useMemo, useState } from "react";
 import type {
 	WidgetInput,
@@ -48,17 +51,17 @@ const SOURCE_OPTIONS: Array<{ value: SourceType; label: string }> = [
 ];
 
 /** Default grid size per kind, so a new widget looks right immediately. */
-const DEFAULT_SIZE = Object.fromEntries(
+const DEFAULT_SIZE = new Map(
 	WIDGET_DEFINITIONS.map((d) => [d.kind, d.defaultSize])
-) as Record<WidgetKind, { w: number; h: number }>;
+);
 
-function parseJsonOr<T>(text: string, fallback: T): T {
+function parseJsonOr(text: string, fallback: JsonValue): JsonValue {
 	const trimmed = text.trim();
 	if (!trimmed) {
 		return fallback;
 	}
 	try {
-		return JSON.parse(trimmed) as T;
+		return jsonValueSchema.parse(JSON.parse(trimmed));
 	} catch {
 		return fallback;
 	}
@@ -68,17 +71,19 @@ export function AddWidgetDialog({
 	open,
 	onOpenChange,
 	coreEndpoints,
+	sourceTypes,
 	onCreate,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	/** Allowed core_endpoint names from the catalog. */
 	coreEndpoints: string[];
+	sourceTypes: string[];
 	onCreate: (input: WidgetInput) => void | Promise<void>;
 }) {
 	const [kind, setKind] = useState<WidgetKind>("stat");
 	const [title, setTitle] = useState("");
-	const [sourceType, setSourceType] = useState<SourceType>("core_endpoint");
+	const [sourceType, setSourceType] = useState<SourceType>("static");
 	const [refreshInterval, setRefreshInterval] = useState("30s");
 	const [configJson, setConfigJson] = useState("");
 
@@ -95,6 +100,10 @@ export function AddWidgetDialog({
 	const [agentPrompt, setAgentPrompt] = useState("");
 	const [staticData, setStaticData] = useState("");
 
+	const sourceOptions = useMemo(
+		() => SOURCE_OPTIONS.filter((option) => sourceTypes.includes(option.value)),
+		[sourceTypes]
+	);
 	const endpointItems = useMemo(
 		() => coreEndpoints.map((e) => ({ value: e, label: e })),
 		[coreEndpoints]
@@ -140,7 +149,13 @@ export function AddWidgetDialog({
 	};
 
 	const handleSubmit = async () => {
-		const size = DEFAULT_SIZE[kind];
+		if (!sourceTypes.includes(sourceType)) {
+			return;
+		}
+		const size = DEFAULT_SIZE.get(kind);
+		if (!size) {
+			return;
+		}
 		await onCreate({
 			kind,
 			title: title.trim() || KIND_OPTIONS.find((k) => k.value === kind)?.label,
@@ -154,9 +169,21 @@ export function AddWidgetDialog({
 
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent className="max-h-[85vh] overflow-auto sm:max-w-lg">
+			<DialogContent
+				className="max-h-[85vh] overflow-auto sm:max-w-lg"
+				showCloseButton={false}
+			>
 				<DialogHeader>
 					<DialogTitle>Add widget</DialogTitle>
+					<Button
+						aria-label="Close"
+						className="absolute end-4 top-4"
+						onClick={() => onOpenChange(false)}
+						size="icon-sm"
+						variant="secondary"
+					>
+						<HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+					</Button>
 				</DialogHeader>
 
 				<div className="space-y-4">
@@ -173,11 +200,9 @@ export function AddWidgetDialog({
 					<div className="grid grid-cols-2 gap-3">
 						<div className="space-y-1.5">
 							<Label>Type</Label>
-							<Select
+							<Select<WidgetKind>
 								items={KIND_OPTIONS}
-								onValueChange={(v: string | null) =>
-									v && setKind(v as WidgetKind)
-								}
+								onValueChange={(v) => v && setKind(v)}
 								value={kind}
 							>
 								<SelectTrigger className="w-full">
@@ -194,18 +219,16 @@ export function AddWidgetDialog({
 						</div>
 						<div className="space-y-1.5">
 							<Label>Data source</Label>
-							<Select
-								items={SOURCE_OPTIONS}
-								onValueChange={(v: string | null) =>
-									v && setSourceType(v as SourceType)
-								}
+							<Select<SourceType>
+								items={sourceOptions}
+								onValueChange={(v) => v && setSourceType(v)}
 								value={sourceType}
 							>
 								<SelectTrigger className="w-full">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									{SOURCE_OPTIONS.map((s) => (
+									{sourceOptions.map((s) => (
 										<SelectItem key={s.value} value={s.value}>
 											{s.label}
 										</SelectItem>
@@ -386,6 +409,7 @@ export function AddWidgetDialog({
 							Advanced: display config (JSON)
 						</summary>
 						<Textarea
+							aria-label="Display config (JSON)"
 							className="mt-2"
 							onChange={(e) => setConfigJson(e.target.value)}
 							placeholder='charts: { "x_key": "day", "series": ["signups"] } · stat: { "unit": "users" }'
@@ -400,6 +424,7 @@ export function AddWidgetDialog({
 						Cancel
 					</Button>
 					<Button
+						disabled={!sourceTypes.includes(sourceType)}
 						onClick={() => {
 							handleSubmit().catch(() => undefined);
 						}}

@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // System-wide dictation preference: the cross-process contract persisted in Core
 // under the `dictation` key. Owned by the `dictation` apps-store app (plugin enable
 // is the single on/off switch); Island is the OS surface that registers shortcuts
@@ -17,7 +19,7 @@ import {
 	EMPTY_AGENT_SELECTION,
 	parseAgentSelectionWithLegacyAgent,
 } from "./agent-selection.ts";
-import { VOICE_ENGINE_VALUES, type VoiceEngine } from "./voice.ts";
+import { type VoiceEngine, voiceEngineSchema } from "./voice.ts";
 
 export type { AgentSelection } from "./agent-selection.ts";
 export {
@@ -154,91 +156,78 @@ export const DEFAULT_DICTATION_PREFS: DictationPrefs = {
 	shortcut: DEFAULT_DICTATION_SHORTCUT,
 };
 
-/**
- * Coerce an unknown value to a known engine, defaulting to parakeet.
- *
- * Checked against the full list rather than one `=== "whisper"`: the old form
- * mapped EVERY other value onto parakeet, so a `gateway` pick written by the
- * desktop was silently rewritten to parakeet the next time the island saved.
- */
-function coerceEngine(value: unknown): VoiceEngine {
-	return VOICE_ENGINE_VALUES.includes(value as VoiceEngine)
-		? (value as VoiceEngine)
-		: "parakeet";
-}
+const modeSchema = z.enum(["toggle", "push-to-talk"]).catch("push-to-talk");
+const selectedTargetSchema = z.object({
+	selection: z.unknown().optional(),
+	agent: z.unknown().optional(),
+});
+const postProcessSchema = selectedTargetSchema
+	.extend({
+		enabled: z.boolean().catch(false),
+		prompt: z
+			.string()
+			.refine((value) => value.trim().length > 0)
+			.catch(DEFAULT_DICTATION_POSTPROCESS_PROMPT),
+	})
+	.transform(
+		(value): DictationPostProcess => ({
+			enabled: value.enabled,
+			prompt: value.prompt,
+			selection: parseAgentSelectionWithLegacyAgent(
+				value.selection,
+				value.agent
+			),
+		})
+	)
+	.catch({ ...DEFAULT_DICTATION_PREFS.postProcess, enabled: false });
+const askSchema = selectedTargetSchema
+	.extend({
+		enabled: z.boolean().catch(false),
+		mode: modeSchema,
+		prompt: z
+			.string()
+			.refine((value) => value.trim().length > 0)
+			.catch(DEFAULT_DICTATION_ASK_PROMPT),
+		shortcut: z.string().trim().min(1).catch(DEFAULT_DICTATION_ASK_SHORTCUT),
+	})
+	.transform(
+		(value): DictationAskPrefs => ({
+			enabled: value.enabled,
+			mode: value.mode,
+			prompt: value.prompt,
+			selection: parseAgentSelectionWithLegacyAgent(
+				value.selection,
+				value.agent
+			),
+			shortcut: value.shortcut,
+		})
+	)
+	.catch(DEFAULT_DICTATION_ASK);
+const dictationPrefsSchema = z
+	.object({
+		ask: askSchema,
+		autoSend: z.boolean().catch(false),
+		enabled: z.boolean().catch(true),
+		engine: voiceEngineSchema,
+		insertMode: z.enum(["type", "paste"]).catch("type"),
+		mode: modeSchema,
+		pasteKeys: z.string().trim().catch(""),
+		postProcess: z.preprocess(
+			(value) => (value == null ? { enabled: true } : value),
+			postProcessSchema
+		),
+		restoreClipboard: z.boolean().catch(true),
+		shortcut: z.string().trim().min(1).catch(DEFAULT_DICTATION_SHORTCUT),
+	})
+	.catch(DEFAULT_DICTATION_PREFS);
 
-/** Coerce an unknown value to a known activation mode, defaulting to push-to-talk. */
-function coerceMode(value: unknown): DictationMode {
-	return value === "toggle" ? "toggle" : "push-to-talk";
-}
-
-/** Coerce an unknown value to a known insertion mode, defaulting to type. */
-function coerceInsertMode(value: unknown): DictationInsertMode {
-	return value === "paste" ? "paste" : "type";
-}
-
-/** Parse the optional post-process block, filling every field from the default. */
-function parsePostProcess(value: unknown): DictationPostProcess {
-	const raw = (value ?? {}) as Record<string, unknown>;
-	const prompt =
-		typeof raw.prompt === "string" && raw.prompt.trim().length > 0
-			? raw.prompt
-			: DEFAULT_DICTATION_POSTPROCESS_PROMPT;
-	return {
-		enabled: value == null ? true : raw.enabled === true,
-		prompt,
-		selection: parseAgentSelectionWithLegacyAgent(raw.selection, raw.agent),
-	};
-}
-
-/** Parse the optional agent-ask block, filling every field from the default. */
-function parseAsk(value: unknown): DictationAskPrefs {
-	const raw = (value ?? {}) as Record<string, unknown>;
-	const shortcut =
-		typeof raw.shortcut === "string" && raw.shortcut.trim().length > 0
-			? raw.shortcut.trim()
-			: DEFAULT_DICTATION_ASK_SHORTCUT;
-	const prompt =
-		typeof raw.prompt === "string" && raw.prompt.trim().length > 0
-			? raw.prompt
-			: DEFAULT_DICTATION_ASK_PROMPT;
-	return {
-		enabled: raw.enabled === true,
-		mode: coerceMode(raw.mode),
-		prompt,
-		selection: parseAgentSelectionWithLegacyAgent(raw.selection, raw.agent),
-		shortcut,
-	};
-}
-
-/**
- * Tolerantly coerce a raw preference value (JSON string from Core, or `null`)
- * into {@link DictationPrefs}. Falls back to the default for any missing/unknown
- * field so a malformed blob never breaks shortcut registration or capture.
- */
+/** Parse persisted dictation settings, preserving field-level compatibility defaults. */
 export function parseDictationPrefs(raw: string | null): DictationPrefs {
 	if (!raw) {
 		return DEFAULT_DICTATION_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<DictationPrefs>;
-		const shortcut =
-			typeof parsed.shortcut === "string" && parsed.shortcut.trim().length > 0
-				? parsed.shortcut.trim()
-				: DEFAULT_DICTATION_SHORTCUT;
-		return {
-			ask: parseAsk(parsed.ask),
-			autoSend: parsed.autoSend === true,
-			enabled: parsed.enabled !== false,
-			engine: coerceEngine(parsed.engine),
-			insertMode: coerceInsertMode(parsed.insertMode),
-			mode: coerceMode(parsed.mode),
-			pasteKeys:
-				typeof parsed.pasteKeys === "string" ? parsed.pasteKeys.trim() : "",
-			postProcess: parsePostProcess(parsed.postProcess),
-			restoreClipboard: parsed.restoreClipboard !== false,
-			shortcut,
-		};
+		return dictationPrefsSchema.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_DICTATION_PREFS;
 	}

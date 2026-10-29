@@ -7,14 +7,14 @@
 //! enforcement stay there.
 //!
 //! Every model/provider/strategy default is a swappable config entry loaded
-//! from `~/.ryu/registry.json` (or `$RYU_REGISTRY_PATH`), falling back to
+//! from `~/.ryu/state/registry.json` (or `$RYU_REGISTRY_PATH`), falling back to
 //! built-in defaults when the file is absent or a field is missing. Environment
 //! variables take precedence over file values; the built-in literals are the
 //! last-resort fallbacks and are documented as such.
 //!
 //! # Precedence chain (highest → lowest)
 //! 1. Environment variable (e.g. `RYU_DEFAULT_LLM_MODEL`)
-//! 2. `~/.ryu/registry.json` field (or `$RYU_REGISTRY_PATH`)
+//! 2. `~/.ryu/state/registry.json` field (or `$RYU_REGISTRY_PATH`)
 //! 3. Built-in literal constant (last-resort fallback, documented below)
 //!
 //! # Which constructor you use decides whether layer 2 exists at all
@@ -47,7 +47,7 @@
 //! - **An artifact ⇒ delete the file key, leave it env-only.** The nine
 //!   `local_*_model_{id,url,sha256}` values name a GGUF that
 //!   `sidecar::onboarding::install_local_stack` *downloads* at boot and a llama.cpp
-//!   sidecar *serves* arbitrarily later; the artifact is `~/.ryu/models/<id>.gguf`.
+//!   sidecar *serves* arbitrarily later; the artifact is `~/.ryu/models/<modality>/<id>.gguf`.
 //!   The three `embed_*` values decide the vector space of `spaces.db`,
 //!   `retrieval.db` and `message-embeddings.db`; the artifact is the stored vectors
 //!   (and, for `embed_dims`, the fixed width of the `chunk_vectors` vec0 table,
@@ -94,7 +94,7 @@
 //! layer 2. A variable Core seeded for you therefore outranks your `registry.json`
 //! exactly as one you exported would.
 //!
-//! Of the eight variables `apply_env_defaults` seeds, **two** name a field of this
+//! Of the seven variables `apply_env_defaults` can seed, **two** name a field of this
 //! registry — and they are shadowed to different degrees, only one of which is a
 //! setting the operator loses:
 //!
@@ -110,11 +110,11 @@
 //!   release, inert everywhere else. It also flips the *other* reranker from local
 //!   to remote; see [`crate::rag_host::reranker_from_registry`].
 //!
-//! That is the complete set. The other six seeds (`RYU_BIND`, `RYU_GATEWAY_URL`,
-//! `GATEWAY_CONFIG`, `RYU_SHADOW_URL`, `RYU_RESEARCH_UPSTREAM`, and `RYU_DIR` —
-//! which names no field but relocates the *file*, see below) leave this schema
-//! alone. `registry_env_keys_shadowed_by_the_profile_defaults` re-derives the
-//! intersection from `profile.rs`'s own source and fails if a future seed lands on
+//! That is the complete set. The other four defaults (`RYU_BIND`, `RYU_GATEWAY_URL`,
+//! `GATEWAY_CONFIG`, and `RYU_SHADOW_URL`) leave this schema
+//! alone. `RYU_DIR` is resolved separately and is not seeded.
+//! `registry_env_keys_shadowed_by_the_profile_defaults` checks the actual startup
+//! default plan and fails if a future seed lands on
 //! another registry key — because the failure mode of that edit is a `registry.json`
 //! key that goes quietly dead for everyone running a dev stack, with no error
 //! anywhere.
@@ -123,11 +123,10 @@
 //!
 //! [`registry_path`] falls back to `crate::paths::ryu_dir()`, and
 //! `paths::default_ryu_dir()` is suffixed by the profile (`.ryu{suffix}`) *on its
-//! own* — `RYU_DIR` being seeded merely pins that answer for child processes, it is
-//! not the cause, so unsetting `RYU_DIR` does not restore `~/.ryu` under `dev`.
+//! own*, so unsetting `RYU_DIR` does not restore `~/.ryu` under `dev`.
 //! (`paths::resolve` also consults a data-dir pointer file between the env var and
 //! that default.) So on the `dev` profile every key in this schema is read from
-//! `~/.ryu-dev/registry.json`. Editing `~/.ryu/registry.json` and seeing nothing
+//! `~/.ryu-dev/state/registry.json`. Editing `~/.ryu/state/registry.json` and seeing nothing
 //! change is the expected outcome, not a dead key.
 //!
 //! # API keys
@@ -137,6 +136,7 @@
 
 use std::path::PathBuf;
 
+use ryu_sidecar_runtime::layout::{self, Modality};
 use serde::{Deserialize, Serialize};
 
 // ── Built-in last-resort fallbacks ────────────────────────────────────────────
@@ -162,7 +162,7 @@ pub const DEFAULT_EMBED_DIMS: usize = 768;
 /// `RYU_EMBED_BASE_URL` to use a remote endpoint instead.
 pub const DEFAULT_EMBED_BASE_URL: &str = "http://127.0.0.1:8081";
 
-/// Default local embedding model id (storage key + filename stem in `~/.ryu/models/`).
+/// Default local embedding model id (storage key + filename stem in `models/embedding/`).
 ///
 /// nomic-embed-text-v1.5 Q4_K_M from nomic-ai — publicly accessible without HF
 /// authentication, ~84 MB, CPU-friendly. Served by the `llamacpp-embed` sidecar.
@@ -209,7 +209,7 @@ pub const DEFAULT_RERANKER_DIMS: usize = 1;
 /// search. Override via `RYU_RERANKER_BASE_URL`.
 pub const DEFAULT_RERANKER_BASE_URL: &str = "http://127.0.0.1:8082";
 
-/// Default local reranker model id (storage key + filename stem in `~/.ryu/models/`).
+/// Default local reranker model id (storage key + filename stem in `models/rerank/`).
 ///
 /// BAAI bge-reranker-v2-m3, Q4_K_M (via the gpustack GGUF conversion) — a
 /// multilingual cross-encoder reranker, ~438 MB, CPU-friendly and publicly
@@ -227,7 +227,7 @@ pub const DEFAULT_LOCAL_RERANKER_MODEL_SHA256: &str =
     "e186a244ed455b4ab66ec64339ce7427a6ae13f5c0b5e544de96e50f0f8b3673";
 
 /// Default local **classifier** model id (storage key + filename stem in
-/// `~/.ryu/models/`).
+/// `models/classifier/`).
 ///
 /// Gemma 3 270M IT, QAT Q4_0 (the `ggml-org` conversion) — a 270M
 /// instruction-tuned model, ~241 MB, CPU-friendly and publicly reachable without
@@ -254,8 +254,56 @@ pub const DEFAULT_LOCAL_CLASSIFIER_MODEL_URL: &str =
 pub const DEFAULT_LOCAL_CLASSIFIER_MODEL_SHA256: &str =
     "3626e245220ca4a1c5911eb4010b3ecb7bdbf5bc53c79403c21355354d1e2dc6";
 
+/// Default local guard model id (storage key and filename stem in
+/// `models/classifier/`). Qwen3Guard-Gen 0.6B, Q4_K_M, served by the opt-in
+/// `llamacpp-guard` sidecar as a node-tier hazard screener backend in the
+/// Qwen3Guard dialect. Apache-2.0 and ungated, unlike Llama Guard. It does not
+/// cover `hazard.S4`, so it never qualifies alone for the platform floor; on a
+/// node, which Ryu's floor never binds, it is one opinion beside the decision
+/// model. Override via `RYU_LOCAL_GUARD_MODEL_ID`.
+pub const DEFAULT_LOCAL_GUARD_MODEL_ID: &str = "qwen3guard-gen-0.6b-q4_k_m";
+
+/// Default local guard model weight URL, pinned to a repository revision so the
+/// checksum stays valid. Override via `RYU_LOCAL_GUARD_MODEL_URL`.
+pub const DEFAULT_LOCAL_GUARD_MODEL_URL: &str =
+    "https://huggingface.co/mradermacher/Qwen3Guard-Gen-0.6B-GGUF/resolve/2a59799e089fba3807d534a89c6b95bdf38ee76a/Qwen3Guard-Gen-0.6B.Q4_K_M.gguf";
+
+/// SHA-256 of the default guard GGUF (484,220,416 bytes), from the Hugging Face
+/// LFS oid at the pinned revision. Override via `RYU_LOCAL_GUARD_MODEL_SHA256`.
+/// It is also the weights hash Core publishes for the screener backend, so a
+/// qualification record and the screener cache pin these exact weights.
+pub const DEFAULT_LOCAL_GUARD_MODEL_SHA256: &str =
+    "2e73a1411746e6dbd8a71b4d22dc66369044283f433b81ed6e4006cab4af9859";
+
+/// The local guard model: the GGUF the opt-in `llamacpp-guard` sidecar serves.
+///
+/// Env-only, like the classifier entry and for the same reason: the sidecar
+/// (which downloads and serves the file) and the Gateway spawn env (which
+/// publishes its id and hash) read it at different moments and must agree, so
+/// the answer is frozen per process. Unlike the classifier, onboarding never
+/// downloads it: the guard tier is off by default, and the sidecar fetches its
+/// weights only after the operator opts in.
+pub fn local_guard_model() -> LocalModelEntry {
+    LocalModelEntry {
+        modality: Modality::Classifier,
+        id: env_or_file_or_literal(
+            "RYU_LOCAL_GUARD_MODEL_ID",
+            None,
+            DEFAULT_LOCAL_GUARD_MODEL_ID,
+        ),
+        weight_url: env_or_file_or_literal(
+            "RYU_LOCAL_GUARD_MODEL_URL",
+            None,
+            DEFAULT_LOCAL_GUARD_MODEL_URL,
+        ),
+        sha256: std::env::var("RYU_LOCAL_GUARD_MODEL_SHA256")
+            .ok()
+            .unwrap_or_else(|| DEFAULT_LOCAL_GUARD_MODEL_SHA256.to_owned()),
+    }
+}
+
 /// Default local Speech Processing model id (storage key + filename stem in
-/// `~/.ryu/models/`). S1-mini by Superwhisper is a 0.6B Q4_K_M text normalizer
+/// `models/chat/`). S1-mini by Superwhisper is a 0.6B Q4_K_M text normalizer
 /// for raw speech-recognition transcripts. It is not a chat model: the
 /// dedicated `llamacpp-speech` sidecar serves it only for post-ASR cleanup.
 pub const DEFAULT_LOCAL_SPEECH_MODEL_ID: &str = "s1-mini-q4_k_m";
@@ -285,7 +333,7 @@ pub const DEFAULT_RAG_STRATEGY: &str = "vector";
 /// is rejected when the Spaces store opens instead of being silently ignored.
 pub const DEFAULT_GRAPH_EXTRACTION_MODEL: &str = "local-cooccurrence";
 
-/// Default local chat model id (storage key + filename stem in `~/.ryu/models/`).
+/// Default local chat model id (storage key + filename stem in `models/chat/`).
 ///
 /// Gemma 4 E2B IT Q4_K_M from unsloth — publicly accessible without HF authentication,
 /// ~3.1 GB, runs well on modest hardware. Validated as publicly reachable via git-lfs
@@ -296,7 +344,7 @@ pub const DEFAULT_LOCAL_CHAT_MODEL_ID: &str = "gemma-4-E2B-it-Q4_K_M";
 /// The agent id auto-installed and enabled on first Core start (U041).
 ///
 /// Override via `RYU_DEFAULT_AGENT` env var or `"default_agent_id"` in
-/// `~/.ryu/registry.json`. The literal fallback is `"ryu"` — the flagship
+/// `~/.ryu/state/registry.json`. The literal fallback is `"ryu"` — the flagship
 /// Pi + Gateway agent is the only agent installed by default. Every other
 /// built-in (Claude Code, Codex, Gemini CLI, Pi, OpenClaw, …) is opt-in via
 /// the agents catalog (onboarding detects which CLIs the user already has and
@@ -320,6 +368,120 @@ pub const DEFAULT_LOCAL_CHAT_MODEL_URL: &str =
 /// Override via `RYU_LOCAL_CHAT_MODEL_SHA256` (use empty string to skip verification).
 pub const DEFAULT_LOCAL_CHAT_MODEL_SHA256: &str =
     "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8";
+
+/// Size of the default chat GGUF at the pinned revision (HF `x-linked-size`).
+/// It needs about 5.0 GiB of system RAM on the CPU (`system_ram_need_bytes`).
+pub const DEFAULT_LOCAL_CHAT_MODEL_BYTES: u64 = 3_106_738_272;
+
+/// Smaller chat default for machines whose RAM cannot hold
+/// [`DEFAULT_LOCAL_CHAT_MODEL_ID`]: Gemma 3 1B IT Q4_K_M (the `ggml-org`
+/// conversion, ungated), ~0.8 GB, needing about 2.4 GiB of RAM. Chosen by
+/// [`local_chat_default_for`]; same family and chat template as the main
+/// default, text-only (no vision adapter).
+pub const FALLBACK_LOCAL_CHAT_MODEL_ID: &str = "gemma-3-1b-it-Q4_K_M";
+
+/// Pinned to a commit revision — see [`DEFAULT_LOCAL_CHAT_MODEL_URL`].
+pub const FALLBACK_LOCAL_CHAT_MODEL_URL: &str =
+    "https://huggingface.co/ggml-org/gemma-3-1b-it-GGUF/resolve/f9c28bcd85737ffc5aef028638d3341d49869c27/gemma-3-1b-it-Q4_K_M.gguf";
+
+/// SHA-256 of the fallback chat GGUF (HF tree API `lfs.oid` at the pinned
+/// revision).
+pub const FALLBACK_LOCAL_CHAT_MODEL_SHA256: &str =
+    "8ccc5cd1f1b3602548715ae25a66ed73fd5dc68a210412eea643eb20eb75a135";
+
+/// Size of the fallback chat GGUF (806 058 240 bytes, HF `lfs.size`).
+pub const FALLBACK_LOCAL_CHAT_MODEL_BYTES: u64 = 806_058_240;
+
+/// One built-in local chat default: `(id, weight URL, SHA-256)` plus its size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalChatDefault {
+    pub id: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub bytes: u64,
+}
+
+pub const MAIN_LOCAL_CHAT_DEFAULT: LocalChatDefault = LocalChatDefault {
+    id: DEFAULT_LOCAL_CHAT_MODEL_ID,
+    url: DEFAULT_LOCAL_CHAT_MODEL_URL,
+    sha256: DEFAULT_LOCAL_CHAT_MODEL_SHA256,
+    bytes: DEFAULT_LOCAL_CHAT_MODEL_BYTES,
+};
+
+pub const FALLBACK_LOCAL_CHAT_DEFAULT: LocalChatDefault = LocalChatDefault {
+    id: FALLBACK_LOCAL_CHAT_MODEL_ID,
+    url: FALLBACK_LOCAL_CHAT_MODEL_URL,
+    sha256: FALLBACK_LOCAL_CHAT_MODEL_SHA256,
+    bytes: FALLBACK_LOCAL_CHAT_MODEL_BYTES,
+};
+
+/// The built-in chat default for a node: the main default unless the node's
+/// RAM is known to be too small for it on the CPU (`fits_in_system_ram` —
+/// weights × 1.2 + 1.5 GiB, ~5.0 GiB for Gemma 4 E2B), then the 1B fallback.
+/// Unknown hardware (`None`, or RAM undetectable) keeps the main default.
+pub fn local_chat_default_for(
+    device: Option<&crate::model_catalog::device::DeviceInfo>,
+) -> LocalChatDefault {
+    let too_small = device.is_some_and(|device| {
+        crate::model_catalog::device::fits_in_system_ram(DEFAULT_LOCAL_CHAT_MODEL_BYTES, device)
+            == Some(false)
+    });
+    if too_small {
+        FALLBACK_LOCAL_CHAT_DEFAULT
+    } else {
+        MAIN_LOCAL_CHAT_DEFAULT
+    }
+}
+
+/// The local chat model id this node actually uses: an operator's
+/// `RYU_LOCAL_CHAT_MODEL_ID`, else the hardware-chosen built-in default (the 1B
+/// fallback on low-RAM nodes). Use this instead of
+/// [`DEFAULT_LOCAL_CHAT_MODEL_ID`] wherever a side job needs "the local model",
+/// so a fallback node never names a model it doesn't have. `from_env` is right
+/// here: the local chat model has no `registry.json` key.
+pub fn local_chat_model_id() -> String {
+    ProviderRegistry::from_env().local_chat_model.id
+}
+
+/// Size of a built-in chat default by id, for the install-time fit check;
+/// `None` for an operator-supplied id (an unknown size never blocks).
+pub fn local_chat_default_bytes(id: &str) -> Option<u64> {
+    [MAIN_LOCAL_CHAT_DEFAULT, FALLBACK_LOCAL_CHAT_DEFAULT]
+        .into_iter()
+        .find(|default| default.id == id)
+        .map(|default| default.bytes)
+}
+
+/// Why this node got the fallback chat default, as one sentence with the real
+/// numbers; `None` when it gets the main default.
+pub fn local_chat_fallback_reason(
+    device: &crate::model_catalog::device::DeviceInfo,
+) -> Option<String> {
+    use crate::model_catalog::device::{human_bytes, system_ram_need_bytes};
+    (local_chat_default_for(Some(device)) == FALLBACK_LOCAL_CHAT_DEFAULT).then(|| {
+        format!(
+            "This computer has {} of memory, too little for the default Gemma 4 E2B chat model \
+             (it needs about {}), so the smaller Gemma 3 1B ({}) was installed instead.",
+            device.ram_human,
+            human_bytes(system_ram_need_bytes(DEFAULT_LOCAL_CHAT_MODEL_BYTES)),
+            human_bytes(FALLBACK_LOCAL_CHAT_MODEL_BYTES),
+        )
+    })
+}
+
+/// The hardware the chat default is picked for: this node's, probed once per
+/// process (the same cache the llama.cpp variant pick uses, so the id is stable
+/// for the process lifetime — see [`LocalModelEntry`]). Under `cfg(test)` it is
+/// unknown, so every test sees the main default regardless of the CI machine.
+#[cfg(not(test))]
+fn chat_default_device() -> Option<&'static crate::model_catalog::device::DeviceInfo> {
+    Some(crate::sidecar::providers::llamacpp::variant::device())
+}
+
+#[cfg(test)]
+fn chat_default_device() -> Option<&'static crate::model_catalog::device::DeviceInfo> {
+    None
+}
 
 // ── Entry types ───────────────────────────────────────────────────────────────
 
@@ -388,9 +550,15 @@ pub struct ProviderEntry {
 /// not sprinkling `load()` calls. Until someone does that, do not re-add the keys.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalModelEntry {
-    /// Model identifier used to name the file in `~/.ryu/models/` and in the
-    /// version store (e.g. `"gemma-3-1b-it-Q4_K_M"`).
+    /// Model identifier used to name the file in `models/<modality>/` and in
+    /// the version store (e.g. `"gemma-3-1b-it-Q4_K_M"`).
     pub id: String,
+    /// Which `models/<modality>/` folder the weight lives in. Fixed per registry
+    /// slot (chat and Speech Processing → `chat`, embedder → `embedding`,
+    /// reranker → `rerank`, classifier → `classifier`) and kept in step with
+    /// `model_catalog::gguf_modality_for_role`, which picks the download
+    /// destination for the same weight.
+    pub modality: Modality,
     /// Direct HTTPS URL to the GGUF file. Must be publicly reachable without
     /// authentication (zero-setup headline: works with no API key).
     pub weight_url: String,
@@ -400,17 +568,16 @@ pub struct LocalModelEntry {
 }
 
 impl LocalModelEntry {
-    /// Resolved path for this weight inside `~/.ryu/models/<id>.gguf`.
+    /// Resolved path for this weight: `<data dir>/models/<modality>/<id>.gguf`.
     pub fn weight_path(&self) -> PathBuf {
-        crate::paths::ryu_dir()
-            .join("models")
+        layout::models_dir(&crate::paths::ryu_dir(), self.modality)
             .join(format!("{}.gguf", self.id))
     }
 }
 
 // ── File-backed config (registry.json) ───────────────────────────────────────
 
-/// Raw JSON shape of `~/.ryu/registry.json` (or `$RYU_REGISTRY_PATH`).
+/// Raw JSON shape of `~/.ryu/state/registry.json` (or `$RYU_REGISTRY_PATH`).
 /// All fields are optional so a partial file is always valid — missing fields
 /// fall through to env vars, then to built-in literals.
 ///
@@ -584,7 +751,7 @@ pub struct ProviderRegistry {
     ///    live for a developer on `dev` than for a user on release.
     /// 2. **`RetrievalStore`'s `reranker_model_id` field**, passed as the id the
     ///    store "reports". Nothing reports it: `RetrievalStore::reranker_model_id()`
-    ///    (`crates/core/rag/src/lib.rs`) has no caller in this workspace outside that
+    ///    (`crates/core/rag/src/store/state.rs`) has no caller in this workspace outside that
     ///    crate's own unit test, and neither does its symmetric twin
     ///    `embedder_model_id()`. They are public accessors on the published
     ///    `ryu-rag` crate — API surface for an out-of-workspace consumer, not a live
@@ -656,7 +823,7 @@ pub struct ProviderRegistry {
     /// process lifetime**, and they must agree or the tier breaks.
     ///
     /// 1. `sidecar::onboarding::install_local_stack` — downloads the GGUF to
-    ///    `~/.ryu/models/<id>.gguf`, once, from a background task at boot.
+    ///    `~/.ryu/models/classifier/<id>.gguf`, once, from a background task at boot.
     /// 2. `sidecar::gateway::classify_model_id` — publishes the id to the gateway
     ///    (`RYU_CLASSIFY_MODEL_ID`) at gateway spawn, *and* re-resolves it on every
     ///    `PUT /v1/config` push to decide whether the pushed config selects this
@@ -724,7 +891,7 @@ pub struct ProviderRegistry {
     /// Agent id that is auto-installed + enabled on first Core start.
     ///
     /// Resolution: `RYU_DEFAULT_AGENT` env > `default_agent_id` in
-    /// `~/.ryu/registry.json` > built-in literal `"ryu"`.
+    /// `~/.ryu/state/registry.json` > built-in literal `"ryu"`.
     ///
     /// `GET /api/agents` surfaces this id with `"enabled": true` so clients
     /// can badge the default without hard-coding it.
@@ -733,7 +900,7 @@ pub struct ProviderRegistry {
 
 impl ProviderRegistry {
     /// Load the registry from the default path (`$RYU_REGISTRY_PATH` or
-    /// `~/.ryu/registry.json`) and apply environment-variable overlays.
+    /// `~/.ryu/state/registry.json`) and apply environment-variable overlays.
     ///
     /// Never panics. A missing or malformed file produces the built-in defaults.
     pub fn load() -> Self {
@@ -747,7 +914,7 @@ impl ProviderRegistry {
     /// That matters when writing tests: a test that proves "`registry.json` field X
     /// takes effect" by calling `from_file` proves nothing about production, because
     /// production reaches the file through [`load`](Self::load) →
-    /// [`registry_path`] → `$RYU_REGISTRY_PATH` / `~/.ryu/registry.json`. A test of
+    /// [`registry_path`] → `$RYU_REGISTRY_PATH` / `~/.ryu/state/registry.json`. A test of
     /// that shape passed for `rag_strategy` while the shipped path read no file at
     /// all. Prove file-backed behaviour with `load()` + a `RYU_REGISTRY_PATH`
     /// override instead (see `rag_strategy_reads_registry_file_via_load`).
@@ -858,18 +1025,30 @@ impl ProviderRegistry {
             DEFAULT_GRAPH_EXTRACTION_MODEL,
         );
 
-        let chat_model_id =
-            env_or_file_or_literal("RYU_LOCAL_CHAT_MODEL_ID", None, DEFAULT_LOCAL_CHAT_MODEL_ID);
-        let chat_model_url = env_or_file_or_literal(
+        // The built-in chat default is hardware-tiered (weak machines get the 1B
+        // fallback). Any chat override env var means the operator chose the
+        // model, so the whole triple then falls back to the main literals.
+        let chat_overridden = [
+            "RYU_LOCAL_CHAT_MODEL_ID",
             "RYU_LOCAL_CHAT_MODEL_URL",
-            None,
-            DEFAULT_LOCAL_CHAT_MODEL_URL,
-        );
+            "RYU_LOCAL_CHAT_MODEL_SHA256",
+        ]
+        .iter()
+        .any(|key| std::env::var_os(key).is_some());
+        let chat_default = if chat_overridden {
+            MAIN_LOCAL_CHAT_DEFAULT
+        } else {
+            local_chat_default_for(chat_default_device())
+        };
+        let chat_model_id =
+            env_or_file_or_literal("RYU_LOCAL_CHAT_MODEL_ID", None, chat_default.id);
+        let chat_model_url =
+            env_or_file_or_literal("RYU_LOCAL_CHAT_MODEL_URL", None, chat_default.url);
         // SHA256 is special: empty string is a valid value (disables verify), so we
         // preserve it even when empty; the literal default is the known good hash.
         let chat_model_sha256 = std::env::var("RYU_LOCAL_CHAT_MODEL_SHA256")
             .ok()
-            .unwrap_or_else(|| DEFAULT_LOCAL_CHAT_MODEL_SHA256.to_owned());
+            .unwrap_or_else(|| chat_default.sha256.to_owned());
 
         let default_agent_id =
             env_or_file_or_literal("RYU_DEFAULT_AGENT", file.default_agent_id, DEFAULT_AGENT_ID);
@@ -883,6 +1062,7 @@ impl ProviderRegistry {
             },
             embed_base_url,
             local_embed_model: LocalModelEntry {
+                modality: Modality::Embedding,
                 id: embed_model_id,
                 weight_url: embed_model_url,
                 sha256: embed_model_sha256,
@@ -893,16 +1073,19 @@ impl ProviderRegistry {
             },
             reranker_base_url,
             local_reranker_model: LocalModelEntry {
+                modality: Modality::Rerank,
                 id: reranker_model_id,
                 weight_url: reranker_model_url,
                 sha256: reranker_model_sha256,
             },
             local_classifier_model: LocalModelEntry {
+                modality: Modality::Classifier,
                 id: classifier_model_id,
                 weight_url: classifier_model_url,
                 sha256: classifier_model_sha256,
             },
             local_speech_model: LocalModelEntry {
+                modality: Modality::Chat,
                 id: speech_model_id,
                 weight_url: speech_model_url,
                 sha256: speech_model_sha256,
@@ -910,6 +1093,7 @@ impl ProviderRegistry {
             rag_strategy,
             graph_extraction_model,
             local_chat_model: LocalModelEntry {
+                modality: Modality::Chat,
                 id: chat_model_id,
                 weight_url: chat_model_url,
                 sha256: chat_model_sha256,
@@ -931,12 +1115,12 @@ fn env_or_file_or_literal(env_key: &str, file_val: Option<String>, literal: &str
         .unwrap_or_else(|| literal.to_owned())
 }
 
-/// Resolve the registry file path: `$RYU_REGISTRY_PATH` or `~/.ryu/registry.json`.
+/// Resolve the registry file path: `$RYU_REGISTRY_PATH` or `~/.ryu/state/registry.json`.
 ///
 /// # Under `cfg(test)` the unset case is a temp path, never `~/.ryu`
 ///
 /// [`RegistryEnvGuard`] *clears* `RYU_REGISTRY_PATH`, and in production an unset var
-/// means the operator's real `~/.ryu/registry.json`. Composed, that pointed guarded
+/// means the operator's real `~/.ryu/state/registry.json`. Composed, that pointed guarded
 /// tests at the developer's own config file — and worse, it did so for every
 /// [`ProviderRegistry::load`] caller in the crate, including ones in other modules'
 /// tests that never take [`lock_registry_env`] and so could not know to set the var
@@ -964,7 +1148,7 @@ fn registry_path() -> Option<PathBuf> {
 /// real config file.
 #[cfg(not(test))]
 fn default_registry_path() -> PathBuf {
-    crate::paths::ryu_dir().join("registry.json")
+    layout::state_path(&crate::paths::ryu_dir(), "registry.json")
 }
 
 /// The `cfg(test)` twin of [`default_registry_path`]: a path in the temp dir that is
@@ -1020,7 +1204,7 @@ impl ProviderRegistry {
     /// So: prefer [`load`](Self::load) in new code. Reach for `from_env` only when
     /// the fields you read have no file key (say which, at the call site), or when
     /// file loading is genuinely unwanted (a test that must not read the operator's
-    /// real `~/.ryu/registry.json`). If you need a field that *is* file-backed, use
+    /// real `~/.ryu/state/registry.json`). If you need a field that *is* file-backed, use
     /// `load()` — do not add a file key for a field this constructor's callers read.
     pub fn from_env() -> Self {
         Self::from_file_path(None)
@@ -1066,6 +1250,7 @@ impl Default for ProviderRegistry {
             },
             embed_base_url: DEFAULT_EMBED_BASE_URL.to_owned(),
             local_embed_model: LocalModelEntry {
+                modality: Modality::Embedding,
                 id: DEFAULT_LOCAL_EMBED_MODEL_ID.to_owned(),
                 weight_url: DEFAULT_LOCAL_EMBED_MODEL_URL.to_owned(),
                 sha256: DEFAULT_LOCAL_EMBED_MODEL_SHA256.to_owned(),
@@ -1076,16 +1261,19 @@ impl Default for ProviderRegistry {
             },
             reranker_base_url: DEFAULT_RERANKER_BASE_URL.to_owned(),
             local_reranker_model: LocalModelEntry {
+                modality: Modality::Rerank,
                 id: DEFAULT_LOCAL_RERANKER_MODEL_ID.to_owned(),
                 weight_url: DEFAULT_LOCAL_RERANKER_MODEL_URL.to_owned(),
                 sha256: DEFAULT_LOCAL_RERANKER_MODEL_SHA256.to_owned(),
             },
             local_classifier_model: LocalModelEntry {
+                modality: Modality::Classifier,
                 id: DEFAULT_LOCAL_CLASSIFIER_MODEL_ID.to_owned(),
                 weight_url: DEFAULT_LOCAL_CLASSIFIER_MODEL_URL.to_owned(),
                 sha256: DEFAULT_LOCAL_CLASSIFIER_MODEL_SHA256.to_owned(),
             },
             local_speech_model: LocalModelEntry {
+                modality: Modality::Chat,
                 id: DEFAULT_LOCAL_SPEECH_MODEL_ID.to_owned(),
                 weight_url: DEFAULT_LOCAL_SPEECH_MODEL_URL.to_owned(),
                 sha256: DEFAULT_LOCAL_SPEECH_MODEL_SHA256.to_owned(),
@@ -1093,6 +1281,7 @@ impl Default for ProviderRegistry {
             rag_strategy: DEFAULT_RAG_STRATEGY.to_owned(),
             graph_extraction_model: DEFAULT_GRAPH_EXTRACTION_MODEL.to_owned(),
             local_chat_model: LocalModelEntry {
+                modality: Modality::Chat,
                 id: DEFAULT_LOCAL_CHAT_MODEL_ID.to_owned(),
                 weight_url: DEFAULT_LOCAL_CHAT_MODEL_URL.to_owned(),
                 sha256: DEFAULT_LOCAL_CHAT_MODEL_SHA256.to_owned(),
@@ -1195,7 +1384,7 @@ pub(crate) fn lock_registry_env() -> std::sync::MutexGuard<'static, ()> {
 /// mutates process env never leaks into the others.
 ///
 /// **`RYU_REGISTRY_PATH` is cleared too.** Clearing alone used to be worse than
-/// useless: an unset var meant the operator's real `~/.ryu/registry.json`, so a
+/// useless: an unset var meant the operator's real `~/.ryu/state/registry.json`, so a
 /// guarded `load()` test read the developer's config. That hole is now closed in
 /// [`registry_path`] itself, which resolves the unset case to a nonexistent temp
 /// path under `cfg(test)` — so isolation no longer depends on each test remembering
@@ -1273,7 +1462,7 @@ const REGISTRY_ENV: &[&str] = &[
     // The file half of the same knob. Cleared here so nothing inherits a stray
     // override; the cleared state is safe because `registry_path` resolves an unset
     // var to a nonexistent temp path under `cfg(test)` rather than to the operator's
-    // real `~/.ryu/registry.json`.
+    // real `~/.ryu/state/registry.json`.
     "RYU_REGISTRY_PATH",
 ];
 
@@ -1368,6 +1557,63 @@ mod tests {
         assert_eq!(reg.default_llm_model, DEFAULT_LLM_MODEL);
     }
 
+    fn device_with_ram(ram_gib: Option<u64>) -> crate::model_catalog::device::DeviceInfo {
+        let total_ram_bytes = ram_gib.map(|g| g * 1024 * 1024 * 1024);
+        crate::model_catalog::device::DeviceInfo {
+            ram_human: total_ram_bytes
+                .map(crate::model_catalog::device::human_bytes)
+                .unwrap_or_default(),
+            total_ram_bytes,
+            vram_bytes: None,
+            vram_human: String::new(),
+            gpu_name: None,
+            gpu_vendor: None,
+            unified_memory: false,
+            os: "linux".into(),
+            disk_free_bytes: None,
+            disk_free_human: String::new(),
+        }
+    }
+
+    /// Gemma 4 E2B needs ~5.0 GiB on the CPU; below that the node's built-in
+    /// chat default is the ~0.8 GB Gemma 3 1B. Unknown hardware never downgrades.
+    #[test]
+    fn chat_default_falls_back_to_gemma_3_1b_only_when_ram_is_known_too_small() {
+        assert_eq!(local_chat_default_for(None), MAIN_LOCAL_CHAT_DEFAULT);
+        assert_eq!(
+            local_chat_default_for(Some(&device_with_ram(None))),
+            MAIN_LOCAL_CHAT_DEFAULT
+        );
+        assert_eq!(
+            local_chat_default_for(Some(&device_with_ram(Some(8)))),
+            MAIN_LOCAL_CHAT_DEFAULT
+        );
+        assert_eq!(
+            local_chat_default_for(Some(&device_with_ram(Some(6)))),
+            MAIN_LOCAL_CHAT_DEFAULT
+        );
+        assert_eq!(
+            local_chat_default_for(Some(&device_with_ram(Some(4)))),
+            FALLBACK_LOCAL_CHAT_DEFAULT
+        );
+        assert_eq!(local_chat_fallback_reason(&device_with_ram(Some(8))), None);
+        let reason = local_chat_fallback_reason(&device_with_ram(Some(4))).unwrap();
+        assert!(reason.contains("This computer has 4.0 GB"), "{reason}");
+        assert!(reason.contains("Gemma 3 1B"), "{reason}");
+    }
+
+    #[test]
+    fn chat_defaults_are_pinned_and_sized() {
+        for default in [MAIN_LOCAL_CHAT_DEFAULT, FALLBACK_LOCAL_CHAT_DEFAULT] {
+            assert!(default.url.contains("/resolve/"), "{}", default.url);
+            assert!(!default.url.contains("/resolve/main/"), "{}", default.url);
+            assert!(default.url.ends_with(&format!("/{}.gguf", default.id)));
+            assert_eq!(default.sha256.len(), 64);
+            assert_eq!(local_chat_default_bytes(default.id), Some(default.bytes));
+        }
+        assert_eq!(local_chat_default_bytes("my-custom-model"), None);
+    }
+
     #[test]
     fn default_local_chat_model_is_set() {
         let reg = ProviderRegistry::default();
@@ -1376,10 +1622,29 @@ mod tests {
         assert!(!reg.local_chat_model.weight_url.is_empty());
         assert!(reg.local_chat_model.weight_url.contains("gemma-4-E2B"));
         assert!(!reg.local_chat_model.sha256.is_empty());
-        // weight_path resolves to ~/.ryu/models/<id>.gguf
+        // weight_path resolves to <data dir>/models/chat/<id>.gguf
         let path = reg.local_chat_model.weight_path();
-        assert!(path.to_string_lossy().contains("models"));
-        assert!(path.to_string_lossy().ends_with(".gguf"));
+        assert!(path.ends_with(format!("models/chat/{DEFAULT_LOCAL_CHAT_MODEL_ID}.gguf")));
+    }
+
+    #[test]
+    fn each_local_model_role_has_its_own_models_folder() {
+        let reg = ProviderRegistry::default();
+        let folder = |entry: &LocalModelEntry| {
+            entry
+                .weight_path()
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+        };
+        assert_eq!(folder(&reg.local_chat_model).as_deref(), Some("chat"));
+        assert_eq!(folder(&reg.local_speech_model).as_deref(), Some("chat"));
+        assert_eq!(folder(&reg.local_embed_model).as_deref(), Some("embedding"));
+        assert_eq!(folder(&reg.local_reranker_model).as_deref(), Some("rerank"));
+        assert_eq!(
+            folder(&reg.local_classifier_model).as_deref(),
+            Some("classifier")
+        );
     }
 
     #[test]
@@ -1461,7 +1726,7 @@ mod tests {
         );
         assert!(!reg.local_classifier_model.sha256.is_empty());
         // Distinct from the chat model — sharing the id would collide on the same
-        // `~/.ryu/models/<id>.gguf` path.
+        // version-store key (`gguf:<id>`).
         assert_ne!(reg.local_classifier_model.id, reg.local_chat_model.id);
         let path = reg.local_classifier_model.weight_path();
         assert!(path.to_string_lossy().contains("models"));
@@ -1691,81 +1956,49 @@ mod tests {
         );
     }
 
-    /// Re-derive, from `profile.rs`'s own source, the set of registry env vars that
-    /// `profile::apply_env_defaults` seeds — i.e. the keys where a non-release
-    /// profile silently occupies layer 1 of the env > file > literal chain.
-    ///
-    /// A hand-copied list here would be a list that rots. The failure mode it would
-    /// rot into is specific and silent: adding one `set_if_unset` row in `profile.rs`
-    /// for, say, `RYU_DEFAULT_LLM_MODEL` would make that `registry.json` key dead for
-    /// every developer running `bun dev`, with nothing anywhere reporting it. So this
-    /// parses the seeds out of the source instead and fails when the intersection
-    /// changes, forcing the module header's table to be updated in the same commit.
-    ///
-    /// `include_str!` with a literal path on purpose: `tools/mirror-public.sh` step 3b
-    /// greps literal include paths and refuses to publish a tree where one does not
-    /// resolve, and a computed path would bypass that gate.
+    /// Exercise the actual startup default plan instead of parsing Rust source.
+    /// These defaults participate in env > registry file > literal precedence;
+    /// a new registry key here would silently shadow its file-backed setting.
     #[test]
     fn registry_env_keys_shadowed_by_the_profile_defaults() {
-        const PROFILE_SRC: &str = include_str!("../profile.rs");
-
-        // Strip line comments FIRST, for two reasons. `profile.rs`'s module header
-        // *names* both of the keys below in prose, so the obvious cheaper test —
-        // substring-search the raw file for each key — would stay green after
-        // someone deleted the seeding entirely. And a commented-out `set_if_unset(…)`
-        // must not count as a live seed here either. Renaming the helper's own
-        // definition keeps `fn set_if_unset(` from parsing as a ninth call site.
-        let code = PROFILE_SRC
-            .lines()
-            .filter(|l| !l.trim_start().starts_with("//"))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .replace("fn set_if_unset(", "fn seeder_definition(");
-
-        // Split on the call token rather than matching a line: five of the eight
-        // seeds are multi-line, so a line-scoped regex would see only three of them
-        // — and would miss both of the keys this test exists to track.
-        let call_sites: Vec<&str> = code.split("set_if_unset(").skip(1).collect();
+        let gateway_config = std::path::PathBuf::from("fixture-profile/gateway.toml");
+        let defaults = crate::profile::environment_defaults_for(1000, Some(gateway_config.clone()));
         assert_eq!(
-            call_sites.len(),
-            8,
-            "apply_env_defaults changed shape; re-read it and update the module header table"
+            defaults,
+            vec![
+                ("RYU_BIND", "127.0.0.1:8980".to_owned()),
+                ("RYU_GATEWAY_URL", "http://127.0.0.1:8981".to_owned()),
+                (
+                    "GATEWAY_CONFIG",
+                    gateway_config.to_string_lossy().into_owned()
+                ),
+                ("RYU_SHADOW_URL", "http://127.0.0.1:4030".to_owned()),
+                ("RYU_EMBED_BASE_URL", "http://127.0.0.1:9081".to_owned()),
+                ("RYU_RERANKER_BASE_URL", "http://127.0.0.1:9082".to_owned()),
+            ]
         );
-
-        // First string literal in each call = the env key. One seed passes a const
-        // (`crate::paths::RYU_DIR_ENV`) and so yields nothing here; that is fine
-        // because `RYU_DIR` is not a registry key — but if this count ever exceeds
-        // one, a NEW const-keyed seed exists and this test must be taught to resolve
-        // it rather than skip it.
-        let mut seeded: Vec<&str> = Vec::new();
-        let mut const_keyed = 0usize;
-        for site in call_sites {
-            match site
-                .split_once('"')
-                .and_then(|(_, rest)| rest.split_once('"'))
-            {
-                Some((key, _)) => seeded.push(key),
-                None => const_keyed += 1,
-            }
-        }
-        assert_eq!(const_keyed, 1, "only RYU_DIR is seeded through a const");
-        assert!(
-            seeded.contains(&"RYU_BIND"),
-            "sanity: parsed the literals, got {seeded:?}"
-        );
-
         let mut shadowed: Vec<&str> = REGISTRY_ENV
             .iter()
             .copied()
-            .filter(|k| seeded.contains(k))
+            .filter(|key| defaults.iter().any(|(seeded, _)| seeded == key))
             .collect();
         shadowed.sort_unstable();
         assert_eq!(
             shadowed,
             ["RYU_EMBED_BASE_URL", "RYU_RERANKER_BASE_URL"],
-            "the set of registry keys a non-release profile occupies changed — update \
-             the `RYU_PROFILE` table in this module's header and the field docs it \
-             points at, then change this expectation"
+            "a profile default must not silently shadow another registry file setting"
+        );
+
+        let defaults_without_config = crate::profile::environment_defaults_for(1000, None);
+        assert_eq!(defaults_without_config.len(), 5);
+        assert!(!defaults_without_config
+            .iter()
+            .any(|(key, _)| *key == "GATEWAY_CONFIG"));
+        assert!(
+            !defaults
+                .iter()
+                .any(|(key, _)| *key == crate::paths::RYU_DIR_ENV),
+            "seeding RYU_DIR would mask the operator's relocation pointer"
         );
     }
 
@@ -2043,7 +2276,7 @@ mod tests {
     /// Hence `load()` + a real `RYU_REGISTRY_PATH` — the same two hops production
     /// takes (`load` → `registry_path` → `$RYU_REGISTRY_PATH`). Setting the path is
     /// also what keeps this hermetic: `RegistryEnvGuard` *clears* the var, and an
-    /// unset var makes `load()` read the operator's real `~/.ryu/registry.json`.
+    /// unset var makes `load()` read the operator's real `~/.ryu/state/registry.json`.
     #[test]
     fn rag_strategy_reads_registry_file_via_load() {
         let _lock = lock_registry_env();
@@ -2089,7 +2322,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // Deliberately never created. Pointing at a nonexistent path inside a
         // tempdir (rather than leaving the var unset) is what stops this test from
-        // reading the developer's real ~/.ryu/registry.json.
+        // reading the developer's real ~/.ryu/state/registry.json.
         std::env::set_var("RYU_REGISTRY_PATH", dir.path().join("nope.json"));
 
         let reg = ProviderRegistry::load();
@@ -2241,7 +2474,7 @@ mod tests {
     }
 
     /// The unset case is hermetic under test: `load()` with no `RYU_REGISTRY_PATH`
-    /// must NOT reach `~/.ryu/registry.json`.
+    /// must NOT reach `~/.ryu/state/registry.json`.
     ///
     /// This is the isolation that used to be every individual test's responsibility
     /// — a responsibility that could not be discharged by tests in other modules
@@ -2257,7 +2490,7 @@ mod tests {
         // that forgets to set it is in.
         let resolved = super::registry_path().expect("a path is always resolved");
         // Assert the POSITIVE shape first. The two negative assertions below both
-        // pass vacuously on a machine that simply has no `~/.ryu/registry.json` —
+        // pass vacuously on a machine that simply has no `~/.ryu/state/registry.json` —
         // which is most dev machines — so on their own they would be no evidence
         // that the `cfg(test)` fallback fired at all. If `registry` ever stops being
         // compiled under `cfg(test)` (it is a module of the *bin* target today, and

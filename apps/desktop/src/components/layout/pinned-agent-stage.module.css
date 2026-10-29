@@ -1,0 +1,6 @@
+.authored1 {
+	transition-property: background-color, border-color, transform;
+}
+.authored2 {
+	letter-spacing: 0.12em;
+}

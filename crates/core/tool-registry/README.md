@@ -17,9 +17,10 @@ registry-driven embedder choice stay Core-side.
 
 - `ToolDescriptor` / `ToolKind` / `DescribedTool` / `DescribedArg` — the Contract-1
   descriptor types over which search and describe operate.
-- `ToolRanker` — swappable ranker; **Needle 2 default** with BM25 fallback and an
+- `ToolRanker` — swappable ranker; **Needle 3 default** with Needle 2 rollback,
+  BM25 fallback and an
   embedder-backed `Semantic` seam.
-- `ToolSelector` — host-provided model selector used by the Needle 2 ranker.
+- `ToolSelector` — host-provided model selector used by the Needle rankers.
 - `ToolEmbedder` — trait the semantic ranker calls; supplied by Core.
 - `run_search` — the pure search body over `[ToolDescriptor]`.
 - `describe_from_parts` / `describe_composio` / `described_args` / `arg_summary` —
@@ -27,9 +28,9 @@ registry-driven embedder choice stay Core-side.
 
 ## Swap seam
 
-`ToolRanker` selects the ranking strategy: Needle 2 by default, BM25 as a
+`ToolRanker` selects the ranking strategy: Needle 3 by default, Needle 2 as a
 deterministic fallback/explicit opt-out, or a Semantic ranker backed by any
-host-provided `ToolEmbedder`. Core supplies the Needle 2 selector and keeps the
+host-provided `ToolEmbedder`. Core supplies the Needle selector and keeps the
 runtime/download choice out of this portable crate.
 
 ## Consumed as

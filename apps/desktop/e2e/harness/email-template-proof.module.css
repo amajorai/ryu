@@ -1,0 +1,71 @@
+main {
+	max-width: 1440px;
+	padding: 48px;
+	margin: 0 auto;
+}
+header {
+	max-width: 700px;
+	margin-bottom: 28px;
+}
+.eyebrow {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--muted-foreground);
+	text-transform: uppercase;
+	letter-spacing: 0.16em;
+}
+h1 {
+	margin: 12px 0;
+	font-size: clamp(28px, 4vw, 48px);
+	letter-spacing: -0.04em;
+}
+header p:last-child {
+	font-size: 16px;
+	line-height: 1.6;
+	color: var(--muted-foreground);
+}
+.grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 24px;
+}
+.card {
+	overflow: hidden;
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 18px;
+	box-shadow: 0 20px 60px #0006;
+}
+.card h2 {
+	padding: 16px 20px;
+	margin: 0;
+	font-size: 14px;
+	color: var(--foreground);
+}
+.loading {
+	display: grid;
+	place-items: center;
+	height: 690px;
+	font-size: 14px;
+	color: var(--muted-foreground);
+}
+iframe {
+	display: block;
+	width: 100%;
+	height: 690px;
+	background: #fff;
+	border: 0;
+}
+@media (max-width: 1200px) {
+	.grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+@media (max-width: 900px) {
+	main {
+		padding: 24px;
+	}
+	.grid {
+		grid-template-columns: 1fr;
+	}
+}

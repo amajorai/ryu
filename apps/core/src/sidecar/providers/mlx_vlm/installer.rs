@@ -1,4 +1,5 @@
-//! MLX-VLM installer — checks for Python ≥ 3.9 and installs `mlx-vlm` via pip.
+//! MLX-VLM installer — checks for Python ≥ 3.10 and installs the pinned
+//! `mlx-vlm` release via pip.
 //!
 //! MLX-VLM is the vision/omni sibling of `mlx-lm` (Blaizzy/mlx-vlm): it serves
 //! Vision-Language and Omni models (image / audio / video input) on Apple's MLX
@@ -18,6 +19,13 @@ use crate::win_process::NoWindow;
 /// Pip package that provides the `mlx_vlm` module (`python -m mlx_vlm.server`).
 pub const PIP_PACKAGE: &str = "mlx-vlm";
 
+/// The pinned requirement Ryu installs. The `mlx-vlm` native launch catalog in
+/// `ryu-engines` is verified against this release's `mlx_vlm.server` CLI.
+pub const PIP_REQUIREMENT: &str = "mlx-vlm==0.7.8";
+
+/// The version [`PIP_REQUIREMENT`] pins, as `pip show` reports it.
+pub const PINNED_VERSION: &str = "0.7.8";
+
 /// Key under which the installed version is recorded in `versions.json`.
 pub const VERSION_KEY: &str = "mlx-vlm";
 
@@ -34,9 +42,24 @@ pub fn ensure_supported() -> Result<()> {
     )
 }
 
-/// Locate a usable Python interpreter (python3 or python) and verify it is ≥ 3.9.
-/// Returns the command name that works on this system.
+/// Locate the Python interpreter that runs MLX-VLM. An install from before the
+/// pin keeps running on the Python it was installed with (≥ 3.9); a fresh or
+/// pinned install needs ≥ 3.10. Returns the command name that works.
 pub async fn python_cmd() -> Result<String> {
+    let recorded = VersionStore::load().versions.get(VERSION_KEY).cloned();
+    python_cmd_at_least(run_min_minor(recorded.as_deref())).await
+}
+
+/// The lowest Python 3 minor version that runs the recorded install.
+fn run_min_minor(recorded: Option<&str>) -> u32 {
+    match recorded {
+        Some(version) if version.trim() != PINNED_VERSION => 9,
+        _ => 10,
+    }
+}
+
+/// Locate python3 or python and verify it is at least `3.{min_minor}`.
+async fn python_cmd_at_least(min_minor: u32) -> Result<String> {
     for candidate in ["python3", "python"] {
         if let Ok(output) = Command::new(candidate)
             .args(["--version"])
@@ -49,12 +72,12 @@ pub async fn python_cmd() -> Result<String> {
                 // "Python 3.11.2" → "3.11.2"
                 let version_str = text.strip_prefix("Python ").unwrap_or("").to_string();
 
-                if is_version_sufficient(&version_str) {
+                if is_version_sufficient(&version_str, min_minor) {
                     return Ok(candidate.to_string());
                 }
 
                 bail!(
-                    "Python {version_str} found but MLX-VLM requires Python ≥ 3.9. \
+                    "Python {version_str} found but MLX-VLM requires Python ≥ 3.{min_minor}. \
                      Please install a newer Python version."
                 );
             }
@@ -62,17 +85,18 @@ pub async fn python_cmd() -> Result<String> {
     }
 
     bail!(
-        "Python not found. MLX-VLM requires Python ≥ 3.9. \
+        "Python not found. MLX-VLM requires Python ≥ 3.{min_minor}. \
          Install it from https://www.python.org/downloads/ or via your system package manager."
     )
 }
 
-/// Returns `true` if the version string (e.g. "3.11.2") is ≥ 3.9.
-fn is_version_sufficient(version: &str) -> bool {
+/// Returns `true` if the version string (e.g. "3.11.2") is ≥ `3.{min_minor}`
+/// (the pinned mlx-vlm declares `requires_python >= 3.10`).
+fn is_version_sufficient(version: &str, min_minor: u32) -> bool {
     let mut parts = version.splitn(3, '.');
     let major: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minor: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-    major > 3 || (major == 3 && minor >= 9)
+    major > 3 || (major == 3 && minor >= min_minor)
 }
 
 pub async fn ensure_installed() -> Result<()> {
@@ -80,27 +104,40 @@ pub async fn ensure_installed() -> Result<()> {
 
     let store = VersionStore::load();
 
-    // Fast path: already recorded in versions.json.
-    if store.versions.contains_key(VERSION_KEY) {
-        tracing::info!("mlx-vlm already installed — skipping");
+    // Fast path: an install is already recorded in versions.json. An install
+    // from before the pin is kept rather than upgraded in the user's Python on
+    // start (it may run on a Python the pinned release no longer supports); a
+    // native launch option that release lacks fails only when it is set.
+    let recorded = store.versions.get(VERSION_KEY).map(String::as_str);
+    if !needs_install(recorded) {
+        tracing::info!(
+            "mlx-vlm {} already installed — skipping",
+            recorded.unwrap_or_default()
+        );
+        if let Ok(python) = python_cmd().await {
+            crate::sidecar::external_runtime::remediate_installed_pip_floor(VERSION_KEY, &python)
+                .await;
+        }
         return Ok(());
     }
 
-    let python = python_cmd()
+    let python = python_cmd_at_least(10)
         .await
         .context("locating Python interpreter for MLX-VLM")?;
 
-    tracing::info!("installing mlx-vlm via pip ({python} -m pip install {PIP_PACKAGE})");
+    tracing::info!("installing mlx-vlm via pip ({python} -m pip install {PIP_REQUIREMENT})");
 
+    let pip_args = crate::sidecar::external_runtime::pip_install_package_args(&[PIP_REQUIREMENT])
+        .context("writing the pip security constraints file")?;
     let status = Command::new(&python)
-        .args(["-m", "pip", "install", PIP_PACKAGE])
+        .args(&pip_args)
         .no_window()
         .status()
         .await
         .context("running `pip install mlx-vlm`")?;
 
     if !status.success() {
-        bail!("`{python} -m pip install {PIP_PACKAGE}` failed with {status}");
+        bail!("`{python} -m pip install {PIP_REQUIREMENT}` failed with {status}");
     }
 
     // Query the installed version.
@@ -117,10 +154,38 @@ pub async fn ensure_installed() -> Result<()> {
                 .and_then(|l| l.strip_prefix("Version:"))
                 .map(|v| v.trim().to_string())
         })
-        .unwrap_or_else(|| "latest".to_string());
+        .unwrap_or_else(|| PINNED_VERSION.to_string());
 
     VersionStore::set_version_persisted(VERSION_KEY, &version).context("writing versions.json")?;
 
     tracing::info!("mlx-vlm {version} installed");
     Ok(())
+}
+
+/// Whether `pip install` must run for the version recorded in `versions.json`.
+fn needs_install(recorded: Option<&str>) -> bool {
+    recorded.is_none()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_recorded_install_is_kept_and_a_fresh_one_gets_the_pin() {
+        assert!(needs_install(None));
+        assert!(!needs_install(Some("0.6.2")));
+        assert!(!needs_install(Some(PINNED_VERSION)));
+        assert!(PIP_REQUIREMENT.ends_with(&format!("=={PINNED_VERSION}")));
+    }
+
+    #[test]
+    fn a_pre_pin_install_keeps_running_on_python_3_9() {
+        assert_eq!(run_min_minor(Some("0.6.2")), 9);
+        assert_eq!(run_min_minor(Some(PINNED_VERSION)), 10);
+        assert_eq!(run_min_minor(None), 10);
+        assert!(is_version_sufficient("3.9.6", 9));
+        assert!(!is_version_sufficient("3.9.6", 10));
+        assert!(is_version_sufficient("3.12.1", 10));
+    }
 }

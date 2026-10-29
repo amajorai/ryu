@@ -4,13 +4,13 @@ use anyhow::Context;
 
 /// Fetches the latest release tag from GitHub Releases API.
 /// Returns the tag_name string (e.g. "v0.2.0" or "b8373").
+///
+/// Goes through the updater's GitHub GET so it shares its headers, deadline and
+/// optional token (a configured token lifts the 60/hr unauthenticated limit that
+/// the catalog and the update check otherwise share).
 pub async fn fetch_latest_version(client: &reqwest::Client, repo: &str) -> anyhow::Result<String> {
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let resp = client
-        .get(&url)
-        .header("User-Agent", "ryu-core/1.0")
-        .header("Accept", "application/vnd.github+json")
-        .send()
+    let resp = crate::update::github_get(client, url)
         .await
         .context("github request failed")?
         .error_for_status()

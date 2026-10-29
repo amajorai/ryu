@@ -20,12 +20,14 @@ import "../../src/index.css";
 const summary: UsageSummaryData = {
 	byModel: [
 		{ amountMicroUsd: 4_200_000, count: 19, key: "claude-sonnet-4" },
-		{ amountMicroUsd: 1_450_000, count: 8, key: "gpt-4.1-mini" },
+		{ amountMicroUsd: 1_290_000, count: 7, key: "gpt-4.1-mini" },
+		{ amountMicroUsd: 160_000, count: 1, key: "google/gemini-2.5-flash" },
 		{ amountMicroUsd: 600_000, count: 3, key: null },
 	],
 	byProvider: [
 		{ amountMicroUsd: 4_200_000, count: 19, key: "Anthropic" },
-		{ amountMicroUsd: 1_450_000, count: 8, key: "OpenAI" },
+		{ amountMicroUsd: 1_290_000, count: 7, key: "OpenAI" },
+		{ amountMicroUsd: 160_000, count: 1, key: "openrouter" },
 		{ amountMicroUsd: 600_000, count: 3, key: null },
 	],
 	byReason: [
@@ -54,6 +56,7 @@ const rows: UsageRow[] = [
 		model: "claude-sonnet-4",
 		outputTokens: 6420,
 		provider: "Anthropic",
+		upstreamProvider: null,
 		reason: "gateway_usage",
 		taskLabel: "Summarize release notes",
 	},
@@ -65,9 +68,10 @@ const rows: UsageRow[] = [
 		id: "usage-2",
 		inputTokens: 9800,
 		isCredit: false,
-		model: "gpt-4.1-mini",
+		model: "google/gemini-2.5-flash",
 		outputTokens: 2900,
-		provider: "OpenAI",
+		provider: "openrouter",
+		upstreamProvider: "Google Vertex",
 		reason: "gateway_usage",
 		taskLabel: null,
 	},
@@ -82,12 +86,32 @@ const rows: UsageRow[] = [
 		model: null,
 		outputTokens: null,
 		provider: null,
+		upstreamProvider: null,
 		reason: "topup",
 		taskLabel: null,
 	},
 ];
 
 const analyticsEvents: UsageEvent[] = [
+	{
+		agentSeconds: 3,
+		bucketSeconds: 900,
+		costMicroUsd: 160_000,
+		errorCount: 0,
+		feature: "Chat",
+		inputTokens: 9800,
+		latencySamples: 1,
+		latencyTotalMs: 2100,
+		memberId: "jiawei",
+		model: "google/gemini-2.5-flash",
+		nodeId: "node-local",
+		organizationId: "org-acme",
+		outputTokens: 2900,
+		provider: "openrouter",
+		requestCount: 1,
+		source: "managed",
+		timestamp: "2026-08-17T22:10:00.000Z",
+	},
 	{
 		agentSeconds: 12,
 		bucketSeconds: 900,
@@ -128,8 +152,12 @@ const analyticsEvents: UsageEvent[] = [
 	},
 ];
 
-const providerOptions = ["openai", "anthropic"];
-const modelOptions = ["gpt-4.1-mini", "claude-sonnet-4"];
+const providerOptions = ["openai", "anthropic", "openrouter"];
+const modelOptions = [
+	"gpt-4.1-mini",
+	"claude-sonnet-4",
+	"google/gemini-2.5-flash",
+];
 
 function snapshot(
 	overrides: Partial<UsageSnapshot> & Pick<UsageSnapshot, "agentId" | "engine">
@@ -335,7 +363,7 @@ function CreditUsageChartsProof() {
 		<main className="min-h-screen bg-background px-6 py-10 text-foreground">
 			<div className="mx-auto flex max-w-5xl flex-col gap-6">
 				<header className="flex flex-col gap-2">
-					<p className="font-medium text-primary text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 						Ryu desktop verification artifact
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">

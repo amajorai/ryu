@@ -1,8 +1,10 @@
 "use client";
 
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
+import { cn } from "@ryu/ui/lib/utils";
 import { ArrowRight, Check, LockKeyhole, UserRoundCheck } from "lucide-react";
 import { useState } from "react";
+import styles from "./gateway-request-preview.module.css";
 
 const EXAMPLES = {
 	read: {
@@ -51,7 +53,7 @@ export function GatewayRequestPreview({
 	if (compact) {
 		return (
 			<div
-				className="relative w-full overflow-hidden rounded-[1.5rem] bg-background p-3 text-foreground sm:p-4"
+				className="relative h-full w-full overflow-hidden bg-muted/65 p-5 pb-16 text-foreground"
 				data-testid="gateway-request-preview"
 			>
 				<Tabs
@@ -70,46 +72,36 @@ export function GatewayRequestPreview({
 						))}
 					</TabsList>
 				</Tabs>
-				<div className="mt-4 flex min-w-0 items-center gap-2">
-					<span className="truncate rounded-lg bg-muted/50 px-2.5 py-2 text-xs">
-						Agent
-					</span>
-					<ArrowRight
-						aria-hidden="true"
-						className="size-4 shrink-0 text-muted-foreground"
-					/>
-					<span className="truncate rounded-lg bg-background px-2.5 py-2 text-xs ring-1 ring-border/50">
-						Gateway
-					</span>
-					<ArrowRight
-						aria-hidden="true"
-						className="size-4 shrink-0 text-muted-foreground"
-					/>
-					<span className="min-w-0 truncate rounded-lg bg-muted/50 px-2.5 py-2 text-xs">
-						{example.tool}
-					</span>
-				</div>
-				<div
-					aria-live="polite"
-					className="mt-3 flex items-center gap-3 rounded-xl bg-background px-3 py-3 ring-1 ring-border/50"
-				>
-					<example.Icon
-						aria-hidden="true"
-						className="showcase-loop size-5 shrink-0 animate-pulse text-primary"
-						strokeWidth={1.5}
-					/>
-					<div className="min-w-0">
-						<p className="font-heading font-medium text-lg tracking-tight">
-							{example.decision}
-						</p>
-						<p className="mt-0.5 text-muted-foreground text-xs">
-							{selected === "read"
-								? "Allowed by policy"
-								: selected === "send"
-									? "Approval required"
-									: "Blocked by policy"}
-						</p>
+				<div aria-live="polite" className="mt-8">
+					<div className="flex items-start gap-4">
+						<example.Icon
+							aria-hidden="true"
+							className={cn(
+								styles.loop,
+								"size-5 shrink-0 animate-pulse text-muted-foreground"
+							)}
+							strokeWidth={1.5}
+						/>
+						<div className="min-w-0">
+							<p className="font-heading font-medium text-xl tracking-tight">
+								{example.decision}
+							</p>
+							<p className="mt-1 text-muted-foreground text-xs">
+								{selected === "read"
+									? "Allowed by policy"
+									: selected === "send"
+										? "Approval required"
+										: "Blocked by policy"}
+							</p>
+						</div>
 					</div>
+				</div>
+				<div className="type-compact absolute right-5 bottom-16 left-5 flex items-center gap-2 border-foreground/10 border-t pt-3 text-muted-foreground">
+					<span>Agent</span>
+					<ArrowRight aria-hidden="true" className="size-3" />
+					<span>Gateway</span>
+					<ArrowRight aria-hidden="true" className="size-3" />
+					<span className="truncate">{example.tool}</span>
 				</div>
 			</div>
 		);
@@ -117,7 +109,7 @@ export function GatewayRequestPreview({
 
 	return (
 		<div
-			className="w-full overflow-hidden rounded-[1.5rem] bg-background"
+			className="w-full overflow-hidden rounded-3xl bg-background"
 			data-testid="gateway-request-preview"
 		>
 			<div

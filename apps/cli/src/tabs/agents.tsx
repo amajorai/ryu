@@ -36,16 +36,14 @@ import { StatusMessage } from "@/components/ui/status-message.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import { useInputFocused } from "../core/InputFocusContext.tsx";
+import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
+import { tf } from "../i18n/translate.ts";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
 import type { TabProps } from "./types.ts";
 
 const LIST_HEIGHT = 16;
 const LABEL_WIDTH = 11;
-
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
 
 // Pad an attribute label to a fixed column so values line up (parity with the
 // Rust detail pane's " engine     " style fixed-width labels).
@@ -54,7 +52,7 @@ function padLabel(label: string): string {
 }
 
 export function AgentsTab({ active }: TabProps) {
-	const { target, url, token } = useCore();
+	const { target } = useCore();
 	const theme = useTheme();
 	const inputFocused = useInputFocused();
 
@@ -88,11 +86,11 @@ export function AgentsTab({ active }: TabProps) {
 				setDetailError(null);
 				setLoaded(true);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (listReqRef.current !== reqId) {
 					return;
 				}
-				setError(errText(err));
+				setError(nativeErrorMessage(err));
 				setLoaded(true);
 			})
 			.finally(() => {
@@ -126,11 +124,15 @@ export function AgentsTab({ active }: TabProps) {
 				}
 				setDetail(d);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (detailReqRef.current !== reqId) {
 					return;
 				}
-				setDetailError(`Failed to load detail: ${errText(err)}`);
+				setDetailError(
+					tf("Failed to load detail: {error}", {
+						error: nativeErrorMessage(err),
+					})
+				);
 			})
 			.finally(() => {
 				if (detailReqRef.current === reqId) {
@@ -176,7 +178,9 @@ export function AgentsTab({ active }: TabProps) {
 	// A failed list fetch covers "core not running" (parity with the Rust empty
 	// state when Core is unreachable).
 	if (error) {
-		return <ErrorView message={error} />;
+		return (
+			<ErrorView message={humanizeError(error, { url: target.url })} onRetry />
+		);
 	}
 
 	return (
@@ -246,7 +250,9 @@ function AgentList({
 						marginTop={i === 0 ? 1 : 0}
 					>
 						<box flexDirection="row" gap={1}>
-							<text fg={isSel ? theme.colors.accent : theme.colors.muted}>
+							<text
+								fg={isSel ? theme.colors.accent : theme.colors.mutedForeground}
+							>
 								{isSel ? "›" : " "}
 							</text>
 							<text fg={isSel ? theme.colors.accent : theme.colors.foreground}>

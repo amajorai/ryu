@@ -1,0 +1,14 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+/* The private diff host retains its opaque black dark surface independently
+ * of the application page/card theme, as the previous edit-card owner did. */
+@layer components {
+	.card {
+		--edit-diff-dark-surface: #000;
+	}
+	[class~="dark"] .card,
+	[data-theme="dark"] .card {
+		background-color: var(--edit-diff-dark-surface);
+	}
+}

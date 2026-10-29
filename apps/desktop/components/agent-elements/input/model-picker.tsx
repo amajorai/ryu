@@ -1,25 +1,24 @@
 "use client";
 
+import "./universal-picker-body.module.css";
+
 import {
 	ArrowDown01Icon,
 	Search01Icon,
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/popover.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { memo, useCallback, useMemo, useState } from "react";
-import {
-	COMPOSER_SELECT_ITEM,
-	COMPOSER_SELECT_POPOVER,
-	COMPOSER_SELECT_TRIGGER,
-} from "@/components/agent-elements/input/composer-select.ts";
+
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import { friendlyModelDisplay } from "@/src/lib/catalog/friendly.ts";
 import type { ModelOption } from "../types.ts";
@@ -51,6 +50,7 @@ export const ModelPicker = memo(function ModelPicker({
 	const activeModel = models.find((m) => m.id === activeId) ?? models[0];
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
+	const tl = useLiteralMessages();
 	const [friendly] = useFriendlyMode();
 	// Friendly mode cleans raw developer model names AND quant labels (reusing the
 	// store's vocabulary, so a quant reads "Balanced (recommended)", never
@@ -97,8 +97,9 @@ export const ModelPicker = memo(function ModelPicker({
 			<PopoverTrigger
 				render={
 					<Button
+						appearance="composer-settings"
 						aria-label="Select model"
-						className={cn(COMPOSER_SELECT_TRIGGER, className)}
+						className={className}
 						size="sm"
 						type="button"
 						variant="ghost"
@@ -131,11 +132,12 @@ export const ModelPicker = memo(function ModelPicker({
 				// the popup itself must not scroll too (two nested scrollers read as a
 				// list that will not move).
 				className={cn(
-					COMPOSER_SELECT_POPOVER,
-					"flex max-h-80 flex-col overflow-hidden"
+					"flex max-h-80 w-auto min-w-[200px] max-w-[280px] flex-col overflow-hidden"
 				)}
+				data-desktop-picker-popover="true"
 				side="top"
 				sideOffset={6}
+				spacing="small-inset"
 			>
 				{showSearch && (
 					<div className="sticky top-0 z-10 mb-1">
@@ -146,10 +148,10 @@ export const ModelPicker = memo(function ModelPicker({
 							/>
 							<Input
 								aria-label="Filter models"
-								className="h-7 border-0 bg-transparent pl-7 text-[12px]"
 								onChange={(e) => setQuery(e.target.value)}
 								onKeyDown={(e) => e.stopPropagation()}
 								placeholder="Search models"
+								purpose="picker-filter"
 								spellCheck={false}
 								value={query}
 							/>
@@ -159,14 +161,17 @@ export const ModelPicker = memo(function ModelPicker({
 				<div className="scroll-fade min-h-0 flex-1 overflow-y-auto">
 					{filteredModels.length === 0 ? (
 						<p className="px-3 py-4 text-center text-muted-foreground text-xs">
-							No models match &ldquo;{query.trim()}&rdquo;
+							{tl("No models match “{query}”", { query: query.trim() })}
 						</p>
 					) : (
 						filteredModels.map((model) => {
 							const isActive = model.id === activeModel?.id;
 							return (
 								<Button
-									className={cn(COMPOSER_SELECT_ITEM, isActive && "bg-accent")}
+									appearance={
+										isActive ? "composer-mode-active" : "composer-mode"
+									}
+									className="items-center"
 									key={model.id}
 									onClick={() => handleSelect(model.id)}
 									type="button"
@@ -218,7 +223,7 @@ export const ModelBadge = memo(function ModelBadge({
 	return (
 		<div
 			className={cn(
-				"inline-flex h-7 items-center px-2 text-[12px] text-foreground/30 leading-4",
+				"inline-flex h-7 items-center px-2 text-foreground/30 text-xs leading-4",
 				className
 			)}
 		>

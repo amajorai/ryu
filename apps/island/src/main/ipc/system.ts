@@ -22,23 +22,27 @@ import {
 	type OpenDialogOptions,
 	shell,
 } from "electron";
+import { z } from "zod";
 import { IPC, type IslandAttachment } from "../../shared/ipc.ts";
 
 /** Only these schemes may be handed to the OS; everything else is ignored. */
 const SAFE_SCHEME_RE = /^https?:\/\//i;
 
 /** Image extensions offered in the picker, mapped to their MIME type. */
-const IMAGE_MIME: Record<string, string> = {
-	".png": "image/png",
-	".jpg": "image/jpeg",
-	".jpeg": "image/jpeg",
-	".gif": "image/gif",
-	".webp": "image/webp",
-};
+const IMAGE_MIME = new Map(
+	Object.entries({
+		".png": "image/png",
+		".jpg": "image/jpeg",
+		".jpeg": "image/jpeg",
+		".gif": "image/gif",
+		".webp": "image/webp",
+	})
+);
+const externalUrlSchema = z.string().trim().regex(SAFE_SCHEME_RE);
 
 /** Read one image path into an attachment (data URL), or null if unreadable. */
 async function readAttachment(path: string): Promise<IslandAttachment | null> {
-	const mimeType = IMAGE_MIME[extname(path).toLowerCase()];
+	const mimeType = IMAGE_MIME.get(extname(path).toLowerCase());
 	if (!mimeType) {
 		return null;
 	}
@@ -58,12 +62,16 @@ async function readAttachment(path: string): Promise<IslandAttachment | null> {
 
 /** Register the system IPC handlers (open-external + attach images). */
 export function registerSystemIpc(getWindow: () => BrowserWindow | null): void {
-	ipcMain.handle(IPC.system.openExternal, async (_event, url: unknown) => {
-		if (typeof url !== "string" || !SAFE_SCHEME_RE.test(url.trim())) {
-			return;
+	ipcMain.handle(
+		IPC.system.openExternal,
+		async (_event, url: Parameters<typeof externalUrlSchema.safeParse>[0]) => {
+			const parsed = externalUrlSchema.safeParse(url);
+			if (!parsed.success) {
+				return;
+			}
+			await shell.openExternal(parsed.data);
 		}
-		await shell.openExternal(url.trim());
-	});
+	);
 
 	ipcMain.handle(
 		IPC.system.attachFiles,

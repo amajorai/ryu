@@ -1011,6 +1011,8 @@ pub struct CyclePlan {
     pub scored: usize,
     pub sample_count: usize,
     pub min_reward: f64,
+    /// Always `None`: datasets are no longer written to disk (a retrain sends
+    /// its samples inline). Kept so existing API clients keep parsing the plan.
     pub dataset_path: Option<String>,
     /// Whether a fine-tune was actually dispatched (false = dry-run preview).
     pub dispatched: bool,
@@ -1117,36 +1119,21 @@ pub async fn run_cycle_with_improvement(
             rows.push(r);
         }
     }
-    let jsonl = build_jsonl(&rows);
-
-    // Persist the dataset for LOCAL training + audit. A remote node can't read a
-    // local path, so remote dispatch inlines the samples instead (see below); the
-    // file write is best-effort but its failure is recorded (not conflated with
-    // "no samples").
-    let mut dataset_path = None;
-    let mut write_err = None;
-    if !rows.is_empty() {
-        let dir = crate::data_dir().join("learning");
-        match tokio::fs::create_dir_all(&dir).await {
-            Ok(()) => {
-                let path = dir.join(format!("dataset-{}.jsonl", chrono::Utc::now().timestamp()));
-                match tokio::fs::write(&path, &jsonl).await {
-                    Ok(()) => dataset_path = Some(path.to_string_lossy().to_string()),
-                    Err(e) => write_err = Some(format!("writing dataset failed: {e}")),
-                }
-            }
-            Err(e) => write_err = Some(format!("creating dataset dir failed: {e}")),
-        }
-    }
-
+    // The dataset is never written to disk: it is a plaintext copy of the
+    // (sealed) buffer, and both the local fine-tune sidecar and a remote node
+    // accept the samples inline, so dispatch sends them in the request body.
     let mut dispatched = false;
     let mut job_id = None;
     let mut error = None;
+    let mut sample_count = rows.len();
     let note = if execute {
-        let d = dispatch_cycle(ctx, &base_model, &rows, &dataset_path, &write_err).await;
+        let d = dispatch_cycle(ctx, &base_model, &rows).await;
         dispatched = d.dispatched;
         job_id = d.job_id;
         error = d.error;
+        if d.dispatched {
+            sample_count = d.sample_count;
+        }
         d.note
     } else {
         "dry run — dataset assembled; review, then re-run with execute:true to train".to_string()
@@ -1157,9 +1144,9 @@ pub async fn run_cycle_with_improvement(
         base_model,
         swept,
         scored,
-        sample_count: rows.len(),
+        sample_count,
         min_reward,
-        dataset_path,
+        dataset_path: None,
         dispatched,
         job_id,
         error,
@@ -1212,6 +1199,35 @@ struct Dispatched {
     job_id: Option<String>,
     error: Option<String>,
     note: String,
+    /// Samples actually placed in the dispatched body (after the byte budget).
+    sample_count: usize,
+}
+
+/// Byte budget for the serialized inline samples of one retrain dispatch. The
+/// fine-tune app's control routes reject bodies over 4 MiB; this leaves room for
+/// the envelope (base model, target, remote coordinates) and JSON overhead.
+pub const INLINE_DATASET_BUDGET_BYTES: usize = 3 * 1024 * 1024 + 512 * 1024;
+
+/// Serialize rows into chat samples, in order, stopping before the cumulative
+/// serialized size would exceed `budget`. Rows come reward-descending, so the
+/// kept prefix is the highest-reward subset that fits. Pure for testing.
+pub fn inline_samples_within_budget(rows: &[Experience], budget: usize) -> Vec<Value> {
+    let mut used = 0usize;
+    let mut samples = Vec::new();
+    for r in rows {
+        let sample = json!({ "messages": [
+            { "role": "user", "content": r.user_text },
+            { "role": "assistant", "content": r.assistant_text },
+        ] });
+        // +1 for the separating comma inside the samples array.
+        let size = serde_json::to_vec(&sample).map_or(usize::MAX, |b| b.len()) + 1;
+        if used.saturating_add(size) > budget {
+            break;
+        }
+        used += size;
+        samples.push(sample);
+    }
+    samples
 }
 
 /// Build and dispatch the retrain. A real retrain always derives a FRESH LoRA
@@ -1224,14 +1240,13 @@ async fn dispatch_cycle(
     ctx: &LearningCtx,
     base_model: &Option<String>,
     rows: &[Experience],
-    dataset_path: &Option<String>,
-    write_err: &Option<String>,
 ) -> Dispatched {
     let mut out = Dispatched {
         dispatched: false,
         job_id: None,
         error: None,
         note: String::new(),
+        sample_count: 0,
     };
     let fail = |out: &mut Dispatched, msg: String| {
         out.error = Some(msg.clone());
@@ -1262,31 +1277,23 @@ async fn dispatch_cycle(
     }
     let use_remote = requested_remote && remote.is_some();
 
-    // Remote reads the dataset on ITS filesystem, so a local path is meaningless
-    // there — inline the samples. Local uses the on-disk JSONL path.
-    let dataset = if use_remote {
-        let samples: Vec<Value> = rows
-            .iter()
-            .map(|r| {
-                json!({ "messages": [
-                    { "role": "user", "content": r.user_text },
-                    { "role": "assistant", "content": r.assistant_text },
-                ] })
-            })
-            .collect();
-        json!({ "format": "chat", "samples": samples })
-    } else {
-        match dataset_path {
-            Some(p) => json!({ "format": "chat", "path": p }),
-            None => {
-                let e = write_err
-                    .clone()
-                    .unwrap_or_else(|| "dataset file was not written".to_string());
-                fail(&mut out, format!("cannot dispatch: {e}"));
-                return out;
-            }
-        }
-    };
+    // Both targets receive the samples inline: a remote node cannot read a local
+    // path, and the local sidecar must not need a plaintext dataset file on disk.
+    // The fine-tune control routes cap request bodies, so keep the highest-reward
+    // rows (they arrive reward-descending) that fit the inline budget.
+    let samples = inline_samples_within_budget(rows, INLINE_DATASET_BUDGET_BYTES);
+    let sent = samples.len();
+    out.sample_count = sent;
+    if sent == 0 {
+        fail(
+            &mut out,
+            format!(
+                "cannot dispatch: the top-reward sample alone exceeds the {INLINE_DATASET_BUDGET_BYTES}-byte inline dataset budget"
+            ),
+        );
+        return out;
+    }
+    let dataset = json!({ "format": "chat", "samples": samples });
 
     let output_name = format!("learned-{}", chrono::Utc::now().timestamp());
     let mut body = json!({
@@ -1308,10 +1315,14 @@ async fn dispatch_cycle(
                 .get("job_id")
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
-            out.note = format!(
-                "fine-tune dispatched from base '{base}' on {} samples",
-                rows.len()
-            );
+            out.note = if sent < rows.len() {
+                format!(
+                    "fine-tune dispatched from base '{base}' on {sent} of {} samples (the rest exceeded the {INLINE_DATASET_BUDGET_BYTES}-byte inline dataset budget; highest-reward samples kept)",
+                    rows.len()
+                )
+            } else {
+                format!("fine-tune dispatched from base '{base}' on {sent} samples")
+            };
         }
         Err(err) => {
             fail(&mut out, format!("dispatch failed: {err}"));
@@ -2067,7 +2078,8 @@ mod flow_tests {
         assert!(!plan.dispatched);
         assert!(plan.error.is_none());
         assert!(plan.note.contains("dry run"));
-        assert!(plan.dataset_path.is_some()); // dataset written to temp data dir
+        // The dataset is never written to disk (plaintext copy of the buffer).
+        assert!(plan.dataset_path.is_none());
     }
 
     #[tokio::test]
@@ -2094,12 +2106,73 @@ mod flow_tests {
             .with_messages("c1", &[("user", "q"), ("assistant", "a")]);
         host.prm_reply = Some("0.95".to_string());
         host.finetune = Some(json!({ "job_id": "job-123" }));
+        let dispatched = host.dispatched.clone();
         let c = ctx(host, store("cycle-exec"));
         let plan = run_cycle(&c, true).await.unwrap();
         assert!(plan.dispatched);
         assert_eq!(plan.job_id.as_deref(), Some("job-123"));
         assert!(plan.error.is_none());
         assert!(plan.note.contains("fine-tune dispatched"));
+        // Local training gets the samples inline: no plaintext dataset file.
+        let body = dispatched.lock().unwrap().clone().expect("dispatched body");
+        assert_eq!(body["target"], "local");
+        assert!(body["dataset"].get("path").is_none());
+        assert_eq!(body["dataset"]["samples"][0]["messages"][0]["content"], "q");
+        assert_eq!(body["dataset"]["samples"][0]["messages"][1]["content"], "a");
+    }
+
+    #[tokio::test]
+    async fn cycle_execute_caps_inline_dataset_under_the_control_body_limit() {
+        // Six conversations of ~1 MiB each: ~6 MiB of samples would be rejected
+        // (413) by the finetune app's 4 MiB control body limit.
+        let big = "x".repeat(1024 * 1024);
+        let mut host = MockHost::new()
+            .enabled()
+            .with_pref(LEARNING_MIN_REWARD_PREF, "0.5")
+            .with_pref(LEARNING_BASE_MODEL_PREF, "orig-base");
+        for i in 0..6 {
+            let id = format!("c{i}");
+            host = host
+                .with_conversation(&id, 10 + i, 2)
+                .with_messages(&id, &[("user", "q"), ("assistant", big.as_str())]);
+        }
+        host.prm_reply = Some("0.95".to_string());
+        host.finetune = Some(json!({ "job_id": "job-big" }));
+        let dispatched = host.dispatched.clone();
+        let c = ctx(host, store("cycle-exec-big"));
+        let plan = run_cycle(&c, true).await.unwrap();
+        assert!(plan.dispatched, "{plan:?}");
+        let body = dispatched.lock().unwrap().clone().expect("dispatched body");
+        let body_len = serde_json::to_vec(&body).unwrap().len();
+        assert!(body_len < 4 * 1024 * 1024, "dispatched body {body_len} bytes");
+        let sent = body["dataset"]["samples"].as_array().unwrap().len();
+        assert!(sent > 0 && sent < 6, "sent {sent}");
+        assert_eq!(plan.sample_count, sent);
+        assert!(plan.note.contains(&format!("{sent} of 6 samples")), "{}", plan.note);
+    }
+
+    #[test]
+    fn inline_budget_keeps_the_leading_highest_reward_rows() {
+        let row = |text: &str, reward: f64| Experience {
+            id: format!("e-{reward}"),
+            conversation_id: "c".into(),
+            agent_id: None,
+            user_text: "q".into(),
+            assistant_text: text.into(),
+            outcome: "completed".into(),
+            reward: Some(reward),
+            base_model: None,
+            skill_generation: 0,
+            excluded: false,
+            created_at: String::new(),
+        };
+        let rows = vec![row("best", 0.9), row(&"y".repeat(500), 0.8), row("small", 0.7)];
+        let kept = inline_samples_within_budget(&rows, 200);
+        // Stops at the first row that does not fit (no reordering past it).
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0]["messages"][1]["content"], "best");
+        assert!(inline_samples_within_budget(&rows, 10).is_empty());
+        assert_eq!(inline_samples_within_budget(&rows, usize::MAX).len(), 3);
     }
 
     #[tokio::test]

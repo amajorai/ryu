@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::StreamExt;
+use ryu_sidecar_runtime::layout;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{broadcast, watch, Mutex, RwLock};
@@ -27,6 +28,105 @@ use super::{
     DownloadTask, ThroughputSample, DEFAULT_SLOTS, MAX_SLOTS, MIN_SLOTS,
 };
 
+/// Write completely before replacing the accepted preference. A write/rename
+/// failure leaves the previous file intact and removes only our own staging file.
+fn persist_settings(path: &Path, settings: DownloadSettings) -> Result<()> {
+    let json = serde_json::to_vec_pretty(&settings)?;
+    write_file_atomically(path, &json)
+}
+
+/// Stage `bytes` in a sibling file, fsync, then rename over `path`. A crash or
+/// write failure leaves the previous file intact (never a truncated JSON that a
+/// later `load()` would silently discard), and removes only our staging file.
+fn write_file_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    static NEXT_SAVE: AtomicU64 = AtomicU64::new(0);
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("download state file has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let stem = path
+        .file_name()
+        .map_or_else(|| "state".into(), |name| name.to_string_lossy());
+    let (staging, mut file) = loop {
+        let sequence = NEXT_SAVE.fetch_add(1, Ordering::Relaxed);
+        let staging = parent.join(format!(".{stem}-{}-{sequence}.tmp", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staging)
+        {
+            Ok(file) => break (staging, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    };
+    let result = (|| -> std::io::Result<()> {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&staging, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&staging);
+    }
+    result.map_err(Into::into)
+}
+
+/// The filesystem steps that install a verified `.part` at its destination.
+/// Production uses [`StdInstallFs`]; the crate's tests wrap it to observe the
+/// order of the steps and to inject failures.
+pub(crate) trait InstallFs: Send + Sync {
+    /// Flush a file's data and metadata to stable storage.
+    fn sync_file(&self, path: &Path) -> std::io::Result<()>;
+    /// Give the file at `original` a second name, `link`.
+    fn hard_link(&self, original: &Path, link: &Path) -> std::io::Result<()>;
+    /// Atomically replace `to` with `from`.
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+    /// Flush a directory's entries, so a rename inside it survives power loss.
+    fn sync_dir(&self, path: &Path) -> std::io::Result<()>;
+    /// Remove a file name.
+    fn remove_file(&self, path: &Path) -> std::io::Result<()>;
+}
+
+pub(crate) struct StdInstallFs;
+
+impl InstallFs for StdInstallFs {
+    fn sync_file(&self, path: &Path) -> std::io::Result<()> {
+        // Write access, because Windows refuses to flush a read-only handle.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)?
+            .sync_all()
+    }
+
+    fn hard_link(&self, original: &Path, link: &Path) -> std::io::Result<()> {
+        std::fs::hard_link(original, link)
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::rename(from, to)
+    }
+
+    fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
+
+    fn sync_dir(&self, path: &Path) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            std::fs::File::open(path)?.sync_all()
+        }
+        // Windows cannot open a directory for flushing without backup
+        // semantics; NTFS journals the rename's metadata itself.
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Ok(())
+        }
+    }
+}
+
 /// Max HTTP attempts per active streaming pass before a task is marked
 /// `Failed{retryable}`. The `.part` is kept so a Retry resumes from offset.
 const MAX_ATTEMPTS: u32 = 4;
@@ -34,6 +134,18 @@ const MAX_TRANSFER_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// Min interval between progress broadcasts per task (bytes still accrue every
 /// chunk; we just don't flood SSE/persist on every read).
 const PROGRESS_THROTTLE: Duration = Duration::from_millis(250);
+/// Bound on the TCP/TLS connect for each download hop. Neither client had any
+/// deadline, so a black-holed host held a concurrency slot (and every
+/// `download_blocking` caller) forever. Matches [`crate::default_http_client`].
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Per-read idle bound: the longest the response headers or the next body chunk
+/// may take to arrive. This is NOT a total-transfer cap (a multi-GB model that
+/// keeps streaming is never cut off). It catches a peer that accepts the
+/// connection and then goes silent while keeping it alive, which TCP keepalive
+/// cannot detect. A stall surfaces as a network error, so the bounded retry
+/// resumes the `.part` with a Range request instead of pinning a concurrency
+/// slot (and every `download_blocking` installer behind it) forever.
+const STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Control message sent to a driver. The displayed [`DownloadState`] is separate
 /// (the driver re-arms this to `Pause` after a failed pass so it parks instead
@@ -52,6 +164,16 @@ type Term = Option<std::result::Result<PathBuf, String>>;
 struct TaskCtl {
     control: watch::Sender<Control>,
     done: watch::Sender<Term>,
+    /// The spec a byte-transfer driver runs its NEXT pass with (`None` for an
+    /// indeterminate registration). Shared so a later caller that dedups onto a
+    /// parked or failed task can hand it fresh integrity data — a task reloaded
+    /// from `downloads.json` carries no checksum, and the caller's own spec must
+    /// not be silently discarded in favour of that stripped one.
+    spec: Option<Arc<std::sync::Mutex<DownloadSpec>>>,
+    /// Parked because Core restarted mid-transfer (restored by `load()`), not
+    /// because the user paused it. Only such a task is woken by a plain
+    /// `download_blocking` caller; a user's Pause is never overridden.
+    restored: bool,
     /// Monotonic registration stamp. Byte transfers dedup by id in [`DownloadCenter::spawn`],
     /// but an indeterminate registration cannot (its future's output type is the
     /// caller's, so a second caller can't be handed the first one's result) — it
@@ -133,13 +255,85 @@ struct Inner {
     /// Whether the sampling loop has been started (lazily, on the first download,
     /// so constructing a center outside a Tokio runtime never panics).
     tuner_started: AtomicBool,
+    /// The caller's client. Only the loopback tests send through it: production
+    /// builds a guarded, DNS-pinned client for every hop in `stream_once`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "production fetches through a per-hop guarded client"
+        )
+    )]
     client: reqwest::Client,
+    /// Per-read idle bound for transfers ([`STALL_TIMEOUT`]; tests shorten it).
+    stall_timeout: Duration,
     /// Durable log of finished downloads (newest first), so "previous downloads"
     /// survives a restart even though live terminal tasks are dropped from the
-    /// active registry. Persisted to `~/.ryu/downloads-history.json`.
+    /// active registry. Persisted to `<data dir>/state/downloads-history.json`.
     history: Mutex<Vec<DownloadTask>>,
     /// Source of the [`TaskCtl::seq`] stamps.
     next_seq: AtomicU64,
+    /// Serializes snapshot+write of `downloads.json` / `downloads-history.json`.
+    /// Several drivers can change state at once; without this, concurrent
+    /// writers could interleave, or an older snapshot could land after a newer
+    /// one and resurrect stale state on the next restart.
+    persist_lock: Mutex<()>,
+    /// How a verified `.part` is made durable and moved into place.
+    install_fs: Arc<dyn InstallFs>,
+    /// Free bytes on the volume holding a path ([`crate::available_space_for`];
+    /// tests inject a fixed value) for the pre-write disk-space preflight.
+    disk_free: fn(&Path) -> Option<u64>,
+    /// Test-only: park the next registry commit that matches, after its write
+    /// guard is released, so a test can interleave a competing operation.
+    #[cfg(test)]
+    commit_park: std::sync::Mutex<Option<Arc<CommitPark>>>,
+    /// Test-only: park the next [`DownloadCenter::snapshot_and_subscribe`]
+    /// between its subscription and its snapshot, so a test can commit there.
+    #[cfg(test)]
+    snapshot_park: std::sync::Mutex<Option<Arc<CommitPark>>>,
+}
+
+/// Test-only: runs inside [`DownloadCenter::snapshot_and_subscribe`], after it
+/// subscribes and before its snapshot is taken.
+#[cfg(test)]
+async fn snapshot_parked(inner: &Inner) {
+    let park = inner.snapshot_park.lock().unwrap().take();
+    if let Some(park) = park {
+        let _ = park.reached.send(true);
+        park.release
+            .acquire()
+            .await
+            .expect("snapshot park semaphore is never closed")
+            .forget();
+    }
+}
+
+/// A one-shot test barrier on registry commits (see [`Inner::commit_park`]).
+#[cfg(test)]
+struct CommitPark {
+    matches: Box<dyn Fn(&DownloadEvent) -> bool + Send + Sync>,
+    reached: watch::Sender<bool>,
+    release: tokio::sync::Semaphore,
+}
+
+/// Test-only: runs right after a registry commit's write guard is released.
+#[cfg(test)]
+async fn after_commit(inner: &Inner, event: &DownloadEvent) {
+    let park = {
+        let mut slot = inner.commit_park.lock().unwrap();
+        match slot.as_ref() {
+            Some(park) if (park.matches)(event) => slot.take(),
+            _ => None,
+        }
+    };
+    if let Some(park) = park {
+        let _ = park.reached.send(true);
+        park.release
+            .acquire()
+            .await
+            .expect("commit park semaphore is never closed")
+            .forget();
+    }
 }
 
 /// Process-wide download registry. Cheap to clone (wraps an `Arc`).
@@ -151,14 +345,14 @@ pub struct DownloadCenter {
 fn downloads_path() -> PathBuf {
     std::env::var("RYU_DOWNLOADS_FILE")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| host().ryu_dir().join("downloads.json"))
+        .unwrap_or_else(|_| layout::state_path(&host().ryu_dir(), "downloads.json"))
 }
 
 /// Where the durable "previous downloads" log lives.
 fn history_path() -> PathBuf {
     std::env::var("RYU_DOWNLOADS_HISTORY_FILE")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| host().ryu_dir().join("downloads-history.json"))
+        .unwrap_or_else(|_| layout::state_path(&host().ryu_dir(), "downloads-history.json"))
 }
 
 /// Cap on retained history entries (newest kept). Bounds the file + response.
@@ -168,7 +362,7 @@ const HISTORY_CAP: usize = 200;
 fn settings_path() -> PathBuf {
     std::env::var("RYU_DOWNLOADS_SETTINGS_FILE")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| host().ryu_dir().join("downloads-settings.json"))
+        .unwrap_or_else(|_| layout::state_path(&host().ryu_dir(), "downloads-settings.json"))
 }
 
 /// How often the auto-tuner samples throughput. Long enough that a sample spans
@@ -221,6 +415,32 @@ fn now_ms() -> i64 {
 
 /// Stable id derived from the destination path — re-enqueueing the same artifact
 /// dedups onto the in-flight task.
+/// Fold a deduping caller's spec into the one a parked/queued driver will use
+/// next. The caller is the authority on what it is installing (URL, label,
+/// checksum, version record); an absent checksum or version record never erases
+/// one the task already has.
+fn adopt_spec(current: &mut DownloadSpec, incoming: DownloadSpec) {
+    let DownloadSpec {
+        kind,
+        role,
+        label,
+        url,
+        dest: _,
+        sha256,
+        version_record,
+    } = incoming;
+    current.kind = kind;
+    current.role = role;
+    current.label = label;
+    current.url = url;
+    if sha256.as_deref().is_some_and(|value| !value.is_empty()) {
+        current.sha256 = sha256;
+    }
+    if version_record.is_some() {
+        current.version_record = version_record;
+    }
+}
+
 fn derive_id(dest: &Path) -> String {
     let mut hasher = Sha256::new();
     hasher.update(dest.to_string_lossy().as_bytes());
@@ -231,6 +451,29 @@ fn part_path(dest: &Path) -> PathBuf {
     let mut s = dest.as_os_str().to_os_string();
     s.push(".part");
     PathBuf::from(s)
+}
+
+/// The second name an update gives the previous install until the new one is
+/// durable.
+fn previous_install_path(dest: &Path) -> PathBuf {
+    let mut s = dest.as_os_str().to_os_string();
+    s.push(".previous");
+    PathBuf::from(s)
+}
+
+/// Drop the second name [`install_durably`] keeps for a previous install when a
+/// crash left it behind. Beside an installed file it is only a stale extra link
+/// that pins the old file's disk space; beside a missing install it may be the
+/// only copy, so it is kept. Run at startup, before any install can be in
+/// flight.
+fn remove_stale_previous_installs<'a>(dests: impl IntoIterator<Item = &'a str>) {
+    for dest in dests {
+        let dest = Path::new(dest);
+        let previous = previous_install_path(dest);
+        if dest.is_file() && previous.is_file() {
+            let _ = std::fs::remove_file(previous);
+        }
+    }
 }
 
 impl DownloadCenter {
@@ -261,10 +504,57 @@ impl DownloadCenter {
                 }),
                 tuner_started: AtomicBool::new(false),
                 client,
+                stall_timeout: STALL_TIMEOUT,
                 history: Mutex::new(Vec::new()),
                 next_seq: AtomicU64::new(1),
+                persist_lock: Mutex::new(()),
+                install_fs: Arc::new(StdInstallFs),
+                disk_free: crate::disk::available_space_for,
+                #[cfg(test)]
+                commit_park: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                snapshot_park: std::sync::Mutex::new(None),
             }),
         }
+    }
+
+    /// A center whose install step runs through `install_fs` (tests only).
+    #[cfg(test)]
+    fn with_install_fs(client: reqwest::Client, install_fs: Arc<dyn InstallFs>) -> Self {
+        let mut center = Self::new(client);
+        Arc::get_mut(&mut center.inner)
+            .expect("a fresh center is not shared")
+            .install_fs = install_fs;
+        center
+    }
+
+    /// Park the next registry commit whose event matches, after its write guard
+    /// is released, until the returned handle is released (tests only).
+    #[cfg(test)]
+    fn park_after_commit(
+        &self,
+        matches: impl Fn(&DownloadEvent) -> bool + Send + Sync + 'static,
+    ) -> Arc<CommitPark> {
+        let park = Arc::new(CommitPark {
+            matches: Box::new(matches),
+            reached: watch::channel(false).0,
+            release: tokio::sync::Semaphore::new(0),
+        });
+        *self.inner.commit_park.lock().unwrap() = Some(Arc::clone(&park));
+        park
+    }
+
+    /// Park the next [`Self::snapshot_and_subscribe`] between its subscription
+    /// and its snapshot until the returned handle is released (tests only).
+    #[cfg(test)]
+    fn park_next_snapshot(&self) -> Arc<CommitPark> {
+        let park = Arc::new(CommitPark {
+            matches: Box::new(|_| true),
+            reached: watch::channel(false).0,
+            release: tokio::sync::Semaphore::new(0),
+        });
+        *self.inner.snapshot_park.lock().unwrap() = Some(Arc::clone(&park));
+        park
     }
 
     /// Convenience constructor using the standard ryu HTTP client.
@@ -272,9 +562,46 @@ impl DownloadCenter {
         Self::new(default_http_client())
     }
 
+    /// Shorten the per-read stall bound so a test can exercise it quickly.
+    #[cfg(test)]
+    fn with_stall_timeout(mut self, stall_timeout: Duration) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("set the stall bound before the center is shared")
+            .stall_timeout = stall_timeout;
+        self
+    }
+
+    /// Report a fixed free-space figure to the disk preflight (tests only).
+    #[cfg(test)]
+    fn with_disk_probe(mut self, disk_free: fn(&Path) -> Option<u64>) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("set the disk probe before the center is shared")
+            .disk_free = disk_free;
+        self
+    }
+
     /// Subscribe to live download deltas (used by the SSE endpoint).
     pub fn subscribe(&self) -> broadcast::Receiver<DownloadEvent> {
         self.inner.events.subscribe()
+    }
+
+    /// The registry as of one commit, plus a receiver that delivers exactly
+    /// the commits after it. A stream that starts with this snapshot and then
+    /// forwards the receiver neither replays a commit the snapshot already
+    /// holds nor misses one (the SSE routes).
+    pub async fn snapshot_and_subscribe(
+        &self,
+    ) -> (Vec<DownloadTask>, broadcast::Receiver<DownloadEvent>) {
+        // Every commit publishes while it holds the registry write lock, so
+        // under the read lock no commit can land between the two steps.
+        let tasks = self.inner.tasks.read().await;
+        let rx = self.subscribe();
+        #[cfg(test)]
+        snapshot_parked(&self.inner).await;
+        let mut out: Vec<DownloadTask> = tasks.values().cloned().collect();
+        drop(tasks);
+        out.sort_by_key(|t| t.created_at);
+        (out, rx)
     }
 
     // ── Concurrency settings ──────────────────────────────────────────────────
@@ -323,35 +650,25 @@ impl DownloadCenter {
             );
         }
         self.ensure_settings_loaded().await;
-        let to_persist = {
-            let mut state = self.inner.settings.lock().await;
-            state.settings.mode = mode;
-            if let Some(n) = slots {
-                state.settings.manual_slots = n.clamp(MIN_SLOTS, MAX_SLOTS);
-            }
-            match mode {
-                ConcurrencyMode::Manual => {
-                    self.inner.limiter.set(state.settings.manual_slots);
-                    // Re-seed the tuner from the user's pick, so switching back to
-                    // Auto starts from a sane number rather than a stale one.
-                    state.tuner = AutoTuner::new(state.settings.manual_slots);
-                }
-                ConcurrencyMode::Auto => {
-                    self.inner.limiter.set(state.tuner.slots());
-                }
-            }
-            state.settings
-        };
+        // Serialize durable acceptance and live publication under the same
+        // settings lock. A refused save must not resize the running gate.
+        let mut state = self.inner.settings.lock().await;
+        let mut next = state.settings;
+        next.mode = mode;
+        if let Some(n) = slots {
+            next.manual_slots = n.clamp(MIN_SLOTS, MAX_SLOTS);
+        }
         let path = settings_path();
-        let _ = tokio::task::spawn_blocking(move || {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+        tokio::task::spawn_blocking(move || persist_settings(&path, next)).await??;
+        state.settings = next;
+        match mode {
+            ConcurrencyMode::Manual => {
+                self.inner.limiter.set(next.manual_slots);
+                state.tuner = AutoTuner::new(next.manual_slots);
             }
-            if let Ok(json) = serde_json::to_string_pretty(&to_persist) {
-                let _ = std::fs::write(&path, json);
-            }
-        })
-        .await;
+            ConcurrencyMode::Auto => self.inner.limiter.set(state.tuner.slots()),
+        }
+        drop(state);
         Ok(self.settings().await)
     }
 
@@ -417,15 +734,20 @@ impl DownloadCenter {
     /// transfer runs on a background driver. Progress/terminal state is observed
     /// via `subscribe()` or `download_blocking`.
     pub async fn enqueue(&self, spec: DownloadSpec) -> String {
-        self.spawn(spec, false).await.0
+        self.spawn(spec, false, false).await.0
     }
 
     /// Start a download and await its terminal state, returning the installed
     /// path. Equivalent to the old synchronous downloader call, but with live
     /// progress + pause/resume/cancel while the caller awaits. The transfer runs
     /// on a background driver, so it survives the caller's request being dropped.
+    ///
+    /// A task restored as `Paused` after a Core restart is woken: the caller is
+    /// waiting on this file now, and subscribing to that parked driver would
+    /// never resolve. A task the USER paused stays paused — a background caller
+    /// must not silently resume a download the user stopped.
     pub async fn download_blocking(&self, spec: DownloadSpec) -> Result<PathBuf> {
-        let (_id, mut done_rx) = self.spawn(spec, false).await;
+        let (_id, mut done_rx) = self.spawn(spec, false, false).await;
         loop {
             if let Some(result) = done_rx.borrow_and_update().clone() {
                 return result.map_err(|e| anyhow::anyhow!(e));
@@ -443,8 +765,10 @@ impl DownloadCenter {
     /// restart; an explicit Install action must wake that parked task instead
     /// of deduplicating onto a receiver that can never complete.
     pub async fn resume_and_download_blocking(&self, spec: DownloadSpec) -> Result<PathBuf> {
-        let (id, mut done_rx) = self.spawn(spec, false).await;
-        self.resume(&id).await;
+        // `spawn` wakes the parked task itself, clearing its previous result
+        // BEFORE subscribing. Resuming afterwards raced the driver: the caller
+        // usually read the old failure before the driver cleared it.
+        let (_id, mut done_rx) = self.spawn(spec, false, true).await;
         loop {
             if let Some(result) = done_rx.borrow_and_update().clone() {
                 return result.map_err(|e| anyhow::anyhow!(e));
@@ -456,6 +780,11 @@ impl DownloadCenter {
     }
 
     pub async fn pause(&self, id: &str) -> bool {
+        // An explicit Pause makes the parked state the user's, so a later
+        // `download_blocking` caller no longer wakes it.
+        if let Some(handle) = self.inner.handles.lock().await.get_mut(id) {
+            handle.restored = false;
+        }
         self.signal(id, Control::Pause).await
     }
 
@@ -475,23 +804,31 @@ impl DownloadCenter {
     /// Remove a terminal task entry from the registry (a "dismiss" in the UI).
     /// No-op for non-terminal tasks (cancel those first).
     pub async fn clear(&self, id: &str) -> bool {
+        // Hold the handles lock across the whole dismissal. A reinstall of the
+        // same artifact registers its handle and row under this lock too, so it
+        // runs strictly before (and the row is no longer dismissable) or after
+        // (and its handle and Queued row follow the Removed event).
+        let mut handles = self.inner.handles.lock().await;
         let removed = {
             let mut tasks = self.inner.tasks.write().await;
             match tasks.get(id) {
                 Some(t) if t.state.is_terminal() || t.state == DownloadState::Failed => {
                     tasks.remove(id);
+                    let _ = self
+                        .inner
+                        .events
+                        .send(DownloadEvent::Removed { id: id.to_string() });
                     true
                 }
                 _ => false,
             }
         };
         if removed {
-            self.inner.handles.lock().await.remove(id);
+            #[cfg(test)]
+            after_commit(&self.inner, &DownloadEvent::Removed { id: id.to_string() }).await;
+            handles.remove(id);
+            drop(handles);
             self.persist().await;
-            let _ = self
-                .inner
-                .events
-                .send(DownloadEvent::Removed { id: id.to_string() });
         }
         removed
     }
@@ -551,22 +888,27 @@ impl DownloadCenter {
             created_at: now,
             updated_at: now,
             etag: None,
+            sha256: None,
         };
         let (control_tx, mut control_rx) = watch::channel(Control::Run);
         let (done_tx, _done_rx) = watch::channel::<Term>(None);
         let seq = self.inner.next_seq.fetch_add(1, Ordering::Relaxed);
         {
+            // Handle and row land together, so a finishing same-id registration
+            // sees this one as the owner of both.
             let mut handles = self.inner.handles.lock().await;
             handles.insert(
                 id.clone(),
                 TaskCtl {
                     control: control_tx,
                     done: done_tx,
+                    spec: None,
+                    restored: false,
                     seq,
                 },
             );
+            put_task_inner(&self.inner, task).await;
         }
-        put_task_inner(&self.inner, task).await;
 
         // Race the install future against a cancel signal. On cancel `fut` is
         // dropped (killing any kill_on_drop child).
@@ -588,41 +930,36 @@ impl DownloadCenter {
         };
 
         // Only retire OUR registration — a later same-id registration owns the map
-        // entry now, and dropping it would strand a running install with no Cancel.
-        {
+        // entry and the row now: dropping its handle would strand a running
+        // install with no Cancel, and finishing its row would report a running
+        // install as done.
+        let (state, error) = match &outcome {
+            Some(Ok(_)) => (DownloadState::Completed, None),
+            Some(Err(e)) => (DownloadState::Failed, Some(format!("{e:#}"))),
+            None => (DownloadState::Cancelled, None),
+        };
+        let owned = {
             let mut handles = self.inner.handles.lock().await;
-            if handles.get(&id).is_some_and(|h| h.seq == seq) {
+            let owned = handles.get(&id).is_some_and(|h| h.seq == seq);
+            if owned {
                 handles.remove(&id);
+                patch(&self.inner, &id, false, |t| {
+                    t.state = state;
+                    if let Some(message) = error {
+                        t.error = Some(message);
+                        t.retryable = true;
+                    }
+                })
+                .await;
             }
+            owned
+        };
+        if owned {
+            persist_inner(&self.inner).await;
         }
         match outcome {
-            Some(Ok(value)) => {
-                patch(&self.inner, &id, false, |t| {
-                    t.state = DownloadState::Completed;
-                })
-                .await;
-                persist_inner(&self.inner).await;
-                Ok(value)
-            }
-            Some(Err(e)) => {
-                let msg = format!("{e:#}");
-                patch(&self.inner, &id, false, |t| {
-                    t.state = DownloadState::Failed;
-                    t.error = Some(msg);
-                    t.retryable = true;
-                })
-                .await;
-                persist_inner(&self.inner).await;
-                Err(e)
-            }
-            None => {
-                patch(&self.inner, &id, false, |t| {
-                    t.state = DownloadState::Cancelled;
-                })
-                .await;
-                persist_inner(&self.inner).await;
-                anyhow::bail!("cancelled")
-            }
+            Some(result) => result,
+            None => anyhow::bail!("cancelled"),
         }
     }
 
@@ -637,10 +974,16 @@ impl DownloadCenter {
     /// Register + drive a download. `start_paused` is used by `load()` to bring a
     /// reloaded task up in the parked `Paused` state (awaiting an explicit resume).
     /// Dedups: a re-enqueue of a non-terminal task returns the existing done-handle.
+    ///
+    /// Deduping onto a FAILED task restarts it with the caller's spec: the driver
+    /// parks after a failure, so subscribing to it as-is replayed the old error to
+    /// every later install until someone pressed Retry in the UI. `wake_parked`
+    /// also restarts a `Paused` task (an explicit install of a reloaded one).
     async fn spawn(
         &self,
         spec: DownloadSpec,
         start_paused: bool,
+        wake_parked: bool,
     ) -> (String, watch::Receiver<Term>) {
         let id = derive_id(&spec.dest);
         self.ensure_settings_loaded().await;
@@ -649,13 +992,23 @@ impl DownloadCenter {
         {
             let mut handles = self.inner.handles.lock().await;
             if let Some(existing) = handles.get(&id) {
-                let tasks = self.inner.tasks.read().await;
-                let terminal = tasks
-                    .get(&id)
-                    .map(|t| t.state == DownloadState::Completed)
-                    .unwrap_or(false);
-                if !terminal {
+                let state = self.inner.tasks.read().await.get(&id).map(|t| t.state);
+                // A Cancelled task's driver may still be retiring; a reinstall
+                // must start afresh rather than inherit its cancellation.
+                if !state.is_some_and(|state| state.is_terminal()) {
                     // Already in flight (or parked) — dedup onto it.
+                    if let Some(shared) = &existing.spec {
+                        adopt_spec(&mut shared.lock().unwrap_or_else(|e| e.into_inner()), spec);
+                        let restart = state == Some(DownloadState::Failed)
+                            || (state == Some(DownloadState::Paused)
+                                && (wake_parked || existing.restored));
+                        if restart {
+                            // Clear the old result before subscribing so this
+                            // caller can only observe the restarted pass.
+                            existing.done.send_replace(None);
+                            let _ = existing.control.send(Control::Run);
+                        }
+                    }
                     return (id, existing.done.subscribe());
                 }
             }
@@ -673,6 +1026,7 @@ impl DownloadCenter {
 
             let (control_tx, control_rx) = watch::channel(initial_control);
             let (done_tx, done_rx) = watch::channel::<Term>(None);
+            let shared_spec = Arc::new(std::sync::Mutex::new(spec.clone()));
 
             // Carry forward any received bytes already on disk (.part) so the UI
             // shows the resumable offset before the driver re-attaches.
@@ -697,28 +1051,42 @@ impl DownloadCenter {
                 created_at: now_ms(),
                 updated_at: now_ms(),
                 etag: None,
+                sha256: spec.sha256.clone().filter(|value| !value.is_empty()),
             };
 
+            let seq = self.inner.next_seq.fetch_add(1, Ordering::Relaxed);
             handles.insert(
                 id.clone(),
                 TaskCtl {
                     control: control_tx.clone(),
                     done: done_tx.clone(),
-                    seq: self.inner.next_seq.fetch_add(1, Ordering::Relaxed),
+                    spec: Some(Arc::clone(&shared_spec)),
+                    restored: start_paused,
+                    seq,
                 },
             );
-            drop(handles);
-
+            // The handle and its row land together under the handles lock, so a
+            // concurrent `clear` sees either both or neither.
             self.put_task(task).await;
+            drop(handles);
             self.persist().await;
 
             let inner = Arc::clone(&self.inner);
             let drv_id = id.clone();
             tokio::spawn(async move {
-                drive(inner, drv_id, spec, control_tx, control_rx, done_tx).await;
+                drive(
+                    inner,
+                    drv_id,
+                    seq,
+                    shared_spec,
+                    control_tx,
+                    control_rx,
+                    done_tx,
+                )
+                .await;
             });
 
-            return (id, done_rx);
+            (id, done_rx)
         }
     }
 
@@ -728,7 +1096,7 @@ impl DownloadCenter {
         put_task_inner(&self.inner, task).await;
     }
 
-    /// Snapshot persistable tasks to `~/.ryu/downloads.json`. Called on state
+    /// Snapshot persistable tasks to `<data dir>/state/downloads.json`. Called on state
     /// transitions only — never per progress chunk.
     async fn persist(&self) {
         persist_inner(&self.inner).await;
@@ -752,6 +1120,7 @@ impl DownloadCenter {
     /// finished" could empty the tray popover and leave the page's list exactly as
     /// it was, so the history was permanently un-clearable by any UI.
     pub async fn clear_history(&self) -> usize {
+        let _persisting = self.inner.persist_lock.lock().await;
         let dropped = {
             let mut hist = self.inner.history.lock().await;
             let n = hist.len();
@@ -759,13 +1128,7 @@ impl DownloadCenter {
             n
         };
         let path = history_path();
-        let _ = tokio::task::spawn_blocking(move || {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(&path, "[]");
-        })
-        .await;
+        let _ = tokio::task::spawn_blocking(move || write_file_atomically(&path, b"[]")).await;
         dropped
     }
 
@@ -774,6 +1137,7 @@ impl DownloadCenter {
         // active tasks below).
         if let Ok(raw) = std::fs::read_to_string(history_path()) {
             let hist: Vec<DownloadTask> = serde_json::from_str(&raw).unwrap_or_default();
+            remove_stale_previous_installs(hist.iter().filter_map(|t| t.dest_path.as_deref()));
             *self.inner.history.lock().await = hist;
         }
 
@@ -782,6 +1146,7 @@ impl DownloadCenter {
             Err(_) => return,
         };
         let persisted: Vec<DownloadTask> = serde_json::from_str(&raw).unwrap_or_default();
+        remove_stale_previous_installs(persisted.iter().filter_map(|t| t.dest_path.as_deref()));
         let autoresume = std::env::var("RYU_DOWNLOADS_AUTORESUME").as_deref() == Ok("1");
 
         for task in persisted {
@@ -802,10 +1167,17 @@ impl DownloadCenter {
                 label: task.label.clone(),
                 url,
                 dest,
-                sha256: None,
+                sha256: task.sha256.clone(),
                 version_record: None,
             };
-            let (id, _rx) = self.spawn(spec, true).await;
+            let (id, _rx) = self.spawn(spec, true, false).await;
+            // Keep the validator so the resumed Range request still sends
+            // `If-Range`: without it a changed upstream file is spliced onto the
+            // old `.part` instead of restarting cleanly.
+            if task.etag.is_some() {
+                let etag = task.etag.clone();
+                patch(&self.inner, &id, false, |t| t.etag = etag).await;
+            }
             if autoresume {
                 self.resume(&id).await;
             }
@@ -813,1058 +1185,13 @@ impl DownloadCenter {
     }
 }
 
-// ── free helpers operating on Inner (so the driver task can call them) ──────
+mod persist;
+mod stream;
+mod transfer;
 
-async fn put_task_inner(inner: &Inner, task: DownloadTask) {
-    {
-        let mut tasks = inner.tasks.write().await;
-        tasks.insert(task.id.clone(), task.clone());
-    }
-    let _ = inner.events.send(DownloadEvent::Update { task });
-}
-
-/// Mutate one task, bump `updated_at`, broadcast the delta, and (optionally)
-/// persist. Per-chunk progress passes `persist = false`.
-async fn patch(inner: &Inner, id: &str, persist: bool, f: impl FnOnce(&mut DownloadTask)) {
-    let updated = {
-        let mut tasks = inner.tasks.write().await;
-        let Some(task) = tasks.get_mut(id) else {
-            return;
-        };
-        f(task);
-        task.updated_at = now_ms();
-        task.clone()
-    };
-    let _ = inner.events.send(DownloadEvent::Update { task: updated });
-    if persist {
-        persist_inner(inner).await;
-    }
-}
-
-async fn persist_inner(inner: &Inner) {
-    let to_save: Vec<DownloadTask> = {
-        let tasks = inner.tasks.read().await;
-        tasks
-            .values()
-            .filter(|t| t.state.is_persistable())
-            .cloned()
-            .collect()
-    };
-    let path = downloads_path();
-    // Tiny file; a blocking write off the async path keeps it simple.
-    let _ = tokio::task::spawn_blocking(move || {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&to_save) {
-            let _ = std::fs::write(&path, json);
-        }
-    })
-    .await;
-}
-
-/// Append a finished download to the durable history log (newest first),
-/// de-duping by id so a re-download replaces its prior entry, then persist the
-/// capped list. Called when a task reaches a terminal state (Completed /
-/// Cancelled) — the only ones that leave the active registry.
-async fn record_history(inner: &Inner, task: &DownloadTask) {
-    let to_save = {
-        let mut hist = inner.history.lock().await;
-        hist.retain(|t| t.id != task.id);
-        hist.insert(0, task.clone());
-        hist.truncate(HISTORY_CAP);
-        hist.clone()
-    };
-    let path = history_path();
-    let _ = tokio::task::spawn_blocking(move || {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&to_save) {
-            let _ = std::fs::write(&path, json);
-        }
-    })
-    .await;
-}
-
-// ── the driver ──────────────────────────────────────────────────────────────
-
-enum AttemptOutcome {
-    Done(PathBuf),
-    Paused,
-    Cancelled,
-    Failed { error: String, retryable: bool },
-}
-
-enum StreamResult {
-    Done,
-    Paused,
-    Cancelled,
-}
-
-enum StreamErr {
-    /// Transient (network) — keep the `.part` and retry with Range.
-    Network(String),
-    /// Fatal (disk full, bad path) — not resumable.
-    Io(String),
-}
-
-async fn drive(
-    inner: Arc<Inner>,
-    id: String,
-    spec: DownloadSpec,
-    control_tx: watch::Sender<Control>,
-    mut control_rx: watch::Receiver<Control>,
-    done_tx: watch::Sender<Term>,
-) {
-    loop {
-        // PARK: wait until Run; exit on Cancel. Copy the value out so the
-        // (non-Send) watch guard never lives across the awaits below.
-        loop {
-            let ctl = *control_rx.borrow_and_update();
-            match ctl {
-                Control::Run => break,
-                Control::Cancel => {
-                    cleanup_cancelled(&inner, &id, &spec, &done_tx).await;
-                    return;
-                }
-                Control::Pause => {}
-            }
-            if control_rx.changed().await.is_err() {
-                return; // center dropped — process shutting down
-            }
-        }
-
-        // A failed pass publishes an error to blocking callers but keeps the
-        // driver parked so the UI can retry the same task. Clear that result
-        // only when a retry actually wakes the driver; otherwise a new
-        // `download_blocking` call would immediately replay the old failure
-        // instead of awaiting the retry's terminal state.
-        let _ = done_tx.send(None);
-
-        // FAST PATH: already installed with a matching checksum → Completed.
-        if let Some(path) = fast_path(&spec).await {
-            finish_completed(&inner, &id, &spec, &done_tx, path).await;
-            return;
-        }
-
-        // Take a concurrency slot BEFORE flipping to Active. The order matters: a
-        // task that is waiting on the gate is `Queued`, and only one that is
-        // actually streaming is `Active`. Marking it Active first (as this did)
-        // meant every queued download rendered as "Downloading" the instant it was
-        // registered — so the queue existed in Core but was invisible everywhere,
-        // and a sequential-looking onboarding was indistinguishable from a
-        // parallel one that happened to be waiting.
-        let _permit = inner.limiter.acquire().await;
-        patch(&inner, &id, true, |t| {
-            t.state = DownloadState::Active;
-            t.error = None;
-        })
-        .await;
-
-        match attempt(&inner, &id, &spec, &mut control_rx).await {
-            AttemptOutcome::Done(path) => {
-                drop(_permit);
-                finish_completed(&inner, &id, &spec, &done_tx, path).await;
-                return;
-            }
-            AttemptOutcome::Cancelled => {
-                drop(_permit);
-                cleanup_cancelled(&inner, &id, &spec, &done_tx).await;
-                return;
-            }
-            AttemptOutcome::Paused => {
-                drop(_permit);
-                patch(&inner, &id, true, |t| {
-                    t.state = DownloadState::Paused;
-                    t.speed_bps = None;
-                })
-                .await;
-                // control is already Pause (the user set it) → PARK re-parks.
-                continue;
-            }
-            AttemptOutcome::Failed { error, retryable } => {
-                drop(_permit);
-                patch(&inner, &id, true, |t| {
-                    t.state = DownloadState::Failed;
-                    t.error = Some(error.clone());
-                    t.retryable = retryable;
-                    t.speed_bps = None;
-                })
-                .await;
-                // Failed transfers remain parked and retryable when allowed,
-                // but the synchronous `download_blocking` contract still needs
-                // a result so installers cannot hang forever on a checksum,
-                // redirect, or network error.
-                let _ = done_tx.send(Some(Err(error)));
-                // Re-arm to parked so we don't hot-loop; a Retry sets Run.
-                let _ = control_tx.send(Control::Pause);
-                continue;
-            }
-        }
-    }
-}
-
-/// If `dest` exists and matches the expected checksum (or a recorded one), skip
-/// the download entirely. Mirrors the downloaders' existing fast-path.
-async fn fast_path(spec: &DownloadSpec) -> Option<PathBuf> {
-    if !spec.dest.exists() {
-        return None;
-    }
-    let expected = spec.sha256.clone().filter(|s| !s.is_empty()).or_else(|| {
-        spec.version_record
-            .as_ref()
-            .and_then(|v| host().installed_checksum(&v.store_key))
-    })?;
-    let actual = sha256_file(&spec.dest).await.ok()?;
-    (actual == expected).then(|| spec.dest.clone())
-}
-
-/// Stream with bounded retry. Network errors keep the `.part` and retry with a
-/// Range request; fatal IO errors and checksum mismatches fail terminally.
-async fn attempt(
-    inner: &Inner,
-    id: &str,
-    spec: &DownloadSpec,
-    control_rx: &mut watch::Receiver<Control>,
-) -> AttemptOutcome {
-    if requires_checksum(spec.role) && expected_checksum(spec).is_none() {
-        return AttemptOutcome::Failed {
-            error: format!(
-                "download '{}' requires a SHA-256 checksum before execution",
-                spec.label
-            ),
-            retryable: false,
-        };
-    }
-    let mut attempts = 0u32;
-    loop {
-        attempts += 1;
-        match stream_once(inner, id, spec, control_rx).await {
-            Ok(StreamResult::Done) => match finalize(inner, id, spec).await {
-                Ok(path) => return AttemptOutcome::Done(path),
-                Err(e) => {
-                    // Bad checksum or rename failure — delete the corrupt .part.
-                    let _ = tokio::fs::remove_file(part_path(&spec.dest)).await;
-                    return AttemptOutcome::Failed {
-                        error: e,
-                        retryable: false,
-                    };
-                }
-            },
-            Ok(StreamResult::Paused) => return AttemptOutcome::Paused,
-            Ok(StreamResult::Cancelled) => return AttemptOutcome::Cancelled,
-            Err(StreamErr::Network(e)) => {
-                if attempts >= MAX_ATTEMPTS {
-                    return AttemptOutcome::Failed {
-                        error: e,
-                        retryable: true,
-                    };
-                }
-                let backoff = Duration::from_secs(1u64 << (attempts - 1));
-                tracing::warn!(
-                    "download {id}: attempt {attempts} failed ({e}); retry in {backoff:?}"
-                );
-                // Honour cancel/pause during the backoff wait.
-                tokio::select! {
-                    _ = tokio::time::sleep(backoff) => {}
-                    changed = control_rx.changed() => {
-                        if changed.is_err() { return AttemptOutcome::Cancelled; }
-                        let ctl = *control_rx.borrow();
-                        match ctl {
-                            Control::Cancel => return AttemptOutcome::Cancelled,
-                            Control::Pause => return AttemptOutcome::Paused,
-                            Control::Run => {}
-                        }
-                    }
-                }
-            }
-            Err(StreamErr::Io(e)) => {
-                return AttemptOutcome::Failed {
-                    error: e,
-                    retryable: false,
-                }
-            }
-        }
-    }
-}
-
-fn requires_checksum(role: DownloadRole) -> bool {
-    matches!(
-        role,
-        DownloadRole::Engine
-            | DownloadRole::Agent
-            | DownloadRole::Tool
-            | DownloadRole::Plugin
-            | DownloadRole::McpServer
-    )
-}
-
-fn expected_checksum(spec: &DownloadSpec) -> Option<String> {
-    spec.sha256
-        .clone()
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            spec.version_record
-                .as_ref()
-                .and_then(|record| host().installed_checksum(&record.store_key))
-        })
-}
-
-/// One streaming pass: open `.part`, send Range+If-Range when resuming, write
-/// chunks to disk while polling the control channel.
-async fn stream_once(
-    inner: &Inner,
-    id: &str,
-    spec: &DownloadSpec,
-    control_rx: &mut watch::Receiver<Control>,
-) -> std::result::Result<StreamResult, StreamErr> {
-    let part = part_path(&spec.dest);
-    if let Some(parent) = spec.dest.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| StreamErr::Io(format!("creating {}: {e}", parent.display())))?;
-    }
-
-    let existing = tokio::fs::metadata(&part)
-        .await
-        .map(|m| m.len())
-        .unwrap_or(0);
-    if existing > MAX_TRANSFER_BYTES {
-        return Err(StreamErr::Io(format!(
-            "partial download exceeds the {}-byte transfer cap",
-            MAX_TRANSFER_BYTES
-        )));
-    }
-    let etag = {
-        let tasks = inner.tasks.read().await;
-        tasks.get(id).and_then(|t| t.etag.clone())
-    };
-
-    // Build the request (Range + If-Range when resuming a non-empty .part).
-    // Production downloads are screened and DNS-pinned at the transfer sink,
-    // immediately before each connection is made. Redirects are followed here,
-    // one hop at a time, so a GitHub release asset can move to its CDN without
-    // allowing an un-screened redirect target or leaking host-specific auth.
-    let download_policy = ryu_egress::GuardedFetchPolicy {
-        allow_http: true,
-        max_body_bytes: MAX_TRANSFER_BYTES,
-        ..ryu_egress::GuardedFetchPolicy::default()
-    };
-    let mut current_url = spec.url.clone();
-    let mut redirect_hops = 0usize;
-    let resp = loop {
-        #[cfg(test)]
-        let mut req = host().authorize(&current_url, inner.client.get(&current_url));
-        #[cfg(not(test))]
-        let mut req = {
-            let target = ryu_egress::resolve_guarded_url(&current_url, download_policy)
-                .await
-                .map_err(|error| StreamErr::Io(format!("download URL rejected: {error}")))?;
-            let client = reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .resolve_to_addrs(&target.host, &target.addresses)
-                .build()
-                .map_err(|error| {
-                    StreamErr::Io(format!("building guarded download client: {error}"))
-                })?;
-            host().authorize(&current_url, client.get(&current_url))
-        };
-        if existing > 0 {
-            req = req.header(reqwest::header::RANGE, format!("bytes={existing}-"));
-            if let Some(tag) = &etag {
-                req = req.header(reqwest::header::IF_RANGE, tag.clone());
-            }
-        }
-
-        let response = req
-            .send()
-            .await
-            .map_err(|e| StreamErr::Network(format!("GET {}: {e}", current_url)))?;
-        if !(300..400).contains(&response.status().as_u16()) {
-            break response;
-        }
-        if redirect_hops >= download_policy.max_redirect_hops {
-            return Err(StreamErr::Network(format!(
-                "too many redirects (more than {}) for {}",
-                download_policy.max_redirect_hops, spec.url
-            )));
-        }
-        let location = response
-            .headers()
-            .get(reqwest::header::LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| {
-                StreamErr::Network(format!(
-                    "HTTP {} for {} without a Location header",
-                    response.status(),
-                    current_url
-                ))
-            })?;
-        current_url = url::Url::parse(&current_url)
-            .and_then(|base| base.join(location))
-            .map_err(|error| StreamErr::Io(format!("invalid download redirect: {error}")))?
-            .to_string();
-        redirect_hops += 1;
-    };
-    let status = resp.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        // Gated (e.g. HF) — not resolvable by retrying.
-        return Err(StreamErr::Io(format!(
-            "remote refused the download (HTTP {}). If this is a gated model, set a \
-             Hugging Face token in Settings → Integrations and accept the model terms.",
-            status.as_u16()
-        )));
-    }
-    if !status.is_success() {
-        return Err(StreamErr::Network(format!(
-            "HTTP {} for {}",
-            status, spec.url
-        )));
-    }
-
-    // 206 ⇒ resume from offset; 200 ⇒ server ignored Range / file changed ⇒ restart.
-    let resuming = status == reqwest::StatusCode::PARTIAL_CONTENT && existing > 0;
-    let mut received = if resuming { existing } else { 0 };
-
-    let new_etag = resp
-        .headers()
-        .get(reqwest::header::ETAG)
-        .or_else(|| resp.headers().get(reqwest::header::LAST_MODIFIED))
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    let content_len = resp.content_length();
-    let total = match (resuming, content_len) {
-        (true, Some(len)) => Some(existing + len),
-        (false, Some(len)) => Some(len),
-        _ => None,
-    };
-    if total.is_some_and(|bytes| bytes > MAX_TRANSFER_BYTES) {
-        return Err(StreamErr::Io(format!(
-            "download exceeds the {}-byte transfer cap",
-            MAX_TRANSFER_BYTES
-        )));
-    }
-
-    let file = if resuming {
-        tokio::fs::OpenOptions::new().append(true).open(&part).await
-    } else {
-        tokio::fs::File::create(&part).await
-    };
-    let mut file = file.map_err(|e| StreamErr::Io(format!("opening {}: {e}", part.display())))?;
-
-    patch(inner, id, true, |t| {
-        t.total_bytes = total;
-        t.received_bytes = received;
-        if new_etag.is_some() {
-            t.etag = new_etag.clone();
-        }
-    })
-    .await;
-
-    let mut stream = resp.bytes_stream();
-    let mut last_emit = Instant::now();
-    let mut sample_anchor = (Instant::now(), received);
-
-    loop {
-        tokio::select! {
-            biased;
-            changed = control_rx.changed() => {
-                if changed.is_err() { return Ok(StreamResult::Cancelled); }
-                let ctl = *control_rx.borrow();
-                match ctl {
-                    Control::Cancel => return Ok(StreamResult::Cancelled),
-                    Control::Pause => {
-                        let _ = file.flush().await;
-                        return Ok(StreamResult::Paused);
-                    }
-                    Control::Run => {}
-                }
-            }
-            chunk = stream.next() => {
-                match chunk {
-                    None => {
-                        file.flush().await.map_err(|e| StreamErr::Io(e.to_string()))?;
-                        return Ok(StreamResult::Done);
-                    }
-                    Some(Err(e)) => return Err(StreamErr::Network(format!("stream error: {e}"))),
-                    Some(Ok(bytes)) => {
-                        if received.saturating_add(bytes.len() as u64) > MAX_TRANSFER_BYTES {
-                            return Err(StreamErr::Io(format!(
-                                "download exceeds the {}-byte transfer cap",
-                                MAX_TRANSFER_BYTES
-                            )));
-                        }
-                        file.write_all(&bytes)
-                            .await
-                            .map_err(|e| StreamErr::Io(format!("writing {}: {e}", part.display())))?;
-                        received += bytes.len() as u64;
-
-                        if last_emit.elapsed() >= PROGRESS_THROTTLE {
-                            let (anchor_t, anchor_b) = sample_anchor;
-                            let secs = anchor_t.elapsed().as_secs_f64();
-                            let speed = if secs > 0.0 {
-                                Some(((received - anchor_b) as f64 / secs) as u64)
-                            } else {
-                                None
-                            };
-                            patch(inner, id, false, |t| {
-                                t.received_bytes = received;
-                                t.speed_bps = speed;
-                            })
-                            .await;
-                            last_emit = Instant::now();
-                            sample_anchor = (Instant::now(), received);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Re-hash the completed `.part` from disk, verify, then atomically rename into
-/// place and record the version/checksum.
-async fn finalize(
-    inner: &Inner,
-    id: &str,
-    spec: &DownloadSpec,
-) -> std::result::Result<PathBuf, String> {
-    patch(inner, id, true, |t| {
-        t.state = DownloadState::Verifying;
-        t.speed_bps = None;
-    })
-    .await;
-
-    let part = part_path(&spec.dest);
-    let actual = sha256_file(&part).await.map_err(|e| e.to_string())?;
-
-    if let Some(expected) = expected_checksum(spec).as_deref() {
-        if &actual != expected {
-            return Err(format!(
-                "checksum mismatch: expected {expected}, got {actual}"
-            ));
-        }
-    }
-
-    tokio::fs::rename(&part, &spec.dest)
-        .await
-        .map_err(|e| format!("rename {} -> {}: {e}", part.display(), spec.dest.display()))?;
-
-    if let Some(rec) = &spec.version_record {
-        host().record_version(&rec.store_key, &rec.version, &actual);
-    }
-
-    Ok(spec.dest.clone())
-}
-
-async fn finish_completed(
-    inner: &Inner,
-    id: &str,
-    spec: &DownloadSpec,
-    done_tx: &watch::Sender<Term>,
-    path: PathBuf,
-) {
-    patch(inner, id, false, |t| {
-        t.state = DownloadState::Completed;
-        t.error = None;
-        t.speed_bps = None;
-        if let Some(total) = t.total_bytes {
-            t.received_bytes = total;
-        }
-    })
-    .await;
-    persist_inner(inner).await;
-    if let Some(t) = inner.tasks.read().await.get(id).cloned() {
-        record_history(inner, &t).await;
-    }
-    inner.handles.lock().await.remove(id);
-    let _ = done_tx.send(Some(Ok(path)));
-    let _ = spec; // dest already captured in path
-}
-
-async fn cleanup_cancelled(
-    inner: &Inner,
-    id: &str,
-    spec: &DownloadSpec,
-    done_tx: &watch::Sender<Term>,
-) {
-    let _ = tokio::fs::remove_file(part_path(&spec.dest)).await;
-    patch(inner, id, false, |t| {
-        t.state = DownloadState::Cancelled;
-        t.speed_bps = None;
-    })
-    .await;
-    persist_inner(inner).await;
-    if let Some(t) = inner.tasks.read().await.get(id).cloned() {
-        record_history(inner, &t).await;
-    }
-    inner.handles.lock().await.remove(id);
-    let _ = done_tx.send(Some(Err("cancelled".to_string())));
-}
-
-async fn sha256_file(path: &Path) -> Result<String> {
-    let bytes = tokio::fs::read(path).await?;
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    Ok(hex::encode(hasher.finalize()))
-}
+use persist::*;
+use stream::*;
+use transfer::*;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{set_global_host, DownloadKind, DownloadsHost};
-
-    /// A no-state host for the crate's own tests: a per-process temp data dir (so
-    /// `downloads.json` / history never touch a real `~/.ryu`), no version-store
-    /// checksums, and no auth (the tests hit loopback, never Hugging Face).
-    struct TestHost {
-        dir: PathBuf,
-    }
-
-    impl DownloadsHost for TestHost {
-        fn ryu_dir(&self) -> PathBuf {
-            self.dir.clone()
-        }
-        fn installed_checksum(&self, _store_key: &str) -> Option<String> {
-            None
-        }
-        fn record_version(&self, _store_key: &str, _version: &str, _checksum: &str) {}
-        fn authorize(&self, _url: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-            req
-        }
-    }
-
-    /// Install the temp-dir [`TestHost`] once for the whole test binary.
-    /// `set_global_host` is idempotent, so every test can call this cheaply.
-    fn ensure_host() {
-        let dir = std::env::temp_dir().join(format!("ryu-dl-host-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        set_global_host(std::sync::Arc::new(TestHost { dir }));
-    }
-
-    fn spec(dest: PathBuf) -> DownloadSpec {
-        DownloadSpec {
-            kind: DownloadKind::Model,
-            role: DownloadRole::ChatModel,
-            label: "test".to_string(),
-            url: "http://127.0.0.1:0/never".to_string(),
-            dest,
-            sha256: None,
-            version_record: None,
-        }
-    }
-
-    #[test]
-    fn id_is_stable_and_dest_derived() {
-        let a = derive_id(Path::new("/x/y/model.gguf"));
-        let b = derive_id(Path::new("/x/y/model.gguf"));
-        let c = derive_id(Path::new("/x/y/other.gguf"));
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-        assert!(a.starts_with("dl_"));
-    }
-
-    #[test]
-    fn executable_download_roles_require_integrity_metadata() {
-        assert!(requires_checksum(DownloadRole::Engine));
-        assert!(requires_checksum(DownloadRole::Agent));
-        assert!(requires_checksum(DownloadRole::Tool));
-        assert!(requires_checksum(DownloadRole::Plugin));
-        assert!(requires_checksum(DownloadRole::McpServer));
-        assert!(!requires_checksum(DownloadRole::ChatModel));
-    }
-
-    #[test]
-    fn part_path_appends_suffix() {
-        assert_eq!(
-            part_path(Path::new("/m/x.gguf")),
-            PathBuf::from("/m/x.gguf.part")
-        );
-    }
-
-    #[tokio::test]
-    async fn fast_path_skips_when_checksum_matches() {
-        ensure_host();
-        let dir = std::env::temp_dir().join(format!("ryu-dl-test-{}", std::process::id()));
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        let dest = dir.join("present.bin");
-        tokio::fs::write(&dest, b"hello world").await.unwrap();
-        let sum = sha256_file(&dest).await.unwrap();
-
-        let mut s = spec(dest.clone());
-        s.sha256 = Some(sum);
-        assert_eq!(fast_path(&s).await, Some(dest.clone()));
-
-        // Wrong checksum ⇒ no skip.
-        let mut bad = spec(dest.clone());
-        bad.sha256 = Some("deadbeef".to_string());
-        assert_eq!(fast_path(&bad).await, None);
-
-        let _ = tokio::fs::remove_dir_all(&dir).await;
-    }
-
-    #[tokio::test]
-    async fn blocking_download_returns_a_failed_transfer_without_hanging() {
-        ensure_host();
-        let dir = std::env::temp_dir().join(format!("ryu-dl-failure-{}", std::process::id()));
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        let dest = dir.join("engine.bin");
-        let mut s = spec(dest);
-        s.kind = DownloadKind::Engine;
-        s.role = DownloadRole::Engine;
-
-        let center = DownloadCenter::with_default_client();
-        let error =
-            tokio::time::timeout(Duration::from_secs(2), center.download_blocking(s.clone()))
-                .await
-                .expect("a failed download must resolve its blocking waiter")
-                .expect_err("an engine without integrity metadata must fail");
-        assert!(error.to_string().contains("requires a SHA-256 checksum"));
-
-        let id = derive_id(&s.dest);
-        let task = center
-            .snapshot()
-            .await
-            .into_iter()
-            .find(|task| task.id == id)
-            .expect("failed task remains visible for retry");
-        assert_eq!(task.state, DownloadState::Failed);
-        assert!(
-            !task.retryable,
-            "missing integrity metadata is not retryable"
-        );
-
-        let _ = tokio::fs::remove_dir_all(&dir).await;
-    }
-
-    /// End-to-end on loopback: a half-written `.part` resumes via a Range request
-    /// and the final file equals the full body (no concatenation corruption). This
-    /// is the advisor's #3 concern exercised deterministically — no timing races.
-    #[tokio::test]
-    async fn resumes_from_part_via_range() {
-        ensure_host();
-        use axum::extract::Request;
-        use axum::http::{header, StatusCode};
-        use axum::response::IntoResponse;
-        use axum::routing::get;
-        use axum::Router;
-
-        let body: Vec<u8> = (0u8..=255).cycle().take(10_000).collect();
-        let served = body.clone();
-        let app = Router::new().route(
-            "/file",
-            get(move |req: Request| {
-                let body = served.clone();
-                async move {
-                    let range = req
-                        .headers()
-                        .get(header::RANGE)
-                        .and_then(|v| v.to_str().ok())
-                        .map(str::to_string);
-                    match range {
-                        Some(r) => {
-                            let start: usize = r
-                                .trim_start_matches("bytes=")
-                                .trim_end_matches('-')
-                                .parse()
-                                .unwrap_or(0);
-                            let slice = body[start..].to_vec();
-                            let mut resp = (StatusCode::PARTIAL_CONTENT, slice).into_response();
-                            resp.headers_mut()
-                                .insert(header::ETAG, "\"v1\"".parse().unwrap());
-                            resp
-                        }
-                        None => {
-                            let mut resp = (StatusCode::OK, body.clone()).into_response();
-                            resp.headers_mut()
-                                .insert(header::ETAG, "\"v1\"".parse().unwrap());
-                            resp
-                        }
-                    }
-                }
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, app).await;
-        });
-
-        let dir = std::env::temp_dir().join(format!("ryu-dl-resume-{}", std::process::id()));
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        let dest = dir.join("file.bin");
-        // Simulate an interrupted download: first 4000 bytes already on disk.
-        tokio::fs::write(part_path(&dest), &body[..4000])
-            .await
-            .unwrap();
-
-        let center = DownloadCenter::with_default_client();
-        let mut s = spec(dest.clone());
-        s.url = format!("http://{addr}/file");
-        s.sha256 = Some({
-            let mut h = Sha256::new();
-            h.update(&body);
-            hex::encode(h.finalize())
-        });
-
-        let path = center.download_blocking(s).await.unwrap();
-        let got = tokio::fs::read(&path).await.unwrap();
-        assert_eq!(got, body, "resumed file must equal the full body");
-        let _ = tokio::fs::remove_dir_all(&dir).await;
-    }
-
-    #[tokio::test]
-    async fn follows_redirects_with_a_fresh_download_guard_per_hop() {
-        ensure_host();
-        use axum::response::Redirect;
-        use axum::routing::get;
-        use axum::Router;
-
-        let body = b"redirected archive".to_vec();
-        let served = body.clone();
-        let app = Router::new()
-            .route("/start", get(|| async { Redirect::temporary("/file") }))
-            .route(
-                "/file",
-                get(move || {
-                    let body = served.clone();
-                    async move { body }
-                }),
-            );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let _ = axum::serve(listener, app).await;
-        });
-
-        let dir = std::env::temp_dir().join(format!("ryu-dl-redirect-{}", std::process::id()));
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        let dest = dir.join("redirected.bin");
-        let mut s = spec(dest.clone());
-        s.url = format!("http://{addr}/start");
-        s.sha256 = Some({
-            let mut hasher = Sha256::new();
-            hasher.update(&body);
-            hex::encode(hasher.finalize())
-        });
-
-        let center = DownloadCenter::with_default_client();
-        let path = center.download_blocking(s).await.unwrap();
-        assert_eq!(tokio::fs::read(path).await.unwrap(), body);
-        let _ = tokio::fs::remove_dir_all(&dir).await;
-    }
-
-    #[tokio::test]
-    async fn register_indeterminate_tracks_completion_and_failure() {
-        ensure_host();
-        let center = DownloadCenter::with_default_client();
-
-        let ok: Result<i32> = center
-            .register_indeterminate("ind:ok".into(), DownloadKind::Skill, "ok".into(), async {
-                Ok(42)
-            })
-            .await;
-        assert_eq!(ok.unwrap(), 42);
-        let t = center
-            .snapshot()
-            .await
-            .into_iter()
-            .find(|t| t.id == "ind:ok")
-            .unwrap();
-        assert_eq!(t.state, DownloadState::Completed);
-        assert!(t.total_bytes.is_none(), "indeterminate task has no total");
-
-        let err: Result<i32> = center
-            .register_indeterminate("ind:err".into(), DownloadKind::Skill, "err".into(), async {
-                anyhow::bail!("boom")
-            })
-            .await;
-        assert!(err.is_err());
-        let t = center
-            .snapshot()
-            .await
-            .into_iter()
-            .find(|t| t.id == "ind:err")
-            .unwrap();
-        assert_eq!(t.state, DownloadState::Failed);
-        assert!(t.retryable);
-    }
-
-    /// Two indeterminate registrations can legitimately share an id — the same
-    /// artifact installed from two surfaces (an agent runtime reachable from both
-    /// the Agents tab and the Engines tab), or a retry racing the first attempt.
-    /// Unlike a byte transfer, they cannot dedup: the future's output type belongs
-    /// to the caller, so the second registration replaces the map entry.
-    ///
-    /// The bug that guards against: when the FIRST one finished it removed the id
-    /// unconditionally, deleting the SECOND one's live control handle — so Cancel
-    /// on the still-running install silently no-opped and the row could never be
-    /// stopped. Removal is stamped, so only the owning registration retires it.
-    #[tokio::test]
-    async fn a_finished_registration_does_not_strand_a_later_same_id_one() {
-        ensure_host();
-        let center = DownloadCenter::with_default_client();
-
-        // Wait until the registration wearing `label` owns the id.
-        async fn until_registered(center: &DownloadCenter, label: &str) {
-            for _ in 0..1000 {
-                if center
-                    .snapshot()
-                    .await
-                    .iter()
-                    .any(|t| t.id == "ind:shared" && t.label == label)
-                {
-                    return;
-                }
-                tokio::task::yield_now().await;
-            }
-            panic!("registration `{label}` never appeared");
-        }
-
-        let (release_first, first_held) = tokio::sync::oneshot::channel::<()>();
-        let first = {
-            let center = center.clone();
-            tokio::spawn(async move {
-                center
-                    .register_indeterminate(
-                        "ind:shared".into(),
-                        DownloadKind::Agent,
-                        "first".into(),
-                        async {
-                            let _ = first_held.await;
-                            Ok(1)
-                        },
-                    )
-                    .await
-            })
-        };
-        until_registered(&center, "first").await;
-
-        let (_release_second, second_held) = tokio::sync::oneshot::channel::<()>();
-        let second = {
-            let center = center.clone();
-            tokio::spawn(async move {
-                center
-                    .register_indeterminate(
-                        "ind:shared".into(),
-                        DownloadKind::Agent,
-                        "second".into(),
-                        async {
-                            let _ = second_held.await;
-                            Ok(2)
-                        },
-                    )
-                    .await
-            })
-        };
-        until_registered(&center, "second").await;
-
-        // The FIRST registration finishes while the SECOND still holds the id.
-        drop(release_first);
-        assert_eq!(first.await.expect("task joined").unwrap(), 1);
-
-        // The second is still cancelable: its control handle survived.
-        assert!(
-            center.cancel("ind:shared").await,
-            "cancel must still reach the registration that owns the id"
-        );
-        let outcome = second.await.expect("task joined");
-        assert!(
-            outcome.is_err(),
-            "a cancelled registration returns an error"
-        );
-    }
-
-    /// A download waiting on the concurrency gate must report `Queued`, not
-    /// `Active`. This is what makes the queue visible at all: the driver used to
-    /// flip the state to Active before acquiring a permit, so every waiting task
-    /// claimed to be downloading and the tray had nothing to group.
-    #[tokio::test]
-    async fn waiting_downloads_report_queued_not_active() {
-        ensure_host();
-        let center = DownloadCenter::with_default_client();
-        // One slot, so everything after the first must wait on the gate.
-        center
-            .set_settings(ConcurrencyMode::Manual, Some(1))
-            .await
-            .unwrap();
-
-        let dir = std::env::temp_dir().join(format!("ryu-dl-queue-{}", std::process::id()));
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-
-        // Unroutable URLs: the first task holds the single permit while it retries,
-        // which is exactly the "slot is busy" condition the others must queue behind.
-        let mut ids = Vec::new();
-        for n in 0..3 {
-            let mut s = spec(dir.join(format!("queued-{n}.bin")));
-            s.url = "http://127.0.0.1:1/never".to_string();
-            ids.push(center.enqueue(s).await);
-        }
-
-        // Let the drivers reach their first await point.
-        let mut queued = 0;
-        for _ in 0..50 {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-            let snap = center.snapshot().await;
-            queued = snap
-                .iter()
-                .filter(|t| ids.contains(&t.id) && t.state == DownloadState::Queued)
-                .count();
-            if queued >= 2 {
-                break;
-            }
-        }
-        assert!(
-            queued >= 2,
-            "with 1 slot and 3 downloads, at least 2 must sit in Queued (saw {queued})"
-        );
-
-        for id in &ids {
-            center.cancel(id).await;
-        }
-        let _ = tokio::fs::remove_dir_all(&dir).await;
-    }
-
-    /// Manual mode resizes the live gate and the view reports what is in force.
-    #[tokio::test]
-    async fn manual_settings_resize_the_gate() {
-        ensure_host();
-        let center = DownloadCenter::with_default_client();
-        let view = center
-            .set_settings(ConcurrencyMode::Manual, Some(6))
-            .await
-            .unwrap();
-        assert_eq!(view.mode, ConcurrencyMode::Manual);
-        assert_eq!(view.manual_slots, 6);
-        assert_eq!(view.effective_slots, 6);
-
-        // Growing is immediate; shrinking with nothing running is too.
-        let view = center
-            .set_settings(ConcurrencyMode::Manual, Some(2))
-            .await
-            .unwrap();
-        assert_eq!(view.effective_slots, 2);
-
-        // Out-of-range values clamp rather than being rejected.
-        let view = center
-            .set_settings(ConcurrencyMode::Manual, Some(999))
-            .await
-            .unwrap();
-        assert_eq!(view.manual_slots, MAX_SLOTS);
-    }
-
-    #[tokio::test]
-    async fn enqueue_dedups_onto_same_id() {
-        ensure_host();
-        let center = DownloadCenter::with_default_client();
-        let dest = std::env::temp_dir().join("ryu-dedup-test.bin");
-        let id1 = center.enqueue(spec(dest.clone())).await;
-        let id2 = center.enqueue(spec(dest.clone())).await;
-        assert_eq!(id1, id2);
-        let snap = center.snapshot().await;
-        assert_eq!(snap.iter().filter(|t| t.id == id1).count(), 1);
-        // Clean up the driver (it's stuck retrying an unroutable URL).
-        center.cancel(&id1).await;
-    }
-}
+mod tests;

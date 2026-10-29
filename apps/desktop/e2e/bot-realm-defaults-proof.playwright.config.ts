@@ -2,7 +2,7 @@ import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
 const harnessDir = path.resolve(import.meta.dirname, "harness");
-const desktopRoot = path.resolve(harnessDir, "../..");
+path.resolve(harnessDir, "../..");
 const port = Number(process.env.RYU_BOT_REALM_E2E_PORT ?? "5178");
 
 export default defineConfig({

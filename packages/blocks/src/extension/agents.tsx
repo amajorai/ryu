@@ -1,15 +1,13 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
-import {
-	Card,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card";
+import { Card, CardHeader, CardTitle } from "@ryu/ui/components/card";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { Bot, Lock } from "lucide-react";
 import type { ReactNode } from "react";
+import styles from "./agents.module.css";
 
 /**
  * Block-local agent shape: the subset of fields the card renders. The live
@@ -28,34 +26,43 @@ export interface AgentCardData {
 }
 
 export function AgentCard({ agent }: { agent: AgentCardData }) {
+	const tl = useLiteralMessages();
 	return (
 		<Card>
-			<CardHeader className="pb-3">
-				<CardTitle className="flex items-center gap-2 text-base">
+			<CardHeader spacing="compact">
+				<CardTitle layout="badge-row">
 					<Bot className="size-4 opacity-70" />
 					{agent.name}
 				</CardTitle>
-				<CardDescription className="flex flex-wrap items-center gap-1.5">
+				<div
+					className={cn(
+						"flex flex-wrap items-center text-muted-foreground text-sm",
+						styles.agentBadges
+					)}
+					data-slot="card-description"
+				>
 					<Badge variant="secondary">{agent.engine ?? "unbound"}</Badge>
 					{agent.model ? <Badge variant="outline">{agent.model}</Badge> : null}
 					{agent.toolCount ? (
 						<Badge variant="outline">
-							{agent.toolCount} tool{agent.toolCount === 1 ? "" : "s"}
+							{tl("{toolCount, plural, one {# tool} other {# tools}}", {
+								toolCount: agent.toolCount,
+							})}
 						</Badge>
 					) : null}
 					{agent.hasPolicy ? (
-						<Badge className="gap-1" variant="outline">
+						<Badge variant="outline">
 							<Lock className="size-3" />
 							Policy
 						</Badge>
 					) : null}
 					{agent.builtIn ? (
-						<Badge className="gap-1" variant="outline">
+						<Badge variant="outline">
 							<Lock className="size-3" />
 							Built-in
 						</Badge>
 					) : null}
-				</CardDescription>
+				</div>
 				{agent.description ? (
 					<p className="mt-1 line-clamp-2 text-muted-foreground text-xs">
 						{agent.description}

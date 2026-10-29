@@ -27,6 +27,22 @@ describe("useWidgetStateStore", () => {
 		});
 	});
 
+	it("accepts persisted scalar state and an undefined reset", () => {
+		const store = useWidgetStateStore.getState();
+		for (const state of [null, false, 0, "selected", undefined]) {
+			store.set("call-1", state);
+			expect(useWidgetStateStore.getState().get("call-1")).toEqual(state);
+		}
+	});
+	it("rejects nonserializable state before replacing a stored snapshot", () => {
+		const store = useWidgetStateStore.getState();
+		store.set("call-1", { selected: 1 });
+		expect(() => store.set("call-1", { selected: () => 2 })).toThrow();
+		expect(useWidgetStateStore.getState().get("call-1")).toEqual({
+			selected: 1,
+		});
+	});
+
 	it("keeps distinct entries per toolCallId (no cross-key clobber)", () => {
 		const store = useWidgetStateStore.getState();
 		store.set("call-1", { a: 1 });

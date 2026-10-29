@@ -236,10 +236,10 @@ export function useIslandComposer(): IslandComposerState {
 
 	const leftActions = (
 		<ComposerSettingsMenu
-			className="text-foreground hover:bg-muted"
 			compact
 			sections={sections}
 			side="top"
+			tone="foreground"
 		/>
 	);
 	const composerDirectory = useMemo(
@@ -248,11 +248,10 @@ export function useIslandComposer(): IslandComposerState {
 	);
 
 	const getAcpPayload = useCallback(() => {
-		const payload: {
-			acp_config?: Record<string, string>;
-			acp_mode?: string;
-			acp_model?: string;
-		} = {};
+		const payload: Pick<
+			import("../../shared/ipc.ts").CoreChatStreamRequest,
+			"acp_config" | "acp_mode" | "acp_model"
+		> = {};
 		if (acpMode) {
 			payload.acp_mode = acpMode;
 		}

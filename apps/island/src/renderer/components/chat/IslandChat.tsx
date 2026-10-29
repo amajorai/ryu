@@ -8,21 +8,44 @@
 // tool rows, MCP widgets, generated images, mentions, and directory dropdowns do
 // not need island-local ports.
 
-import { handleComposerSettingsShortcut } from "@ryu/blocks/composer/composer-shortcuts";
+import {
+	type ComposerShortcutEvent,
+	handleComposerSettingsShortcut,
+} from "@ryu/blocks/composer/composer-shortcuts";
 import { AgentChat } from "@ryu/blocks/desktop/agent-elements/agent-chat";
+import {
+	type AgentUiSurfaceSelection,
+	agentUiSurfaceKey,
+	deriveLiveAgentUiSurface,
+	dismissAgentUiSurface,
+	displayedAgentUiSurface,
+	EMPTY_AGENT_UI_SURFACE_SELECTION,
+	reconcileAgentUiSurfaceSelection,
+	reopenAgentUiSurface,
+} from "@ryu/blocks/desktop/agent-elements/agent-ui/surface";
+import {
+	type AgentUiSurfaceHost,
+	AgentUiSurfaceHostProvider,
+} from "@ryu/blocks/desktop/agent-elements/agent-ui/surface-context";
 import {
 	InputBar,
 	type InputBarProps,
 } from "@ryu/blocks/desktop/agent-elements/input-bar";
 import { useI18n } from "@ryu/i18n/react";
-import type { KeyboardEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import { useIslandComposerContext } from "../../context/island-composer-context.tsx";
 import { useComposerShortcutBindings } from "../../hooks/use-composer-shortcut-bindings.ts";
 import { IslandWidgetHost } from "../../host/IslandWidgetHost.tsx";
 import { useIslandState } from "../../store/island-state.ts";
 import { CommandIcon } from "../icons.tsx";
 import { useIslandChat } from "./use-island-chat.ts";
+
+const agentUiSubmitContentSchema = z.union([
+	z.string(),
+	z.json().transform((value) => JSON.stringify(value)),
+	z.undefined().transform(String),
+]);
 
 type Reachability = "checking" | "offline" | "online";
 
@@ -86,7 +109,7 @@ export function IslandChat() {
 	const offline = reachability === "offline";
 
 	const onComposerKeyDown = useCallback(
-		(event: KeyboardEvent<HTMLTextAreaElement>): boolean =>
+		(event: ComposerShortcutEvent): boolean =>
 			handleComposerSettingsShortcut(event, sections, composerShortcuts),
 		[sections, composerShortcuts]
 	);
@@ -108,7 +131,7 @@ export function IslandChat() {
 	);
 	const inputBarPropsRef = useRef<{
 		onAttach: () => void;
-		onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+		onComposerKeyDown: (event: ComposerShortcutEvent) => boolean;
 	}>({ onAttach, onComposerKeyDown });
 	inputBarPropsRef.current = { onAttach, onComposerKeyDown };
 	const islandInputBar = useMemo(
@@ -122,11 +145,7 @@ export function IslandChat() {
 						leftActions={null}
 						onAttach={live.onAttach}
 						onTextareaKeyDown={(event) => {
-							if (
-								live.onComposerKeyDown(
-									event as KeyboardEvent<HTMLTextAreaElement>
-								)
-							) {
+							if (live.onComposerKeyDown(event)) {
 								return;
 							}
 							props.onTextareaKeyDown?.(event);
@@ -137,15 +156,92 @@ export function IslandChat() {
 		[]
 	);
 	const handleAgentUiSubmit = useCallback(
-		(value: unknown) => {
-			const content =
-				typeof value === "string"
-					? value
-					: (JSON.stringify(value) ?? String(value));
-			sendTurn(content);
+		(value: Parameters<typeof agentUiSubmitContentSchema.safeParse>[0]) => {
+			const parsed = agentUiSubmitContentSchema.safeParse(value);
+			if (parsed.success) {
+				sendTurn(parsed.data);
+			}
 		},
 		[sendTurn]
 	);
+
+	// Generative UI as ONE live screen: the agent's latest `ui.render` shows on
+	// the desktop beside the Island, reshapes when a follow-up turn renders a replacement, and leaves
+	// when a turn finishes without UI. The transcript keeps a chip per render that
+	// can bring an older (or closed) screen back.
+	const live = useMemo(
+		() => deriveLiveAgentUiSurface(messages, status),
+		[messages, status]
+	);
+	// Dismissal is keyed by render id (see `AgentUiSurfaceSelection`), so closing
+	// a screen never suppresses a later `ui.render` of the same spec.
+	const [storedSelection, setSelection] = useState<AgentUiSurfaceSelection>(
+		() =>
+			reconcileAgentUiSurfaceSelection(
+				EMPTY_AGENT_UI_SURFACE_SELECTION,
+				live.surface
+			)
+	);
+	const selection = reconcileAgentUiSurfaceSelection(
+		storedSelection,
+		live.surface
+	);
+	if (selection !== storedSelection) {
+		// A newly rendered screen supersedes one the user reopened from history.
+		setSelection(selection);
+	}
+	const surface = displayedAgentUiSurface(selection, live.surface);
+	const surfaceKey = surface ? agentUiSurfaceKey(surface) : null;
+	const surfaceUpdating = selection.reopened ? false : live.updating;
+	const surfaceHost = useMemo<AgentUiSurfaceHost>(
+		() => ({
+			activeKey: surfaceKey,
+			open: (next) =>
+				setSelection((current) => reopenAgentUiSurface(current, next)),
+		}),
+		[surfaceKey]
+	);
+	const dismissSurface = useCallback(() => {
+		setSelection((current) => dismissAgentUiSurface(current, surface));
+	}, [surface]);
+
+	// The screen draws in its own on-screen window (main/screen-surface.ts), not in
+	// this panel. Push it only when its identity or busy state changes, so a
+	// streaming turn does not re-send the spec on every chunk.
+	const surfaceRef = useRef(surface);
+	surfaceRef.current = surface;
+	useEffect(() => {
+		const current = surfaceRef.current;
+		window.island.surface.show({
+			surface: surfaceKey && current ? current : null,
+			updating: surfaceUpdating,
+		});
+	}, [surfaceKey, surfaceUpdating]);
+	useEffect(
+		() => () => window.island.surface.show({ surface: null, updating: false }),
+		[]
+	);
+	const surfaceHandlersRef = useRef({
+		dismiss: dismissSurface,
+		submit: handleAgentUiSubmit,
+	});
+	surfaceHandlersRef.current = {
+		dismiss: dismissSurface,
+		submit: handleAgentUiSubmit,
+	};
+	useEffect(() => {
+		// `handleAgentUiSubmit` validates the value like an in-chat submission.
+		const offSubmit = window.island.surface.onSubmit((value) =>
+			surfaceHandlersRef.current.submit(value)
+		);
+		const offDismiss = window.island.surface.onDismiss(() =>
+			surfaceHandlersRef.current.dismiss()
+		);
+		return () => {
+			offSubmit();
+			offDismiss();
+		};
+	}, []);
 
 	return (
 		<div className="flex h-full w-full flex-col gap-2">
@@ -156,7 +252,7 @@ export function IslandChat() {
 					</span>
 					<select
 						aria-label={t("language.current")}
-						className="max-w-32 truncate rounded-full border border-border bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground outline-none"
+						className="type-compact max-w-32 truncate rounded-full border border-border bg-card px-1.5 py-0.5 text-muted-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
 						onChange={(event) => selectPack(event.target.value || null)}
 						value={selectedPackId ?? ""}
 					>
@@ -196,7 +292,7 @@ export function IslandChat() {
 			{notes.length > 0 ? (
 				<div className="relative z-20 shrink-0 rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-1.5">
 					<div className="flex items-start justify-between gap-2">
-						<span className="font-medium text-[10px] text-status-warning/90 uppercase tracking-wide">
+						<span className="type-compact font-medium text-status-warning/90 uppercase tracking-wide">
 							{t("island.note", undefined, "Note")}
 						</span>
 						<button
@@ -222,7 +318,7 @@ export function IslandChat() {
 					{notes.map((note, index) => (
 						<p
 							className="mt-0.5 text-status-warning/90 text-xs leading-snug"
-							// biome-ignore lint/suspicious/noArrayIndexKey: notes are append-only, ephemeral, and never reordered
+							// notes are append-only, ephemeral, and never reordered
 							key={index}
 						>
 							{note}
@@ -245,32 +341,34 @@ export function IslandChat() {
 				) : null}
 				<div className="min-h-0 flex-1">
 					<IslandWidgetHost>
-						<AgentChat
-							attachments={{
-								images: pendingAttachments.map((attachment) => ({
-									filename: attachment.name,
-									id: attachment.path,
-									mimeType: attachment.mimeType,
-									url: attachment.dataUrl,
-								})),
-								onRemoveImage: removeAttachment,
-							}}
-							composerDisabled={offline}
-							composerMenuGroups={composerMenuGroups}
-							density="compact"
-							error={error ? new Error(error) : undefined}
-							mentionItems={mentionItems}
-							messages={messages}
-							onAgentUiSubmit={handleAgentUiSubmit}
-							onComposerMenuSelect={onComposerMenuSelect}
-							onComposerResize={setComposerHeight}
-							onSeedDraftConsumed={clearChatPrefill}
-							onSend={(message) => sendTurn(message.content)}
-							onStop={stop}
-							seedDraft={chatPrefill ?? undefined}
-							slots={{ InputBar: islandInputBar }}
-							status={status}
-						/>
+						<AgentUiSurfaceHostProvider value={surfaceHost}>
+							<AgentChat
+								attachments={{
+									images: pendingAttachments.map((attachment) => ({
+										filename: attachment.name,
+										id: attachment.path,
+										mimeType: attachment.mimeType,
+										url: attachment.dataUrl,
+									})),
+									onRemoveImage: removeAttachment,
+								}}
+								composerDisabled={offline}
+								composerMenuGroups={composerMenuGroups}
+								density="compact"
+								error={error ? new Error(error) : undefined}
+								mentionItems={mentionItems}
+								messages={messages}
+								onAgentUiSubmit={handleAgentUiSubmit}
+								onComposerMenuSelect={onComposerMenuSelect}
+								onComposerResize={setComposerHeight}
+								onSeedDraftConsumed={clearChatPrefill}
+								onSend={(message) => sendTurn(message.content)}
+								onStop={stop}
+								seedDraft={chatPrefill ?? undefined}
+								slots={{ InputBar: islandInputBar }}
+								status={status}
+							/>
+						</AgentUiSurfaceHostProvider>
 					</IslandWidgetHost>
 				</div>
 			</div>

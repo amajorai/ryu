@@ -1,16 +1,22 @@
-import { Button } from "@ryu/ui/components/button";
-import { Separator } from "@ryu/ui/components/separator";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { sileo } from "sileo";
 import { type OwnedOAuthApp, settingsApi } from "../../utils/api-client.ts";
+import {
+	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "../shared/settings-rows.tsx";
 import { OAuthAppRegistrationDialog } from "./oauth-app-registration-dialog.tsx";
 import { OAuthAppRow } from "./oauth-app-row.tsx";
 import { errorMessage, type PendingAction } from "./shared.ts";
 
 export function OwnedAppsSection() {
 	const queryClient = useQueryClient();
+	const titleId = useId();
 	const ownedQuery = useQuery({
 		queryKey: ["oauth-apps", "owned"],
 		queryFn: settingsApi.oauthApps.owned.list,
@@ -71,34 +77,50 @@ export function OwnedAppsSection() {
 	const pending = deleteMutation.isPending || rotateMutation.isPending;
 
 	return (
-		<section className="space-y-4">
-			<div className="flex flex-wrap items-start justify-between gap-3">
-				<div>
-					<h3 className="font-medium text-sm">Your OAuth apps</h3>
-					<p className="mt-0.5 max-w-2xl text-muted-foreground text-xs">
-						Register an app that can ask Ryu users for scoped access. Client
-						secrets are shown once when created or rotated.
-					</p>
-				</div>
+		<SettingsSection
+			as="section"
+			caption="Register an app that can ask Ryu users for scoped access. Client secrets are shown once when created or rotated."
+			headerAction={
 				<Button onClick={openCreate} size="sm">
 					Create OAuth app
 				</Button>
-			</div>
-			<Separator />
+			}
+			title="Your OAuth apps"
+			titleId={titleId}
+		>
 			{ownedQuery.isLoading ? (
-				<div className="flex justify-center py-4">
+				<SettingsCard className="flex justify-center py-6">
 					<Spinner className="size-5" />
-				</div>
+				</SettingsCard>
 			) : ownedQuery.isError ? (
-				<p className="text-sm text-status-destructive">
-					{errorMessage(ownedQuery.error, "Failed to load your OAuth apps")}
-				</p>
+				// A plain sentence, the server's reason in view, and a retry.
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Button
+								onClick={() => void ownedQuery.refetch()}
+								size="sm"
+								type="button"
+								variant="outline"
+							>
+								Retry
+							</Button>
+						}
+						title="Couldn't load your OAuth apps."
+					>
+						<p className="text-status-destructive text-xs" role="alert">
+							{errorMessage(ownedQuery.error, "Failed to load your OAuth apps")}
+						</p>
+					</SettingsItem>
+				</SettingsGroup>
 			) : ownedApps.length === 0 ? (
-				<p className="py-4 text-center text-muted-foreground text-sm">
-					You have not registered an OAuth app yet.
-				</p>
+				<SettingsCard>
+					<p className="text-center text-muted-foreground text-sm">
+						You have not registered an OAuth app yet.
+					</p>
+				</SettingsCard>
 			) : (
-				<div className="space-y-3">
+				<SettingsGroup>
 					{ownedApps.map((app) => (
 						<OAuthAppRow
 							app={app}
@@ -108,7 +130,7 @@ export function OwnedAppsSection() {
 							pendingAction={pendingAction}
 						/>
 					))}
-				</div>
+				</SettingsGroup>
 			)}
 			<OAuthAppRegistrationDialog
 				createdApp={createdApp}
@@ -122,6 +144,6 @@ export function OwnedAppsSection() {
 				open={dialogOpen}
 			/>
 			{pending ? <span className="sr-only">Updating OAuth app</span> : null}
-		</section>
+		</SettingsSection>
 	);
 }

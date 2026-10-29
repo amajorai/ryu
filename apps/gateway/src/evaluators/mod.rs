@@ -19,6 +19,7 @@
 //! `config::CustomPatternKind`, and `evals::Assertion`.
 
 pub mod catalog;
+pub mod exec;
 pub mod registry;
 
 use serde::{Deserialize, Serialize};
@@ -80,6 +81,55 @@ pub struct Evaluator {
     /// so "pass" always means GOOD regardless of which direction the raw score runs.
     #[serde(default = "default_higher_is_better")]
     pub higher_is_better: bool,
+}
+
+impl Evaluator {
+    /// Runtime support is owned by Gateway, never by caller-supplied capability flags.
+    pub fn unavailable_inline_reason(&self) -> Option<&'static str> {
+        if matches!(self.target, EvaluatorTarget::Image | EvaluatorTarget::Audio) {
+            return Some("media inline judges are unavailable");
+        }
+        match &self.impl_ {
+            EvaluatorImpl::Code { .. } => Some("sandboxed code evaluator execution is unavailable"),
+            EvaluatorImpl::Builtin { detector }
+                if exec::builtin_detection_kind(detector).is_none() =>
+            {
+                Some("unknown builtin detector")
+            }
+            _ => None,
+        }
+    }
+
+    pub fn unavailable_offline_reason(&self) -> Option<&'static str> {
+        if matches!(self.target, EvaluatorTarget::Image | EvaluatorTarget::Audio) {
+            return Some("media datasets and offline media judges are unavailable");
+        }
+        match &self.impl_ {
+            EvaluatorImpl::Code { .. } => Some("sandboxed code evaluator execution is unavailable"),
+            EvaluatorImpl::Builtin { detector }
+                if exec::builtin_detection_kind(detector).is_none() =>
+            {
+                Some("unknown builtin detector")
+            }
+            EvaluatorImpl::Wasm { .. } => {
+                Some("Wasm policy evaluators support inline execution only")
+            }
+            _ => None,
+        }
+    }
+
+    /// Project legacy definitions honestly without changing the persisted authoring source.
+    pub fn gate_unavailable_capabilities(&mut self) {
+        if self.unavailable_inline_reason().is_some() {
+            self.capabilities.inline = false;
+            self.inline = None;
+            self.enforced = false;
+        }
+        if self.unavailable_offline_reason().is_some() {
+            self.capabilities.offline = false;
+            self.offline = None;
+        }
+    }
 }
 
 /// Serde default for [`Evaluator::higher_is_better`]: quality-style (higher = better).
@@ -169,9 +219,11 @@ pub enum EvaluatorImpl {
     Heuristic,
     /// LLM-as-a-judge with a rubric used as the judge system prompt.
     LlmJudge { rubric: String },
-    /// Sandboxed user code (JS via Deno / Python via sandbox backend).
+    /// Sandboxed user code (JS via Core's JS sandbox / Python via sandbox backend).
     Code { lang: CodeLang, source: String },
-    /// A named built-in detector wired elsewhere in the gateway.
+    /// A named firewall detector (`pii`, `secret`, `prompt_injection`,
+    /// `code_injection`, `toxicity`, `bias`) run over the target text; see
+    /// [`exec::BUILTIN_DETECTORS`]. Unknown names are reported unavailable.
     Builtin { detector: String },
     /// Untrusted third-party **policy code** running IN-PROCESS in the gateway,
     /// compiled to WebAssembly and executed in the hardened wasmtime sandbox

@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig } from "vite";
-import harness from "./vite.harness.config";
+import harness from "./vite.harness.config.ts";
 
 export default mergeConfig(
 	harness,
@@ -9,5 +9,7 @@ export default mergeConfig(
 			port: 5199,
 			strictPort: true,
 		},
+
+		optimizeDeps: { esbuildOptions: { target: "esnext" } },
 	})
 );

@@ -1,3 +1,23 @@
+/** Native numeric formatting rejects non-numbers without coercing them. The ticker
+ * owns String presentation for those operands, including legacy stored counts. */
+/** Native conversion reads these method slots lazily, and permits malformed slots
+ * to produce their original errors. Function, Date, proxy and null-prototype
+ * operands retain their native identities and additional fields. */
+export interface NativeCountConversion {
+	toString?: unknown;
+	valueOf?: unknown;
+	[Symbol.toPrimitive]?: unknown;
+}
+export type CountFormattingInput =
+	| number
+	| string
+	| boolean
+	| bigint
+	| symbol
+	| null
+	| undefined
+	| NativeCountConversion;
+
 const MILLION = 1_000_000;
 
 const INTEGER_FORMATTER = new Intl.NumberFormat("en-US", {
@@ -12,8 +32,8 @@ const MILLION_FORMATTER = new Intl.NumberFormat("en-US", {
 	maximumFractionDigits: 1,
 });
 
-function isFiniteNumber(value: number | null | undefined): value is number {
-	return typeof value === "number" && Number.isFinite(value);
+function isFiniteNumber(value: CountFormattingInput): value is number {
+	return value !== null && value !== undefined && Number.isFinite(value);
 }
 
 /**
@@ -23,7 +43,7 @@ function isFiniteNumber(value: number | null | undefined): value is number {
  * counts use a compact, lowercase suffix (`1.2m`). This is the display policy
  * shared by the website and desktop app.
  */
-export function formatCount(value: number | null | undefined): string | null {
+export function formatCount(value: CountFormattingInput): string | null {
 	if (!isFiniteNumber(value)) {
 		return null;
 	}

@@ -20,6 +20,15 @@ import {
 	type SvglRoute,
 } from "@ryu/ui/components/svgl.ts";
 
+/** Artwork slots resolved from publisher icon fields and the current brand index. */
+export interface ResolvedCardIcon {
+	/** Brand marks retain their colours and are letterboxed rather than cropped. */
+	brand?: boolean;
+	iconId?: string | null;
+	iconUrl?: string | null;
+	iconUrlDark?: string | null;
+}
+
 /** GitHub image CDN hosts. Every `*.githubusercontent.com` subdomain
  *  (`raw`, `user-images`, `avatars`, `camo`, `objects`, `private-user-images`)
  *  serves image bytes; `github.com` itself only for release/attachment `/assets/`
@@ -85,14 +94,7 @@ export function resolveCardIcon({
 	iconUrl?: string | null;
 	/** svgl's loaded brand index, or null before it lands — see {@link useSvglIndex}. */
 	svglIndex?: Map<string, SvglRoute> | null;
-}): {
-	/** True when the raster slot holds a BRAND mark, which must be letterboxed
-	 *  (`object-contain`) rather than cropped to fill the tile like a cover image. */
-	brand?: boolean;
-	iconId?: string | null;
-	iconUrl?: string | null;
-	iconUrlDark?: string | null;
-} {
+}): ResolvedCardIcon {
 	// A brand id resolves to the raster slot in the brand's own colours. The
 	// publisher-declared `icon_url` still wins — it is the more specific claim.
 	const svgl = resolveSvglIcon(icon, svglIndex);

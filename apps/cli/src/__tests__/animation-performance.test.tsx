@@ -6,39 +6,51 @@ import {
 	mkdtemp,
 	readFile,
 	rm,
+	symlink,
 	writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { testRender } from "@opentui/react/test-utils";
 import { act, useState } from "react";
 import { Spinner } from "../../components/ui/spinner.tsx";
 import { ThemeProvider } from "../../components/ui/theme-provider.tsx";
+import { testRender } from "./cli-test-render.ts";
 
 test("spinners share their timer and reduced motion releases it", async () => {
 	const originalSet = globalThis.setInterval;
 	const originalClear = globalThis.clearInterval;
-	const active = new Set<unknown>();
+	// SAFETY: bun-types/globals.d.ts declares clearInterval(number | Timer),
+	// alongside Node's string/number/Timeout overload. Function.call selects only
+	// the last ambient overload; this native callable retains both SDK inputs,
+	// forwards the same handle/receiver, and preserves native refusal/errors.
+	const clearNativeTimer = originalClear as (
+		id: Parameters<typeof originalClear>[0] | Timer
+	) => ReturnType<typeof originalClear>;
+	const active = new Set<Parameters<typeof originalClear>[0] | Timer>();
 	let started = 0;
 	let invalid = false;
-	// Forward the platform timer's complete overload set unchanged.
-	const trackedInterval = ((...args: unknown[]) => {
+	// Forward the native timer callback, delay, arguments, and returned handle.
+	// SAFETY: this transparent spy forwards every runtime argument to the same
+	// native setInterval and returns its unchanged handle. Parameters selects
+	// only the last DOM/Bun/Node overload; the wrapper preserves every original
+	// overload's acceptance, coercion, callback arguments, and native errors.
+	const trackedInterval = ((...args: Parameters<typeof originalSet>) => {
 		if (args[1] === Number.POSITIVE_INFINITY) {
 			invalid = true;
 		}
-		const id: unknown = Reflect.apply(originalSet, globalThis, args);
+		const id = originalSet.apply(globalThis, args);
 		if (args[1] === 143) {
 			started++;
 			active.add(id);
 		}
 		return id;
-	}) as typeof setInterval;
+	}) as typeof originalSet;
 	const set = spyOn(globalThis, "setInterval").mockImplementation(
 		trackedInterval
 	);
 	const clear = spyOn(globalThis, "clearInterval").mockImplementation((id) => {
 		active.delete(id);
-		Reflect.apply(originalClear, globalThis, [id]);
+		clearNativeTimer.call(globalThis, id);
 	});
 	let reduce!: (value: boolean) => void;
 	function View() {
@@ -120,6 +132,18 @@ test("registry refresh preserves the host animation hook while writing other fil
 		await copyFile(
 			resolve(import.meta.dirname, "../../scripts/vendor-termcn.ts"),
 			join(root, "scripts/vendor-termcn.ts")
+		);
+		await copyFile(
+			resolve(
+				import.meta.dirname,
+				"../../scripts/termcn-registry-contracts.ts"
+			),
+			join(root, "scripts/termcn-registry-contracts.ts")
+		);
+		await symlink(
+			resolve(import.meta.dirname, "../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
 		);
 		await writeFile(join(root, "hooks/use-animation.ts"), "host-owned");
 		const child = Bun.spawn(

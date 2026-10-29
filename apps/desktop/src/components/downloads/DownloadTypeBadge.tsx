@@ -10,31 +10,18 @@
 // decided against tooltips inside the row (nesting another trigger made the whole
 // row a tooltip target), and the badge is a passive stamp, not a control.
 
-import { Badge } from "@ryu/ui/components/badge";
-import { cn } from "@ryu/ui/lib/utils";
-import type {
-	BadgeTone,
-	DownloadBadge,
-} from "@/src/lib/catalog/downloadBadge.ts";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import type { DownloadBadge } from "@/src/lib/catalog/downloadBadge.ts";
 
 // Muted fills rather than solid ones: the row's own title, progress bar and
 // controls are the things to read first — the type is orienting, not shouting.
-const TONE_CLASS: Record<BadgeTone, string> = {
-	amber: "bg-warning/10 text-status-warning",
-	blue: "bg-primary/10 text-primary",
-	emerald: "bg-success/10 text-status-success",
-	neutral: "bg-muted text-muted-foreground",
-	rose: "bg-destructive/10 text-status-destructive",
-	violet: "bg-accent text-accent-foreground",
-};
-
+// Badge's `tint` variant carries exactly the BadgeTone keys, so the fill stays
+// on the pill itself.
 export function DownloadTypeBadge({ badge }: { badge: DownloadBadge }) {
 	return (
 		<Badge
-			className={cn(
-				"h-4 px-1.5 font-medium text-[10px] leading-none",
-				TONE_CLASS[badge.tone]
-			)}
+			size="download-label"
+			tint={badge.tone}
 			title={badge.tooltip}
 			variant="secondary"
 		>

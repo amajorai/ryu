@@ -1,0 +1,507 @@
+{
+  "version": 1,
+  "description": "Ryu's first-party capability taxonomy. A capability is a job an agent wants done; a platform is the real-world system the job acts on. An endpoint joins one capability on one platform, and (platform, capability) is the comparison row that lines up vendors serving the same job. Promoted capabilities whose `verbs` are listed are the canonical facade verbs in apps/core/src/sidecar/mcp/capability_tools.rs (one capability per verb; `layer` is the binding capability that serves it). New jobs land as `proposed` and are promoted by review; a capability with comparison `per_model` (generative media) compares only endpoints that run the same model. Read by ryu_gw_contracts::capability_taxonomy and @ryuhq/protocol/capability-taxonomy.",
+  "platforms": [
+    {
+      "id": "web",
+      "name": "Public web",
+      "description": "Pages and search results on the open internet.",
+      "status": "promoted",
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser",
+      "name": "Browser session",
+      "description": "A live browser tab, local Chromium or a cloud browser, driven on the user's behalf.",
+      "status": "promoted",
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "desktop",
+      "name": "Desktop computer",
+      "description": "The user's own screen, keyboard and pointer.",
+      "status": "promoted",
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "agent-memory",
+      "name": "Agent memory store",
+      "description": "Long-term facts an agent remembers across conversations.",
+      "status": "promoted",
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "decision-model",
+      "name": "Typed decision model",
+      "description": "A model that answers choice, score or yes/no questions with structured output.",
+      "status": "promoted",
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "source-of-truth",
+      "name": "Source of truth",
+      "description": "A reference document set or rule base that claims are checked against.",
+      "status": "promoted",
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "GitHub repositories, issues and accounts.",
+      "status": "promoted",
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "generative-media",
+      "name": "Generative media model",
+      "description": "Hosted image and video generation models.",
+      "status": "proposed",
+      "addedOn": "2026-10-20"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "decision.predict",
+      "name": "Answer a typed question about a state",
+      "description": "Answer choice, score or yes/no questions about a text or JSON state with structured output.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["decision-model"],
+      "layer": "decision.typed",
+      "verbs": ["decision.predict"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "decision.predict_multimodal",
+      "name": "Answer a typed question about images",
+      "description": "Answer typed questions about a text or JSON state that includes embedded images.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["decision-model"],
+      "layer": "decision.typed",
+      "verbs": ["decision.predict_multimodal"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "verify.claim",
+      "name": "Check a claim",
+      "description": "Check a plain-language claim against a source of truth and return a verdict with its evidence.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["source-of-truth"],
+      "layer": "verify.claim",
+      "verbs": ["verify.claim"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "verify.scopes",
+      "name": "List checkable sources",
+      "description": "List the sources of truth that claims can be checked against.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["source-of-truth"],
+      "layer": "verify.claim",
+      "verbs": ["verify.scopes"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "web.search",
+      "name": "Search the web",
+      "description": "Return ranked web results (title, URL, snippet) for a query.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["web"],
+      "layer": "web.search",
+      "verbs": ["web.search"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "web.extract",
+      "name": "Extract a page",
+      "description": "Return the readable content of one web page.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["web"],
+      "layer": "web.extract",
+      "verbs": ["web.extract"],
+      "aliases": ["web.fetch"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "web.crawl",
+      "name": "Crawl a site",
+      "description": "Follow links from a start URL and return the extracted pages.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["web"],
+      "layer": "web.crawl",
+      "verbs": ["web.crawl"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.navigate",
+      "name": "Open a URL in a browser",
+      "description": "Open a URL in a real browser tab and return the resulting tab.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.navigate"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.snapshot",
+      "name": "Read the page accessibility tree",
+      "description": "Return the page's accessibility tree with stable element references.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.snapshot"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.click",
+      "name": "Click a page element",
+      "description": "Click an element identified by an accessibility reference.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.click"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.type",
+      "name": "Type into a page element",
+      "description": "Insert text into an element identified by an accessibility reference.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.type"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.scroll",
+      "name": "Scroll the page",
+      "description": "Scroll a browser page in a direction.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.scroll"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.screenshot",
+      "name": "Screenshot the page",
+      "description": "Capture an image of the current browser page.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.screenshot"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.tabs",
+      "name": "List browser tabs",
+      "description": "List open browser tabs with their ids, URLs and titles.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.tabs"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.context",
+      "name": "Gather page context",
+      "description": "Return the page screenshot, accessibility snapshot, saved annotations and pointed-element DOM context together.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.context"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.annotate",
+      "name": "Annotate a page region",
+      "description": "Attach a frozen-frame visual comment to page elements or an area.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.annotate"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.clear_annotations",
+      "name": "Clear page annotations",
+      "description": "Remove saved visual comments from a browser tab.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.clear_annotations"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.hover",
+      "name": "Hover over a page element",
+      "description": "Move the pointer over an element without clicking it.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.hover"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.click_at",
+      "name": "Click a page coordinate",
+      "description": "Click a viewport coordinate where no accessibility reference exists.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.click_at"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.key",
+      "name": "Press a key in the page",
+      "description": "Press a key or key chord at the page's current focus.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.key"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "browser.drag",
+      "name": "Drag between page coordinates",
+      "description": "Drag the pointer between two viewport coordinates.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["browser"],
+      "layer": "browser.control",
+      "verbs": ["browser.drag"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "computer.capture",
+      "name": "Capture the screen",
+      "description": "Capture the screen with accessibility metadata for later targeting.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["desktop"],
+      "layer": "computer.control",
+      "verbs": ["computer.capture"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "computer.click",
+      "name": "Click a screen coordinate",
+      "description": "Click at a coordinate on the desktop.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["desktop"],
+      "layer": "computer.control",
+      "verbs": ["computer.click"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "computer.type",
+      "name": "Type text at the keyboard focus",
+      "description": "Type text into whatever has desktop keyboard focus.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["desktop"],
+      "layer": "computer.control",
+      "verbs": ["computer.type"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "computer.key",
+      "name": "Press a key on the desktop",
+      "description": "Press a key or key chord at the desktop's keyboard focus.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["desktop"],
+      "layer": "computer.control",
+      "verbs": ["computer.key"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "computer.scroll",
+      "name": "Scroll at a screen coordinate",
+      "description": "Scroll the desktop at a given coordinate.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["desktop"],
+      "layer": "computer.control",
+      "verbs": ["computer.scroll"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "computer.focus_app",
+      "name": "Bring an application forward",
+      "description": "Bring a desktop application to the front before interacting with it.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["desktop"],
+      "layer": "computer.control",
+      "verbs": ["computer.focus_app"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "memory.search",
+      "name": "Recall remembered facts",
+      "description": "Recall durable facts from long-term memory for a query.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["agent-memory"],
+      "layer": "memory",
+      "verbs": ["memory.search"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "memory.store",
+      "name": "Remember a fact",
+      "description": "Store a durable fact at an agent, user, node, project or org scope.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["agent-memory"],
+      "layer": "memory",
+      "verbs": ["memory.store"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "memory.context",
+      "name": "Summarise what memory knows",
+      "description": "Return a short standing summary of what the memory provider knows.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["agent-memory"],
+      "layer": "memory",
+      "verbs": ["memory.context"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "memory.sync",
+      "name": "Feed a conversation turn to memory",
+      "description": "Hand a raw conversation turn to the memory provider and let it extract what to keep.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["agent-memory"],
+      "layer": "memory",
+      "verbs": ["memory.sync"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "memory.forget",
+      "name": "Forget a remembered fact",
+      "description": "Delete a remembered fact by id.",
+      "status": "promoted",
+      "comparison": "capability",
+      "platforms": ["agent-memory"],
+      "layer": "memory",
+      "verbs": ["memory.forget"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "account.whoami",
+      "name": "Identify the connected account",
+      "description": "Return the profile of the account a connection acts as.",
+      "status": "proposed",
+      "comparison": "capability",
+      "platforms": ["github"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "repository.list",
+      "name": "List repositories",
+      "description": "List the code repositories the connected account can access.",
+      "status": "proposed",
+      "comparison": "capability",
+      "platforms": ["github"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "issue.list",
+      "name": "List a project's issues",
+      "description": "List the issues filed against one repository or project.",
+      "status": "proposed",
+      "comparison": "capability",
+      "platforms": ["github"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "issue.list_assigned",
+      "name": "List issues assigned to me",
+      "description": "List the issues assigned to the connected account across projects.",
+      "status": "proposed",
+      "comparison": "capability",
+      "platforms": ["github"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "issue.get",
+      "name": "Read an issue",
+      "description": "Return one issue by its number or id.",
+      "status": "proposed",
+      "comparison": "capability",
+      "platforms": ["github"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "issue.create",
+      "name": "File an issue",
+      "description": "Open a new issue with a title and body.",
+      "status": "proposed",
+      "comparison": "capability",
+      "platforms": ["github"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "issue.comment",
+      "name": "Comment on an issue",
+      "description": "Add a comment to an existing issue.",
+      "status": "proposed",
+      "comparison": "capability",
+      "platforms": ["github"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "issue.search",
+      "name": "Search issues and pull requests",
+      "description": "Find issues and pull requests matching a query.",
+      "status": "proposed",
+      "comparison": "capability",
+      "platforms": ["github"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "image.generate",
+      "name": "Generate an image",
+      "description": "Produce an image from a text prompt with a named model.",
+      "status": "proposed",
+      "comparison": "per_model",
+      "platforms": ["generative-media"],
+      "addedOn": "2026-10-20"
+    },
+    {
+      "id": "video.generate",
+      "name": "Generate a video",
+      "description": "Produce a video clip from a text or image prompt with a named model.",
+      "status": "proposed",
+      "comparison": "per_model",
+      "platforms": ["generative-media"],
+      "addedOn": "2026-10-20"
+    }
+  ]
+}

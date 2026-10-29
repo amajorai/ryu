@@ -15,11 +15,13 @@
 //! no `Embedder::`/`Reranker::`/`RetrievalStore::open*` construction lives outside
 //! `rag_host` + `#[cfg(test)]`), so a provider swap is a change at exactly one
 //! origin — memory, spaces, search, tool-routing and chat retrieval move together,
-//! never a silent half-swap. The provider is keyed by [`active_provider_id`]; today
-//! only the in-process `"vector"` provider exists and a bound out-of-process id is
-//! an **explicit error** ([`open_retrieval_store`]), never a silent fallthrough to
-//! vector. A real GraphRAG *sidecar* provider (broker-routed) is the deferred W8
-//! follow-on.
+//! never a silent half-swap. The provider is keyed by `RYU_RAG_PROVIDER` (default
+//! `"vector"`) and resolved by [`provider_binding`]: the in-process `"vector"` provider (sqlite-vec,
+//! the default) alone, or the in-process provider plus a configured external
+//! vector store ([`vector_store`]: Qdrant, Chroma, Pinecone, Weaviate, Milvus,
+//! pgvector, or a local sqlite-vec collection). Any other id is an **explicit
+//! error** ([`open_retrieval_store`]), never a silent fallthrough to vector. A real
+//! GraphRAG *sidecar* provider (broker-routed) is the deferred W8 follow-on.
 //!
 //! Mirrors the `search_host`/`crypto_host` precedent (kernel wiring the extracted
 //! crate can't own), by *constructor injection* like `ryu-storage`.
@@ -31,25 +33,75 @@ use anyhow::Result;
 use ryu_rag::{
     ChunkSource, Embedder, Reranker, RetrievalOptions, RetrievalStore, ScoredChunk, SpaceRecall,
 };
-use ryu_spaces::{DocFilter, SpaceStore};
+use ryu_spaces::{DocFilter, SpaceSearchOptions, SpaceStore};
 
 use crate::registry::ModelRegistry;
 
-/// The bound RAG provider id. Today only the in-process vector provider exists;
-/// the seam reads `RYU_RAG_PROVIDER` (default `"vector"`) so a future binding layer
-/// can select an out-of-process provider without touching consumers. An unknown id
-/// is rejected at the store-creation origin ([`open_retrieval_store`]).
-pub fn active_provider_id() -> String {
-    std::env::var("RYU_RAG_PROVIDER")
-        .ok()
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "vector".to_string())
-}
+pub mod vector_store;
+
+use ryu_vector_stores::VectorStoreProvider;
 
 /// `true` when the active provider is the built-in in-process vector RAG.
 fn is_in_process(id: &str) -> bool {
     matches!(id, "vector" | "in-process" | "builtin" | "ryu-rag")
+}
+
+/// What the configured RAG provider resolves to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderBinding {
+    /// The built-in in-process stores only (`retrieval.db` + sqlite-vec Spaces).
+    BuiltIn,
+    /// The built-in stores plus an external vector-store collection, answered as
+    /// the [`vector_store::SOURCE_ID`] retrieval source.
+    VectorStore(VectorStoreProvider),
+}
+
+/// Resolve the provider binding from `RYU_RAG_PROVIDER` and
+/// `RYU_RAG_VECTOR_STORE_PROVIDER` (node-config `settings.rag.provider` /
+/// `settings.rag.vectorStore.provider`) through `lookup`.
+///
+/// - `RYU_RAG_VECTOR_STORE_PROVIDER` names the vector store explicitly;
+/// - `RYU_RAG_PROVIDER` may name one as shorthand (`RYU_RAG_PROVIDER=qdrant`);
+/// - both set to different stores is an error rather than a silent pick;
+/// - `sqlite-vec` via `RYU_RAG_PROVIDER` is the built-in default itself, while
+///   `RYU_RAG_VECTOR_STORE_PROVIDER=sqlite-vec` opts into a separate local
+///   knowledge collection (`db/vector-store.db`).
+pub fn provider_binding(lookup: impl Fn(&str) -> Option<String>) -> Result<ProviderBinding> {
+    let read = |name: &str| {
+        lookup(name)
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty())
+    };
+    let rag = read("RYU_RAG_PROVIDER").unwrap_or_else(|| "vector".to_owned());
+    let explicit = read("RYU_RAG_VECTOR_STORE_PROVIDER")
+        .map(|id| id.parse::<VectorStoreProvider>())
+        .transpose()?;
+    let shorthand =
+        if is_in_process(&rag) {
+            None
+        } else {
+            match rag.parse::<VectorStoreProvider>() {
+                Ok(VectorStoreProvider::SqliteVec) => None,
+                Ok(provider) => Some(provider),
+                Err(_) => anyhow::bail!(
+                "RAG provider '{rag}' is not supported; use 'vector' (the default) or a vector \
+                 store id ({}).",
+                VectorStoreProvider::ALL.map(VectorStoreProvider::as_str).join(", ")
+            ),
+            }
+        };
+    match (explicit, shorthand) {
+        (Some(a), Some(b)) if a != b => anyhow::bail!(
+            "RYU_RAG_PROVIDER selects '{b}' but RYU_RAG_VECTOR_STORE_PROVIDER selects '{a}'; \
+             set one of them."
+        ),
+        (Some(provider), _) | (None, Some(provider)) => Ok(ProviderBinding::VectorStore(provider)),
+        (None, None) => Ok(ProviderBinding::BuiltIn),
+    }
+}
+
+fn env_lookup(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 /// The registry the two retrieval-store openers build from — the single seam where
@@ -112,8 +164,8 @@ pub fn retrieval_registry() -> ModelRegistry {
 ///   separate embedding-model **preference** path (`set_embedding_model`), so
 ///   nothing re-indexes on its own at boot.
 /// - `message-embeddings.db` — self-healing on a **dims** change only.
-///   `MessageIndex::open` rebuilds the vec0 table and clears the metadata so the
-///   next search re-backfills. A same-dims model change leaves old rows filtered out
+///   `MessageIndex::open` clears its sealed vectors so the next search
+///   re-backfills. A same-dims model change leaves old rows filtered out
 ///   until they are re-indexed by the normal backfill.
 /// - `retrieval.db` — no re-embed path. `RetrievalStore` filters on
 ///   `embedding_model`, so chunks written under the previous model stay invisible.
@@ -147,7 +199,7 @@ pub fn embedder_from_config(base_url: &str, model: &str, dims: usize) -> Embedde
 /// API key directly to a provider when this path is selected.
 pub fn gateway_embedder(model: &str, dims: usize) -> Embedder {
     let base_url = crate::sidecar::gateway::gateway_url();
-    let token = crate::sidecar::gateway::required_gateway_core_token().ok();
+    let token = crate::sidecar::gateway::required_gateway_inference_token().ok();
     // Keep provider identity in the stored vector tag. Gateway removes this
     // namespace before model routing, so a local `model-x` and cloud
     // `gateway/model-x` can never silently share vectors.
@@ -192,7 +244,7 @@ fn embed_api_key() -> Option<String> {
 ///   remote branch is the one place that key changes behaviour, so dev is where a
 ///   file-set `reranker_model` actually reaches the wire.
 /// - `RetrievalStore::retrieve` propagates a reranker error rather than falling back
-///   to cosine order (`self.reranker.rerank(..).await?`, `crates/core/rag/src/lib.rs`),
+///   to cosine order (`self.reranker.rerank(..).await?`, `crates/core/rag/src/store/retrieve.rs`),
 ///   and `Reranker::Remote` errors when the endpoint is unreachable. The Spaces path
 ///   falls open to vector order; this one does not. Its main consumer, chat
 ///   auto-recall (`sidecar::adapters`), catches the error, logs a warning and
@@ -210,7 +262,7 @@ pub fn reranker_from_registry(registry: &ModelRegistry) -> Reranker {
         return Reranker::remote(
             &base_url,
             &format!("gateway/{}", registry.reranker.id),
-            crate::sidecar::gateway::required_gateway_core_token().ok(),
+            crate::sidecar::gateway::required_gateway_inference_token().ok(),
         );
     }
     match std::env::var("RYU_RERANKER_BASE_URL")
@@ -284,16 +336,36 @@ fn backfill_owner() -> Option<(String, String)> {
     }
 }
 
+/// Recall diagnostics (counts only, never content): how much of each sealed
+/// vector index is searchable from memory right now (`vector_coverage`:
+/// `hydrated`, `total`, `evicted_partitions` under the shared
+/// `RYU_VECTOR_CACHE_MB` budget) and how many rows were skipped because a sealed
+/// value did not open. Degraded semantic recall is visible here, never silent.
+pub fn recall_diagnostics(
+    retrieval: &RetrievalStore,
+    conversations: &crate::server::conversations::ConversationStore,
+) -> serde_json::Value {
+    serde_json::json!({
+        "retrieval": {
+            "vector_coverage": retrieval.vector_coverage(),
+            "unreadable_rows": retrieval.unreadable_rows(),
+        },
+        "conversations": conversations.search_index_diagnostics(),
+    })
+}
+
 /// Open (or create) the process retrieval store at the default `~/.ryu/retrieval.db`
 /// path using the node's model registry ([`retrieval_registry`]: env >
 /// `registry.json` > literal) — the ServerState field origin. Resolves the embedder
 /// + reranker + default reranker id through this module and runs the tenancy
 /// backfill with the Core-resolved owner.
 ///
-/// This is the single fallible origin where the bound provider id is enforced: an
-/// out-of-process provider id (anything other than the in-process vector provider)
-/// is an explicit error rather than a silent fallthrough to vector — a future
-/// GraphRAG sidecar provider is wired here (broker-routed), not faked.
+/// This is the single fallible origin where the bound provider id is enforced
+/// ([`provider_binding`]): an unknown id, a conflicting pair, or an invalid
+/// vector-store setting is an explicit boot error rather than a silent
+/// fallthrough to vector. A configured vector store is validated here and opened
+/// lazily on first recall ([`vector_store::ExternalCollection`]); a future GraphRAG
+/// sidecar provider is wired here (broker-routed), not faked.
 ///
 /// `spaces` is **required**, not optional, and that is the point: it is what makes
 /// `RetrievalOptions::space_ids` reach a real Space at all (see [`SpacesRecall`]).
@@ -301,26 +373,35 @@ fn backfill_owner() -> Option<(String, String)> {
 /// it is silent — an agent's Space allowlist that retrieves nothing, which is the
 /// exact defect this delegate closes.
 pub fn open_retrieval_store(spaces: &SpaceStore) -> Result<RetrievalStore> {
-    let provider = active_provider_id();
-    if !is_in_process(&provider) {
-        anyhow::bail!(
-            "RAG provider '{provider}' selects an out-of-process provider that is not wired yet; \
-             only the in-process 'vector' provider is supported (unset RYU_RAG_PROVIDER)."
-        );
-    }
+    let binding = provider_binding(env_lookup)?;
     // `retrieval_registry()` (= `load()`), not `from_env()`: this store's
     // `reranker_model` comes from `registry.json` when the operator set it there.
     let registry = retrieval_registry();
     let embedder = embedder_from_registry(&registry);
     let reranker = reranker_from_registry(&registry);
+    let recall: Arc<dyn SpaceRecall> = match binding {
+        ProviderBinding::BuiltIn => Arc::new(SpacesRecall::new(spaces.clone())),
+        ProviderBinding::VectorStore(provider) => {
+            let settings = vector_store::VectorStoreSettings::from_lookup(provider, env_lookup)?;
+            tracing::info!(
+                "retrieval: {provider} vector store collection '{}' is available as source '{}'",
+                settings.collection,
+                vector_store::SOURCE_ID
+            );
+            Arc::new(vector_store::VectorStoreRecall::new(
+                SpacesRecall::new(spaces.clone()),
+                vector_store::ExternalCollection::new(settings, embedder.clone()),
+            ))
+        }
+    };
     Ok(RetrievalStore::open(
-        crate::paths::ryu_dir().join("retrieval.db"),
+        crate::paths::db_path("retrieval.db"),
         embedder,
         reranker,
         registry.reranker.id.clone(),
         backfill_owner(),
     )?
-    .with_space_recall(Arc::new(SpacesRecall::new(spaces.clone()))))
+    .with_space_recall(recall))
 }
 
 /// The Core-side [`SpaceRecall`] delegate: answers `RetrievalOptions::space_ids`
@@ -334,10 +415,11 @@ pub fn open_retrieval_store(spaces: &SpaceStore) -> Result<RetrievalStore> {
 /// `ryu-spaces` uses `ryu_rag::Embedder`), so the trait is declared in `ryu-rag`
 /// and implemented here, in the module that already owns every RAG construction
 /// site. All it does is lower tenancy into a [`DocFilter`] and call
-/// [`SpaceStore::search_ext`] — the SAME entry point the Spaces search box and the
+/// [`SpaceStore::search_with`] — the SAME pipeline the Spaces search box and the
 /// `ryu_search_space` MCP tool use, which is what keeps `retrieval_mode` and the
 /// entity graph single-sourced in `spaces.db`. Nothing here re-reads a Space's
-/// mode; `search_ext` branches on it internally.
+/// mode; `search_with` branches on it internally. The request's `hybrid` and
+/// `filter` knobs are forwarded so they apply inside each Space.
 pub struct SpacesRecall {
     spaces: SpaceStore,
 }
@@ -386,6 +468,13 @@ impl SpaceRecall for SpacesRecall {
                 .collect(),
         };
 
+        // The caller's hybrid and metadata-filter knobs apply inside each Space.
+        let search_options = SpaceSearchOptions {
+            limit: per_space_limit,
+            hybrid: opts.hybrid,
+            filter: opts.filter.clone(),
+            ..SpaceSearchOptions::default()
+        };
         let mut lists = Vec::new();
         for space_id in space_ids {
             // Per-Space fail-open: one unreadable/missing Space must not cost the
@@ -395,7 +484,7 @@ impl SpaceRecall for SpacesRecall {
             // matched by the `retrieval.db` half.
             match self
                 .spaces
-                .search_ext(&space_id, query, per_space_limit, None, filter.clone())
+                .search_with(&space_id, query, &search_options, filter.clone())
                 .await
             {
                 Ok(matches) if matches.is_empty() => {}
@@ -794,6 +883,41 @@ mod space_recall_tests {
         );
     }
 
+    /// The recall diagnostics report vector coverage and unreadable-row counts
+    /// for both recall stores, and never content.
+    #[tokio::test]
+    async fn recall_diagnostics_report_coverage_without_content() {
+        let spaces = SpaceStore::open_in_memory().unwrap();
+        let store = wired(&spaces);
+        store
+            .index_chunk(
+                "diag-1",
+                ChunkSource::Memory,
+                None,
+                "Diagnostics must never echo this sentence.",
+                ryu_rag::RetrievalOwner::shared(),
+            )
+            .await
+            .unwrap();
+        store
+            .retrieve(
+                "diagnostics sentence",
+                &RetrievalOptions {
+                    include_sensitive: true,
+                    ..RetrievalOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+        let conversations =
+            crate::server::conversations::ConversationStore::open_in_memory().unwrap();
+        let report = recall_diagnostics(&store, &conversations);
+        assert_eq!(report["retrieval"]["vector_coverage"]["hydrated"], 1);
+        assert_eq!(report["retrieval"]["unreadable_rows"], 0);
+        assert!(report["conversations"]["unreadable"].is_object());
+        assert!(!report.to_string().contains("echo this sentence"));
+    }
+
     /// An id that is not a Space at all — this store's own `space_id` column holds
     /// OKF **bundle** ids — is skipped by the delegate without failing the recall,
     /// and the bundle's chunks still come back from `retrieval.db`. Guards the one
@@ -822,5 +946,77 @@ mod space_recall_tests {
         assert!(hits
             .iter()
             .any(|c| c.space_id.as_deref() == Some("bundle-1")));
+    }
+}
+
+#[cfg(test)]
+mod provider_binding_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn binding(pairs: &[(&str, &str)]) -> Result<ProviderBinding> {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        provider_binding(|name| map.get(name).cloned())
+    }
+
+    #[test]
+    fn default_and_in_process_ids_are_built_in() {
+        assert_eq!(binding(&[]).unwrap(), ProviderBinding::BuiltIn);
+        for id in [
+            "vector",
+            "In-Process",
+            "builtin",
+            "ryu-rag",
+            "sqlite-vec",
+            " ",
+        ] {
+            assert_eq!(
+                binding(&[("RYU_RAG_PROVIDER", id)]).unwrap(),
+                ProviderBinding::BuiltIn,
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn vector_store_ids_select_a_store() {
+        assert_eq!(
+            binding(&[("RYU_RAG_PROVIDER", "Qdrant")]).unwrap(),
+            ProviderBinding::VectorStore(VectorStoreProvider::Qdrant)
+        );
+        assert_eq!(
+            binding(&[("RYU_RAG_VECTOR_STORE_PROVIDER", "pgvector")]).unwrap(),
+            ProviderBinding::VectorStore(VectorStoreProvider::Pgvector)
+        );
+        // The explicit key may opt into a separate local sqlite-vec collection.
+        assert_eq!(
+            binding(&[("RYU_RAG_VECTOR_STORE_PROVIDER", "sqlite-vec")]).unwrap(),
+            ProviderBinding::VectorStore(VectorStoreProvider::SqliteVec)
+        );
+        // Agreeing keys are fine.
+        assert_eq!(
+            binding(&[
+                ("RYU_RAG_PROVIDER", "milvus"),
+                ("RYU_RAG_VECTOR_STORE_PROVIDER", "milvus"),
+            ])
+            .unwrap(),
+            ProviderBinding::VectorStore(VectorStoreProvider::Milvus)
+        );
+    }
+
+    #[test]
+    fn unknown_or_conflicting_ids_are_explicit_errors() {
+        let error = binding(&[("RYU_RAG_PROVIDER", "graphrag-sidecar")]).unwrap_err();
+        assert!(error.to_string().contains("not supported"), "{error}");
+        assert!(binding(&[("RYU_RAG_VECTOR_STORE_PROVIDER", "faiss")]).is_err());
+        let error = binding(&[
+            ("RYU_RAG_PROVIDER", "qdrant"),
+            ("RYU_RAG_VECTOR_STORE_PROVIDER", "chroma"),
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("set one of them"), "{error}");
     }
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import { forwardRef } from "react";
-import { Magnetic } from "../magnetic";
-import { Button, type ButtonProps } from "./base";
+import { Magnetic } from "../magnetic.tsx";
+import { Button, type ButtonProps } from "./base.tsx";
 
 export interface MagneticButtonProps extends ButtonProps {
 	/** Class applied to the magnetic wrapper. */

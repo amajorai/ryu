@@ -6,10 +6,10 @@ if (!id || !requested) return { kind: "none" };
 const enabled = String(await host.getPreference({ key: "effort-escalator-enabled" }) ?? "false") === "true";
 if (!enabled) return { kind: "none" };
 let state;
-try { state = JSON.parse((await host.storage.get(`effort-escalator:${id}`)) ?? "{}"); } catch (_error) { return { kind: "none" }; }
+try { state = JSON.parse((await host.storage.get(`effort-escalator:${id}`)) ?? "{}"); } catch  { return { kind: "none" }; }
 if (!state?.stuck || !Number(state.escalations)) return { kind: "none" };
 let rules;
-try { rules = JSON.parse(String(await host.getPreference({ key: "effort-escalator-rules" }) ?? "{}")); } catch (_error) { return { kind: "none" }; }
+try { rules = JSON.parse(String(await host.getPreference({ key: "effort-escalator-rules" }) ?? "{}")); } catch  { return { kind: "none" }; }
 const rule = rules?.agents?.[ctx.agent_id] ?? rules?.global;
 if (!rule?.ladder?.length) return { kind: "none" };
 const ladderLength = rule.ladder.length;

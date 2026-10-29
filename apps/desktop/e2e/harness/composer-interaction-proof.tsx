@@ -1,4 +1,4 @@
-import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar";
+import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import type { QuestionConfig } from "@ryu/blocks/desktop/agent-elements/question/question-prompt.tsx";
 import { useDeferredComposerPrompt } from "@ryu/blocks/desktop/agent-elements/use-deferred-question.ts";
 import { useState } from "react";
@@ -86,7 +86,7 @@ function Story() {
 		<main className="min-h-screen bg-background px-6 py-8 text-foreground">
 			<div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
 				<div className="space-y-1">
-					<p className="font-medium text-muted-foreground text-sm uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-sm uppercase tracking-(--tracking-section)">
 						Composer interaction proof
 					</p>
 					<h1 className="font-semibold text-2xl tracking-tight">

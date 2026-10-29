@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 
 const noop = () => {
@@ -25,10 +26,13 @@ export default function Dashboard({
 	onManage = noop,
 	onUpgrade = noop,
 }: DashboardProps) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center gap-4">
-				<p className="font-medium text-lg">Plan: {pro ? "Pro" : "Free"}</p>
+				<p className="font-medium text-lg">
+					{tl("Plan: {planName}", { planName: pro ? "Pro" : "Free" })}
+				</p>
 				{pro ? (
 					<Button onClick={onManage}>Manage Subscription</Button>
 				) : (
@@ -38,7 +42,7 @@ export default function Dashboard({
 			<div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
 				<a
 					className="rounded-lg border p-4 transition-colors hover:bg-muted"
-					href="/dashboard/certifications"
+					href="/console/certifications"
 				>
 					<p className="font-medium">Certifications</p>
 					<p className="text-muted-foreground text-sm">

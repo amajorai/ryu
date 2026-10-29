@@ -13,7 +13,7 @@ Not every published unit has the same license. Read [`../LICENSING.md`](../LICEN
 
 | Tool | Version | Needed for |
 |---|---|---|
-| [Bun](https://bun.sh) | 1.3.14 | JavaScript/TypeScript workspaces and the public toolsmith tests |
+| [Bun](https://bun.sh) | 1.4.4 | JavaScript/TypeScript workspaces and the public toolsmith tests |
 | Rust (stable) | latest | `apps/core` and `apps/gateway` |
 | Node.js | 22+ | the public toolsmith tests |
 | System deps (Linux) | see below | the Desktop app only |

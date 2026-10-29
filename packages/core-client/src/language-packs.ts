@@ -6,36 +6,58 @@
  */
 
 import { type LanguagePack, validateLanguagePack } from "@ryu/i18n/core";
+import { z } from "zod";
+
+const installedPackState = z.object({ enabled: z.boolean().catch(true) });
+
+import {
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
 import type { ApiTarget } from "./client.ts";
 import { request } from "./client.ts";
 
 const MAX_IMPORT_ARCHIVE_BYTES = 8 * 1024 * 1024;
 
-interface InstalledLanguagePacksResponse {
-	packs?: unknown;
+// Whole native JSON is admitted by transport. Only the business field read is
+// observed here; validateLanguagePack remains the complete pack authority.
+const languageResponseCellsSchema = z.custom<Record<string, AppResponseValue>>(
+	(value) =>
+		z.instanceof(Object).safeParse(value).success &&
+		Object.values(new Object(value)).every(
+			(cell) => appResponseValueSchema.safeParse(cell).success
+		)
+);
+function languageResponseField(
+	value: AppResponseValue,
+	field: "packs" | "pack"
+): AppResponseValue {
+	if (value === null || value === undefined) {
+		throw new TypeError(
+			`Language-pack response has no readable ${field} property`
+		);
+	}
+	return languageResponseCellsSchema.parse(new Object(value))[field];
 }
 
 export async function fetchInstalledLanguagePacks(
 	target: ApiTarget
 ): Promise<LanguagePack[]> {
-	const response = await request<InstalledLanguagePacksResponse>(
+	const response = await request(
 		target,
-		"/api/language-packs/installed"
+		"/api/language-packs/installed",
+		{},
+		appResponseValueSchema
 	);
-	if (!Array.isArray(response.packs)) {
+	const responsePacks = languageResponseField(response, "packs");
+	if (!Array.isArray(responsePacks)) {
 		return [];
 	}
 	const packs: LanguagePack[] = [];
-	for (const raw of response.packs) {
+	for (const raw of responsePacks) {
 		try {
 			const pack = validateLanguagePack(raw);
-			const enabled =
-				typeof raw === "object" &&
-				raw !== null &&
-				"enabled" in raw &&
-				typeof raw.enabled === "boolean"
-					? raw.enabled
-					: true;
+			const enabled = installedPackState.parse(raw).enabled;
 			packs.push({ ...pack, enabled });
 		} catch {
 			// One malformed installed record must not hide the rest of the catalog.
@@ -60,13 +82,14 @@ export async function importLanguagePack(
 	target: ApiTarget,
 	archive: Uint8Array
 ): Promise<LanguagePack> {
-	const result = await request<{ pack?: unknown }>(
+	const result = await request(
 		target,
 		"/api/language-packs/import",
 		{
 			body: { archive_base64: archiveBase64(archive) },
 			method: "POST",
-		}
+		},
+		appResponseValueSchema
 	);
-	return validateLanguagePack(result.pack);
+	return validateLanguagePack(languageResponseField(result, "pack"));
 }

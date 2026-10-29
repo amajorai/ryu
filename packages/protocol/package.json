@@ -1,19 +1,46 @@
 {
   "name": "@ryuhq/protocol",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "exports": {
+    "./cloud-environments": "./src/cloud-environments.ts",
+    "./managed-ssh": "./src/managed-ssh.ts",
+    "./managed-agents": "./src/managed-agents.ts",
+    "./marketplace-wallpaper": "./src/marketplace-wallpaper.ts",
+    "./password-policy": "./src/password-policy.ts",
+    "./prompt-hub": "./src/prompt-hub.ts",
+    "./public-profile": "./src/public-profile.ts",
+    "./public-agents": "./src/public-agents.ts",
     "./agent-rules": "./src/agent-rules.ts",
+    "./capability-taxonomy": "./src/capability-taxonomy.ts",
     "./challenges": "./src/challenges.ts",
+    "./connect-access-token": "./src/connect-access-token.ts",
+    "./connect-tool-policy": "./src/connect-tool-policy.ts",
     "./connection-status": "./src/connection-status.ts",
     "./continuity": "./src/continuity.ts",
+    "./credential-scope": "./src/credential-scope.ts",
     "./deep-link": "./src/deep-link.ts",
+    "./feature-flags": "./src/feature-flags.ts",
     "./hardware": "./src/hardware.ts",
+    "./interfaces": "./src/interfaces.ts",
+    "./interfaces-fixture": "./src/interfaces-fixture.ts",
     "./publisher-trust": "./src/publisher-trust.ts",
     "./quest-events": "./src/quest-events.ts",
     "./sse": "./src/sse-client.ts",
+    "./tool-catalog": "./src/tool-catalog.ts",
+    "./tool-catalog-browse": "./src/tool-catalog-browse.ts",
+    "./tool-credential-ladder": "./src/tool-credential-ladder.ts",
+    "./tool-discovery-ranking": "./src/tool-discovery-ranking.ts",
+    "./tool-price": "./src/tool-price.ts",
+    "./tool-reliability": "./src/tool-reliability.ts",
+    "./tool-reviews": "./src/tool-reviews.ts",
     "./voice": "./src/voice.ts",
-    "./watch": "./src/watch.ts"
+    "./waitlist": "./src/waitlist.ts",
+    "./watch": "./src/watch.ts",
+    "./workspace-preview": "./src/workspace-preview.ts",
+    "./wire-object": "./src/wire-object.ts",
+    "./spend-tags": "./src/spend-tags.ts",
+    "./tool-spend-ladder": "./src/tool-spend-ladder.ts"
   },
   "scripts": {
     "test": "bun test"
@@ -22,5 +49,8 @@
     "@ryu/config": "workspace:*",
     "@types/bun": "catalog:",
     "typescript": "^5"
+  },
+  "dependencies": {
+    "zod": "catalog:"
   }
 }

@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
+import { z } from "zod";
 
 /**
  * How the left sidebar lays out its content sections.
@@ -10,6 +11,8 @@ import { useCallback, useSyncExternalStore } from "react";
  * - "agent": BOT MODE — a focused stacked view with messaging-style agent rows
  *   and each bot's direct threads inline. Other chats remain available below the
  *   roster without a second tab strip.
+ * - "computers": ALL COMPUTERS — one group per configured computer, the default
+ *   one first with its regular sections, the others as read-only thread lists.
  *
  * - `plugin:<pluginId>:<modeId>`: an app-registered mode from a manifest's
  *   `contributes.sidebar_modes`.
@@ -23,7 +26,11 @@ import { useCallback, useSyncExternalStore } from "react";
  * renderer, so a contributed mode can do anything Bot mode does. This module
  * only owns the stored KEY.
  */
-export type SidebarMode = "sections" | "tabbed" | "agent" | `plugin:${string}`;
+export const sidebarModeSchema = z.union([
+	z.enum(["sections", "tabbed", "agent", "computers"]),
+	z.templateLiteral(["plugin:", z.string()]),
+]);
+export type SidebarMode = z.output<typeof sidebarModeSchema>;
 
 export const SIDEBAR_MODE_KEY = "ryu:sidebar-mode";
 /** The persisted key stays `agent` so existing Agent mode choices keep working. */
@@ -43,13 +50,9 @@ const listeners = new Set<() => void>();
 function read(): SidebarMode {
 	try {
 		const stored = localStorage.getItem(SIDEBAR_MODE_KEY);
-		if (
-			stored === "sections" ||
-			stored === "tabbed" ||
-			stored === "agent" ||
-			(stored?.startsWith("plugin:") ?? false)
-		) {
-			return stored as SidebarMode;
+		const parsed = sidebarModeSchema.safeParse(stored);
+		if (parsed.success) {
+			return parsed.data;
 		}
 		return DEFAULT_SIDEBAR_MODE;
 	} catch {

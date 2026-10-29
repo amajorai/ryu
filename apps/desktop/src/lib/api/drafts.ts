@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/drafts.ts
 //
 // Typed client for the `@ryu/drafts` sidecar — the durable outbox.
@@ -89,7 +91,12 @@ export interface DraftReadings {
 
 /** Every draft that has not been sent, newest first. */
 export async function listDrafts(target: ApiTarget): Promise<DraftWire[]> {
-	const body = await request<{ drafts: DraftWire[] }>(target, `${BASE}/list`);
+	const body = await request<{ drafts: DraftWire[] }>(
+		target,
+		`${BASE}/list`,
+		{},
+		fetchReadyDraftsResponseSchema
+	);
 	return body?.drafts ?? [];
 }
 
@@ -101,7 +108,9 @@ export async function getDraft(
 ): Promise<DraftWire | null> {
 	const body = await request<{ draft: DraftWire | null }>(
 		target,
-		`${BASE}/drafts/${encodeURIComponent(id)}`
+		`${BASE}/drafts/${encodeURIComponent(id)}`,
+		{},
+		saveDraftResponseSchema
 	);
 	const draft = body?.draft ?? null;
 	return draft?.state === "sent" ? null : draft;
@@ -114,7 +123,9 @@ export async function listSentDrafts(
 ): Promise<DraftWire[]> {
 	const body = await request<{ drafts: DraftWire[] }>(
 		target,
-		`${BASE}/drafts?limit=${limit}`
+		`${BASE}/drafts?limit=${limit}`,
+		{},
+		fetchReadyDraftsResponseSchema
 	);
 	return body?.drafts ?? [];
 }
@@ -142,7 +153,9 @@ export async function fetchReadyDrafts(
 	const query = params.toString();
 	const body = await request<{ drafts: DraftWire[] }>(
 		target,
-		query ? `${BASE}/queue?${query}` : `${BASE}/queue`
+		query ? `${BASE}/queue?${query}` : `${BASE}/queue`,
+		{},
+		fetchReadyDraftsResponseSchema
 	);
 	return body?.drafts ?? [];
 }
@@ -152,7 +165,9 @@ export async function getDraftsSettings(
 ): Promise<DraftsSettings> {
 	const body = await request<{ settings: DraftsSettings }>(
 		target,
-		`${BASE}/settings`
+		`${BASE}/settings`,
+		{},
+		saveDraftsSettingsResponseSchema
 	);
 	return body.settings;
 }
@@ -181,7 +196,8 @@ export async function saveDraft(
 	const body = await request<{ draft: DraftWire | null }>(
 		target,
 		`${BASE}/drafts`,
-		{ method: "POST", body: input }
+		{ method: "POST", body: input },
+		saveDraftResponseSchema
 	);
 	return body?.draft ?? null;
 }
@@ -190,9 +206,14 @@ export async function deleteDraft(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `${BASE}/drafts/${encodeURIComponent(id)}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`${BASE}/drafts/${encodeURIComponent(id)}`,
+		{
+			method: "DELETE",
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /** Give a draft a condition and queue it. */
@@ -204,7 +225,8 @@ export async function armDraft(
 	const body = await request<{ draft: DraftWire }>(
 		target,
 		`${BASE}/drafts/${encodeURIComponent(id)}/arm`,
-		{ method: "POST", body: { trigger } }
+		{ method: "POST", body: { trigger } },
+		claimDraftResponseSchema
 	);
 	return body.draft;
 }
@@ -217,7 +239,8 @@ export async function disarmDraft(
 	const body = await request<{ draft: DraftWire }>(
 		target,
 		`${BASE}/drafts/${encodeURIComponent(id)}/disarm`,
-		{ method: "POST" }
+		{ method: "POST" },
+		claimDraftResponseSchema
 	);
 	return body.draft;
 }
@@ -238,11 +261,13 @@ export async function claimDraft(
 		const body = await request<{ draft: DraftWire }>(
 			target,
 			`${BASE}/drafts/${encodeURIComponent(id)}/claim`,
-			{ method: "POST" }
+			{ method: "POST" },
+			claimDraftResponseSchema
 		);
 		return body.draft;
 	} catch (error) {
-		if ((error as { status?: number }).status === 409) {
+		const parsed = z.object({ status: z.literal(409) }).safeParse(error);
+		if (parsed.success) {
 			return null;
 		}
 		throw error;
@@ -255,10 +280,15 @@ export async function markDraftSent(
 	id: string,
 	conversationId?: string
 ): Promise<void> {
-	await request(target, `${BASE}/drafts/${encodeURIComponent(id)}/sent`, {
-		method: "POST",
-		body: { conversation_id: conversationId ?? null },
-	});
+	await request(
+		target,
+		`${BASE}/drafts/${encodeURIComponent(id)}/sent`,
+		{
+			method: "POST",
+			body: { conversation_id: conversationId ?? null },
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /** Report a failed send. The draft comes back visible carrying the reason. */
@@ -267,10 +297,15 @@ export async function markDraftFailed(
 	id: string,
 	error: string
 ): Promise<void> {
-	await request(target, `${BASE}/drafts/${encodeURIComponent(id)}/failed`, {
-		method: "POST",
-		body: { error },
-	});
+	await request(
+		target,
+		`${BASE}/drafts/${encodeURIComponent(id)}/failed`,
+		{
+			method: "POST",
+			body: { error },
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 export async function saveDraftsSettings(
@@ -280,7 +315,84 @@ export async function saveDraftsSettings(
 	const body = await request<{ settings: DraftsSettings }>(
 		target,
 		`${BASE}/settings`,
-		{ method: "PUT", body: settings }
+		{ method: "PUT", body: settings },
+		saveDraftsSettingsResponseSchema
 	);
 	return body.settings;
+}
+
+const draftWireSchema = z
+	.object({
+		agent_id: z.string().optional(),
+		claimed_at: z.number().optional(),
+		conversation_id: z.string().optional(),
+		created_at: z.number(),
+		error: z.string().optional(),
+		folder_path: z.string().optional(),
+		id: z.string(),
+		model: z.string().optional(),
+		preview: z.string(),
+		sent_at: z.number().optional(),
+		source: z.union([
+			z.literal("composer-autosave"),
+			z.literal("manual"),
+			z.literal("auto-queue"),
+		]),
+		state: z.union([
+			z.literal("draft"),
+			z.literal("armed"),
+			z.literal("sending"),
+			z.literal("sent"),
+			z.literal("failed"),
+		]),
+		state_label: z.string(),
+		text: z.string(),
+		trigger: z.union([
+			z.object({ kind: z.literal("manual") }).passthrough(),
+			z
+				.object({ below: z.number(), kind: z.literal("concurrency") })
+				.passthrough(),
+			z.object({ kind: z.literal("all_done") }).passthrough(),
+			z
+				.object({
+					agent_id: z.string(),
+					below_percent: z.number(),
+					kind: z.literal("usage_reset"),
+				})
+				.passthrough(),
+			z.object({ epoch_ms: z.number(), kind: z.literal("at") }).passthrough(),
+		]),
+		updated_at: z.number(),
+		waiting_for: z.string(),
+	})
+	.passthrough();
+const fetchReadyDraftsResponseSchema: z.ZodType<{ drafts: DraftWire[] }> =
+	retainValidatedResponse(
+		z.object({ drafts: z.array(draftWireSchema) }).passthrough()
+	);
+const saveDraftResponseSchema: z.ZodType<{ draft: DraftWire | null }> =
+	retainValidatedResponse(
+		z.object({ draft: z.union([draftWireSchema, z.null()]) }).passthrough()
+	);
+const saveDraftsSettingsResponseSchema: z.ZodType<{
+	settings: DraftsSettings;
+}> = retainValidatedResponse(
+	z
+		.object({
+			settings: z
+				.object({
+					auto_queue_enabled: z.boolean(),
+					autosave_enabled: z.boolean(),
+					autosave_min_chars: z.number(),
+					max_concurrent: z.number(),
+				})
+				.passthrough(),
+		})
+		.passthrough()
+);
+const claimDraftResponseSchema: z.ZodType<{ draft: DraftWire }> =
+	retainValidatedResponse(z.object({ draft: draftWireSchema }).passthrough());
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

@@ -37,13 +37,18 @@ let cachedMode = readMode();
 function subscribe(callback: () => void): () => void {
 	listeners.add(callback);
 	const onStorage = (event: StorageEvent) => {
-		if (event.key === LANGUAGE_MODE_KEY) {
+		if (
+			(event.storageArea === null || event.storageArea === localStorage) &&
+			(event.key === null ||
+				event.key === LANGUAGE_MODE_KEY ||
+				event.key === LANGUAGE_PACK_STORAGE_KEY)
+		) {
 			cachedMode = readMode();
 			callback();
 		}
 	};
 	const onModeChanged = () => {
-		cachedMode = readMode();
+		// Setters publish the session cache even when persistence is denied.
 		callback();
 	};
 	window.addEventListener("storage", onStorage);

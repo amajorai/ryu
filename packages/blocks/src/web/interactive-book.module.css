@@ -1,0 +1,27 @@
+.insideCover {
+	visibility: hidden;
+	transform: translateX(-100%);
+}
+.insideCover[data-visible="true"] {
+	visibility: visible;
+}
+.backFace {
+	transform: rotateY(180deg) translateZ(0.5px);
+}
+.page[data-hidden="true"],
+.backFace[data-hidden="true"] {
+	visibility: hidden;
+}
+.coverSheen {
+	background:
+		radial-gradient(
+			circle at 75% 10%,
+			color-mix(in srgb, var(--background) 18%, transparent),
+			transparent 38%
+		),
+		linear-gradient(
+			135deg,
+			color-mix(in srgb, var(--background) 10%, transparent),
+			transparent 36%
+		);
+}

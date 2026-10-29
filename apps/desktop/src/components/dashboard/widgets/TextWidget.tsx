@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // Text widget: static or source-fed text/markdown. Rendered as readable prose;
 // kept deliberately plain (no HTML injection) so it stays consistent and safe.
 
@@ -5,16 +6,19 @@ import { asRecord } from "./data.ts";
 import { parseConfig, textConfigSchema } from "./schema.ts";
 
 /** Pull display text from config.markdown, a string value, or a {text} value. */
-function resolveText(value: unknown, config: unknown): string {
+function resolveText<TValue, TConfig>(
+	value: TValue,
+	config: TConfig
+): string | undefined {
 	const cfg = parseConfig(textConfigSchema, config);
-	if (typeof cfg.markdown === "string" && cfg.markdown.length > 0) {
+	if (isNativeText(cfg.markdown) && cfg.markdown.length > 0) {
 		return cfg.markdown;
 	}
-	if (typeof value === "string") {
+	if (isNativeText(value)) {
 		return value;
 	}
 	const record = asRecord(value);
-	if (record && typeof record.text === "string") {
+	if (record && isNativeText(record.text)) {
 		return record.text;
 	}
 	return value === null || value === undefined

@@ -1,5 +1,6 @@
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
+import type { BezierDefinition } from "motion/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
 	type CSSProperties,
@@ -10,21 +11,19 @@ import {
 	useRef,
 	useState,
 } from "react";
+import styles from "./elements-one.module.css";
 
-/**
- * CSS var on the content box that carries the measured FULL height, so the
- * `max-height` tween can land on the exact content height instead of a guess.
- */
-const FULL_HEIGHT_VAR = "--collapsible-full-height";
+interface CollapsibleContentStyle extends CSSProperties {
+	"--collapsible-full-height"?: string;
+}
 
 /**
  * The app-wide morph curve (ease-out quint): opens fast, settles softly. The CSS
  * form drives the `max-height` tween; the tuple form drives the motion fades.
- * Both classes are written LITERALLY in the JSX below — Tailwind's scanner does
- * not resolve template-literal candidates, so interpolating the curve here would
- * silently drop the custom ease and max-height custom-property utilities.
+ * The private content CSS owns the identical curve for the height tween;
+ * this tuple is the equivalent producer for the motion fades.
  */
-const MORPH_CURVE_MOTION = [0.22, 1, 0.36, 1] as const;
+const MORPH_CURVE_MOTION = [0.22, 1, 0.36, 1] satisfies BezierDefinition;
 
 export interface CollapsibleTextProps {
 	children: ReactNode;
@@ -113,6 +112,8 @@ export const CollapsibleText = memo(function CollapsibleText({
 		if (!onContentClick) {
 			return;
 		}
+		// SAFETY: native clicks in this rendered div target Elements. Only
+		// Element.closest ancestry is read; no HTML-only property is assumed.
 		if ((event.target as Element).closest("[data-collapsible-expand]")) {
 			return;
 		}
@@ -138,7 +139,8 @@ export const CollapsibleText = memo(function CollapsibleText({
 					// class; expanding swaps it for the measured full height. The fade
 					// strip and "Show less" control sit below/over the box's bottom
 					// edge, so the whole disclosure opens and closes as one surface.
-					"transition-[max-height] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+					styles.collapse,
+					"duration-300 motion-reduce:transition-none",
 					!expanded && collapsedMaxHeightClass,
 					showFullHeight && "max-h-[var(--collapsible-full-height)]",
 					onContentClick && "cursor-pointer"
@@ -157,9 +159,11 @@ export const CollapsibleText = memo(function CollapsibleText({
 				ref={contentRef}
 				role={onContentClick ? "button" : undefined}
 				style={
-					showFullHeight
-						? ({ [FULL_HEIGHT_VAR]: `${fullHeight}px` } as CSSProperties)
-						: undefined
+					{
+						"--collapsible-full-height": showFullHeight
+							? `${fullHeight}px`
+							: undefined,
+					} satisfies CollapsibleContentStyle as CollapsibleContentStyle
 				}
 				tabIndex={onContentClick ? 0 : undefined}
 			>
@@ -177,12 +181,12 @@ export const CollapsibleText = memo(function CollapsibleText({
 							transition={controlTransition}
 						>
 							<Button
-								className="h-6 px-2 text-muted-foreground text-xs hover:text-foreground"
+								appearance="collapse-toggle"
 								data-collapsible-expand
 								onClick={() => setExpanded(false)}
 								size="sm"
 								type="button"
-								variant="ghost"
+								variant="ghost-muted"
 							>
 								{collapseLabel}
 							</Button>
@@ -207,7 +211,7 @@ export const CollapsibleText = memo(function CollapsibleText({
 							/>
 							<div className="pointer-events-auto relative flex h-full items-end justify-center pb-0.5">
 								<Button
-									className="h-6 px-2 text-muted-foreground text-xs hover:text-foreground"
+									appearance="collapse-toggle"
 									data-collapsible-expand
 									onClick={(event) => {
 										event.stopPropagation();
@@ -215,7 +219,7 @@ export const CollapsibleText = memo(function CollapsibleText({
 									}}
 									size="sm"
 									type="button"
-									variant="ghost"
+									variant="ghost-muted"
 								>
 									{expandLabel}
 								</Button>

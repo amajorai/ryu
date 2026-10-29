@@ -1,0 +1,7 @@
+.inline1 {
+	top: var(--base-1-top);
+	left: var(--base-1-left);
+	width: var(--base-1-width);
+	height: var(--base-1-height);
+	translate: var(--base-1-x) var(--base-1-y);
+}

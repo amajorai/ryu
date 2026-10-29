@@ -5,16 +5,16 @@
 // many at once, pick one active, toggle per-provider routing, and discover
 // models dynamically. It sits alongside `usePiConfig` (which backs the older,
 // agent-scoped editor) and DELIBERATELY reuses the same TanStack Query cache
-// keys (`pi-config` / `pi-config-catalog`, keyed by node url) so both surfaces
+// keys (`pi-config` / `pi-config-catalog`, keyed by full node authority) so both surfaces
 // stay in sync: a change here invalidates the catalog the agent-edit view reads.
 //
 // Every decision lives in Core (`/api/pi-config/*`); this hook only holds query
 // + mutation state. Config is per-node (Core's isolated PI_CODING_AGENT_DIR), so
-// the cache key includes the node url.
+// the cache key includes URL and an opaque token/delegation authority identity.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { useProviderQueryScope } from "./provider-query-scope.ts";
 import {
 	type CheckProviderInput,
 	type CheckProviderResult,
@@ -32,6 +32,7 @@ import {
 	type ProviderAccountTarget,
 	type ProviderConfigInput,
 	removeProviderAccount,
+	renameProviderAccount,
 	setModelEnabled,
 	switchProviderAccount,
 	updatePiConfig,
@@ -57,6 +58,12 @@ export interface UseLlmProvidersResult {
 	remove: (id: string) => Promise<PiCatalog>;
 	/** Remove one saved account without removing the provider. */
 	removeAccount: (provider: string, accountId: string) => Promise<PiCatalog>;
+	/** Rename one saved account in the provider's sealed account list. */
+	renameAccount: (
+		provider: string,
+		accountId: string,
+		label: string
+	) => Promise<PiCatalog>;
 	/** Switch one saved provider account for yourself or the Gateway. */
 	switchAccount: (
 		provider: string,
@@ -73,78 +80,108 @@ export interface UseLlmProvidersResult {
 
 export function useLlmProviders(): UseLlmProvidersResult {
 	const node = useActiveNode();
-	const target = useMemo(() => toTarget(node), [node]);
-	const queryClient = useQueryClient();
+	const scope = useProviderQueryScope(node);
+	const target = scope.target;
 
 	const configQuery = useQuery({
-		queryKey: ["pi-config", node.url],
-		queryFn: () => fetchPiConfig(target),
+		queryKey: scope.configKey,
+		queryFn: async () => {
+			await scope.waitForWrite();
+			return fetchPiConfig(target);
+		},
 	});
 
 	const catalogQuery = useQuery({
-		queryKey: ["pi-config-catalog", node.url],
-		queryFn: () => fetchPiCatalog(target),
+		queryKey: scope.catalogKey,
+		queryFn: async () => {
+			await scope.waitForWrite();
+			return fetchPiCatalog(target);
+		},
 	});
 
 	// Every mutation revalidates the shared config + catalog so the agent-edit
 	// view (which reads the same keys) reflects the change immediately.
 	const invalidate = useCallback(() => {
-		queryClient.invalidateQueries({ queryKey: ["pi-config", node.url] });
-		queryClient.invalidateQueries({
-			queryKey: ["pi-config-catalog", node.url],
-		});
-	}, [queryClient, node.url]);
+		scope.invalidateConfig();
+		scope.invalidateCatalog();
+	}, [scope]);
 
 	const activateMutation = useMutation({
-		mutationFn: (input: PiConfigInput) => updatePiConfig(target, input),
-		onSuccess: (config) => {
-			queryClient.setQueryData(["pi-config", node.url], config);
-			queryClient.invalidateQueries({
-				queryKey: ["pi-config-catalog", node.url],
-			});
+		mutationFn: async ({
+			input,
+			owner,
+		}: {
+			input: PiConfigInput;
+			owner: typeof scope;
+		}) => ({
+			value: await owner.write(() => updatePiConfig(owner.target, input)),
+			owner,
+		}),
+		onSuccess: ({ value, owner }) => {
+			owner.publishConfig(value);
+			owner.invalidateCatalog();
 		},
 	});
-
 	const configureMutation = useMutation({
-		mutationFn: (input: ProviderConfigInput) =>
-			configureProvider(target, input),
-		onSuccess: (catalog) => {
-			queryClient.setQueryData(["pi-config-catalog", node.url], catalog);
-			// Routing overrides live on the config too — refetch to stay honest.
-			queryClient.invalidateQueries({ queryKey: ["pi-config", node.url] });
+		mutationFn: async ({
+			input,
+			owner,
+		}: {
+			input: ProviderConfigInput;
+			owner: typeof scope;
+		}) => ({
+			value: await owner.write(() => configureProvider(owner.target, input)),
+			owner,
+		}),
+		onSuccess: ({ value, owner }) => {
+			owner.publishCatalog(value);
+			owner.invalidateConfig();
 		},
 	});
-
 	const removeMutation = useMutation({
-		mutationFn: (id: string) => deleteProvider(target, id),
-		onSuccess: (catalog) => {
-			queryClient.setQueryData(["pi-config-catalog", node.url], catalog);
-			queryClient.invalidateQueries({ queryKey: ["pi-config", node.url] });
+		mutationFn: async ({ id, owner }: { id: string; owner: typeof scope }) => ({
+			value: await owner.write(() => deleteProvider(owner.target, id)),
+			owner,
+		}),
+		onSuccess: ({ value, owner }) => {
+			owner.publishCatalog(value);
+			owner.invalidateConfig();
 		},
 	});
-
 	const modelEnabledMutation = useMutation({
-		mutationFn: (input: {
-			enabled: boolean;
-			model: string;
-			provider: string;
-		}) => setModelEnabled(target, input),
-		onSuccess: (catalog) => {
-			queryClient.setQueryData(["pi-config-catalog", node.url], catalog);
-		},
+		mutationFn: async ({
+			input,
+			owner,
+		}: {
+			input: { enabled: boolean; model: string; provider: string };
+			owner: typeof scope;
+		}) => ({
+			value: await owner.write(() => setModelEnabled(owner.target, input)),
+			owner,
+		}),
+		onSuccess: ({ value, owner }) => owner.publishCatalog(value),
 	});
 
 	const activate = useCallback(
-		(input: PiConfigInput) => activateMutation.mutateAsync(input),
-		[activateMutation]
+		(input: PiConfigInput) =>
+			activateMutation
+				.mutateAsync({ input, owner: scope })
+				.then((result) => result.value),
+		[activateMutation, scope]
 	);
 	const configure = useCallback(
-		(input: ProviderConfigInput) => configureMutation.mutateAsync(input),
-		[configureMutation]
+		(input: ProviderConfigInput) =>
+			configureMutation
+				.mutateAsync({ input, owner: scope })
+				.then((result) => result.value),
+		[configureMutation, scope]
 	);
 	const remove = useCallback(
-		(id: string) => removeMutation.mutateAsync(id),
-		[removeMutation]
+		(id: string) =>
+			removeMutation
+				.mutateAsync({ id, owner: scope })
+				.then((result) => result.value),
+		[removeMutation, scope]
 	);
 	const switchAccount = useCallback(
 		(
@@ -152,21 +189,36 @@ export function useLlmProviders(): UseLlmProvidersResult {
 			accountId: string,
 			accountTarget: ProviderAccountTarget = "self"
 		) =>
-			switchProviderAccount(target, provider, accountId, accountTarget).then(
-				(catalog) => {
-					queryClient.setQueryData(["pi-config-catalog", node.url], catalog);
+			scope
+				.write(() =>
+					switchProviderAccount(target, provider, accountId, accountTarget)
+				)
+				.then((catalog) => {
+					scope.publishCatalog(catalog);
 					return catalog;
-				}
-			),
-		[target, queryClient, node.url]
+				}),
+		[target, scope]
 	);
 	const removeAccount = useCallback(
 		(provider: string, accountId: string) =>
-			removeProviderAccount(target, provider, accountId).then((catalog) => {
-				queryClient.setQueryData(["pi-config-catalog", node.url], catalog);
-				return catalog;
-			}),
-		[target, queryClient, node.url]
+			scope
+				.write(() => removeProviderAccount(target, provider, accountId))
+				.then((catalog) => {
+					scope.publishCatalog(catalog);
+					return catalog;
+				}),
+		[target, scope]
+	);
+	const renameAccount = useCallback(
+		async (provider: string, accountId: string, label: string) => {
+			const catalog = await scope.write(() =>
+				renameProviderAccount(target, provider, accountId, label)
+			);
+			scope.publishCatalog(catalog);
+			scope.invalidateConfig();
+			return catalog;
+		},
+		[target, scope]
 	);
 	// Discovery is not a cache mutation — it's a live lookup the caller awaits.
 	const discover = useCallback(
@@ -180,28 +232,39 @@ export function useLlmProviders(): UseLlmProvidersResult {
 	);
 	const toggleModelEnabled = useCallback(
 		(provider: string, model: string, enabled: boolean) =>
-			modelEnabledMutation.mutateAsync({ provider, model, enabled }),
-		[modelEnabledMutation]
+			modelEnabledMutation
+				.mutateAsync({ input: { provider, model, enabled }, owner: scope })
+				.then((result) => result.value),
+		[modelEnabledMutation, scope]
 	);
 
+	const waitingForRefresh =
+		(scope.pending && scope.resource.owner !== scope.generation) ||
+		(scope.waitForRefresh &&
+			(!configQuery.isFetchedAfterMount ||
+				!catalogQuery.isFetchedAfterMount ||
+				!configQuery.isSuccess ||
+				!catalogQuery.isSuccess));
 	return {
-		config: configQuery.data ?? null,
-		catalog: catalogQuery.data ?? null,
-		loading: configQuery.isLoading || catalogQuery.isLoading,
+		config: waitingForRefresh ? null : (configQuery.data ?? null),
+		catalog: waitingForRefresh ? null : (catalogQuery.data ?? null),
+		loading:
+			(scope.pending && scope.resource.owner !== scope.generation) ||
+			(waitingForRefresh && !configQuery.isError && !catalogQuery.isError) ||
+			configQuery.isLoading ||
+			catalogQuery.isLoading,
 		error:
 			(configQuery.error as Error | null)?.message ??
 			(catalogQuery.error as Error | null)?.message ??
 			null,
-		mutating:
-			activateMutation.isPending ||
-			configureMutation.isPending ||
-			removeMutation.isPending,
+		mutating: scope.pending,
 		activate,
 		check,
 		configure,
 		remove,
 		switchAccount,
 		removeAccount,
+		renameAccount,
 		discover,
 		toggleModelEnabled,
 		reload: invalidate,

@@ -11,20 +11,29 @@
 //
 // Cron expressions use the job's optional IANA zone (or UTC when absent), and
 // intervals are absolute durations. The resulting `Date`s are instants; the
-// calendar renders them in the user's local zone.
+// calendar files and labels them in the selected display time zone (see
+// ./display-days.ts), not the machine's.
 //
 // High-frequency schedules (sub-hourly intervals, or cron expressions that fire
 // many times a day) would flood a month grid with thousands of cells, so those
 // are collapsed into one aggregate marker per day carrying a run count instead
 // of one event per fire.
 
-import type { RunStatusTimelineEntry } from "@ryu/ui/components/run-status-timeline";
+import type { RunStatusTimelineEntry } from "@ryu/ui/components/run-status-timeline.tsx";
+import {
+	nextDisplayDayBoundaryMs,
+	startOfDisplayDayMs,
+} from "@ryu/ui/lib/timezone.ts";
 import { CronExpressionParser } from "cron-parser";
 import type {
 	ExecOutcome,
 	Schedule,
 	ScheduledJob,
 } from "@/src/lib/api/schedules.ts";
+import {
+	displayDayKey,
+	displayMidday,
+} from "@/src/lib/calendar/display-days.ts";
 
 export type CalendarEventKind = "past" | "upcoming";
 
@@ -36,6 +45,9 @@ export interface CalendarEvent {
 	 * single day (used for high-frequency schedules to keep the grid readable).
 	 */
 	aggregateCount?: number;
+	/** The persistent chat an agent job appends every firing to
+	 *  (`target.conversationId`), when it has one. */
+	conversationId?: string;
 	/** Finished instant for a past run, when Core returned a valid timestamp. */
 	end?: Date;
 	/** Error message for a failed past run, if any. */
@@ -47,6 +59,11 @@ export interface CalendarEvent {
 	kind: CalendarEventKind;
 	/** Present only for past runs. */
 	outcome?: ExecOutcome;
+	/** The job waits for approval before each run (`require_approval`). */
+	requireApproval?: boolean;
+	/** Core's run id for a past run (the per-firing `agentrun_*` conversation);
+	 *  null when Core recorded none (failed per-firing runs, workflow runs). */
+	runId?: string | null;
 	/** Human schedule phrase, e.g. "Daily at 9 AM". */
 	scheduleLabel: string;
 	/** When the run happened (past) or is projected to happen (upcoming). */
@@ -67,6 +84,8 @@ export interface CalendarEvent {
 
 interface TargetInfo {
 	agentId?: string;
+	conversationId?: string;
+	requireApproval?: boolean;
 	system?: boolean;
 	workflowId?: string;
 	workflowName?: string;
@@ -85,11 +104,20 @@ function targetInfo(
 	if (job.system) {
 		return { system: true };
 	}
+	const requireApproval = job.requireApproval || undefined;
 	if (job.target.type === "workflow") {
 		const workflowId = job.target.workflowId;
-		return { workflowId, workflowName: workflowNames?.get(workflowId) };
+		return {
+			requireApproval,
+			workflowId,
+			workflowName: workflowNames?.get(workflowId),
+		};
 	}
-	return { agentId: job.target.agentId };
+	return {
+		agentId: job.target.agentId,
+		conversationId: job.target.conversationId || undefined,
+		requireApproval,
+	};
 }
 
 // ── Schedule formatting ──────────────────────────────────────────────────────
@@ -120,15 +148,15 @@ function formatHour(h: number): string {
 /** Human-readable phrase for a job's schedule, shared with the automations list. */
 export function describeSchedule(schedule: Schedule): string {
 	if (schedule.kind === "every") {
-		const map: Record<string, string> = {
-			"5m": "Every 5 minutes",
-			"10m": "Every 10 minutes",
-			"15m": "Every 15 minutes",
-			"30m": "Every 30 minutes",
-			"1h": "Every hour",
-			"3600": "Every hour",
-		};
-		return map[schedule.interval] ?? `Every ${schedule.interval}`;
+		const labels = new Map([
+			["5m", "Every 5 minutes"],
+			["10m", "Every 10 minutes"],
+			["15m", "Every 15 minutes"],
+			["30m", "Every 30 minutes"],
+			["1h", "Every hour"],
+			["3600", "Every hour"],
+		]);
+		return labels.get(schedule.interval) ?? `Every ${schedule.interval}`;
 	}
 	const expr = schedule.expr.trim();
 	const daily = DAILY_CRON.exec(expr);
@@ -179,14 +207,6 @@ function parseIntervalSeconds(interval: string): number | null {
 const HIGH_FREQUENCY_SECONDS = 3600; // sub-hourly intervals aggregate
 const MAX_OCCURRENCES_PER_JOB = 500; // hard cap so a "* * * * *" cron can't run away
 
-function dayKey(d: Date): string {
-	return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
-function startOfLocalDay(d: Date): Date {
-	return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
 /** Projected fire times for an interval job within [windowStart, windowEnd). */
 function intervalOccurrences(
 	job: ScheduledJob,
@@ -211,41 +231,42 @@ function intervalOccurrences(
 		firstMs += steps * stepMs;
 	}
 
-	// High-frequency: one aggregate marker per day with a count.
+	// High-frequency: one aggregate marker per display-zone day with a count.
 	if (stepSeconds < HIGH_FREQUENCY_SECONDS) {
 		const events: CalendarEvent[] = [];
-		for (let day = startOfLocalDay(windowStart); day.getTime() < endMs; ) {
-			const nextDay = new Date(day);
-			nextDay.setDate(nextDay.getDate() + 1);
-			const dayStartMs = Math.max(day.getTime(), startMs);
-			const dayEndMs = Math.min(nextDay.getTime(), endMs);
+		for (let dayStartMs = startOfDisplayDayMs(startMs); dayStartMs < endMs; ) {
+			const nextDayMs = nextDisplayDayBoundaryMs(dayStartMs);
+			if (!(nextDayMs > dayStartMs)) {
+				break;
+			}
+			const windowDayStartMs = Math.max(dayStartMs, startMs);
+			const windowDayEndMs = Math.min(nextDayMs, endMs);
 			let firstInDayMs = firstMs;
-			if (firstInDayMs < dayStartMs) {
+			if (firstInDayMs < windowDayStartMs) {
 				firstInDayMs +=
-					Math.ceil((dayStartMs - firstInDayMs) / stepMs) * stepMs;
+					Math.ceil((windowDayStartMs - firstInDayMs) / stepMs) * stepMs;
 			}
-			if (firstInDayMs >= dayEndMs) {
-				day = nextDay;
+			if (firstInDayMs >= windowDayEndMs) {
+				dayStartMs = nextDayMs;
 				continue;
 			}
-			const count = Math.floor((dayEndMs - 1 - firstInDayMs) / stepMs) + 1;
+			const count =
+				Math.floor((windowDayEndMs - 1 - firstInDayMs) / stepMs) + 1;
 			if (count <= 0) {
-				day = nextDay;
+				dayStartMs = nextDayMs;
 				continue;
 			}
-			const noonOfDay = new Date(day);
-			noonOfDay.setHours(12, 0, 0, 0);
 			events.push({
-				id: `${job.id}-agg-${day.getTime()}`,
+				id: `${job.id}-agg-${dayStartMs}`,
 				jobId: job.id,
 				jobName: job.name,
-				start: noonOfDay,
+				start: displayMidday(dayStartMs),
 				kind: "upcoming",
 				...target,
 				scheduleLabel: label,
 				aggregateCount: count,
 			});
-			day = nextDay;
+			dayStartMs = nextDayMs;
 		}
 		return events;
 	}
@@ -267,6 +288,34 @@ function intervalOccurrences(
 		});
 	}
 	return events;
+}
+
+/**
+ * A cron job's fire instants within [windowStart, windowEnd], in the job's
+ * zone (UTC when absent), exactly as Core's scheduler fires them. Empty for an
+ * interval job or an unparseable expression.
+ */
+export function cronFireTimes(
+	job: ScheduledJob,
+	windowStart: Date,
+	windowEnd: Date
+): Date[] {
+	if (job.schedule.kind !== "cron") {
+		return [];
+	}
+	try {
+		return CronExpressionParser.parse(job.schedule.expr, {
+			// The parser starts strictly after currentDate; step back so a fire at
+			// windowStart itself is included.
+			currentDate: new Date(windowStart.getTime() - 1),
+			endDate: windowEnd,
+			tz: job.schedule.tz ?? "UTC",
+		})
+			.take(MAX_OCCURRENCES_PER_JOB)
+			.map((fire) => fire.toDate());
+	} catch {
+		return [];
+	}
 }
 
 /** Projected fire times for a cron job within [windowStart, windowEnd). */
@@ -295,7 +344,7 @@ function cronOccurrences(
 	// Collapse to a per-day count when a cron fires many times in one day.
 	const perDay = new Map<string, Date[]>();
 	for (const fire of fires) {
-		const key = dayKey(fire);
+		const key = displayDayKey(fire);
 		const bucket = perDay.get(key);
 		if (bucket) {
 			bucket.push(fire);
@@ -307,13 +356,11 @@ function cronOccurrences(
 	const events: CalendarEvent[] = [];
 	for (const [, dayFires] of perDay) {
 		if (dayFires.length > 6) {
-			const noon = startOfLocalDay(dayFires[0]);
-			noon.setHours(12);
 			events.push({
-				id: `${job.id}-cronagg-${dayKey(dayFires[0])}`,
+				id: `${job.id}-cronagg-${displayDayKey(dayFires[0])}`,
 				jobId: job.id,
 				jobName: job.name,
-				start: noon,
+				start: displayMidday(dayFires[0]),
 				kind: "upcoming",
 				...target,
 				scheduleLabel: label,
@@ -364,6 +411,7 @@ function pastOccurrences(
 			kind: "past",
 			outcome: record.outcome,
 			error: record.error,
+			runId: record.runId,
 			end:
 				Number.isFinite(finishedMs) && finishedMs >= ms ? finished : undefined,
 			...target,
@@ -426,13 +474,13 @@ export function buildCalendarEvents(
 	return events;
 }
 
-/** Group events by local calendar day for grid rendering. */
+/** Group events by display-zone calendar day for grid rendering. */
 export function groupEventsByDay(
 	events: CalendarEvent[]
 ): Map<string, CalendarEvent[]> {
 	const map = new Map<string, CalendarEvent[]>();
 	for (const event of events) {
-		const key = dayKey(event.start);
+		const key = displayDayKey(event.start);
 		const bucket = map.get(key);
 		if (bucket) {
 			bucket.push(event);
@@ -489,21 +537,21 @@ export function buildRunStatusTimelineEntries(
 			? `${event.aggregateCount} projected runs; times collapsed`
 			: event.scheduleLabel;
 
-		return [
-			{
-				...(endAt != null && Number.isFinite(endAt) && endAt > startAt
-					? { endAt }
-					: {}),
-				id: event.id,
-				label: `${event.jobName} · ${
-					event.kind === "past" ? "Completed" : "Scheduled"
-				} · ${runLabel}`,
-				startAt,
-				status,
-			},
-		];
+		const entry: RunStatusTimelineEntry = {
+			id: event.id,
+			label: `${event.jobName} · ${event.kind === "past" ? "Completed" : "Scheduled"} · ${runLabel}`,
+			startAt,
+			status,
+		};
+		if (endAt != null && Number.isFinite(endAt) && endAt > startAt) {
+			return [{ endAt, ...entry }];
+		}
+		return [entry];
 	});
 }
 
-/** Day key for a Date — exported so the grid keys cells the same way. */
-export { dayKey as eventDayKey };
+/**
+ * Key of the display-zone day an event's instant falls on. A grid column keys
+ * itself with `civilDayKey` (./display-days.ts), which reads the same shape.
+ */
+export { displayDayKey as eventDayKey };

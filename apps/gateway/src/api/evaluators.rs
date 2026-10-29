@@ -17,7 +17,6 @@ use axum::extract::State;
 use axum::Json;
 use serde_json::{json, Value};
 
-use crate::evaluators::EvaluatorRegistry;
 use crate::state::SharedState;
 
 /// GET /v1/evaluators — the full evaluator catalog: the built-in seed table merged
@@ -26,7 +25,7 @@ use crate::state::SharedState;
 /// render the catalog and to read-modify-write the custom set (filter `builtin ==
 /// false`).
 pub async fn get_evaluators(State(state): State<SharedState>) -> Json<Value> {
-    let registry = EvaluatorRegistry::from_config(&state.config);
+    let registry = state.evaluator_registry();
     Json(json!({ "evaluators": registry.all() }))
 }
 
@@ -50,5 +49,16 @@ mod tests {
             .collect();
         assert!(enforced_ids.contains(&"prompt_injection"));
         assert!(enforced_ids.contains(&"pii_leakage"));
+        for id in [
+            "code_evaluator",
+            "code_checker",
+            "explicit_content",
+            "audio_quality",
+        ] {
+            let entry = list.iter().find(|entry| entry["id"] == id).unwrap();
+            assert_eq!(entry["capabilities"]["inline"], false);
+            assert_eq!(entry["capabilities"]["offline"], false);
+            assert_eq!(entry["enforced"], false);
+        }
     }
 }

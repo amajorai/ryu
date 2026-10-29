@@ -1,0 +1,13 @@
+@import "tailwindcss" source(none);
+@import "@ryu/ui/companion-theme.css";
+@import "tw-animate-css";
+@source "./usage-history-proof.tsx";
+@source "../../src/components/usage";
+@source "../../../../packages/ui/src/components";
+
+body {
+	margin: 0;
+	font-family: var(--font-sans);
+	color: var(--foreground);
+	background: var(--background);
+}

@@ -22,22 +22,17 @@ import {
 	contributionSourceRequest,
 	sourceItemsFromResponse,
 } from "@ryu/app-host/views";
-import { Button } from "@ryu/ui/components/button";
-import { Icon } from "@ryu/ui/components/icon";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Icon } from "@ryu/ui/components/icon.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
-import { toast } from "@ryu/ui/components/sileo";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/popover.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
-import {
-	COMPOSER_SELECT_ITEM,
-	COMPOSER_SELECT_POPOVER,
-	COMPOSER_SELECT_TRIGGER,
-} from "@/components/agent-elements/input/composer-select.ts";
 import {
 	composerSelectOptions,
 	composerSelectValue,
@@ -156,8 +151,8 @@ function PluginComposerSelect({
 			<PopoverTrigger
 				render={
 					<Button
+						appearance="composer-settings"
 						aria-label={control.label}
-						className={COMPOSER_SELECT_TRIGGER}
 						size="sm"
 						title={control.description ?? control.label}
 						type="button"
@@ -170,16 +165,15 @@ function PluginComposerSelect({
 			</PopoverTrigger>
 			<PopoverContent
 				align="start"
-				className={COMPOSER_SELECT_POPOVER}
+				className="max-h-80 w-auto min-w-[200px] max-w-[280px] overflow-y-auto"
 				side="top"
 				sideOffset={6}
 			>
 				{options.map((option) => (
 					<Button
-						className={cn(
-							COMPOSER_SELECT_ITEM,
-							option.value === value ? "text-foreground" : "text-foreground/80"
-						)}
+						appearance={
+							option.value === value ? "composer-mode-active" : "composer-mode"
+						}
 						key={option.value}
 						onClick={() => {
 							onValue(control.flag, option.value);
@@ -259,7 +253,7 @@ function PluginComposerChip({
 	return (
 		<span
 			className={cn(
-				"inline-flex items-center gap-1 rounded-md px-1.5 text-[12px] leading-4",
+				"inline-flex items-center gap-1 rounded-md px-1.5 text-xs leading-4",
 				first ? "text-foreground" : "text-muted-foreground"
 			)}
 			title={control.description ?? control.label}
@@ -317,8 +311,8 @@ function PluginComposerAction({
 
 	return (
 		<Button
+			appearance="composer-settings"
 			aria-label={control.label}
-			className={COMPOSER_SELECT_TRIGGER}
 			disabled={busy}
 			onClick={() => {
 				void fire();

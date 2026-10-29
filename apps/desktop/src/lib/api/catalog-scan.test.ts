@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import wireFixture from "../../../../../packages/marketplace/src/catalog/fixtures/agent-audit.json";
+import wireFixture from "../../../../../packages/marketplace/src/catalog/fixtures/agent-audit.json" with {
+	type: "json",
+};
 import { runCatalogScan } from "./catalog-scan.ts";
 
 test("audit adapter preserves structured assessment and node credentials", async () => {

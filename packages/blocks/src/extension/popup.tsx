@@ -11,6 +11,7 @@ import {
 	Settings,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import styles from "./popup.module.css";
 
 export type PopupCoreStatus = "running" | "starting" | "stopped";
 
@@ -32,11 +33,11 @@ const QUICK_LINKS = [
 	{ path: "/settings", icon: Settings, label: "Settings" },
 ] as const;
 
-const STATUS_META: Record<PopupCoreStatus, { color: string; label: string }> = {
+const STATUS_META = {
 	running: { color: "bg-success", label: "Running" },
 	starting: { color: "bg-warning", label: "Starting" },
 	stopped: { color: "bg-destructive", label: "Stopped" },
-};
+} satisfies Record<PopupCoreStatus, { color: string; label: string }>;
 
 function initialsFor(user: PopupUser): string {
 	if (user.name) {
@@ -54,7 +55,7 @@ export interface ExtensionPopupProps {
 	coreStatus?: PopupCoreStatus;
 	/** Renders the compact per-surface model picker supplied by the extension. */
 	modelPicker?: ReactNode;
-	onOpen?: (path: string) => void;
+	onOpen?: (path: string, conversationId?: string) => void;
 	onQuickMessageChange?: (value: string) => void;
 	onSubmitQuickChat?: () => void;
 	quickMessage?: string;
@@ -97,7 +98,7 @@ export function ExtensionPopup({
 				</div>
 				<div className="flex items-center gap-1.5">
 					<span className={`size-2 rounded-full ${status.color}`} />
-					<span className="text-[11px] text-muted-foreground">
+					<span className="type-caption text-muted-foreground">
 						{status.label}
 					</span>
 				</div>
@@ -105,21 +106,23 @@ export function ExtensionPopup({
 
 			<div className="border-border border-b px-3 py-3">
 				<form
-					className="flex items-center gap-1 rounded-2xl bg-muted px-2 py-1"
+					className="flex items-center gap-1 rounded-2xl bg-muted px-2 py-1 focus-within:ring-3 focus-within:ring-ring/30"
 					onSubmit={(e) => {
 						e.preventDefault();
 						onSubmitQuickChat?.();
 					}}
 				>
 					<input
-						className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-[14px] leading-[1.6] outline-none placeholder:text-muted-foreground"
+						aria-label="Message Ryu"
+						className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
 						onChange={(e) => onQuickMessageChange?.(e.target.value)}
 						placeholder="Ask Ryu something…"
 						type="text"
 						value={quickMessage}
 					/>
 					<Button
-						className="size-8 shrink-0 rounded-xl"
+						appearance="extension-quick-send"
+						aria-label="Send message"
 						disabled={!canSend}
 						size="icon"
 						type="submit"
@@ -130,7 +133,7 @@ export function ExtensionPopup({
 				</form>
 				{modelPicker ? (
 					<div className="mt-2 flex items-center justify-between gap-2 border-border/60 border-t pt-2">
-						<span className="text-[11px] text-muted-foreground">
+						<span className="type-caption text-muted-foreground">
 							Browser model
 						</span>
 						{modelPicker}
@@ -147,14 +150,14 @@ export function ExtensionPopup({
 						type="button"
 					>
 						<Icon className="size-4" />
-						<span className="font-medium text-[10px]">{label}</span>
+						<span className="type-compact font-medium">{label}</span>
 					</button>
 				))}
 			</div>
 
 			<div className="flex-1 overflow-y-auto">
 				<div className="px-3 pt-3 pb-1.5">
-					<span className="font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+					<span className="type-caption font-medium text-muted-foreground uppercase tracking-wider">
 						Recent
 					</span>
 				</div>
@@ -168,7 +171,7 @@ export function ExtensionPopup({
 							<button
 								className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted"
 								key={conv.id}
-								onClick={() => onOpen?.("/chat")}
+								onClick={() => onOpen?.("/chat", conv.id)}
 								type="button"
 							>
 								<MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
@@ -176,7 +179,7 @@ export function ExtensionPopup({
 									<div className="truncate font-medium text-xs">
 										{conv.title}
 									</div>
-									<div className="truncate text-[10px] text-muted-foreground">
+									<div className="type-compact truncate text-muted-foreground">
 										{conv.subtitle}
 									</div>
 								</div>
@@ -188,9 +191,10 @@ export function ExtensionPopup({
 
 			<div className="border-border border-t px-3 py-2.5">
 				<Button
-					className="w-full gap-1.5"
+					className="w-full"
 					onClick={() => onOpen?.("/chat")}
 					size="sm"
+					spacing="regular"
 					variant="default"
 				>
 					Open Ryu
@@ -200,9 +204,14 @@ export function ExtensionPopup({
 
 			{user ? (
 				<div className="flex items-center gap-2 border-border border-t px-4 py-2.5">
-					<Avatar className="size-6 rounded-md">
+					<Avatar
+						className="size-6"
+						render={<span className={styles.accountAvatar} />}
+					>
 						<AvatarImage alt={user.name ?? ""} src={user.image ?? undefined} />
-						<AvatarFallback className="rounded-md text-[10px]">
+						<AvatarFallback
+							render={<span className={styles.accountAvatarFallback} />}
+						>
 							{initialsFor(user)}
 						</AvatarFallback>
 					</Avatar>
@@ -210,8 +219,13 @@ export function ExtensionPopup({
 						{user.name ?? user.email}
 					</span>
 					{userMenu ?? (
-						<Button className="size-7" size="icon" variant="ghost">
-							<Settings className="size-3.5" />
+						<Button
+							aria-label="Account settings"
+							className="size-7"
+							size="icon"
+							variant="ghost"
+						>
+							<Settings aria-hidden="true" className="size-3.5" />
 						</Button>
 					)}
 				</div>

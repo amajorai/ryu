@@ -1,0 +1,16 @@
+/* The desktop shell reserves space inside the transcript scroller. The shared
+ * transcript's data-slot and loading label identify its native layout owners. */
+.chat-page-titlebar-owner > [data-chat-state]
+	> [data-chat-layout]
+	> div
+	> [data-chat-transcript]
+	> div
+	> [data-slot="message-scroller"],
+.chat-page-titlebar-owner
+	> [data-chat-state]
+	> [data-chat-layout]
+	> div
+	> [data-chat-transcript]
+	> output[aria-label="Loading conversation"] {
+	padding-top: var(--ryu-titlebar-inset, 3rem);
+}

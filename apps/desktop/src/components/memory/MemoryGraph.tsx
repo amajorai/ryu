@@ -1,4 +1,5 @@
-import { Badge } from "@ryu/ui/components/badge";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Background,
 	Controls,
@@ -9,22 +10,22 @@ import {
 import type { MemoryGraphSnapshot } from "@/src/lib/api/memory.ts";
 import { layoutForceGraph } from "@/src/lib/force-directed-graph.ts";
 
-const NODE_COLORS: Record<string, string> = {
+const NODE_COLORS = {
 	memory: "var(--card)",
 	topic: "color-mix(in srgb, var(--primary) 14%, var(--card))",
 	person: "color-mix(in srgb, #3b82f6 14%, var(--card))",
 	category: "color-mix(in srgb, #8b5cf6 14%, var(--card))",
 	scope: "color-mix(in srgb, #0d9488 14%, var(--card))",
 	agent: "color-mix(in srgb, #d97706 14%, var(--card))",
-};
+} satisfies Record<MemoryGraphSnapshot["nodes"][number]["kind"], string>;
 
-const EDGE_COLORS: Record<string, string> = {
-	has_topic: "var(--primary)",
-	mentions_person: "#3b82f6",
-	has_category: "#8b5cf6",
-	applies_to_scope: "#0d9488",
-	authored_by_agent: "#d97706",
-};
+const EDGE_COLORS = new Map<string, string>([
+	["has_topic", "var(--primary)"],
+	["mentions_person", "#3b82f6"],
+	["has_category", "#8b5cf6"],
+	["applies_to_scope", "#0d9488"],
+	["authored_by_agent", "#d97706"],
+]);
 
 const GRAPH_HALF_EXTENT = 360;
 
@@ -51,6 +52,7 @@ function nodeStyle(
  * Core has already applied caller, scope, agent, and sensitive-topic policy.
  */
 export function MemoryGraph({ graph }: { graph: MemoryGraphSnapshot }) {
+	const tl = useLiteralMessages();
 	const positions = layoutForceGraph(
 		graph.nodes,
 		graph.edges.map((edge) => ({ source: edge.source, target: edge.target }))
@@ -82,7 +84,7 @@ export function MemoryGraph({ graph }: { graph: MemoryGraphSnapshot }) {
 		source: edge.source,
 		target: edge.target,
 		style: {
-			stroke: EDGE_COLORS[edge.kind] ?? "var(--border)",
+			stroke: EDGE_COLORS.get(edge.kind) ?? "var(--border)",
 			strokeWidth: Math.max(1, Math.min(2.5, edge.weight)),
 		},
 	}));
@@ -98,14 +100,20 @@ export function MemoryGraph({ graph }: { graph: MemoryGraphSnapshot }) {
 	return (
 		<div className="relative h-full w-full">
 			<div className="pointer-events-none absolute top-3 left-3 z-10 flex flex-wrap gap-1.5 rounded-lg border bg-background/90 p-2 shadow-sm backdrop-blur">
-				<Badge variant="secondary">{graph.memoryCount} memories</Badge>
+				<Badge variant="secondary">
+					{tl("{memoryCount} memories", {
+						memoryCount: String(graph.memoryCount),
+					})}
+				</Badge>
 				<Badge variant="outline">Topics</Badge>
 				<Badge variant="outline">People</Badge>
 				<Badge variant="outline">Categories</Badge>
 				<Badge variant="outline">Scopes</Badge>
 				<Badge variant="outline">Agents</Badge>
 				{graph.truncated ? (
-					<Badge variant="destructive">Graph capped</Badge>
+					<Badge tint="amber" variant="secondary">
+						Graph capped
+					</Badge>
 				) : null}
 			</div>
 			<ReactFlow

@@ -4,7 +4,7 @@ import {
 	ContextMenuItem,
 	ContextMenuSeparator,
 	ContextMenuTrigger,
-} from "@ryu/ui/components/context-menu";
+} from "@ryu/ui/components/context-menu.tsx";
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ContextMenuOverflowButton } from "../../src/components/layout/context-menu-overflow-button.tsx";
@@ -31,7 +31,7 @@ function TabProofRow({ kind }: { kind: RowKind }) {
 						className="size-4 shrink-0 rounded-full bg-primary/20"
 					/>
 					<OverflowTooltip
-						className="proof-title min-w-0 flex-1 overflow-hidden whitespace-nowrap text-sm"
+						className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-sm"
 						fade
 						text={LONG_TITLE}
 					/>
@@ -58,7 +58,9 @@ function ProofStory() {
 
 	useEffect(() => {
 		const read = () => {
-			const title = document.querySelector<HTMLElement>(".proof-title");
+			const title = document.querySelector<HTMLElement>(
+				'span[data-slot="tooltip-trigger"]'
+			);
 			const inner = title?.firstElementChild;
 			const menu = document.querySelector(
 				'[data-slot="context-menu-content"] [role="menuitem"]'

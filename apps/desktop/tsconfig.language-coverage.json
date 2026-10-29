@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/hooks/useLanguageMode.ts",
+    "src/hooks/useLanguageMode.storage.test.tsx",
+    "src/components/LanguagePackBridge.tsx",
+    "src/components/LanguagePackBridge.test.tsx",
+    "src/components/LanguagePackBridge.catalog-replacement.test.tsx",
+    "src/components/LanguagePackBridge.publication.test.tsx",
+    "src/components/LanguagePackBridge.remount.test.tsx",
+    "src/components/LanguageHost.lifetime.test.tsx",
+    "src/components/LanguageHost.strict-layout.test.tsx",
+    "src/components/LanguageHost.cross-hook.test.tsx",
+    "../../packages/core-client/src/language-packs.test.ts",
+    "src/components/settings/LanguageSettings.tsx",
+    "src/components/settings/LanguageSettings.import.test.tsx",
+    "src/components/settings/LanguageSettings.storage.test.tsx",
+    "src/components/settings/LanguageSettings.controls.native-http.test.tsx",
+    "src/components/store/MarketplaceStrip.tsx",
+    "src/components/store/MarketplaceStrip.language.test.tsx",
+    "e2e/language-settings.playwright.config.ts",
+    "e2e/language-settings-storage.spec.ts",
+    "e2e/harness/language-settings-proof.tsx",
+    "e2e/harness/vite.language-settings.config.ts"
+  ]
+}

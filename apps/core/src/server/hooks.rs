@@ -62,7 +62,7 @@ pub fn build_hook_inventory(
         let Some(contributes) = manifest.contributes.as_ref() else {
             continue;
         };
-        let trusted_by_default = crate::plugins::builtins::is_compiled_in_manifest(&manifest.id);
+        let trusted_by_default = crate::plugins::builtins::is_exact_compiled_manifest(manifest);
         for hook in &contributes.turn_hooks {
             let hook_key = format!("{}::{}", manifest.id, hook.id);
             let policy = overrides.get(&hook_key);
@@ -179,7 +179,12 @@ pub async fn put_hook_override(
         )
             .into_response();
     }
-    if update.scope == GovernanceScope::Node
+    // Hook overrides are node-wide: the "user" layer here is not keyed per
+    // member, so on an organization/team-bound node it would let any member
+    // enable or trust a hook for everyone. There it needs the same authority
+    // as the node layer; an unbound node is single-user and stays open.
+    let shared_node = crate::sidecar::control_plane::registered_org().is_some();
+    if (update.scope == GovernanceScope::Node || shared_node)
         && super::enforce_permission(
             &state,
             &caller,
@@ -235,6 +240,44 @@ mod tests {
     use super::build_hook_inventory;
     use crate::plugin_manifest::PluginManifest;
     use crate::plugins::PluginRecord;
+
+    #[test]
+    fn altered_compiled_hook_inventory_requires_review() {
+        let original = crate::plugin_manifest::PluginManifestLoader::load_install_catalog()
+            .into_iter()
+            .find(|manifest| {
+                manifest
+                    .contributes
+                    .as_ref()
+                    .is_some_and(|contributes| !contributes.turn_hooks.is_empty())
+            })
+            .expect("compiled hooks");
+        let record = PluginRecord {
+            id: original.id.clone(),
+            version: original.version.clone(),
+            enabled: true,
+            approved_grants: Vec::new(),
+            channel: "stable".to_owned(),
+            provenance: None,
+            created_at: None,
+            updated_at: None,
+        };
+        let trusted = build_hook_inventory(
+            std::slice::from_ref(&original),
+            std::slice::from_ref(&record),
+            &BTreeMap::new(),
+        );
+        assert!(!trusted.is_empty());
+        assert!(trusted
+            .iter()
+            .all(|hook| hook.trusted && hook.effective_enabled));
+        let mut changed = original;
+        changed.permission_grants.push("hook:run-agent".to_owned());
+        let untrusted = build_hook_inventory(&[changed], &[record], &BTreeMap::new());
+        assert!(untrusted
+            .iter()
+            .all(|hook| hook.review_required && !hook.effective_enabled));
+    }
 
     #[test]
     fn third_party_hook_inventory_requires_review_and_never_exposes_code() {

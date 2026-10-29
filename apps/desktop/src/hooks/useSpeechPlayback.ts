@@ -4,7 +4,9 @@ export type SpeechPlaybackResult = "playing" | "stopped" | "superseded";
 
 export interface SpeechPlaybackOptions {
 	/** Prepare the element (for example, select an output device) before play. */
-	prepareAudio?: (audio: HTMLAudioElement) => Promise<unknown> | unknown;
+	prepareAudio?: (
+		audio: HTMLAudioElement
+	) => Promise<boolean> | Promise<void> | void;
 	/** A repeated key stops the current/pending clip. Disable for preview buttons. */
 	toggle?: boolean;
 }
@@ -18,6 +20,15 @@ interface OwnedPlayback {
 	url: string;
 }
 
+export interface SpeechPlaybackControls {
+	play: (
+		key: string,
+		createBlob: () => Promise<Blob>,
+		options?: SpeechPlaybackOptions
+	) => Promise<SpeechPlaybackResult>;
+	stop: () => void;
+}
+
 /**
  * Own one blob-backed audio element for a surface.
  *
@@ -25,14 +36,7 @@ interface OwnedPlayback {
  * unmount all converge on the same idempotent disposer. Generation ids also make
  * a late synthesis result harmless after a newer request or unmount.
  */
-export function useSpeechPlayback(): {
-	play: (
-		key: string,
-		createBlob: () => Promise<Blob>,
-		options?: SpeechPlaybackOptions
-	) => Promise<SpeechPlaybackResult>;
-	stop: () => void;
-} {
+export function useSpeechPlayback(): SpeechPlaybackControls {
 	const currentRef = useRef<OwnedPlayback | null>(null);
 	const generationRef = useRef(0);
 	const pendingKeyRef = useRef<string | null>(null);

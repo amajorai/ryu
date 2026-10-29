@@ -148,7 +148,7 @@ function Story() {
 		<main className="min-h-svh bg-background p-8 text-foreground">
 			<div className="mx-auto flex max-w-6xl flex-col gap-6">
 				<header>
-					<p className="text-muted-foreground text-xs uppercase tracking-[0.2em]">
+					<p className="text-muted-foreground text-xs uppercase tracking-widest">
 						Ryu · Catalog scan proof
 					</p>
 					<h1 className="mt-2 font-semibold text-3xl">
@@ -199,7 +199,7 @@ function Story() {
 						/>
 					</section>
 				</div>
-				<p className="font-medium text-emerald-600" data-testid="proof-status">
+				<p className="font-medium text-success" data-testid="proof-status">
 					VERIFIED
 				</p>
 			</div>

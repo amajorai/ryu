@@ -1,26 +1,24 @@
 "use client";
 
+import "./universal-picker-body.module.css";
+
 import { ArrowDown01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useFullAccessSelectionGuard } from "@ryu/blocks/composer/full-access-warning";
-import { Button } from "@ryu/ui/components/button";
+import { useFullAccessSelectionGuard } from "@ryu/blocks/composer/full-access-warning.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/popover.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { memo, useCallback, useState } from "react";
-import {
-	COMPOSER_SELECT_ITEM,
-	COMPOSER_SELECT_POPOVER,
-	COMPOSER_SELECT_TRIGGER,
-} from "@/components/agent-elements/input/composer-select.ts";
 import {
 	type AcpConfigOption,
 	type AcpSessionModeState,
 	flattenConfigOptions,
 } from "@/src/lib/api/acp.ts";
+import styles from "./acp-pickers.module.css";
 
 interface SelectItem {
 	description?: string | null;
@@ -43,7 +41,7 @@ const SelectMenu = memo(function SelectMenu({
 	className,
 }: {
 	items: SelectItem[];
-	value: string | undefined;
+	value: AcpConfigOption["currentValue"];
 	onChange: (id: string) => void;
 	ariaLabel: string;
 	/** Small muted prefix shown before the active name (e.g. "Mode"). */
@@ -76,8 +74,9 @@ const SelectMenu = memo(function SelectMenu({
 			<PopoverTrigger
 				render={
 					<Button
+						appearance="composer-settings"
 						aria-label={ariaLabel}
-						className={cn(COMPOSER_SELECT_TRIGGER, className)}
+						className={className}
 						size="sm"
 						type="button"
 						variant="ghost"
@@ -98,25 +97,31 @@ const SelectMenu = memo(function SelectMenu({
 			</PopoverTrigger>
 			<PopoverContent
 				align="start"
-				className={COMPOSER_SELECT_POPOVER}
+				className={cn(
+					"max-h-80 w-auto min-w-[200px] max-w-[280px] overflow-y-auto"
+				)}
+				data-desktop-picker-popover="true"
 				side="top"
 				sideOffset={6}
+				spacing="small-inset"
 			>
 				{items.map((item) => {
 					const isActive = item.id === active?.id;
 					return (
 						<Button
-							className={cn(
-								COMPOSER_SELECT_ITEM,
-								"flex-col items-start gap-0.5",
-								isActive && "bg-accent"
-							)}
+							appearance={isActive ? "composer-mode-active" : "composer-mode"}
+							className="flex-col"
 							key={item.id}
 							onClick={() => handleSelect(item.id)}
 							type="button"
 							variant="ghost"
 						>
-							<span className="flex w-full items-center gap-2.5">
+							<span
+								className={cn(
+									"flex w-full items-center gap-2.5",
+									styles.optionLabel
+								)}
+							>
 								<span className="flex-1 truncate">{item.name}</span>
 								{isActive && (
 									<HugeiconsIcon

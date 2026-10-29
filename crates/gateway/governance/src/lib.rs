@@ -239,11 +239,15 @@ fn scope_allowed(
         owner_namespace(protected_id)
             .is_some_and(|protected| protected.eq_ignore_ascii_case(namespace))
     }) {
+        // The caller must be an exact protected id that owns THIS namespace.
+        // Membership in the protected list alone is not enough: `@ryu/mail` is
+        // first-party, but it does not own `monitors:*`.
         return app_id.is_some_and(|id| {
-            policy
-                .protected_owner_ids
-                .iter()
-                .any(|protected_id| protected_id.trim().eq_ignore_ascii_case(id.trim()))
+            policy.protected_owner_ids.iter().any(|protected_id| {
+                protected_id.trim().eq_ignore_ascii_case(id.trim())
+                    && owner_namespace(protected_id)
+                        .is_some_and(|protected| protected.eq_ignore_ascii_case(namespace))
+            })
         });
     }
     namespace.eq_ignore_ascii_case(owner)
@@ -330,6 +334,44 @@ fn canonicalize(value: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tailscale_control_traffic_requires_explicit_operator_grant() {
+        let grants = vec!["network:vpn:tailscale".to_owned()];
+        let reserved = vec!["network".to_owned()];
+        let denied = validate_grants_for(
+            Some("com.ryu.cloud-environments"),
+            &grants,
+            &GrantPolicy {
+                allowlist: &[],
+                reserved_namespaces: &reserved,
+                owner_scoped: true,
+                protected_owner_ids: &[],
+            },
+        );
+        assert!(!denied.all_approved());
+        let approved = validate_grants_for(
+            Some("com.ryu.cloud-environments"),
+            &grants,
+            &GrantPolicy {
+                allowlist: &grants,
+                reserved_namespaces: &reserved,
+                owner_scoped: true,
+                protected_owner_ids: &[],
+            },
+        );
+        assert!(approved.all_approved());
+        let squatter = validate_grants_for(
+            Some("com.evil.network"),
+            &grants,
+            &GrantPolicy {
+                allowlist: &[],
+                reserved_namespaces: &reserved,
+                owner_scoped: true,
+                protected_owner_ids: &[],
+            },
+        );
+        assert!(!squatter.all_approved());
+    }
     use super::*;
     use ed25519_dalek::SigningKey;
     use serde_json::json;
@@ -528,6 +570,31 @@ mod tests {
         let third_party =
             validate_grants_for(Some("com.acme.notes"), &scopes(&["notes:crud"]), &policy);
         assert!(third_party.all_approved());
+    }
+
+    #[test]
+    fn protected_namespace_requires_its_own_owner_not_any_protected_id() {
+        let reserved = scopes(&["model"]);
+        let protected = scopes(&[
+            "@ryu/monitors",
+            "com.ryu.monitors",
+            "@ryu/mail",
+            "com.ryu.mail",
+        ]);
+        let policy = protected_policy(&[], &reserved, &protected);
+
+        // Another first-party id is protected too, but it does not own `monitors`.
+        for id in ["@ryu/mail", "com.ryu.mail"] {
+            let decision = validate_grants_for(Some(id), &scopes(&["monitors:jobs"]), &policy);
+            assert_eq!(
+                decision.denied,
+                vec!["monitors:jobs".to_string()],
+                "{id} must not claim another protected owner's namespace"
+            );
+        }
+
+        let owner = validate_grants_for(Some("@ryu/mail"), &scopes(&["mail:crud"]), &policy);
+        assert!(owner.all_approved(), "denied: {:?}", owner.denied);
     }
 
     #[test]

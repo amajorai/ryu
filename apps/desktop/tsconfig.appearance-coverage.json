@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/AppearanceTab.tsx",
+    "src/components/settings/AppearanceTab.coverage.native-http.test.tsx",
+    "e2e/appearance-coverage.playwright.config.ts",
+    "e2e/harness/vite.appearance-coverage.config.ts"
+  ]
+}

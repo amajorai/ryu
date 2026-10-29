@@ -12,4 +12,3 @@ test("reads only validated hosted standalone app targets", () => {
 		readHostedStandaloneAppId("?window=standalone-app&appId=../../outside")
 	).toBe("");
 });
-

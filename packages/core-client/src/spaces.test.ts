@@ -1,3 +1,4 @@
+import type { HttpFixtureBody } from "./test-support/http-fixture.ts";
 // packages/core-client/src/spaces.test.ts
 //
 // Drift guard for the ONE sentence in this package that a language model reads.
@@ -31,9 +32,11 @@ import type { ApiTarget } from "./client.ts";
 import {
 	cancelSpaceRetrievalModeChange,
 	createSpace,
+	fetchDocuments,
 	fetchSpaceRetrievalModeStatus,
 	fetchSpaces,
 	type RetrievalModeStatus,
+	searchSpace,
 	startSpaceRetrievalModeChange,
 } from "./spaces.ts";
 
@@ -54,7 +57,7 @@ interface CapturedRequest {
 	url?: string;
 }
 
-function stubJson(payload: unknown, status = 200): CapturedRequest {
+function stubJson(payload: HttpFixtureBody, status = 200): CapturedRequest {
 	const captured: CapturedRequest = {};
 	globalThis.fetch = Object.assign(
 		(input: RequestInfo | URL, init?: RequestInit) => {
@@ -68,8 +71,8 @@ function stubJson(payload: unknown, status = 200): CapturedRequest {
 }
 
 function statusWire(
-	overrides: Record<string, unknown> = {}
-): Record<string, unknown> {
+	overrides: Record<string, HttpFixtureBody | undefined> = {}
+) {
 	return {
 		job_id: "job-1",
 		space_id: "space-1",
@@ -95,6 +98,83 @@ const COMPLETED_CHANGE = {
 	graph_nodes: 8,
 	graph_edges: 12,
 };
+
+describe("Spaces native response contracts", () => {
+	test("preserves native nullable search distances and result order", async () => {
+		stubJson({
+			space_id: "space-1",
+			matches: [
+				{
+					chunk_id: "null-distance",
+					document_id: "doc-1",
+					content: "Unmeasured",
+					distance: null,
+					future: { source: "native" },
+				},
+				{
+					chunk_id: "measured",
+					document_id: "doc-2",
+					content: "Measured",
+					distance: 0.25,
+				},
+			],
+		});
+		expect(await searchSpace(TARGET, "space-1", "query")).toEqual([
+			{
+				chunkId: "null-distance",
+				documentId: "doc-1",
+				content: "Unmeasured",
+				distance: null,
+			},
+			{
+				chunkId: "measured",
+				documentId: "doc-2",
+				content: "Measured",
+				distance: 0.25,
+			},
+		]);
+	});
+
+	test("rejects malformed search rows instead of trusting their declared type", async () => {
+		stubJson({
+			matches: [
+				{
+					chunk_id: "chunk",
+					document_id: "doc",
+					content: "Text",
+					distance: "0.25",
+				},
+			],
+		});
+		await expect(searchSpace(TARGET, "space-1", "query")).rejects.toThrow();
+	});
+
+	test("keeps legacy document defaults while accepting future metadata", async () => {
+		stubJson({
+			documents: [
+				{
+					id: "doc",
+					space_id: "space-1",
+					title: "Legacy",
+					created_at: 10,
+					chunk_count: 2,
+					future: { enabled: true },
+				},
+			],
+		});
+		expect(await fetchDocuments(TARGET, "space-1")).toEqual([
+			{
+				id: "doc",
+				spaceId: "space-1",
+				title: "Legacy",
+				createdAt: 10,
+				updatedAt: 10,
+				chunkCount: 2,
+				icon: null,
+			},
+		]);
+	});
+});
 
 describe("Spaces retrieval-mode client", () => {
 	test("maps explicit modes and defaults legacy rows to vector", async () => {
@@ -343,6 +423,7 @@ function sourceFile(relative: string): string {
 
 const SPACES_TS = "packages/core-client/src/spaces.ts";
 const SPACES_RS = "crates/core/spaces/src/lib.rs";
+const SPACES_RETRIEVAL_RS = "crates/core/spaces/src/retrieval.rs";
 
 /**
  * Body of one Rust fn, brace-matched from its header line. Brace-matched rather
@@ -419,11 +500,17 @@ describe("the searchSpace description an MCP client reads", () => {
 describe("the Core behaviour those docs now claim", () => {
 	const spacesRs = sourceFile(SPACES_RS);
 
-	test("search_ext still branches on the Space's retrieval mode", () => {
+	test("Space search still branches on the Space's retrieval mode", () => {
 		// Without this half the doc tests are a spellcheck: someone could collapse
 		// Core back to a single branch and every assertion above would still pass
 		// while the published description promised a capability that was gone.
-		const body = rustFnBody(spacesRs, SPACES_RS, "pub async fn search_ext(");
+		// `search_ext` is `search_with` with default options; the per-query
+		// candidate collection in `retrieval.rs` is where the mode is read.
+		const body = rustFnBody(
+			sourceFile(SPACES_RETRIEVAL_RS),
+			SPACES_RETRIEVAL_RS,
+			"async fn collect_candidates("
+		);
 		expect(body).toContain("let mode = self.space_mode(space_id).await?;");
 		expect(body).toContain("RetrievalMode::Graph => {");
 		expect(body).toContain("self.graph_search(");

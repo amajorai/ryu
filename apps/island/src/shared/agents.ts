@@ -1,11 +1,13 @@
+import { z } from "zod";
+
 // Island agent-routing preference: the cross-process contract persisted in Core
 // under the `island-agents` key. The desktop writes it from its Island settings;
 // the island companion (a separate Electron process that cannot share the
 // desktop's localStorage) reads it on startup, subscribes to live changes, and
 // uses it to pick (1) the agent its conversational chat routes to and (2) the
 // agent the proactive suggestion engine uses. Mirrors `shared/voice.ts`: a plain
-// schema with no `@ryu/ui` dependency, because the main process externalizes
-// workspace deps and cannot import `@ryu/ui`.
+// schema with no `@ryu/ui` dependency, because the main process inlines
+// workspace packages into its bundle and `@ryu/ui` is renderer UI code.
 //
 // Both surfaces default to the flagship `ryu` agent (Pi + Gateway), the only
 // agent installed out of the box. Like every Ryu default, it is swappable, never
@@ -40,22 +42,19 @@ export const DEFAULT_ISLAND_AGENT_PREFS: IslandAgentPrefs = {
  * into {@link IslandAgentPrefs}. Falls back to the default for any missing/unknown
  * field so a malformed blob never breaks chat or the suggestion engine.
  */
+const preferenceSchema = z
+	.object({
+		voiceAgent: z.string().catch(DEFAULT_AGENT_ID),
+		proactiveAgent: z.string().catch(DEFAULT_AGENT_ID),
+	})
+	.catch(DEFAULT_ISLAND_AGENT_PREFS);
+
 export function parseIslandAgentPrefs(raw: string | null): IslandAgentPrefs {
 	if (!raw) {
 		return DEFAULT_ISLAND_AGENT_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<IslandAgentPrefs>;
-		return {
-			voiceAgent:
-				typeof parsed.voiceAgent === "string"
-					? parsed.voiceAgent
-					: DEFAULT_AGENT_ID,
-			proactiveAgent:
-				typeof parsed.proactiveAgent === "string"
-					? parsed.proactiveAgent
-					: DEFAULT_AGENT_ID,
-		};
+		return preferenceSchema.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_ISLAND_AGENT_PREFS;
 	}

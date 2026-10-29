@@ -12,8 +12,8 @@
 
 import { Add01Icon, Delete01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -21,19 +21,19 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
@@ -196,6 +196,8 @@ export function AgentAutoRoutingEditor() {
 	);
 	const [rules, setRules] = useState<AutoRuleRow[]>([]);
 	const [loaded, setLoaded] = useState(false);
+	const [loadError, setLoadError] = useState<string | null>(null);
+	const [loadAttempt, setLoadAttempt] = useState(0);
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	// Keyed on the node's OWN identity, not on a getter. `useActiveNodeGetter`
@@ -207,7 +209,7 @@ export function AgentAutoRoutingEditor() {
 	// primitives `toTarget` actually reads.
 	const target = useMemo(
 		() => toTarget(node),
-		// biome-ignore lint/correctness/useExhaustiveDependencies: the two fields
+		// the two fields
 		// toTarget reads are the identity that matters; depending on `node` itself
 		// would re-run on every unrelated store write.
 		[node.url, node.token]
@@ -221,25 +223,37 @@ export function AgentAutoRoutingEditor() {
 			return;
 		}
 		let cancelled = false;
-		getAgentAutoRouting(target).then((cfg) => {
-			if (cancelled) {
-				return;
-			}
-			setDraft(cfg);
-			setRules(
-				cfg.rules.map((r) => ({
-					id: crypto.randomUUID(),
-					description: r.description,
-					agentId: r.agent_id,
-				}))
-			);
-			setSaveError(null);
-			setLoaded(true);
-		});
+		setLoaded(false);
+		setLoadError(null);
+		getAgentAutoRouting(target)
+			.then((cfg) => {
+				if (cancelled) {
+					return;
+				}
+				setDraft(cfg);
+				setRules(
+					cfg.rules.map((r) => ({
+						id: crypto.randomUUID(),
+						description: r.description,
+						agentId: r.agent_id,
+					}))
+				);
+				setSaveError(null);
+				setLoaded(true);
+			})
+			.catch((error) => {
+				if (!cancelled) {
+					setLoadError(
+						error instanceof Error
+							? error.message
+							: "Could not load auto routing settings."
+					);
+				}
+			});
 		return () => {
 			cancelled = true;
 		};
-	}, [open, target]);
+	}, [loadAttempt, open, target]);
 
 	// The two states in which auto routing is enabled and yet inert, both of which
 	// the resolver treats as a no-op WITHOUT saying so (`is_active` returns false
@@ -346,7 +360,7 @@ export function AgentAutoRoutingEditor() {
 
 	return (
 		<Dialog onOpenChange={setOpen} open={open}>
-			<DialogContent className="max-h-[85vh] gap-0 overflow-y-auto sm:max-w-lg">
+			<DialogContent appearance="auto-routing">
 				<DialogHeader>
 					<DialogTitle>Auto agent routing</DialogTitle>
 					<DialogDescription>
@@ -377,30 +391,31 @@ export function AgentAutoRoutingEditor() {
 							<Label htmlFor="auto-strategy">
 								{friendly ? "How to choose a rule" : "Strategy"}
 							</Label>
-							<Select
+							<Select<RouteStrategy>
 								items={strategyCopy.labels}
-								onValueChange={(v) =>
-									v && patch({ strategy: v as RouteStrategy })
-								}
+								onValueChange={(v) => v && patch({ strategy: v })}
 								value={draft.strategy}
 							>
 								<SelectTrigger id="auto-strategy">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									{(
-										Object.entries(strategyCopy.labels) as [
-											RouteStrategy,
-											string,
-										][]
-									).map(([val, label]) => (
-										<SelectItem key={val} value={val}>
-											<span className="font-medium">{label}</span>
-											<span className="ml-1 text-muted-foreground text-xs">
-												— {strategyCopy.descriptions[val]}
-											</span>
-										</SelectItem>
-									))}
+									{
+										/* SAFETY: routeStrategyCopy selects the checked authored technical or friendly labels map; both own exactly llm/embedding/keyword with string labels. Native Object.entries erases only that complete RouteStrategy key union. */
+										(
+											Object.entries(strategyCopy.labels) as [
+												RouteStrategy,
+												string,
+											][]
+										).map(([val, label]) => (
+											<SelectItem key={val} value={val}>
+												<span className="font-medium">{label}</span>
+												<span className="ml-1 text-muted-foreground text-xs">
+													— {strategyCopy.descriptions[val]}
+												</span>
+											</SelectItem>
+										))
+									}
 								</SelectContent>
 							</Select>
 						</div>
@@ -482,6 +497,7 @@ export function AgentAutoRoutingEditor() {
 										<div className="flex items-start gap-2" key={rule.id}>
 											<div className="flex flex-1 flex-col gap-1.5">
 												<Input
+													aria-label={`Rule ${idx + 1} description`}
 													onChange={(e) =>
 														updateRule(rule.id, "description", e.target.value)
 													}
@@ -576,13 +592,26 @@ export function AgentAutoRoutingEditor() {
 						</div>
 
 						{saveError ? (
-							<p className="text-sm text-status-destructive">{saveError}</p>
+							<p className="text-sm text-status-destructive" role="alert">
+								{saveError}
+							</p>
 						) : null}
 					</div>
-				) : (
-					<div className="flex items-center justify-center py-10">
-						<Spinner className="size-5" />
+				) : loadError ? (
+					<div className="flex flex-col items-start gap-3 py-6" role="alert">
+						<p className="text-sm text-status-destructive">
+							Auto routing settings could not be loaded. {loadError}
+						</p>
+						<Button
+							onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+							size="sm"
+							variant="outline"
+						>
+							Retry
+						</Button>
 					</div>
+				) : (
+					<SkeletonRows spacing="expanded" />
 				)}
 
 				<DialogFooter>

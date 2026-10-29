@@ -4,17 +4,17 @@
 
 import { ArrowDown02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	PreviewRail,
 	type PreviewRailItem,
-} from "@ryu/ui/components/motion/preview-rail";
+} from "@ryu/ui/components/motion/preview-rail.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/popover.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useReducedMotion } from "motion/react";
 import {
 	type ComponentPropsWithRef,
@@ -26,6 +26,11 @@ import {
 	useRef,
 	useState,
 } from "react";
+
+import {
+	isNativeFunction,
+	isNativeText,
+} from "../../lib/native-primitive-observation.ts";
 
 const PREVIEW_TITLE_LENGTH = 56;
 const PREVIEW_DESCRIPTION_LENGTH = 88;
@@ -143,7 +148,7 @@ function CollapsedMessageRail({
 					<span className="h-px w-3.5 rounded-full bg-current/70" />
 					<span className="h-px w-2 rounded-full bg-current/45" />
 				</span>
-				<span className="font-medium text-[9px] tabular-nums leading-none">
+				<span className="type-micro font-medium tabular-nums leading-none">
 					{items.length > 99 ? "99+" : items.length}
 				</span>
 			</PopoverTrigger>
@@ -161,7 +166,7 @@ function CollapsedMessageRail({
 							Jump to any message in this conversation
 						</p>
 					</div>
-					<span className="shrink-0 rounded-full bg-muted px-2 py-1 font-medium text-[10px] text-muted-foreground tabular-nums">
+					<span className="type-compact shrink-0 rounded-full bg-muted px-2 py-1 font-medium text-muted-foreground tabular-nums">
 						{items.length}
 					</span>
 				</div>
@@ -193,7 +198,7 @@ function CollapsedMessageRail({
 									<span
 										aria-hidden="true"
 										className={cn(
-											"mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-[10px] text-muted-foreground tabular-nums",
+											"type-compact mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted font-medium text-muted-foreground tabular-nums",
 											active && "bg-foreground text-background"
 										)}
 									>
@@ -204,7 +209,7 @@ function CollapsedMessageRail({
 											{item.label}
 										</span>
 										{item.description ? (
-											<span className="mt-0.5 line-clamp-2 block text-[11px] text-muted-foreground leading-4">
+											<span className="type-caption mt-0.5 line-clamp-2 block text-muted-foreground leading-4">
 												{item.description}
 											</span>
 										) : null}
@@ -223,10 +228,12 @@ export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
 	/** Marks the transcript as waiting for more streamed content. */
 	busy?: boolean;
 	contentClassName?: string;
+	contentInset?: "default" | "compact" | "transcript";
 	contentProps?: Omit<
 		ComponentPropsWithRef<"div">,
 		"children" | "className" | "ref"
 	> & { "data-slot"?: string };
+	contentSpacing?: "default" | "flush";
 	/** Keep streamed output pinned while the reader remains near the end. */
 	followOutput?: boolean;
 	/** Distance from the end that still counts as following the output. */
@@ -278,6 +285,8 @@ export function MessageScroller({
 	navigationLabel = "Message navigation",
 	viewportClassName,
 	contentClassName,
+	contentInset = "default",
+	contentSpacing = "default",
 	railClassName,
 	viewportRef: externalViewportRef,
 	viewportProps,
@@ -292,6 +301,7 @@ export function MessageScroller({
 	const followingRef = useRef(followOutput);
 	const knownMessageIdsRef = useRef<Set<string>>(new Set());
 	const programmaticScrollRef = useRef(false);
+	const lastScrollTopRef = useRef(0);
 	const scrollTimerRef = useRef<number | undefined>(undefined);
 	const frameRef = useRef<number | undefined>(undefined);
 	const railFrameRef = useRef<number | undefined>(undefined);
@@ -319,7 +329,7 @@ export function MessageScroller({
 	const setViewportRef = useCallback(
 		(node: HTMLElement | null) => {
 			viewportRef.current = node;
-			if (typeof externalViewportRef === "function") {
+			if (isNativeFunction(externalViewportRef)) {
 				externalViewportRef(node);
 			} else if (externalViewportRef) {
 				externalViewportRef.current = node;
@@ -365,10 +375,15 @@ export function MessageScroller({
 				(node): node is HTMLElement =>
 					node instanceof HTMLElement &&
 					node.dataset.slot === "message-scroller-item" &&
-					typeof node.dataset.messageId === "string" &&
+					isNativeText(node.dataset.messageId) &&
 					node.dataset.messageId.length > 0
 			)
-			.map((node) => node.dataset.messageId as string);
+			.map((node) => {
+				// SAFETY: actual DOMStringMap values are strings when present. The native
+				// attribute was checked above; no mutation or callback intervenes in
+				// this synchronous native child-list observation. Keep its final read.
+				return node.dataset.messageId as string;
+			});
 		const knownMessageIds = knownMessageIdsRef.current;
 		const addedMessageIds = messageIds.filter((id) => !knownMessageIds.has(id));
 
@@ -535,7 +550,7 @@ export function MessageScroller({
 
 			setFollowing(true);
 			programmaticScrollRef.current = true;
-			if (typeof viewport.scrollTo === "function") {
+			if (isNativeFunction(viewport.scrollTo)) {
 				viewport.scrollTo({ top: viewport.scrollHeight, behavior });
 			} else {
 				viewport.scrollTop = viewport.scrollHeight;
@@ -546,11 +561,22 @@ export function MessageScroller({
 			scrollTimerRef.current = window.setTimeout(
 				() => {
 					programmaticScrollRef.current = false;
+					// Content that grew while the smooth scroll ran (a fast stream)
+					// left the animation short of the new end; finish the follow.
+					const current = viewportRef.current;
+					if (
+						followingRef.current &&
+						current &&
+						current.scrollHeight - current.scrollTop - current.clientHeight >
+							followThreshold
+					) {
+						current.scrollTop = current.scrollHeight;
+					}
 				},
 				behavior === "smooth" ? 320 : 0
 			);
 		},
-		[setFollowing]
+		[followThreshold, setFollowing]
 	);
 
 	const handleScroll = useCallback(() => {
@@ -561,7 +587,25 @@ export function MessageScroller({
 
 		const distance =
 			viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-		setFollowing(distance <= followThreshold);
+		const movedUp = viewport.scrollTop < lastScrollTopRef.current;
+		lastScrollTopRef.current = viewport.scrollTop;
+		// Our own smooth follow passes through positions far from the end, and
+		// the end moves while output streams in. Those frames are not the reader
+		// leaving the live edge (wheel, touch, and keys clear the flag first).
+		// The follow only ever moves DOWN, so an upward move that ends away from
+		// the end is the reader leaving (scrollbar drag, Shift+Space, find in
+		// page, autoscroll) even while the follow flag is still set. A shrinking
+		// transcript clamps scrollTop to the end (distance 0), so it is excluded.
+		if (
+			programmaticScrollRef.current &&
+			movedUp &&
+			distance > followThreshold
+		) {
+			programmaticScrollRef.current = false;
+		}
+		if (!programmaticScrollRef.current || distance <= followThreshold) {
+			setFollowing(distance <= followThreshold);
+		}
 		updateActiveRailItem();
 	}, [followThreshold, setFollowing, updateActiveRailItem]);
 
@@ -594,7 +638,7 @@ export function MessageScroller({
 
 		syncUnreadMessages();
 		const observer =
-			typeof MutationObserver === "undefined"
+			globalThis.MutationObserver === undefined
 				? null
 				: new MutationObserver(syncUnreadMessages);
 		observer?.observe(content, { childList: true, subtree: true });
@@ -634,7 +678,7 @@ export function MessageScroller({
 
 	useEffect(() => {
 		const content = contentRef.current;
-		if (!content || typeof ResizeObserver === "undefined") {
+		if (!content || globalThis.ResizeObserver === undefined) {
 			return;
 		}
 
@@ -666,7 +710,7 @@ export function MessageScroller({
 
 		scheduleRailSync();
 		const mutationObserver =
-			typeof MutationObserver === "undefined"
+			globalThis.MutationObserver === undefined
 				? null
 				: new MutationObserver(scheduleRailSync);
 		mutationObserver?.observe(content, {
@@ -676,7 +720,7 @@ export function MessageScroller({
 		});
 
 		const resizeObserver =
-			typeof ResizeObserver === "undefined"
+			globalThis.ResizeObserver === undefined
 				? null
 				: new ResizeObserver(scheduleRailSync);
 		resizeObserver?.observe(content);
@@ -723,9 +767,9 @@ export function MessageScroller({
 			programmaticScrollRef.current = true;
 			const behavior = reduce || !smooth ? "auto" : "smooth";
 
-			if (typeof target.scrollIntoView === "function") {
+			if (isNativeFunction(target.scrollIntoView)) {
 				target.scrollIntoView({ behavior, block: "center", inline: "nearest" });
-			} else if (typeof viewport.scrollTo === "function") {
+			} else if (isNativeFunction(viewport.scrollTo)) {
 				const viewportRect = viewport.getBoundingClientRect();
 				const targetRect = target.getBoundingClientRect();
 				const top =
@@ -791,7 +835,16 @@ export function MessageScroller({
 				aria-busy={busy}
 				aria-live="polite"
 				aria-relevant="additions text"
-				className={contentClassName}
+				className={
+					contentInset === "default" && contentSpacing === "default"
+						? contentClassName
+						: cn(
+								contentSpacing === "flush" && "gap-0",
+								contentInset === "compact" && "px-0.5 py-1",
+								contentInset === "transcript" && "px-3 py-6",
+								contentClassName
+							)
+				}
 				ref={contentRef}
 				role="log"
 				{...contentProps}

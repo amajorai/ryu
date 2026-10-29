@@ -5,6 +5,11 @@ import { isOrganizationAdminRole } from "@/src/lib/resource-visibility.ts";
 
 const ORG_LIST_KEY = ["settings", "orgs"] as const;
 
+export interface VisibilityAdminAccess {
+	canMakePrivate: boolean;
+	role: string | null;
+}
+
 /**
  * UI courtesy for the admin-only shared → private transition.
  *
@@ -13,10 +18,7 @@ const ORG_LIST_KEY = ["settings", "orgs"] as const;
  * scoped; a bound Core request still rejects a non-admin at the mutation
  * boundary.
  */
-export function useVisibilityAdminAccess(): {
-	canMakePrivate: boolean;
-	role: string | null;
-} {
+export function useVisibilityAdminAccess(): VisibilityAdminAccess {
 	const authed = hasOrgAuth();
 	const activeOrgId = useActiveOrgId();
 	const orgsQuery = useQuery(

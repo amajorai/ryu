@@ -317,6 +317,85 @@ fn emit_lifecycle_transition(
     });
 }
 
+/// One queued delegate's place in its fan-out run's `run_active_count`.
+///
+/// The fan-out reserves every delegate it will run before it spawns any of them,
+/// so a delegate still waiting for a concurrency permit keeps the run's count
+/// above zero. Without this, a fan-out wider than its concurrency limit drained
+/// to zero between delegates and observers saw the run as finished early.
+struct DelegationRunReservation {
+    run_id: String,
+    agent_id: String,
+    released: bool,
+}
+
+impl DelegationRunReservation {
+    fn reserve(run_id: &str, agent_id: &str) -> Self {
+        if let Ok(mut counts) = active_by_run().lock() {
+            *counts.entry(run_id.to_owned()).or_default() += 1;
+        }
+        Self {
+            run_id: run_id.to_owned(),
+            agent_id: agent_id.to_owned(),
+            released: false,
+        }
+    }
+
+    /// The delegate got its permit: it now counts as globally active, and its
+    /// reservation becomes the lease that `finish` releases.
+    fn admit(mut self) -> DelegationLifecycleLease {
+        self.released = true;
+        let run_id = std::mem::take(&mut self.run_id);
+        let agent_id = std::mem::take(&mut self.agent_id);
+        let active_count = ACTIVE_DELEGATES.fetch_add(1, Ordering::AcqRel) + 1;
+        let run_active_count = active_by_run()
+            .lock()
+            .ok()
+            .and_then(|counts| counts.get(&run_id).copied())
+            .unwrap_or(1);
+        emit_lifecycle_transition(&run_id, &agent_id, active_count as usize, run_active_count);
+        DelegationLifecycleLease {
+            run_id,
+            agent_id,
+            finished: false,
+        }
+    }
+}
+
+impl Drop for DelegationRunReservation {
+    /// A delegate that never got admitted (its task panicked or was aborted
+    /// while queued) still leaves the run, so the run can reach zero.
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        self.released = true;
+        let run_active_count = release_run_slot(&self.run_id);
+        emit_lifecycle_transition(
+            &self.run_id,
+            &self.agent_id,
+            ACTIVE_DELEGATES.load(Ordering::Acquire) as usize,
+            run_active_count,
+        );
+    }
+}
+
+/// Drop one delegate from its run's count, forgetting the run at zero.
+fn release_run_slot(run_id: &str) -> usize {
+    active_by_run()
+        .lock()
+        .map(|mut counts| {
+            let count = counts.entry(run_id.to_owned()).or_default();
+            *count = count.saturating_sub(1);
+            let remaining = *count;
+            if remaining == 0 {
+                counts.remove(run_id);
+            }
+            remaining
+        })
+        .unwrap_or(0)
+}
+
 /// One admitted delegate owns exactly one lease. Drop is the safety net for a
 /// panic/abort path; the finished bit prevents normal completion from
 /// decrementing the global registry a second time.
@@ -327,24 +406,6 @@ struct DelegationLifecycleLease {
 }
 
 impl DelegationLifecycleLease {
-    fn admit(run_id: &str, agent_id: &str) -> Self {
-        let active_count = ACTIVE_DELEGATES.fetch_add(1, Ordering::AcqRel) + 1;
-        let run_active_count = active_by_run()
-            .lock()
-            .map(|mut counts| {
-                let count = counts.entry(run_id.to_owned()).or_default();
-                *count += 1;
-                *count
-            })
-            .unwrap_or(1);
-        emit_lifecycle_transition(run_id, agent_id, active_count as usize, run_active_count);
-        Self {
-            run_id: run_id.to_owned(),
-            agent_id: agent_id.to_owned(),
-            finished: false,
-        }
-    }
-
     fn finish(&mut self) {
         if self.finished {
             return;
@@ -355,18 +416,7 @@ impl DelegationLifecycleLease {
                 count.checked_sub(1)
             })
             .unwrap_or(0);
-        let run_active_count = active_by_run()
-            .lock()
-            .map(|mut counts| {
-                let count = counts.entry(self.run_id.clone()).or_default();
-                *count = count.saturating_sub(1);
-                let remaining = *count;
-                if remaining == 0 {
-                    counts.remove(&self.run_id);
-                }
-                remaining
-            })
-            .unwrap_or(0);
+        let run_active_count = release_run_slot(&self.run_id);
         emit_lifecycle_transition(
             &self.run_id,
             &self.agent_id,
@@ -436,7 +486,7 @@ fn safe_segment(s: &str) -> anyhow::Result<&str> {
 
 /// Checkpoint root directory (`~/.ryu/fanout-checkpoints`).
 fn checkpoint_root() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("fanout-checkpoints")
+    crate::paths::state_path("fanout-checkpoints")
 }
 
 /// Compute the checkpoint directory for a fan-out step, validating all segments.
@@ -450,7 +500,7 @@ fn checkpoint_dir(key: &FanoutCheckpointKey) -> anyhow::Result<std::path::PathBu
 /// Uses atomic write (temp-file + rename) so a mid-write crash cannot leave a
 /// partial checkpoint that would be mistakenly treated as complete on resume.
 /// Directory is created with mode 0o700 and the file with mode 0o600 on Unix.
-fn save_delegate_checkpoint(key: &FanoutCheckpointKey, result: &DelegateResult) {
+pub(crate) fn save_delegate_checkpoint(key: &FanoutCheckpointKey, result: &DelegateResult) {
     let dir = match checkpoint_dir(key) {
         Ok(d) => d,
         Err(e) => {
@@ -485,7 +535,6 @@ fn save_delegate_checkpoint(key: &FanoutCheckpointKey, result: &DelegateResult) 
     }
 
     let path = dir.join(format!("{id}.json"));
-    let tmp_path = dir.join(format!("{id}.json.tmp"));
     let json = match serde_json::to_vec_pretty(result) {
         Ok(v) => v,
         Err(e) => {
@@ -493,32 +542,50 @@ fn save_delegate_checkpoint(key: &FanoutCheckpointKey, result: &DelegateResult) 
             return;
         }
     };
-
-    #[cfg(unix)]
-    let write_result = {
-        use std::io::Write as _;
-        use std::os::unix::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp_path)
-            .and_then(|mut f| f.write_all(&json))
+    // The delegate's output is user content: seal the whole body (fails closed:
+    // without a key nothing is written and the delegate simply reruns on resume).
+    let encoded = match encode_checkpoint(key, id, &json) {
+        Ok(encoded) => encoded,
+        Err(e) => {
+            tracing::warn!("fanout checkpoint: not written for {id}: {e}");
+            return;
+        }
     };
-    #[cfg(not(unix))]
-    let write_result = std::fs::write(&tmp_path, &json);
-
-    if let Err(e) = write_result {
-        tracing::warn!("fanout checkpoint: write tmp failed {tmp_path:?}: {e}");
-        return;
-    }
-    if let Err(e) = std::fs::rename(&tmp_path, &path) {
-        tracing::warn!("fanout checkpoint: rename failed {tmp_path:?} -> {path:?}: {e}");
+    if let Err(e) = ryu_durable::atomic_write_private(&path, &encoded) {
+        tracing::warn!("fanout checkpoint: write failed {path:?}: {e}");
     }
 }
 
+/// Record kind (AAD purpose) of a fan-out checkpoint in the `workflow-state`
+/// content store.
+const KIND_FANOUT: &str = "fanout-checkpoint";
+
+/// The AAD id of one delegate's checkpoint: `<run_id>/<node_id>/<delegate_id>`.
+fn checkpoint_record_id(key: &FanoutCheckpointKey, delegate_id: &str) -> String {
+    format!("{}/{}/{delegate_id}", key.run_id, key.node_id)
+}
+
+fn encode_checkpoint(
+    key: &FanoutCheckpointKey,
+    delegate_id: &str,
+    json: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    use ryu_durable::CheckpointCodec as _;
+    super::store::state_codec(KIND_FANOUT)?.encode(&checkpoint_record_id(key, delegate_id), json)
+}
+
+fn decode_checkpoint(
+    key: &FanoutCheckpointKey,
+    delegate_id: &str,
+    stored: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    use ryu_durable::CheckpointCodec as _;
+    super::store::state_codec(KIND_FANOUT)?.decode(&checkpoint_record_id(key, delegate_id), stored)
+}
+
 /// Load a persisted delegate result from its checkpoint file, if it exists.
+/// A checkpoint that does not open is treated as absent (the delegate reruns),
+/// and logged.
 fn load_delegate_checkpoint(
     key: &FanoutCheckpointKey,
     delegate_id: &str,
@@ -527,7 +594,106 @@ fn load_delegate_checkpoint(
     let id = safe_segment(delegate_id).ok()?;
     let path = dir.join(format!("{id}.json"));
     let data = std::fs::read(&path).ok()?;
-    serde_json::from_slice(&data).ok()
+    match decode_checkpoint(key, id, &data) {
+        Ok(json) => serde_json::from_slice(&json).ok(),
+        Err(error) => {
+            tracing::warn!("fanout checkpoint: {path:?} does not open: {error}");
+            None
+        }
+    }
+}
+
+/// Seal, once, the fan-out checkpoints still stored as legacy plaintext, and
+/// remove dead ones (Core runs this while starting, through
+/// [`super::store::reseal_stored_workflows`]). A checkpoint holds a delegate's
+/// output and is only read again while its run can still resume, so:
+/// - the checkpoints of a run whose record is `Completed` are deleted (they are
+///   never read again);
+/// - every other plaintext checkpoint is rewritten sealed, same content;
+/// - temporary files a crashed write left are removed.
+///
+/// Idempotent. Returns how many files were sealed or removed.
+pub(crate) fn reseal_fanout_checkpoints() -> usize {
+    reseal_fanout_checkpoints_in(&checkpoint_root(), |run_id| {
+        super::store::load_run(run_id).ok().map(|run| run.status)
+    })
+}
+
+fn reseal_fanout_checkpoints_in(
+    root: &std::path::Path,
+    run_status: impl Fn(&str) -> Option<super::store::RunStatus>,
+) -> usize {
+    let subdirectories = |dir: &std::path::Path| -> Vec<(String, std::path::PathBuf)> {
+        std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|entry| entry.path().is_dir())
+                    .filter_map(|entry| {
+                        let name = entry.file_name().to_str()?.to_owned();
+                        safe_segment(&name).ok()?;
+                        Some((name, entry.path()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut changed = 0;
+    for (run_id, run_dir) in subdirectories(root) {
+        if run_status(&run_id) == Some(super::store::RunStatus::Completed) {
+            match std::fs::remove_dir_all(&run_dir) {
+                Ok(()) => changed += 1,
+                Err(error) => tracing::warn!(
+                    "fanout checkpoint: could not remove finished run {run_dir:?}: {error}"
+                ),
+            }
+            continue;
+        }
+        for (node_id, node_dir) in subdirectories(&run_dir) {
+            changed += ryu_durable::remove_orphaned_temp_files(
+                &node_dir,
+                std::time::Duration::from_secs(60),
+            );
+            let key = FanoutCheckpointKey {
+                run_id: run_id.clone(),
+                node_id,
+            };
+            let Ok(entries) = std::fs::read_dir(&node_dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                let Some(delegate_id) = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .and_then(|stem| safe_segment(stem).ok())
+                else {
+                    continue;
+                };
+                let result = std::fs::read(&path).and_then(|stored| {
+                    if ryu_durable::SealingCodec::is_sealed(&stored) {
+                        return Ok(false);
+                    }
+                    // A completed delegate's checkpoint is written once and
+                    // never again, so the same body is rewritten sealed.
+                    let encoded = encode_checkpoint(&key, delegate_id, &stored)?;
+                    ryu_durable::atomic_write_private(&path, &encoded)?;
+                    Ok(true)
+                });
+                match result {
+                    Ok(true) => changed += 1,
+                    Ok(false) => {}
+                    Err(error) => {
+                        tracing::warn!("fanout checkpoint: {path:?} was not sealed: {error}")
+                    }
+                }
+            }
+        }
+    }
+    changed
 }
 
 /// Run a fan-out of sibling delegates concurrently, honouring the depth and
@@ -636,10 +802,34 @@ async fn run_fanout_with_policy(
     let mut handles: Vec<(String, tokio::task::JoinHandle<DelegateResult>)> =
         Vec::with_capacity(delegates.len());
 
-    for spec in delegates {
-        // Check for an existing checkpoint — skip the model call if found.
-        if let Some(ref key) = checkpoint_key {
-            if let Some(saved) = load_delegate_checkpoint(key, &spec.id) {
+    // Reserve every delegate that will run before spawning any of them, so the
+    // run's lifecycle count reaches zero only when the last one finishes, not
+    // whenever the delegates holding permits drain ahead of the queued ones.
+    let slots: Vec<(DelegateSpec, FanoutSlot)> = delegates
+        .into_iter()
+        .map(|spec| {
+            // Check for an existing checkpoint — skip the model call if found.
+            let saved = checkpoint_key
+                .as_deref()
+                .and_then(|key| load_delegate_checkpoint(key, &spec.id));
+            let slot = match saved {
+                Some(saved) => FanoutSlot::Checkpointed(saved),
+                None => FanoutSlot::Queued(DelegationRunReservation::reserve(
+                    &run_id,
+                    lifecycle_agent_id(&spec),
+                )),
+            };
+            (spec, slot)
+        })
+        .collect();
+
+    // `delegate.*` runs under the caller's sub-agent Box scope (a task-local),
+    // which `tokio::spawn` below does not inherit. Carry it into each delegate so
+    // its machine verbs run on its own child Box.
+    let box_scope = crate::sidecar::mcp::box_desktop::current_subagent_scope();
+    for (spec, slot) in slots {
+        let reservation = match slot {
+            FanoutSlot::Checkpointed(saved) => {
                 // Emit the progress events so callers see the delegate as
                 // started-and-finished even on resume.
                 if let Some(tx) = &progress {
@@ -657,16 +847,17 @@ async fn run_fanout_with_policy(
                 handles.push((id, handle));
                 continue;
             }
-        }
+            FanoutSlot::Queued(reservation) => reservation,
+        };
 
         let semaphore = Arc::clone(&semaphore);
         let caps = Arc::clone(&caps);
         let progress = progress.clone();
         let checkpoint_key = checkpoint_key.clone();
-        let run_id = run_id.clone();
+        let box_scope = box_scope.clone();
 
         let id = spec.id.clone();
-        let handle = tokio::spawn(async move {
+        let delegate = async move {
             // The permit gates how many delegates run at once; acquiring it is
             // the moment a delegate "starts".
             let _permit = semaphore
@@ -681,14 +872,13 @@ async fn run_fanout_with_policy(
                 });
             }
 
-            let agent_id = spec
-                .agent_id
-                .as_deref()
-                .filter(|id| !id.is_empty())
-                .unwrap_or(&spec.id);
-            let mut lifecycle_lease = DelegationLifecycleLease::admit(&run_id, agent_id);
+            let mut lifecycle_lease = reservation.admit();
 
-            let result = run_one(&spec, &caps, execution_policy).await;
+            let result = crate::sidecar::mcp::box_desktop::with_subagent_scope(
+                box_scope,
+                run_one(&spec, &caps, execution_policy),
+            )
+            .await;
             lifecycle_lease.finish();
 
             // SubagentStop hooks (Claude parity): fire detached when a delegated
@@ -698,8 +888,13 @@ async fn run_fanout_with_policy(
 
             // Persist the result before emitting the Finished event so a
             // restart between the save and the event still recovers correctly.
+            // Only successes are durable: a failed delegate (a rate or usage
+            // limit, a wall-time cap, a crashed agent) runs again when the
+            // fan-out is resumed instead of replaying its failure forever.
             if let Some(ref key) = checkpoint_key {
-                save_delegate_checkpoint(key, &result);
+                if result.error.is_none() {
+                    save_delegate_checkpoint(key, &result);
+                }
             }
 
             if let Some(tx) = &progress {
@@ -708,7 +903,13 @@ async fn run_fanout_with_policy(
                 });
             }
             result
-        });
+        };
+        // Each delegate is a sub-turn of the caller's turn: keep its attribution.
+        let attribution = crate::profile_activity::current_attribution();
+        let handle = tokio::spawn(crate::profile_activity::with_attribution(
+            attribution,
+            delegate,
+        ));
         handles.push((id, handle));
     }
 
@@ -724,6 +925,21 @@ async fn run_fanout_with_policy(
         }
     }
     Ok(results)
+}
+
+/// A fan-out delegate either replays its checkpointed result or is queued to
+/// run, holding its place in the run's lifecycle count until it finishes.
+enum FanoutSlot {
+    Checkpointed(DelegateResult),
+    Queued(DelegationRunReservation),
+}
+
+/// The agent id a delegate reports on lifecycle transitions.
+fn lifecycle_agent_id(spec: &DelegateSpec) -> &str {
+    spec.agent_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .unwrap_or(&spec.id)
 }
 
 /// Fire `subagent_stop` hooks (Claude's SubagentStop) DETACHED when a delegate
@@ -744,10 +960,14 @@ fn fire_subagent_stop_hooks(spec: &DelegateSpec, result: &DelegateResult) {
         })),
         ..Default::default()
     };
-    tokio::spawn(async move {
-        let _ =
-            crate::plugin_host::dispatch_global(crate::plugin_host::ON_SUBAGENT_STOP, ctx).await;
-    });
+    let attribution = crate::profile_activity::current_attribution();
+    tokio::spawn(crate::profile_activity::with_attribution(
+        attribution,
+        async move {
+            let _ = crate::plugin_host::dispatch_global(crate::plugin_host::ON_SUBAGENT_STOP, ctx)
+                .await;
+        },
+    ));
 }
 
 /// Execute a single delegate with a clean context under its wall-time cap.
@@ -816,6 +1036,36 @@ fn should_use_registered_agent(
         && spec.agent_id.as_deref().is_some_and(|id| !id.is_empty())
 }
 
+/// Ends a registered-agent delegate's one-shot conversation when the call
+/// returns. The pooled ACP instance behind `delegate-<uuid>` would otherwise
+/// idle out with a resident agent process for the whole idle timeout, although
+/// nothing will send it another turn. A call dropped by the wall-time limit
+/// also cancels its in-flight turn, so a subagent whose result was already
+/// discarded stops working instead of finishing in the background.
+struct DelegateConversationGuard {
+    conversation_id: String,
+    finished: bool,
+}
+
+impl Drop for DelegateConversationGuard {
+    fn drop(&mut self) {
+        if !self.finished {
+            crate::sidecar::adapters::acp::request_cancel(&self.conversation_id);
+        }
+        crate::sidecar::adapters::acp::close_conversation_instances(&self.conversation_id);
+        // The delegate is done: park its child Box and free its sub-agent
+        // number, so later delegates neither share one number nor keep
+        // finished children's Boxes registered.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let conversation_id = self.conversation_id.clone();
+            handle.spawn(async move {
+                crate::sidecar::mcp::box_desktop::release_child_conversation(&conversation_id)
+                    .await;
+            });
+        }
+    }
+}
+
 async fn call_sub_agent(
     spec: &DelegateSpec,
     max_tokens: u32,
@@ -835,6 +1085,11 @@ async fn call_sub_agent(
         if let Some(id) = spec.agent_id.as_deref().filter(|s| !s.is_empty()) {
             if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
                 let conversation_id = format!("delegate-{}", uuid::Uuid::new_v4().simple());
+                crate::sidecar::mcp::box_desktop::bind_child_conversation(&conversation_id);
+                let mut guard = DelegateConversationGuard {
+                    conversation_id: conversation_id.clone(),
+                    finished: false,
+                };
                 let text = runner
                     .run_with_max_tokens(
                         Some(id.to_string()),
@@ -842,13 +1097,14 @@ async fn call_sub_agent(
                         spec.task.clone(),
                         max_tokens,
                     )
-                    .await
-                    .map_err(|e| {
-                        SubAgentError::with_child(
-                            format!("delegate '{id}' failed: {e}"),
-                            conversation_id.clone(),
-                        )
-                    })?;
+                    .await;
+                guard.finished = true;
+                let text = text.map_err(|e| {
+                    SubAgentError::with_child(
+                        format!("delegate '{id}' failed: {e}"),
+                        conversation_id.clone(),
+                    )
+                })?;
                 return Ok(SubAgentCall {
                     text,
                     child_conversation_id: Some(conversation_id),
@@ -858,7 +1114,7 @@ async fn call_sub_agent(
     }
 
     let gw_url = crate::sidecar::gateway::gateway_url();
-    let gw_token = crate::sidecar::gateway::gateway_core_token();
+    let gw_token = crate::sidecar::gateway::gateway_inference_token();
 
     // Model + clean-context system message. An inline ephemeral agent definition
     // (an LLM-authored "dynamic subagent" with no registered `agent_id`) overrides
@@ -914,9 +1170,12 @@ async fn call_sub_agent(
         ],
     });
 
-    let client = reqwest::Client::new();
+    let client = crate::sidecar::gateway::gateway_http_client();
     let endpoint = format!("{}/v1/chat/completions", gw_url.trim_end_matches('/'));
-    let mut builder = client.post(&endpoint).json(&payload);
+    let mut builder = crate::sidecar::gateway::with_side_call_headers(
+        client.post(&endpoint).json(&payload),
+        &crate::sidecar::gateway::SidePurpose::Delegate,
+    );
     if let Some(token) = gw_token.as_deref() {
         builder = builder.bearer_auth(token);
     }
@@ -947,14 +1206,28 @@ async fn call_sub_agent(
         }
         Ok(resp) => {
             if !resp.status().is_success() {
-                return Err(SubAgentError::new(format!(
-                    "sub-agent: gateway returned HTTP {}",
-                    resp.status()
+                let status = resp.status();
+                let retry_after = resp
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_owned);
+                let body = resp.text().await.unwrap_or_default();
+                return Err(SubAgentError::new(super::limits::gateway_error_message(
+                    "sub-agent",
+                    status,
+                    retry_after.as_deref(),
+                    &body,
                 )));
             }
             let body: serde_json::Value = resp.json().await.map_err(|e| {
                 SubAgentError::new(format!("sub-agent: invalid gateway response: {e}"))
             })?;
+            crate::sidecar::gateway::log_side_usage(
+                &crate::sidecar::gateway::SidePurpose::Delegate,
+                &model,
+                &body,
+            );
             Ok(SubAgentCall {
                 text: extract_completion_text(&body),
                 child_conversation_id: None,
@@ -1137,9 +1410,9 @@ mod tests {
 
     #[test]
     fn lifecycle_registry_tracks_overlapping_runs() {
-        let mut first = DelegationLifecycleLease::admit("run-a", "agent-a");
+        let mut first = DelegationRunReservation::reserve("run-a", "agent-a").admit();
         assert_eq!(active_by_run().lock().unwrap().get("run-a"), Some(&1));
-        let mut second = DelegationLifecycleLease::admit("run-b", "agent-b");
+        let mut second = DelegationRunReservation::reserve("run-b", "agent-b").admit();
         assert_eq!(active_by_run().lock().unwrap().get("run-a"), Some(&1));
         assert_eq!(active_by_run().lock().unwrap().get("run-b"), Some(&1));
         first.finish();
@@ -1147,6 +1420,41 @@ mod tests {
         assert_eq!(active_by_run().lock().unwrap().get("run-b"), Some(&1));
         second.finish();
         assert!(!active_by_run().lock().unwrap().contains_key("run-b"));
+    }
+
+    #[test]
+    fn queued_delegates_keep_their_run_active_until_the_last_finishes() {
+        // Three delegates at concurrency 1: each is reserved at fan-out, then
+        // admitted and finished one at a time. The run only drains on the last.
+        let run = "run-queued-serial";
+        let count = || active_by_run().lock().unwrap().get(run).copied();
+        let mut queued: Vec<_> = ["a", "b", "c"]
+            .into_iter()
+            .map(|agent| DelegationRunReservation::reserve(run, agent))
+            .collect();
+        assert_eq!(count(), Some(3));
+        let mut remaining = 3;
+        while !queued.is_empty() {
+            let mut lease = queued.remove(0).admit();
+            assert_eq!(count(), Some(remaining));
+            lease.finish();
+            remaining -= 1;
+            if remaining > 0 {
+                assert_eq!(count(), Some(remaining));
+            }
+        }
+        assert_eq!(count(), None);
+    }
+
+    #[test]
+    fn an_unadmitted_reservation_still_leaves_its_run() {
+        let run = "run-queued-dropped";
+        let mut admitted = DelegationRunReservation::reserve(run, "a").admit();
+        let never_admitted = DelegationRunReservation::reserve(run, "b");
+        admitted.finish();
+        assert_eq!(active_by_run().lock().unwrap().get(run), Some(&1));
+        drop(never_admitted);
+        assert!(!active_by_run().lock().unwrap().contains_key(run));
     }
 
     #[tokio::test]
@@ -1558,5 +1866,101 @@ mod tests {
             checkpoint_dir(&key).is_err(),
             "traversal in node_id must be rejected"
         );
+    }
+
+    #[test]
+    fn fanout_checkpoints_are_sealed_and_bound_to_their_place() {
+        let run_id = format!("run{}", uuid::Uuid::new_v4().simple());
+        let key = FanoutCheckpointKey {
+            run_id: run_id.clone(),
+            node_id: "node-1".to_string(),
+        };
+        let marker = format!("delegatemarker{}", uuid::Uuid::new_v4().simple());
+        let result = DelegateResult::ok("d0".into(), PermissionPreset::default(), marker.clone());
+        save_delegate_checkpoint(&key, &result);
+        let dir = checkpoint_dir(&key).unwrap();
+        let raw = std::fs::read_to_string(dir.join("d0.json")).unwrap();
+        assert!(raw.starts_with("encb:v1:"));
+        assert!(!raw.contains(&marker));
+        assert_eq!(
+            load_delegate_checkpoint(&key, "d0").and_then(|r| r.output),
+            Some(marker.clone())
+        );
+        // Copied to another delegate: does not open, so that delegate reruns.
+        std::fs::copy(dir.join("d0.json"), dir.join("d1.json")).unwrap();
+        assert!(load_delegate_checkpoint(&key, "d1").is_none());
+        // A legacy plaintext checkpoint still reads.
+        std::fs::write(
+            dir.join("d2.json"),
+            serde_json::to_vec(&DelegateResult::ok(
+                "d2".into(),
+                PermissionPreset::default(),
+                "legacy".into(),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            load_delegate_checkpoint(&key, "d2").and_then(|r| r.output),
+            Some("legacy".to_owned())
+        );
+        let _ = std::fs::remove_dir_all(checkpoint_root().join(run_id));
+    }
+
+    #[test]
+    fn boot_pass_seals_legacy_checkpoints_and_drops_finished_runs() {
+        use super::super::store::RunStatus;
+        let root = tempfile::tempdir().unwrap();
+        let marker = format!("legacyoutput{}", uuid::Uuid::new_v4().simple());
+        let legacy = |run: &str, delegate: &str| {
+            let dir = root.path().join(run).join("node-1");
+            std::fs::create_dir_all(&dir).unwrap();
+            let body = serde_json::to_vec(&DelegateResult::ok(
+                delegate.into(),
+                PermissionPreset::default(),
+                marker.clone(),
+            ))
+            .unwrap();
+            std::fs::write(dir.join(format!("{delegate}.json")), &body).unwrap();
+            // A crashed write's leftover copy.
+            std::fs::write(dir.join(format!("{delegate}.json.tmp")), &body).unwrap();
+            dir
+        };
+        let live = legacy("runlive", "d0");
+        let finished = legacy("rundone", "d0");
+        let status = |run: &str| match run {
+            "rundone" => Some(RunStatus::Completed),
+            _ => Some(RunStatus::AwaitingInput),
+        };
+        // Fresh temps may belong to a write in flight: age them past the gate.
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+        std::fs::File::options()
+            .write(true)
+            .open(live.join("d0.json.tmp"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        // Sealed d0, removed temp, removed finished run.
+        assert_eq!(reseal_fanout_checkpoints_in(root.path(), status), 3);
+        assert!(
+            !finished.exists(),
+            "a completed run's checkpoints are dead state"
+        );
+        assert!(!live.join("d0.json.tmp").exists());
+        let raw = std::fs::read_to_string(live.join("d0.json")).unwrap();
+        assert!(raw.starts_with("encb:v1:"));
+        assert!(!raw.contains(&marker));
+        let key = FanoutCheckpointKey {
+            run_id: "runlive".into(),
+            node_id: "node-1".into(),
+        };
+        let stored = std::fs::read(live.join("d0.json")).unwrap();
+        let opened: DelegateResult =
+            serde_json::from_slice(&decode_checkpoint(&key, "d0", &stored).unwrap()).unwrap();
+        assert_eq!(opened.output, Some(marker.clone()));
+        // Run twice: nothing left to do.
+        assert_eq!(reseal_fanout_checkpoints_in(root.path(), status), 0);
+        assert_eq!(std::fs::read(live.join("d0.json")).unwrap(), stored);
     }
 }

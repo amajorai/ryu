@@ -6,6 +6,7 @@
 // Uses a fetch-based SSE reader (not EventSource) so the node's bearer token can
 // be sent as a header — mirrors `streamMonitorAlerts`.
 
+import { z } from "zod";
 import {
 	type ApiTarget,
 	apiUrl,
@@ -19,6 +20,12 @@ export interface DesktopNotification {
 	level?: string;
 	title: string;
 }
+
+const desktopNotificationSchema = z.object({
+	body: z.string().nullable().optional(),
+	level: z.string().optional(),
+	title: z.string(),
+});
 
 const FRAME_SEP = "\n\n";
 const DATA_PREFIX = "data:";
@@ -63,7 +70,7 @@ export async function streamDesktopNotifications(
 				.join("\n");
 			if (data) {
 				try {
-					onNotification(JSON.parse(data) as DesktopNotification);
+					onNotification(desktopNotificationSchema.parse(JSON.parse(data)));
 				} catch {
 					// Ignore malformed frames; the next event self-heals the feed.
 				}

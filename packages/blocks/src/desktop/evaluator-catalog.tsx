@@ -18,6 +18,7 @@ import {
 	ShieldIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
@@ -87,21 +88,19 @@ const CATEGORY_ORDER: { key: string; label: string }[] = [
 	{ key: "custom", label: "Custom" },
 ];
 
-const CATEGORY_RANK: Record<string, number> = CATEGORY_ORDER.reduce(
-	(acc, c, i) => {
-		acc[c.key] = i;
-		return acc;
-	},
-	{} as Record<string, number>
+const CATEGORY_RANK = new Map(
+	CATEGORY_ORDER.map((category, index) => [category.key, index])
 );
 
-const IMPL_LABELS: Record<string, string> = {
-	regex: "Regex",
-	heuristic: "Heuristic",
-	llm_judge: "LLM judge",
-	code: "Code",
-	builtin: "Built-in",
-};
+const IMPL_LABELS = new Map(
+	Object.entries({
+		regex: "Regex",
+		heuristic: "Heuristic",
+		llm_judge: "LLM judge",
+		code: "Code",
+		builtin: "Built-in",
+	})
+);
 
 function matchesSearch(item: EvaluatorCatalogItem, q: string): boolean {
 	if (!q) {
@@ -129,6 +128,7 @@ function EvaluatorRow({
 	onDelete?: () => void;
 	deleteDisabled?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	// Enforcement honesty is only meaningful for the inline surface (a catalogued
 	// but unwired detector silently no-ops). Offline scoring runs regardless, so
 	// there the run-time `executed` flag carries the honesty instead.
@@ -137,24 +137,26 @@ function EvaluatorRow({
 		<div className="flex items-start justify-between gap-3 rounded-lg border bg-card/40 p-3">
 			<div className="flex min-w-0 flex-col gap-1.5">
 				<div className="flex flex-wrap items-center gap-1.5">
-					<span className="truncate font-medium text-sm">{item.name}</span>
-					<Badge className="px-1.5 py-0 text-[10px]" variant="outline">
-						{IMPL_LABELS[item.implKind] ?? item.implKind}
+					<span className="truncate font-medium text-sm" title={item.name}>
+						{item.name}
+					</span>
+					<Badge appearance="catalog-label" variant="outline">
+						{IMPL_LABELS.get(item.implKind) ?? item.implKind}
 					</Badge>
 					{item.capInline ? (
-						<Badge className="px-1.5 py-0 text-[10px]" variant="secondary">
+						<Badge appearance="catalog-label" variant="secondary">
 							Inline
 						</Badge>
 					) : null}
 					{item.capOffline ? (
-						<Badge className="px-1.5 py-0 text-[10px]" variant="secondary">
+						<Badge appearance="catalog-label" variant="secondary">
 							Offline
 						</Badge>
 					) : null}
 					{showEnforced ? (
 						<span
 							className={cn(
-								"text-[10px]",
+								"type-compact",
 								item.enforced ? "text-status-success" : "text-muted-foreground"
 							)}
 						>
@@ -170,7 +172,7 @@ function EvaluatorRow({
 				{control}
 				{item.builtin ? null : onDelete ? (
 					<Button
-						aria-label={`Delete ${item.name}`}
+						aria-label={tl("Delete {name}", { name: item.name })}
 						disabled={deleteDisabled}
 						onClick={onDelete}
 						size="icon-sm"
@@ -213,8 +215,8 @@ export function EvaluatorCatalog({
 			return capable && matchesSearch(it, search);
 		});
 		filtered.sort((a, b) => {
-			const ra = CATEGORY_RANK[a.category] ?? 99;
-			const rb = CATEGORY_RANK[b.category] ?? 99;
+			const ra = CATEGORY_RANK.get(a.category) ?? 99;
+			const rb = CATEGORY_RANK.get(b.category) ?? 99;
 			if (ra !== rb) {
 				return ra - rb;
 			}
@@ -247,9 +249,11 @@ export function EvaluatorCatalog({
 					icon={Search01Icon}
 				/>
 				<Input
-					className="h-8 pl-8 text-sm"
+					aria-label="Search evaluators"
+					leadingAdornment="compact"
 					onChange={(e) => onSearchChange(e.target.value)}
 					placeholder="Search evaluators…"
+					size="settings-search"
 					value={search}
 				/>
 			</div>

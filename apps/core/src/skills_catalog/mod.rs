@@ -28,6 +28,7 @@ pub mod distribution;
 pub mod from_source;
 pub mod packs;
 pub mod plugin_skills;
+pub(crate) mod public_stats;
 pub mod system_skills;
 
 pub(crate) const USER_AGENT: &str = "ryu-core/0.1 (+https://ryu.app)";
@@ -38,6 +39,10 @@ fn api_base() -> String {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "https://skills.sh".to_string())
+}
+
+pub(crate) fn uses_public_catalog() -> bool {
+    api_base().trim_end_matches('/') == "https://skills.sh"
 }
 
 /// Seed queries used to populate the default "featured" view (no search text).
@@ -717,8 +722,7 @@ async fn fetch_github_raw_file(
 }
 
 pub(crate) fn github_cache_path(name: &str) -> std::path::PathBuf {
-    crate::paths::ryu_dir()
-        .join("cache")
+    crate::paths::cache_dir()
         .join("skills-github")
         .join(safe_cache_segment(name))
 }
@@ -934,14 +938,7 @@ pub async fn skill_detail(client: &reqwest::Client, id: &str) -> Result<SkillDet
     let slug = slug_of(id);
     let source = id.rsplitn(2, '/').nth(1).unwrap_or(id).to_string();
 
-    let skill_md = files
-        .iter()
-        .find(|f| f.path.eq_ignore_ascii_case("SKILL.md"))
-        .or_else(|| {
-            files
-                .iter()
-                .find(|f| f.path.to_lowercase().ends_with("skill.md"))
-        });
+    let skill_md = entry_skill_doc_index(&files).map(|index| &files[index]);
 
     let (description, name, readme) = match skill_md {
         Some(f) => {
@@ -999,6 +996,117 @@ pub async fn skill_detail(client: &reqwest::Client, id: &str) -> Result<SkillDet
 pub struct InstallResult {
     pub slug: String,
     pub path: String,
+    #[serde(skip)]
+    pub(crate) artifact_fingerprint: Option<String>,
+}
+
+/// The index of a package's entry doc: the file named `SKILL.md` (any case)
+/// nearest the package root, else the first file whose path ends with
+/// `skill.md`. Install stages exactly this file as `SKILL.md` and fingerprints
+/// these same bytes, and detail and update checks read it too, so a package
+/// that also ships e.g. `examples/writing-a-skill.md` never installs one doc
+/// while reporting or comparing another.
+fn entry_skill_doc_index(files: &[DownloadFile]) -> Option<usize> {
+    let depth = |path: &str| {
+        path.split(['/', '\\'])
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .count()
+    };
+    files
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| {
+            f.path
+                .rsplit(['/', '\\'])
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
+        })
+        .min_by_key(|(_, f)| depth(&f.path))
+        .or_else(|| {
+            files
+                .iter()
+                .enumerate()
+                .find(|(_, f)| f.path.to_lowercase().ends_with("skill.md"))
+        })
+        .map(|(index, _)| index)
+}
+
+/// Write a downloaded skill package into `staging`: the entry doc (see
+/// [`entry_skill_doc_index`]) as `SKILL.md`, every other file at its declared
+/// relative path.
+async fn stage_skill_files(staging: &std::path::Path, files: &[DownloadFile]) -> Result<()> {
+    tokio::fs::create_dir_all(staging)
+        .await
+        .with_context(|| format!("creating {}", staging.display()))?;
+    let entry = entry_skill_doc_index(files);
+    let entry_dest = staging.join("SKILL.md");
+    for (index, f) in files.iter().enumerate() {
+        let dest = if Some(index) == entry {
+            entry_dest.clone()
+        } else {
+            let Some(dest) = safe_join(staging, &f.path) else {
+                tracing::warn!("skipping skill file with unsafe path: {}", f.path);
+                continue;
+            };
+            // A second root-level `skill.md` would replace the entry doc on a
+            // case-insensitive filesystem.
+            if dest
+                .strip_prefix(staging)
+                .is_ok_and(|relative| relative.as_os_str().eq_ignore_ascii_case("SKILL.md"))
+            {
+                tracing::warn!("skipping a second root skill doc: {}", f.path);
+                continue;
+            }
+            dest
+        };
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        tokio::fs::write(&dest, &f.contents)
+            .await
+            .with_context(|| format!("writing {}", dest.display()))?;
+    }
+    Ok(())
+}
+
+/// Move every staged file into `skill_dir`, `SKILL.md` LAST, so a concurrent
+/// registry reload never sees a new entry doc beside old resources. Each move
+/// is a same-volume rename, which replaces the destination atomically.
+async fn place_staged_skill(staging: &std::path::Path, skill_dir: &std::path::Path) -> Result<()> {
+    let mut pending = vec![staging.to_path_buf()];
+    let mut files = Vec::new();
+    while let Some(dir) = pending.pop() {
+        let mut entries = tokio::fs::read_dir(&dir)
+            .await
+            .with_context(|| format!("reading {}", dir.display()))?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if entry.file_type().await?.is_dir() {
+                pending.push(path);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    let entry_doc = staging.join("SKILL.md");
+    files.sort_by_key(|path| *path == entry_doc);
+    for source in files {
+        let relative = source
+            .strip_prefix(staging)
+            .context("staged skill file escaped its staging dir")?;
+        let dest = skill_dir.join(relative);
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        tokio::fs::rename(&source, &dest)
+            .await
+            .with_context(|| format!("rename {} -> {}", source.display(), dest.display()))?;
+    }
+    Ok(())
 }
 
 /// Download a Skill and write it into the universal Agent Skills directory in the
@@ -1010,46 +1118,48 @@ pub async fn install_skill(client: &reqwest::Client, id: &str) -> Result<Install
     let files = download(client, id).await?;
     let slug = slug_of(id);
 
-    let has_skill_md = files
-        .iter()
-        .any(|f| f.path.to_lowercase().ends_with("skill.md"));
-    if !has_skill_md {
+    let Some(entry_doc) = entry_skill_doc_index(&files) else {
         anyhow::bail!("package has no SKILL.md — cannot install");
-    }
+    };
 
-    let skill_dir = ryu_skills::SkillRegistry::skills_dir().join(&slug);
-    tokio::fs::create_dir_all(&skill_dir)
+    let skills_root = ryu_skills::SkillRegistry::skills_dir();
+    let skill_dir = skills_root.join(&slug);
+    tokio::fs::create_dir_all(&skills_root)
         .await
-        .with_context(|| format!("creating skill dir {}", skill_dir.display()))?;
+        .with_context(|| format!("creating skills dir {}", skills_root.display()))?;
 
-    // Write the entry doc last (atomically, via tmp+rename) so a concurrent
-    // registry reload never observes a half-written SKILL.md.
-    let mut skill_md_contents: Option<&str> = None;
-    for f in &files {
-        if f.path.to_lowercase().ends_with("skill.md") {
-            skill_md_contents = Some(&f.contents);
-            continue;
-        }
-        let Some(dest) = safe_join(&skill_dir, &f.path) else {
-            tracing::warn!("skipping skill file with unsafe path: {}", f.path);
-            continue;
-        };
-        if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent).await.ok();
-        }
-        tokio::fs::write(&dest, &f.contents)
-            .await
-            .with_context(|| format!("writing {}", dest.display()))?;
-    }
-
+    // Stage every file first, in a sibling directory on the same volume. An
+    // update that fails partway (disk full, a bad path) then leaves the
+    // installed skill exactly as it was, instead of a mix of old and new files.
+    // Files the new version dropped are deliberately not deleted: this
+    // directory is shared with other agents, and users keep their own files in
+    // it.
+    //
+    // Staged BESIDE the skills dir, not in it: every agent that scans the
+    // skills dir (Ryu's registry, Claude Code) would load a staging folder
+    // holding a SKILL.md as a skill of its own.
+    //
+    // A fresh directory per install, so two installs of the same skill (an
+    // "Update all" overlapping a manual update) never share or delete each
+    // other's staging. Removed when it drops.
+    let staging_root = skills_root
+        .parent()
+        .unwrap_or(&skills_root)
+        .join(".ryu-skill-staging");
+    tokio::fs::create_dir_all(&staging_root)
+        .await
+        .with_context(|| format!("creating {}", staging_root.display()))?;
+    let staging_dir = tempfile::Builder::new()
+        .prefix(&format!("{slug}-"))
+        .tempdir_in(&staging_root)
+        .with_context(|| format!("creating a staging dir in {}", staging_root.display()))?;
+    let staging = staging_dir.path().to_path_buf();
+    stage_skill_files(&staging, &files).await?;
+    place_staged_skill(&staging, &skill_dir).await?;
+    drop(staging_dir);
     let dest = skill_dir.join("SKILL.md");
-    let tmp = skill_dir.join("SKILL.md.tmp");
-    tokio::fs::write(&tmp, skill_md_contents.unwrap_or_default())
-        .await
-        .with_context(|| format!("writing {}", tmp.display()))?;
-    tokio::fs::rename(&tmp, &dest)
-        .await
-        .with_context(|| format!("rename {} -> {}", tmp.display(), dest.display()))?;
+    // The same entry doc stage_skill_files wrote as SKILL.md.
+    let skill_md_contents = files[entry_doc].contents.as_str();
 
     // Record provenance (slug → full id) so the installed view can deep-link
     // back to the catalog detail for this Skill.
@@ -1065,10 +1175,17 @@ pub async fn install_skill(client: &reqwest::Client, id: &str) -> Result<Install
         crate::skills_catalog::system_skills::SkillOrigin::User,
     );
 
-    Ok(InstallResult {
+    let result = InstallResult {
+        artifact_fingerprint: public_stats::artifact_fingerprint(&slug, skill_md_contents),
         slug,
         path: dest.to_string_lossy().to_string(),
-    })
+    };
+    if uses_public_catalog() {
+        // The successful download above came from the canonical anonymous
+        // public listing endpoint and supplied these exact installed bytes.
+        public_stats::record_public_install(id, &result);
+    }
+    Ok(result)
 }
 
 /// One installed skill whose local SKILL.md differs from the current upstream
@@ -1083,6 +1200,11 @@ pub struct SkillUpdate {
     pub id: String,
     /// Display name (the slug; skills.sh has no separate title on the package).
     pub name: String,
+    /// The catalog source the update was found on, and so the one that must
+    /// apply it. Detection always reads skills.sh; applying through whichever
+    /// source happens to be active sent a skills.sh id to a different
+    /// marketplace, which failed and left the row in place.
+    pub source: &'static str,
 }
 
 /// Normalise SKILL.md text for comparison: unify line endings and ignore
@@ -1109,13 +1231,10 @@ pub async fn check_updates(client: &reqwest::Client) -> Vec<SkillUpdate> {
         let Ok(files) = download(client, &id).await else {
             continue;
         };
-        // Match how install_skill locates the doc — `ends_with("skill.md")` — so a
+        // Compare the same entry doc install_skill writes as SKILL.md, so a
         // package that ships SKILL.md at a nested path (e.g. `slug/SKILL.md`) is
         // still update-checked rather than silently skipped.
-        let Some(remote) = files
-            .iter()
-            .find(|f| f.path.to_lowercase().ends_with("skill.md"))
-        else {
+        let Some(remote) = entry_skill_doc_index(&files).map(|index| &files[index]) else {
             continue;
         };
         if normalise_skill_md(&local) != normalise_skill_md(&remote.contents) {
@@ -1123,6 +1242,7 @@ pub async fn check_updates(client: &reqwest::Client) -> Vec<SkillUpdate> {
                 name: slug.clone(),
                 slug,
                 id,
+                source: "skills-sh",
             });
         }
     }
@@ -1172,7 +1292,7 @@ fn safe_join(base: &std::path::Path, rel: &str) -> Option<std::path::PathBuf> {
 // ── Provenance (slug → catalog id) ───────────────────────────────────────────
 
 fn provenance_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("skills-catalog-installed.json")
+    crate::paths::state_path("skills-catalog-installed.json")
 }
 
 fn load_provenance() -> std::collections::HashMap<String, String> {
@@ -1294,6 +1414,112 @@ mod tests {
         assert!(fm.is_empty());
         assert_eq!(body, "# Just markdown");
         assert_eq!(front_matter_field(&fm, "name"), None);
+    }
+
+    #[tokio::test]
+    async fn staged_skill_replaces_files_and_keeps_the_users_own() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join("staging");
+        let skill_dir = root.path().join("skills").join("alpha");
+        std::fs::create_dir_all(skill_dir.join("refs")).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "old doc").unwrap();
+        std::fs::write(skill_dir.join("refs/a.md"), "old a").unwrap();
+        std::fs::write(skill_dir.join("my-notes.md"), "mine").unwrap();
+
+        let files = vec![
+            DownloadFile {
+                path: "alpha/SKILL.md".into(),
+                contents: "new doc".into(),
+            },
+            DownloadFile {
+                path: "refs/a.md".into(),
+                contents: "new a".into(),
+            },
+            DownloadFile {
+                path: "../escape.md".into(),
+                contents: "nope".into(),
+            },
+        ];
+        stage_skill_files(&staging, &files).await.unwrap();
+        place_staged_skill(&staging, &skill_dir).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(),
+            "new doc"
+        );
+        assert_eq!(
+            std::fs::read_to_string(skill_dir.join("refs/a.md")).unwrap(),
+            "new a"
+        );
+        assert_eq!(
+            std::fs::read_to_string(skill_dir.join("my-notes.md")).unwrap(),
+            "mine"
+        );
+        assert!(!root.path().join("escape.md").exists());
+        assert!(!root.path().join("skills/escape.md").exists());
+    }
+
+    fn file(path: &str, contents: &str) -> DownloadFile {
+        DownloadFile {
+            path: path.into(),
+            contents: contents.into(),
+        }
+    }
+
+    #[test]
+    fn entry_skill_doc_prefers_the_shallowest_skill_md_in_any_order() {
+        let files = vec![
+            file("examples/writing-a-skill.md", "example"),
+            file("alpha/SKILL.md", "entry"),
+            file("alpha/nested/skill.md", "nested"),
+        ];
+        assert_eq!(entry_skill_doc_index(&files), Some(1));
+        let reversed: Vec<_> = files.into_iter().rev().collect();
+        assert_eq!(entry_skill_doc_index(&reversed), Some(1));
+        assert_eq!(
+            entry_skill_doc_index(&[file("b/SKILL.md", "b"), file("SKILL.md", "root")]),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn entry_skill_doc_falls_back_to_a_suffix_match() {
+        let files = vec![file("refs/a.md", "a"), file("my-skill.md", "doc")];
+        assert_eq!(entry_skill_doc_index(&files), Some(1));
+        assert_eq!(entry_skill_doc_index(&[file("README.md", "readme")]), None);
+    }
+
+    #[tokio::test]
+    async fn staged_skill_writes_only_the_entry_doc_as_skill_md() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join("staging");
+        let files = vec![
+            file("SKILL.md", "entry"),
+            file("examples/writing-a-skill.md", "example"),
+            file("skill.md", "duplicate root doc"),
+        ];
+        stage_skill_files(&staging, &files).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(staging.join("SKILL.md")).unwrap(),
+            "entry"
+        );
+        assert_eq!(
+            std::fs::read_to_string(staging.join("examples/writing-a-skill.md")).unwrap(),
+            "example"
+        );
+        // The second root-level skill doc is skipped, not written beside
+        // SKILL.md, where a case-insensitive filesystem would let it replace
+        // the entry doc.
+        let mut root_entries: Vec<String> = std::fs::read_dir(&staging)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        root_entries.sort();
+        assert_eq!(root_entries, ["SKILL.md", "examples"]);
+        // The install fingerprint reads the same entry doc that landed on disk.
+        let entry = entry_skill_doc_index(&files).unwrap();
+        assert_eq!(files[entry].contents, "entry");
     }
 
     #[test]

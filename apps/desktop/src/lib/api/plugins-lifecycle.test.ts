@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import {
 	disableApp,
 	enableApp,
@@ -24,7 +25,7 @@ const app = {
 test("plugin lifecycle routes encode scoped ids as one path segment", async () => {
 	const originalFetch = globalThis.fetch;
 	const requests: Array<{ method: string; url: string }> = [];
-	globalThis.fetch = (async (input, init) => {
+	globalThis.fetch = createFetchFixture(originalFetch, async (input, init) => {
 		const url = String(input);
 		requests.push({ method: init?.method ?? "GET", url });
 		const body = url.endsWith("/grants")
@@ -33,7 +34,7 @@ test("plugin lifecycle routes encode scoped ids as one path segment", async () =
 				? { removed: scopedId, success: true }
 				: { app };
 		return Response.json(body);
-	}) as typeof globalThis.fetch;
+	});
 
 	try {
 		await installApp(target, scopedId);
@@ -68,10 +69,10 @@ test("plugin lifecycle routes encode scoped ids as one path segment", async () =
 test("historical plugin actions forward the exact version", async () => {
 	const originalFetch = globalThis.fetch;
 	const bodies: unknown[] = [];
-	globalThis.fetch = (async (_input, init) => {
+	globalThis.fetch = createFetchFixture(originalFetch, async (_input, init) => {
 		bodies.push(JSON.parse(String(init?.body)));
 		return Response.json({ app });
-	}) as typeof globalThis.fetch;
+	});
 
 	try {
 		await installPluginFromCatalogAtVersion(
@@ -89,4 +90,22 @@ test("historical plugin actions forward the exact version", async () => {
 		{ id: scopedId, version: "v0.9.0" },
 		{ force: true, version: "v0.8.0" },
 	]);
+});
+
+test("uninstall keeps app storage unless deleteStorage is requested", async () => {
+	const originalFetch = globalThis.fetch;
+	const bodies: Array<string | null> = [];
+	globalThis.fetch = createFetchFixture(originalFetch, async (_input, init) => {
+		bodies.push(typeof init?.body === "string" ? init.body : null);
+		return Response.json({ removed: scopedId, success: true });
+	});
+
+	try {
+		await uninstallApp(target, scopedId);
+		await uninstallApp(target, scopedId, { deleteStorage: true });
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+
+	expect(bodies).toEqual([null, JSON.stringify({ delete_storage: true })]);
 });

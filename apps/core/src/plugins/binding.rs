@@ -28,6 +28,11 @@
 //!      candidate set, so the disable-safety reconstruction argument below is
 //!      unchanged. Selectability needs **unanimity** among the providers, so one
 //!      third-party manifest cannot loosen a strict capability.
+//!
+//!    Steps 4 and 5 skip a **selected-only** provider ([`is_selected_only_provider`],
+//!    today Ryu Cloud Search, which bills organization credits): it binds only
+//!    through an override. When it is the only candidate, the result is
+//!    [`BindingError::SelectionRequired`].
 //! 6. The chosen provider's [`ProvidesEntry::version`] must satisfy the consumer's
 //!    [`CapabilityReq::min_version`] floor, else [`BindingError::VersionUnsatisfied`].
 //!    The floor is checked against the *capability* version, not the provider app's
@@ -163,6 +168,13 @@ pub enum BindingError {
         requirement: String,
         reason: String,
     },
+    /// Every candidate is a selected-only provider (see
+    /// [`is_selected_only_provider`]), which binds only through an explicit
+    /// override. The user must pick one before the capability resolves.
+    SelectionRequired {
+        capability: String,
+        providers: Vec<String>,
+    },
 }
 
 impl BindingError {
@@ -174,6 +186,7 @@ impl BindingError {
             BindingError::OverrideNotProvider { .. } => "capability_override_not_provider",
             BindingError::VersionUnsatisfied { .. } => "capability_version_unsatisfied",
             BindingError::InvalidVersionReq { .. } => "capability_invalid_version_req",
+            BindingError::SelectionRequired { .. } => "capability_selection_required",
         }
     }
 }
@@ -216,11 +229,28 @@ impl std::fmt::Display for BindingError {
                 f,
                 "capability '{capability}' has an invalid version requirement '{requirement}': {reason}"
             ),
+            BindingError::SelectionRequired {
+                capability,
+                providers,
+            } => write!(
+                f,
+                "capability '{capability}' is served only by providers that must be picked explicitly ({}) — set a binding override to choose one",
+                providers.join(", ")
+            ),
         }
     }
 }
 
 impl std::error::Error for BindingError {}
+
+/// Whether `provider_id` is a selected-only provider: one that binds only through
+/// an explicit override and is never auto-picked. Ryu Cloud Search ships enabled
+/// so the layer picker can offer it, but each search spends organization credits,
+/// so neither disabling the default provider nor sorting lowest by id may select
+/// it.
+pub fn is_selected_only_provider(provider_id: &str) -> bool {
+    crate::sidecar::mcp::web_search_access::is_selected_only_provider(provider_id)
+}
 
 /// One provider candidate of a capability, paired with the entry that declares it.
 /// `pub` because [`BindingRegistry::resolve_provider`] returns it — the capability
@@ -290,10 +320,10 @@ pub fn is_selectable(candidates: &[PluginManifest], capability: &str) -> bool {
 /// stable surface.
 ///
 /// Derived from the canonical verb table rather than a re-listed set of capability
-/// names, so adding a verb for a new capability makes it a toolkit automatically and
-/// nothing here has to be remembered. [`crate::document_parse::CAP_DOCUMENT_PARSE`]
-/// is the one facade that serves over the sidecar route instead of verbs, so it is
-/// named explicitly.
+/// names, so adding a verb makes Core recognize the facade automatically. It becomes
+/// a toolkit unless providers explicitly classify it into another layer.
+/// [`crate::document_parse::CAP_DOCUMENT_PARSE`] is the one facade that serves over
+/// the sidecar route instead of verbs, so it is named explicitly.
 fn is_facade_capability(capability: &str) -> bool {
     capability == crate::document_parse::CAP_DOCUMENT_PARSE
         || crate::sidecar::mcp::capability_tools::verbs()
@@ -301,10 +331,36 @@ fn is_facade_capability(capability: &str) -> bool {
             .any(|v| v.capability == capability)
 }
 
+/// **Fan-out capabilities**: contracts that every app serves for ITS OWN data, which
+/// Core calls on each enabled provider in turn instead of binding one.
+///
+/// - `data.count` / `data.purge` back the Settings → Danger Zone rows an app
+///   declares in `contributes.data_categories` (body `{ category }`, replies
+///   `{ count }` / `{ removed }`); `crate::server::data_admin` iterates every
+///   enabled provider that also declares the category.
+/// - `jobs.list` / `jobs.run` are the app-owned scheduled-job contract (body `{}`
+///   → `{ jobs: [...] }`, and `{ id, payload? }`); `crate::scheduler::app_jobs`
+///   reconciles and ticks every enabled Core-tier provider of both.
+///
+/// Several providers are the normal case, so these are never bound, never
+/// selectable, and never offered as a toolkit. Core is their only caller: the
+/// capability broker REFUSES every fan-out capability
+/// (`crate::sidecar::ext_proxy` `host_capability`), so no sidecar can reach
+/// another app's data or jobs by declaring a `requires` edge on one. This is
+/// vocabulary, not a per-app list.
+pub const FANOUT_CAPABILITIES: &[&str] = &["data.count", "data.purge", "jobs.list", "jobs.run"];
+
+/// Whether `capability` is one of the [`FANOUT_CAPABILITIES`].
+#[must_use]
+pub fn is_fanout_capability(capability: &str) -> bool {
+    FANOUT_CAPABILITIES.contains(&capability)
+}
+
 /// Whether a capability should render as a **toolkit** — a swappable layer in the
 /// node dropdown — computed over the KNOWN manifest set.
 ///
-/// Two independent grounds, either of which makes the pick meaningful:
+/// Two independent grounds, either of which makes the pick meaningful, unless
+/// providers explicitly assign the capability to another picker with `layerKind`:
 ///
 /// 1. A host facade owns it ([`is_facade_capability`]): the verbs (or the parse
 ///    route) stay the same whichever provider is bound, so swapping is the feature.
@@ -317,7 +373,24 @@ fn is_facade_capability(capability: &str) -> bool {
 ///
 /// Counted over distinct manifest ids, not `provides[]` entries, so a manifest that
 /// declares a capability twice cannot promote itself to a toolkit alone.
+///
+/// A [`FANOUT_CAPABILITIES`] entry is never a toolkit: its providers are not
+/// alternatives to each other.
 pub fn is_toolkit(known: &[PluginManifest], capability: &str) -> bool {
+    if is_fanout_capability(capability) {
+        return false;
+    }
+    // An explicit layer kind owns its presentation. In particular, a
+    // decision-model facade must not appear again in Toolkits just because Core
+    // also exposes its stable `decision.predict` verb.
+    if known.iter().any(|manifest| {
+        manifest
+            .provided_capabilities()
+            .iter()
+            .any(|provided| provided.capability == capability && provided.layer_kind.is_some())
+    }) {
+        return false;
+    }
     if is_facade_capability(capability) {
         return true;
     }
@@ -330,6 +403,24 @@ pub fn is_toolkit(known: &[PluginManifest], capability: &str) -> bool {
         })
         .count()
         >= 2
+}
+
+/// Whether every known provider explicitly classifies `capability` as a
+/// decision-model layer. The unanimity check keeps a mismatched manifest from
+/// making the layer show up in the wrong picker.
+pub fn is_decision_model(known: &[PluginManifest], capability: &str) -> bool {
+    let mut found = false;
+    for provided in known
+        .iter()
+        .flat_map(PluginManifest::provided_capabilities)
+        .filter(|provided| provided.capability == capability)
+    {
+        found = true;
+        if provided.layer_kind != Some(crate::plugin_manifest::ProvidesLayerKind::DecisionModel) {
+            return false;
+        }
+    }
+    found
 }
 
 /// The capability's human name, picked over the KNOWN manifest set.
@@ -462,8 +553,8 @@ pub struct CapabilityInfo {
     /// Whether this capability is a **toolkit** — a swappable layer a user picks a
     /// provider for — as opposed to one app's private back door.
     ///
-    /// COMPUTED by Core (see [`is_toolkit`]), never declared in a manifest, and that
-    /// is the whole point. The layer picker used to filter on [`Self::selectable`],
+    /// COMPUTED by Core (see [`is_toolkit`]), never declared as a toolkit in a
+    /// manifest, and that is the whole point. The layer picker used to filter on [`Self::selectable`],
     /// which is the binder's *tie-break* flag: `is_selectable` is a unanimity check
     /// across a capability's providers, so it is trivially true for a sole provider.
     /// Four app-private capabilities (`news.crud`, `plan.review`, `reasoning.check`,
@@ -471,6 +562,15 @@ pub struct CapabilityInfo {
     /// `"selectable": true` from a manifest that had a reason to declare it. A
     /// declared field would let the next app do the same; a computed one cannot.
     pub toolkit: bool,
+    /// Whether every known provider places this capability in the Decision Models
+    /// layer. This is a separate picker from tool selection, even though both use
+    /// the same selectable provider binding contract.
+    #[serde(
+        default,
+        rename = "decisionModel",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub decision_model: bool,
     /// Every ENABLED candidate provider, sorted by id.
     pub providers: Vec<CapabilityProvider>,
     /// Providers that serve this capability but are NOT enabled, sorted by id.
@@ -540,7 +640,7 @@ pub fn describe_capabilities(
     // enabled providers alone made a capability whose providers are all disabled
     // disappear from the read model entirely - no row, not even an empty one - so a
     // picker could not tell "nothing provides this" apart from "this does not
-    // exist". `web.search` hit exactly that: every one of its five providers ships
+    // exist". `web.search` hit exactly that: most of its six providers ship
     // opt-in, so on a fresh install the toolkit was invisible and nothing pointed
     // at the Store. `web.extract` / `web.crawl` only escaped it because `spider`
     // happens to be pre-installed.
@@ -605,6 +705,10 @@ pub fn describe_capabilities(
                 // `web.search` disappearance only for users who had installed nothing
                 // — the hardest case to notice and the one that matters most.
                 toolkit: is_toolkit(known, &capability),
+                // Decision models share provider binding with toolkits but have a
+                // distinct picker. Compute it over the known manifests so the row
+                // stays visible when every provider is disabled.
+                decision_model: is_decision_model(known, &capability),
                 // KNOWN again, and for the third time the same reason: the name has
                 // to survive its providers being disabled or uninstalled, or the
                 // picker loses the header exactly when it is showing the "nothing
@@ -658,7 +762,8 @@ impl<'a> BindingRegistry<'a> {
         }
 
         // 2. Pick: override > single provider > (selectable: declared default >
-        //    lowest id) > ambiguous.
+        //    lowest id) > ambiguous. A selected-only provider takes part only
+        //    through an override.
         let (provider, entry) = if let Some(chosen) = self.config.overrides.get(&req.capability) {
             *providers
                 .iter()
@@ -667,17 +772,32 @@ impl<'a> BindingRegistry<'a> {
                     capability: req.capability.clone(),
                     chosen: chosen.clone(),
                 })?
-        } else if providers.len() == 1 {
-            providers[0]
-        } else if let Some(pick) = pick_selectable(&providers) {
-            pick
         } else {
-            let mut ids: Vec<String> = providers.iter().map(|(m, _)| m.id.clone()).collect();
-            ids.sort();
-            return Err(BindingError::Ambiguous {
-                capability: req.capability.clone(),
-                providers: ids,
-            });
+            let auto: Vec<Candidate<'_>> = providers
+                .iter()
+                .copied()
+                .filter(|(m, _)| !is_selected_only_provider(&m.id))
+                .collect();
+            if auto.is_empty() {
+                let mut ids: Vec<String> = providers.iter().map(|(m, _)| m.id.clone()).collect();
+                ids.sort();
+                return Err(BindingError::SelectionRequired {
+                    capability: req.capability.clone(),
+                    providers: ids,
+                });
+            }
+            if auto.len() == 1 {
+                auto[0]
+            } else if let Some(pick) = pick_selectable(&auto) {
+                pick
+            } else {
+                let mut ids: Vec<String> = auto.iter().map(|(m, _)| m.id.clone()).collect();
+                ids.sort();
+                return Err(BindingError::Ambiguous {
+                    capability: req.capability.clone(),
+                    providers: ids,
+                });
+            }
         };
 
         // 3. Capability-version floor (checked against ProvidesEntry.version).
@@ -850,6 +970,13 @@ mod tests {
         m
     }
 
+    fn decision_model_provider(id: &str, cap: &str) -> PluginManifest {
+        let mut manifest = selectable_provider(id, cap, false);
+        manifest.provides[0].layer_kind =
+            Some(crate::plugin_manifest::ProvidesLayerKind::DecisionModel);
+        manifest
+    }
+
     fn consumer(id: &str, cap: &str, min: Option<&str>) -> PluginManifest {
         PluginManifest {
             id: id.to_owned(),
@@ -888,6 +1015,24 @@ mod tests {
     /// different questions — this one is "should the picker list it", not "may the
     /// binder auto-pick between them" — and a `toolkit` accidentally derived from
     /// `selectable` would report `false` here.
+    #[test]
+    fn fanout_capabilities_are_never_toolkits_however_many_apps_serve_them() {
+        for cap in FANOUT_CAPABILITIES {
+            let pair = vec![
+                provider("monitors", cap, "1.0.0"),
+                provider("meetings", cap, "1.0.0"),
+            ];
+            assert!(
+                !is_toolkit(&pair, cap),
+                "'{cap}' is served by every app for its own data; its providers are not \
+                 alternatives a user picks between"
+            );
+        }
+        assert!(is_fanout_capability("jobs.list"));
+        assert!(is_fanout_capability("jobs.run"));
+        assert!(!is_fanout_capability("invoice.parse"));
+    }
+
     #[test]
     fn two_providers_make_a_non_facade_capability_a_toolkit() {
         const CAP: &str = "invoice.parse";
@@ -934,6 +1079,45 @@ mod tests {
             "a toolkit whose every provider is disabled must still report `toolkit` — \
              that row is the only thing telling the user the Store has candidates"
         );
+    }
+
+    #[test]
+    fn decision_models_use_a_distinct_layer_and_do_not_enter_toolkits() {
+        const CAP: &str = "decision.typed";
+        let known = vec![
+            decision_model_provider("@ryu/laya", CAP),
+            decision_model_provider("@ryu/ollaya", CAP),
+        ];
+
+        assert!(is_decision_model(&known, CAP));
+        assert!(!is_toolkit(&known, CAP));
+
+        let rows = describe_capabilities(&[], &known, &BindingConfig::default());
+        let row = rows.iter().find(|row| row.capability == CAP).unwrap();
+        assert!(row.decision_model);
+        assert!(!row.toolkit);
+        assert!(row.providers.is_empty());
+        assert_eq!(row.available.len(), 2);
+        let wire = serde_json::to_value(row).unwrap();
+        assert_eq!(wire["decisionModel"], true);
+        assert!(wire.get("decision_model").is_none());
+    }
+
+    #[test]
+    fn mismatched_layer_kind_is_hidden_from_both_picker_families() {
+        const CAP: &str = "decision.typed";
+        let mut unclassified = selectable_provider("third-party", CAP, false);
+        let known = vec![
+            decision_model_provider("@ryu/laya", CAP),
+            unclassified.clone(),
+        ];
+
+        assert!(!is_decision_model(&known, CAP));
+        assert!(!is_toolkit(&known, CAP));
+
+        unclassified.provides[0].layer_kind =
+            Some(crate::plugin_manifest::ProvidesLayerKind::DecisionModel);
+        assert!(is_decision_model(&[known[0].clone(), unclassified], CAP));
     }
 
     #[test]
@@ -1049,6 +1233,52 @@ mod tests {
     }
 
     #[test]
+    fn selected_only_provider_is_never_auto_picked() {
+        let cloud = crate::sidecar::mcp::web_search_access::cloud_search_provider_id();
+        assert!(is_selected_only_provider(cloud));
+        assert!(!is_selected_only_provider("@ryu/exa"));
+        let defaults = BindingConfig::default();
+
+        // The sole enabled provider (the default was disabled) is not auto-picked;
+        // the picker then shows nothing bound, so picking it writes an override.
+        let sole = vec![selectable_provider(cloud, "web.search", false)];
+        let error = BindingRegistry::new(&defaults, &sole)
+            .resolve_by_name("web.search")
+            .unwrap_err();
+        assert_eq!(error.code(), "capability_selection_required");
+        assert!(error.to_string().contains(cloud));
+        let rows = describe_capabilities(&sole, &sole, &defaults);
+        assert_eq!(rows[0].bound, None);
+
+        // It does not win the lowest-id rung over another provider either.
+        let mixed = vec![
+            selectable_provider("@ryu/parallel", "web.search", false),
+            selectable_provider(cloud, "web.search", false),
+        ];
+        assert_eq!(
+            BindingRegistry::new(&defaults, &mixed)
+                .resolve_by_name("web.search")
+                .unwrap()
+                .provider_id,
+            "@ryu/parallel"
+        );
+
+        // An explicit override is the only way it binds.
+        let chosen = BindingConfig {
+            overrides: [("web.search".to_owned(), cloud.to_owned())].into(),
+        };
+        for set in [&sole, &mixed] {
+            assert_eq!(
+                BindingRegistry::new(&chosen, set)
+                    .resolve_by_name("web.search")
+                    .unwrap()
+                    .provider_id,
+                cloud
+            );
+        }
+    }
+
+    #[test]
     fn selectability_requires_unanimity_so_one_manifest_cannot_loosen_rag() {
         // A rogue third-party provider declaring itself selectable must NOT relax the
         // strict capability: the ambiguity refusal still stands.
@@ -1122,7 +1352,7 @@ mod tests {
         // The bug this closes: names used to come from the ENABLED set, so a
         // capability with candidates but none enabled vanished from the read model
         // entirely. A picker could not distinguish "nothing serves this" from "this
-        // does not exist", and `web.search` - whose five providers all ship opt-in -
+        // does not exist", and `web.search` - whose providers are mostly opt-in -
         // was therefore invisible on a fresh install with no pointer to the Store.
         let known = vec![
             selectable_provider("@ryu/exa", "web.search", true),
@@ -1205,7 +1435,7 @@ mod tests {
     /// The title travels on the read model, and is read off the KNOWN set.
     ///
     /// Same trap as `toolkit`: computing it over the ENABLED set would leave every
-    /// opt-in toolkit (all five `web.search` providers ship off) headed by a raw
+    /// opt-in toolkit (most `web.search` providers ship off) headed by a raw
     /// dotted id on a fresh install — exactly the state where the row exists only
     /// to point the user at the Store.
     #[test]

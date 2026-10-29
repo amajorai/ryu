@@ -1,17 +1,27 @@
 [package]
 name = "ryu-gateway"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 
 [[bin]]
 name = "ryu-gateway"
 path = "src/main.rs"
 
 [dependencies]
+ryu-composio = { path = "../../crates/core/composio", version = "0.5.0" }
 ryu-gw-credentials = { path = "../../crates/gateway/credentials" }
+# OTLP exporter presets (Langfuse, LangSmith, Braintrust, Phoenix, Helicone,
+# Datadog): pure endpoint/header/resource mapping shared with Core telemetry.
+ryu-tracing = { path = "../../crates/core/tracing" }
+# `gateway.toml` secret sealing: the component subkey Core delivers, or one a
+# standalone Gateway derives from `RYU_MASTER_KEY` / the data-dir key file. No OS
+# keychain backend (no libdbus in the Gateway build), same as ryu-composio.
+ryu-crypto = { path = "../../crates/core/crypto", version = "0.5.0", default-features = false }
+# The data-dir layout shared with Core (`state/`, `secrets/` slots).
+ryu-sidecar-runtime = { path = "../../crates/core/sidecar-runtime", version = "0.5.0" }
 tokio = { version = "1", features = ["full"] }
-axum = { version = "0.7", features = ["macros", "ws"] }
+axum = { version = "0.7", features = ["macros", "ws", "multipart"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "timeout"] }
 serde = { version = "1", features = ["derive"] }
@@ -19,11 +29,13 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
-genai = "0.6.5"
+reqwest_sdk = { package = "reqwest", version = "0.13", default-features = false, features = ["json", "stream"] }
+genai = { path = "../../vendor/genai", version = "0.6.5" }
 async-trait = "0.1"
+async-stream = "0.3"
 anyhow = "1"
 thiserror = "2"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 regex = "1"
@@ -66,6 +78,11 @@ ryu-gw-cache = { path = "../../crates/gateway/cache" }
 # scanner). Re-exported by `src/firewall/mod.rs`; the FirewallScanner /
 # FirewallBackend / FirewallRegistry wiring stays in apps/gateway.
 ryu-gw-firewall = { path = "../../crates/gateway/firewall" }
+# The hazard screener backends (ScreenerBackend trait, role chain, SafetyClient,
+# segment cache, systemone decision / guard model / inspector adapters). Pure
+# HTTP clients and parsers with no gateway types; the admission glue that maps
+# the floor onto them lives in `src/screening/`.
+ryu-gw-screening = { path = "../../crates/gateway/screening" }
 # The passthrough wire-format redaction engine (native Anthropic/Responses
 # request-body + streaming-SSE DLP redaction over a narrow `PassthroughFirewall`
 # interface, plus upstream URL/path helpers and the `WireFormat` marker).
@@ -109,7 +126,7 @@ ryu-gw-router = { path = "../../crates/gateway/router" }
 ryu-gw-channels = { path = "../../crates/gateway/channels" }
 
 # WASM policy tier (gateway plugin plane — in-process third-party policy code).
-# Pinned to v46 to match Core's sandbox dep (apps/core/Cargo.toml) so the tree
+# Pinned to v48 to match Core's sandbox dep (apps/core/Cargo.toml) so the tree
 # holds ONE wasmtime. Default features (proven to build on this machine via Core);
 # the sandbox posture comes entirely from the runtime `Config`/`Linker`/`StoreLimits`
 # (zero-import linker, NO WASI, fuel + epoch + memory caps), NOT from Cargo features,
@@ -118,21 +135,23 @@ ryu-gw-channels = { path = "../../crates/gateway/channels" }
 # fresh (Core's spike has none of the fuel/epoch/limit hardening) — the shared
 # `ryu-wasm-host` crate that would dedupe this AND retrofit Core is a documented
 # follow-up (see src/wasm_policy/mod.rs).
-wasmtime = "46"
+wasmtime = "48.0.7"
 
 # OpenTelemetry seam (#540, P1): mirrors Core's seam (apps/core/Cargo.toml). The
 # vendor-neutral instrumentation export path. `tracing-opentelemetry` 0.33 bridges
 # the existing `tracing` spans into OTel; it pins `opentelemetry` ^0.32, so the
 # whole family is pinned to 0.32 to keep ONE `opentelemetry` in the tree (a version
 # skew pulls two and breaks the layer's trait bounds). OTLP/HTTP-protobuf only
-# (`http-proto` + `reqwest-client`) so we avoid tonic/grpc — Axiom and most
-# collectors speak OTLP/HTTP. The exporter is installed ONLY on consent (see
+# (`http-proto` + `reqwest-blocking-client`) so we avoid tonic/grpc — Axiom and most
+# collectors speak OTLP/HTTP. The blocking client is required: the SDK's batch
+# processor exports from its own thread with no Tokio reactor, where the async
+# reqwest client panics. The exporter is installed ONLY on consent (see
 # main.rs); with the flag off nothing egresses and the local `audit/` SQLite sink
 # is untouched. The backend is a swappable config value (`OTEL_EXPORTER_OTLP_ENDPOINT`),
 # never a lock.
 opentelemetry = "0.32"
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
 tracing-opentelemetry = "0.33"
 
 # Crash reporting tier (#544, P3) — Sentry for Rust PANICS ONLY. The gateway has no
@@ -144,6 +163,10 @@ tracing-opentelemetry = "0.33"
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "native-tls"] }
 
 [dev-dependencies]
+tempfile = "3"
+# The sentinel TestBackend and mock guard / systemone engines, for tests only, so
+# release builds carry no RYU_TEST string (spec SC-3).
+ryu-gw-screening = { path = "../../crates/gateway/screening", features = ["test-backends"] }
 # WAT → wasm compilation for the wasm-policy test guests (proof + malicious-guest
 # fixtures authored inline as `.wat`, no wasm32 toolchain / committed binary blob).
 wat = "1"

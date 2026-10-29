@@ -5,6 +5,17 @@ export function readProjectFile(path: string): Promise<string> {
 	return invokeWhenReady<string>("read_project_file", { path });
 }
 
+export function readProjectFileBinary(path: string): Promise<string> {
+	return invokeWhenReady<string>("read_project_file_binary", { path });
+}
+
+export function writeProjectFileBinary(
+	path: string,
+	blob: string
+): Promise<void> {
+	return invokeWhenReady<void>("write_project_file_binary", { path, blob });
+}
+
 /** Read a committed file without losing blank lines through the shell bridge. */
 export async function readGitProjectFile(
 	folder: string,

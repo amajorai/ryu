@@ -1,0 +1,3 @@
+[data-focus-segment] {
+	width: var(--focus-segment-width);
+}

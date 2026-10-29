@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
 	AmbientLight,
@@ -11,6 +12,8 @@ import {
 	Scene,
 	SphereGeometry,
 } from "three";
+import { isNativeNumber } from "../lib/native-primitive-observation.ts";
+import { cn } from "../lib/utils.ts";
 import {
 	blendExpressiveFrames,
 	expressiveFrame,
@@ -18,12 +21,27 @@ import {
 } from "./expressive.ts";
 import { expressiveAnimationPreviewTime } from "./expressive-animation.ts";
 import type { LogoProps } from "./logo.tsx";
+import drawingStyles from "./logo-3d.drawing.module.css";
 import { sampleGhostAnimation } from "./logo-3d-animation.ts";
 import { createGhostDecorations } from "./logo-3d-decorations.ts";
 import { createGhostFace } from "./logo-3d-face.ts";
 import { createGhostGeometry } from "./logo-3d-geometry.ts";
 import { createGhostBodyMaterial } from "./logo-3d-material.ts";
 import { createGhostRenderer } from "./logo-3d-renderer.ts";
+
+interface LogoContainerStyle extends CSSProperties {
+	"--logo-3d-1-cursor"?: CSSProperties["cursor"];
+	"--logo-3d-1-height"?: string | undefined;
+	"--logo-3d-1-position"?: CSSProperties["position"];
+	"--logo-3d-1-width"?: string | undefined;
+}
+interface LogoViewportStyle extends CSSProperties {
+	"--logo-3d-2-inset"?: CSSProperties["inset"];
+	"--logo-3d-2-position"?: CSSProperties["position"];
+}
+function drawingLength(value: CSSProperties["width"]): string | undefined {
+	return isNativeNumber(value) ? `${value}px` : value;
+}
 
 export default function Logo3D({
 	size = "192px",
@@ -329,21 +347,30 @@ export default function Logo3D({
 		animationRef.current = animation;
 		updateFace.current?.();
 	}, [expression, animation]);
+	const logoContainerStyle: LogoContainerStyle = {
+		"--logo-3d-1-width": drawingLength(size),
+		"--logo-3d-1-height": drawingLength(size),
+		"--logo-3d-1-position": "relative",
+		"--logo-3d-1-cursor": animated ? "grab" : undefined,
+	};
+	const logoViewportStyle: LogoViewportStyle = {
+		"--logo-3d-2-position": "absolute",
+		"--logo-3d-2-inset": 0,
+	};
 	return (
 		<div
 			aria-label="Ryu 3D ghost"
-			className={className}
+			className={cn(className, drawingStyles.logoContainer)}
 			data-logo-variant="3d"
 			data-renderer={ready ? "webgl" : "fallback"}
 			role="group"
-			style={{
-				width: size,
-				height: size,
-				position: "relative",
-				cursor: animated ? "grab" : undefined,
-			}}
+			style={logoContainerStyle}
 		>
-			<div ref={host} style={{ position: "absolute", inset: 0 }} />
+			<div
+				className={drawingStyles.logoViewport}
+				ref={host}
+				style={logoViewportStyle}
+			/>
 			{!ready && fallback}
 		</div>
 	);

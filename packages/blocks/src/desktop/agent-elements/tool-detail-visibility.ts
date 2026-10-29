@@ -1,8 +1,12 @@
+import {
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 // What the transcript still renders at Detail level "None" — the rung of the
 // ladder that shows no tool calls and no file edits at all, leaving a pure
 // messaging view. See `ChatDisplayPrefs.hideToolDetail` for the product rules.
 //
-// Pure (no React, no @ryu/ui) so `bun test` can cover it, for the same reason as
+// Pure (no React; shared native scalar observations only) so `bun test` can cover it, for the same reason as
 // planning-visibility.ts: this predicate does not merely decide how a row looks,
 // it decides whether a TURN renders at all. Getting it wrong has a specific and
 // ugly failure mode — a turn kept because this said "has content" that then
@@ -24,11 +28,31 @@
 // visible by the caller (`isInterruptedMessage` in message-list.tsx) rather than
 // here. That split is the point — turn status is not part content.
 
+import { z } from "zod";
+import { consentRequestKind } from "./tools/consent-tool.ts";
 import { hasTurnEndCards } from "./turn-end-cards.ts";
+import { nativeSdkSchemaAdmits } from "./utils/native-sdk-admission.ts";
+import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
 import { normalizeAssistantToolParts } from "./utils/tool-part-normalizer.ts";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+/** The fields observed by transcript visibility, not a whole SDK part DTO.
+ * Each value remains opaque until the existing scalar/business comparison. */
+interface VisibilityPartObservation {
+	data?: NativeSdkValue;
+	errorText?: NativeSdkValue;
+	mediaType?: NativeSdkValue;
+	message?: NativeSdkValue;
+	mimeType?: NativeSdkValue;
+	state?: NativeSdkValue;
+	text?: NativeSdkValue;
+	toolName?: NativeSdkValue;
+	type?: NativeSdkValue;
+	url?: NativeSdkValue;
+}
+const visibilityPartObservationSchema =
+	z.custom<VisibilityPartObservation>(isNativeObjectLike);
+function isRecord(value: NativeSdkValue): value is VisibilityPartObservation {
+	return nativeSdkSchemaAdmits(visibilityPartObservationSchema, value);
 }
 
 /**
@@ -38,7 +62,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * completed tool call. The widget is tool detail too — it exists only because a
  * tool ran.
  */
-export function isToolLikePart(part: unknown): boolean {
+export function isToolLikePart(part: NativeSdkValue): boolean {
 	if (!isRecord(part)) {
 		return false;
 	}
@@ -49,7 +73,7 @@ export function isToolLikePart(part: unknown): boolean {
 	) {
 		return true;
 	}
-	return typeof partType === "string" && partType.startsWith("tool-");
+	return isNativeText(partType) && partType.startsWith("tool-");
 }
 
 /**
@@ -58,14 +82,23 @@ export function isToolLikePart(part: unknown): boolean {
  * moving the state (the same two surfaces `ToolRenderer` reads to decide it
  * should render an error card).
  */
-export function isFailedToolPart(part: unknown): boolean {
+export function isFailedToolPart(part: NativeSdkValue): boolean {
 	if (!(isRecord(part) && isToolLikePart(part))) {
 		return false;
 	}
 	if (part.state === "output-error") {
 		return true;
 	}
-	return typeof part.errorText === "string" && part.errorText.trim().length > 0;
+	return isNativeText(part.errorText) && part.errorText.trim().length > 0;
+}
+
+/** A consent card part, typed or carried by a `dynamic-tool` name. */
+function isConsentPart(part: NativeSdkValue): boolean {
+	if (!(isRecord(part) && isNativeText(part.type))) {
+		return false;
+	}
+	const toolName = isNativeText(part.toolName) ? part.toolName : undefined;
+	return consentRequestKind(part.type, toolName) !== null;
 }
 
 /**
@@ -75,13 +108,20 @@ export function isFailedToolPart(part: unknown): boolean {
  * failed, because the render loop drops it unconditionally at every level (its
  * content belongs to the parent Task row) — counting it as visible here would
  * produce exactly the empty turn this module exists to prevent.
+ *
+ * Consent requests (`consent.connect_app` / `consent.install_plugin`) always
+ * show: they are a question to the user, not tool detail, and the agent is
+ * waiting on the answer.
  */
-export function isHiddenAtNoDetail(part: unknown): boolean {
+export function isHiddenAtNoDetail(part: NativeSdkValue): boolean {
 	if (!isToolLikePart(part)) {
 		return false;
 	}
 	if (isRecord(part) && part.type === "tool-TaskOutput") {
 		return true;
+	}
+	if (isConsentPart(part)) {
+		return false;
 	}
 	return !isFailedToolPart(part);
 }
@@ -94,15 +134,15 @@ export function isHiddenAtNoDetail(part: unknown): boolean {
  * (`step-start` and friends) that draw nothing, and treating those as content
  * would keep every empty turn on screen.
  */
-function rendersRegardlessOfDetail(part: unknown): boolean {
+function rendersRegardlessOfDetail(part: NativeSdkValue): boolean {
 	if (!isRecord(part)) {
 		return false;
 	}
 	if (part.type === "text") {
-		return typeof part.text === "string" && part.text.trim().length > 0;
+		return isNativeText(part.text) && part.text.trim().length > 0;
 	}
 	if (part.type === "error") {
-		return typeof part.message === "string";
+		return isNativeText(part.message);
 	}
 	// Both generation surfaces, always together. Adding a media part type without
 	// adding it here is silent: the part renders fine at full detail and vanishes
@@ -118,9 +158,8 @@ function rendersRegardlessOfDetail(part: unknown): boolean {
 		// Mirrors both `file` branches of the render loop: an image part needs a
 		// media type and a body, and so does the audio/attachment fallback.
 		const media = part.mediaType ?? part.mimeType;
-		const hasBody =
-			typeof part.url === "string" || typeof part.data === "string";
-		return typeof media === "string" && media.length > 0 && hasBody;
+		const hasBody = isNativeText(part.url) || isNativeText(part.data);
+		return isNativeText(media) && media.length > 0 && hasBody;
 	}
 	return false;
 }
@@ -131,7 +170,7 @@ function rendersRegardlessOfDetail(part: unknown): boolean {
  * Normalises first, exactly as the render loop does, so the two can never
  * disagree about a part whose input/output arrived as a JSON string.
  */
-export function hasVisibleContentAtNoDetail(parts: unknown[]): boolean {
+export function hasVisibleContentAtNoDetail(parts: NativeSdkValue[]): boolean {
 	if (hasTurnEndCards(parts)) {
 		return true;
 	}

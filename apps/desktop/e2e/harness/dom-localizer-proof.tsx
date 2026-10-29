@@ -69,7 +69,7 @@ if (remote) {
 		},
 	});
 }
-Reflect.set(window, "localizerProof", {
+const localizerProof = {
 	reset: () => {
 		calls = 0;
 		visitedTextNodes = 0;
@@ -81,7 +81,14 @@ Reflect.set(window, "localizerProof", {
 	remoteCount: () => remoteCalls.length,
 	changeHost: (id: string, version = "1") => hostChange(snapshot(id, version)),
 	resolveRemote: (index: number, value: string) => remoteCalls[index](value),
-});
+};
+Reflect.set(window, "localizerProof", localizerProof);
+export type LocalizerProof = typeof localizerProof;
+declare global {
+	interface Window {
+		localizerProof: LocalizerProof;
+	}
+}
 const pack = (revision: number): LanguagePack => ({
 	schemaVersion: 1,
 	id: "test-pack",

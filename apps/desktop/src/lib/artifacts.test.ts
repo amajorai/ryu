@@ -18,15 +18,7 @@ import {
 } from "./artifacts.ts";
 
 // Build a loose stream message from an array of text-part strings.
-const msg = (
-	id: string | undefined,
-	texts: string[],
-	role?: string
-): {
-	id?: string;
-	parts?: Array<{ type?: string; text?: unknown } | null>;
-	role?: string;
-} => ({
+const msg = (id: string | undefined, texts: string[], role?: string) => ({
 	id,
 	role,
 	parts: texts.map((text) => ({ type: "text", text })),
@@ -193,6 +185,8 @@ describe("extractArtifacts — defensive shapes", () => {
 
 	it("tolerates null messages, missing parts, and non-text parts", () => {
 		const arts = extractArtifacts([
+			// SAFETY: This deliberately malformed fixture exercises the extractor
+			// runtime null guard; it is never consumed as a valid message.
 			null as never,
 			{ id: "x" }, // no parts
 			{ id: "y", parts: [null, { type: "image" }, { type: "text", text: 5 }] },

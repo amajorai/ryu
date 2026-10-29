@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::pin::Pin;
 
 use axum::body::Body;
@@ -8,18 +9,40 @@ use crate::error::ProviderError;
 
 use super::{
     chat_completions_url, check_response_status, check_stream_status, discover_openai_models,
-    embeddings_url, models_from_response, rerank_url, send_with_retry, Provider,
+    embeddings_url, models_from_response, normalize_legacy_completion_token_limit, rerank_url,
+    send_with_retry, streaming_request, Provider,
 };
 
 /// Provider for locally-running OpenAI-compatible servers such as Ollama or llama.cpp.
 pub struct LocalProvider {
     client: reqwest::Client,
     base_url: String,
+    /// Requested model name → name the engine serves (e.g. a derived Ollama
+    /// model carrying per-model launch settings). Empty ⇒ names pass through.
+    model_routes: HashMap<String, String>,
 }
 
 impl LocalProvider {
     pub fn new(client: reqwest::Client, base_url: String) -> Self {
-        Self { client, base_url }
+        Self {
+            client,
+            base_url,
+            model_routes: HashMap::new(),
+        }
+    }
+
+    /// Serve the keys of `routes` from their values on chat requests.
+    pub fn with_model_routes(mut self, routes: HashMap<String, String>) -> Self {
+        self.model_routes = routes;
+        self
+    }
+
+    /// The model name to send upstream for a chat request naming `model`.
+    fn served_model<'a>(&'a self, model: &'a str) -> &'a str {
+        self.model_routes
+            .get(model)
+            .map(String::as_str)
+            .unwrap_or(model)
     }
 }
 
@@ -43,15 +66,17 @@ impl Provider for LocalProvider {
         body: &'a Value,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, ProviderError>> + Send + 'a>> {
         Box::pin(async move {
+            let model = self.served_model(model);
             let mut payload = body.clone();
             payload["model"] = Value::String(model.to_string());
+            normalize_legacy_completion_token_limit(&mut payload);
             let url = chat_completions_url(&self.base_url);
             debug!(provider = "local", model, url = %url, "sending non-streaming request");
 
             let resp = send_with_retry(
                 || {
                     let req = self.client.post(&url).json(&payload);
-                    Box::pin(async move { req.send().await })
+                    Box::pin(crate::trace_context::apply(req).send())
                 },
                 "local",
                 2,
@@ -68,16 +93,18 @@ impl Provider for LocalProvider {
         body: &'a Value,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Body, ProviderError>> + Send + 'a>> {
         Box::pin(async move {
+            let model = self.served_model(model);
             let mut payload = body.clone();
             payload["model"] = Value::String(model.to_string());
             payload["stream"] = Value::Bool(true);
+            normalize_legacy_completion_token_limit(&mut payload);
             debug!(provider = "local", model, "sending streaming request");
 
             let url = chat_completions_url(&self.base_url);
             let resp = send_with_retry(
                 || {
-                    let req = self.client.post(&url).json(&payload);
-                    Box::pin(async move { req.send().await })
+                    let req = streaming_request(self.client.post(&url).json(&payload));
+                    Box::pin(crate::trace_context::apply(req).send())
                 },
                 "local",
                 2,
@@ -103,7 +130,7 @@ impl Provider for LocalProvider {
                         .client
                         .post(embeddings_url(&self.base_url))
                         .json(&payload);
-                    Box::pin(async move { req.send().await })
+                    Box::pin(crate::trace_context::apply(req).send())
                 },
                 "local",
                 2,
@@ -124,7 +151,7 @@ impl Provider for LocalProvider {
             let resp = send_with_retry(
                 || {
                     let req = self.client.post(rerank_url(&self.base_url)).json(&payload);
-                    Box::pin(async move { req.send().await })
+                    Box::pin(crate::trace_context::apply(req).send())
                 },
                 "local",
                 2,
@@ -156,6 +183,23 @@ mod tests {
         // A local server (Ollama/llama.cpp) takes no bearer key.
         assert!(reqs[0].header("authorization").is_none());
         assert_eq!(reqs[0].json()["model"], json!("qwen2.5"));
+    }
+
+    #[tokio::test]
+    async fn complete_serves_routed_model_name() {
+        let server = MockServer::always(MockResponse::ok_json(r#"{"id":"local"}"#)).await;
+        let routes = HashMap::from([("llama3.2".to_owned(), "ryu-llama3.2-abc".to_owned())]);
+        let p = LocalProvider::new(reqwest::Client::new(), server.base_url().to_string())
+            .with_model_routes(routes);
+        p.complete("llama3.2", &json!({ "messages": [] }))
+            .await
+            .unwrap();
+        p.complete("qwen2.5", &json!({ "messages": [] }))
+            .await
+            .unwrap();
+        let reqs = server.requests();
+        assert_eq!(reqs[0].json()["model"], json!("ryu-llama3.2-abc"));
+        assert_eq!(reqs[1].json()["model"], json!("qwen2.5"));
     }
 
     #[tokio::test]

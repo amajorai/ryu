@@ -6,6 +6,7 @@ import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import type { ChatStatus, UIMessage } from "ai";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import { AgentImageField } from "../../src/components/agents/AgentImageField.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
 import { AgentAvatar } from "../../src/lib/agent-logos.tsx";
@@ -54,8 +55,9 @@ function loadValue(): GlyphValue {
 		const raw: unknown = JSON.parse(
 			localStorage.getItem("ryu-ghost-avatar-proof") ?? "null"
 		);
-		if (raw && typeof raw === "object" && "expressive" in raw) {
-			const ghost = parseGhostAvatar(raw.expressive);
+		const stored = z.object({ expressive: z.json() }).safeParse(raw);
+		if (stored.success) {
+			const ghost = parseGhostAvatar(stored.data.expressive);
 			if (ghost) {
 				return { ...ghost, kind: "expressive" };
 			}

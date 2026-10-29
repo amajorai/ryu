@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/ugc",
   "name": "UGC",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Productivity",
   "description": "Creator-marketing campaign tracker: briefs, a creator roster, post submissions with review, per-post metric snapshots refreshed through a curated Composio action map, and CPM/flat payout accrual against a campaign budget.",
@@ -39,7 +39,7 @@
         "port_env": "RYU_UGC_PORT"
       },
       "host_api": {
-        "grants": ["tools.invoke"]
+        "grants": ["tools.invoke", "crypto:seal"]
       },
       "port": 8004,
       "health_path": "/health",
@@ -183,7 +183,7 @@
     {
       "id": "ugc.payouts",
       "label": "Can settle payouts",
-      "description": "Approve accrued payouts and mark them paid. Marking a payout paid freezes its amount — it is never re-priced afterwards, even if the post keeps gaining views — and is the record this campaign's spend is reconciled against.",
+      "description": "Approve accrued payouts and mark them paid. Marking a payout paid freezes its amount — it is never re-priced afterwards, even if the post keeps gaining views — and is the record this campaign's spend is reconciled against. A paid payout is never deleted: deleting its campaign, creator (even with force) or submission is refused.",
       "implies": ["ugc.view"]
     }
   ],
@@ -214,7 +214,7 @@
       {
         "id": "@ryu/ugc#submission.received",
         "title": "Submission received",
-        "description": "A creator's post was recorded against a campaign — once per `submissions` row actually CREATED. Re-submitting the same post is refused by the `(campaign_id, platform, external_post_id)` unique index (409), so a duplicate never re-emits. `external_post_id` is empty when the URL could not be parsed: that submission is still reviewable by hand, it just cannot auto-refresh.",
+        "description": "A creator's post was recorded against a campaign — once per `submissions` row actually CREATED. Re-submitting the same post to a campaign is refused (409) whatever platform label it is sent under, so a duplicate never re-emits: posts are matched by the post their URL names (the platform the URL's host belongs to plus that platform's post id, so `youtu.be/<id>` and `youtube.com/watch?v=<id>` are one post), or by their normalized URL when it names no recognised post. `external_post_id` is empty in that case: the submission is still reviewable by hand, it just cannot auto-refresh.",
         "payload_example": {
           "submission_id": "sub_1f7c9a2e4b6d4c1a8e3f5b7d9c0a2e46",
           "campaign_id": "cmp_4b2d8e1a6f3c4d5e9a7b0c2d4e6f8a13",

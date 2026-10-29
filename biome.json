@@ -8,6 +8,11 @@
   "files": {
     "ignoreUnknown": false,
     "includes": [
+      "!!docs/proof",
+      "!!apps/docs/proof",
+      "!!apps/native/e2e/maestro/evidence",
+      "!!packages/i18n/locales",
+      "!!apps/web/src/lib/__fixtures__/react-streamed-comparison.html",
       "!**/.agent",
       "!**/.agents",
       "!**/.claude",
@@ -25,6 +30,7 @@
       "!**/.zed",
       "!**/.vscode",
       "!**/routeTree.gen.ts",
+      "!**/*.golden.html",
       "!**/src-tauri",
       "!**/.nuxt",
       "!bts.jsonc",
@@ -44,12 +50,17 @@
       "!plugins-store/*/*/mcp.json",
       "!apps-store/*/hooks",
       "!apps-store/*/adapters",
+      "!packages/create-ryu-app/template/*/adapters",
       "!apps-store/*/ui/companion.html",
+      "!apps-store/forms/sidecar/bundle/index.html",
+      "!apps-store/voice/ui/preview-dist/preview.html",
       "!tools/oxlint/anti-slop",
       "!apps-store/*/tools",
       "!registry/registry.json",
       "!apps/core/Python",
       "!apps/core/src/plugin_manifest/fixtures",
+      "!packages/blocks/src/web/backgrounds/vendor",
+      "!tools/embedded-app-ui.lock.json",
       "!apps/web/public/openapi.json",
       "!crates/sdk/core/specs/core-openapi.json",
       "!crates/sdk/napi/index.js",
@@ -64,7 +75,8 @@
       "!apps/cli/components/ui",
       "!apps/cli/hooks",
       "!apps/cli/lib",
-      "!**/components/dither-kit"
+      "!**/components/dither-kit",
+      "!**/web/iso/kit"
     ]
   },
   "formatter": {
@@ -92,7 +104,15 @@
         "useJsxKeyInIterable": "off",
         "useHookAtTopLevel": "off",
         "useExhaustiveDependencies": "off",
-        "useImageSize": "off"
+        "useImageSize": "off",
+        "useImportExtensions": {
+          "level": "error",
+          "options": {
+            "extensionMappings": {
+              "mts": "mjs"
+            }
+          }
+        }
       },
       "complexity": {
         "noBannedTypes": "off",
@@ -296,6 +316,32 @@
       },
       "formatter": {
         "enabled": false
+      }
+    },
+    {
+      "includes": ["**/*.module.css"],
+      "css": {
+        "parser": {
+          "cssModules": true
+        }
+      }
+    },
+    {
+      "includes": ["apps/passport/tests/core-runtime.fixture.test.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useImportExtensions": {
+              "level": "error",
+              "options": {
+                "extensionMappings": {
+                  "mts": "mjs",
+                  "ts": "js"
+                }
+              }
+            }
+          }
+        }
       }
     }
   ],

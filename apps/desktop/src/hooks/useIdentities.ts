@@ -69,7 +69,7 @@ export function useIdentities(): UseIdentitiesResult {
 		void qc.invalidateQueries({ queryKey: listKey }).catch(() => undefined);
 	}, [qc, listKey]);
 	const invalidateMutation = useCallback(
-		(_result: unknown, variables: { target: ApiTarget }) => {
+		<TResult>(_result: TResult, variables: { target: ApiTarget }) => {
 			const queryKey = identityListKey(variables.target);
 			void qc
 				.cancelQueries({ queryKey })

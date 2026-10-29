@@ -29,10 +29,12 @@ export function formatQuotePrefix(quote: string): string {
  * returning the un-prefixed quote text and the remaining body. Used to render a
  * styled quote block above a user bubble that was sent with a quote.
  */
-export function splitLeadingQuote(text: string): {
-	quote: string | null;
+export interface SplitQuote {
 	body: string;
-} {
+	quote: string | null;
+}
+
+export function splitLeadingQuote(text: string): SplitQuote {
 	const lines = text.split("\n");
 	const quoteLines: string[] = [];
 	let i = 0;

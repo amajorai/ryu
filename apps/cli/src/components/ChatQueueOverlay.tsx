@@ -3,6 +3,7 @@
 import { useKeyboard } from "@opentui/react";
 
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { tf } from "../i18n/translate.ts";
 
 import {
 	type ChatQueueEntry,
@@ -10,6 +11,7 @@ import {
 	ChatQueuePreviewRow,
 	type ChatQueueRemoveHandler,
 	type ChatQueueSelectHandler,
+	chatQueueEntryKey,
 } from "./ChatQueueBar.tsx";
 
 const DEFAULT_MAX_VISIBLE_ROWS = 8;
@@ -50,11 +52,16 @@ const positiveInteger = (value: number, fallback: number): number => {
 	return Math.max(1, Math.trunc(value));
 };
 
+interface VisibleQueueWindow {
+	end: number;
+	start: number;
+}
+
 function visibleWindow(
 	length: number,
 	selectedIndex: number,
 	maxVisibleRows: number
-): { end: number; start: number } {
+): VisibleQueueWindow {
 	if (length <= maxVisibleRows) {
 		return { end: length, start: 0 };
 	}
@@ -136,7 +143,10 @@ export function ChatQueueOverlay({
 			items.length > 0 &&
 			(key.name === "x" || key.name === "delete" || key.name === "backspace")
 		) {
-			onRemove(currentIndex, items[currentIndex] as ChatQueueEntry);
+			const entry = items[currentIndex];
+			if (entry !== undefined) {
+				onRemove(currentIndex, entry);
+			}
 			return;
 		}
 		if (
@@ -176,9 +186,9 @@ export function ChatQueueOverlay({
 					<text fg={theme.colors.primary}>
 						<b>{title}</b>
 					</text>
-					<text
-						fg={theme.colors.mutedForeground}
-					>{`${items.length} queued`}</text>
+					<text fg={theme.colors.mutedForeground}>
+						{tf("{count} queued", { count: String(items.length) })}
+					</text>
 				</box>
 
 				{items.length === 0 ? (
@@ -190,11 +200,7 @@ export function ChatQueueOverlay({
 							<ChatQueuePreviewRow
 								entry={entry}
 								index={index}
-								key={
-									typeof entry === "string"
-										? `${index}:${entry}`
-										: (entry.id ?? `${index}:${entry.text}`)
-								}
+								key={chatQueueEntryKey(entry, index)}
 								onRemove={onRemove}
 								previewLength={maxPreviewLength}
 								selected={index === currentIndex}

@@ -13,7 +13,17 @@
 // rather than assuming one layout. Treat the rendering as best-effort until a
 // real video model run confirms the shape.
 
+import {
+	type RpcJsonResponse,
+	type RyuJsonValue,
+	rpcJsonResponseSchema,
+} from "@ryu/app-host/rpc";
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
+import {
+	videoClipsSchema,
+	videoFailureSchema,
+	videoJobFieldsSchema,
+} from "./video-wire-contracts.ts";
 
 /** A single generated clip, ready to drop into a `<video src>` (or `<img>`). */
 export interface GeneratedVideo {
@@ -23,74 +33,24 @@ export interface GeneratedVideo {
 	url: string;
 }
 
-/** Pull a `data:`/`http` URL out of one entry, trying the known field names. */
-function entryToVideo(entry: unknown): GeneratedVideo | null {
-	if (typeof entry === "string") {
-		// A bare base64 string or URL.
-		if (entry.startsWith("http") || entry.startsWith("data:")) {
-			return { url: entry, mediaType: "video/mp4" };
-		}
-		return { url: `data:video/mp4;base64,${entry}`, mediaType: "video/mp4" };
-	}
-	if (!entry || typeof entry !== "object") {
-		return null;
-	}
-	const obj = entry as Record<string, unknown>;
-	if (typeof obj.url === "string") {
-		return {
-			url: obj.url,
-			mediaType:
-				typeof obj.mediaType === "string"
-					? obj.mediaType
-					: typeof obj.mime_type === "string"
-						? obj.mime_type
-						: "video/mp4",
-		};
-	}
-	// sd-server may reuse the image field name for the encoded clip.
-	const b64 =
-		typeof obj.b64_json === "string"
-			? obj.b64_json
-			: typeof obj.video === "string"
-				? obj.video
-				: null;
-	if (b64) {
-		return { url: `data:video/mp4;base64,${b64}`, mediaType: "video/mp4" };
-	}
-	return null;
+/** Vendor responses are full JSON; only the documented renderable fields are projected. */
+function clipsFromBody(body: RpcJsonResponse): GeneratedVideo[] {
+	return videoClipsSchema.parse(body);
 }
-
-/** Extract renderable clips from a response/job body (data[]/videos[]/bare). */
-function clipsFromBody(body: unknown): GeneratedVideo[] {
-	const out: GeneratedVideo[] = [];
-	const containers: unknown[] = [];
-	if (Array.isArray(body)) {
-		containers.push(...body);
-	} else if (body && typeof body === "object") {
-		const obj = body as Record<string, unknown>;
-		if (Array.isArray(obj.data)) {
-			containers.push(...obj.data);
-		} else if (Array.isArray(obj.videos)) {
-			containers.push(...obj.videos);
-		} else {
-			containers.push(body);
-		}
-	}
-	for (const entry of containers) {
-		const video = entryToVideo(entry);
-		if (video) {
-			out.push(video);
-		}
-	}
-	return out;
-}
-
 /** Options for {@link generateVideo}. */
 export interface GenerateVideoOptions {
 	/** Host attribution for app-level generation ACLs. */
 	appId?: string;
 	/** Human-facing app permission required for this host-direct call. */
 	appPermission?: string;
+	/** Requested clip length in seconds, for `$duration_s` references. */
+	durationS?: number;
+	/** An audio track (`data:audio/*`) for lip-sync or talking avatars. */
+	inputAudio?: string;
+	/** `[first, last?]` reference frames as `data:image/*` URIs. */
+	inputImages?: string[];
+	/** A source clip (`data:video/*`) for video-to-video or matting. */
+	inputVideo?: string;
 	/** Cloud model id (required when `provider` is set). */
 	model?: string;
 	/** Poll interval while a cloud job runs, in ms. Default: 3000. */
@@ -98,25 +58,20 @@ export interface GenerateVideoOptions {
 	/** Cloud provider to route through the Gateway: `"replicate"` or `"fal"`.
 	 * Omit (or use a local id) to render on the local sd-server engine. */
 	provider?: string;
+	/** Model-specific fields Core merges into the cloud provider body. Core
+	 *  refuses routing keys and any input it cannot map for the target. */
+	providerInput?: Record<string, RyuJsonValue>;
 	/** Correlates this generation with an app-owned Gateway audit request. */
 	requestId?: string;
 	/** Give up after this many ms for a cloud job. Default: 600000 (10 min). */
 	timeoutMs?: number;
 }
 
-/** A submitted cloud video job. */
-interface VideoJobEnvelope {
-	error?: string;
-	id?: string;
-	status?: string;
-	[key: string]: unknown;
-}
-
 /** Poll a cloud video job once via Core's `/api/video/jobs/:id`. */
 export async function pollVideoJob(
 	target: ApiTarget,
 	id: string
-): Promise<VideoJobEnvelope> {
+): Promise<RpcJsonResponse> {
 	const resp = await authenticatedFetch(
 		target,
 		`/api/video/jobs/${encodeURIComponent(id)}`,
@@ -127,7 +82,7 @@ export async function pollVideoJob(
 	if (!resp.ok) {
 		throw new Error(`video job poll failed: ${resp.status}`);
 	}
-	return (await resp.json()) as VideoJobEnvelope;
+	return rpcJsonResponseSchema.parse(await resp.json());
 }
 
 const sleep = (ms: number) =>
@@ -149,7 +104,7 @@ export async function generateVideo(
 	prompt: string,
 	options: GenerateVideoOptions = {}
 ): Promise<GeneratedVideo[]> {
-	const body: Record<string, unknown> = {
+	const body: VideoGenerationWireRequest = {
 		prompt,
 		request_id: options.requestId,
 	};
@@ -158,6 +113,23 @@ export async function generateVideo(
 	}
 	if (options.model) {
 		body.model = options.model;
+	}
+	// Reference inputs pass through unchanged: Core maps each one for the
+	// selected target or refuses the request, so nothing is dropped here.
+	if (options.inputImages && options.inputImages.length > 0) {
+		body.input_images = options.inputImages;
+	}
+	if (options.inputVideo !== undefined) {
+		body.input_video = options.inputVideo;
+	}
+	if (options.inputAudio !== undefined) {
+		body.input_audio = options.inputAudio;
+	}
+	if (options.durationS !== undefined) {
+		body.duration_s = options.durationS;
+	}
+	if (options.providerInput !== undefined) {
+		body.provider_input = options.providerInput;
 	}
 
 	const resp = await authenticatedFetch(target, "/api/video/generate", {
@@ -175,9 +147,9 @@ export async function generateVideo(
 	if (!resp.ok) {
 		let detail = `video generation failed: ${resp.status}`;
 		try {
-			const errorBody = (await resp.json()) as { error?: string };
+			const errorBody = videoFailureSchema.parse(await resp.json());
 			if (errorBody.error) {
-				detail = errorBody.error;
+				detail = String(errorBody.error);
 			}
 		} catch {
 			// Non-JSON error body — keep the status-based message.
@@ -185,17 +157,19 @@ export async function generateVideo(
 		throw new Error(detail);
 	}
 
-	const first = (await resp.json()) as VideoJobEnvelope;
+	const first = rpcJsonResponseSchema.parse(await resp.json());
+	const firstJob = videoJobFieldsSchema.parse(first);
 
 	// Local (synchronous) path: no job id → parse clips directly.
-	if (!options.provider || typeof first.id !== "string") {
+	if (!options.provider || firstJob.id === undefined) {
 		return clipsFromBody(first);
 	}
 
 	// Cloud (job-based) path: poll until terminal.
 	const interval = options.pollIntervalMs ?? 3000;
 	const deadline = Date.now() + (options.timeoutMs ?? 600_000);
-	let job: VideoJobEnvelope = first;
+	let jobBody = first;
+	let job = firstJob;
 	while (
 		![
 			"succeeded",
@@ -210,12 +184,25 @@ export async function generateVideo(
 			throw new Error("video generation timed out");
 		}
 		await sleep(interval);
-		job = await pollVideoJob(target, first.id);
+		jobBody = await pollVideoJob(target, firstJob.id);
+		job = videoJobFieldsSchema.parse(jobBody);
 	}
 	if (
 		["failed", "canceled", "cancelled", "expired"].includes(job.status ?? "")
 	) {
-		throw new Error(job.error ?? "video generation failed");
+		throw new Error(String(job.error ?? "video generation failed"));
 	}
-	return clipsFromBody(job);
+	return clipsFromBody(jobBody);
+}
+
+interface VideoGenerationWireRequest {
+	duration_s?: number;
+	input_audio?: string;
+	input_images?: string[];
+	input_video?: string;
+	model?: string;
+	prompt: string;
+	provider?: string;
+	provider_input?: Record<string, RyuJsonValue>;
+	request_id?: string;
 }

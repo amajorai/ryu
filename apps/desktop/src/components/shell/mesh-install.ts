@@ -21,6 +21,8 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchMeshInstallStatus,
 	fetchMeshStatus,
+	MESH_BACKEND_CLOUDFLARED,
+	MESH_BACKEND_OPENTUNNEL,
 	MESH_BACKEND_TAILCAT,
 	type MeshBackend,
 	type MeshStatus,
@@ -61,59 +63,93 @@ function dismissProgress(): void {
 export async function watchMeshInstall(
 	target: ApiTarget,
 	backend: MeshBackend,
-	onStatus?: (status: MeshStatus) => void
+	onStatus?: (status: MeshStatus) => void,
+	isCurrent: () => boolean = () => true,
 ): Promise<MeshStatus | null> {
+	if (!isCurrent()) return null;
 	dismissProgress();
 	const isTailcat = backend === MESH_BACKEND_TAILCAT;
-	const clientLabel = isTailcat ? "Tailcat" : "Tailscale client";
+	const clientLabel = isTailcat
+		? "Tailcat"
+		: backend === MESH_BACKEND_CLOUDFLARED
+			? "Cloudflared"
+			: backend === MESH_BACKEND_OPENTUNNEL
+				? "OpenTunnel"
+				: "Tailscale client";
 	progressToastId = sileo.info({
 		title: `Installing ${clientLabel}…`,
 		description: `Ryu is downloading ${clientLabel} for this node and will connect it when it's ready.`,
 		duration: null,
 	});
 
+	const ownedProgressToastId = progressToastId;
+	const dismissOwnedProgress = () => {
+		if (progressToastId === ownedProgressToastId) dismissProgress();
+	};
 	const deadline = Date.now() + INSTALL_DEADLINE_MS;
 	let last: MeshStatus | null = null;
 	while (Date.now() < deadline) {
 		await new Promise<void>((resolve) => {
 			setTimeout(resolve, POLL_INTERVAL_MS);
 		});
+		if (!isCurrent()) {
+			dismissOwnedProgress();
+			return last;
+		}
 		let status: MeshStatus;
 		let installState: Awaited<
 			ReturnType<typeof fetchMeshInstallStatus>
 		> | null = null;
 		try {
 			status = await fetchMeshStatus(target);
+			if (!isCurrent()) {
+				dismissOwnedProgress();
+				return last;
+			}
 			installState = await fetchMeshInstallStatus(target, backend).catch(
-				() => null
+				() => null,
 			);
 		} catch {
+			if (!isCurrent()) {
+				dismissOwnedProgress();
+				return last;
+			}
 			// A transient read failure is not a verdict — Core may be busy with the
 			// install. Keep waiting until the deadline.
 			continue;
 		}
+		if (!isCurrent()) {
+			dismissOwnedProgress();
+			return last;
+		}
 		last = status;
 		onStatus?.(status);
 		if (status.reachable) {
-			dismissProgress();
+			dismissOwnedProgress();
 			sileo.success({
-				title: isTailcat ? "Tailcat ready" : "Mesh connected",
+				title: isTailcat
+					? "Tailcat ready"
+					: status.publicUrl
+						? "Public tunnel ready"
+						: "Mesh connected",
 				description: isTailcat
 					? "This node has a short-lived Tailcat address ready to share."
-					: status.magicDnsName
-						? `This node is on the tailnet as ${status.magicDnsName}.`
-						: "This node is on the tailnet.",
+					: status.publicUrl
+						? `Core is reachable at ${status.publicUrl}. Protected routes still require RYU_TOKEN.`
+						: status.magicDnsName
+							? `This node is on the tailnet as ${status.magicDnsName}.`
+							: "This node is on the tailnet.",
 			});
 			return status;
 		}
 		// The user turned the mesh back off while we waited — stop, silently. They
 		// know what they did; a toast about an install they abandoned is noise.
 		if (!status.enabled) {
-			dismissProgress();
+			dismissOwnedProgress();
 			return status;
 		}
 		if (installState?.state === "failed") {
-			dismissProgress();
+			dismissOwnedProgress();
 			sileo.error({
 				title: `${clientLabel} install failed`,
 				description:
@@ -123,7 +159,11 @@ export async function watchMeshInstall(
 		}
 	}
 
-	dismissProgress();
+	if (!isCurrent()) {
+		dismissOwnedProgress();
+		return last;
+	}
+	dismissOwnedProgress();
 	sileo.warning({
 		title: "Still setting up the mesh",
 		description: `${clientLabel} is taking a while to install. Check the downloads overlay — this node will connect once it finishes.`,

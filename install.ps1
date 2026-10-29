@@ -18,8 +18,27 @@
 #   $env:RYU_CORE_URL       Core health URL (default: http://127.0.0.1:7980)
 #   $env:RYU_PROGRESS_FORMAT json to emit RYU_INSTALL_EVENT JSON lines
 #   $env:RYU_INSTALL_MARKER  version marker written beside installed binaries
+#                            (default: $env:RYU_VERSION; an unpinned install always reinstalls)
+#   $env:RYU_FORCE_INSTALL   1 to reinstall even when the marker already matches
+# Desktop supplies -ReleaseBase from its packaged distribution configuration.
+
+param([string]$ReleaseBase = 'https://github.com/amajorai/ryu/releases')
 
 $ErrorActionPreference = 'Stop'
+
+$releaseUri = $null
+if (-not [Uri]::TryCreate($ReleaseBase, [UriKind]::Absolute, [ref]$releaseUri) -or
+    $releaseUri.Scheme -ne 'https' -or [string]::IsNullOrEmpty($releaseUri.Host) -or
+    -not $ReleaseBase.StartsWith('https://', [StringComparison]::Ordinal) -or
+    -not [string]::IsNullOrEmpty($releaseUri.UserInfo) -or
+    -not [string]::IsNullOrEmpty($releaseUri.Query) -or
+    -not [string]::IsNullOrEmpty($releaseUri.Fragment) -or
+    $ReleaseBase.Trim() -ne $ReleaseBase -or $ReleaseBase.Contains('\') -or
+    $ReleaseBase -match '[\x00-\x1f\x7f]' -or
+    ($ReleaseBase -split '://', 2)[1].Split('/')[0].Contains('@')) {
+  throw 'ReleaseBase must be HTTPS without credentials, query, or fragment'
+}
+$ReleaseBase = $releaseUri.AbsoluteUri.TrimEnd('/')
 
 $repo       = 'amajorai/ryu'
 $installDir = if ($env:RYU_INSTALL_DIR) { $env:RYU_INSTALL_DIR } else { Join-Path $HOME '.ryu\bin' }
@@ -28,7 +47,9 @@ $progressFormat = if ($env:RYU_PROGRESS_FORMAT) { $env:RYU_PROGRESS_FORMAT } els
 $startCore  = if ($env:RYU_START_CORE) { $env:RYU_START_CORE } else { '1' }
 $coreBind   = if ($env:RYU_CORE_BIND) { $env:RYU_CORE_BIND } else { '127.0.0.1:7980' }
 $coreUrl    = if ($env:RYU_CORE_URL) { $env:RYU_CORE_URL } else { 'http://127.0.0.1:7980' }
-$installMarker = if ($env:RYU_INSTALL_MARKER) { $env:RYU_INSTALL_MARKER } else { 'latest' }
+# `latest` names no fixed release, so it never matches an existing install: a
+# re-run of the one-liner must upgrade rather than report "already installed".
+$installMarker = if ($env:RYU_INSTALL_MARKER) { $env:RYU_INSTALL_MARKER } elseif ($env:RYU_VERSION) { $env:RYU_VERSION } else { 'latest' }
 $forceInstall = $env:RYU_FORCE_INSTALL -eq '1'
 
 function Emit-Progress {
@@ -63,13 +84,14 @@ if ($arch -ne 'AMD64') {
 $suffix = 'windows-x86_64'
 
 $base = if ($env:RYU_VERSION) {
-  "https://github.com/$repo/releases/download/$($env:RYU_VERSION)"
+  "$ReleaseBase/download/$($env:RYU_VERSION)"
 } else {
-  "https://github.com/$repo/releases/latest/download"
+  "$ReleaseBase/latest/download"
 }
 
 Write-Host "Installing Ryu ($suffix) into $installDir"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+$replacedExisting = $false
 
 for ($index = 0; $index -lt $binaries.Count; $index++) {
   $bin = $binaries[$index]
@@ -79,7 +101,7 @@ for ($index = 0; $index -lt $binaries.Count; $index++) {
   $before = $index * 15
   $after = ($index + 1) * 15
   $markerPath = "$out.version"
-  $markerMatches = (Test-Path $markerPath) -and ((Get-Content -Raw -Path $markerPath).Trim() -eq $installMarker)
+  $markerMatches = ($installMarker -ne 'latest') -and (Test-Path $markerPath) -and ((Get-Content -Raw -Path $markerPath).Trim() -eq $installMarker)
   if ((Test-Path $out) -and $markerMatches -and -not $forceInstall) {
     Write-Host "  $bin already installed"
     Emit-Progress 'binary' $bin 'skipped' $after
@@ -115,14 +137,35 @@ for ($index = 0; $index -lt $binaries.Count; $index++) {
     $got = (Get-FileHash -Algorithm SHA256 -Path $download).Hash.ToLower()
     if ($want.ToLower() -ne $got) { Fail-Install $bin "checksum mismatch for $asset (want $want, got $got)" }
   }
-  Move-Item -Force -Path $download -Destination $out
+  # Windows refuses to overwrite a running executable (Core and the gateway it
+  # spawns stay running between installs) but does allow renaming it, so move
+  # the current exe aside before putting the verified download in place.
+  $aside = $null
+  try {
+    if (Test-Path $out) {
+      Get-ChildItem -Path $installDir -Filter "$bin.exe.old*" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+      $aside = "$out.old"
+      if (Test-Path $aside) { $aside = "$out.old-$([DateTime]::UtcNow.Ticks)" }
+      Move-Item -Force -Path $out -Destination $aside
+    }
+    Move-Item -Force -Path $download -Destination $out
+  } catch {
+    $replaceError = $_
+    if ($aside -and (Test-Path $aside) -and -not (Test-Path $out)) {
+      Move-Item -Force -Path $aside -Destination $out -ErrorAction SilentlyContinue
+    }
+    Remove-Item -Force -Path $download -ErrorAction SilentlyContinue
+    Fail-Install $bin "could not replace $out — $replaceError"
+  }
+  if ($aside) { $replacedExisting = $true }
   Set-Content -Path "$out.version" -Value $installMarker -NoNewline
   Emit-Progress 'binary' $bin 'complete' $after
 }
 
 # --- PATH (user scope) ------------------------------------------------------
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if (($userPath -split ';') -notcontains $installDir) {
+if ($env:RYU_NO_MODIFY_PATH -ne '1' -and ($userPath -split ';') -notcontains $installDir) {
   $newPath = if ([string]::IsNullOrEmpty($userPath)) { $installDir } else { "$userPath;$installDir" }
   [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
   $env:Path = "$env:Path;$installDir"
@@ -135,8 +178,9 @@ Write-Host "Done. Installed: $($binaries -join ', ')"
 if ($startCore -eq '1') {
   $ryuHome = Split-Path -Parent $installDir
   $corePath = Join-Path $installDir 'ryu-core.exe'
-  $coreLog = if ($env:RYU_CORE_LOG) { $env:RYU_CORE_LOG } else { Join-Path $ryuHome 'ryu-core.log' }
-  $coreErrorLog = "$coreLog.err"
+  # RYU_CORE_LOG: legacy name the desktop installer still passes.
+  $coreLog = if ($env:RYU_CORE_LOG_PATH) { $env:RYU_CORE_LOG_PATH } elseif ($env:RYU_CORE_LOG) { $env:RYU_CORE_LOG } else { Join-Path $ryuHome 'ryu-core.log' }
+  $coreLog = [System.IO.Path]::GetFullPath($coreLog)
   $coreParent = Split-Path -Parent $coreLog
   New-Item -ItemType Directory -Force -Path $coreParent | Out-Null
   Emit-Progress 'core' 'ryu-core' 'started' 55
@@ -152,9 +196,24 @@ if ($startCore -eq '1') {
 
   if (-not (Test-CoreHealthy)) {
     Write-Host '  starting Ryu Core'
-    Start-Process -FilePath $corePath -ArgumentList "--bind=$coreBind" -WorkingDirectory $ryuHome -WindowStyle Hidden -RedirectStandardOutput $coreLog -RedirectStandardError $coreErrorLog | Out-Null
+    $previousCoreLogPath = $env:RYU_CORE_LOG_PATH
+    $env:RYU_CORE_LOG_PATH = $coreLog
+    try {
+      Start-Process -FilePath $corePath -ArgumentList "--bind=$coreBind" -WorkingDirectory $ryuHome -WindowStyle Hidden | Out-Null
+    } finally {
+      if ($null -eq $previousCoreLogPath) {
+        Remove-Item Env:RYU_CORE_LOG_PATH -ErrorAction SilentlyContinue
+      } else {
+        $env:RYU_CORE_LOG_PATH = $previousCoreLogPath
+      }
+    }
   } else {
     Write-Host '  Ryu Core is already running'
+    if ($replacedExisting) {
+      # The running process keeps executing the previous build; only a restart
+      # picks up the binaries this run just installed.
+      Write-Host '  Restart Ryu Core to run the upgraded binaries; the running process is still the previous build'
+    }
   }
 
   $healthy = $false

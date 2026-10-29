@@ -1,3 +1,7 @@
+import {
+	isNativeFunction,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useCallback, useEffect, useState } from "react";
 
 /** Device-local pins for the shared composer "+" directory. */
@@ -7,7 +11,7 @@ const COMPOSER_PINS_EVENT = "ryu:composer-pins-change";
 
 function readComposerPins(): string[] {
 	try {
-		const storage = (globalThis as { localStorage?: Storage }).localStorage;
+		const storage = globalThis.localStorage;
 		if (!storage) {
 			return [];
 		}
@@ -18,7 +22,7 @@ function readComposerPins(): string[] {
 		}
 		return [
 			...new Set(
-				parsed.filter((value): value is string => typeof value === "string")
+				parsed.filter((value): value is string => isNativeText(value))
 			),
 		];
 	} catch {
@@ -28,7 +32,7 @@ function readComposerPins(): string[] {
 
 function writeComposerPins(pinnedIds: readonly string[]): void {
 	try {
-		const storage = (globalThis as { localStorage?: Storage }).localStorage;
+		const storage = globalThis.localStorage;
 		storage?.setItem(COMPOSER_PINS_STORAGE_KEY, JSON.stringify(pinnedIds));
 	} catch {
 		// A storage failure should make pins session-local, not break the composer.
@@ -36,7 +40,7 @@ function writeComposerPins(pinnedIds: readonly string[]): void {
 }
 
 function notifyComposerPinsChanged(): void {
-	if (typeof globalThis.dispatchEvent === "function") {
+	if (isNativeFunction(globalThis.dispatchEvent)) {
 		globalThis.dispatchEvent(new Event(COMPOSER_PINS_EVENT));
 	}
 }
@@ -62,10 +66,7 @@ export function toggleComposerPin(id: string): string[] {
  * composers in the same desktop window in sync; the native storage event covers
  * another window or web tab.
  */
-export function useComposerPins(): {
-	pinnedIds: string[];
-	togglePin: (id: string) => void;
-} {
+export function useComposerPins() {
 	const [pinnedIds, setPinnedIds] = useState(getComposerPins);
 
 	useEffect(() => {

@@ -9,6 +9,8 @@ import { type BrowserWindow, ipcMain } from "electron";
 import {
 	type CoreChatStreamRequest,
 	type CoreCompletionsRequest,
+	type CoreStreamEndEvent,
+	type CoreStreamPartEvent,
 	type CoreToolCallRequest,
 	type CoreTranscribeRequest,
 	IPC,
@@ -27,6 +29,7 @@ import {
 	sidecarStart,
 	sidecarStatus,
 	transcribe,
+	transcribeOptions,
 } from "../services/core.ts";
 
 /**
@@ -40,7 +43,10 @@ export function registerCoreIpc(getWindow: () => BrowserWindow | null): void {
 	ipcMain.handle(
 		IPC.core.chatStreamStart,
 		(_event, req: CoreChatStreamRequest) => {
-			const send = (channel: string, payload: unknown): void => {
+			const send = (
+				channel: string,
+				payload: CoreStreamPartEvent | CoreStreamEndEvent
+			): void => {
 				const win = getWindow();
 				if (win && !win.isDestroyed()) {
 					win.webContents.send(channel, payload);
@@ -77,7 +83,7 @@ export function registerCoreIpc(getWindow: () => BrowserWindow | null): void {
 	);
 
 	ipcMain.handle(IPC.core.transcribe, (_event, req: CoreTranscribeRequest) =>
-		transcribe(req.audio, req.engine)
+		transcribe(req.audio, req.engine, transcribeOptions(req.options))
 	);
 
 	ipcMain.handle(IPC.core.agents, () => agents());

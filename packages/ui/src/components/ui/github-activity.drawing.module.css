@@ -1,0 +1,33 @@
+.tooltipPosition {
+	top: var(--github-activity-1-top);
+	left: var(--github-activity-1-left);
+	transform: var(--github-activity-1-transform);
+}
+.monthRow {
+	gap: var(--github-activity-2-gap);
+	margin-bottom: var(--github-activity-2-margin-bottom);
+}
+.monthCell {
+	width: var(--github-activity-3-width);
+}
+.contributionGrid {
+	gap: var(--github-activity-4-gap);
+}
+.contributionWeek {
+	gap: var(--github-activity-5-gap);
+}
+.contributionCell {
+	width: var(--github-activity-6-width);
+	height: var(--github-activity-6-height);
+}
+.activityCard {
+	width: var(--github-activity-7-width);
+}
+.activityPanel {
+	border-radius: var(--github-activity-8-border-radius);
+}
+
+.level {
+	background-color: var(--contribution-color);
+	opacity: var(--contribution-opacity);
+}

@@ -15,7 +15,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/drafts",
   "name": "Drafts",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Productivity",
   "description": "A durable outbox for messages you have not sent yet. Anything you type into a composer and walk away from is kept as a draft instead of being lost with the tab, and every draft lives in one node-wide store rather than inside the chat it happened to be typed in — so it survives closing the conversation, restarting the app, and moving to another project. A draft can also be armed: give it a condition and it sends itself when the condition holds. The two conditions that exist are the two that actually block work — 'fewer than N agents are running' (so a queued prompt starts the moment a slot frees instead of piling onto a machine already at capacity) and 'this agent's usage window has room again' (so a prompt written against a capped subscription goes out when the cap lifts rather than failing on send). Both are evaluated against readings the app takes from this node, and a draft whose condition never becomes true simply stays a draft — nothing is sent on a guess.",
@@ -94,7 +94,7 @@
         ]
       },
       "host_api": {
-        "grants": ["chat.sendFollowUp", "core:readings"]
+        "grants": ["chat.sendFollowUp", "core:readings", "crypto:seal"]
       }
     }
   ],
@@ -118,19 +118,6 @@
     }
   ],
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "drafts.chat",
-        "title": "Drafts widget",
-        "description": "Drafts chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["drafts widget"],
-        "examples": ["Show me a drafts widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "data_categories": [
       {
         "id": "drafts",

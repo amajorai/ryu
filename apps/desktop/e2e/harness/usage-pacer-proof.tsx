@@ -1,5 +1,26 @@
+// React's style contract includes the exact CSS custom properties consumed below.
+declare module "react" {
+	interface CSSProperties {
+		"--fixture-value-1"?: string | number;
+		"--fixture-value-2"?: string | number;
+		"--fixture-value-3"?: string | number;
+		"--fixture-value-4"?: string | number;
+		"--fixture-value-5"?: string | number;
+		"--fixture-value-6"?: string | number;
+		"--fixture-value-7"?: string | number;
+		"--fixture-value-8"?: string | number;
+		"--fixture-value-9"?: string | number;
+		"--fixture-value-10"?: string | number;
+		"--fixture-value-11"?: string | number;
+		"--fixture-value-12"?: string | number;
+		"--fixture-value-13"?: string | number;
+		"--fixture-value-14"?: string | number;
+	}
+}
+
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import proofStyles from "./usage-pacer-proof.module.css";
 
 type Provider = "claude" | "codex";
 type ScenarioId = "normal" | "remaining" | "day" | "hour";
@@ -58,10 +79,14 @@ const SCENARIOS: Scenario[] = [
 	},
 ];
 
-const PROVIDERS: Record<Provider, { label: string; optionId: string }> = {
+interface ProviderPresentation {
+	label: string;
+	optionId: string;
+}
+const PROVIDERS = {
 	claude: { label: "Claude ACP", optionId: "fast" },
 	codex: { label: "Codex ACP", optionId: "fast-mode" },
-};
+} satisfies Record<Provider, ProviderPresentation>;
 
 function directiveFor(scenario: ScenarioId, provider: Provider): Directive {
 	if (scenario === "normal") {
@@ -89,34 +114,9 @@ function formatDirective(directive: Directive): string {
 
 function Metric({ label, value }: { label: string; value: string }) {
 	return (
-		<div
-			style={{
-				background: "#111923",
-				border: "1px solid #223040",
-				borderRadius: 12,
-				padding: "14px 16px",
-			}}
-		>
-			<div
-				style={{
-					color: "#8292a5",
-					fontSize: 11,
-					letterSpacing: "0.1em",
-					textTransform: "uppercase",
-				}}
-			>
-				{label}
-			</div>
-			<div
-				style={{
-					color: "#eef5ff",
-					fontSize: 18,
-					fontWeight: 700,
-					marginTop: 7,
-				}}
-			>
-				{value}
-			</div>
+		<div className={proofStyles.fixture1}>
+			<div className={proofStyles.fixture2}>{label}</div>
+			<div className={proofStyles.fixture3}>{value}</div>
 		</div>
 	);
 }
@@ -130,66 +130,23 @@ function UsagePacerProof() {
 	const providerInfo = PROVIDERS[provider];
 
 	return (
-		<main
-			style={{
-				background: "#090d12",
-				boxSizing: "border-box",
-				color: "#eef5ff",
-				fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-				minHeight: "100vh",
-				padding: "38px 24px 56px",
-			}}
-		>
-			<div style={{ margin: "0 auto", maxWidth: 980 }}>
+		<main className={proofStyles.fixture4}>
+			<div className={proofStyles.fixture5}>
 				<header>
-					<div style={{ alignItems: "center", display: "flex", gap: 12 }}>
-						<div
-							aria-hidden="true"
-							style={{
-								alignItems: "center",
-								background: "#153c32",
-								border: "1px solid #43d39e",
-								borderRadius: 12,
-								display: "flex",
-								fontSize: 22,
-								height: 44,
-								justifyContent: "center",
-								width: 44,
-							}}
-						>
+					<div className={proofStyles.fixture6}>
+						<div aria-hidden="true" className={proofStyles.fixture7}>
 							↗
 						</div>
 						<div>
-							<div
-								style={{
-									color: "#43d39e",
-									fontSize: 12,
-									fontWeight: 700,
-									letterSpacing: "0.12em",
-								}}
-							>
+							<div className={proofStyles.fixture8}>
 								VERIFIED REACT ARTIFACT
 							</div>
-							<h1
-								style={{
-									fontSize: 32,
-									letterSpacing: "-0.04em",
-									margin: "5px 0 0",
-								}}
-							>
+							<h1 className={proofStyles.fixture9}>
 								Usage Pacer · reverse quota policy
 							</h1>
 						</div>
 					</div>
-					<p
-						style={{
-							color: "#aebdcd",
-							fontSize: 16,
-							lineHeight: 1.6,
-							margin: "20px 0 26px",
-							maxWidth: 760,
-						}}
-					>
+					<p className={proofStyles.fixture10}>
 						When a subscription window is nearly spent or close to reset, the
 						plugin can move back up the model ladder and request provider fast
 						mode for this turn.
@@ -198,11 +155,7 @@ function UsagePacerProof() {
 
 				<section
 					aria-label="Verification summary"
-					style={{
-						display: "grid",
-						gap: 10,
-						gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-					}}
+					className={proofStyles.fixture11}
 				>
 					<Metric label="Hook tests" value="10 / 10 passed" />
 					<Metric label="Core route" value="ACP merge passed" />
@@ -210,42 +163,41 @@ function UsagePacerProof() {
 					<Metric label="Claude ACP" value="fast" />
 				</section>
 
-				<section aria-label="Usage window scenarios" style={{ marginTop: 28 }}>
-					<div
-						style={{
-							alignItems: "end",
-							display: "flex",
-							justifyContent: "space-between",
-							marginBottom: 11,
-						}}
-					>
+				<section
+					aria-label="Usage window scenarios"
+					className={proofStyles.fixture12}
+				>
+					<div className={proofStyles.fixture13}>
 						<div>
-							<h2 style={{ fontSize: 18, margin: 0 }}>Policy simulator</h2>
-							<div style={{ color: "#8292a5", fontSize: 13, marginTop: 5 }}>
+							<h2 className={proofStyles.fixture14}>Policy simulator</h2>
+							<div className={proofStyles.fixture15}>
 								Select the usage boundary that the tests exercise.
 							</div>
 						</div>
-						<div style={{ color: "#43d39e", fontSize: 13 }}>
-							Upgrade wins fallback
-						</div>
+						<div className={proofStyles.fixture16}>Upgrade wins fallback</div>
 					</div>
-					<div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+					<div className={proofStyles.fixture17}>
 						{SCENARIOS.map((item) => {
 							const selected = item.id === scenario.id;
 							return (
 								<button
 									aria-pressed={selected}
+									className={proofStyles.dynamicFixture1}
 									data-testid={`scenario-${item.id}`}
 									key={item.id}
 									onClick={() => setScenarioId(item.id)}
 									style={{
-										background: selected ? "#173a34" : "#111923",
-										border: `1px solid ${selected ? "#43d39e" : "#2a3a4c"}`,
-										borderRadius: 9,
-										color: selected ? "#c9ffe8" : "#b9c6d4",
-										cursor: "pointer",
-										fontSize: 13,
-										padding: "9px 12px",
+										"--fixture-value-1": selected
+											? "var(--usage-pacer-proof-color-1)"
+											: "var(--usage-pacer-proof-color-2)",
+										"--fixture-value-2": `1px solid ${selected ? "var(--usage-pacer-proof-color-3)" : "var(--usage-pacer-proof-color-4)"}`,
+										"--fixture-value-3": "9px",
+										"--fixture-value-4": selected
+											? "var(--usage-pacer-proof-color-5)"
+											: "var(--usage-pacer-proof-color-6)",
+										"--fixture-value-5": "pointer",
+										"--fixture-value-6": "13px",
+										"--fixture-value-7": "9px 12px",
 									}}
 									type="button"
 								>
@@ -258,126 +210,70 @@ function UsagePacerProof() {
 
 				<section
 					aria-label="Selected usage window"
-					style={{
-						background: "#111923",
-						border: "1px solid #223040",
-						borderRadius: 14,
-						marginTop: 16,
-						padding: 18,
-					}}
+					className={proofStyles.fixture18}
 				>
-					<div
-						style={{
-							display: "grid",
-							gap: 16,
-							gridTemplateColumns: "1.2fr repeat(3, 1fr)",
-						}}
-					>
+					<div className={proofStyles.fixture19}>
 						<div>
-							<div
-								style={{
-									color: "#8292a5",
-									fontSize: 11,
-									letterSpacing: "0.1em",
-									textTransform: "uppercase",
-								}}
-							>
-								Current boundary
-							</div>
-							<div style={{ fontSize: 19, fontWeight: 700, marginTop: 6 }}>
-								{scenario.label}
-							</div>
-							<div
-								style={{
-									color: "#aebdcd",
-									fontSize: 13,
-									lineHeight: 1.5,
-									marginTop: 5,
-								}}
-							>
+							<div className={proofStyles.fixture20}>Current boundary</div>
+							<div className={proofStyles.fixture21}>{scenario.label}</div>
+							<div className={proofStyles.fixture22}>
 								{scenario.description}
 							</div>
 						</div>
 						<div>
-							<div
-								style={{
-									color: "#8292a5",
-									fontSize: 11,
-									letterSpacing: "0.1em",
-									textTransform: "uppercase",
-								}}
-							>
-								Quota left
-							</div>
-							<strong style={{ display: "block", fontSize: 19, marginTop: 6 }}>
+							<div className={proofStyles.fixture23}>Quota left</div>
+							<strong className={proofStyles.fixture24}>
 								{scenario.remaining}
 							</strong>
 						</div>
 						<div>
-							<div
-								style={{
-									color: "#8292a5",
-									fontSize: 11,
-									letterSpacing: "0.1em",
-									textTransform: "uppercase",
-								}}
-							>
-								Reset in
-							</div>
-							<strong style={{ display: "block", fontSize: 19, marginTop: 6 }}>
+							<div className={proofStyles.fixture25}>Reset in</div>
+							<strong className={proofStyles.fixture26}>
 								{scenario.reset}
 							</strong>
 						</div>
 						<div>
-							<div
-								style={{
-									color: "#8292a5",
-									fontSize: 11,
-									letterSpacing: "0.1em",
-									textTransform: "uppercase",
-								}}
-							>
-								Current model
-							</div>
-							<strong style={{ display: "block", fontSize: 19, marginTop: 6 }}>
+							<div className={proofStyles.fixture27}>Current model</div>
+							<strong className={proofStyles.fixture28}>
 								{scenario.model}
 							</strong>
 						</div>
 					</div>
 				</section>
 
-				<section aria-label="Provider fast mode" style={{ marginTop: 28 }}>
-					<div
-						style={{
-							alignItems: "end",
-							display: "flex",
-							justifyContent: "space-between",
-							marginBottom: 11,
-						}}
-					>
+				<section
+					aria-label="Provider fast mode"
+					className={proofStyles.fixture29}
+				>
+					<div className={proofStyles.fixture30}>
 						<div>
-							<h2 style={{ fontSize: 18, margin: 0 }}>ACP provider mapping</h2>
-							<div style={{ color: "#8292a5", fontSize: 13, marginTop: 5 }}>
+							<h2 className={proofStyles.fixture31}>ACP provider mapping</h2>
+							<div className={proofStyles.fixture32}>
 								Fast mode is exposed as a provider-specific session config
 								option.
 							</div>
 						</div>
-						<div style={{ display: "flex", gap: 7 }}>
+						<div className={proofStyles.fixture33}>
 							{(["claude", "codex"] as const).map((item) => {
 								const selected = provider === item;
 								return (
 									<button
 										aria-pressed={selected}
+										className={proofStyles.dynamicFixture2}
 										key={item}
 										onClick={() => setProvider(item)}
 										style={{
-											background: selected ? "#263147" : "#111923",
-											border: `1px solid ${selected ? "#8da9ff" : "#2a3a4c"}`,
-											borderRadius: 8,
-											color: selected ? "#dfe7ff" : "#aebdcd",
-											cursor: "pointer",
-											fontSize: 12,
-											padding: "8px 10px",
+											"--fixture-value-8": selected
+												? "var(--usage-pacer-proof-color-7)"
+												: "var(--usage-pacer-proof-color-2)",
+											"--fixture-value-9": `1px solid ${selected ? "var(--usage-pacer-proof-color-8)" : "var(--usage-pacer-proof-color-4)"}`,
+											"--fixture-value-10": "8px",
+											"--fixture-value-11": selected
+												? "var(--usage-pacer-proof-color-9)"
+												: "var(--usage-pacer-proof-color-10)",
+											"--fixture-value-12": "pointer",
+											"--fixture-value-13": "12px",
+											"--fixture-value-14": "8px 10px",
 										}}
 										type="button"
 									>
@@ -388,75 +284,22 @@ function UsagePacerProof() {
 						</div>
 					</div>
 
-					<div
-						style={{
-							display: "grid",
-							gap: 12,
-							gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)",
-						}}
-					>
-						<div
-							style={{
-								background: "#111923",
-								border: "1px solid #223040",
-								borderRadius: 14,
-								padding: 18,
-							}}
-						>
-							<div
-								style={{
-									color: "#8da9ff",
-									fontSize: 12,
-									fontWeight: 700,
-									letterSpacing: "0.1em",
-									textTransform: "uppercase",
-								}}
-							>
-								{providerInfo.label}
-							</div>
-							<h3 style={{ fontSize: 22, margin: "8px 0 4px" }}>
-								{providerInfo.optionId}
-							</h3>
-							<p
-								style={{
-									color: "#aebdcd",
-									fontSize: 13,
-									lineHeight: 1.55,
-									margin: 0,
-								}}
-							>
+					<div className={proofStyles.fixture34}>
+						<div className={proofStyles.fixture35}>
+							<div className={proofStyles.fixture36}>{providerInfo.label}</div>
+							<h3 className={proofStyles.fixture37}>{providerInfo.optionId}</h3>
+							<p className={proofStyles.fixture38}>
 								Readable rule key <code>fast_mode</code> is translated to the
 								adapter's advertised id and sent only for this turn.
 							</p>
 						</div>
-						<div
-							style={{
-								background: "#070a0e",
-								border: "1px solid #223040",
-								borderRadius: 14,
-								padding: 18,
-							}}
-						>
-							<div
-								style={{
-									color: "#8292a5",
-									fontSize: 11,
-									letterSpacing: "0.1em",
-									textTransform: "uppercase",
-								}}
-							>
+						<div className={proofStyles.fixture39}>
+							<div className={proofStyles.fixture40}>
 								Selected directive · {scenario.label}
 							</div>
 							<pre
+								className={proofStyles.fixture41}
 								data-testid="directive-output"
-								style={{
-									color: "#d8e6ff",
-									fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-									fontSize: 13,
-									lineHeight: 1.55,
-									margin: "12px 0 0",
-									whiteSpace: "pre-wrap",
-								}}
 							>
 								{formatDirective(directive)}
 							</pre>
@@ -464,20 +307,12 @@ function UsagePacerProof() {
 					</div>
 				</section>
 
-				<footer
-					style={{
-						borderTop: "1px solid #1d2a37",
-						color: "#8292a5",
-						fontSize: 12,
-						lineHeight: 1.6,
-						marginTop: 28,
-						paddingTop: 16,
-					}}
-				>
-					<strong style={{ color: "#b9c6d4" }}>Evidence:</strong> 10 Usage Pacer
-					hook tests, the Core ACP merge test, and the existing ACP boolean
-					transport test passed. Unknown provider options remain best-effort, so
-					an adapter that does not advertise fast mode continues normally.
+				<footer className={proofStyles.fixture42}>
+					<strong className={proofStyles.fixture43}>Evidence:</strong> 10 Usage
+					Pacer hook tests, the Core ACP merge test, and the existing ACP
+					boolean transport test passed. Unknown provider options remain
+					best-effort, so an adapter that does not advertise fast mode continues
+					normally.
 				</footer>
 			</div>
 		</main>
@@ -486,6 +321,7 @@ function UsagePacerProof() {
 
 const root = document.getElementById("root");
 if (root) {
+	// SAFETY: This fixture installs and reuses only its own optional React root handle below.
 	const globals = globalThis as typeof globalThis & {
 		__usagePacerRoot?: ReturnType<typeof createRoot>;
 	};

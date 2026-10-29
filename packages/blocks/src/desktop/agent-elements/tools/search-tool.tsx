@@ -1,9 +1,20 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { AgentActivity } from "@ryu/ui/components/agents/agent-activity";
+import {
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { memo, useMemo } from "react";
+import { z } from "zod";
 import { useToolComplete } from "../hooks/use-tool-complete.ts";
 import type { SourceType } from "../icons/source-icons.tsx";
 import type { StepState, TimelineStep } from "../types/timeline.ts";
+import { nativeSdkSchemaAdmits } from "../utils/native-sdk-admission.ts";
+import {
+	type NativeSdkValue,
+	nativeSdkObjectSchema,
+} from "../utils/native-sdk-observation.ts";
 import {
 	mapToolInvocationToStep,
 	mapToolStateToStepState,
@@ -31,9 +42,15 @@ export interface SearchGroupRichProps {
 }
 
 /** Truthful completion label for a finished search. */
-function searchCompleteLabel(count: number, hasBody: boolean): string {
+function searchCompleteLabel(
+	count: number,
+	hasBody: boolean,
+	tl: LiteralMessage
+): string {
 	if (count > 0) {
-		return `Found ${formatNumber(count)} results`;
+		return tl("Found {resultCount} results", {
+			resultCount: formatNumber(count),
+		});
 	}
 	if (hasBody) {
 		return "Search complete";
@@ -49,9 +66,10 @@ export function SearchGroupRich({
 	bodyText = "",
 	defaultOpen,
 }: SearchGroupRichProps) {
+	const tl = useLiteralMessages();
 	const anyAnimating = toolSteps.some((s) => stepStates[s.id] === "animating");
 	const searchQuery =
-		toolSteps.find((s) => s.searchQuery)?.searchQuery ?? "searching...";
+		toolSteps.find((s) => s.searchQuery)?.searchQuery ?? "searching…";
 	const totalResults = results.length;
 	const hasResults = totalResults > 0;
 	const hasBody = !hasResults && bodyText.trim().length > 0;
@@ -107,7 +125,7 @@ export function SearchGroupRich({
 				defaultOpen={defaultOpen}
 				items={items}
 				status={anyAnimating ? "working" : "complete"}
-				summary={searchCompleteLabel(totalResults, hasBody)}
+				summary={searchCompleteLabel(totalResults, hasBody, tl)}
 			/>
 		</>
 	);
@@ -120,12 +138,20 @@ export interface SearchToolProps {
 		toolCallId?: string;
 		type?: string;
 		state?: string;
-		input?: Record<string, unknown>;
-		args?: Record<string, unknown>;
-		output?: Record<string, unknown>;
-		result?: Record<string, unknown>;
+		input?: NativeSdkValue;
+		args?: NativeSdkValue;
+		output?: NativeSdkValue;
+		result?: NativeSdkValue;
 	};
 	results?: SearchResult[];
+}
+
+/** These optional cells describe the existing native member reads, including
+ * primitive boxing and nullish optional chaining; no envelope/array DTO is parsed.
+ */
+interface NativeSearchOutputObservation {
+	output?: NativeSdkValue;
+	results?: NativeSdkValue;
 }
 
 // Markdown link: `[title](https://…)`. Declared at module scope so it isn't
@@ -138,19 +164,19 @@ const WWW_PREFIX_RE = /^www\./;
  * `{ status, output }` envelope, ACP content-block arrays (`[{type,text}]`),
  * and plain strings — flattening them all to human-readable text.
  */
-function toOutputText(value: unknown): string {
+function toOutputText(value: NativeSdkValue): string {
 	if (value == null) {
 		return "";
 	}
-	if (typeof value === "string") {
+	if (isNativeText(value)) {
 		return value;
 	}
 	if (Array.isArray(value)) {
 		return value.map(toOutputText).filter(Boolean).join("\n");
 	}
-	if (typeof value === "object") {
-		const obj = value as Record<string, unknown>;
-		if (typeof obj.text === "string") {
+	if (nativeSdkSchemaAdmits(nativeSdkObjectSchema, value)) {
+		const obj = value;
+		if (isNativeText(obj.text)) {
 			return obj.text;
 		}
 		if (obj.output !== undefined) {
@@ -159,7 +185,7 @@ function toOutputText(value: unknown): string {
 		if (obj.content !== undefined) {
 			return toOutputText(obj.content);
 		}
-		if (typeof obj.result === "string") {
+		if (isNativeText(obj.result)) {
 			return obj.result;
 		}
 	}
@@ -183,31 +209,41 @@ function parseLinkResults(text: string): SearchResult[] {
 		} catch {
 			// Leave `host` as the raw URL if it doesn't parse.
 		}
-		out.push({ title, source: host as SourceType, date: "" });
+		out.push({ title, source: host, date: "" });
 	}
 	return out;
 }
 
-function normalizeResults(value: unknown): SearchResult[] | undefined {
+/** Only these opaque result cells are observed; raw SDK arrays/receivers and
+ * unrelated fields remain unchanged. This is not a decoded full tool DTO. */
+interface NativeSearchResultObservation {
+	readonly date?: NativeSdkValue;
+	readonly source?: NativeSdkValue;
+	readonly title?: NativeSdkValue;
+}
+const nativeSearchResultObservationSchema =
+	z.custom<NativeSearchResultObservation>(isNativeObjectLike);
+
+function normalizeResults(value: NativeSdkValue): SearchResult[] | undefined {
 	if (!Array.isArray(value)) {
 		return undefined;
 	}
 	const parsed = value
-		.map((item) => {
-			if (!item || typeof item !== "object") {
+		.map((item: NativeSdkValue) => {
+			if (!nativeSdkSchemaAdmits(nativeSearchResultObservationSchema, item)) {
 				return null;
 			}
-			const source = (item as { source?: unknown }).source;
-			const title = (item as { title?: unknown }).title;
-			const date = (item as { date?: unknown }).date;
+			const source = item.source;
+			const title = item.title;
+			const date = item.date;
 			// title is required; source and date are optional (ACP results may omit them)
-			if (typeof title !== "string") {
+			if (!isNativeText(title)) {
 				return null;
 			}
 			return {
-				source: (typeof source === "string" ? source : "") as SourceType,
+				source: isNativeText(source) ? source : "",
 				title,
-				date: typeof date === "string" ? date : "",
+				date: isNativeText(date) ? date : "",
 			};
 		})
 		.filter((item): item is SearchResult => Boolean(item));
@@ -245,15 +281,30 @@ export const SearchTool = memo(function SearchTool({
 	// unwrap the real payload to text and lift any markdown links into results,
 	// keeping whatever remains as the panel body. This is what fixes the old
 	// "Found 0 results" for ACP WebSearch, whose output is text, not `{results}`.
+	// SAFETY: the optional-chain reads below retain the opaque SDK receivers and
+	// native nil/boxing semantics. Only the results/output cells are observed;
+	// neither their presence nor a decoded object/array value is asserted.
 	const structured =
 		results ??
-		normalizeResults(part.output?.results) ??
-		normalizeResults(part.result?.results) ??
 		normalizeResults(
-			(part.output as { output?: { results?: unknown } })?.output?.results
+			(part.output as NativeSearchOutputObservation | undefined)?.results
 		) ??
 		normalizeResults(
-			(part.result as { output?: { results?: unknown } })?.output?.results
+			(part.result as NativeSearchOutputObservation | undefined)?.results
+		) ??
+		normalizeResults(
+			(
+				(part.output as NativeSearchOutputObservation | undefined)?.output as
+					| NativeSearchOutputObservation
+					| undefined
+			)?.results
+		) ??
+		normalizeResults(
+			(
+				(part.result as NativeSearchOutputObservation | undefined)?.output as
+					| NativeSearchOutputObservation
+					| undefined
+			)?.results
 		);
 	const bodyText = structured ? "" : toOutputText(part.output ?? part.result);
 	const linked = structured ?? (bodyText ? parseLinkResults(bodyText) : []);

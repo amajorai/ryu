@@ -1,7 +1,7 @@
 "use client";
 
-import { EASE_OUT, SPRING_PRESS } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { EASE_OUT, SPRING_PRESS } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useId } from "react";
 

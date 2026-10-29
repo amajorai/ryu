@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["bun", "react", "react-dom", "vite/client"] },
+  "include": [
+    "e2e/harness/time-consumers-proof.tsx",
+    "e2e/harness/vite.time-consumers.config.ts",
+    "e2e/time-consumers-source-map.ts",
+    "e2e/time-consumers-resource-audit.ts",
+    "e2e/time-consumers.playwright.config.ts",
+    "e2e/time-consumers.spec.ts",
+    "../../packages/blocks/src/desktop/agent-elements/message-list.tsx",
+    "../../packages/blocks/src/desktop/agent-elements/message-list.module.css.d.ts",
+    "../../packages/ui/src/components/data-grid/data-grid-cell-variants.tsx",
+    "../../packages/ui/src/lib/display-day.ts"
+  ]
+}

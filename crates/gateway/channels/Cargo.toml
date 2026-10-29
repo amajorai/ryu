@@ -1,12 +1,13 @@
 [package]
 name = "ryu-gw-channels"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
 description = "Ryu Gateway channel-layer engine: the external messaging-surface adapters (Telegram long-poll, Slack Socket Mode, Discord poll, WhatsApp webhook) plus their shared inbound path — allowlist gate, request-body build, reply extraction — over a narrow `ChannelHost` seam. The pipeline call, `RequestContext` construction, control-plane store fetch, and channel registration/spawn wiring stay in apps/gateway (they hold `SharedState` and drive the pipeline; 'engine moves, wiring stays')."
 
 [dependencies]
+ryu-channel-contracts = { package = "ryu-gw-contracts", path = "../contracts" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["macros"] }
 serde = { version = "1", features = ["derive"] }
@@ -21,3 +22,6 @@ hmac = "0.12"
 hex = "0.4"
 base64 = "0.22"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
+# backend: the key arrives from Core (RYU_SEAL_KEY) or RYU_MASTER_KEY.
+ryu-crypto = { path = "../../core/crypto", version = "0.5.0", default-features = false }

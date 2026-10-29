@@ -1,0 +1,15 @@
+{
+  "provider": "openai-credits",
+  "status": 400,
+  "expectRow": "openai.content_policy_violation",
+  "provenance": "reconstructed from public reports, not captured from a live request (spec Q-03-1)",
+  "source": "https://learn.microsoft.com/en-us/answers/questions/2044545/content-filter-and-policy-violation-issues-when-us",
+  "body": {
+    "error": {
+      "code": "content_policy_violation",
+      "message": "RYU_TEST_FIXTURE upstream refusal message",
+      "param": null,
+      "type": "invalid_request_error"
+    }
+  }
+}

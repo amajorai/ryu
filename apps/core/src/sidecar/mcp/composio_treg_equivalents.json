@@ -1,0 +1,274 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "composioSlug": "COMPOSIO_SEARCH_AMAZON",
+      "composioToolkit": "composio_search",
+      "brand": "amazon",
+      "tregEndpointId": "justoneapi.x.amazon-search-products-v1",
+      "method": "GET",
+      "args": [
+        {
+          "composio": "query",
+          "treg": "keyword",
+          "in": "query",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        },
+        {
+          "composio": "page",
+          "treg": "page",
+          "in": "query",
+          "type": "integer",
+          "min": 1,
+          "max": 100
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://docs.justoneapi.com/en/api/amazon/product-search-v1",
+        "verifiedOn": "2026-10-22"
+      }
+    },
+    {
+      "composioSlug": "COMPOSIO_SEARCH_DUCK_DUCK_GO",
+      "composioToolkit": "composio_search",
+      "brand": "duckduckgosearchresultsserp",
+      "tregEndpointId": "litescrape.duckduckgo.serp.organic",
+      "method": "GET",
+      "args": [
+        {
+          "composio": "query",
+          "treg": "q",
+          "in": "query",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        },
+        {
+          "composio": "start",
+          "treg": "start",
+          "in": "query",
+          "type": "integer",
+          "min": 0,
+          "max": 500
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://litescrape.com/docs/duckduckgo-search",
+        "verifiedOn": "2026-10-22"
+      }
+    },
+    {
+      "composioSlug": "COMPOSIO_SEARCH_EXA_ANSWER",
+      "composioToolkit": "composio_search",
+      "brand": "openwebseodata",
+      "tregEndpointId": "exa.web.answer",
+      "method": "POST",
+      "args": [
+        {
+          "composio": "content",
+          "treg": "query",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://exa.ai/docs/reference/answer",
+        "verifiedOn": "2026-10-22"
+      }
+    },
+    {
+      "composioSlug": "COMPOSIO_SEARCH_GOOGLE_MAPS",
+      "composioToolkit": "composio_search",
+      "brand": "googlekeyworddata",
+      "tregEndpointId": "serper.google.serp.maps",
+      "method": "POST",
+      "args": [
+        {
+          "composio": "q",
+          "treg": "q",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        },
+        {
+          "composio": "ll",
+          "treg": "ll",
+          "in": "body",
+          "type": "string",
+          "maxBytes": 64,
+          "pattern": "@-?[0-9]{1,3}(\\.[0-9]+)?,-?[0-9]{1,3}(\\.[0-9]+)?,[0-9]{1,2}(\\.[0-9]+)?z"
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://serper.dev/playground",
+        "verifiedOn": "2026-10-22"
+      }
+    },
+    {
+      "composioSlug": "COMPOSIO_SEARCH_IMAGE",
+      "composioToolkit": "composio_search",
+      "brand": "googlekeyworddata",
+      "tregEndpointId": "serper.google.serp.images",
+      "method": "POST",
+      "args": [
+        {
+          "composio": "query",
+          "treg": "q",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://serper.dev/playground",
+        "verifiedOn": "2026-10-22"
+      }
+    },
+    {
+      "composioSlug": "COMPOSIO_SEARCH_NEWS",
+      "composioToolkit": "composio_search",
+      "brand": "googlekeyworddata",
+      "tregEndpointId": "serper.google.serp.news",
+      "method": "POST",
+      "args": [
+        {
+          "composio": "query",
+          "treg": "q",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        },
+        {
+          "composio": "gl",
+          "treg": "gl",
+          "in": "body",
+          "type": "string",
+          "maxBytes": 2,
+          "pattern": "[a-z]{2}"
+        },
+        {
+          "composio": "hl",
+          "treg": "hl",
+          "in": "body",
+          "type": "string",
+          "maxBytes": 16,
+          "pattern": "[a-z]{2}(-[A-Za-z]{2})?"
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://serper.dev/playground",
+        "verifiedOn": "2026-10-22"
+      }
+    },
+    {
+      "composioSlug": "COMPOSIO_SEARCH_SCHOLAR",
+      "composioToolkit": "composio_search",
+      "brand": "googlekeyworddata",
+      "tregEndpointId": "serper.google.serp.scholar",
+      "method": "POST",
+      "args": [
+        {
+          "composio": "query",
+          "treg": "q",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://serper.dev/playground",
+        "verifiedOn": "2026-10-22"
+      }
+    },
+    {
+      "composioSlug": "COMPOSIO_SEARCH_SHOPPING",
+      "composioToolkit": "composio_search",
+      "brand": "googlekeyworddata",
+      "tregEndpointId": "litescrape.google.serp.shopping",
+      "method": "GET",
+      "args": [
+        {
+          "composio": "query",
+          "treg": "q",
+          "in": "query",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        },
+        {
+          "composio": "gl",
+          "treg": "gl",
+          "in": "query",
+          "type": "string",
+          "maxBytes": 2,
+          "pattern": "[a-z]{2}"
+        },
+        {
+          "composio": "hl",
+          "treg": "hl",
+          "in": "query",
+          "type": "string",
+          "maxBytes": 16,
+          "pattern": "[a-z]{2}(-[A-Za-z]{2})?"
+        },
+        {
+          "composio": "location",
+          "treg": "location",
+          "in": "query",
+          "type": "string",
+          "maxBytes": 256
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://litescrape.com/docs/google-shopping",
+        "verifiedOn": "2026-10-22"
+      }
+    },
+    {
+      "composioSlug": "COMPOSIO_SEARCH_TRIP_ADVISOR",
+      "composioToolkit": "composio_search",
+      "brand": "tripadvisor",
+      "tregEndpointId": "litescrape.tripadvisor.search.general",
+      "method": "GET",
+      "args": [
+        {
+          "composio": "query",
+          "treg": "q",
+          "in": "query",
+          "type": "string",
+          "required": true,
+          "maxBytes": 2048
+        },
+        {
+          "composio": "offset",
+          "treg": "start",
+          "in": "query",
+          "type": "integer",
+          "min": 0,
+          "max": 500
+        }
+      ],
+      "provenance": {
+        "composioDocs": "https://docs.composio.dev/toolkits/composio_search",
+        "vendorDocs": "https://litescrape.com/docs/tripadvisor-search",
+        "verifiedOn": "2026-10-22"
+      }
+    }
+  ]
+}

@@ -2,10 +2,17 @@
 
 // beui.dev/components/agents/agent-activity
 
-import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure";
-import { ThinkingShimmer } from "@ryu/ui/components/agents/loading-states/thinking-shimmer";
-import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import type { CSSProperties } from "react";
+import css from "./index.module.css";
+
+interface Inline1Style extends CSSProperties {
+	"--index-1-height"?: CSSProperties["height"];
+}
+
+import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
+import { ThinkingShimmer } from "@ryu/ui/components/agents/loading-states/thinking-shimmer.tsx";
+import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { ChevronDown, Globe2, ListChecks, Wrench } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -17,12 +24,12 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { ActivityRow } from "./activity-row";
+import { ActivityRow } from "./activity-row.tsx";
 import type {
 	AgentActivityContentType,
 	AgentActivityItem,
 	AgentActivityProps,
-} from "./types";
+} from "./types.ts";
 
 export type {
 	AgentActivityContentType,
@@ -37,7 +44,7 @@ export type {
 	AgentSearchResult,
 	AgentStepStatus,
 	AgentTraceKind,
-} from "./types";
+} from "./types.ts";
 
 function formatDuration(duration: number) {
 	const seconds = Math.max(0, Math.round(duration));
@@ -187,7 +194,7 @@ export function AgentActivity({
 		const measure = () => setContentHeight(node.offsetHeight);
 		measure();
 
-		if (typeof ResizeObserver === "undefined") {
+		if (globalThis.ResizeObserver === undefined) {
 			return;
 		}
 		const observer = new ResizeObserver(measure);
@@ -212,12 +219,10 @@ export function AgentActivity({
 
 	const liveLabel = activeLabel ?? getActiveLabel(contentType);
 	const completedSummary = summary ?? getSummary(contentType, items, duration);
-	const maskImage = capped
-		? working
-			? "linear-gradient(to bottom, transparent, black 12px)"
-			: "linear-gradient(to bottom, transparent, black 12px, black calc(100% - 12px), transparent)"
-		: undefined;
-
+	const inline1Style: Inline1Style = {
+		"--index-1-height":
+			viewportHeight === undefined ? undefined : `${viewportHeight}px`,
+	};
 	return (
 		<div
 			aria-busy={working}
@@ -264,18 +269,18 @@ export function AgentActivity({
 				role="region"
 			>
 				<div
-					className={cn(
-						"scrollbar-hide pr-1",
-						capped && expanded && !working
-							? "scroll-fade overflow-y-auto"
-							: "overflow-y-hidden"
-					)}
+					className={[
+						css.inline1,
+						capped && (working ? css.workingMask : css.completedMask),
+						cn(
+							"scrollbar-hide pr-1",
+							capped && expanded && !working
+								? "scroll-fade overflow-y-auto"
+								: "overflow-y-hidden"
+						),
+					].join(" ")}
 					ref={viewportRef}
-					style={{
-						height: viewportHeight,
-						maskImage,
-						WebkitMaskImage: maskImage,
-					}}
+					style={inline1Style}
 				>
 					<motion.div
 						animate={{ y: streamOffset }}

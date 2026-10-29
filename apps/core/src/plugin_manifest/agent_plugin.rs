@@ -159,10 +159,11 @@ fn validate_spec_name(name: &str) -> Result<(), String> {
 /// Kept OUT of the package directory: the spec treats package files as read-only
 /// content under containment rules (§4.1) and gives `${PLUGIN_DATA}` its own
 /// separate containment boundary (§7.2.1), so mixing them would blur the two.
+/// It is the same `<data dir>/plugin-data/<dir>` every plugin's data lives in
+/// (and uninstall-with-data deletes); `dir_name` is already the flattened
+/// package directory name.
 fn plugin_data_dir(dir_name: &str) -> PathBuf {
-    crate::plugin_manifest::PluginManifestLoader::plugins_dir()
-        .join(".plugin-data")
-        .join(dir_name)
+    ryu_sidecar_runtime::layout::plugin_data_root(&crate::paths::ryu_dir()).join(dir_name)
 }
 
 /// Expand `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` (§7.2.1) in an `args`/`env` value.

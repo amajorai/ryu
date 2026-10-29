@@ -1,10 +1,29 @@
 import { expect, test } from "bun:test";
 import {
 	createBackup,
+	listBackups,
 	restoreBackup,
 	saveBackupDestination,
 } from "./backups.ts";
 import { ApiError } from "./client.ts";
+
+test("node and Space browse queries select their own catalogs", async () => {
+	const urls: string[] = [];
+	const target = {
+		url: "https://node.example",
+		token: "node-token",
+		fetch: async (url: RequestInfo | URL) => {
+			urls.push(String(url));
+			return Response.json([]);
+		},
+	};
+	await listBackups(target, "destination/id");
+	await listBackups(target, "destination/id", "space/a");
+	expect(urls).toEqual([
+		"https://node.example/api/backups/destinations/destination%2Fid/backups?scope=node",
+		"https://node.example/api/backups/destinations/destination%2Fid/backups?spaceId=space%2Fa",
+	]);
+});
 
 test("backup clients preserve remote node credentials, scope and idempotency", async () => {
 	const calls: Array<{ url: string; body: unknown; headers: Headers }> = [];
@@ -18,7 +37,18 @@ test("backup clients preserve remote node credentials, scope and idempotency", a
 				body: JSON.parse(String(init?.body)),
 				headers: new Headers(init?.headers),
 			});
-			return Response.json({ id: "operation", status: "pending" });
+			return Response.json({
+				id: "operation",
+				status: "pending",
+				destinationId: "dest",
+				scope: { kind: "space", spaceId: "space" },
+				action: "backup",
+				createdAt: "2026-10-07T00:00:00Z",
+				completedAt: null,
+				backup: null,
+				error: null,
+				result: null,
+			});
 		},
 	};
 	const body = {
@@ -71,8 +101,9 @@ test("failed destination validation remains a failure with the safe server reaso
 		throw new Error("Expected validation failure");
 	} catch (error) {
 		expect(error).toBeInstanceOf(ApiError);
-		expect((error as ApiError).serverMessage).toBe(
-			"Recovery key must contain 32 bytes"
-		);
+		if (!(error instanceof ApiError)) {
+			throw error;
+		}
+		expect(error.serverMessage).toBe("Recovery key must contain 32 bytes");
 	}
 });

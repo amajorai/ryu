@@ -1,17 +1,29 @@
 "use client";
-
-import { cn } from "@ryu/ui/lib/utils";
-import { createCodePlugin } from "@streamdown/code";
+import { useMediaQuery } from "@ryu/ui/hooks/use-mobile.ts";
 import {
+	isNativeBoolean,
+	isNativeFunction,
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils";
+import {
+	CodeBlock,
+	CodeBlockCopyButton,
+	CodeBlockDownloadButton,
 	type Components,
+	type ControlsConfig,
 	type CustomRendererProps,
 	extractTableDataFromElement,
 	Streamdown,
+	StreamdownContext,
 	type StreamdownProps,
 	tableDataToCSV,
 	tableDataToMarkdown,
 	tableDataToTSV,
+	useIsCodeFenceIncomplete,
 } from "streamdown";
+import styles from "./markdown.module.css";
 import "streamdown/styles.css";
 import { ExpandIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -20,14 +32,18 @@ import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
-	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { safeNavigationUrl } from "@ryu/ui/lib/safe-url.ts";
 import {
+	type AnchorHTMLAttributes,
+	createContext,
 	type ImgHTMLAttributes,
+	isValidElement,
 	type ReactNode,
 	type Ref,
 	type TableHTMLAttributes,
+	useContext,
 	useEffect,
 	useId,
 	useMemo,
@@ -35,6 +51,10 @@ import {
 	useState,
 } from "react";
 import { useChatDisplayPrefs } from "./chat-display-prefs.tsx";
+import {
+	staticCodeHighlighter,
+	streamingCodeHighlighter,
+} from "./code-highlighter.ts";
 import { CopyFormatMenu, writeClipboardPayload } from "./copy-format-menu.tsx";
 import { FileTypeIcon } from "./file-type-icon.tsx";
 import { ImageLightbox } from "./image-lightbox.tsx";
@@ -55,6 +75,21 @@ const STREAM_ANIMATION = {
 	duration: 200,
 	sep: "word",
 } as const;
+
+function safeMarkdownDestination(value: string): string | null {
+	const navigation = safeNavigationUrl(value);
+	if (navigation) {
+		return navigation;
+	}
+	try {
+		const parsed = new URL(value);
+		return parsed.protocol === "mailto:" && parsed.pathname
+			? parsed.href
+			: null;
+	} catch {
+		return null;
+	}
+}
 
 function fixNumberedListBreaks(text: string): string {
 	return text.replace(/^(\d+)\.\s*\n+\s*\n*/gm, "$1. ");
@@ -92,7 +127,7 @@ function normalizeCodeFenceLanguages(text: string): string {
 		if (!lang) {
 			return "```";
 		}
-		const normalized = lang.split(/\s+/)[0];
+		const normalized = lang.split(/\s+/)[0] ?? "";
 		return CODE_FENCE_LANGS.has(normalized) ? `\`\`\`${normalized}` : "```text";
 	});
 }
@@ -104,12 +139,17 @@ export interface MarkdownProps {
 	content: string;
 	fileReferences?: FileReference[];
 	/**
-	 * When true, newly streamed text animates in (word-by-word blur-in). Callers
-	 * pass the already-resolved value: only the actively streaming last assistant
-	 * turn with animations enabled should set this. Omitted/false ⇒ static render
-	 * (past messages, other surfaces, motion disabled). Default: false.
+	 * Newly streamed text can animate in word-by-word. An explicit request
+	 * and actively streaming content both obey the resolved display preference.
+	 * Completed history stays static; global and OS motion preferences win.
 	 */
 	isAnimating?: boolean;
+	/**
+	 * True while this content is still arriving. Independent of `isAnimating`
+	 * (motion can be off mid-stream): it lets code highlighting resume from the
+	 * finished lines of the block that is still growing. Default: false.
+	 */
+	isStreaming?: boolean;
 	mentionItems?: MentionItem[];
 	onOpenFile?: (path: string) => void;
 	onOpenLink?: (url: string) => void;
@@ -126,14 +166,6 @@ export interface FileReference {
 	label: string;
 	path: string;
 }
-
-// `@streamdown/code` currently resolves its own Shiki 3 types while Streamdown
-// resolves the workspace Shiki 4 types. The runtime plugin contract is the same
-// (both expose the documented code-highlighter methods), so keep the boundary
-// explicit until the upstream packages publish a shared Shiki type surface.
-const code: NonNullable<StreamdownProps["plugins"]>["code"] = createCodePlugin({
-	themes: ["github-light", "github-dark"],
-}) as unknown as NonNullable<StreamdownProps["plugins"]>["code"];
 
 function normalizePathToken(value: string): string {
 	return value.replaceAll("\\", "/").replace(LEADING_DOT_SLASH_RE, "");
@@ -237,6 +269,9 @@ function svgToPng(svg: string): Promise<Blob> {
 	});
 }
 
+/** Hosts with local-only replies can disable network-active response images. */
+export const MarkdownResponseImages = createContext(true);
+
 function MarkdownImage({
 	alt,
 	className,
@@ -244,7 +279,15 @@ function MarkdownImage({
 	src,
 	...props
 }: ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }) {
-	if (typeof src !== "string" || !src) {
+	const allowResponseImages = useContext(MarkdownResponseImages);
+	if (!allowResponseImages) {
+		return (
+			<span className="text-muted-foreground text-sm">
+				{alt || "Image omitted"}
+			</span>
+		);
+	}
+	if (!(isNativeText(src) && src)) {
 		return null;
 	}
 	return (
@@ -277,8 +320,8 @@ function MermaidBlock({
 			const mermaidModule = await import("mermaid");
 			const mermaid = mermaidModule.default;
 			const prefersDark =
-				typeof window !== "undefined" &&
-				typeof window.matchMedia === "function" &&
+				globalThis.window !== undefined &&
+				isNativeFunction(window.matchMedia) &&
 				window.matchMedia("(prefers-color-scheme: dark)").matches;
 			mermaid.initialize({
 				fontFamily: "inherit",
@@ -296,7 +339,7 @@ function MermaidBlock({
 			}
 		};
 
-		renderDiagram().catch((reason: unknown) => {
+		renderDiagram().catch((reason) => {
 			if (!cancelled) {
 				setError(
 					reason instanceof Error ? reason.message : "Failed to render diagram"
@@ -309,13 +352,19 @@ function MermaidBlock({
 		};
 	}, [code, id, isIncomplete]);
 
-	const diagramUrl = useMemo(
-		() =>
-			svg
-				? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-				: null,
-		[svg]
-	);
+	// The lightbox only shows media URLs the shared policy admits, and that
+	// policy refuses `data:image/svg+xml`. Hand it a browser-created object URL
+	// for the sanitized SVG instead, revoked when the diagram changes or unmounts.
+	const [diagramUrl, setDiagramUrl] = useState<string | null>(null);
+	useEffect(() => {
+		if (!svg) {
+			setDiagramUrl(null);
+			return;
+		}
+		const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+		setDiagramUrl(url);
+		return () => URL.revokeObjectURL(url);
+	}, [svg]);
 
 	const handleCopy = async (format: string) => {
 		if (format === "mermaid") {
@@ -388,14 +437,15 @@ function MermaidBlock({
 						options={DIAGRAM_COPY_OPTIONS}
 					/>
 					<Button
+						appearance="markdown-diagram-expand"
 						aria-label="Expand diagram"
-						className="size-7 rounded-md text-muted-foreground hover:text-foreground"
+						className="size-7"
 						data-testid="mermaid-expand"
 						onClick={() => setLightboxOpen(true)}
 						size="icon"
 						title="Expand diagram"
 						type="button"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						<HugeiconsIcon aria-hidden="true" icon={ExpandIcon} size={14} />
 					</Button>
@@ -416,7 +466,6 @@ function MermaidBlock({
 				    remain selectable vectors rather than a screenshot. */}
 				<span
 					className="flex max-w-full items-center justify-center [&>svg]:h-auto [&>svg]:max-h-[28rem] [&>svg]:max-w-full"
-					// biome-ignore lint/security/noDangerouslySetInnerHtml: Mermaid strict mode sanitizes the generated SVG before display.
 					dangerouslySetInnerHTML={{ __html: svg }}
 				/>
 			</button>
@@ -447,7 +496,7 @@ function ExpandableMarkdownTable({
 	const tableRef = useRef<HTMLTableElement>(null);
 	const tableClassName = (tableTone: MarkdownTone) =>
 		cn(
-			"an-md-table w-full min-w-max text-sm",
+			styles.table,
 			tableTone === "primary"
 				? "[&>tbody>tr>td]:border-primary-foreground/20 [&>tbody>tr>td]:text-primary-foreground/90 [&>thead>tr>th]:bg-primary-foreground/10 [&>thead>tr>th]:text-primary-foreground"
 				: "[&>thead>tr>th]:bg-muted [&>thead]:bg-muted",
@@ -529,7 +578,7 @@ function ExpandableMarkdownTable({
 				)}
 				data-streamdown="table-wrapper"
 			>
-				<div className="scroll-fade-x overflow-x-auto rounded-[var(--radius)]">
+				<div className="scroll-fade-x overflow-x-auto rounded-(--radius)">
 					{table(undefined, tableRef)}
 				</div>
 				<div className="pointer-events-none absolute top-1 right-1 z-10 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/an-md-table:opacity-100">
@@ -537,21 +586,35 @@ function ExpandableMarkdownTable({
 						{copyMenu("markdown-table-copy")}
 					</div>
 					<Button
+						appearance="markdown-table-expand"
 						aria-label="Expand table"
-						className="pointer-events-auto size-7 bg-background/90 text-muted-foreground shadow-sm hover:text-foreground"
+						className="pointer-events-auto size-7"
 						data-testid="markdown-table-expand"
 						onClick={() => setOpen(true)}
 						size="icon-xs"
 						title="Expand table"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						<HugeiconsIcon icon={ExpandIcon} size={14} />
 					</Button>
 				</div>
 			</div>
 			<Dialog onOpenChange={setOpen} open={open}>
-				<DialogContent className="flex max-h-[min(90vh,60rem)] max-w-[min(95vw,90rem)] flex-col gap-3">
-					<DialogHeader className="flex-row items-start justify-between gap-4">
+				<DialogContent
+					render={(props) => (
+						<div
+							{...props}
+							className={cn(
+								props.className,
+								"flex max-h-[min(90vh,60rem)] max-w-[min(95vw,90rem)] flex-col gap-3"
+							)}
+						/>
+					)}
+				>
+					<div
+						className="flex flex-row items-start justify-between gap-4"
+						data-slot="dialog-header"
+					>
 						<div className="min-w-0">
 							<DialogTitle>Expanded markdown table</DialogTitle>
 							<DialogDescription>
@@ -559,8 +622,8 @@ function ExpandableMarkdownTable({
 							</DialogDescription>
 						</div>
 						{copyMenu("markdown-table-dialog-copy")}
-					</DialogHeader>
-					<div className="min-h-0 overflow-auto rounded-[var(--radius)] border border-border/60">
+					</div>
+					<div className="min-h-0 overflow-auto rounded-(--radius) border border-border/60">
 						{table("min-w-[72rem]", undefined, "default")}
 					</div>
 				</DialogContent>
@@ -569,6 +632,406 @@ function ExpandableMarkdownTable({
 	);
 }
 
+// Per-render data the element overrides need. It travels through context, not
+// through closures in `components`, so the `components` map and every entry in it
+// keep one identity for the life of the app. Streamdown's Block memo compares each
+// component by reference: a fresh closure per render re-rendered every finished
+// block of a reply on every streamed token. Context still reaches the links and
+// tables that read it when this data changes, even inside memoized blocks.
+interface MarkdownRenderContextValue {
+	citations?: Citation[];
+	fileReferences?: FileReference[];
+	mentionItems?: MentionItem[];
+	onOpenFile?: (path: string) => void;
+	onOpenLink?: (url: string) => void;
+	onOpenMention?: (item: MentionItem) => void;
+	previewResolvers?: LinkPreviewResolvers;
+	tone: MarkdownTone;
+	wideBlocks: boolean;
+}
+
+const MarkdownRenderContext = createContext<MarkdownRenderContextValue>({
+	tone: "default",
+	wideBlocks: false,
+});
+
+type AnchorProps = AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
+
+function MarkdownLink({ href, children, ...props }: AnchorProps) {
+	const {
+		citations,
+		fileReferences,
+		mentionItems,
+		onOpenFile,
+		onOpenLink,
+		onOpenMention,
+		previewResolvers,
+	} = useContext(MarkdownRenderContext);
+	if (!href) {
+		return <span>{children}</span>;
+	}
+	if (href.startsWith("#ryu-cite-")) {
+		const n = Number(href.replace("#ryu-cite-", ""));
+		const citation = Number.isFinite(n)
+			? citations?.find((c) => c.number === n)
+			: undefined;
+		if (!citation) {
+			return <span>{children}</span>;
+		}
+		return <CitationMarkLink citation={citation} />;
+	}
+	if (href.startsWith("#ryu-mention-")) {
+		const mentionHref = href.slice("#ryu-mention-".length);
+		// Resolve the complete kind+label token first. New mention kinds may
+		// contain hyphens (for example `app-item`), while older persisted
+		// messages use the original `kind-label` wire shape.
+		const resolvedMention = mentionItems?.find((candidate) =>
+			[candidate.label, candidate.id].some(
+				(value) =>
+					value !== undefined &&
+					mentionHref === `${candidate.kind}-${encodeURIComponent(value)}`
+			)
+		);
+		const separator = mentionHref.indexOf("-");
+		const kind =
+			resolvedMention?.kind ??
+			(separator === -1 ? mentionHref : mentionHref.slice(0, separator));
+		const encodedLabel = resolvedMention
+			? ""
+			: separator === -1
+				? ""
+				: mentionHref.slice(separator + 1);
+		const label = encodedLabel ? decodeMentionLabel(encodedLabel) : "";
+		const item =
+			resolvedMention ??
+			mentionItems?.find(
+				(candidate) =>
+					candidate.kind === kind &&
+					(candidate.label === label || candidate.id === label)
+			);
+		const mentionContent = <MentionToken item={item}>{children}</MentionToken>;
+		if (item && item.kind !== "user" && onOpenMention) {
+			return (
+				<button
+					aria-label={`Open ${item.kind} ${item.label}`}
+					className="inline-flex max-w-full cursor-pointer rounded p-0 font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+					data-mention-id={item.id}
+					data-mention-kind={item.kind}
+					onClick={(event) => {
+						event.preventDefault();
+						onOpenMention(item);
+					}}
+					title={`Open ${item.label}`}
+					type="button"
+				>
+					{mentionContent}
+				</button>
+			);
+		}
+		return (
+			<strong
+				className="inline-flex items-center gap-1 font-medium text-primary"
+				data-mention-id={item?.id}
+				data-mention-kind={item?.kind}
+				{...props}
+			>
+				{mentionContent}
+			</strong>
+		);
+	}
+	if (/^#ryu-file-\d+$/.test(href)) {
+		const index = Number(href.replace("#ryu-file-", ""));
+		const ref = Number.isFinite(index) ? fileReferences?.[index] : undefined;
+		if (!ref) {
+			return <span>{children}</span>;
+		}
+		return (
+			<button
+				className="inline-flex items-center rounded px-0.5 text-primary underline-offset-2 hover:underline"
+				onClick={(event) => {
+					event.preventDefault();
+					onOpenFile?.(ref.path);
+				}}
+				title={ref.path}
+				type="button"
+			>
+				<FileTypeIcon className="mr-1 size-3.5" path={ref.path} />
+				{children}
+			</button>
+		);
+	}
+	const mentionedFile = decodeMentionHref(href, "#ryu-file-path-");
+	if (mentionedFile) {
+		return (
+			<LinkPreview
+				resolvers={previewResolvers}
+				target={{ kind: "file", value: mentionedFile }}
+			>
+				<button
+					className="inline-flex items-center rounded px-0.5 text-primary underline-offset-2 hover:underline"
+					onClick={(event) => {
+						event.preventDefault();
+						onOpenFile?.(mentionedFile);
+					}}
+					title={mentionedFile}
+					type="button"
+				>
+					<FileTypeIcon className="mr-1 size-3.5" path={mentionedFile} />
+					{children}
+				</button>
+			</LinkPreview>
+		);
+	}
+	const mentionedWebsite = decodeMentionHref(href, "#ryu-web-url-");
+	const destination = safeMarkdownDestination(mentionedWebsite ?? href);
+	if (!destination) {
+		return <span>{children}</span>;
+	}
+	const isExternal = /^(?:https?:|mailto:)/i.test(destination);
+	const link = (
+		<a
+			{...props}
+			className="text-primary underline-offset-2 hover:underline"
+			href={destination}
+			onClick={
+				isExternal && onOpenLink
+					? (event) => {
+							event.preventDefault();
+							onOpenLink(destination);
+						}
+					: undefined
+			}
+			rel={isExternal ? "noopener noreferrer" : undefined}
+			target={isExternal ? "_blank" : undefined}
+		>
+			{children}
+		</a>
+	);
+	return destination.startsWith("http") ? (
+		<LinkPreview
+			resolvers={previewResolvers}
+			target={{ kind: "website", value: destination }}
+		>
+			{link}
+		</LinkPreview>
+	) : (
+		link
+	);
+}
+
+function MarkdownTable(
+	props: TableHTMLAttributes<HTMLTableElement> & {
+		children?: ReactNode;
+		node?: unknown;
+	}
+) {
+	const { tone, wideBlocks } = useContext(MarkdownRenderContext);
+	return <ExpandableMarkdownTable {...props} tone={tone} wide={wideBlocks} />;
+}
+
+function MarkdownMermaidRenderer(props: CustomRendererProps) {
+	const { wideBlocks } = useContext(MarkdownRenderContext);
+	return <MermaidBlock {...props} wideBlocks={wideBlocks} />;
+}
+
+// The declared Streamdown code slot is a boolean or its complete options object.
+// The existing code ?? true normalization removes nil before this observation.
+type NativeCodeControls = NonNullable<Exclude<ControlsConfig, boolean>["code"]>;
+function isCodeControlsObject(
+	value: NativeCodeControls
+): value is Exclude<NativeCodeControls, boolean> {
+	return isNativeObjectLike(value);
+}
+
+// Streamdown's highlighted body retains late callbacks across code changes.
+// A source-keyed standard CodeBlock gives each request its own mounted lifetime,
+// while retaining Streamdown's header, actions, themes and raw-source fallback.
+function MarkdownCodeRenderer({
+	code,
+	language,
+	isIncomplete,
+	meta,
+}: CustomRendererProps) {
+	const { controls, lineNumbers, shikiTheme } = useContext(StreamdownContext);
+	const codeControls = isNativeBoolean(controls)
+		? controls
+		: (controls.code ?? true);
+	const enabled = codeControls !== false;
+	const copy = isCodeControlsObject(codeControls)
+		? codeControls.copy !== false
+		: enabled;
+	const download = isCodeControlsObject(codeControls)
+		? codeControls.download !== false
+		: enabled;
+	const start = meta?.match(/startLine=(\d+)/)?.[1];
+	const startLine = start ? Number.parseInt(start, 10) : undefined;
+	return (
+		<CodeBlock
+			code={code}
+			isIncomplete={isIncomplete}
+			key={JSON.stringify([code, language, shikiTheme])}
+			language={language}
+			lineNumbers={
+				lineNumbers !== false && !/\bnoLineNumbers\b/.test(meta ?? "")
+			}
+			startLine={startLine && startLine >= 1 ? startLine : undefined}
+		>
+			{enabled && (
+				<>
+					{download && (
+						<CodeBlockDownloadButton code={code} language={language} />
+					)}
+					{copy && <CodeBlockCopyButton />}
+				</>
+			)}
+		</CodeBlock>
+	);
+}
+
+const MarkdownCode: NonNullable<Components["code"]> = ({
+	node,
+	className,
+	children,
+	...props
+}) => {
+	const isIncomplete = useIsCodeFenceIncomplete();
+	if (!("data-block" in props)) {
+		return (
+			<code
+				className={cn(
+					"rounded bg-muted px-1.5 py-0.5 font-mono text-sm",
+					className
+				)}
+				data-streamdown="inline-code"
+				{...props}
+			>
+				{children}
+			</code>
+		);
+	}
+	const language = className?.match(/language-([^\s]+)/)?.[1] ?? "text";
+	const value = isValidElement<{ children?: ReactNode }>(children)
+		? children.props.children
+		: children;
+	const code = isNativeText(value) ? value : "";
+	const rawMeta = node?.properties?.metastring;
+	const meta = isNativeText(rawMeta) ? rawMeta : undefined;
+	if (language === "mermaid" || language === "mmd") {
+		return (
+			<MarkdownMermaidRenderer
+				code={code}
+				isIncomplete={isIncomplete}
+				language={language}
+				meta={meta}
+			/>
+		);
+	}
+	return (
+		<MarkdownCodeRenderer
+			code={code}
+			isIncomplete={isIncomplete}
+			language={language}
+			meta={meta}
+		/>
+	);
+};
+
+const MARKDOWN_COMPONENTS: Components = {
+	code: MarkdownCode,
+	h1: ({ children, ...props }) => (
+		<h1 className="mt-3 mb-1.5 font-medium text-base" {...props}>
+			{children}
+		</h1>
+	),
+	h2: ({ children, ...props }) => (
+		<h2 className="mt-3 mb-1.5 font-medium text-base" {...props}>
+			{children}
+		</h2>
+	),
+	h3: ({ children, ...props }) => (
+		<h3 className="mt-2 mb-1 font-medium text-sm" {...props}>
+			{children}
+		</h3>
+	),
+	h4: ({ children, ...props }) => (
+		<h4 className="mt-2 mb-1 font-medium text-sm" {...props}>
+			{children}
+		</h4>
+	),
+	p: ({ children, ...props }) => (
+		<p className="text-foreground/80 text-sm leading-relaxed" {...props}>
+			{children}
+		</p>
+	),
+	ul: ({ children, ...props }) => (
+		<ul
+			className="mb-2 list-outside list-disc space-y-0.5 pl-4 text-foreground/80 text-sm"
+			{...props}
+		>
+			{children}
+		</ul>
+	),
+	ol: ({ children, ...props }) => (
+		<ol
+			className="mb-2 list-outside list-decimal space-y-0.5 pl-5 text-foreground/80 text-sm"
+			{...props}
+		>
+			{children}
+		</ol>
+	),
+	li: ({ children, ...props }) => (
+		<li className="pl-0.5 text-foreground/80 text-sm" {...props}>
+			{children}
+		</li>
+	),
+	strong: ({ children, ...props }) => (
+		<strong className="font-medium text-foreground" {...props}>
+			{children}
+		</strong>
+	),
+	a: MarkdownLink,
+	blockquote: ({ children, ...props }) => (
+		<blockquote
+			className="mb-2 border-border border-l-2 pl-3 text-foreground/70 text-sm italic"
+			{...props}
+		>
+			{children}
+		</blockquote>
+	),
+	hr: ({ ...props }) => <hr className="my-4 border-border" {...props} />,
+	table: MarkdownTable,
+	img: MarkdownImage,
+	th: ({ children, ...props }) => (
+		<th className="bg-muted px-3 py-2 text-left font-medium" {...props}>
+			{children}
+		</th>
+	),
+	td: ({ children, ...props }) => (
+		<td
+			className="border-border border-t px-3 py-2 text-foreground/80"
+			{...props}
+		>
+			{children}
+		</td>
+	),
+};
+
+const MARKDOWN_RENDERERS = [
+	{ component: MarkdownMermaidRenderer, language: ["mermaid", "mmd"] },
+];
+
+// Streamdown's root memo compares `plugins` by reference, so each variant is one
+// module-level object. Growing blocks resume tokenization from checkpoints;
+// finished replies use the exact highlighter.
+const STATIC_PLUGINS: NonNullable<StreamdownProps["plugins"]> = {
+	code: staticCodeHighlighter,
+	renderers: MARKDOWN_RENDERERS,
+};
+const STREAMING_PLUGINS: NonNullable<StreamdownProps["plugins"]> = {
+	code: streamingCodeHighlighter,
+	renderers: MARKDOWN_RENDERERS,
+};
+
 export function Markdown({
 	mentionItems,
 	citations,
@@ -576,6 +1039,7 @@ export function Markdown({
 	className,
 	fileReferences,
 	isAnimating = false,
+	isStreaming = false,
 	onOpenFile,
 	onOpenLink,
 	onOpenMention,
@@ -588,290 +1052,77 @@ export function Markdown({
 	// data attribute rather than a prop on the code plugin because the fenced
 	// block is rendered by `@streamdown/code`, not by a component we own — the
 	// cap lands in CSS against its stable `data-streamdown` parts (agent-ui.css).
-	const { expandCodeBlocks } = useChatDisplayPrefs();
-	const mentionContent = formatMentionContent(content, mentionItems);
-	const safeContent = normalizeCodeFenceLanguages(
-		fixNumberedListBreaks(
-			linkifyCitationMarkers(
-				linkifyAtMentions(
-					enrichInlineFileReferences(mentionContent, fileReferences)
-				),
-				citations
-			)
-		)
-	);
-	const mermaidRenderer = useMemo(
+	const { expandCodeBlocks, streamAnimation, animationsEnabled } =
+		useChatDisplayPrefs();
+	const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+	const animateText =
+		streamAnimation &&
+		animationsEnabled &&
+		!reducedMotion &&
+		(isAnimating || isStreaming);
+	const safeContent = useMemo(
 		() =>
-			function MarkdownMermaidRenderer(props: CustomRendererProps) {
-				return <MermaidBlock {...props} wideBlocks={wideBlocks} />;
-			},
-		[wideBlocks]
-	);
-	const components: Components = {
-		h1: ({ children, ...props }) => (
-			<h1 className="an-md-h1 mt-3 mb-1.5 font-medium text-base" {...props}>
-				{children}
-			</h1>
-		),
-		h2: ({ children, ...props }) => (
-			<h2 className="an-md-h2 mt-3 mb-1.5 font-medium text-base" {...props}>
-				{children}
-			</h2>
-		),
-		h3: ({ children, ...props }) => (
-			<h3 className="an-md-h3 mt-2 mb-1 font-medium text-sm" {...props}>
-				{children}
-			</h3>
-		),
-		h4: ({ children, ...props }) => (
-			<h4 className="an-md-h4 mt-2 mb-1 font-medium text-sm" {...props}>
-				{children}
-			</h4>
-		),
-		p: ({ children, ...props }) => (
-			<p
-				className="an-md-p text-foreground/80 text-sm leading-relaxed"
-				{...props}
-			>
-				{children}
-			</p>
-		),
-		ul: ({ children, ...props }) => (
-			<ul
-				className="an-md-ul mb-2 list-outside list-disc space-y-0.5 pl-4 text-foreground/80 text-sm"
-				{...props}
-			>
-				{children}
-			</ul>
-		),
-		ol: ({ children, ...props }) => (
-			<ol
-				className="an-md-ol mb-2 list-outside list-decimal space-y-0.5 pl-5 text-foreground/80 text-sm"
-				{...props}
-			>
-				{children}
-			</ol>
-		),
-		li: ({ children, ...props }) => (
-			<li className="an-md-li pl-0.5 text-foreground/80 text-sm" {...props}>
-				{children}
-			</li>
-		),
-		strong: ({ children, ...props }) => (
-			<strong className="font-medium text-foreground" {...props}>
-				{children}
-			</strong>
-		),
-		a: ({ href, children, ...props }) => {
-			if (!href) {
-				return <span>{children}</span>;
-			}
-			if (href.startsWith("#ryu-cite-")) {
-				const n = Number(href.replace("#ryu-cite-", ""));
-				const citation = Number.isFinite(n)
-					? citations?.find((c) => c.number === n)
-					: undefined;
-				if (!citation) {
-					return <span>{children}</span>;
-				}
-				return <CitationMarkLink citation={citation} />;
-			}
-			if (href.startsWith("#ryu-mention-")) {
-				const mentionHref = href.slice("#ryu-mention-".length);
-				// Resolve the complete kind+label token first. New mention kinds may
-				// contain hyphens (for example `app-item`), while older persisted
-				// messages use the original `kind-label` wire shape.
-				const resolvedMention = mentionItems?.find((candidate) =>
-					[candidate.label, candidate.id].some(
-						(value) =>
-							value !== undefined &&
-							mentionHref === `${candidate.kind}-${encodeURIComponent(value)}`
+			normalizeCodeFenceLanguages(
+				fixNumberedListBreaks(
+					linkifyCitationMarkers(
+						linkifyAtMentions(
+							enrichInlineFileReferences(
+								formatMentionContent(content, mentionItems),
+								fileReferences
+							)
+						),
+						citations
 					)
-				);
-				const separator = mentionHref.indexOf("-");
-				const kind =
-					resolvedMention?.kind ??
-					(separator === -1 ? mentionHref : mentionHref.slice(0, separator));
-				const encodedLabel = resolvedMention
-					? ""
-					: separator === -1
-						? ""
-						: mentionHref.slice(separator + 1);
-				const label = encodedLabel ? decodeMentionLabel(encodedLabel) : "";
-				const item =
-					resolvedMention ??
-					mentionItems?.find(
-						(candidate) =>
-							candidate.kind === kind &&
-							(candidate.label === label || candidate.id === label)
-					);
-				const mentionContent = (
-					<MentionToken item={item}>{children}</MentionToken>
-				);
-				if (item && item.kind !== "user" && onOpenMention) {
-					return (
-						<button
-							aria-label={`Open ${item.kind} ${item.label}`}
-							className="an-md-mention inline-flex max-w-full cursor-pointer rounded p-0 font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-							data-mention-id={item.id}
-							data-mention-kind={item.kind}
-							onClick={(event) => {
-								event.preventDefault();
-								onOpenMention(item);
-							}}
-							title={`Open ${item.label}`}
-							type="button"
-						>
-							{mentionContent}
-						</button>
-					);
-				}
-				return (
-					<strong
-						className="inline-flex items-center gap-1 font-medium text-primary"
-						data-mention-id={item?.id}
-						data-mention-kind={item?.kind}
-						{...props}
-					>
-						{mentionContent}
-					</strong>
-				);
-			}
-			if (/^#ryu-file-\d+$/.test(href)) {
-				const index = Number(href.replace("#ryu-file-", ""));
-				const ref = Number.isFinite(index)
-					? fileReferences?.[index]
-					: undefined;
-				if (!ref) {
-					return <span>{children}</span>;
-				}
-				return (
-					<button
-						className="an-md-file-link inline-flex items-center rounded px-0.5 text-primary underline-offset-2 hover:underline"
-						onClick={(event) => {
-							event.preventDefault();
-							onOpenFile?.(ref.path);
-						}}
-						title={ref.path}
-						type="button"
-					>
-						<FileTypeIcon className="mr-1 size-3.5" path={ref.path} />
-						{children}
-					</button>
-				);
-			}
-			const mentionedFile = decodeMentionHref(href, "#ryu-file-path-");
-			if (mentionedFile) {
-				return (
-					<LinkPreview
-						resolvers={previewResolvers}
-						target={{ kind: "file", value: mentionedFile }}
-					>
-						<button
-							className="an-md-file-link inline-flex items-center rounded px-0.5 text-primary underline-offset-2 hover:underline"
-							onClick={(event) => {
-								event.preventDefault();
-								onOpenFile?.(mentionedFile);
-							}}
-							title={mentionedFile}
-							type="button"
-						>
-							<FileTypeIcon className="mr-1 size-3.5" path={mentionedFile} />
-							{children}
-						</button>
-					</LinkPreview>
-				);
-			}
-			const mentionedWebsite = decodeMentionHref(href, "#ryu-web-url-");
-			const destination = mentionedWebsite ?? href;
-			const isExternal =
-				destination.startsWith("http") || destination.startsWith("mailto:");
-			const link = (
-				<a
-					{...props}
-					className="an-md-link text-primary underline-offset-2 hover:underline"
-					href={destination}
-					onClick={
-						isExternal && onOpenLink
-							? (event) => {
-									event.preventDefault();
-									onOpenLink(destination);
-								}
-							: undefined
-					}
-					rel={isExternal ? "noopener noreferrer" : undefined}
-					target={isExternal ? "_blank" : undefined}
-				>
-					{children}
-				</a>
-			);
-			return destination.startsWith("http") ? (
-				<LinkPreview
-					resolvers={previewResolvers}
-					target={{ kind: "website", value: destination }}
-				>
-					{link}
-				</LinkPreview>
-			) : (
-				link
-			);
-		},
-		blockquote: ({ children, ...props }) => (
-			<blockquote
-				className="an-md-blockquote mb-2 border-border border-l-2 pl-3 text-foreground/70 text-sm italic"
-				{...props}
-			>
-				{children}
-			</blockquote>
-		),
-		hr: ({ ...props }) => (
-			<hr className="an-md-hr my-4 border-border" {...props} />
-		),
-		table: (props) => (
-			<ExpandableMarkdownTable {...props} tone={tone} wide={wideBlocks} />
-		),
-		img: (props) => <MarkdownImage {...props} />,
-		th: ({ children, ...props }) => (
-			<th className="bg-muted px-3 py-2 text-left font-medium" {...props}>
-				{children}
-			</th>
-		),
-		td: ({ children, ...props }) => (
-			<td
-				className="border-border border-t px-3 py-2 text-foreground/80"
-				{...props}
-			>
-				{children}
-			</td>
-		),
-	};
+				)
+			),
+		[citations, content, fileReferences, mentionItems]
+	);
+	const renderContext = useMemo<MarkdownRenderContextValue>(
+		() => ({
+			citations,
+			fileReferences,
+			mentionItems,
+			onOpenFile,
+			onOpenLink,
+			onOpenMention,
+			previewResolvers,
+			tone,
+			wideBlocks,
+		}),
+		[
+			citations,
+			fileReferences,
+			mentionItems,
+			onOpenFile,
+			onOpenLink,
+			onOpenMention,
+			previewResolvers,
+			tone,
+			wideBlocks,
+		]
+	);
 
 	return (
 		<div
 			className={cn(
-				"an-markdown",
+				styles.markdown,
 				"wrap-break-word overflow-hidden",
 				"[&_li>p]:mb-0 [&_li>p]:inline",
 				className
 			)}
 			data-code-detail={expandCodeBlocks ? "full" : "capped"}
+			data-ryu-i18n="off"
 		>
-			<Streamdown
-				animated={isAnimating ? STREAM_ANIMATION : false}
-				components={components}
-				isAnimating={isAnimating}
-				plugins={{
-					code,
-					renderers: [
-						{
-							component: mermaidRenderer,
-							language: ["mermaid", "mmd"],
-						},
-					],
-				}}
-			>
-				{safeContent}
-			</Streamdown>
+			<MarkdownRenderContext.Provider value={renderContext}>
+				<Streamdown
+					animated={animateText ? STREAM_ANIMATION : false}
+					components={MARKDOWN_COMPONENTS}
+					isAnimating={animateText}
+					plugins={isStreaming ? STREAMING_PLUGINS : STATIC_PLUGINS}
+				>
+					{safeContent}
+				</Streamdown>
+			</MarkdownRenderContext.Provider>
 		</div>
 	);
 }

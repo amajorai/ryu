@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/DictationSettings.tsx",
+    "src/components/settings/VoiceInputSettings.tsx",
+    "src/components/settings/VoiceModeDisplaySettings.tsx",
+    "src/components/settings/VoiceReadbackSettings.tsx",
+    "src/components/settings/TtsEngineSettings.tsx",
+    "src/components/settings/AudioDevicesSettings.tsx",
+    "src/components/settings/voice-preference-state.tsx",
+    "src/components/settings/VoicePreferences.authority.test.tsx",
+    "src/components/settings/DictationSettings.coverage.native-http.test.tsx",
+    "src/components/settings/VoiceInputSettings.coverage.native-http.test.tsx",
+    "src/components/settings/VoiceModeDisplaySettings.coverage.test.tsx",
+    "src/components/settings/AudioDevicesSettings.coverage.test.tsx",
+    "src/components/settings/TtsEngineSettings.coverage.native-http.test.tsx"
+  ]
+}

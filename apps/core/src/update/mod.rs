@@ -52,7 +52,20 @@ pub struct VersionInfo {
     /// `os-arch` of the running Core (e.g. `windows-x86_64`). Clients use this
     /// to pick the right release asset.
     pub platform: String,
+    /// Behaviour a client must confirm before relying on it, so a newer client can
+    /// refuse to talk to an older Core instead of guessing from version strings.
+    /// See [`CORE_FEATURES`].
+    pub features: Vec<String>,
 }
+
+/// The web tier forwards a signed-in browser's `/api/ext/*` call only to a Core
+/// that runs the web-delegated admission (`sidecar::ext_proxy`). An older Core reads
+/// the web tier's node token as the owner and would run the request with owner
+/// authority, so the web tier checks this flag on `GET /api/version` first.
+pub const FEATURE_WEB_DELEGATED_EXT: &str = "web_delegated_ext";
+
+/// Every feature flag [`VersionInfo::features`] advertises.
+pub const CORE_FEATURES: &[&str] = &[FEATURE_WEB_DELEGATED_EXT];
 
 /// A downloadable release asset matched to the running platform.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -122,9 +135,51 @@ pub struct UpdateCheck {
     pub cutoff_unresolved: bool,
 }
 
+/// Set once a self-update asks Core to restart onto its new binary.
+static RESTART_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static RESTART_NOTIFY: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Exit code Core uses after a restart-for-update shutdown: `EX_TEMPFAIL`, non-zero
+/// so `Restart=on-failure` (systemd) restarts it as well as `always` policies.
+pub const RESTART_EXIT_CODE: i32 = 75;
+
+/// Ask the running Core to shut down gracefully so a supervisor restarts it on
+/// the binary a self-update just installed.
+pub fn request_restart() {
+    RESTART_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+    RESTART_NOTIFY.notify_waiters();
+    RESTART_NOTIFY.notify_one();
+}
+
+/// Resolves once [`request_restart`] has been called.
+pub async fn restart_requested() {
+    if RESTART_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    RESTART_NOTIFY.notified().await;
+}
+
+/// Whether a restart was requested (checked after the graceful shutdown).
+pub fn restart_was_requested() -> bool {
+    RESTART_REQUESTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// The current Ryu version (single release train = Core's own crate version).
 pub fn current_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// The `releases/download/<tag>` base of the release this Core was built for.
+///
+/// Assets that must match the running build (app sidecars, version-pinned mesh
+/// clients) come from here rather than `releases/latest`, which serves whatever
+/// stable release is newest. Every release publishes under a versioned tag
+/// (`v<version>`, rolling channels included).
+pub fn own_release_download_base() -> String {
+    format!(
+        "https://github.com/{RYU_REPO}/releases/download/v{}",
+        current_version()
+    )
 }
 
 /// `os-arch` string for the running Core.
@@ -160,6 +215,10 @@ pub fn version_info_with(gateway_version: Option<&str>) -> VersionInfo {
         ryu_version: v,
         components,
         platform: platform_tag(),
+        features: CORE_FEATURES
+            .iter()
+            .map(|feature| (*feature).to_owned())
+            .collect(),
     }
 }
 
@@ -345,9 +404,26 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
     }
 }
 
+/// The release asset name of THIS platform's standalone Core binary — the
+/// `ryu-core-{platform_tag}{ext}` contract `.github/workflows/release.yml`
+/// ("Stage + rename assets") publishes, e.g. `ryu-core-linux-x86_64` or
+/// `ryu-core-windows-x86_64.exe`.
+pub fn core_asset_name() -> String {
+    format!(
+        "ryu-core-{}{}",
+        platform_tag(),
+        std::env::consts::EXE_SUFFIX
+    )
+}
+
 /// Infer an installer kind from an asset filename.
 fn asset_kind(name: &str) -> &'static str {
     let lower = name.to_ascii_lowercase();
+    // The bare Core binary carries no extension off Windows, so the suffix table
+    // below cannot classify it; it is still a raw executable.
+    if lower == core_asset_name().to_ascii_lowercase() {
+        return "exe";
+    }
     if lower.ends_with(".msi") {
         "msi"
     } else if lower.ends_with(".exe") {
@@ -363,49 +439,6 @@ fn asset_kind(name: &str) -> &'static str {
     } else {
         "unknown"
     }
-}
-
-/// Score how well an asset name matches the running platform. Higher is better;
-/// `None` means the asset is for a different OS and should be skipped.
-fn platform_match_score(name: &str) -> Option<u32> {
-    let lower = name.to_ascii_lowercase();
-    let os = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
-
-    // OS gate: the asset must be plausibly for this OS.
-    let os_ok = match os {
-        "windows" => {
-            lower.contains("windows")
-                || lower.contains("win")
-                || lower.ends_with(".msi")
-                || lower.ends_with(".exe")
-        }
-        "macos" => {
-            lower.contains("darwin")
-                || lower.contains("macos")
-                || lower.contains("mac")
-                || lower.ends_with(".dmg")
-        }
-        "linux" => {
-            lower.contains("linux") || lower.ends_with(".appimage") || lower.ends_with(".deb")
-        }
-        _ => false,
-    };
-    if !os_ok {
-        return None;
-    }
-
-    let mut score = 1;
-    // Arch bonus — prefer an exact arch match, also accept common aliases.
-    let arch_aliases: &[&str] = match arch {
-        "x86_64" => &["x86_64", "amd64", "x64"],
-        "aarch64" => &["aarch64", "arm64"],
-        _ => &[],
-    };
-    if arch_aliases.iter().any(|a| lower.contains(a)) {
-        score += 2;
-    }
-    Some(score)
 }
 
 /// A single GitHub release asset as returned by the releases API.
@@ -643,8 +676,7 @@ fn release_cache_path(name: &str) -> std::path::PathBuf {
             }
         })
         .collect::<String>();
-    crate::paths::ryu_dir()
-        .join("cache")
+    crate::paths::cache_dir()
         .join(RELEASE_DISK_CACHE_DIR)
         .join(format!("{safe}.json"))
 }
@@ -757,7 +789,10 @@ async fn fetch_channel_release(
 /// exhausts that and every check fails open to "no update" — the app-update row
 /// then silently never appears. A token, when the host has one, raises the ceiling
 /// to 5000/hr. Optional by design: no token still works, it is just rate-limited.
-async fn github_get(client: &reqwest::Client, url: String) -> reqwest::Result<reqwest::Response> {
+pub(crate) async fn github_get(
+    client: &reqwest::Client,
+    url: String,
+) -> reqwest::Result<reqwest::Response> {
     let mut req = client
         .get(url)
         .header("User-Agent", "ryu-core/1.0")
@@ -866,14 +901,23 @@ async fn fetch_all_releases(
     }
 }
 
-/// The release asset best matching the running platform, when one exists.
+/// The asset a node installs to update ITSELF: this platform's standalone Core
+/// binary, matched by its exact published name.
+///
+/// Matched exactly rather than scored by OS/arch substrings. One release carries
+/// Core, the Gateway, the CLI, every app sidecar (all `<bin>-<platform>`), their
+/// `.sha256` files and the desktop installers, so a fuzzy "best match for this
+/// platform" tied across dozens of assets and resolved to whichever came last —
+/// a sidecar, a checksum file, or (on Windows, where any `.exe` matched) another
+/// binary that `apply` would then swap in as Core. `None` when the release does
+/// not publish this platform's Core binary.
 fn best_asset(release: &GhRelease) -> Option<ReleaseAsset> {
+    let wanted = core_asset_name();
     release
         .assets
         .iter()
-        .filter_map(|a| platform_match_score(&a.name).map(|score| (score, a)))
-        .max_by_key(|(score, _)| *score)
-        .map(|(_, a)| ReleaseAsset {
+        .find(|a| a.name == wanted)
+        .map(|a| ReleaseAsset {
             kind: asset_kind(&a.name).to_string(),
             name: a.name.clone(),
             url: a.browser_download_url.clone(),
@@ -1313,37 +1357,42 @@ mod tests {
     }
 
     #[test]
-    fn platform_match_score_prefers_this_os_and_arch() {
-        let os = std::env::consts::OS;
-        let arch = std::env::consts::ARCH;
+    fn best_asset_is_this_platforms_core_binary_and_nothing_else() {
+        let core = core_asset_name();
+        let ext = std::env::consts::EXE_SUFFIX;
+        let platform = platform_tag();
+        let asset = |name: &str| GhAsset {
+            name: name.to_string(),
+            browser_download_url: format!(
+                "https://github.com/{RYU_REPO}/releases/download/v1.0.0/{name}"
+            ),
+            size: 10,
+        };
+        // Every other per-platform binary, its checksum, and the desktop
+        // installers share the platform tokens; listing Core FIRST proves the
+        // pick is not "whichever tied asset came last".
+        let release = GhRelease {
+            tag_name: "v1.0.0".into(),
+            assets: vec![
+                asset(&core),
+                asset(&format!("ryu-gateway-{platform}{ext}")),
+                asset(&format!("ryu-mail-{platform}{ext}")),
+                asset(&format!("{core}.sha256")),
+                asset("Ryu_1.0.0_x64-setup.exe"),
+                asset("Ryu_1.0.0_aarch64.dmg"),
+                asset("Ryu_1.0.0_amd64.AppImage"),
+            ],
+            ..GhRelease::default()
+        };
+        let picked = best_asset(&release).expect("core binary is published");
+        assert_eq!(picked.name, core);
+        assert_eq!(picked.kind, "exe");
 
-        // An asset built for a definitely-different OS is rejected (None).
-        let foreign = match os {
-            "windows" => "ryu-core-linux-x86_64.tar.gz",
-            _ => "ryu-core-windows-x86_64.zip",
+        let without_core = GhRelease {
+            assets: release.assets[1..].to_vec(),
+            ..release
         };
-        assert!(platform_match_score(foreign).is_none());
-
-        // An asset naming THIS os + THIS arch scores above one naming only the OS.
-        let arch_token = match arch {
-            "x86_64" => "x86_64",
-            "aarch64" => "aarch64",
-            _ => return, // unusual arch: skip the arch-bonus assertion
-        };
-        let os_token = match os {
-            "windows" => "windows",
-            "macos" => "macos",
-            "linux" => "linux",
-            _ => return,
-        };
-        let with_arch = format!("ryu-core-{os_token}-{arch_token}.tar.gz");
-        let os_only = format!("ryu-core-{os_token}.tar.gz");
-        let s_arch = platform_match_score(&with_arch).expect("this-os asset matches");
-        let s_os = platform_match_score(&os_only).expect("this-os asset matches");
-        assert!(
-            s_arch > s_os,
-            "arch match ({s_arch}) should outrank os-only ({s_os})"
-        );
+        assert!(best_asset(&without_core).is_none());
     }
 
     #[tokio::test]

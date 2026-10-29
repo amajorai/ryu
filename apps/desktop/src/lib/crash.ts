@@ -30,18 +30,27 @@
 //
 // Nothing hardcoded: the DSN comes from VITE_SENTRY_DSN. With no DSN the whole
 // module is a graceful no-op (no vendor wired).
+//
+// The SDK is downloaded after initCrashReporting(), once the main thread is idle,
+// so it never delays the first render. Reports made meanwhile (the error
+// boundary, the preflight report) wait in a small queue that the opt-out clears
+// and that beforeSend gates again on delivery. Until the SDK's own
+// window.onerror / unhandledrejection handlers are installed, small early
+// listeners queue those errors the same way (gated, capped, cleared by the
+// opt-out), so a window started hidden or a boot-time error is not lost.
+// Sentry's Breadcrumbs integration is left out: beforeBreadcrumb already drops
+// every crumb, so it only patched console / fetch / xhr / DOM / history for
+// nothing.
 
-import {
-	captureException,
-	captureMessage,
-	type ErrorEvent as SentryErrorEvent,
-	init as sentryInit,
-} from "@sentry/react";
+import type { ErrorEvent as SentryErrorEvent } from "@sentry/react";
 import { getInstallId } from "./analytics.ts";
+import { runWhenIdle } from "./idle.ts";
+
+type SentryModule = typeof import("@sentry/react");
 
 // --- Config (swappable, env-driven) -----------------------------------------
 
-const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN as string | undefined;
+const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
 
 // localStorage key mirroring the canonical kebab pref name, under the `ryu:`
 // namespace — synchronous seed before the async Core read resolves.
@@ -51,6 +60,18 @@ const ENABLED_MIRROR_KEY = "ryu:crash-reports-enabled";
 
 let initialized = false;
 let enabled = readEnabledMirror();
+// The SDK once loaded, and the one in-flight load.
+let sdk: SentryModule | null = null;
+let loading: Promise<SentryModule | null> | null = null;
+
+type PendingReport =
+	| { context?: CrashContext; error: unknown; kind: "error" }
+	| { context?: CrashContext; kind: "event"; message: string };
+// Reports made after initCrashReporting() but before the SDK arrived.
+const pending: PendingReport[] = [];
+const MAX_PENDING_REPORTS = 20;
+// Removes the early window listeners once the SDK (or its failure) settles.
+let stopEarlyCapture: (() => void) | null = null;
 
 function readEnabledMirror(): boolean {
 	try {
@@ -124,43 +145,127 @@ function scrubEvent(event: SentryErrorEvent): SentryErrorEvent | null {
 
 // --- Init -------------------------------------------------------------------
 
+function sendReport(mod: SentryModule, report: PendingReport): string | null {
+	if (report.kind === "error") {
+		return mod.captureException(report.error, {
+			extra: report.context?.extra,
+			tags: report.context?.tags,
+		});
+	}
+	mod.captureMessage(report.message, {
+		extra: report.context?.extra,
+		level: "info",
+		tags: report.context?.tags,
+	});
+	return null;
+}
+
+function loadSentry(dsn: string): Promise<SentryModule | null> {
+	loading ??= import("@sentry/react")
+		.then((mod) => {
+			mod.init({
+				dsn,
+				release: import.meta.env.VITE_APP_VERSION ?? undefined,
+				// No PII, no performance tracing, no profiling, no session replay.
+				sendDefaultPii: false,
+				tracesSampleRate: 0,
+				// Drop ALL breadcrumbs. For a crash tier the stack trace is the value;
+				// breadcrumbs are pure leak surface. @sentry/browser's default `breadcrumbs`
+				// integration has dom + history on, emitting `ui.click` / `ui.input` (which
+				// capture the clicked element's text / aria-label — i.e. conversation titles
+				// or rendered agent content), plus `console` / `fetch` / `xhr` / `navigation`
+				// (content + URLs). Returning null for every breadcrumb is the clean,
+				// strictly-safer answer and honors the AC's "never include agent content".
+				beforeBreadcrumb() {
+					return null;
+				},
+				// ...and since every crumb is dropped, do not install the integration
+				// that records them (it wraps console, fetch, xhr and DOM listeners).
+				integrations: (defaults) =>
+					defaults.filter((integration) => integration.name !== "Breadcrumbs"),
+				beforeSend: scrubEvent,
+				initialScope: {
+					// The only identifier: the random install id (NOT the account).
+					tags: { install_id: safeInstallId() },
+				},
+			});
+			// The opt-out is honored from the first event: scrubEvent (beforeSend) returns
+			// null whenever `enabled` is false, so no separate client opt-out is needed
+			// (@sentry/react has no top-level opt_out anyway).
+			// Sentry's GlobalHandlers now cover window errors; keeping ours would
+			// report each one twice.
+			stopEarlyCapture?.();
+			sdk = mod;
+			for (const report of pending.splice(0)) {
+				if (!enabled) {
+					break;
+				}
+				try {
+					sendReport(mod, report);
+				} catch {
+					// Never let a crash-report failure surface to the user.
+				}
+			}
+			return mod;
+		})
+		.catch(() => {
+			stopEarlyCapture?.();
+			return null;
+		});
+	return loading;
+}
+
+/** Queue uncaught window errors and rejections raised before the SDK has
+ *  loaded. reportError applies the gate and the queue cap; the tag values are
+ *  fixed enums, never content. */
+function captureEarlyWindowErrors(): void {
+	if (typeof window === "undefined") {
+		return;
+	}
+	const onError = (event: ErrorEvent) => {
+		reportError(event.error ?? event.message, {
+			tags: { early_capture: "error" },
+		});
+	};
+	const onRejection = (event: PromiseRejectionEvent) => {
+		reportError(event.reason, {
+			tags: { early_capture: "unhandledrejection" },
+		});
+	};
+	window.addEventListener("error", onError);
+	window.addEventListener("unhandledrejection", onRejection);
+	stopEarlyCapture = () => {
+		window.removeEventListener("error", onError);
+		window.removeEventListener("unhandledrejection", onRejection);
+		stopEarlyCapture = null;
+	};
+}
+
 /**
  * Initialize Sentry once. Safe to call when no DSN is set (graceful no-op). Uses
  * the random, account-unlinked install id; never calls setUser. Disables every
  * content-carrying default (breadcrumbs/replay/tracing) and respects the opt-out
- * from the very first event.
+ * from the very first event. The SDK loads when the main thread is idle.
  */
 export function initCrashReporting(): void {
 	if (initialized || !SENTRY_DSN) {
 		return;
 	}
 	initialized = true;
-	sentryInit({
-		dsn: SENTRY_DSN,
-		release:
-			(import.meta.env.VITE_APP_VERSION as string | undefined) ?? undefined,
-		// No PII, no performance tracing, no profiling, no session replay.
-		sendDefaultPii: false,
-		tracesSampleRate: 0,
-		// Drop ALL breadcrumbs. For a crash tier the stack trace is the value;
-		// breadcrumbs are pure leak surface. @sentry/browser's default `breadcrumbs`
-		// integration has dom + history on, emitting `ui.click` / `ui.input` (which
-		// capture the clicked element's text / aria-label — i.e. conversation titles
-		// or rendered agent content), plus `console` / `fetch` / `xhr` / `navigation`
-		// (content + URLs). Returning null for every breadcrumb is the clean,
-		// strictly-safer answer and honors the AC's "never include agent content".
-		beforeBreadcrumb() {
-			return null;
-		},
-		beforeSend: scrubEvent,
-		initialScope: {
-			// The only identifier: the random install id (NOT the account).
-			tags: { install_id: safeInstallId() },
-		},
+	const dsn = SENTRY_DSN;
+	captureEarlyWindowErrors();
+	runWhenIdle(() => {
+		loadSentry(dsn).catch(() => undefined);
 	});
-	// The opt-out is honored from the first event: scrubEvent (beforeSend) returns
-	// null whenever `enabled` is false, so no separate client opt-out is needed
-	// (@sentry/react has no top-level opt_out anyway).
+}
+
+/** Resolves once the SDK is live: false when unconfigured, not initialised, or
+ *  when it failed to load. Loads it now instead of waiting for idle time. */
+export async function crashReportingReady(): Promise<boolean> {
+	if (!(initialized && SENTRY_DSN)) {
+		return false;
+	}
+	return (await loadSentry(SENTRY_DSN)) !== null;
 }
 
 function safeInstallId(): string {
@@ -174,11 +279,15 @@ function safeInstallId(): string {
 /**
  * Flip the live gate from the Privacy settings toggle. Flips the in-memory flag and
  * mirrors it to localStorage for the next reload. beforeSend reads `enabled` on
- * every event, so toggling off stops egress immediately.
+ * every event, so toggling off stops egress immediately (and drops the reports
+ * still waiting for the SDK).
  */
 export function setCrashReportingEnabled(next: boolean): void {
 	enabled = next;
 	writeEnabledMirror(next);
+	if (!next) {
+		pending.length = 0;
+	}
 }
 
 /**
@@ -198,19 +307,30 @@ export interface CrashContext {
 
 /**
  * Manually report a caught error (e.g. from an error boundary). A no-op unless a
- * DSN is configured AND the gate is on.
+ * DSN is configured, the client is initialized, and the gate is on. Returns the
+ * local event receipt when queued, or null when unavailable (including while the
+ * SDK is still loading; the report is then sent once it has). This is not a
+ * delivery acknowledgement.
  */
-export function reportError(error: unknown, context?: CrashContext): void {
-	if (!(enabled && SENTRY_DSN)) {
-		return;
+export function reportError(
+	error: unknown,
+	context?: CrashContext
+): string | null {
+	if (!(initialized && enabled && SENTRY_DSN)) {
+		return null;
+	}
+	if (!sdk) {
+		// Delivered once the SDK loads; there is no receipt yet.
+		if (pending.length < MAX_PENDING_REPORTS) {
+			pending.push({ context, error, kind: "error" });
+		}
+		return null;
 	}
 	try {
-		captureException(error, {
-			extra: context?.extra,
-			tags: context?.tags,
-		});
+		return sendReport(sdk, { context, error, kind: "error" });
 	} catch {
 		// Never let a crash-report failure surface to the user.
+		return null;
 	}
 }
 
@@ -230,12 +350,15 @@ export function reportCrashEvent(
 	if (!(enabled && SENTRY_DSN)) {
 		return;
 	}
+	if (!sdk) {
+		// Before initCrashReporting() there is no client to send through.
+		if (initialized && pending.length < MAX_PENDING_REPORTS) {
+			pending.push({ context, kind: "event", message });
+		}
+		return;
+	}
 	try {
-		captureMessage(message, {
-			extra: context?.extra,
-			level: "info",
-			tags: context?.tags,
-		});
+		sendReport(sdk, { context, kind: "event", message });
 	} catch {
 		// Never let a crash-report failure surface to the user.
 	}

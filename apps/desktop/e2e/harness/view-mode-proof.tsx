@@ -4,21 +4,21 @@ import {
 	LibraryCard,
 	LibraryGrid,
 	type LibraryViewMode,
-} from "@ryu/blocks/desktop/library";
-import { type ViewMode, ViewToggle } from "@ryu/blocks/desktop/view-toggle";
+} from "@ryu/blocks/desktop/library.tsx";
+import { type ViewMode, ViewToggle } from "@ryu/blocks/desktop/view-toggle.tsx";
 import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
 import {
 	StoreCardGrid,
 	StoreViewModeProvider,
 } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
-import { Badge } from "@ryu/ui/components/badge";
-import { BookCard } from "@ryu/ui/components/book-card";
-import { ProjectFolder } from "@ryu/ui/components/project-folder";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { BookCard } from "@ryu/ui/components/book-card.tsx";
+import { ProjectFolder } from "@ryu/ui/components/project-folder.tsx";
 import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AgentBadgeCard } from "../../src/components/agents/AgentBadgeCard";
-import { useStoreViewMode } from "../../src/hooks/useStoreViewMode";
-import { useTabViewMode } from "../../src/hooks/useTabViewMode";
+import { AgentBadgeCard } from "../../src/components/agents/AgentBadgeCard.tsx";
+import { useStoreViewMode } from "../../src/hooks/useStoreViewMode.ts";
+import { useTabViewMode } from "../../src/hooks/useTabViewMode.ts";
 import "../../src/index.css";
 
 const LIBRARY_TABS = [
@@ -118,11 +118,11 @@ function LibraryContent({ tab, view }: { tab: string; view: LibraryViewMode }) {
 					itemLabel="document"
 					previews={[
 						{
-							content: <div className="h-20 bg-sky-100 dark:bg-sky-950" />,
+							content: <div className="h-20 bg-info/10" />,
 							id: "brief",
 						},
 						{
-							content: <div className="h-20 bg-amber-100 dark:bg-amber-950" />,
+							content: <div className="h-20 bg-warning/10" />,
 							id: "notes",
 						},
 					]}
@@ -137,7 +137,7 @@ function LibraryContent({ tab, view }: { tab: string; view: LibraryViewMode }) {
 				{["Research", "Writing"].map((title) => (
 					<BookCard
 						coverArt={
-							<div className="flex h-full items-center justify-center bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+							<div className="flex h-full items-center justify-center bg-accent text-accent-foreground">
 								<HugeiconsIcon
 									className="size-10"
 									icon={WorkflowCircle06Icon}

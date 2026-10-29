@@ -1,12 +1,5 @@
 import { CREDIT_POOLS, isCreditPoolId } from "@ryu/auth/lib/credit-pools";
 import { Button } from "@ryu/ui/components/button.tsx";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@ryu/ui/components/card.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
@@ -18,16 +11,30 @@ import {
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
+import { onActiveTokenChange, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { SettingsNotice } from "@/src/components/gateway/SettingsNotice.tsx";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
+import {
+	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "@/src/components/settings/shared/settings-items.tsx";
 import { MICRO_USD_PER_DOLLAR } from "@/src/lib/api/credits.ts";
 import {
 	fetchTransferable,
-	hasOrgAuth,
+	getOrgSessionToken,
 	type OrgSummary,
 	transferCredits,
 } from "@/src/lib/api/orgs.ts";
@@ -120,22 +127,84 @@ function poolDisplayName(pool: string): string {
 		.join(" ");
 }
 
+let nextTransferScope = 0;
+function subscribeTransferAuthority(onChange: () => void) {
+	const onStorage = (event: StorageEvent) => {
+		if (event.key === TOKEN_KEY || event.key === null) {
+			onChange();
+		}
+	};
+	window.addEventListener("storage", onStorage);
+	window.addEventListener("focus", onChange);
+	const unsubscribeVault = onActiveTokenChange(onChange);
+	return () => {
+		unsubscribeVault();
+		window.removeEventListener("storage", onStorage);
+		window.removeEventListener("focus", onChange);
+	};
+}
+
 export function CreditTransferCard() {
+	const sessionToken = useSyncExternalStore(
+		subscribeTransferAuthority,
+		getOrgSessionToken,
+		() => null
+	);
+	const authority = useRef<{ token: string | null; scope: number } | null>(
+		null
+	);
+	if (!authority.current || authority.current.token !== sessionToken) {
+		authority.current = { token: sessionToken, scope: ++nextTransferScope };
+	}
+	if (!sessionToken) {
+		return null;
+	}
+	return (
+		<ScopedCreditTransferCard
+			key={authority.current.scope}
+			scope={authority.current.scope}
+			sessionToken={sessionToken}
+		/>
+	);
+}
+
+function ScopedCreditTransferCard({
+	sessionToken,
+	scope,
+}: {
+	sessionToken: string;
+	scope: number;
+}) {
 	const queryClient = useQueryClient();
-	const authed = hasOrgAuth();
+	const authed = Boolean(sessionToken);
 	const [sourceOrgId, setSourceOrgId] = useState<string | null>(null);
 	const [destOrgId, setDestOrgId] = useState<string | null>(null);
 	const stepUp = useStepUp();
+	const mounted = useRef(true);
+	const guardPending = useRef(false);
+	// One key per intended transfer. A retry after a failed or lost response
+	// reuses it, so a transfer the server already committed is not applied
+	// twice; it rotates only once a transfer succeeds.
+	const transferKey = useRef(crypto.randomUUID());
+	const [checkingAuthority, setCheckingAuthority] = useState(false);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, []);
+	const isCurrentAuthority = () =>
+		mounted.current && getOrgSessionToken() === sessionToken;
 	const [selectedGrants, setSelectedGrants] = useState<Set<string>>(new Set());
 	const [topupDollars, setTopupDollars] = useState("");
 
-	const { data, isLoading } = useQuery({
+	const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
 		enabled: authed,
-		queryFn: () => fetchTransferable(sourceOrgId),
+		queryFn: () => fetchTransferable(sourceOrgId, sessionToken),
 		// The source is part of the key: the server answers "what does THIS org
 		// hold", so a cache keyed only on the route would show the previous
 		// workspace's grants for a beat after switching — long enough to tick one.
-		queryKey: [...TRANSFERABLE_KEY, sourceOrgId ?? "default"],
+		queryKey: [...TRANSFERABLE_KEY, scope, sourceOrgId ?? "default"],
 	});
 
 	const orgs = useMemo(() => data?.orgs ?? [], [data]);
@@ -184,18 +253,44 @@ export function CreditTransferCard() {
 		.reduce((sum, grant) => sum + grant.remainingMicroUsd, 0);
 
 	const transferMutation = useMutation({
-		mutationFn: () =>
-			transferCredits({
-				fromOrgId: resolvedSource as string,
-				grantIds: [...selectedGrants],
-				toOrgId: destOrgId as string,
-				topupMicroUsd,
-			}),
-		onError: (error: unknown) =>
+		mutationFn: () => {
+			if (resolvedSource === null || resolvedSource === undefined) {
+				throw new Error(
+					"Select a source organization before transferring credits."
+				);
+			}
+			if (destOrgId === null || destOrgId === undefined) {
+				throw new Error(
+					"Select a destination organization before transferring credits."
+				);
+			}
+			return transferCredits(
+				{
+					fromOrgId: resolvedSource,
+					grantIds: [...selectedGrants],
+					toOrgId: destOrgId,
+					topupMicroUsd,
+				},
+				transferKey.current,
+				sessionToken
+			);
+		},
+		onError: (error: unknown) => {
+			if (!isCurrentAuthority()) {
+				return;
+			}
+			// The request may have committed before its response was lost; show
+			// the server's balances before the user decides to retry.
+			queryClient.invalidateQueries({ queryKey: [...TRANSFERABLE_KEY, scope] });
 			toast.error({
 				title: error instanceof Error ? error.message : "Transfer failed",
-			}),
+			});
+		},
 		onSuccess: async (result) => {
+			transferKey.current = crypto.randomUUID();
+			if (!isCurrentAuthority()) {
+				return;
+			}
 			setSelectedGrants(new Set());
 			setTopupDollars("");
 			toast.success({
@@ -213,12 +308,62 @@ export function CreditTransferCard() {
 	});
 
 	const handleTransfer = async () => {
+		if (guardPending.current || !isCurrentAuthority()) {
+			return;
+		}
+		guardPending.current = true;
+		setCheckingAuthority(true);
+		let mutationStarted = false;
 		try {
-			await stepUp.guard("billing", () => transferMutation.mutateAsync());
-		} catch {
-			// React Query's onError owns the user-facing failure toast.
+			await stepUp.guard("billing", () => {
+				if (!isCurrentAuthority()) {
+					return Promise.resolve(null);
+				}
+				mutationStarted = true;
+				return transferMutation.mutateAsync();
+			});
+		} catch (error: unknown) {
+			// Mutation failures already publish through onError; preflight failures do not.
+			if (!mutationStarted && isCurrentAuthority()) {
+				toast.error({
+					title:
+						error instanceof Error
+							? error.message
+							: "We couldn't verify this transfer. Try again.",
+				});
+			}
+		} finally {
+			// Each opaque authority owns its gate; retired work never unlocks a new one.
+			if (isCurrentAuthority()) {
+				guardPending.current = false;
+				setCheckingAuthority(false);
+			}
 		}
 	};
+
+	if (isError) {
+		// A plain sentence leads; the server's message stays on the title only.
+		return (
+			<SettingsSection title="Move credits">
+				<SettingsNotice
+					action={
+						<Button
+							disabled={isFetching}
+							onClick={() => void refetch()}
+							size="sm"
+							variant="outline"
+						>
+							Retry
+						</Button>
+					}
+					detail={error instanceof Error ? error.message : undefined}
+					role="alert"
+				>
+					Couldn't load credits you can move.
+				</SettingsNotice>
+			</SettingsSection>
+		);
+	}
 
 	// Nothing to move BETWEEN. A solo user has one workspace, and a transfer form
 	// whose destination list is empty is a control that can only be refused.
@@ -230,16 +375,12 @@ export function CreditTransferCard() {
 	const overdrawn = topupMicroUsd > topupAvailable;
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle className="text-base">Move credits</CardTitle>
-				<CardDescription>
-					Referral rewards are always paid into your personal workspace. Move
-					them to the workspace that will spend them.
-				</CardDescription>
-			</CardHeader>
-			<CardContent className="space-y-4">
-				<div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+		<SettingsSection
+			caption="Referral rewards are always paid into your personal workspace. Move them to the workspace that will spend them."
+			title="Move credits"
+		>
+			<div className="flex flex-col gap-3">
+				<SettingsCard className="flex flex-col gap-3 sm:flex-row sm:items-end">
 					<div className="min-w-0 flex-1 space-y-1.5">
 						<Label htmlFor="transfer-source">From</Label>
 						<Select
@@ -293,23 +434,22 @@ export function CreditTransferCard() {
 							</SelectContent>
 						</Select>
 					</div>
-				</div>
+				</SettingsCard>
 
 				{isLoading ? (
-					<div className="flex justify-center py-6">
-						<Spinner className="size-5" />
-					</div>
+					<SettingsCard>
+						<SkeletonRows spacing="generous" />
+					</SettingsCard>
 				) : null}
 
 				{grants.length > 0 ? (
-					<div className="space-y-2">
-						<p className="font-medium text-sm">Grants</p>
-						{/* Each row moves whole — see the note at the top of this file. */}
+					// Each row moves whole — see the note at the top of this file.
+					<SettingsGroup>
 						{grants.map((grant) => {
 							const expiry = formatExpiry(grant.expiresAt);
 							return (
 								<label
-									className="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 hover:bg-muted/50"
+									className="flex min-h-11 cursor-pointer items-center gap-3 px-3.5 py-2.5"
 									htmlFor={`grant-${grant.id}`}
 									key={grant.id}
 								>
@@ -329,7 +469,7 @@ export function CreditTransferCard() {
 										}
 									/>
 									<span className="min-w-0 flex-1">
-										<span className="block font-medium font-mono text-sm tabular-nums">
+										<span className="block font-mono text-sm tabular-nums">
 											{formatUsd(grant.remainingMicroUsd)}
 										</span>
 										<span className="block text-muted-foreground text-xs">
@@ -340,55 +480,74 @@ export function CreditTransferCard() {
 								</label>
 							);
 						})}
-					</div>
+					</SettingsGroup>
 				) : null}
 
-				<div className="space-y-1.5">
-					<Label htmlFor="transfer-topup">
-						Top-up balance (
-						<span className="font-mono tabular-nums">
-							{formatUsd(topupAvailable)}
-						</span>{" "}
-						available)
-					</Label>
-					<Input
-						id="transfer-topup"
-						inputMode="decimal"
-						onChange={(event) => setTopupDollars(event.target.value)}
-						placeholder="0.00"
-						value={topupDollars}
-					/>
-					{overdrawn ? (
-						<p className="text-status-destructive text-xs">
-							That is more than this workspace holds.
-						</p>
-					) : null}
-				</div>
-
-				<div className="flex items-center justify-between gap-3">
-					<p className="text-muted-foreground text-sm tabular-nums">
-						{nothingChosen ? "Nothing selected" : "Moving "}
-						{nothingChosen ? null : (
-							<span className="font-mono text-foreground">
-								{formatUsd(selectedMicroUsd + topupMicroUsd)}
-							</span>
-						)}
-					</p>
-					<Button
-						disabled={
-							nothingChosen || overdrawn || !(destOrgId && resolvedSource)
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<div className="w-32">
+								<Input
+									id="transfer-topup"
+									inputMode="decimal"
+									onChange={(event) => setTopupDollars(event.target.value)}
+									placeholder="0.00"
+									value={topupDollars}
+								/>
+							</div>
 						}
-						loading={transferMutation.isPending}
-						onClick={() => void handleTransfer()}
-						type="button"
-					>
-						{!transferMutation.isPending && <ArrowRight className="size-4" />}
-						Move credits
-					</Button>
-				</div>
-			</CardContent>
+						description={
+							overdrawn ? (
+								<span className="text-status-destructive">
+									That is more than this workspace holds.
+								</span>
+							) : undefined
+						}
+						title={
+							<Label className="font-normal" htmlFor="transfer-topup">
+								Top-up balance (
+								<span className="font-mono tabular-nums">
+									{formatUsd(topupAvailable)}
+								</span>{" "}
+								available)
+							</Label>
+						}
+					/>
+					<SettingsItem
+						actions={
+							<Button
+								disabled={
+									checkingAuthority ||
+									nothingChosen ||
+									overdrawn ||
+									!(destOrgId && resolvedSource)
+								}
+								loading={checkingAuthority || transferMutation.isPending}
+								onClick={() => void handleTransfer()}
+								size="sm"
+								type="button"
+							>
+								{!transferMutation.isPending && (
+									<ArrowRight className="size-4" />
+								)}
+								Move credits
+							</Button>
+						}
+						title={
+							<span className="text-muted-foreground tabular-nums">
+								{nothingChosen ? "Nothing selected" : "Moving "}
+								{nothingChosen ? null : (
+									<span className="font-mono text-foreground">
+										{formatUsd(selectedMicroUsd + topupMicroUsd)}
+									</span>
+								)}
+							</span>
+						}
+					/>
+				</SettingsGroup>
+			</div>
 			{stepUp.dialog}
-		</Card>
+		</SettingsSection>
 	);
 }
 

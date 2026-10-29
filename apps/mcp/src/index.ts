@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // Ryu Core MCP server (stdio transport).
 //
 // Exposes a running Ryu Core node's API to any MCP host (Claude Desktop,
@@ -7,8 +7,11 @@
 //
 // stdout is reserved for JSON-RPC. All diagnostics go to stderr.
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { version as packageVersion } from "../package.json" with {
+	type: "json",
+};
 import { loadToken, runLogin, runLogout, runWhoami } from "./auth.ts";
 import { buildTarget } from "./target.ts";
 import { registerRyuTools } from "./tools.ts";
@@ -18,15 +21,18 @@ import { registerRyuTools } from "./tools.ts";
 const serve = async (): Promise<void> => {
 	const target = buildTarget();
 
-	const server = new McpServer({
-		name: "ryu-mcp",
-		version: "0.1.0",
-	});
+	serveStdio(
+		() => {
+			const server = new McpServer({
+				name: "ryu-mcp",
+				version: packageVersion,
+			});
 
-	registerRyuTools(server, target);
-
-	const transport = new StdioServerTransport();
-	await server.connect(transport);
+			registerRyuTools(server, target);
+			return server;
+		},
+		{ legacy: "serve" }
+	);
 
 	const signedIn = loadToken();
 	const who = signedIn?.name || signedIn?.email || "not signed in";

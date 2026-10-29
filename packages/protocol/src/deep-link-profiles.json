@@ -1,0 +1,7 @@
+{
+  "release": "ryu",
+  "dev": "ryu-dev",
+  "beta": "ryu-beta",
+  "nightly": "ryu-nightly",
+  "canary": "ryu-canary"
+}

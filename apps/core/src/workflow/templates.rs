@@ -7,7 +7,7 @@
 //! `body_workflow_id` (and any `SubWorkflow.workflow_id`) to the minted id, mints
 //! a fresh id for the primary, and persists them all through the shared
 //! [`super::persist_workflow`] path (so triggers reconcile identically to a
-//! hand-authored save). Returns the primary id.
+//! hand-authored save). Returns the saved primary definition for provenance.
 //!
 //! Per the Core-vs-Gateway rule this is **Core**: a template decides *what runs*
 //! (which nodes, in what order). Every model call a node makes stays
@@ -23,14 +23,15 @@
 //! at runtime: adding or editing a template is a JSON edit plus one line in
 //! [`TEMPLATE_FILES`], not a Rust rewrite.
 //!
-//! The 12 blueprints cover the common agentic patterns (Anthropic's
-//! "Building effective agents" set) plus Ryu's autoresearch git-ledger loop.
+//! The 13 blueprints cover the common agentic patterns (Anthropic's
+//! "Building effective agents" set), Ryu's autoresearch git-ledger loop, and
+//! the video-drama production-crew pipeline.
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{NodeKind, Workflow};
+use super::{NodeKind, Workflow, WorkflowGraph};
 
 /// Public listing shape for one template (`GET /api/workflows/catalog`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +89,7 @@ const TEMPLATE_FILES: &[&str] = &[
     include_str!("templates/adversarial-verification.json"),
     include_str!("templates/tournament.json"),
     include_str!("templates/generate-and-filter.json"),
+    include_str!("templates/video-drama-studio.json"),
 ];
 
 /// Every curated template. Order = display order.
@@ -122,8 +124,9 @@ pub fn find(template_id: &str) -> Option<WorkflowTemplate> {
 
 // ── install ──────────────────────────────────────────────────────────────────
 
-/// Rewrite every `While.body_workflow_id` / `SubWorkflow.workflow_id` that names
-/// a placeholder in `id_map` to its minted id.
+/// Rewrite every nested workflow reference (`While`/`ForEach` bodies,
+/// `SubWorkflow.workflow_id`, `Parallel` branch workflows) that names a
+/// placeholder in `id_map` to its minted id.
 fn patch_bodies(workflow: &mut Workflow, id_map: &HashMap<String, String>) {
     for n in &mut workflow.nodes {
         match &mut n.kind {
@@ -135,9 +138,20 @@ fn patch_bodies(workflow: &mut Workflow, id_map: &HashMap<String, String>) {
                     *bid = minted.clone();
                 }
             }
-            NodeKind::SubWorkflow { workflow_id } => {
+            NodeKind::SubWorkflow { workflow_id }
+            | NodeKind::ForEach {
+                body_workflow_id: workflow_id,
+                ..
+            } => {
                 if let Some(minted) = id_map.get(workflow_id) {
                     *workflow_id = minted.clone();
+                }
+            }
+            NodeKind::Parallel { branches, .. } => {
+                for branch in branches {
+                    if let Some(minted) = id_map.get(&branch.workflow_id) {
+                        branch.workflow_id = minted.clone();
+                    }
                 }
             }
             _ => {}
@@ -151,29 +165,52 @@ fn mint_id() -> String {
 
 /// Install a template: persist all body workflows with minted ids (patched so
 /// inter-body references resolve), then persist the primary (its `While` nodes
-/// patched to the minted body ids). Returns the primary workflow id.
-pub async fn install(template_id: &str) -> Result<String, String> {
+/// patched to the minted body ids). Returns the saved primary workflow.
+pub async fn install(template_id: &str) -> Result<Workflow, String> {
     let tmpl = find(template_id).ok_or_else(|| format!("unknown template '{template_id}'"))?;
 
-    // Mint a fresh id for every body placeholder up front so references resolve.
-    let mut id_map: HashMap<String, String> = HashMap::new();
+    let ids = install_definition(tmpl).await?;
+    super::store::load_workflow(&ids[0]).map_err(|error| error.to_string())
+}
+
+/// Install a portable or built-in template through the same canonical workflow
+/// persistence path. The primary id comes first; every body id is tracked so the
+/// package lifecycle can remove all definitions it owns.
+pub async fn install_definition(tmpl: WorkflowTemplate) -> Result<Vec<String>, String> {
+    let mut id_map = HashMap::new();
     for (placeholder, _) in &tmpl.bodies {
-        id_map.insert(placeholder.clone(), mint_id());
+        if id_map.insert(placeholder.clone(), mint_id()).is_some() {
+            return Err(format!("duplicate workflow body '{placeholder}'"));
+        }
     }
-
-    // Persist each body with its minted id (patching any inter-body references).
+    let mut definitions = Vec::new();
     for (placeholder, mut body) in tmpl.bodies {
-        body.id = id_map.get(&placeholder).cloned().unwrap_or_else(mint_id);
+        body.id = id_map[&placeholder].clone();
         patch_bodies(&mut body, &id_map);
-        super::persist_workflow(body).await?;
+        WorkflowGraph::build(&body).map_err(|error| error.to_string())?;
+        definitions.push(body);
     }
-
-    // Persist the primary: fresh id (let persist mint it) + patched while nodes.
     let mut primary = tmpl.primary;
-    primary.id = String::new();
+    primary.id = mint_id();
     patch_bodies(&mut primary, &id_map);
-    let saved = super::persist_workflow(primary).await?;
-    Ok(saved.id)
+    WorkflowGraph::build(&primary).map_err(|error| error.to_string())?;
+    let primary_id = primary.id.clone();
+    definitions.push(primary);
+    let mut installed = Vec::new();
+    for workflow in definitions {
+        match super::persist_workflow(workflow).await {
+            Ok(saved) => installed.push(saved.id),
+            Err(error) => {
+                for id in &installed {
+                    let _ = super::store::delete_workflow(id);
+                }
+                return Err(error);
+            }
+        }
+    }
+    installed.retain(|id| id != &primary_id);
+    installed.insert(0, primary_id);
+    Ok(installed)
 }
 
 #[cfg(test)]
@@ -233,6 +270,7 @@ mod tests {
                 "adversarial-verification",
                 "tournament",
                 "generate-and-filter",
+                "video-drama-studio",
             ]
         );
     }
@@ -254,13 +292,13 @@ mod tests {
     }
 
     #[test]
-    fn catalog_has_twelve_templates_with_unique_ids() {
+    fn catalog_has_thirteen_templates_with_unique_ids() {
         let all = catalog();
-        assert_eq!(all.len(), 12);
+        assert_eq!(all.len(), 13);
         let mut ids: Vec<String> = all.iter().map(|t| t.meta.id.clone()).collect();
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), 12, "template ids must be unique");
+        assert_eq!(ids.len(), 13, "template ids must be unique");
     }
 
     #[test]

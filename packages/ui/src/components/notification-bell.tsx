@@ -1,11 +1,13 @@
 "use client";
 
 import { Slot, Slottable } from "@radix-ui/react-slot";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	AnimatePresence,
 	type AnimationPlaybackControls,
 	animate,
+	type MotionStyle,
 	type MotionValue,
 	motion,
 	useMotionValue,
@@ -14,18 +16,54 @@ import {
 	useTransform,
 	useVelocity,
 } from "motion/react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { useEffect, useRef } from "react";
+import { isNativeNumber } from "../lib/native-primitive-observation.ts";
+import drawingStyles from "./notification-bell.drawing.module.css";
+import styles from "./notification-bell.module.css";
 
-const SURFACE = "bg-[#F4F4F9] dark:bg-[#262626]";
-const GLYPH = "text-[#868593] dark:text-[#9B9AA7]";
+interface BellSwingStyle extends MotionStyle {
+	"--notification-bell-1-rotate"?: MotionStyle["rotate"];
+	"--notification-bell-1-transform-origin"?: MotionStyle["transformOrigin"];
+}
+interface ClapperSwingStyle extends MotionStyle {
+	"--notification-bell-2-rotate"?: MotionStyle["rotate"];
+	"--notification-bell-2-transform-box"?: MotionStyle["transformBox"];
+	"--notification-bell-2-transform-origin"?: MotionStyle["transformOrigin"];
+}
+interface DigitRollStyle extends MotionStyle {
+	"--notification-bell-3-y"?: MotionStyle["y"];
+}
+interface BellSizeStyle extends CSSProperties {
+	"--notification-bell-4-height"?: string | undefined;
+	"--notification-bell-4-width"?: string | undefined;
+}
+function drawingLength(value: CSSProperties["width"]): string | undefined {
+	return isNativeNumber(value) ? `${value}px` : value;
+}
+
+interface NotificationDigitMaskStyle extends MotionStyle {
+	"--notification-digit-mask": MotionValue<string> | undefined;
+}
+interface NotificationDigitTileStyle extends CSSProperties {
+	"--notification-digit-top": string;
+}
+interface NotificationBadgeStyle extends MotionStyle {
+	"--notification-badge-font": string;
+	"--notification-badge-inset": string;
+	"--notification-badge-padding": string;
+	"--notification-badge-side": string;
+}
+
+const SURFACE = "bg-muted";
+const GLYPH = "text-muted-foreground";
 
 const COLORS = {
-	red: "bg-[#FF3B30] dark:bg-[#FF453A]",
-	orange: "bg-[#FF9500] dark:bg-[#FF9F0A]",
-	green: "bg-[#34C759] dark:bg-[#30D158]",
-	blue: "bg-[#007AFF] dark:bg-[#0A84FF]",
-	violet: "bg-[#AF52DE] dark:bg-[#BF5AF2]",
+	red: "bg-destructive",
+	orange: "bg-warning",
+	green: "bg-success",
+	blue: "bg-info",
+	violet: "bg-primary",
 } as const;
 
 // all sizes are a fraction of the size prop
@@ -125,13 +163,23 @@ function BellIcon({
 	swing: MotionValue<number>;
 	clapper: MotionValue<number>;
 }) {
+	const bellSwingStyle: BellSwingStyle = {
+		"--notification-bell-1-rotate": swing,
+		"--notification-bell-1-transform-origin": "50% 12%",
+	};
+	const clapperSwingStyle: ClapperSwingStyle = {
+		"--notification-bell-2-rotate": clapper,
+		"--notification-bell-2-transform-box": "fill-box",
+		"--notification-bell-2-transform-origin": "50% 0%",
+	};
 	return (
 		<motion.svg
 			aria-hidden
+			// the bell hangs from the top, spinning from the middle looks wrong
+			className={drawingStyles.bellSwing}
 			fill="currentColor"
 			height={side}
-			// the bell hangs from the top, spinning from the middle looks wrong
-			style={{ rotate: swing, transformOrigin: "50% 12%" }}
+			style={bellSwingStyle}
 			viewBox="0 0 18 18"
 			width={side}
 		>
@@ -142,12 +190,9 @@ function BellIcon({
 				fillRule="evenodd"
 			/>
 			<motion.path
+				className={drawingStyles.clapperSwing}
 				d="M10.2 15H7.80099C7.64999 15 7.50799 15.068 7.41299 15.185C7.31799 15.302 7.28099 15.456 7.31199 15.603C7.48499 16.425 8.17999 17 9.00099 17C9.82199 17 10.517 16.425 10.69 15.603C10.721 15.456 10.684 15.302 10.589 15.185C10.494 15.068 10.351 15 10.2 15Z"
-				style={{
-					rotate: clapper,
-					transformBox: "fill-box",
-					transformOrigin: "50% 0%",
-				}}
+				style={clapperSwingStyle}
 			/>
 		</motion.svg>
 	);
@@ -176,23 +221,36 @@ function DigitColumn({ value, reduced }: { value: number; reduced: boolean }) {
 		}
 	}, [value, reduced, position]);
 
+	const digitMaskStyle: NotificationDigitMaskStyle = {
+		"--notification-digit-mask": reduced ? undefined : mask,
+	};
+
+	const digitRollStyle: DigitRollStyle = { "--notification-bell-3-y": y };
 	return (
 		<motion.span
-			className="relative inline-block h-[1em] overflow-hidden"
-			style={{
-				width: "1ch",
-				maskImage: reduced ? undefined : mask,
-				WebkitMaskImage: reduced ? undefined : mask,
-			}}
+			className={cn(
+				"relative inline-block overflow-hidden",
+				styles.digitWindow
+			)}
+			style={digitMaskStyle}
 		>
-			<motion.span className="absolute inset-0" style={{ y }}>
+			<motion.span
+				className={cn("absolute inset-0", drawingStyles.digitRoll)}
+				style={digitRollStyle}
+			>
 				{Array.from({ length: WINDOW * 2 + 1 }, (_, i) => {
 					const tile = value - WINDOW + i;
+					const digitTileStyle: NotificationDigitTileStyle = {
+						"--notification-digit-top": `${tile * 100}%`,
+					};
 					return (
 						<span
-							className="absolute inset-x-0 flex justify-center"
+							className={cn(
+								"absolute inset-x-0 flex justify-center",
+								styles.digitTile
+							)}
 							key={tile}
-							style={{ top: `${tile * 100}%` }}
+							style={digitTileStyle}
 						>
 							{digitOf(tile)}
 						</span>
@@ -221,15 +279,25 @@ function CountBadge({
 	const { side, inset } = badgeMetrics(size, dot);
 	const clamped = total > max;
 	const places = clamped ? 0 : String(total).length;
+	const showBadge = total > 0;
+	const badgeStyle: NotificationBadgeStyle | undefined = showBadge
+		? {
+				"--notification-badge-inset": `${inset}px`,
+				"--notification-badge-side": `${side}px`,
+				"--notification-badge-padding": `${dot ? 0 : size * PAD}px`,
+				"--notification-badge-font": `${size * FONT}px`,
+			}
+		: undefined;
 
 	return (
 		<AnimatePresence initial={false}>
-			{total > 0 && (
+			{showBadge && (
 				<motion.span
 					animate={{ scale: 1, opacity: 1 }}
 					aria-hidden
 					className={cn(
 						"pointer-events-none absolute z-10 grid place-items-center rounded-full",
+						styles.badge,
 						COLORS[color]
 					)}
 					exit={{ scale: 0, opacity: 0 }}
@@ -237,21 +305,15 @@ function CountBadge({
 					key="badge"
 					// motion does not turn layout animation off for reduced motion, so we do it here
 					layout={!reduced}
-					style={{
-						top: inset,
-						right: inset,
-						height: side,
-						minWidth: side,
-						paddingInline: dot ? 0 : size * PAD,
-						fontSize: size * FONT,
-					}}
+					style={badgeStyle}
 					transition={reduced ? FADE : ENTER_SPRING}
 				>
 					{!dot && (
 						<span
-							className="flex font-medium text-white leading-none tracking-tight"
-							// digits need the same width or the columns shift
-							style={{ fontVariantNumeric: "tabular-nums" }}
+							className={cn(
+								"flex font-medium text-white leading-none tracking-tight",
+								styles.badgeDigits
+							)}
 						>
 							{clamped
 								? `${max}+`
@@ -282,6 +344,8 @@ export type NotificationBellProps = Omit<
 	| "onDragStart"
 	| "onDragEnd"
 > & {
+	appearance?: "default" | "inbox-menubar" | "inbox-sidebar";
+	expanded?: boolean;
 	count?: number;
 	max?: number;
 	variant?: "count" | "dot";
@@ -292,6 +356,8 @@ export type NotificationBellProps = Omit<
 };
 
 export function NotificationBell({
+	appearance = "default",
+	expanded = false,
 	count = 0,
 	max = 99,
 	variant = "count",
@@ -303,6 +369,25 @@ export function NotificationBell({
 	children,
 	...props
 }: NotificationBellProps) {
+	const chrome =
+		appearance === "inbox-menubar"
+			? cn(
+					"rounded-lg bg-transparent! text-white/75! hover:bg-white/10! hover:text-white!",
+					expanded && "bg-white/10! text-white!"
+				)
+			: appearance === "inbox-sidebar"
+				? cn(
+						"rounded-xl bg-transparent! text-muted-foreground! hover:bg-muted! hover:text-foreground!",
+						expanded && "bg-muted! text-foreground!"
+					)
+				: undefined;
+	const surfaceSize =
+		appearance === "inbox-menubar"
+			? 24
+			: appearance === "inbox-sidebar"
+				? 28
+				: size;
+	const tl = useLiteralMessages();
 	const reduced = useReducedMotion() ?? false;
 	const total = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
 	// use the total so a weird count cannot ring the bell
@@ -322,7 +407,9 @@ export function NotificationBell({
 	// this is also the button label, so the count gets read out when it changes
 	const label = (
 		<span className="sr-only" role="status">
-			{total > 0 ? `Notifications, ${total} unread` : "Notifications"}
+			{total > 0
+				? tl("Notifications, {total} unread", { total: String(total) })
+				: "Notifications"}
 		</span>
 	);
 	const bell = <BellIcon clapper={clapper} side={size * ICON} swing={swing} />;
@@ -330,7 +417,7 @@ export function NotificationBell({
 	if (asChild) {
 		return (
 			<Slot
-				className={cn("relative", className)}
+				className={cn("relative", chrome, className)}
 				data-slot="notification-bell"
 				style={style}
 				{...props}
@@ -343,16 +430,25 @@ export function NotificationBell({
 		);
 	}
 
+	const bellSizeStyle: BellSizeStyle = {
+		"--notification-bell-4-width": drawingLength(surfaceSize),
+		"--notification-bell-4-height": drawingLength(surfaceSize),
+		...style,
+	};
 	return (
 		<button
 			className={cn(
-				"relative grid place-items-center rounded-full outline-none transition-transform focus-visible:ring-2 focus-visible:ring-ring active:scale-90 motion-reduce:active:scale-100",
-				SURFACE,
-				GLYPH,
-				className
+				cn(
+					"relative grid place-items-center rounded-full outline-none transition-transform focus-visible:ring-2 focus-visible:ring-ring active:scale-90 motion-reduce:active:scale-100",
+					SURFACE,
+					GLYPH,
+					chrome,
+					className
+				),
+				drawingStyles.bellSize
 			)}
 			data-slot="notification-bell"
-			style={{ width: size, height: size, ...style }}
+			style={bellSizeStyle}
 			type="button"
 			{...props}
 		>

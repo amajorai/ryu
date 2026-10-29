@@ -1,7 +1,12 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { formatDistanceToNow } from "date-fns";
 import { AppWindow, Trash2 } from "lucide-react";
 import type { OAuthApp } from "../../utils/api-client.ts";
+import {
+	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
+} from "../shared/settings-rows.tsx";
 import { scopeLabel } from "./shared.ts";
 
 export function AuthorizedOAuthAppList({
@@ -21,14 +26,16 @@ export function AuthorizedOAuthAppList({
 }) {
 	if (apps.length === 0) {
 		return (
-			<p className="py-4 text-center text-muted-foreground text-sm">
-				No authorized apps.
-			</p>
+			<SettingsCard>
+				<p className="text-center text-muted-foreground text-sm">
+					No authorized apps.
+				</p>
+			</SettingsCard>
 		);
 	}
 
 	return (
-		<div className="space-y-2">
+		<SettingsGroup>
 			{apps.map((app) => {
 				const isConfirming = confirmRevoke === app.clientId;
 				const scopeList = app.scopes
@@ -38,57 +45,62 @@ export function AuthorizedOAuthAppList({
 					.join(", ");
 
 				return (
-					<div
-						className="flex flex-wrap items-center gap-3 rounded-lg border p-3"
-						key={app.clientId}
-					>
-						<AppWindow className="size-4 shrink-0 text-muted-foreground" />
-						<div className="min-w-0 flex-1">
-							<p className="truncate font-medium text-sm">{app.clientName}</p>
-							<p className="text-muted-foreground text-xs">
-								{scopeList || "No scopes"} \u00b7 Authorized{" "}
-								{formatDistanceToNow(new Date(app.grantedAt), {
-									addSuffix: true,
-								})}
-							</p>
-						</div>
-						{isConfirming ? (
-							<div className="flex shrink-0 items-center gap-2">
-								<span className="text-muted-foreground text-xs">
-									Revoke access?
-								</span>
+					<SettingsItem
+						actions={
+							isConfirming ? (
+								<div className="flex flex-wrap items-center justify-end gap-2">
+									<span className="text-muted-foreground text-xs">
+										Revoke access?
+									</span>
+									<Button
+										disabled={isRevoking}
+										onClick={() => onRevoke(app.clientId)}
+										size="sm"
+										variant="destructive"
+									>
+										Revoke
+									</Button>
+									<Button
+										disabled={isRevoking}
+										onClick={onConfirmRevoke}
+										size="sm"
+										variant="ghost"
+									>
+										Cancel
+									</Button>
+								</div>
+							) : (
 								<Button
+									aria-label={`Revoke access for ${app.clientName}`}
+									className="size-8 shrink-0"
 									disabled={isRevoking}
-									onClick={() => onRevoke(app.clientId)}
-									size="sm"
-									variant="destructive"
-								>
-									Revoke
-								</Button>
-								<Button
-									disabled={isRevoking}
-									onClick={onConfirmRevoke}
-									size="sm"
+									onClick={() => onStartRevoke(app.clientId)}
+									size="icon"
 									variant="ghost"
 								>
-									Cancel
+									<Trash2 className="size-4" />
 								</Button>
-							</div>
-						) : (
-							<Button
-								aria-label={`Revoke access for ${app.clientName}`}
-								className="size-8 shrink-0 text-muted-foreground hover:text-status-destructive"
-								disabled={isRevoking}
-								onClick={() => onStartRevoke(app.clientId)}
-								size="icon"
-								variant="ghost"
-							>
-								<Trash2 className="size-4" />
-							</Button>
-						)}
-					</div>
+							)
+						}
+						key={app.clientId}
+						title={
+							<span className="flex min-w-0 items-center gap-2">
+								<AppWindow className="size-4 shrink-0 text-muted-foreground" />
+								<span className="truncate" title={app.clientName}>
+									{app.clientName}
+								</span>
+							</span>
+						}
+					>
+						<p className="text-muted-foreground text-xs">
+							{scopeList || "No scopes"} · Authorized{" "}
+							{formatDistanceToNow(new Date(app.grantedAt), {
+								addSuffix: true,
+							})}
+						</p>
+					</SettingsItem>
 				);
 			})}
-		</div>
+		</SettingsGroup>
 	);
 }

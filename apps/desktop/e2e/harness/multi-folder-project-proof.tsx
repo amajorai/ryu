@@ -61,4 +61,4 @@ function Story() {
 }
 
 document.documentElement.classList.add("dark");
-createRoot(document.getElementById("root") as HTMLElement).render(<Story />);
+createRoot(document.getElementById("root")!).render(<Story />);

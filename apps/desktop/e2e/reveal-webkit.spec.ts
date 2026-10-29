@@ -1,13 +1,19 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
+declare global {
+	interface Window {
+		__revealTransitions: number;
+	}
+}
+
 for (const reducedMotion of ["no-preference", "reduce"] as const) {
 	test(`reveal modes finish correctly with motion preference ${reducedMotion}`, async ({
 		page,
 	}) => {
 		await page.emulateMedia({ reducedMotion });
 		await page.addInitScript(() => {
-			Reflect.set(window, "__revealTransitions", 0);
+			window.__revealTransitions = 0;
 			document.addEventListener("transitionrun", (event) => {
 				if (
 					event.target instanceof Element &&
@@ -16,11 +22,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
 						event.propertyName
 					)
 				) {
-					Reflect.set(
-						window,
-						"__revealTransitions",
-						Number(Reflect.get(window, "__revealTransitions")) + 1
-					);
+					window.__revealTransitions = Number(window.__revealTransitions) + 1;
 				}
 			});
 		});
@@ -49,7 +51,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
 				)
 				.toBe(0);
 			const transitions = await page.evaluate(() =>
-				Number(Reflect.get(window, "__revealTransitions"))
+				Number(window.__revealTransitions)
 			);
 			if (reducedMotion === "reduce") {
 				expect(transitions).toBe(0);

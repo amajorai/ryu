@@ -1,0 +1,39 @@
+.inline1 {
+	opacity: var(--desktop-inline1-opacity);
+}
+
+.inline2 {
+	left: var(--desktop-inline2-left);
+	touch-action: none;
+}
+
+.inline3 {
+	width: var(--desktop-inline3-width);
+	pointer-events: none;
+}
+
+.inline4 {
+	width: var(--desktop-inline4-width);
+	pointer-events: var(--desktop-inline4-pointer-Events);
+	opacity: var(--desktop-inline4-opacity);
+	transform: var(--desktop-inline4-transform);
+	transition:
+		transform 280ms cubic-bezier(0.34, 1.2, 0.64, 1),
+		opacity 240ms ease-out;
+}
+
+.inline5 {
+	touch-action: none;
+}
+
+.inline6 {
+	pointer-events: auto;
+}
+
+#assistantReserve {
+	padding-right: var(--desktop-inline7-padding-Right);
+}
+
+.authored1 {
+	animation-duration: 0.9s;
+}

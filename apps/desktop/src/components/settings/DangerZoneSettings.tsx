@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Settings → Danger Zone. Irreversible bulk "delete all X" actions for the user
 // data Core holds on this node. Purely a visual layer — every delete is performed
 // by Core (`/api/data/clear`, see apps/core/src/server/data_admin.rs). Each action
@@ -21,9 +22,9 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -31,29 +32,31 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useState } from "react";
 import { sileo } from "sileo";
-import { restartRyuCore } from "@/lib/tauri-bridge.ts";
+import { restartRyuCore, startRyuCore } from "@/lib/tauri-bridge.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
-import { useActiveNodeGetter } from "@/src/hooks/useActiveNode.ts";
+import {
+	useActiveNode,
+	useActiveNodeGetter,
+} from "@/src/hooks/useActiveNode.ts";
 import {
 	ApiError,
 	type ApiTarget,
@@ -142,13 +145,18 @@ const LEGACY_KERNEL_CATEGORIES = [
 async function fetchDangerCategories(
 	target: ApiTarget
 ): Promise<DangerCategory[]> {
-	const json = await request<DataCountsPayload>(target, "/api/data/counts");
+	const json = await request<DataCountsPayload>(
+		target,
+		"/api/data/counts",
+		{},
+		dataCountsPayloadResponseSchema
+	);
 	if (Array.isArray(json.categories)) {
 		return json.categories;
 	}
 	return LEGACY_KERNEL_CATEGORIES.map((def) => ({
 		...def,
-		count: json[def.id as "chats" | "memory" | "spaces"] ?? 0,
+		count: json[def.id] ?? 0,
 		plugin: null,
 	}));
 }
@@ -158,10 +166,15 @@ async function clearCategory(
 	target: ApiTarget,
 	category: string
 ): Promise<number> {
-	const json = await request<{ removed?: number }>(target, "/api/data/clear", {
-		method: "POST",
-		body: { category },
-	});
+	const json = await request<{ removed?: number }>(
+		target,
+		"/api/data/clear",
+		{
+			method: "POST",
+			body: { category },
+		},
+		clearCategoryResponseSchema
+	);
 	return json?.removed ?? 0;
 }
 
@@ -242,7 +255,7 @@ function clearClientStateForFreshNode(): void {
  * reset can never succeed until Core is updated. Blaming "shared node" for that
  * (the previous catch-all) sent people looking in the wrong place entirely.
  */
-function resetFailureReason(e: unknown): string {
+function resetFailureReason<TError>(e: TError): string {
 	if (!(e instanceof ApiError)) {
 		return "Could not reach this node. Check that Core is running and try again.";
 	}
@@ -290,7 +303,6 @@ export function DangerZoneSettings() {
 	const [cleanDepth, setCleanDepth] = useState<"none" | "state" | "full">(
 		"state"
 	);
-	const [cleanShared, setCleanShared] = useState(true);
 	const toggleCleanProfile = useCallback((profile: string, on: boolean) => {
 		setCleanProfiles((prev) =>
 			on ? [...new Set([...prev, profile])] : prev.filter((p) => p !== profile)
@@ -308,7 +320,6 @@ export function DangerZoneSettings() {
 				await invoke("deep_clean_node", {
 					depth: cleanDepth,
 					profile,
-					shared: cleanShared,
 				});
 			}
 
@@ -337,12 +348,33 @@ export function DangerZoneSettings() {
 				title: "Could not deep clean",
 				description: String(e),
 			});
+			// The failed invoke (or an earlier one in the set) has usually stopped
+			// Core already, and nothing else brings it back. Start the local Core
+			// again so the page stays usable for a retry; `start_ryu_core` is a
+			// no-op when Core never stopped (e.g. an early "binary not found").
+			if (isLocalNode(getNode())) {
+				await startRyuCore().catch(() => undefined);
+			}
 			setDeepCleaning(false);
 			setDeepCleanOpen(false);
 		}
-	}, [getNode, cleanProfiles, cleanDepth, cleanShared]);
+	}, [getNode, cleanProfiles, cleanDepth]);
 	const [resetOpen, setResetOpen] = useState(false);
 	const [resetTyped, setResetTyped] = useState("");
+
+	// A confirmation describes ONE node: its counts and its name. If another node
+	// is selected while one is open, it no longer describes the node a delete or
+	// reset would reach, so it is withdrawn during that render instead of being
+	// carried out on the newly selected node.
+	const selectedNodeUrl = useActiveNode().url;
+	const [confirmingFor, setConfirmingFor] = useState(selectedNodeUrl);
+	if (confirmingFor !== selectedNodeUrl) {
+		setConfirmingFor(selectedNodeUrl);
+		setActive(null);
+		setTyped("");
+		setResetOpen(false);
+		setResetTyped("");
+	}
 	const [resetBusy, setResetBusy] = useState(false);
 	const resetArmed = resetTyped.trim().toLowerCase() === nodeName.toLowerCase();
 
@@ -503,7 +535,7 @@ export function DangerZoneSettings() {
 
 			{canUseNativeShell ? (
 				<SettingsSection
-					caption="Reset node clears this node's data folder and nothing else. Shadow captures, ghost state and the gateway config live OUTSIDE it and survive, which is why a 'reset' node can still be several gigabytes. This removes those too."
+					caption="Reset node clears this node's data folder and nothing else. The gateway config and the pointer to the data folder live OUTSIDE it and survive. This removes those too, and can also clear the data folder itself."
 					title="Deep clean"
 				>
 					{/* One button, and every option behind it. The scope controls used to sit
@@ -574,14 +606,12 @@ export function DangerZoneSettings() {
 
 						<div className="flex flex-col gap-2">
 							<span className="font-medium text-sm">How much to remove</span>
-							<Select
+							<Select<"none" | "state" | "full">
 								items={CLEAN_DEPTHS.map((d) => ({
 									label: d.label,
 									value: d.value,
 								}))}
-								onValueChange={(v) =>
-									setCleanDepth(v as "none" | "state" | "full")
-								}
+								onValueChange={(v) => setCleanDepth(v)}
 								value={cleanDepth}
 							>
 								<SelectTrigger className="w-full">
@@ -599,27 +629,6 @@ export function DangerZoneSettings() {
 								{CLEAN_DEPTHS.find((d) => d.value === cleanDepth)?.description}
 							</span>
 						</div>
-
-						<label
-							className="flex items-start justify-between gap-4"
-							htmlFor="clean-shared"
-						>
-							<span className="flex flex-col gap-0.5">
-								<span className="font-medium text-sm">
-									Also clear shadow + ghost
-								</span>
-								<span className="text-muted-foreground text-xs">
-									~/.shadow and ~/.ghost are NOT per-profile, so clearing them
-									affects every profile on this machine
-								</span>
-							</span>
-							<Switch
-								aria-label="Also clear shadow and ghost"
-								checked={cleanShared}
-								id="clean-shared"
-								onCheckedChange={setCleanShared}
-							/>
-						</label>
 					</div>
 
 					<DialogFooter>
@@ -662,22 +671,14 @@ export function DangerZoneSettings() {
 							{cleanDepth === "full"
 								? ", and delete its entire data folder including downloaded engines and models"
 								: null}
-							{cleanShared
-								? ", plus your shadow captures (~/.shadow) and ghost state (~/.ghost)"
-								: null}
 							. Then it restarts and runs setup again. This cannot be undone.
 						</AlertDialogDescription>
-						{/* The one thing a user cannot infer from the folder names: two of
-						    these three are NOT profile-scoped. Their Rust uses a plain
-						    ~/.shadow / ~/.ghost for every profile, so a "clean my canary"
-						    click clears stable's captures with it. */}
-						<AlertDialogDescription className="text-status-warning">
-							{cleanShared
-								? "Shadow and ghost are shared by every profile on this machine, so clearing them here clears them everywhere. "
-								: null}
-							{cleanDepth === "none"
-								? "Chats, spaces and memory live in the data folder and are NOT touched at this setting."
-								: "The encryption key is kept: it is node identity, and there is no way to re-encrypt data without it."}
+						<AlertDialogDescription>
+							<span className="text-status-warning">
+								{cleanDepth === "none"
+									? "Chats, spaces and memory live in the data folder and are NOT touched at this setting."
+									: "The encryption key is kept: it is node identity, and there is no way to re-encrypt data without it."}
+							</span>
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
@@ -723,6 +724,7 @@ export function DangerZoneSettings() {
 							confirm.
 						</span>
 						<Input
+							aria-label={`Type ${nodeName} to confirm`}
 							autoComplete="off"
 							onChange={(e) => setResetTyped(e.target.value)}
 							placeholder={nodeName}
@@ -773,6 +775,7 @@ export function DangerZoneSettings() {
 							to confirm.
 						</span>
 						<Input
+							aria-label={`Type ${active?.confirm_word ?? "the confirmation word"} to confirm`}
 							autoComplete="off"
 							onChange={(e) => setTyped(e.target.value)}
 							placeholder={active?.confirm_word}
@@ -798,4 +801,38 @@ export function DangerZoneSettings() {
 			</AlertDialog>
 		</div>
 	);
+}
+
+const dataCountsPayloadResponseSchema: z.ZodType<DataCountsPayload> =
+	retainValidatedResponse(
+		z
+			.object({
+				categories: z
+					.array(
+						z
+							.object({
+								confirm_word: z.string(),
+								count: z.number(),
+								detail: z.string(),
+								id: z.string(),
+								noun: z.string(),
+								plugin: z.union([z.null(), z.string()]),
+								title: z.string(),
+							})
+							.passthrough()
+					)
+					.optional(),
+				chats: z.number().optional(),
+				memory: z.number().optional(),
+				spaces: z.number().optional(),
+			})
+			.passthrough()
+	);
+const clearCategoryResponseSchema: z.ZodType<{ removed?: number }> =
+	retainValidatedResponse(
+		z.object({ removed: z.number().optional() }).passthrough()
+	);
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

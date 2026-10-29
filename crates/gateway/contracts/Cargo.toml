@@ -1,10 +1,12 @@
 [package]
 name = "ryu-gw-contracts"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
-description = "Shared value-types exchanged between Ryu Gateway stages (e.g. AlertTier). The neutral home for cross-stage vocabulary so peer stage crates (budget, firewall, …) never depend on each other."
+description = "Platform-neutral interactive messaging contracts shared by Ryu channel adapters and extensions."
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"

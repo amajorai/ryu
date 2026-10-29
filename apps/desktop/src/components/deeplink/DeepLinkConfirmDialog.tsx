@@ -1,4 +1,10 @@
-import { Button } from "@ryu/ui/components/button";
+import {
+	fitBlockReason,
+	isBlockedFit,
+	isSlowFit,
+	SLOW_FIT_WARNING,
+} from "@ryu/blocks/desktop/model-fit.ts";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -6,19 +12,23 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { TextSwap } from "@ryu/ui/components/text-swap";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+} from "@ryu/ui/components/dialog.tsx";
+import { TextSwap } from "@ryu/ui/components/text-swap.tsx";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
+import { bundleSkillChanges } from "@/src/components/skills/skill-set-change.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchDetail,
 	type MarketplaceDetail,
 } from "@/src/lib/api/marketplace.ts";
-import { installMarketplaceBundle } from "@/src/lib/api/marketplace-bundles.ts";
+import {
+	describeBundleManualSteps,
+	installMarketplaceBundle,
+} from "@/src/lib/api/marketplace-bundles.ts";
 import {
 	fetchModelDetail,
 	installModelFile,
@@ -39,11 +49,15 @@ import { useDeepLinkStore } from "@/src/store/useDeepLinkStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
 interface DialogBody {
+	/** Why the confirm action is disabled (e.g. the model won't fit this node). */
+	blockedReason?: string;
 	confirm?: string;
 	description: string;
 	error?: boolean;
 	onConfirm?: () => void;
 	title: string;
+	/** A non-blocking caution shown above the actions (e.g. "may be slow"). */
+	warning?: string;
 }
 
 interface DetailQuery<T> {
@@ -98,11 +112,20 @@ function modelBody(
 		};
 	}
 	const fit = quant.fitLabel ? ` · ${quant.fitLabel}` : "";
+	// The recommended quant is blocked only when every quant is: Core would
+	// refuse the install, so the confirm stays disabled with the reason shown.
+	const blockedReason = fitBlockReason(
+		quant.fit,
+		quant.fitLabel,
+		q.data.device
+	);
 	return {
 		title: `Install ${card.name}?`,
 		description: `Download ${quant.filename} (${quant.sizeHuman}${fit}) and use it as the active model.`,
 		confirm: "Install & use",
 		onConfirm: run,
+		...(blockedReason ? { blockedReason } : {}),
+		...(isSlowFit(quant.fit) ? { warning: SLOW_FIT_WARNING } : {}),
 	};
 }
 
@@ -235,7 +258,8 @@ function nodeBody(
 // nothing happens until the user confirms here. Installs go through Core's
 // verified, source-pinned download path — the link never picks the registry.
 export function DeepLinkConfirmDialog() {
-	const { installCatalogSkill } = useSkillDistributionFlow();
+	const { confirmSkillSetChange, installCatalogSkill } =
+		useSkillDistributionFlow();
 	const pending = useDeepLinkStore((s) => s.pending);
 	const clear = useDeepLinkStore((s) => s.clear);
 	const qc = useQueryClient();
@@ -297,7 +321,10 @@ export function DeepLinkConfirmDialog() {
 	const appId = intent?.kind === "app" ? intent.id : undefined;
 	const appDetail = useQuery({
 		queryKey: ["deeplink", "app", "detail", target.url, pending?.nonce, appId],
-		queryFn: () => fetchPluginCatalogDetail(target, appId as string),
+		queryFn:
+			appId === null || appId === undefined
+				? skipToken
+				: () => fetchPluginCatalogDetail(target, appId),
 		enabled: open && appId !== undefined,
 	});
 
@@ -332,6 +359,15 @@ export function DeepLinkConfirmDialog() {
 				if (!quant) {
 					throw new Error("No downloadable file found for this model");
 				}
+				if (isBlockedFit(quant.fit)) {
+					throw new Error(
+						fitBlockReason(
+							quant.fit,
+							quant.fitLabel,
+							modelDetail.data.device
+						) ?? "This model won't fit on this device"
+					);
+				}
 				await installModelFile(target, intent.id, quant.filename);
 				// The user clicked a model link to *use* it — switch as well so the
 				// freshly installed weights become the served model. Best-effort:
@@ -363,7 +399,11 @@ export function DeepLinkConfirmDialog() {
 		const { card } = skillDetail.data;
 		setBusy(true);
 		try {
-			const installed = await installCatalogSkill({ id: intent.id, target });
+			const installed = await installCatalogSkill({
+				id: intent.id,
+				name: card.name,
+				target,
+			});
 			if (installed === null) {
 				return;
 			}
@@ -409,6 +449,13 @@ export function DeepLinkConfirmDialog() {
 		}
 		setBusy(true);
 		try {
+			// New skill members change every skill-loading thread's prompt.
+			const confirmed = await confirmSkillSetChange(
+				await bundleSkillChanges(target, bundleDetail.data.bundleMembers)
+			);
+			if (!confirmed) {
+				return;
+			}
 			const result = await installMarketplaceBundle(
 				target,
 				intent.id,
@@ -417,9 +464,16 @@ export function DeepLinkConfirmDialog() {
 			const requiredFailures = result.failures.filter(
 				({ member }) => member.required
 			);
+			const manualNote = describeBundleManualSteps(result.manual);
 			if (requiredFailures.length > 0) {
 				sileo.error({
 					title: "Bundle installed with required items missing",
+					...(manualNote ? { description: manualNote } : {}),
+				});
+			} else if (manualNote) {
+				sileo.warning({
+					title: `Installed ${result.completed.length} bundle items`,
+					description: manualNote,
 				});
 			} else {
 				sileo.success({
@@ -512,12 +566,26 @@ export function DeepLinkConfirmDialog() {
 							: ""}
 					</p>
 				) : null}
+				{body.blockedReason ? (
+					<p className="text-sm text-status-destructive" role="note">
+						{body.blockedReason} It can't be installed on this node.
+					</p>
+				) : null}
+				{body.warning && !body.blockedReason ? (
+					<p className="text-sm text-status-warning" role="note">
+						{body.warning}
+					</p>
+				) : null}
 				<DialogFooter>
 					<Button disabled={busy} onClick={close} type="button" variant="ghost">
 						{body.confirm ? "Cancel" : "Close"}
 					</Button>
 					{body.confirm ? (
-						<Button disabled={busy} onClick={body.onConfirm} type="button">
+						<Button
+							disabled={busy || body.blockedReason !== undefined}
+							onClick={body.onConfirm}
+							type="button"
+						>
 							<TextSwap>{busy ? "Working…" : body.confirm}</TextSwap>
 						</Button>
 					) : null}

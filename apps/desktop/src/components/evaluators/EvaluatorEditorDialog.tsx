@@ -11,7 +11,7 @@
 // new evaluator is catalogued + runnable. On success `onSaved` fires so the
 // caller can refetch the catalog.
 
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -19,18 +19,18 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useMemo, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type {
@@ -73,12 +73,10 @@ const TARGET_ITEMS: { value: EvaluatorTarget; label: string }[] = [
 	{ value: "input", label: "Input — the user prompt" },
 	{ value: "conversation", label: "Conversation — full history" },
 	{ value: "trajectory", label: "Trajectory — agent steps" },
-	{ value: "image", label: "Image" },
-	{ value: "audio", label: "Audio" },
 ];
 
 const LANG_ITEMS: { value: EvaluatorCodeLang; label: string }[] = [
-	{ value: "js", label: "JavaScript (Deno)" },
+	{ value: "js", label: "JavaScript" },
 	{ value: "python", label: "Python (sandbox)" },
 ];
 
@@ -125,14 +123,8 @@ export function EvaluatorEditorDialog({
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	// Which impls the editor can offer as an inline guardrail. Both editor modes
-	// produce an inline-capable impl (judge → `llm_judge`, code → `code`), so the
-	// toggle is always available here; regex/heuristic-only entries (which this
-	// editor never creates) would gate it off. Enforcement honesty diverges from
-	// capability, though: only `llm_judge` actually RUNS on the inline path today
-	// (`flag_inline_binding` in the gateway pipeline), so a code evaluator can be
-	// OFFERED inline (`capabilities.inline`) yet must report `enforced: false`.
-	const inlineCapable = mode === "judge" || mode === "code";
+	// Code definitions run offline through Core; Gateway only executes text judges here.
+	const inlineCapable = mode === "judge";
 
 	const id = useMemo(() => slugify(name), [name]);
 	const idCollision = id.length > 0 && existingIds.includes(id);
@@ -143,7 +135,7 @@ export function EvaluatorEditorDialog({
 	const canSave =
 		id.length > 0 &&
 		!idCollision &&
-		thresholdValid &&
+		(mode !== "judge" || thresholdValid) &&
 		!saving &&
 		(mode === "judge" ? rubric.trim().length > 0 : source.trim().length > 0);
 
@@ -164,10 +156,6 @@ export function EvaluatorEditorDialog({
 		setSaving(true);
 		setError(null);
 		try {
-			// Offer inline only for inline-capable impls; enforce honesty: a custom
-			// inline evaluator is `enforced` only when its impl actually runs on the
-			// inline path (`llm_judge`). Code is inline-capable but a no-op inline
-			// today (P4), so it is offered inline yet reports `enforced: false`.
 			const offerInline = inlineEnabled && inlineCapable;
 			const enforced = offerInline && mode === "judge";
 			const evaluator: Evaluator = {
@@ -179,19 +167,20 @@ export function EvaluatorEditorDialog({
 						: `Custom ${lang === "js" ? "JavaScript" : "Python"} code evaluator.`,
 				category,
 				target: evalTarget,
-				capabilities: { inline: offerInline, offline: true },
+				capabilities: { inline: offerInline, offline: mode === "judge" },
 				impl:
 					mode === "judge"
 						? { kind: "llm_judge", rubric: rubric.trim() }
 						: { kind: "code", lang, source },
 				inline: offerInline ? { action: "warn_and_continue" } : null,
-				offline: {
-					threshold: thresholdNum,
-					judgeModel:
-						mode === "judge" && judgeModel.trim().length > 0
-							? judgeModel.trim()
-							: null,
-				},
+				offline:
+					mode === "judge"
+						? {
+								threshold: thresholdNum,
+								judgeModel:
+									judgeModel.trim().length > 0 ? judgeModel.trim() : null,
+							}
+						: null,
 				builtin: false,
 				enforced,
 				higherIsBetter: true,
@@ -232,7 +221,7 @@ export function EvaluatorEditorDialog({
 					<DialogDescription>
 						{mode === "judge"
 							? "A model judges each case against your rubric and returns a score."
-							: "Your function scores each case. Runs sandboxed (Deno for JS, sandbox for Python)."}
+							: "Your function scores each case. Runs sandboxed in Core."}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -261,11 +250,9 @@ export function EvaluatorEditorDialog({
 					<div className="flex gap-3">
 						<div className="flex flex-1 flex-col gap-1.5">
 							<Label htmlFor="ev-category">Category</Label>
-							<Select
+							<Select<EvaluatorCategory>
 								items={CATEGORY_ITEMS}
-								onValueChange={(v: string | null) =>
-									setCategory((v ?? "custom") as EvaluatorCategory)
-								}
+								onValueChange={(v) => setCategory(v ?? "custom")}
 								value={category}
 							>
 								<SelectTrigger id="ev-category">
@@ -282,11 +269,9 @@ export function EvaluatorEditorDialog({
 						</div>
 						<div className="flex flex-1 flex-col gap-1.5">
 							<Label htmlFor="ev-target">Target</Label>
-							<Select
+							<Select<EvaluatorTarget>
 								items={TARGET_ITEMS}
-								onValueChange={(v: string | null) =>
-									setEvalTarget((v ?? "output") as EvaluatorTarget)
-								}
+								onValueChange={(v) => setEvalTarget(v ?? "output")}
 								value={evalTarget}
 							>
 								<SelectTrigger id="ev-target">
@@ -303,29 +288,32 @@ export function EvaluatorEditorDialog({
 						</div>
 					</div>
 
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="ev-threshold">Pass threshold (0–1)</Label>
-						<Input
-							id="ev-threshold"
-							inputMode="decimal"
-							onChange={(e) => setThreshold(e.target.value)}
-							value={threshold}
-						/>
-						{thresholdValid ? null : (
-							<p className="text-status-destructive text-xs">
-								Enter a number between 0 and 1.
-							</p>
-						)}
-					</div>
+					{/* Only a judge keeps offline scoring settings; a code evaluator is
+					    saved without a threshold, so it does not ask for one. */}
+					{mode === "judge" ? (
+						<div className="flex flex-col gap-1.5">
+							<Label htmlFor="ev-threshold">Pass threshold (0–1)</Label>
+							<Input
+								id="ev-threshold"
+								inputMode="decimal"
+								onChange={(e) => setThreshold(e.target.value)}
+								value={threshold}
+							/>
+							{thresholdValid ? null : (
+								<p className="text-status-destructive text-xs">
+									Enter a number between 0 and 1.
+								</p>
+							)}
+						</div>
+					) : null}
 
 					{inlineCapable ? (
 						<div className="flex items-start justify-between gap-3 rounded-lg border bg-muted/20 p-3">
 							<div className="flex min-w-0 flex-col gap-0.5">
 								<Label htmlFor="ev-inline">Available as inline guardrail</Label>
 								<p className="text-muted-foreground text-xs">
-									{mode === "judge"
-										? "Also run this on the request/response path as a Warn guardrail (change the action per scope in the gateway policy)."
-										: "Offer this on the gateway policy surface. Code guardrails do not execute inline yet, so it is catalogued but not enforced."}
+									Also run this on the request/response path as a Warn guardrail
+									(change the action per scope in the gateway policy).
 								</p>
 							</div>
 							<Switch
@@ -350,11 +338,12 @@ export function EvaluatorEditorDialog({
 							<div className="flex flex-col gap-1.5">
 								<Label htmlFor="ev-rubric">Rubric</Label>
 								<Textarea
-									className="min-h-32 font-mono text-xs"
+									className="min-h-32"
 									id="ev-rubric"
 									onChange={(e) => setRubric(e.target.value)}
 									placeholder="Describe what a good response looks like. The judge scores each case against this."
 									value={rubric}
+									variant="code-caption"
 								/>
 							</div>
 						</>
@@ -362,11 +351,9 @@ export function EvaluatorEditorDialog({
 						<>
 							<div className="flex flex-col gap-1.5">
 								<Label htmlFor="ev-lang">Language</Label>
-								<Select
+								<Select<EvaluatorCodeLang>
 									items={LANG_ITEMS}
-									onValueChange={(v: string | null) =>
-										onLangChange((v ?? "js") as EvaluatorCodeLang)
-									}
+									onValueChange={(v) => onLangChange(v ?? "js")}
 									value={lang}
 								>
 									<SelectTrigger id="ev-lang">
@@ -384,11 +371,12 @@ export function EvaluatorEditorDialog({
 							<div className="flex flex-col gap-1.5">
 								<Label htmlFor="ev-source">Source</Label>
 								<Textarea
-									className="min-h-48 font-mono text-xs"
+									className="min-h-48"
 									id="ev-source"
 									onChange={(e) => setSource(e.target.value)}
 									spellCheck={false}
 									value={source}
+									variant="code-caption"
 								/>
 								<p className="text-muted-foreground text-xs">
 									Contract:{" "}

@@ -61,9 +61,7 @@ export function hydrateHistoryMessage(
 ): HydratedMessage {
 	const hasParts = Array.isArray(m.parts) && m.parts.length > 0;
 	const msSinceUpdate =
-		typeof m.timestamp === "number"
-			? now - m.timestamp
-			: Number.POSITIVE_INFINITY;
+		m.timestamp === undefined ? Number.POSITIVE_INFINITY : now - m.timestamp;
 	const blankBody = !m.content || m.content.trim() === "";
 	const legacyStaleRunning =
 		m.role === "assistant" &&
@@ -75,40 +73,33 @@ export function hydrateHistoryMessage(
 	const body = hasParts
 		? (m.parts ?? [])
 		: [{ type: "text" as const, text: m.content }];
-	const metadata =
-		m.author || m.persisted
-			? {
-					...(m.author ? { author: m.author } : {}),
-					...(m.persisted ? { ryuPersisted: true } : {}),
-				}
-			: undefined;
-	if (!interrupted) {
-		return {
-			id: m.id,
-			...(metadata ? { metadata } : {}),
-			originServer: m.originServer,
-			parts: body,
-			persisted: m.persisted,
-			role: m.role,
-			source: m.source,
-			widgetInstanceId: m.widgetInstanceId,
-		};
-	}
-	// An empty bubble above the marker reads as a rendering bug, so a turn that
-	// saved nothing at all keeps no parts and shows the marker alone.
-	const kept = blankBody && !hasParts ? [] : body;
-	return {
+	// Client metadata cannot impersonate the server's verified author or storage state.
+	const renderMetadata = Object.fromEntries(
+		Object.entries(m.metadata ?? {}).filter(
+			([key]) => key !== "author" && key !== "ryuPersisted"
+		)
+	);
+	const message: HydratedMessage = {
 		id: m.id,
-		...(metadata ? { metadata } : {}),
 		originServer: m.originServer,
-		role: m.role,
-		parts: kept,
+		parts: interrupted && blankBody && !hasParts ? [] : body,
 		persisted: m.persisted,
+		role: m.role,
 		source: m.source,
 		widgetInstanceId: m.widgetInstanceId,
-		// READ by the transcript: message-list.tsx draws a `Marker` at the end of
-		// any turn carrying this, which is why the parts above are left exactly as
-		// the node saved them.
-		_interrupted: true,
 	};
+	if (Object.keys(renderMetadata).length > 0 || m.author || m.persisted) {
+		if (m.author) {
+			renderMetadata.author = m.author;
+		}
+		if (m.persisted) {
+			renderMetadata.ryuPersisted = true;
+		}
+		message.metadata = renderMetadata;
+	}
+	if (interrupted) {
+		// The transcript draws this marker after the surviving message parts.
+		message._interrupted = true;
+	}
+	return message;
 }

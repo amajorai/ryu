@@ -1,7 +1,8 @@
 import { Link01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useEffect, useState } from "react";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { fetchBacklinks, type SpaceDocLink } from "@/src/lib/api/spaces.ts";
 
@@ -17,11 +18,12 @@ export function BacklinksPanel({
 	spaceId: string;
 	documentId: string;
 }) {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const { url } = node;
 	const token = node.token ?? null;
 	const userJwt = node.userJwt ?? null;
-	const { openTab } = useTabsContext();
+	const openTab = useTabSelector((state) => state.openTab);
 	const [links, setLinks] = useState<SpaceDocLink[]>([]);
 
 	useEffect(() => {
@@ -50,7 +52,10 @@ export function BacklinksPanel({
 		<section className="shrink-0 border-t bg-muted/20 px-4 py-3">
 			<h2 className="mb-2 flex items-center gap-1.5 font-medium text-muted-foreground text-xs uppercase tracking-wide">
 				<HugeiconsIcon className="size-3.5" icon={Link01Icon} />
-				{links.length} linked reference{links.length === 1 ? "" : "s"}
+				{tl(
+					"{referenceCount, plural, one {# linked reference} other {# linked references}}",
+					{ referenceCount: links.length }
+				)}
 			</h2>
 			<ul className="flex flex-col gap-1">
 				{links.map((link) => (
@@ -64,7 +69,10 @@ export function BacklinksPanel({
 								{link.srcTitle || "Untitled"}
 							</span>
 							{link.snippet ? (
-								<span className="block truncate text-muted-foreground text-xs">
+								<span
+									className="block truncate text-muted-foreground text-xs"
+									title={link.snippet}
+								>
 									{link.snippet}
 								</span>
 							) : null}

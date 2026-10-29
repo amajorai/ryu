@@ -14,7 +14,7 @@ import {
 	clearVariant,
 	DEFAULT_RADIUS as DEFAULT_THEME_RADIUS,
 	isDarkMode,
-} from "@ryu/ui/theme/apply";
+} from "@ryu/ui/theme/apply.ts";
 import {
 	DEFAULT_CARD_SPACING as DEFAULT_THEME_CARD_SPACING,
 	DEFAULT_THEME_MODE,
@@ -24,7 +24,7 @@ import {
 	THEME_PREFS_VERSION,
 	type ThemeMode,
 	type ThemePrefs,
-} from "@ryu/ui/theme/prefs";
+} from "@ryu/ui/theme/prefs.ts";
 import { useTheme } from "next-themes";
 import { useEffect } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -168,9 +168,9 @@ function buildThemePrefs(localeOverride?: string): ThemePrefs {
 		timezone: effectiveTimeZone(),
 		locale:
 			localeOverride ??
-			(typeof document !== "undefined" && document.documentElement.lang
+			(globalThis.document !== undefined && document.documentElement.lang
 				? document.documentElement.lang
-				: typeof navigator === "undefined"
+				: globalThis.navigator === undefined
 					? undefined
 					: navigator.language),
 		// The island resolves the selected preset id against this list alone, so it

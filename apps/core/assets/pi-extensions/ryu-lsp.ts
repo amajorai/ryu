@@ -100,7 +100,8 @@ import {
 	isEditToolResult,
 	isWriteToolResult,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
+import { Check } from "typebox/value";
 
 /** Prefix on every stderr line so Core's `acp_subprocess` log is greppable. */
 const LOG_PREFIX = "[ryu-lsp]";
@@ -208,15 +209,15 @@ const MAX_SYMBOL_DETAIL_CHARS = 100;
 const JSONRPC_METHOD_NOT_FOUND = -32_601;
 
 /** LSP DiagnosticSeverity -> label. Index is the wire value; 1 is the most severe. */
-const SEVERITY_LABELS: Record<number, string> = {
+const SEVERITY_LABELS = {
 	1: "error",
 	2: "warning",
 	3: "info",
 	4: "hint",
-};
+} satisfies Record<Static<typeof severitySchema>, string>;
 
 /** LSP SymbolKind -> label. Index is the wire value; the spec numbers start at 1. */
-const SYMBOL_KIND_LABELS: Record<number, string> = {
+const SYMBOL_KIND_LABELS = {
 	1: "file",
 	2: "module",
 	3: "namespace",
@@ -243,7 +244,7 @@ const SYMBOL_KIND_LABELS: Record<number, string> = {
 	24: "event",
 	25: "operator",
 	26: "typeParameter",
-};
+} satisfies Record<Static<typeof symbolKindSchema>, string>;
 
 /** Every wire value 1..26, advertised as the client's supported SymbolKind set. */
 const SYMBOL_KIND_VALUES = [
@@ -251,53 +252,137 @@ const SYMBOL_KIND_VALUES = [
 	23, 24, 25, 26,
 ];
 
+/** Native JSON-RPC values are validated at config and framed stdio boundaries. */
+type LspJsonValue =
+	| null
+	| boolean
+	| number
+	| string
+	| LspJsonValue[]
+	| LspJsonObject;
+interface LspJsonObject {
+	[key: string]: LspJsonValue;
+}
+const lspJsonValueSchema = Type.Cyclic(
+	{
+		Value: Type.Union([
+			Type.Null(),
+			Type.Boolean(),
+			Type.Number(),
+			Type.String(),
+			Type.Array(Type.Ref("Value")),
+			Type.Record(Type.String(), Type.Ref("Value")),
+		]),
+	},
+	"Value"
+);
+const lspJsonObjectSchema = Type.Record(Type.String(), lspJsonValueSchema);
+const severitySchema = Type.Union([
+	Type.Literal(1),
+	Type.Literal(2),
+	Type.Literal(3),
+	Type.Literal(4),
+]);
+const symbolKindSchema = Type.Union([
+	Type.Literal(1),
+	Type.Literal(2),
+	Type.Literal(3),
+	Type.Literal(4),
+	Type.Literal(5),
+	Type.Literal(6),
+	Type.Literal(7),
+	Type.Literal(8),
+	Type.Literal(9),
+	Type.Literal(10),
+	Type.Literal(11),
+	Type.Literal(12),
+	Type.Literal(13),
+	Type.Literal(14),
+	Type.Literal(15),
+	Type.Literal(16),
+	Type.Literal(17),
+	Type.Literal(18),
+	Type.Literal(19),
+	Type.Literal(20),
+	Type.Literal(21),
+	Type.Literal(22),
+	Type.Literal(23),
+	Type.Literal(24),
+	Type.Literal(25),
+	Type.Literal(26),
+]);
+const lspStringSchema = Type.String();
+const lspNumberSchema = Type.Number();
+const lspBooleanSchema = Type.Boolean();
+const lspPositiveNumberSchema = Type.Number({ exclusiveMinimum: 0 });
+const lspPositionSchema = Type.Object({
+	character: Type.Number(),
+	line: Type.Number(),
+});
+const lspRangeSchema = Type.Object({
+	end: lspPositionSchema,
+	start: lspPositionSchema,
+});
+const lspJsonRpcSchema = Type.Object({
+	error: Type.Optional(
+		Type.Object({
+			code: Type.Optional(Type.Number()),
+			message: Type.Optional(Type.String()),
+		})
+	),
+	id: Type.Optional(Type.Union([Type.Number(), Type.String()])),
+	method: Type.Optional(Type.String()),
+	params: Type.Optional(lspJsonValueSchema),
+	result: Type.Optional(lspJsonValueSchema),
+});
+const lspDiagnosticSchema = Type.Object({
+	code: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+	message: Type.Optional(Type.String()),
+	range: Type.Optional(lspRangeSchema),
+	severity: Type.Optional(Type.Number()),
+	source: Type.Optional(Type.String()),
+});
+const publishDiagnosticsSchema = Type.Object({ uri: Type.String() });
+const changedPathSchema = Type.Object({ path: Type.String() });
+
+/**
+ * The `pi-copy` plugin's `copy_paste` tool. It writes `to_path` (default
+ * `path`), so its destination gets the same post-write diagnostics as `edit`
+ * and `write`; a cross-file move also rewrites `path`, which is diagnosed too.
+ * Matched by name because it is a sibling extension's tool, not a Pi built-in
+ * with an exported guard.
+ */
+const COPY_PASTE_TOOL = "copy_paste";
+const copyPasteInputSchema = Type.Object({
+	move: Type.Optional(Type.Boolean()),
+	path: Type.String(),
+	to_path: Type.Optional(Type.String()),
+});
+
 // ── Wire types ──────────────────────────────────────────────────────────────
 
 interface JsonRpcMessage {
 	error?: { code?: number; message?: string };
 	id?: number | string;
 	method?: string;
-	params?: unknown;
-	result?: unknown;
+	params?: LspJsonValue;
+	result?: LspJsonValue;
 }
 
-interface LspPosition {
-	character: number;
-	line: number;
-}
-
-interface LspRange {
-	end: LspPosition;
-	start: LspPosition;
-}
+type LspPosition = Static<typeof lspPositionSchema>;
+type LspRange = Static<typeof lspRangeSchema>;
 
 interface LspLocation {
 	range: LspRange;
 	uri: string;
 }
 
-interface LspDiagnostic {
-	code?: string | number;
-	message: string;
-	range: LspRange;
-	severity?: number;
-	source?: string;
-}
+type LspDiagnostic = Static<typeof lspDiagnosticSchema>;
 
 interface PublishDiagnosticsParams {
 	diagnostics?: LspDiagnostic[];
 	uri: string;
 	version?: number;
-}
-
-/** One entry of `textDocument/documentSymbol`'s `DocumentSymbol[]` form. */
-interface DocumentSymbolLike {
-	children?: DocumentSymbolLike[];
-	detail?: string;
-	kind?: number;
-	name?: string;
-	range?: LspRange;
-	selectionRange?: LspRange;
 }
 
 /** One entry of `workspace/symbol`'s `WorkspaceSymbol` / `SymbolInformation` forms. */
@@ -323,7 +408,7 @@ interface CallHierarchyItemLike {
 	kind?: number;
 	name?: string;
 	range?: LspRange;
-	raw: Record<string, unknown>;
+	raw: LspJsonObject;
 	selectionRange?: LspRange;
 	uri?: string;
 }
@@ -339,14 +424,14 @@ interface ServerConfig {
 	args: string[];
 	command: string;
 	diagnostics: boolean;
-	env: Record<string, string>;
+	env: ServerEnvironment;
 	/** Normalized ".ext" (lowercase, leading dot) -> LSP language id. */
 	extensionToLanguage: Map<string, string>;
 	id: string;
-	initializationOptions?: unknown;
+	initializationOptions?: LspJsonValue;
 	maxRestarts: number;
 	restartOnCrash: boolean;
-	settings?: unknown;
+	settings?: LspJsonValue;
 	shutdownTimeout: number;
 	startupTimeout: number;
 	workspaceFolder?: string;
@@ -389,7 +474,7 @@ interface FileDiagnostics {
 
 interface PendingRequest {
 	reject: (reason: Error) => void;
-	resolve: (value: unknown) => void;
+	resolve: (value: LspJsonValue | undefined) => void;
 	timer: ReturnType<typeof setTimeout>;
 }
 
@@ -412,7 +497,7 @@ interface ServerRuntime {
 	pending: Map<number, PendingRequest>;
 	restarts: number;
 	rootPath: string;
-	serverCapabilities: Record<string, unknown>;
+	serverCapabilities: LspJsonObject;
 	/** Set by teardown so an expected exit is not mistaken for a crash. */
 	shuttingDown: boolean;
 	/** In-flight start, so N concurrent touches share ONE spawn. */
@@ -431,8 +516,8 @@ let extensionOwners = new Map<string, string>();
 // ── Small helpers ───────────────────────────────────────────────────────────
 
 /** Message of a thrown value, without assuming it is an Error. */
-function errorText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+function errorText(err: Error): string {
+	return err.message;
 }
 
 /**
@@ -472,42 +557,50 @@ function withUi(
 	}
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-		return value as Record<string, unknown>;
-	}
-	return;
+function asRecord(value: LspJsonValue | undefined): LspJsonObject | undefined {
+	return Check(lspJsonObjectSchema, value) ? value : undefined;
 }
 
-function asStringArray(value: unknown): string[] {
+function parsedRange(value: LspJsonValue | undefined): LspRange | undefined {
+	return Check(lspRangeSchema, value) ? value : undefined;
+}
+
+function asStringArray(value: LspJsonValue | undefined): string[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
-	return value.filter((item): item is string => typeof item === "string");
+	return value.filter((item): item is string => Check(lspStringSchema, item));
 }
 
-function asStringRecord(value: unknown): Record<string, string> {
+interface ServerEnvironment {
+	[variable: string]: string;
+}
+function asStringRecord(value: LspJsonValue | undefined): ServerEnvironment {
 	const record = asRecord(value);
-	const out: Record<string, string> = {};
+	const out: ServerEnvironment = {};
 	if (!record) {
 		return out;
 	}
 	for (const [key, item] of Object.entries(record)) {
-		if (typeof item === "string") {
+		if (Check(lspStringSchema, item)) {
 			out[key] = item;
 		}
 	}
 	return out;
 }
 
-function asPositiveNumber(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0
-		? value
-		: fallback;
+function asPositiveNumber(
+	value: LspJsonValue | undefined,
+	fallback: number
+): number {
+	return Check(lspPositiveNumberSchema, value) ? value : fallback;
 }
 
-function asBoolean(value: unknown, fallback: boolean): boolean {
-	return typeof value === "boolean" ? value : fallback;
+function asBoolean(
+	value: LspJsonValue | undefined,
+	fallback: boolean
+): boolean {
+	return Check(lspBooleanSchema, value) ? value : fallback;
 }
 
 /**
@@ -566,12 +659,10 @@ function configPath(): string {
 }
 
 /** Normalize `{ "go": "go", ".ts": "typescript" }` to `.ext` -> language id. */
-function normalizeExtensionMap(
-	raw: Record<string, unknown>
-): Map<string, string> {
+function normalizeExtensionMap(raw: LspJsonObject): Map<string, string> {
 	const out = new Map<string, string>();
 	for (const [rawExt, rawLang] of Object.entries(raw)) {
-		if (typeof rawLang !== "string" || !rawLang.trim()) {
+		if (!(Check(lspStringSchema, rawLang) && rawLang.trim())) {
 			continue;
 		}
 		const trimmed = rawExt.trim().toLowerCase();
@@ -595,13 +686,15 @@ function normalizeExtensionMap(
  */
 function parseServerConfig(
 	id: string,
-	value: unknown
+	value: LspJsonValue | undefined
 ): ServerConfig | undefined {
 	const entry = asRecord(value);
 	if (!entry) {
 		return;
 	}
-	const command = typeof entry.command === "string" ? entry.command.trim() : "";
+	const command = Check(lspStringSchema, entry.command)
+		? entry.command.trim()
+		: "";
 	const languages = asRecord(entry.extensionToLanguage);
 	if (!(command || languages)) {
 		return;
@@ -624,8 +717,9 @@ function parseServerConfig(
 	// `transport` is an enumerated field in the model we are matching, so an
 	// unsupported value is declined loudly rather than silently treated as
 	// stdio — a socket server driven over its stdin would simply never answer.
-	const transport =
-		typeof entry.transport === "string" ? entry.transport.trim() : "stdio";
+	const transport = Check(lspStringSchema, entry.transport)
+		? entry.transport.trim()
+		: "stdio";
 	if (transport !== "stdio") {
 		log(
 			`server "${id}" skipped: transport "${transport}" is not supported (stdio only).`
@@ -640,7 +734,8 @@ function parseServerConfig(
 		initializationOptions: entry.initializationOptions,
 		settings: entry.settings,
 		workspaceFolder:
-			typeof entry.workspaceFolder === "string" && entry.workspaceFolder.trim()
+			Check(lspStringSchema, entry.workspaceFolder) &&
+			entry.workspaceFolder.trim()
 				? entry.workspaceFolder.trim()
 				: undefined,
 		startupTimeout: asPositiveNumber(
@@ -681,11 +776,17 @@ async function loadServerConfigs(): Promise<ServerConfig[]> {
 	if (!raw.trim()) {
 		return [];
 	}
-	let parsed: unknown;
+	let parsed: LspJsonValue;
 	try {
-		parsed = JSON.parse(raw);
+		const decoded = JSON.parse(raw);
+		if (!Check(lspJsonValueSchema, decoded)) {
+			throw new Error("configuration contains a non-JSON value");
+		}
+		parsed = decoded;
 	} catch (err) {
-		log(`ignoring ${file}: not valid JSON (${errorText(err)}).`);
+		log(
+			`ignoring ${file}: not valid JSON (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
+		);
 		return [];
 	}
 	const root = asRecord(parsed);
@@ -735,7 +836,7 @@ function claimExtensions(configs: ServerConfig[]): Map<string, string> {
 
 function writeMessage(
 	runtime: ServerRuntime,
-	payload: Record<string, unknown>
+	payload: JsonRpcMessage & { jsonrpc: string }
 ): void {
 	const stdin = runtime.child?.stdin;
 	if (!stdin?.writable) {
@@ -756,7 +857,9 @@ function writeMessage(
 			])
 		);
 	} catch (err) {
-		log(`server "${runtime.config.id}": write failed (${errorText(err)}).`);
+		log(
+			`server "${runtime.config.id}": write failed (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
+		);
 	}
 }
 
@@ -801,20 +904,24 @@ function drainFrames(runtime: ServerRuntime): void {
 		}
 		const body = runtime.buffer.subarray(bodyStart, end).toString("utf8");
 		runtime.buffer = runtime.buffer.subarray(end);
-		let message: unknown;
+		let message: JsonRpcMessage;
 		try {
-			message = JSON.parse(body);
+			const decoded = JSON.parse(body);
+			if (!Check(lspJsonRpcSchema, decoded)) {
+				continue;
+			}
+			message = decoded;
 		} catch {
 			continue;
 		}
-		dispatchMessage(runtime, message as JsonRpcMessage);
+		dispatchMessage(runtime, message);
 	}
 }
 
 // ── Base protocol: dispatch ─────────────────────────────────────────────────
 
 function settleResponse(runtime: ServerRuntime, message: JsonRpcMessage): void {
-	const id = typeof message.id === "number" ? message.id : Number(message.id);
+	const id = Number(message.id);
 	const pending = runtime.pending.get(id);
 	if (!pending) {
 		return;
@@ -845,7 +952,7 @@ function handleServerRequest(
 	runtime: ServerRuntime,
 	message: JsonRpcMessage
 ): void {
-	const respond = (result: unknown): void => {
+	const respond = (result: LspJsonValue | undefined): void => {
 		writeMessage(runtime, { jsonrpc: "2.0", id: message.id, result });
 	};
 	switch (message.method) {
@@ -869,7 +976,9 @@ function handleServerRequest(
 			// for a section we do not model receives null and uses its own default.
 			const items = asRecord(message.params)?.items;
 			const count = Array.isArray(items) ? items.length : 1;
-			respond(new Array(count).fill(runtime.config.settings ?? null));
+			respond(
+				Array.from({ length: count }, () => runtime.config.settings ?? null)
+			);
 			return;
 		}
 		default:
@@ -895,8 +1004,7 @@ function handlePublishDiagnostics(
 	const diagnostics = Array.isArray(params.diagnostics)
 		? params.diagnostics
 		: [];
-	const version =
-		typeof params.version === "number" ? params.version : undefined;
+	const version = params.version;
 	const previous = runtime.diagnostics.get(key);
 	// Keep the stored verdict MONOTONIC in document version. A late publish for a
 	// revision we have already moved past must not overwrite a fresher one, or
@@ -910,7 +1018,7 @@ function handlePublishDiagnostics(
 	if (!stale) {
 		runtime.diagnostics.set(key, { diagnostics, version });
 	}
-	for (const waiter of [...runtime.waiters]) {
+	for (const waiter of runtime.waiters) {
 		if (waiter.fsPath !== key) {
 			continue;
 		}
@@ -921,7 +1029,7 @@ function handlePublishDiagnostics(
 		// "any publish for this file", which is the pre-3.15 behaviour.
 		if (
 			waiter.version !== undefined &&
-			typeof params.version === "number" &&
+			params.version !== undefined &&
 			params.version < waiter.version
 		) {
 			continue;
@@ -969,11 +1077,22 @@ function dispatchMessage(
 		return;
 	}
 	if (message.method) {
-		if (message.method === "textDocument/publishDiagnostics") {
-			handlePublishDiagnostics(
-				runtime,
-				(message.params ?? {}) as PublishDiagnosticsParams
-			);
+		if (
+			message.method === "textDocument/publishDiagnostics" &&
+			Check(publishDiagnosticsSchema, message.params)
+		) {
+			const record = asRecord(message.params);
+			const rawDiagnostics = record?.diagnostics;
+			const version = record?.version;
+			handlePublishDiagnostics(runtime, {
+				uri: message.params.uri,
+				diagnostics: Array.isArray(rawDiagnostics)
+					? rawDiagnostics.filter((diagnostic) =>
+							Check(lspDiagnosticSchema, diagnostic)
+						)
+					: [],
+				version: Check(lspNumberSchema, version) ? version : undefined,
+			});
 		}
 		// Every other notification (`window/logMessage`, `$/progress`,
 		// `telemetry/event`, …) is intentionally dropped: none of it changes what
@@ -988,12 +1107,12 @@ function dispatchMessage(
 function request(
 	runtime: ServerRuntime,
 	method: string,
-	params: unknown,
+	params: LspJsonValue | undefined,
 	timeoutMs: number
-): Promise<unknown> {
+): Promise<LspJsonValue | undefined> {
 	const id = runtime.nextRequestId;
 	runtime.nextRequestId += 1;
-	return new Promise<unknown>((resolve, reject) => {
+	return new Promise<LspJsonValue | undefined>((resolve, reject) => {
 		const timer = setTimeout(() => {
 			runtime.pending.delete(id);
 			reject(new Error(`${method} timed out after ${timeoutMs}ms`));
@@ -1005,7 +1124,11 @@ function request(
 	});
 }
 
-function notify(runtime: ServerRuntime, method: string, params: unknown): void {
+function notify(
+	runtime: ServerRuntime,
+	method: string,
+	params: LspJsonValue | undefined
+): void {
 	writeMessage(runtime, { jsonrpc: "2.0", method, params });
 }
 
@@ -1076,7 +1199,7 @@ function drainPendingWork(runtime: ServerRuntime, reason: string): void {
 		pending.reject(new Error(reason));
 	}
 	runtime.pending.clear();
-	for (const waiter of [...runtime.waiters]) {
+	for (const waiter of runtime.waiters) {
 		// Release rather than hang: a diagnostics wait whose server just died must
 		// fall through to "no diagnostics", not sit out its full budget.
 		waiter.finish();
@@ -1162,7 +1285,7 @@ function attachChild(runtime: ServerRuntime, child: ChildProcess): void {
 			// A stdout handler throws on Pi's own event loop; swallowing keeps a
 			// malformed frame from taking the whole agent process down.
 			log(
-				`server "${runtime.config.id}": dispatch failed (${errorText(err)}).`
+				`server "${runtime.config.id}": dispatch failed (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
 			);
 		}
 	});
@@ -1192,7 +1315,7 @@ function attachChild(runtime: ServerRuntime, child: ChildProcess): void {
  * request we would leave unanswered is worse than not advertising it, because
  * the server blocks on us instead of falling back to its own defaults.
  */
-function clientCapabilities(): Record<string, unknown> {
+function clientCapabilities() {
 	return {
 		general: { positionEncodings: ["utf-16"] },
 		workspace: {
@@ -1276,28 +1399,36 @@ async function startServer(
 			})
 		);
 	} catch (err) {
-		skipServer(runtime, `failed to spawn: ${errorText(err)}`);
+		skipServer(
+			runtime,
+			`failed to spawn: ${errorText(err instanceof Error ? err : new Error(String(err)))}`
+		);
 		return false;
 	}
 
 	try {
+		const params = {
+			processId: process.pid,
+			clientInfo: { name: "ryu-lsp", version: "1" },
+			rootUri: pathToFileURL(runtime.rootPath).href,
+			rootPath: runtime.rootPath,
+			workspaceFolders: [
+				{
+					uri: pathToFileURL(runtime.rootPath).href,
+					name: path.basename(runtime.rootPath),
+				},
+			],
+			capabilities: clientCapabilities(),
+		};
+		if (config.initializationOptions !== undefined) {
+			Object.assign(params, {
+				initializationOptions: config.initializationOptions,
+			});
+		}
 		const result = await request(
 			runtime,
 			"initialize",
-			{
-				processId: process.pid,
-				clientInfo: { name: "ryu-lsp", version: "1" },
-				rootUri: pathToFileURL(runtime.rootPath).href,
-				rootPath: runtime.rootPath,
-				workspaceFolders: [
-					{
-						uri: pathToFileURL(runtime.rootPath).href,
-						name: path.basename(runtime.rootPath),
-					},
-				],
-				capabilities: clientCapabilities(),
-				initializationOptions: config.initializationOptions,
-			},
+			params,
 			config.startupTimeout
 		);
 		runtime.serverCapabilities = asRecord(asRecord(result)?.capabilities) ?? {};
@@ -1313,7 +1444,7 @@ async function startServer(
 		const tail = runtime.stderrTail.trim();
 		skipServer(
 			runtime,
-			`initialize failed: ${errorText(err)}${tail ? ` — ${tail}` : ""}`
+			`initialize failed: ${errorText(err instanceof Error ? err : new Error(String(err)))}${tail ? ` — ${tail}` : ""}`
 		);
 		return false;
 	}
@@ -1345,8 +1476,11 @@ function ensureServer(runtime: ServerRuntime, cwd: string): Promise<boolean> {
 	}
 	if (!runtime.starting) {
 		runtime.starting = startServer(runtime, cwd)
-			.catch((err: unknown) => {
-				skipServer(runtime, `failed to start: ${errorText(err)}`);
+			.catch((err) => {
+				skipServer(
+					runtime,
+					`failed to start: ${errorText(err instanceof Error ? err : new Error(String(err)))}`
+				);
 				return false;
 			})
 			.finally(() => {
@@ -1419,9 +1553,9 @@ async function stopAllServers(
 ): Promise<void> {
 	await Promise.all(
 		[...registry.values()].map((runtime) =>
-			stopServer(runtime).catch((err: unknown) => {
+			stopServer(runtime).catch((err) => {
 				log(
-					`server "${runtime.config.id}": shutdown failed (${errorText(err)}).`
+					`server "${runtime.config.id}": shutdown failed (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
 				);
 			})
 		)
@@ -1462,7 +1596,11 @@ function fingerprint(text: string): string {
  * text with them. The numeric `textDocumentSync` form carries no save
  * information at all, so it is treated as "does not want saves".
  */
-function saveOptions(runtime: ServerRuntime): { send: boolean; text: boolean } {
+interface DocumentSaveOptions {
+	send: boolean;
+	text: boolean;
+}
+function saveOptions(runtime: ServerRuntime): DocumentSaveOptions {
 	const sync = runtime.serverCapabilities.textDocumentSync;
 	const record = asRecord(sync);
 	if (!record) {
@@ -1554,10 +1692,11 @@ async function syncDocument(
 	if (didSave) {
 		const save = saveOptions(runtime);
 		if (save.send) {
-			notify(runtime, "textDocument/didSave", {
-				textDocument: { uri },
-				...(save.text ? { text } : {}),
-			});
+			const params: LspJsonObject = { textDocument: { uri } };
+			if (save.text) {
+				params.text = text;
+			}
+			notify(runtime, "textDocument/didSave", params);
 		}
 	}
 	return { version, changed: true };
@@ -1612,7 +1751,7 @@ function displayPath(cwd: string, fsPath: string): string {
 }
 
 function severityRank(diagnostic: LspDiagnostic): number {
-	return typeof diagnostic.severity === "number" ? diagnostic.severity : 1;
+	return diagnostic.severity ?? 1;
 }
 
 function formatDiagnostic(
@@ -1622,7 +1761,10 @@ function formatDiagnostic(
 ): string {
 	const line = (diagnostic.range?.start?.line ?? 0) + 1;
 	const column = (diagnostic.range?.start?.character ?? 0) + 1;
-	const severity = SEVERITY_LABELS[severityRank(diagnostic)] ?? "error";
+	const rank = severityRank(diagnostic);
+	const severity = Check(severitySchema, rank)
+		? SEVERITY_LABELS[rank]
+		: "error";
 	// `message` is required by the spec and typed as such, but it arrives off the
 	// wire from a third-party process. A server that omits it must cost us one
 	// blank diagnostic line, not a TypeError thrown out of a tool's `execute`.
@@ -1716,18 +1858,18 @@ function targetFor(fsPath: string): ResolvedTarget | undefined {
  * building a URI from it.
  */
 function changedPath(
-	input: Record<string, unknown>,
+	input: Static<typeof changedPathSchema>,
 	cwd: string
 ): string | undefined {
 	const raw = input.path;
-	if (typeof raw !== "string" || !raw.trim()) {
+	if (!raw.trim()) {
 		return;
 	}
 	return path.resolve(cwd, raw.trim());
 }
 
 async function diagnosticsForChangedFile(
-	input: Record<string, unknown>,
+	input: Static<typeof changedPathSchema>,
 	ctx: ExtensionContext
 ): Promise<string | undefined> {
 	const fsPath = changedPath(input, ctx.cwd);
@@ -1793,9 +1935,12 @@ async function diagnosticsForChangedFile(
  * `positionEncodings: ["utf-16"]`, the protocol default), which is also what
  * JavaScript string indices are — so the conversion is a plain subtraction.
  */
-function toPosition(line: unknown, column: unknown): LspPosition {
-	const lineNumber = typeof line === "number" && line > 0 ? line : 1;
-	const columnNumber = typeof column === "number" && column > 0 ? column : 1;
+function toPosition(
+	line: number | undefined,
+	column: number | undefined
+): LspPosition {
+	const lineNumber = line !== undefined && line > 0 ? line : 1;
+	const columnNumber = column !== undefined && column > 0 ? column : 1;
 	return { line: lineNumber - 1, character: columnNumber - 1 };
 }
 
@@ -1812,10 +1957,10 @@ interface PreparedRequest {
 }
 
 async function prepareRequest(
-	rawPath: unknown,
+	rawPath: string | undefined,
 	ctx: ExtensionContext
 ): Promise<PreparedRequest | { message: string }> {
-	if (typeof rawPath !== "string" || !rawPath.trim()) {
+	if (!rawPath?.trim()) {
 		throw new Error("`path` is required.");
 	}
 	const fsPath = path.resolve(ctx.cwd, rawPath.trim());
@@ -1841,7 +1986,7 @@ async function prepareRequest(
 }
 
 /** Normalize `Location | Location[] | LocationLink[] | null` to plain locations. */
-function toLocations(result: unknown): LspLocation[] {
+function toLocations(result: LspJsonValue | undefined): LspLocation[] {
 	const items = Array.isArray(result) ? result : [result];
 	const out: LspLocation[] = [];
 	for (const item of items) {
@@ -1849,15 +1994,15 @@ function toLocations(result: unknown): LspLocation[] {
 		if (!record) {
 			continue;
 		}
-		const uri =
-			typeof record.uri === "string"
-				? record.uri
-				: typeof record.targetUri === "string"
-					? record.targetUri
-					: undefined;
-		const range = (asRecord(record.range) ??
-			asRecord(record.targetSelectionRange) ??
-			asRecord(record.targetRange)) as LspRange | undefined;
+		const uri = Check(lspStringSchema, record.uri)
+			? record.uri
+			: Check(lspStringSchema, record.targetUri)
+				? record.targetUri
+				: undefined;
+		const range =
+			parsedRange(record.range) ??
+			parsedRange(record.targetSelectionRange) ??
+			parsedRange(record.targetRange);
 		if (uri && range) {
 			out.push({ uri, range });
 		}
@@ -1882,15 +2027,15 @@ function renderLocations(cwd: string, locations: LspLocation[]): string {
 }
 
 /** Flatten `MarkupContent | MarkedString | MarkedString[]` into plain text. */
-function renderHoverContents(contents: unknown): string {
-	if (typeof contents === "string") {
+function renderHoverContents(contents: LspJsonValue | undefined): string {
+	if (Check(lspStringSchema, contents)) {
 		return contents;
 	}
 	if (Array.isArray(contents)) {
 		return contents.map((item) => renderHoverContents(item)).join("\n\n");
 	}
 	const record = asRecord(contents);
-	if (record && typeof record.value === "string") {
+	if (record && Check(lspStringSchema, record.value)) {
 		return record.value;
 	}
 	return "";
@@ -1899,10 +2044,8 @@ function renderHoverContents(contents: unknown): string {
 // ── Symbol & call-hierarchy rendering ───────────────────────────────────────
 
 /** Wire SymbolKind -> short label, with a safe fallback for a value the spec does not name. */
-function symbolKindLabel(kind: unknown): string {
-	return typeof kind === "number"
-		? (SYMBOL_KIND_LABELS[kind] ?? "symbol")
-		: "symbol";
+function symbolKindLabel(kind: LspJsonValue | undefined): string {
+	return Check(symbolKindSchema, kind) ? SYMBOL_KIND_LABELS[kind] : "symbol";
 }
 
 /**
@@ -1916,7 +2059,7 @@ function symbolKindLabel(kind: unknown): string {
 function pushDocumentSymbol(
 	cwd: string,
 	fsPath: string,
-	item: unknown,
+	item: LspJsonValue | undefined,
 	depth: number,
 	lines: string[]
 ): void {
@@ -1927,14 +2070,12 @@ function pushDocumentSymbol(
 	if (!record) {
 		return;
 	}
-	const range = (asRecord(record.selectionRange) ?? asRecord(record.range)) as
-		| LspRange
-		| undefined;
+	const range = parsedRange(record.selectionRange) ?? parsedRange(record.range);
 	const line = (range?.start?.line ?? 0) + 1;
 	const column = (range?.start?.character ?? 0) + 1;
-	const name = typeof record.name === "string" ? record.name : "?";
+	const name = Check(lspStringSchema, record.name) ? record.name : "?";
 	const detail =
-		typeof record.detail === "string" && record.detail.trim()
+		Check(lspStringSchema, record.detail) && record.detail.trim()
 			? ` — ${record.detail.trim().slice(0, MAX_SYMBOL_DETAIL_CHARS)}`
 			: "";
 	const indent = "  ".repeat(depth);
@@ -1956,7 +2097,7 @@ function pushDocumentSymbol(
 function renderDocumentSymbols(
 	cwd: string,
 	fsPath: string,
-	raw: unknown
+	raw: LspJsonValue | undefined
 ): string {
 	if (!Array.isArray(raw) || raw.length === 0) {
 		return "No symbols in this file.";
@@ -1973,14 +2114,12 @@ function renderDocumentSymbols(
 			if (!record) {
 				continue;
 			}
-			const range = asRecord(asRecord(record.location)?.range) as
-				| LspRange
-				| undefined;
+			const range = parsedRange(asRecord(record.location)?.range);
 			const line = (range?.start?.line ?? 0) + 1;
 			const column = (range?.start?.character ?? 0) + 1;
-			const name = typeof record.name === "string" ? record.name : "?";
+			const name = Check(lspStringSchema, record.name) ? record.name : "?";
 			const container =
-				typeof record.containerName === "string" && record.containerName
+				Check(lspStringSchema, record.containerName) && record.containerName
 					? `${record.containerName}.`
 					: "";
 			lines.push(
@@ -2003,27 +2142,28 @@ function renderDocumentSymbols(
  * as its `location` when the server expects a follow-up resolve we do not do,
  * so `range` is optional and renders as line 1.
  */
-function toWorkspaceSymbols(raw: unknown): WorkspaceSymbolLike[] {
+function toWorkspaceSymbols(
+	raw: LspJsonValue | undefined
+): WorkspaceSymbolLike[] {
 	if (!Array.isArray(raw)) {
 		return [];
 	}
 	const out: WorkspaceSymbolLike[] = [];
 	for (const item of raw) {
 		const record = asRecord(item);
-		if (!record || typeof record.name !== "string") {
+		if (!(record && Check(lspStringSchema, record.name))) {
 			continue;
 		}
 		const location = asRecord(record.location);
 		out.push({
 			name: record.name,
-			kind: typeof record.kind === "number" ? record.kind : undefined,
-			containerName:
-				typeof record.containerName === "string"
-					? record.containerName
-					: undefined,
+			kind: Check(lspNumberSchema, record.kind) ? record.kind : undefined,
+			containerName: Check(lspStringSchema, record.containerName)
+				? record.containerName
+				: undefined,
 			location: {
-				uri: typeof location?.uri === "string" ? location.uri : undefined,
-				range: asRecord(location?.range) as LspRange | undefined,
+				uri: Check(lspStringSchema, location?.uri) ? location.uri : undefined,
+				range: parsedRange(location?.range),
 			},
 		});
 	}
@@ -2063,24 +2203,28 @@ function renderWorkspaceSymbols(
 	return lines.join("\n");
 }
 
-function toCallHierarchyItem(raw: unknown): CallHierarchyItemLike | undefined {
+function toCallHierarchyItem(
+	raw: LspJsonValue | undefined
+): CallHierarchyItemLike | undefined {
 	const record = asRecord(raw);
 	if (!record) {
 		return;
 	}
 	return {
-		name: typeof record.name === "string" ? record.name : "?",
-		kind: typeof record.kind === "number" ? record.kind : undefined,
-		uri: typeof record.uri === "string" ? record.uri : undefined,
-		detail: typeof record.detail === "string" ? record.detail : undefined,
-		selectionRange: asRecord(record.selectionRange) as LspRange | undefined,
-		range: asRecord(record.range) as LspRange | undefined,
+		name: Check(lspStringSchema, record.name) ? record.name : "?",
+		kind: Check(lspNumberSchema, record.kind) ? record.kind : undefined,
+		uri: Check(lspStringSchema, record.uri) ? record.uri : undefined,
+		detail: Check(lspStringSchema, record.detail) ? record.detail : undefined,
+		selectionRange: parsedRange(record.selectionRange),
+		range: parsedRange(record.range),
 		raw: record,
 	};
 }
 
 /** `prepareCallHierarchy` answers one item or an array of them. */
-function toCallHierarchyItems(raw: unknown): CallHierarchyItemLike[] {
+function toCallHierarchyItems(
+	raw: LspJsonValue | undefined
+): CallHierarchyItemLike[] {
 	const records = Array.isArray(raw) ? raw : [raw];
 	const out: CallHierarchyItemLike[] = [];
 	for (const record of records) {
@@ -2101,10 +2245,9 @@ function renderCallHierarchyItem(
 	const range = item.selectionRange ?? item.range;
 	const line = (range?.start?.line ?? 0) + 1;
 	const column = (range?.start?.character ?? 0) + 1;
-	const detail =
-		typeof item.detail === "string" && item.detail.trim()
-			? ` — ${item.detail.trim().slice(0, MAX_SYMBOL_DETAIL_CHARS)}`
-			: "";
+	const detail = item.detail?.trim()
+		? ` — ${item.detail.trim().slice(0, MAX_SYMBOL_DETAIL_CHARS)}`
+		: "";
 	const location = fsPath
 		? `${displayPath(cwd, fsPath)}:${line}:${column}: `
 		: "";
@@ -2138,7 +2281,7 @@ async function renderCallHierarchyTree(
 			? "callHierarchy/incomingCalls"
 			: "callHierarchy/outgoingCalls";
 	const marker = direction === "incoming" ? "←" : "→";
-	let raw: unknown;
+	let raw: LspJsonValue | undefined;
 	try {
 		// The params carry the VERBATIM item received (its `raw`), never a
 		// re-derived copy — see the note on `CallHierarchyItemLike.raw`.
@@ -2151,7 +2294,9 @@ async function renderCallHierarchyTree(
 	} catch (err) {
 		// One broken edge must not fail the whole tree; the caller still sees
 		// the levels that did resolve.
-		log(`call hierarchy on "${runtime.config.id}" failed (${errorText(err)}).`);
+		log(
+			`call hierarchy on "${runtime.config.id}" failed (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
+		);
 		return [];
 	}
 	const children: Array<{ item: CallHierarchyItemLike; label: string }> = [];
@@ -2222,10 +2367,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 		promptSnippet: "Resolve a symbol to its definition via the language server",
 		parameters: Type.Object(POSITION_PARAMS),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const prepared = await prepareRequest(
-				(params as { path?: unknown }).path,
-				ctx
-			);
+			const prepared = await prepareRequest(params.path, ctx);
 			if ("message" in prepared) {
 				return {
 					content: [{ type: "text", text: prepared.message }],
@@ -2237,10 +2379,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 				"textDocument/definition",
 				{
 					textDocument: { uri: prepared.uri },
-					position: toPosition(
-						(params as { line?: unknown }).line,
-						(params as { column?: unknown }).column
-					),
+					position: toPosition(params.line, params.column),
 				},
 				NAVIGATION_TIMEOUT_MS
 			);
@@ -2269,10 +2408,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const prepared = await prepareRequest(
-				(params as { path?: unknown }).path,
-				ctx
-			);
+			const prepared = await prepareRequest(params.path, ctx);
 			if ("message" in prepared) {
 				return {
 					content: [{ type: "text", text: prepared.message }],
@@ -2284,14 +2420,9 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 				"textDocument/references",
 				{
 					textDocument: { uri: prepared.uri },
-					position: toPosition(
-						(params as { line?: unknown }).line,
-						(params as { column?: unknown }).column
-					),
+					position: toPosition(params.line, params.column),
 					context: {
-						includeDeclaration:
-							(params as { includeDeclaration?: unknown })
-								.includeDeclaration === true,
+						includeDeclaration: params.includeDeclaration === true,
 					},
 				},
 				NAVIGATION_TIMEOUT_MS
@@ -2314,10 +2445,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 		promptSnippet: "Read a symbol's type and docs via the language server",
 		parameters: Type.Object(POSITION_PARAMS),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const prepared = await prepareRequest(
-				(params as { path?: unknown }).path,
-				ctx
-			);
+			const prepared = await prepareRequest(params.path, ctx);
 			if ("message" in prepared) {
 				return {
 					content: [{ type: "text", text: prepared.message }],
@@ -2329,10 +2457,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 				"textDocument/hover",
 				{
 					textDocument: { uri: prepared.uri },
-					position: toPosition(
-						(params as { line?: unknown }).line,
-						(params as { column?: unknown }).column
-					),
+					position: toPosition(params.line, params.column),
 				},
 				NAVIGATION_TIMEOUT_MS
 			);
@@ -2361,10 +2486,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 			}),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const prepared = await prepareRequest(
-				(params as { path?: unknown }).path,
-				ctx
-			);
+			const prepared = await prepareRequest(params.path, ctx);
 			if ("message" in prepared) {
 				return {
 					content: [{ type: "text", text: prepared.message }],
@@ -2422,17 +2544,14 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const query = (params as { query?: unknown }).query;
-			if (typeof query !== "string" || !query.trim()) {
+			const query = params.query;
+			if (!query.trim()) {
 				return {
 					content: [{ type: "text", text: "`query` is required." }],
 					details: {},
 				};
 			}
-			const resolved = await symbolSearchServers(
-				(params as { path?: unknown }).path,
-				ctx
-			);
+			const resolved = await symbolSearchServers(params.path, ctx);
 			if ("message" in resolved) {
 				return {
 					content: [{ type: "text", text: resolved.message }],
@@ -2458,7 +2577,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 				} catch (err) {
 					// One dead server must not hide the others' answers.
 					log(
-						`workspace/symbol on "${runtime.config.id}" failed (${errorText(err)}).`
+						`workspace/symbol on "${runtime.config.id}" failed (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
 					);
 				}
 			}
@@ -2487,10 +2606,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 		promptSnippet: "Find implementations of a type via the language server",
 		parameters: Type.Object(POSITION_PARAMS),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const prepared = await prepareRequest(
-				(params as { path?: unknown }).path,
-				ctx
-			);
+			const prepared = await prepareRequest(params.path, ctx);
 			if ("message" in prepared) {
 				return {
 					content: [{ type: "text", text: prepared.message }],
@@ -2514,10 +2630,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 				"textDocument/implementation",
 				{
 					textDocument: { uri: prepared.uri },
-					position: toPosition(
-						(params as { line?: unknown }).line,
-						(params as { column?: unknown }).column
-					),
+					position: toPosition(params.line, params.column),
 				},
 				NAVIGATION_TIMEOUT_MS
 			);
@@ -2555,10 +2668,7 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const prepared = await prepareRequest(
-				(params as { path?: unknown }).path,
-				ctx
-			);
+			const prepared = await prepareRequest(params.path, ctx);
 			if ("message" in prepared) {
 				return {
 					content: [{ type: "text", text: prepared.message }],
@@ -2578,13 +2688,8 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 				};
 			}
 			const direction =
-				(params as { direction?: unknown }).direction === "incoming"
-					? "incoming"
-					: "outgoing";
-			const requestedDepth =
-				typeof (params as { depth?: unknown }).depth === "number"
-					? ((params as { depth?: unknown }).depth as number)
-					: 2;
+				params.direction === "incoming" ? "incoming" : "outgoing";
+			const requestedDepth = params.depth ?? 2;
 			const depth = Math.min(
 				Math.max(Math.floor(requestedDepth), 1),
 				MAX_CALL_HIERARCHY_DEPTH
@@ -2594,15 +2699,13 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 				"textDocument/prepareCallHierarchy",
 				{
 					textDocument: { uri: prepared.uri },
-					position: toPosition(
-						(params as { line?: unknown }).line,
-						(params as { column?: unknown }).column
-					),
+					position: toPosition(params.line, params.column),
 				},
 				NAVIGATION_TIMEOUT_MS
 			);
 			const items = toCallHierarchyItems(raw);
-			if (items.length === 0) {
+			const first = items[0];
+			if (!first) {
 				return {
 					content: [
 						{ type: "text", text: "No call hierarchy at this position." },
@@ -2614,13 +2717,13 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 			const tree = await renderCallHierarchyTree(
 				runtime,
 				direction,
-				items[0],
+				first,
 				ctx.cwd,
 				depth,
 				budget
 			);
 			const lines = [
-				`${renderCallHierarchyItem(ctx.cwd, items[0])} (${direction})`,
+				`${renderCallHierarchyItem(ctx.cwd, first)} (${direction})`,
 				...tree,
 			];
 			if (budget.truncated) {
@@ -2653,8 +2756,8 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const rawPath = (params as { path?: unknown }).path;
-			if (typeof rawPath === "string" && rawPath.trim()) {
+			const rawPath = params.path;
+			if (rawPath?.trim()) {
 				return await diagnoseOneFile(rawPath, ctx);
 			}
 			return diagnoseWorkspace(ctx);
@@ -2662,10 +2765,15 @@ function registerNavigationTools(pi: ExtensionAPI): void {
 	});
 }
 
+interface DiagnosticToolResult {
+	content: [{ type: "text"; text: string }];
+	details: { count?: number };
+}
+
 async function diagnoseOneFile(
 	rawPath: string,
 	ctx: ExtensionContext
-): Promise<{ content: [{ type: "text"; text: string }]; details: unknown }> {
+): Promise<DiagnosticToolResult> {
 	const prepared = await prepareRequest(rawPath, ctx);
 	if ("message" in prepared) {
 		return { content: [{ type: "text", text: prepared.message }], details: {} };
@@ -2705,10 +2813,7 @@ async function diagnoseOneFile(
  * spawn anything: starting every declared server and opening the whole tree to
  * answer one question would be a multi-second, multi-hundred-megabyte surprise.
  */
-function diagnoseWorkspace(ctx: ExtensionContext): {
-	content: [{ type: "text"; text: string }];
-	details: unknown;
-} {
+function diagnoseWorkspace(ctx: ExtensionContext): DiagnosticToolResult {
 	const entries: Array<{ fsPath: string; diagnostics: LspDiagnostic[] }> = [];
 	for (const runtime of servers.values()) {
 		if (runtime.status !== "ready") {
@@ -2742,10 +2847,10 @@ function diagnoseWorkspace(ctx: ExtensionContext): {
  * pay an `initialize` for a query you did not point at it.
  */
 async function symbolSearchServers(
-	rawPath: unknown,
+	rawPath: string | undefined,
 	ctx: ExtensionContext
 ): Promise<{ servers: ServerRuntime[] } | { message: string }> {
-	if (typeof rawPath === "string" && rawPath.trim()) {
+	if (rawPath?.trim()) {
 		const fsPath = path.resolve(ctx.cwd, rawPath.trim());
 		const target = targetFor(fsPath);
 		if (!target) {
@@ -2810,7 +2915,7 @@ export default async function (pi: ExtensionAPI) {
 			config.id,
 			{
 				config,
-				status: "idle" as ServerStatus,
+				status: "idle",
 				child: undefined,
 				buffer: Buffer.alloc(0),
 				nextRequestId: 1,
@@ -2824,7 +2929,7 @@ export default async function (pi: ExtensionAPI) {
 				stderrTail: "",
 				rootPath: process.cwd(),
 				shuttingDown: false,
-			},
+			} satisfies ServerRuntime,
 		])
 	);
 	extensionOwners = claimExtensions(configs);
@@ -2845,20 +2950,41 @@ export default async function (pi: ExtensionAPI) {
 		// The exported guards, not `event.toolName === "edit"`:
 		// `CustomToolResultEvent.toolName` is `string` and overlaps every literal,
 		// so a direct comparison does not narrow.
-		if (!(isEditToolResult(event) || isWriteToolResult(event))) {
+		const builtinWrite = isEditToolResult(event) || isWriteToolResult(event);
+		if (!(builtinWrite || event.toolName === COPY_PASTE_TOOL)) {
 			return;
 		}
 		if (event.isError) {
 			return;
 		}
 		try {
-			const block = await diagnosticsForChangedFile(event.input, ctx);
-			if (!block) {
+			const changed: Static<typeof changedPathSchema>[] = [];
+			if (builtinWrite) {
+				if (Check(changedPathSchema, event.input)) {
+					changed.push(event.input);
+				}
+			} else if (Check(copyPasteInputSchema, event.input)) {
+				const { move, path: sourcePath, to_path: destPath } = event.input;
+				changed.push({ path: destPath || sourcePath });
+				if (move === true && destPath && destPath !== sourcePath) {
+					changed.push({ path: sourcePath });
+				}
+			}
+			const blocks: { type: "text"; text: string }[] = [];
+			for (const input of changed) {
+				const block = await diagnosticsForChangedFile(input, ctx);
+				if (block) {
+					blocks.push({ type: "text", text: block });
+				}
+			}
+			if (blocks.length === 0) {
 				return;
 			}
-			return { content: [...event.content, { type: "text", text: block }] };
+			return { content: [...event.content, ...blocks] };
 		} catch (err) {
-			log(`diagnostics for tool result failed (${errorText(err)}).`);
+			log(
+				`diagnostics for tool result failed (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
+			);
 			return;
 		}
 	});

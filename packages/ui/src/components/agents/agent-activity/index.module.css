@@ -1,0 +1,23 @@
+.inline1 {
+	height: var(--index-1-height);
+}
+.workingMask {
+	-webkit-mask-image: linear-gradient(to bottom, transparent, black 12px);
+	mask-image: linear-gradient(to bottom, transparent, black 12px);
+}
+.completedMask {
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		transparent,
+		black 12px,
+		black calc(100% - 12px),
+		transparent
+	);
+	mask-image: linear-gradient(
+		to bottom,
+		transparent,
+		black 12px,
+		black calc(100% - 12px),
+		transparent
+	);
+}

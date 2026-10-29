@@ -36,6 +36,12 @@ pub struct Metrics {
     pub budget_restricted: AtomicU64,
     pub composio_calls: AtomicU64,
     pub semantic_cache_hits: AtomicU64,
+    /// `/v1/embeddings` requests answered entirely from the embedding cache.
+    /// Kept apart from `cache_hits`/`cache_misses`, which measure the chat
+    /// response caches' hit rate.
+    pub embedding_cache_hits: AtomicU64,
+    /// Cacheable `/v1/embeddings` requests that went to the provider.
+    pub embedding_cache_misses: AtomicU64,
     /// Requests served by a fallback provider (primary circuit was open).
     pub degraded_fallback: AtomicU64,
     /// Requests that exhausted the entire fallback chain (all providers unavailable).
@@ -80,6 +86,12 @@ impl Metrics {
     }
     pub fn inc_semantic_cache_hit(&self) {
         self.semantic_cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_embedding_cache_hit(&self) {
+        self.embedding_cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_embedding_cache_miss(&self) {
+        self.embedding_cache_misses.fetch_add(1, Ordering::Relaxed);
     }
     /// Increment the counter for requests served by a fallback provider (degraded
     /// path AC3 of #218).
@@ -216,6 +228,8 @@ impl Metrics {
                 "semantic_hits": self.semantic_cache_hits.load(Ordering::Relaxed),
                 "misses":        misses,
                 "hit_rate":      hit_rate,
+                "embedding_hits":   self.embedding_cache_hits.load(Ordering::Relaxed),
+                "embedding_misses": self.embedding_cache_misses.load(Ordering::Relaxed),
             },
             "tokens": {
                 "input":  self.total_input_tokens.load(Ordering::Relaxed),
@@ -272,6 +286,19 @@ mod tests {
             snap["tokens"]["cached_input"], 900,
             "cached_input aggregates provider-side prompt-cache reads"
         );
+    }
+
+    #[test]
+    fn embedding_cache_counters_stay_out_of_the_response_cache_hit_rate() {
+        let metrics = Metrics::default();
+        metrics.inc_embedding_cache_hit();
+        metrics.inc_embedding_cache_hit();
+        metrics.inc_embedding_cache_miss();
+        let snap = metrics.snapshot();
+        assert_eq!(snap["cache"]["embedding_hits"], 2);
+        assert_eq!(snap["cache"]["embedding_misses"], 1);
+        assert_eq!(snap["cache"]["exact_hits"], 0);
+        assert_eq!(snap["cache"]["hit_rate"], 0.0);
     }
 
     #[test]

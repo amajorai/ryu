@@ -25,10 +25,37 @@
 // `WebSocket` (a web standard present in browsers, React Native, and Bun/Node)
 // so this stays platform-agnostic like the rest of `core-client`.
 
+/** Write inputs retain the complete native JSON.stringify input ABI, including
+ * SDK values, and are forwarded to that operation without a new admission gate. */
+type RealtimeWriteInput = Parameters<typeof JSON.stringify>[0];
+
+import { z } from "zod";
 import {
-	appendWebSocketTicket,
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
+
+const realtimeString = z.string();
+const realtimeNumber = z.union([
+	z.number(),
+	z.nan(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+const realtimeFunction = z.function();
+const realtimeObjectFields = z.record(z.string(), appResponseValueSchema);
+// This owner is used only after JSON.parse. Validate the complete native JSON
+// tree first, retaining every key and reference, including numeric overflow.
+const realtimeFrame = z.custom<z.output<typeof realtimeObjectFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		realtimeObjectFields.safeParse(value).success
+);
+
+import {
 	type ApiTarget,
 	apiUrl,
+	appendWebSocketTicket,
 	requestWebSocketTicket,
 } from "./client.ts";
 import { createResourceId } from "./ids.ts";
@@ -40,25 +67,29 @@ export type RealtimeKind = "conversation" | "document" | "application";
 
 /** A named event published by an application room. */
 export interface RealtimeNamedEvent {
-	data: unknown;
+	data: AppResponseValue;
 	name: string;
 }
 
 /** Encode the application-room event control frame. */
-export function encodeRealtimeEvent(event: RealtimeNamedEvent): string {
+export function encodeRealtimeEvent(event: {
+	name: string;
+	data: RealtimeWriteInput;
+}): string {
 	return JSON.stringify({ type: "event", event: event.name, data: event.data });
 }
 
 /** Decode an application-room event control frame, or `null` for another frame. */
 export function decodeRealtimeEvent(raw: string): RealtimeNamedEvent | null {
 	try {
-		const value: unknown = JSON.parse(raw);
-		if (typeof value !== "object" || value === null) {
+		const parsed = realtimeFrame.safeParse(JSON.parse(raw));
+		if (!parsed.success) {
 			return null;
 		}
-		const frame = value as Record<string, unknown>;
-		return frame.type === "event" && typeof frame.event === "string"
-			? { name: frame.event, data: frame.data }
+		const frame = parsed.data;
+		return frame.type === "event" &&
+			realtimeString.safeParse(frame.event).success
+			? { name: realtimeString.parse(frame.event), data: frame.data }
 			: null;
 	} catch {
 		return null;
@@ -121,6 +152,8 @@ export function decodeDocSync(bytes: Uint8Array): DocSyncMessage | null {
 	if (tag === undefined || !DOC_SYNC_TAGS.includes(tag)) {
 		return null;
 	}
+	// SAFETY: The preceding membership check accepts exactly the four private
+	// DOC_SYNC_TAGS literals declared by DocSyncTag; the native byte payload is retained.
 	return { tag: tag as DocSyncTag, payload: bytes.slice(1) };
 }
 
@@ -142,7 +175,7 @@ export interface JoinAck {
 	maySeed: boolean;
 	memberId: string;
 	/** Current active-room presence roster, included for late joiners. */
-	presence: unknown[];
+	presence: AppResponseValue[];
 	roomId: string;
 }
 
@@ -161,14 +194,14 @@ export interface RealtimeHandlers {
 	onDocumentReset?: (epoch: number) => void;
 	onError?: (event: Event) => void;
 	/** A `{ channel: "events" }` payload — e.g. a new chat message `data`. */
-	onEvent?: (data: unknown) => void;
+	onEvent?: (data: AppResponseValue) => void;
 	/** The resolved access level for this connection, sent right after join. */
 	onJoinAck?: (ack: JoinAck) => void;
 	/** A named event from an application room. */
 	onNamedEvent?: (event: RealtimeNamedEvent) => void;
 	onOpen?: () => void;
 	/** A `{ channel: "presence" }` payload — an awareness delta or leave. */
-	onPresence?: (data: unknown) => void;
+	onPresence?: (data: AppResponseValue) => void;
 	/** The bounded room feed skipped state. Reload a snapshot or restart CRDT sync. */
 	onResyncRequired?: (notice: ResyncRequired) => void;
 }
@@ -207,7 +240,7 @@ export function realtimeWsUrl(
 export class RealtimeConnection {
 	private socket: WebSocket | null = null;
 	private hasPresence = false;
-	private lastPresence: unknown;
+	private lastPresence: RealtimeWriteInput;
 	private keepalive: ReturnType<typeof setInterval> | null = null;
 	private presenceHeartbeat: ReturnType<typeof setInterval> | null = null;
 	private readonly target: ApiTarget;
@@ -249,37 +282,36 @@ export class RealtimeConnection {
 				return;
 			}
 			const socket = new WebSocket(appendWebSocketTicket(this.url, ticket));
-		socket.binaryType = "arraybuffer";
-		this.socket = socket;
+			socket.binaryType = "arraybuffer";
+			this.socket = socket;
 
-		socket.onopen = () => {
-			// The gateway REQUIRES the join frame first, and it must carry
-			// `type: "join"` (the handshake in `realtime_ws.rs` gates on it, like
-			// every other control frame). Anything else closes the socket (1003).
-			this.sendText({
-				type: "join",
-				room_id: this.options.roomId,
-				kind: this.options.kind,
-				client_id: this.clientId,
-				...(this.options.kind === "application" && this.options.appId
-					? { app_id: this.options.appId }
-					: {}),
-			});
-			this.startKeepalive();
-			handlers?.onOpen?.();
-		};
-		socket.onmessage = (event) => this.dispatch(event);
-		socket.onclose = (event) => {
-			this.clearKeepalive();
-			this.clearPresenceHeartbeat();
-			if (this.socket === socket) {
-				this.socket = null;
-			}
-			handlers?.onClose?.(event);
-		};
-		socket.onerror = (event) => handlers?.onError?.(event);
+			socket.onopen = () => {
+				// The gateway REQUIRES the join frame first, and it must carry
+				// `type: "join"` (the handshake in `realtime_ws.rs` gates on it, like
+				// every other control frame). Anything else closes the socket (1003).
+				this.sendText({
+					type: "join",
+					room_id: this.options.roomId,
+					kind: this.options.kind,
+					client_id: this.clientId,
+					...(this.options.kind === "application" &&
+						this.options.appId && { app_id: this.options.appId }),
+				});
+				this.startKeepalive();
+				handlers?.onOpen?.();
+			};
+			socket.onmessage = (event) => this.dispatch(event);
+			socket.onclose = (event) => {
+				this.clearKeepalive();
+				this.clearPresenceHeartbeat();
+				if (this.socket === socket) {
+					this.socket = null;
+				}
+				handlers?.onClose?.(event);
+			};
+			socket.onerror = (event) => handlers?.onError?.(event);
 		} catch {
-			if (typeof Event === "function") {
+			if (realtimeFunction.safeParse(globalThis.Event).success) {
 				handlers?.onError?.(new Event("error"));
 			}
 		} finally {
@@ -291,7 +323,7 @@ export class RealtimeConnection {
 
 	/** Publish this client's awareness payload (cursor/typing/name/etc.). The
 	 * server stamps the member id before broadcasting. */
-	publishPresence(data: unknown): void {
+	publishPresence(data: RealtimeWriteInput): void {
 		this.hasPresence = true;
 		this.lastPresence = data;
 		this.sendText({ type: "presence", data });
@@ -310,8 +342,11 @@ export class RealtimeConnection {
 	}
 
 	/** Publish a named event to an application room. */
-	sendEvent(name: string, data: unknown): void {
-		this.sendText(encodeRealtimeEvent({ name, data }));
+	sendEvent(name: string, data: RealtimeWriteInput): void {
+		// `sendText` stringifies once; pass the frame object (the same shape
+		// `encodeRealtimeEvent` produces) so Core receives a JSON object, not a
+		// JSON string literal it would silently ignore.
+		this.sendText({ type: "event", event: name, data });
 	}
 
 	/** Liveness ping; the server replies with a `pong` (ignored by the dispatcher). */
@@ -357,7 +392,7 @@ export class RealtimeConnection {
 
 	private dispatch(event: MessageEvent): void {
 		const handlers = this.options.handlers;
-		if (typeof event.data === "string") {
+		if (realtimeString.safeParse(event.data).success) {
 			this.dispatchText(event.data, handlers);
 			return;
 		}
@@ -373,17 +408,17 @@ export class RealtimeConnection {
 		raw: string,
 		handlers: RealtimeHandlers | undefined
 	): void {
-		let value: unknown;
+		let parsed: ReturnType<typeof realtimeFrame.safeParse>;
 		try {
-			value = JSON.parse(raw);
+			parsed = realtimeFrame.safeParse(JSON.parse(raw));
 		} catch {
 			// Malformed frame; the next one self-heals the feed.
 			return;
 		}
-		if (typeof value !== "object" || value === null) {
+		if (!parsed.success) {
 			return;
 		}
-		const frame = value as Record<string, unknown>;
+		const frame = parsed.data;
 		if (frame.type === "ping") {
 			this.sendText({ type: "pong" });
 			return;
@@ -393,8 +428,9 @@ export class RealtimeConnection {
 				access: frame.access === "write" ? "write" : "read",
 				maySeed: frame.may_seed === true,
 				clientId: String(frame.client_id ?? this.clientId),
-				documentEpoch:
-					typeof frame.document_epoch === "number" ? frame.document_epoch : 0,
+				documentEpoch: realtimeNumber.safeParse(frame.document_epoch).success
+					? realtimeNumber.parse(frame.document_epoch)
+					: 0,
 				memberId: String(frame.member_id ?? ""),
 				presence: Array.isArray(frame.presence) ? frame.presence : [],
 				roomId: String(frame.room_id ?? ""),
@@ -404,28 +440,32 @@ export class RealtimeConnection {
 		if (frame.type === "resync_required") {
 			handlers?.onResyncRequired?.({
 				dropped:
-					typeof frame.dropped === "number" &&
+					realtimeNumber.safeParse(frame.dropped).success &&
 					Number.isSafeInteger(frame.dropped)
-						? frame.dropped
+						? realtimeNumber.parse(frame.dropped)
 						: undefined,
-				reason:
-					typeof frame.reason === "string" ? frame.reason : "room-state-gap",
+				reason: realtimeString.safeParse(frame.reason).success
+					? realtimeString.parse(frame.reason)
+					: "room-state-gap",
 			});
 			return;
 		}
 		if (frame.type === "document_reset") {
 			if (
-				typeof frame.epoch === "number" &&
+				realtimeNumber.safeParse(frame.epoch).success &&
 				Number.isSafeInteger(frame.epoch)
 			) {
-				handlers?.onDocumentReset?.(frame.epoch);
+				handlers?.onDocumentReset?.(realtimeNumber.parse(frame.epoch));
 			}
 			return;
 		}
 		if (frame.channel === "events") {
 			handlers?.onEvent?.(frame.data);
-			if (typeof frame.event === "string") {
-				handlers?.onNamedEvent?.({ name: frame.event, data: frame.data });
+			if (realtimeString.safeParse(frame.event).success) {
+				handlers?.onNamedEvent?.({
+					name: realtimeString.parse(frame.event),
+					data: frame.data,
+				});
 			}
 			return;
 		}
@@ -435,7 +475,7 @@ export class RealtimeConnection {
 		// `pong` and any unknown control frame are ignored (forward-compatible).
 	}
 
-	private sendText(payload: unknown): void {
+	private sendText(payload: RealtimeWriteInput): void {
 		if (this.socket?.readyState === WEBSOCKET_OPEN) {
 			this.socket.send(JSON.stringify(payload));
 		}
@@ -454,8 +494,8 @@ const WEBSOCKET_OPEN = 1;
 /** Create an opaque per-client correlation id without making it an auth input. */
 export function createRealtimeClientId(): string {
 	if (
-		typeof globalThis.crypto?.getRandomValues === "function" ||
-		typeof globalThis.crypto?.randomUUID === "function"
+		realtimeFunction.safeParse(globalThis.crypto?.getRandomValues).success ||
+		realtimeFunction.safeParse(globalThis.crypto?.randomUUID).success
 	) {
 		try {
 			return createResourceId();

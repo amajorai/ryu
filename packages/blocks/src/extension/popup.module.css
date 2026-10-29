@@ -1,0 +1,8 @@
+.accountAvatar {
+	border-radius: calc(var(--radius) - 2px);
+}
+.accountAvatarFallback {
+	font-size: var(--text-compact);
+	line-height: var(--text-compact--line-height);
+	border-radius: calc(var(--radius) - 2px);
+}

@@ -1,9 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
-
-const PROOF_DIR = "/Users/jiawei/Documents/Code/ryu-closed/docs/proof";
-const PROOF_SCREENSHOT = `${PROOF_DIR}/agent-lifecycle-safety-proof.png`;
-const PROOF_LOG = `${PROOF_DIR}/agent-lifecycle-safety-proof.log.json`;
 
 test("new agents expose an enforced trial and safety boundary", async ({
 	page,
@@ -45,10 +41,12 @@ test("new agents expose an enforced trial and safety boundary", async ({
 	);
 	await expect(panel).toContainText("Effective safety: Read-only");
 
-	await mkdir(PROOF_DIR, { recursive: true });
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("agent-lifecycle-safety-proof.png"),
+		fullPage: true,
+	});
 	await writeFile(
-		PROOF_LOG,
+		test.info().outputPath("agent-lifecycle-safety-proof.log.json"),
 		JSON.stringify({ consoleErrors, failedRequests }, null, 2)
 	);
 

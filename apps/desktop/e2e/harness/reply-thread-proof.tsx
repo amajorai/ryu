@@ -42,7 +42,7 @@ const MESSAGES = [
 		],
 		role: "assistant",
 	},
-] as unknown as UIMessage[];
+] satisfies UIMessage[];
 
 function AssistantAvatar() {
 	return (
@@ -72,7 +72,7 @@ function Story() {
 		>
 			<div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
 				<header className="space-y-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Focused reply threads
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">

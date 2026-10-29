@@ -1,0 +1,293 @@
+{
+  "description": "Ryu's generated tool catalog tier (Treg parity C1). Written by tools/tool-catalog-generate.ts from the vendor-published OpenAPI specs listed in tool-catalog-generated-sources-v1.json, with Ryu's own OpenAPI parse rules (ryu-openapi-import). Do not edit by hand: change a source or a judgement and regenerate. Every entry is tier generated, source ryu and unverified; docsUrl and spec cite the exact spec bytes it came from (SHA-256), operation names the vendor method and path, and its one probe checks the operation is still in the spec. Entries carry no price, so none routes a paid call until a curator reviews a price. Curated rows (tool-catalog-v1.json) win on a shared endpoint id or operation. Read by ryu_gw_contracts::tool_catalog and @ryuhq/protocol/tool-catalog; the control plane seeds its catalog store from it.",
+  "entries": [
+    {
+      "endpoint": "exa.answer",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Generate an answer from search results",
+      "docsUrl": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/answer"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+          "expect": ["/answer", "answer"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "de1e8f95c9a3c07e807ee0de4d8880816919a04e7e6a8518e319b6dcbaf64d25",
+        "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml"
+      }
+    },
+    {
+      "endpoint": "exa.findsimilar",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Find similar links",
+      "docsUrl": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/findSimilar"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+          "expect": ["/findSimilar", "findSimilar"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "de1e8f95c9a3c07e807ee0de4d8880816919a04e7e6a8518e319b6dcbaf64d25",
+        "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml"
+      }
+    },
+    {
+      "endpoint": "exa.research_tasks_create",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Create a research task with instructions and an output schema",
+      "docsUrl": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/research/v0/tasks"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+          "expect": ["/research/v0/tasks", "research-tasks-create"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "de1e8f95c9a3c07e807ee0de4d8880816919a04e7e6a8518e319b6dcbaf64d25",
+        "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml"
+      }
+    },
+    {
+      "endpoint": "exa.research_tasks_get",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Get a research task by id",
+      "docsUrl": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/research/v0/tasks/{id}"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+          "expect": [
+            "/research/v0/tasks/{id}",
+            "ResearchControllerV0_getResearchTask"
+          ]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "de1e8f95c9a3c07e807ee0de4d8880816919a04e7e6a8518e319b6dcbaf64d25",
+        "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml"
+      }
+    },
+    {
+      "endpoint": "exa.research_tasks_list",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "List research tasks",
+      "docsUrl": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/research/v0/tasks"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+          "expect": ["/research/v0/tasks", "research-tasks-list"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "de1e8f95c9a3c07e807ee0de4d8880816919a04e7e6a8518e319b6dcbaf64d25",
+        "url": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml"
+      }
+    },
+    {
+      "endpoint": "tavily.crawl",
+      "provider": "tavily",
+      "source": "ryu",
+      "tier": "generated",
+      "platform": "web",
+      "capability": "web.crawl",
+      "title": "Initiate a web crawl from a base URL",
+      "docsUrl": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/crawl"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+          "expect": ["/crawl", "crawl"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "4958dc0b567ec857892acd088d9a664bb2b35ea501dccc656401c0049986a03a",
+        "url": "https://docs.tavily.com/documentation/api-reference/openapi.json"
+      }
+    },
+    {
+      "endpoint": "tavily.createresearch",
+      "provider": "tavily",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Initiate a research task",
+      "docsUrl": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/research"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+          "expect": ["/research", "createResearch"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "4958dc0b567ec857892acd088d9a664bb2b35ea501dccc656401c0049986a03a",
+        "url": "https://docs.tavily.com/documentation/api-reference/openapi.json"
+      }
+    },
+    {
+      "endpoint": "tavily.extract",
+      "provider": "tavily",
+      "source": "ryu",
+      "tier": "generated",
+      "platform": "web",
+      "capability": "web.extract",
+      "title": "Retrieve raw web content from specified URLs",
+      "docsUrl": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/extract"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+          "expect": ["/extract", "extract"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "4958dc0b567ec857892acd088d9a664bb2b35ea501dccc656401c0049986a03a",
+        "url": "https://docs.tavily.com/documentation/api-reference/openapi.json"
+      }
+    },
+    {
+      "endpoint": "tavily.getresearch",
+      "provider": "tavily",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Get research task status and results",
+      "docsUrl": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "GET",
+        "path": "/research/{request_id}"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+          "expect": ["/research/{request_id}", "getResearch"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "4958dc0b567ec857892acd088d9a664bb2b35ea501dccc656401c0049986a03a",
+        "url": "https://docs.tavily.com/documentation/api-reference/openapi.json"
+      }
+    },
+    {
+      "endpoint": "tavily.map",
+      "provider": "tavily",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Initiate a web mapping from a base URL",
+      "docsUrl": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "operation": {
+        "method": "POST",
+        "path": "/map"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+          "expect": ["/map", "map"]
+        }
+      ],
+      "spec": {
+        "checkedOn": "2026-10-21",
+        "sha256": "4958dc0b567ec857892acd088d9a664bb2b35ea501dccc656401c0049986a03a",
+        "url": "https://docs.tavily.com/documentation/api-reference/openapi.json"
+      }
+    }
+  ],
+  "version": 1
+}

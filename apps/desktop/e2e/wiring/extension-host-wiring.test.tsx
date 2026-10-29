@@ -29,15 +29,22 @@
 import "./setup-dom.ts";
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { ExtensionHost, IFRAME_SANDBOX } from "@ryu/app-host/ExtensionHost";
-import type { HostServices } from "@ryu/app-host/rpc";
+import {
+	APP_DOWNLOAD_GRANT,
+	ExtensionHost,
+	IFRAME_SANDBOX,
+} from "@ryu/app-host/ExtensionHost";
+import type { Capability, HostServices } from "@ryu/app-host/rpc";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 // React's `act` needs this flag set so effects flush inside `await act(...)`.
-(
-	globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
+// ReactDOM reads this optional host flag; the fixture installs it on the full
+// existing native global object at the original mutation point.
+const reactActEnvironment: typeof globalThis & {
+	IS_REACT_ACT_ENVIRONMENT?: boolean;
+} = globalThis;
+reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
 const NONCE = "wiring-nonce-abc";
 
@@ -46,14 +53,16 @@ const NONCE = "wiring-nonce-abc";
 function stubServices(): HostServices {
 	return {
 		listAgents: () => Promise.resolve([]),
-		registerRoute: () => Promise.resolve({}),
+		registerRoute: (claim) => Promise.resolve({ path: claim.path }),
 	};
 }
 
 let currentRoot: Root | null = null;
 let currentContainer: HTMLElement | null = null;
 
-async function mountHost(): Promise<HTMLIFrameElement> {
+async function mountHost(
+	approvedGrants: string[] = []
+): Promise<HTMLIFrameElement> {
 	const container = document.createElement("div");
 	document.body.appendChild(container);
 	currentContainer = container;
@@ -64,7 +73,8 @@ async function mountHost(): Promise<HTMLIFrameElement> {
 			createElement(ExtensionHost, {
 				srcdoc: "<!doctype html><body>wiring</body>",
 				nonce: NONCE,
-				granted: new Set(),
+				granted: new Set<Capability>(),
+				allowDownloads: approvedGrants.includes(APP_DOWNLOAD_GRANT),
 				services: stubServices(),
 				title: "Wiring",
 			})
@@ -97,6 +107,14 @@ describe("ExtensionHost DOM wiring (NOT a security cert — no CSP, no real orig
 		expect(sandbox).not.toContain("allow-same-origin");
 	});
 
+	it("adds allow-downloads only when the host approves the export grant", async () => {
+		const iframe = await mountHost([APP_DOWNLOAD_GRANT]);
+		expect(iframe.getAttribute("sandbox")).toBe(
+			`${IFRAME_SANDBOX} allow-downloads`
+		);
+		expect(iframe.getAttribute("sandbox")).not.toContain("allow-same-origin");
+	});
+
 	it("drives the frame via srcDoc and NEVER sets src", async () => {
 		const iframe = await mountHost();
 		expect(iframe.hasAttribute("srcdoc")).toBe(true);
@@ -112,14 +130,16 @@ describe("ExtensionHost DOM wiring (NOT a security cert — no CSP, no real orig
 		}
 
 		// Spy on the frame's postMessage: a transferred port shows up here.
-		const posts: Array<{ data: unknown; ports: readonly MessagePort[] }> = [];
+		const posts: Array<{ data: unknown; ports: readonly Transferable[] }> = [];
 		const originalPostMessage = contentWindow.postMessage.bind(contentWindow);
-		(
-			contentWindow as unknown as { postMessage: (...a: unknown[]) => void }
-		).postMessage = (data: unknown, _target?: unknown, transfer?: unknown) => {
+		contentWindow.postMessage = (
+			data: Parameters<typeof contentWindow.postMessage>[0],
+			_target?: string | WindowPostMessageOptions,
+			transfer?: Transferable[]
+		) => {
 			posts.push({
 				data,
-				ports: (transfer as MessagePort[] | undefined) ?? [],
+				ports: transfer ?? [],
 			});
 		};
 
@@ -131,7 +151,7 @@ describe("ExtensionHost DOM wiring (NOT a security cert — no CSP, no real orig
 			window.dispatchEvent(
 				new MessageEvent("message", {
 					data: ready,
-					source: window as unknown as Window,
+					source: window,
 				})
 			);
 		});
@@ -149,15 +169,27 @@ describe("ExtensionHost DOM wiring (NOT a security cert — no CSP, no real orig
 		expect(posts.length).toBe(0);
 
 		// (3) LEGIT ready from THIS frame with the right nonce: the port is
-		// transferred exactly once, tagged with the nonce.
+		// transferred exactly once, tagged with the nonce, after its privacy update.
 		await act(async () => {
 			window.dispatchEvent(
 				new MessageEvent("message", { data: ready, source: contentWindow })
 			);
 		});
-		expect(posts.length).toBe(1);
-		expect(posts[0]?.ports.length).toBe(1);
-		expect(posts[0]?.data).toMatchObject({
+		expect(posts.length).toBe(2);
+		expect(posts[0]?.data).toEqual({
+			kind: "ryu-plugin-privacy",
+			nonce: NONCE,
+			streamingActive: true,
+		});
+		expect(posts[0]?.ports).toHaveLength(0);
+		expect(posts[1]?.ports.length).toBe(1);
+		// happy-dom's global MessagePort constructor differs from Bun's channel
+		// port constructor; verify the transferred transport's usable methods.
+		expect(posts[1]?.ports[0]).toMatchObject({
+			postMessage: expect.any(Function),
+			close: expect.any(Function),
+		});
+		expect(posts[1]?.data).toMatchObject({
 			kind: "ryu-plugin-host-port",
 			nonce: NONCE,
 		});
@@ -168,11 +200,9 @@ describe("ExtensionHost DOM wiring (NOT a security cert — no CSP, no real orig
 				new MessageEvent("message", { data: ready, source: contentWindow })
 			);
 		});
-		expect(posts.length).toBe(1);
+		expect(posts.length).toBe(2);
 
 		// restore (defensive; afterEach unmounts anyway)
-		(
-			contentWindow as unknown as { postMessage: (...a: unknown[]) => void }
-		).postMessage = originalPostMessage as (...a: unknown[]) => void;
+		contentWindow.postMessage = originalPostMessage;
 	});
 });

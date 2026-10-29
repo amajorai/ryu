@@ -1,10 +1,10 @@
-// Future User Nav control for the desktop-owned Island companion.
+// User Nav control for the desktop-owned Island companion.
 //
-// NavUser keeps the import/render commented while Island is disabled. Keeping
-// the stateful item as a normal component means the later enablement is one
-// small UI toggle, not a new visibility implementation.
+// NavUser renders this only when the `ISLAND_ENABLED` release gate
+// (`@/src/lib/island-availability.ts`) is on, so enabling Island is one flag
+// flip, not a new visibility implementation.
 
-import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu";
+import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu.tsx";
 import { Laptop } from "lucide-react";
 import { useEffect, useState } from "react";
 import {

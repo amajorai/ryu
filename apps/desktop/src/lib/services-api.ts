@@ -1,12 +1,28 @@
+import { agentsResponseSchema } from "@ryuhq/core-client/agents.ts";
+import {
+	type CatalogItem as NativeCatalogItem,
+	nativeCatalogResponseSchema,
+} from "@ryuhq/core-client/catalog.ts";
+import {
+	type DependencyInstallResults,
+	dependenciesCheckResponseSchema,
+	dependenciesInstallResponseSchema,
+	sandboxStatusResponseSchema,
+	setupInstallResponseSchema,
+	setupUninstallResponseSchema,
+	sidecarActionResponseSchema,
+} from "@ryuhq/core-client/services-wire.ts";
+import { sidecarStatusResponseSchema } from "@ryuhq/core-client/system.ts";
+
 // apps/desktop/src/lib/services-api.ts
 
 export interface CatalogItem {
-	category: "agent" | "tool" | "provider" | "voice" | "media" | "embedding";
+	category: NativeCatalogItem["category"];
 	deprecated: boolean;
 	description: string;
 	displayName: string;
 	installedVersion: string | null;
-	installState: "not_installed" | "installing" | "installed" | "failed";
+	installState: NativeCatalogItem["install_state"];
 	latestVersion: string | null;
 	name: string;
 	/** OS families this entry runs on (e.g. ["macos"]). Empty = every platform. */
@@ -18,6 +34,12 @@ export interface CatalogItem {
 	 * install/enable controls regardless of the client's own platform.
 	 */
 	supported: boolean;
+	/**
+	 * Core's plain-language reason this node can't run the entry (it knows the
+	 * node's OS + arch + placed binaries); null when supported or when an older
+	 * Core omits it, in which case the UI falls back to a `platforms` message.
+	 */
+	unsupportedReason: string | null;
 	/**
 	 * Whether reinstalling would actually deliver a newer build — decided by the
 	 * NODE, never re-derived here. `installedVersion !== latestVersion` is not a
@@ -52,10 +74,9 @@ export async function fetchExternalAgents(
 	if (!resp.ok) {
 		throw new Error(`agents fetch failed: ${resp.status}`);
 	}
-	const json = await resp.json();
-	// biome-ignore lint/suspicious/noExplicitAny: external JSON shape
+	const json = agentsResponseSchema.parse(await resp.json());
 	return (json.agents ?? []).map(
-		(a: any): ExternalAgent => ({
+		(a): ExternalAgent => ({
 			id: a.id,
 			name: a.name,
 			description: a.description ?? null,
@@ -104,6 +125,10 @@ async function postAction(
 	token: string | null,
 	path: string,
 	label: string,
+	responseSchema:
+		| typeof sidecarActionResponseSchema
+		| typeof setupInstallResponseSchema
+		| typeof setupUninstallResponseSchema,
 	signal?: AbortSignal,
 	userJwt: string | null = null
 ): Promise<void> {
@@ -112,12 +137,13 @@ async function postAction(
 		headers: makeHeaders(token, userJwt),
 		signal,
 	});
-	let body: { success?: boolean; error?: string } | null = null;
+	let rawBody: Awaited<ReturnType<Response["json"]>>;
 	try {
-		body = await resp.json();
+		rawBody = await resp.json();
 	} catch {
-		body = null;
+		rawBody = null;
 	}
+	const body = rawBody === null ? null : responseSchema.parse(rawBody);
 	if (!resp.ok) {
 		throw new Error(body?.error ?? `${label} failed: ${resp.status}`);
 	}
@@ -146,10 +172,13 @@ export async function fetchCatalog(
 	if (!resp.ok) {
 		throw new Error(`catalog fetch failed: ${resp.status}`);
 	}
-	const json = await resp.json();
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	return json.sidecars.map(
-		(s: any): CatalogItem => ({
+	const json = nativeCatalogResponseSchema.parse(await resp.json());
+	const sidecars = json.sidecars;
+	if (!sidecars) {
+		throw new Error("catalog response missing sidecars");
+	}
+	return sidecars.map(
+		(s): CatalogItem => ({
 			name: s.name,
 			displayName: s.display_name,
 			description: s.description,
@@ -160,9 +189,13 @@ export async function fetchCatalog(
 			installedVersion: s.installed_version ?? null,
 			installState: s.install_state,
 			platforms: s.platforms ?? [],
-			// Default to supported when an older Core omits the field, so existing
-			// engines are never spuriously disabled by a version skew.
+			// Default to supported ONLY when an older Core omits the field, so
+			// existing engines are never spuriously disabled by a version skew. A
+			// current Core always sends it and gates OS/arch-specific engines itself
+			// (and refuses to start an unsupported one), so this default never
+			// re-enables an engine that Core reports as unsupported.
 			supported: s.supported ?? true,
+			unsupportedReason: s.unsupported_reason ?? null,
 			// Absent on an older Core: fall back to the version comparison it
 			// expected clients to make. Newer Cores answer authoritatively.
 			updateAvailable:
@@ -187,10 +220,9 @@ export async function fetchSidecarStatus(
 	if (!resp.ok) {
 		throw new Error(`sidecar status failed: ${resp.status}`);
 	}
-	const json = await resp.json();
+	const json = sidecarStatusResponseSchema.parse(await resp.json());
 	// Returns { sidecars: [{ name, running }] } — normalize to a map
 	const map: Record<string, boolean> = {};
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	for (const s of json.sidecars ?? []) {
 		map[s.name] = s.running;
 	}
@@ -208,9 +240,9 @@ export async function fetchDependencies(
 	if (!resp.ok) {
 		throw new Error(`deps check failed: ${resp.status}`);
 	}
-	const json = await resp.json();
-	// Backend returns { dependencies: { git: bool, rust: bool, ... }, all_installed: bool }
-	const deps = json.dependencies as Record<string, boolean> | undefined;
+	const json = dependenciesCheckResponseSchema.parse(await resp.json());
+	// Backend returns complete dependency probes or its failure envelope.
+	const deps = json.dependencies;
 	if (!deps) {
 		return [];
 	}
@@ -241,6 +273,7 @@ export async function installSidecar(
 		token,
 		`/api/setup/${name}/install${query}`,
 		force ? "update" : "install",
+		setupInstallResponseSchema,
 		signal,
 		userJwt
 	);
@@ -257,6 +290,7 @@ export async function uninstallSidecar(
 		token,
 		`/api/setup/${name}/uninstall`,
 		"uninstall",
+		setupUninstallResponseSchema,
 		undefined,
 		userJwt
 	);
@@ -273,6 +307,7 @@ export async function startSidecar(
 		token,
 		`/api/sidecar/${name}/start`,
 		"start",
+		sidecarActionResponseSchema,
 		undefined,
 		userJwt
 	);
@@ -289,6 +324,7 @@ export async function stopSidecar(
 		token,
 		`/api/sidecar/${name}/stop`,
 		"stop",
+		sidecarActionResponseSchema,
 		undefined,
 		userJwt
 	);
@@ -305,6 +341,7 @@ export async function restartSidecar(
 		token,
 		`/api/sidecar/${name}/restart`,
 		"restart",
+		sidecarActionResponseSchema,
 		undefined,
 		userJwt
 	);
@@ -320,6 +357,7 @@ export async function startAll(
 		token,
 		"/api/sidecar/start-all",
 		"start all",
+		sidecarActionResponseSchema,
 		undefined,
 		userJwt
 	);
@@ -335,6 +373,7 @@ export async function stopAll(
 		token,
 		"/api/sidecar/stop-all",
 		"stop all",
+		sidecarActionResponseSchema,
 		undefined,
 		userJwt
 	);
@@ -372,14 +411,14 @@ export async function fetchSandboxStatus(
 			docker: { available: false, reason: null },
 		};
 	}
-	const json = await resp.json();
-	const dockerRaw = json.docker ?? {};
+	const json = sandboxStatusResponseSchema.parse(await resp.json());
+	const dockerRaw = json.docker;
 	return {
 		enabled: Boolean(json.enabled),
 		available: Boolean(json.available),
 		docker: {
-			available: Boolean(dockerRaw.available),
-			reason: dockerRaw.reason ?? null,
+			available: Boolean(dockerRaw?.available),
+			reason: dockerRaw?.reason ?? null,
 		},
 	};
 }
@@ -416,7 +455,7 @@ export async function installMissingDeps(
 	nodeUrl: string,
 	token: string | null,
 	userJwt: string | null = null
-): Promise<Record<string, "installed" | "already_installed" | "failed">> {
+): Promise<DependencyInstallResults> {
 	const resp = await fetch(`${nodeUrl}/api/dependencies/install`, {
 		method: "POST",
 		headers: makeHeaders(token, userJwt),
@@ -424,9 +463,6 @@ export async function installMissingDeps(
 	if (!resp.ok) {
 		throw new Error(`deps install failed: ${resp.status}`);
 	}
-	const json = await resp.json();
-	return (json.results ?? {}) as Record<
-		string,
-		"installed" | "already_installed" | "failed"
-	>;
+	const json = dependenciesInstallResponseSchema.parse(await resp.json());
+	return json.results;
 }

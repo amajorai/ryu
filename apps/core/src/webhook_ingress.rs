@@ -31,7 +31,17 @@ pub async fn configured_kind(prefs: &PreferencesStore) -> IngressKind {
 pub async fn from_prefs(prefs: &PreferencesStore, server_url: &str) -> Ingress {
     let backend = prefs.get(INGRESS_BACKEND_PREF).await.ok().flatten();
     let url = prefs.get(INGRESS_URL_PREF).await.ok().flatten();
-    ryu_webhook_ingress::from_prefs(backend.as_deref(), url.as_deref(), server_url)
+    match ryu_webhook_ingress::from_prefs(backend.as_deref(), url.as_deref(), server_url) {
+        Ingress::Cloudflared(source) => {
+            let source =
+                source.with_env_scrubber(crate::sidecar::cloudflared::scrub_cloudflared_env);
+            match crate::sidecar::cloudflared::resolve_binary() {
+                Ok(binary) => Ingress::Cloudflared(source.with_binary(binary)),
+                Err(_) => Ingress::Cloudflared(source),
+            }
+        }
+        ingress => ingress,
+    }
 }
 
 /// The effective **own-relay** public base, mirroring `OwnRelaySource::new`'s
@@ -320,6 +330,46 @@ pub async fn reconcile_composio_subscription(
     Ok(())
 }
 
+/// Re-point the Composio project webhook subscription after the managed relay
+/// registered this node again under a new public URL (its relay token was
+/// rotated). Composio would otherwise keep posting to the revoked URL, which the
+/// relay answers with `404`.
+///
+/// Only a destination Core manages is touched: the legacy (non-Connect) mode
+/// with a Composio key and at least one trigger subscription, which are the
+/// conditions under which [`reconcile_composio_subscription`] created it. The
+/// reconcile patches the subscription only when its URL drifted. Best-effort: a
+/// failure is logged, and the next trigger subscribe or workflow save
+/// reconciles again.
+pub async fn repoint_composio_subscription_after_relay_change() {
+    if ryu_composio::service::is_configured() || !crate::composio_auth::is_configured() {
+        return;
+    }
+    let Some(store) = crate::composio_triggers::global() else {
+        return;
+    };
+    match store.list().await {
+        Ok(subscriptions) if !subscriptions.is_empty() => {}
+        Ok(_) => return,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "webhook-ingress: could not list Composio subscriptions after relay token rotation"
+            );
+            return;
+        }
+    }
+    match reconcile_composio_subscription(store).await {
+        Ok(()) => tracing::info!(
+            "webhook-ingress: Composio webhook subscription follows the rotated relay URL"
+        ),
+        Err(error) => tracing::warn!(
+            error = %error,
+            "webhook-ingress: could not re-point the Composio webhook subscription after relay token rotation"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! The real-wiring canary for the extraction: exercises the crate's unified
@@ -336,8 +386,21 @@ mod tests {
 
     /// Sign with the same HMAC-SHA256 hex the verifier uses, so a test signature
     /// round-trips against `verify_workflow_webhook_signature`.
-    fn sign(secret: &str, body: &[u8]) -> String {
-        crate::composio_triggers::hmac_sha256_hex(secret.as_bytes(), body)
+    fn sign(
+        secret: &str,
+        workflow_id: &str,
+        body: &[u8],
+        timestamp: &str,
+        delivery_id: &str,
+    ) -> String {
+        let mut signed =
+            format!("ryu-workflow-webhook-v3\n{workflow_id}\n{timestamp}\n{delivery_id}\n")
+                .into_bytes();
+        signed.extend_from_slice(body);
+        format!(
+            "v3,{}",
+            crate::composio_triggers::hmac_sha256_hex(secret.as_bytes(), &signed)
+        )
     }
 
     #[tokio::test]
@@ -358,23 +421,26 @@ mod tests {
             triggers: vec![WorkflowTrigger::Webhook {
                 secret: Some(secret.to_owned()),
             }],
+            max_concurrency: None,
             created_at: None,
             updated_at: None,
         };
         crate::workflow::store::save_workflow(&workflow).expect("save workflow");
 
         let body = br#"{"event":"unify","value":42}"#;
-        let sig = sign(secret, body);
+        let timestamp = crate::pairing::now_secs().to_string();
+        let delivery_id = format!("delivery-{}", uuid::Uuid::new_v4().simple());
+        let sig = sign(secret, &id, body, &timestamp, &delivery_id);
+        let headers = ryu_webhook_ingress::InboundWebhookHeaders {
+            signature: Some(&sig),
+            webhook_id: Some(&delivery_id),
+            webhook_timestamp: Some(&timestamp),
+        };
         let path = ryu_webhook_ingress::workflow_webhook_path(&id);
 
         // Deliver through the SAME path router the relay dispatches to, against the
         // real Core host.
-        let outcome = ryu_webhook_ingress::deliver_inbound(
-            &path,
-            body,
-            ryu_webhook_ingress::InboundWebhookHeaders::signature(Some(&sig)),
-        )
-        .await;
+        let outcome = ryu_webhook_ingress::deliver_inbound(&path, body, headers).await;
         match &outcome {
             ryu_webhook_ingress::InboundOutcome::Delivered { detail } => {
                 assert!(
@@ -390,15 +456,180 @@ mod tests {
         );
 
         // A tampered body (signature no longer matches) is rejected fail-closed.
-        let rejected = ryu_webhook_ingress::deliver_inbound(
-            &path,
-            br#"{"event":"tampered"}"#,
-            ryu_webhook_ingress::InboundWebhookHeaders::signature(Some(&sig)),
-        )
-        .await;
+        let rejected =
+            ryu_webhook_ingress::deliver_inbound(&path, br#"{"event":"tampered"}"#, headers).await;
         assert!(matches!(
             rejected,
             ryu_webhook_ingress::InboundOutcome::Rejected(_)
         ));
+    }
+
+    /// Two workflows that intentionally share one signing secret: a fresh, valid
+    /// delivery signed for A must not start B, on either the relay path router or
+    /// the direct per-workflow entry point, and must still run A afterwards (the
+    /// refusal at B reserves nothing).
+    #[tokio::test]
+    async fn a_signature_for_one_workflow_never_fires_another_with_the_same_secret() {
+        use ryu_webhook_ingress::WorkflowWebhookOutcome;
+
+        ryu_webhook_ingress::set_global_host(Arc::new(
+            crate::webhook_ingress_host::CoreWebhookIngressHost,
+        ));
+        let shared_secret = "wh-secret-shared-between-workflows";
+        let workflow = |id: &str| Workflow {
+            id: id.to_owned(),
+            name: format!("shared secret {id}"),
+            description: None,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            triggers: vec![WorkflowTrigger::Webhook {
+                secret: Some(shared_secret.to_owned()),
+            }],
+            created_at: None,
+            updated_at: None,
+            max_concurrency: None,
+        };
+        let suffix = uuid::Uuid::new_v4().simple();
+        let id_a = format!("wf-shared-a-{suffix}");
+        let id_b = format!("wf-shared-b-{suffix}");
+        crate::workflow::store::save_workflow(&workflow(&id_a)).expect("save A");
+        crate::workflow::store::save_workflow(&workflow(&id_b)).expect("save B");
+
+        let body = br#"{"event":"for-a-only"}"#;
+        let timestamp = crate::pairing::now_secs().to_string();
+        let delivery_id = format!("delivery-{suffix}");
+        let sig = sign(shared_secret, &id_a, body, &timestamp, &delivery_id);
+        let headers = ryu_webhook_ingress::InboundWebhookHeaders {
+            signature: Some(&sig),
+            webhook_id: Some(&delivery_id),
+            webhook_timestamp: Some(&timestamp),
+        };
+
+        let path_b = ryu_webhook_ingress::workflow_webhook_path(&id_b);
+        let relayed = ryu_webhook_ingress::deliver_inbound(&path_b, body, headers).await;
+        assert!(
+            matches!(relayed, ryu_webhook_ingress::InboundOutcome::Rejected(_)),
+            "A's signature must not be accepted at B over the relay: {relayed:?}"
+        );
+        let direct = ryu_webhook_ingress::deliver_workflow_webhook(&id_b, body, headers).await;
+        assert!(
+            matches!(direct, WorkflowWebhookOutcome::BadSignature),
+            "A's signature must not be accepted at B directly: {direct:?}"
+        );
+        assert!(ryu_webhook_ingress::last_delivery(&path_b).is_none());
+
+        assert!(matches!(
+            ryu_webhook_ingress::deliver_workflow_webhook(&id_a, body, headers).await,
+            WorkflowWebhookOutcome::Ran(_)
+        ));
+    }
+
+    /// A webhook run that fails after it started keeps its delivery reservation:
+    /// the sender gets the run id at once, and a redelivery of the same id is a
+    /// duplicate even after the failure, so side effects of nodes that already
+    /// ran are never repeated.
+    #[tokio::test]
+    async fn failed_webhook_run_keeps_its_delivery_reservation() {
+        use crate::workflow::store::RunStatus;
+        use crate::workflow::{NodeKind, WorkflowEdge, WorkflowNode};
+        use ryu_webhook_ingress::WorkflowWebhookOutcome;
+
+        ryu_webhook_ingress::set_global_host(Arc::new(
+            crate::webhook_ingress_host::CoreWebhookIngressHost,
+        ));
+        let secret = "wh-secret-failing";
+        let id = format!("wf-failing-{}", uuid::Uuid::new_v4().simple());
+        let node = |id: &str, kind: NodeKind| WorkflowNode {
+            id: id.to_owned(),
+            kind,
+            retry: None,
+            timeout_ms: None,
+            repeat: None,
+        };
+        let edge = |from: &str, to: &str| WorkflowEdge {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            branch: None,
+        };
+        let workflow = Workflow {
+            id: id.clone(),
+            name: "failing webhook test".to_owned(),
+            description: None,
+            nodes: vec![
+                node("in", NodeKind::Input { key: None }),
+                // Always errors: no MCP registry in tests, and an unknown tool.
+                node(
+                    "tool",
+                    NodeKind::Tool {
+                        name: "nope.nope".to_owned(),
+                        args: serde_json::json!({}),
+                    },
+                ),
+                node("out", NodeKind::Output { key: None }),
+            ],
+            edges: vec![edge("in", "tool"), edge("tool", "out")],
+            triggers: vec![WorkflowTrigger::Webhook {
+                secret: Some(secret.to_owned()),
+            }],
+            max_concurrency: None,
+            created_at: None,
+            updated_at: None,
+        };
+        crate::workflow::store::save_workflow(&workflow).expect("save workflow");
+
+        let body = br#"{"event":"fails"}"#;
+        let timestamp = crate::pairing::now_secs().to_string();
+        let delivery_id = format!("delivery-{}", uuid::Uuid::new_v4().simple());
+        let sig = sign(secret, &id, body, &timestamp, &delivery_id);
+        let headers = ryu_webhook_ingress::InboundWebhookHeaders {
+            signature: Some(&sig),
+            webhook_id: Some(&delivery_id),
+            webhook_timestamp: Some(&timestamp),
+        };
+
+        let run_id = match ryu_webhook_ingress::deliver_workflow_webhook(&id, body, headers).await {
+            WorkflowWebhookOutcome::Ran(run_id) => run_id,
+            other => panic!("expected the run to start, got {other:?}"),
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let status = crate::workflow::store::load_run(&run_id).map(|run| run.status);
+            if matches!(status, Ok(RunStatus::Failed)) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the background run should fail, got {status:?}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(matches!(
+            ryu_webhook_ingress::deliver_workflow_webhook(&id, body, headers).await,
+            WorkflowWebhookOutcome::Duplicate
+        ));
+    }
+
+    /// Composio delivery claims reach the real host's durable SQLite ledger (one
+    /// fresh connection per call, so a claim outlives the process that took it),
+    /// and a released claim can be taken again by the sender's retry.
+    #[test]
+    fn composio_delivery_claims_use_the_real_durable_ledger() {
+        ryu_webhook_ingress::set_global_host(Arc::new(
+            crate::webhook_ingress_host::CoreWebhookIngressHost,
+        ));
+        let delivery_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+
+        assert!(ryu_webhook_ingress::reserve_composio_delivery(&delivery_id).expect("claim"));
+        assert!(
+            !ryu_webhook_ingress::reserve_composio_delivery(&delivery_id).expect("retry"),
+            "a retry of a claimed id is a duplicate"
+        );
+        ryu_webhook_ingress::release_composio_delivery(&delivery_id).expect("release");
+        assert!(
+            ryu_webhook_ingress::reserve_composio_delivery(&delivery_id).expect("re-claim"),
+            "a released id is dispatched again"
+        );
+        ryu_webhook_ingress::release_composio_delivery(&delivery_id).expect("cleanup");
+        assert!(ryu_webhook_ingress::reserve_composio_delivery("  ").is_err());
     }
 }

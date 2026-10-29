@@ -47,7 +47,7 @@ async function probeIsland(): Promise<boolean> {
 
 /** Read the browser's network hint without assuming a browser during tests. */
 function browserIsOnline(): boolean {
-	return typeof navigator === "undefined" || navigator.onLine;
+	return globalThis.navigator === undefined || navigator.onLine;
 }
 
 export interface SystemStatus {
@@ -217,8 +217,8 @@ export function useSystemStatus(): SystemStatus {
 		// Core snapshot, so it is set even when Core itself is down.
 		const [statusResult, islandUp] = await Promise.all([
 			fetchSystemStatusWithTimeout(target)
-				.then((snapshot) => ({ error: null as unknown, snapshot }))
-				.catch((error: unknown) => ({ error, snapshot: null })),
+				.then((snapshot) => ({ error: null, snapshot }))
+				.catch((error) => ({ error, snapshot: null })),
 			local ? probeIsland() : Promise.resolve(false),
 		]);
 		if (pollId !== latestPollRef.current || getActiveNode().url !== node.url) {
@@ -295,7 +295,7 @@ export function useSystemStatus(): SystemStatus {
 	}, [poll]);
 
 	useEffect(() => {
-		if (typeof window === "undefined") {
+		if (globalThis.window === undefined) {
 			return;
 		}
 		const onOffline = () => {

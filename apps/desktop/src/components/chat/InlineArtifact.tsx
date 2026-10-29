@@ -1,3 +1,4 @@
+import layout from "./chat-layout.module.css";
 // apps/desktop/src/components/chat/InlineArtifact.tsx
 //
 // The desktop's injected Renderer for the blocks artifact host: a compact
@@ -10,33 +11,59 @@
 //
 // A created artifact (`url` set, no inline content) is lazily fetched through
 // the host's node target; until it resolves the preview shows a placeholder.
+//
+// Pages, SVGs and diagrams render at their natural height (reported by the
+// sandboxed frame), so a chart, dashboard or UI mock reads as part of the
+// answer rather than a thumbnail. Very tall content is capped and scrolls
+// inside the frame; other kinds keep a compact fixed-height preview.
+//
+// An HTML page can keep state with `ryu.state.set(obj)`; it is saved with the
+// conversation and handed back through `ryu.state.get()` when the chat reopens.
 
 import {
-	type HostArtifact,
+	type NativeArtifactObservation,
 	useArtifactHost,
 } from "@ryu/blocks/desktop/agent-elements/artifact-host-context.tsx";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ButtonGroup,
 	ButtonGroupSeparator,
-} from "@ryu/ui/components/button-group";
-import { useEffect, useMemo, useState } from "react";
+} from "@ryu/ui/components/button-group.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import {
 	ArtifactContentView,
 	ArtifactHeader,
+	FRAMED_ARTIFACT_KINDS,
 } from "@/src/components/chat/ArtifactRenderer.tsx";
-import { artifactFromPayload } from "@/src/lib/artifacts.ts";
+import { useArtifactPageState } from "@/src/hooks/useArtifactPageState.ts";
+import { artifactFromSdkObservation } from "@/src/lib/live-artifacts.ts";
+
+/** Height before the frame has reported its content size. */
+const INITIAL_FRAME_HEIGHT = 240;
+const MIN_FRAME_HEIGHT = 96;
+/** Taller content scrolls inside the frame; the full view is one click away. */
+const MAX_FRAME_HEIGHT = 960;
+
+interface InlineArtifactGeometryStyle extends CSSProperties {
+	"--inline-artifact-height"?: string;
+}
+
+function clampFrameHeight(height: number): number {
+	return Math.min(MAX_FRAME_HEIGHT, Math.max(MIN_FRAME_HEIGHT, height));
+}
 
 export function InlineArtifact({
 	artifact: payload,
 	id,
 }: {
-	artifact: HostArtifact;
+	artifact: NativeArtifactObservation;
 	id: string;
 }) {
 	const host = useArtifactHost();
 	const [fetchedContent, setFetchedContent] = useState<string | null>(null);
 	const [fetching, setFetching] = useState(false);
+	const [frameHeight, setFrameHeight] = useState(INITIAL_FRAME_HEIGHT);
 
 	// A created artifact carries a blob URL but no inline content: fetch it once
 	// through the host so the preview renders rather than sitting empty.
@@ -60,7 +87,7 @@ export function InlineArtifact({
 
 	const artifact = useMemo(
 		() =>
-			artifactFromPayload(
+			artifactFromSdkObservation(
 				{ ...payload, content: payload.content ?? fetchedContent ?? "" },
 				id,
 				"tool"
@@ -68,16 +95,39 @@ export function InlineArtifact({
 		[id, payload, fetchedContent]
 	);
 
+	const pageState = useArtifactPageState(id, artifact.title);
+	const framed = FRAMED_ARTIFACT_KINDS.has(artifact.kind);
+	const geometry: InlineArtifactGeometryStyle | undefined = framed
+		? { "--inline-artifact-height": `${clampFrameHeight(frameHeight)}px` }
+		: undefined;
+
 	return (
 		<div className="flex flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm">
 			<ArtifactHeader artifact={artifact} compact />
-			<div className="h-40 min-h-0 overflow-hidden border-border/60 border-t">
+			<div
+				className={cn(
+					"min-h-0 overflow-hidden border-border/60 border-t",
+					framed
+						? cn(
+								layout.artifactFrame,
+								"h-(--inline-artifact-height) duration-150"
+							)
+						: "h-40"
+				)}
+				data-testid="inline-artifact-body"
+				style={geometry}
+			>
 				{fetching && !fetchedContent ? (
-					<div className="flex h-full animate-pulse items-center justify-center bg-sidebar text-muted-foreground text-xs">
+					<div className="flex h-full animate-skeleton items-center justify-center bg-sidebar text-muted-foreground text-xs">
 						Loading artifact…
 					</div>
 				) : (
-					<ArtifactContentView artifact={artifact} />
+					<ArtifactContentView
+						artifact={artifact}
+						onContentHeight={framed ? setFrameHeight : undefined}
+						onState={pageState.onState}
+						savedState={pageState.savedState}
+					/>
 				)}
 			</div>
 			<div className="flex shrink-0 items-center justify-end border-border/60 border-t bg-sidebar/50 px-3 py-1.5">

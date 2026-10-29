@@ -33,4 +33,6 @@ export default defineConfig({
 		},
 	},
 	root: harnessDir,
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

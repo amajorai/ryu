@@ -1,0 +1,10 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+/* The native navigation row owns its interaction; explicit caller utilities
+ * retain the previous cn override precedence. Item already owns color motion. */
+@layer components {
+	.navigationRow:hover {
+		background-color: color-mix(in oklab, var(--foreground) 4%, transparent);
+	}
+}

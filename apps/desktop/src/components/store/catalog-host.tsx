@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/components/store/catalog-host.tsx
 //
 // Desktop binding for the shared @ryu/marketplace catalog sections (apps / models
@@ -43,6 +44,7 @@ import { SKILL_EDITOR_ALIAS } from "@/src/contributions/companion-alias.ts";
 import { useCompanionAlias } from "@/src/contributions/use-companion-alias.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAppsCatalog } from "@/src/hooks/useAppsCatalog.ts";
+import { useAppListingAllowed } from "@/src/hooks/useFeatureFlag.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { useModelCatalog } from "@/src/hooks/useModelCatalog.ts";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
@@ -51,7 +53,7 @@ import { useSkillPacks } from "@/src/hooks/useSkillPacks.ts";
 import { useSkillsCatalog } from "@/src/hooks/useSkillsCatalog.ts";
 import { fetchEntitlementSnapshot } from "@/src/lib/api/billing.ts";
 import { runCatalogScan } from "@/src/lib/api/catalog-scan.ts";
-import type { DownloadKind } from "@/src/lib/api/downloads.ts";
+
 import { estimateLlmfit, listInstalledModels } from "@/src/lib/api/models.ts";
 import {
 	fetchPluginChannels,
@@ -60,6 +62,19 @@ import {
 import { installSidecar } from "@/src/lib/services-api.ts";
 import { useInstallProgress } from "@/src/store/useDownloadsStore.ts";
 import { useInstallingLookup } from "@/src/store/useInstallStore.ts";
+
+const downloadKindSchema = z.enum([
+	"model",
+	"engine",
+	"agent",
+	"tool",
+	"skill",
+	"embedding",
+	"voice",
+	"media",
+	"mcp",
+	"other",
+]);
 
 /** The install button the shared sections render, wired to the desktop downloads
  *  store: it looks up the live percent for the item and renders the progress
@@ -75,7 +90,10 @@ function DesktopInstallButton({
 	busyLabel,
 }: CatalogInstallButtonProps) {
 	const { percent } = useInstallProgress(
-		progress.kinds as DownloadKind[],
+		progress.kinds.flatMap((kind) => {
+			const parsed = downloadKindSchema.safeParse(kind);
+			return parsed.success ? [parsed.data] : [];
+		}),
 		progress.name,
 		progress.taskId
 	);
@@ -245,6 +263,9 @@ export function DesktopCatalogHost({ children }: { children: ReactNode }) {
 					input
 				),
 			useAppsCatalog,
+			// Hides Store listings whose app rollout flag is off for this account
+			// (installed apps always show). Module-level, so the host stays stable.
+			useAppListingAllowed,
 			useMarketplaceAccess,
 			useSkillsCatalog,
 			useModelCatalog,
@@ -259,7 +280,8 @@ export function DesktopCatalogHost({ children }: { children: ReactNode }) {
 			// node-scoped tabs, App Settings for user-scoped ones) instead of leaving
 			// the user to find it. Web omits this and the affordance never renders.
 			usePluginSettingsOpener,
-			installSidecar,
+			installSidecar: (url, token, name, userJwt) =>
+				installSidecar(url, token, name, false, undefined, userJwt ?? null),
 			estimateLlmfit: (node, repo, options) =>
 				estimateLlmfit(
 					{

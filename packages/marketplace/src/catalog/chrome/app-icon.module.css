@@ -1,0 +1,22 @@
+/* Catalog artwork geometry and material are owned here; native CSS variables
+   carry the manifest's palette and the generated vector without narrowing them. */
+.frame {
+	border-radius: 24%;
+}
+.flatBackground {
+	background: var(--catalog-icon-background);
+}
+.material {
+	background-image: var(--catalog-icon-material);
+	background-size: 100% 100%;
+	border-radius: 24%;
+}
+.monogram {
+	font-size: var(--catalog-monogram-size);
+}
+.swatch {
+	background-color: var(--catalog-swatch-color);
+}
+.inheritedGlyph {
+	color: currentColor;
+}

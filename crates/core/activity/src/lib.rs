@@ -16,6 +16,7 @@
 //! Placement note (Core vs Gateway): this records *what the node did* — a history
 //! of what ran, not a policy decision about what is allowed — so it is Core.
 
+mod seal;
 mod store;
 
 pub use store::ActivityStore;

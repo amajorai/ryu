@@ -12,15 +12,15 @@
 use std::process::Stdio;
 
 use anyhow::{Context, Result};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 
+use crate::sidecar::providers::held_child::HeldChild;
 use crate::win_process::NoWindow;
 
 pub const DEFAULT_HOST: &str = "127.0.0.1";
 /// MLX-VLM's canonical (release) loopback port. 8084 sits in the 808x block
-/// (8080 = llama.cpp, 8081 = embeddings, 8082 = rerank, 8083 = stable-diffusion,
-/// 8086 = mlx-lm). The concrete port is profile-aware; see [`default_port`].
+/// (8080 = llama.cpp, 8081 = embeddings, 8082 = rerank, 8083 = classify,
+/// 8086 = mlx-lm; stable-diffusion is 8101). The concrete port is profile-aware; see [`default_port`].
 pub const DEFAULT_PORT_BASE: u16 = 8084;
 
 /// Profile-aware MLX-VLM port (release 8084, dev 9084, …). Both the spawn side
@@ -30,16 +30,19 @@ pub fn default_port() -> u16 {
     crate::profile::port(DEFAULT_PORT_BASE)
 }
 
+/// Flags Core passes (or must not let a user pass) to `mlx_vlm.server`; each
+/// takes a value.
+const MANAGED_VALUE_FLAGS: &[&str] = &["--model", "--host", "--port", "--api-key"];
+
 pub struct MlxVlmProcess {
     python: String,
     model: String,
     port: u16,
-    /// Advanced per-model launch config. MLX-VLM's launch surface is minimal, so
-    /// (like mlx-lm) only the raw `extra_args` escape hatch rides along — see
-    /// `crate::inference::LaunchConfig::to_args` for `Engine::Other`.
+    /// Advanced launch config (engine settings merged with the model's): native
+    /// `mlx-vlm` catalog options plus the raw `extra_args` escape hatch — see
+    /// `crate::inference::LaunchConfig::to_args` for `Engine::MlxVlm`.
     launch: crate::inference::LaunchConfig,
-    child: Option<Child>,
-    log_tasks: Vec<tokio::task::JoinHandle<()>>,
+    held: HeldChild,
 }
 
 impl MlxVlmProcess {
@@ -49,8 +52,7 @@ impl MlxVlmProcess {
             model,
             port,
             launch: crate::inference::LaunchConfig::default(),
-            child: None,
-            log_tasks: Vec::new(),
+            held: HeldChild::default(),
         }
     }
 
@@ -58,6 +60,28 @@ impl MlxVlmProcess {
     pub fn with_launch(mut self, launch: crate::inference::LaunchConfig) -> Self {
         self.launch = launch;
         self
+    }
+
+    /// Launch flags appended after the base command: native `mlx-vlm` options,
+    /// then raw `extra_args` (last, so a raw flag wins under argparse). This
+    /// must use `Engine::MlxVlm`: `Engine::Other` emits nothing, which silently
+    /// dropped every user-supplied MLX-VLM launch argument. Core-managed flags
+    /// are stripped from the raw args: argparse keeps the last value, so a saved
+    /// `--port`/`--host`/`--model` would move the server off what Core probes,
+    /// and `--api-key` would break Core's unauthenticated readiness probe.
+    fn launch_args(&self) -> Vec<String> {
+        crate::sidecar::providers::launch_args_with_filtered_raw(
+            &self.launch,
+            crate::inference::Engine::MlxVlm,
+            MANAGED_VALUE_FLAGS,
+            &[],
+        )
+    }
+
+    /// Saved environment-only options (prefix cache, queue timeout, speculative
+    /// coalescing). An inherited variable of the same name stays authoritative.
+    fn launch_env(&self) -> Vec<(String, String)> {
+        crate::sidecar::providers::native_env_for_spawn("mlx-vlm", &self.launch, &["HF_HOME"])
     }
 
     pub async fn start(&mut self) -> Result<()> {
@@ -74,80 +98,112 @@ impl MlxVlmProcess {
             &self.port.to_string(),
         ]);
         // Advanced inference launch flags (research flags via `extra_args` ride along).
-        // MLX-VLM is treated as `Engine::Other`, so only the raw passthrough emits.
-        for arg in self.launch.to_args(crate::inference::Engine::Other) {
+        for arg in self.launch_args() {
             cmd.arg(arg);
         }
-        let mut child = cmd
+        // Keep every Hub download inside the data dir (`models/hf`).
+        for (key, value) in crate::sidecar::providers::python_engine_env() {
+            cmd.env(key, value);
+        }
+        for (key, value) in self.launch_env() {
+            cmd.env(key, value);
+        }
+        let child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false)
             .no_window()
             .spawn()
             .context("spawning mlx-vlm server")?;
-
-        if let Some(stdout) = child.stdout.take() {
-            self.log_tasks.push(tokio::spawn(async move {
-                let mut lines = BufReader::new(stdout).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::info!(target: "mlx-vlm", "{line}");
-                }
-            }));
-        }
-
-        if let Some(stderr) = child.stderr.take() {
-            self.log_tasks.push(tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::warn!(target: "mlx-vlm", "{line}");
-                }
-            }));
-        }
-
-        self.child = Some(child);
+        self.held.attach(
+            child,
+            |line| tracing::info!(target: "mlx-vlm", "{line}"),
+            |line| tracing::warn!(target: "mlx-vlm", "{line}"),
+        );
         Ok(())
     }
 
     pub async fn stop(&mut self) -> Result<()> {
-        for handle in self.log_tasks.drain(..) {
-            handle.abort();
-        }
-
-        if let Some(mut child) = self.child.take() {
-            #[cfg(unix)]
-            if let Some(pid) = child.id() {
-                use nix::sys::signal::{kill, Signal};
-                use nix::unistd::Pid;
-                let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
-            }
-
-            #[cfg(windows)]
-            let _ = child.kill().await;
-
-            let mut child = child;
-            match tokio::time::timeout(std::time::Duration::from_secs(10), child.wait()).await {
-                Ok(_) => {}
-                Err(_) => {
-                    tracing::warn!("mlx-vlm did not exit within 10 s — sending SIGKILL");
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                }
-            }
-        }
-
+        self.held.stop("mlx-vlm").await;
         Ok(())
     }
 
+    /// Wrap an already spawned child, for the provider's start-gate tests.
+    #[cfg(test)]
+    pub(crate) fn from_child_for_test(child: tokio::process::Child) -> Self {
+        let mut process = Self::new(String::new(), String::new(), 0);
+        process.held = HeldChild::from_child(child);
+        process
+    }
+
+    /// OS process id of the held child, when one is held.
+    #[cfg(test)]
+    pub(crate) fn pid(&self) -> Option<u32> {
+        self.held.pid()
+    }
+
     pub fn is_running(&mut self) -> bool {
-        let Some(child) = self.child.as_mut() else {
-            return false;
-        };
-        match child.try_wait() {
-            Ok(None) => true,
-            _ => {
-                self.child = None;
-                false
-            }
+        self.held.is_running()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_launch_arguments_reach_the_mlx_vlm_command() {
+        let process = MlxVlmProcess::new("python3".to_owned(), "repo/model".to_owned(), 1)
+            .with_launch(crate::inference::LaunchConfig {
+                extra_args: vec!["--max-tokens".to_owned(), "512".to_owned()],
+                ..Default::default()
+            });
+        assert_eq!(process.launch_args(), vec!["--max-tokens", "512"]);
+    }
+
+    #[test]
+    fn raw_args_cannot_override_core_managed_flags() {
+        let process = MlxVlmProcess::new("python3".to_owned(), "repo/model".to_owned(), 1)
+            .with_launch(crate::inference::LaunchConfig {
+                extra_args: vec![
+                    "--port".to_owned(),
+                    "1".to_owned(),
+                    "--api-key".to_owned(),
+                    "x".to_owned(),
+                    "--host=0.0.0.0".to_owned(),
+                    "--model".to_owned(),
+                    "other/model".to_owned(),
+                    "--max-tokens".to_owned(),
+                    "512".to_owned(),
+                ],
+                ..Default::default()
+            });
+        assert_eq!(process.launch_args(), vec!["--max-tokens", "512"]);
+    }
+
+    #[test]
+    fn native_options_precede_raw_args_and_env_options_reach_the_environment() {
+        let process = MlxVlmProcess::new("python3".to_owned(), "repo/model".to_owned(), 1)
+            .with_launch(crate::inference::LaunchConfig {
+                native: serde_json::json!({
+                    "mlx_vlm_max_kv_size": 8192,
+                    "mlx_vlm_apc_num_blocks": 512,
+                })
+                .as_object()
+                .cloned()
+                .unwrap(),
+                extra_args: vec!["--max-kv-size".to_owned(), "4096".to_owned()],
+                ..Default::default()
+            });
+        assert_eq!(
+            process.launch_args(),
+            vec!["--max-kv-size", "8192", "--max-kv-size", "4096"]
+        );
+        if std::env::var_os("APC_NUM_BLOCKS").is_none() {
+            assert_eq!(
+                process.launch_env(),
+                vec![("APC_NUM_BLOCKS".to_owned(), "512".to_owned())]
+            );
         }
     }
 }

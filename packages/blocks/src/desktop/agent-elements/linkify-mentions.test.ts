@@ -5,6 +5,13 @@ import {
 } from "./linkify-mentions.ts";
 
 describe("linkifyAtMentions", () => {
+	test("expands bracketed references once and preserves filename underscores", () => {
+		expect(
+			linkifyAtMentions("@<note.constructor> @<note.__proto__> @<normal.pdf>")
+		).toBe(
+			"[@note.constructor](#ryu-file-path-note.constructor) [@note.\\_\\_proto\\_\\_](#ryu-file-path-note.__proto__) [@normal.pdf](#ryu-file-path-normal.pdf)"
+		);
+	});
 	test("links file and website mentions", () => {
 		const result = linkifyAtMentions(
 			"See @src/App.tsx and @https://example.com/docs."

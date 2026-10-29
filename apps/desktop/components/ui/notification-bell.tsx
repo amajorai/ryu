@@ -1,5 +1,5 @@
-export type { NotificationBellProps } from "@ryu/ui/components/notification-bell";
+export type { NotificationBellProps } from "@ryu/ui/components/notification-bell.tsx";
 export {
 	default,
 	NotificationBell,
-} from "@ryu/ui/components/notification-bell";
+} from "@ryu/ui/components/notification-bell.tsx";

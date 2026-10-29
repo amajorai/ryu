@@ -1,8 +1,9 @@
-//! Conversation search primitive: the sqlite-vec (`vec0`) semantic KNN index
-//! ([`MessageIndex`]) and the contentless FTS5 lexical index
-//! ([`MessageFtsIndex`]) over past chat messages. Both stores hold vectors /
-//! inverted-index + metadata only — never message text; the caller re-reads and
-//! decrypts each hit's snippet from `conversations.db`.
+//! Conversation search primitive: the sealed-vector semantic index
+//! ([`MessageIndex`]) and the blind-term keyword index ([`MessageFtsIndex`])
+//! over past chat messages. Neither store holds message text: vectors are sealed
+//! (`RYU-CB01`) and searched in memory, and keyword terms are stored as keyed
+//! tokens. The caller re-reads and decrypts each hit's snippet from
+//! `conversations.db`.
 //!
 //! ## The embedder seam ([`SearchEmbedder`])
 //!
@@ -13,15 +14,16 @@
 //! wraps its `retrieval::Embedder` behind this in `apps/core/src/search_host.rs`.
 //! The crate never sees `ModelRegistry` and has ZERO dependency on `apps/core`.
 //!
-//! The default db paths (`~/.ryu/message-embeddings.db`, `~/.ryu/message-fts.db`)
+//! The default db paths (`<data dir>/db/message-embeddings.db`, `<data dir>/db/message-fts.db`)
 //! and the registry-driven embedder choice likewise stay Core-side (the host
 //! shim), mirroring the `ryu-storage` `open(path)` precedent.
 
 mod message_fts;
 mod message_index;
 
-pub use message_fts::{MessageFtsHit, MessageFtsIndex};
-pub use message_index::{MessageHit, MessageIndex};
+pub use message_fts::{MessageFtsHit, MessageFtsIndex, MESSAGE_FTS_STORE};
+pub use message_index::{MessageHit, MessageIndex, MESSAGE_INDEX_STORE};
+pub use ryu_crypto::VectorCoverage;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -98,6 +100,39 @@ pub(crate) fn encode_embedding(vec: &[f32]) -> Vec<u8> {
 /// (`local_embed`/`tokenize`/`fnv1a`/`l2_normalize`) so the moved KNN tests keep
 /// byte-identical ranking semantics. Core's own in-memory test constructors wrap
 /// the *real* `Embedder::Local` via `search_host`, not this copy.
+/// A unique scratch directory for file-backed tests, removed on drop (the
+/// crate has no `tempfile` dev-dependency).
+#[cfg(test)]
+pub(crate) mod test_dir {
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    pub struct TestDir(PathBuf);
+
+    impl TestDir {
+        pub fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "ryu-search-test-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&path).expect("creating test dir");
+            Self(path)
+        }
+
+        pub fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod test_embedder {
     use super::{Result, SearchEmbedder};

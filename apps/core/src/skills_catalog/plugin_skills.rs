@@ -22,16 +22,9 @@
 //! - **owned-only removal** — uninstall deletes a `<slug>` only when its marker
 //!   names this plugin, so it can never delete a user's skill.
 //!
-//! ## Built-in vs user-installed (the discriminating fork)
-//!
-//! A **user-installed / satellite** plugin lives on disk at
-//! `~/.ryu/plugins/<id>/`, so `<id>/skills/` is present and this materializer
-//! works directly. A **built-in** plugin ships only its compiled-in manifest
-//! fixture (`include_str!`), so `plugins-store/{plugins,lsp,external_plugins}/<x>/skills/` is NOT on the user's
-//! machine; materializing built-in skills needs a compile-time embed
-//! (`include_dir!`) parallel to the fixture. That embed is a deliberate follow-up
-//! — [`plugin_skills_root`] returns `None` for a plugin with no on-disk dir and
-//! logs it, so built-ins are an explicit no-op, never a silent one.
+//! Skill bodies come from the installed package tree. A catalog-only manifest
+//! with no installed skills directory is a no-op; it cannot activate a body that
+//! is absent from the node.
 
 use std::path::{Path, PathBuf};
 
@@ -43,11 +36,8 @@ pub const OWNER_MARKER: &str = ".ryu-plugin-owner";
 
 /// The on-disk root a plugin's bundled skills live under, or `None`.
 ///
-/// User-installed / satellite plugins live at `~/.ryu/plugins/<id>/`, so their
-/// `skills/` subdir is on disk. Built-in plugins ship only the compiled-in
-/// manifest fixture (no `skills/` on the user's machine) — they return `None`, a
-/// logged no-op pending the `include_dir!` embed follow-up. The id is validated
-/// before it is used as a path component.
+/// Installed plugin directories supply skill bodies. Catalog manifests alone
+/// do not. The id is validated before it is used as a path component.
 pub fn plugin_skills_root(plugin_id: &str) -> Option<PathBuf> {
     if crate::plugin_manifest::validate_plugin_id(plugin_id).is_err() {
         return None;
@@ -77,7 +67,7 @@ pub fn install_plugin_skills(plugin_id: &str) -> Vec<String> {
     let write_root = ryu_skills::SkillRegistry::skills_dir();
     let mut installed = Vec::new();
     for skill_dir in discover_skill_dirs(&root) {
-        let Some(slug) = skill_dir.file_name().and_then(|n| n.to_str()) else {
+        let Some(slug) = skill_dir.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
         let dest = write_root.join(slug);
@@ -90,14 +80,23 @@ pub fn install_plugin_skills(plugin_id: &str) -> Vec<String> {
             );
             continue;
         }
-        if let Err(e) = copy_skill_dir(&skill_dir, &dest) {
+        // Establish ownership before copying. A partial write stays retryable
+        // without mistaking our own directory for a user-created collision.
+        if let Err(e) = std::fs::create_dir_all(&dest)
+            .and_then(|()| std::fs::write(dest.join(OWNER_MARKER), plugin_id))
+        {
+            tracing::warn!(plugin = %plugin_id, slug, "install_plugin_skills: owner marker failed: {e}");
+            continue;
+        }
+        let copied = copy_skill_dir(&skill_dir, &dest);
+        if let Err(e) = copied {
             tracing::warn!(plugin = %plugin_id, slug, "install_plugin_skills: copy failed: {e}");
             continue;
         }
-        if let Err(e) = std::fs::write(dest.join(OWNER_MARKER), plugin_id) {
-            tracing::warn!(plugin = %plugin_id, slug, "install_plugin_skills: writing owner marker failed: {e}");
+        if let Err(e) = ryu_skills::try_set_active(&slug, true) {
+            tracing::warn!(plugin = %plugin_id, slug, "install_plugin_skills: activation failed: {e}");
+            continue;
         }
-        ryu_skills::set_active(slug, true);
         installed.push(slug.to_owned());
     }
     if !installed.is_empty() {
@@ -112,7 +111,10 @@ pub fn install_plugin_skills(plugin_id: &str) -> Vec<String> {
 pub fn deactivate_plugin_skills(plugin_id: &str) -> Vec<String> {
     let mut done = Vec::new();
     for (slug, _dir) in owned_skill_dirs(plugin_id) {
-        ryu_skills::set_active(&slug, false);
+        if let Err(e) = ryu_skills::try_set_active(&slug, false) {
+            tracing::warn!(plugin = %plugin_id, slug, "deactivate_plugin_skills: activation failed: {e}");
+            continue;
+        }
         done.push(slug);
     }
     done
@@ -125,7 +127,10 @@ pub fn deactivate_plugin_skills(plugin_id: &str) -> Vec<String> {
 pub fn remove_plugin_skills(plugin_id: &str) -> Vec<String> {
     let mut removed = Vec::new();
     for (slug, dir) in owned_skill_dirs(plugin_id) {
-        ryu_skills::set_active(&slug, false);
+        if let Err(e) = ryu_skills::try_set_active(&slug, false) {
+            tracing::warn!(plugin = %plugin_id, slug, "remove_plugin_skills: activation failed: {e}");
+            continue;
+        }
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => removed.push(slug),
             Err(e) => {
@@ -276,3 +281,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
+
+#[cfg(test)]
+#[path = "plugin_skills_installed_runtime_tests.rs"]
+mod installed_runtime_tests;

@@ -1,0 +1,70 @@
+.fixture1 {
+	display: flex;
+	gap: 0.75rem;
+	align-items: baseline;
+	justify-content: space-between;
+	margin-bottom: 1rem;
+}
+
+.fixture2 {
+	font-size: 0.75rem;
+	color: var(--muted-foreground);
+}
+
+.fixture3 {
+	margin: 1rem 0 0;
+	font-size: 0.8125rem;
+	line-height: 1.5;
+	color: var(--muted-foreground);
+}
+
+.fixture4 {
+	min-height: 100vh;
+	padding: 3rem 1.5rem;
+	font-family: var(--font-sans);
+	color: var(--foreground);
+	background: var(--background);
+}
+
+.fixture5 {
+	max-width: 42rem;
+	margin: 0 auto;
+}
+
+.fixture6 {
+	margin: 0;
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--muted-foreground);
+	text-transform: uppercase;
+	letter-spacing: 0.14em;
+}
+
+.fixture7 {
+	margin: 0.5rem 0;
+	font-size: 2rem;
+	letter-spacing: -0.04em;
+}
+
+.fixture8 {
+	margin: 0;
+	line-height: 1.6;
+	color: var(--muted-foreground);
+}
+
+.fixture9 {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 1rem;
+	margin-top: 2rem;
+}
+
+.fixture10 {
+	display: inline-block;
+	padding: 0.5rem 0.75rem;
+	margin-top: 2rem;
+	font-size: 0.75rem;
+	color: var(--muted-foreground);
+	border: 1px solid color-mix(in oklch, var(--border), transparent 25%);
+	border-radius: 999px;
+}

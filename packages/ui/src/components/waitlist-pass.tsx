@@ -1,11 +1,19 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 import { useLayoutEffect, useRef, useState } from "react";
+import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import { cn } from "../lib/utils.ts";
 import { EntityAvatar } from "./entity-avatar.tsx";
 import { Logo } from "./logo.tsx";
 import { PassCardShell } from "./pass-card-shell.tsx";
 import { PassQrBack } from "./pass-qr-back.tsx";
+import {
+	SensitiveRevealButton,
+	useSensitiveValue,
+} from "./sensitive-value.tsx";
+import { TearTicket } from "./tear-ticket.tsx";
 
 /**
  * The membership pass a queued user sees on the waitlist screens (web
@@ -91,6 +99,7 @@ export interface WaitlistPassProps {
 	metalTheme?: "auto" | "dark" | "light";
 	/** Display name on the pass. Falls back to the handle, then to "Member". */
 	name?: string | null;
+	onTearComplete?: () => void;
 	/** 1-based queue position; null while it is still loading or unknown. */
 	position?: number | null;
 	/**
@@ -107,6 +116,8 @@ export interface WaitlistPassProps {
 	 * does still carry one.
 	 */
 	serialSeed?: string | null;
+	/** True while an access code is being used to open the account. */
+	torn?: boolean;
 	/**
 	 * Queue size. No longer printed on the card, but it gates the position
 	 * readout: see `QUEUE_STATS_MIN`.
@@ -163,7 +174,10 @@ export const linkedInShareUrl = (url: string): string =>
  * caller decides how to open it (a browser `window.open`, or the desktop's
  * `openExternal`, which must not navigate the app window away).
  */
-export const xShareIntentUrl = (text: string, url?: string | null): string => {
+export const xShareIntentUrl = (
+	text: string,
+	url?: string | null
+): `https://x.com/intent/tweet?${string}` => {
 	const params = new URLSearchParams({ text });
 	if (url) {
 		params.set("url", url);
@@ -181,7 +195,7 @@ const RYU_PITCH = "Ryu is end-to-end infrastructure for AI agents.";
 export const waitlistShareText = (
 	position: number | null | undefined
 ): string =>
-	typeof position === "number"
+	isNativeNumber(position)
 		? `I just claimed spot #${position} on the Ryu waitlist. ${RYU_PITCH}`
 		: `I just claimed my spot on the Ryu waitlist. ${RYU_PITCH}`;
 
@@ -205,6 +219,10 @@ export const waitlistShareText = (
  * that fitted its type any other way would silently disagree with its own
  * export.
  */
+interface AutoFitStyle extends CSSProperties {
+	"--fit-font-size": string;
+}
+
 export function AutoFitText({
 	children,
 	className,
@@ -221,6 +239,7 @@ export function AutoFitText({
 	const nodeRef = useRef<HTMLSpanElement>(null);
 	const [fontPx, setFontPx] = useState(maxPx);
 	const [wrapped, setWrapped] = useState(false);
+	const fitStyle: AutoFitStyle = { "--fit-font-size": `${fontPx}px` };
 
 	// Layout effect, not effect: this runs between the DOM write and the paint,
 	// so the name never flashes at the wrong size on the way to the right one.
@@ -239,13 +258,13 @@ export function AutoFitText({
 			// width, so there would be nothing left to measure against.
 			node.style.whiteSpace = "nowrap";
 			let size = maxPx;
-			node.style.fontSize = `${size}px`;
+			node.style.setProperty("--fit-font-size", `${size}px`);
 			// `Math.max` rather than a bare subtraction: a step that does not divide
 			// the range evenly would otherwise undershoot the floor on its last
 			// pass, which is how the handle line ended up a pixel under its minimum.
 			while (size > minPx && node.scrollWidth > available) {
 				size = Math.max(minPx, size - stepPx);
-				node.style.fontSize = `${size}px`;
+				node.style.setProperty("--fit-font-size", `${size}px`);
 			}
 			const overflowsAtFloor = node.scrollWidth > available;
 			// Only `whiteSpace` is dropped — the class owns it. `fontSize` is LEFT
@@ -266,12 +285,12 @@ export function AutoFitText({
 	return (
 		<span
 			className={cn(
-				"block",
+				"block text-[length:var(--fit-font-size)]",
 				wrapped ? "break-words" : "whitespace-nowrap",
 				className
 			)}
 			ref={nodeRef}
-			style={{ fontSize: `${fontPx}px` }}
+			style={fitStyle}
 		>
 			{children}
 		</span>
@@ -285,11 +304,14 @@ export function WaitlistPass({
 	joinedAt,
 	metalTheme = "auto",
 	name,
+	onTearComplete,
 	position,
 	referralUrl,
 	totalWaiting,
+	torn = false,
 	username,
 }: WaitlistPassProps) {
+	const { revealed, toggle } = useSensitiveValue(referralUrl);
 	const displayName = name?.trim() || (username ? `@${username}` : "Member");
 	// When there is no name the hero falls back to the handle — which is right on
 	// the public `/pass` page, where there is no session to read a name from. What
@@ -300,7 +322,7 @@ export function WaitlistPass({
 	const showHandle = Boolean(username) && displayName !== `@${username}`;
 	const memberSince = formatPassDate(joinedAt);
 	const showPosition =
-		typeof totalWaiting === "number" && totalWaiting > QUEUE_STATS_MIN;
+		isNativeNumber(totalWaiting) && totalWaiting > QUEUE_STATS_MIN;
 	// TWO seeds, deliberately, because the two things they colour answer
 	// different questions.
 	//
@@ -317,102 +339,119 @@ export function WaitlistPass({
 	const glyphSeed = avatarSeed || backdropSeed;
 
 	return (
-		<PassCardShell
-			back={
-				<PassQrBack
-					caption="Scan to invite"
-					metalTheme={metalTheme}
-					seed={backdropSeed}
-					value={referralUrl}
-				/>
-			}
-			backdrop="warp"
-			className={className}
-			ditherSeed={backdropSeed}
-			edge="live"
-			metalTheme={metalTheme}
-			// No chrome until the handle is claimed: the metal edge is what the
-			// reserve step pays out, so a pass that arrives already finished has
-			// nothing left to earn.
-			ringed={Boolean(username)}
+		<TearTicket
+			onTearComplete={onTearComplete}
+			showIdlePerforation={false}
+			tearLineRatio={0.84}
+			torn={torn}
 		>
-			{/* `min-h` rather than a fixed height: the name is the hero and can
+			<PassCardShell
+				back={
+					<PassQrBack
+						caption="Scan to invite"
+						metalTheme={metalTheme}
+						onRevealToggle={toggle}
+						revealed={revealed}
+						seed={backdropSeed}
+						value={referralUrl}
+					/>
+				}
+				backdrop="warp"
+				className={className}
+				ditherSeed={backdropSeed}
+				edge="live"
+				metalTheme={metalTheme}
+				// No chrome until the handle is claimed: the metal edge is what the
+				// reserve step pays out, so a pass that arrives already finished has
+				// nothing left to earn.
+				ringed={Boolean(username)}
+				still={torn}
+			>
+				{/* `min-h` rather than a fixed height: the name is the hero and can
 		    wrap to two or three lines, so the card grows past the floor
 		    instead of clipping. The hero block takes the slack (`flex-1`),
 		    which is what keeps a short name from leaving the footer
 		    floating in the middle of the card. */}
-			<div className="relative flex min-h-[27rem] w-full flex-1 flex-col gap-6 p-7">
-				{/* Wordmark left, join date right. The serial and the "early
+				<div className="relative flex min-h-[27rem] w-full flex-1 flex-col gap-6 p-7">
+					{/* Wordmark left, join date right. The serial and the "early
 				    access" line are gone: neither is something the owner or a
 				    reader of a shared card ever needs, and they were crowding
 				    the one thing the header should carry — whose card this is
 				    and how long they have been here. */}
-				<div className="flex items-center justify-between gap-3">
-					<span className="flex items-center gap-2">
-						<Logo size="20px" variant="outline" />
-						<span className="font-medium text-sm">Ryu</span>
-					</span>
-					<span className="text-[11px] text-muted-foreground tabular-nums">
-						{memberSince ?? ""}
-					</span>
-				</div>
+					<div className="flex items-center justify-between gap-3">
+						<span className="flex items-center gap-2">
+							<Logo size="20px" variant="outline" />
+							<span className="font-medium text-sm">Ryu</span>
+						</span>
+						<span className="type-caption text-muted-foreground tabular-nums">
+							{memberSince ?? ""}
+						</span>
+					</div>
 
-				<div className="flex min-w-0 flex-1 flex-col justify-end gap-1.5">
-					{/* The member's glyph, in a circle, directly above their name — the
+					<div className="flex min-w-0 flex-1 flex-col justify-end gap-1.5">
+						{/* The member's glyph, in a circle, directly above their name — the
 					    shape a reader already knows means "this person". The ring and
 					    the tinted disc under it are what keep it legible against a
 					    shader backdrop that is itself in the glyph's own hue. */}
-					{/* ONLY when the member has actually set a picture. The generative
+						{/* ONLY when the member has actually set a picture. The generative
 					    glyph is deliberately NOT used as the fallback here: it is seeded
 					    off the canonical avatar seed (id, then email, then name) while
 					    the card's backdrop is seeded off the HANDLE, so the two never
 					    agree on a hue and the circle read as a foreign object stuck on
 					    someone else's card. With no picture the name simply carries the
 					    card, which is what it did before the circle existed. */}
-					{avatarUrl ? (
-						<EntityAvatar
-							className="mb-3 size-14 shrink-0 border border-border/60 bg-background/70 backdrop-blur-sm"
-							name={displayName}
-							seed={glyphSeed}
-							src={avatarUrl}
-						/>
-					) : null}
-					<AutoFitText
-						className="font-medium leading-[1.02] tracking-tight"
-						maxPx={NAME_MAX_PX}
-						minPx={NAME_MIN_PX}
-					>
-						{displayName}
-					</AutoFitText>
-					{/* No placeholder for an unclaimed handle: an empty-state line
+						{avatarUrl ? (
+							<EntityAvatar
+								className="mb-3 size-14 shrink-0 border border-border/60 bg-background/70 backdrop-blur-sm"
+								name={displayName}
+								seed={glyphSeed}
+								src={avatarUrl}
+							/>
+						) : null}
+						<AutoFitText
+							className="font-medium leading-[1.02] tracking-tight"
+							maxPx={NAME_MAX_PX}
+							minPx={NAME_MIN_PX}
+						>
+							{displayName}
+						</AutoFitText>
+						{/* No placeholder for an unclaimed handle: an empty-state line
 					    under the name reads as a defect on a card whose whole job
 					    is to look like a finished object. The reserve field on the
 					    screen beside it is what prompts the claim. */}
-					{showHandle ? (
-						<AutoFitText
-							className="text-muted-foreground"
-							maxPx={HANDLE_MAX_PX}
-							minPx={HANDLE_MIN_PX}
-						>
-							{`@${username}`}
-						</AutoFitText>
-					) : null}
-				</div>
+						{showHandle ? (
+							<AutoFitText
+								className="text-muted-foreground"
+								maxPx={HANDLE_MAX_PX}
+								minPx={HANDLE_MIN_PX}
+							>
+								{`@${username}`}
+							</AutoFitText>
+						) : null}
+					</div>
 
-				{/* Position alone. Value above its label, sentence case: the
+					{/* Position alone. Value above its label, sentence case: the
 				    number is the fact worth reading and the word only says which
 				    fact it is. Referrals moved off the card — it is a private
 				    number about your own account, not something to hand to
 				    everyone who sees a shared pass. */}
-				{showPosition ? (
-					<div className="flex flex-col">
-						<span className="font-medium text-xl tabular-nums leading-none">
-							#{position ?? "—"}
-						</span>
-						<span className="text-muted-foreground text-xs">Position</span>
-					</div>
-				) : null}
-			</div>
-		</PassCardShell>
+					{showPosition ? (
+						<div className="flex flex-col">
+							<span className="font-medium text-xl tabular-nums leading-none">
+								#{position ?? "—"}
+							</span>
+							<span className="text-muted-foreground text-xs">Position</span>
+						</div>
+					) : null}
+					{referralUrl ? (
+						<SensitiveRevealButton
+							label="waitlist invite QR"
+							onToggle={toggle}
+							revealed={revealed}
+						/>
+					) : null}
+				</div>
+			</PassCardShell>
+		</TearTicket>
 	);
 }

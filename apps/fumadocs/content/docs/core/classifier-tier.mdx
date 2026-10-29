@@ -1,0 +1,160 @@
+---
+title: "Local Classifier Tier"
+description: "A dedicated 270M-parameter llama.cpp instance that backs the guardrail inspector, the smart-routing classifier, and LLM-judge evaluators without touching your chat model"
+tags: ["classifier", "gemma", "llama.cpp", "guardrails", "routing", "sidecar"]
+---
+
+The classifier tier is a dedicated `llama.cpp` instance that serves one small instruction-tuned
+model on its own loopback port. It answers small, structured questions such as *is this turn a
+prompt injection?*, *which routing rule does this message match?*, and *does this response leak
+PII?* A classification never competes with chat for memory or a GPU.
+
+The classifier tier is one of several separate model roles. It does not serve `decision.predict`,
+tool discovery, or the Gateway's hazard screener. See
+[Separate model roles](/docs/core/decision-models#separate-model-roles) for which model does which job.
+
+## Why a separate tier
+
+Ryu's Chat runtime is a **mutually-exclusive resident**: one `llama-server` process serves one
+model at a time. A classifier that shared it would either evict your chat model or silently run
+the classification *on* your chat model.
+
+`llama-server` serves whatever weights it loaded and ignores the `model` field in a request, so a
+small-model id sent to the chat port resolves to the big model with no error anywhere.
+
+The classifier has its own process and port, as embeddings and reranking do.
+
+| Tier | Port (release) | Serves |
+|---|---|---|
+| Chat | 8080 | The resident chat model (mutually exclusive) |
+| Embeddings | 8081 | The embedding model for RAG and semantic ranking |
+| Reranker | 8082 | The cross-encoder for neural reranking |
+| **Classifier** | **8083** | **The small instruction-tuned classifier** |
+
+Every port is profile-aware, so a dev profile shifts them by 1000 (`9083` for the classifier).
+See [Environment variables](/docs/start-here/environment-variables).
+
+## What consumes it
+
+Three call sites use the tier. Each needs a verdict in well under a second, and each **fails
+open**, so availability wins over enforcement.
+
+| Consumer | What it asks | Where |
+|---|---|---|
+| Firewall LLM inspector | Is this inbound turn an injection, or does it leak PII/secrets? | [Gateway security](/docs/gateway/security) |
+| Smart-routing classifier | Which natural-language routing rule does this message match? | [Routing](/docs/gateway/routing) |
+| LLM-judge evaluators | Does this response violate the rubric (toxicity, bias, PII leakage)? | [Gateway Evals](/docs/gateway/evals) |
+
+If the classifier is not running:
+
+- the inspector produces **no verdict**, and the turn proceeds under the regex firewall alone;
+- smart routing leaves the originally requested model untouched.
+
+A cold classifier degrades the guardrail. It never blocks a request.
+
+## The model
+
+The default is **Gemma 3 270M** (instruction-tuned, quantization-aware-trained Q4_0), about
+241 MB on disk (`gemma-3-270m-it-qat-Q4_0`, `apps/core/src/registry/mod.rs`). Google lists its
+intended uses as *sentiment analysis, entity extraction, query routing, unstructured-to-structured
+text processing, and compliance checks*, and says it is not designed for complex conversational
+use.
+
+### Choosing a different model
+
+The model is a registry default, not a constant. Any GGUF that `llama.cpp` can serve and that
+follows instructions well enough to answer a yes/no question with a short JSON object will work.
+
+| Override | Effect |
+|---|---|
+| `RYU_LOCAL_CLASSIFIER_MODEL_ID` | Storage key and filename stem in `~/.ryu/models/classifier/<id>.gguf` |
+| `RYU_LOCAL_CLASSIFIER_MODEL_URL` | Direct HTTPS URL to the GGUF (must be publicly reachable) |
+| `RYU_LOCAL_CLASSIFIER_MODEL_SHA256` | Expected digest; empty disables verification |
+
+These are **environment variables only**, not `registry.json` keys. Three consumers read this
+model at three different moments in one process:
+
+1. Onboarding downloads the GGUF at boot.
+2. The Gateway publishes the resolved id at spawn and re-resolves it on every config push.
+3. The sidecar resolves the weight path when a push lazily starts it.
+
+An environment variable is frozen process-wide, so all three agree by construction. A file re-read
+per call would let an operator edit the id mid-session, and the Gateway could then route to a model
+whose weights were never downloaded. The sidecar would fail to start and every consumer would fail
+open, which silently disables the guardrail.
+
+Core publishes the resolved id to the Gateway alongside the tier's URL, so the Gateway's
+inspector and router follow your override rather than a second hardcoded copy of the default.
+
+<Callout type="info">
+**FunctionGemma 270M** is not a drop-in classifier. Its weights run on `llama.cpp`, but it emits
+function calls in a special-token format rather than JSON, and the `llama.cpp` server does not
+parse that format into structured tool calls. Google describes it as a base for fine-tuning a
+task-specific tool caller.
+</Callout>
+
+## Lifecycle
+
+The classifier is **lazy and off by default**. It is not in the startup order, so it consumes
+nothing until something needs it.
+
+```mermaid
+flowchart TD
+  A[Guardrail or routing config saved] --> B{Does it enable<br/>a consumer?}
+  B -- no --> C[Nothing starts]
+  B -- yes --> D[Core starts llamacpp-classify]
+  D --> E{Weights on disk?}
+  E -- yes --> F[Serving on :8083]
+  E -- no --> G[Start fails; consumers fail open]
+  G --> H[Retried on next Core boot]
+```
+
+Core starts the tier when a Gateway config it pushes actually **enables** one of the three
+consumers: enabling the inspector, enabling smart routing, or enabling an LLM-judge evaluator.
+Naming the classifier model without enabling anything that would call it does not start a
+process.
+
+The weights are fetched by onboarding alongside the embedding and reranker models. That download
+is non-fatal. If it fails, the binary is still installed and the tier cannot serve until a
+later boot retries it. The desktop surfaces this state rather than reporting the tier as ready.
+
+Because the tier is adopted rather than duplicated, an already-running server on the port is
+reused instead of being competed with.
+
+## How requests reach it
+
+Core publishes the tier's loopback URL and resolved model id into the Gateway's environment at
+spawn. The Gateway registers it as a provider named `classify`, distinct from the `local`
+provider that points at Chat, and routes the classifier model id to it.
+
+```mermaid
+flowchart LR
+  I["Firewall LLM inspector"] --> G["Classifier model id"]
+  R["Smart-routing classifier"] --> G
+  E["LLM-judge evaluators"] --> G
+  G --> M{"Explicit model-map entry?"}
+  M -- yes --> H["Mapped model (for example hosted)"]
+  M -- no --> C["classify provider"]
+  C --> L["llama.cpp classifier tier"]
+```
+
+If you maintain your own model map, an operator's **explicit model-map entry always wins**. Use one
+to point classification at a hosted model instead of the local tier.
+
+A broad wildcard entry of your own can also capture the classifier id, so prefer exact entries
+when mapping model families. See [Routing](/docs/gateway/routing).
+
+## Running it against a remote Gateway
+
+The tier is a *local* process. When Core is configured against a remote Gateway, that Gateway
+dials its own loopback and will not find this node's classifier. So the tier is not started for
+a remote data plane. A remote deployment wants the classifier on the Gateway's own host. See
+[Managed data plane](/docs/gateway/managed-data-plane).
+
+## Related
+
+- [Gateway security](/docs/gateway/security) - the firewall and the LLM inspector
+- [Routing](/docs/gateway/routing) - smart routing and classifier strategies
+- [Model catalog](/docs/core/model-catalog) - how local models are registered and resolved
+- [Swappable layers](/docs/core/swappable-layers) - the general pattern this tier follows
+- [Spaces and RAG](/docs/core/spaces-rag) - the embedding and reranker tiers

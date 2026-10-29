@@ -1,24 +1,19 @@
+import {
+	type JsonRecord,
+	JsonRecordSchema,
+	type JsonValue,
+	jsonRecord,
+	nonemptyString,
+} from "./json.ts";
 import type { ChatResult, ToolEvent } from "./types.ts";
-
-interface JsonRecord {
-	[key: string]: unknown;
-}
 
 export interface StreamCallbacks {
 	onFrame?: (frame: JsonRecord) => void;
 }
 
-function isRecord(value: unknown): value is JsonRecord {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringValue(value: unknown): string | null {
-	return typeof value === "string" && value.length > 0 ? value : null;
-}
-
 function nestedString(record: JsonRecord, ...keys: string[]): string | null {
 	for (const key of keys) {
-		const value = stringValue(record[key]);
+		const value = nonemptyString(record[key]);
 		if (value !== null) {
 			return value;
 		}
@@ -32,34 +27,37 @@ function frameRunId(frame: JsonRecord): string | null {
 		return direct;
 	}
 	const data = frame.data;
-	if (isRecord(data)) {
-		return nestedString(data, "run_id", "runId");
+	const record = jsonRecord(data);
+	if (record) {
+		return nestedString(record, "run_id", "runId");
 	}
 	return null;
 }
 
 function parseFrame(payload: string): JsonRecord | null {
 	try {
-		const parsed: unknown = JSON.parse(payload);
-		return isRecord(parsed) ? parsed : null;
+		const parsed = JsonRecordSchema.safeParse(JSON.parse(payload));
+		return parsed.success ? parsed.data : null;
 	} catch {
 		return null;
 	}
 }
 
+interface StreamState {
+	finished: boolean;
+	runId: string | null;
+	text: string;
+	toolEvents: ToolEvent[];
+	workflowEvents: JsonValue[];
+}
+
 function consumeFrame(
 	frame: JsonRecord,
-	state: {
-		finished: boolean;
-		runId: string | null;
-		text: string;
-		toolEvents: ToolEvent[];
-		workflowEvents: unknown[];
-	},
+	state: StreamState,
 	callbacks?: StreamCallbacks
 ): void {
 	callbacks?.onFrame?.(frame);
-	const type = stringValue(frame.type);
+	const type = nonemptyString(frame.type);
 	const frameRun = frameRunId(frame);
 	if (state.runId === null && frameRun !== null) {
 		state.runId = frameRun;
@@ -67,7 +65,7 @@ function consumeFrame(
 
 	switch (type) {
 		case "text-delta": {
-			const delta = stringValue(frame.delta);
+			const delta = nonemptyString(frame.delta);
 			if (delta !== null) {
 				state.text += delta;
 			}
@@ -83,7 +81,7 @@ function consumeFrame(
 			return;
 		case "tool-output-available": {
 			const rawOutput = frame.output;
-			const outputRecord = isRecord(rawOutput) ? rawOutput : null;
+			const outputRecord = jsonRecord(rawOutput);
 			state.toolEvents.push({
 				type: "output",
 				toolCallId: nestedString(frame, "toolCallId", "tool_call_id"),
@@ -113,13 +111,7 @@ function consumeFrame(
 
 function consumeDataLine(
 	line: string,
-	state: {
-		finished: boolean;
-		runId: string | null;
-		text: string;
-		toolEvents: ToolEvent[];
-		workflowEvents: unknown[];
-	},
+	state: StreamState,
 	callbacks?: StreamCallbacks
 ): void {
 	const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
@@ -147,12 +139,12 @@ export async function parseCoreChatStream(
 ): Promise<ChatResult> {
 	const reader = body.getReader();
 	const decoder = new TextDecoder();
-	const state = {
+	const state: StreamState = {
 		finished: false,
-		runId: null as string | null,
+		runId: null,
 		text: "",
-		toolEvents: [] as ToolEvent[],
-		workflowEvents: [] as unknown[],
+		toolEvents: [],
+		workflowEvents: [],
 	};
 	let buffer = "";
 

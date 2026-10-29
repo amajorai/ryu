@@ -3,6 +3,7 @@ import {
 	type BouncyAccordionItem,
 } from "@ryu/ui/components/bouncy-accordion";
 
+import { landingSectionClass } from "./landing-typography.ts";
 import { SectionTitle } from "./section-title.tsx";
 
 export interface FAQItem {
@@ -101,6 +102,8 @@ export const GENERAL_FAQ_ITEMS: FAQItem[] = [
 
 interface FAQProps {
 	items?: FAQItem[];
+	/** Section heading. Defaults to "Questions". */
+	title?: string;
 }
 
 function faqAnswer(content: FAQItem["content"]) {
@@ -109,14 +112,16 @@ function faqAnswer(content: FAQItem["content"]) {
 	return (
 		<div className="space-y-3">
 			{paragraphs.map((paragraph, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: static content
 				<p key={index}>{paragraph}</p>
 			))}
 		</div>
 	);
 }
 
-export default function FAQ({ items = GENERAL_FAQ_ITEMS }: FAQProps) {
+export default function FAQ({
+	items = GENERAL_FAQ_ITEMS,
+	title = "Questions",
+}: FAQProps) {
 	const accordionItems: BouncyAccordionItem[] = items.map((item) => ({
 		id: item.id,
 		title: item.title,
@@ -124,24 +129,22 @@ export default function FAQ({ items = GENERAL_FAQ_ITEMS }: FAQProps) {
 	}));
 
 	return (
-		<div className="container mx-auto px-4 py-16">
-			<div className="mx-auto flex max-w-2xl flex-col gap-4">
-				<div>
-					<SectionTitle size="compact" title="Frequently Asked Questions" />
-				</div>
-
+		<section className={landingSectionClass} data-testid="faq">
+			<div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-16">
+				<SectionTitle title={title} />
+				{/* Rows separate by whitespace only. The answer cancels the panel's
+				    px-3 so question and answer share one left edge. */}
 				<BouncyAccordion
+					appearance="faq"
 					classNames={{
-						// Keep the card look the Base UI version had; the bouncy rows
-						// animate their own radii, so no rounding class here.
-						item: "border-none bg-muted/50 dark:bg-white/5",
-						trigger: "px-4 py-3",
-						title: "font-medium text-[15px] leading-6",
-						description: "px-1 text-[15px] text-muted-foreground",
+						description: "-mx-3 px-0",
+						item: "bg-transparent",
+						title: "text-pretty text-base font-medium md:text-lg",
+						trigger: "px-0 py-5",
 					}}
 					items={accordionItems}
 				/>
 			</div>
-		</div>
+		</section>
 	);
 }

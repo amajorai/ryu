@@ -15,7 +15,7 @@ import {
 	applySpacing,
 	applyVariant,
 	clearCardSpacing,
-} from "@ryu/ui/theme/apply";
+} from "@ryu/ui/theme/apply.ts";
 import {
 	activePresetId,
 	DEFAULT_CODE_FONT,
@@ -25,9 +25,10 @@ import {
 	DEFAULT_UI_FONT,
 	normalizeThemePrefs,
 	type ThemePrefs,
-} from "@ryu/ui/theme/prefs";
-import { findVariantIn } from "@ryu/ui/theme/presets";
+} from "@ryu/ui/theme/prefs.ts";
+import { findVariantIn } from "@ryu/ui/theme/presets.ts";
 import { useEffect } from "react";
+import type { IslandThemeApi } from "../../shared/ipc.ts";
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
@@ -122,8 +123,13 @@ function applyPrefs(prefs: ThemePrefs): void {
 	);
 }
 
-export function useIslandTheme(): void {
+/**
+ * `api` defaults to the Island's bridge; the on-screen generative UI window
+ * passes its own minimal one (`window.islandSurface.theme`).
+ */
+export function useIslandTheme(api?: IslandThemeApi): void {
 	useEffect(() => {
+		const theme = api ?? window.island.theme;
 		let cancelled = false;
 		let last: ThemePrefs | null = null;
 
@@ -143,12 +149,12 @@ export function useIslandTheme(): void {
 			}
 		};
 
-		window.island.theme.get().then((raw) => {
+		theme.get().then((raw) => {
 			if (!cancelled) {
 				fromRaw(raw);
 			}
 		});
-		const unsubscribe = window.island.theme.onChanged(fromRaw);
+		const unsubscribe = theme.onChanged(fromRaw);
 
 		// Re-resolve light/dark when the OS scheme flips while mode is "system".
 		const media = window.matchMedia(DARK_QUERY);
@@ -164,5 +170,5 @@ export function useIslandTheme(): void {
 			unsubscribe();
 			media.removeEventListener("change", onSchemeChange);
 		};
-	}, []);
+	}, [api]);
 }

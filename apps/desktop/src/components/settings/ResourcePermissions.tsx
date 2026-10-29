@@ -1,24 +1,34 @@
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@ryu/ui/components/collapsible";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/collapsible.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { useCallback, useEffect, useMemo, useState } from "react";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { z } from "zod";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { type ApiTarget, request } from "@/src/lib/api/client.ts";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 
 /**
  * Who can do what on ONE resource.
@@ -114,11 +124,11 @@ interface PermissionGroup {
 /** Tri-state for one permission on one target. */
 type Setting = "allow" | "deny" | "inherit";
 
-const SETTING_LABEL: Record<Setting, string> = {
+const SETTING_LABEL = {
 	allow: "Allow",
 	deny: "Deny",
 	inherit: "Inherit",
-};
+} satisfies Record<Setting, string>;
 
 const SETTING_ORDER = ["deny", "inherit", "allow"] as const;
 
@@ -155,34 +165,34 @@ function withSetting(
 	return { ...row, allow, deny };
 }
 
-const TARGET_LABEL: Record<TargetType, string> = {
+const TARGET_LABEL = {
 	org: "Everyone in the org",
 	team: "Team",
 	role: "Role",
 	member: "Person",
-};
+} satisfies Record<TargetType, string>;
 
-const TARGET_PLACEHOLDER: Record<TargetType, string> = {
+const TARGET_PLACEHOLDER = {
 	org: "",
 	team: "Choose a team",
 	role: "Choose a role",
 	member: "Choose a person",
-};
+} satisfies Record<TargetType, string>;
 
-const TARGET_FALLBACK_PLACEHOLDER: Record<TargetType, string> = {
+const TARGET_FALLBACK_PLACEHOLDER = {
 	org: "",
 	team: "Team identifier",
 	role: "Role identifier",
 	member: "Person's identifier",
-};
+} satisfies Record<TargetType, string>;
 
 /** What the node would have listed, for the message shown when it listed none. */
-const TARGET_PLURAL: Record<TargetType, string> = {
+const TARGET_PLURAL = {
 	org: "",
 	team: "teams",
 	role: "roles",
 	member: "people",
-};
+} satisfies Record<TargetType, string>;
 
 /**
  * A readable name for the app a permission came from.
@@ -227,7 +237,9 @@ function closureFrom(seed: string, edges: Map<string, string[]>): string[] {
  * - An app that names a built-in key keeps its wording but loses its edges — the
  *   node drops them and reports the id in `collisions` — so the key is filed
  *   under the built-ins and its declared `implies` is ignored. Drawing those
- *   edges would promise an expansion the node does not perform.
+ *   edges would promise an expansion the node does not perform. Core likewise
+ *   drops (and reports) an app level's edges into a built-in key or another
+ *   app's level, and strips them from that level's `implies` before serving it.
  * - An edge pointing at an id nothing declared is dropped, again matching Core:
  *   an unknown id must not be able to widen a known one.
  */
@@ -355,9 +367,9 @@ function TargetPicker({
 			<div className="flex flex-1 flex-col gap-1">
 				<Input
 					aria-label={`${TARGET_LABEL[row.target_type]} identifier`}
-					className="h-8 text-xs"
 					onChange={(e) => onChange(e.target.value)}
 					placeholder={TARGET_FALLBACK_PLACEHOLDER[row.target_type]}
+					size="compact"
 					value={row.target_id}
 				/>
 				<p className="text-muted-foreground text-xs">
@@ -388,12 +400,10 @@ function TargetPicker({
 	return (
 		<Select
 			items={options.map((c) => ({ value: c.id, label: c.label }))}
-			onValueChange={(value) =>
-				onChange(typeof value === "string" ? value : "")
-			}
+			onValueChange={(value) => onChange(isNativeText(value) ? value : "")}
 			value={row.target_id}
 		>
-			<SelectTrigger className="h-8 flex-1 text-xs">
+			<SelectTrigger appearance="gateway-action" className="flex-1">
 				<SelectValue placeholder={TARGET_PLACEHOLDER[row.target_type]} />
 			</SelectTrigger>
 			<SelectContent
@@ -494,8 +504,14 @@ function PermissionGroupSection({
 
 	return (
 		<Collapsible onOpenChange={setOpen} open={open}>
-			<CollapsibleTrigger className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-muted/40">
-				<span className="min-w-0 truncate font-medium text-xs">
+			<CollapsibleTrigger
+				appearance="permission-group"
+				className="flex w-full items-center justify-between text-left"
+			>
+				<span
+					className="min-w-0 truncate font-medium text-xs"
+					title={group.title}
+				>
 					{group.title}
 				</span>
 				<span className="flex shrink-0 items-center gap-2 text-muted-foreground text-xs">
@@ -508,7 +524,7 @@ function PermissionGroupSection({
 					/>
 				</span>
 			</CollapsibleTrigger>
-			<CollapsibleContent className="flex flex-col gap-2 px-2 pt-1 pb-2">
+			<CollapsibleContent className="flex flex-col" spacing="permission-list">
 				{group.permissions.map((permission) => (
 					<PermissionRow
 						key={permission.id}
@@ -543,7 +559,7 @@ function OverwriteCard({
 	return (
 		<li className="flex flex-col gap-3 rounded-md border p-3">
 			<div className="flex items-start gap-2">
-				<Label className="pt-1.5 text-xs">
+				<Label size="compact" spacing="permission-aligned">
 					{TARGET_LABEL[row.target_type]}
 				</Label>
 				<TargetPicker
@@ -583,6 +599,56 @@ function OverwriteCard({
 	);
 }
 
+const declaredLevelResponseCodec: z.ZodType<DeclaredLevel> = z
+	.object({
+		description: z.string(),
+		id: z.string(),
+		implies: z.array(z.string()),
+		label: z.string(),
+		plugin_id: z.string(),
+	})
+	.passthrough();
+const vocabularyResponseCodec: z.ZodType<Vocabulary> = z
+	.object({
+		collisions: z.array(z.string()),
+		declared: z.array(declaredLevelResponseCodec),
+		kernel: z.array(z.string()),
+	})
+	.passthrough();
+const overwriteResponseCodec: z.ZodType<Overwrite> = z
+	.object({
+		allow: z.array(z.string()),
+		deny: z.array(z.string()),
+		target_id: z.string(),
+		target_type: z.union([
+			z.literal("org"),
+			z.literal("team"),
+			z.literal("role"),
+			z.literal("member"),
+		]),
+	})
+	.passthrough();
+const principalDirectoryResponseCodec: z.ZodType<PrincipalDirectory> = z
+	.object({
+		kinds: z.array(z.string()).optional(),
+		members: z.array(
+			z
+				.object({
+					email: z.union([z.string(), z.null()]),
+					id: z.string(),
+					name: z.string(),
+				})
+				.passthrough()
+		),
+		org_id: z.union([z.string(), z.null()]).optional(),
+		roles: z.array(
+			z.object({ id: z.string(), label: z.string() }).passthrough()
+		),
+		teams: z.array(
+			z.object({ id: z.string(), name: z.string() }).passthrough()
+		),
+	})
+	.passthrough();
 export function ResourcePermissions({
 	resourceKind,
 	resourceId,
@@ -593,49 +659,97 @@ export function ResourcePermissions({
 	resourceName?: string;
 }) {
 	const node = useActiveNode();
-	const target: ApiTarget = {
-		url: node.url,
-		token: node.token,
-		userJwt: node.userJwt ?? null,
-	};
+	const scope = useMemo(() => {
+		const target: ApiTarget = {
+			url: node.url,
+			token: node.token,
+			userJwt: node.userJwt ?? null,
+		};
+		return { target, resourceKind, resourceId };
+	}, [node.url, node.token, node.userJwt, resourceKind, resourceId]);
+	const ownerRef = useRef<{
+		scope: typeof scope;
+		draftRevision: number;
+	} | null>(null);
 
 	const [vocabulary, setVocabulary] = useState<Vocabulary | null>(null);
 	const [directory, setDirectory] = useState<PrincipalDirectory | null>(null);
 	const [rows, setRows] = useState<Overwrite[]>([]);
 	const [loading, setLoading] = useState(true);
+	const [loadError, setLoadError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [dirty, setDirty] = useState(false);
 
+	useLayoutEffect(() => {
+		// Each committed lifetime gets a distinct owner, including effect replay.
+		// Returning to the same credentials must not revive a retired request.
+		const owner = { scope, draftRevision: 0 };
+		ownerRef.current = owner;
+		setLoading(true);
+		setLoadError(null);
+		setSaving(false);
+		setDirty(false);
+		return () => {
+			if (ownerRef.current === owner) {
+				ownerRef.current = null;
+			}
+		};
+	}, [scope]);
+
 	const refresh = useCallback(async () => {
+		const owner = ownerRef.current;
+		if (!owner || owner.scope !== scope) {
+			return;
+		}
+		const isCurrent = () => ownerRef.current === owner;
+		const readRevision = owner.draftRevision;
 		setLoading(true);
 		try {
 			const [vocab, current, principals] = await Promise.all([
-				request<Vocabulary>(target, "/api/acl/vocabulary"),
+				request<Vocabulary>(
+					scope.target,
+					"/api/acl/vocabulary",
+					{},
+					vocabularyResponseCodec
+				),
 				request<{ overwrites: Overwrite[] }>(
-					target,
-					`/api/acl/resources/${encodeURIComponent(resourceKind)}/${encodeURIComponent(resourceId)}`
+					scope.target,
+					`/api/acl/resources/${encodeURIComponent(scope.resourceKind)}/${encodeURIComponent(scope.resourceId)}`,
+					{},
+					z
+						.object({ overwrites: z.array(overwriteResponseCodec) })
+						.passthrough()
 				),
 				// Caught here rather than by the surrounding try: the directory is an
 				// improvement on a text box, not a precondition for editing, and an
 				// older node that does not serve it must still get a working panel.
-				request<PrincipalDirectory>(target, "/api/acl/principals").catch(
-					() => null
-				),
+				request<PrincipalDirectory>(
+					scope.target,
+					"/api/acl/principals",
+					{},
+					principalDirectoryResponseCodec
+				).catch(() => null),
 			]);
+			if (!isCurrent() || owner.draftRevision !== readRevision) {
+				return;
+			}
 			setVocabulary(vocab);
 			setRows(current.overwrites ?? []);
 			setDirectory(principals);
+			setLoadError(null);
 			setDirty(false);
 		} catch (error) {
-			toast.error("Could not load permissions", {
-				id: `acl-${resourceKind}-${resourceId}`,
-				description: error instanceof Error ? error.message : String(error),
-			});
+			if (isCurrent() && owner.draftRevision === readRevision) {
+				setLoadError(
+					error instanceof Error ? error.message : "Could not load permissions"
+				);
+			}
 		} finally {
-			setLoading(false);
+			if (isCurrent()) {
+				setLoading(false);
+			}
 		}
-		// `target` is rebuilt each render; depend on its fields.
-	}, [node.url, node.token, node.userJwt, resourceKind, resourceId]);
+	}, [scope]);
 
 	useEffect(() => {
 		void refresh();
@@ -644,6 +758,12 @@ export function ResourcePermissions({
 	const groups = useMemo(() => buildGroups(vocabulary), [vocabulary]);
 
 	const save = async () => {
+		const owner = ownerRef.current;
+		if (!owner || owner.scope !== scope) {
+			return;
+		}
+		const isCurrent = () => ownerRef.current === owner;
+		const savedRevision = owner.draftRevision;
 		setSaving(true);
 		try {
 			// Drop rows that ended up setting nothing, so "inherit everything"
@@ -652,23 +772,49 @@ export function ResourcePermissions({
 				(r) => r.allow.length > 0 || r.deny.length > 0
 			);
 			await request(
-				target,
-				`/api/acl/resources/${encodeURIComponent(resourceKind)}/${encodeURIComponent(resourceId)}`,
-				{ method: "PUT", body: { overwrites } }
+				scope.target,
+				`/api/acl/resources/${encodeURIComponent(scope.resourceKind)}/${encodeURIComponent(scope.resourceId)}`,
+				{ method: "PUT", body: { overwrites } },
+				gatewayJsonValueSchema
 			);
-			toast.success("Permissions saved", { id: `acl-save-${resourceId}` });
-			await refresh();
-		} catch (error) {
-			toast.error("Could not save permissions", {
-				id: `acl-save-${resourceId}`,
-				description: error instanceof Error ? error.message : String(error),
+			if (!isCurrent()) {
+				return;
+			}
+			toast.success("Permissions saved", {
+				id: `acl-save-${scope.resourceId}`,
 			});
+			// The acknowledged write saved its captured rows. Later edits stay
+			// dirty instead of being replaced by a read of that older snapshot.
+			if (owner.draftRevision === savedRevision) {
+				await refresh();
+			}
+		} catch (error) {
+			if (isCurrent()) {
+				toast.error("Could not save permissions", {
+					id: `acl-save-${scope.resourceId}`,
+					description: error instanceof Error ? error.message : String(error),
+				});
+			}
 		} finally {
-			setSaving(false);
+			if (isCurrent()) {
+				setSaving(false);
+			}
 		}
 	};
 
+	const markDraftChanged = () => {
+		const owner = ownerRef.current;
+		if (!owner || owner.scope !== scope) {
+			return false;
+		}
+		owner.draftRevision += 1;
+		return true;
+	};
+
 	const addTarget = (targetType: TargetType) => {
+		if (!markDraftChanged()) {
+			return;
+		}
 		setRows((current) => [
 			...current,
 			{
@@ -685,11 +831,17 @@ export function ResourcePermissions({
 	};
 
 	const updateRow = (index: number, next: Overwrite) => {
+		if (!markDraftChanged()) {
+			return;
+		}
 		setRows((current) => current.map((r, i) => (i === index ? next : r)));
 		setDirty(true);
 	};
 
 	const removeRow = (index: number) => {
+		if (!markDraftChanged()) {
+			return;
+		}
 		setRows((current) => current.filter((_, i) => i !== index));
 		setDirty(true);
 	};
@@ -708,6 +860,21 @@ export function ResourcePermissions({
 			<p className="text-muted-foreground text-xs">
 				Loading permissions&hellip;
 			</p>
+		);
+	}
+	if (loadError) {
+		return (
+			<div
+				className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 px-3 py-2"
+				role="alert"
+			>
+				<p className="text-status-destructive text-xs">
+					Could not load permissions: {loadError}
+				</p>
+				<Button onClick={() => void refresh()} size="sm" variant="outline">
+					Retry
+				</Button>
+			</div>
 		);
 	}
 
@@ -735,7 +902,7 @@ export function ResourcePermissions({
 							choices={choicesFor(directory, row.target_type)}
 							directoryFailed={directory === null}
 							groups={groups}
-							// biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and freely reorderable, and two of them may legitimately point at the same role or person, so the target is not a key.
+							// rows are positional and freely reorderable, and two of them may legitimately point at the same role or person, so the target is not a key.
 							key={index}
 							onChange={(next) => updateRow(index, next)}
 							onRemove={() => removeRow(index)}
@@ -772,12 +939,9 @@ export function ResourcePermissions({
 
 			{vocabulary && vocabulary.collisions.length > 0 ? (
 				<p className="text-muted-foreground text-xs">
-					Note: {vocabulary.collisions.join(", ")}{" "}
-					{vocabulary.collisions.length === 1 ? "is a" : "are"} built-in
-					permission
-					{vocabulary.collisions.length === 1 ? "" : "s"}, so the app's own
-					rules for {vocabulary.collisions.length === 1 ? "it" : "them"} were
-					ignored.
+					Note: some app rules for {vocabulary.collisions.join(", ")} were
+					ignored. An app can't change a built-in permission, a level another
+					app owns, or a level two installed apps both declare.
 				</p>
 			) : null}
 		</div>

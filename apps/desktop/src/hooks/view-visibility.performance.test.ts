@@ -5,7 +5,7 @@ import {
 	subscribeViewVisibility,
 } from "@ryu/ui/lib/view-visibility.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 test("embedded consumers share one observer and release it after the last unsubscribe", () => {
@@ -14,13 +14,31 @@ test("embedded consumers share one observer and release it after the last unsubs
 	let created = 0;
 	let disconnected = 0;
 	let notify: (entries: IntersectionObserverEntry[]) => void = () => undefined;
-	class Observer {
+	function entry(isIntersecting: boolean): IntersectionObserverEntry {
+		const rect = new DOMRect(0, 0, 1, 1);
+		return {
+			time: 0,
+			target: document.documentElement,
+			isIntersecting,
+			boundingClientRect: rect,
+			intersectionRect: rect,
+			intersectionRatio: isIntersecting ? 1 : 0,
+			rootBounds: rect,
+		};
+	}
+	class Observer implements IntersectionObserver {
+		readonly root = null;
+		readonly rootMargin = "0px";
+		readonly thresholds = [0];
 		constructor(callback: IntersectionObserverCallback) {
 			created++;
-			notify = (entries) =>
-				callback(entries, this as unknown as IntersectionObserver);
+			notify = (entries) => callback(entries, this);
 		}
 		observe() {}
+		unobserve() {}
+		takeRecords(): IntersectionObserverEntry[] {
+			return [];
+		}
 		disconnect() {
 			disconnected++;
 		}
@@ -37,12 +55,12 @@ test("embedded consumers share one observer and release it after the last unsubs
 	);
 	try {
 		expect(created).toBe(1);
-		notify([{ isIntersecting: false } as IntersectionObserverEntry]);
+		notify([entry(false)]);
 		expect(first).toEqual([false]);
 		expect(second).toEqual([false]);
 		unsubscribe();
 		expect(disconnected).toBe(0);
-		notify([{ isIntersecting: true } as IntersectionObserverEntry]);
+		notify([entry(true)]);
 		expect(first).toEqual([false]);
 		expect(second).toEqual([false, true]);
 		unsubscribeSecond();

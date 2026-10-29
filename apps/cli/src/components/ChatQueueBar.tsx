@@ -1,8 +1,10 @@
 /* @jsxImportSource @opentui/react */
 
 import { useKeyboard } from "@opentui/react";
+import { z } from "zod";
 
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { tf } from "../i18n/translate.ts";
 
 /** The display fields shared by string queues and richer queued turns. */
 export interface ChatQueueItem {
@@ -42,8 +44,20 @@ const positiveInteger = (value: number, fallback: number): number => {
 	return Math.max(1, Math.trunc(value));
 };
 
+const queueTextSchema = z.string();
+function isQueueText(entry: ChatQueueEntry): entry is string {
+	return queueTextSchema.safeParse(entry).success;
+}
 export function chatQueueEntryText(entry: ChatQueueEntry): string {
-	return typeof entry === "string" ? entry : entry.text;
+	return isQueueText(entry) ? entry : entry.text;
+}
+export function chatQueueEntryKey(
+	entry: ChatQueueEntry,
+	index: number
+): string {
+	return isQueueText(entry)
+		? `${index}:${entry}`
+		: (entry.id ?? `${index}:${entry.text}`);
 }
 
 /** Collapse multi-line prompts and keep previews bounded for narrow terminals. */
@@ -223,7 +237,10 @@ export function ChatQueueBar({
 			onRemove &&
 			(key.name === "x" || key.name === "delete" || key.name === "backspace")
 		) {
-			onRemove(keyboardIndex, items[keyboardIndex] as ChatQueueEntry);
+			const entry = items[keyboardIndex];
+			if (entry !== undefined) {
+				onRemove(keyboardIndex, entry);
+			}
 			return;
 		}
 		if (onClear && key.name === "c" && !key.ctrl && !key.meta) {
@@ -259,7 +276,12 @@ export function ChatQueueBar({
 		>
 			<box flexDirection="row" height={1} justifyContent="space-between">
 				<text fg={theme.colors.primary}>
-					<b>{`${label} · ${items.length} queued`}</b>
+					<b>
+						{tf("{label} · {count} queued", {
+							count: String(items.length),
+							label,
+						})}
+					</b>
 				</text>
 				{focused ? <text fg={theme.colors.focusRing}>focused</text> : null}
 			</box>
@@ -267,11 +289,7 @@ export function ChatQueueBar({
 				<ChatQueuePreviewRow
 					entry={entry}
 					index={index}
-					key={
-						typeof entry === "string"
-							? `${index}:${entry}`
-							: (entry.id ?? `${index}:${entry.text}`)
-					}
+					key={chatQueueEntryKey(entry, index)}
 					onRemove={onRemove}
 					previewLength={maxPreviewLength}
 					selected={index === selected}
@@ -279,7 +297,7 @@ export function ChatQueueBar({
 			))}
 			{hiddenCount > 0 ? (
 				<text fg={theme.colors.mutedForeground} height={1}>
-					{`+${hiddenCount} more`}
+					{tf("+{hiddenCount} more", { hiddenCount: String(hiddenCount) })}
 				</text>
 			) : null}
 			<text fg={theme.colors.mutedForeground} height={1}>

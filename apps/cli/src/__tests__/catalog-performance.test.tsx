@@ -1,11 +1,11 @@
 /* @jsxImportSource @opentui/react */
 import { expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
 import { act, useState } from "react";
 import { ThemeProvider } from "../../components/ui/theme-provider.tsx";
 import { CoreProvider } from "../core/CoreContext.tsx";
 import { AppsTab } from "../tabs/apps.tsx";
 import { ToastProvider } from "../ui/toast.tsx";
+import { testRender } from "./cli-test-render.ts";
 
 async function until(predicate: () => boolean) {
 	const deadline = Date.now() + 3000;

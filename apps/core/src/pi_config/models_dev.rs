@@ -28,9 +28,7 @@ fn registry_url() -> String {
 
 /// On-disk cache path for the fetched registry.
 fn cache_path() -> PathBuf {
-    let dir = crate::sidecar::download_manager::ryu_dir().join("cache");
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join("models-dev.json")
+    crate::paths::cache_path("models-dev.json")
 }
 
 /// How long a cached registry is considered fresh before we refetch.

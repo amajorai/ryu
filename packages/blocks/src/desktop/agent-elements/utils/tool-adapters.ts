@@ -1,4 +1,13 @@
+import {
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { StepState, TimelineStep } from "../types/timeline.ts";
+import { nativeSdkSchemaAdmits } from "./native-sdk-admission.ts";
+import {
+	type NativeSdkValue,
+	nativeSdkObjectSchema,
+} from "./native-sdk-observation.ts";
 
 function calculateDiffStatsFromPatch(
 	patches: Array<{ lines?: string[] }>
@@ -82,9 +91,21 @@ export function mapToolNameToVariant(
 	return undefined;
 }
 
+/** The argument cells read by timeline adaptation, not a whole tool-input DTO.
+ * The genuine SDK owns opaque values; String coercion happens at the old sites. */
+interface TimelineArgumentObservation {
+	command?: NativeSdkValue;
+	content?: NativeSdkValue;
+	file_path?: NativeSdkValue;
+	pattern?: NativeSdkValue;
+	query?: NativeSdkValue;
+	thought?: NativeSdkValue;
+	url?: NativeSdkValue;
+}
+
 function extractToolDetail(
 	toolName: string,
-	args: Record<string, any>
+	args: TimelineArgumentObservation
 ): string {
 	switch (toolName) {
 		case "Bash":
@@ -114,7 +135,7 @@ export function mapToolInvocationToStep(
 	toolCallId: string,
 	toolInvocation: {
 		toolName: string;
-		args?: Record<string, any>;
+		args?: TimelineArgumentObservation;
 		state: "partial-call" | "call" | "result";
 		result?: any;
 	}
@@ -140,29 +161,27 @@ export function mapToolInvocationToStep(
 	if (toolName === "Bash") {
 		step.bashCommand = args?.command ? String(args.command) : undefined;
 		if (toolInvocation.state === "result" && result) {
-			if (typeof result === "string") {
+			if (isNativeText(result)) {
 				step.bashOutput = result;
 				step.bashSuccess = true;
-			} else if (typeof result === "object") {
+			} else if (isNativeObjectLike(result)) {
 				// Flatten output — may be a plain string, or an ACP array of content blocks.
 				const rawOutput = result?.output ?? result?.stdout;
-				const stdout =
-					typeof rawOutput === "string"
+				const stdout = isNativeText(rawOutput)
+					? rawOutput
+					: Array.isArray(rawOutput)
 						? rawOutput
-						: Array.isArray(rawOutput)
-							? rawOutput
-									.map((item: unknown) =>
-										typeof item === "string"
-											? item
-											: typeof item === "object" &&
-													item !== null &&
-													"text" in item
-												? String((item as { text: unknown }).text)
-												: JSON.stringify(item)
-									)
-									.join("\n")
-							: "";
-				const stderr = typeof result?.stderr === "string" ? result.stderr : "";
+								.map((item: NativeSdkValue) =>
+									isNativeText(item)
+										? item
+										: nativeSdkSchemaAdmits(nativeSdkObjectSchema, item) &&
+												"text" in item
+											? String(item.text)
+											: JSON.stringify(item)
+								)
+								.join("\n")
+						: "";
+				const stderr = isNativeText(result?.stderr) ? result.stderr : "";
 				step.bashOutput = [stdout, stderr]
 					.filter(Boolean)
 					.join(stdout && stderr ? "\n" : "");
@@ -189,12 +208,11 @@ export function mapToolInvocationToStep(
 	}
 
 	if (toolName === "Write") {
-		const content =
-			typeof result?.content === "string"
-				? result.content
-				: typeof args?.content === "string"
-					? args.content
-					: "";
+		const content = isNativeText(result?.content)
+			? result.content
+			: isNativeText(args?.content)
+				? args.content
+				: "";
 
 		if (content) {
 			const lines = content.split("\n");
@@ -229,12 +247,11 @@ export function mapToolInvocationToStep(
 		toolName.toLowerCase() === "thinking" ||
 		toolName.toLowerCase() === "reasoning"
 	) {
-		step.thoughtContent =
-			typeof args?.thought === "string"
-				? args.thought
-				: typeof result === "string"
-					? result
-					: undefined;
+		step.thoughtContent = isNativeText(args?.thought)
+			? args.thought
+			: isNativeText(result)
+				? result
+				: undefined;
 	}
 
 	return step;

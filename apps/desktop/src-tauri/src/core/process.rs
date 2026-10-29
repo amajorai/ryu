@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use sysinfo::{Pid as SysinfoPid, System};
+use sysinfo::{Pid as SysinfoPid, ProcessStatus, System};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
@@ -27,10 +27,29 @@ fn configure_process_group(_command: &mut Command) {}
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
 fn pid_path() -> PathBuf {
-    crate::profile::ryu_home_dir().join("ryu-core.pid")
+    ryu_sidecar_runtime::layout::state_path(&crate::profile::ryu_home_dir(), "ryu-core.pid")
 }
 
 const PID_RECORD_VERSION: u8 = 1;
+const CORE_LOG_PATH_ENV: &str = "RYU_CORE_LOG_PATH";
+
+fn preserve_core_on_exit(debug_build: bool, profile: &str) -> bool {
+    debug_build && profile == "dev"
+}
+
+pub(crate) fn preserve_desktop_core_on_exit() -> bool {
+    preserve_core_on_exit(cfg!(debug_assertions), &crate::profile::name())
+}
+
+fn persistent_core_log_path(home: &std::path::Path) -> PathBuf {
+    ryu_sidecar_runtime::layout::logs_dir(home).join("core-dev-runtime.log")
+}
+
+/// `<data dir>/runtimes/dev-execution` — Core's independent development
+/// execution host (its binary copy and `worker.json` receipt).
+pub(crate) fn dev_execution_dir(home: &std::path::Path) -> PathBuf {
+    ryu_sidecar_runtime::layout::runtime_dir(home, "dev-execution")
+}
 
 /// PID files must bind a PID to the process that Desktop actually started. A
 /// bare integer is unsafe after a crash because operating systems reuse PIDs.
@@ -49,6 +68,144 @@ struct ProcessIdentity {
     pid: u32,
     executable: String,
     start_time: u64,
+}
+
+/// Wire contract written by Core's independent development execution host.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExecutionWorkerRecord {
+    version: u32,
+    pid: u32,
+    executable: PathBuf,
+    start_time: u64,
+    private_bind: std::net::SocketAddr,
+    data_dir: PathBuf,
+    public_bind: std::net::SocketAddr,
+}
+
+struct ExecutionHostStop {
+    command: std::process::Command,
+    record: ExecutionWorkerRecord,
+}
+
+const MAX_EXECUTION_RECORD_BYTES: u64 = 16 * 1024;
+
+fn execution_host_identity(record: &ExecutionWorkerRecord) -> Result<Option<ProcessIdentity>> {
+    let system = System::new_all();
+    let Some(process) = system.process(SysinfoPid::from_u32(record.pid)) else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        process.start_time() != 0,
+        "Cannot verify execution host start time"
+    );
+    if process.start_time() != record.start_time {
+        // PID reuse is a stale receipt, not permission to signal its new owner.
+        return Ok(None);
+    }
+    let executable = process
+        .exe()
+        .ok_or_else(|| anyhow!("Cannot inspect live execution host executable"))?;
+    let actual = std::fs::canonicalize(executable)?;
+    let expected = std::fs::canonicalize(&record.executable)?;
+    if actual != expected {
+        return Ok(None);
+    }
+    Ok(Some(ProcessIdentity {
+        pid: record.pid,
+        executable: actual.to_string_lossy().into_owned(),
+        start_time: process.start_time(),
+    }))
+}
+
+fn execution_host_stop_command(
+    home: &std::path::Path,
+    profile: &str,
+) -> Result<Option<ExecutionHostStop>> {
+    use std::io::Read;
+    let path = dev_execution_dir(home).join("worker.json");
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    anyhow::ensure!(
+        metadata.file_type().is_file() && metadata.len() <= MAX_EXECUTION_RECORD_BYTES,
+        "Execution host receipt must be a bounded regular file"
+    );
+    let file = std::fs::File::open(&path)?;
+    anyhow::ensure!(
+        file.metadata()?.is_file(),
+        "Execution host receipt is not a regular file"
+    );
+    let mut bytes = Vec::new();
+    file.take(MAX_EXECUTION_RECORD_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= MAX_EXECUTION_RECORD_BYTES,
+        "Execution host receipt is too large"
+    );
+    let record: ExecutionWorkerRecord = serde_json::from_slice(&bytes)?;
+    anyhow::ensure!(
+        record.version == 1
+            && record.pid != 0
+            && record.start_time != 0
+            && record.private_bind.ip().is_loopback()
+            && record.private_bind.port() != 0
+            && record.public_bind.ip().is_loopback()
+            && record.public_bind.port() != 0,
+        "Invalid execution host receipt"
+    );
+    let canonical_home = std::fs::canonicalize(home)?;
+    anyhow::ensure!(
+        std::fs::canonicalize(&record.data_dir)? == canonical_home,
+        "Execution host receipt belongs to another data directory"
+    );
+    // Check whether this PID is still its recorded owner before requiring the
+    // immutable executable to exist. Dead hosts can leave removed binaries.
+    let Some(identity) = execution_host_identity(&record)? else {
+        return Ok(None);
+    };
+    let executable = PathBuf::from(identity.executable);
+    anyhow::ensure!(
+        executable.starts_with(dev_execution_dir(&canonical_home)),
+        "Execution host executable is outside its data directory"
+    );
+    let mut command = std::process::Command::new(executable);
+    command
+        .arg("--stop-dev-execution")
+        .arg(format!("--bind={}", record.public_bind))
+        .env("RYU_DIR", canonical_home)
+        .env(crate::profile::RYU_PROFILE_ENV, profile)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .no_window();
+    Ok(Some(ExecutionHostStop { command, record }))
+}
+
+fn execute_host_stop(mut stop: ExecutionHostStop, timeout: Duration) -> Result<()> {
+    let mut child = stop.command.spawn()?;
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(anyhow!("Development execution host shutdown timed out"));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    anyhow::ensure!(
+        status.success(),
+        "Could not stop development execution host: {status}"
+    );
+    anyhow::ensure!(
+        execution_host_identity(&stop.record)?.is_none(),
+        "Development execution host is still alive after shutdown"
+    );
+    Ok(())
 }
 
 impl ManagedPidRecord {
@@ -85,6 +242,30 @@ fn inspect_process(pid: u32) -> Option<ProcessIdentity> {
         executable,
         start_time: process.start_time(),
     })
+}
+
+fn kill_facade_process(record: &ManagedPidRecord) -> Result<()> {
+    let system = System::new_all();
+    let Some(process) = system.process(SysinfoPid::from_u32(record.pid)) else {
+        return Ok(());
+    };
+    if process.status() == ProcessStatus::Zombie {
+        return Ok(());
+    }
+    let executable = process
+        .exe()
+        .ok_or_else(|| anyhow!("Cannot inspect development facade before stop"))?;
+    if !record.matches(&ProcessIdentity {
+        pid: record.pid,
+        executable: executable.to_string_lossy().into_owned(),
+        start_time: process.start_time(),
+    }) {
+        return Ok(());
+    }
+    // Windows taskkill /T follows parentage even for a detached worker. Stop
+    // only the facade; its immutable host owns the verified tree shutdown.
+    anyhow::ensure!(process.kill(), "Could not stop verified development facade");
+    Ok(())
 }
 
 async fn inspect_spawned_process(pid: u32) -> Option<ProcessIdentity> {
@@ -131,6 +312,8 @@ pub struct RyuCoreProcess {
     state: ProcessState,
     /// Handles for stdout/stderr forwarding tasks.
     log_tasks: Vec<tokio::task::JoinHandle<()>>,
+    preserve_on_exit: bool,
+    recovery_admission: Option<ryu_runtime_install::startup::StartupAdmission>,
 }
 
 impl RyuCoreProcess {
@@ -141,7 +324,18 @@ impl RyuCoreProcess {
             pid_path: pid_path(),
             state: ProcessState::Stopped,
             log_tasks: Vec::new(),
+            preserve_on_exit: preserve_desktop_core_on_exit(),
+            recovery_admission: None,
         }
+    }
+
+    pub fn new_for_app(app: &tauri::AppHandle, binary_path: PathBuf) -> Self {
+        use tauri::Manager;
+        let mut process = Self::new(binary_path);
+        process.recovery_admission = app
+            .try_state::<crate::update_recovery::UpdateStartupState>()
+            .and_then(|state| state.admission.clone());
+        process
     }
 
     /// Check if Ryu Core is already running by hitting the health endpoint.
@@ -174,10 +368,24 @@ impl RyuCoreProcess {
             return Ok(());
         }
 
+        // A retained local dev runtime may be warming up or temporarily busy.
+        // Failed health is not permission to interrupt its active turns.
+        if self.attach_preserved_core() {
+            return Ok(());
+        }
+
         self.cleanup_orphan().await;
         self.state = ProcessState::Starting;
 
         let mut command = Command::new(&self.binary_path);
+        // Core and everything it launches get the user's own GPU environment,
+        // not the switches the desktop set for its webviews.
+        for (name, original) in crate::hardware_acceleration::restore_child_env() {
+            match original {
+                Some(value) => command.env(name, value),
+                None => command.env_remove(name),
+            };
+        }
         command
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -187,6 +395,47 @@ impl RyuCoreProcess {
             // Piping stdio does NOT suppress it — only the creation flag does.
             .no_window();
         configure_process_group(&mut command);
+        if let Some(admission) = &self.recovery_admission {
+            let checkpoint = ryu_runtime_install::recovery::RecoveryCheckpoint::observe(
+                admission.checkpoint.clone(),
+            )?;
+            match checkpoint.read()?.phase {
+                ryu_runtime_install::recovery::RecoveryPhase::AwaitingHealth => {
+                    command.env("RYU_UPDATE_RUNTIME_NONCE", &admission.nonce);
+                }
+                ryu_runtime_install::recovery::RecoveryPhase::Committed
+                | ryu_runtime_install::recovery::RecoveryPhase::Restored => {
+                    self.recovery_admission = None;
+                }
+                _ => return Err(anyhow!("update recovery has not admitted runtime startup")),
+            }
+        }
+        // Pin both processes to the same published release generation. Explicit
+        // operator overrides remain authoritative.
+        if std::env::var_os("RYU_GATEWAY_BIN").is_none() {
+            if let Some(gateway) = crate::core::install::managed_gateway_path() {
+                command.env("RYU_GATEWAY_BIN", gateway);
+            }
+        }
+        if let Some(directory) = self.binary_path.parent() {
+            let paths = std::iter::once(directory.to_path_buf()).chain(
+                std::env::var_os("PATH")
+                    .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            );
+            command.env("PATH", std::env::join_paths(paths)?);
+        }
+        // A local dev Desktop is replaceable while Core keeps executing turns.
+        // Its child must not retain pipes whose readers disappear on reload.
+        if self.preserve_on_exit {
+            // The PID record lives in `state/`, so derive the log from the
+            // data dir itself rather than from the PID file's parent.
+            let home = crate::profile::ryu_home_dir();
+            command
+                .env(CORE_LOG_PATH_ENV, persistent_core_log_path(&home))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+        }
         // Isolate the dev variant's backend: hand the Core child our profile so it
         // binds the shifted port (8980) and uses the shifted data dir (~/.ryu-dev)
         // via its own `profile::apply_env_defaults`. Release passes nothing new
@@ -203,6 +452,27 @@ impl RyuCoreProcess {
         }
         let child = command.spawn()?;
         self.own_spawned_child(child).await
+    }
+
+    fn attach_preserved_core(&mut self) -> bool {
+        if !self.preserve_on_exit {
+            return false;
+        }
+        let record = std::fs::read_to_string(&self.pid_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<ManagedPidRecord>(&content).ok());
+        let Some(record) = record else {
+            return false;
+        };
+        if !inspect_process(record.pid).is_some_and(|identity| record.matches(&identity)) {
+            return false;
+        }
+        self.state = ProcessState::Running;
+        tracing::warn!(
+            pid = record.pid,
+            "Retained dev Core is alive but temporarily unhealthy; preserving its active turns"
+        );
+        true
     }
 
     /// Persist the child's verified identity before publishing it as managed.
@@ -271,6 +541,27 @@ impl RyuCoreProcess {
 
     /// Gracefully stop the process: SIGTERM → 5 s wait → SIGKILL.
     pub async fn stop(&mut self) -> Result<()> {
+        if self.preserve_on_exit {
+            // Quiesce our verified launcher before the final receipt read: it
+            // must not publish a new detached worker after an absent read.
+            if let Some(child) = self.child.as_mut() {
+                child.start_kill()?;
+                tokio::time::timeout(Duration::from_secs(2), child.wait()).await??;
+            } else if let Some(record) = self.verified_facade_record()? {
+                kill_facade_process(&record)?;
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+                while self.verified_facade_record()?.is_some()
+                    && tokio::time::Instant::now() < deadline
+                {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                anyhow::ensure!(
+                    self.verified_facade_record()?.is_none(),
+                    "Verified development facade did not stop"
+                );
+            }
+        }
+        self.stop_dev_execution_host().await?;
         self.state = ProcessState::Stopping;
 
         // Abort log forwarding tasks first.
@@ -287,7 +578,9 @@ impl RyuCoreProcess {
         // in dev never gets a PID file from us, so port kill is what makes
         // restart/reset actually stop the process that holds the data-dir locks.
         self.cleanup_orphan().await;
-        kill_profile_listeners().await;
+        if !self.preserve_on_exit {
+            kill_profile_listeners().await;
+        }
 
         let _ = tokio::fs::remove_file(&self.pid_path).await;
         self.state = ProcessState::Stopped;
@@ -299,6 +592,32 @@ impl RyuCoreProcess {
     /// Gives the whole managed process group a bounded graceful shutdown before a
     /// final kill, so Gateway/plugin children cannot outlive Desktop Quit.
     pub fn try_stop(&mut self) -> Result<()> {
+        if self.preserve_on_exit {
+            if let Some(child) = self.child.as_mut() {
+                child.start_kill()?;
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while child.try_wait()?.is_none() && std::time::Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                anyhow::ensure!(
+                    child.try_wait()?.is_some(),
+                    "Owned development facade did not stop"
+                );
+            } else if let Some(record) = self.verified_facade_record()? {
+                kill_facade_process(&record)?;
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while self.verified_facade_record()?.is_some()
+                    && std::time::Instant::now() < deadline
+                {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                anyhow::ensure!(
+                    self.verified_facade_record()?.is_none(),
+                    "Verified development facade did not stop"
+                );
+            }
+        }
+        self.stop_dev_execution_host_sync()?;
         // Abort log forwarding tasks
         for handle in self.log_tasks.drain(..) {
             handle.abort();
@@ -318,6 +637,91 @@ impl RyuCoreProcess {
 
         self.state = ProcessState::Stopped;
         self.child = None;
+        Ok(())
+    }
+
+    fn verified_facade_record(&self) -> Result<Option<ManagedPidRecord>> {
+        let content = match std::fs::read(&self.pid_path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let Ok(record) = serde_json::from_slice::<ManagedPidRecord>(&content) else {
+            return Ok(None);
+        };
+        let system = System::new_all();
+        let Some(process) = system.process(SysinfoPid::from_u32(record.pid)) else {
+            return Ok(None);
+        };
+        // A killed but unreaped facade is a zombie: it has exited, and Linux no
+        // longer exposes its executable, so it cannot be (and need not be) verified.
+        if process.status() == ProcessStatus::Zombie {
+            return Ok(None);
+        }
+        anyhow::ensure!(
+            process.start_time() != 0,
+            "Cannot verify development facade start time"
+        );
+        if process.start_time() != record.start_time {
+            return Ok(None);
+        }
+        let executable = process
+            .exe()
+            .ok_or_else(|| anyhow!("Cannot inspect live development facade executable"))?;
+        Ok(record
+            .matches(&ProcessIdentity {
+                pid: record.pid,
+                executable: executable.to_string_lossy().into_owned(),
+                start_time: process.start_time(),
+            })
+            .then_some(record))
+    }
+
+    fn dev_execution_stop_command(&self) -> Result<Option<ExecutionHostStop>> {
+        if !self.preserve_on_exit {
+            return Ok(None);
+        }
+        // Resolve Core relocation using the shared path contract. Discovery must
+        // never execute an older Core that ignores unknown CLI arguments.
+        let profile = crate::profile::name();
+        let paths = ryu_runtime_install::data_paths::DataPaths::for_profile(
+            &profile,
+            dirs::home_dir(),
+            dirs::config_dir(),
+        )?;
+        let home = paths.resolve_data_dir(std::env::var_os("RYU_DIR"))?;
+        execution_host_stop_command(&home, &profile)
+    }
+
+    async fn stop_dev_execution_host(&self) -> Result<()> {
+        let Some(stop) = self.dev_execution_stop_command()? else {
+            return Ok(());
+        };
+        tokio::task::spawn_blocking(move || execute_host_stop(stop, Duration::from_secs(30)))
+            .await?
+    }
+
+    fn stop_dev_execution_host_sync(&self) -> Result<()> {
+        let Some(stop) = self.dev_execution_stop_command()? else {
+            return Ok(());
+        };
+        execute_host_stop(stop, Duration::from_secs(30))
+    }
+
+    /// Local development reloads replace Desktop, not the running Core. Keep
+    /// the verified PID record so the next Desktop can attach and explicit
+    /// restart/reset can still terminate the runtime. Packaged builds retain
+    /// their normal shutdown behavior, including packaged Ryu Dev.
+    pub fn exit_desktop(&mut self) -> Result<()> {
+        if !self.preserve_on_exit {
+            return self.try_stop();
+        }
+        for handle in self.log_tasks.drain(..) {
+            handle.abort();
+        }
+        self.child = None;
+        self.state = ProcessState::Stopped;
+        tracing::info!("Desktop dev reload detached; Ryu Core continues running");
         Ok(())
     }
 
@@ -357,6 +761,18 @@ impl RyuCoreProcess {
     /// Returns `true` if a live child process handle is currently held.
     pub fn has_child(&self) -> bool {
         self.child.is_some()
+    }
+
+    pub(crate) fn owns_process(&self) -> bool {
+        if self.has_child() {
+            return true;
+        }
+        let record = std::fs::read_to_string(&self.pid_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<ManagedPidRecord>(&content).ok());
+        record.is_some_and(|record| {
+            inspect_process(record.pid).is_some_and(|identity| record.matches(&identity))
+        })
     }
 
     /// Kill an owned leftover process whose full identity is recorded in the PID
@@ -431,6 +847,19 @@ async fn kill_profile_listeners() {
     }
 }
 
+#[cfg(any(unix, test))]
+fn recorded_process_group(pid: u32, group: Option<i32>) -> Option<i32> {
+    let leader = i32::try_from(pid).ok().filter(|value| *value > 0)?;
+    group.filter(|value| *value == leader)
+}
+
+#[cfg(unix)]
+fn verified_process_group(pid: u32, group: Option<i32>) -> Option<i32> {
+    use nix::unistd::{getpgid, Pid};
+    let leader = recorded_process_group(pid, group)?;
+    (getpgid(Some(Pid::from_raw(leader))).ok()?.as_raw() == leader).then_some(leader)
+}
+
 async fn kill_pid_tree(pid: u32, process_group: Option<i32>) {
     if pid == 0 {
         return;
@@ -439,8 +868,7 @@ async fn kill_pid_tree(pid: u32, process_group: Option<i32>) {
     {
         use nix::sys::signal::{kill, Signal};
         use nix::unistd::Pid;
-        let target = process_group
-            .filter(|group| *group > 0)
+        let target = verified_process_group(pid, process_group)
             .map_or_else(|| Pid::from_raw(pid as i32), |group| Pid::from_raw(-group));
         let _ = kill(target, Signal::SIGTERM);
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -532,8 +960,7 @@ fn kill_pid_tree_sync(pid: u32, process_group: Option<i32>, grace: Duration) {
     {
         use nix::sys::signal::{kill, Signal};
         use nix::unistd::Pid;
-        let target = process_group
-            .filter(|group| *group > 0)
+        let target = verified_process_group(pid, process_group)
             .map_or_else(|| Pid::from_raw(pid as i32), |group| Pid::from_raw(-group));
         let _ = kill(target, Signal::SIGTERM);
         std::thread::sleep(grace);
@@ -617,5 +1044,395 @@ fn pids_listening_on(port: u16) -> Vec<i32> {
             .split_whitespace()
             .filter_map(|s| s.parse::<i32>().ok())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn recorded_group_cannot_target_another_process_group() {
+        assert_eq!(super::recorded_process_group(123, Some(123)), Some(123));
+        for group in [None, Some(0), Some(-123), Some(456)] {
+            assert_eq!(super::recorded_process_group(123, group), None);
+        }
+        assert_eq!(super::recorded_process_group(0, Some(0)), None);
+        assert_eq!(super::recorded_process_group(u32::MAX, Some(-1)), None);
+    }
+
+    use super::*;
+
+    fn execution_receipt(home: &std::path::Path) -> ExecutionWorkerRecord {
+        ExecutionWorkerRecord {
+            version: 1,
+            pid: u32::MAX,
+            executable: dev_execution_dir(home).join("missing-host"),
+            start_time: 1,
+            private_bind: "127.0.0.1:12345".parse().unwrap(),
+            data_dir: std::fs::canonicalize(home).unwrap(),
+            public_bind: "127.0.0.1:12346".parse().unwrap(),
+        }
+    }
+
+    fn write_execution_receipt(home: &std::path::Path, record: &ExecutionWorkerRecord) -> PathBuf {
+        let directory = dev_execution_dir(home);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("worker.json");
+        std::fs::write(&path, serde_json::to_vec(record).unwrap()).unwrap();
+        path
+    }
+
+    #[test]
+    fn dead_execution_host_with_removed_binary_allows_facade_cleanup() {
+        let home = tempfile::tempdir().unwrap();
+        let record = execution_receipt(home.path());
+        let path = write_execution_receipt(home.path(), &record);
+        assert!(execution_host_stop_command(home.path(), "dev")
+            .unwrap()
+            .is_none());
+        assert!(path.exists(), "stale receipt is not deleted by Desktop");
+    }
+
+    #[test]
+    fn reused_execution_pid_never_requires_or_executes_its_removed_binary() {
+        let home = tempfile::tempdir().unwrap();
+        let mut record = execution_receipt(home.path());
+        record.pid = std::process::id();
+        record.start_time = inspect_process(record.pid).unwrap().start_time + 1;
+        let path = write_execution_receipt(home.path(), &record);
+        assert!(execution_host_stop_command(home.path(), "dev")
+            .unwrap()
+            .is_none());
+        assert!(path.exists());
+        record.start_time -= 1;
+        write_execution_receipt(home.path(), &record);
+        assert!(
+            execution_host_stop_command(home.path(), "dev").is_err(),
+            "live process with unavailable executable fails closed"
+        );
+    }
+
+    #[test]
+    fn invalid_execution_receipts_fail_before_process_launch() {
+        let home = tempfile::tempdir().unwrap();
+        let record = execution_receipt(home.path());
+        let path = write_execution_receipt(home.path(), &record);
+        let valid = serde_json::to_value(&record).unwrap();
+        let mut cases = vec![serde_json::json!({}), serde_json::json!(null)];
+        for (key, value) in [
+            ("version", serde_json::json!(2)),
+            ("pid", serde_json::json!(0)),
+            ("pid", serde_json::json!(4294967296_u64)),
+            ("start_time", serde_json::json!(0)),
+            ("private_bind", serde_json::json!("0.0.0.0:12345")),
+            ("private_bind", serde_json::json!("127.0.0.1:0")),
+            ("public_bind", serde_json::json!("localhost:8980")),
+            ("public_bind", serde_json::json!("0.0.0.0:8980")),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[key] = value;
+            cases.push(invalid);
+        }
+        for invalid in cases {
+            std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            assert!(
+                execution_host_stop_command(home.path(), "dev").is_err(),
+                "accepted invalid receipt: {invalid}"
+            );
+        }
+        std::fs::write(&path, vec![b' '; MAX_EXECUTION_RECORD_BYTES as usize + 1]).unwrap();
+        assert!(execution_host_stop_command(home.path(), "dev").is_err());
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(execution_host_stop_command(home.path(), "dev").is_err());
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture for identity and bounded shutdown tests"]
+    fn execution_host_fixture() {
+        if let Some(path) = std::env::var_os("RYU_TEST_FACADE_CHILD_RECEIPT") {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args(["execution_host_fixture", "--ignored"])
+                .env_remove("RYU_TEST_FACADE_CHILD_RECEIPT")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .no_window();
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000 | 0x00000200);
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                command.process_group(0);
+            }
+            let child = command.spawn().unwrap();
+            std::fs::write(path, child.id().to_string()).unwrap();
+            drop(child);
+        }
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    #[test]
+    fn facade_quiesce_does_not_kill_its_detached_execution_child() {
+        let home = tempfile::tempdir().unwrap();
+        let child_receipt = home.path().join("child-pid");
+        let mut facade = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["execution_host_fixture", "--ignored"])
+            .env("RYU_TEST_FACADE_CHILD_RECEIPT", &child_receipt)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .no_window()
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !child_receipt.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let child_pid: u32 = std::fs::read_to_string(&child_receipt)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let result = (|| -> Result<()> {
+            let record = ManagedPidRecord::from_identity(
+                inspect_process(facade.id()).ok_or_else(|| anyhow!("facade fixture identity"))?,
+            );
+            kill_facade_process(&record)?;
+            facade.wait()?;
+            anyhow::ensure!(
+                inspect_process(child_pid).is_some(),
+                "facade quiesce killed its detached execution child"
+            );
+            Ok(())
+        })();
+        let _ = facade.kill();
+        let _ = facade.wait();
+        if let Some(child) = System::new_all().process(SysinfoPid::from_u32(child_pid)) {
+            child.kill();
+        }
+        result.unwrap();
+    }
+
+    #[test]
+    fn verified_host_uses_immutable_executable_and_recorded_public_bind() {
+        let home = tempfile::tempdir().unwrap();
+        let directory = dev_execution_dir(home.path());
+        std::fs::create_dir_all(&directory).unwrap();
+        let executable = directory.join(if cfg!(windows) { "host.exe" } else { "host" });
+        std::fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+        let executable = std::fs::canonicalize(executable).unwrap();
+        let mut child = std::process::Command::new(&executable)
+            .args(["execution_host_fixture", "--ignored", "--nocapture"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .no_window()
+            .spawn()
+            .unwrap();
+        let result = (|| -> Result<()> {
+            let identity =
+                inspect_process(child.id()).ok_or_else(|| anyhow!("fixture process identity"))?;
+            let mut record = execution_receipt(home.path());
+            record.pid = identity.pid;
+            record.start_time = identity.start_time;
+            record.executable = executable.clone();
+            let path = write_execution_receipt(home.path(), &record);
+            let stop = execution_host_stop_command(home.path(), "dev")?.unwrap();
+            assert_eq!(stop.command.get_program(), executable.as_os_str());
+            let args: Vec<_> = stop.command.get_args().collect();
+            assert_eq!(args, ["--stop-dev-execution", "--bind=127.0.0.1:12346"]);
+            // A successful helper which leaves the verified host running must
+            // fail and keep its receipt available for a later real shutdown.
+            let mut success = std::process::Command::new(&executable);
+            success
+                .arg("--list")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .no_window();
+            assert!(execute_host_stop(
+                ExecutionHostStop {
+                    command: success,
+                    record: record.clone()
+                },
+                Duration::from_secs(5)
+            )
+            .is_err());
+            assert!(path.exists());
+            let mut hanging = std::process::Command::new(&executable);
+            hanging
+                .args(["execution_host_fixture", "--ignored"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .no_window();
+            let started = std::time::Instant::now();
+            assert!(execute_host_stop(
+                ExecutionHostStop {
+                    command: hanging,
+                    record
+                },
+                Duration::from_millis(100)
+            )
+            .is_err());
+            assert!(started.elapsed() < Duration::from_secs(3));
+            assert!(path.exists());
+            Ok(())
+        })();
+        let _ = child.kill();
+        let _ = child.wait();
+        result.unwrap();
+    }
+
+    #[test]
+    fn absent_host_never_sends_a_stop_flag_to_a_legacy_core() {
+        let base = tempfile::tempdir().unwrap();
+        let marker = base.path().join("unexpected-stop");
+        #[cfg(windows)]
+        let cli = base.path().join("legacy.cmd");
+        #[cfg(windows)]
+        std::fs::write(
+            &cli,
+            format!("@echo launched>\"{}\"\r\n@exit /b 0\r\n", marker.display()),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        let cli = base.path().join("legacy.sh");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(&cli, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let mut process = RyuCoreProcess::new(cli);
+        process.pid_path = base.path().join("ryu-core.pid");
+        process.preserve_on_exit = true;
+        assert!(process.dev_execution_stop_command().unwrap().is_none());
+        assert!(execution_host_stop_command(base.path(), "dev")
+            .unwrap()
+            .is_none());
+        // The production resolver must not invoke the replacement binary either.
+        let paths = ryu_runtime_install::data_paths::DataPaths::for_profile(
+            "dev",
+            Some(base.path().to_owned()),
+            Some(base.path().join("config")),
+        )
+        .unwrap();
+        let home = paths.resolve_data_dir(None).unwrap();
+        assert!(execution_host_stop_command(&home, "dev").unwrap().is_none());
+        assert!(
+            !marker.exists(),
+            "legacy Core was executed during shutdown discovery"
+        );
+    }
+
+    #[test]
+    fn only_local_debug_dev_preserves_core() {
+        assert!(preserve_core_on_exit(true, "dev"));
+        for profile in ["release", "canary", "nightly", "beta", "unknown"] {
+            assert!(!preserve_core_on_exit(true, profile));
+        }
+        assert!(!preserve_core_on_exit(false, "dev"));
+    }
+
+    #[test]
+    fn preserved_dev_core_log_uses_the_profile_log_directory() {
+        let home = tempfile::tempdir().expect("temporary runtime home");
+        assert_eq!(
+            persistent_core_log_path(home.path()),
+            home.path().join("logs").join("core-dev-runtime.log"),
+            "the dev runtime log is logs/core-dev-runtime.log"
+        );
+    }
+
+    #[tokio::test]
+    async fn dev_exit_preserves_owned_and_reattached_process_until_explicit_stop() {
+        let home = tempfile::tempdir().expect("temporary runtime home");
+        let pid_path = home.path().join("ryu-core.pid");
+        // The retained process is a sleeper, while its CLI implements the real
+        // no-host shutdown contract. Do not point lifecycle calls at a missing
+        // executable just because this fixture has no independent host.
+        #[cfg(windows)]
+        let runtime_binary = home.path().join("runtime-cli.cmd");
+        #[cfg(windows)]
+        std::fs::write(
+            &runtime_binary,
+            "@if \"%~1\"==\"--stop-dev-execution\" exit /b 0\r\n@exit /b 2\r\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        let runtime_binary = home.path().join("runtime-cli.sh");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(
+                &runtime_binary,
+                "#!/bin/sh\n[ \"$1\" = \"--stop-dev-execution\" ]\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(&runtime_binary, std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+        }
+        #[cfg(windows)]
+        let mut command = Command::new("powershell.exe");
+        #[cfg(windows)]
+        command.args([
+            "-NoProfile",
+            "-Command",
+            "Write-Output 'runtime alive'; Start-Sleep -Seconds 60",
+        ]);
+        #[cfg(unix)]
+        let mut command = Command::new("sh");
+        #[cfg(unix)]
+        command.args(["-c", "echo 'runtime alive'; sleep 60"]);
+        command
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(false)
+            .no_window();
+        configure_process_group(&mut command);
+        let child = command.spawn().expect("spawn test runtime");
+        let pid = child.id().expect("runtime PID");
+        let mut process = RyuCoreProcess::new(runtime_binary.clone());
+        process.pid_path = pid_path.clone();
+        process.preserve_on_exit = true;
+        process
+            .own_spawned_child(child)
+            .await
+            .expect("record owned runtime");
+        process.exit_desktop().expect("detach owned runtime");
+        assert!(
+            inspect_process(pid).is_some(),
+            "owned runtime survives exit"
+        );
+        assert!(pid_path.exists(), "identity survives for explicit shutdown");
+
+        let mut attached = RyuCoreProcess::new(runtime_binary);
+        attached.pid_path = pid_path.clone();
+        attached.preserve_on_exit = true;
+        assert!(
+            attached.attach_preserved_core(),
+            "failed health preserves a verified live dev runtime"
+        );
+        assert_eq!(attached.state, ProcessState::Running);
+        attached.exit_desktop().expect("detach attached runtime");
+        assert!(
+            inspect_process(pid).is_some(),
+            "attached runtime survives exit"
+        );
+        assert!(pid_path.exists());
+        // Explicit shutdown retains identity-verified orphan termination.
+        attached.try_stop().expect("explicit shutdown");
+        // Windows may retain the process entry briefly after taskkill returns.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while inspect_process(pid).is_some() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(
+            inspect_process(pid).is_none(),
+            "explicit shutdown stops runtime"
+        );
+        assert!(!pid_path.exists());
     }
 }

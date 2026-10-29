@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 
 test("chat and proactive terminal responses release held HTTP bodies", async () => {
 	const root = await mkdtemp(join(tmpdir(), "ryu-island-chat-stream-"));
@@ -10,7 +18,9 @@ test("chat and proactive terminal responses release held HTTP bodies", async () 
 		hostname: "127.0.0.1",
 		port: 0,
 		async fetch(req) {
-			const body = (await req.json()) as { agent_id?: string };
+			const body = z
+				.object({ agent_id: z.string().optional() })
+				.parse(await req.json());
 			const rejected = body.agent_id === "rejected";
 			const frame =
 				'data: {"type":"text-delta","delta":"hello"}\n\ndata: [DONE]\n\n';
@@ -28,9 +38,23 @@ test("chat and proactive terminal responses release held HTTP bodies", async () 
 		},
 	});
 	try {
+		await symlink(
+			join(import.meta.dirname, "../../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
+		);
+		await copyFile(
+			join(import.meta.dirname, "../../shared/acp.ts"),
+			join(root, "acp.ts")
+		);
 		for (const name of ["core.ts", "response-deadline.ts", "sse.ts"]) {
 			await copyFile(join(import.meta.dirname, name), join(root, name));
 		}
+		const coreSource = await readFile(join(root, "core.ts"), "utf8");
+		await writeFile(
+			join(root, "core.ts"),
+			coreSource.replaceAll("../../shared/acp.ts", "./acp.ts")
+		);
 		await writeFile(
 			join(root, "config.ts"),
 			`export const coreHeaders=()=>({}); export const loadConfig=()=>({coreBaseUrl:${JSON.stringify(server.url.toString().replace(/\/$/, ""))}});`

@@ -12,9 +12,12 @@ import {
 } from "@ryu/ui/components/popover.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { ChevronLeft, Wrench } from "lucide-react";
-import type { FormEvent } from "react";
+import type { SubmitEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import type { WebMcpPageTool } from "./webmcp";
+import { z } from "zod";
+import { ASSISTANT_POPUP_LAYER } from "./skin.ts";
+import type { WebMcpPageTool } from "./webmcp.ts";
+import type { WebMcpRecord } from "./webmcp-contract.ts";
 
 interface ToolField {
 	description?: string;
@@ -28,12 +31,6 @@ interface ToolField {
 
 type ToolValue = boolean | string;
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
 function fieldLabel(value: string): string {
 	return value
 		.replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -42,29 +39,12 @@ function fieldLabel(value: string): string {
 }
 
 function toolFields(tool: WebMcpPageTool): ToolField[] {
-	const schema = asRecord(tool.inputSchema);
-	const properties = asRecord(schema?.properties);
-	if (!properties) {
-		return [];
-	}
-	const required = new Set(
-		Array.isArray(schema?.required)
-			? schema.required.filter(
-					(value): value is string => typeof value === "string"
-				)
-			: []
-	);
+	const schema = tool.inputSchema;
+	const properties = schema.properties;
+	const required = new Set(schema.required ?? []);
 	const fields: ToolField[] = [];
-	for (const [key, rawValue] of Object.entries(properties).slice(0, 12)) {
-		const value = asRecord(rawValue);
-		if (!value) {
-			continue;
-		}
-		const enumValues = Array.isArray(value.enum)
-			? value.enum
-					.filter((item): item is string => typeof item === "string")
-					.slice(0, 20)
-			: undefined;
+	for (const [key, value] of Object.entries(properties).slice(0, 12)) {
+		const enumValues = value.enum?.slice(0, 20);
 		const rawType = value.type;
 		const type: ToolField["type"] =
 			rawType === "boolean"
@@ -75,14 +55,11 @@ function toolFields(tool: WebMcpPageTool): ToolField[] {
 						? "number"
 						: "string";
 		fields.push({
-			description:
-				typeof value.description === "string"
-					? value.description.slice(0, 150)
-					: undefined,
+			description: value.description?.slice(0, 150),
 			enumValues,
 			key,
-			maximum: typeof value.maximum === "number" ? value.maximum : undefined,
-			minimum: typeof value.minimum === "number" ? value.minimum : undefined,
+			maximum: value.maximum,
+			minimum: value.minimum,
 			required: required.has(key),
 			type,
 		});
@@ -93,22 +70,24 @@ function toolFields(tool: WebMcpPageTool): ToolField[] {
 function buildToolInput(
 	fields: readonly ToolField[],
 	values: Record<string, ToolValue>
-): Record<string, unknown> {
-	const input: Record<string, unknown> = {};
+): WebMcpRecord {
+	const input: WebMcpRecord = {};
 	for (const field of fields) {
-		const value = values[field.key];
+		const rawValue = values[field.key];
 		if (field.type === "boolean") {
-			if (value === true || field.required) {
-				input[field.key] = value === true;
+			if (rawValue === true || field.required) {
+				input[field.key] = rawValue === true;
 			}
 			continue;
 		}
-		if (typeof value !== "string" || !value.trim()) {
+		const parsedValue = z.string().safeParse(rawValue);
+		if (!(parsedValue.success && parsedValue.data.trim())) {
 			if (field.required) {
 				throw new Error(`${fieldLabel(field.key)} is required.`);
 			}
 			continue;
 		}
+		const value = parsedValue.data;
 		if (field.type === "number" || field.type === "integer") {
 			const number = Number(value);
 			if (!Number.isFinite(number)) {
@@ -139,18 +118,25 @@ function buildToolInput(
 }
 
 function toolIsWrite(tool: WebMcpPageTool): boolean {
-	return tool.annotations?.readOnlyHint !== true;
+	return (
+		tool.annotations?.consequentialHint === true ||
+		tool.annotations?.readOnlyHint !== true
+	);
 }
 
 function displayTitle(tool: WebMcpPageTool): string {
 	return tool.title?.trim() || tool.name;
 }
 
+function toolCategory(tool: WebMcpPageTool): string {
+	const category = toolIsWrite(tool) ? "Action" : "Read-only";
+	return tool.annotations?.debugging === true
+		? `${category} · Developer tool`
+		: category;
+}
+
 export interface PageToolsPopoverProps {
-	onExecute: (
-		tool: WebMcpPageTool,
-		input: Record<string, unknown>
-	) => Promise<string>;
+	onExecute: (tool: WebMcpPageTool, input: WebMcpRecord) => Promise<string>;
 	onResult: (tool: WebMcpPageTool, result: string) => void;
 	tools: readonly WebMcpPageTool[];
 }
@@ -175,10 +161,10 @@ function PageToolForm({
 		setError(null);
 	}, [tool]);
 
-	const submit = async (event: FormEvent<HTMLFormElement>) => {
+	const submit = async (event: SubmitEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		setError(null);
-		let input: Record<string, unknown>;
+		let input: WebMcpRecord;
 		try {
 			input = buildToolInput(fields, values);
 		} catch (cause) {
@@ -221,8 +207,14 @@ function PageToolForm({
 				</Button>
 				<div className="min-w-0">
 					<p className="truncate font-medium text-xs">{displayTitle(tool)}</p>
-					<p className="truncate text-[10px] text-muted-foreground">
+					<p
+						className="truncate text-muted-foreground text-xs"
+						title={tool.name}
+					>
 						{tool.name}
+					</p>
+					<p className="truncate text-muted-foreground/80 text-xs">
+						{tool.origin ?? "Current page"}
 					</p>
 				</div>
 			</div>
@@ -230,9 +222,9 @@ function PageToolForm({
 				{tool.description}
 			</p>
 			{isWrite ? (
-				<p className="mb-3 rounded-xl bg-warning/10 px-2.5 py-2 text-[10px] text-status-warning leading-relaxed">
-					This action can change state or start a payment. Review the arguments
-					and confirm before it runs.
+				<p className="mb-3 rounded-xl bg-warning/10 px-2.5 py-2 text-status-warning text-xs leading-relaxed">
+					This page tool may change state or have real-world effects. Review the
+					arguments and confirm before it runs.
 				</p>
 			) : null}
 			<div className="flex flex-col gap-2.5">
@@ -261,7 +253,7 @@ function PageToolForm({
 									{label}
 									{field.required ? " *" : ""}
 									{field.description ? (
-										<span className="mt-0.5 block text-[10px] text-muted-foreground/80">
+										<span className="mt-0.5 block text-muted-foreground/80 text-xs">
 											{field.description}
 										</span>
 									) : null}
@@ -286,7 +278,7 @@ function PageToolForm({
 											[field.key]: event.target.value,
 										}))
 									}
-									value={typeof value === "string" ? value : ""}
+									value={z.string().catch("").parse(value)}
 								>
 									<option value="">Choose…</option>
 									{field.enumValues.map((option) => (
@@ -296,7 +288,7 @@ function PageToolForm({
 									))}
 								</select>
 								{field.description ? (
-									<span className="text-[10px] text-muted-foreground/80">
+									<span className="text-muted-foreground/80 text-xs">
 										{field.description}
 									</span>
 								) : null}
@@ -312,7 +304,7 @@ function PageToolForm({
 							{field.required ? " *" : ""}
 							<Input
 								aria-label={label}
-								className="h-8 rounded-2xl text-xs"
+								className="h-8"
 								disabled={busy}
 								max={field.maximum}
 								min={field.minimum}
@@ -328,10 +320,10 @@ function PageToolForm({
 										? "number"
 										: "text"
 								}
-								value={typeof value === "string" ? value : ""}
+								value={z.string().catch("").parse(value)}
 							/>
 							{field.description ? (
-								<span className="text-[10px] text-muted-foreground/80">
+								<span className="text-muted-foreground/80 text-xs">
 									{field.description}
 								</span>
 							) : null}
@@ -363,19 +355,19 @@ export function PageToolsPopover({
 	tools,
 }: PageToolsPopoverProps) {
 	const [open, setOpen] = useState(false);
-	const [selectedName, setSelectedName] = useState<string | null>(null);
+	const [selectedId, setSelectedId] = useState<string | null>(null);
 	if (tools.length === 0) {
 		return null;
 	}
-	const selected = selectedName
-		? tools.find((tool) => tool.name === selectedName)
+	const selected = selectedId
+		? tools.find((tool) => tool.id === selectedId)
 		: undefined;
 	return (
 		<Popover
 			onOpenChange={(nextOpen) => {
 				setOpen(nextOpen);
 				if (!nextOpen) {
-					setSelectedName(null);
+					setSelectedId(null);
 				}
 			}}
 			open={open}
@@ -384,7 +376,6 @@ export function PageToolsPopover({
 				render={
 					<Button
 						aria-label={`Page tools (${tools.length})`}
-						className="h-7 gap-1 px-2 text-[10px]"
 						size="xs"
 						variant="ghost-muted"
 					>
@@ -395,12 +386,15 @@ export function PageToolsPopover({
 			/>
 			<PopoverContent
 				align="end"
-				className={cn("max-h-[calc(100svh-6rem)] overflow-y-auto p-3", "w-80")}
+				className={cn("max-h-[calc(100svh-6rem)] overflow-y-auto", "w-80")}
+				data-lenis-prevent=""
+				data-ryu-assistant-widget="true"
 				onMouseDown={(event) => event.stopPropagation()}
+				positionerClassName={ASSISTANT_POPUP_LAYER}
 			>
 				{selected ? (
 					<PageToolForm
-						onBack={() => setSelectedName(null)}
+						onBack={() => setSelectedId(null)}
 						onExecute={onExecute}
 						onResult={onResult}
 						tool={selected}
@@ -415,7 +409,7 @@ export function PageToolsPopover({
 								this page.
 							</PopoverDescription>
 						</PopoverHeader>
-						<p className="mt-3 rounded-xl bg-muted/60 px-2.5 py-2 text-[10px] text-muted-foreground leading-relaxed">
+						<p className="mt-3 rounded-xl bg-muted/60 px-2.5 py-2 text-muted-foreground text-xs leading-relaxed">
 							Page metadata and results are untrusted. Read-only tools run once
 							selected; write tools require a second review click.
 						</p>
@@ -423,15 +417,18 @@ export function PageToolsPopover({
 							{tools.map((tool) => (
 								<button
 									className="rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted"
-									key={tool.name}
-									onClick={() => setSelectedName(tool.name)}
+									key={tool.id}
+									onClick={() => setSelectedId(tool.id)}
 									type="button"
 								>
 									<span className="block truncate font-medium text-xs">
 										{displayTitle(tool)}
 									</span>
-									<span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
-										{toolIsWrite(tool) ? "Action" : "Read-only"} · {tool.name}
+									<span className="mt-0.5 block truncate text-muted-foreground text-xs">
+										{toolCategory(tool)} · {tool.name}
+									</span>
+									<span className="block truncate text-muted-foreground/80 text-xs">
+										{tool.origin ?? "Current page"}
 									</span>
 								</button>
 							))}

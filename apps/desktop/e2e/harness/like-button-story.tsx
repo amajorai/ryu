@@ -40,8 +40,9 @@ const counts = new Map<string, number>([
 
 /** Sign-in prompts the anonymous row triggered, read by the spec. */
 const authPrompts: string[] = [];
-(window as unknown as { __likeAuthPrompts: string[] }).__likeAuthPrompts =
-	authPrompts;
+/* SAFETY: This module publishes its own authPrompts string array on the native browser Window; its sole mutation appends the authored prompted string. The view claims only this private capture slot. */ (
+	window as typeof window & { __likeAuthPrompts: string[] }
+).__likeAuthPrompts = authPrompts;
 const mine = new Set<string>();
 
 /** Resolve after a beat, so the OPTIMISTIC state is observable before the
@@ -89,8 +90,7 @@ const host: MarketplaceHost = {
 		},
 	},
 	openExternal: () => undefined,
-	startPurchase: () =>
-		Promise.resolve({ alreadyLicensed: false, url: "" } as never),
+	startPurchase: () => Promise.resolve({ alreadyLicensed: false, url: "" }),
 	useLicenses: () => ({
 		authed: false,
 		error: null,
@@ -114,10 +114,14 @@ const host: MarketplaceHost = {
  *  still renders with its real count and a click must prompt rather than like.
  *  A separate provider because `canLike` is a property of the host, and the two
  *  states must be observable side by side in one page. */
+const signedInLikes = host.likes;
+if (!signedInLikes) {
+	throw new Error("Like proof requires its authored service");
+}
 const signedOutHost: MarketplaceHost = {
 	...host,
 	likes: {
-		...(host.likes as NonNullable<MarketplaceHost["likes"]>),
+		...signedInLikes,
 		canLike: () => false,
 		onRequireAuth: () => authPrompts.push("prompted"),
 	},

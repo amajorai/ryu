@@ -158,6 +158,7 @@ describe("SkillTargetDialog", () => {
 		expect(document.body.textContent).not.toContain("OpenCode");
 
 		await click(button("Show all supported agents"));
+		// SAFETY: After this awaited show-all click, the actual dialog publishes its sole named searchbox through the native Input owner without a render override. byRole already rejects a missing element; this remaining view identifies that existing native input only.
 		const search = byRole(
 			"searchbox",
 			"Search supported agents"

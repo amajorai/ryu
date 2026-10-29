@@ -3,14 +3,12 @@
 import { AwardBadge } from "@ryu/ui/components/award-badge";
 import { buttonVariants } from "@ryu/ui/components/button";
 import { ChromaticTextReveal } from "@ryu/ui/components/motion/chromatic-text-reveal";
-import PageHeader from "@ryu/ui/components/page-header";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
 import { cn } from "@ryu/ui/lib/utils";
 import { Library } from "lucide-react";
 import Link from "next/link";
 import { DEMO_HREF } from "./data/resources.tsx";
 import HeroDesktopDemo from "./hero-desktop-demo.tsx";
-import { landingHeadlineClass } from "./landing-typography.ts";
 
 const DECOSMIC_HREF = "https://decosmic.com";
 const AMAJOR_HREF = "https://amajor.ai";
@@ -26,10 +24,10 @@ const PRODUCT_HUNT_HREF = "https://www.producthunt.com/products/ryu";
 const SHOW_AWARD_BADGE = false;
 
 /**
- * The homepage is the Bot launch page. Console and Platform stay in the product
+ * The homepage is the Bot launch page. Agent and Platform stay in the product
  * navigation; this hero only needs to make the managed Bot concrete.
  */
-const HERO_TITLE = "Meet Ryu Bot.";
+const HERO_TITLE = "Meet Bot.";
 
 /**
  * The headline gets the same chromatic sweep every section header on this page
@@ -92,7 +90,7 @@ export default function Hero() {
 									rel="noopener noreferrer"
 									target="_blank"
 								>
-									<span className="inline-flex size-4 shrink-0 items-center justify-center rounded-[5px] bg-[#0099ff] text-white">
+									<span className="inline-flex size-4 shrink-0 items-center justify-center rounded-(--radius-artwork-compact) bg-info text-white">
 										<Library
 											aria-hidden="true"
 											className="size-2.5"
@@ -110,31 +108,26 @@ export default function Hero() {
 								>
 									<img
 										alt=""
-										className="size-4 shrink-0 rounded-[5px] object-cover"
+										className="size-4 shrink-0 rounded-(--radius-artwork-compact) object-cover"
 										src="/logos/amajor.png"
 									/>
 									A Major
 								</a>
 							</p>
 
-							<PageHeader
-								className="max-w-2xl whitespace-pre-line"
-								stagger={false}
-								title={
-									<>
-										{HERO_TITLE_PREFIX}
-										<ChromaticTextReveal
-											delay={HERO_SWEEP_DELAY_S}
-											loop={false}
-											once
-											prefix=""
-											startOnView
-											words={[HERO_TITLE_LAST_WORD]}
-										/>
-									</>
-								}
-								titleClassName={landingHeadlineClass}
-							/>
+							<div className="max-w-2xl whitespace-pre-line">
+								<h1 className="text-balance font-heading font-medium text-3xl text-foreground leading-tight tracking-tight md:text-4xl">
+									{HERO_TITLE_PREFIX}
+									<ChromaticTextReveal
+										delay={HERO_SWEEP_DELAY_S}
+										loop={false}
+										once
+										prefix=""
+										startOnView
+										words={[HERO_TITLE_LAST_WORD]}
+									/>
+								</h1>
+							</div>
 
 							<p className="max-w-lg text-muted-foreground text-sm leading-relaxed">
 								Managed AI you can give real work to. It has its own computer,
@@ -144,10 +137,10 @@ export default function Hero() {
 
 							<div className="flex flex-col gap-3 sm:flex-row">
 								<Link
-									className={cn(buttonVariants({ variant: "default" }))}
+									className={cn(buttonVariants({ variant: "mono" }))}
 									href="/download"
 								>
-									Get Ryu Bot
+									Get Bot
 								</Link>
 								<Link
 									className={cn(buttonVariants({ variant: "ghost" }))}

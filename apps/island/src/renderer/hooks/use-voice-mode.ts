@@ -48,7 +48,7 @@ export interface VoiceMode {
 }
 
 const AUDIO_LEVEL_HISTORY_SIZE = 24;
-const SILENT_LEVELS = new Array<number>(AUDIO_LEVEL_HISTORY_SIZE).fill(0);
+const SILENT_LEVELS = Array.from({ length: AUDIO_LEVEL_HISTORY_SIZE }, () => 0);
 
 function clampAudioLevel(level: number): number {
 	return Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
@@ -139,7 +139,7 @@ export function useVoiceMode(options: VoiceModeOptions = {}): VoiceMode {
 				connRef.current = conn;
 				return conn.start();
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				setError(
 					e instanceof Error
 						? e.message

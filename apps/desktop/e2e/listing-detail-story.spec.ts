@@ -78,14 +78,24 @@ test("renders GitHub presentation metadata and screenshots", async ({
 	const screenshots = page.locator("img[alt^='Example App screenshot']");
 	await expect(screenshots).toHaveCount(5);
 	expect(
-		await screenshots
-			.first()
-			.evaluate((image) => (image as HTMLImageElement).naturalWidth)
+		await screenshots.first().evaluate((image) => {
+			if (!(image instanceof HTMLImageElement)) {
+				throw new Error("Expected proof element to be an HTMLImageElement.");
+			}
+			return image.naturalWidth;
+		})
 	).toBeGreaterThan(0);
 
 	await page.screenshot({
 		fullPage: true,
 		path: testInfo.outputPath("marketplace-rich-metadata-hero.png"),
+	});
+	await page.locator("html").evaluate((element) => {
+		element.classList.add("dark");
+	});
+	await page.screenshot({
+		fullPage: true,
+		path: testInfo.outputPath("marketplace-rich-metadata-hero-dark.png"),
 	});
 	await page.locator("[data-testid='dialog']").evaluate((element) => {
 		element.scrollTop = 250;
@@ -123,7 +133,7 @@ test("renders the support, extension, and implementation split", async ({
 	await page.getByTestId("surface-support").scrollIntoViewIfNeeded();
 	await page.screenshot({
 		fullPage: true,
-		path: "/Users/jiawei/Documents/Code/ryu/apps/desktop/artifacts/marketplace-support-extension-proof.png",
+		path: testInfo.outputPath("marketplace-support-extension-proof.png"),
 	});
 });
 
@@ -168,7 +178,10 @@ test("the hero tile's wash stays opaque under its white glyph", async ({
 	// pass while the other end is see-through. A two-tone ramp paints every cell,
 	// so its minimum is the opacity multiplier — full here.
 	const minAlpha = await canvases.nth(tiles[0]).evaluate((el) => {
-		const canvas = el as HTMLCanvasElement;
+		if (!(el instanceof HTMLCanvasElement)) {
+			throw new Error("Expected proof element to be an HTMLCanvasElement.");
+		}
+		const canvas = el;
 		const ctx = canvas.getContext("2d");
 		if (!ctx) {
 			throw new Error("no 2d context on the tile canvas");

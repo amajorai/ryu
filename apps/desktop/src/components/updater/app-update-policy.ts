@@ -40,8 +40,48 @@ export type AppUpdatePinPolicy =
 	| { kind: "none" }
 	| { allowed: boolean; kind: "required"; tag: string };
 
+/**
+ * The verdict's release, as the nightly and canary feeds need it.
+ *
+ * Those builds publish their feed only on their own versioned tag (the rolling
+ * `nightly`/`canary` tags are retired), so the install has to follow the
+ * verdict's `tag`. That tag is node-asserted, and `checkForUpdate` accepts an
+ * arbitrary node URL, so it is trusted only when the LOCAL node answered (the
+ * same gate as pinned installs) and only when it names exactly the advertised
+ * version on the client's own channel. A remote node could otherwise choose
+ * which signed build lands on this machine.
+ */
+export interface AppUpdateLatestRelease {
+	fromLocalNode: boolean;
+	tag?: string | null;
+	version: string;
+}
+
+function trustedChannelTag(
+	channel: ReleaseChannel,
+	latest: AppUpdateLatestRelease | undefined
+): string | null {
+	if (!latest?.fromLocalNode) {
+		return null;
+	}
+	const tag = latest.tag?.trim() ?? "";
+	const version = latest.version.trim();
+	if (tag === "" || version === "" || tag !== `v${version}`) {
+		return null;
+	}
+	// The prerelease identifier must be the client's channel, so a nightly
+	// build cannot be steered onto a canary tag (or a stable/beta one).
+	const prerelease = version.split("+", 1)[0]?.split("-").slice(1).join("-");
+	return prerelease?.split(".")[0] === channel ? tag : null;
+}
+
+/**
+ * Without a trusted `latest` tag, nightly and canary have no feed to read and
+ * the caller falls back to a manual download.
+ */
 export function resolveAppUpdateSource(input: {
 	channel: ReleaseChannel;
+	latest?: AppUpdateLatestRelease;
 	pin: AppUpdatePinPolicy;
 }): AppUpdateSource | null {
 	if (input.pin.kind === "required") {
@@ -61,5 +101,9 @@ export function resolveAppUpdateSource(input: {
 	if (input.channel === "stable") {
 		return { kind: "stable" };
 	}
-	return { channel: input.channel, kind: "channel" };
+	if (input.channel === "beta") {
+		return { channel: input.channel, kind: "channel" };
+	}
+	const tag = trustedChannelTag(input.channel, input.latest);
+	return tag ? { channel: input.channel, kind: "tag", tag } : null;
 }

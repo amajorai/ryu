@@ -56,7 +56,7 @@ import {
 /** Chip geometry, matching `BASE_CHIP` in the marketplace's catalog-badges so a
  *  status glyph lines up with the token/size badges it sits beside. */
 const BASE_CHIP =
-	"inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-3xl px-1.5 py-0.5 font-medium text-[11px] whitespace-nowrap";
+	"inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-3xl px-1.5 py-0.5 font-medium type-caption whitespace-nowrap";
 
 /** The four attributes a catalog row, a library row or a sidebar row can carry. */
 export type StatusKind = "active" | "builtin" | "default" | "unavailable";
@@ -77,10 +77,7 @@ export type StatusKind = "active" | "builtin" | "default" | "unavailable";
  *   • `UnavailableIcon` is already the "signature invalid" mark on two surfaces,
  *     which is the same "you cannot have this" reading.
  */
-const STATUS_META: Record<
-	StatusKind,
-	{ icon: IconSvgElement; label: string; tone: string }
-> = {
+const STATUS_META = {
 	active: {
 		icon: CheckmarkCircle02Icon,
 		label: "Active",
@@ -101,7 +98,10 @@ const STATUS_META: Record<
 		label: "Unavailable",
 		tone: "bg-destructive/12 text-status-destructive",
 	},
-};
+} satisfies Record<
+	StatusKind,
+	{ icon: IconSvgElement; label: string; tone: string }
+>;
 
 /** The label a given status shows on hover, before any caller override. */
 export function statusLabel(kind: StatusKind): string {

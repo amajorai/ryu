@@ -26,12 +26,13 @@ import {
 	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Skeleton } from "@ryu/ui/components/skeleton";
-import { cn } from "@ryu/ui/lib/utils";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BoardView } from "@/src/components/panels/crm/BoardView.tsx";
 import { Duplicates } from "@/src/components/panels/crm/Duplicates.tsx";
 import { ImportWizard } from "@/src/components/panels/crm/ImportWizard.tsx";
@@ -62,6 +63,7 @@ type Mode =
 	| { kind: "schema" };
 
 export function CrmPanel() {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const { apps } = useApps();
 
@@ -76,6 +78,8 @@ export function CrmPanel() {
 	const [viewId, setViewId] = useState<string | null>(null);
 	const [mode, setMode] = useState<Mode>({ kind: "list" });
 	const [search, setSearch] = useState("");
+	const creatingRef = useRef(false);
+	const [creating, setCreating] = useState(false);
 	const [hits, setHits] = useState<SearchHit[] | null>(null);
 
 	// Feature detection, exactly like the sibling dock panels: a disabled app gets
@@ -92,12 +96,17 @@ export function CrmPanel() {
 			return client
 				.getSchema(signal)
 				.then((next) => {
+					if (signal?.aborted) {
+						return;
+					}
 					setSchema(next);
-					setObjectSlug(
-						(current) => current ?? next.objects[0]?.object.slug ?? null
+					setObjectSlug((current) =>
+						next.objects.some((entry) => entry.object.slug === current)
+							? current
+							: (next.objects[0]?.object.slug ?? null)
 					);
 				})
-				.catch((cause: unknown) => {
+				.catch((cause) => {
 					if (signal?.aborted) {
 						return;
 					}
@@ -151,6 +160,7 @@ export function CrmPanel() {
 	// so typing does not issue a query per keystroke.
 	useEffect(() => {
 		const needle = search.trim();
+		setHits(null);
 		if (needle.length < 2) {
 			setHits(null);
 			return;
@@ -159,7 +169,11 @@ export function CrmPanel() {
 		const timer = setTimeout(() => {
 			client
 				.search(needle, undefined, controller.signal)
-				.then((response) => setHits(response.hits))
+				.then((response) => {
+					if (!controller.signal.aborted) {
+						setHits(response.hits);
+					}
+				})
 				.catch(() => {
 					// A failed search leaves the grid's own filtering in place rather
 					// than surfacing an error over the whole panel.
@@ -172,14 +186,20 @@ export function CrmPanel() {
 	}, [client, search]);
 
 	const createRecord = async () => {
-		if (!subject) {
+		if (!subject || creatingRef.current) {
 			return;
 		}
+		creatingRef.current = true;
+		setCreating(true);
+		setError(null);
 		try {
 			const created = await client.createRecord(subject.object.slug, {});
 			setMode({ kind: "record", recordId: created.id });
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
+		} finally {
+			creatingRef.current = false;
+			setCreating(false);
 		}
 	};
 
@@ -237,7 +257,7 @@ export function CrmPanel() {
 						/>
 						<Input
 							aria-label="Search all records"
-							className="pl-7"
+							leadingAdornment="search-icon"
 							onChange={(event) => setSearch(event.target.value)}
 							placeholder="Search everything…"
 							value={search}
@@ -249,7 +269,9 @@ export function CrmPanel() {
 					{hits ? (
 						<div>
 							<h2 className="mb-1 px-1 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-								{hits.length} result{hits.length === 1 ? "" : "s"}
+								{tl("{resultCount, plural, one {# result} other {# results}}", {
+									resultCount: hits.length,
+								})}
 							</h2>
 							<ul className="space-y-0.5">
 								{hits.map((hit) => (
@@ -265,7 +287,9 @@ export function CrmPanel() {
 											}}
 											type="button"
 										>
-											<div className="truncate text-sm">{hit.title}</div>
+											<div className="truncate text-sm" title={hit.title}>
+												{hit.title}
+											</div>
 											<div className="truncate text-muted-foreground text-xs">
 												{hit.object_slug} · {hit.snippet}
 											</div>
@@ -297,10 +321,13 @@ export function CrmPanel() {
 											}}
 											type="button"
 										>
-											<span className="truncate capitalize">
+											<span
+												className="truncate capitalize"
+												title={entry.object.plural}
+											>
 												{entry.object.plural}
 											</span>
-											<Badge className="font-normal" variant="secondary">
+											<Badge typography="normal" variant="secondary">
 												{entry.record_count}
 											</Badge>
 										</button>
@@ -375,6 +402,7 @@ export function CrmPanel() {
 					</Button>
 					<Button
 						className="w-full justify-start"
+						disabled={creating}
 						onClick={() => void createRecord()}
 						size="sm"
 						variant="ghost"
@@ -387,6 +415,14 @@ export function CrmPanel() {
 
 			{/* Main area */}
 			<div className="flex min-h-0 min-w-0 flex-1 flex-col">
+				{error && schema && (
+					<div
+						className="border-b bg-destructive/10 px-3 py-2 text-status-destructive text-xs"
+						role="alert"
+					>
+						{error}
+					</div>
+				)}
 				{subject ? (
 					mode.kind === "insights" ? (
 						<Insights
@@ -417,7 +453,12 @@ export function CrmPanel() {
 							client={client}
 							objectsBySlug={objectsBySlug}
 							onBack={() => setMode({ kind: "list" })}
-							onOpenRecord={(recordId) => setMode({ kind: "record", recordId })}
+							onOpenRecord={(recordId, relatedObjectSlug) => {
+								if (relatedObjectSlug) {
+									setObjectSlug(relatedObjectSlug);
+								}
+								setMode({ kind: "record", recordId });
+							}}
 							recordId={mode.recordId}
 							subject={subject}
 						/>

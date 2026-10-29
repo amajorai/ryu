@@ -1,6 +1,7 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { IconAt } from "@tabler/icons-react";
 import type { CSSProperties, ReactNode } from "react";
+import styles from "./elements-one.module.css";
 import type { MentionItem } from "./types.ts";
 
 const SAFE_MENTION_COLOR =
@@ -11,19 +12,8 @@ function safeMentionColor(value: string | undefined): string | undefined {
 	return trimmed && SAFE_MENTION_COLOR.test(trimmed) ? trimmed : undefined;
 }
 
-function mentionStyle(
-	item: MentionItem | undefined
-): CSSProperties | undefined {
-	const accent = safeMentionColor(item?.accentColor);
-	if (!accent) {
-		return undefined;
-	}
-
-	return {
-		"--mention-accent": accent,
-		"--mention-ink": `color-mix(in srgb, ${accent} 68%, #111827 32%)`,
-		color: `color-mix(in srgb, ${accent} 68%, #111827 32%)`,
-	} as CSSProperties;
+interface MentionAccentStyle extends CSSProperties {
+	"--mention-accent"?: string;
 }
 
 export interface MentionTokenProps {
@@ -34,20 +24,24 @@ export interface MentionTokenProps {
 
 /** The shared inline treatment for composer and transcript mentions. */
 export function MentionToken({ children, className, item }: MentionTokenProps) {
-	const hasAccent = Boolean(safeMentionColor(item?.accentColor));
+	const accent = safeMentionColor(item?.accentColor);
+	const hasAccent = Boolean(accent);
 	const icon = item?.visualIcon ?? item?.icon;
 
 	return (
 		<span
 			className={cn(
-				"inline-flex max-w-full items-center gap-1 align-baseline font-medium text-[0.9em] leading-[1.2] transition-colors",
-				hasAccent
-					? "[&_em]:!text-[color:var(--mention-ink)] [&_strong]:!text-[color:var(--mention-ink)] text-[color:var(--mention-ink)] hover:text-[color:var(--mention-accent)]"
-					: "text-primary",
+				styles.mention,
+				"inline-flex max-w-full items-center gap-1 align-baseline font-medium leading-tight transition-colors",
+				hasAccent ? styles.mentionAccent : "text-primary",
 				className
 			)}
 			data-mention-token={item?.kind ?? "reference"}
-			style={mentionStyle(item)}
+			style={
+				{
+					"--mention-accent": accent,
+				} satisfies MentionAccentStyle as MentionAccentStyle
+			}
 		>
 			<span
 				aria-hidden="true"

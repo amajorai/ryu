@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ApiTarget } from "./client.ts";
 import { request } from "./client.ts";
 import type { AgentSelection } from "./preferences.ts";
@@ -68,6 +69,8 @@ export interface OnboardingAgentSuggestion {
 
 export interface ProfileJobStatus {
 	agentSuggestions: OnboardingAgentSuggestion[];
+	/** The user chose to leave the progress view; the build runs either way. */
+	background: boolean;
 	conversationId: string | null;
 	error: string | null;
 	id: string;
@@ -78,6 +81,7 @@ export interface ProfileJobStatus {
 
 interface ProfileJobWire {
 	agentSuggestions?: OnboardingAgentSuggestion[];
+	background?: boolean;
 	conversationId?: string | null;
 	error?: string | null;
 	id: string;
@@ -89,6 +93,9 @@ interface ProfileJobWire {
 function normalize(job: ProfileJobWire): ProfileJobStatus {
 	return {
 		agentSuggestions: job.agentSuggestions ?? [],
+		// Older nodes only materialized after "Run in background", so their
+		// `materialized` flag is the background choice.
+		background: job.background ?? job.materialized ?? false,
 		conversationId: job.conversationId ?? null,
 		error: job.error ?? null,
 		id: job.id,
@@ -101,16 +108,26 @@ function normalize(job: ProfileJobWire): ProfileJobStatus {
 export async function fetchGatewayOnboardingAccess(
 	target: ApiTarget
 ): Promise<GatewayOnboardingAccess> {
-	return request<GatewayOnboardingAccess>(target, "/api/onboarding/access");
+	return request<GatewayOnboardingAccess>(
+		target,
+		"/api/onboarding/access",
+		{},
+		gatewayOnboardingAccessResponseSchema
+	);
 }
 
 /** Read node onboarding state; a missing/old route is handled by the caller. */
 export async function fetchNodeOnboardingState(
 	target: ApiTarget
 ): Promise<NodeOnboardingSnapshot> {
-	return request<NodeOnboardingSnapshot>(target, "/api/onboarding/state", {
-		signal: AbortSignal.timeout(10_000),
-	});
+	return request<NodeOnboardingSnapshot>(
+		target,
+		"/api/onboarding/state",
+		{
+			signal: AbortSignal.timeout(10_000),
+		},
+		nodeOnboardingSnapshotResponseSchema
+	);
 }
 
 export interface SaveNodeOnboardingStateInput {
@@ -125,21 +142,31 @@ export async function saveNodeOnboardingState(
 	target: ApiTarget,
 	input: SaveNodeOnboardingStateInput
 ): Promise<NodeOnboardingSnapshot> {
-	return request<NodeOnboardingSnapshot>(target, "/api/onboarding/state", {
-		body: input,
-		method: "PUT",
-		signal: AbortSignal.timeout(10_000),
-	});
+	return request<NodeOnboardingSnapshot>(
+		target,
+		"/api/onboarding/state",
+		{
+			body: input,
+			method: "PUT",
+			signal: AbortSignal.timeout(10_000),
+		},
+		nodeOnboardingSnapshotResponseSchema
+	);
 }
 
 /** Clear only the node's onboarding state; durable chats and memories remain. */
 export async function resetNodeOnboardingState(
 	target: ApiTarget
 ): Promise<NodeOnboardingSnapshot> {
-	return request<NodeOnboardingSnapshot>(target, "/api/onboarding/state", {
-		method: "DELETE",
-		signal: AbortSignal.timeout(10_000),
-	});
+	return request<NodeOnboardingSnapshot>(
+		target,
+		"/api/onboarding/state",
+		{
+			method: "DELETE",
+			signal: AbortSignal.timeout(10_000),
+		},
+		nodeOnboardingSnapshotResponseSchema
+	);
 }
 
 export async function fetchProfileAvailability(
@@ -147,7 +174,9 @@ export async function fetchProfileAvailability(
 ): Promise<ProfileAvailability> {
 	return request<ProfileAvailability>(
 		target,
-		"/api/onboarding/profile/availability"
+		"/api/onboarding/profile/availability",
+		{},
+		profileAvailabilityResponseSchema
 	);
 }
 
@@ -169,7 +198,8 @@ export async function startProfileJob(
 		{
 			method: "POST",
 			body: input,
-		}
+		},
+		profileJobWireResponseSchema
 	);
 	return normalize(job);
 }
@@ -180,7 +210,9 @@ export async function getProfileJobStatus(
 ): Promise<ProfileJobStatus> {
 	const job = await request<ProfileJobWire>(
 		target,
-		`/api/onboarding/profile/status/${encodeURIComponent(jobId)}`
+		`/api/onboarding/profile/status/${encodeURIComponent(jobId)}`,
+		{},
+		profileJobWireResponseSchema
 	);
 	return normalize(job);
 }
@@ -192,7 +224,8 @@ export async function cancelProfileJob(
 	const job = await request<ProfileJobWire>(
 		target,
 		`/api/onboarding/profile/cancel/${encodeURIComponent(jobId)}`,
-		{ method: "POST" }
+		{ method: "POST" },
+		profileJobWireResponseSchema
 	);
 	return normalize(job);
 }
@@ -204,7 +237,119 @@ export async function continueProfileJobInBackground(
 	const job = await request<ProfileJobWire>(
 		target,
 		`/api/onboarding/profile/background/${encodeURIComponent(jobId)}`,
-		{ method: "POST" }
+		{ method: "POST" },
+		profileJobWireResponseSchema
 	);
 	return normalize(job);
+}
+
+const gatewayOnboardingAccessResponseSchema: z.ZodType<GatewayOnboardingAccess> =
+	retainValidatedResponse(
+		z
+			.object({
+				allowed: z.boolean(),
+				managedNode: z.boolean(),
+				reason: z.union([
+					z.union([
+						z.literal("local_node"),
+						z.literal("personal_node"),
+						z.literal("managed_node"),
+						z.literal("shared_acl_node"),
+						z.literal("shared_node_admin"),
+						z.literal("not_node_owner"),
+						z.literal("profile_not_eligible"),
+						z.literal("ready"),
+					]),
+					z.string(),
+				]),
+				scope: z.union([
+					z.literal("org"),
+					z.literal("team"),
+					z.literal("personal"),
+					z.null(),
+				]),
+			})
+			.passthrough()
+	);
+const nodeOnboardingSnapshotResponseSchema: z.ZodType<NodeOnboardingSnapshot> =
+	retainValidatedResponse(
+		z
+			.object({
+				canConfigure: z.boolean(),
+				completed: z.boolean(),
+				completedAtMs: z.union([z.number(), z.null()]),
+				personalization: z
+					.object({
+						companyContext: z.string(),
+						companyKnowledgeEnabled: z.boolean(),
+					})
+					.passthrough(),
+				setupKind: z.union([
+					z.union([z.literal("personal"), z.literal("team")]),
+					z.null(),
+				]),
+				version: z.number(),
+			})
+			.passthrough()
+	);
+const profileAvailabilityResponseSchema: z.ZodType<ProfileAvailability> =
+	retainValidatedResponse(
+		z
+			.object({
+				allowed: z.boolean(),
+				completed: z.boolean(),
+				reason: z.union([
+					z.union([
+						z.literal("local_node"),
+						z.literal("personal_node"),
+						z.literal("managed_node"),
+						z.literal("shared_acl_node"),
+						z.literal("shared_node_admin"),
+						z.literal("not_node_owner"),
+						z.literal("profile_not_eligible"),
+						z.literal("ready"),
+					]),
+					z.string(),
+				]),
+			})
+			.passthrough()
+	);
+const profileJobWireResponseSchema: z.ZodType<ProfileJobWire> =
+	retainValidatedResponse(
+		z
+			.object({
+				agentSuggestions: z
+					.array(
+						z
+							.object({
+								description: z.string(),
+								id: z.string(),
+								name: z.string(),
+								reason: z.string(),
+								systemPrompt: z.string(),
+								title: z.string(),
+								tools: z.array(z.string()),
+							})
+							.passthrough()
+					)
+					.optional(),
+				background: z.boolean().optional(),
+				conversationId: z.union([z.string(), z.null()]).optional(),
+				error: z.union([z.string(), z.null()]).optional(),
+				id: z.string(),
+				materialized: z.boolean().optional(),
+				startedAtMs: z.number().optional(),
+				state: z.union([
+					z.literal("queued"),
+					z.literal("building"),
+					z.literal("completed"),
+					z.literal("failed"),
+					z.literal("cancelled"),
+				]),
+			})
+			.passthrough()
+	);
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

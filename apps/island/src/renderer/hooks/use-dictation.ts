@@ -22,11 +22,13 @@ import { downsample, encodeWav, TARGET_SAMPLE_RATE } from "../lib/wav.ts";
 import { useIslandState } from "../store/island-state.ts";
 
 /** Sidecar name (for `sidecarStart`) per transcription engine. */
-const ENGINE_SIDECARS: Record<string, string> = {
-	whisper: "whispercpp",
-	parakeet: "parakeet",
-	audiocpp: "audiocpp",
-};
+const ENGINE_SIDECARS = new Map(
+	Object.entries({
+		whisper: "whispercpp",
+		parakeet: "parakeet",
+		audiocpp: "audiocpp",
+	})
+);
 
 /**
  * Wire the dictation / agent-ask shortcuts to mic capture + insertion. The
@@ -41,6 +43,12 @@ export function useDictation(): void {
 
 	const engineRef = useRef<string>(DEFAULT_DICTATION_PREFS.engine);
 	const recordingRef = useRef(false);
+	// A start is in flight while `getUserMedia` is pending; a stop that lands in
+	// that window (fast hold-to-talk release) is recorded so the opened stream is
+	// released instead of capturing and later typing audio nobody held a key for.
+	const startingRef = useRef(false);
+	const stopRequestedRef = useRef(false);
+	const mountedRef = useRef(true);
 	const taskRef = useRef<DictationTask>("transcribe");
 
 	const streamRef = useRef<MediaStream | null>(null);
@@ -111,11 +119,25 @@ export function useDictation(): void {
 			if (recordingRef.current || !navigator.mediaDevices?.getUserMedia) {
 				return;
 			}
+			if (startingRef.current) {
+				// A fresh press while the mic is still opening re-arms the hold.
+				stopRequestedRef.current = false;
+				return;
+			}
+			startingRef.current = true;
+			stopRequestedRef.current = false;
 			taskRef.current = task;
 			try {
 				const stream = await navigator.mediaDevices.getUserMedia({
 					audio: true,
 				});
+				if (stopRequestedRef.current || !mountedRef.current) {
+					// Released (or unmounted) before the mic opened: never arm capture.
+					for (const track of stream.getTracks()) {
+						track.stop();
+					}
+					return;
+				}
 				streamRef.current = stream;
 
 				const ctx = new AudioContext();
@@ -143,6 +165,8 @@ export function useDictation(): void {
 				teardown();
 				recordingRef.current = false;
 				window.island.dictation.setRecording(false, task);
+			} finally {
+				startingRef.current = false;
 			}
 		},
 		[teardown]
@@ -150,6 +174,9 @@ export function useDictation(): void {
 
 	const stopRecording = useCallback((): void => {
 		if (!recordingRef.current) {
+			if (startingRef.current) {
+				stopRequestedRef.current = true;
+			}
 			return;
 		}
 		const task = taskRef.current;
@@ -170,7 +197,7 @@ export function useDictation(): void {
 				}
 				// The engine sidecar likely isn't running (voice engines are opt-in to
 				// start). Kick it off so the next attempt works.
-				const sidecar = ENGINE_SIDECARS[engineRef.current];
+				const sidecar = ENGINE_SIDECARS.get(engineRef.current);
 				if (sidecar) {
 					window.island.core.sidecarStart(sidecar).catch(() => {
 						// Best-effort cold start; the next dictation will transcribe.
@@ -184,7 +211,7 @@ export function useDictation(): void {
 
 	const toggle = useCallback(
 		(task: DictationTask): void => {
-			if (recordingRef.current) {
+			if (recordingRef.current || startingRef.current) {
 				stopRecording();
 			} else {
 				startRecording(task).catch(() => undefined);
@@ -198,6 +225,7 @@ export function useDictation(): void {
 	//  - start/stop: push-to-talk key-down / key-release (hold-to-talk mode), where
 	//    the release is seen through the main process's global key hook.
 	useEffect(() => {
+		mountedRef.current = true;
 		const offToggle = window.island.dictation.onToggle((task) => toggle(task));
 		const offStart = window.island.dictation.onStart((task) => {
 			startRecording(task).catch(() => undefined);
@@ -207,6 +235,7 @@ export function useDictation(): void {
 			offToggle();
 			offStart();
 			offStop();
+			mountedRef.current = false;
 			teardown();
 		};
 	}, [toggle, startRecording, stopRecording, teardown]);

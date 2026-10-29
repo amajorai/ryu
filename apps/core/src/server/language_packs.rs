@@ -169,7 +169,7 @@ pub(crate) async fn installed(State(_state): State<ServerState>) -> Response {
             return super::json_error(
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 error.to_string(),
-            )
+            );
         }
     };
     let mut packs = Vec::new();
@@ -272,7 +272,7 @@ pub(crate) async fn import(
                 return super::json_error(
                     StatusCode::BAD_REQUEST,
                     format!("archive_base64 is invalid: {error}"),
-                )
+                );
             }
         };
     let extracted = match crate::portable_packages::extract_archive(&archive) {
@@ -322,7 +322,7 @@ pub(crate) async fn import(
     ) {
         Ok(package) => package,
         Err(error) => {
-            return super::json_error(StatusCode::UNPROCESSABLE_ENTITY, error.to_string())
+            return super::json_error(StatusCode::UNPROCESSABLE_ENTITY, error.to_string());
         }
     };
     let owner = super::spaces::owner_of(&super::caller_tenancy(&caller));

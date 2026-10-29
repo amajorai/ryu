@@ -33,10 +33,10 @@ export default function StoreCategoryPage<T>({
 			<nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm">
 				<Button
 					aria-label="Back to categories"
-					className="-ml-2 gap-1 text-muted-foreground hover:text-foreground"
+					className="-ml-2"
 					onClick={onBack}
 					size="sm"
-					variant="ghost"
+					variant="ghost-muted"
 				>
 					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
 					<span>Categories</span>

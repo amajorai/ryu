@@ -20,14 +20,16 @@ import {
 	type CatalogVersion,
 } from "@ryu/marketplace/catalog/types";
 import {
+	type DefaultError,
 	keepPreviousData,
+	skipToken,
+	type UseQueryOptions,
 	useInfiniteQuery,
 	useMutation,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
-import { TOKEN_KEY } from "@/lib/auth-client.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchInstalledPortablePackages,
@@ -45,9 +47,7 @@ import {
 	fetchApps,
 	fetchPluginCatalogDetail,
 	fetchPluginSources,
-	installApp,
 	installAppFromUrl,
-	installPluginFromCatalog,
 	installPluginFromCatalogAtVersion,
 	type PluginCatalogDetail,
 	type PluginCatalogSource,
@@ -55,19 +55,15 @@ import {
 	updateInstalledPlugin,
 	updateInstalledPluginAtVersion,
 } from "@/src/lib/api/plugins.ts";
+import {
+	installCatalogEntry,
+	portablePackageTarget,
+	readBuyerToken,
+} from "@/src/lib/catalog-entry-install.ts";
 import { beginInstall, endInstall } from "@/src/store/useInstallStore.ts";
 import { useDebouncedValue } from "./use-debounced-value.ts";
 import { useActiveNode } from "./useActiveNode.ts";
-
-/** Read the control-plane session bearer for optional Marketplace account-aware
- *  operations. Installs remain available without a plan or item license. */
-function readBuyerToken(): string | null {
-	try {
-		return localStorage.getItem(TOKEN_KEY);
-	} catch {
-		return null;
-	}
-}
+import { useOrgFeatures } from "./useOrgFeatures.ts";
 
 /** A catalog entry joined with its live lifecycle record (if any). */
 export interface AppCatalogItem {
@@ -116,6 +112,8 @@ export interface UseAppsCatalogResult {
 	 *  that need the cross-instance truth (the Store mounts this hook twice) read
 	 *  the shared install store instead — see `useInstallStore`. */
 	installing: string | null;
+	/** Error from the manual manifest URL install field, shown beside that field. */
+	installUrlError: string | null;
 	/** Install or update one exact historical version from the Versions tab. */
 	installVersion: (id: string, version: CatalogVersion) => Promise<void>;
 	items: AppCatalogItem[];
@@ -144,19 +142,8 @@ const PAGE_LIMIT = 40;
  *  backstop against a wedged fetch — never the normal path. */
 const INSTALLED_REFRESH_DEADLINE_MS = 10_000;
 
-function portablePackageTarget(
-	entry: CatalogEntry
-): { id: string; kind: string } | null {
-	const kind = entry.package_kind?.trim();
-	if (!(kind && (entry.github_source || entry.download_url))) {
-		return null;
-	}
-	return { id: entry.id, kind };
-}
-
 /** Sources the picker must not offer.
  *
- *  - `ryu-apps` — a stub with no real feed behind it.
  *  - `ryu-marketplace` — the HOSTED commerce backend. It is not a rival catalog to
  *    browse: Core folds its paid listings into the `ryu-catalog` view, so the two
  *    render as ONE "Ryu Marketplace". Offering it as a second row was the confusing
@@ -169,11 +156,7 @@ function portablePackageTarget(
  *    filter unreviewed listings out by design, so every row the source returned
  *    would be dropped. Community stays reachable the one way that works — its own
  *    tab, which addresses the feed through `?origin=community`. */
-const HIDDEN_PLUGIN_SOURCES = new Set([
-	"ryu-apps",
-	"ryu-marketplace",
-	"github-topic",
-]);
+const HIDDEN_PLUGIN_SOURCES = new Set(["ryu-marketplace", "github-topic"]);
 
 // Query descriptors shared with the Store's warm-up path (`useStorePrefetch`), so
 // a prefetch always lands under the key this hook reads. See the same block in
@@ -216,6 +199,7 @@ export function pluginCatalogQuery(
 				// server-side preference.
 				source: origin ? undefined : params.source,
 			}),
+		// SAFETY: The initial cursor is the authored undefined literal, already a member of this query's string | undefined pageParam port. This widening seeds the same complete cursor type used by queryFn/getNextPageParam; it makes no claim about decoded HTTP data.
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (last: { nextCursor?: string | null }) =>
 			last.nextCursor ?? undefined,
@@ -233,6 +217,19 @@ export function useAppsCatalog(
 	// active-source preference, which would otherwise blank Apps/Plugins.
 	const origin = options?.origin;
 	const activeNode = useActiveNode();
+	// Organization toggles: Core refuses the install routes when an admin turned
+	// them off; refusing here first gives the card a clear message instead of a
+	// generic lifecycle failure.
+	const { isEnabled: orgFeatureEnabled } = useOrgFeatures();
+	const orgInstallBlock = (fromCatalog: boolean): string | null => {
+		if (fromCatalog && !orgFeatureEnabled("plugins.marketplace")) {
+			return "Marketplace plugins are disabled by your organization's administrator.";
+		}
+		if (!(fromCatalog || orgFeatureEnabled("apps.install"))) {
+			return "App installation is disabled by your organization's administrator.";
+		}
+		return null;
+	};
 	const target = useMemo<ApiTarget>(
 		() => ({
 			url: activeNode.url,
@@ -410,24 +407,30 @@ export function useAppsCatalog(
 	// which the panel already renders inline without losing the Overview.
 	const detailQuery = useQuery(
 		useMemo(
-			() => ({
-				queryKey: [
-					"plugins",
-					"detail",
-					url,
-					selectedId,
-					activeSource,
-					origin ?? null,
-				],
-				queryFn: () =>
-					fetchPluginCatalogDetail(
-						target,
-						selectedId as string,
-						origin,
-						origin ? undefined : activeSource
-					),
-				enabled: selectedId !== null,
-			}),
+			() =>
+				({
+					queryKey: [
+						"plugins",
+						"detail",
+						url,
+						selectedId,
+						activeSource,
+						origin ?? null,
+					],
+					queryFn:
+						selectedId === null || selectedId === undefined
+							? skipToken
+							: () =>
+									fetchPluginCatalogDetail(
+										target,
+										selectedId,
+										origin,
+										origin ? undefined : activeSource
+									),
+					enabled: selectedId !== null,
+				}) satisfies UseQueryOptions<
+					Awaited<ReturnType<typeof fetchPluginCatalogDetail>>
+				>,
 			[target, url, selectedId, activeSource, origin]
 		)
 	);
@@ -481,38 +484,11 @@ export function useAppsCatalog(
 			channel?: string | null;
 			item: AppCatalogItem;
 		}): Promise<void> => {
-			// Community listings are unsigned and unreviewed, so Core's
-			// install-by-id path is fail-closed for them by design (its descriptor
-			// carries no manifest). Refuse here too, with copy that says why —
-			// installing one is an explicit per-repo act, not a catalog install.
-			if (item.entry.origin === "community") {
-				throw new Error(
-					"Community listings are browse-only — open the repository to review it before installing."
-				);
-			}
-			if (item.entry.descriptor_only) {
-				throw new Error(
-					"Integration descriptors are browse-only — open the link to configure."
-				);
-			}
-			const portableTarget = portablePackageTarget(item.entry);
-			if (portableTarget && !item.installed) {
-				await installPortablePackage({ url, token, userJwt }, portableTarget);
-				return;
-			}
-			if (!item.installed && item.entry.source !== "built-in") {
-				await installPluginFromCatalog(
-					{ url, token, userJwt },
-					item.entry.id,
-					readBuyerToken(),
-					channel
-				);
-				return;
-			}
-			// A built-in is shipped with Core, so its version IS Core's version and
-			// there is no separate train to follow — a channel is meaningless here
-			// and is deliberately not forwarded rather than quietly ignored downstream.
-			await installApp({ url, token, userJwt }, item.entry.id);
+			await installCatalogEntry({ url, token, userJwt }, item.entry, {
+				channel,
+				installed: item.installed,
+				orgInstallBlock,
+			});
 		},
 		// Both halves of the shared flag live on the mutation lifecycle, never in a
 		// component effect: a card that unmounts mid-add (scrolled out of a
@@ -706,7 +682,7 @@ export function useAppsCatalog(
 		[switchChannelMutation]
 	);
 
-	const errorOf = (e: unknown): string | null =>
+	const errorOf = (e: DefaultError | Error | null): string | null =>
 		e instanceof Error ? e.message : null;
 	const loadError =
 		errorOf(listQuery.error) ??
@@ -727,6 +703,7 @@ export function useAppsCatalog(
 			appsQuery.isLoading ||
 			portablePackagesQuery.isLoading,
 		error: actionError ?? browseNote ?? loadError,
+		installUrlError: errorOf(installUrlMutation.error),
 		fetchNextPage: listQuery.fetchNextPage,
 		hasNextPage: listQuery.hasNextPage,
 		loadingMore: listQuery.isFetchingNextPage,

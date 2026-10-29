@@ -1,0 +1,55 @@
+/*
+ * Workflow run figure. The shared quiet tokens (../shared/quiet.css) set the look; this
+ * file adds only the marble, the one accent.
+ */
+
+.iso.wfr {
+	--wfr-ball: #171717;
+	--wfr-glint: #fff;
+}
+
+.dark .iso.wfr {
+	--wfr-ball: #f2f2f2;
+	--wfr-glint: #fff;
+}
+
+.wfr-ball {
+	fill: var(--wfr-ball);
+	stroke: none;
+}
+
+.wfr-glint {
+	opacity: 0.55;
+	fill: var(--wfr-glint);
+}
+
+.dark .wfr-glint {
+	opacity: 0.9;
+}
+
+/* Fading the skipped branch and lifting a picked node are slow, quiet changes. */
+.wfr-live [data-stage] {
+	transition: opacity 600ms ease;
+}
+
+/* The branch the condition did not take fades once it is skipped. */
+.wfr-live[data-skip] [data-stage="4"],
+.wfr-live[data-skip] [data-branch] {
+	opacity: 0.35;
+}
+
+/* A picked node steps its tones up; every other node softens. */
+.wfr-live [data-stage][data-on] {
+	--anatomy-mid: var(--anatomy-hi);
+	--anatomy-lo: var(--anatomy-mid);
+}
+
+.wfr-live[data-focus] [data-stage]:not([data-on]) {
+	opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.wfr-live [data-stage] {
+		transition: none;
+	}
+}

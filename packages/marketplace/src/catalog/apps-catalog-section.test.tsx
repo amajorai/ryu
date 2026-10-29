@@ -35,7 +35,7 @@ const SAMPLE_ITEM: AppCatalogItem = {
 	installed: false,
 };
 
-function makeAppsState(): AppsCatalogState {
+function makeAppsState(item: AppCatalogItem = SAMPLE_ITEM): AppsCatalogState {
 	return {
 		activeSource: "ryu-marketplace",
 		addingMarketplace: false,
@@ -51,7 +51,7 @@ function makeAppsState(): AppsCatalogState {
 		install: () => Promise.resolve(),
 		installFromUrl: () => Promise.resolve(),
 		installing: null,
-		items: [SAMPLE_ITEM],
+		items: [item],
 		lifecyclePending: false,
 		loading: false,
 		loadingMore: false,
@@ -59,8 +59,8 @@ function makeAppsState(): AppsCatalogState {
 		select: () => {
 			// no-op
 		},
-		selectedId: SAMPLE_ITEM.entry.id,
-		selectedItem: SAMPLE_ITEM,
+		selectedId: item.entry.id,
+		selectedItem: item,
 		selectingSource: false,
 		selectSource: () => {
 			// no-op
@@ -81,7 +81,10 @@ const MOCK_INSTALL: CatalogInstall = {
 	),
 };
 
-function makeHost(install: CatalogInstall | null): CatalogHost {
+function makeHost(
+	install: CatalogInstall | null,
+	item: AppCatalogItem = SAMPLE_ITEM
+): CatalogHost {
 	return {
 		install,
 		Markdown: ({ content }) => <div>{content}</div>,
@@ -91,7 +94,7 @@ function makeHost(install: CatalogInstall | null): CatalogHost {
 		renderAffordance: (target) => (
 			<span data-testid="affordance">Open {target.name} in Ryu</span>
 		),
-		useAppsCatalog: () => makeAppsState(),
+		useAppsCatalog: () => makeAppsState(item),
 		useSkillsCatalog: () => {
 			throw new Error("useSkillsCatalog not used by the Apps section");
 		},
@@ -99,13 +102,12 @@ function makeHost(install: CatalogInstall | null): CatalogHost {
 			throw new Error("useModelCatalog not used by the Apps section");
 		},
 		useActiveNode: () => ({ url: "", token: null }),
-		usePersistedToggle: (_key: string, defaultValue: boolean) =>
-			[
-				defaultValue,
-				() => {
-					// no-op
-				},
-			] as [boolean, (v: boolean) => void],
+		usePersistedToggle: (_key: string, defaultValue: boolean) => [
+			defaultValue,
+			() => {
+				// no-op
+			},
+		],
 		installSidecar: () => Promise.resolve(),
 		estimateLlmfit: () =>
 			Promise.resolve({
@@ -192,6 +194,25 @@ describe("CatalogHost seam — Apps section", () => {
 		expect(html).toContain("Handles provider credentials and traffic");
 		expect(html).toContain("read requests and responses routed through it");
 		expect(html).toContain("ChatGPT subscription (gpt-5)");
+	});
+
+	test("badges a deprecated listing in the grid", () => {
+		const deprecated: AppCatalogItem = {
+			...SAMPLE_ITEM,
+			entry: {
+				...SAMPLE_ITEM.entry,
+				deprecated: { message: "Superseded by Sample Plugin 2." },
+			},
+		};
+		const html = renderToStaticMarkup(
+			<CatalogHostProvider host={makeHost(MOCK_INSTALL, deprecated)}>
+				<AppsCatalogSection />
+			</CatalogHostProvider>
+		);
+		expect(html).toContain('data-testid="deprecated-badge"');
+		expect(render(MOCK_INSTALL)).not.toContain(
+			'data-testid="deprecated-badge"'
+		);
 	});
 
 	test("renders the selected item's name and description from the host hook", () => {

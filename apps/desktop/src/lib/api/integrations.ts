@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/integrations.ts
 //
 // Client for the merged Integrations catalog (`GET /api/integrations`). Core
@@ -8,6 +9,62 @@
 // the front door to everything that connects to that service.
 
 import { type ApiTarget, request } from "./client.ts";
+import { getPreference, setPreference } from "./preferences.ts";
+
+const priceResponseSchema = z.looseObject({
+	basis: z.union([z.null(), z.string()]).optional(),
+	confidence: z.union([z.null(), z.string()]).optional(),
+	currency: z.union([z.null(), z.string()]).optional(),
+	metered_by: z.array(z.string()).optional(),
+	per: z.union([z.null(), z.number()]).optional(),
+	unit: z.union([z.null(), z.string()]).optional(),
+	usd: z.union([z.null(), z.number()]).optional(),
+	value: z.union([z.null(), z.number()]).optional(),
+});
+const optionsResponseSchema = z.looseObject({
+	action: z.string().optional(),
+	availability_note: z.union([z.null(), z.string()]).optional(),
+	available: z.union([z.null(), z.literal(false), z.literal(true)]).optional(),
+	capability: z.union([z.null(), z.string()]).optional(),
+	comparison_key: z.union([z.null(), z.string()]).optional(),
+	connection_id: z.union([z.null(), z.string()]).optional(),
+	description: z.union([z.null(), z.string()]).optional(),
+	id: z.string().optional(),
+	is_cheapest: z.boolean().optional(),
+	kind: z.string().optional(),
+	name: z.string().optional(),
+	price: z.union([z.null(), priceResponseSchema]).optional(),
+	provider: z.union([z.null(), z.string()]).optional(),
+	provider_role: z.union([z.null(), z.string()]).optional(),
+	source: z.string().optional(),
+	url: z.union([z.null(), z.string()]).optional(),
+});
+const connectionsResponseSchema = z.looseObject({
+	id: z.string(),
+	kind: z.string(),
+	name: z.string(),
+	url: z.union([z.null(), z.string()]),
+});
+const integrationsResponseSchema = z.looseObject({
+	options: z.array(optionsResponseSchema).optional(),
+	categories: z.array(z.string()),
+	connections: z.array(connectionsResponseSchema),
+	description: z.union([z.null(), z.string()]),
+	domain: z.union([z.null(), z.string()]),
+	feeds: z.array(z.string()),
+	id: z.string(),
+	logo: z.union([z.null(), z.string()]),
+	name: z.string(),
+	popularity: z.union([z.null(), z.number()]),
+	preferred_source: z.union([z.null(), z.string()]).optional(),
+	sources: z.array(z.string()),
+	suggested_source: z.union([z.null(), z.string()]).optional(),
+});
+const jsonResponseSchema = z.looseObject({
+	integrations: z.array(integrationsResponseSchema).optional(),
+	next_cursor: z.union([z.null(), z.string()]).optional(),
+	total: z.number().optional(),
+});
 
 /** One concrete connection a brand offers, straight from a directory record.
  *  This is the actionable form of `feeds`: the record `id` is what Core's
@@ -37,13 +94,26 @@ export interface IntegrationOption {
 	name: string;
 	price: IntegrationPrice | null;
 	provider: string | null;
+	/**
+	 * Set by Core only when a tool catalog (Treg's or Ryu's) and Composio both
+	 * offer the brand: `primary` on the catalog options, `alternative` on
+	 * Composio's.
+	 */
+	providerRole: "primary" | "alternative" | null;
 	source: string;
 	url: string | null;
 }
 
 export interface IntegrationPrice {
+	/**
+	 * What the figure covers: `one_call` (all-in), `base_call` (meters in
+	 * `meteredBy` add to it) or `usage`; null when the source does not say.
+	 */
+	basis: string | null;
 	confidence: string | null;
 	currency: string | null;
+	/** Meters billed on top of a `base_call` figure. */
+	meteredBy: string[];
 	per: number | null;
 	unit: string | null;
 	usd: number | null;
@@ -63,25 +133,52 @@ interface IntegrationOptionWire {
 	kind?: string;
 	name?: string;
 	price?: {
+		basis?: string | null;
 		confidence?: string | null;
 		currency?: string | null;
+		metered_by?: string[];
 		per?: number | null;
 		unit?: string | null;
 		usd?: number | null;
 		value?: number | null;
 	} | null;
 	provider?: string | null;
+	provider_role?: string | null;
 	source?: string;
 	url?: string | null;
 }
 
-interface IntegrationBrandWire extends Omit<IntegrationBrand, "options"> {
-	options?: IntegrationOptionWire[];
+function providerRole(
+	value: string | null | undefined
+): IntegrationOption["providerRole"] {
+	return value === "primary" || value === "alternative" ? value : null;
 }
 
-function mapIntegrationBrand(brand: IntegrationBrandWire): IntegrationBrand {
+interface IntegrationBrandWire
+	extends Omit<
+		IntegrationBrand,
+		"options" | "preferredSource" | "suggestedSource"
+	> {
+	options?: IntegrationOptionWire[];
+	preferred_source?: string | null;
+	suggested_source?: string | null;
+}
+
+function pinnableSource(
+	value: string | null | undefined
+): IntegrationProviderPin | null {
+	return value === "treg" || value === "composio" ? value : null;
+}
+
+function mapIntegrationBrand({
+	preferred_source,
+	suggested_source,
+	...brand
+}: IntegrationBrandWire): IntegrationBrand {
 	return {
 		...brand,
+		preferredSource: pinnableSource(preferred_source),
+		suggestedSource: suggested_source ?? null,
 		options: (brand.options ?? []).map((option) => ({
 			action: option.action ?? "chat-setup",
 			available: option.available ?? null,
@@ -96,8 +193,10 @@ function mapIntegrationBrand(brand: IntegrationBrandWire): IntegrationBrand {
 			name: option.name ?? option.id ?? "",
 			price: option.price
 				? {
+						basis: option.price.basis ?? null,
 						confidence: option.price.confidence ?? null,
 						currency: option.price.currency ?? null,
+						meteredBy: option.price.metered_by ?? [],
 						per: option.price.per ?? null,
 						unit: option.price.unit ?? null,
 						usd: option.price.usd ?? null,
@@ -105,6 +204,7 @@ function mapIntegrationBrand(brand: IntegrationBrandWire): IntegrationBrand {
 					}
 				: null,
 			provider: option.provider ?? null,
+			providerRole: providerRole(option.provider_role),
 			source: option.source ?? "",
 			url: option.url ?? null,
 		})),
@@ -126,11 +226,58 @@ export interface IntegrationBrand {
 	logo: string | null;
 	name: string;
 	/** One unified preview list: integrations.sh records, Composio toolkits, and
-	 * Treg endpoints/platforms. */
+	 * Ryu's and Treg's catalog endpoints/platforms, each labelled by source. */
 	options: IntegrationOption[];
 	popularity: number | null;
-	/** Which catalogs surfaced this brand: "directory", "composio", and/or "treg". */
+	/** The user's pinned managed source for this brand, when that source offers it. */
+	preferredSource: IntegrationProviderPin | null;
+	/** Which catalogs surfaced this brand: "directory", "composio", "ryu" and/or "treg". */
 	sources: string[];
+	/**
+	 * The managed source Ryu suggests: the tool catalog (`treg`, billed at the
+	 * provider's cost, or `ryu`) when it offers the brand, else `composio`.
+	 */
+	suggestedSource: string | null;
+}
+
+/** A managed source a brand can be pinned to. */
+export type IntegrationProviderPin = "treg" | "composio";
+
+/** Core preference holding the per-brand pins (brand id → source). */
+const PROVIDER_PINS_PREF = "integrations-provider-pins";
+
+/**
+ * Pin a brand to one managed source, or clear the pin (`null`) to follow Ryu's
+ * suggestion. Stored in Core's preferences, where the Integrations Store and
+ * agent routing read it.
+ */
+export async function setIntegrationProviderPin(
+	target: ApiTarget,
+	brandId: string,
+	source: IntegrationProviderPin | null
+): Promise<boolean> {
+	const raw = await getPreference(target, PROVIDER_PINS_PREF);
+	let pins: Record<string, string> = {};
+	if (raw) {
+		try {
+			const parsed: unknown = JSON.parse(raw);
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				pins = Object.fromEntries(
+					Object.entries(parsed).filter(
+						(entry): entry is [string, string] => typeof entry[1] === "string"
+					)
+				);
+			}
+		} catch {
+			// A malformed value is replaced; Core ignores it too.
+		}
+	}
+	if (source) {
+		pins[brandId] = source;
+	} else {
+		delete pins[brandId];
+	}
+	return setPreference(target, PROVIDER_PINS_PREF, JSON.stringify(pins));
 }
 
 export interface IntegrationsPage {
@@ -161,11 +308,12 @@ export async function searchIntegrations(
 	if (params.cursor) {
 		q.set("cursor", params.cursor);
 	}
-	const json = await request<{
-		integrations?: IntegrationBrandWire[];
-		next_cursor?: string | null;
-		total?: number;
-	}>(target, `/api/integrations?${q.toString()}`);
+	const json = await request(
+		target,
+		`/api/integrations?${q.toString()}`,
+		undefined,
+		jsonResponseSchema
+	);
 	return {
 		integrations: (json.integrations ?? []).map(mapIntegrationBrand),
 		nextCursor: json.next_cursor ?? null,
@@ -178,9 +326,11 @@ export async function fetchIntegration(
 	target: ApiTarget,
 	id: string
 ): Promise<IntegrationBrand> {
-	const brand = await request<IntegrationBrandWire>(
+	const brand = await request(
 		target,
-		`/api/integrations/${encodeURIComponent(id)}`
+		`/api/integrations/${encodeURIComponent(id)}`,
+		undefined,
+		integrationsResponseSchema
 	);
 	return mapIntegrationBrand(brand);
 }

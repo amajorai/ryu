@@ -1,0 +1,472 @@
+{
+  "normalize": [
+    {
+      "input": "Sales Bot",
+      "agentName": "ignored",
+      "expect": "sales-bot"
+    },
+    {
+      "input": null,
+      "agentName": "Nova",
+      "expect": "nova"
+    },
+    {
+      "input": "  ",
+      "agentName": "Nova Prime_2",
+      "expect": "nova-prime-2"
+    },
+    {
+      "input": "a+b",
+      "agentName": "x",
+      "expect": "ab"
+    },
+    {
+      "input": "!!!",
+      "agentName": "x",
+      "error": "empty"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "agentName": "x",
+      "error": "too_long"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "agentName": "x",
+      "expect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": null,
+      "agentName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": null,
+      "agentName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b",
+      "expect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": null,
+      "agentName": "",
+      "error": "empty"
+    },
+    {
+      "input": "",
+      "agentName": "   ",
+      "error": "empty"
+    },
+    {
+      "input": null,
+      "agentName": "日本語",
+      "error": "empty"
+    },
+    {
+      "input": "Zoë",
+      "agentName": "x",
+      "expect": "zoe"
+    },
+    {
+      "input": "Café Bot",
+      "agentName": "x",
+      "expect": "cafe-bot"
+    },
+    {
+      "input": "Ünïcödé Agent",
+      "agentName": "x",
+      "expect": "unicode-agent"
+    },
+    {
+      "input": "ＡＢＣ",
+      "agentName": "x",
+      "expect": "abc"
+    },
+    {
+      "input": "ﬁnance",
+      "agentName": "x",
+      "expect": "finance"
+    },
+    {
+      "input": "Nova 🚀 Bot",
+      "agentName": "x",
+      "expect": "nova-bot"
+    },
+    {
+      "input": "sales.team",
+      "agentName": "x",
+      "expect": "sales-team"
+    },
+    {
+      "input": "sales_team",
+      "agentName": "x",
+      "expect": "sales-team"
+    },
+    {
+      "input": "a+b+c@x",
+      "agentName": "x",
+      "expect": "abcx"
+    },
+    {
+      "input": "-sales-",
+      "agentName": "x",
+      "expect": "sales"
+    },
+    {
+      "input": "..sales..",
+      "agentName": "x",
+      "expect": "sales"
+    },
+    {
+      "input": "a - b",
+      "agentName": "x",
+      "expect": "a-b"
+    },
+    {
+      "input": "Agent\tOne",
+      "agentName": "x",
+      "expect": "agent-one"
+    },
+    {
+      "input": "  Sales   Bot  ",
+      "agentName": "x",
+      "expect": "sales-bot"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbb",
+      "agentName": "x",
+      "error": "too_long"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaa bbbbbbbbbbbbbbb",
+      "agentName": "x",
+      "expect": "aaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbb"
+    },
+    {
+      "input": "---",
+      "agentName": "Nova",
+      "error": "empty"
+    },
+    {
+      "input": "日本語",
+      "agentName": "Nova",
+      "error": "empty"
+    }
+  ],
+  "rejectAlias": [
+    {
+      "local": "support",
+      "platformHost": true,
+      "caller": "admin",
+      "expect": "reserved"
+    },
+    {
+      "local": "support",
+      "platformHost": false,
+      "caller": "agent",
+      "expect": "admin_only"
+    },
+    {
+      "local": "support",
+      "platformHost": false,
+      "caller": "admin",
+      "expect": null
+    },
+    {
+      "local": "a.b",
+      "platformHost": true,
+      "caller": "agent",
+      "expect": "invalid"
+    },
+    {
+      "local": "a_b",
+      "platformHost": false,
+      "caller": "admin",
+      "expect": "invalid"
+    },
+    {
+      "local": "a+b",
+      "platformHost": false,
+      "caller": "admin",
+      "expect": "invalid"
+    },
+    {
+      "local": "-sales",
+      "platformHost": false,
+      "caller": "admin",
+      "expect": "invalid"
+    },
+    {
+      "local": "Sales",
+      "platformHost": false,
+      "caller": "admin",
+      "expect": "invalid"
+    },
+    {
+      "local": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "platformHost": false,
+      "caller": "admin",
+      "expect": "invalid"
+    },
+    {
+      "local": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "platformHost": true,
+      "caller": "agent",
+      "expect": null
+    },
+    {
+      "local": "sales",
+      "platformHost": true,
+      "caller": "agent",
+      "expect": "reserved"
+    },
+    {
+      "local": "ryu-bot",
+      "platformHost": true,
+      "caller": "admin",
+      "expect": "reserved"
+    },
+    {
+      "local": "shit",
+      "platformHost": true,
+      "caller": "admin",
+      "expect": "blocked"
+    },
+    {
+      "local": "shit",
+      "platformHost": false,
+      "caller": "admin",
+      "expect": null
+    },
+    {
+      "local": "no-reply",
+      "platformHost": false,
+      "caller": "agent",
+      "expect": "admin_only"
+    },
+    {
+      "local": "payroll",
+      "platformHost": false,
+      "caller": "agent",
+      "expect": "admin_only"
+    },
+    {
+      "local": "payroll",
+      "platformHost": false,
+      "caller": "admin",
+      "expect": null
+    },
+    {
+      "local": "nova",
+      "platformHost": true,
+      "caller": "agent",
+      "expect": null
+    }
+  ],
+  "parse": [
+    {
+      "address": "Acme+X@Mail.Example",
+      "platformDomain": "mail.example",
+      "expect": {
+        "local": "acme",
+        "tag": "x",
+        "domain": "mail.example",
+        "isPlatformDomain": true,
+        "platformHostLabel": null
+      }
+    },
+    {
+      "address": "sales@acme.mail.example",
+      "platformDomain": "mail.example",
+      "expect": {
+        "local": "sales",
+        "tag": null,
+        "domain": "acme.mail.example",
+        "isPlatformDomain": false,
+        "platformHostLabel": "acme"
+      }
+    },
+    {
+      "address": "SALES@ACME.MAIL.EXAMPLE",
+      "platformDomain": "Mail.Example",
+      "expect": {
+        "local": "sales",
+        "tag": null,
+        "domain": "acme.mail.example",
+        "isPlatformDomain": false,
+        "platformHostLabel": "acme"
+      }
+    },
+    {
+      "address": "x@a.b.mail.example",
+      "platformDomain": "mail.example",
+      "expect": {
+        "local": "x",
+        "tag": null,
+        "domain": "a.b.mail.example",
+        "isPlatformDomain": false,
+        "platformHostLabel": null
+      }
+    },
+    {
+      "address": "acme+a+b@mail.example",
+      "platformDomain": "mail.example",
+      "expect": {
+        "local": "acme",
+        "tag": "a+b",
+        "domain": "mail.example",
+        "isPlatformDomain": true,
+        "platformHostLabel": null
+      }
+    },
+    {
+      "address": "acme+@mail.example",
+      "platformDomain": "mail.example",
+      "expect": {
+        "local": "acme",
+        "tag": null,
+        "domain": "mail.example",
+        "isPlatformDomain": true,
+        "platformHostLabel": null
+      }
+    },
+    {
+      "address": "first.last@agents.example.com",
+      "platformDomain": "mail.example",
+      "expect": {
+        "local": "first.last",
+        "tag": null,
+        "domain": "agents.example.com",
+        "isPlatformDomain": false,
+        "platformHostLabel": null
+      }
+    },
+    {
+      "address": "x@notmail.example",
+      "platformDomain": "mail.example",
+      "expect": {
+        "local": "x",
+        "tag": null,
+        "domain": "notmail.example",
+        "isPlatformDomain": false,
+        "platformHostLabel": null
+      }
+    },
+    {
+      "address": "+tag@mail.example",
+      "platformDomain": "mail.example",
+      "expect": null
+    },
+    {
+      "address": "Nova <nova@mail.example>",
+      "platformDomain": "mail.example",
+      "expect": null
+    },
+    {
+      "address": "no-at-sign",
+      "platformDomain": "mail.example",
+      "expect": null
+    },
+    {
+      "address": "x@localhost",
+      "platformDomain": "mail.example",
+      "expect": null
+    }
+  ],
+  "rejectHandle": [
+    {
+      "handle": "acme",
+      "expect": null
+    },
+    {
+      "handle": "fryer",
+      "expect": null
+    },
+    {
+      "handle": "xn--pypal-4ve",
+      "expect": "invalid"
+    },
+    {
+      "handle": "ab--cd",
+      "expect": "invalid"
+    },
+    {
+      "handle": "a--b",
+      "expect": null
+    },
+    {
+      "handle": "p0stmaster",
+      "expect": "reserved"
+    },
+    {
+      "handle": "5upport",
+      "expect": "reserved"
+    },
+    {
+      "handle": "supp0rt",
+      "expect": "reserved"
+    },
+    {
+      "handle": "amaj0r",
+      "expect": "reserved"
+    },
+    {
+      "handle": "ryusupport",
+      "expect": "reserved"
+    },
+    {
+      "handle": "supportryu",
+      "expect": null
+    },
+    {
+      "handle": "anthropicsupport",
+      "expect": "reserved"
+    },
+    {
+      "handle": "ryu0",
+      "expect": "reserved"
+    },
+    {
+      "handle": "sh1t",
+      "expect": "blocked"
+    },
+    {
+      "handle": "ryuji",
+      "expect": "reserved"
+    },
+    {
+      "handle": "support-ryu",
+      "expect": "reserved"
+    },
+    {
+      "handle": "my-ryu-bot",
+      "expect": "reserved"
+    },
+    {
+      "handle": "ryu-team",
+      "expect": "reserved"
+    },
+    {
+      "handle": "support-ryu0",
+      "expect": "reserved"
+    },
+    {
+      "handle": "kiryu",
+      "expect": null
+    },
+    {
+      "handle": "mitsuryu",
+      "expect": null
+    },
+    {
+      "handle": "kiryu-bot",
+      "expect": null
+    },
+    {
+      "handle": "anthropic-fan",
+      "expect": "reserved"
+    },
+    {
+      "handle": "myamajor",
+      "expect": "reserved"
+    }
+  ]
+}

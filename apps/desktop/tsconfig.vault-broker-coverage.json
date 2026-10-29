@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/vault/VaultBrokerPanel.tsx",
+    "src/components/vault/vault-errors.ts",
+    "src/components/vault/vault-errors.test.ts",
+    "src/components/vault/VaultBrokerPanel.native-http.test.tsx",
+    "src/lib/api/vault-broker.test.ts"
+  ]
+}

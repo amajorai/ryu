@@ -269,7 +269,7 @@ pub async fn resolve_for_node(state: &ServerState) -> LspResolution {
     let Ok(records) = state.app_store.list().await else {
         return LspResolution::default();
     };
-    let enabled: HashMap<String, Vec<String>> = records
+    let mut enabled: HashMap<String, Vec<String>> = records
         .iter()
         .filter(|r| r.enabled)
         .map(|r| (r.id.clone(), r.approved_grants.clone()))
@@ -282,11 +282,44 @@ pub async fn resolve_for_node(state: &ServerState) -> LspResolution {
     let candidates: Vec<PluginManifest> = manifests
         .iter()
         .filter(|m| enabled.contains_key(&m.id))
+        .filter(|m| {
+            m.contributes
+                .as_ref()
+                .is_some_and(|c| !c.lsp_servers.is_empty())
+        })
         .cloned()
         .collect();
     drop(manifests);
 
-    resolve_lsp_servers(&candidates, &enabled)
+    // A language server is a spawned host process: a locally revoked plugin, or
+    // one with no trust basis on a node that requires it, starts none.
+    let mut refused = Vec::new();
+    if !candidates.is_empty() {
+        let policy = crate::plugins::isolation::load_trust_policy(Some(&state.app_store)).await;
+        for manifest in &candidates {
+            let record = records.iter().find(|r| r.id == manifest.id);
+            let version = record.map_or(manifest.version.as_str(), |r| r.version.as_str());
+            let provenance = record.and_then(|r| r.provenance.as_ref());
+            let Some(refusal) = policy.host_access_refusal(manifest, version, provenance) else {
+                continue;
+            };
+            enabled.remove(&manifest.id);
+            for server_name in manifest
+                .contributes
+                .iter()
+                .flat_map(|c| c.lsp_servers.keys())
+            {
+                refused.push(LspSkip {
+                    key: format!("{}/{server_name}", manifest.id),
+                    reason: format!("plugin '{}': {refusal}", manifest.id),
+                });
+            }
+        }
+    }
+
+    let mut resolution = resolve_lsp_servers(&candidates, &enabled);
+    resolution.skipped.extend(refused);
+    resolution
 }
 
 /// Materialise the node's resolved table into the managed Pi's config dir, so the
@@ -368,6 +401,69 @@ mod tests {
     fn enabled(ids: &[&str]) -> HashMap<String, Vec<String>> {
         ids.iter()
             .map(|id| ((*id).to_owned(), vec![GRANT_PI_EXTENSION.to_owned()]))
+            .collect()
+    }
+
+    const SHIPPED_LSP_MANIFESTS: &[(&str, &str)] = &[
+        (
+            "clangd-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/clangd-lsp/manifest.json"),
+        ),
+        (
+            "csharp-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/csharp-lsp/manifest.json"),
+        ),
+        (
+            "gopls-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/gopls-lsp/manifest.json"),
+        ),
+        (
+            "jdtls-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/jdtls-lsp/manifest.json"),
+        ),
+        (
+            "kotlin-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/kotlin-lsp/manifest.json"),
+        ),
+        (
+            "lua-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/lua-lsp/manifest.json"),
+        ),
+        (
+            "php-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/php-lsp/manifest.json"),
+        ),
+        (
+            "pyright-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/pyright-lsp/manifest.json"),
+        ),
+        (
+            "ruby-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/ruby-lsp/manifest.json"),
+        ),
+        (
+            "rust-analyzer-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/rust-analyzer-lsp/manifest.json"),
+        ),
+        (
+            "swift-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/swift-lsp/manifest.json"),
+        ),
+        (
+            "typescript-lsp",
+            include_str!("../../../generated/ryu-runtime/plugins-store/lsp/typescript-lsp/manifest.json"),
+        ),
+    ];
+
+    fn shipped_lsp_manifests() -> Vec<PluginManifest> {
+        SHIPPED_LSP_MANIFESTS
+            .iter()
+            .map(|(package, raw)| {
+                let manifest: PluginManifest =
+                    serde_json::from_str(raw).expect("shipped LSP manifest parses");
+                assert_eq!(manifest.id, format!("@ryu/{package}"));
+                manifest
+            })
             .collect()
     }
 
@@ -602,5 +698,94 @@ mod tests {
             doc.get("generatedAt").is_none(),
             "no timestamp: it would defeat the binding's content-compare write"
         );
+    }
+
+    #[test]
+    fn shipped_lsp_manifests_resolve_to_exact_local_wire_configs() {
+        let manifests = shipped_lsp_manifests();
+        assert_eq!(manifests.len(), 12);
+        let enabled: HashMap<String, Vec<String>> = manifests
+            .iter()
+            .map(|manifest| (manifest.id.clone(), manifest.permission_grants.clone()))
+            .collect();
+
+        let resolution = resolve_lsp_servers(&manifests, &enabled);
+        assert!(resolution.skipped.is_empty(), "{:?}", resolution.skipped);
+        let expected_count = manifests
+            .iter()
+            .map(|manifest| {
+                manifest
+                    .contributes
+                    .as_ref()
+                    .expect("shipped LSP package contributes servers")
+                    .lsp_servers
+                    .len()
+            })
+            .sum::<usize>();
+        assert_eq!(resolution.servers.len(), expected_count);
+
+        let wire = resolution.to_wire_document();
+        let wire_servers = wire["servers"]
+            .as_object()
+            .expect("wire document has a servers object");
+        let mut owned_extensions = HashSet::new();
+        for manifest in &manifests {
+            let declarations = &manifest.contributes.as_ref().unwrap().lsp_servers;
+            for (server_name, declaration) in declarations {
+                assert_eq!(declaration.validate(server_name), Ok(()));
+                let key = format!("{}/{server_name}", manifest.id);
+                let resolved = resolution
+                    .servers
+                    .iter()
+                    .find(|server| server.key() == key)
+                    .unwrap_or_else(|| panic!("{key} was not resolved"));
+
+                // The host materializes each plugin's command and argv as a
+                // stdio process config. No shell string or server process is
+                // constructed by this resolver.
+                assert_eq!(resolved.config.command, declaration.command);
+                assert_eq!(resolved.config.args, declaration.args);
+                assert_eq!(resolved.config.transport_kind(), LspTransport::Stdio);
+                assert_eq!(
+                    resolved.config.extension_to_language,
+                    declaration.normalized_extensions()
+                );
+                for extension in resolved.config.extension_to_language.keys() {
+                    assert!(
+                        owned_extensions.insert(extension.clone()),
+                        "duplicate shipped extension claim for {extension}"
+                    );
+                }
+
+                let wire_config = &wire_servers[&key];
+                assert_eq!(wire_config["command"], declaration.command);
+                if declaration.args.is_empty() {
+                    assert!(wire_config.get("args").is_none());
+                } else {
+                    assert_eq!(wire_config["args"], serde_json::json!(declaration.args));
+                }
+                assert_eq!(
+                    wire_config["extensionToLanguage"],
+                    serde_json::to_value(declaration.normalized_extensions()).unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn community_lsp_config_requires_an_approved_pi_extension_grant() {
+        let mut manifest = shipped_lsp_manifests().remove(0);
+        manifest.id = "@fixture/community-clangd".to_owned();
+        let server_id = manifest.id.clone();
+        let denied = HashMap::from([(server_id.clone(), Vec::new())]);
+        let blocked = resolve_lsp_servers(&[manifest.clone()], &denied);
+        assert!(blocked.servers.is_empty());
+        assert_eq!(blocked.skipped.len(), 1);
+        assert!(blocked.skipped[0].reason.contains(GRANT_PI_EXTENSION));
+
+        let approved = HashMap::from([(server_id, vec![GRANT_PI_EXTENSION.to_owned()])]);
+        let allowed = resolve_lsp_servers(&[manifest], &approved);
+        assert_eq!(allowed.servers.len(), 1);
+        assert!(allowed.skipped.is_empty());
     }
 }

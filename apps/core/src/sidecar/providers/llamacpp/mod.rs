@@ -1,14 +1,17 @@
 pub mod classify;
 pub mod downloader;
 pub mod embed;
+pub mod guard;
 pub mod process;
 pub mod rerank;
+mod satellite;
 pub mod speech;
 pub mod variant;
 
 pub use classify::LlamaCppClassifyManager;
 pub use downloader::LlamaCppDownloader;
 pub use embed::LlamaCppEmbedManager;
+pub use guard::LlamaCppGuardManager;
 pub use process::LlamaCppProcess;
 pub use rerank::LlamaCppRerankManager;
 pub use speech::LlamaCppSpeechManager;
@@ -144,6 +147,10 @@ async fn resolve_sleep_idle_secs() -> Option<u32> {
     }
 }
 
+/// Is the child in this slot still alive? Reaps an exited child (clearing the
+/// handle), so a crashed server reads `false` and the next start respawns it.
+/// The llama.cpp satellites (`classify`, `embed`, `rerank`) share this as their
+/// "our child is still starting or serving" gate.
 fn process_is_running(process: &Mutex<Option<LlamaCppProcess>>) -> bool {
     process
         .lock()
@@ -153,6 +160,16 @@ fn process_is_running(process: &Mutex<Option<LlamaCppProcess>>) -> bool {
         .unwrap_or(false)
 }
 
+/// Take and stop whatever child the slot holds. A start that gives up on
+/// readiness calls this so the next start spawns afresh instead of finding a
+/// useless child still alive behind the [`process_is_running`] gate.
+async fn stop_held_child(process: &Mutex<Option<LlamaCppProcess>>) {
+    let held = process.lock().unwrap().take();
+    if let Some(mut child) = held {
+        let _ = child.stop().await;
+    }
+}
+
 fn normalized_model_id(value: &str) -> Option<String> {
     let value = value.trim().replace('\\', "/");
     let leaf = value.rsplit('/').next().unwrap_or_default();
@@ -160,7 +177,7 @@ fn normalized_model_id(value: &str) -> Option<String> {
     (!leaf.is_empty()).then(|| leaf.to_ascii_lowercase())
 }
 
-fn served_model_ids(payload: &serde_json::Value) -> Vec<String> {
+pub(crate) fn served_model_ids(payload: &serde_json::Value) -> Vec<String> {
     payload
         .get("data")
         .and_then(serde_json::Value::as_array)
@@ -171,7 +188,7 @@ fn served_model_ids(payload: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-fn model_identity_matches(expected: &str, payload: &serde_json::Value) -> bool {
+pub(crate) fn model_identity_matches(expected: &str, payload: &serde_json::Value) -> bool {
     let Some(expected) = normalized_model_id(expected) else {
         return false;
     };
@@ -265,6 +282,16 @@ impl Sidecar for LlamaCppManager {
         let client = self.client.clone();
         let downloads = self.downloads.clone();
         Box::pin(async move {
+            // Never respawn a resident engine: a second llama-server cannot bind
+            // the port, and storing it in the slot drops (kills) the child that is
+            // serving, mid-stream. A crashed child is reaped here and falls through
+            // to a fresh spawn. Model switches use `restart_sidecar` (stop, then
+            // start), so they never reach this with a live child.
+            if process_is_running(&process) {
+                tracing::info!("llama.cpp already running — nothing to start");
+                return Ok(());
+            }
+
             // Download binary if not already installed — through the download
             // center (#456) so it streams to disk and shows in the overlay.
             let downloads =
@@ -298,7 +325,7 @@ impl Sidecar for LlamaCppManager {
             };
 
             // Construct and start the process. The binary lives inside the
-            // installed build's own directory (`~/.ryu/bin/llamacpp/`), beside
+            // installed build's own directory (`engines/chat/llamacpp/`), beside
             // that backend's `ggml-*` libraries.
             let binary_path = variant::server_path();
 
@@ -384,10 +411,7 @@ impl Sidecar for LlamaCppManager {
             )
             .await
             {
-                let failed_child = process.lock().unwrap().take();
-                if let Some(mut child) = failed_child {
-                    let _ = child.stop().await;
-                }
+                stop_held_child(&process).await;
                 return Err(error).context("llama.cpp readiness check failed");
             }
 
@@ -448,18 +472,12 @@ impl Sidecar for LlamaCppManager {
             // The whole installed build — binary, `llama-tts`, the backend's
             // `ggml-*` libraries and the variant marker — lives in one directory.
             crate::sidecar::remove_dir(&variant::install_dir()).await;
-            // Also clear the pre-variant layout, where `llama-server` sat
-            // directly in `~/.ryu/bin`; an install that predates variants and was
-            // never re-run still has it.
-            crate::sidecar::remove_ryu_binary("llama-server").await;
             crate::sidecar::remove_from_version_store("llamacpp");
 
-            if delete_data {
-                // llama.cpp caches downloaded models in ~/.cache/llama.cpp
-                if let Some(cache) = dirs::home_dir() {
-                    crate::sidecar::remove_dir(&cache.join(".cache").join("llama.cpp")).await;
-                }
-            }
+            // `delete_data` removes nothing more: the chat GGUFs in
+            // `models/chat/` are catalog installs shared with every other chat
+            // engine and are removed through the catalog, not with the engine.
+            let _ = delete_data;
 
             tracing::info!("llamacpp uninstalled");
             Ok(())
@@ -578,6 +596,52 @@ mod tests {
 
         stop_process(&process).await;
         fixture.abort();
+    }
+
+    /// A second start (start-all, the services panel) while the engine is
+    /// resident must not spawn a competitor and replace — and so kill — the
+    /// serving child. Returning before `downloads.expect` also proves no spawn
+    /// path ran: this manager has no download center wired.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn start_keeps_a_live_engine_instead_of_respawning() {
+        let mgr = LlamaCppManager::new();
+        *mgr.process.lock().unwrap() = sleeping_process().into_inner().unwrap();
+        let pid = mgr.pid();
+        assert!(pid.is_some());
+
+        mgr.start().await.expect("a live engine is already started");
+        assert_eq!(mgr.pid(), pid, "the serving child must not be replaced");
+        assert!(mgr.is_running());
+
+        stop_process(&mgr.process).await;
+    }
+
+    /// The live-child gate the satellites share reaps an exited child, so crash
+    /// recovery still respawns instead of trusting a dead handle.
+    #[cfg(unix)]
+    #[test]
+    fn process_is_running_reaps_an_exited_child() {
+        let mut child = std::process::Command::new("/usr/bin/true")
+            .spawn()
+            .expect("spawn exited child fixture");
+        child.wait().expect("wait exited child fixture");
+        let process = Mutex::new(Some(LlamaCppProcess::from_child_for_test(child)));
+        assert!(!process_is_running(&process));
+        assert!(process
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|process| process.pid().is_none()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stop_held_child_empties_the_slot() {
+        let process = sleeping_process();
+        stop_held_child(&process).await;
+        assert!(process.lock().unwrap().is_none());
+        assert!(!process_is_running(&process));
     }
 
     #[cfg(unix)]

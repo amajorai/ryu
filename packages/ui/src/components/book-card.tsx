@@ -26,60 +26,16 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useReducedMotion } from "motion/react";
 import type { CSSProperties, ReactNode } from "react";
+import styles from "./book-card.module.css";
 
 /** How far the block of pages sticks out behind the cover, in container-query
  *  units so it tracks whatever width the consumer picked. */
-const BOOK_DEPTH = "29cqw";
-/** Rounder on the spine edge than the fore-edge, like a real hardback. */
-const BOOK_RADIUS = "6px 4px 4px 6px";
+interface BookStyle extends CSSProperties {
+	"--book-depth": string;
+	"--book-width": string;
+}
+
 const DEFAULT_WIDTH = 176;
-/** Cover proportions — a trade paperback, not a square card. */
-const BOOK_ASPECT = "49 / 60";
-
-/** The binding: a sheen highlight over a shadow ramp, so the cover creases into
- *  the spine instead of ending flat. Achromatic on purpose — this is paper
- *  shading, so it is mixed from the theme's own ink and paper rather than a
- *  hardcoded grey that only reads right in one mode. */
-const BINDING_SHEEN = [
-	"linear-gradient(90deg,",
-	"transparent 0%,",
-	"transparent 12%,",
-	"color-mix(in oklch, var(--color-background) 25%, transparent) 29.25%,",
-	"transparent 50.5%,",
-	"transparent 75.25%,",
-	"color-mix(in oklch, var(--color-background) 25%, transparent) 91%,",
-	"transparent 100%),",
-	"linear-gradient(90deg,",
-	"color-mix(in oklch, var(--color-foreground) 3%, transparent) 0%,",
-	"color-mix(in oklch, var(--color-foreground) 10%, transparent) 12%,",
-	"transparent 30%,",
-	"color-mix(in oklch, var(--color-foreground) 2%, transparent) 50%,",
-	"color-mix(in oklch, var(--color-foreground) 20%, transparent) 73.5%,",
-	"color-mix(in oklch, var(--color-foreground) 50%, transparent) 75.25%,",
-	"color-mix(in oklch, var(--color-foreground) 15%, transparent) 85.25%,",
-	"transparent 100%)",
-].join(" ");
-
-/** The cut edge of the paper block: brighter where it meets the cover, falling
- *  away into the gutter. */
-const PAGE_EDGES = [
-	"linear-gradient(90deg,",
-	"color-mix(in oklch, var(--color-foreground) 9%, var(--color-card)) 0%,",
-	"transparent 70%),",
-	"linear-gradient(var(--color-card),",
-	"color-mix(in oklch, var(--color-foreground) 5%, var(--color-card)))",
-].join(" ");
-
-/** Three stacked shadows — contact, lift, ambient — so the book sits on the page
- *  instead of floating. Inline rather than a `shadow-[…]` utility: Tailwind
- *  rewrites an arbitrary box-shadow's colour into `--tw-shadow-color`, which
- *  swallows the `color-mix` alpha and leaves three OPAQUE ink-coloured shadows.
- *  Verified against the built stylesheet, not assumed. */
-const BOOK_SHADOW = [
-	"0 1px 1px color-mix(in oklch, var(--color-foreground) 4%, transparent),",
-	"0 4px 8px -4px color-mix(in oklch, var(--color-foreground) 16%, transparent),",
-	"0 16px 24px -8px color-mix(in oklch, var(--color-foreground) 10%, transparent)",
-].join(" ");
 
 export interface BookCardProps {
 	className?: string;
@@ -110,53 +66,56 @@ export function BookCard({
 	width = DEFAULT_WIDTH,
 }: BookCardProps) {
 	const reducedMotion = useReducedMotion();
-	const bookWidth = `${width}px`;
+	const bookStyle: BookStyle = {
+		"--book-width": `${width}px`,
+		"--book-depth": "29cqw",
+	};
 
 	return (
 		<div
-			className={cn("inline-block w-fit", className)}
-			style={{ perspective: "900px" }}
+			className={cn("inline-block w-fit", styles.scene, className)}
+			data-slot="book-card"
 		>
 			<div
 				className={cn(
-					"relative w-fit [container-type:inline-size] [transform-style:preserve-3d]",
-					// Written out in full rather than composed from a variable: Tailwind
-					// scans source text, so an interpolated class name is never emitted.
+					"relative w-fit",
+					styles.book,
 					reducedMotion
 						? null
-						: [
-								"transition-transform duration-[250ms] ease-out",
-								"hover:[transform:rotateY(-20deg)_scale(1.05)_translateX(-8px)]",
-								"group-hover:[transform:rotateY(-20deg)_scale(1.05)_translateX(-8px)]",
-								"group-focus-visible:[transform:rotateY(-20deg)_scale(1.05)_translateX(-8px)]",
-							]
+						: ["transition-transform duration-[250ms] ease-out", styles.motion]
 				)}
-				style={{ aspectRatio: BOOK_ASPECT, minWidth: bookWidth }}
+				style={bookStyle}
 			>
 				{/* Front cover */}
 				<div
-					className="absolute flex flex-col overflow-hidden bg-card [transform:translateZ(0px)]"
-					style={{
-						borderRadius: BOOK_RADIUS,
-						boxShadow: BOOK_SHADOW,
-						height: "100%",
-						width: bookWidth,
-					}}
+					className={cn(
+						"absolute flex flex-col overflow-hidden bg-card",
+						styles.cover
+					)}
 				>
 					<div className="flex h-full w-full flex-row items-stretch">
 						{/* Spine. The sheen is a separate absolutely-positioned child
 						    because it blends in `overlay` — printing the label inside it
 						    would blend the text away too. */}
-						<div className="relative flex min-w-[9%] items-center justify-center overflow-hidden">
+						<div
+							className={cn(
+								"relative flex items-center justify-center overflow-hidden",
+								styles.spine
+							)}
+						>
 							<div
 								aria-hidden
-								className="absolute inset-0 mix-blend-overlay"
-								style={{ background: BINDING_SHEEN }}
+								className={cn(
+									"absolute inset-0 mix-blend-overlay",
+									styles.binding
+								)}
 							/>
 							<span
 								aria-hidden
-								className="relative truncate font-medium text-[7cqw] text-muted-foreground leading-none tracking-tight [text-orientation:mixed] [writing-mode:vertical-rl]"
-								style={{ maxHeight: "80%" }}
+								className={cn(
+									"relative truncate font-medium text-muted-foreground leading-none tracking-tight",
+									styles.spineLabel
+								)}
 							>
 								{spineLabel ?? title}
 							</span>
@@ -165,18 +124,32 @@ export function BookCard({
 						<div className="flex min-w-0 flex-1 flex-col">
 							{/* Cover art band — muted rather than a brand colour, so the art
 							    (usually a generative dither avatar) carries the hue. */}
-							<div className="relative flex-1 overflow-hidden bg-muted [transform:translateZ(0px)]">
+							<div
+								className={cn(
+									"relative flex-1 overflow-hidden bg-muted",
+									styles.art
+								)}
+							>
 								{coverArt}
 							</div>
 							<div
-								className="flex flex-col justify-between gap-[6.1%] p-[6.1%] [container-type:inline-size]"
-								style={{ minHeight: "34%" }}
+								className={cn("flex flex-col justify-between", styles.caption)}
 							>
-								<span className="line-clamp-3 text-balance font-medium text-[11cqw] text-card-foreground leading-[1.25em] tracking-[-0.02em]">
+								<span
+									className={cn(
+										"line-clamp-3 text-balance font-medium text-card-foreground",
+										styles.title
+									)}
+								>
 									{title}
 								</span>
 								{footer ? (
-									<span className="truncate text-[8cqw] text-muted-foreground leading-none">
+									<span
+										className={cn(
+											"truncate text-muted-foreground leading-none",
+											styles.footer
+										)}
+									>
 										{footer}
 									</span>
 								) : null}
@@ -187,36 +160,26 @@ export function BookCard({
 					{/* Hairline so the cover reads as a printed board, not a flat div. */}
 					<div
 						aria-hidden
-						className="pointer-events-none absolute inset-0 border border-border"
-						style={{ borderRadius: "inherit" }}
+						className={cn(
+							"pointer-events-none absolute inset-0 border border-border",
+							styles.hairline
+						)}
 					/>
 				</div>
 
 				{/* The block of pages, stood on end at the fore-edge. */}
 				<div
 					aria-hidden
-					className="pointer-events-none absolute"
-					style={
-						{
-							background: PAGE_EDGES,
-							height: "calc(100% - 6px)",
-							top: "3px",
-							transform: `translateX(calc(${bookWidth} - ${BOOK_DEPTH} / 2 - 3px)) rotateY(90deg) translateX(calc(${BOOK_DEPTH} / 2))`,
-							width: `calc(${BOOK_DEPTH} - 2px)`,
-						} as CSSProperties
-					}
+					className={cn("pointer-events-none absolute", styles.pages)}
 				/>
 
 				{/* Back cover, so the tilt does not reveal a hollow shell. */}
 				<div
 					aria-hidden
-					className="pointer-events-none absolute left-0 bg-card"
-					style={{
-						borderRadius: BOOK_RADIUS,
-						height: "100%",
-						transform: `translateZ(calc(-1 * ${BOOK_DEPTH}))`,
-						width: bookWidth,
-					}}
+					className={cn(
+						"pointer-events-none absolute left-0 bg-card",
+						styles.back
+					)}
 				/>
 			</div>
 		</div>

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agentRegistrationMetadata } from "./agent-discovery";
+import { agentRegistrationMetadata } from "./agent-discovery.ts";
 
 test("registration discovery describes OAuth consent and advertised revocation", () => {
 	const metadata = agentRegistrationMetadata(

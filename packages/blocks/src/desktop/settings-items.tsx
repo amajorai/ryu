@@ -1,4 +1,9 @@
 "use client";
+import {
+	isNativeFunction,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import navigationStyles from "./settings-nav.module.css";
 
 // Shared iOS-style settings primitives.
 //
@@ -29,7 +34,7 @@ import {
 	ItemTitle,
 } from "@ryu/ui/components/item";
 import { cn } from "@ryu/ui/lib/utils";
-// biome-ignore lint/correctness/noUnresolvedImports: Children, Fragment, and isValidElement are valid React exports; biome's resolver misreports them
+
 import {
 	Children,
 	cloneElement,
@@ -54,7 +59,7 @@ const localizeSettingText = (
 	settingsId: string | undefined,
 	field: "caption" | "description" | "title"
 ): ReactNode => {
-	if (!i18n || typeof value !== "string" || value.trim().length === 0) {
+	if (!(i18n && isNativeText(value)) || value.trim().length === 0) {
 		return value;
 	}
 	const id = settingsId
@@ -70,6 +75,7 @@ const childDescription = (
 	if (!isValidElement(child)) {
 		return null;
 	}
+	// SAFETY: SettingsGroup children are React settings rows, whose optional description/settingsId props follow this module's owner contract.
 	const props = child.props as {
 		description?: ReactNode;
 		settingsId?: string;
@@ -83,13 +89,13 @@ const childDescription = (
 };
 
 /**
- * The shared card surface — a subtle muted fill with modest rounding, tuned to
- * look like an iOS grouped table, not a bubble. Borderless by design: the card
- * edge reads from the `bg-muted/40` fill alone, never an outline. Row hairlines
- * (`ItemSeparator`) still separate items inside a group; this is only the outer
- * card. Do not add a `border` here — it has been removed deliberately.
+ * The shared card surface — the same iOS grouped-table card as
+ * {@link SettingsGroup}: `--grouped-card` (the muted tint on a plain page, the
+ * raised card surface inside a `grouped-pane`), with the group's rounding.
+ * Borderless by design: the card edge reads from the fill alone, never an
+ * outline. Do not add a `border` here — it has been removed deliberately.
  */
-const SURFACE = "rounded-[10px] bg-muted/40";
+const SURFACE = "rounded-xl bg-grouped-card";
 
 /**
  * Read the `bare` opt-out from a group child.
@@ -106,6 +112,7 @@ const childIsBare = (child: ReactNode): boolean => {
 	if (!isValidElement(child)) {
 		return false;
 	}
+	// SAFETY: bare is a boolean opt-in supplied by SettingsItem and its settings-row wrappers; exact true excludes other values.
 	return (child.props as { bare?: boolean }).bare === true;
 };
 
@@ -115,7 +122,7 @@ const isFullBleedTextControl = (child: ReactNode): boolean => {
 	}
 
 	const type = child.type;
-	if (typeof type !== "function") {
+	if (!isNativeFunction(type)) {
 		return false;
 	}
 
@@ -127,6 +134,7 @@ const renderSettingControl = (children: ReactNode): ReactNode => {
 		return children;
 	}
 
+	// SAFETY: isFullBleedTextControl accepted only React elements owned by Input/Textarea, whose className prop is optional text.
 	const control = children as ReactElement<{ className?: string }>;
 	return cloneElement(control, {
 		className: cn(
@@ -193,18 +201,18 @@ export const SettingsGroup = ({ children, className }: SettingsGroupProps) => {
 
 	const renderCard = (rows: ReactNode[]) => (
 		<ItemGroup
+			appearance="settings-group"
 			className={cn(
 				// `ItemGroup`'s base sets a conditional `has-data-[size=sm]:gap-2.5`
 				// that a plain `gap-0` can't override (different merge group),
 				// which would wrap every row + hairline in 10px of dead space. Zero out
 				// the size-conditional gaps too so rows sit flush against the separator.
-				"gap-0 overflow-hidden shadow-none has-data-[size=sm]:gap-0 has-data-[size=xs]:gap-0",
-				SURFACE,
+				"overflow-hidden",
 				className
 			)}
+			spacing="flush"
 		>
 			{rows.map((child, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: row order is static within a render
 				<Fragment key={index}>
 					{child}
 					{index < rows.length - 1 ? <ItemSeparator className="my-0" /> : null}
@@ -213,14 +221,13 @@ export const SettingsGroup = ({ children, className }: SettingsGroupProps) => {
 		</ItemGroup>
 	);
 
-	if (slices.length === 1 && !(slices[0].caption || slices[0].bare)) {
-		return renderCard(slices[0].rows);
-	}
-
+	// Always the same root element, even for one uncaptioned slice: a row's
+	// description appearing or disappearing while its control is focused (an
+	// input whose hint shows only while it is empty) must not swap the root and
+	// remount the rows, which would drop focus after one keystroke.
 	return (
 		<div className="space-y-1.5">
 			{slices.map((slice, sliceIndex) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: slice order is static within a render
 				<Fragment key={sliceIndex}>
 					{slice.bare ? slice.rows : renderCard(slice.rows)}
 					{slice.caption ? (
@@ -268,7 +275,9 @@ export const SettingsCard = ({
 	bare ? (
 		<div className={className}>{children}</div>
 	) : (
-		<div className={cn(SURFACE, "p-3.5", className)}>{children}</div>
+		<div className={cn(SURFACE, "p-3.5", className)} data-slot="settings-card">
+			{children}
+		</div>
 	);
 
 interface SettingsItemProps {
@@ -295,6 +304,7 @@ interface SettingsItemProps {
 	 * caption below the card this row closes.
 	 */
 	description?: ReactNode;
+	navigation?: boolean;
 	/**
 	 * Optional stable id from the desktop settings search index. Emitted as
 	 * `data-setting-id`, which is the authoritative anchor a search result jumps
@@ -314,6 +324,7 @@ interface SettingsItemProps {
  * belongs to this setting).
  */
 export const SettingsItem = ({
+	navigation,
 	actions,
 	bare,
 	children,
@@ -345,9 +356,9 @@ export const SettingsItem = ({
 			data-setting-id={settingsId}
 		>
 			<div className="flex items-center justify-between gap-3 px-3.5">
-				<ItemTitle className="font-medium text-sm">{localizedTitle}</ItemTitle>
+				<ItemTitle typography="settings-label">{localizedTitle}</ItemTitle>
 				{actions ? (
-					<ItemActions className="shrink-0">{actions}</ItemActions>
+					<ItemActions className="ml-auto shrink-0">{actions}</ItemActions>
 				) : null}
 			</div>
 			{children}
@@ -359,21 +370,24 @@ export const SettingsItem = ({
 		</div>
 	) : (
 		<Item
-			className={cn(
-				"flex-col items-stretch gap-2 rounded-none border-0 px-3.5 py-2.5",
-				className
-			)}
+			className={cn(className)}
 			data-setting-id={settingsId}
+			purpose="settings-row"
+			render={
+				navigation ? (
+					<div className={navigationStyles.navigationRow} />
+				) : undefined
+			}
 			size="sm"
 		>
-			<div className="flex w-full items-center justify-between gap-3">
-				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<ItemTitle className="font-medium text-sm">
-						{localizedTitle}
-					</ItemTitle>
+			{/* Wraps the controls under the title when the row is too narrow for
+			    both, instead of squeezing the title underneath them. */}
+			<div className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2">
+				<div className="flex min-w-[8rem] flex-1 flex-col gap-0.5">
+					<ItemTitle typography="settings-label">{localizedTitle}</ItemTitle>
 				</div>
 				{actions && !hasFullBleedTextControl(actions) ? (
-					<ItemActions className="shrink-0">{actions}</ItemActions>
+					<ItemActions className="ml-auto shrink-0">{actions}</ItemActions>
 				) : null}
 			</div>
 			{actions && hasFullBleedTextControl(actions)

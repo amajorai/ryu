@@ -1,19 +1,33 @@
 import { ComputerIcon, Delete01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { settingsApi } from "@ryu/settings";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Spinner } from "@ryu/ui/components/spinner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { useState } from "react";
 import { sileo } from "sileo";
 import {
+	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "./shared/settings-items.tsx";
+
 export function SessionsTab() {
+	const tl = useLiteralMessages();
 	const queryClient = useQueryClient();
 
 	const { data, isLoading, isError, refetch } = useQuery({
@@ -40,13 +54,13 @@ export function SessionsTab() {
 	});
 
 	const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
+	const [pendingRevoke, setPendingRevoke] = useState<{
+		id: string;
+		label: string;
+	} | null>(null);
 
 	if (isLoading) {
-		return (
-			<div className="flex items-center justify-center py-8">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows spacing="section" />;
 	}
 
 	const sessions = data?.sessions ?? [];
@@ -94,53 +108,56 @@ export function SessionsTab() {
 				title="Active sessions"
 			>
 				{isError ? (
-					<div className="flex flex-col items-center gap-3 px-3 py-6 text-center">
+					<SettingsCard className="flex items-center justify-between gap-3">
 						<p className="text-muted-foreground text-sm">
 							We couldn't load your sessions. Check your connection and try
 							again.
 						</p>
-						<Button onClick={() => refetch()} size="sm" variant="ghost">
+						<Button
+							className="shrink-0"
+							onClick={() => refetch()}
+							size="sm"
+							variant="outline"
+						>
 							Retry
 						</Button>
-					</div>
+					</SettingsCard>
 				) : sessions.length === 0 ? (
-					<p className="px-3 py-4 text-center text-muted-foreground text-sm">
-						You're signed in on this device, but the app's sign-in doesn't
-						appear in the browser-session list. Sessions created by signing in
-						on the web show up here.
-					</p>
+					<SettingsCard>
+						<p className="text-center text-muted-foreground text-sm">
+							You're signed in on this device, but the app's sign-in doesn't
+							appear in the browser-session list. Sessions created by signing in
+							on the web show up here.
+						</p>
+					</SettingsCard>
 				) : (
 					<SettingsGroup>
 						{sessions.map((session) => {
-							// Heuristic: the current session is the one whose userId matches and is the most recently used
-							// We identify it by checking the stored bearer token against session IDs isn't possible,
-							// so we mark the first/most-recent one as current.
-							const isCurrent = session.id === sessions[0]?.id;
+							const isCurrent = session.isCurrent === true;
 
 							return (
 								<SettingsItem
 									actions={
 										!isCurrent && (
 											<Button
+												appearance="cancel-request"
 												aria-label="Revoke session"
-												className="size-8 shrink-0 text-muted-foreground hover:text-status-destructive"
+												className="size-8 shrink-0"
 												disabled={revokeMutation.isPending}
-												onClick={() => revokeMutation.mutate(session.id)}
+												onClick={() =>
+													setPendingRevoke({
+														id: session.id,
+														label: session.userAgent
+															? parseUserAgent(session.userAgent)
+															: "Unknown device",
+													})
+												}
 												size="icon"
 												variant="ghost"
 											>
 												<HugeiconsIcon className="size-4" icon={Delete01Icon} />
 											</Button>
 										)
-									}
-									description={
-										<>
-											{session.ipAddress && `${session.ipAddress} · `}
-											Created{" "}
-											{formatDistanceToNow(new Date(session.createdAt), {
-												addSuffix: true,
-											})}
-										</>
 									}
 									key={session.id}
 									title={
@@ -155,18 +172,70 @@ export function SessionsTab() {
 													: "Unknown device"}
 											</span>
 											{isCurrent && (
-												<Badge className="shrink-0 text-xs" variant="secondary">
+												<Badge className="shrink-0" variant="secondary">
 													This device
 												</Badge>
 											)}
 										</span>
 									}
-								/>
+								>
+									{/* Inline meta, not a `description`: a description would
+									    close the card after every session and split one list
+									    into a stack of single-row cards. */}
+									<p className="text-muted-foreground text-xs">
+										{session.ipAddress && `${session.ipAddress} · `}
+										{tl("Created {timeAgo}", {
+											timeAgo: formatDistanceToNow(
+												new Date(session.createdAt),
+												{
+													addSuffix: true,
+												}
+											),
+										})}
+									</p>
+								</SettingsItem>
 							);
 						})}
 					</SettingsGroup>
 				)}
 			</SettingsSection>
+			<AlertDialog
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingRevoke(null);
+					}
+				}}
+				open={pendingRevoke !== null}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Revoke this session?</AlertDialogTitle>
+						<AlertDialogDescription>
+							{pendingRevoke
+								? tl(
+										"{label} will be signed out and must sign in again to use your account.",
+										{ label: pendingRevoke.label }
+									)
+								: ""}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={revokeMutation.isPending}
+							onClick={() => {
+								if (pendingRevoke) {
+									revokeMutation.mutate(pendingRevoke.id);
+								}
+								setPendingRevoke(null);
+							}}
+							variant="destructive"
+						>
+							Revoke session
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import { fetchPluginEvals, runPluginEvals } from "./plugins.ts";
 
 const target = { token: "node-token", url: "http://127.0.0.1:7980" };
@@ -6,7 +7,7 @@ const target = { token: "node-token", url: "http://127.0.0.1:7980" };
 test("fetchPluginEvals reads one installed package suite", async () => {
 	const originalFetch = globalThis.fetch;
 	let requestUrl = "";
-	globalThis.fetch = (async (input) => {
+	globalThis.fetch = createFetchFixture(originalFetch, async (input) => {
 		requestUrl = String(input);
 		return new Response(
 			JSON.stringify({
@@ -27,7 +28,7 @@ test("fetchPluginEvals reads one installed package suite", async () => {
 			}),
 			{ headers: { "content-type": "application/json" }, status: 200 }
 		);
-	}) as typeof globalThis.fetch;
+	});
 
 	try {
 		const overview = await fetchPluginEvals(target, "com.example/mail");
@@ -45,7 +46,7 @@ test("runPluginEvals posts the selected installed artifact", async () => {
 	const originalFetch = globalThis.fetch;
 	let requestUrl = "";
 	let requestInit: RequestInit | undefined;
-	globalThis.fetch = (async (input, init) => {
+	globalThis.fetch = createFetchFixture(originalFetch, async (input, init) => {
 		requestUrl = String(input);
 		requestInit = init;
 		return new Response(
@@ -74,7 +75,7 @@ test("runPluginEvals posts the selected installed artifact", async () => {
 			}),
 			{ headers: { "content-type": "application/json" }, status: 200 }
 		);
-	}) as typeof globalThis.fetch;
+	});
 
 	try {
 		const result = await runPluginEvals(target, {

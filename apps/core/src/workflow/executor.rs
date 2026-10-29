@@ -1,8 +1,16 @@
 //! Topological executor for the petgraph DAG engine.
 //!
 //! Execution model:
-//!   - Nodes run in dependency order (a node runs once all its *active* incoming
-//!     edges have produced a value).
+//!   - Nodes run in dependency order (a node runs once all its incoming edges
+//!     have resolved). Independent ready nodes run **concurrently**, up to the
+//!     workflow's `max_concurrency` (default [`DEFAULT_NODE_CONCURRENCY`]). Each
+//!     in-flight node executes against a private copy of the run and every
+//!     checkpoint it writes merges only its own changes into the canonical run
+//!     (see [`BranchScope`]), so per-node checkpoints stay deterministic. The
+//!     graph bookkeeping (joins, pruning, ready queue) stays serial in the
+//!     coordinator. When a node fails, suspends, or parks, no new node starts;
+//!     the nodes already in flight finish and are checkpointed before the run
+//!     settles.
 //!   - A node's input is the value carried on its first satisfied incoming edge
 //!     (single-input model; fan-in concatenates incoming values with `\n`).
 //!   - A `Condition` node evaluates its expression and activates only the
@@ -14,31 +22,365 @@
 //! call to the OpenAI-compatible default route; it does not enforce policy.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+use futures_util::stream::FuturesUnordered;
 use futures_util::StreamExt;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 
+use super::history::CheckpointEvent;
 use super::store::{self, NodeRunState, NodeStatus, RunStatus, WorkflowRun};
-use super::{delegation, NodeKind, Workflow, WorkflowGraph};
+use super::{delegation, NodeKind, RepeatCollect, RepeatPolicy, Workflow, WorkflowGraph};
 
 /// Sentinel error value returned by `execute_node` for an `Awakeable` gate (and a
 /// `NotifyUser` node whose ack policy requires waiting). The outer loop treats
 /// this as a suspend signal rather than a real error.
 pub(crate) const SUSPEND_SENTINEL: &str = "__AWAKEABLE_SUSPEND__";
 
+// Reserved durable links keep a child gate attached to its enclosing node without
+// changing the public run schema. SetState cannot overwrite this namespace.
+pub(crate) const PARENT_RUN_KEY: &str = "__workflow_parent_run";
+const AWAITING_CHILD_KEY: &str = "__workflow_awaiting_child";
+
+/// Serialize execution and gate decisions per persisted run. Parent execution
+/// takes child locks in nesting order; resume releases the child before waking
+/// ancestors, so an approval arriving during the suspend checkpoint cannot race
+/// the parent's write or deadlock with it.
+fn execution_lock(run_id: &str) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let key = format!("{}/{}", crate::paths::ryu_dir().display(), run_id);
+    let mut locks = LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| "workflow execution lock poisoned".to_string())?;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
+        return Ok(lock);
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(key, Arc::downgrade(&lock));
+    Ok(lock)
+}
+
+/// Whether some task in this process is executing `run_id` right now (holds its
+/// execution lock). Lets auto-resume tell an interrupted `Running` checkpoint
+/// from one a live request is still driving.
+pub(crate) fn is_run_executing(run_id: &str) -> bool {
+    execution_lock(run_id).is_ok_and(|lock| lock.try_lock().is_err())
+}
+
+/// Advance every enclosing run after a child decision. Links and loop carries
+/// live on disk, so this also works when the approval occurs after a restart.
+async fn continue_parent_runs(mut child: WorkflowRun) -> Result<WorkflowRun, String> {
+    let mut seen = HashSet::new();
+    while let Some(parent_id) = child.state.get(PARENT_RUN_KEY).cloned() {
+        if !seen.insert(parent_id.clone()) || seen.len() > MAX_SUBWORKFLOW_DEPTH {
+            return Err("invalid workflow parent chain".to_string());
+        }
+        // An approval can land while the parent is still executing (a fan-out
+        // item gated early while its siblings run), before the parent's settle
+        // checkpoint has written the link to this child. Wait for that checkpoint,
+        // so the link is read once it is on disk and the parent is woken instead
+        // of left suspended on a child that is already decided. The lock is not
+        // held past the read: `run_workflow` below takes it again.
+        let parent = {
+            let lock = execution_lock(&parent_id)?;
+            let _settled = lock.lock().await;
+            store::load_run(&parent_id)
+                .map_err(|e| format!("failed to load enclosing run '{parent_id}': {e}"))?
+        };
+        if parent.state.get(AWAITING_CHILD_KEY) != Some(&child.run_id) {
+            break;
+        }
+        if matches!(parent.status, RunStatus::Completed | RunStatus::Failed) {
+            // Recovery may observe a terminal intermediate parent whose own
+            // ancestor has not yet consumed that checkpoint.
+            child = parent;
+            continue;
+        }
+        if child.status == RunStatus::Failed {
+            // A rejected child must fail its enclosing runs even when their
+            // definitions/agents are no longer executable. Do not run lifecycle
+            // preflight, retries, or downstream effects to propagate a denial.
+            let lock = execution_lock(&parent_id)?;
+            let guard = lock.lock_owned().await;
+            let mut parent = store::load_run(&parent_id)
+                .map_err(|e| format!("failed to load enclosing run: {e}"))?;
+            if parent.state.get(AWAITING_CHILD_KEY) != Some(&child.run_id) {
+                break;
+            }
+            if !matches!(parent.status, RunStatus::Completed | RunStatus::Failed) {
+                let error = format!(
+                    "child workflow failed: {}",
+                    child.error.as_deref().unwrap_or("unknown error")
+                );
+                if let Some(node_id) = parent.awaiting_node.clone() {
+                    mark(
+                        &mut parent,
+                        &node_id,
+                        NodeStatus::Failed,
+                        None,
+                        Some(error.clone()),
+                    );
+                }
+                parent.status = RunStatus::Failed;
+                parent.error = Some(error.clone());
+                parent.awaiting_node = None;
+                parent.updated_at = chrono::Utc::now().to_rfc3339();
+                checkpoint_run(&parent, ExecutionMode::Live)?;
+                crate::plugin_host::fire_workflow_run_event(
+                    crate::plugin_host::ON_WORKFLOW_RUN_FAILED,
+                    serde_json::json!({ "run_id": parent.run_id, "workflow_id": parent.workflow_id, "status": "failed", "error": error }),
+                );
+            }
+            drop(guard);
+            child = parent;
+            continue;
+        }
+        let workflow = store::load_workflow(&parent.workflow_id)
+            .map_err(|e| format!("failed to load enclosing workflow: {e}"))?;
+        let parent_id = parent.run_id.clone();
+        child = match run_workflow(&workflow, parent.input, parent.run_id).await {
+            Ok(result) => result,
+            Err(error) => {
+                let failed = store::load_run(&parent_id).map_err(|_| error.clone())?;
+                if failed.status != RunStatus::Failed {
+                    return Err(error);
+                }
+                failed
+            }
+        };
+    }
+    Ok(child)
+}
+
+fn persisted_nesting_depth(run: &WorkflowRun) -> Result<usize, String> {
+    let mut parent_id = run.state.get(PARENT_RUN_KEY).cloned();
+    let mut seen = HashSet::from([run.run_id.clone()]);
+    while let Some(id) = parent_id {
+        if !seen.insert(id.clone()) || seen.len() > MAX_SUBWORKFLOW_DEPTH + 1 {
+            return Err("invalid workflow parent chain".to_string());
+        }
+        let parent =
+            store::load_run(&id).map_err(|e| format!("failed to load parent checkpoint: {e}"))?;
+        parent_id = parent.state.get(PARENT_RUN_KEY).cloned();
+    }
+    Ok(seen.len() - 1)
+}
+
 /// Maximum nested SubWorkflow depth, guards against accidental deep nesting.
 const MAX_SUBWORKFLOW_DEPTH: usize = 8;
 const MAX_WEBHOOK_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
-/// Defensive cap on how many times a single `While` gate may take its continue
-/// (`true`) branch before it is forced to exit (`false`). Under today's
-/// single-visit Kahn traversal a `While` is evaluated at most once per run, so
-/// this cap is inert; it exists so that a future looping executor (which would
-/// re-enter the gate) cannot run away. See the [`NodeKind::While`] doc.
+/// Hard ceiling on body iterations for a bounded `While` loop. The optional
+/// node-specific cap can lower this bound but cannot raise it. Body-less While
+/// nodes remain one-shot branch gates; body workflows execute as child runs so
+/// the enclosing DAG remains acyclic. See the [`NodeKind::While`] doc.
 pub const MAX_WHILE_ITERATIONS: u64 = 100;
+
+/// Hard ceiling on iterations for a step's [`RepeatPolicy`]. Shares the `While`
+/// backstop: a policy can lower the bound but never raise it.
+pub const MAX_REPEAT_ITERATIONS: u64 = MAX_WHILE_ITERATIONS;
+
+/// Hard ceiling on a [`RepeatPolicy`]'s `interval_ms` (1 hour). The pause holds
+/// the run task open, so longer waits belong in a schedule trigger instead.
+pub const MAX_REPEAT_INTERVAL_MS: u64 = 60 * 60 * 1000;
+
+/// Reserved run-state namespace for repeat progress (`__repeat_count_<id>`,
+/// `__repeat_carry_<id>`, ...). SetState cannot write it.
+const REPEAT_STATE_PREFIX: &str = "__repeat_";
+
+/// Reserved run-state namespace backing the `{{loop.*}}` template tokens of the
+/// step currently repeating (see [`super::template`]).
+pub(crate) const LOOP_STATE_PREFIX: &str = "__loop_";
+
+fn repeat_state_key(field: &str, node_id: &str) -> String {
+    format!("{REPEAT_STATE_PREFIX}{field}_{node_id}")
+}
+
+/// Decide whether a repeating step runs again after finishing iteration number
+/// `completed` (1-based). Pure so the exit rules are unit-testable. Checked in
+/// order: the iteration cap, `until` holding, `while` failing, and an unchanged
+/// output when `stop_when_unchanged` is set.
+pub fn decide_repeat(
+    policy: &RepeatPolicy,
+    completed: u64,
+    until_holds: bool,
+    while_holds: bool,
+    unchanged: bool,
+) -> bool {
+    completed < policy.effective_max_iterations()
+        && !until_holds
+        && while_holds
+        && !(policy.stop_when_unchanged && unchanged)
+}
+
+/// The id a node's side effects are keyed by: its own id, or `<id>__repeat<k>`
+/// for the k-th repeat iteration (k >= 1). Idempotency keys, agent
+/// conversations, delegation checkpoints, and child runs derive from this, so
+/// each iteration is a distinct effect while a resumed iteration reuses its key.
+fn iteration_scoped_id(run: &WorkflowRun, node_id: &str) -> String {
+    match run
+        .state
+        .get(&repeat_state_key("count", node_id))
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        Some(k) if k > 0 => format!("{node_id}__repeat{k}"),
+        _ => node_id.to_owned(),
+    }
+}
+
+/// Durable progress of one repeating step. Loaded from run state when the node
+/// (re-)enters, so a resumed run continues from the last finished iteration.
+struct RepeatProgress<'a> {
+    policy: &'a RepeatPolicy,
+    node_id: &'a str,
+    original: String,
+    completed: u64,
+    carry: String,
+    last: Option<String>,
+    outputs: Vec<String>,
+}
+
+impl<'a> RepeatProgress<'a> {
+    fn load(policy: &'a RepeatPolicy, node_id: &'a str, original: &str, run: &WorkflowRun) -> Self {
+        let get = |field: &str| run.state.get(&repeat_state_key(field, node_id)).cloned();
+        Self {
+            policy,
+            node_id,
+            original: original.to_owned(),
+            completed: get("count").and_then(|v| v.parse().ok()).unwrap_or(0),
+            carry: get("carry").unwrap_or_else(|| original.to_owned()),
+            last: get("last"),
+            outputs: get("outputs")
+                .and_then(|v| serde_json::from_str(&v).ok())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Publish the `{{loop.*}}` tokens for the iteration about to run.
+    fn expose(&self, run: &mut WorkflowRun) {
+        let vars = [
+            ("iteration", (self.completed + 1).to_string()),
+            ("previous", self.last.clone().unwrap_or_default()),
+            ("original", self.original.clone()),
+        ];
+        for (name, value) in vars {
+            run.state
+                .insert(format!("{LOOP_STATE_PREFIX}{name}"), value);
+        }
+    }
+
+    /// Fold one finished iteration in and decide whether another runs. When it
+    /// does, the progress is written to run state for the caller to checkpoint.
+    fn advance(&mut self, output: String, run: &mut WorkflowRun) -> bool {
+        use super::template::resolve;
+
+        let unchanged = self.last.as_deref() == Some(output.as_str());
+        self.completed += 1;
+        let ctx = build_template_ctx(&output, run);
+        let holds = |expr: &str| eval_condition(&resolve(expr, &ctx), &output);
+        let until_holds = self.policy.until_expr().is_some_and(holds);
+        let while_holds = self.policy.while_condition().is_none_or(holds);
+        let again = decide_repeat(
+            self.policy,
+            self.completed,
+            until_holds,
+            while_holds,
+            unchanged,
+        );
+
+        if self.policy.collect == RepeatCollect::All {
+            self.outputs.push(output.clone());
+        }
+        self.carry = if self.policy.feed_output {
+            output.clone()
+        } else {
+            self.original.clone()
+        };
+        self.last = Some(output);
+        if again {
+            self.persist(run);
+        }
+        again
+    }
+
+    fn persist(&self, run: &mut WorkflowRun) {
+        let mut put = |field: &str, value: String| {
+            run.state
+                .insert(repeat_state_key(field, self.node_id), value);
+        };
+        put("count", self.completed.to_string());
+        put("carry", self.carry.clone());
+        put("last", self.last.clone().unwrap_or_default());
+        if self.policy.collect == RepeatCollect::All {
+            put(
+                "outputs",
+                serde_json::to_string(&self.outputs).unwrap_or_default(),
+            );
+        }
+        // The next iteration gets a fresh retry budget and its own durable timer.
+        if let Some(state) = run.nodes.get_mut(self.node_id) {
+            state.attempts = 0;
+            state.wake_at = None;
+        }
+    }
+
+    /// Stamp the durable instant the next iteration may start, so a restart
+    /// during the pause resumes with only the remaining wait. The caller
+    /// checkpoints it with the finished iteration.
+    fn schedule_next(&self, run: &mut WorkflowRun) {
+        let interval_ms = self.policy.interval_ms.min(MAX_REPEAT_INTERVAL_MS);
+        if interval_ms == 0 {
+            return;
+        }
+        let wake_at = chrono::Utc::now() + chrono::Duration::milliseconds(interval_ms as i64);
+        run.state.insert(
+            repeat_state_key("wake_at", self.node_id),
+            wake_at.to_rfc3339(),
+        );
+    }
+
+    /// Wait out any pending pause before the next iteration. Only the time left
+    /// until the persisted `wake_at` is slept (never more than the capped
+    /// interval, so a forward-dated stamp cannot park the run), and the stamp is
+    /// cleared so the iteration's own checkpoint records that the pause ended.
+    async fn wait_for_interval(&self, run: &mut WorkflowRun) {
+        let Some(stamp) = run.state.remove(&repeat_state_key("wake_at", self.node_id)) else {
+            return;
+        };
+        let Ok(wake_at) = chrono::DateTime::parse_from_rfc3339(&stamp) else {
+            return;
+        };
+        let remaining = (wake_at.with_timezone(&chrono::Utc) - chrono::Utc::now())
+            .num_milliseconds()
+            .max(0) as u64;
+        let remaining = remaining.min(self.policy.interval_ms.min(MAX_REPEAT_INTERVAL_MS));
+        if remaining > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(remaining)).await;
+        }
+    }
+
+    /// End the loop: drop the transient progress (the iteration count stays as
+    /// a record of how many times the step ran) and produce the step's value.
+    fn finish(self, run: &mut WorkflowRun) -> String {
+        run.state.insert(
+            repeat_state_key("count", self.node_id),
+            self.completed.to_string(),
+        );
+        for field in ["carry", "last", "outputs", "wake_at"] {
+            run.state.remove(&repeat_state_key(field, self.node_id));
+        }
+        run.state
+            .retain(|key, _| !key.starts_with(LOOP_STATE_PREFIX));
+        match self.policy.collect {
+            RepeatCollect::Last => self.last.unwrap_or_default(),
+            RepeatCollect::All => serde_json::to_string(&self.outputs).unwrap_or_default(),
+        }
+    }
+}
 
 /// Whether a workflow execution may create durable state or invoke effectful
 /// nodes. Dry runs are deliberately a separate execution mode so a caller
@@ -58,11 +400,22 @@ impl ExecutionMode {
 /// Save a checkpoint only for a live execution. Keeping this guard at the
 /// executor boundary makes every existing checkpoint call dry-run safe,
 /// including nested workflows, loop iterations, retries, and durable timers.
+///
+/// Inside a dispatched branch (see [`BranchScope`]) a checkpoint of the branch's
+/// own run merges the branch's changes into the canonical run and saves that, so
+/// concurrently executing nodes never overwrite each other's progress.
 fn checkpoint_run(run: &WorkflowRun, mode: ExecutionMode) -> Result<(), String> {
     if mode.is_dry_run() {
         return Ok(());
     }
-    store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))
+    let scope = BRANCH_SCOPE
+        .try_with(|scope| (scope.run_id == run.run_id).then(|| Arc::clone(scope)))
+        .ok()
+        .flatten();
+    match scope {
+        Some(scope) => scope.checkpoint(run),
+        None => store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}")),
+    }
 }
 
 /// Decide a `While` gate against an explicit iteration cap. Pure so it is unit
@@ -119,11 +472,17 @@ pub fn decide_while(counter: u64, condition_holds: bool) -> (bool, u64) {
 /// sub-workflow — a consumer counting runs would over-count and a consumer
 /// summarizing them would summarize fragments. This wrapper is the one boundary that
 /// corresponds to what a user calls "a run".
+/// Conversation id prefix of a workflow agent node's chat: `wfrun-<run>-<node>`.
+const WORKFLOW_CONVERSATION_PREFIX: &str = "wfrun-";
+
 pub async fn run_workflow(
     workflow: &Workflow,
     input: HashMap<String, String>,
     run_id: String,
 ) -> Result<WorkflowRun, String> {
+    // A live run (manual, scheduled, triggered, resumed) is the user using Ryu,
+    // so it marks today active for the profile streak. In-memory only.
+    crate::profile_activity::note_activity();
     run_workflow_with_mode(workflow, input, run_id, ExecutionMode::Live).await
 }
 
@@ -167,11 +526,22 @@ async fn run_workflow_with_mode(
         return outcome;
     }
 
+    // Each agent node ran in its own `wfrun-<run>-<node>` chat. Those pooled agent
+    // processes would otherwise idle out one by one; nothing reuses them once the
+    // run has stopped (a resumed run skips its completed nodes).
+    crate::sidecar::adapters::acp::close_conversation_instances_with_prefix(&format!(
+        "{WORKFLOW_CONVERSATION_PREFIX}{run_id}-"
+    ));
+
     match &outcome {
         // A run that suspended at an approval gate has NOT finished — it is waiting
         // on a human and will come back through `resume_run`. Emitting `finished`
         // here would tell a consumer the work is done while it is still pending.
-        Ok(run) if run.status == store::RunStatus::AwaitingInput => {}
+        Ok(run)
+            if matches!(
+                run.status,
+                store::RunStatus::AwaitingInput | store::RunStatus::Waiting
+            ) => {}
         Ok(run) => crate::plugin_host::fire_workflow_run_event(
             if run.status == store::RunStatus::Failed {
                 crate::plugin_host::ON_WORKFLOW_RUN_FAILED
@@ -227,6 +597,34 @@ pub(crate) async fn resume_run_after_notify_ack(
     resume_run_inner(run_id, payload, true).await
 }
 
+async fn locked_gate_target(
+    run_id: &str,
+) -> Result<(WorkflowRun, tokio::sync::OwnedMutexGuard<()>), String> {
+    let mut target_id = run_id.to_string();
+    let mut seen = HashSet::new();
+    loop {
+        if !seen.insert(target_id.clone()) || seen.len() > MAX_SUBWORKFLOW_DEPTH + 1 {
+            return Err("invalid workflow child chain".to_string());
+        }
+        let lock = execution_lock(&target_id)?;
+        let guard = lock.lock_owned().await;
+        let current = store::load_run(&target_id).map_err(|_| "run not found".to_string())?;
+        if current.status == RunStatus::AwaitingInput {
+            if let Some(child_id) = current.state.get(AWAITING_CHILD_KEY) {
+                let child =
+                    store::load_run(child_id).map_err(|e| format!("child run not found: {e}"))?;
+                if child.state.get(PARENT_RUN_KEY) != Some(&current.run_id) {
+                    return Err("invalid workflow child link".to_string());
+                }
+                target_id = child_id.clone();
+                drop(guard);
+                continue;
+            }
+        }
+        return Ok((current, guard));
+    }
+}
+
 async fn resume_run_inner(
     run_id: &str,
     payload: String,
@@ -234,7 +632,8 @@ async fn resume_run_inner(
 ) -> Result<WorkflowRun, String> {
     use store::{NodeRunState, NodeStatus, RunStatus};
 
-    let mut run = store::load_run(run_id).map_err(|_| "run not found".to_string())?;
+    let (mut run, gate_guard) = locked_gate_target(run_id).await?;
+    let target_id = run.run_id.clone();
     if run.status != RunStatus::AwaitingInput {
         return Err(format!(
             "run '{run_id}' is not awaiting input (status: {:?})",
@@ -282,7 +681,22 @@ async fn resume_run_inner(
     run.updated_at = chrono::Utc::now().to_rfc3339();
     store::save_run(&run).map_err(|e| format!("failed to persist gate completion: {e}"))?;
 
-    run_workflow(&workflow, run.input.clone(), run_id.to_string()).await
+    drop(gate_guard);
+    match run_workflow(&workflow, run.input.clone(), target_id.clone()).await {
+        Ok(child) => {
+            continue_parent_runs(child).await?;
+            // The resume endpoint addresses one run; ancestor propagation must
+            // not change the identity of the resource returned to its caller.
+            store::load_run(run_id).map_err(|e| format!("failed to load resumed run: {e}"))
+        }
+        Err(error) => {
+            let child = store::load_run(&target_id).map_err(|_| error.clone())?;
+            if child.status == RunStatus::Failed {
+                continue_parent_runs(child).await?;
+            }
+            Err(error)
+        }
+    }
 }
 
 /// Fail a workflow run (e.g. its `Awakeable` approval gate was rejected/expired),
@@ -291,8 +705,14 @@ async fn resume_run_inner(
 pub async fn fail_run(run_id: &str, error: &str) -> Result<(), String> {
     use store::RunStatus;
 
-    let mut run = store::load_run(run_id).map_err(|_| "run not found".to_string())?;
-    if matches!(run.status, RunStatus::Completed | RunStatus::Failed) {
+    let (mut run, gate_guard) = locked_gate_target(run_id).await?;
+    let failed_id = run.run_id.clone();
+    if run.status == RunStatus::Completed {
+        return Ok(());
+    }
+    if run.status == RunStatus::Failed {
+        drop(gate_guard);
+        continue_parent_runs(run).await?;
         return Ok(());
     }
     run.status = RunStatus::Failed;
@@ -308,7 +728,7 @@ pub async fn fail_run(run_id: &str, error: &str) -> Result<(), String> {
         crate::plugin_host::fire_workflow_run_event(
             crate::plugin_host::ON_WORKFLOW_RUN_FAILED,
             serde_json::json!({
-                "run_id": run_id,
+                "run_id": failed_id,
                 "workflow_id": run.workflow_id,
                 "status": "failed",
                 "error": error,
@@ -316,27 +736,17 @@ pub async fn fail_run(run_id: &str, error: &str) -> Result<(), String> {
         );
     }
 
-    // Feed the failure to the self-healing loop (diagnose → propose a diagnosed
-    // retry to the inbox, or auto-retry). Best-effort + fire-and-forget so it never
-    // blocks or fails the fail_run write. The `healrun_` guard in the heal engine
-    // stops a heal-retry that itself fails from looping.
+    // Raise `core#run.failed` (a subscriber such as Self-Healing may propose a
+    // diagnosed retry). Synchronous queueing only, so it never blocks or fails the
+    // fail_run write. A subscriber's own never-heal-a-heal guard (`healrun_` ids)
+    // stops a retry that itself fails from looping.
     if saved.is_ok() {
-        let run_id = run_id.to_string();
-        let error = error.to_string();
-        tokio::spawn(async move {
-            if let Some(client) = crate::healing_client::global_client() {
-                client
-                    .report_failure(
-                        &run_id,
-                        crate::healing_client::HealSource::Workflow,
-                        format!("Workflow run {run_id} failed."),
-                        error,
-                    )
-                    .await;
-            }
-        });
+        crate::run_failures::report_workflow_failure(&failed_id, error);
     }
-    saved
+    drop(gate_guard);
+    saved?;
+    continue_parent_runs(run).await?;
+    Ok(())
 }
 
 /// Re-run a failed workflow from scratch: load the failed run, load its workflow,
@@ -357,6 +767,133 @@ pub async fn rerun_run(run_id: &str) -> Result<WorkflowRun, String> {
     run_workflow(&workflow, run.input.clone(), new_id).await
 }
 
+/// Run-state namespaces the engine owns. They never carry a fork's links or
+/// in-flight loop progress over from the parent, and a fork's `state_patch`
+/// cannot write them.
+const ENGINE_STATE_PREFIXES: [&str; 6] = [
+    "__workflow_",
+    REPEAT_STATE_PREFIX,
+    LOOP_STATE_PREFIX,
+    FANOUT_STATE_PREFIX,
+    "__while_",
+    super::notify_user::ACK_STATE_PREFIX,
+];
+
+/// Time travel: fork `run_id` from one of its history checkpoints (see
+/// [`super::history`]) into a **new** run that resumes from that point, with an
+/// optional patch applied to the checkpoint's state map.
+///
+/// The fork copies the checkpoint's *completed* nodes and their outputs, so
+/// they are replayed rather than re-executed: their side effects are never
+/// repeated. Every node that had not completed at the checkpoint runs again in
+/// the fork as a **new** effect: the fork has its own run id, so its
+/// idempotency keys (`<run_id>:<node_id>`, see [`idempotency_key`]), agent
+/// conversations, and nested child run ids are all distinct from the parent's.
+/// That is the same effectively-once contract a resumed run has, applied to a
+/// deliberately new execution. The parent run is never modified.
+///
+/// The new run records its lineage in [`WorkflowRun::forked_from`] and its
+/// history starts with a `forked` checkpoint. Nested child runs (driven by
+/// their parent) cannot be forked directly; fork the top-level run instead.
+pub async fn fork_run(
+    run_id: &str,
+    checkpoint_id: &str,
+    state_patch: HashMap<String, String>,
+) -> Result<WorkflowRun, String> {
+    let parent = store::load_run(run_id).map_err(|_| "run not found".to_string())?;
+    if parent.dry_run {
+        return Err("dry runs have no history to fork".to_string());
+    }
+    if parent.state.contains_key(PARENT_RUN_KEY) {
+        return Err(
+            "run is a nested child run; fork the top-level run that owns it instead".to_string(),
+        );
+    }
+    let checkpoint = super::history::find(run_id, checkpoint_id)
+        .map_err(|e| format!("failed to read run history: {e}"))?
+        .ok_or_else(|| format!("checkpoint '{checkpoint_id}' not found"))?;
+    // Ad-hoc script runs are owned by the caller scope that started them (see
+    // `super::script`); this generic surface cannot verify that scope, so it
+    // must not re-execute their code under a new run.
+    if parent
+        .workflow_id
+        .starts_with(store::SCRIPT_WORKFLOW_PREFIX)
+    {
+        return Err("script runs cannot be forked".to_string());
+    }
+    let workflow = store::load_workflow(&parent.workflow_id)
+        .map_err(|_| format!("workflow '{}' not found", parent.workflow_id))?;
+    let fork_id = format!("fork_{}", uuid::Uuid::new_v4().simple());
+    let forked = build_fork(&parent, &checkpoint, &workflow, state_patch, fork_id)?;
+    store::save_run(&forked).map_err(|e| format!("failed to persist fork: {e}"))?;
+    super::history::record(&forked, CheckpointEvent::Forked, None, 0);
+    run_workflow(&workflow, forked.input.clone(), forked.run_id.clone()).await
+}
+
+/// Build the seed checkpoint of a fork. Pure apart from the clock so the
+/// carry-over rules are unit-testable.
+fn build_fork(
+    parent: &WorkflowRun,
+    checkpoint: &super::history::RunCheckpoint,
+    workflow: &Workflow,
+    state_patch: HashMap<String, String>,
+    fork_id: String,
+) -> Result<WorkflowRun, String> {
+    for key in state_patch.keys() {
+        if key.trim().is_empty() {
+            return Err("state_patch keys must not be empty".to_string());
+        }
+        if let Some(prefix) = ENGINE_STATE_PREFIXES
+            .iter()
+            .find(|prefix| key.starts_with(*prefix))
+        {
+            return Err(format!(
+                "state_patch cannot write engine state keys beginning with '{prefix}'"
+            ));
+        }
+    }
+    let mut run = WorkflowRun::new(fork_id, parent.workflow_id.clone(), parent.input.clone());
+    run.caller_scope = parent.caller_scope.clone();
+    run.forked_from = Some(store::RunLineage {
+        run_id: parent.run_id.clone(),
+        checkpoint_id: checkpoint.checkpoint_id.clone(),
+    });
+    // Only completed nodes carry over; everything else (failed, skipped,
+    // in-flight, or suspended at a gate) is recomputed by the fork.
+    run.nodes = checkpoint
+        .nodes
+        .iter()
+        .filter(|(_, state)| state.status == NodeStatus::Completed)
+        .map(|(id, state)| (id.clone(), state.clone()))
+        .collect();
+    run.state = checkpoint.state.clone();
+    // Parent/child links and in-flight fan-out/loop-token state belong to the
+    // parent's executions; a fork starts its own.
+    run.state.retain(|key, _| {
+        !key.starts_with("__workflow_")
+            && !key.starts_with(LOOP_STATE_PREFIX)
+            && !key.starts_with(FANOUT_STATE_PREFIX)
+    });
+    // Loop progress of a node that will run again starts over.
+    for node in &workflow.nodes {
+        if run.is_completed(&node.id) {
+            continue;
+        }
+        for field in ["count", "carry", "last", "outputs", "wake_at"] {
+            run.state.remove(&repeat_state_key(field, &node.id));
+        }
+        run.state.remove(&format!("__while_{}", node.id));
+        run.state.remove(&format!("__while_carry_{}", node.id));
+        // A NotifyUser gate that runs again delivers fresh notifications; the
+        // parent's ack bookkeeping (its members' acks and inbox rows) must not
+        // satisfy or route the fork's gate.
+        run.state
+            .remove(&super::notify_user::ack_state_key(&node.id));
+    }
+    run.state.extend(state_patch);
+    Ok(run)
+}
+
 fn run_workflow_inner(
     workflow: &Workflow,
     input: HashMap<String, String>,
@@ -365,6 +902,8 @@ fn run_workflow_inner(
     mode: ExecutionMode,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<WorkflowRun, String>> + Send + '_>> {
     Box::pin(async move {
+        let lock = execution_lock(&run_id)?;
+        let _guard = lock.lock_owned().await;
         if depth > MAX_SUBWORKFLOW_DEPTH {
             return Err(format!(
                 "sub-workflow nesting exceeded max depth of {MAX_SUBWORKFLOW_DEPTH}"
@@ -391,257 +930,217 @@ fn run_workflow_inner(
             }
         };
         run.dry_run = mode.is_dry_run();
+        let depth = if mode.is_dry_run() {
+            depth
+        } else {
+            depth.max(persisted_nesting_depth(&run)?)
+        };
         // Resuming a suspended run: clear awaiting state and re-run from the
         // last checkpoint. Any Awakeable node already flipped to Completed (by
         // the resume endpoint) will be skipped like any other finished node.
         run.awaiting_node = None;
         run.status = RunStatus::Running;
+        // Woken from a limit wait (or resumed early by hand): the wait is over.
+        run.resume_at = None;
+        run.wait_reason = None;
+        if !mode.is_dry_run() && super::history::is_empty(&run.run_id) {
+            super::history::record(&run, CheckpointEvent::RunStarted, None, 0);
+        }
 
-        // Per-node produced value, seeded with any completed-node outputs from a
-        // resumed run so downstream nodes can read upstream results.
-        let mut values: HashMap<NodeIndex, String> = HashMap::new();
-        for node in &workflow.nodes {
-            if let Some(state) = run.nodes.get(&node.id) {
-                if state.status == NodeStatus::Completed {
-                    if let Some(out) = &state.output {
-                        if let Some(&idx) = graph.index_by_id.get(&node.id) {
-                            values.insert(idx, out.clone());
-                        }
-                    }
+        let mut traversal = Traversal::new(&graph, workflow, &run);
+        let limit = effective_node_concurrency(workflow.max_concurrency);
+        let shared = Arc::new(Mutex::new(run));
+        let mut in_flight: FuturesUnordered<BranchFuture<'_>> = FuturesUnordered::new();
+        let mut halt = Halt::default();
+
+        loop {
+            // Dispatch every ready node, up to the concurrency limit. Nodes that
+            // need no execution (pruned, already completed on resume, skipped by
+            // a dry run) settle inline and may make more nodes ready.
+            while halt.is_clear() && in_flight.len() < limit {
+                let Some(idx) = traversal.queue.pop_front() else {
+                    break;
+                };
+                if traversal.pruned.contains(&idx) {
+                    // A skipped node still resolves its outgoing edges so a
+                    // downstream join (branches that reconverge on one node)
+                    // keeps making progress instead of stalling forever.
+                    let mut run = lock_run(&shared)?;
+                    traversal.resolve_successors(idx, true, &mut run, mode)?;
+                    continue;
                 }
-            }
-        }
-
-        // Edges considered "active". A condition prunes the non-taken branch.
-        let mut active_edges: HashSet<petgraph::graph::EdgeIndex> =
-            graph.graph.edge_indices().collect();
-        let mut pruned_nodes: HashSet<NodeIndex> = HashSet::new();
-
-        // Kahn-style traversal honouring active edges only.
-        let mut indegree: HashMap<NodeIndex, usize> = HashMap::new();
-        for idx in graph.graph.node_indices() {
-            let count = graph.graph.edges_directed(idx, Direction::Incoming).count();
-            indegree.insert(idx, count);
-        }
-
-        let mut queue: VecDeque<NodeIndex> = graph.roots().into_iter().collect();
-
-        while let Some(idx) = queue.pop_front() {
-            if pruned_nodes.contains(&idx) {
-                // A skipped node still resolves its outgoing edges so a
-                // downstream join (branches that reconverge on one node) keeps
-                // making progress instead of stalling forever. Its edges carry
-                // no value and are deactivated inside `resolve_successors`.
-                resolve_successors(
-                    idx,
-                    true,
-                    &graph,
-                    &mut active_edges,
-                    &mut indegree,
-                    &mut pruned_nodes,
-                    &mut queue,
-                    &mut run,
-                    mode,
-                )?;
-                continue;
-            }
-            let node = &graph.graph[idx];
-
-            // Gather input value from active incoming edges (fan-in joins).
-            let incoming: Vec<String> = graph
-                .graph
-                .edges_directed(idx, Direction::Incoming)
-                .filter(|e| active_edges.contains(&e.id()))
-                .filter_map(|e| values.get(&e.source()).cloned())
-                .collect();
-            let node_input = if incoming.is_empty() {
-                // Root node: read from run input by key/id.
-                input_for_root(node, &run)
-            } else {
-                incoming.join("\n")
-            };
-
-            // Skip already-completed nodes on resume.
-            let produced = if run.is_completed(&node.id) {
-                run.nodes
-                    .get(&node.id)
-                    .and_then(|s| s.output.clone())
-                    .unwrap_or_default()
-            } else {
+                let node = &graph.graph[idx];
+                let (node_input, replayed) = {
+                    let run = lock_run(&shared)?;
+                    let replayed = run.is_completed(&node.id).then(|| {
+                        run.nodes
+                            .get(&node.id)
+                            .and_then(|s| s.output.clone())
+                            .unwrap_or_default()
+                    });
+                    (traversal.input_for(idx, &run), replayed)
+                };
+                // Skip already-completed nodes on resume: replay their output.
+                if let Some(produced) = replayed {
+                    let mut run = lock_run(&shared)?;
+                    traversal.complete(idx, produced, &mut run, mode)?;
+                    continue;
+                }
                 // Dry runs execute only pure nodes and tools that Core can
                 // classify as read-only. Effectful nodes are recorded as
                 // skipped and their outgoing paths are treated like a normal
                 // skipped branch, so no external call can happen accidentally.
                 if mode.is_dry_run() {
                     if let Some(reason) = dry_run_skip_reason(node).await {
+                        let mut run = lock_run(&shared)?;
                         mark(&mut run, &node.id, NodeStatus::Skipped, None, Some(reason));
                         checkpoint_run(&run, mode)?;
-                        resolve_successors(
-                            idx,
-                            true,
-                            &graph,
-                            &mut active_edges,
-                            &mut indegree,
-                            &mut pruned_nodes,
-                            &mut queue,
-                            &mut run,
-                            mode,
-                        )?;
+                        traversal.resolve_successors(idx, true, &mut run, mode)?;
                         continue;
                     }
                 }
-                mark(&mut run, &node.id, NodeStatus::Running, None, None);
-                checkpoint_run(&run, mode)?;
+                let base = lock_run(&shared)?.clone();
+                in_flight.push(drive_branch(
+                    node,
+                    idx,
+                    node_input,
+                    base,
+                    Arc::clone(&shared),
+                    depth,
+                    mode,
+                ));
+            }
 
-                // Temporal-style retry loop with an optional per-node wall-clock
-                // timeout per attempt. A node with no `retry` policy runs once
-                // (`max_attempts` defaults to 1); a timeout is surfaced as a
-                // retryable error so it composes with the policy. An `Awakeable`
-                // suspend is never retried.
-                let policy = node.retry.clone().unwrap_or_default();
-                let max_attempts = policy.max_attempts.max(1);
-
-                let outcome = loop {
-                    // Count this attempt before running it, so a crash mid-call
-                    // still spends budget. `attempts` persists across restart.
-                    let attempt = {
-                        let st = run.nodes.entry(node.id.clone()).or_insert(NodeRunState {
-                            status: NodeStatus::Running,
-                            output: None,
-                            error: None,
-                            attempts: 0,
-                            wake_at: None,
-                        });
-                        st.attempts += 1;
-                        st.status = NodeStatus::Running;
-                        st.attempts
-                    };
-                    checkpoint_run(&run, mode)?;
-
-                    let attempt_result =
-                        run_node_attempt(node, &node_input, &mut run, depth, mode).await;
-
-                    match attempt_result {
-                        Ok(out) => {
-                            mark(
-                                &mut run,
-                                &node.id,
-                                NodeStatus::Completed,
-                                Some(out.clone()),
-                                None,
-                            );
-                            break Ok(out);
-                        }
-                        // Awakeable gate: suspend, never retry. The node stays
-                        // `Running` so the resume endpoint can identify it and
-                        // the executor re-enters it once it is flipped Completed.
-                        Err(e) if e == SUSPEND_SENTINEL => {
-                            run.status = RunStatus::AwaitingInput;
-                            run.awaiting_node = Some(node.id.clone());
-                            run.updated_at = chrono::Utc::now().to_rfc3339();
-                            checkpoint_run(&run, mode)?;
-                            // Surface an `Awakeable` HITL gate in the approval
-                            // inbox so the user can approve (resume) or reject
-                            // (fail) it from one place. Best-effort + deduped on
-                            // the run id. A `NotifyUser` gate is skipped here: it
-                            // already delivered its own per-member inbox items
-                            // (with an Ack action) inside the node arm, so a
-                            // generic approval row would be a duplicate.
-                            if let NodeKind::Awakeable { prompt } = &node.kind {
-                                if let Some(engine) = crate::approvals::global_engine() {
-                                    let req = crate::approvals::ApprovalRequest::for_workflow_gate(
-                                        &run.run_id,
-                                        &workflow.name,
-                                        prompt.as_deref(),
-                                    );
-                                    let _ = engine.request_deduped(req).await;
-                                }
-                            }
-                            return Ok(run);
-                        }
-                        Err(e) => match decide_retry(&policy, attempt, max_attempts, &e) {
-                            RetryDecision::Fail => break Err(e),
-                            RetryDecision::Retry(sleep_ms) => {
-                                checkpoint_run(&run, mode)?;
-                                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms))
-                                    .await;
-                            }
-                        },
-                    }
-                };
-
-                match outcome {
-                    Ok(out) => out,
-                    Err(e) => {
-                        mark(
-                            &mut run,
-                            &node.id,
-                            NodeStatus::Failed,
-                            None,
-                            Some(e.clone()),
-                        );
-                        run.status = RunStatus::Failed;
-                        run.error = Some(e.clone());
-                        checkpoint_run(&run, mode)?;
-                        return Err(e);
-                    }
-                }
+            let Some(done) = in_flight.next().await else {
+                break;
             };
-
-            values.insert(idx, produced.clone());
-
-            // Condition nodes (and a body-less one-shot While gate) produce
-            // "true"/"false" and prune the non-taken branch. A *looped* While
-            // (`body_workflow_id` set) produces the loop's carry value, not a
-            // branch label, so it must NOT prune — it is a plain data node with a
-            // single unlabelled forward edge.
-            let is_brancher = matches!(node.kind, NodeKind::Condition { .. })
-                || matches!(
-                    node.kind,
-                    NodeKind::While {
-                        body_workflow_id: None,
-                        ..
-                    }
-                );
-            if is_brancher {
-                let taken = produced == "true";
-                let label = if taken { "true" } else { "false" };
-                for edge in graph.graph.edges_directed(idx, Direction::Outgoing) {
-                    let matches = edge
-                        .weight()
-                        .branch
-                        .as_deref()
-                        .map(|b| b == label)
-                        .unwrap_or(true);
-                    if !matches {
-                        active_edges.remove(&edge.id());
+            let BranchDone {
+                idx,
+                scope,
+                local,
+                outcome,
+            } = done;
+            let node = &graph.graph[idx];
+            let mut run = lock_run(&shared)?;
+            scope.merge_into(&mut run, &local)?;
+            match outcome {
+                Err(fatal) => {
+                    halt.fatal.get_or_insert(fatal);
+                }
+                Ok(NodeOutcome::Produced(produced)) => {
+                    traversal.complete(idx, produced, &mut run, mode)?;
+                    super::history::record(
+                        &run,
+                        CheckpointEvent::NodeCompleted,
+                        Some(&node.id),
+                        node_iteration(&run, node),
+                    );
+                }
+                Ok(NodeOutcome::Failed(error)) => {
+                    checkpoint_run(&run, mode)?;
+                    super::history::record(
+                        &run,
+                        CheckpointEvent::NodeFailed,
+                        Some(&node.id),
+                        node_iteration(&run, node),
+                    );
+                    halt.failed.get_or_insert(error);
+                }
+                Ok(NodeOutcome::Parked(error)) => {
+                    halt.parked.get_or_insert((node.id.clone(), error));
+                }
+                // Only one gate is routed per suspension: the first. A second
+                // suspended branch re-enters (and re-suspends at) its own gate
+                // on the next resume, since its node is still unfinished.
+                Ok(NodeOutcome::Suspended) => {
+                    if halt.suspended.is_none() {
+                        halt.suspended = Some((
+                            node.id.clone(),
+                            local.state.get(AWAITING_CHILD_KEY).cloned(),
+                        ));
                     }
                 }
             }
+        }
 
+        let mut run = lock_run(&shared)?.clone();
+        drop(shared);
+
+        // Settle a halted run once every in-flight branch has finished, so no
+        // branch's completed work is lost: a hard checkpoint error first, then a
+        // failed node, then a provider limit, then a human gate.
+        if let Some(fatal) = halt.fatal {
+            return Err(fatal);
+        }
+        if let Some(error) = halt.failed {
+            run.status = RunStatus::Failed;
+            run.error = Some(error.clone());
+            run.updated_at = chrono::Utc::now().to_rfc3339();
             checkpoint_run(&run, mode)?;
-
-            // Resolve successors: decrement each successor's indegree and, once
-            // it reaches zero, either enqueue it (a live incoming edge remains)
-            // or skip it (every incoming path was pruned).
-            resolve_successors(
-                idx,
-                false,
-                &graph,
-                &mut active_edges,
-                &mut indegree,
-                &mut pruned_nodes,
-                &mut queue,
-                &mut run,
-                mode,
-            )?;
+            super::history::record(&run, CheckpointEvent::RunFailed, None, 0);
+            return Err(error);
+        }
+        if let Some((node_id, error)) = halt.parked {
+            // A rate, usage, or session limit is not this node failing: park
+            // the run until the limit resets. A nested run parks too and its
+            // parent turns that into a limit error of its own, so the whole
+            // chain parks; only the top-level run schedules the wake-up, and
+            // resuming it re-enters each child under its run id.
+            park_on_limit(&mut run, &node_id, &error);
+            checkpoint_run(&run, mode)?;
+            super::history::record(&run, CheckpointEvent::NodeParked, Some(&node_id), 0);
+            if depth == 0 {
+                super::auto_resume::schedule_wake(&run);
+            }
+            return Ok(run);
+        }
+        if let Some((node_id, child)) = halt.suspended {
+            // Route the resume to the suspended gate's child run (if the gate is
+            // nested). Re-assert the link here: a sibling branch that finished
+            // after the gate suspended may have merged its own link removal.
+            match child {
+                Some(child) => {
+                    run.state.insert(AWAITING_CHILD_KEY.to_string(), child);
+                }
+                None => {
+                    run.state.remove(AWAITING_CHILD_KEY);
+                }
+            }
+            // The gate node stays `Running` so the resume endpoint can identify
+            // it and the executor re-enters it once it is flipped Completed.
+            run.status = RunStatus::AwaitingInput;
+            run.awaiting_node = Some(node_id.clone());
+            run.updated_at = chrono::Utc::now().to_rfc3339();
+            checkpoint_run(&run, mode)?;
+            super::history::record(&run, CheckpointEvent::NodeSuspended, Some(&node_id), 0);
+            // Surface an `Awakeable` HITL gate in the approval inbox so the user
+            // can approve (resume) or reject (fail) it from one place.
+            // Best-effort + deduped on the run id. A `NotifyUser` gate is
+            // skipped here: it already delivered its own per-member inbox items
+            // (with an Ack action) inside the node arm, so a generic approval
+            // row would be a duplicate.
+            let gate = graph
+                .index_by_id
+                .get(&node_id)
+                .map(|&idx| &graph.graph[idx].kind);
+            if let Some(NodeKind::Awakeable { prompt }) = gate {
+                if let Some(engine) = crate::approvals::global_engine() {
+                    let req = crate::approvals::ApprovalRequest::for_workflow_gate(
+                        &run.run_id,
+                        &workflow.name,
+                        prompt.as_deref(),
+                    );
+                    let _ = engine.request_deduped(req).await;
+                }
+            }
+            return Ok(run);
         }
 
         // Collect Output node values into the run output map.
         for node in &workflow.nodes {
             if let NodeKind::Output { key } = &node.kind {
                 if let Some(&idx) = graph.index_by_id.get(&node.id) {
-                    if let Some(v) = values.get(&idx) {
+                    if let Some(v) = traversal.values.get(&idx) {
                         let out_key = key.clone().unwrap_or_else(|| node.id.clone());
                         run.output.insert(out_key, v.clone());
                     }
@@ -654,72 +1153,466 @@ fn run_workflow_inner(
         }
         run.updated_at = chrono::Utc::now().to_rfc3339();
         checkpoint_run(&run, mode)?;
+        super::history::record(&run, CheckpointEvent::RunCompleted, None, 0);
         Ok(run)
     })
 }
 
-/// Resolve a finalized node's outgoing edges during Kahn traversal.
-///
-/// Called once per node after it Completes (`was_skipped == false`) and once per
-/// Skipped node (`was_skipped == true`). A skipped node produces no value, so its
-/// outgoing edges are deactivated. For every successor whose indegree reaches
-/// zero we decide run-vs-skip: a successor with at least one still-active
-/// incoming edge runs (and reads only its active inputs); a successor whose
-/// incoming edges were all pruned is itself skipped and enqueued so the skip
-/// propagates through any further joins. This is what lets a `Condition` whose
-/// branches reconverge on a single downstream node work — the pruned branch's
-/// skip flows through to the join instead of stalling its indegree forever.
-#[allow(clippy::too_many_arguments)]
-fn resolve_successors(
+/// Why the coordinator stopped dispatching new nodes. Every reason is recorded
+/// as it happens, but the run is only settled once in-flight branches finish.
+#[derive(Default)]
+struct Halt {
+    /// A checkpoint could not be written: the run cannot continue safely.
+    fatal: Option<String>,
+    /// The first node failure.
+    failed: Option<String>,
+    /// The first node parked on a provider limit, with its limit error.
+    parked: Option<(String, String)>,
+    /// The first node suspended at a gate, with its child-run link (if any).
+    suspended: Option<(String, Option<String>)>,
+}
+
+impl Halt {
+    fn is_clear(&self) -> bool {
+        self.fatal.is_none()
+            && self.failed.is_none()
+            && self.parked.is_none()
+            && self.suspended.is_none()
+    }
+}
+
+/// How one dispatched node finished.
+enum NodeOutcome {
+    /// The node produced a value (already marked `Completed` in its branch).
+    Produced(String),
+    /// The node failed (already marked `Failed` in its branch).
+    Failed(String),
+    /// The node suspended the run at a human gate (it stays `Running`).
+    Suspended,
+    /// The node hit a provider limit; the run parks with this error.
+    Parked(String),
+}
+
+/// A finished branch: the node, its private run copy, and the outcome.
+struct BranchDone {
     idx: NodeIndex,
-    was_skipped: bool,
-    graph: &WorkflowGraph,
-    active_edges: &mut HashSet<petgraph::graph::EdgeIndex>,
-    indegree: &mut HashMap<NodeIndex, usize>,
-    pruned_nodes: &mut HashSet<NodeIndex>,
-    queue: &mut VecDeque<NodeIndex>,
-    run: &mut WorkflowRun,
+    scope: Arc<BranchScope>,
+    local: WorkflowRun,
+    /// `Err` is a fatal checkpoint failure, not a node error.
+    outcome: Result<NodeOutcome, String>,
+}
+
+type BranchFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = BranchDone> + Send + 'a>>;
+
+/// The run copy one in-flight node executes against, plus the canonical run it
+/// is merged back into. Nodes take `&mut WorkflowRun`, so concurrent branches
+/// each get a private copy taken when they are dispatched; every checkpoint the
+/// branch writes merges only *its own changes* (relative to `base`) into the
+/// shared canonical run before that run is saved. Two branches can therefore
+/// checkpoint in any interleaving without one overwriting the other's progress.
+struct BranchScope {
+    run_id: String,
+    /// The branch copy as of its last merge (initially the dispatch snapshot).
+    /// Each merge applies only what changed since then, so a key the branch
+    /// wrote in one checkpoint and removed before the next is removed from the
+    /// canonical run too.
+    base: Mutex<WorkflowRun>,
+    shared: Arc<Mutex<WorkflowRun>>,
+}
+
+tokio::task_local! {
+    /// The branch whose checkpoints are being routed through a merge. Set while
+    /// one dispatched node runs; nested child runs have different run ids and
+    /// therefore save directly (or through their own scope).
+    static BRANCH_SCOPE: Arc<BranchScope>;
+}
+
+impl BranchScope {
+    /// Fold the branch's changes since its last merge into the canonical run.
+    /// Idempotent: merging the same branch copy twice is a no-op.
+    fn merge_into(&self, shared: &mut WorkflowRun, local: &WorkflowRun) -> Result<(), String> {
+        let mut base = self
+            .base
+            .lock()
+            .map_err(|_| "workflow branch state lock poisoned".to_string())?;
+        merge_run_delta(shared, &base, local);
+        base.clone_from(local);
+        Ok(())
+    }
+
+    /// Merge `local` into the canonical run and save it, under the canonical
+    /// run's lock so saves from concurrent branches are totally ordered.
+    fn checkpoint(&self, local: &WorkflowRun) -> Result<(), String> {
+        let mut shared = lock_run(&self.shared)?;
+        self.merge_into(&mut shared, local)?;
+        store::save_run(&shared).map_err(|e| format!("failed to persist checkpoint: {e}"))
+    }
+}
+
+/// Apply the node/state/output changes `local` made since `base` onto `shared`.
+fn merge_run_delta(shared: &mut WorkflowRun, base: &WorkflowRun, local: &WorkflowRun) {
+    for (id, state) in &local.nodes {
+        if base.nodes.get(id) != Some(state) {
+            shared.nodes.insert(id.clone(), state.clone());
+        }
+    }
+    merge_string_map(&mut shared.state, &base.state, &local.state);
+    merge_string_map(&mut shared.output, &base.output, &local.output);
+    shared.updated_at = chrono::Utc::now().to_rfc3339();
+}
+
+fn merge_string_map(
+    shared: &mut HashMap<String, String>,
+    base: &HashMap<String, String>,
+    local: &HashMap<String, String>,
+) {
+    for (key, value) in local {
+        if base.get(key) != Some(value) {
+            shared.insert(key.clone(), value.clone());
+        }
+    }
+    for key in base.keys() {
+        if !local.contains_key(key) {
+            shared.remove(key);
+        }
+    }
+}
+
+fn lock_run(shared: &Mutex<WorkflowRun>) -> Result<std::sync::MutexGuard<'_, WorkflowRun>, String> {
+    shared
+        .lock()
+        .map_err(|_| "workflow run state lock poisoned".to_string())
+}
+
+/// Default number of independent nodes of one run that execute at once.
+pub const DEFAULT_NODE_CONCURRENCY: u32 = 4;
+/// Hard ceiling on a workflow's `max_concurrency`.
+pub const MAX_NODE_CONCURRENCY: u32 = 16;
+
+/// Resolve a workflow's node concurrency: its setting clamped to
+/// `1..=MAX_NODE_CONCURRENCY`, defaulting to [`DEFAULT_NODE_CONCURRENCY`].
+pub fn effective_node_concurrency(max_concurrency: Option<u32>) -> usize {
+    max_concurrency
+        .unwrap_or(DEFAULT_NODE_CONCURRENCY)
+        .clamp(1, MAX_NODE_CONCURRENCY) as usize
+}
+
+/// How many times `node` has run in this run, for history records: its
+/// `repeat` iteration count, its `while` loop count, or 1.
+fn node_iteration(run: &WorkflowRun, node: &super::WorkflowNode) -> u64 {
+    let parsed = |key: String| run.state.get(&key).and_then(|v| v.parse::<u64>().ok());
+    parsed(repeat_state_key("count", &node.id))
+        .or_else(|| match &node.kind {
+            NodeKind::While { .. } => parsed(format!("__while_{}", node.id)),
+            _ => None,
+        })
+        .filter(|count| *count > 0)
+        .unwrap_or(1)
+}
+
+/// Run one node on its private run copy, routing its checkpoints through the
+/// branch merge so concurrent branches never clobber each other.
+fn drive_branch<'a>(
+    node: &'a super::WorkflowNode,
+    idx: NodeIndex,
+    input: String,
+    base: WorkflowRun,
+    shared: Arc<Mutex<WorkflowRun>>,
+    depth: usize,
     mode: ExecutionMode,
-) -> Result<(), String> {
-    let out_edges: Vec<(petgraph::graph::EdgeIndex, NodeIndex)> = graph
-        .graph
-        .edges_directed(idx, Direction::Outgoing)
-        .map(|e| (e.id(), e.target()))
-        .collect();
-    for (eid, target) in out_edges {
-        if was_skipped {
-            // A skipped source carries no value into the join.
-            active_edges.remove(&eid);
+) -> BranchFuture<'a> {
+    Box::pin(async move {
+        let scope = Arc::new(BranchScope {
+            run_id: base.run_id.clone(),
+            base: Mutex::new(base.clone()),
+            shared,
+        });
+        let mut local = base;
+        let outcome = BRANCH_SCOPE
+            .scope(
+                Arc::clone(&scope),
+                drive_node(node, &input, &mut local, depth, mode),
+            )
+            .await;
+        BranchDone {
+            idx,
+            scope,
+            local,
+            outcome,
         }
-        let entry = indegree.entry(target).or_insert(0);
-        if *entry > 0 {
-            *entry -= 1;
+    })
+}
+
+/// Execute one node to a settled outcome: the Temporal-style retry loop with an
+/// optional per-attempt timeout, wrapped by an optional `repeat` loop. Mutates
+/// only node-scoped state on `run` (its own node entry and state keys); the
+/// coordinator owns run-level status transitions.
+async fn drive_node(
+    node: &super::WorkflowNode,
+    node_input: &str,
+    run: &mut WorkflowRun,
+    depth: usize,
+    mode: ExecutionMode,
+) -> Result<NodeOutcome, String> {
+    mark(run, &node.id, NodeStatus::Running, None, None);
+    checkpoint_run(run, mode)?;
+
+    // A node with no `retry` policy runs once (`max_attempts` defaults to 1); a
+    // timeout is surfaced as a retryable error so it composes with the policy.
+    // An `Awakeable` suspend is never retried.
+    let policy = node.retry.clone().unwrap_or_default();
+    let max_attempts = policy.max_attempts.max(1);
+    // A `repeat` policy wraps the retry loop: each iteration is one full
+    // (retried) execution of the node on the carried value.
+    let mut repeat = node
+        .repeat
+        .as_ref()
+        .map(|p| RepeatProgress::load(p, &node.id, node_input, run));
+
+    let outcome = loop {
+        let iteration_input = match &repeat {
+            Some(progress) => {
+                progress.wait_for_interval(run).await;
+                progress.expose(run);
+                progress.carry.clone()
+            }
+            None => node_input.to_string(),
+        };
+        let attempt_outcome = loop {
+            // Count this attempt before running it, so a crash mid-call still
+            // spends budget. `attempts` persists across restart.
+            let attempt = {
+                let st = run.nodes.entry(node.id.clone()).or_insert(NodeRunState {
+                    status: NodeStatus::Running,
+                    output: None,
+                    error: None,
+                    attempts: 0,
+                    wake_at: None,
+                });
+                st.attempts += 1;
+                st.status = NodeStatus::Running;
+                st.attempts
+            };
+            checkpoint_run(run, mode)?;
+
+            match run_node_attempt(node, &iteration_input, run, depth, mode).await {
+                Ok(out) => break Ok(out),
+                // Awakeable gate: suspend, never retry.
+                Err(e) if e == SUSPEND_SENTINEL => return Ok(NodeOutcome::Suspended),
+                // A rate, usage, or session limit is not this node failing.
+                Err(e)
+                    if !mode.is_dry_run()
+                        && run.limit_waits < super::auto_resume::MAX_LIMIT_WAITS
+                        && super::limits::is_limit_error(&e) =>
+                {
+                    return Ok(NodeOutcome::Parked(e));
+                }
+                Err(e) => match decide_retry(&policy, attempt, max_attempts, &e) {
+                    RetryDecision::Fail => break Err(e),
+                    RetryDecision::Retry(sleep_ms) => {
+                        checkpoint_run(run, mode)?;
+                        tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)).await;
+                    }
+                },
+            }
+        };
+        let out = match attempt_outcome {
+            Ok(out) => out,
+            Err(e) => break Err(e),
+        };
+        let Some(progress) = repeat.as_mut() else {
+            break Ok(out);
+        };
+        if !progress.advance(out, run) {
+            break Ok(repeat.take().map(|p| p.finish(run)).unwrap_or_default());
         }
-        if *entry != 0 || pruned_nodes.contains(&target) {
-            continue;
+        // Stamp the pause before the next pass as a durable timer, then
+        // checkpoint the finished iteration with it so a restart resumes the
+        // loop at the next pass after the remaining wait.
+        if !mode.is_dry_run() {
+            progress.schedule_next(run);
         }
-        let has_active_incoming = graph
-            .graph
-            .edges_directed(target, Direction::Incoming)
-            .any(|e| active_edges.contains(&e.id()));
-        // A still-pending node reachable by no active path is skipped (and the
-        // skip propagates from its own edges). A completed node — a prior run's
-        // checkpoint on resume — is never re-marked; it is enqueued so the
-        // loop replays its stored output down the graph.
-        if !has_active_incoming && !run.is_completed(&graph.graph[target].id) {
-            pruned_nodes.insert(target);
+        checkpoint_run(run, mode)?;
+    };
+
+    match outcome {
+        Ok(out) => {
             mark(
                 run,
-                &graph.graph[target].id,
-                NodeStatus::Skipped,
-                None,
+                &node.id,
+                NodeStatus::Completed,
+                Some(out.clone()),
                 None,
             );
-            checkpoint_run(run, mode)?;
+            Ok(NodeOutcome::Produced(out))
         }
-        queue.push_back(target);
+        Err(e) => {
+            mark(run, &node.id, NodeStatus::Failed, None, Some(e.clone()));
+            Ok(NodeOutcome::Failed(e))
+        }
     }
-    Ok(())
+}
+
+/// Kahn-style traversal state honouring active edges only. Owned by the
+/// coordinator; nodes run concurrently but the graph bookkeeping is serial.
+struct Traversal<'g> {
+    graph: &'g WorkflowGraph,
+    /// Per-node produced value, seeded with any completed-node outputs from a
+    /// resumed run so downstream nodes can read upstream results.
+    values: HashMap<NodeIndex, String>,
+    /// Edges considered "active". A condition prunes the non-taken branch.
+    active_edges: HashSet<petgraph::graph::EdgeIndex>,
+    pruned: HashSet<NodeIndex>,
+    indegree: HashMap<NodeIndex, usize>,
+    /// Ready nodes, in deterministic dispatch order.
+    queue: VecDeque<NodeIndex>,
+}
+
+impl<'g> Traversal<'g> {
+    fn new(graph: &'g WorkflowGraph, workflow: &Workflow, run: &WorkflowRun) -> Self {
+        let mut values = HashMap::new();
+        for node in &workflow.nodes {
+            if let Some(state) = run.nodes.get(&node.id) {
+                if state.status == NodeStatus::Completed {
+                    if let (Some(out), Some(&idx)) =
+                        (&state.output, graph.index_by_id.get(&node.id))
+                    {
+                        values.insert(idx, out.clone());
+                    }
+                }
+            }
+        }
+        let indegree = graph
+            .graph
+            .node_indices()
+            .map(|idx| {
+                (
+                    idx,
+                    graph.graph.edges_directed(idx, Direction::Incoming).count(),
+                )
+            })
+            .collect();
+        Self {
+            graph,
+            values,
+            active_edges: graph.graph.edge_indices().collect(),
+            pruned: HashSet::new(),
+            indegree,
+            queue: graph.roots().into_iter().collect(),
+        }
+    }
+
+    /// A node's input: its active incoming values joined with `\n` (fan-in), or
+    /// the run input for a root node.
+    fn input_for(&self, idx: NodeIndex, run: &WorkflowRun) -> String {
+        let incoming: Vec<&str> = self
+            .graph
+            .graph
+            .edges_directed(idx, Direction::Incoming)
+            .filter(|e| self.active_edges.contains(&e.id()))
+            .filter_map(|e| self.values.get(&e.source()).map(String::as_str))
+            .collect();
+        if incoming.is_empty() {
+            input_for_root(&self.graph.graph[idx], run)
+        } else {
+            incoming.join("\n")
+        }
+    }
+
+    /// Record a node's value, prune the branch a brancher did not take,
+    /// checkpoint, and make its successors ready.
+    fn complete(
+        &mut self,
+        idx: NodeIndex,
+        produced: String,
+        run: &mut WorkflowRun,
+        mode: ExecutionMode,
+    ) -> Result<(), String> {
+        let node = &self.graph.graph[idx];
+        // Condition nodes (and a body-less one-shot While gate) produce
+        // "true"/"false" and prune the non-taken branch. A *looped* While
+        // (`body_workflow_id` set) produces the loop's carry value, not a branch
+        // label, so it must NOT prune — it is a plain data node with a single
+        // unlabelled forward edge.
+        let is_brancher = matches!(node.kind, NodeKind::Condition { .. })
+            || matches!(
+                node.kind,
+                NodeKind::While {
+                    body_workflow_id: None,
+                    ..
+                }
+            );
+        if is_brancher {
+            let label = if produced == "true" { "true" } else { "false" };
+            for edge in self.graph.graph.edges_directed(idx, Direction::Outgoing) {
+                let matches = edge.weight().branch.as_deref().is_none_or(|b| b == label);
+                if !matches {
+                    self.active_edges.remove(&edge.id());
+                }
+            }
+        }
+        self.values.insert(idx, produced);
+        checkpoint_run(run, mode)?;
+        self.resolve_successors(idx, false, run, mode)
+    }
+
+    /// Resolve a finalized node's outgoing edges.
+    ///
+    /// Called once per node after it Completes (`was_skipped == false`) and
+    /// once per Skipped node (`was_skipped == true`). A skipped node produces no
+    /// value, so its outgoing edges are deactivated. A successor becomes ready
+    /// only once **every** incoming edge has resolved (joins wait for all their
+    /// inputs, whichever order concurrent branches finish in). A ready successor
+    /// with at least one still-active incoming edge runs (and reads only its
+    /// active inputs); one whose incoming edges were all pruned is itself
+    /// skipped and enqueued so the skip propagates through any further joins.
+    /// This is what lets a `Condition` whose branches reconverge on a single
+    /// downstream node work.
+    fn resolve_successors(
+        &mut self,
+        idx: NodeIndex,
+        was_skipped: bool,
+        run: &mut WorkflowRun,
+        mode: ExecutionMode,
+    ) -> Result<(), String> {
+        let out_edges: Vec<(petgraph::graph::EdgeIndex, NodeIndex)> = self
+            .graph
+            .graph
+            .edges_directed(idx, Direction::Outgoing)
+            .map(|e| (e.id(), e.target()))
+            .collect();
+        for (eid, target) in out_edges {
+            if was_skipped {
+                // A skipped source carries no value into the join.
+                self.active_edges.remove(&eid);
+            }
+            let entry = self.indegree.entry(target).or_insert(0);
+            if *entry > 0 {
+                *entry -= 1;
+            }
+            if *entry != 0 || self.pruned.contains(&target) {
+                continue;
+            }
+            let has_active_incoming = self
+                .graph
+                .graph
+                .edges_directed(target, Direction::Incoming)
+                .any(|e| self.active_edges.contains(&e.id()));
+            // A still-pending node reachable by no active path is skipped (and
+            // the skip propagates from its own edges). A completed node — a
+            // prior run's checkpoint on resume — is never re-marked; it is
+            // enqueued so the loop replays its stored output down the graph.
+            let target_id = &self.graph.graph[target].id;
+            if !has_active_incoming && !run.is_completed(target_id) {
+                self.pruned.insert(target);
+                mark(run, target_id, NodeStatus::Skipped, None, None);
+                checkpoint_run(run, mode)?;
+            }
+            self.queue.push_back(target);
+        }
+        Ok(())
+    }
 }
 
 fn input_for_root(node: &super::WorkflowNode, run: &WorkflowRun) -> String {
@@ -792,7 +1685,9 @@ async fn dry_run_skip_reason(node: &super::WorkflowNode) -> Option<String> {
         | NodeKind::Delay { .. }
         | NodeKind::Note { .. }
         | NodeKind::While { .. }
-        | NodeKind::SubWorkflow { .. } => None,
+        | NodeKind::SubWorkflow { .. }
+        | NodeKind::ForEach { .. }
+        | NodeKind::Parallel { .. } => None,
         NodeKind::Tool { name, .. } => dry_run_tool_skip_reason(name).await,
         NodeKind::Mcp { server, tool, .. } => {
             dry_run_tool_skip_reason(&format!("{server}.{tool}")).await
@@ -810,6 +1705,9 @@ async fn dry_run_skip_reason(node: &super::WorkflowNode) -> Option<String> {
             "dry run skipped: agent delegation may invoke models or tools and is not read-only"
                 .to_string(),
         ),
+        NodeKind::Script { .. } => {
+            Some("dry run skipped: script nodes run agents and are not read-only".to_string())
+        }
         NodeKind::Plugin { .. } => Some(
             "dry run skipped: plugin runnables do not expose a read-only execution contract"
                 .to_string(),
@@ -836,6 +1734,10 @@ async fn dry_run_skip_reason(node: &super::WorkflowNode) -> Option<String> {
         NodeKind::ChannelSend { .. } => {
             Some("dry run skipped: channel sends would deliver a message externally".to_string())
         }
+        NodeKind::Code { .. } => Some(
+            "dry run skipped: code steps execute a program or call a model and are not read-only"
+                .to_string(),
+        ),
         NodeKind::Awakeable { .. } => Some(
             "dry run skipped: human-in-the-loop gates cannot be resumed from a transient run"
                 .to_string(),
@@ -879,6 +1781,32 @@ enum RetryDecision {
     Fail,
 }
 
+/// Allocate dispatch work in a separate constructor frame before polling it.
+/// Factories keep large future temporaries off each nested executor's stack.
+fn boxed_node_work<'a, F, Fut, T>(
+    make: F,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = T> + Send + 'a,
+{
+    Box::pin(make())
+}
+
+/// Allocate the node dispatcher before entering its polling frame.
+fn boxed_node_execution<'a>(
+    node: &'a super::WorkflowNode,
+    input: &'a str,
+    run: &'a mut WorkflowRun,
+    depth: usize,
+    mode: ExecutionMode,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>> {
+    // Construct the large dispatch future in a separate frame that returns
+    // before polling it. Heap ownership alone inside the async attempt would
+    // still reserve a large temporary on every nested attempt's polling stack.
+    Box::pin(execute_node(node, input, run, depth, mode))
+}
+
 /// Run one node attempt, applying the node's optional per-node wall-clock
 /// timeout (the Temporal `StartToClose` analogue). On timeout the in-flight
 /// future is cancelled and a *retryable* "timed out" error is returned, so a
@@ -891,19 +1819,15 @@ async fn run_node_attempt(
     depth: usize,
     mode: ExecutionMode,
 ) -> Result<String, String> {
+    let execution = boxed_node_execution(node, input, run, depth, mode);
     match node.timeout_ms {
         Some(ms) if ms > 0 => {
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(ms),
-                execute_node(node, input, run, depth, mode),
-            )
-            .await
-            {
+            match tokio::time::timeout(std::time::Duration::from_millis(ms), execution).await {
                 Ok(r) => r,
                 Err(_) => Err(format!("node '{}' timed out after {ms}ms", node.id)),
             }
         }
-        _ => execute_node(node, input, run, depth, mode).await,
+        _ => execution.await,
     }
 }
 
@@ -1040,6 +1964,9 @@ async fn execute_node(
     use super::template::resolve;
 
     let ctx = build_template_ctx(input, run);
+    // Effects key on this so every `repeat` iteration is distinct (see
+    // [`iteration_scoped_id`]); it is the plain node id otherwise.
+    let exec_id = iteration_scoped_id(run, &node.id);
 
     match &node.kind {
         NodeKind::Input { .. } => Ok(input.to_string()),
@@ -1064,6 +1991,18 @@ async fn execute_node(
             Ok(eval_condition(&resolved, input).to_string())
         }
         NodeKind::SetState { key, value } => {
+            for reserved in [
+                "__workflow_",
+                REPEAT_STATE_PREFIX,
+                LOOP_STATE_PREFIX,
+                FANOUT_STATE_PREFIX,
+            ] {
+                if key.starts_with(reserved) {
+                    return Err(format!(
+                        "state keys beginning with '{reserved}' are reserved"
+                    ));
+                }
+            }
             let resolved = resolve(value, &ctx);
             run.state.insert(key.clone(), resolved);
             // Pass the incoming value through unchanged to outgoing edges.
@@ -1136,7 +2075,10 @@ async fn execute_node(
                 // Real bounded loop: re-run the body sub-workflow while the
                 // condition holds. See [`run_while_loop`].
                 Some(body_id) if !body_id.is_empty() => {
-                    run_while_loop(expr, body_id, cap, &node.id, input, run, depth, mode).await
+                    boxed_node_work(|| {
+                        run_while_loop(expr, body_id, cap, &node.id, input, run, depth, mode)
+                    })
+                    .await
                 }
                 // One-shot guarded gate (back-compat, NOT a loop): resolve tokens,
                 // evaluate the condition, then consult the per-node iteration
@@ -1157,33 +2099,34 @@ async fn execute_node(
                 }
             }
         }
-        NodeKind::Guardrails { checks } => run_guardrails(checks, input).await,
+        NodeKind::Guardrails { checks } => boxed_node_work(|| run_guardrails(checks, input)).await,
         NodeKind::Prompt { prompt, agent_id } => {
             let rendered = resolve(prompt, &ctx);
-            run_prompt(&rendered, agent_id.as_deref(), &run.run_id, &node.id).await
+            boxed_node_work(|| run_prompt(&rendered, agent_id.as_deref(), &run.run_id, &exec_id))
+                .await
         }
         NodeKind::Webhook { url, method } => {
             let resolved_url = resolve(url, &ctx);
-            let idem_key = idempotency_key(&run.run_id, &node.id);
-            run_webhook(&resolved_url, method, input, &idem_key).await
+            let idem_key = idempotency_key(&run.run_id, &exec_id);
+            boxed_node_work(|| run_webhook(&resolved_url, method, input, &idem_key)).await
         }
         NodeKind::Tool { name, args } => {
             let resolved_args = resolve_json_strings(args, &ctx);
-            let idem_key = idempotency_key(&run.run_id, &node.id);
-            run_tool(name, &resolved_args, input, &idem_key).await
+            let idem_key = idempotency_key(&run.run_id, &exec_id);
+            boxed_node_work(|| run_tool(name, &resolved_args, input, &idem_key)).await
         }
         NodeKind::Mcp { server, tool, args } => {
             // The explicit two-field form of a Tool node: join `<server>.<tool>`
             // into the id the MCP registry expects, then reuse the Tool path so
             // idempotency-key + `input` folding behave identically.
             let resolved_args = resolve_json_strings(args, &ctx);
-            let idem_key = idempotency_key(&run.run_id, &node.id);
+            let idem_key = idempotency_key(&run.run_id, &exec_id);
             let tool_id = format!("{server}.{tool}");
-            run_tool(&tool_id, &resolved_args, input, &idem_key).await
+            boxed_node_work(|| run_tool(&tool_id, &resolved_args, input, &idem_key)).await
         }
         NodeKind::Recipe { recipe, params } => {
             let resolved_params = resolve_json_strings(params, &ctx);
-            run_recipe(recipe, &resolved_params).await
+            boxed_node_work(|| run_recipe(recipe, &resolved_params)).await
         }
         NodeKind::GhostAction {
             action,
@@ -1192,7 +2135,7 @@ async fn execute_node(
         } => {
             let resolved_target = resolve_json_strings(target, &ctx);
             let resolved_params = resolve_json_strings(params, &ctx);
-            run_ghost_action(action, &resolved_target, &resolved_params).await
+            boxed_node_work(|| run_ghost_action(action, &resolved_target, &resolved_params)).await
         }
         NodeKind::SubWorkflow { workflow_id } => {
             let sub = store::load_workflow(workflow_id)
@@ -1204,13 +2147,90 @@ async fn execute_node(
             // the inner run's already-Completed nodes after a restart, and any
             // side-effecting inner node keeps a STABLE idempotency key across the
             // crash (a fresh UUID here would defeat both).
-            let sub_run_id = format!("{}-sub-{}", run.run_id, node.id);
-            let result = run_workflow_inner(&sub, sub_input, sub_run_id, depth + 1, mode).await?;
+            let sub_run_id = format!("{}-sub-{}", run.run_id, exec_id);
+            let result = boxed_node_work(|| {
+                run_child_workflow(&sub, sub_input, sub_run_id, &node.id, run, depth, mode)
+            })
+            .await?;
             // Forward the first output value (or empty).
             Ok(result.output.values().next().cloned().unwrap_or_default())
         }
+        NodeKind::ForEach {
+            body_workflow_id,
+            items,
+            max_concurrency,
+        } => {
+            boxed_node_work(|| {
+                run_for_each(
+                    body_workflow_id,
+                    items.as_deref(),
+                    *max_concurrency,
+                    &node.id,
+                    &exec_id,
+                    input,
+                    run,
+                    depth,
+                    mode,
+                )
+            })
+            .await
+        }
+        NodeKind::Parallel {
+            branches,
+            max_concurrency,
+        } => {
+            boxed_node_work(|| {
+                run_parallel(
+                    branches,
+                    *max_concurrency,
+                    &node.id,
+                    &exec_id,
+                    input,
+                    run,
+                    depth,
+                    mode,
+                )
+            })
+            .await
+        }
+        NodeKind::Script {
+            code,
+            agent_id,
+            preset,
+            allow_mutation,
+        } => {
+            // Authored workflows predate the field and may write; an ad-hoc
+            // script workflow saved without it is held to read-only presets.
+            // An ad-hoc script with no locked agent never writes either, or its
+            // `agent()` calls could pick any registered agent's tool loop.
+            let ad_hoc = run
+                .workflow_id
+                .starts_with(super::store::SCRIPT_WORKFLOW_PREFIX);
+            let locked_agent = agent_id.clone().filter(|id| !id.trim().is_empty());
+            let script_ctx = super::script::ScriptContext {
+                run_id: run.run_id.clone(),
+                node_id: node.id.clone(),
+                depth,
+                allow_mutation: allow_mutation.unwrap_or(!ad_hoc)
+                    && !(ad_hoc && locked_agent.is_none()),
+                agent_id: locked_agent,
+                default_preset: preset.unwrap_or(delegation::PermissionPreset::Research),
+            };
+            boxed_node_work(|| super::script::run_script(code, input, script_ctx)).await
+        }
         NodeKind::AgentDelegate { delegates, caps } => {
-            run_agent_delegate(delegates, caps.clone(), input, depth, &run.run_id, &node.id).await
+            let resolved: Vec<delegation::DelegateSpec> = delegates
+                .iter()
+                .map(|delegate| {
+                    let mut resolved = delegate.clone();
+                    resolved.task = resolve(&delegate.task, &ctx);
+                    resolved
+                })
+                .collect();
+            boxed_node_work(|| {
+                run_agent_delegate(&resolved, caps.clone(), input, depth, &run.run_id, &exec_id)
+            })
+            .await
         }
         NodeKind::Agent { agent_id, task } => {
             // A dedicated "run agent X on this task" step. `run_prompt` already
@@ -1219,7 +2239,7 @@ async fn execute_node(
             // template is the agent's instruction.
             let task_tmpl = task.as_deref().unwrap_or("{{input}}");
             let rendered = resolve(task_tmpl, &ctx);
-            run_prompt(&rendered, Some(agent_id), &run.run_id, &node.id).await
+            boxed_node_work(|| run_prompt(&rendered, Some(agent_id), &run.run_id, &exec_id)).await
         }
         NodeKind::Skill {
             skill,
@@ -1228,7 +2248,10 @@ async fn execute_node(
         } => {
             let task_tmpl = task.as_deref().unwrap_or("{{input}}");
             let rendered = resolve(task_tmpl, &ctx);
-            run_skill(skill, agent_id.as_deref(), &rendered, &run.run_id, &node.id).await
+            boxed_node_work(|| {
+                run_skill(skill, agent_id.as_deref(), &rendered, &run.run_id, &exec_id)
+            })
+            .await
         }
         NodeKind::Plugin {
             plugin_id,
@@ -1236,18 +2259,21 @@ async fn execute_node(
             args,
         } => {
             let resolved_args = resolve_json_strings(args, &ctx);
-            let idem_key = idempotency_key(&run.run_id, &node.id);
-            run_plugin(
-                plugin_id,
-                runnable_id,
-                &resolved_args,
-                input,
-                &idem_key,
-                &run.run_id,
-                &node.id,
-                depth,
-                mode,
-            )
+            let idem_key = idempotency_key(&run.run_id, &exec_id);
+            boxed_node_work(|| {
+                run_plugin(
+                    plugin_id,
+                    runnable_id,
+                    &resolved_args,
+                    input,
+                    &idem_key,
+                    run,
+                    &node.id,
+                    &exec_id,
+                    depth,
+                    mode,
+                )
+            })
             .await
         }
         NodeKind::NotifyUser {
@@ -1264,14 +2290,16 @@ async fn execute_node(
             // to an Awakeable gate); fire-and-forget returns a JSON receipt.
             let rendered_title = resolve(title, &ctx);
             let rendered_body = resolve(body, &ctx);
-            super::notify_user::run(
-                target,
-                &rendered_title,
-                &rendered_body,
-                ack_mode,
-                &node.id,
-                run,
-            )
+            boxed_node_work(|| {
+                super::notify_user::run(
+                    target,
+                    &rendered_title,
+                    &rendered_body,
+                    ack_mode,
+                    &node.id,
+                    run,
+                )
+            })
             .await
         }
         NodeKind::ChannelSend {
@@ -1285,13 +2313,48 @@ async fn execute_node(
             // channel-send helper (which reuses the monitor notify primitives).
             let rendered_recipient = resolve(recipient, &ctx);
             let rendered_text = resolve(text, &ctx);
-            super::channel_send::run(
-                *platform,
-                &rendered_recipient,
-                &rendered_text,
-                bot_token.as_deref(),
-                webhook_url.as_deref(),
-            )
+            boxed_node_work(|| {
+                super::channel_send::run(
+                    *platform,
+                    &rendered_recipient,
+                    &rendered_text,
+                    bot_token.as_deref(),
+                    webhook_url.as_deref(),
+                )
+            })
+            .await
+        }
+        NodeKind::Code {
+            language,
+            mode,
+            source,
+            input: input_template,
+            function,
+            args,
+            model,
+        } => {
+            // The source stays literal; only the data handed to the program is
+            // template-resolved, so a step input can never rewrite the program.
+            let program_input = input_template
+                .as_deref()
+                .map_or_else(|| input.to_string(), |template| resolve(template, &ctx));
+            let resolved_args = resolve_json_strings(args, &ctx);
+            let timeout = node.timeout_ms.map_or(
+                ryu_code_runner::DEFAULT_TIMEOUT,
+                std::time::Duration::from_millis,
+            );
+            boxed_node_work(|| {
+                run_code_step(
+                    *language,
+                    *mode,
+                    source,
+                    &program_input,
+                    function.as_deref(),
+                    &resolved_args,
+                    model.as_deref(),
+                    timeout,
+                )
+            })
             .await
         }
         // Signal the outer loop to suspend by returning the sentinel. The outer
@@ -1299,6 +2362,512 @@ async fn execute_node(
         // `AwaitingInput` without marking the node Failed.
         NodeKind::Awakeable { .. } => Err(SUSPEND_SENTINEL.to_string()),
     }
+}
+
+/// Execute or reuse a deterministic child checkpoint. Parent/child links are
+/// written before the child can create an approval. Awaiting children suspend
+/// their enclosing node; failed children fail it; only completed output advances
+/// the parent's loop carry or SubWorkflow result.
+#[allow(clippy::too_many_arguments)]
+async fn run_child_workflow(
+    workflow: &Workflow,
+    input: HashMap<String, String>,
+    child_id: String,
+    node_id: &str,
+    parent: &mut WorkflowRun,
+    depth: usize,
+    mode: ExecutionMode,
+) -> Result<WorkflowRun, String> {
+    if depth >= MAX_SUBWORKFLOW_DEPTH {
+        return Err(format!(
+            "sub-workflow nesting exceeded max depth of {MAX_SUBWORKFLOW_DEPTH}"
+        ));
+    }
+    let child_lock = execution_lock(&child_id)?;
+    let child_guard = child_lock.lock_owned().await;
+    let parent_awaits_child = parent.state.get(AWAITING_CHILD_KEY) == Some(&child_id);
+    let child = prepare_child(
+        workflow,
+        &input,
+        &child_id,
+        &parent.run_id,
+        parent_awaits_child,
+        mode,
+    )
+    .await?;
+    parent
+        .state
+        .insert(AWAITING_CHILD_KEY.to_string(), child_id.clone());
+    checkpoint_run(parent, mode)?;
+    drop(child_guard);
+    let result = drive_child(workflow, input, child, depth, mode).await?;
+    match result.status {
+        RunStatus::AwaitingInput => {
+            parent.awaiting_node = Some(node_id.to_string());
+            Err(SUSPEND_SENTINEL.to_string())
+        }
+        RunStatus::Completed => {
+            parent.state.remove(AWAITING_CHILD_KEY);
+            Ok(result)
+        }
+        RunStatus::Failed => Err(format!(
+            "child workflow failed: {}",
+            result.error.as_deref().unwrap_or("unknown error")
+        )),
+        RunStatus::Waiting => Err(child_limit_error(&result)),
+        RunStatus::Running => Err("child workflow did not reach a stable checkpoint".to_string()),
+    }
+}
+
+/// Load (or create) a deterministic child checkpoint, verify it belongs to this
+/// parent, stamp the parent link, and write it. The caller holds the child's
+/// execution lock. `parent_awaits_child` is true when the parent's durable link
+/// already names this child: a missing checkpoint is then an integrity failure,
+/// never a reason to start the child over.
+async fn prepare_child(
+    workflow: &Workflow,
+    input: &HashMap<String, String>,
+    child_id: &str,
+    parent_run_id: &str,
+    parent_awaits_child: bool,
+    mode: ExecutionMode,
+) -> Result<WorkflowRun, String> {
+    let existing = if mode.is_dry_run() {
+        None
+    } else {
+        match store::load_run(child_id) {
+            Ok(run) => Some(run),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if parent_awaits_child {
+                    return Err(
+                        "pending child checkpoint is missing; refusing to recreate execution"
+                            .to_string(),
+                    );
+                }
+                None
+            }
+            Err(error) => return Err(format!("failed to load child checkpoint: {error}")),
+        }
+    };
+    if let Some(child) = &existing {
+        if child.workflow_id != workflow.id
+            || child.state.get(PARENT_RUN_KEY).map(String::as_str) != Some(parent_run_id)
+        {
+            // Older deterministic child checkpoints predate links. Permit their
+            // adoption, but never attach a run already owned by another parent.
+            if child.workflow_id != workflow.id || child.state.contains_key(PARENT_RUN_KEY) {
+                return Err("child run belongs to a different workflow or parent".to_string());
+            }
+        }
+    }
+    if existing
+        .as_ref()
+        .is_none_or(|child| child.status == RunStatus::Running)
+    {
+        // Refusing a new child must not leave a fictional Running checkpoint.
+        crate::workflow::ensure_agents_active(workflow).await?;
+        WorkflowGraph::build(workflow).map_err(|e| e.to_string())?;
+    }
+    let mut child = existing.unwrap_or_else(|| {
+        WorkflowRun::new(child_id.to_owned(), workflow.id.clone(), input.clone())
+    });
+    child
+        .state
+        .insert(PARENT_RUN_KEY.to_string(), parent_run_id.to_owned());
+    // Write the child first: a parent link must never point to an execution
+    // checkpoint that has not yet existed. A crash before the parent's write
+    // safely adopts this deterministic child when the parent re-enters.
+    checkpoint_run(&child, mode)?;
+    Ok(child)
+}
+
+/// Run (or re-enter) a prepared child to a stable checkpoint. A terminal or
+/// gate-suspended child is returned as-is.
+async fn drive_child(
+    workflow: &Workflow,
+    input: HashMap<String, String>,
+    child: WorkflowRun,
+    depth: usize,
+    mode: ExecutionMode,
+) -> Result<WorkflowRun, String> {
+    match child.status {
+        RunStatus::AwaitingInput if child.state.contains_key(AWAITING_CHILD_KEY) => {
+            // An intermediate parent may still be waiting after a crash between
+            // the leaf completion checkpoint and ancestor advancement. Re-enter
+            // composition nodes, whose actual gate children remain untouched.
+            run_workflow_inner(workflow, input, child.run_id, depth + 1, mode).await
+        }
+        RunStatus::AwaitingInput | RunStatus::Completed | RunStatus::Failed => Ok(child),
+        // A child parked on a limit is woken with its parent.
+        RunStatus::Running | RunStatus::Waiting => {
+            run_workflow_inner(workflow, input, child.run_id, depth + 1, mode).await
+        }
+    }
+}
+
+/// Default number of `ForEach` items / `Parallel` branches that run at once.
+pub const DEFAULT_FANOUT_CONCURRENCY: u32 = 4;
+/// Hard ceiling on a fan-out node's `max_concurrency`.
+pub const MAX_FANOUT_CONCURRENCY: u32 = 16;
+/// Hard ceiling on `ForEach` items (and `Parallel` branches) per node.
+pub const MAX_FANOUT_ITEMS: usize = 1_000;
+
+/// Reserved run-state namespace for fan-out progress (`__fanout_<id>` holds the
+/// finished item results). SetState cannot write it.
+pub(crate) const FANOUT_STATE_PREFIX: &str = "__fanout_";
+
+/// One child run of a `ForEach` / `Parallel` node.
+struct FanoutJob<'w> {
+    /// Result key: the item index or the branch id.
+    key: String,
+    workflow: &'w Workflow,
+    input: HashMap<String, String>,
+    child_id: String,
+}
+
+/// How a fan-out node assembles its children's results.
+#[derive(Clone, Copy)]
+enum FanoutShape {
+    /// A JSON array in job order (`ForEach`).
+    Array,
+    /// A JSON object keyed by job key (`Parallel`).
+    Object,
+}
+
+/// The value a child run hands its fan-out parent: its single output, or the
+/// lexicographically first output key's value when it has several.
+fn child_primary_output(child: &WorkflowRun) -> String {
+    let mut keys: Vec<&String> = child.output.keys().collect();
+    keys.sort();
+    keys.first()
+        .and_then(|key| child.output.get(*key))
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Embed a child result in the fan-out output: JSON objects and arrays stay
+/// structured, anything else is a string.
+fn fanout_value(output: &str) -> serde_json::Value {
+    match serde_json::from_str::<serde_json::Value>(output) {
+        Ok(value @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) => value,
+        _ => serde_json::Value::String(output.to_owned()),
+    }
+}
+
+/// Clamp a fan-out node's concurrency setting.
+pub fn effective_fanout_concurrency(max_concurrency: Option<u32>) -> usize {
+    max_concurrency
+        .unwrap_or(DEFAULT_FANOUT_CONCURRENCY)
+        .clamp(1, MAX_FANOUT_CONCURRENCY) as usize
+}
+
+/// Run a set of child workflows with bounded concurrency and join their
+/// results in job order.
+///
+/// Durability: each finished child's output is folded into
+/// `state["__fanout_<exec id>"]` and checkpointed immediately, so a resumed
+/// node skips finished children and re-enters the rest under their
+/// deterministic child run ids (which themselves resume from their own
+/// checkpoints). When a child suspends at a gate, fails, or parks on a limit, no
+/// further child starts; the children in flight settle (and are checkpointed)
+/// first. A suspension links the parent to the suspended child so approval
+/// resumes it and then this node; a failure fails the node; a limit parks it.
+#[allow(clippy::too_many_arguments)]
+async fn run_fanout(
+    node_id: &str,
+    exec_id: &str,
+    jobs: Vec<FanoutJob<'_>>,
+    limit: usize,
+    shape: FanoutShape,
+    run: &mut WorkflowRun,
+    depth: usize,
+    mode: ExecutionMode,
+) -> Result<String, String> {
+    if depth >= MAX_SUBWORKFLOW_DEPTH {
+        return Err(format!(
+            "sub-workflow nesting exceeded max depth of {MAX_SUBWORKFLOW_DEPTH}"
+        ));
+    }
+    let progress_key = format!("{FANOUT_STATE_PREFIX}{exec_id}");
+    let mut finished: HashMap<String, String> = run
+        .state
+        .get(&progress_key)
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or_default();
+    let order: Vec<String> = jobs.iter().map(|job| job.key.clone()).collect();
+    let mut pending: VecDeque<FanoutJob<'_>> = jobs
+        .into_iter()
+        .filter(|job| !finished.contains_key(&job.key))
+        .collect();
+    let parent_run_id = run.run_id.clone();
+    let awaited_child = run.state.get(AWAITING_CHILD_KEY).cloned();
+
+    type ChildFuture<'f> = std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = (String, String, Result<WorkflowRun, String>)>
+                + Send
+                + 'f,
+        >,
+    >;
+    let mut in_flight: FuturesUnordered<ChildFuture<'_>> = FuturesUnordered::new();
+    let mut suspended: Option<String> = None;
+    let mut failure: Option<String> = None;
+    let mut limited: Option<String> = None;
+
+    loop {
+        while suspended.is_none()
+            && failure.is_none()
+            && limited.is_none()
+            && in_flight.len() < limit.max(1)
+        {
+            let Some(job) = pending.pop_front() else {
+                break;
+            };
+            let parent_awaits_child = awaited_child.as_deref() == Some(job.child_id.as_str());
+            let parent_run_id = parent_run_id.clone();
+            in_flight.push(Box::pin(async move {
+                let FanoutJob {
+                    key,
+                    workflow,
+                    input,
+                    child_id,
+                } = job;
+                let result = async {
+                    let child_lock = execution_lock(&child_id)?;
+                    let child_guard = child_lock.lock_owned().await;
+                    let child = prepare_child(
+                        workflow,
+                        &input,
+                        &child_id,
+                        &parent_run_id,
+                        parent_awaits_child,
+                        mode,
+                    )
+                    .await?;
+                    drop(child_guard);
+                    drive_child(workflow, input, child, depth, mode).await
+                }
+                .await;
+                (key, child_id, result)
+            }));
+        }
+        let Some((key, child_id, result)) = in_flight.next().await else {
+            break;
+        };
+        match result {
+            Ok(child) => match child.status {
+                RunStatus::Completed => {
+                    finished.insert(key, child_primary_output(&child));
+                    run.state.insert(
+                        progress_key.clone(),
+                        serde_json::to_string(&finished).map_err(|e| e.to_string())?,
+                    );
+                    if run.state.get(AWAITING_CHILD_KEY) == Some(&child_id) {
+                        run.state.remove(AWAITING_CHILD_KEY);
+                    }
+                    checkpoint_run(run, mode)?;
+                }
+                RunStatus::AwaitingInput => {
+                    suspended.get_or_insert(child_id);
+                }
+                RunStatus::Failed => {
+                    failure.get_or_insert(format!(
+                        "child workflow failed: {}",
+                        child.error.as_deref().unwrap_or("unknown error")
+                    ));
+                }
+                RunStatus::Waiting => {
+                    limited.get_or_insert(child_limit_error(&child));
+                }
+                RunStatus::Running => {
+                    failure.get_or_insert(
+                        "child workflow did not reach a stable checkpoint".to_string(),
+                    );
+                }
+            },
+            Err(error) => {
+                failure.get_or_insert(error);
+            }
+        }
+    }
+
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    if let Some(error) = limited {
+        return Err(error);
+    }
+    if let Some(child_id) = suspended {
+        run.state.insert(AWAITING_CHILD_KEY.to_string(), child_id);
+        run.awaiting_node = Some(node_id.to_string());
+        checkpoint_run(run, mode)?;
+        return Err(SUSPEND_SENTINEL.to_string());
+    }
+
+    let output = match shape {
+        FanoutShape::Array => serde_json::Value::Array(
+            order
+                .iter()
+                .map(|key| fanout_value(finished.get(key).map_or("", String::as_str)))
+                .collect(),
+        ),
+        FanoutShape::Object => serde_json::Value::Object(
+            order
+                .iter()
+                .map(|key| {
+                    (
+                        key.clone(),
+                        fanout_value(finished.get(key).map_or("", String::as_str)),
+                    )
+                })
+                .collect(),
+        ),
+    };
+    // The node is about to complete with the joined value; its progress is no
+    // longer needed for resume.
+    run.state.remove(&progress_key);
+    serde_json::to_string(&output).map_err(|e| format!("failed to serialise fan-out results: {e}"))
+}
+
+/// Execute a `ForEach` node: resolve its items, then map the body workflow
+/// over them through [`run_fanout`].
+#[allow(clippy::too_many_arguments)]
+async fn run_for_each(
+    body_workflow_id: &str,
+    items_template: Option<&str>,
+    max_concurrency: Option<u32>,
+    node_id: &str,
+    exec_id: &str,
+    input: &str,
+    run: &mut WorkflowRun,
+    depth: usize,
+    mode: ExecutionMode,
+) -> Result<String, String> {
+    if body_workflow_id == run.workflow_id {
+        return Err(format!(
+            "for_each node '{node_id}': body_workflow_id '{body_workflow_id}' is the workflow itself (would recurse infinitely)"
+        ));
+    }
+    let body = store::load_workflow(body_workflow_id).map_err(|e| {
+        format!("for_each node '{node_id}': body workflow '{body_workflow_id}' not found: {e}")
+    })?;
+    let raw_items = match items_template {
+        Some(template) => super::template::resolve(template, &build_template_ctx(input, run)),
+        None => input.to_string(),
+    };
+    let items = match serde_json::from_str::<serde_json::Value>(raw_items.trim()) {
+        Ok(serde_json::Value::Array(items)) => items,
+        _ => {
+            return Err(format!(
+                "for_each node '{node_id}': items must be a JSON array"
+            ))
+        }
+    };
+    if items.len() > MAX_FANOUT_ITEMS {
+        return Err(format!(
+            "for_each node '{node_id}': {} items exceed the {MAX_FANOUT_ITEMS} item limit",
+            items.len()
+        ));
+    }
+    let jobs = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let item_text = match item {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            FanoutJob {
+                key: index.to_string(),
+                workflow: &body,
+                input: HashMap::from([
+                    ("input".to_string(), item_text),
+                    ("index".to_string(), index.to_string()),
+                ]),
+                child_id: format!("{}-{exec_id}-item-{index}", run.run_id),
+            }
+        })
+        .collect();
+    run_fanout(
+        node_id,
+        exec_id,
+        jobs,
+        effective_fanout_concurrency(max_concurrency),
+        FanoutShape::Array,
+        run,
+        depth,
+        mode,
+    )
+    .await
+}
+
+/// Execute a `Parallel` node: run each branch's workflow through
+/// [`run_fanout`] and join the results by branch id.
+#[allow(clippy::too_many_arguments)]
+async fn run_parallel(
+    branches: &[super::ParallelBranch],
+    max_concurrency: Option<u32>,
+    node_id: &str,
+    exec_id: &str,
+    input: &str,
+    run: &mut WorkflowRun,
+    depth: usize,
+    mode: ExecutionMode,
+) -> Result<String, String> {
+    let ctx = build_template_ctx(input, run);
+    let mut workflows = Vec::with_capacity(branches.len());
+    for branch in branches {
+        if branch.workflow_id == run.workflow_id {
+            return Err(format!(
+                "parallel node '{node_id}': branch '{}' runs the workflow itself (would recurse infinitely)",
+                branch.id
+            ));
+        }
+        let workflow = store::load_workflow(&branch.workflow_id).map_err(|e| {
+            format!(
+                "parallel node '{node_id}': branch '{}' workflow '{}' not found: {e}",
+                branch.id, branch.workflow_id
+            )
+        })?;
+        workflows.push(workflow);
+    }
+    let jobs = branches
+        .iter()
+        .zip(&workflows)
+        .map(|(branch, workflow)| {
+            let branch_input = branch
+                .input
+                .as_deref()
+                .map_or_else(|| input.to_string(), |t| super::template::resolve(t, &ctx));
+            FanoutJob {
+                key: branch.id.clone(),
+                workflow,
+                input: HashMap::from([("input".to_string(), branch_input)]),
+                child_id: format!("{}-{exec_id}-par-{}", run.run_id, branch.id),
+            }
+        })
+        .collect();
+    run_fanout(
+        node_id,
+        exec_id,
+        jobs,
+        effective_fanout_concurrency(max_concurrency),
+        FanoutShape::Object,
+        run,
+        depth,
+        mode,
+    )
+    .await
+}
+
+/// The error a parent node reports for a child run parked on a provider limit.
+/// It carries the child's own limit text so [`super::limits`] parks the parent
+/// with the same reset time.
+fn child_limit_error(child: &WorkflowRun) -> String {
+    format!(
+        "child workflow is waiting on a provider limit: {}",
+        child.wait_reason.as_deref().unwrap_or("rate limit")
+    )
 }
 
 /// Run a real bounded `While` loop using iteration-as-recursion: each iteration
@@ -1330,8 +2899,8 @@ async fn execute_node(
 /// - A self-referential `body_workflow_id` (equal to the parent run's workflow
 ///   id) is rejected to avoid infinite recursion; [`MAX_SUBWORKFLOW_DEPTH`] also
 ///   bounds nesting.
-/// - An `Awakeable` gate inside the body (the sub-run returns `AwaitingInput`)
-///   fails the While node in v1 with a clear error.
+/// - A suspended child propagates its gate to the parent without advancing the
+///   counter/carry; approval resumes the same deterministic iteration run.
 async fn run_while_loop(
     expr: &str,
     body_id: &str,
@@ -1342,7 +2911,6 @@ async fn run_while_loop(
     depth: usize,
     mode: ExecutionMode,
 ) -> Result<String, String> {
-    use super::store::RunStatus;
     use super::template::{resolve, TemplateCtx};
 
     if body_id == run.workflow_id {
@@ -1394,14 +2962,38 @@ async fn run_while_loop(
         let mut sub_input = HashMap::new();
         sub_input.insert("input".to_string(), carry.clone());
         let sub_run_id = format!("{}-{}-iter-{}", run.run_id, node_id, counter);
-        let result = run_workflow_inner(&body_wf, sub_input, sub_run_id, depth + 1, mode).await?;
-
-        // v1: an Awakeable gate inside the body is not supported — fail clearly.
-        if result.status == RunStatus::AwaitingInput {
-            return Err(format!(
-                "while node '{node_id}': Awakeable gates are not supported inside a While body in v1"
-            ));
-        }
+        // Preserve the carry before starting a child, including iteration zero.
+        // A pending approval must never fold an empty partial output into it.
+        run.state.insert(counter_key.clone(), counter.to_string());
+        run.state.insert(carry_key.clone(), carry.clone());
+        let result = match run_child_workflow(
+            &body_wf,
+            sub_input,
+            sub_run_id.clone(),
+            node_id,
+            run,
+            depth,
+            mode,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                // An iteration whose child ran and failed ends the loop with
+                // nothing left to resume, so drop the counter/carry. A
+                // suspension keeps them so approval resumes the same iteration,
+                // and an integrity refusal (lost or damaged child checkpoint)
+                // keeps them as evidence of the iteration that was pending.
+                if error != SUSPEND_SENTINEL
+                    && store::load_run(&sub_run_id)
+                        .is_ok_and(|child| child.status == RunStatus::Failed)
+                {
+                    run.state.remove(&counter_key);
+                    run.state.remove(&carry_key);
+                }
+                return Err(error);
+            }
+        };
 
         // Fold the body's first output into the carry (loop variable advances).
         carry = result.output.values().next().cloned().unwrap_or_default();
@@ -1417,6 +3009,34 @@ async fn run_while_loop(
 
     // Loop finished: the node produces the final carry as a plain data value.
     Ok(carry)
+}
+
+/// Park `run` on a provider limit reported by `node_id`. The attempt the limit
+/// interrupted is refunded: waiting out a limit must not spend the node's
+/// retry budget, or a long rate-limited stretch would fail a healthy node.
+fn park_on_limit(run: &mut WorkflowRun, node_id: &str, error: &str) {
+    let now = chrono::Utc::now();
+    let hit = super::limits::classify(error, now).unwrap_or(super::limits::LimitHit {
+        resume_at: now + super::limits::DEFAULT_WAIT,
+        reported: false,
+    });
+    if let Some(state) = run.nodes.get_mut(node_id) {
+        state.attempts = state.attempts.saturating_sub(1);
+        state.status = NodeStatus::Running;
+        state.error = Some(error.to_owned());
+    }
+    run.status = RunStatus::Waiting;
+    run.resume_at = Some(hit.resume_at.to_rfc3339());
+    run.wait_reason = Some(error.to_owned());
+    run.limit_waits = run.limit_waits.saturating_add(1);
+    run.updated_at = now.to_rfc3339();
+    tracing::info!(
+        run_id = %run.run_id,
+        node_id,
+        resume_at = %hit.resume_at,
+        reported = hit.reported,
+        "workflow run parked on a provider limit"
+    );
 }
 
 /// Execute an `AgentDelegate` node: fan out to its sub-agents concurrently with
@@ -1478,6 +3098,18 @@ async fn run_agent_delegate(
     )
     .await
     .map_err(|e| e.to_string())?;
+
+    // One delegate failing does not fail the node, but one stopped by a rate,
+    // usage, or session limit does: the node error lets the run park until the
+    // limit resets, and the resumed fan-out reruns only the delegates that did
+    // not finish (successes are checkpointed above).
+    if let Some(limited) = results
+        .iter()
+        .filter_map(|result| result.error.as_deref())
+        .find(|error| super::limits::is_limit_error(error))
+    {
+        return Err(format!("delegate hit a provider limit: {limited}"));
+    }
 
     serde_json::to_string(&results)
         .map_err(|e| format!("failed to serialise delegate results: {e}"))
@@ -1586,7 +3218,7 @@ async fn run_prompt(
     // A configured agent + an available runner: invoke the real agent.
     if let Some(id) = agent_id.filter(|s| !s.is_empty()) {
         if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
-            let conversation_id = format!("wfrun-{run_id}-{node_id}");
+            let conversation_id = format!("{WORKFLOW_CONVERSATION_PREFIX}{run_id}-{node_id}");
             return runner
                 .run(Some(id.to_string()), conversation_id, prompt.to_string())
                 .await
@@ -1597,10 +3229,7 @@ async fn run_prompt(
     let gw_url = gateway_url();
     let gw_token = gateway_token();
 
-    let model = std::env::var("RYU_DEFAULT_LLM_MODEL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "gpt-4o-mini".to_string());
+    let model = default_llm_model();
 
     let payload = serde_json::json!({
         "model": model,
@@ -1608,9 +3237,12 @@ async fn run_prompt(
         "messages": [{ "role": "user", "content": prompt }],
     });
 
-    let client = reqwest::Client::new();
+    let client = crate::sidecar::gateway::gateway_http_client();
     let endpoint = format!("{}/v1/chat/completions", gw_url.trim_end_matches('/'));
-    let mut builder = client.post(&endpoint).json(&payload);
+    let mut builder = crate::sidecar::gateway::with_side_call_headers(
+        client.post(&endpoint).json(&payload),
+        &crate::sidecar::gateway::SidePurpose::WorkflowPrompt,
+    );
     if let Some(token) = gw_token {
         builder = builder.bearer_auth(token);
     }
@@ -1620,15 +3252,29 @@ async fn run_prompt(
         .await
         .map_err(|e| format!("prompt node: gateway unreachable (fail-closed): {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!(
-            "prompt node: gateway returned HTTP {}",
-            resp.status()
+        let status = resp.status();
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let body = resp.text().await.unwrap_or_default();
+        return Err(super::limits::gateway_error_message(
+            "prompt node",
+            status,
+            retry_after.as_deref(),
+            &body,
         ));
     }
     let body: serde_json::Value = resp
         .json()
         .await
         .map_err(|e| format!("prompt node: invalid gateway response: {e}"))?;
+    crate::sidecar::gateway::log_side_usage(
+        &crate::sidecar::gateway::SidePurpose::WorkflowPrompt,
+        &model,
+        &body,
+    );
     let text = body
         .get("choices")
         .and_then(|c| c.get(0))
@@ -1638,6 +3284,68 @@ async fn run_prompt(
         .unwrap_or_default()
         .to_string();
     Ok(text)
+}
+
+/// The model a workflow step requests when it does not name one.
+fn default_llm_model() -> String {
+    std::env::var("RYU_DEFAULT_LLM_MODEL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "gpt-4o-mini".to_string())
+}
+
+/// The gateway route a BAML code step's `Ryu` client uses, so its model calls
+/// stay governed like every other workflow model call.
+fn code_step_llm_route(model: Option<&str>) -> ryu_code_runner::LlmRoute {
+    use crate::sidecar::gateway::{gateway_token, gateway_url};
+
+    ryu_code_runner::LlmRoute {
+        base_url: format!("{}/v1", gateway_url().trim_end_matches('/')),
+        api_key: gateway_token(),
+        model: model
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map_or_else(default_llm_model, str::to_string),
+    }
+}
+
+/// Execute a `Code` node through [`ryu_code_runner`]: Lean and Bend run in a
+/// command-capable sandbox (or the host only when allowed), BAML runs as a
+/// scrubbed, gateway-only `baml-cli` server.
+#[allow(clippy::too_many_arguments)]
+async fn run_code_step(
+    language: ryu_code_runner::CodeLanguage,
+    mode: ryu_code_runner::CodeMode,
+    source: &str,
+    input: &str,
+    function: Option<&str>,
+    args: &serde_json::Value,
+    model: Option<&str>,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
+    let llm = (language == ryu_code_runner::CodeLanguage::Baml
+        && mode == ryu_code_runner::CodeMode::Run)
+        .then(|| code_step_llm_route(model));
+    let request = ryu_code_runner::CodeRequest {
+        language,
+        mode,
+        source,
+        input,
+        function,
+        args,
+        timeout,
+        llm: llm.as_ref(),
+    };
+    let output = ryu_code_runner::run_code(&request)
+        .await
+        .map_err(|e| format!("code node ({}): {e}", language.as_str()))?;
+    tracing::debug!(
+        language = language.as_str(),
+        mode = mode.as_str(),
+        runner = %output.runner,
+        "workflow code step finished"
+    );
+    Ok(output.value)
 }
 
 /// Execute a `Skill` node: load the skill's instruction body from the registry
@@ -1744,14 +3452,16 @@ async fn run_plugin(
     args: &serde_json::Value,
     input: &str,
     idem_key: &str,
-    run_id: &str,
+    run: &mut WorkflowRun,
     node_id: &str,
+    exec_id: &str,
     depth: usize,
     mode: ExecutionMode,
 ) -> Result<String, String> {
     use crate::plugin_manifest::PluginManifestLoader;
     use crate::runnable::RunnableKind;
 
+    let run_id = run.run_id.clone();
     let manifest = PluginManifestLoader::load()
         .into_iter()
         .find(|m| m.id == plugin_id)
@@ -1784,17 +3494,17 @@ async fn run_plugin(
     match entry.kind {
         RunnableKind::Tool => {
             let slug = config_str("slug")?;
-            run_tool(&slug, args, input, idem_key).await
+            boxed_node_work(|| run_tool(&slug, args, input, idem_key)).await
         }
         RunnableKind::Agent => {
             // Run the agent registered under the runnable id; the pipeline value
             // is the task. Fails clearly if the plugin's agent is not (yet)
             // registered in the agent store.
-            run_prompt(input, Some(&entry.id), run_id, node_id).await
+            boxed_node_work(|| run_prompt(input, Some(&entry.id), &run_id, exec_id)).await
         }
         RunnableKind::Skill => {
             let skill_id = config_str("skill_id")?;
-            run_skill(&skill_id, None, input, run_id, node_id).await
+            boxed_node_work(|| run_skill(&skill_id, None, input, &run_id, exec_id)).await
         }
         RunnableKind::Workflow => {
             let wf_id = config_str("entry")?;
@@ -1805,9 +3515,8 @@ async fn run_plugin(
             sub_input.insert("input".to_string(), input.to_string());
             // Deterministic child run id (same scheme as a SubWorkflow node) so a
             // resumed parent re-enters the SAME inner run after a restart.
-            let sub_run_id = format!("{run_id}-plugin-{node_id}");
-            let result =
-                run_workflow_inner(&sub, sub_input, sub_run_id, depth + 1, mode).await?;
+            let sub_run_id = format!("{run_id}-plugin-{exec_id}");
+            let result = boxed_node_work(|| run_child_workflow(&sub, sub_input, sub_run_id, node_id, run, depth, mode)).await?;
             Ok(result.output.values().next().cloned().unwrap_or_default())
         }
         RunnableKind::Companion
@@ -1849,7 +3558,7 @@ async fn run_guardrails(checks: &[String], input: &str) -> Result<String, String
         "checks": checks,
     });
 
-    let client = reqwest::Client::new();
+    let client = crate::sidecar::gateway::gateway_http_client();
     let endpoint = format!("{}/v1/firewall/check", gw_url.trim_end_matches('/'));
     let mut builder = client.post(&endpoint).json(&payload);
     if let Some(token) = gw_token {
@@ -2198,7 +3907,7 @@ async fn run_webhook(
         .body(serde_json::json!({ "input": input }).to_string())
         .send()
         .await
-        .map_err(|e| format!("webhook node: request failed: {e}"))?;
+        .map_err(|e| format!("webhook node: request failed: {}", e.without_url()))?;
     let status = resp.status();
     if resp
         .content_length()
@@ -2211,7 +3920,8 @@ async fn run_webhook(
     let mut stream = resp.bytes_stream();
     let mut body = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("webhook node: response read failed: {e}"))?;
+        let chunk = chunk
+            .map_err(|e| format!("webhook node: response read failed: {}", e.without_url()))?;
         if body.len().saturating_add(chunk.len()) > MAX_WEBHOOK_RESPONSE_BYTES {
             return Err(format!(
                 "webhook node: response exceeds {MAX_WEBHOOK_RESPONSE_BYTES} bytes"
@@ -2227,2022 +3937,5 @@ async fn run_webhook(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn transforms_apply() {
-        assert_eq!(apply_transform("uppercase", None, "hi").unwrap(), "HI");
-        assert_eq!(apply_transform("lowercase", None, "HI").unwrap(), "hi");
-        assert_eq!(apply_transform("trim", None, "  x ").unwrap(), "x");
-        assert_eq!(
-            apply_transform("template", Some("<{{input}}>"), "y").unwrap(),
-            "<y>"
-        );
-        assert!(apply_transform("nope", None, "x").is_err());
-    }
-
-    // ── Retry / timeout / idempotency / durable timers ───────────────────────
-    // (best-of Temporal RetryPolicy + StartToClose timeout, Restate idempotency
-    // keys + durable timers)
-
-    use crate::workflow::RetryPolicy;
-
-    /// Fast retry policy for tests: tiny intervals so the loop spends its budget
-    /// in milliseconds.
-    fn fast_policy(max_attempts: u32) -> RetryPolicy {
-        RetryPolicy {
-            max_attempts,
-            initial_interval_ms: 1,
-            backoff_coefficient: 2.0,
-            max_interval_ms: 10,
-            jitter_fraction: 0.0,
-            non_retryable_errors: Vec::new(),
-        }
-    }
-
-    fn empty_input() -> HashMap<String, String> {
-        HashMap::new()
-    }
-
-    #[test]
-    fn decide_retry_budget_and_non_retryable() {
-        // Budget spent (attempt == max) → Fail; budget left → Retry.
-        assert!(matches!(
-            decide_retry(&fast_policy(3), 3, 3, "boom"),
-            RetryDecision::Fail
-        ));
-        assert!(matches!(
-            decide_retry(&fast_policy(3), 1, 3, "boom"),
-            RetryDecision::Retry(_)
-        ));
-        // Non-retryable substring (case-insensitive) fails fast regardless of budget.
-        let mut p = fast_policy(5);
-        p.non_retryable_errors = vec!["FORBIDDEN".into()];
-        assert!(matches!(
-            decide_retry(&p, 1, 5, "HTTP 403 Forbidden"),
-            RetryDecision::Fail
-        ));
-        assert!(matches!(
-            decide_retry(&p, 1, 5, "connection reset"),
-            RetryDecision::Retry(_)
-        ));
-    }
-
-    #[test]
-    fn backoff_is_exponential_and_capped() {
-        let p = RetryPolicy {
-            max_attempts: 10,
-            initial_interval_ms: 100,
-            backoff_coefficient: 2.0,
-            max_interval_ms: 500,
-            jitter_fraction: 0.0,
-            non_retryable_errors: Vec::new(),
-        };
-        assert_eq!(next_backoff_ms(&p, 1), 100); // 100 * 2^0
-        assert_eq!(next_backoff_ms(&p, 2), 200); // 100 * 2^1
-        assert_eq!(next_backoff_ms(&p, 3), 400); // 100 * 2^2
-        assert_eq!(next_backoff_ms(&p, 4), 500); // 800 capped to 500
-    }
-
-    #[test]
-    fn jitter_noop_when_off_or_out_of_range_else_in_band() {
-        let mut p = fast_policy(3);
-        p.jitter_fraction = 0.0;
-        assert_eq!(apply_jitter(100, &p), 100);
-        p.jitter_fraction = 1.5; // out of [0,1]
-        assert_eq!(apply_jitter(100, &p), 100);
-        p.jitter_fraction = 0.5; // ±50% band
-        let j = apply_jitter(100, &p);
-        assert!((50..=150).contains(&j), "jitter {j} out of ±50% band");
-    }
-
-    #[test]
-    fn idempotency_key_is_stable_and_unique() {
-        assert_eq!(idempotency_key("r1", "n1"), "r1:n1");
-        assert_ne!(idempotency_key("r1", "n1"), idempotency_key("r2", "n1"));
-        assert_ne!(idempotency_key("r1", "n1"), idempotency_key("r1", "n2"));
-    }
-
-    #[test]
-    fn tool_args_inject_key_and_input_without_clobber() {
-        use serde_json::json;
-        let a = build_tool_args(&json!({"x": 1}), "hi", "r:n");
-        assert_eq!(a["x"], json!(1));
-        assert_eq!(a["input"], json!("hi"));
-        assert_eq!(a["__ryu_idempotency_key"], json!("r:n"));
-        // A pre-existing key is preserved (cooperating author may set one).
-        let b = build_tool_args(&json!({"__ryu_idempotency_key": "keep"}), "hi", "r:n");
-        assert_eq!(b["__ryu_idempotency_key"], json!("keep"));
-        // Null and scalar args are wrapped into an object.
-        let c = build_tool_args(&json!(null), "x", "k");
-        assert_eq!(c["input"], json!("x"));
-        let d = build_tool_args(&json!("scalar"), "x", "k");
-        assert_eq!(d["args"], json!("scalar"));
-        assert_eq!(d["__ryu_idempotency_key"], json!("k"));
-    }
-
-    #[test]
-    fn retry_policy_serde_defaults_and_partial() {
-        // Bare `{}` → defaults (max_attempts 1 = run once, coefficient 2.0).
-        let p: RetryPolicy = serde_json::from_str("{}").unwrap();
-        assert_eq!(p.max_attempts, 1);
-        assert_eq!(p.backoff_coefficient, 2.0);
-        // Partial JSON → unspecified fields fall back to defaults.
-        let p2: RetryPolicy = serde_json::from_str(r#"{"max_attempts":5}"#).unwrap();
-        assert_eq!(p2.max_attempts, 5);
-        assert_eq!(p2.initial_interval_ms, 100);
-    }
-
-    #[test]
-    fn node_and_run_state_back_compat_serde() {
-        use crate::workflow::WorkflowNode;
-        // Old node JSON (no retry/timeout) still deserializes.
-        let n: WorkflowNode = serde_json::from_str(r#"{"id":"a","type":"input"}"#).unwrap();
-        assert!(n.retry.is_none());
-        assert!(n.timeout_ms.is_none());
-        // Old run-state JSON (no attempts/wake_at) → safe defaults.
-        let s: store::NodeRunState = serde_json::from_str(r#"{"status":"completed"}"#).unwrap();
-        assert_eq!(s.attempts, 0);
-        assert!(s.wake_at.is_none());
-
-        let old_run: WorkflowRun = serde_json::from_value(serde_json::json!({
-            "run_id": "r1",
-            "workflow_id": "w1",
-            "status": "completed",
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": "2026-01-01T00:00:00Z"
-        }))
-        .expect("old run JSON remains readable");
-        assert!(!old_run.dry_run);
-
-        let mut preview = WorkflowRun::new("preview".into(), "w1".into(), HashMap::new());
-        preview.dry_run = true;
-        let preview_json = serde_json::to_value(&preview).expect("preview run serializes");
-        assert_eq!(preview_json["dryRun"], serde_json::json!(true));
-        assert!(preview_json.get("dry_run").is_none());
-        assert!(store::save_run(&preview).is_err());
-    }
-
-    #[tokio::test]
-    async fn direct_resume_cannot_bypass_notify_user_gate() {
-        use crate::workflow::{AckMode, NotifyTargetSpec, WorkflowEdge, WorkflowNode};
-
-        let workflow = Workflow {
-            id: format!("notify-resume-{}", uuid::Uuid::new_v4().simple()),
-            name: "notify resume guard".into(),
-            description: None,
-            nodes: vec![WorkflowNode {
-                id: "approval".into(),
-                kind: NodeKind::NotifyUser {
-                    target: NotifyTargetSpec::Members {
-                        user_ids: vec!["user-1".into()],
-                    },
-                    title: "Review".into(),
-                    body: "Please approve".into(),
-                    ack_mode: AckMode::First,
-                    ack_timeout_ms: None,
-                },
-                retry: None,
-                timeout_ms: None,
-            }],
-            edges: Vec::<WorkflowEdge>::new(),
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        store::save_workflow(&workflow).expect("workflow should persist");
-
-        let run_id = format!("notify-run-{}", uuid::Uuid::new_v4().simple());
-        let mut run = WorkflowRun::new(run_id.clone(), workflow.id.clone(), empty_input());
-        run.status = RunStatus::AwaitingInput;
-        run.awaiting_node = Some("approval".into());
-        store::save_run(&run).expect("suspended run should persist");
-
-        let error = resume_run(&run_id, "bypass".into())
-            .await
-            .expect_err("a notification gate must require a recipient ack");
-        assert!(error.contains("member acknowledgements"));
-        let persisted = store::load_run(&run_id).expect("run should remain persisted");
-        assert_eq!(persisted.status, RunStatus::AwaitingInput);
-        assert_eq!(persisted.awaiting_node.as_deref(), Some("approval"));
-    }
-
-    /// A perpetually-failing node with a 3-attempt policy spends its whole
-    /// budget, records `attempts == 3`, then fails the run.
-    #[tokio::test]
-    async fn retry_exhausts_budget_then_fails() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-        let wf = Workflow {
-            id: format!("retry-{}", uuid::Uuid::new_v4().simple()),
-            name: "r".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "t".into(),
-                    retry: Some(fast_policy(3)),
-                    timeout_ms: None,
-                    // Always errors (no/empty MCP registry, or unknown tool).
-                    kind: NodeKind::Tool {
-                        name: "nope.nope".into(),
-                        args: serde_json::json!({}),
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output { key: None },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "t".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "t".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("rr-{}", uuid::Uuid::new_v4().simple());
-        let res = run_workflow(&wf, empty_input(), run_id.clone()).await;
-        assert!(res.is_err(), "perpetually-failing node must fail the run");
-        let run = store::load_run(&run_id).expect("run persisted");
-        assert_eq!(run.status, RunStatus::Failed);
-        assert_eq!(
-            run.nodes.get("t").map(|s| s.attempts),
-            Some(3),
-            "should spend the full 3-attempt budget"
-        );
-    }
-
-    /// With no policy a failing node runs exactly once (back-compat behaviour).
-    #[tokio::test]
-    async fn no_policy_runs_once() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-        let wf = Workflow {
-            id: format!("once-{}", uuid::Uuid::new_v4().simple()),
-            name: "o".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "t".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Tool {
-                        name: "nope.nope".into(),
-                        args: serde_json::json!({}),
-                    },
-                },
-            ],
-            edges: vec![WorkflowEdge {
-                from: "in".into(),
-                to: "t".into(),
-                branch: None,
-            }],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("or-{}", uuid::Uuid::new_v4().simple());
-        let _ = run_workflow(&wf, empty_input(), run_id.clone()).await;
-        let run = store::load_run(&run_id).expect("run persisted");
-        assert_eq!(run.nodes.get("t").map(|s| s.attempts), Some(1));
-    }
-
-    /// A run whose checkpoint cannot be persisted must fail rather than
-    /// continue: on a later crash/resume it would reload stale state and re-run
-    /// already-completed side-effecting nodes. Fault injection: a run id
-    /// containing `.` is outside `store`'s id charset, so every `save_run`
-    /// returns `Err` — the very first checkpoint (marking the first node
-    /// Running) must abort the run.
-    #[tokio::test]
-    async fn checkpoint_save_failure_fails_the_run() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowNode};
-        let wf = Workflow {
-            id: format!("ckpt-{}", uuid::Uuid::new_v4().simple()),
-            name: "c".into(),
-            description: None,
-            nodes: vec![WorkflowNode {
-                id: "in".into(),
-                retry: None,
-                timeout_ms: None,
-                kind: NodeKind::Input { key: None },
-            }],
-            edges: Vec::new(),
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let res = run_workflow(&wf, empty_input(), "bad.run.id".into()).await;
-        let err = res.expect_err("run must fail when its checkpoint cannot be saved");
-        assert!(
-            err.contains("failed to persist checkpoint"),
-            "unexpected error: {err}"
-        );
-    }
-
-    /// A per-node timeout cancels a slow attempt and fails fast (Temporal
-    /// StartToClose): a 20ms timeout on a 2s delay must not wait the full delay.
-    #[tokio::test]
-    async fn per_node_timeout_fails_fast() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-        let wf = Workflow {
-            id: format!("to-{}", uuid::Uuid::new_v4().simple()),
-            name: "t".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "d".into(),
-                    retry: None,
-                    timeout_ms: Some(20),
-                    kind: NodeKind::Delay { ms: 2000 },
-                },
-            ],
-            edges: vec![WorkflowEdge {
-                from: "in".into(),
-                to: "d".into(),
-                branch: None,
-            }],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("tor-{}", uuid::Uuid::new_v4().simple());
-        let start = tokio::time::Instant::now();
-        let res = run_workflow(&wf, empty_input(), run_id.clone()).await;
-        let err = res.expect_err("must fail on timeout");
-        assert!(
-            err.contains("timed out"),
-            "expected a timeout error, got: {err}"
-        );
-        assert!(
-            start.elapsed() < std::time::Duration::from_millis(1500),
-            "must fail fast, not wait the full 2s delay"
-        );
-        let run = store::load_run(&run_id).expect("run persisted");
-        assert_eq!(run.status, RunStatus::Failed);
-    }
-
-    /// Durable timer: a run pre-seeded with a `Delay` whose `wake_at` is already
-    /// in the past resumes and completes immediately — it does NOT re-sleep the
-    /// full (here 60s) duration. This is the crash-recovery guarantee.
-    #[tokio::test]
-    async fn durable_delay_resumes_with_remaining_time() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-        let wf_id = format!("dd-{}", uuid::Uuid::new_v4().simple());
-        let wf = Workflow {
-            id: wf_id.clone(),
-            name: "d".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "d".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Delay { ms: 60_000 },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output { key: None },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "d".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "d".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        // Pre-seed: the Delay node is Running with a wake_at 5s in the PAST.
-        let run_id = format!("ddr-{}", uuid::Uuid::new_v4().simple());
-        let mut pre = store::WorkflowRun::new(run_id.clone(), wf_id.clone(), empty_input());
-        pre.nodes.insert(
-            "d".into(),
-            store::NodeRunState {
-                status: NodeStatus::Running,
-                output: None,
-                error: None,
-                attempts: 1,
-                wake_at: Some((chrono::Utc::now() - chrono::Duration::seconds(5)).to_rfc3339()),
-            },
-        );
-        store::save_run(&pre).expect("pre-seed save ok");
-
-        let start = tokio::time::Instant::now();
-        let run = run_workflow(&wf, empty_input(), run_id)
-            .await
-            .expect("resume ok");
-        assert_eq!(run.status, RunStatus::Completed);
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(2),
-            "wake_at was in the past → must not re-sleep the full delay"
-        );
-    }
-
-    /// An `Awakeable` gate carrying a retry policy must still suspend (not be
-    /// retried as a failure). The gate runs once and the run awaits input.
-    #[tokio::test]
-    async fn awakeable_with_retry_policy_suspends_not_retries() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-        let wf = Workflow {
-            id: format!("aw-{}", uuid::Uuid::new_v4().simple()),
-            name: "a".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "gate".into(),
-                    retry: Some(fast_policy(5)),
-                    timeout_ms: None,
-                    kind: NodeKind::Awakeable { prompt: None },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output { key: None },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "gate".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "gate".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("awr-{}", uuid::Uuid::new_v4().simple());
-        let run = run_workflow(&wf, empty_input(), run_id)
-            .await
-            .expect("suspends ok");
-        assert_eq!(run.status, RunStatus::AwaitingInput);
-        assert_eq!(run.awaiting_node.as_deref(), Some("gate"));
-        assert_eq!(
-            run.nodes.get("gate").map(|s| s.attempts),
-            Some(1),
-            "the gate must run once and suspend, never retry"
-        );
-    }
-
-    /// A `Delay` stamps and persists its `wake_at` on the FIRST run (not only on
-    /// resume), and the instant survives into the Completed node state.
-    #[tokio::test]
-    async fn durable_delay_stamps_wake_at_on_first_run() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-        let before = chrono::Utc::now();
-        let wf = Workflow {
-            id: format!("ws-{}", uuid::Uuid::new_v4().simple()),
-            name: "s".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "d".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Delay { ms: 50 },
-                },
-            ],
-            edges: vec![WorkflowEdge {
-                from: "in".into(),
-                to: "d".into(),
-                branch: None,
-            }],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("wsr-{}", uuid::Uuid::new_v4().simple());
-        run_workflow(&wf, empty_input(), run_id.clone())
-            .await
-            .expect("ok");
-        let run = store::load_run(&run_id).expect("run persisted");
-        let wake_at = run
-            .nodes
-            .get("d")
-            .and_then(|s| s.wake_at.clone())
-            .expect("wake_at must be stamped on first run");
-        let parsed = chrono::DateTime::parse_from_rfc3339(&wake_at)
-            .expect("wake_at must be RFC3339")
-            .with_timezone(&chrono::Utc);
-        // ~50ms in the future of `before`, with generous slack for CI.
-        assert!(
-            parsed >= before && parsed <= before + chrono::Duration::seconds(2),
-            "wake_at {parsed} should be ~now+50ms (ms, not seconds)"
-        );
-    }
-
-    /// Timeout composes with retry: a per-node timeout produces a *retryable*
-    /// error, so the retry loop re-runs the node and spends its whole budget. A
-    /// `Delay{ms:10_000}` with a 30ms timeout can NEVER finish inside an attempt
-    /// (no delay-vs-timeout race: the timeout always wins), so it deterministically
-    /// times out every attempt and exhausts a 3-attempt budget.
-    #[tokio::test]
-    async fn timeout_is_retryable_and_exhausts_budget() {
-        use crate::workflow::{NodeKind, RetryPolicy, Workflow, WorkflowEdge, WorkflowNode};
-        let wf = Workflow {
-            id: format!("trx-{}", uuid::Uuid::new_v4().simple()),
-            name: "trx".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "d".into(),
-                    retry: Some(RetryPolicy {
-                        max_attempts: 3,
-                        initial_interval_ms: 1,
-                        backoff_coefficient: 1.0,
-                        max_interval_ms: 5,
-                        jitter_fraction: 0.0,
-                        non_retryable_errors: Vec::new(),
-                    }),
-                    timeout_ms: Some(30),
-                    kind: NodeKind::Delay { ms: 10_000 },
-                },
-            ],
-            edges: vec![WorkflowEdge {
-                from: "in".into(),
-                to: "d".into(),
-                branch: None,
-            }],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("trxr-{}", uuid::Uuid::new_v4().simple());
-        let res = run_workflow(&wf, empty_input(), run_id.clone()).await;
-        let err = res.expect_err("every attempt times out → run fails");
-        assert!(
-            err.contains("timed out"),
-            "expected a timeout error, got: {err}"
-        );
-        let run = store::load_run(&run_id).expect("run persisted");
-        assert_eq!(run.status, RunStatus::Failed);
-        assert_eq!(
-            run.nodes.get("d").map(|s| s.attempts),
-            Some(3),
-            "a timeout must be retried until the budget is spent"
-        );
-    }
-
-    /// The success-after-failure arm: a node that already has a prior failed
-    /// attempt recorded (as after a crash+restart) completes on its next attempt,
-    /// and the attempt counter accumulates across the resume rather than resetting.
-    /// Deterministic — a `Transform` always succeeds, so there is no timing race.
-    #[tokio::test]
-    async fn node_succeeds_on_retry_accumulating_attempts() {
-        use crate::workflow::{NodeKind, RetryPolicy, Workflow, WorkflowEdge, WorkflowNode};
-        let wf_id = format!("sr-{}", uuid::Uuid::new_v4().simple());
-        let wf = Workflow {
-            id: wf_id.clone(),
-            name: "sr".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("text".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "up".into(),
-                    retry: Some(RetryPolicy {
-                        max_attempts: 5,
-                        ..Default::default()
-                    }),
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "uppercase".into(),
-                        template: None,
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("result".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "up".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "up".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        // Pre-seed: the Transform node has 2 prior (failed) attempts and is not
-        // yet Completed — as if two attempts failed before a restart.
-        let run_id = format!("srr-{}", uuid::Uuid::new_v4().simple());
-        let mut input = HashMap::new();
-        input.insert("text".to_string(), "hello".to_string());
-        let mut pre = store::WorkflowRun::new(run_id.clone(), wf_id.clone(), input.clone());
-        pre.nodes.insert(
-            "up".into(),
-            store::NodeRunState {
-                status: NodeStatus::Running,
-                output: None,
-                error: Some("prior failure".into()),
-                attempts: 2,
-                wake_at: None,
-            },
-        );
-        store::save_run(&pre).expect("pre-seed save ok");
-
-        let run = run_workflow(&wf, input, run_id).await.expect("succeeds");
-        assert_eq!(run.status, RunStatus::Completed);
-        assert_eq!(run.output.get("result").map(String::as_str), Some("HELLO"));
-        // Prior 2 attempts + this successful 3rd = 3 total (budget accumulates).
-        assert_eq!(run.nodes.get("up").map(|s| s.attempts), Some(3));
-    }
-
-    /// A non-retryable error matched at run level fails immediately (attempts==1)
-    /// even with a generous budget — the error string flows to `decide_retry`.
-    #[tokio::test]
-    async fn non_retryable_short_circuits_at_run_level() {
-        use crate::workflow::{NodeKind, RetryPolicy, Workflow, WorkflowEdge, WorkflowNode};
-        let wf = Workflow {
-            id: format!("nr-{}", uuid::Uuid::new_v4().simple()),
-            name: "nr".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "t".into(),
-                    retry: Some(RetryPolicy {
-                        max_attempts: 5,
-                        initial_interval_ms: 1,
-                        backoff_coefficient: 2.0,
-                        max_interval_ms: 10,
-                        jitter_fraction: 0.0,
-                        // The Tool node's error always begins with "tool node:".
-                        non_retryable_errors: vec!["tool node:".into()],
-                    }),
-                    timeout_ms: None,
-                    kind: NodeKind::Tool {
-                        name: "nope.nope".into(),
-                        args: serde_json::json!({}),
-                    },
-                },
-            ],
-            edges: vec![WorkflowEdge {
-                from: "in".into(),
-                to: "t".into(),
-                branch: None,
-            }],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("nrr-{}", uuid::Uuid::new_v4().simple());
-        let res = run_workflow(&wf, empty_input(), run_id.clone()).await;
-        assert!(res.is_err());
-        let run = store::load_run(&run_id).expect("run persisted");
-        assert_eq!(run.status, RunStatus::Failed);
-        assert_eq!(
-            run.nodes.get("t").map(|s| s.attempts),
-            Some(1),
-            "non-retryable error must fail on the first attempt"
-        );
-    }
-
-    #[test]
-    fn header_safe_key_keeps_token_chars_and_replaces_others() {
-        assert_eq!(header_safe_key("run-1:node_2"), "run-1:node_2");
-        assert_eq!(header_safe_key("a b\nc"), "a-b-c");
-        assert_eq!(header_safe_key("ok.id-9"), "ok.id-9");
-    }
-
-    #[test]
-    fn ghost_action_maps_common_steps() {
-        use serde_json::json;
-
-        // click → ghost_click with query + app + dom locators.
-        let (tool, call) = ghost_action_call(
-            "click",
-            &json!({ "query": "Compose", "app": "Gmail", "dom_id": "c1" }),
-            &json!({}),
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(tool, "ghost.ghost_click");
-        assert_eq!(call["query"], json!("Compose"));
-        assert_eq!(call["app"], json!("Gmail"));
-        assert_eq!(call["dom_id"], json!("c1"));
-
-        // type → ghost_type with `into` (not `query`) and `text`.
-        let (tool, call) = ghost_action_call(
-            "type",
-            &json!({ "query": "Recipient" }),
-            &json!({ "text": "a@b.com" }),
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(tool, "ghost.ghost_type");
-        assert_eq!(call["into"], json!("Recipient"));
-        assert_eq!(call["text"], json!("a@b.com"));
-
-        // hotkey → split keys on '+'.
-        let (tool, call) = ghost_action_call("hotkey", &json!({}), &json!({ "keys": "ctrl + c" }))
-            .unwrap()
-            .unwrap();
-        assert_eq!(tool, "ghost.ghost_hotkey");
-        assert_eq!(call["keys"], json!(["ctrl", "c"]));
-
-        // scroll → direction + numeric amount default.
-        let (tool, call) = ghost_action_call("scroll", &json!({}), &json!({ "direction": "up" }))
-            .unwrap()
-            .unwrap();
-        assert_eq!(tool, "ghost.ghost_scroll");
-        assert_eq!(call["direction"], json!("up"));
-        assert_eq!(call["amount"], json!(3));
-
-        // focus → app from target, no duplicate app injection.
-        let (tool, call) = ghost_action_call("focus", &json!({ "app": "Calculator" }), &json!({}))
-            .unwrap()
-            .unwrap();
-        assert_eq!(tool, "ghost.ghost_focus");
-        assert_eq!(call["app"], json!("Calculator"));
-
-        // wait → no tool (pure sleep).
-        assert!(
-            ghost_action_call("wait", &json!({}), &json!({ "seconds": 2 }))
-                .unwrap()
-                .is_none()
-        );
-
-        // unknown → error.
-        assert!(ghost_action_call("teleport", &json!({}), &json!({})).is_err());
-    }
-
-    #[test]
-    fn conditions_evaluate() {
-        assert!(eval_condition("input == \"yes\"", "yes"));
-        assert!(!eval_condition("input == \"yes\"", "no"));
-        assert!(eval_condition("input != \"yes\"", "no"));
-        assert!(eval_condition("input contains \"ell\"", "hello"));
-        assert!(eval_condition("input starts_with \"he\"", "hello"));
-        assert!(!eval_condition("input starts_with \"lo\"", "hello"));
-        assert!(eval_condition("input ends_with \"lo\"", "hello"));
-        assert!(!eval_condition("input ends_with \"he\"", "hello"));
-        assert!(eval_condition("input nonempty", "x"));
-        assert!(eval_condition("input empty", ""));
-    }
-
-    #[test]
-    fn while_cap_clamps_to_hard_max() {
-        // An explicit override below the ceiling is honoured.
-        assert_eq!(effective_while_cap(Some(5)), 5);
-        // Above the ceiling is clamped down (never raised past the safety cap).
-        assert_eq!(
-            effective_while_cap(Some(MAX_WHILE_ITERATIONS + 50)),
-            MAX_WHILE_ITERATIONS
-        );
-        // Unset / zero fall back to the engine default.
-        assert_eq!(effective_while_cap(None), MAX_WHILE_ITERATIONS);
-        assert_eq!(effective_while_cap(Some(0)), MAX_WHILE_ITERATIONS);
-        // The capped decision stops at the lowered bound.
-        assert_eq!(decide_while_capped(4, true, 5), (true, 5));
-        assert_eq!(decide_while_capped(5, true, 5), (false, 5));
-    }
-
-    #[test]
-    fn conditions_evaluate_numeric() {
-        // Strict less-than / greater-than.
-        assert!(eval_condition("input < 10", "3"));
-        assert!(!eval_condition("input < 10", "10"));
-        assert!(eval_condition("input > 5", "6"));
-        assert!(!eval_condition("input > 5", "5"));
-        // Inclusive variants — must not be mis-parsed as `< =` / `> =`.
-        assert!(eval_condition("input <= 10", "10"));
-        assert!(!eval_condition("input <= 10", "11"));
-        assert!(eval_condition("input >= 5", "5"));
-        assert!(!eval_condition("input >= 5", "4"));
-        // Floats and whitespace are tolerated.
-        assert!(eval_condition("input < 2.5", "2.49"));
-        assert!(eval_condition("input <= 3 ", " 3 "));
-        // Non-numeric operands are false (never panic / never truthy).
-        assert!(!eval_condition("input < 10", "abc"));
-        assert!(!eval_condition("input > x", "5"));
-    }
-
-    #[tokio::test]
-    async fn runs_linear_transform_workflow() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        let wf = Workflow {
-            id: format!("test-lin-{}", uuid::Uuid::new_v4().simple()),
-            name: "lin".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("text".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "up".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "uppercase".into(),
-                        template: None,
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("result".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "up".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "up".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        let mut input = HashMap::new();
-        input.insert("text".to_string(), "hello".to_string());
-        let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
-        let run = run_workflow(&wf, input, run_id).await.expect("run ok");
-        assert_eq!(run.status, RunStatus::Completed);
-        assert_eq!(run.output.get("result").map(String::as_str), Some("HELLO"));
-    }
-
-    #[tokio::test]
-    async fn dry_run_evaluates_pure_nodes_and_never_writes_run_state() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        let workflow_id = format!("dry-pure-{}", uuid::Uuid::new_v4().simple());
-        let workflow = Workflow {
-            id: workflow_id.clone(),
-            name: "dry run pure".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("text".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "up".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "uppercase".into(),
-                        template: None,
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("result".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "up".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "up".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("dry-run-{}", uuid::Uuid::new_v4().simple());
-        let mut input = HashMap::new();
-        input.insert("text".into(), "hello".into());
-
-        // A pre-existing durable record must not be resumed or overwritten by
-        // the transient dry-run projection.
-        let mut persisted = WorkflowRun::new(run_id.clone(), workflow_id, input.clone());
-        persisted.output.insert("old".into(), "sentinel".into());
-        store::save_run(&persisted).expect("seed durable run");
-
-        let run = dry_run_workflow(&workflow, input, run_id.clone())
-            .await
-            .expect("dry run succeeds");
-        assert!(run.dry_run);
-        assert_eq!(run.status, RunStatus::Completed);
-        assert_eq!(run.output.get("result").map(String::as_str), Some("HELLO"));
-        assert_eq!(
-            run.nodes.get("up").map(|state| state.status),
-            Some(NodeStatus::Completed)
-        );
-
-        let from_disk = store::load_run(&run_id).expect("seeded run remains on disk");
-        assert!(!from_disk.dry_run);
-        assert_eq!(
-            from_disk.output.get("old").map(String::as_str),
-            Some("sentinel")
-        );
-    }
-
-    #[tokio::test]
-    async fn dry_run_skips_effectful_nodes_without_calling_them() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        let workflow_id = format!("dry-skip-{}", uuid::Uuid::new_v4().simple());
-        let workflow = Workflow {
-            id: workflow_id,
-            name: "dry run skip".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input { key: None },
-                },
-                WorkflowNode {
-                    id: "send".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    // This URL is intentionally invalid. A live run would
-                    // attempt validation and fail; a dry run must skip it.
-                    kind: NodeKind::Webhook {
-                        url: "not-a-url".into(),
-                        method: "POST".into(),
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output { key: None },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "send".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "send".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let run_id = format!("dry-skip-run-{}", uuid::Uuid::new_v4().simple());
-        let run = dry_run_workflow(&workflow, empty_input(), run_id.clone())
-            .await
-            .expect("dry run succeeds without calling webhook");
-
-        assert_eq!(run.status, RunStatus::Completed);
-        assert_eq!(
-            run.nodes.get("send").map(|state| state.status),
-            Some(NodeStatus::Skipped)
-        );
-        assert!(run
-            .nodes
-            .get("send")
-            .and_then(|state| state.error.as_deref())
-            .is_some_and(|error| error.contains("webhook delivery")));
-        assert_eq!(
-            run.nodes.get("out").map(|state| state.status),
-            Some(NodeStatus::Skipped)
-        );
-        assert!(
-            store::load_run(&run_id).is_err(),
-            "dry run must not create history"
-        );
-    }
-
-    /// AC1 + AC3 + AC4: Awakeable suspend → disk-persist → resume → completion.
-    ///
-    /// This test covers the full HITL loop without Restate:
-    ///
-    /// 1. Run a workflow with an `Awakeable` gate mid-DAG.
-    /// 2. The run suspends at the gate: status = `AwaitingInput`, `awaiting_node`
-    ///    is set, and the state is persisted to disk.
-    /// 3. Simulate a Core restart by **only** using `run_id` (no in-memory state
-    ///    carryover). Load the run from disk, flip the gate to Completed with a
-    ///    payload, persist, and call `run_workflow` again.
-    /// 4. The executor skips the now-Completed gate and upstream nodes; it
-    ///    executes only the downstream Output node, producing the payload.
-    #[tokio::test]
-    async fn awakeable_suspend_restart_resume_completes() {
-        use crate::workflow::store::{NodeRunState, NodeStatus, RunStatus};
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        // Workflow: Input → Awakeable gate → Output
-        let wf_id = format!("awk-wf-{}", uuid::Uuid::new_v4().simple());
-        let wf = Workflow {
-            id: wf_id.clone(),
-            name: "awk-test".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("initial".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "gate".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Awakeable {
-                        prompt: Some("Approve?".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("result".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "gate".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "gate".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        // Step 1: Initial run — hits the Awakeable gate and suspends.
-        let run_id = format!("run-awk-{}", uuid::Uuid::new_v4().simple());
-        let mut input = HashMap::new();
-        input.insert("initial".to_string(), "hello".to_string());
-
-        let suspended = run_workflow(&wf, input.clone(), run_id.clone())
-            .await
-            .expect("suspend should return Ok (not Err)");
-
-        // AC1: status must reflect paused/awaiting-input.
-        assert_eq!(
-            suspended.status,
-            RunStatus::AwaitingInput,
-            "run must be AwaitingInput after hitting Awakeable gate"
-        );
-        assert_eq!(
-            suspended.awaiting_node.as_deref(),
-            Some("gate"),
-            "awaiting_node must identify the gate"
-        );
-
-        // AC3: verify the run survives a "restart" by reading purely from disk.
-        let from_disk = store::load_run(&run_id).expect("run must be persisted to disk");
-        assert_eq!(
-            from_disk.status,
-            RunStatus::AwaitingInput,
-            "disk state must be AwaitingInput"
-        );
-        assert_eq!(from_disk.awaiting_node.as_deref(), Some("gate"));
-
-        // Step 2: Simulate resume (what the resume endpoint does).
-        // Flip the gate to Completed with a payload, persist.
-        let mut resuming = from_disk.clone();
-        resuming.nodes.insert(
-            "gate".to_string(),
-            NodeRunState {
-                status: NodeStatus::Completed,
-                output: Some("approved".to_string()),
-                error: None,
-                attempts: 0,
-                wake_at: None,
-            },
-        );
-        resuming.status = RunStatus::Running;
-        resuming.awaiting_node = None;
-        store::save_run(&resuming).expect("save resumed run ok");
-
-        // AC4: re-invoke with same run_id; executor loads from disk and continues.
-        let completed = run_workflow(&wf, input, run_id.clone())
-            .await
-            .expect("resume run ok");
-
-        assert_eq!(
-            completed.status,
-            RunStatus::Completed,
-            "run must complete after resume"
-        );
-        // The Output node receives the gate's payload ("approved").
-        assert_eq!(
-            completed.output.get("result").map(String::as_str),
-            Some("approved"),
-            "output must be the resume payload"
-        );
-        // The gate node must still be Completed (not re-executed).
-        assert_eq!(
-            completed.nodes.get("gate").map(|s| s.status),
-            Some(NodeStatus::Completed),
-            "gate node must be Completed after resume"
-        );
-    }
-
-    #[test]
-    fn while_decides_continue_until_cap() {
-        // A holding condition continues and increments the counter...
-        assert_eq!(decide_while(0, true), (true, 1));
-        assert_eq!(decide_while(5, true), (true, 6));
-        // ...right up to the iteration just below the cap.
-        assert_eq!(
-            decide_while(MAX_WHILE_ITERATIONS - 1, true),
-            (true, MAX_WHILE_ITERATIONS)
-        );
-        // At the cap the gate is forced to exit even though the condition holds.
-        assert_eq!(
-            decide_while(MAX_WHILE_ITERATIONS, true),
-            (false, MAX_WHILE_ITERATIONS)
-        );
-    }
-
-    #[test]
-    fn while_exits_and_resets_when_condition_fails() {
-        // A failing condition exits and resets the counter so a later re-entry
-        // starts fresh.
-        assert_eq!(decide_while(0, false), (false, 0));
-        assert_eq!(decide_while(42, false), (false, 0));
-    }
-
-    /// A `While` gate whose condition is already false takes the exit (`false`)
-    /// branch immediately, so only the exit subgraph runs to Output.
-    #[tokio::test]
-    async fn while_exits_immediately_when_condition_false() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        let wf = Workflow {
-            id: format!("test-while-{}", uuid::Uuid::new_v4().simple()),
-            name: "while".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("v".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "loop".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::While {
-                        // Input is "done", so `nonempty`... use an exact-match so the
-                        // gate is false: continue only while input == "go".
-                        expr: "input == \"go\"".into(),
-                        body_workflow_id: None,
-                        max_iterations: None,
-                    },
-                },
-                WorkflowNode {
-                    id: "body".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "template".into(),
-                        template: Some("BODY".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "after".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "template".into(),
-                        template: Some("AFTER".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "outBody".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("b".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "outAfter".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("a".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "loop".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "loop".into(),
-                    to: "body".into(),
-                    branch: Some("true".into()),
-                },
-                WorkflowEdge {
-                    from: "loop".into(),
-                    to: "after".into(),
-                    branch: Some("false".into()),
-                },
-                WorkflowEdge {
-                    from: "body".into(),
-                    to: "outBody".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "after".into(),
-                    to: "outAfter".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        let mut input = HashMap::new();
-        input.insert("v".to_string(), "done".to_string());
-        let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
-        let run = run_workflow(&wf, input, run_id).await.expect("run ok");
-        assert_eq!(run.status, RunStatus::Completed);
-        // Exit branch ran...
-        assert_eq!(run.output.get("a").map(String::as_str), Some("AFTER"));
-        // ...and the continue branch was pruned (skipped, no output).
-        assert_eq!(run.output.get("b"), None);
-        assert_eq!(
-            run.nodes.get("body").map(|s| s.status),
-            Some(NodeStatus::Skipped)
-        );
-    }
-
-    /// A real bounded `While` loop (`body_workflow_id` set) re-runs its body
-    /// sub-workflow N>1 times and terminates when the condition flips.
-    ///
-    /// Body workflow: `input → Transform(template "{{input}}x") → output` — it
-    /// appends one `x` to the carry per iteration. Parent: `input → While(loop) →
-    /// output`, continuing while `input != "xxx"`. Seeded with "" the carry grows
-    /// "" → "x" → "xx" → "xxx" over three iterations, then exits.
-    #[tokio::test]
-    async fn while_loop_increments_state_until_exit() {
-        use crate::workflow::store;
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        // Persist the loop body workflow so `run_while_loop` can load it.
-        let body_id = format!("whilebody{}", uuid::Uuid::new_v4().simple());
-        let body = Workflow {
-            id: body_id.clone(),
-            name: "body".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "bin".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("input".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "append".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "template".into(),
-                        template: Some("{{input}}x".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "bout".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("r".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "bin".into(),
-                    to: "append".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "append".into(),
-                    to: "bout".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        store::save_workflow(&body).expect("save body workflow");
-
-        // Parent: Input → While(loop) → Output.
-        let wf = Workflow {
-            id: format!("whileparent{}", uuid::Uuid::new_v4().simple()),
-            name: "while-loop".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("seed".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "loop".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::While {
-                        expr: "input != \"xxx\"".into(),
-                        body_workflow_id: Some(body_id.clone()),
-                        max_iterations: None,
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("result".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "loop".into(),
-                    branch: None,
-                },
-                // Unlabelled forward edge: a looped While is a data node, not a
-                // brancher, so its output flows straight through.
-                WorkflowEdge {
-                    from: "loop".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        let mut input = HashMap::new();
-        input.insert("seed".to_string(), String::new());
-        let run_id = format!("run{}", uuid::Uuid::new_v4().simple());
-        let run = run_workflow(&wf, input, run_id).await.expect("run ok");
-
-        assert_eq!(run.status, RunStatus::Completed);
-        // The loop ran three times (carry "" → "x" → "xx" → "xxx").
-        assert_eq!(
-            run.state.get("__while_loop").map(String::as_str),
-            Some("3"),
-            "loop must have iterated three times"
-        );
-        // The carry / node output is the terminal value.
-        assert_eq!(
-            run.state.get("__while_carry_loop").map(String::as_str),
-            Some("xxx")
-        );
-        assert_eq!(run.output.get("result").map(String::as_str), Some("xxx"));
-    }
-
-    /// A looped `While` whose `body_workflow_id` is the parent workflow itself is
-    /// rejected (would recurse infinitely).
-    #[tokio::test]
-    async fn while_loop_rejects_self_reference() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        let wf_id = format!("whileself{}", uuid::Uuid::new_v4().simple());
-        let wf = Workflow {
-            id: wf_id.clone(),
-            name: "self".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("seed".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "loop".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::While {
-                        expr: "input nonempty".into(),
-                        body_workflow_id: Some(wf_id.clone()),
-                        max_iterations: None,
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("result".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "loop".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "loop".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        let mut input = HashMap::new();
-        input.insert("seed".to_string(), "go".to_string());
-        let run_id = format!("run{}", uuid::Uuid::new_v4().simple());
-        // A node error propagates as `Err` from `run_workflow` (only the Awakeable
-        // suspend sentinel yields `Ok`), so the self-reference guard surfaces here.
-        let err = run_workflow(&wf, input, run_id)
-            .await
-            .expect_err("self-reference must fail the run");
-        assert!(
-            err.contains("recurse"),
-            "expected self-reference error, got: {err}"
-        );
-    }
-
-    /// A `Note` node forwards its input untouched and contributes no run output.
-    #[tokio::test]
-    async fn note_passes_through_without_output() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        let wf = Workflow {
-            id: format!("test-note-{}", uuid::Uuid::new_v4().simple()),
-            name: "note".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("v".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "doc".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Note {
-                        text: "explains the next step".into(),
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("r".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "doc".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "doc".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        let mut input = HashMap::new();
-        input.insert("v".to_string(), "hello".to_string());
-        let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
-        let run = run_workflow(&wf, input, run_id).await.expect("run ok");
-        assert_eq!(run.status, RunStatus::Completed);
-        // The Note forwarded the input unchanged to Output.
-        assert_eq!(run.output.get("r").map(String::as_str), Some("hello"));
-    }
-
-    #[tokio::test]
-    async fn condition_prunes_branch() {
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        let wf = Workflow {
-            id: format!("test-cond-{}", uuid::Uuid::new_v4().simple()),
-            name: "cond".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("v".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "c".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Condition {
-                        expr: "input == \"yes\"".into(),
-                    },
-                },
-                WorkflowNode {
-                    id: "yes".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "template".into(),
-                        template: Some("YESPATH".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "no".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "template".into(),
-                        template: Some("NOPATH".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "outYes".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("y".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "outNo".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("n".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "c".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "c".into(),
-                    to: "yes".into(),
-                    branch: Some("true".into()),
-                },
-                WorkflowEdge {
-                    from: "c".into(),
-                    to: "no".into(),
-                    branch: Some("false".into()),
-                },
-                WorkflowEdge {
-                    from: "yes".into(),
-                    to: "outYes".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "no".into(),
-                    to: "outNo".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        let mut input = HashMap::new();
-        input.insert("v".to_string(), "yes".to_string());
-        let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
-        let run = run_workflow(&wf, input, run_id).await.expect("run ok");
-        assert_eq!(run.status, RunStatus::Completed);
-        assert_eq!(run.output.get("y").map(String::as_str), Some("YESPATH"));
-        // The false branch must have been pruned (skipped), not produce output.
-        assert_eq!(run.output.get("n"), None);
-        assert_eq!(
-            run.nodes.get("no").map(|s| s.status),
-            Some(NodeStatus::Skipped)
-        );
-    }
-
-    #[tokio::test]
-    async fn condition_branches_reconverge_on_one_output() {
-        // A diamond: both Condition branches feed the SAME Output node. The
-        // pruned branch must propagate its skip through the join so the Output
-        // still fires with the taken branch's value (regression for the join
-        // dead-end that stalled routing / classify-and-act / adversarial
-        // templates).
-        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-        let node = |id: &str, kind: NodeKind| WorkflowNode {
-            id: id.into(),
-            retry: None,
-            timeout_ms: None,
-            kind,
-        };
-        let edge = |from: &str, to: &str, branch: Option<&str>| WorkflowEdge {
-            from: from.into(),
-            to: to.into(),
-            branch: branch.map(str::to_string),
-        };
-
-        let build = || Workflow {
-            id: format!("test-diamond-{}", uuid::Uuid::new_v4().simple()),
-            name: "diamond".into(),
-            description: None,
-            nodes: vec![
-                node(
-                    "in",
-                    NodeKind::Input {
-                        key: Some("v".into()),
-                    },
-                ),
-                node(
-                    "c",
-                    NodeKind::Condition {
-                        expr: "input == \"yes\"".into(),
-                    },
-                ),
-                node(
-                    "yes",
-                    NodeKind::Transform {
-                        op: "template".into(),
-                        template: Some("YESPATH".into()),
-                    },
-                ),
-                node(
-                    "no",
-                    NodeKind::Transform {
-                        op: "template".into(),
-                        template: Some("NOPATH".into()),
-                    },
-                ),
-                node(
-                    "out",
-                    NodeKind::Output {
-                        key: Some("r".into()),
-                    },
-                ),
-            ],
-            edges: vec![
-                edge("in", "c", None),
-                edge("c", "yes", Some("true")),
-                edge("c", "no", Some("false")),
-                edge("yes", "out", None),
-                edge("no", "out", None),
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        // Taken branch = true.
-        let mut input = HashMap::new();
-        input.insert("v".to_string(), "yes".to_string());
-        let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
-        let run = run_workflow(&build(), input, run_id).await.expect("run ok");
-        assert_eq!(run.status, RunStatus::Completed);
-        assert_eq!(run.output.get("r").map(String::as_str), Some("YESPATH"));
-        assert_eq!(
-            run.nodes.get("no").map(|s| s.status),
-            Some(NodeStatus::Skipped)
-        );
-
-        // Taken branch = false: the join must still fire with the other value.
-        let mut input = HashMap::new();
-        input.insert("v".to_string(), "no".to_string());
-        let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
-        let run = run_workflow(&build(), input, run_id).await.expect("run ok");
-        assert_eq!(run.status, RunStatus::Completed);
-        assert_eq!(run.output.get("r").map(String::as_str), Some("NOPATH"));
-        assert_eq!(
-            run.nodes.get("yes").map(|s| s.status),
-            Some(NodeStatus::Skipped)
-        );
-    }
-
-    // ── Agent / Skill / Mcp / Plugin node kinds (Runnable node support) ────────
-
-    #[test]
-    fn new_node_kinds_round_trip_wire_format() {
-        use serde_json::json;
-
-        // The desktop canvas flattens `NodeKind` onto `WorkflowNode` via
-        // `#[serde(flatten)]` with a snake_case `type` tag — lock that shape so a
-        // saved workflow keeps loading and the palette/config stay in sync.
-        for (value, expected_type) in [
-            (
-                json!({ "type": "agent", "agent_id": "researcher", "task": "Summarise {{input}}" }),
-                "agent",
-            ),
-            (
-                json!({ "type": "skill", "skill": "pdf", "agent_id": null, "task": "{{input}}" }),
-                "skill",
-            ),
-            (
-                json!({ "type": "mcp", "server": "spider", "tool": "crawl", "args": { "url": "x" } }),
-                "mcp",
-            ),
-            (
-                json!({ "type": "plugin", "plugin_id": "com.example.app", "runnable_id": "r1", "args": {} }),
-                "plugin",
-            ),
-        ] {
-            let kind: NodeKind =
-                serde_json::from_value(value.clone()).expect("deserialize new node kind");
-            let back = serde_json::to_value(&kind).expect("serialize new node kind");
-            assert_eq!(
-                back.get("type").and_then(|v| v.as_str()),
-                Some(expected_type),
-                "type tag must round-trip for {expected_type}"
-            );
-        }
-    }
-
-    #[test]
-    fn agent_and_skill_default_task_to_input() {
-        use serde_json::json;
-
-        // `task` is optional; when absent the executor falls back to `{{input}}`.
-        let agent: NodeKind =
-            serde_json::from_value(json!({ "type": "agent", "agent_id": "a" })).unwrap();
-        match agent {
-            NodeKind::Agent { agent_id, task } => {
-                assert_eq!(agent_id, "a");
-                assert_eq!(task, None);
-            }
-            other => panic!("expected Agent, got {other:?}"),
-        }
-
-        let skill: NodeKind =
-            serde_json::from_value(json!({ "type": "skill", "skill": "s" })).unwrap();
-        match skill {
-            NodeKind::Skill {
-                skill,
-                agent_id,
-                task,
-            } => {
-                assert_eq!(skill, "s");
-                assert_eq!(agent_id, None);
-                assert_eq!(task, None);
-            }
-            other => panic!("expected Skill, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn run_plugin_reports_missing_plugin() {
-        // An id that is neither a built-in fixture nor an installed manifest must
-        // fail with a clear "not installed" error rather than panicking.
-        let err = run_plugin(
-            "com.ryu.definitely-not-installed",
-            "r1",
-            &serde_json::json!({}),
-            "input",
-            "idem",
-            "run",
-            "node",
-            0,
-            ExecutionMode::Live,
-        )
-        .await
-        .expect_err("unknown plugin must error");
-        assert!(
-            err.contains("not installed"),
-            "error should name the missing plugin: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn run_skill_reports_missing_skill() {
-        // A bogus skill id is never installed regardless of the skills dir, so the
-        // node must fail clearly instead of silently producing empty output.
-        let err = run_skill(
-            "ryu:definitely-not-a-real-skill/v0",
-            None,
-            "input",
-            "run",
-            "node",
-        )
-        .await
-        .expect_err("unknown skill must error");
-        assert!(
-            err.contains("not installed"),
-            "error should name the missing skill: {err}"
-        );
-    }
-
-    /// A record for [`compose_skill_prompt`]'s three cases, parameterised only on
-    /// the field the predicate reads.
-    fn skill_record(id: &str, instructions: &str) -> ryu_skills::SkillRecord {
-        ryu_skills::SkillRecord {
-            id: id.to_owned(),
-            name: "Deploy Helper".to_owned(),
-            description: Some("ships things".to_owned()),
-            instructions: instructions.to_owned(),
-            allowed_tools: Vec::new(),
-            enabled: true,
-            always_on: false,
-        }
-    }
-
-    /// The regression this pins: a registered-but-body-less skill used to compose
-    /// `"## Skill: Deploy Helper\n\n\n<task>"` and the node reported SUCCESS, so the
-    /// run continued and downstream nodes consumed output produced without the
-    /// instructions the author picked the node for.
-    ///
-    /// Both the plugin-contributed shape (`register_app_skill` writes
-    /// `instructions: String::new()`) and the disk shape (a front-matter-only
-    /// `SKILL.md`, whose body `parse_skill_md` leaves empty — whitespace-only after
-    /// the delimiter) land here, which is why the assertion covers both spellings of
-    /// "no body" rather than just the empty string.
-    #[test]
-    fn a_body_less_skill_fails_the_node_instead_of_running_an_empty_prompt() {
-        for empty in ["", "   \n\n\t"] {
-            let err = compose_skill_prompt(
-                "app__deploy",
-                Some(skill_record("app__deploy", empty)),
-                "ship it",
-            )
-            .expect_err("a body-less skill must fail the node");
-            assert!(
-                err.contains("app__deploy") && err.contains("no instructions installed"),
-                "the failure must name the skill and the actual cause: {err}"
-            );
-            // Distinguishable from the missing-skill arm on purpose: the two need
-            // different fixes, and this one is IN the user's library.
-            assert!(
-                !err.contains("is not installed"),
-                "must not be reported as a missing skill: {err}"
-            );
-        }
-    }
-
-    /// The other two arms, so the guard cannot be "fixed" by failing everything.
-    #[test]
-    fn compose_skill_prompt_runs_a_real_body_and_names_a_missing_skill() {
-        let composed = compose_skill_prompt(
-            "deploy",
-            Some(skill_record("deploy", "Step 1. Check CI.")),
-            "ship it",
-        )
-        .expect("a skill with a body must compose");
-        // The `## Skill: <name>` framing is shared with the chat/ACP injectors —
-        // a skill must read the same whether injected or driven as a node.
-        assert_eq!(
-            composed,
-            "## Skill: Deploy Helper\nStep 1. Check CI.\n\nship it"
-        );
-
-        let err = compose_skill_prompt("nope", None, "ship it")
-            .expect_err("an absent record must fail the node");
-        assert!(err.contains("'nope' is not installed"), "{err}");
-    }
-}
+#[path = "executor_tests.rs"]
+mod tests;

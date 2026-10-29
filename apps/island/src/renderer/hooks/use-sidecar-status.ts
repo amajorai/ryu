@@ -35,12 +35,7 @@ const EMPTY: SidecarSnapshot = {
  * and `recording` stay false (we just don't know Shadow's capture state, and we
  * are not allowed to ask). Exposes `startShadow` and a manual `refresh`.
  */
-export function useSidecarStatus(contextReadAllowed: boolean): {
-	refresh: () => Promise<void>;
-	snapshot: SidecarSnapshot;
-	startShadow: () => Promise<void>;
-	starting: boolean;
-} {
+export function useSidecarStatus(contextReadAllowed: boolean) {
 	const [state, setState] = useState({
 		allowed: contextReadAllowed,
 		snapshot: EMPTY,

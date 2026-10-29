@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
 	bindWorkflowConnectTrigger,
 	fetchWorkflowConnectBindings,
+	subscribeTrigger,
 } from "./composio-triggers.ts";
 
 const wire = {
@@ -82,4 +83,38 @@ test("binding refuses malformed selectors before I/O and mismatched confirmation
 			"00000000-0000-4000-8000-000000000001"
 		)
 	).rejects.toThrow("did not confirm");
+});
+
+test("own-account triggers send own_account and read it back", async () => {
+	const bodies: unknown[] = [];
+	const transport = {
+		url: "https://node.example.test",
+		token: "fixture",
+		fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+			const sent = new Request(input, init);
+			const body = (await sent.json()) as Record<string, unknown>;
+			bodies.push(body);
+			return Response.json({
+				subscription: {
+					...wire,
+					agent_id: "agent-a",
+					target_kind: "agent",
+					workflow_id: null,
+					own_account: body.own_account === true,
+				},
+			});
+		},
+	};
+	const input = {
+		agentId: "agent-a",
+		connectedAccountId: "own-a",
+		toolkit: "gmail",
+		triggerSlug: "GMAIL_EVENT",
+	};
+	const own = await subscribeTrigger(transport, { ...input, ownAccount: true });
+	const yours = await subscribeTrigger(transport, input);
+	expect(bodies[0]).toMatchObject({ own_account: true });
+	expect(bodies[1]).not.toHaveProperty("own_account");
+	expect(own.ownAccount).toBe(true);
+	expect(yours.ownAccount).toBe(false);
 });

@@ -1,12 +1,20 @@
 "use client";
 
+import type { CSSProperties } from "react";
+import css from "./action-swap.module.css";
+
+interface Inline1Style extends CSSProperties {
+	"--action-swap-1-transition"?: CSSProperties["transition"];
+	"--action-swap-1-width"?: CSSProperties["width"];
+}
+
 import {
 	EASE_OUT,
 	EASE_OUT_CSS,
 	SPRING_PRESS,
 	SPRING_SWAP,
-} from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	AnimatePresence,
 	type HTMLMotionProps,
@@ -15,6 +23,7 @@ import {
 	type Variants,
 } from "motion/react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { isNativeText } from "../../lib/native-primitive-observation.ts";
 
 export interface ActionSwapItem {
 	ariaLabel?: string;
@@ -89,7 +98,7 @@ const CASCADE_LETTER_VARIANTS: Variants = {
 	}),
 };
 
-const TEXT_VARIANTS: Record<CoreAnimation, Variants> = {
+const TEXT_VARIANTS = {
 	blur: {
 		initial: { opacity: 0, scale: 0.94, filter: SWAP_BLUR },
 		animate: {
@@ -120,9 +129,9 @@ const TEXT_VARIANTS: Record<CoreAnimation, Variants> = {
 			transition: ROLL_EXIT_TRANSITION,
 		},
 	},
-};
+} satisfies Record<CoreAnimation, Variants>;
 
-const ICON_VARIANTS: Record<CoreAnimation, Variants> = {
+const ICON_VARIANTS = {
 	blur: {
 		initial: { opacity: 0, scale: 0.25, filter: SWAP_BLUR },
 		animate: {
@@ -153,22 +162,22 @@ const ICON_VARIANTS: Record<CoreAnimation, Variants> = {
 			transition: ROLL_EXIT_TRANSITION,
 		},
 	},
-};
+} satisfies Record<CoreAnimation, Variants>;
 
-const VARIANT_CLASS: Record<ActionSwapButtonVariant, string> = {
+const VARIANT_CLASS = {
 	primary: "bg-primary text-primary-foreground hover:bg-primary/90",
 	secondary: "border border-border bg-card text-foreground hover:border-border",
 	outline:
 		"border border-border bg-transparent text-foreground hover:bg-primary/5",
 	ghost: "text-muted-foreground hover:bg-primary/5 hover:text-foreground",
-};
+} satisfies Record<ActionSwapButtonVariant, string>;
 
-const SIZE_CLASS: Record<ActionSwapButtonSize, string> = {
+const SIZE_CLASS = {
 	sm: "h-8 gap-1.5 rounded-full px-3 text-xs",
 	md: "h-10 gap-2 rounded-full px-4 text-sm",
 	lg: "h-12 gap-2.5 rounded-full px-5 text-base",
 	icon: "h-10 w-10 rounded-full",
-};
+} satisfies Record<ActionSwapButtonSize, string>;
 
 export function ActionSwapText({
 	value,
@@ -192,21 +201,27 @@ export function ActionSwapText({
 
 	// Cascade needs a plain string to split into letters; non-string content
 	// and reduced motion fall back to the closest single-element animation.
-	const label = typeof children === "string" ? children : null;
+	const label = isNativeText(children) ? children : null;
 	const cascade = animation === "cascade" && label !== null && !reduce;
 	const coreAnimation: CoreAnimation =
 		animation === "cascade" ? "roll" : animation;
 
+	const inline1Style: Inline1Style = {
+		"--action-swap-1-width": width === undefined ? undefined : `${width}px`,
+		"--action-swap-1-transition": reduce
+			? undefined
+			: `width 220ms ${EASE_OUT_CSS}`,
+	};
 	return (
 		<span
-			className={cn(
-				"relative inline-block overflow-hidden whitespace-nowrap align-bottom",
-				className
-			)}
-			style={{
-				width,
-				transition: reduce ? undefined : `width 220ms ${EASE_OUT_CSS}`,
-			}}
+			className={[
+				css.inline1,
+				cn(
+					"relative inline-block overflow-hidden whitespace-nowrap align-bottom",
+					className
+				),
+			].join(" ")}
+			style={inline1Style}
 		>
 			<span
 				aria-hidden
@@ -232,7 +247,6 @@ export function ActionSwapText({
 								<motion.span
 									className="inline-block whitespace-pre will-change-[opacity,filter,transform]"
 									custom={i * CASCADE_STAGGER}
-									// biome-ignore lint/suspicious/noArrayIndexKey: position is the slot identity — the letter at a position is exactly what rolls.
 									key={i}
 									variants={CASCADE_LETTER_VARIANTS}
 								>
@@ -340,9 +354,7 @@ export function ActionSwapButton({
 
 	const accessibleLabel =
 		activeItem.ariaLabel ??
-		(iconOnly && typeof activeItem.label === "string"
-			? activeItem.label
-			: undefined);
+		(iconOnly && isNativeText(activeItem.label) ? activeItem.label : undefined);
 
 	return (
 		<motion.button

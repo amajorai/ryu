@@ -15,7 +15,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/clips",
   "name": "Clips",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Media & Voice",
   "description": "A local-first video capture and ingest surface with a bundled editor preview. The out-of-process ryu-clips sidecar owns Core→Shadow recording and URL ingest; transcript-led analysis and vertical rendering are not connected yet.",
@@ -56,7 +56,7 @@
       }
     }
   ],
-  "permission_grants": ["app:http"],
+  "permission_grants": ["app:http", "files:download"],
   "requires": {
     "apps": [
       {
@@ -156,19 +156,6 @@
         "order": 68
       }
     ],
-    "chat_widget_templates": [
-      {
-        "id": "clips.chat",
-        "title": "Clips widget",
-        "description": "Clips chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["clips widget"],
-        "examples": ["Show me a clips widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "hook_events": [
       {
         "id": "@ryu/clips#clip.started",
@@ -183,7 +170,7 @@
       {
         "id": "@ryu/clips#clip.ready",
         "title": "Clip ready",
-        "description": "Fires once a finished clip bundle exists — from BOTH paths that produce one: stopping a recording (POST /api/clips/{id}/stop) and completing an ingest of a watched URL or a local video file (POST /api/clips/ingest). `source` is how a consumer tells them apart; the bundle itself does not record which. Fires once per clip, alongside (not after) the auto-file into the Clips Space, so it still fires if that filing fails. `framesEndpoint` is the Core-served path, already rewritten off Shadow's internal one, so a consumer can fetch frames from it directly; the mp4 is at /api/clips/{id}/file.",
+        "description": "Fires once a finished clip bundle exists — from BOTH paths that produce one: stopping a recording (POST /api/clips/{id}/stop) and completing an ingest of a watched URL or a local video file (POST /api/clips/ingest). `source` is how a consumer tells them apart; the bundle itself does not record which. Fires once per clip. On hosts that support Space filing, that work is attempted separately; on standalone nodes, the clip response reports filing as unavailable. `framesEndpoint` is the Core-served path, already rewritten off Shadow's internal one, so a consumer can fetch frames from it directly; the mp4 is at /api/clips/{id}/file.",
         "payload_example": {
           "id": "clip_9f2c41a8c1f04e2f9d1e6b0a7c3d5e11",
           "title": "Demo walkthrough",

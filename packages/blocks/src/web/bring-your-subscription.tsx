@@ -1,5 +1,6 @@
 import { cn } from "@ryu/ui/lib/utils";
 import type { CSSProperties } from "react";
+import styles from "./bring-your-subscription.module.css";
 import { landingSurfaceCardXlClass } from "./landing-card-tones.ts";
 import { Reveal } from "./reveal.tsx";
 import { SectionHeading } from "./sections.tsx";
@@ -47,28 +48,21 @@ const PROVIDERS: Provider[] = [
 	},
 ];
 
-function maskStyle(logo: string): CSSProperties {
-	const url = `url(/logos/${logo}.svg)`;
-	return {
-		maskImage: url,
-		WebkitMaskImage: url,
-		maskRepeat: "no-repeat",
-		WebkitMaskRepeat: "no-repeat",
-		maskPosition: "center",
-		WebkitMaskPosition: "center",
-		maskSize: "contain",
-		WebkitMaskSize: "contain",
-	};
-}
-
 function ProviderCard({ provider }: { provider: Provider }) {
 	return (
 		<div className={cn(landingSurfaceCardXlClass, "flex h-full flex-col")}>
 			<div className="flex flex-col gap-3">
 				<span
 					aria-hidden="true"
-					className="size-6 shrink-0 bg-foreground/80"
-					style={maskStyle(provider.logo)}
+					className={cn(
+						"size-6 shrink-0 bg-foreground/80",
+						styles.providerMask
+					)}
+					style={
+						{
+							"--provider-mask": `url(/logos/${provider.logo}.svg)`,
+						} satisfies ProviderMaskStyle as ProviderMaskStyle
+					}
 				/>
 				<div className="flex items-start justify-between gap-3">
 					<span className="font-medium text-foreground text-lg">
@@ -77,8 +71,8 @@ function ProviderCard({ provider }: { provider: Provider }) {
 					<span
 						className={
 							provider.passthrough
-								? "shrink-0 rounded-full bg-foreground/10 px-2.5 py-1 font-medium text-[11px] text-foreground/70"
-								: "shrink-0 rounded-full bg-muted px-2.5 py-1 font-medium text-[11px] text-muted-foreground"
+								? "type-caption shrink-0 rounded-full bg-foreground/10 px-2.5 py-1 font-medium text-foreground/70"
+								: "type-caption shrink-0 rounded-full bg-muted px-2.5 py-1 font-medium text-muted-foreground"
 						}
 					>
 						{provider.tag}
@@ -119,7 +113,6 @@ export default function BringYourSubscription() {
 		<section className="container mx-auto px-4 py-16 md:py-24">
 			<div className="mx-auto max-w-6xl">
 				<SectionHeading
-					eyebrow="Your plan, your login, your bill"
 					subtitle="Keep Claude Code and Codex on the plan you already pay for."
 					title="Bring the subscription you already pay for"
 				/>
@@ -127,4 +120,8 @@ export default function BringYourSubscription() {
 			</div>
 		</section>
 	);
+}
+
+interface ProviderMaskStyle extends CSSProperties {
+	"--provider-mask": string;
 }

@@ -1,8 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
 const STORY_URL = "/credit-usage-charts-proof.html";
-const PROOF_PATH =
-	"/Users/jiawei/Documents/Code/ryu/apps/desktop/artifacts/usage-subscription-dashboard-proof.png";
 
 interface RuntimeIssues {
 	consoleErrors: string[];
@@ -179,5 +177,8 @@ test("keeps totals stable across controls, empties, and recovery", async ({
 		"provider/model filters"
 	);
 	expectCleanRuntime(issues);
-	await page.screenshot({ fullPage: true, path: PROOF_PATH });
+	await page.screenshot({
+		fullPage: true,
+		path: test.info().outputPath("usage-subscription-dashboard-proof.png"),
+	});
 });

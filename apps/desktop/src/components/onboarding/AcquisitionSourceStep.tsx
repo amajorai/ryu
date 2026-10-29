@@ -1,13 +1,13 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardFooter,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
-import { Label } from "@ryu/ui/components/label";
-import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group";
+} from "@ryu/ui/components/card.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group.tsx";
 import { useState } from "react";
 import {
 	ONBOARDING_SOURCES,
@@ -15,7 +15,7 @@ import {
 } from "@/src/lib/api/onboarding-activation.ts";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
-const SOURCE_LABELS: Readonly<Record<OnboardingSource, string>> = {
+const SOURCE_LABELS = {
 	community: "A community or event",
 	friend: "A friend or colleague",
 	newsletter: "A newsletter",
@@ -25,16 +25,18 @@ const SOURCE_LABELS: Readonly<Record<OnboardingSource, string>> = {
 	social: "Social media",
 	work: "My workplace",
 	youtube: "YouTube",
-};
+} satisfies Readonly<Record<OnboardingSource, string>>;
 
 export function AcquisitionSourceStep({
 	busy = false,
 	error,
 	onContinue,
+	onSkip,
 }: {
 	busy?: boolean;
 	error?: string | null;
 	onContinue: (source: OnboardingSource) => void;
+	onSkip: () => void;
 }) {
 	const [source, setSource] = useState<OnboardingSource | null>(null);
 
@@ -43,19 +45,23 @@ export function AcquisitionSourceStep({
 			subtitle="This helps us understand how people find Ryu."
 			title="Where did you hear about us?"
 		>
-			<Card className="w-full max-w-xl border border-border/60">
+			<Card
+				appearance="onboarding"
+				borderTone="subtle"
+				className="w-full max-w-xl"
+			>
 				<CardHeader>
 					<CardTitle>One quick question</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<RadioGroup
 						aria-label="Where did you hear about us?"
-						onValueChange={(value: unknown) => {
-							if (
-								typeof value === "string" &&
-								(ONBOARDING_SOURCES as readonly string[]).includes(value)
-							) {
-								setSource(value as OnboardingSource);
+						onValueChange={(value) => {
+							const selected = ONBOARDING_SOURCES.find(
+								(source) => source === value
+							);
+							if (selected) {
+								setSource(selected);
 							}
 						}}
 						value={source ?? ""}
@@ -65,7 +71,7 @@ export function AcquisitionSourceStep({
 							return (
 								<div className="flex items-center gap-3" key={value}>
 									<RadioGroupItem id={id} value={value} />
-									<Label className="font-normal text-sm" htmlFor={id}>
+									<Label htmlFor={id} typography="field-choice">
 										{SOURCE_LABELS[value]}
 									</Label>
 								</div>
@@ -78,7 +84,10 @@ export function AcquisitionSourceStep({
 						</p>
 					) : null}
 				</CardContent>
-				<CardFooter className="justify-end border-t">
+				<CardFooter appearance="onboarding-step" className="justify-between">
+					<Button disabled={busy} onClick={onSkip} variant="ghost">
+						Skip for now
+					</Button>
 					<Button
 						disabled={busy || source === null}
 						loading={busy}

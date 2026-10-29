@@ -3,6 +3,49 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { Logo } from "./logo.tsx";
 
+describe("Logo trace variant", () => {
+	test("keeps CSS sizing and the status label stable while tracing", () => {
+		const html = renderToStaticMarkup(
+			<Logo
+				ariaLabel="Loading workspace"
+				size="min(20vw, 64px)"
+				variant="trace"
+			/>
+		);
+		expect(html).toContain('role="status"');
+		expect(html).toContain('aria-label="Loading workspace"');
+		expect(html).toContain('aria-busy="true"');
+		expect(html).toContain('data-logo-trace-phase="loop"');
+		expect(html).toContain('stroke-dasharray="0.16 0.84"');
+		expect(html).toContain("min(20vw, 64px)");
+		expect(html).not.toContain("NaN");
+	});
+
+	test("renders the filled mark immediately when animation is disabled", () => {
+		const html = renderToStaticMarkup(
+			<Logo animated={false} variant="trace" />
+		);
+		expect(html).toContain('data-logo-trace-phase="done"');
+		expect(html).toContain('aria-busy="false"');
+		expect(html.match(/<ellipse /g)).toHaveLength(2);
+		expect(html).toContain('mask="url(#');
+	});
+
+	test("keeps masks independent and supports hiding eye cutouts", () => {
+		const html = renderToStaticMarkup(
+			<>
+				<Logo variant="trace" />
+				<Logo showEyes={false} variant="trace" />
+			</>
+		);
+		const ids = [...html.matchAll(/<mask[^>]*id="([^"]+)"/g)].map(
+			(match) => match[1]
+		);
+		expect(new Set(ids).size).toBe(2);
+		expect(html.match(/<ellipse /g)).toHaveLength(2);
+	});
+});
+
 describe("Logo outline-muted variant", () => {
 	test("renders larger muted one-pixel outlines for the body and eyes", () => {
 		const html = renderToStaticMarkup(
@@ -88,9 +131,9 @@ describe("Logo dead expression", () => {
 describe("Logo 3d variant", () => {
 	test("server fallback preserves responsive sizing without invalid SVG coordinates", () => {
 		const html = renderToStaticMarkup(
-			<Logo className="brand-logo" size="min(64vw, 420px)" variant="3d" />
+			<Logo className="shrink-0" size="min(64vw, 420px)" variant="3d" />
 		);
-		expect(html).toContain("brand-logo");
+		expect(html).toContain("shrink-0");
 		expect(html).toContain("min(64vw, 420px)");
 		expect(html).toContain("<svg");
 		expect(html).not.toContain("NaN");
@@ -106,4 +149,22 @@ test("default logo keeps its shared palette when one color is overridden", () =>
 	expect(html).toContain("--c2:oklch(70% 0.20 264)");
 	expect(html).toContain("--c3:oklch(78% 0.15 230)");
 	expect(html).toContain("--bg:oklch(95% 0.02 264)");
+});
+
+describe("Logo inherited tone", () => {
+	test("preserves the former inherited color and static eye markup", () => {
+		const former = renderToStaticMarkup(
+			<Logo
+				animated={false}
+				className="text-current"
+				size="34px"
+				variant="eyes"
+			/>
+		);
+		const semantic = renderToStaticMarkup(
+			<Logo animated={false} size="34px" tone="inherit" variant="eyes" />
+		);
+		expect(semantic).toBe(former);
+		expect(semantic).not.toContain("tone=");
+	});
 });

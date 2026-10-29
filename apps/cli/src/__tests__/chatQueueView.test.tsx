@@ -1,13 +1,12 @@
 /* @jsxImportSource @opentui/react */
 
 import { afterEach, expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
 import { act, type ReactNode, useState } from "react";
-
 import { ThemeProvider } from "@/components/ui/theme-provider.tsx";
 import { ChatQueueBar } from "../components/ChatQueueBar.tsx";
 import { ChatQueueOverlay } from "../components/ChatQueueOverlay.tsx";
 import { ryuTheme } from "../ui/theme.ts";
+import { testRender } from "./cli-test-render.ts";
 
 let testSetup: Awaited<ReturnType<typeof testRender>> | null = null;
 

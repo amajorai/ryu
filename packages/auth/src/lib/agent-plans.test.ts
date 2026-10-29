@@ -8,8 +8,8 @@ import {
 	hostedAgentMonthlyPriceMicroUsd,
 	hostedAgentPackPriceUsd,
 	hostedAgentPlanAllowsOrganization,
-	PRO_FOUNDING_TRIAL,
 	quoteHostedAgentPlan,
+	TEAMS_FOUNDING_TRIAL,
 } from "./agent-plans.ts";
 
 const usd = (value: number): number => value * 1_000_000;
@@ -53,7 +53,7 @@ describe("hosted agent plans", () => {
 
 	it("keeps the private founding voucher on the real five-agent Pro contract", () => {
 		expect(HOSTED_AGENT_PRICING_VERSION).toBe(5);
-		expect(PRO_FOUNDING_TRIAL).toMatchObject({
+		expect(TEAMS_FOUNDING_TRIAL).toMatchObject({
 			discountBasisPoints: 8000,
 			durationMonths: 3,
 			includedAgents: 5,

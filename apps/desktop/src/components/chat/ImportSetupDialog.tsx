@@ -3,8 +3,9 @@
 // Import agent *setup* from a scanned local folder into Ryu — the setup-side
 // companion to `ImportThreadsDialog` (which imports conversations). Point at a
 // folder (a project directory, or an agent config root like ~/.claude,
-// ~/.cursor, ~/.codex), scan it, pick what to bring over (instructions, skills,
-// MCP servers, plugins, agents, slash commands, and Claude project memories),
+// ~/.cursor, ~/.codex, ~/.openclaw, ~/.hermes), scan it, pick what to bring over
+// (instructions, skills, MCP servers, plugins, agents, slash commands, and
+// memories),
 // and import the selection into
 // Ryu's own stores.
 //
@@ -17,9 +18,10 @@ import {
 	RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -27,9 +29,9 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { ScrollArea } from "@ryu/ui/components/scroll-area";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/dialog.tsx";
+import { ScrollArea } from "@ryu/ui/components/scroll-area.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -48,6 +50,8 @@ const AGENT_CONFIG_ROOTS: { key: string; label: string }[] = [
 	{ key: ".claude", label: "Claude Code" },
 	{ key: ".cursor", label: "Cursor" },
 	{ key: ".codex", label: "Codex" },
+	{ key: ".openclaw", label: "OpenClaw" },
+	{ key: ".hermes", label: "Hermes" },
 ];
 
 const PATH_SEP = /[\\/]/;
@@ -64,6 +68,7 @@ export function ImportSetupDialog({
 	/** Called after an import that registered at least one project folder. */
 	onImported?: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const addProjectFolder = useWorkspaceStore((s) => s.addProjectFolder);
 	const [browseOpen, setBrowseOpen] = useState(false);
 	const [folder, setFolder] = useState<string | null>(null);
@@ -222,8 +227,9 @@ export function ImportSetupDialog({
 					<DialogTitle>Import agent setup</DialogTitle>
 					<DialogDescription>
 						Scan a folder and bring its agent setup into Ryu — instructions,
-						skills, MCP servers, plugins, agents, slash commands, and Claude
-						project memories. Your files are never modified.
+						skills, MCP servers, plugins, agents, slash commands, and memories
+						from Claude Code, Codex, Cursor, OpenClaw, Hermes, Muse, Mastra, or
+						LangChain. Your files are never modified.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -314,7 +320,10 @@ export function ImportSetupDialog({
 									{allSelected ? "Deselect all" : "Select all"}
 								</button>
 								<span className="text-muted-foreground text-xs tabular-nums">
-									{selected.size} of {items.length} selected
+									{tl("{selectedCount} of {totalCount} selected", {
+										selectedCount: String(selected.size),
+										totalCount: String(items.length),
+									})}
 								</span>
 							</div>
 						)}
@@ -361,7 +370,10 @@ export function ImportSetupDialog({
 																tabIndex={-1}
 															/>
 															<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-																<span className="truncate font-medium text-foreground text-sm">
+																<span
+																	className="truncate font-medium text-foreground text-sm"
+																	title={item.title}
+																>
 																	{item.title}
 																</span>
 																{item.detail && (
@@ -395,9 +407,16 @@ export function ImportSetupDialog({
 										className="size-4 shrink-0"
 										icon={Download01Icon}
 									/>
-									Imported {importedCount}, skipped{" "}
-									{outcomes.length - importedCount - failedCount}, failed{" "}
-									{failedCount}
+									{tl(
+										"Imported {importedCount}, skipped {skippedCount}, failed {failedCount}",
+										{
+											importedCount: String(importedCount),
+											skippedCount: String(
+												outcomes.length - importedCount - failedCount
+											),
+											failedCount: String(failedCount),
+										}
+									)}
 								</p>
 								{outcomes
 									.filter((o) => o.status === "failed" && o.detail)
@@ -427,7 +446,11 @@ export function ImportSetupDialog({
 						loading={importing}
 						onClick={handleImport}
 					>
-						{selected.size > 0 ? `Import ${selected.size}` : "Import"}
+						{selected.size > 0
+							? tl("Import {selectedCount}", {
+									selectedCount: String(selected.size),
+								})
+							: "Import"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

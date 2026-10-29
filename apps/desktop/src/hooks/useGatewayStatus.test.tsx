@@ -2,21 +2,21 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import type { ApiTarget } from "@/src/lib/api/client.ts";
+
 import type { GatewayStatus } from "@/src/lib/api/gateway.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-let node = {
+let node: ApiTarget = {
 	url: "https://first.example",
-	token: null as string | null,
-	userJwt: null as string | null,
+	token: null,
+	userJwt: null,
 };
-const nodeState = { getActiveNode: () => node };
-mock.module("@/src/store/useNodeStore.ts", () => ({
-	useNodeStore: <T,>(select: (state: typeof nodeState) => T) =>
-		select(nodeState),
+mock.module("@/src/hooks/useActiveNode.ts", () => ({
+	useActiveNode: () => node,
 }));
 const calls: {
 	signal: AbortSignal;

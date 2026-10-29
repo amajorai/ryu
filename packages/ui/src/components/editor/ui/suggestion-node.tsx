@@ -7,7 +7,6 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva } from "class-variance-authority";
 import { CornerDownLeftIcon } from "lucide-react";
 import type {
-	AnyPluginConfig,
 	TElement,
 	TSuggestionData,
 	TSuggestionText,
@@ -17,7 +16,7 @@ import { KEYS } from "platejs";
 import type {
 	PlateEditor,
 	PlateLeafProps,
-	RenderNodeWrapper,
+	PlatePluginConfig,
 } from "platejs/react";
 import { PlateLeaf, useEditorPlugin, usePluginOption } from "platejs/react";
 import {
@@ -28,7 +27,9 @@ import {
 	type ReactElement,
 	type ReactNode,
 } from "react";
+import { isNativeText } from "../../../lib/native-primitive-observation.ts";
 
+// SAFETY: This native plugin object is used only as the registered suggestion key for Plate hook lookups. suggestion-kit owns the matching activeId/hoverId options; the installed hooks resolve editor.plugins by that key rather than reading those options from this SDK token. This does not assert that the raw SDK plugin itself carries the custom options.
 const suggestionPlugin = SuggestionPlugin as WithRequiredKey<SuggestionConfig>;
 
 export const suggestionVariants = cva(
@@ -153,7 +154,7 @@ function SuggestionLineBreakElementAnchor({
 	children: ReactElement<any>;
 	className?: string;
 }) {
-	if (!isValidElement(children)) {
+	if (!isValidElement<typeof children.props>(children)) {
 		return children;
 	}
 	const badge = (
@@ -171,31 +172,32 @@ function SuggestionLineBreakElementAnchor({
 	);
 
 	if (children.type === "ol" || children.type === "ul") {
-		const childNodes = Children.toArray(
-			(children.props as { children?: ReactNode }).children
-		);
+		const childNodes = Children.toArray(children.props.children);
 		const lastIndex = childNodes.length - 1;
 		const lastChild = childNodes[lastIndex];
 
-		if (!isValidElement(lastChild) || lastChild.type !== "li") {
+		if (
+			!isValidElement<ComponentProps<"li">>(lastChild) ||
+			lastChild.type !== "li"
+		) {
 			return children;
 		}
 
-		const nextLastChild = cloneElement(lastChild as ReactElement<any>, {
+		const nextLastChild = cloneElement(lastChild, {
 			children: (
 				<>
-					{(lastChild.props as { children?: ReactNode }).children}
+					{lastChild.props.children}
 					{badge}
 				</>
 			),
 		});
 
-		return cloneElement(children as ReactElement<any>, {
+		return cloneElement(children, {
 			children: [...childNodes.slice(0, lastIndex), nextLastChild],
 		});
 	}
 
-	if (typeof children.type === "string") {
+	if (isNativeText(children.type)) {
 		return (
 			<>
 				{children}
@@ -204,7 +206,7 @@ function SuggestionLineBreakElementAnchor({
 		);
 	}
 
-	return cloneElement(children as ReactElement<any>, {
+	return cloneElement(children, {
 		lineBreakBadge: badge,
 	});
 }
@@ -249,15 +251,22 @@ export function SuggestionLeaf(props: PlateLeafProps<TSuggestionText>) {
 		</PlateLeaf>
 	);
 }
-export const SuggestionLineBreak: RenderNodeWrapper<AnyPluginConfig> = ({
-	api,
-	element,
-}) => {
+type SuggestionRenderConfig = PlatePluginConfig<
+	SuggestionConfig["key"],
+	SuggestionConfig["options"],
+	SuggestionConfig["api"],
+	SuggestionConfig["transforms"],
+	SuggestionConfig["selectors"]
+>;
+
+export const SuggestionLineBreak: NonNullable<
+	NonNullable<SuggestionRenderConfig["render"]>["belowNodes"]
+> = ({ api, element }) => {
 	if (!api.suggestion.isBlockSuggestion(element)) {
 		return;
 	}
 
-	const suggestionData = element.suggestion as TSuggestionData;
+	const suggestionData = element.suggestion;
 
 	return function Component({ children }) {
 		return (
@@ -305,7 +314,7 @@ export function SuggestionLineBreakContent({
 	return (
 		<>
 			{isLineBreak ? (
-				isValidElement(children) && typeof children.type !== "string" ? (
+				isValidElement(children) && !isNativeText(children.type) ? (
 					<SuggestionLineBreakElementAnchor
 						badgeProps={{
 							onClick: (event) => {

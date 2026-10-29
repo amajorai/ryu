@@ -1,4 +1,7 @@
+import { type ViewSourceRow, viewSourceRowSchema } from "@ryu/app-host/views";
 import { useConfirmDialog } from "@ryu/ui/hooks/use-confirm-dialog.tsx";
+import { z } from "zod";
+import { pluginStoreSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 // apps/desktop/src/components/store/ContributedStoreSection.tsx
 //
 // The generic renderer for an app-registered Store section
@@ -44,7 +47,7 @@ import {
 	storeItemHaystack,
 	type ViewAction,
 } from "@ryu/app-host/views";
-import { InstallProgressButton } from "@ryu/blocks/desktop/install-button";
+import { InstallProgressButton } from "@ryu/blocks/desktop/install-button.tsx";
 import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
 import StoreCatalogLayout, {
 	StoreCardGrid,
@@ -60,8 +63,8 @@ import {
 	ListingStatStrip,
 } from "@ryu/marketplace/catalog/detail/listing-detail-shell";
 import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -69,10 +72,10 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Icon } from "@ryu/ui/components/icon";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/empty.tsx";
+import { Icon } from "@ryu/ui/components/icon.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
@@ -123,7 +126,10 @@ function AppOffState({
 			if (!tab.app_installed) {
 				await install(tab.plugin);
 			}
-			await toggle(tab.plugin, true);
+			const outcome = await toggle(tab.plugin, true);
+			if (!outcome.success) {
+				throw new Error(outcome.error);
+			}
 			toast.success(`${tab.title} is ready`);
 			onEnabled();
 		} catch (e) {
@@ -136,7 +142,7 @@ function AppOffState({
 	};
 
 	return (
-		<Empty className="h-full p-6">
+		<Empty className="h-full" inset="dense">
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
 					<TabIcon icon={tab.icon} />
@@ -204,7 +210,7 @@ function DetailPanel({
 			</Empty>
 		);
 	}
-	const installSpec = tab.spec?.install;
+	const installSpec = pluginStoreSpec(tab)?.install;
 	const installable = installSpec != null;
 	const sourceHref = safeHttpUrl(item.sourceUrl);
 	return (
@@ -222,7 +228,7 @@ function DetailPanel({
 					{/* Declared per-item extras (Preview, Duplicate, …) fire against the
 					    SELECTED row, so they live here rather than on the card — a
 					    card-level slot would have to pick a row before the user did. */}
-					{tab.spec?.itemActions?.map((action) => (
+					{pluginStoreSpec(tab)?.itemActions?.map((action) => (
 						<Button
 							key={action.id}
 							onClick={() => runAction(action, item)}
@@ -261,11 +267,7 @@ function DetailPanel({
 					<ListingAsideCard title="Tags">
 						<div className="flex flex-wrap gap-1">
 							{item.tags.map((tag) => (
-								<Badge
-									className="font-normal text-xs"
-									key={tag}
-									variant="outline"
-								>
+								<Badge key={tag} typography="normal" variant="outline">
 									{tag}
 								</Badge>
 							))}
@@ -326,7 +328,7 @@ function ContributedDetailGraph({
 	tab: PluginStoreTab;
 }) {
 	const node = useActiveNode();
-	const spec = tab.spec;
+	const spec = useMemo(() => pluginStoreSpec(tab), [tab]);
 	const source = spec?.detail?.source;
 	const sourceRequest =
 		source?.http.method === "GET"
@@ -360,7 +362,7 @@ function ContributedDetailGraph({
 			if (!resp.ok) {
 				throw new Error(`${rendered.path} failed: ${resp.status}`);
 			}
-			return (await resp.json()) as unknown;
+			return z.json().parse(await resp.json());
 		},
 	});
 
@@ -453,14 +455,24 @@ function CardAction({
 /** Flatten an install response into `{{result.<key>}}` template values. Only scalar
  *  leaves are exposed — a nested object in a route template would stringify to JSON
  *  and produce a broken path. */
-function resultValues(payload: unknown): Record<string, unknown> {
-	if (typeof payload !== "object" || payload === null) {
+const resultScalarSchema = z.union([
+	z.string(),
+	z.number(),
+	z.boolean(),
+	z.null(),
+]);
+function resultValues(
+	payload: Parameters<typeof viewSourceRowSchema.safeParse>[0]
+): ViewSourceRow {
+	const parsed = viewSourceRowSchema.safeParse(payload);
+	if (!parsed.success) {
 		return {};
 	}
-	const out: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(payload)) {
-		if (typeof value !== "object" || value === null) {
-			out[`result.${key}`] = value;
+	const out: ViewSourceRow = {};
+	for (const [key, value] of Object.entries(parsed.data)) {
+		const scalar = resultScalarSchema.safeParse(value);
+		if (scalar.success) {
+			out[`result.${key}`] = scalar.data;
 		}
 	}
 	return out;
@@ -489,7 +501,7 @@ export default function ContributedStoreSection({
 	const node = useActiveNode();
 	const queryClient = useQueryClient();
 	const openTab = useTabSelector((state) => state.openTab);
-	const spec = tab.spec;
+	const spec = useMemo(() => pluginStoreSpec(tab), [tab]);
 	const catalog = useContributedStoreCatalog(tab, tab.app_enabled);
 
 	const groups = useMemo(() => {
@@ -643,7 +655,7 @@ export default function ContributedStoreSection({
 
 	if (!spec?.source) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				{confirmationDialog}
 
 				<EmptyHeader>
@@ -687,7 +699,7 @@ export default function ContributedStoreSection({
 								}
 							}}
 							runAction={(action, item) => {
-								runAction(action, item).catch((e: unknown) => {
+								runAction(action, item).catch((e) => {
 									toast.error(`${action.label} failed`, {
 										description: e instanceof Error ? e.message : String(e),
 									});
@@ -761,15 +773,11 @@ function CatalogList({
 	total: number;
 }) {
 	if (loading && total === 0) {
-		return (
-			<div className="flex items-center justify-center p-8 text-muted-foreground">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows inset="catalog" />;
 	}
 	if (error && total === 0) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<TabIcon icon={tab.icon} />
@@ -787,7 +795,7 @@ function CatalogList({
 	}
 	if (total === 0) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<TabIcon icon={tab.icon} />

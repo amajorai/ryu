@@ -1,0 +1,44 @@
+diff --git a/dist/introspect-6ew7sakf.mjs b/dist/introspect-6ew7sakf.mjs
+--- a/dist/introspect-6ew7sakf.mjs
++++ b/dist/introspect-6ew7sakf.mjs
+@@ -1206,7 +1206,7 @@ async function userInfoEndpoint(ctx, opts) {
+ 			url: getEndpointUrl(ctx, "/oauth2/userinfo"),
+ 			proofMaxAgeSeconds: opts.dpop?.proofMaxAgeSeconds,
+ 			signingAlgorithms: opts.dpop?.signingAlgorithms,
+-			replayStore: createDpopReplayStore(ctx.context.internalAdapter)
++			replayStore: createDpopReplayStoreOutlivingWindow(ctx.context.internalAdapter)
+ 		});
+ 	} catch (error) {
+ 		if (isDpopBindingError(error)) throw new APIError("UNAUTHORIZED", {
+@@ -1621,6 +1621,22 @@ async function resolveResourceGrantIssuance(ctx, opts, params) {
+ 		dpopBoundAccessTokensRequired: resourcePolicy.dpopBoundAccessTokensRequired
+ 	};
+ }
++/**
++* Ryu patch: keep each DPoP proof reservation 60 s past the proof's acceptance
++* window. `verifyDpopProof` accepts a proof while floor(now) - iat <= maxAge,
++* that is through iat + maxAge + 1 s, but reserves it only until iat + maxAge,
++* and every verification lookup deletes expired rows, so a proof accepted in
++* the last second of its window could be accepted again. The margin matches
++* `DPOP_RESERVATION_MARGIN_MS` in @ryu/auth `lib/oauth-dpop` and also covers
++* clock skew between instances.
++*/
++function createDpopReplayStoreOutlivingWindow(reservations) {
++	const store = createDpopReplayStore(reservations);
++	return { reserve: (reservation) => store.reserve({
++		...reservation,
++		expiresAt: new Date(reservation.expiresAt.getTime() + 6e4)
++	}) };
++}
+ function throwInvalidDpopProof(errorDescription) {
+ 	throw new APIError("BAD_REQUEST", {
+ 		error: "invalid_dpop_proof",
+@@ -1649,7 +1665,7 @@ async function resolveDpopTokenBinding(ctx, opts, params) {
+ 			expectedJkt,
+ 			proofMaxAgeSeconds: opts.dpop?.proofMaxAgeSeconds,
+ 			signingAlgorithms: opts.dpop?.signingAlgorithms,
+-			replayStore: createDpopReplayStore(ctx.context.internalAdapter)
++			replayStore: createDpopReplayStoreOutlivingWindow(ctx.context.internalAdapter)
+ 		})).jkt };
+ 	} catch (error) {
+ 		if (isDpopProofError(error)) throwInvalidDpopProof(error.message);

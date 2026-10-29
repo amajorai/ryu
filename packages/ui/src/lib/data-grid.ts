@@ -23,32 +23,73 @@ import {
 	ListChecksIcon,
 	ListIcon,
 	Presentation,
+	SigmaIcon,
 	TextInitialIcon,
 } from "lucide-react";
 import type * as React from "react";
+import { z } from "zod";
+
+import { getDisplayLocale } from "./timezone.ts";
+
+const cellTextSchema = z.string();
+const localDateInputSchema = z.union([z.instanceof(Date), cellTextSchema]);
+const popoverElementSchema = z.custom<Element>(
+	(value) => value instanceof Element
+);
+const fileCellSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	size: z.union([
+		z.number(),
+		z.nan(),
+		z.literal(Number.POSITIVE_INFINITY),
+		z.literal(Number.NEGATIVE_INFINITY),
+	]),
+	type: z.string(),
+	url: z.string().optional(),
+}) satisfies z.ZodType<FileCellData>;
+
+type CellRenderSource<TProps extends object> =
+	| ((props: TProps) => React.ReactNode)
+	| string
+	| undefined;
+function isCellText<TProps extends object>(
+	source: CellRenderSource<TProps>
+): source is string {
+	return cellTextSchema.safeParse(source).success;
+}
+
+/** Native TanStack column methods read by the pinning and border helpers. */
+export type GridColumnMetrics<TData> = Pick<
+	Column<TData>,
+	| "getIsPinned"
+	| "getIsFirstColumn"
+	| "getIsLastColumn"
+	| "getStart"
+	| "getAfter"
+	| "getSize"
+>;
+
+/** Persisted tag colors may include future keys; unresolved keys retain the neutral fallback. */
+interface SelectOptionPalette {
+	[color: string]: string;
+}
 
 const TRAILING_CR_REGEX = /\r$/;
-const UNSAFE_URL_PROTOCOL_REGEX = /^(javascript|data|vbscript|file):/i;
-
 export function flexRender<TProps extends object>(
-	Comp: ((props: TProps) => React.ReactNode) | string | undefined,
+	Comp: CellRenderSource<TProps>,
 	props: TProps
 ): React.ReactNode {
-	if (typeof Comp === "string") {
+	if (isCellText(Comp)) {
 		return Comp;
 	}
 	return Comp?.(props);
 }
 
-export function getIsFileCellData(item: unknown): item is FileCellData {
-	return (
-		!!item &&
-		typeof item === "object" &&
-		"id" in item &&
-		"name" in item &&
-		"size" in item &&
-		"type" in item
-	);
+export function getIsFileCellData(
+	item: Parameters<typeof fileCellSchema.safeParse>[0]
+): item is FileCellData {
+	return fileCellSchema.safeParse(item).success;
 }
 
 export function matchSelectOption(
@@ -81,35 +122,32 @@ export function parseCellKey(cellKey: string): Required<CellPosition> {
 }
 
 export function getRowHeightValue(rowHeight: RowHeightValue): number {
-	const rowHeightMap: Record<RowHeightValue, number> = {
+	const rowHeightMap = {
 		short: 36,
 		medium: 56,
 		tall: 76,
 		"extra-tall": 96,
-	};
+	} satisfies Record<RowHeightValue, number>;
 
 	return rowHeightMap[rowHeight];
 }
 
 export function getLineCount(rowHeight: RowHeightValue): number {
-	const lineCountMap: Record<RowHeightValue, number> = {
+	const lineCountMap = {
 		short: 1,
 		medium: 2,
 		tall: 3,
 		"extra-tall": 4,
-	};
+	} satisfies Record<RowHeightValue, number>;
 
 	return lineCountMap[rowHeight];
 }
 
 export function getColumnBorderVisibility<TData>(params: {
-	column: Column<TData>;
-	nextColumn?: Column<TData>;
+	column: GridColumnMetrics<TData>;
+	nextColumn?: GridColumnMetrics<TData>;
 	isLastColumn: boolean;
-}): {
-	showEndBorder: boolean;
-	showStartBorder: boolean;
-} {
+}) {
 	const { column, nextColumn, isLastColumn } = params;
 
 	const isPinned = column.getIsPinned();
@@ -133,11 +171,22 @@ export function getColumnBorderVisibility<TData>(params: {
 	};
 }
 
+/** Dynamic pin geometry is consumed by the data-grid's shared CSS. */
+export interface ColumnPinningStyle extends React.CSSProperties {
+	"--data-grid-pin-left"?: string;
+	"--data-grid-pin-opacity": number;
+	"--data-grid-pin-position": "sticky" | "relative";
+	"--data-grid-pin-right"?: string;
+	"--data-grid-pin-shadow"?: string;
+	"--data-grid-pin-width": string;
+	"--data-grid-pin-z-index"?: number;
+}
+
 export function getColumnPinningStyle<TData>(params: {
-	column: Column<TData>;
+	column: GridColumnMetrics<TData>;
 	withBorder?: boolean;
 	dir?: Direction;
-}): React.CSSProperties {
+}): ColumnPinningStyle {
 	const { column, dir = "ltr", withBorder = false } = params;
 
 	const isPinned = column.getIsPinned();
@@ -159,16 +208,16 @@ export function getColumnPinningStyle<TData>(params: {
 		withBorder,
 	});
 
-	return {
-		boxShadow,
-		left: isRtl ? rightPosition : leftPosition,
-		right: isRtl ? leftPosition : rightPosition,
-		opacity: isPinned ? 0.97 : 1,
-		position: isPinned ? "sticky" : "relative",
-		background: isPinned ? "var(--background)" : "var(--background)",
-		width: column.getSize(),
-		zIndex: isPinned ? 1 : undefined,
+	const style: ColumnPinningStyle = {
+		"--data-grid-pin-shadow": boxShadow,
+		"--data-grid-pin-left": isRtl ? rightPosition : leftPosition,
+		"--data-grid-pin-right": isRtl ? leftPosition : rightPosition,
+		"--data-grid-pin-opacity": isPinned ? 0.97 : 1,
+		"--data-grid-pin-position": isPinned ? "sticky" : "relative",
+		"--data-grid-pin-width": `${column.getSize()}px`,
+		"--data-grid-pin-z-index": isPinned ? 1 : undefined,
 	};
+	return style;
 }
 
 function getPinnedColumnBoxShadow({
@@ -207,12 +256,12 @@ export function getScrollDirection(
 		direction === "home" ||
 		direction === "end"
 	) {
-		return direction as "left" | "right" | "home" | "end";
+		return direction;
 	}
-	if (direction === "pageleft") {
+	if (direction === "pageleft" || direction === "ctrl+left") {
 		return "left";
 	}
-	if (direction === "pageright") {
+	if (direction === "pageright" || direction === "ctrl+right") {
 		return "right";
 	}
 	return undefined;
@@ -433,16 +482,19 @@ export function parseTsv(
 	return parsePlainTsv(text, fallbackColumnCount);
 }
 
-export function getIsInPopover(element: unknown): boolean {
-	if (!(element instanceof Element)) {
+export function getIsInPopover(
+	element: Parameters<typeof popoverElementSchema.safeParse>[0]
+): boolean {
+	const parsed = popoverElementSchema.safeParse(element);
+	if (!parsed.success) {
 		return false;
 	}
 
 	return (
-		element.closest("[data-grid-cell-editor]") !== null ||
-		element.closest("[data-grid-popover]") !== null ||
-		element.closest("[data-slot='dropdown-menu-content']") !== null ||
-		element.closest("[data-slot='popover-content']") !== null
+		parsed.data.closest("[data-grid-cell-editor]") !== null ||
+		parsed.data.closest("[data-grid-popover]") !== null ||
+		parsed.data.closest("[data-slot='dropdown-menu-content']") !== null ||
+		parsed.data.closest("[data-slot='popover-content']") !== null
 	);
 }
 
@@ -469,6 +521,8 @@ export function getColumnVariant(variant?: CellOpts["variant"]): {
 			return { label: "Date", icon: CalendarIcon };
 		case "file":
 			return { label: "File", icon: FileIcon };
+		case "formula":
+			return { label: "Formula", icon: SigmaIcon };
 		default:
 			return null;
 	}
@@ -479,7 +533,7 @@ export function getColumnVariant(variant?: CellOpts["variant"]): {
  * color name persisted on `CellSelectOption.color`; each maps to a badge class
  * string (light + dark). `getOptionColorClass` falls back to a neutral tag.
  */
-export const SELECT_OPTION_COLORS: Record<string, string> = {
+export const SELECT_OPTION_COLORS: SelectOptionPalette = {
 	gray: "bg-gray-100 text-gray-700 dark:bg-gray-500/20 dark:text-gray-200",
 	brown: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
 	orange:
@@ -505,9 +559,7 @@ export function getOptionColorClass(color?: string): string {
 	return SELECT_OPTION_COLORS[color] ?? "";
 }
 
-export function getEmptyCellValue(
-	variant: CellOpts["variant"] | undefined
-): unknown {
+export function getEmptyCellValue(variant: CellOpts["variant"] | undefined) {
 	if (variant === "multi-select" || variant === "file") {
 		return [];
 	}
@@ -526,30 +578,45 @@ export function getUrlHref(urlString: string): string {
 	}
 
 	const trimmed = urlString.trim();
-
-	// Reject dangerous protocols (extra safety, though our http:// prefix would neutralize them)
-	if (UNSAFE_URL_PROTOCOL_REGEX.test(trimmed)) {
+	const hasControlCharacter = Array.from(trimmed).some((character) => {
+		const codePoint = character.codePointAt(0) ?? 0;
+		return codePoint < 0x20 || codePoint === 0x7f;
+	});
+	if (hasControlCharacter || trimmed.includes("\\")) {
+		return "";
+	}
+	if (
+		(trimmed.startsWith("//") || /^[a-z][a-z\d+.-]*:/iu.test(trimmed)) &&
+		!/^https?:\/\//iu.test(trimmed)
+	) {
 		return "";
 	}
 
-	if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-		return trimmed;
+	const candidate = /^https?:\/\//iu.test(trimmed)
+		? trimmed
+		: `http://${trimmed}`;
+	try {
+		const parsed = new URL(candidate);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			return "";
+		}
+	} catch {
+		return "";
 	}
-
-	return `http://${trimmed}`;
+	return candidate;
 }
 
-export function parseLocalDate(dateStr: unknown): Date | null {
-	if (!dateStr) {
+export function parseLocalDate(
+	dateStr: Parameters<typeof localDateInputSchema.safeParse>[0]
+): Date | null {
+	const parsed = localDateInputSchema.safeParse(dateStr);
+	if (!parsed.success) {
 		return null;
 	}
-	if (dateStr instanceof Date) {
-		return dateStr;
+	if (parsed.data instanceof Date) {
+		return parsed.data;
 	}
-	if (typeof dateStr !== "string") {
-		return null;
-	}
-	const [year, month, day] = dateStr.split("-").map(Number);
+	const [year, month, day] = parsed.data.split("-").map(Number);
 	if (!(year && month && day)) {
 		return null;
 	}
@@ -572,15 +639,44 @@ export function formatDateToString(date: Date): string {
 	return `${year}-${month}-${day}`;
 }
 
-export function formatDateForDisplay(dateStr: unknown): string {
+const ISO_DATE_PREFIX = /^(\d{4}-\d{2}-\d{2})(?:$|T)/;
+
+/**
+ * Normalize pasted text to the local `YYYY-MM-DD` string a date column stores.
+ * `new Date("2024-03-05")` is UTC midnight (the previous day west of UTC), so
+ * date-only and ISO-timestamp input keep the calendar day as written; other
+ * formats fall back to `Date` parsing read in local time.
+ */
+export function parsePastedDate(text: string): string | null {
+	const trimmed = text.trim();
+	const isoDate = ISO_DATE_PREFIX.exec(trimmed)?.[1];
+	const local = parseLocalDate(isoDate ?? trimmed);
+	if (local) {
+		return formatDateToString(local);
+	}
+	if (isoDate) {
+		return null;
+	}
+	const date = new Date(trimmed);
+	return Number.isNaN(date.getTime()) ? null : formatDateToString(date);
+}
+
+export function formatDateForDisplay(
+	dateStr: Parameters<typeof parseLocalDate>[0]
+): string {
 	if (!dateStr) {
 		return "";
 	}
 	const date = parseLocalDate(dateStr);
 	if (!date) {
-		return typeof dateStr === "string" ? dateStr : "";
+		const parsed = cellTextSchema.safeParse(dateStr);
+		return parsed.success ? parsed.data : "";
 	}
-	return date.toLocaleDateString();
+	try {
+		return date.toLocaleDateString(getDisplayLocale());
+	} catch {
+		return date.toLocaleDateString();
+	}
 }
 
 export function formatFileSize(bytes: number): string {

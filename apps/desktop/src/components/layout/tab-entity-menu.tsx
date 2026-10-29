@@ -37,7 +37,7 @@ import {
 	ContextMenuSeparator,
 } from "@ryu/ui/components/context-menu.tsx";
 import { Icon } from "@ryu/ui/components/icon.tsx";
-import { toast } from "@ryu/ui/components/sileo";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useCallback, useMemo } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import type { Tab } from "@/src/contexts/TabsContext.tsx";

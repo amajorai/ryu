@@ -1,5 +1,10 @@
-import { toast } from "@ryu/ui/components/sileo";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import {
+	type DefaultError,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -62,7 +67,7 @@ export function useQuests(): UseQuestsResult {
 		listQuery.refetch().catch(() => undefined);
 	}, [listQuery]);
 
-	const onError = useCallback((error: unknown) => {
+	const onError = useCallback((error: DefaultError) => {
 		const message = error instanceof Error ? error.message : "request failed";
 		toast.error({ title: "Tasks", description: message });
 	}, []);

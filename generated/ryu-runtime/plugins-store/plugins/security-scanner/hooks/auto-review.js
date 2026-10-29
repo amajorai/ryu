@@ -1,4 +1,12 @@
-// Turn-hook body for security-scanner.auto-review.
+// Turn-hook body for `security-scanner.auto-review`, run in Core's plugin sandbox.
+// Injected globals: `ctx` (the turn context) and `host` (the capability bridge:
+// host.sideModel / …).
+//
+// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
+// (apps/core/src/plugin_host/mod.rs `build_hook_program`) and it `return`s a hook
+// directive. That is why a top-level `return` is correct here, and why
+// plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
+//
 // This optional hook reviews only the last assistant answer and never edits it.
 
 const MAX_CODE_CHARS = 24000;
@@ -73,7 +81,7 @@ try {
 	if (text && !/^result:\s*clean\b/i.test(text) && !/^looks?\s+(secure|good|fine|safe)\b/i.test(text)) {
 		review = text;
 	}
-} catch (error) {
+} catch  {
 	host.log("security-scanner: automatic review failed");
 }
 

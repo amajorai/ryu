@@ -1,0 +1,4 @@
+[data-skill-relation-size] {
+	width: var(--skill-relation-size);
+	height: var(--skill-relation-size);
+}

@@ -8,6 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { apiUrl, requestHeaders, toTarget } from "@/src/lib/api/client.ts";
+import { pluginStoreSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
+import { pluginValueSchema } from "@/src/lib/api/plugin-wire-values.ts";
 import type { PluginStoreTab } from "@/src/lib/api/plugins.ts";
 
 export interface ContributedStoreCatalogData {
@@ -21,7 +23,7 @@ export function contributedStoreCatalogQuery(
 	target: ReturnType<typeof toTarget>,
 	enabled: boolean
 ) {
-	const spec = tab.spec;
+	const spec = pluginStoreSpec(tab);
 	const source = spec?.source;
 	const sourceRequest = contributionSourceRequest(tab, source);
 	return {
@@ -46,7 +48,7 @@ export function contributedStoreCatalogQuery(
 			if (!response.ok) {
 				throw new Error(`${sourceRequest.path} failed: ${response.status}`);
 			}
-			const payload = (await response.json()) as unknown;
+			const payload = pluginValueSchema.parse(await response.json());
 			return {
 				items: storeItemsFromResponse(spec, payload),
 				total: storeTotalFromResponse(spec, payload),

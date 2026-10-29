@@ -1,4 +1,5 @@
 import { useConfirmDialog } from "@ryu/ui/hooks/use-confirm-dialog.tsx";
+import { z } from "zod";
 // The desktop surface for a plugin-contributed **declarative view** (the Raycast
 // tier). A plugin declares `contributes.views[]` in its manifest; Core serves them
 // via `GET /api/plugins/contributions` tagged with the owning plugin id, and this
@@ -15,27 +16,25 @@ import { useConfirmDialog } from "@ryu/ui/hooks/use-confirm-dialog.tsx";
 // Either way, a successful action re-fetches the view's `source` and invalidates
 // the plugin-contributions query so the rendered view reflects the new state.
 
-import type {
-	ViewAction,
-	ViewActionContext,
-	ViewSpec,
-} from "@ryu/app-host/views";
+import type { ViewAction, ViewActionContext } from "@ryu/app-host/views";
 import {
 	contributionSourceRequest,
 	DECLARATIVE_HTTP_GRANT,
 	isCoreReadPath,
 	isViewSourceHttpMethod,
 	renderContributionActionHttp,
+	validateView,
+	viewSpecSchema,
 } from "@ryu/app-host/views";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { toast } from "@ryu/ui/components/sileo";
+} from "@ryu/ui/components/empty.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -47,6 +46,15 @@ import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import { apiUrl, requestHeaders, toTarget } from "@/src/lib/api/client.ts";
 import { pluginHostInvoke } from "@/src/lib/api/plugins.ts";
+
+/** The success note a plugin's `view_action` hook returned, if any. */
+function viewActionMessage<TResult>(result: TResult): string | null {
+	const decoded = z
+		.object({ message: z.string().optional() })
+		.safeParse(result);
+	const message = decoded.success ? decoded.data.message : undefined;
+	return message && message.trim() !== "" ? message : null;
+}
 
 export default function PluginViewPage({
 	pluginId,
@@ -65,6 +73,10 @@ export default function PluginViewPage({
 	const contribution = useMemo(
 		() => views.find((v) => v.plugin === pluginId && v.id === viewId),
 		[views, pluginId, viewId]
+	);
+	const parsedSpec = useMemo(
+		() => viewSpecSchema.safeParse(contribution?.spec),
+		[contribution?.spec]
 	);
 	const { url, token, userJwt } = node;
 	const canReadSource = (contribution?.approved_grants ?? []).includes(
@@ -116,7 +128,7 @@ export default function PluginViewPage({
 
 	const handleAction = useCallback(
 		async (action: ViewAction, ctx: ViewActionContext) => {
-			// biome-ignore lint/suspicious/noAlert: the v1 declarative confirm gate — a spec-declared destructive-action prompt.
+			// the v1 declarative confirm gate — a spec-declared destructive-action prompt.
 			if (action.confirm && !(await confirm(action.confirm))) {
 				return;
 			}
@@ -153,14 +165,24 @@ export default function PluginViewPage({
 				} else {
 					// App-backed intent: relay over the plugin host bridge so it reaches
 					// `POST /api/plugins/:id/host` (grant-gated `view.action` dispatch).
-					await pluginHostInvoke(target, pluginId, "view.action", {
-						view_id: viewId,
-						action_id: action.id,
-						intent: action.intent ?? null,
-						payload: action.payload ?? null,
-						values: ctx.values ?? null,
-						item: ctx.item ?? null,
-					});
+					const result = await pluginHostInvoke(
+						target,
+						pluginId,
+						"view.action",
+						{
+							view_id: viewId,
+							action_id: action.id,
+							intent: action.intent ?? null,
+							payload: action.payload ?? null,
+							values: ctx.values ?? null,
+							item: ctx.item ?? null,
+						}
+					);
+					// The owning app's `view_action` hook may report a success note.
+					const message = viewActionMessage(result);
+					if (message) {
+						toast.success(message);
+					}
 				}
 				// Re-render from truth: bump the source re-fetch and invalidate the
 				// contributions query (a spec-provider may have re-emitted the view).
@@ -195,6 +217,20 @@ export default function PluginViewPage({
 		);
 	}
 
+	if (!parsedSpec.success) {
+		const check = validateView(contribution.spec);
+		return (
+			<Empty>
+				<EmptyHeader>
+					<EmptyTitle>Unsupported view</EmptyTitle>
+					<EmptyDescription>
+						{check.ok ? "Invalid view configuration" : check.errors.join("; ")}
+					</EmptyDescription>
+				</EmptyHeader>
+			</Empty>
+		);
+	}
+
 	return (
 		<div className="mx-auto max-w-3xl p-6">
 			{confirmationDialog}
@@ -205,10 +241,10 @@ export default function PluginViewPage({
 			<DeclarativeView
 				fetchJson={fetchJson}
 				onAction={(action, ctx) => {
-					void handleAction(action, { ...ctx, viewId });
+					return handleAction(action, { ...ctx, viewId });
 				}}
 				reloadToken={reloadToken}
-				spec={contribution.spec as ViewSpec}
+				spec={parsedSpec.data}
 			/>
 		</div>
 	);

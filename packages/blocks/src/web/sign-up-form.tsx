@@ -1,45 +1,27 @@
 "use client";
 
-import { ViewIcon, ViewOffSlashIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	AGE_ELIGIBILITY_SECONDS,
+	AgeEligibilityDeniedError,
+	meetsMinimumAccountAge,
+} from "@ryu/auth/lib/age-eligibility";
 import { Button } from "@ryu/ui/components/button";
+import { Checkbox } from "@ryu/ui/components/checkbox";
 import {
 	Field,
 	FieldError,
 	FieldGroup,
 	FieldLabel,
 } from "@ryu/ui/components/field";
+import { GoogleBrandMark } from "@ryu/ui/components/google-brand-mark.tsx";
 import { Input } from "@ryu/ui/components/input";
 import PageHeader from "@ryu/ui/components/page-header";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import type { ReactNode, SVGProps } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { docsHref } from "./data/resources.tsx";
+import PasswordField from "./password-field.tsx";
 import { PasswordStrengthMeter } from "./password-strength.tsx";
-
-/** Google brand mark, inlined so the block has no app-local SVG dependency. */
-function Google(props: SVGProps<SVGSVGElement>) {
-	return (
-		<svg {...props} fill="none" viewBox="0 0 24 24">
-			<title>Google</title>
-			<path
-				d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-				fill="#4285F4"
-			/>
-			<path
-				d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-				fill="#34A853"
-			/>
-			<path
-				d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-				fill="#FBBC05"
-			/>
-			<path
-				d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-				fill="#EA4335"
-			/>
-		</svg>
-	);
-}
 
 export interface SignUpValues {
 	email: string;
@@ -48,6 +30,7 @@ export interface SignUpValues {
 }
 
 export interface SignUpFormProps {
+	ageCheckRequired?: boolean;
 	/** Captcha widget slot (the live app injects its Turnstile here). */
 	captcha?: ReactNode;
 	emailError?: string;
@@ -57,6 +40,11 @@ export interface SignUpFormProps {
 	loading?: boolean;
 	/** Field-level validation error messages. */
 	nameError?: string;
+	/**
+	 * Server age check. Called only after the visitor has ticked the Terms and
+	 * Privacy checkbox, so the live handler sends `acceptedTerms: true`.
+	 */
+	onCheckAge?: (dateOfBirth: string) => Promise<void>;
 	/** Sign-up-with-Google handler. */
 	onGoogle?: () => void | Promise<void>;
 	/** Called with the entered details when the form is submitted. */
@@ -76,6 +64,8 @@ const noop = () => {
  * storyboard renders it standalone with static state.
  */
 export default function SignUpForm({
+	ageCheckRequired = false,
+	onCheckAge,
 	onSubmit = noop,
 	loading = false,
 	googleLoading = false,
@@ -86,10 +76,32 @@ export default function SignUpForm({
 	passwordError,
 	captcha,
 }: SignUpFormProps) {
+	const [dateOfBirth, setDateOfBirth] = useState("");
+	const [ageChecked, setAgeChecked] = useState(false);
+	const [checkingAge, setCheckingAge] = useState(false);
+	const [ageError, setAgeError] = useState<string>();
+	const [ageDenied, setAgeDenied] = useState(false);
+	const [acceptedTerms, setAcceptedTerms] = useState(false);
+	const [termsError, setTermsError] = useState<string>();
 	const [name, setName] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
-	const [showPassword, setShowPassword] = useState(false);
+	useEffect(() => {
+		if (ageCheckRequired) {
+			setAgeChecked(false);
+			setAgeError("Please repeat the age check before creating your account.");
+		}
+	}, [ageCheckRequired]);
+	useEffect(() => {
+		if (!ageChecked) {
+			return;
+		}
+		const timeout = setTimeout(() => {
+			setAgeChecked(false);
+			setAgeError("Your age check expired. Please check again.");
+		}, AGE_ELIGIBILITY_SECONDS * 1000);
+		return () => clearTimeout(timeout);
+	}, [ageChecked]);
 	// See sign-in-form.tsx: an edited field is back in its default state, so its
 	// stale error is withheld until the next submit produces a fresh one.
 	const [edited, setEdited] = useState({
@@ -104,6 +116,141 @@ export default function SignUpForm({
 	const visibleNameError = edited.name ? undefined : nameError;
 	const visibleEmailError = edited.email ? undefined : emailError;
 	const visiblePasswordError = edited.password ? undefined : passwordError;
+
+	if (!ageChecked) {
+		return (
+			<div className="mx-auto flex w-full max-w-md flex-col gap-6">
+				<PageHeader
+					subtitle="Check your eligibility before entering your account details"
+					title="Create an account"
+				/>
+				{ageDenied ? (
+					<p role="alert">You are not eligible to create a Ryu account.</p>
+				) : (
+					<form
+						className="space-y-4"
+						onSubmit={async (event) => {
+							event.preventDefault();
+							if (!acceptedTerms) {
+								setTermsError(
+									"Agree to the Terms of Service and Privacy Policy to continue."
+								);
+								return;
+							}
+							setCheckingAge(true);
+							setAgeError(undefined);
+							try {
+								if (onCheckAge) {
+									await onCheckAge(dateOfBirth);
+								} else if (!meetsMinimumAccountAge(dateOfBirth)) {
+									setAgeDenied(true);
+									return;
+								}
+								setDateOfBirth("");
+								setAgeChecked(true);
+							} catch (error) {
+								if (error instanceof AgeEligibilityDeniedError) {
+									setAgeDenied(true);
+								} else {
+									setAgeError(
+										error instanceof Error
+											? error.message
+											: "Could not check eligibility. Try again."
+									);
+								}
+							} finally {
+								setCheckingAge(false);
+							}
+						}}
+					>
+						<FieldGroup>
+							<Field data-invalid={Boolean(ageError)}>
+								<FieldLabel htmlFor="date-of-birth">Date of birth</FieldLabel>
+								<Input
+									aria-describedby={
+										ageError ? "age-privacy age-error" : "age-privacy"
+									}
+									aria-invalid={Boolean(ageError)}
+									autoComplete="bday"
+									className="h-16"
+									id="date-of-birth"
+									onChange={(event) => setDateOfBirth(event.target.value)}
+									required
+									type="date"
+									value={dateOfBirth}
+									variant="muted"
+								/>
+								{ageError ? (
+									<FieldError errors={[{ message: ageError }]} id="age-error" />
+								) : null}
+							</Field>
+						</FieldGroup>
+						<p className="text-muted-foreground text-sm" id="age-privacy">
+							We use your date of birth only to check eligibility. It is not
+							saved to your account.
+						</p>
+						<Field data-invalid={Boolean(termsError)} orientation="horizontal">
+							<Checkbox
+								aria-describedby={termsError ? "terms-error" : undefined}
+								aria-invalid={Boolean(termsError)}
+								checked={acceptedTerms}
+								id="accept-terms"
+								name="acceptedTerms"
+								onCheckedChange={(checked) => {
+									setAcceptedTerms(checked === true);
+									setTermsError(undefined);
+								}}
+								required
+							/>
+							<FieldLabel
+								className="font-normal text-muted-foreground text-sm"
+								htmlFor="accept-terms"
+							>
+								<span>
+									I agree to the{" "}
+									<a
+										className="underline"
+										href={docsHref("/docs/legal/terms")}
+										rel="noopener"
+										target="_blank"
+									>
+										Terms of Service
+									</a>{" "}
+									and{" "}
+									<a
+										className="underline"
+										href={docsHref("/docs/legal/privacy")}
+										rel="noopener"
+										target="_blank"
+									>
+										Privacy Policy
+									</a>
+								</span>
+							</FieldLabel>
+						</Field>
+						{termsError ? (
+							<FieldError errors={[{ message: termsError }]} id="terms-error" />
+						) : null}
+						<Button
+							className="w-full"
+							disabled={checkingAge}
+							size="lg"
+							type="submit"
+						>
+							{checkingAge ? "Checking..." : "Continue"}
+						</Button>
+					</form>
+				)}
+				<Button
+					className="mx-auto"
+					onClick={onSwitchToSignIn}
+					variant="ghost-muted"
+				>
+					Already have an account? Sign in
+				</Button>
+			</div>
+		);
+	}
 
 	return (
 		<div className="mx-auto flex w-full max-w-md flex-col gap-6">
@@ -140,7 +287,7 @@ export default function SignUpForm({
 								aria-describedby={visibleNameError ? "name-error" : undefined}
 								aria-invalid={Boolean(visibleNameError)}
 								autoComplete="name"
-								className="h-16 border-0 bg-muted shadow-none"
+								className="h-16"
 								id="name"
 								name="name"
 								onChange={(e) => {
@@ -149,6 +296,7 @@ export default function SignUpForm({
 								}}
 								placeholder="Name"
 								value={name}
+								variant="muted"
 							/>
 							{visibleNameError ? (
 								<FieldError
@@ -166,7 +314,7 @@ export default function SignUpForm({
 								aria-describedby={visibleEmailError ? "email-error" : undefined}
 								aria-invalid={Boolean(visibleEmailError)}
 								autoComplete="email"
-								className="h-16 border-0 bg-muted shadow-none"
+								className="h-16"
 								id="email"
 								inputMode="email"
 								name="email"
@@ -177,6 +325,7 @@ export default function SignUpForm({
 								placeholder="Email Address"
 								type="email"
 								value={email}
+								variant="muted"
 							/>
 							{visibleEmailError ? (
 								<FieldError
@@ -186,98 +335,69 @@ export default function SignUpForm({
 							) : null}
 						</Field>
 
-						<Field data-invalid={Boolean(visiblePasswordError)}>
-							<FieldLabel className="sr-only" htmlFor="password">
-								Password
-							</FieldLabel>
-							<div className="relative w-full">
-								<Input
-									aria-describedby={
-										visiblePasswordError
-											? "password-error password-strength-label password-strength-requirements"
-											: "password-strength-label password-strength-requirements"
-									}
-									aria-invalid={Boolean(visiblePasswordError)}
-									autoComplete="new-password"
-									className="h-16 border-0 bg-muted pr-14 shadow-none"
-									id="password"
-									name="password"
-									onChange={(e) => {
-										setPassword(e.target.value);
-										setEdited((s) => ({ ...s, password: true }));
-									}}
-									placeholder="Password"
-									type={showPassword ? "text" : "password"}
-									value={password}
-								/>
-								<Button
-									aria-label={showPassword ? "Hide password" : "Show password"}
-									aria-pressed={showPassword}
-									className="absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground"
-									onClick={() => setShowPassword((v) => !v)}
-									size="icon-sm"
-									type="button"
-									variant="ghost"
-								>
-									<HugeiconsIcon
-										icon={showPassword ? ViewOffSlashIcon : ViewIcon}
-										strokeWidth={2}
-									/>
-								</Button>
-							</div>
+						<PasswordField
+							autoComplete="new-password"
+							descriptionIds="password-strength-label password-strength-requirements"
+							error={visiblePasswordError}
+							errorId="password-error"
+							id="password"
+							label="Password"
+							name="password"
+							onChange={(value) => {
+								setPassword(value);
+								setEdited((current) => ({ ...current, password: true }));
+							}}
+							placeholder="Password"
+							value={password}
+						>
 							<PasswordStrengthMeter
 								className="px-1"
 								idPrefix="password-strength"
 								value={password}
 							/>
-							{visiblePasswordError ? (
-								<FieldError
-									errors={[{ message: visiblePasswordError }]}
-									id="password-error"
-								/>
-							) : null}
-						</Field>
+						</PasswordField>
 					</FieldGroup>
 
 					{captcha}
 
 					<Button className="w-full" disabled={loading} size="lg" type="submit">
-						{loading ? "Creating account..." : "Sign up"}
+						{loading ? "Creating account…" : "Sign up"}
 					</Button>
 				</form>
 
 				<div className="flex flex-col gap-4 text-center">
 					<Button
-						className="w-full gap-3"
+						className="w-full"
 						disabled={googleLoading}
 						onClick={onGoogle}
 						size="lg"
+						spacing="comfortable"
 						variant="secondary"
 					>
-						<Google className="h-5 w-5" />
-						{googleLoading ? "Creating account..." : "Sign up with Google"}
+						<GoogleBrandMark className="h-5 w-5" />
+						{googleLoading ? "Creating account…" : "Sign up with Google"}
 					</Button>
 
 					<Button
-						className="mx-auto text-muted-foreground"
+						className="mx-auto"
 						onClick={onSwitchToSignIn}
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						Already have an account? Sign in
 					</Button>
 				</div>
 
-				<div className="text-center text-muted-foreground text-sm">
-					By creating an account, you agree to our{" "}
-					<a className="underline" href="/terms">
+				<p className="text-center text-muted-foreground text-sm">
+					You accepted our{" "}
+					<a className="underline" href={docsHref("/docs/legal/terms")}>
 						Terms
-					</a>
-					<br />
+					</a>{" "}
 					and{" "}
-					<a className="underline" href="/privacy">
+					<a className="underline" href={docsHref("/docs/legal/privacy")}>
 						Privacy Policy
-					</a>
-				</div>
+					</a>{" "}
+					in the previous step.
+				</p>
 			</StaggerReveal>
 		</div>
 	);

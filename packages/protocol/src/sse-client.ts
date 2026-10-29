@@ -1,3 +1,5 @@
+import type { z } from "zod";
+
 // packages/protocol/src/sse-client.ts
 //
 // Shared client reader for the cloud API's SSE endpoints (the streams the Hono
@@ -13,9 +15,109 @@
 // Web callers that authenticate with a session cookie instead pass
 // `credentials: "include"`.
 
-const FRAME_SEP = "\n\n";
 const EVENT_PREFIX = "event:";
 const DATA_PREFIX = "data:";
+
+/**
+ * Maximum wire bytes retained for one SSE event before its terminating blank
+ * line. This is deliberately transport-level: endpoint decoders and output
+ * limits only run after framing succeeds.
+ */
+export const MAX_SSE_EVENT_BYTES = 256 * 1024;
+
+/** Raised before an incomplete or complete SSE event can exceed the bound. */
+export class SseFrameTooLargeError extends Error {
+	readonly maxBytes: number;
+
+	constructor(maxBytes: number) {
+		super(`sse event exceeds ${maxBytes} bytes`);
+		this.name = "SseFrameTooLargeError";
+		this.maxBytes = maxBytes;
+	}
+}
+
+/**
+ * Incremental, byte-bounded SSE frame decoder shared by browser clients.
+ * It accepts all line endings allowed by the SSE grammar (LF, CRLF, and CR),
+ * including a CRLF pair split between chunks. Returned frames use normalized
+ * LF separators so endpoint-specific parsers do not need transport branches.
+ */
+export class SseFrameDecoder {
+	private readonly decoder = new TextDecoder();
+	private readonly lines: string[] = [];
+	private readonly line: number[] = [];
+	private retainedBytes = 0;
+	private skipLeadingLf = false;
+
+	constructor(readonly maxEventBytes = MAX_SSE_EVENT_BYTES) {
+		if (!(Number.isSafeInteger(maxEventBytes) && maxEventBytes > 0)) {
+			throw new TypeError("maxEventBytes must be a positive safe integer");
+		}
+	}
+
+	/** Feed one response-body chunk and return every completed raw SSE frame. */
+	push(chunk: Uint8Array): string[] {
+		const frames: string[] = [];
+		for (const byte of chunk) {
+			if (this.skipLeadingLf) {
+				this.skipLeadingLf = false;
+				if (byte === 0x0a) {
+					continue;
+				}
+			}
+			if (byte === 0x0d) {
+				this.skipLeadingLf = true;
+				this.finishLine(frames);
+				continue;
+			}
+			if (byte === 0x0a) {
+				this.finishLine(frames);
+				continue;
+			}
+			this.line.push(byte);
+			this.retain(1);
+		}
+		return frames;
+	}
+
+	/** Drop any unterminated event at EOF and release its retained memory. */
+	finish(): void {
+		this.clear();
+	}
+
+	private finishLine(frames: string[]): void {
+		if (this.line.length === 0) {
+			if (this.lines.length > 0) {
+				frames.push(this.lines.join("\n"));
+			}
+			this.lines.length = 0;
+			this.retainedBytes = 0;
+			return;
+		}
+
+		this.lines.push(this.decoder.decode(Uint8Array.from(this.line)));
+		this.line.length = 0;
+		// Keep one byte of budget for the normalized line separator retained in
+		// the frame. CRLF therefore cannot bypass the limit by changing spelling.
+		this.retain(1);
+	}
+
+	private retain(bytes: number): void {
+		this.retainedBytes += bytes;
+		if (this.retainedBytes <= this.maxEventBytes) {
+			return;
+		}
+		this.clear();
+		throw new SseFrameTooLargeError(this.maxEventBytes);
+	}
+
+	private clear(): void {
+		this.line.length = 0;
+		this.lines.length = 0;
+		this.retainedBytes = 0;
+		this.skipLeadingLf = false;
+	}
+}
 
 /** One parsed SSE frame: its `event:` name (default "message") and JSON `data`. */
 export interface SseMessage<T> {
@@ -78,15 +180,27 @@ function parseFrame(frame: string): { event: string; data: string } | null {
  * {@link SseConnectError} (carrying the HTTP status) on a non-2xx connect so the
  * caller can decide whether — and how fast — to reconnect.
  *
- *   for await (const msg of openSse<RedemptionEvent>(url, { token })) {
+ *   for await (const msg of openSse(url, { token, decode: redemptionEventSchema.parse })) {
  *     handle(msg.data);
  *   }
  */
-export async function* openSse<T = unknown>(
+export interface DecodedOpenSseOptions<T> extends OpenSseOptions {
+	/** Decode the endpoint's complete event contract before yielding it. */
+	decode: z.ZodType<T>["parse"];
+}
+export function openSse<T>(
 	url: string,
-	options: OpenSseOptions = {}
-): AsyncGenerator<SseMessage<T>> {
-	const headers: Record<string, string> = { ...options.headers };
+	options: DecodedOpenSseOptions<T>
+): AsyncGenerator<SseMessage<T>>;
+export function openSse(
+	url: string,
+	options?: OpenSseOptions
+): AsyncGenerator<SseMessage<unknown>>;
+export async function* openSse(
+	url: string,
+	options: OpenSseOptions & { decode?: z.ZodType["parse"] } = {}
+): AsyncGenerator<SseMessage<unknown>> {
+	const headers = { ...options.headers };
 	if (options.token) {
 		headers.Authorization = `Bearer ${options.token}`;
 	}
@@ -102,27 +216,33 @@ export async function* openSse<T = unknown>(
 	}
 
 	const reader = resp.body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-	for (;;) {
-		const { done, value } = await reader.read();
-		if (done) {
-			break;
-		}
-		buffer += decoder.decode(value, { stream: true });
-		let sep = buffer.indexOf(FRAME_SEP);
-		while (sep !== -1) {
-			const parsed = parseFrame(buffer.slice(0, sep));
-			buffer = buffer.slice(sep + FRAME_SEP.length);
-			if (parsed) {
-				try {
-					yield { event: parsed.event, data: JSON.parse(parsed.data) as T };
-				} catch {
-					// Ignore a malformed frame; the next event self-heals the feed.
+	const frames = new SseFrameDecoder();
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) {
+				frames.finish();
+				break;
+			}
+			for (const frame of frames.push(value)) {
+				const parsed = parseFrame(frame);
+				if (parsed) {
+					try {
+						const data = JSON.parse(parsed.data);
+						yield {
+							event: parsed.event,
+							data: options.decode ? options.decode(data) : data,
+						};
+					} catch {
+						// Ignore a malformed frame; the next event self-heals the feed.
+					}
 				}
 			}
-			sep = buffer.indexOf(FRAME_SEP);
 		}
+	} finally {
+		frames.finish();
+		await reader.cancel().catch(() => undefined);
+		reader.releaseLock();
 	}
 }
 
@@ -132,10 +252,10 @@ export async function* openSse<T = unknown>(
  * resolve when the stream ends or `signal` aborts. Convenient for surfaces that
  * prefer a callback + reconnect loop over consuming the async generator directly.
  */
-export async function readSse<T = unknown>(
+export async function readSse<T>(
 	url: string,
 	onMessage: (message: SseMessage<T>) => void,
-	options: OpenSseOptions = {}
+	options: DecodedOpenSseOptions<T>
 ): Promise<void> {
 	for await (const message of openSse<T>(url, options)) {
 		onMessage(message);

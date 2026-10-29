@@ -9,7 +9,16 @@ if (!action || !action.id) {
 	return { kind: "none" };
 }
 
-if ((await host.getPreference({ key: "action-summary-enabled" })) === "false") {
+let enabled = null;
+try {
+	enabled = await host.getPreference({ key: "action-summary-enabled" });
+} catch (error) {
+	// A transient preference-store failure should not abort the action event. The
+	// manifest default is enabled, so preserve that default and let a later event
+	// retry the read instead of caching the failure.
+	host.log("action-summary: enabled preference read failed", error);
+}
+if (enabled === "false") {
 	return { kind: "none" };
 }
 
@@ -53,7 +62,7 @@ async function detailLevel() {
 	let value = null;
 	try {
 		value = await host.getPreference({ key: "action-summary-detail" });
-	} catch (error) {
+	} catch  {
 		value = null;
 	}
 	const normalized = String(value || "").trim().toLowerCase();
@@ -80,6 +89,8 @@ function systemPrompt(level, maxChars) {
 	);
 }
 
+// Hook action input is serde_json::Value, embedded by Core before this hook
+// runs. Recursion stays within that JSON domain, which contains no callables.
 function redact(value, key) {
 	if (value === null || value === undefined) {
 		return null;
@@ -87,7 +98,7 @@ function redact(value, key) {
 	if (key && /(token|secret|password|api[_-]?key|authorization|private[_-]?key|cookie|credential)/i.test(key)) {
 		return "[redacted]";
 	}
-	if (typeof value === "string") {
+	if (parsePrimitiveText(value) !== undefined) {
 		return value
 			.slice(0, 8000)
 			.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
@@ -102,7 +113,7 @@ function redact(value, key) {
 	if (Array.isArray(value)) {
 		return value.slice(0, 64).map((item) => redact(item, key));
 	}
-	if (typeof value === "object") {
+	if (Object(value) === value) {
 		const out = {};
 		for (const [childKey, childValue] of Object.entries(value).slice(0, 48)) {
 			out[childKey] = redact(childValue, childKey);
@@ -120,8 +131,8 @@ function normalize(value, maxChars) {
 	if (text.startsWith("{") || text.startsWith("[")) {
 		try {
 			const parsed = JSON.parse(text);
-			text = typeof parsed === "string" ? parsed : parsed.summary || "";
-		} catch (error) {
+			text = parsePrimitiveText(parsed) !== undefined ? parsed : parsed.summary || "";
+		} catch  {
 			text = "";
 		}
 	}
@@ -150,7 +161,7 @@ function fallback(item, maxChars) {
 			maxChars
 		);
 	}
-	const input = item.input && typeof item.input === "object" ? item.input : {};
+	const input = item.input && Object(item.input) === item.input ? item.input : {};
 	const subject =
 		input.command ||
 		input.cmd ||
@@ -184,4 +195,15 @@ function clip(value, maxChars) {
 	return value.length > maxChars
 		? value.slice(0, Math.max(1, maxChars - 1)).trimEnd() + "…"
 		: value;
+}
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
 }

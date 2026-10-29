@@ -3,14 +3,10 @@ import {
 	type QuestEventResponse,
 	recordQuestEvent,
 } from "@ryuhq/core-client/quest-events";
+import { coreAuthStatusWireSchema } from "./auth-status-wire.ts";
 
-const AUTH_BACKEND_URL =
-	process.env.RYU_AUTH_URL?.trim() || "http://localhost:3000";
+import { accountBackendTarget } from "./authBackend.ts";
 
-interface CoreAuthStatus {
-	authenticated?: boolean;
-	token?: string | null;
-}
 /**
  * Forward the active Core account's referral activity to the control plane.
  *
@@ -22,16 +18,18 @@ export async function reportCliReferralEvent(
 	coreTarget: ApiTarget
 ): Promise<QuestEventResponse | null> {
 	try {
-		const status = await request<CoreAuthStatus>(
+		const status = await request(
 			coreTarget,
-			"/api/auth/status"
+			"/api/auth/status",
+			{},
+			coreAuthStatusWireSchema
 		);
 		const token = status.authenticated ? status.token?.trim() : null;
 		if (!token) {
 			return null;
 		}
 		return await recordQuestEvent(
-			{ token, url: AUTH_BACKEND_URL },
+			accountBackendTarget(token),
 			"referral_sync",
 			"cli"
 		);

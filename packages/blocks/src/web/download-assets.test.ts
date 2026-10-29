@@ -110,6 +110,9 @@ describe("isDesktopAsset", () => {
 			"ryu-cli-windows-x86_64.exe",
 			"ryu-core-macos-aarch64",
 			"ryu-gateway-linux-x86_64",
+			"Ryu.Bot_0.3.0_aarch64.dmg",
+			"Ryu.Bot_0.3.0_x64-setup.exe",
+			"Ryu.Bot_0.3.0_amd64.AppImage",
 		]) {
 			expect(isDesktopAsset(name)).toBe(false);
 		}
@@ -122,6 +125,7 @@ describe("isDesktopAsset", () => {
 			"Ryu_0.1.1_aarch64.dmg",
 			"Ryu_0.1.1_amd64.AppImage",
 			"Ryu-0.1.1-1.x86_64.rpm",
+			"Ryu.Desktop.Research_Preview.0.1.7_aarch64.dmg",
 		]) {
 			expect(isDesktopAsset(name)).toBe(true);
 		}
@@ -351,14 +355,16 @@ describe("loadReleases", () => {
 		resetReleasesCache();
 		const original = globalThis.fetch;
 		let calls = 0;
-		globalThis.fetch = (() => {
-			calls++;
-			return Promise.resolve(
-				new Response(JSON.stringify([{ ...release(V011_ASSETS) }]), {
-					status: 200,
-				})
-			);
-		}) as typeof fetch;
+		globalThis.fetch = new Proxy(original, {
+			apply() {
+				calls++;
+				return Promise.resolve(
+					new Response(JSON.stringify([{ ...release(V011_ASSETS) }]), {
+						status: 200,
+					})
+				);
+			},
+		});
 		try {
 			const results = await Promise.all([
 				loadReleases(),

@@ -80,6 +80,31 @@
           ],
           "type": "string"
         },
+        "MultitaskStrategy": {
+          "description": "What a session does when a new run is requested while another run is\nactive (\"double-texting\").",
+          "oneOf": [
+            {
+              "const": "reject",
+              "description": "Refuse the new run with a conflict while a run is active or queued.",
+              "type": "string"
+            },
+            {
+              "const": "enqueue",
+              "description": "Persist the new run in the session's ordered queue. It starts when every\nrun ahead of it has finished, including across a Core restart.",
+              "type": "string"
+            },
+            {
+              "const": "interrupt",
+              "description": "Stop the active run at its next cancellation point, keep its partial\ntranscript, then start the new run ahead of any queued runs.",
+              "type": "string"
+            },
+            {
+              "const": "rollback",
+              "description": "Stop the active run, remove the turns it wrote from the transcript, then\nstart the new run ahead of any queued runs.",
+              "type": "string"
+            }
+          ]
+        },
         "NetworkMode": {
           "description": "Network authority requested by an execution profile. Gateway policy remains\nauthoritative; these values are a request/provenance field, not a bypass.",
           "enum": [
@@ -103,6 +128,35 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "description": "A replayable, strictly ordered event envelope.",
       "oneOf": [
+        {
+          "description": "The run was accepted behind an active run and waits in the session's\ndurable queue. `position` is 1-based at the time of queueing; a later\n`run_started` marks dispatch.",
+          "properties": {
+            "activeRunId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "position": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "strategy": {
+              "$ref": "#/$defs/MultitaskStrategy"
+            },
+            "type": {
+              "const": "run_queued",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "position",
+            "strategy"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "executionProfile": {
@@ -434,6 +488,31 @@
           ],
           "type": "string"
         },
+        "MultitaskStrategy": {
+          "description": "What a session does when a new run is requested while another run is\nactive (\"double-texting\").",
+          "oneOf": [
+            {
+              "const": "reject",
+              "description": "Refuse the new run with a conflict while a run is active or queued.",
+              "type": "string"
+            },
+            {
+              "const": "enqueue",
+              "description": "Persist the new run in the session's ordered queue. It starts when every\nrun ahead of it has finished, including across a Core restart.",
+              "type": "string"
+            },
+            {
+              "const": "interrupt",
+              "description": "Stop the active run at its next cancellation point, keep its partial\ntranscript, then start the new run ahead of any queued runs.",
+              "type": "string"
+            },
+            {
+              "const": "rollback",
+              "description": "Stop the active run, remove the turns it wrote from the transcript, then\nstart the new run ahead of any queued runs.",
+              "type": "string"
+            }
+          ]
+        },
         "NetworkMode": {
           "description": "Network authority requested by an execution profile. Gateway policy remains\nauthoritative; these values are a request/provenance field, not a bypass.",
           "enum": [
@@ -540,6 +619,17 @@
             "string",
             "null"
           ]
+        },
+        "multitaskStrategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MultitaskStrategy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The double-texting strategy the run was submitted with, when one other\nthan the default was requested."
         },
         "output": true,
         "parentRunId": {
@@ -819,6 +909,31 @@
           ],
           "type": "string"
         },
+        "MultitaskStrategy": {
+          "description": "What a session does when a new run is requested while another run is\nactive (\"double-texting\").",
+          "oneOf": [
+            {
+              "const": "reject",
+              "description": "Refuse the new run with a conflict while a run is active or queued.",
+              "type": "string"
+            },
+            {
+              "const": "enqueue",
+              "description": "Persist the new run in the session's ordered queue. It starts when every\nrun ahead of it has finished, including across a Core restart.",
+              "type": "string"
+            },
+            {
+              "const": "interrupt",
+              "description": "Stop the active run at its next cancellation point, keep its partial\ntranscript, then start the new run ahead of any queued runs.",
+              "type": "string"
+            },
+            {
+              "const": "rollback",
+              "description": "Stop the active run, remove the turns it wrote from the transcript, then\nstart the new run ahead of any queued runs.",
+              "type": "string"
+            }
+          ]
+        },
         "NetworkMode": {
           "description": "Network authority requested by an execution profile. Gateway policy remains\nauthoritative; these values are a request/provenance field, not a bypass.",
           "enum": [
@@ -861,6 +976,17 @@
         "input": {
           "default": {},
           "description": "JSON input interpreted by the selected runnable. Chat adapters commonly\nuse an object containing `messages`."
+        },
+        "multitaskStrategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MultitaskStrategy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Behavior when the session already has an active run. Omitted means\n[`MultitaskStrategy::Reject`]."
         },
         "resumeRunId": {
           "type": [

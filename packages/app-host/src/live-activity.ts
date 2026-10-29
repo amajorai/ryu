@@ -22,6 +22,8 @@
 // `LiveActivityContribution`); the `spec` there is opaque, so a new activity
 // capability needs no Core change. The desktop's generic renderer interprets it.
 
+import { z } from "zod";
+
 import { sourceItemsFromResponse, type ViewSource } from "./views.ts";
 
 /** Lifecycle phase of a live activity, shared by every surface renderer. This is
@@ -148,7 +150,7 @@ export interface LiveActivityContribution {
 	/** Accent colour hint (any CSS color). */
 	accent?: string;
 	/** Core-stamped declarative HTTP authority. */
-	http_policy?: unknown;
+	http_policy?: import("./views.ts").ContributionHttpPolicy;
 	icon?: string;
 	id: string;
 	/** Optional placement hint among the dock's activities (lower = first). */
@@ -159,17 +161,29 @@ export interface LiveActivityContribution {
 	title: string;
 }
 
+// Source responses cross the same JSON boundary as the HTTP endpoint. Invalid
+// individual field values stay absent so an optional field cannot discard a card.
+const liveActivityRowSchema = z.record(
+	z.string(),
+	z.json().optional().catch(undefined)
+);
+export type LiveActivityRow = z.infer<typeof liveActivityRowSchema>;
+const rowTextSchema = z.union([
+	z.union([z.string(), z.number(), z.boolean()]).transform(String),
+	z
+		.union([z.array(z.json()), z.record(z.string(), z.json())])
+		.transform((value) => JSON.stringify(value)),
+]);
+const liveActivityStatusSchema = z.enum(LIVE_ACTIVITY_STATUSES);
+
 /** A source-fetched card: the mapped {@link LiveActivity} plus the RAW response
  *  row (the `{{item.<key>}}` templating base for `target`). */
 export interface SourceLiveActivity {
 	activity: LiveActivity;
-	raw: Record<string, unknown>;
+	raw: LiveActivityRow;
 }
 
-function rawString(
-	row: Record<string, unknown>,
-	key?: string
-): string | undefined {
+function rawString(row: LiveActivityRow, key?: string): string | undefined {
 	if (!key) {
 		return undefined;
 	}
@@ -177,21 +191,17 @@ function rawString(
 	if (value === null || value === undefined) {
 		return undefined;
 	}
-	return typeof value === "object" ? JSON.stringify(value) : String(value);
+	const parsed = rowTextSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
-function rawNumber(
-	row: Record<string, unknown>,
-	key?: string
-): number | undefined {
+function rawNumber(row: LiveActivityRow, key?: string): number | undefined {
 	if (!key) {
 		return undefined;
 	}
 	const value = row[key];
-	if (typeof value !== "number" || !Number.isFinite(value)) {
-		return undefined;
-	}
-	return value;
+	const parsed = z.number().finite().safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
 /** Resolve a wire status value to a {@link LiveActivityStatus}, honouring the
@@ -199,7 +209,7 @@ function rawNumber(
  *  fallback of `running` (a row the map cannot classify is still an activity —
  *  the status vocabulary is the surface's, not the backend's). */
 export function statusFromRow(
-	row: Record<string, unknown>,
+	row: LiveActivityRow,
 	map: LiveActivitySourceMap | undefined
 ): LiveActivityStatus {
 	const raw = rawString(row, map?.status);
@@ -210,14 +220,12 @@ export function statusFromRow(
 	if (mapped) {
 		return mapped;
 	}
-	if ((LIVE_ACTIVITY_STATUSES as readonly string[]).includes(raw)) {
-		return raw as LiveActivityStatus;
-	}
-	return "running";
+	const parsed = liveActivityStatusSchema.safeParse(raw);
+	return parsed.success ? parsed.data : "running";
 }
 
 function progressFromRow(
-	row: Record<string, unknown>,
+	row: LiveActivityRow,
 	map: LiveActivitySourceMap | undefined
 ): number | undefined {
 	const value = rawNumber(row, map?.progress);
@@ -245,7 +253,7 @@ function progressFromRow(
  */
 export function liveActivitiesFromResponse(
 	contribution: LiveActivityContribution,
-	payload: unknown,
+	payload: Parameters<typeof sourceItemsFromResponse>[1],
 	now: number = Date.now()
 ): SourceLiveActivity[] {
 	const spec = contribution.spec;
@@ -254,29 +262,32 @@ export function liveActivitiesFromResponse(
 		return [];
 	}
 	const map = spec.map ?? {};
-	return sourceItemsFromResponse(source, payload).map(({ item, raw }) => {
-		const status = statusFromRow(raw, map);
-		const activity: LiveActivity = {
-			id: `plugin:${contribution.plugin ?? "unknown"}:${contribution.id}:${item.id}`,
-			appId: contribution.plugin ?? "unknown",
-			kind: contribution.id,
-			title: item.title,
-			detail: item.subtitle ?? item.detail ?? "",
-			status,
-			progress: progressFromRow(raw, map),
-			icon: item.icon ?? contribution.icon,
-			accent: rawString(raw, map.accent) ?? contribution.accent,
-			startedAt: now,
-			updatedAt: now,
-		};
-		return { activity, raw };
-	});
+	return sourceItemsFromResponse(source, payload).map(
+		({ item, raw: wireRow }) => {
+			const raw = liveActivityRowSchema.parse(wireRow);
+			const status = statusFromRow(raw, map);
+			const activity: LiveActivity = {
+				id: `plugin:${contribution.plugin ?? "unknown"}:${contribution.id}:${item.id}`,
+				appId: contribution.plugin ?? "unknown",
+				kind: contribution.id,
+				title: item.title,
+				detail: item.subtitle ?? item.detail ?? "",
+				status,
+				progress: progressFromRow(raw, map),
+				icon: item.icon ?? contribution.icon,
+				accent: rawString(raw, map.accent) ?? contribution.accent,
+				startedAt: now,
+				updatedAt: now,
+			};
+			return { activity, raw };
+		}
+	);
 }
 
 /** Render a contribution's `target` route template against the raw row. */
 export function renderLiveActivityTarget(
 	contribution: LiveActivityContribution,
-	row: Record<string, unknown>
+	row: LiveActivityRow
 ): string | undefined {
 	const target = contribution.spec?.target;
 	if (!target) {
@@ -285,13 +296,7 @@ export function renderLiveActivityTarget(
 	// Inlined renderTemplate from views.ts (token `{{item.<key>}}`, URI-encoded).
 	return target.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, token: string) => {
 		const key = token.startsWith("item.") ? token.slice("item.".length) : token;
-		const value = row[key];
-		const text =
-			value === null || value === undefined
-				? ""
-				: typeof value === "object"
-					? JSON.stringify(value)
-					: String(value);
+		const text = rawString(row, key) ?? "";
 		return encodeURIComponent(text);
 	});
 }
@@ -299,7 +304,7 @@ export function renderLiveActivityTarget(
 /** A live activity's activation target, resolved to an action. */
 export function actionForLiveActivity(
 	contribution: LiveActivityContribution,
-	row: Record<string, unknown>
+	row: LiveActivityRow
 ): LiveActivity["action"] {
 	const path = renderLiveActivityTarget(contribution, row);
 	if (path) {
@@ -308,7 +313,7 @@ export function actionForLiveActivity(
 	return undefined;
 }
 
-// ── Validation (pure, dependency-free) ────────────────────────────────────────
+// ── Validation ────────────────────────────────────────
 
 /** Result of {@link validateLiveActivity}: `ok` plus flat human-readable errors. */
 export interface LiveActivityValidation {
@@ -316,30 +321,29 @@ export interface LiveActivityValidation {
 	ok: boolean;
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-	return typeof v === "object" && v !== null;
-}
-
-/**
- * Structurally validate a value as a {@link LiveActivityContribution}. Shallow
- * (shape, not deep field types) — the renderer tolerates missing optional fields —
- * so a newer app targeting an older shell degrades to a skipped entry rather than
- * a crash. A contribution without a `source` is valid but renders nothing (a
- * header-only dock group is not useful, so renderers skip it).
- */
-export function validateLiveActivity(value: unknown): LiveActivityValidation {
-	const errors: string[] = [];
-	if (!isRecord(value)) {
-		return { ok: false, errors: ["live activity must be an object"] };
-	}
-	if (typeof value.id !== "string" || value.id.length === 0) {
-		errors.push('live activity: "id" must be a non-empty string');
-	}
-	if (typeof value.title !== "string" || value.title.length === 0) {
-		errors.push('live activity: "title" must be a non-empty string');
-	}
-	return { ok: errors.length === 0, errors };
-}
+const liveActivityContributionEnvelopeSchema = z.object({
+	id: z.unknown().optional(),
+	title: z.unknown().optional(),
+});
+const contributionLabelSchema = z.string().min(1);
+/** Validate the required contribution labels while tolerating optional future fields. */
+const liveActivityValidationSchema = z
+	.unknown()
+	.transform((value): LiveActivityValidation => {
+		const parsed = liveActivityContributionEnvelopeSchema.safeParse(value);
+		if (!parsed.success) {
+			return { ok: false, errors: ["live activity must be an object"] };
+		}
+		const errors: string[] = [];
+		if (!contributionLabelSchema.safeParse(parsed.data.id).success) {
+			errors.push('live activity: "id" must be a non-empty string');
+		}
+		if (!contributionLabelSchema.safeParse(parsed.data.title).success) {
+			errors.push('live activity: "title" must be a non-empty string');
+		}
+		return { ok: errors.length === 0, errors };
+	});
+export const validateLiveActivity = liveActivityValidationSchema.parse;
 
 /** The reference example: an "agent working" card sourced from `/api/runs`. */
 export const helloLiveActivity: LiveActivityContribution = {

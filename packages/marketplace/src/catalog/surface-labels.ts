@@ -11,6 +11,11 @@
 import type { CompatibilityVerdict, Surface } from "./types.ts";
 import { blockingUnmet } from "./types.ts";
 
+/** Known host labels are complete; newer manifest surface names may be absent. */
+type SurfaceLabelLookup = Record<Surface, string> & {
+	[surface: string]: string | undefined;
+};
+
 /** Display name per surface.
  *
  *  Pinned to {@link Surface} with `satisfies`, which is the whole point: this map
@@ -19,7 +24,7 @@ import { blockingUnmet } from "./types.ts";
  *  `gateway`, `core`, and the actual `extension`. A manifest targeting the browser
  *  extension therefore displayed the raw token. The satisfies clause turns that
  *  class of drift into a build error. */
-export const SURFACE_LABELS = {
+export const SURFACE_LABELS: SurfaceLabelLookup = {
 	gateway: "Gateway",
 	core: "Headless node",
 	desktop: "Desktop",
@@ -41,7 +46,7 @@ export const SURFACE_LABELS = {
  *  mirrors that tolerance — an unrecognised surface deserializes rather than
  *  failing the whole manifest. */
 export function surfaceLabel(surface: string): string {
-	return SURFACE_LABELS[surface as Surface] ?? surface;
+	return SURFACE_LABELS[surface] ?? surface;
 }
 
 /** A one-line, user-facing reason a listing cannot be installed here, or `null`
@@ -63,6 +68,9 @@ export function describeIncompatibility(
 		return null;
 	}
 	const parts = blocking.map((u) => {
+		if (u.code === "host_api_too_old") {
+			return `Ryu plugin host API ${u.required} (you have ${u.present})`;
+		}
 		const label = u.surface === "core" ? "Ryu" : surfaceLabel(u.surface);
 		return u.code === "too_old"
 			? `${label} ${u.required} (you have ${u.present})`

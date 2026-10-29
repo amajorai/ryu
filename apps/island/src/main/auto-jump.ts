@@ -10,6 +10,7 @@
 
 import type { BrowserWindow } from "electron";
 import { DEFAULT_AUTO_JUMP } from "../shared/auto-jump.ts";
+import { isIslandAtRest } from "./ipc/win.ts";
 import { isIslandOnActiveDisplay, moveToActiveDisplay } from "./position.ts";
 import { ACRYLIC_START_HEIGHT, ACRYLIC_START_WIDTH } from "./window.ts";
 
@@ -31,11 +32,16 @@ let isMaterial: () => boolean = () => false;
 
 /**
  * Whether the island is at its resting footprint and therefore safe to relocate.
- * Translucent windows never change size (the morph is drawn inside a fixed
- * oversized window), so they are always "at rest"; a material window *is* the
- * island and grows when it morphs open, so we only jump it while small.
+ * In either appearance an open panel, or a footprint shifted off its dock to stay
+ * on-screen, is not at rest: the resting geometry would place it wrongly, and a
+ * later collapse would glide back to the old dock. A translucent window never
+ * changes size, so that is its whole test; a material window *is* the island and
+ * grows when it morphs open, so it must also be small.
  */
 function isAtRest(win: BrowserWindow): boolean {
+	if (!isIslandAtRest(win)) {
+		return false;
+	}
 	if (!isMaterial()) {
 		return true;
 	}
@@ -59,15 +65,15 @@ function tick(): void {
 	if (!win || win.isDestroyed()) {
 		return;
 	}
-	// Never yank a morphed-open material window using resting geometry; require a
-	// fresh settle once it collapses back to rest.
+	// Never yank an open or shifted island using resting geometry; require a
+	// fresh settle once it is back at rest.
 	if (!isAtRest(win)) {
 		settled = 0;
 		return;
 	}
 	// Only count toward a jump while the cursor genuinely sits on another monitor;
 	// reset the moment it returns to the island's display.
-	if (isIslandOnActiveDisplay(win, isMaterial())) {
+	if (isIslandOnActiveDisplay(win)) {
 		settled = 0;
 		return;
 	}
@@ -75,7 +81,7 @@ function tick(): void {
 	if (settled < SETTLE_TICKS) {
 		return;
 	}
-	moveToActiveDisplay(win, isMaterial());
+	moveToActiveDisplay(win);
 	// Re-arm the debounce: the island is now under the cursor, so the next jump
 	// waits for the cursor to settle on another monitor again.
 	settled = 0;
@@ -126,7 +132,7 @@ export function jumpNow(): void {
 	}
 	const win = getWindow();
 	if (win && !win.isDestroyed() && isAtRest(win)) {
-		moveToActiveDisplay(win, isMaterial());
+		moveToActiveDisplay(win);
 	}
 	settled = 0;
 }

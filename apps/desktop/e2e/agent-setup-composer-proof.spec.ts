@@ -1,11 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/19/01a0185e-7884-7061-bbdd-4aa2bba2d25d/agent-setup-composer-proof.png";
-const PROOF_LOG =
-	"/Users/jiawei/.codex/visualizations/2026/08/19/01a0185e-7884-7061-bbdd-4aa2bba2d25d/agent-setup-composer-proof.log.json";
-
 test("agent setup merges Markdown instructions with the universal picker", async ({
 	page,
 }) => {
@@ -80,7 +75,7 @@ test("agent setup merges Markdown instructions with the universal picker", async
 	).toBeVisible();
 
 	await page.screenshot({
-		path: PROOF_SCREENSHOT,
+		path: test.info().outputPath("agent-setup-composer-proof.png"),
 		fullPage: true,
 	});
 
@@ -105,7 +100,7 @@ test("agent setup merges Markdown instructions with the universal picker", async
 		'"engine": "claude"'
 	);
 	await writeFile(
-		PROOF_LOG,
+		test.info().outputPath("agent-setup-composer-proof.log.json"),
 		JSON.stringify({ consoleErrors, failedRequests }, null, 2)
 	);
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -76,6 +77,7 @@ export function RecentUpdates({
 	entries: ChangelogEntryData[];
 	className?: string;
 }) {
+	const tl = useLiteralMessages();
 	const [contentFilter, setContentFilter] = useState<ContentFilter>("all");
 	const [activeTag, setActiveTag] = useState<string | undefined>();
 	const [searchQuery, setSearchQuery] = useState("");
@@ -176,8 +178,11 @@ export function RecentUpdates({
 			{visibleItems.length === 0 ? (
 				<div className="py-12 text-center">
 					<p className="text-muted-foreground">
-						No results found
-						{searchQuery ? ` matching "${searchQuery}"` : " for this filter"}.
+						{searchQuery
+							? tl('No results found matching "{searchQuery}".', {
+									searchQuery,
+								})
+							: "No results found for this filter."}
 					</p>
 				</div>
 			) : (

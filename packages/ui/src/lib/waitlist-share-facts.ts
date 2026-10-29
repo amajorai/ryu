@@ -11,7 +11,7 @@
 // server-rendered `/pass` page; `QUEUE_STATS_MIN` lives in a client component.
 
 import { QUEUE_STATS_MIN } from "../components/waitlist-pass.tsx";
-import type { PassShareFacts } from "./pass-share.ts";
+import { isPassQueueNumber, type PassShareFacts } from "./pass-share.ts";
 
 /** The subset of `/api/waitlist/me` the pass is drawn from. */
 export interface WaitlistShareSource {
@@ -33,7 +33,7 @@ export function waitlistShareFacts(
 	}
 ): PassShareFacts {
 	const showPosition =
-		typeof me?.totalWaiting === "number" && me.totalWaiting > QUEUE_STATS_MIN;
+		isPassQueueNumber(me?.totalWaiting) && me.totalWaiting > QUEUE_STATS_MIN;
 	return {
 		name: userName?.trim() || (reserved ? `@${reserved}` : "Member"),
 		position: showPosition ? (me?.position ?? null) : null,

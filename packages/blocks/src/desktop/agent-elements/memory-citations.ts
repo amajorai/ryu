@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /** The data part emitted when Core injects built-in memory into a chat turn. */
 export const MEMORY_CITATIONS_PART = "data-ryu-memory-citations";
 
@@ -7,9 +9,15 @@ export interface MemoryCitation {
 	id: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
+const memoryCitationsPartSchema = z.object({
+	type: z.literal(MEMORY_CITATIONS_PART),
+	data: z.object({ citations: z.array(z.unknown()) }),
+});
+
+const memoryCitationSchema = z.object({
+	id: z.string().trim().min(1),
+	content: z.string().trim().min(1),
+});
 
 /**
  * Read memory citations from a UIMessage's opaque parts without trusting the
@@ -26,21 +34,17 @@ export function extractMemoryCitations(
 	const citations: MemoryCitation[] = [];
 	const seen = new Set<string>();
 	for (const part of parts) {
-		if (!isRecord(part) || part.type !== MEMORY_CITATIONS_PART) {
+		const envelope = memoryCitationsPartSchema.safeParse(part);
+		if (!envelope.success) {
 			continue;
 		}
-		const data = part.data;
-		if (!(isRecord(data) && Array.isArray(data.citations))) {
-			continue;
-		}
-		for (const candidate of data.citations) {
-			if (!isRecord(candidate)) {
+		for (const candidate of envelope.data.data.citations) {
+			const parsed = memoryCitationSchema.safeParse(candidate);
+			if (!parsed.success) {
 				continue;
 			}
-			const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-			const content =
-				typeof candidate.content === "string" ? candidate.content.trim() : "";
-			if (!(id && content) || seen.has(id)) {
+			const { content, id } = parsed.data;
+			if (seen.has(id)) {
 				continue;
 			}
 			seen.add(id);

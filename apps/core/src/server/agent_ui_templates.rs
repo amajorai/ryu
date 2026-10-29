@@ -237,7 +237,7 @@ pub struct AgentUiTemplateStore {
 
 impl AgentUiTemplateStore {
     pub fn open_default() -> Result<Self> {
-        Self::open(crate::paths::ryu_dir().join("agent-ui-templates.db"))
+        Self::open(crate::paths::db_path("agent-ui-templates.db"))
     }
 
     #[cfg(test)]

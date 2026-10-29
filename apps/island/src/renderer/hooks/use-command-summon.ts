@@ -13,14 +13,18 @@ import { useIslandAppearance } from "./use-island-appearance.ts";
  * 3. Mouse-capture is forced on while expanded so a hotkey-summoned palette is
  *    typeable with the pointer nowhere near the (transparent) window, and restored
  *    to the resting mode on collapse: a translucent window returns to click-through
- *    (pointerenter re-captures), a material window stays interactive.
+ *    (pointerenter re-captures), a material window stays interactive. Until main
+ *    has said which mode the window is, a collapse changes nothing and the resting
+ *    capture is applied when the answer lands.
  */
 export function useCommandSummon(): void {
 	const openCommand = useIslandState((store) => store.openCommand);
 	const state = useIslandState((store) => store.state);
 	const background = useIslandAppearance();
-	const material = background === "acrylic" || background === "mica";
 	const prevExpanded = useRef(false);
+	// A collapse happened before the window's mode was known, so its resting
+	// capture is still owed.
+	const restPending = useRef(false);
 
 	useEffect(() => {
 		const offOpen = window.island.command.onOpen(() => openCommand());
@@ -39,11 +43,23 @@ export function useCommandSummon(): void {
 
 	useEffect(() => {
 		const expanded = state === "expanded";
-		if (expanded && !prevExpanded.current) {
-			window.island.win.setMouseCapture(true);
-		} else if (!expanded && prevExpanded.current) {
-			window.island.win.setMouseCapture(material);
-		}
+		const opened = expanded && !prevExpanded.current;
+		const closed = !expanded && prevExpanded.current;
 		prevExpanded.current = expanded;
-	}, [state, material]);
+		if (opened) {
+			restPending.current = false;
+			window.island.win.setMouseCapture(true);
+			return;
+		}
+		if (closed) {
+			restPending.current = true;
+		}
+		if (!(restPending.current && background !== null)) {
+			return;
+		}
+		restPending.current = false;
+		window.island.win.setMouseCapture(
+			background === "acrylic" || background === "mica"
+		);
+	}, [state, background]);
 }

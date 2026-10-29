@@ -18,6 +18,9 @@
 
 import {
 	type AppRequestMethod,
+	type AppRequestValue,
+	type AppResponseValue,
+	type MountedAppPathInput,
 	mountedAppRequest,
 	resolveMountedAppPath,
 } from "./app-request.ts";
@@ -41,7 +44,7 @@ export type RlmMethod = "DELETE" | "GET" | "POST" | "PUT";
 
 export interface RlmRequestInput {
 	/** JSON body. Omit for GET/DELETE. */
-	body?: unknown;
+	body?: AppRequestValue;
 	/** Defaults to `"GET"`. */
 	method?: RlmMethod;
 	/** Path RELATIVE to `/api/rlm`, leading slash included, query and all. */
@@ -65,7 +68,7 @@ export interface RlmRequestInput {
  * `..` is what stops `%2e%2e` and its variants, which decode into dot segments only
  * AFTER a literal check would have run.
  */
-export function resolveRlmPath(path: unknown): string | null {
+export function resolveRlmPath(path: MountedAppPathInput): string | null {
 	return resolveMountedAppPath(RLM_MOUNT, path);
 }
 
@@ -79,7 +82,7 @@ export function resolveRlmPath(path: unknown): string | null {
 export async function rlmRequest(
 	target: ApiTarget,
 	input: RlmRequestInput
-): Promise<unknown> {
+): Promise<AppResponseValue> {
 	return await mountedAppRequest(target, input, {
 		allowedMethods: ALLOWED_METHODS,
 		invalidMethodMessage: (method) =>

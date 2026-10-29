@@ -302,6 +302,72 @@ pub struct SidecarManager {
     /// "crashed", and by [`Self::is_wake_eligible`] so the proxy only wakes sidecars
     /// that opted into on-demand start.
     lazy_registered: RwLock<HashSet<String>>,
+    /// Per-name **in-flight wake** — the single-flight table behind
+    /// [`Self::wake_and_await_healthy`]. A cold start runs on a detached task (so a
+    /// caller's short wait never cancels a venv/`pip install` mid-way), and every
+    /// concurrent waker of the same name joins that one task instead of starting a
+    /// second, racing install. Entries are replaced, never pruned: one per name.
+    wake_flights: Mutex<HashMap<String, WakeFlight>>,
+}
+
+/// Total budget for the DETACHED start a wake kicks off.
+///
+/// A lazy Python sidecar's first start is a provisioning run (`python -m venv` +
+/// `pip install`), from tens of MB to gigabytes. Callers stop *waiting* at their own
+/// short timeout; the start itself keeps this budget to finish in the background.
+pub const WAKE_START_BUDGET: Duration = Duration::from_secs(30 * 60);
+
+/// What a finished wake flight reported: `Ok(woke)` or the start's error text.
+type WakeOutcome = Result<bool, String>;
+
+/// One detached cold start that concurrent wakers share. See
+/// [`SidecarManager::wake_and_await_healthy`].
+#[derive(Clone)]
+struct WakeFlight {
+    /// `None` while the start runs; `Some` once it finished. A closed channel with
+    /// `None` means the task died without reporting (a panic) — treated as stale.
+    outcome: tokio::sync::watch::Receiver<Option<WakeOutcome>>,
+    /// Whether some waiter already received the flight's `woke = true`, so the
+    /// cold-start moment (the caller's activation event) is reported exactly once —
+    /// even when every waiter of the flight itself gave up before it finished.
+    cold_start_claimed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl WakeFlight {
+    /// A flight that a new waker should join rather than replace: still running.
+    fn in_progress(&self) -> bool {
+        self.outcome.borrow().is_none() && self.outcome.has_changed().is_ok()
+    }
+}
+
+/// The wake's start has not finished within the caller's wait — **retryable**. The
+/// start keeps running on its detached task, so a later request finds it warm (or
+/// joins the same in-flight start). Distinct from a real start failure, which is
+/// surfaced as a plain error carrying the start's own message.
+#[derive(Debug, Clone)]
+pub struct SidecarStillStarting {
+    pub name: String,
+    pub waited: Duration,
+}
+
+impl std::fmt::Display for SidecarStillStarting {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "sidecar '{}' is still starting after {}s (a first start may be installing \
+             its environment); retry shortly",
+            self.name,
+            self.waited.as_secs()
+        )
+    }
+}
+
+impl std::error::Error for SidecarStillStarting {}
+
+/// Whether `err` (from [`SidecarManager::wake_and_await_healthy`]) means "still
+/// starting, retry" rather than "the start failed".
+pub fn is_still_starting(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<SidecarStillStarting>().is_some()
 }
 
 impl SidecarManager {
@@ -331,6 +397,7 @@ impl SidecarManager {
             idle_overrides: Mutex::new(HashMap::new()),
             start_locks: Mutex::new(HashMap::new()),
             lazy_registered: RwLock::new(HashSet::new()),
+            wake_flights: Mutex::new(HashMap::new()),
         })
     }
 
@@ -358,6 +425,7 @@ impl SidecarManager {
             idle_overrides: Mutex::new(HashMap::new()),
             start_locks: Mutex::new(HashMap::new()),
             lazy_registered: RwLock::new(HashSet::new()),
+            wake_flights: Mutex::new(HashMap::new()),
         })
     }
 
@@ -405,7 +473,27 @@ impl SidecarManager {
                 continue;
             }
 
-            let result = self.start_with_retries(&sidecar).await;
+            // Hold the active-engine slot while the resident engine boots. A chat
+            // turn that arrives meanwhile calls `set_active_local_engine`, which
+            // takes the same lock; without it that call saw the engine as "not
+            // running yet" and started a second copy, which replaced (and killed)
+            // the first process and contended for the same port, failing both.
+            // Taken before the per-name start lock, the same order
+            // `set_active_local_engine` -> `start_sidecar` takes them.
+            let engine_slot = if is_local_engine(name) {
+                Some(self.active_engine.lock().await)
+            } else {
+                None
+            };
+            // The same per-name lock as `start_sidecar`: a lazy start racing this
+            // boot pass (a search, a gateway config push) must not spawn a second
+            // child for the same name.
+            let result = {
+                let lock = self.start_lock_for(name);
+                let _guard = lock.lock().await;
+                self.start_with_retries(&sidecar).await
+            };
+            drop(engine_slot);
             match result {
                 Ok(()) => self.spawn_health_monitor(name),
                 Err(e) if sidecar.is_required() => {
@@ -432,7 +520,10 @@ impl SidecarManager {
     pub async fn available_local_engines(&self) -> Vec<String> {
         let mut available = Vec::new();
         for name in &self.startup_order {
-            if is_local_engine(name)
+            // A stale install marker (e.g. a data dir copied from a Mac) must not
+            // list an engine this node can't run; `set_active_local_engine`
+            // would refuse it anyway.
+            if crate::sidecar::active_engine::can_reside_on_node(name)
                 && self.sidecars.contains_key(name)
                 && self.setup.is_installed(name).await
             {
@@ -496,7 +587,15 @@ impl SidecarManager {
             }
         }
 
-        // Load the requested engine.
+        // Load the requested engine. One already running outside the slot (started
+        // directly, e.g. from the services panel) is stopped first: a start keeps a
+        // live child as it is, so it would go on serving the model it was spawned
+        // with instead of the selection the caller just persisted.
+        if already_running {
+            if let Err(e) = self.stop_sidecar(name).await {
+                tracing::warn!("error stopping {name} before making it resident: {e}");
+            }
+        }
         let start_result = self.start_sidecar(name).await;
         let running = start_result.is_ok();
 
@@ -521,8 +620,16 @@ impl SidecarManager {
     /// selection if it is still installed, else the first installed local engine
     /// in startup order, else none.
     async fn resolve_resident_engine(&self) -> Option<String> {
+        use crate::sidecar::active_engine::can_reside_on_node;
         if let Some(persisted) = ActiveEngineStore::load().active {
-            if is_local_engine(&persisted)
+            // A data dir copied from another machine can name an engine this
+            // platform cannot run (MLX on Linux); fall back instead of failing.
+            if is_local_engine(&persisted) && !can_reside_on_node(&persisted) {
+                tracing::warn!(
+                    engine = %persisted,
+                    "persisted local engine is not supported on this node; falling back to the default engine"
+                );
+            } else if is_local_engine(&persisted)
                 && self.sidecars.contains_key(&persisted)
                 && self.setup.is_installed(&persisted).await
             {
@@ -530,7 +637,7 @@ impl SidecarManager {
             }
         }
         for name in &self.startup_order {
-            if is_local_engine(name)
+            if can_reside_on_node(name)
                 && self.sidecars.contains_key(name)
                 && self.setup.is_installed(name).await
             {
@@ -854,8 +961,14 @@ impl SidecarManager {
             if let Some(handle) = self.health_monitors.lock().unwrap().remove(name) {
                 handle.abort();
             }
-            sidecar.stop().await?;
-            sidecar.start().await?;
+            // Same per-name lock as `start_sidecar`, so a lazy start cannot slip a
+            // child in between this stop and start.
+            {
+                let lock = self.start_lock_for(name);
+                let _guard = lock.lock().await;
+                sidecar.stop().await?;
+                sidecar.start().await?;
+            }
             self.spawn_health_monitor(name);
             return Ok(());
         }
@@ -898,8 +1011,32 @@ impl SidecarManager {
         self.setup.uninstall(name).await;
     }
 
+    /// Whether the named sidecar's process is currently running.
+    pub fn is_sidecar_running(&self, name: &str) -> bool {
+        self.sidecars
+            .get(name)
+            .is_some_and(|sidecar| sidecar.is_running())
+    }
+
     /// Start a single installed sidecar by name and spawn its health monitor.
     pub async fn start_sidecar(self: &Arc<Self>, name: &str) -> anyhow::Result<()> {
+        if crate::gaming::models_paused() && crate::gaming::is_model_sidecar(name) {
+            return Err(crate::gaming::paused_error(name));
+        }
+        // The platform gate applies to every start path (the direct
+        // `/api/sidecar/{name}/start` route, restarts, lazy starts), not only
+        // installs: an install marker copied from another machine must not
+        // launch a binary built for a different OS or architecture.
+        if !crate::catalog::registry::supported_on_node(name) {
+            return Err(anyhow::anyhow!(
+                "'{name}' is not supported on this node ({}/{}){}",
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                crate::catalog::registry::platform_requirement(name)
+                    .map(|reason| format!(" — {reason}"))
+                    .unwrap_or_default()
+            ));
+        }
         if !self.setup.is_installed(name).await {
             return Err(anyhow::anyhow!(
                 "'{name}' is not installed — run `ryu setup` first"
@@ -910,7 +1047,15 @@ impl SidecarManager {
             .get(name)
             .ok_or_else(|| anyhow::anyhow!("unknown sidecar: {name}"))?;
         let sidecar = Arc::clone(sidecar);
-        sidecar.start().await?;
+        // Serialize starts of the same name. Lazy callers fire this per request
+        // (a search, a gateway config push), and two cold starts racing before
+        // either has spawned would both spawn. The second waits here, then finds
+        // the first's child serving or loading and returns without spawning.
+        {
+            let lock = self.start_lock_for(name);
+            let _guard = lock.lock().await;
+            sidecar.start().await?;
+        }
         self.spawn_health_monitor(name);
         // Every lazy-start call site is also a request touchpoint: recording
         // activity here means the fire-and-forget `start_sidecar` spawns that wake
@@ -999,6 +1144,7 @@ impl SidecarManager {
                 // failure_reason: None` for a process that no longer existed.
                 failure_reason: crate::sidecar::manifest_sidecar::registration_failure_reason(name)
                     .or_else(|| crate::sidecar::manifest_sidecar::crash_reason(name)),
+                sandbox: crate::sidecar::os_isolation::sandbox_status(name),
             }
         };
         let mut out: Vec<SidecarStatus> = self
@@ -1038,6 +1184,7 @@ impl SidecarManager {
                 memory_bytes: None,
                 cpu_percent: None,
                 failure_reason: Some(reason),
+                sandbox: None,
             });
         }
         out
@@ -1128,6 +1275,9 @@ impl SidecarManager {
         if sidecar.is_running() {
             return Ok(false);
         }
+        if crate::gaming::models_paused() && crate::gaming::is_model_sidecar(name) {
+            return Err(crate::gaming::paused_error(name));
+        }
         // Serialize concurrent wakes of the SAME name so two racing first requests
         // (or an enable racing a first proxy hit) start the child exactly once. The
         // is_running re-check under the lock is what closes the previous race where
@@ -1143,49 +1293,148 @@ impl SidecarManager {
         Ok(true)
     }
 
-    /// Wake `name` on demand and (if it had to be started) block until it reports
-    /// healthy — the proxy/broker warm-up gate. The WHOLE operation (start + health
-    /// poll) is bounded by `timeout` so a first `start()` that includes a binary
-    /// download can never stall the caller past its budget; a timeout is surfaced as
-    /// an error the proxy turns into a 503 "warming" (a resumable `.part` download
-    /// means a later request warms it). Returns `Ok(true)` when it cold-started the
-    /// process (the "first hit" moment the caller fires an activation event on),
-    /// `Ok(false)` when it was already warm (no health wait needed).
+    /// Wake `name` on demand and (if it had to be started) wait until it reports
+    /// healthy — the proxy/broker warm-up gate.
+    ///
+    /// **The start is detached and single-flight.** A cold start (start + health
+    /// poll) runs on its own task with [`WAKE_START_BUDGET`]; the caller only waits
+    /// `timeout` for it. A caller that gives up therefore stops *waiting* without
+    /// cancelling the start — a first start that is a venv + `pip install` used to be
+    /// dropped mid-install by the caller's timeout, orphaning pip, and the next
+    /// request began a second install racing the first. Concurrent wakes of the same
+    /// name join the one in-flight start.
+    ///
+    /// Returns `Ok(true)` exactly once per cold start (the "first hit" moment a caller
+    /// fires an activation event on — handed to a later waker if every waiter of the
+    /// start itself gave up), `Ok(false)` when already warm. A wait that ran out is an
+    /// error carrying [`SidecarStillStarting`] (retryable; see [`is_still_starting`]);
+    /// any other error is the start's real failure.
     pub async fn wake_and_await_healthy(
         self: &Arc<Self>,
         name: &str,
         timeout: Duration,
     ) -> anyhow::Result<bool> {
+        let sidecar = self
+            .resolve_sidecar(name)
+            .ok_or_else(|| anyhow::anyhow!("unknown sidecar: {name}"))?;
+        let flight = {
+            let mut flights = self.wake_flights.lock().unwrap();
+            let existing = flights.get(name).cloned();
+            match existing {
+                Some(flight) if flight.in_progress() => flight,
+                Some(flight)
+                    if sidecar.is_running() && Self::claim_unreported_cold_start(&flight) =>
+                {
+                    drop(flights);
+                    self.touch_activity(name);
+                    return Ok(true);
+                }
+                _ => {
+                    if sidecar.is_running() {
+                        drop(flights);
+                        self.touch_activity(name);
+                        return Ok(false);
+                    }
+                    let flight = self.spawn_wake_flight(name);
+                    flights.insert(name.to_string(), flight.clone());
+                    flight
+                }
+            }
+        };
+        Self::await_wake_flight(name, &flight, timeout).await
+    }
+
+    /// A finished flight whose `woke = true` no waiter received yet: claim it.
+    fn claim_unreported_cold_start(flight: &WakeFlight) -> bool {
+        let woke = matches!(*flight.outcome.borrow(), Some(Ok(true)));
+        woke && !flight
+            .cold_start_claimed
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Start `name`'s wake (start + health poll) on a detached task bounded by
+    /// [`WAKE_START_BUDGET`]. The caller inserts the returned flight under the
+    /// `wake_flights` lock, which is what makes the start single-flight.
+    fn spawn_wake_flight(self: &Arc<Self>, name: &str) -> WakeFlight {
+        let (tx, outcome) = tokio::sync::watch::channel(None);
         let this = Arc::clone(self);
         let name_owned = name.to_string();
-        tokio::time::timeout(timeout, async move {
-            let woke = this.wake_sidecar(&name_owned).await?;
-            if woke {
-                this.await_healthy(&name_owned).await?;
+        tokio::spawn(async move {
+            let run = async {
+                let woke = this.wake_sidecar(&name_owned).await?;
+                if woke {
+                    this.await_healthy(&name_owned).await?;
+                }
+                Ok::<bool, anyhow::Error>(woke)
+            };
+            let result = match tokio::time::timeout(WAKE_START_BUDGET, run).await {
+                Ok(Ok(woke)) => Ok(woke),
+                Ok(Err(e)) => Err(format!("{e:#}")),
+                Err(_) => Err(format!(
+                    "sidecar '{name_owned}' did not become healthy within {}s",
+                    WAKE_START_BUDGET.as_secs()
+                )),
+            };
+            if let Err(e) = &result {
+                tracing::warn!(sidecar = %name_owned, "sidecar wake failed: {e}");
             }
-            Ok::<bool, anyhow::Error>(woke)
-        })
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "sidecar '{name}' did not warm within {}s",
-                timeout.as_secs()
-            )
-        })?
+            let _ = tx.send(Some(result));
+        });
+        WakeFlight {
+            outcome,
+            cold_start_claimed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    /// Wait at most `timeout` for `flight` to finish — never cancelling it.
+    async fn await_wake_flight(
+        name: &str,
+        flight: &WakeFlight,
+        timeout: Duration,
+    ) -> anyhow::Result<bool> {
+        let mut outcome = flight.outcome.clone();
+        let finished = match tokio::time::timeout(timeout, outcome.wait_for(Option::is_some)).await
+        {
+            Err(_) => {
+                return Err(anyhow::Error::new(SidecarStillStarting {
+                    name: name.to_string(),
+                    waited: timeout,
+                }))
+            }
+            Ok(Err(_)) => anyhow::bail!("sidecar '{name}' wake task ended without reporting"),
+            Ok(Ok(finished)) => finished.clone(),
+        };
+        match finished {
+            Some(Ok(true)) => Ok(!flight
+                .cold_start_claimed
+                .swap(true, std::sync::atomic::Ordering::SeqCst)),
+            Some(Ok(false)) | None => Ok(false),
+            Some(Err(e)) => Err(anyhow::anyhow!(e)),
+        }
     }
 
     /// Poll a sidecar's health check until it is [`HealthStatus::Healthy`], sleeping
     /// briefly between attempts. Unbounded on its own — always called inside the
-    /// `wake_and_await_healthy` timeout that bounds it.
+    /// detached wake flight's [`WAKE_START_BUDGET`] that bounds it.
     async fn await_healthy(&self, name: &str) -> anyhow::Result<()> {
         let sidecar = self
             .resolve_sidecar(name)
             .ok_or_else(|| anyhow::anyhow!("unknown sidecar: {name}"))?;
+        // Start tight and back off: most warm starts become healthy within a few
+        // hundred ms, and a flat 200 ms poll added ~100 ms to every wake on average.
+        let mut delay = Duration::from_millis(25);
         loop {
             if matches!(sidecar.health_check().await, HealthStatus::Healthy) {
                 return Ok(());
             }
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            // The poll now outlives its callers (it runs on the detached flight), so
+            // a child that died after `start` must end the flight, not hold it open
+            // for the whole start budget.
+            if !sidecar.is_running() {
+                anyhow::bail!("sidecar '{name}' exited before becoming healthy");
+            }
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(Duration::from_millis(250));
         }
     }
 
@@ -1403,6 +1652,42 @@ impl SidecarManager {
                 }
             }
         });
+    }
+
+    /// Gaming mode: stop every running model sidecar that has no request in
+    /// flight, and return the names it stopped. A busy sidecar is spared and
+    /// picked up by the next detector tick once its request finishes, so a reply
+    /// that is mid-stream is never cut off. Built-in sidecars stay registered, and
+    /// [`Self::start_sidecar`] / [`Self::wake_sidecar`] refuse to restart them
+    /// while [`crate::gaming::models_paused`] holds.
+    pub async fn pause_model_sidecars(self: &Arc<Self>) -> Vec<String> {
+        let candidates: Vec<(String, Arc<dyn Sidecar>)> = self
+            .sidecars
+            .iter()
+            .filter(|(name, sidecar)| crate::gaming::is_model_sidecar(name) && sidecar.is_running())
+            .map(|(name, sidecar)| (name.clone(), Arc::clone(sidecar)))
+            .collect();
+        let mut stopped = Vec::new();
+        for (name, sidecar) in candidates {
+            let busy = self
+                .activity
+                .lock()
+                .unwrap()
+                .get(&name)
+                .is_some_and(|state| state.in_flight > 0);
+            if busy {
+                continue;
+            }
+            if let Some(handle) = self.health_monitors.lock().unwrap().remove(&name) {
+                handle.abort();
+            }
+            match sidecar.stop().await {
+                Ok(()) => stopped.push(name.clone()),
+                Err(e) => tracing::warn!("gaming mode could not stop '{name}': {e}"),
+            }
+            self.activity.lock().unwrap().remove(&name);
+        }
+        stopped
     }
 
     /// Whether `name` is still idle (no in-flight request and idle clock still
@@ -1656,115 +1941,76 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn typed_team_client_never_dials_a_refused_or_stopped_sidecar() {
-        let manager = SidecarManager::new_noop();
-        let name = "@ryu/teams/ryu-teams";
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let client = crate::teams_client::TeamsClient::new(Arc::clone(&manager));
-        assert!(manager
-            .register_and_start(FakeSidecar::with_port(name, port))
-            .await
-            .is_err());
-        assert!(client
-            .get("test-team")
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("not registered"));
-        assert_eq!(
-            listener.accept().unwrap_err().kind(),
-            std::io::ErrorKind::WouldBlock
-        );
+    /// A local engine whose `start` takes a while, like a model load.
+    struct SlowEngine {
+        running: Arc<AtomicBool>,
+        start_calls: Arc<std::sync::atomic::AtomicU32>,
+    }
 
-        drop(listener);
-        let sidecar = FakeSidecar::with_port(name, port);
-        manager.register_and_start(sidecar.clone()).await.unwrap();
-        // The same client now resolves the live registration instead of retaining
-        // its initial unavailable state or a manifest port.
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
-            .await
-            .unwrap();
-        let server = tokio::spawn(async move {
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0u8; 4096];
-            let read = stream.read(&mut request).await.unwrap();
-            assert!(
-                String::from_utf8_lossy(&request[..read]).starts_with("GET /api/teams/test-team ")
-            );
-            let body = r#"{"team":{"id":"test-team","name":"Test","members":[],"coordination":"broadcast"}}"#;
-            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-            listener
-        });
-        let team = tokio::time::timeout(Duration::from_secs(5), client.get("test-team"))
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        assert_eq!(team.id, "test-team");
-        let listener = server.await.unwrap();
-        sidecar.running.store(false, Ordering::SeqCst);
-        assert!(client.get("test-team").await.is_err());
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), listener.accept())
-                .await
-                .is_err()
-        );
+    impl Sidecar for SlowEngine {
+        fn name(&self) -> &str {
+            "llamacpp"
+        }
+        fn is_required(&self) -> bool {
+            false
+        }
+        fn start(&self) -> BoxFuture<anyhow::Result<()>> {
+            let running = self.running.clone();
+            let calls = self.start_calls.clone();
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                running.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+        fn stop(&self) -> BoxFuture<anyhow::Result<()>> {
+            let running = self.running.clone();
+            Box::pin(async move {
+                running.store(false, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+        fn health_check(&self) -> BoxFuture<HealthStatus> {
+            Box::pin(async move { HealthStatus::Healthy })
+        }
+        fn is_running(&self) -> bool {
+            self.running.load(Ordering::SeqCst)
+        }
     }
 
     #[tokio::test]
-    async fn dashboard_feed_disconnects_when_its_consumer_closes() {
-        use ryu_hardware::feed::DashboardFeed;
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    async fn chat_during_boot_waits_for_the_resident_engine_instead_of_double_starting() {
+        let engine = Arc::new(SlowEngine {
+            running: Arc::new(AtomicBool::new(false)),
+            start_calls: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        });
+        let setup = Arc::new(crate::sidecar::onboarding::SetupManager::new());
+        setup.mark_installed("llamacpp").await;
+        let manager = SidecarManager::new(
+            vec![engine.clone() as Arc<dyn Sidecar>],
+            vec!["llamacpp".to_owned()],
+            setup,
+        );
 
-        for response_prefix in [
-            "",
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n",
-        ] {
-            let manager = SidecarManager::new_noop();
-            let reservation = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-            let port = reservation.local_addr().unwrap().port();
-            drop(reservation);
-            let name = "@ryu/dashboards/ryu-dashboards";
-            manager
-                .register_and_start(FakeSidecar::with_port(name, port))
-                .await
-                .unwrap();
-            let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
-                .await
-                .unwrap();
-            let (started, ready) = tokio::sync::oneshot::channel();
-            let server = tokio::spawn(async move {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut buffer = [0; 4096];
-                assert!(socket.read(&mut buffer).await.unwrap() > 0);
-                socket.write_all(response_prefix.as_bytes()).await.unwrap();
-                started.send(()).unwrap();
-                loop {
-                    match socket.read(&mut buffer).await {
-                        Ok(0) => break,
-                        Ok(_) => {}
-                        Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
-                        Err(error) => panic!("unexpected socket read failure: {error}"),
-                    }
-                }
-            });
-            let client = crate::dashboards_client::DashboardsClient::new(manager.clone());
-            let receiver = client.subscribe_changes().await;
-            tokio::time::timeout(Duration::from_secs(3), ready)
-                .await
-                .unwrap()
-                .unwrap();
-            drop(receiver);
-            tokio::time::timeout(Duration::from_secs(2), server)
-                .await
-                .expect("dropping the dashboard consumer must close the HTTP read")
-                .unwrap();
-            manager.stop_and_deregister(name).await.unwrap();
+        let booting = {
+            let manager = Arc::clone(&manager);
+            tokio::spawn(async move { manager.start_all().await })
+        };
+        // Let boot begin the slow resident start, then race a chat-driven swap.
+        while engine.start_calls.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
+        let swap = manager
+            .set_active_local_engine("llamacpp")
+            .await
+            .expect("swap to the booting resident engine");
+        booting.await.unwrap().unwrap();
+
+        assert!(swap.unchanged, "the chat must reuse the booted engine");
+        assert_eq!(engine.start_calls.load(Ordering::SeqCst), 1);
+        assert!(engine.is_running());
+        manager.stop_all().await;
     }
 
     /// A minimal in-memory [`Sidecar`] for exercising the runtime-registration
@@ -2648,7 +2894,11 @@ mod tests {
         mgr.activity.lock().unwrap().insert(
             "anything".to_string(),
             ActivityState {
-                last_activity: Instant::now() - Duration::from_secs(9999),
+                // `Instant` counts from boot on Windows, so subtracting hours from
+                // it underflows on a freshly booted machine.
+                last_activity: Instant::now()
+                    .checked_sub(Duration::from_secs(9999))
+                    .unwrap_or_else(Instant::now),
                 in_flight: 0,
             },
         );
@@ -2910,5 +3160,180 @@ mod tests {
         let mgr2 = SidecarManager::new_noop();
         mgr2.set_idle_override("x", 0);
         assert!(!mgr2.is_wake_eligible("x"));
+    }
+
+    /// A [`Sidecar`] whose `start` blocks until the test releases it — the shape of a
+    /// first start that is a venv + `pip install` outliving the caller's wait.
+    struct GatedSidecar {
+        name: String,
+        running: Arc<AtomicBool>,
+        start_calls: Arc<std::sync::atomic::AtomicU32>,
+        gate: Arc<tokio::sync::Semaphore>,
+        fail_with: Option<&'static str>,
+    }
+
+    impl GatedSidecar {
+        fn new(name: &str, fail_with: Option<&'static str>) -> Arc<Self> {
+            Arc::new(Self {
+                name: name.to_string(),
+                running: Arc::new(AtomicBool::new(false)),
+                start_calls: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                gate: Arc::new(tokio::sync::Semaphore::new(0)),
+                fail_with,
+            })
+        }
+
+        fn release(&self) {
+            self.gate.add_permits(1);
+        }
+    }
+
+    impl Sidecar for GatedSidecar {
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn is_required(&self) -> bool {
+            false
+        }
+        fn start(&self) -> BoxFuture<anyhow::Result<()>> {
+            let running = self.running.clone();
+            let calls = self.start_calls.clone();
+            let gate = self.gate.clone();
+            let fail_with = self.fail_with;
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                gate.acquire().await.expect("gate open").forget();
+                if let Some(message) = fail_with {
+                    anyhow::bail!(message);
+                }
+                running.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+        fn stop(&self) -> BoxFuture<anyhow::Result<()>> {
+            let running = self.running.clone();
+            Box::pin(async move {
+                running.store(false, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+        fn health_check(&self) -> BoxFuture<HealthStatus> {
+            Box::pin(async move { HealthStatus::Healthy })
+        }
+        fn is_running(&self) -> bool {
+            self.running.load(Ordering::SeqCst)
+        }
+        fn port(&self) -> Option<u16> {
+            None
+        }
+    }
+
+    async fn wait_until_running(sc: &GatedSidecar) {
+        for _ in 0..400 {
+            if sc.is_running() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the detached start was cancelled when the caller stopped waiting");
+    }
+
+    /// A caller that stops waiting must not cancel the start it was waiting on: the
+    /// wait reports "still starting" (retryable), the start keeps running and
+    /// completes, and the cold start is still reported once to a later waker.
+    #[tokio::test]
+    async fn a_wake_that_outlives_the_caller_timeout_keeps_starting() {
+        let mgr = SidecarManager::new_noop();
+        let sc = GatedSidecar::new("com.acme.tool/slow", None);
+        mgr.register(sc.clone()).unwrap();
+
+        let err = mgr
+            .wake_and_await_healthy("com.acme.tool/slow", Duration::from_millis(20))
+            .await
+            .expect_err("an unfinished start reads as still starting");
+        assert!(is_still_starting(&err), "got: {err:#}");
+
+        sc.release();
+        wait_until_running(&sc).await;
+        assert_eq!(sc.start_calls.load(Ordering::SeqCst), 1);
+        // The cold start nobody saw finish is handed to the next waker, once.
+        assert!(mgr
+            .wake_and_await_healthy("com.acme.tool/slow", Duration::from_secs(5))
+            .await
+            .unwrap());
+        assert!(!mgr
+            .wake_and_await_healthy("com.acme.tool/slow", Duration::from_secs(5))
+            .await
+            .unwrap());
+        assert_eq!(sc.start_calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Concurrent wakes of the same cold sidecar share ONE in-flight start — including
+    /// a waker that arrives after an earlier one already gave up waiting.
+    #[tokio::test]
+    async fn concurrent_wakes_share_one_in_flight_start() {
+        let mgr = SidecarManager::new_noop();
+        let sc = GatedSidecar::new("com.acme.tool/slow", None);
+        mgr.register(sc.clone()).unwrap();
+
+        let first = mgr
+            .wake_and_await_healthy("com.acme.tool/slow", Duration::from_millis(10))
+            .await
+            .expect_err("still starting");
+        assert!(is_still_starting(&first));
+
+        let mut waiters = Vec::new();
+        for _ in 0..8 {
+            let mgr = Arc::clone(&mgr);
+            waiters.push(tokio::spawn(async move {
+                mgr.wake_and_await_healthy("com.acme.tool/slow", Duration::from_secs(5))
+                    .await
+            }));
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sc.release();
+        let mut cold_starts = 0;
+        for waiter in waiters {
+            if waiter.await.unwrap().expect("joined start succeeds") {
+                cold_starts += 1;
+            }
+        }
+        assert_eq!(
+            sc.start_calls.load(Ordering::SeqCst),
+            1,
+            "one start, shared"
+        );
+        assert_eq!(cold_starts, 1, "the cold start is reported exactly once");
+    }
+
+    /// A start that fails is reported as that failure, not as "still starting", and
+    /// the next wake retries with a fresh start.
+    #[tokio::test]
+    async fn a_failing_wake_reports_the_start_error() {
+        let mgr = SidecarManager::new_noop();
+        let sc = GatedSidecar::new("com.acme.tool/broken", Some("pip install failed"));
+        mgr.register(sc.clone()).unwrap();
+        sc.release();
+
+        let err = mgr
+            .wake_and_await_healthy("com.acme.tool/broken", Duration::from_secs(5))
+            .await
+            .expect_err("a failing start is an error");
+        assert!(!is_still_starting(&err));
+        assert!(
+            format!("{err:#}").contains("pip install failed"),
+            "got: {err:#}"
+        );
+
+        sc.release();
+        assert!(mgr
+            .wake_and_await_healthy("com.acme.tool/broken", Duration::from_secs(5))
+            .await
+            .is_err());
+        assert_eq!(
+            sc.start_calls.load(Ordering::SeqCst),
+            2,
+            "a failed flight is retried"
+        );
     }
 }

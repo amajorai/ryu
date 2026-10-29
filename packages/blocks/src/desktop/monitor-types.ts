@@ -8,5 +8,10 @@ export type {
 	MonitorInput,
 	NotifyTarget,
 	NumComparator,
+	ProviderUsageSnapshot,
 	Snapshot,
+	UsageMeterTarget,
+	UsageMeterValueTarget,
+	UsageProviderOption,
+	UsageWindowTarget,
 } from "@ryuhq/core-client/monitors";

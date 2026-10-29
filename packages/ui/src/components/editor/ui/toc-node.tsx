@@ -39,6 +39,10 @@ export function TocElement(props: PlateElementProps) {
 							}
 							className={headingItemVariants({
 								active: item.id === activeContentId,
+								// SAFETY: Installed cva indexes its actual variant table and omits
+								// unknown keys. The native Heading depth is forwarded unchanged:
+								// only 1/2/3 add spacing; 4/5/6 and custom depths keep the
+								// existing no-depth-class fallback. No closed-set membership is proved.
 								depth: item.depth as 1 | 2 | 3,
 							})}
 							key={item.id}
@@ -49,7 +53,7 @@ export function TocElement(props: PlateElementProps) {
 						</Button>
 					))
 				) : (
-					<div className="text-gray-500 text-sm">
+					<div className="text-muted-foreground text-sm">
 						Create a heading to display the table of contents.
 					</div>
 				)}

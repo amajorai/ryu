@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/models.ts
 //
 // Typed client for Core's model-catalog endpoints (`/api/models/*`). The catalog
@@ -7,82 +9,261 @@
 // and parses responses, so the same Core powers the desktop, mobile, and
 // extension surfaces identically.
 
+import {
+	MODEL_CATEGORY_OPTIONS,
+	type ModelCategory,
+} from "@ryu/marketplace/catalog/types";
+import {
+	type ActiveModelPreview,
+	activeModelPreviewSchema,
+	type ModelInstallPreview,
+	type ModelUninstallPreview,
+	modelInstallPreviewSchema,
+	modelUninstallPreviewSchema,
+} from "@ryuhq/core-client/model-preview-contracts.ts";
+import type {
+	AaStats,
+	ActiveModel,
+	CatalogSource,
+	CatalogSources,
+	DeviceInfo,
+	FitVerdict,
+	InstallResult,
+	ModelCard,
+	ModelFormat,
+	NodeEngines,
+	SearchParams,
+	SetActiveModelResult,
+} from "@ryuhq/core-client/models.ts";
 import { track } from "@/src/lib/analytics.ts";
-import { type ApiTarget, buyerTokenHeader, request } from "./client.ts";
+import {
+	ApiError,
+	type ApiTarget,
+	buyerTokenHeader,
+	request,
+} from "./client.ts";
 
-/** How the catalog list is ordered. Mirrors Core's `CatalogSort`. */
-export type ModelSort = "trending" | "downloads" | "likes" | "recent";
+export type {
+	AaStats,
+	ActiveModel,
+	CatalogSource,
+	CatalogSources,
+	DeviceInfo,
+	FitVerdict,
+	InstallResult,
+	ModelCard,
+	ModelFormat,
+	ModelSort,
+	NodeEngine,
+	NodeEngines,
+	NodeFormatSupport,
+	SearchParams,
+	SetActiveModelResult,
+} from "@ryuhq/core-client/models.ts";
 
-/**
- * Model weight format. Mirrors Core's `ModelFormat`. GGUF is a single quantized
- * file (llama.cpp/Ollama); safetensors (vLLM/SGLang) and MLX are multi-file repo
- * snapshots. The format determines which engine can serve the model.
- */
-export type ModelFormat = "gguf" | "safetensors" | "mlx";
+const modelsResponseSchema = z.looseObject({
+	architecture: z.union([z.null(), z.string()]).optional(),
+	author: z.string(),
+	compatible: z.boolean().optional(),
+	context_length: z.union([z.null(), z.number()]).optional(),
+	created_at: z.union([z.null(), z.string()]).optional(),
+	downloads: z.number().optional(),
+	format: z
+		.union([z.literal("gguf"), z.literal("safetensors"), z.literal("mlx")])
+		.optional(),
+	gated: z.boolean().optional(),
+	id: z.string(),
+	installed: z.boolean().optional(),
+	last_modified: z.union([z.null(), z.string()]).optional(),
+	likes: z.number().optional(),
+	name: z.string(),
+	needs_engine: z.union([z.null(), z.string()]).optional(),
+	params: z.union([z.null(), z.number()]).optional(),
+	pipeline_tag: z.union([z.null(), z.string()]).optional(),
+	tags: z.array(z.string()).optional(),
+});
+const jsonResponseSchema = z.looseObject({
+	models: z.array(modelsResponseSchema).optional(),
+	next_cursor: z.union([z.null(), z.string()]).optional(),
+	total: z.union([z.null(), z.number()]).optional(),
+	total_count: z.union([z.null(), z.number()]).optional(),
+});
+const filesResponseSchema = z.looseObject({
+	filename: z.string(),
+	fit: z
+		.union([
+			z.literal("no_space"),
+			z.literal("too_big"),
+			z.literal("cpu"),
+			z.literal("partial"),
+			z.literal("ok"),
+			z.literal("great"),
+			z.literal("unknown"),
+		])
+		.optional(),
+	fit_label: z.string().optional(),
+	installed: z.boolean().optional(),
+	quant: z.union([z.null(), z.string()]).optional(),
+	sha256: z.union([z.null(), z.string()]).optional(),
+	size_bytes: z.union([z.null(), z.number()]).optional(),
+	size_human: z.string().optional(),
+	url: z.string(),
+});
+const statsResponseSchema = z.looseObject({
+	intelligence_index: z.union([z.null(), z.number()]).optional(),
+	matched_name: z.string().optional(),
+	output_tokens_per_second: z.union([z.null(), z.number()]).optional(),
+	price_usd_per_1m: z.union([z.null(), z.number()]).optional(),
+	time_to_first_token_s: z.union([z.null(), z.number()]).optional(),
+});
+const deviceResponseSchema = z.looseObject({
+	disk_free_bytes: z.union([z.null(), z.number()]).optional(),
+	disk_free_human: z.string().optional(),
+	gpu_name: z.union([z.null(), z.string()]).optional(),
+	os: z.string().optional(),
+	ram_human: z.string().optional(),
+	total_ram_bytes: z.union([z.null(), z.number()]).optional(),
+	unified_memory: z.boolean().optional(),
+	vram_bytes: z.union([z.null(), z.number()]).optional(),
+	vram_human: z.string().optional(),
+});
+const jsonResponseSchema2 = z.looseObject({
+	card: modelsResponseSchema,
+	readme: z.union([z.null(), z.string()]).optional(),
+	format: z
+		.union([z.literal("gguf"), z.literal("safetensors"), z.literal("mlx")])
+		.optional(),
+	files: z.array(filesResponseSchema).optional(),
+	vision: z.boolean().optional(),
+	stats: z.union([z.null(), statsResponseSchema]).optional(),
+	stats_api_key_present: z.boolean().optional(),
+	device: deviceResponseSchema.optional(),
+	repo_size_bytes: z.union([z.null(), z.number()]).optional(),
+	repo_fit: z.string().optional(),
+	repo_fit_label: z.string().optional(),
+});
+const estimateLlmfitResponseSchema = z.looseObject({
+	fit_level: z.union([z.null(), z.string()]),
+	installed: z.boolean(),
+	matched: z.boolean(),
+	min_vram_gb: z.union([z.null(), z.number()]),
+	model_name: z.union([z.null(), z.string()]),
+	path: z.union([z.null(), z.string()]),
+	tps: z.union([z.null(), z.number()]),
+});
+const resultResponseSchema = z.looseObject({
+	repo_id: z.string(),
+	filename: z.string(),
+	path: z.string(),
+});
+const installModelFileResponseSchema = z.looseObject({
+	success: z.boolean().optional(),
+	error: z.string().optional(),
+	result: resultResponseSchema.optional(),
+});
+const resultResponseSchema2 = z.looseObject({
+	repo_id: z.string(),
+	filename: z.string(),
+	path: z.string(),
+});
+const jsonResponseSchema3 = z.looseObject({
+	success: z.boolean().optional(),
+	error: z.string().optional(),
+	result: resultResponseSchema2.optional(),
+});
+const jsonResponseSchema4 = z.looseObject({
+	success: z.boolean().optional(),
+	error: z.string().optional(),
+});
+const jsonResponseSchema5 = z.looseObject({
+	active: z.string().optional(),
+	engine: z.union([z.null(), z.string()]).optional(),
+	format: z
+		.union([z.literal("gguf"), z.literal("safetensors"), z.literal("mlx")])
+		.optional(),
+	ref: z.union([z.null(), z.string()]).optional(),
+	repo_id: z.union([z.null(), z.string()]).optional(),
+	default: z.string().optional(),
+});
+const modelsResponseSchema2 = z.looseObject({
+	repo_id: z.string().optional(),
+	filename: z.string().optional(),
+	stem: z.string().optional(),
+	size_bytes: z.union([z.null(), z.number()]).optional(),
+	format: z
+		.union([z.literal("gguf"), z.literal("safetensors"), z.literal("mlx")])
+		.optional(),
+	finetune_base: z.union([z.null(), z.string()]).optional(),
+});
+const jsonResponseSchema6 = z.looseObject({
+	models: z.array(modelsResponseSchema2).optional(),
+});
+const updatesResponseSchema = z.looseObject({
+	stem: z.string().optional(),
+	repo_id: z.string().optional(),
+	filename: z.string().optional(),
+	name: z.string().optional(),
+	installed_size: z.union([z.null(), z.number()]).optional(),
+	latest_size: z.union([z.null(), z.number()]).optional(),
+});
+const jsonResponseSchema7 = z.looseObject({
+	updates: z.array(updatesResponseSchema).optional(),
+});
+const jsonResponseSchema8 = z.looseObject({
+	success: z.boolean().optional(),
+	error: z.string().optional(),
+	active: z.string().optional(),
+	engine: z.union([z.null(), z.string()]).optional(),
+	format: z
+		.union([z.literal("gguf"), z.literal("safetensors"), z.literal("mlx")])
+		.optional(),
+	swapped: z.boolean().optional(),
+	restarted: z.boolean().optional(),
+	gateway_refreshed: z.boolean().optional(),
+});
+const enginesResponseSchema = z.looseObject({
+	name: z.string(),
+	supported: z.boolean().optional(),
+});
+const formatsResponseSchema = z.looseObject({
+	format: z.union([
+		z.literal("gguf"),
+		z.literal("safetensors"),
+		z.literal("mlx"),
+	]),
+	supported: z.boolean().optional(),
+	engines: z.array(enginesResponseSchema).optional(),
+});
+const jsonResponseSchema9 = z.looseObject({
+	formats: z.array(formatsResponseSchema).optional(),
+	resident: z.union([z.null(), z.string()]).optional(),
+});
+const sourcesResponseSchema = z.looseObject({
+	base_url: z.union([z.null(), z.string()]).optional(),
+	builtin: z.boolean().optional(),
+	display_name: z.string(),
+	id: z.string(),
+});
+const jsonResponseSchema10 = z.looseObject({
+	active: z.string().optional(),
+	sources: z.array(sourcesResponseSchema).optional(),
+});
+
+export type { ModelCategory } from "@ryu/marketplace/catalog/types";
+export type {
+	ActiveModelPreview,
+	ModelInstallPreview,
+	ModelUninstallPreview,
+} from "@ryuhq/core-client/model-preview-contracts.ts";
 
 /** Every catalog format the desktop fans out across. */
 export const MODEL_FORMATS: ModelFormat[] = ["gguf", "safetensors", "mlx"];
 
-/**
- * Friendly model category shown in the filter. `"all"` applies no task filter;
- * every other value maps to a single Hugging Face `pipeline_tag` (see
- * {@link MODEL_CATEGORY_TASK}). HF accepts one tag, so this is single-select.
- */
-export type ModelCategory =
-	| "all"
-	| "chat"
-	| "vision"
-	| "embedding"
-	| "reranker"
-	| "stt"
-	| "tts";
-
 /** Category → Hugging Face `pipeline_tag`. `"all"` means no filter. */
-export const MODEL_CATEGORY_TASK: Record<ModelCategory, string> = {
-	all: "",
-	chat: "text-generation",
-	vision: "image-text-to-text",
-	embedding: "sentence-similarity",
-	reranker: "text-ranking",
-	stt: "automatic-speech-recognition",
-	tts: "text-to-speech",
-};
-
-/** A model row in the left-hand selector. */
-export interface ModelCard {
-	/** Model architecture from GGUF metadata (e.g. "llama", "gemma3"). */
-	architecture: string | null;
-	author: string;
-	/** Whether an engine that can serve `format` is runnable on this node. */
-	compatible: boolean;
-	/** Context window in tokens (the single prompt+completion budget). */
-	contextLength: number | null;
-	createdAt: string | null;
-	downloads: number;
-	/** Weight format this card was surfaced under (the query facet). */
-	format: ModelFormat;
-	gated: boolean;
-	id: string;
-	installed: boolean;
-	lastModified: string | null;
-	likes: number;
-	name: string;
-	/** Engine label needed for an incompatible card (e.g. "vLLM"); null when OK. */
-	needsEngine: string | null;
-	/** Parameter count from GGUF metadata (e.g. 8_000_000_000). */
-	params: number | null;
-	pipelineTag: string | null;
-	tags: string[];
-}
-
-/** Plain-language device-fit verdict, worst → best. Mirrors Core's `FitVerdict`. */
-export type FitVerdict =
-	| "too_big"
-	| "cpu"
-	| "partial"
-	| "ok"
-	| "great"
-	| "unknown";
+export const MODEL_CATEGORY_TASK: Record<ModelCategory, string> =
+	/* SAFETY: The native MODEL_CATEGORY_OPTIONS table defines ModelCategory from its exact value union, with a string pipelineTag for every entry. Mapping every entry through Object.fromEntries covers that authored key domain; no catalog response is cast here. */ Object.fromEntries(
+		MODEL_CATEGORY_OPTIONS.map(({ value, pipelineTag }) => [value, pipelineTag])
+	) as Record<ModelCategory, string>;
 
 /** One downloadable file of a model (a GGUF quantization). */
 export interface ModelFile {
@@ -102,26 +283,6 @@ export interface ModelFile {
  * imports don't break; `ModelFile` is the format-neutral name.
  */
 export type GgufFile = ModelFile;
-
-/** Independent benchmark stats from Artificial Analysis (when available). */
-export interface AaStats {
-	intelligenceIndex: number | null;
-	matchedName: string;
-	outputTokensPerSecond: number | null;
-	priceUsdPer1m: number | null;
-	timeToFirstTokenS: number | null;
-}
-
-/** Detected hardware the fit verdicts were computed against. */
-export interface DeviceInfo {
-	gpuName: string | null;
-	os: string;
-	ramHuman: string;
-	totalRamBytes: number | null;
-	unifiedMemory: boolean;
-	vramBytes: number | null;
-	vramHuman: string;
-}
 
 /** Full right-hand detail payload for a selected model. */
 export interface ModelDetail {
@@ -191,6 +352,8 @@ interface StatsWire {
 }
 
 interface DeviceWire {
+	disk_free_bytes?: number | null;
+	disk_free_human?: string;
 	gpu_name?: string | null;
 	os?: string;
 	ram_human?: string;
@@ -251,6 +414,9 @@ function toStats(w: StatsWire | null | undefined): AaStats | null {
 
 function toDevice(w: DeviceWire | null | undefined): DeviceInfo {
 	return {
+		// Keep undefined (an older Core never sends it) apart from null (unknown).
+		diskFreeBytes: w?.disk_free_bytes,
+		diskFreeHuman: w?.disk_free_human ?? "",
 		totalRamBytes: w?.total_ram_bytes ?? null,
 		ramHuman: w?.ram_human ?? "",
 		vramBytes: w?.vram_bytes ?? null,
@@ -259,21 +425,6 @@ function toDevice(w: DeviceWire | null | undefined): DeviceInfo {
 		unifiedMemory: w?.unified_memory ?? false,
 		os: w?.os ?? "",
 	};
-}
-
-export interface SearchParams {
-	/** Opaque pagination cursor from a prior page's {@link ModelPage.nextCursor}. */
-	cursor?: string;
-	/** Weight format facet (one clean cursor per format). Defaults to GGUF. */
-	format?: ModelFormat;
-	installedOnly?: boolean;
-	limit?: number;
-	/** Hugging Face org/user to restrict to (the "browse this org" filter). */
-	org?: string;
-	query?: string;
-	sort?: ModelSort;
-	/** Hugging Face `pipeline_tag` to narrow results to one task. Empty = any. */
-	task?: string;
 }
 
 /** One page of catalog results plus the cursor for the next page (if any). */
@@ -318,12 +469,12 @@ export async function searchModels(
 	if (params.cursor) {
 		q.set("cursor", params.cursor);
 	}
-	const json = await request<{
-		models?: CardWire[];
-		next_cursor?: string | null;
-		total?: number | null;
-		total_count?: number | null;
-	}>(target, `/api/models/catalog?${q.toString()}`);
+	const json = await request(
+		target,
+		`/api/models/catalog?${q.toString()}`,
+		undefined,
+		jsonResponseSchema
+	);
 	return {
 		models: (json.models ?? []).map(toCard),
 		nextCursor: json.next_cursor ?? null,
@@ -337,21 +488,11 @@ export async function fetchModelDetail(
 	id: string,
 	format: ModelFormat = "gguf"
 ): Promise<ModelDetail> {
-	const json = await request<{
-		card: CardWire;
-		readme?: string | null;
-		format?: ModelFormat;
-		files?: FileWire[];
-		vision?: boolean;
-		stats?: StatsWire | null;
-		stats_api_key_present?: boolean;
-		device?: DeviceWire;
-		repo_size_bytes?: number | null;
-		repo_fit?: string;
-		repo_fit_label?: string;
-	}>(
+	const json = await request(
 		target,
-		`/api/models/catalog/detail?id=${encodeURIComponent(id)}&format=${format}`
+		`/api/models/catalog/detail?id=${encodeURIComponent(id)}&format=${format}`,
+		undefined,
+		jsonResponseSchema2
 	);
 	return {
 		card: toCard(json.card),
@@ -366,26 +507,6 @@ export async function fetchModelDetail(
 		repoFit: json.repo_fit ?? "",
 		repoFitLabel: json.repo_fit_label ?? "",
 	};
-}
-
-export interface InstallResult {
-	filename: string;
-	path: string;
-	repoId: string;
-}
-
-export interface ModelInstallPreview {
-	action: "install";
-	dryRun: true;
-	success: boolean;
-	[key: string]: unknown;
-}
-
-export interface ModelUninstallPreview {
-	action: "uninstall";
-	dryRun: true;
-	success: boolean;
-	[key: string]: unknown;
 }
 
 /** On-demand llmfit hardware fit + tok/s estimate for one model. `installed`
@@ -417,9 +538,64 @@ export function estimateLlmfit(
 	if (opts?.quant) {
 		q.set("quant", opts.quant);
 	}
-	return request<LlmFitEstimate>(
+	return request(
 		target,
-		`/api/models/llmfit-estimate?${q.toString()}`
+		`/api/models/llmfit-estimate?${q.toString()}`,
+		undefined,
+		estimateLlmfitResponseSchema
+	);
+}
+
+/** Core's machine codes for an install it refuses before downloading anything. */
+export type ModelInstallBlockCode = "model_too_large" | "insufficient_disk";
+
+/**
+ * Core refused an install (HTTP 422) because the model would not fit the
+ * serving node's memory or free disk. `message` is Core's plain-language reason
+ * with the real numbers, so callers can show it as-is.
+ */
+export class ModelInstallBlockedError extends Error {
+	readonly code: ModelInstallBlockCode | null;
+
+	constructor(message: string, code: ModelInstallBlockCode | null) {
+		super(message);
+		this.name = "ModelInstallBlockedError";
+		this.code = code;
+	}
+}
+
+const installBlockBodySchema = z.looseObject({
+	code: z.string().optional().catch(undefined),
+	message: z.string().optional().catch(undefined),
+});
+
+function installBlockCode(
+	code: string | undefined
+): ModelInstallBlockCode | null {
+	return code === "model_too_large" || code === "insufficient_disk"
+		? code
+		: null;
+}
+
+/**
+ * Map Core's install refusal (422 `model_too_large` / `insufficient_disk`) to a
+ * {@link ModelInstallBlockedError} carrying the human message instead of the
+ * generic "<path> failed: 422". The body may put the message in `error` (string
+ * or `{ message, code }`) or at the top level; every other error passes through.
+ */
+export function toModelInstallError(err: unknown): unknown {
+	if (!(err instanceof ApiError) || err.status !== 422) {
+		return err;
+	}
+	const body = installBlockBodySchema.safeParse(err.body);
+	const topLevel = body.success ? body.data : {};
+	const message =
+		err.serverMessage ??
+		topLevel.message ??
+		"This model won't fit on this device, so it wasn't added.";
+	return new ModelInstallBlockedError(
+		message,
+		installBlockCode(err.code ?? topLevel.code)
 	);
 }
 
@@ -436,20 +612,21 @@ export async function installModelFile(
 		result?: { repo_id: string; filename: string; path: string };
 	};
 	try {
-		json = await request<{
-			success?: boolean;
-			error?: string;
-			result?: { repo_id: string; filename: string; path: string };
-		}>(target, "/api/models/catalog/install", {
-			method: "POST",
-			body: { id, file, format: "gguf" },
-			// Forward the buyer's control-plane session for optional Marketplace
-			// account-aware operations. It is not required for installation.
-			headers: buyerTokenHeader(target),
-		});
+		json = await request(
+			target,
+			"/api/models/catalog/install",
+			{
+				method: "POST",
+				body: { id, file, format: "gguf" },
+				// Forward the buyer's control-plane session for optional Marketplace
+				// account-aware operations. It is not required for installation.
+				headers: buyerTokenHeader(target),
+			},
+			installModelFileResponseSchema
+		);
 	} catch (err) {
 		track({ event: "model_install_completed", model_id: id, ok: false });
-		throw err;
+		throw toModelInstallError(err);
 	}
 	if (json.success === false || !json.result) {
 		track({ event: "model_install_completed", model_id: id, ok: false });
@@ -465,7 +642,7 @@ export async function installModelFile(
 
 /**
  * Install a multi-file repo snapshot (safetensors / MLX). Core fetches the whole
- * repo into `~/.ryu/models/<slug>/` — there is no per-quant file to pick, so this
+ * repo into `~/.ryu/models/chat/snapshots/<slug>/` — there is no per-quant file to pick, so this
  * takes the repo id + format only.
  */
 export async function installModelSnapshot(
@@ -473,14 +650,17 @@ export async function installModelSnapshot(
 	id: string,
 	format: ModelFormat
 ): Promise<InstallResult> {
-	const json = await request<{
-		success?: boolean;
-		error?: string;
-		result?: { repo_id: string; filename: string; path: string };
-	}>(target, "/api/models/catalog/install", {
-		method: "POST",
-		body: { id, format },
-		headers: buyerTokenHeader(target),
+	const json = await request(
+		target,
+		"/api/models/catalog/install",
+		{
+			method: "POST",
+			body: { id, format },
+			headers: buyerTokenHeader(target),
+		},
+		jsonResponseSchema3
+	).catch((err: unknown) => {
+		throw toModelInstallError(err);
 	});
 	if (json.success === false || !json.result) {
 		throw new Error(json.error ?? `Failed to install ${id}`);
@@ -502,13 +682,14 @@ export async function uninstallModelFile(
 	id: string,
 	file: string
 ): Promise<void> {
-	const json = await request<{ success?: boolean; error?: string }>(
+	const json = await request(
 		target,
 		"/api/models/catalog/uninstall",
 		{
 			method: "POST",
 			body: { id, file },
-		}
+		},
+		jsonResponseSchema4
 	);
 	if (json.success === false) {
 		throw new Error(json.error ?? `Failed to uninstall ${file}`);
@@ -521,16 +702,21 @@ export function previewModelInstall(
 	id: string,
 	options: { file?: string; format?: ModelFormat } = {}
 ): Promise<ModelInstallPreview> {
-	return request<ModelInstallPreview>(target, "/api/models/catalog/install", {
-		method: "POST",
-		body: {
-			dryRun: true,
-			id,
-			...(options.file ? { file: options.file } : {}),
-			...(options.format ? { format: options.format } : {}),
+	return request(
+		target,
+		"/api/models/catalog/install",
+		{
+			method: "POST",
+			body: {
+				dryRun: true,
+				id,
+				...(options.file ? { file: options.file } : undefined),
+				...(options.format ? { format: options.format } : undefined),
+			},
+			headers: buyerTokenHeader(target),
 		},
-		headers: buyerTokenHeader(target),
-	});
+		gatewayJsonValueSchema
+	).then((value) => modelInstallPreviewSchema.parse(value));
 }
 
 /** Validate and project model removal without deleting the weight or adapter. */
@@ -539,44 +725,27 @@ export function previewModelUninstall(
 	id: string,
 	file: string
 ): Promise<ModelUninstallPreview> {
-	return request<ModelUninstallPreview>(
+	return request(
 		target,
 		"/api/models/catalog/uninstall",
 		{
 			method: "POST",
 			body: { dryRun: true, file, id },
-		}
-	);
+		},
+		gatewayJsonValueSchema
+	).then((value) => modelUninstallPreviewSchema.parse(value));
 }
 
 // ── Active served model (switch which installed GGUF the engine loads) ───────
 
-/** The model the local chat stack is serving, plus the registry fallback. */
-export interface ActiveModel {
-	/** Effective served model ref (stem for GGUF, repo id for a snapshot). */
-	active: string;
-	/** Registry default served when no override is set. */
-	default: string;
-	/** The engine derived to serve the selection (e.g. "llamacpp", "vllm"). */
-	engine: string | null;
-	/** Weight format of the active selection. */
-	format: ModelFormat;
-	/** The selection ref (stem or repo id), or null when none is set. */
-	ref: string | null;
-	/** Hugging Face repo the selection was installed from, when known. */
-	repoId: string | null;
-}
-
 /** Read which installed model local Chat is currently serving. */
 export async function getActiveModel(target: ApiTarget): Promise<ActiveModel> {
-	const json = await request<{
-		active?: string;
-		engine?: string | null;
-		format?: ModelFormat;
-		ref?: string | null;
-		repo_id?: string | null;
-		default?: string;
-	}>(target, "/api/models/active");
+	const json = await request(
+		target,
+		"/api/models/active",
+		undefined,
+		jsonResponseSchema5
+	);
 	return {
 		active: json.active ?? "",
 		engine: json.engine ?? null,
@@ -611,16 +780,12 @@ export async function listInstalledModels(
 	target: ApiTarget
 ): Promise<InstalledModelEntry[]> {
 	try {
-		const json = await request<{
-			models?: {
-				repo_id?: string;
-				filename?: string;
-				stem?: string;
-				size_bytes?: number | null;
-				format?: ModelFormat;
-				finetune_base?: string | null;
-			}[];
-		}>(target, "/api/models/installed");
+		const json = await request(
+			target,
+			"/api/models/installed",
+			undefined,
+			jsonResponseSchema6
+		);
 		return (json.models ?? []).map((m) => ({
 			repoId: m.repo_id ?? "",
 			filename: m.filename ?? "",
@@ -651,16 +816,12 @@ export async function listModelUpdates(
 	target: ApiTarget
 ): Promise<ModelUpdateEntry[]> {
 	try {
-		const json = await request<{
-			updates?: {
-				stem?: string;
-				repo_id?: string;
-				filename?: string;
-				name?: string;
-				installed_size?: number | null;
-				latest_size?: number | null;
-			}[];
-		}>(target, "/api/models/updates");
+		const json = await request(
+			target,
+			"/api/models/updates",
+			undefined,
+			jsonResponseSchema7
+		);
 		return (json.updates ?? []).map((u) => ({
 			stem: u.stem ?? "",
 			repoId: u.repo_id ?? "",
@@ -674,32 +835,21 @@ export async function listModelUpdates(
 	}
 }
 
-export interface SetActiveModelResult {
-	active: string;
-	engine: string | null;
-	format: ModelFormat;
-	gatewayRefreshed: boolean;
-	restarted: boolean;
-	swapped: boolean;
-}
-
-export interface ActiveModelPreview {
-	action: "switch";
-	dryRun: true;
-	success: boolean;
-	[key: string]: unknown;
-}
-
 /** Resolve an installed model and report the engine/gateway changes without switching it. */
 export function previewActiveModel(
 	target: ApiTarget,
 	id: string,
 	engine?: string
 ): Promise<ActiveModelPreview> {
-	return request<ActiveModelPreview>(target, "/api/models/active", {
-		method: "POST",
-		body: engine ? { dryRun: true, id, engine } : { dryRun: true, id },
-	});
+	return request(
+		target,
+		"/api/models/active",
+		{
+			method: "POST",
+			body: engine ? { dryRun: true, id, engine } : { dryRun: true, id },
+		},
+		gatewayJsonValueSchema
+	).then((value) => activeModelPreviewSchema.parse(value));
 }
 
 /**
@@ -715,19 +865,15 @@ export async function setActiveModel(
 	id: string,
 	engine?: string
 ): Promise<SetActiveModelResult> {
-	const json = await request<{
-		success?: boolean;
-		error?: string;
-		active?: string;
-		engine?: string | null;
-		format?: ModelFormat;
-		swapped?: boolean;
-		restarted?: boolean;
-		gateway_refreshed?: boolean;
-	}>(target, "/api/models/active", {
-		method: "POST",
-		body: engine ? { id, engine } : { id },
-	});
+	const json = await request(
+		target,
+		"/api/models/active",
+		{
+			method: "POST",
+			body: engine ? { id, engine } : { id },
+		},
+		jsonResponseSchema8
+	);
 	if (json.success === false) {
 		throw new Error(json.error ?? `Failed to switch to "${id}"`);
 	}
@@ -743,39 +889,18 @@ export async function setActiveModel(
 
 // ── Node engine capabilities (format → engine support) ──────────────────────
 
-/** One engine and whether it's runnable on this node. */
-export interface NodeEngine {
-	name: string;
-	supported: boolean;
-}
-
-/** Per-format engine support on this node. */
-export interface NodeFormatSupport {
-	engines: NodeEngine[];
-	format: ModelFormat;
-	supported: boolean;
-}
-
-/** The format → engine capability map for a node, plus the resident engine. */
-export interface NodeEngines {
-	formats: NodeFormatSupport[];
-	resident: string | null;
-}
-
 /**
  * Read which weight formats (and engines) this node can run, computed on the
  * Core node so the verdict is authoritative even when the node is remote. Drives
  * the format facet + compatibility annotations in the Models tab.
  */
 export async function getNodeEngines(target: ApiTarget): Promise<NodeEngines> {
-	const json = await request<{
-		formats?: {
-			format: ModelFormat;
-			supported?: boolean;
-			engines?: { name: string; supported?: boolean }[];
-		}[];
-		resident?: string | null;
-	}>(target, "/api/models/engines");
+	const json = await request(
+		target,
+		"/api/models/engines",
+		undefined,
+		jsonResponseSchema9
+	);
 	return {
 		formats: (json.formats ?? []).map((f) => ({
 			format: f.format,
@@ -796,25 +921,11 @@ export async function getNodeEngines(target: ApiTarget): Promise<NodeEngines> {
 // in Core; the dropdown lists them and selects one, after which the model
 // catalog re-keys against the newly-active endpoint.
 
-/** One selectable catalog source. Mirrors Core's source descriptor. */
-export interface CatalogSource {
-	baseUrl: string | null;
-	builtin: boolean;
-	displayName: string;
-	id: string;
-}
-
 interface SourceWire {
 	base_url?: string | null;
 	builtin?: boolean;
 	display_name: string;
 	id: string;
-}
-
-/** The active source id plus every source available for the model kind. */
-export interface CatalogSources {
-	active: string;
-	sources: CatalogSource[];
 }
 
 function toSource(w: SourceWire): CatalogSource {
@@ -830,10 +941,12 @@ function toSource(w: SourceWire): CatalogSource {
 export async function fetchModelSources(
 	target: ApiTarget
 ): Promise<CatalogSources> {
-	const json = await request<{
-		active?: string;
-		sources?: SourceWire[];
-	}>(target, "/api/catalog/sources?kind=model");
+	const json = await request(
+		target,
+		"/api/catalog/sources?kind=model",
+		undefined,
+		jsonResponseSchema10
+	);
 	return {
 		active: json.active ?? "",
 		sources: (json.sources ?? []).map(toSource),
@@ -845,8 +958,13 @@ export async function selectModelSource(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(target, "/api/catalog/sources/select", {
-		method: "POST",
-		body: { kind: "model", id },
-	});
+	await request(
+		target,
+		"/api/catalog/sources/select",
+		{
+			method: "POST",
+			body: { kind: "model", id },
+		},
+		gatewayJsonValueSchema
+	);
 }

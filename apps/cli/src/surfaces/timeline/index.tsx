@@ -22,6 +22,7 @@ import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useSurfaceView } from "../../core/ContributionsContext.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { useInputFocused } from "../../core/InputFocusContext.tsx";
 import { ContributedViewPanel } from "../../ui/ContributedView.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
@@ -36,10 +37,11 @@ const SHADOW_KEYS = ["shadow", "ghost"];
 const SURFACE_ID = "timeline";
 
 function TimelineSurface({ active, paneId }: SurfaceProps) {
-	const { target, url, token } = useCore();
+	const { target } = useCore();
 	const theme = useTheme();
 	const { focusedPaneId } = useWorkspace();
 	const focused = active && focusedPaneId === paneId;
+	const inputFocused = useInputFocused();
 	const contributed = useSurfaceView(SURFACE_ID);
 
 	const [shadow, setShadow] = useState<ShadowState>("unknown");
@@ -75,7 +77,7 @@ function TimelineSurface({ active, paneId }: SurfaceProps) {
 	}, [active, contributed, runLoad]);
 
 	useKeyboard((key) => {
-		if (!focused || contributed) {
+		if (!focused || contributed || inputFocused) {
 			return;
 		}
 		if (key.name === "r") {

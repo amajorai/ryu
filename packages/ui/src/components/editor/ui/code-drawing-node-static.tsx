@@ -13,8 +13,7 @@ export function CodeDrawingElementStatic({
 				<div className="relative h-full min-w-0 flex-1 rounded-md bg-muted/50 p-8 pe-4">
 					<pre className="m-0 overflow-x-auto font-mono text-sm leading-[normal] [tab-size:2] print:break-inside-avoid">
 						<code className="block w-full">
-							{(props.element.data?.code as string) ||
-								"Enter your code here..."}
+							{props.element.data?.code || "Enter your code here…"}
 						</code>
 					</pre>
 				</div>

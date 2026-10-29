@@ -1,0 +1,79 @@
+.areaHue {
+	background-color: rgb(
+		var(--color-picker-area-r),
+		var(--color-picker-area-g),
+		var(--color-picker-area-b)
+	);
+}
+.areaWhite {
+	background: linear-gradient(to right, #fff, transparent);
+}
+.areaBlack {
+	background: linear-gradient(to bottom, transparent, #000);
+}
+.areaHandle {
+	top: var(--color-picker-area-top);
+	left: var(--color-picker-area-left);
+}
+.alphaChecker {
+	background:
+		linear-gradient(45deg, #ccc 25%, transparent 25%),
+		linear-gradient(-45deg, #ccc 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #ccc 75%),
+		linear-gradient(-45deg, transparent 75%, #ccc 75%);
+	background-position:
+		0 0,
+		0 4px,
+		4px -4px,
+		-4px 0px;
+	background-size: 8px 8px;
+}
+.alphaColor {
+	background: linear-gradient(
+		to right,
+		transparent,
+		rgb(
+			var(--color-picker-alpha-r),
+			var(--color-picker-alpha-g),
+			var(--color-picker-alpha-b)
+		)
+	);
+}
+.opaquePaint {
+	background-color: var(--color-picker-paint);
+}
+.translucentPaint {
+	background: var(--color-picker-paint);
+}
+.emptyPaint {
+	background: linear-gradient(
+			to bottom right,
+			transparent calc(50% - 1px),
+			hsl(var(--destructive)) calc(50% - 1px) calc(50% + 1px),
+			transparent calc(50% + 1px)
+		)
+		no-repeat;
+}
+.forcedColorsNone {
+	forced-color-adjust: none;
+}
+.fieldFill {
+	background-color: var(--color-picker-trigger-fill);
+}
+.swatchFill {
+	background: var(--color-picker-trigger-fill);
+}
+.triggerForeground {
+	color: var(--color-picker-trigger-foreground);
+}
+.spectrumFill {
+	background: conic-gradient(
+		from 0deg,
+		#ef4444,
+		#f59e0b,
+		#10b981,
+		#3b82f6,
+		#8b5cf6,
+		#ef4444
+	);
+}

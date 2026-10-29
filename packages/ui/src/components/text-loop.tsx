@@ -1,9 +1,11 @@
 "use client";
 
-import { TextMorph } from "@ryu/ui/components/text-morph";
+import { TextMorph } from "@ryu/ui/components/text-morph.tsx";
+import { useMediaQuery } from "@ryu/ui/hooks/use-mobile.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { Children, type ReactNode, useEffect, useState } from "react";
+import { isNativeText } from "../lib/native-primitive-observation.ts";
 
 export interface TextLoopProps {
 	children: ReactNode[];
@@ -26,7 +28,7 @@ export function TextLoop({
 	trigger = true,
 }: TextLoopProps) {
 	const items = Children.toArray(children);
-	const reduceMotion = useReducedMotion() ?? false;
+	const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
 	const shouldAnimate = trigger && !reduceMotion && items.length > 1;
 	const [index, setIndex] = useState(0);
 
@@ -55,9 +57,7 @@ export function TextLoop({
 		return <span className={cn("truncate", className)}>{items[0]}</span>;
 	}
 
-	const textItems = items.every(
-		(item): item is string => typeof item === "string"
-	)
+	const textItems = items.every((item): item is string => isNativeText(item))
 		? items
 		: null;
 	if (textItems) {

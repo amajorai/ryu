@@ -37,7 +37,7 @@ export interface DownloadBadge {
 	tooltip: string;
 }
 
-const ROLE_BADGE: Record<DownloadRole, DownloadBadge | null> = {
+const ROLE_BADGE = {
 	engine: {
 		label: "Engine",
 		tooltip: "The program that runs models locally on this machine.",
@@ -117,6 +117,11 @@ const ROLE_BADGE: Record<DownloadRole, DownloadBadge | null> = {
 		tooltip: "An app or plugin and the files it needs to run.",
 		tone: "neutral",
 	},
+	plugin_model: {
+		label: "Local model",
+		tooltip: "A model checkpoint installed for a local plugin.",
+		tone: "blue",
+	},
 	mcp_server: {
 		label: "MCP",
 		tooltip: "A tool server agents can connect to.",
@@ -129,20 +134,21 @@ const ROLE_BADGE: Record<DownloadRole, DownloadBadge | null> = {
 		tone: "neutral",
 	},
 	other: null,
-};
+} satisfies Record<DownloadRole, DownloadBadge | null>;
 
 /** Last-resort mapping for tasks from an older Core, which have no role. */
-const KIND_BADGE: Partial<Record<DownloadKind, DownloadBadge>> = {
-	engine: ROLE_BADGE.engine as DownloadBadge,
-	agent: ROLE_BADGE.agent as DownloadBadge,
-	tool: ROLE_BADGE.tool as DownloadBadge,
-	skill: ROLE_BADGE.skill as DownloadBadge,
-	mcp: ROLE_BADGE.mcp_server as DownloadBadge,
-	embedding: ROLE_BADGE.embedding_model as DownloadBadge,
-	voice: ROLE_BADGE.voice_model as DownloadBadge,
-	media: ROLE_BADGE.image_model as DownloadBadge,
-	model: ROLE_BADGE.chat_model as DownloadBadge,
-};
+const KIND_BADGE = {
+	engine: ROLE_BADGE.engine,
+	agent: ROLE_BADGE.agent,
+	tool: ROLE_BADGE.tool,
+	skill: ROLE_BADGE.skill,
+	mcp: ROLE_BADGE.mcp_server,
+	embedding: ROLE_BADGE.embedding_model,
+	voice: ROLE_BADGE.voice_model,
+	media: ROLE_BADGE.image_model,
+	model: ROLE_BADGE.chat_model,
+	other: null,
+} satisfies Record<DownloadKind, DownloadBadge | null>;
 
 /**
  * The type badge for a download, or `null` when nothing useful can be said.

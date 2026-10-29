@@ -6,9 +6,15 @@
 // One query per CONVERSATION, not per message — a long thread would otherwise
 // open hundreds of requests to render a chip row that is empty on most rows.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	type QueryKey,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { z } from "zod";
+import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import {
 	addReaction,
 	listReactions,
@@ -25,10 +31,24 @@ export interface ReactionFrame {
 	type?: string;
 	user_id?: string;
 }
+const reactionFrameInputSchema = z.json();
+export type ReactionFrameInput =
+	| z.infer<typeof reactionFrameInputSchema>
+	| undefined;
+export const reactionFrameSchema = z.object({
+	type: z.literal("reaction"),
+	message_id: z.string().min(1),
+	emoji: z.string().min(1),
+	op: z.enum(["add", "remove"]),
+	user_id: z.string().optional().catch(undefined),
+});
 
 export interface UseMessageReactionsResult {
 	/** Fold a `conversation.reaction` realtime frame into the cache. */
-	applyRealtimeFrame: (data: unknown, myUserId: string | null) => void;
+	applyRealtimeFrame: (
+		data: ReactionFrameInput,
+		myUserId: string | null
+	) => void;
 	/** Buckets grouped by message id, preserving Core's ordering within a message. */
 	byMessage: ReadonlyMap<string, ReactionBucket[]>;
 	/** Add or remove the caller's `emoji` on a message, optimistically. */
@@ -47,12 +67,26 @@ export interface UseMessageReactionsResult {
  * already in must bump the count and leave `reactedByMe` alone.
  */
 export function applyReactionDelta(
+	buckets: ReactionBucket[],
+	messageId: string,
+	emoji: string,
+	op: "add" | "remove",
+	mine: boolean
+): ReactionBucket[];
+export function applyReactionDelta(
 	buckets: readonly ReactionBucket[],
 	messageId: string,
 	emoji: string,
 	op: "add" | "remove",
 	mine: boolean
-): ReactionBucket[] {
+): readonly ReactionBucket[];
+export function applyReactionDelta(
+	buckets: readonly ReactionBucket[],
+	messageId: string,
+	emoji: string,
+	op: "add" | "remove",
+	mine: boolean
+): readonly ReactionBucket[] {
 	const index = buckets.findIndex(
 		(b) => b.messageId === messageId && b.emoji === emoji
 	);
@@ -60,7 +94,7 @@ export function applyReactionDelta(
 		// Removing from a bucket that isn't there is a no-op, not an empty bucket:
 		// a zero-count chip would render as a ghost nobody can clear.
 		if (op === "remove") {
-			return buckets as ReactionBucket[];
+			return buckets;
 		}
 		// Appended, never inserted — Core orders by FIRST-reaction time, so a new
 		// emoji belongs at the end. Sorting here would reshuffle the row under the
@@ -73,7 +107,7 @@ export function applyReactionDelta(
 	// twice) must not double-count: the set is keyed (message, user, emoji) in
 	// Core, so the caller's own state is idempotent.
 	if (mine && current.reactedByMe === (op === "add")) {
-		return buckets as ReactionBucket[];
+		return buckets;
 	}
 	const count = current.count + delta;
 	const next = [...buckets];
@@ -89,6 +123,16 @@ export function applyReactionDelta(
 	return next;
 }
 
+// Mutation ownership belongs to the actual Query cache entry, so returning to
+// an authority shares row revisions while a newly created cache cannot inherit them.
+const reactionWriteResources = new WeakMap<
+	object,
+	{
+		pending: number;
+		revisions: Map<string, object>;
+	}
+>();
+
 export function useMessageReactions(
 	conversationId: string | null
 ): UseMessageReactionsResult {
@@ -96,13 +140,22 @@ export function useMessageReactions(
 	const target = useMemo(() => toTarget(node), [node]);
 	const queryClient = useQueryClient();
 	const queryKey = useMemo(
-		() => ["message-reactions", node.url, conversationId],
-		[node.url, conversationId]
+		() => [
+			"message-reactions",
+			node.url,
+			node.token ?? null,
+			node.userJwt ?? null,
+			conversationId,
+		],
+		[node.url, node.token, node.userJwt, conversationId]
 	);
 
 	const query = useQuery({
 		queryKey,
-		queryFn: () => listReactions(target, conversationId as string),
+		queryFn: () =>
+			conversationId
+				? listReactions(target, conversationId)
+				: Promise.resolve([]),
 		enabled: Boolean(conversationId),
 		// Reactions arrive over the realtime room, so polling would only duplicate
 		// what the socket already delivers.
@@ -128,31 +181,115 @@ export function useMessageReactions(
 	const write = useMutation<
 		void,
 		Error,
-		{ emoji: string; messageId: string; op: "add" | "remove" },
-		// The rollback snapshot. Declared explicitly because `onMutate`'s return
+		{
+			emoji: string;
+			messageId: string;
+			op: "add" | "remove";
+			target: ApiTarget;
+			conversationId: string;
+			queryKey: QueryKey;
+		},
+		// Per-row rollback ownership. Declared explicitly because `onMutate`'s return
 		// type is not inferred into `onError`'s `context` parameter.
-		{ previous: ReactionBucket[] }
+		{
+			query: object;
+			resource: { pending: number; revisions: Map<string, object> };
+			row: string;
+			revision: object;
+			previousIndex: number;
+			queryKey: QueryKey;
+		}
 	>({
-		mutationFn: ({ messageId, emoji, op }) =>
+		mutationFn: ({ messageId, emoji, op, target, conversationId }) =>
 			op === "add"
 				? addReaction(target, conversationId as string, messageId, emoji)
 				: removeReaction(target, conversationId as string, messageId, emoji),
-		// Roll back to the snapshot taken before the optimistic edit. Without this
-		// a failed write leaves a chip on screen that no longer exists server-side,
-		// and the next reload silently contradicts it.
-		onError: (_err, _vars, context) => {
-			if (context?.previous) {
-				queryClient.setQueryData(queryKey, context.previous);
-			}
+		// Undo only this optimistic membership change. Restoring the whole list
+		// would erase accepted concurrent emojis or newly delivered peer counts.
+		onError: (_err, vars, context) => {
+			if (
+				!context ||
+				context.resource.revisions.get(context.row) !== context.revision ||
+				queryClient
+					.getQueryCache()
+					.find({ queryKey: context.queryKey, exact: true }) !== context.query
+			)
+				return;
+			queryClient.setQueryData<ReactionBucket[]>(
+				context.queryKey,
+				(current) => {
+					const old = current ?? [];
+					const missing = !old.some(
+						(bucket) =>
+							bucket.messageId === vars.messageId && bucket.emoji === vars.emoji
+					);
+					const next = applyReactionDelta(
+						old,
+						vars.messageId,
+						vars.emoji,
+						vars.op === "add" ? "remove" : "add",
+						true
+					);
+					// Restoring a removed last member keeps first-reaction ordering.
+					if (
+						vars.op === "remove" &&
+						missing &&
+						context.previousIndex >= 0 &&
+						next.length > old.length
+					) {
+						const restored = next.pop();
+						if (restored)
+							next.splice(
+								Math.min(context.previousIndex, next.length),
+								0,
+								restored
+							);
+					}
+					return next;
+				}
+			);
 		},
-		onMutate: async ({ messageId, emoji, op }) => {
+		onMutate: async ({ messageId, emoji, op, queryKey }) => {
 			await queryClient.cancelQueries({ queryKey });
 			const previous =
 				queryClient.getQueryData<ReactionBucket[]>(queryKey) ?? [];
 			queryClient.setQueryData<ReactionBucket[]>(queryKey, (old) =>
 				applyReactionDelta(old ?? [], messageId, emoji, op, true)
 			);
-			return { previous };
+			const query = queryClient.getQueryCache().find({ queryKey, exact: true });
+			if (!query)
+				throw new Error(
+					"Reaction query cache disappeared during optimistic update"
+				);
+			let resource = reactionWriteResources.get(query);
+			if (!resource) {
+				resource = { pending: 0, revisions: new Map() };
+				reactionWriteResources.set(query, resource);
+			}
+			const row = JSON.stringify([messageId, emoji]);
+			const revision = {};
+			resource.pending++;
+			resource.revisions.set(row, revision);
+			return {
+				query,
+				resource,
+				row,
+				revision,
+				previousIndex: previous.findIndex(
+					(bucket) => bucket.messageId === messageId && bucket.emoji === emoji
+				),
+				queryKey,
+			};
+		},
+		onSettled: (_data, _error, _vars, context) => {
+			if (!context) return;
+			context.resource.pending--;
+			if (context.resource.revisions.get(context.row) === context.revision)
+				context.resource.revisions.delete(context.row);
+			// Read canonical membership only when all overlapping writes for this
+			// cache have settled; an earlier read must not erase a still-pending chip.
+			if (context.resource.pending === 0)
+				void queryClient.invalidateQueries({ queryKey: context.queryKey });
 		},
 	});
 
@@ -165,27 +302,24 @@ export function useMessageReactions(
 				queryClient.getQueryData<ReactionBucket[]>(queryKey) ?? []
 			).find((b) => b.messageId === messageId && b.emoji === emoji);
 			write.mutate({
+				target,
+				conversationId,
+				queryKey,
 				messageId,
 				emoji,
 				op: existing?.reactedByMe ? "remove" : "add",
 			});
 		},
-		[conversationId, queryClient, queryKey, write]
+		[conversationId, target, queryClient, queryKey, write]
 	);
 
 	const applyRealtimeFrame = useCallback(
-		(data: unknown, myUserId: string | null) => {
-			if (typeof data !== "object" || data === null) {
+		(data: ReactionFrameInput, myUserId: string | null) => {
+			const parsed = reactionFrameSchema.safeParse(data);
+			if (!parsed.success) {
 				return;
 			}
-			const frame = data as ReactionFrame;
-			if (frame.type !== "reaction") {
-				return;
-			}
-			const { message_id: messageId, emoji, op, user_id: userId } = frame;
-			if (!(messageId && emoji) || (op !== "add" && op !== "remove")) {
-				return;
-			}
+			const { message_id: messageId, emoji, op, user_id: userId } = parsed.data;
 			// Our own write already moved the cache optimistically, and Core echoes
 			// it back to us like any other member. Folding it in again would
 			// double-count.

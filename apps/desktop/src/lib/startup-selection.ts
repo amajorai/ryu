@@ -21,15 +21,15 @@ const DEFAULT_NODE_KEY = "ryu_startup_default_node";
 const VALID_MODES: StartupSelectionMode[] = ["always", "defaults", "never"];
 
 function storage(): Storage | null {
-	return typeof localStorage === "undefined" ? null : localStorage;
+	return globalThis.localStorage === undefined ? null : globalThis.localStorage;
 }
 
 function isMode(value: string | null): value is StartupSelectionMode {
-	return value !== null && VALID_MODES.includes(value as StartupSelectionMode);
+	return value !== null && VALID_MODES.some((mode) => mode === value);
 }
 
 function notifyChanged(): void {
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.dispatchEvent(new Event("storage"));
 	}
 }
@@ -93,7 +93,7 @@ export function startupSelectionSteps({
 	defaultNodeName: string | null;
 	mode: StartupSelectionMode;
 	nodes: readonly StartupSelectionNode[];
-}): { account: boolean; node: boolean } {
+}) {
 	if (mode === "never") {
 		return { account: false, node: false };
 	}

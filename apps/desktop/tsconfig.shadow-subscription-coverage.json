@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/lib/api/shadow.ts",
+    "src/components/settings/ShadowSettings.tsx",
+    "src/components/settings/ShadowSettings.native-http.test.tsx",
+    "src/components/settings/ShadowSettings.capture.native-http.test.tsx",
+    "src/components/settings/ShadowSettings.controls.native-http.test.tsx",
+    "src/components/settings/subscription-authority.test.tsx",
+    "e2e/shadow-subscription-browser.spec.ts",
+    "e2e/shadow-subscription-browser.playwright.config.ts",
+    "e2e/harness/vite.shadow-subscription-browser.config.ts"
+  ]
+}

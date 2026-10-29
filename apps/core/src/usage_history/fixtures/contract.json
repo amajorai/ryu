@@ -1,0 +1,122 @@
+{
+  "summary": {
+    "totals": {
+      "inputTokens": 1000000,
+      "outputTokens": 500000,
+      "cacheReadTokens": 2000000,
+      "cacheWriteTokens": 0,
+      "cachedOutputTokens": 0,
+      "reasoningTokens": 100000,
+      "missingInputRecords": 0,
+      "missingOutputRecords": 0,
+      "missingCacheReadRecords": 0,
+      "missingCacheWriteRecords": 0,
+      "missingCachedOutputRecords": 0,
+      "missingReasoningRecords": 0
+    },
+    "sessions": 1,
+    "records": 1,
+    "estimatedCostUsd": 3.0,
+    "reportedCostUsd": null,
+    "billedCostUsd": null,
+    "sourceEstimatedCostUsd": null,
+    "cacheSavingsUsd": 1.0,
+    "unpricedRecords": 0,
+    "daily": [
+      {
+        "date": "2026-01-01",
+        "sourceId": "codex",
+        "modelId": null,
+        "totals": {
+          "inputTokens": 1000000,
+          "outputTokens": 500000,
+          "cacheReadTokens": 2000000,
+          "cacheWriteTokens": 0,
+          "cachedOutputTokens": 0,
+          "reasoningTokens": 100000,
+          "missingInputRecords": 0,
+          "missingOutputRecords": 0,
+          "missingCacheReadRecords": 0,
+          "missingCacheWriteRecords": 0,
+          "missingCachedOutputRecords": 0,
+          "missingReasoningRecords": 0
+        },
+        "sessions": 1,
+        "records": 1,
+        "estimatedCostUsd": 3.0,
+        "reportedCostUsd": null,
+        "billedCostUsd": null,
+        "sourceEstimatedCostUsd": null,
+        "cacheSavingsUsd": 1.0,
+        "unpricedRecords": 0
+      }
+    ],
+    "models": [
+      {
+        "date": "",
+        "sourceId": "codex",
+        "modelId": "fixture-model",
+        "totals": {
+          "inputTokens": 1000000,
+          "outputTokens": 500000,
+          "cacheReadTokens": 2000000,
+          "cacheWriteTokens": 0,
+          "cachedOutputTokens": 0,
+          "reasoningTokens": 100000,
+          "missingInputRecords": 0,
+          "missingOutputRecords": 0,
+          "missingCacheReadRecords": 0,
+          "missingCacheWriteRecords": 0,
+          "missingCachedOutputRecords": 0,
+          "missingReasoningRecords": 0
+        },
+        "sessions": 1,
+        "records": 1,
+        "estimatedCostUsd": 3.0,
+        "reportedCostUsd": null,
+        "billedCostUsd": null,
+        "sourceEstimatedCostUsd": null,
+        "cacheSavingsUsd": 1.0,
+        "unpricedRecords": 0
+      }
+    ],
+    "sources": [
+      {
+        "date": "",
+        "sourceId": "codex",
+        "modelId": null,
+        "totals": {
+          "inputTokens": 1000000,
+          "outputTokens": 500000,
+          "cacheReadTokens": 2000000,
+          "cacheWriteTokens": 0,
+          "cachedOutputTokens": 0,
+          "reasoningTokens": 100000,
+          "missingInputRecords": 0,
+          "missingOutputRecords": 0,
+          "missingCacheReadRecords": 0,
+          "missingCacheWriteRecords": 0,
+          "missingCachedOutputRecords": 0,
+          "missingReasoningRecords": 0
+        },
+        "sessions": 1,
+        "records": 1,
+        "estimatedCostUsd": 3.0,
+        "reportedCostUsd": null,
+        "billedCostUsd": null,
+        "sourceEstimatedCostUsd": null,
+        "cacheSavingsUsd": 1.0,
+        "unpricedRecords": 0
+      }
+    ]
+  },
+  "sources": [
+    {
+      "id": "codex",
+      "label": "Codex",
+      "transport": "localFiles",
+      "available": true,
+      "limitations": "Only retained usage counters are imported."
+    }
+  ]
+}

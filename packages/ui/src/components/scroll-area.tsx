@@ -5,17 +5,26 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 
 function ScrollArea({
 	className,
+	appearance = "default",
 	children,
 	...props
-}: ScrollAreaPrimitive.Root.Props) {
+}: ScrollAreaPrimitive.Root.Props & {
+	appearance?: "default" | "licenses" | "inspector" | "specimen";
+}) {
 	return (
 		<ScrollAreaPrimitive.Root
-			className={cn("relative", className)}
+			className={cn(
+				"relative",
+				appearance === "licenses" && "bg-muted/10",
+				appearance === "inspector" && "rounded-md border p-2",
+				appearance === "specimen" && "rounded-xl border border-border p-3",
+				className
+			)}
 			data-slot="scroll-area"
 			{...props}
 		>
 			<ScrollAreaPrimitive.Viewport
-				className="scroll-fade size-full rounded-[inherit] outline-none transition-[color,box-shadow] focus-visible:outline-1 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+				className="scroll-fade size-full rounded-[inherit] outline-none transition-[color,box-shadow] focus-visible:outline-1 focus-visible:ring-3 focus-visible:ring-ring"
 				data-slot="scroll-area-viewport"
 			>
 				{children}

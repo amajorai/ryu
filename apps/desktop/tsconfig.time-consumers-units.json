@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["bun", "react", "react-dom", "vite/client"] },
+  "include": [
+    "src/lib/grid-date-cell-editor.test.tsx",
+    "src/lib/block-discussion-date.test.tsx",
+    "src/components/agents/AgentRunHistoryView.day-groups.native-http.test.tsx",
+    "src/components/agents/AgentRunHistoryView.tsx",
+    "../../packages/ui/src/components/calendar.tsx",
+    "../../packages/ui/src/lib/block-discussion-index.ts",
+    "../../packages/blocks/src/desktop/agent-elements/message-list-day-separator.test.tsx",
+    "../../packages/blocks/src/desktop/agent-elements/date-groups.ts",
+    "../../packages/blocks/src/desktop/agent-elements/message-list.module.css.d.ts"
+  ]
+}

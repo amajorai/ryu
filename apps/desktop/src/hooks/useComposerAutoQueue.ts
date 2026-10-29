@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/hooks/useComposerAutoQueue.ts
 //
 // "Don't start this now — the machine is already full."
@@ -20,12 +21,9 @@
 // queue on an unreadable signal is that their message silently does not happen.
 
 import { useCallback } from "react";
-import { useAppShellPath } from "@/src/contributions/app-shell-routes.ts";
 import { request, toTarget } from "@/src/lib/api/client.ts";
 import {
 	armDraft,
-	DRAFTS_BUTTON_ID,
-	DRAFTS_PLUGIN_ID,
 	getDraftsSettings,
 	saveDraft,
 } from "@/src/lib/api/drafts.ts";
@@ -33,11 +31,8 @@ import { useActiveNode } from "./useActiveNode.ts";
 import {
 	type ComposerDraftContext,
 	draftIdFor,
+	useComposerDraftsEnabled,
 } from "./useComposerDraftAutosave.ts";
-
-interface RunWire {
-	run_status?: string;
-}
 
 /**
  * Returns a predicate the composer calls before sending: `true` means the message
@@ -49,9 +44,7 @@ export function useComposerAutoQueue(
 	context: ComposerDraftContext
 ): (text: string) => Promise<boolean> {
 	const node = useActiveNode();
-	const enabled =
-		context.persist !== false &&
-		useAppShellPath(DRAFTS_PLUGIN_ID, DRAFTS_BUTTON_ID) !== null;
+	const enabled = useComposerDraftsEnabled(context);
 
 	return useCallback(
 		async (text: string) => {
@@ -64,7 +57,12 @@ export function useComposerAutoQueue(
 				if (!settings.auto_queue_enabled) {
 					return false;
 				}
-				const body = await request<{ runs?: RunWire[] }>(target, "/api/runs");
+				const body = await request(
+					target,
+					"/api/runs",
+					undefined,
+					autoQueueRunsResponseSchema
+				);
 				const running = (body?.runs ?? []).filter(
 					(r) => r.run_status === "running"
 				).length;
@@ -98,3 +96,11 @@ export function useComposerAutoQueue(
 		[enabled, node, context]
 	);
 }
+
+const runWireResponseSchema = z
+	.object({ run_status: z.string().nullish() })
+	.passthrough();
+
+const autoQueueRunsResponseSchema = z
+	.object({ runs: z.array(runWireResponseSchema).optional() })
+	.passthrough();

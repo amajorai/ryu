@@ -72,7 +72,7 @@ test("the shoulders are darker than the core", async ({ page }) => {
 	const fills = await sliceFills(page);
 	const shadowAlphas = fills.map((fill) => {
 		const match = /rgba\(10, 10, 14, ([\d.]+)\)/.exec(fill);
-		return match ? Number.parseFloat(match[1] as string) : Number.NaN;
+		return match ? Number.parseFloat(match[1]) : Number.NaN;
 	});
 	const spread = Math.max(...shadowAlphas) - Math.min(...shadowAlphas);
 	// A stack with no depth ramp has a spread of exactly zero.

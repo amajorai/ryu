@@ -1,0 +1,8 @@
+.inline1 {
+	border-radius: var(--prism-gradient-1-border-radius);
+}
+.inline2 {
+	background-image: var(--prism-gradient-2-background-image);
+	background-size: var(--prism-gradient-2-background-size);
+	opacity: var(--prism-gradient-2-opacity);
+}

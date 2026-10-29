@@ -1,37 +1,11 @@
 {
   "slug": "paralegal",
   "name": "Paralegal",
-  "navLabel": "Paralegal",
-  "category": "Legal & Compliance",
   "icon": "FileText",
   "tagline": "Organize case records, prepare chronologies, and draft summaries for legal review.",
-  "heroEyebrow": "Ryu for Paralegal",
-  "heroTitle": "Ryu for paralegal",
-  "heroSubtitle": "Organize case records, prepare chronologies, and draft summaries for legal review.",
+  "heroTitle": "Ryu for paralegals",
+  "pluralPhrase": "paralegals",
   "visualKey": "SkillsVisual",
-  "intro": "Paralegals carry the document-heavy legwork of a matter: summaries, chronologies, cite-checks, and exhibit prep, all on confidential files that can't go into a public chatbot. Ryu lets you package these repeatable tasks as skills that run locally, ground them on the matter's own documents, and log every call, so the routine work goes faster while an attorney reviews the result.",
-  "highlights": [
-    {
-      "title": "Reusable skills",
-      "description": "Package repeatable tasks like deposition summaries and cite-checks as skills you can run on any matter, the same way each time.",
-      "icon": "Sparkles"
-    },
-    {
-      "title": "Cites the source",
-      "description": "Ground agents on the matter's filings and records with Spaces and RAG, so every summary points back to the page and document.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Matter data stays private",
-      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Auditable by default",
-      "description": "Every model and tool call is logged in the Gateway audit trail, so the attorney can see exactly what the assistant worked from.",
-      "icon": "Eye"
-    }
-  ],
   "useCases": [
     {
       "title": "Document summarization",
@@ -58,28 +32,18 @@
       "description": "Turn an inbound matter into a structured file with parties, issues, deadlines, and a checklist for the attorney to confirm."
     }
   ],
-  "examplePrompts": [
-    "Summarize this 60-page deposition into the key admissions with page and line citations.",
-    "Build a chronology of events from the documents in this matter, linking each entry to its source.",
-    "Check every quote and citation in this brief against the record and flag any that don't match.",
-    "Extract the parties, dates, and key terms from this discovery set into an index.",
-    "Draft an exhibit list and table of authorities from this filing for me to review."
-  ],
   "faq": [
     {
       "q": "Is confidential matter data safe with Ryu?",
-      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the call, so matter files stay governed end to end."
+      "a": "Yes. With a local model, matter files stay on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Will the summaries cite the source?",
-      "a": "Yes. Ground agents on the matter's documents with Spaces and RAG so summaries and chronologies point back to the specific page and document, letting an attorney verify before relying on them."
+      "a": "Yes. Add the matter's documents to a Space so summaries and chronologies point back to the page and document, and an attorney can verify before relying on them."
     },
     {
       "q": "Can it do the same task the same way each time?",
-      "a": "Yes. Package a repeatable task as a skill and run it across matters consistently. The work is still a first pass for an attorney to review, and the audit trail records what the assistant worked from."
+      "a": "Yes. Package a repeatable task as a skill and run it across matters consistently. The work is still a first pass for an attorney to review, and the audit trail records which model ran and when."
     }
-  ],
-  "ctaTitle": "Give your team an AI paralegal.",
-  "ctaSubtitle": "Summarize, organize, and prep faster, with matter data kept private and every call on the record.",
-  "ctaNote": "Reusable skills · Local-first · Full audit trail"
+  ]
 }

@@ -19,6 +19,9 @@
 
 import {
 	type AppRequestMethod,
+	type AppRequestValue,
+	type AppResponseValue,
+	type MountedAppPathInput,
 	mountedAppRequest,
 	resolveMountedAppPath,
 } from "./app-request.ts";
@@ -42,7 +45,7 @@ export type ReasoningMethod = "DELETE" | "GET" | "POST" | "PUT";
 
 export interface ReasoningRequestInput {
 	/** JSON body. Omit for GET/DELETE. */
-	body?: unknown;
+	body?: AppRequestValue;
 	/** Defaults to `"GET"`. */
 	method?: ReasoningMethod;
 	/** Path RELATIVE to `/api/reasoning`, leading slash included, query and all. */
@@ -66,7 +69,7 @@ export interface ReasoningRequestInput {
  * `..` is what stops `%2e%2e` and its variants, which decode into dot segments only
  * AFTER a literal check would have run.
  */
-export function resolveReasoningPath(path: unknown): string | null {
+export function resolveReasoningPath(path: MountedAppPathInput): string | null {
 	return resolveMountedAppPath(REASONING_MOUNT, path);
 }
 
@@ -80,7 +83,7 @@ export function resolveReasoningPath(path: unknown): string | null {
 export async function reasoningRequest(
 	target: ApiTarget,
 	input: ReasoningRequestInput
-): Promise<unknown> {
+): Promise<AppResponseValue> {
 	return await mountedAppRequest(target, input, {
 		allowedMethods: ALLOWED_METHODS,
 		invalidMethodMessage: (method) =>

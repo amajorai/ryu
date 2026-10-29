@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tracing::debug;
 
+use crate::stats::CacheStatsSnapshot;
+use crate::BoxFuture;
+
 // ─── Semantic cache config (moved verbatim from gateway `config.rs`) ──────────
 //
 // The serde shape the built-in [`SemanticCache`] consumes. It lives here so this
@@ -58,16 +61,21 @@ pub struct SemanticCache {
     config: SemanticCacheConfig,
     store: DashMap<u64, Entry>,
     ttl_secs: u64,
+    /// Entry cap (the exact cache's `cache.max_entries`). Each entry holds an
+    /// embedding plus a full response and every lookup scans all of them, so
+    /// the TTL alone does not bound memory or per-request CPU.
+    max_entries: usize,
     /// Monotonic counter used as insert key — safe across evictions.
     next_key: AtomicU64,
 }
 
 impl SemanticCache {
-    pub fn new(config: SemanticCacheConfig, ttl_secs: u64) -> Self {
+    pub fn new(config: SemanticCacheConfig, ttl_secs: u64, max_entries: usize) -> Self {
         Self {
             config,
             store: DashMap::new(),
             ttl_secs,
+            max_entries,
             next_key: AtomicU64::new(0),
         }
     }
@@ -120,7 +128,13 @@ impl SemanticCache {
     }
 
     /// Store a new embedding + response, tagged with the caller's tenant.
+    /// Enforces `max_entries` by evicting the oldest entries when full.
     pub fn insert(&self, org_id: Option<String>, embedding: Vec<f32>, response: Value) {
+        // Same cap as the exact cache: at the limit, drop ~10 % (oldest first).
+        // `.max(1)` keeps the cap enforced when `max_entries` is under 10.
+        if self.store.len() >= self.max_entries {
+            self.evict_oldest((self.max_entries / 10).max(1));
+        }
         let key = self.next_key.fetch_add(1, Ordering::Relaxed);
         self.store.insert(
             key,
@@ -139,6 +153,21 @@ impl SemanticCache {
         let now = Instant::now();
         self.store
             .retain(|_, e| now.duration_since(e.inserted_at).as_secs() <= self.ttl_secs);
+    }
+
+    fn evict_oldest(&self, n: usize) {
+        // Partition out the oldest n entries without sorting the entire store.
+        let mut pairs: Vec<(u64, Instant)> = self
+            .store
+            .iter()
+            .map(|entry| (*entry.key(), entry.value().inserted_at))
+            .collect();
+        if n < pairs.len() {
+            pairs.select_nth_unstable_by_key(n, |(_, inserted_at)| *inserted_at);
+        }
+        for (key, _) in pairs.into_iter().take(n) {
+            self.store.remove(&key);
+        }
     }
 
     /// Flatten the `messages` array into a single string suitable for embedding.
@@ -196,6 +225,32 @@ pub trait SemanticCacheBackend: Send + Sync {
     fn insert(&self, org_id: Option<String>, embedding: Vec<f32>, response: Value);
     /// Evict expired entries (background sweep).
     fn evict_expired(&self);
+
+    /// Async form of [`lookup`](Self::lookup), used by the request pipeline.
+    /// In-process backends keep the default; network backends override it.
+    fn lookup_async<'a>(
+        &'a self,
+        org_id: Option<&'a str>,
+        query: &'a [f32],
+    ) -> BoxFuture<'a, Option<Value>> {
+        Box::pin(std::future::ready(self.lookup(org_id, query)))
+    }
+
+    /// Async form of [`insert`](Self::insert).
+    fn insert_async(
+        &self,
+        org_id: Option<String>,
+        embedding: Vec<f32>,
+        response: Value,
+    ) -> BoxFuture<'_, ()> {
+        self.insert(org_id, embedding, response);
+        Box::pin(std::future::ready(()))
+    }
+
+    /// Hit/miss/store/error counters, when the backend keeps them.
+    fn stats(&self) -> Option<CacheStatsSnapshot> {
+        None
+    }
 }
 
 impl SemanticCacheBackend for SemanticCache {
@@ -472,6 +527,10 @@ mod tests {
     // ─── lookup / insert ─────────────────────────────────────────────────────
 
     fn cache(threshold: f32, ttl_secs: u64) -> SemanticCache {
+        capped_cache(threshold, ttl_secs, 1000)
+    }
+
+    fn capped_cache(threshold: f32, ttl_secs: u64, max_entries: usize) -> SemanticCache {
         SemanticCache::new(
             SemanticCacheConfig {
                 enabled: true,
@@ -479,7 +538,33 @@ mod tests {
                 embedding_model: "m".into(),
             },
             ttl_secs,
+            max_entries,
         )
+    }
+
+    #[test]
+    fn insert_caps_at_max_entries_and_evicts_the_oldest() {
+        let c = capped_cache(0.92, 3600, 20);
+        for i in 0..25 {
+            c.insert(Some("org".into()), vec![1.0, i as f32], json!({ "r": i }));
+            // Distinct `inserted_at` so "oldest" is well defined.
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(c.store.len() <= 20, "len = {}", c.store.len());
+        let kept: Vec<u64> = c.store.iter().map(|entry| *entry.key()).collect();
+        assert!(!kept.contains(&0), "the oldest entry must be evicted first");
+        assert!(kept.contains(&24), "the newest entry must be kept");
+    }
+
+    #[test]
+    fn small_max_entries_still_bounds_the_cache() {
+        // max_entries < 10: the 10 % eviction share would floor to 0 without
+        // the `.max(1)` guard and the store would grow without bound.
+        let c = capped_cache(0.92, 3600, 3);
+        for i in 0..50 {
+            c.insert(Some("org".into()), vec![1.0, i as f32], json!({ "r": i }));
+        }
+        assert!(c.store.len() <= 3, "len = {}", c.store.len());
     }
 
     #[test]

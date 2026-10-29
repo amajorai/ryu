@@ -21,6 +21,8 @@ export default defineConfig({
 	optimizeDeps: {
 		entries: ["i18n-coverage-proof.html"],
 		exclude: ["@ryu/blocks", "@ryu/i18n", "@ryu/ui"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		dedupe: ["react", "react-dom"],

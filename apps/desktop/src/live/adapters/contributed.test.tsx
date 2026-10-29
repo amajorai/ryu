@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { PluginLiveActivity } from "@/src/lib/api/plugins.ts";
 
-if (typeof document === "undefined") {
+if (!globalThis.document) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);

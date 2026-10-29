@@ -30,7 +30,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ImageLightbox } from "@ryu/blocks/desktop/agent-elements/image-lightbox";
+import { ImageLightbox } from "@ryu/blocks/desktop/agent-elements/image-lightbox.tsx";
 import { MarketplacePromptBanner } from "@ryu/marketplace/catalog/chrome/marketplace-prompt-banner";
 import VerifiedBadge from "@ryu/marketplace/catalog/chrome/verified-badge";
 import {
@@ -38,27 +38,32 @@ import {
 	ListingInfoGrid,
 	ListingSection,
 } from "@ryu/marketplace/catalog/detail/listing-detail-shell";
-import { Avatar, AvatarFallback, AvatarImage } from "@ryu/ui/components/avatar";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import {
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
+} from "@ryu/ui/components/avatar.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar";
+} from "@ryu/ui/components/dialog.tsx";
+import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
-import { Input } from "@ryu/ui/components/input";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/dropdown-menu.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { ChevronDown } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
@@ -78,7 +83,7 @@ import {
 	fetchDetail,
 	fetchReviews,
 	type MarketplaceDetail,
-	type MarketplaceError,
+	MarketplaceError,
 	type MarketplaceKind,
 	postReview,
 	type Review,
@@ -112,15 +117,30 @@ export default function MarketplaceDetailDialog({
 	onInstallBundle?: () => void;
 	bundleInstalling?: boolean;
 }) {
+	const [screenshotOpen, setScreenshotOpen] = useState(false);
+	useEffect(() => setScreenshotOpen(false), [id, kind, open]);
 	return (
 		<Dialog
-			onOpenChange={(next: boolean) => (next ? undefined : onClose())}
+			onOpenChange={(next, eventDetails) => {
+				if (next) {
+					return;
+				}
+				if (
+					screenshotOpen ||
+					(eventDetails.reason === "escape-key" &&
+						eventDetails.event.defaultPrevented)
+				) {
+					eventDetails.cancel();
+					return;
+				}
+				onClose();
+			}}
 			open={open}
 		>
 			{/* The paid preview is intentionally a focused 720px card: identity,
 			    sample prompts, and a short description first. Advanced install and trust
 			    metadata stays behind the in-card disclosure below. */}
-			<DialogContent className="max-h-[88vh] w-[min(45rem,94vw)] max-w-[min(45rem,94vw)] overflow-hidden p-0 sm:max-w-[min(45rem,94vw)]">
+			<DialogContent appearance="marketplace-detail">
 				<DialogHeader className="sr-only">
 					<DialogTitle>{initialName ?? "Listing"}</DialogTitle>
 				</DialogHeader>
@@ -133,6 +153,7 @@ export default function MarketplaceDetailDialog({
 							initialName={initialName}
 							kind={kind}
 							onInstallBundle={onInstallBundle}
+							onScreenshotOpenChange={setScreenshotOpen}
 						/>
 					) : null}
 				</div>
@@ -147,6 +168,7 @@ function DetailBody({
 	initialName,
 	initialIconUrl,
 	onInstallBundle,
+	onScreenshotOpenChange,
 	bundleInstalling,
 }: {
 	kind: MarketplaceKind;
@@ -154,6 +176,7 @@ function DetailBody({
 	initialName?: string;
 	initialIconUrl?: string | null;
 	onInstallBundle?: () => void;
+	onScreenshotOpenChange: (open: boolean) => void;
 	bundleInstalling: boolean;
 }) {
 	const [detail, setDetail] = useState<MarketplaceDetail | null>(null);
@@ -172,7 +195,7 @@ function DetailBody({
 				setDetail(d);
 				setError(null);
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setError(e instanceof Error ? e.message : "Could not load listing.");
 				}
@@ -208,7 +231,10 @@ function DetailBody({
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0">
 							<div className="flex min-w-0 items-center gap-2">
-								<h2 className="truncate font-medium text-2xl tracking-tight">
+								<h2
+									className="truncate font-medium text-2xl tracking-tight"
+									title={name}
+								>
 									{name}
 								</h2>
 								<VerifiedBadge
@@ -252,11 +278,7 @@ function DetailBody({
 				</div>
 			</header>
 
-			{loading && !detail ? (
-				<div className="flex justify-center py-8">
-					<Spinner className="size-5" />
-				</div>
-			) : null}
+			{loading && !detail ? <SkeletonRows spacing="section" /> : null}
 			{error ? (
 				<p className="text-sm text-status-destructive">{error}</p>
 			) : null}
@@ -293,7 +315,12 @@ function DetailBody({
 			) : null}
 
 			{detail ? (
-				<MarketplacePreviewDetails detail={detail} id={id} kind={kind} />
+				<MarketplacePreviewDetails
+					detail={detail}
+					id={id}
+					kind={kind}
+					onScreenshotOpenChange={onScreenshotOpenChange}
+				/>
 			) : null}
 		</div>
 	);
@@ -335,7 +362,7 @@ function CommunityStat({ label, value }: { label: string; value: number }) {
 	return (
 		<div className="rounded-lg border border-border/60 bg-background/70 px-3 py-2">
 			<p className="font-medium text-base tabular-nums">{formatCount(value)}</p>
-			<p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
+			<p className="type-caption mt-0.5 text-muted-foreground">{label}</p>
 		</div>
 	);
 }
@@ -386,7 +413,7 @@ function BundleContents({
 								<p className="truncate font-medium text-sm">
 									{member.name ?? member.id}
 								</p>
-								<p className="truncate text-[11px] text-muted-foreground">
+								<p className="type-caption truncate text-muted-foreground">
 									{member.kind} · {member.id}
 								</p>
 							</div>
@@ -412,23 +439,15 @@ function MarketplacePreviewDetails({
 	detail,
 	id,
 	kind,
+	onScreenshotOpenChange,
 }: {
 	detail: MarketplaceDetail;
 	id: string;
 	kind: MarketplaceKind;
+	onScreenshotOpenChange: (open: boolean) => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const hasDetails =
-		detail.setup.length > 0 ||
-		detail.runnables.length > 0 ||
-		detail.screenshots.length > 0 ||
-		externalLinks(detail).length > 0 ||
-		detail.capabilities.length > 0 ||
-		Boolean(detail.languagePack) ||
-		Boolean(detail.developer || detail.category || detail.version);
-	if (!hasDetails) {
-		return null;
-	}
+	// Every listing has a reviews surface, even when optional metadata is absent.
 
 	return (
 		<section className="border-border/60 border-t pt-4">
@@ -448,6 +467,7 @@ function MarketplacePreviewDetails({
 					{detail.screenshots.length > 0 ? (
 						<ScreenshotGallery
 							name={detail.name}
+							onOpenChange={onScreenshotOpenChange}
 							screenshots={detail.screenshots}
 						/>
 					) : null}
@@ -539,14 +559,15 @@ function DetailLogo({
 	iconUrl: string | null;
 	name: string;
 }) {
+	const safeIconUrl = safeMediaUrl(iconUrl);
 	// Fills the hero's icon tile rather than sizing itself: the tile owns the box,
 	// the radius and the ring, so every realm's hero art is the same square.
-	if (iconUrl) {
+	if (safeIconUrl) {
 		return (
 			<img
 				alt={`${name} logo`}
 				className="size-full object-cover"
-				src={iconUrl}
+				src={safeIconUrl}
 			/>
 		);
 	}
@@ -563,33 +584,43 @@ function DetailLogo({
 function ScreenshotGallery({
 	screenshots,
 	name,
+	onOpenChange,
 }: {
 	screenshots: string[];
 	name: string;
+	onOpenChange: (open: boolean) => void;
 }) {
 	const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 	const lightboxOriginRef = useRef<HTMLElement | null>(null);
+	const safeScreenshots = useMemo(
+		() =>
+			screenshots
+				.map((url) => safeMediaUrl(url))
+				.filter((url): url is string => Boolean(url)),
+		[screenshots]
+	);
 	const images = useMemo(
 		() =>
-			screenshots.map((url, i) => ({
+			safeScreenshots.map((url, i) => ({
 				id: `${i}`,
 				url,
 				filename: `${name} screenshot ${i + 1}`,
 			})),
-		[screenshots, name]
+		[safeScreenshots, name]
 	);
 
 	return (
 		<section className="flex flex-col gap-2">
 			<h3 className="font-medium text-sm">Screenshots</h3>
 			<div className="scroll-fade-x flex gap-3 overflow-x-auto pb-2">
-				{screenshots.map((url, i) => (
+				{safeScreenshots.map((url, i) => (
 					<button
 						className="shrink-0 overflow-hidden rounded-lg border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						key={url}
 						onClick={(event) => {
 							lightboxOriginRef.current = event.currentTarget;
 							setLightboxIndex(i);
+							onOpenChange(true);
 						}}
 						type="button"
 					>
@@ -605,7 +636,10 @@ function ScreenshotGallery({
 			<ImageLightbox
 				images={images}
 				initialIndex={lightboxIndex ?? 0}
-				onClose={() => setLightboxIndex(null)}
+				onClose={() => {
+					setLightboxIndex(null);
+					onOpenChange(false);
+				}}
 				open={lightboxIndex !== null}
 				originRef={lightboxOriginRef}
 			/>
@@ -706,7 +740,9 @@ function RunnablesSection({ runnables }: { runnables: DetailRunnable[] }) {
 								icon={runnableIcon(r.kind)}
 							/>
 							<div className="min-w-0">
-								<p className="truncate font-medium text-sm">{r.name}</p>
+								<p className="truncate font-medium text-sm" title={r.name}>
+									{r.name}
+								</p>
 								{r.description ? (
 									<p className="mt-0.5 text-muted-foreground text-xs">
 										{r.description}
@@ -738,7 +774,7 @@ function InformationBlock({ detail }: { detail: MarketplaceDetail }) {
 			value: (
 				<span className="flex flex-wrap justify-end gap-1">
 					{detail.capabilities.map((c) => (
-						<Badge className="text-[11px]" key={c} variant="secondary">
+						<Badge key={c} typography="caption" variant="secondary">
 							{c}
 						</Badge>
 					))}
@@ -836,9 +872,11 @@ function ReviewsSection({
 	const [nextCursor, setNextCursor] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [loadingMore, setLoadingMore] = useState(false);
+	const [reviewsError, setReviewsError] = useState<string | null>(null);
 
 	const load = useCallback(async () => {
 		setLoading(true);
+		setReviewsError(null);
 		try {
 			const page = await fetchReviews(kind, id, { limit: REVIEW_PAGE_LIMIT });
 			setReviews(page.reviews);
@@ -848,7 +886,7 @@ function ReviewsSection({
 				count: page.ratingCount,
 			});
 		} catch {
-			// Reviews are non-critical; leave the list empty on failure.
+			setReviewsError("Couldn't load reviews. Try again.");
 		} finally {
 			setLoading(false);
 		}
@@ -863,6 +901,7 @@ function ReviewsSection({
 			return;
 		}
 		setLoadingMore(true);
+		setReviewsError(null);
 		try {
 			const page = await fetchReviews(kind, id, {
 				limit: REVIEW_PAGE_LIMIT,
@@ -871,7 +910,7 @@ function ReviewsSection({
 			setReviews((prev) => [...prev, ...page.reviews]);
 			setNextCursor(page.nextCursor);
 		} catch {
-			// Ignore — the "Load more" button stays available for a retry.
+			setReviewsError("Couldn't load more reviews. Try again.");
 		} finally {
 			setLoadingMore(false);
 		}
@@ -885,8 +924,22 @@ function ReviewsSection({
 	return (
 		<section className="flex flex-col gap-4">
 			<h3 className="font-medium text-sm">Reviews</h3>
+			{reviewsError && (
+				<div
+					className="flex items-center justify-between gap-2 text-sm text-status-destructive"
+					role="alert"
+				>
+					<span>{reviewsError}</span>
+					{reviews.length === 0 && (
+						<Button onClick={() => void load()} size="sm" variant="outline">
+							Retry reviews
+						</Button>
+					)}
+				</div>
+			)}
 
 			<WriteReviewForm
+				disabled={loading || (Boolean(reviewsError) && reviews.length === 0)}
 				existing={myReview}
 				id={id}
 				kind={kind}
@@ -895,12 +948,10 @@ function ReviewsSection({
 			/>
 
 			{loading && reviews.length === 0 ? (
-				<div className="flex justify-center py-4">
-					<Spinner className="size-4" />
-				</div>
+				<SkeletonRows spacing="spacious" />
 			) : null}
 
-			{!loading && reviews.length === 0 ? (
+			{!(loading || reviewsError) && reviews.length === 0 ? (
 				<p className="text-muted-foreground text-sm">
 					No reviews yet. Be the first to review this item.
 				</p>
@@ -941,7 +992,7 @@ function ReviewItem({ review, isOwn }: { review: Review; isOwn: boolean }) {
 						src={review.userImage}
 					/>
 				) : null}
-				<AvatarFallback className="overflow-hidden bg-transparent p-0">
+				<AvatarFallback appearance="artwork" className="overflow-hidden">
 					<DitherAvatar
 						className="size-full"
 						name={review.userId ?? review.userName ?? "anonymous"}
@@ -954,12 +1005,12 @@ function ReviewItem({ review, isOwn }: { review: Review; isOwn: boolean }) {
 						{review.userName ?? "Anonymous"}
 					</span>
 					{isOwn ? (
-						<Badge className="text-[10px]" variant="secondary">
+						<Badge size="compact" variant="secondary">
 							You
 						</Badge>
 					) : null}
 					{review.verifiedPurchase ? (
-						<Badge className="text-[10px]" variant="outline">
+						<Badge size="compact" variant="outline">
 							Verified purchase
 						</Badge>
 					) : null}
@@ -980,12 +1031,14 @@ function WriteReviewForm({
 	kind,
 	id,
 	signedIn,
+	disabled,
 	existing,
 	onSubmitted,
 }: {
 	kind: MarketplaceKind;
 	id: string;
 	signedIn: boolean;
+	disabled: boolean;
 	existing: Review | null;
 	onSubmitted: () => Promise<void>;
 }) {
@@ -1021,7 +1074,7 @@ function WriteReviewForm({
 			sileo.success({ title: existing ? "Review updated." : "Review posted." });
 			await onSubmitted();
 		} catch (e) {
-			if ((e as MarketplaceError).kind === "purchase") {
+			if (e instanceof MarketplaceError && e.kind === "purchase") {
 				setPurchaseRequired(true);
 			} else {
 				const message =
@@ -1065,11 +1118,15 @@ function WriteReviewForm({
 				<span className="font-medium text-sm">
 					{existing ? "Edit your review" : "Write a review"}
 				</span>
-				<StarRatingInput disabled={busy} onChange={setRating} value={rating} />
+				<StarRatingInput
+					disabled={busy || disabled}
+					onChange={setRating}
+					value={rating}
+				/>
 			</div>
 			<Input
 				aria-label="Review title"
-				disabled={busy}
+				disabled={busy || disabled}
 				maxLength={120}
 				onChange={(e) => setTitle(e.target.value)}
 				placeholder="Title (optional)"
@@ -1077,7 +1134,7 @@ function WriteReviewForm({
 			/>
 			<Textarea
 				aria-label="Review body"
-				disabled={busy}
+				disabled={busy || disabled}
 				maxLength={2000}
 				onChange={(e) => setBody(e.target.value)}
 				placeholder="Share what you think (optional)"
@@ -1092,12 +1149,17 @@ function WriteReviewForm({
 				</p>
 			) : null}
 			<div className="flex items-center gap-2">
-				<Button loading={busy} onClick={() => submit()} size="sm">
+				<Button
+					disabled={disabled}
+					loading={busy}
+					onClick={() => submit()}
+					size="sm"
+				>
 					{existing ? "Update review" : "Post review"}
 				</Button>
 				{existing ? (
 					<Button
-						disabled={busy}
+						disabled={busy || disabled}
 						onClick={() => remove()}
 						size="sm"
 						variant="ghost"

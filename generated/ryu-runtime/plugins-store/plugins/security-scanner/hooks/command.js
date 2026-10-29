@@ -30,9 +30,13 @@ if (!isExactCommand(input, firstWord)) {
 if (firstWord === "/security-clear") {
 	if (ctx.conversation_id) {
 		try {
-			await host.storage.delete(ctx.conversation_id);
-		} catch (error) {
+			const deleted = await host.storage.delete(ctx.conversation_id);
+			if (deleted === false) {
+				throw new Error("storage refused deletion");
+			}
+		} catch  {
 			host.log("security-scanner: clear failed");
+			return { kind: "handled", text: "Security Scanner state could not be cleared. The previous state could not be confirmed. Try again." };
 		}
 	}
 	return {
@@ -59,7 +63,7 @@ async function preference(key, fallback) {
 		const value = await host.getPreference({ key: key });
 		const text = String(value == null ? "" : value).trim();
 		return text || fallback;
-	} catch (error) {
+	} catch  {
 		return fallback;
 	}
 }
@@ -172,7 +176,7 @@ async function runScan(rest) {
 	let response;
 	try {
 		response = await host.runFanout({ delegates: delegates, caps: caps });
-	} catch (error) {
+	} catch  {
 		host.log("security-scanner: scan delegation failed");
 		return {
 			kind: "handled",
@@ -212,13 +216,13 @@ async function runScan(rest) {
 			].join("\n"),
 		});
 		synthesis = clip(raw, MAX_REPORT_CHARS);
-	} catch (error) {
+	} catch  {
 		host.log("security-scanner: report synthesis failed");
 	}
 	const status = complete && synthesis ? "complete" : "partial";
 	const report = synthesis || fallbackReport(mode, scope, workers);
 	const finalText = formatReport(mode, scope, status, workers.length, requestedCount, report);
-	await saveState({
+	const saved = await saveState({
 		mode: mode,
 		scope: scope,
 		status: status,
@@ -226,7 +230,7 @@ async function runScan(rest) {
 		verification: "",
 		fix: "",
 	});
-	return { kind: "handled", text: finalText };
+	return { kind: "handled", text: withPersistenceStatus(finalText, saved) };
 }
 
 function synthesisSystem() {
@@ -242,8 +246,8 @@ function synthesisSystem() {
 function normalizeWorkers(response) {
 	const values = response && Array.isArray(response.results) ? response.results : [];
 	return values.map(function (value, index) {
-		const output = value && typeof value.output === "string" ? value.output.trim() : "";
-		const error = value && typeof value.error === "string" ? value.error.trim() : "";
+		const output = value && parsePrimitiveText(value.output) !== undefined ? value.output.trim() : "";
+		const error = value && parsePrimitiveText(value.error) !== undefined ? value.error.trim() : "";
 		return {
 			id: value && value.id ? String(value.id) : "delegate-" + (index + 1),
 			text: output || (error ? "Delegate error: " + clip(error, 500) : "Delegate returned no evidence."),
@@ -308,21 +312,33 @@ async function readState() {
 			return null;
 		}
 		const parsed = JSON.parse(String(raw));
-		return parsed && typeof parsed === "object" ? parsed : null;
-	} catch (error) {
+		return parsed && Object(parsed) === parsed ? parsed : null;
+	} catch  {
 		return null;
 	}
 }
 
 async function saveState(state) {
 	if (!ctx.conversation_id) {
-		return;
+		return false;
 	}
 	try {
-		await host.storage.set(ctx.conversation_id, state);
-	} catch (error) {
+		const stored = await host.storage.set(ctx.conversation_id, state);
+		if (stored === false) {
+			throw new Error("storage refused write");
+		}
+		return true;
+	} catch  {
 		host.log("security-scanner: state write failed");
+		return false;
 	}
+}
+
+function withPersistenceStatus(text, saved) {
+	if (saved) {
+		return text;
+	}
+	return text + "\n\nState warning: this result could not be saved. Fix local storage and rerun the command before using /security-verify or /security-fix.";
 }
 
 async function runVerification(focus) {
@@ -359,7 +375,7 @@ async function runVerification(focus) {
 				max_tokens: 9000,
 			},
 		});
-	} catch (error) {
+	} catch  {
 		host.log("security-scanner: verification delegation failed");
 		return {
 			kind: "handled",
@@ -392,7 +408,7 @@ async function runVerification(focus) {
 			].join("\n"),
 		});
 		synthesis = clip(raw, 14000);
-	} catch (error) {
+	} catch  {
 		host.log("security-scanner: verification synthesis failed");
 	}
 	const verification = synthesis || [
@@ -410,7 +426,7 @@ async function runVerification(focus) {
 		"",
 		"Verification boundary: read-only review. No files, patches, commits, or pushes were changed.",
 	].join("\n");
-	await saveState({
+	const saved = await saveState({
 		mode: state.mode || "unknown",
 		scope: state.scope || "unknown",
 		status: state.status || "partial",
@@ -418,7 +434,7 @@ async function runVerification(focus) {
 		verification: clip(text, 18000),
 		fix: state.fix || "",
 	});
-	return { kind: "handled", text: text };
+	return { kind: "handled", text: withPersistenceStatus(text, saved) };
 }
 
 async function runFix(focus) {
@@ -453,7 +469,7 @@ async function runFix(focus) {
 			args.agent_id = agentId;
 		}
 		raw = String(await host.runAgent(args) || "").trim();
-	} catch (error) {
+	} catch  {
 		host.log("security-scanner: fix planner failed");
 	}
 	if (!raw) {
@@ -471,7 +487,7 @@ async function runFix(focus) {
 		"",
 		"Patch boundary: proposal only. No files, patches, commits, or pushes were changed.",
 	].join("\n");
-	await saveState({
+	const saved = await saveState({
 		mode: state.mode || "unknown",
 		scope: state.scope || "unknown",
 		status: state.status || "partial",
@@ -479,5 +495,16 @@ async function runFix(focus) {
 		verification: state.verification || "",
 		fix: clip(text, 18000),
 	});
-	return { kind: "handled", text: text };
+	return { kind: "handled", text: withPersistenceStatus(text, saved) };
+}
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
 }

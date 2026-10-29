@@ -21,6 +21,9 @@
 //   d  install        POST /api/setup/{name}/install    (only when not installed)
 //   D  uninstall      POST /api/setup/{name}/uninstall  (only when installed)
 //   j/k + arrows      move selection
+// A, Z and D are bulk or destructive, so each opens an inline ConfirmPrompt
+// (Cancel by default; y confirms, n/Esc cancels) and posts only once confirmed.
+// The prompt takes the status bar's place while open, so it fits short panes.
 // 'q' (quit) is owned by the shell. 'i' (dependency setup wizard) is a separate
 // full-screen flow in apps/cli (Screen::SetupDependencies) and is not ported.
 //
@@ -31,6 +34,7 @@
 
 import type { KeyEvent } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -38,13 +42,19 @@ import { Spinner } from "@/components/ui/spinner.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import { useInputFocused } from "../core/InputFocusContext.tsx";
+import { HINT, type KeyHint } from "../core/keymap.ts";
+import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
 import {
 	loadServices,
 	type ServicesSnapshot,
 } from "../core/services-snapshot.ts";
+import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
-import { type KeyHint, StatusBar } from "../ui/StatusBar.tsx";
+import {
+	OVERLAY_STATUS_SCOPE,
+	useStatusContribution,
+} from "../ui/StatusContext.tsx";
 import { useToast } from "../ui/toast.tsx";
 import type { TabProps } from "./types.ts";
 
@@ -93,7 +103,7 @@ const LIST_HEIGHT = 16;
 
 async function postAction(target: ApiTarget, path: string): Promise<boolean> {
 	try {
-		await request(target, path, { method: "POST" });
+		await request(target, path, { method: "POST" }, appResponseValueSchema);
 		return true;
 	} catch {
 		return false;
@@ -167,11 +177,11 @@ export function ServicesTab({ active }: TabProps) {
 						return remaining.size === prev.size ? prev : remaining;
 					});
 				})
-				.catch((err: unknown) => {
+				.catch((err) => {
 					if (controller.signal.aborted || reqRef.current !== reqId) {
 						return;
 					}
-					setError(err instanceof Error ? err.message : String(err));
+					setError(nativeErrorMessage(err));
 				})
 				.finally(() => {
 					if (inFlightRef.current === controller) {
@@ -250,10 +260,14 @@ export function ServicesTab({ active }: TabProps) {
 				}
 				runLoad(false);
 			})
-			.catch((err: unknown) =>
-				notify(`Install failed: ${name} - ${errText(err)}`, "error")
+			.catch((err) =>
+				notify(`Install failed: ${name} - ${nativeErrorMessage(err)}`, "error")
 			);
 	}, [index, queued, isInstalled, target, notify, runLoad]);
+
+	// A bulk or destructive action waiting on the inline ConfirmPrompt. While it is
+	// set, the tab's own keys are ignored so y/n/r reach only the prompt.
+	const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
 
 	// Letter actions, mirroring the Rust Services keymap. Kept separate from the
 	// nav/modifier decode in handleKey so neither function grows too complex.
@@ -261,16 +275,40 @@ export function ServicesTab({ active }: TabProps) {
 		(lower: string, shifted: boolean) => {
 			const installedGuard = (n: string) => isInstalled(n);
 			if (lower === "a" && shifted) {
-				act("/api/sidecar/start-all", "Started all");
+				setConfirm({
+					title: "Start all services?",
+					consequence: "Starts every installed sidecar on this node.",
+					confirmLabel: "Start all",
+					run: () => act("/api/sidecar/start-all", "Started all"),
+				});
 				return;
 			}
 			if (lower === "z" && shifted) {
-				act("/api/sidecar/stop-all", "Stopped all");
+				setConfirm({
+					title: "Stop all services?",
+					consequence:
+						"Stops every running sidecar; features that depend on them stop working.",
+					confirmLabel: "Stop all",
+					run: () => act("/api/sidecar/stop-all", "Stopped all"),
+				});
 				return;
 			}
 			if (lower === "d") {
 				if (shifted) {
-					act("/api/setup/{name}/uninstall", "Uninstalled", installedGuard);
+					const name = SIDECAR_ORDER[index];
+					if (name && isInstalled(name)) {
+						setConfirm({
+							title: `Uninstall ${name}?`,
+							consequence: `${name} will be stopped and removed from this node; press d to reinstall it.`,
+							confirmLabel: "Uninstall",
+							run: () =>
+								act(
+									"/api/setup/{name}/uninstall",
+									"Uninstalled",
+									installedGuard
+								),
+						});
+					}
 				} else {
 					installSelected();
 				}
@@ -286,7 +324,7 @@ export function ServicesTab({ active }: TabProps) {
 				notify("Dependency setup is not available in the TUI", "warning");
 			}
 		},
-		[act, installSelected, isInstalled, notify]
+		[act, index, installSelected, isInstalled, notify]
 	);
 
 	const handleKey = useCallback(
@@ -308,17 +346,28 @@ export function ServicesTab({ active }: TabProps) {
 	);
 
 	useKeyboard((key) => {
-		if (!active || inputFocused) {
+		if (!active || inputFocused || confirm) {
 			return;
 		}
 		handleKey(key);
+	});
+
+	useStatusContribution(active ? OVERLAY_STATUS_SCOPE : undefined, {
+		// An open confirm prompt shows its own keys in place of the tab's.
+		hints: snapshot && !snapshot.offline && !confirm ? SERVICES_HINTS : [],
+		left: loading ? "refreshing…" : undefined,
 	});
 
 	if (loading && !snapshot) {
 		return <Loading label="Loading services…" />;
 	}
 	if (error && !snapshot) {
-		return <ErrorView hint="Retrying automatically…" message={error} />;
+		return (
+			<ErrorView
+				hint="Retrying automatically…"
+				message={humanizeError(error, { url: target.url })}
+			/>
+		);
 	}
 	if (snapshot?.offline) {
 		return (
@@ -345,17 +394,6 @@ export function ServicesTab({ active }: TabProps) {
 	);
 	const visible = SIDECAR_ORDER.slice(start, start + LIST_HEIGHT);
 
-	const hints: KeyHint[] = [
-		{ keys: "↑↓", label: "nav" },
-		{ keys: "d", label: "install" },
-		{ keys: "s", label: "start" },
-		{ keys: "x", label: "stop" },
-		{ keys: "r", label: "restart" },
-		{ keys: "A", label: "all start" },
-		{ keys: "Z", label: "all stop" },
-		{ keys: "D", label: "uninstall" },
-	];
-
 	return (
 		<box flexDirection="column" flexGrow={1}>
 			<box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
@@ -380,7 +418,11 @@ export function ServicesTab({ active }: TabProps) {
 						});
 						return (
 							<box flexDirection="row" gap={1} key={name}>
-								<text fg={isSel ? theme.colors.primary : theme.colors.muted}>
+								<text
+									fg={
+										isSel ? theme.colors.primary : theme.colors.mutedForeground
+									}
+								>
 									{isSel ? "›" : " "}
 								</text>
 								<text
@@ -396,7 +438,11 @@ export function ServicesTab({ active }: TabProps) {
 									{categoryOf(name).padEnd(CATEGORY_WIDTH)}
 								</Badge>
 								<text
-									fg={installed ? theme.colors.success : theme.colors.muted}
+									fg={
+										installed
+											? theme.colors.success
+											: theme.colors.mutedForeground
+									}
 								>
 									{installed ? "[✓]" : "   "}
 								</text>
@@ -406,10 +452,37 @@ export function ServicesTab({ active }: TabProps) {
 					})}
 				</box>
 			</box>
-			<StatusBar hints={hints} left={loading ? "refreshing…" : undefined} />
+			{confirm ? (
+				<box flexShrink={0} paddingLeft={1}>
+					<ConfirmPrompt
+						active={active && !inputFocused}
+						confirmLabel={confirm.confirmLabel}
+						consequence={confirm.consequence}
+						onCancel={() => setConfirm(null)}
+						onConfirm={() => {
+							setConfirm(null);
+							confirm.run();
+						}}
+						title={confirm.title}
+					/>
+				</box>
+			) : null}
 		</box>
 	);
 }
+
+// Published to the shell's status bar (Services renders inside the Settings
+// overlay, which owns the keyboard while open). Lower priority survives narrow bars.
+const SERVICES_HINTS: KeyHint[] = [
+	{ ...HINT.move, priority: 0 },
+	{ keys: "d", label: "install", priority: 1 },
+	{ keys: "s", label: "start", priority: 1 },
+	{ keys: "x", label: "stop", priority: 1 },
+	{ keys: "r", label: "restart", priority: 2 },
+	{ keys: "A", label: "all start", priority: 3 },
+	{ keys: "Z", label: "all stop", priority: 3 },
+	{ keys: "D", label: "uninstall", priority: 2 },
+];
 
 function StatusCell({ status }: { status: RowStatus }) {
 	if (status.downloading) {
@@ -423,10 +496,17 @@ function StatusCell({ status }: { status: RowStatus }) {
 	);
 }
 
+// A bulk or destructive action held until the user answers the ConfirmPrompt.
+interface PendingConfirm {
+	confirmLabel: string;
+	consequence: string;
+	run: () => void;
+	title: string;
+}
+
 interface ThemeLike {
 	colors: {
 		error: string;
-		muted: string;
 		mutedForeground: string;
 		primary: string;
 		success: string;
@@ -481,8 +561,4 @@ function rowStatus(theme: ThemeLike, flags: RowFlags): RowStatus {
 		color: theme.colors.warning,
 		downloading: false,
 	};
-}
-
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }

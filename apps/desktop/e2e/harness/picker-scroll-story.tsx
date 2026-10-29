@@ -23,7 +23,7 @@ import {
 	DropdownMenuSub,
 	DropdownMenuSubContent,
 	DropdownMenuSubTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AcpOptionPicker } from "../../components/agent-elements/input/acp-pickers.tsx";
@@ -75,7 +75,7 @@ function Story() {
 											<span className="truncate">Agent {i}</span>
 										</span>
 									</DropdownMenuSubTrigger>
-									<DropdownMenuSubContent className="max-h-96 min-w-[220px] max-w-[320px] overflow-y-auto p-1">
+									<DropdownMenuSubContent className="max-h-96 min-w-[220px] max-w-[320px] overflow-y-auto">
 										<DropdownMenuItem
 											closeOnClick={false}
 											onClick={() => {

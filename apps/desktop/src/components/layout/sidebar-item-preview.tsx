@@ -4,8 +4,8 @@ import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
-} from "@ryu/ui/components/hover-card";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/hover-card.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ReactNode, useRef, useState } from "react";
 
 const SIDEBAR_PREVIEW_BOUNDARY_SELECTOR = "[data-sidebar-preview-boundary]";
@@ -19,6 +19,7 @@ export function SidebarItemPreview({
 	children,
 	content,
 	className,
+	spacing,
 	renderContent,
 	side = "right",
 	sideOffset = 14,
@@ -26,6 +27,7 @@ export function SidebarItemPreview({
 	children: ReactNode;
 	content: ReactNode;
 	className?: string;
+	spacing?: "conversation-preview";
 	/** Render optional expensive content only after the hover card opens. */
 	renderContent?: (open: boolean) => ReactNode;
 	side?: "top" | "bottom" | "left" | "right" | "inline-start" | "inline-end";
@@ -75,12 +77,11 @@ export function SidebarItemPreview({
 				align="start"
 				alignOffset={0}
 				anchor={getPreviewAnchor}
-				className={cn(
-					"w-80 max-w-[min(20rem,calc(100vw-2rem))] p-4 text-sm",
-					className
-				)}
+				appearance="sidebar-preview"
+				className={cn(className)}
 				side={side}
 				sideOffset={sideOffset}
+				spacing={spacing}
 			>
 				{content}
 				{renderContent ? renderContent(open) : null}
@@ -99,7 +100,10 @@ export function SidebarPreviewTitle({
 }) {
 	return (
 		<div className="flex flex-col gap-2">
-			<p className="wrap-break-word font-medium text-sm leading-snug">
+			<p
+				className="wrap-break-word font-medium text-sm leading-snug"
+				data-ryu-i18n="off"
+			>
 				{title}
 			</p>
 			{children}
@@ -152,7 +156,7 @@ export function SidebarPreviewTitleHistory({
 	const prior = entries.slice(0, -1);
 	return (
 		<div className="flex flex-col gap-1 border-border/60 border-t pt-2">
-			<p className="text-[11px] text-muted-foreground uppercase tracking-wide">
+			<p className="type-caption text-muted-foreground uppercase tracking-wide">
 				Title history
 			</p>
 			<ul className="flex flex-col gap-0.5">

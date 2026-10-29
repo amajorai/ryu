@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { apiKey } from "@better-auth/api-key";
 import { cimd } from "@better-auth/cimd";
 import { fetchClientMetadataResource } from "@better-auth/cimd/node";
+import {
+	defineRequestState,
+	getCurrentAuthContext,
+	hasRequestState,
+	queueAfterTransactionHook,
+} from "@better-auth/core/context";
 import { expo } from "@better-auth/expo";
 import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
@@ -9,22 +15,35 @@ import { scim } from "@better-auth/scim";
 import { sso } from "@better-auth/sso";
 import { polar } from "@polar-sh/better-auth";
 import { client, mongoClient } from "@ryu/db";
+import { writeBound } from "@ryu/db/crypto";
 import { User } from "@ryu/db/models/auth.model";
-import { ControlAuditEvent } from "@ryu/db/models/control-audit.model";
 import {
 	Member,
 	Organization,
+	RoleAssignment,
 	Team,
 	TeamMember,
 } from "@ryu/db/models/control-plane.model";
+import { markManagedAgentOrganizationDeleted } from "@ryu/db/models/managed-agent.model";
 import { OrganizationInvitationPolicy } from "@ryu/db/models/organization-invitation-policy.model";
 import { isOrganizationNotificationEnabled } from "@ryu/db/models/organization-notification.model";
 import { OrganizationSeatReservation } from "@ryu/db/models/organization-seat-reservation.model";
 import { isUserNotificationChannelEnabled } from "@ryu/db/models/user-notification.model";
+import { VaultPolicyBinding } from "@ryu/db/models/vault.model";
+import {
+	organizationIdentityRevision,
+	resolveOrganizationIdentityUpdate,
+} from "@ryu/db/organization-identity";
+import {
+	revokeOrganizationRoleAssignments,
+	revokeTeamRoleAssignments,
+} from "@ryu/db/organization-role-assignments";
 import {
 	AccountExistsEmail,
 	configureContactIdSaver,
+	configureNotificationRateLimiting,
 	configureRateLimiting,
+	configureSentEmailRecorder,
 	EmailVerificationOTPEmail,
 	MagicLinkEmail,
 	OrganizationInvitationExistingAccountEmail,
@@ -37,13 +56,12 @@ import {
 	StaleAccountAdminEmail,
 	StaleAccountUserEmail,
 	sendEmail,
-	subscribeContact,
 	TwoFactorOTPEmail,
 	VerificationEmail,
 	WaitlistConfirmationEmail,
 } from "@ryu/email";
 import { env } from "@ryu/env/server";
-import { betterAuth } from "better-auth";
+import { type Auth, type BetterAuthOptions, betterAuth } from "better-auth";
 import {
 	APIError,
 	createAuthEndpoint,
@@ -58,6 +76,7 @@ import {
 	lastLoginMethod,
 	magicLink,
 	multiSession,
+	type OrganizationOptions,
 	oneTap,
 	oneTimeToken,
 	organization,
@@ -66,40 +85,100 @@ import {
 } from "better-auth/plugins";
 import { admin } from "better-auth/plugins/admin";
 import { jwt } from "better-auth/plugins/jwt";
+import { z } from "zod";
+import { adminAbuseGuardPlugin } from "./lib/admin-abuse-guard-plugin.ts";
+import { ageEligibilityPlugin } from "./lib/age-eligibility-plugin.ts";
+import { rejectClientApiKeyMetadata } from "./lib/api-key-metadata-guard.ts";
 import { createRyuAuthI18nPlugin } from "./lib/auth-i18n.ts";
+import { bannedSignInPlugin } from "./lib/banned-sign-in-plugin.ts";
+import {
+	organizationAuditDetails,
+	recordOrganizationControlAudit,
+	rememberMemberRoleBeforeUpdate,
+} from "./lib/control-audit-recorder.ts";
+import {
+	resolveCoreFlagClaim,
+	selectCoreFlagClaimOrganization,
+	withCoreFlagClaim,
+} from "./lib/core-flag-claim.ts";
 import { resolveRyuCorsOrigins } from "./lib/cors-origins.ts";
+import { revokeDepartedMemberNodeCredentials } from "./lib/departed-member-node-credentials.ts";
 import { ryuEmailHarmony } from "./lib/email-harmony.ts";
+import { hasEnterpriseCapability } from "./lib/enterprise-entitlement.ts";
+import {
+	isCustomRoleWritePath,
+	type OrganizationSeatCopy,
+	organizationSeatCopy,
+} from "./lib/family-admission.ts";
+import { disableFamilyBotGrantsOnMemberExit } from "./lib/family-bot-grants.ts";
+import {
+	claimFamilyMembershipSlot,
+	confirmFamilyMembershipSlot,
+	familyMembershipSlotExists,
+	releaseFamilyMembershipSlot,
+	releaseFamilyMembershipSlotsForOrganization,
+} from "./lib/family-membership-slots.ts";
+import {
+	familySharingCapacity,
+	userFamilyOrganizationIds,
+} from "./lib/family-sharing.ts";
+import { removeTeamCreatedInFamily } from "./lib/family-team-guard.ts";
 import {
 	GUEST_MODE_DISABLED_MESSAGE,
 	shouldRejectGuestSignIn,
 } from "./lib/guest-mode.ts";
+import { invitationEmailNotSentError } from "./lib/invitation-email-delivery.ts";
+import {
+	jwtIdentityClaims,
+	jwtSessionBindingClaims,
+} from "./lib/jwt-identity-claims.ts";
+import {
+	admitJwtOrgMemberships,
+	jwtOrgAccessUnavailable,
+} from "./lib/jwt-org-access.ts";
 import { LOGIN_APPROVAL_CLIENTS } from "./lib/login-approval-contract.ts";
 import { loginApprovalSessionPlugin } from "./lib/login-approval-session-plugin.ts";
 import {
 	assertPendingEmailMatches,
 	assertPendingPasskeyMatches,
 	loginAssuranceAfterFactor,
+	loginAssuranceAfterMagicLinkRequest,
 	loginAssuranceAfterPassword,
 	loginAssuranceCleanupPlugin,
 } from "./lib/login-assurance.ts";
 import {
-	businessEmailDecision,
-	businessEmailDomainDecision,
-	businessEmailMessage,
-} from "./lib/organization-email-policy.ts";
+	clearPriorMembershipGrants,
+	recordRoleGrantCleanupFailure,
+} from "./lib/membership-grant-cleanup.ts";
+import { mfaEnrollmentPlugin } from "./lib/mfa-enrollment-plugin.ts";
+import { checkNotificationEmailRateLimit } from "./lib/notification-email-rate.ts";
+import { authorizeScopeDefaultsFromStore } from "./lib/oauth-authorize-scope.ts";
+import { userInMfaRequiredOrganization } from "./lib/org-mfa-membership.ts";
+import {
+	createOrganizationAdmission,
+	requireVerifiedBusinessEmail,
+} from "./lib/organization-admission.ts";
+import { businessEmailDomainDecision } from "./lib/organization-email-policy.ts";
 import {
 	normalizeInvitationEmail,
 	normalizeReferralTag,
 	ORGANIZATION_INVITATION_COOLDOWN_MS,
 } from "./lib/organization-invitation-policy.ts";
 import {
+	FAMILY_ORGANIZATION_KIND,
 	metadataWithOrganizationKind,
 	ORGANIZATION_KIND_KEY,
+	type OrganizationKind,
+	type OrganizationMetadataInput,
 	organizationKindFromMetadata,
+	organizationKindFromRecord,
 	PERSONAL_ORGANIZATION_KIND,
 	parseOrganizationMetadata,
+	readOrganizationKind,
+	reconcileOrganizationKindMetadata,
 	TEAMS_ORGANIZATION_KIND,
 } from "./lib/organization-kind.ts";
+import { organizationMutationSucceeded } from "./lib/organization-mutation-result.ts";
 import {
 	notifyOrganizationEvent,
 	organizationAppUrl,
@@ -107,26 +186,58 @@ import {
 import { activeTeamsSeatAllowance } from "./lib/organization-seat-entitlement.ts";
 import { decideSeatAdmission } from "./lib/organization-seat-gate.ts";
 import {
+	claimPendingInvitationCancellation,
 	ensurePersonalOrganization,
-	type OrganizationApi,
 	resolveInitialActiveOrganization,
 	resolvePersonalOrgId,
 } from "./lib/organizations.ts";
-import { passwordSchema } from "./lib/password-policy.ts";
+import { passwordPolicyRefusal } from "./lib/password-endpoints.ts";
 import { polarClient, syncPolarCustomer } from "./lib/payments.ts";
 import {
 	ORGANIZATION_PLAN_IDS,
 	PLANS,
 	planByProductId,
+	resolveCoreLimitsClaim,
 	resolveProductId,
+	withCoreLimitsClaim,
 } from "./lib/plans.ts";
+import { platformAdminAuditPlugin } from "./lib/platform-admin-audit-plugin.ts";
 import { resolveOrganizationPolarCustomerId } from "./lib/polar-customer-identity.ts";
+import {
+	PRIMARY_OWNER_GUARDED_PATHS,
+	primaryOwnerHookDecision,
+} from "./lib/primary-owner-guard.ts";
+import {
+	creditPendingReferral,
+	creditReferrerAtSignup,
+} from "./lib/referral-credit.ts";
 import { runRefereeGrantHook } from "./lib/referral-grant-hook.ts";
+import {
+	type ResentInvitationSeat,
+	successfulResentInvitationSeat,
+} from "./lib/resent-invitation-seat.ts";
+import { retireOrganizationMail } from "./lib/retire-organization-mail.ts";
+import { ryuClientSessionPlugin } from "./lib/ryu-client-session.ts";
+import { scimAdminEmailGuardPlugin } from "./lib/scim-admin-email-guard.ts";
+import {
+	createScimIdentity,
+	createScimMembershipProjection,
+	type ScimRemovedMember,
+} from "./lib/scim-deprovisioning.ts";
+import { recordSentEmail } from "./lib/sent-email-archive.ts";
+import {
+	authoritativeAuthContext,
+	refreshSessionCookieFromStore,
+	sessionCookieCache,
+} from "./lib/session-cache.ts";
 import {
 	ACCOUNT_LINKING_SOCIAL_PROVIDER_IDS,
 	isAllowedSocialSignInProvider,
 	SOCIAL_SIGN_IN_PROVIDER,
 } from "./lib/social-provider-policy.ts";
+import { validateSsoIdentityUserInfo } from "./lib/sso-email-domain.ts";
+import { resolveEnterpriseSsoUser } from "./lib/sso-enterprise-gate.ts";
+import { settleSsoMembership } from "./lib/sso-membership.ts";
 import { providerIdFromSsoCallbackPath } from "./lib/sso-organization.ts";
 import { encryptedMongoAdapter } from "./lib/sso-provider-encryption.ts";
 import {
@@ -135,15 +246,22 @@ import {
 	formatLoginTime,
 	isStaleAccountLogin,
 } from "./lib/stale-account.ts";
-import { stepUpGate } from "./lib/step-up-plugin.ts";
+import {
+	platformAdminAccessControl,
+	platformAdminRoles,
+} from "./lib/step-up.ts";
+import { resolveSessionForHook, stepUpGate } from "./lib/step-up-plugin.ts";
 import { supportAccessPlugin } from "./lib/support-access-plugin.ts";
+import { telegramMiniAppSessionPlugin } from "./lib/telegram-mini-app-session-plugin.ts";
 import {
 	ADMIN_ROLE,
 	APPROVED_ROLE,
 	adminEmails,
 	generateReferralCode,
 	isAdminEmail,
+	isVerifiedAdminEmail,
 	isWaitlistBypassed,
+	reconciledAdminRole,
 	referralUrlFor,
 	WAITLIST_ROLE,
 	webOrigin,
@@ -153,25 +271,124 @@ import {
 	ryuOrganizationAccessControl,
 	ryuOrganizationRoles,
 } from "./organization-access.ts";
-import { defaultPermissionsForRole, RYU_SUPPORTED_SCOPES } from "./scopes.ts";
+import {
+	implicitPermissionsForRole,
+	OAUTH_OPT_IN_SCOPES,
+	RYU_DEFAULT_OAUTH_SCOPES,
+	RYU_SUPPORTED_SCOPES,
+} from "./scopes.ts";
 
 const DUPLICATE_KEY_ERROR_CODE = 11_000;
-
-interface PolarListPage<T> {
-	readonly items?: readonly T[];
-	readonly result?: { readonly items?: readonly T[] };
+const optionalPolarPlugins: Parameters<typeof polar>[0]["use"][number][] = [];
+const userHookFieldsSchema = z.object({
+	isAnonymous: z.boolean().catch(false),
+	referredBy: z.string().nullish().catch(undefined),
+});
+/**
+ * The admin-plugin role a new durable account starts with, and whether that
+ * puts it in the waitlist queue. Support staff (the admin allowlist) get the
+ * real "admin" role so the admin plugin's impersonation primitive accepts them
+ * (#545). With no admins configured (self-hosted, ADMIN_EMAILS empty) nobody
+ * could ever approve a queued user, so signups are auto-approved
+ * (APPROVED_ROLE) instead of dead-ending on the waitlist; otherwise everyone
+ * else is queued (WAITLIST_ROLE), fail-closed. `user.create.before` stamps the
+ * role and `user.create.after` decides the welcome email from the same call,
+ * so the two cannot drift.
+ *
+ * The allowlist grants ADMIN_ROLE only to a VERIFIED address. An allowlisted
+ * address that is not yet proven (email/password sign-up before the mailbox
+ * link, or an SSO/SCIM account whose IdP asserted it) is held on WAITLIST_ROLE
+ * without the queue email; `afterEmailVerification` and the session-create
+ * reconcile promote it once the mailbox is verified.
+ */
+function resolveSignupRole(user: {
+	email?: string | null;
+	emailVerified?: boolean | null;
+}): {
+	queued: boolean;
+	role: typeof ADMIN_ROLE | typeof APPROVED_ROLE | typeof WAITLIST_ROLE;
+} {
+	if (isVerifiedAdminEmail(user)) {
+		return { queued: false, role: ADMIN_ROLE };
+	}
+	if (isWaitlistBypassed()) {
+		return { queued: false, role: APPROVED_ROLE };
+	}
+	if (isAdminEmail(user.email)) {
+		return { queued: false, role: WAITLIST_ROLE };
+	}
+	return { queued: true, role: WAITLIST_ROLE };
 }
 
-const polarPageItems = <T>(page: unknown): readonly T[] => {
-	if (Array.isArray(page)) {
-		return page as readonly T[];
-	}
-	if (!(page && typeof page === "object")) {
-		return [];
-	}
-	const value = page as PolarListPage<T>;
-	return value.result?.items ?? value.items ?? [];
-};
+const polarSubscriptionSchema = z.object({
+	product: z.object({ id: z.string().nullish() }).nullish(),
+	productId: z.string().nullish(),
+	quantity: z.number().nullish(),
+	seats: z.number().nullish(),
+	status: z.string().nullish(),
+});
+const polarSubscriptionsSchema = z.array(polarSubscriptionSchema);
+/** The session field the JWT flag claim reads; lenient so a mint never fails. */
+const flagClaimSessionSchema = z
+	.object({ activeOrganizationId: z.string().nullish().catch(null) })
+	.catch(() => ({ activeOrganizationId: null }));
+const polarPageItems = z
+	.union([
+		polarSubscriptionsSchema,
+		z
+			.object({
+				items: polarSubscriptionsSchema.nullish(),
+				result: z
+					.object({ items: polarSubscriptionsSchema.nullish() })
+					.nullish(),
+			})
+			.transform((page) => page.result?.items ?? page.items ?? []),
+	])
+	.catch(() => []).parse;
+const organizationHookStringSchema = z.string().optional().catch(undefined);
+const invitationNotificationFieldsSchema = z
+	.object({
+		referralTag: organizationHookStringSchema,
+		teamId: organizationHookStringSchema,
+	})
+	.catch(() => ({}));
+const organizationHookBodySchema = z
+	.object({
+		email: organizationHookStringSchema,
+		provider: organizationHookStringSchema,
+		organizationId: organizationHookStringSchema,
+		memberId: organizationHookStringSchema,
+		userId: organizationHookStringSchema,
+		teamId: organizationHookStringSchema,
+		invitationId: organizationHookStringSchema,
+		resend: z.boolean().optional().catch(undefined),
+	})
+	.catch(() => ({}));
+const hookActiveOrganizationId = z
+	.object({
+		session: z.object({ activeOrganizationId: z.string().nullish() }),
+	})
+	.nullable()
+	.transform((value) => value?.session.activeOrganizationId ?? null)
+	.catch(null).parse;
+const auditResourceSchema = z
+	.object({
+		id: organizationHookStringSchema,
+		organizationId: organizationHookStringSchema,
+	})
+	.catch(() => ({}));
+const auditReturnSchema = z
+	.object({
+		id: organizationHookStringSchema,
+		organizationId: organizationHookStringSchema,
+		organization: auditResourceSchema,
+		invitation: auditResourceSchema,
+		member: auditResourceSchema,
+		team: auditResourceSchema,
+		// The role an invitation or member row carries (invite, add, role update).
+		role: organizationHookStringSchema,
+	})
+	.catch(() => ({ organization: {}, invitation: {}, member: {}, team: {} }));
 
 const ORGANIZATION_PRODUCT_IDS = (): Set<string> =>
 	new Set(
@@ -186,19 +403,35 @@ const ORGANIZATION_PRODUCT_IDS = (): Set<string> =>
 	);
 
 /**
- * Resolve the live Teams seat quantity for an organization. A missing active
- * Teams subscription returns null (shared membership has no paid capacity);
- * a Polar failure is a hard error because allowing a paid-org membership
- * change while the meter is unknown would be an authorization decision made
- * blind.
+ * Resolve the live admitting capacity for an organization, with the org kind
+ * it was resolved for (the kind picks the refusal copy).
+ *
+ * - family: the Ryu Max family-sharing capacity registered by the API (six
+ *   people when the owner's plan and the rollout flag allow it, else null). It
+ *   never reads a Polar seat quantity or bonus seats: a family's plan is the
+ *   owner's personal Max subscription, not a seat contract.
+ * - otherwise: the live Teams seat quantity. A missing active Teams
+ *   subscription returns null (shared membership has no paid capacity).
+ *
+ * A Polar or database failure is a hard error because allowing a paid-org
+ * membership change while the meter is unknown would be an authorization
+ * decision made blind.
  */
-async function activeTeamsSeatCount(
-	organizationId: string
-): Promise<number | null> {
+async function activeOrganizationSeatCapacity(organizationId: string): Promise<{
+	kind: OrganizationKind | null;
+	seatCapacity: number | null;
+}> {
 	try {
+		const kind = await readOrganizationKind(organizationId);
+		if (kind === FAMILY_ORGANIZATION_KIND) {
+			return {
+				kind,
+				seatCapacity: await familySharingCapacity(organizationId),
+			};
+		}
 		const customerId = await resolveOrganizationPolarCustomerId(organizationId);
 		if (!customerId) {
-			return null;
+			return { kind, seatCapacity: null };
 		}
 
 		const subscriptions = await polarClient.subscriptions.list({
@@ -209,13 +442,7 @@ async function activeTeamsSeatCount(
 		});
 		const productIds = ORGANIZATION_PRODUCT_IDS();
 		for await (const page of subscriptions) {
-			const active = polarPageItems<{
-				product?: { id?: string | null } | null;
-				productId?: string | null;
-				quantity?: number | null;
-				seats?: number | null;
-				status?: string | null;
-			}>(page).find((subscription) => {
+			const active = polarPageItems(page).find((subscription) => {
 				const status = (subscription.status ?? "").toLowerCase();
 				const productId =
 					subscription.productId ?? subscription.product?.id ?? null;
@@ -237,11 +464,15 @@ async function activeTeamsSeatCount(
 				const billedSeats = Number.isFinite(requested)
 					? Math.max(Math.floor(requested), minimum)
 					: minimum;
-				return (await activeTeamsSeatAllowance(organizationId, billedSeats))
-					.includedSeats;
+				return {
+					kind,
+					seatCapacity: (
+						await activeTeamsSeatAllowance(organizationId, billedSeats)
+					).includedSeats,
+				};
 			}
 		}
-		return null;
+		return { kind, seatCapacity: null };
 	} catch (error) {
 		console.error("Failed to verify organization seat capacity:", error);
 		throw new APIError("INTERNAL_SERVER_ERROR", {
@@ -251,12 +482,17 @@ async function activeTeamsSeatCount(
 	}
 }
 
+/** The live admitting capacity alone; see {@link activeOrganizationSeatCapacity}. */
+async function activeTeamsSeatCount(
+	organizationId: string
+): Promise<number | null> {
+	return (await activeOrganizationSeatCapacity(organizationId)).seatCapacity;
+}
+
 const SEAT_CLAIM_TTL_MS = 2 * 60 * 1000;
 const ORGANIZATION_INVITATION_EXPIRES_IN_SEC = 48 * 60 * 60;
 const PENDING_INVITATION_CLAIM_PREFIX = "pending_invitation:";
 const DIRECT_MEMBER_CLAIM_PREFIX = "direct_member:";
-const NO_ACTIVE_ORGANIZATION_PLAN_MESSAGE =
-	"An active Teams or Business subscription is required before this organization can add members. Buy seats first.";
 
 const pendingInvitationClaimId = (
 	organizationId: string,
@@ -271,14 +507,14 @@ const directMemberClaimId = (userId: string): string =>
 
 async function requireActiveOrganizationSeatCapacity(
 	organizationId: string
-): Promise<number> {
-	const seatCapacity = await activeTeamsSeatCount(organizationId);
+): Promise<{ copy: OrganizationSeatCopy; seatCapacity: number }> {
+	const { kind, seatCapacity } =
+		await activeOrganizationSeatCapacity(organizationId);
+	const copy = organizationSeatCopy(kind);
 	if (seatCapacity === null) {
-		throw new APIError("FORBIDDEN", {
-			message: NO_ACTIVE_ORGANIZATION_PLAN_MESSAGE,
-		});
+		throw new APIError("FORBIDDEN", { message: copy.noCapacity });
 	}
-	return seatCapacity;
+	return { copy, seatCapacity };
 }
 
 /**
@@ -294,7 +530,7 @@ async function reserveSeatClaim(input: {
 	kind: "pending_invitation" | "accepting_invitation" | "direct_member";
 	organizationId: string;
 }): Promise<void> {
-	const seatCapacity = await requireActiveOrganizationSeatCapacity(
+	const { copy, seatCapacity } = await requireActiveOrganizationSeatCapacity(
 		input.organizationId
 	);
 	const now = new Date();
@@ -344,7 +580,7 @@ async function reserveSeatClaim(input: {
 		reservedSeatCount: reservations.length,
 	});
 	if (!decision.allowed) {
-		throw new APIError("FORBIDDEN", { message: decision.reason });
+		throw new APIError("FORBIDDEN", { message: copy.full });
 	}
 
 	const used = new Set(reservations.map((row) => row.seatIndex));
@@ -387,10 +623,7 @@ async function reserveSeatClaim(input: {
 				if (claimed.seatIndex < seatCapacity) {
 					return;
 				}
-				throw new APIError("FORBIDDEN", {
-					message:
-						"Organization seat capacity changed while this member was being added. Ask an organization owner or admin to add a seat and try again.",
-				});
+				throw new APIError("FORBIDDEN", { message: copy.capacityChanged });
 			}
 			// Mongo's TTL monitor is eventually consistent. Remove a stale row that
 			// still owns the unique seat index, then retry this same index.
@@ -411,11 +644,18 @@ async function reserveSeatClaim(input: {
 			used.add(seatIndex);
 		}
 	}
-	throw new APIError("FORBIDDEN", {
-		message:
-			"No unassigned organization seat is available. Buy another seat or remove a member first.",
-	});
+	throw new APIError("FORBIDDEN", { message: copy.full });
 }
+
+/**
+ * Test seam for the real Mongo/Polar seat path (`index.family-seat.test.ts`).
+ * Not a package API: production callers reach these only through the Better
+ * Auth organization hooks below.
+ */
+export const organizationSeatPathForTests = {
+	activeOrganizationSeatCapacity,
+	reserveSeatClaim,
+} as const;
 
 /** Reserve the seat before Better Auth creates the pending invitation row. */
 async function reservePendingInvitationSeat(input: {
@@ -463,7 +703,7 @@ async function reserveInvitationSeat(input: {
 		return;
 	}
 
-	const seatCapacity = await requireActiveOrganizationSeatCapacity(
+	const { seatCapacity } = await requireActiveOrganizationSeatCapacity(
 		input.organizationId
 	);
 	const now = new Date();
@@ -531,6 +771,116 @@ async function reserveDirectMemberSeat(input: {
 	});
 }
 
+/**
+ * Revoke the custom-role grants of a member who left or was removed. Better
+ * Auth deletes the `member` row and its team memberships, but Ryu's
+ * `roleAssignment` rows and `user:<id>` vault policy bindings would otherwise
+ * come back into force if the same user were invited again. Mirrors the
+ * Admin API removal (`org-admin-ops.ts`). Best effort: the removal has already
+ * happened. Console removal already revoked fail-closed in
+ * `beforeRemoveMember`, and `revokeStaleRoleGrantsBeforeAdmission` fails
+ * closed on re-admission.
+ */
+async function revokeRemovedMemberGrants(input: {
+	organizationId: string;
+	userId: string;
+}): Promise<void> {
+	try {
+		await revokeOrganizationRoleAssignments(input);
+	} catch (error) {
+		// The member row is already gone, so this cannot fail the request. The
+		// permission resolvers ignore grants older than the current membership,
+		// so a leftover row never comes back into force; record it for admins.
+		console.error("Failed to revoke removed member's role grants:", error);
+		await recordRoleGrantCleanupFailure({ ...input, phase: "remove" });
+	}
+	// Vault policies bound directly to the user would otherwise come back into
+	// force (secret reads, writes, approvals) if the same user were re-invited.
+	try {
+		await VaultPolicyBinding.deleteMany({
+			organizationId: input.organizationId,
+			subject: `user:${input.userId}`,
+		});
+	} catch (error) {
+		// The vault principal ignores `user:<id>` bindings older than the
+		// current membership, so a leftover never comes back into force on a
+		// re-invite; record it for admins as for role grants.
+		console.error("Failed to revoke removed member's vault bindings:", error);
+		await recordRoleGrantCleanupFailure({
+			...input,
+			grant: "vault_bindings",
+			phase: "remove",
+		});
+	}
+	// Personal gateway keys and Fleet nodes issued for the member would
+	// otherwise keep authenticating as an org node. The gateway and Fleet
+	// resolvers re-check membership, so a failure here still fails closed.
+	try {
+		await revokeDepartedMemberNodeCredentials(input);
+	} catch (error) {
+		console.error("Failed to revoke removed member's node credentials:", error);
+	}
+}
+
+/**
+ * Revoke custom-role grants scoped to a team the user no longer belongs to
+ * (or, without `userId`, to a deleted team). Team-scoped assignments require
+ * team membership when granted; leaving them behind would silently restore the
+ * role, and its gateway ACL role key, if the user were re-added to the team.
+ */
+async function revokeTeamScopedGrants(input: {
+	organizationId: string;
+	teamId: string;
+	userId?: string;
+}): Promise<void> {
+	try {
+		await RoleAssignment.deleteMany({
+			organizationId: input.organizationId,
+			teamId: input.teamId,
+			...(input.userId ? { userId: input.userId } : {}),
+		});
+	} catch (error) {
+		console.error("Failed to revoke team-scoped role grants:", error);
+	}
+}
+
+/**
+ * Fail closed on custom-role grants an earlier membership left behind (a
+ * removal path whose best-effort cleanup failed, or a writer that skipped it):
+ * before admitting a user to an organization (or, with `teamId`, to a team),
+ * delete their grants there so a re-admission never revives them. Skipped
+ * while the user still holds that membership, so a repeated or refused
+ * admission cannot strip a current member's live grants.
+ */
+async function revokeStaleRoleGrantsBeforeAdmission(input: {
+	organizationId: string;
+	teamId?: string;
+	userId: string;
+}): Promise<void> {
+	const { teamId } = input;
+	if (teamId) {
+		if (await TeamMember.exists({ teamId, userId: input.userId })) {
+			return;
+		}
+		await revokeTeamRoleAssignments({ ...input, teamId });
+		return;
+	}
+	if (
+		await Member.exists({
+			organizationId: input.organizationId,
+			userId: input.userId,
+		})
+	) {
+		return;
+	}
+	await revokeOrganizationRoleAssignments(input);
+}
+
+const leftMemberSchema = z.object({
+	organizationId: z.coerce.string().min(1),
+	userId: z.coerce.string().min(1),
+});
+
 async function releaseSeatClaims(input: {
 	email?: string;
 	invitationId?: string;
@@ -559,29 +909,17 @@ async function releaseSeatClaims(input: {
  * claim as well; if an older invitation has no claim, acceptance will still
  * perform the authoritative live-capacity check before adding its member.
  */
-async function refreshResentInvitationSeat(input: {
-	email: string;
-	organizationId: string;
-}): Promise<void> {
-	const policy = await OrganizationInvitationPolicy.findOne({
-		organizationId: input.organizationId,
-		email: normalizeInvitationEmail(input.email),
-	})
-		.select("lastInvitationId")
-		.lean<{ lastInvitationId?: string | null }>();
-	if (!policy?.lastInvitationId) {
-		return;
-	}
+async function refreshResentInvitationSeat(
+	input: ResentInvitationSeat
+): Promise<void> {
 	await OrganizationSeatReservation.updateOne(
 		{
-			invitationId: policy.lastInvitationId,
+			invitationId: input.invitationId,
 			organizationId: input.organizationId,
 		},
 		{
 			$set: {
-				expiresAt: new Date(
-					Date.now() + ORGANIZATION_INVITATION_EXPIRES_IN_SEC * 1000
-				),
+				expiresAt: input.expiresAt,
 				updatedAt: new Date(),
 			},
 		}
@@ -594,19 +932,30 @@ async function refreshResentInvitationSeat(input: {
 // org membership may manage the key record, but it never grants the key any
 // Ryu capability by itself. The control-plane route still supplies the
 // role-clamped Ryu statements at creation time.
-function isDuplicateKeyError(error: unknown): boolean {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		(error as { code?: number }).code === DUPLICATE_KEY_ERROR_CODE
-	);
+const isDuplicateKeyError = z
+	.unknown()
+	.transform(
+		(error) =>
+			z.object({ code: z.literal(DUPLICATE_KEY_ERROR_CODE) }).safeParse(error)
+				.success
+	).parse;
+
+/** A reserved invitation send, with what is needed to undo it. */
+interface InvitationPolicyReservation {
+	cooldownUntil: Date;
+	email: string;
+	organizationId: string;
+	/** The fields the reservation overwrote, or null when it created the row. */
+	previous: {
+		cooldownUntil: Date | null;
+		lastSentAt: Date | null;
+	} | null;
 }
 
 async function reserveOrganizationInvitationPolicy(input: {
 	email: string;
 	organizationId: string;
-	referralTag?: string;
-}): Promise<void> {
+}): Promise<InvitationPolicyReservation> {
 	const now = new Date();
 	const cooldownUntil = new Date(
 		now.getTime() + ORGANIZATION_INVITATION_COOLDOWN_MS
@@ -633,17 +982,30 @@ async function reserveOrganizationInvitationPolicy(input: {
 				$set: {
 					cooldownUntil,
 					lastSentAt: now,
-					referralTag: input.referralTag,
 				},
 				$setOnInsert: {
 					email: input.email,
 					organizationId: input.organizationId,
 				},
 			},
-			{ new: true, upsert: true }
+			// The row as it was before, so an invitation whose email never went
+			// out can give its cooldown back (releaseOrganizationInvitationPolicy).
+			{ includeResultMetadata: true, lean: true, new: false, upsert: true }
 		);
-		if (reserved) {
-			return;
+		const outcome = reserved.lastErrorObject;
+		if (outcome?.updatedExisting || outcome?.upserted) {
+			const previous = outcome.updatedExisting ? reserved.value : null;
+			return {
+				cooldownUntil,
+				email: input.email,
+				organizationId: input.organizationId,
+				previous: previous
+					? {
+							cooldownUntil: previous.cooldownUntil ?? null,
+							lastSentAt: previous.lastSentAt ?? null,
+						}
+					: null,
+			};
 		}
 	} catch (error) {
 		if (!isDuplicateKeyError(error)) {
@@ -666,91 +1028,476 @@ async function reserveOrganizationInvitationPolicy(input: {
 	});
 }
 
-const PERSONAL_WORKSPACE_MESSAGE =
-	"Personal workspaces are for one person. Upgrade this workspace to Teams to invite teammates and share access.";
-
-interface OrganizationPolicyUser {
-	email?: string | null;
-	emailVerified?: boolean | null;
-}
-
-function requireVerifiedBusinessEmail(
-	user: OrganizationPolicyUser,
-	context: "member" | "upgrade" = "member"
-): void {
-	const decision = businessEmailDecision({
-		email: user.email,
-		emailVerified: user.emailVerified,
+/**
+ * Give back a reservation whose invitation was never sent, so the 24-hour
+ * cooldown does not stop the owner from sending it again. The filter matches
+ * only this reservation (its exact `cooldownUntil`) and never a decline block.
+ */
+async function releaseOrganizationInvitationPolicy(
+	reservation: InvitationPolicyReservation
+): Promise<void> {
+	const reserved = {
+		blockedAt: null,
+		cooldownUntil: reservation.cooldownUntil,
+		email: reservation.email,
+		organizationId: reservation.organizationId,
+	};
+	if (!reservation.previous) {
+		await OrganizationInvitationPolicy.deleteOne(reserved);
+		return;
+	}
+	await OrganizationInvitationPolicy.updateOne(reserved, {
+		$set: reservation.previous,
 	});
-	if (!decision.allowed) {
-		throw new APIError("FORBIDDEN", {
-			message: businessEmailMessage(decision, context),
+}
+
+/**
+ * Request-scoped state for the invitation hooks. Better Auth gives each
+ * top-level request its own store, but a nested `auth.api` call reuses the
+ * caller's (`to-auth-endpoints`), so every entry is keyed by the invitation it
+ * belongs to rather than held in a single slot.
+ */
+
+/**
+ * What `beforeCreateInvitation` reserved for an invitation this request is
+ * creating, keyed by organization and recipient (the id does not exist yet).
+ * Better Auth writes the invitation before it calls `sendInvitationEmail`, with
+ * no transaction around the two, so an invitation whose email does not go out
+ * must give these back.
+ */
+interface InvitationBeingCreated {
+	email: string;
+	organizationId: string;
+	policy: InvitationPolicyReservation;
+}
+
+const invitationsBeingCreated = defineRequestState(
+	() => new Map<string, InvitationBeingCreated>()
+);
+
+const invitationCreationKey = (organizationId: string, email: string) =>
+	`${organizationId}:${normalizeInvitationEmail(email)}`;
+
+/** Take the reservations made for this invitation, if this request made them. */
+async function takeInvitationBeingCreated(invitation: {
+	email: string;
+	organizationId: string;
+}): Promise<InvitationBeingCreated | null> {
+	if (!(await hasRequestState())) {
+		return null;
+	}
+	const creating = await invitationsBeingCreated.get();
+	const key = invitationCreationKey(
+		invitation.organizationId,
+		invitation.email
+	);
+	const reserved = creating.get(key) ?? null;
+	creating.delete(key);
+	return reserved;
+}
+
+/**
+ * Invitations as they were before a resend, by id, recorded by the global
+ * before hook. Better Auth stores a resend's new expiry before it calls
+ * `sendInvitationEmail`; a resend whose email is not sent puts the old expiry
+ * back, so the invitation and its seat claim are left as they were.
+ */
+const invitationsBeforeResend = defineRequestState(
+	() => new Map<string, Date>()
+);
+
+type AuthAdapter = Awaited<
+	ReturnType<typeof getCurrentAuthContext>
+>["context"]["adapter"];
+
+/**
+ * Record a resend's pending invitation before Better Auth changes it. Only for
+ * a request that carries a session (the endpoint authorizes it next), and only
+ * in the named organization: one recipient can hold pending invitations from
+ * many organizations.
+ */
+async function rememberInvitationsBeforeResend(
+	adapter: AuthAdapter,
+	body: z.infer<typeof organizationHookBodySchema>
+): Promise<void> {
+	if (!(body.resend === true && body.email && (await hasRequestState()))) {
+		return;
+	}
+	try {
+		const pending = await adapter.findMany<{ expiresAt: Date; id: string }>({
+			// Without an organization in the body Better Auth uses the session's
+			// active one; the read is then bounded and may miss the target, in
+			// which case the seat claim follows the stored expiry instead.
+			limit: 50,
+			model: "invitation",
+			where: [
+				{ field: "email", value: normalizeInvitationEmail(body.email) },
+				{ field: "status", value: "pending" },
+				...(body.organizationId
+					? [{ field: "organizationId", value: body.organizationId }]
+					: []),
+			],
 		});
+		const before = await invitationsBeforeResend.get();
+		for (const { expiresAt, id } of pending) {
+			before.set(id, expiresAt);
+		}
+	} catch (error) {
+		console.error("Failed to read an invitation before its resend:", error);
 	}
 }
 
-function requireBusinessEmailDomain(email: string): void {
-	const decision = businessEmailDomainDecision(email);
-	if (!decision.allowed) {
-		throw new APIError("BAD_REQUEST", {
-			message: businessEmailMessage(decision, "invitation"),
-		});
+/**
+ * An invitation email that was not sent in this request, by invitation id.
+ * Better Auth runs `sendInvitationEmail` through `runInBackgroundOrAwait`,
+ * which logs and swallows anything it throws, so the failure is recorded here
+ * and raised by `afterCreateInvitation` (a new invitation) or the global after
+ * hook (a resend) instead.
+ */
+interface UnsentInvitationEmail {
+	error: unknown;
+	/** The expiry Better Auth stored for this send. */
+	expiresAt: Date;
+	invitationId: string;
+	organizationId: string;
+}
+
+const unsentInvitationEmails = defineRequestState(
+	() => new Map<string, UnsentInvitationEmail>()
+);
+
+/** Take the recorded failure for one invitation, if its email was not sent. */
+async function takeUnsentInvitationEmail(
+	invitationId: string
+): Promise<UnsentInvitationEmail | null> {
+	if (!(await hasRequestState())) {
+		return null;
+	}
+	const unsent = await unsentInvitationEmails.get();
+	const recorded = unsent.get(invitationId) ?? null;
+	unsent.delete(invitationId);
+	return recorded;
+}
+
+type InvitationEmail = Parameters<
+	NonNullable<OrganizationOptions["sendInvitationEmail"]>
+>[0];
+
+/** Run the invitation email and record a failure instead of only logging it. */
+function recordUnsentInvitationEmail(
+	send: (invitation: InvitationEmail) => Promise<void>
+): (invitation: InvitationEmail) => Promise<void> {
+	return async (invitation) => {
+		try {
+			await send(invitation);
+		} catch (error) {
+			console.error("Failed to send organization invitation email:", error);
+			if (await hasRequestState()) {
+				(await unsentInvitationEmails.get()).set(invitation.id, {
+					error,
+					expiresAt: invitation.invitation.expiresAt,
+					invitationId: invitation.id,
+					organizationId: invitation.organization.id,
+				});
+			}
+		}
+	};
+}
+
+/** Give back the seat claim and 24-hour cooldown one request reserved. */
+async function releaseInvitationReservations(
+	reserved: InvitationBeingCreated,
+	invitationId?: string
+): Promise<void> {
+	const releases = await Promise.allSettled([
+		releaseSeatClaims({
+			email: reserved.email,
+			invitationId,
+			organizationId: reserved.organizationId,
+		}),
+		releaseOrganizationInvitationPolicy(reserved.policy),
+	]);
+	for (const release of releases) {
+		if (release.status === "rejected") {
+			console.error(
+				"Failed to release a reservation of an organization invitation:",
+				release.reason
+			);
+		}
 	}
 }
 
-/** Resolve the durable personal/shared kind, with a legacy fallback. */
-async function isPersonalOrganization(
+const unwrittenInvitationSchema = z.object({
+	email: z.string(),
+	organizationId: z.string(),
+});
+
+/**
+ * Better Auth writes a new invitation after `beforeCreateInvitation` reserved
+ * its seat claim and 24-hour cooldown. When that database write fails, Better
+ * Auth rethrows the database error, so neither `afterCreateInvitation` nor the
+ * after hooks run. The adapter is the only Ryu code on that path: give back
+ * what this request reserved for that invitation there, and let the error
+ * continue. Nothing is released for an invitation this request did not
+ * reserve.
+ */
+function releaseReservationsOfFailedInvitationWrites(
+	factory: ReturnType<typeof encryptedMongoAdapter>
+): ReturnType<typeof encryptedMongoAdapter> {
+	return (options) => {
+		const adapter = factory(options);
+		return {
+			...adapter,
+			create: async <T extends Record<string, unknown>, R = T>(
+				input: Parameters<typeof adapter.create<T, R>>[0]
+			): Promise<R> => {
+				try {
+					return await adapter.create<T, R>(input);
+				} catch (error) {
+					const unwritten = unwrittenInvitationSchema.safeParse(input.data);
+					if (input.model === "invitation" && unwritten.success) {
+						const reserved = await takeInvitationBeingCreated(unwritten.data);
+						if (reserved) {
+							await releaseInvitationReservations(reserved);
+						}
+					}
+					throw error;
+				}
+			},
+		};
+	};
+}
+
+/**
+ * What became of a new invitation whose email was not sent:
+ * - `withdrawn`: removed, with its seat claim and cooldown given back;
+ * - `settled`: accepted, declined or cancelled while the email was at the
+ *   provider, so it was used and keeps what it reserved;
+ * - `kept`: the database would not remove it, so it stays pending without its
+ *   email.
+ */
+type UnsentInvitationOutcome = "kept" | "settled" | "withdrawn";
+
+/**
+ * Remove a new invitation whose email was not sent, then give back its seat
+ * claim and 24-hour cooldown, so nothing is left that looks pending or blocks
+ * the owner from sending it again. Nothing is given back unless exactly that
+ * pending invitation was removed.
+ */
+async function withdrawUnsentInvitation(
+	adapter: AuthAdapter,
+	invitation: {
+		email: string;
+		expiresAt: Date;
+		id: string;
+		organizationId: string;
+	}
+): Promise<UnsentInvitationOutcome> {
+	const reserved = await takeInvitationBeingCreated(invitation);
+	let removed: number;
+	try {
+		// Only the send attempt that failed: a resend that went out meanwhile
+		// moved `expiresAt`, and its working link must not be withdrawn.
+		removed = await adapter.deleteMany({
+			model: "invitation",
+			where: [
+				{ field: "id", value: invitation.id },
+				{ field: "status", value: "pending" },
+				{ field: "expiresAt", value: invitation.expiresAt },
+			],
+		});
+	} catch (error) {
+		console.error(
+			"Failed to withdraw an organization invitation whose email was not sent:",
+			error
+		);
+		return "kept";
+	}
+	if (removed !== 1) {
+		return "settled";
+	}
+	if (reserved) {
+		await releaseInvitationReservations(reserved, invitation.id);
+	}
+	return "withdrawn";
+}
+
+/** The id of the invitation an `invite-member` call answered with, if any. */
+const returnedInvitationId = (returned: unknown): string | null => {
+	const parsed = z.object({ id: z.string().min(1) }).safeParse(returned);
+	return parsed.success ? parsed.data.id : null;
+};
+
+/**
+ * Put back the expiry a resend stored when its email was not sent. Without the
+ * earlier expiry, keep the seat claim on the stored one instead.
+ */
+async function restoreInvitationAfterUnsentResend(
+	adapter: AuthAdapter,
+	unsent: UnsentInvitationEmail
+): Promise<void> {
+	try {
+		const before = (await invitationsBeforeResend.get()).get(
+			unsent.invitationId
+		);
+		if (!before) {
+			await refreshResentInvitationSeat(unsent);
+			return;
+		}
+		await adapter.update({
+			model: "invitation",
+			update: { expiresAt: before },
+			where: [
+				{ field: "id", value: unsent.invitationId },
+				{ field: "expiresAt", value: unsent.expiresAt },
+			],
+		});
+	} catch (error) {
+		console.error(
+			"Failed to restore an organization invitation whose resend email was not sent:",
+			error
+		);
+	}
+}
+
+/**
+ * Resolve the durable personal/teams/family kind, with a legacy fallback: an
+ * unmarked org is personal when it is its first member's personal org, and
+ * otherwise shared (null, admitted under the Teams rules).
+ */
+async function resolveOrganizationKind(
 	organizationId: string,
-	metadata?: unknown
-): Promise<boolean> {
-	const organization = metadata
-		? null
-		: await Organization.findById(organizationId)
-				.select("metadata")
-				.lean<{ metadata?: unknown }>();
-	const kind = organizationKindFromMetadata(metadata ?? organization?.metadata);
-	if (kind === PERSONAL_ORGANIZATION_KIND) {
-		return true;
-	}
-	if (kind === TEAMS_ORGANIZATION_KIND) {
-		return false;
+	metadata?: OrganizationMetadataInput
+): Promise<OrganizationKind | null> {
+	// The authoritative field wins over the hook's metadata, which Better Auth
+	// read from the same row and which a stale organization update can carry
+	// (see `organizationKindFromRecord`).
+	const authoritative = await readOrganizationKind(organizationId);
+	const kind = authoritative ?? organizationKindFromMetadata(metadata ?? null);
+	if (kind) {
+		return kind;
 	}
 
 	const firstMember = await Member.findOne({ organizationId })
 		.sort({ createdAt: 1 })
 		.select("userId")
-		.lean<{ userId: unknown }>();
+		.lean<Pick<ReturnType<typeof Member.hydrate>, "userId">>();
 	if (!firstMember) {
-		return false;
+		return null;
 	}
 	const personalOrgId = await resolvePersonalOrgId(String(firstMember.userId));
-	return personalOrgId === organizationId;
+	return personalOrgId === organizationId ? PERSONAL_ORGANIZATION_KIND : null;
 }
 
-/** Keep the personal workspace genuinely personal; shared access needs an org. */
-async function rejectPersonalWorkspaceInvitation(
-	organizationId: string,
-	metadata?: unknown
-): Promise<void> {
-	if (await isPersonalOrganization(organizationId, metadata)) {
-		throw new APIError("BAD_REQUEST", {
-			message: PERSONAL_WORKSPACE_MESSAGE,
+/** The account id for an already-normalized email, or null when none exists. */
+async function findUserIdByEmail(email: string): Promise<string | null> {
+	const user = await User.findOne({ email }, "_id").lean<{ _id: unknown }>();
+	return user ? String(user._id) : null;
+}
+
+/**
+ * Admission decisions for every organization hook below, wired to the Mongo
+ * seat claims, Polar capacity and family-sharing capacity in this file.
+ */
+const organizationAdmission = createOrganizationAdmission({
+	activeSeatCapacity: activeTeamsSeatCount,
+	claimFamilyPlace: (place) =>
+		claimFamilyMembershipSlot({
+			...place,
+			listFamilyOrganizationIds: userFamilyOrganizationIds,
+		}),
+	confirmFamilyPlace: confirmFamilyMembershipSlot,
+	countMembers: (organizationId) => Member.countDocuments({ organizationId }),
+	familyOrganizationIdsForUser: userFamilyOrganizationIds,
+	findUserIdByEmail,
+	hasFamilyPlace: familyMembershipSlotExists,
+	readOrganizationKind,
+	releaseFamilyPlace: releaseFamilyMembershipSlot,
+	releaseSeatClaims,
+	removeMember: async ({ memberId, organizationId, userId }) => {
+		await Member.deleteOne({ _id: memberId, organizationId, userId });
+	},
+	reserveDirectMemberSeat,
+	// Record what each send reserved, so an invitation whose write fails or
+	// whose email is not sent can give its 24-hour cooldown back.
+	reserveInvitationPolicy: async (input) => {
+		const policy = await reserveOrganizationInvitationPolicy(input);
+		if (await hasRequestState()) {
+			(await invitationsBeingCreated.get()).set(
+				invitationCreationKey(input.organizationId, input.email),
+				{ email: input.email, organizationId: input.organizationId, policy }
+			);
+		}
+	},
+	reserveInvitationSeat,
+	reservePendingInvitationSeat,
+	resolveOrganizationKind,
+});
+
+/**
+ * Finish an invitation cancellation that won the invitation's single
+ * pending -> canceled transition: release its seat claims and any family place
+ * an unfinished accept reserved, then tell the organization and the recipient.
+ * Better Auth's `afterCancelInvitation` hook and Ryu's atomic revoke route
+ * (`cancelInvitationAtomically` in packages/api) both finish through this one
+ * function, so neither path can skip a release or the notification. Call it
+ * only for the winning cancellation; an idempotent retry must not notify again.
+ */
+export async function finalizeCanceledOrganizationInvitation(invitation: {
+	email: string | null;
+	id: string;
+	organizationId: string;
+}): Promise<void> {
+	const email = invitation.email || null;
+	await releaseSeatClaims({
+		email: email ?? undefined,
+		invitationId: invitation.id,
+		organizationId: invitation.organizationId,
+	});
+	if (email) {
+		await organizationAdmission.releaseInvitationFamilyPlace({
+			email,
+			organizationId: invitation.organizationId,
 		});
 	}
+	await notifyOrganizationEvent({
+		actionLabel: "Manage organization members",
+		actionUrl: organizationAppUrl("/organizations/invitations"),
+		actionUrlForOrganization: () =>
+			organizationAppUrl("/organizations/members"),
+		body: email
+			? `The invitation for ${normalizeInvitationEmail(email)} was cancelled.`
+			: "An invitation was cancelled.",
+		dedupeKey: `organization-invitation:${invitation.id}:cancelled`,
+		extraRecipients: email
+			? [
+					{
+						actionLabel: "Open invitations",
+						actionUrl: organizationAppUrl("/organizations/invitations"),
+						email,
+					},
+				]
+			: [],
+		kind: "organization-invitation",
+		organizationIds: [String(invitation.organizationId)],
+		sourceId: String(invitation.id),
+		sourceType: "organization-invitation",
+		subject: "Organization invitation cancelled",
+		title: "Organization invitation cancelled",
+	});
 }
 
-function boundedOrganizationHookValue(value: unknown): string | null {
-	if (typeof value === "string") {
-		const trimmed = value.trim();
-		return trimmed ? trimmed.slice(0, 300) : null;
-	}
-	if (value instanceof Date) {
-		return value.toISOString();
-	}
-	return value === null || value === undefined
-		? null
-		: String(value).slice(0, 300);
-}
+const boundedOrganizationHookValue = z.union([
+	z
+		.string()
+		.transform((value) => (value.trim() ? value.trim().slice(0, 300) : null)),
+	z
+		.custom<Date>((value) => value instanceof Date)
+		.transform((value) => value.toISOString()),
+	z.null().transform(() => null),
+	z.undefined().transform(() => null),
+	z.coerce.string().transform((value) => value.slice(0, 300)),
+]).parse;
 
 /**
  * Publish the non-sensitive activity projection for Better Auth organization
@@ -791,22 +1538,15 @@ async function notifyOrganizationHookActivity(input: {
 
 // Narrow an unknown caught error to its string `code` (e.g. better-auth's
 // RATE_LIMIT_EXCEEDED) without an `as any` cast.
-const errorCode = (e: unknown): string | undefined =>
-	typeof e === "object" && e !== null && "code" in e
-		? String((e as { code: unknown }).code)
-		: undefined;
+const errorCode = z
+	.object({ code: z.union([z.string(), z.number()]) })
+	.transform((error) => String(error.code))
+	.optional()
+	.catch(undefined).parse;
 
 interface EmailUser {
 	email: string;
 	name?: string | null;
-}
-
-interface AuthAccount {
-	providerId: string;
-}
-
-interface RateLimitedError {
-	retryAfter?: number;
 }
 
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY?.trim() || null;
@@ -839,8 +1579,21 @@ async function recordLoginAndNotifyStaleAccount(
 			{
 				$set: {
 					lastLoginAt: now,
-					lastLoginDevice: boundedLoginDetail(session.userAgent) ?? null,
-					lastLoginIp: boundedLoginDetail(session.ipAddress) ?? null,
+					// Sealed per user once content sealing is on (nothing reads them back here).
+					lastLoginDevice: writeBound(
+						"user",
+						"lastLoginDevice",
+						session.userId,
+						session.userId,
+						boundedLoginDetail(session.userAgent) ?? null
+					),
+					lastLoginIp: writeBound(
+						"user",
+						"lastLoginIp",
+						session.userId,
+						session.userId,
+						boundedLoginDetail(session.ipAddress) ?? null
+					),
 				},
 			},
 			{ new: false }
@@ -906,12 +1659,49 @@ async function recordLoginAndNotifyStaleAccount(
 	}
 }
 
-function retryAfterSeconds(error: unknown): number | undefined {
-	if (typeof error !== "object" || error === null || !("retryAfter" in error)) {
-		return;
-	}
-	const { retryAfter } = error as RateLimitedError;
-	return typeof retryAfter === "number" ? retryAfter : undefined;
+const retryAfterSeconds = z
+	.object({ retryAfter: z.number().optional() })
+	.optional()
+	.transform((error) => error?.retryAfter)
+	.catch(undefined).parse;
+
+const EMAIL_COOLDOWN_MS = 60 * 1000;
+const EMAIL_DAILY_LIMIT = 20;
+
+/**
+ * Start a fresh daily email count when the stored one belongs to an earlier
+ * day. Also normalizes a null count (users created before the field existed),
+ * which `$inc` and range filters would otherwise trip over.
+ */
+async function rollEmailDayOver(userId: unknown, today: Date): Promise<void> {
+	await User.updateOne(
+		{
+			_id: userId,
+			$or: [
+				{ lastEmailResetDate: { $not: { $gte: today } } },
+				{ dailyEmailCount: null },
+			],
+		},
+		{ $set: { dailyEmailCount: 0, lastEmailResetDate: today } }
+	);
+}
+
+/**
+ * Undo one cooldown claim whose email was never delivered, restoring the
+ * stamp it replaced. Only while the claim is still the latest stamp: a later
+ * claim or a counted delivery has moved `lastEmailSentAt` and is kept.
+ */
+async function releaseEmailCooldownClaim(
+	userId: unknown,
+	claimedAt: Date,
+	previous: Date | null
+): Promise<void> {
+	await User.updateOne(
+		{ _id: userId, lastEmailSentAt: claimedAt },
+		previous
+			? { $set: { lastEmailSentAt: previous } }
+			: { $unset: { lastEmailSentAt: 1 } }
+	);
 }
 
 const checkEmailRateLimit = async (email: string): Promise<RateLimitResult> => {
@@ -923,44 +1713,41 @@ const checkEmailRateLimit = async (email: string): Promise<RateLimitResult> => {
 		}
 
 		const now = new Date();
-
-		if (user.lastEmailSentAt) {
-			const timeSinceLastEmail = now.getTime() - user.lastEmailSentAt.getTime();
-			const cooldownPeriod = 60 * 1000;
-
-			if (timeSinceLastEmail < cooldownPeriod) {
-				const retryAfter = Math.ceil(
-					(cooldownPeriod - timeSinceLastEmail) / 1000
-				);
-				return {
-					allowed: false,
-					reason: "Please wait before requesting another email",
-					retryAfter,
-				};
-			}
-		}
-
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 
-		if (user.lastEmailResetDate) {
-			const lastReset = new Date(user.lastEmailResetDate);
-			lastReset.setHours(0, 0, 0, 0);
+		// Roll the daily counter over first, as its own conditional write, so the
+		// claim below sees today's count rather than yesterday's in-memory value.
+		await rollEmailDayOver(user._id, today);
 
-			if (today.getTime() > lastReset.getTime()) {
-				await User.updateOne(
-					{ _id: user._id },
-					{ $set: { dailyEmailCount: 0, lastEmailResetDate: today } }
-				);
-			}
-		} else {
-			await User.updateOne(
-				{ _id: user._id },
-				{ $set: { lastEmailResetDate: today } }
-			);
+		// Claim the cooldown slot atomically. A read-then-check let concurrent
+		// requests (parallel resets, sign-up retries) all pass before the first
+		// send stamped `lastEmailSentAt`, defeating the per-recipient cooldown.
+		// `updateEmailStats` still counts the delivery after a successful send,
+		// and a send that never delivers releases the claim, so a provider outage
+		// does not start a cooldown for an email nobody received.
+		const claimed = await User.findOneAndUpdate(
+			{
+				_id: user._id,
+				dailyEmailCount: { $not: { $gte: EMAIL_DAILY_LIMIT } },
+				lastEmailSentAt: {
+					$not: { $gt: new Date(now.getTime() - EMAIL_COOLDOWN_MS) },
+				},
+			},
+			{ $set: { lastEmailSentAt: now } },
+			// The document as it was, so a release can restore the prior stamp.
+			{ new: false }
+		);
+		if (claimed) {
+			const previous = claimed.lastEmailSentAt ?? null;
+			return {
+				allowed: true,
+				release: () => releaseEmailCooldownClaim(user._id, now, previous),
+			};
 		}
 
-		if ((user.dailyEmailCount ?? 0) >= 20) {
+		const current = await User.findOne({ _id: user._id });
+		if ((current?.dailyEmailCount ?? 0) >= EMAIL_DAILY_LIMIT) {
 			const tomorrow = new Date(today);
 			tomorrow.setDate(tomorrow.getDate() + 1);
 			const retryAfter = Math.ceil((tomorrow.getTime() - now.getTime()) / 1000);
@@ -973,7 +1760,16 @@ const checkEmailRateLimit = async (email: string): Promise<RateLimitResult> => {
 			};
 		}
 
-		return { allowed: true };
+		const lastSentAt = current?.lastEmailSentAt?.getTime() ?? now.getTime();
+		const retryAfter = Math.max(
+			1,
+			Math.ceil((EMAIL_COOLDOWN_MS - (now.getTime() - lastSentAt)) / 1000)
+		);
+		return {
+			allowed: false,
+			reason: "Please wait before requesting another email",
+			retryAfter,
+		};
 	} catch (error) {
 		console.error("Error checking email rate limit:", error);
 		return { allowed: true };
@@ -992,33 +1788,11 @@ const updateEmailStats = async (email: string): Promise<void> => {
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 
-		let newDailyCount: number;
-		let newResetDate: Date | undefined;
-
-		if (user.lastEmailResetDate) {
-			const lastReset = new Date(user.lastEmailResetDate);
-			lastReset.setHours(0, 0, 0, 0);
-
-			if (today.getTime() > lastReset.getTime()) {
-				newDailyCount = 1;
-				newResetDate = today;
-			} else {
-				newDailyCount = (user.dailyEmailCount ?? 0) + 1;
-			}
-		} else {
-			newDailyCount = 1;
-			newResetDate = today;
-		}
-
+		await rollEmailDayOver(user._id, today);
+		// `$inc`, not read-then-`$set`: concurrent sends must each be counted.
 		await User.updateOne(
 			{ _id: user._id },
-			{
-				$set: {
-					lastEmailSentAt: now,
-					dailyEmailCount: newDailyCount,
-					...(newResetDate && { lastEmailResetDate: newResetDate }),
-				},
-			}
+			{ $set: { lastEmailSentAt: now }, $inc: { dailyEmailCount: 1 } }
 		);
 	} catch (error) {
 		console.error("Error updating user email stats:", error);
@@ -1026,6 +1800,7 @@ const updateEmailStats = async (email: string): Promise<void> => {
 };
 
 configureRateLimiting(checkEmailRateLimit, updateEmailStats);
+configureNotificationRateLimiting(checkNotificationEmailRateLimit);
 
 const saveContactIdToUser = async (
 	email: string,
@@ -1048,6 +1823,7 @@ const saveContactIdToUser = async (
 };
 
 configureContactIdSaver(saveContactIdToUser);
+configureSentEmailRecorder(recordSentEmail);
 
 // The browser extension's pages (dashboard.html, popup) run on a fixed
 // chrome-extension:// origin and call Better Auth directly (device-auth flow,
@@ -1066,7 +1842,12 @@ function frontendOrigin(): string | undefined {
 	}
 }
 
-function passkeyWebAuthnOptions(): { origin?: string; rpID?: string } {
+interface PasskeyWebAuthnOptionsResult {
+	origin?: string;
+	rpID?: string;
+}
+
+function passkeyWebAuthnOptions(): PasskeyWebAuthnOptionsResult {
 	const origin = frontendOrigin();
 	if (!origin) {
 		return {};
@@ -1092,7 +1873,7 @@ function normalizeHostname(hostname: string): string {
 /**
  * When the auth API and marketing web live on sibling subdomains (api.ryuhq.com
  * vs ryuhq.com), the session cookie must use the shared parent domain or SSR on
- * the apex never sees it and /login <-> /dashboard loops forever. Explicit
+ * the apex never sees it and /login <-> /console loops forever. Explicit
  * AUTH_COOKIE_DOMAIN wins; otherwise infer from FRONTEND_URL + BETTER_AUTH_URL.
  */
 function resolveAuthCookieDomain(): string | undefined {
@@ -1133,6 +1914,7 @@ function parseCorsOrigins(): string[] {
 		corsOrigin: process.env.CORS_ORIGIN,
 		extensionOrigin: process.env.EXTENSION_ORIGIN,
 		frontendUrl: frontendOrigin(),
+		nodeEnv: env.NODE_ENV,
 		webappUrl: env.WEBAPP_URL || "https://app.ryuhq.com",
 	});
 }
@@ -1153,16 +1935,13 @@ function parseCsvEnv(value: string | undefined): string[] {
  * Defensive against Better Auth's context shape: returns undefined if the
  * cookie (or the context) is absent, so a missing cookie is simply a no-op.
  */
-function referredByFromCookie(context: unknown): string | undefined {
-	const ctx = context as
-		| {
-				headers?: { get?: (k: string) => string | null } | null;
-				request?: {
-					headers?: { get?: (k: string) => string | null } | null;
-				} | null;
-		  }
-		| null
-		| undefined;
+interface ReferralCookieContext {
+	headers?: Pick<Headers, "get"> | null;
+	request?: { headers?: Pick<Headers, "get"> | null } | null;
+}
+function referredByFromCookie(
+	ctx: ReferralCookieContext | null | undefined
+): string | undefined {
 	const cookieHeader =
 		ctx?.headers?.get?.("cookie") ??
 		ctx?.request?.headers?.get?.("cookie") ??
@@ -1207,8 +1986,8 @@ interface TeamClaim {
  * is exactly what Core narrows on, so carrying it would only inflate every token.
  *
  * Never throws. Teams are additive to a payload that already works, so a failure
- * here degrades to "no teams" instead of costing the caller their org claims —
- * which is what sharing the caller's try/catch would do.
+ * here degrades to "no teams" (fail closed for team access) instead of failing
+ * the whole mint the way an unreadable org roster does.
  */
 async function resolveTeamClaims(
 	userId: string,
@@ -1240,46 +2019,153 @@ async function resolveTeamClaims(
 }
 
 /**
- * Stamp `ADMIN_ROLE` on an allowlisted address that does not carry it yet.
+ * Make the stored role agree with the admin allowlist for a VERIFIED address.
  *
- * The role is written ONCE, in the user-create hook, from `isAdminEmail(email)`.
- * So an address added to `ADMIN_EMAILS` AFTER its account already existed never
- * receives the role — the server-side gates still let them through (they read
- * the allowlist directly), but everything that can only see the session, which
- * is every client-side admin affordance and the Better Auth admin plugin's own
- * `adminRoles` check, treats them as an ordinary user. That is an admin who is
- * allowed in and cannot find the door.
+ * The user-create hook writes the role once, from `isVerifiedAdminEmail(user)`.
+ * An address added to `ADMIN_EMAILS` after its account existed, or one whose
+ * mailbox was proven after sign-up, would otherwise never receive it. Server
+ * gates that see the session user (`requirePlatformAdmin`, `isAdmin` with
+ * `emailVerified`) already admit such a verified address, but gates that read
+ * only the stored role, every client-side admin affordance, and the Better Auth
+ * admin plugin's `adminRoles` check do not until this runs. It runs on session
+ * create, on `afterEmailVerification`, and when an update verifies the mailbox.
  *
- * Reconciling on session create is the same lazy-heal idiom the referral code
- * already uses, and it grants nothing new: the create hook's own comment says
- * the allowlist is exactly who should hold this role, and the allowlist is
- * already sufficient for the server-side admin gates and for impersonation
- * (`support-access.ts`). This only makes the stored role agree with it.
+ * The reverse also holds: an allowlisted address that is NOT verified loses an
+ * `ADMIN_ROLE` it carries (stamped before verification was required) and goes
+ * back to the signup role, so an unproven address never keeps admin. Proving
+ * the mailbox promotes it again. An unlisted admin (granted through the admin
+ * plugin) is left alone.
  *
  * Fail-open: a lookup error must never block login.
  */
 async function reconcileAdminRole(userId: string): Promise<void> {
 	try {
 		const record = await User.findById(userId)
-			.select("email role")
-			.lean<{ email?: string; role?: string }>();
-		if (!record?.email || record.role === ADMIN_ROLE) {
+			.select("email emailVerified role")
+			.lean<{ email?: string; emailVerified?: boolean; role?: string }>();
+		if (!record) {
 			return;
 		}
-		if (!isAdminEmail(record.email)) {
+		// Only a verified address earns the durable role; an unverified one is
+		// promoted later, by `afterEmailVerification` or the next session.
+		const role = reconciledAdminRole(record);
+		if (!role) {
 			return;
 		}
-		await User.updateOne({ _id: userId }, { $set: { role: ADMIN_ROLE } });
+		// Conditional on the role read above, so a concurrent change wins.
+		await User.updateOne(
+			{ _id: userId, role: record.role ?? null },
+			{ $set: { role } }
+		);
 	} catch (error) {
 		console.error("Failed to reconcile admin role:", error);
 	}
 }
 
-export const auth = betterAuth({
-	// SCIM creates/updates a user, account, and organization membership as one
-	// operation. Pass the native MongoClient so Better Auth enables interactive
+interface RyuPasskeyPlugin extends ReturnType<typeof passkey> {}
+interface RyuScimPlugin extends ReturnType<typeof scim> {}
+
+function createRyuPasskeyPlugin(): RyuPasskeyPlugin {
+	return passkey({
+		...PASSKEY_WEBAUTHN_OPTIONS,
+		rpName: "Ryu",
+		authentication: {
+			afterVerification: ({ ctx }) => assertPendingPasskeyMatches(ctx),
+		},
+	});
+}
+
+/**
+ * Member-exit cleanup for a membership SCIM deprovisioning removed. Mirrors
+ * `afterRemoveMember` (seat claim, custom-role grants, personal node
+ * credentials, family bot grants and place) and records the removal in the
+ * control audit log. Runs after the SCIM transaction commits.
+ */
+async function cleanUpScimRemovedMember(
+	removed: ScimRemovedMember
+): Promise<void> {
+	const membership = {
+		organizationId: removed.organizationId,
+		userId: removed.userId,
+	};
+	await releaseSeatClaims(membership);
+	await revokeRemovedMemberGrants(membership);
+	await disableFamilyBotGrantsOnMemberExit(membership);
+	await organizationAdmission.releaseMemberFamilyPlace(membership);
+	try {
+		await recordOrganizationControlAudit({
+			action: "member.remove",
+			actorId: null,
+			actorType: "system",
+			details: { source: "scim", status: "success", userId: removed.userId },
+			organizationId: removed.organizationId,
+			target: "member",
+			targetId: removed.memberId,
+		});
+	} catch (error) {
+		console.error("Failed to append SCIM member removal audit:", error);
+	}
+	await notifyOrganizationHookActivity({
+		body: "Directory sync (SCIM) deprovisioned a member and removed their organization access.",
+		event: "member.removed",
+		organizationId: removed.organizationId,
+		sourceId: removed.memberId,
+		sourceType: "member",
+		target: "member",
+		title: "Organization member removed",
+	});
+}
+
+function createRyuScimPlugin(): RyuScimPlugin {
+	return scim({
+		// Ryu provisions SCIM connections through the organization-scoped
+		// Enterprise router. Better Auth owns the managed connection catalog and
+		// stores only credential digests; no personal/static token path is exposed.
+		connections: [],
+		managedConnections: {
+			credentialHashSecret: env.BETTER_AUTH_SECRET,
+			maxActiveCredentials: 5,
+		},
+		// Link existing verified-domain non-owner members (who joined through SSO
+		// before SCIM ran) so the directory can deprovision them too.
+		identity: createScimIdentity(),
+		// A connection's provisioningDomainId is its organization. Deactivating
+		// or deleting the user's last active source there removes the membership
+		// (never an owner's; revocation runs through runScimConnectionRetirement).
+		projection: createScimMembershipProjection({
+			afterMemberRemoved: cleanUpScimRemovedMember,
+			queueAfterCommit: (hook) =>
+				queueAfterTransactionHook(hook, {
+					onError: (error) => {
+						console.error("Failed to clean up a SCIM-removed member:", error);
+					},
+				}),
+		}),
+	});
+}
+
+const authOptions = {
+	session: { cookieCache: sessionCookieCache },
+	// Identifiers that embed a bearer token (password reset, account deletion)
+	// are stored as SHA-256 digests, so a database dump cannot complete a reset.
+	// Email-keyed OTP identifiers stay plain on purpose: their values are
+	// already encrypted (`storeOTP: "encrypted"`), and account merge deletes the
+	// absorbed address's rows by matching the email in the identifier.
+	verification: {
+		storeIdentifier: {
+			default: "plain",
+			overrides: {
+				"delete-account-": "hashed",
+				"reset-password:": "hashed",
+			},
+		},
+	},
+	// SCIM creates/updates a user and its SCIM source records, and removes the
+	// organization membership on deprovisioning, as one operation. Pass the native MongoClient so Better Auth enables interactive
 	// transactions; passing only the Db silently disables the transaction hook.
-	database: encryptedMongoAdapter(client, { client: mongoClient }),
+	database: releaseReservationsOfFailedInvitationWrites(
+		encryptedMongoAdapter(client, { client: mongoClient })
+	),
 	trustedOrigins: parseCorsOrigins(),
 	appName: "Ryu",
 	// Better Auth reads BETTER_AUTH_SECRETS automatically when present. Keep the
@@ -1303,28 +2189,27 @@ export const auth = betterAuth({
 			"/scim/v2/*": { window: 60, max: 120 },
 		},
 	},
-	socialProviders: {
-		google: {
-			clientId: env.GOOGLE_CLIENT_ID ?? "",
-			clientSecret: env.GOOGLE_CLIENT_SECRET ?? "",
-		},
-		...(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
-			? {
-					github: {
-						clientId: env.GITHUB_CLIENT_ID,
-						clientSecret: env.GITHUB_CLIENT_SECRET,
-					},
-				}
-			: {}),
-		...(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET
-			? {
-					discord: {
-						clientId: env.DISCORD_CLIENT_ID,
-						clientSecret: env.DISCORD_CLIENT_SECRET,
-					},
-				}
-			: {}),
-	},
+	socialProviders: (() => {
+		const providers: NonNullable<BetterAuthOptions["socialProviders"]> = {
+			google: {
+				clientId: env.GOOGLE_CLIENT_ID ?? "",
+				clientSecret: env.GOOGLE_CLIENT_SECRET ?? "",
+			},
+		};
+		if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
+			providers.github = {
+				clientId: env.GITHUB_CLIENT_ID,
+				clientSecret: env.GITHUB_CLIENT_SECRET,
+			};
+		}
+		if (env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET) {
+			providers.discord = {
+				clientId: env.DISCORD_CLIENT_ID,
+				clientSecret: env.DISCORD_CLIENT_SECRET,
+			};
+		}
+		return providers;
+	})(),
 	account: {
 		accountLinking: {
 			enabled: true,
@@ -1445,15 +2330,6 @@ export const auth = betterAuth({
 						verificationUrl: parsedUrl.toString(),
 					}),
 				});
-
-				try {
-					await subscribeContact(user.email, user.name ?? undefined);
-				} catch (subscribeError) {
-					console.error(
-						"Failed to subscribe contact (non-critical):",
-						subscribeError
-					);
-				}
 			} catch (error) {
 				console.error("Failed to send verification email:", error);
 				if (
@@ -1486,12 +2362,33 @@ export const auth = betterAuth({
 				// into a failed sign-in. The boolean remains Better Auth's authority.
 				console.error("Failed to record email verification timestamp:", error);
 			}
+			// A referee who signed up unverified earns their referrer's credit now.
+			// Idempotent and self-contained, so it cannot fail the verification.
+			await creditPendingReferral(user.id);
+			// An allowlisted address held back at sign-up for want of proof gets
+			// its admin role now. Fail-open, like the referral credit above.
+			await reconcileAdminRole(user.id);
 		},
 	},
 	user: {
+		// Better Auth calls this before it creates a user, links a provider
+		// account, or signs a provider user in. SSO identities must stay on the
+		// provider's DNS-verified domain (asserted and stored address alike), so
+		// an organization cannot pre-register or take over an address it does
+		// not own (lib/sso-email-domain.ts). Other sources pass through.
+		validateUserInfo: validateSsoIdentityUserInfo,
 		additionalFields: {
+			// Match the twoFactor plugin's server-owned field in the canonical
+			// options so getSession inference retains the existing enrollment state.
+			twoFactorEnabled: {
+				type: "boolean",
+				required: false,
+				defaultValue: false,
+				input: false,
+			},
 			avatarId: {
 				type: "string",
+				required: false,
 				input: false,
 			},
 			resendContactId: {
@@ -1542,85 +2439,135 @@ export const auth = betterAuth({
 		const authCookieDomain = resolveAuthCookieDomain();
 		const ipAddressHeaders = parseCsvEnv(env.BETTER_AUTH_IP_ADDRESS_HEADERS);
 		const trustedProxies = parseCsvEnv(env.BETTER_AUTH_TRUSTED_PROXIES);
-		return {
-			ipAddress: {
-				// Better Auth only trusts a single forwarded value unless explicit
-				// proxy ranges are configured. This keeps spoofed forwarded chains from
-				// becoming distinct rate-limit buckets by accident.
-				ipAddressHeaders:
-					ipAddressHeaders.length > 0 ? ipAddressHeaders : ["x-forwarded-for"],
-				...(trustedProxies.length > 0 ? { trustedProxies } : {}),
-			},
-			// When the frontend and auth API live on different subdomains
-			// (ryuhq.com vs api.ryuhq.com), the session cookie must carry the shared
-			// parent domain (AUTH_COOKIE_DOMAIN="ryuhq.com") so the apex SSR portal gate
-			// can read it.
-			// Without this it is host-only on the API subdomain, invisible to SSR, and
-			// /dashboard <-> /login loops forever. Env-gated so local dev (no shared
-			// parent) keeps host-only cookies.
-			...(authCookieDomain
-				? {
-						crossSubDomainCookies: {
-							enabled: true,
-							domain: authCookieDomain,
-						},
-					}
-				: {}),
+		const ipAddress: NonNullable<
+			NonNullable<BetterAuthOptions["advanced"]>["ipAddress"]
+		> = {
+			// Trust one forwarded value unless explicit proxy ranges are configured.
+			ipAddressHeaders:
+				ipAddressHeaders.length > 0 ? ipAddressHeaders : ["x-forwarded-for"],
+		};
+		if (trustedProxies.length > 0) {
+			ipAddress.trustedProxies = trustedProxies;
+		}
+		const advanced: NonNullable<BetterAuthOptions["advanced"]> = {
+			ipAddress,
 			defaultCookieAttributes: {
 				sameSite: "lax",
 				secure: process.env.NODE_ENV === "production",
 				httpOnly: true,
 			},
 		};
+		// Sharing the cookie domain keeps apex/subdomain SSR session checks aligned.
+		if (authCookieDomain) {
+			advanced.crossSubDomainCookies = {
+				enabled: true,
+				domain: authCookieDomain,
+			};
+		}
+		return advanced;
 	})(),
 	hooks: {
 		before: createAuthMiddleware(async (ctx) => {
+			// Cache ordinary session display reads only. Auth operations and plugin
+			// hooks must see revoked sessions and current account/organization state.
+			const override = authoritativeAuthContext(ctx);
+			if (override) {
+				ctx.query = override.context.query;
+			}
+			if (ctx.path === "/oauth2/authorize" && override) {
+				// Without this, an authorize request that omits `scope` asks for
+				// every scope, `mail:manage` included (oauth-authorize-scope.ts).
+				// Better Auth reads a POST authorize from the body, a GET from the
+				// query, so the default goes wherever the request carries it.
+				const defaults = await authorizeScopeDefaultsFromStore(
+					{ body: ctx.body, method: ctx.method, query: ctx.query },
+					ctx.context.adapter
+				);
+				if (defaults && "query" in defaults) {
+					override.context.query = {
+						...override.context.query,
+						...defaults.query,
+					};
+					ctx.query = override.context.query;
+				} else if (defaults) {
+					const overrideContext: {
+						body?: Record<string, unknown>;
+						query: typeof override.context.query;
+					} = override.context;
+					overrideContext.body = defaults.body;
+					ctx.body = defaults.body;
+				}
+			}
 			if (shouldRejectGuestSignIn(ctx.path)) {
 				throw new APIError("FORBIDDEN", {
 					message: GUEST_MODE_DISABLED_MESSAGE,
 				});
 			}
+			// API-key metadata is server-only: a key's class and organization come
+			// from its stored configId/referenceId, never from client-written metadata.
+			rejectClientApiKeyMetadata(ctx);
+			if (
+				ctx.path === "/organization/invite-member" &&
+				(ctx.headers?.get("authorization")?.startsWith("Bearer ") ||
+					ctx.headers
+						?.get("cookie")
+						?.includes(ctx.context.authCookies.sessionToken.name))
+			) {
+				await rememberInvitationsBeforeResend(
+					ctx.context.adapter,
+					organizationHookBodySchema.parse(ctx.body)
+				);
+			}
 			if (ctx.path === "/sign-in/social") {
-				const body = ctx.body as { provider?: unknown };
+				const body = organizationHookBodySchema.parse(ctx.body);
 				if (!isAllowedSocialSignInProvider(body?.provider)) {
 					throw new APIError("FORBIDDEN", {
 						message: `Social sign-in is available only with ${SOCIAL_SIGN_IN_PROVIDER}.`,
 					});
 				}
 			}
-			if (ctx.path === "/sign-in/email") {
-				const body = ctx.body as { email?: string };
-				if (!body?.email) {
-					return;
-				}
-
-				const user = await ctx.context.internalAdapter.findUserByEmail(
-					body.email.toLowerCase(),
-					{ includeAccounts: true }
+			// Email sign-in gets no account lookup here. Better Auth answers an
+			// account without a password exactly like an unknown address (the same
+			// INVALID_EMAIL_OR_PASSWORD after the same password hash); a distinct
+			// reply would tell callers which addresses hold a passwordless account.
+			if (isCustomRoleWritePath(ctx.path)) {
+				// Better Auth's dynamic access control is off (custom roles are Ryu's
+				// control-plane roles), so these endpoints are not mounted today. A
+				// family keeps the built-in owner/organizer/member roles; the role
+				// endpoints have no organization hook, so if dynamic roles ever come
+				// back the write is still refused here. They default to the
+				// session's active organization when the body names none.
+				const body = organizationHookBodySchema.parse(ctx.body);
+				const organizationId =
+					body?.organizationId ??
+					hookActiveOrganizationId(await resolveSessionForHook(ctx));
+				await organizationAdmission.requireCustomRoleWriteAllowed(
+					organizationId
 				);
-
-				if (
-					user?.accounts &&
-					!user.accounts.find(
-						(account: AuthAccount) => account.providerId === "credential"
-					)
-				) {
-					throw new APIError("UNAUTHORIZED", {
-						message: "NO_PASSWORD_ACCOUNT",
-					});
-				}
 			}
-			if (ctx.path === "/sign-up/email") {
-				const body = ctx.body as { password?: unknown };
-				const result = passwordSchema.safeParse(body?.password);
-				if (!result.success) {
-					throw new APIError("BAD_REQUEST", {
-						message:
-							result.error.issues[0]?.message ?? "Choose a stronger password",
-					});
+			// Every endpoint that stores a password a person chose (sign-up, both
+			// resets, change-password) is held to the sign-up rules. It runs before
+			// the endpoint, so a refused password does not use up the emailed reset
+			// link or code that came with it.
+			const passwordRefusal = passwordPolicyRefusal(ctx.path, ctx.body);
+			if (passwordRefusal) {
+				throw new APIError("BAD_REQUEST", { message: passwordRefusal });
+			}
+			if (PRIMARY_OWNER_GUARDED_PATHS.has(ctx.path)) {
+				// This config hook runs before the bearer plugin's rewrite, so the
+				// actor must come from resolveSessionForHook (cookie AND bearer);
+				// an unresolved actor is refused rather than skipping the ladder.
+				const decision = await primaryOwnerHookDecision({
+					body: ctx.body,
+					path: ctx.path,
+					resolveSession: () => resolveSessionForHook(ctx),
+				});
+				if (decision) {
+					throw new APIError(decision.code, { message: decision.message });
 				}
 			}
 			await assertPendingEmailMatches(ctx);
+			return override;
 		}),
 		after: createAuthMiddleware(async (ctx) => {
 			// Better Auth stores active organization and active team on the same
@@ -1637,37 +2584,43 @@ export const auth = betterAuth({
 							activeTeamId: null,
 							updatedAt: new Date(),
 						});
+						await refreshSessionCookieFromStore(ctx, sessionToken);
 					} catch (error) {
 						console.error("Failed to clear active organization team:", error);
 					}
 				}
 			}
 			if (ctx.path === "/organization/invite-member") {
-				const body = ctx.body as {
-					email?: unknown;
-					organizationId?: unknown;
-					resend?: unknown;
-				};
-				if (body?.resend === true && typeof body.email === "string") {
-					const organizationId =
-						typeof body.organizationId === "string"
-							? body.organizationId
-							: ctx.context.session?.session.activeOrganizationId;
-					if (organizationId) {
-						try {
-							await refreshResentInvitationSeat({
-								email: body.email,
-								organizationId,
-							});
-						} catch (error) {
-							// The acceptance hook remains authoritative if this maintenance
-							// refresh cannot reach Mongo; do not turn a successfully resent
-							// invitation into a misleading 500 response.
-							console.error(
-								"Failed to refresh resent organization invitation seat:",
-								error
-							);
-						}
+				// A resend whose email was not sent: Better Auth answered with the
+				// invitation, but the owner must learn the email did not go out.
+				const resentId = returnedInvitationId(ctx.context.returned);
+				const unsentResend = resentId
+					? await takeUnsentInvitationEmail(resentId)
+					: null;
+				if (
+					unsentResend &&
+					organizationMutationSucceeded(ctx.context.returned)
+				) {
+					await restoreInvitationAfterUnsentResend(
+						ctx.context.adapter,
+						unsentResend
+					);
+					throw invitationEmailNotSentError(unsentResend.error, "resend");
+				}
+				const body = organizationHookBodySchema.parse(ctx.body);
+				const resentSeat = successfulResentInvitationSeat({
+					returned: ctx.context.returned,
+					resend: body?.resend,
+				});
+				if (resentSeat) {
+					try {
+						await refreshResentInvitationSeat(resentSeat);
+					} catch (error) {
+						// Keep a completed resend successful if seat maintenance is unavailable.
+						console.error(
+							"Failed to refresh resent organization invitation seat:",
+							error
+						);
 					}
 				}
 			}
@@ -1676,89 +2629,85 @@ export const auth = betterAuth({
 			// they do not pass through the Hono control-plane router middleware. Keep
 			// the audit append at this post-success hook: the session is authenticated,
 			// the mutation has completed, and only stable ids are persisted.
-			const organizationAuditActions: Record<
-				string,
-				{ action: string; target: string }
-			> = {
-				"/organization/add-member": {
-					action: "member.add",
-					target: "member",
-				},
-				"/organization/accept-invitation": {
-					action: "invitation.accept",
-					target: "invitation",
-				},
-				"/organization/add-team-member": {
-					action: "team.member.add",
-					target: "team-member",
-				},
-				"/organization/create-team": {
-					action: "team.create",
-					target: "team",
-				},
-				"/organization/create": {
-					action: "organization.create",
-					target: "organization",
-				},
-				"/organization/cancel-invitation": {
-					action: "invitation.cancel",
-					target: "invitation",
-				},
-				"/organization/delete": {
-					action: "organization.delete",
-					target: "organization",
-				},
-				"/organization/invite-member": {
-					action: "member.invite",
-					target: "member",
-				},
-				"/organization/leave": {
-					action: "organization.leave",
-					target: "organization",
-				},
-				"/organization/remove-member": {
-					action: "member.remove",
-					target: "member",
-				},
-				"/organization/remove-team": {
-					action: "team.remove",
-					target: "team",
-				},
-				"/organization/remove-team-member": {
-					action: "team.member.remove",
-					target: "team-member",
-				},
-				"/organization/reject-invitation": {
-					action: "invitation.reject",
-					target: "invitation",
-				},
-				"/organization/set-active": {
-					action: "organization.set-active",
-					target: "organization",
-				},
-				"/organization/set-active-team": {
-					action: "team.set-active",
-					target: "team",
-				},
-				"/organization/update": {
-					action: "organization.update",
-					target: "organization",
-				},
-				"/organization/update-member-role": {
-					action: "member.role.update",
-					target: "member",
-				},
-				"/organization/update-team": {
-					action: "team.update",
-					target: "team",
-				},
-			};
-			const auditAction = organizationAuditActions[ctx.path];
+			const organizationAuditActions = new Map(
+				Object.entries({
+					"/organization/add-member": {
+						action: "member.add",
+						target: "member",
+					},
+					"/organization/accept-invitation": {
+						action: "invitation.accept",
+						target: "invitation",
+					},
+					"/organization/add-team-member": {
+						action: "team.member.add",
+						target: "team-member",
+					},
+					"/organization/create-team": {
+						action: "team.create",
+						target: "team",
+					},
+					"/organization/create": {
+						action: "organization.create",
+						target: "organization",
+					},
+					"/organization/cancel-invitation": {
+						action: "invitation.cancel",
+						target: "invitation",
+					},
+					"/organization/delete": {
+						action: "organization.delete",
+						target: "organization",
+					},
+					"/organization/invite-member": {
+						action: "member.invite",
+						target: "member",
+					},
+					"/organization/leave": {
+						action: "organization.leave",
+						target: "organization",
+					},
+					"/organization/remove-member": {
+						action: "member.remove",
+						target: "member",
+					},
+					"/organization/remove-team": {
+						action: "team.remove",
+						target: "team",
+					},
+					"/organization/remove-team-member": {
+						action: "team.member.remove",
+						target: "team-member",
+					},
+					"/organization/reject-invitation": {
+						action: "invitation.reject",
+						target: "invitation",
+					},
+					"/organization/set-active": {
+						action: "organization.set-active",
+						target: "organization",
+					},
+					"/organization/set-active-team": {
+						action: "team.set-active",
+						target: "team",
+					},
+					"/organization/update": {
+						action: "organization.update",
+						target: "organization",
+					},
+					"/organization/update-member-role": {
+						action: "member.role.update",
+						target: "member",
+					},
+					"/organization/update-team": {
+						action: "team.update",
+						target: "team",
+					},
+				})
+			);
+			const auditAction = organizationAuditActions.get(ctx.path);
 			const session = ctx.context.session;
-			const body =
-				ctx.body && typeof ctx.body === "object"
-					? (ctx.body as Record<string, unknown>)
-					: {};
+			const body = organizationHookBodySchema.parse(ctx.body);
 			if (
 				ctx.path === "/organization/remove-team-member" &&
 				session?.session.token &&
@@ -1778,26 +2727,11 @@ export const auth = betterAuth({
 					console.error("Failed to clear removed active team:", error);
 				}
 			}
-			const returned =
-				ctx.context.returned && typeof ctx.context.returned === "object"
-					? (ctx.context.returned as Record<string, unknown>)
-					: {};
-			const returnedOrganization =
-				returned.organization && typeof returned.organization === "object"
-					? (returned.organization as Record<string, unknown>)
-					: {};
-			const returnedInvitation =
-				returned.invitation && typeof returned.invitation === "object"
-					? (returned.invitation as Record<string, unknown>)
-					: {};
-			const returnedMember =
-				returned.member && typeof returned.member === "object"
-					? (returned.member as Record<string, unknown>)
-					: {};
-			const returnedTeam =
-				returned.team && typeof returned.team === "object"
-					? (returned.team as Record<string, unknown>)
-					: {};
+			const returned = auditReturnSchema.parse(ctx.context.returned);
+			const returnedOrganization = returned.organization;
+			const returnedInvitation = returned.invitation;
+			const returnedMember = returned.member;
+			const returnedTeam = returned.team;
 			const returnedOrganizationId = [
 				returnedOrganization.id,
 				returned.organizationId,
@@ -1805,33 +2739,42 @@ export const auth = betterAuth({
 				returnedMember.organizationId,
 				returnedTeam.organizationId,
 				returned.id,
-			].find(
-				(value): value is string =>
-					typeof value === "string" && value.trim().length > 0
-			);
+			].find((value) => Boolean(value?.trim().length));
 			const organizationId =
 				auditAction?.action === "organization.create"
 					? returnedOrganizationId
-					: typeof body.organizationId === "string"
-						? body.organizationId
-						: (returnedOrganizationId ?? session?.session.activeOrganizationId);
-			if (auditAction && organizationId && session?.user?.id) {
+					: body.organizationId === undefined
+						? (returnedOrganizationId ?? session?.session.activeOrganizationId)
+						: body.organizationId;
+			if (
+				auditAction &&
+				organizationId &&
+				session?.user?.id &&
+				organizationMutationSucceeded(ctx.context.returned)
+			) {
 				const targetId =
-					["memberId", "userId", "teamId", "invitationId"].reduce<
+					(["memberId", "userId", "teamId", "invitationId"] as const).reduce<
 						string | null
 					>((found, key) => {
 						if (found) {
 							return found;
 						}
 						const value = body[key];
-						return typeof value === "string" && value.trim() ? value : null;
+						return value?.trim() ? value : null;
 					}, null) ?? organizationId;
 				try {
-					await ControlAuditEvent.create({
+					// Through the API's writer, so the row also reaches the org's
+					// SIEM stream (see control-audit-recorder.ts).
+					await recordOrganizationControlAudit({
 						action: auditAction.action,
 						actorId: session.user.id,
 						actorType: "user",
-						details: { method: ctx.method, status: "success" },
+						details: await organizationAuditDetails({
+							memberId: body.memberId ?? returned.id,
+							method: String(ctx.method),
+							path: ctx.path,
+							role: returned.role,
+						}),
 						organizationId,
 						target: auditAction.target,
 						targetId,
@@ -1842,10 +2785,29 @@ export const auth = betterAuth({
 					console.error("Failed to append organization control audit:", error);
 				}
 			}
+			// `/organization/leave` runs none of Better Auth's member hooks, so the
+			// seat claim and custom-role grants are released here instead.
+			if (
+				ctx.path === "/organization/leave" &&
+				organizationMutationSucceeded(ctx.context.returned)
+			) {
+				const left = leftMemberSchema.safeParse(ctx.context.returned);
+				if (left.success) {
+					try {
+						await releaseSeatClaims(left.data);
+					} catch (error) {
+						console.error("Failed to release a leaving member's seat:", error);
+					}
+					await revokeRemovedMemberGrants(left.data);
+					await disableFamilyBotGrantsOnMemberExit(left.data);
+					await organizationAdmission.releaseMemberFamilyPlace(left.data);
+				}
+			}
 			const loginAssuranceResponse = await loginAssuranceAfterPassword(ctx);
 			if (loginAssuranceResponse) {
 				return loginAssuranceResponse;
 			}
+			await loginAssuranceAfterMagicLinkRequest(ctx);
 			await loginAssuranceAfterFactor(ctx);
 
 			if (ctx.path === "/change-password") {
@@ -1868,37 +2830,80 @@ export const auth = betterAuth({
 				}
 			}
 
-			const providerId = providerIdFromSsoCallbackPath(ctx.path);
+			// `ctx.path` is the route template here; the id is in `ctx.params`.
+			const providerId = providerIdFromSsoCallbackPath(ctx.path, ctx.params);
 			const newSession = ctx.context.newSession;
 			const sessionToken = newSession?.session?.token;
 			const userId = newSession?.user?.id;
-			if (!(providerId && sessionToken && userId)) {
+			const userEmail = newSession?.user?.email;
+			if (!(providerId && sessionToken && userId && userEmail)) {
 				return;
 			}
 
 			try {
-				const provider = (await ctx.context.adapter.findOne({
-					model: "ssoProvider",
-					where: [{ field: "providerId", value: providerId }],
-				})) as { organizationId?: unknown } | null;
-				const organizationId =
-					provider && typeof provider.organizationId === "string"
-						? provider.organizationId
-						: null;
+				const provider = z
+					.object({ organizationId: z.string().nullable().catch(null) })
+					.nullable()
+					.catch(null)
+					.parse(
+						await ctx.context.adapter.findOne({
+							model: "ssoProvider",
+							where: [{ field: "providerId", value: providerId }],
+						})
+					);
+				const organizationId = provider?.organizationId;
 				if (!organizationId) {
 					return;
 				}
 
-				const member = await Member.findOne({ organizationId, userId })
-					.select("_id")
-					.lean();
-				if (!member) {
+				// Plugin provisioning is disabled in `sso()` below because it writes
+				// the member row past `beforeAddMember`. Admit through the
+				// organization plugin instead, so the paid-seat reservation and the
+				// verified business-email gate apply exactly as for invitations.
+				const membership = await settleSsoMembership(
+					{ organizationId, user: { email: userEmail, id: userId } },
+					{
+						addMember: async (member) => {
+							await auth.api.addMember({
+								body: { ...member, role: "member" },
+							});
+						},
+						hasPendingInvitation: async ({ email }) =>
+							Boolean(
+								await ctx.context.adapter.findOne({
+									model: "invitation",
+									where: [
+										{ field: "organizationId", value: organizationId },
+										{ field: "email", value: email },
+										{ field: "status", value: "pending" },
+										{
+											field: "expiresAt",
+											operator: "gt",
+											value: new Date(),
+										},
+									],
+								})
+							),
+						isMember: async (member) =>
+							Boolean(await Member.findOne(member).select("_id").lean()),
+					}
+				);
+				if (membership.kind === "refused") {
+					// The identity is proven, so the sign-in still completes; only the
+					// organization access waits for a free seat or a verified email.
+					console.warn(
+						"SSO sign-in did not add an organization member:",
+						membership.error instanceof Error
+							? membership.error.message
+							: membership.error
+					);
+					return;
+				}
+				if (membership.kind === "invitation-pending") {
 					return;
 				}
 
-				const activeOrganizationId = newSession.session.activeOrganizationId as
-					| string
-					| undefined;
+				const activeOrganizationId = newSession.session.activeOrganizationId;
 				if (activeOrganizationId === organizationId) {
 					return;
 				}
@@ -1907,6 +2912,7 @@ export const auth = betterAuth({
 					activeOrganizationId: organizationId,
 					updatedAt: new Date(),
 				});
+				await refreshSessionCookieFromStore(ctx, sessionToken);
 			} catch (error) {
 				console.error("Failed to select the SSO organization:", error);
 			}
@@ -1963,10 +2969,7 @@ export const auth = betterAuth({
 										: null;
 								},
 								ensureOrganization: async (userId) => {
-									await ensurePersonalOrganization(
-										userId,
-										auth.api as unknown as OrganizationApi
-									);
+									await ensurePersonalOrganization(userId, auth.api);
 								},
 							}
 						);
@@ -1990,14 +2993,12 @@ export const auth = betterAuth({
 		user: {
 			create: {
 				before: async (user, context) => {
-					if ((user as { isAnonymous?: boolean }).isAnonymous) {
+					if (userHookFieldsSchema.parse(user).isAnonymous) {
 						return { data: user };
 					}
 					// Stamp every new user with a referral code. Normalize any inbound
-					// referral code to the canonical upper-case form. (Role is set in the
-					// after hook so it reliably overrides the admin plugin's default.)
-					const inboundReferredBy = (user as { referredBy?: string | null })
-						.referredBy;
+					// referral code to the canonical upper-case form.
+					const inboundReferredBy = userHookFieldsSchema.parse(user).referredBy;
 					// Email/password sign-up threads `referredBy` in the body (wins here);
 					// social/OAuth sign-up has no body, so fall back to the `ryu_ref`
 					// cookie the web client set at the ?ref= landing. Without this,
@@ -2007,14 +3008,35 @@ export const auth = betterAuth({
 					const referredBy = rawReferredBy
 						? rawReferredBy.trim().toUpperCase()
 						: undefined;
-					return {
-						data: {
-							...user,
-							referralCode: generateReferralCode(),
-							referralCount: 0,
-							...(referredBy ? { referredBy } : {}),
-						},
+					type SignupUserCreateData = typeof user & {
+						emailVerifiedAt?: Date;
+						referralCode: string;
+						referralCount: number;
+						referredBy?: string;
+						role: string;
 					};
+					// The role is written with the insert, so no committed account ever
+					// carries the admin plugin's default "user" (which the waitlist
+					// treats as approved). Better Auth 1.7.1 runs plugin hooks first and
+					// `databaseHooks` last (context/helpers.mjs), spreading each result
+					// over the previous one (db/with-hooks.mjs), so this `role` replaces
+					// the admin plugin's `{ role: "user", ...user }` and any role the
+					// caller passed (admin createUser, SCIM, SSO). The adapter writes
+					// every declared field whatever its `input` flag, so `role` and
+					// `emailVerifiedAt` reach the document.
+					const data: SignupUserCreateData = {
+						...user,
+						referralCode: generateReferralCode(),
+						referralCount: 0,
+						role: resolveSignupRole(user).role,
+					};
+					if (user.emailVerified) {
+						data.emailVerifiedAt = new Date();
+					}
+					if (referredBy) {
+						data.referredBy = referredBy;
+					}
+					return { data };
 				},
 				after: async (user: {
 					id: string;
@@ -2030,56 +3052,16 @@ export const auth = betterAuth({
 					if (user.isAnonymous) {
 						return;
 					}
-					// Credit the referrer (if any) so referrals move them up the queue.
-					// Best-effort: a bad/unknown code just means no credit.
-					if (user.referredBy) {
-						try {
-							await User.updateOne(
-								{ referralCode: user.referredBy },
-								{ $inc: { referralCount: 1 } }
-							);
-						} catch (error) {
-							console.error("Failed to credit referrer:", error);
-						}
-					}
-					// Put the new user in the queue (role WAITLIST_ROLE); admins skip it
-					// and keep the normal role. This overrides the admin plugin's default
-					// "user" role. Written via Mongoose so it definitely persists. Also
-					// ensure a referral code exists.
-					const approved = isAdminEmail(user.email);
-					// Support staff (the admin allowlist) get the real "admin" role so
-					// the admin plugin's impersonation primitive accepts them (#545).
-					// With no admins configured (self-hosted, ADMIN_EMAILS empty) nobody
-					// could ever approve a queued user, so signups are auto-approved
-					// (APPROVED_ROLE) instead of dead-ending on the waitlist; otherwise
-					// everyone else is queued (WAITLIST_ROLE), fail-closed as before.
-					const queued = !(approved || isWaitlistBypassed());
-					let resolvedRole = APPROVED_ROLE;
-					if (approved) {
-						resolvedRole = ADMIN_ROLE;
-					} else if (queued) {
-						resolvedRole = WAITLIST_ROLE;
-					}
-					const referralCode = user.referralCode ?? generateReferralCode();
-					try {
-						await User.updateOne(
-							{ _id: user.id },
-							{
-								$set: {
-									role: resolvedRole,
-									...(user.emailVerified
-										? { emailVerifiedAt: new Date() }
-										: {}),
-								},
-							}
-						);
-						await User.updateOne(
-							{ _id: user.id, referralCode: { $in: [null, undefined, ""] } },
-							{ $set: { referralCode, referralCount: user.referralCount ?? 0 } }
-						);
-					} catch (error) {
-						console.error("Failed to set waitlist role:", error);
-					}
+					// Credit the referrer (if any) so referrals move them up the queue —
+					// at once for a verified referee, otherwise when the mailbox is
+					// verified. Best-effort: a bad/unknown code just means no credit.
+					await creditReferrerAtSignup(user);
+					// The role (and `emailVerifiedAt`, and the referral code) were
+					// written with the insert by `user.create.before`; the queue
+					// decision is recomputed from the same helper rather than trusted
+					// from this hook's argument.
+					const { queued } = resolveSignupRole(user);
+					const referralCode = user.referralCode;
 					// Welcome queued users with their position and personal referral link.
 					// Admins and auto-approved (waitlist-bypassed) users skip this — they
 					// were never in the queue, so a position email would be wrong.
@@ -2112,10 +3094,7 @@ export const auth = betterAuth({
 					// valid org context. Wrapped so a failure here never fails sign-up,
 					// exactly like the Polar provisioning above.
 					try {
-						await ensurePersonalOrganization(
-							user.id,
-							auth.api as unknown as OrganizationApi
-						);
+						await ensurePersonalOrganization(user.id, auth.api);
 					} catch (error) {
 						console.error(
 							"Failed to create default organization for user:",
@@ -2138,7 +3117,19 @@ export const auth = betterAuth({
 				},
 			},
 			update: {
-				after: async (user: { id: string; email: string; name?: string }) => {
+				after: async (user: {
+					id: string;
+					email: string;
+					emailVerified?: boolean;
+					name?: string;
+				}) => {
+					// Email-OTP sign-in, magic links and OAuth account linking verify
+					// a mailbox through `updateUser` without `afterEmailVerification`,
+					// so settle a pending referral credit here too (at most once).
+					if (user.emailVerified) {
+						await creditPendingReferral(user.id);
+						await reconcileAdminRole(user.id);
+					}
 					await syncPolarCustomer({
 						id: user.id,
 						email: user.email,
@@ -2149,6 +3140,17 @@ export const auth = betterAuth({
 		},
 	},
 	plugins: [
+		// FIRST on purpose. The admin plugin's account-control endpoints (ban,
+		// unban, set-role, remove, set-password, revoke sessions, create/update
+		// user) answer 404 unless the root-admin abuse console calls them through
+		// `auth.api.*` inside its server-only context. Running before every other
+		// plugin hook (age gate, support access, step-up) means a raw HTTP caller
+		// learns nothing, not even that step-up would be needed.
+		adminAbuseGuardPlugin(),
+		// Before `admin()`: its session hook refuses a banned user with a bare
+		// error, and this one runs first to add the reason label and appeal path.
+		bannedSignInPlugin(),
+		ageEligibilityPlugin(),
 		// Better Auth owns authentication responses, so localize its standard error
 		// codes at the server boundary. The product language-pack runtime owns UI
 		// copy; this plugin is deliberately limited to auth errors and keeps the
@@ -2196,13 +3198,7 @@ export const auth = betterAuth({
 			expiresIn: 3,
 			storeToken: "hashed",
 		}),
-		passkey({
-			...PASSKEY_WEBAUTHN_OPTIONS,
-			rpName: "Ryu",
-			authentication: {
-				afterVerification: ({ ctx }) => assertPendingPasskeyMatches(ctx),
-			},
-		}),
+		createRyuPasskeyPlugin(),
 		twoFactor({
 			issuer: "Ryu",
 			otpOptions: {
@@ -2332,16 +3328,18 @@ export const auth = betterAuth({
 				}
 			},
 			expiresIn: 300,
+			// The emailed link carries the token; only its digest is stored.
+			storeToken: "hashed",
 		}),
 		polar({
 			client: polarClient,
 			// Keep the Polar integration for customer/subscription webhooks, but do
 			// not register its generic checkout/portal routes. All money creation is
 			// owned by the org-aware billing routers below.
-			// The SDK types `use` as a non-empty tuple even when no optional Polar
-			// endpoint should be registered. Keep the runtime list empty; the cast is
-			// only to satisfy that type-level tuple requirement.
-			use: [] as unknown as [never],
+			// SAFETY: Polar reduces this list with an initial empty endpoint object,
+			// so an empty list is supported at runtime despite its non-empty tuple
+			// declaration. Billing routers own checkout/portal registration in Ryu.
+			use: optionalPolarPlugins as Parameters<typeof polar>[0]["use"],
 			// Customer provisioning is deferred to the billing checkout routes. This
 			// prevents a personal customer created at sign-up from colliding with the
 			// dedicated team customer an organization may need later.
@@ -2357,6 +3355,13 @@ export const auth = betterAuth({
 				].includes(clientId),
 		}),
 		loginApprovalSessionPlugin(),
+		// Stamp the device-flow client id (ryu-desktop, ryu-cli, ...) on the
+		// session `/device/token` issues, so routes can tell a Ryu client's
+		// session from a browser sign-in. Server-side only; see the module.
+		ryuClientSessionPlugin(),
+		// Telegram Mini App launches exchange Telegram-signed initData for a bearer
+		// session, only for a Telegram identity the owner already linked.
+		telegramMiniAppSessionPlugin(),
 		// The built-in GET /device only returns { user_code, status } — it hides the
 		// requesting clientId/scope. The approve consent screen needs to name the app
 		// asking for access ("Ryu Desktop is requesting…"), so expose a read-only
@@ -2413,6 +3418,11 @@ export const auth = betterAuth({
 			// impersonate other admins by default (Better Auth's built-in behavior —
 			// we deliberately do NOT grant the `impersonate-admins` permission).
 			impersonationSessionDuration: 60 * 60,
+			// The default admin role would also grant session listing (live
+			// tokens), raw user updates and user creation, none of them consented,
+			// stepped up or audited. Grant only the step-up-gated staff actions.
+			ac: platformAdminAccessControl,
+			roles: platformAdminRoles,
 		}),
 		lastLoginMethod(),
 		username({
@@ -2420,48 +3430,137 @@ export const auth = betterAuth({
 			maxUsernameLength: 32,
 		}),
 		jwt({
+			// Mint only on `GET /api/auth/token`. With the header on, Better Auth
+			// would also mint (and run `definePayload`, with its roster reads and
+			// org policy evaluation) on every `/get-session`, including every
+			// control-plane request's `createContext`. Nothing reads
+			// `set-auth-jwt`, and a mint that can fail (see below) must never fail
+			// a session read. The MFA-enrollment and support-access plugins still
+			// strip the header as defense in depth.
+			disableSettingJwtHeader: true,
 			jwt: {
 				// Enrich the JWT so a node's Core can verify org + team membership and
 				// role OFFLINE (it validates the signature against the JWKS, no live call
-				// to better-auth). definePayload only receives `user` (not the session),
-				// so we resolve every org the user belongs to from the `member`
+				// to better-auth). The session carries only the ACTIVE org, so we
+				// resolve every org the user belongs to from the `member`
 				// collection, and every team from `teamMember`, the same sources of truth
 				// the control plane reads from. Core narrows both to its bound org.
-				// Fail-open: a lookup error must never block token issuance, so we fall
-				// back to a user-only payload.
-				definePayload: async ({ user }) => {
-					const base = { id: user.id, email: user.email };
-					try {
-						// This runs on every token mint, and the two rosters are independent,
-						// so they overlap. The `catch` keeps a team-roster failure from
-						// rejecting the pair: teams are additive, org claims are not.
-						const [members, teamRows] = await Promise.all([
-							Member.find({ userId: user.id }).lean(),
-							TeamMember.find({ userId: user.id })
-								.lean()
-								.catch((error: unknown) => {
-									console.error("Failed to read team memberships:", error);
-									return [];
-								}),
-						]);
-						// Both id fields are ObjectId on disk; the claim is a JSON string
-						// id, and Core compares it as text. Stringify at the boundary
-						// rather than relying on `ObjectId.toJSON()` at serialize time,
-						// so the in-process value matches what the token carries.
-						const orgs = members.map((member) => ({
-							id: String(member.organizationId),
-							role: member.role,
-						}));
-						const teams = await resolveTeamClaims(
-							user.id,
-							teamRows.map((row) => String(row.teamId)),
-							orgs
-						);
-						return { ...base, orgs, teams };
-					} catch (error) {
-						console.error("Failed to embed org memberships in JWT:", error);
-						return base;
+				// The payload always carries `email_verified`, so Core never treats an
+				// unproven address as one the caller owns when an app grants access by
+				// email, and `ryu_sid` (lib/jwt-identity-claims.ts), the id of the
+				// session the token is minted from: the control plane accepts a token
+				// Core forwards only while that session is live, and applies that
+				// session's step-up grants and access policy to it. `iss`, `aud` and
+				// `sub` are never set here; Better Auth stamps them.
+				// `ryu_flags` (lib/core-flag-claim.ts) carries the enabled rollout flags
+				// Core enforces offline, evaluated for the session's active org (or the
+				// earliest membership) with the caller's role in it; `ryu_flags_org`
+				// names that org. It waits only on the org roster, never rejects, and is
+				// omitted (flags off) on any failure, including a roster read failure.
+				// `ryu_limits` (`CORE_LIMITS_CLAIM` in lib/plans.ts) carries the same
+				// org's Box concurrency cap, `{ boxConcurrency }`, and is omitted on
+				// any failure, so Core falls back to the Box service's own limits.
+				// Each org's access policy (IP allowlist, required two-factor, session
+				// max age; lib/jwt-org-access.ts) is applied to this mint first: an org
+				// that refuses this session is left out of `orgs`, `teams` and the
+				// `ryu_flags_org` choice, so its nodes never see this caller as a member.
+				// When the roster or that policy cannot be read, the mint FAILS with a
+				// 503 the client retries, instead of going out without the org claims
+				// (which would lock an org member out for the token's lifetime with
+				// no signal). A user with no memberships never consults the policy.
+				// The team roster still degrades to no teams (teams are additive and
+				// fail closed), as do the flags.
+				definePayload: async ({ user, session }) => {
+					const base = {
+						...jwtIdentityClaims(user),
+						...jwtSessionBindingClaims(session),
+					};
+					// A support (impersonation) session never gets a token: `/token` is
+					// already outside every support scope, this is defense in depth.
+					if (
+						z.object({ impersonatedBy: z.string().min(1) }).safeParse(session)
+							.success
+					) {
+						throw new APIError("FORBIDDEN", {
+							code: "SUPPORT_SESSION_JWT_REFUSED",
+							message: "A support session cannot mint a token",
+						});
 					}
+					const activeOrganizationId =
+						flagClaimSessionSchema.parse(session).activeOrganizationId ?? null;
+					// `exec()` so the roster runs once: both the flag claim and the
+					// roster below await this promise, and a mongoose Query re-executes
+					// on every `then`. Only memberships whose org policy admits this
+					// mint go further; an undecidable policy rejects the mint.
+					const memberRows = Member.find({ userId: user.id })
+						.lean()
+						.exec()
+						.then((rows) => admitJwtOrgMemberships(rows, { session, user }));
+					// `{ organization }` once the roster is read, null when it failed.
+					const claimOrganization = memberRows.then(
+						(rows) => ({
+							organization: selectCoreFlagClaimOrganization(
+								activeOrganizationId,
+								rows.map((row) => ({
+									createdAt: row.createdAt ?? null,
+									id: String(row.organizationId),
+									role: row.role,
+								}))
+							),
+						}),
+						() => null
+					);
+					const coreFlags = claimOrganization.then((selected) =>
+						selected
+							? resolveCoreFlagClaim(user, selected.organization)
+							: { keys: [], organizationId: null }
+					);
+					const coreLimits = claimOrganization.then((selected) =>
+						resolveCoreLimitsClaim(selected?.organization?.id ?? null)
+					);
+					// The two rosters are independent, so they overlap. The team
+					// roster's `catch` keeps a team-roster failure from rejecting the
+					// pair: teams are additive, org claims are not.
+					const rosters = await Promise.all([
+						memberRows,
+						TeamMember.find({ userId: user.id })
+							.lean()
+							.catch((error) => {
+								console.error(
+									"Failed to read team memberships:",
+									z
+										.union([z.instanceof(Error), z.json()])
+										.nullable()
+										.catch(null)
+										.parse(error)
+								);
+								return [];
+							}),
+					]).catch((error) => {
+						console.error("Failed to embed org memberships in JWT:", error);
+						return null;
+					});
+					if (!rosters) {
+						throw jwtOrgAccessUnavailable();
+					}
+					const [members, teamRows] = rosters;
+					// Both id fields are ObjectId on disk; the claim is a JSON string
+					// id, and Core compares it as text. Stringify at the boundary
+					// rather than relying on `ObjectId.toJSON()` at serialize time,
+					// so the in-process value matches what the token carries.
+					const orgs = members.map((member) => ({
+						id: String(member.organizationId),
+						role: member.role,
+					}));
+					const teams = await resolveTeamClaims(
+						user.id,
+						teamRows.map((row) => String(row.teamId)),
+						orgs
+					);
+					return withCoreLimitsClaim(
+						withCoreFlagClaim({ ...base, orgs, teams }, await coreFlags),
+						await coreLimits
+					);
 				},
 			},
 		}),
@@ -2479,11 +3578,18 @@ export const auth = betterAuth({
 				configId: "default",
 				references: "user",
 				enableMetadata: true,
+				// The plugin default is 10 verifications per day. The plugin stores the
+				// limiter on each key at creation; migration
+				// 1791936000000-api-key-rate-limit-backfill raised keys minted on that
+				// default to this limiter, and custom limits were left alone.
+				rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 600 },
 				permissions: {
 					defaultPermissions: async (referenceId) => {
 						try {
 							const user = await User.findById(referenceId).lean();
-							return defaultPermissionsForRole(user?.role);
+							// The implicit set leaves out opt-in scopes (such as
+							// mail:manage), matching classic /me/api-keys tokens.
+							return implicitPermissionsForRole(user?.role);
 						} catch (error) {
 							console.error(
 								"[auth] apiKey defaultPermissions lookup failed:",
@@ -2508,6 +3614,7 @@ export const auth = betterAuth({
 				configId: "organization",
 				references: "organization",
 				enableMetadata: true,
+				rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 600 },
 				permissions: { defaultPermissions: {} },
 			},
 		]),
@@ -2520,6 +3627,22 @@ export const auth = betterAuth({
 			consentPage: `${process.env.FRONTEND_URL || "http://localhost:3001"}/oauth/consent`,
 			resource: new URL("/mcp", env.BETTER_AUTH_URL).toString(),
 			scopes: RYU_SUPPORTED_SCOPES,
+			// Opt-in scopes (`mail:manage`) are registrable and grantable, but are
+			// requested only by name. Better Auth stores every dynamic or CIMD
+			// client with the default-plus-allowed union, `mail:manage` included
+			// (the default list only validates a registration that sends no
+			// `scope`), and that stored list grants nothing by itself: an authorize
+			// request without `scope` is defaulted in `hooks.before` above, and
+			// consent leaves the scope unchecked.
+			clientRegistrationDefaultScopes: RYU_DEFAULT_OAUTH_SCOPES,
+			clientRegistrationAllowedScopes: [...OAUTH_OPT_IN_SCOPES],
+			// Discovery (protected-resource and authorization-server metadata)
+			// leaves opt-in scopes out. MCP clients request every advertised scope
+			// when the 401 challenge names none, so advertising `mail:manage` would
+			// put it in every connect request and re-prompt consent each time it
+			// is declined. A client learns of it from the `insufficient_scope`
+			// challenge `mail_create_inbox` returns (apps/server hosted MCP).
+			advertisedMetadata: { scopes_supported: RYU_DEFAULT_OAUTH_SCOPES },
 			allowDynamicClientRegistration: true,
 			allowUnauthenticatedClientRegistration: true,
 			accessTokenExpiresIn: 3600,
@@ -2543,12 +3666,29 @@ export const auth = betterAuth({
 		// Ryu's entitlement and membership policy before calling these Better Auth
 		// endpoints. The protocol endpoints themselves remain available for the
 		// hosted login/provisioning flows.
+		//
+		// Plugin organization provisioning stays disabled. It inserts the member
+		// row through the raw adapter, which bypasses `beforeAddMember` and so
+		// the paid-seat and business-email gates. Organization-bound SSO callbacks
+		// admit through `settleSsoMembership` in the global after hook instead.
+		// The plugin's other path, joining an organization on a plain social
+		// login because the email domain matches a verified provider, is
+		// deliberately not replaced: a matching email domain alone does not grant
+		// organization access (see the public enterprise-identity docs). Those
+		// users join through SSO or an invitation.
 		sso({
 			domainVerification: { enabled: true },
-			organizationProvisioning: {
-				defaultRole: "member",
-				getRole: async () => "member",
-			},
+			// Live Enterprise entitlement gate, checked after Better Auth has
+			// resolved the exact persisted provider and before it creates a user,
+			// account, or session: a suspended or expired SSO entitlement stops the
+			// protocol itself, not only the management API.
+			resolveUser: async (input, context) =>
+				await resolveEnterpriseSsoUser(
+					input,
+					context.database,
+					hasEnterpriseCapability
+				),
+			organizationProvisioning: { disabled: true },
 			provisionUserOnEveryLogin: true,
 			saml: {
 				algorithms: { onDeprecated: "reject" },
@@ -2557,16 +3697,9 @@ export const auth = betterAuth({
 				requireTimestamps: true,
 			},
 		}),
-		scim({
-			// Ryu provisions SCIM connections through the organization-scoped
-			// Enterprise router. Better Auth owns the managed connection catalog and
-			// stores only credential digests; no personal/static token path is exposed.
-			connections: [],
-			managedConnections: {
-				credentialHashSecret: env.BETTER_AUTH_SECRET,
-				maxActiveCredentials: 5,
-			},
-		}),
+		createRyuScimPlugin(),
+		// SCIM may not create or rename an account to a platform-admin address.
+		scimAdminEmailGuardPlugin(),
 		organization({
 			// The creator of an org becomes its owner. This is the single source of
 			// truth the control plane reads from (the `member` collection).
@@ -2579,20 +3712,33 @@ export const auth = betterAuth({
 			// list endpoint. Require a verified recipient session for by-id get,
 			// accept, and reject operations, in addition to Ryu's business-email gate.
 			requireEmailVerificationOnInvitation: true,
-			// Enable Better Auth's organization-role lifecycle endpoints. These
-			// roles are additive to the Ryu control-plane RBAC below; they never
-			// widen a Ryu scope without an explicit server-side permission check.
+			// Static Better Auth roles only. Custom roles are Ryu's control-plane
+			// `orgRole`/`roleAssignment` (step-up gated, audited, ceiling-checked,
+			// mirrored in Core). Better Auth's dynamic roles were a second, unused
+			// custom-role system: a dynamic role carrying `member:update` gave
+			// Better Auth-level member control to someone Ryu treats as a viewer,
+			// outside step-up and audit, so it stays off.
 			ac: ryuOrganizationAccessControl,
 			roles: ryuOrganizationRoles,
-			dynamicAccessControl: {
-				enabled: true,
-				maximumRolesPerOrganization: 20,
-			},
 			teams: {
 				enabled: true,
 				maximumTeams: 50,
 				allowRemovingAllTeams: true,
 			},
+			// Better Auth's own size caps, stated rather than inherited: without
+			// them it applies 100 members and 100 pending invitations anyway, and
+			// checks them before Ryu's hooks run. Seat admission
+			// (lib/organization-admission.ts and `reserveSeatClaim`, where pending
+			// invitations hold seats) decides org size below this ceiling.
+			// It stays at 100 until the paths that read at most 100 members page:
+			// apps/web's `listMembers` callers show only the first page, and Better
+			// Auth's last-owner checks (remove/leave/update role) count owners in an
+			// unpaged `findMany` capped at 100 rows. Lifting it must use the function
+			// form (`() => Number.POSITIVE_INFINITY`): a NUMERIC limit is also the
+			// default `listMembers` / `getFullOrganization` page size, and 0 falls
+			// back to 100.
+			membershipLimit: 100,
+			invitationLimit: 100,
 			// Organization identity verification — the blue check on the PUBLISHING
 			// ORG. Declared here purely so the values come back OUT of Better Auth:
 			// its adapter's `transformOutput` iterates the DECLARED schema fields
@@ -2629,6 +3775,39 @@ export const auth = betterAuth({
 							input: false,
 							required: false,
 						},
+						// Server-owned; changed only by the primary-ownership transfer.
+						primaryOwnerUserId: {
+							type: "string",
+							input: false,
+							required: false,
+						},
+						// Digest of the public publisher identity (name, slug, logo);
+						// a change clears the staff verification verdict below.
+						identityRevision: {
+							type: "string",
+							input: false,
+							required: false,
+						},
+						// The authoritative personal/teams/family kind, written only by
+						// `setOrganizationKind`. Declared so it reaches clients: the
+						// metadata key can briefly lag it after a racing update, so
+						// apps/web's `organizationKindOf` prefers this field. No
+						// default, so Better Auth's create/update never write it.
+						organizationKind: {
+							type: "string",
+							input: false,
+							required: false,
+						},
+						verifiedIdentityRevision: {
+							type: "string",
+							input: false,
+							required: false,
+						},
+						verificationRequestId: {
+							type: "string",
+							input: false,
+							required: false,
+						},
 					},
 				},
 				invitation: {
@@ -2643,6 +3822,7 @@ export const auth = betterAuth({
 			},
 			organizationHooks: {
 				beforeCreateOrganization: async ({ organization, user }) => {
+					const identityRevision = organizationIdentityRevision(organization);
 					// The signup hook uses the reserved `personal-` slug when it
 					// mints the default one-person workspace. A consumer mailbox stays
 					// personal; a company-domain mailbox is stamped as the Teams boundary
@@ -2660,10 +3840,14 @@ export const auth = betterAuth({
 						return {
 							data: {
 								...organization,
+								identityRevision,
 								metadata: metadataWithOrganizationKind(
 									organization.metadata,
 									bootstrapKind
 								),
+								// The creator is the primary owner (see primary-owner.ts),
+								// written with the insert rather than patched afterwards.
+								primaryOwnerUserId: user.id,
 							},
 						};
 					}
@@ -2671,10 +3855,14 @@ export const auth = betterAuth({
 					return {
 						data: {
 							...organization,
+							identityRevision,
 							metadata: metadataWithOrganizationKind(
 								organization.metadata,
 								TEAMS_ORGANIZATION_KIND
 							),
+							// The creator is the primary owner (see primary-owner.ts),
+							// written with the insert rather than patched afterwards.
+							primaryOwnerUserId: user.id,
 						},
 					};
 				},
@@ -2694,27 +3882,62 @@ export const auth = betterAuth({
 					// `organizationKind` is a server-owned boundary marker. Better Auth
 					// filters declared input:false fields, but arbitrary metadata remains
 					// client-writable, so preserve the durable kind explicitly.
+					// The kind comes from the authoritative field when present: Better
+					// Auth writes this merged metadata back after the hook, so a family
+					// enable/disable landing in between is restored by the after hook.
 					const existing = await Organization.findById(member.organizationId)
-						.select("metadata")
-						.lean<{ metadata?: unknown }>();
+						.select("logo metadata name organizationKind slug")
+						.lean<{
+							logo?: string | null;
+							metadata?: string;
+							name?: string;
+							organizationKind?: unknown;
+							slug?: string;
+						}>();
 					const currentMetadata = parseOrganizationMetadata(existing?.metadata);
 					const requestedMetadata = parseOrganizationMetadata(
 						organization.metadata
 					);
-					const currentKind = organizationKindFromMetadata(currentMetadata);
+					const currentKind = organizationKindFromRecord(existing);
 					if (currentKind) {
 						requestedMetadata[ORGANIZATION_KIND_KEY] = currentKind;
 					} else {
 						delete requestedMetadata[ORGANIZATION_KIND_KEY];
 					}
+					const identityUpdate = resolveOrganizationIdentityUpdate(
+						existing ?? {},
+						organization
+					);
+					const data = {
+						...organization,
+						identityRevision: identityUpdate.revision,
+						metadata: { ...currentMetadata, ...requestedMetadata },
+					};
+					if (!identityUpdate.changed) {
+						return { data };
+					}
+					// This is part of the SAME Better Auth adapter update as the public
+					// identity change. A renamed publisher therefore cannot retain a
+					// staff verdict even for one successful write.
 					return {
 						data: {
-							...organization,
-							metadata: { ...currentMetadata, ...requestedMetadata },
+							...data,
+							verificationRequestId: null,
+							verificationTier: null,
+							verified: false,
+							verifiedAt: null,
+							verifiedBy: null,
+							verifiedIdentityRevision: null,
 						},
 					};
 				},
 				afterUpdateOrganization: async ({ organization, member }) => {
+					try {
+						await reconcileOrganizationKindMetadata(member.organizationId);
+					} catch (error) {
+						// Readers prefer the authoritative field; the next update retries.
+						console.error("Failed to reconcile organization kind:", error);
+					}
 					if (!organization) {
 						return;
 					}
@@ -2729,66 +3952,35 @@ export const auth = betterAuth({
 					});
 				},
 				beforeDeleteOrganization: async ({ organization }) => {
-					// Deleting the Better Auth organization must not strand an active
-					// Polar subscription that would keep charging its payer. Cancel the
-					// plan through billing first; once Polar reports it inactive, deletion
-					// can proceed and the after hook removes transient seat claims.
-					if ((await activeTeamsSeatCount(organization.id)) !== null) {
-						throw new APIError("BAD_REQUEST", {
-							message:
-								"Cancel the active organization plan before deleting this organization. Billing is managed from Organization billing.",
-						});
-					}
+					await organizationAdmission.beforeDeleteOrganization({
+						organization,
+					});
 				},
-				beforeAddMember: async ({ member, user, organization }) => {
-					const personal = await isPersonalOrganization(
-						member.organizationId,
-						organization.metadata
-					);
-					const memberCount = await Member.countDocuments({
-						organizationId: member.organizationId,
+				beforeAddMember: async (data) => {
+					await revokeStaleRoleGrantsBeforeAdmission({
+						organizationId: data.member.organizationId,
+						userId: String(data.user.id),
 					});
-					if (personal) {
-						if (memberCount > 0) {
-							throw new APIError("BAD_REQUEST", {
-								message: PERSONAL_WORKSPACE_MESSAGE,
-							});
-						}
-						return;
-					}
-					const isFirstOwner =
-						memberCount === 0 &&
-						member.role
-							.split(",")
-							.map((role) => role.trim())
-							.includes("owner");
-					// The signup bootstrap can stamp a company-domain account as a Teams
-					// org before its verification email is completed. Permit that one
-					// owner row so the account has a usable home. A newly-created shared
-					// organization also needs its first owner before it has a subscription;
-					// every later member requires both a paid seat and the verified-business
-					// decision.
-					const bootstrapTeams =
-						isFirstOwner &&
-						(organization.slug ?? "")
-							.trim()
-							.toLowerCase()
-							.startsWith("personal-") &&
-						businessEmailDomainDecision(user.email).allowed;
-					if (bootstrapTeams || isFirstOwner) {
-						return;
-					}
-					requireVerifiedBusinessEmail(user);
-					await reserveDirectMemberSeat({
-						organizationId: member.organizationId,
-						userId: user.id,
-					});
+					await organizationAdmission.beforeAddMember(data);
 				},
 				afterAddMember: async ({ member, organization, user }) => {
+					await clearPriorMembershipGrants({
+						createdAt: member.createdAt,
+						organizationId: member.organizationId,
+						userId: String(member.userId),
+					});
 					// The direct-add lock is needed only until Better Auth has created the
 					// member row. Invitation acceptance has its own invitation claim and
 					// does not pass through this hook.
 					await releaseSeatClaims({
+						organizationId: member.organizationId,
+						userId: String(member.userId),
+					});
+					// Confirms the family place, or undoes an add that raced sharing
+					// being turned off (and fails the request).
+					await organizationAdmission.afterMemberAdmitted({
+						actor: "other",
+						memberId: String(member.id),
 						organizationId: member.organizationId,
 						userId: String(member.userId),
 					});
@@ -2810,14 +4002,25 @@ export const auth = betterAuth({
 						organizationId: member.organizationId,
 						userId: String(member.userId),
 					});
+					// Revoke custom-role grants while the removal can still be
+					// refused: a failure here stops the removal instead of leaving
+					// grants that a later re-admission would revive. The after hook
+					// repeats this for a grant written in between.
+					await revokeOrganizationRoleAssignments({
+						organizationId: member.organizationId,
+						userId: String(member.userId),
+					});
 				},
-				beforeUpdateMemberRole: async ({ user }) => {
-					// A role promotion is another shared-organization admission point.
-					// Keep a user whose email was changed or unverified from gaining a
-					// stronger organization role through the native Better Auth endpoint.
-					requireVerifiedBusinessEmail(user);
+				beforeUpdateMemberRole: async (data) => {
+					await organizationAdmission.beforeUpdateMemberRole(data);
 				},
-				afterUpdateMemberRole: async ({ member, organization, user }) => {
+				afterUpdateMemberRole: async ({
+					member,
+					organization,
+					previousRole,
+					user,
+				}) => {
+					await rememberMemberRoleBeforeUpdate(member.id, previousRole);
 					await notifyOrganizationHookActivity({
 						body: `${user.name || user.email}'s organization role was updated in ${organization.name}.`,
 						event: "member.role.updated",
@@ -2828,42 +4031,36 @@ export const auth = betterAuth({
 						title: "Organization role updated",
 					});
 				},
-				beforeCreateInvitation: async ({ invitation, inviter }) => {
-					await rejectPersonalWorkspaceInvitation(invitation.organizationId);
-					requireVerifiedBusinessEmail(inviter);
-					requireBusinessEmailDomain(invitation.email);
-					const email = normalizeInvitationEmail(invitation.email);
-					// The seat is reserved before Better Auth writes the invitation. The
-					// short TTL covers a failed create; afterCreateInvitation extends it to
-					// the invitation's real expiry.
-					await reservePendingInvitationSeat({
-						email,
-						organizationId: invitation.organizationId,
-					});
-					try {
-						await reserveOrganizationInvitationPolicy({
-							email,
-							organizationId: invitation.organizationId,
-							referralTag: normalizeReferralTag(invitation.referralTag),
-						});
-					} catch (error) {
-						// Do not strand the seat when the independent invitation policy
-						// rejects this send (cooldown or decline block).
-						await releaseSeatClaims({
-							email,
-							organizationId: invitation.organizationId,
-						});
-						throw error;
-					}
-					return {
-						data: {
-							...invitation,
-							email,
-							referralTag: normalizeReferralTag(invitation.referralTag),
-						},
-					};
-				},
+				beforeCreateInvitation: async ({ invitation, inviter }) =>
+					await organizationAdmission.beforeCreateInvitation({
+						invitation,
+						inviter,
+					}),
 				afterCreateInvitation: async ({ invitation }) => {
+					const unsent = await takeUnsentInvitationEmail(invitation.id);
+					let unsentOutcome: UnsentInvitationOutcome | null = null;
+					if (unsent) {
+						// The owner must not see a pending invitation nobody was told
+						// about: withdraw it, give back its seat and cooldown, and
+						// answer with why and when to send it again.
+						const { context } = await getCurrentAuthContext();
+						unsentOutcome = await withdrawUnsentInvitation(
+							context.adapter,
+							invitation
+						);
+						if (unsentOutcome === "withdrawn") {
+							throw invitationEmailNotSentError(unsent.error, "invite");
+						}
+						// "settled": the invitation was used, so the request stands.
+						// "kept": it stays pending without its email, so it is recorded
+						// below as the pending invitation it is (its seat claim follows
+						// it) and the owner is asked to resend it. Either way no
+						// "invitation sent" notice is recorded.
+					} else {
+						// The email went out (or the recipient's preferences skip it),
+						// so the reservations now belong to the invitation.
+						await takeInvitationBeingCreated(invitation);
+					}
 					const now = new Date();
 					await OrganizationSeatReservation.updateOne(
 						{
@@ -2894,10 +4091,15 @@ export const auth = betterAuth({
 								cooldownUntil: new Date(
 									now.getTime() + ORGANIZATION_INVITATION_COOLDOWN_MS
 								),
-								referralTag: normalizeReferralTag(invitation.referralTag),
 							},
 						}
 					);
+					if (unsent) {
+						if (unsentOutcome === "kept") {
+							throw invitationEmailNotSentError(unsent.error, "resend");
+						}
+						return;
+					}
 					await notifyOrganizationEvent({
 						actionLabel: "Manage organization members",
 						actionUrl: organizationAppUrl("/organizations/members"),
@@ -2911,11 +4113,24 @@ export const auth = betterAuth({
 						title: "Organization invitation sent",
 					});
 				},
-				afterAcceptInvitation: async ({ invitation }) => {
+				afterAcceptInvitation: async ({ invitation, member }) => {
+					await clearPriorMembershipGrants({
+						createdAt: member.createdAt,
+						organizationId: invitation.organizationId,
+						userId: String(member.userId),
+					});
 					await releaseSeatClaims({
 						email: invitation.email,
 						invitationId: invitation.id,
 						organizationId: invitation.organizationId,
+					});
+					// Confirms the family place, or undoes an accept that raced sharing
+					// being turned off (and fails the request).
+					await organizationAdmission.afterMemberAdmitted({
+						actor: "self",
+						memberId: String(member.id),
+						organizationId: invitation.organizationId,
+						userId: String(member.userId),
 					});
 					await OrganizationInvitationPolicy.updateOne(
 						{
@@ -2947,17 +4162,19 @@ export const auth = betterAuth({
 					});
 				},
 				beforeAcceptInvitation: async ({ invitation, user }) => {
-					await rejectPersonalWorkspaceInvitation(invitation.organizationId);
-					requireVerifiedBusinessEmail(user);
-					await reserveInvitationSeat({
-						email: invitation.email,
-						invitationId: invitation.id,
+					await revokeStaleRoleGrantsBeforeAdmission({
 						organizationId: invitation.organizationId,
-						userId: user.id,
+						userId: String(user.id),
+					});
+					await organizationAdmission.beforeAcceptInvitation({
+						invitation,
+						user,
 					});
 				},
 				beforeRejectInvitation: async ({ invitation }) => {
-					await rejectPersonalWorkspaceInvitation(invitation.organizationId);
+					await organizationAdmission.rejectPersonalWorkspaceInvitation(
+						invitation.organizationId
+					);
 				},
 				afterRejectInvitation: async ({ invitation }) => {
 					await releaseSeatClaims({
@@ -2965,6 +4182,7 @@ export const auth = betterAuth({
 						invitationId: invitation.id,
 						organizationId: invitation.organizationId,
 					});
+					await organizationAdmission.releaseInvitationFamilyPlace(invitation);
 					await OrganizationInvitationPolicy.updateOne(
 						{
 							organizationId: invitation.organizationId,
@@ -3002,46 +4220,43 @@ export const auth = betterAuth({
 					});
 				},
 				beforeCancelInvitation: async ({ invitation }) => {
-					await rejectPersonalWorkspaceInvitation(invitation.organizationId);
-				},
-				afterCancelInvitation: async ({ invitation }) => {
-					await releaseSeatClaims({
-						email: invitation.email,
-						invitationId: invitation.id,
-						organizationId: invitation.organizationId,
-					});
-					await notifyOrganizationEvent({
-						actionLabel: "Manage organization members",
-						actionUrl: organizationAppUrl("/organizations/invitations"),
-						actionUrlForOrganization: () =>
-							organizationAppUrl("/organizations/members"),
-						body: `The invitation for ${normalizeInvitationEmail(invitation.email)} was cancelled.`,
-						dedupeKey: `organization-invitation:${invitation.id}:cancelled`,
-						extraRecipients: [
-							{
-								actionLabel: "Open invitations",
-								actionUrl: organizationAppUrl("/organizations/invitations"),
-								email: invitation.email,
-							},
-						],
-						kind: "organization-invitation",
-						organizationIds: [String(invitation.organizationId)],
-						sourceId: String(invitation.id),
-						sourceType: "organization-invitation",
-						subject: "Organization invitation cancelled",
-						title: "Organization invitation cancelled",
-					});
-				},
-				beforeCreateTeam: async ({ team }) => {
-					const name = team.name.trim();
-					if (!name) {
-						throw new APIError("BAD_REQUEST", {
-							message: "Team name is required.",
+					await organizationAdmission.rejectPersonalWorkspaceInvitation(
+						invitation.organizationId
+					);
+					// Better Auth's own cancel writes `canceled` by id with no expected
+					// status, so an accept that won meanwhile would be rewritten as
+					// canceled while its member row stays. Claim the single
+					// pending -> canceled transition here instead (accept claims the
+					// same one); a lost race refuses with the real terminal state.
+					const claim = await claimPendingInvitationCancellation(
+						String(invitation.id)
+					);
+					if (!claim.won) {
+						throw new APIError("CONFLICT", {
+							code: "INVITATION_NOT_PENDING",
+							message: `This invitation is already ${claim.status ?? "gone"}.`,
 						});
 					}
-					return { data: { ...team, name } };
 				},
+				afterCancelInvitation: async ({ invitation }) => {
+					await finalizeCanceledOrganizationInvitation({
+						email: invitation.email,
+						id: invitation.id,
+						organizationId: invitation.organizationId,
+					});
+				},
+				beforeCreateTeam: async ({ team, organization }) =>
+					await organizationAdmission.beforeCreateTeam({ organization, team }),
 				afterCreateTeam: async ({ team, organization }) => {
+					// A team whose before-hook read the personal kind can land after a
+					// family enable promoted the org; re-read the kind after the write.
+					const familyRefusal = await removeTeamCreatedInFamily({
+						organizationId: organization.id,
+						teamId: team.id,
+					});
+					if (familyRefusal) {
+						throw new APIError("BAD_REQUEST", { message: familyRefusal });
+					}
 					await notifyOrganizationHookActivity({
 						body: `${team.name} was created in ${organization.name}.`,
 						event: "team.created",
@@ -3054,7 +4269,7 @@ export const auth = betterAuth({
 					});
 				},
 				beforeUpdateTeam: async ({ updates }) => {
-					if (typeof updates.name !== "string") {
+					if (updates.name === undefined) {
 						return;
 					}
 					const name = updates.name.trim();
@@ -3088,6 +4303,10 @@ export const auth = betterAuth({
 					}
 				},
 				afterDeleteTeam: async ({ team, organization }) => {
+					await revokeTeamScopedGrants({
+						organizationId: organization.id,
+						teamId: String(team.id),
+					});
 					await notifyOrganizationHookActivity({
 						body: `${team.name} was deleted from ${organization.name}.`,
 						event: "team.deleted",
@@ -3098,12 +4317,16 @@ export const auth = betterAuth({
 						title: "Organization team deleted",
 					});
 				},
-				beforeAddTeamMember: async ({ organization, user }) => {
-					await rejectPersonalWorkspaceInvitation(
-						organization.id,
-						organization.metadata
-					);
-					requireVerifiedBusinessEmail(user);
+				beforeAddTeamMember: async ({ organization, team, user }) => {
+					await revokeStaleRoleGrantsBeforeAdmission({
+						organizationId: organization.id,
+						teamId: team.id,
+						userId: String(user.id),
+					});
+					await organizationAdmission.beforeAddTeamMember({
+						organization,
+						user,
+					});
 				},
 				afterAddTeamMember: async ({
 					team,
@@ -3135,6 +4358,11 @@ export const auth = betterAuth({
 					organization,
 					user,
 				}) => {
+					await revokeTeamScopedGrants({
+						organizationId: organization.id,
+						teamId: String(team.id),
+						userId: String(teamMember.userId),
+					});
 					await notifyOrganizationHookActivity({
 						body: `${user.name || user.email} left ${team.name}.`,
 						event: "team.member.removed",
@@ -3153,6 +4381,18 @@ export const auth = betterAuth({
 						organizationId: member.organizationId,
 						userId: String(member.userId),
 					});
+					await revokeRemovedMemberGrants({
+						organizationId: member.organizationId,
+						userId: String(member.userId),
+					});
+					await disableFamilyBotGrantsOnMemberExit({
+						organizationId: member.organizationId,
+						userId: String(member.userId),
+					});
+					await organizationAdmission.releaseMemberFamilyPlace({
+						organizationId: member.organizationId,
+						userId: String(member.userId),
+					});
 					await notifyOrganizationHookActivity({
 						body: `${user.name || user.email} left ${organization.name}.`,
 						event: "member.removed",
@@ -3168,11 +4408,18 @@ export const auth = betterAuth({
 					await OrganizationSeatReservation.deleteMany({
 						organizationId: organization.id,
 					});
+					await releaseFamilyMembershipSlotsForOrganization(organization.id);
+					await markManagedAgentOrganizationDeleted(organization.id);
+					// Stop its mail; every address it claimed stays reserved forever.
+					await retireOrganizationMail(organization.id);
 				},
 			},
 			// Providing this implementation enables member invitations. The invite
-			// link lands on the web org shell where the invitee accepts.
-			sendInvitationEmail: async (data) => {
+			// link lands on the web org shell where the invitee accepts. A send
+			// that fails is recorded (recordUnsentInvitationEmail) and the request
+			// answers with it: afterCreateInvitation for a new invitation, the
+			// global after hook for a resend.
+			sendInvitationEmail: recordUnsentInvitationEmail(async (data) => {
 				if (
 					!(await isOrganizationNotificationEnabled(
 						data.organization.id,
@@ -3185,10 +4432,10 @@ export const auth = betterAuth({
 				const invitationPath = `/organizations/accept-invitation/${encodeURIComponent(data.id)}`;
 				const inviteUrl = `${frontendUrl}${invitationPath}`;
 				const signUpUrl = `${frontendUrl}/login?view=signup&callback=${encodeURIComponent(invitationPath)}`;
-				const referralTag = normalizeReferralTag(
-					(data.invitation as { referralTag?: unknown } | undefined)
-						?.referralTag
+				const invitationFields = invitationNotificationFieldsSchema.parse(
+					data.invitation
 				);
+				const referralTag = normalizeReferralTag(invitationFields.referralTag);
 				let recipientUserId: string | null = null;
 				try {
 					const recipient = await User.findOne(
@@ -3217,10 +4464,7 @@ export const auth = betterAuth({
 				}
 				const hasRyuAccount = Boolean(recipientUserId);
 				let teamName: string | undefined;
-				const teamId =
-					typeof data.invitation.teamId === "string"
-						? data.invitation.teamId.split(",")[0]?.trim()
-						: undefined;
+				const teamId = invitationFields.teamId?.split(",")[0]?.trim();
 				if (teamId) {
 					try {
 						const team = await Team.findById(teamId)
@@ -3233,37 +4477,40 @@ export const auth = betterAuth({
 						console.error("Failed to resolve invitation team name:", error);
 					}
 				}
-				try {
-					await sendEmail({
-						to: data.email,
-						subject: hasRyuAccount
-							? `Come build with ${data.organization.name} on Ryu`
-							: `${data.inviter.user.name || data.inviter.user.email} invited you to ${data.organization.name} on Ryu`,
-						react: hasRyuAccount
-							? OrganizationInvitationExistingAccountEmail({
-									invitedByName:
-										data.inviter.user.name || data.inviter.user.email,
-									organizationName: data.organization.name,
-									inviteUrl,
-									referralTag,
-									teamName,
-								})
-							: OrganizationInvitationNewAccountEmail({
-									invitedByName:
-										data.inviter.user.name || data.inviter.user.email,
-									organizationName: data.organization.name,
-									signUpUrl,
-									referralTag,
-									teamName,
-								}),
-					});
-				} catch (error) {
-					console.error("Failed to send organization invitation email:", error);
-				}
-			},
+				await sendEmail({
+					deliveryClass: "notification",
+					to: data.email,
+					subject: hasRyuAccount
+						? `Come build with ${data.organization.name} on Ryu`
+						: `${data.inviter.user.name || data.inviter.user.email} invited you to ${data.organization.name} on Ryu`,
+					react: hasRyuAccount
+						? OrganizationInvitationExistingAccountEmail({
+								invitedByName:
+									data.inviter.user.name || data.inviter.user.email,
+								organizationName: data.organization.name,
+								inviteUrl,
+								referralTag,
+								teamName,
+							})
+						: OrganizationInvitationNewAccountEmail({
+								invitedByName:
+									data.inviter.user.name || data.inviter.user.email,
+								organizationName: data.organization.name,
+								signUpUrl,
+								referralTag,
+								teamName,
+							}),
+				});
+			}),
 		}),
 		loginAssuranceCleanupPlugin(),
 		supportAccessPlugin(),
+		// Append-only ControlAuditEvent rows for /admin/* account changes
+		// (set-role, ban, remove, password, update, create, session revoke).
+		platformAdminAuditPlugin(),
+		// Mandatory authenticator-or-passkey enrollment: status endpoint plus the
+		// guard against removing an account's last strong factor.
+		mfaEnrollmentPlugin({ userInMfaRequiredOrganization }),
 		// LAST on purpose. Before-hooks run in `[config.hooks.before, ...plugins]`
 		// order, so this has to sit after `bearer` — which rewrites an
 		// `Authorization` header into the session cookie — or the gate resolves no
@@ -3271,4 +4518,6 @@ export const auth = betterAuth({
 		// in lib/step-up-plugin.ts.
 		stepUpGate(),
 	],
-});
+} satisfies BetterAuthOptions;
+
+export const auth: Auth<typeof authOptions> = betterAuth(authOptions);

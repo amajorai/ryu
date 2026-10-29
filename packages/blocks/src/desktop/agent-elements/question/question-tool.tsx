@@ -3,8 +3,10 @@ import {
 	type ApprovalCardAnswer,
 	type ApprovalCardQuestion,
 } from "@ryu/ui/components/agents/approval-card";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useEffect, useMemo, useState } from "react";
 import type { QuestionAnswer, QuestionConfig } from "./question-prompt.tsx";
+import styles from "./question-tool.module.css";
 
 export interface QuestionToolPart {
 	input?: {
@@ -93,7 +95,7 @@ export function QuestionTool({ part }: QuestionToolProps) {
 	const [localIndex, setLocalIndex] = useState(part.input?.questionIndex ?? 1);
 	const questions: QuestionConfig[] = part.input?.questions ?? [];
 	const totalQuestions = part.input?.totalQuestions ?? questions.length;
-	const isControlled = typeof part.input?.questionIndex === "number";
+	const isControlled = isNativeNumber(part.input?.questionIndex);
 	const questionIndex = isControlled
 		? (part.input?.questionIndex ?? 1)
 		: questions.length > 0
@@ -106,7 +108,7 @@ export function QuestionTool({ part }: QuestionToolProps) {
 	>({});
 
 	useEffect(() => {
-		if (typeof part.input?.questionIndex === "number") {
+		if (isNativeNumber(part.input?.questionIndex)) {
 			setLocalIndex(part.input.questionIndex);
 		}
 	}, [part.input?.questionIndex]);
@@ -153,58 +155,59 @@ export function QuestionTool({ part }: QuestionToolProps) {
 	};
 
 	return (
-		<ApprovalCard
-			className="an-tool-question"
-			defaultAnswers={Object.fromEntries(
-				Object.entries(localAnswers)
-					.filter(([, answer]) => answer && answer.kind !== "skip")
-					.map(([index, answer]) => [
-						questions[Number(index) - 1]?.title ?? index,
-						{
-							selected: answer.selectedIds ?? [],
-							custom: answer.text,
-						} satisfies ApprovalCardAnswer,
-					])
-			)}
-			defaultStep={clampedIndex - 1}
-			description="The agent needs an answer before it continues."
-			onAnswersChange={(answers) => {
-				// Keep localAnswers in sync so completion state and the summary stay
-				// truthful as the user moves through the questions.
-				const next: Record<number, QuestionAnswer> = {};
-				for (const [title, answer] of Object.entries(answers)) {
-					const idx = questions.findIndex((q) => q.title === title);
-					if (idx >= 0) {
-						next[idx + 1] = fromApprovalAnswer(questions[idx]!, answer);
+		<div className={styles.question}>
+			<ApprovalCard
+				defaultAnswers={Object.fromEntries(
+					Object.entries(localAnswers)
+						.filter(([, answer]) => answer && answer.kind !== "skip")
+						.map(([index, answer]) => [
+							questions[Number(index) - 1]?.title ?? index,
+							{
+								selected: answer.selectedIds ?? [],
+								custom: answer.text,
+							} satisfies ApprovalCardAnswer,
+						])
+				)}
+				defaultStep={clampedIndex - 1}
+				description="The agent needs an answer before it continues."
+				onAnswersChange={(answers) => {
+					// Keep localAnswers in sync so completion state and the summary stay
+					// truthful as the user moves through the questions.
+					const next: Record<number, QuestionAnswer> = {};
+					for (const [title, answer] of Object.entries(answers)) {
+						const idx = questions.findIndex((q) => q.title === title);
+						if (idx >= 0) {
+							next[idx + 1] = fromApprovalAnswer(questions[idx]!, answer);
+						}
 					}
-				}
-				setLocalAnswers(next);
-			}}
-			onStepChange={(step) => {
-				if (!isControlled) {
-					setLocalIndex(step + 1);
-				}
-			}}
-			onSubmit={(answers) => {
-				// The primary action advances through questions; on the last one it
-				// reports the answer to the part.
-				if (clampedIndex < totalQuestions) {
-					goNext();
-					return;
-				}
-				const lastQuestion = questions[clampedIndex - 1];
-				if (!lastQuestion) {
-					return;
-				}
-				const answer = answers[lastQuestion.title];
-				part.input?.onSubmitAnswer?.(
-					answer ? fromApprovalAnswer(lastQuestion, answer) : { kind: "skip" }
-				);
-			}}
-			questions={approvalQuestions}
-			result={isComplete ? summaryText : undefined}
-			status={isComplete ? "answered" : "pending"}
-			submitLabel={part.input?.submitLabel ?? "Submit response"}
-		/>
+					setLocalAnswers(next);
+				}}
+				onStepChange={(step) => {
+					if (!isControlled) {
+						setLocalIndex(step + 1);
+					}
+				}}
+				onSubmit={(answers) => {
+					// The primary action advances through questions; on the last one it
+					// reports the answer to the part.
+					if (clampedIndex < totalQuestions) {
+						goNext();
+						return;
+					}
+					const lastQuestion = questions[clampedIndex - 1];
+					if (!lastQuestion) {
+						return;
+					}
+					const answer = answers[lastQuestion.title];
+					part.input?.onSubmitAnswer?.(
+						answer ? fromApprovalAnswer(lastQuestion, answer) : { kind: "skip" }
+					);
+				}}
+				questions={approvalQuestions}
+				result={isComplete ? summaryText : undefined}
+				status={isComplete ? "answered" : "pending"}
+				submitLabel={part.input?.submitLabel ?? "Submit response"}
+			/>
+		</div>
 	);
 }

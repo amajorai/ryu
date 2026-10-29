@@ -1,6 +1,6 @@
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMemo } from "react";
 import { useApps } from "@/src/hooks/useApps.ts";
 import { OAuthConnections } from "../marketplace/ConnectionsTab.tsx";
@@ -31,10 +31,10 @@ export function RyuAppsTab() {
 		>
 			{loading ? (
 				<SettingsCard>
-					<div className="flex items-center gap-2 text-muted-foreground text-sm">
-						<Spinner className="size-4" />
-						Loading installed Ryu apps…
-					</div>
+					<SkeletonRows
+						label="Loading installed Ryu apps…"
+						spacing="comfortable"
+					/>
 				</SettingsCard>
 			) : error ? (
 				<SettingsCard>

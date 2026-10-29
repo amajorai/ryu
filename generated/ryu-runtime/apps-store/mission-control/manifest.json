@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/mission-control",
   "name": "Mission Control",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Productivity",
   "description": "The project-level view over many chats: recent sessions and what each one accomplished, per-day activity, the files several chats keep returning to, and the to-dos left outstanding in threads nobody reopened. Declares the out-of-process ryu-mission-control sidecar (kind:local), which owns the digest store and the cross-chat rollup and is served to the desktop through the generic ext-proxy public_mount. The digests themselves are computed in the desktop from each chat's message parts and PUT here, because a manifest sidecar has no conversation read and the parts column is sealed at rest — the same function feeds the in-chat Mission Control panel, so a chat's summary is identical in both places.",
@@ -43,9 +43,10 @@
       "lazy": true,
       "idle_stop_secs": 300,
       "host_api": {
-        "grants": ["hook:side-model"]
+        "grants": ["hook:side-model", "crypto:seal"]
       },
       "http": {
+        "caller_resource_scope": "conversation",
         "mount": "/api/mission-control",
         "public_mount": "/api/mission-control",
         "routes": [
@@ -97,19 +98,6 @@
     }
   ],
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "mission-control.chat",
-        "title": "Mission Control widget",
-        "description": "Mission Control chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["mission control widget"],
-        "examples": ["Show me a mission control widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "sidebar_buttons": [
       {
         "id": "home",

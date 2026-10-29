@@ -11,7 +11,7 @@ import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 const stubbedGlobals = new Map<string, PropertyDescriptor | undefined>();
 
 /** `vi.stubGlobal`: install a global, remembering how to put it back. */
-function stubGlobal(name: string, value: unknown): void {
+function stubGlobal<TValue>(name: string, value: TValue): void {
 	if (!stubbedGlobals.has(name)) {
 		stubbedGlobals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
 	}
@@ -28,7 +28,7 @@ function unstubAllGlobals(): void {
 		if (descriptor) {
 			Object.defineProperty(globalThis, name, descriptor);
 		} else {
-			delete (globalThis as Record<string, unknown>)[name];
+			Reflect.deleteProperty(globalThis, name);
 		}
 	}
 	stubbedGlobals.clear();

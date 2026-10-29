@@ -14,6 +14,7 @@
     "images",
     "editor"
   ],
+  "tags": ["youtube", "thumbnails", "creative", "design", "images", "editor"],
   "author": { "name": "A Major", "url": "https://amajorai.com" },
   "repository": "https://github.com/amajorai/backstage",
   "homepage": "https://github.com/amajorai/backstage",

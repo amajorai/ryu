@@ -13,6 +13,17 @@ describe("grantLabel", () => {
 
 	test("lookup is case-insensitive", () => {
 		expect(grantLabel("FS.READ")).toBe("Read your files");
+		// The issued grant is camelCase; its table key must be stored lower-case.
+		expect(grantLabel("chat.sendFollowUp")).toBe("Send follow-up messages");
+	});
+
+	test("the reviewed tool-plane grant has a curated label", () => {
+		// Shipped apps hold `tools.invoke`; the enable dialog must not show the
+		// humanized fallback "Tools invoke".
+		expect(grantLabel("tools.invoke")).toBe("Use your connected tools");
+		expect(grantDescription("tools.invoke")).toBe(
+			"Run tools connected to Ryu and request work from Ryu-managed providers. Paid provider requests can use your Ryu credits."
+		);
 	});
 
 	test("unknown grant is humanized from its separators", () => {

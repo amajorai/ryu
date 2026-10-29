@@ -60,7 +60,7 @@ async function pref(key, fallback) {
 	let raw = null;
 	try {
 		raw = await host.getPreference({ key: key });
-	} catch (e) {
+	} catch  {
 		return fallback;
 	}
 	if (raw === null || raw === undefined) {
@@ -72,7 +72,7 @@ async function pref(key, fallback) {
 	return s === "" ? fallback : s;
 }
 
-const rev = ctx.transcript.slice().reverse();
+const rev = (Array.isArray(ctx.transcript) ? ctx.transcript : []).slice().reverse();
 const lastAssistant = rev.find((m) => m.role === "assistant");
 if (!lastAssistant) {
 	return { kind: "none" };
@@ -149,7 +149,7 @@ const report = await host.runAgent({
 });
 
 const findings = (report || "").trim();
-if (!findings || /slop:\s*none/i.test(findings)) {
+if (!findings || /^slop:\s*none\s*$/i.test(findings)) {
 	// Clean answer: say nothing. A note on every clean turn would be its own slop.
 	return { kind: "none" };
 }

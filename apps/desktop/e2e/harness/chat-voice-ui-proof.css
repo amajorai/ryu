@@ -1,0 +1,13 @@
+:root {
+	color-scheme: dark;
+}
+
+body {
+	min-width: 320px;
+	margin: 0;
+	background: var(--background);
+}
+
+* {
+	box-sizing: border-box;
+}

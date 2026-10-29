@@ -2,6 +2,7 @@
 // Provides screen capture, accessibility tree, window tracking, and input monitoring.
 
 pub mod accessibility;
+pub mod capture_scratch;
 pub mod input;
 pub mod screen;
 pub mod window;

@@ -39,14 +39,24 @@ const argument = rest.slice(word.length).trim();
 // Per-conversation, not global: "stop reading over my shoulder in this chat" and
 // "stop learning at all" are different asks, and the second one is the setting.
 if (word === "off" || word === "mute" || word === "stop") {
-	await setMuted(true);
+	if (!(await setMuted(true))) {
+		return {
+			kind: "handled",
+			text: "Couldn't save that change, so I can't confirm whether this chat is muted. Try again.",
+		};
+	}
 	return {
 		kind: "handled",
 		text: "Not learning from corrections in this chat any more. The existing rules still apply — `/mistakes on` resumes, and `/mistakes add` still works.",
 	};
 }
 if (word === "on" || word === "unmute" || word === "start") {
-	await setMuted(false);
+	if (!(await setMuted(false))) {
+		return {
+			kind: "handled",
+			text: "Couldn't save that change, so I can't confirm whether this chat is muted. Try again.",
+		};
+	}
 	return {
 		kind: "handled",
 		text: "Learning from corrections again in this chat.",
@@ -80,6 +90,12 @@ if (word === "add" || word === "remember") {
 		};
 	}
 	const existing = await listRules(spaceId);
+	if (!existing) {
+		return {
+			kind: "handled",
+			text: "Couldn't read the existing rules, so I didn't add anything. Try again.",
+		};
+	}
 	if (existing.some((r) => sameRule(r.title, rule))) {
 		return { kind: "handled", text: "Already on the list: " + rule };
 	}
@@ -112,6 +128,12 @@ if (word === "add" || word === "remember") {
 // ── forget ───────────────────────────────────────────────────────────────────
 if (word === "forget" || word === "remove" || word === "delete") {
 	const rules = await listRules(spaceId);
+	if (!rules) {
+		return {
+			kind: "handled",
+			text: "Couldn't read the rules, so nothing was deleted. Try again.",
+		};
+	}
 	if (rules.length === 0) {
 		return { kind: "handled", text: "Nothing recorded yet, so there is nothing to forget." };
 	}
@@ -142,6 +164,12 @@ if (word === "forget" || word === "remove" || word === "delete") {
 
 // ── list (the bare command, and anything unrecognized) ───────────────────────
 const rules = await listRules(spaceId);
+if (!rules) {
+	return {
+		kind: "handled",
+		text: "Couldn't read the rules from the " + spaceName + " Space. Try again.",
+	};
+}
 if (rules.length === 0) {
 	return {
 		kind: "handled",
@@ -175,12 +203,12 @@ async function pref(key) {
 	try {
 		const v = await host.getPreference({ key: key });
 		return v == null ? "" : String(v).trim();
-	} catch (e) {
+	} catch  {
 		return "";
 	}
 }
 
-/** The ledger as `[{id, title}]`, newest first, empty on any failure. */
+/** The ledger as `[{id, title}]`, newest first, or `null` on provider failure. */
 async function listRules(spaceId) {
 	try {
 		const docs = (await host.spaces.listDocs({ space_id: spaceId })) || [];
@@ -189,19 +217,20 @@ async function listRules(spaceId) {
 			.filter((d) => d.id && d.title);
 	} catch (e) {
 		host.log("no-more-mistakes: listing the ledger failed", e);
-		return [];
+		return null;
 	}
 }
 
 /** Set (or clear) the per-conversation mute the capture hook reads. */
 async function setMuted(muted) {
 	if (!convId) {
-		return;
+		return false;
 	}
 	try {
-		await host.storage.set(convId, { muted: muted });
+		return (await host.storage.set(convId, { muted: muted })) !== false;
 	} catch (e) {
 		host.log("no-more-mistakes: storing the mute failed", e);
+		return false;
 	}
 }
 

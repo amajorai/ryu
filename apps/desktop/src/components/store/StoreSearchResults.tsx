@@ -1,7 +1,7 @@
 import { ArrowRight01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -9,8 +9,8 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/empty.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import type {
 	StoreSearchGroup,
@@ -40,11 +40,7 @@ export default function StoreSearchResults({
 	onOpenRealm: (realm: StoreSearchRealm) => void;
 }) {
 	if (loading && isEmpty) {
-		return (
-			<div className="flex h-full items-center justify-center text-muted-foreground">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 	if (isEmpty) {
 		return (
@@ -93,7 +89,7 @@ function ResultSection({
 				<span className="font-medium text-xs uppercase tracking-widest">
 					{group.label}
 				</span>
-				<span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
+				<span className="type-compact rounded-full bg-muted px-1.5 py-0.5 tabular-nums">
 					{formatCount(group.items.length) ?? "—"}
 				</span>
 				<HugeiconsIcon className="size-3.5" icon={ArrowRight01Icon} />
@@ -125,7 +121,9 @@ function ResultCard({
 			type="button"
 		>
 			<div className="flex items-center justify-between gap-2">
-				<span className="truncate font-medium text-sm">{item.name}</span>
+				<span className="truncate font-medium text-sm" title={item.name}>
+					{item.name}
+				</span>
 				{item.tag ? (
 					<Badge className="shrink-0" variant="outline">
 						{item.tag}

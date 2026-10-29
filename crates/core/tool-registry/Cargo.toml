@@ -1,9 +1,9 @@
 [package]
 name = "ryu-tool-registry"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Unified tool-catalog primitive for Ryu (#474): the Contract-1 descriptor types (`ToolKind`/`ToolDescriptor`/`DescribedTool`/`DescribedArg`), the swappable `ToolRanker` (Needle 2 default, BM25 fallback, and an embedder-backed Semantic seam), argument-schema parsing, and the pure search/describe bodies over `ToolDescriptor`. An extracted Core capability crate: in-process by default, consumed as a NON-optional path dependency (the `/api/tools/{search,describe}` endpoints and the mcp_bridge tool-search meta-tool reach it in every build, including lean). The semantic embedder and Needle 2 selector inject through narrow traits, so the crate has ZERO dependency on apps/core — the `RegistryTool`→`ToolDescriptor` ingest adapter, the built-in server inventory classification, the Composio live fetch, and the runtime choices stay Core-side (`apps/core/src/sidecar/mcp/catalog.rs` + `apps/core/src/tool_registry_host.rs`)."
+description = "Unified tool-catalog primitive for Ryu (#474): the Contract-1 descriptor types (`ToolKind`/`ToolDescriptor`/`DescribedTool`/`DescribedArg`), the swappable `ToolRanker` (Needle 3 default, Needle 2 rollback, BM25 fallback, and an embedder-backed Semantic seam), argument-schema parsing, and the pure search/describe bodies over `ToolDescriptor`. An extracted Core capability crate: in-process by default, consumed as a NON-optional path dependency (the `/api/tools/{search,describe}` endpoints and the mcp_bridge tool-search meta-tool reach it in every build, including lean). The semantic embedder and Needle selectors inject through narrow traits, so the crate has ZERO dependency on apps/core — the `RegistryTool`→`ToolDescriptor` ingest adapter, the built-in server inventory classification, the Composio live fetch, and the runtime choices stay Core-side (`apps/core/src/sidecar/mcp/catalog.rs` + `apps/core/src/tool_registry_host.rs`)."
 repository = "https://github.com/amajorai/ryu"
 
 # Versions are matched to apps/core/Cargo.toml so there is no version skew when

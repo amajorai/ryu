@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdir,
+	mkdtemp,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 
 test("preference reads coalesce in flight without caching or crossing credentials and writes", async () => {
 	const root = await mkdtemp(join(tmpdir(), "ryu-shared-prefs-"));
@@ -22,7 +30,7 @@ test("preference reads coalesce in flight without caching or crossing credential
 				return new Response(null, { status: 204 });
 			}
 			if (req.method === "PUT") {
-				value = ((await req.json()) as { value: string }).value;
+				value = z.object({ value: z.string() }).parse(await req.json()).value;
 				return new Response(null, { status: 204 });
 			}
 			reads++;
@@ -39,6 +47,11 @@ test("preference reads coalesce in flight without caching or crossing credential
 	});
 
 	try {
+		await symlink(
+			join(import.meta.dirname, "../../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
+		);
 		const services = join(root, "main/services");
 		const shared = join(root, "shared");
 		await mkdir(services, { recursive: true });
@@ -46,6 +59,7 @@ test("preference reads coalesce in flight without caching or crossing credential
 		for (const name of [
 			"preferences",
 			"preference-stream",
+			"sse-reader",
 			"reconnect-delay",
 			"response-deadline",
 			"theme",
@@ -95,7 +109,7 @@ const failed=await get("error");const recovered=await get("error");process.stdou
 		});
 		const result = await new Response(child.stdout).json();
 		expect(await child.exited).toBe(0);
-		expect(result.batch).toEqual(new Array(18).fill("initial"));
+		expect(result.batch).toEqual(Array.from({ length: 18 }, () => "initial"));
 		expect(result.cold).toEqual({ reads: 6 });
 		expect(result.fresh).toEqual({ reads: 7 });
 		expect(result.scoped).toEqual({ reads: 9 });

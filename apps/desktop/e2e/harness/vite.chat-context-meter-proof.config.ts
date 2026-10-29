@@ -33,4 +33,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "chat-context-meter-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

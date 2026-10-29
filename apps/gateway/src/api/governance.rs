@@ -11,9 +11,11 @@
 //! matches what that caller parses. Signing/verify is the manifest-integrity
 //! primitive #468 adds: the server signs on publish, Core verifies on install.
 //!
-//! These are read-only governance computations over caller-supplied data (they
-//! mutate no gateway state and expose no secret — only the public key), so they
-//! are not behind the master-key admin gate that `config`/`audit` use.
+//! Validate/verify/pubkey are read-only governance computations over
+//! caller-supplied data (they mutate no gateway state and expose no secret —
+//! only the public key), so they are not behind the master-key admin gate that
+//! `config`/`audit` use. Signing is the exception: it is a trusted-signature
+//! oracle, so it always requires the master key (a keyless gateway cannot sign).
 
 use std::net::SocketAddr;
 
@@ -25,7 +27,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{error::GatewayError, governance, state::SharedState};
+use crate::{
+    error::GatewayError,
+    governance,
+    pipeline::{authenticate, AuthInputs},
+    state::SharedState,
+};
 
 // ── grant validation ──────────────────────────────────────────────────────────
 
@@ -93,39 +100,40 @@ pub struct SignManifestResponse {
 /// POST /v1/manifests/sign — sign a manifest with the gateway's ed25519 key.
 ///
 /// Signing is a privileged oracle (it produces a trusted signature over
-/// arbitrary caller input), so unlike verify/validate/pubkey it is restricted to
-/// loopback peers. The only legitimate caller is the control-plane server on
-/// publish, which is co-located on loopback. The gateway can bind `0.0.0.0`
-/// (config default), so a network-reachable signing oracle would let anyone get
-/// any manifest signed under the trusted key, defeating the point of signing.
+/// arbitrary caller input), so unlike verify/validate/pubkey it requires the
+/// Gateway master/admin credential (`Authorization: Bearer <master>`):
+///
+/// - **the master key authorizes it from any peer and in any mode.** Signing is
+///   an administrator operation like `/v1/config` and `/v1/audit`, which the
+///   master key already governs from any peer, so the control-plane publisher
+///   can sign against a hosted (fleet) Gateway over TLS.
+/// - **loopback is never proof of identity.** Any co-resident process —
+///   including a sandboxed plugin granted `127.0.0.1` HTTP egress — or an
+///   external caller behind a same-host reverse proxy also arrives as
+///   127.0.0.1, so the keyless zero-config loopback allowance of
+///   `require_local_admin` is deliberately NOT extended to the signing oracle.
+///
+/// A gateway with no master key provisioned cannot sign at all (fail closed).
 pub async fn sign_manifest(
     State(state): State<SharedState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    ConnectInfo(_peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<SignManifestRequest>,
 ) -> Result<Json<SignManifestResponse>, GatewayError> {
-    // CSRF defense (F3): the loopback-only gate below authorizes on peer posture
-    // alone (no credential), so a browser page could `fetch()` this signing oracle
-    // cross-origin against the desktop's own loopback gateway. Reject any request a
-    // browser stamped as a cross/same-site fetch; server-side callers (the
-    // control-plane publisher, curl) omit `Sec-Fetch-Site` and are unaffected.
+    // CSRF defense (F3): reject any request a browser stamped as a cross/same-site
+    // fetch. Server-side callers (the control-plane publisher, curl) omit
+    // `Sec-Fetch-Site` and are unaffected; no legitimate signer is a browser page.
     crate::api::config::reject_cross_origin_browser(&headers, "manifest signing")?;
-    // Anti–DNS-rebinding (F3): reject a non-loopback `Host`. sign_manifest has no
-    // master-key concept — it is loopback-only always — so the Host check is
-    // unconditional here. `Host` is a browser-forbidden header, so this rejects a
-    // rebinding page (same-origin post-rebind, `Host: evil.com`) that the
-    // Sec-Fetch-Site check alone would miss; server-side callers send a loopback Host.
-    crate::api::config::reject_non_loopback_host(&headers, "manifest signing")?;
-    // Loopback-only, neutralized under mesh (#478, B-9) AND fleet (managed-cloud
-    // WS2): under userspace networking a tailnet peer appears as 127.0.0.1, and
-    // behind a co-located fleet LB/reverse-proxy an EXTERNAL caller also appears
-    // as 127.0.0.1 — either would otherwise expose this trusted signing oracle
-    // (external attacker gets any manifest signed under the gateway key, which
-    // Core's install-time verify_manifest then trusts). Mirror the admin gate,
-    // which drops loopback trust under mesh OR fleet (see admin_loopback_allowed).
-    if !peer.ip().is_loopback() || crate::tools::mesh_enabled() || state.config.fleet {
+    // Credential gate: loopback is a location, not an identity. Require the
+    // master/admin key the way the batch/admin surfaces do, from any peer and in
+    // any mode (fleet, mesh); a keyless gateway has no master key, so it refuses.
+    let raw_key = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok());
+    let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
+    if !ctx.is_master_key {
         return Err(GatewayError::Unauthorized(
-            "manifest signing is restricted to loopback callers".to_string(),
+            "manifest signing requires the Gateway master key".to_string(),
         ));
     }
     let signature = governance::sign_manifest(&req.manifest);
@@ -192,6 +200,28 @@ mod tests {
         ConnectInfo("127.0.0.1:9999".parse().unwrap())
     }
 
+    const MASTER: &str = "gwadm_signing_fixture_0123456789abcdef";
+
+    /// A gateway with a provisioned master key (the shape every managed or
+    /// deployed signing gateway has).
+    fn master_state() -> SharedState {
+        let mut config = crate::config::GatewayConfig::default();
+        config.auth.master_key = Some(MASTER.to_owned());
+        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .unwrap();
+        let evals = crate::evals::EvalsRunner::new(config.evals.clone());
+        Arc::new(AppState::new_for_test(config, audit, evals))
+    }
+
+    fn master_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", format!("Bearer {MASTER}").parse().unwrap());
+        headers
+    }
+
     #[tokio::test]
     async fn validate_grants_partitions_approved_and_denied() {
         // Mix a clearly-safe grant with a bogus one so we exercise both buckets and
@@ -216,15 +246,15 @@ mod tests {
     async fn sign_then_verify_roundtrips_under_the_gateway_key() {
         let manifest = json!({ "id": "com.acme.app", "version": "1.2.3" });
         let Json(signed) = sign_manifest(
-            State(state()),
+            State(master_state()),
             loopback(),
-            HeaderMap::new(),
+            master_headers(),
             Json(SignManifestRequest {
                 manifest: manifest.clone(),
             }),
         )
         .await
-        .expect("loopback caller may sign");
+        .expect("a loopback caller holding the master key may sign");
         assert_eq!(signed.algorithm, governance::SIGNING_ALGORITHM);
         assert!(!signed.signature.is_empty());
 
@@ -334,11 +364,11 @@ mod tests {
         );
 
         // The server-side control-plane publisher omits Sec-Fetch-Site entirely,
-        // so a bare loopback caller still signs successfully.
+        // so a loopback caller presenting the master key still signs.
         let res_ok = sign_manifest(
-            State(state()),
+            State(master_state()),
             loopback(),
-            HeaderMap::new(),
+            master_headers(),
             Json(SignManifestRequest {
                 manifest: json!({ "id": "x" }),
             }),
@@ -348,6 +378,137 @@ mod tests {
             res_ok.is_ok(),
             "a server-side loopback caller (no Sec-Fetch-Site) must still sign"
         );
+    }
+
+    /// With a master key configured, a bare loopback caller (a co-resident
+    /// process, or an external caller behind a same-host proxy that rewrote
+    /// `Host`) cannot mint signatures; only the master key can.
+    #[tokio::test]
+    async fn sign_requires_the_master_key_when_one_is_configured() {
+        use crate::config::GatewayConfig;
+        use crate::evals::{EvalsConfig, EvalsRunner};
+        let mut config = GatewayConfig::default();
+        config.auth.master_key = Some("gwadm_signing_test_0123456789abcdef".to_owned());
+        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .unwrap();
+        let keyed = Arc::new(AppState::new_for_test(
+            config,
+            audit,
+            EvalsRunner::new(EvalsConfig::default()),
+        ));
+        for (credential, allowed) in [
+            (None, false),
+            (Some("Bearer wrong"), false),
+            (Some("Bearer gwadm_signing_test_0123456789abcdef"), true),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert("host", "127.0.0.1:7981".parse().unwrap());
+            if let Some(credential) = credential {
+                headers.insert("authorization", credential.parse().unwrap());
+            }
+            let res = sign_manifest(
+                State(keyed.clone()),
+                loopback(),
+                headers,
+                Json(SignManifestRequest {
+                    manifest: json!({ "id": "x", "grants": ["shell:exec"] }),
+                }),
+            )
+            .await;
+            if allowed {
+                assert!(res.is_ok(), "the master key may sign");
+            } else {
+                assert!(
+                    matches!(res, Err(GatewayError::Unauthorized(_))),
+                    "{credential:?} must not reach the signing oracle"
+                );
+            }
+        }
+    }
+
+    /// The master key is the administrator credential, so the control-plane
+    /// publisher may sign against a hosted (fleet) Gateway from the network with
+    /// a public `Host`; without it the same request is refused.
+    #[tokio::test]
+    async fn the_master_key_signs_from_any_peer_including_fleet_mode() {
+        use crate::config::GatewayConfig;
+        use crate::evals::{EvalsConfig, EvalsRunner};
+        let mut config = GatewayConfig {
+            fleet: true,
+            ..GatewayConfig::default()
+        };
+        config.auth.master_key = Some("gwadm_fleet_signing_0123456789abcdef".to_owned());
+        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .unwrap();
+        let fleet = Arc::new(AppState::new_for_test(
+            config,
+            audit,
+            EvalsRunner::new(EvalsConfig::default()),
+        ));
+        for (credential, allowed) in [
+            (None, false),
+            (Some("Bearer wrong"), false),
+            (Some("Bearer gwadm_fleet_signing_0123456789abcdef"), true),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert("host", "gateway.example.com".parse().unwrap());
+            if let Some(credential) = credential {
+                headers.insert("authorization", credential.parse().unwrap());
+            }
+            let res = sign_manifest(
+                State(fleet.clone()),
+                ConnectInfo("203.0.113.7:443".parse().unwrap()),
+                headers,
+                Json(SignManifestRequest {
+                    manifest: json!({ "id": "x" }),
+                }),
+            )
+            .await;
+            if allowed {
+                assert!(res.is_ok(), "the master key signs from the network");
+            } else {
+                assert!(
+                    matches!(res, Err(GatewayError::Unauthorized(_))),
+                    "{credential:?} must not reach the signing oracle"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_requires_the_master_key_even_from_loopback() {
+        // A local process (e.g. a plugin granted 127.0.0.1 HTTP egress) is a
+        // loopback peer; without the master key it must not mint signatures,
+        // whether the gateway has no master key (zero-config) or a different one.
+        for (state, headers) in [
+            (state(), HeaderMap::new()),
+            (master_state(), HeaderMap::new()),
+            (master_state(), {
+                let mut wrong = HeaderMap::new();
+                wrong.insert("authorization", "Bearer not-the-master".parse().unwrap());
+                wrong
+            }),
+        ] {
+            let res = sign_manifest(
+                State(state),
+                loopback(),
+                headers,
+                Json(SignManifestRequest {
+                    manifest: json!({ "id": "x" }),
+                }),
+            )
+            .await;
+            assert!(
+                matches!(res, Err(GatewayError::Unauthorized(_))),
+                "a keyless loopback caller must not reach the signing oracle"
+            );
+        }
     }
 
     #[tokio::test]

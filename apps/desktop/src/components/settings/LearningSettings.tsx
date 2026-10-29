@@ -12,9 +12,10 @@
 // the app record — only the HTTP surface is gated — so the consent control has to
 // exist wherever that capture does.
 
-import { toast } from "@ryu/ui/components/sileo";
-import { Switch } from "@ryu/ui/components/switch";
-import { useCallback, useEffect, useState } from "react";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import {
 	getLearningEnabled,
@@ -22,67 +23,101 @@ import {
 	setLearningEnabled,
 	setLearningSkillsEnabled,
 } from "@/src/lib/api/preferences.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "./shared/settings-items.tsx";
 
-function activeTarget(): ApiTarget {
-	return toTarget(useNodeStore.getState().getActiveNode());
+export function LearningSettings() {
+	const { url, token, userJwt } = toTarget(useActiveNode());
+	const target = useMemo(
+		() => ({ url, token, userJwt }),
+		[url, token, userJwt]
+	);
+	return (
+		<NodeLearningSettings
+			key={JSON.stringify([url, token, userJwt ?? null])}
+			target={target}
+		/>
+	);
 }
 
-export function LearningSettings() {
+function NodeLearningSettings({ target }: { target: ApiTarget }) {
 	const [learningEnabled, setLearningEnabledState] = useState(false);
-	// The local skills loop defaults ON (on-device, inbox-gated); seed the
-	// Seed both consent controls to OFF so no capture occurs before Core answers.
 	const [skillsEnabled, setSkillsEnabledState] = useState(false);
-
+	const [loaded, setLoaded] = useState(false);
+	const [readError, setReadError] = useState(false);
+	const [readAttempt, setReadAttempt] = useState(0);
+	const [pending, setPending] = useState({ skills: false, learning: false });
+	const pendingWrites = useRef(new Set<"skills" | "learning">());
+	const mounted = useRef(true);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, []);
 	useEffect(() => {
 		let cancelled = false;
-		const target = activeTarget();
+		setReadError(false);
 		Promise.all([getLearningEnabled(target), getLearningSkillsEnabled(target)])
 			.then(([learning, skills]) => {
-				if (cancelled) {
-					return;
-				}
+				if (cancelled) return;
 				setLearningEnabledState(learning);
 				setSkillsEnabledState(skills);
+				setLoaded(true);
 			})
-			// A failed read leaves the seeded defaults on screen: for a consent
-			// control, reachable-with-defaults beats an error card that hides it.
-			.catch(() => undefined);
+			.catch(() => {
+				if (!cancelled) setReadError(true);
+			});
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [target, readAttempt]);
 
-	const handleLearning = useCallback(async (next: boolean) => {
-		setLearningEnabledState(next); // optimistic
+	async function handleChange(kind: "skills" | "learning", next: boolean) {
+		if (!loaded || pendingWrites.current.has(kind)) return;
+		pendingWrites.current.add(kind);
+		setPending((previous) => ({ ...previous, [kind]: true }));
+		const setValue =
+			kind === "skills" ? setSkillsEnabledState : setLearningEnabledState;
+		const previous = kind === "skills" ? skillsEnabled : learningEnabled;
+		setValue(next);
 		try {
-			await setLearningEnabled(activeTarget(), next);
+			const save =
+				kind === "skills" ? setLearningSkillsEnabled : setLearningEnabled;
+			if (!(await save(target, next))) throw new Error("Consent write refused");
 		} catch {
-			setLearningEnabledState(!next);
-			toast.error("Couldn't save your learning choice", {
-				description: "Check your connection and try again.",
-			});
+			if (!mounted.current) return;
+			setValue(previous);
+			toast.error(
+				kind === "skills"
+					? "Couldn't save your skill-learning choice"
+					: "Couldn't save your learning choice",
+				{
+					description: "Check your connection and try again.",
+				}
+			);
+		} finally {
+			if (mounted.current) {
+				pendingWrites.current.delete(kind);
+				setPending((current) => ({ ...current, [kind]: false }));
+			}
 		}
-	}, []);
-	const handleSkills = useCallback(async (next: boolean) => {
-		setSkillsEnabledState(next); // optimistic
-		try {
-			await setLearningSkillsEnabled(activeTarget(), next);
-		} catch {
-			setSkillsEnabledState(!next);
-			toast.error("Couldn't save your skill-learning choice", {
-				description: "Check your connection and try again.",
-			});
-		}
-	}, []);
+	}
 
 	return (
 		<div className="space-y-6">
+			{readError && (
+				<div role="alert">
+					Couldn't load your learning choices.{" "}
+					<Button onClick={() => setReadAttempt((attempt) => attempt + 1)}>
+						Retry
+					</Button>
+				</div>
+			)}
 			<SettingsSection
 				caption="Ryu learns from your conversations at two levels: a private one that never leaves this device, and a heavier one you opt into. You can leave out any individual conversation, and excluded conversations are never used."
 				title="Learn from my conversations"
@@ -91,9 +126,11 @@ export function LearningSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Learn skills from my chats"
 								checked={skillsEnabled}
 								id="learning-skills-enabled"
-								onCheckedChange={handleSkills}
+								disabled={!loaded || pending.skills}
+								onCheckedChange={(next) => handleChange("skills", next)}
 							/>
 						}
 						description="Off by default. When enabled, Ryu distills reusable skills from your chats on this device and proposes them in your Inbox for approval before they go live."
@@ -102,9 +139,11 @@ export function LearningSettings() {
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Train my local model"
 								checked={learningEnabled}
 								id="learning-enabled"
-								onCheckedChange={handleLearning}
+								disabled={!loaded || pending.learning}
+								onCheckedChange={(next) => handleChange("learning", next)}
 							/>
 						}
 						description="Off by default. Also rate your conversations with a stronger model and, on a device with a capable graphics card, fine-tune your local model on your best ones. Rating sends conversation text to that model, which may run in the cloud, so this stays opt-in."

@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import "./LiveActivityDock.css";
 // apps/desktop/src/components/live/LiveActivityDock.tsx
 //
 // The desktop "Dynamic Island" — a compact pill dock of live activities rendered
@@ -11,21 +13,21 @@
 // live-activity store fed by the built-in + contributed adapters.
 
 import type { LiveActivity } from "@ryu/app-host/live-activity";
-import { Icon } from "@ryu/ui/components/icon";
-import { SPRING_MORPH } from "@ryu/ui/lib/ease";
+import { Icon } from "@ryu/ui/components/icon.tsx";
+import { SPRING_MORPH } from "@ryu/ui/lib/ease.ts";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState } from "react";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useLiveActivities } from "@/src/store/useLiveActivityStore.ts";
 
 /** Status → pulse/tone colour, matching the island's status-dot language. */
-const STATUS_TONE: Record<LiveActivity["status"], string> = {
+const STATUS_TONE = {
 	running: "var(--primary)",
-	waiting: "var(--warning, #f59e0b)",
-	review: "var(--warning, #f59e0b)",
-	done: "var(--success, #22c55e)",
+	waiting: "var(--warning)",
+	review: "var(--warning)",
+	done: "var(--success)",
 	error: "var(--destructive)",
-};
+} satisfies Record<LiveActivity["status"], string>;
 
 function statusLabel(status: LiveActivity["status"]): string {
 	switch (status) {
@@ -61,6 +63,12 @@ function ActivityCard({
 	onOpen: (a: LiveActivity) => void;
 }) {
 	const tone = STATUS_TONE[activity.status] ?? "var(--primary)";
+	const activityTintVariables1: CSSProperties & {
+		"--live-activity-tint": string;
+	} = { "--live-activity-tint": tone };
+	const activityTintVariables2: CSSProperties & {
+		"--live-activity-tint": string;
+	} = { "--live-activity-tint": tone };
 	return (
 		<motion.div
 			className="flex w-64 flex-col gap-2 rounded-2xl border border-border/70 bg-popover/95 p-3 text-left shadow-lg backdrop-blur-md"
@@ -71,22 +79,25 @@ function ActivityCard({
 				<span
 					aria-hidden
 					className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md"
-					style={{
-						backgroundColor: `color-mix(in srgb, ${tone} 15%, transparent)`,
-					}}
+					data-live-activity-tile=""
+					data-live-activity-tint=""
+					style={activityTintVariables1}
 				>
 					<Icon className="size-3.5" icon={activity.icon ?? "activity-03"} />
 				</span>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-1.5">
-						<span className="truncate font-medium text-foreground text-xs">
+						<span
+							className="truncate font-medium text-foreground text-xs"
+							title={activity.title}
+						>
 							{activity.title}
 						</span>
-						<span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[9px] text-muted-foreground uppercase tracking-wide">
+						<span className="type-micro shrink-0 rounded-full bg-muted px-1.5 py-px text-muted-foreground uppercase tracking-wide">
 							{statusLabel(activity.status)}
 						</span>
 					</div>
-					<p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground leading-snug">
+					<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground leading-snug">
 						{activity.detail}
 					</p>
 				</div>
@@ -96,14 +107,15 @@ function ActivityCard({
 					<motion.div
 						animate={{ width: `${Math.round(activity.progress * 100)}%` }}
 						className="h-full rounded-full"
-						style={{ backgroundColor: tone }}
+						data-live-activity-tint=""
+						style={activityTintVariables2}
 						transition={{ duration: 0.4, ease: "easeOut" }}
 					/>
 				</div>
 			)}
 			{activity.action && (
 				<button
-					className="mt-1 flex items-center justify-center gap-1 rounded-lg bg-muted/70 py-1.5 font-medium text-[11px] text-foreground transition-colors hover:bg-muted"
+					className="type-caption mt-1 flex items-center justify-center gap-1 rounded-lg bg-muted/70 py-1.5 font-medium text-foreground transition-colors hover:bg-muted"
 					onClick={() => onOpen(activity)}
 					type="button"
 				>
@@ -127,6 +139,12 @@ function ActivityPill({
 	onToggle: (a: LiveActivity) => void;
 }) {
 	const tone = STATUS_TONE[activity.status] ?? "var(--primary)";
+	const activityTintVariables3: CSSProperties & {
+		"--live-activity-tint": string;
+	} = { "--live-activity-tint": tone };
+	const activityTintVariables4: CSSProperties & {
+		"--live-activity-tint": string;
+	} = { "--live-activity-tint": tone };
 	return (
 		<motion.button
 			aria-expanded={expanded}
@@ -141,28 +159,33 @@ function ActivityPill({
 			>
 				<span
 					className="absolute size-1.5 rounded-full"
-					style={{ backgroundColor: tone }}
+					data-live-activity-tint=""
+					style={activityTintVariables3}
 				/>
 				{activity.status === "running" && (
 					<span
 						aria-hidden
-						className="absolute size-1.5 animate-ping rounded-full"
-						style={{ backgroundColor: tone, opacity: 0.6 }}
+						className="absolute size-1.5 rounded-full opacity-60 motion-safe:animate-ping"
+						data-live-activity-tint=""
+						style={activityTintVariables4}
 					/>
 				)}
 			</span>
-			<span className="max-w-28 truncate font-medium text-foreground text-xs">
+			<span
+				className="max-w-28 truncate font-medium text-foreground text-xs"
+				title={activity.title}
+			>
 				{activity.title}
 			</span>
 			{activity.progress !== undefined && (
-				<span className="text-[10px] text-muted-foreground tabular-nums">
+				<span className="type-compact text-muted-foreground tabular-nums">
 					{Math.round(activity.progress * 100)}%
 				</span>
 			)}
 			{expanded && (
 				<span
 					aria-hidden
-					className="ml-0.5 rounded-full bg-muted px-1.5 py-px text-[9px] text-muted-foreground"
+					className="type-micro ml-0.5 rounded-full bg-muted px-1.5 py-px text-muted-foreground"
 				>
 					{statusLabel(activity.status)}
 				</span>

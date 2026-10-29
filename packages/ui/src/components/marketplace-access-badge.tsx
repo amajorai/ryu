@@ -16,11 +16,13 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 export function MarketplaceAccessBadge({
 	membershipEntitled = false,
 	membershipIncluded = false,
+	tone = "default",
 	className,
 }: {
 	className?: string;
 	membershipEntitled?: boolean;
 	membershipIncluded?: boolean;
+	tone?: "default" | "hero";
 }) {
 	if (!membershipIncluded) {
 		return null;
@@ -39,7 +41,8 @@ export function MarketplaceAccessBadge({
 			<PopoverTrigger
 				aria-label={triggerLabel}
 				className={cn(
-					"pointer-events-auto relative z-10 inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-primary outline-none transition-colors hover:text-primary/75 focus-visible:ring-2 focus-visible:ring-ring/60",
+					"pointer-events-auto relative z-10 inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-primary outline-none transition-colors hover:text-primary/75 focus-visible:ring-2 focus-visible:ring-ring",
+					tone === "hero" && "text-white hover:text-white/75",
 					className
 				)}
 				data-slot="marketplace-access-trigger"

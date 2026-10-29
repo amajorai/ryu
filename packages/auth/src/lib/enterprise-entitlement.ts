@@ -10,6 +10,10 @@ import {
 	normalizeEnterpriseCapabilities,
 } from "./enterprise-entitlement-policy.ts";
 import { verifySelfHostedEnterpriseLicense } from "./enterprise-license.ts";
+import {
+	FAMILY_ORGANIZATION_KIND,
+	readOrganizationKind,
+} from "./organization-kind.ts";
 
 export type { EnterpriseCapability } from "./enterprise-entitlement-policy.ts";
 export {
@@ -26,12 +30,17 @@ export interface EnterpriseAccess {
 	status: EnterpriseLicenseStatus | null;
 }
 
+/**
+ * Development/test-only organization ids that receive Enterprise identity
+ * capabilities without a contract record. Read from the raw process env, not
+ * the production env schema, and ignored entirely in production.
+ */
 function parseDevelopmentOrganizationIds(): Set<string> {
 	if (env.NODE_ENV === "production") {
 		return new Set();
 	}
 	return new Set(
-		(env.RYU_ENTERPRISE_ORG_IDS ?? "")
+		(process.env.RYU_ENTERPRISE_ORG_IDS ?? "")
 			.split(",")
 			.map((value) => value.trim())
 			.filter(Boolean)
@@ -48,10 +57,30 @@ function emptyAccess(): EnterpriseAccess {
 	};
 }
 
-/** Resolve the active organization-level enterprise grant. Fail closed. */
+/**
+ * Resolve the active organization-level enterprise grant. Fail closed.
+ *
+ * A family workspace (Ryu Max family sharing) never has enterprise access,
+ * whatever grant, license or development override names it: this is the
+ * backstop behind the per-route family gates in the API, and it also covers
+ * the consumers that only read capabilities (cloud nodes, data controls).
+ */
 export async function resolveEnterpriseAccess(
 	organizationId: string
 ): Promise<EnterpriseAccess> {
+	try {
+		if (
+			(await readOrganizationKind(organizationId)) === FAMILY_ORGANIZATION_KIND
+		) {
+			return emptyAccess();
+		}
+	} catch (error) {
+		console.error(
+			"[enterprise] failed to read organization kind; denying access:",
+			error
+		);
+		return emptyAccess();
+	}
 	if (parseDevelopmentOrganizationIds().has(organizationId)) {
 		return {
 			capabilities: [...ENTERPRISE_CAPABILITIES],
@@ -94,12 +123,19 @@ export async function resolveEnterpriseAccess(
 			new Date()
 		);
 		if (!active) {
+			// Expiry is date-based: nothing rewrites the stored status, so a
+			// lapsed `active`/`trialing` grant reports the effective `expired`
+			// status. Status-only consumers must never read it as live.
+			const storedStatus = entitlement.status ?? null;
 			return {
 				capabilities: [],
 				expiresAt,
 				plan: entitlement.plan ?? null,
 				source: entitlement.source ?? null,
-				status: entitlement.status ?? null,
+				status:
+					storedStatus === "active" || storedStatus === "trialing"
+						? "expired"
+						: storedStatus,
 			};
 		}
 

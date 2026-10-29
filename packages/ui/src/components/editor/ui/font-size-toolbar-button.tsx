@@ -7,6 +7,7 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@ryu/ui/components/editor/ui/popover.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { Minus, Plus } from "lucide-react";
 import type { TElement } from "platejs";
@@ -18,11 +19,11 @@ import { ToolbarButton } from "./toolbar.tsx";
 
 const DEFAULT_FONT_SIZE = "16";
 
-const FONT_SIZE_MAP = {
-	h1: "36",
-	h2: "24",
-	h3: "20",
-} as const;
+const FONT_SIZE_MAP = new Map([
+	["h1", "36"],
+	["h2", "24"],
+	["h3", "20"],
+]);
 
 const FONT_SIZES = [
 	"8",
@@ -49,8 +50,9 @@ export function FontSizeToolbarButton() {
 	const cursorFontSize = useEditorSelector((editor) => {
 		const fontSize = editor.api.marks()?.[KEYS.fontSize];
 
-		if (fontSize) {
-			return toUnitLess(fontSize as string);
+		// Malformed non-string marks use the existing block/default sizing path.
+		if (fontSize && isNativeText(fontSize)) {
+			return toUnitLess(fontSize);
 		}
 
 		const [block] = editor.api.block<TElement>() || [];
@@ -59,8 +61,9 @@ export function FontSizeToolbarButton() {
 			return DEFAULT_FONT_SIZE;
 		}
 
-		return block.type in FONT_SIZE_MAP
-			? FONT_SIZE_MAP[block.type as keyof typeof FONT_SIZE_MAP]
+		// Keep the selected native field reads; a missing final key uses the default.
+		return FONT_SIZE_MAP.has(block.type)
+			? (FONT_SIZE_MAP.get(block.type) ?? DEFAULT_FONT_SIZE)
 			: DEFAULT_FONT_SIZE;
 	}, []);
 

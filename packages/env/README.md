@@ -11,7 +11,7 @@ Typed, validated environment-variable schemas built on `@t3-oss/env` and `zod`, 
 
 ## What it provides
 
-- **Server schema** (`src/server.ts`): vars for the control-plane server and server packages (`@ryu/auth`, `@ryu/db`, `@ryu/api`).
+- **Server schema** (`src/server.ts`): vars for the control-plane server and server packages (`@ryu/auth`, `@ryu/db`, `@ryu/api`). The keys are declared by area in `src/server-schema/` (identity, billing, services, operations) and spread into one `createEnv` call; `scripts/generate-env-docs.mjs` and `scripts/audit-env-gaps.mjs` read that directory too.
 - **Web schema** (`src/web.ts`): `@t3-oss/env-nextjs` schema for `apps/web`, separating public (`NEXT_PUBLIC_*`) from server vars.
 - **Native schema** (`src/native.ts`): the subset of vars the Expo app needs.
 

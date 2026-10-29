@@ -8,22 +8,38 @@
 // gateway is down — the very state this overlay exists to report), instead doing
 // the single raw fetch the Rust client does.
 
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { request } from "@ryuhq/core-client/client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { useCore } from "../../core/CoreContext.tsx";
 
 const REFRESH_INTERVAL_MS = 5000;
 
-// Raw wire shape of GET /api/gateway/status. `health`, `metrics`, and
-// `effective_config` are passed through verbatim by Core, so they stay
-// `unknown`-typed and are read via the narrowing getters below.
-export interface RawStatus {
-	effective_config?: unknown;
-	health?: unknown;
-	metrics?: unknown;
-	reachable?: boolean;
-	url?: string;
-}
+// Core owns these evolving JSON payloads; preserve their fields at the I/O boundary.
+const gatewayStatusJsonSchema = z.json();
+export type GatewayStatusValue =
+	| z.infer<typeof gatewayStatusJsonSchema>
+	| undefined;
+const gatewayStatusRecordSchema = z.record(z.string(), gatewayStatusJsonSchema);
+type GatewayStatusRecord = z.infer<typeof gatewayStatusRecordSchema>;
+const gatewayStatusScalarSchema = z.union([
+	z.string(),
+	z.number(),
+	z.boolean(),
+	z.null(),
+]);
+const gatewayStatusStringSchema = z.string();
+const gatewayStatusNumberSchema = z.number();
+const gatewayStatusErrorSchema = z.instanceof(Error);
+export const rawGatewayStatusSchema = z.object({
+	effective_config: gatewayStatusJsonSchema.optional(),
+	health: gatewayStatusJsonSchema.optional(),
+	metrics: gatewayStatusJsonSchema.optional(),
+	reachable: z.boolean().optional().catch(undefined),
+	url: gatewayStatusStringSchema.optional().catch(undefined),
+});
+export type RawStatus = z.infer<typeof rawGatewayStatusSchema>;
 
 export type LoadState =
 	| { kind: "idle" }
@@ -31,21 +47,32 @@ export type LoadState =
 	| { kind: "ready"; raw: RawStatus }
 	| { kind: "error"; message: string };
 
-export function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+export function errText(
+	err: Parameters<typeof gatewayStatusErrorSchema.safeParse>[0]
+): string {
+	const parsed = gatewayStatusErrorSchema.safeParse(err);
+	return parsed.success ? parsed.data.message : String(err);
 }
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-	if (value && typeof value === "object" && !Array.isArray(value)) {
-		return value as Record<string, unknown>;
-	}
-	return null;
+function isGatewayStatusRecord(
+	value: GatewayStatusValue
+): value is GatewayStatusRecord {
+	return (
+		value !== undefined &&
+		!Array.isArray(value) &&
+		!gatewayStatusScalarSchema.safeParse(value).success
+	);
+}
+function asRecord(value: GatewayStatusValue): GatewayStatusRecord | null {
+	return isGatewayStatusRecord(value) ? value : null;
 }
 
 // Walk an object path, returning the leaf value or undefined if any hop is missing
 // or not an object. Mirrors the Rust chain of `.get(...).and_then(...)`.
-export function getPath(root: unknown, ...keys: string[]): unknown {
-	let current: unknown = root;
+export function getPath(
+	root: GatewayStatusValue,
+	...keys: string[]
+): GatewayStatusValue {
+	let current: GatewayStatusValue = root;
 	for (const key of keys) {
 		const record = asRecord(current);
 		if (!record) {
@@ -56,27 +83,32 @@ export function getPath(root: unknown, ...keys: string[]): unknown {
 	return current;
 }
 
-export function asBool(value: unknown): boolean {
+export function asBool(value: GatewayStatusValue): boolean {
 	return value === true;
 }
 
-export function asString(value: unknown): string | null {
-	return typeof value === "string" ? value : null;
+export function asString(value: GatewayStatusValue): string | null {
+	const parsed = gatewayStatusStringSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
 }
 
-export function asNumber(value: unknown): number | null {
-	return typeof value === "number" && Number.isFinite(value) ? value : null;
+export function asNumber(value: GatewayStatusValue): number | null {
+	const parsed = gatewayStatusNumberSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
 }
 
-export function asStringArray(value: unknown): string[] {
+export function asStringArray(value: GatewayStatusValue): string[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
-	return value.filter((item): item is string => typeof item === "string");
+	return value.flatMap((item) => {
+		const parsed = gatewayStatusStringSchema.safeParse(item);
+		return parsed.success ? [parsed.data] : [];
+	});
 }
 
 // routing.default_model, else routing.default_provider, else routing.default.
-export function routingDefault(ec: unknown): string {
+export function routingDefault(ec: GatewayStatusValue): string {
 	return (
 		asString(getPath(ec, "routing", "default_model")) ??
 		asString(getPath(ec, "routing", "default_provider")) ??
@@ -87,7 +119,7 @@ export function routingDefault(ec: unknown): string {
 
 // dlp.enabled, falling back to pii.enabled only when the dlp key is absent
 // (matches the Rust `c.get("dlp").or_else(|| c.get("pii"))`).
-export function dlpEnabled(ec: unknown): boolean {
+export function dlpEnabled(ec: GatewayStatusValue): boolean {
 	const dlp = getPath(ec, "dlp");
 	const source = dlp === undefined ? getPath(ec, "pii") : dlp;
 	return asBool(getPath(source, "enabled"));
@@ -95,7 +127,7 @@ export function dlpEnabled(ec: unknown): boolean {
 
 // requests_total, else total_requests (flat keys), else the nested requests.total
 // the gateway emits today.
-export function requestsTotal(metrics: unknown): number | null {
+export function requestsTotal(metrics: GatewayStatusValue): number | null {
 	return (
 		asNumber(getPath(metrics, "requests_total")) ??
 		asNumber(getPath(metrics, "total_requests")) ??
@@ -109,7 +141,7 @@ export interface ModelMapEntry {
 }
 
 // routing.model_map entries, read-only, from the on-disk config.
-export function modelMapEntries(ec: unknown): ModelMapEntry[] {
+export function modelMapEntries(ec: GatewayStatusValue): ModelMapEntry[] {
 	const map = asRecord(getPath(ec, "routing", "model_map"));
 	if (!map) {
 		return [];
@@ -126,7 +158,7 @@ export function modelMapEntries(ec: unknown): ModelMapEntry[] {
 
 // auth.api_keys[].name — the gateway redacts every key value, so only the names
 // are surfaced (matching the desktop GatewayKeysCard).
-export function apiKeyNames(ec: unknown): string[] {
+export function apiKeyNames(ec: GatewayStatusValue): string[] {
 	const keys = getPath(ec, "auth", "api_keys");
 	if (!Array.isArray(keys)) {
 		return [];
@@ -175,9 +207,16 @@ export function useGatewayStatus(): GatewayStatusHandle {
 				setState({ kind: "loading" });
 			}
 			try {
-				const raw = await request<RawStatus>(target, "/api/gateway/status", {
-					signal: controller.signal,
-				});
+				const raw = rawGatewayStatusSchema.parse(
+					await request(
+						target,
+						"/api/gateway/status",
+						{
+							signal: controller.signal,
+						},
+						appResponseValueSchema
+					)
+				);
 				if (!controller.signal.aborted && reqId === reqIdRef.current) {
 					setState({ kind: "ready", raw });
 				}

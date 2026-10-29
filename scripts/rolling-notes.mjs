@@ -27,6 +27,14 @@
 // call exits non-zero instead of silently shipping fallback notes.
 
 import { execFileSync } from "node:child_process";
+import {
+	batches,
+	consolidateHighlights,
+	modelHttpError,
+	retryModelCall,
+	reviewWithSplitting,
+	validateCoverage,
+} from "./notes-batches.mjs";
 import { opencodeHeaders } from "./opencode-session.mjs";
 
 const args = new Map();
@@ -43,7 +51,9 @@ for (let i = 2; i < process.argv.length; i++) {
 
 const channel = args.get("channel") || "canary";
 const repo = args.get("repo") || "amajorai/ryu";
-const tag = typeof args.get("tag") === "string" ? args.get("tag") : "";
+const tagArgument = args.get("tag");
+const tag =
+	tagArgument === true || tagArgument === undefined ? "" : tagArgument;
 const requireAi = args.get("require-ai") === true;
 const releaseKind =
 	channel === "release" ? "stable release" : `rolling ${channel} build`;
@@ -55,6 +65,7 @@ const git = (...a) => {
 	try {
 		return execFileSync("git", a, {
 			encoding: "utf8",
+			maxBuffer: 64 * 1024 * 1024,
 			stdio: ["ignore", "pipe", "pipe"],
 		}).trim();
 	} catch {
@@ -69,7 +80,13 @@ const git = (...a) => {
  * nightly" expressible at all.
  */
 const pickPrev = () => {
-	const tags = git("tag", "--list", "--sort=-v:refname")
+	const tags = git(
+		"tag",
+		"--merged",
+		tag || "HEAD",
+		"--list",
+		"--sort=-v:refname"
+	)
 		.split("\n")
 		.filter(Boolean)
 		.filter((candidate) => candidate !== tag);
@@ -80,18 +97,33 @@ const pickPrev = () => {
 	return tags.find((t) => /^v\d+\.\d+\.\d+$/.test(t)) || "";
 };
 
+const previousArgument = args.get("prev");
 const prev =
-	typeof args.get("prev") === "string" ? args.get("prev") : pickPrev();
+	previousArgument === true || previousArgument === undefined
+		? pickPrev()
+		: previousArgument;
 const taggedHead = tag ? git("rev-parse", `${tag}^{commit}`) : "";
 if (tag && !taggedHead) {
 	process.stderr.write(`rolling-notes: tag does not resolve: ${tag}\n`);
 	process.exit(1);
 }
 const head = taggedHead || git("rev-parse", "HEAD");
+if (prev && !git("rev-parse", `${prev}^{commit}`)) {
+	process.stderr.write("rolling-notes: previous release does not resolve\n");
+	process.exit(1);
+}
 const range = prev ? `${prev}..${head}` : head;
 
 const SEP = "\\x1e";
-const entries = git("log", range, "--no-merges", `--pretty=format:${SEP}%s%n%b`)
+const entries = execFileSync(
+	"git",
+	["log", range, `--pretty=format:${SEP}%s%n%b`],
+	{
+		encoding: "utf8",
+		maxBuffer: 64 * 1024 * 1024,
+		stdio: ["ignore", "pipe", "pipe"],
+	}
+)
 	.split(SEP)
 	.map((c) => c.trim())
 	.filter(Boolean)
@@ -113,11 +145,7 @@ const emit = (lines) => {
 // that single commit's body is precisely the summary of this sync, so use it.
 // The hub, which keeps real history, only reaches this when nothing changed.
 if (!entries.length) {
-	const body = git("log", "-1", "--pretty=%b").trim();
-	if (!body) {
-		emit([`_No changes since \`${prev || "the previous build"}\`._`]);
-	}
-	entries.push({ subject: git("log", "-1", "--pretty=%s"), body });
+	emit([`_No changes since \`${prev || "the previous build"}\`._`]);
 }
 
 // Every bullet already written into the mirror commit bodies, in order. This is
@@ -140,13 +168,8 @@ const plain = () => {
 	const lines = [heading, ""];
 	// A rolling build can span many syncs; keep the body a sane length.
 	lines.push(
-		...(bullets.length
-			? bullets.slice(0, 60)
-			: entries.map((e) => `- ${e.subject}`))
+		...(bullets.length ? bullets : entries.map((e) => `- ${e.subject}`))
 	);
-	if (bullets.length > 60) {
-		lines.push("", `_${bullets.length - 60} further entries omitted._`);
-	}
 	if (compare) {
 		lines.push("", compare);
 	}
@@ -166,102 +189,111 @@ if (!key) {
 	fallback("OPENCODE_API_KEY is not set");
 }
 
-const requestAiNotes = async () => {
+const request = async (messages) => {
 	const res = await fetch(
 		`${process.env.OPENCODE_API_BASE || "https://opencode.ai/zen/go/v1"}/chat/completions`,
 		{
 			method: "POST",
+			signal: AbortSignal.timeout(180_000),
 			headers: opencodeHeaders(key, sessionContext),
 			body: JSON.stringify({
 				model: process.env.OPENCODE_MODEL || "deepseek-v4.1-flash",
 				temperature: 0.2,
 				max_tokens: Number(process.env.OPENCODE_MAX_TOKENS || 16_000),
-				messages: [
-					{
-						role: "system",
-						content: [
-							`You write the notes for a ${releaseKind} of Ryu, a local-first agent platform.`,
-							"Input is the set of change descriptions already written for the syncs in this range.",
-							"Return STRICT JSON only — no prose, no markdown fence.",
-							'Schema: {"highlights":[{"title":string,"body":string}],"bullets":[string]}',
-							"",
-							"Rules:",
-							"- highlights: at most 3, only for user-visible new capability or a breaking change. title is a 3-6 word noun phrase; body is 2-3 sentences of plain prose. Empty array if nothing qualifies.",
-							"- bullets: 5 to 20 one-line entries covering the rest, merged where they describe the same work, ordered by significance.",
-							"- Never invent a change, package, number or API that is not in the input.",
-							"- No marketing language, no emoji.",
-						].join("\n"),
-					},
-					{
-						role: "user",
-						content: `Range: ${prev}..${head}\n\nChange descriptions:\n${JSON.stringify(
-							bullets.length ? bullets.slice(0, 200) : entries,
-							null,
-							1
-						)}`,
-					},
-				],
+				messages,
 			}),
 		}
 	);
 	if (!res.ok) {
-		const detail = (await res.text()).slice(0, 200);
-		throw new Error(`HTTP ${res.status}${detail ? `: ${detail}` : ""}`);
+		throw modelHttpError(res, `HTTP ${res.status}`);
 	}
 	const json = await res.json();
 	const choice = json?.choices?.[0];
-	const content = choice?.message?.content;
-	if (!content) {
-		throw new Error(
-			`no content (finish_reason=${choice?.finish_reason ?? "?"}, ` +
-				`completion_tokens=${json?.usage?.completion_tokens ?? "?"})`
-		);
+	if (!choice?.message?.content || choice.finish_reason === "length") {
+		throw new Error("Incomplete model output");
 	}
-	const parsed = JSON.parse(
-		content
+	return JSON.parse(
+		choice.message.content
 			.trim()
 			.replace(/^```(?:json)?\s*/i, "")
 			.replace(/\s*```$/, "")
 	);
-	if (!Array.isArray(parsed.bullets)) {
-		throw new Error("no bullets");
+};
+try {
+	// Keep every mirror commit, including prose-only commits alongside bullet bodies.
+	const descriptions = entries
+		.flatMap((entry) => {
+			const rows = entry.body
+				.split("\n")
+				.map((line) => line.trim())
+				.filter((line) => line.startsWith("- "));
+			return (rows.length ? rows : [entry.body || entry.subject]).map(
+				(text) => ({ text, subject: entry.subject, context: entry.body })
+			);
+		})
+		.map((description, index) => ({ id: String(index), ...description }));
+	const work = batches(descriptions);
+	const changes = [];
+	let highlights = [];
+	for (const [index, batch] of work.entries()) {
+		process.stderr.write(
+			`rolling-notes: batch ${index + 1}/${work.length}, ${batch.length} descriptions\n`
+		);
+		const result = await reviewWithSplitting(batch, (subset) =>
+			retryModelCall(async () => {
+				const value = await request([
+					{
+						role: "system",
+						content: `Write notes for a ${releaseKind} of Ryu. Return strict JSON: {"highlights":[{"title":string,"body":string}],"changes":[{"id":string,"summary":string}]}. Return exactly one change per input id. Rewrite each description as one plain English sentence without dropping meaningful details. Highlights: at most 3, only user-visible capabilities or breaking changes. Never invent facts or use marketing language or emoji.`,
+					},
+					{ role: "user", content: JSON.stringify(subset) },
+				]);
+				validateCoverage(
+					value.changes,
+					subset.map((item) => item.id),
+					(item) => item.id,
+					(item) => item.summary
+				);
+				return value;
+			})
+		);
+		changes.push(...result.changes);
+		highlights.push(...(result.highlights || []));
 	}
+	highlights = await consolidateHighlights(
+		highlights,
+		(messages) => retryModelCall(() => request(messages)),
+		3
+	);
+	validateCoverage(
+		changes,
+		descriptions.map((item) => item.id),
+		(item) => item.id,
+		(item) => item.summary
+	);
+	const byId = new Map(changes.map((item) => [item.id, item.summary]));
 	const lines = [];
-	for (const h of parsed.highlights || []) {
-		if (!lines.length) {
-			lines.push("## Highlights", "");
-		}
-		lines.push(`### ${h.title}`, "", String(h.body).trim(), "");
+	if (highlights.length) {
+		lines.push("## Highlights", "");
 	}
-	lines.push(heading, "");
-	lines.push(...parsed.bullets.map((b) => `- ${String(b).trim()}`));
+	for (const h of highlights) {
+		lines.push(`### ${h.title}`, "", h.body, "");
+	}
+	lines.push(
+		heading,
+		"",
+		...descriptions.map((item) => `- ${byId.get(item.id)}`)
+	);
 	if (compare) {
 		lines.push("", compare);
 	}
-	return lines;
-};
-
-const configuredAttempts = Number(process.env.AI_NOTES_ATTEMPTS || 3);
-const attempts = Number.isFinite(configuredAttempts)
-	? Math.max(1, Math.floor(configuredAttempts))
-	: 3;
-let lines;
-let failure = "AI generation failed";
-for (let attempt = 1; attempt <= attempts; attempt++) {
-	try {
-		lines = await requestAiNotes();
-		break;
-	} catch (error) {
-		failure = error instanceof Error ? error.message : "AI generation failed";
-		if (attempt < attempts) {
-			await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
-		}
+	if (lines.join("\n").length > 120_000) {
+		throw new Error("Complete notes exceed the release body limit");
 	}
+	process.stderr.write(
+		`rolling-notes: verified ${changes.length}/${descriptions.length} descriptions\n`
+	);
+	emit(lines);
+} catch (error) {
+	fallback(error.message);
 }
-
-if (!lines) {
-	// Any failure at all falls back to the real, unpolished bullets unless the
-	// caller explicitly requires AI output for a stable release.
-	fallback(failure);
-}
-emit(lines);

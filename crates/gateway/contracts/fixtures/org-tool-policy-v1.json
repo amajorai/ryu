@@ -1,0 +1,94 @@
+{
+  "description": "Golden cases for evaluating one tool call against an organization's resolved tool rules (policy.rules.allowedTools / deniedTools / allowedMcpServers from /api/control-plane/gateway/resolve and /gateway/tool-policy). Entries are ASCII case-insensitive globs ('*' any run, '?' one character) matched against the canonical server.tool id or the MCP server id. A deny match always wins; a non-empty allowlist denies everything it does not match; '<deny-all>' matches nothing. Replayed by Core (apps/core/src/org_policy.rs) and the Gateway (apps/gateway/src/policy/tool_policy.rs).",
+  "version": 1,
+  "cases": [
+    {
+      "name": "empty rules allow everything",
+      "tool": "composio.GMAIL_SEND_EMAIL",
+      "allow": true
+    },
+    {
+      "name": "a composio deny glob denies a composio action",
+      "rules": { "deniedTools": ["composio.*"] },
+      "tool": "composio.GMAIL_SEND_EMAIL",
+      "allow": false
+    },
+    {
+      "name": "deny globs are case-insensitive",
+      "rules": { "deniedTools": ["COMPOSIO.gmail_*"] },
+      "tool": "composio.GMAIL_SEND_EMAIL",
+      "allow": false
+    },
+    {
+      "name": "a composio deny glob does not touch other servers",
+      "rules": { "deniedTools": ["composio.*"] },
+      "tool": "exa.search",
+      "allow": true
+    },
+    {
+      "name": "deny wins over allow",
+      "rules": {
+        "allowedTools": ["composio.*"],
+        "deniedTools": ["composio.GMAIL_SEND_EMAIL"]
+      },
+      "tool": "composio.GMAIL_SEND_EMAIL",
+      "allow": false
+    },
+    {
+      "name": "a non-empty allowlist admits what it matches",
+      "rules": { "allowedTools": ["composio.GMAIL_GET_*"] },
+      "tool": "composio.GMAIL_GET_MESSAGE",
+      "allow": true
+    },
+    {
+      "name": "a non-empty allowlist denies what it does not match",
+      "rules": { "allowedTools": ["composio.GMAIL_GET_*"] },
+      "tool": "composio.GMAIL_SEND_EMAIL",
+      "allow": false
+    },
+    {
+      "name": "question mark matches exactly one character",
+      "rules": { "allowedTools": ["shell.ru?"] },
+      "tool": "shell.run",
+      "allow": true
+    },
+    {
+      "name": "question mark does not match two characters",
+      "rules": { "allowedTools": ["shell.ru?"] },
+      "tool": "shell.runs",
+      "allow": false
+    },
+    {
+      "name": "the deny-all allowlist denies every tool",
+      "rules": { "allowedTools": ["<deny-all>"] },
+      "tool": "composio.GMAIL_GET_MESSAGE",
+      "allow": false
+    },
+    {
+      "name": "blank entries are ignored and do not make the allowlist non-empty",
+      "rules": { "allowedTools": ["  "] },
+      "tool": "composio.GMAIL_GET_MESSAGE",
+      "allow": true
+    },
+    {
+      "name": "the MCP server allowlist denies an unlisted external server",
+      "rules": { "allowedMcpServers": ["github"] },
+      "tool": "linear.create_issue",
+      "mcpServer": "linear",
+      "allow": false
+    },
+    {
+      "name": "the MCP server allowlist admits a listed external server",
+      "rules": { "allowedMcpServers": ["git*"] },
+      "tool": "github.create_issue",
+      "mcpServer": "github",
+      "allow": true
+    },
+    {
+      "name": "the MCP server allowlist does not apply to built-in tools",
+      "rules": { "allowedMcpServers": ["github"] },
+      "tool": "composio.GMAIL_GET_MESSAGE",
+      "allow": true
+    }
+  ]
+}

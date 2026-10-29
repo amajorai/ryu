@@ -1,5 +1,4 @@
 import { cva, type VariantProps } from "class-variance-authority";
-
 import type { SlateElementProps } from "platejs/static";
 import { SlateElement } from "platejs/static";
 import type * as React from "react";
@@ -21,6 +20,7 @@ export function HeadingElementStatic({
 	variant = "h1",
 	...props
 }: SlateElementProps & VariantProps<typeof headingVariants>) {
+	// SAFETY: Plate NodeId supplies native string bookmark IDs; the original optional ID is forwarded without coercion to the internal anchor.
 	const id = props.element.id as string | undefined;
 
 	return (

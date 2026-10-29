@@ -6,6 +6,10 @@ import { createRoot } from "react-dom/client";
 if (!globalThis.window) {
 	GlobalRegistrator.register();
 }
+// SAFETY: The actual installed ReactDOM act environment reads this optional
+// global flag. This test writes the authored boolean true to that native hook;
+// the declaration gap concerns only this flag, without asserting other globals
+// or replacing the registered DOM/native React test environment.
 (
 	globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;

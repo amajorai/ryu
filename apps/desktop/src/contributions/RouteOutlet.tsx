@@ -11,10 +11,7 @@
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Suspense, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import type { Tab } from "@/src/contexts/TabsContext.tsx";
-import {
-	contributionRegistry,
-	type RouteTab,
-} from "@/src/contributions/registry.ts";
+import { contributionRegistry } from "@/src/contributions/registry.ts";
 import { isBotRoutePath } from "@/src/lib/product.ts";
 import { useProductMode } from "@/src/lib/product-mode.ts";
 
@@ -36,7 +33,7 @@ export function RouteOutlet({
 			? undefined
 			: contributionRegistry.resolve(tab.path);
 	const content = useMemo(
-		() => render?.(tab as RouteTab, { onClose: close }) ?? null,
+		() => render?.(tab, { onClose: close }) ?? null,
 		[render, tab, close]
 	);
 	if (botProduct && !isBotRoutePath(tab.path)) {
@@ -47,7 +44,7 @@ export function RouteOutlet({
 						That surface belongs in Ryu Build.
 					</p>
 					<p className="text-muted-foreground text-sm">
-						Ryu Bot keeps the managed chat experience focused. Close this tab to
+						Bot keeps the managed chat experience focused. Close this tab to
 						return to your conversations.
 					</p>
 					<Button onClick={onClose} variant="outline">
@@ -63,15 +60,10 @@ export function RouteOutlet({
 	}
 	// `Tab` is structurally a superset of `RouteTab`; the render-fns only read the
 	// `RouteTab` subset (path + the initial* params a pattern/exact route needs).
+	// The fallback is deliberately empty. Lazy page chunks are warmed on link
+	// hover/focus (see `lib/route-prefetch.ts`), so a suspend usually lasts a
+	// single frame; a "Loading…" label there only ever read as a flash.
 	return (
-		<Suspense
-			fallback={
-				<div className="flex size-full items-center justify-center text-muted-foreground text-sm">
-					Loading…
-				</div>
-			}
-		>
-			{content}
-		</Suspense>
+		<Suspense fallback={<div className="size-full" />}>{content}</Suspense>
 	);
 }

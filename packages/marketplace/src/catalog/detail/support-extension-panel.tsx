@@ -63,7 +63,7 @@ export function SupportExtensionPanel({
 									</p>
 								) : null}
 							</div>
-							<Badge className="shrink-0 text-xs" variant="outline">
+							<Badge className="shrink-0" variant="outline">
 								{surfaceSupportLabel(row.support)}
 							</Badge>
 						</div>

@@ -7,6 +7,7 @@
 // pushed events keyed by the channel names in `IPC.suggestions`.
 
 import { type BrowserWindow, ipcMain } from "electron";
+import { z } from "zod";
 import {
 	agentIdOrUndefined,
 	DEFAULT_AGENT_ID,
@@ -16,12 +17,21 @@ import {
 import {
 	type FeedbackKind,
 	IPC,
+	type IslandSuggestion,
 	type SuggestionFeedbackRequest,
 	type SuggestionFeedbackResult,
 } from "../../shared/ipc.ts";
 import type { buildSuggestionMessages } from "../engine/prompt.ts";
 import { SuggestionEngine } from "../engine/suggestions.ts";
-import { onConsentChanged, shouldRunEngine } from "../services/consent.ts";
+import {
+	archiveConnectSuggestion,
+	listConnectSuggestions,
+} from "../services/connect-suggestions.ts";
+import {
+	onConsentChanged,
+	shouldRunEngine,
+	shouldRunProactiveEngine,
+} from "../services/consent.ts";
 import { completions, runAgentText } from "../services/core.ts";
 import {
 	getPreferenceRaw,
@@ -44,11 +54,15 @@ let engine: SuggestionEngine | null = null;
 const PAGE_CONTEXT_PREF_KEY = "browser.page-context";
 const PAGE_CONTEXT_FRESHNESS_MS = 120_000;
 
-interface BridgedPage {
-	content: string;
-	ts: number;
-	url: string;
-}
+const bridgedPageSchema = z.object({
+	content: z.string(),
+	url: z.string(),
+	ts: z
+		.number()
+		.nullish()
+		.transform((value) => value ?? Date.now()),
+});
+type BridgedPage = z.infer<typeof bridgedPageSchema>;
 
 let latestBrowserPage: BridgedPage | null = null;
 
@@ -57,10 +71,8 @@ function parseBrowserPage(raw: string | null): BridgedPage | null {
 		return null;
 	}
 	try {
-		const obj = JSON.parse(raw) as Partial<BridgedPage>;
-		if (typeof obj.url === "string" && typeof obj.content === "string") {
-			return { url: obj.url, content: obj.content, ts: obj.ts ?? Date.now() };
-		}
+		const parsed = bridgedPageSchema.safeParse(JSON.parse(raw));
+		return parsed.success ? parsed.data : null;
 	} catch {
 		// Malformed blob: ignore.
 	}
@@ -113,15 +125,23 @@ function watchProactiveAgent(): void {
 }
 
 function buildEngine(getWindow: () => BrowserWindow | null): SuggestionEngine {
-	const send = (channel: string, payload?: unknown): void => {
+	const send = (channel: string, payload?: IslandSuggestion): void => {
 		const win = getWindow();
 		if (win && !win.isDestroyed()) {
 			win.webContents.send(channel, payload);
 		}
 	};
 	return new SuggestionEngine({
-		getContext: () => getCurrentContext(),
+		getContext: () =>
+			shouldRunEngine()
+				? getCurrentContext()
+				: Promise.resolve({
+						available: false,
+						reason: "screen context consent is disabled",
+					}),
 		getProactive: () => getProactive(),
+		getConnectionSuggestions: () => listConnectSuggestions(),
+		archiveConnectionSuggestion: (id) => archiveConnectSuggestion(id),
 		getBrowserContext: () => Promise.resolve(readBrowserContext()),
 		complete: async (messages: ReturnType<typeof buildSuggestionMessages>) => {
 			// Route through the configured agent (default `ryu`) when set; fall back
@@ -159,14 +179,14 @@ export function registerSuggestionsIpc(
 	watchBrowserContext();
 	engine = buildEngine(getWindow);
 
-	// Consent gate (U6): the engine reads screen context then suggests, so it may
-	// only run when both `contextRead` and `proactive` are granted. Honour the
-	// current grant immediately and react to later toggles from any surface.
+	// Connection events need proactive consent but not screen capture consent. The
+	// context callback above independently keeps Shadow and browser context behind
+	// the stronger contextRead + proactive gate.
 	const syncEngineToConsent = (): void => {
 		if (!engine) {
 			return;
 		}
-		if (shouldRunEngine()) {
+		if (shouldRunProactiveEngine()) {
 			if (!engine.status().running) {
 				engine.start();
 			}
@@ -177,9 +197,9 @@ export function registerSuggestionsIpc(
 	onConsentChanged(syncEngineToConsent);
 	syncEngineToConsent();
 
-	// `start` still honours the gate so a renderer cannot bypass consent.
+	// `start` still honours the proactive-consent gate so a renderer cannot bypass it.
 	ipcMain.handle(IPC.suggestions.start, () => {
-		if (!shouldRunEngine()) {
+		if (!shouldRunProactiveEngine()) {
 			return engine?.status();
 		}
 		return engine?.start();

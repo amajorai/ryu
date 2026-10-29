@@ -2,7 +2,7 @@
 import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
 import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
 import type { CardDither } from "@ryu/marketplace/catalog/types";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";

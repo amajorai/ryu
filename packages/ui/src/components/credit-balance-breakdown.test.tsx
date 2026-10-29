@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CreditBalanceBreakdown } from "./credit-balance-breakdown.tsx";
 
 describe("CreditBalanceBreakdown", () => {
-	it("shows total, separate buckets, and each free-provider allocation", () => {
+	it("shows total, separate buckets, and ONE free-credit figure with the nearest expiry", () => {
 		const html = renderToStaticMarkup(
 			<CreditBalanceBreakdown
 				giftCreditsMicroUsd={3_000_000}
@@ -12,13 +12,16 @@ describe("CreditBalanceBreakdown", () => {
 				planCreditsMicroUsd={7_500_000}
 				providerAllocations={[
 					{
-						expiresAtLabel: "Expires Sep 30, 2026",
+						expiresAt: "2026-12-31T00:00:00Z",
+						expiresAtLabel: "Expires Dec 31, 2026",
 						id: "fast",
 						isFreeProvider: true,
 						label: "Ryu Fast",
 						remainingMicroUsd: 4_250_000,
 					},
 					{
+						expiresAt: "2026-09-30T00:00:00Z",
+						expiresAtLabel: "Expires Sep 30, 2026",
 						id: "frontier",
 						isFreeProvider: false,
 						label: "Ryu Frontier",
@@ -31,17 +34,24 @@ describe("CreditBalanceBreakdown", () => {
 
 		for (const value of [
 			"$41.75",
-			"Free-provider credits",
+			"Free credit",
 			"Plan credits",
 			"Gift balance",
 			"On-demand credits",
-			"$4.25",
-			"Ryu Fast",
+			"$14.25",
 			"Expires Sep 30, 2026",
-			"Allocated free provider only",
-			"Other provider-specific allocations",
+			"Used automatically on models marked Free",
 		]) {
 			expect(html).toContain(value);
+		}
+		// No per-tier or per-provider breakdown reaches the user.
+		for (const value of [
+			"Ryu Fast",
+			"Ryu Frontier",
+			"Expires Dec 31, 2026",
+			"provider-specific",
+		]) {
+			expect(html).not.toContain(value);
 		}
 		expect(html).toContain('aria-label="About plan credits"');
 		expect(html).not.toContain("41750000");
@@ -60,7 +70,7 @@ describe("CreditBalanceBreakdown", () => {
 		);
 
 		expect(html).toContain("$0.00 left of $15.00 this billing period");
-		expect(html).toContain("No free-provider credits are currently allocated.");
+		expect(html).toContain("No free credit right now.");
 	});
 
 	it("rounds wallet balances to currency precision after prorated changes", () => {
@@ -112,8 +122,8 @@ describe("CreditBalanceBreakdown", () => {
 		expect(html).toContain("Polar balance");
 		expect(html).toContain("$12.50");
 		expect(html).toContain("Polar maintains this aggregate credit meter");
-		expect(html).toContain("Provider-specific allocations");
-		expect(html).toContain("Ryu Fast");
+		expect(html).toContain("Free credit");
+		expect(html).not.toContain("Ryu Fast");
 		expect(html).toContain("$2.50");
 		expect(html).not.toContain("Plan credits");
 		expect(html).not.toContain("On-demand credits");

@@ -1,0 +1,24 @@
+/* Exact palette and tracking for the isolated sample-media fixture. */
+.page {
+	background-color: #09111f;
+}
+.eyebrow {
+	--tw-tracking: 0.22em;
+	color: oklch(86.5% 0.127 207.078);
+	letter-spacing: 0.22em;
+}
+.secondary {
+	color: oklch(86.9% 0.022 252.894);
+}
+.muted {
+	color: oklch(70.4% 0.04 256.788);
+}
+.selectedSource {
+	color: oklch(95.6% 0.045 203.388);
+	background-color: color-mix(
+		in oklab,
+		oklch(86.5% 0.127 207.078) 15%,
+		transparent
+	);
+	border-color: oklch(86.5% 0.127 207.078);
+}

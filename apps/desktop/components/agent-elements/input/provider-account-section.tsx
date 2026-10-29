@@ -2,19 +2,24 @@
 
 import {
 	Delete02Icon,
+	PencilEdit01Icon,
 	SquareLock01Icon,
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { CommandItem } from "@ryu/ui/components/command.tsx";
 import {
+	DropdownMenu,
+	DropdownMenuContent,
 	DropdownMenuItem,
-	DropdownMenuSub,
-	DropdownMenuSubContent,
-	DropdownMenuSubTrigger,
+	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import "./universal-picker-body.module.css";
+import { useState } from "react";
 import { useProviderCommandNavigation } from "@/components/agent-elements/input/provider-command-dialog.tsx";
 
 /** A provider or ACP account as exposed by Core — labels only, never credentials. */
@@ -28,6 +33,8 @@ export interface ProviderAccount {
 	kind: string;
 	/** Display name (email, provider label, or "Account N"). */
 	label: string;
+	/** Core blocked this credential generation until the user signs in again. */
+	needsReauth?: boolean;
 	/** Provider id for managed-Pi accounts aggregated under the Ryu agent. */
 	provider?: string;
 }
@@ -75,9 +82,10 @@ function AccountTargetItem({
 
 	return (
 		<DropdownMenuItem
-			className="flex-col items-start gap-0.5"
+			className="flex-col items-start"
 			disabled={disabled}
 			onClick={onSelect}
+			spacing="tight"
 		>
 			<span className="flex w-full items-center gap-2">
 				<span className="flex-1 truncate">{label}</span>
@@ -116,7 +124,7 @@ function AccountTargetPage({
 				label="Use for yourself"
 				onSelect={() => onSwitch(account, "self")}
 			/>
-			{gatewaySupported && (
+			{gatewaySupported && account.kind === "api_key" && (
 				<AccountTargetItem
 					description={
 						canSetGateway
@@ -135,17 +143,30 @@ function AccountTargetPage({
 	);
 }
 
-function AccountStatus({ account }: { account: ProviderAccount }) {
-	const gatewayActive = account.kind === "api_key" && account.gatewayActive;
+function AccountStatus({
+	account,
+	gatewaySupported,
+}: {
+	account: ProviderAccount;
+	gatewaySupported: boolean;
+}) {
+	const gatewayActive =
+		gatewaySupported && account.kind === "api_key" && account.gatewayActive;
 	const statuses = [
 		account.active ? "You" : null,
 		gatewayActive ? "Gateway" : null,
+		account.needsReauth ? "Sign in again" : null,
 	].filter(Boolean);
 	if (statuses.length === 0) {
 		return null;
 	}
 	return (
-		<span className="shrink-0 text-[10px] text-muted-foreground">
+		<span
+			className={cn(
+				"type-compact shrink-0 text-muted-foreground",
+				account.needsReauth && "text-destructive"
+			)}
+		>
 			{statuses.join(" · ")}
 		</span>
 	);
@@ -156,16 +177,27 @@ function AccountRow({
 	account,
 	canSetGateway,
 	gatewaySupported,
+	onRename,
 	onRemove,
 	onSwitch,
 }: {
 	account: ProviderAccount;
 	canSetGateway: boolean;
 	gatewaySupported: boolean;
+	onRename?: (accountId: string, label: string) => Promise<boolean>;
 	onRemove: (accountId: string) => void;
 	onSwitch: (account: ProviderAccount, target: ProviderAccountTarget) => void;
 }) {
 	const commandNavigation = useProviderCommandNavigation();
+	const tl = useLiteralMessages();
+	const [editingLabel, setEditingLabel] = useState(false);
+	const [labelDraft, setLabelDraft] = useState(account.label);
+	const [savingLabel, setSavingLabel] = useState(false);
+	const selected =
+		account.active ||
+		(gatewaySupported &&
+			account.kind === "api_key" &&
+			account.gatewayActive === true);
 	const targetPage = (
 		<AccountTargetPage
 			account={account}
@@ -177,16 +209,73 @@ function AccountRow({
 	const label = account.provider
 		? `${account.label} · ${account.provider}`
 		: account.label;
+	const saveLabel = async () => {
+		const nextLabel = labelDraft.trim();
+		if (!onRename) {
+			return;
+		}
+		if (!nextLabel || nextLabel === account.label) {
+			return;
+		}
+
+		setSavingLabel(true);
+		try {
+			if (await onRename(account.accountId, nextLabel)) {
+				setEditingLabel(false);
+			}
+		} finally {
+			setSavingLabel(false);
+		}
+	};
+
+	if (editingLabel) {
+		return (
+			<form
+				className="flex items-center gap-1 px-1 py-1"
+				onSubmit={(event) => {
+					event.preventDefault();
+					void saveLabel();
+				}}
+			>
+				<Input
+					aria-label={tl("Label for {label}", { label: account.label })}
+					autoFocus
+					className="h-7 min-w-0 flex-1"
+					maxLength={80}
+					onChange={(event) => setLabelDraft(event.target.value)}
+					onKeyDown={(event) => event.stopPropagation()}
+					value={labelDraft}
+				/>
+				<Button
+					disabled={
+						savingLabel ||
+						labelDraft.trim() === "" ||
+						labelDraft.trim() === account.label
+					}
+					size="sm"
+					type="submit"
+				>
+					Save
+				</Button>
+				<Button
+					disabled={savingLabel}
+					onClick={() => setEditingLabel(false)}
+					size="sm"
+					type="button"
+					variant="ghost"
+				>
+					Cancel
+				</Button>
+			</form>
+		);
+	}
 
 	if (commandNavigation) {
 		return (
 			<div className="flex items-center gap-1">
 				<CommandItem
 					className="min-w-0 flex-1"
-					data-checked={
-						account.active ||
-						(account.kind === "api_key" && account.gatewayActive === true)
-					}
+					data-checked={selected}
 					onSelect={() =>
 						commandNavigation.push({
 							body: targetPage,
@@ -194,9 +283,23 @@ function AccountRow({
 						})
 					}
 				>
-					<span className="min-w-0 flex-1 truncate text-[13px]">{label}</span>
-					<AccountStatus account={account} />
+					<span className="text-(length:--text-detail) min-w-0 flex-1 truncate">
+						{label}
+					</span>
+					<AccountStatus
+						account={account}
+						gatewaySupported={gatewaySupported}
+					/>
 				</CommandItem>
+				{onRename ? (
+					<AccountRenameButton
+						account={account}
+						onRename={() => {
+							setLabelDraft(account.label);
+							setEditingLabel(true);
+						}}
+					/>
+				) : null}
 				<AccountRemoveButton account={account} onRemove={onRemove} />
 			</div>
 		);
@@ -204,24 +307,68 @@ function AccountRow({
 
 	return (
 		<div className="flex items-center gap-1">
-			<DropdownMenuSub>
-				<DropdownMenuSubTrigger
-					className={cn(
-						"min-w-0 flex-1",
-						(account.active ||
-							(account.kind === "api_key" && account.gatewayActive === true)) &&
-							"bg-foreground/10"
-					)}
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					className="flex min-w-0 flex-1 items-center"
+					selected={selected}
+					variant="account-row"
 				>
-					<span className="min-w-0 flex-1 truncate text-[13px]">{label}</span>
-					<AccountStatus account={account} />
-				</DropdownMenuSubTrigger>
-				<DropdownMenuSubContent className="min-w-[220px] p-1">
+					<span className="text-(length:--text-detail) min-w-0 flex-1 truncate">
+						{label}
+					</span>
+					<AccountStatus
+						account={account}
+						gatewaySupported={gatewaySupported}
+					/>
+				</DropdownMenuTrigger>
+				<DropdownMenuContent
+					className="min-w-[220px]"
+					data-desktop-picker-inset="true"
+				>
 					{targetPage}
-				</DropdownMenuSubContent>
-			</DropdownMenuSub>
+				</DropdownMenuContent>
+			</DropdownMenu>
+			{onRename ? (
+				<AccountRenameButton
+					account={account}
+					onRename={() => {
+						setLabelDraft(account.label);
+						setEditingLabel(true);
+					}}
+				/>
+			) : null}
 			<AccountRemoveButton account={account} onRemove={onRemove} />
 		</div>
+	);
+}
+
+function AccountRenameButton({
+	account,
+	onRename,
+}: {
+	account: ProviderAccount;
+	onRename: () => void;
+}) {
+	const tl = useLiteralMessages();
+	return (
+		<Button
+			aria-label={tl("Rename account {label}", { label: account.label })}
+			className="shrink-0"
+			onClick={(event) => {
+				event.stopPropagation();
+				onRename();
+			}}
+			size="icon-xs"
+			type="button"
+			variant="ghost"
+		>
+			<HugeiconsIcon
+				className="text-muted-foreground/70 hover:text-foreground"
+				icon={PencilEdit01Icon}
+				size={12}
+				strokeWidth={2}
+			/>
+		</Button>
 	);
 }
 
@@ -232,15 +379,16 @@ function AccountRemoveButton({
 	account: ProviderAccount;
 	onRemove: (accountId: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<Button
-			aria-label={`Remove ${account.label}`}
-			className="h-6 w-6 shrink-0 px-0"
+			aria-label={tl("Remove {label}", { label: account.label })}
+			className="shrink-0"
 			onClick={(event) => {
 				event.stopPropagation();
 				onRemove(account.accountId);
 			}}
-			size="sm"
+			size="icon-xs"
 			type="button"
 			variant="ghost"
 		>
@@ -259,12 +407,14 @@ export function ProviderAccountSection({
 	accounts,
 	canSetGateway = true,
 	gatewaySupported = false,
+	onRename,
 	onRemove,
 	onSwitch,
 }: {
 	accounts: ProviderAccount[];
 	canSetGateway?: boolean;
 	gatewaySupported?: boolean;
+	onRename?: (accountId: string, label: string) => Promise<boolean>;
 	onRemove: (accountId: string) => void;
 	onSwitch: (account: ProviderAccount, target: ProviderAccountTarget) => void;
 }) {
@@ -273,7 +423,7 @@ export function ProviderAccountSection({
 	}
 	return (
 		<div className="border-border/50 border-t pt-1">
-			<div className="flex items-center gap-1 px-3 pt-1 pb-0.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+			<div className="type-caption flex items-center gap-1 px-3 pt-1 pb-0.5 font-medium text-muted-foreground uppercase tracking-wide">
 				<span>Accounts</span>
 				{gatewaySupported && !canSetGateway && (
 					<HugeiconsIcon
@@ -291,6 +441,7 @@ export function ProviderAccountSection({
 					gatewaySupported={gatewaySupported && account.kind === "api_key"}
 					key={account.accountId}
 					onRemove={onRemove}
+					onRename={onRename}
 					onSwitch={onSwitch}
 				/>
 			))}

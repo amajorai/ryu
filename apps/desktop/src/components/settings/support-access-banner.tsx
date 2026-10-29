@@ -14,8 +14,9 @@
 
 import { ShieldKeyIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { toast } from "@ryu/ui/components/sileo";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -62,6 +63,7 @@ function formatRemaining(expiryMs: number, nowMs: number): string {
  * Non-rendering when the grant is off/expired.
  */
 export function SupportAccessBanner() {
+	const tl = useLiteralMessages();
 	// No tab context here (mounted in the shell), so resolve the default node.
 	// Select the node (a stable store ref), then derive `target` in the render
 	// body — building the object inside the selector would return a fresh object
@@ -69,63 +71,94 @@ export function SupportAccessBanner() {
 	const node = useNodeStore((s) => s.getActiveNode());
 	const target: ApiTarget = useMemo(
 		() => ({ url: node.url, token: node.token, userJwt: node.userJwt ?? null }),
-		[node.url, node.token]
+		[node.url, node.token, node.userJwt]
 	);
 
 	const [active, setActive] = useState(false);
+	const [loadedTarget, setLoadedTarget] = useState<ApiTarget | null>(null);
 	const [expiryMs, setExpiryMs] = useState(0);
 	const [now, setNow] = useState(() => Date.now());
 	const [ending, setEnding] = useState(false);
 
-	const cancelledRef = useRef(false);
+	// A shared cancellation boolean can be reset by a different node's effect.
+	// Keep each target lifetime and each read distinct, including JWT rotation.
+	const scopeRef = useRef(0);
+	const readVersionRef = useRef(0);
+	const pendingEndRef = useRef<number | null>(null);
 
-	const refresh = useCallback(async () => {
-		const [enabled, expiry] = await Promise.all([
-			getSupportAccessLocalEnabled(target),
-			getSupportAccessLocalExpiry(target),
-		]);
-		if (cancelledRef.current) {
-			return;
-		}
-		const nowMs = Date.now();
-		setExpiryMs(expiry);
-		setNow(nowMs);
-		setActive(isGrantActive(enabled, expiry, nowMs));
-	}, [target]);
+	const refresh = useCallback(
+		async (scope: number) => {
+			if (scopeRef.current !== scope || pendingEndRef.current === scope) {
+				return;
+			}
+			const version = ++readVersionRef.current;
+			const [enabled, expiry] = await Promise.all([
+				getSupportAccessLocalEnabled(target),
+				getSupportAccessLocalExpiry(target),
+			]);
+			if (scopeRef.current !== scope || readVersionRef.current !== version) {
+				return;
+			}
+			const nowMs = Date.now();
+			setLoadedTarget(target);
+			setExpiryMs(expiry);
+			setNow(nowMs);
+			setActive(isGrantActive(enabled, expiry, nowMs));
+		},
+		[target]
+	);
 
 	useEffect(() => {
-		cancelledRef.current = false;
-		refresh().catch(() => undefined);
+		const scope = ++scopeRef.current;
+		pendingEndRef.current = null;
+		setActive(false);
+		setLoadedTarget(null);
+		setEnding(false);
+		refresh(scope).catch(() => undefined);
 		const id = setInterval(() => {
-			refresh().catch(() => undefined);
+			refresh(scope).catch(() => undefined);
 		}, POLL_INTERVAL_MS);
 		return () => {
-			cancelledRef.current = true;
+			scopeRef.current++;
 			clearInterval(id);
 		};
 	}, [refresh]);
 
 	const handleEnd = useCallback(async () => {
+		const scope = scopeRef.current;
+		if (pendingEndRef.current === scope) {
+			return;
+		}
+		pendingEndRef.current = scope;
+		// A read started before revocation must not restore its old grant snapshot.
+		readVersionRef.current++;
 		setEnding(true);
 		try {
 			await setSupportAccessLocalEnabled(target, false);
-			if (!cancelledRef.current) {
+			if (scopeRef.current !== scope) {
+				return;
+			}
+			if (await getSupportAccessLocalEnabled(target)) {
+				throw new Error("Core did not confirm support access was disabled");
+			}
+			if (scopeRef.current === scope) {
 				setActive(false);
 			}
 		} catch {
-			// Ending failed — the grant is still live, so keep the banner up and
-			// tell the user instead of silently swallowing the rejection.
-			toast.error("Couldn't end support access", {
-				description: "Check your connection and try again.",
-			});
+			if (scopeRef.current === scope) {
+				toast.error("Couldn't end support access", {
+					description: "Check your connection and try again.",
+				});
+			}
 		} finally {
-			if (!cancelledRef.current) {
+			if (scopeRef.current === scope) {
+				pendingEndRef.current = null;
 				setEnding(false);
 			}
 		}
 	}, [target]);
 
-	if (!active) {
+	if (!active || loadedTarget !== target) {
 		return null;
 	}
 
@@ -137,9 +170,13 @@ export function SupportAccessBanner() {
 			/>
 			<div className="flex flex-col leading-tight">
 				<span className="font-medium text-xs">Support access active</span>
-				<span className="text-[11px] text-muted-foreground">
-					Support can read redacted diagnostics over the mesh ·{" "}
-					{formatRemaining(expiryMs, now)}
+				<span className="type-caption text-muted-foreground">
+					{tl(
+						"Support can read redacted diagnostics over the mesh · {remaining}",
+						{
+							remaining: formatRemaining(expiryMs, now),
+						}
+					)}
 				</span>
 			</div>
 			<Button

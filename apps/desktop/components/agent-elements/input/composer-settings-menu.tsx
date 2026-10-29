@@ -7,12 +7,12 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { composeTriggerSummary } from "@ryu/blocks/composer/composer-trigger-summary";
+import { composeTriggerSummary } from "@ryu/blocks/composer/composer-trigger-summary.ts";
 import {
 	FullAccessSelectionProvider,
 	isFullAccessEquivalent,
 	useFullAccessSelectionGuard,
-} from "@ryu/blocks/composer/full-access-warning";
+} from "@ryu/blocks/composer/full-access-warning.tsx";
 import { useChatDisplayPrefs } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -24,14 +24,18 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
+import { isNativeFunction } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { Fragment, type ReactElement, type ReactNode, useState } from "react";
-import { COMPOSER_SELECT_TRIGGER } from "@/components/agent-elements/input/composer-select.ts";
+import { ItemTag } from "@/components/agent-elements/input/item-tag.tsx";
+import styles from "./composer-settings-menu.module.css";
 
 export interface ComposerSettingItem {
 	description?: string | null;
 	id: string;
 	name: string;
+	/** A short trailing tag on the row (e.g. "Free" on a Ryu Router model). */
+	tag?: string | null;
 }
 
 /** A colour + icon applied to a setting item (see `ComposerSettingsSection.decorate`). */
@@ -184,7 +188,7 @@ function EffortMeter({
 		<span
 			aria-label={`Effort: ${active.name}`}
 			className={cn(
-				"composer-effort-meter inline-flex h-4 shrink-0 items-end gap-px text-primary",
+				"inline-flex h-4 shrink-0 items-end gap-px text-primary",
 				className
 			)}
 			data-composer-effort-meter="true"
@@ -195,11 +199,11 @@ function EffortMeter({
 				<span
 					aria-hidden="true"
 					className={cn(
-						"w-1 rounded-[1px] transition-colors",
+						styles.effortBar,
+						"w-1 transition-colors",
 						index < filledBars ? "bg-current" : "bg-muted-foreground/25"
 					)}
 					key={index}
-					style={{ height: `${5 + index * 2}px` }}
 				/>
 			))}
 		</span>
@@ -342,8 +346,7 @@ function ComposerSettingsMenuContent({
 		selectionGuard?.request(item ?? { id, name: id }, apply, section.label);
 	};
 	const closeMenu = () => setOpen(false);
-	const footerContent =
-		typeof footer === "function" ? footer(closeMenu) : footer;
+	const footerContent = isNativeFunction(footer) ? footer(closeMenu) : footer;
 
 	const renderRow =
 		(section: ComposerSettingsSection) => (item: ComposerSettingItem) => {
@@ -351,13 +354,12 @@ function ComposerSettingsMenuContent({
 			const deco = section.decorate?.(item);
 			return (
 				<DropdownMenuItem
-					className={cn(
-						"flex-col items-start gap-0.5",
-						isActive && "bg-foreground/10"
-					)}
+					active={isActive}
+					className="flex-col items-start"
 					closeOnClick={false}
 					key={item.id}
 					onClick={() => selectItem(section)(item.id)}
+					spacing="tight"
 				>
 					<span className="flex w-full items-center gap-2.5">
 						{deco && (
@@ -371,6 +373,7 @@ function ComposerSettingsMenuContent({
 						<span className={cn("flex-1 truncate", deco?.className)}>
 							{item.name}
 						</span>
+						{item.tag ? <ItemTag tag={item.tag} /> : null}
 						{isActive && (
 							<HugeiconsIcon
 								className="shrink-0 text-muted-foreground"
@@ -397,12 +400,10 @@ function ComposerSettingsMenuContent({
 				<DropdownMenuTrigger
 					render={
 						<Button
+							appearance="composer-settings"
 							aria-label={triggerLabel}
-							className={cn(
-								COMPOSER_SELECT_TRIGGER,
-								"composer-settings-trigger min-w-0 max-w-full",
-								className
-							)}
+							className={cn("min-w-0 max-w-full", className)}
+							data-composer-settings-trigger="true"
 							size="sm"
 							type="button"
 							variant="ghost"
@@ -583,7 +584,7 @@ function ComposerSettingsMenuContent({
 							let sectionBody: ReactNode;
 							if (loadingEmpty) {
 								sectionBody = (
-									<div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-muted-foreground">
+									<div className="text-(length:--text-detail) flex items-center gap-2 px-2.5 py-2 text-muted-foreground">
 										<HugeiconsIcon
 											className={cn(
 												"shrink-0",
@@ -604,12 +605,12 @@ function ComposerSettingsMenuContent({
 							return (
 								<DropdownMenuSub key={section.key}>
 									<DropdownMenuSubTrigger>
-										<span className="flex-1 text-[13px] text-muted-foreground">
+										<span className="text-(length:--text-detail) flex-1 text-muted-foreground">
 											{section.label}
 										</span>
 										<span
 											className={cn(
-												"flex max-w-[160px] items-center gap-1.5 text-[13px] text-muted-foreground",
+												"text-(length:--text-detail) flex max-w-[160px] items-center gap-1.5 text-muted-foreground",
 												!loadingEmpty && activeDeco?.className
 											)}
 										>
@@ -644,7 +645,7 @@ function ComposerSettingsMenuContent({
 									    so it must scroll here or be clipped unreachably. */}
 									<DropdownMenuSubContent
 										className={cn(
-											"max-h-80 min-w-[220px] max-w-[300px] p-0",
+											"max-h-80 min-w-[220px] max-w-[300px]",
 											section.renderContent
 												? "overflow-hidden"
 												: "overflow-y-auto"

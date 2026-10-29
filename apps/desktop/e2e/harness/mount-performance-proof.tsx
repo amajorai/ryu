@@ -4,6 +4,7 @@ import { htmlCompanionSrcdoc } from "@ryu/app-host/third-party-plugin";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import { pluginHostInvokeStream } from "../../src/lib/api/plugins.ts";
 import "../../src/index.css";
 const hostStreamProof = new URLSearchParams(location.search).has("hostStream");
@@ -130,29 +131,29 @@ function App() {
 							setConnections((n) => n + 1);
 						}}
 						onMessage={(value) => {
-							if (!value || typeof value !== "object") {
-								return;
-							}
-							const data = value as {
-								kind?: unknown;
-								version?: unknown;
-								readyAt?: unknown;
-							};
+							const observation = z
+								.object({
+									kind: z.literal("proof-mounted"),
+									version: z.number(),
+									readyAt: z.number(),
+								})
+								.safeParse(value);
 							if (
-								data.kind !== "proof-mounted" ||
-								data.version !== timingRef.current.version ||
-								typeof data.readyAt !== "number"
+								!observation.success ||
+								observation.data.version !== timingRef.current.version
 							) {
 								return;
 							}
+							const data = observation.data;
 							const timing = timingRef.current;
+							// SAFETY: The authored companion readyScript posts performance.timeOrigin + performance.now() as readyAt; the preceding native number guard additionally checks the structured-cloned message field before this sample calculation.
 							setSamples((previous) => [
 								...previous,
 								{
 									version: timing.version,
 									wrapperMs: timing.wrapperMs,
 									handshakeMs: timing.handshakeMs,
-									readyMs: (data.readyAt as number) - timing.startedAt,
+									readyMs: data.readyAt - timing.startedAt,
 								},
 							]);
 						}}

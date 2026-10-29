@@ -39,6 +39,10 @@ Only visible user and assistant text is portable in v0. Credentials, ACLs, owner
 
 Each request uses only that node's configured credential. Core never calls a user-supplied node URL.
 
+## Working-tree handoff
+
+A separate, capability-probed contract carries a reviewed git working tree. Probe the destination with `GET /api/rnp/v0/capabilities` (a `404` means unsupported). `parseRnpWorkspaceInspection`, `parseRnpWorkspaceManifest`, `parseRnpWorkspaceResumeResult` and `parseRnpCapabilities` validate the replies; `isSafeRepoRelativePath` and `isCredentialFreeRemoteUrl` are the shared path and remote rules, and `RNP_WORKSPACE_LIMITS` holds the caps. Blobs move as content-addressed `application/octet-stream` bodies under `/api/rnp/v0/workspace-blobs/:sha256`. Unlike the transcript flow, a working-tree resume makes the destination contact the manifest's credential-free git remote after an SSRF check.
+
 Export requires read access. Resume creates a private caller-owned row or requires write access to an existing row. Stable conversation, message, bundle, and context IDs make retries of the reviewed bundle idempotent and let later cloud sync converge. A reused message ID with different content fails with `409`.
 
 ## Handoff links

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ApiTarget } from "./client.ts";
 import {
 	fetchGatewayConfig,
@@ -88,12 +89,13 @@ export function parseExecApprovalEnabled(raw: string | null): boolean {
 }
 
 export function parseSavedPosture(raw: string | null): GatewayPosture | null {
-	return GATEWAY_POSTURES.includes(raw?.trim().toLowerCase() as GatewayPosture)
-		? (raw?.trim().toLowerCase() as GatewayPosture)
-		: null;
+	const parsed = z.enum(GATEWAY_POSTURES).safeParse(raw?.trim().toLowerCase());
+	return parsed.success ? parsed.data : null;
 }
 
-function preservesSafetyInvariant(firewall: GatewayFirewallConfig): boolean {
+function preservesSafetyInvariant(
+	firewall: Partial<GatewayFirewallConfig>
+): boolean {
 	return (
 		firewall.enabled === true &&
 		firewall.scan_inbound === true &&
@@ -111,7 +113,7 @@ export function resolveGatewayPosture({
 }: {
 	approvalMode: ApprovalMode;
 	execApprovalEnabled: boolean;
-	firewall: GatewayFirewallConfig;
+	firewall: Partial<GatewayFirewallConfig>;
 }): ResolvedGatewayPosture {
 	if (!(preservesSafetyInvariant(firewall) && execApprovalEnabled)) {
 		return "custom";
@@ -129,7 +131,7 @@ export function resolveGatewayPosture({
 }
 
 export function firewallForPosture(
-	current: GatewayFirewallConfig,
+	current: Partial<GatewayFirewallConfig>,
 	posture: GatewayPosture
 ): GatewayFirewallConfig {
 	return {
@@ -192,7 +194,10 @@ export async function applyGatewayPosture(
 	}
 	const current = await fetchGatewayConfig(target);
 	const firewall = firewallForPosture(current.firewall, posture);
-	const result = await updateGatewayConfig(target, { firewall });
+	const result = await updateGatewayConfig(target, {
+		firewall,
+		expectedRevision: current.configRevision ?? undefined,
+	});
 	if (!result.ok) {
 		throw new Error("Gateway rejected the posture change");
 	}

@@ -33,7 +33,7 @@ import {
 	ColorPicker,
 	ColorPickerContent,
 	ColorPickerPanel,
-} from "@ryu/ui/components/color-picker";
+} from "@ryu/ui/components/color-picker.tsx";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 import {
 	DropdownMenu,
@@ -49,6 +49,8 @@ import {
 	PopoverAnchor,
 	PopoverContent,
 } from "@ryu/ui/components/editor/ui/popover.tsx";
+import { useDropNudge } from "@ryu/ui/hooks/use-drop-nudge.ts";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	ArrowDown,
@@ -88,10 +90,12 @@ import {
 	useSelected,
 	withHOC,
 } from "platejs/react";
+import type { CSSProperties as ReactCSSProperties } from "react";
 import {
 	type ComponentProps,
 	type CSSProperties,
 	createContext,
+	type KeyboardEvent,
 	memo,
 	type PointerEvent,
 	type ReactNode,
@@ -104,7 +108,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-
+import editorStyles from "../editor-lint.module.css";
 import { blockSelectionVariants } from "./block-selection.tsx";
 import {
 	BorderAllIcon,
@@ -116,6 +120,29 @@ import {
 } from "./table-icons.tsx";
 import { Toolbar, ToolbarButton, ToolbarGroup } from "./toolbar.tsx";
 
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editortableNode1-padding-left"?: string | number;
+	"--editortableNode2-max-width"?: string | number;
+	"--editortableNode2-min-width"?: string | number;
+	"--editortableNode2-width"?: string | number;
+	"--editortableNode3-max-width"?: string | number;
+	"--editortableNode3-min-width"?: string | number;
+	"--editortableNode3-width"?: string | number;
+}
+
+interface TableLayoutStyle extends CSSProperties {
+	"--table-width": string;
+}
+interface TableColumnStyle extends CSSProperties {
+	[column: `--table-col-${number}`]: string;
+}
+interface TableRowStyle extends CSSProperties {
+	"--tableRowMinHeight"?: string;
+}
+interface TableCellStyle extends CSSProperties {
+	"--cellBackground"?: TTableCellElement["background"];
+	"--cellWidth"?: string;
+}
 type TableResizeDirection = "bottom" | "left" | "right";
 
 interface TableResizeStartOptions {
@@ -136,7 +163,11 @@ interface TableResizeDragState {
 
 interface TableResizeContextValue {
 	clearResizePreview: (handleKey: string) => void;
+	colSizes: number[];
 	disableMarginLeft: boolean;
+	marginLeft: number;
+	minColumnWidth: number;
+	resizeBy: (options: TableResizeStartOptions, delta: number) => void;
 	setResizePreview: (
 		event: PointerEvent<HTMLDivElement>,
 		options: TableResizeStartOptions
@@ -150,6 +181,8 @@ interface TableResizeContextValue {
 const TABLE_CONTROL_COLUMN_WIDTH = 8;
 const TABLE_DEFAULT_COLUMN_WIDTH = 120;
 const TABLE_DEFERRED_COLUMN_RESIZE_CELL_COUNT = 1200;
+const TABLE_KEYBOARD_RESIZE_STEP = 8;
+const TABLE_KEYBOARD_RESIZE_LARGE_STEP = 40;
 const TABLE_MULTI_SELECTION_TOOLBAR_DELAY_MS = 150;
 
 const TableResizeContext = createContext<TableResizeContextValue | null>(null);
@@ -623,15 +656,82 @@ function useTableResizeController({
 		]
 	);
 
+	// Keyboard alternative to the drag (WCAG 2.1.1 / 2.5.7): runs the same
+	// resize math as a pointer drag of `delta` pixels and commits immediately.
+	const resizeBy = useCallback(
+		(
+			{ colIndex, direction, rowIndex }: TableResizeStartOptions,
+			delta: number
+		) => {
+			if (dragStateRef.current) {
+				return;
+			}
+
+			const rowHeight =
+				tableRef.current?.rows.item(rowIndex)?.getBoundingClientRect().height ??
+				0;
+
+			dragStateRef.current = {
+				colIndex,
+				direction,
+				initialPosition: 0,
+				initialSize:
+					direction === "bottom"
+						? rowHeight
+						: (effectiveColSizesRef.current[colIndex] ??
+							TABLE_DEFAULT_COLUMN_WIDTH),
+				marginLeft: marginLeftRef.current,
+				rowIndex,
+			};
+			applyResize({ clientX: delta, clientY: delta }, true);
+			dragStateRef.current = null;
+		},
+		[applyResize, tableRef]
+	);
+
 	return useMemo(
 		() => ({
 			clearResizePreview,
+			colSizes: effectiveColSizes,
 			disableMarginLeft,
+			marginLeft,
+			minColumnWidth,
+			resizeBy,
 			setResizePreview,
 			startResize,
 		}),
-		[clearResizePreview, disableMarginLeft, setResizePreview, startResize]
+		[
+			clearResizePreview,
+			disableMarginLeft,
+			effectiveColSizes,
+			marginLeft,
+			minColumnWidth,
+			resizeBy,
+			setResizePreview,
+			startResize,
+		]
 	);
+}
+
+function getKeyboardResizeDelta(
+	event: KeyboardEvent<HTMLDivElement>,
+	direction: TableResizeDirection
+): number | null {
+	const step = event.shiftKey
+		? TABLE_KEYBOARD_RESIZE_LARGE_STEP
+		: TABLE_KEYBOARD_RESIZE_STEP;
+	const decreaseKey = direction === "bottom" ? "ArrowUp" : "ArrowLeft";
+	const increaseKey = direction === "bottom" ? "ArrowDown" : "ArrowRight";
+
+	if (event.key === decreaseKey) {
+		return -step;
+	}
+
+	if (event.key === increaseKey) {
+		return step;
+	}
+
+	return null;
 }
 
 export const TableElement = withHOC(
@@ -680,47 +780,65 @@ export const TableElement = withHOC(
 				() => TABLE_DEFAULT_COLUMN_WIDTH
 			);
 		}, [colSizes, props.element]);
-		const tableVariableStyle = useMemo(() => {
-			if (resolvedColSizes.length === 0) {
-				return;
-			}
+		const tableVariableStyle: TableColumnStyle = {};
+		resolvedColSizes.forEach((colSize, index) => {
+			tableVariableStyle[`--table-col-${index}`] = `${colSize}px`;
+		});
+		const tableStyle: TableLayoutStyle = {
+			"--table-width": `${resolvedColSizes.reduce((total, colSize) => total + colSize, 0) + controlColumnWidth}px`,
+		};
 
-			return {
-				...Object.fromEntries(
-					resolvedColSizes.map((colSize, index) => [
-						`--table-col-${index}`,
-						`${colSize}px`,
-					])
-				),
-			} as CSSProperties;
-		}, [resolvedColSizes]);
-		const tableStyle = useMemo(
-			() =>
-				({
-					width: `${
-						resolvedColSizes.reduce((total, colSize) => total + colSize, 0) +
-						controlColumnWidth
-					}px`,
-				}) as CSSProperties,
-			[controlColumnWidth, resolvedColSizes]
-		);
-
+		// SAFETY: Native useBlockSelected forwards this id to isSelected, which
+		// uses truthiness and Set.has on the original identity, not string APIs.
 		const isSelectingTable = useBlockSelected(props.element.id as string);
 
+		const editortableNode1Style: EditorVariableStyle = {
+			"--editortableNode1-padding-left": isNativeNumber(marginLeft)
+				? `${marginLeft}px`
+				: marginLeft,
+		};
+		const editortableNode2Style: EditorVariableStyle = {
+			"--editortableNode2-max-width": isNativeNumber(TABLE_CONTROL_COLUMN_WIDTH)
+				? `${TABLE_CONTROL_COLUMN_WIDTH}px`
+				: TABLE_CONTROL_COLUMN_WIDTH,
+			"--editortableNode2-min-width": isNativeNumber(TABLE_CONTROL_COLUMN_WIDTH)
+				? `${TABLE_CONTROL_COLUMN_WIDTH}px`
+				: TABLE_CONTROL_COLUMN_WIDTH,
+			"--editortableNode2-width": isNativeNumber(TABLE_CONTROL_COLUMN_WIDTH)
+				? `${TABLE_CONTROL_COLUMN_WIDTH}px`
+				: TABLE_CONTROL_COLUMN_WIDTH,
+		};
 		const content = (
 			<PlateElement
 				{...props}
 				className={cn(
-					"overflow-x-auto py-5",
-					hasControls && "-ms-2 *:data-[slot=block-selection]:start-2"
+					cn(
+						"overflow-x-auto py-5",
+						hasControls && "-ms-2 *:data-[slot=block-selection]:start-2"
+					),
+					editorStyles.editortableNode1
 				)}
-				style={{ paddingLeft: marginLeft }}
+				style={editortableNode1Style}
 			>
 				<TableResizeContext.Provider value={resizeController}>
 					<div
 						className="group/table relative w-fit"
-						ref={wrapperRef}
-						style={tableVariableStyle}
+						ref={(element) => {
+							wrapperRef.current = element;
+							if (!element) {
+								return;
+							}
+							for (const [property, value] of Object.entries(
+								tableVariableStyle
+							)) {
+								element.style.setProperty(property, value);
+							}
+							return () => {
+								for (const property of Object.keys(tableVariableStyle)) {
+									element.style.removeProperty(property);
+								}
+							};
+						}}
 					>
 						<div
 							className="pointer-events-none absolute inset-y-0 z-36 hidden w-[3px] -translate-x-[1.5px] bg-ring/70 rtl:translate-x-[1.5px]"
@@ -734,7 +852,7 @@ export const TableElement = withHOC(
 						/>
 						<table
 							className={cn(
-								"ms-px me-0 table h-px table-fixed border-collapse",
+								"ms-px me-0 table h-px w-(--table-width) table-fixed border-collapse",
 								"data-[table-selecting=true]:[&_*::selection]:!bg-transparent",
 								"data-[table-selecting=true]:[&_*::selection]:!text-inherit",
 								"data-[table-selecting=true]:[&_*::-moz-selection]:!bg-transparent",
@@ -749,23 +867,30 @@ export const TableElement = withHOC(
 								<colgroup>
 									{hasControls && (
 										<col
-											style={{
-												maxWidth: TABLE_CONTROL_COLUMN_WIDTH,
-												minWidth: TABLE_CONTROL_COLUMN_WIDTH,
-												width: TABLE_CONTROL_COLUMN_WIDTH,
-											}}
+											className={editorStyles.editortableNode2}
+											style={editortableNode2Style}
 										/>
 									)}
-									{resolvedColSizes.map((colSize, index) => (
-										<col
-											key={index}
-											style={{
-												maxWidth: colSize,
-												minWidth: colSize,
-												width: colSize,
-											}}
-										/>
-									))}
+									{resolvedColSizes.map((colSize, index) => {
+										const editortableNode3Style: EditorVariableStyle = {
+											"--editortableNode3-max-width": isNativeNumber(colSize)
+												? `${colSize}px`
+												: colSize,
+											"--editortableNode3-min-width": isNativeNumber(colSize)
+												? `${colSize}px`
+												: colSize,
+											"--editortableNode3-width": isNativeNumber(colSize)
+												? `${colSize}px`
+												: colSize,
+										};
+										return (
+											<col
+												className={editorStyles.editortableNode3}
+												key={index}
+												style={editortableNode3Style}
+											/>
+										);
+									})}
 								</colgroup>
 							)}
 							<tbody className="min-w-full">{children}</tbody>
@@ -1183,16 +1308,12 @@ export function TableRowElement({
 	const { element } = props;
 	const readOnly = useReadOnly();
 	const editor = useEditorRef();
-	const rowIndex = useElementSelector(([, path]) => path.at(-1) as number, [], {
+	const rowIndex = useElementSelector(([, path]) => path.at(-1) ?? 0, [], {
 		key: KEYS.tr,
 	});
-	const rowSize = useElementSelector(
-		([node]) => (node as TTableRowElement).size,
-		[],
-		{
-			key: KEYS.tr,
-		}
-	);
+	const rowSize = useElementSelector(([node]) => node.size, [], {
+		key: KEYS.tr,
+	});
 	const rowSizeOverrides = useTableValue("rowSizeOverrides");
 	const rowMinHeight = rowSizeOverrides.get?.(rowIndex) ?? rowSize;
 	const isSelectionAreaVisible = usePluginOption(
@@ -1210,6 +1331,7 @@ export function TableRowElement({
 				PathApi.parent(dropEntry[1])
 			),
 		onDropHandler: (_, { dragItem }) => {
+			// SAFETY: This row uses native useDraggable without a custom drag item. Its installed producer captures element from editor.api.node, and useDropNode routes file items away before this handler. The existing element guard is retained; this local producer bridge does not validate forged foreign drag payloads.
 			const dragElement = (dragItem as { element: TElement }).element;
 
 			if (dragElement) {
@@ -1218,18 +1340,17 @@ export function TableRowElement({
 		},
 	});
 
+	const rowStyle: TableRowStyle = {
+		...props.style,
+		"--tableRowMinHeight": rowMinHeight ? `${rowMinHeight}px` : undefined,
+	};
 	return (
 		<PlateElement
 			{...props}
 			as="tr"
 			className={cn("group/row", isDragging && "opacity-50")}
 			ref={useComposedRef(props.ref, previewRef, nodeRef)}
-			style={
-				{
-					...props.style,
-					"--tableRowMinHeight": rowMinHeight ? `${rowMinHeight}px` : undefined,
-				} as CSSProperties
-			}
+			style={rowStyle}
 		>
 			{hasControls && (
 				<td
@@ -1237,7 +1358,7 @@ export function TableRowElement({
 					contentEditable={false}
 				>
 					<RowDragHandle dragRef={handleRef} />
-					<RowDropLine />
+					<RowDropGap rowRef={nodeRef} />
 				</td>
 			)}
 
@@ -1294,21 +1415,12 @@ function RowDragHandle({ dragRef }: { dragRef: Ref<any> }) {
 	);
 }
 
-function RowDropLine() {
+/** Eases this row and its neighbour apart where a dragged row would drop, in
+ *  place of a drawn drop line. */
+function RowDropGap({ rowRef }: { rowRef: RefObject<HTMLElement | null> }) {
 	const { dropLine } = useDropLine();
-
-	if (!dropLine) {
-		return null;
-	}
-
-	return (
-		<div
-			className={cn(
-				"reorder-drop-indicator absolute inset-x-0 start-2 z-50 h-0.5 bg-brand/50",
-				dropLine === "top" ? "-top-px" : "-bottom-px"
-			)}
-		/>
-	);
+	useDropNudge(rowRef, dropLine);
+	return null;
 }
 
 export function TableCellElement({
@@ -1320,9 +1432,13 @@ export function TableCellElement({
 	const readOnly = useReadOnly();
 	const element = props.element;
 
+	// SAFETY: This selector forwards the raw table identity only to native
+	// useBlockSelected/isSelected (truthiness and Set.has); it proves no string.
 	const tableId = useElementSelector(([node]) => node.id as string, [], {
 		key: KEYS.table,
 	});
+	// SAFETY: The raw row identity is consumed by the same native Set.has
+	// selection path below. The narrower annotation does not validate its kind.
 	const rowId = useElementSelector(([node]) => node.id as string, [], {
 		key: KEYS.tr,
 	});
@@ -1336,6 +1452,10 @@ export function TableCellElement({
 	const { borders, colIndex, colSpan, rowIndex, rowSpan, width } =
 		useTableCellPresentation(element);
 
+	const cellStyle: TableCellStyle = {
+		"--cellBackground": element.background,
+		"--cellWidth": `${width}px`,
+	};
 	return (
 		<PlateElement
 			{...props}
@@ -1347,33 +1467,25 @@ export function TableCellElement({
 				rowSpan,
 			}}
 			className={cn(
-				"relative h-full overflow-visible border-none bg-background p-0",
+				"relative h-full min-w-(--cellWidth) max-w-(--cellWidth) overflow-visible border-none bg-background p-0",
 				element.background ? "bg-(--cellBackground)" : "bg-background",
 				isHeader && "text-start *:m-0",
 				"before:size-full",
 				"data-[table-cell-selected=true]:before:z-10",
-				"data-[table-cell-selected=true]:before:bg-brand/5",
+				"data-[table-cell-selected=true]:before:bg-primary/5",
 				"before:absolute before:box-border before:select-none before:content-['']",
 				borders.bottom?.size && "before:border-b before:border-b-border",
 				borders.right?.size && "before:border-e before:border-e-border",
 				borders.left?.size && "before:border-s before:border-s-border",
 				borders.top?.size && "before:border-t before:border-t-border"
 			)}
-			style={
-				{
-					"--cellBackground": element.background,
-					maxWidth: width,
-					minWidth: width,
-				} as CSSProperties
-			}
+			style={cellStyle}
 		>
 			<div
-				className="relative z-20 box-border h-full px-3 py-2"
-				style={
-					rowSpan === 1
-						? { minHeight: "var(--tableRowMinHeight, 0px)" }
-						: undefined
-				}
+				className={cn(
+					"relative z-20 box-border h-full px-3 py-2",
+					rowSpan === 1 && "min-h-(--tableRowMinHeight,0px)"
+				)}
 			>
 				{props.children}
 			</div>
@@ -1404,7 +1516,11 @@ const TableCellResizeControls = memo(function TableCellResizeControls({
 }) {
 	const {
 		clearResizePreview,
+		colSizes,
 		disableMarginLeft,
+		marginLeft,
+		minColumnWidth,
+		resizeBy,
 		setResizePreview,
 		startResize,
 	} = useTableResizeContext();
@@ -1412,6 +1528,27 @@ const TableCellResizeControls = memo(function TableCellResizeControls({
 	const bottomHandleKey = `bottom:${rowIndex}:${colIndex}`;
 	const leftHandleKey = `left:${rowIndex}:${colIndex}`;
 	const isLeftHandle = colIndex === 0 && !disableMarginLeft;
+	// Every cell carries pointer handles, but only one per boundary joins the
+	// tab order: column handles on the first row, row handles in the first
+	// column. The rest stay pointer-only duplicates hidden from assistive tech.
+	const isColumnHandleFocusable = rowIndex === 0;
+	const isRowHandleFocusable = colIndex === 0;
+	const columnWidth = colSizes[colIndex] ?? TABLE_DEFAULT_COLUMN_WIDTH;
+	const handleResizeKeyDown = (
+		event: KeyboardEvent<HTMLDivElement>,
+		direction: TableResizeDirection,
+		handleKey: string
+	) => {
+		const delta = getKeyboardResizeDelta(event, direction);
+
+		if (delta === null) {
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+		resizeBy({ colIndex, direction, handleKey, rowIndex }, delta);
+	};
 
 	return (
 		<div
@@ -1420,7 +1557,15 @@ const TableCellResizeControls = memo(function TableCellResizeControls({
 			suppressContentEditableWarning={true}
 		>
 			<div
-				className="pointer-events-auto absolute -end-1 -top-2 z-40 h-[calc(100%_+_8px)] w-2 cursor-col-resize touch-none"
+				aria-hidden={isColumnHandleFocusable ? undefined : true}
+				aria-label={isColumnHandleFocusable ? "Resize column" : undefined}
+				aria-orientation={isColumnHandleFocusable ? "vertical" : undefined}
+				aria-valuemin={isColumnHandleFocusable ? minColumnWidth : undefined}
+				aria-valuenow={isColumnHandleFocusable ? columnWidth : undefined}
+				className="pointer-events-auto absolute -end-1 -top-2 z-40 h-[calc(100%_+_8px)] w-2 cursor-col-resize touch-none outline-none focus-visible:bg-ring"
+				onKeyDown={(event) => {
+					handleResizeKeyDown(event, "right", rightHandleKey);
+				}}
 				onPointerDown={(event) => {
 					startResize(event, {
 						colIndex,
@@ -1440,9 +1585,17 @@ const TableCellResizeControls = memo(function TableCellResizeControls({
 				onPointerLeave={() => {
 					clearResizePreview(rightHandleKey);
 				}}
+				role={isColumnHandleFocusable ? "separator" : undefined}
+				tabIndex={isColumnHandleFocusable ? 0 : undefined}
 			/>
 			<div
-				className="pointer-events-auto absolute start-0 -bottom-1 z-40 h-2 w-full cursor-row-resize touch-none"
+				aria-hidden={isRowHandleFocusable ? undefined : true}
+				aria-label={isRowHandleFocusable ? "Resize row" : undefined}
+				aria-orientation={isRowHandleFocusable ? "horizontal" : undefined}
+				className="pointer-events-auto absolute start-0 -bottom-1 z-40 h-2 w-full cursor-row-resize touch-none outline-none focus-visible:bg-ring"
+				onKeyDown={(event) => {
+					handleResizeKeyDown(event, "bottom", bottomHandleKey);
+				}}
 				onPointerDown={(event) => {
 					startResize(event, {
 						colIndex,
@@ -1462,10 +1615,22 @@ const TableCellResizeControls = memo(function TableCellResizeControls({
 				onPointerLeave={() => {
 					clearResizePreview(bottomHandleKey);
 				}}
+				role={isRowHandleFocusable ? "separator" : undefined}
+				tabIndex={isRowHandleFocusable ? 0 : undefined}
 			/>
 			{isLeftHandle && (
 				<div
-					className="pointer-events-auto absolute -start-1 top-0 z-40 h-full w-2 cursor-col-resize touch-none"
+					aria-hidden={isColumnHandleFocusable ? undefined : true}
+					aria-label={
+						isColumnHandleFocusable ? "Resize table left margin" : undefined
+					}
+					aria-orientation={isColumnHandleFocusable ? "vertical" : undefined}
+					aria-valuemin={isColumnHandleFocusable ? 0 : undefined}
+					aria-valuenow={isColumnHandleFocusable ? marginLeft : undefined}
+					className="pointer-events-auto absolute -start-1 top-0 z-40 h-full w-2 cursor-col-resize touch-none outline-none focus-visible:bg-ring"
+					onKeyDown={(event) => {
+						handleResizeKeyDown(event, "left", leftHandleKey);
+					}}
 					onPointerDown={(event) => {
 						startResize(event, {
 							colIndex,
@@ -1485,6 +1650,8 @@ const TableCellResizeControls = memo(function TableCellResizeControls({
 					onPointerLeave={() => {
 						clearResizePreview(leftHandleKey);
 					}}
+					role={isColumnHandleFocusable ? "separator" : undefined}
+					tabIndex={isColumnHandleFocusable ? 0 : undefined}
 				/>
 			)}
 		</div>

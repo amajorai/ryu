@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "description": "Reviewed sources of Ryu's generated tool catalog tier (Treg parity C1), read by tools/tool-catalog-generate.ts. Only vendor-published OpenAPI specs: each source names the spec URL, who publishes it (publishedBy says why it is the vendor's own), the date it was checked and the SHA-256 of the exact bytes the generated rows come from; a spec whose bytes change is refused until a reviewed --refresh. Never another catalog (Treg's catalog and hosted catalog API are refused by the clean-room rule). judgements are reviewed decisions carried by operation (\"METHOD /path\"): exclude it with a reason, or set its endpoint id, title, or platform and capability (capability-taxonomy-v1.json). A judgement whose operation leaves the spec fails the generator. Operations a curated row already covers (tool-catalog-v1.json operation or endpoint id) are left out: curated wins.",
+  "sources": [
+    {
+      "provider": "exa",
+      "specUrl": "https://raw.githubusercontent.com/exa-labs/openapi-spec/master/exa-openapi-spec.yaml",
+      "publishedBy": "Exa, in its own GitHub organization (github.com/exa-labs/openapi-spec)",
+      "checkedOn": "2026-10-21",
+      "sha256": "de1e8f95c9a3c07e807ee0de4d8880816919a04e7e6a8518e319b6dcbaf64d25",
+      "judgements": [
+        {
+          "operation": "GET /research/v0/tasks/{id}",
+          "endpoint": "exa.research_tasks_get",
+          "reason": "The spec's operationId is a server controller name; named to match its sibling research task operations."
+        }
+      ]
+    },
+    {
+      "provider": "tavily",
+      "specUrl": "https://docs.tavily.com/documentation/api-reference/openapi.json",
+      "publishedBy": "Tavily, on its own documentation site, under its API reference (docs.tavily.com/documentation/api-reference)",
+      "checkedOn": "2026-10-21",
+      "sha256": "4958dc0b567ec857892acd088d9a664bb2b35ea501dccc656401c0049986a03a",
+      "judgements": [
+        {
+          "operation": "POST /extract",
+          "platform": "web",
+          "capability": "web.extract",
+          "reason": "Tavily's reference describes it as retrieving the raw content of the given URLs: the web.extract job."
+        },
+        {
+          "operation": "POST /crawl",
+          "platform": "web",
+          "capability": "web.crawl",
+          "reason": "Tavily's reference describes a crawl from a base URL that follows links and returns the pages: the web.crawl job."
+        },
+        {
+          "operation": "POST /feedback",
+          "exclude": "Feedback to Tavily about earlier calls; not a tool an agent calls for a job.",
+          "reason": "Not a tool."
+        },
+        {
+          "operation": "GET /usage",
+          "exclude": "Account administration: reads the key owner's own usage, not a job.",
+          "reason": "Account administration."
+        },
+        {
+          "operation": "POST /logs",
+          "exclude": "Account administration: reads the key owner's own request logs.",
+          "reason": "Account administration."
+        },
+        {
+          "operation": "POST /org-usage",
+          "exclude": "Account administration that needs the organization owner's personal key.",
+          "reason": "Account administration."
+        }
+      ]
+    }
+  ]
+}

@@ -46,6 +46,10 @@ pub struct SyncProfile {
     pub root: String,
     pub import_enabled: bool,
     pub export_enabled: bool,
+    /// Whether the automatic export writes conversation transcripts into the
+    /// bundle. Off by default: the bundle is plaintext outside the data folder.
+    #[serde(default)]
+    pub include_conversations: bool,
     pub status: String,
     pub conflict_count: u64,
     pub last_operation_id: Option<String>,
@@ -92,6 +96,7 @@ pub struct AcpBinding {
     pub working_directory: Option<String>,
     pub capabilities: Value,
     pub updated_at: i64,
+    pub conversation_generation: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -179,6 +184,9 @@ struct ProfileInput {
     import_enabled: bool,
     #[serde(default)]
     export_enabled: bool,
+    /// `None` keeps the stored choice (off for a new profile).
+    #[serde(default)]
+    include_conversations: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -224,7 +232,9 @@ struct ExportInput {
     include_agents: bool,
     #[serde(default = "default_true")]
     include_skills: bool,
-    #[serde(default = "default_true")]
+    /// Conversation transcripts are an explicit opt-in: the bundle is
+    /// plaintext outside the data folder.
+    #[serde(default)]
     include_conversations: bool,
 }
 
@@ -288,6 +298,7 @@ pub fn global_store() -> Option<AgentSyncStore> {
 /// it with the agent's actual capability record.
 pub(crate) fn remember_native_session(
     conversation_id: &str,
+    generation: &str,
     agent_id: &str,
     engine: &str,
     native_session_id: &str,
@@ -304,6 +315,7 @@ pub(crate) fn remember_native_session(
         native_session_id,
         working_directory,
         &json!({ "source": "native-history" }),
+        generation,
     ) {
         tracing::debug!("agent sync: native session binding skipped: {error:#}");
     }
@@ -318,7 +330,7 @@ pub fn local_node_id() -> String {
 
 impl AgentSyncStore {
     pub fn open_default() -> Result<Self> {
-        Self::open(crate::paths::ryu_dir().join("agent-sync.db"))
+        Self::open(crate::paths::db_path("agent-sync.db"))
     }
 
     pub fn open(path: PathBuf) -> Result<Self> {
@@ -328,7 +340,17 @@ impl AgentSyncStore {
         }
         let conn = Connection::open(&path)
             .with_context(|| format!("opening agent sync database {}", path.display()))?;
+        // This connection ATTACHes conversations.db, which the conversation
+        // store writes through its own connection; wait out a transient lock
+        // instead of failing the sync read with SQLITE_BUSY.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         init_schema(&conn)?;
+        attach_conversations(
+            &conn,
+            path.parent()
+                .map(|parent| parent.join("conversations.db"))
+                .as_deref(),
+        )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             active: Arc::new(Mutex::new(HashSet::new())),
@@ -340,11 +362,21 @@ impl AgentSyncStore {
     fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().context("opening in-memory sync database")?;
         init_schema(&conn)?;
+        attach_conversations(&conn, None)?;
+        conn.execute("INSERT INTO conversation_state.conversation_generations VALUES ('conversation-1', 'test-generation')", [])?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             active: Arc::new(Mutex::new(HashSet::new())),
             node_id: "test-node".to_owned(),
         })
+    }
+
+    pub fn current_generation(&self, conversation_id: &str) -> Result<Option<String>> {
+        let conn = self
+            .conn
+            .try_lock()
+            .map_err(|_| anyhow::anyhow!("sync database busy"))?;
+        conn.query_row("SELECT generation FROM conversation_state.conversation_generations WHERE conversation_id = ?1", [conversation_id], |row| row.get(0)).optional().context("reading conversation generation")
     }
 
     pub fn node_id(&self) -> &str {
@@ -355,7 +387,7 @@ impl AgentSyncStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
             "SELECT id, provider, root, import_enabled, export_enabled, status,
-                    conflict_count, last_operation_id, updated_at
+                    conflict_count, last_operation_id, updated_at, include_conversations
              FROM sync_profiles ORDER BY provider, root",
         )?;
         let rows = stmt.query_map([], profile_from_row)?;
@@ -367,7 +399,7 @@ impl AgentSyncStore {
         let conn = self.conn.lock().await;
         conn.query_row(
             "SELECT id, provider, root, import_enabled, export_enabled, status,
-                    conflict_count, last_operation_id, updated_at
+                    conflict_count, last_operation_id, updated_at, include_conversations
              FROM sync_profiles WHERE id = ?1",
             [id],
             profile_from_row,
@@ -381,7 +413,7 @@ impl AgentSyncStore {
         let conn = self.conn.lock().await;
         conn.query_row(
             "SELECT id, provider, root, import_enabled, export_enabled, status,
-                    conflict_count, last_operation_id, updated_at
+                    conflict_count, last_operation_id, updated_at, include_conversations
              FROM sync_profiles WHERE root = ?1",
             [root],
             profile_from_row,
@@ -417,14 +449,16 @@ impl AgentSyncStore {
             conn.execute(
                 "UPDATE sync_profiles
                  SET provider = ?1, import_enabled = ?2, export_enabled = ?3,
-                     updated_at = ?4
+                     updated_at = ?4,
+                     include_conversations = COALESCE(?6, include_conversations)
                  WHERE id = ?5",
                 params![
                     provider,
                     input.import_enabled as i64,
                     input.export_enabled as i64,
                     now,
-                    existing_id
+                    existing_id,
+                    input.include_conversations.map(i64::from)
                 ],
             )?;
             drop(conn);
@@ -436,15 +470,16 @@ impl AgentSyncStore {
         conn.execute(
             "INSERT INTO sync_profiles
                 (id, provider, root, import_enabled, export_enabled, status,
-                 conflict_count, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'idle', 0, ?6)",
+                 conflict_count, updated_at, include_conversations)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'idle', 0, ?6, ?7)",
             params![
                 id,
                 provider,
                 root,
                 input.import_enabled as i64,
                 input.export_enabled as i64,
-                now
+                now,
+                i64::from(input.include_conversations.unwrap_or(false))
             ],
         )?;
         drop(conn);
@@ -534,21 +569,69 @@ impl AgentSyncStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
             "SELECT node_id, conversation_id, agent_id, engine, native_session_id,
-                    working_directory, capabilities_json, updated_at
-             FROM acp_bindings ORDER BY updated_at DESC",
+                    working_directory, capabilities_json, updated_at, conversation_generation
+             FROM acp_bindings WHERE EXISTS (SELECT 1 FROM conversation_state.conversation_generations g WHERE g.conversation_id = acp_bindings.conversation_id AND g.generation = acp_bindings.conversation_generation) ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([], binding_from_row)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("listing ACP bindings")
     }
 
+    /// The native session this node last recorded for one agent in one
+    /// conversation, which a respawned ACP instance can resume.
+    pub async fn binding_for_agent(
+        &self,
+        conversation_id: &str,
+        agent_id: &str,
+    ) -> Result<Option<AcpBinding>> {
+        let conn = self.conn.lock().await;
+        conn.query_row(
+            "SELECT node_id, conversation_id, agent_id, engine, native_session_id,
+                    working_directory, capabilities_json, updated_at, conversation_generation
+             FROM acp_bindings
+             WHERE node_id = ?1 AND conversation_id = ?2 AND agent_id = ?3 AND EXISTS (SELECT 1 FROM conversation_state.conversation_generations g WHERE g.conversation_id = acp_bindings.conversation_id AND g.generation = acp_bindings.conversation_generation)
+             LIMIT 1",
+            params![self.node_id, conversation_id, agent_id],
+            binding_from_row,
+        )
+        .optional()
+        .context("reading ACP binding for agent")
+    }
+
+    /// Every native session id this node recorded for one conversation (any
+    /// agent or generation), for deleting the agents' own transcripts with it.
+    pub async fn native_sessions_for(&self, conversation_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT native_session_id FROM acp_bindings
+             WHERE node_id = ?1 AND conversation_id = ?2 AND native_session_id <> ''",
+        )?;
+        let rows = stmt.query_map(params![self.node_id, conversation_id], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("listing native sessions")
+    }
+
+    /// Forget this node's native ACP sessions for one conversation, so the next
+    /// turn starts a fresh agent session from Ryu's transcript instead of
+    /// resuming one that remembers turns the user rewound.
+    pub async fn forget_acp_bindings(&self, conversation_id: &str) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM acp_bindings WHERE node_id = ?1 AND conversation_id = ?2",
+            params![self.node_id, conversation_id],
+        )
+        .context("forgetting ACP bindings")
+    }
+
     async fn binding_for(&self, conversation_id: &str) -> Result<Option<AcpBinding>> {
         let conn = self.conn.lock().await;
         conn.query_row(
             "SELECT node_id, conversation_id, agent_id, engine, native_session_id,
-                    working_directory, capabilities_json, updated_at
+                    working_directory, capabilities_json, updated_at, conversation_generation
              FROM acp_bindings
-             WHERE node_id = ?1 AND conversation_id = ?2
+             WHERE node_id = ?1 AND conversation_id = ?2 AND EXISTS (SELECT 1 FROM conversation_state.conversation_generations g WHERE g.conversation_id = acp_bindings.conversation_id AND g.generation = acp_bindings.conversation_generation)
              ORDER BY updated_at DESC LIMIT 1",
             params![self.node_id, conversation_id],
             binding_from_row,
@@ -597,6 +680,7 @@ impl AgentSyncStore {
         native_session_id: &str,
         working_directory: Option<&Path>,
         capabilities: &Value,
+        generation: &str,
     ) -> Result<()> {
         let conn = self
             .conn
@@ -611,6 +695,7 @@ impl AgentSyncStore {
             native_session_id,
             working_directory,
             capabilities,
+            generation,
         )
     }
 
@@ -622,6 +707,7 @@ impl AgentSyncStore {
         native_session_id: &str,
         working_directory: Option<&Path>,
         capabilities: &Value,
+        generation: &str,
     ) -> Result<()> {
         let conn = self.conn.lock().await;
         record_acp_binding_conn(
@@ -633,6 +719,7 @@ impl AgentSyncStore {
             native_session_id,
             working_directory,
             capabilities,
+            generation,
         )
     }
 }
@@ -646,18 +733,21 @@ fn record_acp_binding_conn(
     native_session_id: &str,
     working_directory: Option<&Path>,
     capabilities: &Value,
+    generation: &str,
 ) -> Result<()> {
-    conn.execute(
+    let changed = conn.execute(
         "INSERT INTO acp_bindings
                 (node_id, conversation_id, agent_id, engine, native_session_id,
-                 working_directory, capabilities_json, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 working_directory, capabilities_json, updated_at, conversation_generation)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+             WHERE EXISTS (SELECT 1 FROM conversation_state.conversation_generations WHERE conversation_id = ?2 AND generation = ?9)
              ON CONFLICT(node_id, conversation_id, agent_id) DO UPDATE SET
                 engine = excluded.engine,
                 native_session_id = excluded.native_session_id,
                 working_directory = excluded.working_directory,
                 capabilities_json = excluded.capabilities_json,
-                updated_at = excluded.updated_at",
+                updated_at = excluded.updated_at,
+                conversation_generation = excluded.conversation_generation",
         params![
             node_id,
             conversation_id,
@@ -667,8 +757,10 @@ fn record_acp_binding_conn(
             working_directory.map(|path| path.to_string_lossy().to_string()),
             serde_json::to_string(capabilities)?,
             now_ms(),
+            generation,
         ],
     )?;
+    anyhow::ensure!(changed == 1, "conversation generation is no longer current");
     Ok(())
 }
 
@@ -1054,14 +1146,35 @@ async fn resume_acp(
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_default();
-    let native_session_id = binding.native_session_id.clone();
-    match crate::sidecar::adapters::acp::load_acp_session(
-        spawn_cmd,
-        native_session_id.clone(),
-        cwd,
-    )
-    .await
+    if store
+        .current_generation(&conversation_id)
+        .ok()
+        .flatten()
+        .as_deref()
+        != Some(binding.conversation_generation.as_str())
     {
+        return error_response_with(
+            StatusCode::CONFLICT,
+            "Conversation changed; retry from its current transcript",
+        );
+    }
+    let native_session_id = binding.native_session_id.clone();
+    let loaded =
+        crate::sidecar::adapters::acp::load_acp_session(spawn_cmd, native_session_id.clone(), cwd)
+            .await;
+    if store
+        .current_generation(&conversation_id)
+        .ok()
+        .flatten()
+        .as_deref()
+        != Some(binding.conversation_generation.as_str())
+    {
+        return error_response_with(
+            StatusCode::CONFLICT,
+            "Conversation changed; retry from its current transcript",
+        );
+    }
+    match loaded {
         Ok(response) if response.get("supported").and_then(Value::as_bool) == Some(true) => {
             let mode = response
                 .get("mode")
@@ -1147,7 +1260,7 @@ async fn import_items(
             let requested_root = match crate::import::canonicalize_root(requested_root) {
                 Ok(root) => root,
                 Err(error) => {
-                    return error_response_with(StatusCode::BAD_REQUEST, &error.to_string())
+                    return error_response_with(StatusCode::BAD_REQUEST, &error.to_string());
                 }
             };
             if requested_root != configured_root {
@@ -1220,6 +1333,10 @@ async fn import_items(
     let mut source_hashes = HashMap::new();
     for selection in selections {
         let selection_key = selection_key(&selection);
+        if let Some(reason) = own_skill_skip_reason(&store, &profile.id, &root, &selection).await {
+            skipped_hashes.insert(selection_key.clone(), reason.to_owned());
+            continue;
+        }
         let source_hash = match hash_results.remove(&selection_key) {
             Some(result) => result,
             None => Err(anyhow::anyhow!("selected item was not hashed")),
@@ -1565,7 +1682,7 @@ async fn resolve_conflict(
                     false,
                     true,
                     true,
-                    true,
+                    profile.include_conversations,
                     &caller,
                     Some((input.kind.as_str(), input.item_id.as_str())),
                 )
@@ -2185,6 +2302,19 @@ fn init_schema(conn: &Connection) -> Result<()> {
              ON acp_bindings(node_id, conversation_id);",
     )
     .context("initializing agent sync schema")?;
+    let has_generation = {
+        let mut stmt = conn.prepare("PRAGMA table_info(acp_bindings)")?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        columns.iter().any(|name| name == "conversation_generation")
+    };
+    if !has_generation {
+        conn.execute(
+            "ALTER TABLE acp_bindings ADD COLUMN conversation_generation TEXT",
+            [],
+        )?;
+    }
     let has_revision = {
         let mut stmt = conn.prepare("PRAGMA table_info(sync_items)")?;
         let names = stmt
@@ -2195,6 +2325,20 @@ fn init_schema(conn: &Connection) -> Result<()> {
     if !has_revision {
         conn.execute(
             "ALTER TABLE sync_items ADD COLUMN revision INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    let has_include_conversations = {
+        let mut stmt = conn.prepare("PRAGMA table_info(sync_profiles)")?;
+        let names = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        names.iter().any(|name| name == "include_conversations")
+    };
+    if !has_include_conversations {
+        // Existing profiles stop exporting conversations until the user opts in.
+        conn.execute(
+            "ALTER TABLE sync_profiles ADD COLUMN include_conversations INTEGER NOT NULL DEFAULT 0",
             [],
         )?;
     }
@@ -2212,6 +2356,7 @@ fn profile_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SyncProfile> {
         conflict_count: row.get::<_, i64>(6)?.max(0) as u64,
         last_operation_id: row.get(7)?,
         updated_at: row.get(8)?,
+        include_conversations: row.get::<_, i64>(9)? != 0,
     })
 }
 
@@ -2231,6 +2376,19 @@ fn item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SyncItemStatus> {
     })
 }
 
+fn attach_conversations(conn: &Connection, path: Option<&Path>) -> Result<()> {
+    if let Some(path) = path.filter(|path| path.is_file()) {
+        conn.execute(
+            "ATTACH DATABASE ?1 AS conversation_state",
+            [path.to_string_lossy().as_ref()],
+        )?;
+    } else {
+        conn.execute("ATTACH DATABASE ':memory:' AS conversation_state", [])?;
+        conn.execute("CREATE TABLE conversation_state.conversation_generations (conversation_id TEXT PRIMARY KEY, generation TEXT NOT NULL)", [])?;
+    }
+    Ok(())
+}
+
 fn binding_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AcpBinding> {
     let capabilities = row
         .get::<_, String>(6)
@@ -2246,6 +2404,7 @@ fn binding_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AcpBinding> {
         working_directory: row.get(5)?,
         capabilities,
         updated_at: row.get(7)?,
+        conversation_generation: row.get(8)?,
     })
 }
 
@@ -2258,7 +2417,21 @@ fn normalize_provider(input: &str) -> Result<String> {
     if provider.is_empty() {
         bail!("provider is empty");
     }
-    if !matches!(provider.as_str(), "claude" | "codex" | "cursor" | "other") {
+    if !matches!(
+        provider.as_str(),
+        "claude"
+            | "codex"
+            | "cursor"
+            | "openclaw"
+            | "hermes"
+            | "muse"
+            | "mastra"
+            | "langchain"
+            | "persona"
+            | "chatgpt"
+            | "claude-ai"
+            | "other"
+    ) {
         bail!("unsupported provider {provider:?}");
     }
     Ok(provider)
@@ -2273,6 +2446,9 @@ fn detect_provider(root: &Path) -> String {
             ".cursor" => "cursor",
             _ => "other",
         })
+        .filter(|provider| *provider != "other")
+        .or_else(|| crate::import::chat_exports::detect(root).map(|s| s.id()))
+        .or_else(|| crate::import::frameworks::detect(root).map(|f| f.id()))
         .unwrap_or("other")
         .to_owned()
 }
@@ -2298,8 +2474,141 @@ fn hash_selected_item_with_budget(
     selection: &ImportSelection,
     budget: &mut HashBudget,
 ) -> Result<Option<String>> {
+    // Chat-export items dedupe per conversation / per memory entry inside the
+    // importer, and their source files can be far larger than the hash budget,
+    // so they are tracked by a fingerprint of the export's file metadata.
+    if is_chat_export_selection(selection) {
+        return chat_export_fingerprint(root).map(Some);
+    }
     let path = crate::import::resolve_item_path(root, &selection.id)?;
     Ok(Some(hash_path_with_budget(&path, budget)?))
+}
+
+/// A ChatGPT / Claude export item: a conversation group or saved context.
+fn is_chat_export_selection(selection: &ImportSelection) -> bool {
+    selection.kind == crate::import::kind::CONVERSATIONS
+        || selection
+            .id
+            .ends_with(&format!("#{}", crate::import::chat_exports::SAVED_CONTEXT))
+}
+
+/// Names, sizes, and modification times of the files of a ChatGPT / Claude
+/// export that the importer reads: its conversation, project and memory files
+/// at the top level plus the records in `projects/` and `memories/`. A newer
+/// export unzipped over the folder changes it, without reading any file.
+fn chat_export_fingerprint(root: &Path) -> Result<String> {
+    let mut hasher = Sha256::new();
+    for folder in ["", "projects", "memories"] {
+        let dir = root.join(folder);
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) if !folder.is_empty() && error.kind() == std::io::ErrorKind::NotFound => {
+                continue;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("reading directory {}", dir.display()))
+            }
+        };
+        // Only the files the importer reads count. An export of a heavy account
+        // also holds a file for every image it handled, thousands of them;
+        // counting those would put it past the entry limit, and an export that
+        // cannot be fingerprinted is never imported and is parsed again on every
+        // tick.
+        let mut entries = entries
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .map_or(true, |entry| reads_export_file(folder, &entry.file_name()))
+            })
+            .take(MAX_HASH_ENTRIES.saturating_add(1))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        if entries.len() > MAX_HASH_ENTRIES {
+            bail!("hash entry limit exceeded");
+        }
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if !metadata.is_file() {
+                continue;
+            }
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |since| since.as_nanos());
+            hasher.update(folder.as_bytes());
+            hasher.update([0]);
+            hasher.update(entry.file_name().as_encoded_bytes());
+            hasher.update([0]);
+            hasher.update(metadata.len().to_le_bytes());
+            hasher.update(modified.to_le_bytes());
+        }
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Whether the importer reads this file of an export folder: the conversation,
+/// project, memory and marker files at the top level, and the `.json` records in
+/// `projects/` and `memories/`.
+fn reads_export_file(folder: &str, name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    if folder.is_empty() {
+        return crate::import::chat_exports::is_import_file(name);
+    }
+    Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        == Some("json")
+}
+
+/// Why a scanned skill must not be imported because it is Ryu's own skill:
+/// a directory inside Ryu's skills install dir (installing it would delete
+/// the very directory it copies from), or a `SKILL.md` that `project_skills`
+/// wrote for this profile and that nothing has changed since. Re-importing a
+/// projection would replace the real skill (and its bundled resources) with
+/// the one-file projection and re-activate a skill the user disabled.
+async fn own_skill_skip_reason(
+    store: &AgentSyncStore,
+    profile_id: &str,
+    root: &Path,
+    selection: &ImportSelection,
+) -> Option<&'static str> {
+    if selection.kind != crate::import::kind::SKILL {
+        return None;
+    }
+    let dir = crate::import::resolve_item_path(root, &selection.id).ok()?;
+    if is_inside_skills_install_dir(&dir) {
+        return Some("already a Ryu skill install");
+    }
+    let rel = selection
+        .id
+        .strip_prefix(crate::import::kind::SKILL)?
+        .strip_prefix('/')?;
+    let source_id = format!("{rel}/SKILL.md");
+    let previous = store
+        .item(profile_id, "skill", &source_id)
+        .await
+        .ok()
+        .flatten()?;
+    // Only a "projected" row's hash is Ryu's own output. An "external" row's
+    // adopted hash is the agent's or user's edit that "keep external" chose
+    // over Ryu's projection, so importing it must still go through.
+    if previous.state != "projected" {
+        return None;
+    }
+    let projected_hash = previous.generated_hash?;
+    let current_hash = sha256_bytes(&fs::read(dir.join("SKILL.md")).ok()?);
+    (current_hash == projected_hash).then_some("generated output")
+}
+
+/// True when `dir` is (inside) Ryu's skills install directory.
+fn is_inside_skills_install_dir(dir: &Path) -> bool {
+    let Ok(skills_dir) = fs::canonicalize(ryu_skills::SkillRegistry::skills_dir()) else {
+        return false;
+    };
+    fs::canonicalize(dir).is_ok_and(|dir| dir.starts_with(&skills_dir))
 }
 
 fn selection_key(selection: &ImportSelection) -> String {
@@ -2426,15 +2735,58 @@ fn bundle_projection_hash_from_bytes(bytes: &[u8]) -> Option<String> {
     Some(sha256_bytes(&serde_json::to_vec(&projection).ok()?))
 }
 
+/// Remove bundle temporaries a crashed export left in `dir` (older than an
+/// hour, so a write in progress is never touched). Returns how many went.
+fn sweep_orphaned_bundle_temporaries(dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let prefix = format!(".{BUNDLE_FILE_NAME}.");
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with(&prefix) && name.ends_with(".tmp")) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .ok()
+            .filter(fs::Metadata::is_file)
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > std::time::Duration::from_secs(3600));
+        if stale && fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("bundle has no parent directory")?;
     fs::create_dir_all(parent)?;
+    sweep_orphaned_bundle_temporaries(parent);
     let temporary = parent.join(format!(
         ".{}.{}.tmp",
         BUNDLE_FILE_NAME,
         uuid::Uuid::new_v4()
     ));
-    fs::write(&temporary, bytes).with_context(|| format!("writing {}", temporary.display()))?;
+    {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options
+            .open(&temporary)
+            .with_context(|| format!("writing {}", temporary.display()))?;
+        std::io::Write::write_all(&mut file, bytes)
+            .and_then(|()| file.sync_all())
+            .with_context(|| format!("writing {}", temporary.display()))?;
+    }
     if let Err(error) = fs::rename(&temporary, path) {
         let _ = fs::remove_file(&temporary);
         return Err(error).with_context(|| format!("atomically replacing {}", path.display()));
@@ -2488,8 +2840,41 @@ pub fn spawn_worker(state: ServerState) {
     });
 }
 
+/// Chat-export fingerprints automatic import has fully reconciled, by profile
+/// id. Scanning an export parses all of it, so an unchanged export is not
+/// scanned again on every tick.
+fn reconciled_chat_exports() -> &'static std::sync::Mutex<HashMap<String, String>> {
+    static RECONCILED: OnceLock<std::sync::Mutex<HashMap<String, String>>> = OnceLock::new();
+    RECONCILED.get_or_init(Default::default)
+}
+
+fn remember_reconciled_chat_export(profile_id: &str, fingerprint: Option<String>) {
+    if let (Some(fingerprint), Ok(mut reconciled)) = (fingerprint, reconciled_chat_exports().lock())
+    {
+        reconciled.insert(profile_id.to_owned(), fingerprint);
+    }
+}
+
 async fn reconcile_import(state: &ServerState, store: &AgentSyncStore, profile: &SyncProfile) {
     let root = PathBuf::from(&profile.root);
+    let export_fingerprint = tokio::task::spawn_blocking({
+        let root = root.clone();
+        move || {
+            crate::import::chat_exports::detect(&root)?;
+            chat_export_fingerprint(&root).ok()
+        }
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some(fingerprint) = &export_fingerprint {
+        let reconciled = reconciled_chat_exports()
+            .lock()
+            .is_ok_and(|reconciled| reconciled.get(&profile.id) == Some(fingerprint));
+        if reconciled {
+            return;
+        }
+    }
     let scan = match tokio::task::spawn_blocking({
         let root = root.clone();
         move || crate::import::scan_source(&root)
@@ -2506,16 +2891,30 @@ async fn reconcile_import(state: &ServerState, store: &AgentSyncStore, profile: 
             return;
         }
     };
-    let mut selections = Vec::new();
+    // Each pending item keeps the hash it was compared under. That is the hash
+    // recorded once it is imported: hashing the folder again after the import
+    // would also cover files that arrived while the import ran, and mark them
+    // imported although the import never read them.
+    let mut pending: Vec<(ImportSelection, String)> = Vec::new();
     let mut budget = HashBudget::default();
     for item in scan.items {
         let selection = ImportSelection {
             kind: item.kind.to_owned(),
             id: item.id,
         };
+        if own_skill_skip_reason(store, &profile.id, &root, &selection)
+            .await
+            .is_some()
+        {
+            continue;
+        }
         let Ok(Some(hash)) = hash_selected_item_with_budget(&root, &selection, &mut budget) else {
             continue;
         };
+        // A chat export can be very large, so a failed chat-export item is
+        // retried when the export changes (or from a manual import), not on
+        // every tick.
+        let chat_export = is_chat_export_selection(&selection);
         let unchanged = store
             .item(&profile.id, &selection.kind, &selection.id)
             .await
@@ -2523,41 +2922,50 @@ async fn reconcile_import(state: &ServerState, store: &AgentSyncStore, profile: 
             .flatten()
             .is_some_and(|previous| {
                 previous.source_hash.as_deref() == Some(hash.as_str())
-                    && previous.state == "imported"
+                    && (previous.state == "imported" || chat_export)
             });
         if !unchanged {
-            selections.push(selection);
+            pending.push((selection, hash));
         }
     }
-    if selections.len() >= MAX_IMPORT_SELECTIONS {
-        selections.truncate(MAX_IMPORT_SELECTIONS);
+    let truncated = pending.len() > MAX_IMPORT_SELECTIONS;
+    if truncated {
+        pending.truncate(MAX_IMPORT_SELECTIONS);
     }
-    if selections.is_empty() || !store.try_start(&profile.id).await {
+    if pending.is_empty() {
+        remember_reconciled_chat_export(&profile.id, export_fingerprint);
+        return;
+    }
+    if !store.try_start(&profile.id).await {
         return;
     }
     let operation_id = format!("auto-import_{}", uuid::Uuid::new_v4());
-    let results =
-        crate::server::apply_import_selections(state, &None, &root, selections.clone()).await;
+    let selections = pending
+        .iter()
+        .map(|(selection, _)| selection.clone())
+        .collect();
+    let results = crate::server::apply_import_selections(state, &None, &root, selections).await;
     store.finish(&profile.id).await;
-    for (selection, result) in selections.into_iter().zip(results) {
-        if let Ok(Some(hash)) = hash_selected_item_with_budget(&root, &selection, &mut budget) {
-            let _ = store
-                .upsert_item(
-                    &profile.id,
-                    &selection.kind,
-                    &selection.id,
-                    Some(hash.as_str()),
-                    None,
-                    &operation_id,
-                    if result.status == "failed" {
-                        "failed"
-                    } else {
-                        "imported"
-                    },
-                    None,
-                )
-                .await;
-        }
+    for ((selection, hash), result) in pending.into_iter().zip(results) {
+        let _ = store
+            .upsert_item(
+                &profile.id,
+                &selection.kind,
+                &selection.id,
+                Some(hash.as_str()),
+                None,
+                &operation_id,
+                if result.status == "failed" {
+                    "failed"
+                } else {
+                    "imported"
+                },
+                None,
+            )
+            .await;
+    }
+    if !truncated {
+        remember_reconciled_chat_export(&profile.id, export_fingerprint);
     }
 }
 
@@ -2575,7 +2983,7 @@ async fn reconcile_export(state: &ServerState, store: &AgentSyncStore, profile: 
         false,
         true,
         true,
-        true,
+        profile.include_conversations,
         &None,
         None,
     )
@@ -2659,6 +3067,10 @@ async fn reconcile_native_threads(
 }
 
 #[cfg(test)]
+#[path = "agent_sync_reconcile_test.rs"]
+mod reconcile_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
@@ -2703,6 +3115,7 @@ mod tests {
         crate::identity_verify::VerifiedCaller {
             user_id: user_id.to_owned(),
             email: None,
+            email_verified: false,
             org_id: Some("sync-org".to_owned()),
             role: crate::identity_verify::OrgRole::Member,
             teams: Vec::new(),
@@ -2735,6 +3148,7 @@ mod tests {
             agent_id: agent_id.to_owned(),
             engine: "claude".to_owned(),
             native_session_id: format!("session-{conversation_id}"),
+            conversation_generation: "test-generation".to_owned(),
             working_directory: None,
             capabilities: serde_json::json!({}),
             updated_at: 1,
@@ -2853,6 +3267,7 @@ mod tests {
                 root: dir.path().to_string_lossy().to_string(),
                 import_enabled: true,
                 export_enabled: false,
+                include_conversations: None,
             })
             .await
             .unwrap();
@@ -2863,6 +3278,7 @@ mod tests {
                 root: dir.path().to_string_lossy().to_string(),
                 import_enabled: false,
                 export_enabled: true,
+                include_conversations: None,
             })
             .await
             .unwrap();
@@ -2870,6 +3286,65 @@ mod tests {
         assert!(!second.import_enabled);
         assert!(second.export_enabled);
         assert_eq!(store.profiles().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn conversation_export_is_opt_in_and_kept_until_changed() {
+        let store = AgentSyncStore::open_in_memory().unwrap();
+        let dir = tempdir().unwrap();
+        let input = |include_conversations| ProfileInput {
+            id: None,
+            provider: "claude".to_owned(),
+            root: dir.path().to_string_lossy().to_string(),
+            import_enabled: false,
+            export_enabled: true,
+            include_conversations,
+        };
+        let created = store.upsert_profile(input(None)).await.unwrap();
+        assert!(!created.include_conversations, "off by default");
+        let opted_in = store.upsert_profile(input(Some(true))).await.unwrap();
+        assert!(opted_in.include_conversations);
+        // A toggle that does not mention it keeps the stored choice.
+        let kept = store.upsert_profile(input(None)).await.unwrap();
+        assert!(kept.include_conversations);
+        let opted_out = store.upsert_profile(input(Some(false))).await.unwrap();
+        assert!(!opted_out.include_conversations);
+        let manual: ExportInput =
+            serde_json::from_value(json!({ "destination": "/tmp/x" })).unwrap();
+        assert!(!manual.include_conversations);
+    }
+
+    #[test]
+    fn crashed_bundle_temporaries_are_swept_but_fresh_ones_kept() {
+        let dir = tempdir().unwrap();
+        let stale = dir.path().join(format!(".{BUNDLE_FILE_NAME}.old.tmp"));
+        let fresh = dir.path().join(format!(".{BUNDLE_FILE_NAME}.new.tmp"));
+        let other = dir.path().join("notes.tmp");
+        for path in [&stale, &fresh, &other] {
+            fs::write(path, "{}").unwrap();
+        }
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert_eq!(sweep_orphaned_bundle_temporaries(dir.path()), 1);
+        assert!(!stale.exists());
+        assert!(fresh.exists());
+        assert!(other.exists());
+        write_atomic(&dir.path().join(BUNDLE_FILE_NAME), b"{}").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(dir.path().join(BUNDLE_FILE_NAME))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
     }
 
     #[tokio::test]
@@ -2883,6 +3358,7 @@ mod tests {
                 root: dir.path().to_string_lossy().to_string(),
                 import_enabled: false,
                 export_enabled: false,
+                include_conversations: None,
             })
             .await
             .unwrap();
@@ -2893,6 +3369,7 @@ mod tests {
                 root: dir.path().to_string_lossy().to_string(),
                 import_enabled: false,
                 export_enabled: false,
+                include_conversations: None,
             })
             .await;
         assert!(result.is_err());
@@ -2975,6 +3452,35 @@ mod tests {
     }
 
     #[test]
+    fn chat_export_items_are_fingerprinted_so_automatic_import_queues_them() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("conversations.json"), "[]").unwrap();
+        fs::create_dir_all(root.join("projects")).unwrap();
+        fs::write(root.join("projects/p.json"), "{}").unwrap();
+        let chats = ImportSelection {
+            kind: crate::import::kind::CONVERSATIONS.to_owned(),
+            id: "conversations/conversations.json#chats".to_owned(),
+        };
+        // Split exports have no `conversations.json`; nothing is resolved.
+        let saved = ImportSelection {
+            kind: crate::import::kind::MEMORY.to_owned(),
+            id: "memory/conversations-000.json#saved-context".to_owned(),
+        };
+        let mut budget = HashBudget::default();
+        let first = hash_selected_item_with_budget(root, &chats, &mut budget)
+            .unwrap()
+            .expect("a chat export item has a fingerprint");
+        assert_eq!(
+            hash_selected_item_with_budget(root, &saved, &mut budget).unwrap(),
+            Some(first.clone())
+        );
+        assert_eq!(budget.bytes, 0, "fingerprinting reads no file contents");
+        fs::write(root.join("projects/p.json"), "{\"uuid\":\"x\"}").unwrap();
+        assert_ne!(chat_export_fingerprint(root).unwrap(), first);
+    }
+
+    #[test]
     fn automatic_hash_budget_is_shared_across_items() {
         let dir = tempdir().unwrap();
         let first = dir.path().join("first.txt");
@@ -3009,6 +3515,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn automatic_import_skips_ryus_own_skill_projections_and_installs() {
+        let store = AgentSyncStore::open_in_memory().unwrap();
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let profile = store
+            .upsert_profile(ProfileInput {
+                id: None,
+                provider: "codex".to_owned(),
+                root: root.to_string_lossy().to_string(),
+                import_enabled: true,
+                export_enabled: true,
+                include_conversations: None,
+            })
+            .await
+            .unwrap();
+        let skill = ryu_skills::SkillRecord {
+            id: "pdf".to_owned(),
+            name: "pdf".to_owned(),
+            description: Some("Read PDFs".to_owned()),
+            instructions: "Use the scripts.".to_owned(),
+            allowed_tools: Vec::new(),
+            enabled: false,
+            always_on: false,
+        };
+        project_skills(&store, &profile, &root, &[skill], "op-export", false, None)
+            .await
+            .unwrap();
+        let selection = ImportSelection {
+            kind: crate::import::kind::SKILL.to_owned(),
+            id: "skill/skills/pdf".to_owned(),
+        };
+        let skill_dir = root.join("skills").join("pdf");
+        fs::write(skill_dir.join("notes.md"), "extra").unwrap();
+        assert_eq!(
+            own_skill_skip_reason(&store, &profile.id, &root, &selection).await,
+            Some("generated output")
+        );
+
+        let edited = "---\nname: pdf\n---\nEdited.";
+        fs::write(skill_dir.join("SKILL.md"), edited).unwrap();
+        assert_eq!(
+            own_skill_skip_reason(&store, &profile.id, &root, &selection).await,
+            None
+        );
+
+        // "Keep external" adopts the edit; it is the user's content, not Ryu's
+        // projection, so it must stay importable.
+        let adopted_hash = sha256_bytes(edited.as_bytes());
+        store
+            .upsert_item(
+                &profile.id,
+                "skill",
+                "skills/pdf/SKILL.md",
+                None,
+                Some(&adopted_hash),
+                "op-resolve",
+                "external",
+                Some(&json!({
+                    "resolution": "keep_external",
+                    "adopted_hash": adopted_hash,
+                })),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            own_skill_skip_reason(&store, &profile.id, &root, &selection).await,
+            None
+        );
+
+        let inside_install_dir = {
+            let _env = ryu_skills::SKILLS_ENV_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::env::set_var("RYU_SKILLS_DIR", root.join("skills"));
+            let inside = is_inside_skills_install_dir(&skill_dir);
+            std::env::remove_var("RYU_SKILLS_DIR");
+            inside
+        };
+        assert!(inside_install_dir);
+    }
+
+    #[tokio::test]
     async fn acp_binding_is_device_scoped_and_updated_in_place() {
         let store = AgentSyncStore::open_in_memory().unwrap();
         store
@@ -3019,6 +3607,7 @@ mod tests {
                 "session-a",
                 None,
                 &json!({ "loadSession": true }),
+                "test-generation",
             )
             .unwrap();
         store
@@ -3029,12 +3618,133 @@ mod tests {
                 "session-b",
                 None,
                 &json!({ "loadSession": false }),
+                "test-generation",
             )
             .unwrap();
         let bindings = store.bindings().await.unwrap();
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].native_session_id, "session-b");
         assert_eq!(bindings[0].node_id, "test-node");
+    }
+
+    #[tokio::test]
+    async fn deleted_incarnations_cannot_resume_or_overwrite_recreated_bindings() {
+        let root = tempdir().unwrap();
+        let canonical = Connection::open(root.path().join("conversations.db")).unwrap();
+        canonical.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE conversations (id TEXT PRIMARY KEY, owner TEXT); INSERT INTO conversations VALUES ('chat', 'alice');").unwrap();
+        crate::server::conversation_lifecycle::initialize(&canonical).unwrap();
+        let path = root.path().join("agent-sync.db");
+        let store = AgentSyncStore::open(path.clone()).unwrap();
+        let old = store.current_generation("chat").unwrap().unwrap();
+        // Pre-migration rows must not inherit the generation of an existing ID.
+        store.conn.lock().await.execute("INSERT INTO acp_bindings (node_id, conversation_id, agent_id, engine, native_session_id, capabilities_json, updated_at) VALUES (?1, 'chat', 'agent', 'claude', 'legacy', '{}', 1)", [store.node_id()]).unwrap();
+        assert!(store
+            .binding_for_agent("chat", "agent")
+            .await
+            .unwrap()
+            .is_none());
+        store
+            .record_acp_binding_async(
+                "chat",
+                "agent",
+                "claude",
+                "alice-session",
+                None,
+                &json!({}),
+                &old,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .binding_for("chat")
+                .await
+                .unwrap()
+                .unwrap()
+                .native_session_id,
+            "alice-session"
+        );
+        drop(store);
+        let store = AgentSyncStore::open(path.clone()).unwrap();
+        assert_eq!(
+            store.current_generation("chat").unwrap().as_deref(),
+            Some(old.as_str())
+        );
+        assert_eq!(store.bindings().await.unwrap().len(), 1);
+        canonical
+            .execute("DELETE FROM conversations WHERE owner = 'alice'", [])
+            .unwrap();
+        assert!(store
+            .binding_for_agent("chat", "agent")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(store.binding_for("chat").await.unwrap().is_none());
+        assert!(store.bindings().await.unwrap().is_empty());
+        assert!(store
+            .record_acp_binding_async(
+                "chat",
+                "agent",
+                "claude",
+                "late-old",
+                None,
+                &json!({}),
+                &old
+            )
+            .await
+            .is_err());
+        canonical
+            .execute("INSERT INTO conversations VALUES ('chat', 'bob')", [])
+            .unwrap();
+        let new = store.current_generation("chat").unwrap().unwrap();
+        assert_ne!(old, new);
+        assert!(store.binding_for("chat").await.unwrap().is_none());
+        store
+            .record_acp_binding_async(
+                "chat",
+                "agent",
+                "claude",
+                "bob-session",
+                None,
+                &json!({}),
+                &new,
+            )
+            .await
+            .unwrap();
+        assert!(store
+            .record_acp_binding_async(
+                "chat",
+                "agent",
+                "claude",
+                "late-old",
+                None,
+                &json!({}),
+                &old
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            store
+                .binding_for("chat")
+                .await
+                .unwrap()
+                .unwrap()
+                .native_session_id,
+            "bob-session"
+        );
+        drop(store);
+        let store = AgentSyncStore::open(path).unwrap();
+        assert_eq!(
+            store
+                .binding_for("chat")
+                .await
+                .unwrap()
+                .unwrap()
+                .native_session_id,
+            "bob-session"
+        );
+        canonical.execute("DELETE FROM conversations", []).unwrap();
+        assert!(store.bindings().await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -3048,6 +3758,7 @@ mod tests {
                 root: dir.path().to_string_lossy().to_string(),
                 import_enabled: false,
                 export_enabled: false,
+                include_conversations: None,
             })
             .await
             .unwrap();

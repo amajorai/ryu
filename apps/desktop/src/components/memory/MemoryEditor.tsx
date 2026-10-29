@@ -5,7 +5,7 @@
 // (1–5), when-to-use, and tags — and persists via the memory client. Shared by
 // the Memory library for both "New memory" and "Edit" so the form lives once.
 
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -13,18 +13,18 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
+} from "@ryu/ui/components/select.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { type ChangeEvent, type SubmitEvent, useMemo, useState } from "react";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -100,12 +100,20 @@ export function MemoryEditor({
 
 	// Seed the form from the memory (edit) or sensible defaults (create). Keyed on
 	// the memory id + open so reopening the dialog for a different row re-seeds.
-	const seed = useMemo(
+	const seed = useMemo<{
+		content: string;
+		scope: MemoryScope;
+		scopeId: string;
+		category: MemoryCategory;
+		importance: number;
+		whenToUse: string;
+		tags: string;
+	}>(
 		() => ({
 			content: memory?.content ?? "",
-			scope: memory?.scope ?? ("user" as MemoryScope),
+			scope: memory?.scope ?? "user",
 			scopeId: memory?.scopeId ?? "",
-			category: memory?.category ?? ("other" as MemoryCategory),
+			category: memory?.category ?? "other",
 			importance: memory?.importance ?? 3,
 			whenToUse: memory?.whenToUse ?? "",
 			tags: (memory?.tags ?? []).join(", "),
@@ -142,7 +150,7 @@ export function MemoryEditor({
 		setError(null);
 	}
 
-	const handleSubmit = async (e: FormEvent) => {
+	const handleSubmit = async (e: SubmitEvent) => {
 		e.preventDefault();
 		const trimmedContent = content.trim();
 		if (!trimmedContent) {
@@ -231,7 +239,7 @@ export function MemoryEditor({
 								<Label htmlFor="memory-scope">Scope</Label>
 								<Select
 									items={scopeItems(scopeLabels)}
-									onValueChange={(v) => setScope(v as MemoryScope)}
+									onValueChange={(v) => setScope(v)}
 									value={scope}
 								>
 									<SelectTrigger className="w-full" id="memory-scope">
@@ -251,7 +259,7 @@ export function MemoryEditor({
 								<Label htmlFor="memory-category">Category</Label>
 								<Select
 									items={categoryItems(categoryLabels)}
-									onValueChange={(v) => setCategory(v as MemoryCategory)}
+									onValueChange={(v) => setCategory(v)}
 									value={category}
 								>
 									<SelectTrigger className="w-full" id="memory-category">

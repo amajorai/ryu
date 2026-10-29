@@ -16,12 +16,25 @@ import {
 } from "@ryu/ui/components/alert-dialog";
 import { Button } from "@ryu/ui/components/button";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { safeNavigationUrl } from "@ryu/ui/lib/safe-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { Undo2Icon } from "lucide-react";
-import { useState } from "react";
+import {
+	type ComponentProps,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { AgentUI } from "./agent-ui/agent-ui.tsx";
+import {
+	AgentUiSurfaceChip,
+	useAgentUiSurfaceHost,
+} from "./agent-ui/surface-context.tsx";
 import { useArtifactHost } from "./artifact-host-context.tsx";
 import { FileTypeIcon } from "./file-type-icon.tsx";
+import { artifactIdForPart } from "./tools/artifact-tool.ts";
 import type {
 	ArtifactTurnEndCard,
 	EditedFile,
@@ -30,6 +43,8 @@ import type {
 	JsonRenderTurnEndCard,
 	TurnEndCard,
 } from "./turn-end-cards.ts";
+import { nativeArtifactReactChild } from "./utils/native-artifact-render-abi.ts";
+import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
 
 const MAX_COLLAPSED_FILES = 3;
 
@@ -73,6 +88,24 @@ function UndoFileEditsDialog({
 }) {
 	const [error, setError] = useState<string | null>(null);
 	const [pending, setPending] = useState(false);
+	const owner = useMemo(() => ({ onUndo, cardId: card.id }), [onUndo, card.id]);
+	const ownerRef = useRef(owner);
+	ownerRef.current = owner;
+	const mounted = useRef(true);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, []);
+	useEffect(() => {
+		if (ownerRef.current !== owner) {
+			return;
+		}
+		setPending(false);
+		setError(null);
+	}, [owner]);
+
 	const singleFile = card.files.length === 1 ? card.files[0] : undefined;
 	const title = singleFile
 		? `Undo changes to ${fileName(singleFile.path)}?`
@@ -89,6 +122,10 @@ function UndoFileEditsDialog({
 	};
 
 	const handleConfirm = async () => {
+		if (pending) {
+			return;
+		}
+		const ownsResult = () => mounted.current && ownerRef.current === owner;
 		setPending(true);
 		setError(null);
 		try {
@@ -96,15 +133,22 @@ function UndoFileEditsDialog({
 				throw new Error("This turn does not have a reversible text-edit plan.");
 			}
 			await onUndo(card.undoPlan);
-			onOpenChange(false);
+			if (ownsResult()) {
+				onOpenChange(false);
+			}
 		} catch (caught) {
+			if (!ownsResult()) {
+				return;
+			}
 			setError(
 				caught instanceof Error
 					? caught.message
 					: "The file edits could not be undone."
 			);
 		} finally {
-			setPending(false);
+			if (ownsResult()) {
+				setPending(false);
+			}
 		}
 	};
 
@@ -203,6 +247,39 @@ function FileEditsCard({
 	const [expanded, setExpanded] = useState(false);
 	const [undoDialogOpen, setUndoDialogOpen] = useState(false);
 	const [undoComplete, setUndoComplete] = useState(false);
+	const undoOwner = useMemo(
+		() => ({ onUndo, cardId: card.id }),
+		[onUndo, card.id]
+	);
+	const undoOwnerRef = useRef(undoOwner);
+	undoOwnerRef.current = undoOwner;
+	const undoMounted = useRef(true);
+	useEffect(() => {
+		undoMounted.current = true;
+		return () => {
+			undoMounted.current = false;
+		};
+	}, []);
+	useEffect(() => {
+		if (undoOwnerRef.current !== undoOwner) {
+			return;
+		}
+		setUndoDialogOpen(false);
+		setUndoComplete(false);
+	}, [undoOwner]);
+	const completeUndo = useCallback(
+		async (plan: FileEditUndoPlan) => {
+			if (!onUndo) {
+				return;
+			}
+			await onUndo(plan);
+			if (undoMounted.current && undoOwnerRef.current === undoOwner) {
+				setUndoComplete(true);
+			}
+		},
+		[onUndo, undoOwner]
+	);
+
 	const files = expanded
 		? card.files
 		: card.files.slice(0, MAX_COLLAPSED_FILES);
@@ -241,10 +318,7 @@ function FileEditsCard({
 				card={card}
 				disabled={undoComplete}
 				onOpenChange={setUndoDialogOpen}
-				onUndo={async (plan) => {
-					await onUndo(plan);
-					setUndoComplete(true);
-				}}
+				onUndo={completeUndo}
 				open={undoDialogOpen}
 			/>
 		) : null;
@@ -374,15 +448,31 @@ function JsonRenderCard({
 	onSubmit,
 }: {
 	card: JsonRenderTurnEndCard;
-	onSubmit?: (value: unknown) => void | Promise<void>;
+	onSubmit?: ComponentProps<typeof AgentUI>["onSubmit"];
 }) {
+	const surfaceHost = useAgentUiSurfaceHost();
+	if (surfaceHost) {
+		return (
+			<AgentUiSurfaceChip
+				host={surfaceHost}
+				surface={{
+					format: card.format,
+					// The render's tool call id when known, so the chip names the same
+					// render the host tracks (`deriveLiveAgentUiSurface`).
+					id: card.toolCallId ?? card.id,
+					spec: card.spec,
+					title: card.title,
+				}}
+			/>
+		);
+	}
 	return (
 		<section
 			className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm"
 			data-slot="turn-json-render-card"
 		>
 			<header className="flex items-center gap-2 border-border/70 border-b px-4 py-3">
-				<span className="rounded-lg bg-primary/10 px-2 py-1 font-mono text-[10px] text-primary uppercase tracking-[0.12em]">
+				<span className="type-compact rounded-lg bg-primary/10 px-2 py-1 font-mono text-primary uppercase tracking-eyebrow">
 					{card.format === "a2ui" ? "A2UI" : "JSON UI"}
 				</span>
 				{card.title ? (
@@ -390,33 +480,34 @@ function JsonRenderCard({
 				) : null}
 			</header>
 			<div className="p-3">
-				<AgentUI format={card.format} onSubmit={onSubmit} spec={card.spec} />
+				<AgentUI
+					format={card.format}
+					onSubmit={onSubmit}
+					persistKey={card.toolCallId}
+					persistTitle={card.title}
+					spec={card.spec}
+				/>
 			</div>
 		</section>
 	);
 }
 
-function safeArtifactUrl(value: string | undefined): string | undefined {
-	if (!value) {
-		return undefined;
-	}
-	try {
-		const url = new URL(value, "http://localhost");
-		return url.protocol === "http:" || url.protocol === "https:"
-			? url.toString()
-			: undefined;
-	} catch {
-		return undefined;
-	}
+function safeArtifactUrl(value: NativeSdkValue): string | undefined {
+	return safeNavigationUrl(value) ?? undefined;
 }
 
 function ArtifactCard({ card }: { card: ArtifactTurnEndCard }) {
 	const host = useArtifactHost();
 	if (host) {
 		const Renderer = host.Renderer;
+		// The inline tool row's id, so the page keeps the state saved while the
+		// turn was streaming and opens the same panel/tab.
+		const artifactId = card.toolCallId
+			? artifactIdForPart(card.toolCallId)
+			: card.id;
 		return (
 			<div className="w-full" data-slot="turn-artifact-card">
-				<Renderer artifact={card.artifact} id={card.id} />
+				<Renderer artifact={card.artifact} id={artifactId} />
 			</div>
 		);
 	}
@@ -432,7 +523,7 @@ function ArtifactCard({ card }: { card: ArtifactTurnEndCard }) {
 				icon={FileCodeIcon}
 			/>
 			<span className="min-w-0 flex-1 truncate font-medium text-sm">
-				{card.artifact.title ?? "Artifact"}
+				{nativeArtifactReactChild(card.artifact.title ?? "Artifact")}
 			</span>
 			{url ? (
 				<a
@@ -463,7 +554,7 @@ export function TurnEndCards({
 	onUndoFileEdits,
 }: {
 	cards: TurnEndCard[];
-	onAgentUiSubmit?: (value: unknown) => void | Promise<void>;
+	onAgentUiSubmit?: ComponentProps<typeof AgentUI>["onSubmit"];
 	onOpenFile?: (path: string) => void;
 	onReviewFileEdits?: (paths: string[]) => void;
 	onUndoFileEdits?: (plan: FileEditUndoPlan) => Promise<void>;

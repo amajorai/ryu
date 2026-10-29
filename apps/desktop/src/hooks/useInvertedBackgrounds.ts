@@ -1,4 +1,4 @@
-import { THEME_APPEARANCE_CHANGE_EVENT } from "@ryu/ui/theme/prefs";
+import { THEME_APPEARANCE_CHANGE_EVENT } from "@ryu/ui/theme/prefs.ts";
 import { useEffect, useState } from "react";
 
 const KEY = "ryu_inverted_backgrounds";

@@ -1,5 +1,12 @@
-import { planLimit } from "@ryu/auth/lib/plans";
-import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
+import type { RyuJsonValue } from "@ryu/app-host/json-values";
+import { asGlyphValue, type GlyphValue } from "@ryu/ui/components/glyph.ts";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type {
+	WorkbenchItem,
+	WorkbenchSplitNode,
+	WorkbenchState,
+} from "@ryu/workbench/model";
+import type { WorkbenchAction } from "@ryu/workbench/reducer";
 import type { ReactNode } from "react";
 import {
 	createContext,
@@ -13,48 +20,42 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import { z } from "zod";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { AttachedImage } from "@/components/agent-elements/input-bar.tsx";
 import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
+import { TabNodeChatHistoryBoundary } from "@/src/contexts/TabNodeChatHistory.tsx";
 import {
 	bindConversation,
 	findChatTab,
+	findChatTabOnNode,
+	tabNodeKey,
 } from "@/src/contexts/tab-conversation.ts";
 import { readPersistedNumber } from "@/src/hooks/usePersistedNumber.ts";
 import { readStartupBehavior } from "@/src/hooks/useStartupBehavior.ts";
 import { readTabOpenBehavior } from "@/src/hooks/useTabOpenBehavior.ts";
 import { hasBillingAuth } from "@/src/lib/api/billing.ts";
+import { sealedLocalStorage } from "@/src/lib/content-seal.ts";
 import {
 	DASHBOARD_DEFAULT_PATH,
 	LEGACY_DASHBOARD_PATH,
 } from "@/src/lib/dashboards/app.ts";
-import { effectivePlan } from "@/src/lib/gating/planCapBridge.ts";
+import { capLimit, effectivePlan } from "@/src/lib/gating/planCapBridge.ts";
 import { stampRecentFromPath } from "@/src/lib/library.ts";
 import {
 	buildPresetTree,
 	PANE_CHOOSER_PATH,
 	type PresetBranch,
+	type PresetNode,
 	presetSlots,
 } from "@/src/lib/splitPresets.ts";
 import {
-	appendLeaves,
-	containsLeaf,
-	directionOrientation,
-	equalizeNode,
-	insertLeaf,
 	leafOrder,
-	makeBranch,
 	makeLeaf,
-	normalizeNode,
-	pruneToMembers,
-	removeLeaf,
-	replaceLeaf,
 	type SplitBranch,
 	type SplitDirection,
 	type SplitNode,
 	type SplitOrientation,
-	setSizesAt,
-	swapLeaves,
 } from "@/src/lib/splitTree.ts";
 import {
 	DEFAULT_TAB_UNLOAD_MINUTES,
@@ -70,12 +71,17 @@ import {
 	tabEntityKey,
 } from "@/src/lib/window-routing.ts";
 import {
-	parseWorkspaceSessionState,
 	sameWorkspaceSessionState,
 	type WorkspaceSessionState,
+	workspaceSessionSchema,
 } from "@/src/lib/workspace-session.ts";
 import { useArtifactStore } from "@/src/store/useArtifactStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import {
+	DesktopWorkbenchProvider,
+	useDesktopWorkbench,
+	useOptionalDesktopWorkbench,
+} from "@/src/workbench/DesktopWorkbenchContext.tsx";
 
 export type {
 	SplitBranch,
@@ -140,7 +146,7 @@ export interface Tab {
 	/** One-shot team target carried from the new-chat launchpad. Runtime-only. */
 	initialTeamId?: string;
 	/** Context from an app-owned sidebar row, forwarded to that app's Companion. */
-	mountContext?: Record<string, unknown> | null;
+	mountContext?: Record<string, RyuJsonValue> | null;
 	/** Bumped each time this tab is navigated in place ("open in current tab").
 	    Folded into the pane's React key so a reused tab remounts its page — pages
 	    like ChatPage seed state from props once on mount, so without a remount an
@@ -150,13 +156,16 @@ export interface Tab {
 	path: string;
 	/** Pinned tabs sit in a compact block at the left and never auto-unload. */
 	pinned?: boolean;
+	/** The computer a restored tab was bound to. Read back from the persisted
+	    session only to re-seed `useNodeStore().tabOverrides` at startup, then
+	    dropped: the live binding is always the store's per-tab override. */
+	restoredNode?: string;
 	/** One-shot message id to scroll into view once the chat tab hydrates.
 	    Runtime-only; ChatPage clears it after consuming. */
 	scrollToMessageId?: string;
-	/** Membership in a Split view (see `splits`). Mirrors `groupId`: the tab is
-	    the source of truth for its split membership, so `normalize` keeps split
-	    members contiguous and the strip can bracket them. A tab is never both
-	    split and grouped, and split members are never pinned. */
+	/** Compatibility projection for callers that still render a Split bracket.
+	    Workbench Center groups/tree own membership; TabsProvider derives this id
+	    for the active route item in each visible Center leaf. */
 	splitId?: string;
 	title: string;
 	/** When true the tab's React tree is unmounted to free memory; it remounts
@@ -176,15 +185,9 @@ export interface TabGroup {
 	name: string;
 }
 
-/** A Warp-style split view: two or more tabs tiled in the main content area.
-    Membership lives on the tabs (`tab.splitId`) — that is what `normalize`
-    and the strip brackets read — while `root` carries the visual arrangement:
-    a tree of branches (columns = side-by-side, rows = stacked) whose leaves
-    are the member tabs, supporting arbitrary nesting (e.g. one tall pane
-    beside two stacked ones). The split is shown whenever the focused tab
-    (`activeTabId`) is one of its members; its other members render alongside,
-    all kept live. The tree's leaves and the members are kept in lockstep by
-    `reconcileSplits`. */
+/** Compatibility view of the shared Workbench Center tree. Its leaves are the
+    active route item ids projected from Center group leaves. Name/color/collapse
+    remain presentation metadata; callers never own geometry or membership. */
 export interface Split {
 	/** Collapsed in the tab strip: the member tabs hide behind the header pill
 	    (the same interaction as a tab group), while the tiled panes keep
@@ -224,36 +227,6 @@ export function splitPaneTabs(tabs: Tab[], split: Split): Tab[] {
 	return leafOrder(split.root)
 		.map((id) => byId.get(id))
 		.filter((t): t is Tab => !!t);
-}
-
-/** Reconcile the split trees against current tab membership: drop splits with
-    fewer than two members, prune leaves whose tab left, and (as a safety net)
-    re-attach members missing from the tree so a pane can never silently
-    disappear. Pure — used inside setSplits updaters. */
-function reconcileSplits(splits: Split[], tabs: Tab[]): Split[] {
-	const out: Split[] = [];
-	for (const s of splits) {
-		const members = tabs.filter((t) => t.splitId === s.id).map((t) => t.id);
-		if (members.length < 2) {
-			continue;
-		}
-		const pruned = pruneToMembers(s.root, new Set(members));
-		if (!pruned || pruned.type === "leaf") {
-			// The tree degenerated but ≥2 members remain — rebuild flat.
-			out.push({
-				...s,
-				root: makeBranch("columns", members.map(makeLeaf)),
-			});
-			continue;
-		}
-		const present = new Set(leafOrder(pruned));
-		const missing = members.filter((id) => !present.has(id));
-		out.push({
-			...s,
-			root: missing.length > 0 ? appendLeaves(pruned, missing) : pruned,
-		});
-	}
-	return out;
 }
 
 export const TAB_GROUP_COLORS = [
@@ -341,12 +314,17 @@ interface TabsContextValue {
 			initialProject?: string;
 			initialStoreQuery?: string;
 			initialStoreItem?: { id: string; kind: string };
-			mountContext?: Record<string, unknown> | null;
+			mountContext?: Record<string, RyuJsonValue> | null;
 			worktreeMode?: boolean;
 			/** Entity glyph to show in the tab strip (mirrors the sidebar). */
 			icon?: GlyphValue;
+			/** Bind the tab to this computer (a per-tab node override). Dedupe
+			    then matches only a tab already on the same computer. */
+			node?: string;
 		}
 	) => string;
+	/** Clear route-only presentation metadata before a Workbench DnD split move. */
+	prepareTabForWorkbenchSplit: (tabId: string) => void;
 	/** Drop a single tab out of its split (dissolving the split if <2 remain).*/
 	removeFromSplit: (tabId: string) => void;
 	removeTabFromGroup: (tabId: string) => void;
@@ -429,6 +407,46 @@ interface TabsContextValue {
 	) => void;
 }
 
+export interface EmptyCenterTabOptions {
+	conversationId?: string;
+	title?: string;
+}
+
+/** Listeners told about every `openTab` request, see {@link subscribeTabOpenRequests}. */
+const tabOpenRequestListeners = new Set<(tabId: string) => void>();
+
+function notifyTabOpenRequest(tabId: string): void {
+	for (const listener of tabOpenRequestListeners) {
+		listener(tabId);
+	}
+}
+
+/**
+ * Subscribe to every `openTab` request with the id of the tab it opened or
+ * activated. Reopening the tab that is already active changes no tab state
+ * (same id, path, and navToken), so a surface that hides a tab until the user
+ * navigates (the interface overview) needs this to see the navigation at all.
+ */
+export function subscribeTabOpenRequests(
+	listener: (tabId: string) => void
+): () => void {
+	tabOpenRequestListeners.add(listener);
+	return () => {
+		tabOpenRequestListeners.delete(listener);
+	};
+}
+
+export function openTabFromEmptyCenter(
+	openTab: (
+		path: string,
+		opts?: EmptyCenterTabOptions & { forceNew?: boolean }
+	) => string,
+	path: string,
+	opts?: EmptyCenterTabOptions
+): string {
+	return openTab(path, { ...opts, forceNew: true });
+}
+
 /** Exported ONLY so the e2e harness can supply a stub value for a component under
  *  test; app code must go through {@link useTabsContext}, which fails loudly
  *  outside a real {@link TabsProvider}. */
@@ -439,7 +457,7 @@ const TabsSelectionContext = createContext<StoreApi<TabsContextValue> | null>(
 );
 
 /** Keep action-only and per-tab subscribers off unrelated navigation updates. */
-function TabsStateProvider({
+export function TabsStateProvider({
 	value,
 	children,
 }: {
@@ -494,7 +512,9 @@ export function CurrentTabIdProvider({
 }) {
 	return (
 		<CurrentTabIdContext.Provider value={tabId}>
-			{children}
+			<TabNodeChatHistoryBoundary tabId={tabId}>
+				{children}
+			</TabNodeChatHistoryBoundary>
 		</CurrentTabIdContext.Provider>
 	);
 }
@@ -534,26 +554,26 @@ export function useTabsContext(): TabsContextValue {
     shell, so their titles come from {@link shellRoute} instead — see the comment
     there. Do not re-add a per-section key here; it would be dead (shellRoute is
     consulted first) and would drift. */
-const PATH_TITLES: Record<string, string> = {
-	[DASHBOARD_DEFAULT_PATH]: "Home",
-	"/chat": "New chat",
-	"/compute": "Compute",
-	[PANE_CHOOSER_PATH]: "Empty pane",
-	"/identities/new": "New identity",
-	"/vault": "Vault",
-	"/workflows/build": "Build a workflow",
-	"/calendar": "Calendar",
-	"/meetings": "Meetings",
-	"/quests": "Quests",
-	"/timeline": "Timeline",
-	"/activity": "Activity",
-	"/review": "Weekly review",
-	"/approvals": "Inbox",
-	"/inbox": "Inbox",
-	"/downloads": "Downloads",
-	"/settings": "Settings",
-	"/share": "Share",
-};
+const PATH_TITLES = new Map<string, string>([
+	[DASHBOARD_DEFAULT_PATH, "Home"],
+	["/chat", "New chat"],
+	["/compute", "Compute"],
+	[PANE_CHOOSER_PATH, "Empty pane"],
+	["/identities/new", "New identity"],
+	["/vault", "Vault"],
+	["/workflows/build", "Build a workflow"],
+	["/calendar", "Calendar"],
+	["/meetings", "Meetings"],
+	["/quests", "Quests"],
+	["/timeline", "Timeline"],
+	["/activity", "Activity"],
+	["/review", "Weekly review"],
+	["/approvals", "Inbox"],
+	["/inbox", "Inbox"],
+	["/downloads", "Downloads"],
+	["/settings", "Settings"],
+	["/share", "Share"],
+]);
 
 /** The two multi-section shells in the app: LibraryPage and StorePage. */
 type ShellFamily = "library" | "store";
@@ -653,8 +673,19 @@ function makeGroupId(): string {
 	return `grp-${crypto.randomUUID()}`;
 }
 
-function makeSplitId(): string {
-	return `split-${crypto.randomUUID()}`;
+function routeWorkbenchItem(tab: Tab): WorkbenchItem {
+	return {
+		closable: true,
+		duplicable: true,
+		id: tab.id,
+		pinned: tab.pinned === true,
+		preferredRegion: "center",
+		scope: tab.conversationId
+			? { kind: "conversation", conversationId: tab.conversationId }
+			: { kind: "window" },
+		source: { kind: "route", path: tab.path },
+		title: tab.title,
+	};
 }
 
 const AGENT_EDIT_TITLE_RE = /^\/agents\/.+\/edit$/;
@@ -699,7 +730,7 @@ function defaultTitle(path: string): string {
 	if (shell) {
 		return shell.title;
 	}
-	const mapped = PATH_TITLES[base];
+	const mapped = PATH_TITLES.get(base);
 	if (mapped) {
 		return mapped;
 	}
@@ -823,25 +854,37 @@ export interface InitialTab {
     on every tab change; read once at launch. */
 const SESSION_TABS_KEY = "ryu_session_tabs";
 
-/** The serializable subset of a Tab persisted for session restore. Runtime-only
-    fields (ids, one-shot composer seeds, unload flags, group membership) are
-    intentionally dropped; split layouts ARE persisted (see
-    `PersistedSession.splits`) so a tiled workspace survives a relaunch. */
-interface PersistedTab {
-	conversationId?: string;
-	/** Serialized GlyphValue (or null). Omitted on older sessions. */
-	icon?: GlyphValue;
-	initialAgent?: string;
-	initialProject?: string;
-	path: string;
-	pinned?: boolean;
-	title: string;
-	workspaceSession?: WorkspaceSessionState;
-	worktreeMode?: boolean;
-}
+/** The serializable subset of a Tab persisted for session restore. The stable
+    Workbench item id is retained so same-path chats cannot exchange runtime
+    metadata. One-shot seeds, unload flags, and presentation groups are dropped. */
+const restoredSessionSchema = z.object({
+	activeIndex: z.number().int().optional(),
+	tabs: z.array(
+		z.object({
+			path: z.string(),
+			title: z.string(),
+			id: z.string().optional(),
+			conversationId: z.string().optional(),
+			initialAgent: z.string().optional(),
+			initialProject: z.string().optional(),
+			// The tab's per-tab computer override. Omitted for the default
+			// computer and in sessions written before tabs could be bound to one.
+			node: z.string().optional().catch(undefined),
+			pinned: z.boolean().optional(),
+			worktreeMode: z.boolean().optional(),
+			icon: z
+				.unknown()
+				.transform((input) => asGlyphValue(input))
+				.optional(),
+			workspaceSession: workspaceSessionSchema.optional().catch(undefined),
+		})
+	),
+});
 
-/** A split tree serialized over tab INDEXES (ids are regenerated on restore):
-    a leaf is `{ i }`, a branch is `{ o, s, c }`. */
+type PersistedTab = z.infer<typeof restoredSessionSchema>["tabs"][number];
+
+/** Legacy compatibility split serialized over tab indexes. The Workbench v2
+    snapshot is the authoritative geometry restored by DesktopWorkbenchProvider. */
 type PersistedSplitNode =
 	| { i: number }
 	| { c: PersistedSplitNode[]; o: SplitOrientation; s: number[] };
@@ -880,52 +923,25 @@ function persistSplitNode(
 	return { o: node.orientation, s, c };
 }
 
-function reviveSplitNode(
-	node: PersistedSplitNode,
-	idAt: (i: number) => string | undefined
-): SplitNode | null {
-	if ("i" in node) {
-		const id = idAt(node.i);
-		return id ? makeLeaf(id) : null;
-	}
-	if (!(Array.isArray(node.c) && node.c.length > 0)) {
-		return null;
-	}
-	const orientation: SplitOrientation = node.o === "rows" ? "rows" : "columns";
-	const children: SplitNode[] = [];
-	const sizes: number[] = [];
-	node.c.forEach((child, j) => {
-		const revived = reviveSplitNode(child, idAt);
-		if (revived) {
-			children.push(revived);
-			sizes.push(
-				typeof node.s?.[j] === "number" && node.s[j] > 0 ? node.s[j] : 0
-			);
-		}
-	});
-	if (children.length === 0) {
-		return null;
-	}
-	const branch = makeBranch(
-		orientation,
-		children,
-		sizes.every((v) => v > 0) ? sizes : undefined
-	);
-	return normalizeNode(branch);
-}
-
-function persistSession(tabs: Tab[], activeTabId: string, splits: Split[]) {
+function persistSession(
+	tabs: Tab[],
+	activeTabId: string,
+	splits: Split[],
+	overrides: Readonly<Record<string, string>>
+) {
 	try {
 		if (tabs.length === 0) {
-			localStorage.removeItem(SESSION_TABS_KEY);
+			sealedLocalStorage.removeItem(SESSION_TABS_KEY);
 			return;
 		}
 		const persisted: PersistedTab[] = tabs.map((t) => ({
+			id: t.id,
 			path: t.path,
 			title: t.title,
 			conversationId: t.conversationId,
 			initialAgent: t.initialAgent,
 			initialProject: t.initialProject,
+			node: overrides[t.id],
 			pinned: t.pinned,
 			icon: t.icon,
 			workspaceSession: t.workspaceSession,
@@ -944,7 +960,7 @@ function persistSession(tabs: Tab[], activeTabId: string, splits: Split[]) {
 			activeIndex,
 			splits: persistedSplits.length > 0 ? persistedSplits : undefined,
 		};
-		localStorage.setItem(SESSION_TABS_KEY, JSON.stringify(payload));
+		sealedLocalStorage.setItem(SESSION_TABS_KEY, JSON.stringify(payload));
 	} catch {
 		// Persisting the session is best-effort; ignore storage/serialize failures.
 	}
@@ -953,7 +969,441 @@ function persistSession(tabs: Tab[], activeTabId: string, splits: Split[]) {
 interface StartupState {
 	activeId: string;
 	splits: Split[];
+	stableItemIds?: Set<string>;
 	tabs: Tab[];
+}
+
+type WorkbenchRouteItem = WorkbenchItem & {
+	source: Extract<WorkbenchItem["source"], { kind: "route" }>;
+};
+
+function isWorkbenchRouteItem(
+	item: WorkbenchItem | undefined
+): item is WorkbenchRouteItem {
+	return item?.source.kind === "route";
+}
+
+/** Re-seed each restored tab's computer binding into the node store (by its
+    FINAL id, after workbench reconciliation) and drop the carrier field. */
+function seedRestoredTabNodes(startup: StartupState): StartupState {
+	if (!startup.tabs.some((tab) => tab.restoredNode)) {
+		return startup;
+	}
+	const { setTabOverride } = useNodeStore.getState();
+	return {
+		...startup,
+		tabs: startup.tabs.map(({ restoredNode, ...tab }) => {
+			if (restoredNode) {
+				setTabOverride(tab.id, restoredNode);
+			}
+			return tab;
+		}),
+	};
+}
+
+function reconcileStartupWithWorkbench(
+	state: WorkbenchState,
+	startup: StartupState
+): StartupState {
+	const remainingTabs = [...startup.tabs];
+	let migratedActiveId = "";
+	const routeItems = state.groups.flatMap((group) =>
+		group.itemIds.flatMap((itemId) => {
+			const item = state.items.find((candidate) => candidate.id === itemId);
+			return isWorkbenchRouteItem(item) ? [item] : [];
+		})
+	);
+	const tabs = routeItems.map((item) => {
+		const stableMatchIndex = remainingTabs.findIndex(
+			(tab) => startup.stableItemIds?.has(tab.id) === true && tab.id === item.id
+		);
+		const semanticMatchIndex = remainingTabs.findIndex((tab) => {
+			if (startup.stableItemIds?.has(tab.id) === true) {
+				return false;
+			}
+			if (tab.path !== item.source.path) {
+				return false;
+			}
+			return tab.conversationId
+				? item.scope.kind === "conversation" &&
+						item.scope.conversationId === tab.conversationId
+				: item.scope.kind !== "conversation";
+		});
+		const matchIndex =
+			stableMatchIndex >= 0 ? stableMatchIndex : semanticMatchIndex;
+		const matched =
+			matchIndex < 0 ? undefined : remainingTabs.splice(matchIndex, 1)[0];
+		if (matched?.id === startup.activeId) {
+			migratedActiveId = item.id;
+		}
+		return {
+			...matched,
+			id: item.id,
+			path: matched?.path ?? item.source.path,
+			pinned: item.pinned,
+			title: matched?.title ?? item.title,
+		};
+	});
+	const focusedItemId = state.groups.find(
+		(group) => group.id === state.focusedGroupId
+	)?.activeItemId;
+	const focusedRouteId = routeItems.some((item) => item.id === focusedItemId)
+		? (focusedItemId ?? "")
+		: "";
+	return {
+		activeId: focusedRouteId || migratedActiveId || startup.activeId,
+		splits: startup.splits,
+		stableItemIds: startup.stableItemIds,
+		tabs: [...tabs, ...remainingTabs],
+	};
+}
+
+function projectTabsFromWorkbench(
+	state: WorkbenchState,
+	runtimeTabs: Tab[],
+	splitMemberIds: ReadonlySet<string> = new Set()
+): Tab[] {
+	const runtimeById = new Map(runtimeTabs.map((tab) => [tab.id, tab]));
+	const projected: Tab[] = [];
+	const seen = new Set<string>();
+	for (const group of state.groups) {
+		for (const itemId of group.itemIds) {
+			const item = state.items.find((candidate) => candidate.id === itemId);
+			if (item?.source.kind !== "route" || seen.has(item.id)) {
+				continue;
+			}
+			seen.add(item.id);
+			const runtime = runtimeById.get(item.id);
+			projected.push({
+				...(runtime ?? {
+					id: item.id,
+					path: item.source.path,
+					pinned: item.pinned,
+					title: item.title,
+				}),
+				path: item.source.path,
+				pinned: item.pinned,
+				splitId: splitMemberIds.has(item.id)
+					? WORKBENCH_CENTER_SPLIT_ID
+					: undefined,
+				title: item.title,
+			});
+		}
+	}
+	for (const tab of runtimeTabs) {
+		if (!seen.has(tab.id)) {
+			projected.push({ ...tab, splitId: undefined });
+		}
+	}
+	return projected;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return false;
+	}
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+/** Value equality for projected tab fields: primitives by `Object.is`, arrays
+    element-wise, plain records key-wise (an absent key equals `undefined`, as
+    neither survives serialization), anything else by identity. */
+function sameProjectedValue(a: unknown, b: unknown): boolean {
+	if (Object.is(a, b)) {
+		return true;
+	}
+	if (Array.isArray(a) || Array.isArray(b)) {
+		return (
+			Array.isArray(a) &&
+			Array.isArray(b) &&
+			a.length === b.length &&
+			a.every((value, index) => sameProjectedValue(value, b[index]))
+		);
+	}
+	if (!(isPlainRecord(a) && isPlainRecord(b))) {
+		return false;
+	}
+	for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+		if (!sameProjectedValue(a[key], b[key])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Structural sharing for the compatibility tab projection. Every Workbench
+ * change (an `item/activate` on each tab switch included) re-projects all tabs
+ * as fresh objects; RouteOutlet memoizes each page on its tab object, so fresh
+ * objects re-render every retained page. A tab whose fields are all equal by
+ * value keeps its previous object, and an unchanged list keeps its previous
+ * array. Any real change to any field still yields a new object.
+ */
+export function reuseUnchangedTabs(previous: Tab[], next: Tab[]): Tab[] {
+	const previousById = new Map(previous.map((tab) => [tab.id, tab]));
+	let unchanged = previous.length === next.length;
+	const shared = next.map((tab, index) => {
+		const prior = previousById.get(tab.id);
+		const reused = prior && sameProjectedValue(prior, tab) ? prior : tab;
+		if (reused !== previous[index]) {
+			unchanged = false;
+		}
+		return reused;
+	});
+	return unchanged ? previous : shared;
+}
+
+const WORKBENCH_CENTER_SPLIT_ID = "workbench:center";
+
+interface SplitPresentation {
+	collapsed: boolean;
+	color: TabGroupColor;
+	name: string;
+}
+
+function normalizedSizes(sizes: number[], count: number): number[] {
+	const values = Array.from({ length: count }, (_, index) => {
+		const value = sizes[index] ?? 1;
+		return Number.isFinite(value) && value > 0 ? value : 1;
+	});
+	const total = values.reduce((sum, value) => sum + value, 0);
+	return values.map((value) => value / total);
+}
+
+function projectCenterNode(
+	node: WorkbenchState["centerTree"],
+	state: WorkbenchState,
+	routeIds: ReadonlySet<string>,
+	members: Set<string>
+): SplitNode | null {
+	if (node.type === "leaf") {
+		const activeItemId = state.groups.find(
+			(group) => group.id === node.groupId
+		)?.activeItemId;
+		if (!(activeItemId && routeIds.has(activeItemId))) {
+			return null;
+		}
+		members.add(activeItemId);
+		return makeLeaf(activeItemId);
+	}
+	const projectedChildren: SplitNode[] = [];
+	const projectedSizes: number[] = [];
+	for (const [index, child] of node.children.entries()) {
+		const projected = projectCenterNode(child, state, routeIds, members);
+		if (projected) {
+			projectedChildren.push(projected);
+			projectedSizes.push(node.sizes[index] ?? 1);
+		}
+	}
+	if (projectedChildren.length === 0) {
+		return null;
+	}
+	if (projectedChildren.length === 1) {
+		return projectedChildren[0] ?? null;
+	}
+	return {
+		type: "branch",
+		children: projectedChildren,
+		orientation: node.orientation,
+		sizes: normalizedSizes(projectedSizes, projectedChildren.length),
+	};
+}
+
+function projectCenterSplit(
+	state: WorkbenchState,
+	runtimeTabs: Tab[],
+	presentation: SplitPresentation
+) {
+	const routeIds = new Set(runtimeTabs.map((tab) => tab.id));
+	const memberIds = new Set<string>();
+	const root = projectCenterNode(state.centerTree, state, routeIds, memberIds);
+	if (root?.type !== "branch") {
+		return { memberIds: new Set<string>(), splits: [] };
+	}
+	return {
+		memberIds,
+		splits: [
+			{
+				id: WORKBENCH_CENTER_SPLIT_ID,
+				root,
+				...presentation,
+			},
+		],
+	};
+}
+
+function centerBranchSizes(
+	tree: WorkbenchState["centerTree"],
+	path: number[] = []
+): Array<{ path: number[]; sizes: number[] }> {
+	if (tree.type === "leaf") {
+		return [];
+	}
+	return [
+		{
+			path,
+			sizes: Array.from(
+				{ length: tree.children.length },
+				() => 1 / tree.children.length
+			),
+		},
+		...tree.children.flatMap((child, index) =>
+			centerBranchSizes(child, [...path, index])
+		),
+	];
+}
+
+function collapseWorkbenchCenter(
+	dispatch: (action: WorkbenchAction) => void,
+	state: WorkbenchState,
+	primaryGroupId: string
+): void {
+	for (const group of state.groups) {
+		if (group.region !== "center" || group.id === primaryGroupId) {
+			continue;
+		}
+		for (const itemId of group.itemIds) {
+			dispatch({
+				type: "item/move",
+				itemId,
+				toGroupId: primaryGroupId,
+			});
+		}
+		dispatch({ type: "center/remove-group", groupId: group.id });
+	}
+}
+
+export function workbenchActiveItemsProtectedFromUnload(
+	state: WorkbenchState
+): Set<string> {
+	const ids = new Set<string>();
+	for (const group of state.groups) {
+		const visible =
+			group.region === "center" || state.openRegions[group.region] === true;
+		if (visible && group.activeItemId) {
+			ids.add(group.activeItemId);
+		}
+	}
+	return ids;
+}
+
+export function shouldAutoUnloadWorkbenchTab({
+	cutoff,
+	lastActive,
+	state,
+	tab,
+}: {
+	cutoff: number;
+	lastActive: number | undefined;
+	state: WorkbenchState;
+	tab: Tab;
+}): boolean {
+	return (
+		!(
+			tab.pinned ||
+			tab.unloaded ||
+			workbenchActiveItemsProtectedFromUnload(state).has(tab.id)
+		) &&
+		lastActive !== undefined &&
+		lastActive < cutoff
+	);
+}
+
+function centerLeafGroupIds(tree: WorkbenchSplitNode): string[] {
+	return tree.type === "leaf"
+		? [tree.groupId]
+		: tree.children.flatMap(centerLeafGroupIds);
+}
+
+function detachCenterItem({
+	dispatch,
+	itemId,
+	state,
+}: {
+	dispatch: (action: WorkbenchAction) => void;
+	itemId: string;
+	state: WorkbenchState;
+}): void {
+	const sourceGroup = state.groups.find((group) =>
+		group.itemIds.includes(itemId)
+	);
+	if (sourceGroup?.region !== "center") {
+		return;
+	}
+	const targetGroup = state.groups.find(
+		(group) => group.region === "center" && group.id !== sourceGroup.id
+	);
+	if (!targetGroup) {
+		return;
+	}
+	dispatch({
+		type: "item/move",
+		activate: false,
+		itemId,
+		toGroupId: targetGroup.id,
+	});
+	if (sourceGroup.itemIds.length === 1) {
+		dispatch({ type: "center/remove-group", groupId: sourceGroup.id });
+	}
+}
+
+function placeTabsInCenter({
+	dispatch,
+	state,
+	tabIds,
+}: {
+	dispatch: (action: WorkbenchAction) => void;
+	state: WorkbenchState;
+	tabIds: string[];
+}): string[] {
+	const primaryGroup = state.groups.find((group) => group.region === "center");
+	if (!(primaryGroup && tabIds[0])) {
+		return [];
+	}
+	collapseWorkbenchCenter(dispatch, state, primaryGroup.id);
+	dispatch({
+		type: "item/move",
+		itemId: tabIds[0],
+		toGroupId: primaryGroup.id,
+	});
+	dispatch({ type: "item/pin", itemId: tabIds[0], pinned: false });
+	const groupIds = [primaryGroup.id];
+	for (const itemId of tabIds.slice(1)) {
+		const newGroupId = makeGroupId();
+		dispatch({
+			type: "center/split",
+			direction: "right",
+			newGroupId,
+			targetGroupId: primaryGroup.id,
+		});
+		dispatch({ type: "item/move", itemId, toGroupId: newGroupId });
+		dispatch({ type: "item/pin", itemId, pinned: false });
+		groupIds.push(newGroupId);
+	}
+	return groupIds;
+}
+
+function presetCenterTree(
+	node: PresetNode,
+	groupIds: Iterator<string>
+): WorkbenchSplitNode | null {
+	if (node.type === "slot") {
+		const group = groupIds.next();
+		return group.done ? null : { type: "leaf", groupId: group.value };
+	}
+	const children = node.children.flatMap((child) => {
+		const converted = presetCenterTree(child, groupIds);
+		return converted ? [converted] : [];
+	});
+	return children.length === node.children.length
+		? {
+				type: "branch",
+				children,
+				orientation: node.orientation,
+				sizes: normalizedSizes(node.sizes, children.length),
+			}
+		: null;
 }
 
 /** Rewrite a path that a previous version persisted but no route answers to any
@@ -994,10 +1444,7 @@ function migrateLegacyPath(path: string): string {
  * survivor's section is deliberate and matches `openTab`: pinning says "keep
  * this tab", not "keep this section".
  */
-function dedupeShellFamilies(
-	tabs: Tab[],
-	activeId: string
-): { activeId: string; tabs: Tab[] } {
+function dedupeShellFamilies(tabs: Tab[], activeId: string) {
 	const families = new Map<ShellFamily, Tab[]>();
 	for (const t of tabs) {
 		const family = t.splitId ? undefined : shellRoute(t.path)?.family;
@@ -1044,11 +1491,11 @@ function dedupeShellFamilies(
 
 function restoreSession(): StartupState | null {
 	try {
-		const raw = localStorage.getItem(SESSION_TABS_KEY);
+		const raw = sealedLocalStorage.getItem(SESSION_TABS_KEY);
 		if (!raw) {
 			return null;
 		}
-		const parsed = JSON.parse(raw) as PersistedSession;
+		const parsed = restoredSessionSchema.parse(JSON.parse(raw));
 		if (!Array.isArray(parsed.tabs) || parsed.tabs.length === 0) {
 			return null;
 		}
@@ -1062,52 +1509,37 @@ function restoreSession(): StartupState | null {
 		// both (a chat tab's thread name and avatar are NOT derivable from its
 		// path). Re-titling alone would leave several identically-named tabs in the
 		// strip, so `dedupeShellFamilies` below collapses them too.
+		const usedIds = new Set<string>();
+		const stableItemIds = new Set<string>();
 		const mapped: Tab[] = parsed.tabs.map((t) => {
 			const path = migrateLegacyPath(t.path);
+			const stableId =
+				isNativeText(t.id) && t.id.length > 0 && !usedIds.has(t.id)
+					? t.id
+					: undefined;
+			let id = stableId ?? makeTabId();
+			while (usedIds.has(id)) {
+				id = makeTabId();
+			}
+			usedIds.add(id);
+			if (stableId) {
+				stableItemIds.add(id);
+			}
 			return {
-				id: makeTabId(),
+				id,
 				path,
 				title: resolveTabTitle(path, t.title),
 				conversationId: t.conversationId,
 				initialAgent: t.initialAgent,
 				initialProject: t.initialProject,
 				pinned: t.pinned,
+				restoredNode:
+					isNativeText(t.node) && t.node.length > 0 ? t.node : undefined,
 				icon: resolveTabGlyph(path, t.icon),
-				workspaceSession: parseWorkspaceSessionState(t.workspaceSession),
+				workspaceSession: t.workspaceSession,
 				worktreeMode: t.worktreeMode,
 			};
 		});
-		// Revive split layouts over the fresh ids, then stamp membership onto the
-		// member tabs (membership drives normalize + the strip brackets).
-		const splits: Split[] = [];
-		for (const node of parsed.splits ?? []) {
-			const revived = reviveSplitNode(node, (i) => mapped[i]?.id);
-			if (!revived || revived.type === "leaf") {
-				continue;
-			}
-			const id = makeSplitId();
-			const memberIds = new Set(leafOrder(revived));
-			for (const t of mapped) {
-				// A tab can only be in one split; pinned tabs never split.
-				if (memberIds.has(t.id) && !(t.splitId || t.pinned)) {
-					t.splitId = id;
-				}
-			}
-			splits.push({
-				id,
-				root: revived,
-				collapsed: false,
-				name: "",
-				color: nextClusterColor([], splits),
-			});
-		}
-		const reconciled = reconcileSplits(splits, mapped);
-		const liveIds = new Set(reconciled.map((s) => s.id));
-		for (const t of mapped) {
-			if (t.splitId && !liveIds.has(t.splitId)) {
-				t.splitId = undefined;
-			}
-		}
 		const idx = Math.min(
 			Math.max(0, parsed.activeIndex ?? 0),
 			mapped.length - 1
@@ -1122,7 +1554,8 @@ function restoreSession(): StartupState | null {
 		return {
 			tabs: normalize(collapsed.tabs),
 			activeId: collapsed.activeId,
-			splits: reconciled,
+			splits: [],
+			stableItemIds,
 		};
 	} catch {
 		return null;
@@ -1157,16 +1590,36 @@ function computeStartupState(): StartupState {
 	return { tabs: [], activeId: "", splits: [] };
 }
 
-export function TabsProvider({
+export function TabsProvider(props: {
+	children: ReactNode;
+	initialTab?: InitialTab;
+}) {
+	const workbench = useOptionalDesktopWorkbench();
+	return workbench ? (
+		<WorkbenchTabsProvider {...props} />
+	) : (
+		<DesktopWorkbenchProvider>
+			<WorkbenchTabsProvider {...props} />
+		</DesktopWorkbenchProvider>
+	);
+}
+
+function WorkbenchTabsProvider({
 	children,
 	initialTab,
 }: {
 	children: ReactNode;
 	initialTab?: InitialTab;
 }) {
+	const {
+		dispatch: dispatchWorkbench,
+		getState: getWorkbenchState,
+		openItem: openWorkbenchItem,
+		state: workbenchState,
+	} = useDesktopWorkbench();
 	// The main window opens per the "On startup" preference; a tear-off window
 	// (spawned with an `initialTab`) always seeds from that one conversation.
-	const [initialState] = useState<StartupState>(() => {
+	const [legacyInitialState] = useState<StartupState>(() => {
 		if (initialTab) {
 			const id = initialTab.transfer?.tab.id ?? makeTabId();
 			if (initialTab.transfer?.artifact) {
@@ -1196,7 +1649,30 @@ export function TabsProvider({
 		}
 		return computeStartupState();
 	});
+	const [initialState] = useState<StartupState>(() =>
+		seedRestoredTabNodes(
+			reconcileStartupWithWorkbench(workbenchState, legacyInitialState)
+		)
+	);
 	const [tabs, setTabs] = useState<Tab[]>(initialState.tabs);
+	// Per-tab computer bindings: persisted with the session and folded into the
+	// cross-window entity keys, so a thread open on two computers stays two tabs.
+	const tabOverrides = useNodeStore((s) => s.tabOverrides);
+	const defaultNodeName = useNodeStore((s) => s.getActiveNode().name);
+	const startupWorkbenchSyncRef = useRef(false);
+
+	useEffect(() => {
+		if (startupWorkbenchSyncRef.current) {
+			return;
+		}
+		startupWorkbenchSyncRef.current = true;
+		const liveItemIds = new Set(workbenchState.items.map((item) => item.id));
+		for (const tab of tabs) {
+			if (!liveItemIds.has(tab.id)) {
+				openWorkbenchItem(routeWorkbenchItem(tab), { region: "center" });
+			}
+		}
+	}, [openWorkbenchItem, tabs, workbenchState.items]);
 
 	// Carry the source tab's node binding into this window by registering it as a
 	// per-tab override on the seeded tab (window-local; never touches nodes.json).
@@ -1207,18 +1683,57 @@ export function TabsProvider({
 		}
 	}, [seededNode, initialState.activeId]);
 	const [groups, setGroups] = useState<TabGroup[]>([]);
-	const [splits, setSplits] = useState<Split[]>(initialState.splits);
+	const [splitPresentation, setSplitPresentation] = useState<SplitPresentation>(
+		() => {
+			const restored = initialState.splits[0];
+			return restored
+				? {
+						collapsed: restored.collapsed,
+						color: restored.color,
+						name: restored.name,
+					}
+				: { collapsed: false, color: TAB_GROUP_COLORS[0], name: "" };
+		}
+	);
 	const [activeTabId, setActiveTabId] = useState<string>(initialState.activeId);
 	const [closedTabs, setClosedTabs] = useState<ClosedTab[]>([]);
+	const centerSplitProjection = useMemo(
+		() => projectCenterSplit(workbenchState, tabs, splitPresentation),
+		[splitPresentation, tabs, workbenchState]
+	);
+	// The previous projection, so unchanged tabs keep their object identity
+	// across Workbench changes (see `reuseUnchangedTabs`).
+	const projectedTabsRef = useRef<Tab[]>([]);
+	const compatibilityTabs = useMemo(
+		() =>
+			reuseUnchangedTabs(
+				projectedTabsRef.current,
+				projectTabsFromWorkbench(
+					workbenchState,
+					tabs,
+					centerSplitProjection.memberIds
+				)
+			),
+		[centerSplitProjection.memberIds, tabs, workbenchState]
+	);
+	projectedTabsRef.current = compatibilityTabs;
+	const splits = centerSplitProjection.splits;
 
 	// Ref for synchronous reads inside callbacks without stale closure issues
 	const tabsRef = useRef<Tab[]>(tabs);
 	tabsRef.current = tabs;
 
-	// Kept in sync with `splits` so callbacks (close/unload/timer) can read the
-	// current split layout without a stale closure.
+	// Compatibility-only projection for callers that still address the Center
+	// layout as a legacy Split. Geometry and membership come from Workbench.
 	const splitsRef = useRef<Split[]>(splits);
 	splitsRef.current = splits;
+	// Read by `openTab` so its identity does not follow every re-projection: the
+	// projection builds a new Set on each Workbench change, including each tab
+	// activation.
+	const splitMemberIdsRef = useRef<ReadonlySet<string>>(
+		centerSplitProjection.memberIds
+	);
+	splitMemberIdsRef.current = centerSplitProjection.memberIds;
 
 	// Kept in sync with `groups` so split-creation callbacks can pick a color
 	// that is distinct from every open group without a stale closure.
@@ -1233,18 +1748,50 @@ export function TabsProvider({
 	);
 	const activeTabIdRef = useRef<string>(activeTabId);
 	activeTabIdRef.current = activeTabId;
+	const processedWorkbenchClosedIdsRef = useRef(new Set<string>());
+	useEffect(() => {
+		for (const item of workbenchState.items) {
+			processedWorkbenchClosedIdsRef.current.delete(item.id);
+		}
+		const newlyClosedIds = new Set(
+			workbenchState.closedItems.flatMap(({ item }) =>
+				item.source.kind === "route" &&
+				!processedWorkbenchClosedIdsRef.current.has(item.id)
+					? [item.id]
+					: []
+			)
+		);
+		if (newlyClosedIds.size === 0) {
+			return;
+		}
+		const current = tabsRef.current;
+		const closed = current.flatMap((tab, index) =>
+			newlyClosedIds.has(tab.id) ? [{ index, tab }] : []
+		);
+		for (const itemId of newlyClosedIds) {
+			processedWorkbenchClosedIdsRef.current.add(itemId);
+		}
+		if (closed.length === 0) {
+			return;
+		}
+		const next = current.filter((tab) => !newlyClosedIds.has(tab.id));
+		tabsRef.current = next;
+		setTabs(next);
+		setClosedTabs((stack) => [...stack, ...closed]);
+	}, [workbenchState.closedItems, workbenchState.items]);
 
 	// Managed-path numeric cap on OPEN TABS (free-tier gating). Held in refs so the
 	// openTab callback reads the live limit + upgrade opener without re-creating on
 	// every entitlement change. Off the managed path the limit is Infinity, so
 	// self-host / local-Core-without-billing is never capped.
-	const { verdict, requestUpgrade } = useEntitlementContext();
+	const { verdict, requestUpgrade, requestDesktopLicense } =
+		useEntitlementContext();
 	const tabLimitRef = useRef<number>(Number.POSITIVE_INFINITY);
 	tabLimitRef.current = hasBillingAuth()
-		? planLimit(effectivePlan(verdict), "maxOpenTabs")
+		? capLimit(effectivePlan(verdict), "maxOpenTabs")
 		: Number.POSITIVE_INFINITY;
-	const requestUpgradeRef = useRef(requestUpgrade);
-	requestUpgradeRef.current = requestUpgrade;
+	const requestUpgradeRef = useRef(requestDesktopLicense ?? requestUpgrade);
+	requestUpgradeRef.current = requestDesktopLicense ?? requestUpgrade;
 
 	// Global navigation history of activated views. Each tab is a single
 	// immutable page, so the only meaningful back/forward is the sequence of
@@ -1282,66 +1829,52 @@ export function TabsProvider({
 	// Make `id` the active view: stamp its last-active time and clear any
 	// unloaded flag (activating an unloaded tab remounts it). Centralizes the
 	// state every entry point into a tab must keep consistent.
-	const markActive = useCallback((id: string) => {
-		// Stamp the outgoing tab with the moment it stops being viewed — that is
-		// what the auto-unload timer measures idle time against. Stamp the
-		// incoming tab too so every tab always has an entry.
-		const previous = activeTabIdRef.current;
-		if (previous && previous !== id) {
-			lastActiveAtRef.current[previous] = Date.now();
-		}
-		lastActiveAtRef.current[id] = Date.now();
-		// Keep the ref authoritative so the auto-unload timer and any synchronous
-		// follow-up never read a stale active id.
-		activeTabIdRef.current = id;
-		setActiveTabId(id);
-		setTabs((prev) => {
-			// Activating a split member shows the whole split, so wake every pane in
-			// it — not just the focused one — or a sibling pane would stay blank.
-			const splitId = prev.find((t) => t.id === id)?.splitId;
-			const toLoad = new Set(
-				splitId
-					? prev.filter((t) => t.splitId === splitId).map((t) => t.id)
-					: [id]
+	const markActive = useCallback(
+		(id: string) => {
+			// Stamp the outgoing tab with the moment it stops being viewed — that is
+			// what the auto-unload timer measures idle time against. Stamp the
+			// incoming tab too so every tab always has an entry.
+			const previous = activeTabIdRef.current;
+			if (previous && previous !== id) {
+				lastActiveAtRef.current[previous] = Date.now();
+			}
+			lastActiveAtRef.current[id] = Date.now();
+			// Keep the ref authoritative so the auto-unload timer and any synchronous
+			// follow-up never read a stale active id.
+			activeTabIdRef.current = id;
+			setActiveTabId(id);
+			dispatchWorkbench({ type: "item/activate", itemId: id });
+			setTabs((prev) => {
+				if (!prev.some((tab) => tab.id === id && tab.unloaded)) {
+					return prev;
+				}
+				const next = prev.map((tab) =>
+					tab.id === id ? { ...tab, unloaded: false } : tab
+				);
+				tabsRef.current = next;
+				return next;
+			});
+			// Activating a tab inside a collapsed group expands the group so the tab
+			// is visible (Chrome behavior).
+			setGroups((prev) => {
+				const gid = tabsRef.current.find((t) => t.id === id)?.groupId;
+				if (!gid) {
+					return prev;
+				}
+				const g = prev.find((x) => x.id === gid);
+				if (!g?.collapsed) {
+					return prev;
+				}
+				return prev.map((x) => (x.id === gid ? { ...x, collapsed: false } : x));
+			});
+			setSplitPresentation((current) =>
+				current.collapsed ? { ...current, collapsed: false } : current
 			);
-			if (!prev.some((t) => toLoad.has(t.id) && t.unloaded)) {
-				return prev;
-			}
-			const next = prev.map((t) =>
-				toLoad.has(t.id) && t.unloaded ? { ...t, unloaded: false } : t
-			);
-			tabsRef.current = next;
-			return next;
-		});
-		// Activating a tab inside a collapsed group expands the group so the tab
-		// is visible (Chrome behavior).
-		setGroups((prev) => {
-			const gid = tabsRef.current.find((t) => t.id === id)?.groupId;
-			if (!gid) {
-				return prev;
-			}
-			const g = prev.find((x) => x.id === gid);
-			if (!g?.collapsed) {
-				return prev;
-			}
-			return prev.map((x) => (x.id === gid ? { ...x, collapsed: false } : x));
-		});
-		// The same for a collapsed split: activating any of its panes expands the
-		// whole split so the tab is visible in the strip.
-		setSplits((prev) => {
-			const sid = tabsRef.current.find((t) => t.id === id)?.splitId;
-			if (!sid) {
-				return prev;
-			}
-			const s = prev.find((x) => x.id === sid);
-			if (!s?.collapsed) {
-				return prev;
-			}
-			return prev.map((x) => (x.id === sid ? { ...x, collapsed: false } : x));
-		});
-	}, []);
+		},
+		[dispatchWorkbench]
+	);
 
-	const openTab = useCallback(
+	const openTabRoute = useCallback(
 		(
 			path: string,
 			opts?: {
@@ -1361,11 +1894,12 @@ export function TabsProvider({
 				initialProject?: string;
 				initialStoreQuery?: string;
 				initialStoreItem?: { id: string; kind: string };
-				mountContext?: Record<string, unknown> | null;
+				mountContext?: Record<string, RyuJsonValue> | null;
 				worktreeMode?: boolean;
 				icon?: GlyphValue;
+				node?: string;
 			}
-			// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
+			// legacy component
 		): string => {
 			const current = tabsRef.current;
 			const base = path.split("?")[0];
@@ -1410,7 +1944,9 @@ export function TabsProvider({
 				const existing =
 					current.find((t) => t.path === base) ??
 					current.find(
-						(t) => !t.splitId && shellRoute(t.path)?.family === shell.family
+						(t) =>
+							!splitMemberIdsRef.current.has(t.id) &&
+							shellRoute(t.path)?.family === shell.family
 					);
 				if (existing) {
 					// `existing.title !== shell.title` heals a tab whose stale label was
@@ -1432,13 +1968,13 @@ export function TabsProvider({
 							title: resolveTabTitle(path, opts?.title),
 							icon: resolveTabGlyph(base, opts?.icon ?? existing.icon),
 							...(opts?.mountContext === undefined
-								? {}
+								? undefined
 								: { mountContext: opts.mountContext }),
 							...(opts?.initialStoreQuery === undefined
-								? {}
+								? undefined
 								: { initialStoreQuery: opts.initialStoreQuery }),
 							...(opts?.initialStoreItem === undefined
-								? {}
+								? undefined
 								: { initialStoreItem: opts.initialStoreItem }),
 							navToken:
 								existing.path === base &&
@@ -1448,6 +1984,10 @@ export function TabsProvider({
 									? existing.navToken
 									: (existing.navToken ?? 0) + 1,
 						};
+						dispatchWorkbench({
+							type: "item/update",
+							item: routeWorkbenchItem(reused),
+						});
 						setTabs((prev) => {
 							const next = normalize(
 								prev.map((t) => (t.id === reused.id ? reused : t))
@@ -1469,7 +2009,7 @@ export function TabsProvider({
 						const patched: Tab = {
 							...patchIcon(existing),
 							...(opts.mountContext === undefined
-								? {}
+								? undefined
 								: {
 										mountContext: opts.mountContext,
 										navToken: (existing.navToken ?? 0) + 1,
@@ -1489,17 +2029,57 @@ export function TabsProvider({
 				}
 			}
 
+			const nodeStore = useNodeStore.getState();
+			const defaultName = nodeStore.getActiveNode().name;
+			const requestedNode =
+				opts?.node && opts.node !== defaultName ? opts.node : null;
+			// Bind (or unbind) only a tab this call actually opened or focused. The
+			// tab-cap early return below hands back the ACTIVE tab, which must never
+			// be silently rebound to another computer.
+			const bindNode = (tabId: string) => {
+				if (requestedNode) {
+					nodeStore.setTabOverride(tabId, requestedNode);
+				} else if (useNodeStore.getState().tabOverrides[tabId]) {
+					nodeStore.clearTabOverride(tabId);
+				}
+			};
+
 			if (!opts?.forceNew && opts?.conversationId) {
-				const existing = findChatTab(current, opts.conversationId);
+				const normalizedOverrides: Record<string, string> = {};
+				for (const tab of current) {
+					const key = tabNodeKey(nodeStore.tabOverrides, tab.id, defaultName);
+					if (key) {
+						normalizedOverrides[tab.id] = key;
+					}
+				}
+				const existing = findChatTabOnNode(
+					current,
+					opts.conversationId,
+					requestedNode,
+					normalizedOverrides
+				);
 				if (existing) {
+					// An explicit per-tab run mode (a handoff opening a handed-off
+					// worktree) applies to the focused tab too, not only a new one.
+					const worktreeModeChanged =
+						opts.worktreeMode !== undefined &&
+						opts.worktreeMode !== existing.worktreeMode;
 					if (
 						opts.icon !== undefined ||
-						(opts.title !== undefined && opts.title !== existing.title)
+						(opts.title !== undefined && opts.title !== existing.title) ||
+						worktreeModeChanged
 					) {
 						const patched: Tab = {
 							...patchIcon(existing),
-							...(opts.title === undefined ? {} : { title: opts.title }),
+							...(opts.title === undefined ? undefined : { title: opts.title }),
+							...(worktreeModeChanged
+								? { worktreeMode: opts.worktreeMode }
+								: undefined),
 						};
+						dispatchWorkbench({
+							type: "item/update",
+							item: routeWorkbenchItem(patched),
+						});
 						setTabs((prev) => {
 							const next = normalize(
 								prev.map((t) => (t.id === patched.id ? patched : t))
@@ -1507,6 +2087,9 @@ export function TabsProvider({
 							tabsRef.current = next;
 							return next;
 						});
+					}
+					if (requestedNode) {
+						bindNode(existing.id);
 					}
 					markActive(existing.id);
 					pushHistory(existing.id);
@@ -1526,7 +2109,7 @@ export function TabsProvider({
 				!opts?.forceNew &&
 				activeTab &&
 				!activeTab.pinned &&
-				!activeTab.splitId
+				!splitMemberIdsRef.current.has(activeTab.id)
 			) {
 				const reused: Tab = {
 					...activeTab,
@@ -1557,6 +2140,13 @@ export function TabsProvider({
 					navToken: (activeTab.navToken ?? 0) + 1,
 					unloaded: false,
 				};
+				// The reused tab shows new content, so it takes the requested
+				// computer, and a stale binding from its previous page is cleared.
+				bindNode(reused.id);
+				dispatchWorkbench({
+					type: "item/update",
+					item: routeWorkbenchItem(reused),
+				});
 				setTabs((prev) => {
 					const next = normalize(
 						prev.map((t) => (t.id === reused.id ? reused : t))
@@ -1600,6 +2190,11 @@ export function TabsProvider({
 				mountContext: opts?.mountContext,
 				worktreeMode: opts?.worktreeMode,
 			};
+			// Before the tab mounts, so its first render already reads the binding.
+			if (requestedNode) {
+				bindNode(newTab.id);
+			}
+			openWorkbenchItem(routeWorkbenchItem(newTab), { region: "center" });
 			setTabs((prev) => {
 				const next = normalize([...prev, newTab]);
 				tabsRef.current = next;
@@ -1609,7 +2204,16 @@ export function TabsProvider({
 			pushHistory(newTab.id);
 			return newTab.id;
 		},
-		[markActive, pushHistory]
+		[dispatchWorkbench, markActive, openWorkbenchItem, pushHistory]
+	);
+
+	const openTab = useCallback<typeof openTabRoute>(
+		(path, opts) => {
+			const id = openTabRoute(path, opts);
+			notifyTabOpenRequest(id);
+			return id;
+		},
+		[openTabRoute]
 	);
 
 	const closeTab = useCallback(
@@ -1641,18 +2245,21 @@ export function TabsProvider({
 			if (idx === -1) {
 				return;
 			}
+			const closingGroup = workbenchState.groups.find((group) =>
+				group.itemIds.includes(id)
+			);
+			dispatchWorkbench({ type: "item/close", itemId: id });
 			if (!options?.transferred) {
 				setClosedTabs((stack) => [...stack, { tab: prev[idx], index: idx }]);
 			}
 			// If the tab is part of a split, its surviving siblings stay together.
 			// Prefer focusing one of them so the split remains visible after the
 			// close, rather than jumping to an unrelated neighbor tab.
-			const closingSplitId = prev[idx].splitId;
-			const siblings = closingSplitId
-				? prev
-						.filter((t) => t.splitId === closingSplitId && t.id !== id)
-						.map((t) => t.id)
-				: [];
+			const siblings = centerSplitProjection.memberIds.has(id)
+				? [...centerSplitProjection.memberIds].filter((itemId) => itemId !== id)
+				: (closingGroup?.itemIds.filter(
+						(itemId) => itemId !== id && prev.some((tab) => tab.id === itemId)
+					) ?? []);
 			// Allow the tab list to reach zero — closing the final tab leaves an empty
 			// window (handled by Layout's empty state) rather than respawning a tab or
 			// quitting the app. A new tab is one click away via the titlebar + button.
@@ -1674,24 +2281,14 @@ export function TabsProvider({
 					nextActive = fallback;
 				}
 			}
-			// The closed tab's split membership vanishes with it. If that leaves the
-			// split with a single member, dissolve it (clear the lone member's
-			// splitId); otherwise reconcile the tree — the closed pane's leaf is
-			// pruned and its space flows back to its siblings.
-			if (closingSplitId) {
-				const remaining = next.filter((t) => t.splitId === closingSplitId);
-				if (remaining.length < 2) {
-					next = next.map((t) =>
-						t.splitId === closingSplitId ? { ...t, splitId: undefined } : t
-					);
-				}
-				setSplits((prevSplits) => reconcileSplits(prevSplits, next));
-			}
 			tabsRef.current = next;
 			setTabs(next);
 			if (wasActive) {
 				activeTabIdRef.current = nextActive;
 				setActiveTabId(nextActive);
+				if (nextActive) {
+					dispatchWorkbench({ type: "item/activate", itemId: nextActive });
+				}
 			}
 			// Drop now-empty groups so stale brackets don't linger, and expand the
 			// group the revealed tab belongs to so its chip is actually visible.
@@ -1703,47 +2300,43 @@ export function TabsProvider({
 						g.id === fallbackGroupId ? { ...g, collapsed: false } : g
 					)
 			);
-			// Same for a collapsed split: reveal the member the focus falls back to.
-			const fallbackSplitId = next.find((t) => t.id === nextActive)?.splitId;
-			setSplits((prev) =>
-				prev.map((s) =>
-					s.id === fallbackSplitId ? { ...s, collapsed: false } : s
-				)
+			setSplitPresentation((current) =>
+				current.collapsed ? { ...current, collapsed: false } : current
 			);
 		},
-		[syncNav]
+		[
+			centerSplitProjection.memberIds,
+			dispatchWorkbench,
+			syncNav,
+			workbenchState.groups,
+		]
 	);
 
 	const restoreTab = useCallback(() => {
-		setClosedTabs((stack) => {
-			if (stack.length === 0) {
-				return stack;
-			}
-			const last = stack.at(-1);
-			if (!last) {
-				return stack;
-			}
-			const { tab, index } = last;
-			// Drop any stale split membership — the split was almost certainly
-			// dissolved when this tab closed, so restore it as a standalone tab.
-			const restored: Tab = {
-				...tab,
-				id: makeTabId(),
-				unloaded: false,
-				splitId: undefined,
-			};
-			setTabs((prev) => {
-				const next = [...prev];
-				next.splice(Math.min(index, next.length), 0, restored);
-				const normalized = normalize(next);
-				tabsRef.current = normalized;
-				return normalized;
-			});
-			markActive(restored.id);
-			pushHistory(restored.id);
-			return stack.slice(0, -1);
+		const last = closedTabs.at(-1);
+		if (!last) {
+			return;
+		}
+		const { tab, index } = last;
+		// Drop any stale split membership — the split was almost certainly
+		// dissolved when this tab closed, so restore it as a standalone tab.
+		const restored: Tab = {
+			...tab,
+			unloaded: false,
+			splitId: undefined,
+		};
+		dispatchWorkbench({ type: "item/restore", itemId: restored.id });
+		setTabs((prev) => {
+			const next = [...prev];
+			next.splice(Math.min(index, next.length), 0, restored);
+			const normalized = normalize(next);
+			tabsRef.current = normalized;
+			return normalized;
 		});
-	}, [markActive, pushHistory]);
+		markActive(restored.id);
+		pushHistory(restored.id);
+		setClosedTabs((stack) => stack.slice(0, -1));
+	}, [closedTabs, dispatchWorkbench, markActive, pushHistory]);
 
 	const activateTab = useCallback(
 		(id: string) => {
@@ -1782,15 +2375,36 @@ export function TabsProvider({
 		syncNav();
 	}, [markActive, syncNav]);
 
-	const updateTabTitle = useCallback((id: string, title: string) => {
-		setTabs((prev) => {
-			const tab = prev.find((item) => item.id === id);
-			if (!tab || tab.title === title) {
-				return prev;
+	const updateTabTitle = useCallback(
+		(id: string, title: string) => {
+			// A page's title-bar effect re-runs whenever its tab is activated and
+			// writes the title it already has. That must not commit a new Workbench
+			// state, re-render the tab strip, or schedule a session snapshot. The
+			// strip shows the Workbench item's title, and a restore can leave it
+			// different from the runtime tab's, so skip only when both agree.
+			if (
+				tabsRef.current.find((tab) => tab.id === id)?.title === title &&
+				getWorkbenchState().items.find((item) => item.id === id)?.title ===
+					title
+			) {
+				return;
 			}
-			return prev.map((item) => (item.id === id ? { ...item, title } : item));
-		});
-	}, []);
+			const next = tabsRef.current.map((tab) =>
+				tab.id === id ? { ...tab, title } : tab
+			);
+			const updated = next.find((tab) => tab.id === id);
+			if (!updated) {
+				return;
+			}
+			tabsRef.current = next;
+			setTabs(next);
+			dispatchWorkbench({
+				type: "item/update",
+				item: routeWorkbenchItem(updated),
+			});
+		},
+		[dispatchWorkbench, getWorkbenchState]
+	);
 
 	const updateTabWorkspaceSession = useCallback(
 		(id: string, workspaceSession: WorkspaceSessionState) => {
@@ -1831,16 +2445,22 @@ export function TabsProvider({
 	// so a repeat call from ChatPage's effect never re-snapshots the session.
 	const bindTabConversation = useCallback(
 		(tabId: string, conversationId: string | undefined) => {
-			setTabs((prev) => {
-				const next = bindConversation(prev, tabId, conversationId);
-				if (next === prev) {
-					return prev;
-				}
-				tabsRef.current = next;
-				return next;
-			});
+			const current = tabsRef.current;
+			const next = bindConversation(current, tabId, conversationId);
+			if (next === current) {
+				return;
+			}
+			tabsRef.current = next;
+			setTabs(next);
+			const updated = next.find((tab) => tab.id === tabId);
+			if (updated) {
+				dispatchWorkbench({
+					type: "item/update",
+					item: routeWorkbenchItem(updated),
+				});
+			}
 		},
-		[]
+		[dispatchWorkbench]
 	);
 
 	const updateTabIcon = useCallback((id: string, icon: GlyphValue) => {
@@ -1925,6 +2545,34 @@ export function TabsProvider({
 			if (draggedId === targetId) {
 				return;
 			}
+			const targetGroup = workbenchState.groups.find((group) =>
+				group.itemIds.includes(targetId)
+			);
+			if (targetGroup) {
+				const draggedGroup = workbenchState.groups.find((group) =>
+					group.itemIds.includes(draggedId)
+				);
+				if (draggedGroup?.id === targetGroup.id) {
+					const withoutDragged = targetGroup.itemIds.filter(
+						(itemId) => itemId !== draggedId
+					);
+					const targetIndex = withoutDragged.indexOf(targetId);
+					dispatchWorkbench({
+						type: "item/reorder",
+						groupId: targetGroup.id,
+						itemId: draggedId,
+						toIndex: before ? targetIndex : targetIndex + 1,
+					});
+				} else {
+					const targetIndex = targetGroup.itemIds.indexOf(targetId);
+					dispatchWorkbench({
+						type: "item/move",
+						itemId: draggedId,
+						toGroupId: targetGroup.id,
+						index: before ? targetIndex : targetIndex + 1,
+					});
+				}
+			}
 			setTabs((prev) => {
 				const dragged = prev.find((t) => t.id === draggedId);
 				if (!dragged) {
@@ -1946,19 +2594,28 @@ export function TabsProvider({
 				return next;
 			});
 		},
-		[]
+		[dispatchWorkbench, workbenchState.groups]
 	);
-
-	// Reconcile the split trees against current tab membership (drop dissolved
-	// splits, prune departed leaves). Reads tabsRef, so call it after the
-	// setTabs that changed membership.
-	const pruneSplits = useCallback(() => {
-		setSplits((prev) => reconcileSplits(prev, tabsRef.current));
-	}, []);
 
 	// --- Pinning ---------------------------------------------------------------
 	const togglePin = useCallback(
 		(id: string) => {
+			const currentTarget = tabsRef.current.find((tab) => tab.id === id);
+			if (!currentTarget) {
+				return;
+			}
+			if (!currentTarget.pinned) {
+				detachCenterItem({
+					dispatch: dispatchWorkbench,
+					itemId: id,
+					state: workbenchState,
+				});
+			}
+			dispatchWorkbench({
+				type: "item/pin",
+				itemId: id,
+				pinned: !currentTarget.pinned,
+			});
 			setTabs((prev) => {
 				const target = prev.find((t) => t.id === id);
 				if (!target) {
@@ -1967,95 +2624,70 @@ export function TabsProvider({
 				const pinning = !target.pinned;
 				// Pinning detaches a tab from its group and split (Chrome behavior); a
 				// pinned tab is icon-only and can't host a side-by-side pane.
-				const detachedSplitId = pinning ? target.splitId : undefined;
-				let mapped = prev.map((t) =>
+				const mapped = prev.map((t) =>
 					t.id === id
 						? {
 								...t,
 								pinned: pinning,
 								groupId: pinning ? undefined : t.groupId,
-								splitId: pinning ? undefined : t.splitId,
+								splitId: undefined,
 							}
 						: t
 				);
-				// If pulling this tab out left a split with a single member, dissolve it.
-				if (
-					detachedSplitId &&
-					mapped.filter((t) => t.splitId === detachedSplitId).length < 2
-				) {
-					mapped = mapped.map((t) =>
-						t.splitId === detachedSplitId ? { ...t, splitId: undefined } : t
-					);
-				}
 				const next = normalize(mapped);
 				tabsRef.current = next;
 				return next;
 			});
-			// A pin may have emptied a group or split.
+			// A pin may have emptied a presentation group.
 			setGroups((prev) =>
 				prev.filter((g) => tabsRef.current.some((t) => t.groupId === g.id))
 			);
-			pruneSplits();
 		},
-		[pruneSplits]
+		[dispatchWorkbench, workbenchState]
 	);
 
 	// --- Unloading -------------------------------------------------------------
-	const unloadTab = useCallback((id: string) => {
-		// Never unload the tab the user is currently looking at.
-		if (id === activeTabIdRef.current) {
-			return;
-		}
-		// A running route may own the live stream that is driving the tab. Keep it
-		// mounted until the run ends so memory cleanup never becomes cancellation.
-		if (tabsRef.current.find((tab) => tab.id === id)?.busy) {
-			return;
-		}
-		// Never unload a pane that is currently visible as part of the active
-		// split — it would blank a side-by-side view the user is still using.
-		const activeSplitId = tabsRef.current.find(
-			(t) => t.id === activeTabIdRef.current
-		)?.splitId;
-		const targetSplitId = tabsRef.current.find((t) => t.id === id)?.splitId;
-		if (activeSplitId && targetSplitId === activeSplitId) {
-			return;
-		}
-		setTabs((prev) => {
-			const next = prev.map((t) =>
-				t.id === id ? { ...t, unloaded: true } : t
-			);
-			tabsRef.current = next;
-			return next;
-		});
-	}, []);
+	const unloadTab = useCallback(
+		(id: string) => {
+			if (
+				id === activeTabIdRef.current ||
+				tabsRef.current.find((tab) => tab.id === id)?.busy ||
+				workbenchActiveItemsProtectedFromUnload(workbenchState).has(id)
+			) {
+				return;
+			}
+			setTabs((prev) => {
+				const next = prev.map((t) =>
+					t.id === id ? { ...t, unloaded: true } : t
+				);
+				tabsRef.current = next;
+				return next;
+			});
+		},
+		[workbenchState]
+	);
 
 	// --- Grouping --------------------------------------------------------------
 	const addTabToGroup = useCallback(
 		(tabId: string, groupId: string) => {
+			detachCenterItem({
+				dispatch: dispatchWorkbench,
+				itemId: tabId,
+				state: workbenchState,
+			});
+			dispatchWorkbench({ type: "item/pin", itemId: tabId, pinned: false });
 			setTabs((prev) => {
-				const target = prev.find((t) => t.id === tabId);
-				const detachedSplitId = target?.splitId;
-				// Joining a group unpins and leaves any split (a tab is never both).
-				let mapped = prev.map((t) =>
+				const mapped = prev.map((t) =>
 					t.id === tabId
 						? { ...t, groupId, pinned: false, splitId: undefined }
 						: t
 				);
-				if (
-					detachedSplitId &&
-					mapped.filter((t) => t.splitId === detachedSplitId).length < 2
-				) {
-					mapped = mapped.map((t) =>
-						t.splitId === detachedSplitId ? { ...t, splitId: undefined } : t
-					);
-				}
 				const next = normalize(mapped);
 				tabsRef.current = next;
 				return next;
 			});
-			pruneSplits();
 		},
-		[pruneSplits]
+		[dispatchWorkbench, workbenchState]
 	);
 
 	const createGroup = useCallback(
@@ -2110,23 +2742,24 @@ export function TabsProvider({
 	}, []);
 
 	const renameSplit = useCallback((splitId: string, name: string) => {
-		setSplits((prev) =>
-			prev.map((s) => (s.id === splitId ? { ...s, name } : s))
-		);
+		if (splitId === WORKBENCH_CENTER_SPLIT_ID) {
+			setSplitPresentation((current) => ({ ...current, name }));
+		}
 	}, []);
 
 	const setSplitColor = useCallback((splitId: string, color: TabGroupColor) => {
-		setSplits((prev) =>
-			prev.map((s) => (s.id === splitId ? { ...s, color } : s))
-		);
+		if (splitId === WORKBENCH_CENTER_SPLIT_ID) {
+			setSplitPresentation((current) => ({ ...current, color }));
+		}
 	}, []);
 
 	const toggleSplitCollapsed = useCallback((splitId: string) => {
-		setSplits((prev) =>
-			prev.map((s) =>
-				s.id === splitId ? { ...s, collapsed: !s.collapsed } : s
-			)
-		);
+		if (splitId === WORKBENCH_CENTER_SPLIT_ID) {
+			setSplitPresentation((current) => ({
+				...current,
+				collapsed: !current.collapsed,
+			}));
+		}
 	}, []);
 
 	const ungroup = useCallback((groupId: string) => {
@@ -2155,6 +2788,34 @@ export function TabsProvider({
 	);
 
 	// --- Split view ------------------------------------------------------------
+	const prepareTabForWorkbenchSplit = useCallback(
+		(tabId: string) => {
+			if (!tabsRef.current.some((tab) => tab.id === tabId)) {
+				return;
+			}
+			dispatchWorkbench({ type: "item/pin", itemId: tabId, pinned: false });
+			const next = normalize(
+				tabsRef.current.map((tab) =>
+					tab.id === tabId
+						? {
+								...tab,
+								groupId: undefined,
+								pinned: false,
+								splitId: undefined,
+								unloaded: false,
+							}
+						: tab
+				)
+			);
+			tabsRef.current = next;
+			setTabs(next);
+			setGroups((current) =>
+				current.filter((group) => next.some((tab) => tab.groupId === group.id))
+			);
+		},
+		[dispatchWorkbench]
+	);
+
 	const splitTabs = useCallback(
 		(tabIds: string[], orientation: SplitOrientation = "columns") => {
 			const unique = [...new Set(tabIds)].filter((id) =>
@@ -2163,20 +2824,39 @@ export function TabsProvider({
 			if (unique.length < 2) {
 				return;
 			}
-			const id = makeSplitId();
-			const color = nextClusterColor(groupsRef.current, splitsRef.current);
-			// Assign the new splitId to every member (detaching them from pin/group —
-			// a tab is never both), and wake them here: markActive below only wakes
-			// the focused pane and reads a splitsRef this tick hasn't refreshed, so an
-			// already-unloaded sibling would otherwise render blank. normalize then
-			// makes the members contiguous so the strip brackets them as one block.
+			const groupIds = placeTabsInCenter({
+				dispatch: dispatchWorkbench,
+				state: workbenchState,
+				tabIds: unique,
+			});
+			if (groupIds.length !== unique.length) {
+				return;
+			}
+			dispatchWorkbench({
+				type: "center/replace-tree",
+				tree: {
+					type: "branch",
+					children: groupIds.map((groupId) => ({ type: "leaf", groupId })),
+					orientation,
+					sizes: Array.from(
+						{ length: groupIds.length },
+						() => 1 / groupIds.length
+					),
+				},
+			});
+			setSplitPresentation((current) => ({
+				...current,
+				collapsed: false,
+				color: nextClusterColor(groupsRef.current, []),
+				name: "",
+			}));
 			setTabs((prev) => {
 				const next = normalize(
 					prev.map((t) =>
 						unique.includes(t.id)
 							? {
 									...t,
-									splitId: id,
+									splitId: undefined,
 									pinned: false,
 									groupId: undefined,
 									unloaded: false,
@@ -2190,21 +2870,9 @@ export function TabsProvider({
 			setGroups((prev) =>
 				prev.filter((g) => tabsRef.current.some((t) => t.groupId === g.id))
 			);
-			// Add the new split, then prune any prior split a member was pulled out of.
-			setSplits((prev) => [
-				...prev,
-				{
-					id,
-					root: makeBranch(orientation, unique.map(makeLeaf)),
-					collapsed: false,
-					name: "",
-					color,
-				},
-			]);
-			pruneSplits();
 			markActive(unique[0]);
 		},
-		[markActive, pruneSplits]
+		[dispatchWorkbench, markActive, workbenchState]
 	);
 
 	// Tile tabs into a split whose SHAPE comes from a saved preset. Deliberately
@@ -2226,15 +2894,29 @@ export function TabsProvider({
 				return;
 			}
 			const members = new Set(leafOrder(tree));
-			const id = makeSplitId();
-			const color = nextClusterColor(groupsRef.current, splitsRef.current);
+			const groupIds = placeTabsInCenter({
+				dispatch: dispatchWorkbench,
+				state: workbenchState,
+				tabIds: leafOrder(tree),
+			});
+			const centerTree = presetCenterTree(root, groupIds.values());
+			if (!centerTree) {
+				return;
+			}
+			dispatchWorkbench({ type: "center/replace-tree", tree: centerTree });
+			setSplitPresentation((current) => ({
+				...current,
+				collapsed: false,
+				color: nextClusterColor(groupsRef.current, []),
+				name: "",
+			}));
 			setTabs((prev) => {
 				const next = normalize(
 					prev.map((t) =>
 						members.has(t.id)
 							? {
 									...t,
-									splitId: id,
+									splitId: undefined,
 									pinned: false,
 									groupId: undefined,
 									unloaded: false,
@@ -2248,14 +2930,9 @@ export function TabsProvider({
 			setGroups((prev) =>
 				prev.filter((g) => tabsRef.current.some((t) => t.groupId === g.id))
 			);
-			setSplits((prev) => [
-				...prev,
-				{ id, root: tree, collapsed: false, name: "", color },
-			]);
-			pruneSplits();
 			markActive(unique[0]);
 		},
-		[markActive, pruneSplits]
+		[dispatchWorkbench, markActive, workbenchState]
 	);
 
 	// "Apply a preset onto empty panes": open one real tab per slot — its
@@ -2274,8 +2951,6 @@ export function TabsProvider({
 				requestUpgradeRef.current();
 				return;
 			}
-			const id = makeSplitId();
-			const color = nextClusterColor(groupsRef.current, splitsRef.current);
 			// Minted here rather than through N× `openTab` on purpose: `openTab`
 			// publishes each new tab through its own `setTabs`, and only the FIRST
 			// updater in a batch is evaluated eagerly — so the second call would
@@ -2286,7 +2961,6 @@ export function TabsProvider({
 					id: makeTabId(),
 					path: base,
 					title: defaultTitle(base),
-					splitId: id,
 				};
 			});
 			const tree = buildPresetTree(
@@ -2296,65 +2970,96 @@ export function TabsProvider({
 			if (!tree) {
 				return;
 			}
+			for (const tab of created) {
+				openWorkbenchItem(routeWorkbenchItem(tab), { region: "center" });
+			}
+			const groupIds = placeTabsInCenter({
+				dispatch: dispatchWorkbench,
+				state: workbenchState,
+				tabIds: created.map((tab) => tab.id),
+			});
+			const centerTree = presetCenterTree(root, groupIds.values());
+			if (!centerTree) {
+				return;
+			}
+			dispatchWorkbench({ type: "center/replace-tree", tree: centerTree });
+			setSplitPresentation((current) => ({
+				...current,
+				collapsed: false,
+				color: nextClusterColor(groupsRef.current, []),
+				name: "",
+			}));
 			setTabs((prev) => {
 				const next = normalize([...prev, ...created]);
 				tabsRef.current = next;
 				return next;
 			});
-			setSplits((prev) => [
-				...prev,
-				{ id, root: tree, collapsed: false, name: "", color },
-			]);
-			pruneSplits();
 			markActive(created[0].id);
 			pushHistory(created[0].id);
 		},
-		[markActive, pruneSplits, pushHistory]
+		[
+			dispatchWorkbench,
+			markActive,
+			openWorkbenchItem,
+			pushHistory,
+			workbenchState,
+		]
 	);
 
 	const removeFromSplit = useCallback(
 		(tabId: string) => {
+			detachCenterItem({
+				dispatch: dispatchWorkbench,
+				itemId: tabId,
+				state: workbenchState,
+			});
 			setTabs((prev) => {
-				const splitId = prev.find((t) => t.id === tabId)?.splitId;
-				if (!splitId) {
-					return prev;
-				}
-				let mapped = prev.map((t) =>
+				const mapped = prev.map((t) =>
 					t.id === tabId ? { ...t, splitId: undefined } : t
 				);
-				// Dissolve the split if removing this pane leaves a single member.
-				if (mapped.filter((t) => t.splitId === splitId).length < 2) {
-					mapped = mapped.map((t) =>
-						t.splitId === splitId ? { ...t, splitId: undefined } : t
-					);
-				}
 				const next = normalize(mapped);
 				tabsRef.current = next;
 				return next;
 			});
-			pruneSplits();
 		},
-		[pruneSplits]
+		[dispatchWorkbench, workbenchState]
 	);
 
 	const unsplit = useCallback(
 		(tabId: string) => {
-			setTabs((prev) => {
-				const splitId = prev.find((t) => t.id === tabId)?.splitId;
-				if (!splitId) {
-					return prev;
+			const centerGroups = workbenchState.groups.filter(
+				(group) => group.region === "center"
+			);
+			const primaryGroup =
+				centerGroups.find((group) => group.itemIds.includes(tabId)) ??
+				centerGroups[0];
+			if (primaryGroup) {
+				for (const group of centerGroups) {
+					if (group.id === primaryGroup.id) {
+						continue;
+					}
+					for (const itemId of group.itemIds) {
+						dispatchWorkbench({
+							type: "item/move",
+							itemId,
+							toGroupId: primaryGroup.id,
+						});
+					}
+					dispatchWorkbench({
+						type: "center/remove-group",
+						groupId: group.id,
+					});
 				}
+			}
+			setTabs((prev) => {
 				const next = normalize(
-					prev.map((t) =>
-						t.splitId === splitId ? { ...t, splitId: undefined } : t
-					)
+					prev.map((tab) => ({ ...tab, splitId: undefined }))
 				);
 				tabsRef.current = next;
 				return next;
 			});
-			pruneSplits();
 		},
-		[pruneSplits]
+		[dispatchWorkbench, workbenchState.groups]
 	);
 
 	// Flips the ROOT branch's axis. For a flat (unnested) split this is the
@@ -2363,46 +3068,49 @@ export function TabsProvider({
 	// that now matches the new root orientation.
 	const setSplitOrientation = useCallback(
 		(splitId: string, orientation: SplitOrientation) => {
-			setSplits((prev) =>
-				prev.map((s) => {
-					if (s.id !== splitId || s.root.orientation === orientation) {
-						return s;
-					}
-					const flipped = normalizeNode({ ...s.root, orientation });
-					return flipped && flipped.type === "branch"
-						? { ...s, root: flipped }
-						: s;
-				})
-			);
+			if (
+				splitId !== WORKBENCH_CENTER_SPLIT_ID ||
+				workbenchState.centerTree.type !== "branch" ||
+				workbenchState.centerTree.orientation === orientation
+			) {
+				return;
+			}
+			dispatchWorkbench({
+				type: "center/replace-tree",
+				tree: { ...workbenchState.centerTree, orientation },
+			});
 		},
-		[]
+		[dispatchWorkbench, workbenchState]
 	);
 
 	// Even out the panes after the gutters have been dragged around. Sizes only:
 	// membership is untouched, so no reconcile/prune is involved. Recursive by
 	// design, unlike `setSplitOrientation` above — an inner branch left skewed
 	// would make "equalize panes" look like it did nothing.
-	const equalizeSplit = useCallback((splitId: string) => {
-		setSplits((prev) =>
-			prev.map((s) =>
-				s.id === splitId
-					? { ...s, root: equalizeNode(s.root) as SplitBranch }
-					: s
-			)
-		);
-	}, []);
+	const equalizeSplit = useCallback(
+		(splitId: string) => {
+			if (splitId !== WORKBENCH_CENTER_SPLIT_ID) {
+				return;
+			}
+			for (const branch of centerBranchSizes(workbenchState.centerTree)) {
+				dispatchWorkbench({
+					type: "center/resize-branch",
+					path: branch.path,
+					sizes: branch.sizes,
+				});
+			}
+		},
+		[dispatchWorkbench, workbenchState.centerTree]
+	);
 
 	const setSplitSizes = useCallback(
 		(splitId: string, path: number[], sizes: number[]) => {
-			setSplits((prev) =>
-				prev.map((s) =>
-					s.id === splitId
-						? { ...s, root: setSizesAt(s.root, path, sizes) as SplitBranch }
-						: s
-				)
-			);
+			if (splitId !== WORKBENCH_CENTER_SPLIT_ID) {
+				return;
+			}
+			dispatchWorkbench({ type: "center/resize-branch", path, sizes });
 		},
-		[]
+		[dispatchWorkbench]
 	);
 
 	// Tile `sourceTabId` beside `targetTabId` on the given side — the engine
@@ -2421,36 +3129,70 @@ export function TabsProvider({
 			if (!(source && target)) {
 				return;
 			}
-			const targetSplitId = target.splitId;
-			const splitId = targetSplitId ?? makeSplitId();
-			const oldSplitId = source.splitId;
-			// Membership first: both endpoints join `splitId` (detached from
-			// pin/group — a tab is never both), and every member is woken here since
-			// markActive below reads a splitsRef this tick hasn't refreshed.
+			const originalTargetGroup = workbenchState.groups.find((group) =>
+				group.itemIds.includes(targetTabId)
+			);
+			const sourceGroup = workbenchState.groups.find((group) =>
+				group.itemIds.includes(sourceTabId)
+			);
+			const centerTargetGroup =
+				originalTargetGroup?.region === "center"
+					? originalTargetGroup
+					: workbenchState.groups.find((group) => group.region === "center");
+			if (centerTargetGroup) {
+				if (originalTargetGroup?.region !== "center") {
+					dispatchWorkbench({
+						type: "item/move",
+						itemId: targetTabId,
+						toGroupId: centerTargetGroup.id,
+					});
+				}
+				const newGroupId = makeGroupId();
+				dispatchWorkbench({
+					type: "center/split",
+					direction,
+					newGroupId,
+					targetGroupId: centerTargetGroup.id,
+				});
+				dispatchWorkbench({
+					type: "item/move",
+					itemId: sourceTabId,
+					toGroupId: newGroupId,
+				});
+				dispatchWorkbench({
+					type: "item/pin",
+					itemId: sourceTabId,
+					pinned: false,
+				});
+				dispatchWorkbench({
+					type: "item/pin",
+					itemId: targetTabId,
+					pinned: false,
+				});
+				if (
+					sourceGroup?.region === "center" &&
+					sourceGroup.id !== centerTargetGroup.id &&
+					sourceGroup.itemIds.length === 1
+				) {
+					dispatchWorkbench({
+						type: "center/remove-group",
+						groupId: sourceGroup.id,
+					});
+				}
+			}
 			setTabs((prev) => {
-				let mapped = prev.map((t) => {
+				const mapped = prev.map((t) => {
 					if (t.id === sourceTabId || t.id === targetTabId) {
 						return {
 							...t,
-							splitId,
+							splitId: undefined,
 							pinned: false,
 							groupId: undefined,
 							unloaded: false,
 						};
 					}
-					return t.splitId === splitId ? { ...t, unloaded: false } : t;
+					return t;
 				});
-				// If pulling the source out of a different split left it with a single
-				// member, dissolve that split (clear the lone survivor's splitId).
-				if (
-					oldSplitId &&
-					oldSplitId !== splitId &&
-					mapped.filter((t) => t.splitId === oldSplitId).length < 2
-				) {
-					mapped = mapped.map((t) =>
-						t.splitId === oldSplitId ? { ...t, splitId: undefined } : t
-					);
-				}
 				const next = normalize(mapped);
 				tabsRef.current = next;
 				return next;
@@ -2458,81 +3200,43 @@ export function TabsProvider({
 			setGroups((prev) =>
 				prev.filter((g) => tabsRef.current.some((t) => t.groupId === g.id))
 			);
-			setSplits((prev) => {
-				let list: Split[];
-				if (targetSplitId) {
-					list = prev.map((s) => {
-						if (s.id !== targetSplitId) {
-							return s;
-						}
-						// Moving within the same split: pull the source leaf out first so
-						// the insert can't duplicate it.
-						let root: SplitNode | null = containsLeaf(s.root, sourceTabId)
-							? removeLeaf(s.root, sourceTabId)
-							: s.root;
-						if (!(root && containsLeaf(root, targetTabId))) {
-							root = makeLeaf(targetTabId);
-						}
-						const inserted = insertLeaf(
-							root,
-							targetTabId,
-							sourceTabId,
-							direction
-						);
-						const branch =
-							inserted.type === "branch"
-								? inserted
-								: makeBranch(directionOrientation(direction), [inserted]);
-						return { ...s, root: branch };
-					});
-				} else {
-					const root = insertLeaf(
-						makeLeaf(targetTabId),
-						targetTabId,
-						sourceTabId,
-						direction
-					);
-					if (root.type !== "branch") {
-						return prev;
-					}
-					list = [
-						...prev,
-						{
-							id: splitId,
-							root,
-							collapsed: false,
-							name: "",
-							color: nextClusterColor(groupsRef.current, splitsRef.current),
-						},
-					];
-				}
-				return reconcileSplits(list, tabsRef.current);
-			});
 			markActive(sourceTabId);
 		},
-		[markActive]
+		[dispatchWorkbench, markActive, workbenchState.groups]
 	);
 
 	// Swap the pane positions of two members of the same split (center-drop on
 	// a pane). Membership and sizes stay put — only the leaves trade places.
-	const swapSplitPanes = useCallback((aTabId: string, bTabId: string) => {
-		if (aTabId === bTabId) {
-			return;
-		}
-		const a = tabsRef.current.find((t) => t.id === aTabId);
-		const b = tabsRef.current.find((t) => t.id === bTabId);
-		if (!(a?.splitId && a.splitId === b?.splitId)) {
-			return;
-		}
-		const splitId = a.splitId;
-		setSplits((prev) =>
-			prev.map((s) =>
-				s.id === splitId
-					? { ...s, root: swapLeaves(s.root, aTabId, bTabId) as SplitBranch }
-					: s
-			)
-		);
-	}, []);
+	const swapSplitPanes = useCallback(
+		(aTabId: string, bTabId: string) => {
+			if (aTabId === bTabId) {
+				return;
+			}
+			const aGroup = workbenchState.groups.find((group) =>
+				group.itemIds.includes(aTabId)
+			);
+			const bGroup = workbenchState.groups.find((group) =>
+				group.itemIds.includes(bTabId)
+			);
+			if (
+				aGroup?.region === "center" &&
+				bGroup?.region === "center" &&
+				aGroup.id !== bGroup.id
+			) {
+				dispatchWorkbench({
+					type: "item/move",
+					itemId: aTabId,
+					toGroupId: bGroup.id,
+				});
+				dispatchWorkbench({
+					type: "item/move",
+					itemId: bTabId,
+					toGroupId: aGroup.id,
+				});
+			}
+		},
+		[dispatchWorkbench, workbenchState.groups]
+	);
 
 	// Point an existing tab at a different route in place. Same body as
 	// `openTab`'s "open in current tab" reuse, minus the `!tab.splitId` guard —
@@ -2578,34 +3282,61 @@ export function TabsProvider({
 				navToken: (target.navToken ?? 0) + 1,
 				unloaded: false,
 			};
+			dispatchWorkbench({
+				type: "item/update",
+				item: routeWorkbenchItem(next),
+			});
 			setTabs((prev) => {
 				const mapped = normalize(prev.map((t) => (t.id === tabId ? next : t)));
 				tabsRef.current = mapped;
 				return mapped;
 			});
 		},
-		[]
+		[dispatchWorkbench]
 	);
 
 	// Hand a pane over to an already-open tab: the incoming tab takes the exact
 	// leaf (and therefore the exact fractions) the pane occupied, and the pane's
-	// own tab is dropped. Written as ONE primitive rather than
-	// addTabToSplit + swapSplitPanes + closeTab because those three read
-	// `tabsRef`/`splitsRef` between calls, and only the first setState updater in
-	// a batch runs eagerly — the second would see stale membership and bail.
+	// own tab is dropped. Written as one primitive so the placeholder never
+	// enters the user-facing closed-tab stack.
 	const replacePaneTab = useCallback(
 		(paneTabId: string, tabId: string) => {
 			if (paneTabId === tabId) {
 				return;
 			}
 			const current = tabsRef.current;
-			const pane = current.find((t) => t.id === paneTabId);
 			const incoming = current.find((t) => t.id === tabId);
-			const splitId = pane?.splitId;
-			if (!(splitId && incoming)) {
+			if (!incoming) {
 				return;
 			}
-			const oldSplitId = incoming.splitId;
+			const paneGroup = workbenchState.groups.find((group) =>
+				group.itemIds.includes(paneTabId)
+			);
+			const incomingGroup = workbenchState.groups.find((group) =>
+				group.itemIds.includes(tabId)
+			);
+			if (
+				paneGroup?.region !== "center" ||
+				paneGroup.activeItemId !== paneTabId
+			) {
+				return;
+			}
+			dispatchWorkbench({
+				type: "item/move",
+				itemId: tabId,
+				toGroupId: paneGroup.id,
+			});
+			dispatchWorkbench({ type: "item/close", itemId: paneTabId });
+			if (
+				incomingGroup?.region === "center" &&
+				incomingGroup.id !== paneGroup.id &&
+				incomingGroup.itemIds.length === 1
+			) {
+				dispatchWorkbench({
+					type: "center/remove-group",
+					groupId: incomingGroup.id,
+				});
+			}
 			// The placeholder is discarded, not closed: it never held anything the
 			// user could want back, so it stays out of the reopen-closed-tab stack.
 			// Its nav-history entries still have to go, or back/forward would land
@@ -2625,31 +3356,20 @@ export function TabsProvider({
 			);
 			syncNav();
 			setTabs((prev) => {
-				let mapped = prev
+				const mapped = prev
 					.filter((t) => t.id !== paneTabId)
 					.map((t) => {
 						if (t.id === tabId) {
 							return {
 								...t,
-								splitId,
+								splitId: undefined,
 								pinned: false,
 								groupId: undefined,
 								unloaded: false,
 							};
 						}
-						return t.splitId === splitId ? { ...t, unloaded: false } : t;
+						return t;
 					});
-				// Pulling the incoming tab out of a different split may leave that one
-				// with a single member — dissolve it, same as every other move.
-				if (
-					oldSplitId &&
-					oldSplitId !== splitId &&
-					mapped.filter((t) => t.splitId === oldSplitId).length < 2
-				) {
-					mapped = mapped.map((t) =>
-						t.splitId === oldSplitId ? { ...t, splitId: undefined } : t
-					);
-				}
 				const next = normalize(mapped);
 				tabsRef.current = next;
 				return next;
@@ -2657,27 +3377,9 @@ export function TabsProvider({
 			setGroups((prev) =>
 				prev.filter((g) => tabsRef.current.some((t) => t.groupId === g.id))
 			);
-			setSplits((prev) =>
-				reconcileSplits(
-					prev.map((s) => {
-						if (s.id !== splitId) {
-							return s;
-						}
-						// When the incoming tab is ALREADY a pane of this split, lift its
-						// old leaf out first or `replaceLeaf` would leave it in the tree
-						// twice.
-						const base = containsLeaf(s.root, tabId)
-							? (removeLeaf(s.root, tabId) ?? s.root)
-							: s.root;
-						const swapped = replaceLeaf(base, paneTabId, tabId);
-						return swapped.type === "branch" ? { ...s, root: swapped } : s;
-					}),
-					tabsRef.current
-				)
-			);
 			markActive(tabId);
 		},
-		[markActive, syncNav]
+		[dispatchWorkbench, markActive, syncNav, workbenchState.groups]
 	);
 
 	// Join `tabId` to an existing split as a new pane at the end of its root
@@ -2685,32 +3387,66 @@ export function TabsProvider({
 	const addTabToSplit = useCallback(
 		(splitId: string, tabId: string) => {
 			const tab = tabsRef.current.find((t) => t.id === tabId);
-			const split = splitsRef.current.find((s) => s.id === splitId);
-			if (!(tab && split) || tab.splitId === splitId) {
+			if (
+				!tab ||
+				splitId !== WORKBENCH_CENTER_SPLIT_ID ||
+				centerSplitProjection.memberIds.has(tabId)
+			) {
 				return;
 			}
-			const oldSplitId = tab.splitId;
+			const targetGroupId = centerLeafGroupIds(workbenchState.centerTree).at(
+				-1
+			);
+			if (!targetGroupId) {
+				return;
+			}
+			const newGroupId = makeGroupId();
+			dispatchWorkbench({
+				type: "center/split",
+				direction: "right",
+				newGroupId,
+				targetGroupId,
+			});
+			dispatchWorkbench({
+				type: "item/move",
+				itemId: tabId,
+				toGroupId: newGroupId,
+			});
+			dispatchWorkbench({ type: "item/pin", itemId: tabId, pinned: false });
+			const currentTree = workbenchState.centerTree;
+			const children =
+				currentTree.type === "branch"
+					? [
+							...currentTree.children,
+							{ type: "leaf" as const, groupId: newGroupId },
+						]
+					: [currentTree, { type: "leaf" as const, groupId: newGroupId }];
+			dispatchWorkbench({
+				type: "center/replace-tree",
+				tree: {
+					type: "branch",
+					children,
+					orientation:
+						currentTree.type === "branch" ? currentTree.orientation : "columns",
+					sizes: Array.from(
+						{ length: children.length },
+						() => 1 / children.length
+					),
+				},
+			});
 			setTabs((prev) => {
-				let mapped = prev.map((t) => {
+				const mapped = prev.map((t) => {
 					if (t.id === tabId) {
 						return {
 							...t,
-							splitId,
+							splitId: undefined,
 							pinned: false,
 							groupId: undefined,
 							unloaded: false,
 						};
 					}
-					return t.splitId === splitId ? { ...t, unloaded: false } : t;
+					return t;
 				});
-				if (
-					oldSplitId &&
-					mapped.filter((t) => t.splitId === oldSplitId).length < 2
-				) {
-					mapped = mapped.map((t) =>
-						t.splitId === oldSplitId ? { ...t, splitId: undefined } : t
-					);
-				}
 				const next = normalize(mapped);
 				tabsRef.current = next;
 				return next;
@@ -2718,17 +3454,14 @@ export function TabsProvider({
 			setGroups((prev) =>
 				prev.filter((g) => tabsRef.current.some((t) => t.groupId === g.id))
 			);
-			setSplits((prev) =>
-				reconcileSplits(
-					prev.map((s) =>
-						s.id === splitId ? { ...s, root: appendLeaves(s.root, [tabId]) } : s
-					),
-					tabsRef.current
-				)
-			);
 			markActive(tabId);
 		},
-		[markActive]
+		[
+			centerSplitProjection.memberIds,
+			dispatchWorkbench,
+			markActive,
+			workbenchState.centerTree,
+		]
 	);
 
 	// --- Auto-unload timer -----------------------------------------------------
@@ -2757,7 +3490,10 @@ export function TabsProvider({
 				}
 				let changed = false;
 				const next = prev.map((t) => {
-					if (!unloadIds.has(t.id)) {
+					if (
+						!unloadIds.has(t.id) ||
+						workbenchActiveItemsProtectedFromUnload(workbenchState).has(t.id)
+					) {
 						return t;
 					}
 					changed = true;
@@ -2772,7 +3508,7 @@ export function TabsProvider({
 		};
 		const interval = setInterval(tick, TAB_UNLOAD_INTERVAL_MS);
 		return () => clearInterval(interval);
-	}, []);
+	}, [workbenchState]);
 
 	// The native process owns cross-window entity routing, while each renderer
 	// owns its tab layout. Register only stable entity keys (currently persisted
@@ -2783,7 +3519,10 @@ export function TabsProvider({
 		const entries: Array<{ active: boolean; key: string }> = [];
 		const entryIndexes = new Map<string, number>();
 		for (const tab of tabs) {
-			const key = tabEntityKey(tab);
+			const key = tabEntityKey({
+				conversationId: tab.conversationId,
+				node: tabNodeKey(tabOverrides, tab.id, defaultNodeName) ?? undefined,
+			});
 			if (!key) {
 				continue;
 			}
@@ -2801,7 +3540,7 @@ export function TabsProvider({
 			entries,
 			fingerprint: JSON.stringify(entries),
 		};
-	}, [tabs, activeTabId]);
+	}, [tabs, activeTabId, tabOverrides, defaultNodeName]);
 	const entityRegistrationFingerprint = useRef<string | undefined>(undefined);
 	const entityRegistrationRevision = useRef(0);
 	const entityRegistrationRendererId = useRef(crypto.randomUUID());
@@ -2827,8 +3566,15 @@ export function TabsProvider({
 		let cancelled = false;
 		let unlisten: (() => void) | undefined;
 		void listenForEntityActivation(({ key, messageId }) => {
+			const { tabOverrides: overrides, getActiveNode } =
+				useNodeStore.getState();
+			const defaultName = getActiveNode().name;
 			const tab = tabsRef.current.find(
-				(candidate) => tabEntityKey(candidate) === key
+				(candidate) =>
+					tabEntityKey({
+						conversationId: candidate.conversationId,
+						node: tabNodeKey(overrides, candidate.id, defaultName) ?? undefined,
+					}) === key
 			);
 			if (tab) {
 				activateTab(tab.id);
@@ -2872,10 +3618,11 @@ export function TabsProvider({
 		}
 		// Coalesce rapid navigation and let the selected page paint before
 		// serializing the whole session into synchronous browser storage.
-		pendingSession.current = () => persistSession(tabs, activeTabId, splits);
+		pendingSession.current = () =>
+			persistSession(tabs, activeTabId, splits, tabOverrides);
 		const timer = window.setTimeout(flushSession, 150);
 		return () => window.clearTimeout(timer);
-	}, [tabs, activeTabId, splits, initialTab, flushSession]);
+	}, [tabs, activeTabId, splits, tabOverrides, initialTab, flushSession]);
 	useEffect(() => {
 		const onVisibilityChange = () => {
 			if (document.visibilityState === "hidden") {
@@ -2891,12 +3638,50 @@ export function TabsProvider({
 		};
 	}, [flushSession]);
 
+	const focusedWorkbenchItemId = workbenchState.groups.find(
+		(group) => group.id === workbenchState.focusedGroupId
+	)?.activeItemId;
+	const compatibilityActiveTabId = compatibilityTabs.some(
+		(tab) => tab.id === focusedWorkbenchItemId
+	)
+		? (focusedWorkbenchItemId ?? "")
+		: activeTabId;
+	useEffect(() => {
+		if (
+			!compatibilityActiveTabId ||
+			compatibilityActiveTabId === activeTabIdRef.current
+		) {
+			return;
+		}
+		const previous = activeTabIdRef.current;
+		if (previous) {
+			lastActiveAtRef.current[previous] = Date.now();
+		}
+		lastActiveAtRef.current[compatibilityActiveTabId] = Date.now();
+		activeTabIdRef.current = compatibilityActiveTabId;
+		setActiveTabId(compatibilityActiveTabId);
+		setTabs((current) => {
+			if (
+				!current.some(
+					(tab) => tab.id === compatibilityActiveTabId && tab.unloaded
+				)
+			) {
+				return current;
+			}
+			const next = current.map((tab) =>
+				tab.id === compatibilityActiveTabId ? { ...tab, unloaded: false } : tab
+			);
+			tabsRef.current = next;
+			return next;
+		});
+	}, [compatibilityActiveTabId]);
+
 	const value = useMemo<TabsContextValue>(
 		() => ({
-			tabs,
+			tabs: compatibilityTabs,
 			groups,
 			splits,
-			activeTabId,
+			activeTabId: compatibilityActiveTabId,
 			openTab,
 			closeTab,
 			activateTab,
@@ -2917,6 +3702,7 @@ export function TabsProvider({
 			canGoBack,
 			canGoForward,
 			moveTab,
+			prepareTabForWorkbenchSplit,
 			togglePin,
 			unloadTab,
 			createGroup,
@@ -2945,7 +3731,7 @@ export function TabsProvider({
 			equalizeSplit,
 		}),
 		[
-			activeTabId,
+			compatibilityActiveTabId,
 			activateTab,
 			addTabToGroup,
 			addTabToSplit,
@@ -2964,6 +3750,7 @@ export function TabsProvider({
 			goForward,
 			groups,
 			moveTab,
+			prepareTabForWorkbenchSplit,
 			openTab,
 			removeFromSplit,
 			removeTabFromGroup,
@@ -2980,7 +3767,7 @@ export function TabsProvider({
 			splitTabs,
 			splits,
 			swapSplitPanes,
-			tabs,
+			compatibilityTabs,
 			toggleGroupCollapsed,
 			togglePin,
 			toggleSplitCollapsed,

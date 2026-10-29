@@ -1,3 +1,4 @@
+import { SensitiveValue } from "@ryu/ui/components/sensitive-value.tsx";
 // apps/desktop/src/components/gateway/ApiSection.tsx
 //
 // The Gateway "API & traffic" surface. Three blocks, LM-Studio-style:
@@ -19,20 +20,30 @@
 import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { MorphIconSwap } from "@ryu/ui/components/morph-icon.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { useEffect, useRef, useState } from "react";
 import {
+	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
+import {
+	applyGatewayCliSetup,
+	type GatewayCliSetupStatus,
+	type GatewayCliTool,
+	getGatewayCliSetupStatus,
+	resetGatewayCliSetup,
+} from "@/src/lib/api/cli-setup.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchGatewayConfig,
 	type GatewayApiKey,
+	type GatewayClientOperation,
 	generateGatewayKey,
 	registerByoaKey,
 	removeByoaKey,
@@ -44,6 +55,27 @@ import { formatTime as formatDisplayTime } from "@/src/lib/timezone.ts";
 const COPIED_RESET_MS = 1500;
 /** How many traffic rows the dashboard keeps in memory. */
 const TRAFFIC_WINDOW = 50;
+const CLIENT_OPERATIONS: { id: GatewayClientOperation; label: string }[] = [
+	{ id: "inference", label: "LLM, embeddings & media" },
+	{ id: "web_search", label: "Web search" },
+	{ id: "web_fetch", label: "Web fetch" },
+];
+
+const CLI_TOOLS: { id: GatewayCliTool; label: string }[] = [
+	{ id: "claude-code", label: "Claude Code" },
+	{ id: "codex", label: "Codex CLI" },
+	{ id: "opencode", label: "OpenCode" },
+	{ id: "gemini-cli", label: "Gemini CLI" },
+	{ id: "pi", label: "Pi" },
+	{ id: "droid", label: "Factory Droid" },
+	{ id: "openclaw", label: "OpenClaw" },
+	{ id: "hermes", label: "Hermes Agent" },
+	{ id: "continue", label: "Continue" },
+	{ id: "kilo", label: "Kilo Code" },
+	{ id: "cline", label: "Cline CLI" },
+	{ id: "iflow", label: "iFlow CLI" },
+	{ id: "qwen-code", label: "Qwen Code" },
+];
 
 /** A copy-to-clipboard row with a trailing label chip. */
 function CopyRow({
@@ -84,17 +116,14 @@ function CopyRow({
 					{copied ? "Copied" : "Copy"}
 				</Button>
 			}
-			description={
-				<span
-					className={`block max-w-full truncate ${
-						mono ? "font-mono text-xs" : ""
-					}`}
-				>
-					{value}
-				</span>
-			}
 			title={label}
-		/>
+		>
+			<span
+				className={`block max-w-full truncate text-muted-foreground ${mono ? "font-mono text-xs" : ""}`}
+			>
+				{value}
+			</span>
+		</SettingsItem>
 	);
 }
 
@@ -109,58 +138,200 @@ function EndpointCard({ baseUrl }: { baseUrl: string }) {
 			caption="Point OpenAI-, Anthropic- or Gemini-compatible clients (Cursor, Claude Code, Gemini CLI, …) at this node. Requests flow through the same budgets, filters and audit as desktop traffic."
 			title="Endpoint URLs"
 		>
-			<div className="flex flex-col gap-2 px-3">
+			<SettingsGroup>
 				<CopyRow label="OpenAI compatible" value={openai} />
 				<CopyRow label="Anthropic Messages" value={anthropic} />
 				<CopyRow label="Google Gemini" value={gemini} />
-			</div>
+			</SettingsGroup>
 		</SettingsSection>
 	);
 }
 
 // ── API key management ───────────────────────────────────────────────────────
 
-function KeyManagement({
+export function GatewayClientKeys({
 	target,
 	managed,
+	baseUrl,
+	gatewayReady,
+	canConfigure = true,
 }: {
+	canConfigure?: boolean;
+	baseUrl: string;
+	gatewayReady: boolean;
 	managed: boolean;
 	target: ApiTarget;
 }) {
 	const [keys, setKeys] = useState<GatewayApiKey[]>([]);
+	const [operationGrantsSupported, setOperationGrantsSupported] =
+		useState(false);
+	const [allowedOperations, setAllowedOperations] = useState<
+		GatewayClientOperation[]
+	>(["inference"]);
+	const [createdOperations, setCreatedOperations] = useState<
+		GatewayClientOperation[]
+	>([]);
+	const activeTarget = useRef(target);
 	const [requireAuth, setRequireAuth] = useState(false);
 	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [loadError, setLoadError] = useState<string | null>(null);
+	const [actionError, setActionError] = useState<string | null>(null);
 	const [newName, setNewName] = useState("");
 	const [creating, setCreating] = useState(false);
 	const [createdKey, setCreatedKey] = useState<string | null>(null);
 	const [copied, setCopied] = useState(false);
+	const [cliModel, setCliModel] = useState("");
+	const [kiloContext, setKiloContext] = useState("");
+	const [kiloOutput, setKiloOutput] = useState("");
+	const contextTokens = Number(kiloContext);
+	const outputTokens = Number(kiloOutput);
+	const kiloLimitsValid =
+		Number.isInteger(contextTokens) &&
+		Number.isInteger(outputTokens) &&
+		contextTokens > 0 &&
+		contextTokens <= 16_777_216 &&
+		outputTokens > 0 &&
+		outputTokens <= 1_048_576 &&
+		outputTokens <= contextTokens;
+	const [pastedKey, setPastedKey] = useState("");
+	const [cliBusy, setCliBusy] = useState<GatewayCliTool | null>(null);
+	const [cliError, setCliError] = useState<string | null>(null);
+	const [cliAvailable, setCliAvailable] = useState(true);
+	const [cliStatuses, setCliStatuses] = useState<
+		Partial<Record<GatewayCliTool, GatewayCliSetupStatus>>
+	>({});
+	const hasInferenceCredential = Boolean(
+		pastedKey.trim() || (createdKey && createdOperations.includes("inference"))
+	);
+
+	useEffect(() => {
+		if (managed) {
+			return;
+		}
+		let cancelled = false;
+		Promise.allSettled(
+			CLI_TOOLS.map((tool) => getGatewayCliSetupStatus(tool.id))
+		).then((results) => {
+			if (cancelled) {
+				return;
+			}
+			const next: Partial<Record<GatewayCliTool, GatewayCliSetupStatus>> = {};
+			for (const [index, result] of results.entries()) {
+				if (result.status === "fulfilled") {
+					next[CLI_TOOLS[index].id] = result.value;
+				}
+			}
+			setCliStatuses(next);
+			setCliAvailable(results.some((result) => result.status === "fulfilled"));
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [managed]);
+
+	const handleApplyCli = async (tool: GatewayCliTool) => {
+		const apiKey = pastedKey.trim() || createdKey;
+		if (!(apiKey && cliModel.trim() && hasInferenceCredential)) {
+			return;
+		}
+		if (tool === "kilo" && !kiloLimitsValid) {
+			return;
+		}
+		setCliBusy(tool);
+		setCliError(null);
+		try {
+			const status = await applyGatewayCliSetup({
+				tool,
+				gatewayUrl: baseUrl,
+				apiKey,
+				model: cliModel.trim(),
+				...(tool === "kilo"
+					? { modelLimits: { contextTokens, outputTokens } }
+					: undefined),
+			});
+			setCliStatuses((current) => ({ ...current, [tool]: status }));
+		} catch (error) {
+			setCliError(
+				error instanceof Error ? error.message : "Could not apply CLI setup"
+			);
+		} finally {
+			setCliBusy(null);
+		}
+	};
+
+	const handleResetCli = async (tool: GatewayCliTool) => {
+		setCliBusy(tool);
+		setCliError(null);
+		try {
+			const status = await resetGatewayCliSetup(tool);
+			setCliStatuses((current) => ({ ...current, [tool]: status }));
+		} catch (error) {
+			setCliError(
+				error instanceof Error ? error.message : "Could not reset CLI setup"
+			);
+		} finally {
+			setCliBusy(null);
+		}
+	};
 
 	const load = async () => {
 		try {
 			const cfg = await fetchGatewayConfig(target);
-			setKeys(cfg.auth?.api_keys ?? []);
+			if (activeTarget.current !== target) {
+				return;
+			}
+			setKeys(
+				(cfg.auth?.api_keys ?? []).filter(
+					(key) =>
+						key.system_relay !== undefined ||
+						(key.name !== "local-core" && key.name !== "local-inference")
+				)
+			);
 			setRequireAuth(cfg.auth?.require_auth ?? false);
-			setError(null);
+			setOperationGrantsSupported(cfg.webServiceSchema === 1);
+			setLoadError(null);
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Failed to load keys");
+			if (activeTarget.current === target) {
+				setLoadError(e instanceof Error ? e.message : "Failed to load keys");
+			}
 		} finally {
-			setLoading(false);
+			if (activeTarget.current === target) {
+				setLoading(false);
+			}
 		}
 	};
 
 	useEffect(() => {
+		activeTarget.current = target;
+		setCreating(false);
+		setLoading(true);
+		setActionError(null);
+		setCreatedKey(null);
+		setCreatedOperations([]);
+		setAllowedOperations(["inference"]);
+		setPastedKey("");
+		setKeys([]);
 		void load();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [target]);
 
 	const handleCreate = async () => {
 		const name = newName.trim();
-		if (!name || creating) {
+		if (
+			!name ||
+			creating ||
+			!canConfigure ||
+			managed ||
+			(operationGrantsSupported && allowedOperations.length === 0)
+		) {
+			return;
+		}
+		if (keys.some((key) => key.name === name)) {
+			setActionError("A Gateway client key already uses that name.");
 			return;
 		}
 		setCreating(true);
-		setError(null);
+		setActionError(null);
 		setCreatedKey(null);
 		try {
 			const key = generateGatewayKey();
@@ -168,24 +339,43 @@ function KeyManagement({
 				key,
 				name,
 				trusted_forwarder: false,
+				...(operationGrantsSupported
+					? { allowed_operations: allowedOperations }
+					: undefined),
 			};
 			await registerByoaKey(target, entry);
+			if (activeTarget.current !== target) {
+				return;
+			}
 			setCreatedKey(key);
+			setCreatedOperations(
+				operationGrantsSupported ? [...allowedOperations] : ["inference"]
+			);
 			setNewName("");
 			await load();
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Failed to create key");
+			if (activeTarget.current === target) {
+				setActionError(e instanceof Error ? e.message : "Failed to create key");
+			}
 		} finally {
-			setCreating(false);
+			if (activeTarget.current === target) {
+				setCreating(false);
+			}
 		}
 	};
 
 	const handleRevoke = async (name: string) => {
+		setActionError(null);
+		if (!canConfigure || managed) {
+			return;
+		}
 		try {
 			await removeByoaKey(target, name);
 			await load();
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Failed to revoke key");
+			if (activeTarget.current === target) {
+				setActionError(e instanceof Error ? e.message : "Failed to revoke key");
+			}
 		}
 	};
 
@@ -202,87 +392,169 @@ function KeyManagement({
 		}
 	};
 
+	const cliStatusLabel = (status: GatewayCliSetupStatus | undefined) => {
+		if (status?.conflict) {
+			return "Changed outside Ryu";
+		}
+		return status?.applied ? "Applied" : "Not applied";
+	};
+
 	return (
-		<SettingsSection
-			caption={
-				managed
-					? "Keys are issued and revoked in the web dashboard."
-					: "Issue a local API key to authenticate OpenAI/Anthropic/Gemini clients. The plaintext value is shown only once, at creation."
-			}
-			title="API keys"
-		>
-			<div className="flex flex-col gap-3">
+		<div className="flex flex-col gap-6">
+			<SettingsSection
+				caption={
+					managed
+						? "Keys are issued and revoked in Console on the web."
+						: "Issue a local API key to authenticate OpenAI/Anthropic/Gemini clients. The plaintext value is shown only once, at creation."
+				}
+				title="Gateway client API keys"
+			>
 				{loading ? (
-					<div className="flex items-center gap-2 px-3 text-muted-foreground text-sm">
-						<Spinner className="size-4" />
-						Loading…
-					</div>
+					<SettingsCard>
+						<SkeletonRows label="Loading…" spacing="panel" />
+					</SettingsCard>
 				) : null}
-				{error ? (
-					<p className="px-3 text-sm text-status-destructive">{error}</p>
+				{loadError || actionError ? (
+					<SettingsCard>
+						<p className="text-sm text-status-destructive">
+							{actionError ?? loadError}
+						</p>
+					</SettingsCard>
 				) : null}
 
-				{managed ? null : (
-					<div className="flex items-end gap-2 px-3">
-						<div className="flex min-w-0 flex-1 flex-col gap-1">
-							<label
-								className="text-muted-foreground text-xs"
-								htmlFor="api-key-name"
-							>
-								Key name
-							</label>
-							<Input
-								autoComplete="off"
-								className="h-8"
-								id="api-key-name"
-								onChange={(e) => setNewName(e.target.value)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") {
-										void handleCreate();
+				{loading ? null : (
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<span
+									className={
+										requireAuth
+											? "text-muted-foreground text-sm"
+											: "text-sm text-status-destructive"
 									}
-								}}
-								placeholder="e.g. Cursor, Claude Code, Gemini CLI"
-								value={newName}
+								>
+									{requireAuth
+										? "Authentication required"
+										: "Authentication disabled"}
+								</span>
+							}
+							description={
+								loadError || requireAuth ? undefined : (
+									<>
+										Auth is currently disabled — requests are accepted without a
+										key. Enable <span className="font-mono">require_auth</span>{" "}
+										in the gateway config to require authentication.
+									</>
+								)
+							}
+							title="Authentication"
+						/>
+					</SettingsGroup>
+				)}
+
+				{managed ? null : (
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<div className="flex items-center gap-2">
+									<Input
+										autoComplete="off"
+										className="h-8 w-56"
+										disabled={!canConfigure}
+										id="api-key-name"
+										onChange={(e) => setNewName(e.target.value)}
+										onKeyDown={(e) => {
+											if (e.key === "Enter") {
+												void handleCreate();
+											}
+										}}
+										placeholder="e.g. Cursor, Claude Code, Gemini CLI"
+										value={newName}
+									/>
+									<Button
+										disabled={
+											!newName.trim() ||
+											creating ||
+											!canConfigure ||
+											(operationGrantsSupported &&
+												allowedOperations.length === 0)
+										}
+										onClick={() => void handleCreate()}
+										size="sm"
+									>
+										{creating ? "Creating…" : "Create key"}
+									</Button>
+								</div>
+							}
+							title={<label htmlFor="api-key-name">Key name</label>}
+						/>
+						{operationGrantsSupported ? (
+							<SettingsItem
+								actions={
+									<fieldset
+										aria-label="Allowed services"
+										className="flex flex-wrap gap-4"
+									>
+										{CLIENT_OPERATIONS.map(({ id, label }) => (
+											<label
+												className="flex items-center gap-2 text-xs"
+												key={id}
+											>
+												<Checkbox
+													checked={allowedOperations.includes(id)}
+													disabled={!canConfigure || creating}
+													onCheckedChange={(checked) =>
+														setAllowedOperations((current) =>
+															checked
+																? [
+																		...current.filter((value) => value !== id),
+																		id,
+																	]
+																: current.filter((value) => value !== id)
+														)
+													}
+												/>
+												{label}
+											</label>
+										))}
+									</fieldset>
+								}
+								title="Allowed services"
 							/>
-						</div>
-						<Button
-							disabled={!newName.trim() || creating}
-							onClick={() => void handleCreate()}
-							size="sm"
-						>
-							{creating ? "Creating…" : "Create key"}
-						</Button>
-					</div>
+						) : null}
+					</SettingsGroup>
 				)}
 
 				{createdKey ? (
-					<div className="mx-3 flex items-start gap-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
-						<div className="min-w-0 flex-1">
-							<p className="font-medium text-sm">Copy your key now</p>
-							<p className="break-all font-mono text-muted-foreground text-xs">
-								{createdKey}
-							</p>
-							<p className="mt-1 text-muted-foreground text-xs">
-								It won&apos;t be shown again.
-							</p>
+					<SettingsCard>
+						<div className="flex items-start gap-3">
+							<div className="min-w-0 flex-1">
+								<p className="font-medium text-sm">Copy your key now</p>
+								<p className="break-all font-mono text-muted-foreground text-xs">
+									<SensitiveValue label="API key" value={createdKey} />
+								</p>
+								<p className="mt-1 text-muted-foreground text-xs">
+									It won&apos;t be shown again.
+								</p>
+							</div>
+							<Button
+								onClick={() => void copyCreated()}
+								size="sm"
+								variant="ghost"
+							>
+								<MorphIconSwap
+									a={Copy01Icon}
+									b={Tick01Icon}
+									className="size-4"
+									state={copied ? "b" : "a"}
+								/>
+								{copied ? "Copied" : "Copy"}
+							</Button>
 						</div>
-						<Button
-							onClick={() => void copyCreated()}
-							size="sm"
-							variant="ghost"
-						>
-							<MorphIconSwap
-								a={Copy01Icon}
-								b={Tick01Icon}
-								className="size-4"
-								state={copied ? "b" : "a"}
-							/>
-							{copied ? "Copied" : "Copy"}
-						</Button>
-					</div>
+					</SettingsCard>
 				) : null}
 
-				{loading || error ? null : (
+				{loading || loadError ? null : (
 					<SettingsGroup>
 						{keys.length === 0 ? (
 							<SettingsItem
@@ -294,11 +566,15 @@ function KeyManagement({
 								<SettingsItem
 									actions={
 										<div className="flex items-center gap-2">
+											{k.system_relay ? (
+												<Badge variant="secondary">System relay</Badge>
+											) : null}
 											{k.trusted_forwarder ? (
 												<Badge variant="secondary">trusted</Badge>
 											) : null}
-											{managed ? null : (
+											{managed || k.system_relay ? null : (
 												<Button
+													disabled={!canConfigure}
 													onClick={() => void handleRevoke(k.name)}
 													size="sm"
 													variant="ghost"
@@ -309,7 +585,20 @@ function KeyManagement({
 										</div>
 									}
 									description={
-										<span className="font-mono text-xs">{maskKey(k.key)}</span>
+										<span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+											<span className="font-mono text-xs">
+												{maskKey(k.key)}
+											</span>
+											{operationGrantsSupported && k.allowed_operations ? (
+												<span className="text-xs">
+													{CLIENT_OPERATIONS.filter((operation) =>
+														k.allowed_operations?.includes(operation.id)
+													)
+														.map((operation) => operation.label)
+														.join(" · ")}
+												</span>
+											) : null}
+										</span>
 									}
 									key={k.name}
 									title={k.name}
@@ -318,17 +607,192 @@ function KeyManagement({
 						)}
 					</SettingsGroup>
 				)}
+			</SettingsSection>
 
-				{loading || error || requireAuth ? null : (
-					<p className="px-3 text-muted-foreground text-xs">
-						Auth is currently disabled — requests are accepted without a key.
-						Enable <span className="font-mono">require_auth</span> in the
-						gateway config to require authentication.
-					</p>
-				)}
-			</div>
-		</SettingsSection>
+			{managed ? null : (
+				<SettingsSection
+					caption={
+						<>
+							Apply writes this Gateway URL, a client key, and the selected
+							model into the local CLI configuration. New CLI sessions use
+							Gateway routing with that model. Reset restores the previous files
+							if they have not changed since Apply.
+							{cliAvailable ? null : (
+								<span className="mt-1 block">
+									CLI setup is available in the desktop app.
+								</span>
+							)}
+							{cliError ? (
+								<span className="mt-1 block text-status-destructive">
+									{cliError}
+								</span>
+							) : null}
+						</>
+					}
+					title="Connect a local CLI"
+				>
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<div>
+									<Input
+										className="h-8 w-56"
+										id="gateway-cli-model"
+										onChange={(event) => setCliModel(event.target.value)}
+										placeholder="openrouter/auto"
+										value={cliModel}
+									/>
+								</div>
+							}
+							title={
+								<label htmlFor="gateway-cli-model">Gateway model ID</label>
+							}
+						/>
+						<SettingsItem
+							actions={
+								<div>
+									<Input
+										className="h-8 w-56"
+										id="gateway-cli-key"
+										onChange={(event) => setPastedKey(event.target.value)}
+										placeholder={
+											createdKey
+												? "New key above will be used"
+												: "Paste a key or create one above"
+										}
+										type="password"
+										value={pastedKey}
+									/>
+								</div>
+							}
+							title={
+								<label htmlFor="gateway-cli-key">
+									Existing client key (optional)
+								</label>
+							}
+						/>
+					</SettingsGroup>
+					<SettingsGroup>
+						{CLI_TOOLS.flatMap((tool) => {
+							const status = cliStatuses[tool.id];
+							const row = (
+								<SettingsItem
+									actions={
+										<div className="flex items-center gap-2">
+											<span
+												className={
+													status?.conflict
+														? "text-sm text-status-warning"
+														: "text-muted-foreground text-sm"
+												}
+											>
+												{cliStatusLabel(status)}
+											</span>
+											<Button
+												disabled={
+													!(
+														gatewayReady &&
+														cliAvailable &&
+														cliModel.trim() &&
+														hasInferenceCredential
+													) ||
+													cliBusy !== null ||
+													(tool.id === "kilo" && !kiloLimitsValid)
+												}
+												onClick={() => void handleApplyCli(tool.id)}
+												size="sm"
+											>
+												Apply
+											</Button>
+											<Button
+												disabled={
+													!(cliAvailable && status?.applied) || cliBusy !== null
+												}
+												onClick={() => void handleResetCli(tool.id)}
+												size="sm"
+												variant="outline"
+											>
+												Reset
+											</Button>
+										</div>
+									}
+									key={tool.id}
+									title={tool.label}
+								/>
+							);
+							if (tool.id !== "kilo") {
+								return [row];
+							}
+							// Kilo needs the selected model's real limits, so its two
+							// numeric fields sit directly under its row.
+							return [
+								row,
+								<SettingsItem
+									actions={
+										<div>
+											<Input
+												className="h-8 w-32"
+												id="gateway-kilo-context"
+												max={16_777_216}
+												min={1}
+												onChange={(event) => setKiloContext(event.target.value)}
+												step={1}
+												type="number"
+												value={kiloContext}
+											/>
+										</div>
+									}
+									key="kilo-context"
+									title={
+										<label htmlFor="gateway-kilo-context">
+											Kilo model context tokens
+										</label>
+									}
+								/>,
+								<SettingsItem
+									actions={
+										<div>
+											<Input
+												className="h-8 w-32"
+												id="gateway-kilo-output"
+												max={1_048_576}
+												min={1}
+												onChange={(event) => setKiloOutput(event.target.value)}
+												step={1}
+												type="number"
+												value={kiloOutput}
+											/>
+										</div>
+									}
+									description="Enter the selected model's actual limits so Kilo can manage context and output size."
+									key="kilo-output"
+									title={
+										<label htmlFor="gateway-kilo-output">
+											Kilo model output tokens
+										</label>
+									}
+								/>,
+							];
+						})}
+					</SettingsGroup>
+				</SettingsSection>
+			)}
+		</div>
 	);
+}
+
+function trafficSubject(event: TrafficEvent): string {
+	if (event.event_type !== "service_call") {
+		return event.model ?? "";
+	}
+	switch (event.command) {
+		case "web.search":
+			return "Web search";
+		case "web.fetch":
+			return "Web fetch";
+		default:
+			return "Web service";
+	}
 }
 
 function maskKey(key: string): string {
@@ -343,22 +807,29 @@ function maskKey(key: string): string {
 
 // ── Live traffic dashboard ───────────────────────────────────────────────────
 
+/** HTTP status Core returns when the caller lacks `audit.view`. */
+const TRAFFIC_FORBIDDEN_STATUS = 403;
+
 function LiveTraffic({
+	canView,
 	reachable,
 	target,
 }: {
+	canView: boolean;
 	reachable: boolean;
 	target: ApiTarget;
 }) {
 	const [events, setEvents] = useState<TrafficEvent[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [connected, setConnected] = useState(false);
+	const [denied, setDenied] = useState(false);
 	const unsubscribeRef = useRef<(() => void) | null>(null);
 	const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const cancelledRef = useRef(false);
 
 	useEffect(() => {
-		if (!reachable) {
+		setDenied(false);
+		if (!(reachable && canView)) {
 			setEvents([]);
 			setConnected(false);
 			return;
@@ -387,8 +858,16 @@ function LiveTraffic({
 					setError(null);
 					setEvents((prev) => [ev, ...prev].slice(0, TRAFFIC_WINDOW));
 				},
-				(message) => {
+				(message, detail) => {
 					setConnected(false);
+					// A permission refusal is terminal: reconnecting cannot change
+					// the caller's role, so stop instead of retrying forever.
+					if (detail?.status === TRAFFIC_FORBIDDEN_STATUS) {
+						setError(null);
+						setEvents([]);
+						setDenied(true);
+						return;
+					}
 					setError(message);
 					// Reconnect with backoff while the section is open.
 					if (!cancelledRef.current) {
@@ -402,15 +881,29 @@ function LiveTraffic({
 
 		connect();
 		return teardown;
-	}, [reachable, target]);
+	}, [canView, reachable, target]);
+
+	if (!canView || denied) {
+		return (
+			<SettingsSection title="Live traffic">
+				<SettingsCard>
+					<p className="text-muted-foreground text-sm">
+						Live traffic shows every member's requests, models, and cost. Ask an
+						organization owner or admin for the audit.view permission to see it.
+					</p>
+				</SettingsCard>
+			</SettingsSection>
+		);
+	}
 
 	if (!reachable) {
 		return (
-			<SettingsSection
-				caption="The gateway is unreachable, so no live traffic is available."
-				title="Live traffic"
-			>
-				<span />
+			<SettingsSection title="Live traffic">
+				<SettingsCard>
+					<p className="text-muted-foreground text-sm">
+						The gateway is unreachable, so no live traffic is available.
+					</p>
+				</SettingsCard>
 			</SettingsSection>
 		);
 	}
@@ -440,7 +933,7 @@ function LiveTraffic({
 			}
 			title="Live traffic"
 		>
-			<div className="flex flex-col gap-3 px-3">
+			<SettingsCard>
 				<section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
 					<Tile label="Requests" value={formatNumber(total)} />
 					<Tile label="Tokens" value={formatTokens(tokens)} />
@@ -450,76 +943,77 @@ function LiveTraffic({
 						value={requests === 0 ? "—" : formatPercent(errors / requests)}
 					/>
 				</section>
+			</SettingsCard>
 
-				{events.length === 0 ? (
-					<div className="flex flex-col items-center gap-1 rounded-md border border-dashed px-4 py-8 text-center">
-						<p className="text-muted-foreground text-sm">
-							{error
-								? "Waiting for the feed to reconnect…"
-								: "Waiting for the first request…"}
-						</p>
-						<p className="text-muted-foreground text-xs">
-							Send a request through this node and it appears here instantly.
-						</p>
-					</div>
-				) : (
-					<div className="overflow-x-auto rounded-md border">
-						<table className="w-full min-w-[640px] text-left text-sm">
-							<thead>
-								<tr className="border-b bg-muted/40 text-muted-foreground text-xs">
-									<th className="px-3 py-2 font-medium">Time</th>
-									<th className="px-3 py-2 font-medium">Model</th>
-									<th className="px-3 py-2 font-medium">Provider</th>
-									<th className="px-3 py-2 font-medium">Tokens</th>
-									<th className="px-3 py-2 font-medium">Latency</th>
-									<th className="px-3 py-2 font-medium">Status</th>
-								</tr>
-							</thead>
-							<tbody>
-								{events.map((e) => (
-									<tr
-										className="border-muted/40 border-b last:border-0"
-										key={e.request_id}
+			{events.length === 0 ? (
+				<SettingsCard>
+					<p className="py-4 text-center text-muted-foreground text-sm">
+						{error
+							? "Waiting for the feed to reconnect…"
+							: "Waiting for the first request…"}{" "}
+						Send a request through this node and it appears here instantly.
+					</p>
+				</SettingsCard>
+			) : (
+				<SettingsCard className="overflow-x-auto p-0">
+					<table className="w-full min-w-[640px] text-left text-sm">
+						<thead>
+							<tr className="border-b text-muted-foreground text-xs">
+								<th className="px-3 py-2 font-medium">Time</th>
+								<th className="px-3 py-2 font-medium">Model / service</th>
+								<th className="px-3 py-2 font-medium">Provider</th>
+								<th className="px-3 py-2 font-medium">Usage</th>
+								<th className="px-3 py-2 font-medium">Latency</th>
+								<th className="px-3 py-2 font-medium">Status</th>
+							</tr>
+						</thead>
+						<tbody>
+							{events.map((e) => (
+								<tr
+									className="border-muted/40 border-b last:border-0"
+									key={e.request_id}
+								>
+									<td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground text-xs">
+										{formatTime(e.ts)}
+									</td>
+									<td
+										className="max-w-[220px] truncate px-3 py-2 font-mono text-xs"
+										title={trafficSubject(e)}
 									>
-										<td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground text-xs">
-											{formatTime(e.ts)}
-										</td>
-										<td className="max-w-[220px] truncate px-3 py-2 font-mono text-xs">
-											{e.model}
-										</td>
-										<td className="px-3 py-2 text-xs">{e.provider}</td>
-										<td className="px-3 py-2 font-mono text-xs tabular-nums">
-											{formatNumber(e.input_tokens ?? 0)} /{" "}
-											{formatNumber(e.output_tokens ?? 0)}
-										</td>
-										<td className="px-3 py-2 font-mono text-xs tabular-nums">
-											{e.latency_ms ?? 0}ms
-										</td>
-										<td className="px-3 py-2">
-											{e.error ? (
-												<Badge variant="destructive">error</Badge>
-											) : e.cache_hit ? (
-												<Badge variant="secondary">cache</Badge>
-											) : (
-												<Badge variant="default">ok</Badge>
-											)}
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				)}
-			</div>
+										{trafficSubject(e)}
+									</td>
+									<td className="px-3 py-2 text-xs">{e.provider}</td>
+									<td className="px-3 py-2 font-mono text-xs tabular-nums">
+										{e.event_type === "service_call"
+											? `${formatNumber(e.service_usage?.requests ?? 0)} requests / ${formatNumber(e.service_usage?.documents ?? 0)} documents`
+											: `${formatNumber(e.input_tokens ?? 0)} / ${formatNumber(e.output_tokens ?? 0)} tokens`}
+									</td>
+									<td className="px-3 py-2 font-mono text-xs tabular-nums">
+										{e.latency_ms ?? 0}ms
+									</td>
+									<td className="px-3 py-2">
+										{e.error ? (
+											<Badge variant="destructive">error</Badge>
+										) : e.cache_hit ? (
+											<Badge variant="secondary">cache</Badge>
+										) : (
+											<Badge variant="default">ok</Badge>
+										)}
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</SettingsCard>
+			)}
 		</SettingsSection>
 	);
 }
 
-// A module-level map so a component instance can release exactly the
-// subscription it owns (the SSE helper returns a controller-abort function).
+/** One live stat, laid flat on the stats card (no inner chrome). */
 function Tile({ label, value }: { label: string; value: string }) {
 	return (
-		<div className="flex flex-col gap-0.5 rounded-md border bg-background px-3 py-2">
+		<div className="flex flex-col gap-0.5">
 			<span className="text-muted-foreground text-xs">{label}</span>
 			<span className="font-medium text-lg tabular-nums">{value}</span>
 		</div>
@@ -552,11 +1046,16 @@ function formatTime(iso: string | undefined): string {
 // ── Section root ─────────────────────────────────────────────────────────────
 
 export function ApiSection({
+	canConfigure = true,
+	canViewTraffic = true,
 	managed,
 	reachable,
 	statusUrl,
 	target,
 }: {
+	canConfigure?: boolean;
+	/** Whether the caller holds `audit.view`, which Core requires for the feed. */
+	canViewTraffic?: boolean;
 	managed: boolean;
 	reachable: boolean;
 	statusUrl: string | null;
@@ -564,10 +1063,20 @@ export function ApiSection({
 }) {
 	const baseUrl = statusUrl ?? target.url;
 	return (
-		<div className="flex flex-col gap-4">
+		<div className="flex flex-col gap-6">
 			<EndpointCard baseUrl={baseUrl} />
-			<KeyManagement managed={managed} target={target} />
-			<LiveTraffic reachable={reachable} target={target} />
+			<GatewayClientKeys
+				baseUrl={baseUrl}
+				canConfigure={canConfigure}
+				gatewayReady={reachable && statusUrl !== null}
+				managed={managed}
+				target={target}
+			/>
+			<LiveTraffic
+				canView={canViewTraffic}
+				reachable={reachable}
+				target={target}
+			/>
 		</div>
 	);
 }

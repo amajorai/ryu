@@ -23,7 +23,7 @@
 // CSS variable the use site must declare (`LEVEL_RAMP_CLASS`), which is only
 // safe to copy around if the class and the function ship together.
 
-import { RangeSlider } from "@ryu/ui/components/motion/range-slider";
+import { RangeSlider } from "@ryu/ui/components/motion/range-slider.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback } from "react";
 import type { ComposerSettingsSection } from "@/components/agent-elements/input/composer-settings-menu.tsx";
@@ -72,10 +72,10 @@ export function EffortSliderRow({
 			onKeyDown={(e) => e.stopPropagation()}
 		>
 			<div className="flex items-center justify-between gap-2">
-				<span className="text-[13px] text-muted-foreground">
+				<span className="text-(length:--text-detail) text-muted-foreground">
 					{section.label}
 				</span>
-				<span className="max-w-[140px] truncate text-[13px] text-foreground">
+				<span className="text-(length:--text-detail) max-w-[140px] truncate text-foreground">
 					{active?.name}
 				</span>
 			</div>
@@ -95,7 +95,7 @@ export function EffortSliderRow({
 					{items.map((item, i) => (
 						<span
 							className={cn(
-								"flex-1 truncate text-[10px] leading-none",
+								"type-compact flex-1 truncate leading-none",
 								i === 0 && "text-left",
 								i === items.length - 1 && "text-right",
 								i > 0 && i < items.length - 1 && "text-center",

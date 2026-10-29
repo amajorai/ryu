@@ -23,7 +23,9 @@ import {
 	CodeIcon,
 	Database01Icon,
 	GitBranchIcon,
+	GitForkIcon,
 	GoogleIcon,
+	Layers01Icon,
 	Mail01Icon,
 	Note01Icon,
 	PlayIcon,
@@ -41,7 +43,7 @@ import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
 import type {
 	WorkflowEdge,
@@ -54,24 +56,21 @@ import type {
 /** Composio toolkit slug → glyph. Only well-known toolkits with a confirmed
  * Hugeicon are mapped; everything else falls back to the generic Composio bolt.
  * Slugs are lower-cased before lookup so `Gmail`/`GMAIL` both resolve. */
-const COMPOSIO_TOOLKIT_ICONS: Record<string, IconSvgElement> = {
-	gmail: Mail01Icon,
-	googlemail: Mail01Icon,
-	googlecalendar: Calendar04Icon,
-	google_calendar: Calendar04Icon,
-	calendar: Calendar04Icon,
-	google: GoogleIcon,
-	googledrive: GoogleIcon,
-	googledocs: GoogleIcon,
-	googlesheets: GoogleIcon,
-};
+const COMPOSIO_TOOLKIT_ICONS = new Map<string, IconSvgElement>([
+	["gmail", Mail01Icon],
+	["googlemail", Mail01Icon],
+	["googlecalendar", Calendar04Icon],
+	["google_calendar", Calendar04Icon],
+	["calendar", Calendar04Icon],
+	["google", GoogleIcon],
+	["googledrive", GoogleIcon],
+	["googledocs", GoogleIcon],
+	["googlesheets", GoogleIcon],
+]);
 
 /** Icon + human label for a single trigger. Manual triggers are the default and
  * carry no external event, so callers usually skip rendering them. */
-export function triggerMeta(trigger: WorkflowTrigger): {
-	icon: IconSvgElement;
-	label: string;
-} {
+export function triggerMeta(trigger: WorkflowTrigger) {
 	switch (trigger.type) {
 		case "schedule":
 			return { icon: Clock01Icon, label: "Schedule" };
@@ -80,7 +79,7 @@ export function triggerMeta(trigger: WorkflowTrigger): {
 		case "composio": {
 			const slug = trigger.toolkit.toLowerCase();
 			return {
-				icon: COMPOSIO_TOOLKIT_ICONS[slug] ?? ZapIcon,
+				icon: COMPOSIO_TOOLKIT_ICONS.get(slug) ?? ZapIcon,
 				label: trigger.toolkit || "Composio event",
 			};
 		}
@@ -103,31 +102,33 @@ export function triggerMeta(trigger: WorkflowTrigger): {
 /** Node-kind → glyph, mirroring the workflows-app canvas palette
  * (`packages/workflows-app/src/WorkflowCanvas.tsx`) so a card preview reads the
  * same as the canvas. Unmapped kinds fall back to a plain dot. */
-const NODE_KIND_ICONS: Record<string, IconSvgElement> = {
-	input: ArrowRight01Icon,
-	output: CircleIcon,
-	prompt: BotIcon,
-	condition: GitBranchIcon,
-	transform: CodeIcon,
-	set_state: Database01Icon,
-	tool: ZapIcon,
-	webhook: WebhookIcon,
-	delay: Clock01Icon,
-	sub_workflow: WorkflowCircle06Icon,
-	agent_delegate: CircleIcon,
-	note: Note01Icon,
-	while: RepeatIcon,
-	guardrails: Shield01Icon,
-	recipe: RecordIcon,
-	ghost_action: ZapIcon,
-	agent: BotIcon,
-	skill: PlugSocketIcon,
-	mcp: PlugSocketIcon,
-	plugin: PlugSocketIcon,
-};
+const NODE_KIND_ICONS = new Map<string, IconSvgElement>([
+	["input", ArrowRight01Icon],
+	["output", CircleIcon],
+	["prompt", BotIcon],
+	["condition", GitBranchIcon],
+	["transform", CodeIcon],
+	["set_state", Database01Icon],
+	["tool", ZapIcon],
+	["webhook", WebhookIcon],
+	["delay", Clock01Icon],
+	["sub_workflow", WorkflowCircle06Icon],
+	["for_each", Layers01Icon],
+	["parallel", GitForkIcon],
+	["agent_delegate", CircleIcon],
+	["note", Note01Icon],
+	["while", RepeatIcon],
+	["guardrails", Shield01Icon],
+	["recipe", RecordIcon],
+	["ghost_action", ZapIcon],
+	["agent", BotIcon],
+	["skill", PlugSocketIcon],
+	["mcp", PlugSocketIcon],
+	["plugin", PlugSocketIcon],
+]);
 
 function nodeKindIcon(type: string): IconSvgElement {
-	return NODE_KIND_ICONS[type] ?? CircleIcon;
+	return NODE_KIND_ICONS.get(type) ?? CircleIcon;
 }
 
 /** Terminal nodes = nodes whose id never appears as any edge's `from` (nothing
@@ -149,18 +150,20 @@ function terminalNodes(
 	if (explicit.length > 0) {
 		return explicit;
 	}
-	return [nodes.at(-1) as WorkflowNode];
+	return nodes.slice(-1);
 }
 
 // ── Next-run estimate (best-effort, `every` only) ───────────────────────────
 
 const INTERVAL_PATTERN = /^(\d+)\s*([smhd])$/;
-const UNIT_MS: Record<string, number> = {
+const UNIT_MS = {
 	s: 1000,
 	m: 60_000,
 	h: 3_600_000,
 	d: 86_400_000,
 };
+
+const INTERVAL_UNITS = new Map(Object.entries(UNIT_MS));
 
 /** Parse a fixed interval like `"5m"`, `"1h"`, `"1d"` into milliseconds. */
 function intervalMs(value: string): number | null {
@@ -168,7 +171,8 @@ function intervalMs(value: string): number | null {
 	if (!match) {
 		return null;
 	}
-	return Number(match[1]) * UNIT_MS[match[2]];
+	const unit = INTERVAL_UNITS.get(match[2] ?? "");
+	return unit === undefined ? null : Number(match[1]) * unit;
 }
 
 /** Compact relative time until `target` (e.g. "in 12m", "in 3h", "in 2d"). */

@@ -10,7 +10,7 @@
 //! ([`RhpServerMsg::Display`]) over that device's live WS so it re-polls promptly.
 //!
 //! Cost discipline mirrors the dashboard refresh loop: the nudge is only sent to
-//! **connected** devices ([`session::live::is_connected`]), and it is **debounced**
+//! **connected** devices ([`crate::session::live::is_connected`]), and it is **debounced**
 //! per device so a burst of widget updates collapses into one re-poll. The device
 //! still re-polls on its own `refresh_rate` cadence when offline, so a missed nudge
 //! is never a correctness problem — only a latency one.
@@ -98,6 +98,8 @@ async fn surface_for(devices: &DeviceStore, device_id: &str) -> Surface {
 mod tests {
     use super::*;
     use crate::feed::{DeviceBinding, DeviceManifest, RenderedImage, SetDeviceResult};
+    use crate::protocol::DeviceType as WireDeviceType;
+    use crate::session::live::LiveMeta;
     use crate::session::SessionOutput;
     use serde_json::Value;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -175,8 +177,18 @@ mod tests {
         }
     }
 
+    fn meta() -> LiveMeta {
+        LiveMeta {
+            name: "Desk".to_owned(),
+            device_type: WireDeviceType::Desk,
+            secure: false,
+            relay: false,
+        }
+    }
+
     #[tokio::test]
     async fn offline_events_skip_bindings_and_connected_devices_still_receive_nudges() {
+        let _serial = live::TEST_SERIAL.lock().await;
         let directory = std::env::temp_dir().join(format!("ryu-nudge-{}", uuid::Uuid::new_v4()));
         let devices = DeviceStore::open(directory.join("hardware.db")).unwrap();
         let offline = Feed::with_events(20);
@@ -184,10 +196,10 @@ mod tests {
         assert_eq!(offline.reads.load(Ordering::SeqCst), 0);
 
         let (tx, mut rx) = mpsc::channel(4);
-        let (generation, _revoked) = live::register("nudge-lifetime-test", tx).await;
+        let handle = live::register("nudge-lifetime-test", tx, meta()).await;
         let online = Feed::with_events(3);
         run(online.clone(), devices.clone()).await;
-        live::unregister("nudge-lifetime-test", generation).await;
+        live::unregister("nudge-lifetime-test", handle.generation).await;
         assert_eq!(online.reads.load(Ordering::SeqCst), 3);
         assert!(matches!(
             rx.recv().await,
@@ -199,11 +211,11 @@ mod tests {
         );
 
         let (tx, rx) = mpsc::channel(1);
-        let (generation, _revoked) = live::register("nudge-lifetime-test", tx).await;
+        let handle = live::register("nudge-lifetime-test", tx, meta()).await;
         drop(rx);
         let closed = Feed::with_events(20);
         run(closed.clone(), devices.clone()).await;
-        live::unregister("nudge-lifetime-test", generation).await;
+        live::unregister("nudge-lifetime-test", handle.generation).await;
         assert_eq!(closed.reads.load(Ordering::SeqCst), 0);
         drop(devices);
         std::fs::remove_dir_all(directory).unwrap();

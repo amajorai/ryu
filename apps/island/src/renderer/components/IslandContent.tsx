@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import type { ReactNode } from "react";
 import type { IslandSuggestion } from "../../shared/ipc.ts";
 import type { ActiveContext } from "../hooks/use-active-context.ts";
@@ -7,22 +8,21 @@ import { useIslandState } from "../store/island-state.ts";
 import { ContextPill } from "./ContextPill.tsx";
 import { IslandCommand } from "./command/IslandCommand.tsx";
 import { ExpandedPanel } from "./ExpandedPanel.tsx";
+import { IslandMorphingPage } from "./IslandMorphingPage.tsx";
 import { IslandSuggestionChip } from "./IslandSuggestionChip.tsx";
 import { RecordingPill } from "./RecordingPill.tsx";
 import { VoiceModePanel } from "./VoiceModePanel.tsx";
 
-const IS_DEV = Boolean(
-	(import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV
-);
+const IS_DEV = Boolean(import.meta.env?.DEV);
 
-// A throwaway suggestion so the dev state switcher (press 3) can preview the
-// chip morph even when no real engine suggestion is active. Never used in prod.
+// A throwaway connection suggestion so the dev state switcher (press 3) can
+// preview the event-trigger surface without a connected Core. Never used in prod.
 const DEV_DEMO_SUGGESTION: IslandSuggestion = {
-	id: "dev-demo",
-	source: "local_model",
-	suggestionType: "context",
-	title: "Summarize this page",
-	body: "Looks like a long article. Want a quick summary?",
+	id: "dev-connect-demo",
+	source: "connect_event",
+	suggestionType: "connection",
+	title: "Password reset request",
+	body: "A password reset was requested. If you didn't request it, ignore the code and change your password in the source app.",
 	action: "chat",
 	confidence: 0.8,
 	appName: null,
@@ -75,16 +75,23 @@ export function IslandContent({
 }: IslandContentProps) {
 	const expandedView = useIslandState((store) => store.expandedView);
 	if (state === "expanded") {
-		if (expandedView === "voice") {
-			return (
-				<VoiceModePanel
-					composerControls={composerControls}
-					onClose={onVoiceClose}
-					voice={voice}
-				/>
-			);
-		}
-		return expandedView === "command" ? <IslandCommand /> : <ExpandedPanel />;
+		return (
+			<AnimatePresence initial={false} mode="popLayout">
+				<IslandMorphingPage className="h-full w-full" key={expandedView}>
+					{expandedView === "voice" ? (
+						<VoiceModePanel
+							composerControls={composerControls}
+							onClose={onVoiceClose}
+							voice={voice}
+						/>
+					) : expandedView === "command" ? (
+						<IslandCommand />
+					) : (
+						<ExpandedPanel />
+					)}
+				</IslandMorphingPage>
+			</AnimatePresence>
+		);
 	}
 	if (state === "recording") {
 		return (

@@ -1,6 +1,7 @@
 //! Per-agent subscription usage-metering primitive for Ryu (`crates/ryu-usage`)
 //! — the "usage bar" feature, à la CodexBar / openusage. When an ACP agent that
-//! runs on its own subscription is active in chat (Claude Code, Codex), the
+//! runs on its own subscription is active in chat (Claude Code, Codex, Cursor,
+//! Devin, Antigravity, OpenCode Go, and other supported agents), the
 //! desktop shows that agent's rolling rate-limit windows — the 5h "session"
 //! window and the weekly window — so the user can see how close they are to
 //! their plan's cap.
@@ -42,6 +43,14 @@
 //! - **GLM / Z.ai** (`acp:glm`): a `ZAI_API_KEY` / `GLM_API_KEY` (Z.ai ships no
 //!   CLI whose credential we could reuse) → `api.z.ai`'s quota + subscription
 //!   endpoints (5h session, weekly, monthly web-search count).
+//! - **Devin** (`acp:devin`): reads `windsurf_api_key` from the Devin CLI's
+//!   `~/.local/share/devin/credentials.toml` and calls its fixed Connect JSON
+//!   usage endpoint. The API key is never refreshed or written.
+//! - **OpenCode Go** (`acp:opencode`): reads only the `opencode-go` API key from
+//!   OpenCode's `auth.json` and calls its rolling, weekly, and monthly usage API.
+//! - **Ollama Cloud** (`acp:ollama`): reads Ollama's existing OpenSSH Ed25519
+//!   key, signs a fixed usage request locally, and never writes or transmits the
+//!   private key.
 //!
 //! ## Why we never refresh the token
 //!
@@ -59,24 +68,24 @@
 //! Tokens NEVER appear in logs or in the response body. The endpoint returns
 //! normalized snapshots only.
 //!
-//! ## Known gaps (scoped, not silent)
+//! ## Known limitations
 //!
 //! - **Remote node**: Core reads *its own* machine's `~/.codex`/`~/.claude`/…
 //!   For local Core (the common case) that's where the agents run, so it's
 //!   correct; a remote node would report its own creds, not the user's laptop's.
-//! - **Cursor** (`acp:cursor`): its usage lives behind Connect RPC on
-//!   `api2.cursor.sh` with the session token in Cursor's local SQLite state DB,
-//!   and openusage's reader *persists rotated tokens back*. Both the SQLite
-//!   dependency and the write-back conflict with this crate's read-only,
-//!   never-refresh posture, so it stays `unsupported` for now.
-//! - **Gemini / Antigravity** (`acp:gemini`): two sources, neither cheap. The
-//!   local one means discovering Antigravity's language-server process and
-//!   reading its CSRF token and ports — no refresh needed, but it only answers
-//!   while the app is running. The remote one reaches Google's Cloud Code API
-//!   with a token from Antigravity's Keychain item, which openusage *refreshes*
-//!   through Google OAuth — exactly what this crate must never do (see above).
-//!   Deferred on cost, not on principle; the local path is the way in if it's
-//!   picked up.
+//! - **Cursor** (`acp:cursor`): reads only the current access token from the
+//!   local SQLite state database and calls `GetCurrentPeriodUsage` without using
+//!   Cursor's refresh token or writing to its database. An expired token remains
+//!   unavailable until Cursor itself refreshes it. The core quota windows are
+//!   supported; local usage history exports are not part of this meter.
+//! - **Antigravity** (`acp:gemini`): uses the running IDE's local language server
+//!   over loopback with its process-scoped CSRF token. It never reads the Google
+//!   Keychain credential or calls Google's OAuth refresh endpoint, so the meter
+//!   is available only while the IDE language server is running.
+//! - **Ollama Cloud** (`acp:ollama`): the usage endpoint is undocumented. Ryu
+//!   reads only Ollama's existing `~/.ollama/id_ed25519` key, signs the fixed
+//!   HTTPS quota request in memory, and shows 5h/7d usage without guessing reset
+//!   times. The private key is never sent or written back.
 //! - **Droid / Qwen / CodeBuddy / Pi / Ryu's own portal**: no readable
 //!   subscription usage window → `unsupported`, which makes the desktop bar
 //!   hide rather than error. Ryu's ChatGPT / Claude / Copilot provider logins
@@ -115,6 +124,35 @@ pub trait UsageHost: Send + Sync {
     fn ryu_pi_auth_path(&self) -> Option<PathBuf> {
         None
     }
+
+    /// Read the current Cursor access token from its state database. The host
+    /// owns the platform-specific path and must open the database read-only.
+    fn cursor_access_token(&self) -> Option<String> {
+        None
+    }
+
+    /// Antigravity local language-server endpoints discovered from its running
+    /// process arguments. The token-like CSRF value is used only on loopback.
+    fn antigravity_local_servers(&self) -> Vec<AntigravityLocalServer> {
+        Vec::new()
+    }
+
+    /// An HTTP proxy URL the usage call for `vendor` (`"claude"`, …) must use,
+    /// such as a cloud node routing that vendor through the owner's desktop.
+    /// `Ok(None)` keeps the direct path; `Err` means the call must go through a
+    /// route that is not available, so it is not made at all.
+    fn vendor_proxy(&self, _vendor: &str) -> Result<Option<String>, ()> {
+        Ok(None)
+    }
+}
+
+/// A verified loopback endpoint for the running Antigravity language server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AntigravityLocalServer {
+    pub http_port: Option<u16>,
+    pub http_csrf_token: Option<String>,
+    pub https_port: Option<u16>,
+    pub https_csrf_token: Option<String>,
 }
 
 /// Process-global usage host, installed once at boot by `apps/core`.
@@ -276,10 +314,19 @@ pub enum UsageUnavailable {
 /// A normalized usage snapshot for one agent. Always 200 from the endpoint;
 /// refusals carry `available=false` + a `reason` rather than an HTTP error, so
 /// the desktop never branches on status codes.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct UsageSnapshot {
     /// The agent id this snapshot is for (echoed back).
     pub agent_id: String,
+    /// The Ryu provider id this reading belongs to, when the caller read one
+    /// saved provider account rather than a CLI login. Stamped by Core after
+    /// the read; the readers in this crate never set it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    /// The saved account this reading belongs to, stamped by Core alongside
+    /// [`Self::provider_id`]. `None` for CLI logins and unscoped reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
     /// The engine we resolved it to ("claude" | "codex"), or "" if unsupported.
     pub engine: String,
     /// Whether `windows` carry live data.
@@ -313,6 +360,8 @@ impl UsageSnapshot {
     fn unavailable(agent_id: &str, engine: &str, reason: UsageUnavailable) -> Self {
         Self {
             agent_id: agent_id.to_string(),
+            provider_id: None,
+            account_id: None,
             engine: engine.to_string(),
             available: false,
             plan: None,
@@ -329,6 +378,8 @@ impl UsageSnapshot {
     fn available(agent_id: &str, engine: &str, plan: Option<String>) -> Self {
         Self {
             agent_id: agent_id.to_string(),
+            provider_id: None,
+            account_id: None,
             engine: engine.to_string(),
             available: true,
             plan,
@@ -355,6 +406,11 @@ enum Engine {
     Grok,
     /// Z.ai's GLM Coding Plan (`acp:glm`).
     Glm,
+    Devin,
+    OpenCode,
+    Ollama,
+    Cursor,
+    Antigravity,
 }
 
 /// Curated ACP ids → engine. Matched exactly *first* so a growing substring
@@ -367,6 +423,11 @@ const AGENT_ENGINES: &[(&str, Engine)] = &[
     ("acp:copilot", Engine::Copilot),
     ("acp:grok", Engine::Grok),
     ("acp:glm", Engine::Glm),
+    ("acp:devin", Engine::Devin),
+    ("acp:opencode", Engine::OpenCode),
+    ("acp:ollama", Engine::Ollama),
+    ("acp:cursor", Engine::Cursor),
+    ("acp:gemini", Engine::Antigravity),
 ];
 
 /// The canonical agent ids [`AGENT_ENGINES`] maps, in a stable order — the whole
@@ -388,6 +449,11 @@ pub const SUBSCRIPTION_AGENTS: &[&str] = &[
     "acp:copilot",
     "acp:grok",
     "acp:glm",
+    "acp:devin",
+    "acp:opencode",
+    "acp:ollama",
+    "acp:cursor",
+    "acp:gemini",
 ];
 
 /// Substring fallbacks for engine-direct / custom ids built on the same CLI
@@ -400,6 +466,12 @@ const ENGINE_SUBSTRINGS: &[(&str, Engine)] = &[
     ("grok", Engine::Grok),
     ("glm", Engine::Glm),
     ("zai", Engine::Glm),
+    ("devin", Engine::Devin),
+    ("opencode", Engine::OpenCode),
+    ("ollama", Engine::Ollama),
+    ("cursor", Engine::Cursor),
+    ("antigravity", Engine::Antigravity),
+    ("gemini", Engine::Antigravity),
 ];
 
 /// Map an agent id to the subscription engine whose usage we can read, or `None`
@@ -416,6 +488,26 @@ fn engine_for_agent(agent_id: &str) -> Option<Engine> {
         .iter()
         .find(|(needle, _)| id.contains(needle))
         .map(|(_, engine)| *engine)
+}
+
+/// Whether `agent_id` maps to a subscription engine whose usage this crate can
+/// read. The same mapping [`fetch_usage`] uses, so a caller that wants to probe
+/// only the agents worth probing filters with exactly the rule that answers.
+pub fn supports_usage(agent_id: &str) -> bool {
+    engine_for_agent(agent_id).is_some()
+}
+
+/// Whether a saved Ryu provider account can report its own usage windows.
+///
+/// True only for the engines with an account-aware credential reader in
+/// [`fetch_ryu_provider_usage_for_credential`]: Claude, Codex, ChatGPT and
+/// Copilot. Every other provider (and every unknown id) reports no per-account
+/// usage, so a caller must not probe its saved accounts.
+pub fn supports_account_usage(provider_id: &str) -> bool {
+    matches!(
+        engine_for_agent(provider_id),
+        Some(Engine::Claude | Engine::Codex | Engine::ChatGpt | Engine::Copilot)
+    )
 }
 
 /// Public entry point used by the HTTP handler. Never errors — always returns a
@@ -435,6 +527,11 @@ pub async fn fetch_usage(agent_id: &str) -> UsageSnapshot {
         Engine::Copilot => copilot::fetch(agent_id).await,
         Engine::Grok => grok::fetch(agent_id).await,
         Engine::Glm => glm::fetch(agent_id).await,
+        Engine::Devin => devin::fetch(agent_id).await,
+        Engine::OpenCode => opencode::fetch(agent_id).await,
+        Engine::Ollama => ollama::fetch(agent_id).await,
+        Engine::Cursor => cursor::fetch(agent_id).await,
+        Engine::Antigravity => antigravity::fetch(agent_id).await,
     }
 }
 
@@ -460,6 +557,15 @@ pub async fn fetch_ryu_provider_usage(provider_id: &str) -> UsageSnapshot {
         // Keep the fallback conservative if a future provider is routed here
         // before it has a Pi-auth reader of its own.
         Engine::Grok | Engine::Glm => fetch_usage(provider_id).await,
+        // Devin and OpenCode Go read credentials from their own CLI stores.
+        // Do not substitute those global credentials for a saved Pi account.
+        Engine::Devin
+        | Engine::OpenCode
+        | Engine::Ollama
+        | Engine::Cursor
+        | Engine::Antigravity => {
+            UsageSnapshot::unavailable(provider_id, "", UsageUnavailable::Unsupported)
+        }
     }
 }
 
@@ -489,7 +595,13 @@ pub async fn fetch_ryu_provider_usage_for_credential(
         // Ryu's provider catalog currently exposes account-backed logins for
         // Claude, Codex, and Copilot only. Keep future engines conservative
         // until their credential shapes have an account-aware reader too.
-        Engine::Grok | Engine::Glm => {
+        Engine::Grok
+        | Engine::Glm
+        | Engine::Devin
+        | Engine::OpenCode
+        | Engine::Ollama
+        | Engine::Cursor
+        | Engine::Antigravity => {
             UsageSnapshot::unavailable(provider_id, "", UsageUnavailable::Unsupported)
         }
     }
@@ -504,23 +616,96 @@ fn http_client() -> reqwest::Client {
         .unwrap_or_default()
 }
 
+/// [`http_client`] for one vendor, through the host's proxy for it when set.
+/// `Err` when the host requires a proxy it cannot supply, or one that does not
+/// work: the call is skipped rather than made without it.
+fn vendor_http_client(vendor: &str) -> Result<reqwest::Client, ()> {
+    let Some(url) = host().map_or(Ok(None), |host| host.vendor_proxy(vendor))? else {
+        return Ok(http_client());
+    };
+    let proxy = reqwest::Proxy::all(url).map_err(|_| ())?;
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .proxy(proxy)
+        .build()
+        .map_err(|_| ())
+}
+
+/// Client for provider requests that carry credentials. A redirect could
+/// otherwise forward Devin's Connect request body to a different origin.
+fn credential_http_client() -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+}
+
+/// Parse a bounded provider response. Provider responses remain untrusted even
+/// when the request goes to a fixed HTTPS origin.
+async fn read_json_limited(response: reqwest::Response) -> Result<serde_json::Value, ()> {
+    use futures_util::StreamExt;
+
+    const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+    {
+        return Err(());
+    }
+
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| ())?;
+        if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+            return Err(());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|_| ())
+}
+
 /// Unix-seconds expiry from a JWT's `exp` claim, read WITHOUT verifying the
 /// signature (we only need the claim, never trust it). Returns `None` when the
 /// token isn't a 3-part JWT or has no numeric `exp`.
 fn jwt_exp_unix(token: &str) -> Option<i64> {
+    jwt_payload(token)?
+        .get("exp")
+        .and_then(serde_json::Value::as_i64)
+}
+
+/// Decode the payload of a JWT for non-authoritative local claims such as `sub`.
+fn jwt_payload(token: &str) -> Option<serde_json::Value> {
     use base64::Engine as _;
     let payload = token.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
         .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(payload))
         .ok()?;
-    let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    json.get("exp").and_then(serde_json::Value::as_i64)
+    serde_json::from_slice(&bytes).ok()
 }
 
-/// Read a small credential file as text, or `None` if it's missing/unreadable.
+const MAX_CREDENTIAL_FILE_BYTES: u64 = 1024 * 1024;
+
+/// Read a credential file as text, or `None` if missing, unreadable, or oversized.
 fn read_file(path: &PathBuf) -> Option<String> {
-    std::fs::read_to_string(path).ok()
+    read_file_limited(path, MAX_CREDENTIAL_FILE_BYTES)
+}
+
+/// Read at most `max_bytes + 1` so a credential file that grows after its
+/// metadata check cannot force an unbounded allocation.
+fn read_file_limited(path: &PathBuf, max_bytes: u64) -> Option<String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(max_bytes.checked_add(1)?)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if u64::try_from(bytes.len()).ok()? > max_bytes {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// The `~/.config` root the CLI-adjacent credential files live under.
@@ -616,6 +801,16 @@ fn timestamp_to_rfc3339(value: Option<&serde_json::Value>) -> Option<String> {
         if let Ok(date) = chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d") {
             return Some(date.and_hms_opt(0, 0, 0)?.and_utc().to_rfc3339());
         }
+        if let Ok(number) = text.parse::<f64>() {
+            if !number.is_finite() {
+                return None;
+            }
+            return if number.abs() >= 1e11 {
+                epoch_millis_to_rfc3339(number)
+            } else {
+                epoch_secs_to_rfc3339(number as i64)
+            };
+        }
         return None;
     }
     let number = value.as_f64()?;
@@ -651,11 +846,16 @@ fn title_case(value: &str, separators: &[char]) -> String {
         .join(" ")
 }
 
+mod antigravity;
 mod claude;
 mod codex;
 mod copilot;
+mod cursor;
+mod devin;
 mod glm;
 mod grok;
+mod ollama;
+mod opencode;
 mod provider_credits;
 
 pub use provider_credits::{

@@ -20,14 +20,16 @@
 // `limit` is optional on the canonical verb. Passing it through as
 // `undefined` is SAFE and deliberate: the sandbox serializes args with
 // JSON.stringify, which omits undefined values entirely, so the key is
-// absent rather than null and exa.search's `body_defaults.num_results`
-// still applies. Do not "fix" this into a conditional - sending an
-// explicit null WOULD override the default.
+// absent rather than null and exa.search's `body_defaults.numResults`
+// still applies. Exa's REST body is camelCase (`numResults`); a snake_case
+// `num_results` is not an Exa field, so the canonical `limit` never applied.
+// Do not "fix" this into a conditional - sending an explicit null WOULD
+// override the default.
 const keyed = await callTool({
 	query: input.query,
-	num_results: input.limit,
+	numResults: input.limit,
 });
-const shape = (items, provider) => ({
+const searchResponse = (items, provider) => ({
 	results: (items || []).map((it) => ({
 		title: it.title,
 		url: it.url,
@@ -40,7 +42,7 @@ const shape = (items, provider) => ({
 	via: provider,
 });
 if (keyed && Array.isArray(keyed.results)) {
-	return shape(
+	return searchResponse(
 		keyed.results.map((r) => ({
 			title: r.title,
 			url: r.url,
@@ -70,7 +72,7 @@ const free = await callNamed("exa.free_search", {
 });
 // The endpoint answers text/event-stream, so the http tool hands back the raw
 // frame as a string: `event: message\ndata: {json}`. Pull the JSON out.
-if (typeof free !== "string") {
+if (parsePrimitiveText(free) === undefined) {
 	return { raw: free };
 }
 let payload = null;
@@ -78,7 +80,7 @@ for (const line of free.split("\n")) {
 	if (line.startsWith("data: ")) {
 		try {
 			payload = JSON.parse(line.slice(6));
-		} catch (e) {
+		} catch  {
 			payload = null;
 		}
 	}
@@ -93,7 +95,7 @@ const text =
 	payload.result.content[0]
 		? payload.result.content[0].text
 		: null;
-if (typeof text !== "string") {
+if (parsePrimitiveText(text) === undefined) {
 	return { raw: free };
 }
 // Records are separated by a `---` line, each a block of `Key: value` headers
@@ -124,4 +126,15 @@ const items = text
 if (items.some((item) => !item.url)) {
 	return { raw: free };
 }
-return shape(items, "mcp.exa.ai (free tier, no key)");
+return searchResponse(items, "mcp.exa.ai (free tier, no key)");
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}

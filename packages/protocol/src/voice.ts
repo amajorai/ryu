@@ -1,9 +1,11 @@
+import { z } from "zod";
+
 // Realtime Voice-Mode Protocol (RVP) — TS mirror of the wire contract.
 //
 // The client-side counterpart of the Rust `crate::voice::protocol`
 // (apps/core/src/voice/protocol.rs) served at `GET /api/voice/ws`. Hand-written
-// TypeScript types + tiny narrowing guards — no zod, no runtime deps — matching
-// the style of `./hardware.ts`. Keep in lockstep with the Rust source.
+// TypeScript contracts and native boundary codecs. Keep the complete message
+// schemas in lockstep with the Rust source.
 //
 // Audio itself rides out-of-band as BINARY frames (not modeled here):
 //   - uplink:   raw PCM16 mono (client resamples to 16 kHz)
@@ -23,6 +25,13 @@ export type VoiceState = "idle" | "listening" | "thinking" | "speaking";
 export interface RvpStart {
 	/** Route turns through a specific agent/persona. */
 	agent_id?: string;
+	/**
+	 * Only `false` changes anything: Core then runs the session under its
+	 * restricted tool profile for an unverified caller. Omit it (or send `true`)
+	 * for the owner's own session; the field can only restrict, never widen.
+	 * The Gateway sends `false` for phone callers a line does not list.
+	 */
+	caller_trusted?: boolean;
 	/** Bind turns to an existing conversation, or omit for an ephemeral session. */
 	conversation_id?: string;
 	/** Sample rate (Hz) of the PCM16 BINARY frames the client will stream. */
@@ -42,6 +51,11 @@ export interface RvpText {
 	type: "text";
 }
 
+/** Internal post-call summary request; it produces text without TTS audio. */
+export interface RvpSummary {
+	type: "summary";
+}
+
 /** Manual barge-in / stop button: abort the in-flight turn + TTS now. */
 export interface RvpAbort {
 	type: "abort";
@@ -53,7 +67,13 @@ export interface RvpPing {
 }
 
 /** Every control message the client sends (audio rides out-of-band as binary). */
-export type VoiceClientMsg = RvpStart | RvpText | RvpAbort | RvpPing;
+export type VoiceClientMsg =
+	| RvpStart
+	| RvpText
+	| RvpSummary
+	| RvpAbort
+	| RvpPing
+	| { type: "end" };
 
 export type VoiceClientMsgType = VoiceClientMsg["type"];
 
@@ -96,6 +116,15 @@ export interface RvpChatEnd {
 	type: "chat_end";
 }
 
+/** A persisted user-side call summary. Sent before the socket closes. */
+export interface RvpCallEnded {
+	content: string;
+	conversationId: string;
+	durationSeconds: number;
+	messageId: string;
+	type: "call_ended";
+}
+
 /** Barge-in: drop any queued/playing TTS audio immediately. */
 export interface RvpStopPlayback {
 	type: "stop_playback";
@@ -131,6 +160,7 @@ export type VoiceServerMsg =
 	| RvpStt
 	| RvpChatDelta
 	| RvpChatEnd
+	| RvpCallEnded
 	| RvpStopPlayback
 	| RvpTtsStart
 	| RvpTtsEnd
@@ -139,17 +169,56 @@ export type VoiceServerMsg =
 
 export type VoiceServerMsgType = VoiceServerMsg["type"];
 
-/** Narrowing guard: parse an inbound text frame to a typed server message. */
-export function parseVoiceServerMsg(raw: string): VoiceServerMsg | null {
-	let value: unknown;
+const callEndedSchema = z.object({
+	type: z.literal("call_ended"),
+	content: z.string(),
+	conversationId: z.string(),
+	messageId: z.string(),
+	durationSeconds: z.number().int().min(0),
+});
+const controlEnvelopeSchema = z.looseObject({ type: z.string() });
+/** A transport envelope may contain a future message type, without claiming its payload. */
+export type VoiceControlEnvelope = z.infer<typeof controlEnvelopeSchema>;
+const admittedEnvelopeSchema = z.custom<VoiceControlEnvelope>((value) => {
+	const result = controlEnvelopeSchema.safeParse(value);
+	return (
+		result.success &&
+		(result.data.type !== "call_ended" ||
+			callEndedSchema.safeParse(value).success)
+	);
+});
+/** Validate the complete payload before dispatching a supported server message. */
+const supportedMessagesSchema = z.discriminatedUnion("type", [
+	z.object({
+		type: z.literal("ready"),
+		session_id: z.string(),
+		tts_sample_rate: z.number(),
+	}),
+	z.object({
+		type: z.literal("state"),
+		value: z.enum(["idle", "listening", "thinking", "speaking"]),
+	}),
+	z.object({ type: z.literal("speech_start") }),
+	z.object({ type: z.literal("stt"), text: z.string(), final: z.boolean() }),
+	z.object({ type: z.literal("chat_delta"), text: z.string() }),
+	z.object({ type: z.literal("chat_end"), conversation_id: z.string() }),
+	callEndedSchema,
+	z.object({ type: z.literal("stop_playback") }),
+	z.object({ type: z.literal("tts_start") }),
+	z.object({ type: z.literal("tts_end") }),
+	z.object({ type: z.literal("error"), code: z.string(), message: z.string() }),
+	z.object({ type: z.literal("pong") }),
+]);
+/** Preserve native JSON metadata and field order after full payload validation. */
+export const voiceServerMsgSchema = z.custom<
+	z.infer<typeof supportedMessagesSchema>
+>((value) => supportedMessagesSchema.safeParse(value).success);
+/** Preserve incoming control envelopes, including future types and native JSON metadata. */
+export function parseVoiceServerMsg(raw: string) {
 	try {
-		value = JSON.parse(raw);
+		const result = admittedEnvelopeSchema.safeParse(JSON.parse(raw));
+		return result.success ? result.data : null;
 	} catch {
 		return null;
 	}
-	if (typeof value !== "object" || value === null) {
-		return null;
-	}
-	const type = (value as { type?: unknown }).type;
-	return typeof type === "string" ? (value as VoiceServerMsg) : null;
 }

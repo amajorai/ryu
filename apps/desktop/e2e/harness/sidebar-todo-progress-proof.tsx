@@ -1,3 +1,5 @@
+declare const window: Window;
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { createRoot } from "react-dom/client";
@@ -101,26 +103,28 @@ const COMPLETE_READ_SESSION = conversation(
 	10
 );
 
-const TODO_MESSAGES: Record<string, TodoProgressMessage[]> = {
-	[BOT_CONVERSATION.id]: todoMessages([
-		{ content: "Inspect the current bot run", status: "completed" },
-		{ content: "Draft the next response", status: "in_progress" },
-	]),
-	[PARTIAL_SESSION.id]: todoMessages([
-		{ content: "Inspect the dashboard", status: "completed" },
-		{ content: "Refresh the data", status: "in_progress" },
-		{ content: "Verify the report", status: "pending" },
-	]),
-	[COMPLETE_UNREAD_SESSION.id]: todoMessages([
-		{ content: "Tune the spacing", status: "completed" },
-		{ content: "Add the final copy", status: "completed" },
-		{ content: "Verify the result", status: "completed" },
-	]),
-	[COMPLETE_READ_SESSION.id]: todoMessages([
-		{ content: "Close the rollout", status: "completed" },
-		{ content: "Record the outcome", status: "completed" },
-	]),
-};
+const TODO_MESSAGES = new Map<string, TodoProgressMessage[]>(
+	Object.entries({
+		[BOT_CONVERSATION.id]: todoMessages([
+			{ content: "Inspect the current bot run", status: "completed" },
+			{ content: "Draft the next response", status: "in_progress" },
+		]),
+		[PARTIAL_SESSION.id]: todoMessages([
+			{ content: "Inspect the dashboard", status: "completed" },
+			{ content: "Refresh the data", status: "in_progress" },
+			{ content: "Verify the report", status: "pending" },
+		]),
+		[COMPLETE_UNREAD_SESSION.id]: todoMessages([
+			{ content: "Tune the spacing", status: "completed" },
+			{ content: "Add the final copy", status: "completed" },
+			{ content: "Verify the result", status: "completed" },
+		]),
+		[COMPLETE_READ_SESSION.id]: todoMessages([
+			{ content: "Close the rollout", status: "completed" },
+			{ content: "Record the outcome", status: "completed" },
+		]),
+	})
+);
 
 const SESSIONS = [
 	PARTIAL_SESSION,
@@ -134,7 +138,7 @@ const handlers: ChatRowHandlers = {
 	agents: AGENTS,
 	archivedIds: new Set<string>(),
 	canMakePrivate: true,
-	loadMessages: async (id) => TODO_MESSAGES[id] ?? [],
+	loadMessages: async (id) => TODO_MESSAGES.get(id) ?? [],
 	onAddScheduledTask: noOp,
 	onDeleteConversation: noOp,
 	onForkConversation: noOp,
@@ -146,6 +150,7 @@ const handlers: ChatRowHandlers = {
 	onOpenInNewWindow: noOp,
 	onOpenNewSideChat: noOp,
 	onOpenSideChat: noOp,
+	onMoveToProject: noOp,
 	onRemoveFromProject: noOp,
 	onRenameConversation: noOp,
 	onRequestConversationVisibility: noOp,
@@ -154,6 +159,7 @@ const handlers: ChatRowHandlers = {
 	onToggleArchive: noOp,
 	onTogglePin: noOp,
 	pinnedIds: new Set<string>(),
+	projectTargets: [],
 	projectNameForFolder: () => "proof",
 	pullRequestsEnabled: false,
 	schedulingEnabled: false,
@@ -162,9 +168,9 @@ const handlers: ChatRowHandlers = {
 	unreadIds: new Set([COMPLETE_UNREAD_SESSION.id]),
 };
 
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
 	if (url.includes("/api/plugins/contributions")) {
 		return Promise.resolve(
 			new Response(JSON.stringify({ context_menu_items: [] }), {
@@ -190,7 +196,7 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 		);
 	}
 	return realFetch(input, init);
-}) as typeof fetch;
+};
 
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
@@ -220,7 +226,7 @@ function Story() {
 								</header>
 								<div className="space-y-5 p-3">
 									<section>
-										<p className="mb-1 px-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+										<p className="type-caption mb-1 px-2 font-medium text-muted-foreground uppercase tracking-wide">
 											Bots
 										</p>
 										<div className="group/row relative flex min-h-14 items-center gap-2 overflow-hidden rounded-md bg-background/30 px-2 py-1.5">
@@ -238,7 +244,7 @@ function Story() {
 										</div>
 									</section>
 									<section>
-										<p className="mb-1 px-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+										<p className="type-caption mb-1 px-2 font-medium text-muted-foreground uppercase tracking-wide">
 											Sessions
 										</p>
 										<SidebarConversationList

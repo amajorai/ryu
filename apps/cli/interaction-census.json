@@ -1,0 +1,3080 @@
+{
+  "schema_version": 1,
+  "surface": "apps/cli",
+  "scope": "Active OpenTUI workspace, rendered surfaces, overlays, sidebar mouse controls, and CLI command entry points.",
+  "summary": {
+    "counting_unit": "One control record is one observable user action or one homogeneous set of aliases exercised through the same handler.",
+    "legacy_control_records": 136,
+    "added_mode_and_launcher_records": 7,
+    "added_chat_parity_records": 5,
+    "added_general_settings_records": 1,
+    "added_profile_records": 2,
+    "added_advanced_inference_records": 1,
+    "added_contributed_command_records": 1,
+    "added_privacy_records": 10,
+    "added_cli_parity_records": 2,
+    "added_memory_and_safety_records": 16,
+    "added_identity_account_records": 22,
+    "added_engine_launch_settings_records": 2,
+    "added_agent_inference_records": 1,
+    "added_update_settings_records": 1,
+    "added_transcript_turn_records": 1,
+    "added_mfa_enrollment_records": 3,
+    "added_agent_identity_records": 3,
+    "total_control_records": 303,
+    "covered": 302,
+    "partial": 1,
+    "uncovered": 0,
+    "added_granular_parity_records": 89
+  },
+  "status_definitions": {
+    "covered": "A native OpenTUI or command-flow test asserts the user-visible result.",
+    "partial": "Related helpers or part of the UI flow are tested, but the complete visible interaction is not.",
+    "uncovered": "No behavior test currently drives this control."
+  },
+  "controls": [
+    {
+      "id": "shell.ctrl_c",
+      "area": "Workspace",
+      "control": "Ctrl+C quit",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Ctrl+C arms the exit and a second press within 2s quits"
+      ]
+    },
+    {
+      "id": "gate.retry",
+      "area": "Waitlist gate",
+      "control": "r retries the access check before entering the workspace",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/waitlist.interactions.test.tsx#Waitlist gate r retries access and admits the CLI when Core approves the account"
+      ]
+    },
+    {
+      "id": "gate.mfa_open_setup",
+      "area": "Two-factor gate",
+      "control": "Enter opens the website's two-factor setup page while the account has no second factor",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/mfa-enrollment.interactions.test.tsx#MFA enrollment gate shows the setup page and Enter opens it in the browser"
+      ]
+    },
+    {
+      "id": "gate.mfa_check_again",
+      "area": "Two-factor gate",
+      "control": "r re-reads the two-factor status and opens the workspace once a factor is enrolled",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/mfa-enrollment.interactions.test.tsx#MFA enrollment gate r checks again and admits the workspace once a factor is enrolled"
+      ]
+    },
+    {
+      "id": "cli.mfa_enrollment_error",
+      "area": "CLI commands",
+      "control": "A command refused for a missing second factor names the website setup page and exits 1",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#identity commands name the website setup page when the account must enroll a second factor"
+      ]
+    },
+    {
+      "id": "shell.ctrl_k",
+      "area": "Workspace",
+      "control": "Ctrl+K opens the command palette",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/smoke.test.tsx#Ctrl+K palette filters navigation destinations"
+      ]
+    },
+    {
+      "id": "palette.query",
+      "area": "Command palette",
+      "control": "Type a query to filter destinations",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/smoke.test.tsx#Ctrl+K palette filters navigation destinations",
+        "src/__tests__/shell.interactions.test.tsx#command palette arrow keys change selection and Escape dismisses it"
+      ]
+    },
+    {
+      "id": "palette.arrow_down",
+      "area": "Command palette",
+      "control": "Down selects the next result",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#command palette arrow keys change selection and Escape dismisses it"
+      ]
+    },
+    {
+      "id": "palette.arrow_up",
+      "area": "Command palette",
+      "control": "Up selects the previous result",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#command palette arrow keys change selection and Escape dismisses it"
+      ]
+    },
+    {
+      "id": "palette.backspace",
+      "area": "Command palette",
+      "control": "Backspace edits the query and restores matching destinations",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/palette.interactions.test.tsx#Backspace edits the command-palette query and restores the matching destination"
+      ]
+    },
+    {
+      "id": "palette.enter",
+      "area": "Command palette",
+      "control": "Enter activates a result",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/product-mode.interactions.test.tsx#Console palette arrows move the selected route and persist the landing",
+        "src/__tests__/palette-scroll.interactions.test.tsx#scrolls the selected command into view and activates the eleventh result"
+      ]
+    },
+    {
+      "id": "palette.escape",
+      "area": "Command palette",
+      "control": "Escape dismisses the palette",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#command palette arrow keys change selection and Escape dismisses it"
+      ]
+    },
+    {
+      "id": "shell.ctrl_t",
+      "area": "Workspace",
+      "control": "Ctrl+T opens a new Chat tab",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Ctrl+T opens a tab, Ctrl+W closes it, Ctrl+Shift+T restores it"
+      ]
+    },
+    {
+      "id": "shell.ctrl_w",
+      "area": "Workspace",
+      "control": "Ctrl+W closes the active tab",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Ctrl+T opens a tab, Ctrl+W closes it, Ctrl+Shift+T restores it"
+      ]
+    },
+    {
+      "id": "shell.ctrl_shift_t",
+      "area": "Workspace",
+      "control": "Ctrl+Shift+T restores the last closed tab",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Ctrl+T opens a tab, Ctrl+W closes it, Ctrl+Shift+T restores it"
+      ]
+    },
+    {
+      "id": "shell.ctrl_alt_s",
+      "area": "Workspace",
+      "control": "Ctrl+Alt+S toggles the split",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/tabs.smoke.test.tsx#Ctrl+Alt+S splits the workspace into two chat panes"
+      ]
+    },
+    {
+      "id": "shell.alt_left",
+      "area": "Workspace",
+      "control": "Alt+Left focuses the previous pane",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Alt+Left and Alt+Right focus their pane before Ctrl+T opens a tab"
+      ]
+    },
+    {
+      "id": "shell.alt_right",
+      "area": "Workspace",
+      "control": "Alt+Right focuses the next pane",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Alt+Left and Alt+Right focus their pane before Ctrl+T opens a tab"
+      ]
+    },
+    {
+      "id": "shell.ctrl_tab",
+      "area": "Workspace",
+      "control": "Ctrl+Tab cycles tabs forward",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Ctrl+Tab and Ctrl+Shift+Tab activate adjacent workspace tabs"
+      ]
+    },
+    {
+      "id": "shell.ctrl_shift_tab",
+      "area": "Workspace",
+      "control": "Ctrl+Shift+Tab cycles tabs backward",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Ctrl+Tab and Ctrl+Shift+Tab activate adjacent workspace tabs"
+      ]
+    },
+    {
+      "id": "sidebar.node_selector",
+      "area": "Sidebar",
+      "control": "Click node selector to open the node picker",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks",
+        "src/__tests__/shell.interactions.test.tsx#node picker Escape cancels and Enter persists the selected node"
+      ]
+    },
+    {
+      "id": "node_picker.down",
+      "area": "Node picker",
+      "control": "Down moves selection",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#node picker Escape cancels and Enter persists the selected node"
+      ]
+    },
+    {
+      "id": "node_picker.up",
+      "area": "Node picker",
+      "control": "Up moves selection",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#node picker Escape cancels and Enter persists the selected node"
+      ]
+    },
+    {
+      "id": "node_picker.j",
+      "area": "Node picker",
+      "control": "j moves selection",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#node picker Escape cancels and Enter persists the selected node"
+      ]
+    },
+    {
+      "id": "node_picker.k",
+      "area": "Node picker",
+      "control": "k moves selection",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#node picker Escape cancels and Enter persists the selected node"
+      ]
+    },
+    {
+      "id": "node_picker.enter",
+      "area": "Node picker",
+      "control": "Enter persists and switches to the selected node",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#node picker Escape cancels and Enter persists the selected node"
+      ]
+    },
+    {
+      "id": "node_picker.escape",
+      "area": "Node picker",
+      "control": "Escape closes without changing the active node",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#node picker Escape cancels and Enter persists the selected node"
+      ]
+    },
+    {
+      "id": "sidebar.home",
+      "area": "Sidebar",
+      "control": "Home navigation click",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.new_chat",
+      "area": "Sidebar",
+      "control": "New chat navigation click",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.search",
+      "area": "Sidebar",
+      "control": "Search opens the palette",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.library",
+      "area": "Sidebar",
+      "control": "Library navigation click",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.customize",
+      "area": "Sidebar",
+      "control": "Customize navigation click",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.tasks",
+      "area": "Sidebar",
+      "control": "Tasks navigation click",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.timeline",
+      "area": "Sidebar",
+      "control": "Timeline navigation click",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.section.agents.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Agents",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.section.groups.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Groups",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.section.spaces.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Spaces",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.section.meetings.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Meetings",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.section.workflows.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Workflows",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.section.pinned.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Pinned",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.section.projects.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Projects",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.section.chats.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Chats",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.section.archived.toggle",
+      "area": "Sidebar",
+      "control": "Collapse/expand Archived",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar section headers collapse and restore their own content"
+      ]
+    },
+    {
+      "id": "sidebar.create.agents",
+      "area": "Sidebar",
+      "control": "Agents create (+)",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#each sidebar create control opens its section destination"
+      ]
+    },
+    {
+      "id": "sidebar.create.groups",
+      "area": "Sidebar",
+      "control": "Groups create (+)",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#each sidebar create control opens its section destination"
+      ]
+    },
+    {
+      "id": "sidebar.create.spaces",
+      "area": "Sidebar",
+      "control": "Spaces create (+)",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#each sidebar create control opens its section destination"
+      ]
+    },
+    {
+      "id": "sidebar.create.meetings",
+      "area": "Sidebar",
+      "control": "Meetings create (+)",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#each sidebar create control opens its section destination"
+      ]
+    },
+    {
+      "id": "sidebar.create.workflows",
+      "area": "Sidebar",
+      "control": "Workflows create (+)",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#each sidebar create control opens its section destination"
+      ]
+    },
+    {
+      "id": "sidebar.create.pinned",
+      "area": "Sidebar",
+      "control": "Pinned create (+)",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#each sidebar create control opens its section destination"
+      ]
+    },
+    {
+      "id": "sidebar.create.chats",
+      "area": "Sidebar",
+      "control": "Chats create (+)",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#each sidebar create control opens its section destination"
+      ]
+    },
+    {
+      "id": "sidebar.create.archived",
+      "area": "Sidebar",
+      "control": "Archived create (+)",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#each sidebar create control opens its section destination"
+      ]
+    },
+    {
+      "id": "sidebar.item.agent",
+      "area": "Sidebar",
+      "control": "Click an agent row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.item.group",
+      "area": "Sidebar",
+      "control": "Click a group row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.item.space",
+      "area": "Sidebar",
+      "control": "Click a space row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.item.meeting",
+      "area": "Sidebar",
+      "control": "Click a meeting row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.item.workflow",
+      "area": "Sidebar",
+      "control": "Click a workflow row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.item.pinned_chat",
+      "area": "Sidebar",
+      "control": "Click a pinned conversation row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.item.project_chat",
+      "area": "Sidebar",
+      "control": "Click a project conversation row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.item.chat",
+      "area": "Sidebar",
+      "control": "Click a regular conversation row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.item.archived_chat",
+      "area": "Sidebar",
+      "control": "Click an archived conversation row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.account",
+      "area": "Sidebar",
+      "control": "Account opens Settings",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.settings_gear",
+      "area": "Sidebar",
+      "control": "Settings gear opens Settings",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.inbox",
+      "area": "Sidebar",
+      "control": "Inbox navigation click",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "sidebar.downloads",
+      "area": "Sidebar",
+      "control": "Downloads navigation click",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/sidebar.interactions.test.tsx#sidebar navigation, search, node picker, and account destinations respond to clicks"
+      ]
+    },
+    {
+      "id": "list_tab.navigation",
+      "area": "Shared list surfaces",
+      "control": "j/k and Up/Down select rows",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/listTab.interactions.test.tsx#list navigation, activation, secondary action, and reload work through keys"
+      ]
+    },
+    {
+      "id": "list_tab.enter",
+      "area": "Shared list surfaces",
+      "control": "Enter runs the primary row action",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/listTab.interactions.test.tsx#list navigation, activation, secondary action, and reload work through keys"
+      ]
+    },
+    {
+      "id": "list_tab.a",
+      "area": "Shared list surfaces",
+      "control": "a runs the secondary row action",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/listTab.interactions.test.tsx#list navigation, activation, secondary action, and reload work through keys"
+      ]
+    },
+    {
+      "id": "list_tab.r",
+      "area": "Shared list surfaces",
+      "control": "r reloads the list",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/listTab.interactions.test.tsx#list navigation, activation, secondary action, and reload work through keys"
+      ]
+    },
+    {
+      "id": "list_tab.focus_gates",
+      "area": "Shared list surfaces",
+      "control": "Inactive and input-focused lists ignore keys",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/listTab.interactions.test.tsx#inactive and input-focused lists ignore navigation and activation keys"
+      ]
+    },
+    {
+      "id": "home.action.new_chat",
+      "area": "Home",
+      "control": "Enter opens New chat",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Home quick actions open each advertised surface and refresh system status"
+      ]
+    },
+    {
+      "id": "home.action.library",
+      "area": "Home",
+      "control": "Enter opens Library",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Home quick actions open each advertised surface and refresh system status"
+      ]
+    },
+    {
+      "id": "home.action.tasks",
+      "area": "Home",
+      "control": "Enter opens Tasks",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Home quick actions open each advertised surface and refresh system status"
+      ]
+    },
+    {
+      "id": "home.action.calendar",
+      "area": "Home",
+      "control": "Enter opens Calendar",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Home quick actions open each advertised surface and refresh system status"
+      ]
+    },
+    {
+      "id": "home.action.timeline",
+      "area": "Home",
+      "control": "Enter opens Timeline",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Home quick actions open each advertised surface and refresh system status"
+      ]
+    },
+    {
+      "id": "home.action.monitors",
+      "area": "Home",
+      "control": "Enter opens Monitors",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Home quick actions open each advertised surface and refresh system status"
+      ]
+    },
+    {
+      "id": "home.refresh",
+      "area": "Home",
+      "control": "r refreshes system status",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Home quick actions open each advertised surface and refresh system status"
+      ]
+    },
+    {
+      "id": "store.sections",
+      "area": "Store",
+      "control": "Left/Right visits all eight sections and wraps at either end",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#left and right move through all Store sections and wrap at both ends"
+      ]
+    },
+    {
+      "id": "store.search",
+      "area": "Store",
+      "control": "Slash focuses search and typing filters all realms",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store search tracks typed input and Enter opens the selected result realm"
+      ]
+    },
+    {
+      "id": "store.search_escape",
+      "area": "Store",
+      "control": "Escape leaves search input focus while keeping results",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store search tracks typed input and Enter opens the selected result realm"
+      ]
+    },
+    {
+      "id": "store.search_navigation",
+      "area": "Store",
+      "control": "j/k/Up/Down select search results",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store search tracks typed input and Enter opens the selected result realm"
+      ]
+    },
+    {
+      "id": "store.search_enter",
+      "area": "Store",
+      "control": "Enter opens the selected result realm",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store search tracks typed input and Enter opens the selected result realm"
+      ]
+    },
+    {
+      "id": "store.search_refresh",
+      "area": "Store",
+      "control": "r refreshes the aggregated search results",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store search tracks typed input and Enter opens the selected result realm"
+      ]
+    },
+    {
+      "id": "setup.steps",
+      "area": "Setup",
+      "control": "Left/Right and Tab/Shift+Tab navigate all four wizard steps",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Setup arrows and Tab keys move among all wizard steps in both directions"
+      ]
+    },
+    {
+      "id": "setup.categories",
+      "area": "Setup",
+      "control": "Left/Right and Tab switch Providers, Tools, and Agents and filter catalog items to the selected category",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/setup.interactions.test.tsx#Setup filters catalog items by step and retries a failed provider install"
+      ]
+    },
+    {
+      "id": "setup.install",
+      "area": "Setup",
+      "control": "Enter installs the selected provider, tool, or agent using its exact catalog item id and shows install errors",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/setup.interactions.test.tsx#Setup filters catalog items by step and retries a failed provider install"
+      ]
+    },
+    {
+      "id": "setup.install_refresh",
+      "area": "Setup",
+      "control": "r reloads the catalog after install failure or success and refreshes installed status",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/setup.interactions.test.tsx#Setup filters catalog items by step and retries a failed provider install"
+      ]
+    },
+    {
+      "id": "spaces.selection",
+      "area": "Spaces",
+      "control": "j/k/Up/Down switch the selected space and document list",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Spaces move between document lists, refresh cached documents, and page history"
+      ]
+    },
+    {
+      "id": "spaces.refresh",
+      "area": "Spaces",
+      "control": "r reloads the selected space documents and conversation history",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Spaces move between document lists, refresh cached documents, and page history"
+      ]
+    },
+    {
+      "id": "spaces.history_pages",
+      "area": "Spaces",
+      "control": "PageUp/PageDown move the history window",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Spaces move between document lists, refresh cached documents, and page history"
+      ]
+    },
+    {
+      "id": "workflows.selection",
+      "area": "Workflows",
+      "control": "j/k/Up/Down select workflows",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Workflows require confirmation, Escape cancels, and Enter starts the selected run"
+      ]
+    },
+    {
+      "id": "workflows.refresh",
+      "area": "Workflows",
+      "control": "r refreshes workflows",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Workflows require confirmation, Escape cancels, and Enter starts the selected run"
+      ]
+    },
+    {
+      "id": "workflows.confirm_cancel",
+      "area": "Workflows",
+      "control": "Enter confirms runs; Escape cancels the confirmation",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Workflows require confirmation, Escape cancels, and Enter starts the selected run"
+      ]
+    },
+    {
+      "id": "workflows.run",
+      "area": "Workflows",
+      "control": "Confirmed Enter starts a run and shows output",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Workflows require confirmation, Escape cancels, and Enter starts the selected run"
+      ]
+    },
+    {
+      "id": "calendar.navigation",
+      "area": "Calendar",
+      "control": "j/k/Up/Down navigate scheduled jobs",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Calendar and Tasks navigate scheduled jobs, open history, and refresh"
+      ]
+    },
+    {
+      "id": "calendar.enter",
+      "area": "Calendar",
+      "control": "Enter opens Tasks run history",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Calendar and Tasks navigate scheduled jobs, open history, and refresh"
+      ]
+    },
+    {
+      "id": "calendar.refresh",
+      "area": "Calendar",
+      "control": "r refreshes the agenda",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Calendar and Tasks navigate scheduled jobs, open history, and refresh"
+      ]
+    },
+    {
+      "id": "tasks.navigation",
+      "area": "Tasks",
+      "control": "j/k/Up/Down navigate scheduled jobs",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Calendar and Tasks navigate scheduled jobs, open history, and refresh"
+      ]
+    },
+    {
+      "id": "tasks.refresh",
+      "area": "Tasks",
+      "control": "r refreshes scheduled jobs",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Calendar and Tasks navigate scheduled jobs, open history, and refresh"
+      ]
+    },
+    {
+      "id": "timeline.refresh",
+      "area": "Timeline",
+      "control": "r rechecks Shadow status",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/surface.interactions.test.tsx#Timeline r rechecks Shadow status on the active node"
+      ]
+    },
+    {
+      "id": "agents.selection",
+      "area": "Agents",
+      "control": "j/k/Up/Down select agents",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Agents Enter detail and e edit save the currently focused field"
+      ]
+    },
+    {
+      "id": "agents.enter_detail",
+      "area": "Agents",
+      "control": "Enter loads selected agent detail",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Agents Enter detail and e edit save the currently focused field"
+      ]
+    },
+    {
+      "id": "agents.new",
+      "area": "Agents",
+      "control": "n opens a new agent form",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Agents creates a record through keyboard focus and Ctrl+S"
+      ]
+    },
+    {
+      "id": "agents.edit",
+      "area": "Agents",
+      "control": "e opens the existing agent editor",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Agents Enter detail and e edit save the currently focused field"
+      ]
+    },
+    {
+      "id": "agents.refresh",
+      "area": "Agents",
+      "control": "r reloads configured agents",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Agents Enter detail and e edit save the currently focused field"
+      ]
+    },
+    {
+      "id": "agents.form_inputs",
+      "area": "Agents",
+      "control": "Tab moves fields; text inputs update while typing; Ctrl+S saves",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Agents creates a record through keyboard focus and Ctrl+S",
+        "src/__tests__/shell.interactions.test.tsx#Agents Enter detail and e edit save the currently focused field"
+      ]
+    },
+    {
+      "id": "agents.form_escape",
+      "area": "Agents",
+      "control": "Escape cancels the agent editor without saving",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Agents creates a record through keyboard focus and Ctrl+S"
+      ]
+    },
+    {
+      "id": "agents.tools_picker",
+      "area": "Agents",
+      "control": "Agent tool picker reads/retries MCP catalog, toggles selected grants, and persists exact allowlist state",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/agents.parity.interactions.test.tsx#Agent editor saves Desktop-shared fields, preserves advanced settings, retries, and reloads",
+        "src/__tests__/agents.parity.interactions.test.tsx#new agent tool and skill pickers save explicit safe selections",
+        "src/__tests__/agents.parity.interactions.test.tsx#agent editor preserves no-access sentinels and legacy all-access values"
+      ]
+    },
+    {
+      "id": "agents.skills_picker",
+      "area": "Agents",
+      "control": "Agent skill picker reads/retries installed skills, toggles enabled grants, and persists exact allowlist state",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/agents.parity.interactions.test.tsx#Agent editor saves Desktop-shared fields, preserves advanced settings, retries, and reloads",
+        "src/__tests__/agents.parity.interactions.test.tsx#new agent tool and skill pickers save explicit safe selections",
+        "src/__tests__/agents.parity.interactions.test.tsx#agent editor preserves no-access sentinels and legacy all-access values"
+      ]
+    },
+    {
+      "id": "agents.inference_authoring",
+      "area": "Agent Inference",
+      "control": "Create/edit common per-agent sampling defaults, validate fields, preserve values across retry, and read back the saved inference slot",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/agents.parity.interactions.test.tsx#Agent editor authors per-agent sampling through Core, validates fields, retries, and reloads saved values",
+        "src/__tests__/agents.parity.interactions.test.tsx#new Agent can save a per-agent sampling default through Core's create contract"
+      ]
+    },
+    {
+      "id": "agents.identity_step",
+      "area": "Agents",
+      "control": "A new agent opens on \"How should this agent work?\" (Acts as you / Its own identity / Both; arrows or 1-3, Enter continues, Esc leaves); the editor's works-as field reopens it, and Core's launch refusal blocks the save",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/agents.parity.interactions.test.tsx#a new agent starts on the identity step and Core's launch refusal blocks the save",
+        "src/__tests__/agents.parity.interactions.test.tsx#Escape on a new agent's identity step leaves without creating anything",
+        "src/__tests__/agents.parity.interactions.test.tsx#the agent editor changes identity mode and edits account access by key"
+      ]
+    },
+    {
+      "id": "agents.account_access",
+      "area": "Agents",
+      "control": "Account access panel lists the allowlist by kind, adds a validated key (a), removes one (x), clears to no limit (c) or allows none (0), and saves only when edited",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/agents.parity.interactions.test.tsx#the agent editor changes identity mode and edits account access by key",
+        "src/__tests__/agents.parity.interactions.test.tsx#clearing account access sends null, and an untouched mode is not rewritten"
+      ]
+    },
+    {
+      "id": "cli.agents.identity_access",
+      "area": "CLI commands",
+      "control": "ryu-cli agents show/create/identity/access read and patch identity mode and account access with the revision guard and Core's launch check",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli.agents.test.ts#changes only the mode, with the revision guard",
+        "src/__tests__/cli.agents.test.ts#sends the identity mode with no tools and no account limit",
+        "src/__tests__/cli.agents.test.ts#remove, clear and none"
+      ]
+    },
+    {
+      "id": "chat.input_send",
+      "area": "Chat",
+      "control": "Type a multi-character prompt and submit it to the stream endpoint",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat sends the focused composer value through the stream endpoint"
+      ]
+    },
+    {
+      "id": "chat.history_up",
+      "area": "Chat",
+      "control": "Up recalls the previous prompt",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat sends the focused composer value through the stream endpoint"
+      ]
+    },
+    {
+      "id": "chat.history_down",
+      "area": "Chat",
+      "control": "Down returns to the draft after history navigation",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat sends the focused composer value through the stream endpoint"
+      ]
+    },
+    {
+      "id": "chat.reset",
+      "area": "Chat",
+      "control": "Ctrl+L starts a fresh conversation",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat sends the focused composer value through the stream endpoint"
+      ]
+    },
+    {
+      "id": "chat.expand_prompts",
+      "area": "Chat",
+      "control": "Ctrl+O expands or collapses user prompts longer than six lines; clicking the hint expands one prompt",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat renders user turns behind a left bar and collapses long prompts until Ctrl+O"
+      ]
+    },
+    {
+      "id": "chat.autocomplete",
+      "area": "Chat",
+      "control": "Slash, agent, workflow, app, plugin, and human mention completions update while typing; Tab accepts the highlighted choice",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Chat composer updates slash suggestions as the user types and accepts a choice",
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat completes a workflow mention and sends the exact workflow target to Core",
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat completes enabled app and plugin mentions with Desktop labels",
+        "src/__tests__/human-mentions.interactions.test.tsx#CLI chat completes a human mention, sends to Core, and reports recipient permission failures"
+      ]
+    },
+    {
+      "id": "chat.contributed_commands",
+      "area": "Chat",
+      "control": "Core-enabled contributed slash commands load into the composer, retry after catalog failure, support keyboard selection, preserve full command text through streaming retry, and do not shadow local CLI handlers",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/contributed-chat-commands.interactions.test.tsx#Core contributed slash commands validate and never shadow local commands",
+        "src/__tests__/contributed-chat-commands.interactions.test.tsx#CLI retries the plugin command catalog, selects by keyboard, and sends the exact command text to Core"
+      ]
+    },
+    {
+      "id": "chat.slash_argument_choices",
+      "area": "Chat",
+      "control": "Plugin slash commands expose sequential registered argument choices, custom values, and submit the exact command text with routing intact",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/autocomplete.test.ts#structured slash arguments filter choices, advance sequentially, and allow custom values",
+        "src/__tests__/contributed-chat-commands.interactions.test.tsx#structured plugin choices advance arguments and retry the exact team-routed command"
+      ]
+    },
+    {
+      "id": "chat.acp_advertised_commands",
+      "area": "Chat",
+      "control": "ACP available-command updates replace the advertised menu, selected commands pass through as exact chat text to the active agent, and failed requests remain retryable",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chatStream.test.ts#dispatches ACP available-command updates as replacement data",
+        "src/__tests__/autocomplete.test.ts#ACP advertised slash commands normalize and replace malformed or empty updates",
+        "src/__tests__/contributed-chat-commands.interactions.test.tsx#ACP advertised slash commands submit through their agent and replace on an empty update"
+      ]
+    },
+    {
+      "id": "chat.workflow_mention",
+      "area": "Chat",
+      "control": "@ workflow completion lists only chat-input workflows, inserts the visible name, and routes the submitted prompt to that workflow",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat completes a workflow mention and sends the exact workflow target to Core",
+        "src/__tests__/autocomplete.test.ts#workflow suggestions include only chat-input workflows and route by visible name"
+      ]
+    },
+    {
+      "id": "chat.app_plugin_mentions",
+      "area": "Chat",
+      "control": "@ app and plugin completions include enabled CLI entries, insert Desktop display names, and submit prompt references without changing routing",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat completes enabled app and plugin mentions with Desktop labels",
+        "src/__tests__/autocomplete.test.ts#app and plugin mentions include enabled CLI entries and insert their visible names"
+      ]
+    },
+    {
+      "id": "chat.human_mentions",
+      "area": "Chat",
+      "control": "Inbox-gated @person completion excludes self, sends the exact recipient-scoped notification, reports permission failures, and shows a deduplicated per-user toast",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/human-mentions.interactions.test.tsx#CLI chat completes a human mention, sends to Core, and reports recipient permission failures",
+        "src/__tests__/human-mentions.interactions.test.tsx#disabled Inbox hides human candidates and never sends a mention notification",
+        "src/__tests__/human-mentions.interactions.test.tsx#CLI shell renders a per-user notification once and rejects another recipient"
+      ]
+    },
+    {
+      "id": "chat.keymap",
+      "area": "Chat",
+      "control": "F1, Ctrl+? (raw 0x1F), a bare ? outside text fields, the palette, or /help opens the shortcuts overlay; typing filters it; F1 or Escape closes it",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat opens the keymap with Ctrl+? and dismisses it with Escape",
+        "src/__tests__/shell.interactions.test.tsx#F1 opens the shortcuts overlay, filters as you type, and toggles closed",
+        "src/__tests__/shell.interactions.test.tsx#a raw Ctrl+/ (0x1F) from the terminal opens the shortcuts overlay",
+        "src/__tests__/shell.interactions.test.tsx#a bare ? stays composer text but opens the shortcuts outside text fields",
+        "src/__tests__/shell.interactions.test.tsx#a bare ? in the left pane's composer after a split stays composer text",
+        "src/__tests__/shell.interactions.test.tsx#palette lists Keyboard shortcuts with its key",
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat slash overlays open Help, Agent, ACP settings, Model, and btw views"
+      ]
+    },
+    {
+      "id": "chat.agent_picker",
+      "area": "Chat",
+      "control": "Ctrl+A lists agents; arrows and Enter select one",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat Ctrl+A and Ctrl+R choose an agent and its ACP mode"
+      ]
+    },
+    {
+      "id": "chat.acp_picker",
+      "area": "Chat",
+      "control": "Ctrl+R opens ACP modes; arrows and Enter choose one",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat Ctrl+A and Ctrl+R choose an agent and its ACP mode",
+        "src/__tests__/acpPicker.test.ts#applies mode and config choices independently"
+      ]
+    },
+    {
+      "id": "chat.group_picker",
+      "area": "Chat",
+      "control": "/group opens the named-team picker; arrows and Enter select a team for the next turn",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/team-picker.interactions.test.tsx#/group opens the named picker and selected team routes a real chat POST",
+        "src/__tests__/team-picker.interactions.test.tsx#/group shows a useful empty state and Escape closes the picker",
+        "src/__tests__/team-picker.interactions.test.tsx#group catalog failures can be retried and dismissed with Escape"
+      ]
+    },
+    {
+      "id": "chat.bot_mode_targeting",
+      "area": "Bot chat",
+      "control": "Bot keeps agent and group routing hidden, pins the next chat POST to Ryu, and leaves targeting available in Console",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/bot-mode-parity.interactions.test.tsx#Bot hides agent/group targeting and pins the actual chat request to Ryu",
+        "src/__tests__/bot-mode-parity.interactions.test.tsx#Console retains agent selection and named group routing in chat requests"
+      ]
+    },
+    {
+      "id": "chat.queue",
+      "area": "Chat",
+      "control": "Ctrl+Q focuses the queue, Enter opens it, Escape closes it, and queued turns dispatch after the active turn",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Ctrl+Q opens queued prompts while a chat stream is running",
+        "src/__tests__/chatQueueView.test.tsx#focused queue overlay emits selection, remove, clear, and cancel intents"
+      ]
+    },
+    {
+      "id": "chat.streaming_escape",
+      "area": "Chat",
+      "control": "Escape stops an active stream",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Escape aborts the active Chat stream, cancels its turn on Core, and clears its streaming state"
+      ]
+    },
+    {
+      "id": "chat.permission_overlay",
+      "area": "Chat",
+      "control": "Permission overlay selection submits the chosen option; Escape rejects it",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat permission overlay submits a choice and Escape rejects the next request"
+      ]
+    },
+    {
+      "id": "chat.question_overlay",
+      "area": "Chat",
+      "control": "Question overlay supports choice, typed answer edits, submit, and skip",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat question overlay submits choices, typed answers, and skip responses through Core"
+      ]
+    },
+    {
+      "id": "chat.slash_actions",
+      "area": "Chat",
+      "control": "Registered slash actions and queue list/clear/drop/up/down commands",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/commands.test.ts#returns pure intents for local, overlay, and pass-through commands",
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat slash commands pin, unpin, rename, fork, resume, and forward goal, proof, and receipt turns",
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat local slash commands toggle double-check, route groups, set model, and start new",
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat slash overlays open Help, Agent, ACP settings, Model, and btw views",
+        "src/__tests__/chat.surface.interactions.test.tsx#/queue opens queued prompts and /queue clear removes them while a turn is active",
+        "src/__tests__/chat.surface.interactions.test.tsx#/queue up, down, and drop apply their slash actions to the requested queued turn"
+      ]
+    },
+    {
+      "id": "chat.theme_picker",
+      "area": "Chat",
+      "control": "/theme picker arrow selection, reset, apply, and cancel",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat theme picker moves, applies, resets, and cancels its selection"
+      ]
+    },
+    {
+      "id": "chat.delete_confirmation",
+      "area": "Chat",
+      "control": "Delete confirmation Escape/N cancel, Y/Enter confirm, and deletion result",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat /delete requires confirmation and only y or Enter deletes the conversation"
+      ]
+    },
+    {
+      "id": "chat.sessions",
+      "area": "Chat",
+      "control": "/sessions opens its read-only run list and Escape closes it",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat /sessions lists this conversation's runs and closes on Escape"
+      ]
+    },
+    {
+      "id": "chat.fork_resume_pin_rename",
+      "area": "Chat",
+      "control": "/fork, /resume, /pin, /unpin, /rename UI actions",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/chat.surface.interactions.test.tsx#Chat slash commands pin, unpin, rename, fork, resume, and forward goal, proof, and receipt turns"
+      ]
+    },
+    {
+      "id": "settings.navigation",
+      "area": "Settings overlay",
+      "control": "Up/Down/j/k move panels; Escape closes",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Settings and Gateway overlays navigate sections and close on Escape"
+      ]
+    },
+    {
+      "id": "settings.startup_realm",
+      "area": "Settings overlay",
+      "control": "Click or use left/right to select Last used, Bot, Console, or OS as the next launch realm",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/product-mode.interactions.test.tsx#General settings persist an independent startup realm and launch it on the next run"
+      ]
+    },
+    {
+      "id": "settings.privacy.analytics",
+      "area": "Settings Privacy",
+      "control": "Load, toggle, persist, retry, read back, and restore anonymous usage analytics",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy loads Core defaults, retries a failed save, verifies readback, and restores the saved choice"
+      ]
+    },
+    {
+      "id": "settings.privacy.community_stats",
+      "area": "Settings Privacy",
+      "control": "Toggle Community stats and save its exact Core preference",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy saves the Community stats, Profile activity, and Crash reports choices and clears the OTLP endpoint"
+      ]
+    },
+    {
+      "id": "settings.privacy.crash_reports",
+      "area": "Settings Privacy",
+      "control": "Toggle Crash reports and save its exact Core preference",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy saves the Community stats, Profile activity, and Crash reports choices and clears the OTLP endpoint"
+      ]
+    },
+    {
+      "id": "settings.privacy.diagnostics_export",
+      "area": "Settings Privacy",
+      "control": "Keep diagnostics export opt-in and persist an explicit opt-in choice",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy saves the customer OTLP endpoint, keeps export opt-in, and grants support with a hard expiry"
+      ]
+    },
+    {
+      "id": "settings.privacy.otlp_endpoint",
+      "area": "Settings Privacy",
+      "control": "Edit and clear the diagnostics OTLP endpoint with Core readback",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy saves the customer OTLP endpoint, keeps export opt-in, and grants support with a hard expiry",
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy saves the Community stats, Profile activity, and Crash reports choices and clears the OTLP endpoint"
+      ]
+    },
+    {
+      "id": "settings.privacy.support_duration",
+      "area": "Settings Privacy",
+      "control": "Choose 1, 8, or 24-hour local support grants with Left/Right; keep the active grant duration locked until access ends",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy saves the customer OTLP endpoint, keeps export opt-in, and grants support with a hard expiry"
+      ]
+    },
+    {
+      "id": "settings.privacy.support_access",
+      "area": "Settings Privacy",
+      "control": "Grant timed local support access in expiry-first order and revoke it",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy saves the customer OTLP endpoint, keeps export opt-in, and grants support with a hard expiry"
+      ]
+    },
+    {
+      "id": "settings.privacy.row_navigation",
+      "area": "Settings Privacy",
+      "control": "Up/Down moves exactly one privacy row without writing a preference",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy arrows move rows while j/k change Settings panels"
+      ]
+    },
+    {
+      "id": "settings.privacy.panel_navigation",
+      "area": "Settings Privacy",
+      "control": "j/k switches between Settings panels while Privacy is selected",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy arrows move rows while j/k change Settings panels"
+      ]
+    },
+    {
+      "id": "settings.privacy.retry",
+      "area": "Settings Privacy",
+      "control": "r reloads failed Core preference reads and retries a failed save",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy loads Core defaults, retries a failed save, verifies readback, and restores the saved choice",
+        "src/__tests__/settings-privacy.interactions.test.tsx#Privacy load failure stays visible and r retries the canonical Core reads"
+      ]
+    },
+    {
+      "id": "settings.profile_name",
+      "area": "Settings Profile",
+      "control": "Load the signed-in profile and edit/save the display name",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-profile.interactions.test.tsx#Settings Profile edits the authenticated account name through the existing profile API",
+        "src/__tests__/settings-profile.interactions.test.tsx#Settings Profile Edit and Save controls write the name from the rendered panel"
+      ]
+    },
+    {
+      "id": "settings.profile_retry",
+      "area": "Settings Profile",
+      "control": "Retry a failed signed-in session/profile read",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-profile.interactions.test.tsx#Settings Profile retries a failed session read without showing Account security controls"
+      ]
+    },
+    {
+      "id": "settings.profile.no_write_guards",
+      "area": "Settings Profile",
+      "control": "Canceling an edit or saving an unchanged display name performs no profile write",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-profile.interactions.test.tsx#Settings Profile cancel and unchanged save do not write the account name"
+      ]
+    },
+    {
+      "id": "settings.account.auth_status",
+      "area": "Settings Account",
+      "control": "Read Better Auth name/email and password, 2FA, plan, and active-session status through the authenticated backend",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/account.interactions.test.tsx#Account refresh, switch, remove, add, sign in, and sign out follow their visible key actions"
+      ]
+    },
+    {
+      "id": "settings.account.device_login_payload",
+      "area": "Settings Account",
+      "control": "Start sign-in or add-account through Core with the exact configured Better Auth backend URL",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/account.interactions.test.tsx#Account refresh, switch, remove, add, sign in, and sign out follow their visible key actions",
+        "src/__tests__/cli-identity.commands.test.ts#ryu login and logout use Core's device-flow routes and exact backend payload, with dry-run write guards"
+      ]
+    },
+    {
+      "id": "settings.account.active_switch_noop",
+      "area": "Settings Account",
+      "control": "Selecting s on the already-active account issues no account-switch request",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/account.interactions.test.tsx#Account refresh, switch, remove, add, sign in, and sign out follow their visible key actions"
+      ]
+    },
+    {
+      "id": "settings.sessions.list_retry",
+      "area": "Settings Sessions",
+      "control": "Read the authenticated Better Auth session list, retry failures, and avoid account-backend calls while signed out",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-sessions.interactions.test.tsx#Settings Sessions retries a failed list read and does not call Better Auth while signed out"
+      ]
+    },
+    {
+      "id": "settings.sessions.revoke_remote",
+      "area": "Settings Sessions",
+      "control": "Revoke one explicitly selected non-current session through the existing DELETE route, confirm readback, and retain the row on failure",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-sessions.interactions.test.tsx#Settings Sessions lists Better Auth devices and revokes a selected remote session with exact path and readback",
+        "src/__tests__/settings-sessions.interactions.test.tsx#Settings Sessions keeps a remote device visible when revoke fails and refreshes on retry"
+      ]
+    },
+    {
+      "id": "settings.sessions.revoke_all_confirmation",
+      "area": "Settings Sessions",
+      "control": "Require y confirmation before revoking other sessions; n cancels without a write and readback keeps this device",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-sessions.interactions.test.tsx#Settings Sessions protects the current device and requires confirmation before revoking others"
+      ]
+    },
+    {
+      "id": "settings.sessions.current_no_write",
+      "area": "Settings Sessions",
+      "control": "Refuse to revoke the current device's session without sending a DELETE",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-sessions.interactions.test.tsx#Settings Sessions protects the current device and requires confirmation before revoking others"
+      ]
+    },
+    {
+      "id": "cli.identity.login",
+      "area": "CLI identity commands",
+      "control": "Start device login through Core with the exact backendUrl payload; dry-run performs no request",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#ryu login and logout use Core's device-flow routes and exact backend payload, with dry-run write guards"
+      ]
+    },
+    {
+      "id": "cli.identity.logout",
+      "area": "CLI identity commands",
+      "control": "Sign out through Core's active-account logout route; dry-run performs no request",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#ryu login and logout use Core's device-flow routes and exact backend payload, with dry-run write guards"
+      ]
+    },
+    {
+      "id": "cli.identity.whoami",
+      "area": "CLI identity commands",
+      "control": "Resolve the local Core bearer, read the Better Auth session, and omit bearer/internal fields from output",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#ryu whoami, account, and plan use authenticated Better Auth read routes without exposing bearer tokens",
+        "src/__tests__/cli-identity.commands.test.ts#identity commands fail closed when Core cannot provide a verified local account bearer"
+      ]
+    },
+    {
+      "id": "cli.identity.account",
+      "area": "CLI identity commands",
+      "control": "Aggregate the canonical user, password, 2FA, plan, and session status routes",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#ryu whoami, account, and plan use authenticated Better Auth read routes without exposing bearer tokens"
+      ]
+    },
+    {
+      "id": "cli.identity.plan",
+      "area": "CLI identity commands",
+      "control": "Read subscription status from the Better Auth account backend rather than a nonexistent Core account route",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#ryu whoami, account, and plan use authenticated Better Auth read routes without exposing bearer tokens"
+      ]
+    },
+    {
+      "id": "cli.identity.sessions_list",
+      "area": "CLI identity commands",
+      "control": "List active browser sessions through the authenticated Better Auth route",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#ryu sessions lists, revokes an explicitly selected non-current session, and checks readback"
+      ]
+    },
+    {
+      "id": "cli.identity.sessions_revoke",
+      "area": "CLI identity commands",
+      "control": "Revoke an explicitly selected remote session and verify it is absent on readback; current session and dry-run do not write",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#ryu sessions lists, revokes an explicitly selected non-current session, and checks readback"
+      ]
+    },
+    {
+      "id": "cli.identity.sessions_revoke_all",
+      "area": "CLI identity commands",
+      "control": "Require --force for revoke-all, support a no-write dry-run, and confirm only the current session remains",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#ryu sessions revoke-all is no-write without force, previews safely, and preserves the current session"
+      ]
+    },
+    {
+      "id": "cli.identity.auth_backend_unavailable",
+      "area": "CLI identity commands",
+      "control": "Fail closed when Core does not provide an authenticated local bearer and never call the account backend",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/cli-identity.commands.test.ts#identity commands fail closed when Core cannot provide a verified local account bearer"
+      ]
+    },
+    {
+      "id": "settings.account.security_mutations_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Reachable Account security editor: canonical password/email/two-factor lifecycle, offered method selection and credential backspace with failure/retry and readback.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback",
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback",
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account offered step-up methods cycle both directions, clear input, and change an existing password with readback"
+      ],
+      "source": "src/overlays/settings/account-security.tsx",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary."
+    },
+    {
+      "id": "settings.account.email_verification_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Account v dispatches authenticated verification resend and acknowledges success; external mailbox delivery remains unverified.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ],
+      "source": "src/overlays/settings/account-security.tsx",
+      "evidence_note": "Historical row retained for coordinator reconciliation; granular current controls are enumerated separately. Fixture evidence proves client behavior, not live external services."
+    },
+    {
+      "id": "settings.profile.avatar_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Local image multipart upload, cancellation, denied retry, session confirmation and removal are reachable; native picker/crop remains a presentation difference.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+      ],
+      "source": "src/overlays/settings/profile-avatar.tsx",
+      "evidence_note": "Historical row retained for coordinator reconciliation; granular current controls are enumerated separately. Fixture evidence proves client behavior, not live external services."
+    },
+    {
+      "id": "settings.profile.personal_context_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Reachable four-field personal context editor: all field edits, Tab cycling, cancellation, denied persistence retry, failed load retry and exact Core readback.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback",
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+      ],
+      "source": "src/overlays/settings/personal-context.tsx",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary."
+    },
+    {
+      "id": "settings.authorized_apps.boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Reachable authorized app list: bounded row selection, explicit reload, denied read/write retry, confirmation/cancel and authenticated readback; signed-out guard.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-authorized-apps.interactions.test.tsx#production Settings lists authorized apps, cancels, retries denied revoke, and confirms readback",
+        "src/__tests__/settings-authorized-apps.interactions.test.tsx#signed-out Settings never calls account OAuth API",
+        "src/__tests__/settings-authorized-apps.interactions.test.tsx#Authorized Apps arrows select bounded rows and reload retries a failed read with authenticated readback"
+      ],
+      "source": "src/overlays/settings/authorized-apps.tsx",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary."
+    },
+    {
+      "id": "gateway.navigation",
+      "area": "Gateway overlay",
+      "control": "Up/Down/j/k move sections; r refreshes; Escape closes",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/shell.interactions.test.tsx#Settings and Gateway overlays navigate sections and close on Escape"
+      ]
+    },
+    {
+      "id": "declarative.list_actions",
+      "area": "Contributed views",
+      "control": "j/k selection, digit actions, Enter primary action, focus gating",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/declarative-view.test.tsx#a digit fires the nth action with the selected row as the item context",
+        "src/__tests__/declarative-view.test.tsx#Enter fires the primary action; an unfocused view ignores keys entirely"
+      ]
+    },
+    {
+      "id": "declarative.confirm",
+      "area": "Contributed views",
+      "control": "Confirm action y/n gate",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/declarative-view.test.tsx#a confirm-carrying action prompts inline and only fires on y"
+      ]
+    },
+    {
+      "id": "declarative.form_switch",
+      "area": "Contributed views",
+      "control": "Space toggles switch field and Enter submits",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/declarative-view.test.tsx#a form spec toggles a switch with space and submits the collected values"
+      ]
+    },
+    {
+      "id": "declarative.form_text",
+      "area": "Contributed views",
+      "control": "e edits text field; cursor keys/type/Enter commit; action receives edited value",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/declarative-view.test.tsx#editing a form text field commits the typed value before the primary action"
+      ]
+    },
+    {
+      "id": "declarative.form_select",
+      "area": "Contributed views",
+      "control": "Left/Right cycle select field options",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/declarative-view.test.tsx#a form select cycles its choices in either direction and submits the selection"
+      ]
+    },
+    {
+      "id": "store.plugin_mutations",
+      "area": "Store Plugins",
+      "control": "i install, e enable/disable, u update, D/Shift+d uninstall, C/Shift+c cascade disable/uninstall",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store Plugins install, toggle, update, uninstall, and refresh through Core lifecycle actions",
+        "src/__tests__/store.interactions.test.tsx#Store Plugins offer C after a dependent refusal and retry the uninstall with cascade"
+      ]
+    },
+    {
+      "id": "store.sidecar_mutations",
+      "area": "Store Sidecars",
+      "control": "i install and D/Shift+d uninstall selected sidecar",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store Sidecars install and uninstall the selected catalog item"
+      ]
+    },
+    {
+      "id": "store.models_skills_actions",
+      "area": "Store Catalogs",
+      "control": "Models and Skills Enter install and a activate the selected catalog row",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store Models and Skills install and activate the selected catalog items"
+      ]
+    },
+    {
+      "id": "store.agents_detail",
+      "area": "Store Agents",
+      "control": "j/k select an agent, Enter loads details, and r refreshes the list",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store Agents select a configured agent, load its detail, and refresh the list"
+      ]
+    },
+    {
+      "id": "store.engines_activation",
+      "area": "Store Engines",
+      "control": "j/k select an engine, Enter activates it, and r refreshes current engine state",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/store.interactions.test.tsx#Store Engines navigate and persist the selected engine through Core"
+      ]
+    },
+    {
+      "id": "settings.account_controls",
+      "area": "Settings overlay",
+      "control": "Account refresh, selection/switch/removal, sign-in, add account, and sign-out",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/account.interactions.test.tsx#Account refresh, switch, remove, add, sign in, and sign out follow their visible key actions"
+      ]
+    },
+    {
+      "id": "settings.connections_composio",
+      "area": "Settings Connections",
+      "control": "Move among toolkits, cycle access level, initiate an exact toolkit connection, poll Core status, retry reads, and reject non-HTTPS authorization redirects",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-connections.interactions.test.tsx#Settings Connections retries Core failures, starts with the chosen action ceiling, and polls persisted readback",
+        "src/__tests__/settings-connections.interactions.test.tsx#Settings Connections never initiates when Composio is not configured on the active Core node",
+        "src/__tests__/settings-connections.interactions.test.tsx#Settings Connections rejects a non-HTTPS redirect returned by Core"
+      ]
+    },
+    {
+      "id": "settings.inference_engine",
+      "area": "Settings Inference",
+      "control": "Select an engine, edit supported engine-wide sampling fields, validate values, save exact Core preferences, retry, and reload saved state",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-inference.interactions.test.tsx#engine sampling defaults use Core preference GET/PUT and restore the saved value after app reload",
+        "src/__tests__/settings-inference.interactions.test.tsx#sampling validation blocks out-of-range numbers and unsafe logit bias before any Core write",
+        "src/__tests__/settings-inference.interactions.test.tsx#engine selection exposes the same extended sampler fields as Desktop only for supported runtimes",
+        "src/__tests__/settings-inference.interactions.test.tsx#failed sampling save keeps the draft and retries the exact Core preference write"
+      ]
+    },
+    {
+      "id": "settings.inference_engine_launch_defaults",
+      "area": "Settings Inference",
+      "control": "Switch to Launch defaults, edit engine-supported context/hardware and raw arguments, validate, save/read back the exact `model.launch.engine.{engine}` preference, retry, and reload",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-inference.interactions.test.tsx#engine launch defaults save exact hardware and argument values and survive reopening Settings",
+        "src/__tests__/settings-inference.interactions.test.tsx#Ollama, vLLM, SGLang, and MLX launch controls use their engine-specific Core preference keys",
+        "src/__tests__/settings-inference.interactions.test.tsx#launch validation blocks invalid hardware writes and launch reads/writes retry against the same preference",
+        "src/__tests__/settings-inference.interactions.test.tsx#externally managed engines explain the launch boundary without reading or writing launch preferences"
+      ]
+    },
+    {
+      "id": "settings.inference_model_launch_boundary",
+      "area": "Models parity boundary",
+      "control": "Chat reads Core GET /api/models/:id/launch-config to display active-model context size; Core PUT exists, but the model-specific Desktop editor has no production caller and no shipped CLI model-detail surface exposes those writes",
+      "status": "partial"
+    },
+    {
+      "id": "settings.memory.auto_recall",
+      "area": "Settings Memory",
+      "control": "Toggle Core auto-recall and confirm the saved preference by readback and reopening Settings",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory reads canonical Core preferences, toggles auto-recall with readback, and reloads the saved value"
+      ]
+    },
+    {
+      "id": "settings.memory.snippets_per_reply",
+      "area": "Settings Memory",
+      "control": "Edit the recall top-k value, reject malformed input, clamp writes to the offered 1–50 range, and keep the edit gated by auto-recall",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory validates recall count and context budget input before exact Core preference writes",
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory does not edit snippet limits or auto-compact while their Core master settings are off"
+      ]
+    },
+    {
+      "id": "settings.memory.context_budget",
+      "area": "Settings Memory",
+      "control": "Read and save Off/Auto/token context budgets using Core's raw preference values; arrow cycling from a custom value advances to a preset instead of resetting to Off",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory validates recall count and context budget input before exact Core preference writes",
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory advances a custom context budget to a preset instead of resetting it to Off"
+      ]
+    },
+    {
+      "id": "settings.memory.reply_reserve",
+      "area": "Settings Memory",
+      "control": "Edit and clamp the reply reserve to 128–32768 tokens",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory context, skill disclosure, and search ranking choices persist their canonical values"
+      ]
+    },
+    {
+      "id": "settings.memory.auto_compact",
+      "area": "Settings Memory",
+      "control": "Toggle context auto-compaction only while a context budget is active; preserve its Core preference",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory context, skill disclosure, and search ranking choices persist their canonical values",
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory does not edit snippet limits or auto-compact while their Core master settings are off"
+      ]
+    },
+    {
+      "id": "settings.memory.skill_disclosure",
+      "area": "Settings Memory",
+      "control": "Toggle progressive versus full skill instruction loading",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory context, skill disclosure, and search ranking choices persist their canonical values"
+      ]
+    },
+    {
+      "id": "settings.memory.search_ranking",
+      "area": "Settings Memory",
+      "control": "Cycle Needle 2, BM25, and semantic tool/skill ranking with exact Core preference readback",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory context, skill disclosure, and search ranking choices persist their canonical values"
+      ]
+    },
+    {
+      "id": "settings.memory.retry",
+      "area": "Settings Memory",
+      "control": "Surface failed reads, retry load, roll back failed saves, and retry the same preference write",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory exposes failed preference reads and retries, and failed writes retry the same value"
+      ]
+    },
+    {
+      "id": "settings.memory.panel_navigation",
+      "area": "Settings Memory",
+      "control": "j/k switches Settings panels while preserving memory preference values without writes",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory.interactions.test.tsx#Memory Settings j/k moves between panels without changing the saved preferences"
+      ]
+    },
+    {
+      "id": "gateway.guardrails.status_readonly",
+      "area": "Gateway Guardrails",
+      "control": "Read offline firewall and DLP status through status GET; this status action itself sends no mutation (separate node policy controls now coexist).",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway Guardrails shows offline firewall and DLP configuration as read-only Core status"
+      ]
+    },
+    {
+      "id": "gateway.guardrails.retry",
+      "area": "Gateway Guardrails",
+      "control": "Show denied status reads, retry GET /api/gateway/status, and render recovered state without a PUT",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway Guardrails shows an error after denied status access and retries the read without a write"
+      ]
+    },
+    {
+      "id": "settings.memory.cross_session_consent_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Versioned private host consent toggles persist and drive subsequent real App chat enable_long_term, including restart after revocation.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory production App navigation confirms model/effort, denied consent, retry and local chat consent",
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#CLI memory consent fails closed for malformed or unversioned data and persists with private permissions"
+      ],
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "evidence_note": "Historical row retained for coordinator reconciliation; granular current controls are enumerated separately. Fixture evidence proves client behavior, not live external services."
+    },
+    {
+      "id": "settings.memory.sensitive_topic_consent_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Core memory consent rejects denied GET without PUT and accepts exact authorized PUT followed by GET confirmation.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory production App navigation confirms model/effort, denied consent, retry and local chat consent"
+      ],
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "evidence_note": "Historical row retained for coordinator reconciliation; granular current controls are enumerated separately. Fixture evidence proves client behavior, not live external services."
+    },
+    {
+      "id": "settings.memory.library_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Reachable Memory library CRUD/search and metadata editing with no-write delete cancellation, failed readback/update retry and reopened list; explicit reload, row arrows and editor cancel undriven.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback",
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library arrows select the actual entry, reload retries, search matches every advertised field, and editor cancel preserves Core"
+      ],
+      "source": "src/overlays/settings/memory-library.tsx",
+      "evidence_note": "Historical row retained for coordinator reconciliation; granular current controls are enumerated separately. Fixture evidence proves client behavior, not live external services."
+    },
+    {
+      "id": "settings.memory.summarizer_model_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Catalog model/effort cycling and custom/default model authoring persist exact canonical preferences with denied-save retry/readback.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory production App navigation confirms model/effort, denied consent, retry and local chat consent",
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory custom model editor saves a routable ID and can restore the inherited default"
+      ],
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "evidence_note": "Historical row retained for coordinator reconciliation; granular current controls are enumerated separately. Fixture evidence proves client behavior, not live external services."
+    },
+    {
+      "id": "settings.safety.policy_edit_boundary",
+      "area": "CLI parity reconciliation",
+      "control": "Reachable basic node policy and seven advanced full-section editors; all basic toggles, upward row navigation, exact requests, rejected writes, retry and readback proven.",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway policy retries the identical failed mutation, preserves sibling config, and reads persisted changes after reopen",
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway policy keeps denied reads disabled, retries them, and retains rejected writes until successful readback",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway full node safety JSON retries identical request and reloads persisted readback",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway invalid JSON, unsupported overlay fields and cancel never write",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway conflict protects newer policy and rejected map writes retain identical retry",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway refuses unserved sections and denied reads until successful reload",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway custom evaluators save complete catalog and restart before confirming activation",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway managed owner/admin access is rechecked before writes and membership loss prevents mutation",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway normalized agent overlays confirm authored fields, while retained removed IDs fail readback",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway canonical egress preferences retry identical writes and preserve map IDs through node readback",
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway custom evaluator failed restart cannot claim activated catalog and retry restarts the same saved definitions",
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway node policy drives every scanning and redaction toggle and moves selection upward without a write"
+      ],
+      "source": "src/overlays/gateway/policy.tsx",
+      "evidence_note": "Passing production App test drives basic policy row keyboard callers, asserts exact progressive requests and reopened readback; fixture does not prove live Gateway scanning."
+    },
+    {
+      "id": "product.mode_selector",
+      "area": "Product mode",
+      "control": "Ctrl+Shift+M opens Bot/Console/OS; Console appears only after current managed-node owner/admin access is verified, while Bot and OS remain available",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/product-mode.interactions.test.tsx#mode picker switches to Bot while preserving local chat on a plan-limited account",
+        "src/__tests__/product-mode.interactions.test.tsx#mode picker mouse activation opens the selected terminal surface",
+        "src/__tests__/product-mode.interactions.test.tsx#Console palette arrows move the selected route and persist the landing",
+        "src/__tests__/product-mode.interactions.test.tsx#Console appears in the mode picker only after owner access is verified without writing preferences",
+        "src/__tests__/productMode.contract.test.ts#mode selection remembers the chosen per-mode landing surface on disk"
+      ]
+    },
+    {
+      "id": "product.bot_managed_lane",
+      "area": "Bot mode",
+      "control": "Bot remains selectable and local chat remains usable without managed-inference entitlement; eligible managed routing seeds only an empty cloud lane and preserves existing provider/model choices",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/product-mode.interactions.test.tsx#mode picker switches to Bot while preserving local chat on a plan-limited account",
+        "src/__tests__/productMode.contract.test.ts#Bot keeps the local workspace when managed inference is not entitled",
+        "src/__tests__/productMode.contract.test.ts#Bot seeds only an empty managed cloud lane and keeps scoped credentials in memory",
+        "src/__tests__/productMode.contract.test.ts#Bot preserves an existing provider/model selection instead of overwriting it",
+        "src/__tests__/productMode.contract.test.ts#Bot reports a failed default-lane write while keeping managed chat usable"
+      ]
+    },
+    {
+      "id": "product.console_access",
+      "area": "Console mode",
+      "control": "Console accepts known unmanaged nodes, allows managed-node members whose effective permissions grant Gateway configuration, denies other members, non-members, or unavailable verification, hides the picker option until access is verified, and rechecks after a managed-node switch",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/productMode.contract.test.ts#Console is available on a known unmanaged node without account authority",
+        "src/__tests__/productMode.contract.test.ts#Console allows a managed-node %s with Gateway configuration and keeps its scoped target",
+        "src/__tests__/productMode.contract.test.ts#Console fails closed for a managed-node member without Gateway configuration and leaves the target untouched",
+        "src/__tests__/productMode.contract.test.ts#Console treats a control-plane 403 as a non-member and denies it",
+        "src/__tests__/productMode.contract.test.ts#Console fails closed when managed-node role verification is unavailable",
+        "src/__tests__/product-mode.interactions.test.tsx#Console revalidates a managed-node switch and hides its workspace from a member",
+        "src/__tests__/product-mode.interactions.test.tsx#Console appears in the mode picker only after owner access is verified without writing preferences"
+      ]
+    },
+    {
+      "id": "product.os_launcher_entry",
+      "area": "OS mode",
+      "control": "OS mode lands in the terminal App Launcher and the palette can route back to it",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/productMode.contract.test.ts#OS mode opens the terminal App Launcher without account or Core calls",
+        "src/__tests__/app-launcher.interactions.test.tsx#OS launcher is palette-reachable, retries Core, and keeps a selected row visible past 12 results"
+      ]
+    },
+    {
+      "id": "product.app_launcher_retry",
+      "area": "App Launcher",
+      "control": "r retries a failed Core Apps catalog read and renders recovered launchable views",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/app-launcher.interactions.test.tsx#OS launcher is palette-reachable, retries Core, and keeps a selected row visible past 12 results"
+      ]
+    },
+    {
+      "id": "product.app_launcher_result_window",
+      "area": "App Launcher",
+      "control": "Navigation keeps a selected result visible beyond the 12-row window; Enter opens the exact contributed view and persists its route",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/app-launcher.interactions.test.tsx#OS launcher is palette-reachable, retries Core, and keeps a selected row visible past 12 results"
+      ]
+    },
+    {
+      "id": "product.app_launcher_plugins_sidecars",
+      "area": "App Launcher",
+      "control": "Search the built-in Plugins & Sidecars shortcut and Enter opens its Store landing",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/app-launcher.interactions.test.tsx#App Launcher search opens its Plugins & Sidecars shortcut in the Store"
+      ]
+    },
+    {
+      "id": "settings.updates_auto_update",
+      "area": "Settings Updates",
+      "control": "Read and toggle the shared Core auto-updates preference with write readback",
+      "status": "covered",
+      "tests": [
+        "src/__tests__/settings-updates.interactions.test.tsx#Updates toggles the shared Core auto-updates preference with readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.password_begin",
+      "area": "CLI parity additions",
+      "control": "w enters password security workflow",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "begin(\"password\")",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.verification_input",
+      "area": "CLI parity additions",
+      "control": "Type verification credential in the offered mailbox method",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "setValue((current) => (current + key.sequence)",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.verification_challenge",
+      "area": "CLI parity additions",
+      "control": "Ctrl+S requests exact account.security magic-link challenge",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/step-up/challenge",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.verification_submit_retry",
+      "area": "CLI parity additions",
+      "control": "Enter submits denied verification and retries identical credential without premature password write",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/step-up/verify",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.password_input",
+      "area": "CLI parity additions",
+      "control": "Type new password after verified step-up",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "New password",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.password_submit_readback",
+      "area": "CLI parity additions",
+      "control": "Enter writes new password with bearer and confirms changed password status",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/user/set-password",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.cancel",
+      "area": "CLI parity additions",
+      "control": "Tab cancels active security stage without POST",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "key.name === \"tab\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account security uses mailbox step-up, cancel, denied verification/retry and password readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.email_begin",
+      "area": "CLI parity additions",
+      "control": "u enters email change workflow",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "begin(\"email\")",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.email_input",
+      "area": "CLI parity additions",
+      "control": "Type new email address",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "New email address",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.email_submit",
+      "area": "CLI parity additions",
+      "control": "Enter initiates exact newEmail request and shows active change status",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/user/initiate-email-change",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.email_cancel_readback",
+      "area": "CLI parity additions",
+      "control": "c cancels active request and confirms inactive readback",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/user/cancel-email-change",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.two_factor_enable",
+      "area": "CLI parity additions",
+      "control": "t enters enable and submits current password",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/auth/two-factor/enable",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.two_factor_password_input",
+      "area": "CLI parity additions",
+      "control": "Type password for enable, backup regeneration and disable",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "Current password",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.totp_input_submit",
+      "area": "CLI parity additions",
+      "control": "Type TOTP and Enter verifies exact code; backup codes render",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/auth/two-factor/verify-totp",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.backup_close",
+      "area": "CLI parity additions",
+      "control": "Enter closes visible backup codes",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "stage === \"backup\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.backup_regenerate",
+      "area": "CLI parity additions",
+      "control": "b submits password and displays regenerated backup codes",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/auth/two-factor/generate-backup-codes",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.two_factor_disable_readback",
+      "area": "CLI parity additions",
+      "control": "t disables existing two-factor setting and confirms security readback",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "/api/auth/two-factor/disable",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account email request, cancellation, verification resend and two-factor lifecycle use canonical bodies and readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.method_selection",
+      "area": "CLI parity additions",
+      "control": "Left/Right chooses another step-up method",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "key.name === \"left\"",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account offered step-up methods cycle both directions, clear input, and change an existing password with readback"
+      ]
+    },
+    {
+      "id": "settings.account.security.credential_backspace",
+      "area": "CLI parity additions",
+      "control": "Backspace edits security credential",
+      "status": "covered",
+      "source": "src/overlays/settings/account-security.tsx",
+      "source_anchor": "key.name === \"backspace\"",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Account offered step-up methods cycle both directions, clear input, and change an existing password with readback"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.begin",
+      "area": "CLI parity additions",
+      "control": "p opens four-field editor",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "key.name === \"p\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.nickname",
+      "area": "CLI parity additions",
+      "control": "Edit nickname input and preserve siblings",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "key: \"nickname\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.save_retry_readback",
+      "area": "CLI parity additions",
+      "control": "Enter saves, retries rejected persistence and confirms all fields through GET",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "void save()",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.cancel",
+      "area": "CLI parity additions",
+      "control": "Click Cancel discards draft and reloads without PUT",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "Cancel personal context",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context cancels without write and retries denied persistence with exact Core readback"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.occupation",
+      "area": "CLI parity additions",
+      "control": "Edit occupation input",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "key: \"occupation\"",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.about_you",
+      "area": "CLI parity additions",
+      "control": "Edit About you input",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "key: \"aboutYou\"",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.organization",
+      "area": "CLI parity additions",
+      "control": "Edit About your organization input",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "key: \"aboutOrganization\"",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.field_focus",
+      "area": "CLI parity additions",
+      "control": "Tab cycles focused personal-context field",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "setField((index)",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile Tab edits every personal context field, wraps to nickname, and discards changed drafts"
+      ]
+    },
+    {
+      "id": "settings.profile.personal_context.load_retry",
+      "area": "CLI parity additions",
+      "control": "r retries failed personal-context load",
+      "status": "covered",
+      "source": "src/overlays/settings/personal-context.tsx",
+      "source_anchor": "key.name === \"r\"",
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary.",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile personal context failed read blocks edits and r retries canonical preference read"
+      ]
+    },
+    {
+      "id": "settings.profile.avatar.upload_begin",
+      "area": "CLI parity additions",
+      "control": "a opens local image path editor",
+      "status": "covered",
+      "source": "src/overlays/settings/profile-avatar.tsx",
+      "source_anchor": "key.name === \"a\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+      ]
+    },
+    {
+      "id": "settings.profile.avatar.path_input",
+      "area": "CLI parity additions",
+      "control": "Type local file path",
+      "status": "covered",
+      "source": "src/overlays/settings/profile-avatar.tsx",
+      "source_anchor": "onInput={setPath}",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+      ]
+    },
+    {
+      "id": "settings.profile.avatar.upload_submit_retry_readback",
+      "area": "CLI parity additions",
+      "control": "Enter uploads exact multipart bytes; denied retry confirms session avatar ID",
+      "status": "covered",
+      "source": "src/overlays/settings/profile-avatar.tsx",
+      "source_anchor": "method: \"POST\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+      ]
+    },
+    {
+      "id": "settings.profile.avatar.upload_cancel",
+      "area": "CLI parity additions",
+      "control": "Tab cancels path entry without upload",
+      "status": "covered",
+      "source": "src/overlays/settings/profile-avatar.tsx",
+      "source_anchor": "key.name === \"tab\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+      ]
+    },
+    {
+      "id": "settings.profile.avatar.remove_begin",
+      "area": "CLI parity additions",
+      "control": "d opens removal confirmation",
+      "status": "covered",
+      "source": "src/overlays/settings/profile-avatar.tsx",
+      "source_anchor": "key.name === \"d\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+      ]
+    },
+    {
+      "id": "settings.profile.avatar.remove_cancel",
+      "area": "CLI parity additions",
+      "control": "n cancels removal without DELETE",
+      "status": "covered",
+      "source": "src/overlays/settings/profile-avatar.tsx",
+      "source_anchor": "key.name === \"n\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+      ]
+    },
+    {
+      "id": "settings.profile.avatar.remove_confirm_readback",
+      "area": "CLI parity additions",
+      "control": "y removes photo and confirms null avatar ID",
+      "status": "covered",
+      "source": "src/overlays/settings/profile-avatar.tsx",
+      "source_anchor": "method: \"DELETE\"",
+      "tests": [
+        "src/__tests__/settings-account-security.interactions.test.tsx#Profile photo uses local file multipart upload, cancel, denied retry, confirmation and removal readback"
+      ]
+    },
+    {
+      "id": "settings.authorized_apps.revoke_begin",
+      "area": "CLI parity additions",
+      "control": "x opens confirmation for selected client",
+      "status": "covered",
+      "source": "src/overlays/settings/authorized-apps.tsx",
+      "source_anchor": "key.name === \"x\"",
+      "tests": [
+        "src/__tests__/settings-authorized-apps.interactions.test.tsx#production Settings lists authorized apps, cancels, retries denied revoke, and confirms readback"
+      ]
+    },
+    {
+      "id": "settings.authorized_apps.revoke_cancel",
+      "area": "CLI parity additions",
+      "control": "n cancels confirmation without DELETE",
+      "status": "covered",
+      "source": "src/overlays/settings/authorized-apps.tsx",
+      "source_anchor": "key.name === \"n\"",
+      "tests": [
+        "src/__tests__/settings-authorized-apps.interactions.test.tsx#production Settings lists authorized apps, cancels, retries denied revoke, and confirms readback"
+      ]
+    },
+    {
+      "id": "settings.authorized_apps.revoke_confirm_retry_readback",
+      "area": "CLI parity additions",
+      "control": "y revokes encoded client ID, retries rejection and confirms absence",
+      "status": "covered",
+      "source": "src/overlays/settings/authorized-apps.tsx",
+      "source_anchor": "key.name === \"y\"",
+      "tests": [
+        "src/__tests__/settings-authorized-apps.interactions.test.tsx#production Settings lists authorized apps, cancels, retries denied revoke, and confirms readback"
+      ]
+    },
+    {
+      "id": "settings.authorized_apps.row_selection",
+      "area": "CLI parity additions",
+      "control": "Up/Down select authorized app",
+      "status": "covered",
+      "source": "src/overlays/settings/authorized-apps.tsx",
+      "source_anchor": "key.name === \"up\"",
+      "tests": [
+        "src/__tests__/settings-authorized-apps.interactions.test.tsx#Authorized Apps arrows select bounded rows and reload retries a failed read with authenticated readback"
+      ],
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary."
+    },
+    {
+      "id": "settings.authorized_apps.reload",
+      "area": "CLI parity additions",
+      "control": "r refreshes authorized app list",
+      "status": "covered",
+      "source": "src/overlays/settings/authorized-apps.tsx",
+      "source_anchor": "key.name === \"r\"",
+      "tests": [
+        "src/__tests__/settings-authorized-apps.interactions.test.tsx#Authorized Apps arrows select bounded rows and reload retries a failed read with authenticated readback"
+      ],
+      "evidence_note": "Passing production App interaction test proves this caller with exact request, no-write guards, failure/retry and readback. Live account services remain a separate boundary."
+    },
+    {
+      "id": "settings.memory.advanced.navigation",
+      "area": "CLI parity additions",
+      "control": "m enters advanced Memory and returns; reopen reads saved values",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "key.name === \"m\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory production App navigation confirms model/effort, denied consent, retry and local chat consent"
+      ]
+    },
+    {
+      "id": "settings.memory.advanced.model_cycle",
+      "area": "CLI parity additions",
+      "control": "Left/Right chooses catalog model (Right driven)",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "row === 0 || row === 1",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory production App navigation confirms model/effort, denied consent, retry and local chat consent"
+      ]
+    },
+    {
+      "id": "settings.memory.advanced.effort_cycle",
+      "area": "CLI parity additions",
+      "control": "Left/Right chooses catalog effort (Right driven)",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "kind: row === 0 ? \"model\" : \"effort\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory production App navigation confirms model/effort, denied consent, retry and local chat consent"
+      ]
+    },
+    {
+      "id": "settings.memory.advanced.row_down",
+      "area": "CLI parity additions",
+      "control": "Down focuses model/effort/consent rows",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "key.name === \"down\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory production App navigation confirms model/effort, denied consent, retry and local chat consent"
+      ]
+    },
+    {
+      "id": "settings.memory.advanced.retry",
+      "area": "CLI parity additions",
+      "control": "r retries exact failed intent or reloads denied consent",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "key.name === \"r\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory production App navigation confirms model/effort, denied consent, retry and local chat consent"
+      ]
+    },
+    {
+      "id": "settings.memory.advanced.custom_model_begin",
+      "area": "CLI parity additions",
+      "control": "e opens custom summarizer model editor",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "row === 0 && key.name === \"e\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory custom model editor saves a routable ID and can restore the inherited default"
+      ]
+    },
+    {
+      "id": "settings.memory.advanced.custom_model_input",
+      "area": "CLI parity additions",
+      "control": "Type a routable custom model ID",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "onChange={setDraft}",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory custom model editor saves a routable ID and can restore the inherited default"
+      ]
+    },
+    {
+      "id": "settings.memory.advanced.custom_model_save",
+      "area": "CLI parity additions",
+      "control": "Enter saves custom ID or blank inherited default with retry/readback",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "onSubmit={(value)",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory custom model editor saves a routable ID and can restore the inherited default"
+      ]
+    },
+    {
+      "id": "settings.memory.advanced.row_up",
+      "area": "CLI parity additions",
+      "control": "Up focuses previous advanced Memory row",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-advanced.tsx",
+      "source_anchor": "key.name === \"up\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Advanced Memory model and effort arrows restore defaults with exact writes and reopened readback; sensitive consent can be revoked"
+      ]
+    },
+    {
+      "id": "settings.memory.library.navigation",
+      "area": "CLI parity additions",
+      "control": "l opens library and returns; reopening reads /api/memory?limit=500",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"l\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.add",
+      "area": "CLI parity additions",
+      "control": "a opens new entry editor",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"a\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.edit",
+      "area": "CLI parity additions",
+      "control": "e opens selected entry editor",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"e\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.content",
+      "area": "CLI parity additions",
+      "control": "Type authored content in add/edit",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "field === \"content\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.metadata",
+      "area": "CLI parity additions",
+      "control": "Edit full metadata JSON and confirm category/importance/tags/when_to_use readback",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "Metadata JSON",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.field_focus",
+      "area": "CLI parity additions",
+      "control": "Tab changes content/metadata focus",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"tab\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.save_retry_readback",
+      "area": "CLI parity additions",
+      "control": "Enter retries denied POST, retains created opaque ID after failed readback, then PUT/readback/list confirms",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "onSubmit={() => void save()}",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.search",
+      "area": "CLI parity additions",
+      "control": "/ opens local query; type content search and Enter applies",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"/\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.delete_begin",
+      "area": "CLI parity additions",
+      "control": "x opens selected entry removal confirmation",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"x\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.delete_cancel",
+      "area": "CLI parity additions",
+      "control": "n closes confirmation without DELETE",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"n\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.delete_confirm_retry_readback",
+      "area": "CLI parity additions",
+      "control": "y retries failed DELETE and confirms list absence",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"y\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library App navigation confirms permission denial, search, CRUD, cancel, retry and reopened readback"
+      ]
+    },
+    {
+      "id": "settings.memory.library.row_selection",
+      "area": "CLI parity additions",
+      "control": "Up/Down selects visible memory entry",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"up\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library arrows select the actual entry, reload retries, search matches every advertised field, and editor cancel preserves Core"
+      ]
+    },
+    {
+      "id": "settings.memory.library.reload",
+      "area": "CLI parity additions",
+      "control": "r reloads list",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.name === \"r\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library arrows select the actual entry, reload retries, search matches every advertised field, and editor cancel preserves Core"
+      ]
+    },
+    {
+      "id": "settings.memory.library.edit_cancel",
+      "area": "CLI parity additions",
+      "control": "Ctrl+B closes entry editor without save",
+      "status": "covered",
+      "source": "src/overlays/settings/memory-library.tsx",
+      "source_anchor": "key.ctrl && key.name === \"b\"",
+      "tests": [
+        "src/__tests__/settings-memory-advanced.interactions.test.tsx#Memory library arrows select the actual entry, reload retries, search matches every advertised field, and editor cancel preserves Core"
+      ]
+    },
+    {
+      "id": "gateway.policy.enabled",
+      "area": "CLI parity additions",
+      "control": "Enter toggles Firewall and retries identical failed intent with readback",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "\"enabled\"",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway policy retries the identical failed mutation, preserves sibling config, and reads persisted changes after reopen"
+      ]
+    },
+    {
+      "id": "gateway.policy.command_approval",
+      "area": "CLI parity additions",
+      "control": "Enter toggles canonical command approval and confirms reopened state",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "exec-approval-mode",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway policy retries the identical failed mutation, preserves sibling config, and reads persisted changes after reopen"
+      ]
+    },
+    {
+      "id": "gateway.policy.row_down",
+      "area": "CLI parity additions",
+      "control": "Down selects policy rows and command approval",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "key.name === \"down\"",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway policy retries the identical failed mutation, preserves sibling config, and reads persisted changes after reopen"
+      ]
+    },
+    {
+      "id": "gateway.policy.policy",
+      "area": "CLI parity additions",
+      "control": "Enter cycles firewall policy after rejection, preserving complete config",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "\"Policy\"",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway policy keeps denied reads disabled, retries them, and retains rejected writes until successful readback"
+      ]
+    },
+    {
+      "id": "gateway.policy.reload",
+      "area": "CLI parity additions",
+      "control": "r retries denied config read before editing",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "key.name === \"r\"",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway policy keeps denied reads disabled, retries them, and retains rejected writes until successful readback"
+      ]
+    },
+    {
+      "id": "gateway.policy.scan_inbound",
+      "area": "CLI parity additions",
+      "control": "Enter toggles scan_inbound through basic node policy caller",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "\"scan_inbound\"",
+      "evidence_note": "Passing production App test drives basic policy row keyboard callers, asserts exact progressive requests and reopened readback; fixture does not prove live Gateway scanning.",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway node policy drives every scanning and redaction toggle and moves selection upward without a write"
+      ]
+    },
+    {
+      "id": "gateway.policy.scan_outbound",
+      "area": "CLI parity additions",
+      "control": "Enter toggles scan_outbound through basic node policy caller",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "\"scan_outbound\"",
+      "evidence_note": "Passing production App test drives basic policy row keyboard callers, asserts exact progressive requests and reopened readback; fixture does not prove live Gateway scanning.",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway node policy drives every scanning and redaction toggle and moves selection upward without a write"
+      ]
+    },
+    {
+      "id": "gateway.policy.log_detections",
+      "area": "CLI parity additions",
+      "control": "Enter toggles log_detections through basic node policy caller",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "\"log_detections\"",
+      "evidence_note": "Passing production App test drives basic policy row keyboard callers, asserts exact progressive requests and reopened readback; fixture does not prove live Gateway scanning.",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway node policy drives every scanning and redaction toggle and moves selection upward without a write"
+      ]
+    },
+    {
+      "id": "gateway.policy.redact_pii",
+      "area": "CLI parity additions",
+      "control": "Enter toggles redact_pii through basic node policy caller",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "\"redact_pii\"",
+      "evidence_note": "Passing production App test drives basic policy row keyboard callers, asserts exact progressive requests and reopened readback; fixture does not prove live Gateway scanning.",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway node policy drives every scanning and redaction toggle and moves selection upward without a write"
+      ]
+    },
+    {
+      "id": "gateway.policy.redact_secrets",
+      "area": "CLI parity additions",
+      "control": "Enter toggles redact_secrets through basic node policy caller",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "\"redact_secrets\"",
+      "evidence_note": "Passing production App test drives basic policy row keyboard callers, asserts exact progressive requests and reopened readback; fixture does not prove live Gateway scanning.",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway node policy drives every scanning and redaction toggle and moves selection upward without a write"
+      ]
+    },
+    {
+      "id": "gateway.policy.row_up",
+      "area": "CLI parity additions",
+      "control": "Up focuses previous basic policy row",
+      "status": "covered",
+      "source": "src/overlays/gateway/policy.tsx",
+      "source_anchor": "key.name === \"up\"",
+      "tests": [
+        "src/__tests__/gateway-guardrails.interactions.test.tsx#Gateway node policy drives every scanning and redaction toggle and moves selection upward without a write"
+      ],
+      "evidence_note": "Passing production App test drives basic policy row keyboard callers, asserts exact progressive requests and reopened readback; fixture does not prove live Gateway scanning."
+    },
+    {
+      "id": "gateway.advanced_policy.firewall",
+      "area": "CLI parity additions",
+      "control": "Replace complete node firewall JSON; exact retry/readback/reopen",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "section",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway full node safety JSON retries identical request and reloads persisted readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.organization_overlays",
+      "area": "CLI parity additions",
+      "control": "Replace organization map with concurrency rejection and retry/readback",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "firewall_org_overlays",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway conflict protects newer policy and rejected map writes retain identical retry"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.agent_overlays",
+      "area": "CLI parity additions",
+      "control": "Replace agent map with normalized readback; mismatch refuses success",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "firewall_agent_overlays",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway normalized agent overlays confirm authored fields, while retained removed IDs fail readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.custom_evaluators",
+      "area": "CLI parity additions",
+      "control": "Replace custom catalog, restart and confirm activation; failed restart retries",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "custom_evaluators",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway custom evaluators save complete catalog and restart before confirming activation"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.claude_egress",
+      "area": "CLI parity additions",
+      "control": "Replace Claude preference with exact boolean encoding and retry",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "claude-gateway-routing",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway canonical egress preferences retry identical writes and preserve map IDs through node readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.codex_egress",
+      "area": "CLI parity additions",
+      "control": "Replace Codex preference and confirm node readback",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "codex-gateway-routing",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway canonical egress preferences retry identical writes and preserve map IDs through node readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.agent_egress",
+      "area": "CLI parity additions",
+      "control": "Replace per-agent preference map retaining IDs",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "agent-gateway-routing",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway canonical egress preferences retry identical writes and preserve map IDs through node readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.row_selection",
+      "area": "CLI parity additions",
+      "control": "Up/Down selects advanced policy section",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "key.name === \"up\"",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway normalized agent overlays confirm authored fields, while retained removed IDs fail readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.json_edit",
+      "area": "CLI parity additions",
+      "control": "e enters served JSON editor; typed replacement changes draft",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "key.name === \"e\"",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway full node safety JSON retries identical request and reloads persisted readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.json_clear",
+      "area": "CLI parity additions",
+      "control": "Ctrl+U clears JSON draft before replacement",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "key.name === \"u\"",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway full node safety JSON retries identical request and reloads persisted readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.review",
+      "area": "CLI parity additions",
+      "control": "Enter validates and opens replacement confirmation without write",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "key.name === \"return\"",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway full node safety JSON retries identical request and reloads persisted readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.save_retry_readback",
+      "area": "CLI parity additions",
+      "control": "y saves reviewed replacement, retries failed identical intent, confirms readback",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "key.name === \"y\"",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway full node safety JSON retries identical request and reloads persisted readback"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.review_cancel",
+      "area": "CLI parity additions",
+      "control": "n abandons pending replacement and returns to editor without write",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "key.name === \"n\"",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway invalid JSON, unsupported overlay fields and cancel never write"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.edit_cancel",
+      "area": "CLI parity additions",
+      "control": "Tab closes editor without mutation",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "key.name === \"tab\"",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway invalid JSON, unsupported overlay fields and cancel never write"
+      ]
+    },
+    {
+      "id": "gateway.advanced_policy.reload",
+      "area": "CLI parity additions",
+      "control": "r reloads denied/conflicting policy",
+      "status": "covered",
+      "source": "src/overlays/gateway/advanced-policy.tsx",
+      "source_anchor": "key.name === \"r\"",
+      "tests": [
+        "src/__tests__/gateway-advanced-policy.interactions.test.tsx#Advanced Gateway conflict protects newer policy and rejected map writes retain identical retry"
+      ]
+    }
+  ],
+  "notes": [
+    "TabStrip and StatusBar are presentation-only in the current shell; no click handlers are registered on them.",
+    "Generic ListTab behavior is shared by Library, Inbox, Downloads, Meetings, Teams, Tools, Monitors, and Setup catalog lists.",
+    "CLI command parsing/dispatch is covered separately by cli.dispatch.test.ts, cli.init.test.ts, cli.node.test.ts, cli.kind.test.ts, and cli.api.test.ts.",
+    "Every registered CLI slash action has a rendered Chat flow test; parser usage/unknown handling is covered by commands.test.ts."
+  ],
+  "reconciliation": {
+    "date": "2026-10-03",
+    "retained_historical_boundary_records": 11,
+    "new_control_records": 89,
+    "evidence": "Granular current production callers reviewed against test assertions; historical capability rows retain partial status where their constituent controls remain undriven. Readback is the required outcome of a mutation action, not another counted user control."
+  }
+}

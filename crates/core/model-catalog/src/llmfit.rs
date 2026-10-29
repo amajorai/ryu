@@ -33,7 +33,7 @@ fn llmfit_binary() -> Option<PathBuf> {
     } else {
         "llmfit"
     };
-    let path = crate::ryu_dir().join("bin").join(name);
+    let path = ryu_sidecar_runtime::layout::bin_dir(&crate::ryu_dir()).join(name);
     path.exists().then_some(path)
 }
 

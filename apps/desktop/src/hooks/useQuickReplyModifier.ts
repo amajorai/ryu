@@ -27,11 +27,15 @@ const VALID_MODIFIERS = new Set<QuickReplyModifier>([
 const listeners = new Set<() => void>();
 let memoryModifier: QuickReplyModifier = DEFAULT_QUICK_REPLY_MODIFIER;
 
-function isQuickReplyModifier(value: unknown): value is QuickReplyModifier {
-	return (
-		typeof value === "string" &&
-		VALID_MODIFIERS.has(value as QuickReplyModifier)
-	);
+function isQuickReplyModifier(
+	value: string | null
+): value is QuickReplyModifier {
+	for (const candidate of VALID_MODIFIERS) {
+		if (candidate === value) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function readModifier(): QuickReplyModifier {
@@ -55,12 +59,12 @@ function subscribe(callback: () => void): () => void {
 			callback();
 		}
 	};
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.addEventListener("storage", onStorage);
 	}
 	return () => {
 		listeners.delete(callback);
-		if (typeof window !== "undefined") {
+		if (globalThis.window !== undefined) {
 			window.removeEventListener("storage", onStorage);
 		}
 	};

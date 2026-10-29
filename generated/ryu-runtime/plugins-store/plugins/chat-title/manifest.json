@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/chat-title",
   "name": "Chat Title",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "Auto-renames a chat as soon as the first reply lands, then again after every N completed assistant turns (default 5), using a side model — and keeps a Core-side history of the names it chose so you can see how a conversation drifted. Enablement, the first-turn rename, frequency, and the model to use are all settings.",
   "tagline": "Names your chats for you, automatically",
@@ -96,7 +96,15 @@
       {
         "id": "chat-title.rename",
         "on": "post_assistant_turn",
-        "code_file": "hooks/rename.js"
+        "code_file": "hooks/rename.js",
+        "match": {
+          "reply_cadence": {
+            "every_pref": "auto-title-every-n",
+            "every_default": 5,
+            "first_pref": "auto-title-on-first-turn",
+            "enabled_pref": "auto-title-enabled"
+          }
+        }
       }
     ]
   }

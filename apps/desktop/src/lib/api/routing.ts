@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/routing.ts
 //
 // Typed client for Core's threshold model fallback (`/api/routing/*`) — the
@@ -28,7 +30,20 @@ export type RoutingCondition =
 	| { source: "provider_credits"; provider_id: string; below_usd: number }
 	| {
 			source: "subscription_window";
+			/**
+			 * The agent whose own login is watched (`acp:claude`, …). Empty for a
+			 * provider-scoped rule: exactly one of `agent_id` / `provider_id` is set.
+			 */
 			agent_id: string;
+			/**
+			 * A Ryu subscription provider (`claude-pro-max`, …). Without
+			 * `account_id` the rule watches the provider's account pool and fires
+			 * only when every eligible account with a reading is below the
+			 * threshold; with no reading at all it does not fire.
+			 */
+			provider_id?: string;
+			/** One saved account of `provider_id`. Requires `provider_id`. */
+			account_id?: string;
 			/** Case-insensitive substring of the window label; "" = worst window. */
 			window: string;
 			/** Restrict to a model-scoped window (Claude's per-model weekly caps). */
@@ -134,14 +149,24 @@ export async function fetchRoutingAdvice(
 		// the turn's behaviour the same thing.
 		at_conversation_start: String(atConversationStart),
 	});
-	return await request<RoutingAdvice>(target, `/api/routing/advice?${params}`);
+	return await request<RoutingAdvice>(
+		target,
+		`/api/routing/advice?${params}`,
+		undefined,
+		routingAdviceResponseCodec
+	);
 }
 
 /** The node's rule list, plus the providers a credit rule may name. */
 export async function fetchRoutingPolicy(
 	target: ApiTarget
 ): Promise<RoutingPolicyView> {
-	return await request<RoutingPolicyView>(target, "/api/routing/policy");
+	return await request<RoutingPolicyView>(
+		target,
+		"/api/routing/policy",
+		undefined,
+		routingPolicyViewResponseCodec
+	);
 }
 
 /** Replace the node's rule list. Core drops its cached signal readings. */
@@ -149,10 +174,15 @@ export async function saveRoutingPolicy(
 	target: ApiTarget,
 	policy: RoutingPolicy
 ): Promise<void> {
-	await request<unknown>(target, "/api/routing/policy", {
-		method: "PUT",
-		body: policy,
-	});
+	await request<unknown>(
+		target,
+		"/api/routing/policy",
+		{
+			method: "PUT",
+			body: policy,
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /** Format a reading for the info bar, in whichever unit it came in. */
@@ -257,7 +287,12 @@ export function defaultRetryPolicy(): RetryPolicy {
 export async function fetchRetryPolicy(
 	target: ApiTarget
 ): Promise<RetryPolicyView> {
-	return await request<RetryPolicyView>(target, "/api/routing/retry-policy");
+	return await request<RetryPolicyView>(
+		target,
+		"/api/routing/retry-policy",
+		undefined,
+		retryPolicyViewResponseCodec
+	);
 }
 
 /** Replace the node's reactive failover config. */
@@ -265,8 +300,106 @@ export async function saveRetryPolicy(
 	target: ApiTarget,
 	policy: RetryPolicy
 ): Promise<void> {
-	await request<unknown>(target, "/api/routing/retry-policy", {
-		method: "PUT",
-		body: policy,
-	});
+	await request<unknown>(
+		target,
+		"/api/routing/retry-policy",
+		{
+			method: "PUT",
+			body: policy,
+		},
+		gatewayJsonValueSchema
+	);
 }
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const routingTargetResponseCodec = z
+	.object({ agent_id: z.string(), model: z.string() })
+	.catchall(gatewayJsonValueSchema);
+const routingSeverityResponseCodec = z.union([
+	z.literal("continue"),
+	z.literal("warn"),
+	z.literal("swap"),
+]);
+const routingSignalReadingResponseCodec = z
+	.object({
+		label: z.string(),
+		threshold: z.number(),
+		unit: z.union([z.literal("usd"), z.literal("percent")]),
+		value: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const routingAdviceResponseCodec = z
+	.object({
+		effective: routingTargetResponseCodec,
+		original: routingTargetResponseCodec,
+		reason: z.string().optional(),
+		rule_id: z.string().optional(),
+		severity: routingSeverityResponseCodec,
+		signal: routingSignalReadingResponseCodec.optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const agentSelectionResponseCodec = z
+	.object({
+		access_mode: z.string(),
+		agent_id: z.string(),
+		effort: z.string(),
+		model: z.string(),
+		provider: z.string(),
+		thinking_level: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const routingSelectionResponseCodec = agentSelectionResponseCodec;
+const routingConditionResponseCodec = z.union([
+	z
+		.object({ source: z.literal("ryu_credits"), below_usd: z.number() })
+		.catchall(gatewayJsonValueSchema),
+	z
+		.object({
+			source: z.literal("provider_credits"),
+			provider_id: z.string(),
+			below_usd: z.number(),
+		})
+		.catchall(gatewayJsonValueSchema),
+	z
+		.object({
+			source: z.literal("subscription_window"),
+			agent_id: z.string(),
+			window: z.string(),
+			model: z.string().optional(),
+			remaining_below_percent: z.number(),
+		})
+		.catchall(gatewayJsonValueSchema),
+]);
+const routingRuleResponseCodec = z
+	.object({
+		applies_to_agents: z.array(z.string()),
+		enabled: z.boolean(),
+		fallback: routingSelectionResponseCodec,
+		id: z.string(),
+		notify: z.boolean(),
+		when: routingConditionResponseCodec,
+	})
+	.catchall(gatewayJsonValueSchema);
+const routingPolicyResponseCodec = z
+	.object({ rules: z.array(routingRuleResponseCodec) })
+	.catchall(gatewayJsonValueSchema);
+const routingPolicyViewResponseCodec = z.intersection(
+	routingPolicyResponseCodec,
+	z
+		.object({ credit_providers: z.array(z.string()) })
+		.catchall(gatewayJsonValueSchema)
+);
+const retryPolicyResponseCodec = z
+	.object({
+		candidates: z.array(z.string()),
+		enabled: z.boolean(),
+		notify_only: z.boolean(),
+		spent_below_percent: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const retryPolicyViewResponseCodec = z
+	.object({
+		policy: retryPolicyResponseCodec,
+		subscription_agents: z.array(z.string()),
+	})
+	.catchall(gatewayJsonValueSchema);

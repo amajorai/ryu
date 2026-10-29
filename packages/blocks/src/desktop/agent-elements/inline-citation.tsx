@@ -20,6 +20,17 @@ export interface Citation {
 	url: string;
 }
 
+function safeCitationUrl(value: string): string | null {
+	try {
+		const url = new URL(value);
+		return url.protocol === "http:" || url.protocol === "https:"
+			? url.href
+			: null;
+	} catch {
+		return null;
+	}
+}
+
 function hostnameOf(url: string): string {
 	try {
 		return new URL(url).hostname.replace(/^www\./, "");
@@ -36,7 +47,7 @@ export function CitationMark({
 	return (
 		<span
 			className={cn(
-				"inline-flex h-3 min-w-3 flex-none items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-medium text-[9px] text-muted-foreground leading-none",
+				"type-micro inline-flex h-3 min-w-3 flex-none items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-medium text-muted-foreground leading-none",
 				className
 			)}
 			{...props}
@@ -76,10 +87,8 @@ export function InlineCitationCardTrigger({
 	const extra = sources.length > 1 ? ` +${sources.length - 1}` : "";
 	return (
 		<HoverCardTrigger
-			className={cn(
-				"inline-flex cursor-default items-center gap-1 rounded-full border border-border bg-muted/60 px-1.5 py-0.5 align-middle font-medium text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground",
-				className
-			)}
+			appearance="citation-pill"
+			className={className}
 			closeDelay={100}
 			delay={120}
 		>
@@ -96,7 +105,8 @@ export function InlineCitationCardBody({
 }: React.ComponentProps<typeof HoverCardContent>) {
 	return (
 		<HoverCardContent
-			className={cn("w-80 max-w-[min(90vw,20rem)] p-0 text-sm", className)}
+			appearance="citation-popup"
+			className={className}
 			{...props}
 		/>
 	);
@@ -113,16 +123,23 @@ export function InlineCitationSource({
 	title: string;
 	url: string;
 }) {
+	const safeUrl = safeCitationUrl(url);
 	return (
 		<div className={cn("flex flex-col gap-1 p-3", className)}>
-			<a
-				className="line-clamp-2 font-medium text-foreground text-sm underline-offset-2 hover:underline"
-				href={url}
-				rel="noopener noreferrer"
-				target="_blank"
-			>
-				{title}
-			</a>
+			{safeUrl ? (
+				<a
+					className="line-clamp-2 font-medium text-foreground text-sm underline-offset-2 hover:underline"
+					href={safeUrl}
+					rel="noopener noreferrer"
+					target="_blank"
+				>
+					{title}
+				</a>
+			) : (
+				<span className="line-clamp-2 font-medium text-foreground text-sm">
+					{title}
+				</span>
+			)}
 			<span className="truncate text-muted-foreground text-xs">
 				{hostnameOf(url)}
 			</span>
@@ -158,12 +175,13 @@ export function InlineCitationQuote({
  * title / host / snippet (AICSS inline-citations pattern).
  */
 export function CitationMarkLink({ citation }: { citation: Citation }) {
+	const safeUrl = safeCitationUrl(citation.url);
 	return (
 		<InlineCitation className="mx-0.5">
 			<InlineCitationCard>
 				<HoverCardTrigger
-					className="inline-flex h-3 min-w-3 cursor-pointer items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-medium text-[9px] text-muted-foreground leading-none no-underline transition-colors hover:bg-muted/80 hover:text-foreground"
-					href={citation.url}
+					appearance="citation-mark"
+					href={safeUrl ?? undefined}
 					rel="noopener noreferrer"
 					target="_blank"
 				>
@@ -219,17 +237,24 @@ export function CitationSources({ citations }: { citations: Citation[] }) {
 	return (
 		<div className="mt-3 flex flex-col gap-1.5 border-border border-t pt-2.5">
 			{citations.map((citation) => {
+				const safeUrl = safeCitationUrl(citation.url);
+				if (!safeUrl) {
+					return null;
+				}
 				const host = hostnameOf(citation.url);
 				return (
 					<a
-						className="group/cite-ref flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs leading-[18px] no-underline transition-colors hover:text-foreground"
-						href={citation.url}
+						className="group/cite-ref flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs leading-4.5 no-underline transition-colors hover:text-foreground"
+						href={safeUrl}
 						key={`${citation.number}-${citation.url}`}
 						rel="noopener noreferrer"
 						target="_blank"
 					>
 						<CitationMark>{citation.number}</CitationMark>
-						<span className="min-w-0 truncate font-medium text-foreground">
+						<span
+							className="min-w-0 truncate font-medium text-foreground"
+							title={citation.title}
+						>
 							{citation.title}
 						</span>
 						<span aria-hidden className="flex-none text-muted-foreground/70">
@@ -240,7 +265,7 @@ export function CitationSources({ citations }: { citations: Citation[] }) {
 						</span>
 						<span
 							aria-hidden
-							className="ml-[-2px] inline-flex flex-none text-muted-foreground/70 opacity-0 transition-opacity group-hover/cite-ref:opacity-100"
+							className="ml-[-2px] inline-flex flex-none text-muted-foreground/70 opacity-0 transition-opacity group-hover/cite-ref:opacity-100 group-focus-visible/cite-ref:opacity-100"
 						>
 							<ArrowUpRight className="size-2.5" />
 						</span>

@@ -136,25 +136,75 @@ fn token_from_hosts_yml(text: &str) -> Option<String> {
 }
 
 /// Read a managed Pi OAuth entry for Ryu's Copilot subscription provider.
+///
+/// Pi's Copilot login stores `{refresh: <GitHub OAuth token>, access: <Copilot
+/// API token>}`: `access` is the ~30-minute `tid=…;exp=…` token minted for
+/// `api.githubcopilot.com`, which `api.github.com/copilot_internal/user` rejects.
+/// So the GitHub token in `refresh` comes first, and `access` is only accepted
+/// when it is not a Copilot API token (an entry written by another tool).
 fn token_from_ryu_entry(entry: &serde_json::Value) -> Option<String> {
-    ["access", "accessToken", "oauth_token"]
+    let field = |key: &str| {
+        entry
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+    };
+    ["refresh", "oauth_token", "accessToken", "access"]
         .iter()
-        .find_map(|key| entry.get(*key).and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
+        .filter_map(|key| field(key))
+        .find(|token| !is_copilot_api_token(token))
         .map(str::to_string)
 }
 
-/// Read the managed Pi auth file's Copilot entry.
-fn token_from_ryu_json(root: &serde_json::Value) -> Option<String> {
-    token_from_ryu_entry(root.get("github-copilot")?)
+/// A Copilot API token (`tid=…;exp=…;…:sig`) from `copilot_internal/v2/token`,
+/// as opposed to a GitHub OAuth token the usage endpoint accepts.
+fn is_copilot_api_token(token: &str) -> bool {
+    token.starts_with("tid=") || token.contains(";exp=")
 }
 
-fn load_ryu_token() -> Option<String> {
+/// The usage endpoint on the GitHub host that issued a managed Pi entry's token.
+///
+/// Pi records the GitHub Enterprise domain a Copilot login used in
+/// `enterpriseUrl`, and its `refresh` token is an OAuth token from that host. It
+/// must only go to that host's API (`api.<domain>`, where Pi itself mints Copilot
+/// tokens), never to api.github.com. `None` means the domain cannot be parsed, so
+/// the read is refused rather than guessing a host.
+fn usage_url_for_ryu_entry(entry: &serde_json::Value) -> Option<String> {
+    let enterprise = match entry.get("enterpriseUrl") {
+        None | Some(serde_json::Value::Null) => return Some(usage_url()),
+        Some(value) => value.as_str()?.trim(),
+    };
+    if enterprise.is_empty() {
+        return Some(usage_url());
+    }
+    let host = enterprise_domain(enterprise)?;
+    if host == "github.com" {
+        return Some(usage_url());
+    }
+    Some(format!("https://api.{host}/copilot_internal/user"))
+}
+
+/// The hostname of a GitHub Enterprise domain as Pi normalizes it (a bare domain
+/// or a URL). IP literals and inputs with no host are rejected.
+fn enterprise_domain(input: &str) -> Option<String> {
+    let url = if input.contains("://") {
+        reqwest::Url::parse(input)
+    } else {
+        reqwest::Url::parse(&format!("https://{input}"))
+    }
+    .ok()?;
+    url.domain()
+        .map(|domain| domain.trim_end_matches('.').to_ascii_lowercase())
+        .filter(|domain| !domain.is_empty())
+}
+
+/// Read the managed Pi auth file's Copilot entry.
+fn load_ryu_entry() -> Option<serde_json::Value> {
     let path = super::host()?.ryu_pi_auth_path()?;
     let text = read_file(&path)?;
-    let root = serde_json::from_str::<serde_json::Value>(&text).ok()?;
-    token_from_ryu_json(&root)
+    let mut root = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    root.get_mut("github-copilot").map(serde_json::Value::take)
 }
 
 /// The `gh` CLI stores its token as a login-Keychain generic password (service
@@ -187,36 +237,38 @@ pub(super) async fn fetch(agent_id: &str) -> UsageSnapshot {
         }
         Err(_) => return UsageSnapshot::unavailable(agent_id, "copilot", UsageUnavailable::Error),
     };
-    fetch_with_token(agent_id, token).await
+    fetch_with_token(agent_id, token, usage_url()).await
 }
 
 pub(super) async fn fetch_ryu(agent_id: &str) -> UsageSnapshot {
-    let token = match tokio::task::spawn_blocking(load_ryu_token).await {
-        Ok(Some(token)) => token,
-        Ok(None) => {
-            return UsageSnapshot::unavailable(agent_id, "copilot", UsageUnavailable::NotLoggedIn)
-        }
-        Err(_) => return UsageSnapshot::unavailable(agent_id, "copilot", UsageUnavailable::Error),
-    };
-    fetch_with_token(agent_id, token).await
+    match tokio::task::spawn_blocking(load_ryu_entry).await {
+        Ok(entry) => fetch_ryu_with_credential(agent_id, entry).await,
+        Err(_) => UsageSnapshot::unavailable(agent_id, "copilot", UsageUnavailable::Error),
+    }
 }
 
 pub(super) async fn fetch_ryu_with_credential(
     agent_id: &str,
     credential: Option<serde_json::Value>,
 ) -> UsageSnapshot {
-    let Some(token) = credential.as_ref().and_then(token_from_ryu_entry) else {
+    let Some(entry) = credential.as_ref() else {
         return UsageSnapshot::unavailable(agent_id, "copilot", UsageUnavailable::NotLoggedIn);
     };
-    fetch_with_token(agent_id, token).await
+    let Some(token) = token_from_ryu_entry(entry) else {
+        return UsageSnapshot::unavailable(agent_id, "copilot", UsageUnavailable::NotLoggedIn);
+    };
+    let Some(url) = usage_url_for_ryu_entry(entry) else {
+        return UsageSnapshot::unavailable(agent_id, "copilot", UsageUnavailable::Unsupported);
+    };
+    fetch_with_token(agent_id, token, url).await
 }
 
-async fn fetch_with_token(agent_id: &str, token: String) -> UsageSnapshot {
+async fn fetch_with_token(agent_id: &str, token: String, url: String) -> UsageSnapshot {
     let unavailable =
         |reason: UsageUnavailable| UsageSnapshot::unavailable(agent_id, "copilot", reason);
 
     let resp = http_client()
-        .get(usage_url())
+        .get(url)
         // `/copilot_internal/user` accepts the `token` scheme, not `Bearer`.
         .header("Authorization", format!("token {}", token.trim()))
         .header("Accept", "application/json")
@@ -718,12 +770,99 @@ mod tests {
         let root = serde_json::json!({
             "github-copilot": {
                 "type": "oauth",
-                "access": "copilot-access",
+                "access": "gho_access",
             }
         });
         assert_eq!(
-            token_from_ryu_json(&root).as_deref(),
-            Some("copilot-access")
+            token_from_ryu_entry(&root["github-copilot"]).as_deref(),
+            Some("gho_access")
         );
+    }
+
+    #[test]
+    fn ryu_auth_entry_prefers_pis_github_token_over_the_copilot_api_token() {
+        // Pi's real Copilot credential shape: `refresh` is the GitHub OAuth token
+        // the usage endpoint accepts, `access` the short-lived Copilot API token.
+        let entry = serde_json::json!({
+            "type": "oauth",
+            "refresh": "ghu_real",
+            "access": "tid=abc;exp=1700000000;sku=x:sig",
+            "expires": 1,
+        });
+        assert_eq!(token_from_ryu_entry(&entry).as_deref(), Some("ghu_real"));
+
+        // A lone Copilot API token cannot authenticate the usage read.
+        let entry = serde_json::json!({
+            "type": "oauth",
+            "access": "tid=abc;exp=1700000000;sku=x:sig",
+        });
+        assert_eq!(token_from_ryu_entry(&entry), None);
+    }
+
+    #[test]
+    fn enterprise_entry_is_read_from_its_own_host_never_the_public_api() {
+        let _g = lock();
+        std::env::remove_var("RYU_USAGE_COPILOT_URL");
+        let entry = |enterprise: serde_json::Value| {
+            serde_json::json!({
+                "type": "oauth",
+                "refresh": "ghu_enterprise",
+                "access": "tid=abc;exp=1700000000;sku=x:sig",
+                "enterpriseUrl": enterprise,
+            })
+        };
+
+        // A GitHub Enterprise login's token goes to that host's API only.
+        for domain in ["acme.ghe.com", "https://acme.ghe.com/", " ACME.ghe.com "] {
+            assert_eq!(
+                usage_url_for_ryu_entry(&entry(serde_json::json!(domain))).as_deref(),
+                Some("https://api.acme.ghe.com/copilot_internal/user"),
+                "{domain}"
+            );
+        }
+        // An unparseable or host-less domain refuses the read instead of
+        // falling back to api.github.com.
+        for bad in [
+            serde_json::json!("https://"),
+            serde_json::json!("10.0.0.1"),
+            serde_json::json!(42),
+        ] {
+            assert_eq!(usage_url_for_ryu_entry(&entry(bad.clone())), None, "{bad}");
+        }
+        // Public GitHub logins (no domain recorded) keep the public endpoint.
+        for public in [
+            serde_json::Value::Null,
+            serde_json::json!(""),
+            serde_json::json!("github.com"),
+        ] {
+            assert_eq!(
+                usage_url_for_ryu_entry(&entry(public.clone())).as_deref(),
+                Some(USAGE_URL),
+                "{public}"
+            );
+        }
+        let mut no_domain = entry(serde_json::Value::Null);
+        no_domain.as_object_mut().unwrap().remove("enterpriseUrl");
+        assert_eq!(
+            usage_url_for_ryu_entry(&no_domain).as_deref(),
+            Some(USAGE_URL)
+        );
+    }
+
+    #[tokio::test]
+    async fn unusable_enterprise_domain_refuses_without_sending_the_token() {
+        let _g = lock();
+        // Any request reaching the override would be a public-host fallback.
+        let url = spawn_loopback("200 OK", r#"{"copilot_plan":"individual"}"#);
+        std::env::set_var("RYU_USAGE_COPILOT_URL", &url);
+        let entry = serde_json::json!({
+            "type": "oauth",
+            "refresh": "ghu_enterprise",
+            "enterpriseUrl": "https://",
+        });
+        let snap = fetch_ryu_with_credential("github-copilot", Some(entry)).await;
+        std::env::remove_var("RYU_USAGE_COPILOT_URL");
+        assert!(!snap.available);
+        assert!(matches!(snap.reason, Some(UsageUnavailable::Unsupported)));
     }
 }

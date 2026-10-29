@@ -8,7 +8,12 @@
 // invalidates the check on success so the row reflects the new version. Every
 // decision lives in Core (`/api/agents/:id/{update-check,update}`).
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import {
@@ -42,14 +47,24 @@ export function useAgentUpdate(
 	const active = Boolean(agentId) && enabled;
 	const query = useQuery({
 		queryKey: ["agent-update", node.url, agentId],
-		queryFn: () => fetchAgentUpdateCheck(target, agentId as string),
+		queryFn:
+			agentId === null || agentId === undefined
+				? skipToken
+				: () => fetchAgentUpdateCheck(target, agentId),
 		enabled: active,
 		staleTime: CHECK_STALE_MS,
 		refetchOnWindowFocus: false,
 	});
 
 	const mutation = useMutation({
-		mutationFn: () => runAgentUpdate(target, agentId as string),
+		mutationFn: () => {
+			if (agentId === null || agentId === undefined) {
+				throw new Error(
+					"Select an agent before checking or installing an update."
+				);
+			}
+			return runAgentUpdate(target, agentId);
+		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({
 				queryKey: ["agent-update", node.url, agentId],
@@ -67,7 +82,7 @@ export function useAgentUpdate(
 	return {
 		check: query.data ?? null,
 		loading: active && query.isLoading,
-		error: (query.error as Error | null)?.message ?? null,
+		error: query.error?.message ?? null,
 		update,
 		updating: mutation.isPending,
 	};

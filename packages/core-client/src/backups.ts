@@ -1,3 +1,13 @@
+import {
+	backupDestinationResponseSchema,
+	backupNoContentResponseSchema,
+	backupOperationResponseSchema,
+	backupOverviewResponseSchema,
+	backupPolicyResponseSchema,
+	backupRecordsResponseSchema,
+	backupRecoveryKeyResponseSchema,
+	backupTestResponseSchema,
+} from "./backup-response-contracts.ts";
 import type {
 	BackupDestination,
 	BackupOperation,
@@ -28,12 +38,22 @@ export function getBackups(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<BackupOverview> {
-	return request(target, "/api/backups", { signal });
+	return request(
+		target,
+		"/api/backups",
+		{ signal },
+		backupOverviewResponseSchema
+	);
 }
 export function generateBackupKey(
 	target: ApiTarget
 ): Promise<{ recoveryKey: string }> {
-	return request(target, "/api/backups/recovery-key", { method: "POST" });
+	return request(
+		target,
+		"/api/backups/recovery-key",
+		{ method: "POST" },
+		backupRecoveryKeyResponseSchema
+	);
 }
 export function saveBackupDestination(
 	target: ApiTarget,
@@ -43,7 +63,8 @@ export function saveBackupDestination(
 	return request(
 		target,
 		`/api/backups/destinations${id ? `/${encodeURIComponent(id)}` : ""}`,
-		{ method: id ? "PUT" : "POST", body }
+		{ method: id ? "PUT" : "POST", body },
+		backupDestinationResponseSchema
 	);
 }
 export function deleteBackupDestination(
@@ -53,7 +74,8 @@ export function deleteBackupDestination(
 	return request(
 		target,
 		`/api/backups/destinations/${encodeURIComponent(id)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		backupNoContentResponseSchema
 	);
 }
 export function testBackupDestination(
@@ -63,9 +85,11 @@ export function testBackupDestination(
 	return request(
 		target,
 		`/api/backups/destinations/${encodeURIComponent(id)}/test`,
-		{ method: "POST" }
+		{ method: "POST" },
+		backupTestResponseSchema
 	);
 }
+/** Browse the node catalog by default, or a specified Space's catalog. */
 export function listBackups(
 	target: ApiTarget,
 	id: string,
@@ -74,39 +98,65 @@ export function listBackups(
 ): Promise<BackupRecord[]> {
 	return request(
 		target,
-		`/api/backups/destinations/${encodeURIComponent(id)}/backups${spaceId ? `?spaceId=${encodeURIComponent(spaceId)}` : ""}`,
-		{ signal }
+		`/api/backups/destinations/${encodeURIComponent(id)}/backups${spaceId ? `?spaceId=${encodeURIComponent(spaceId)}` : "?scope=node"}`,
+		{ signal },
+		backupRecordsResponseSchema
 	);
 }
 export function saveBackupPolicy(
 	target: ApiTarget,
 	body: SaveBackupPolicy
 ): Promise<BackupPolicy> {
-	return request(target, "/api/backups/policies", { method: "POST", body });
+	return request(
+		target,
+		"/api/backups/policies",
+		{ method: "POST", body },
+		backupPolicyResponseSchema
+	);
 }
 export function deleteBackupPolicy(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	return request(target, `/api/backups/policies/${encodeURIComponent(id)}`, {
-		method: "DELETE",
-	});
+	return request(
+		target,
+		`/api/backups/policies/${encodeURIComponent(id)}`,
+		{
+			method: "DELETE",
+		},
+		backupNoContentResponseSchema
+	);
 }
 export function createBackup(
 	target: ApiTarget,
 	body: CreateBackup
 ): Promise<BackupOperation> {
-	return request(target, "/api/backups/runs", { method: "POST", body });
+	return request(
+		target,
+		"/api/backups/runs",
+		{ method: "POST", body },
+		backupOperationResponseSchema
+	);
 }
 export function restoreBackup(
 	target: ApiTarget,
 	body: RestoreBackup
 ): Promise<BackupOperation> {
-	return request(target, "/api/backups/restore", { method: "POST", body });
+	return request(
+		target,
+		"/api/backups/restore",
+		{ method: "POST", body },
+		backupOperationResponseSchema
+	);
 }
 export function getBackupOperation(
 	target: ApiTarget,
 	id: string
 ): Promise<BackupOperation> {
-	return request(target, `/api/backups/operations/${encodeURIComponent(id)}`);
+	return request(
+		target,
+		`/api/backups/operations/${encodeURIComponent(id)}`,
+		{},
+		backupOperationResponseSchema
+	);
 }

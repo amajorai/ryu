@@ -1,16 +1,43 @@
 [package]
 name = "ryu-durable"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Durable-execution primitive for Ryu: the swap-seam `DurableEngine` trait (checkpoint / resume / replay of a run to completion) plus `FileCheckpointStore`, the atomically-durable (temp + fsync + rename) directory-backed run-state store that makes crash-recoverable resume real rather than best-effort. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the workflow store checkpoints every node through it). The trait is generic over the run/workflow types, so the crate has ZERO dependency on apps/core — the petgraph workflow executor (the `execute` implementation) and the concrete `WorkflowRun` type stay Core-side (`apps/core/src/workflow/durable.rs` host shim). The seam re-admits an external Temporal/Restate/DBOS sidecar backend."
+description = "Durable-execution primitive for Ryu: the swap-seam `DurableEngine` trait (checkpoint / resume / replay of a run to completion) plus the pluggable, namespaced `CheckpointStore` seam with file (`FileCheckpointStore`, atomically durable temp + fsync + rename), in-memory, Postgres, and Redis/Valkey backends selected by `CheckpointStoreConfig` and held to one shared conformance suite. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the workflow store checkpoints every node through it). The trait is generic over the run/workflow types, so the crate has ZERO dependency on apps/core — the petgraph workflow executor (the `execute` implementation) and the concrete `WorkflowRun` type stay Core-side (`apps/core/src/workflow/durable.rs` host shim). The seam re-admits an external Temporal/Restate/DBOS sidecar backend."
 repository = "https://github.com/amajorai/ryu"
+
+[features]
+default = ["postgres", "redis"]
+# Postgres backend: tokio-postgres (+ native TLS), the client Core already links
+# for vault dynamic roles, so enabling it adds no registry crates to Core.
+postgres = [
+  "dep:tokio",
+  "dep:tokio-postgres",
+  "dep:postgres-native-tls",
+  "dep:native-tls",
+  "dep:url",
+]
+# Redis / Valkey backend over the shared minimal RESP client.
+redis = ["dep:ryu-redis-wire"]
 
 # Versions are matched to apps/core/Cargo.toml so there is no version skew when
 # Core links this crate in-process. This crate has ZERO dependency on apps/core.
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
+# backend from this crate: Core links it through its own dependency.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false }
+tokio = { version = "1", features = ["rt", "sync"], optional = true }
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"], optional = true }
+postgres-native-tls = { version = "0.5", optional = true }
+native-tls = { version = "0.2", optional = true }
+url = { version = "2", optional = true }
+ryu-redis-wire = { path = "../redis-wire", version = "0.5.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+ryu-redis-wire = { path = "../redis-wire", version = "0.5.0", features = ["testing"] }
+# Test builds only: lets unit tests construct sealing stores without a host.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["test-ephemeral-host"] }

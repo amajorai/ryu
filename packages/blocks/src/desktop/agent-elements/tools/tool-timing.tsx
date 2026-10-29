@@ -1,3 +1,9 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import {
+	type NativePropertyValue,
+	observeNativeOptionalProperty,
+} from "@ryu/ui/lib/native-optional-property.mjs";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatTime } from "@ryu/ui/lib/timezone.ts";
 import {
 	createContext,
@@ -67,8 +73,8 @@ export interface ToolTimingSource {
 const ToolTimingContext = createContext<ToolTimingSource | null>(null);
 
 /** A finite, non-negative epoch stamp, or undefined. */
-function finiteMs(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0
+function finiteMs(value: NativePropertyValue): number | undefined {
+	return isNativeNumber(value) && Number.isFinite(value) && value >= 0
 		? value
 		: undefined;
 }
@@ -81,21 +87,27 @@ function finiteMs(value: unknown): number | undefined {
  * than rendered as a negative duration — a wall clock can step backwards mid
  * call (an NTP correction), and Core already floors its own `durationMs`.
  */
-export function readToolTiming(part: unknown): ToolTimingSource | null {
-	const meta = (part as { callProviderMetadata?: Record<string, unknown> })
-		?.callProviderMetadata?.ryu as Record<string, unknown> | undefined;
-	const startedAt = finiteMs(meta?.startedAt);
+export function readToolTiming<Part>(part: Part): ToolTimingSource | null {
+	const meta = observeNativeOptionalProperty(
+		observeNativeOptionalProperty(part, "callProviderMetadata"),
+		"ryu"
+	);
+	const startedAt = finiteMs(observeNativeOptionalProperty(meta, "startedAt"));
 	if (startedAt === undefined) {
 		return null;
 	}
-	const completedAt = finiteMs(meta?.completedAt);
+	const completedAt = finiteMs(
+		observeNativeOptionalProperty(meta, "completedAt")
+	);
 	if (completedAt === undefined || completedAt < startedAt) {
 		return { startedAt };
 	}
 	return {
 		startedAt,
 		completedAt,
-		durationMs: finiteMs(meta?.durationMs) ?? completedAt - startedAt,
+		durationMs:
+			finiteMs(observeNativeOptionalProperty(meta, "durationMs")) ??
+			completedAt - startedAt,
 	};
 }
 
@@ -105,12 +117,12 @@ export function readToolTiming(part: unknown): ToolTimingSource | null {
  * Always renders its children, stamp or not: a part with no stamp provides null,
  * which puts `ToolTiming` back on the mount clock.
  */
-export function ToolTimingProvider({
+export function ToolTimingProvider<Part>({
 	part,
 	children,
 }: {
 	children: ReactNode;
-	part: unknown;
+	part: Part;
 }) {
 	const timing = useMemo(() => readToolTiming(part), [part]);
 	return (
@@ -156,7 +168,7 @@ export function formatToolClock(epochMs: number, withSeconds = false): string {
 	return formatTime(epochMs, {
 		hour: "2-digit",
 		minute: "2-digit",
-		...(withSeconds ? { second: "2-digit" } : {}),
+		...(withSeconds ? { second: "2-digit" } : undefined),
 	});
 }
 
@@ -197,6 +209,7 @@ export function useToolElapsed(
 
 /** What the badge should say, resolved from the stamp and the running flag. */
 function resolveLabel(
+	tl: LiteralMessage,
 	timing: ToolTimingSource | null,
 	isRunning: boolean,
 	elapsedMs: number | null
@@ -207,7 +220,10 @@ function resolveLabel(
 		if (timing.durationMs !== undefined) {
 			return {
 				label: formatToolDuration(timing.durationMs),
-				title: `Started ${startedClock} · took ${formatToolDuration(timing.durationMs)}`,
+				title: tl("Started {startedClock} · took {duration}", {
+					duration: formatToolDuration(timing.durationMs),
+					startedClock,
+				}),
 			};
 		}
 		// Still running: tick against Core's start, so a row that mounts mid-call
@@ -215,7 +231,7 @@ function resolveLabel(
 		if (isRunning && elapsedMs !== null) {
 			return {
 				label: formatToolDuration(elapsedMs),
-				title: `Running · started ${startedClock}`,
+				title: tl("Running · started {startedClock}", { startedClock }),
 			};
 		}
 		// Opened, never closed, not running. THE case this feature exists for: a
@@ -223,8 +239,10 @@ function resolveLabel(
 		// that separates them afterwards. Rendered as a time of day, not a
 		// duration, so it cannot be misread as "this call took 14 hours".
 		return {
-			label: `started ${formatToolClock(timing.startedAt)}`,
-			title: `Never completed · started ${startedClock}`,
+			label: tl("started {startedClock}", {
+				startedClock: formatToolClock(timing.startedAt),
+			}),
+			title: tl("Never completed · started {startedClock}", { startedClock }),
 		};
 	}
 	// Unstamped part: mount clock only, which by construction has nothing to say
@@ -247,9 +265,10 @@ export function ToolTiming({
 	className?: string;
 	isRunning: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const timing = useContext(ToolTimingContext);
 	const elapsedMs = useToolElapsed(isRunning, timing?.startedAt);
-	const resolved = resolveLabel(timing, isRunning, elapsedMs);
+	const resolved = resolveLabel(tl, timing, isRunning, elapsedMs);
 	if (!resolved) {
 		return null;
 	}

@@ -8,6 +8,7 @@
 //   - a MALICIOUS fixture attempts every escalation and each is BLOCKED host-side.
 
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
 import { IFRAME_SANDBOX } from "./ExtensionHost.tsx";
 import {
 	asRpcRequest,
@@ -21,6 +22,22 @@ import {
 	validatePluginRoute,
 } from "./rpc.ts";
 import { thirdPartyPluginSrcdoc } from "./third-party-plugin.ts";
+
+const adversarialAgentListSchema = z.array(
+	z.strictObject({ id: z.string(), name: z.string() })
+);
+const adversarialResultSchema = z.union([
+	adversarialAgentListSchema,
+	z.object({ path: z.string() }),
+	z.undefined(),
+]);
+const adversarialReplySchema = z.object({
+	kind: z.literal("ryu-plugin-rpc-result"),
+	id: z.number().int(),
+	error: z.string().optional(),
+	result: adversarialResultSchema.optional(),
+});
+type AdversarialResult = z.output<typeof adversarialResultSchema>;
 
 const AGENTS = [{ id: "ryu", name: "Ryu" }];
 const NOT_GRANTED = /Capability not granted/;
@@ -65,7 +82,7 @@ function attachHost(
 					result,
 				} satisfies RpcResponse);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				port.postMessage({
 					kind: "ryu-plugin-rpc-result",
 					id: req.id,
@@ -81,28 +98,29 @@ function attachHost(
 function pluginCaller(port: MessagePort) {
 	const pending = new Map<
 		number,
-		{ resolve: (v: unknown) => void; reject: (e: Error) => void }
+		{ resolve: (value: AdversarialResult) => void; reject: (e: Error) => void }
 	>();
 	let nextId = 1;
 	port.onmessage = (event: MessageEvent) => {
-		const msg = event.data as RpcResponse;
-		if (msg?.kind !== "ryu-plugin-rpc-result") {
+		const parsed = adversarialReplySchema.safeParse(event.data);
+		if (!parsed.success) {
 			return;
 		}
+		const msg = parsed.data;
 		const p = pending.get(msg.id);
 		if (!p) {
 			return;
 		}
 		pending.delete(msg.id);
-		if (typeof msg.error === "string") {
-			p.reject(new Error(msg.error));
-		} else {
+		if (msg.error === undefined) {
 			p.resolve(msg.result);
+		} else {
+			p.reject(new Error(msg.error));
 		}
 	};
 	port.start?.();
 	return (method: string, args: unknown[] = []) =>
-		new Promise<unknown>((resolve, reject) => {
+		new Promise<AdversarialResult>((resolve, reject) => {
 			const id = nextId++;
 			pending.set(id, { resolve, reject });
 			port.postMessage({ kind: "ryu-plugin-rpc", id, method, args });
@@ -178,7 +196,7 @@ describe("malicious third-party plugin is blocked at the host gate", () => {
 		const svc = hostServices();
 		expect(Object.keys(svc).sort()).toEqual(["listAgents", "registerRoute"]);
 		// listAgents returns only {id,name} — never a raw agent record.
-		const agents = (await svc.listAgents()) as Record<string, unknown>[];
+		const agents = adversarialAgentListSchema.parse(await svc.listAgents());
 		for (const a of agents) {
 			expect(Object.keys(a).sort()).toEqual(["id", "name"]);
 		}

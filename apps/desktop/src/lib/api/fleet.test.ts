@@ -1,27 +1,64 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { z } from "zod";
+import { vaultHydrated } from "@/lib/auth-client.ts";
 import {
 	bindSelfHostedNodeToOrganization,
 	getFleetBindingStatus,
 	NodeAlreadyBoundError,
 	parseFleetBindingStatus,
 } from "./fleet.ts";
+import type { PluginValue } from "./plugin-wire-values.ts";
 
 const originalFetch = globalThis.fetch;
-const originalStorage = globalThis.localStorage;
+const originalStorage = Object.getOwnPropertyDescriptor(
+	globalThis,
+	"localStorage"
+);
 const originalSetTimeout = globalThis.setTimeout;
 const originalClearTimeout = globalThis.clearTimeout;
 const target = { token: "local-core-token", url: "http://127.0.0.1:7980" };
+function storage(token: string | null): Storage {
+	return {
+		getItem: () => token,
+		setItem: () => {},
+		removeItem: () => {},
+		clear: () => {},
+		key: () => null,
+		length: token ? 1 : 0,
+	};
+}
+function stubFetch(
+	callback: (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit
+	) => Promise<Response>
+) {
+	globalThis.fetch = Object.assign(callback, {
+		preconnect: originalFetch.preconnect,
+	});
+}
 const validEnrollmentToken = `rfe_${"a".repeat(64)}`;
 
+// Importing the auth client starts its vault hydration, which waits for the
+// Tauri bridge before migrating a legacy session token. Let it finish before
+// any test installs a session in storage, or its background profile lookup
+// lands in whichever test's stubbed fetch happens to be live at that moment.
+await vaultHydrated;
+
 beforeEach(() => {
-	globalThis.localStorage = {
-		getItem: () => "account-session",
-	} as unknown as Storage;
+	Object.defineProperty(globalThis, "localStorage", {
+		configurable: true,
+		value: storage("account-session"),
+	});
 });
 
 afterEach(() => {
 	globalThis.fetch = originalFetch;
-	globalThis.localStorage = originalStorage;
+	if (originalStorage) {
+		Object.defineProperty(globalThis, "localStorage", originalStorage);
+	} else {
+		Reflect.deleteProperty(globalThis, "localStorage");
+	}
 	globalThis.setTimeout = originalSetTimeout;
 	globalThis.clearTimeout = originalClearTimeout;
 });
@@ -34,7 +71,7 @@ describe("Fleet organization binding", () => {
 			url: string;
 		}> = [];
 		let statusReads = 0;
-		globalThis.fetch = (async (input, init) => {
+		stubFetch(async (input, init) => {
 			const url = String(input);
 			requests.push({
 				body: String(init?.body ?? ""),
@@ -62,7 +99,7 @@ describe("Fleet organization binding", () => {
 				});
 			}
 			return Response.json({ nodeId: "node-1", organizationId: "org-1" });
-		}) as typeof globalThis.fetch;
+		});
 
 		await expect(
 			bindSelfHostedNodeToOrganization({
@@ -76,8 +113,11 @@ describe("Fleet organization binding", () => {
 			nodeId: "node-1",
 			organizationId: "org-1",
 		});
+		// The Better Auth client created by auth-client.ts may read its session
+		// (GET /api/auth/get-session) in the background at any point; only the
+		// Fleet calls belong to this flow.
 		const enrollmentRequests = requests.filter(
-			(request) => !request.url.endsWith("/api/auth/token")
+			(request) => !new URL(request.url).pathname.startsWith("/api/auth/")
 		);
 		expect(enrollmentRequests.map((request) => request.url)).toEqual([
 			"http://127.0.0.1:7980/api/fleet/status",
@@ -104,7 +144,7 @@ describe("Fleet organization binding", () => {
 
 	test("rejects a malformed cloud token before sending it to Core", async () => {
 		const requestedUrls: string[] = [];
-		globalThis.fetch = (async (input) => {
+		stubFetch(async (input) => {
 			const url = String(input);
 			requestedUrls.push(url);
 			if (url.endsWith("/api/fleet/status")) {
@@ -114,7 +154,7 @@ describe("Fleet organization binding", () => {
 				return Response.json({ token: "rfe_not-a-real-code" });
 			}
 			return Response.json({});
-		}) as typeof globalThis.fetch;
+		});
 
 		await expect(
 			bindSelfHostedNodeToOrganization({
@@ -130,10 +170,10 @@ describe("Fleet organization binding", () => {
 
 	test("rejects a trimmed node name longer than 128 characters before fetching", async () => {
 		let requestCount = 0;
-		globalThis.fetch = (async (_input, _init) => {
+		stubFetch(async (_input, _init) => {
 			requestCount += 1;
 			return Response.json({ enrolled: false });
-		}) as typeof globalThis.fetch;
+		});
 
 		await expect(
 			bindSelfHostedNodeToOrganization({
@@ -147,7 +187,7 @@ describe("Fleet organization binding", () => {
 
 	test("never issues a new code for an already-bound node", async () => {
 		const requestedUrls: string[] = [];
-		globalThis.fetch = (async (input) => {
+		stubFetch(async (input) => {
 			requestedUrls.push(String(input));
 			return Response.json({
 				enrolled: true,
@@ -156,7 +196,7 @@ describe("Fleet organization binding", () => {
 				organizationId: "org-existing",
 				organizationName: "Existing org",
 			});
-		}) as typeof globalThis.fetch;
+		});
 
 		await expect(
 			bindSelfHostedNodeToOrganization({
@@ -177,34 +217,45 @@ describe("Fleet organization binding", () => {
 	});
 
 	test("aborts a blackholed Core status request and clears its timer", async () => {
-		globalThis.localStorage = {
-			getItem: () => null,
-		} as unknown as Storage;
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage(null),
+		});
 		let clearedTimers = 0;
-		globalThis.setTimeout = ((handler: TimerHandler) => {
-			if (typeof handler === "function") {
-				handler();
-			}
-			return 1;
-		}) as typeof globalThis.setTimeout;
-		globalThis.clearTimeout = (() => {
-			clearedTimers += 1;
-		}) as typeof globalThis.clearTimeout;
-		globalThis.fetch = (async (_input, init) =>
-			new Promise<Response>((_resolve, reject) => {
-				init?.signal?.addEventListener("abort", () => {
-					reject(new DOMException("aborted", "AbortError"));
-				});
-				if (init?.signal?.aborted) {
-					reject(new DOMException("aborted", "AbortError"));
+		globalThis.setTimeout = new Proxy(originalSetTimeout, {
+			apply(timer, receiver, args) {
+				const handler = z.function().safeParse(args[0]);
+				if (handler.success) {
+					handler.data();
 				}
-			})) as typeof globalThis.fetch;
+				return timer.call(receiver, () => {}, 0);
+			},
+		});
+		globalThis.clearTimeout = new Proxy(originalClearTimeout, {
+			apply(clear, receiver, args) {
+				clearedTimers += 1;
+				return clear.call(receiver, args[0]);
+			},
+		});
+		stubFetch(
+			async (_input, init) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => {
+						reject(new DOMException("aborted", "AbortError"));
+					});
+					if (init?.signal?.aborted) {
+						reject(new DOMException("aborted", "AbortError"));
+					}
+				})
+		);
 
 		const result = await Promise.race([
 			getFleetBindingStatus(target).then(
 				() => "resolved",
-				(error: unknown) =>
-					error instanceof Error ? error.message : "unknown error"
+				(error) => {
+					const parsed = z.instanceof(Error).safeParse(error);
+					return parsed.success ? parsed.data.message : "unknown error";
+				}
 			),
 			new Promise<string>((resolve) =>
 				originalSetTimeout(() => resolve("still pending"), 100)
@@ -214,4 +265,69 @@ describe("Fleet organization binding", () => {
 		expect(result).toContain("timed out");
 		expect(clearedTimers).toBe(1);
 	});
+});
+
+test("Fleet legacy metadata defaults and identifier error order stay intact", () => {
+	expect(
+		parseFleetBindingStatus({
+			enrolled: false,
+			nodeId: {},
+			organizationId: false,
+		})
+	).toEqual({ enrolled: false, state: "unbound" });
+	expect(
+		parseFleetBindingStatus({
+			enrolled: true,
+			nodeId: " node-1 ",
+			organizationId: "org-1",
+			organizationName: "  ",
+			managedInferenceReady: "true",
+		})
+	).toEqual({
+		enrolled: true,
+		state: "bound",
+		nodeId: " node-1 ",
+		organizationId: "org-1",
+		organizationName: null,
+		managedInferenceReady: false,
+	});
+	expect(() => parseFleetBindingStatus({ enrolled: "true" })).toThrow(
+		"invalid Fleet status"
+	);
+	expect(() =>
+		parseFleetBindingStatus({
+			enrolled: true,
+			nodeId: null,
+			organizationId: null,
+		})
+	).toThrow("missing nodeId");
+	expect(() =>
+		parseFleetBindingStatus({
+			enrolled: true,
+			nodeId: "node-1",
+			organizationId: " ",
+		})
+	).toThrow("missing organizationId");
+});
+
+test("cloud enrollment errors preserve message priority, whitespace, and status fallback", async () => {
+	for (const [body, expected] of [
+		[{ message: " first ", error: "second" }, " first "],
+		[{ message: " ", error: " second " }, " second "],
+		[{ message: false, error: 1 }, "Could not create enrollment code (409)."],
+		[null, "Could not create enrollment code (409)."],
+	] satisfies [PluginValue, string][]) {
+		stubFetch(async (input) =>
+			String(input).endsWith("/api/fleet/status")
+				? Response.json({ enrolled: false })
+				: Response.json(body, { status: 409 })
+		);
+		await expect(
+			bindSelfHostedNodeToOrganization({
+				name: "node",
+				organizationId: "org",
+				target,
+			})
+		).rejects.toThrow(expected);
+	}
 });

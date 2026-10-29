@@ -32,10 +32,7 @@ function items(...ids: string[]): ComposerSettingItem[] {
 	return ids.map((id) => ({ id, name: id }));
 }
 
-function keyEvent(partial: Partial<ComposerShortcutEvent> & { key: string }): {
-	event: ComposerShortcutEvent;
-	prevented: () => boolean;
-} {
+function keyEvent(partial: Partial<ComposerShortcutEvent> & { key: string }) {
 	let didPrevent = false;
 	const event: ComposerShortcutEvent = {
 		altKey: false,
@@ -206,6 +203,96 @@ describe("Shift+Tab cycles the approval section", () => {
 		const secs = [
 			makeSection(
 				{ key: "agent", items: items("a1", "a2"), value: "a1" },
+				changes
+			),
+		];
+		const { event } = keyEvent({ key: "Tab", shiftKey: true });
+		expect(handleComposerSettingsShortcut(event, secs, defaults)).toBe(false);
+		expect(changes).toEqual([]);
+	});
+
+	it("skips a bypassPermissions mode, which needs the menu's confirmation", () => {
+		const changes: Changes = [];
+		const secs = [
+			makeSection(
+				{
+					key: "approval",
+					items: items("default", "acceptEdits", "plan", "bypassPermissions"),
+					value: "plan",
+				},
+				changes
+			),
+		];
+		const { event } = keyEvent({ key: "Tab", shiftKey: true });
+		expect(handleComposerSettingsShortcut(event, secs, defaults)).toBe(true);
+		expect(changes).toEqual(["default"]);
+	});
+
+	it("skips a 'Full access' config option value", () => {
+		const changes: Changes = [];
+		const secs = [
+			makeSection(
+				{
+					key: "sandbox_preset",
+					label: "Approval",
+					items: [
+						{ id: "read-only", name: "Read only" },
+						{ id: "auto", name: "Auto" },
+						{ id: "full", name: "Full access" },
+					],
+					value: "auto",
+				},
+				changes
+			),
+		];
+		const { event } = keyEvent({ key: "Tab", shiftKey: true });
+		expect(handleComposerSettingsShortcut(event, secs, defaults)).toBe(true);
+		expect(changes).toEqual(["read-only"]);
+	});
+
+	it("steps down to the first item when the current mode is full access", () => {
+		const changes: Changes = [];
+		const secs = [
+			makeSection(
+				{
+					key: "approval",
+					items: items("default", "plan", "bypassPermissions"),
+					value: "bypassPermissions",
+				},
+				changes
+			),
+		];
+		const { event } = keyEvent({ key: "Tab", shiftKey: true });
+		expect(handleComposerSettingsShortcut(event, secs, defaults)).toBe(true);
+		expect(changes).toEqual(["default"]);
+	});
+
+	it("leaves full access for the only safe mode in a two-option section", () => {
+		const changes: Changes = [];
+		const secs = [
+			makeSection(
+				{
+					key: "approval",
+					items: items("default", "bypassPermissions"),
+					value: "bypassPermissions",
+				},
+				changes
+			),
+		];
+		const { event } = keyEvent({ key: "Tab", shiftKey: true });
+		expect(handleComposerSettingsShortcut(event, secs, defaults)).toBe(true);
+		expect(changes).toEqual(["default"]);
+	});
+
+	it("does not move into full access from the only safe mode", () => {
+		const changes: Changes = [];
+		const secs = [
+			makeSection(
+				{
+					key: "approval",
+					items: items("default", "bypassPermissions"),
+					value: "default",
+				},
 				changes
 			),
 		];

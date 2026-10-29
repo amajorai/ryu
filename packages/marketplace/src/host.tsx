@@ -12,6 +12,7 @@
 // carries keep a consistent identity across renders (rules of hooks).
 
 import { createContext, type ReactNode, useContext } from "react";
+import type { MarketplaceCreatorsService } from "./creators/creator-types.ts";
 import { LikesProvider } from "./likes/likes-provider.tsx";
 import type { MarketplaceLikesService } from "./likes/likes-store.ts";
 import type {
@@ -143,6 +144,9 @@ export interface MarketplaceReviewsService {
 
 /** The full set of services the shared store UI needs from its host surface. */
 export interface MarketplaceHost {
+	/** The Creators directory and profiles. Optional: a surface without a
+	 *  control-plane binding renders the tab's unavailable state. */
+	creators?: MarketplaceCreatorsService;
 	/** Optional surface-owned confirmation around card-funded purchases. */
 	guardPurchase?: <T>(action: () => Promise<T>) => Promise<T | null>;
 	/** The heart on a store card: bulk count reads plus like/unlike, keyed by the
@@ -151,10 +155,17 @@ export interface MarketplaceHost {
 	likes?: MarketplaceLikesService;
 	/** Open an external URL (Tauri shell on desktop, navigation on web). */
 	openExternal: (url: string) => Promise<void> | void;
+	/** Open one owned license's manage view (renewal, period end). Optional: a
+	 *  surface without one renders no "Manage" action on subscription rows. */
+	openLicense?: (licenseId: string) => Promise<void> | void;
 	/** Return to the marketplace catalog from an account empty state. */
 	openMarketplace?: () => Promise<void> | void;
 	/** Open organization selection from an org-gated empty state. */
 	openOrganization?: () => Promise<void> | void;
+	/** Open the surface's own seller payouts view (Stripe Connect embedded
+	 *  onboarding and payouts). Optional: when absent, the Sell tab mints a
+	 *  Stripe-hosted onboarding link through `onboard()` and `openExternal`. */
+	openSellerPayouts?: () => Promise<void> | void;
 	/** Open the surface's sign-in flow from an auth-gated empty state. */
 	openSignIn?: () => Promise<void> | void;
 	/** Optional surface-owned confirmation dialog rendered beside the marketplace. */

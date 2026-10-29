@@ -11,9 +11,10 @@ export default defineConfig({
 	projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 	webServer: {
 		command:
-			"bunx vite --config e2e/harness/vite.ryu-provider-usage-proof.config.ts",
+			"node node_modules/vite/bin/vite.js --config e2e/harness/vite.ryu-provider-usage-proof.config.ts",
 		url: "http://localhost:5178/",
-		reuseExistingServer: !process.env.CI,
+		reuseExistingServer: false,
+		gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
 		timeout: 120_000,
 	},
 });

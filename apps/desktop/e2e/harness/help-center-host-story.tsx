@@ -9,23 +9,14 @@ import {
 	validatePluginRoute,
 } from "@ryu/app-host/rpc";
 import { htmlCompanionSrcdoc } from "@ryu/app-host/third-party-plugin";
-import { createElement, type Root } from "react";
-import { createRoot } from "react-dom/client";
+import { createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
 
 const PLUGIN_ID = "@ryu/help-center";
 const SPACE_ID = "help-center-proof-space";
 const DOCUMENT_KIND = "app:@ryu/help-center";
 
-interface ProofSource {
-	createdAt: string;
-	id: string;
-	schemaVersion: 1;
-	subject?: string;
-	title?: string;
-	type: "help-center/ticket" | "help-center/article";
-	updatedAt: string;
-	[key: string]: unknown;
-}
+type ProofSource = (typeof SEEDED_SOURCES)[number];
 
 interface ProofRecord {
 	id: string;
@@ -35,7 +26,7 @@ interface ProofRecord {
 	updated_at: number;
 }
 
-const SEEDED_SOURCES: ProofSource[] = [
+const SEEDED_SOURCES = [
 	{
 		schemaVersion: 1,
 		type: "help-center/ticket",

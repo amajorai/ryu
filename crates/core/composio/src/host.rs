@@ -36,6 +36,22 @@ pub trait ComposioHost: Send + Sync {
     /// Run a single agent prompt for a fired trigger (routes through the
     /// configured agent's real chat path); returns the run id.
     async fn run_agent(&self, agent_id: &str, prompt: &str) -> Result<String>;
+
+    /// Whether the agent may still receive events from a connected account.
+    /// `account_entity` is the Composio entity the subscription recorded as the
+    /// account's owner: empty for one of the user's accounts, or the agent's own
+    /// entity (`agent:<owner>:<agent_id>`). Re-checked on every delivery, so a
+    /// binding made before the agent's account access was narrowed stops
+    /// firing. Hosts without per-agent account policy keep every user-account
+    /// binding and never fire an own-entity one.
+    async fn agent_may_receive(
+        &self,
+        _agent_id: &str,
+        _connected_account_id: &str,
+        account_entity: &str,
+    ) -> Result<bool> {
+        Ok(account_entity.is_empty())
+    }
 }
 
 /// Process-global host, installed once at boot by `apps/core`.

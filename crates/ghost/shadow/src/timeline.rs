@@ -3,6 +3,131 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::DataPaths;
 use crate::event::EventHeader;
+use crate::seal::{self, TIMELINE_STORE};
+use ryu_crypto::content_sqlite::{ColumnPlan, KeyKind};
+
+/// Text columns of `timeline.db` sealed as `encb:v1:` under [`TIMELINE_STORE`],
+/// each bound to its table, column and row id. Ids, timestamps, app names,
+/// bundle ids, roles and counters stay clear (they order, filter and group).
+pub(crate) const SEALED_COLUMNS: [(&str, &str, KeyKind); 10] = [
+    ("events_index", "window_title", KeyKind::Integer),
+    ("events_index", "url", KeyKind::Integer),
+    ("events_index", "ax_title", KeyKind::Integer),
+    ("ax_snapshots", "window_title", KeyKind::Integer),
+    ("procedures", "name", KeyKind::Text),
+    ("procedures", "description", KeyKind::Text),
+    ("semantic_knowledge", "value", KeyKind::Text),
+    ("directives", "trigger_pattern", KeyKind::Text),
+    ("directives", "action_description", KeyKind::Text),
+    ("directives", "source_context", KeyKind::Text),
+];
+
+/// The migration plans of every sealed `timeline.db` column.
+pub(crate) fn column_plans() -> Vec<ColumnPlan> {
+    SEALED_COLUMNS
+        .iter()
+        .map(|(table, column, key_kind)| {
+            ColumnPlan::text(table, column, "id", *key_kind).expect("valid column plan")
+        })
+        .collect()
+}
+
+fn seal_col(
+    table: &str,
+    column: &str,
+    id: &str,
+    value: Option<&str>,
+) -> rusqlite::Result<Option<String>> {
+    seal::seal_opt(
+        TIMELINE_STORE,
+        &format!("{table}.{column}"),
+        "id",
+        id,
+        value,
+    )
+}
+
+fn open_col(table: &str, column: &str, id: &str, stored: Option<String>) -> Option<String> {
+    seal::open_opt(
+        TIMELINE_STORE,
+        &format!("{table}.{column}"),
+        "id",
+        id,
+        stored,
+    )
+}
+
+/// Open one sealed `events_index` text column (`window_title`, `url`,
+/// `ax_title`) of the row `id`. Legacy plaintext is returned as is;
+/// a value that does not open is counted and returned as `None`. For readers
+/// that query `timeline.db` directly.
+pub fn open_event_column(id: i64, column: &str, stored: Option<String>) -> Option<String> {
+    open_col("events_index", column, &id.to_string(), stored)
+}
+
+fn seal_event_col(id: i64, column: &str, value: Option<&str>) -> rusqlite::Result<Option<String>> {
+    seal_col("events_index", column, &id.to_string(), value)
+}
+
+/// The next `events_index` id. `TimelineIndex` is the only writer of the table
+/// and runs behind a mutex, so `MAX(id) + 1` (a primary-key lookup) is safe.
+fn next_event_id(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT COALESCE(MAX(id), 0) + 1 FROM events_index",
+        [],
+        |row| row.get(0),
+    )
+}
+
+fn sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(error.to_string().into())
+}
+
+/// Give `events_index` an explicit `id INTEGER PRIMARY KEY` (sealed values are
+/// bound to it; an implicit rowid is not stable across rebuilds). The rebuild
+/// copies every row's rowid into `id` explicitly, in one transaction.
+fn ensure_event_ids(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let columns: Vec<String> = {
+        let mut stmt = conn.prepare("PRAGMA table_info(events_index)")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    if columns.iter().any(|column| column == "id") {
+        return Ok(());
+    }
+    let list = columns
+        .iter()
+        .map(|column| format!("\"{column}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let typed: Vec<String> = {
+        let mut stmt = conn.prepare("PRAGMA table_info(events_index)")?;
+        let rows = stmt.query_map([], |row| {
+            let name: String = row.get(1)?;
+            let ty: String = row.get(2)?;
+            let not_null: bool = row.get(3)?;
+            let default: Option<String> = row.get(4)?;
+            let mut def = format!("\"{name}\" {ty}");
+            if not_null {
+                def.push_str(" NOT NULL");
+            }
+            if let Some(default) = default {
+                def.push_str(&format!(" DEFAULT {default}"));
+            }
+            Ok(def)
+        })?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(&format!(
+        "ALTER TABLE events_index RENAME TO events_index_rowid;
+         CREATE TABLE events_index (id INTEGER PRIMARY KEY, {});
+         INSERT INTO events_index (id, {list}) SELECT rowid, {list} FROM events_index_rowid;
+         DROP TABLE events_index_rowid;",
+        typed.join(", ")
+    ))?;
+    tx.commit()
+}
 
 /// Lightweight SQLite index for time-range queries.
 /// NOT the primary data store — just an index over the event log.
@@ -149,13 +274,22 @@ pub struct IntegrityReport {
 
 impl TimelineIndex {
     pub fn new(paths: &DataPaths) -> Result<Self, rusqlite::Error> {
+        #[cfg(test)]
+        seal::install_fixed_key_for_tests();
         let conn = Connection::open(&paths.timeline_db)?;
+        // Sealed columns: zero freed cells as they are replaced (before any migration).
+        ryu_crypto::content_sqlite::enable_secure_delete(&conn).map_err(sql_error)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
         // WAL mode for better concurrent read/write performance
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // Rebuildable capture index: a power cut may drop the last moments of
+        // writes but never corrupts the file, and each commit skips an fsync.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS events_index (
+                id           INTEGER PRIMARY KEY,
                 ts           INTEGER NOT NULL,
                 track        INTEGER NOT NULL,
                 event_type   TEXT NOT NULL DEFAULT '',
@@ -164,9 +298,6 @@ impl TimelineIndex {
                 url          TEXT,
                 segment_file TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_ts ON events_index(ts);
-            CREATE INDEX IF NOT EXISTS idx_app ON events_index(app_name);
-            CREATE INDEX IF NOT EXISTS idx_track ON events_index(track);
 
             CREATE TABLE IF NOT EXISTS video_segments (
                 display_id   INTEGER NOT NULL,
@@ -257,6 +388,12 @@ impl TimelineIndex {
             CREATE INDEX IF NOT EXISTS idx_keyframes_display_ts
                 ON keyframes(display_id, ts);
 
+            -- One versioned accepted capture policy, loaded before capture starts.
+            CREATE TABLE IF NOT EXISTS capture_policy (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                policy TEXT NOT NULL
+            );
+
             -- Retention policy persisted as key-value pairs.
             CREATE TABLE IF NOT EXISTS retention_config (
                 key   TEXT PRIMARY KEY,
@@ -285,11 +422,16 @@ impl TimelineIndex {
             let _ = conn.execute_batch(&sql);
         }
 
-        // Mimicry Phase A1: index on ax_role for behavioral queries
-        let _ = conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_ax_role ON events_index(ax_role);
-             CREATE INDEX IF NOT EXISTS idx_ax_title ON events_index(ax_title);",
-        );
+        // Explicit row ids (sealed values bind to them), then the indexes. The
+        // ax_title index is gone: the column is sealed, so it orders nothing.
+        ensure_event_ids(&conn)?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_ts ON events_index(ts);
+             CREATE INDEX IF NOT EXISTS idx_app ON events_index(app_name);
+             CREATE INDEX IF NOT EXISTS idx_track ON events_index(track);
+             CREATE INDEX IF NOT EXISTS idx_ax_role ON events_index(ax_role);
+             DROP INDEX IF EXISTS idx_ax_title;",
+        )?;
 
         // video_segments retention columns
         for &(col, col_type) in &[
@@ -408,12 +550,13 @@ impl TimelineIndex {
         segment_file: &str,
         segment_id: Option<i64>,
     ) -> Result<(), rusqlite::Error> {
+        let id = next_event_id(&self.conn)?;
         self.conn.execute(
             "INSERT INTO events_index
-                (ts, track, event_type, app_name, bundle_id, app_path, window_title,
+                (id, ts, track, event_type, app_name, bundle_id, app_path, window_title,
                  url, segment_file, seq, session_id, display_id, pid, segment_id,
                  ax_role, ax_title, ax_identifier, click_x, click_y)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+             VALUES (?20, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 header.effective_ts() as i64,
                 header.track,
@@ -421,8 +564,8 @@ impl TimelineIndex {
                 header.app_name,
                 header.bundle_id,
                 header.app_path,
-                header.window_title,
-                header.url,
+                seal_event_col(id, "window_title", header.window_title.as_deref())?,
+                seal_event_col(id, "url", header.url.as_deref())?,
                 segment_file,
                 header.seq.map(|s| s as i64),
                 header.session_id,
@@ -430,10 +573,11 @@ impl TimelineIndex {
                 header.pid,
                 segment_id,
                 header.ax_role,
-                header.ax_title,
+                seal_event_col(id, "ax_title", header.ax_title.as_deref())?,
                 header.ax_identifier,
                 header.click_x,
                 header.click_y,
+                id,
             ],
         )?;
 
@@ -465,7 +609,7 @@ impl TimelineIndex {
         let mut stmt = self.conn.prepare(
             "SELECT e.ts, e.track, e.event_type, e.app_name, e.bundle_id, e.app_path,
                     e.window_title, e.url, COALESCE(s.path, e.segment_file) as resolved_path,
-                    e.display_id
+                    e.display_id, e.id
              FROM events_index e
              LEFT JOIN segments s ON e.segment_id = s.segment_id
              WHERE e.ts >= ?1 AND e.ts <= ?2
@@ -473,6 +617,7 @@ impl TimelineIndex {
         )?;
 
         let rows = stmt.query_map(params![start_us as i64, end_us as i64], |row| {
+            let id: i64 = row.get(10)?;
             Ok(TimelineEntry {
                 ts: row.get::<_, i64>(0)? as u64,
                 track: row.get::<_, u8>(1)?,
@@ -480,8 +625,8 @@ impl TimelineIndex {
                 app_name: row.get(3)?,
                 bundle_id: row.get(4)?,
                 app_path: row.get(5)?,
-                window_title: row.get(6)?,
-                url: row.get(7)?,
+                window_title: open_event_column(id, "window_title", row.get(6)?),
+                url: open_event_column(id, "url", row.get(7)?),
                 display_id: row.get::<_, Option<i64>>(9)?.map(|v| v as u32),
                 segment_file: row.get(8)?,
             })
@@ -700,12 +845,13 @@ impl TimelineIndex {
     ) -> Result<(), rusqlite::Error> {
         let tx = self.conn.transaction()?;
         {
+            let mut id = next_event_id(&tx)?;
             let mut idx_stmt = tx.prepare(
                 "INSERT INTO events_index
                     (ts, track, event_type, app_name, window_title, url, segment_file,
                      seq, session_id, display_id, pid, bundle_id, segment_id,
-                     ax_role, ax_title, ax_identifier, click_x, click_y)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                     ax_role, ax_title, ax_identifier, click_x, click_y, id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             )?;
             let mut close_stmt =
                 tx.prepare("UPDATE app_focus_intervals SET end_ts = ?1 WHERE end_ts = 0")?;
@@ -720,8 +866,8 @@ impl TimelineIndex {
                     header.track,
                     header.r#type.as_deref().unwrap_or(""),
                     header.app_name,
-                    header.window_title,
-                    header.url,
+                    seal_event_col(id, "window_title", header.window_title.as_deref())?,
+                    seal_event_col(id, "url", header.url.as_deref())?,
                     segment_file,
                     header.seq.map(|s| s as i64),
                     header.session_id,
@@ -730,11 +876,13 @@ impl TimelineIndex {
                     header.bundle_id,
                     segment_id,
                     header.ax_role,
-                    header.ax_title,
+                    seal_event_col(id, "ax_title", header.ax_title.as_deref())?,
                     header.ax_identifier,
                     header.click_x,
                     header.click_y,
+                    id,
                 ])?;
+                id += 1;
 
                 // Track app focus intervals for app_switch events
                 if header.r#type.as_deref() == Some("app_switch") {
@@ -1547,23 +1695,42 @@ impl TimelineIndex {
         node_count: u32,
         trigger: Option<&str>,
     ) -> Result<i64, rusqlite::Error> {
-        self.conn.execute(
+        // The id is assigned on insert; the sealed title is bound to it, so the
+        // row is inserted without a title and updated in the same transaction.
+        seal::require_writable().map_err(seal::to_sql_error)?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO ax_snapshots
                 (timestamp_us, app_bundle_id, app_name, window_title,
                  display_id, tree_hash, node_count, trigger)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7)",
             params![
                 timestamp_us as i64,
                 app_bundle_id,
                 app_name,
-                window_title,
                 display_id,
                 tree_hash as i64,
                 node_count,
                 trigger,
             ],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        let id = tx.last_insert_rowid();
+        if window_title.is_some() {
+            tx.execute(
+                "UPDATE ax_snapshots SET window_title = ?1 WHERE id = ?2",
+                params![
+                    seal_col(
+                        "ax_snapshots",
+                        "window_title",
+                        &id.to_string(),
+                        window_title
+                    )?,
+                    id
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(id)
     }
 
     /// Find an AX snapshot by approximate timestamp (nearest within 5 seconds).
@@ -1583,12 +1750,18 @@ impl TimelineIndex {
         )?;
         let result = stmt
             .query_row(params![ts - window, ts + window, ts], |row| {
+                let id: i64 = row.get(0)?;
                 Ok(AxSnapshotRecord {
-                    id: row.get(0)?,
+                    id,
                     timestamp_us: row.get::<_, i64>(1)? as u64,
                     app_bundle_id: row.get(2)?,
                     app_name: row.get(3)?,
-                    window_title: row.get(4)?,
+                    window_title: open_col(
+                        "ax_snapshots",
+                        "window_title",
+                        &id.to_string(),
+                        row.get(4)?,
+                    ),
                     display_id: row.get(5)?,
                     tree_hash: row.get::<_, i64>(6)? as u64,
                     node_count: row.get(7)?,
@@ -1619,12 +1792,18 @@ impl TimelineIndex {
             let rows = stmt.query_map(
                 params![bundle_id, start_ts as i64, end_ts as i64, limit],
                 |row| {
+                    let id: i64 = row.get(0)?;
                     Ok(AxSnapshotRecord {
-                        id: row.get(0)?,
+                        id,
                         timestamp_us: row.get::<_, i64>(1)? as u64,
                         app_bundle_id: row.get(2)?,
                         app_name: row.get(3)?,
-                        window_title: row.get(4)?,
+                        window_title: open_col(
+                            "ax_snapshots",
+                            "window_title",
+                            &id.to_string(),
+                            row.get(4)?,
+                        ),
                         display_id: row.get(5)?,
                         tree_hash: row.get::<_, i64>(6)? as u64,
                         node_count: row.get(7)?,
@@ -1643,12 +1822,18 @@ impl TimelineIndex {
                  LIMIT ?3",
             )?;
             let rows = stmt.query_map(params![start_ts as i64, end_ts as i64, limit], |row| {
+                let id: i64 = row.get(0)?;
                 Ok(AxSnapshotRecord {
-                    id: row.get(0)?,
+                    id,
                     timestamp_us: row.get::<_, i64>(1)? as u64,
                     app_bundle_id: row.get(2)?,
                     app_name: row.get(3)?,
-                    window_title: row.get(4)?,
+                    window_title: open_col(
+                        "ax_snapshots",
+                        "window_title",
+                        &id.to_string(),
+                        row.get(4)?,
+                    ),
                     display_id: row.get(5)?,
                     tree_hash: row.get::<_, i64>(6)? as u64,
                     node_count: row.get(7)?,
@@ -1682,8 +1867,8 @@ impl TimelineIndex {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 id,
-                name,
-                description,
+                seal_col("procedures", "name", id, Some(name))?,
+                seal_col("procedures", "description", id, Some(description))?,
                 source_app,
                 source_bundle_id,
                 step_count,
@@ -1712,10 +1897,12 @@ impl TimelineIndex {
                  LIMIT ?2",
             )?;
             let rows = stmt.query_map(params![app, limit], |row| {
+                let id: String = row.get(0)?;
                 Ok(ProcedureRecord {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
+                    name: open_col("procedures", "name", &id, row.get(1)?).unwrap_or_default(),
+                    description: open_col("procedures", "description", &id, row.get(2)?)
+                        .unwrap_or_default(),
+                    id,
                     source_app: row.get(3)?,
                     source_bundle_id: row.get(4)?,
                     step_count: row.get(5)?,
@@ -1735,10 +1922,12 @@ impl TimelineIndex {
                  LIMIT ?1",
             )?;
             let rows = stmt.query_map(params![limit], |row| {
+                let id: String = row.get(0)?;
                 Ok(ProcedureRecord {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
+                    name: open_col("procedures", "name", &id, row.get(1)?).unwrap_or_default(),
+                    description: open_col("procedures", "description", &id, row.get(2)?)
+                        .unwrap_or_default(),
+                    id,
                     source_app: row.get(3)?,
                     source_bundle_id: row.get(4)?,
                     step_count: row.get(5)?,
@@ -1781,7 +1970,7 @@ impl TimelineIndex {
                 id,
                 category,
                 key,
-                value,
+                seal_col("semantic_knowledge", "value", id, Some(value))?,
                 confidence,
                 source_episode_ids,
                 created_at as i64,
@@ -1807,11 +1996,13 @@ impl TimelineIndex {
                  LIMIT ?2",
             )?;
             let rows = stmt.query_map(params![cat, limit], |row| {
+                let id: String = row.get(0)?;
                 Ok(SemanticKnowledgeRecord {
-                    id: row.get(0)?,
+                    value: open_col("semantic_knowledge", "value", &id, row.get(3)?)
+                        .unwrap_or_default(),
+                    id,
                     category: row.get(1)?,
                     key: row.get(2)?,
-                    value: row.get(3)?,
                     confidence: row.get(4)?,
                     source_episode_ids: row.get(5)?,
                     created_at: row.get::<_, i64>(6)? as u64,
@@ -1830,11 +2021,13 @@ impl TimelineIndex {
                  LIMIT ?1",
             )?;
             let rows = stmt.query_map(params![limit], |row| {
+                let id: String = row.get(0)?;
                 Ok(SemanticKnowledgeRecord {
-                    id: row.get(0)?,
+                    value: open_col("semantic_knowledge", "value", &id, row.get(3)?)
+                        .unwrap_or_default(),
+                    id,
                     category: row.get(1)?,
                     key: row.get(2)?,
-                    value: row.get(3)?,
                     confidence: row.get(4)?,
                     source_episode_ids: row.get(5)?,
                     created_at: row.get::<_, i64>(6)? as u64,
@@ -1887,12 +2080,17 @@ impl TimelineIndex {
             params![
                 id,
                 directive_type,
-                trigger_pattern,
-                action_description,
+                seal_col("directives", "trigger_pattern", id, Some(trigger_pattern))?,
+                seal_col(
+                    "directives",
+                    "action_description",
+                    id,
+                    Some(action_description)
+                )?,
                 priority,
                 created_at as i64,
                 expires_at.map(|v| v as i64),
-                source_context
+                seal_col("directives", "source_context", id, Some(source_context))?
             ],
         )?;
         Ok(())
@@ -1915,18 +2113,22 @@ impl TimelineIndex {
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![now_us as i64, limit], |row| {
+            let id: String = row.get(0)?;
             Ok(DirectiveRecord {
-                id: row.get(0)?,
+                trigger_pattern: open_col("directives", "trigger_pattern", &id, row.get(2)?)
+                    .unwrap_or_default(),
+                action_description: open_col("directives", "action_description", &id, row.get(3)?)
+                    .unwrap_or_default(),
                 directive_type: row.get(1)?,
-                trigger_pattern: row.get(2)?,
-                action_description: row.get(3)?,
                 priority: row.get(4)?,
                 created_at: row.get::<_, i64>(5)? as u64,
                 expires_at: row.get::<_, Option<i64>>(6)?.map(|v| v as u64),
                 is_active: row.get::<_, i32>(7)? != 0,
                 execution_count: row.get(8)?,
                 last_triggered_at: row.get::<_, Option<i64>>(9)?.map(|v| v as u64),
-                source_context: row.get(10)?,
+                source_context: open_col("directives", "source_context", &id, row.get(10)?)
+                    .unwrap_or_default(),
+                id,
             })
         })?;
         rows.collect()
@@ -1964,6 +2166,99 @@ impl TimelineIndex {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn legacy_rowid_events_get_ids_and_text_is_sealed() {
+        let tmp = TempDir::new().unwrap();
+        let paths = DataPaths::new(tmp.path().to_str().unwrap());
+        paths.ensure_dirs().unwrap();
+        {
+            // A timeline written by an earlier build: implicit rowid, plaintext.
+            let conn = Connection::open(&paths.timeline_db).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE events_index (ts INTEGER NOT NULL, track INTEGER NOT NULL,
+                 event_type TEXT NOT NULL DEFAULT '', app_name TEXT, window_title TEXT,
+                 url TEXT, segment_file TEXT NOT NULL);
+                 INSERT INTO events_index (ts, track, event_type, app_name, window_title, url,
+                 segment_file) VALUES (10, 3, 'app_switch', 'Mail', 'LegacyTitleQwe', NULL, 's');",
+            )
+            .unwrap();
+        }
+        let mut index = TimelineIndex::new(&paths).unwrap();
+        let header = EventHeader {
+            ts: 20,
+            track: 3,
+            r#type: Some("app_switch".into()),
+            app_name: Some("Notes".into()),
+            window_title: Some("FreshTitleZxc".into()),
+            url: Some("https://example.test/secret-path".into()),
+            v: None,
+            ts_wall_us: None,
+            ts_mono_ns: None,
+            seq: None,
+            session_id: None,
+            source: None,
+            display_id: None,
+            pid: None,
+            bundle_id: None,
+            app_path: None,
+            ax_role: None,
+            ax_title: None,
+            ax_identifier: None,
+            click_x: None,
+            click_y: None,
+        };
+        index.insert(&header, "s", None).unwrap();
+        let entries = index.query_range(0, 100).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].window_title.as_deref(), Some("LegacyTitleQwe"));
+        assert_eq!(entries[1].window_title.as_deref(), Some("FreshTitleZxc"));
+        assert_eq!(
+            entries[1].url.as_deref(),
+            Some("https://example.test/secret-path")
+        );
+        let stored: String = index
+            .conn
+            .query_row(
+                "SELECT window_title FROM events_index WHERE ts = 20",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(stored.starts_with("encb:v1:"));
+
+        // The background migration seals the legacy row; a second run is a no-op.
+        drop(index);
+        let report = crate::migrate_timeline(&paths.timeline_db).unwrap();
+        assert_eq!(report.sealed, 1);
+        let again = crate::migrate_timeline(&paths.timeline_db).unwrap();
+        assert_eq!(again.sealed, 0);
+        let index = TimelineIndex::new(&paths).unwrap();
+        index
+            .conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .unwrap();
+        let bytes = std::fs::read(&paths.timeline_db).unwrap();
+        for needle in ["LegacyTitleQwe", "FreshTitleZxc", "secret-path"] {
+            assert!(
+                !bytes.windows(needle.len()).any(|w| w == needle.as_bytes()),
+                "{needle} is on disk in plaintext"
+            );
+        }
+        let entries = index.query_range(0, 100).unwrap();
+        assert_eq!(entries[0].window_title.as_deref(), Some("LegacyTitleQwe"));
+        // A sealed title copied to another row does not open there.
+        index
+            .conn
+            .execute(
+                "UPDATE events_index SET window_title =
+                 (SELECT window_title FROM events_index WHERE ts = 20) WHERE ts = 10",
+                [],
+            )
+            .unwrap();
+        let entries = index.query_range(0, 100).unwrap();
+        assert_eq!(entries[0].window_title, None);
+    }
 
     #[test]
     fn test_insert_and_query_v1() {

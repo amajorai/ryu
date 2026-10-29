@@ -3,7 +3,9 @@
 //! Parakeet (NVIDIA FastConformer-TDT) is **not** a GGML/whisper model — it runs
 //! on ONNX Runtime, so it cannot be served by the whisper.cpp engine. We fetch
 //! the int8 ONNX bundle Handy publishes (the same one `transcribe-rs` loads) and
-//! extract it into `~/.ryu/models/parakeet-tdt-0.6b-v3-int8/`. Actual inference
+//! extract it into `models/speech-to-text/parakeet/parakeet-tdt-0.6b-v3-int8/`
+//! ([`ryu_sidecar_runtime::layout::parakeet_v3_dir`] — the same dir the Meetings
+//! and Subtitles sidecars read). Actual inference
 //! is done in-process by the parakeet engine behind the `voice-parakeet` feature.
 //!
 //! The model URL is a swappable default (`RYU_PARAKEET_MODEL_URL`), not a lock.
@@ -12,17 +14,20 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use ryu_sidecar_runtime::layout;
+
 use crate::sidecar::download_manager::{
-    build_http_client, extract_tar_gz_to_dir, ryu_dir, ProgressCallback, VersionStore,
+    build_http_client, extract_tar_gz_to_dir, ryu_dir, tmp_dir, ProgressCallback, VersionStore,
 };
 
-/// Directory name the extracted model lives in (transcribe-rs expects exactly this).
-pub const MODEL_DIR_NAME: &str = "parakeet-tdt-0.6b-v3-int8";
+/// Directory name the extracted model lives in (transcribe-rs expects exactly
+/// this, and the archive's top-level folder carries it).
+pub const MODEL_DIR_NAME: &str = layout::PARAKEET_V3_INT8_DIR;
 
 /// Default int8 ONNX bundle (CPU-friendly, ~478 MB). Published by Handy; mirrors
 /// istupakov's HF ONNX export. Swappable via `RYU_PARAKEET_MODEL_URL`.
 const DEFAULT_MODEL_URL: &str = "https://blob.handy.computer/parakeet-v3-int8.tar.gz";
-const MODEL_STORE_KEY: &str = "parakeet-model:v3-int8";
+pub(crate) const MODEL_STORE_KEY: &str = "parakeet-model:v3-int8";
 
 /// Decompression-bomb cap for the model archive. The int8 ONNX bundle is
 /// ~478 MB compressed and expands past the extractor's 500 MB default cap
@@ -31,9 +36,19 @@ const MODEL_STORE_KEY: &str = "parakeet-model:v3-int8";
 /// (`RYU_PARAKEET_MODEL_URL`).
 const MODEL_EXTRACT_CAP_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
-/// Resolved directory that holds the extracted ONNX model files.
+/// Resolved directory that holds the extracted ONNX model files:
+/// `models/speech-to-text/parakeet/parakeet-tdt-0.6b-v3-int8`.
 pub fn model_dir() -> PathBuf {
-    ryu_dir().join("models").join(MODEL_DIR_NAME)
+    layout::parakeet_v3_dir(&ryu_dir())
+}
+
+/// `models/speech-to-text/parakeet` — the archive is extracted here, so its
+/// top-level `parakeet-tdt-0.6b-v3-int8/` folder becomes [`model_dir`].
+pub fn family_dir() -> PathBuf {
+    model_dir()
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(model_dir)
 }
 
 /// The four files transcribe-rs needs to load the parakeet model.
@@ -82,7 +97,7 @@ impl ParakeetDownloader {
     ///
     /// The tar.gz bundle downloads through the global [`DownloadCenter`] (#456)
     /// so it streams to disk and shows in the overlay; we then read it back and
-    /// extract it into `~/.ryu/models/` exactly as before.
+    /// extract it into `models/speech-to-text/parakeet/`.
     pub async fn ensure_model(
         &self,
         downloads: &crate::downloads::DownloadCenter,
@@ -101,7 +116,7 @@ impl ParakeetDownloader {
 
         // Download the archive through the center to a deterministic temp dest
         // (so its own `.part`/resume works), then read it back to extract.
-        let archive_dest = ryu_dir().join("tmp").join("parakeet-v3-int8.tar.gz");
+        let archive_dest = tmp_dir().join("parakeet-v3-int8.tar.gz");
         let archive_path = downloads
             .download_blocking(crate::downloads::DownloadSpec {
                 kind: crate::downloads::DownloadKind::Voice,
@@ -132,7 +147,7 @@ impl ParakeetDownloader {
                     let archive = tokio::fs::read(&archive_to_extract)
                         .await
                         .context("reading downloaded parakeet model archive")?;
-                    let models_dir = ryu_dir().join("models");
+                    let models_dir = family_dir();
                     let written = tokio::task::spawn_blocking(move || {
                         extract_tar_gz_to_dir(
                             &archive,
@@ -174,5 +189,19 @@ impl ParakeetDownloader {
 impl Default for ParakeetDownloader {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_dir_is_the_shared_parakeet_v3_dir() {
+        // Core's download target and the Meetings/Subtitles sidecars' read path
+        // must be the same folder.
+        assert_eq!(model_dir(), layout::parakeet_v3_dir(&ryu_dir()));
+        assert!(model_dir().ends_with("models/speech-to-text/parakeet/parakeet-tdt-0.6b-v3-int8"));
+        assert_eq!(family_dir().join(MODEL_DIR_NAME), model_dir());
     }
 }

@@ -1,6 +1,6 @@
 /* @jsxImportSource @opentui/react */
 import { expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
+import { KeyEvent } from "@opentui/core";
 import { act } from "react";
 import { ThemeProvider } from "../../components/ui/theme-provider.tsx";
 import { CoreProvider, useCore } from "../core/CoreContext.tsx";
@@ -10,6 +10,7 @@ import {
 	useWorkspace,
 	WorkspaceProvider,
 } from "../workspace/WorkspaceContext.tsx";
+import { testRender } from "./cli-test-render.ts";
 
 async function until(predicate: () => boolean) {
 	const deadline = Date.now() + 3000;
@@ -91,20 +92,22 @@ test("run polls stay single and Escape cannot be undone by a late poll or run-st
 	);
 	const press = async (name: string) => {
 		await act(async () => {
-			(
-				setup.renderer as unknown as {
-					keyInput: { emit: (event: string, data: unknown) => void };
-				}
-			).keyInput.emit("keypress", {
-				name,
-				sequence: "",
-				shift: false,
-				ctrl: false,
-				meta: false,
-				option: false,
-				eventType: "press",
-				repeated: false,
-			});
+			setup.renderer.keyInput.emit(
+				"keypress",
+				new KeyEvent({
+					name,
+					sequence: "",
+					shift: false,
+					ctrl: false,
+					meta: false,
+					option: false,
+					eventType: "press",
+					repeated: false,
+					number: false,
+					raw: "",
+					source: "raw",
+				})
+			);
 		});
 		await setup.renderOnce();
 	};

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-skills"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 build = "build.rs"
 license = "Apache-2.0"
@@ -10,18 +10,25 @@ repository = "https://github.com/amajorai/ryu"
 # Versions are matched to apps/core/Cargo.toml so the in-process merge into Core's
 # axum router has no version skew. This crate has ZERO dependency on apps/core.
 [dependencies]
+# The data-dir layout (`db/`, `state/`, …) shared by every Ryu process.
+ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.0" }
 axum = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yml = "0.0.12"
+noyalib = { version = "0.0.58", default-features = false, features = ["std", "compat-serde-yaml"] }
 tracing = "0.1"
 dirs = "5"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 anyhow = "1"
-ryu-json-store = { path = "../json-store", version = "0.4.0" }
-ryu-workspace = { path = "../workspace", version = "0.4.0" }
+ryu-json-store = { path = "../json-store", version = "0.5.0" }
+ryu-workspace = { path = "../workspace", version = "0.5.0" }
+# Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
+# backend from this crate: Core links it through its own dependency.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+# Test builds only: lets unit tests construct sealing stores without a host.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["test-ephemeral-host"] }

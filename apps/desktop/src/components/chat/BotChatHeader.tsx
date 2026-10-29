@@ -1,9 +1,16 @@
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Avatar } from "@ryu/ui/components/avatar.tsx";
+import { useConversationActivity } from "@ryu/blocks/desktop/agent-elements/conversation-activity.ts";
+import { TextShimmer } from "@ryu/blocks/desktop/agent-elements/text-shimmer.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import {
+	AnimatePresence,
+	motion,
+	type Transition,
+	useReducedMotion,
+} from "framer-motion";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import layout from "./chat-layout.module.css";
 
 type BotChatHeaderAgent = Pick<
 	AgentSummary,
@@ -17,13 +24,24 @@ const FALLBACK_AGENT: BotChatHeaderAgent = {
 	engine: "ryu",
 	id: "ryu",
 	name: "Ryu",
-	title: "Ryu Bot",
+	title: "Bot",
+};
+
+const BUBBLE_SPRING: Transition = {
+	type: "spring",
+	stiffness: 520,
+	damping: 38,
+	mass: 0.8,
 };
 
 /**
  * The Bot-mode identity row above an active conversation. It intentionally
  * stays present for both a new chat and an existing thread so the managed
  * assistant remains the visual anchor while the transcript changes below it.
+ *
+ * The name bubble morphs taller while the bot is busy to show what it is doing
+ * right now ("Thinking…", "Searching the web…"), read from the enclosing
+ * AgentChat, and settles back to just the name when the turn ends.
  */
 export function BotChatHeader({
 	agent,
@@ -37,43 +55,82 @@ export function BotChatHeader({
 }) {
 	const currentAgent = agent ?? FALLBACK_AGENT;
 	const name = currentAgent.name.trim() || FALLBACK_AGENT.name;
+	const { label, state } = useConversationActivity();
+	const reduceMotion = useReducedMotion();
+	const tl = useLiteralMessages();
+	const transition: Transition = reduceMotion ? { duration: 0 } : BUBBLE_SPRING;
+	const busy =
+		state === "thinking" || state === "working" || state === "responding";
 
 	return (
 		<header
-			aria-label={`Chat with ${name}`}
+			aria-label={tl("Chat with {name}", { name })}
 			className={cn(
-				"flex shrink-0 flex-col items-center gap-1.5 px-4 pb-2",
-				clearTitleBar ? "pt-12" : "pt-3",
+				"flex shrink-0 flex-col items-center gap-1.5 px-4 pb-1",
+				clearTitleBar ? layout.titlebarInset : "pt-3",
 				className
 			)}
 			data-testid="bot-chat-header"
 		>
-			<div data-testid="bot-chat-header-avatar">
-				<Avatar
-					aria-hidden="true"
-					className="bg-muted/60 shadow-sm ring-1 ring-border/30 after:hidden"
-					size="lg"
-				>
-					<AgentAvatar
-						avatarUrl={currentAgent.avatarUrl}
-						className="size-full rounded-full object-contain"
-						engine={engineForAgent(currentAgent)}
-						glyph={currentAgent.avatarGlyph}
-						size="40px"
-					/>
-				</Avatar>
-			</div>
 			<div
-				className="inline-flex max-w-[18rem] items-center gap-1 rounded-full bg-muted/80 px-3 py-1 text-foreground shadow-sm ring-1 ring-border/30"
-				data-testid="bot-chat-header-name"
+				aria-hidden="true"
+				className="size-10"
+				data-testid="bot-chat-header-avatar"
 			>
-				<span className="truncate font-medium text-sm">{name}</span>
-				<HugeiconsIcon
-					aria-hidden="true"
-					className="size-3 shrink-0 text-muted-foreground"
-					icon={ArrowDown01Icon}
-					strokeWidth={2}
+				<AgentAvatar
+					avatarUrl={currentAgent.avatarUrl}
+					className="size-full object-contain"
+					engine={engineForAgent(currentAgent)}
+					glyph={currentAgent.avatarGlyph}
+					size="40px"
 				/>
+			</div>
+			{/* Reserves the expanded bubble's height so the transcript never jumps. */}
+			<div className="flex h-12 items-start justify-center">
+				<motion.div
+					className="flex max-w-[18rem] flex-col items-center bg-muted/80 px-4 py-1.5 text-foreground shadow-sm ring-1 ring-border/30"
+					data-state={state}
+					data-testid="bot-chat-header-name"
+					layout
+					style={{ borderRadius: 20 }}
+					transition={transition}
+				>
+					<motion.span
+						className="truncate font-medium text-sm leading-5"
+						layout="position"
+						transition={transition}
+					>
+						{name}
+					</motion.span>
+					<AnimatePresence initial={false} mode="popLayout">
+						{label ? (
+							<motion.span
+								animate={{ opacity: 1, y: 0 }}
+								aria-live="polite"
+								className={cn(
+									"block max-w-full truncate text-xs leading-4",
+									state === "error"
+										? "text-destructive"
+										: "text-muted-foreground"
+								)}
+								data-testid="bot-chat-header-status"
+								exit={{ opacity: 0, y: -4 }}
+								initial={{ opacity: 0, y: -4 }}
+								key="status"
+								layout="position"
+								transition={transition}
+							>
+								{busy ? (
+									<TextShimmer as="span" duration={1.6}>
+										{label}
+									</TextShimmer>
+								) : (
+									label
+								)}
+							</motion.span>
+						) : null}
+					</AnimatePresence>
+				</motion.div>
 			</div>
 		</header>
 	);

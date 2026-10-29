@@ -1,3 +1,4 @@
+import { isNativeNumber } from "../../lib/native-primitive-observation.ts";
 /**
  * The two faces of the pass, painted into 2D canvases.
  *
@@ -301,7 +302,7 @@ export function fitFontSize(
 		trackingEm?: number;
 		weight: number;
 	}
-): { size: number; wrapped: boolean } {
+) {
 	let size = maxPx;
 	const widthAt = (px: number): number => {
 		ctx.font = font(family, weight, px, scale);
@@ -321,9 +322,7 @@ export function fitFontSize(
  */
 export function setTracking(ctx: CanvasRenderingContext2D, px: number): void {
 	if ("letterSpacing" in ctx) {
-		(
-			ctx as CanvasRenderingContext2D & { letterSpacing: string }
-		).letterSpacing = `${px}px`;
+		ctx.letterSpacing = `${px}px`;
 	}
 }
 
@@ -592,7 +591,7 @@ export function paintFrontType(
 	// Footer first, because the hero above it is bottom-aligned against whatever
 	// the footer leaves — the same `flex-1` + `justify-end` the live card uses.
 	let heroFloor = bottom;
-	if (typeof content.position === "number") {
+	if (isNativeNumber(content.position)) {
 		const statTop = paintPassStat(ctx, env, {
 			baseline: bottom,
 			label: "Position",
@@ -801,13 +800,7 @@ export function paintBackType(
 }
 
 /** The face's rounded silhouette, inset by the ring gutter, in device px. */
-export function faceRect(scale: number): {
-	height: number;
-	radius: number;
-	width: number;
-	x: number;
-	y: number;
-} {
+export function faceRect(scale: number) {
 	return {
 		height: (CARD_HEIGHT_PX - METAL_EDGE_RING_PX * 2) * scale,
 		radius: FACE_RADIUS_PX * scale,

@@ -1,0 +1,15 @@
+{
+  "status": 402,
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_dc684f475c274c13b2574335da3c3aec"
+  },
+  "body": {
+    "balance_micro_usd": 0,
+    "code": "insufficient_credits",
+    "error": "This organization has no credits left for Connect tool execution. Add credits to run tools again.",
+    "estimate_micro_usd": 0,
+    "ok": false
+  }
+}

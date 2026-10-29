@@ -1,6 +1,8 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { USAGE_STREAK_HINT } from "@ryu/ui/lib/usage-streak.ts";
 
 import { EntityAvatar } from "./entity-avatar.tsx";
 import { Logo } from "./logo.tsx";
@@ -85,19 +87,23 @@ export interface WrappedPassProps {
  * One labelled fact in the footer: value above its label, the same treatment
  * the referral and tier cards give their stats.
  */
-function WrappedStat({ label, value }: { label: string; value: string }) {
+function WrappedStat({
+	hint,
+	label,
+	value,
+}: {
+	/** Plain-text explanation, shown as the native hover title. The pass tilts
+	 *  and drags, so a floating tooltip popup would fight the gesture. */
+	hint?: string;
+	label: string;
+	value: string;
+}) {
 	return (
-		<div className="flex min-w-0 flex-col">
-			<span
-				className="truncate font-medium font-mono tabular-nums leading-none"
-				style={{ fontSize: `${WRAPPED_STAT_VALUE_PX}px` }}
-			>
+		<div className="flex min-w-0 flex-col" title={hint}>
+			<span className="truncate font-medium font-mono text-[20px] tabular-nums leading-none">
 				{value}
 			</span>
-			<span
-				className="truncate text-muted-foreground"
-				style={{ fontSize: `${WRAPPED_META_PX}px` }}
-			>
+			<span className="truncate text-[12px] text-muted-foreground">
 				{label}
 			</span>
 		</div>
@@ -118,6 +124,7 @@ export function WrappedPass({
 	topModel,
 	still = false,
 }: WrappedPassProps) {
+	const tl = useLiteralMessages();
 	// Seeded off the NAME so the card is the member's own colour and two people
 	// never hold the same one. Falls back to a stable literal rather than a fresh
 	// value per render, which would rehash the backdrop on every paint for nothing.
@@ -147,8 +154,8 @@ export function WrappedPass({
 						<Logo size="20px" variant="outline" />
 						<span className="font-medium text-sm">Ryu</span>
 					</span>
-					<span className="text-[11px] text-muted-foreground uppercase tracking-widest">
-						Wrapped · {WRAPPED_YEAR}
+					<span className="type-caption text-muted-foreground uppercase tracking-widest">
+						{tl("Wrapped · {year}", { year: String(WRAPPED_YEAR) })}
 					</span>
 				</div>
 
@@ -184,7 +191,10 @@ export function WrappedPass({
 						minPx={WRAPPED_SUB_MIN_PX}
 						stepPx={WRAPPED_FIT_STEP_PX}
 					>
-						{`Level ${level} · ${streakCurrent}-day streak`}
+						{tl("Level {level} · {streakDays}-day streak", {
+							level: String(level),
+							streakDays: String(streakCurrent),
+						})}
 					</AutoFitText>
 				</div>
 
@@ -197,7 +207,11 @@ export function WrappedPass({
 						label="Agent hours"
 						value={`${agentHours.toFixed(1)}h`}
 					/>
-					<WrappedStat label="Best streak" value={`${streakLongest}d`} />
+					<WrappedStat
+						hint={USAGE_STREAK_HINT}
+						label="Best streak"
+						value={`${streakLongest}d`}
+					/>
 					<WrappedStat label="Top model" value={topModel?.trim() || "Ryu"} />
 				</div>
 			</div>

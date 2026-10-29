@@ -6,6 +6,8 @@
 // and install-pack. TanStack Query caches the list per node; the opened pack is
 // a per-id query, and install is a mutation that invalidates the list + the
 // catalog list (a pack install changes which skills show as installed).
+// Installing a pack activates its new members, so it asks first through the
+// shared prompt-cache confirmation (`confirmSkillSetChange`).
 
 import {
 	keepPreviousData,
@@ -14,6 +16,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchSkillPackDetail,
@@ -39,6 +42,7 @@ export function skillPackDetailQuery(target: ApiTarget, id: string) {
 }
 
 export function useSkillPacks() {
+	const { confirmSkillSetChange } = useSkillDistributionFlow();
 	const activeNode = useActiveNode();
 	const target: ApiTarget = {
 		url: activeNode.url,
@@ -59,8 +63,12 @@ export function useSkillPacks() {
 
 	const detailQuery = useQuery({
 		queryKey: ["skills", "packs", "detail", url, openedId],
-		queryFn: () =>
-			fetchSkillPackDetail({ url, token, userJwt }, openedId as string),
+		queryFn: () => {
+			if (openedId === null) {
+				throw new Error("Select a skill pack before requesting its details.");
+			}
+			return fetchSkillPackDetail({ url, token, userJwt }, openedId);
+		},
 		enabled: openedId !== null,
 	});
 
@@ -85,9 +93,22 @@ export function useSkillPacks() {
 		},
 	});
 
+	// Only members not yet on disk change the enabled set; a pack whose members
+	// are all installed re-runs without asking.
 	const install = useCallback(
-		(id: string) => installMutation.mutateAsync(id),
-		[installMutation]
+		async (id: string) => {
+			const pack = await qc.fetchQuery(
+				skillPackDetailQuery({ url, token, userJwt }, id)
+			);
+			const added = pack.members
+				.filter((member) => !member.installed)
+				.map((member) => member.name);
+			if (!(await confirmSkillSetChange(added))) {
+				return [];
+			}
+			return installMutation.mutateAsync(id);
+		},
+		[confirmSkillSetChange, installMutation, qc, url, token, userJwt]
 	);
 
 	const open = useCallback((id: string) => {

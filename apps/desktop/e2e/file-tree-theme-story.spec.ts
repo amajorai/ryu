@@ -20,6 +20,14 @@ test.describe.configure({ timeout: 90_000 });
 const STORY_URL = "/file-tree-theme-story.html";
 
 test.describe("file tree theming — real hook in isolation", () => {
+	test("inherit keeps the selected app light mode when the OS is dark", async ({
+		page,
+	}) => {
+		await page.emulateMedia({ colorScheme: "dark" });
+		await page.goto(STORY_URL);
+		await expect(page.getByTestId("tree")).toHaveCSS("color-scheme", "light");
+	});
+
 	test("the inherit default pushes no theme variables", async ({ page }) => {
 		await page.goto(STORY_URL);
 		const tree = page.getByTestId("tree");
@@ -51,8 +59,8 @@ test.describe("file tree theming — real hook in isolation", () => {
 		await page.goto(STORY_URL);
 		await expect(page.getByTestId("tree")).toBeVisible();
 		const failed = await page.evaluate(() =>
-			(
-				window as unknown as {
+			/* SAFETY: file-tree-theme-story.tsx installs __resolveEveryCatalogTheme before this proof page is evaluated. */ (
+				window as Window & {
 					__resolveEveryCatalogTheme: () => Promise<string[]>;
 				}
 			).__resolveEveryCatalogTheme()

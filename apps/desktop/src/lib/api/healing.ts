@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/healing.ts
 //
 // Typed client for Core's self-healing surface (`/api/healing/*`): the loop that
@@ -41,12 +42,22 @@ export interface HealingStatus {
 
 /** Read the resolved healing config. */
 export function getHealingConfig(target: ApiTarget): Promise<HealingConfig> {
-	return request<HealingConfig>(target, "/api/healing/config");
+	return request(
+		target,
+		"/api/healing/config",
+		undefined,
+		healingConfigResponseSchema
+	);
 }
 
 /** Read the in-memory per-source heal-attempt map (history/observability). */
 export function getHealingStatus(target: ApiTarget): Promise<HealingStatus> {
-	return request<HealingStatus>(target, "/api/healing/status");
+	return request(
+		target,
+		"/api/healing/status",
+		undefined,
+		healingStatusResponseSchema
+	);
 }
 
 /** Set any subset of the healing config; returns the newly-resolved config. */
@@ -54,8 +65,32 @@ export function setHealingConfig(
 	target: ApiTarget,
 	patch: HealingConfigPatch
 ): Promise<HealingConfig> {
-	return request<HealingConfig>(target, "/api/healing/config", {
-		method: "POST",
-		body: patch,
-	});
+	return request(
+		target,
+		"/api/healing/config",
+		{
+			method: "POST",
+			body: patch,
+		},
+		healingConfigResponseSchema
+	);
 }
+
+const healingConfigResponseSchema = z
+	.object({
+		auto_decide: z.boolean(),
+		cooldown_secs: z.number(),
+		diagnose_effort: z.string(),
+		diagnose_model: z.string(),
+		enabled: z.boolean(),
+		max_attempts: z.number(),
+	})
+	.passthrough();
+
+const healAttemptResponseSchema = z
+	.object({ count: z.number(), given_up: z.boolean(), last_at: z.number() })
+	.passthrough();
+
+const healingStatusResponseSchema = z
+	.object({ attempts: z.record(z.string(), healAttemptResponseSchema) })
+	.passthrough();

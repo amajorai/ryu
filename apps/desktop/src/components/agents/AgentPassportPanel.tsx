@@ -6,9 +6,10 @@ import {
 	Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
 import { useMemo } from "react";
@@ -120,6 +121,7 @@ function activityTime(timestamp: string): string {
 }
 
 function ActivityRow({ row }: { row: PassportActivityRow }) {
+	const tl = useLiteralMessages();
 	const success = row.outcome === "success";
 	const correlations = [
 		row.requestId ? `request ${row.requestId}` : null,
@@ -147,7 +149,7 @@ function ActivityRow({ row }: { row: PassportActivityRow }) {
 					</Badge>
 					<Badge variant="outline">{row.scope}</Badge>
 				</div>
-				<div className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
+				<div className="type-compact mt-1 break-all font-mono text-muted-foreground">
 					{row.action}
 				</div>
 				<div className="mt-1 break-words font-medium text-sm">{row.target}</div>
@@ -177,21 +179,29 @@ function ActivityRow({ row }: { row: PassportActivityRow }) {
 						</>
 					)}
 				</p>
-				<div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
+				<div className="type-compact mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-muted-foreground">
 					{row.agentAction && row.actorId ? (
-						<span className="break-all">agent {row.actorId}</span>
+						<span className="break-all">
+							{tl("agent {actorId}", { actorId: row.actorId })}
+						</span>
 					) : null}
 					{!row.agentAction && row.actorId ? (
-						<span className="break-all">actor {row.actorId}</span>
+						<span className="break-all">
+							{tl("actor {actorId}", { actorId: row.actorId })}
+						</span>
 					) : null}
 					{row.initiatedById ? (
-						<span className="break-all">user {row.initiatedById}</span>
+						<span className="break-all">
+							{tl("user {initiatedById}", {
+								initiatedById: row.initiatedById,
+							})}
+						</span>
 					) : null}
 				</div>
 				<p className="mt-1 break-words text-muted-foreground text-xs">
 					{row.details}
 				</p>
-				<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
+				<div className="type-compact mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-muted-foreground">
 					<span title={row.timestamp}>{activityTime(row.timestamp)}</span>
 					{correlations.map((value) => (
 						<span key={value}>{value}</span>
@@ -313,7 +323,7 @@ export function AgentPassportPanel({
 			<SettingsSection
 				caption="A read-only identity card and event ledger for this agent. Every action names the agent, the human or system that initiated it, and the request or session correlation when available. Prompt and credential payloads are never shown."
 				headerAction={
-					<Badge className="gap-1" variant="outline">
+					<Badge variant="outline">
 						<HugeiconsIcon className="size-3" icon={Shield01Icon} />
 						Traceable identity
 					</Badge>
@@ -425,9 +435,7 @@ export function AgentPassportPanel({
 			>
 				<SettingsCard className="p-0">
 					{auditQuery.isLoading ? (
-						<div className="flex items-center gap-2 p-5 text-muted-foreground text-sm">
-							<Spinner className="size-4" /> Loading agent activity…
-						</div>
+						<SkeletonRows inset="detail" label="Loading agent activity…" />
 					) : auditQuery.isError ? (
 						<div className="flex flex-col items-center gap-3 p-8 text-center">
 							<HugeiconsIcon

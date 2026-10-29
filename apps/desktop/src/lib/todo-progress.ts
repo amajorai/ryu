@@ -1,3 +1,8 @@
+import {
+	type AppRequestValue,
+	appRequestValueSchema,
+} from "@ryuhq/core-client/app-request-json.ts";
+import { z } from "zod";
 export type TodoItemStatus = "completed" | "in_progress" | "pending";
 
 export interface TodoProgressItem {
@@ -23,15 +28,33 @@ export interface TodoProgressMessage {
 	role?: unknown;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+// Persisted tool values are Core JSON; live optional fields can still be
+// undefined. Parse that transport before consuming the TodoWrite projection.
+const todoRecordFieldsSchema = z.record(z.string(), appRequestValueSchema);
+const todoRecordSchema = z.preprocess(
+	(value) => (Array.isArray(value) ? { ...value } : value),
+	z.custom<z.output<typeof todoRecordFieldsSchema>>(
+		(value) =>
+			todoRecordFieldsSchema.safeParse(value).success &&
+			appRequestValueSchema.safeParse(value).success
+	)
+);
+type TodoRecord = z.output<typeof todoRecordSchema>;
+const todoTextSchema = z.string();
+const todoItemsSchema = z.array(appRequestValueSchema);
+const todoStatusSchema = z.enum(["completed", "in_progress", "pending"]);
+
+function todoRecord(value: Parameters<typeof todoRecordSchema.parse>[0]) {
+	const parsed = todoRecordSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
 }
 
-function stringValue(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
+function stringValue(value: AppRequestValue): string | undefined {
+	const parsed = todoTextSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
-function todoToolName(part: Record<string, unknown>): string | undefined {
+function todoToolName(part: TodoRecord): string | undefined {
 	const type = stringValue(part.type);
 	if (type === "dynamic-tool") {
 		return stringValue(part.toolName);
@@ -42,28 +65,27 @@ function todoToolName(part: Record<string, unknown>): string | undefined {
 	return undefined;
 }
 
-function todoListOf(part: Record<string, unknown>): readonly unknown[] | null {
-	const input = isRecord(part.input) ? part.input : undefined;
-	if (input && Array.isArray(input.todos)) {
-		return input.todos;
+function todoListOf(part: TodoRecord): readonly AppRequestValue[] | null {
+	const input = todoRecord(part.input);
+	const inputItems = todoItemsSchema.safeParse(input?.todos);
+	if (inputItems.success) {
+		return inputItems.data;
 	}
-	const output = isRecord(part.output) ? part.output : undefined;
-	if (output && Array.isArray(output.newTodos)) {
-		return output.newTodos;
-	}
-	return null;
+	const output = todoRecord(part.output);
+	const outputItems = todoItemsSchema.safeParse(output?.newTodos);
+	return outputItems.success ? outputItems.data : null;
 }
 
-function todoStatusOf(value: unknown): TodoItemStatus | undefined {
-	return value === "completed" || value === "in_progress" || value === "pending"
-		? value
-		: undefined;
+function todoStatusOf(value: AppRequestValue): TodoItemStatus | undefined {
+	const parsed = todoStatusSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
-function todoItemsOf(items: readonly unknown[]): TodoProgressItem[] {
+function todoItemsOf(items: readonly AppRequestValue[]): TodoProgressItem[] {
 	const normalized: TodoProgressItem[] = [];
-	for (const item of items) {
-		if (!isRecord(item)) {
+	for (const value of items) {
+		const item = todoRecord(value);
+		if (!item) {
 			continue;
 		}
 		const label = stringValue(item.content)?.trim();
@@ -90,8 +112,8 @@ export function deriveTodoProgress(
 			continue;
 		}
 		for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
-			const part = parts[partIndex];
-			if (!isRecord(part) || todoToolName(part) !== "TodoWrite") {
+			const part = todoRecord(parts[partIndex]);
+			if (!part || todoToolName(part) !== "TodoWrite") {
 				continue;
 			}
 			const rawItems = todoListOf(part);

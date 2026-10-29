@@ -56,12 +56,12 @@ function subscribe(cb: () => void): () => void {
 			cb();
 		}
 	};
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.addEventListener("storage", onStorage);
 	}
 	return () => {
 		listeners.delete(cb);
-		if (typeof window !== "undefined") {
+		if (globalThis.window !== undefined) {
 			window.removeEventListener("storage", onStorage);
 		}
 	};

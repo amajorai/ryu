@@ -55,7 +55,7 @@ fn credential_file_name(plugin_id: &str) -> String {
 }
 
 fn credentials_dir() -> PathBuf {
-    crate::paths::ryu_dir().join("plugin-credentials")
+    crate::paths::secret_path("plugin-credentials")
 }
 
 fn master_cipher() -> anyhow::Result<FieldCipher> {

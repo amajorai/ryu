@@ -1,10 +1,37 @@
+@import "./publisher-verification-theme.css";
+@import "./native-desktop-shell-theme.css";
 @import "./status-colors.css";
+@import "./registered-icon.css";
+@import "./plan-tier-colors.css";
+@import "./profile-chart-colors.css";
+@import "./text-shimmer.css";
 @import "./overlays.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "./classic-theme-icon.css";
+@import "./css-backdrops.css";
 @source "../../../apps/**/*.{ts,tsx}";
 @source "../**/*.{ts,tsx}";
+@plugin "@toolwind/corner-shape";
+
+/* Compatibility classes passed to host Markdown renderers. Keep the public
+   prose hooks while giving them the shared selection and typography roles. */
+@utility prose {
+	user-select: text;
+	& * {
+		user-select: text;
+	}
+}
+
+@utility prose-sm {
+	font-size: var(--text-sm);
+	line-height: var(--text-sm--line-height);
+}
+
+@utility prose-invert {
+	color: var(--foreground);
+}
 
 /* Keep interface emphasis readable without allowing browser-default bold to
    reintroduce a heavier weight where a surface omits an explicit utility. */
@@ -17,6 +44,45 @@
    casing supplied by each caller across web and desktop. */
 [data-sileo-title].ryu-sileo-title {
 	text-transform: none;
+}
+
+/* The shared toaster sits above z-50 overlays so a dialog's backdrop does not
+   dim the error it just raised. While a modal or popup is open, though, a toast
+   must not take taps meant for that surface (a bottom-drawer footer, a
+   bottom-right sheet footer, a menu opening under it), so toasts go
+   click-through for as long as one is open. They stay visible and still
+   auto-dismiss. */
+body:has(
+		:is(
+				[data-slot="dialog-content"],
+				[data-slot="alert-dialog-content"],
+				[data-slot="sheet-content"],
+				[data-slot="drawer-content"],
+				[data-slot="popover-content"],
+				[data-slot="select-content"],
+				[data-slot="combobox-content"],
+				[data-slot="dropdown-menu-content"],
+				[data-slot="context-menu-content"]
+			)[data-open]
+	) [data-slot="toaster"]
+	[data-sileo-toast],
+body:has(
+		:is(
+				[data-slot="dialog-content"],
+				[data-slot="alert-dialog-content"],
+				[data-slot="sheet-content"],
+				[data-slot="drawer-content"],
+				[data-slot="popover-content"],
+				[data-slot="select-content"],
+				[data-slot="combobox-content"],
+				[data-slot="dropdown-menu-content"],
+				[data-slot="context-menu-content"]
+			)[data-open]
+	)
+	[data-slot="toaster"]
+	[data-sileo-toast]
+	* {
+	pointer-events: none;
 }
 
 /* The welcome wordmark stays foreground-coloured while a diagonal primary
@@ -86,10 +152,47 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@keyframes ryu-voice-activity-beam-sweep {
+	0% {
+		transform: translateX(8%);
+		opacity: 0.18;
+	}
+	50% {
+		opacity: 0.98;
+	}
+	100% {
+		transform: translateX(255%);
+		opacity: 0.18;
+	}
+}
+
+.voice-activity-beam__glow {
+	transition:
+		transform 150ms cubic-bezier(0.23, 1, 0.32, 1),
+		opacity 150ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.voice-activity-beam__sweep {
+	animation: ryu-voice-activity-beam-sweep 2.4s linear infinite;
+	will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.voice-activity-beam__glow {
+		transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1);
+	}
+}
+
 /* Keep icon controls circular even when the shared Button base applies the
  * optional squircle corner shape. Equal dimensions plus this explicit round
  * shape are the contract for compact circular actions. */
 @utility corner-round {
+	corner-shape: round !important;
+}
+
+/* An explicit full radius stays a pill or circle when a shared Button also
+   carries its rectangular squircle base utility. */
+:where([class~="rounded-full"].corner-squircle) {
 	corner-shape: round !important;
 }
 
@@ -126,7 +229,105 @@
 	inherits: false;
 }
 
+/* Compact labels and scaled diagrams share named typography tokens. Keep
+   their established sizes consistent across host and marketplace surfaces. */
+@theme {
+	--color-space-paper-border: #d9d1c5;
+	--color-space-paper: #fffdfa;
+	--color-space-paper-foreground: #37332d;
+	--color-space-paper-border-dark: #49443d;
+	--color-space-paper-dark: #292722;
+	--color-space-paper-foreground-dark: #f2eee5;
+	--color-space-paper-accent: #a88de8;
+	--color-space-paper-heading-placeholder: #e0d9ce;
+	--color-space-paper-heading-placeholder-dark: #4a453e;
+	--color-space-paper-line-placeholder: #e7e0d5;
+	--color-space-paper-line-placeholder-dark: #3f3b35;
+	--color-space-template-surface-dark: #292a2d;
+	--color-space-template-grid: #b9b9b9;
+	--color-space-template-board: #fbfbfb;
+	--color-space-template-board-dark: #242528;
+	--color-space-template-accent: #a78bfa;
+	--color-space-template-paper-foreground: #3d3932;
+	--color-space-template-paper-dark: #24221f;
+	--color-space-template-heading: #77716a;
+	--color-space-template-line: #b9b1a6;
+	--color-space-rail: #f7f7f7;
+	--color-space-rail-foreground: #464646;
+	--color-space-rail-dark: #222326;
+	--color-space-rail-foreground-dark: #d5d5d5;
+	--color-space-navigation-active: #e45d57;
+	--color-space-navigation-foreground: #b7443e;
+	--color-space-navigation-surface-dark: #2b2c30;
+	--color-space-navigation-foreground-dark: #ff8c84;
+	--color-space-rail-icon: #e9e9e9;
+	--color-space-rail-icon-dark: #34353a;
+	--color-space-home: #f4f4f4;
+	--color-space-home-foreground: #242424;
+	--color-space-home-dark: #1b1c1f;
+	--color-space-home-foreground-dark: #f1f1f1;
+	--color-space-search-dark: #292a2e;
+	--tracking-table-label: 0.14em;
+	--tracking-space-greeting: -0.03em;
+	--shadow-space-paper: 0 2px 6px rgba(44, 39, 30, 0.14);
+	--color-realm-workspace-background: #121126;
+	--color-realm-site-surface: var(--color-amber-100);
+	--color-realm-site-surface-dark: var(--color-amber-900);
+	--color-realm-terminal-background: var(--color-zinc-950);
+	--color-realm-terminal-foreground: var(--color-zinc-100);
+	--color-realm-terminal-muted: var(--color-zinc-400);
+	--color-realm-terminal-label: var(--color-zinc-500);
+	--color-realm-review-marker: var(--color-amber-400);
+	--color-realm-capacity-marker: var(--color-amber-500);
+	--color-realm-review-foreground: var(--color-amber-900);
+	--color-realm-review-foreground-dark: var(--color-amber-100);
+	--color-realm-complete: var(--color-emerald-700);
+	--color-realm-complete-dark: var(--color-emerald-400);
+	--color-realm-progress: var(--color-amber-700);
+	--color-realm-progress-dark: var(--color-amber-300);
+	--color-realm-brief-foreground: var(--color-amber-800);
+	--color-realm-brief-foreground-dark: var(--color-amber-200);
+	--color-realm-video-primary: var(--color-violet-200);
+	--color-realm-video-primary-dark: var(--color-violet-900);
+	--color-realm-video-secondary: var(--color-emerald-200);
+	--color-realm-video-secondary-dark: var(--color-emerald-900);
+	--radius-glass: 3rem;
+	--color-image-viewer-foreground: var(--color-white);
+	--color-image-viewer-background: var(--color-black);
+	--color-support-warning-hover: var(--color-white);
+	--spacing-image-viewer-icon: 15px;
+	--text-image-viewer-caption: 12.5px;
+	--shadow-image-viewer-focus: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+	--radius-glyph-compact: 3px;
+	--radius-artwork-compact: 5px;
+	--radius-artwork-mention: 4px;
+	--color-glass-content: var(--color-white);
+	--color-pitch-risk: var(--color-rose-300);
+	--color-pitch-risk-emphasis: var(--color-rose-200);
+	--color-pitch-risk-indicator: var(--color-rose-400);
+	--color-pitch-success: var(--color-emerald-400);
+	--tracking-eyebrow: 0.12em;
+	--tracking-label: 0.15em;
+	--tracking-section: 0.16em;
+	--tracking-section-label: 0.1em;
+	--tracking-display: 0.2em;
+	--leading-pitch-hero: 1.04;
+	--text-diagram: 6px;
+	--text-miniature: 7px;
+	--text-tiny: 8px;
+	--text-micro: 9px;
+	--text-compact: 10px;
+	--text-caption: 11px;
+	--text-detail: 13px;
+	--text-comfortable: 15px;
+}
+
 @theme inline {
+	--color-suggestion-insert-surface: var(--color-emerald-100);
+	--color-suggestion-insert-foreground: var(--color-emerald-700);
+	--color-suggestion-remove-surface: var(--color-red-100);
+	--color-suggestion-remove-foreground: var(--color-red-700);
+
 	@keyframes scroll-fade-reveal-t {
 		from {
 			--scroll-fade-t: 0px;
@@ -176,6 +377,13 @@
 	}
 }
 
+/* A settings pane: Apple's grouped background, with settings cards raised to
+   the card surface inside it. See `--grouped` above. */
+@utility grouped-pane {
+	--grouped-card: var(--card);
+	background-color: var(--grouped);
+}
+
 @utility scroll-fade {
 	--_scroll-fade-size-t: var(
 		--scroll-fade-t-size,
@@ -185,11 +393,19 @@
 		--scroll-fade-b-size,
 		var(--scroll-fade-size, min(12%, calc(var(--spacing) * 10)))
 	);
+	/* Eased (sine in-out) stops instead of a linear ramp: a linear fade shows a
+	   visible band where it meets the solid region. */
 	--scroll-fade-block: linear-gradient(
 		to bottom,
 		transparent 0,
+		rgb(0 0 0 / 0.146) calc(var(--scroll-fade-t, 0px) * 0.25),
+		rgb(0 0 0 / 0.5) calc(var(--scroll-fade-t, 0px) * 0.5),
+		rgb(0 0 0 / 0.854) calc(var(--scroll-fade-t, 0px) * 0.75),
 		#000 var(--scroll-fade-t, 0px),
 		#000 calc(100% - var(--scroll-fade-b, 0px)),
+		rgb(0 0 0 / 0.854) calc(100% - var(--scroll-fade-b, 0px) * 0.75),
+		rgb(0 0 0 / 0.5) calc(100% - var(--scroll-fade-b, 0px) * 0.5),
+		rgb(0 0 0 / 0.146) calc(100% - var(--scroll-fade-b, 0px) * 0.25),
 		transparent 100%
 	);
 	-webkit-mask-image: var(--scroll-fade-mask, var(--scroll-fade-block));
@@ -228,8 +444,14 @@
 	--scroll-fade-inline: linear-gradient(
 		to right,
 		transparent 0,
+		rgb(0 0 0 / 0.146) calc(var(--scroll-fade-s, 0px) * 0.25),
+		rgb(0 0 0 / 0.5) calc(var(--scroll-fade-s, 0px) * 0.5),
+		rgb(0 0 0 / 0.854) calc(var(--scroll-fade-s, 0px) * 0.75),
 		#000 var(--scroll-fade-s, 0px),
 		#000 calc(100% - var(--scroll-fade-e, 0px)),
+		rgb(0 0 0 / 0.854) calc(100% - var(--scroll-fade-e, 0px) * 0.75),
+		rgb(0 0 0 / 0.5) calc(100% - var(--scroll-fade-e, 0px) * 0.5),
+		rgb(0 0 0 / 0.146) calc(100% - var(--scroll-fade-e, 0px) * 0.25),
 		transparent 100%
 	);
 	-webkit-mask-image: var(--scroll-fade-mask, var(--scroll-fade-inline));
@@ -243,8 +465,14 @@
 		--scroll-fade-inline: linear-gradient(
 			to left,
 			transparent 0,
+			rgb(0 0 0 / 0.146) calc(var(--scroll-fade-s, 0px) * 0.25),
+			rgb(0 0 0 / 0.5) calc(var(--scroll-fade-s, 0px) * 0.5),
+			rgb(0 0 0 / 0.854) calc(var(--scroll-fade-s, 0px) * 0.75),
 			#000 var(--scroll-fade-s, 0px),
 			#000 calc(100% - var(--scroll-fade-e, 0px)),
+			rgb(0 0 0 / 0.854) calc(100% - var(--scroll-fade-e, 0px) * 0.75),
+			rgb(0 0 0 / 0.5) calc(100% - var(--scroll-fade-e, 0px) * 0.5),
+			rgb(0 0 0 / 0.146) calc(100% - var(--scroll-fade-e, 0px) * 0.25),
 			transparent 100%
 		);
 	}
@@ -275,6 +503,9 @@
 		to bottom,
 		#000 0,
 		#000 calc(100% - var(--scroll-fade-b, 0px)),
+		rgb(0 0 0 / 0.854) calc(100% - var(--scroll-fade-b, 0px) * 0.75),
+		rgb(0 0 0 / 0.5) calc(100% - var(--scroll-fade-b, 0px) * 0.5),
+		rgb(0 0 0 / 0.146) calc(100% - var(--scroll-fade-b, 0px) * 0.25),
 		transparent 100%
 	);
 	-webkit-mask-image: var(--scroll-fade-mask);
@@ -306,13 +537,42 @@
    triggers need it and neither can import the desktop's component. Pair it with
    `overflow-hidden whitespace-nowrap` and a max width; a label that fits is
    unaffected, since there is nothing past the mask's opaque stop to fade. */
-@utility text-fade-edge {
-	-webkit-mask-image: linear-gradient(
+@utility fade-text-edge {
+	--text-fade-edge: linear-gradient(
 		to right,
 		#000 calc(100% - 2.5rem),
+		rgb(0 0 0 / 0.854) calc(100% - 1.875rem),
+		rgb(0 0 0 / 0.5) calc(100% - 1.25rem),
+		rgb(0 0 0 / 0.146) calc(100% - 0.625rem),
 		transparent
 	);
-	mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+	-webkit-mask-image: var(--text-fade-edge);
+	mask-image: var(--text-fade-edge);
+}
+
+/* Eased scrim for legible text over imagery. Sine in-out alpha stops keep the
+   image visible higher up than a linear `from-black/80 to-transparent` ramp and
+   need less height to keep the label readable. Tune with `--scrim-alpha`. */
+@utility scrim-t {
+	background-image: linear-gradient(
+		to top,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 1)) 0,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.854)) 25%,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.5)) 50%,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.146)) 75%,
+		rgb(0 0 0 / 0) 100%
+	);
+}
+
+@utility scrim-b {
+	background-image: linear-gradient(
+		to bottom,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 1)) 0,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.854)) 25%,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.5)) 50%,
+		rgb(0 0 0 / calc(var(--scrim-alpha, 0.8) * 0.146)) 75%,
+		rgb(0 0 0 / 0) 100%
+	);
 }
 
 /* Reorder/drop markers are deliberately pills even when they are only a couple
@@ -325,6 +585,13 @@
 :root {
 	--card: oklch(1 0 0);
 	--card-foreground: oklch(0.145 0 0);
+	/* iOS/macOS grouped settings. A `grouped-pane` paints the grouped
+	   background (light: the muted grey; dark: the page black) and raises its
+	   settings cards onto `--card` — white on grey in light mode, as in Apple's
+	   Settings. Outside a pane, settings cards keep the translucent muted tint
+	   they have always had, so a card on a plain white page never vanishes. */
+	--grouped: var(--muted);
+	--grouped-card: color-mix(in oklab, var(--muted) 40%, transparent);
 	/* Popover surfaces track the (customizable) muted colour rather than a fixed
 	   value, so overlay menus follow theme customization. The apply engine
 	   (packages/ui/src/theme/apply.ts) deliberately does not write inline
@@ -353,10 +620,11 @@
 	--secondary: oklch(0.97 0 0);
 	--secondary-foreground: oklch(0.205 0 0);
 	--muted: oklch(0.97 0 0);
-	--muted-foreground: oklch(0.556 0 0);
+	--muted-foreground: oklch(0.545 0 0);
 	--accent: oklch(0.97 0 0);
 	--accent-foreground: oklch(0.205 0 0);
 	--destructive: oklch(0.577 0.245 27.325);
+	--destructive-foreground: oklch(0.985 0 0);
 	--success: oklch(0.62 0.17 145);
 	--success-foreground: oklch(0.985 0 0);
 	--warning: oklch(0.75 0.16 75);
@@ -365,7 +633,7 @@
 	--info-foreground: oklch(0.985 0 0);
 	--border: oklch(0.922 0 0);
 	--input: oklch(0.922 0 0);
-	--ring: oklch(0.708 0 0);
+	--ring: oklch(0.64 0 0);
 	--chart-1: oklch(0.87 0 0);
 	--chart-2: oklch(0.556 0 0);
 	--chart-3: oklch(0.439 0 0);
@@ -379,14 +647,19 @@
 	--sidebar-accent: oklch(0.97 0 0);
 	--sidebar-accent-foreground: oklch(0.205 0 0);
 	--sidebar-border: oklch(0.922 0 0);
-	--sidebar-ring: oklch(0.708 0 0);
+	--sidebar-ring: oklch(0.64 0 0);
 	--background: oklch(1 0 0);
 	--foreground: oklch(0.145 0 0);
+	/* The page's own background, resolved here at the root and inherited as a
+	   colour. A forced-dark section (a marketing stage hero) redefines
+	   --background, so it fades into the real page with this instead. */
+	--page-background: var(--background);
 }
 
 .dark {
 	--background: oklch(0.145 0 0);
 	--foreground: oklch(0.985 0 0);
+	--grouped: var(--background);
 	--card: oklch(0.205 0 0);
 	--card-foreground: oklch(0.985 0 0);
 	/* --popover inherits the :root reference to var(--muted); --muted below flips
@@ -402,6 +675,7 @@
 	--accent: oklch(0.269 0 0);
 	--accent-foreground: oklch(0.985 0 0);
 	--destructive: oklch(0.704 0.191 22.216);
+	--destructive-foreground: oklch(0.205 0 0);
 	--success: oklch(0.7 0.15 150);
 	--success-foreground: oklch(0.985 0 0);
 	--warning: oklch(0.8 0.15 80);
@@ -427,7 +701,18 @@
 }
 
 @theme inline {
+	--color-grouped: var(--grouped);
+	--color-grouped-card: var(--grouped-card);
+	--color-docs-preview-background: var(
+		--color-fd-background,
+		var(--background)
+	);
+	--color-docs-preview-primary: var(--color-fd-primary, var(--primary));
+	--color-docs-preview-secondary: var(--color-fd-secondary, var(--secondary));
 	--font-sans: var(--font-sans);
+	/* Loading placeholders: a sub-second pulse reads as "almost there", where the
+	   default 2s pulse reads as idle. Status dots keep `animate-pulse`. */
+	--animate-skeleton: pulse 0.9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 	--color-sidebar-ring: var(--sidebar-ring);
 	--color-sidebar-border: var(--sidebar-border);
 	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -445,6 +730,7 @@
 	--color-input: var(--input);
 	--color-border: var(--border);
 	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
 	--color-success: var(--success);
 	--color-success-foreground: var(--success-foreground);
 	--color-warning: var(--warning);
@@ -477,13 +763,22 @@
 
 @layer base {
 	* {
-		@apply border-border outline-ring/50;
+		@apply border-border outline-ring;
 	}
 	body {
-		@apply font-sans bg-background text-foreground;
+		@apply font-sans bg-background text-foreground antialiased;
 	}
 	html {
 		@apply font-sans;
+	}
+	/* Wrapping defaults: headings balance their lines and paragraphs avoid a lone
+	   last word. `:where()` keeps specificity at zero, so any `text-wrap`,
+	   `text-nowrap` or `truncate` utility on the element still wins. */
+	:where(h1, h2, h3, h4, h5, h6) {
+		text-wrap: balance;
+	}
+	:where(p) {
+		text-wrap: pretty;
 	}
 	::selection {
 		color: var(--background);
@@ -495,9 +790,9 @@
 [data-color-theme="zinc"] {
 	--primary: oklch(0.205 0 0);
 	--primary-foreground: oklch(0.985 0 0);
-	--ring: oklch(0.708 0 0);
+	--ring: oklch(0.64 0 0);
 	--sidebar-primary: oklch(0.205 0 0);
-	--sidebar-ring: oklch(0.708 0 0);
+	--sidebar-ring: oklch(0.64 0 0);
 }
 .dark[data-color-theme="zinc"],
 .dark [data-color-theme="zinc"],
@@ -563,9 +858,9 @@
 [data-color-theme="amber"] {
 	--primary: oklch(0.769 0.188 70.08);
 	--primary-foreground: oklch(0.145 0 0);
-	--ring: oklch(0.769 0.188 70.08);
+	--ring: oklch(0.64 0.188 70.08);
 	--sidebar-primary: oklch(0.769 0.188 70.08);
-	--sidebar-ring: oklch(0.769 0.188 70.08);
+	--sidebar-ring: oklch(0.64 0.188 70.08);
 }
 .dark[data-color-theme="amber"],
 .dark [data-color-theme="amber"],
@@ -597,9 +892,9 @@
 [data-color-theme="default"] {
 	--primary: oklch(0.669 0.1837 248.81);
 	--primary-foreground: oklch(0.97 0.014 254.604);
-	--ring: oklch(0.669 0.1837 248.81);
+	--ring: oklch(0.64 0.1837 248.81);
 	--sidebar-primary: oklch(0.669 0.1837 248.81);
-	--sidebar-ring: oklch(0.669 0.1837 248.81);
+	--sidebar-ring: oklch(0.64 0.1837 248.81);
 }
 .dark [data-color-theme="default"],
 [data-color-theme="default"].dark {
@@ -621,9 +916,9 @@
 [data-color-theme="red"].dark {
 	--primary: hsl(0 62.8% 50%);
 	--primary-foreground: hsl(0 0% 98%);
-	--ring: hsl(0 62.8% 50%);
+	--ring: hsl(0 62.8% 51%);
 	--sidebar-primary: hsl(0 62.8% 50%);
-	--sidebar-ring: hsl(0 62.8% 50%);
+	--sidebar-ring: hsl(0 62.8% 51%);
 }
 
 [data-color-theme="orange"] {
@@ -645,9 +940,9 @@
 [data-color-theme="yellow"] {
 	--primary: hsl(47.9 95.8% 40%);
 	--primary-foreground: hsl(0 0% 9%);
-	--ring: hsl(47.9 95.8% 40%);
+	--ring: hsl(47.9 95.8% 34%);
 	--sidebar-primary: hsl(47.9 95.8% 40%);
-	--sidebar-ring: hsl(47.9 95.8% 40%);
+	--sidebar-ring: hsl(47.9 95.8% 34%);
 }
 .dark [data-color-theme="yellow"],
 [data-color-theme="yellow"].dark {
@@ -773,7 +1068,7 @@
 	--shimmer-ease: linear;
 	/* Onboarding progress marquee — an always-moving highlight so the phase bar
 	   never reads as frozen while a long auto-advancing step waits. */
-	--progress-marquee-dur: 1400ms;
+	--progress-marquee-dur: 900ms;
 	--progress-marquee-band: 45%;
 	--progress-marquee-ease: cubic-bezier(0.4, 0, 0.6, 1);
 	/* Switch thumb bounce */
@@ -782,6 +1077,9 @@
 	--toggle-ov2: 0px;
 	--toggle-track: 150ms;
 	--toggle-ease: cubic-bezier(0.34, 1.35, 0.64, 1);
+	--toggle-stretch: 1.18;
+	--toggle-press: 160ms;
+	--toggle-release: 90ms;
 	/* Success check (10) — the confirmation icon on terminal success pages
 	   (device activated, email verified, payment complete). */
 	--check-opacity-dur: 500ms;
@@ -862,12 +1160,83 @@
 }
 .t-toggle-thumb {
 	--toggle-travel: calc(100% - 8px);
+	transform-origin: left center;
 	translate: 0 0;
-	transition: translate var(--toggle-dur) var(--toggle-ease);
+	transition:
+		translate var(--toggle-dur) var(--toggle-ease),
+		scale var(--toggle-release) ease-out,
+		transform-origin var(--toggle-release) ease-out;
 	will-change: translate;
 }
 .t-toggle[data-checked] .t-toggle-thumb {
+	transform-origin: right center;
 	translate: var(--toggle-travel) 0;
+}
+/* While held, stretch the thumb toward the side it will travel to. `scale`
+   (not width) so the percentage travel above never overshoots the track; the
+   origin anchors the edge the thumb is leaving. Release snaps back fast. */
+.t-toggle:active:not([data-disabled]) .t-toggle-thumb {
+	scale: var(--toggle-stretch) 1;
+	transition:
+		translate var(--toggle-dur) var(--toggle-ease),
+		scale var(--toggle-press) ease-out,
+		transform-origin var(--toggle-press) ease-out;
+}
+
+/* --- Avatar stacks: clip each avatar against its next neighbour instead of a
+   background-coloured ring, so overlaps stay correct on gradients and images.
+   The notch is a radial mask centred on the neighbour's centre. --- */
+/* Defaults live in the base layer so `[--avatar-size:…]` utilities override
+   them; unlayered declarations would beat every Tailwind utility. */
+@layer base {
+	:where([data-slot="avatar-group"], [data-avatar-stack]) {
+		--avatar-size: 2rem;
+		--avatar-overlap: 0.5rem;
+		--avatar-gap: 2px;
+	}
+	/* Smaller overlap at sm (matches `has-data-[size=sm]:-space-x-1.5`) so two
+	   initials still fit in the visible crescent. */
+	:where([data-slot="avatar-group"]):has([data-size="sm"]) {
+		--avatar-size: 1.5rem;
+		--avatar-overlap: 0.375rem;
+	}
+	:where([data-slot="avatar-group"]):has([data-size="lg"]) {
+		--avatar-size: 2.5rem;
+	}
+}
+:where([data-slot="avatar-group"], [data-avatar-stack]) > :not(:last-child) {
+	--_avatar-notch-x: calc(
+		100% +
+		var(--avatar-size) /
+		2 -
+		var(--avatar-overlap)
+	);
+	--_avatar-notch: radial-gradient(
+		circle at var(--_avatar-notch-x) 50%,
+		transparent calc(var(--avatar-size) / 2 + var(--avatar-gap)),
+		#000 calc(var(--avatar-size) / 2 + var(--avatar-gap) + 0.5px)
+	);
+	-webkit-mask-image: var(--_avatar-notch);
+	mask-image: var(--_avatar-notch);
+}
+:where([data-slot="avatar-group"], [data-avatar-stack]):where(
+		[dir="rtl"],
+		[dir="rtl"] *
+	)
+	> :not(:last-child) {
+	--_avatar-notch-x: calc(var(--avatar-overlap) - var(--avatar-size) / 2);
+}
+/* Centre initials in the visible crescent, not under the neighbour. */
+:where([data-slot="avatar-group"], [data-avatar-stack])
+	> :not(:last-child)
+	:where([data-slot="avatar-fallback"]) {
+	padding-inline-end: var(--avatar-overlap);
+}
+:where([data-slot="avatar-group"])
+	> [data-size="sm"]:not(:last-child)
+	:where([data-slot="avatar-fallback"]) {
+	font-size: 0.625rem;
+	letter-spacing: -0.02em;
 }
 
 /* --- Notification badge (03) --- */
@@ -928,6 +1297,7 @@
 .t-digit-group {
 	display: inline-flex;
 	align-items: baseline;
+	font-variant-numeric: tabular-nums;
 }
 .t-digit {
 	display: inline-block;
@@ -1066,10 +1436,9 @@
 		var(--shimmer-ease, linear) infinite;
 }
 
-/* Business has fourteen stops, so give the face more runway and drift the
-   enlarged field gently across the plinth instead of flashing every colour at
-   once. Pro keeps its own still gradient and sheen treatment. */
-@keyframes t-plan-badge-business-drift {
+/* Drift every tier's enlarged gradient across the badge face independently
+   of the white sheen, keeping the tier palette itself visibly in motion. */
+@keyframes t-plan-badge-gradient-drift {
 	0%,
 	100% {
 		background-position: 0% 50%;
@@ -1078,51 +1447,23 @@
 		background-position: 100% 50%;
 	}
 }
-.t-plan-badge-business {
+.t-plan-badge-gradient {
 	background-repeat: no-repeat;
 	background-position: 0% 50%;
 	background-size: 300% 100%;
-	animation: t-plan-badge-business-drift 8s ease-in-out infinite;
+	animation: t-plan-badge-gradient-drift 8s ease-in-out infinite;
+}
+.t-plan-badge-plus-gradient {
+	inset: -1px;
+	background-color: #e2dfd8;
+	background-size: 180% 100%;
+}
+.t-plan-badge-business-gradient {
+	background-size: 500% 100%;
 }
 
-/* --- Pro pricing card animated gradient border — the Pro badge's holographic
-   pastel, as a conic sweep that rotates slowly around the highlighted card.
-   Repeating the first colour at the end keeps the loop seamless; the animated
-   angle needs a registered custom property so it can tween. --- */
-@property --pro-border-angle {
-	syntax: "<angle>";
-	initial-value: 0deg;
-	inherits: false;
-}
-@keyframes t-pro-border-spin {
-	to {
-		--pro-border-angle: 360deg;
-	}
-}
-.t-pro-card-border {
-	background: conic-gradient(
-		from var(--pro-border-angle),
-		#9effef,
-		#d1ffd6,
-		#fff8ad,
-		#a3edff,
-		#bdbdff,
-		#ffb8eb,
-		#ffdda3,
-		#9effef
-	);
-	animation: t-pro-border-spin var(--pro-border-dur, 6s) linear infinite;
-}
-/* Whip the sweep around on hover. */
-.t-pro-card-border:hover {
-	--pro-border-dur: 1.2s;
-}
-
-/* --- The other cards' hover borders — the tier's conic gradient (set inline)
-   rotates continuously, exactly like the Pro card, just tinted per tier. The
-   layer itself fades in on hover via a Tailwind opacity transition; the spin
-   runs underneath the whole time so it's already in motion when it appears, and
-   whips faster while the card is hovered (mirroring the Pro border). --- */
+/* --- Pricing card borders consume the shared palettes from plan-badge.
+   Pro stays visible; the remaining card rings fade in on hover. --- */
 @property --tier-border-angle {
 	syntax: "<angle>";
 	initial-value: 0deg;
@@ -1133,6 +1474,15 @@
 		--tier-border-angle: 360deg;
 	}
 }
+.t-pro-card-border {
+	animation: t-card-border-spin var(--pro-border-dur, 6s) linear infinite;
+}
+/* Whip the sweep around on hover. */
+.t-pro-card-border:hover {
+	--pro-border-dur: 1.2s;
+}
+
+/* Other cards share the same rotating angle, but fade their rings in on hover. */
 .t-card-border-spin {
 	animation: t-card-border-spin var(--tier-border-dur, 7s) linear infinite;
 }
@@ -1370,7 +1720,7 @@
 	.t-toggle-thumb,
 	.t-plan-badge-sheen,
 	.t-plan-badge-border,
-	.t-plan-badge-business,
+	.t-plan-badge-gradient,
 	.t-pro-card-border,
 	.t-card-border-spin,
 	.t-stagger-line,
@@ -1768,4 +2118,180 @@ html {
 	color: var(--primary);
 	text-align: center;
 	content: attr(data-unread-label);
+}
+
+/* Shared scroll containers hide chrome while preserving scrolling. */
+@utility no-scrollbar {
+	scrollbar-width: none;
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+@utility scrollbar-hide {
+	scrollbar-width: none;
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+/* Use distinct utility names so typography cannot be mistaken for colors. */
+@utility type-compact {
+	font-size: var(--text-compact);
+}
+
+@utility type-caption {
+	font-size: var(--text-caption);
+}
+
+@utility type-micro {
+	font-size: var(--text-micro);
+}
+
+@utility type-tiny {
+	font-size: var(--text-tiny);
+}
+
+@utility type-detail {
+	font-size: var(--text-detail);
+}
+
+@utility type-comfortable {
+	font-size: var(--text-comfortable);
+}
+
+@utility type-miniature {
+	font-size: var(--text-miniature);
+}
+
+@utility type-diagram {
+	font-size: var(--text-diagram);
+}
+
+@utility rounded-inherit {
+	border-radius: inherit;
+}
+
+@utility glass-native-backdrop {
+	-webkit-backdrop-filter: none !important;
+	backdrop-filter: none !important;
+}
+
+@utility glass-scrim {
+	background-image: var(--glass-scrim-gradient);
+}
+
+@utility transition-image-viewer-control {
+	transition-property: border-color, background-color, color;
+}
+
+@utility type-image-viewer-caption {
+	font-size: var(--text-image-viewer-caption);
+}
+
+@utility image-viewer-no-callout {
+	-webkit-touch-callout: none;
+}
+
+@utility image-viewer-flight {
+	opacity: var(--image-viewer-flight-opacity, 1);
+	transform: var(--image-viewer-flight-transform, none);
+}
+
+@utility image-viewer-content {
+	border-radius: calc(var(--image-viewer-content-radius, 0) * 1px);
+	transform: var(--image-viewer-content-transform, none);
+}
+
+@utility image-viewer-focus-ring {
+	--tw-shadow: var(--shadow-image-viewer-focus);
+	box-shadow:
+		var(--tw-inset-shadow), var(--tw-inset-ring-shadow),
+		var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+
+/* SVG luminance masks require absolute clear/solid values in every theme. */
+@theme static {
+	--color-logo-mask-clear: #000;
+	--color-logo-mask-solid: #fff;
+	--color-logo-highlight: #fff;
+}
+
+@property --logo-angle {
+	syntax: "<angle>";
+	inherits: false;
+	initial-value: 0deg;
+}
+
+@keyframes ryu-logo-rotate {
+	to {
+		--logo-angle: 360deg;
+	}
+}
+
+@keyframes ryu-skeleton-shimmer {
+	0% {
+		background-position: -200% center;
+	}
+	100% {
+		background-position: 200% center;
+	}
+}
+
+@utility notion-columns {
+	grid-template-columns: repeat(var(--notion-column-count), minmax(0, 1fr));
+}
+
+/* Editor decorations retain native defaults when editor.css is not loaded.
+   Plugin paint is supplied by that stylesheet; caller utilities can override
+   these component defaults without replacing the editor's state handlers. */
+@layer components {
+	.ryu-editor-highlight {
+		background-color: Mark;
+	}
+
+	.ryu-editor-comment,
+	.ryu-editor-comment-active,
+	.ryu-editor-comment-overlap,
+	.ryu-editor-comment-overlap-active,
+	.ryu-editor-comment-static {
+		background-color: transparent;
+		border-bottom-color: var(--border);
+	}
+
+	.ryu-editor-comment-accent {
+		background-color: transparent;
+	}
+}
+
+@utility scrollbar-thin {
+	scrollbar-width: thin;
+}
+@utility scrollbar-gutter-stable {
+	scrollbar-gutter: stable;
+}
+@utility scrollbar-none {
+	scrollbar-width: none;
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+@utility shimmer {
+	background-image: linear-gradient(
+		110deg,
+		transparent 30%,
+		color-mix(in oklch, var(--foreground) 8%, transparent) 50%,
+		transparent 70%
+	);
+	background-size: 200% 100%;
+	animation: ryu-skeleton-shimmer 2s linear infinite;
+}
+
+/* Keep the public mask utility available to existing host consumers. */
+@utility text-fade-edge {
+	@apply fade-text-edge;
+}
+
+@theme inline {
+	--color-connection-toast-surface: #18181b;
 }

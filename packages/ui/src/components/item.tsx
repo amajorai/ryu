@@ -8,11 +8,28 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
 
-function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
+function ItemGroup({
+	className,
+	spacing = "default",
+	appearance = "default",
+	...props
+}: React.ComponentProps<"div"> & {
+	spacing?: "default" | "flush";
+	appearance?: "default" | "settings-group" | "hardware-summary";
+}) {
 	return (
 		<div
 			className={cn(
 				"group/item-group flex w-full flex-col gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2",
+				spacing === "flush" && "gap-0",
+				// iOS/macOS grouped table: a rounded card on `--grouped-card` (raised
+				// to the card surface inside a `grouped-pane`), with inset hairlines —
+				// they start where the row's text starts (past an icon tile) and stop
+				// short of the trailing edge, never touching the card's sides.
+				appearance === "settings-group" &&
+					"rounded-xl bg-grouped-card shadow-none has-data-[size=sm]:gap-0 has-data-[size=xs]:gap-0 [&>[data-slot=item-separator]:has(+*_[data-slot=settings-icon-tile])]:ms-12 [&>[data-slot=item-separator]]:ms-3.5 [&>[data-slot=item-separator]]:me-3.5 [&>[data-slot=item-separator]]:w-auto!",
+				appearance === "hardware-summary" &&
+					"rounded-lg bg-muted/50 shadow-none",
 				className
 			)}
 			data-slot="item-group"
@@ -37,7 +54,7 @@ function ItemSeparator({
 }
 
 const itemVariants = cva(
-	"group/item flex w-full flex-wrap items-center rounded-2xl border text-sm outline-none transition-colors duration-100 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 [a]:transition-colors [a]:hover:bg-muted",
+	"group/item corner-squircle flex w-full flex-wrap items-center rounded-2xl border text-sm outline-none transition-colors duration-100 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring [a]:transition-colors [a]:hover:bg-muted",
 	{
 		variants: {
 			variant: {
@@ -50,6 +67,13 @@ const itemVariants = cva(
 				sm: "gap-3.5 px-3.5 py-3",
 				xs: "gap-2.5 in-data-[slot=dropdown-menu-content]:p-0 px-3 py-2.5",
 			},
+			purpose: {
+				// 44px rows, as in Apple's Settings. A row placed straight in a
+				// section (no `SettingsGroup`) still gets its own grouped card, so no
+				// settings row floats card-less on the grouped background.
+				"settings-row":
+					"min-h-11 flex-col items-stretch justify-center gap-2 not-in-data-[slot=item-group]:rounded-xl rounded-none border-0 not-in-data-[slot=item-group]:bg-grouped-card px-3.5 py-2.5",
+			},
 		},
 		defaultVariants: {
 			variant: "default",
@@ -60,6 +84,7 @@ const itemVariants = cva(
 
 function Item({
 	className,
+	purpose,
 	variant = "default",
 	size = "default",
 	render,
@@ -69,7 +94,7 @@ function Item({
 		defaultTagName: "div",
 		props: mergeProps<"div">(
 			{
-				className: cn(itemVariants({ variant, size, className })),
+				className: cn(itemVariants({ variant, size, purpose, className })),
 			},
 			props
 		),
@@ -90,7 +115,7 @@ const itemMediaVariants = cva(
 				default: "bg-transparent",
 				icon: "[&_svg:not([class*='size-'])]:size-4",
 				image:
-					"size-10 overflow-hidden rounded-xl group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 group-data-[size=xs]/item:rounded-lg [&_img]:size-full [&_img]:object-cover",
+					"corner-squircle group-data-[size=xs]/item:corner-squircle size-10 overflow-hidden rounded-xl group-data-[size=sm]/item:size-8 group-data-[size=xs]/item:size-6 group-data-[size=xs]/item:rounded-lg [&_img]:size-full [&_img]:object-cover",
 			},
 		},
 		defaultVariants: {
@@ -130,13 +155,22 @@ function ItemContent({ className, ...props }: React.ComponentProps<"div">) {
 function ItemTitle({
 	children,
 	className,
+	tone,
+	typography,
 	...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> & {
+	tone?: "destructive";
+	typography?: "settings-label";
+}) {
 	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn(
 				"line-clamp-1 flex w-fit items-center gap-2 font-medium text-sm leading-snug underline-offset-4",
+				tone === "destructive" && "text-status-destructive",
+				// Apple's Settings labels are regular weight; emphasis comes from
+				// section headers and values, not from every row title.
+				typography === "settings-label" && "font-normal text-sm",
 				className
 			)}
 			data-slot="item-title"

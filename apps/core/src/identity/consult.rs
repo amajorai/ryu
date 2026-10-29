@@ -115,6 +115,18 @@ fn extract_domain(args: &Value) -> Option<String> {
     None
 }
 
+/// Credential-consuming fetches must select the vault connection for the same
+/// canonical HTTPS host that the outbound HTTP client will contact. Do not use
+/// the generic `domain` fallback: the fetch tool consumes only its `url` arg.
+fn extract_injection_domain(args: &Value) -> Option<String> {
+    let url = args.get("url")?.as_str()?.trim();
+    let parsed = url::Url::parse(url).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    parsed.host_str().map(str::to_owned)
+}
+
 /// Pull the lowercased host out of a URL string without a URL-parsing dep.
 ///
 /// Handles `scheme://host[:port]/path` and bare `host[:port]/path`. Strips any
@@ -176,7 +188,12 @@ pub async fn consult_for_tool_call_with_agent(
     if tool_id.starts_with("composio.") {
         return ConsultOutcome::Proceed;
     }
-    let Some(domain) = extract_domain(args) else {
+    let target_domain = if is_injection_capable(tool_id) {
+        extract_injection_domain(args)
+    } else {
+        extract_domain(args)
+    };
+    let Some(domain) = target_domain else {
         return ConsultOutcome::Proceed;
     };
     if std::env::var_os("RYU_PASSPORT_URL").is_some() {
@@ -424,6 +441,44 @@ mod tests {
         // No addressable arg → None.
         assert_eq!(
             extract_domain(&serde_json::json!({ "query": "hello" })),
+            None
+        );
+    }
+
+    #[test]
+    fn credential_injection_uses_the_http_clients_canonical_host() {
+        assert_eq!(
+            extract_injection_domain(
+                &serde_json::json!({"url": "https://APP.Example.COM:8443/path"})
+            ),
+            Some("app.example.com".to_owned())
+        );
+        assert_eq!(
+            extract_injection_domain(
+                &serde_json::json!({"url": "https://user:pass@app.example.com/path"})
+            ),
+            Some("app.example.com".to_owned())
+        );
+        // The HTTPS URL parser treats the backslash as a path separator. The
+        // old hand parser instead selected the victim after the `@`.
+        assert_eq!(
+            extract_injection_domain(
+                &serde_json::json!({"url": "https://attacker.example\\@victim.example/path"})
+            ),
+            Some("attacker.example".to_owned())
+        );
+        // A separate domain field cannot select a credential when the URL is
+        // malformed or lacks the HTTPS scheme required by web_fetch.get.
+        assert_eq!(
+            extract_injection_domain(
+                &serde_json::json!({"url": "not a URL", "domain": "victim.example"})
+            ),
+            None
+        );
+        assert_eq!(
+            extract_injection_domain(
+                &serde_json::json!({"url": "http://victim.example", "domain": "victim.example"})
+            ),
             None
         );
     }

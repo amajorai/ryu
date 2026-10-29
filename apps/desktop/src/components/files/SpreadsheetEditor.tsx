@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import "./spreadsheet-editor.css";
 import { cellValueAsString, setFormula } from "@office-kit/xlsx/cell";
 import {
 	fromArrayBuffer,
@@ -12,7 +14,7 @@ import {
 	setCell,
 	type Worksheet,
 } from "@office-kit/xlsx/worksheet";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	forwardRef,
 	useEffect,
@@ -21,6 +23,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { z } from "zod";
 import {
 	parseSpreadsheetInput,
 	spreadsheetColumnLabel,
@@ -46,13 +49,11 @@ function cellText(worksheet: Worksheet, row: number, column: number): string {
 	if (!cell) {
 		return "";
 	}
-	if (
-		typeof cell.value === "object" &&
-		cell.value !== null &&
-		"kind" in cell.value &&
-		cell.value.kind === "formula"
-	) {
-		return `=${cell.value.formula}`;
+	const formula = z
+		.object({ kind: z.literal("formula"), formula: z.string() })
+		.safeParse(cell.value);
+	if (formula.success) {
+		return `=${formula.data.formula}`;
 	}
 	return cellValueAsString(cell.value);
 }
@@ -89,7 +90,7 @@ export const SpreadsheetEditor = forwardRef<
 				setWorkbook(loaded);
 				setActiveSheetIndex(Math.max(0, activeWorksheetIndex));
 			})
-			.catch((error: unknown) => {
+			.catch((error) => {
 				if (!cancelled) {
 					onLoadError(
 						error instanceof Error
@@ -165,6 +166,16 @@ export const SpreadsheetEditor = forwardRef<
 		);
 	}
 
+	const spreadsheetWidthVariables1: CSSProperties & {
+		"--spreadsheet-grid-width": string;
+	} = { "--spreadsheet-grid-width": `${gridWidth}px` };
+	const spreadsheetBodyVariables2: CSSProperties & {
+		"--spreadsheet-grid-height": string;
+		"--spreadsheet-grid-width": string;
+	} = {
+		"--spreadsheet-grid-height": `${rowCount * ROW_HEIGHT}px`,
+		"--spreadsheet-grid-width": `${gridWidth}px`,
+	};
 	return (
 		<div className="flex min-h-0 flex-1 flex-col bg-muted/20">
 			<div
@@ -174,7 +185,8 @@ export const SpreadsheetEditor = forwardRef<
 			>
 				<div
 					className="sticky top-0 z-20 flex h-8 border-border border-b bg-muted"
-					style={{ width: gridWidth }}
+					data-spreadsheet-grid-width=""
+					style={spreadsheetWidthVariables1}
 				>
 					<div className="sticky left-0 z-30 w-[52px] shrink-0 border-border border-r bg-muted" />
 					{Array.from({ length: columnCount }, (_, index) => (
@@ -188,51 +200,58 @@ export const SpreadsheetEditor = forwardRef<
 				</div>
 				<div
 					className="relative"
-					style={{ height: rowCount * ROW_HEIGHT, width: gridWidth }}
+					data-spreadsheet-grid-body=""
+					style={spreadsheetBodyVariables2}
 				>
-					{visibleRows.map((row) => (
-						<div
-							className="absolute left-0 flex h-8"
-							key={row}
-							style={{ top: (row - 1) * ROW_HEIGHT }}
-						>
-							<div className="sticky left-0 z-10 w-[52px] shrink-0 border-border border-r border-b bg-muted px-2 py-2 text-right text-muted-foreground text-xs">
-								{row}
+					{visibleRows.map((row) => {
+						const spreadsheetRowVariables3: CSSProperties & {
+							"--spreadsheet-row-top": string;
+						} = { "--spreadsheet-row-top": `${(row - 1) * ROW_HEIGHT}px` };
+						return (
+							<div
+								className="absolute left-0 flex h-8"
+								data-spreadsheet-grid-row=""
+								key={row}
+								style={spreadsheetRowVariables3}
+							>
+								<div className="sticky left-0 z-10 w-[52px] shrink-0 border-border border-r border-b bg-muted px-2 py-2 text-right text-muted-foreground text-xs">
+									{row}
+								</div>
+								{Array.from({ length: columnCount }, (_, columnIndex) => {
+									const column = columnIndex + 1;
+									const address = `${spreadsheetColumnLabel(column)}${row}`;
+									return (
+										<input
+											aria-label={address}
+											className="text-(length:--text-detail) h-8 w-36 shrink-0 border-0 border-border border-r border-b bg-background px-2 font-mono outline-none focus:relative focus:z-10 focus:ring-2 focus:ring-primary"
+											defaultValue={cellText(worksheet, row, column)}
+											key={`${address}:${activeSheetIndex}:${revision}`}
+											onBlur={(event) => {
+												const parsed = parseSpreadsheetInput(
+													event.currentTarget.value
+												);
+												if (parsed.kind === "formula") {
+													setFormula(
+														setCell(worksheet, row, column),
+														parsed.formula
+													);
+												} else {
+													setCell(
+														worksheet,
+														row,
+														column,
+														parsed.kind === "blank" ? null : parsed.value
+													);
+												}
+												setRevision((value) => value + 1);
+												onDirty();
+											}}
+										/>
+									);
+								})}
 							</div>
-							{Array.from({ length: columnCount }, (_, columnIndex) => {
-								const column = columnIndex + 1;
-								const address = `${spreadsheetColumnLabel(column)}${row}`;
-								return (
-									<input
-										aria-label={address}
-										className="h-8 w-36 shrink-0 border-0 border-border border-r border-b bg-background px-2 font-mono text-[13px] outline-none focus:relative focus:z-10 focus:ring-2 focus:ring-primary"
-										defaultValue={cellText(worksheet, row, column)}
-										key={`${address}:${activeSheetIndex}:${revision}`}
-										onBlur={(event) => {
-											const parsed = parseSpreadsheetInput(
-												event.currentTarget.value
-											);
-											if (parsed.kind === "formula") {
-												setFormula(
-													setCell(worksheet, row, column),
-													parsed.formula
-												);
-											} else {
-												setCell(
-													worksheet,
-													row,
-													column,
-													parsed.kind === "blank" ? null : parsed.value
-												);
-											}
-											setRevision((value) => value + 1);
-											onDirty();
-										}}
-									/>
-								);
-							})}
-						</div>
-					))}
+						);
+					})}
 				</div>
 			</div>
 			<div className="flex shrink-0 items-center gap-1 overflow-x-auto border-border border-t bg-background px-2 py-1.5">

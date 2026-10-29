@@ -1,5 +1,12 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import type { UIMessage } from "ai";
+import {
+	isPositiveContextCount,
+	readContextField,
+	sumContextTokens,
+} from "./native-context-usage.mjs";
+import type { NativeTokenOperand } from "./native-token-count.mjs";
+import type { RenderedMessage } from "./utils/native-sdk-observation.ts";
 
 /**
  * Shared context-window usage model. Both the per-message footer
@@ -19,30 +26,65 @@ export const CONTEXT_CRITICAL_PCT = 85;
 /** Token breakdown streamed by Core, normalized across the two stat parts. */
 export interface ContextUsage {
 	/** Cached input tokens (prompt-cache hits), when the provider reports them. */
-	cachedTokens?: number;
+	cachedTokens?: NativeTokenOperand;
+	/** Uncached prompt tokens, derived when total input and both cache counts exist. */
+	cacheMissTokens?: NativeTokenOperand;
+	/** Input tokens read from the prompt cache. */
+	cacheReadTokens?: NativeTokenOperand;
+	/** Input tokens written to the prompt cache. */
+	cacheWriteTokens?: NativeTokenOperand;
 	/** Output/completion tokens for the last turn. */
-	completionTokens?: number;
+	completionTokens?: NativeTokenOperand;
+	/** True while the reporting turn is still streaming (ACP `done: false`). */
+	inFlight?: boolean;
+	/** Model that served the reporting turn (or the caller's hint) — keys the cache TTL. */
+	model?: string;
+	/** Epoch ms at which Core observed the reporting turn's usage. */
+	observedAt?: number;
 	/** Input/prompt tokens for the last turn. */
-	promptTokens?: number;
+	promptTokens?: NativeTokenOperand;
+	/** Provider or agent id for the reporting turn — the cache-TTL fallback key. */
+	provider?: string;
 	/** Reasoning tokens (o-series / thinking models), when reported. */
-	reasoningTokens?: number;
+	reasoningTokens?: NativeTokenOperand;
 	/** The model's context window (ring denominator). 0 when unknown. */
-	total: number;
+	total: NativeTokenOperand;
 	/** Prompt + completion for the last turn. */
-	totalTokens?: number;
+	totalTokens?: NativeTokenOperand;
 	/** Tokens currently occupying the context window (ring numerator). */
-	used: number;
+	used: NativeTokenOperand;
 }
 
 /** Severity color for a usage percentage. Returns a Tailwind text-color class. */
 export function contextRingColor(pct: number): string {
 	if (pct >= CONTEXT_CRITICAL_PCT) {
-		return "text-destructive";
+		return "text-status-destructive";
 	}
 	if (pct >= CONTEXT_WARN_PCT) {
-		return "text-warning";
+		return "text-status-warning";
 	}
 	return "text-muted-foreground";
+}
+
+/** Cache reads and writes are subsets of total input, not extra input tokens. */
+export function deriveCacheMissTokens(
+	promptTokens: NativeTokenOperand,
+	cacheReadTokens: NativeTokenOperand,
+	cacheWriteTokens: NativeTokenOperand
+): number | undefined {
+	if (
+		!(
+			isNativeNumber(promptTokens) &&
+			isNativeNumber(cacheReadTokens) &&
+			isNativeNumber(cacheWriteTokens) &&
+			Number.isFinite(promptTokens) &&
+			Number.isFinite(cacheReadTokens) &&
+			Number.isFinite(cacheWriteTokens)
+		)
+	) {
+		return undefined;
+	}
+	return Math.max(0, promptTokens - cacheReadTokens - cacheWriteTokens);
 }
 
 /**
@@ -148,10 +190,33 @@ export interface ContextBreakdown {
  * The bar and the legend both follow it, so a slice that grows between turns
  * stays in the same place instead of jumping as it overtakes its neighbours.
  */
-export const CATEGORY_META: Record<
-	string,
-	{ color: string; order: number; hint?: string }
-> = {
+export interface ContextCategoryMetadata {
+	color: string;
+	hint?: string;
+	order: number;
+}
+
+/** Authored category metadata plus the existing mutable extension-key port. */
+export interface ContextCategoryMetadataRegistry {
+	agent_baseline: ContextCategoryMetadata;
+	documents: ContextCategoryMetadata;
+	free: ContextCategoryMetadata;
+	history_assistant: ContextCategoryMetadata;
+	history_replay: ContextCategoryMetadata;
+	history_system: ContextCategoryMetadata;
+	history_tool: ContextCategoryMetadata;
+	history_user: ContextCategoryMetadata;
+	images: ContextCategoryMetadata;
+	output_style: ContextCategoryMetadata;
+	plugin_context: ContextCategoryMetadata;
+	skills: ContextCategoryMetadata;
+	system: ContextCategoryMetadata;
+	tools: ContextCategoryMetadata;
+	unaccounted: ContextCategoryMetadata;
+	[category: string]: ContextCategoryMetadata;
+}
+
+export const CATEGORY_META: ContextCategoryMetadataRegistry = {
 	system: {
 		color: "oklch(0.62 0.19 256)",
 		order: 0,
@@ -243,7 +308,7 @@ export interface ContextSlice extends ContextCategory {
 export function contextSlices(
 	breakdown: ContextBreakdown,
 	fallbackWindow?: number
-): { slices: ContextSlice[]; used: number; window: number } {
+) {
 	const window =
 		breakdown.window > 0 ? breakdown.window : (fallbackWindow ?? 0);
 	const reported = breakdown.reportedInput ?? 0;
@@ -277,38 +342,60 @@ export function contextSlices(
 	return { slices, used, window };
 }
 
-// Data-part types Core streams (see `build_stats_part` and the `acp-usage`
-// emitter in apps/core/src/sidecar/adapters/mod.rs). Kept loose (all optional)
-// because a frame may carry only a subset while streaming.
-interface RyuStatsPart {
-	cachedTokens?: number;
-	completionTokens?: number;
-	promptTokens?: number;
-	reasoningTokens?: number;
-	totalTokens?: number;
-}
-
-interface AcpUsagePart {
-	cachedTokens?: number;
-	completionTokens?: number;
-	promptTokens?: number;
-	reasoningTokens?: number;
-	total?: number;
-	totalTokens?: number;
-	used?: number;
-}
-
+// Named usage parts preserve raw provider operands; field reads below do not claim numeric DTOs.
 const RYU_STATS_PART_TYPE = "data-ryu-stats";
 const ACP_USAGE_PART_TYPE = "data-acp-usage";
 
-function partData<T>(msg: UIMessage, type: string): T | null {
-	const parts = (msg.parts ?? []) as Array<{ type?: string; data?: unknown }>;
+function partData(
+	msg: RenderedMessage,
+	type: typeof RYU_STATS_PART_TYPE | typeof ACP_USAGE_PART_TYPE
+): NativeTokenOperand {
+	const parts = msg.parts ?? [];
 	for (const part of parts) {
 		if (part?.type === type && part.data) {
-			return part.data as T;
+			return readContextField(part, "data");
 		}
 	}
 	return null;
+}
+
+/** Hints for fields a usage part may omit — the surface's selected model/agent. */
+export interface ContextUsageHints {
+	model?: string | null;
+	provider?: string | null;
+}
+
+function textField(data: NativeTokenOperand, keys: readonly string[]) {
+	for (const key of keys) {
+		const value = readContextField(data, key);
+		if (typeof value === "string" && value.trim() !== "") {
+			return value;
+		}
+	}
+	return;
+}
+
+/** Model, provider, timestamp and liveness shared by both usage part shapes. */
+function turnIdentity(
+	data: NativeTokenOperand,
+	hints: ContextUsageHints | undefined
+): Pick<ContextUsage, "inFlight" | "model" | "observedAt" | "provider"> {
+	const observedAt = readContextField(data, "observedAt");
+	return {
+		inFlight: readContextField(data, "done") === false,
+		model:
+			textField(data, ["historyModelId", "modelId", "model"]) ??
+			hints?.model ??
+			undefined,
+		observedAt:
+			isNativeNumber(observedAt) && Number.isFinite(observedAt)
+				? observedAt
+				: undefined,
+		provider:
+			textField(data, ["historyProviderId", "providerId", "provider"]) ??
+			hints?.provider ??
+			undefined,
+	};
 }
 
 /**
@@ -322,8 +409,9 @@ function partData<T>(msg: UIMessage, type: string): T | null {
  * loaded chat shows no meter until the next turn.
  */
 export function deriveContextUsage(
-	messages: readonly UIMessage[],
-	contextSize?: number
+	messages: readonly RenderedMessage[],
+	contextSize?: number,
+	hints?: ContextUsageHints
 ): ContextUsage | null {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const msg = messages[i];
@@ -331,40 +419,92 @@ export function deriveContextUsage(
 			continue;
 		}
 
-		const acp = partData<AcpUsagePart>(msg, ACP_USAGE_PART_TYPE);
+		const acp = partData(msg, ACP_USAGE_PART_TYPE);
 		if (acp) {
 			const used =
-				acp.used ??
-				acp.totalTokens ??
-				(acp.promptTokens ?? 0) + (acp.completionTokens ?? 0);
-			const total = acp.total ?? contextSize ?? 0;
-			if (used > 0) {
+				readContextField(acp, "used") ??
+				readContextField(acp, "currentUsage") ??
+				readContextField(acp, "current_usage") ??
+				readContextField(acp, "totalTokens") ??
+				sumContextTokens(
+					readContextField(acp, "promptTokens"),
+					readContextField(acp, "completionTokens")
+				);
+			const total =
+				readContextField(acp, "total") ??
+				readContextField(acp, "contextWindow") ??
+				readContextField(acp, "context_window") ??
+				contextSize ??
+				0;
+			if (isPositiveContextCount(used)) {
+				const cacheReadTokens =
+					readContextField(acp, "cachedReadTokens") ??
+					readContextField(acp, "cacheReadTokens") ??
+					readContextField(acp, "cachedTokens");
+				const cacheWriteTokens =
+					readContextField(acp, "cachedWriteTokens") ??
+					readContextField(acp, "cacheWriteTokens");
 				return {
+					...turnIdentity(acp, hints),
 					used,
 					total,
-					promptTokens: acp.promptTokens,
-					cachedTokens: acp.cachedTokens,
-					completionTokens: acp.completionTokens,
-					reasoningTokens: acp.reasoningTokens,
-					totalTokens: acp.totalTokens,
+					promptTokens: readContextField(acp, "promptTokens"),
+					cachedTokens: cacheReadTokens,
+					cacheReadTokens,
+					cacheWriteTokens,
+					cacheMissTokens:
+						readContextField(acp, "cacheMissTokens") ??
+						deriveCacheMissTokens(
+							readContextField(acp, "promptTokens"),
+							cacheReadTokens,
+							cacheWriteTokens
+						),
+					completionTokens: readContextField(acp, "completionTokens"),
+					// Core forwards ACP's `thought_tokens` as `thoughtTokens`.
+					reasoningTokens:
+						readContextField(acp, "reasoningTokens") ??
+						readContextField(acp, "thoughtTokens"),
+					totalTokens: readContextField(acp, "totalTokens"),
 				};
 			}
 		}
 
-		const stats = partData<RyuStatsPart>(msg, RYU_STATS_PART_TYPE);
+		const stats = partData(msg, RYU_STATS_PART_TYPE);
 		if (stats) {
 			const used =
-				stats.totalTokens ??
-				(stats.promptTokens ?? 0) + (stats.completionTokens ?? 0);
-			if (used > 0) {
+				readContextField(stats, "currentUsage") ??
+				readContextField(stats, "current_usage") ??
+				readContextField(stats, "totalTokens") ??
+				sumContextTokens(
+					readContextField(stats, "promptTokens"),
+					readContextField(stats, "completionTokens")
+				);
+			if (isPositiveContextCount(used)) {
+				const cacheReadTokens =
+					readContextField(stats, "cacheReadTokens") ??
+					readContextField(stats, "cachedTokens");
 				return {
+					...turnIdentity(stats, hints),
 					used,
-					total: contextSize ?? 0,
-					promptTokens: stats.promptTokens,
-					cachedTokens: stats.cachedTokens,
-					completionTokens: stats.completionTokens,
-					reasoningTokens: stats.reasoningTokens,
-					totalTokens: stats.totalTokens,
+					total:
+						readContextField(stats, "contextWindow") ??
+						readContextField(stats, "context_window") ??
+						contextSize ??
+						0,
+					promptTokens: readContextField(stats, "promptTokens"),
+					cachedTokens: cacheReadTokens,
+					cacheReadTokens,
+					cacheWriteTokens: readContextField(stats, "cacheWriteTokens"),
+					cacheMissTokens:
+						readContextField(stats, "cacheMissTokens") ??
+						deriveCacheMissTokens(
+							readContextField(stats, "promptTokens"),
+							cacheReadTokens,
+							readContextField(stats, "cacheWriteTokens")
+						),
+					completionTokens: readContextField(stats, "completionTokens"),
+					reasoningTokens: readContextField(stats, "reasoningTokens"),
+					totalTokens: readContextField(stats, "totalTokens"),
 				};
 			}
 		}

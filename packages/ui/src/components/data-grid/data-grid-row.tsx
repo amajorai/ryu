@@ -3,6 +3,7 @@
 import { DataGridCell } from "@ryu/ui/components/data-grid/data-grid-cell.tsx";
 import { useComposedRefs } from "@ryu/ui/lib/compose-refs.ts";
 import {
+	type ColumnPinningStyle,
 	flexRender,
 	getCellKey,
 	getColumnBorderVisibility,
@@ -24,20 +25,35 @@ import type {
 import type { VirtualItem } from "@tanstack/react-virtual";
 import {
 	type ComponentProps,
+	type MouseEvent,
 	memo,
 	type RefObject,
 	useCallback,
 	useMemo,
 } from "react";
+import { isNativeFunction } from "../../lib/native-primitive-observation.ts";
+
+import styles from "./data-grid.module.css";
+
+interface RowStyle extends Partial<ColumnPinningStyle> {
+	"--grid-cell-width"?: string;
+	"--grid-row-height"?: string;
+	"--grid-row-top"?: string;
+	"--grid-row-transform"?: string;
+}
 
 interface DataGridRowProps<TData> extends ComponentProps<"div"> {
 	activeSearchMatch: CellPosition | null;
 	adjustLayout: boolean;
 	cellSelectionKeys: Set<string>;
+	/** Column definitions; a new array re-renders cells (formulas, formatting). */
+	columnDefs: unknown;
 	columnPinning: ColumnPinningState;
 	columnVisibility: VisibilityState;
 	dir: Direction;
 	editingCell: CellPosition | null;
+	/** Column of this row's cell that carries the selection's fill handle. */
+	fillHandleColumnId: string | null;
 	focusedCell: CellPosition | null;
 	measureElement: (node: Element | null) => void;
 	readOnly: boolean;
@@ -50,113 +66,123 @@ interface DataGridRowProps<TData> extends ComponentProps<"div"> {
 	virtualItem: VirtualItem;
 }
 
-export const DataGridRow = memo(DataGridRowImpl, (prev, next) => {
-	const prevRowIndex = prev.virtualItem.index;
-	const nextRowIndex = next.virtualItem.index;
+export const DataGridRow =
+	// SAFETY: React memo retains this exact generic implementation and forwards the complete props packet to it for JSX rendering. Its public ComponentProps extraction erases the implementation's TData parameter; this restores that same generic JSX signature, without claiming the native memo descriptor is directly callable or narrowing any row/cell value.
+	memo(DataGridRowImpl, (prev, next) => {
+		const prevRowIndex = prev.virtualItem.index;
+		const nextRowIndex = next.virtualItem.index;
 
-	// Re-render if row identity changed
-	if (prev.row.id !== next.row.id) {
-		return false;
-	}
+		// Re-render if row identity changed
+		if (prev.row.id !== next.row.id) {
+			return false;
+		}
 
-	// Re-render if row data (original) reference changed
-	if (prev.row.original !== next.row.original) {
-		return false;
-	}
+		// Re-render if row data (original) reference changed
+		if (prev.row.original !== next.row.original) {
+			return false;
+		}
 
-	// Re-render if virtual position changed (handles transform updates)
-	if (prev.virtualItem.start !== next.virtualItem.start) {
-		return false;
-	}
+		// Re-render if virtual position changed (handles transform updates)
+		if (prev.virtualItem.start !== next.virtualItem.start) {
+			return false;
+		}
 
-	// Re-render if focus state changed for this row
-	const prevHasFocus = prev.focusedCell?.rowIndex === prevRowIndex;
-	const nextHasFocus = next.focusedCell?.rowIndex === nextRowIndex;
+		// Re-render if focus state changed for this row
+		const prevHasFocus = prev.focusedCell?.rowIndex === prevRowIndex;
+		const nextHasFocus = next.focusedCell?.rowIndex === nextRowIndex;
 
-	if (prevHasFocus !== nextHasFocus) {
-		return false;
-	}
+		if (prevHasFocus !== nextHasFocus) {
+			return false;
+		}
 
-	// Re-render if focused column changed within this row
-	if (
-		nextHasFocus &&
-		prevHasFocus &&
-		prev.focusedCell?.columnId !== next.focusedCell?.columnId
-	) {
-		return false;
-	}
+		// Re-render if focused column changed within this row
+		if (
+			nextHasFocus &&
+			prevHasFocus &&
+			prev.focusedCell?.columnId !== next.focusedCell?.columnId
+		) {
+			return false;
+		}
 
-	// Re-render if editing state changed for this row
-	const prevHasEditing = prev.editingCell?.rowIndex === prevRowIndex;
-	const nextHasEditing = next.editingCell?.rowIndex === nextRowIndex;
+		// Re-render if editing state changed for this row
+		const prevHasEditing = prev.editingCell?.rowIndex === prevRowIndex;
+		const nextHasEditing = next.editingCell?.rowIndex === nextRowIndex;
 
-	if (prevHasEditing !== nextHasEditing) {
-		return false;
-	}
+		if (prevHasEditing !== nextHasEditing) {
+			return false;
+		}
 
-	// Re-render if editing column changed within this row
-	if (
-		nextHasEditing &&
-		prevHasEditing &&
-		prev.editingCell?.columnId !== next.editingCell?.columnId
-	) {
-		return false;
-	}
+		// Re-render if editing column changed within this row
+		if (
+			nextHasEditing &&
+			prevHasEditing &&
+			prev.editingCell?.columnId !== next.editingCell?.columnId
+		) {
+			return false;
+		}
 
-	// Re-render if this row's selected cells changed
-	// Using stable Set reference that only includes this row's cells
-	if (prev.cellSelectionKeys !== next.cellSelectionKeys) {
-		return false;
-	}
+		if (prev.fillHandleColumnId !== next.fillHandleColumnId) {
+			return false;
+		}
 
-	// Re-render if column visibility changed
-	if (prev.columnVisibility !== next.columnVisibility) {
-		return false;
-	}
+		if (prev.columnDefs !== next.columnDefs) {
+			return false;
+		}
 
-	// Re-render if row height changed
-	if (prev.rowHeight !== next.rowHeight) {
-		return false;
-	}
+		// Re-render if this row's selected cells changed
+		// Using stable Set reference that only includes this row's cells
+		if (prev.cellSelectionKeys !== next.cellSelectionKeys) {
+			return false;
+		}
 
-	// Re-render if column pinning state changed
-	if (prev.columnPinning !== next.columnPinning) {
-		return false;
-	}
+		// Re-render if column visibility changed
+		if (prev.columnVisibility !== next.columnVisibility) {
+			return false;
+		}
 
-	// Re-render if readOnly changed
-	if (prev.readOnly !== next.readOnly) {
-		return false;
-	}
+		// Re-render if row height changed
+		if (prev.rowHeight !== next.rowHeight) {
+			return false;
+		}
 
-	// Re-render if search match columns changed for this row
-	if (prev.searchMatchColumns !== next.searchMatchColumns) {
-		return false;
-	}
+		// Re-render if column pinning state changed
+		if (prev.columnPinning !== next.columnPinning) {
+			return false;
+		}
 
-	// Re-render if active search match changed for this row
-	if (prev.activeSearchMatch?.columnId !== next.activeSearchMatch?.columnId) {
-		return false;
-	}
+		// Re-render if readOnly changed
+		if (prev.readOnly !== next.readOnly) {
+			return false;
+		}
 
-	// Re-render if direction changed
-	if (prev.dir !== next.dir) {
-		return false;
-	}
+		// Re-render if search match columns changed for this row
+		if (prev.searchMatchColumns !== next.searchMatchColumns) {
+			return false;
+		}
 
-	// Re-render if adjustLayout state changed
-	if (prev.adjustLayout !== next.adjustLayout) {
-		return false;
-	}
+		// Re-render if active search match changed for this row
+		if (prev.activeSearchMatch?.columnId !== next.activeSearchMatch?.columnId) {
+			return false;
+		}
 
-	// Re-render if stretchColumns changed
-	if (prev.stretchColumns !== next.stretchColumns) {
-		return false;
-	}
+		// Re-render if direction changed
+		if (prev.dir !== next.dir) {
+			return false;
+		}
 
-	// Skip re-render - props are equal
-	return true;
-}) as typeof DataGridRowImpl;
+		// Re-render if adjustLayout state changed
+		if (prev.adjustLayout !== next.adjustLayout) {
+			return false;
+		}
+
+		// Re-render if stretchColumns changed
+		if (prev.stretchColumns !== next.stretchColumns) {
+			return false;
+		}
+
+		// Skip re-render - props are equal
+		return true;
+	}) as typeof DataGridRowImpl;
 
 function DataGridRowImpl<TData>({
 	row,
@@ -169,7 +195,9 @@ function DataGridRowImpl<TData>({
 	columnPinning,
 	focusedCell,
 	editingCell,
+	fillHandleColumnId,
 	cellSelectionKeys,
+	columnDefs,
 	searchMatchColumns,
 	activeSearchMatch,
 	dir,
@@ -185,7 +213,7 @@ function DataGridRowImpl<TData>({
 
 	const onRowChange = useCallback(
 		(node: HTMLDivElement | null) => {
-			if (typeof virtualRowIndex === "undefined") {
+			if (virtualRowIndex === undefined) {
 				return;
 			}
 
@@ -201,15 +229,40 @@ function DataGridRowImpl<TData>({
 
 	const rowRef = useComposedRefs(ref, onRowChange);
 
+	const onFillHandleMouseDown = useCallback(
+		(event: MouseEvent<HTMLDivElement>) => {
+			tableMeta?.onFillHandleMouseDown?.(event);
+		},
+		[tableMeta]
+	);
+
+	const onFillHandleDoubleClick = useCallback(
+		(event: MouseEvent<HTMLDivElement>) => {
+			event.preventDefault();
+			event.stopPropagation();
+			tableMeta?.onFillHandleDoubleClick?.();
+		},
+		[tableMeta]
+	);
+
 	const isRowSelected = row.getIsSelected();
 
 	// Memoize visible cells to avoid recreating cell array on every render
 	// Though TanStack returns new Cell wrappers, memoizing the array helps React's reconciliation
-	// biome-ignore lint/correctness/useExhaustiveDependencies: columnVisibility and columnPinning are used for calculating the visible cells
+
 	const visibleCells = useMemo(
 		() => row.getVisibleCells(),
-		[row, columnVisibility, columnPinning]
+		[row, columnVisibility, columnPinning, columnDefs]
 	);
+
+	const rowStyle: RowStyle = {
+		"--grid-row-height": `${getRowHeightValue(rowHeight)}px`,
+		"--grid-row-top": adjustLayout ? `${virtualItem.start}px` : undefined,
+		"--grid-row-transform": adjustLayout
+			? undefined
+			: `translateY(${virtualItem.start}px)`,
+		...style,
+	};
 
 	return (
 		<div
@@ -223,17 +276,12 @@ function DataGridRowImpl<TData>({
 			{...props}
 			className={cn(
 				"absolute flex w-full border-b [content-visibility:auto]",
+				styles.row,
 				!adjustLayout && "will-change-transform",
 				className
 			)}
 			ref={rowRef}
-			style={{
-				height: `${getRowHeightValue(rowHeight)}px`,
-				...(adjustLayout
-					? { top: `${virtualItem.start}px` }
-					: { transform: `translateY(${virtualItem.start}px)` }),
-				...style,
-			}}
+			style={rowStyle}
 		>
 			{visibleCells.map((cell, colIndex) => {
 				const columnId = cell.column.id;
@@ -259,10 +307,21 @@ function DataGridRowImpl<TData>({
 					isLastColumn,
 				});
 
+				const pinStyle = getColumnPinningStyle({ column: cell.column, dir });
+				const cellStyle: RowStyle = {
+					"--data-grid-pin-left": pinStyle["--data-grid-pin-left"],
+					"--data-grid-pin-right": pinStyle["--data-grid-pin-right"],
+					"--data-grid-pin-opacity": pinStyle["--data-grid-pin-opacity"],
+					"--data-grid-pin-position": pinStyle["--data-grid-pin-position"],
+					"--data-grid-pin-shadow": pinStyle["--data-grid-pin-shadow"],
+					"--data-grid-pin-width": pinStyle["--data-grid-pin-width"],
+					"--data-grid-pin-z-index": pinStyle["--data-grid-pin-z-index"],
+					"--grid-cell-width": `calc(var(--col-${columnId}-size) * 1px)`,
+				};
 				return (
 					<div
 						aria-colindex={colIndex + 1}
-						className={cn({
+						className={cn(styles.cell, {
 							grow: stretchColumns && columnId !== "select",
 							"border-e": showEndBorder && columnId !== "select",
 							"border-s": showStartBorder && columnId !== "select",
@@ -271,13 +330,10 @@ function DataGridRowImpl<TData>({
 						data-slot="grid-cell"
 						key={cell.id}
 						role="gridcell"
-						style={{
-							...getColumnPinningStyle({ column: cell.column, dir }),
-							width: `calc(var(--col-${columnId}-size) * 1px)`,
-						}}
+						style={cellStyle}
 						tabIndex={-1}
 					>
-						{typeof cell.column.columnDef.header === "function" ? (
+						{isNativeFunction(cell.column.columnDef.header) ? (
 							<div
 								className={cn("size-full px-3 py-1.5", {
 									"bg-primary/10": isRowSelected,
@@ -298,6 +354,16 @@ function DataGridRowImpl<TData>({
 								rowHeight={rowHeight}
 								rowIndex={virtualRowIndex}
 								tableMeta={tableMeta}
+							/>
+						)}
+						{fillHandleColumnId === columnId && (
+							<div
+								aria-hidden="true"
+								className="absolute end-0 bottom-0 z-[2] size-2 cursor-crosshair border border-background bg-primary"
+								data-slot="grid-fill-handle"
+								onDoubleClick={onFillHandleDoubleClick}
+								onMouseDown={onFillHandleMouseDown}
+								title="Drag to fill, double-click to fill down"
 							/>
 						)}
 					</div>

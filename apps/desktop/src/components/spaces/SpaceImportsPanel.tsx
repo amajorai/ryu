@@ -9,26 +9,26 @@ import {
 	Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardDescription,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/card.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/select.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import {
 	type ChangeEvent,
 	type ComponentProps,
@@ -39,6 +39,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { z } from "zod";
 import {
 	useComposioActions,
 	useComposioConnections,
@@ -71,7 +72,7 @@ interface SpaceImportsPanelProps {
 	target: ApiTarget;
 }
 
-function errorMessage(error: unknown): string {
+function errorMessage<TError>(error: TError): string {
 	return error instanceof Error
 		? error.message
 		: "The import could not be started.";
@@ -99,6 +100,24 @@ function formatWhen(timestamp: number): string {
 		dateStyle: "medium",
 		timeStyle: "short",
 	}).format(new Date(timestamp));
+}
+
+const CONNECTOR_LABELS: Record<string, string> = {
+	confluence: "Confluence",
+	github: "GitHub",
+	google_drive: "Google Drive",
+	notion: "Notion",
+	web: "Web",
+};
+
+function importSourceLabel(item: SpaceImportRecord): string {
+	if (item.sourceType === "composio") {
+		return `Composio · ${item.sourceFormat}`;
+	}
+	if (item.sourceType === "connector") {
+		return CONNECTOR_LABELS[item.sourceFormat] ?? item.sourceFormat;
+	}
+	return item.sourceFormat.toUpperCase();
 }
 
 function statusVariant(
@@ -133,12 +152,12 @@ function FileImportCard({
 	const input = useRef<HTMLInputElement>(null);
 	return (
 		<Card className="h-full">
-			<CardHeader className="gap-3">
+			<CardHeader spacing="chart">
 				<div className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
 					{icon}
 				</div>
 				<div>
-					<CardTitle className="text-sm">{title}</CardTitle>
+					<CardTitle variant="section">{title}</CardTitle>
 					<CardDescription className="mt-1">{description}</CardDescription>
 				</div>
 			</CardHeader>
@@ -267,7 +286,11 @@ function defaultArgumentValue(property: ComposioInputProperty): string {
 	if (property.default === undefined || property.default === null) {
 		return "";
 	}
-	if (typeof property.default === "object") {
+	if (
+		z
+			.union([z.array(z.json()), z.record(z.string(), z.json())])
+			.safeParse(property.default).success
+	) {
 		return JSON.stringify(property.default);
 	}
 	return String(property.default);
@@ -277,7 +300,7 @@ function buildArguments(
 	action: ComposioAction,
 	values: Record<string, string>
 ) {
-	const argumentsValue: Record<string, unknown> = {};
+	const argumentsValue: Record<string, z.infer<ReturnType<typeof z.json>>> = {};
 	const required = new Set(action.inputSchema.required ?? []);
 	for (const [name, property] of Object.entries(
 		action.inputSchema.properties ?? {}
@@ -303,7 +326,7 @@ function buildArguments(
 		} else if (type === "boolean") {
 			argumentsValue[name] = value === "true";
 		} else if (type === "array" || type === "object") {
-			argumentsValue[name] = JSON.parse(value) as unknown;
+			argumentsValue[name] = z.json().parse(JSON.parse(value));
 		} else {
 			argumentsValue[name] = value;
 		}
@@ -530,7 +553,7 @@ export function SpaceImportsPanel({
 				</div>
 				<Card>
 					<CardHeader>
-						<CardTitle className="flex items-center gap-2 text-sm">
+						<CardTitle layout="badge-row" variant="section">
 							<HugeiconsIcon className="size-4" icon={CloudDownloadIcon} />
 							Import from a connected app
 						</CardTitle>
@@ -539,7 +562,7 @@ export function SpaceImportsPanel({
 							should go.
 						</CardDescription>
 					</CardHeader>
-					<CardContent className="flex flex-col gap-4">
+					<CardContent layout="spaced-stack">
 						{configured ? (
 							availableToolkits.length === 0 ? (
 								<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
@@ -645,12 +668,8 @@ export function SpaceImportsPanel({
 											<Label htmlFor="space-import-destination">
 												Destination
 											</Label>
-											<Select
-												onValueChange={(value) =>
-													setDestinationKind(
-														value as "auto" | "page" | "database"
-													)
-												}
+											<Select<"auto" | "page" | "database">
+												onValueChange={(value) => setDestinationKind(value)}
 												value={destinationKind}
 											>
 												<SelectTrigger id="space-import-destination">
@@ -755,7 +774,10 @@ export function SpaceImportsPanel({
 														: File01Icon
 												}
 											/>
-											<p className="truncate font-medium text-sm">
+											<p
+												className="truncate font-medium text-sm"
+												title={item.sourceName}
+											>
 												{item.sourceName}
 											</p>
 											<Badge variant={statusVariant(item.status)}>
@@ -763,9 +785,7 @@ export function SpaceImportsPanel({
 											</Badge>
 										</div>
 										<p className="mt-1 text-muted-foreground text-xs">
-											{item.sourceType === "composio"
-												? `Composio · ${item.sourceFormat}`
-												: item.sourceFormat.toUpperCase()}
+											{importSourceLabel(item)}
 											{" · "}
 											{formatWhen(item.createdAt)}
 											{item.byteSize > 0

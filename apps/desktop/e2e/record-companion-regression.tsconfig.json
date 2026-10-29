@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "record-companion-regression.spec.ts",
+    "record-companion-regression.host.ts",
+    "record-companion-regression.playwright.config.ts",
+    "harness/record-companion-regression.tsx",
+    "harness/record-companion-regression.types.ts",
+    "harness/vite.record-companion-regression.config.ts"
+  ]
+}

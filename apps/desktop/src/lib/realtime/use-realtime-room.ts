@@ -19,10 +19,10 @@ import {
 	RealtimeConnection,
 	type RealtimeHandlers,
 	type RealtimeKind,
-} from "@ryuhq/core-client/realtime";
+} from "@ryuhq/core-client/realtime.ts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import { getRealtimeJwt } from "./jwt.ts";
+import { realtimeJwtForTarget } from "@/src/lib/api/client.ts";
 
 /** What a surface gets back from {@link useRealtimeRoom}. */
 export interface RealtimeRoom {
@@ -39,7 +39,7 @@ export interface RealtimeRoom {
 	memberId: string | null;
 	/** Publish this client's awareness/presence payload (the server stamps the
 	 * member id). No-op until the connection is open. */
-	publishPresence: (data: unknown) => void;
+	publishPresence: RealtimeConnection["publishPresence"];
 	/** Send a CRDT doc-sync frame (document rooms only). No-op until open. */
 	sendDocSync: (message: DocSyncMessage) => void;
 }
@@ -110,7 +110,7 @@ export function useRealtimeRoom(
 		};
 
 		const open = async () => {
-			const jwt = await getRealtimeJwt();
+			const jwt = await realtimeJwtForTarget({ url, token, userJwt });
 			// An unmount (or a dep change) during the async exchange must not leave a
 			// zombie socket behind.
 			if (cancelled) {
@@ -141,9 +141,12 @@ export function useRealtimeRoom(
 		};
 	}, [roomId, kind, url, token, userJwt, clientId]);
 
-	const publishPresence = useCallback((data: unknown) => {
-		connectionRef.current?.publishPresence(data);
-	}, []);
+	const publishPresence = useCallback(
+		(data: Parameters<RealtimeConnection["publishPresence"]>[0]) => {
+			connectionRef.current?.publishPresence(data);
+		},
+		[]
+	);
 	const sendDocSync = useCallback((message: DocSyncMessage) => {
 		connectionRef.current?.sendDocSync(message);
 	}, []);

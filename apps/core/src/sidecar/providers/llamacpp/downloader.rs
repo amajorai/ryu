@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use super::variant::{self, LlamaVariant};
 use crate::registry::{LocalModelEntry, ModelRegistry};
 use crate::sidecar::download_manager::{
-    build_http_client, extract_binary_with_libs, ryu_dir, ProgressCallback, VersionStore,
+    build_http_client, extract_binary_with_libs_from, tmp_dir, ProgressCallback, VersionStore,
 };
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
@@ -36,6 +36,11 @@ fn bin_path() -> PathBuf {
 /// deliverable version instead of GitHub's latest (which produced a permanent
 /// "update available" row whose Update button could never do anything).
 pub const TARGET_VERSION: &str = "b10218";
+
+/// Serializes every write into the shared llama.cpp install directory: a
+/// variant install wipes and re-extracts it, and `ensure_tts_binary` extracts
+/// into it too, so either running beside another deletes files mid-extract.
+static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Release-archive URL for `variant` on this platform. Every variant resolves
 /// through [`LlamaVariant::asset_slug`], so the URL and the "can this node run
@@ -152,26 +157,6 @@ fn archive_is_zip() -> bool {
     cfg!(target_os = "windows")
 }
 
-/// Delete the pre-variant install: `llama-server`/`llama-tts` sitting directly
-/// in `~/.ryu/bin`, from before builds were installed per-variant into their own
-/// directory. Best-effort — a file we cannot remove is logged, not fatal.
-///
-/// Only these two names are touched. `~/.ryu/bin` is shared with every other
-/// managed binary (whisper-cli, sd-server, tailscale, …), so a directory-wide
-/// sweep here would delete other engines' installs.
-async fn remove_legacy_install() {
-    for stem in ["llama-server", "llama-tts"] {
-        let path = ryu_dir().join("bin").join(variant::exe_name(stem));
-        if !path.exists() {
-            continue;
-        }
-        match tokio::fs::remove_file(&path).await {
-            Ok(()) => tracing::info!("removed pre-variant llama.cpp binary {}", path.display()),
-            Err(e) => tracing::warn!("could not remove {}: {e}", path.display()),
-        }
-    }
-}
-
 // ── LlamaCppDownloader ─────────────────────────────────────────────────────────
 
 pub struct LlamaCppDownloader {
@@ -192,7 +177,7 @@ impl LlamaCppDownloader {
         self
     }
 
-    /// Ensure a llama.cpp build is installed at `~/.ryu/bin/llamacpp/`, picking
+    /// Ensure a llama.cpp build is installed at `<data dir>/engines/chat/llamacpp/`, picking
     /// the variant for this machine (accelerated when there is a usable GPU,
     /// CPU otherwise) unless the user pinned one.
     ///
@@ -229,6 +214,13 @@ impl LlamaCppDownloader {
                     .unwrap_or("unsupported on this hardware")
             );
         }
+
+        // One install at a time, process-wide. Several surfaces (onboarding,
+        // embed, rerank, the install route) call this concurrently, and each
+        // wipes and re-extracts the shared install dir — two at once delete
+        // each other's libraries mid-extract. The fast path below runs under the
+        // lock, so a caller that waited sees the finished install and returns.
+        let _install = INSTALL_LOCK.lock().await;
 
         let dest = bin_path();
         let installed = variant::installed_variant();
@@ -267,7 +259,7 @@ impl LlamaCppDownloader {
 
         // Download the archive through the center to a deterministic temp dest
         // (so its own `.part`/resume works), then read it back to extract.
-        let archive_dest = ryu_dir().join("tmp").join(format!(
+        let archive_dest = tmp_dir().join(format!(
             "llamacpp-{TARGET_VERSION}-{v}.{ext}",
             v = wanted.as_str(),
             ext = archive_ext()
@@ -284,9 +276,10 @@ impl LlamaCppDownloader {
             })
             .await
             .context("downloading llama.cpp archive")?;
-        let archive_data = tokio::fs::read(&archive_path)
-            .await
-            .context("reading downloaded llama.cpp archive")?;
+        // Streamed from disk: CUDA builds are hundreds of MB, and reading the
+        // whole archive into memory first doubled the install's peak RAM.
+        let archive_file =
+            std::fs::File::open(&archive_path).context("opening downloaded llama.cpp archive")?;
 
         // Wipe the previous build before extracting. Backends ship DIFFERENT
         // `ggml-*` shared libraries under the SAME names, and llama.cpp's
@@ -308,7 +301,12 @@ impl LlamaCppDownloader {
         let is_zip = archive_is_zip();
         let extract_dir = bin_dir.clone();
         let dest = tokio::task::spawn_blocking(move || {
-            extract_binary_with_libs(&archive_data, "llama-server", &extract_dir, is_zip)
+            extract_binary_with_libs_from(
+                std::io::BufReader::new(archive_file),
+                "llama-server",
+                &extract_dir,
+                is_zip,
+            )
         })
         .await
         .context("spawn_blocking for archive extraction")??;
@@ -342,16 +340,6 @@ impl LlamaCppDownloader {
         // The extracted binary is in place; drop the temp archive.
         let _ = tokio::fs::remove_file(&archive_path).await;
 
-        // Retire the pre-variant install (a `llama-server` loose in ~/.ryu/bin).
-        // Left in place it is a second, stale copy that every path-probing
-        // caller could still find.
-        remove_legacy_install().await;
-
-        // Ensure PATH includes ~/.ryu/bin
-        if let Err(e) = crate::sidecar::path_manager::PathManager::add_to_path() {
-            tracing::warn!("Failed to add ~/.ryu/bin to PATH: {}", e);
-        }
-
         tracing::info!(
             "llama.cpp {} ({}) installed at {}",
             TARGET_VERSION,
@@ -371,9 +359,7 @@ impl LlamaCppDownloader {
         url: &str,
         bin_dir: &std::path::Path,
     ) -> Result<()> {
-        let dest = ryu_dir()
-            .join("tmp")
-            .join(format!("llamacpp-cudart-{TARGET_VERSION}.zip"));
+        let dest = tmp_dir().join(format!("llamacpp-cudart-{TARGET_VERSION}.zip"));
         let archive_path = downloads
             .download_blocking(crate::downloads::DownloadSpec {
                 kind: crate::downloads::DownloadKind::Engine,
@@ -392,12 +378,11 @@ impl LlamaCppDownloader {
             })
             .await
             .context("downloading the CUDA runtime archive")?;
-        let data = tokio::fs::read(&archive_path)
-            .await
-            .context("reading the downloaded CUDA runtime archive")?;
+        let archive_file = std::fs::File::open(&archive_path)
+            .context("opening the downloaded CUDA runtime archive")?;
         let bin_dir = bin_dir.to_path_buf();
         tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut zip = zip::ZipArchive::new(std::io::Cursor::new(data))
+            let mut zip = zip::ZipArchive::new(std::io::BufReader::new(archive_file))
                 .context("opening the CUDA runtime archive")?;
             for i in 0..zip.len() {
                 let mut entry = zip.by_index(i)?;
@@ -432,7 +417,7 @@ impl LlamaCppDownloader {
     }
 
     /// Ensure the `llama-tts` text-to-speech binary is installed beside the
-    /// engine in `~/.ryu/bin/llamacpp/`. Shares the same llama.cpp release
+    /// engine in `<data dir>/engines/chat/llamacpp/`. Shares the same llama.cpp release
     /// archive as `llama-server`; used by the OuteTTS voice engine. Idempotent:
     /// skips the download when the binary already exists.
     ///
@@ -447,6 +432,12 @@ impl LlamaCppDownloader {
         if dest.exists() {
             return Ok(dest);
         }
+        let _install = INSTALL_LOCK.lock().await;
+        // Re-check under the lock: a variant install that held it may have
+        // just placed (or wiped) the directory.
+        if dest.exists() {
+            return Ok(dest);
+        }
 
         let wanted = match variant::installed_variant() {
             Some(v) => v,
@@ -456,7 +447,7 @@ impl LlamaCppDownloader {
         tracing::info!("downloading llama.cpp (for llama-tts) from {url}");
         // Download the archive through the center (shows in the overlay), then
         // extract llama-tts. Shares the llama-server release archive.
-        let archive_dest = ryu_dir().join("tmp").join(format!(
+        let archive_dest = tmp_dir().join(format!(
             "llamacpp-tts-{TARGET_VERSION}-{v}.{ext}",
             v = wanted.as_str(),
             ext = archive_ext()
@@ -473,9 +464,8 @@ impl LlamaCppDownloader {
             })
             .await
             .context("downloading llama.cpp archive for llama-tts")?;
-        let archive_data = tokio::fs::read(&archive_path)
-            .await
-            .context("reading downloaded llama-tts archive")?;
+        let archive_file =
+            std::fs::File::open(&archive_path).context("opening downloaded llama-tts archive")?;
 
         // Extract llama-tts plus its sibling shared libs (shared with
         // llama-server) into the variant dir so its same-dir rpath resolves.
@@ -485,7 +475,12 @@ impl LlamaCppDownloader {
             .with_context(|| format!("creating {}", bin_dir.display()))?;
         let is_zip = archive_is_zip();
         let dest = tokio::task::spawn_blocking(move || {
-            extract_binary_with_libs(&archive_data, "llama-tts", &bin_dir, is_zip)
+            extract_binary_with_libs_from(
+                std::io::BufReader::new(archive_file),
+                "llama-tts",
+                &bin_dir,
+                is_zip,
+            )
         })
         .await
         .context("spawn_blocking for archive extraction")??;

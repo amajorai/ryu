@@ -61,7 +61,7 @@ function ProofShell() {
 					)}
 				>
 					<div className="max-w-xl rounded-3xl border bg-card/80 p-7 shadow-2xl backdrop-blur-sm">
-						<p className="font-medium text-primary text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 							Responsive shell proof
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl">{surfaceLabel}</h1>

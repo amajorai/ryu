@@ -1,0 +1,72 @@
+{
+  "version": 0,
+  "workspaceId": "workspace-fixture-1",
+  "conversationId": "conversation-fixture-1",
+  "createdAt": 1800000000000,
+  "repo": {
+    "name": "ryu-fixture",
+    "remoteUrl": "https://github.com/example/ryu-fixture.git",
+    "baseCommit": "2222222222222222222222222222222222222222",
+    "branch": "feature/fixture",
+    "upstreamRef": "origin/feature/fixture"
+  },
+  "commits": {
+    "blob": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bytes": 2048,
+      "mediaType": "application/x-git-bundle"
+    },
+    "tip": "2222222222222222222222222222222222222222",
+    "prerequisites": ["1111111111111111111111111111111111111111"],
+    "count": 2
+  },
+  "diff": {
+    "blob": {
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "bytes": 512,
+      "mediaType": "text/x-diff"
+    },
+    "files": [
+      {
+        "path": "README.md",
+        "status": "modified",
+        "bytes": 120,
+        "binary": false,
+        "sensitive": false
+      },
+      {
+        "path": "assets/logo.png",
+        "status": "modified",
+        "bytes": 64,
+        "binary": true,
+        "sensitive": false
+      },
+      {
+        "path": "notes/todo.txt",
+        "status": "added",
+        "bytes": 32,
+        "binary": false,
+        "sensitive": false
+      },
+      {
+        "path": "old.txt",
+        "status": "deleted",
+        "binary": false,
+        "sensitive": false
+      }
+    ]
+  },
+  "untracked": [
+    {
+      "path": "notes/todo.txt",
+      "status": "added",
+      "bytes": 32,
+      "binary": false,
+      "sensitive": false
+    }
+  ],
+  "omitted": [
+    { "path": ".env", "reason": "not-selected" },
+    { "path": "vendor/sdk/", "reason": "submodule" }
+  ]
+}

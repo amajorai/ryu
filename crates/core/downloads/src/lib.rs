@@ -23,7 +23,7 @@
 //! all of which are process-global state in Core — invert through the narrow
 //! [`DownloadsHost`] trait:
 //!
-//! - the active `~/.ryu` **data dir** (`downloads.json` + `downloads-history.json`
+//! - the active `~/.ryu` **data dir** (`state/downloads.json` + `state/downloads-history.json`
 //!   live under it; it is dynamic — user data-folder relocation moves it),
 //! - the **version-store checksum-skip** (a completed re-download is skipped when
 //!   the on-disk file already matches the recorded checksum), and
@@ -37,9 +37,11 @@
 
 mod autotune;
 mod center;
+mod disk;
 
 pub use autotune::{AutoTuner, ThroughputSample, MAX_SLOTS, MIN_SLOTS};
 pub use center::DownloadCenter;
+pub use disk::{available_space_for, DISK_HEADROOM_BYTES};
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -51,7 +53,7 @@ use serde::{Deserialize, Serialize};
 /// installs it once at boot via [`set_global_host`], before the first download.
 pub trait DownloadsHost: Send + Sync {
     /// The active Ryu data dir (`~/.ryu`, or its profile/relocation variant).
-    /// `downloads.json` and `downloads-history.json` are written under it. This is
+    /// `state/downloads.json` and `state/downloads-history.json` are written under it. This is
     /// resolved per call because the user can relocate the data folder at runtime.
     fn ryu_dir(&self) -> PathBuf;
 
@@ -104,6 +106,9 @@ pub fn default_http_client() -> reqwest::Client {
         // is SSRF-screened and DNS-pinned before it is contacted.
         .redirect(reqwest::redirect::Policy::none())
         .user_agent("ryu-core/0.1")
+        // No overall timeout (a multi-GB model legitimately takes hours); the
+        // stream driver enforces response and per-chunk stall deadlines instead.
+        .connect_timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("reqwest client")
 }
@@ -175,6 +180,8 @@ pub enum DownloadRole {
     Skill,
     /// A plugin/app bundle or its sidecar payload.
     Plugin,
+    /// A model checkpoint provisioned into a plugin's private runtime.
+    PluginModel,
     /// An MCP server — its catalog plan plus the npm package its command spawns.
     McpServer,
     /// A post-download processing step (unpacking an archive). Byte-less by
@@ -270,6 +277,11 @@ pub struct DownloadTask {
     /// instead of silently concatenating two versions. Persisted for restart resume.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub etag: Option<String>,
+    /// Expected SHA-256 (hex) from the originating [`DownloadSpec`]. Persisted so
+    /// a task reloaded after a restart still verifies its `.part` before the
+    /// rename into place, instead of finalizing unverified bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
     /// Epoch-ms created / last-updated, for stable ordering + UI freshness.
     pub created_at: i64,
     pub updated_at: i64,

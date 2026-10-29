@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/skill-editor",
   "name": "Skill Editor",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Developer Tools",
   "description": "Author a user-owned Agent Skill (SKILL.md): front-matter fields (name / description / allowed tools / always-on), a markdown body editor, debounced autosave, and server-backed undoable version history.",
@@ -51,20 +51,5 @@
   "companion": {
     "label": "Skill Editor",
     "icon": "sparkles"
-  },
-  "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "skill-editor.chat",
-        "title": "Skill Editor widget",
-        "description": "Skill Editor chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["skill editor widget"],
-        "examples": ["Show me a skill editor widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ]
   }
 }

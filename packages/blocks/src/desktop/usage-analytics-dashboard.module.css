@@ -1,0 +1,12 @@
+.background {
+	background-color: var(--usage-marker-background);
+}
+.foreground {
+	color: var(--usage-marker-foreground);
+}
+.intensity {
+	opacity: var(--usage-marker-opacity);
+}
+.width {
+	width: var(--usage-marker-width);
+}

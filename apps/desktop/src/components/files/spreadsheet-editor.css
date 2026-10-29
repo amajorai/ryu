@@ -1,0 +1,10 @@
+[data-spreadsheet-grid-width] {
+	width: var(--spreadsheet-grid-width);
+}
+[data-spreadsheet-grid-body] {
+	width: var(--spreadsheet-grid-width);
+	height: var(--spreadsheet-grid-height);
+}
+[data-spreadsheet-grid-row] {
+	top: var(--spreadsheet-row-top);
+}

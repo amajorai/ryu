@@ -1,4 +1,6 @@
+import { z } from "zod";
 import { create } from "zustand";
+import { sealedLocalStorage } from "@/src/lib/content-seal.ts";
 
 export interface OidcUserInfo {
 	email?: string;
@@ -6,12 +8,22 @@ export interface OidcUserInfo {
 	picture?: string;
 }
 
+// The signed-in user's email, name and avatar are PII: the value is sealed at
+// rest through the sealed localStorage facade (hydrated before first render).
 const OIDC_USER_KEY = "ryu_oidc_user";
 
 function loadOidcUser(): OidcUserInfo | null {
 	try {
-		const raw = localStorage.getItem(OIDC_USER_KEY);
-		return raw ? (JSON.parse(raw) as OidcUserInfo) : null;
+		const raw = sealedLocalStorage.getItem(OIDC_USER_KEY);
+		return raw
+			? z
+					.object({
+						email: z.string().optional(),
+						name: z.string().optional(),
+						picture: z.string().optional(),
+					})
+					.parse(JSON.parse(raw))
+			: null;
 	} catch {
 		return null;
 	}
@@ -19,9 +31,9 @@ function loadOidcUser(): OidcUserInfo | null {
 
 function saveOidcUser(user: OidcUserInfo | null): void {
 	if (user) {
-		localStorage.setItem(OIDC_USER_KEY, JSON.stringify(user));
+		sealedLocalStorage.setItem(OIDC_USER_KEY, JSON.stringify(user));
 	} else {
-		localStorage.removeItem(OIDC_USER_KEY);
+		sealedLocalStorage.removeItem(OIDC_USER_KEY);
 	}
 }
 
@@ -49,3 +61,17 @@ export const useAppStore = create<AppState>((set) => ({
 		set({ oidcUser: user });
 	},
 }));
+
+// This module can be evaluated before the sealed values are hydrated; pick the
+// stored user up once they are.
+sealedLocalStorage
+	.hydrate()
+	.then(() => {
+		if (useAppStore.getState().oidcUser === null) {
+			const stored = loadOidcUser();
+			if (stored) {
+				useAppStore.setState({ oidcUser: stored });
+			}
+		}
+	})
+	.catch(() => undefined);

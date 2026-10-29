@@ -15,7 +15,10 @@ export default defineConfig({
 	},
 	plugins: [react()],
 	resolve: { alias: { "@": path.resolve(root, "../../../web/src") } },
-	optimizeDeps: { entries: ["watch-proof.html"] },
+	optimizeDeps: {
+		entries: ["watch-proof.html"],
+		esbuildOptions: { target: "esnext" },
+	},
 	server: {
 		host: "127.0.0.1",
 		port: 5199,

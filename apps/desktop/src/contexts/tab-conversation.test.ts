@@ -13,6 +13,8 @@ import type { Tab } from "@/src/contexts/TabsContext.tsx";
 import {
 	bindConversation,
 	findChatTab,
+	findChatTabOnNode,
+	tabNodeKey,
 } from "@/src/contexts/tab-conversation.ts";
 
 const freshChatTab = (): Tab[] => [
@@ -74,5 +76,33 @@ describe("findChatTab", () => {
 			},
 		];
 		expect(findChatTab(tabs, "conv-1")).toBeUndefined();
+	});
+});
+
+describe("findChatTabOnNode", () => {
+	const tabs: Tab[] = [
+		{ id: "on-default", path: "/chat", title: "A", conversationId: "same" },
+		{ id: "on-studio", path: "/chat", title: "B", conversationId: "same" },
+	];
+	const overrides = { "on-studio": "studio" };
+
+	test("matches only the same conversation on the same computer", () => {
+		expect(findChatTabOnNode(tabs, "same", null, overrides)?.id).toBe(
+			"on-default"
+		);
+		expect(findChatTabOnNode(tabs, "same", "studio", overrides)?.id).toBe(
+			"on-studio"
+		);
+		expect(
+			findChatTabOnNode(tabs, "same", "laptop", overrides)
+		).toBeUndefined();
+		expect(findChatTabOnNode(tabs, "other", null, overrides)).toBeUndefined();
+	});
+
+	test("an override naming the default computer counts as the default", () => {
+		const named = { "on-default": "local" };
+		expect(tabNodeKey(named, "on-default", "local")).toBeNull();
+		expect(tabNodeKey(overrides, "on-studio", "local")).toBe("studio");
+		expect(tabNodeKey(overrides, "missing", "local")).toBeNull();
 	});
 });

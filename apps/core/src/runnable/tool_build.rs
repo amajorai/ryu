@@ -11,7 +11,7 @@
 //! **at runtime** without a human running a CLI. So the same four checks are
 //! reimplemented here, with two changes that matter:
 //!
-//! 1. **The cases execute in Core's deny-all Deno sandbox** — via
+//! 1. **The cases execute in Core's deny-all JS sandbox** — via
 //!    [`ryu_tool_exec::run_eval_js`] — not in a full-privilege Node process.
 //!    Verification therefore runs on the *same substrate the tool will run on*,
 //!    and the body is confined by the real sandbox instead of a regex guardrail.
@@ -27,7 +27,7 @@
 //!
 //! 1. **Purity scan** — static, and FIRST because it is the only step that runs
 //!    before the body does. Its denylist covers `import`/`require`/`eval`/
-//!    `new Function`/`process`/`fetch`/`Deno` — every escape from the sandbox —
+//!    `new Function`/`process`/`fetch`/`childProcess` — every escape from the sandbox —
 //!    so clearing it is what makes step 5 safe to run on an AI-authored body.
 //! 2. **Manifest contract** — the seat exists, is routable (real description,
 //!    `input_schema`) and callable (`tool:execute` granted).
@@ -51,7 +51,7 @@ use serde_json::{json, Value};
 
 use crate::plugin_manifest::schema::ToolConfig;
 
-/// The one grant a self-built `inline_deno` tool must carry before Core will run
+/// The one grant a self-built `inline_js` tool must carry before Core will run
 /// its body at all. Mirrors [`ryu_tool_exec::GRANT_TOOL_EXECUTE`]; spelled out so
 /// the contract check below does not depend on the tool-exec feature being on.
 const GRANT_TOOL_EXECUTE: &str = "tool:execute";
@@ -162,9 +162,9 @@ fn denied_rules() -> Vec<DeniedRule> {
             "the body is a fragment — `return` its result instead of exporting it"
         ),
         rule!(
-            r"\bDeno\s*\.",
-            "the Deno global",
-            "the sandbox runs with no permissions; anything Deno.* would reach is denied at the flag level"
+            r"\bchildProcess\s*\.",
+            "the childProcess global",
+            "a self-built tool must not start processes — reach the outside world through host/callTool"
         ),
     ]
 }
@@ -342,14 +342,13 @@ fn runner_payload(spec: &ToolSpec, body: &str) -> Value {
     })
 }
 
-/// The deny-all Deno program that runs every case twice against
+/// The deny-all sandbox program that runs every case twice against
 /// identically-seeded stubs, with every ambient nondeterminism source shadowed.
 ///
 /// This is a port of the splice in `tools/toolsmith/harness.mjs` (the shadow
 /// bindings, the queue-backed host facade, the recorded-effect protocol) executed
 /// *inside* Core's sandbox via [`ryu_tool_exec::run_eval_js`], which passes the
-/// payload as `ctx` and serializes the returned report back over a tagged stdout
-/// line. The program is self-contained: the stubs are in-program, so it makes no
+/// payload as `ctx` and returns the report as the run's result. The program is self-contained: the stubs are in-program, so it makes no
 /// `tools.*` bridge calls at all — there is nothing for the sandbox to reach.
 ///
 /// Returns `{ cases: [{ name, run1, run2 }] }` where each run is
@@ -405,11 +404,11 @@ function shadowValues() {
 		denied("setInterval()"),
 		new Proxy({}, { get: (_t, prop) => denied(`globalThis.${String(prop)}`) }),
 		denied("require()"),
-		new Proxy({}, { get: (_t, prop) => denied(`Deno.${String(prop)}`) }),
+		new Proxy({}, { get: (_t, prop) => denied(`childProcess.${String(prop)}`) }),
 	];
 }
 
-const SHADOW_NAMES = ["Math","Date","crypto","performance","fetch","process","setTimeout","setInterval","globalThis","require","Deno"];
+const SHADOW_NAMES = ["Math","Date","crypto","performance","fetch","process","setTimeout","setInterval","globalThis","require","childProcess"];
 
 // JSON-snapshot a value so an explicitly-undefined property is DROPPED — a case
 // is written in JSON, where `undefined` cannot be expressed, so the recording
@@ -417,7 +416,7 @@ const SHADOW_NAMES = ["Math","Date","crypto","performance","fetch","process","se
 const recordable = (v) => JSON.parse(JSON.stringify(v ?? null));
 const frozenCopy = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
-// The `host` facade Core injects into an `inline_deno` tool, driven from a
+// The `host` facade Core injects into an `inline_js` tool, driven from a
 // case's `host` fixture: `sideModel`/`runAgent` read from a QUEUE, `storage` is
 // a real read-after-write Map, every call is recorded in order.
 function buildHost(fixture, calls) {
@@ -716,14 +715,15 @@ fn check_manifest(
         return;
     };
 
-    if config.get("backend").and_then(Value::as_str) != Some("inline_deno") {
+    // `inline_deno` is the deprecated pre-rename spelling of the same backend;
+    // tools this module wrote before the rename persist it, and they must still
+    // re-verify rather than be refused as a different backend.
+    let backend = config.get("backend").and_then(Value::as_str);
+    if !backend.is_some_and(crate::plugin_manifest::schema::is_inline_js_backend) {
         problems.push(format!(
-            "runnable for '{}' has backend '{}', expected 'inline_deno'",
+            "runnable for '{}' has backend '{}', expected 'inline_js'",
             spec.tool,
-            config
-                .get("backend")
-                .and_then(Value::as_str)
-                .unwrap_or("(none)")
+            backend.unwrap_or("(none)")
         ));
     }
 
@@ -1012,7 +1012,7 @@ pub async fn verify_tool_package(dir: &Path, expected_id: &str) -> Result<GateRe
 }
 
 /// The manifest `write_tool` seals, as a JSON value. `code` is the body; this is
-/// the ONLY form Core loads for an `inline_deno` tool.
+/// the ONLY form Core loads for an `inline_js` tool.
 pub fn tool_manifest_json(
     id: &str,
     slug: &str,
@@ -1034,7 +1034,7 @@ pub fn tool_manifest_json(
                 "kind": "tool",
                 "config": {
                     "slug": slug,
-                    "backend": "inline_deno",
+                    "backend": "inline_js",
                     "description": description,
                     "input_schema": input_schema,
                     "code": code
@@ -1132,16 +1132,55 @@ return { length: text.length };
             "return 1;",
         );
         assert_eq!(m["permission_grants"][0], GRANT_TOOL_EXECUTE);
-        assert_eq!(m["runnables"][0]["config"]["backend"], "inline_deno");
+        assert_eq!(m["runnables"][0]["config"]["backend"], "inline_js");
         assert_eq!(m["runnables"][0]["config"]["code"], "return 1;");
         // The sealed manifest must deserialize + validate as a real ToolConfig.
         validate_tool_config(&m["runnables"][0]["config"]).unwrap();
     }
 
     #[test]
-    fn validate_tool_config_rejects_inline_deno_without_code() {
-        let cfg = json!({ "slug": "demo", "backend": "inline_deno" });
+    fn validate_tool_config_rejects_inline_js_without_code() {
+        let cfg = json!({ "slug": "demo", "backend": "inline_js" });
         assert!(validate_tool_config(&cfg).is_err());
+    }
+
+    // Tools this module sealed before the `inline_deno` → `inline_js` rename
+    // still say `inline_deno` on disk; they must re-verify, not be refused.
+    #[test]
+    fn manifest_check_accepts_the_legacy_inline_deno_backend() {
+        let spec: ToolSpec = serde_json::from_value(json!({
+            "tool": "demo",
+            "kind": "inline_tool",
+            "code_file": "tools/demo.js",
+            "cases": []
+        }))
+        .unwrap();
+        let check = |backend: &str| {
+            let mut manifest = tool_manifest_json(
+                "com.acme.demo",
+                "demo",
+                "Demo tool.",
+                json!({ "type": "object" }),
+                "return 1;",
+            );
+            manifest["runnables"][0]["config"]["backend"] = json!(backend);
+            let mut report = GateReport::check("x", true, "");
+            check_manifest(&spec, "return 1;", &manifest, "com.acme.demo", &mut report);
+            report.checks.pop().unwrap()
+        };
+        let legacy = check("inline_deno");
+        assert!(legacy.ok, "{}", legacy.detail);
+        validate_tool_config(
+            &json!({ "slug": "demo", "backend": "inline_deno", "code": "return 1;" }),
+        )
+        .unwrap();
+        let other = check("http");
+        assert!(!other.ok);
+        assert!(
+            other.detail.contains("expected 'inline_js'"),
+            "{}",
+            other.detail
+        );
     }
 
     #[test]
@@ -1301,16 +1340,9 @@ return { length: text.length };
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// True when the `deno` binary is on PATH, i.e. the sandbox can actually run.
-    fn deno_available() -> bool {
-        std::process::Command::new("deno")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .stdin(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+    /// True when the JS sandbox is built, i.e. the cases can actually run.
+    fn sandbox_available() -> bool {
+        ryu_tool_exec::is_available()
     }
 
     /// The full gate, through the REAL deny-all sandbox, on the real worked
@@ -1319,8 +1351,8 @@ return { length: text.length };
     /// keeping the two in lockstep.
     #[test]
     fn verify_text_chunk_end_to_end_through_the_sandbox() {
-        if !deno_available() {
-            eprintln!("skipping: deno not on PATH");
+        if !sandbox_available() {
+            eprintln!("skipping: the JS sandbox is not built");
             return;
         }
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1363,8 +1395,15 @@ return { length: text.length };
         let report = rt
             .block_on(verify_tool_package(&dir, "com.acme.text-chunk"))
             .unwrap();
+        let expected_case_count = serde_json::from_str::<Value>(
+            &std::fs::read_to_string(dir.join("cases.json")).unwrap(),
+        )
+        .unwrap()["cases"]
+            .as_array()
+            .expect("worked example has a cases array")
+            .len();
         assert!(report.passed, "{:#?}", report);
-        assert_eq!(report.cases.len(), 7, "every case ran");
+        assert_eq!(report.cases.len(), expected_case_count, "every case ran");
         assert!(report.cases.iter().all(|c| c.ok));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1380,8 +1419,8 @@ return { length: text.length };
         // is a body that the shadow harness rejects at runtime for a QUEUE miss,
         // which is the documented behaviour when a body calls host more often
         // than the fixture allows.
-        if !deno_available() {
-            eprintln!("skipping: deno not on PATH");
+        if !sandbox_available() {
+            eprintln!("skipping: the JS sandbox is not built");
             return;
         }
         let dir = tmp_dir();

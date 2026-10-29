@@ -7,7 +7,12 @@ import {
 	NativeDesktopOnly,
 } from "./app-surface-context.tsx";
 
-const BROWSER_SURFACES: readonly AppSurface[] = ["web", "extension", "mobile"];
+const BROWSER_SURFACES: readonly AppSurface[] = [
+	"web",
+	"extension",
+	"mobile",
+	"telegram",
+];
 
 function renderActions(surface: AppSurface): string {
 	const children = [

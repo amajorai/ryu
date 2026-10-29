@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export type BrowserFamily = "chrome" | "edge" | "firefox" | "safari" | "other";
 
 export interface BrowserDevice {
@@ -58,7 +60,7 @@ export function classifyBrowserDevice(
 }
 
 export function detectBrowserDevice(): BrowserDevice {
-	if (typeof navigator === "undefined") {
+	if (!globalThis.navigator) {
 		return {
 			browser: "other",
 			isComputer: true,
@@ -67,11 +69,14 @@ export function detectBrowserDevice(): BrowserDevice {
 		};
 	}
 
-	const userAgentData = (
-		navigator as Navigator & {
-			userAgentData?: { mobile?: boolean };
-		}
-	).userAgentData;
+	const { userAgentData } = z
+		.object({
+			userAgentData: z
+				.object({ mobile: z.boolean().optional() })
+				.optional()
+				.catch(undefined),
+		})
+		.parse(navigator);
 	return classifyBrowserDevice({
 		maxTouchPoints: navigator.maxTouchPoints,
 		platform: navigator.platform,

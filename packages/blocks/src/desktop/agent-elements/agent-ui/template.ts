@@ -64,11 +64,12 @@ export const AgentUiSpecSchema = z
 				});
 				return;
 			}
-			if (visited.has(elementId) || !(elementId in spec.elements)) {
+			const element = spec.elements[elementId];
+			if (visited.has(elementId) || !element) {
 				return;
 			}
 			visiting.add(elementId);
-			for (const childId of spec.elements[elementId].children) {
+			for (const childId of element.children) {
 				visit(childId);
 			}
 			visiting.delete(elementId);
@@ -121,20 +122,11 @@ export type AgentUiSpec = z.infer<typeof AgentUiSpecSchema>;
 export type AgentUiTemplate = z.infer<typeof AgentUiTemplateSchema>;
 export type AgentUiTemplateInput = z.infer<typeof AgentUiTemplateInputSchema>;
 
-export function parseAgentUiTemplate(input: unknown): AgentUiTemplate {
-	return AgentUiTemplateSchema.parse(input);
-}
+export const parseAgentUiTemplate = AgentUiTemplateSchema.parse;
 
-export function parseAgentUiTemplateInput(
-	input: unknown
-): AgentUiTemplateInput {
-	return AgentUiTemplateInputSchema.parse(input);
-}
+export const parseAgentUiTemplateInput = AgentUiTemplateInputSchema.parse;
 
-export function safeParseAgentUiTemplate(input: unknown) {
-	return AgentUiTemplateSchema.safeParse(input);
-}
+export const safeParseAgentUiTemplate = AgentUiTemplateSchema.safeParse;
 
-export function safeParseAgentUiTemplateInput(input: unknown) {
-	return AgentUiTemplateInputSchema.safeParse(input);
-}
+export const safeParseAgentUiTemplateInput =
+	AgentUiTemplateInputSchema.safeParse;

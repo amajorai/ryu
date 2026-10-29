@@ -3,7 +3,7 @@
 //
 //   node tools/toolsmith/index.mjs scaffold --id @scope/name --tool slug [--kind inline_tool|adapter] [--out DIR]
 //   node tools/toolsmith/index.mjs verify   <plugin dir>
-//   node tools/toolsmith/index.mjs sync     <plugin dir> [--check]
+//   node tools/toolsmith/index.mjs sync     <plugin dir> [--check] [--cases cases/<tool>.json]
 //
 // `verify` is the gate: purity scan → manifest contract → drift check → golden
 // cases. A tool that has not passed it is not a tool, it is a draft. The same four
@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { caseFiles } from "./harness.mjs";
 import {
 	checkBodyDrift,
 	checkManifestContract,
@@ -97,13 +97,13 @@ function writeIfAbsent(path, contents) {
  *
  * `cases.json` is the toolsmith-side source of truth for WHICH body is under
  * test, deliberately separate from the manifest: an adapter names its body with
- * `code_file` (which Core hydrates) while an `inline_deno` tool has no
+ * `code_file` (which Core hydrates) while an `inline_js` tool has no
  * `code_file` field at all in `ToolConfig` and must carry its body inline. One
  * pointer that works for both keeps the harness from having to branch on kind
  * just to find the file.
  */
-function loadToolPackage(dir) {
-	const casesPath = join(dir, "cases.json");
+function loadToolPackage(dir, casesFile = "cases.json") {
+	const casesPath = join(dir, casesFile);
 	if (!existsSync(casesPath)) {
 		die(
 			`${dir} has no cases.json — this is not a toolsmith package. Run \`scaffold\` first.`
@@ -143,7 +143,7 @@ function seatOrDie(dir, spec, kind) {
 
 const INLINE_TOOL_TEMPLATE = (
 	slug
-) => `// Tool body for \`${slug}\`, run in Core's Deno sandbox.
+) => `// Tool body for \`${slug}\`, run in Core's JS sandbox.
 //
 // This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE
 // with \`input\` (the call arguments) and \`host\` (the capability bridge) already
@@ -179,15 +179,17 @@ const ADAPTER_TEMPLATE = (
 // itself. \`node tools/toolsmith/index.mjs verify\` enforces that.
 
 const res = await callTool({ query: input.query });
-// An MCP \`tools/call\` answer is the TRANSPORT envelope, not the tool's value.
-// Only \`structuredContent\` carries the typed model; shaping a missing one into an
-// empty result would report a broken install as "nothing found".
-const payload = res && res.structuredContent;
-if (!payload || res.isError) {
+// \`provider.tool\` is an \`http\` tool with \`unwrap_body\`, so a 2xx answer IS the
+// provider's parsed JSON body. Anything else is not a result set: a non-2xx
+// response arrives as \`{status, body}\` and, because the tool is \`fail_open\`, a
+// rejected key or unreachable host as \`{available: false, reason, hint}\`. Pass
+// those through under \`raw\`; shaping them into an empty result would report a
+// broken install as "nothing found".
+if (!(res && Array.isArray(res.results))) {
 	return { raw: res };
 }
 
-return { results: payload.results ?? [] };
+return { results: res.results };
 `;
 
 const CASES_TEMPLATE = (slug, kind, codeFile) => {
@@ -196,18 +198,13 @@ const CASES_TEMPLATE = (slug, kind, codeFile) => {
 		return {
 			...base,
 			adapter_tools: [],
+			// The http shapes `provider.tool` answers with (see the adapter body).
 			cases: [
 				{
 					name: "maps a provider hit onto the canonical shape",
 					input: { query: "lisbon" },
 					provider: {
-						call: [
-							{
-								structuredContent: {
-									results: [{ url: "https://example.com" }],
-								},
-							},
-						],
+						call: [{ results: [{ url: "https://example.com" }] }],
 					},
 					expect: { results: [{ url: "https://example.com" }] },
 					expectCalls: [{ path: "callTool", args: { query: "lisbon" } }],
@@ -215,14 +212,38 @@ const CASES_TEMPLATE = (slug, kind, codeFile) => {
 				{
 					name: "an empty provider result stays empty, not null",
 					input: { query: "nothing" },
-					provider: { call: [{ structuredContent: {} }] },
+					provider: { call: [{ results: [] }] },
 					expect: { results: [] },
 				},
 				{
-					name: "a broken provider passes the envelope through instead of faking a result",
+					name: "a provider error passes the {status, body} envelope through instead of faking a result",
 					input: { query: "lisbon" },
-					provider: { call: [{ isError: true, content: [] }] },
-					expect: { raw: { isError: true, content: [] } },
+					provider: {
+						call: [{ status: 500, body: { error: "upstream unavailable" } }],
+					},
+					expect: {
+						raw: { status: 500, body: { error: "upstream unavailable" } },
+					},
+				},
+				{
+					name: "a rejected key passes the fail_open envelope through",
+					input: { query: "lisbon" },
+					provider: {
+						call: [
+							{
+								available: false,
+								reason: "endpoint returned HTTP 401",
+								hint: "check the key",
+							},
+						],
+					},
+					expect: {
+						raw: {
+							available: false,
+							reason: "endpoint returned HTTP 401",
+							hint: "check the key",
+						},
+					},
 				},
 			],
 		};
@@ -252,10 +273,11 @@ const CASES_TEMPLATE = (slug, kind, codeFile) => {
 const TEST_TEMPLATE = (
 	harnessSpecifier
 ) => `// Generated by \`tools/toolsmith\`. Runs this package's tool body against every
-// case in \`cases.json\`, twice each, with all ambient nondeterminism shadowed.
+// case in \`cases.json\` and \`cases/*.json\`, twice each, with all ambient
+// nondeterminism shadowed.
 //
-// Re-running \`scaffold\` regenerates this file; it never touches the body or
-// \`cases.json\`. Add cases by editing \`cases.json\`, never by editing this file.
+// Re-running \`scaffold\` regenerates this file; it never touches a body or a
+// case table. Add cases by editing the case tables, never by editing this file.
 
 import { dirname } from "node:path";
 import test from "node:test";
@@ -267,9 +289,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 // tools/ directory — there the harness is genuinely absent and a skip is the honest
 // result. A REPORTED skip, never a silent pass: a suite that quietly tests nothing
 // is the failure mode this whole pipeline exists to prevent.
-let defineToolTests;
+let definePackageToolTests;
 try {
-	({ defineToolTests } = await import("${harnessSpecifier}"));
+	({ definePackageToolTests } = await import(
+		"${harnessSpecifier}"
+	));
 } catch {
 	test("toolsmith harness is absent — cases did NOT run (satellite checkout?)", {
 		skip: "harness not resolvable from this tree",
@@ -278,8 +302,8 @@ try {
 	});
 }
 
-if (defineToolTests) {
-	defineToolTests(here);
+if (definePackageToolTests) {
+	definePackageToolTests(here);
 }
 `;
 
@@ -306,7 +330,7 @@ function scaffold(flags) {
 
 	// `adapters/` is one of Core's two CODE_FILE_DIRS, so an adapter body can be a
 	// real `code_file` the loader hydrates. `tools/` is NOT (ToolConfig has no
-	// code_file field at all), so an inline_deno body lives in a file for
+	// code_file field at all), so an inline_js body lives in a file for
 	// authorship and diffability and is SEALED into the manifest by `sync`.
 	const codeFile =
 		kind === "adapter" ? `adapters/${slug}.js` : `tools/${slug}.js`;
@@ -346,8 +370,9 @@ function scaffold(flags) {
 
 	const manifestPath = join(outDir, "manifest.json");
 	if (existsSync(manifestPath)) {
+		const grants = baseManifest(id, slug, kind, codeFile).permission_grants;
 		process.stdout.write(
-			`toolsmith: ${manifestPath} already exists — left untouched. Add the tool seat yourself:\n${JSON.stringify(toolSeat(slug, kind, codeFile), null, "\t")}\n`
+			`toolsmith: ${manifestPath} already exists — left untouched. Add the tool seat yourself, and grant ${grants.join(", ")}:\n${JSON.stringify(toolSeat(slug, kind, codeFile), null, "\t")}\n`
 		);
 	} else {
 		writeJson(manifestPath, baseManifest(id, slug, kind, codeFile));
@@ -362,10 +387,46 @@ function scaffold(flags) {
 	);
 }
 
+/**
+ * The example provider host an adapter seat calls. The provider tool's URL and
+ * the `tool:http-egress:<host>` grant must name the same host, or Core refuses
+ * the call.
+ */
+const ADAPTER_PROVIDER_HOST = "api.example.com";
+
 /** The manifest fragment that seats a tool body, by kind. */
 function toolSeat(slug, kind, codeFile) {
 	if (kind === "adapter") {
 		return {
+			// Core rejects a binding whose `tool` is not owned by this provider
+			// ("targets tool ... that is not owned by this provider"), so the seat
+			// declares the provider tool it adapts. `create-ryu-app --template adapter`
+			// emits this same shape; its test asserts the two agree.
+			runnables: [
+				{
+					id: "tool-provider",
+					name: "provider.tool",
+					kind: "tool",
+					config: {
+						slug: "provider.tool",
+						backend: "http",
+						method: "POST",
+						url: `https://${ADAPTER_PROVIDER_HOST}/search`,
+						// The adapter reads the provider's JSON body directly: `unwrap_body`
+						// drops the `{status, body}` envelope on a 2xx, and `fail_open`
+						// turns a 401/403 or an unreachable host into `{available: false}`.
+						unwrap_body: true,
+						fail_open: true,
+						description:
+							"TODO: what the provider tool does, in one line the model can route on.",
+						input_schema: {
+							type: "object",
+							properties: { query: { type: "string", description: "TODO" } },
+							required: ["query"],
+						},
+					},
+				},
+			],
 			provides: [
 				{
 					capability: "example.verb",
@@ -389,7 +450,7 @@ function toolSeat(slug, kind, codeFile) {
 				kind: "tool",
 				config: {
 					slug,
-					backend: "inline_deno",
+					backend: "inline_js",
 					description: `TODO: what ${slug} does, in one line the model can route on.`,
 					input_schema: {
 						type: "object",
@@ -411,10 +472,14 @@ function baseManifest(id, slug, kind, codeFile) {
 		version: "0.1.0",
 		description: `TODO: one line on what ${basename(id)} provides.`,
 		category: "Developer Tools",
-		// `tool:execute` is the grant Core requires before an inline_deno body may
-		// run at all (GRANT_TOOL_EXECUTE); without it the tool registers and then
-		// refuses every call.
-		permission_grants: kind === "inline_tool" ? ["tool:execute"] : [],
+		// `tool:execute` is the grant Core requires before an inline_js body or a
+		// capability adapter may run at all (GRANT_TOOL_EXECUTE); without it the
+		// tool or provider registers and then refuses every call. An adapter's http
+		// provider tool also needs `tool:http-egress:<host>` for its URL's host.
+		permission_grants:
+			kind === "adapter"
+				? ["tool:execute", `tool:http-egress:${ADAPTER_PROVIDER_HOST}`]
+				: ["tool:execute"],
 		...toolSeat(slug, kind, codeFile),
 	};
 }
@@ -422,7 +487,7 @@ function baseManifest(id, slug, kind, codeFile) {
 // ── sync ─────────────────────────────────────────────────────────────────────
 
 /**
- * Seal an `inline_deno` body from its authored file into the manifest, or (with
+ * Seal an `inline_js` body from its authored file into the manifest, or (with
  * `--check`) assert the two already agree.
  *
  * This exists because `ToolConfig` has no `code_file`: the ONLY form Core can
@@ -434,7 +499,10 @@ function baseManifest(id, slug, kind, codeFile) {
  * manifest points at the file the cases test.
  */
 function sync(dir, flags) {
-	const { spec, kind, codePath, code } = loadToolPackage(dir);
+	const { spec, kind, codePath, code } = loadToolPackage(
+		dir,
+		flags.cases ?? "cases.json"
+	);
 	const { manifest, manifestPath, seat } = seatOrDie(dir, spec, kind);
 
 	if (!seat) {
@@ -446,7 +514,7 @@ function sync(dir, flags) {
 	// A file-backed form (adapter / turn hook) has nothing to seal — Core hydrates
 	// its `code_file` — so both `sync` and `sync --check` reduce to the same
 	// assertion, and it is the shared one the suite also runs.
-	if (seat.type !== "inline_deno" || flags.check) {
+	if (seat.type !== "inline_js" || flags.check) {
 		const problems = checkBodyDrift(seat, spec, code);
 		if (problems.length > 0) {
 			die(problems.join("\n  "));
@@ -471,7 +539,7 @@ function sync(dir, flags) {
  *
  *   1. **Purity scan** — static, and FIRST because it is the only step that runs
  *      before the body does. Its denylist covers `import`/`require`/`eval`/
- *      `new Function`/`process`/`fetch`/`Deno`, i.e. every escape from the test
+ *      `new Function`/`process`/`fetch`/`childProcess`, i.e. every escape from the test
  *      harness, so clearing it is what makes step 3 safe to run at all.
  *   2. **Manifest contract** — the seat exists and is wired so the tool is
  *      actually callable and actually routable.
@@ -481,7 +549,31 @@ function sync(dir, flags) {
  *      shadowed.
  */
 function verify(dir) {
-	const { spec, kind, codePath, code } = loadToolPackage(dir);
+	// A multi-tool package carries `cases/<tool>.json` beside (or instead of)
+	// `cases.json`; steps 1-3 run per table, step 4 runs the package suite once.
+	const files = caseFiles(dir);
+	if (files.length === 0) {
+		loadToolPackage(dir); // dies with the "not a toolsmith package" reason
+	}
+	for (const file of files) {
+		verifyStatic(dir, file);
+	}
+
+	const result = spawnSync(
+		process.execPath,
+		["--test", join(dir, "tool.test.mjs")],
+		{ stdio: "inherit", cwd: REPO_ROOT }
+	);
+	if (result.status !== 0) {
+		process.stderr.write(`toolsmith: cases failed for ${basename(dir)}\n`);
+		process.exit(result.status ?? 1);
+	}
+	process.stdout.write(`toolsmith: ${basename(dir)} VERIFIED\n`);
+}
+
+/** Steps 1-3 of the gate (purity, contract, drift) for one case table. */
+function verifyStatic(dir, casesFile) {
+	const { spec, kind, codePath, code } = loadToolPackage(dir, casesFile);
 
 	const violations = scanPurity(code);
 	if (violations.length > 0) {
@@ -507,18 +599,7 @@ function verify(dir) {
 	}
 	process.stdout.write(`toolsmith: manifest contract ok (${spec.tool})\n`);
 
-	sync(dir, { check: true });
-
-	const result = spawnSync(
-		process.execPath,
-		["--test", join(dir, "tool.test.mjs")],
-		{ stdio: "inherit", cwd: REPO_ROOT }
-	);
-	if (result.status !== 0) {
-		process.stderr.write(`toolsmith: cases failed for ${spec.tool}\n`);
-		process.exit(result.status ?? 1);
-	}
-	process.stdout.write(`toolsmith: ${spec.tool} VERIFIED\n`);
+	sync(dir, { check: true, cases: casesFile });
 }
 
 // ── entry ────────────────────────────────────────────────────────────────────
@@ -548,7 +629,7 @@ switch (command) {
 				"  scaffold --id <@scope/name> --tool <slug> [--kind inline_tool|adapter] [--out DIR]\n" +
 				"           (regenerates tool.test.mjs; never overwrites the body or cases.json)\n" +
 				"  verify   <plugin dir>\n" +
-				"  sync     <plugin dir> [--check]\n"
+				"  sync     <plugin dir> [--check] [--cases cases/<tool>.json]\n"
 		);
 		process.exit(command ? 1 : 0);
 }

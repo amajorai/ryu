@@ -1,3 +1,12 @@
+import type { RunEvalsRequest } from "@ryuhq/core-client/gateway";
+import { z } from "zod";
+import {
+	JsonRecordSchema,
+	type JsonValue,
+	JsonValueSchema,
+	jsonRecord,
+	nonemptyString,
+} from "./json.ts";
 import { parseCoreChatStream, type StreamCallbacks } from "./sse.ts";
 import type {
 	ChatRequest,
@@ -16,6 +25,20 @@ export type FetchLike = (
 	init?: RequestInit
 ) => Promise<Response>;
 
+/** Header carrying a machine vault token on `/api/vault/agent/*`. */
+export const VAULT_TOKEN_HEADER = "x-ryu-vault-token";
+
+/** How a request authenticates: the node bearer, nothing (public login), or a
+ *  vault token (agent routes). */
+type RequestAuth = "node" | "none" | { vaultToken: string };
+
+export interface VaultLoginResult {
+	accessor: string;
+	expiresAt: string;
+	identityId: string;
+	token: string;
+}
+
 export class RyuHttpError extends Error {
 	readonly path: string;
 	readonly status: number;
@@ -28,27 +51,28 @@ export class RyuHttpError extends Error {
 	}
 }
 
-function timeoutSignal(timeoutMs: number): {
-	signal: AbortSignal;
+interface RequestTimer {
 	clear: () => void;
-} {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
-	return {
-		signal: controller.signal,
-		clear: () => clearTimeout(timer),
-	};
+	signal: AbortSignal;
 }
 
-function errorMessage(value: unknown): string {
-	if (typeof value === "string" && value.length > 0) {
-		return value;
+function timeoutSignal(timeoutMs: number): RequestTimer {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+function errorMessage(value: JsonValue): string {
+	const text = nonemptyString(value);
+	if (text !== null) {
+		return text;
 	}
-	if (value && typeof value === "object" && !Array.isArray(value)) {
-		const record = value as Record<string, unknown>;
+	const record = jsonRecord(value);
+	if (record) {
 		for (const key of ["error", "message", "detail"]) {
-			if (typeof record[key] === "string" && record[key].length > 0) {
-				return record[key] as string;
+			const detail = nonemptyString(record[key]);
+			if (detail !== null) {
+				return detail;
 			}
 		}
 	}
@@ -62,39 +86,93 @@ function redact(message: string, token: string | null): string {
 	return message.replaceAll(token, "[REDACTED]");
 }
 
-function parseJsonText(text: string): unknown {
+function parseJsonText(text: string): JsonValue {
 	if (text.trim().length === 0) {
 		return null;
 	}
 	try {
-		return JSON.parse(text) as unknown;
+		return JsonValueSchema.parse(JSON.parse(text));
 	} catch {
 		return text.slice(0, 1000);
 	}
 }
 
-function normalizeHealth(value: unknown): NodeHealth {
-	const record = value && typeof value === "object" ? value : {};
-	const raw = record as Record<string, unknown>;
+function normalizeHealth(value: JsonValue): NodeHealth {
+	const raw = jsonRecord(value) ?? {};
 	return {
-		capabilities: Array.isArray(raw.capabilities) ? raw.capabilities : [],
-		channel: typeof raw.channel === "string" ? raw.channel : null,
-		status: typeof raw.status === "string" ? raw.status : "unknown",
-		version: typeof raw.version === "string" ? raw.version : null,
+		capabilities: z
+			.array(JsonValueSchema)
+			.catch(() => [])
+			.parse(raw.capabilities),
+		channel: z.string().nullable().catch(null).parse(raw.channel),
+		status: z.string().catch("unknown").parse(raw.status),
+		version: z.string().nullable().catch(null).parse(raw.version),
 	};
 }
 
-function normalizeInfo(value: unknown): NodeInfo {
-	const record = value && typeof value === "object" ? value : {};
-	const raw = record as Record<string, unknown>;
+function normalizeInfo(value: JsonValue): NodeInfo {
+	const raw = jsonRecord(value) ?? {};
 	return {
 		...raw,
-		hostname: typeof raw.hostname === "string" ? raw.hostname : null,
+		hostname: z.string().nullable().catch(null).parse(raw.hostname),
 		managed: raw.managed === true,
-		orgId: typeof raw.org_id === "string" ? raw.org_id : null,
-		orgName: typeof raw.org_name === "string" ? raw.org_name : null,
-		os: typeof raw.os === "string" ? raw.os : null,
+		orgId: z.string().nullable().catch(null).parse(raw.org_id),
+		orgName: z.string().nullable().catch(null).parse(raw.org_name),
+		os: z.string().nullable().catch(null).parse(raw.os),
 	};
+}
+
+interface VaultExportRequest {
+	environment?: string;
+	format: "json";
+	names: string[];
+	path: string;
+}
+type VaultCredentials =
+	| { roleId: string; secretId: string }
+	| { identity: string; jwt: string };
+interface RequestOptions {
+	accept?: string;
+	auth?: RequestAuth;
+	body?:
+		| ChatRequest
+		| RunEvalsRequest
+		| ToolRequest
+		| VaultCredentials
+		| VaultExportRequest;
+	method?: string;
+	timeoutMs: number;
+}
+interface OpenedResponse {
+	response: Response;
+	timer: RequestTimer;
+}
+
+/** IPv4 127.0.0.0/8 or IPv6 ::1, as `URL.hostname` spells them. */
+function isLiteralLoopback(hostname: string): boolean {
+	return hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
+/**
+ * Node, vault, and OIDC credentials travel only over HTTPS, or plain HTTP to a
+ * literal loopback address (a node on the runner itself). Throws otherwise.
+ */
+export function assertSecureNodeUrl(value: string): void {
+	let parsed: URL;
+	try {
+		parsed = new URL(value);
+	} catch {
+		throw new Error(`Ryu node URL is invalid: '${value}'.`);
+	}
+	if (parsed.protocol === "https:") {
+		return;
+	}
+	if (parsed.protocol === "http:" && isLiteralLoopback(parsed.hostname)) {
+		return;
+	}
+	throw new Error(
+		"Ryu node URL must use https (plain http is allowed only for 127.0.0.1 or [::1])."
+	);
 }
 
 export class RyuNodeClient {
@@ -107,36 +185,48 @@ export class RyuNodeClient {
 	}
 
 	private url(path: string): string {
-		return `${this.target.url}${path}`;
+		const url = `${this.target.url}${path}`;
+		// Checked at the request boundary too, so no caller can attach a
+		// credential to cleartext transport.
+		assertSecureNodeUrl(url);
+		return url;
 	}
 
-	private headers(extra: Record<string, string> = {}): Record<string, string> {
-		return {
+	private headers(extra: Record<string, string>, auth: RequestAuth): Headers {
+		const headers = new Headers({
 			Accept: "application/json",
 			"Content-Type": "application/json",
-			...(this.target.token
-				? { Authorization: `Bearer ${this.target.token}` }
-				: {}),
-			...extra,
-		};
+		});
+		if (auth === "node" && this.target.token) {
+			headers.set("Authorization", `Bearer ${this.target.token}`);
+		} else if (auth !== "node" && auth !== "none") {
+			headers.set(VAULT_TOKEN_HEADER, auth.vaultToken);
+		}
+		for (const [name, value] of Object.entries(extra)) {
+			headers.set(name, value);
+		}
+		return headers;
 	}
 
 	private async request(
 		path: string,
-		options: {
-			accept?: string;
-			body?: unknown;
-			method?: string;
-			timeoutMs: number;
-		}
-	): Promise<{ response: Response; timer: ReturnType<typeof timeoutSignal> }> {
+		options: RequestOptions
+	): Promise<OpenedResponse> {
+		// Validate the destination before any credential header or body exists.
+		const url = this.url(path);
 		const timer = timeoutSignal(options.timeoutMs);
 		try {
-			const response = await this.fetchImpl(this.url(path), {
+			const response = await this.fetchImpl(url, {
 				body:
 					options.body === undefined ? undefined : JSON.stringify(options.body),
-				headers: this.headers({ Accept: options.accept ?? "application/json" }),
+				headers: this.headers(
+					{ Accept: options.accept ?? "application/json" },
+					options.auth ?? "node"
+				),
 				method: options.method ?? "GET",
+				// Every request carries a bearer, a vault token, or login
+				// credentials; a redirect must not move them anywhere else.
+				redirect: "error",
 				signal: timer.signal,
 			});
 			return { response, timer };
@@ -151,10 +241,10 @@ export class RyuNodeClient {
 		}
 	}
 
-	private async json<T>(
+	private async json(
 		path: string,
-		options: { body?: unknown; method?: string; timeoutMs: number }
-	): Promise<T> {
+		options: RequestOptions
+	): Promise<JsonValue> {
 		const { response, timer } = await this.request(path, options);
 		try {
 			const text = await response.text();
@@ -163,13 +253,17 @@ export class RyuNodeClient {
 			}
 			const parsed = parseJsonText(text);
 			if (!response.ok) {
+				const vaultToken =
+					options.auth && options.auth !== "node" && options.auth !== "none"
+						? options.auth.vaultToken
+						: null;
 				throw new RyuHttpError(
 					path,
 					response.status,
-					redact(errorMessage(parsed), this.target.token)
+					redact(redact(errorMessage(parsed), this.target.token), vaultToken)
 				);
 			}
-			return parsed as T;
+			return parsed;
 		} catch (error) {
 			if (timer.signal.aborted) {
 				throw new Error(`${path} timed out after ${options.timeoutMs}ms.`);
@@ -180,18 +274,103 @@ export class RyuNodeClient {
 		}
 	}
 
-	async validate(mode: TargetMode, timeoutMs: number): Promise<NodeSnapshot> {
+	/** Exchange AppRole credentials or an OIDC JWT for a short-lived vault token. */
+	async vaultLogin(
+		credentials: VaultCredentials,
+		timeoutMs: number
+	): Promise<VaultLoginResult> {
+		const path =
+			"roleId" in credentials
+				? "/api/vault/auth/approle/login"
+				: "/api/vault/auth/jwt/login";
+		const result = await this.json(path, {
+			auth: "none",
+			body: credentials,
+			method: "POST",
+			timeoutMs,
+		});
+		const token = jsonRecord(jsonRecord(result)?.token);
+		const tokenValue = nonemptyString(token?.token);
+		if (!token || tokenValue === null) {
+			throw new Error(`${path} returned no vault token.`);
+		}
+		return {
+			accessor: String(token.accessor ?? ""),
+			expiresAt: String(token.expiresAt ?? ""),
+			identityId: String(token.identityId ?? ""),
+			token: tokenValue,
+		};
+	}
+
+	/** Fetch node-scoped values the vault token may read, as a name→value map. */
+	async vaultExport(
+		vaultToken: string,
+		selection: { environment: string | null; names: string[]; path: string },
+		timeoutMs: number
+	): Promise<Record<string, string>> {
+		const body: VaultExportRequest = {
+			format: "json",
+			names: selection.names,
+			path: selection.path,
+		};
+		if (selection.environment) {
+			body.environment = selection.environment;
+		}
+		const result = await this.json("/api/vault/agent/export", {
+			auth: { vaultToken },
+			body,
+			method: "POST",
+			timeoutMs,
+		});
+		const content = z.string().safeParse(jsonRecord(result)?.content);
+		const parsed = content.success
+			? JsonRecordSchema.safeParse(JSON.parse(content.data))
+			: null;
+		if (!parsed?.success) {
+			throw new Error("/api/vault/agent/export returned no JSON object.");
+		}
+		const values: Record<string, string> = {};
+		for (const [name, value] of Object.entries(parsed.data)) {
+			const text = z.string().safeParse(value);
+			if (text.success) {
+				values[name] = text.data;
+			}
+		}
+		return values;
+	}
+
+	/** Revoke the presented vault token. */
+	async vaultRevoke(vaultToken: string, timeoutMs: number): Promise<void> {
+		await this.json("/api/vault/agent/self/revoke", {
+			auth: { vaultToken },
+			method: "POST",
+			timeoutMs,
+		});
+	}
+
+	/** Check health and node info. With `infoOptional` (a vault-only run that
+	 *  holds no node token), an unauthorized `/api/system/info` is reported as
+	 *  unknown info instead of failing, except in `managed` mode where the
+	 *  managed flag must be verified. */
+	async validate(
+		mode: TargetMode,
+		timeoutMs: number,
+		options: { infoOptional?: boolean } = {}
+	): Promise<NodeSnapshot> {
 		let health: NodeHealth | null = null;
-		let lastError: unknown = null;
+		let lastError: Error | null = null;
 		for (let attempt = 0; attempt < 2; attempt += 1) {
 			try {
-				const rawHealth = await this.json<unknown>("/api/health", {
+				const rawHealth = await this.json("/api/health", {
 					timeoutMs,
 				});
 				health = normalizeHealth(rawHealth);
 				break;
 			} catch (error) {
-				lastError = error;
+				lastError =
+					error instanceof Error
+						? error
+						: new Error("Ryu node health check failed.");
 				if (attempt === 0) {
 					await new Promise<void>((resolve) => setTimeout(resolve, 250));
 				}
@@ -203,9 +382,19 @@ export class RyuNodeClient {
 				: new Error("Ryu node health check failed.");
 		}
 
-		const info = normalizeInfo(
-			await this.json<unknown>("/api/system/info", { timeoutMs })
-		);
+		let rawInfo: JsonValue;
+		try {
+			rawInfo = await this.json("/api/system/info", { timeoutMs });
+		} catch (error) {
+			const unauthorized =
+				error instanceof RyuHttpError &&
+				(error.status === 401 || error.status === 403);
+			if (!(options.infoOptional && unauthorized && mode !== "managed")) {
+				throw error;
+			}
+			rawInfo = {};
+		}
+		const info = normalizeInfo(rawInfo);
 		if (mode === "managed" && !info.managed) {
 			throw new Error(
 				"The selected target was 'managed', but the node reported managed=false. Check the managed node URL."
@@ -263,6 +452,20 @@ export class RyuNodeClient {
 		}
 	}
 
+	/** Replay an eval dataset through Core's Gateway proxy. */
+	runEvals(body: RunEvalsRequest, timeoutMs: number): Promise<JsonValue> {
+		return this.json("/api/gateway/evals/run", {
+			body,
+			method: "POST",
+			timeoutMs,
+		});
+	}
+
+	/** Read the shared Gateway evaluator catalog through Core. */
+	evaluators(timeoutMs: number): Promise<JsonValue> {
+		return this.json("/api/gateway/evaluators", { timeoutMs });
+	}
+
 	async callTool(body: ToolRequest, timeoutMs: number): Promise<ToolResult> {
 		const { response, timer } = await this.request("/api/mcp/tools/call", {
 			body,
@@ -282,10 +485,9 @@ export class RyuNodeClient {
 					redact(errorMessage(parsed), this.target.token)
 				);
 			}
-			const record = parsed && typeof parsed === "object" ? parsed : {};
-			const raw = record as Record<string, unknown>;
+			const raw = jsonRecord(parsed) ?? {};
 			return {
-				error: typeof raw.error === "string" ? raw.error : null,
+				error: z.string().nullable().catch(null).parse(raw.error),
 				ok: raw.ok !== false,
 				output: raw.output,
 			};

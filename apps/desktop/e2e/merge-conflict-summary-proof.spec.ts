@@ -3,8 +3,6 @@ import { expect, test } from "@playwright/test";
 test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/merge-conflict-summary-proof.html";
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/21/01a023e6-d9f4-7933-a25a-b98ef22168a8/merge-conflict-summary-proof.png";
 
 test("shows merge conflicts in the pinned summary and stages a Fix report", async ({
 	page,
@@ -34,5 +32,8 @@ test("shows merge conflicts in the pinned summary and stages a Fix report", asyn
 		page.getByRole("status").filter({ hasText: "Merge conflict report staged" })
 	).toBeVisible();
 
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("merge-conflict-summary-proof.png"),
+		fullPage: true,
+	});
 });

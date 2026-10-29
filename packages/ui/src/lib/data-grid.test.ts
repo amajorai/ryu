@@ -4,10 +4,12 @@
 // and carry the grid's paste/serialization + security logic.
 
 import { describe, expect, test } from "bun:test";
+import type { Column } from "@tanstack/react-table";
 import {
 	formatDateForDisplay,
 	formatDateToString,
 	formatFileSize,
+	type GridColumnMetrics,
 	getCellKey,
 	getColumnBorderVisibility,
 	getColumnPinningStyle,
@@ -22,6 +24,7 @@ import {
 	matchSelectOption,
 	parseCellKey,
 	parseLocalDate,
+	parsePastedDate,
 	parseTsv,
 	SELECT_OPTION_COLORS,
 } from "./data-grid.ts";
@@ -51,15 +54,16 @@ function fakeColumn(opts: {
 	} = opts;
 	return {
 		getIsPinned: () => pinned,
-		getIsFirstColumn: (side: "left" | "right") =>
-			side === "left" ? firstLeft : firstRight,
-		getIsLastColumn: (side: "left" | "right") =>
-			side === "left" ? lastLeft : lastRight,
+		getIsFirstColumn: (
+			side: Parameters<Column<object>["getIsFirstColumn"]>[0]
+		) => (side === "left" ? firstLeft : firstRight),
+		getIsLastColumn: (
+			side: Parameters<Column<object>["getIsLastColumn"]>[0]
+		) => (side === "left" ? lastLeft : lastRight),
 		getStart: () => start,
 		getAfter: () => after,
 		getSize: () => size,
-		// biome-ignore lint/suspicious/noExplicitAny: test stub for the Column API
-	} as any;
+	} satisfies GridColumnMetrics<object>;
 }
 
 describe("matchSelectOption", () => {
@@ -145,7 +149,11 @@ describe("getIsFileCellData", () => {
 
 describe("getOptionColorClass", () => {
 	test("resolves a known color key to its badge class", () => {
-		expect(getOptionColorClass("blue")).toBe(SELECT_OPTION_COLORS.blue!);
+		const expected = SELECT_OPTION_COLORS.blue;
+		if (!expected) {
+			throw new Error("Expected the persisted blue tag palette entry");
+		}
+		expect(getOptionColorClass("blue")).toBe(expected);
 	});
 
 	test("returns empty string for unset or unknown colors", () => {
@@ -205,6 +213,12 @@ describe("getUrlHref", () => {
 		expect(getUrlHref("file:///etc/passwd")).toBe("");
 	});
 
+	test("rejects protocol-relative, backslash, and control-character URLs", () => {
+		expect(getUrlHref("//attacker.example/path")).toBe("");
+		expect(getUrlHref("https:\\\\attacker.example")).toBe("");
+		expect(getUrlHref("https://example.com/\nattack")).toBe("");
+	});
+
 	test("empty or whitespace-only input returns empty string", () => {
 		expect(getUrlHref("")).toBe("");
 		expect(getUrlHref("   ")).toBe("");
@@ -235,6 +249,28 @@ describe("parseLocalDate", () => {
 	});
 });
 
+describe("parsePastedDate", () => {
+	test("keeps a pasted yyyy-mm-dd as the same calendar-day string", () => {
+		expect(parsePastedDate("2024-03-05")).toBe("2024-03-05");
+		expect(parsePastedDate(" 2024-03-05 ")).toBe("2024-03-05");
+	});
+
+	test("keeps the written day of an ISO timestamp", () => {
+		expect(parsePastedDate("2024-03-05T00:00:00.000Z")).toBe("2024-03-05");
+		expect(parsePastedDate("2024-03-05T23:30:00Z")).toBe("2024-03-05");
+	});
+
+	test("reads other date formats in local time", () => {
+		expect(parsePastedDate("March 5, 2024")).toBe("2024-03-05");
+	});
+
+	test("rejects impossible and unparseable dates", () => {
+		expect(parsePastedDate("2024-02-30")).toBeNull();
+		expect(parsePastedDate("2024-02-30T00:00:00Z")).toBeNull();
+		expect(parsePastedDate("not a date")).toBeNull();
+	});
+});
+
 describe("formatDateToString", () => {
 	test("zero-pads month and day", () => {
 		expect(formatDateToString(new Date(2024, 0, 5))).toBe("2024-01-05");
@@ -244,7 +280,10 @@ describe("formatDateToString", () => {
 		const s = "2023-11-09";
 		const d = parseLocalDate(s);
 		expect(d).not.toBeNull();
-		expect(formatDateToString(d as Date)).toBe(s);
+		if (!d) {
+			throw new Error("Expected the valid local date to round-trip");
+		}
+		expect(formatDateToString(d)).toBe(s);
 	});
 });
 
@@ -355,32 +394,32 @@ describe("getColumnPinningStyle", () => {
 		const style = getColumnPinningStyle({
 			column: fakeColumn({ pinned: false, size: 120 }),
 		});
-		expect(style.position).toBe("relative");
-		expect(style.opacity).toBe(1);
-		expect(style.zIndex).toBeUndefined();
-		expect(style.left).toBeUndefined();
-		expect(style.right).toBeUndefined();
-		expect(style.width).toBe(120);
-		expect(style.boxShadow).toBeUndefined();
+		expect(style["--data-grid-pin-position"]).toBe("relative");
+		expect(style["--data-grid-pin-opacity"]).toBe(1);
+		expect(style["--data-grid-pin-z-index"]).toBeUndefined();
+		expect(style["--data-grid-pin-left"]).toBeUndefined();
+		expect(style["--data-grid-pin-right"]).toBeUndefined();
+		expect(style["--data-grid-pin-width"]).toBe("120px");
+		expect(style["--data-grid-pin-shadow"]).toBeUndefined();
 	});
 
 	test("a left-pinned column sticks with a left offset from getStart", () => {
 		const style = getColumnPinningStyle({
 			column: fakeColumn({ pinned: "left", start: 40 }),
 		});
-		expect(style.position).toBe("sticky");
-		expect(style.opacity).toBe(0.97);
-		expect(style.zIndex).toBe(1);
-		expect(style.left).toBe("40px");
-		expect(style.right).toBeUndefined();
+		expect(style["--data-grid-pin-position"]).toBe("sticky");
+		expect(style["--data-grid-pin-opacity"]).toBe(0.97);
+		expect(style["--data-grid-pin-z-index"]).toBe(1);
+		expect(style["--data-grid-pin-left"]).toBe("40px");
+		expect(style["--data-grid-pin-right"]).toBeUndefined();
 	});
 
 	test("a right-pinned column offsets from getAfter", () => {
 		const style = getColumnPinningStyle({
 			column: fakeColumn({ pinned: "right", after: 24 }),
 		});
-		expect(style.right).toBe("24px");
-		expect(style.left).toBeUndefined();
+		expect(style["--data-grid-pin-right"]).toBe("24px");
+		expect(style["--data-grid-pin-left"]).toBeUndefined();
 	});
 
 	test("RTL swaps the left/right offsets", () => {
@@ -389,8 +428,8 @@ describe("getColumnPinningStyle", () => {
 			dir: "rtl",
 		});
 		// The left-pin's start offset lands on `right` under RTL.
-		expect(style.right).toBe("40px");
-		expect(style.left).toBeUndefined();
+		expect(style["--data-grid-pin-right"]).toBe("40px");
+		expect(style["--data-grid-pin-left"]).toBeUndefined();
 	});
 
 	test("withBorder draws an inset shadow on the last left-pinned column (LTR)", () => {
@@ -398,7 +437,9 @@ describe("getColumnPinningStyle", () => {
 			column: fakeColumn({ pinned: "left", lastLeft: true }),
 			withBorder: true,
 		});
-		expect(style.boxShadow).toBe("-4px 0 4px -4px var(--border) inset");
+		expect(style["--data-grid-pin-shadow"]).toBe(
+			"-4px 0 4px -4px var(--border) inset"
+		);
 	});
 
 	test("withBorder draws the mirrored shadow on the first right-pinned column (LTR)", () => {
@@ -406,13 +447,42 @@ describe("getColumnPinningStyle", () => {
 			column: fakeColumn({ pinned: "right", firstRight: true }),
 			withBorder: true,
 		});
-		expect(style.boxShadow).toBe("4px 0 4px -4px var(--border) inset");
+		expect(style["--data-grid-pin-shadow"]).toBe(
+			"4px 0 4px -4px var(--border) inset"
+		);
 	});
 
 	test("without withBorder there is no shadow even for a pinned edge column", () => {
 		const style = getColumnPinningStyle({
 			column: fakeColumn({ pinned: "left", lastLeft: true }),
 		});
-		expect(style.boxShadow).toBeUndefined();
+		expect(style["--data-grid-pin-shadow"]).toBeUndefined();
 	});
+});
+
+test("file-cell validation checks complete metadata before exposing its typed fields", () => {
+	const valid = {
+		id: "file",
+		name: "example",
+		size: 12,
+		type: "text/plain",
+		url: "https://example.com/file",
+	};
+	expect(getIsFileCellData(valid)).toBe(true);
+	for (const invalid of [
+		{ ...valid, id: 1 },
+		{ ...valid, name: null },
+		{ ...valid, size: "12" },
+		{ ...valid, type: [] },
+		{ ...valid, url: false },
+	]) {
+		expect(getIsFileCellData(invalid)).toBe(false);
+	}
+	for (const size of [
+		Number.NaN,
+		Number.POSITIVE_INFINITY,
+		Number.NEGATIVE_INFINITY,
+	]) {
+		expect(getIsFileCellData({ ...valid, size })).toBe(true);
+	}
 });

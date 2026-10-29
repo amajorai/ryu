@@ -17,6 +17,7 @@ import { handshakeAnnounceScript } from "./rpc.ts";
 import {
 	buildCompanionThemeLayoutCss,
 	buildThemeTokenStyle,
+	companionScriptLiteralSchema,
 } from "./third-party-plugin.ts";
 
 /** Build the example plugin's sandboxed document, with the host nonce baked in.
@@ -29,13 +30,7 @@ export function examplePluginSrcdoc(
 	/** True when the containing Ryu root already applies `--ryu-ui-scale`. */
 	scaleInParent = false
 ): string {
-	const scriptSafe = (value: unknown): string =>
-		JSON.stringify(value ?? null)
-			.replace(/</g, "\\u003c")
-			.replace(/>/g, "\\u003e")
-			.replace(/&/g, "\\u0026")
-			.replace(/\u2028/g, "\\u2028")
-			.replace(/\u2029/g, "\\u2029");
+	const scriptSafe = companionScriptLiteralSchema.parse;
 	const nonceLiteral = scriptSafe(nonce);
 	const themeTokensLiteral = scriptSafe(themeTokens);
 	const themeStyle = buildThemeTokenStyle(themeTokens);

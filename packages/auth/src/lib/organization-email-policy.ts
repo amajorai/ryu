@@ -72,7 +72,7 @@ const EMAIL_RE = /^[^@\s]+@([^@\s]+\.[^@\s]+)$/;
 export function normalizeEmailDomain(
 	email: string | null | undefined
 ): string | null {
-	if (typeof email !== "string") {
+	if (email === null || email === undefined) {
 		return null;
 	}
 	const match = EMAIL_RE.exec(email.trim().toLowerCase());
@@ -161,4 +161,31 @@ export function businessEmailMessage(
 			: "Teams requires a company email address, not Gmail, Outlook, or another public mailbox. You can change and verify the email on this same Ryu account; a second account is not required.";
 	}
 	return "A verified business email is required for Teams organizations.";
+}
+
+/**
+ * The admission check for an organization role change, applied to the member
+ * whose role changes, when the change grants permissions they did not hold
+ * (callers compute that with `roleChangeGrantsPermissions`). Better Auth's `beforeUpdateMemberRole` hook and the
+ * Admin API role route both call it, so a user whose email was changed or is
+ * unverified cannot gain a stronger role through either path. Returns the
+ * refusal message, or null when the change is admitted.
+ */
+export function memberRoleChangeRefusal(
+	user: {
+		email: string | null | undefined;
+		emailVerified: boolean | null | undefined;
+	},
+	change: { grantsPermissions: boolean } = { grantsPermissions: true }
+): string | null {
+	// Only a promotion is an admission point; a demotion or lateral change
+	// never needs the business-email check (and must not be blocked by it).
+	if (!change.grantsPermissions) {
+		return null;
+	}
+	const decision = businessEmailDecision({
+		email: user.email,
+		emailVerified: user.emailVerified,
+	});
+	return decision.allowed ? null : businessEmailMessage(decision, "member");
 }

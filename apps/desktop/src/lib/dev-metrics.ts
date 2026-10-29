@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+
 // In-memory performance metrics for troubleshooting, recorded only in a dev
 // build or when the user turns Developer Mode on.
 //
@@ -296,12 +298,11 @@ export const instrumentedFetch: typeof fetch = Object.assign(
 		}
 		const started = performance.now();
 		const at = Date.now();
-		const url =
-			typeof input === "string"
-				? input
-				: input instanceof URL
-					? input.href
-					: input.url;
+		const url = isNativeText(input)
+			? input
+			: input instanceof URL
+				? input.href
+				: input.url;
 		const path = pathOf(url);
 
 		return fetch(input, init).then(
@@ -348,7 +349,7 @@ export const instrumentedFetch: typeof fetch = Object.assign(
 					headers: response.headers,
 				});
 			},
-			(error: unknown) => {
+			(error) => {
 				recordTurnSample({
 					at,
 					path,
@@ -362,7 +363,8 @@ export const instrumentedFetch: typeof fetch = Object.assign(
 			}
 		);
 	},
-	{ preconnect: fetch.preconnect }
+	// Bun's fetch type carries preconnect; DOM-only builds do not declare it.
+	{ preconnect: Reflect.get(fetch, "preconnect") }
 );
 
 // ── Text rendering (diagnostics bundle) ──────────────────────────────────────

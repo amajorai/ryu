@@ -13,6 +13,9 @@ pub struct UiMessage {
     /// AI SDK v6 sends parts at the top level instead of content.
     #[serde(default)]
     pub parts: Vec<serde_json::Value>,
+    /// Client display metadata, preserved at rest but never trusted for identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -22,6 +25,21 @@ pub enum UiContent {
     Empty,
     Text(String),
     Parts(Vec<Value>),
+}
+
+impl UiMessage {
+    /// Preserve the submitted render parts across both AI SDK wire shapes.
+    pub fn render_parts(&self) -> Option<Value> {
+        let parts = if self.parts.is_empty() {
+            match &self.content {
+                UiContent::Parts(parts) => parts,
+                _ => return None,
+            }
+        } else {
+            &self.parts
+        };
+        (!parts.is_empty()).then(|| Value::Array(parts.clone()))
+    }
 }
 
 impl UiContent {
@@ -360,6 +378,7 @@ mod tests {
 
     fn user_with_parts(text: &str, parts: Vec<serde_json::Value>) -> UiMessage {
         UiMessage {
+            metadata: None,
             role: "user".to_owned(),
             content: UiContent::Text(text.to_owned()),
             parts,

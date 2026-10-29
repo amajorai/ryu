@@ -1,4 +1,7 @@
 "use client";
+import type { CSSProperties } from "react";
+import styles from "./global-island.module.css";
+import islandStyles from "./island-shapes.module.css";
 
 /*
  * The persistent floating Island for the marketing site — a 1:1 web mirror of the
@@ -16,7 +19,7 @@
 
 import { Logo as RyuLogo } from "@ryu/ui/components/logo";
 import { cn } from "@ryu/ui/lib/utils";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import {
 	useCallback,
 	useEffect,
@@ -33,12 +36,11 @@ import { IslandSuggestionChip } from "../island/suggestion-chip.tsx";
 import {
 	CONTENT_SPRING,
 	DETAIL_SIZES,
-	ISLAND_CSS,
 	ISLAND_SPRING,
+	ISLAND_SURFACE_BASE,
 	type IslandAction,
 	IslandActionPills,
 	LOGO_CIRCLE,
-	SHAPE_BASE,
 	SPLIT_GAP,
 	TRANSLUCENT_SKIN,
 } from "./island-shapes.tsx";
@@ -60,7 +62,7 @@ import ScratchCard from "./scratch-card.tsx";
 
 // useLayoutEffect warns during SSR; fall back to useEffect on the server.
 const useIsoLayoutEffect =
-	typeof window === "undefined" ? useEffect : useLayoutEffect;
+	globalThis.window === undefined ? useEffect : useLayoutEffect;
 
 // Resting footprint used for snap math: logo(40) + gap(8) + idle pill(96).
 const RESTING_PILL = { width: 144, height: 40 } as const;
@@ -130,7 +132,7 @@ function SuggestionActionPills({
 const ISLAND_REPLIES = [
 	"On it. Running that locally on your server, nothing leaves the machine.",
 	"Done. I pulled the action items and queued a follow-up for 9am.",
-];
+] as const;
 
 function ExpandedIslandChat({
 	onClose,
@@ -164,7 +166,9 @@ function ExpandedIslandChat({
 			...prev,
 			{ id: `u${idSeq.current}`, role: "user", content: trimmed },
 		]);
-		const reply = ISLAND_REPLIES[replyIndex.current % ISLAND_REPLIES.length];
+		const reply =
+			ISLAND_REPLIES[replyIndex.current % ISLAND_REPLIES.length] ??
+			ISLAND_REPLIES[0];
 		replyIndex.current += 1;
 		setTimeout(() => {
 			idSeq.current += 1;
@@ -229,7 +233,7 @@ function IslandDetailContent({
 				suggestion={
 					hasPromo
 						? {
-								title: "I have a 30% discount 🎁",
+								title: "I have a 30% discount",
 								body: "Just scratch the card to reveal your code",
 							}
 						: {
@@ -241,7 +245,7 @@ function IslandDetailContent({
 		);
 	}
 	// idle: the plain text pill (matches the live ContextPill with no live app).
-	return <span className="font-medium text-neutral-100 text-sm">Ryu</span>;
+	return <span className="font-medium text-sm text-space-home">Ryu</span>;
 }
 
 /* ── the Island shell (split-morph copied verbatim from Island.tsx) ────────── */
@@ -289,16 +293,28 @@ function IslandColumn({
 
 	return (
 		<div className="flex flex-col items-start">
-			<div className="flex items-start" style={{ gap: SPLIT_GAP }}>
+			<div
+				className={cn("flex items-start", styles.split)}
+				style={
+					{
+						"--global-island-gap": `${SPLIT_GAP}px`,
+					} satisfies PrivateStyle as PrivateStyle
+				}
+			>
 				<motion.div
 					animate={{ scale: 1, opacity: 1 }}
-					className={`${SHAPE_BASE} ${TRANSLUCENT_SKIN}`}
+					className={cn(
+						`${ISLAND_SURFACE_BASE} ${TRANSLUCENT_SKIN}`,
+						styles.logoCircle
+					)}
 					initial={{ scale: 0.6, opacity: 0 }}
-					style={{
-						width: LOGO_CIRCLE.width,
-						height: LOGO_CIRCLE.height,
-						borderRadius: LOGO_CIRCLE.radius,
-					}}
+					style={
+						{
+							"--global-island-width": `${LOGO_CIRCLE.width}px`,
+							"--global-island-height": `${LOGO_CIRCLE.height}px`,
+							"--global-island-border-radius": `${LOGO_CIRCLE.radius}px`,
+						} satisfies PrivateStyle as PrivateStyle
+					}
 					transition={ISLAND_SPRING}
 				>
 					{/* The logo is the primary drag handle; a tap (no drag) toggles chat. */}
@@ -313,7 +329,7 @@ function IslandColumn({
 						{...dragHandlers.forTap(logoTap)}
 					/>
 					<div className="flex h-full w-full items-center justify-center">
-						<RyuLogo className="text-current" size="34px" variant="eyes" />
+						<RyuLogo size="34px" tone="inherit" variant="eyes" />
 					</div>
 				</motion.div>
 
@@ -326,7 +342,7 @@ function IslandColumn({
 								borderRadius: detail.radius,
 								opacity: 1,
 							}}
-							className={`${SHAPE_BASE} ${TRANSLUCENT_SKIN}`}
+							className={`${ISLAND_SURFACE_BASE} ${TRANSLUCENT_SKIN}`}
 							exit={{ width: 0, opacity: 0 }}
 							initial={{ width: 0, opacity: 0 }}
 							key="detail"
@@ -420,21 +436,27 @@ function SnapZoneOverlay({
 
 	return (
 		<div
-			className="island-zone-overlay pointer-events-none fixed inset-0 z-[119]"
+			className={cn(
+				islandStyles.zoneOverlay,
+				"pointer-events-none fixed inset-0 z-[119]"
+			)}
 			data-shown={shown ? "true" : "false"}
 		>
-			<div className="island-zone-backdrop" />
+			<div className={islandStyles.zoneBackdrop} />
 			{ghosts.map(({ zone, anchor }) => (
 				<div
-					className={`island-zone-ghost${zone === active ? "active" : ""}`}
+					className={cn(islandStyles.zoneGhost, styles.zoneGhostGeometry)}
+					data-active={zone === active || undefined}
 					key={`island-zone-${zone}`}
-					style={{
-						left: anchor.x,
-						top: anchor.y,
-						width: RESTING_PILL.width,
-						height: RESTING_PILL.height,
-						borderRadius: GHOST_RADIUS,
-					}}
+					style={
+						{
+							"--global-island-left": `${anchor.x}px`,
+							"--global-island-top": `${anchor.y}px`,
+							"--global-island-width": `${RESTING_PILL.width}px`,
+							"--global-island-height": `${RESTING_PILL.height}px`,
+							"--global-island-border-radius": `${GHOST_RADIUS}px`,
+						} satisfies PrivateStyle as PrivateStyle
+					}
 				/>
 			))}
 		</div>
@@ -667,8 +689,6 @@ function FloatingIsland({
 
 	return createPortal(
 		<>
-			{/* Static, in-repo CSS injected as a text child (no user input, no XSS surface). */}
-			<style>{ISLAND_CSS}</style>
 			<SnapZoneOverlay
 				active={activeZone}
 				area={workArea(viewport)}
@@ -707,12 +727,23 @@ export function GlobalIsland() {
 		return null;
 	}
 	return (
-		<FloatingIsland
-			hasPromo={hasPromo}
-			setState={setIslandState}
-			state={state}
-		/>
+		<MotionConfig reducedMotion="user">
+			<FloatingIsland
+				hasPromo={hasPromo}
+				setState={setIslandState}
+				state={state}
+			/>
+		</MotionConfig>
 	);
 }
 
 export default GlobalIsland;
+
+interface PrivateStyle extends CSSProperties {
+	"--global-island-border-radius"?: string;
+	"--global-island-gap"?: string;
+	"--global-island-height"?: string;
+	"--global-island-left"?: string;
+	"--global-island-top"?: string;
+	"--global-island-width"?: string;
+}

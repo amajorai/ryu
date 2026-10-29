@@ -3,25 +3,67 @@ use std::time::Instant;
 
 use axum::body::Body;
 use hmac::{Hmac, Mac};
+use ryu_gw_contracts::credit_debit::CreditDebitReason;
 use serde_json::{json, Value};
 use sha2::Sha256;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+#[cfg(test)]
+mod audio_tests;
 mod auxiliary;
+mod edit_rescan;
+#[cfg(test)]
+mod edit_rescan_probe_tests;
+#[cfg(test)]
+mod edit_rescan_tests;
 pub(crate) mod inference_governance;
+mod media_knobs;
+mod outbound_text;
+#[cfg(test)]
+mod outbound_text_tests;
+#[cfg(test)]
+mod phase0_bypass_tests;
+mod pool_dispatch;
+pub(crate) mod pool_execution;
+#[cfg(test)]
+mod pool_runtime_tests;
+mod pool_signals;
+#[cfg(test)]
+mod pool_stream_tests;
+pub(crate) mod upstream_features;
+pub(crate) mod web;
 use inference_governance::InferenceClient;
+mod gen_ai_telemetry;
+#[cfg(test)]
+mod gen_ai_telemetry_tests;
+pub(crate) mod model_alias;
+mod own_supply;
+pub(crate) mod provider_call_guard;
 mod provider_usage;
+mod stream_dlp;
+#[cfg(test)]
+mod stream_dlp_probe_tests;
+#[cfg(test)]
+mod stream_dlp_scope_tests;
+mod tool_loop_screen;
+#[cfg(test)]
+mod tool_loop_screen_probe_tests;
+#[cfg(test)]
+mod tool_loop_screen_tests;
+mod tool_rounds;
+pub(crate) mod upstream_signals;
+pub(crate) mod zero_data_retention;
 use provider_usage::{
-    cost_usd_to_micro, inject_stream_usage_option, provider_cache_write_tokens,
-    provider_cached_tokens, response_reported_cost_usd, sse_parse_cache_write_tokens,
-    sse_parse_cached_tokens, sse_parse_cost, sse_parse_usage,
+    cost_usd_to_micro, inject_stream_usage_option, provider_cache_write_tokens_reported,
+    provider_cached_tokens_reported, response_reported_cost_usd, sse_estimate_output_tokens,
+    sse_parse_cache_usage, sse_parse_cache_write_tokens_reported, sse_parse_cached_tokens_reported,
+    sse_parse_cost, sse_parse_usage,
 };
 
 mod inline_eval;
 use inline_eval::{
-    backstop_flag, image_detection_kind, inline_detection_kind, inline_outcome,
-    llm_judge_backstop_kind, InlineOutcome,
+    backstop_flag, inline_detection_kind, inline_outcome, llm_judge_backstop_kind, InlineOutcome,
 };
 
 pub mod node_routing;
@@ -38,6 +80,13 @@ pub(crate) mod test_support {
     /// fields your test is actually about.
     pub(crate) fn plain_request_context() -> RequestContext {
         RequestContext {
+            org_limits: None,
+            identity: None,
+            standing: None,
+            enforcement: None,
+            host_conversation: None,
+            authorized_operation: crate::config::ApiKeyOperation::Inference,
+            provider_snapshot: None,
             request_id: "test-req".to_string(),
             api_key: "sk-test".to_string(),
             owner_binding: ryu_gw_credentials::fingerprint("sk-test"),
@@ -48,23 +97,32 @@ pub(crate) mod test_support {
             user_name: None,
             user_id: None,
             agent_id: None,
+            agent_provider_access: None,
             key_config: None,
             skill_ids: None,
             tool_actions: None,
             tools_header_present: false,
+            capability_hints: None,
             slot_provider: None,
             slot_model: None,
+            own_supply_route: None,
+            violation_attempt: Default::default(),
             session_id: None,
             feature: None,
+            purpose: None,
             companion_source: false,
             tool_search_requested: false,
+            untrusted_caller: false,
             priority: crate::concurrency::Priority::Interactive,
             tool_profile: None,
             raw_tools: false,
             managed_inference: false,
+            openrouter_routing_enabled: false,
             remaining_budget_micro_usd: None,
             unrestricted_budget_micro_usd: None,
             pool_budgets_micro_usd: std::collections::HashMap::new(),
+            credit_accounting_unavailable: false,
+            budget_resolved_at: None,
             resolved_policy: None,
             prompt_cache_mode: None,
             prompt_cache_ttl: None,
@@ -78,7 +136,7 @@ use stages::PipelineStage;
 
 use crate::{
     audit::AuditRecord,
-    budget::{BudgetChargeKind, BudgetDecision, CreditReservation},
+    budget::{BudgetAdmission, BudgetChargeKind, BudgetDecision, BudgetHold, CreditReservation},
     cache::Cache,
     config::{
         AlertTier, ApiKeyConfig, ApiKeyOperation, BudgetAction, FirewallPolicy, Modality,
@@ -93,57 +151,70 @@ use crate::{
     state::AppState,
 };
 
+// Production clusters split out of this file. Each child does `use super::*;`
+// and the private globs below keep every item reachable inside `pipeline` by
+// its old path; the `pub(crate) use` block re-exports what the rest of the
+// crate imports as `crate::pipeline::<item>`.
+pub(crate) use audit::audit_refused;
+pub(crate) use auth::{authenticate, authenticate_for_operation, AuthInputs};
+pub(crate) use body_shaping::ANTHROPIC_BETA_FIELD;
+pub(crate) use core_proof::{ct_eq, has_core_proof_key};
+pub(crate) use credit_reserve::credit_headroom_micro_usd;
+pub(crate) use media_jobs::{submit_audio_job, submit_video_job};
+pub(crate) use media_poll::{poll_audio_job, poll_video_job};
+pub(crate) use prompt_text::is_dlp_guardrail;
+pub(crate) use tool_debit::{
+    external_tool_debit_reason, external_tool_ref_id, spawn_external_tool_debit_for_ids,
+    spawn_managed_tool_debit, ManagedToolDebit,
+};
+mod audit;
+use audit::*;
+mod auth;
+use auth::*;
+mod auth_identity;
+use auth_identity::*;
+mod body_shaping;
+use body_shaping::*;
+mod budget;
+use budget::*;
+mod budget_charge;
+use budget_charge::*;
+mod core_proof;
+use core_proof::*;
+mod credit_reserve;
+use credit_reserve::*;
+mod debit;
+use debit::*;
+mod dlp_stream;
+use dlp_stream::*;
+mod inline_apply;
+use inline_apply::*;
+mod inline_flags;
+use inline_flags::*;
+mod json_text;
+use json_text::*;
+mod media_jobs;
+use media_jobs::*;
+mod media_poll;
+mod prompt_text;
+use prompt_text::*;
+mod routing_smart;
+use routing_smart::*;
+mod stream_observe;
+use stream_observe::*;
+mod stream_observer;
+use stream_observer::*;
+mod stream_opening;
+use stream_opening::*;
+mod tool_debit;
+use tool_debit::*;
+mod tool_loop_select;
+use tool_loop_select::*;
+
 /// Build the firewall [`PolicyAlert`] for an inbound/outbound firewall match, or
 /// `None` when the resolved firewall's `alert` tier is below `Warn` (so a
 /// firewall with no configured tier fires no alert). `enforcement` is `block`
 /// (Block) or `notify` (WarnAndContinue).
-/// Constant-time string equality — no early return on the first differing byte, so
-/// comparing a caller-supplied key against the configured master key leaks no timing
-/// signal about how many leading bytes matched. Length mismatch short-circuits (key
-/// length is not secret). The Gateway defaults to a `0.0.0.0` bind, making a naive
-/// `==` a remotely-observable side channel.
-fn ct_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
-}
-
-/// Verify the Core-minted proof on an agent-scoped Gateway route.
-///
-/// Dynamic `rgw_` credentials are tenant credentials, not trusted-forwarder
-/// credentials. The proof makes the agent identity an assertion from Core,
-/// bound to the exact bearer that authenticated this request, instead of a
-/// caller-controlled header that could move spend between agents.
-fn verify_agent_route_proof(raw_api_key: Option<&str>, agent_id: &str, proof: &str) -> bool {
-    type AgentRouteMac = Hmac<Sha256>;
-
-    let Some(raw_api_key) = raw_api_key else {
-        return false;
-    };
-    let key = raw_api_key
-        .strip_prefix("Bearer ")
-        .unwrap_or(raw_api_key)
-        .trim();
-    if key.is_empty() || proof.trim().is_empty() {
-        return false;
-    }
-    let Ok(mut mac) = AgentRouteMac::new_from_slice(key.as_bytes()) else {
-        return false;
-    };
-    mac.update(b"ryu-agent-route-v1\0");
-    mac.update(agent_id.as_bytes());
-    let Ok(expected) = hex::decode(proof.trim()) else {
-        return false;
-    };
-    mac.verify_slice(&expected).is_ok()
-}
-
 fn firewall_policy_alert(
     cfg: &crate::config::FirewallConfig,
     ctx: &RequestContext,
@@ -164,6 +235,8 @@ fn firewall_policy_alert(
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct RequestContext {
+    pub(crate) authorized_operation: ApiKeyOperation,
+    pub(crate) provider_snapshot: Option<Arc<crate::providers::ProviderSnapshot>>,
     pub request_id: String,
     pub api_key: String,
     /// Stable bearer binding used for asynchronous job ownership. Unlike
@@ -179,6 +252,14 @@ pub struct RequestContext {
     pub user_id: Option<String>,
     /// Selected agent for per-agent budgets (U21), from `x-ryu-agent-id`.
     pub agent_id: Option<String>,
+    /// The user's model providers this agent may use: Core's
+    /// `x-ryu-agent-provider-access` header, intersected with a signed `gws1.`
+    /// scope's list when both are present. `None` is unrestricted. It only ever
+    /// narrows (see `inference_governance::authorize_agent_provider`), so it is
+    /// honored from any caller: a forged value can only limit the forger. It
+    /// limits only the user's own credentials: credential-free slots and a
+    /// hosted organisation's fleet-served managed inference stay open.
+    pub agent_provider_access: Option<Arc<std::collections::HashSet<String>>>,
     /// The matched ApiKeyConfig, if any. Used for per-key RBAC overrides.
     pub key_config: Option<ApiKeyConfig>,
     /// Active skill ids for this request (M3 / #145 AC3), from `x-ryu-skill-ids`.
@@ -197,6 +278,8 @@ pub struct RequestContext {
     /// carries only the legacy header → this stays false → it keeps its fast
     /// streaming path and the legacy Composio loop, never the unified loop.
     pub tools_header_present: bool,
+    /// JSON-encoded, turn-scoped capability suggestion IDs from Core.
+    pub capability_hints: Option<String>,
     /// Per-agent slot provider override (M3 / #164), from `x-ryu-slot-provider`.
     /// When set, this provider is used in place of the static modality_map entry
     /// for multimodal requests from carded agents. `None` falls back to the map.
@@ -205,6 +288,17 @@ pub struct RequestContext {
     /// When set alongside `slot_provider`, this model is forwarded to the provider
     /// instead of the config-pinned or caller-requested model.
     pub slot_model: Option<String>,
+    /// Gateway-internal: the own-supply `(slot, upstream)` this attempt is
+    /// dispatched to (see [`own_supply`]). Never set from a header or the body —
+    /// only by the free-credit own-supply plan — so a client cannot name a slot
+    /// through it. The body keeps the id the user picked, which is what the
+    /// Policy stage authorized.
+    pub own_supply_route: Option<(ProviderId, String)>,
+    /// Gateway-internal: which attempt this context screens, for the
+    /// violation events it records (spec 00.5). Default (0, no provider) for
+    /// the inbound screens; an output screen or a tool round stamps its own
+    /// on a clone. Never set from a header or the body.
+    pub violation_attempt: crate::violations::AttemptRef,
     /// Core conversation/session id forwarded by Core via `x-ryu-session-id` (M4 / #176).
     /// Used as the correlation key for per-run/per-session audit queries.
     pub session_id: Option<String>,
@@ -213,6 +307,11 @@ pub struct RequestContext {
     /// when untagged (self-hosted / legacy callers). Recorded on the audit row so
     /// the reporter can build the per-feature daily usage breakdown.
     pub feature: Option<String>,
+    /// Background feature behind this call, from `x-ryu-purpose`
+    /// (`compaction`, `auto_title`, `plugin:<id>`, ...), already validated by
+    /// [`crate::audit::valid_purpose`]. Recorded on the audit row so usage
+    /// rollups can separate background spend; `feature` is unaffected.
+    pub purpose: Option<String>,
     /// True when Core has tagged this request as originating from the context
     /// companion (screen-capture path). When set, Gateway DLP/PII redaction is
     /// applied unconditionally before the provider call, even if the local
@@ -224,6 +323,12 @@ pub struct RequestContext {
     /// buffered tool loop. Absent ⇒ no signal ⇒ fast path (no added latency, and
     /// no double surface on ACP egress — Core's ACP forwarder never sets it).
     pub tool_search_requested: bool,
+    /// Core marked this turn as spoken by an unverified caller, from
+    /// `x-ryu-untrusted-caller`. Restrict-only: the unified loop then offers
+    /// neither `tool_search` nor the operator's always-on tools, grants nothing
+    /// from capability hints, and a request without `x-ryu-tools` runs no
+    /// managed tool loop at all.
+    pub untrusted_caller: bool,
     /// Admission priority for the local-engine queue, from `x-ryu-priority`
     /// (`background` ⇒ Background, else Interactive). Lets interactive chat jump
     /// ahead of background fan-out (delegate / threads / scheduler) when the
@@ -249,6 +354,9 @@ pub struct RequestContext {
     /// Only managed tenants get the pre-flight credit gate + fail-closed debit;
     /// BYOK / static-key / master-key traffic is `false` and unaffected.
     pub managed_inference: bool,
+    /// Business-only OpenRouter node-routing entitlement from the control plane.
+    /// Static and legacy contexts default to false.
+    pub openrouter_routing_enabled: bool,
     /// The resolved org's remaining credit budget in micro-USD, from the
     /// control-plane token resolution. `Some(b)` with `b <= 0` ⇒ wallet exhausted
     /// ⇒ pre-flight 402. `None` ⇒ no managed cap (uncapped / non-managed).
@@ -266,6 +374,18 @@ pub struct RequestContext {
     /// are unreachable by construction: the gate only ever adds the ONE matching
     /// entry to the unrestricted part.
     pub pool_budgets_micro_usd: std::collections::HashMap<String, i64>,
+    /// The control plane could not read this managed tenant's entitlement or
+    /// wallet (see [`crate::policy::TenantCredit::accounting_unavailable`]).
+    /// Set only on a gateway that bills tenants; every credit gate then
+    /// answers `503 credit_accounting_unavailable` instead of judging an
+    /// unknown balance. `false` on every other path.
+    pub credit_accounting_unavailable: bool,
+    /// When the control-plane resolve that supplied the budget figures above
+    /// was fetched. Resolutions are cached for up to a minute, per credential
+    /// and operation, so the credit gate compares the last debit's balance
+    /// report against THIS request's figures, not another entry's. `None` when
+    /// the figures did not come from a resolve.
+    pub budget_resolved_at: Option<Instant>,
     /// The org's resolved effective policy when auth came from a dynamic `rgw_`
     /// token. `Some` ⇒ the pipeline enforces THIS tenant's policy (allowlist /
     /// locked guardrails) instead of the global startup policy; `None` ⇒ the
@@ -288,6 +408,447 @@ pub struct RequestContext {
     /// is carried on ALL auth paths rather than only the "trusted" ones: there is
     /// no trusted tier to condition on.
     pub node_routing: Option<node_routing::NodeRoutingPrefs>,
+    /// Control-plane org limits for a resolved `rgw_` request (contract C1):
+    /// the org's caps, the presenting credential id, and the verified caller's
+    /// teams. `None` on static-key, master, and anonymous paths.
+    pub org_limits: Option<Arc<crate::org_limits::OrgLimitContext>>,
+    /// Who this request is for (see [`crate::identity`]): the resolved
+    /// credential, the verified user, the hashed tenant end user, the chosen
+    /// actor and its upstream subject. Set by [`authenticate`]; `None` on
+    /// contexts built outside it.
+    pub identity: Option<Arc<crate::identity::RequestIdentity>>,
+    /// What an in-flight tool loop or stream needs to check this request's
+    /// platform standing again (see [`crate::standing::StandingGuard`]). Set
+    /// for a dynamically resolved `rgw_` bearer; `None` everywhere else.
+    pub standing: Option<Arc<crate::standing::StandingGuard>>,
+    /// The abuse ladder's throttle and restrict posture and the in-flight
+    /// slots this request holds on the fleet (see [`crate::enforcement`]).
+    /// Set for a dynamically resolved `rgw_` bearer on `Fleet` custody when
+    /// a level or the new-key limit applies; `None` everywhere else. The
+    /// slots are given back when the last clone of the request drops.
+    pub enforcement: Option<Arc<crate::enforcement::Enforcement>>,
+    /// Core's proved host conversation for this turn, from
+    /// `x-ryu-host-conversation-id` / `x-ryu-host-conversation-proof`. Kept only
+    /// for a static trusted-forwarder key (see [`trusted_host_conversation`]);
+    /// every other path drops it. The unified tool loop relays it to Core so
+    /// each execution is judged against the turn owner's own tool rules.
+    pub host_conversation: Option<crate::tools::HostConversation>,
+}
+
+impl RequestContext {
+    /// This context stamped as the attempt at chain position `index`, bound
+    /// to `provider`, for the screens of what that attempt produced.
+    pub fn at_attempt(&self, index: usize, provider: &ProviderId) -> Self {
+        let mut ctx = self.clone();
+        ctx.violation_attempt = crate::violations::AttemptRef::new(index, Some(provider.clone()));
+        ctx
+    }
+
+    /// Hosted credential id for audit rows and per-key rollups.
+    pub fn key_id(&self) -> Option<String> {
+        self.identity
+            .as_ref()
+            .and_then(|identity| identity.credential.as_ref())
+            .map(|credential| credential.credential_id.clone())
+            .or_else(|| {
+                self.org_limits
+                    .as_ref()
+                    .and_then(|limits| limits.credential_id.clone())
+            })
+    }
+
+    /// Every team this request is charged to, comma-joined for the audit row's
+    /// `team_ids` (the reporter's `teamDaily` rollup credits each). Falls back
+    /// to the single `team_id` for statically configured keys.
+    pub fn audit_team_ids(&self) -> Option<String> {
+        let teams = self
+            .org_limits
+            .as_ref()
+            .map(|limits| limits.team_ids.as_slice())
+            .unwrap_or_default();
+        if teams.is_empty() {
+            return self.team_id.clone();
+        }
+        Some(teams.join(","))
+    }
+}
+
+/// Account bindings are scoped to the tenant and verified caller. A session id
+/// alone must not collide or consume another caller's conversation capacity.
+/// Owner binding for a Core-scoped inference bearer: a fingerprint of the
+/// length-prefixed scope identity, so no two distinct scopes collide and none
+/// collides with a fingerprint of a raw key.
+fn scoped_inference_owner_binding(scope: &ryu_gw_credentials::InferenceScope) -> String {
+    let field = |value: Option<&str>| {
+        value.map_or_else(
+            || "-".to_owned(),
+            |value| format!("{}:{value}", value.len()),
+        )
+    };
+    // The signed provider list is part of the scope: a limited and an unlimited
+    // bearer for one agent never share stored responses or cache entries. The
+    // list is sorted and each id length-prefixed; `-` is "no limit", which is
+    // different from an empty list ("no provider").
+    let provider_access = scope.provider_access.as_ref().map_or_else(
+        || "-".to_owned(),
+        |ids| {
+            let mut ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            let ids: String = ids.iter().map(|id| format!("{}:{id},", id.len())).collect();
+            format!("[{ids}]")
+        },
+    );
+    ryu_gw_credentials::fingerprint(&format!(
+        "gws1-scope\0{}\0{}\0{}\0{provider_access}",
+        field(Some(&scope.agent_id)),
+        field(scope.user_id.as_deref()),
+        field(scope.session_id.as_deref()),
+    ))
+}
+
+fn account_affinity(ctx: &RequestContext, body: &Value) -> Option<String> {
+    let session = ctx
+        .session_id
+        .as_deref()
+        .or_else(|| body.get("prompt_cache_key").and_then(Value::as_str))
+        .or_else(|| body.get("conversation_id").and_then(Value::as_str))
+        .or_else(|| body.get("sessionId").and_then(Value::as_str))
+        .filter(|id| !id.is_empty() && id.len() <= 256)?;
+    let org = ctx.org_id.as_deref().unwrap_or_default();
+    let caller = ctx.user_id.as_deref().unwrap_or(&ctx.owner_binding);
+    let scope = format!("{}:{org}{}:{caller}", org.len(), caller.len());
+    Some(format!("{}:{scope}{session}", scope.len()))
+}
+
+fn provider_snapshot(
+    state: &AppState,
+    ctx: &RequestContext,
+) -> Arc<crate::providers::ProviderSnapshot> {
+    ctx.provider_snapshot
+        .clone()
+        .unwrap_or_else(|| state.provider_runtime.snapshot())
+}
+
+/// Request admission (pipeline steps 1 + 2), shared by every inference route:
+/// the per-key requests-per-minute ceiling, then the org request ceiling, then
+/// the per-key burst bucket, each consumed only when the previous one admitted
+/// the request. A per-key refusal names its policy (`Retry-After` plus the IETF
+/// `RateLimit` / `RateLimit-Policy` headers); an org refusal stays bare.
+pub(crate) fn admit_request(state: &AppState, ctx: &RequestContext) -> Result<(), GatewayError> {
+    let key_config = ctx.key_config.as_ref();
+    if !state
+        .rate_limiter
+        .check_request_for_key(&ctx.api_key, key_config)
+    {
+        return Err(GatewayError::rate_limited(
+            state.rate_limiter.request_limit_policy(key_config),
+        ));
+    }
+    crate::org_limits::check_request(state, ctx)?;
+    if !state.rate_limiter.check_burst(&ctx.api_key) {
+        return Err(GatewayError::rate_limited(
+            state.rate_limiter.burst_limit_policy(),
+        ));
+    }
+    Ok(())
+}
+
+/// The refusing policy's name for a rate-limit log line (`org` when bare).
+fn rate_limit_policy_name(error: &GatewayError) -> &'static str {
+    match error {
+        GatewayError::RateLimitedBy(limit) => limit.policy,
+        _ => "org",
+    }
+}
+
+fn capture_provider_snapshot(state: &AppState, ctx: &mut RequestContext) {
+    if ctx.provider_snapshot.is_none() {
+        ctx.provider_snapshot = Some(state.provider_runtime.snapshot());
+    }
+}
+
+/// The cache tenant: the org, narrowed to the caller's user when one is known.
+/// Members of one org must not receive each other's cached responses, and the
+/// user id here is only ever a verified or trusted-forwarder identity (dynamic
+/// tenants accept it only from a verified JWT). JSON framing keeps an org-only
+/// tenant distinct from every `(org, user)` pair.
+fn cache_tenant(ctx: &RequestContext) -> Option<String> {
+    match (ctx.org_id.as_deref(), ctx.user_id.as_deref()) {
+        (org, Some(user)) => Some(serde_json::json!(["user", org, user]).to_string()),
+        (Some(org), None) => Some(org.to_owned()),
+        (None, None) => None,
+    }
+}
+
+fn provider_cache_scope<'a>(
+    state: &AppState,
+    ctx: &'a RequestContext,
+    tenant: Option<&'a str>,
+    provider: &'a str,
+    model: &'a str,
+) -> crate::cache::CacheScope<'a> {
+    let snapshot = provider_snapshot(state, ctx);
+    let epoch =
+        crate::cache::CacheEpoch::new(*snapshot.epoch.boot.as_bytes(), snapshot.epoch.sequence);
+    // Partition by credential as well as tenant: two static keys with no org (or
+    // two credentials of one org) must not confirm or read each other's prompts
+    // and answers through a shared entry.
+    crate::cache::CacheScope::new(epoch, tenant, provider, model).with_caller(&ctx.owner_binding)
+}
+
+/// The embedding-cache scope and cacheable request shape for an embeddings
+/// call, or `None` when it must bypass the cache: the cache is off, the
+/// operation is a rerank, node routing pins the upstream, the bound route
+/// forbids response caching, or the body is not cacheable (token-array inputs,
+/// `user`, unknown `encoding_format`). The scope is the same tenant + caller +
+/// provider + model + provider-epoch namespace the response caches use.
+fn embedding_cache_slot(
+    state: &AppState,
+    ctx: &RequestContext,
+    decision: &RouteDecision,
+    body: &Value,
+    operation: EmbeddingOperation,
+) -> Option<(String, ryu_gw_cache::EmbeddingRequest)> {
+    if !matches!(operation, EmbeddingOperation::Embed)
+        || state.embedding_cache.is_none()
+        || ctx.node_routing.is_some()
+    {
+        return None;
+    }
+    let route = bind_route(state, ctx, decision).ok()?;
+    if !route.cache_allowed {
+        return None;
+    }
+    let request = ryu_gw_cache::EmbeddingRequest::from_body(body)?;
+    let tenant = cache_tenant(ctx);
+    let scope = provider_cache_scope(
+        state,
+        ctx,
+        tenant.as_deref(),
+        route.provider_id.as_str(),
+        &route.model,
+    )
+    .semantic_scope();
+    Some((scope, request))
+}
+
+fn provider_circuit_key(state: &AppState, ctx: &RequestContext, provider: &str) -> String {
+    provider_snapshot(state, ctx).epoch.circuit_key(provider)
+}
+
+/// Bind one routed decision to the request's captured provider generation.
+/// Callers keep the returned provider, region, cache eligibility, and epoch
+/// together through governance and dispatch rather than independently reading
+/// the mutable runtime state.
+fn bind_route(
+    state: &AppState,
+    ctx: &RequestContext,
+    decision: &RouteDecision,
+) -> Result<crate::providers::BoundRoute, GatewayError> {
+    provider_snapshot(state, ctx).bind(decision)
+}
+
+fn bound_circuit_key(route: &crate::providers::BoundRoute) -> String {
+    route.epoch.circuit_key(route.provider_id.as_str())
+}
+
+fn canonical_sdk_provider(
+    state: &AppState,
+    ctx: &RequestContext,
+    provider: &ProviderId,
+    model: &str,
+) -> Result<ProviderId, GatewayError> {
+    if ryu_gw_credentials::sdk_provider_by_id(provider.as_str()).is_none() {
+        return Ok(provider.clone());
+    }
+    provider_snapshot(&state, &ctx)
+        .providers
+        .canonicalize_sdk_route(provider.as_str(), model)
+        .map(ProviderId::from)
+        .ok_or_else(|| {
+            GatewayError::BadRequest(
+                "SDK connection is inactive or the model belongs to a different provider".into(),
+            )
+        })
+}
+fn canonicalize_sdk_decision(
+    state: &AppState,
+    ctx: &RequestContext,
+    decision: &mut RouteDecision,
+) -> Result<(), GatewayError> {
+    decision.provider = canonical_sdk_provider(state, ctx, &decision.provider, &decision.model)?;
+    Ok(())
+}
+async fn resolve_provider_pool(
+    state: &AppState,
+    ctx: &RequestContext,
+    body: &Value,
+    decision: &mut RouteDecision,
+) -> Result<Option<crate::provider_pools::SelectedPoolRoute>, GatewayError> {
+    let affinity = account_affinity(ctx, body);
+    let facts = pool_signals::scoped_request_facts(state, ctx, body);
+    let signals = pool_signals::member_facts(state, ctx, &facts);
+    let mut route = provider_snapshot(&state, &ctx)
+        .provider_pools
+        .select_wait_with_facts(
+            decision.provider.as_str(),
+            affinity.as_deref(),
+            &facts,
+            |id, model| {
+                let Ok(provider) = canonical_sdk_provider(state, ctx, &ProviderId::from(id), model)
+                else {
+                    return false;
+                };
+                provider_snapshot(&state, &ctx)
+                    .providers
+                    .get_owned(provider.as_str())
+                    .is_some()
+                    && !state.circuit_breaker.is_open(&provider_circuit_key(
+                        &state,
+                        &ctx,
+                        provider.as_str(),
+                    ))
+                    && inference_governance::authorize_provider_region(state, ctx, &provider)
+                        .is_ok()
+            },
+            |member| {
+                signals
+                    .get(&(member.provider.clone(), member.model.clone()))
+                    .cloned()
+                    .unwrap_or_default()
+            },
+        )
+        .await
+        .map_err(GatewayError::AllProvidersUnavailable)?;
+    if let Some(selected) = route.as_mut() {
+        selected.provider =
+            canonical_sdk_provider(state, ctx, &selected.provider, &selected.model)?;
+        for candidate in &mut selected.fallback_candidates {
+            candidate.provider =
+                canonical_sdk_provider(state, ctx, &candidate.provider, &candidate.model)?;
+        }
+        decision.provider = selected.provider.clone();
+        decision.model.clone_from(&selected.model);
+    }
+    Ok(route)
+}
+
+fn reconcile_pool_after_budget(
+    decision: &RouteDecision,
+    route: &mut Option<crate::provider_pools::SelectedPoolRoute>,
+) -> Result<(), GatewayError> {
+    if route.as_ref().is_some_and(|selected| {
+        selected.provider != decision.provider || selected.model != decision.model
+    }) {
+        *route = None;
+    }
+    if decision.provider.as_str().starts_with("pool:") {
+        return Err(GatewayError::AllProvidersUnavailable(
+            "budget downgrade resolved to a provider pool after admission".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+struct ChatAttemptRoute {
+    decision: RouteDecision,
+    pool: Option<crate::provider_pools::SelectedPoolRoute>,
+}
+
+/// Append a context-relay pool's handoff to `messages`, after screening it
+/// (P0-4). The handoff carries the previous target's answer, which no inbound
+/// screen has read.
+fn apply_pool_relay(
+    state: &AppState,
+    ctx: &RequestContext,
+    route: Option<&crate::provider_pools::SelectedPoolRoute>,
+    body: &mut Value,
+    model: &str,
+    start: Instant,
+) -> Result<Option<PolicyAlert>, GatewayError> {
+    let Some(route) = route else {
+        return Ok(None);
+    };
+    let Some(session) = account_affinity(ctx, body) else {
+        return Ok(None);
+    };
+    let scope_session = format!("{}:{}", auxiliary::scope(state, ctx), session);
+    let handoff = provider_snapshot(state, ctx)
+        .provider_pools
+        .relay_messages(route, &scope_session);
+    if handoff.is_empty() {
+        return Ok(None);
+    }
+    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else {
+        return Ok(None);
+    };
+    let handoff = Value::Array(handoff);
+    let alert = edit_rescan::screen_edit_audited(
+        state,
+        ctx,
+        edit_rescan::EditSite::PoolRelay,
+        &handoff,
+        model,
+        start,
+    )?;
+    if let Value::Array(handoff) = handoff {
+        messages.extend(handoff);
+    }
+    Ok(alert)
+}
+
+fn chat_attempt_routes(
+    state: &AppState,
+    ctx: &RequestContext,
+    decision: &RouteDecision,
+    selected_pool: Option<&crate::provider_pools::SelectedPoolRoute>,
+) -> Vec<ChatAttemptRoute> {
+    if let Some(selected) = selected_pool {
+        let mut attempts = Vec::with_capacity(1 + selected.fallback_candidates.len());
+        attempts.push(ChatAttemptRoute {
+            decision: decision.clone(),
+            pool: Some(selected.clone()),
+        });
+        for candidate in &selected.fallback_candidates {
+            attempts.push(ChatAttemptRoute {
+                decision: RouteDecision {
+                    provider: candidate.provider.clone(),
+                    model: candidate.model.clone(),
+                },
+                pool: Some(crate::provider_pools::SelectedPoolRoute {
+                    pool_name: selected.pool_name.clone(),
+                    member_index: candidate.member_index,
+                    provider: candidate.provider.clone(),
+                    model: candidate.model.clone(),
+                    fallback_candidates: Vec::new(),
+                    execution: None,
+                }),
+            });
+        }
+        return attempts;
+    }
+    clamped_fallback_chain(state, ctx, decision)
+        .into_iter()
+        .map(|provider| ChatAttemptRoute {
+            decision: RouteDecision {
+                provider,
+                model: decision.model.clone(),
+            },
+            pool: None,
+        })
+        .collect()
+}
+
+fn restore_token_ceiling(body: &mut Value, key: &str, original: Option<&Value>) {
+    let Some(map) = body.as_object_mut() else {
+        return;
+    };
+    if let Some(value) = original {
+        map.insert(key.to_owned(), value.clone());
+    } else {
+        map.remove(key);
+    }
 }
 
 /// Describes the degraded mode the pipeline entered, if any, for this request.
@@ -379,611 +940,6 @@ pub struct PipelineStreamOutput {
 
 // ─── Authentication ───────────────────────────────────────────────────────────
 
-/// The forwarded inputs `authenticate` resolves into a [`RequestContext`].
-///
-/// Grouped into a struct (rather than ~10 positional params) so call sites read
-/// clearly and adding a field doesn't churn every caller. Admin endpoints that
-/// only need auth use [`AuthInputs::with_key`]; the chat / multimodal paths fill
-/// in the forwarded identity + slot + tool-allowlist fields.
-#[derive(Debug, Default)]
-pub struct AuthInputs<'a> {
-    pub raw_api_key: Option<&'a str>,
-    /// Caller identity for per-user budgets (U21), from `x-ryu-user-id`.
-    pub user_id: Option<String>,
-    /// Selected agent for per-agent budgets (U21), from `x-ryu-agent-id`.
-    pub agent_id: Option<String>,
-    /// Core's HMAC proof for an agent-scoped Gateway ingress. Only dynamic
-    /// `rgw_` credentials use this; static trusted-forwarder/master paths keep
-    /// their existing identity rules.
-    pub agent_proof: Option<String>,
-    /// Active skill ids (M3 / #145 AC3), from `x-ryu-skill-ids`.
-    pub skill_ids: Option<String>,
-    /// Per-agent egress tool allowlist (#475 C7), from `x-ryu-tools` (legacy
-    /// fallback `x-ryu-composio-actions`).
-    pub tool_actions: Option<String>,
-    /// True only when the new `x-ryu-tools` header was literally present (#475).
-    /// The trigger for the unified tool loop — distinct from `tool_actions`,
-    /// which folds in the legacy `x-ryu-composio-actions` fallback.
-    pub tools_header_present: bool,
-    /// Per-agent modality slot provider override (M3 / #164).
-    pub slot_provider: Option<ProviderId>,
-    /// Per-agent modality slot model override (M3 / #164).
-    pub slot_model: Option<String>,
-    /// Core conversation id (M4 / #176), from `x-ryu-session-id`.
-    pub session_id: Option<String>,
-    /// Product surface (profiles / usage-points), from `x-ryu-feature`.
-    pub feature: Option<String>,
-    /// Companion-sourced flag (M7 / #199), from `x-ryu-companion-source`.
-    pub companion_source: bool,
-    /// Explicit unified-tool-loop opt-in (#475), from `x-ryu-tool-search: on`.
-    pub tool_search_requested: bool,
-    /// Local-engine admission priority (#queue), from `x-ryu-priority`.
-    pub priority: crate::concurrency::Priority,
-    /// Named tool-policy profile (#473 profiles), from `x-ryu-tool-profile`.
-    pub tool_profile: Option<String>,
-    /// Raw tool passthrough (SDK-side agent loops), from `x-ryu-raw-tools`.
-    /// Suppresses both managed tool loops so the caller's own tools/tool_calls
-    /// pass through untouched.
-    pub raw_tools: bool,
-    /// Per-request prompt-cache mode, from `x-ryu-prompt-cache`.
-    pub prompt_cache_mode: Option<ryu_gw_providers::PromptCacheMode>,
-    /// Per-request prompt-cache TTL, from `x-ryu-prompt-cache-ttl`.
-    pub prompt_cache_ttl: Option<String>,
-    /// The node's raw routing preferences, from `x-ryu-node-routing`. Already
-    /// parsed (an unparseable header is `None` — ignore, never reject) but NOT
-    /// yet clamped; see [`RequestContext::node_routing`].
-    pub node_routing: Option<node_routing::NodeRoutingPrefs>,
-}
-
-impl<'a> AuthInputs<'a> {
-    /// Auth-only inputs for admin endpoints (no forwarded identity/slots).
-    pub fn with_key(raw_api_key: Option<&'a str>) -> Self {
-        Self {
-            raw_api_key,
-            ..Default::default()
-        }
-    }
-}
-
-/// Authenticate the request and build a RequestContext.
-///
-/// The forwarded fields ([`AuthInputs`]) carry the caller identity Core relays
-/// via `x-ryu-*` headers; they drive per-user/per-agent budgets (U21), skill
-/// attribution (M3), per-attribute slot routing (M3 / #164), session
-/// correlation (M4), and the unified tool-loop allowlist (#475 C7).
-pub async fn authenticate(
-    state: &AppState,
-    inputs: AuthInputs<'_>,
-) -> Result<RequestContext, GatewayError> {
-    let AuthInputs {
-        raw_api_key,
-        user_id,
-        agent_id,
-        agent_proof,
-        skill_ids,
-        tool_actions,
-        tools_header_present,
-        slot_provider,
-        slot_model,
-        session_id,
-        feature,
-        companion_source,
-        tool_search_requested,
-        priority,
-        tool_profile,
-        raw_tools,
-        prompt_cache_mode,
-        prompt_cache_ttl,
-        node_routing,
-    } = inputs;
-
-    // Shared builder so the anonymous / master / static / dynamic paths differ
-    // only in their identity fields and never drift on the forwarded request
-    // fields (adding a `RequestContext` field touches one place).
-    let build_ctx = |is_master_key: bool,
-                     api_key: String,
-                     org_id: Option<String>,
-                     team_id: Option<String>,
-                     project_id: Option<String>,
-                     user_name: Option<String>,
-                     eff_user_id: Option<String>,
-                     eff_agent_id: Option<String>,
-                     key_config: Option<ApiKeyConfig>,
-                     managed_inference: bool,
-                     remaining_budget_micro_usd: Option<i64>,
-                     unrestricted_budget_micro_usd: Option<i64>,
-                     pool_budgets_micro_usd: std::collections::HashMap<String, i64>,
-                     resolved_policy: Option<crate::policy::EffectivePolicy>|
-     -> RequestContext {
-        let owner_binding = ryu_gw_credentials::fingerprint(&api_key);
-        RequestContext {
-            request_id: Uuid::new_v4().to_string(),
-            api_key,
-            owner_binding,
-            is_master_key,
-            org_id,
-            team_id,
-            project_id,
-            user_name,
-            user_id: eff_user_id,
-            agent_id: eff_agent_id,
-            key_config,
-            skill_ids: skill_ids.clone(),
-            tool_actions: tool_actions.clone(),
-            tools_header_present,
-            slot_provider: slot_provider.clone(),
-            slot_model: slot_model.clone(),
-            session_id: session_id.clone(),
-            feature: feature.clone(),
-            companion_source,
-            tool_search_requested,
-            priority,
-            tool_profile: tool_profile.clone(),
-            raw_tools,
-            managed_inference,
-            remaining_budget_micro_usd,
-            unrestricted_budget_micro_usd,
-            pool_budgets_micro_usd,
-            resolved_policy,
-            prompt_cache_mode,
-            prompt_cache_ttl: prompt_cache_ttl.clone(),
-            node_routing: node_routing.clone(),
-        }
-    };
-
-    // Outcome of the synchronous match under the auth lock. The dynamic `rgw_`
-    // resolve is async and MUST NOT hold the `auth` read guard across an await, so
-    // it is deferred to after the lock is released.
-    enum StaticOutcome {
-        Matched(RequestContext),
-        Reject(GatewayError),
-        /// No static match, but the bearer is an `rgw_` token and the resolve
-        /// cache is enabled: try the control-plane resolution outside the lock.
-        TryDynamic(String),
-    }
-
-    // Use the live auth config (via RwLock) so keys added via PUT /v1/config
-    // take effect immediately without a gateway restart.
-    let outcome = state.with_auth(|auth| {
-        if !auth.require_auth {
-            // Even in no-auth mode a PROVISIONED master key stays authoritative:
-            // a caller presenting it is recognized as master (so the shared
-            // control-plane admin gate — config/audit/budget-spend — honors it),
-            // while everyone else remains anonymous exactly as before. Without a
-            // configured master key this is a no-op and the zero-config dev path
-            // is unchanged (P2 #2 — pairs with the `master_key_present` term in
-            // `admin_loopback_allowed`).
-            if let (Some(master), Some(raw)) = (&auth.master_key, raw_api_key) {
-                let key = raw.strip_prefix("Bearer ").unwrap_or(raw);
-                if ct_eq(key, master.as_str()) {
-                    return StaticOutcome::Matched(build_ctx(
-                        true,
-                        key.to_string(),
-                        None,
-                        None,
-                        None,
-                        Some("master".to_string()),
-                        user_id.clone(),
-                        agent_id.clone(),
-                        None,
-                        false,
-                        None,
-                        None,
-                        std::collections::HashMap::new(),
-                        None,
-                    ));
-                }
-            }
-            return StaticOutcome::Matched(build_ctx(
-                false,
-                raw_api_key.unwrap_or("anonymous").to_string(),
-                None,
-                None,
-                None,
-                None,
-                user_id.clone(),
-                agent_id.clone(),
-                None,
-                false,
-                None,
-                None,
-                std::collections::HashMap::new(),
-                None,
-            ));
-        }
-
-        let Some(key) = raw_api_key else {
-            return StaticOutcome::Reject(GatewayError::Unauthorized(
-                "No API key provided. Pass it via the Authorization header.".to_string(),
-            ));
-        };
-        let key = key.strip_prefix("Bearer ").unwrap_or(key);
-
-        // Local agent identity is issued by Core, never asserted by the recipient.
-        // Scoped inference remains non-admin and non-forwarder: it cannot alter
-        // routing policy, reattribute spend, or invoke privileged control routes.
-        if key.starts_with("gws1.") {
-            let scope = auth
-                .api_keys
-                .iter()
-                .filter(|entry| entry.name == "local-core" && entry.trusted_forwarder)
-                .find_map(|entry| ryu_gw_credentials::InferenceScope::verify(key, &entry.key).ok());
-            let Some(scope) = scope else {
-                return StaticOutcome::Reject(GatewayError::Unauthorized(
-                    "Invalid scoped inference credential".to_owned(),
-                ));
-            };
-            if agent_id.as_deref().is_some_and(|id| id != scope.agent_id)
-                || user_id
-                    .as_deref()
-                    .is_some_and(|id| Some(id) != scope.user_id.as_deref())
-                || session_id
-                    .as_deref()
-                    .is_some_and(|id| Some(id) != scope.session_id.as_deref())
-            {
-                return StaticOutcome::Reject(GatewayError::Unauthorized(
-                    "Inference identity does not match the issued scope".to_owned(),
-                ));
-            }
-            let mut context = build_ctx(
-                false,
-                key.to_owned(),
-                None,
-                None,
-                None,
-                Some(format!("agent:{}", scope.agent_id)),
-                scope.user_id,
-                Some(scope.agent_id),
-                None,
-                false,
-                None,
-                None,
-                std::collections::HashMap::new(),
-                None,
-            );
-            context.session_id = scope.session_id;
-            return StaticOutcome::Matched(context);
-        }
-
-        if let Some(master) = &auth.master_key {
-            if ct_eq(key, master.as_str()) {
-                return StaticOutcome::Matched(build_ctx(
-                    true,
-                    key.to_string(),
-                    None,
-                    None,
-                    None,
-                    Some("master".to_string()),
-                    user_id.clone(),
-                    agent_id.clone(),
-                    None,
-                    false,
-                    None,
-                    None,
-                    std::collections::HashMap::new(),
-                    None,
-                ));
-            }
-        }
-
-        for cfg_key in &auth.api_keys {
-            // Constant-time compare (as the master-key branch above already does):
-            // a naive `==` short-circuits on the first differing byte, a timing
-            // oracle that leaks the key byte-by-byte to a network attacker (the
-            // default bind is 0.0.0.0). Keep first-match semantics — only the
-            // per-byte signal is removed.
-            if ct_eq(key, cfg_key.key.as_str()) {
-                if !cfg_key.allows_operation(ApiKeyOperation::Inference) {
-                    return StaticOutcome::Reject(GatewayError::Unauthorized(
-                        "API key is not authorized for inference relay".to_owned(),
-                    ));
-                }
-                // The budget identity must not be spoofable. Only honor the
-                // client-supplied x-ryu-user-id / x-ryu-agent-id headers when this
-                // key is an explicitly trusted forwarder (e.g. Ryu Core relaying a
-                // real end-user identity). Otherwise bind the budget identity to
-                // the authenticated key so a caller cannot evade or shift its quota
-                // by setting or rotating those headers.
-                let (eff_user_id, eff_agent_id) = if cfg_key.trusted_forwarder {
-                    (user_id.clone(), agent_id.clone())
-                } else {
-                    (Some(cfg_key.name.clone()), None)
-                };
-                return StaticOutcome::Matched(build_ctx(
-                    false,
-                    key.to_string(),
-                    cfg_key.org_id.clone(),
-                    cfg_key.team_id.clone(),
-                    cfg_key.project_id.clone(),
-                    Some(cfg_key.name.clone()),
-                    eff_user_id,
-                    eff_agent_id,
-                    Some(cfg_key.clone()),
-                    false,
-                    None,
-                    None,
-                    std::collections::HashMap::new(),
-                    None,
-                ));
-            }
-        }
-
-        // No static match. An `rgw_`-shaped bearer is a candidate for dynamic
-        // per-token org resolution (multi-tenant data plane) when the resolve
-        // cache is enabled. Everything else is a hard 401.
-        if key.starts_with("rgw_") && state.resolve_cache.is_some() {
-            StaticOutcome::TryDynamic(key.to_string())
-        } else {
-            StaticOutcome::Reject(GatewayError::Unauthorized("Invalid API key.".to_string()))
-        }
-    });
-
-    match outcome {
-        StaticOutcome::Matched(ctx) => Ok(ctx),
-        StaticOutcome::Reject(err) => Err(err),
-        StaticOutcome::TryDynamic(token) => {
-            // Safe: `TryDynamic` is only produced when `resolve_cache` is `Some`.
-            let cache = state
-                .resolve_cache
-                .as_ref()
-                .expect("TryDynamic implies resolve_cache is Some");
-            match cache.resolve_cached(&token).await {
-                Ok(resolved) => {
-                    // A resolved `rgw_` token: bill/attribute to its org. Do NOT
-                    // store the raw bearer in `api_key` (it is written verbatim
-                    // into every audit row) — use a redacted org-scoped label.
-                    let dynamic_agent_id = match (agent_id.as_deref(), agent_proof.as_deref()) {
-                        (Some(agent_id), Some(proof))
-                            if verify_agent_route_proof(raw_api_key, agent_id, proof) =>
-                        {
-                            Some(agent_id.to_owned())
-                        }
-                        (Some(_), Some(_)) | (None, Some(_)) => {
-                            return Err(GatewayError::Unauthorized(
-                                "invalid agent route proof".to_owned(),
-                            ));
-                        }
-                        (Some(_), None) | (None, None) => None,
-                    };
-                    let api_key_label = format!("rgw_org:{}", resolved.org_id);
-                    let mut context = build_ctx(
-                        false,
-                        api_key_label,
-                        Some(resolved.org_id.clone()),
-                        None,
-                        None,
-                        // `rgw_` bearer tokens are resolved by the control plane,
-                        // but the forwarded identity headers are still caller
-                        // input. Dynamic credentials have no trusted-forwarder
-                        // configuration, so bind the user/audit identity to the
-                        // resolved tenant. The agent identity is accepted only
-                        // when Core supplied the HMAC proof above.
-                        Some(format!("org:{}", resolved.org_id)),
-                        None,
-                        dynamic_agent_id,
-                        None,
-                        resolved.managed_inference,
-                        resolved.remaining_budget_micro_usd,
-                        resolved.unrestricted_budget_micro_usd,
-                        resolved.pool_budgets_micro_usd.clone(),
-                        Some(resolved.policy.clone()),
-                    );
-                    // `api_key` intentionally stays an org label for audit and
-                    // org-level accounting. Job ownership must still distinguish
-                    // two valid bearers in the same organization.
-                    context.owner_binding = ryu_gw_credentials::fingerprint(&token);
-                    Ok(context)
-                }
-                // An `rgw_`-shaped token that does not resolve (invalid / revoked /
-                // control plane unreachable) is a HARD 401 — never fall open into
-                // anonymous.
-                Err(crate::policy::ResolveErr::Busy) => Err(GatewayError::RateLimited),
-                Err(crate::policy::ResolveErr::Unresolved) => Err(GatewayError::Unauthorized(
-                    "Invalid or revoked gateway token.".to_string(),
-                )),
-            }
-        }
-    }
-}
-
-// ─── Smart model routing ─────────────────────────────────────────────────────
-
-/// Run smart routing for a chat request, rewriting `body["model"]` in place when
-/// the configured router picks a different target. Returns `true` if the model
-/// was rewritten (so the caller can tell `pre_process` to skip eval/A-B routing
-/// and honor the smart choice).
-///
-/// No-ops (returns `false`) when smart routing is inactive, when a per-agent
-/// chat slot override is present (explicit pinning wins over routing), or when
-/// the router keeps the original model. Provider failures preserve the original
-/// model; security and accounting denials propagate before further dispatch.
-async fn apply_smart_routing(
-    state: &Arc<AppState>,
-    ctx: &RequestContext,
-    body: &mut Value,
-) -> Result<bool, GatewayError> {
-    // A pinned per-agent chat slot is an explicit user choice — never override it.
-    if ctx.slot_provider.is_some() || ctx.slot_model.is_some() {
-        if let Some(object) = body.as_object_mut() {
-            object.remove("ryu_smart_route");
-        }
-        return Ok(false);
-    }
-
-    // Per-agent override (the "both" config scope): Core injects the agent's own
-    // `SmartRoutingConfig` as the private `ryu_smart_route` body field. When
-    // present it replaces the global router for this request; each distinct
-    // config gets one cached ephemeral `SmartRouter` (keyed by a hash of its JSON)
-    // so its rule-embedding + per-session caches persist across the agent's turns.
-    // The private field is always stripped before the body reaches the provider.
-    let per_agent = per_request_smart_router(state, ctx, body)?;
-    // Clone the global smart router Arc out of the hot-swap lock so it survives the
-    // router `.await` below (PUT /v1/config can swap it concurrently); a per-agent
-    // override still wins over the global default.
-    let global = state.smart_router();
-    let router: &dyn crate::router::smart::SmartRouterBackend = match per_agent.as_deref() {
-        Some(r) => r,
-        None => global.as_ref(),
-    };
-
-    if !router.is_active() {
-        return Ok(false);
-    }
-
-    let inference =
-        auxiliary::GovernedInference::new(Arc::clone(state), ctx.clone(), "smart-routing");
-    let chosen = router
-        .resolve(&body["messages"], ctx.session_id.as_deref(), &inference)
-        .await?;
-
-    let Some(model) = chosen else {
-        return Ok(false);
-    };
-
-    let current = body["model"].as_str().unwrap_or("");
-    if model == current {
-        return Ok(false);
-    }
-
-    debug!(
-        request_id = %ctx.request_id,
-        from = current,
-        to = %model,
-        "smart routing: re-routed request to selected model"
-    );
-    body["model"] = Value::String(model);
-    Ok(true)
-}
-
-/// Extract and strip the private `ryu_smart_route` per-agent override from the
-/// request body, returning a cached ephemeral [`SmartRouter`] for it.
-///
-/// The field is ALWAYS removed from `body` (so it never reaches a provider), even
-/// for callers without Core's trusted-forwarder authority. Authorized overrides
-/// are size-limited and cached in a bounded LRU, scoped to the effective caller policy.
-fn per_request_smart_router(
-    state: &AppState,
-    ctx: &RequestContext,
-    body: &mut Value,
-) -> Result<Option<Arc<crate::router::smart::SmartRouter>>, GatewayError> {
-    let Some(raw) = body
-        .as_object_mut()
-        .and_then(|body| body.remove("ryu_smart_route"))
-    else {
-        return Ok(None);
-    };
-    // This internal configuration channel belongs to Core, never ordinary inference callers.
-    if !ctx.is_master_key
-        && !ctx
-            .key_config
-            .as_ref()
-            .is_some_and(|key| key.trusted_forwarder)
-    {
-        return Ok(None);
-    }
-    let json =
-        serde_json::to_vec(&raw).map_err(|error| GatewayError::BadRequest(error.to_string()))?;
-    if json.len() > 65_536 {
-        return Err(GatewayError::BadRequest(
-            "routing override exceeds 64 KiB".into(),
-        ));
-    }
-    let cfg: crate::config::SmartRoutingConfig =
-        serde_json::from_value(raw).map_err(|error| GatewayError::BadRequest(error.to_string()))?;
-    auxiliary::validate_config(&cfg)?;
-    if !cfg.is_active() {
-        return Ok(Some(Arc::new(crate::router::smart::SmartRouter::new(cfg))));
-    }
-    use sha2::Digest;
-    let key = format!(
-        "{}:{:x}",
-        auxiliary::scope(state, ctx),
-        Sha256::digest(&json)
-    );
-    Ok(Some(
-        state.per_agent_routers.get_or_insert_with(key, || {
-            Arc::new(crate::router::smart::SmartRouter::new(cfg))
-        }),
-    ))
-}
-
-// ─── Anthropic betas (the private `ryu_anthropic_beta` body field) ────────────
-
-/// The private body field carrying the caller's `anthropic-beta` opt-ins as one
-/// comma-separated string, from the chat-completions intake to the Anthropic
-/// provider. Same convention as `ryu_smart_route` above.
-///
-/// Named once, here, because two modules must agree on the string: `api::chat`
-/// WRITES it from the request header and [`strip_anthropic_beta_for`] REMOVES it
-/// before any other provider sees it. A literal in each place could drift, and
-/// the failure mode of drift is a 400 from a strict OpenAI endpoint.
-pub(crate) const ANTHROPIC_BETA_FIELD: &str = "ryu_anthropic_beta";
-
-/// Whether `provider` speaks the Anthropic Messages dialect, and is therefore an
-/// intended reader of [`ANTHROPIC_BETA_FIELD`] — and, either way, one that builds
-/// its own whitelist payload rather than forwarding the body verbatim.
-///
-/// `bedrock` is neither a typo nor optional: it is `AnthropicProvider` re-exposed
-/// under its own registry id (see [`crate::providers::ProviderRegistry::new`]), so
-/// `Provider::name` reports `"bedrock"` while the wire format is still Anthropic
-/// Messages. Anchored to the shared const so renaming that id cannot silently
-/// start stripping the betas off the Bedrock path.
-fn speaks_anthropic_dialect(provider: &str) -> bool {
-    // `AnthropicProvider::name()` is the hardcoded "anthropic" (no id const for
-    // the built-in slots); the credit-pool alias does have one.
-    provider == "anthropic" || provider == crate::config::BEDROCK_PROVIDER_ID
-}
-
-/// Strip [`ANTHROPIC_BETA_FIELD`] from the outgoing body unless `provider` is the
-/// one that reads it.
-///
-/// Allowlist direction on purpose: every non-Anthropic provider clones the request
-/// body VERBATIM into its payload (`openai.rs`, `openrouter.rs`, `local.rs`, …)
-/// and an unknown top-level field 400s a strict OpenAI endpoint, so a provider id
-/// nobody has thought about yet is safe by default.
-///
-/// Called per fallback ATTEMPT, not hoisted next to [`apply_prompt_cache`]:
-/// `AnthropicProvider` takes the body by reference and builds its own whitelist
-/// payload, so the field is still in *ours* after an Anthropic attempt — a
-/// fallback onto `openai` for attempt 2 has to re-decide. Do not lift it out of
-/// the loop.
-fn strip_anthropic_beta_for(body: &mut Value, provider: &str) {
-    if speaks_anthropic_dialect(provider) {
-        return;
-    }
-    if let Some(obj) = body.as_object_mut() {
-        obj.remove(ANTHROPIC_BETA_FIELD);
-    }
-}
-
-/// Give OpenRouter's own generation and analytics surfaces a stable, opaque Ryu
-/// identity for Gateway-routed ACP traffic. The Gateway still enforces the cap
-/// from the inline `usage.cost`; this field exists so an operator can reconcile
-/// the same generation later through OpenRouter's `/generation` endpoint.
-///
-/// Agent identity wins because the per-agent budget is the product surface being
-/// measured. A user-only request still gets a stable user tag. Native Claude or
-/// Codex subscription passthrough never reaches this helper and therefore is
-/// intentionally not represented as OpenRouter spend.
-fn stamp_openrouter_identity(body: &mut Value, provider: &str, ctx: &RequestContext) {
-    if provider != "openrouter" {
-        return;
-    }
-    let identity = ctx
-        .agent_id
-        .as_deref()
-        .map(|id| format!("ryu-agent:{id}"))
-        .or_else(|| ctx.user_id.as_deref().map(|id| format!("ryu-user:{id}")));
-    let Some(identity) = identity else {
-        return;
-    };
-    if let Some(obj) = body.as_object_mut() {
-        obj.insert("user".to_string(), Value::String(identity));
-    }
-}
-
-// ─── Pre-process (shared by run + run_stream) ─────────────────────────────────
-
 /// Shared pre-processing: rate-limit + burst check + inbound-firewall + routing.
 /// Returns the routing decision and exact-match cache key.
 ///
@@ -995,7 +951,19 @@ async fn pre_process(
     state: &Arc<AppState>,
     ctx: &RequestContext,
     body: &mut Value,
-) -> Result<(RouteDecision, String, Option<PolicyAlert>), GatewayError> {
+) -> Result<
+    (
+        RouteDecision,
+        String,
+        Option<PolicyAlert>,
+        Option<crate::provider_pools::SelectedPoolRoute>,
+    ),
+    GatewayError,
+> {
+    zero_data_retention::enforce_requested_zdr(state, ctx, body)?;
+    // Server tools and non-caching betas are refused on the fleet before any
+    // provider is chosen, so no fallback can carry them elsewhere.
+    upstream_features::enforce(state.custody, body)?;
     // Ok-path policy alert accumulated during pre-processing (currently a
     // firewall warn-and-continue match). Merged with any budget alert by the
     // caller and stamped onto the response header via the router's map_response.
@@ -1011,7 +979,18 @@ async fn pre_process(
     // freely; the only cost is one extra text extraction on the rate-limited reject
     // path, which is immaterial and not a behavior change.
     let prompt_text = extract_text_for_scanning(body);
+    let definition_text = extract_definition_text(body);
+    // Every other provider-bound string (a top-level `prompt`, non-text content
+    // parts, escaped tool arguments). Detection-only: see `outbound_text`.
+    // The chat slot model header replaces `model` at the Route stage, after
+    // this screen, so it is screened here like `model` itself.
+    let residual_text =
+        outbound_text::chat_residual_text(body).with_control_token(ctx.slot_model.as_deref());
     let scanner = state.resolved_scanner(ctx);
+    state
+        .evaluator_registry()
+        .validate_inline_bindings(&scanner.config().evaluators)
+        .map_err(GatewayError::BadRequest)?;
     let requested_model = body["model"].as_str().unwrap_or("gpt-4o").to_string();
 
     // The routing decision, produced by the pinned `Route` stage. `StageOrder`
@@ -1029,25 +1008,56 @@ async fn pre_process(
         match stage {
             // Steps 1 + 2: per-key request rate limit + burst / bot detection.
             PipelineStage::RateLimit => {
-                if !state
-                    .rate_limiter
-                    .check_request_for_key(&ctx.api_key, ctx.key_config.as_ref())
-                {
-                    warn!(key_id = %crate::audit::credential_log_id(&ctx.api_key), request_id = %ctx.request_id, "rate limit exceeded");
+                if let Err(error) = admit_request(state, ctx) {
+                    warn!(key_id = %crate::audit::credential_log_id(&ctx.api_key), request_id = %ctx.request_id, policy = rate_limit_policy_name(&error), "rate limit exceeded");
                     state.metrics.inc_rate_limited();
-                    return Err(GatewayError::RateLimited);
-                }
-                if !state.rate_limiter.check_burst(&ctx.api_key) {
-                    warn!(key_id = %crate::audit::credential_log_id(&ctx.api_key), request_id = %ctx.request_id, "burst rate exceeded (bot detection)");
-                    state.metrics.inc_rate_limited();
-                    return Err(GatewayError::RateLimited);
+                    return Err(error);
                 }
             }
 
             // Step 3: inbound regex firewall on the per-request RESOLVED scanner
             // (node → org → agent).
             PipelineStage::Firewall => {
-                if let Some(violation) = scanner.scan_inbound(&prompt_text) {
+                let mut sanitized = false;
+                if let Some(violation) = scanner
+                    .scan_inbound(&prompt_text)
+                    .or_else(|| scan_definitions_inbound(scanner.as_ref(), &definition_text))
+                {
+                    // Violation events cover blocks and redactions only (spec
+                    // 03.4.3); a warn-tier match is on the feed, not the ledger.
+                    let (traffic_action, event_action) = match scanner.policy() {
+                        FirewallPolicy::Block => (
+                            crate::traffic::VerdictAction::Block,
+                            Some(crate::audit::EnforcementAction::Blocked),
+                        ),
+                        FirewallPolicy::Sanitize => (
+                            crate::traffic::VerdictAction::Sanitize,
+                            Some(crate::audit::EnforcementAction::Redacted),
+                        ),
+                        FirewallPolicy::WarnAndContinue => {
+                            (crate::traffic::VerdictAction::Warn, None)
+                        }
+                    };
+                    let layers = state.firewall_layers(ctx);
+                    let event_id = event_action.and_then(|event_action| {
+                        crate::violations::record_firewall_match(
+                            state,
+                            ctx,
+                            &violation,
+                            &layers,
+                            event_action,
+                        )
+                    });
+                    state.traffic.note_verdict(
+                        &ctx.request_id,
+                        crate::traffic::firewall_verdict(
+                            &violation.pattern_name,
+                            &violation.kind,
+                            &layers,
+                            traffic_action,
+                        )
+                        .with_event(event_id),
+                    );
                     match scanner.policy() {
                         FirewallPolicy::Block => {
                             state.metrics.inc_firewall_blocked();
@@ -1063,9 +1073,15 @@ async fn pre_process(
                             warn!(
                                 request_id = %ctx.request_id,
                                 pattern = %violation.pattern_name,
-                                "firewall: sanitized inbound content"
+                                "firewall: inbound violation under Sanitize policy"
                             );
-                            sanitize_messages(body, scanner.as_ref());
+                            sanitized = sanitize_inbound_or_block(
+                                state,
+                                ctx,
+                                body,
+                                scanner.as_ref(),
+                                "firewall",
+                            )?;
                         }
                         FirewallPolicy::WarnAndContinue => {
                             warn!(
@@ -1082,6 +1098,33 @@ async fn pre_process(
                         }
                     }
                 }
+                // Screen the residual of the body as Sanitize left it, so the
+                // decoded form of a redacted leaf is redacted too.
+                let sanitized_residual = sanitized.then(|| {
+                    outbound_text::chat_residual_text(body)
+                        .with_control_token(ctx.slot_model.as_deref())
+                });
+                let residual_alert = outbound_text::screen_residual_inbound(
+                    state,
+                    ctx,
+                    scanner.as_ref(),
+                    sanitized_residual.as_ref().unwrap_or(&residual_text),
+                )?;
+                pending_alert = merge_alert(pending_alert, residual_alert);
+                // The hazard screener, after the regex floor and over the bytes
+                // Sanitize left. It keys off custody and tier only, never the
+                // tenant scanner's switches (`crate::screening`).
+                crate::screening::admit::screen_chat_with(
+                    state,
+                    ctx,
+                    body,
+                    sanitized_residual
+                        .as_ref()
+                        .unwrap_or(&residual_text)
+                        .screened_text(),
+                    crate::screening::admit::Surface::Chat,
+                )
+                .await?;
             }
 
             // Step 3a: LLM traffic inspector (opt-in, inbound-only). Calls a cheap
@@ -1124,9 +1167,15 @@ async fn pre_process(
                                 warn!(
                                     request_id = %ctx.request_id,
                                     categories = ?verdict.categories,
-                                    "inspector: sanitizing flagged inbound content"
+                                    "inspector: flagged inbound content under Sanitize policy"
                                 );
-                                sanitize_messages(body, scanner.as_ref());
+                                sanitize_inbound_or_block(
+                                    state,
+                                    ctx,
+                                    body,
+                                    scanner.as_ref(),
+                                    "inspector",
+                                )?;
                             }
                             FirewallPolicy::WarnAndContinue => {
                                 warn!(
@@ -1183,9 +1232,23 @@ async fn pre_process(
                     // guardrail. Uses the same per-request resolved scanner (its
                     // custom patterns participate).
                     if policy.requires_firewall() {
-                        if let Some(violation) =
-                            scanner.scan_locked_guardrails(&prompt_text, &policy.locked_guardrails)
-                        {
+                        let violation = match scanner
+                            .scan_locked_guardrails(&prompt_text, &policy.locked_guardrails)
+                            .or_else(|| {
+                                scanner.scan_locked_guardrails(
+                                    &definition_text,
+                                    &definition_dlp_guardrails(&policy.locked_guardrails),
+                                )
+                            }) {
+                            Some(violation) => Some(violation),
+                            None => outbound_text::residual_locked_violation(
+                                state,
+                                scanner.as_ref(),
+                                &policy.locked_guardrails,
+                                &residual_text,
+                            )?,
+                        };
+                        if let Some(violation) = violation {
                             warn!(
                                 request_id = %ctx.request_id,
                                 pattern = %violation.pattern_name,
@@ -1223,18 +1286,33 @@ async fn pre_process(
                         let category_names: Vec<&str> =
                             redacted_categories.iter().map(|c| c.as_str()).collect();
                         state.metrics.inc_firewall_blocked();
-                        state.log_audit(crate::audit::AuditRecord {
+                        let verdict = category_names.iter().fold(
+                            crate::traffic::TrafficVerdict::new(
+                                crate::traffic::DecidedBy::Node,
+                                crate::traffic::VerdictAction::Sanitize,
+                            ),
+                            |verdict, category| verdict.with_detector(category),
+                        );
+                        let record = crate::audit::AuditRecord {
                             request_id: ctx.request_id.clone(),
                             api_key: ctx.api_key.clone(),
                             user_name: ctx.user_name.clone(),
                             org_id: ctx.org_id.clone(),
                             team_id: ctx.team_id.clone(),
+                            team_ids: ctx.audit_team_ids(),
+                            key_id: ctx.key_id(),
                             project_id: ctx.project_id.clone(),
                             provider: "companion-dlp".to_string(),
                             model: body["model"].as_str().unwrap_or("unknown").to_string(),
                             input_tokens: 0,
                             output_tokens: 0,
+                            cache_read_tokens: None,
+                            cache_write_tokens: None,
                             cache_hit: false,
+                            prompt_cache_outcome: None,
+                            prompt_cache_read_tokens: None,
+                            prompt_cache_write_tokens: None,
+                            cache_write_1h_tokens: None,
                             latency_ms: 0,
                             eval_score: None,
                             error: Some(format!(
@@ -1246,6 +1324,7 @@ async fn pre_process(
                             user_id: ctx.user_id.clone(),
                             agent_id: ctx.agent_id.clone(),
                             feature: ctx.feature.clone(),
+                            purpose: ctx.purpose.clone(),
                             managed_inference: ctx.managed_inference,
                             provider_cost_micro_usd: None,
                             event_type: crate::audit::EventType::ModelCall,
@@ -1254,7 +1333,11 @@ async fn pre_process(
                             duration_ms: None,
                             exit_code: None,
                             widget_instance_id: None,
-                        });
+                        };
+                        state.log_audit_with(
+                            record,
+                            crate::traffic::TrafficOutcome::verdict(verdict),
+                        );
                     }
                 }
             }
@@ -1300,25 +1383,48 @@ async fn pre_process(
                         None
                     }
                 };
-                decision = Some(if ctx.slot_provider.is_some() || slot_model.is_some() {
-                    state.router.route_modality_with_slot(
-                        &crate::config::Modality::Chat,
-                        &requested_model,
-                        ctx.slot_provider.as_ref(),
-                        slot_model,
-                    )
-                } else if smart_routed {
-                    // The classifier already chose this model — route it straight
-                    // to its provider and skip eval/A-B routing, which would
-                    // otherwise reassign the provider and break the smart-routed
-                    // model (#473 smart routing).
-                    state.router.route(&requested_model)
-                } else {
-                    state
-                        .router
-                        .eval_route(&requested_model, |p| state.evals.provider_score(p.as_str()))
-                        .unwrap_or_else(|| state.router.route(&requested_model))
-                });
+                decision = Some(
+                    if let Some((slot, upstream)) = ctx.own_supply_route.as_ref() {
+                        // A free-credit own-supply attempt: the plan already chose
+                        // the slot and the upstream id; the body still names the
+                        // id the user picked (authorized just above).
+                        RouteDecision {
+                            provider: slot.clone(),
+                            model: upstream.clone(),
+                        }
+                    } else if ctx.slot_provider.is_some() || slot_model.is_some() {
+                        provider_snapshot(&state, &ctx)
+                            .router
+                            .route_modality_with_slot(
+                                &crate::config::Modality::Chat,
+                                &requested_model,
+                                ctx.slot_provider.as_ref(),
+                                slot_model,
+                            )
+                    } else if smart_routed {
+                        // The classifier already chose this model — route it straight
+                        // to its provider and skip eval/A-B routing, which would
+                        // otherwise reassign the provider and break the smart-routed
+                        // model (#473 smart routing).
+                        provider_snapshot(&state, &ctx)
+                            .router
+                            .route(&requested_model)
+                    } else {
+                        provider_snapshot(&state, &ctx)
+                            .router
+                            .eval_route(&requested_model, |p| {
+                                state.evals.provider_score(p.as_str())
+                            })
+                            .unwrap_or_else(|| {
+                                provider_snapshot(&state, &ctx)
+                                    .router
+                                    .route(&requested_model)
+                            })
+                    },
+                );
+                if let Some(decision) = decision.as_mut() {
+                    canonicalize_sdk_decision(state, ctx, decision)?;
+                }
             }
 
             // Ordering anchor only. Auditing needs the provider response, so the
@@ -1330,578 +1436,141 @@ async fn pre_process(
         }
     }
 
+    // Keep the provider prompt-cache prefix stable. A Sanitize stage above only
+    // redacts on a turn it flags, but the flag depends on the whole request (the
+    // newest message, an LLM inspector verdict), while the redaction rewrites
+    // every turn and the tool definitions. Without this pass the same history
+    // and tools egress redacted on one turn and raw on the next, so the
+    // provider's cached prefix (tools → system → earlier messages) is
+    // invalidated. Redaction is a pure per-string transform and idempotent, so
+    // applying it whenever a Sanitize posture is configured makes each string's
+    // egress form depend on config alone. A turn a stage already sanitized is
+    // unchanged here.
+    if sanitize_posture_configured(state, scanner.as_ref())
+        && sanitize_messages(body, scanner.as_ref())
+    {
+        debug!(
+            request_id = %ctx.request_id,
+            "sanitize: redacted unflagged content to keep the cached prompt prefix stable"
+        );
+    }
+
     // `Route` is pinned present in every resolved `StageOrder`, so the loop always
     // produced a decision.
-    let decision = decision.expect("Route stage is pinned present in every resolved StageOrder");
+    let mut decision =
+        decision.expect("Route stage is pinned present in every resolved StageOrder");
+    let pool_route = resolve_provider_pool(state, ctx, body, &mut decision).await?;
+    canonicalize_sdk_decision(state, ctx, &mut decision)?;
 
     // Build exact-match cache key from the (possibly sanitized) body.
-    let cache_key = Cache::make_key(ctx.org_id.as_deref(), &decision.model, &body["messages"]);
+    let tenant = cache_tenant(ctx);
+    let cache_key = Cache::make_key(
+        &provider_cache_scope(
+            state,
+            ctx,
+            tenant.as_deref(),
+            decision.provider.as_str(),
+            &decision.model,
+        ),
+        &body["messages"],
+        body.get("tools"),
+        ctx.capability_hints.as_deref(),
+    );
 
-    Ok((decision, cache_key, pending_alert))
+    Ok((decision, cache_key, pending_alert, pool_route))
 }
 
-/// Merge two optional policy alerts, keeping the higher-tier one. On a tie the
-/// FIRST argument wins, so callers pass the firewall alert first to make it beat
-/// a same-tier budget alert deterministically (one response, one header).
-fn merge_alert(a: Option<PolicyAlert>, b: Option<PolicyAlert>) -> Option<PolicyAlert> {
-    match (a, b) {
-        (Some(a), Some(b)) => {
-            if b.alert_tier > a.alert_tier {
-                Some(b)
-            } else {
-                Some(a)
-            }
-        }
-        (Some(a), None) => Some(a),
-        (None, b) => b,
+// Upstream error strings may echo prompts or credentials. Logs retain only
+// governed failure metadata; the response path applies its own policy.
+fn log_provider_failure(provider: &str, error: &GatewayError, context: &'static str) {
+    warn!(
+        provider,
+        error_kind = provider_error_log_kind(error),
+        context,
+        "upstream provider request failed"
+    );
+}
+
+fn provider_error_log_kind(error: &GatewayError) -> &'static str {
+    match error {
+        GatewayError::ProviderRateLimited { .. } => "rate_limited",
+        GatewayError::ProviderPaymentRequired { .. } => "payment_required",
+        GatewayError::ProviderTransport(_) => "transport",
+        GatewayError::ProviderDeliveryUncertain(_) => "delivery_uncertain",
+        GatewayError::ProviderError(_) => "provider_error",
+        GatewayError::ProviderRejected { .. } => "request_rejected",
+        _ => "request_failure",
     }
 }
 
-// ─── Unified-evaluator inline guardrails (P3) ────────────────────────────────
-//
-// Bridge the resolved per-agent policy's enabled `EvaluatorBinding`s into the
-// live pipeline as real guardrails. Input-target detectors (code_injection,
-// prompt_injection) run inbound in `pre_process`; Output-target detectors
-// (pii_leakage, toxicity, bias) run on the response (non-stream `run` +
-// `apply_outbound_firewall_stream`). Deterministic detectors run via the
-// `FirewallScanner`; LLM-judge detectors reuse the fail-open `InspectorClient`
-// with the evaluator's rubric. All of this REUSES the existing firewall
-// block/sanitize/warn machinery — no new enforcement path.
-
-/// The inline action for a binding: the binding's `inline_action` wins; otherwise
-/// the catalog evaluator's default `inline.action`; otherwise warn-and-continue.
-fn inline_action_for(
-    binding: &crate::evaluators::EvaluatorBinding,
-    ev: &Evaluator,
-) -> FirewallPolicy {
-    binding
-        .inline_action
-        .clone()
-        .or_else(|| ev.inline.as_ref().map(|c| c.action.clone()))
-        .unwrap_or(FirewallPolicy::WarnAndContinue)
-}
-
-/// The result of evaluating one inline binding. Distinguishes a legitimate
-/// `(flagged, reason)` verdict — which flows through the binding's action map
-/// ([`inline_outcome`]) — from a fail-closed short-circuit that must BLOCK the
-/// turn regardless of the configured action. The latter is the wasm-policy
-/// fail-direction control (threat model item F): a security plugin that
-/// traps/OOMs/times-out must never be silently skipped (old `None`) nor merely
-/// warned (if bound to `Warn`); it blocks.
-enum InlineFlag {
-    Denied(GatewayError),
-    /// The impl is not enforceable this phase, or this binding is skipped — an
-    /// honest, logged no-op (formerly `None`).
-    Skip,
-    /// The evaluator ran: `(flagged, reason)` feeds the normal action map.
-    Ran {
-        flagged: bool,
-        reason: String,
-    },
-    /// A security policy failed closed (trap / OOM / timeout / invalid output with
-    /// `fail_open = false`): block the turn directly, bypassing the action map.
-    ForceBlock {
-        reason: String,
-    },
-}
-
-/// Evaluate ONE enabled inline binding against `text`. Returns [`InlineFlag`]:
-/// `Ran` when it produced a verdict; `Skip` when the impl is not enforceable this
-/// phase (a `Code` evaluator — P4; a `Builtin`; or an empty-rubric Custom
-/// template) — an honest, logged no-op, never a faked verdict; `ForceBlock` when a
-/// fail-closed wasm policy must short-circuit to a block. Fail-open on the judge is
-/// handled inside [`InspectorClient::inspect_rubric`].
-async fn flag_inline_binding(
-    ev: &Evaluator,
-    scanner: &FirewallScanner,
-    text: &str,
-    state: &Arc<AppState>,
-    ctx: &RequestContext,
-) -> InlineFlag {
-    match &ev.impl_ {
-        EvaluatorImpl::Regex { .. } | EvaluatorImpl::Heuristic => {
-            let Some(kind) = inline_detection_kind(&ev.id) else {
-                return InlineFlag::Skip;
-            };
-            match scanner.scan_kind(text, kind) {
-                Some(m) => InlineFlag::Ran {
-                    flagged: true,
-                    reason: format!("{}:{}", m.kind.as_str(), m.pattern_name),
-                },
-                None => InlineFlag::Ran {
-                    flagged: false,
-                    reason: String::new(),
-                },
-            }
-        }
-        EvaluatorImpl::LlmJudge { rubric } => {
-            if rubric.trim().is_empty() {
-                debug!(evaluator = %ev.id, "inline evaluator: empty rubric — no-op");
-                return InlineFlag::Skip;
-            }
-            let ins = &scanner.config().inspector;
-            let timeout = if ins.timeout_ms == 0 {
-                1500
-            } else {
-                ins.timeout_ms
-            };
-            let inference = auxiliary::GovernedInference::new(
-                Arc::clone(state),
-                ctx.clone(),
-                "inline-evaluator",
-            );
-            let verdict = match InspectorClient::inspect_rubric(
-                text, rubric, &ins.model, timeout, &inference,
-            )
-            .await
-            {
-                Ok(verdict) => verdict,
-                Err(error) => return InlineFlag::Denied(error),
-            };
-            // Deterministic floor: when the judge did NOT answer (no provider /
-            // timeout / unparseable — the common local-only deploy), consult the
-            // lexical seed so obvious slurs/threats/blanket-generalizations are still
-            // caught instead of silently passing under an "enforced" detector. The
-            // seed runs on the FULL untruncated `text`, also covering the judge's
-            // 4000-char head-only truncation on the fail-open path. When the judge
-            // DID answer we trust its context (the `backstop_flag` seam discards the
-            // seed), avoiding the condemned/quoted-stereotype and casual-profanity
-            // false positives a bare seed would hard-flag.
-            let (seed_hit, seed_reason) = if verdict.available {
-                (false, String::new())
-            } else {
-                match llm_judge_backstop_kind(&ev.id).and_then(|k| scanner.scan_kind(text, k)) {
-                    Some(m) => (
-                        true,
-                        format!("seed-backstop {}:{}", m.kind.as_str(), m.pattern_name),
-                    ),
-                    None => (false, String::new()),
-                }
-            };
-            let flagged = backstop_flag(verdict.available, verdict.flagged, seed_hit);
-            let reason = if seed_hit {
-                seed_reason
-            } else {
-                verdict.reason
-            };
-            InlineFlag::Ran { flagged, reason }
-        }
-        EvaluatorImpl::Code { .. } => {
-            debug!(evaluator = %ev.id, "inline evaluator: code impl deferred to P4 — no-op");
-            InlineFlag::Skip
-        }
-        EvaluatorImpl::Builtin { detector } => {
-            debug!(evaluator = %ev.id, %detector, "inline evaluator: builtin impl not wired — no-op");
-            InlineFlag::Skip
-        }
-        EvaluatorImpl::Wasm {
-            module_base64,
-            fail_open,
-        } => flag_wasm_binding(ev, module_base64, *fail_open, text, state).await,
-    }
-}
-
-/// Run an untrusted WASM policy plugin over `text` and translate its verdict into
-/// an [`InlineFlag`]. The whole point of this arm is the fail-direction contract:
-///   * guest `allow`  → `Ran { flagged: false }` (proceed);
-///   * guest `deny`   → `Ran { flagged: true, reason }` (flows through the binding's
-///     action map, so an operator may bind a deny-capable policy as Block / Sanitize
-///     / Warn);
-///   * sandbox `Fail` (trap / fuel / epoch / OOM / invalid output / bad module /
-///     host unavailable) → if `fail_open` then `Ran { flagged: false }` (declared,
-///     logged) else `ForceBlock` (default CLOSED — never a silent allow).
-async fn flag_wasm_binding(
-    ev: &Evaluator,
-    module_base64: &str,
-    fail_open: bool,
-    text: &str,
-    state: &AppState,
-) -> InlineFlag {
-    use base64::Engine as _;
-
-    // Fail (fail-closed unless the plugin declared open) helper.
-    let fail = |reason: String| -> InlineFlag {
-        if fail_open {
-            warn!(evaluator = %ev.id, %reason, "wasm policy failed OPEN (declared) — allowing");
-            InlineFlag::Ran {
-                flagged: false,
-                reason: String::new(),
-            }
-        } else {
-            warn!(evaluator = %ev.id, %reason, "wasm policy failed CLOSED — blocking");
-            InlineFlag::ForceBlock {
-                reason: format!("wasm policy '{}' failed closed: {reason}", ev.id),
-            }
-        }
-    };
-
-    // Cap the base64 payload before decoding (bounds the decode work itself).
-    if module_base64.len() > crate::wasm_policy::MAX_MODULE_B64_LEN {
-        return fail("module payload too large".to_string());
-    }
-    let bytes = match base64::engine::general_purpose::STANDARD.decode(module_base64.as_bytes()) {
-        Ok(b) => b,
-        Err(e) => return fail(format!("invalid base64 module: {e}")),
-    };
-    let Some(host) = state.wasm_host() else {
-        return fail("wasm policy host unavailable".to_string());
-    };
-    match host.evaluate(&bytes, text).await {
-        crate::wasm_policy::WasmVerdict::Allow => InlineFlag::Ran {
-            flagged: false,
-            reason: String::new(),
-        },
-        crate::wasm_policy::WasmVerdict::Deny { reason } => InlineFlag::Ran {
-            flagged: true,
-            reason,
-        },
-        crate::wasm_policy::WasmVerdict::Fail { reason } => fail(reason),
-    }
-}
-
-/// Audit an inline-evaluator enforcement event (block/sanitize). Mirrors
-/// [`audit_inspector_block`] so evaluator guardrails are as observable as the
-/// inspector's, using the same audit fields.
-fn audit_inline_evaluator(
-    state: &AppState,
-    ctx: &RequestContext,
-    model: &str,
-    evaluator_id: &str,
-    enforcement: &str,
-    reason: &str,
-) {
-    if !state.audit.is_enabled() {
-        return;
-    }
-    state.log_audit(AuditRecord {
-        request_id: ctx.request_id.clone(),
-        api_key: ctx.api_key.clone(),
-        user_name: ctx.user_name.clone(),
-        org_id: ctx.org_id.clone(),
-        team_id: ctx.team_id.clone(),
-        project_id: ctx.project_id.clone(),
-        provider: "evaluator".to_string(),
-        model: model.to_string(),
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_hit: false,
-        latency_ms: 0,
-        eval_score: None,
-        error: Some(format!(
-            "inline evaluator '{evaluator_id}' {enforcement}: {reason}"
-        )),
-        skill_ids: ctx.skill_ids.clone(),
-        session_id: ctx.session_id.clone(),
-        user_id: ctx.user_id.clone(),
-        agent_id: ctx.agent_id.clone(),
-        feature: ctx.feature.clone(),
-        managed_inference: ctx.managed_inference,
-        provider_cost_micro_usd: None,
-        event_type: crate::audit::EventType::ModelCall,
-        backend: Some("inline-evaluator".to_string()),
-        command: None,
-        duration_ms: None,
-        exit_code: None,
-        widget_instance_id: None,
-    });
-}
-
-/// Run the resolved policy's **input-target** inline evaluators over the inbound
-/// prompt. Blocks (403) on a `Block` action, sanitizes the messages in place on
-/// `Sanitize`, and returns a warn-tier [`PolicyAlert`] on `WarnAndContinue`. The
-/// common empty-policy path allocates nothing (no registry build).
-async fn apply_inline_input_evaluators(
-    state: &Arc<AppState>,
-    ctx: &RequestContext,
-    body: &mut Value,
-    scanner: &FirewallScanner,
-    prompt_text: &str,
-) -> Result<Option<PolicyAlert>, GatewayError> {
-    if !scanner.config().evaluators.iter().any(|b| b.enabled) {
-        return Ok(None);
-    }
-    let registry = EvaluatorRegistry::from_config(&state.config);
-    let bindings: Vec<crate::evaluators::EvaluatorBinding> = scanner
-        .config()
-        .evaluators
-        .iter()
-        .filter(|b| b.enabled)
-        .cloned()
-        .collect();
-    let mut pending: Option<PolicyAlert> = None;
-
-    for binding in &bindings {
-        let Some(ev) = registry.get(&binding.id) else {
-            continue;
-        };
-        if !ev.capabilities.inline || ev.target != EvaluatorTarget::Input {
-            continue;
-        }
-        let (flagged, reason) =
-            match flag_inline_binding(ev, scanner, prompt_text, state, ctx).await {
-                InlineFlag::Denied(error) => return Err(error),
-                InlineFlag::Skip => continue,
-                InlineFlag::Ran { flagged, reason } => (flagged, reason),
-                InlineFlag::ForceBlock { reason } => {
-                    // Fail-closed short-circuit: block regardless of the binding's
-                    // configured action (the wasm-policy fail-direction control).
-                    let model = body["model"].as_str().unwrap_or("unknown");
-                    state.metrics.inc_firewall_blocked();
-                    audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
-                    warn!(
-                        request_id = %ctx.request_id,
-                        evaluator = %ev.id,
-                        %reason,
-                        "inline evaluator: fail-closed block (inbound)"
-                    );
-                    return Err(GatewayError::FirewallBlocked(
-                        format!(
-                            "Inbound content blocked by evaluator '{}': {}",
-                            ev.id, reason
-                        ),
-                        firewall_policy_alert(scanner.config(), ctx, "block"),
-                    ));
-                }
-            };
-        let action = inline_action_for(binding, ev);
-        match inline_outcome(flagged, &action) {
-            InlineOutcome::Allow => {}
-            InlineOutcome::Block => {
-                let model = body["model"].as_str().unwrap_or("unknown");
-                state.metrics.inc_firewall_blocked();
-                audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
-                warn!(
-                    request_id = %ctx.request_id,
-                    evaluator = %ev.id,
-                    %reason,
-                    "inline evaluator: blocked inbound content"
-                );
-                return Err(GatewayError::FirewallBlocked(
-                    format!(
-                        "Inbound content blocked by evaluator '{}': {}",
-                        ev.id, reason
-                    ),
-                    firewall_policy_alert(scanner.config(), ctx, "block"),
-                ));
-            }
-            InlineOutcome::Sanitize => {
-                let model = body["model"].as_str().unwrap_or("unknown").to_string();
-                warn!(
-                    request_id = %ctx.request_id,
-                    evaluator = %ev.id,
-                    "inline evaluator: sanitizing inbound content"
-                );
-                audit_inline_evaluator(state, ctx, &model, &ev.id, "sanitized", &reason);
-                sanitize_messages(body, scanner);
-            }
-            InlineOutcome::Warn => {
-                warn!(
-                    request_id = %ctx.request_id,
-                    evaluator = %ev.id,
-                    %reason,
-                    "inline evaluator: inbound flagged (warn-and-continue)"
-                );
-                pending = merge_alert(
-                    pending,
-                    firewall_policy_alert(scanner.config(), ctx, "notify"),
-                );
-            }
-        }
-    }
-    Ok(pending)
-}
-
-/// Run the resolved policy's **output-target** inline evaluators over the
-/// (non-streaming) response. Blocks on `Block`, redacts in place on `Sanitize`,
-/// logs on `WarnAndContinue`. Resolves the per-agent scanner from `ctx` (cached),
-/// so it needs no state threaded from `pre_process`. No-op (allocation-free) when
-/// no binding is enabled.
-async fn apply_inline_output_evaluators(
-    state: &Arc<AppState>,
-    ctx: &RequestContext,
-    response: &mut Value,
-) -> Result<(), GatewayError> {
-    let scanner = state.resolved_scanner(ctx);
-    if !scanner.config().evaluators.iter().any(|b| b.enabled) {
-        return Ok(());
-    }
-    let registry = EvaluatorRegistry::from_config(&state.config);
-    let bindings: Vec<crate::evaluators::EvaluatorBinding> = scanner
-        .config()
-        .evaluators
-        .iter()
-        .filter(|b| b.enabled)
-        .cloned()
-        .collect();
-    let response_text = response_to_text(response);
-
-    for binding in &bindings {
-        let Some(ev) = registry.get(&binding.id) else {
-            continue;
-        };
-        if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
-            continue;
-        }
-        let (flagged, reason) =
-            match flag_inline_binding(ev, scanner.as_ref(), &response_text, state, ctx).await {
-                InlineFlag::Denied(error) => return Err(error),
-                InlineFlag::Skip => continue,
-                InlineFlag::Ran { flagged, reason } => (flagged, reason),
-                InlineFlag::ForceBlock { reason } => {
-                    // Fail-closed short-circuit on the outbound path too (a wasm
-                    // policy may be bound Output-target). Block regardless of action.
-                    let model = response["model"].as_str().unwrap_or("unknown");
-                    state.metrics.inc_firewall_blocked();
-                    audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
-                    warn!(
-                        request_id = %ctx.request_id,
-                        evaluator = %ev.id,
-                        %reason,
-                        "inline evaluator: fail-closed block (outbound)"
-                    );
-                    return Err(GatewayError::FirewallBlocked(
-                        format!(
-                            "Outbound response blocked by evaluator '{}': {}",
-                            ev.id, reason
-                        ),
-                        firewall_policy_alert(scanner.config(), ctx, "block"),
-                    ));
-                }
-            };
-        let action = inline_action_for(binding, ev);
-        match inline_outcome(flagged, &action) {
-            InlineOutcome::Allow | InlineOutcome::Warn => {
-                if flagged {
-                    warn!(
-                        request_id = %ctx.request_id,
-                        evaluator = %ev.id,
-                        %reason,
-                        "inline evaluator: outbound flagged (warn-and-continue)"
-                    );
-                }
-            }
-            InlineOutcome::Block => {
-                let model = response["model"].as_str().unwrap_or("unknown");
-                state.metrics.inc_firewall_blocked();
-                audit_inline_evaluator(state, ctx, model, &ev.id, "blocked", &reason);
-                warn!(
-                    request_id = %ctx.request_id,
-                    evaluator = %ev.id,
-                    %reason,
-                    "inline evaluator: blocked outbound response"
-                );
-                return Err(GatewayError::FirewallBlocked(
-                    format!(
-                        "Outbound response blocked by evaluator '{}': {}",
-                        ev.id, reason
-                    ),
-                    firewall_policy_alert(scanner.config(), ctx, "block"),
-                ));
-            }
-            InlineOutcome::Sanitize => {
-                let model = response["model"].as_str().unwrap_or("unknown").to_string();
-                warn!(
-                    request_id = %ctx.request_id,
-                    evaluator = %ev.id,
-                    "inline evaluator: sanitizing outbound response"
-                );
-                audit_inline_evaluator(state, ctx, &model, &ev.id, "sanitized", &reason);
-                sanitize_response(response, scanner.as_ref());
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Whether any enabled OUTPUT-target inline binding would BLOCK or SANITIZE — the
-/// streaming firewall must buffer the whole response in that case, even when the
-/// node firewall policy is warn/off (otherwise a blocking output evaluator would
-/// never fire on the default streaming chat path).
-#[cfg(test)]
-fn output_inline_wants_transform(scanner: &FirewallScanner, registry: &EvaluatorRegistry) -> bool {
-    scanner.config().evaluators.iter().any(|b| {
-        if !b.enabled {
-            return false;
-        }
-        let Some(ev) = registry.get(&b.id) else {
-            return false;
-        };
-        if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
-            return false;
-        }
-        matches!(
-            inline_action_for(b, ev),
-            FirewallPolicy::Block | FirewallPolicy::Sanitize
-        )
-    })
-}
-
-/// Evaluate the resolved OUTPUT-target inline evaluators against assembled
-/// streamed text, returning the STRICTEST outcome (Block > Sanitize > Warn >
-/// Allow) plus a reason, so the streaming firewall can emit the right frame.
-async fn evaluate_output_inline_stream(
-    state: &Arc<AppState>,
-    ctx: &RequestContext,
-    scanner: &FirewallScanner,
-    assembled: &str,
-) -> (InlineOutcome, String) {
-    let registry = EvaluatorRegistry::from_config(&state.config);
-    let bindings: Vec<crate::evaluators::EvaluatorBinding> = scanner
-        .config()
-        .evaluators
-        .iter()
-        .filter(|b| b.enabled)
-        .cloned()
-        .collect();
-
-    let mut strictest = InlineOutcome::Allow;
-    let mut reason = String::new();
-    for binding in &bindings {
-        let Some(ev) = registry.get(&binding.id) else {
-            continue;
-        };
-        if !ev.capabilities.inline || ev.target != EvaluatorTarget::Output {
-            continue;
-        }
-        let (flagged, r) = match flag_inline_binding(ev, scanner, assembled, state, ctx).await {
-            InlineFlag::Denied(error) => return (InlineOutcome::Block, error.to_string()),
-            InlineFlag::Skip => continue,
-            InlineFlag::Ran { flagged, reason } => (flagged, reason),
-            InlineFlag::ForceBlock { reason: fc_reason } => {
-                // Fail-closed → Block is the strictest possible streamed outcome;
-                // nothing can outrank it, so short-circuit.
-                return (InlineOutcome::Block, format!("{}: {fc_reason}", ev.id));
-            }
-        };
-        let outcome = inline_outcome(flagged, &inline_action_for(binding, ev));
-        if inline_outcome_rank(outcome) > inline_outcome_rank(strictest) {
-            strictest = outcome;
-            reason = format!("{}: {}", ev.id, r);
-        }
-    }
-    let _ = ctx;
-    (strictest, reason)
-}
-
-/// Strictness rank for picking the winning streamed-output outcome.
-fn inline_outcome_rank(o: InlineOutcome) -> u8 {
-    match o {
-        InlineOutcome::Allow => 0,
-        InlineOutcome::Warn => 1,
-        InlineOutcome::Sanitize => 2,
-        InlineOutcome::Block => 3,
-    }
-}
-
-/// Whether this error says the provider itself is unhealthy. Rate limits and
-/// payment-required responses belong to capacity/account state, so fallbacks may
-/// run but the circuit must stay ready for a later request after recovery.
+/// Whether this error says the provider itself is unhealthy, so it counts
+/// toward the provider circuit (and pool-member demotion) every tenant shares.
+///
+/// A positive allowlist of genuine upstream health faults: a 5xx, a 408 or an
+/// unreadable reply (all `ProviderError`), and a credential the upstream no
+/// longer accepts (a 401 rejection), which is broken for every caller. Nothing
+/// else counts. Safety and policy outcomes are decisions about one request
+/// (see [`GatewayError::is_safety_outcome`]); any other upstream 4xx, including
+/// a 403 content refusal, is about one request's content; rate limits and
+/// payment-required replies are capacity or account state; a transport or
+/// delivery-uncertain failure is the network path, not the provider. The match
+/// is exhaustive so a new variant must be classified before it compiles.
 fn penalizes_provider_circuit(error: &GatewayError) -> bool {
-    !matches!(
-        error,
-        GatewayError::ProviderRateLimited { .. } | GatewayError::ProviderPaymentRequired { .. }
-    )
+    match error {
+        GatewayError::ProviderError(_) => true,
+        GatewayError::ProviderRejected { status, .. } => *status == 401,
+        GatewayError::FirewallBlocked(..)
+        | GatewayError::UpstreamSafetyRefused(_)
+        | GatewayError::PolicyViolation(_)
+        | GatewayError::PlatformRefused { .. }
+        | GatewayError::ScreeningUnavailable { .. }
+        | GatewayError::ContentBlocked(_)
+        | GatewayError::ScreeningDegradedThrottle { .. }
+        | GatewayError::ScreeningCapacityExceeded
+        | GatewayError::StandingRefused(_)
+        | GatewayError::StandingUnavailable
+        | GatewayError::AbuseThrottled(_)
+        | GatewayError::AccountRestricted(_)
+        | GatewayError::NewKeyRateLimited { .. }
+        | GatewayError::RateLimited
+        | GatewayError::RateLimitedBy(_)
+        | GatewayError::ConfigConflict(_)
+        | GatewayError::Unauthorized(_)
+        | GatewayError::NoProvider(_)
+        | GatewayError::ProviderTransport(_)
+        | GatewayError::ProviderDeliveryUncertain(_)
+        | GatewayError::ProviderPaymentRequired { .. }
+        | GatewayError::ProviderRateLimited { .. }
+        | GatewayError::CircuitOpen(_)
+        | GatewayError::Overloaded(_)
+        | GatewayError::BudgetExceeded(_)
+        | GatewayError::BudgetStoreUnavailable(_)
+        | GatewayError::InsufficientCredits
+        | GatewayError::AccountingUnavailable
+        | GatewayError::ToolUnpriced(_)
+        | GatewayError::ToolNotServable(_)
+        | GatewayError::ToolPaymentRequired(_)
+        | GatewayError::ProviderResponseTooLarge { .. }
+        | GatewayError::ProviderBodyUnreadable { .. }
+        | GatewayError::AllProvidersUnavailable(_)
+        | GatewayError::BadRequest(_)
+        | GatewayError::InvalidRequest { .. }
+        | GatewayError::Internal(_) => false,
+    }
 }
+
+/// Whether a failed attempt ends the fallback chain instead of moving to the
+/// next provider: on the hosted fleet and on a managed node an upstream 4xx
+/// other than 408 and 429 is returned as is (see
+/// [`crate::custody::GatewayCustody::ends_chain_on_refusal`] and
+/// [`GatewayError::ends_hosted_attempt`]). Callers return safety outcomes
+/// before this on every custody.
+fn ends_attempt_chain(state: &AppState, error: &GatewayError) -> bool {
+    state.custody.ends_chain_on_refusal() && error.ends_hosted_attempt()
+}
+
+#[cfg(test)]
+mod transport_circuit_tests;
 
 /// Keep an actionable payment-required failure if later fallbacks also fail.
 /// A generic outage may explain the last attempt, but it must not erase the
@@ -1917,109 +1586,705 @@ fn remember_preferred_provider_error(slot: &mut Option<GatewayError>, error: Gat
     }
 }
 
+/// [`own_supply::SupplyView`] over this request's captured provider generation
+/// and policy.
+struct RequestSupply<'a> {
+    state: &'a AppState,
+    snapshot: Arc<crate::providers::ProviderSnapshot>,
+    policy: Option<crate::policy::EffectivePolicy>,
+}
+
+impl<'a> RequestSupply<'a> {
+    fn new(state: &'a AppState, ctx: &RequestContext) -> Self {
+        let policy = (!ctx.is_master_key).then(|| {
+            ctx.resolved_policy
+                .clone()
+                .unwrap_or_else(|| state.policy_snapshot())
+        });
+        Self {
+            state,
+            snapshot: provider_snapshot(state, ctx),
+            policy,
+        }
+    }
+
+    fn routes_to_ryu_router(&self, model: &str) -> bool {
+        self.snapshot.router.route(model).provider.as_str() == own_supply::RYU_ROUTER_SLOT
+    }
+}
+
+impl own_supply::SupplyView for RequestSupply<'_> {
+    fn table(&self) -> Arc<ryu_gw_router::own_supply::OwnSupplyTable> {
+        self.state.own_supply.table()
+    }
+
+    fn serves(&self, slot: &str, shown_model: &str) -> bool {
+        self.snapshot.providers.get(slot).is_some()
+            && self.policy.as_ref().is_none_or(|policy| {
+                policy.allows_model(shown_model) && policy.allows_provider(slot)
+            })
+    }
+
+    fn is_routable(&self, row: &ryu_gw_router::own_supply::OwnSupplyRow) -> bool {
+        self.state.own_supply.is_routable(row)
+    }
+
+    fn allowance(&self, pool: &str) -> Option<crate::credit_pools::PoolAllowance> {
+        self.state.pool_allowances.get(pool)
+    }
+}
+
+/// The own-supply plan for this request, if it qualifies (see [`own_supply`]).
+fn own_supply_plan(
+    state: &AppState,
+    ctx: &RequestContext,
+    body: &Value,
+) -> Option<own_supply::OwnSupplyPlan> {
+    let requested = body["model"].as_str()?;
+    // Ladder L3 takes own-supply vendor slots away (spec 04.8.1): the
+    // request stays on the Ryu Router route.
+    if crate::enforcement::is_restricted(ctx) {
+        return None;
+    }
+    let supply = RequestSupply::new(state, ctx);
+    // Only a managed caller can be planned; skip walking the prompt otherwise.
+    let estimated_prompt_tokens = if ctx.managed_inference {
+        estimate_prompt_tokens(body)
+    } else {
+        0
+    };
+    let plan = own_supply::plan(
+        requested,
+        supply.routes_to_ryu_router(requested),
+        estimated_prompt_tokens,
+        ctx,
+        &supply,
+        chrono::Utc::now(),
+    )?;
+    info!(
+        request_id = %ctx.request_id,
+        org_id = ?ctx.org_id,
+        slot = %plan.slot,
+        basis = plan.basis.as_str(),
+        "credits: serving a Ryu Router pick from own supply"
+    );
+    Some(plan)
+}
+
+/// The own-supply attempt: the same body under the id the user sees (for
+/// `openrouter/auto`, the pool default's id), dispatched to exactly the plan's
+/// `(slot, upstream)` through the gateway-internal route pin.
+fn own_supply_attempt(
+    ctx: &RequestContext,
+    body: &Value,
+    plan: &own_supply::OwnSupplyPlan,
+) -> (RequestContext, Value) {
+    let mut attempt_ctx = ctx.clone();
+    attempt_ctx.own_supply_route =
+        Some((ProviderId::from(plan.slot.as_str()), plan.upstream.clone()));
+    let mut routed = body.clone();
+    routed["model"] = Value::String(plan.shown_model.clone());
+    (attempt_ctx, routed)
+}
+
+/// After a failed own-supply attempt: an upstream 404 (model gone) or 401
+/// (credential refused) takes the row off this gateway for an hour
+/// (`own_supply_table::QUARANTINE_FOR`). A 403 or a safety outcome never does.
+fn note_own_supply_failure(
+    state: &AppState,
+    plan: &own_supply::OwnSupplyPlan,
+    error: &GatewayError,
+) {
+    if own_supply::is_row_unavailable(error) {
+        state.own_supply.quarantine(&plan.slot, &plan.upstream);
+    }
+}
+
+/// Authorize the model a route will DISPATCH. When the route is exactly the
+/// Ryu alias / pool namespace the client requested (`ryu-code/max` →
+/// `anthropic-credits` + `claude-opus-4-5`), the requested id is what the
+/// org's allowlist approved at the Policy stage, so the upstream id is not
+/// re-checked: approving the alias must be enough, and the upstream id is not
+/// something an admin is ever shown. Any other route (a budget downgrade, a
+/// fallback to another model) is checked as before.
+fn authorize_routed_model(
+    state: &AppState,
+    ctx: &RequestContext,
+    requested_model: &str,
+    decision: &RouteDecision,
+) -> Result<(), GatewayError> {
+    // Ladder L3 first: an alias or own-supply route the org approved is
+    // still refused when it lands on an own-supply vendor slot or a model
+    // off the floor's restricted list.
+    crate::enforcement::authorize_route(
+        state,
+        ctx,
+        decision.provider.as_str(),
+        decision.model.as_str(),
+    )?;
+    let routed = (decision.provider.as_str(), decision.model.as_str());
+    let is_requested_pool_route = ryu_gw_router::pool_model_alias_route(requested_model)
+        == Some(routed)
+        || ryu_gw_router::pool_namespace_route(requested_model) == Some(routed)
+        // The own-supply plan's route serves exactly the id the user picked.
+        || ctx
+            .own_supply_route
+            .as_ref()
+            .is_some_and(|(slot, upstream)| (slot.as_str(), upstream.as_str()) == routed);
+    if is_requested_pool_route {
+        return Ok(());
+    }
+    auxiliary::authorize_model(state, ctx, &decision.model)
+}
+
+/// `x-degraded: fallback:<slot>` must not name a Ryu-operated slot to a
+/// managed caller; it reads `fallback:ryu` instead. Operators keep the slot.
+fn mask_degraded(degraded: &mut Option<DegradedMode>, managed: bool) {
+    if !managed {
+        return;
+    }
+    if let Some(DegradedMode::Fallback(provider)) = degraded {
+        if crate::credit_pools::is_ryu_router_slot(provider) {
+            *provider = model_alias::ALIAS_PROVIDER_LABEL.to_owned();
+        }
+    }
+}
+
+/// `x-provider` for a managed caller: work any Ryu-operated slot served (own
+/// supply or the OpenRouter pass-through) reads as Ryu Router (`ryu`).
+fn mask_provider_used(provider_used: &mut &'static str, managed: bool) {
+    if managed && crate::credit_pools::is_ryu_router_slot(provider_used) {
+        *provider_used = model_alias::ALIAS_PROVIDER_LABEL;
+    }
+}
+
+/// Show the user's own id on an own-supply error that will not fall back.
+fn mask_own_supply_error(
+    error: GatewayError,
+    plan: &own_supply::OwnSupplyPlan,
+    managed: bool,
+) -> GatewayError {
+    let error = model_alias::mask_model(error, &plan.upstream, &plan.shown_model);
+    model_alias::mask_pool_slots(error, managed)
+}
+
 // ─── Non-streaming pipeline ───────────────────────────────────────────────────
+
+/// Whether a client hang-up must leave this buffered call running.
+///
+/// True when this node debits the org's wallet for the call: accepted provider
+/// work has to reach the settlement that audits, budgets and debits it, so a
+/// client timeout cannot turn into unbilled provider spend.
+///
+/// An unmetered call (a Desktop's Core-managed local Gateway, a self-hosted
+/// node) keeps cancel-on-drop. Its client gone, queued or in-flight work is
+/// dropped, which frees the local engine's admission slot and queue place for
+/// the next caller instead of serving a response nobody will read.
+fn settles_after_client_hang_up(state: &AppState, ctx: &RequestContext) -> bool {
+    state.config.credits.is_active() && ctx.org_id.as_deref().is_some_and(|org| !org.is_empty())
+}
+
+/// Run a buffered pipeline, on its own task when `detach` is set.
+///
+/// A client that hangs up (or times out) makes hyper drop the handler future.
+/// Awaited inline, that drop cancels the provider call mid-flight, after the
+/// provider may have accepted the work but before the settlement that audits,
+/// budgets and debits it. On its own task the pipeline outlives the handler:
+/// dropping this future only detaches the `JoinHandle`, so dispatched work
+/// finishes and is settled exactly like a delivered response. The task keeps
+/// the caller's tracing span and route template (the traffic feed reads it).
+/// See [`settles_after_client_hang_up`] for which calls detach.
+async fn run_buffered<T: Send + 'static>(
+    detach: bool,
+    work: impl std::future::Future<Output = Result<T, GatewayError>> + Send + 'static,
+) -> Result<T, GatewayError> {
+    use tracing::Instrument;
+    if !detach {
+        return work.await;
+    }
+    match tokio::spawn(crate::traffic::carry_route(work).in_current_span()).await {
+        Ok(result) => result,
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(error) => Err(GatewayError::Internal(anyhow::anyhow!(
+            "pipeline task was cancelled: {error}"
+        ))),
+    }
+}
 
 pub async fn run(
     state: Arc<AppState>,
     ctx: RequestContext,
-    mut body: Value,
+    body: Value,
 ) -> Result<PipelineOutput, GatewayError> {
+    let managed = ctx.managed_inference;
+    // Free credit first: a Ryu Router pick Ryu can serve from its own supply is
+    // served there, shown under the id the user picked (see `own_supply`).
+    if let Some(plan) = own_supply_plan(&state, &ctx, &body) {
+        let (attempt_ctx, attempt_body) = own_supply_attempt(&ctx, &body, &plan);
+        let attempt = run_unaliased(Arc::clone(&state), attempt_ctx, attempt_body).await;
+        if let Err(error) = &attempt {
+            note_own_supply_failure(&state, &plan, error);
+        }
+        match attempt {
+            Ok(mut output) => {
+                model_alias::apply_to_output(
+                    &mut output.response,
+                    &mut output.model_used,
+                    &mut output.provider_used,
+                    &plan.shown_model,
+                );
+                mask_degraded(&mut output.degraded, managed);
+                return Ok(output);
+            }
+            Err(error) if own_supply::may_fall_back(&error, &ctx) => {
+                warn!(
+                    request_id = %ctx.request_id,
+                    slot = %plan.slot,
+                    error = %error,
+                    "own supply failed before output; serving from the Ryu Router route"
+                );
+            }
+            Err(error) => return Err(mask_own_supply_error(error, &plan, managed)),
+        }
+    }
+    // A Ryu model alias (`ryu-code/max`) is resolved to the supplier's id for
+    // dispatch; the client gets the alias back, never the supplier's id.
+    let alias = model_alias::requested_alias(&body);
+    let mut output = run_unaliased(state, ctx, body).await.map_err(|error| {
+        model_alias::mask_pool_slots(model_alias::mask_error(error, alias), managed)
+    })?;
+    // A pre-alias raw id an own-supply slot served is shown under the id the
+    // user knows, never the supplier's.
+    let shown: Option<String> = alias
+        .map(str::to_owned)
+        .or_else(|| model_alias::served_display_id(output.provider_used, &output.model_used));
+    if let Some(shown) = shown {
+        model_alias::apply_to_output(
+            &mut output.response,
+            &mut output.model_used,
+            &mut output.provider_used,
+            &shown,
+        );
+    }
+    mask_degraded(&mut output.degraded, managed);
+    mask_provider_used(&mut output.provider_used, managed);
+    Ok(output)
+}
+
+async fn run_unaliased(
+    state: Arc<AppState>,
+    ctx: RequestContext,
+    body: Value,
+) -> Result<PipelineOutput, GatewayError> {
+    // Dispatch one buffered attempt; metered calls run detached (see
+    // `run_buffered`) so a client hang-up never skips settlement.
+    let detach = settles_after_client_hang_up(&state, &ctx);
+    // A detached call outlives its caller. Dropping this future (a client
+    // hang-up) cancels `caller`, which stops a tool loop from running further
+    // tools or rounds; see `run_attached`.
+    let caller = tokio_util::sync::CancellationToken::new();
+    let _cancel_on_hang_up = caller.clone().drop_guard();
+    run_buffered(
+        detach,
+        run_attached(state, ctx, body, detach.then_some(caller)),
+    )
+    .await
+}
+
+/// Bill the provider rounds a buffered tool loop ran before it failed.
+///
+/// They are provider spend even though the request did not succeed on this
+/// attempt. They settle under their own ref, `{request_id}:attempt-{n}`, so a
+/// fallback attempt that succeeds afterwards is not deduplicated against them
+/// by the idempotent debit. The credit claim follows this debit. `error`, when
+/// known, is what the loop failed with; the traffic feed reports it.
+#[allow(clippy::too_many_arguments)]
+fn settle_failed_tool_rounds(
+    state: &Arc<AppState>,
+    ctx: &RequestContext,
+    attempt_index: usize,
+    rounds: tool_rounds::ToolRoundTotals,
+    provider: &str,
+    model: &str,
+    budget: Option<BudgetDecision>,
+    start: Instant,
+    reservation: Option<CreditReservation>,
+    error: Option<&GatewayError>,
+) {
+    settle_unanswered_tool_rounds(
+        state,
+        ctx,
+        format!("{}:attempt-{attempt_index}", ctx.request_id),
+        rounds,
+        provider,
+        model,
+        budget,
+        start,
+        reservation,
+        "tool loop failed after paid provider rounds",
+        error,
+    );
+}
+
+/// Bill a tool loop the pool's final-execution deadline cut off, as a failed
+/// attempt (`{request_id}:attempt-{n}`).
+///
+/// The deadline drops the loop, but a metered round runs on its own task and
+/// keeps going: the provider bills it, so Ryu must too. With no round in
+/// flight, the answered rounds settle now. Otherwise one settlement waits,
+/// bounded by [`ABANDONED_PROVIDER_WAIT`], for the round to finish, then bills
+/// every round once, the late one from its real usage. A second debit for the
+/// late round alone would need its own ref (the same ref is deduplicated), so
+/// the rounds settle together, as on the hang-up paths. The credit claim is
+/// held until that debit resolves.
+#[allow(clippy::too_many_arguments)]
+fn settle_timed_out_tool_rounds(
+    state: &Arc<AppState>,
+    ctx: &RequestContext,
+    attempt_index: usize,
+    ledger: &Arc<tool_rounds::ToolRoundLedger>,
+    provider: &'static str,
+    model: &str,
+    budget: Option<BudgetDecision>,
+    start: Instant,
+    reservation: Option<CreditReservation>,
+) {
+    let settle = move |state: &Arc<AppState>,
+                       ctx: &RequestContext,
+                       model: &str,
+                       rounds: tool_rounds::ToolRoundTotals| {
+        if rounds.rounds > 0 {
+            settle_failed_tool_rounds(
+                state,
+                ctx,
+                attempt_index,
+                rounds,
+                provider,
+                model,
+                budget,
+                start,
+                reservation,
+                None,
+            );
+        }
+    };
+    let handle = tokio::runtime::Handle::try_current();
+    match handle {
+        Ok(handle) if ledger.rounds_in_flight() > 0 => {
+            let (state, ctx, ledger, model) = (
+                Arc::clone(state),
+                ctx.clone(),
+                Arc::clone(ledger),
+                model.to_owned(),
+            );
+            handle.spawn(async move {
+                let rounds = ledger.settled(ABANDONED_PROVIDER_WAIT).await;
+                settle(&state, &ctx, &model, rounds);
+            });
+        }
+        _ => settle(state, ctx, model, ledger.totals()),
+    }
+}
+
+/// Bill tool-loop rounds that did not answer the request: rounds before a
+/// failed round, or the rounds of a loop its caller abandoned. `debit_ref` is
+/// the ref they settle under. The credit claim, shrunk to what the rounds
+/// cost, follows this debit. The row reads the request's own traffic note, so
+/// it carries the request's route, stages and verdict, and reports `error`
+/// when the loop failed with one.
+#[allow(clippy::too_many_arguments)]
+fn settle_unanswered_tool_rounds(
+    state: &Arc<AppState>,
+    ctx: &RequestContext,
+    debit_ref: String,
+    rounds: tool_rounds::ToolRoundTotals,
+    provider: &str,
+    model: &str,
+    budget: Option<BudgetDecision>,
+    start: Instant,
+    reservation: Option<CreditReservation>,
+    reason: &str,
+    error: Option<&GatewayError>,
+) {
+    let mut attempt_ctx = ctx.clone();
+    attempt_ctx.request_id = debit_ref;
+    // No round answered the request, so none is judged against the token
+    // limits: all of them are recorded below like earlier rounds.
+    let tokens = rounds.input_tokens.saturating_add(rounds.output_tokens);
+    let reservation = shrink_credit_claim(
+        state,
+        ctx,
+        reservation,
+        tool_rounds_charge_micro_usd(state, &rounds, provider, model),
+    );
+    let mut settlement = inference_governance::settle_completion(
+        state,
+        &attempt_ctx,
+        &rounds.billing_view(&Value::Null),
+        inference_governance::CompletionReceipt {
+            provider: provider.to_owned(),
+            model: model.to_owned(),
+            purpose: None,
+            audit_provider: provider.to_owned(),
+            backend: None,
+            start,
+            admitted_tokens: tokens,
+            estimated_input: 0,
+            budget,
+            reservations: reservation.into_iter().collect(),
+            zero_cost: false,
+        },
+    );
+    settlement.record_mut().error = Some(reason.to_owned());
+    settlement.join_note_of(&ctx.request_id);
+    if let Some(error) = error {
+        settlement.report(error);
+    }
+    record_earlier_round_tokens(state, ctx, tokens);
+}
+
+/// How a buffered tool loop ended when its caller can hang up.
+enum LoopOutcome<T> {
+    Finished(T),
+    /// The caller hung up first. The loop was dropped: no further tool runs
+    /// and no new round starts.
+    CallerGone,
+}
+
+/// Run `work`, a buffered tool loop, until it finishes or `caller` (present
+/// on a metered, detached call) is cancelled by a client hang-up. Cancellation
+/// wins a tie, and a caller already gone never starts the loop.
+async fn unless_caller_gone<T>(
+    work: impl std::future::Future<Output = T>,
+    caller: Option<&tokio_util::sync::CancellationToken>,
+) -> LoopOutcome<T> {
+    let Some(caller) = caller else {
+        return LoopOutcome::Finished(work.await);
+    };
+    tokio::select! {
+        biased;
+        () = caller.cancelled() => LoopOutcome::CallerGone,
+        output = work => LoopOutcome::Finished(output),
+    }
+}
+
+/// What a tool loop's rounds are charged, in micro-USD: the same figure the
+/// budgets and the debit use.
+fn tool_rounds_charge_micro_usd(
+    state: &AppState,
+    rounds: &tool_rounds::ToolRoundTotals,
+    provider: &str,
+    model: &str,
+) -> u64 {
+    charged_budget_cost_micro_usd(
+        state,
+        Some(provider),
+        rounds.reported_cost_usd(),
+        rounds.input_tokens,
+        rounds.output_tokens,
+        model,
+        rounds.cache_usage(),
+    )
+}
+
+/// Shrink a credit claim to `spent_micro_usd`, what the work actually cost.
+///
+/// A failed attempt's claim is held until its debit resolves. At full size,
+/// the fallback attempt that follows would have to fit alongside the failed
+/// attempt's whole estimate, and an org near its balance would be refused
+/// although it can pay for both. The smaller claim is taken before the
+/// original is released, so the amount held never dips below the spend. A
+/// claim is never grown.
+fn shrink_credit_claim(
+    state: &AppState,
+    ctx: &RequestContext,
+    claim: Option<CreditReservation>,
+    spent_micro_usd: u64,
+) -> Option<CreditReservation> {
+    let claim = claim?;
+    let Some(org_id) = ctx.org_id.as_deref().filter(|org| !org.is_empty()) else {
+        return Some(claim);
+    };
+    let held = i64::try_from(spent_micro_usd)
+        .unwrap_or(i64::MAX)
+        .min(claim.amount_micro_usd());
+    let shrunk = state.wallet.try_reserve(org_id, held, i64::MAX);
+    drop(claim);
+    shrunk
+}
+
+/// Count a tool loop's earlier provider rounds against the per-minute token
+/// limits without refusing the request for them.
+///
+/// Every round is billed, but the token limits judge only the round that
+/// answers, as they did before rounds were metered. Judging the sum would turn
+/// a loop that already ran its tools and was debited into a 429, and the
+/// client's retry would run the tools and pay again. Each bucket is charged at
+/// most one window of these tokens, so one request cannot put it more than a
+/// minute into debt.
+fn record_earlier_round_tokens(state: &AppState, ctx: &RequestContext, tokens: u64) {
+    if tokens == 0 {
+        return;
+    }
+    state.rate_limiter.record_tokens_within_window_for_key(
+        &ctx.api_key,
+        tokens,
+        ctx.key_config.as_ref(),
+    );
+    crate::org_limits::record_tokens_within_window(state, ctx, tokens);
+}
+
+async fn run_attached(
+    state: Arc<AppState>,
+    mut ctx: RequestContext,
+    mut body: Value,
+    // Cancelled when the client of a detached (metered) call hangs up.
+    caller: Option<tokio_util::sync::CancellationToken>,
+) -> Result<PipelineOutput, GatewayError> {
+    capture_provider_snapshot(&state, &mut ctx);
     let start = Instant::now();
 
     state.metrics.inc_requests();
+    let mut sampling_extensions = SamplingExtensions::take(&mut body);
 
     // Admission and content governance precede optional smart-router inference.
     let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
-    let (mut decision, cache_key, pre_alert) =
+    let (mut decision, cache_key, mut pre_alert, mut pool_route) =
         pre_process(&state, &ctx, &mut body).await.map_err(|e| {
             state.metrics.inc_errors();
             audit_failure(&state, &ctx, &requested_model, &e, start);
             e
         })?;
+    state.traffic.note_screen(
+        &ctx.request_id,
+        crate::traffic::current_route(),
+        start.elapsed().as_millis() as u64,
+    );
+
+    let cache_route = bind_route(&state, &ctx, &decision)?;
+
+    // Gateway response caches have no account dimension. A multi-key provider
+    // uses session-sticky upstream prompt caching instead; serving a Gateway
+    // hit here could reuse an answer from a different account or obscure a
+    // quota failover before the account is even selected.
+    let cache_allowed = pool_route.is_none()
+        && ctx.capability_hints.is_none()
+        && ctx.node_routing.is_none()
+        && cache_route.cache_allowed;
+    let cache_origin = (cache_route.provider_id.clone(), cache_route.model.clone());
+    let semantic_tenant = cache_tenant(&ctx);
+    let semantic_scope = provider_cache_scope(
+        &state,
+        &ctx,
+        semantic_tenant.as_deref(),
+        cache_route.provider_id.as_str(),
+        &cache_route.model,
+    )
+    .semantic_scope();
 
     // 5a. Exact-match cache lookup — return early on hit
-    if let Some(cached) = state.cache.get(&cache_key) {
-        debug!(request_id = %ctx.request_id, "exact cache hit");
-        state.metrics.inc_cache_hit();
-        // Output-target inline evaluators must run on cache hits too: the exact
-        // cache key is (org, model, messages) — NOT scoped by agent — so an agent
-        // with `toxicity: Block` / `pii_leakage: Sanitize` could otherwise be
-        // served a sibling agent's cached toxic/PII response with the guardrail
-        // silently bypassed. No-op (allocation-free) when the agent has no
-        // output evaluators, so a plain cache hit stays fast.
-        let mut cached = cached;
-        apply_inline_output_evaluators(&state, &ctx, &mut cached).await?;
-        audit_cache_hit(&state, &ctx, "cache", &decision.model, &cached, start);
-        return Ok(PipelineOutput {
-            response: cached,
-            context: ctx,
-            provider_used: "cache",
-            model_used: decision.model,
-            cache_hit: true,
-            budget: None,
-            eval_score: None,
-            degraded: None,
-            policy_alert: pre_alert.clone(),
-            // Our own response cache answered; no provider was called, so there
-            // is no provider prompt-cache activity to report.
-            prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-        });
+    if cache_allowed {
+        if let Some(cached) = state.cache.get_async(&cache_key).await {
+            debug!(request_id = %ctx.request_id, "exact cache hit");
+            state.metrics.inc_cache_hit();
+            // Output-target inline evaluators must run on cache hits too: the exact
+            // cache key is (org, model, messages) — NOT scoped by agent — so an agent
+            // with `toxicity: Block` / `pii_leakage: Sanitize` could otherwise be
+            // served a sibling agent's cached toxic/PII response with the guardrail
+            // silently bypassed. No-op (allocation-free) when the agent has no
+            // output evaluators, so a plain cache hit stays fast.
+            let mut cached = cached;
+            // The entry holds the response as DLP'd for whoever populated it;
+            // this caller's own (possibly stricter) outbound policy applies too.
+            apply_outbound_json_dlp(&state, &ctx, &mut cached)?;
+            apply_inline_output_evaluators(&state, &ctx, &mut cached).await?;
+            screen_buffered_output(&state, &ctx, &cached).await?;
+            audit_cache_hit(
+                &state,
+                &ctx,
+                "cache",
+                &model_alias::display_model(decision.provider.as_str(), &decision.model),
+                &cached,
+                start,
+            );
+            return Ok(PipelineOutput {
+                response: cached,
+                context: ctx,
+                provider_used: "cache",
+                model_used: decision.model,
+                cache_hit: true,
+                budget: None,
+                eval_score: None,
+                degraded: None,
+                policy_alert: pre_alert.clone(),
+                // Our own response cache answered; no provider was called, so there
+                // is no provider prompt-cache activity to report.
+                prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            });
+        }
     }
 
     // 5b. Semantic cache lookup (optional)
     let mut semantic_embedding: Option<Vec<f32>> = None;
-    if let (Some(sc), Some(_openai_cfg)) = (
-        state.semantic_cache.active(),
-        state.config.providers.openai.as_ref(),
-    ) {
-        let text = SemanticCache::messages_to_text(&body["messages"]);
-        let inference =
-            auxiliary::GovernedInference::new(Arc::clone(&state), ctx.clone(), "semantic-cache");
-        if let Some(emb) = inference.embed(sc.embedding_model(), &text, 30_000).await? {
-            if let Some(cached) = sc.lookup(ctx.org_id.as_deref(), &emb) {
-                debug!(request_id = %ctx.request_id, "semantic cache hit");
-                state.metrics.inc_semantic_cache_hit();
-                state.metrics.inc_cache_hit();
-                // Same per-agent bypass concern as the exact cache above: the
-                // semantic cache is org-scoped, not agent-scoped, so run the
-                // output-target inline evaluators before serving a cached hit.
-                let mut cached = cached;
-                apply_inline_output_evaluators(&state, &ctx, &mut cached).await?;
-                audit_cache_hit(
-                    &state,
-                    &ctx,
-                    "semantic-cache",
-                    &decision.model,
-                    &cached,
-                    start,
-                );
-                return Ok(PipelineOutput {
-                    response: cached,
-                    context: ctx,
-                    provider_used: "semantic-cache",
-                    model_used: decision.model,
-                    cache_hit: true,
-                    budget: None,
-                    eval_score: None,
-                    degraded: None,
-                    policy_alert: pre_alert.clone(),
-                    prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
-                    cache_read_tokens: 0,
-                    cache_write_tokens: 0,
-                });
+    if cache_allowed {
+        if let (Some(sc), Some(_openai_cfg)) = (
+            state.semantic_cache.active(),
+            provider_snapshot(&state, &ctx).config.openai.as_ref(),
+        ) {
+            let text = SemanticCache::messages_to_text(&body["messages"]);
+            let inference = auxiliary::GovernedInference::new(
+                Arc::clone(&state),
+                ctx.clone(),
+                "semantic-cache",
+            );
+            if let Some(emb) = inference.embed(sc.embedding_model(), &text, 30_000).await? {
+                if let Some(cached) = sc.lookup_async(Some(&semantic_scope), &emb).await {
+                    debug!(request_id = %ctx.request_id, "semantic cache hit");
+                    state.metrics.inc_semantic_cache_hit();
+                    state.metrics.inc_cache_hit();
+                    // Same per-agent bypass concern as the exact cache above: the
+                    // semantic cache is org-scoped, not agent-scoped, so run the
+                    // output-target inline evaluators before serving a cached hit.
+                    let mut cached = cached;
+                    apply_outbound_json_dlp(&state, &ctx, &mut cached)?;
+                    apply_inline_output_evaluators(&state, &ctx, &mut cached).await?;
+                    screen_buffered_output(&state, &ctx, &cached).await?;
+                    audit_cache_hit(
+                        &state,
+                        &ctx,
+                        "semantic-cache",
+                        &model_alias::display_model(decision.provider.as_str(), &decision.model),
+                        &cached,
+                        start,
+                    );
+                    return Ok(PipelineOutput {
+                        response: cached,
+                        context: ctx,
+                        provider_used: "semantic-cache",
+                        model_used: decision.model,
+                        cache_hit: true,
+                        budget: None,
+                        eval_score: None,
+                        degraded: None,
+                        policy_alert: pre_alert.clone(),
+                        prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
+                        cache_read_tokens: 0,
+                        cache_write_tokens: 0,
+                    });
+                }
+                semantic_embedding = Some(emb);
             }
-            semantic_embedding = Some(emb);
         }
     }
 
     state.metrics.inc_cache_miss();
 
-    // 6. Skills injection
-    if !state.skills.is_empty() {
-        state.skills.inject(&mut body);
-    }
+    // 6. Skills injection, then a screen of the injected text (P0-4).
+    let skills_alert =
+        edit_rescan::inject_skills(&state, &ctx, &mut body, &requested_model, start)?;
+    pre_alert = merge_alert(pre_alert, skills_alert);
 
     // 6a. Shared (cross-machine) budget — enforce the control-plane coordinator's
     // most recent verdict. The master key always bypasses budget gates.
@@ -2045,7 +2310,9 @@ pub async fn run(
                             "token budget exceeded, downgrading model"
                         );
                         body["model"] = Value::String(downgrade_model.clone());
-                        decision = state.router.route(downgrade_model);
+                        decision = provider_snapshot(&state, &ctx)
+                            .router
+                            .route(downgrade_model);
                     } else {
                         warn!(key_id = %crate::audit::credential_log_id(&ctx.api_key), used, budget, "token budget exceeded");
                         state.metrics.inc_budget_exceeded();
@@ -2056,6 +2323,63 @@ pub async fn run(
             }
         }
     }
+
+    let mut execution_ceiling = None;
+    if let Some(route) = pool_route
+        .as_ref()
+        .filter(|route| route.execution.is_some())
+    {
+        match pool_dispatch::prepare(Arc::clone(&state), &ctx, route, body.clone()).await? {
+            Some(pool_dispatch::PreparedExecution::Single {
+                target,
+                mut response,
+            }) => {
+                apply_outbound_json_dlp(&state, &ctx, &mut response)?;
+                apply_inline_output_evaluators(&state, &ctx, &mut response).await?;
+                screen_buffered_output(&state, &ctx, &response).await?;
+                let bound = provider_snapshot(&state, &ctx).bind(&RouteDecision {
+                    provider: ProviderId::from(target.provider.as_str()),
+                    model: target.model.clone(),
+                })?;
+                return Ok(PipelineOutput {
+                    response,
+                    context: ctx,
+                    provider_used: bound.provider.name(),
+                    model_used: target.model,
+                    cache_hit: false,
+                    budget: None,
+                    eval_score: None,
+                    degraded: None,
+                    policy_alert: pre_alert,
+                    prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                });
+            }
+            Some(pool_dispatch::PreparedExecution::Final {
+                target,
+                body: prepared,
+                timeout_ms,
+                output_bytes,
+            }) => {
+                body = prepared;
+                decision = RouteDecision {
+                    provider: ProviderId::from(target.provider.as_str()),
+                    model: target.model,
+                };
+                execution_ceiling = Some((
+                    tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms),
+                    output_bytes,
+                ));
+                pool_route = None;
+            }
+            None => {}
+        }
+    }
+
+    let execution_final_route = execution_ceiling.map(|_| decision.clone());
+    let original_max_tokens = body.get("max_tokens").cloned();
+    let original_max_completion_tokens = body.get("max_completion_tokens").cloned();
 
     // 6c. Per-user / per-agent charged-spend budgets with local counters (U21).
     // Stop aborts;
@@ -2074,6 +2398,9 @@ pub async fn run(
         // loop; if no debit fires (credits inactive, no org) the permit stays
         // here and drops on return, which is correct.
         reservation: mut credit_reservation,
+        // Local budgets are recorded synchronously before this returns, so the
+        // in-flight claim simply lives until then.
+        budget_hold: _budget_hold,
     } = enforce_budget(
         &state,
         &ctx,
@@ -2082,43 +2409,106 @@ pub async fn run(
         BudgetChargeKind::Model,
         OutputCeiling::Clamp,
     )?;
-    auxiliary::authorize_model(&state, &ctx, &decision.model)?;
+    if execution_final_route.as_ref().is_some_and(|target| {
+        target.provider != decision.provider || target.model != decision.model
+    }) {
+        return Err(GatewayError::BudgetExceeded(None));
+    }
+    authorize_routed_model(&state, &ctx, &requested_model, &decision)?;
+    reconcile_pool_after_budget(&decision, &mut pool_route)?;
     // One response, one header: firewall (Ok-path) alert first so it wins a tie
     // against a same-tier budget alert (deterministic).
-    let policy_alert = merge_alert(pre_alert, budget_alert);
+    let mut policy_alert = merge_alert(pre_alert, budget_alert);
 
     // 6d. Context compression (egress transform). When enabled, send the
     // messages to the compression service and swap in the result before any
-    // provider call. Runs once for the whole fallback chain. Fails open: on any
-    // error the original body is left untouched (see `compression`).
-    if state.config.compression.enabled {
-        if let Some(saved) =
-            crate::compression::maybe_compress(&state.config.compression, &mut body).await
-        {
-            state.metrics.add_compression_saved(saved);
-            debug!(tokens_saved = saved, "compression: request compressed");
-        }
-    }
+    // provider call. Runs once for the whole fallback chain. The swapped-in
+    // messages are screened; a failed compression leaves the body untouched,
+    // except on the hosted fleet, where it refuses the request (see
+    // `edit_rescan::compress`).
+    let compression_alert =
+        edit_rescan::compress(&state, &ctx, &mut body, &decision.model, start).await?;
+    policy_alert = merge_alert(policy_alert, compression_alert);
 
-    let fallback_chain = clamped_fallback_chain(&state, &ctx, &decision);
+    let pool_base_body = body.clone();
+    let fallback_chain = if execution_ceiling.is_some() {
+        vec![ChatAttemptRoute {
+            decision: decision.clone(),
+            pool: None,
+        }]
+    } else {
+        chat_attempt_routes(&state, &ctx, &decision, pool_route.as_ref())
+    };
     let mut last_err: Option<GatewayError> = None;
     // Track whether the primary provider (first in chain) was skipped so we
     // can signal DegradedMode::Fallback when a later provider serves the request.
-    let primary_provider = fallback_chain.first().cloned();
+    let primary_provider = fallback_chain
+        .first()
+        .map(|attempt| attempt.decision.provider.clone());
     let mut primary_skipped = false;
 
-    // Provider prompt-cache markers, stamped once for the whole fallback chain.
-    // Placed here because it is the last point where `messages` is final and the
-    // routed model — which selects the marker dialect — is already decided
-    // (smart routing, the budget downgrade, and the firewall have all run).
-    // Fallback swaps the *provider*, never the model, so one decision holds for
-    // every attempt; re-running it per attempt would only re-inspect markers it
-    // had just written.
-    let prompt_cache_outcome = apply_prompt_cache(&state, &ctx, &decision.model, &mut body);
+    // Stamp markers after request transforms. A pool retry restores the request
+    // body and applies markers again for that member's model and dialect.
+    let mut prompt_cache_outcome = apply_prompt_cache(&state, &ctx, &decision.model, &mut body);
 
-    for provider_kind in &fallback_chain {
-        if let Err(error) =
-            inference_governance::authorize_provider_region(&state, &ctx, provider_kind)
+    for (attempt_index, attempt) in fallback_chain.iter().enumerate() {
+        // Standing first on every attempt (spec 05.5): a push that lands
+        // while an attempt fails must stop the next one from dispatching.
+        crate::standing::recheck(&state, &ctx).await?;
+        if attempt_index > 0 {
+            drop(credit_reservation.take());
+            // Generic retries retain any completed tool turns. Explicit pool
+            // retries keep their existing per-member request reset semantics.
+            if pool_route.is_some() {
+                body = pool_base_body.clone();
+            }
+            restore_token_ceiling(&mut body, "max_tokens", original_max_tokens.as_ref());
+            restore_token_ceiling(
+                &mut body,
+                "max_completion_tokens",
+                original_max_completion_tokens.as_ref(),
+            );
+            if let Some(restrict) = budget
+                .as_ref()
+                .filter(|rule| rule.action == crate::config::BudgetAction::Restrict)
+            {
+                body["max_tokens"] = Value::from(restrict.restrict_max_tokens);
+            }
+            decision = attempt.decision.clone();
+            if let Err(error) = canonicalize_sdk_decision(&state, &ctx, &mut decision) {
+                last_err = Some(error);
+                continue;
+            }
+            if let Err(error) = authorize_routed_model(&state, &ctx, &requested_model, &decision) {
+                last_err = Some(error);
+                continue;
+            }
+            match reserve_route_credit(&state, &ctx, &mut body, &decision, OutputCeiling::Clamp) {
+                Ok(reservation) => credit_reservation = reservation,
+                Err(error) => {
+                    last_err = Some(error);
+                    continue;
+                }
+            }
+            prompt_cache_outcome = apply_prompt_cache(&state, &ctx, &decision.model, &mut body);
+        }
+        let candidate_provider = &attempt.decision.provider;
+        let route = match bind_route(
+            &state,
+            &ctx,
+            &RouteDecision {
+                provider: candidate_provider.clone(),
+                model: attempt.decision.model.clone(),
+            },
+        ) {
+            Ok(route) => route,
+            Err(error) => {
+                last_err = Some(error);
+                continue;
+            }
+        };
+        let provider_kind = &route.provider_id;
+        if let Err(error) = inference_governance::authorize_bound_route_region(&state, &ctx, &route)
         {
             last_err = Some(error);
             if Some(provider_kind) == primary_provider.as_ref() {
@@ -2127,7 +2517,7 @@ pub async fn run(
             continue;
         }
         // 7. Circuit breaker check
-        if state.circuit_breaker.is_open(provider_kind.as_str()) {
+        if state.circuit_breaker.is_open(&bound_circuit_key(&route)) {
             debug!(
                 provider = provider_kind.as_str(),
                 "circuit open, skipping provider"
@@ -2142,12 +2532,35 @@ pub async fn run(
             continue;
         }
 
-        let Some(provider) = state.providers.get(provider_kind.as_str()) else {
-            if Some(provider_kind) == primary_provider.as_ref() {
-                primary_skipped = true;
-            }
-            continue;
-        };
+        // A refused handoff ends the request: retrying it on the next member
+        // would send the same content to another provider.
+        let relay_alert = apply_pool_relay(
+            &state,
+            &ctx,
+            attempt.pool.as_ref(),
+            &mut body,
+            &decision.model,
+            start,
+        )?;
+        policy_alert = merge_alert(policy_alert, relay_alert);
+        // Per-attempt re-admission (spec 02.12 and 00.12): the hazard screener
+        // reads the body this attempt sends, skills, compression and relay
+        // edits included. Unchanged segments answer from the segment cache,
+        // so a fallback attempt costs no second classifier call.
+        if let Err(error) = crate::screening::admit::screen_chat_as(
+            &state,
+            &ctx,
+            &body,
+            crate::screening::admit::Surface::Chat,
+            &attempt.decision.model,
+        )
+        .await
+        {
+            state.metrics.inc_errors();
+            audit_failure(&state, &ctx, &decision.model, &error, start);
+            return Err(error);
+        }
+        let provider = Arc::clone(&route.provider);
 
         state.metrics.inc_provider_request(provider.name());
 
@@ -2155,7 +2568,15 @@ pub async fn run(
         // else the private field is an unknown top-level key that would 400 a
         // strict endpoint. Per attempt, because fallback swaps the provider.
         strip_anthropic_beta_for(&mut body, provider.name());
-        stamp_openrouter_identity(&mut body, provider.name(), &ctx);
+        strip_cache_control_for(&mut body, provider.name(), &decision.model);
+        sampling_extensions.apply_for(&mut body, provider.name());
+        stamp_upstream_identity(
+            &state,
+            &ctx,
+            &mut body,
+            provider.name(),
+            crate::identity::UpstreamSurface::Chat,
+        );
 
         // 7b. Admission: gate concurrent access to the resident local engine so
         // interactive chat is served ahead of background fan-out (the engine has
@@ -2172,17 +2593,26 @@ pub async fn run(
         // batching + priority matter most; the tool-loop path stays ungated.
         // Raw passthrough (`x-ryu-raw-tools`) forces the plain branch; otherwise
         // unified (catalog + signal) wins, then legacy Composio, then plain.
+        let tools_restricted = matches!(
+            budget.as_ref().map(|b| b.action),
+            Some(crate::config::BudgetAction::Restrict)
+        );
         let loop_kind = select_tool_loop(
             &ctx,
             state.tools.is_some(),
             state.composio.is_some(),
             &state.config.tools,
+            tools_restricted,
         );
         let runs_tool_loop = matches!(loop_kind, ToolLoopKind::Unified);
         let _admission = if runs_tool_loop {
             crate::concurrency::AdmissionPermit::none()
         } else {
-            match state.admission.acquire(provider.name(), ctx.priority).await {
+            match state
+                .admission
+                .acquire_for(provider.name(), ctx.priority, ctx.org_id.as_deref())
+                .await
+            {
                 Ok(permit) => permit,
                 Err(full) => {
                     return Err(GatewayError::Overloaded(format!(
@@ -2199,95 +2629,303 @@ pub async fn run(
         //      (x-ryu-tools present OR x-ryu-tool-search: on);
         //   b) else legacy Composio tool loop — when Composio is configured;
         //   c) else a plain completion.
-        // The Restrict budget action strips `tools`; we inject the search tool
-        // only when tools were NOT stripped (B-12).
-        let tools_restricted = matches!(
-            budget.as_ref().map(|b| b.action),
-            Some(crate::config::BudgetAction::Restrict)
-        );
-        let completion_result = match loop_kind {
-            ToolLoopKind::Unified => {
-                let catalog = state
-                    .tools
-                    .as_ref()
-                    .expect("Unified selected ⇒ tools catalog present");
-                let allowed = effective_tool_allowlist(&ctx, &state.config.tools);
-                let tool_ctx = crate::tools::ToolLoopContext {
-                    agent_id: ctx.agent_id.clone(),
-                    user_id: ctx.user_id.clone(),
-                    allowed,
-                };
-                if !tools_restricted {
-                    crate::tools::inject_search_tool(&mut body, &state.config.tools.always_on);
+        let (original_provider_options, original_models) =
+            apply_node_openrouter_preferences(&state, &ctx, provider.name(), &mut body, true);
+        let _pool_load = attempt
+            .pool
+            .as_ref()
+            .and_then(|pool| provider_snapshot(&state, &ctx).provider_pools.acquire(pool));
+        // A tool loop calls the provider once per round; each round is billed,
+        // not only the final one the loop returns.
+        let round_ledger = (loop_kind != ToolLoopKind::Plain)
+            .then(|| Arc::new(tool_rounds::ToolRoundLedger::default()));
+        // A detached (metered) call stops its tool loop when the client hangs
+        // up, so its rounds run on their own tasks: the round in flight then
+        // finishes and is billed from its real usage.
+        let loop_caller = caller.as_ref().filter(|_| round_ledger.is_some());
+        let metered_rounds = round_ledger.as_ref().map(|ledger| {
+            tool_rounds::MeteredRounds::new(
+                Arc::clone(&provider),
+                Arc::clone(ledger),
+                loop_caller.is_some(),
+            )
+        });
+        let loop_provider: &dyn ryu_gw_providers::Provider = match &metered_rounds {
+            Some(metered) => metered,
+            None => provider.as_ref(),
+        };
+        // OTel GenAI model-call span for this attempt: a child of the inbound
+        // HTTP server span, ended when the provider returns or fails. Provider
+        // requests made inside carry its `traceparent`. A tool loop makes
+        // several provider calls with tool runs in between, so it gets one
+        // span per provider call (`traced_provider`) instead of one around
+        // the whole loop.
+        let model_span = if matches!(loop_kind, ToolLoopKind::Plain) {
+            gen_ai_telemetry::start_span(
+                &state,
+                &ctx,
+                crate::telemetry::gen_ai_span::OPERATION_CHAT,
+                Some(gen_ai_telemetry::chat_output_type(&body)),
+                provider.name(),
+                &decision.model,
+                &body,
+                false,
+            )
+        } else {
+            crate::telemetry::gen_ai_span::ModelCallSpan::disabled()
+        };
+        let traced_provider = gen_ai_telemetry::TracedProvider::new(&state, &ctx, loop_provider);
+        let completion = model_span.instrument(async {
+            match loop_kind {
+                ToolLoopKind::Unified => {
+                    let catalog = state
+                        .tools
+                        .as_ref()
+                        .expect("Unified selected ⇒ tools catalog present");
+                    let allowed = effective_tool_allowlist(&ctx, &state.config.tools);
+                    let hints = unified_loop_hints(&ctx, &allowed);
+                    let (composio_user_id, require_composio_user_id) =
+                        unified_composio_identity(&state, &ctx)?;
+                    let tool_ctx = crate::tools::ToolLoopContext {
+                        agent_id: ctx.agent_id.clone(),
+                        user_id: ctx.user_id.clone(),
+                        composio_user_id,
+                        require_composio_user_id,
+                        allowed,
+                        firewall: Some(tool_loop_screen::firewall(&state, &ctx)),
+                        untrusted_caller: ctx.untrusted_caller,
+                        parallel_reads: state.config.tools.parallel_reads,
+                        host_conversation: ctx.host_conversation.clone(),
+                        org_tools: org_tool_gate(&state, &ctx),
+                    };
+                    inject_unified_loop_tools(
+                        &mut body,
+                        &ctx,
+                        &state.config.tools,
+                        tools_restricted,
+                    );
+                    let affinity = account_affinity(&ctx, &body);
+                    crate::tools::run_tool_loop_with_hints_for_session(
+                        &mut body,
+                        &traced_provider,
+                        &decision.model,
+                        catalog,
+                        &tool_ctx,
+                        state.config.tools.max_rounds,
+                        state.config.tools.describe_top_n,
+                        hints.as_deref(),
+                        affinity.as_deref(),
+                    )
+                    .await
                 }
-                crate::tools::run_tool_loop(
-                    &mut body,
-                    provider,
-                    &decision.model,
-                    catalog,
-                    &tool_ctx,
-                    state.config.tools.max_rounds,
-                    state.config.tools.describe_top_n,
-                )
-                .await
+                ToolLoopKind::Composio => {
+                    let composio = state
+                        .composio
+                        .as_ref()
+                        .expect("Composio selected ⇒ Composio configured");
+                    // Legacy Composio loop: returns (response, billable_tool_calls).
+                    state.metrics.inc_composio_calls();
+                    if state.resolve_cache.is_some() && ctx.org_id.is_none() {
+                        return Err(GatewayError::Unauthorized(
+                            "managed Composio calls require an authenticated organization"
+                                .to_owned(),
+                        ));
+                    }
+                    let entity_id = composio
+                        .entity_for_request(ctx.org_id.as_deref(), ctx.user_id.as_deref())?;
+                    // A request header may narrow the operator's Composio grants,
+                    // never introduce an action absent from global configuration.
+                    let allowed =
+                        legacy_composio_allowlist(ctx.tool_actions.as_deref(), composio.actions());
+                    let affinity = account_affinity(&ctx, &body);
+                    let on_charge = |cost, transaction_id: &str| {
+                        spawn_external_tool_debit_for_ids(
+                            &state,
+                            &ctx.owner_binding,
+                            ctx.user_id.as_deref(),
+                            ctx.agent_id.as_deref(),
+                            ctx.session_id.as_deref(),
+                            ctx.org_id.as_deref(),
+                            &ctx.request_id,
+                            ctx.managed_inference,
+                            "composio",
+                            None,
+                            Some(cost),
+                            Some(transaction_id),
+                            false,
+                            Some("Composio tool execution with provider receipt"),
+                            1,
+                            crate::org_limits::subject_for(&ctx).as_ref(),
+                        );
+                    };
+                    composio
+                        .run_tool_loop_for_session(
+                            &mut body,
+                            &traced_provider,
+                            &decision.model,
+                            &entity_id,
+                            &allowed,
+                            state
+                                .tools
+                                .as_ref()
+                                .map(|catalog| catalog as &dyn crate::tools::CoreCatalog),
+                            ctx.agent_id.as_deref(),
+                            affinity.as_deref(),
+                            Some(&tool_loop_screen::firewall(&state, &ctx)),
+                            &org_tool_gate(&state, &ctx),
+                            &on_charge,
+                        )
+                        .await
+                }
+                ToolLoopKind::Plain => {
+                    // Plain completion: no tool loop ⇒ no billable tool calls. Also the
+                    // raw-passthrough target — the caller's own tools/tool_calls pass
+                    // through untouched.
+                    let affinity = account_affinity(&ctx, &body);
+                    provider
+                        .complete_for_session(&decision.model, &body, affinity.as_deref())
+                        .await
+                        .map_err(GatewayError::from)
+                        .map(|v| (v, 0u64))
+                }
             }
-            ToolLoopKind::Composio => {
-                let composio = state
-                    .composio
-                    .as_ref()
-                    .expect("Composio selected ⇒ Composio configured");
-                // Legacy Composio loop: returns (response, billable_tool_calls).
-                state.metrics.inc_composio_calls();
-                let entity_id = ctx
-                    .user_id
-                    .as_deref()
-                    .unwrap_or(&state.config.composio.entity_id);
-                // Per-agent allowlist (#456): when Core forwards `x-ryu-tools`,
-                // scope the tool loop to exactly those actions; otherwise fall back
-                // to the gateway's global `composio.actions` config.
-                // `"*"` is stripped for the same reason as in `parse_tool_actions`:
-                // the client header must not be able to introduce a wildcard grant.
-                let per_request: Vec<String> = ctx
-                    .tool_actions
-                    .as_deref()
-                    .map(|s| {
-                        s.split(',')
-                            .map(str::trim)
-                            .filter(|x| !x.is_empty() && *x != "*")
-                            .map(String::from)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let allowed: &[String] = if per_request.is_empty() {
-                    composio.actions()
-                } else {
-                    &per_request
+        });
+        let completion = unless_caller_gone(completion, loop_caller);
+        let completion_outcome = if let Some((deadline, _)) = execution_ceiling {
+            match tokio::time::timeout_at(deadline, completion).await {
+                Ok(outcome) => outcome,
+                Err(_) => {
+                    // Rounds the provider answered are spend, and so is a
+                    // metered round still in flight.
+                    if let Some(ledger) = round_ledger.as_ref() {
+                        settle_timed_out_tool_rounds(
+                            &state,
+                            &ctx,
+                            attempt_index,
+                            ledger,
+                            provider.name(),
+                            &decision.model,
+                            budget.clone(),
+                            start,
+                            credit_reservation.take(),
+                        );
+                    }
+                    let error = GatewayError::ProviderDeliveryUncertain(
+                        "Pool final execution timed out and is not replayed".into(),
+                    );
+                    gen_ai_telemetry::finish_error(model_span, &error);
+                    return Err(error);
+                }
+            }
+        } else {
+            completion.await
+        };
+        let completion_result = match completion_outcome {
+            LoopOutcome::Finished(result) => result,
+            LoopOutcome::CallerGone => {
+                // The client hung up mid-loop. Bill every round the provider
+                // answered, including the one in flight once it finishes,
+                // under the request id; nobody reads the response.
+                let rounds = match round_ledger.as_ref() {
+                    Some(ledger) => ledger.settled(ABANDONED_PROVIDER_WAIT).await,
+                    None => tool_rounds::ToolRoundTotals::default(),
                 };
-                composio
-                    .run_tool_loop(&mut body, provider, &decision.model, entity_id, allowed)
-                    .await
-            }
-            ToolLoopKind::Plain => {
-                // Plain completion: no tool loop ⇒ no billable tool calls. Also the
-                // raw-passthrough target — the caller's own tools/tool_calls pass
-                // through untouched.
-                provider
-                    .complete(&decision.model, &body)
-                    .await
-                    .map_err(GatewayError::from)
-                    .map(|v| (v, 0u64))
+                if rounds.rounds > 0 {
+                    settle_unanswered_tool_rounds(
+                        &state,
+                        &ctx,
+                        ctx.request_id.clone(),
+                        rounds,
+                        provider.name(),
+                        &decision.model,
+                        budget.clone(),
+                        start,
+                        credit_reservation.take(),
+                        "client disconnected during the tool loop",
+                        None,
+                    );
+                }
+                return Err(GatewayError::Internal(anyhow::anyhow!(
+                    "the client disconnected during the tool loop"
+                )));
             }
         };
+        match &completion_result {
+            Ok((response, _)) => gen_ai_telemetry::finish_chat(model_span, response),
+            Err(error) => gen_ai_telemetry::finish_error(model_span, error),
+        }
+        restore_node_openrouter_preferences(
+            provider.name(),
+            &mut body,
+            original_provider_options,
+            original_models,
+        );
 
         match completion_result {
             Ok((mut response, billable_tool_calls)) => {
+                upstream_signals::note_soft_refusal(
+                    &state,
+                    &ctx,
+                    attempt_index,
+                    provider.name(),
+                    &response,
+                );
+                // A tool loop settles every round it ran. The client still
+                // receives the final round's own usage.
+                let round_totals = round_ledger.as_ref().map(|ledger| ledger.totals());
+                let billed = round_totals.map(|rounds| rounds.billing_view(&response));
+                // Only the answering round is judged against the token limits;
+                // `admitted_tokens` keeps the earlier rounds out of that check.
+                let earlier_round_tokens =
+                    round_totals.map_or(0, |rounds| rounds.earlier_round_tokens());
+                if execution_ceiling.is_some_and(|(_, limit)| {
+                    pool_execution::response_text_bytes(&response)
+                        .map_or(true, |bytes| bytes > limit)
+                }) {
+                    // Settle accepted work below before rejecting oversized output.
+                    let _settlement = inference_governance::settle_completion(
+                        &state,
+                        &ctx,
+                        billed.as_ref().unwrap_or(&response),
+                        inference_governance::CompletionReceipt {
+                            provider: provider.name().to_owned(),
+                            model: decision.model.clone(),
+                            purpose: Some("pool_output_limit"),
+                            audit_provider: provider.name().into(),
+                            backend: Some("pool-final"),
+                            start,
+                            admitted_tokens: earlier_round_tokens,
+                            estimated_input: estimate_prompt_tokens(&body),
+                            budget: budget.clone(),
+                            reservations: credit_reservation.take().into_iter().collect(),
+                            zero_cost: false,
+                        },
+                    );
+                    record_earlier_round_tokens(&state, &ctx, earlier_round_tokens);
+                    return Err(GatewayError::ProviderError(
+                        "Pool final output exceeds configured byte limit".into(),
+                    ));
+                }
                 // Provider generation is complete and the response is fully
                 // buffered. Release the local-engine slot before an output
                 // evaluator makes a judge call through the same provider; a
                 // single-slot local engine must be re-entrant for that
                 // post-generation governance pass.
                 drop(_admission);
-                state.circuit_breaker.record_success(provider.name());
+                state
+                    .circuit_breaker
+                    .record_success(&bound_circuit_key(&route));
+                if let Some(route) = attempt.pool.as_ref() {
+                    let affinity = account_affinity(&ctx, &body);
+                    provider_snapshot(&state, &ctx)
+                        .provider_pools
+                        .record_success_facts(
+                            route,
+                            affinity.as_deref(),
+                            &pool_signals::scoped_request_facts(&state, &ctx, &pool_base_body),
+                            start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                        );
+                }
                 // Determine degraded mode: we served via a fallback when the primary
                 // was skipped and a different provider is now responding (#218).
                 let degraded = if primary_skipped {
@@ -2297,10 +2935,17 @@ pub async fn run(
                     None
                 };
 
-                let input_tokens = response["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
-                let output_tokens = response["usage"]["completion_tokens"].as_u64().unwrap_or(0);
-                let cached_tokens = provider_cached_tokens(&response);
-                let cache_write_tokens = provider_cache_write_tokens(&response);
+                let billed_response = billed.as_ref().unwrap_or(&response);
+                let input_tokens = billed_response["usage"]["prompt_tokens"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let output_tokens = billed_response["usage"]["completion_tokens"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let cache_read_reported = provider_cached_tokens_reported(&response);
+                let cache_write_reported = provider_cache_write_tokens_reported(&response);
+                let cached_tokens = cache_read_reported.unwrap_or(0);
+                let cache_write_tokens = cache_write_reported.unwrap_or(0);
                 if cached_tokens > 0 {
                     state.metrics.add_cached_tokens(cached_tokens);
                 }
@@ -2311,21 +2956,28 @@ pub async fn run(
                 let mut settlement = inference_governance::settle_completion(
                     &state,
                     &ctx,
-                    &response,
+                    billed_response,
                     inference_governance::CompletionReceipt {
                         provider: provider.name().to_owned(),
                         model: decision.model.clone(),
-                        reason: "gateway_usage",
+                        purpose: None,
                         audit_provider: provider.name().into(),
                         backend: None,
                         start,
-                        admitted_tokens: 0,
+                        admitted_tokens: earlier_round_tokens,
                         estimated_input: estimate_prompt_tokens(&body),
                         budget: budget.clone(),
                         reservations: credit_reservation.take().into_iter().collect(),
                         zero_cost: false,
                     },
                 );
+                record_earlier_round_tokens(&state, &ctx, earlier_round_tokens);
+                {
+                    let record = settlement.record_mut();
+                    record.prompt_cache_outcome = Some(prompt_cache_outcome.as_str().to_owned());
+                    record.prompt_cache_read_tokens = cache_read_reported;
+                    record.prompt_cache_write_tokens = cache_write_reported;
+                }
                 // Tools have already executed too; output rejection must not erase their bill.
                 spawn_tool_call_debit(&state, &ctx, billable_tool_calls);
                 // 9. Outbound firewall
@@ -2347,10 +2999,48 @@ pub async fn run(
                         error
                     })?;
 
+                // 9c. Hazard screener on the output role (screener addendum
+                // section 8). Classified before return; a block withholds the
+                // response after the provider ran, so the settlement fails.
+                // Its events name this attempt and its provider (spec 00.5).
+                screen_buffered_output(
+                    &state,
+                    &ctx.at_attempt(attempt_index, &attempt.decision.provider),
+                    &response,
+                )
+                .await
+                .map_err(|error| {
+                    settlement.fail(&error);
+                    error
+                })?;
+
                 if settlement.overrun {
                     state.metrics.inc_rate_limited();
                     state.metrics.inc_errors();
                     return Err(GatewayError::RateLimited);
+                }
+
+                if let Some(route) = attempt.pool.as_ref() {
+                    if let Some(session) = account_affinity(&ctx, &pool_base_body) {
+                        let scope_session =
+                            format!("{}:{}", auxiliary::scope(&state, &ctx), session);
+                        let latest_user = pool_base_body["messages"]
+                            .as_array()
+                            .and_then(|messages| {
+                                messages
+                                    .iter()
+                                    .rev()
+                                    .find(|message| message["role"] == "user")
+                            })
+                            .and_then(|message| message["content"].as_str())
+                            .unwrap_or_default();
+                        provider_snapshot(&state, &ctx).provider_pools.record_relay(
+                            route,
+                            &scope_session,
+                            &response,
+                            latest_user,
+                        );
+                    }
                 }
 
                 // 11. Eval scoring (sampled). When this request is sampled, score
@@ -2370,28 +3060,49 @@ pub async fn run(
                 };
 
                 // 12. Exact-match cache store
-                state.cache.insert(cache_key, response.clone());
+                if cache_allowed
+                    && provider_kind == &decision.provider
+                    && decision.provider == cache_origin.0
+                    && decision.model == cache_origin.1
+                    && route.cache_allowed
+                {
+                    state.cache.insert_async(cache_key, response.clone()).await;
+                }
 
                 // 12b. Semantic cache store (if we fetched an embedding earlier)
-                if let (Some(sc), Some(emb)) = (state.semantic_cache.active(), semantic_embedding) {
-                    sc.insert(ctx.org_id.clone(), emb, response.clone());
+                if cache_allowed
+                    && provider_kind == &decision.provider
+                    && decision.provider == cache_origin.0
+                    && decision.model == cache_origin.1
+                    && route.cache_allowed
+                {
+                    if let (Some(sc), Some(emb)) =
+                        (state.semantic_cache.active(), semantic_embedding)
+                    {
+                        sc.insert_async(Some(semantic_scope.clone()), emb, response.clone())
+                            .await;
+                    }
+                }
+
+                // 11b. Online evals (`[evals.online]`): offer a sampled copy of
+                //      the DLP-processed exchange to the background scorer.
+                //      Non-blocking; a full queue drops the sample.
+                if state.online_evals.is_running() {
+                    crate::online_evals::maybe_enqueue(
+                        &state,
+                        &ctx,
+                        &crate::online_evals::latest_user_text(&pool_base_body),
+                        &crate::online_evals::response_text(&response),
+                        &decision.model,
+                        provider.name(),
+                    );
                 }
 
                 settlement.record_mut().eval_score = eval_score;
                 settlement.record_mut().latency_ms = latency_ms;
 
-                // 14b. Experimental OTel GenAI span (#540, P1): reuse the same
-                // tokens/model/provider/latency. No-op unless OTEL_SEMCONV_STABILITY_OPT_IN
-                // opts into the experimental conventions; egresses only if OTLP export
-                // is also consented (orthogonal gates).
-                crate::telemetry::emit_gen_ai_span(
-                    "chat",
-                    provider.name(),
-                    &decision.model,
-                    input_tokens,
-                    output_tokens,
-                    latency_ms,
-                );
+                // 14b. The OTel GenAI model-call span already ended when the
+                // provider returned (`gen_ai_telemetry::finish_chat` above).
                 crate::ryu_analytics::emit_model_call(
                     "chat",
                     provider.name(),
@@ -2410,6 +3121,7 @@ pub async fn run(
                     input_tokens,
                     output_tokens,
                     cached_tokens,
+                    cache_write_tokens,
                     latency_ms,
                     eval_score = ?eval_score,
                     degraded = ?degraded,
@@ -2432,20 +3144,98 @@ pub async fn run(
                 });
             }
             Err(e) => {
+                // A recognised upstream safety refusal on a Ryu-held
+                // credential becomes a safety outcome here (spec 03.5).
+                let e = upstream_signals::settle(&state, &ctx, attempt_index, e);
+                // Rounds the provider answered before the loop failed are spend.
+                if let Some(rounds) = round_ledger
+                    .as_ref()
+                    .map(|ledger| ledger.totals())
+                    .filter(|rounds| rounds.rounds > 0)
+                {
+                    settle_failed_tool_rounds(
+                        &state,
+                        &ctx,
+                        attempt_index,
+                        rounds,
+                        provider.name(),
+                        &decision.model,
+                        budget.clone(),
+                        start,
+                        credit_reservation.take(),
+                        Some(&e),
+                    );
+                }
+                if matches!(e, GatewayError::AccountingUnavailable) {
+                    if let Some(org_id) = ctx.org_id.as_deref() {
+                        state.wallet.set_org_accounting_unavailable(org_id, true);
+                    }
+                    return Err(e);
+                }
+                // A safety or policy outcome (a tool loop stopped by the
+                // firewall, a refused route) is not a provider failure: no
+                // circuit penalty and no fallback, which would shop the request
+                // to another provider and run the loop and its tools again.
+                if e.is_safety_outcome() {
+                    audit_failure(&state, &ctx, &decision.model, &e, start);
+                    return Err(e);
+                }
+                if let Some(route) = attempt.pool.as_ref() {
+                    match &e {
+                        GatewayError::ProviderRateLimited { retry_after, .. } => {
+                            provider_snapshot(&state, &ctx)
+                                .provider_pools
+                                .record_rate_limit(route, *retry_after);
+                        }
+                        GatewayError::ProviderPaymentRequired { .. } => {
+                            provider_snapshot(&state, &ctx)
+                                .provider_pools
+                                .record_rate_limit(route, Some(300));
+                        }
+                        // Feeds the Auto strategy's observed reliability; without it
+                        // the ring would only ever hold successes.
+                        error if penalizes_provider_circuit(error) => {
+                            provider_snapshot(&state, &ctx)
+                                .provider_pools
+                                .record_failure(route);
+                        }
+                        _ => {}
+                    }
+                }
+                if matches!(&e, GatewayError::ProviderDeliveryUncertain(_)) {
+                    state.metrics.inc_provider_error(provider.name());
+                    last_err = Some(e);
+                    break;
+                }
                 // Capacity (429) and account payment (402) are retry/fallback
                 // signals, not provider outages. Neither may poison health state.
                 if !penalizes_provider_circuit(&e) {
                     state.metrics.inc_provider_error(provider.name());
-                    warn!(provider = %provider.name(), error = %e, "provider unavailable for this account, demoting to next tier");
+                    log_provider_failure(
+                        provider.name(),
+                        &e,
+                        "provider unavailable for this account, demoting to next tier",
+                    );
                 } else {
-                    state.circuit_breaker.record_failure(provider.name());
+                    state
+                        .circuit_breaker
+                        .record_failure(&bound_circuit_key(&route));
                     state.metrics.inc_provider_error(provider.name());
-                    warn!(provider = %provider.name(), error = %e, "provider failed, trying fallback");
+                    log_provider_failure(provider.name(), &e, "provider failed, trying fallback");
+                }
+                if ends_attempt_chain(&state, &e) {
+                    last_err = Some(e);
+                    break;
                 }
                 if Some(provider_kind) == primary_provider.as_ref() {
                     primary_skipped = true;
                 }
                 remember_preferred_provider_error(&mut last_err, e);
+                if attempt.pool.is_some() && loop_kind != ToolLoopKind::Plain {
+                    // A managed tool loop may already have performed side effects
+                    // before its model call failed. Never replay it on a member.
+                    break;
+                }
             }
         }
     }
@@ -2460,14 +3250,18 @@ pub async fn run(
             ))
         },
         |prev| match prev {
+            // A refusal that ended the chain on the hosted fleet or a managed
+            // node is returned as itself: the providers did not all fail.
+            GatewayError::ProviderRejected { .. } if state.custody.ends_chain_on_refusal() => prev,
             // Wrap generic chain errors into the typed variant so clients get
             // a stable `all_providers_unavailable` code, not a 404 or 502.
-            GatewayError::CircuitOpen(_) | GatewayError::ProviderError(_) => {
-                GatewayError::AllProvidersUnavailable(format!(
-                    "All providers unavailable for model '{}': {prev}",
-                    decision.model
-                ))
-            }
+            GatewayError::CircuitOpen(_)
+            | GatewayError::ProviderError(_)
+            | GatewayError::ProviderRejected { .. }
+            | GatewayError::ProviderTransport(_) => GatewayError::AllProvidersUnavailable(format!(
+                "All providers unavailable for model '{}': {prev}",
+                decision.model
+            )),
             other => other,
         },
     );
@@ -2476,9 +3270,10 @@ pub async fn run(
         GatewayError::AllProvidersUnavailable(_) => "all_providers_unavailable",
         GatewayError::ProviderRateLimited { .. } => "provider_rate_limited",
         GatewayError::ProviderPaymentRequired { .. } => "provider_payment_required",
-        GatewayError::RateLimited => "rate_limit_exceeded",
+        GatewayError::RateLimited | GatewayError::RateLimitedBy(_) => "rate_limit_exceeded",
         GatewayError::InsufficientCredits => "insufficient_credits",
         GatewayError::AccountingUnavailable => "credit_accounting_unavailable",
+        GatewayError::BudgetStoreUnavailable(_) => "budget_store_unavailable",
         GatewayError::BudgetExceeded(_) => "budget_exceeded",
         GatewayError::FirewallBlocked(_, _) | GatewayError::PolicyViolation(_) => {
             "policy_violation"
@@ -2498,176 +3293,145 @@ pub async fn run(
     Err(err)
 }
 
-/// Record a cache-served response in the audit log. Cache hits incur no provider
-/// token usage, so token counts are recorded as zero.
-fn audit_cache_hit(
-    state: &AppState,
-    ctx: &RequestContext,
-    provider_used: &'static str,
-    model: &str,
-    response: &Value,
-    start: Instant,
-) {
-    if !state.audit.is_enabled() {
-        return;
-    }
-    let input_tokens = response["usage"]["prompt_tokens"].as_u64().unwrap_or(0);
-    let output_tokens = response["usage"]["completion_tokens"].as_u64().unwrap_or(0);
-    state.log_audit(AuditRecord {
-        request_id: ctx.request_id.clone(),
-        api_key: ctx.api_key.clone(),
-        user_name: ctx.user_name.clone(),
-        org_id: ctx.org_id.clone(),
-        team_id: ctx.team_id.clone(),
-        project_id: ctx.project_id.clone(),
-        provider: provider_used.to_string(),
-        model: model.to_string(),
-        input_tokens,
-        output_tokens,
-        cache_hit: true,
-        latency_ms: start.elapsed().as_millis() as u64,
-        eval_score: None,
-        error: None,
-        skill_ids: ctx.skill_ids.clone(),
-        session_id: ctx.session_id.clone(),
-        user_id: ctx.user_id.clone(),
-        agent_id: ctx.agent_id.clone(),
-        feature: ctx.feature.clone(),
-        managed_inference: ctx.managed_inference,
-        provider_cost_micro_usd: None,
-        event_type: crate::audit::EventType::ModelCall,
-        backend: None,
-        command: None,
-        duration_ms: None,
-        exit_code: None,
-        widget_instance_id: None,
-    });
-}
-
-/// Record a failed request in the audit log. The error message is run through
-/// the outbound firewall (U20 DLP) so any sensitive data it carries is redacted
-/// before being persisted.
-fn audit_failure(
-    state: &AppState,
-    ctx: &RequestContext,
-    model: &str,
-    err: &GatewayError,
-    start: Instant,
-) {
-    if !state.audit.is_enabled() {
-        return;
-    }
-    let source = match err {
-        GatewayError::ProviderError(_)
-        | GatewayError::ProviderPaymentRequired { .. }
-        | GatewayError::AllProvidersUnavailable(_) => "upstream provider request failed".to_owned(),
-        _ => err.to_string(),
-    };
-    let redacted_error = state.with_firewall(|fw| {
-        let sanitized = fw.sanitize(&source);
-        fw.redact_outbound(&sanitized).0
-    });
-    state.log_audit(AuditRecord {
-        request_id: ctx.request_id.clone(),
-        api_key: ctx.api_key.clone(),
-        user_name: ctx.user_name.clone(),
-        org_id: ctx.org_id.clone(),
-        team_id: ctx.team_id.clone(),
-        project_id: ctx.project_id.clone(),
-        provider: "none".to_string(),
-        model: model.to_string(),
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_hit: false,
-        latency_ms: start.elapsed().as_millis() as u64,
-        eval_score: None,
-        error: Some(redacted_error),
-        skill_ids: ctx.skill_ids.clone(),
-        session_id: ctx.session_id.clone(),
-        user_id: ctx.user_id.clone(),
-        agent_id: ctx.agent_id.clone(),
-        feature: ctx.feature.clone(),
-        managed_inference: ctx.managed_inference,
-        provider_cost_micro_usd: None,
-        event_type: crate::audit::EventType::ModelCall,
-        backend: None,
-        command: None,
-        duration_ms: None,
-        exit_code: None,
-        widget_instance_id: None,
-    });
-}
-
-/// Emit an audit record when the LLM inspector blocks an inbound request,
-/// mirroring the regex firewall's audit shape (provider tag `"inspector"`).
-fn audit_inspector_block(
-    state: &AppState,
-    ctx: &RequestContext,
-    body: &Value,
-    verdict: &crate::firewall::inspector::InspectorVerdict,
-) {
-    if !state.audit.is_enabled() {
-        return;
-    }
-    state.log_audit(AuditRecord {
-        request_id: ctx.request_id.clone(),
-        api_key: ctx.api_key.clone(),
-        user_name: ctx.user_name.clone(),
-        org_id: ctx.org_id.clone(),
-        team_id: ctx.team_id.clone(),
-        project_id: ctx.project_id.clone(),
-        provider: "inspector".to_string(),
-        model: body["model"].as_str().unwrap_or("unknown").to_string(),
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_hit: false,
-        latency_ms: 0,
-        eval_score: None,
-        error: Some(format!(
-            "inspector blocked: {} [{}]",
-            verdict.reason,
-            verdict.categories.join(",")
-        )),
-        skill_ids: ctx.skill_ids.clone(),
-        session_id: ctx.session_id.clone(),
-        user_id: ctx.user_id.clone(),
-        agent_id: ctx.agent_id.clone(),
-        feature: ctx.feature.clone(),
-        managed_inference: ctx.managed_inference,
-        provider_cost_micro_usd: None,
-        event_type: crate::audit::EventType::ModelCall,
-        backend: Some("inspector".to_string()),
-        command: None,
-        duration_ms: None,
-        exit_code: None,
-        widget_instance_id: None,
-    });
-}
-
-// ─── Streaming pipeline ───────────────────────────────────────────────────────
-
 pub async fn run_stream(
     state: Arc<AppState>,
     ctx: RequestContext,
+    body: Value,
+) -> Result<PipelineStreamOutput, GatewayError> {
+    let managed = ctx.managed_inference;
+    // See `run`. A stream that has started is never re-run: only an error
+    // returned before the response exists falls back.
+    if let Some(plan) = own_supply_plan(&state, &ctx, &body) {
+        let (attempt_ctx, attempt_body) = own_supply_attempt(&ctx, &body, &plan);
+        let attempt = run_stream_unaliased(Arc::clone(&state), attempt_ctx, attempt_body).await;
+        if let Err(error) = &attempt {
+            note_own_supply_failure(&state, &plan, error);
+        }
+        match attempt {
+            Ok(mut output) => {
+                output.body = model_alias::alias_stream(output.body, plan.shown_model.clone());
+                output.model_used = plan.shown_model;
+                output.provider_used = model_alias::ALIAS_PROVIDER_LABEL;
+                mask_degraded(&mut output.degraded, managed);
+                return Ok(output);
+            }
+            Err(error) if own_supply::may_fall_back(&error, &ctx) => {
+                warn!(
+                    request_id = %ctx.request_id,
+                    slot = %plan.slot,
+                    error = %error,
+                    "own supply failed before output; streaming from the Ryu Router route"
+                );
+            }
+            Err(error) => return Err(mask_own_supply_error(error, &plan, managed)),
+        }
+    }
+    // See `run`: every streamed frame names the alias the client asked for.
+    let alias = model_alias::requested_alias(&body);
+    let mut output = run_stream_unaliased(state, ctx, body)
+        .await
+        .map_err(|error| {
+            model_alias::mask_pool_slots(model_alias::mask_error(error, alias), managed)
+        })?;
+    let shown: Option<String> = alias
+        .map(str::to_owned)
+        .or_else(|| model_alias::served_display_id(output.provider_used, &output.model_used));
+    if let Some(shown) = shown {
+        output.body = model_alias::alias_stream(output.body, shown.clone());
+        output.model_used = shown;
+        output.provider_used = model_alias::ALIAS_PROVIDER_LABEL;
+    }
+    mask_degraded(&mut output.degraded, managed);
+    mask_provider_used(&mut output.provider_used, managed);
+    Ok(output)
+}
+
+async fn run_stream_unaliased(
+    state: Arc<AppState>,
+    mut ctx: RequestContext,
     mut body: Value,
 ) -> Result<PipelineStreamOutput, GatewayError> {
+    capture_provider_snapshot(&state, &mut ctx);
     let start = Instant::now();
+    // A metered stream settles provider work its client abandons before the
+    // first byte (see `StreamOpening`); an unmetered one keeps cancel-on-drop.
+    let settles_after_hang_up = settles_after_client_hang_up(&state, &ctx);
 
     state.metrics.inc_requests();
+    let mut sampling_extensions = SamplingExtensions::take(&mut body);
 
     // Admission and content governance precede optional smart-router inference.
     let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
-    let (mut decision, _cache_key, pre_alert) =
+    let (mut decision, _cache_key, mut pre_alert, mut pool_route) =
         pre_process(&state, &ctx, &mut body).await.map_err(|e| {
             state.metrics.inc_errors();
             audit_failure(&state, &ctx, &requested_model, &e, start);
             e
         })?;
+    state.traffic.note_screen(
+        &ctx.request_id,
+        crate::traffic::current_route(),
+        start.elapsed().as_millis() as u64,
+    );
 
-    // Skills injection
-    if !state.skills.is_empty() {
-        state.skills.inject(&mut body);
+    // Skills injection, then a screen of the injected text (P0-4).
+    let skills_alert =
+        edit_rescan::inject_skills(&state, &ctx, &mut body, &requested_model, start)?;
+    pre_alert = merge_alert(pre_alert, skills_alert);
+
+    let mut execution_ceiling = None;
+    if let Some(route) = pool_route
+        .as_ref()
+        .filter(|route| route.execution.is_some())
+    {
+        match pool_dispatch::prepare(Arc::clone(&state), &ctx, route, body.clone()).await? {
+            Some(pool_dispatch::PreparedExecution::Single {
+                target,
+                mut response,
+            }) => {
+                apply_outbound_json_dlp(&state, &ctx, &mut response)?;
+                apply_inline_output_evaluators(&state, &ctx, &mut response).await?;
+                screen_buffered_output(&state, &ctx, &response).await?;
+                let bound = provider_snapshot(&state, &ctx).bind(&RouteDecision {
+                    provider: ProviderId::from(target.provider.as_str()),
+                    model: target.model.clone(),
+                })?;
+                let data = crate::tools::value_to_sse_stream(&response);
+                return Ok(PipelineStreamOutput {
+                    body: data,
+                    context: ctx,
+                    provider_used: bound.provider.name(),
+                    model_used: target.model,
+                    budget: None,
+                    degraded: None,
+                    policy_alert: pre_alert,
+                    prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
+                });
+            }
+            Some(pool_dispatch::PreparedExecution::Final {
+                target,
+                body: prepared,
+                timeout_ms,
+                output_bytes,
+            }) => {
+                body = prepared;
+                decision = RouteDecision {
+                    provider: ProviderId::from(target.provider.as_str()),
+                    model: target.model,
+                };
+                execution_ceiling = Some((
+                    tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms),
+                    output_bytes,
+                ));
+                pool_route = None;
+            }
+            None => {}
+        }
     }
+
+    let execution_final_route = execution_ceiling.map(|_| decision.clone());
+    let original_max_tokens = body.get("max_tokens").cloned();
+    let original_max_completion_tokens = body.get("max_completion_tokens").cloned();
 
     // Per-user / per-agent budgets (U21). Enforcement must run on the streaming
     // path too: Core's chat forwards `stream: true`, so without this the budget
@@ -2681,7 +3445,10 @@ pub async fn run_stream(
         // — the exact window the reservation exists to cover. It is moved into
         // `StreamObserverState` below and released when the stream ends by ANY
         // means, including a client that hangs up mid-answer.
-        reservation: credit_reservation,
+        reservation: mut credit_reservation,
+        // Same lifetime: the stream observer records the spend at stream end,
+        // and this in-flight claim is released only after that.
+        budget_hold,
     } = enforce_budget(
         &state,
         &ctx,
@@ -2690,17 +3457,30 @@ pub async fn run_stream(
         BudgetChargeKind::Model,
         OutputCeiling::Clamp,
     )?;
-    auxiliary::authorize_model(&state, &ctx, &decision.model)?;
+    if execution_final_route.as_ref().is_some_and(|target| {
+        target.provider != decision.provider || target.model != decision.model
+    }) {
+        return Err(GatewayError::BudgetExceeded(None));
+    }
+    authorize_routed_model(&state, &ctx, &requested_model, &decision)?;
+    reconcile_pool_after_budget(&decision, &mut pool_route)?;
     // Firewall (Ok-path) alert first so it wins a same-tier tie deterministically.
-    let policy_alert = merge_alert(pre_alert, budget_alert);
+    let mut policy_alert = merge_alert(pre_alert, budget_alert);
 
-    // When configured, ask the provider to emit a terminal usage frame so the
-    // stream observer can parse real token counts at stream end. Falls back to
-    // the estimate below for non-conforming providers (e.g. local llama.cpp
-    // builds that ignore stream_options). This is per-registry config, not
-    // hardcoded — evals.stream_usage is the swappable default (issue #179).
-    let stream_usage_requested = state.config.evals.stream_usage;
-    if stream_usage_requested {
+    // Compress once before streaming dispatch, matching the regular chat path
+    // (screened, and fail closed on the hosted fleet).
+    let compression_alert =
+        edit_rescan::compress(&state, &ctx, &mut body, &decision.model, start).await?;
+    policy_alert = merge_alert(policy_alert, compression_alert);
+
+    // Ask the provider to emit a terminal usage frame so the stream observer
+    // can parse real token counts at stream end. Falls back to the estimates
+    // for non-conforming providers (e.g. local llama.cpp builds that ignore
+    // stream_options). `evals.stream_usage` is the swappable default (issue
+    // #179), but a METERED stream always asks, overriding a client `false`:
+    // it is billed from that frame.
+    let stream_metered = state.config.credits.is_active() || ctx.managed_inference;
+    if state.config.evals.stream_usage || stream_metered {
         inject_stream_usage_option(&mut body);
     }
 
@@ -2718,11 +3498,11 @@ pub async fn run_stream(
     // without this, `stream: true` bypasses the TPM bucket entirely. Key
     // derivation mirrors the non-streaming check exactly.
     if estimated_tokens > 0
-        && !state.rate_limiter.check_tokens_for_key(
+        && (!state.rate_limiter.check_tokens_for_key(
             &ctx.api_key,
             estimated_tokens,
             ctx.key_config.as_ref(),
-        )
+        ) || !crate::org_limits::check_tokens(&state, &ctx, estimated_tokens))
     {
         warn!(key_id = %crate::audit::credential_log_id(&ctx.api_key), tokens = estimated_tokens, "token-per-minute budget exceeded (stream admission)");
         state.metrics.inc_rate_limited();
@@ -2738,23 +3518,88 @@ pub async fn run_stream(
     // below with zero added latency.
     // Raw passthrough (`x-ryu-raw-tools`) suppresses the unified loop here too, so
     // an SDK-side agent's own tools stream through untouched.
-    let tools_active =
-        !ctx.raw_tools && state.tools.is_some() && tool_signal_active(&ctx, &state.config.tools);
     let tools_restricted = matches!(
         budget.as_ref().map(|b| b.action),
         Some(crate::config::BudgetAction::Restrict)
     );
 
-    let fallback_chain = clamped_fallback_chain(&state, &ctx, &decision);
+    let tools_active = select_tool_loop(
+        &ctx,
+        state.tools.is_some(),
+        false,
+        &state.config.tools,
+        tools_restricted,
+    ) == ToolLoopKind::Unified;
+
+    let pool_base_body = body.clone();
+    let fallback_chain = if execution_ceiling.is_some() {
+        vec![ChatAttemptRoute {
+            decision: decision.clone(),
+            pool: None,
+        }]
+    } else {
+        chat_attempt_routes(&state, &ctx, &decision, pool_route.as_ref())
+    };
     let mut last_err: Option<GatewayError> = None;
-    let primary_provider_stream = fallback_chain.first().cloned();
+    let primary_provider_stream = fallback_chain
+        .first()
+        .map(|attempt| attempt.decision.provider.clone());
     let mut primary_skipped_stream = false;
 
-    // Prompt-cache markers for the streaming path — same placement rationale as
-    // the non-streaming `run`: last point before dispatch, once for the chain.
-    let prompt_cache_outcome = apply_prompt_cache(&state, &ctx, &decision.model, &mut body);
+    // Stamp markers after request transforms. A pool retry restores the request
+    // body and applies markers again for that member's model and dialect.
+    let mut prompt_cache_outcome = apply_prompt_cache(&state, &ctx, &decision.model, &mut body);
 
-    for provider_kind in &fallback_chain {
+    for (attempt_index, attempt) in fallback_chain.iter().enumerate() {
+        // Standing first on every attempt (spec 05.5): a push that lands
+        // while an attempt fails must stop the next one from dispatching.
+        crate::standing::recheck(&state, &ctx).await?;
+        if attempt_index > 0 {
+            drop(credit_reservation.take());
+            if pool_route.is_some() {
+                body = pool_base_body.clone();
+            }
+            restore_token_ceiling(&mut body, "max_tokens", original_max_tokens.as_ref());
+            restore_token_ceiling(
+                &mut body,
+                "max_completion_tokens",
+                original_max_completion_tokens.as_ref(),
+            );
+            if let Some(restrict) = budget
+                .as_ref()
+                .filter(|rule| rule.action == crate::config::BudgetAction::Restrict)
+            {
+                body["max_tokens"] = Value::from(restrict.restrict_max_tokens);
+            }
+            decision = attempt.decision.clone();
+            if let Err(error) = canonicalize_sdk_decision(&state, &ctx, &mut decision) {
+                last_err = Some(error);
+                continue;
+            }
+            if let Err(error) = authorize_routed_model(&state, &ctx, &requested_model, &decision) {
+                last_err = Some(error);
+                continue;
+            }
+            match reserve_route_credit(&state, &ctx, &mut body, &decision, OutputCeiling::Clamp) {
+                Ok(reservation) => credit_reservation = reservation,
+                Err(error) => {
+                    last_err = Some(error);
+                    continue;
+                }
+            }
+            prompt_cache_outcome = apply_prompt_cache(&state, &ctx, &decision.model, &mut body);
+        }
+        let candidate_provider = &attempt.decision.provider;
+        let canonical_provider =
+            match canonical_sdk_provider(&state, &ctx, candidate_provider, &attempt.decision.model)
+            {
+                Ok(provider) => provider,
+                Err(error) => {
+                    last_err = Some(error);
+                    continue;
+                }
+            };
+        let provider_kind = &canonical_provider;
         if let Err(error) =
             inference_governance::authorize_provider_region(&state, &ctx, provider_kind)
         {
@@ -2764,7 +3609,11 @@ pub async fn run_stream(
             }
             continue;
         }
-        if state.circuit_breaker.is_open(provider_kind.as_str()) {
+        if state.circuit_breaker.is_open(&provider_circuit_key(
+            &state,
+            &ctx,
+            provider_kind.as_str(),
+        )) {
             remember_preferred_provider_error(
                 &mut last_err,
                 GatewayError::CircuitOpen(provider_kind.as_str().to_string()),
@@ -2775,18 +3624,57 @@ pub async fn run_stream(
             continue;
         }
 
-        let Some(provider) = state.providers.get(provider_kind.as_str()) else {
+        let Some(provider) = provider_snapshot(&state, &ctx)
+            .providers
+            .get_owned(provider_kind.as_str())
+        else {
             if Some(provider_kind) == primary_provider_stream.as_ref() {
                 primary_skipped_stream = true;
             }
             continue;
         };
 
+        // A refused handoff ends the request, as on the non-streaming path.
+        let relay_alert = apply_pool_relay(
+            &state,
+            &ctx,
+            attempt.pool.as_ref(),
+            &mut body,
+            &decision.model,
+            start,
+        )?;
+        policy_alert = merge_alert(policy_alert, relay_alert);
+        // Per-attempt re-admission (spec 02.12 and 00.12): the hazard screener
+        // reads the body this attempt sends, skills, compression and relay
+        // edits included. Unchanged segments answer from the segment cache,
+        // so a fallback attempt costs no second classifier call.
+        if let Err(error) = crate::screening::admit::screen_chat_as(
+            &state,
+            &ctx,
+            &body,
+            crate::screening::admit::Surface::Chat,
+            &attempt.decision.model,
+        )
+        .await
+        {
+            state.metrics.inc_errors();
+            audit_failure(&state, &ctx, &decision.model, &error, start);
+            return Err(error);
+        }
+
         state.metrics.inc_provider_request(provider.name());
 
         // Anthropic betas: same per-attempt strip as the non-streaming path.
         strip_anthropic_beta_for(&mut body, provider.name());
-        stamp_openrouter_identity(&mut body, provider.name(), &ctx);
+        strip_cache_control_for(&mut body, provider.name(), &decision.model);
+        sampling_extensions.apply_for(&mut body, provider.name());
+        stamp_upstream_identity(
+            &state,
+            &ctx,
+            &mut body,
+            provider.name(),
+            crate::identity::UpstreamSurface::Chat,
+        );
 
         // Admission gate (streaming): same priority queue as the non-stream path.
         // The permit must outlive `run_stream` — a generation occupies an engine
@@ -2802,7 +3690,11 @@ pub async fn run_stream(
         let admission_permit = if tools_active {
             crate::concurrency::AdmissionPermit::none()
         } else {
-            match state.admission.acquire(provider.name(), ctx.priority).await {
+            match state
+                .admission
+                .acquire_for(provider.name(), ctx.priority, ctx.org_id.as_deref())
+                .await
+            {
                 Ok(permit) => permit,
                 Err(full) => {
                     return Err(GatewayError::Overloaded(format!(
@@ -2814,49 +3706,183 @@ pub async fn run_stream(
         };
 
         // Buffered tool loop → synthesized SSE, OR the fast direct stream.
-        let stream_result: Result<Body, GatewayError> = if tools_active {
-            let allowed = effective_tool_allowlist(&ctx, &state.config.tools);
-            let tool_ctx = crate::tools::ToolLoopContext {
-                agent_id: ctx.agent_id.clone(),
-                user_id: ctx.user_id.clone(),
-                allowed,
-            };
-            if !tools_restricted {
-                crate::tools::inject_search_tool(&mut body, &state.config.tools.always_on);
-            }
-            // run_tool_loop forces stream:false internally for the provider calls.
-            match crate::tools::run_tool_loop(
-                &mut body,
-                provider,
-                &decision.model,
-                state.tools.as_ref().expect("tools_active implies Some"),
-                &tool_ctx,
-                state.config.tools.max_rounds,
-                state.config.tools.describe_top_n,
+        let (original_provider_options, original_models) =
+            apply_node_openrouter_preferences(&state, &ctx, provider.name(), &mut body, true);
+        let pool_load = attempt
+            .pool
+            .as_ref()
+            .and_then(|pool| provider_snapshot(&state, &ctx).provider_pools.acquire(pool));
+        // Every provider round of a tool loop is billed, not only the one the
+        // synthesized stream carries.
+        let round_ledger = tools_active.then(|| Arc::new(tool_rounds::ToolRoundLedger::default()));
+        // A metered stream opens on its own task: the provider's answer, not
+        // a client hang-up, decides whether the prompt is billed.
+        let detached_open = (settles_after_hang_up && !tools_active)
+            .then(|| Arc::new(DetachedStreamOpen::default()));
+        // The observer exists before the provider is called, so work a client
+        // abandons before the first byte is still settled. It holds the credit
+        // claim from here on.
+        let opening = StreamOpening::new(
+            StreamObserverState::new(
+                Arc::clone(&state),
+                ctx.clone(),
+                provider.name().to_string(),
+                decision.model.clone(),
+                prompt_cache_outcome,
+                estimated_tokens,
+                start,
+                // Managed policy-alert (item 4): stamp the matched budget-cap
+                // tier onto the stream-end debit. `limit > 0` excludes the
+                // wallet-empty decision; only tiers >= Warn ride.
+                budget
+                    .as_ref()
+                    .filter(|b| b.limit > 0 && b.alert >= AlertTier::Warn)
+                    .map(|b| b.alert),
+                // The credit claim follows the stream's debit, on every exit
+                // including a client hang-up.
+                credit_reservation.take(),
             )
-            .await
-            {
-                Ok((buffered, billable_tool_calls)) => {
-                    // Tools have fully executed by the time the loop returns, so
-                    // the tool-call (Composio) debit fires here rather than at
-                    // stream end — the synthesized SSE carries only the final
-                    // turn and would drop the count (#496). The token debit still
-                    // fires at stream end on the real usage frame.
-                    spawn_tool_call_debit(&state, &ctx, billable_tool_calls);
-                    Ok(crate::tools::value_to_sse_stream(&buffered))
-                }
-                Err(e) => Err(e),
-            }
+            .with_online_prompt(&pool_base_body),
+            round_ledger.clone(),
+            detached_open.clone(),
+            settles_after_hang_up,
+        );
+        // OTel GenAI model-call span for this attempt; on success it rides into
+        // the stream observer and ends when the upstream stream does. The
+        // buffered tool loop instead gets one span per provider call
+        // (`traced_provider`), so its synthesized stream carries no span.
+        let model_span = if tools_active {
+            crate::telemetry::gen_ai_span::ModelCallSpan::disabled()
         } else {
-            provider
-                .complete_stream(&decision.model, &body)
-                .await
-                .map_err(GatewayError::from)
+            gen_ai_telemetry::start_span(
+                &state,
+                &ctx,
+                crate::telemetry::gen_ai_span::OPERATION_CHAT,
+                Some(gen_ai_telemetry::chat_output_type(&body)),
+                provider.name(),
+                &decision.model,
+                &body,
+                true,
+            )
         };
+        let open_stream = model_span.instrument(async {
+            if tools_active {
+                let allowed = effective_tool_allowlist(&ctx, &state.config.tools);
+                let hints = unified_loop_hints(&ctx, &allowed);
+                let (composio_user_id, require_composio_user_id) =
+                    unified_composio_identity(&state, &ctx)?;
+                let tool_ctx = crate::tools::ToolLoopContext {
+                    agent_id: ctx.agent_id.clone(),
+                    user_id: ctx.user_id.clone(),
+                    composio_user_id,
+                    require_composio_user_id,
+                    allowed,
+                    firewall: Some(tool_loop_screen::firewall(&state, &ctx)),
+                    untrusted_caller: ctx.untrusted_caller,
+                    parallel_reads: state.config.tools.parallel_reads,
+                    host_conversation: ctx.host_conversation.clone(),
+                    org_tools: org_tool_gate(&state, &ctx),
+                };
+                inject_unified_loop_tools(&mut body, &ctx, &state.config.tools, tools_restricted);
+                // run_tool_loop forces stream:false internally for the provider calls.
+                let affinity = account_affinity(&ctx, &body);
+                let metered_rounds = tool_rounds::MeteredRounds::new(
+                    Arc::clone(&provider),
+                    Arc::clone(
+                        round_ledger
+                            .as_ref()
+                            .expect("tools_active implies a round ledger"),
+                    ),
+                    settles_after_hang_up,
+                );
+                let traced_provider =
+                    gen_ai_telemetry::TracedProvider::new(&state, &ctx, &metered_rounds);
+                match crate::tools::run_tool_loop_with_hints_for_session(
+                    &mut body,
+                    &traced_provider,
+                    &decision.model,
+                    state.tools.as_ref().expect("tools_active implies Some"),
+                    &tool_ctx,
+                    state.config.tools.max_rounds,
+                    state.config.tools.describe_top_n,
+                    hints.as_deref(),
+                    affinity.as_deref(),
+                )
+                .await
+                {
+                    Ok((buffered, billable_tool_calls)) => {
+                        // Tools have fully executed by the time the loop returns, so
+                        // the tool-call (Composio) debit fires here rather than at
+                        // stream end — the synthesized SSE carries only the final
+                        // turn and would drop the count (#496). The token debit still
+                        // fires at stream end on the real usage frame.
+                        spawn_tool_call_debit(&state, &ctx, billable_tool_calls);
+                        Ok(crate::tools::value_to_sse_stream(&buffered))
+                    }
+                    Err(e) => Err(e),
+                }
+            } else {
+                let affinity = account_affinity(&ctx, &body);
+                match &detached_open {
+                    Some(open) => open
+                        .open(
+                            Arc::clone(&provider),
+                            decision.model.clone(),
+                            body.clone(),
+                            affinity,
+                        )
+                        .await
+                        .map_err(GatewayError::from),
+                    None => provider
+                        .complete_stream_for_session(&decision.model, &body, affinity.as_deref())
+                        .await
+                        .map_err(GatewayError::from),
+                }
+            }
+        });
+        let stream_result: Result<Body, GatewayError> =
+            if let Some((deadline, _)) = execution_ceiling {
+                match tokio::time::timeout_at(deadline, open_stream).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        let error = GatewayError::ProviderDeliveryUncertain(
+                            "Pool final stream opening timed out; accepted calls are not replayed"
+                                .into(),
+                        );
+                        gen_ai_telemetry::finish_error(model_span, &error);
+                        return Err(error);
+                    }
+                }
+            } else {
+                open_stream.await
+            };
+        restore_node_openrouter_preferences(
+            provider.name(),
+            &mut body,
+            original_provider_options,
+            original_models,
+        );
+        // Opened or failed: the observer is the caller's again.
+        let mut observer = opening.opened();
 
         match stream_result {
             Ok(stream_body) => {
-                state.circuit_breaker.record_success(provider.name());
+                state.circuit_breaker.record_success(&provider_circuit_key(
+                    &state,
+                    &ctx,
+                    provider.name(),
+                ));
+                if let Some(route) = attempt.pool.as_ref() {
+                    let affinity = account_affinity(&ctx, &body);
+                    provider_snapshot(&state, &ctx)
+                        .provider_pools
+                        .record_success_facts(
+                            route,
+                            affinity.as_deref(),
+                            &pool_signals::scoped_request_facts(&state, &ctx, &pool_base_body),
+                            start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                        );
+                }
 
                 // Determine degraded mode for the stream path (#218).
                 let degraded = if primary_skipped_stream {
@@ -2877,35 +3903,29 @@ pub async fn run_stream(
                 // 9. Outbound firewall on the streaming path.
                 //
                 // The non-streaming `run` scans the full response after it
-                // arrives; streaming responses arrive incrementally, so we wrap
-                // the SSE body. Behaviour is chosen per-policy because bytes
-                // already streamed to the client cannot be un-sent:
-                //   - WarnAndContinue: pass the stream through unchanged,
-                //     scanning the accumulated text only to log detections.
-                //     Keeps the U18 "stream through unchanged" contract for the
-                //     warn config.
-                //   - Block / Sanitize: buffer the upstream stream fully, scan
-                //     the assembled text, then emit either a single blocked SSE
-                //     error frame or the sanitized completion. This defeats
-                //     incremental streaming for those modes on purpose.
+                // arrives. Streaming responses are parsed and redacted frame by
+                // frame and released once the violation scan has covered them
+                // (`stream_dlp`); under Block a violation ends the stream with
+                // the block notice before any matched text is released. Custom
+                // patterns and output evaluators keep the fully buffered scan.
                 // Observe original upstream usage before client-facing DLP can replace frames.
-                let provider_name = provider.name().to_string();
-                let observed_body = attach_stream_observer(
+                // A tool loop's stream bills every round the loop ran.
+                observer.tool_rounds = round_ledger.as_ref().map(|ledger| ledger.totals());
+                // The attempt's model-call span ends when the upstream stream does.
+                observer.model_span = Some(model_span);
+                // Standing is checked before every output window, beneath the
+                // stream observer, so a stream cut by a refusal still settles.
+                let stream_body = crate::standing::guard_stream(
                     stream_body,
                     Arc::clone(&state),
-                    ctx.clone(),
-                    provider_name,
-                    decision.model.clone(),
-                    estimated_tokens,
-                    start,
-                    // Managed policy-alert (item 4): stamp the matched budget-cap
-                    // tier onto the stream-end debit. `limit > 0` excludes the
-                    // wallet-empty decision; only tiers >= Warn ride.
-                    budget
-                        .as_ref()
-                        .filter(|b| b.limit > 0 && b.alert >= AlertTier::Warn)
-                        .map(|b| b.alert),
+                    ctx.standing.clone(),
                 );
+                let observed_body = observe_stream(stream_body, observer);
+                let observed_body = if let Some((deadline, limit)) = execution_ceiling {
+                    bound_pool_stream(observed_body, deadline, limit)
+                } else {
+                    observed_body
+                };
 
                 let (observed_body, admission_permit) = apply_outbound_firewall_stream(
                     observed_body,
@@ -2914,18 +3934,40 @@ pub async fn run_stream(
                     admission_permit,
                 )
                 .await;
-
-                // Hold any remaining admission slot (the pass-through path) and
-                // the credit reservation for the *whole* client stream: move both
-                // into the body so they drop only when the SSE is fully consumed
-                // (or the client disconnects). Buffered guardrail paths already
-                // released the engine slot after the upstream generation ended;
-                // the credit claim still lasts through the client-facing stream.
-                let observed_body = hold_admission_until_stream_end(
+                // 9b. Hazard screener windows over what the client receives
+                // (screener addendum section 8): asynchronous, and a block
+                // ends the stream with the output-blocked error frame.
+                let observed_body = crate::screening::output::guard_stream(
                     observed_body,
-                    admission_permit,
-                    credit_reservation,
+                    Arc::clone(&state),
+                    ctx.at_attempt(attempt_index, &attempt.decision.provider),
+                    Some(decision.model.clone()),
                 );
+
+                // Hold any remaining admission slot (the pass-through path) for
+                // the *whole* client stream: move it into the body so it drops
+                // only when the SSE is fully consumed (or the client
+                // disconnects). Buffered guardrail paths already released the
+                // engine slot after the upstream generation ended. The credit
+                // claim is held by the observer's debit task instead.
+                let observed_body =
+                    hold_admission_until_stream_end(observed_body, admission_permit);
+                let observed_body = hold_until_stream_end(observed_body, budget_hold);
+                // The ladder's in-flight slots (spec 04.8.1) are held until
+                // the client has the whole stream, not until headers.
+                let observed_body = hold_until_stream_end(observed_body, ctx.enforcement.clone());
+                let observed_body = hold_pool_load_until_stream_end(observed_body, pool_load);
+                let observed_body = if let Some(route) = attempt.pool.clone() {
+                    capture_pool_relay_stream(
+                        observed_body,
+                        Arc::clone(&state),
+                        ctx.clone(),
+                        route,
+                        pool_base_body.clone(),
+                    )
+                } else {
+                    observed_body
+                };
 
                 return Ok(PipelineStreamOutput {
                     body: observed_body,
@@ -2939,28 +3981,110 @@ pub async fn run_stream(
                 });
             }
             Err(e) => {
+                let e = upstream_signals::settle(&state, &ctx, attempt_index, e);
+                gen_ai_telemetry::finish_error(model_span, &e);
+                match round_ledger
+                    .as_ref()
+                    .map(|ledger| ledger.totals())
+                    .filter(|rounds| rounds.rounds > 0)
+                {
+                    // A tool loop that failed after rounds the provider
+                    // answered: those rounds are spend, billed now under their
+                    // own ref so a fallback attempt's debit is not taken for a
+                    // duplicate of this one. The claim, shrunk to what the
+                    // rounds cost, follows this debit.
+                    Some(rounds) => {
+                        observer.credit_reservation = shrink_credit_claim(
+                            &state,
+                            &ctx,
+                            observer.credit_reservation.take(),
+                            tool_rounds_charge_micro_usd(
+                                &state,
+                                &rounds,
+                                provider.name(),
+                                &decision.model,
+                            ),
+                        );
+                        observer.tool_rounds = Some(rounds);
+                        observer.interruption = Some("tool loop failed after paid provider rounds");
+                        observer.ctx.request_id =
+                            format!("{}:attempt-{attempt_index}", ctx.request_id);
+                        drop(observer);
+                    }
+                    // Nothing was served: no charge, and the claim goes back to
+                    // the attempt loop exactly as before.
+                    None => {
+                        credit_reservation = observer.credit_reservation.take();
+                        observer.done = true;
+                    }
+                }
+                // See the non-stream arm: a safety outcome ends the request.
+                if e.is_safety_outcome() {
+                    audit_failure(&state, &ctx, &decision.model, &e, start);
+                    return Err(e);
+                }
+                if let Some(route) = attempt.pool.as_ref() {
+                    match &e {
+                        GatewayError::ProviderRateLimited { retry_after, .. } => {
+                            provider_snapshot(&state, &ctx)
+                                .provider_pools
+                                .record_rate_limit(route, *retry_after);
+                        }
+                        GatewayError::ProviderPaymentRequired { .. } => {
+                            provider_snapshot(&state, &ctx)
+                                .provider_pools
+                                .record_rate_limit(route, Some(300));
+                        }
+                        // Feeds the Auto strategy's observed reliability; without it
+                        // the ring would only ever hold successes.
+                        error if penalizes_provider_circuit(error) => {
+                            provider_snapshot(&state, &ctx)
+                                .provider_pools
+                                .record_failure(route);
+                        }
+                        _ => {}
+                    }
+                }
+                if matches!(&e, GatewayError::ProviderDeliveryUncertain(_)) {
+                    state.metrics.inc_provider_error(provider.name());
+                    last_err = Some(e);
+                    break;
+                }
                 // See the non-stream arm: 429 capacity and 402 payment conditions
                 // demote tiers without a circuit penalty.
                 if !penalizes_provider_circuit(&e) {
                     state.metrics.inc_provider_error(provider.name());
-                    warn!(
-                        provider = %provider.name(),
-                        error = %e,
-                        "stream provider unavailable for this account, demoting to next tier"
+                    log_provider_failure(
+                        provider.name(),
+                        &e,
+                        "stream provider unavailable for this account, demoting to next tier",
                     );
                 } else {
-                    state.circuit_breaker.record_failure(provider.name());
+                    state.circuit_breaker.record_failure(&provider_circuit_key(
+                        &state,
+                        &ctx,
+                        provider.name(),
+                    ));
                     state.metrics.inc_provider_error(provider.name());
-                    warn!(
-                        provider = %provider.name(),
-                        error = %e,
-                        "stream provider failed, trying fallback"
+                    log_provider_failure(
+                        provider.name(),
+                        &e,
+                        "stream provider failed, trying fallback",
                     );
+                }
+                if ends_attempt_chain(&state, &e) {
+                    last_err = Some(e);
+                    break;
                 }
                 if Some(provider_kind) == primary_provider_stream.as_ref() {
                     primary_skipped_stream = true;
                 }
                 remember_preferred_provider_error(&mut last_err, e);
+                if attempt.pool.is_some() && tools_active {
+                    // A buffered tool loop can have performed external actions
+                    // before its final provider failure. Do not replay it.
+                    break;
+                }
             }
         }
     }
@@ -2975,17 +4099,50 @@ pub async fn run_stream(
             ))
         },
         |prev| match prev {
-            GatewayError::CircuitOpen(_) | GatewayError::ProviderError(_) => {
-                GatewayError::AllProvidersUnavailable(format!(
-                    "All providers unavailable for model '{}': {prev}",
-                    decision.model
-                ))
-            }
+            GatewayError::ProviderRejected { .. } if state.custody.ends_chain_on_refusal() => prev,
+            GatewayError::CircuitOpen(_)
+            | GatewayError::ProviderError(_)
+            | GatewayError::ProviderRejected { .. }
+            | GatewayError::ProviderTransport(_) => GatewayError::AllProvidersUnavailable(format!(
+                "All providers unavailable for model '{}': {prev}",
+                decision.model
+            )),
             other => other,
         },
     );
     audit_failure(&state, &ctx, &decision.model, &err, start);
     Err(err)
+}
+
+fn hold_pool_load_until_stream_end(
+    body: Body,
+    lease: Option<ryu_gw_router::pool::PoolLease>,
+) -> Body {
+    hold_until_stream_end(body, lease)
+}
+
+fn bound_pool_stream(body: Body, deadline: tokio::time::Instant, limit: usize) -> Body {
+    use futures_util::StreamExt;
+    let stream = async_stream::stream! {
+        let mut source = body.into_data_stream();
+        let mut received = 0usize;
+        loop {
+            match tokio::time::timeout_at(deadline,source.next()).await {
+                Ok(Some(Ok(bytes))) => {
+                    received = received.saturating_add(bytes.len());
+                    if received > limit {
+                        yield Err(std::io::Error::other("Pool stream output limit reached"));
+                        break;
+                    }
+                    yield Ok(bytes);
+                }
+                Ok(Some(Err(error))) => { yield Err(std::io::Error::other(error.to_string())); break; }
+                Ok(None) => break,
+                Err(_) => { yield Err(std::io::Error::other("Pool stream deadline reached")); break; }
+            }
+        }
+    };
+    Body::from_stream(stream)
 }
 
 // ─── Multimodal pipeline (image / TTS / STT) ─────────────────────────────────
@@ -3002,15 +4159,67 @@ pub async fn run_stream(
 pub async fn run_multimodal(
     state: Arc<AppState>,
     ctx: RequestContext,
-    mut body: Value,
+    body: Value,
     modality: Modality,
 ) -> Result<PipelineOutput, GatewayError> {
+    if modality == Modality::Tts {
+        return Err(GatewayError::BadRequest(
+            "Speech requires the bound delivery pipeline".into(),
+        ));
+    }
+    run_multimodal_bound(state, ctx, body, modality)
+        .await
+        .map(|(output, _)| output)
+}
+
+/// Accepted provider work settles once before opaque hosted audio delivery.
+pub async fn run_speech(
+    state: Arc<AppState>,
+    ctx: RequestContext,
+    body: Value,
+) -> Result<(PipelineOutput, Option<ryu_gw_providers::HostedSpeechOrigin>), GatewayError> {
+    run_multimodal_bound(state, ctx, body, Modality::Tts).await
+}
+
+/// Metered media generation is detached for the same reason as [`run`]: a
+/// client hang-up must not cancel accepted provider work before it is settled.
+async fn run_multimodal_bound(
+    state: Arc<AppState>,
+    ctx: RequestContext,
+    body: Value,
+    modality: Modality,
+) -> Result<(PipelineOutput, Option<ryu_gw_providers::HostedSpeechOrigin>), GatewayError> {
+    let detach = settles_after_client_hang_up(&state, &ctx);
+    run_buffered(
+        detach,
+        run_multimodal_bound_attached(state, ctx, body, modality),
+    )
+    .await
+}
+
+async fn run_multimodal_bound_attached(
+    state: Arc<AppState>,
+    mut ctx: RequestContext,
+    mut body: Value,
+    modality: Modality,
+) -> Result<(PipelineOutput, Option<ryu_gw_providers::HostedSpeechOrigin>), GatewayError> {
+    capture_provider_snapshot(&state, &mut ctx);
     let start = Instant::now();
 
     state.metrics.inc_requests();
 
     let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
 
+    // Ladder L3 takes media generation and transcription away (spec
+    // 04.8.1). Chat through this path is not media.
+    if modality != Modality::Chat {
+        if let Err(e) = crate::enforcement::refuse_media(&ctx) {
+            state.metrics.inc_errors();
+            audit_failure(&state, &ctx, &requested_model, &e, start);
+            return Err(e);
+        }
+    }
+    screen_media_knobs(&state, &ctx, &mut body, &requested_model, start)?;
     let input_alert =
         inference_governance::inspect_multimodal_input(&state, &ctx, &mut body, &modality)
             .map_err(|e| {
@@ -3018,45 +4227,34 @@ pub async fn run_multimodal(
                 audit_failure(&state, &ctx, &requested_model, &e, start);
                 e
             })?;
-
-    // Image-target inline evaluators (explicit_content / sensitive_imagery) are
-    // NOT enforced this phase: judging an image needs a vision-capable judge that
-    // is not wired here. If an agent enabled one, log it honestly rather than
-    // silently implying enforcement — their catalog `enforced` flag stays false.
-    if matches!(modality, Modality::Image) {
-        let scanner = state.resolved_scanner(&ctx);
-        let enabled_image: Vec<&'static str> = scanner
-            .config()
-            .evaluators
-            .iter()
-            .filter(|b| b.enabled)
-            .filter_map(|b| image_detection_kind(&b.id))
-            .map(|k| k.as_str())
-            .collect();
-        if !enabled_image.is_empty() {
-            warn!(
-                request_id = %ctx.request_id,
-                evaluators = ?enabled_image,
-                "inline image evaluators enabled but NOT enforced this phase (no vision judge wired; enforced=false)"
-            );
-        }
-    }
-
-    // Rate limit + burst check.
-    if !state
-        .rate_limiter
-        .check_request_for_key(&ctx.api_key, ctx.key_config.as_ref())
+    let screen_surface = match modality {
+        Modality::Chat => crate::screening::admit::Surface::Chat,
+        Modality::Stt => crate::screening::admit::Surface::Transcription,
+        _ => crate::screening::admit::Surface::Media,
+    };
+    if let Err(e) = crate::screening::admit::screen_value(&state, &ctx, &body, screen_surface).await
     {
-        warn!(key_id = %crate::audit::credential_log_id(&ctx.api_key), "rate limit exceeded (multimodal)");
-        state.metrics.inc_rate_limited();
-        let e = GatewayError::RateLimited;
+        state.metrics.inc_errors();
         audit_failure(&state, &ctx, &requested_model, &e, start);
         return Err(e);
     }
-    if !state.rate_limiter.check_burst(&ctx.api_key) {
-        warn!(key_id = %crate::audit::credential_log_id(&ctx.api_key), "burst rate exceeded (multimodal)");
+
+    // An unavailable guardrail must never silently permit a billed media request.
+    let scanner = state.resolved_scanner(&ctx);
+    state
+        .evaluator_registry()
+        .validate_inline_bindings(&scanner.config().evaluators)
+        .map_err(|reason| {
+            let error = GatewayError::BadRequest(reason);
+            state.metrics.inc_errors();
+            audit_failure(&state, &ctx, &requested_model, &error, start);
+            error
+        })?;
+
+    // Rate limit + burst check.
+    if let Err(e) = admit_request(&state, &ctx) {
+        warn!(key_id = %crate::audit::credential_log_id(&ctx.api_key), policy = rate_limit_policy_name(&e), "rate limit exceeded (multimodal)");
         state.metrics.inc_rate_limited();
-        let e = GatewayError::RateLimited;
         audit_failure(&state, &ctx, &requested_model, &e, start);
         return Err(e);
     }
@@ -3065,15 +4263,18 @@ pub async fn run_multimodal(
     // Core (M3 / #164) so each modality call from the same carded agent can
     // reach a different provider. Governance (firewall, budgets, policy) runs
     // after routing and is never bypassed.
-    let decision = state.router.route_modality_with_slot(
-        &modality,
-        &requested_model,
-        ctx.slot_provider.as_ref(),
-        ctx.slot_model.as_deref(),
-    );
+    let decision = provider_snapshot(&state, &ctx)
+        .router
+        .route_modality_with_slot(
+            &modality,
+            &requested_model,
+            ctx.slot_provider.as_ref(),
+            ctx.slot_model.as_deref(),
+        );
 
     // Budget enforcement (reuse the chat path's enforcer).
     let mut decision = decision;
+    canonicalize_sdk_decision(&state, &ctx, &mut decision)?;
     inference_governance::authorize_model(&state, &ctx, &decision.model).map_err(|e| {
         state.metrics.inc_errors();
         audit_failure(&state, &ctx, &decision.model, &e, start);
@@ -3089,6 +4290,8 @@ pub async fn run_multimodal(
         // `.take()`n into the task below; if no debit fires (credits inactive,
         // no org, zero rate, empty output) it stays here and drops on return.
         reservation: mut credit_reservation,
+        // Media spend is recorded before this returns; hold the claim until then.
+        budget_hold: _budget_hold,
     } = enforce_budget(
         &state,
         &ctx,
@@ -3110,13 +4313,30 @@ pub async fn run_multimodal(
         audit_failure(&state, &ctx, &decision.model, &e, start);
         e
     })?;
+    state.traffic.note_screen(
+        &ctx.request_id,
+        crate::traffic::current_route(),
+        start.elapsed().as_millis() as u64,
+    );
 
     let fallback_chain = clamped_fallback_chain(&state, &ctx, &decision);
     let mut last_err: Option<GatewayError> = None;
     let primary_provider_mm = fallback_chain.first().cloned();
     let mut primary_skipped_mm = false;
 
-    for provider_kind in &fallback_chain {
+    for (attempt_index, candidate_provider) in fallback_chain.iter().enumerate() {
+        // Standing first on every attempt (spec 05.5): a push that lands
+        // while an attempt fails must stop the next one from dispatching.
+        crate::standing::recheck(&state, &ctx).await?;
+        let canonical_provider =
+            match canonical_sdk_provider(&state, &ctx, candidate_provider, &decision.model) {
+                Ok(provider) => provider,
+                Err(error) => {
+                    last_err = Some(error);
+                    continue;
+                }
+            };
+        let provider_kind = &canonical_provider;
         if let Err(error) =
             inference_governance::authorize_provider_region(&state, &ctx, provider_kind)
         {
@@ -3126,7 +4346,11 @@ pub async fn run_multimodal(
             }
             continue;
         }
-        if state.circuit_breaker.is_open(provider_kind.as_str()) {
+        if state.circuit_breaker.is_open(&provider_circuit_key(
+            &state,
+            &ctx,
+            provider_kind.as_str(),
+        )) {
             remember_preferred_provider_error(
                 &mut last_err,
                 GatewayError::CircuitOpen(provider_kind.as_str().to_string()),
@@ -3137,50 +4361,145 @@ pub async fn run_multimodal(
             continue;
         }
 
-        let Some(provider) = state.providers.get(provider_kind.as_str()) else {
+        let Some(provider) = provider_snapshot(&state, &ctx)
+            .providers
+            .get_owned(provider_kind.as_str())
+        else {
             if Some(provider_kind) == primary_provider_mm.as_ref() {
                 primary_skipped_mm = true;
             }
             continue;
         };
 
+        if attempt_index > 0 {
+            drop(credit_reservation.take());
+            let retry = RouteDecision {
+                provider: provider_kind.clone(),
+                model: decision.model.clone(),
+            };
+            match reserve_route_credit(&state, &ctx, &mut body, &retry, OutputCeiling::Untouched) {
+                Ok(reservation) => credit_reservation = reservation,
+                Err(error) => {
+                    last_err = Some(error);
+                    continue;
+                }
+            }
+        }
+
         state.metrics.inc_provider_request(provider.name());
 
-        stamp_openrouter_identity(&mut body, provider.name(), &ctx);
+        stamp_upstream_identity(
+            &state,
+            &ctx,
+            &mut body,
+            provider.name(),
+            crate::identity::UpstreamSurface::for_modality(&modality),
+        );
 
-        let result = match modality {
-            Modality::Image => provider
-                .generate_image(&decision.model, &body)
-                .await
-                .map_err(GatewayError::from),
-            Modality::Tts => provider
-                .synthesize_speech(&decision.model, &body)
-                .await
-                .map_err(GatewayError::from),
-            Modality::Stt => provider
-                .transcribe_audio(&decision.model, &body)
-                .await
-                .map_err(GatewayError::from),
-            Modality::Chat => provider
-                .complete(&decision.model, &body)
-                .await
-                .map_err(GatewayError::from),
-            // Video is job-based (submit + poll); it never flows through the
-            // block-and-return path. `submit_video_job` handles it instead.
-            Modality::Video => Err(GatewayError::ProviderError(
-                "video generation is job-based; use POST /v1/videos/generations".to_string(),
-            )),
-        };
+        let (original_provider_options, original_models) =
+            apply_node_openrouter_preferences(&state, &ctx, provider.name(), &mut body, false);
+        let speech_affinity = account_affinity(&ctx, &body);
+        let mut speech_origin = None;
+        let (gen_ai_operation, gen_ai_output_type) =
+            gen_ai_telemetry::multimodal_operation(&modality, &body);
+        let model_span = gen_ai_telemetry::start_span(
+            &state,
+            &ctx,
+            gen_ai_operation,
+            Some(gen_ai_output_type),
+            provider.name(),
+            &decision.model,
+            &body,
+            false,
+        );
+        let result = model_span
+            .instrument(async {
+                match modality {
+                    Modality::Image => provider
+                        .generate_image(&decision.model, &body)
+                        .await
+                        .map_err(GatewayError::from),
+                    Modality::Tts => provider
+                        .synthesize_speech_bound(&decision.model, &body, speech_affinity.as_deref())
+                        .await
+                        .map(|bound| {
+                            let (response, origin) = bound.into_parts();
+                            speech_origin = origin;
+                            response
+                        })
+                        .map_err(GatewayError::from),
+                    Modality::Stt => provider
+                        .transcribe_audio(&decision.model, &body)
+                        .await
+                        .map_err(GatewayError::from),
+                    Modality::Chat => {
+                        let affinity = account_affinity(&ctx, &body);
+                        provider
+                            .complete_for_session(&decision.model, &body, affinity.as_deref())
+                            .await
+                            .map_err(GatewayError::from)
+                    }
+                    // Video and audio generation are job-based (submit + poll);
+                    // they never flow through the block-and-return path.
+                    // `submit_media_job` handles them instead.
+                    Modality::Video => Err(GatewayError::ProviderError(
+                        "video generation is job-based; use POST /v1/videos/generations"
+                            .to_string(),
+                    )),
+                    Modality::Audio => Err(GatewayError::ProviderError(
+                        "audio generation is job-based; use POST /v1/audio/generations".to_string(),
+                    )),
+                }
+            })
+            .await;
+        match &result {
+            Ok(response) if modality == Modality::Chat => {
+                gen_ai_telemetry::finish_chat(model_span, response)
+            }
+            Ok(response) => gen_ai_telemetry::finish_reported(model_span, response),
+            Err(error) => gen_ai_telemetry::finish_error(model_span, error),
+        }
+        restore_node_openrouter_preferences(
+            provider.name(),
+            &mut body,
+            original_provider_options,
+            original_models,
+        );
 
         match result {
             Ok(mut response) => {
-                state.circuit_breaker.record_success(provider.name());
+                state.circuit_breaker.record_success(&provider_circuit_key(
+                    &state,
+                    &ctx,
+                    provider.name(),
+                ));
                 let latency_ms = start.elapsed().as_millis() as u64;
 
                 apply_outbound_json_dlp(&state, &ctx, &mut response).map_err(|e| {
                     audit_failure(&state, &ctx, &decision.model, &e, start);
                     e
                 })?;
+                // Hazard screener on the output role: chat text and STT
+                // transcripts are classified before return (spec 02.11.3).
+                // Generated images are not classified yet (no vision backend).
+                let screened_output = match modality {
+                    Modality::Chat => Some(crate::screening::output::response_text(&response)),
+                    Modality::Stt => response["text"].as_str().map(str::to_owned),
+                    _ => None,
+                };
+                if let Some(text) = screened_output {
+                    crate::screening::output::screen_buffered(
+                        &state,
+                        &ctx.at_attempt(attempt_index, candidate_provider),
+                        &text,
+                        Some(decision.model.as_str()),
+                    )
+                    .await
+                    .map_err(|e| {
+                        audit_failure(&state, &ctx, &decision.model, &e, start);
+                        e
+                    })?;
+                }
 
                 let degraded = if primary_skipped_mm {
                     state.metrics.inc_degraded_fallback();
@@ -3212,12 +4531,20 @@ pub async fn run_multimodal(
                     user_name: ctx.user_name.clone(),
                     org_id: ctx.org_id.clone(),
                     team_id: ctx.team_id.clone(),
+                    team_ids: ctx.audit_team_ids(),
+                    key_id: ctx.key_id(),
                     project_id: ctx.project_id.clone(),
                     provider: format!("{}:{}", provider.name(), modality.as_str()),
                     model: decision.model.clone(),
                     input_tokens: 0,
                     output_tokens: 0,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
                     cache_hit: false,
+                    prompt_cache_outcome: None,
+                    prompt_cache_read_tokens: None,
+                    prompt_cache_write_tokens: None,
+                    cache_write_1h_tokens: None,
                     latency_ms,
                     eval_score: None,
                     error: None,
@@ -3226,6 +4553,7 @@ pub async fn run_multimodal(
                     user_id: ctx.user_id.clone(),
                     agent_id: ctx.agent_id.clone(),
                     feature: ctx.feature.clone(),
+                    purpose: ctx.purpose.clone(),
                     managed_inference: ctx.managed_inference,
                     provider_cost_micro_usd,
                     event_type: crate::audit::EventType::ModelCall,
@@ -3236,17 +4564,9 @@ pub async fn run_multimodal(
                     widget_instance_id: None,
                 });
 
-                // Experimental OTel GenAI span (#540, P1), multimodal path. The
-                // operation name is the modality (image/tts/stt), not "chat".
-                // Multimodal providers report no token usage, so tokens are 0.
-                crate::telemetry::emit_gen_ai_span(
-                    modality.as_str(),
-                    provider.name(),
-                    &decision.model,
-                    0,
-                    0,
-                    latency_ms,
-                );
+                // The OTel GenAI span (`generate_content`, or `chat` for a chat
+                // modality) ended when the provider returned, carrying only the
+                // token counts the provider actually reported.
                 crate::ryu_analytics::emit_model_call(
                     modality.as_str(),
                     provider.name(),
@@ -3309,10 +4629,13 @@ pub async fn run_multimodal(
                         // the path where a freed-early claim costs the most.
                         let credit_permit = credit_reservation.take();
                         let state_debit = state.clone();
-                        let ref_id = format!("{}:{}", ctx.request_id, modality.as_str());
+                        let ref_id = media_debit_reference(&modality);
                         let pool = crate::credit_pools::pool_for_gateway_provider(provider.name());
                         let debit_attribution = DebitAttribution {
                             provider: Some(provider.name().to_string()),
+                            upstream_provider: provider_usage::response_upstream_provider(
+                                &response,
+                            ),
                             model: Some(decision.model.clone()),
                             // The provider's REPORTED compute time when the
                             // metered path priced this call, absent when it fell
@@ -3325,6 +4648,7 @@ pub async fn run_multimodal(
                             user_id: ctx.user_id.clone(),
                             task_label: Some(media_task_label(&modality, estimated_media_cost)),
                             estimated: Some(estimated_media_cost),
+                            tags: crate::org_limits::tags_for(&ctx),
                             ..Default::default()
                         };
                         tokio::spawn(async move {
@@ -3332,7 +4656,7 @@ pub async fn run_multimodal(
                                 state_debit,
                                 org_id,
                                 ref_id,
-                                "gateway_usage",
+                                CreditDebitReason::GatewayUsage,
                                 media_cost_micro_usd,
                                 fail_closed_sticky,
                                 // Media debits carry no budget-cap tier (item 4
@@ -3348,31 +4672,54 @@ pub async fn run_multimodal(
                     }
                 }
 
-                return Ok(PipelineOutput {
-                    response,
-                    context: ctx,
-                    provider_used: provider.name(),
-                    model_used: decision.model,
-                    cache_hit: false,
-                    budget,
-                    eval_score: None,
-                    degraded,
-                    policy_alert,
-                    // Media/multimodal path: prompt caching does not apply.
-                    prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
-                    cache_read_tokens: 0,
-                    cache_write_tokens: 0,
-                });
+                return Ok((
+                    PipelineOutput {
+                        response,
+                        context: ctx,
+                        provider_used: provider.name(),
+                        model_used: decision.model,
+                        cache_hit: false,
+                        budget,
+                        eval_score: None,
+                        degraded,
+                        policy_alert,
+                        // Media/multimodal path: prompt caching does not apply.
+                        prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
+                        cache_read_tokens: 0,
+                        cache_write_tokens: 0,
+                    },
+                    speech_origin,
+                ));
             }
             Err(e) => {
-                state.circuit_breaker.record_failure(provider.name());
+                let e = upstream_signals::settle(&state, &ctx, attempt_index, e);
+                // A safety outcome ends the request: see the chat arm.
+                if e.is_safety_outcome() {
+                    audit_failure(&state, &ctx, &decision.model, &e, start);
+                    return Err(e);
+                }
+                if matches!(&e, GatewayError::ProviderDeliveryUncertain(_)) {
+                    state.metrics.inc_provider_error(provider.name());
+                    last_err = Some(e);
+                    break;
+                }
+                if penalizes_provider_circuit(&e) {
+                    state.circuit_breaker.record_failure(&provider_circuit_key(
+                        &state,
+                        &ctx,
+                        provider.name(),
+                    ));
+                }
                 state.metrics.inc_provider_error(provider.name());
-                warn!(
-                    provider = %provider.name(),
-                    modality = modality.as_str(),
-                    error = %e,
-                    "multimodal provider failed, trying fallback"
+                log_provider_failure(
+                    provider.name(),
+                    &e,
+                    "multimodal provider failed, trying fallback",
                 );
+                if ends_attempt_chain(&state, &e) {
+                    last_err = Some(e);
+                    break;
+                }
                 if Some(provider_kind) == primary_provider_mm.as_ref() {
                     primary_skipped_mm = true;
                 }
@@ -3391,12 +4738,14 @@ pub async fn run_multimodal(
             ))
         },
         |prev| match prev {
-            GatewayError::CircuitOpen(_) | GatewayError::ProviderError(_) => {
-                GatewayError::AllProvidersUnavailable(format!(
-                    "All providers unavailable for {modality:?} model '{}': {prev}",
-                    decision.model
-                ))
-            }
+            GatewayError::ProviderRejected { .. } if state.custody.ends_chain_on_refusal() => prev,
+            GatewayError::CircuitOpen(_)
+            | GatewayError::ProviderError(_)
+            | GatewayError::ProviderRejected { .. }
+            | GatewayError::ProviderTransport(_) => GatewayError::AllProvidersUnavailable(format!(
+                "All providers unavailable for {modality:?} model '{}': {prev}",
+                decision.model
+            )),
             other => other,
         },
     );
@@ -3407,28 +4756,31 @@ pub async fn run_multimodal(
 /// Run embeddings or reranking through the same governance used by chat and
 /// multimodal calls. These endpoints still consume provider tokens and wallet
 /// credits even though their response shape is not a chat completion.
+/// Metered calls are detached for the same reason as [`run`]: a client hang-up
+/// must not cancel an accepted embedding or rerank call before it is settled.
 pub async fn run_embedding(
     state: Arc<AppState>,
     ctx: RequestContext,
+    body: Value,
+    operation: EmbeddingOperation,
+) -> Result<PipelineOutput, GatewayError> {
+    let detach = settles_after_client_hang_up(&state, &ctx);
+    run_buffered(detach, run_embedding_attached(state, ctx, body, operation)).await
+}
+
+async fn run_embedding_attached(
+    state: Arc<AppState>,
+    mut ctx: RequestContext,
     mut body: Value,
     operation: EmbeddingOperation,
 ) -> Result<PipelineOutput, GatewayError> {
+    capture_provider_snapshot(&state, &mut ctx);
     let start = Instant::now();
     state.metrics.inc_requests();
     let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
 
-    if !state
-        .rate_limiter
-        .check_request_for_key(&ctx.api_key, ctx.key_config.as_ref())
-    {
+    if let Err(error) = admit_request(&state, &ctx) {
         state.metrics.inc_rate_limited();
-        let error = GatewayError::RateLimited;
-        audit_failure(&state, &ctx, &requested_model, &error, start);
-        return Err(error);
-    }
-    if !state.rate_limiter.check_burst(&ctx.api_key) {
-        state.metrics.inc_rate_limited();
-        let error = GatewayError::RateLimited;
         audit_failure(&state, &ctx, &requested_model, &error, start);
         return Err(error);
     }
@@ -3437,7 +4789,10 @@ pub async fn run_embedding(
         EmbeddingOperation::Embed => inference_governance::InputShape::Embedding,
         EmbeddingOperation::Rerank => inference_governance::InputShape::Rerank,
     };
-    let mut decision = state.router.route(&requested_model);
+    let mut decision = provider_snapshot(&state, &ctx)
+        .router
+        .route(&requested_model);
+    canonicalize_sdk_decision(&state, &ctx, &mut decision)?;
     let input_alert = (|| {
         inference_governance::authorize_model(&state, &ctx, &requested_model)?;
         inference_governance::enforce_lifetime_budget(&state, &ctx, &mut body, &mut decision)?;
@@ -3447,12 +4802,24 @@ pub async fn run_embedding(
         audit_failure(&state, &ctx, &requested_model, &error, start);
         error
     })?;
+    if let Err(error) = crate::screening::admit::screen_value(
+        &state,
+        &ctx,
+        &body,
+        crate::screening::admit::Surface::Embeddings,
+    )
+    .await
+    {
+        audit_failure(&state, &ctx, &requested_model, &error, start);
+        return Err(error);
+    }
     let estimated_input = inference_governance::input_token_estimate(&body, shape);
     if !state.rate_limiter.check_tokens_for_key(
         &ctx.api_key,
         estimated_input,
         ctx.key_config.as_ref(),
-    ) {
+    ) || !crate::org_limits::check_tokens(&state, &ctx, estimated_input)
+    {
         let error = GatewayError::RateLimited;
         audit_failure(&state, &ctx, &requested_model, &error, start);
         return Err(error);
@@ -3463,6 +4830,7 @@ pub async fn run_embedding(
         decision: budget,
         alert: policy_alert,
         reservation: mut credit_reservation,
+        budget_hold: _budget_hold,
     } = enforce_budget(
         &state,
         &ctx,
@@ -3501,12 +4869,65 @@ pub async fn run_embedding(
                 error
             })?;
     let policy_alert = merge_alert(input_alert, policy_alert);
+    state.traffic.note_screen(
+        &ctx.request_id,
+        crate::traffic::current_route(),
+        start.elapsed().as_millis() as u64,
+    );
+
+    // Embedding cache: a request whose every input is cached is answered without
+    // a provider call, after all admission and input governance above ran.
+    let embedding_slot = embedding_cache_slot(&state, &ctx, &decision, &body, operation);
+    if let (Some(cache), Some((scope, request))) =
+        (state.embedding_cache.as_ref(), embedding_slot.as_ref())
+    {
+        if let Some(cached) = cache.lookup(scope, &decision.model, request).await {
+            debug!(request_id = %ctx.request_id, "embedding cache hit");
+            state.metrics.inc_embedding_cache_hit();
+            audit_cache_hit(
+                &state,
+                &ctx,
+                "cache",
+                &model_alias::display_model(decision.provider.as_str(), &decision.model),
+                &cached,
+                start,
+            );
+            return Ok(PipelineOutput {
+                response: cached,
+                context: ctx,
+                provider_used: "cache",
+                model_used: decision.model,
+                cache_hit: true,
+                budget: None,
+                eval_score: None,
+                degraded: None,
+                policy_alert,
+                prompt_cache: ryu_gw_providers::PromptCacheOutcome::Disabled,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            });
+        }
+        state.metrics.inc_embedding_cache_miss();
+    }
+
     let fallback_chain = clamped_fallback_chain(&state, &ctx, &decision);
     let primary_provider = fallback_chain.first().cloned();
     let mut primary_skipped = false;
     let mut last_error: Option<GatewayError> = None;
 
-    for provider_kind in &fallback_chain {
+    for (attempt_index, candidate_provider) in fallback_chain.iter().enumerate() {
+        // Standing first on every attempt (spec 05.5): a push that lands
+        // while an attempt fails must stop the next one from dispatching.
+        crate::standing::recheck(&state, &ctx).await?;
+        let canonical_provider =
+            match canonical_sdk_provider(&state, &ctx, candidate_provider, &decision.model) {
+                Ok(provider) => provider,
+                Err(error) => {
+                    last_error = Some(error);
+                    continue;
+                }
+            };
+        let provider_kind = &canonical_provider;
         if let Err(error) =
             inference_governance::authorize_provider_region(&state, &ctx, provider_kind)
         {
@@ -3516,7 +4937,11 @@ pub async fn run_embedding(
             }
             continue;
         }
-        if state.circuit_breaker.is_open(provider_kind.as_str()) {
+        if state.circuit_breaker.is_open(&provider_circuit_key(
+            &state,
+            &ctx,
+            provider_kind.as_str(),
+        )) {
             last_error = Some(GatewayError::CircuitOpen(
                 provider_kind.as_str().to_string(),
             ));
@@ -3526,28 +4951,93 @@ pub async fn run_embedding(
             continue;
         }
 
-        let Some(provider) = state.providers.get(provider_kind.as_str()) else {
+        let Some(provider) = provider_snapshot(&state, &ctx)
+            .providers
+            .get_owned(provider_kind.as_str())
+        else {
             if Some(provider_kind) == primary_provider.as_ref() {
                 primary_skipped = true;
             }
             continue;
         };
+        if attempt_index > 0 {
+            drop(credit_reservation.take());
+            drop(input_reservation.take());
+            let retry = RouteDecision {
+                provider: provider_kind.clone(),
+                model: decision.model.clone(),
+            };
+            let pool = crate::credit_pools::pool_for_gateway_provider(provider_kind.as_str());
+            if let Some(error) = preflight_credit_gate(&ctx, pool) {
+                last_error = Some(error);
+                continue;
+            }
+            match inference_governance::reserve_input_credit(&state, &ctx, &retry, estimated_input)
+            {
+                Ok(reservation) => input_reservation = reservation,
+                Err(error) => {
+                    last_error = Some(error);
+                    continue;
+                }
+            }
+        }
         state.metrics.inc_provider_request(provider.name());
 
-        let result = match operation {
-            EmbeddingOperation::Embed => provider
-                .embed(&decision.model, &body)
-                .await
-                .map_err(GatewayError::from),
-            EmbeddingOperation::Rerank => provider
-                .rerank(&decision.model, &body)
-                .await
-                .map_err(GatewayError::from),
+        let mut provider_body = body.clone();
+        node_routing::apply_openrouter_preferences(
+            ctx.openrouter_routing_enabled,
+            ctx.node_routing.as_ref(),
+            &state.config.node_routing,
+            provider.name(),
+            &mut provider_body,
+        );
+        let embedding_surface = match operation {
+            EmbeddingOperation::Embed => crate::identity::UpstreamSurface::Embedding,
+            EmbeddingOperation::Rerank => crate::identity::UpstreamSurface::Rerank,
         };
+        stamp_upstream_identity(
+            &state,
+            &ctx,
+            &mut provider_body,
+            provider.name(),
+            embedding_surface,
+        );
+        let model_span = gen_ai_telemetry::start_span(
+            &state,
+            &ctx,
+            gen_ai_telemetry::embedding_operation(operation),
+            None,
+            provider.name(),
+            &decision.model,
+            &provider_body,
+            false,
+        );
+        let result = model_span
+            .instrument(async {
+                match operation {
+                    EmbeddingOperation::Embed => provider
+                        .embed(&decision.model, &provider_body)
+                        .await
+                        .map_err(GatewayError::from),
+                    EmbeddingOperation::Rerank => provider
+                        .rerank(&decision.model, &provider_body)
+                        .await
+                        .map_err(GatewayError::from),
+                }
+            })
+            .await;
+        match &result {
+            Ok(response) => gen_ai_telemetry::finish_reported(model_span, response),
+            Err(error) => gen_ai_telemetry::finish_error(model_span, error),
+        }
 
         match result {
             Ok(response) => {
-                state.circuit_breaker.record_success(provider.name());
+                state.circuit_breaker.record_success(&provider_circuit_key(
+                    &state,
+                    &ctx,
+                    provider.name(),
+                ));
                 let exceeded = inference_governance::settle_completion(
                     &state,
                     &ctx,
@@ -3555,7 +5045,7 @@ pub async fn run_embedding(
                     inference_governance::CompletionReceipt {
                         provider: provider.name().to_owned(),
                         model: decision.model.clone(),
-                        reason: operation.as_str(),
+                        purpose: Some(operation.as_str()),
                         audit_provider: format!("{}:{}", provider.name(), operation.as_str()),
                         backend: None,
                         start,
@@ -3573,6 +5063,16 @@ pub async fn run_embedding(
                     state.metrics.inc_rate_limited();
                     state.metrics.inc_errors();
                     return Err(GatewayError::RateLimited);
+                }
+
+                // Only the provider the cache scope names may populate it; a
+                // fallback provider's vectors live in a different space.
+                if provider_kind == &decision.provider {
+                    if let (Some(cache), Some((scope, request))) =
+                        (state.embedding_cache.as_ref(), embedding_slot.as_ref())
+                    {
+                        cache.store(scope, request, &response).await;
+                    }
                 }
 
                 let degraded = if primary_skipped {
@@ -3597,11 +5097,30 @@ pub async fn run_embedding(
                 });
             }
             Err(error) => {
+                let error = upstream_signals::settle(&state, &ctx, attempt_index, error);
+                // A safety outcome ends the request: see the chat arm.
+                if error.is_safety_outcome() {
+                    audit_failure(&state, &ctx, &decision.model, &error, start);
+                    return Err(error);
+                }
+                if matches!(&error, GatewayError::ProviderDeliveryUncertain(_)) {
+                    state.metrics.inc_provider_error(provider.name());
+                    last_error = Some(error);
+                    break;
+                }
                 if penalizes_provider_circuit(&error) {
-                    state.circuit_breaker.record_failure(provider.name());
+                    state.circuit_breaker.record_failure(&provider_circuit_key(
+                        &state,
+                        &ctx,
+                        provider.name(),
+                    ));
                 }
                 state.metrics.inc_provider_error(provider.name());
+                let ends_chain = ends_attempt_chain(&state, &error);
                 last_error = Some(error);
+                if ends_chain {
+                    break;
+                }
                 if Some(provider_kind) == primary_provider.as_ref() {
                     primary_skipped = true;
                 }
@@ -3620,13 +5139,17 @@ pub async fn run_embedding(
             ))
         },
         |previous| match previous {
-            GatewayError::CircuitOpen(_) | GatewayError::ProviderError(_) => {
-                GatewayError::AllProvidersUnavailable(format!(
-                    "All providers unavailable for {} model '{}': {previous}",
-                    operation.as_str(),
-                    decision.model
-                ))
+            GatewayError::ProviderRejected { .. } if state.custody.ends_chain_on_refusal() => {
+                previous
             }
+            GatewayError::CircuitOpen(_)
+            | GatewayError::ProviderError(_)
+            | GatewayError::ProviderRejected { .. }
+            | GatewayError::ProviderTransport(_) => GatewayError::AllProvidersUnavailable(format!(
+                "All providers unavailable for {} model '{}': {previous}",
+                operation.as_str(),
+                decision.model
+            )),
             other => other,
         },
     );
@@ -3634,5371 +5157,21 @@ pub async fn run_embedding(
     Err(error)
 }
 
-// ─── Video generation (job-based) ─────────────────────────────────────────────
-
-/// Submit a video-generation job. Runs the SAME governance as `run_multimodal`
-/// (inbound firewall, rate limit, routing, budget) but, because cloud video runs
-/// for minutes, it does not block: it kicks off the provider's async job, stores
-/// a [`crate::jobs::MediaJob`] keyed by the request id, and returns the job
-/// envelope (`{ id, status, model }`) for the client to poll.
-pub async fn submit_video_job(
-    state: Arc<AppState>,
-    ctx: RequestContext,
-    mut body: Value,
-) -> Result<Value, GatewayError> {
-    let start = Instant::now();
-    state.metrics.inc_requests();
-    let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
-
-    let _input_alert =
-        inference_governance::inspect_multimodal_input(&state, &ctx, &mut body, &Modality::Video)
-            .map_err(|e| {
-            state.metrics.inc_errors();
-            audit_failure(&state, &ctx, &requested_model, &e, start);
-            e
-        })?;
-
-    // Rate limit + burst.
-    if !state
-        .rate_limiter
-        .check_request_for_key(&ctx.api_key, ctx.key_config.as_ref())
-        || !state.rate_limiter.check_burst(&ctx.api_key)
-    {
-        state.metrics.inc_rate_limited();
-        let e = GatewayError::RateLimited;
-        audit_failure(&state, &ctx, &requested_model, &e, start);
-        return Err(e);
-    }
-
-    // Route (honor per-agent video slot) + budget.
-    let decision = state.router.route_modality_with_slot(
-        &Modality::Video,
-        &requested_model,
-        ctx.slot_provider.as_ref(),
-        ctx.slot_model.as_deref(),
-    );
-    let mut decision = decision;
-    inference_governance::authorize_model(&state, &ctx, &decision.model).map_err(|e| {
-        state.metrics.inc_errors();
-        audit_failure(&state, &ctx, &decision.model, &e, start);
-        e
-    })?;
-    // Video is job-based, so its reservation must move into the durable in-memory
-    // job record and live until the provider reaches a terminal state. Dropping it
-    // at the end of submit reopens the exact headroom that concurrent video jobs
-    // are meant to claim.
-    let BudgetOutcome {
-        reservation: credit_reservation,
-        ..
-    } = enforce_budget(
-        &state,
-        &ctx,
-        &mut body,
-        &mut decision,
-        BudgetChargeKind::Media,
-        OutputCeiling::Untouched,
-    )
-    .map_err(|e| {
-        state.metrics.inc_errors();
-        audit_failure(&state, &ctx, &requested_model, &e, start);
-
-        e
-    })?;
-
-    inference_governance::authorize_model(&state, &ctx, &decision.model).map_err(|e| {
-        state.metrics.inc_errors();
-        audit_failure(&state, &ctx, &decision.model, &e, start);
-        e
-    })?;
-    inference_governance::authorize_provider_region(&state, &ctx, &decision.provider).map_err(
-        |e| {
-            state.metrics.inc_errors();
-            audit_failure(&state, &ctx, &decision.model, &e, start);
-            e
-        },
-    )?;
-
-    let provider_kind = decision.provider.clone();
-    if state.circuit_breaker.is_open(provider_kind.as_str()) {
-        let e = GatewayError::CircuitOpen(provider_kind.as_str().to_string());
-        audit_failure(&state, &ctx, &decision.model, &e, start);
-        return Err(e);
-    }
-    let Some(provider) = state.providers.get(provider_kind.as_str()) else {
-        let e = GatewayError::AllProvidersUnavailable(format!(
-            "video provider '{}' not configured",
-            provider_kind.as_str()
-        ));
-        audit_failure(&state, &ctx, &decision.model, &e, start);
-        return Err(e);
-    };
-
-    state.metrics.inc_provider_request(provider.name());
-    let job = provider
-        .submit_video(&decision.model, &body)
-        .await
-        .map_err(GatewayError::from)
-        .map_err(|e| {
-            state.circuit_breaker.record_failure(provider.name());
-            state.metrics.inc_provider_error(provider.name());
-            audit_failure(&state, &ctx, &decision.model, &e, start);
-            e
-        })?;
-    state.circuit_breaker.record_success(provider.name());
-
-    let media_job = crate::jobs::MediaJob {
-        id: ctx.request_id.clone(),
-        provider: provider_kind,
-        provider_ref: job.provider_ref,
-        model: decision.model.clone(),
-        status: job.status,
-        output: job.output,
-        error: job.error,
-        created_ms: crate::jobs::now_ms(),
-        last_activity_ms: crate::jobs::now_ms(),
-        org_id: ctx.org_id.clone(),
-        user_id: ctx.user_id.clone(),
-        agent_id: ctx.agent_id.clone(),
-        session_id: ctx.session_id.clone(),
-        api_key: ctx.api_key.clone(),
-        owner_binding: ctx.owner_binding.clone(),
-        reservation: credit_reservation.map(Arc::new),
-    };
-    // If the provider completed the job synchronously at submit, bill here — no
-    // later poll will observe a Queued→Succeeded transition. Idempotent via the
-    // `{id}:video` ref so it never double-charges against the poll debit.
-    let terminal_success = media_job.status == crate::jobs::JobStatus::Succeeded;
-    let terminal = media_job.status.is_terminal();
-    let has_output = media_job
-        .output
-        .as_ref()
-        .and_then(|o| o["data"].as_array())
-        .is_some_and(|a| !a.is_empty());
-    let job_id = media_job.id.clone();
-    let job_org = media_job.org_id.clone();
-    let job_user_id = media_job.user_id.clone();
-    let job_agent_id = media_job.agent_id.clone();
-    let job_session_id = media_job.session_id.clone();
-    let response = media_job.to_response();
-    state.jobs.insert(media_job);
-
-    if terminal_success && has_output {
-        if let Some(org_id) = job_org.filter(|s| !s.is_empty()) {
-            // PRICED FROM THE PROVIDER'S REPORTED COMPUTE TIME, exactly like the
-            // synchronous media path above — not from the flat rate.
-            //
-            // This read `media_cost_micro_usd(Video)` (the flat rate) and then
-            // `if cost > 0`, which meant an async video job billed NOTHING under
-            // the default config, because `cost_per_video_micro_usd` defaults to
-            // 0. The startup gate deliberately stopped guarding the video rate on
-            // the grounds that "image and video are metered from the provider's
-            // reported cost, so a flat rate of 0 there is an unreached fallback
-            // rather than a leak" — true of the sync path, false here, which is
-            // what made this silent. `to_response()` flattens the provider's
-            // output, so `usage.compute_seconds` is present when the provider
-            // reports it.
-            let (cost, estimated) = state
-                .config
-                .credits
-                .media_cost_from_response(&Modality::Video, &response);
-            record_charged_budget_for_ids(
-                &state,
-                job_user_id.as_deref(),
-                job_agent_id.as_deref(),
-                job_session_id.as_deref(),
-                BudgetChargeKind::Media,
-                state
-                    .config
-                    .credits
-                    .debit_amount_for_provider(Some(provider.name()), cost),
-            );
-            // Outside the `cost > 0` guard — see the sync media path above. A
-            // fallback priced at zero is precisely the case that must not be silent.
-            if estimated {
-                warn!(
-                    cost,
-                    billed = cost > 0,
-                    "credits: video job billed at the FLAT fallback rate — \
-                     the provider reported no compute time"
-                );
-            }
-            if cost > 0 {
-                let fail_closed_sticky = state.config.credits.fail_closed && ctx.managed_inference;
-                let credit_reservation = state.jobs.take_reservation(&job_id);
-                let provider_name = provider.name().to_owned();
-                let pool = crate::credit_pools::pool_for_gateway_provider(provider.name());
-                let model = decision.model.clone();
-                let duration_ms = response["usage"]["compute_seconds"]
-                    .as_f64()
-                    .filter(|seconds| *seconds > 0.0)
-                    .map(|seconds| (seconds * 1000.0).round() as u64);
-                let user_id = ctx.user_id.clone();
-                let task_label = media_task_label(&Modality::Video, estimated);
-                let debit_ref = format!("{job_id}:video");
-                let state_debit = state.clone();
-                tokio::spawn(async move {
-                    debit_wallet_for_request(
-                        state_debit,
-                        org_id,
-                        debit_ref,
-                        "gateway_usage",
-                        cost,
-                        fail_closed_sticky,
-                        None,
-                        pool,
-                        DebitAttribution {
-                            provider: Some(provider_name),
-                            model: Some(model),
-                            // Present exactly when the provider reported compute
-                            // time; absent means this row was priced at the flat
-                            // fallback rate. (submit)
-                            duration_ms,
-                            user_id,
-                            task_label: Some(task_label),
-                            estimated: Some(estimated),
-                            ..Default::default()
-                        },
-                    )
-                    .await;
-                    drop(credit_reservation);
-                });
-            }
-        }
-    }
-
-    // A synchronous failure, an empty/zero-cost success, or a non-managed job
-    // has no debit task to own the claim. Release any remaining job-held permit;
-    // a successful paid job already moved it into the debit task above.
-    if terminal {
-        drop(state.jobs.take_reservation(&job_id));
-    }
-
-    info!(
-        request_id = %ctx.request_id,
-        provider = provider.name(),
-        model = %decision.model,
-        "video job submitted"
-    );
-    Ok(response)
-}
-
-/// Poll a previously-submitted video job by id. Tenant-isolated: the polling API
-/// key must match the key that submitted the job. Terminal jobs return their
-/// cached result; otherwise the provider is re-polled and the store updated. On
-/// the transition to `succeeded` the configured flat video rate is debited once
-/// (idempotent via the `{id}:video` ref).
-pub async fn poll_video_job(
-    state: Arc<AppState>,
-    ctx: RequestContext,
-    job_id: String,
-) -> Result<Value, GatewayError> {
-    let Some(job) = state.jobs.get(&job_id) else {
-        return Err(GatewayError::BadRequest(format!(
-            "no such video job: {job_id}"
-        )));
-    };
-    // Tenant isolation: the redacted org label is shared by all dynamic
-    // credentials in an organization, so require both the independent tenant
-    // binding and the stable per-bearer owner binding. Return the same not-found
-    // shape as an unknown id so ownership cannot be probed.
-    if !job.belongs_to(ctx.org_id.as_deref(), &ctx.api_key, &ctx.owner_binding) {
-        return Err(GatewayError::BadRequest(format!(
-            "no such video job: {job_id}"
-        )));
-    }
-    state.jobs.touch(&job_id);
-    if job.status.is_terminal() {
-        return Ok(job.to_response());
-    }
-
-    let Some(provider) = state.providers.get(job.provider.as_str()) else {
-        return Err(GatewayError::AllProvidersUnavailable(format!(
-            "video provider '{}' not configured",
-            job.provider.as_str()
-        )));
-    };
-
-    let poll = provider.poll_video(&job.provider_ref).await?;
-    let transition = state.jobs.apply_poll(
-        &job_id,
-        poll.status,
-        poll.output.clone(),
-        poll.error.clone(),
-    );
-    let newly_succeeded = transition.became_succeeded;
-
-    let poll_has_output = poll
-        .output
-        .as_ref()
-        .and_then(|o| o["data"].as_array())
-        .is_some_and(|a| !a.is_empty());
-    if newly_succeeded && poll_has_output {
-        if let Some(org_id) = job.org_id.clone().filter(|s| !s.is_empty()) {
-            // Same fix as the submit path: price from the compute time the
-            // provider REPORTED, with the flat rate as a marked fallback. The
-            // poll's own output is the provider payload `to_response()` flattens,
-            // so `usage.compute_seconds` lives there when it is reported at all.
-            // A job with no output resolves to `Null`, which simply misses the
-            // lookup and falls back — the same as any provider that reports none.
-            let poll_payload = poll.output.clone().unwrap_or(serde_json::Value::Null);
-            let (cost, estimated) = state
-                .config
-                .credits
-                .media_cost_from_response(&Modality::Video, &poll_payload);
-            record_charged_budget_for_ids(
-                &state,
-                job.user_id.as_deref(),
-                job.agent_id.as_deref(),
-                job.session_id.as_deref(),
-                BudgetChargeKind::Media,
-                state
-                    .config
-                    .credits
-                    .debit_amount_for_provider(Some(provider.name()), cost),
-            );
-            // Outside the `cost > 0` guard — see the sync media path above.
-            if estimated {
-                warn!(
-                    cost,
-                    billed = cost > 0,
-                    "credits: video job billed at the FLAT fallback rate — \
-                     the provider reported no compute time"
-                );
-            }
-            if cost > 0 {
-                let fail_closed_sticky = state.config.credits.fail_closed && ctx.managed_inference;
-                let credit_reservation = state.jobs.take_reservation(&job_id);
-                let provider_name = provider.name().to_owned();
-                let pool = crate::credit_pools::pool_for_gateway_provider(provider.name());
-                let model = job.model.clone();
-                let duration_ms = poll_payload["usage"]["compute_seconds"]
-                    .as_f64()
-                    .filter(|seconds| *seconds > 0.0)
-                    .map(|seconds| (seconds * 1000.0).round() as u64);
-                let user_id = job.user_id.clone();
-                let task_label = media_task_label(&Modality::Video, estimated);
-                let debit_ref = format!("{job_id}:video");
-                let state_debit = state.clone();
-                tokio::spawn(async move {
-                    debit_wallet_for_request(
-                        state_debit,
-                        org_id,
-                        debit_ref,
-                        "gateway_usage",
-                        cost,
-                        fail_closed_sticky,
-                        None,
-                        pool,
-                        DebitAttribution {
-                            provider: Some(provider_name),
-                            // The JOB's own model, not a request decision: a poll
-                            // arrives on a later request that never made one.
-                            model: Some(model),
-                            // Present exactly when the provider reported compute
-                            // time; absent means this row was priced at the flat
-                            // fallback rate. (poll)
-                            duration_ms,
-                            user_id,
-                            task_label: Some(task_label),
-                            ..Default::default()
-                        },
-                    )
-                    .await;
-                    drop(credit_reservation);
-                });
-            }
-        }
-    }
-
-    // A failed/cancelled terminal result, a successful job with no output, or a
-    // zero-cost/non-managed success has no debit task to own the claim. A paid
-    // success already moved it into the debit task above.
-    if transition.became_terminal {
-        drop(state.jobs.take_reservation(&job_id));
-    }
-
-    let updated = state.jobs.get(&job_id).unwrap_or(job);
-    Ok(updated.to_response())
-}
-
-// ─── Unified tool loop signal (#475) ───────────────────────────────────────────
-
-/// Whether this request should run the unified search-based tool loop.
-///
-/// Gated on an explicit *per-request* signal so plain chat keeps the fast direct
-/// stream and ACP egress never triggers a second tool surface (B-10). The signal
-/// is the new `x-ryu-tools` header literally being present
-/// (`ctx.tools_header_present`) OR `x-ryu-tool-search: on`
-/// (`ctx.tool_search_requested`). Two deliberate exclusions:
-///   - the legacy `x-ryu-composio-actions` fallback is NOT a trigger: a bare
-///     Composio agent (legacy header only) keeps its fast stream + the legacy
-///     Composio loop, instead of being force-buffered into the unified loop.
-///     The fallback still feeds `effective_tool_allowlist` for migration.
-///   - `config.tools.always_on` is NOT a trigger: it is request-independent, so
-///     keying off it would fire on header-less ACP egress — the exact
-///     double-surface the design forbids. Always-on tools stay reachable once a
-///     per-request signal legitimately activates the loop (injected by
-///     `inject_search_tool` and granted by `effective_tool_allowlist`).
-///
-/// Always inert when `config.tools.enabled` is false.
-fn tool_signal_active(ctx: &RequestContext, cfg: &crate::config::ToolsConfig) -> bool {
-    if !cfg.enabled {
-        return false;
-    }
-    ctx.tools_header_present || ctx.tool_search_requested
-}
-
-/// Which completion path the pipeline takes for this request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolLoopKind {
-    /// Unified search-based tool loop (catalog wired + per-request signal).
-    Unified,
-    /// Legacy Composio tool loop (Composio configured).
-    Composio,
-    /// Plain completion — no managed tool loop.
-    Plain,
-}
-
-/// Decide which completion branch to run — the single source of truth for the
-/// precedence in `run` (unified → legacy Composio → plain).
-///
-/// Raw passthrough (`x-ryu-raw-tools`, `ctx.raw_tools`) short-circuits to
-/// `Plain` so an SDK-side agent loop's own `tools`/`tool_calls` are forwarded
-/// verbatim even on a Composio-on node — Core's loop never intercepts them.
-fn select_tool_loop(
-    ctx: &RequestContext,
-    has_catalog: bool,
-    has_composio: bool,
-    cfg: &crate::config::ToolsConfig,
-) -> ToolLoopKind {
-    if ctx.raw_tools {
-        return ToolLoopKind::Plain;
-    }
-    if has_catalog && tool_signal_active(ctx, cfg) {
-        return ToolLoopKind::Unified;
-    }
-    if has_composio {
-        return ToolLoopKind::Composio;
-    }
-    ToolLoopKind::Plain
-}
-
-/// Parse the per-request `x-ryu-tools` CSV into a list of FQ tool ids.
-///
-/// The wildcard `"*"` is stripped here: it grants *every* tool
-/// ([`crate::tools::ToolLoopContext::is_allowed`]) and may only originate from a
-/// server-configured `unrestricted` profile, never from the client-controlled
-/// header. Without this filter, `x-ryu-tools: *` would bypass the allowlist
-/// entirely (both on the no-profile path and when unioned onto a non-`unrestricted`
-/// profile's allow set).
-fn parse_tool_actions(ctx: &RequestContext) -> Vec<String> {
-    ctx.tool_actions
-        .as_deref()
-        .map(|s| {
-            s.split(',')
-                .map(str::trim)
-                .filter(|x| !x.is_empty() && *x != "*")
-                .map(String::from)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Effective egress tool allowlist (FQ ids) for the unified loop.
-///
-/// Default path (no profile, or an unknown profile name): the per-request
-/// `x-ryu-tools` CSV when present, else empty, plus the registry's `always_on`
-/// tool names (so always-on tools are callable without a header). This is the
-/// byte-for-byte original behavior — selecting no profile changes nothing.
-///
-/// Profile path (`ctx.tool_profile` names a configured `cfg.profiles` entry),
-/// modeled on OpenClaw's profile layering (profile → allow/deny):
-///   1. seed the allow set from `profile.allow` (or the wildcard `"*"` when the
-///      profile is `unrestricted` — the "full" preset);
-///   2. union the explicit `x-ryu-tools` CSV on top (explicit allow augments the
-///      profile);
-///   3. strip any id listed in `profile.deny` (deny wins over allow);
-///   4. append `always_on` names last — they are never deny-stripped, preserving
-///      the always-on contract.
-///
-/// `tool_search` is always permitted by the loop itself, independent of this
-/// list. An unrestricted profile's `"*"` is honored by
-/// [`crate::tools::ToolLoopContext::is_allowed`].
-fn effective_tool_allowlist(ctx: &RequestContext, cfg: &crate::config::ToolsConfig) -> Vec<String> {
-    let profile = ctx
-        .tool_profile
-        .as_deref()
-        .and_then(|name| cfg.profiles.get(name));
-
-    let mut allowed: Vec<String> = match profile {
-        // Profile selected and configured: seed from the profile's allow set.
-        Some(p) => {
-            let mut seed: Vec<String> = if p.unrestricted {
-                vec!["*".to_string()]
-            } else {
-                p.allow.clone()
-            };
-            // Explicit per-request allow augments/overrides the profile.
-            for id in parse_tool_actions(ctx) {
-                if !seed.contains(&id) {
-                    seed.push(id);
-                }
-            }
-            // Deny wins over allow (does NOT strip always_on, appended below).
-            if !p.deny.is_empty() {
-                seed.retain(|id| !p.deny.contains(id));
-            }
-            seed
-        }
-        // No profile, or an unknown/typo'd name: exactly today's behavior.
-        None => parse_tool_actions(ctx),
-    };
-
-    for def in &cfg.always_on {
-        if let Some(name) = def["function"]["name"].as_str() {
-            allowed.push(name.to_string());
-        }
-    }
-    allowed
-}
-
 /// Extract the user-visible input text from a multimodal request body for
-/// inbound firewall scanning. Image: `prompt`; TTS: `input`; STT: no text.
+/// inbound firewall scanning. TTS: `input`; image, video and audio: `prompt`
+/// plus every other non-`data:` string leaf (see
+/// `inference_governance::multimodal_text_fields`); STT: no text. These are the
+/// fields Sanitize rewrites; every other string the provider receives is
+/// screened as the residual (see `outbound_text`).
 fn multimodal_input_text(body: &Value, modality: &Modality) -> String {
-    match modality {
-        Modality::Image | Modality::Video => body["prompt"].as_str().unwrap_or("").to_string(),
-        Modality::Tts => body["input"].as_str().unwrap_or("").to_string(),
-        Modality::Stt | Modality::Chat => String::new(),
-    }
-}
-
-fn budget_charge_kind_for_modality(modality: &Modality) -> BudgetChargeKind {
-    match modality {
-        Modality::Chat => BudgetChargeKind::Model,
-        Modality::Image | Modality::Tts | Modality::Stt | Modality::Video => {
-            BudgetChargeKind::Media
-        }
-    }
-}
-
-// ─── Budget enforcement (U21) ─────────────────────────────────────────────────
-
-/// Check the request against per-user and per-agent budgets and apply the
-/// configured action inline. Shared by both the streaming and non-streaming
-/// pipelines so enforcement fires on whichever path Core uses.
-///
-/// Side effects on the action:
-///   - `Stop`      → returns `Err(BudgetExceeded)` (the caller aborts).
-///   - `Downgrade` → rewrites `body["model"]` and reroutes via the router.
-///   - `Restrict`  → strips tool definitions and caps `max_tokens`.
-///   - `Notify`    → no body change; just observable.
-///
-/// Returns the triggered `BudgetDecision` (if any) so the caller can surface it
-/// to the client as response headers.
-fn enforce_budget(
-    state: &AppState,
-    ctx: &RequestContext,
-    body: &mut Value,
-    decision: &mut RouteDecision,
-    kind: BudgetChargeKind,
-    ceiling: OutputCeiling,
-) -> Result<BudgetOutcome, GatewayError> {
-    if ctx.is_master_key {
-        return Ok(BudgetOutcome::default());
-    }
-    if let Some(err) = accounting_unavailable_gate(state, ctx) {
-        state.metrics.inc_errors();
-        warn!(
-            org_id = ?ctx.org_id,
-            "credits: control-plane accounting unavailable, rejecting managed request (503)"
-        );
-        return Err(err);
-    }
-    // Pre-flight credit gate (multi-tenant data plane): a managed-inference tenant
-    // whose control-plane-resolved wallet is already exhausted is rejected BEFORE
-    // dispatch with a hard 402. This closes the "fresh replica serves one request
-    // against an already-empty wallet" hole — it reads the authoritative resolved
-    // balance (refreshed on the 60s cache TTL), so a top-up auto-recovers without a
-    // sticky flag. Independent of `credits.is_active()` (the balance is
-    // control-plane authoritative). Non-managed / BYOK / master traffic is exempt.
-    //
-    // POOL-AWARE (segregated credit pools): the gate is evaluated against the
-    // pool the ROUTED provider bills, so a wallet holding only frontier-pool
-    // grant money cannot serve a free-pool request (and vice versa) even though
-    // its total is positive. Two honest limits of doing it here:
-    //   - This runs BEFORE the fallback chain, so it gates on the PRIMARY
-    //     provider's pool. A request admitted here can still be served by a
-    //     fallback in a different pool. The authoritative pool attribution is the
-    //     post-call debit, which knows the provider that actually answered.
-    //   - An untagged provider yields `None` and the pre-pool check applies.
-    let routed_pool = crate::credit_pools::pool_for_gateway_provider(decision.provider.as_str());
-    if let Some(err) = preflight_credit_gate(ctx, routed_pool) {
-        state.metrics.inc_budget_exceeded();
-        warn!(
-            org_id = ?ctx.org_id,
-            remaining_budget_micro_usd = ?ctx.remaining_budget_micro_usd,
-            unrestricted_budget_micro_usd = ?ctx.unrestricted_budget_micro_usd,
-            pool = ?routed_pool,
-            "credits: managed tenant wallet exhausted, rejecting pre-flight (402)"
-        );
-        return Err(err);
-    }
-
-    // CLAIM THE HEADROOM THE GATE JUST APPROVED, before dispatch.
-    //
-    // The gate above answers "does this org have money", and until this claim
-    // existed that was the whole of the concurrency story: metering is post-paid,
-    // so every request in flight at one instant read the same pre-debit balance
-    // and all of them passed. One org could hold a fraction of a cent and still
-    // put an unbounded number of frontier calls on Ryu's provider account, and
-    // the only thing shortening the burst was the per-org rate limit — which is
-    // denominated in TOKENS while the wallet is denominated in DOLLARS, so it
-    // could not see price at all.
-    //
-    // The permit is returned to the caller and dropped when the request's
-    // lifetime ends (a local on the non-streaming paths, `StreamObserverState` on
-    // the streaming one). Release is `Drop`, never a call — see
-    // [`ryu_gw_budget::CreditReservation`].
-    //
-    // Refusing here is the SAME 402 as the gate: from the client's side "your
-    // wallet cannot cover this" and "your wallet cannot cover this as well as
-    // everything else you have running" are one condition, and splitting them
-    // would leak the node's concurrency accounting into a public error surface.
-    // BOUND THE COST BEFORE CLAIMING IT. The clamp lowers this request's output
-    // ceiling to what the wallet can still pay for, so the reservation below is a
-    // claim against a request that physically cannot exceed it — rather than the
-    // $0.01 floor standing in for an unbounded completion. Must run BEFORE
-    // `maybe_reserve_credit`, which estimates from the very ceiling this writes.
-    if let Some(clamped) = clamp_output_ceiling(state, ctx, body, routed_pool, ceiling) {
-        debug!(
-            org_id = ?ctx.org_id,
-            pool = ?routed_pool,
-            max_output_tokens = clamped,
-            "credits: lowered this request's output ceiling to the affordable maximum"
-        );
-    }
-
-    let reservation = maybe_reserve_credit(state, ctx, body, routed_pool).map_err(|err| {
-        state.metrics.inc_budget_exceeded();
-        warn!(
-            org_id = ?ctx.org_id,
-            pool = ?routed_pool,
-            "credits: in-flight reservations already claim this org's balance, rejecting pre-flight (402)"
-        );
-        err
-    })?;
-
-    // Charged-cost budget decision (U21) and the credit-wallet-empty decision (#486)
-    // are both expressed as a `BudgetDecision`; pick the more severe so a single
-    // `match` applies one action. The wallet decision reuses the existing budget
-    // machinery — no new denial path (spec §4).
-    let token_decision = state
-        .with_budget(|b| b.evaluate_charge(ctx.user_id.as_deref(), ctx.agent_id.as_deref(), kind));
-    let wallet_decision = wallet_empty_decision(state, ctx);
-    // Per-session running cap (#510): one global rule, counter keyed by
-    // x-ryu-session-id. Folded into the same most-severe chain so a session
-    // decision flows through the existing Notify/Downgrade/Restrict/Stop arms.
-    let session_decision =
-        state.with_budget(|b| b.evaluate_session_charge(ctx.session_id.as_deref(), kind));
-
-    // The propagated alert tier is the MAX across every matched decision (not
-    // just the most-severe-enforcement one), so a low-enforcement rule with a
-    // high alert tier still fans out. Computed before `most_severe` consumes the
-    // decisions.
-    let max_tier = [
-        token_decision.as_ref(),
-        wallet_decision.as_ref(),
-        session_decision.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    .map(|d| d.alert)
-    .max()
-    .unwrap_or(AlertTier::Silent);
-
-    let Some(budget) = most_severe(
-        most_severe(token_decision, wallet_decision),
-        session_decision,
-    ) else {
-        return Ok(BudgetOutcome {
-            decision: None,
-            alert: None,
-            reservation,
-        });
-    };
-
-    // Build the Ok/Err-path PolicyAlert once (source/scope inferred from the
-    // winning decision), only when a matched rule asked for a real alert.
-    let alert = if max_tier >= AlertTier::Warn {
-        Some(PolicyAlert::from_budget_decision(
-            &budget,
-            max_tier,
-            ctx.org_id.as_deref().unwrap_or(""),
-        ))
-    } else {
-        None
-    };
-
-    match budget.action {
-        BudgetAction::Notify => {
-            state.metrics.inc_budget_notified();
-            warn!(
-                scope = budget.scope.as_str(),
-                key_id = %crate::audit::credential_log_id(&budget.key),
-                used_micro_usd = budget.used,
-                limit_micro_usd = budget.limit,
-                "budget reached (notify)"
-            );
-        }
-        BudgetAction::Downgrade => {
-            if let Some(ref model) = budget.downgrade_to {
-                state.metrics.inc_budget_downgraded();
-                info!(
-                    scope = budget.scope.as_str(),
-                    key_id = %crate::audit::credential_log_id(&budget.key),
-                    downgrade = %model,
-                    "budget reached, downgrading model"
-                );
-                body["model"] = Value::String(model.clone());
-                *decision = state.router.route(model);
-            }
-        }
-        BudgetAction::Restrict => {
-            state.metrics.inc_budget_restricted();
-            warn!(
-                scope = budget.scope.as_str(),
-                key_id = %crate::audit::credential_log_id(&budget.key),
-                cap = budget.restrict_max_tokens,
-                "budget reached, restricting request"
-            );
-            // Strip tools and clamp the output length so an over-budget caller
-            // still gets a minimal answer instead of a hard failure.
-            if let Some(obj) = body.as_object_mut() {
-                obj.remove("tools");
-                obj.remove("tool_choice");
-            }
-            body["max_tokens"] = Value::from(budget.restrict_max_tokens);
-        }
-        BudgetAction::Stop => {
-            state.metrics.inc_budget_exceeded();
-            state.metrics.inc_errors();
-            warn!(
-                scope = budget.scope.as_str(),
-                key_id = %crate::audit::credential_log_id(&budget.key),
-                used_micro_usd = budget.used,
-                limit_micro_usd = budget.limit,
-                "budget exceeded (stop)"
-            );
-            return Err(GatewayError::BudgetExceeded(alert));
-        }
-    }
-
-    Ok(BudgetOutcome {
-        decision: Some(budget),
-        alert,
-        reservation,
-    })
-}
-
-// ─── Credit-wallet debit hook (#486) ──────────────────────────────────────────
-
-/// Build a `BudgetDecision` from the cached credit-wallet-empty flag for this
-/// request's org, if the credits hook is active and the org is flagged empty.
-///
-/// The flag is set POST-call by the debit hook (the cost is only known after the
-/// response); this gate fires PRE-call on the NEXT request for that org. Returns
-/// the configured wallet-empty action (Stop by default, or Downgrade) so the
-/// shared `enforce_budget` machinery applies it — no new denial path (spec §4).
-/// Pre-flight credit gate for the multi-tenant data plane (§4). A managed-inference
-/// tenant (resolved from an `rgw_` token) whose control-plane-resolved remaining
-/// wallet balance is non-positive is rejected before dispatch with a hard
-/// `InsufficientCredits` (402). Reads only the resolved balance carried on the
-/// ctx — it is refreshed on the resolve cache's 60s TTL, so a top-up auto-recovers
-/// (no sticky flag to strand a re-funded org). Returns `None` for non-managed,
-/// uncapped (`None` budget), or positive-balance requests.
-///
-/// `pool` is the credit pool this request is ROUTED to (see
-/// [`crate::credit_pools`]), and it is what makes the gate able to answer a
-/// question the total cannot: a wallet holding $50 of Bedrock grant and nothing
-/// else has a positive total, yet funds no Cloudflare token at all. With a pool,
-/// the spendable amount is the unrestricted buckets PLUS that one pool's grant —
-/// grants for every other pool are unreachable by construction, because no other
-/// entry of the map is ever added in.
-///
-/// `pool == None` (the provider is not pool-tagged — `openai`, `anthropic`,
-/// `local`, …) is NOT the pre-pool check. It gates on the UNRESTRICTED balance,
-/// because a restricted grant cannot pay an untagged provider: the debit that
-/// follows carries no pool, so `debitWallet` skips every grant row and drives
-/// the top-up bucket negative while the grant sits untouched. Gating such a
-/// request on the blended total would admit it against money it can never
-/// spend, and Ryu would absorb the provider's bill. Concretely: a Founding-50
-/// claimant with `sub=0, topup=0, bedrock grant=$50` sending `gpt-4o`.
-///
-/// One degradation is deliberate and must stay:
-///   - `unrestricted_budget_micro_usd == None` (control plane predates pool
-///     segregation) ⇒ treat the whole balance as unrestricted, i.e. the pre-pool
-///     check again, on BOTH branches. Collapsing this into `0` would gate every
-///     request to death the moment the gateway outran the control plane.
-/// The provider chain to dispatch over: the fleet's own `fallback_chain` for the
-/// routed primary, re-ordered (never extended) by the node's stated preference.
-///
-/// The single seam all three chain-expansion sites — non-stream `run`, streaming
-/// `run_stream`, and `run_multimodal` — go through, so they cannot drift. It owns
-/// the `state.router.fallback_chain` call rather than taking a chain, which is
-/// what makes the swap a one-liner at each site: the multimodal path never runs
-/// `pre_process`, so a clamp result threaded out of `pre_process` would not have
-/// reached it at all.
-///
-/// The clamp is fed the REAL credit gate, so an entry the preference would
-/// promote is re-checked against its own credit pool. That matters because
-/// `preflight_credit_gate` in `enforce_budget` only ever saw the PRIMARY's pool,
-/// before this expansion — see [`node_routing`] for the full argument.
-fn clamped_fallback_chain(
-    state: &AppState,
-    ctx: &RequestContext,
-    decision: &RouteDecision,
-) -> Vec<ProviderId> {
-    let fleet_chain = state.router.fallback_chain(&decision.provider);
-    let clamped = node_routing::clamp_fallback(
-        ctx.node_routing.as_ref(),
-        &state.config.node_routing,
-        ctx,
-        fleet_chain,
-        |c, pool| preflight_credit_gate(c, pool).is_none(),
-    );
-    if !clamped.dropped.is_empty() {
-        debug!(
-            request_id = %ctx.request_id,
-            dropped = ?clamped.dropped,
-            "node routing: parts of the node's fallback preference were not honoured"
-        );
-    }
-    clamped.chain
-}
-
-/// The spendable headroom `preflight_credit_gate` judges a request against, or
-/// `None` when the org has no managed cap at all.
-///
-/// Factored out of the gate so the RESERVATION is taken against exactly the
-/// number the gate approved. Deriving them separately is how a request gets
-/// admitted against pooled grant money and then reserved against the
-/// unrestricted balance — two different figures, and the mismatch would surface
-/// as spurious 402s for tenants whose money is mostly in grants.
-/// What [`enforce_budget`] hands back.
-///
-/// A struct rather than the old `(Option<BudgetDecision>, Option<PolicyAlert>)`
-/// tuple because of the third member: `reservation` is an RAII permit whose
-/// DROP releases the org's claimed headroom, so where it lives is load-bearing
-/// rather than incidental. A tuple invites `let (budget, alert) = …?;`, which
-/// silently drops a third element — releasing the claim the instant it was taken
-/// and turning the whole mechanism into a no-op that still compiles and still
-/// passes every test that does not run two requests at once. Naming the field
-/// makes ignoring it something you have to write down.
-#[derive(Default)]
-struct BudgetOutcome {
-    decision: Option<BudgetDecision>,
-    alert: Option<PolicyAlert>,
-    /// HOLD THIS FOR AS LONG AS THE REQUEST RUNS. Dropping it early re-admits
-    /// everything it was holding back.
-    reservation: Option<CreditReservation>,
-}
-
-/// Take a reservation for this request, or refuse it with the pre-flight 402.
-///
-/// `Ok(None)` is the ADMITTED-WITHOUT-A-CLAIM case and covers every request the
-/// reservation layer has no business gating: reservations switched off, a
-/// non-managed / BYOK tenant, and an org with no managed cap at all. Those are
-/// exactly the callers for whom `credit_headroom_micro_usd` returns `None`, so
-/// the absence of a cap stays a single concept rather than being re-derived
-/// here with a slightly different meaning.
-fn maybe_reserve_credit(
-    state: &AppState,
-    ctx: &RequestContext,
-    body: &Value,
-    pool: Option<&str>,
-) -> Result<Option<CreditReservation>, GatewayError> {
-    if !state.config.credits.reserve_enabled {
-        return Ok(None);
-    }
-    let Some(org_id) = ctx.org_id.as_deref().filter(|s| !s.is_empty()) else {
-        return Ok(None);
-    };
-    let Some(headroom) = credit_headroom_micro_usd(ctx, pool) else {
-        return Ok(None);
-    };
-    let estimate = reservation_estimate_micro_usd(state, body);
-    state
-        .wallet
-        .try_reserve(org_id, estimate, headroom)
-        .map(Some)
-        .ok_or(GatewayError::InsufficientCredits)
-}
-
-fn credit_headroom_micro_usd(ctx: &RequestContext, pool: Option<&str>) -> Option<i64> {
-    if !ctx.managed_inference {
-        return None;
-    }
-    let total = ctx.remaining_budget_micro_usd?;
-    let unrestricted = ctx.unrestricted_budget_micro_usd.unwrap_or(total);
-    let Some(pool) = pool else {
-        return Some(unrestricted);
-    };
-    let pooled = ctx
-        .pool_budgets_micro_usd
-        .get(pool)
-        .copied()
-        .unwrap_or_default();
-    Some(unrestricted.saturating_add(pooled))
-}
-
-/// What THIS request is expected to cost, in micro-USD, for reservation only.
-///
-/// Never bills anything — the authoritative charge is the post-call debit
-/// against the real ledger. This exists solely to decide who may start.
-///
-/// The basis is `max_tokens` at the flat `control_plane.cost_per_1k_micro_usd`
-/// rate, marked up the same way the debit will be, with `min_reserve_micro_usd`
-/// as a floor. The estimate is deliberately crude and is DOCUMENTED as
-/// under-stating frontier traffic: the gateway holds no per-model price table,
-/// and for OpenRouter the true cost only arrives with the response. The floor is
-/// what actually bounds a burst — see [`crate::config::CreditsConfig::min_reserve_micro_usd`].
-///
-/// A request that names no `max_tokens` gets the floor rather than zero. Zero
-/// would mean an unbounded completion reserves nothing, which is precisely
-/// backwards: not stating a ceiling makes a request MORE expensive to serve, not
-/// less.
-fn reservation_estimate_micro_usd(state: &AppState, body: &Value) -> i64 {
-    let credits = &state.config.credits;
-    let max_tokens = body
-        .get("max_tokens")
-        .or_else(|| body.get("max_completion_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let estimate = credits.debit_amount(request_cost_micro_usd(state, 0, max_tokens));
-    estimate
-        .max(credits.min_reserve_micro_usd)
-        .min(i64::MAX as u64) as i64
-}
-
-/// Whether this request body carries an output-token ceiling the credit clamp
-/// may lower.
-///
-/// Only text completions do. `run_multimodal` and `submit_video_job` route
-/// through the same [`enforce_budget`], and writing a `max_tokens` into an image
-/// or video body would at best be ignored and at worst rejected by the provider
-/// as an unknown field.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum OutputCeiling {
-    /// A chat/text-completion body — clamp its token ceiling to what the wallet
-    /// can actually pay for.
-    Clamp,
-    /// An image/video/other body — leave it alone.
-    Untouched,
-}
-
-/// How many output tokens `available_micro_usd` buys at the flat rate.
-///
-/// The inverse of [`request_cost_micro_usd`] over the output term, un-doing the
-/// billing markup first so the answer is in the same currency the caller's
-/// budget is denominated in.
-///
-/// Saturates to `u64::MAX` when the node charges nothing per token (a rate of
-/// zero divides into any balance infinitely), which the caller reads as "no
-/// affordability limit" — correct, because a node that meters nothing cannot
-/// overdraw anyone.
-fn affordable_output_tokens(state: &AppState, available_micro_usd: i64, model: &str) -> u64 {
-    // PER-MODEL, not the flat blended rate. Output prices span roughly 500x
-    // across the catalog, so a single rate made this ceiling far too generous on
-    // exactly the frontier models where an overdraft is worth having, and
-    // needlessly tight on cheap ones — truncating completions the org could
-    // always afford. Falls back to the flat rate when the model is not in the
-    // price table.
-    let per_1k = state
-        .config
-        .control_plane
-        .output_price_per_1k_micro_usd(model);
-    if per_1k == 0 {
-        return u64::MAX;
-    }
-    let available = available_micro_usd.max(0) as u64;
-    // Undo the markup: `debit_amount` is what turns raw provider cost into the
-    // figure charged, and the budget is measured in charged micro-USD. Dividing
-    // before un-marking-up would hand out a ceiling the debit then exceeds.
-    let raw = state.config.credits.undo_debit_amount(available);
-    raw.saturating_mul(1000) / per_1k
-}
-
-/// CLAMP THIS REQUEST'S OUTPUT CEILING TO WHAT THE WALLET CAN PAY FOR.
-///
-/// The hole this closes: metering is post-paid, and a request that names no
-/// `max_tokens` reserved only `min_reserve_micro_usd` — a flat $0.01 that bounds
-/// CONCURRENCY, not cost. So an org holding one cent could front a single
-/// arbitrarily expensive completion, and the overdraft was limited only by how
-/// much the model felt like generating. Prepaid credit is supposed to be a hard
-/// cap; work is supposed to stop at zero.
-///
-/// The fix is to make the ceiling real rather than to refuse the request. A
-/// request stating no ceiling is given the largest one its balance covers; a
-/// request stating one keeps it, unless it is larger than the balance covers, in
-/// which case it is lowered. The request then physically cannot cost more than
-/// the org can pay, so the reservation that follows is an honest claim rather
-/// than a floor standing in for one.
-///
-/// INJECTION, NOT REJECTION — deliberately, and a departure from the original
-/// spec in `docs/pricing-remaining-work.md`, which called for a MANDATORY
-/// `max_output_tokens`. Refusing every request that omits one would 402 every
-/// existing managed client the moment this shipped, to fix a problem the client
-/// did not cause. The cost of injecting instead is that a caller can now be
-/// truncated at a ceiling it never set (`finish_reason: "length"`); that is the
-/// honest consequence of running out of money mid-completion, and it is strictly
-/// better than the alternative of serving the completion and eating the bill.
-///
-/// NET OF IN-FLIGHT CLAIMS. The headroom is the org's whole remaining balance,
-/// and `try_reserve` is what subtracts the requests already running. Clamping
-/// against the gross figure would let three concurrent unbounded requests each
-/// size themselves at the full balance — the first would claim all of it and its
-/// siblings would 402, which is not a bound, it is a race. Subtracting
-/// `in_flight_micro_usd` first means concurrent requests each get a smaller
-/// honest ceiling instead. A claim landing between this read and `try_reserve`
-/// only makes the ceiling generous, and `try_reserve` still refuses
-/// authoritatively — so the residual race degrades to today's behaviour rather
-/// than past it.
-///
-/// THE CEILING IS LOOSE ON EXPENSIVE TRAFFIC. It is derived from the flat
-/// `cost_per_1k_micro_usd`, which [`reservation_estimate_micro_usd`] already
-/// documents as under-stating frontier models — the gateway holds no per-model
-/// price table. So this bounds the overdraft, it does not eliminate it: a
-/// frontier completion can still finish somewhat past the balance. A bound with
-/// known slack is the improvement over no bound at all; tightening it needs the
-/// per-model prices, which is the same missing piece the estimate waits on.
-///
-/// Returns the ceiling written, for logging. `None` when nothing was changed.
-fn clamp_output_ceiling(
-    state: &AppState,
-    ctx: &RequestContext,
-    body: &mut Value,
-    pool: Option<&str>,
-    ceiling: OutputCeiling,
-) -> Option<u64> {
-    if ceiling != OutputCeiling::Clamp || !state.config.credits.reserve_enabled {
-        return None;
-    }
-    let org_id = ctx.org_id.as_deref().filter(|s| !s.is_empty())?;
-    // `None` ⇒ the org has no managed cap at all (BYOK, unmanaged, master key).
-    // Nothing to clamp against, and imposing a ceiling on a tenant who is not
-    // spending our money would be a pure regression.
-    let headroom = credit_headroom_micro_usd(ctx, pool)?;
-    let available = headroom.saturating_sub(state.wallet.in_flight_micro_usd(org_id));
-    // The model named on the BODY — what will actually be dispatched, and so
-    // what the ceiling has to be priced against. An empty/absent model falls
-    // through to the flat rate inside `output_price_per_1k_micro_usd`.
-    let model = body.get("model").and_then(Value::as_str).unwrap_or("");
-    let affordable = affordable_output_tokens(state, available, model);
-    if affordable == u64::MAX {
-        return None;
-    }
-
-    // Write back to the key the CLIENT used. Adding `max_tokens` to a body that
-    // said `max_completion_tokens` would leave both present, which some
-    // providers reject outright.
-    let key = if body.get("max_completion_tokens").is_some() {
-        "max_completion_tokens"
-    } else {
-        "max_tokens"
-    };
-    let requested = body.get(key).and_then(Value::as_u64).unwrap_or(0);
-    // `0`/absent means "no ceiling stated", which is the unbounded case — give it
-    // the affordable one. Otherwise only ever lower, never raise: a client asking
-    // for less than it can afford is stating a preference, not a budget.
-    let effective = if requested == 0 {
-        affordable
-    } else {
-        requested.min(affordable)
-    };
-    if effective == requested {
-        return None;
-    }
-    if let Some(map) = body.as_object_mut() {
-        map.insert(key.to_string(), Value::from(effective));
-    }
-    Some(effective)
-}
-
-fn preflight_credit_gate(ctx: &RequestContext, pool: Option<&str>) -> Option<GatewayError> {
-    if !ctx.managed_inference {
-        return None;
-    }
-    // `None` ⇒ no managed cap at all; nothing to gate on, pooled or not.
-    let total = ctx.remaining_budget_micro_usd?;
-    let unrestricted = ctx.unrestricted_budget_micro_usd.unwrap_or(total);
-    let Some(pool) = pool else {
-        return (unrestricted <= 0).then_some(GatewayError::InsufficientCredits);
-    };
-    let pooled = ctx
-        .pool_budgets_micro_usd
-        .get(pool)
-        .copied()
-        .unwrap_or_default();
-    (unrestricted.saturating_add(pooled) <= 0).then_some(GatewayError::InsufficientCredits)
-}
-
-/// Stop new managed provider spend after a debit could not be accounted for.
-/// This is intentionally separate from `wallet_empty_decision`: an outage is
-/// not evidence that the wallet is empty, and mapping it to the wallet-empty
-/// budget action would strand a funded tenant until the process restarts.
-fn accounting_unavailable_gate(state: &AppState, ctx: &RequestContext) -> Option<GatewayError> {
-    if !(ctx.managed_inference && state.config.credits.is_active()) {
-        return None;
-    }
-    let org_id = ctx.org_id.as_deref().filter(|value| !value.is_empty())?;
-    state
-        .wallet
-        .is_org_accounting_unavailable(org_id)
-        .then_some(GatewayError::AccountingUnavailable)
-}
-
-fn wallet_empty_decision(state: &AppState, ctx: &RequestContext) -> Option<BudgetDecision> {
-    let credits = &state.config.credits;
-    if !credits.is_active() {
-        return None;
-    }
-    let org_id = ctx.org_id.as_deref().filter(|s| !s.is_empty())?;
-    if !state.wallet.is_org_empty(org_id) {
-        return None;
-    }
-
-    // Map the configured wallet-empty action onto the budget action. A downgrade
-    // with no target model degrades to a restrict (mirrors the spend-budget rule)
-    // so the caller is never silently let through on an unhonourable downgrade.
-    let action = match credits.wallet_empty_action {
-        crate::config::WalletEmptyAction::Downgrade
-            if credits.wallet_empty_downgrade_to.is_some() =>
-        {
-            BudgetAction::Downgrade
-        }
-        crate::config::WalletEmptyAction::Downgrade => BudgetAction::Restrict,
-        crate::config::WalletEmptyAction::Stop => BudgetAction::Stop,
-    };
-
-    Some(BudgetDecision {
-        scope: crate::budget::BudgetScope::User,
-        key: format!("org:{org_id}"),
-        action,
-        used: 0,
-        limit: 0,
-        downgrade_to: credits.wallet_empty_downgrade_to.clone(),
-        restrict_max_tokens: 256,
-        // The wallet-empty rule's own alert tier (folded into the max in
-        // `enforce_budget`). `limit == 0` keeps the wallet-empty invariant that
-        // `PolicyAlert::from_budget_decision` routes to `wallet_empty`.
-        alert: credits.wallet_empty_alert,
-    })
-}
-
-/// Pick the more restrictive of two optional budget decisions. Severity order
-/// (most restrictive first): `Stop` > `Restrict`/`Downgrade` > `Notify`. Ties
-/// keep the first budget decision. Mirrors `budget::severity` (private there).
-fn most_severe(a: Option<BudgetDecision>, b: Option<BudgetDecision>) -> Option<BudgetDecision> {
-    fn rank(action: BudgetAction) -> u8 {
-        match action {
-            BudgetAction::Notify => 0,
-            BudgetAction::Restrict | BudgetAction::Downgrade => 1,
-            BudgetAction::Stop => 2,
-        }
-    }
-    match (a, b) {
-        (Some(x), Some(y)) => {
-            if rank(y.action) > rank(x.action) {
-                Some(y)
-            } else {
-                Some(x)
-            }
-        }
-        (Some(x), None) => Some(x),
-        (None, other) => other,
-    }
-}
-
-/// Flat estimated spend in micro-USD for reservation-only paths.
-fn request_cost_micro_usd(state: &AppState, input_tokens: u64, output_tokens: u64) -> u64 {
-    let per_1k = state.config.control_plane.cost_per_1k_micro_usd;
-    input_tokens
-        .saturating_add(output_tokens)
-        .saturating_mul(per_1k)
-        / 1000
-}
-
-/// Raw provider cost in micro-USD, preferring the provider's *reported actual*
-/// spend over the configured per-model price table. OpenRouter returns
-/// `usage.cost` (in USD) when usage accounting is enabled; direct providers
-/// fall back to the model catalog and then the flat rate.
-fn response_cost_micro_usd(
-    state: &AppState,
-    reported_cost_usd: Option<f64>,
-    input_tokens: u64,
-    output_tokens: u64,
-    model: &str,
-) -> u64 {
-    reported_cost_usd
-        .and_then(cost_usd_to_micro)
-        .unwrap_or_else(|| {
-            state
-                .config
-                .control_plane
-                .cost_for(model, input_tokens, output_tokens)
-        })
-}
-
-/// Charged budget amount in micro-USD. Budget counters use the same amount the
-/// wallet would debit, including the configured platform markup, while remaining
-/// useful on self-hosted nodes where the markup is zero and no wallet is active.
-fn charged_budget_cost_micro_usd(
-    state: &AppState,
-    provider: Option<&str>,
-    reported_cost_usd: Option<f64>,
-    input_tokens: u64,
-    output_tokens: u64,
-    model: &str,
-) -> u64 {
-    state.config.credits.debit_amount_for_provider(
-        provider,
-        response_cost_micro_usd(state, reported_cost_usd, input_tokens, output_tokens, model),
-    )
-}
-
-/// Add one successful charged model call to the local user/agent/session
-/// counters. The budget engine owns the identity filtering and zero-cost no-op;
-/// keeping this seam here makes every completion family use the same units.
-fn record_charged_budget(state: &AppState, ctx: &RequestContext, cost_micro_usd: u64) {
-    record_charged_budget_kind(state, ctx, BudgetChargeKind::Model, cost_micro_usd);
-}
-
-/// Add one successful charged amount to the local user/agent/session counters,
-/// honoring each matching rule's category inclusion settings.
-fn record_charged_budget_kind(
-    state: &AppState,
-    ctx: &RequestContext,
-    kind: BudgetChargeKind,
-    cost_micro_usd: u64,
-) {
-    state.with_budget(|budgets| {
-        budgets.record_charge(
-            ctx.user_id.as_deref(),
-            ctx.agent_id.as_deref(),
-            kind,
-            cost_micro_usd,
-        );
-        budgets.record_session_charge(ctx.session_id.as_deref(), kind, cost_micro_usd);
-    });
-}
-
-/// Record charged spend when the completion is represented by stored identity
-/// fields, as with an asynchronous video job that settles during polling.
-fn record_charged_budget_for_ids(
-    state: &AppState,
-    user_id: Option<&str>,
-    agent_id: Option<&str>,
-    session_id: Option<&str>,
-    kind: BudgetChargeKind,
-    cost_micro_usd: u64,
-) {
-    state.with_budget(|budgets| {
-        budgets.record_charge(user_id, agent_id, kind, cost_micro_usd);
-        budgets.record_session_charge(session_id, kind, cost_micro_usd);
-    });
-}
-
-/// Read the configured/provider-reported raw media price. Callers pass the raw
-/// amount to the wallet helper and apply `debit_amount` once for budget counters.
-fn media_cost_from_response(
-    state: &AppState,
-    modality: &Modality,
-    response: &Value,
-) -> (u64, bool) {
-    state
-        .config
-        .credits
-        .media_cost_from_response(modality, response)
-}
-
-/// The `POST /api/credits/debit` request body. Pulled out of
-/// [`debit_wallet_for_request`] so the wire contract with the control plane is
-/// assertable without a live endpoint — this is the one place the gateway tells
-/// the ledger which donated allowance a spend came out of, and a silently
-/// dropped or misnamed `pool` key books frontier tokens against the free pool.
-///
-/// Both optional fields are ADDITIVE: absent means absent, not `null`, so a
-/// control plane that ignores them (or predates them) sees a byte-identical
-/// legacy body.
-/// What a debit was FOR, alongside how much it was.
-///
-/// A struct rather than seven more positional parameters: `debit_wallet_for_request`
-/// already takes seven, and the fields here are all `Option` of two or three
-/// types, so positional args would be trivially transposable at six call sites
-/// with no compiler error to catch it — `provider` and `model` are both
-/// `Option<String>`.
-///
-/// Every field is optional and every absent field is OMITTED from the wire body,
-/// never sent as `null`. A control plane that predates these keys sees a
-/// byte-identical legacy body, which is the same additive contract `alertTier`
-/// and `pool` already follow.
-///
-/// PURELY DESCRIPTIVE. Nothing downstream branches on any of it — these become
-/// receipt lines on a ledger row so a customer can be told what a charge was for.
-/// That is exactly why a missing value is fine and a wrong one is not worth a
-/// failed debit for work already served.
-#[derive(Debug, Clone, Default)]
-struct DebitAttribution {
-    /// Wall-clock milliseconds the billed work took.
-    duration_ms: Option<u64>,
-    input_tokens: Option<u64>,
-    /// Model or resource id that produced the charge.
-    model: Option<String>,
-    output_tokens: Option<u64>,
-    /// Upstream provider that served the work. NOT the credit pool: the pool is
-    /// which donated allowance pays, this is who did the work.
-    provider: Option<String>,
-    /// Human-facing label for what the spend was for.
-    task_label: Option<String>,
-    /// Whether the amount was priced from the configured media fallback rather
-    /// than provider-reported compute time.
-    estimated: Option<bool>,
-    /// The user whose action incurred the charge, when the request carried one.
-    user_id: Option<String>,
-}
-
-/// Keep the existing human-facing label for a fallback charge. The explicit
-/// `estimated` field is the durable machine-readable marker; provider timing
-/// remains in `durationMs` when measured.
-fn media_task_label(modality: &Modality, estimated: bool) -> String {
-    let label = modality.as_str();
-    if estimated {
-        format!("{label} (estimated cost)")
-    } else {
-        label.to_string()
-    }
-}
-
-fn debit_request_body(
-    org_id: &str,
-    amount_micro_usd: u64,
-    reason: &str,
-    ref_id: &str,
-    budget_alert_tier: Option<AlertTier>,
-    pool: Option<&str>,
-    attribution: &DebitAttribution,
-) -> Value {
-    let mut body = json!({
-        "orgId": org_id,
-        "amountMicroUsd": amount_micro_usd,
-        "reason": reason,
-        "refId": ref_id,
-    });
-    let Some(obj) = body.as_object_mut() else {
-        return body;
-    };
-    // Only stamp `alertTier` when a budget cap actually asked for an alert, so
-    // existing debit consumers see the legacy body otherwise. Reuses the
-    // `AlertTier` serde (lowercase) as the wire value.
-    if let Some(tier) = budget_alert_tier {
-        if let Ok(value) = serde_json::to_value(tier) {
-            obj.insert("alertTier".to_string(), value);
-        }
-    }
-    // An untagged provider omits `pool` entirely, and the control-plane debit
-    // then takes its pre-pool path: no grant is reachable and the spend falls
-    // through to the subscription and top-up buckets. Only a tagged provider can
-    // reach pool-restricted grant money, and only its OWN pool's.
-    if let Some(pool) = pool {
-        obj.insert("pool".to_string(), Value::String(pool.to_string()));
-    }
-    // Attribution. Each key is inserted only when present, so an unattributed
-    // debit is byte-identical to the legacy body.
-    let mut put_str = |key: &str, value: &Option<String>| {
-        if let Some(v) = value {
-            let trimmed = v.trim();
-            // A blank is not information. Sending `""` would land an
-            // empty-string model on the row, which renders as a present but
-            // nameless value — worse than an honest absence.
-            if !trimmed.is_empty() {
-                obj.insert(key.to_string(), Value::String(trimmed.to_string()));
-            }
-        }
-    };
-    put_str("provider", &attribution.provider);
-    put_str("model", &attribution.model);
-    put_str("userId", &attribution.user_id);
-    put_str("taskLabel", &attribution.task_label);
-    if let Some(estimated) = attribution.estimated {
-        obj.insert("estimated".to_string(), Value::Bool(estimated));
-    }
-    for (key, value) in [
-        ("inputTokens", attribution.input_tokens),
-        ("outputTokens", attribution.output_tokens),
-        ("durationMs", attribution.duration_ms),
-    ] {
-        if let Some(v) = value {
-            obj.insert(key.to_string(), Value::Number(v.into()));
-        }
-    }
-    body
-}
-
-/// Post-call wallet debit (#486). Computes the marked-up debit for a metered
-/// call's `costMicroUsd` and POSTs it to the control-plane `/credits/debit` for
-/// the request's org, then updates the cached balance from the authoritative
-/// response so the NEXT request is gated when necessary.
-///
-/// The already-served response cannot be unsent, but a managed debit failure is
-/// never allowed to authorize more provider spend: when `fail_closed_sticky` is
-/// true, transport errors, non-2xx responses, and malformed success bodies mark
-/// accounting unavailable and the next managed request receives a retryable 503.
-/// A zero debit (cache hits, 0-token modalities) is skipped because the endpoint
-/// rejects `amountMicroUsd <= 0`.
-///
-/// `ref_id` makes the debit idempotent: a retried hook is a no-op. Token usage
-/// passes `ref_id = request_id`; the per-request tool-call (Composio) debit passes
-/// `ref_id = "{request_id}:composio"` with `reason = "composio"` so it lands as a
-/// distinct ledger row instead of being deduped against the token debit (#496).
-async fn debit_wallet_for_request(
-    state: Arc<AppState>,
-    org_id: String,
-    ref_id: String,
-    reason: &'static str,
-    cost_micro_usd: u64,
-    fail_closed_sticky: bool,
-    // Managed policy-alert hook (item 4): the stamped budget-cap tier for THIS
-    // request, present only when a budget rule with tier >= Warn matched. Carried
-    // on the existing debit payload (the one place the gateway and control-plane
-    // already touch) so `credits.ts /debit` can email managed owners. Additive:
-    // `None` omits the field entirely, leaving the legacy debit body unchanged.
-    budget_alert_tier: Option<AlertTier>,
-    // The segregated credit pool this spend bills against, from the registry id
-    // of the provider that ACTUALLY served the request (see
-    // [`crate::credit_pools`]). Deliberately a required parameter rather than a
-    // defaulted one: every debit site has to make the attribution decision
-    // explicitly, because an accidental `None` is silent — the spend simply never
-    // draws grant money and never appears in per-pool burn.
-    pool: Option<&'static str>,
-    // What the charge was for. `Default::default()` at a site that genuinely
-    // knows nothing; never a placeholder value, because a wrong model on an
-    // invoice line is worse than a blank one.
-    attribution: DebitAttribution,
-) {
-    let credits = &state.config.credits;
-    if !credits.is_active() {
-        return;
-    }
-    let amount = credits.debit_amount_for_provider(attribution.provider.as_deref(), cost_micro_usd);
-    if amount == 0 {
-        return;
-    }
-    let Some(secret) = credits.internal_secret.as_deref() else {
-        return; // is_active guarantees Some, but stay defensive.
-    };
-
-    // `/api` IS PART OF THE ROUTE, and leaving it out cost real money. The control
-    // plane mounts `creditsRouter` at `/api/credits` (`packages/api/src/routers/index.ts`),
-    // and `credits.base_url` defaults to `control_plane.base_url` — the bare origin,
-    // because the sibling resolve call spells its own prefix out in full
-    // (`{}/api/control-plane/gateway/resolve` in `policy/mod.rs`). This join did
-    // not, so in production every debit POSTed to the wrong path and got a
-    // plain 404. Before the hardening change, the hook failed open and managed
-    // inference could run unbilled. The current default is fail-closed: the
-    // next request receives `credit_accounting_unavailable` after any failed or
-    // malformed debit response.
-    let url = format!(
-        "{}/api/credits/debit",
-        credits.base_url.trim_end_matches('/')
-    );
-    let body = debit_request_body(
-        &org_id,
-        amount,
-        reason,
-        &ref_id,
-        budget_alert_tier,
-        pool,
-        &attribution,
-    );
-
-    let resp = state
-        .http
-        .post(&url)
-        .header("x-ryu-internal-secret", secret)
-        .timeout(std::time::Duration::from_millis(credits.timeout_ms.max(1)))
-        .json(&body)
-        .send()
-        .await;
-
-    match resp {
-        Ok(r) if r.status().is_success() => {
-            // Steady-state truth: `balanceMicroUsd <= 0` ⇒ empty. Self-heals the
-            // flag after a top-up. `wentNonPositive` is the edge event (log only).
-            match r.json::<Value>().await {
-                Ok(v) => {
-                    let Some(balance) = v["balanceMicroUsd"].as_i64() else {
-                        warn!(
-                            org_id = %org_id,
-                            ref_id = %ref_id,
-                            "credits: debit returned success without an integer balance"
-                        );
-                        audit_debit_failure(
-                            &state,
-                            &org_id,
-                            &ref_id,
-                            "credits debit response missing integer balance",
-                        );
-                        if fail_closed_sticky {
-                            state.wallet.set_org_accounting_unavailable(&org_id, true);
-                        }
-                        return;
-                    };
-                    // Records the figure AND derives the empty flag from it, so
-                    // Core's dollar-threshold fallback rules read the same number
-                    // this gate does (`WalletState::set_org_balance`).
-                    state.wallet.set_org_balance(&org_id, balance);
-                    if v["wentNonPositive"].as_bool().unwrap_or(false) {
-                        warn!(
-                            org_id = %org_id,
-                            ref_id = %ref_id,
-                            "credits: org wallet emptied; next request will be gated"
-                        );
-                    }
-                }
-                Err(e) => {
-                    warn!(org_id = %org_id, error = %e, "credits: debit succeeded but response unparseable");
-                    audit_debit_failure(
-                        &state,
-                        &org_id,
-                        &ref_id,
-                        &format!("credits debit response unparseable: {e}"),
-                    );
-                    if fail_closed_sticky {
-                        state.wallet.set_org_accounting_unavailable(&org_id, true);
-                    }
-                }
-            }
-        }
-        Ok(r) => {
-            // A control-plane error never blocks the (already-served) request. The
-            // failed debit is recorded in the durable audit log (#486 AC) so
-            // unbilled usage is observable and reconcilable later. When fail-closed
-            // is on for a managed tenant (§5), also flip the org's wallet-empty flag
-            // so the NEXT request is refused — the failure is made sticky, not
-            // silently swallowed.
-            let status = r.status();
-            warn!(
-                org_id = %org_id,
-                status = %status,
-                fail_closed = fail_closed_sticky,
-                "credits: debit returned non-success"
-            );
-            audit_debit_failure(
-                &state,
-                &org_id,
-                &ref_id,
-                &format!("credits debit failed: control plane returned {status}"),
-            );
-            if fail_closed_sticky {
-                state.wallet.set_org_accounting_unavailable(&org_id, true);
-            }
-        }
-        Err(e) => {
-            warn!(
-                org_id = %org_id,
-                error = %e,
-                fail_closed = fail_closed_sticky,
-                "credits: debit transport error"
-            );
-            audit_debit_failure(
-                &state,
-                &org_id,
-                &ref_id,
-                &format!("credits debit failed (transport): {e}"),
-            );
-            if fail_closed_sticky {
-                state.wallet.set_org_accounting_unavailable(&org_id, true);
-            }
-        }
-    }
-}
-
-/// Best-effort per-request debit for billable (Composio) tool calls (#496).
-/// Composio charges per action execution, so on the managed plan each executed
-/// `composio.*` tool call costs the org `cost_per_tool_call_micro_usd`. This
-/// fires ONE debit for the whole request (`count × per-call cost`, at cost via
-/// `debit_amount`) under `reason="composio"` and a distinct
-/// `refId="{request_id}:composio"` so it is not deduped against the token debit.
-/// The local budget counter is updated even when the wallet is inactive or the
-/// node has no org id; the wallet debit is separately a no-op in those cases.
-/// Spawned by the caller so it never adds client latency.
-fn spawn_tool_call_debit(state: &Arc<AppState>, ctx: &RequestContext, billable_tool_calls: u64) {
-    spawn_tool_call_debit_for_ids(
-        state,
-        ctx.user_id.as_deref(),
-        ctx.agent_id.as_deref(),
-        ctx.session_id.as_deref(),
-        ctx.org_id.as_deref(),
-        &ctx.request_id,
-        ctx.managed_inference,
-        billable_tool_calls,
-    );
-}
-
-/// Best-effort tool charge entry point for Core's ACP/MCP bridge. The bridge
-/// executes the action in Core, while the Gateway owns the per-agent counter
-/// and optional wallet debit. `raw_cost` is deliberately passed to the wallet
-/// helper: that helper applies platform markup exactly once. The local budget
-/// counter receives the marked-up amount so its cap matches the wallet.
-pub(crate) fn spawn_tool_call_debit_for_ids(
-    state: &Arc<AppState>,
-    user_id: Option<&str>,
-    agent_id: Option<&str>,
-    session_id: Option<&str>,
-    org_id: Option<&str>,
-    request_id: &str,
-    managed_inference: bool,
-    billable_tool_calls: u64,
-) {
-    spawn_external_tool_debit_for_ids(
-        state,
-        user_id,
-        agent_id,
-        session_id,
-        org_id,
-        request_id,
-        managed_inference,
-        "composio",
-        None,
-        None,
-        None,
-        false,
-        None,
-        billable_tool_calls,
-    );
-}
-
-/// Best-effort provider-neutral external-tool charge entry point. A provider may
-/// report its raw transaction cost (Treg), while Composio keeps the existing
-/// configured per-call fallback when no raw amount is available.
-pub(crate) fn spawn_external_tool_debit_for_ids(
-    state: &Arc<AppState>,
-    user_id: Option<&str>,
-    agent_id: Option<&str>,
-    session_id: Option<&str>,
-    org_id: Option<&str>,
-    request_id: &str,
-    managed_inference: bool,
-    provider: &str,
-    tool_id: Option<&str>,
-    raw_cost_micro_usd: Option<u64>,
-    transaction_id: Option<&str>,
-    estimated: bool,
-    task_label: Option<&str>,
-    billable_tool_calls: u64,
-) {
-    if billable_tool_calls == 0 {
-        return;
-    }
-    let provider = provider.trim();
-    let reason: &'static str = match provider {
-        "composio" => "composio",
-        "treg" => "treg",
-        _ => {
-            warn!(
-                provider,
-                "credits: ignoring unsupported external tool provider"
-            );
-            return;
-        }
-    };
-    let credits = &state.config.credits;
-    let raw_cost = raw_cost_micro_usd.unwrap_or_else(|| {
-        if provider == "composio" {
-            credits.tool_call_cost_micro_usd(billable_tool_calls)
-        } else {
-            0
-        }
-    });
-    if raw_cost == 0 {
-        return;
-    }
-    let charged_cost = credits.debit_amount_for_provider(Some(provider), raw_cost);
-    record_charged_budget_for_ids(
-        state,
-        user_id,
-        agent_id,
-        session_id,
-        BudgetChargeKind::Tools,
-        charged_cost,
-    );
-
-    let Some(org_id) = org_id.filter(|s| !s.is_empty()) else {
-        return;
-    };
-    if !credits.is_active() {
-        return;
-    }
-    let ref_id = transaction_id
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| format!("{provider}:{value}"))
-        .unwrap_or_else(|| format!("{request_id}:{provider}"));
-    let fail_closed_sticky = credits.fail_closed && managed_inference;
-    let default_label = format!(
-        "{billable_tool_calls} {provider} tool {}",
-        if billable_tool_calls == 1 {
-            "call"
-        } else {
-            "calls"
-        }
-    );
-    tokio::spawn(debit_wallet_for_request(
-        Arc::clone(state),
-        org_id.to_string(),
-        ref_id,
-        reason,
-        raw_cost,
-        fail_closed_sticky,
-        None,
-        // No pool, and this is an invariant rather than a stub: a Composio tool
-        // call is not donated inference supply. Neither the Bedrock nor the
-        // Cloudflare allowance pays for it, so it must never draw pool-restricted
-        // grant money — it bills the ordinary subscription/top-up buckets, which
-        // is what `None` means to the control-plane debit.
-        None,
-        // No model and no duration: this row is a COUNT of executed tool calls,
-        // not a timed inference. `taskLabel` carries the count so a statement can
-        // say "3 tool calls" instead of showing an unexplained charge — this is
-        // the row a customer is most likely to query, and until now it was the
-        // one with the least to say for itself.
-        DebitAttribution {
-            provider: Some(provider.to_string()),
-            model: tool_id
-                .filter(|value| !value.trim().is_empty())
-                .map(str::to_owned),
-            user_id: user_id.map(str::to_owned),
-            task_label: task_label
-                .filter(|value| !value.trim().is_empty())
-                .map(str::to_owned)
-                .or(Some(default_label)),
-            estimated: Some(estimated),
-            ..Default::default()
-        },
-    ));
-}
-
-/// Record a failed (fail-open) wallet debit in the durable audit log (#486 AC).
-/// The control-plane debit is best-effort; when it errors we never block the
-/// already-served request, but we persist the miss so unbilled usage is
-/// observable and reconcilable. The error string is run through the outbound
-/// firewall (DLP) before persistence, matching `audit_failure`.
-fn audit_debit_failure(state: &AppState, org_id: &str, request_id: &str, error: &str) {
-    if !state.audit.is_enabled() {
-        return;
-    }
-    let redacted_error = state.with_firewall(|fw| fw.sanitize(error));
-    state.log_audit(AuditRecord {
-        request_id: request_id.to_string(),
-        api_key: String::new(),
-        user_name: None,
-        org_id: Some(org_id.to_string()),
-        team_id: None,
-        project_id: None,
-        provider: "credits-debit".to_string(),
-        model: String::new(),
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_hit: false,
-        latency_ms: 0,
-        eval_score: None,
-        error: Some(redacted_error),
-        skill_ids: None,
-        session_id: None,
-        user_id: None,
-        agent_id: None,
-        feature: None,
-        managed_inference: false,
-        provider_cost_micro_usd: None,
-        event_type: crate::audit::EventType::ModelCall,
-        backend: Some("credits".to_string()),
-        command: None,
-        duration_ms: None,
-        exit_code: None,
-        widget_instance_id: None,
-    });
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Resolve the node's prompt-cache policy against this request and stamp the
-/// resulting markers onto the outgoing payload.
-///
-/// Called immediately before provider dispatch — after routing has picked the
-/// model (the marker dialect depends on it) and after any budget/firewall stage
-/// that could still rewrite `messages`, so the breakpoints land on the bytes
-/// that are actually sent.
-///
-/// The per-request headers are dropped when the node sets
-/// `allow_request_override = false`, which is the whole point of that switch:
-/// an operator running a fixed cost profile must be able to make config the only
-/// lever. See [`ryu_gw_providers::prompt_cache`] for precedence and wire formats.
-/// The per-request prompt-cache override this node is willing to honour.
-///
-/// Split out from [`apply_prompt_cache`] so the "operator can lock the node"
-/// rule is testable without standing up an `AppState`: with
-/// `allow_request_override = false` the client headers are dropped entirely and
-/// config becomes the only lever.
-fn resolve_prompt_cache_override(
-    cfg: &crate::config::PromptCacheConfig,
-    ctx: &RequestContext,
-) -> (Option<ryu_gw_providers::PromptCacheMode>, Option<String>) {
-    if cfg.allow_request_override {
-        (ctx.prompt_cache_mode, ctx.prompt_cache_ttl.clone())
-    } else {
-        (None, None)
-    }
-}
-
-fn apply_prompt_cache(
-    state: &AppState,
-    ctx: &RequestContext,
-    model: &str,
-    body: &mut Value,
-) -> ryu_gw_providers::PromptCacheOutcome {
-    let cfg = &state.config.prompt_cache;
-    let (override_mode, override_ttl) = resolve_prompt_cache_override(cfg, ctx);
-    let estimated = estimate_prompt_tokens(body);
-    let outcome = cfg.options().apply(
-        body,
-        &ryu_gw_providers::PromptCacheRequest {
-            model,
-            override_mode,
-            override_ttl,
-            estimated_input_tokens: Some(estimated),
-            session_id: ctx.session_id.as_deref(),
-        },
-    );
-    debug!(
-        request_id = %ctx.request_id,
-        model,
-        estimated_prompt_tokens = estimated,
-        outcome = outcome.as_str(),
-        "prompt cache"
-    );
-    outcome
-}
-
-/// State threaded through the stream observer unfold loop.
-struct StreamObserverState {
-    inner: axum::body::BodyDataStream,
-    state: Arc<AppState>,
-    ctx: RequestContext,
-    provider_name: String,
-    model: String,
-    /// Fallback estimate used when the provider emits no usage frame.
-    estimated_input_tokens: u64,
-    start: Instant,
-    accumulated: String,
-    done: bool,
-    /// Managed policy-alert tier (item 4) carried to the stream-end debit so the
-    /// control plane can email owners. `None` unless a budget cap with tier >=
-    /// Warn matched this (streaming) request.
-    budget_alert_tier: Option<AlertTier>,
-}
-
-impl Drop for StreamObserverState {
-    fn drop(&mut self) {
-        if self.done {
-            return;
-        }
-        self.done = true;
-        let (raw_input, raw_output) = sse_parse_usage(&self.accumulated);
-        let input_tokens = if raw_input > 0 {
-            raw_input
-        } else {
-            self.estimated_input_tokens
-        };
-        let output_tokens = if raw_output > 0 {
-            raw_output
-        } else {
-            (self.accumulated.chars().count() as u64).div_ceil(4)
-        };
-        let latency_ms = self.start.elapsed().as_millis() as u64;
-        let total_tokens = input_tokens.saturating_add(output_tokens);
-        self.state.audit.add_tokens(&self.ctx.api_key, total_tokens);
-        self.state.metrics.add_tokens(input_tokens, output_tokens);
-        self.state.rate_limiter.record_tokens_for_key(
-            &self.ctx.api_key,
-            total_tokens.saturating_sub(self.estimated_input_tokens),
-            self.ctx.key_config.as_ref(),
-        );
-        let error = if self.accumulated.len() >= 8 * 1024 * 1024 {
-            "response stream exceeded the 8 MiB scan limit"
-        } else {
-            "stream disconnected before completion; usage estimated"
-        };
-        self.state.log_audit(AuditRecord {
-            request_id: self.ctx.request_id.clone(),
-            api_key: self.ctx.api_key.clone(),
-            user_name: self.ctx.user_name.clone(),
-            org_id: self.ctx.org_id.clone(),
-            team_id: self.ctx.team_id.clone(),
-            project_id: None,
-            provider: self.provider_name.clone(),
-            model: self.model.clone(),
-            input_tokens,
-            output_tokens,
-            cache_hit: false,
-            latency_ms,
-            eval_score: None,
-            error: Some(error.to_owned()),
-            skill_ids: self.ctx.skill_ids.clone(),
-            session_id: self.ctx.session_id.clone(),
-            user_id: self.ctx.user_id.clone(),
-            agent_id: self.ctx.agent_id.clone(),
-            feature: self.ctx.feature.clone(),
-            managed_inference: self.ctx.managed_inference,
-            provider_cost_micro_usd: None,
-            event_type: crate::audit::EventType::ModelCall,
-            backend: None,
-            command: None,
-            duration_ms: None,
-            exit_code: None,
-            widget_instance_id: None,
-        });
-    }
-}
-
-/// Wrap `body` with a stream observer that fires at stream end to:
-///  1. Parse real token counts from the terminal usage frame (if any).
-///  2. Emit an eval score for sampled requests.
-///  3. Write a single audit row with the real counts (defer-to-end pattern).
-///
-/// The observer sits before the outbound firewall wrapper, so client-visible
-/// block/sanitize frames cannot erase original provider usage or reported cost. The SSE frames are passed through
-/// byte-for-byte; the terminal usage chunk is NOT stripped (clients that
-/// requested `include_usage` should receive it; clients that did not will
-/// receive a bonus usage-only chunk that well-behaved parsers ignore).
-fn attach_stream_observer(
-    body: Body,
-    state: Arc<AppState>,
-    ctx: RequestContext,
-    provider_name: String,
-    model: String,
-    estimated_input_tokens: u64,
-    start: Instant,
-    budget_alert_tier: Option<AlertTier>,
-) -> Body {
-    use futures_util::StreamExt;
-
-    let init = StreamObserverState {
-        inner: body.into_data_stream(),
-        state,
-        ctx,
-        provider_name,
-        model,
-        estimated_input_tokens,
-        start,
-        accumulated: String::new(),
-        done: false,
-        budget_alert_tier,
-    };
-
-    let stream = futures_util::stream::unfold(init, |mut s| async move {
-        match s.inner.next().await {
-            Some(Ok(bytes)) => {
-                s.accumulated.push_str(&String::from_utf8_lossy(&bytes));
-                Some((Ok(bytes), s))
-            }
-            Some(Err(e)) => Some((Err(std::io::Error::other(e.to_string())), s)),
-            None => {
-                if !s.done {
-                    s.done = true;
-                    // Parse real token counts from the assembled SSE; fall
-                    // back to the estimate when the provider emitted no usage
-                    // frame (non-conforming providers).
-                    let (raw_input, raw_output) = sse_parse_usage(&s.accumulated);
-                    let input_tokens = if raw_input > 0 {
-                        raw_input
-                    } else {
-                        s.estimated_input_tokens
-                    };
-                    let output_tokens = raw_output;
-                    let total_tokens = input_tokens + output_tokens;
-                    let latency_ms = s.start.elapsed().as_millis() as u64;
-
-                    // Update audit token totals (in-memory, for rate/reporting).
-                    s.state.audit.add_tokens(&s.ctx.api_key, total_tokens);
-                    s.state.metrics.add_tokens(input_tokens, output_tokens);
-                    // Settle the TPM bucket with the stream's real usage. The
-                    // pre-admission check consumed only the prompt estimate, so
-                    // charge the remainder here (same key derivation as the
-                    // non-streaming check). The bytes are already delivered, so
-                    // this cannot reject — it carries the overage as bucket debt
-                    // that gates subsequent admissions instead.
-                    s.state.rate_limiter.record_tokens_for_key(
-                        &s.ctx.api_key,
-                        total_tokens.saturating_sub(s.estimated_input_tokens),
-                        s.ctx.key_config.as_ref(),
-                    );
-                    // Provider-side prompt-cache reads and writes (OpenRouter
-                    // cache path). Both come off the terminal usage frame.
-                    let cached_tokens = sse_parse_cached_tokens(&s.accumulated);
-                    if cached_tokens > 0 {
-                        s.state.metrics.add_cached_tokens(cached_tokens);
-                    }
-                    let cache_write_tokens = sse_parse_cache_write_tokens(&s.accumulated);
-                    if cache_write_tokens > 0 {
-                        s.state.metrics.add_cache_write_tokens(cache_write_tokens);
-                    }
-
-                    // Eval scoring at stream end: synthesise a minimal usage
-                    // response so the scorer can compute token_efficiency.
-                    let eval_score = if s.state.evals.should_sample() {
-                        let synthetic = json!({
-                            "usage": {
-                                "prompt_tokens": input_tokens,
-                                "completion_tokens": output_tokens
-                            }
-                        });
-                        // policy_pass=true: outbound firewall already ran on
-                        // this stream; if it had blocked, we'd never reach
-                        // stream end with content.
-                        let eval = s.state.evals.score(latency_ms, &synthetic, true);
-                        if let Some(ref e) = eval {
-                            s.state
-                                .evals
-                                .record_provider_score(&s.provider_name, e.overall);
-                        }
-                        eval.map(|e| e.overall)
-                    } else {
-                        None
-                    };
-                    let reported_cost = sse_parse_cost(&s.accumulated);
-                    let provider_cost_micro_usd = reported_cost.and_then(cost_usd_to_micro);
-                    let budget_cost_micro_usd = charged_budget_cost_micro_usd(
-                        &s.state,
-                        Some(s.provider_name.as_str()),
-                        reported_cost,
-                        input_tokens,
-                        output_tokens,
-                        &s.model,
-                    );
-                    record_charged_budget(&s.state, &s.ctx, budget_cost_micro_usd);
-
-                    info!(
-                        request_id = %s.ctx.request_id,
-                        provider = %s.provider_name,
-                        model = %s.model,
-                        input_tokens,
-                        output_tokens,
-                        latency_ms,
-                        eval_score = ?eval_score,
-                        "streaming request completed"
-                    );
-
-                    // Write the audit row once at stream end with real counts
-                    // (defer-to-end pattern — no zero row at stream start).
-                    s.state.log_audit(AuditRecord {
-                        request_id: s.ctx.request_id.clone(),
-                        api_key: s.ctx.api_key.clone(),
-                        user_name: s.ctx.user_name.clone(),
-                        org_id: s.ctx.org_id.clone(),
-                        team_id: s.ctx.team_id.clone(),
-                        project_id: s.ctx.project_id.clone(),
-                        provider: s.provider_name.clone(),
-                        model: s.model.clone(),
-                        input_tokens,
-                        output_tokens,
-                        cache_hit: false,
-                        latency_ms,
-                        eval_score,
-                        error: None,
-                        skill_ids: s.ctx.skill_ids.clone(),
-                        session_id: s.ctx.session_id.clone(),
-                        user_id: s.ctx.user_id.clone(),
-                        agent_id: s.ctx.agent_id.clone(),
-                        feature: s.ctx.feature.clone(),
-                        managed_inference: s.ctx.managed_inference,
-                        provider_cost_micro_usd,
-                        event_type: crate::audit::EventType::ModelCall,
-                        backend: None,
-                        command: None,
-                        duration_ms: None,
-                        exit_code: None,
-                        widget_instance_id: None,
-                    });
-
-                    // Experimental OTel GenAI span (#540, P1), streaming path —
-                    // emitted at stream end with the real (or estimated) token
-                    // counts, same gates as the non-streamed path.
-                    crate::telemetry::emit_gen_ai_span(
-                        "chat",
-                        &s.provider_name,
-                        &s.model,
-                        input_tokens,
-                        output_tokens,
-                        latency_ms,
-                    );
-                    crate::ryu_analytics::emit_model_call(
-                        "chat",
-                        &s.provider_name,
-                        &s.model,
-                        input_tokens,
-                        output_tokens,
-                        latency_ms,
-                        "ok",
-                        None,
-                    );
-
-                    // Credit-wallet debit hook (#486), streaming path. We are
-                    // already at stream end (all bytes sent), so awaiting the
-                    // control-plane debit here adds no client-visible latency.
-                    // Best-effort + org-gated, mirroring the non-streaming path.
-                    if let Some(org_id) = s.ctx.org_id.clone().filter(|o| !o.is_empty()) {
-                        if s.state.config.credits.is_active() {
-                            let cost = response_cost_micro_usd(
-                                &s.state,
-                                reported_cost,
-                                input_tokens,
-                                output_tokens,
-                                &s.model,
-                            );
-                            let fail_closed_sticky =
-                                s.state.config.credits.fail_closed && s.ctx.managed_inference;
-                            debit_wallet_for_request(
-                                Arc::clone(&s.state),
-                                org_id,
-                                s.ctx.request_id.clone(),
-                                "gateway_usage",
-                                cost,
-                                fail_closed_sticky,
-                                // Managed policy-alert (item 4): the matched
-                                // budget-cap tier, threaded through the stream
-                                // state so streaming managed chat (the common
-                                // case) emails owners too.
-                                s.budget_alert_tier,
-                                // Same authoritative attribution as the
-                                // non-streaming path; the stream state carries
-                                // the provider that actually served the bytes.
-                                crate::credit_pools::pool_for_gateway_provider(&s.provider_name),
-                                // The same four facts the audit row above already
-                                // records for this stream, so a ledger line and
-                                // its audit entry cannot disagree about what was
-                                // served. `latency_ms` here is time to stream
-                                // END, which is the work actually billed.
-                                DebitAttribution {
-                                    provider: Some(s.provider_name.clone()),
-                                    model: Some(s.model.clone()),
-                                    input_tokens: Some(input_tokens as u64),
-                                    output_tokens: Some(output_tokens as u64),
-                                    duration_ms: Some(latency_ms as u64),
-                                    user_id: s.ctx.user_id.clone(),
-                                    task_label: None,
-                                    estimated: None,
-                                },
-                            )
-                            .await;
-                        }
-                    }
-                }
-                None
-            }
-        }
-    });
-
-    Body::from_stream(stream)
-}
-
-/// Wrap an SSE body so a held [`crate::concurrency::AdmissionPermit`] is released
-/// only when the stream finishes (or is dropped — e.g. the client disconnects).
-/// This keeps a streaming generation counted against the local engine's slot
-/// budget for its entire duration, not just until the response headers arrive.
-///
-/// Uses the same `stream::unfold` technique as [`attach_stream_observer`] to
-/// avoid the `async-stream` macro: the permit lives in the unfold state, so when
-/// the stream yields `None` (or the `Body` is dropped) the state — and the permit
-/// — drops, freeing the slot for the next waiter.
-fn hold_admission_until_stream_end(
-    body: Body,
-    permit: crate::concurrency::AdmissionPermit,
-    // The credit reservation taken at `enforce_budget`. `None` when reservations
-    // are off, the tenant is unmanaged, or the org has no managed cap.
-    credit: Option<CreditReservation>,
-) -> Body {
-    hold_until_stream_end(body, (permit, credit))
-}
-
-/// Keep `held` alive for exactly as long as `body` is being consumed.
-///
-/// The generic version of the admission-slot hold, because a second thing now
-/// needs the identical lifetime: the engine slot and the credit reservation are
-/// both claims taken before the first byte and owed back after the last one, and
-/// "after the last one" on a streaming response is not when the handler returns.
-///
-/// WRAPPING ORDER MATTERS AND IS WHY THIS GOES OUTSIDE THE OBSERVER. The stream
-/// observer's end-of-stream hook is what awaits the wallet debit; this wrapper
-/// sits outside it, so its `next()` only returns `None` — and `held` only drops —
-/// after that debit has been issued. Wrap the other way round and the claim would
-/// be released in the window between the last byte and the debit landing, which
-/// is precisely the window a concurrent burst exploits.
-///
-/// Dropping the returned body without draining it (a client disconnect, an axum
-/// shutdown) drops `held` too, which is the point: there is no path that keeps
-/// the claim.
-fn hold_until_stream_end<T: Send + 'static>(body: Body, held: T) -> Body {
-    use futures_util::StreamExt;
-
-    struct Hold<T> {
-        inner: axum::body::BodyDataStream,
-        // Dropped with the stream → releases whatever it was holding.
-        _held: T,
-    }
-
-    let init = Hold {
-        inner: body.into_data_stream(),
-        _held: held,
-    };
-
-    let stream = futures_util::stream::unfold(init, |mut s| async move {
-        let item = s.inner.next().await?;
-        Some((item, s))
-    });
-
-    Body::from_stream(stream)
-}
-
-/// Rough prompt-token estimate (~4 chars/token) for the streaming path, where
-/// no provider usage block is available to read exact counts from.
-fn estimate_prompt_tokens(body: &Value) -> u64 {
-    let chars = extract_text_for_scanning(body).chars().count() as u64;
-    chars.div_ceil(4)
-}
-
-/// Collect every string value in a provider response. Unlike the legacy
-/// `choices[].message.content` projection, this includes tool/function
-/// arguments, error fields, annotations, nested content parts, and every SSE
-/// choice/frame that has been decoded into JSON.
-fn collect_json_strings(value: &Value, out: &mut String) {
-    match value {
-        Value::String(text) => {
-            if !text.is_empty() {
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                out.push_str(text);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                collect_json_strings(value, out);
-            }
-        }
-        Value::Object(values) => {
-            for value in values.values() {
-                collect_json_strings(value, out);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-}
-
-fn collect_json_strings_compact(value: &Value, out: &mut String) {
-    match value {
-        Value::String(text) => out.push_str(text),
-        Value::Array(values) => {
-            for value in values {
-                collect_json_strings_compact(value, out);
-            }
-        }
-        Value::Object(values) => {
-            for value in values.values() {
-                collect_json_strings_compact(value, out);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-}
-
-fn json_string_projection(value: &Value) -> String {
-    let mut out = String::new();
-    collect_json_strings(value, &mut out);
-    out
-}
-
-fn redact_json_strings(value: &mut Value, scanner: &dyn crate::firewall::FirewallBackend) {
-    match value {
-        Value::String(text) => {
-            *text = scanner.redact_outbound(text).0;
-        }
-        Value::Array(values) => {
-            for value in values {
-                redact_json_strings(value, scanner);
-            }
-        }
-        Value::Object(values) => {
-            for value in values.values_mut() {
-                redact_json_strings(value, scanner);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-}
-
-fn sanitize_json_strings(value: &mut Value, scanner: &dyn crate::firewall::FirewallBackend) {
-    match value {
-        Value::String(text) => {
-            let sanitized = scanner.sanitize(text);
-            *text = scanner.redact_outbound(&sanitized).0;
-        }
-        Value::Array(values) => {
-            for value in values {
-                sanitize_json_strings(value, scanner);
-            }
-        }
-        Value::Object(values) => {
-            for value in values.values_mut() {
-                sanitize_json_strings(value, scanner);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-}
-
-/// Apply the shared outbound response DLP boundary to every JSON string value.
-/// External-token redaction is unconditional; the configured firewall policy
-/// still controls whether detected PII/secret content blocks, sanitizes, or is
-/// warned through.
-fn apply_outbound_json_dlp(
-    state: &AppState,
-    ctx: &RequestContext,
-    response: &mut Value,
-) -> Result<bool, GatewayError> {
-    let scanner = state.resolved_scanner(ctx);
-    let response_text = json_string_projection(response);
-    let violation = scanner.scan_outbound(&response_text);
-
-    let Some(violation) = violation else {
-        redact_json_strings(response, scanner.as_ref());
-        return Ok(true);
-    };
-
-    match scanner.policy() {
-        FirewallPolicy::Block => {
-            state.metrics.inc_firewall_blocked();
-            Err(GatewayError::FirewallBlocked(
-                format!(
-                    "Outbound response blocked: {} ({:?})",
-                    violation.pattern_name, violation.kind
-                ),
-                firewall_policy_alert(scanner.config(), ctx, "block"),
-            ))
-        }
-        FirewallPolicy::Sanitize => {
-            sanitize_json_strings(response, scanner.as_ref());
-            Ok(false)
-        }
-        FirewallPolicy::WarnAndContinue => {
-            redact_json_strings(response, scanner.as_ref());
-            warn!(
-                request_id = %ctx.request_id,
-                pattern = %violation.pattern_name,
-                "firewall: outbound violation (warn-and-continue)"
-            );
-            Ok(false)
-        }
-    }
-}
-
-fn extract_text_for_scanning(body: &Value) -> String {
-    let Some(messages) = body["messages"].as_array() else {
-        return String::new();
-    };
-    let mut parts = Vec::with_capacity(messages.len());
-    for msg in messages {
-        match &msg["content"] {
-            Value::String(s) => parts.push(s.as_str()),
-            Value::Array(arr) => {
-                for part in arr {
-                    if let Some(text) = part["text"].as_str() {
-                        parts.push(text);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    parts.join("\n")
-}
-
-/// Extract the assistant text an Output-target inline evaluator should judge.
-///
-/// Concatenates the text of EVERY choice (not just `choices[0]`) and handles both
-/// the string and array-of-parts (`[{ "type": "text", "text": … }]`) content
-/// shapes, so toxic/PII/biased text placed in a second choice (`n>1`), a
-/// content part, or structured tool-call arguments does not bypass the
-/// non-stream + cache-hit judge.
-fn response_to_text(response: &Value) -> String {
-    let Some(choices) = response["choices"].as_array() else {
-        return String::new();
-    };
-    let mut out = String::new();
-    for choice in choices {
-        collect_json_strings(choice, &mut out);
-    }
-    out
-}
-
-fn sanitize_messages(body: &mut Value, scanner: &dyn crate::firewall::FirewallBackend) {
-    if let Some(messages) = body["messages"].as_array_mut() {
-        for msg in messages.iter_mut() {
-            if let Some(content) = msg["content"].as_str() {
-                msg["content"] = Value::String(scanner.sanitize(content));
-            }
-        }
-    }
-}
-
-fn sanitize_response(response: &mut Value, scanner: &dyn crate::firewall::FirewallBackend) {
-    sanitize_json_strings(response, scanner);
-}
-
-/// Decode and rebuild an SSE response so every JSON frame is inspected and the
-/// client never receives an unscanned raw frame. Unknown event lines and
-/// malformed data frames are rejected instead of being replayed.
-fn rewrite_sse_for_dlp(
-    raw: &str,
-    scanner: &dyn crate::firewall::FirewallBackend,
-    policy: &FirewallPolicy,
-) -> Result<(String, String, Option<(String, String)>), String> {
-    let mut frames = Vec::new();
-    let mut saw_done = false;
-    for line in raw.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let Some(data) = line.strip_prefix("data:") else {
-            return Err("provider stream contained an unscannable event frame".to_owned());
-        };
-        let data = data.trim();
-        if data.is_empty() {
-            continue;
-        }
-        if data == "[DONE]" {
-            saw_done = true;
-            continue;
-        }
-        frames.push(
-            serde_json::from_str::<Value>(data)
-                .map_err(|error| format!("provider stream frame is not valid JSON: {error}"))?,
-        );
-    }
-
-    let mut payload = Value::Array(frames);
-    let original_text = {
-        let mut text = String::new();
-        collect_json_strings_compact(&payload, &mut text);
-        text
-    };
-    let violation = scanner
-        .scan_outbound(&original_text)
-        .map(|match_| (match_.pattern_name.clone(), format!("{:?}", match_.kind)));
-    redact_json_strings(&mut payload, scanner);
-    let mut assembled = {
-        let mut text = String::new();
-        collect_json_strings_compact(&payload, &mut text);
-        text
-    };
-    if violation.is_some() && matches!(policy, FirewallPolicy::Sanitize) {
-        sanitize_json_strings(&mut payload, scanner);
-        assembled = json_string_projection(&payload);
-    }
-
-    let mut rewritten = String::new();
-    if let Some(frames) = payload.as_array() {
-        for frame in frames {
-            let encoded = serde_json::to_string(frame)
-                .map_err(|error| format!("provider stream frame could not be encoded: {error}"))?;
-            rewritten.push_str("data: ");
-            rewritten.push_str(&encoded);
-            rewritten.push_str("\n\n");
-        }
-    }
-    if saw_done || !rewritten.is_empty() {
-        rewritten.push_str("data: [DONE]\n\n");
-    }
-    Ok((rewritten, assembled, violation))
+    inference_governance::multimodal_text_fields(body, modality).join("\n")
 }
 
 #[cfg(test)]
-fn sse_extract_text(raw: &str) -> String {
-    let mut out = String::new();
-    for line in raw.lines() {
-        let Some(data) = line.strip_prefix("data:") else {
-            continue;
-        };
-        let data = data.trim();
-        if data.is_empty() || data == "[DONE]" {
-            continue;
-        }
-        let Ok(json) = serde_json::from_str::<Value>(data) else {
-            continue;
-        };
-        collect_json_strings_compact(&json, &mut out);
-    }
-    out
-}
-
-// ─── Streaming outbound firewall ────────────────────────────────────────────────
-
-/// Wrap a provider SSE stream with the outbound firewall, applying the
-/// configured policy. See the call site in `run_stream` for the per-policy
-/// rationale. Returns a (possibly buffered) [`Body`] ready to stream to the
-/// client.
-async fn apply_outbound_firewall_stream(
-    stream_body: Body,
-    state: Arc<AppState>,
-    ctx: RequestContext,
-    admission_permit: crate::concurrency::AdmissionPermit,
-) -> (Body, crate::concurrency::AdmissionPermit) {
-    let request_id = ctx.request_id.clone();
-    // Node-level outbound firewall gate (unchanged): does the node config buffer?
-    let (outbound_enabled, policy) =
-        state.with_firewall(|fw| (fw.outbound_enabled(), fw.policy().clone()));
-    let node_needs_buffer = outbound_enabled && !matches!(policy, FirewallPolicy::WarnAndContinue);
-
-    // Resolved per-agent OUTPUT-target inline evaluators (P3).
-    let resolved = state.resolved_scanner(&ctx);
-    let has_output_eval = resolved.config().evaluators.iter().any(|b| b.enabled);
-
-    // Buffer every stream: structured tool calls, error frames, and outbound-only
-    // secret shapes must not have a raw-byte fast path around DLP.
-    const MAX_BUFFERED_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-    let collected = match axum::body::to_bytes(stream_body, MAX_BUFFERED_RESPONSE_BYTES).await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            warn!(request_id = %request_id, error = %e, "firewall: failed to buffer stream for outbound scan");
-            // Surface a clear error rather than silently leaking unscanned text.
-            return (
-                Body::from(sse_content_frames(
-                    "[Ryu firewall] Unable to scan the response stream; request aborted.",
-                )),
-                crate::concurrency::AdmissionPermit::none(),
-            );
-        }
-    };
-    // The provider generation is complete once the upstream body is buffered.
-    // Release the engine slot before a re-entrant LLM judge is dispatched; the
-    // judge must be admitted independently instead of deadlocking behind its own
-    // parent generation. Deterministic evaluators take the same safe path.
-    drop(admission_permit);
-
-    let raw = String::from_utf8_lossy(&collected).into_owned();
-    let rewritten = state.with_firewall(|fw| rewrite_sse_for_dlp(&raw, fw, &policy));
-    let (rewritten, assembled, violation) = match rewritten {
-        Ok(value) => value,
-        Err(error) => {
-            warn!(request_id = %request_id, %error, "firewall: unscannable response stream");
-            state.metrics.inc_firewall_blocked();
-            return (
-                Body::from(sse_content_frames(
-                    "[Ryu firewall] Response blocked because the provider stream could not be scanned.",
-                )),
-                crate::concurrency::AdmissionPermit::none(),
-            );
-        }
-    };
-
-    if let Some((pattern, kind)) = violation {
-        match policy {
-            FirewallPolicy::Block if node_needs_buffer => {
-                warn!(
-                    request_id = %request_id,
-                    pattern = %pattern,
-                    "firewall: blocked outbound response (streaming)"
-                );
-                state.metrics.inc_firewall_blocked();
-                return (
-                    Body::from(sse_content_frames(&format!(
-                        "[Ryu firewall] Response blocked by policy: {pattern} ({kind})."
-                    ))),
-                    crate::concurrency::AdmissionPermit::none(),
-                );
-            }
-            FirewallPolicy::Sanitize if node_needs_buffer => {
-                warn!(
-                    request_id = %request_id,
-                    pattern = %pattern,
-                    "firewall: sanitized outbound response (streaming)"
-                );
-            }
-            FirewallPolicy::WarnAndContinue if outbound_enabled => {
-                warn!(
-                    request_id = %request_id,
-                    pattern = %pattern,
-                    "firewall: outbound violation (warn-and-continue, streaming)"
-                );
-            }
-            _ => {}
-        }
-    }
-
-    // ── Unified-evaluator OUTPUT inline guardrails (P3) ──
-    if has_output_eval {
-        let (outcome, reason) =
-            evaluate_output_inline_stream(&state, &ctx, resolved.as_ref(), &assembled).await;
-        match outcome {
-            InlineOutcome::Block => {
-                warn!(
-                    request_id = %request_id,
-                    %reason,
-                    "inline evaluator: blocked outbound response (streaming)"
-                );
-                state.metrics.inc_firewall_blocked();
-                let model = ctx.agent_id.as_deref().unwrap_or("unknown");
-                audit_inline_evaluator(&state, &ctx, model, "output", "blocked", &reason);
-                return (
-                    Body::from(sse_content_frames(&format!(
-                        "[Ryu firewall] Response blocked by evaluator: {reason}."
-                    ))),
-                    crate::concurrency::AdmissionPermit::none(),
-                );
-            }
-            InlineOutcome::Sanitize => {
-                warn!(
-                    request_id = %request_id,
-                    %reason,
-                    "inline evaluator: sanitized outbound response (streaming)"
-                );
-                return (
-                    Body::from(sse_content_frames(&resolved.sanitize(&assembled))),
-                    crate::concurrency::AdmissionPermit::none(),
-                );
-            }
-            InlineOutcome::Warn | InlineOutcome::Allow => {}
-        }
-    }
-
-    // Clean: replay the canonical, transformed frames rather than provider bytes.
-    (
-        Body::from(rewritten),
-        crate::concurrency::AdmissionPermit::none(),
-    )
-}
-
-/// Render `text` as a minimal OpenAI-compatible SSE transcript: a single
-/// content delta chunk followed by the terminating `[DONE]` sentinel. Used to
-/// replace a blocked or sanitized streaming response with safe content that
-/// downstream OpenAI-SSE parsers (including Core) relay unchanged.
-fn sse_content_frames(text: &str) -> String {
-    let chunk = json!({
-        "id": "ryu-firewall",
-        "object": "chat.completion.chunk",
-        "choices": [{
-            "index": 0,
-            "delta": { "role": "assistant", "content": text },
-            "finish_reason": "stop"
-        }]
-    });
-    format!("data: {chunk}\n\ndata: [DONE]\n\n")
-}
+mod tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::FirewallConfig;
-    use crate::firewall::FirewallScanner;
-    use axum::{routing::post, Router};
-
-    /// Minimal `RequestContext` for signal-gate tests.
-    fn signal_ctx(
-        tool_actions: Option<&str>,
-        header_present: bool,
-        search: bool,
-    ) -> RequestContext {
-        RequestContext {
-            request_id: "t".into(),
-            api_key: "k".into(),
-            owner_binding: ryu_gw_credentials::fingerprint("k"),
-            is_master_key: false,
-            org_id: None,
-            team_id: None,
-            project_id: None,
-            user_name: None,
-            user_id: None,
-            agent_id: None,
-            key_config: None,
-            skill_ids: None,
-            tool_actions: tool_actions.map(str::to_string),
-            tools_header_present: header_present,
-            slot_provider: None,
-            slot_model: None,
-            session_id: None,
-            feature: None,
-            companion_source: false,
-            tool_search_requested: search,
-            priority: crate::concurrency::Priority::Interactive,
-            tool_profile: None,
-            raw_tools: false,
-            managed_inference: false,
-            remaining_budget_micro_usd: None,
-            unrestricted_budget_micro_usd: None,
-            pool_budgets_micro_usd: std::collections::HashMap::new(),
-            resolved_policy: None,
-            prompt_cache_mode: None,
-            prompt_cache_ttl: None,
-            node_routing: None,
-        }
-    }
-
-    // ── prompt cache: request override + usage readback ──────────────────────
-
-    #[test]
-    fn request_override_is_honoured_when_the_node_allows_it() {
-        let mut ctx = signal_ctx(None, false, false);
-        ctx.prompt_cache_mode = Some(ryu_gw_providers::PromptCacheMode::Explicit);
-        ctx.prompt_cache_ttl = Some("1h".into());
-
-        let cfg = crate::config::PromptCacheConfig::default();
-        assert!(cfg.allow_request_override, "override is on by default");
-        let (mode, ttl) = resolve_prompt_cache_override(&cfg, &ctx);
-        assert_eq!(mode, Some(ryu_gw_providers::PromptCacheMode::Explicit));
-        assert_eq!(ttl.as_deref(), Some("1h"));
-    }
-
-    #[test]
-    fn a_locked_node_drops_the_request_headers_entirely() {
-        let mut ctx = signal_ctx(None, false, false);
-        ctx.prompt_cache_mode = Some(ryu_gw_providers::PromptCacheMode::Explicit);
-        ctx.prompt_cache_ttl = Some("1h".into());
-
-        let cfg = crate::config::PromptCacheConfig {
-            allow_request_override: false,
-            ..Default::default()
-        };
-        let (mode, ttl) = resolve_prompt_cache_override(&cfg, &ctx);
-        assert_eq!(mode, None, "a locked node must ignore x-ryu-prompt-cache");
-        assert_eq!(ttl, None);
-    }
-
-    /// An `AppState` whose credits config is exactly what a reservation test
-    /// needs: reservations on, a known floor, and a known flat token rate.
-    fn reserve_state(min_reserve_micro_usd: u64, cost_per_1k_micro_usd: u64) -> AppState {
-        let mut config = crate::GatewayConfig::default();
-        config.credits.reserve_enabled = true;
-        config.credits.min_reserve_micro_usd = min_reserve_micro_usd;
-        config.control_plane.cost_per_1k_micro_usd = cost_per_1k_micro_usd;
-        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
-        AppState::new_for_test(config, audit, evals)
-    }
-
-    /// A managed-tenant context with a known unrestricted balance.
-    fn managed_ctx(balance_micro_usd: i64) -> RequestContext {
-        let mut ctx = signal_ctx(None, false, false);
-        ctx.org_id = Some("o1".to_string());
-        ctx.managed_inference = true;
-        ctx.remaining_budget_micro_usd = Some(balance_micro_usd);
-        ctx
-    }
-
-    #[test]
-    fn reservation_estimate_floors_at_the_configured_minimum() {
-        let state = reserve_state(10_000, 1);
-        // A tiny completion still claims the floor, so a burst of cheap requests
-        // is bounded by balance / floor rather than by nothing.
-        let body = json!({ "max_tokens": 1 });
-        assert_eq!(reservation_estimate_micro_usd(&state, &body), 10_000);
-    }
-
-    #[test]
-    fn reservation_estimate_scales_with_max_tokens_above_the_floor() {
-        // 1_000_000 tokens at 1000 micro-USD/1k = 1_000_000 micro-USD, over the floor.
-        let state = reserve_state(10_000, 1000);
-        let body = json!({ "max_tokens": 1_000_000 });
-        assert_eq!(reservation_estimate_micro_usd(&state, &body), 1_000_000);
-    }
-
-    #[test]
-    fn an_unbounded_completion_reserves_the_floor_not_zero() {
-        // Naming no ceiling makes a request MORE expensive to serve, not free.
-        let state = reserve_state(10_000, 1000);
-        assert_eq!(reservation_estimate_micro_usd(&state, &json!({})), 10_000);
-        // `max_completion_tokens` is the newer spelling and must read the same.
-        let aliased = json!({ "max_completion_tokens": 1_000_000 });
-        assert_eq!(reservation_estimate_micro_usd(&state, &aliased), 1_000_000);
-    }
-
-    #[test]
-    fn concurrent_managed_requests_cannot_all_spend_one_balance() {
-        // THE REGRESSION GUARD. Post-paid metering means nothing debits until a
-        // request finishes, so without the reservation every one of these sees
-        // the same balance and every one is admitted.
-        let state = reserve_state(10_000, 0);
-        let ctx = managed_ctx(50_000); // $0.05 ⇒ five $0.01 reservations
-        let body = json!({ "max_tokens": 1 });
-
-        let held: Vec<_> = (0..5)
-            .map(|_| {
-                maybe_reserve_credit(&state, &ctx, &body, None)
-                    .expect("within balance")
-                    .expect("a managed tenant takes a real permit")
-            })
-            .collect();
-        assert_eq!(held.len(), 5);
-
-        assert!(
-            matches!(
-                maybe_reserve_credit(&state, &ctx, &body, None),
-                Err(GatewayError::InsufficientCredits)
-            ),
-            "the sixth concurrent request must get the same 402 as an empty wallet"
-        );
-
-        // Finishing the in-flight work returns the headroom.
-        drop(held);
-        assert!(maybe_reserve_credit(&state, &ctx, &body, None).is_ok());
-    }
-
-    #[test]
-    fn a_dust_balance_no_longer_admits_an_expensive_request() {
-        // The old gate asked `balance <= 0`, so one micro-USD bought a frontier
-        // call. The gate is now the ESTIMATE against the balance.
-        let state = reserve_state(10_000, 0);
-        let ctx = managed_ctx(1);
-        assert!(matches!(
-            maybe_reserve_credit(&state, &ctx, &json!({}), None),
-            Err(GatewayError::InsufficientCredits)
-        ));
-    }
-
-    /// Run the clamp over a chat body and hand back what it became.
-    fn clamped(state: &AppState, ctx: &RequestContext, mut body: Value) -> Value {
-        clamp_output_ceiling(state, ctx, &mut body, None, OutputCeiling::Clamp);
-        body
-    }
-
-    #[test]
-    fn an_unstated_ceiling_becomes_the_affordable_one() {
-        // THE OVERDRAFT GUARD. Naming no ceiling used to reserve the $0.01 floor
-        // and then generate without limit, so a dust balance could front an
-        // arbitrarily expensive completion. It now gets the largest ceiling the
-        // balance actually covers.
-        let state = reserve_state(10_000, 1000); // 1000 micro-USD per 1k tokens
-        let ctx = managed_ctx(50_000); // $0.05 ⇒ 50k tokens at that rate
-        let body = clamped(&state, &ctx, json!({ "messages": [] }));
-        assert_eq!(body["max_tokens"], json!(50_000));
-    }
-
-    #[test]
-    fn a_ceiling_the_balance_cannot_cover_is_lowered() {
-        let state = reserve_state(10_000, 1000);
-        let ctx = managed_ctx(50_000);
-        let body = clamped(&state, &ctx, json!({ "max_tokens": 1_000_000 }));
-        assert_eq!(body["max_tokens"], json!(50_000));
-    }
-
-    #[test]
-    fn a_ceiling_within_budget_is_left_exactly_alone() {
-        // Asking for less than you can afford is a preference, not a budget —
-        // the clamp only ever lowers.
-        let state = reserve_state(10_000, 1000);
-        let ctx = managed_ctx(50_000);
-        let body = clamped(&state, &ctx, json!({ "max_tokens": 128 }));
-        assert_eq!(body["max_tokens"], json!(128));
-    }
-
-    /// A state whose price table knows one expensive model.
-    fn priced_state(
-        min_reserve_micro_usd: u64,
-        flat_per_1k: u64,
-        model: &str,
-        output_per_1k: u64,
-    ) -> AppState {
-        let mut config = crate::GatewayConfig::default();
-        config.credits.reserve_enabled = true;
-        config.credits.min_reserve_micro_usd = min_reserve_micro_usd;
-        config.control_plane.cost_per_1k_micro_usd = flat_per_1k;
-        config.control_plane.model_pricing.insert(
-            model.to_string(),
-            crate::config::ModelPrice {
-                input_per_1k_micro_usd: 3000,
-                output_per_1k_micro_usd: output_per_1k,
-            },
-        );
-        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
-        AppState::new_for_test(config, audit, evals)
-    }
-
-    #[test]
-    fn an_expensive_model_gets_a_tighter_ceiling_than_the_flat_rate_would() {
-        // THE RESIDUAL THE OVERDRAFT FIX LEFT. Priced at the flat 1000/1k this
-        // balance buys 50k tokens; the model actually costs 10x that, so the
-        // flat rate authorised 10x more generation than the org could pay for —
-        // and it did so on precisely the frontier models where the overdraft is
-        // worth having.
-        let state = priced_state(10_000, 1000, "frontier-", 10_000);
-        let ctx = managed_ctx(50_000);
-        let body = clamped(
-            &state,
-            &ctx,
-            json!({ "model": "frontier-xl-2026", "messages": [] }),
-        );
-        assert_eq!(body["max_tokens"], json!(5000));
-    }
-
-    #[test]
-    fn a_cheap_model_is_not_truncated_by_a_blended_rate() {
-        // The other half of the same bug: a blended rate charges a cheap model
-        // as though it were expensive and cuts completions the org could always
-        // afford.
-        let state = priced_state(10_000, 1000, "cheap-", 100);
-        let ctx = managed_ctx(50_000);
-        let body = clamped(
-            &state,
-            &ctx,
-            json!({ "model": "cheap-mini", "messages": [] }),
-        );
-        assert_eq!(body["max_tokens"], json!(500_000));
-    }
-
-    #[test]
-    fn a_model_absent_from_the_table_falls_back_to_the_flat_rate() {
-        let state = priced_state(10_000, 1000, "frontier-", 10_000);
-        let ctx = managed_ctx(50_000);
-        let body = clamped(
-            &state,
-            &ctx,
-            json!({ "model": "something-unpriced", "messages": [] }),
-        );
-        assert_eq!(body["max_tokens"], json!(50_000));
-    }
-
-    #[test]
-    fn the_clamp_writes_back_the_spelling_the_client_used() {
-        // Adding `max_tokens` next to a `max_completion_tokens` the client sent
-        // leaves both present, which some providers reject outright.
-        let state = reserve_state(10_000, 1000);
-        let ctx = managed_ctx(50_000);
-        let body = clamped(&state, &ctx, json!({ "max_completion_tokens": 1_000_000 }));
-        assert_eq!(body["max_completion_tokens"], json!(50_000));
-        assert!(
-            body.get("max_tokens").is_none(),
-            "must not add the other spelling alongside it"
-        );
-    }
-
-    #[test]
-    fn the_clamp_is_net_of_this_orgs_in_flight_claims() {
-        // Clamping against the GROSS balance would let concurrent unbounded
-        // requests each size themselves at the whole wallet — the first would
-        // claim all of it and its siblings would 402. That is a race, not a
-        // bound. Each concurrent request must get a smaller honest ceiling.
-        let state = reserve_state(10_000, 1000);
-        let ctx = managed_ctx(50_000);
-        let held = maybe_reserve_credit(&state, &ctx, &json!({ "max_tokens": 30_000 }), None)
-            .expect("within balance")
-            .expect("a managed tenant takes a real permit");
-        // $0.05 balance less the $0.03 already claimed leaves 20k tokens' worth.
-        let body = clamped(&state, &ctx, json!({ "messages": [] }));
-        assert_eq!(body["max_tokens"], json!(20_000));
-        drop(held);
-    }
-
-    #[test]
-    fn the_clamp_leaves_non_text_bodies_untouched() {
-        // `run_multimodal` and `submit_video_job` share `enforce_budget`, and a
-        // token ceiling is meaningless — at best ignored, at worst rejected as an
-        // unknown field.
-        let state = reserve_state(10_000, 1000);
-        let ctx = managed_ctx(50_000);
-        let mut body = json!({ "prompt": "a cat" });
-        clamp_output_ceiling(&state, &ctx, &mut body, None, OutputCeiling::Untouched);
-        assert_eq!(body, json!({ "prompt": "a cat" }));
-    }
-
-    #[test]
-    fn the_clamp_spares_tenants_who_are_not_spending_our_money() {
-        // BYOK/unmanaged traffic has no managed cap to clamp against, and
-        // imposing a ceiling on it would be a pure regression.
-        let state = reserve_state(10_000, 1000);
-        let mut unmanaged = managed_ctx(50_000);
-        unmanaged.managed_inference = false;
-        let body = clamped(&state, &unmanaged, json!({ "messages": [] }));
-        assert!(body.get("max_tokens").is_none());
-
-        // Managed but uncapped: no control-plane budget at all.
-        let mut uncapped = managed_ctx(50_000);
-        uncapped.remaining_budget_micro_usd = None;
-        let body = clamped(&state, &uncapped, json!({ "messages": [] }));
-        assert!(body.get("max_tokens").is_none());
-    }
-
-    #[test]
-    fn a_node_that_meters_nothing_imposes_no_ceiling() {
-        // A zero per-token rate cannot overdraw anyone, so there is nothing to
-        // bound — and dividing by it must not be mistaken for "afford nothing".
-        let state = reserve_state(10_000, 0);
-        let ctx = managed_ctx(50_000);
-        let body = clamped(&state, &ctx, json!({ "messages": [] }));
-        assert!(body.get("max_tokens").is_none());
-    }
-
-    #[test]
-    fn the_ceiling_accounts_for_the_billing_markup() {
-        // The budget is denominated in CHARGED micro-USD but a token count costs
-        // RAW provider micro-USD. Sizing the ceiling without undoing the markup
-        // hands out one the debit then exceeds — the very overdraft this closes.
-        let mut state = reserve_state(10_000, 1000);
-        state.config.credits.markup_bps = 10_000; // +100%: charged = 2x raw
-        let ctx = managed_ctx(50_000);
-        let body = clamped(&state, &ctx, json!({ "messages": [] }));
-        // $0.05 of BUDGET buys $0.025 of raw provider spend = 25k tokens.
-        assert_eq!(body["max_tokens"], json!(25_000));
-    }
-
-    #[test]
-    fn reservations_are_skipped_where_they_have_no_business_gating() {
-        let state = reserve_state(10_000, 0);
-        let body = json!({ "max_tokens": 1 });
-
-        // Unmanaged (BYOK / static key): never gated.
-        let mut unmanaged = managed_ctx(0);
-        unmanaged.managed_inference = false;
-        assert!(maybe_reserve_credit(&state, &unmanaged, &body, None)
-            .expect("admitted")
-            .is_none());
-
-        // Managed but uncapped (no control-plane budget at all).
-        let mut uncapped = managed_ctx(0);
-        uncapped.remaining_budget_micro_usd = None;
-        assert!(maybe_reserve_credit(&state, &uncapped, &body, None)
-            .expect("admitted")
-            .is_none());
-
-        // No org to key the claim on.
-        let mut orgless = managed_ctx(0);
-        orgless.org_id = None;
-        assert!(maybe_reserve_credit(&state, &orgless, &body, None)
-            .expect("admitted")
-            .is_none());
-    }
-
-    #[test]
-    fn the_kill_switch_restores_the_unreserved_behaviour() {
-        let mut state = reserve_state(10_000, 0);
-        state.config.credits.reserve_enabled = false;
-        let ctx = managed_ctx(1);
-        // Same dust balance the reservation path refuses above.
-        assert!(maybe_reserve_credit(&state, &ctx, &json!({}), None)
-            .expect("admitted")
-            .is_none());
-    }
-
-    #[test]
-    fn the_reservation_is_taken_against_the_same_pool_the_gate_approved() {
-        // A tenant whose money is pool-restricted grant credit must be able to
-        // spend it: gating on the unrestricted balance alone would 402 them.
-        let state = reserve_state(10_000, 0);
-        let mut ctx = managed_ctx(0);
-        ctx.unrestricted_budget_micro_usd = Some(0);
-        ctx.pool_budgets_micro_usd =
-            std::collections::HashMap::from([("cloudflare".to_string(), 50_000)]);
-
-        assert!(
-            preflight_credit_gate(&ctx, Some("cloudflare")).is_none(),
-            "precondition: the gate admits this request on pooled money"
-        );
-        assert!(
-            maybe_reserve_credit(&state, &ctx, &json!({}), Some("cloudflare"))
-                .expect("the reservation must see the same pooled headroom")
-                .is_some()
-        );
-        // …and the pool it did NOT route to is still refused.
-        assert!(matches!(
-            maybe_reserve_credit(&state, &ctx, &json!({}), Some("openrouter")),
-            Err(GatewayError::InsufficientCredits)
-        ));
-    }
-
-    #[test]
-    fn preflight_credit_gate_managed_empty_rejects_others_allow() {
-        let mut ctx = signal_ctx(None, false, false);
-        ctx.org_id = Some("o1".to_string());
-
-        // Non-managed traffic is never gated, even at a zero balance (BYOK /
-        // static-key / master paths are exempt).
-        ctx.managed_inference = false;
-        ctx.remaining_budget_micro_usd = Some(0);
-        assert!(preflight_credit_gate(&ctx, None).is_none());
-
-        // Managed + positive balance ⇒ allowed.
-        ctx.managed_inference = true;
-        ctx.remaining_budget_micro_usd = Some(500);
-        assert!(preflight_credit_gate(&ctx, None).is_none());
-
-        // Managed + uncapped (None budget) ⇒ allowed.
-        ctx.remaining_budget_micro_usd = None;
-        assert!(preflight_credit_gate(&ctx, None).is_none());
-
-        // Managed + exhausted (zero) ⇒ hard 402.
-        ctx.remaining_budget_micro_usd = Some(0);
-        assert!(matches!(
-            preflight_credit_gate(&ctx, None),
-            Some(GatewayError::InsufficientCredits)
-        ));
-
-        // Managed + overdrawn (negative) ⇒ hard 402.
-        ctx.remaining_budget_micro_usd = Some(-5);
-        assert!(matches!(
-            preflight_credit_gate(&ctx, None),
-            Some(GatewayError::InsufficientCredits)
-        ));
-    }
-
-    #[tokio::test]
-    async fn malformed_successful_debit_marks_managed_accounting_unavailable() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind debit fixture");
-        let address = listener.local_addr().expect("debit fixture address");
-        let server = tokio::spawn(async move {
-            axum::serve(
-                listener,
-                Router::new().route("/api/credits/debit", post(|| async { "this is not JSON" })),
-            )
-            .await
-            .expect("serve debit fixture");
-        });
-
-        let mut state = reserve_state(10_000, 0);
-        state.config.credits.enabled = true;
-        state.config.credits.base_url = format!("http://{address}");
-        state.config.credits.internal_secret = Some("test-internal-secret".to_string());
-        state.config.credits.fail_closed = true;
-        let state = Arc::new(state);
-
-        debit_wallet_for_request(
-            Arc::clone(&state),
-            "o1".to_string(),
-            "req-malformed-debit".to_string(),
-            "gateway_usage",
-            1,
-            true,
-            None,
-            None,
-            DebitAttribution::default(),
-        )
-        .await;
-
-        assert!(state.wallet.is_org_accounting_unavailable("o1"));
-        server.abort();
-    }
-
-    #[test]
-    fn debit_body_carries_the_pool_only_when_the_provider_is_tagged() {
-        // Untagged provider ⇒ the pre-pool body, byte-identical. `pool` must be
-        // ABSENT, not `null`: the control plane distinguishes the two.
-        let legacy = debit_request_body(
-            "o1",
-            1_234,
-            "gateway_usage",
-            "req_1",
-            None,
-            None,
-            &DebitAttribution::default(),
-        );
-        assert_eq!(legacy["orgId"], "o1");
-        assert_eq!(legacy["amountMicroUsd"], 1_234);
-        assert_eq!(legacy["reason"], "gateway_usage");
-        assert_eq!(legacy["refId"], "req_1");
-        assert!(legacy.get("pool").is_none());
-        assert!(legacy.get("alertTier").is_none());
-
-        // Tagged provider ⇒ the pool id travels verbatim under `pool`. This key
-        // and this value are what let the ledger reach pool-restricted grants;
-        // renaming either is a control-plane contract change.
-        let pooled = debit_request_body(
-            "o1",
-            1_234,
-            "gateway_usage",
-            "req_1",
-            Some(AlertTier::Warn),
-            crate::credit_pools::pool_for_gateway_provider("bedrock"),
-            &DebitAttribution::default(),
-        );
-        assert_eq!(pooled["pool"], "bedrock");
-        assert_eq!(pooled["alertTier"], "warn");
-    }
-
-    /// Attribution is ADDITIVE and every absent field is OMITTED.
-    ///
-    /// The contract that matters is the same one `pool` and `alertTier` already
-    /// hold: a control plane that does not know these keys must see a
-    /// byte-identical legacy body. Sending `null` instead of omitting would
-    /// satisfy a naive "is it there" check while writing an explicit null into
-    /// a column whose whole meaning is "not reported".
-    #[test]
-    fn debit_body_omits_attribution_it_was_not_given() {
-        let bare = debit_request_body(
-            "o1",
-            10,
-            "gateway_usage",
-            "req_1",
-            None,
-            None,
-            &DebitAttribution::default(),
-        );
-        for key in [
-            "provider",
-            "model",
-            "userId",
-            "taskLabel",
-            "inputTokens",
-            "outputTokens",
-            "durationMs",
-            "estimated",
-        ] {
-            assert!(bare.get(key).is_none(), "{key} must be absent, not null");
-        }
-
-        let full = debit_request_body(
-            "o1",
-            10,
-            "gateway_usage",
-            "req_1",
-            None,
-            None,
-            &DebitAttribution {
-                provider: Some("anthropic".to_string()),
-                model: Some("claude-sonnet-5".to_string()),
-                input_tokens: Some(4_210),
-                output_tokens: Some(380),
-                duration_ms: Some(2_140),
-                user_id: Some("u_1".to_string()),
-                task_label: Some("3 tool calls".to_string()),
-                estimated: None,
-            },
-        );
-        assert_eq!(full["provider"], "anthropic");
-        assert_eq!(full["model"], "claude-sonnet-5");
-        assert_eq!(full["inputTokens"], 4_210);
-        assert_eq!(full["outputTokens"], 380);
-        assert_eq!(full["durationMs"], 2_140);
-        assert_eq!(full["userId"], "u_1");
-        assert_eq!(full["taskLabel"], "3 tool calls");
-    }
-
-    /// A blank string is not a value. An empty-string model on a ledger row
-    /// renders as a present-but-nameless model, which reads as a bug to whoever
-    /// is looking at their invoice — strictly worse than an honest blank.
-    #[test]
-    fn debit_body_treats_a_blank_attribution_string_as_absent() {
-        let blank = debit_request_body(
-            "o1",
-            10,
-            "gateway_usage",
-            "req_1",
-            None,
-            None,
-            &DebitAttribution {
-                provider: Some("   ".to_string()),
-                model: Some(String::new()),
-                ..Default::default()
-            },
-        );
-        assert!(blank.get("provider").is_none());
-        assert!(blank.get("model").is_none());
-    }
-
-    #[test]
-    fn media_fallback_is_marked_in_the_existing_ledger_task_label() {
-        let estimated = debit_request_body(
-            "o1",
-            1_950,
-            "gateway_usage",
-            "req_1:image",
-            None,
-            None,
-            &DebitAttribution {
-                provider: Some("replicate".to_string()),
-                model: Some("image-model".to_string()),
-                task_label: Some(media_task_label(&Modality::Image, true)),
-                estimated: Some(true),
-                ..Default::default()
-            },
-        );
-        assert_eq!(estimated["taskLabel"], "image (estimated cost)");
-        assert_eq!(estimated["estimated"], true);
-
-        let measured = debit_request_body(
-            "o1",
-            2_925,
-            "gateway_usage",
-            "req_2:image",
-            None,
-            None,
-            &DebitAttribution {
-                task_label: Some(media_task_label(&Modality::Image, false)),
-                duration_ms: Some(3_000),
-                estimated: Some(false),
-                ..Default::default()
-            },
-        );
-        assert_eq!(measured["taskLabel"], "image");
-        assert_eq!(measured["durationMs"], 3_000);
-        assert_eq!(measured["estimated"], false);
-    }
-
-    #[test]
-    fn preflight_credit_gate_segregates_pool_restricted_grants() {
-        // The wallet the whole pool split exists for: $50 of FRONTIER grant and
-        // nothing unrestricted. Its total is positive, so the pre-pool scalar gate
-        // would wave a Cloudflare request through and let cheap traffic burn the
-        // scarce expensive allowance.
-        let mut ctx = signal_ctx(None, false, false);
-        ctx.org_id = Some("o1".to_string());
-        ctx.managed_inference = true;
-        ctx.remaining_budget_micro_usd = Some(50_000_000);
-        ctx.unrestricted_budget_micro_usd = Some(0);
-        ctx.pool_budgets_micro_usd = std::collections::HashMap::from([
-            ("bedrock".to_string(), 50_000_000_i64),
-            ("cloudflare".to_string(), 0_i64),
-        ]);
-
-        // Routed to the pool that funds it ⇒ served.
-        assert!(preflight_credit_gate(&ctx, Some("bedrock")).is_none());
-
-        // Routed to a pool it holds nothing for ⇒ 402, DESPITE a positive total.
-        // This is the one case where reading `unrestricted_budget_micro_usd`
-        // diverges from falling back to the total, so it is what proves the field
-        // is actually being read.
-        assert!(matches!(
-            preflight_credit_gate(&ctx, Some("cloudflare")),
-            Some(GatewayError::InsufficientCredits)
-        ));
-
-        // A pool absent from the map is treated as funding nothing — same as an
-        // explicit zero, because both mean "no grant money here".
-        assert!(matches!(
-            preflight_credit_gate(&ctx, Some("openrouter")),
-            Some(GatewayError::InsufficientCredits)
-        ));
-
-        // An UNTAGGED provider (openai, anthropic, local, …) is gated on the
-        // unrestricted balance, NOT the total — this wallet funds it with nothing.
-        // Admitting it here was a live money leak: the debit that follows carries
-        // no pool, so `debitWallet` skips every grant row and drives the top-up
-        // bucket negative while the $50 Bedrock grant sits untouched and Ryu
-        // absorbs OpenAI's bill.
-        assert!(matches!(
-            preflight_credit_gate(&ctx, None),
-            Some(GatewayError::InsufficientCredits)
-        ));
-
-        // Unrestricted money alone funds every pool: grants top it up, never cap it.
-        ctx.unrestricted_budget_micro_usd = Some(1_000);
-        assert!(preflight_credit_gate(&ctx, Some("cloudflare")).is_none());
-        // …and it funds an untagged provider too. Tightening the untagged branch
-        // must not become a blanket block on every non-pooled provider for anyone
-        // who happens to hold a grant.
-        assert!(preflight_credit_gate(&ctx, None).is_none());
-    }
-
-    #[test]
-    fn preflight_credit_gate_degrades_to_the_scalar_on_a_pre_pool_control_plane() {
-        // A control plane that does not yet emit `unrestrictedBudgetMicroUsd`
-        // leaves it `None`. Collapsing that to 0 would gate every pooled request
-        // to death the moment the gateway outran the control plane, so `None`
-        // must mean "treat the whole balance as unrestricted".
-        let mut ctx = signal_ctx(None, false, false);
-        ctx.org_id = Some("o1".to_string());
-        ctx.managed_inference = true;
-        ctx.remaining_budget_micro_usd = Some(500);
-        ctx.unrestricted_budget_micro_usd = None;
-        assert!(preflight_credit_gate(&ctx, Some("bedrock")).is_none());
-
-        ctx.remaining_budget_micro_usd = Some(0);
-        assert!(matches!(
-            preflight_credit_gate(&ctx, Some("bedrock")),
-            Some(GatewayError::InsufficientCredits)
-        ));
-
-        // Uncapped stays uncapped whether or not a pool is in play.
-        ctx.remaining_budget_micro_usd = None;
-        assert!(preflight_credit_gate(&ctx, Some("bedrock")).is_none());
-    }
-
-    #[test]
-    fn tool_signal_active_only_on_explicit_new_signal() {
-        let cfg = crate::config::ToolsConfig::default();
-        // Legacy-only context: x-ryu-composio-actions folded into tool_actions,
-        // but the new header was not present → must NOT trigger the unified loop
-        // (the bare Composio agent keeps its fast stream + legacy loop).
-        let legacy = signal_ctx(Some("composio.SLACK"), false, false);
-        assert!(!tool_signal_active(&legacy, &cfg));
-        // New header present → triggers.
-        let new_header = signal_ctx(Some("spider.crawl"), true, false);
-        assert!(tool_signal_active(&new_header, &cfg));
-        // x-ryu-tool-search: on → triggers even without an allowlist header.
-        let search = signal_ctx(None, false, true);
-        assert!(tool_signal_active(&search, &cfg));
-        // always_on alone is request-independent and must NOT trigger (would fire
-        // on header-less ACP egress).
-        let mut always_on = cfg.clone();
-        always_on.always_on = vec![json!({"type":"function","function":{"name":"x"}})];
-        assert!(!tool_signal_active(
-            &signal_ctx(None, false, false),
-            &always_on
-        ));
-        // Disabled config is always inert.
-        let disabled = crate::config::ToolsConfig {
-            enabled: false,
-            ..crate::config::ToolsConfig::default()
-        };
-        assert!(!tool_signal_active(&new_header, &disabled));
-    }
-
-    #[test]
-    fn select_tool_loop_raw_passthrough_forces_plain() {
-        let cfg = crate::config::ToolsConfig::default();
-
-        // A request that WOULD hit the unified loop (catalog wired + signal)...
-        let signaled = signal_ctx(Some("composio.GMAIL_SEARCH_EMAILS"), true, false);
-        assert_eq!(
-            select_tool_loop(&signaled, true, true, &cfg),
-            ToolLoopKind::Unified
-        );
-        // ...and one that WOULD hit the legacy Composio loop (no signal, Composio on).
-        let bare = signal_ctx(None, false, false);
-        assert_eq!(
-            select_tool_loop(&bare, false, true, &cfg),
-            ToolLoopKind::Composio
-        );
-
-        // raw_tools forces Plain in BOTH cases, even with Composio configured —
-        // so an SDK-side loop's own tool_calls are never swallowed.
-        let mut raw_signaled = signaled;
-        raw_signaled.raw_tools = true;
-        assert_eq!(
-            select_tool_loop(&raw_signaled, true, true, &cfg),
-            ToolLoopKind::Plain
-        );
-        let mut raw_bare = bare;
-        raw_bare.raw_tools = true;
-        assert_eq!(
-            select_tool_loop(&raw_bare, false, true, &cfg),
-            ToolLoopKind::Plain
-        );
-
-        // Sanity: no catalog and no Composio ⇒ Plain regardless of signal.
-        assert_eq!(
-            select_tool_loop(&signal_ctx(None, true, false), false, false, &cfg),
-            ToolLoopKind::Plain
-        );
-    }
-
-    // ─── Anthropic betas (private `ryu_anthropic_beta` field) ────────────────
-
-    /// A minimal chat body carrying the private betas field, as `api::chat`
-    /// leaves it after folding in the caller's `anthropic-beta` header.
-    fn body_with_betas() -> Value {
-        let mut body = json!({ "model": "m" });
-        body[ANTHROPIC_BETA_FIELD] = json!("code-execution-2025-05-22");
-        body
-    }
-
-    #[test]
-    fn anthropic_beta_survives_only_for_the_anthropic_dialect_providers() {
-        // `bedrock` is the non-obvious half: it is `AnthropicProvider` under a
-        // different registry id, so stripping there would silently drop the betas
-        // on a wire format that accepts them.
-        for provider in ["anthropic", crate::config::BEDROCK_PROVIDER_ID] {
-            let mut body = body_with_betas();
-            strip_anthropic_beta_for(&mut body, provider);
-            assert_eq!(
-                body[ANTHROPIC_BETA_FIELD],
-                json!("code-execution-2025-05-22"),
-                "{provider} reads the field and must keep it"
-            );
-        }
-    }
-
-    #[test]
-    fn anthropic_beta_is_stripped_for_every_other_provider() {
-        // Each of these clones the request body verbatim into its payload, where an
-        // unknown top-level key 400s a strict endpoint.
-        for provider in [
-            "openai",
-            "openrouter",
-            "local",
-            "core",
-            "genai",
-            "modal",
-            crate::config::CLASSIFY_PROVIDER_ID,
-            crate::config::CLOUDFLARE_PROVIDER_ID,
-            crate::config::VERTEX_PROVIDER_ID,
-            crate::config::OPENAI_CREDITS_PROVIDER_ID,
-            // A provider id nobody has thought about yet: the allowlist direction
-            // means it is safe by default.
-            "some-future-provider",
-        ] {
-            let mut body = body_with_betas();
-            strip_anthropic_beta_for(&mut body, provider);
-            assert_eq!(
-                body.get(ANTHROPIC_BETA_FIELD),
-                None,
-                "{provider} would forward the private field upstream"
-            );
-            // Only that key goes; the rest of the payload is untouched.
-            assert_eq!(body, json!({ "model": "m" }));
-        }
-    }
-
-    #[test]
-    fn anthropic_beta_strip_is_a_no_op_when_the_field_was_never_set() {
-        let original = json!({ "model": "gpt-4o", "messages": [] });
-        let mut body = original.clone();
-        strip_anthropic_beta_for(&mut body, "openai");
-        assert_eq!(body, original);
-    }
-
-    // ─── Tool-policy profile resolution (#473 profiles) ──────────────────────
-
-    use crate::config::{ToolProfile, ToolsConfig};
-
-    /// A `RequestContext` with an `x-ryu-tools` CSV and a selected profile name.
-    fn profile_ctx(tool_actions: Option<&str>, profile: Option<&str>) -> RequestContext {
-        let mut ctx = signal_ctx(tool_actions, tool_actions.is_some(), false);
-        ctx.tool_profile = profile.map(str::to_string);
-        ctx
-    }
-
-    /// A ToolsConfig with `always_on` containing a single tool named `name`.
-    fn cfg_with_always_on(name: &str) -> ToolsConfig {
-        ToolsConfig {
-            always_on: vec![json!({"type":"function","function":{"name": name}})],
-            ..ToolsConfig::default()
-        }
-    }
-
-    #[test]
-    fn allowlist_no_profile_is_unchanged_default_behavior() {
-        // Default-safety guard: with no profile selected the resolved list is
-        // exactly the x-ryu-tools CSV followed by the always_on names, in order.
-        let cfg = cfg_with_always_on("search.web");
-        let ctx = profile_ctx(Some("spider.crawl, exa.find"), None);
-        assert_eq!(
-            effective_tool_allowlist(&ctx, &cfg),
-            vec![
-                "spider.crawl".to_string(),
-                "exa.find".to_string(),
-                "search.web".to_string(),
-            ]
-        );
-        // No header and no profile ⇒ just always_on (the pre-profile behavior).
-        let bare = profile_ctx(None, None);
-        assert_eq!(
-            effective_tool_allowlist(&bare, &cfg),
-            vec!["search.web".to_string()]
-        );
-    }
-
-    #[test]
-    fn allowlist_client_wildcard_header_cannot_grant_arbitrary_tools() {
-        // Regression: a client-supplied `x-ryu-tools: *` must NOT introduce the
-        // wildcard grant. `"*"` may only come from an `unrestricted` profile.
-        let cfg = ToolsConfig::default();
-
-        // No profile: the bare `*` header resolves to an empty allowlist, not "*".
-        let bare = profile_ctx(Some("*"), None);
-        assert!(
-            !effective_tool_allowlist(&bare, &cfg).contains(&"*".to_string()),
-            "client wildcard leaked into the no-profile allowlist"
-        );
-
-        // `*` mixed with a real id keeps the real id and drops the wildcard.
-        let mixed = profile_ctx(Some("spider.crawl, *"), None);
-        let out = effective_tool_allowlist(&mixed, &cfg);
-        assert!(out.contains(&"spider.crawl".to_string()));
-        assert!(
-            !out.contains(&"*".to_string()),
-            "client wildcard survived alongside an explicit tool id"
-        );
-
-        // A non-`unrestricted` profile cannot be escalated to "*" via the header.
-        let mut scoped_cfg = ToolsConfig::default();
-        scoped_cfg.profiles.insert(
-            "messaging".to_string(),
-            ToolProfile {
-                allow: vec!["slack.send".to_string()],
-                ..ToolProfile::default()
-            },
-        );
-        let escalate = profile_ctx(Some("*"), Some("messaging"));
-        let scoped = effective_tool_allowlist(&escalate, &scoped_cfg);
-        assert!(scoped.contains(&"slack.send".to_string()));
-        assert!(
-            !scoped.contains(&"*".to_string()),
-            "client wildcard escalated a scoped profile to unrestricted"
-        );
-    }
-
-    #[test]
-    fn allowlist_messaging_profile_resolves_to_allow_plus_always_on() {
-        let mut cfg = cfg_with_always_on("search.web");
-        cfg.profiles.insert(
-            "messaging".to_string(),
-            ToolProfile {
-                allow: vec!["slack.send".to_string(), "gmail.send".to_string()],
-                ..ToolProfile::default()
-            },
-        );
-        // No x-ryu-tools header: the profile's allow list seeds the allowlist.
-        let ctx = profile_ctx(None, Some("messaging"));
-        assert_eq!(
-            effective_tool_allowlist(&ctx, &cfg),
-            vec![
-                "slack.send".to_string(),
-                "gmail.send".to_string(),
-                "search.web".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn allowlist_explicit_tools_union_on_top_of_profile() {
-        let mut cfg = ToolsConfig::default();
-        cfg.profiles.insert(
-            "messaging".to_string(),
-            ToolProfile {
-                allow: vec!["slack.send".to_string()],
-                ..ToolProfile::default()
-            },
-        );
-        // Explicit x-ryu-tools augments the profile (union; explicit entry appears
-        // even though it is not in the profile).
-        let ctx = profile_ctx(Some("github.pr"), Some("messaging"));
-        let out = effective_tool_allowlist(&ctx, &cfg);
-        assert!(out.contains(&"slack.send".to_string()));
-        assert!(out.contains(&"github.pr".to_string()));
-    }
-
-    #[test]
-    fn allowlist_deny_wins_over_allow_and_explicit() {
-        let mut cfg = ToolsConfig::default();
-        cfg.profiles.insert(
-            "messaging".to_string(),
-            ToolProfile {
-                allow: vec!["slack.send".to_string(), "slack.admin".to_string()],
-                deny: vec!["slack.admin".to_string(), "github.pr".to_string()],
-                ..ToolProfile::default()
-            },
-        );
-        // deny strips both a profile-allowed id and an explicitly-granted id.
-        let ctx = profile_ctx(Some("github.pr"), Some("messaging"));
-        let out = effective_tool_allowlist(&ctx, &cfg);
-        assert!(out.contains(&"slack.send".to_string()));
-        assert!(!out.contains(&"slack.admin".to_string()));
-        assert!(!out.contains(&"github.pr".to_string()));
-    }
-
-    #[test]
-    fn allowlist_deny_does_not_strip_always_on() {
-        // Invariant: always_on tools are never deny-stripped, even if a profile
-        // lists one in its deny set.
-        let mut cfg = cfg_with_always_on("search.web");
-        cfg.profiles.insert(
-            "messaging".to_string(),
-            ToolProfile {
-                allow: vec!["slack.send".to_string()],
-                deny: vec!["search.web".to_string()],
-                ..ToolProfile::default()
-            },
-        );
-        let ctx = profile_ctx(None, Some("messaging"));
-        let out = effective_tool_allowlist(&ctx, &cfg);
-        assert!(
-            out.contains(&"search.web".to_string()),
-            "always_on must survive a profile deny entry"
-        );
-    }
-
-    #[test]
-    fn allowlist_unknown_profile_falls_back_to_default() {
-        // A stale / typo'd profile name must NOT deny-all — it behaves exactly as
-        // if no profile were selected.
-        let cfg = cfg_with_always_on("search.web");
-        let ctx = profile_ctx(Some("spider.crawl"), Some("does-not-exist"));
-        assert_eq!(
-            effective_tool_allowlist(&ctx, &cfg),
-            vec!["spider.crawl".to_string(), "search.web".to_string()]
-        );
-    }
-
-    #[test]
-    fn allowlist_unrestricted_profile_resolves_to_wildcard() {
-        let mut cfg = cfg_with_always_on("search.web");
-        cfg.profiles.insert(
-            "full".to_string(),
-            ToolProfile {
-                unrestricted: true,
-                ..ToolProfile::default()
-            },
-        );
-        let ctx = profile_ctx(None, Some("full"));
-        let out = effective_tool_allowlist(&ctx, &cfg);
-        assert!(
-            out.contains(&"*".to_string()),
-            "full profile seeds wildcard"
-        );
-        assert!(out.contains(&"search.web".to_string()));
-    }
-
-    #[test]
-    fn sse_extract_text_concatenates_deltas() {
-        let raw = concat!(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\n",
-            "data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n\n",
-            "data: [DONE]\n\n"
-        );
-        assert_eq!(sse_extract_text(raw), "Hello world");
-    }
-
-    #[test]
-    fn sse_extract_text_ignores_non_data_and_malformed_lines() {
-        let raw = concat!(
-            ": keep-alive\n\n",
-            "data: not-json\n\n",
-            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"
-        );
-        assert_eq!(sse_extract_text(raw), "ok");
-    }
-
-    #[test]
-    fn sse_extract_then_scan_catches_secret_split_across_deltas() {
-        // A secret token arrives split across two deltas; scanning each delta in
-        // isolation would miss it, so we must scan the reassembled text.
-        let raw = concat!(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"key sk-\"}}]}\n\n",
-            "data: {\"choices\":[{\"delta\":{\"content\":\"ABCDEFGHIJ0123456789KLMN\"}}]}\n\n",
-            "data: [DONE]\n\n"
-        );
-        let scanner = FirewallScanner::new(FirewallConfig::default());
-        let assembled = sse_extract_text(raw);
-        assert!(scanner.scan_outbound(&assembled).is_some());
-    }
-
-    #[test]
-    fn sse_content_frames_are_valid_openai_sse() {
-        let frames = sse_content_frames("blocked message");
-        // The chunk must parse as a content delta a downstream OpenAI-SSE parser
-        // will relay, and the transcript must terminate with the DONE sentinel.
-        let first = frames
-            .lines()
-            .find_map(|l| l.strip_prefix("data: "))
-            .expect("a data line");
-        let json: Value = serde_json::from_str(first).expect("valid json chunk");
-        assert_eq!(json["choices"][0]["delta"]["content"], "blocked message");
-        assert!(frames.contains("data: [DONE]"));
-    }
-
-    #[test]
-    fn outbound_enabled_respects_toggles() {
-        let scanner = FirewallScanner::new(FirewallConfig::default());
-        assert!(scanner.outbound_enabled());
-
-        let off = FirewallConfig {
-            scan_outbound: false,
-            ..FirewallConfig::default()
-        };
-        assert!(!FirewallScanner::new(off).outbound_enabled());
-    }
-
-    /// A bare secret in a chat body does NOT reach the provider under the DEFAULT
-    /// firewall config. This exercises the exact `PipelineStage::Firewall` decision
-    /// (scan_inbound → match policy) with no policy overrides: the default policy
-    /// is `Block`, so the Firewall stage rejects the request outright. The opt-in
-    /// `Sanitize` path (redact-and-continue) is asserted separately below.
-    #[test]
-    fn bare_secret_not_forwarded_to_provider_under_default() {
-        let scanner = FirewallScanner::new(FirewallConfig::default());
-        let body = serde_json::json!({
-            "model": "gpt-4o",
-            "messages": [
-                { "role": "user", "content": "deploy with AKIAIOSFODNN7EXAMPLE now" }
-            ]
-        });
-
-        let prompt = extract_text_for_scanning(&body);
-        let violation = scanner
-            .scan_inbound(&prompt)
-            .expect("a bare secret must trip the inbound scan");
-        assert_eq!(violation.kind, crate::firewall::DetectionKind::Secret);
-
-        // The default policy is Block: the Firewall stage's match arm returns
-        // a FirewallBlocked error, so the body never egresses at all.
-        assert_eq!(scanner.policy(), &FirewallPolicy::Block);
-    }
-
-    /// The opt-in `Sanitize` policy redacts a detected secret from the body
-    /// instead of rejecting the request (redact-and-continue).
-    #[test]
-    fn bare_secret_redacted_from_provider_body_under_sanitize() {
-        let scanner = FirewallScanner::new(FirewallConfig {
-            policy: FirewallPolicy::Sanitize,
-            ..FirewallConfig::default()
-        });
-        let mut body = serde_json::json!({
-            "model": "gpt-4o",
-            "messages": [
-                { "role": "user", "content": "deploy with AKIAIOSFODNN7EXAMPLE now" }
-            ]
-        });
-
-        sanitize_messages(&mut body, &scanner);
-
-        let egress = body["messages"][0]["content"].as_str().unwrap();
-        assert!(
-            !egress.contains("AKIAIOSFODNN7EXAMPLE"),
-            "secret must not reach the provider body: {egress}"
-        );
-        assert!(
-            egress.contains("[REDACTED:"),
-            "expected a redaction marker in the egress body: {egress}"
-        );
-    }
-
-    // ─── Multimodal pipeline integration tests ────────────────────────────────
-
-    /// Verify that `multimodal_input_text` extracts the right field per modality.
-    #[test]
-    fn multimodal_input_text_extracts_correct_fields() {
-        let body = serde_json::json!({
-            "prompt": "a cat",
-            "input": "Hello world",
-            "model": "test-model"
-        });
-
-        assert_eq!(multimodal_input_text(&body, &Modality::Image), "a cat");
-        assert_eq!(multimodal_input_text(&body, &Modality::Tts), "Hello world");
-        assert_eq!(multimodal_input_text(&body, &Modality::Stt), "");
-        assert_eq!(multimodal_input_text(&body, &Modality::Chat), "");
-    }
-
-    /// Verify that an image request is dispatched to the provider registered in
-    /// the modality map and that the audit record carries the correct provider
-    /// label (`openai:image`). Uses a mock provider that succeeds immediately
-    /// without a live endpoint.
-    #[tokio::test]
-    async fn multimodal_image_dispatched_to_configured_provider_and_audited() {
-        use crate::config::{ModalityMapping, RoutingConfig};
-        use crate::router::RouteDecision;
-        use std::collections::HashMap;
-
-        // Build minimal state with a modality map pointing image → openai.
-        let mut modality_map = HashMap::new();
-        modality_map.insert(
-            Modality::Image,
-            ModalityMapping {
-                provider: crate::config::ProviderKind::OpenAi.into(),
-                model: Some("dall-e-3".to_string()),
-            },
-        );
-
-        let config = crate::config::GatewayConfig {
-            routing: RoutingConfig {
-                modality_map,
-                ..RoutingConfig::default()
-            },
-            // Disable auth so the test doesn't need a key.
-            auth: crate::config::AuthConfig {
-                require_auth: false,
-                ..Default::default()
-            },
-            // Disable the firewall to keep the test deterministic.
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            ..crate::config::GatewayConfig::default()
-        };
-
-        // The test uses route_modality to check the routing decision directly —
-        // a full pipeline run would need a real or mock HTTP provider. We verify
-        // the dispatch decision and audit field name here without a live endpoint.
-        let router = crate::router::ModelRouter::new(config.routing.clone());
-        let RouteDecision { provider, model } = router.route_modality(&Modality::Image, "dall-e-3");
-
-        assert_eq!(
-            provider,
-            crate::config::ProviderKind::OpenAi,
-            "image request must be dispatched to the provider in the modality map"
-        );
-        assert_eq!(
-            model, "dall-e-3",
-            "model pin in the modality map must be forwarded to the provider"
-        );
-
-        // Verify the audit label format used by run_multimodal.
-        let provider_label = format!("openai:{}", Modality::Image.as_str());
-        assert_eq!(
-            provider_label, "openai:image",
-            "audit record provider field must encode the modality"
-        );
-    }
-
-    /// Verify that an STT request is dispatched to the provider registered in
-    /// the modality map and carries the correct audit label.
-    #[tokio::test]
-    async fn multimodal_stt_dispatched_to_configured_provider_and_audited() {
-        use crate::config::{ModalityMapping, RoutingConfig};
-        use crate::router::RouteDecision;
-        use std::collections::HashMap;
-
-        let mut modality_map = HashMap::new();
-        modality_map.insert(
-            Modality::Stt,
-            ModalityMapping {
-                provider: crate::config::ProviderKind::OpenAi.into(),
-                model: Some("whisper-1".to_string()),
-            },
-        );
-
-        let config = crate::config::GatewayConfig {
-            routing: RoutingConfig {
-                modality_map,
-                ..RoutingConfig::default()
-            },
-            ..crate::config::GatewayConfig::default()
-        };
-
-        let router = crate::router::ModelRouter::new(config.routing.clone());
-        let RouteDecision { provider, model } = router.route_modality(&Modality::Stt, "whisper-1");
-
-        assert_eq!(
-            provider,
-            crate::config::ProviderKind::OpenAi,
-            "STT request must be dispatched to the provider in the modality map"
-        );
-        assert_eq!(
-            model, "whisper-1",
-            "model pin must be forwarded to the provider"
-        );
-
-        let provider_label = format!("openai:{}", Modality::Stt.as_str());
-        assert_eq!(
-            provider_label, "openai:stt",
-            "audit record provider field must encode the modality"
-        );
-    }
-
-    /// Verify that modality-to-provider mappings are swappable: changing the
-    /// modality_map re-routes the same request to a different provider.
-    #[test]
-    fn modality_map_is_swappable_no_hardcoded_provider() {
-        use crate::config::{ModalityMapping, ProviderKind, RoutingConfig};
-        use std::collections::HashMap;
-
-        for provider in [
-            ProviderKind::OpenAi,
-            ProviderKind::Local,
-            ProviderKind::OpenRouter,
-        ] {
-            let mut modality_map = HashMap::new();
-            modality_map.insert(
-                Modality::Image,
-                ModalityMapping {
-                    provider: provider.clone().into(),
-                    model: None,
-                },
-            );
-            let router = crate::router::ModelRouter::new(RoutingConfig {
-                modality_map,
-                ..RoutingConfig::default()
-            });
-            let decision = router.route_modality(&Modality::Image, "test-model");
-            assert_eq!(
-                decision.provider, provider,
-                "modality map must be fully swappable: {provider:?} must route to itself"
-            );
-        }
-    }
-
-    // ─── Per-attribute slot routing tests (M3 / #164) ────────────────────────
-
-    /// Core forwards a carded agent's image slot as `x-ryu-slot-image-provider`
-    /// and `x-ryu-slot-image-model`. The gateway must route the image call to
-    /// the slot's provider even when the static modality_map says something else.
-    /// This is the primary AC for issue #164: same agent, different providers per
-    /// modality, with the slot override winning over the map entry.
-    #[test]
-    fn per_agent_slot_override_wins_over_modality_map() {
-        use crate::config::{ModalityMapping, ProviderKind, RoutingConfig};
-        use std::collections::HashMap;
-
-        // Static modality_map says image → OpenAi, dall-e-3.
-        let mut modality_map = HashMap::new();
-        modality_map.insert(
-            Modality::Image,
-            ModalityMapping {
-                provider: ProviderKind::OpenAi.into(),
-                model: Some("dall-e-3".to_string()),
-            },
-        );
-
-        let router = crate::router::ModelRouter::new(RoutingConfig {
-            modality_map,
-            ..RoutingConfig::default()
-        });
-
-        // The carded agent's image slot pins Local / "my-local-image-model".
-        let slot_provider: ProviderId = ProviderKind::Local.into();
-        let slot_model = "my-local-image-model";
-
-        let decision = router.route_modality_with_slot(
-            &Modality::Image,
-            "dall-e-3",
-            Some(&slot_provider),
-            Some(slot_model),
-        );
-
-        assert_eq!(
-            decision.provider,
-            ProviderKind::Local,
-            "slot provider must win over the static modality_map entry (AC2 #164)"
-        );
-        assert_eq!(
-            decision.model, "my-local-image-model",
-            "slot model must be forwarded to the provider (AC2 #164)"
-        );
-    }
-
-    /// When the slot has a provider but no model, the requested (caller) model
-    /// is forwarded, consistent with the existing modality_map behavior for
-    /// entries that don't pin a model.
-    #[test]
-    fn per_agent_slot_without_model_forwards_caller_model() {
-        use crate::config::ProviderKind;
-        let router = crate::router::ModelRouter::new(crate::config::RoutingConfig::default());
-
-        let slot_provider: ProviderId = ProviderKind::Anthropic.into();
-        let decision = router.route_modality_with_slot(
-            &Modality::Tts,
-            "tts-caller-model",
-            Some(&slot_provider),
-            None,
-        );
-
-        assert_eq!(decision.provider, ProviderKind::Anthropic);
-        assert_eq!(
-            decision.model, "tts-caller-model",
-            "caller model is passed through when the slot doesn't pin a model"
-        );
-    }
-
-    /// Unset slot (None provider) falls back to the static modality_map, then to
-    /// model routing. This is AC3 of #164: unset slot inherits the registry default.
-    #[test]
-    fn unset_slot_falls_back_to_modality_map_then_model_routing() {
-        use crate::config::{ModalityMapping, ProviderKind, RoutingConfig};
-        use std::collections::HashMap;
-
-        let mut modality_map = HashMap::new();
-        modality_map.insert(
-            Modality::Image,
-            ModalityMapping {
-                provider: ProviderKind::OpenAi.into(),
-                model: Some("dall-e-3".to_string()),
-            },
-        );
-
-        let router = crate::router::ModelRouter::new(RoutingConfig {
-            modality_map,
-            ..RoutingConfig::default()
-        });
-
-        // No slot override: should fall through to modality_map.
-        let decision =
-            router.route_modality_with_slot(&Modality::Image, "some-caller-model", None, None);
-
-        assert_eq!(
-            decision.provider,
-            ProviderKind::OpenAi,
-            "absent slot must fall back to the static modality_map (AC3 #164)"
-        );
-        assert_eq!(
-            decision.model, "dall-e-3",
-            "modality_map model pin must be used when no slot override is present"
-        );
-    }
-
-    /// Same carded agent: chat call routes to its chat slot provider, image call
-    /// routes to its image slot provider — two different providers from the same
-    /// request context. This is the primary AC of #164: per-attribute routing.
-    ///
-    /// The test also verifies `pre_process`-level behavior: when `ctx.slot_provider`
-    /// is set, `pre_process` calls `route_modality_with_slot(Chat, ...)` instead of
-    /// the plain `router.route()` path, so the chat slot wins over eval/model routing.
-    #[test]
-    fn same_carded_agent_chat_and_image_route_to_different_providers() {
-        use crate::config::{ProviderKind, RoutingConfig};
-        use crate::router::ModelRouter;
-
-        // Default config: model routing for chat (gpt-4o → OpenAi), no modality map.
-        let router = ModelRouter::new(RoutingConfig::default());
-
-        // Chat call with a slot override — the agent card pins Anthropic for chat.
-        // This exercises the `pre_process` branch added in #164: when
-        // ctx.slot_provider is Some, route_modality_with_slot(Chat,...) is used.
-        let chat_slot_provider: ProviderId = ProviderKind::Anthropic.into();
-        let chat_slot_model = "claude-3-5-sonnet";
-        let chat_decision = router.route_modality_with_slot(
-            &Modality::Chat,
-            "gpt-4o",
-            Some(&chat_slot_provider),
-            Some(chat_slot_model),
-        );
-        assert_eq!(
-            chat_decision.provider,
-            ProviderKind::Anthropic,
-            "chat call with slot override must route to the slot provider (AC2 #164)"
-        );
-        assert_eq!(chat_decision.model, "claude-3-5-sonnet");
-
-        // Image call — agent card pins Local provider for image generation.
-        let image_slot_provider: ProviderId = ProviderKind::Local.into();
-        let image_slot_model = "stable-diffusion-local";
-        let image_decision = router.route_modality_with_slot(
-            &Modality::Image,
-            "dall-e-3",
-            Some(&image_slot_provider),
-            Some(image_slot_model),
-        );
-        assert_eq!(
-            image_decision.provider,
-            ProviderKind::Local,
-            "image call from the same agent must route to the slot's provider"
-        );
-        assert_eq!(image_decision.model, "stable-diffusion-local");
-
-        // Assert the two providers differ — this is the distinguishing assertion
-        // for "same agent, two different providers per modality" (AC2 #164).
-        assert_ne!(
-            chat_decision.provider, image_decision.provider,
-            "chat and image calls from the same carded agent must reach different providers"
-        );
-    }
-
-    /// When `ctx.slot_provider` and `ctx.slot_model` are both None (default agent,
-    /// no slot configured), pre_process falls through to eval/model routing — the
-    /// slot path must not break routing for non-carded agents.
-    #[test]
-    fn no_slot_falls_through_to_model_routing() {
-        use crate::config::{ProviderKind, RoutingConfig};
-        use crate::router::ModelRouter;
-
-        let router = ModelRouter::new(RoutingConfig::default());
-
-        // No slot — should resolve via model-name prefix rules.
-        let decision = router.route_modality_with_slot(&Modality::Chat, "gpt-4o", None, None);
-        // gpt-4o has no modality_map entry for Chat and no modality_map at all,
-        // so it falls through to model routing; the "gpt-" prefix → OpenAi.
-        assert_eq!(
-            decision.provider,
-            ProviderKind::OpenAi,
-            "absent slot must fall through to standard model routing for chat"
-        );
-    }
-
-    /// End-to-end proof that provider routing is open to arbitrary registry ids:
-    /// a provider registered under a brand-new id (`"acme"`) that the closed
-    /// `ProviderKind` enum never covered is routable purely via
-    /// `default_provider = "acme"` in config, and a real request driven through
-    /// the full `run()` pipeline reaches that provider's `complete()`. This is the
-    /// acceptance test for W6b — the enum is no longer on the road, only the map.
-    #[tokio::test]
-    async fn novel_provider_id_routable_end_to_end_through_pipeline() {
-        use crate::audit::AuditLogger;
-        use crate::config::{
-            AuditConfig, EvalsConfig, FirewallConfig, GatewayConfig, ProviderId, RoutingConfig,
-        };
-        use crate::providers::Provider;
-        use crate::state::AppState;
-        use serde_json::{json, Value};
-        use std::pin::Pin;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-
-        // A provider under an id no enum variant knows about.
-        struct AcmeProvider {
-            calls: AtomicUsize,
-        }
-        impl Provider for AcmeProvider {
-            fn name(&self) -> &'static str {
-                "acme"
-            }
-            fn complete<'a>(
-                &'a self,
-                _model: &'a str,
-                _body: &'a Value,
-            ) -> Pin<
-                Box<
-                    dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
-                        + Send
-                        + 'a,
-                >,
-            > {
-                self.calls.fetch_add(1, Ordering::SeqCst);
-                Box::pin(async move {
-                    Ok(json!({
-                        "id": "chatcmpl-acme",
-                        "object": "chat.completion",
-                        "model": "acme-1",
-                        "choices": [{
-                            "index": 0,
-                            "message": {"role": "assistant", "content": "pong"},
-                            "finish_reason": "stop"
-                        }],
-                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-                    }))
-                })
-            }
-            fn complete_stream<'a>(
-                &'a self,
-                _model: &'a str,
-                _body: &'a Value,
-            ) -> Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = Result<axum::body::Body, ryu_gw_providers::ProviderError>,
-                        > + Send
-                        + 'a,
-                >,
-            > {
-                Box::pin(async move {
-                    Err(ryu_gw_providers::ProviderError::Provider(
-                        "no stream".into(),
-                    ))
-                })
-            }
-        }
-
-        // Route everything to "acme" by config alone — no code names the enum.
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("acme"),
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            ..GatewayConfig::default()
-        };
-
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-
-        let acme = Arc::new(AcmeProvider {
-            calls: AtomicUsize::new(0),
-        });
-        state
-            .providers
-            .register(Arc::clone(&acme) as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let ctx = RequestContext {
-            request_id: "acme-route-req".to_string(),
-            api_key: "sk-test".to_string(),
-            owner_binding: ryu_gw_credentials::fingerprint("sk-test"),
-            is_master_key: false,
-            org_id: None,
-            team_id: None,
-            project_id: None,
-            user_name: None,
-            user_id: None,
-            agent_id: None,
-            key_config: None,
-            skill_ids: None,
-            tool_actions: None,
-            tools_header_present: false,
-            slot_provider: None,
-            slot_model: None,
-            session_id: None,
-            feature: None,
-            companion_source: false,
-            tool_search_requested: false,
-            priority: crate::concurrency::Priority::Interactive,
-            tool_profile: None,
-            raw_tools: false,
-            managed_inference: false,
-            remaining_budget_micro_usd: None,
-            unrestricted_budget_micro_usd: None,
-            pool_budgets_micro_usd: std::collections::HashMap::new(),
-            resolved_policy: None,
-            prompt_cache_mode: None,
-            prompt_cache_ttl: None,
-            node_routing: None,
-        };
-
-        let body = json!({
-            "model": "anything",
-            "messages": [{"role": "user", "content": "ping"}]
-        });
-
-        let out = run(Arc::clone(&state), ctx, body)
-            .await
-            .expect("pipeline must route to the novel-id provider and succeed");
-
-        assert_eq!(
-            out.provider_used, "acme",
-            "the provider registered under the novel id must serve the turn end-to-end"
-        );
-        assert_eq!(
-            acme.calls.load(Ordering::SeqCst),
-            1,
-            "the novel-id provider's complete() must have been invoked exactly once"
-        );
-    }
-
-    /// ProviderKind::from_str correctly round-trips the values forwarded as
-    /// `x-ryu-slot-*-provider` headers from Core to the Gateway.
-    #[test]
-    fn provider_kind_from_str_parses_header_values() {
-        use crate::config::ProviderKind;
-        use std::str::FromStr;
-
-        assert_eq!(
-            "openai".parse::<ProviderKind>().unwrap(),
-            ProviderKind::OpenAi
-        );
-        assert_eq!(
-            "anthropic".parse::<ProviderKind>().unwrap(),
-            ProviderKind::Anthropic
-        );
-        assert_eq!(
-            "local".parse::<ProviderKind>().unwrap(),
-            ProviderKind::Local
-        );
-        assert_eq!(
-            "openrouter".parse::<ProviderKind>().unwrap(),
-            ProviderKind::OpenRouter
-        );
-        assert_eq!("core".parse::<ProviderKind>().unwrap(), ProviderKind::Core);
-        assert!("unknown-provider".parse::<ProviderKind>().is_err());
-    }
-
-    // ─── Streaming token-usage tap tests (#179) ───────────────────────────────
-
-    #[test]
-    fn openrouter_identity_prefers_agent_and_ignores_other_providers() {
-        let mut ctx = crate::pipeline::test_support::plain_request_context();
-        ctx.user_id = Some("user-7".to_owned());
-        ctx.agent_id = Some("agent-7".to_owned());
-
-        let mut openrouter = json!({ "model": "openrouter/model" });
-        stamp_openrouter_identity(&mut openrouter, "openrouter", &ctx);
-        assert_eq!(openrouter["user"], json!("ryu-agent:agent-7"));
-
-        let mut openai = json!({ "model": "gpt-4o" });
-        stamp_openrouter_identity(&mut openai, "openai", &ctx);
-        assert!(openai.get("user").is_none());
-    }
-
-    #[test]
-    fn openrouter_identity_falls_back_to_user() {
-        let mut ctx = crate::pipeline::test_support::plain_request_context();
-        ctx.user_id = Some("user-7".to_owned());
-        let mut body = json!({ "model": "openrouter/model" });
-        stamp_openrouter_identity(&mut body, "openrouter", &ctx);
-        assert_eq!(body["user"], json!("ryu-user:user-7"));
-    }
-
-    #[test]
-    fn agent_route_proof_binds_the_bearer_and_agent() {
-        type AgentRouteMac = Hmac<Sha256>;
-
-        let bearer = "rgw_test-bearer";
-        let mut mac = AgentRouteMac::new_from_slice(bearer.as_bytes()).unwrap();
-        mac.update(b"ryu-agent-route-v1\0");
-        mac.update(b"agent-7");
-        let proof = hex::encode(mac.finalize().into_bytes());
-
-        assert!(verify_agent_route_proof(
-            Some("Bearer rgw_test-bearer"),
-            "agent-7",
-            &proof
-        ));
-        assert!(!verify_agent_route_proof(
-            Some("Bearer rgw_test-bearer"),
-            "agent-8",
-            &proof
-        ));
-        assert!(!verify_agent_route_proof(
-            Some("Bearer rgw_other-bearer"),
-            "agent-7",
-            &proof
-        ));
-    }
-
-    /// attach_stream_observer writes a non-zero audit row at stream end when the
-    /// SSE fixture contains a terminal usage frame (AC2 of issue #179).
-    #[tokio::test]
-    async fn stream_observer_writes_non_zero_audit_row_from_usage_frame() {
-        use crate::audit::{AuditLogger, AuditQuery};
-        use crate::config::{AuditConfig, EvalsConfig, GatewayConfig};
-        use crate::evals::EvalsRunner;
-        use crate::state::AppState;
-        use axum::body::Body;
-        use std::sync::Arc;
-
-        // Recorded SSE fixture with a terminal usage frame (OpenAI format).
-        let fixture = concat!(
-            "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",",
-            "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n",
-            "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",",
-            "\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3,\"total_tokens\":13}}\n\n",
-            "data: [DONE]\n\n"
-        );
-
-        // Build a minimal AppState with audit enabled and evals enabled.
-        let dir = std::env::temp_dir().join(format!(
-            "ryu-stream-obs-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let db_path = dir.join("audit.db");
-        let audit_config = AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_string(),
-        };
-        let audit = AuditLogger::new(&audit_config).expect("audit logger");
-        let evals_config = EvalsConfig {
-            enabled: true,
-            max_latency_ms: 10_000,
-            sample_rate: 1.0,
-            stream_usage: true,
-        };
-        let evals = EvalsRunner::new(evals_config.clone());
-
-        let config = GatewayConfig {
-            audit: audit_config.clone(),
-            evals: evals_config,
-            ..GatewayConfig::default()
-        };
-
-        let state = Arc::new(AppState::new_for_test(config, audit, evals));
-
-        let ctx = RequestContext {
-            request_id: "test-obs-req".to_string(),
-            api_key: "sk-test".to_string(),
-            owner_binding: ryu_gw_credentials::fingerprint("sk-test"),
-            is_master_key: false,
-            org_id: None,
-            team_id: None,
-            project_id: None,
-            user_name: None,
-            user_id: None,
-            agent_id: None,
-            key_config: None,
-            skill_ids: None,
-            tool_actions: None,
-            tools_header_present: false,
-            slot_provider: None,
-            slot_model: None,
-            session_id: None,
-            feature: None,
-            companion_source: false,
-            tool_search_requested: false,
-            priority: crate::concurrency::Priority::Interactive,
-            tool_profile: None,
-            raw_tools: false,
-            managed_inference: false,
-            remaining_budget_micro_usd: None,
-            unrestricted_budget_micro_usd: None,
-            pool_budgets_micro_usd: std::collections::HashMap::new(),
-            resolved_policy: None,
-            prompt_cache_mode: None,
-            prompt_cache_ttl: None,
-            node_routing: None,
-        };
-
-        let body = Body::from(fixture);
-        let observed = attach_stream_observer(
-            body,
-            Arc::clone(&state),
-            ctx,
-            "openai".to_string(),
-            "gpt-4o".to_string(),
-            5, // estimated (should be overridden by the real frame)
-            Instant::now(),
-            None,
-        );
-
-        // Drain the observed body to trigger the stream end hook.
-        let _ = axum::body::to_bytes(observed, usize::MAX).await.unwrap();
-
-        // Wait for the async audit writer to persist the row.
-        let query = AuditQuery::default();
-        let mut rows = Vec::new();
-        for _ in 0..100 {
-            rows = state.audit.query(&query).expect("query");
-            if !rows.is_empty() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-
-        assert_eq!(
-            rows.len(),
-            1,
-            "exactly one audit row must be written at stream end"
-        );
-        let row = &rows[0];
-        assert_eq!(
-            row.input_tokens, 10,
-            "input_tokens must match the usage frame (non-zero)"
-        );
-        assert_eq!(
-            row.output_tokens, 3,
-            "output_tokens must match the usage frame (non-zero)"
-        );
-        assert!(
-            row.eval_score.is_some(),
-            "eval_score must be populated for sampled streams"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    // ── Companion DLP egress guard tests (M7 / #199) ─────────────────────────
-
-    /// AC1: companion_sanitize_messages redacts PII from string-content messages.
-    #[test]
-    fn companion_sanitize_messages_redacts_pii_in_string_content() {
-        use crate::config::FirewallConfig;
-        use crate::firewall::FirewallScanner;
-
-        let scanner = FirewallScanner::new(FirewallConfig {
-            enabled: false,
-            redact_pii: false,
-            redact_secrets: false,
-            ..FirewallConfig::default()
-        });
-
-        let mut messages = serde_json::json!([
-            {"role": "user", "content": "My email is user@example.com and key sk-abcdefghijklmnopqrstu"},
-            {"role": "system", "content": "Safe system prompt"}
-        ]);
-
-        scanner.companion_sanitize_messages(&mut messages);
-
-        let user_content = messages[0]["content"].as_str().unwrap();
-        assert!(
-            !user_content.contains("user@example.com"),
-            "companion sanitize must redact PII email: {user_content}"
-        );
-        assert!(
-            !user_content.contains("sk-abcdefghijklmnopqrstu"),
-            "companion sanitize must redact secrets: {user_content}"
-        );
-        // Safe system prompt should not be altered (no PII).
-        assert_eq!(
-            messages[1]["content"].as_str().unwrap(),
-            "Safe system prompt",
-            "clean content must pass through unchanged"
-        );
-    }
-
-    /// AC1: companion_sanitize_messages handles array-of-parts content shape.
-    #[test]
-    fn companion_sanitize_messages_redacts_pii_in_parts_content() {
-        use crate::config::FirewallConfig;
-        use crate::firewall::FirewallScanner;
-
-        let scanner = FirewallScanner::new(FirewallConfig::default());
-
-        let mut messages = serde_json::json!([
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Screen capture: SSN 123-45-6789"}
-                ]
-            }
-        ]);
-
-        scanner.companion_sanitize_messages(&mut messages);
-
-        let text = messages[0]["content"][0]["text"].as_str().unwrap();
-        assert!(
-            !text.contains("123-45-6789"),
-            "companion sanitize must redact PII in parts content: {text}"
-        );
-        assert!(
-            text.contains("[REDACTED:"),
-            "parts content must contain redaction placeholder: {text}"
-        );
-    }
-
-    /// AC4: a non-companion request body passes through pre_process message
-    /// extraction unmodified (the companion branch must be strictly gated on the
-    /// `companion_source` flag). This is a unit-level check on the sanitization
-    /// helpers — the scanner used is in default (warn-and-continue) mode.
-    #[test]
-    fn non_companion_clean_text_is_byte_identical_after_extraction() {
-        // extract_text_for_scanning must return the same text regardless of the
-        // companion flag — it reads messages, not modifies them.
-        let body = serde_json::json!({
-            "model": "gpt-4o",
-            "messages": [
-                {"role": "user", "content": "Hello, world!"}
-            ]
-        });
-        let extracted = extract_text_for_scanning(&body);
-        assert_eq!(extracted, "Hello, world!");
-    }
-
-    // ── Degraded-mode signal tests (#218) ─────────────────────────────────────
-
-    /// DegradedMode::Fallback header_value encodes the provider name so the
-    /// client can identify which fallback served the request (AC1 #218).
-    #[test]
-    fn degraded_mode_fallback_header_value_encodes_provider() {
-        let mode = DegradedMode::Fallback("anthropic".to_string());
-        assert_eq!(
-            mode.header_value(),
-            "fallback:anthropic",
-            "x-degraded header must be 'fallback:<provider>' for the Fallback variant"
-        );
-    }
-
-    /// DegradedMode::Fallback with an arbitrary provider name round-trips
-    /// correctly — the header value is always prefixed with "fallback:".
-    #[test]
-    fn degraded_mode_fallback_header_value_prefix_is_stable() {
-        for provider in ["openai", "local", "openrouter", "core"] {
-            let mode = DegradedMode::Fallback(provider.to_string());
-            let header = mode.header_value();
-            assert!(
-                header.starts_with("fallback:"),
-                "header value must start with 'fallback:' for all providers, got: {header}"
-            );
-            assert!(
-                header.ends_with(provider),
-                "header value must end with the provider name, got: {header}"
-            );
-        }
-    }
-
-    /// When no degradation occurred (primary provider served the request),
-    /// `degraded` is `None` in PipelineOutput — no x-degraded header is emitted.
-    #[test]
-    fn degraded_none_when_primary_serves_request() {
-        // Simulate: primary was NOT skipped, so degraded is None.
-        // We verify the DegradedMode logic directly.
-        let primary_skipped = false;
-        let provider_name = "openai";
-        let degraded: Option<DegradedMode> = if primary_skipped {
-            Some(DegradedMode::Fallback(provider_name.to_string()))
-        } else {
-            None
-        };
-        assert!(
-            degraded.is_none(),
-            "degraded must be None when the primary provider serves the request"
-        );
-    }
-
-    /// When the primary was skipped (circuit open) and a fallback provider serves
-    /// the request, degraded is Some(Fallback(name)) (AC1 #218).
-    #[test]
-    fn degraded_fallback_when_primary_skipped() {
-        let primary_skipped = true;
-        let provider_name = "anthropic";
-        let degraded: Option<DegradedMode> = if primary_skipped {
-            Some(DegradedMode::Fallback(provider_name.to_string()))
-        } else {
-            None
-        };
-        assert_eq!(
-            degraded,
-            Some(DegradedMode::Fallback("anthropic".to_string())),
-            "degraded must be Some(Fallback) when the primary was skipped"
-        );
-        assert_eq!(degraded.unwrap().header_value(), "fallback:anthropic");
-    }
-
-    // ── Unified-evaluator inline bridge gating (P3) ───────────────────────────
-
-    use crate::evaluators::EvaluatorBinding;
-
-    fn scanner_with_bindings(bindings: Vec<EvaluatorBinding>) -> FirewallScanner {
-        FirewallScanner::new(FirewallConfig {
-            evaluators: bindings,
-            ..FirewallConfig::default()
-        })
-    }
-
-    fn binding(id: &str, enabled: bool, action: Option<FirewallPolicy>) -> EvaluatorBinding {
-        EvaluatorBinding {
-            id: id.into(),
-            enabled,
-            inline_action: action,
-            offline: None,
-            locked: false,
-        }
-    }
-
-    /// A blocking/redacting enabled OUTPUT evaluator forces the streaming firewall
-    /// to buffer (so it can actually fire on the default warn/off streaming path).
-    #[test]
-    fn output_inline_wants_transform_true_for_blocking_binding() {
-        let reg = EvaluatorRegistry::new();
-        let block =
-            scanner_with_bindings(vec![binding("toxicity", true, Some(FirewallPolicy::Block))]);
-        assert!(output_inline_wants_transform(&block, &reg));
-
-        let sanitize = scanner_with_bindings(vec![binding(
-            "pii_leakage",
-            true,
-            Some(FirewallPolicy::Sanitize),
-        )]);
-        assert!(output_inline_wants_transform(&sanitize, &reg));
-    }
-
-    /// A disabled binding is a no-op; a warn-action binding does not force buffering;
-    /// an INPUT-target binding never affects the output buffer decision.
-    #[test]
-    fn output_inline_wants_transform_false_cases() {
-        let reg = EvaluatorRegistry::new();
-        // disabled
-        assert!(!output_inline_wants_transform(
-            &scanner_with_bindings(vec![binding(
-                "toxicity",
-                false,
-                Some(FirewallPolicy::Block)
-            )]),
-            &reg
-        ));
-        // warn action → no buffering
-        assert!(!output_inline_wants_transform(
-            &scanner_with_bindings(vec![binding(
-                "toxicity",
-                true,
-                Some(FirewallPolicy::WarnAndContinue)
-            )]),
-            &reg
-        ));
-        // input-target evaluator (code_injection) is not an output transform
-        assert!(!output_inline_wants_transform(
-            &scanner_with_bindings(vec![binding(
-                "code_injection",
-                true,
-                Some(FirewallPolicy::Block)
-            )]),
-            &reg
-        ));
-        // no bindings at all
-        assert!(!output_inline_wants_transform(
-            &scanner_with_bindings(vec![]),
-            &reg
-        ));
-    }
-
-    /// An enabled toxicity binding routes to the LLM-judge (inspector) path, and a
-    /// flagged verdict + its Block action drives the SAME block outcome the regex
-    /// firewall uses (mock verdict tested at the pure-decision seam — the inspector
-    /// itself is fail-open-tested in `firewall::inspector`).
-    #[test]
-    fn toxicity_binding_routes_to_judge_and_blocks() {
-        let reg = EvaluatorRegistry::new();
-        let tox = reg.get("toxicity").expect("toxicity seeded");
-        assert!(tox.capabilities.inline, "toxicity is inline-capable");
-        assert_eq!(tox.target, EvaluatorTarget::Output);
-        assert!(
-            matches!(tox.impl_, EvaluatorImpl::LlmJudge { .. }),
-            "toxicity dispatches to the inspect_rubric judge path"
-        );
-        let action = inline_action_for(&binding("toxicity", true, None), tox);
-        // Mock verdict = flagged ⇒ Block; clean ⇒ Allow.
-        assert_eq!(inline_outcome(true, &action), InlineOutcome::Block);
-        assert_eq!(inline_outcome(false, &action), InlineOutcome::Allow);
-    }
-
-    /// The inline action resolves binding-first, then the catalog default.
-    #[test]
-    fn inline_action_resolution_precedence() {
-        let reg = EvaluatorRegistry::new();
-        let tox = reg.get("toxicity").expect("toxicity seeded");
-        // Binding override wins.
-        assert_eq!(
-            inline_action_for(
-                &binding("toxicity", true, Some(FirewallPolicy::Sanitize)),
-                tox
-            ),
-            FirewallPolicy::Sanitize
-        );
-        // No binding action ⇒ the catalog default (toxicity defaults to Block).
-        assert_eq!(
-            inline_action_for(&binding("toxicity", true, None), tox),
-            FirewallPolicy::Block
-        );
-    }
-
-    /// response_to_text concatenates text across ALL choices AND array-of-parts
-    /// content, so toxic/PII text hidden in a second choice (`n>1`) or in a content
-    /// part no longer bypasses the non-stream / cache-hit Output judge.
-    #[test]
-    fn response_to_text_extracts_all_choices_and_parts() {
-        // Plain choices[0] string still works.
-        let simple = serde_json::json!({
-            "choices": [{ "message": { "content": "hello world" } }]
-        });
-        assert_eq!(response_to_text(&simple), "hello world");
-
-        // Array-of-parts content is extracted.
-        let parts = serde_json::json!({
-            "choices": [{ "message": { "content": [
-                { "type": "text", "text": "kill yourself you worthless trash" }
-            ] } }]
-        });
-        assert!(response_to_text(&parts).contains("kill yourself"));
-
-        // A toxic SECOND choice (n>1) is no longer invisible.
-        let multi = serde_json::json!({
-            "choices": [
-                { "message": { "content": "benign first choice" } },
-                { "message": { "content": "you are a piece of shit" } }
-            ]
-        });
-        let text = response_to_text(&multi);
-        assert!(text.contains("benign first choice"));
-        assert!(
-            text.contains("piece of shit"),
-            "second choice must be extracted"
-        );
-    }
-
-    #[test]
-    fn structured_tool_arguments_are_scanned_and_redacted() {
-        let secret = "gho_abcdefghijklmnopqrstuvwxyz0123456789";
-        let mut response = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "content": "safe",
-                    "tool_calls": [{
-                        "function": { "name": "lookup", "arguments": secret }
-                    }]
-                }
-            }]
-        });
-        assert!(response_to_text(&response).contains(secret));
-
-        let scanner = FirewallScanner::new_scoped(FirewallConfig::default());
-        sanitize_response(&mut response, &scanner);
-        assert!(!response.to_string().contains(secret));
-        assert!(response.to_string().contains("[REDACTED:gh_pat]"));
-    }
-
-    #[test]
-    fn streaming_dlp_rebuilds_structured_frames_and_rejects_malformed_data() {
-        let secret = "gho_abcdefghijklmnopqrstuvwxyz0123456789";
-        let frame = serde_json::json!({
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{ "function": { "arguments": secret } }]
-                }
-            }]
-        });
-        let raw = format!("data: {frame}\n\ndata: [DONE]\n\n");
-        let scanner = FirewallScanner::new_scoped(FirewallConfig::default());
-        let (rewritten, assembled, _) =
-            rewrite_sse_for_dlp(&raw, &scanner, &FirewallPolicy::WarnAndContinue)
-                .expect("valid SSE JSON should be rebuilt");
-        assert!(!rewritten.contains(secret));
-        assert!(!assembled.contains(secret));
-        assert!(rewritten.contains("[REDACTED:gh_pat]"));
-
-        assert!(rewrite_sse_for_dlp(
-            "data: {not-json}\n\n",
-            &scanner,
-            &FirewallPolicy::WarnAndContinue,
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn modality_governance_uses_final_model_guardrails_and_regions() {
-        let state = AppState::new_for_test_default();
-        let mut ctx = test_support::plain_request_context();
-        ctx.resolved_policy = Some(crate::policy::EffectivePolicy {
-            approved_models: vec!["allowed-model".into()],
-            locked_guardrails: vec!["secrets".into()],
-            allowed_regions: vec!["global".into()],
-            ..Default::default()
-        });
-
-        assert!(inference_governance::authorize_model(&state, &ctx, "allowed-model").is_ok());
-        assert!(inference_governance::authorize_model(&state, &ctx, "blocked-model").is_err());
-        assert!(inference_governance::enforce_locked_guardrails(
-            &state,
-            &ctx,
-            "send sk-abcdefghijklmnopqrstuvwx"
-        )
-        .is_err());
-        assert!(inference_governance::authorize_provider_region(
-            &state,
-            &ctx,
-            &ProviderId::from("openai")
-        )
-        .is_ok());
-        assert!(inference_governance::authorize_provider_region(
-            &state,
-            &ctx,
-            &ProviderId::from("unregistered-plugin")
-        )
-        .is_err());
-    }
-
-    // ── WASM policy tier: end-to-end pipeline enforcement (gateway plugin plane) ──
-    //
-    // Proves the full vertical slice: a manifest declares a `Wasm` policy evaluator
-    // → the pipeline loads it sandboxed → `apply_inline_input_evaluators` calls it →
-    // the verdict is enforced via the SAME Block/Sanitize/Warn machinery → a
-    // misbehaving module FAILS CLOSED (blocks) even when the binding action is Warn
-    // (threat-model item F: a trap must never be a silent bypass).
-
-    /// Always-DENY guest (decision byte 1, reason "denied").
-    const E2E_DENY_WAT: &str = r#"
-      (module
-        (memory (export "memory") 1)
-        (data (i32.const 2100) "\01denied")
-        (func (export "ryu_alloc") (param i32) (result i32) i32.const 1024)
-        (func (export "ryu_policy_eval") (param i32) (param i32) (result i64)
-          (i64.const 0x0000_0834_0000_0007)))
-    "#;
-
-    /// Always-ALLOW guest (decision byte 0).
-    const E2E_ALLOW_WAT: &str = r#"
-      (module
-        (memory (export "memory") 1)
-        (data (i32.const 2048) "\00")
-        (func (export "ryu_alloc") (param i32) (result i32) i32.const 1024)
-        (func (export "ryu_policy_eval") (param i32) (param i32) (result i64)
-          (i64.const 0x0000_0800_0000_0001)))
-    "#;
-
-    /// Infinite-loop guest — trapped by fuel/epoch, must fail closed.
-    const E2E_LOOP_WAT: &str = r#"
-      (module
-        (memory (export "memory") 1)
-        (func (export "ryu_alloc") (param i32) (result i32) i32.const 1024)
-        (func (export "ryu_policy_eval") (param i32) (param i32) (result i64)
-          (loop $l (br $l)) (i64.const 0)))
-    "#;
-
-    fn wasm_b64(wat: &str) -> String {
-        use base64::Engine as _;
-        base64::engine::general_purpose::STANDARD.encode(wat::parse_str(wat).expect("wat compiles"))
-    }
-
-    /// A custom input-target WASM policy evaluator declaration.
-    fn wasm_evaluator(id: &str, wat: &str, fail_open: bool) -> Evaluator {
-        Evaluator {
-            id: id.to_string(),
-            name: format!("wasm {id}"),
-            description: "e2e wasm policy".to_string(),
-            category: crate::evaluators::EvaluatorCategory::Security,
-            target: EvaluatorTarget::Input,
-            capabilities: crate::evaluators::Capabilities {
-                inline: true,
-                offline: false,
-            },
-            impl_: EvaluatorImpl::Wasm {
-                module_base64: wasm_b64(wat),
-                fail_open,
-            },
-            inline: Some(crate::evaluators::InlineConfig {
-                action: FirewallPolicy::Block,
-            }),
-            offline: None,
-            builtin: false,
-            enforced: true,
-            higher_is_better: true,
-        }
-    }
-
-    fn wasm_state(evaluator: Evaluator) -> Arc<AppState> {
-        let config = crate::config::GatewayConfig {
-            custom_evaluators: vec![evaluator],
-            ..crate::config::GatewayConfig::default()
-        };
-        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit");
-        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
-        Arc::new(AppState::new_for_test(config, audit, evals))
-    }
-
-    fn wasm_ctx() -> RequestContext {
-        signal_ctx(None, false, false)
-    }
-
-    /// Run the input inline-evaluator stage with one enabled binding for `eval_id`
-    /// at `action`, returning the pipeline result.
-    async fn run_input_wasm(
-        state: &Arc<AppState>,
-        eval_id: &str,
-        action: FirewallPolicy,
-    ) -> Result<Option<PolicyAlert>, GatewayError> {
-        let scanner = scanner_with_bindings(vec![binding(eval_id, true, Some(action))]);
-        let ctx = wasm_ctx();
-        let mut body = serde_json::json!({ "model": "gpt-4o", "messages": [] });
-        apply_inline_input_evaluators(state, &ctx, &mut body, &scanner, "hello there").await
-    }
-
-    #[tokio::test]
-    async fn e2e_wasm_deny_blocks_request() {
-        let state = wasm_state(wasm_evaluator("wasm_deny", E2E_DENY_WAT, false));
-        let res = run_input_wasm(&state, "wasm_deny", FirewallPolicy::Block).await;
-        assert!(
-            matches!(res, Err(GatewayError::FirewallBlocked(_, _))),
-            "a wasm DENY verdict bound to Block must 403, got {res:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn e2e_wasm_allow_passes_request() {
-        let state = wasm_state(wasm_evaluator("wasm_allow", E2E_ALLOW_WAT, false));
-        let res = run_input_wasm(&state, "wasm_allow", FirewallPolicy::Block).await;
-        assert!(
-            res.is_ok(),
-            "a wasm ALLOW verdict must let the turn proceed, got {res:?}"
-        );
-    }
-
-    /// The critical fail-direction control: a trapping guest with `fail_open = false`
-    /// BLOCKS even when the binding's action is only `WarnAndContinue`. This is the
-    /// exact bypass the threat model (item F) calls out — a misconfigured Warn action
-    /// must NOT let a failed security policy through.
-    #[tokio::test]
-    async fn e2e_wasm_trap_fails_closed_even_when_action_is_warn() {
-        let state = wasm_state(wasm_evaluator("wasm_loop", E2E_LOOP_WAT, false));
-        let res = run_input_wasm(&state, "wasm_loop", FirewallPolicy::WarnAndContinue).await;
-        assert!(
-            matches!(res, Err(GatewayError::FirewallBlocked(_, _))),
-            "a trapping fail-closed wasm policy must BLOCK regardless of Warn action, got {res:?}"
-        );
-    }
-
-    /// An enrichment-style plugin may DECLARE `fail_open = true`; a trap then skips
-    /// (allows) instead of blocking — the declared, non-default direction.
-    #[tokio::test]
-    async fn e2e_wasm_trap_fail_open_allows() {
-        let state = wasm_state(wasm_evaluator("wasm_loop_open", E2E_LOOP_WAT, true));
-        let res = run_input_wasm(&state, "wasm_loop_open", FirewallPolicy::Block).await;
-        assert!(
-            res.is_ok(),
-            "a fail_open=true wasm policy must ALLOW on trap (declared direction), got {res:?}"
-        );
-    }
-
-    /// Output-target symmetry: the same host + verdict + fail-direction machinery
-    /// enforces on the non-streaming RESPONSE path (`apply_inline_output_evaluators`
-    /// resolves its scanner from `ctx`, so the binding is seeded into the node
-    /// firewall config the resolver reads). A wasm policy declared `target: Output`
-    /// and bound Block denies the assembled response.
-    #[tokio::test]
-    async fn e2e_wasm_output_target_deny_blocks_response() {
-        let mut ev = wasm_evaluator("wasm_out_deny", E2E_DENY_WAT, false);
-        ev.target = EvaluatorTarget::Output;
-        let config = crate::config::GatewayConfig {
-            custom_evaluators: vec![ev],
-            firewall: FirewallConfig {
-                evaluators: vec![binding("wasm_out_deny", true, Some(FirewallPolicy::Block))],
-                ..FirewallConfig::default()
-            },
-            ..crate::config::GatewayConfig::default()
-        };
-        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit");
-        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
-        let state = Arc::new(AppState::new_for_test(config, audit, evals));
-
-        let ctx = wasm_ctx();
-        let mut response = serde_json::json!({
-            "model": "gpt-4o",
-            "choices": [{ "message": { "role": "assistant", "content": "some reply" } }]
-        });
-        let res = apply_inline_output_evaluators(&state, &ctx, &mut response).await;
-        assert!(
-            matches!(res, Err(GatewayError::FirewallBlocked(_, _))),
-            "an output-target wasm DENY bound to Block must block the response, got {res:?}"
-        );
-    }
-}
-
-#[cfg(test)]
-mod authenticate_tests {
-    use super::*;
-    use crate::config::{ApiKeyConfig, AuthConfig, GatewayConfig};
-    use crate::state::AppState;
-
-    fn state_with_auth(auth: AuthConfig) -> AppState {
-        let config = GatewayConfig {
-            auth,
-            ..GatewayConfig::default()
-        };
-        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
-        AppState::new_for_test(config, audit, evals)
-    }
-
-    fn api_key(key: &str, name: &str, trusted_forwarder: bool) -> ApiKeyConfig {
-        ApiKeyConfig {
-            key: key.to_string(),
-            name: name.to_string(),
-            org_id: Some("org-acme".to_string()),
-            team_id: Some("team-1".to_string()),
-            channel_id: None,
-            project_id: Some("proj-1".to_string()),
-            requests_per_minute: None,
-            tokens_per_minute: None,
-            token_budget_total: None,
-            downgrade_to: None,
-            trusted_forwarder,
-        }
-    }
-
-    // ─── no-auth mode ────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn no_auth_mode_makes_unknown_callers_anonymous() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: false,
-            api_keys: vec![],
-            master_key: None,
-        });
-        let ctx = authenticate(&state, AuthInputs::with_key(Some("whatever")))
-            .await
-            .expect("no-auth accepts any key");
-        assert!(!ctx.is_master_key);
-        assert_eq!(ctx.api_key, "whatever");
-        assert!(ctx.org_id.is_none());
-    }
-
-    #[tokio::test]
-    async fn no_auth_mode_with_no_key_labels_api_key_anonymous() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: false,
-            api_keys: vec![],
-            master_key: None,
-        });
-        let ctx = authenticate(&state, AuthInputs::with_key(None))
-            .await
-            .expect("no-auth accepts missing key");
-        assert_eq!(ctx.api_key, "anonymous");
-        assert!(!ctx.is_master_key);
-    }
-
-    #[tokio::test]
-    async fn no_auth_mode_still_recognizes_provisioned_master_key() {
-        // A provisioned master key stays authoritative even with require_auth off.
-        let state = state_with_auth(AuthConfig {
-            require_auth: false,
-            api_keys: vec![],
-            master_key: Some("master-secret".to_string()),
-        });
-        let ctx = authenticate(&state, AuthInputs::with_key(Some("master-secret")))
-            .await
-            .expect("master key recognized");
-        assert!(ctx.is_master_key);
-        assert_eq!(ctx.user_name.as_deref(), Some("master"));
-    }
-
-    #[tokio::test]
-    async fn no_auth_master_key_honors_bearer_prefix() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: false,
-            api_keys: vec![],
-            master_key: Some("master-secret".to_string()),
-        });
-        let ctx = authenticate(&state, AuthInputs::with_key(Some("Bearer master-secret")))
-            .await
-            .expect("bearer-prefixed master key recognized");
-        assert!(ctx.is_master_key);
-    }
-
-    // ─── require_auth mode ───────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn require_auth_rejects_missing_key() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: true,
-            api_keys: vec![],
-            master_key: None,
-        });
-        let err = authenticate(&state, AuthInputs::with_key(None))
-            .await
-            .expect_err("missing key must be rejected");
-        assert!(matches!(err, GatewayError::Unauthorized(_)));
-    }
-
-    #[tokio::test]
-    async fn require_auth_rejects_unknown_key() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: true,
-            api_keys: vec![api_key("sk-known", "known", false)],
-            master_key: None,
-        });
-        let err = authenticate(&state, AuthInputs::with_key(Some("sk-unknown")))
-            .await
-            .expect_err("unknown key must be rejected");
-        assert!(matches!(err, GatewayError::Unauthorized(_)));
-    }
-
-    #[tokio::test]
-    async fn require_auth_matches_master_key() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: true,
-            api_keys: vec![],
-            master_key: Some("master-secret".to_string()),
-        });
-        let ctx = authenticate(&state, AuthInputs::with_key(Some("Bearer master-secret")))
-            .await
-            .expect("master key accepted");
-        assert!(ctx.is_master_key);
-    }
-
-    #[tokio::test]
-    async fn static_key_match_populates_org_team_project() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: true,
-            api_keys: vec![api_key("sk-acme", "acme-key", false)],
-            master_key: None,
-        });
-        let ctx = authenticate(&state, AuthInputs::with_key(Some("sk-acme")))
-            .await
-            .expect("static key accepted");
-        assert!(!ctx.is_master_key);
-        assert_eq!(ctx.org_id.as_deref(), Some("org-acme"));
-        assert_eq!(ctx.team_id.as_deref(), Some("team-1"));
-        assert_eq!(ctx.project_id.as_deref(), Some("proj-1"));
-        assert_eq!(ctx.user_name.as_deref(), Some("acme-key"));
-        assert!(ctx.key_config.is_some());
-    }
-
-    #[tokio::test]
-    async fn untrusted_key_ignores_forwarded_identity_headers() {
-        // trusted_forwarder = false => the client-supplied x-ryu-user-id /
-        // x-ryu-agent-id are ignored and budget identity binds to the key name,
-        // so a caller cannot spoof or rotate identity to evade its quota.
-        let state = state_with_auth(AuthConfig {
-            require_auth: true,
-            api_keys: vec![api_key("sk-acme", "acme-key", false)],
-            master_key: None,
-        });
-        let inputs = AuthInputs {
-            raw_api_key: Some("sk-acme"),
-            user_id: Some("spoofed-user".to_string()),
-            agent_id: Some("spoofed-agent".to_string()),
-            ..Default::default()
-        };
-        let ctx = authenticate(&state, inputs).await.expect("accepted");
-        assert_eq!(
-            ctx.user_id.as_deref(),
-            Some("acme-key"),
-            "budget identity must bind to the key name, not the spoofed header"
-        );
-        assert!(ctx.agent_id.is_none());
-    }
-
-    #[tokio::test]
-    async fn trusted_forwarder_honors_forwarded_identity_headers() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: true,
-            api_keys: vec![api_key("sk-core", "ryu-core", true)],
-            master_key: None,
-        });
-        let inputs = AuthInputs {
-            raw_api_key: Some("sk-core"),
-            user_id: Some("real-user".to_string()),
-            agent_id: Some("real-agent".to_string()),
-            ..Default::default()
-        };
-        let ctx = authenticate(&state, inputs).await.expect("accepted");
-        assert_eq!(ctx.user_id.as_deref(), Some("real-user"));
-        assert_eq!(ctx.agent_id.as_deref(), Some("real-agent"));
-    }
-
-    #[tokio::test]
-    async fn rgw_token_without_resolve_cache_is_hard_rejected() {
-        // An rgw_-shaped bearer only reaches the dynamic path when a resolve cache
-        // is configured; the test state has none, so it must NOT fall open into
-        // anonymous — it is a hard 401.
-        let state = state_with_auth(AuthConfig {
-            require_auth: true,
-            api_keys: vec![],
-            master_key: None,
-        });
-        let err = authenticate(&state, AuthInputs::with_key(Some("rgw_sometoken")))
-            .await
-            .expect_err("rgw_ token with no resolve cache must be rejected");
-        assert!(matches!(err, GatewayError::Unauthorized(_)));
-    }
-
-    #[tokio::test]
-    async fn static_key_match_strips_bearer_prefix() {
-        let state = state_with_auth(AuthConfig {
-            require_auth: true,
-            api_keys: vec![api_key("sk-acme", "acme-key", false)],
-            master_key: None,
-        });
-        let ctx = authenticate(&state, AuthInputs::with_key(Some("Bearer sk-acme")))
-            .await
-            .expect("bearer-prefixed static key accepted");
-        assert_eq!(ctx.user_name.as_deref(), Some("acme-key"));
-    }
-
-    #[test]
-    fn ct_eq_is_functionally_equivalent_to_str_eq() {
-        // Constant-time compare returns the exact same boolean as `==`: the only
-        // difference is the removed per-byte timing signal (see `ct_eq` doc comment).
-        assert!(ct_eq("sk-abc", "sk-abc"));
-        // Single trailing-byte difference (the case a naive `==` would leak).
-        assert!(!ct_eq("sk-abc", "sk-abd"));
-        // Length mismatch short-circuits to false (key length is not secret).
-        assert!(!ct_eq("sk-ab", "sk-abc"));
-        // Empty vs empty is equal.
-        assert!(ct_eq("", ""));
-    }
-}
+mod authenticate_tests;
 
 /// End-to-end fallback / cost-tier demotion tests driven through the full
 /// `run()` pipeline with scripted providers. These pin the request-path behavior
@@ -9007,1534 +5180,46 @@ mod authenticate_tests {
 /// trips the circuit and still fails over, an already-open circuit is skipped,
 /// and chain exhaustion surfaces the typed `AllProvidersUnavailable` error.
 #[cfg(test)]
-mod fallback_tests {
-    use super::{run, DegradedMode, RequestContext};
-    use crate::audit::AuditLogger;
-    use crate::config::{
-        AuditConfig, CircuitBreakerConfig, EvalsConfig, FirewallConfig, GatewayConfig, ProviderId,
-        RoutingConfig,
-    };
-    use crate::error::GatewayError;
-    use crate::providers::Provider;
-    use crate::state::AppState;
-    use ryu_gw_providers::ProviderError;
-    use serde_json::{json, Value};
-    use std::pin::Pin;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+mod fallback_tests;
 
-    /// What a scripted provider does on `complete()`.
-    #[derive(Clone, Copy)]
-    enum Mode {
-        /// Return a valid completion.
-        Ok,
-        /// Return a 429 → `ProviderError::RateLimited` (capacity signal, demote).
-        RateLimited,
-        /// Return a 402 account/payment condition (demote without provider fault).
-        PaymentRequired,
-        /// Return a generic provider failure (fault, trip circuit + fail over).
-        Fail,
-    }
-
-    struct StubProvider {
-        id: &'static str,
-        mode: Mode,
-        calls: Arc<AtomicUsize>,
-    }
-
-    impl StubProvider {
-        fn new(id: &'static str, mode: Mode) -> (Arc<Self>, Arc<AtomicUsize>) {
-            let calls = Arc::new(AtomicUsize::new(0));
-            let p = Arc::new(Self {
-                id,
-                mode,
-                calls: Arc::clone(&calls),
-            });
-            (p, calls)
+fn capture_pool_relay_stream(
+    body: Body,
+    state: Arc<AppState>,
+    ctx: RequestContext,
+    route: crate::provider_pools::SelectedPoolRoute,
+    request: Value,
+) -> Body {
+    use futures_util::StreamExt;
+    let stream = async_stream::stream! {
+        let mut source=body.into_data_stream();
+        let mut captured=Vec::new();
+        let mut valid=true;
+        while let Some(chunk)=source.next().await {
+            if let Ok(bytes)=&chunk {
+                if valid && captured.len().saturating_add(bytes.len())<=262_144 { captured.extend_from_slice(bytes); }
+                else { valid=false;captured.clear(); }
+            } else { valid=false; }
+            yield chunk;
         }
-    }
-
-    impl Provider for StubProvider {
-        fn name(&self) -> &'static str {
-            self.id
-        }
-
-        fn complete<'a>(
-            &'a self,
-            _model: &'a str,
-            _body: &'a Value,
-        ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, ProviderError>> + Send + 'a>>
-        {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let mode = self.mode;
-            let id = self.id;
-            Box::pin(async move {
-                match mode {
-                    Mode::Ok => Ok(json!({
-                        "id": "chatcmpl-stub",
-                        "object": "chat.completion",
-                        "model": "stub-1",
-                        "choices": [{
-                            "index": 0,
-                            "message": {"role": "assistant", "content": "pong"},
-                            "finish_reason": "stop"
-                        }],
-                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-                    })),
-                    Mode::RateLimited => Err(ProviderError::RateLimited {
-                        provider: id.to_string(),
-                        retry_after: Some(30),
-                        reset_at: None,
-                    }),
-                    Mode::PaymentRequired => Err(ProviderError::PaymentRequired {
-                        provider: id.to_string(),
-                        message: "no credits".to_owned(),
-                    }),
-                    Mode::Fail => Err(ProviderError::Provider(format!("{id} boom"))),
-                }
-            })
-        }
-
-        fn complete_stream<'a>(
-            &'a self,
-            _model: &'a str,
-            _body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<axum::body::Body, ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            let mode = self.mode;
-            let id = self.id;
-            Box::pin(async move {
-                match mode {
-                    Mode::Ok => {
-                        // A minimal but well-formed SSE stream with a terminal usage
-                        // frame + [DONE], so the stream observer has real counts.
-                        let sse = concat!(
-                            "data: {\"choices\":[{\"delta\":{\"content\":\"pong\"}}]}\n\n",
-                            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n",
-                            "data: [DONE]\n\n",
-                        );
-                        Ok(axum::body::Body::from(sse))
+        if valid {
+            if let Ok(text)=std::str::from_utf8(&captured) {
+                let mut answer=String::new();let mut done=false;let mut failed=false;
+                for line in text.lines().filter_map(|line|line.strip_prefix("data:").map(str::trim)) {
+                    if line=="[DONE]" { done=true;continue; }
+                    if let Ok(value)=serde_json::from_str::<Value>(line) {
+                        failed|=value.get("error").is_some();
+                        if let Some(content)=value.pointer("/choices/0/delta/content").and_then(Value::as_str) { answer.push_str(content); }
                     }
-                    Mode::RateLimited => Err(ProviderError::RateLimited {
-                        provider: id.to_string(),
-                        retry_after: None,
-                        reset_at: None,
-                    }),
-                    Mode::PaymentRequired => Err(ProviderError::PaymentRequired {
-                        provider: id.to_string(),
-                        message: "no credits".to_owned(),
-                    }),
-                    Mode::Fail => Err(ProviderError::Provider(format!("{id} stream boom"))),
                 }
-            })
-        }
-    }
-
-    /// Build a state whose routing pins `primary` first, then `secondary`, with the
-    /// firewall + circuit breaker configured for a deterministic test.
-    fn chain_state(threshold: u32) -> AppState {
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![ProviderId::from("primary"), ProviderId::from("secondary")],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            circuit_breaker: CircuitBreakerConfig {
-                enabled: true,
-                failure_threshold: threshold,
-                reset_timeout_secs: 30,
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        AppState::new_for_test(config, audit, evals)
-    }
-
-    fn plain_ctx() -> RequestContext {
-        RequestContext {
-            request_id: "fallback-req".to_string(),
-            api_key: "sk-test".to_string(),
-            owner_binding: ryu_gw_credentials::fingerprint("sk-test"),
-            is_master_key: false,
-            org_id: None,
-            team_id: None,
-            project_id: None,
-            user_name: None,
-            user_id: None,
-            agent_id: None,
-            key_config: None,
-            skill_ids: None,
-            tool_actions: None,
-            tools_header_present: false,
-            slot_provider: None,
-            slot_model: None,
-            session_id: None,
-            feature: None,
-            companion_source: false,
-            tool_search_requested: false,
-            priority: crate::concurrency::Priority::Interactive,
-            tool_profile: None,
-            raw_tools: false,
-            managed_inference: false,
-            remaining_budget_micro_usd: None,
-            unrestricted_budget_micro_usd: None,
-            pool_budgets_micro_usd: std::collections::HashMap::new(),
-            resolved_policy: None,
-            prompt_cache_mode: None,
-            prompt_cache_ttl: None,
-            node_routing: None,
-        }
-    }
-
-    fn ping_body() -> Value {
-        json!({ "model": "anything", "messages": [{"role": "user", "content": "ping"}] })
-    }
-
-    // ── node routing preferences, end to end through `run()` ─────────────────
-
-    /// `chain_state` with a third provider in the chain, so a preference has
-    /// something to actually reorder.
-    fn three_chain_state() -> AppState {
-        // Built from config, not mutated afterwards: `AppState::new_for_test`
-        // constructs the router registry from `config.routing`, so a chain widened
-        // after the fact would never reach the router.
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![
-                    ProviderId::from("primary"),
-                    ProviderId::from("secondary"),
-                    ProviderId::from("tertiary"),
-                ],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            circuit_breaker: CircuitBreakerConfig {
-                enabled: true,
-                failure_threshold: 10,
-                reset_timeout_secs: 30,
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        AppState::new_for_test(config, audit, evals)
-    }
-
-    fn prefs(fallback: &[&str]) -> super::node_routing::NodeRoutingPrefs {
-        super::node_routing::NodeRoutingPrefs {
-            fallback: fallback.iter().map(|s| (*s).to_string()).collect(),
-            firewall: None,
-        }
-    }
-
-    /// A node preference REORDERS the fleet's chain: with the primary demoting,
-    /// the node's preferred fallback serves before the fleet's default second.
-    #[tokio::test]
-    async fn a_node_preference_reorders_the_fleet_fallback_chain() {
-        let mut state = three_chain_state();
-        let (primary, _) = StubProvider::new("primary", Mode::RateLimited);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        let (tertiary, tertiary_calls) = StubProvider::new("tertiary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        state.providers.register(tertiary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let mut ctx = plain_ctx();
-        ctx.node_routing = Some(prefs(&["tertiary"]));
-
-        let out = run(Arc::clone(&state), ctx, ping_body())
-            .await
-            .expect("the preferred fallback must serve");
-
-        assert_eq!(out.provider_used, "tertiary");
-        assert_eq!(
-            secondary_calls.load(Ordering::SeqCst),
-            0,
-            "the fleet's default second was reordered behind the node's preference"
-        );
-        assert_eq!(tertiary_calls.load(Ordering::SeqCst), 1);
-    }
-
-    /// THE acceptance criterion: a preference may narrow and reorder the org's
-    /// envelope, never widen it. A provider the fleet's own chain does not
-    /// contain is never dispatched to, even when it is registered and healthy —
-    /// because `preflight_credit_gate` only ever gated the PRIMARY's pool.
-    #[tokio::test]
-    async fn a_node_preference_can_never_add_a_provider_to_the_chain() {
-        let mut state = chain_state(10);
-        let (primary, _) = StubProvider::new("primary", Mode::RateLimited);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        // Registered and perfectly healthy, but NOT in the fleet's fallback chain.
-        let (offchain, offchain_calls) = StubProvider::new("tertiary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        state.providers.register(offchain as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let mut ctx = plain_ctx();
-        ctx.node_routing = Some(prefs(&["tertiary"]));
-
-        let out = run(Arc::clone(&state), ctx, ping_body())
-            .await
-            .expect("the fleet's own chain still serves the turn");
-
-        assert_eq!(out.provider_used, "secondary");
-        assert_eq!(
-            offchain_calls.load(Ordering::SeqCst),
-            0,
-            "a preference must not route out of a credit pool nothing gated"
-        );
-        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
-    }
-
-    /// A locked node ignores the preference wholesale — the `[node_routing]`
-    /// lever, mirroring `[prompt_cache].allow_request_override`.
-    #[tokio::test]
-    async fn a_locked_node_ignores_the_preference_end_to_end() {
-        let mut state = three_chain_state();
-        state.config.node_routing.allow_request_override = false;
-        let (primary, _) = StubProvider::new("primary", Mode::RateLimited);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        let (tertiary, tertiary_calls) = StubProvider::new("tertiary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        state.providers.register(tertiary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let mut ctx = plain_ctx();
-        ctx.node_routing = Some(prefs(&["tertiary"]));
-
-        let out = run(Arc::clone(&state), ctx, ping_body())
-            .await
-            .expect("the fleet order stands");
-
-        assert_eq!(out.provider_used, "secondary");
-        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(tertiary_calls.load(Ordering::SeqCst), 0);
-    }
-
-    /// The polarity of the credit gate `clamped_fallback_chain` hands the clamp
-    /// (`preflight_credit_gate(..).is_none()` — `Some(err)` means REJECTED) is
-    /// expressed in exactly ONE place in production. A unit test that writes its
-    /// own closure cannot pin it: inverting the adapter leaves such a test green
-    /// while every reorder starts promoting providers the org cannot pay for.
-    ///
-    /// So this drives the real thing through `run()`. The setup is the segregated
-    /// credit-pool case, which is also the only shape where the bug is reachable:
-    /// the org has grant money in the PRIMARY's pool (so `enforce_budget` admits
-    /// the request — it gates the primary's pool only) and nothing unrestricted,
-    /// so the preferred fallback in a DIFFERENT pool is unfunded and must not be
-    /// promoted ahead of the fleet's own next choice.
-    #[tokio::test]
-    async fn credit_gate_polarity_is_wired_correctly_end_to_end() {
-        // Real provider ids, because `pool_for_gateway_provider` is a fixed table:
-        // `cloudflare` → the "cloudflare" pool, `bedrock` → "bedrock". A made-up id
-        // is untagged and would never exercise pool segregation at all.
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("cloudflare"),
-                fallback_chain: vec![
-                    ProviderId::from("cloudflare"),
-                    ProviderId::from("secondary"),
-                    ProviderId::from("bedrock"),
-                ],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            circuit_breaker: CircuitBreakerConfig {
-                enabled: true,
-                failure_threshold: 10,
-                reset_timeout_secs: 30,
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-
-        let (primary, _) = StubProvider::new("cloudflare", Mode::RateLimited);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        let (bedrock, bedrock_calls) = StubProvider::new("bedrock", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        state.providers.register(bedrock as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let mut ctx = plain_ctx();
-        ctx.managed_inference = true;
-        // Total is positive (so the wallet is not simply empty), but ALL of it is
-        // pool-restricted to the primary's pool. Bedrock has nothing.
-        ctx.remaining_budget_micro_usd = Some(50_000);
-        ctx.unrestricted_budget_micro_usd = Some(0);
-        ctx.pool_budgets_micro_usd =
-            std::collections::HashMap::from([("cloudflare".to_string(), 50_000_i64)]);
-        ctx.node_routing = Some(prefs(&["bedrock"]));
-
-        let out = run(Arc::clone(&state), ctx, ping_body())
-            .await
-            .expect("the request is admitted on the primary's funded pool");
-
-        assert_eq!(
-            out.provider_used, "secondary",
-            "a preference must not promote a provider whose pool the org cannot pay for"
-        );
-        assert_eq!(bedrock_calls.load(Ordering::SeqCst), 0);
-        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
-    }
-
-    // ── slot-model allowlist bypass (pre-existing hole) ──────────────────────
-
-    /// `x-ryu-slot-chat-model` replaced the dispatched model AFTER the Policy
-    /// stage had only checked `body["model"]`, so an `rgw_` bearer could name an
-    /// approved model in the body and the real one in the slot headers and route
-    /// around the org's `approved_models`. The disallowed slot is now IGNORED —
-    /// the turn still runs, under a model the org did approve.
-    ///
-    /// The slot provider is set too, and that is not incidental: `route_modality`
-    /// in `ryu-gw-router` only consults `slot_model` inside the
-    /// `if let Some(provider) = slot_provider` arm, so the bypass needs BOTH
-    /// `x-ryu-slot-chat-provider` and `-model`. Verified against the router rather
-    /// than assumed from the pipeline's `slot_provider.is_some() ||
-    /// slot_model.is_some()` guard, which is looser than what actually routes.
-    #[tokio::test]
-    async fn a_slot_model_outside_the_org_allowlist_is_ignored_not_dispatched() {
-        let mut state = chain_state(10);
-        let (primary, _) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let mut ctx = plain_ctx();
-        ctx.resolved_policy = Some(crate::policy::EffectivePolicy {
-            approved_models: vec!["approved-model".into()],
-            ..Default::default()
-        });
-        ctx.slot_provider = Some(ProviderId::from("primary"));
-        ctx.slot_model = Some("forbidden-model".into());
-
-        let out = run(
-            Arc::clone(&state),
-            ctx,
-            json!({
-                "model": "approved-model",
-                "messages": [{"role": "user", "content": "ping"}]
-            }),
-        )
-        .await
-        .expect("the turn still succeeds under the approved model");
-
-        assert_ne!(
-            out.model_used, "forbidden-model",
-            "the client-supplied slot model bypassed the org's approved_models"
-        );
-        assert_eq!(out.model_used, "approved-model");
-    }
-
-    /// The other half: an ALLOWED slot model still wins, so the clamp did not
-    /// break per-agent slot pinning. And with no allowlist at all (every
-    /// non-allowlisted deployment) nothing changes.
-    #[tokio::test]
-    async fn an_allowed_slot_model_and_an_empty_allowlist_both_still_pin() {
-        let mut state = chain_state(10);
-        let (primary, _) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let mut ctx = plain_ctx();
-        ctx.resolved_policy = Some(crate::policy::EffectivePolicy {
-            approved_models: vec!["approved-model".into(), "slot-model".into()],
-            ..Default::default()
-        });
-        ctx.slot_provider = Some(ProviderId::from("primary"));
-        ctx.slot_model = Some("slot-model".into());
-        let out = run(
-            Arc::clone(&state),
-            ctx,
-            json!({"model": "approved-model", "messages": [{"role": "user", "content": "ping"}]}),
-        )
-        .await
-        .expect("an approved slot model dispatches");
-        assert_eq!(out.model_used, "slot-model");
-
-        let mut ctx = plain_ctx();
-        ctx.slot_provider = Some(ProviderId::from("primary"));
-        ctx.slot_model = Some("anything-at-all".into());
-        let out = run(Arc::clone(&state), ctx, ping_body())
-            .await
-            .expect("no allowlist ⇒ unchanged behaviour");
-        assert_eq!(out.model_used, "anything-at-all");
-    }
-
-    /// A rate-limited primary demotes to the next provider in the chain: the
-    /// secondary serves the turn, the response is flagged as a degraded fallback,
-    /// and — crucially — the primary's circuit is NOT tripped (a 429 is a capacity
-    /// signal, not a fault).
-    #[tokio::test]
-    async fn rate_limited_primary_demotes_to_secondary_without_tripping_circuit() {
-        let mut state = chain_state(1);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::RateLimited);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("secondary must serve after primary rate-limits");
-
-        assert_eq!(out.provider_used, "secondary");
-        assert_eq!(
-            out.degraded,
-            Some(DegradedMode::Fallback("secondary".into()))
-        );
-        assert_eq!(primary_calls.load(Ordering::SeqCst), 1, "primary was tried");
-        assert_eq!(
-            secondary_calls.load(Ordering::SeqCst),
-            1,
-            "secondary served"
-        );
-        // The 429 must NOT open the primary's circuit even with threshold=1.
-        assert!(
-            !state.circuit_breaker.is_open("primary"),
-            "a rate-limit is a capacity signal and must not trip the circuit"
-        );
-    }
-
-    #[tokio::test]
-    async fn payment_required_primary_demotes_without_tripping_circuit() {
-        let mut state = chain_state(1);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::PaymentRequired);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("secondary must serve after the selected account returns 402");
-
-        assert_eq!(out.provider_used, "secondary");
-        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
-        assert!(
-            !state.circuit_breaker.is_open("primary"),
-            "a payment condition belongs to the account, not provider health"
-        );
-    }
-
-    #[tokio::test]
-    async fn exhausted_chain_preserves_the_payment_required_reason() {
-        let mut state = chain_state(1);
-        let (primary, _) = StubProvider::new("primary", Mode::PaymentRequired);
-        let (secondary, _) = StubProvider::new("secondary", Mode::Fail);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
-            Err(error) => error,
-            Ok(_) => panic!("an exhausted fallback chain must fail"),
-        };
-        assert!(
-            matches!(err, GatewayError::ProviderPaymentRequired { .. }),
-            "the actionable 402 must survive a later generic fallback error: {err:?}"
-        );
-    }
-
-    /// A generic (non-429) primary failure trips the circuit breaker AND fails over
-    /// to the secondary. With `failure_threshold == 1` a single failure opens the
-    /// primary circuit.
-    #[tokio::test]
-    async fn generic_primary_failure_trips_circuit_and_fails_over() {
-        let mut state = chain_state(1);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::Fail);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("secondary must serve after primary faults");
-
-        assert_eq!(out.provider_used, "secondary");
-        assert_eq!(
-            out.degraded,
-            Some(DegradedMode::Fallback("secondary".into()))
-        );
-        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
-        // A fault DOES trip the circuit (threshold 1).
-        assert!(
-            state.circuit_breaker.is_open("primary"),
-            "a generic provider fault must open the primary's circuit"
-        );
-    }
-
-    /// An already-open primary circuit is skipped entirely (its `complete()` is
-    /// never called), and the request is served by the secondary as a fallback.
-    #[tokio::test]
-    async fn open_primary_circuit_is_skipped() {
-        let mut state = chain_state(1);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        // Force the primary circuit open before any request.
-        state.circuit_breaker.record_failure("primary");
-        assert!(state.circuit_breaker.is_open("primary"));
-        let state = Arc::new(state);
-
-        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("secondary serves when primary circuit is open");
-
-        assert_eq!(out.provider_used, "secondary");
-        assert_eq!(
-            out.degraded,
-            Some(DegradedMode::Fallback("secondary".into()))
-        );
-        assert_eq!(
-            primary_calls.load(Ordering::SeqCst),
-            0,
-            "an open circuit must skip the provider without calling it"
-        );
-        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
-    }
-
-    /// When every provider in the chain rate-limits, the whole chain is exhausted
-    /// and the typed `ProviderRateLimited` error surfaces (never a silent success).
-    #[tokio::test]
-    async fn all_providers_rate_limited_surfaces_typed_error() {
-        let mut state = chain_state(5);
-        let (primary, _) = StubProvider::new("primary", Mode::RateLimited);
-        let (secondary, _) = StubProvider::new("secondary", Mode::RateLimited);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
-            Err(e) => e,
-            Ok(_) => panic!("an exhausted chain must error, not succeed"),
-        };
-        // The last error was a rate-limit; it is preserved as the typed variant.
-        assert!(
-            matches!(err, GatewayError::ProviderRateLimited { .. }),
-            "exhausted-by-rate-limit must surface ProviderRateLimited, got {err:?}"
-        );
-    }
-
-    /// When a generic-fault chain is exhausted, the error is wrapped into the
-    /// stable `AllProvidersUnavailable` variant so clients get a consistent code.
-    #[tokio::test]
-    async fn all_providers_fault_surfaces_all_unavailable() {
-        let mut state = chain_state(5);
-        let (primary, _) = StubProvider::new("primary", Mode::Fail);
-        let (secondary, _) = StubProvider::new("secondary", Mode::Fail);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
-            Err(e) => e,
-            Ok(_) => panic!("an exhausted fault chain must error"),
-        };
-        assert!(
-            matches!(err, GatewayError::AllProvidersUnavailable(_)),
-            "exhausted-by-fault must wrap into AllProvidersUnavailable, got {err:?}"
-        );
-    }
-
-    /// The happy path: a healthy primary serves the turn and the response is NOT
-    /// flagged degraded (no fallback occurred).
-    #[tokio::test]
-    async fn healthy_primary_serves_without_degradation() {
-        let mut state = chain_state(5);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("healthy primary serves");
-
-        assert_eq!(out.provider_used, "primary");
-        assert_eq!(out.degraded, None, "no fallback ⇒ not degraded");
-        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            secondary_calls.load(Ordering::SeqCst),
-            0,
-            "secondary must not be touched when the primary succeeds"
-        );
-    }
-
-    /// A second identical request is served from the exact-match cache: the
-    /// provider is invoked once (the priming call), and the cached turn reports
-    /// `cache_hit`.
-    #[tokio::test]
-    async fn identical_request_is_served_from_cache_on_second_call() {
-        let mut state = chain_state(5);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        // Prime the cache.
-        let first = run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("first call");
-        assert!(!first.cache_hit, "the priming call is a miss");
-        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
-
-        // Identical body ⇒ exact-match hit; the provider is NOT called again.
-        let second = run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("second call served from cache");
-        assert!(second.cache_hit, "identical request must hit the cache");
-        assert_eq!(
-            primary_calls.load(Ordering::SeqCst),
-            1,
-            "a cache hit must not re-invoke the provider"
-        );
-    }
-
-    /// The firewall integration point: with the inbound scanner on and a `Block`
-    /// policy, a request carrying a detectable secret/PII is refused BEFORE any
-    /// provider is reached (`FirewallBlocked`, provider never called).
-    #[tokio::test]
-    async fn inbound_firewall_block_short_circuits_before_the_provider() {
-        use crate::config::FirewallPolicy;
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![ProviderId::from("primary")],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: true,
-                scan_inbound: true,
-                policy: FirewallPolicy::Block,
-                ..FirewallConfig::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        // A prompt carrying an email + an OpenAI-style key — the built-in scanner's
-        // canonical detection fixture.
-        let body = json!({
-            "model": "anything",
-            "messages": [{
-                "role": "user",
-                "content": "Contact user@example.com or use key sk-abcdefghijklmnopqrstu"
-            }]
-        });
-        let err = match run(Arc::clone(&state), plain_ctx(), body).await {
-            Err(e) => e,
-            Ok(_) => panic!("a Block-policy firewall must refuse the request"),
-        };
-        assert!(
-            matches!(err, GatewayError::FirewallBlocked(..)),
-            "expected FirewallBlocked, got {err:?}"
-        );
-        assert_eq!(
-            primary_calls.load(Ordering::SeqCst),
-            0,
-            "an inbound block must short-circuit before the provider is called"
-        );
-    }
-
-    /// Streaming happy path: a healthy primary serves the SSE stream directly, the
-    /// turn is not degraded, and the body drains to the provider's frames.
-    #[tokio::test]
-    async fn run_stream_serves_primary_without_degradation() {
-        use super::run_stream;
-        let mut state = chain_state(5);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let out = run_stream(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("primary streams");
-        assert_eq!(out.provider_used, "primary");
-        assert_eq!(out.degraded, None);
-        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
-
-        // Draining the SSE body yields the provider's frames.
-        let bytes = axum::body::to_bytes(out.body, usize::MAX)
-            .await
-            .expect("drain sse body");
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(
-            text.contains("pong"),
-            "stream carries the provider's content"
-        );
-        assert!(text.contains("[DONE]"), "stream is terminated");
-    }
-
-    /// Streaming fallback: a rate-limited primary demotes and the secondary streams,
-    /// with the turn flagged as a degraded fallback.
-    #[tokio::test]
-    async fn run_stream_demotes_rate_limited_primary_to_secondary() {
-        use super::run_stream;
-        let mut state = chain_state(5);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::RateLimited);
-        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let out = run_stream(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("secondary streams after primary rate-limits");
-        assert_eq!(out.provider_used, "secondary");
-        assert_eq!(
-            out.degraded,
-            Some(DegradedMode::Fallback("secondary".into()))
-        );
-        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
-        // The 429 on the stream path must not trip the primary's circuit either.
-        assert!(!state.circuit_breaker.is_open("primary"));
-
-        // Body still drains cleanly.
-        let bytes = axum::body::to_bytes(out.body, usize::MAX)
-            .await
-            .expect("drain sse body");
-        assert!(String::from_utf8_lossy(&bytes).contains("[DONE]"));
-    }
-
-    /// Streaming exhaustion: every provider faults, so `run_stream` surfaces the
-    /// wrapped `AllProvidersUnavailable` error rather than an empty stream.
-    #[tokio::test]
-    async fn run_stream_exhausted_chain_errors() {
-        use super::run_stream;
-        let mut state = chain_state(5);
-        let (primary, _) = StubProvider::new("primary", Mode::Fail);
-        let (secondary, _) = StubProvider::new("secondary", Mode::Fail);
-        state.providers.register(primary as Arc<dyn Provider>);
-        state.providers.register(secondary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let err = match run_stream(Arc::clone(&state), plain_ctx(), ping_body()).await {
-            Err(e) => e,
-            Ok(_) => panic!("an exhausted stream chain must error"),
-        };
-        assert!(matches!(err, GatewayError::AllProvidersUnavailable(_)));
-    }
-
-    /// The per-key request rate limiter gates the pipeline: with a 1-request/min
-    /// budget the second identical (uncached) request is refused with `RateLimited`
-    /// before the provider is reached.
-    #[tokio::test]
-    async fn per_key_request_rate_limit_rejects_the_second_call() {
-        use crate::config::RateLimitConfig;
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![ProviderId::from("primary")],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            rate_limit: RateLimitConfig {
-                enabled: true,
-                requests_per_minute: Some(1),
-                tokens_per_minute: None,
-                max_burst_per_second: 0,
-            },
-            // Disable the exact cache so the second call actually reaches the limiter
-            // rather than being served from cache.
-            cache: crate::config::CacheConfig {
-                enabled: false,
-                ..crate::config::CacheConfig::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-        let (primary, _) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        // First request is within budget.
-        run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("first request under the limit");
-        // Second request exceeds 1/min ⇒ RateLimited.
-        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
-            Err(e) => e,
-            Ok(_) => panic!("second request must be rate limited"),
-        };
-        assert!(matches!(err, GatewayError::RateLimited));
-    }
-
-    /// Smart routing (Keyword strategy, no network) rewrites the request's model
-    /// BEFORE provider routing: a rule whose description matches the prompt sends
-    /// the turn to the rule's target model, which then resolves to the default
-    /// provider as any hand-picked model would.
-    #[tokio::test]
-    async fn smart_routing_keyword_rewrites_the_model() {
-        use crate::config::{RouteStrategy, SmartRoutingConfig, SmartRule};
-        let mut routing = RoutingConfig {
-            default_provider: ProviderId::from("primary"),
-            fallback_chain: vec![ProviderId::from("primary")],
-            ..RoutingConfig::default()
-        };
-        routing.smart_routing = SmartRoutingConfig {
-            enabled: true,
-            strategy: RouteStrategy::Keyword,
-            rules: vec![SmartRule {
-                description: "ping".to_string(),
-                model: "claude-rewritten".to_string(),
-                weight: 1.0,
-            }],
-            ..Default::default()
-        };
-        let config = GatewayConfig {
-            routing,
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("smart-routed request serves");
-        // The model was rewritten by the matching keyword rule.
-        assert_eq!(out.model_used, "claude-rewritten");
-        // ...and still resolved to the default provider.
-        assert_eq!(out.provider_used, "primary");
-        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
-    }
-
-    /// Outbound firewall: a provider response carrying a secret is blocked on the
-    /// egress path when the policy is `Block`, so the leaked secret never reaches
-    /// the client (`FirewallBlocked`).
-    #[tokio::test]
-    async fn outbound_firewall_block_stops_a_leaked_secret_response() {
-        use crate::config::FirewallPolicy;
-
-        // A provider that leaks a secret in its completion content.
-        struct LeakyProvider;
-        impl Provider for LeakyProvider {
-            fn name(&self) -> &'static str {
-                "primary"
-            }
-            fn complete<'a>(
-                &'a self,
-                _model: &'a str,
-                _body: &'a serde_json::Value,
-            ) -> Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = Result<serde_json::Value, ryu_gw_providers::ProviderError>,
-                        > + Send
-                        + 'a,
-                >,
-            > {
-                Box::pin(async move {
-                    Ok(json!({
-                        "choices": [{
-                            "index": 0,
-                            "message": {"role": "assistant", "content": "here is a key sk-abcdefghijklmnopqrstu"},
-                            "finish_reason": "stop"
-                        }],
-                        "usage": {"prompt_tokens": 1, "completion_tokens": 5, "total_tokens": 6}
-                    }))
-                })
-            }
-            fn complete_stream<'a>(
-                &'a self,
-                _model: &'a str,
-                _body: &'a serde_json::Value,
-            ) -> Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = Result<axum::body::Body, ryu_gw_providers::ProviderError>,
-                        > + Send
-                        + 'a,
-                >,
-            > {
-                Box::pin(async move {
-                    Err(ryu_gw_providers::ProviderError::Provider(
-                        "no stream".into(),
-                    ))
-                })
+                if done && !failed && answer.len()<=16_384 {
+                    if let Some(session)=account_affinity(&ctx,&request) {
+                        let scoped=format!("{}:{}",auxiliary::scope(&state,&ctx),session);
+                        let user=request["messages"].as_array().and_then(|messages|messages.iter().rev().find(|message|message["role"]=="user")).and_then(|message|message["content"].as_str()).unwrap_or_default();
+                        provider_snapshot(&state,&ctx).provider_pools.record_relay(&route,&scoped,&json!({"choices":[{"message":{"role":"assistant","content":answer}}]}),user);
+                    }
+                }
             }
         }
-
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![ProviderId::from("primary")],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: true,
-                scan_inbound: false,
-                scan_outbound: true,
-                policy: FirewallPolicy::Block,
-                ..FirewallConfig::default()
-            },
-            cache: crate::config::CacheConfig {
-                enabled: false,
-                ..crate::config::CacheConfig::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-        state
-            .providers
-            .register(Arc::new(LeakyProvider) as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
-            Err(e) => e,
-            Ok(_) => panic!("a leaked-secret response must be blocked outbound"),
-        };
-        assert!(
-            matches!(err, GatewayError::FirewallBlocked(..)),
-            "expected outbound FirewallBlocked, got {err:?}"
-        );
-    }
-
-    // ── Budget / credit enforcement (money path) ──────────────────────────────
-
-    /// Build a state whose per-user budget for `u1` is `rule`, with a healthy
-    /// `primary` provider registered. Returns `(state, primary_call_counter)`.
-    fn budget_state(rule: crate::config::BudgetRule) -> (Arc<AppState>, Arc<AtomicUsize>) {
-        use std::collections::HashMap;
-        let mut users = HashMap::new();
-        users.insert("u1".to_string(), rule);
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![ProviderId::from("primary")],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            budgets: crate::config::BudgetConfig {
-                users,
-                ..Default::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-        let (primary, calls) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-        // Seed usage above the rule's limit so the very next request trips it.
-        state.with_budget(|b| b.record(Some("u1"), None, 1_000_000));
-        (state, calls)
-    }
-
-    fn u1_ctx() -> RequestContext {
-        let mut ctx = plain_ctx();
-        ctx.user_id = Some("u1".to_string());
-        ctx
-    }
-
-    /// Build a state whose per-agent budget for `agent-a` is `rule`, with a
-    /// healthy `primary` provider registered. Returns `(state, primary_call_counter)`.
-    fn agent_budget_state(rule: crate::config::BudgetRule) -> (Arc<AppState>, Arc<AtomicUsize>) {
-        use std::collections::HashMap;
-        let mut agents = HashMap::new();
-        agents.insert("agent-a".to_string(), rule);
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![ProviderId::from("primary")],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: false,
-                ..FirewallConfig::default()
-            },
-            budgets: crate::config::BudgetConfig {
-                agents,
-                ..Default::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-        let (primary, calls) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-        // Seed usage above the rule's limit so the very next request trips it.
-        state.with_budget(|b| b.record(None, Some("agent-a"), 1_000_000));
-        (state, calls)
-    }
-
-    #[tokio::test]
-    async fn scoped_inference_auth_binds_identity_and_enforces_agent_budget() {
-        use crate::config::{BudgetAction, BudgetRule};
-        let (state, calls) = agent_budget_state(BudgetRule {
-            limit: 1_000_000,
-            action: BudgetAction::Stop,
-            downgrade_to: None,
-            restrict_max_tokens: 256,
-            alert: crate::config::AlertTier::Silent,
-            include: crate::config::BudgetChargeInclusion::default(),
-        });
-        let signer = "gwcore_0123456789abcdef0123456789abcdef";
-        state.update_auth_config(vec![serde_json::from_value(serde_json::json!({
-            "key": signer, "name":"local-core", "trusted_forwarder":true,
-        }))
-        .unwrap()]);
-        let token = ryu_gw_credentials::InferenceScope {
-            agent_id: "agent-a".into(),
-            user_id: Some("user-a".into()),
-            session_id: Some("session-a".into()),
-            expires_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                + 3600,
-        }
-        .sign(signer)
-        .unwrap();
-        let bearer = format!("Bearer {token}");
-        let context = super::authenticate(&state, super::AuthInputs::with_key(Some(&bearer)))
-            .await
-            .unwrap();
-        assert_eq!(context.agent_id.as_deref(), Some("agent-a"));
-        assert_eq!(context.user_id.as_deref(), Some("user-a"));
-        assert_eq!(context.session_id.as_deref(), Some("session-a"));
-        assert!(!context.is_master_key);
-        assert!(!context
-            .key_config
-            .as_ref()
-            .is_some_and(|key| key.trusted_forwarder));
-        for (agent_id, user_id, session_id) in [
-            (Some("agent-b"), None, None),
-            (None, Some("user-b"), None),
-            (None, None, Some("session-b")),
-        ] {
-            let mut input = super::AuthInputs::with_key(Some(&bearer));
-            input.agent_id = agent_id.map(str::to_owned);
-            input.user_id = user_id.map(str::to_owned);
-            input.session_id = session_id.map(str::to_owned);
-            assert!(matches!(
-                super::authenticate(&state, input).await,
-                Err(GatewayError::Unauthorized(_))
-            ));
-        }
-        let tampered = format!("{token}0");
-        assert!(matches!(
-            super::authenticate(&state, super::AuthInputs::with_key(Some(&tampered))).await,
-            Err(GatewayError::Unauthorized(_))
-        ));
-        let result = run(Arc::clone(&state), context, ping_body()).await;
-        assert!(matches!(result, Err(GatewayError::BudgetExceeded(_))));
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            0,
-            "scoped agent budget must stop before provider dispatch"
-        );
-    }
-
-    fn agent_a_ctx() -> RequestContext {
-        let mut ctx = plain_ctx();
-        ctx.agent_id = Some("agent-a".to_string());
-        ctx
-    }
-
-    /// A `Stop` budget rule at/over its limit rejects the request with a hard
-    /// `BudgetExceeded` before the provider is reached.
-    #[tokio::test]
-    async fn budget_stop_rejects_over_limit_before_dispatch() {
-        use crate::config::{BudgetAction, BudgetRule};
-        let (state, calls) = budget_state(BudgetRule {
-            limit: 1_000_000,
-            action: BudgetAction::Stop,
-            downgrade_to: None,
-            restrict_max_tokens: 256,
-            alert: crate::config::AlertTier::Silent,
-            include: crate::config::BudgetChargeInclusion::default(),
-        });
-        let err = match run(Arc::clone(&state), u1_ctx(), ping_body()).await {
-            Err(e) => e,
-            Ok(_) => panic!("an over-limit Stop budget must reject"),
-        };
-        assert!(
-            matches!(err, GatewayError::BudgetExceeded(_)),
-            "expected BudgetExceeded, got {err:?}"
-        );
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            0,
-            "a hard budget stop must not reach the provider"
-        );
-    }
-
-    /// An agent-specific `Stop` budget rejects the matching agent before the
-    /// provider is reached.
-    #[tokio::test]
-    async fn agent_budget_stop_rejects_over_limit_before_dispatch() {
-        use crate::config::{BudgetAction, BudgetRule};
-        let (state, calls) = agent_budget_state(BudgetRule {
-            limit: 1_000_000,
-            action: BudgetAction::Stop,
-            downgrade_to: None,
-            restrict_max_tokens: 256,
-            alert: crate::config::AlertTier::Silent,
-            include: crate::config::BudgetChargeInclusion::default(),
-        });
-        let err = match run(Arc::clone(&state), agent_a_ctx(), ping_body()).await {
-            Err(e) => e,
-            Ok(_) => panic!("an over-limit agent Stop budget must reject"),
-        };
-        assert!(
-            matches!(err, GatewayError::BudgetExceeded(_)),
-            "expected BudgetExceeded, got {err:?}"
-        );
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            0,
-            "a hard agent budget stop must not reach the provider"
-        );
-    }
-
-    /// A `Downgrade` rule rewrites the request's model to the cheaper target and
-    /// still serves the turn.
-    #[tokio::test]
-    async fn budget_downgrade_rewrites_model_and_serves() {
-        use crate::config::{BudgetAction, BudgetRule};
-        let (state, calls) = budget_state(BudgetRule {
-            limit: 1_000_000,
-            action: BudgetAction::Downgrade,
-            downgrade_to: Some("cheap-model".to_string()),
-            restrict_max_tokens: 256,
-            alert: crate::config::AlertTier::Silent,
-            include: crate::config::BudgetChargeInclusion::default(),
-        });
-        let out = run(Arc::clone(&state), u1_ctx(), ping_body())
-            .await
-            .expect("downgrade still serves");
-        assert_eq!(out.model_used, "cheap-model", "the model was downgraded");
-        assert_eq!(out.provider_used, "primary");
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-    }
-
-    /// A `Restrict` rule serves the turn but stamps the Restrict decision on the
-    /// output (the request path strips tools + caps max_tokens).
-    #[tokio::test]
-    async fn budget_restrict_serves_with_a_restrict_decision() {
-        use crate::config::{BudgetAction, BudgetRule};
-        let (state, _calls) = budget_state(BudgetRule {
-            limit: 1_000_000,
-            action: BudgetAction::Restrict,
-            downgrade_to: None,
-            restrict_max_tokens: 128,
-            alert: crate::config::AlertTier::Silent,
-            include: crate::config::BudgetChargeInclusion::default(),
-        });
-        let out = run(Arc::clone(&state), u1_ctx(), ping_body())
-            .await
-            .expect("restrict still serves a minimal answer");
-        let budget = out.budget.expect("a budget decision is stamped");
-        assert_eq!(budget.action, BudgetAction::Restrict);
-    }
-
-    /// A `Notify` rule is non-blocking: it serves the turn and stamps the Notify
-    /// decision without altering the model.
-    #[tokio::test]
-    async fn budget_notify_is_non_blocking() {
-        use crate::config::{BudgetAction, BudgetRule};
-        let (state, calls) = budget_state(BudgetRule {
-            limit: 1_000_000,
-            action: BudgetAction::Notify,
-            downgrade_to: None,
-            restrict_max_tokens: 256,
-            alert: crate::config::AlertTier::Silent,
-            include: crate::config::BudgetChargeInclusion::default(),
-        });
-        let out = run(Arc::clone(&state), u1_ctx(), ping_body())
-            .await
-            .expect("notify never blocks");
-        assert_eq!(out.budget.expect("decision").action, BudgetAction::Notify);
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-    }
-
-    /// The pre-flight credit gate: a managed-inference tenant whose resolved wallet
-    /// balance is already zero is rejected with a hard `InsufficientCredits` (402)
-    /// before any provider is reached.
-    #[tokio::test]
-    async fn preflight_credit_gate_rejects_exhausted_managed_tenant() {
-        let mut state = chain_state(5);
-        let (primary, calls) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let mut ctx = plain_ctx();
-        ctx.org_id = Some("org-managed".to_string());
-        ctx.managed_inference = true;
-        ctx.remaining_budget_micro_usd = Some(0);
-
-        let err = match run(Arc::clone(&state), ctx, ping_body()).await {
-            Err(e) => e,
-            Ok(_) => panic!("an exhausted managed wallet must be rejected pre-flight"),
-        };
-        assert!(
-            matches!(err, GatewayError::InsufficientCredits),
-            "expected InsufficientCredits, got {err:?}"
-        );
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            0,
-            "the credit gate must short-circuit before dispatch"
-        );
-    }
-
-    /// The streaming outbound firewall (Block policy) buffers the upstream SSE,
-    /// scans the assembled text, and emits a blocked frame instead of the leaked
-    /// secret — so a secret never streams to the client.
-    #[tokio::test]
-    async fn run_stream_outbound_firewall_block_redacts_leaked_secret() {
-        use super::run_stream;
-        use crate::config::FirewallPolicy;
-
-        struct LeakyStream;
-        impl Provider for LeakyStream {
-            fn name(&self) -> &'static str {
-                "primary"
-            }
-            fn complete<'a>(
-                &'a self,
-                _model: &'a str,
-                _body: &'a serde_json::Value,
-            ) -> Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = Result<serde_json::Value, ryu_gw_providers::ProviderError>,
-                        > + Send
-                        + 'a,
-                >,
-            > {
-                Box::pin(
-                    async move { Err(ryu_gw_providers::ProviderError::Provider("n/a".into())) },
-                )
-            }
-            fn complete_stream<'a>(
-                &'a self,
-                _model: &'a str,
-                _body: &'a serde_json::Value,
-            ) -> Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = Result<axum::body::Body, ryu_gw_providers::ProviderError>,
-                        > + Send
-                        + 'a,
-                >,
-            > {
-                let sse = concat!(
-                    "data: {\"choices\":[{\"delta\":{\"content\":\"key sk-abcdefghijklmnopqrstu\"}}]}\n\n",
-                    "data: [DONE]\n\n",
-                );
-                Box::pin(async move { Ok(axum::body::Body::from(sse)) })
-            }
-        }
-
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![ProviderId::from("primary")],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: true,
-                scan_inbound: false,
-                scan_outbound: true,
-                policy: FirewallPolicy::Block,
-                ..FirewallConfig::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-        state
-            .providers
-            .register(Arc::new(LeakyStream) as Arc<dyn Provider>);
-        let state = Arc::new(state);
-
-        let out = run_stream(Arc::clone(&state), plain_ctx(), ping_body())
-            .await
-            .expect("stream is served (as a blocked frame)");
-        let bytes = axum::body::to_bytes(out.body, usize::MAX)
-            .await
-            .expect("drain sse body");
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(
-            !text.contains("sk-abcdefghijklmnopqrstu"),
-            "the outbound firewall must not let the secret stream through: {text}"
-        );
-    }
-
-    /// Build a state with the firewall on at `policy` (+ optional alert tier) and a
-    /// healthy `primary` provider. Exact cache disabled so each run re-scans.
-    fn firewall_state(
-        policy: crate::config::FirewallPolicy,
-        alert: crate::config::AlertTier,
-    ) -> (Arc<AppState>, Arc<AtomicUsize>) {
-        let config = GatewayConfig {
-            routing: RoutingConfig {
-                default_provider: ProviderId::from("primary"),
-                fallback_chain: vec![ProviderId::from("primary")],
-                ..RoutingConfig::default()
-            },
-            firewall: FirewallConfig {
-                enabled: true,
-                scan_inbound: true,
-                scan_outbound: false,
-                policy,
-                alert,
-                ..FirewallConfig::default()
-            },
-            cache: crate::config::CacheConfig {
-                enabled: false,
-                ..crate::config::CacheConfig::default()
-            },
-            ..GatewayConfig::default()
-        };
-        let audit = AuditLogger::new(&AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .expect("disabled audit logger");
-        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
-        let mut state = AppState::new_for_test(config, audit, evals);
-        let (primary, calls) = StubProvider::new("primary", Mode::Ok);
-        state.providers.register(primary as Arc<dyn Provider>);
-        (Arc::new(state), calls)
-    }
-
-    fn secret_body() -> serde_json::Value {
-        json!({
-            "model": "anything",
-            "messages": [{
-                "role": "user",
-                "content": "Contact user@example.com or use key sk-abcdefghijklmnopqrstu"
-            }]
-        })
-    }
-
-    /// A `Sanitize` inbound policy redacts the offending content in place and still
-    /// serves the turn (never blocks).
-    #[tokio::test]
-    async fn inbound_firewall_sanitize_serves_the_request() {
-        use crate::config::{AlertTier, FirewallPolicy};
-        let (state, calls) = firewall_state(FirewallPolicy::Sanitize, AlertTier::Silent);
-        let out = run(Arc::clone(&state), plain_ctx(), secret_body())
-            .await
-            .expect("sanitize never blocks");
-        assert_eq!(out.provider_used, "primary");
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "the sanitized request still reaches the provider"
-        );
-    }
-
-    /// A `WarnAndContinue` inbound policy at a `Warn` alert tier serves the turn and
-    /// stamps a firewall policy alert on the response (observable, non-blocking).
-    #[tokio::test]
-    async fn inbound_firewall_warn_stamps_alert_and_serves() {
-        use crate::config::{AlertTier, FirewallPolicy};
-        let (state, calls) = firewall_state(FirewallPolicy::WarnAndContinue, AlertTier::Warn);
-        let out = run(Arc::clone(&state), plain_ctx(), secret_body())
-            .await
-            .expect("warn-and-continue never blocks");
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert!(
-            out.policy_alert.is_some(),
-            "a warn-tier firewall match must stamp a policy alert on the response"
-        );
-    }
+    };
+    Body::from_stream(stream)
 }

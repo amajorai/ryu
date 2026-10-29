@@ -19,13 +19,15 @@ export default defineConfig({
 	clearScreen: false,
 	optimizeDeps: {
 		entries: [path.resolve(harnessDir, "mesh-auto-install-proof.html")],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		alias: { "@": desktopRoot },
 	},
 	server: {
 		host: "127.0.0.1",
-		port: 5199,
+		port: 5250,
 		strictPort: true,
 	},
 });

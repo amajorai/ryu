@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import { MemoryLibrary } from "../../src/components/memory/MemoryLibrary.tsx";
 import { MemoryTab } from "../../src/components/settings/MemoryTab.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
@@ -295,7 +296,7 @@ useNodeStore.setState({
 window.localStorage.setItem("ryu_long_term_memory", "true");
 document.documentElement.classList.add("dark");
 
-const response = (payload: unknown, status = 200) =>
+const response = <FixturePayload,>(payload: FixturePayload, status = 200) =>
 	new Response(JSON.stringify(payload), {
 		headers: { "Content-Type": "application/json" },
 		status,
@@ -314,9 +315,9 @@ window.fetch = async (input, init) => {
 	}
 	if (url.pathname === "/api/memory/settings") {
 		if (init?.method === "PUT") {
-			const body = JSON.parse(String(init.body)) as {
-				include_sensitive_topics?: boolean;
-			};
+			const body = z
+				.object({ include_sensitive_topics: z.boolean().optional() })
+				.parse(JSON.parse(String(init.body)));
 			return response({
 				include_sensitive_topics: body.include_sensitive_topics === true,
 			});
@@ -340,7 +341,7 @@ function Story() {
 		<div className="min-h-screen bg-background px-6 py-6 text-foreground">
 			<div className="mx-auto max-w-7xl">
 				<div className="mb-5">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Memory system
 					</p>
 					<h1 className="mt-1 font-semibold text-2xl">Typed memory graph</h1>

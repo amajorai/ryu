@@ -63,6 +63,9 @@ COPY . .
 # the artifacts land in the WORKSPACE root /src/target/release — NOT
 # apps/<app>/target/release, which is where this stage used to copy from and does not
 # exist, so the build failed at the `cp`. Same note as release.yml's staging step.
+# The public mirror ships this file WITHOUT the root Cargo.toml, so there each app
+# is its own root package; pinning CARGO_TARGET_DIR gives one output path in both
+# shapes.
 #
 # Core also needs its three shipped-but-not-default features: they are off in
 # `[features] default` to keep `cargo test`/`cargo check` lean, so a bare
@@ -70,11 +73,17 @@ COPY . .
 # inference and NO Silero VAD — each of which degrades silently at runtime. Mirrors
 # apps/core/package.json (`build`), release.yml and release-local.sh; keep all four
 # in sync. (Docker cannot reuse the package.json script: bun is not in this image.)
+ENV CARGO_TARGET_DIR=/src/target
+# The hosted Marketplace verifying key, compiled into Core via `option_env!`.
+# Optional: without it (and without the same variable at runtime) a release Core
+# refuses Marketplace installs instead of trusting the local Gateway's key.
+ARG RYU_MARKETPLACE_PUBLIC_KEY=
+ENV RYU_MARKETPLACE_PUBLIC_KEY=${RYU_MARKETPLACE_PUBLIC_KEY}
 RUN cargo build --locked --release --manifest-path apps/gateway/Cargo.toml \
  && cargo build --locked --release --manifest-path apps/core/Cargo.toml \
       --features sandbox-wasmtime,voice-parakeet,voice-vad \
- && cp target/release/ryu-gateway /usr/local/bin/ryu-gateway \
- && cp target/release/ryu-core /usr/local/bin/ryu-core
+ && cp /src/target/release/ryu-gateway /usr/local/bin/ryu-gateway \
+ && cp /src/target/release/ryu-core /usr/local/bin/ryu-core
 
 # ---- runtime ------------------------------------------------------------------
 FROM debian:trixie-slim AS runtime

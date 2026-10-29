@@ -1,0 +1,23 @@
+@import "tailwindcss";
+@import "@ryu/ui/app-ui.css";
+
+@source "./crm-schema-fieldform-proof.tsx";
+@source "../../src/components/panels/crm/SchemaEditor.tsx";
+@source "../../../../packages/ui/src";
+
+html,
+body,
+#root {
+	min-height: 100%;
+	margin: 0;
+}
+
+body {
+	min-width: 320px;
+	color: var(--foreground);
+	background: var(--background);
+}
+
+@source "../../src/components/panels/crm/CrmPanel.tsx";
+@source "../../src/components/panels/crm/RecordTable.tsx";
+@source "../../src/components/panels/crm/fields.tsx";

@@ -5,6 +5,7 @@ import {
 	InputBar,
 	type InputBarProps,
 } from "@ryu/blocks/desktop/agent-elements/input-bar";
+import { MarkdownResponseImages } from "@ryu/blocks/desktop/agent-elements/markdown.tsx";
 import type { AgentChatProps } from "@ryu/blocks/desktop/agent-elements/types";
 import type { ReactNode } from "react";
 import {
@@ -13,7 +14,7 @@ import {
 	RyuAssistantRecentChats,
 	RyuAssistantWidgetFrame,
 	RyuAssistantWidgetHeader,
-} from "./surface";
+} from "./surface.tsx";
 
 /**
  * A complete shared assistant surface. The host supplies chat state and transport
@@ -23,6 +24,8 @@ import {
 export interface RyuAssistantChatProps
 	extends Omit<AgentChatProps, "density" | "emptyStateFooter" | "slots"> {
 	actions?: ReactNode;
+	/** Disable automatic image requests from untrusted response Markdown. */
+	allowResponseImages?: boolean;
 	closeLabel?: string;
 	closeTitle?: string;
 	density?: AgentChatProps["density"];
@@ -57,6 +60,7 @@ export function RyuAssistantComposer(props: InputBarProps) {
 
 export function RyuAssistantChat({
 	actions,
+	allowResponseImages = true,
 	closeLabel,
 	closeTitle,
 	divider,
@@ -107,15 +111,19 @@ export function RyuAssistantChat({
 				/>
 			) : null}
 			<div className="min-h-0 flex-1">
-				<AgentChat
-					{...chatProps}
-					density={isMinimal ? "compact" : density}
-					emptyStateFooter={emptyStateFooter}
-					emptyStatePosition={
-						emptyStatePosition ?? (isMinimal ? "default" : undefined)
-					}
-					slots={resolvedSlots}
-				/>
+				<MarkdownResponseImages.Provider value={allowResponseImages}>
+					<AgentChat
+						{...chatProps}
+						// Like Desktop's floating Ask Ryu, only the composer is compact; the
+						// transcript keeps its normal inset so bubbles never hug the frame.
+						density={density}
+						emptyStateFooter={emptyStateFooter}
+						emptyStatePosition={
+							emptyStatePosition ?? (isMinimal ? "default" : undefined)
+						}
+						slots={resolvedSlots}
+					/>
+				</MarkdownResponseImages.Provider>
 			</div>
 		</RyuAssistantWidgetFrame>
 	);

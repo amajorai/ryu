@@ -1,11 +1,12 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type { UIMessage } from "ai";
+import type { JSONValue, UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import { useMemo, useState } from "react";
-import type { RyuAssistantChatProps } from "./chat";
-import { RyuAssistantChat } from "./chat";
+import { z } from "zod";
+import type { RyuAssistantChatProps } from "./chat.tsx";
+import { RyuAssistantChat } from "./chat.tsx";
 
 export interface RyuAssistantCoreTarget {
 	token?: string | null;
@@ -24,13 +25,50 @@ export interface RyuAssistantCoreChatProps
 	> {
 	agentId?: string;
 	conversationId?: string;
-	requestBody?: Record<string, unknown>;
+	requestBody?: Record<string, JSONValue>;
 	responseMode?: string;
 	target: RyuAssistantCoreTarget;
 }
 
+const TRAILING_SLASHES = /\/+$/;
+const cancelResponseSchema = z.object({ cancelled: z.boolean() });
+
+function coreApiUrl(target: RyuAssistantCoreTarget, path: string): string {
+	return `${target.url.replace(TRAILING_SLASHES, "")}${path}`;
+}
+
 function coreChatUrl(target: RyuAssistantCoreTarget): string {
-	return `${target.url.replace(/\/+$/, "")}/api/chat/stream`;
+	return coreApiUrl(target, "/api/chat/stream");
+}
+
+/**
+ * Ask Core to stop a conversation's in-flight turn. Core drives a saved turn
+ * independently of the request that started it, so aborting the stream alone
+ * would leave it generating. Best-effort: resolves `false` when nothing was
+ * running or Core could not be reached.
+ */
+export async function cancelCoreChatTurn(
+	target: RyuAssistantCoreTarget,
+	conversationId: string
+): Promise<boolean> {
+	const headers = new Headers({ "Content-Type": "application/json" });
+	if (target.token) {
+		headers.set("Authorization", `Bearer ${target.token}`);
+	}
+	try {
+		const response = await fetch(coreApiUrl(target, "/api/chat/cancel"), {
+			body: JSON.stringify({ conversation_id: conversationId }),
+			headers,
+			method: "POST",
+		});
+		if (!response.ok) {
+			return false;
+		}
+		const parsed = cancelResponseSchema.safeParse(await response.json());
+		return parsed.success && parsed.data.cancelled;
+	} catch {
+		return false;
+	}
 }
 
 export function RyuAssistantCoreChat({
@@ -56,11 +94,12 @@ export function RyuAssistantCoreChat({
 					enable_long_term: false,
 					response_mode: responseMode,
 				}),
-				headers: (): Record<string, string> => {
-					if (!target.token) {
-						return {};
+				headers: () => {
+					const headers = new Headers();
+					if (target.token) {
+						headers.set("Authorization", `Bearer ${target.token}`);
 					}
-					return { Authorization: `Bearer ${target.token}` };
+					return headers;
 				},
 			}),
 		[target.token, target.url, agentId, chatId, requestBody, responseMode]
@@ -78,7 +117,10 @@ export function RyuAssistantCoreChat({
 			onSend={(message) => {
 				void sendMessage({ text: message.content });
 			}}
-			onStop={stop}
+			onStop={() => {
+				void stop();
+				void cancelCoreChatTurn(target, chatId);
+			}}
 			status={status}
 		/>
 	);

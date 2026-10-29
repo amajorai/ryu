@@ -12,14 +12,25 @@ import {
  */
 export const ryuOrganizationClient = organizationClient({
 	ac: ryuOrganizationAccessControl,
-	dynamicAccessControl: {
-		enabled: true,
-	},
 	roles: ryuOrganizationRoles,
 	teams: {
 		enabled: true,
 	},
 	schema: {
+		organization: {
+			additionalFields: {
+				primaryOwnerUserId: {
+					type: "string",
+					required: false,
+				},
+				// Server-owned and authoritative; read by `organizationKindOf`.
+				organizationKind: {
+					type: "string",
+					input: false,
+					required: false,
+				},
+			},
+		},
 		invitation: {
 			additionalFields: {
 				referralTag: {

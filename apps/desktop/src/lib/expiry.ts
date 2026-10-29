@@ -63,10 +63,10 @@ export function expiryClass(iso: string): string {
 		return "bg-muted-foreground/40";
 	}
 	if (hours <= URGENT_EXPIRY_HOURS) {
-		return "bg-red-500";
+		return "bg-destructive";
 	}
 	if (hours <= HOURS_IN_WEEK) {
-		return "bg-amber-500";
+		return "bg-warning";
 	}
-	return "bg-sky-500";
+	return "bg-info";
 }

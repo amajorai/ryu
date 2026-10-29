@@ -1,0 +1,146 @@
+{
+  "id": "@ryu/ollaya",
+  "name": "Ollaya Decision Models",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Use Ollaya's local, TypeSafe-compatible decision API as a swappable typed-decision provider. The service runs separately on the Ryu node; model state and questions are sent to its loopback API.",
+  "tagline": "Open typed decisions on your own machine",
+  "homepage": "https://ollaya.dev/",
+  "license": "Apache-2.0",
+  "category": "Models",
+  "keywords": [
+    "decision models",
+    "classification",
+    "local",
+    "ollaya",
+    "typesafe"
+  ],
+  "tags": ["models", "decision", "classification", "local"],
+  "icon": "ai-brain-01",
+  "iconDither": { "from": 240, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": {
+      "support": "none"
+    },
+    "core": {
+      "support": "full"
+    },
+    "desktop": {
+      "support": "full"
+    },
+    "island": {
+      "support": "limited"
+    },
+    "mobile": {
+      "support": "limited"
+    },
+    "extension": {
+      "support": "limited"
+    },
+    "web": {
+      "support": "full"
+    },
+    "cli": {
+      "support": "full"
+    }
+  },
+  "engines": {
+    "ryu": ">=0.1.0"
+  },
+  "runnables": [
+    {
+      "id": "tool-ollaya-predict",
+      "name": "Ollaya Predict",
+      "kind": "tool",
+      "config": {
+        "slug": "ollaya.predict",
+        "backend": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:11435/v1/systemone",
+        "fail_open": false,
+        "unwrap_body": true,
+        "body_defaults": {
+          "model": "laya"
+        },
+        "description": "Answer typed choice, score, or yes/no questions with an installed local Ollaya decision model. Uses Ollaya's TypeSafe-compatible `/v1/systemone` API.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "description": "The text, JSON object, or list to classify.",
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "array"
+                }
+              ]
+            },
+            "questions": {
+              "type": "object",
+              "description": "Question ids mapped to typed choice, score, or yes/no definitions.",
+              "additionalProperties": {
+                "type": "object"
+              }
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional installed Ollaya model id. Defaults to `laya`."
+            }
+          },
+          "required": ["state", "questions"]
+        }
+      }
+    },
+    {
+      "id": "tool-ollaya-models",
+      "name": "Ollaya Models",
+      "kind": "tool",
+      "config": {
+        "slug": "ollaya.models",
+        "backend": "http",
+        "method": "GET",
+        "url": "http://127.0.0.1:11435/v1/models",
+        "fail_open": false,
+        "unwrap_body": true,
+        "description": "List Ollaya decision models already available on this node.",
+        "input_schema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "decision.typed",
+      "version": "1.0.0",
+      "title": "Typed Decisions",
+      "selectable": true,
+      "layerKind": "decision-model",
+      "tools": {
+        "decision.predict": {
+          "tool": "ollaya.predict"
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:127.0.0.1"],
+  "permission_levels": [
+    {
+      "id": "ollaya.view",
+      "label": "Can view local model availability",
+      "description": "List decision models that Ollaya has available on this node."
+    },
+    {
+      "id": "ollaya.run",
+      "label": "Can run local decisions",
+      "description": "Send bounded state and typed questions to the local Ollaya service.",
+      "implies": ["ollaya.view"]
+    }
+  ]
+}

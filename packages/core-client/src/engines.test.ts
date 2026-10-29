@@ -1,3 +1,7 @@
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 // packages/core-client/src/engines.test.ts
 //
 // Tests for the engines client. fetchEngines / fetchEngineModels / fetchActiveEngine
@@ -33,11 +37,11 @@ interface Captured {
 
 function stub(bodyText: string, status = 200): Captured {
 	const cap: Captured = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		cap.url = url;
 		cap.init = init;
 		return Promise.resolve(new Response(bodyText, { status }));
-	}) as typeof fetch;
+	});
 	return cap;
 }
 
@@ -140,7 +144,7 @@ describe("setActiveEngine", () => {
 		const swap = await setActiveEngine(target, "ollama");
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/engine/active");
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({ name: "ollama" });
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({ name: "ollama" });
 		expect(swap).toEqual({
 			active: "ollama",
 			stopped: "llamacpp",

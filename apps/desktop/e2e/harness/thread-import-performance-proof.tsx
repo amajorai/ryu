@@ -1,13 +1,35 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ImportThreadsDialog } from "@/src/components/chat/ImportThreadsDialog.tsx";
 import { useAutoThreadImport } from "@/src/hooks/useAutoThreadImport.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import "../../src/index.css";
-const agents = [
-	{ id: "codex", name: "Codex", engine: "codex" },
-] as AgentSummary[];
+const agents: AgentSummary[] = [
+	{
+		id: "codex",
+		name: "Codex",
+		engine: "codex",
+		avatarGlyph: null,
+		avatarUrl: null,
+		builtIn: true,
+		createdAt: null,
+		description: null,
+		installed: true,
+		installHint: null,
+		latestVersion: null,
+		lifecycleStatus: "active",
+		locked: true,
+		model: null,
+		recommended: false,
+		safetyProfile: "approval_required",
+		systemPrompt: null,
+		title: "",
+		transport: "acp",
+		version: null,
+		versionStatus: null,
+	},
+];
 function App() {
 	const [open, setOpen] = useState(false);
 	const [refresh, setRefresh] = useState(0);

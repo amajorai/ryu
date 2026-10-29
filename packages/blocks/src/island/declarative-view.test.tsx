@@ -59,7 +59,7 @@ describe("IslandViewPanel", () => {
 						view,
 						plugin: "com.evil.app",
 						// Deliberately omits the required collection for this kind.
-						spec: { view } as never,
+						spec: { view },
 					}}
 				/>
 			);
@@ -74,7 +74,7 @@ describe("IslandViewPanel", () => {
 					id: "futuristic",
 					view: "holo-deck",
 					plugin: "com.ryu.future",
-					spec: { view: "holo-deck" } as never,
+					spec: { view: "holo-deck" },
 				}}
 			/>
 		);
@@ -119,4 +119,20 @@ describe("IslandViewPanel", () => {
 		expect(html).not.toContain("No quests yet.");
 		expect(html).toContain("Complete");
 	});
+});
+
+test("malformed nested view payloads remain readable renderer fallback", () => {
+	const html = renderToStaticMarkup(
+		<IslandViewPanel
+			view={{
+				id: "malformed",
+				view: "filter-bar",
+				spec: {
+					view: "filter-bar",
+					filters: [{ id: "filter", label: "Filter", options: null }],
+				},
+			}}
+		/>
+	);
+	expect(html).toContain("Invalid view specification");
 });

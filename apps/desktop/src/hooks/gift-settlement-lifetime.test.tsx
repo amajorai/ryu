@@ -2,8 +2,9 @@ import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import type { GiftPurchaseView } from "../../../web/src/lib/gifts-api.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -20,12 +21,26 @@ const calls: { signal: AbortSignal; resolve: (response: Response) => void }[] =
 const container = document.createElement("div");
 let root = createRoot(container);
 let timers = spyOn(globalThis, "setTimeout");
+function retryTimers() {
+	return timers.mock.calls.flatMap((args, index) => {
+		const result = timers.mock.results[index];
+		return args[1] === 1500 && result?.type === "return" ? [result.value] : [];
+	});
+}
 let clears = spyOn(globalThis, "clearTimeout");
 async function render(checkoutId?: string) {
 	globalThis.fetch = Object.assign(
 		(_input: Parameters<typeof fetch>[0], init?: RequestInit) =>
 			new Promise<Response>((resolve) => {
-				calls.push({ signal: init?.signal as AbortSignal, resolve });
+				if (!init?.signal) {
+					throw new Error(
+						"Gift reconciliation fetch requires its lifecycle AbortSignal"
+					);
+				}
+				calls.push({
+					signal: init.signal,
+					resolve,
+				});
 			}),
 		{ preconnect: originalFetch.preconnect }
 	);
@@ -33,19 +48,40 @@ async function render(checkoutId?: string) {
 		root.render(<GiftSettlement checkoutId={checkoutId} />)
 	);
 }
-async function answer(index: number, status: string, httpStatus = 200) {
+function settlementBody(status: "active" | "pending") {
+	const gift: GiftPurchaseView = {
+		id: "gift-fixture",
+		kind: "card",
+		status,
+		amountCents: 1000,
+		currency: "USD",
+		claimCode: null,
+		claimExpiresAt: null,
+		claimUrl: null,
+		createdAt: "2026-10-09T00:00:00Z",
+		durationMonths: null,
+		message: null,
+		plan: null,
+		recipientEmail: null,
+		recipientName: null,
+	};
+	return { status, gift };
+}
+async function answer(
+	index: number,
+	status: "active" | "pending",
+	httpStatus = 200
+) {
 	await act(async () =>
-		calls[index].resolve(Response.json({ status }, { status: httpStatus }))
+		calls[index].resolve(
+			Response.json(settlementBody(status), { status: httpStatus })
+		)
 	);
 }
 afterEach(async () => {
 	await act(async () => root.unmount());
-	for (let i = 0; i < timers.mock.calls.length; i++) {
-		if (timers.mock.calls[i][1] === 1500) {
-			originalClear(
-				timers.mock.results[i].value as ReturnType<typeof setTimeout>
-			);
-		}
+	for (const timer of retryTimers()) {
+		originalClear(timer);
 	}
 	timers.mockRestore();
 	clears.mockRestore();
@@ -67,15 +103,15 @@ test("checkout replacement resets status and aborts the old read", async () => {
 });
 test("a delayed old response body cannot complete a replacement checkout", async () => {
 	await render("first");
-	let finish!: (value: { status: string }) => void;
-	const body = new Promise<{ status: string }>((resolve) => {
+	let finish!: (value: ReturnType<typeof settlementBody>) => void;
+	const body = new Promise<ReturnType<typeof settlementBody>>((resolve) => {
 		finish = resolve;
 	});
 	const response = new Response(null);
 	response.json = () => body;
 	await act(async () => calls[0].resolve(response));
 	await render("second");
-	await act(async () => finish({ status: "active" }));
+	await act(async () => finish(settlementBody("active")));
 	expect(container.textContent).toContain("Verifying");
 	await answer(1, "active");
 	expect(container.textContent).toContain("Gift ready");
@@ -83,9 +119,11 @@ test("a delayed old response body cannot complete a replacement checkout", async
 test("unmount clears the scheduled retry instead of leaving a sleeping task", async () => {
 	await render("first");
 	await answer(0, "pending", 202);
-	const index = timers.mock.calls.findIndex((call) => call[1] === 1500);
-	expect(index).toBeGreaterThanOrEqual(0);
-	const handle = timers.mock.results[index].value;
+	expect(retryTimers()).toHaveLength(1);
+	const handle = retryTimers()[0];
+	if (handle === undefined) {
+		throw new Error("Gift retry did not schedule its timer");
+	}
 	await act(async () => root.unmount());
 	root = createRoot(container);
 	expect(clears).toHaveBeenCalledWith(handle);

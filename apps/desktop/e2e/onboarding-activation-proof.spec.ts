@@ -2,79 +2,100 @@ import { expect, test } from "@playwright/test";
 
 const STORY_URL = "/onboarding-activation-proof.html";
 
-test.describe("onboarding activation proof", () => {
-	test("keeps the first task behind checkout and rewards new connections", async ({
-		page,
-	}) => {
-		await page.goto(`${STORY_URL}?organization=true`);
-		await page.getByRole("radio", { name: "Search" }).click();
-		await page.getByRole("button", { exact: true, name: "Continue" }).click();
-		await expect(page.getByText("Recommended for you")).toBeVisible();
-		await page
-			.getByRole("button", { name: /Connect · \+\$0\.50/ })
-			.first()
-			.click();
-		await page
-			.getByTestId("connection-permission-dialog")
-			.getByRole("button", { name: "Continue to connect" })
-			.click();
-		await expect(page.getByText("2/20 · $1.00")).toBeVisible();
-		await page.getByRole("button", { exact: true, name: "Continue" }).click();
-		await page.getByRole("button", { name: "See your first task" }).click();
-		await page
-			.getByRole("button", { name: /Start first month for \$50/ })
-			.click();
-		await expect(page.getByText("I finished checkout")).toBeVisible();
-		await expect(page.getByTestId("task-started")).toHaveCount(0);
-		await page.getByRole("button", { name: "I finished checkout" }).click();
-		await expect(
-			page.getByText("Ryu is ready to start your first task")
-		).toBeVisible();
-		await page.getByRole("button", { name: "Start task" }).click();
-		await expect(page.getByTestId("task-started")).toBeVisible();
-	});
+test("previews a selected task, connects only that app, and requires checkout before managed execution", async ({
+	page,
+}) => {
+	await page.goto(`${STORY_URL}?organization=true`);
+	await expect(
+		page.getByRole("heading", { name: "What would you like Ryu to do?" })
+	).toBeVisible();
+	await expect(page.getByTestId("task-started")).toHaveCount(0);
+	await page
+		.getByRole("button", { name: "Preview task", exact: true })
+		.first()
+		.click();
+	await expect(
+		page.getByText("Find the next task in Notion", { exact: true })
+	).toBeVisible();
+	await page
+		.getByRole("button", { name: "Connect Notion for this task" })
+		.click();
+	await page
+		.getByTestId("connection-permission-dialog")
+		.getByRole("button", { name: "Continue to connect" })
+		.click();
+	await page.getByRole("button", { name: "See managed pricing" }).click();
+	await expect(page.getByTestId("task-started")).toHaveCount(0);
+	// Subscription terms must still be acknowledged before checkout opens.
+	await page.getByRole("checkbox").check();
+	await page.getByRole("button", { name: "Start first month for $50" }).click();
+	await expect(page.getByTestId("task-started")).toHaveCount(0);
+	await page.getByRole("button", { name: "I finished checkout" }).click();
+	await expect(
+		page.getByText("Find the next task in Notion", { exact: true })
+	).toBeVisible();
+	await page.getByRole("button", { name: "Start managed task" }).click();
+	await expect(page.getByTestId("task-started")).toBeVisible();
+});
 
-	test("shows the individual plan in a personal workspace", async ({
-		page,
-	}) => {
-		await page.goto(STORY_URL);
-		await page.getByRole("radio", { name: "Search" }).click();
-		await page.getByRole("button", { exact: true, name: "Continue" }).click();
-		await page.getByRole("button", { exact: true, name: "Continue" }).click();
-		await page.getByRole("button", { name: "See your first task" }).click();
-		await expect(
-			page.getByRole("button", { name: "Start Pro for $49/month" })
-		).toBeVisible();
-	});
+test("shows personal pricing only after a task is chosen", async ({ page }) => {
+	await page.goto(STORY_URL);
+	await page.getByRole("button", { name: "Preview a starting task" }).click();
+	await expect(
+		page.getByText("Turn recent email into a follow-up list", { exact: true })
+	).toBeVisible();
+	await expect(
+		page.getByRole("button", { name: "Start Pro for $49/month" })
+	).toHaveCount(0);
+	await page.getByRole("button", { name: "See managed pricing" }).click();
+	await expect(
+		page.getByRole("button", { name: "Start Pro for $49/month" })
+	).toBeVisible();
+});
 
-	test("skips checkout for an existing subscriber", async ({ page }) => {
-		await page.goto(`${STORY_URL}?paid=true&notion=true`);
-		await expect(page.getByText("Your subscription is ready")).toBeVisible();
-		await expect(
-			page.getByRole("button", { name: /Start first month/ })
-		).toHaveCount(0);
-		await page.getByRole("button", { name: "Continue to task" }).click();
-		await page.getByRole("button", { name: "Start task" }).click();
-		await expect(page.getByTestId("task-started")).toBeVisible();
-	});
+test("uses an existing subscription without another checkout", async ({
+	page,
+}) => {
+	await page.goto(`${STORY_URL}?paid=true&notion=true`);
+	await page
+		.getByRole("button", { name: "Preview task", exact: true })
+		.first()
+		.click();
+	await page.getByRole("button", { name: "Start managed task" }).click();
+	await expect(page.getByTestId("task-started")).toBeVisible();
+});
 
-	test("keeps a shared non-owner on the safe owner path", async ({ page }) => {
-		await page.goto(`${STORY_URL}?role=member`);
-		await expect(
-			page.getByText("Ask the node owner to continue")
-		).toBeVisible();
-		await expect(page.getByTestId("task-started")).toHaveCount(0);
-	});
+test("own-model path does not start managed execution", async ({ page }) => {
+	await page.goto(STORY_URL);
+	await page.getByRole("button", { name: "Preview a starting task" }).click();
+	await page.getByRole("button", { name: "Choose my own model" }).click();
+	await expect(page.getByTestId("own-model-chat")).toBeVisible();
+	await expect(page.getByTestId("task-started")).toHaveCount(0);
+});
 
-	test("renders the completed task product proof", async ({ page }) => {
-		await page.goto(`${STORY_URL}?paid=true&notion=true`);
-		await page.getByRole("button", { name: "Continue to task" }).click();
-		await page.getByRole("button", { name: "Start task" }).click();
-		await expect(page.getByTestId("task-started")).toBeVisible();
-		await expect(page.getByText("Ryu started your first task")).toBeVisible();
-		await page.screenshot({
-			path: "apps/desktop/e2e/artifacts/onboarding-activation-proof.png",
-			fullPage: true,
-		});
-	});
+test("connection cancellation keeps the task preview without starting work", async ({
+	page,
+}) => {
+	await page.goto(STORY_URL);
+	await page
+		.getByRole("button", { name: "Preview task", exact: true })
+		.first()
+		.click();
+	await page
+		.getByRole("button", { name: "Connect Notion for this task" })
+		.click();
+	await page
+		.getByTestId("connection-permission-dialog")
+		.getByRole("button", { name: "Cancel" })
+		.click();
+	await expect(
+		page.getByRole("button", { name: "Connect Notion for this task" })
+	).toBeVisible();
+	await expect(page.getByTestId("task-started")).toHaveCount(0);
+});
+
+test("shared non-owner cannot start the activation task", async ({ page }) => {
+	await page.goto(`${STORY_URL}?role=member`);
+	await expect(page.getByText("Ask the node owner to continue")).toBeVisible();
+	await expect(page.getByTestId("task-started")).toHaveCount(0);
 });

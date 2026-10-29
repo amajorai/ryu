@@ -7,8 +7,9 @@
 //! the private `ryu_smart_route` body field, so model/provider pinning, smart
 //! routing rules and prompt-cache mode reach the fleet today. What did NOT
 //! travel — and what this module carries — is the node's **fallback-chain
-//! preference** and its **own additive firewall rules**, inside a versioned
-//! envelope future knobs can plug into without a second header.
+//! preference**, its **own additive firewall rules**, and its **OpenRouter
+//! provider defaults**, inside a versioned envelope future knobs can plug into
+//! without a second header.
 //!
 //! # Trust class: exactly as trustworthy as the bearer, i.e. not
 //!
@@ -37,6 +38,7 @@
 //! | spend / session budgets     | `state.with_budget`                                 |
 //! | rate limit bucket           | `check_request_for_key(&ctx.api_key, …)` — the key is `rgw_org:<id>`, so a preference cannot move the bucket |
 //! | prompt-cache override       | `[prompt_cache].allow_request_override`             |
+//! | OpenRouter privacy          | configured `data_collection`/`zdr` values override node defaults |
 //! | post-call debit attribution | reads the provider that actually answered, never a preference |
 //! | provider credentials        | fleet config; nothing here names a key               |
 //!
@@ -95,14 +97,105 @@ pub struct NodeRoutingPrefs {
     /// node → org → agent cascade and only ever additively (see
     /// [`clamp_firewall`]).
     pub firewall: Option<FirewallOverlay>,
+    /// OpenRouter's request-level `provider` options. Applied only to an
+    /// OpenRouter attempt; the provider's configured privacy policy remains
+    /// authoritative after these defaults are merged.
+    pub openrouter: Option<serde_json::Value>,
+    /// OpenRouter model ids to try after the caller's primary model. An
+    /// explicit request-level `models` array always wins.
+    pub openrouter_model_fallbacks: Vec<String>,
 }
 
 impl NodeRoutingPrefs {
     /// Whether this document asks for anything at all. An empty document is
     /// indistinguishable from no header, so callers can drop it early.
     pub fn is_empty(&self) -> bool {
-        self.fallback.is_empty() && self.firewall.is_none()
+        self.fallback.is_empty()
+            && self.firewall.is_none()
+            && self
+                .openrouter
+                .as_ref()
+                .and_then(serde_json::Value::as_object)
+                .is_none_or(serde_json::Map::is_empty)
+            && self.openrouter_model_fallbacks.is_empty()
     }
+}
+
+/// Merge saved OpenRouter provider defaults into one OpenRouter attempt.
+/// Explicit per-request fields keep precedence, and other providers never see
+/// the OpenRouter-only `provider` options.
+pub fn apply_openrouter_preferences(
+    allowed_by_entitlement: bool,
+    prefs: Option<&NodeRoutingPrefs>,
+    cfg: &NodeRoutingConfig,
+    provider_name: &str,
+    payload: &mut serde_json::Value,
+) -> bool {
+    if !allowed_by_entitlement || !cfg.allow_request_override || provider_name != "openrouter" {
+        return false;
+    }
+    let Some(options) = prefs
+        .and_then(|prefs| prefs.openrouter.as_ref())
+        .and_then(serde_json::Value::as_object)
+    else {
+        return false;
+    };
+    let Some(payload) = payload.as_object_mut() else {
+        return false;
+    };
+
+    let provider = payload
+        .entry("provider")
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    let Some(provider) = provider.as_object_mut() else {
+        return false;
+    };
+
+    let mut applied = false;
+    for (key, value) in options {
+        if !provider.contains_key(key) {
+            provider.insert(key.clone(), value.clone());
+            applied = true;
+        }
+    }
+    applied
+}
+
+/// Add model fallbacks to an OpenRouter chat completion only when it has no
+/// explicit `models` list. This is separate from generic provider preferences
+/// because embeddings, images, and audio endpoints do not use chat fallback
+/// routing.
+pub fn apply_openrouter_model_fallbacks(
+    allowed_by_entitlement: bool,
+    prefs: Option<&NodeRoutingPrefs>,
+    cfg: &NodeRoutingConfig,
+    provider_name: &str,
+    payload: &mut serde_json::Value,
+) -> bool {
+    if !allowed_by_entitlement || !cfg.allow_request_override || provider_name != "openrouter" {
+        return false;
+    }
+    let Some(prefs) = prefs.filter(|prefs| !prefs.openrouter_model_fallbacks.is_empty()) else {
+        return false;
+    };
+    let Some(payload) = payload.as_object_mut() else {
+        return false;
+    };
+    if payload.contains_key("models") {
+        return false;
+    }
+    payload.insert(
+        "models".to_owned(),
+        serde_json::Value::Array(
+            prefs
+                .openrouter_model_fallbacks
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
+    );
+    true
 }
 
 /// Why a preference (or part of one) was not honoured. Carried out of the clamps
@@ -403,6 +496,13 @@ mod tests {
 
     fn ctx() -> RequestContext {
         RequestContext {
+            org_limits: None,
+            identity: None,
+            standing: None,
+            enforcement: None,
+            host_conversation: None,
+            authorized_operation: crate::config::ApiKeyOperation::Inference,
+            provider_snapshot: None,
             request_id: "nr-test".into(),
             api_key: "rgw_org:acme".into(),
             owner_binding: ryu_gw_credentials::fingerprint("rgw_org:acme"),
@@ -413,23 +513,32 @@ mod tests {
             user_name: None,
             user_id: None,
             agent_id: None,
+            agent_provider_access: None,
             key_config: None,
             skill_ids: None,
             tool_actions: None,
             tools_header_present: false,
+            capability_hints: None,
             slot_provider: None,
             slot_model: None,
+            own_supply_route: None,
+            violation_attempt: Default::default(),
             session_id: None,
             feature: None,
+            purpose: None,
             companion_source: false,
             tool_search_requested: false,
+            untrusted_caller: false,
             priority: crate::concurrency::Priority::Interactive,
             tool_profile: None,
             raw_tools: false,
             managed_inference: true,
+            openrouter_routing_enabled: false,
             remaining_budget_micro_usd: None,
             unrestricted_budget_micro_usd: None,
             pool_budgets_micro_usd: std::collections::HashMap::new(),
+            credit_accounting_unavailable: false,
+            budget_resolved_at: None,
             resolved_policy: None,
             prompt_cache_mode: None,
             prompt_cache_ttl: None,
@@ -455,6 +564,131 @@ mod tests {
         let prefs = parse(&raw, &cfg()).expect("a well-formed v1 document parses");
         assert_eq!(prefs.fallback, vec!["anthropic", "groq"]);
         assert!(prefs.firewall.is_none());
+    }
+
+    #[test]
+    fn parse_accepts_openrouter_provider_preferences() {
+        let raw = encode(
+            r#"{"openrouter":{"sort":"throughput","allow_fallbacks":true,"zdr":true},"openrouter_model_fallbacks":["anthropic/claude-sonnet-4.5"]}"#,
+        );
+        let prefs = parse(&raw, &cfg()).expect("OpenRouter routing options parse");
+        assert_eq!(prefs.openrouter.as_ref().unwrap()["sort"], "throughput");
+        assert_eq!(prefs.openrouter.as_ref().unwrap()["zdr"], true);
+        assert_eq!(
+            prefs.openrouter_model_fallbacks,
+            vec!["anthropic/claude-sonnet-4.5"]
+        );
+    }
+
+    #[test]
+    fn openrouter_preferences_only_fill_missing_fields_for_openrouter() {
+        let prefs = NodeRoutingPrefs {
+            openrouter: Some(serde_json::json!({
+                "allow_fallbacks": true,
+                "data_collection": "deny",
+                "sort": "throughput"
+            })),
+            ..Default::default()
+        };
+        let mut body = serde_json::json!({
+            "provider": { "allow_fallbacks": false, "only": ["azure"] }
+        });
+        assert!(apply_openrouter_preferences(
+            true,
+            Some(&prefs),
+            &cfg(),
+            "openrouter",
+            &mut body
+        ));
+        assert_eq!(body["provider"]["allow_fallbacks"], false);
+        assert_eq!(body["provider"]["only"], serde_json::json!(["azure"]));
+        assert_eq!(body["provider"]["sort"], "throughput");
+        assert_eq!(body["provider"]["data_collection"], "deny");
+
+        let mut other_provider_body = serde_json::json!({ "model": "gpt-4o" });
+        assert!(!apply_openrouter_preferences(
+            true,
+            Some(&prefs),
+            &cfg(),
+            "openai",
+            &mut other_provider_body
+        ));
+        assert!(other_provider_body.get("provider").is_none());
+
+        let fallbacks = NodeRoutingPrefs {
+            openrouter_model_fallbacks: vec!["anthropic/claude-sonnet-4.5".to_owned()],
+            ..Default::default()
+        };
+        let mut fallback_body = serde_json::json!({"model":"openai/gpt-4.1"});
+        assert!(apply_openrouter_model_fallbacks(
+            true,
+            Some(&fallbacks),
+            &cfg(),
+            "openrouter",
+            &mut fallback_body
+        ));
+        assert_eq!(
+            fallback_body["models"],
+            serde_json::json!(["anthropic/claude-sonnet-4.5"])
+        );
+
+        let mut explicit_models = serde_json::json!({
+            "model":"openai/gpt-4.1",
+            "models":["google/gemini-2.5-pro"]
+        });
+        assert!(!apply_openrouter_model_fallbacks(
+            true,
+            Some(&fallbacks),
+            &cfg(),
+            "openrouter",
+            &mut explicit_models
+        ));
+        assert_eq!(
+            explicit_models["models"],
+            serde_json::json!(["google/gemini-2.5-pro"])
+        );
+
+        let mut locked = cfg();
+        locked.allow_request_override = false;
+        let mut locked_body = serde_json::json!({"model":"openai/gpt-4.1"});
+        assert!(!apply_openrouter_model_fallbacks(
+            true,
+            Some(&fallbacks),
+            &locked,
+            "openrouter",
+            &mut locked_body
+        ));
+        assert!(locked_body.get("models").is_none());
+
+        let mut locked = cfg();
+        locked.allow_request_override = false;
+        let mut locked_body = serde_json::json!({ "model": "openrouter/auto" });
+        assert!(!apply_openrouter_preferences(
+            true,
+            Some(&prefs),
+            &locked,
+            "openrouter",
+            &mut locked_body
+        ));
+        assert!(locked_body.get("provider").is_none());
+
+        let mut unentitled_body = serde_json::json!({"model":"openrouter/auto"});
+        assert!(!apply_openrouter_preferences(
+            false,
+            Some(&prefs),
+            &cfg(),
+            "openrouter",
+            &mut unentitled_body
+        ));
+        assert!(!apply_openrouter_model_fallbacks(
+            false,
+            Some(&fallbacks),
+            &cfg(),
+            "openrouter",
+            &mut unentitled_body
+        ));
+        assert!(unentitled_body.get("provider").is_none());
+        assert!(unentitled_body.get("models").is_none());
     }
 
     #[test]
@@ -541,6 +775,8 @@ mod tests {
                 enabled: Some(false),
                 ..Default::default()
             }),
+            openrouter: None,
+            openrouter_model_fallbacks: Vec::new(),
         };
         let fleet = chain(&["openai", "anthropic", "groq"]);
 

@@ -15,8 +15,16 @@ use super::{
 
 const MAX_TOKEN_BYTES: usize = 8 * 1024;
 const MAX_DELEGATION_LIFETIME_SECONDS: u64 = 60;
+const MAX_NODE_LIST_LIFETIME_SECONDS: u64 = 12 * 60;
 const CLOCK_SKEW_SECONDS: u64 = 5;
 const AUDIENCE_PREFIX: &str = "urn:ryu:node:";
+/// Client id the control plane signs into the node-list delegation it mints for
+/// a member's own signed-in session (`GET /nodes`, used by Desktop and the CLI
+/// for managed nodes). Its scopes are derived from that member's organization
+/// role, or narrowed to sandbox status reads. A hosted OAuth or MCP client's
+/// delegation carries that client's own id and only the scopes its user
+/// consented to.
+pub(crate) const NODE_LIST_CLIENT_ID: &str = "ryu-control-plane:nodes";
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Header {
@@ -186,6 +194,7 @@ fn verify_for_node(
     let caller = crate::identity_verify::VerifiedCaller {
         user_id: claims.sub.clone(),
         email: None,
+        email_verified: false,
         org_id: Some(claims.org_id.clone()),
         role: crate::identity_verify::OrgRole::from_ba_str(&claims.org_role),
         teams,
@@ -218,8 +227,13 @@ fn validate_times(claims: &Claims, now: u64) -> Result<(), DelegationError> {
         .exp
         .checked_sub(claims.iat)
         .ok_or(DelegationError::InvalidTimeWindow)?;
+    let max_lifetime = if claims.client_id == NODE_LIST_CLIENT_ID {
+        MAX_NODE_LIST_LIFETIME_SECONDS
+    } else {
+        MAX_DELEGATION_LIFETIME_SECONDS
+    };
     if lifetime == 0
-        || lifetime > MAX_DELEGATION_LIFETIME_SECONDS
+        || lifetime > max_lifetime
         || now >= claims.exp
         || claims.nbf > now.saturating_add(CLOCK_SKEW_SECONDS)
         || claims.iat > now.saturating_add(CLOCK_SKEW_SECONDS)
@@ -301,6 +315,19 @@ mod tests {
         assert!(validate_times(&claims, 101).is_ok());
         assert_eq!(
             validate_times(&Claims { exp: 161, ..claims }, 101),
+            Err(DelegationError::InvalidTimeWindow)
+        );
+    }
+
+    #[test]
+    fn node_list_delegation_has_a_separate_refresh_window() {
+        let mut claims = claims();
+        claims.client_id = "ryu-control-plane:nodes".to_owned();
+        claims.exp = claims.iat + MAX_NODE_LIST_LIFETIME_SECONDS;
+        assert!(validate_times(&claims, 101).is_ok());
+        claims.exp += 1;
+        assert_eq!(
+            validate_times(&claims, 101),
             Err(DelegationError::InvalidTimeWindow)
         );
     }

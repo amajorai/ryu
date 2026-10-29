@@ -1,3 +1,4 @@
+import proofStyles from "./app-sidebar-sections-proof.module.css";
 // Browser proof for the six app-owned record pickers migrated onto the desktop
 // sidebar's generic `sidebar_sections` renderer. Each section below uses the
 // same production `DynamicSidebarSection` that AppSidebar mounts from live app
@@ -6,16 +7,20 @@
 import type { SidebarSectionSpec } from "@ryu/app-host/views";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { QueryClientProvider } from "@tanstack/react-query";
+import type { ComponentProps } from "react";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DynamicSidebarSection } from "../../src/components/layout/AppSidebar.tsx";
-import {
-	TabsContext,
-	type TabsContextValue,
-} from "../../src/contexts/TabsContext.tsx";
+import { TabsContext } from "../../src/contexts/TabsContext.tsx";
+
+type TabsContextValue = NonNullable<
+	ComponentProps<typeof TabsContext.Provider>["value"]
+>;
+
 import { useSidebarSectionSources } from "../../src/hooks/useSidebarSectionSource.ts";
 import { queryClient } from "../../src/lib/query-client.ts";
 import "../../src/index.css";
+import { IDLE_REORDER_SHIFT } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 
 const APP_SECTIONS: Array<{
 	id: string;
@@ -157,7 +162,7 @@ const APP_SECTIONS: Array<{
 	},
 ];
 
-const PAYLOADS: Record<string, unknown> = {
+const PAYLOADS = {
 	"/api/blueprint/plans": {
 		plans: [
 			{
@@ -214,7 +219,7 @@ const PAYLOADS: Record<string, unknown> = {
 
 function recordOpenTab(
 	path: string,
-	options?: { mountContext?: Record<string, unknown> }
+	options?: Parameters<TabsContextValue["openTab"]>[1]
 ): string {
 	const opened = document.getElementById("opened");
 	if (opened) {
@@ -227,9 +232,13 @@ function recordOpenTab(
 	return "proof-tab";
 }
 
-const tabs = {
-	openTab: recordOpenTab,
-} as unknown as TabsContextValue;
+const tabsFixture = { openTab: recordOpenTab } satisfies Pick<
+	TabsContextValue,
+	"openTab"
+>;
+// SAFETY: this fixture mounts DynamicSidebarSection, whose only tabs selector
+// reads openTab; recordOpenTab implements that actual owner contract.
+const tabs = tabsFixture as TabsContextValue;
 
 const noopDnd = {
 	draggingKey: null,
@@ -238,6 +247,7 @@ const noopDnd = {
 	onDragOver: () => undefined,
 	onDragStart: () => undefined,
 	onDrop: () => undefined,
+	shift: IDLE_REORDER_SHIFT,
 	order: [],
 };
 
@@ -255,29 +265,36 @@ if (measurePolling && APP_SECTIONS[0].spec.source) {
 	APP_SECTIONS[0].spec.source.refreshMs = 1000;
 }
 const sourceReadTimes: number[] = [];
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
-	const path = new URL(url, location.href).pathname;
-	const payload = PAYLOADS[path];
-	if (payload) {
-		if (path === "/api/blueprint/plans") {
-			sourceReadTimes.push(performance.now());
-			document.documentElement.dataset.sourceReadTimes =
-				JSON.stringify(sourceReadTimes);
+const payloadsByPath = new Map(Object.entries(PAYLOADS));
+const realFetch = Object.assign(
+	globalThis.fetch.bind(globalThis),
+	globalThis.fetch
+);
+globalThis.fetch = Object.assign(
+	(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+		const url = input instanceof Request ? input.url : String(input);
+		const path = new URL(url, location.href).pathname;
+		const payload = payloadsByPath.get(path);
+		if (payload) {
+			if (path === "/api/blueprint/plans") {
+				sourceReadTimes.push(performance.now());
+				document.documentElement.dataset.sourceReadTimes =
+					JSON.stringify(sourceReadTimes);
+			}
+			document.documentElement.dataset.sectionReads = String(
+				Number(document.documentElement.dataset.sectionReads ?? 0) + 1
+			);
+			return Promise.resolve(
+				new Response(JSON.stringify(payload), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				})
+			);
 		}
-		document.documentElement.dataset.sectionReads = String(
-			Number(document.documentElement.dataset.sectionReads ?? 0) + 1
-		);
-		return Promise.resolve(
-			new Response(JSON.stringify(payload), {
-				headers: { "content-type": "application/json" },
-				status: 200,
-			})
-		);
-	}
-	return realFetch(input as RequestInfo, init);
-}) as typeof fetch;
+		return realFetch(input, init);
+	},
+	globalThis.fetch
+);
 
 function SharedReader() {
 	useSidebarSectionSources(
@@ -296,32 +313,17 @@ function Story() {
 		<QueryClientProvider client={queryClient}>
 			<TabsContext.Provider value={tabs}>
 				{shared && <SharedReader />}
-				<main
-					style={{
-						background: "#0b0d12",
-						color: "#e6e9f0",
-						fontFamily: "var(--font-sans)",
-						minHeight: "100vh",
-						padding: "24px 32px",
-					}}
-				>
+				<main className={proofStyles.fixture1}>
 					{measurePolling && (
 						<Button onClick={() => setShared(true)}>Mount shared reader</Button>
 					)}
-					<h1 style={{ fontSize: 18, margin: "0 0 6px" }}>
+					<h1 className={proofStyles.fixture2}>
 						App-contributed sidebar sections
 					</h1>
-					<p style={{ color: "#8a91a3", fontSize: 13, margin: "0 0 18px" }}>
+					<p className={proofStyles.fixture3}>
 						Seven app-owned record pickers rendered by one desktop primitive.
 					</p>
-					<div
-						style={{
-							display: "flex",
-							flexDirection: "column",
-							gap: 8,
-							width: 300,
-						}}
-					>
+					<div className={proofStyles.fixture4}>
 						{APP_SECTIONS.map((section) => (
 							<DynamicSidebarSection
 								collapsed={false}
@@ -339,8 +341,8 @@ function Story() {
 							/>
 						))}
 					</div>
-					<pre id="opened" style={{ color: "#8a91a3", fontSize: 12 }} />
-					<pre id="opened-context" style={{ color: "#8a91a3", fontSize: 12 }} />
+					<pre className={proofStyles.fixture5} id="opened" />
+					<pre className={proofStyles.fixture6} id="opened-context" />
 				</main>
 			</TabsContext.Provider>
 		</QueryClientProvider>

@@ -1,8 +1,8 @@
 // Presentational command palette shared by the desktop app and the command bar.
 //
-// Pure props in, callbacks out: it renders a flat `CommandAction[]` with the
-// shared `@ryu/ui` command primitives (cmdk under the hood) and owns none of the
-// data. `chrome="dialog"` wraps it in the centered command dialog (the desktop's
+// Search results and actions stay host-owned; this package renders them with the
+// shared `@ryu/ui` command primitives (cmdk under the hood) and owns only view
+// state. `chrome="dialog"` wraps it in the centered command dialog (the desktop's
 // Cmd+K modal); `chrome="bare"` renders just the command surface so an embedder
 // (the Electron command-bar window, which IS the panel) supplies its own frame.
 
@@ -18,11 +18,22 @@ import {
 	CommandList,
 	CommandSeparator,
 	CommandShortcut,
-} from "@ryu/ui/components/command";
-import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
-import { Fragment, type ReactNode } from "react";
+} from "@ryu/ui/components/command.tsx";
+import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs.tsx";
+import {
+	Fragment,
+	type KeyboardEvent,
+	type ReactNode,
+	useEffect,
+	useId,
+	useState,
+} from "react";
 import { actionSearchValue, groupActions } from "./registry.ts";
-import type { CommandAction, CommandPaletteTab } from "./types.ts";
+import type {
+	CommandAction,
+	CommandPaletteMode,
+	CommandPaletteTab,
+} from "./types.ts";
 
 export interface CommandPaletteProps {
 	/** Flat action list; grouped by `group` in first-seen order. */
@@ -35,10 +46,17 @@ export interface CommandPaletteProps {
 	chrome?: "dialog" | "bare";
 	/** Extra classes on the inner `Command`. */
 	className?: string;
+	/** Optional compose view; enables the Search/Compose switch and Tab shortcut. */
+	composeContent?: ReactNode;
+	/** Shared dialog frame layout. */
+	dialogLayout?: "default" | "expanded";
 	/** Empty-results label. */
 	emptyLabel?: string;
 	/** Optional footer rendered under the list (hints, status). */
 	footer?: ReactNode;
+	/** Called when a row becomes the highlighted one (pointer or arrow keys), e.g.
+	 *  to prefetch its `prefetchPath` before it is chosen. */
+	onHighlight?: (action: CommandAction) => void;
 	/** Key handler on the input (e.g. submit a free-text query as a chat prompt). */
 	onInputKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 	/** Dialog open-change handler (used by `chrome="dialog"`). */
@@ -65,6 +83,7 @@ function ActionRow({ action }: { action: CommandAction }) {
 	return (
 		<CommandItem
 			data-checked={action.checked ? "true" : undefined}
+			data-prefetch-path={action.prefetchPath}
 			disabled={action.disabled}
 			onSelect={action.onSelect}
 			value={actionSearchValue(action)}
@@ -72,7 +91,9 @@ function ActionRow({ action }: { action: CommandAction }) {
 			{action.icon ? (
 				<HugeiconsIcon className="size-4 shrink-0" icon={action.icon} />
 			) : null}
-			<span className="truncate">{localizedTitle}</span>
+			<span className="truncate" title={localizedTitle}>
+				{localizedTitle}
+			</span>
 			{action.trailing ? (
 				<span className="ml-auto truncate text-muted-foreground text-xs">
 					{localizedTrailing}
@@ -82,6 +103,72 @@ function ActionRow({ action }: { action: CommandAction }) {
 				<CommandShortcut>{action.shortcut}</CommandShortcut>
 			) : null}
 		</CommandItem>
+	);
+}
+
+function PaletteModeSwitch({
+	active,
+	onChange,
+	searchTabId,
+	composeTabId,
+}: {
+	active: CommandPaletteMode;
+	onChange: (mode: CommandPaletteMode) => void;
+	searchTabId: string;
+	composeTabId: string;
+}) {
+	const searchLabel = useLocalizedString("Search");
+	const composeLabel = useLocalizedString("Compose");
+
+	return (
+		<div
+			aria-label="Search and compose"
+			className="inline-flex items-center gap-1 rounded-xl border border-border/80 bg-popover/95 p-1 shadow-lg backdrop-blur-xl"
+			role="tablist"
+		>
+			<button
+				aria-label={searchLabel}
+				aria-selected={active === "search"}
+				className={
+					active === "search"
+						? "flex h-8 items-center gap-2 rounded-lg bg-accent px-3 text-foreground text-sm shadow-sm"
+						: "flex h-8 items-center gap-2 rounded-lg px-3 text-muted-foreground text-sm transition-colors hover:text-foreground"
+				}
+				id={searchTabId}
+				onClick={() => onChange("search")}
+				role="tab"
+				tabIndex={active === "search" ? 0 : -1}
+				type="button"
+			>
+				{searchLabel}
+				{active === "compose" ? <TabKeyHint /> : null}
+			</button>
+			<button
+				aria-label={composeLabel}
+				aria-selected={active === "compose"}
+				className={
+					active === "compose"
+						? "flex h-8 items-center gap-2 rounded-lg bg-accent px-3 text-foreground text-sm shadow-sm"
+						: "flex h-8 items-center gap-2 rounded-lg px-3 text-muted-foreground text-sm transition-colors hover:text-foreground"
+				}
+				id={composeTabId}
+				onClick={() => onChange("compose")}
+				role="tab"
+				tabIndex={active === "compose" ? 0 : -1}
+				type="button"
+			>
+				{composeLabel}
+				{active === "search" ? <TabKeyHint /> : null}
+			</button>
+		</div>
+	);
+}
+
+function TabKeyHint() {
+	return (
+		<kbd className="type-compact rounded border border-border/80 bg-background/50 px-1.5 py-0.5 font-mono text-muted-foreground leading-none">
+			Tab
+		</kbd>
 	);
 }
 
@@ -99,9 +186,13 @@ function PaletteBody({
 	tabs,
 	activeTab,
 	onTabChange,
-}: Omit<CommandPaletteProps, "chrome" | "open" | "onOpenChange">) {
+	onHighlight,
+}: Omit<
+	CommandPaletteProps,
+	"chrome" | "composeContent" | "dialogLayout" | "open" | "onOpenChange"
+>) {
 	const localizedPlaceholder = useLocalizedString(
-		placeholder ?? "Search or run a command..."
+		placeholder ?? "Search or run a command…"
 	);
 	const localizedEmptyLabel = useLocalizedString(emptyLabel ?? "No results.");
 	const selectedTab = activeTab ?? tabs?.[0]?.id;
@@ -110,8 +201,28 @@ function PaletteBody({
 			? actions.filter((action) => action.resultType === selectedTab)
 			: actions;
 	const groups = groupActions(visibleActions);
+	// cmdk only reports highlight changes when its value is controlled, so the
+	// palette owns the highlighted value whenever a host listens for it.
+	const [highlighted, setHighlighted] = useState("");
+	const handleHighlight = (value: string) => {
+		setHighlighted(value);
+		// cmdk may normalise case/whitespace of item values; compare loosely.
+		const wanted = value.trim().toLowerCase();
+		const action = visibleActions.find(
+			(candidate) =>
+				actionSearchValue(candidate).trim().toLowerCase() === wanted
+		);
+		if (action) {
+			onHighlight?.(action);
+		}
+	};
 	return (
-		<Command className={className} shouldFilter={shouldFilter}>
+		<Command
+			className={className}
+			onValueChange={onHighlight ? handleHighlight : undefined}
+			shouldFilter={shouldFilter}
+			value={onHighlight ? highlighted : undefined}
+		>
 			<CommandInput
 				autoFocus={autoFocus}
 				onKeyDown={onInputKeyDown}
@@ -120,25 +231,27 @@ function PaletteBody({
 				value={search}
 			/>
 			{tabs && tabs.length > 0 ? (
-				<Tabs
-					className="min-w-0 px-3 pb-2"
-					onValueChange={(value) => onTabChange?.(String(value))}
-					value={selectedTab}
-				>
-					<TabsList
-						aria-label="Search result types"
-						className="w-full flex-nowrap"
-						persistLayout={false}
-						variant="muted-pills"
+				<div className="px-3 pb-2">
+					<Tabs
+						className="min-w-0"
+						onValueChange={(value) => onTabChange?.(String(value))}
+						value={selectedTab}
 					>
-						{tabs.map((tab) => (
-							<TabsTrigger className="shrink-0" key={tab.id} value={tab.id}>
-								{tab.icon ? <HugeiconsIcon icon={tab.icon} /> : null}
-								{tab.label}
-							</TabsTrigger>
-						))}
-					</TabsList>
-				</Tabs>
+						<TabsList
+							aria-label="Search result types"
+							className="w-full flex-nowrap"
+							persistLayout={false}
+							variant="muted-pills"
+						>
+							{tabs.map((tab) => (
+								<TabsTrigger className="shrink-0" key={tab.id} value={tab.id}>
+									{tab.icon ? <HugeiconsIcon icon={tab.icon} /> : null}
+									{tab.label}
+								</TabsTrigger>
+							))}
+						</TabsList>
+					</Tabs>
+				</div>
 			) : null}
 			<CommandList>
 				<CommandEmpty>{localizedEmptyLabel}</CommandEmpty>
@@ -168,14 +281,71 @@ export function CommandPalette({
 	open,
 	onOpenChange,
 	autoFocus = true,
-	...body
+	composeContent,
+	dialogLayout,
+	...paletteProps
 }: CommandPaletteProps) {
+	const [activeMode, setActiveMode] = useState<CommandPaletteMode>("search");
+	const modeId = useId();
+	useEffect(() => {
+		if (open === false) {
+			setActiveMode("search");
+		}
+	}, [open]);
+
+	const handleModeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+		if (
+			composeContent === undefined ||
+			event.key !== "Tab" ||
+			event.shiftKey ||
+			event.ctrlKey ||
+			event.altKey ||
+			event.metaKey
+		) {
+			return;
+		}
+		event.preventDefault();
+		setActiveMode((previous) => (previous === "search" ? "compose" : "search"));
+	};
+
+	const paletteContent =
+		composeContent === undefined ? (
+			<PaletteBody autoFocus={autoFocus} {...paletteProps} />
+		) : (
+			<div className="relative w-full" onKeyDown={handleModeKeyDown}>
+				<div className="absolute -top-14 left-1/2 z-50 -translate-x-1/2 max-sm:static max-sm:mb-3 max-sm:flex max-sm:w-full max-sm:translate-x-0 max-sm:justify-center">
+					<PaletteModeSwitch
+						active={activeMode}
+						composeTabId={`${modeId}-compose`}
+						onChange={setActiveMode}
+						searchTabId={`${modeId}-search`}
+					/>
+				</div>
+				<div
+					aria-labelledby={`${modeId}-${activeMode}`}
+					className="w-full"
+					id={`${modeId}-panel`}
+					role="tabpanel"
+				>
+					{activeMode === "compose" ? (
+						composeContent
+					) : (
+						<PaletteBody autoFocus={autoFocus} {...paletteProps} />
+					)}
+				</div>
+			</div>
+		);
+
 	if (chrome === "bare") {
-		return <PaletteBody autoFocus={autoFocus} {...body} />;
+		return paletteContent;
 	}
 	return (
-		<CommandDialog onOpenChange={onOpenChange} open={open}>
-			<PaletteBody autoFocus={autoFocus} {...body} />
+		<CommandDialog
+			layout={dialogLayout}
+			onOpenChange={onOpenChange}
+			open={open}
+		>
+			{paletteContent}
 		</CommandDialog>
 	);
 }

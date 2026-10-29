@@ -25,7 +25,7 @@ function FrameRow({
 	return (
 		<div
 			className={cn(
-				"flex flex-wrap items-baseline gap-x-2 py-0.5 font-mono text-[12px] leading-[16px]",
+				"flex flex-wrap items-baseline gap-x-2 py-0.5 font-mono text-xs leading-4",
 				frame.internal && "opacity-45"
 			)}
 		>
@@ -73,11 +73,11 @@ export const StackTrace = memo(function StackTrace({
 	const header = (
 		<div className="flex flex-wrap items-baseline gap-x-2">
 			{parsed.errorType ? (
-				<span className="font-medium font-mono text-[13px] text-status-destructive">
+				<span className="type-detail font-medium font-mono text-status-destructive">
 					{parsed.errorType}
 				</span>
 			) : null}
-			<span className="min-w-0 break-words text-[13px] text-foreground/90">
+			<span className="type-detail min-w-0 break-words text-foreground/90">
 				{parsed.errorMessage}
 			</span>
 		</div>

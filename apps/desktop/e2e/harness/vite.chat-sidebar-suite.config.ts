@@ -17,16 +17,22 @@ export default defineConfig({
 	define: {
 		"process.env": {},
 	},
+	optimizeDeps: {
+		entries: [
+			"./agent-conversation-branch-proof.html",
+			"./chat-row-menus-story.html",
+			"./chat-row-selection-story.html",
+			"./keyboard-shortcuts-search-proof.html",
+		],
+
+		esbuildOptions: { target: "esnext" },
+	},
 	root: harnessDir,
 	publicDir: path.resolve(desktopRoot, "public"),
 	clearScreen: false,
 	resolve: {
 		alias: {
 			"@": desktopRoot,
-			"@ryu/app-host/third-party-plugin": path.resolve(
-				harnessDir,
-				"quick-reply-app-host-stub.ts"
-			),
 		},
 	},
 	server: {

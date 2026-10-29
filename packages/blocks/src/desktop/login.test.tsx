@@ -32,3 +32,31 @@ test("localizes the welcome copy through the shared catalog", () => {
 	expect(html).toContain("Probar Ryu sin una cuenta");
 	expect(html).not.toContain("Hey, I'm Ryu");
 });
+
+test("shows a copy sign-in link button after device authorization starts", () => {
+	const html = renderToStaticMarkup(
+		<LoginView
+			hasVerificationUri
+			userCode="ABCD1234"
+			verificationUri="https://example.test/device?user_code=ABCD1234"
+			waiting
+		/>
+	);
+
+	expect(html).toContain("Copy sign-in link");
+	expect(html).toContain("Open");
+	expect(html).toContain('aria-label="Device sign-in code"');
+	expect(html).not.toContain("Copy device code");
+	expect(html).not.toContain("bg-muted/40");
+	expect(html).not.toContain("Cancel");
+	expect(html.match(/data-filled="true"/g)).toHaveLength(8);
+});
+
+test("does not offer a copy link before a verification URL exists", () => {
+	const html = renderToStaticMarkup(
+		<LoginView hasVerificationUri userCode="ABCD1234" waiting />
+	);
+
+	expect(html).not.toContain("Copy sign-in link");
+	expect(html).toContain("Open");
+});

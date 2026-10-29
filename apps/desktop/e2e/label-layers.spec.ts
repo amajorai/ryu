@@ -2,6 +2,12 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
+declare global {
+	interface Window {
+		__revealTransitions: number;
+	}
+}
+
 for (const reveal of [false, true, "clone"]) {
 	const prefix =
 		reveal === "clone" ? "reveal-clone" : reveal ? "reveal" : "label";
@@ -19,17 +25,13 @@ for (const reveal of [false, true, "clone"]) {
 		await cdp.send("LayerTree.enable");
 		await page.emulateMedia({ reducedMotion: "no-preference" });
 		await page.addInitScript(() => {
-			Reflect.set(window, "__revealTransitions", 0);
+			window.__revealTransitions = 0;
 			document.addEventListener("transitionrun", (event) => {
 				if (
 					event.target instanceof Element &&
 					event.target.closest("[data-testid=reveal-grid]")
 				) {
-					Reflect.set(
-						window,
-						"__revealTransitions",
-						Number(Reflect.get(window, "__revealTransitions")) + 1
-					);
+					window.__revealTransitions = Number(window.__revealTransitions) + 1;
 				}
 			});
 		});
@@ -50,18 +52,15 @@ for (const reveal of [false, true, "clone"]) {
 			.toBe(0);
 		if (reveal) {
 			expect(
-				await page.evaluate(() =>
-					Number(Reflect.get(window, "__revealTransitions"))
-				)
+				await page.evaluate(() => Number(window.__revealTransitions))
 			).toBeGreaterThan(0);
 		}
 		await expect.poll(() => layers.length).toBeGreaterThan(0);
 		const reasons = await Promise.all(
-			layers.map(
-				(layer) =>
-					cdp.send("LayerTree.compositingReasons", {
-						layerId: layer.layerId,
-					}) as Promise<{ compositingReasons: string[] }>
+			layers.map((layer) =>
+				cdp.send("LayerTree.compositingReasons", {
+					layerId: layer.layerId,
+				})
 			)
 		);
 		const idleTransformHintLayers = reasons.filter((row) =>

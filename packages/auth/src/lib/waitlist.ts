@@ -31,6 +31,23 @@ export function isAdminEmail(email: string | null | undefined): boolean {
 }
 
 /**
+ * True when the allowlist names this user's address AND the address is proven.
+ *
+ * An email attribute is only an identifier until its mailbox is verified, so the
+ * allowlist confers platform-admin privilege only alongside Better Auth's
+ * `emailVerified === true`. SSO and SCIM create accounts with an IdP-asserted,
+ * unverified address; without this check, an IdP that asserts an allowlisted
+ * address would yield a platform admin. Fail closed: a missing flag is treated
+ * as unverified.
+ */
+export function isVerifiedAdminEmail(user: {
+	email?: string | null;
+	emailVerified?: boolean | null;
+}): boolean {
+	return user.emailVerified === true && isAdminEmail(user.email);
+}
+
+/**
  * The second, historically-separate admin allowlist:
  * `RYU_MARKETPLACE_ADMIN_EMAILS`, which gates marketplace moderation, staff
  * picks and the affiliate program.
@@ -167,7 +184,7 @@ export const ADMIN_ROLE = "admin";
  * The env allowlist is server-only, so on the client this resolves to the role
  * check alone. The route guard (`requireAdminSession`) and every client-side
  * admin affordance MUST use this single predicate — otherwise a role-only admin
- * is shown an Admin entry that the guard then bounces back to /dashboard, and
+ * is shown an Admin entry that the guard then bounces back to /console, and
  * every API route behind an admin page must use it too, or the page loads and
  * every request on it 403s. That was the bug this predicate exists to prevent.
  *
@@ -190,12 +207,42 @@ export const ADMIN_ROLE = "admin";
 export function isAdmin(user: {
 	role?: string | null;
 	email?: string | null;
+	emailVerified?: boolean | null;
 }): boolean {
-	return user.role === ADMIN_ROLE || isAdminEmail(user.email);
+	// The allowlist counts only for a verified address (`isVerifiedAdminEmail`);
+	// callers that do not pass `emailVerified` fall back to the stored role, which
+	// the auth hooks stamp only once the address is verified.
+	return user.role === ADMIN_ROLE || isVerifiedAdminEmail(user);
 }
 
 /**
- * True when this user is still in the queue. Admins (env allowlist) never are,
+ * The stored role an account should move to so it agrees with the allowlist,
+ * or `null` to leave it. A verified allowlisted address gains `ADMIN_ROLE`; an
+ * allowlisted address that is NOT verified loses an `ADMIN_ROLE` it carries
+ * (stamped before verification was required) and goes back to the signup role.
+ * An unlisted admin (granted through the admin plugin) is never touched.
+ */
+export function reconciledAdminRole(user: {
+	email?: string | null;
+	emailVerified?: boolean | null;
+	role?: string | null;
+}): typeof ADMIN_ROLE | typeof APPROVED_ROLE | typeof WAITLIST_ROLE | null {
+	if (!user.email) {
+		return null;
+	}
+	const verifiedAdmin = isVerifiedAdminEmail(user);
+	if (user.role === ADMIN_ROLE) {
+		if (verifiedAdmin || !isAdminEmail(user.email)) {
+			return null;
+		}
+		return isWaitlistBypassed() ? APPROVED_ROLE : WAITLIST_ROLE;
+	}
+	return verifiedAdmin ? ADMIN_ROLE : null;
+}
+
+/**
+ * True when this user is still in the queue. Admins (env allowlist, verified
+ * address) never are,
  * and nobody is when the waitlist is bypassed (no admins configured — see
  * `isWaitlistBypassed`), which also unblocks accounts stamped `WAITLIST_ROLE`
  * before `ADMIN_EMAILS` was emptied. Anonymous sessions remain gated while
@@ -206,13 +253,14 @@ export function isWaitlisted(user: {
 	isAnonymous?: boolean | null;
 	role?: string | null;
 	email?: string | null;
+	emailVerified?: boolean | null;
 }): boolean {
 	if (user.isAnonymous && !GUEST_MODE_ENABLED) {
 		return true;
 	}
 	return (
 		user.role === WAITLIST_ROLE &&
-		!isAdminEmail(user.email) &&
+		!isVerifiedAdminEmail(user) &&
 		!isWaitlistBypassed()
 	);
 }
@@ -240,17 +288,17 @@ export function referralUrlFor(code: string): string {
 }
 
 // How many invites we send per week, used only to turn a queue position into a
-// rough wait estimate. A product assumption, NOT a commitment — tune via the
-// `WAITLIST_INVITES_PER_WEEK` env var without a deploy. Defaults to 50/week.
-const DEFAULT_INVITES_PER_WEEK = 50;
+// rough wait estimate when there is not enough approval history to measure the
+// real pace (see `observedInvitesPerWeek`). A product assumption, NOT a
+// commitment. It is a typed constant, not deployment configuration.
+export const DEFAULT_INVITES_PER_WEEK = 50;
 const WEEKS_PER_MONTH = 4.345;
 // Past this many weeks we phrase the estimate in months instead.
 const MONTHS_THRESHOLD_WEEKS = 9;
 
-/** Invites-per-week throughput, from env, clamped to a sane positive number. */
+/** The configured invites-per-week throughput the estimate falls back to. */
 export function invitesPerWeek(): number {
-	const raw = Number.parseInt(process.env.WAITLIST_INVITES_PER_WEEK ?? "", 10);
-	return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_INVITES_PER_WEEK;
+	return DEFAULT_INVITES_PER_WEEK;
 }
 
 /**
@@ -310,9 +358,7 @@ export function waitlistEtaLabel(
 		return null;
 	}
 	const perWeek =
-		typeof ratePerWeek === "number" && ratePerWeek > 0
-			? ratePerWeek
-			: invitesPerWeek();
+		ratePerWeek != null && ratePerWeek > 0 ? ratePerWeek : invitesPerWeek();
 	const weeks = Math.ceil(position / perWeek);
 	if (weeks <= 1) {
 		return "less than a week";

@@ -100,7 +100,7 @@ pub struct InstalledPackage {
 }
 
 fn package_root() -> PathBuf {
-    crate::paths::ryu_dir().join("marketplace-packages")
+    crate::paths::state_path("marketplace-packages")
 }
 
 fn package_key(id: &str) -> String {
@@ -302,7 +302,10 @@ pub fn extract_archive(bytes: &[u8]) -> Result<ExtractedPackage> {
         let mut entry = archive
             .by_index(index)
             .with_context(|| format!("reading package archive entry {index}"))?;
-        let raw_name = entry.name().to_owned();
+        let raw_name = entry
+            .name()
+            .with_context(|| format!("package archive entry {index} has an invalid name"))?
+            .into_owned();
         if entry.is_dir() || raw_name.ends_with('/') {
             continue;
         }
@@ -310,12 +313,12 @@ pub fn extract_archive(bytes: &[u8]) -> Result<ExtractedPackage> {
         if entry.size() > MAX_FILE_BYTES {
             bail!("package archive entry `{path}` is too large");
         }
-        total_bytes = total_bytes.saturating_add(entry.size());
+        let remaining_total = MAX_TOTAL_FILE_BYTES.saturating_sub(total_bytes);
+        let data = read_archive_file(&mut entry, &path, remaining_total)?;
+        total_bytes = total_bytes.saturating_add(data.len() as u64);
         if total_bytes > MAX_TOTAL_FILE_BYTES {
             bail!("package archive expands beyond the total file limit");
         }
-        let mut data = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut data)?;
         if path == PACKAGE_MANIFEST_FILE {
             if manifest_value.is_some() {
                 bail!("package archive contains duplicate {PACKAGE_MANIFEST_FILE}");
@@ -351,6 +354,20 @@ pub fn extract_archive(bytes: &[u8]) -> Result<ExtractedPackage> {
         files,
         package_digest: hex::encode(hasher.finalize()),
     })
+}
+
+fn read_archive_file(reader: &mut impl Read, path: &str, remaining_total: u64) -> Result<Vec<u8>> {
+    let mut data = Vec::new();
+    reader
+        .take(MAX_FILE_BYTES.min(remaining_total) + 1)
+        .read_to_end(&mut data)?;
+    if data.len() as u64 > MAX_FILE_BYTES {
+        bail!("package archive entry `{path}` is too large");
+    }
+    if data.len() as u64 > remaining_total {
+        bail!("package archive expands beyond the total file limit");
+    }
+    Ok(data)
 }
 
 /// Language packs are data-only overlays, not general portable packages. Keep
@@ -635,7 +652,7 @@ pub fn list() -> Result<Vec<InstalledPackage>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonical_json, safe_relative_path, InstalledPackage};
+    use super::{canonical_json, read_archive_file, safe_relative_path, InstalledPackage};
     use serde_json::json;
 
     #[test]
@@ -670,5 +687,14 @@ mod tests {
         }))
         .expect("legacy install state should deserialize");
         assert!(record.runtime_ids.is_empty());
+    }
+
+    #[test]
+    fn archive_reader_enforces_actual_decompressed_bytes() {
+        let mut entry = std::io::Cursor::new(vec![0u8; 10]);
+        assert!(read_archive_file(&mut entry, "file.bin", 5)
+            .unwrap_err()
+            .to_string()
+            .contains("total file limit"));
     }
 }

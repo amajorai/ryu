@@ -1,0 +1,1820 @@
+diff --git a/dist/finite-alpha-mask.js b/dist/finite-alpha-mask.js
+new file mode 100644
+index 000000000..ce8f83121
+--- /dev/null
++++ b/dist/finite-alpha-mask.js
+@@ -0,0 +1,74 @@
++// Finite alpha-mask provenance requires complete native source and CSS grammar proof.
++import ts from 'typescript';
++import cssTree from 'css-tree';
++import {readFileSync,realpathSync,existsSync} from 'node:fs';
++import {createRequire} from 'node:module';
++import {dirname,resolve,relative,isAbsolute} from 'node:path';
++const fail=()=>{throw new Error('unresolved alpha geometry provenance');};
++const parse=(path,text)=>ts.createSourceFile(path,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
++function rejectDynamicEvaluation(source){if(nodes(source,node=>((ts.isCallExpression(node)||ts.isNewExpression(node))&&ts.isIdentifier(node.expression)&&['eval','Function'].includes(node.expression.text))).length)fail();}
++function proveCarrierUses(source,binding,property){for(const node of nodes(source,node=>ts.isIdentifier(node)&&node.text===binding.name.text)){if(node===binding.name)continue;const parent=node.parent;if(!ts.isPropertyAccessExpression(parent)||parent.expression!==node||parent.questionDotToken)fail();if(parent.name.text===property&&!ts.isSpreadAssignment(parent.parent))fail();}}
++function nodes(root,predicate){const out=[];function visit(node){if(predicate(node))out.push(node);ts.forEachChild(node,visit);}visit(root);return out;}
++function name(node){if(ts.isIdentifier(node)||ts.isStringLiteral(node))return node.text;return null;}
++function unwrapped(node){while(node&&ts.isParenthesizedExpression(node))node=node.expression;return node;}
++function pureBinding(source,id){const defs=nodes(source,node=>(ts.isFunctionDeclaration(node)&&node.name?.text===id)||(ts.isVariableDeclaration(node)&&name(node.name)===id));if(defs.length!==1)fail();const writes=nodes(source,node=>{if(ts.isBinaryExpression(node)&&node.operatorToken.kind>=ts.SyntaxKind.FirstAssignment&&node.operatorToken.kind<=ts.SyntaxKind.LastAssignment)return nodes(node.left,x=>ts.isIdentifier(x)&&x.text===id).length>0;if(ts.isPrefixUnaryExpression(node)||ts.isPostfixUnaryExpression(node))return [ts.SyntaxKind.PlusPlusToken,ts.SyntaxKind.MinusMinusToken].includes(node.operator)&&nodes(node.operand,x=>ts.isIdentifier(x)&&x.text===id).length>0;return false;});if(writes.length)fail();const def=defs[0];if(ts.isVariableDeclaration(def)&&!(def.parent.flags&ts.NodeFlags.Const))fail();return def;}
++function pureScalar(source,id,seen=new Set()){if(seen.has(id))fail();const def=pureBinding(source,id);if(!ts.isVariableDeclaration(def)||!def.initializer)fail();return scalar(def.initializer,source,new Map(),new Set([...seen,id]));}
++function condition(node,params){node=unwrapped(node);if(ts.isIdentifier(node)&&params.has(node.text))return params.get(node.text);if(node.kind===ts.SyntaxKind.TrueKeyword)return true;if(node.kind===ts.SyntaxKind.FalseKeyword)return false;if(ts.isPrefixUnaryExpression(node)&&node.operator===ts.SyntaxKind.ExclamationToken)return !condition(node.operand,params);if(ts.isBinaryExpression(node)){if(node.operatorToken.kind===ts.SyntaxKind.BarBarToken)return condition(node.left,params)||condition(node.right,params);if(node.operatorToken.kind===ts.SyntaxKind.AmpersandAmpersandToken)return condition(node.left,params)&&condition(node.right,params);}fail();}
++function scalar(node,source,params,seen=new Set(),locals=new Map()){node=unwrapped(node);if(ts.isStringLiteral(node)||ts.isNoSubstitutionTemplateLiteral(node))return node.text;if(ts.isNumericLiteral(node))return Number(node.text);if(ts.isIdentifier(node)){if(params.has(node.text))fail();if(locals.has(node.text))return locals.get(node.text);return pureScalar(source,node.text,seen);}if(ts.isConditionalExpression(node))return scalar(condition(node.condition,params)?node.whenTrue:node.whenFalse,source,params,seen,locals);if(ts.isTemplateExpression(node)){let text=node.head.text;for(const part of node.templateSpans){const value=scalar(part.expression,source,params,seen,locals);if(!['number','string'].includes(typeof value))fail();text+=String(value)+part.literal.text;}return text;}fail();}
++function styleObject(node,source,params,locals){node=unwrapped(node);if(!ts.isObjectLiteralExpression(node)||node.properties.length!==2)fail();const fields=new Map();for(const property of node.properties){if(!ts.isPropertyAssignment(property)||fields.has(name(property.name)))fail();const key=name(property.name);if(!['maskImage','WebkitMaskImage'].includes(key))fail();fields.set(key,scalar(property.initializer,source,params,new Set(),locals));}if(fields.size!==2||fields.get('maskImage')!==fields.get('WebkitMaskImage'))fail();return fields.get('maskImage');}
++function returnsForCase(fn,source,params){if(!fn.body||!ts.isBlock(fn.body))fail();const locals=new Map();for(const statement of fn.body.statements){if(ts.isIfStatement(statement)){if(statement.elseStatement)fail();if(condition(statement.expression,params)){const body=ts.isBlock(statement.thenStatement)?statement.thenStatement.statements:[statement.thenStatement];if(body.length!==1||!ts.isReturnStatement(body[0])||body[0].expression)fail();return undefined;}}else if(ts.isVariableStatement(statement)){if(!(statement.declarationList.flags&ts.NodeFlags.Const))fail();for(const declaration of statement.declarationList.declarations){if(!ts.isIdentifier(declaration.name)||!declaration.initializer||locals.has(declaration.name.text))fail();pureBinding(source,declaration.name.text);locals.set(declaration.name.text,scalar(declaration.initializer,source,params,new Set(),locals));}}else if(ts.isReturnStatement(statement)&&statement.expression){return styleObject(statement.expression,source,params,locals);}else fail();}fail();}
++export function provesNeutralAlphaMask(value){try{if(typeof value!=='string')return false;const ast=cssTree.parse(value,{context:'value'});if(cssTree.lexer.matchProperty('mask-image',ast).error)return false;let functions=0,gradients=0,opaque=0,transparent=0;cssTree.walk(ast,node=>{if(node.type==='Function'){if(node.name==='linear-gradient'){functions++;gradients++;}else if(node.name!=='calc')fail();}else if(node.type==='Hash'){if(!['000','000000'].includes(node.value.toLowerCase()))fail();opaque++;}else if(node.type==='Identifier'){if(node.name==='transparent')transparent++;else if(node.name==='black')opaque++;else if(!['to','right','left','top','bottom'].includes(node.name))fail();}else if(node.type==='Dimension'){if(!Number.isFinite(Number(node.value))||!['px','rem','em','vw','vh'].includes(node.unit))fail();}else if(node.type==='Percentage'||node.type==='Number'){if(!Number.isFinite(Number(node.value)))fail();}else if(!['Value','WhiteSpace','Operator'].includes(node.type))fail();});return functions===1&&gradients===1&&opaque>0&&transparent>0;}catch{return false;}}
++export function inferMaskFactory(sourceText,functionName,path='native-producer.tsx'){try{const source=parse(path,sourceText);rejectDynamicEvaluation(source);const fn=pureBinding(source,functionName);if(!ts.isFunctionDeclaration(fn)||fn.asteriskToken||fn.modifiers?.some(modifier=>modifier.kind===ts.SyntaxKind.AsyncKeyword)||fn.parameters.length!==2||fn.parameters.some(parameter=>!ts.isIdentifier(parameter.name)||parameter.initializer||parameter.dotDotDotToken))fail();const outputs=[];for(const first of [false,true])for(const second of [false,true]){const params=new Map([[fn.parameters[0].name.text,first],[fn.parameters[1].name.text,second]]);outputs.push(returnsForCase(fn,source,params));}if(outputs.filter(value=>value===undefined).length!==1||new Set(outputs).size!==4||!outputs.every(value=>value===undefined||provesNeutralAlphaMask(value)))fail();return {outputs};}catch{return null;}}
++function sourceFilePath(file) {
++ if (!/\.(?:ts|tsx|mts|cts)$/.test(file) || /\.d\.(?:ts|mts|cts)$/.test(file)) fail();
++ return realpathSync(file);
++}
++function exportLeaves(entry, wildcard, packageDirectory) {
++ if (typeof entry === 'string') {
++  if (!entry.startsWith('./') || /[?#]/.test(entry)) fail();
++  const target=entry.includes('*') ? (wildcard===null ? fail() : entry.replaceAll('*',wildcard)) : entry;
++  const file=sourceFilePath(resolve(packageDirectory,target));
++  if (relative(packageDirectory,file).startsWith('..') || isAbsolute(relative(packageDirectory,file))) fail();
++  return [file];
++ }
++ if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !Object.keys(entry).length || Object.keys(entry).some(key=>key.startsWith('.'))) fail();
++ return Object.values(entry).flatMap(value=>exportLeaves(value,wildcard,packageDirectory));
++}
++export function proveRuntimeSource(specifier,consumerPath,typeResolvedFile) {
++ try {
++  const typed=sourceFilePath(typeResolvedFile);
++  const resolveNative=createRequire(consumerPath).resolve;
++  const runtime=sourceFilePath(resolveNative(specifier));
++  if (typed!==runtime) fail();
++  if (specifier.startsWith('./')||specifier.startsWith('../')) {
++   if (!/\.(?:ts|tsx|mts|cts)$/.test(specifier)||realpathSync(resolve(dirname(consumerPath),specifier))!==runtime) fail();
++   return {file:runtime,kind:'explicit-relative-source'};
++  }
++  if (specifier.startsWith('#')||specifier.startsWith('/')||specifier.includes(':')) fail();
++  const segments=specifier.split('/');const packageName=specifier.startsWith('@')?segments.slice(0,2).join('/'):segments[0];
++  if (!packageName||packageName==='@'||segments.some(segment=>['.','..',''].includes(segment))) fail();
++  let packageDirectory=dirname(runtime),manifest;
++  for (;;) {
++   const path=resolve(packageDirectory,'package.json');
++   if (existsSync(path)) { const candidate=JSON.parse(readFileSync(path,'utf8'));if(candidate.name===packageName){manifest=candidate;break;} }
++   const parent=dirname(packageDirectory);if(parent===packageDirectory)fail();packageDirectory=parent;
++  }
++  if ('typesVersions' in manifest || !manifest.exports) fail();
++  const subpath=specifier.slice(packageName.length);const key=subpath?'.'+subpath:'.';let entry,wildcard=null;
++  const map=manifest.exports;
++  if(typeof map==='string'||(map&&typeof map==='object'&&!Array.isArray(map)&&Object.keys(map).every(key=>!key.startsWith('.')))){if(key!=='.')fail();entry=map;}
++  else {
++   if(!map||typeof map!=='object'||Array.isArray(map)||Object.keys(map).some(key=>!key.startsWith('.')))fail();
++   if(Object.hasOwn(map,key))entry=map[key];
++   else {
++    const matches=Object.keys(map).filter(pattern=>pattern.split('*').length===2).map(pattern=>{const[prefix,suffix]=pattern.split('*');return key.startsWith(prefix)&&key.endsWith(suffix)&&key.length>=prefix.length+suffix.length?{pattern,prefix,suffix}:null;}).filter(Boolean).sort((a,b)=>b.prefix.length-a.prefix.length||b.pattern.length-a.pattern.length);
++    if(!matches.length)fail();const chosen=matches[0];wildcard=key.slice(chosen.prefix.length,key.length-chosen.suffix.length);entry=map[chosen.pattern];
++   }
++  }
++  const alternatives=exportLeaves(entry,wildcard,packageDirectory);
++  if(!alternatives.length||alternatives.some(file=>file!==runtime))fail();
++  return {file:runtime,kind:'single-physical-package-export',packageDirectory,packageName,key,branches:alternatives.length};
++ } catch { return null; }
++}
++
++export function inferImportedStyle({consumerPath,consumerText,bindingName,property,compilerOptions}){try{const consumer=parse(consumerPath,consumerText);rejectDynamicEvaluation(consumer);const binding=pureBinding(consumer,bindingName);if(!ts.isVariableDeclaration(binding)||!binding.initializer||!ts.isCallExpression(binding.initializer)||!ts.isIdentifier(binding.initializer.expression))fail();proveCarrierUses(consumer,binding,property);const callName=binding.initializer.expression.text;const imports=consumer.statements.filter(ts.isImportDeclaration).flatMap(declaration=>{if(declaration.importClause?.isTypeOnly||!declaration.importClause?.namedBindings||!ts.isNamedImports(declaration.importClause.namedBindings))return[];return declaration.importClause.namedBindings.elements.filter(specifier=>!specifier.isTypeOnly&&specifier.name.text===callName).map(specifier=>({declaration,exportName:(specifier.propertyName??specifier.name).text}));});if(imports.length!==1)fail();const {declaration,exportName}=imports[0];if(!ts.isStringLiteral(declaration.moduleSpecifier))fail();const resolved=ts.resolveModuleName(declaration.moduleSpecifier.text,consumerPath,compilerOptions,ts.sys).resolvedModule;if(!resolved||resolved.resolvedFileName.endsWith('.d.ts'))fail();const runtimeProof=proveRuntimeSource(declaration.moduleSpecifier.text,consumerPath,resolved.resolvedFileName);if(!runtimeProof)fail();const producerPath=runtimeProof.file;const producerText=readFileSync(producerPath,'utf8');const producer=parse(producerPath,producerText);rejectDynamicEvaluation(producer);const fn=pureBinding(producer,exportName);if(!ts.isFunctionDeclaration(fn)||fn.asteriskToken||fn.modifiers?.some(modifier=>modifier.kind===ts.SyntaxKind.AsyncKeyword)||!fn.body||!fn.modifiers?.some(modifier=>modifier.kind===ts.SyntaxKind.ExportKeyword))fail();if(nodes(fn.body,node=>node.kind===ts.SyntaxKind.ThisKeyword).length)fail();const directReturns=fn.body.statements.filter(ts.isReturnStatement);if(directReturns.length!==1||fn.body.statements.at(-1)!==directReturns[0])fail();if(fn.body.statements.some(statement=>ts.isIfStatement(statement)||ts.isTryStatement(statement)||ts.isSwitchStatement(statement)||ts.isForStatement(statement)||ts.isWhileStatement(statement)))fail();const result=unwrapped(directReturns[0].expression);if(!result||!ts.isObjectLiteralExpression(result)||result.properties.some(node=>(!ts.isPropertyAssignment(node)&&!ts.isShorthandPropertyAssignment(node))||name(node.name)===null)||new Set(result.properties.map(node=>name(node.name))).size!==result.properties.length)fail();const matches=result.properties.filter(node=>name(node.name)===property);if(matches.length!==1||!ts.isPropertyAssignment(matches[0]))fail();const style=unwrapped(matches[0].initializer);if(!ts.isCallExpression(style)||!ts.isIdentifier(style.expression)||style.arguments.length!==2)fail();const proof=inferMaskFactory(producerText,style.expression.text,producerPath);return proof?{...proof,producerPath,exportName,factory:style.expression.text,runtimeProof}:null;}catch{return null;}}
+diff --git a/dist/imported-css-classes.js b/dist/imported-css-classes.js
+new file mode 100644
+index 000000000..c3c4221d2
+--- /dev/null
++++ b/dist/imported-css-classes.js
+@@ -0,0 +1,188 @@
++import ts from 'typescript';
++import cssTree from 'css-tree';
++import {readFileSync,realpathSync} from 'node:fs';
++import {dirname,resolve} from 'node:path';
++import {createRequire} from 'node:module';
++
++// Resolve only an unconditional literal package CSS export. Native Node resolution
++// supplies the selected physical package/target; aliases and conditional branches
++// are not guessed from a label or from a package's unrelated CSS files.
++function ordinaryCssTarget(spec, owner) {
++  if (/^(?:\.\/|\.\.\/)/.test(spec)) {
++    if(!/^(?:\.\/|\.\.\/).+\.css$/.test(spec)||spec.endsWith('.module.css'))return;
++    return realpathSync(resolve(dirname(owner),spec));
++  }
++  if (!/^(?:@[\w.-]+\/)?[\w.-]+(?:\/[\w./-]+)*$/.test(spec) || spec.startsWith('.') || spec.includes('/../')) return;
++  const pieces=spec.split('/');
++  const packageName=spec.startsWith('@')?pieces.slice(0,2).join('/'):pieces[0];
++  const subpath='.'+(pieces.slice(spec.startsWith('@')?2:1).length?'/'+pieces.slice(spec.startsWith('@')?2:1).join('/'):'');
++  const native=createRequire(owner);
++  let selected;try{selected=realpathSync(native.resolve(spec));}catch{return;}
++  let packageRoot;
++  // Node self-references take priority over node_modules lookup paths.
++  for(let folder=dirname(owner);;folder=dirname(folder)){
++    try{const pkg=JSON.parse(readFileSync(resolve(folder,'package.json'),'utf8'));if(pkg.name===packageName&&pkg.exports!==undefined){packageRoot=folder;break;}}catch{}
++    if(dirname(folder)===folder)break;
++  }
++  if(!packageRoot){
++    for(const folder of native.resolve.paths(packageName)??[]){
++      const candidate=resolve(folder,packageName);
++      try{readFileSync(resolve(candidate,'package.json'),'utf8');packageRoot=candidate;break;}catch{}
++    }
++  }
++  if(!packageRoot)return;
++  let exported;try{
++    const pkg=JSON.parse(readFileSync(resolve(packageRoot,'package.json'),'utf8'));
++    exported=typeof pkg.exports==='string'&&subpath==='.'?pkg.exports:
++      pkg.exports&&typeof pkg.exports==='object'&&!Array.isArray(pkg.exports)&&Object.hasOwn(pkg.exports,subpath)?pkg.exports[subpath]:undefined;
++  }catch{return;}
++  if(typeof exported!=='string'||!exported.startsWith('./')||!exported.endsWith('.css'))return;
++  let expected;try{expected=realpathSync(resolve(packageRoot,exported));}catch{return;}
++  return expected===selected?selected:undefined;
++}
++
++// Static literal publication, not arbitrary string/template discovery. Bindings
++// are resolved lexically and the DOM form must create, fill, then attach the SAME
++// local native style element through an unshadowed document head/body publisher.
++function publishedInlineCss(source) {
++  const nodeScopes=new WeakMap(), bindings=[];
++  const rootScope={parent:null,bindings:new Map(),functionScope:true};
++  function bind(name,node,scope){
++    if(ts.isIdentifier(name)){const previous=scope.bindings.get(name.text);scope.bindings.set(name.text,previous===undefined?node:false);bindings.push({name:name.text,node,scope});}
++    else if(ts.isObjectBindingPattern(name)||ts.isArrayBindingPattern(name))for(const element of name.elements)if(ts.isBindingElement(element))bind(element.name,node,scope);
++  }
++  function walk(node,scope){
++    if((ts.isFunctionDeclaration(node)||ts.isClassDeclaration(node)||ts.isEnumDeclaration(node))&&node.name)bind(node.name,node,scope);
++    if(ts.isFunctionLike(node)||ts.isBlock(node)||ts.isCatchClause(node)||ts.isForStatement(node)||ts.isForOfStatement(node)||ts.isForInStatement(node))scope={parent:scope,bindings:new Map(),functionScope:ts.isFunctionLike(node)};
++    nodeScopes.set(node,scope);
++    if((ts.isFunctionExpression(node)||ts.isClassExpression(node))&&node.name)bind(node.name,node,scope);
++    if(ts.isParameter(node))bind(node.name,node,scope);
++    if(ts.isVariableDeclaration(node)){
++      let target=scope;
++      if(ts.isVariableDeclarationList(node.parent)&&!(node.parent.flags&(ts.NodeFlags.Const|ts.NodeFlags.Let)))while(target.parent&&!target.functionScope)target=target.parent;
++      bind(node.name,node,target);
++    }
++    if(ts.isImportClause(node)&&!node.isTypeOnly&&node.name)bind(node.name,node,scope);
++    if(ts.isImportSpecifier(node)&&!node.isTypeOnly&&!node.parent.parent.isTypeOnly)bind(node.name,node,scope);
++    if(ts.isNamespaceImport(node)&&!node.parent.isTypeOnly)bind(node.name,node,scope);
++    ts.forEachChild(node,child=>walk(child,scope));
++  }
++  walk(source,rootScope);
++  function lookup(identifier){let scope=nodeScopes.get(identifier);while(scope){if(scope.bindings.has(identifier.text))return scope.bindings.get(identifier.text);scope=scope.parent;}return undefined;}
++  function constant(node){return ts.isVariableDeclaration(node)&&ts.isVariableDeclarationList(node.parent)&&!!(node.parent.flags&ts.NodeFlags.Const)&&ts.isIdentifier(node.name);}
++  const writes=new Set();
++  function assignmentTarget(node){if(ts.isIdentifier(node))return lookup(node);return undefined;}
++  function scanWrites(node){
++    if(ts.isBinaryExpression(node)&&node.operatorToken.kind>=ts.SyntaxKind.FirstAssignment&&node.operatorToken.kind<=ts.SyntaxKind.LastAssignment){const target=assignmentTarget(node.left);if(target)writes.add(target);}
++    if((ts.isPrefixUnaryExpression(node)||ts.isPostfixUnaryExpression(node))&&(node.operator===ts.SyntaxKind.PlusPlusToken||node.operator===ts.SyntaxKind.MinusMinusToken)){const target=assignmentTarget(node.operand);if(target)writes.add(target);}
++    ts.forEachChild(node,scanWrites);
++  }
++  scanWrites(source);
++  function literal(node,seen=new Set()){
++    if(ts.isStringLiteral(node)||ts.isNoSubstitutionTemplateLiteral(node))return node.text;
++    if(ts.isIdentifier(node)){const binding=lookup(node);if(!binding||!constant(binding)||writes.has(binding)||seen.has(binding)||!binding.initializer)return;seen.add(binding);return literal(binding.initializer,seen);}
++  }
++  function nativeDocument(node){return ts.isIdentifier(node)&&node.text==='document'&&lookup(node)===undefined;}
++  function nativeAttach(call,binding){
++    if(!ts.isCallExpression(call)||call.arguments.length!==1||!ts.isIdentifier(call.arguments[0])||lookup(call.arguments[0])!==binding||!ts.isPropertyAccessExpression(call.expression))return false;
++    const method=call.expression;if(!['append','appendChild'].includes(method.name.text)||!ts.isPropertyAccessExpression(method.expression))return false;
++    const host=method.expression;return ['head','body','documentElement'].includes(host.name.text)&&nativeDocument(host.expression);
++  }
++  function reference(node){
++    const p=node.parent;
++    if(ts.isPropertyAccessExpression(p)&&p.name===node)return false;
++    if(ts.isJsxAttribute(p)&&p.name===node)return false;
++    if((ts.isJsxOpeningElement(p)||ts.isJsxClosingElement(p)||ts.isJsxSelfClosingElement(p))&&p.tagName===node)return false;
++    if((ts.isPropertyAssignment(p)||ts.isMethodDeclaration(p)||ts.isGetAccessorDeclaration(p)||ts.isSetAccessorDeclaration(p))&&p.name===node)return false;
++    if(ts.isBindingElement(p)&&p.propertyName===node)return false;
++    for(let n=p;n&&!ts.isStatement(n)&&!ts.isExpression(n);n=n.parent)if(ts.isTypeNode(n))return false;
++    return true;
++  }
++  function statement(node){for(let n=node;n;n=n.parent)if(ts.isStatement(n))return n;}
++  const css=[];
++  function jsx(node){
++    if(ts.isJsxElement(node)&&ts.isIdentifier(node.openingElement.tagName)&&node.openingElement.tagName.text==='style'){
++      const attrs=node.openingElement.attributes.properties;
++      const valid=attrs.every(attr=>ts.isJsxAttribute(attr)&&!['dangerouslySetInnerHTML','jsx'].includes(attr.name.getText(source))&&(attr.name.getText(source)!=='type'||attr.initializer&&ts.isStringLiteral(attr.initializer)&&['','text/css'].includes(attr.initializer.text)));
++      const children=node.children.filter(n=>!ts.isJsxText(n)||n.text.trim());
++      if(valid&&children.length===1){const child=children[0];const text=ts.isJsxExpression(child)&&child.expression?literal(child.expression):ts.isJsxText(child)?child.text:undefined;if(text!==undefined)css.push(text);}
++    }
++    ts.forEachChild(node,jsx);
++  }
++  jsx(source);
++  for(const {node:binding} of bindings){
++    if(!constant(binding)||writes.has(binding)||!binding.initializer||!ts.isCallExpression(binding.initializer))continue;
++    const create=binding.initializer;if(create.arguments.length!==1||!ts.isStringLiteral(create.arguments[0])||create.arguments[0].text!=='style'||!ts.isPropertyAccessExpression(create.expression)||create.expression.name.text!=='createElement'||!nativeDocument(create.expression.expression))continue;
++    const createdStatement=statement(binding);
++    let text,fillEnd,fillStatement,publisher=false,ambiguous=false,fills=0;
++    function inspect(node){
++      if(ts.isIdentifier(node)&&reference(node)&&lookup(node)===binding&&node!==binding.name){
++        const parent=node.parent;
++        if(ts.isPropertyAccessExpression(parent)&&parent.expression===node&&ts.isBinaryExpression(parent.parent)&&parent.parent.left===parent&&parent.parent.operatorToken.kind===ts.SyntaxKind.EqualsToken){
++          const write=parent.parent;
++          if(parent.name.text==='textContent'){fills++;text=literal(write.right);fillEnd=write.end;fillStatement=statement(write);if(text===undefined||!ts.isExpressionStatement(fillStatement)||fillStatement.expression!==write||fillStatement.parent!==createdStatement.parent)ambiguous=true;}
++          else if(parent.name.text!=='type'||!['','text/css'].includes(literal(write.right)))ambiguous=true;
++        }else if(ts.isCallExpression(parent)&&nativeAttach(parent,binding)){
++          const attachedStatement=statement(parent);if(fillEnd!==undefined&&fillEnd<parent.getStart(source)&&ts.isExpressionStatement(attachedStatement)&&attachedStatement.expression===parent&&attachedStatement.parent===createdStatement.parent&&fillStatement.parent===attachedStatement.parent)publisher=true;else ambiguous=true;
++        }else if(!(ts.isPropertyAccessExpression(parent)&&parent.expression===node&&parent.name.text==='remove'&&ts.isCallExpression(parent.parent)&&parent.parent.arguments.length===0))ambiguous=true;
++      }
++      ts.forEachChild(node,inspect);
++    }
++    inspect(source);
++    if(!ambiguous&&fills===1&&publisher&&text!==undefined)css.push(text);
++  }
++  return css;
++}
++
++// Only a literal runtime side-effect import of ordinary CSS publishes these
++// selector names. CSS-module bindings do not publish their unscoped names.
++export function importedCssClasses(fromFile) {
++  const classes=new Set();
++  try {
++    const source=ts.createSourceFile(fromFile,readFileSync(fromFile,'utf8'),ts.ScriptTarget.Latest,true);
++    if(source.parseDiagnostics.length)return classes;
++    const files=new Map();
++    // Match the theme reader's 64 import-hop bound; width does not discard valid stylesheets.
++    function read(spec,owner,depth=0) {
++      if(spec.endsWith('.module.css'))return;
++      let target;try{target=ordinaryCssTarget(spec,owner);}catch{return;}
++      if(!target||!target.endsWith('.css'))return;
++      if(target.endsWith('.module.css')||depth>64)return;
++      const previousDepth=files.get(target);
++      if(previousDepth!==undefined&&previousDepth<=depth)return;
++      // Revisit a shallower route so a prior deep path cannot hide descendants.
++      files.set(target,depth);
++      let ast;try{ast=cssTree.parse(readFileSync(target,'utf8'),{onParseError(error){throw error;}});}catch{return;}
++      const local=new Set();
++      cssTree.walk(ast,node=>{
++        if(node.type==='Rule'&&node.prelude)cssTree.walk(node.prelude,selector=>{if(selector.type==='ClassSelector')local.add(selector.name);});
++      });
++      // Native @import declarations only run in the root import prefix.
++      // Charset and layer statements may precede them; ordinary rules and
++      // block at-rules close the prefix. Nested imports never load stylesheets.
++      let importPrefix=true;
++      ast.children.forEach(node=>{
++        if(node.type==='Comment'||node.type==='WhiteSpace')return;
++        if(node.type!=='Atrule'){importPrefix=false;return;}
++        const name=node.name.toLowerCase();
++        if(importPrefix&&name==='import'&&!node.block){
++          const first=node.prelude?.children?.first();
++          if(first?.type==='String'&&!first.value.includes('\\')){
++            const spec=first.value.replace(/^(["'])(.*)\1$/, '$2');
++            read(spec,target,depth+1);
++          }
++        }else if(!(importPrefix&&!node.block&&(name==='charset'||name==='layer'))){
++          importPrefix=false;
++        }
++      });
++      for(const name of local)classes.add(name);
++    }
++    for(const text of publishedInlineCss(source)){
++      try{const ast=cssTree.parse(text,{onParseError(error){throw error;}});cssTree.walk(ast,node=>{if(node.type==='Rule'&&node.prelude)cssTree.walk(node.prelude,selector=>{if(selector.type==='ClassSelector')classes.add(selector.name);});});}catch{}
++    }
++    for(const node of source.statements){
++      if(ts.isImportDeclaration(node)&&!node.importClause&&ts.isStringLiteral(node.moduleSpecifier))read(node.moduleSpecifier.text,fromFile);
++    }
++  }catch{}
++  return classes;
++}
+diff --git a/dist/index.js b/dist/index.js
+index 7c65ec371..04507578f 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,3 +1,7 @@
++import {isReactEmailConfigUtility} from './react-email-config-owner.js';
++import {importedCssClasses} from './imported-css-classes.js';
++import {inferImportedStyle} from './finite-alpha-mask.js';
++import nativeTs from 'typescript';
+ import { a as isArbitraryValue$1, c as normalizeClass, d as splitVariants, f as withBase, i as OPACITY_MODIFIER, l as replaceClass, n as editDistance, o as isMarkerClass, r as COLOR_PREFIX, s as isPaletteClass, t as didYouMean, u as splitClasses } from "./similar.js";
+ import { createRequire } from "node:module";
+ import * as fs from "node:fs";
+@@ -1687,41 +1691,42 @@ function readPackageJson(dir) {
+ 	});
+ 	return json;
+ }
+-function pickTarget(value) {
++function pickTarget(value, css = false) {
+ 	if (typeof value === "string") return value;
+ 	if (Array.isArray(value)) {
+ 		for (const item of value) {
+-			const picked = pickTarget(item);
++			const picked = pickTarget(item, css);
+ 			if (picked) return picked;
+ 		}
+ 		return null;
+ 	}
+ 	if (value && typeof value === "object") {
+ 		for (const key of [
++			...(css ? ["style"] : []),
+ 			"import",
+ 			"default",
+ 			"require",
+ 			"node",
+ 			"types"
+ 		]) if (key in value) {
+-			const picked = pickTarget(value[key]);
++			const picked = pickTarget(value[key], css);
+ 			if (picked) return picked;
+ 		}
+ 		for (const key of Object.keys(value)) {
+ 			if (key.startsWith(".")) continue;
+-			const picked = pickTarget(value[key]);
++			const picked = pickTarget(value[key], css);
+ 			if (picked) return picked;
+ 		}
+ 	}
+ 	return null;
+ }
+-function mapSubpath(map, subpath) {
++function mapSubpath(map, subpath, css = false) {
+ 	const keys = Object.keys(map).filter((key) => key.startsWith(".") || key.startsWith("#")).sort((a, b) => b.length - a.length);
+ 	const out = [];
+ 	for (const key of keys) {
+ 		const captured = matchPattern(key, subpath);
+ 		if (captured === null) continue;
+-		const target = pickTarget(map[key]);
++		const target = pickTarget(map[key], css);
+ 		if (target) out.push(expand(target, captured));
+ 	}
+ 	return out;
+@@ -1772,8 +1777,8 @@ function candidatesFor(spec, fromDir, rootDir, options = {}) {
+ 	const subpath = pkg.subpath ? `./${pkg.subpath}` : ".";
+ 	const exportsMap = readPackageJson(dir)?.exports;
+ 	if (exportsMap && typeof exportsMap === "object") {
+-		for (const target of mapSubpath(exportsMap, subpath)) out.push(path.resolve(dir, target));
+-		for (const target of mapSubpath(exportsMap, `${subpath}/*`)) out.push(path.dirname(path.resolve(dir, target)));
++		for (const target of mapSubpath(exportsMap, subpath, options.css)) out.push(path.resolve(dir, target));
++		for (const target of mapSubpath(exportsMap, `${subpath}/*`, options.css)) out.push(path.dirname(path.resolve(dir, target)));
+ 	}
+ 	if (pkg.subpath) {
+ 		out.push(path.join(dir, pkg.subpath));
+@@ -1792,9 +1797,9 @@ function resolveDirectory(spec, fromDir, rootDir) {
+ }
+ function resolveFileUncached(spec, fromDir, rootDir, extensions = EXTENSIONS, options = {}) {
+ 	for (const candidate of candidatesFor(spec, fromDir, rootDir, options)) {
+-		if (isFile(candidate)) return realpath(candidate);
++		if (isFile(candidate) && (!options.css || path.extname(candidate) === ".css")) return realpath(candidate);
+ 		const ext = path.extname(candidate);
+-		for (const source of SOURCE_FOR_JS[ext] ?? []) {
++		for (const source of options.css ? [] : SOURCE_FOR_JS[ext] ?? []) {
+ 			const swapped = candidate.slice(0, -ext.length) + source;
+ 			if (isFile(swapped)) return realpath(swapped);
+ 		}
+@@ -1807,7 +1812,7 @@ function resolveFileUncached(spec, fromDir, rootDir, extensions = EXTENSIONS, op
+ 	return null;
+ }
+ function resolveFile(spec, fromDir, rootDir, extensions = EXTENSIONS, options = {}) {
+-	const key = `resolve:${fromDir}|${rootDir}|${spec}|${extensions.join(",")}|${options.skipPaths ? 1 : 0}`;
++	const key = `resolve:${fromDir}|${rootDir}|${spec}|${extensions.join(",")}|${options.skipPaths ? 1 : 0}|${options.css ? 1 : 0}`;
+ 	return memoize(key, () => resolveFileUncached(spec, fromDir, rootDir, extensions, options));
+ }
+ 
+@@ -1986,11 +1991,8 @@ function parseClassSelectors(css) {
+ 	for (const match of stripped.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) out.add(match[1]);
+ 	return out;
+ }
+-function isPackageFile(file) {
+-	return file.includes(`${path.sep}node_modules${path.sep}`);
+-}
+-function readTheme(cssFile, seen, read, fromPackage = false) {
+-	if (seen.has(cssFile) || seen.size > 64) return;
++function readTheme(cssFile, seen, read, depth = 0) {
++	if (seen.has(cssFile) || depth > 64) return;
+ 	seen.add(cssFile);
+ 	read.files.push(cssFile);
+ 	let css;
+@@ -2005,7 +2007,7 @@ function readTheme(cssFile, seen, read, fromPackage = false) {
+ 	const root = packageRoot(cssFile) ?? dir;
+ 	for (const spec of parseImports(css)) {
+ 		if (spec === "tailwindcss" || spec.startsWith("tailwindcss/")) read.tailwind = true;
+-		const target = resolveFile(spec, dir, root, [".css"]);
++		const target = resolveFile(spec, dir, root, [".css"], { css: true });
+ 		if (!target) {
+ 			read.missingImports.push({
+ 				spec,
+@@ -2014,9 +2016,11 @@ function readTheme(cssFile, seen, read, fromPackage = false) {
+ 			});
+ 			continue;
+ 		}
+-		readTheme(target, seen, read, fromPackage || isPackageFile(target));
++		readTheme(target, seen, read, depth + 1);
+ 	}
+-	if (!fromPackage) {
++	// Tailwind owns the foundational raw palette. Imported component packages
++	// own their declared semantic tokens, including isolated document themes.
++	if (readPackageJson(root)?.name !== "tailwindcss") {
+ 		const { values, themeNames, declarations } = parseDeclarations(css);
+ 		applyTokenDeclarations(declarations, read.tokens);
+ 		for (const [name, value] of values) read.values.set(name, value);
+@@ -2025,7 +2029,7 @@ function readTheme(cssFile, seen, read, fromPackage = false) {
+ 	}
+ }
+ function signatureOf$3(read) {
+-	return [...read.files.map((file) => `${file}:${mtimeOf(file) ?? "missing"}`), ...read.missingImports.map(({ spec, fromDir, rootDir }) => `${fromDir}:${spec}:${resolveFile(spec, fromDir, rootDir, [".css"]) ?? "missing"}`)].join("|");
++	return [...read.files.map((file) => `${file}:${mtimeOf(file) ?? "missing"}`), ...read.missingImports.map(({ spec, fromDir, rootDir }) => `${fromDir}:${spec}:${resolveFile(spec, fromDir, rootDir, [".css"], { css: true }) ?? "missing"}`)].join("|");
+ }
+ function themeAt(cssFile) {
+ 	const cached = cache$3.get(cssFile);
+@@ -2219,12 +2223,12 @@ function knownClassesFor(fromFile) {
+ 	const cssFile = themeFileFor(fromFile);
+ 	if (!cssFile) return {
+ 		utilities: /* @__PURE__ */ new Set(),
+-		classes: /* @__PURE__ */ new Set()
++		classes: importedCssClasses(fromFile)
+ 	};
+ 	const { utilities, classes } = themeAt(cssFile);
+ 	return {
+ 		utilities,
+-		classes
++		classes: new Set([...classes, ...importedCssClasses(fromFile)])
+ 	};
+ }
+ 
+@@ -2726,7 +2730,38 @@ function componentFunction(bindings, name) {
+ 	else break;
+ 	return fn?.type === "FunctionDeclaration" || fn?.type === "FunctionExpression" || fn?.type === "ArrowFunctionExpression" ? fn : null;
+ }
+-function classNameBindings(fn) {
++function walkRuntime(node, visit) {
++	if (!node || typeof node.type !== "string") return;
++	if (node.type.startsWith("TS")) {
++		if (["TSAsExpression", "TSSatisfiesExpression", "TSNonNullExpression", "TSInstantiationExpression", "TSTypeAssertion"].includes(node.type)) walkRuntime(node.expression, visit);
++		return;
++	}
++	visit(node);
++	for (const key of Object.keys(node)) {
++		if (["parent", "typeAnnotation", "typeParameters", "typeArguments", "returnType"].includes(key)) continue;
++		const value = node[key];
++		if (Array.isArray(value)) for (const child of value) walkRuntime(child, visit);
++		else if (value && typeof value.type === "string") walkRuntime(value, visit);
++	}
++}
++function parseWrapperBindings(source, file) {
++	const parser = require("@typescript-eslint/parser");
++	const parsed = parser.parseForESLint(source, { filePath: file, jsx: true, range: true, sourceType: "module", ecmaVersion: "latest" });
++	const references = new WeakMap();
++	for (const scope of parsed.scopeManager.scopes) for (const ref of scope.references) if (ref.resolved) references.set(ref.identifier, ref.resolved);
++	const parents = (node, parent) => {
++		if (!node || typeof node.type !== "string") return;
++		if (parent) node.parent = parent;
++		for (const key of parsed.visitorKeys[node.type] ?? []) {
++			const value = node[key];
++			if (Array.isArray(value)) for (const child of value) parents(child, node);
++			else parents(value, node);
++		}
++	};
++	parents(parsed.ast, null);
++	return { ast: parsed.ast, variable: node => references.get(node) ?? null, parameter: (fn, name) => parsed.scopeManager.acquire(fn, true)?.set.get(name) ?? null };
++}
++function classNameBindings(fn, lexical) {
+ 	const names = /* @__PURE__ */ new Set();
+ 	const propsNames = /* @__PURE__ */ new Set();
+ 	const param = fn.params?.[0];
+@@ -2740,24 +2775,28 @@ function classNameBindings(fn) {
+ 			if (prop.type !== "Property") continue;
+ 			if ((prop.key?.name ?? prop.key?.value) !== "className") continue;
+ 			const value = prop.value?.type === "AssignmentPattern" ? prop.value.left : prop.value;
+-			if (value?.type === "Identifier") names.add(value.name);
++			if (value?.type === "Identifier") { const variable = lexical.parameter(fn, value.name); if (variable) names.add(variable); }
+ 		}
+ 		if (!names.size) {
+-			for (const prop of pattern.properties) if (prop.type === "RestElement" && prop.argument?.type === "Identifier") propsNames.add(prop.argument.name);
++			for (const prop of pattern.properties) if (prop.type === "RestElement" && prop.argument?.type === "Identifier") { const variable = lexical.parameter(fn, prop.argument.name); if (variable) propsNames.add(variable); }
+ 		}
+-	} else if (pattern.type === "Identifier") propsNames.add(pattern.name);
++	} else if (pattern.type === "Identifier") { const variable = lexical.parameter(fn, pattern.name); if (variable) propsNames.add(variable); }
+ 	return {
+ 		names,
+ 		propsNames
+ 	};
+ }
+-function forwardsClassName(expr, names, propsNames) {
++function forwardsClassName(expr, names, propsNames, lexical) {
+ 	let found = false;
+-	walk(expr, (node) => {
++	walkRuntime(expr, node => {
+ 		if (found) return;
+-		if (node.type === "Identifier" && names.has(node.name)) found = true;
+-		if (node.type === "MemberExpression" && node.object?.type === "Identifier" && propsNames.has(node.object.name) && node.property?.name === "className") found = true;
+-		if (node.type === "JSXSpreadAttribute" && node.argument?.type === "Identifier" && propsNames.has(node.argument.name)) found = true;
++		const variable = lexical.variable(node);
++		if (node.type === "Identifier" && names.has(variable) && variable?.references?.some(ref => ref.identifier === node && ref.isRead?.())) found = true;
++		if (node.type === "MemberExpression" && node.object?.type === "Identifier" && propsNames.has(lexical.variable(node.object)) && ((!node.computed && node.property?.name === "className") || (node.computed && node.property?.type === "Literal" && node.property.value === "className"))) {
++			const writeOnly = node.parent?.type === "AssignmentExpression" && node.parent.left === node && node.parent.operator === "=";
++			if (!writeOnly) found = true;
++		}
++		if (node.type === "JSXSpreadAttribute" && node.argument?.type === "Identifier" && propsNames.has(lexical.variable(node.argument))) found = true;
+ 	});
+ 	return found;
+ }
+@@ -2773,150 +2812,6 @@ function jsxElementName(node) {
+ 	};
+ 	return null;
+ }
+-function build(file, patterns, visiting, deps, parsedAst) {
+-	const wrappers = /* @__PURE__ */ new Map();
+-	let complete = true;
+-	deps.add(file);
+-	let ast = parsedAst;
+-	if (!ast) {
+-		let source;
+-		try {
+-			source = fs.readFileSync(file, "utf-8");
+-		} catch {
+-			return {
+-				wrappers,
+-				complete
+-			};
+-		}
+-		if (!source.includes("className") && !source.includes("...")) return {
+-			wrappers,
+-			complete
+-		};
+-		try {
+-			ast = parseSource(source, file);
+-		} catch {
+-			return {
+-				wrappers,
+-				complete
+-			};
+-		}
+-	}
+-	const imports = /* @__PURE__ */ new Map();
+-	for (const statement of ast.body) {
+-		if (statement.type !== "ImportDeclaration") continue;
+-		const source = statement.source?.value;
+-		if (typeof source !== "string") continue;
+-		for (const spec of statement.specifiers ?? []) {
+-			const local = spec.local?.name;
+-			if (!local) continue;
+-			const original = spec.type === "ImportSpecifier" ? spec.imported?.name ?? spec.imported?.value ?? local : spec.type === "ImportDefaultSpecifier" ? "default" : local;
+-			imports.set(local, {
+-				source,
+-				original,
+-				namespace: spec.type === "ImportNamespaceSpecifier"
+-			});
+-		}
+-	}
+-	const index = componentsFor(file);
+-	const { bindings, candidates } = indexLocalBindings(ast);
+-	const localVisiting = /* @__PURE__ */ new Set();
+-	const targetOf = (element) => {
+-		const name = jsxElementName(element);
+-		if (!name?.root) return null;
+-		const imported = imports.get(name.root);
+-		if (!imported) {
+-			if (name.property !== null) return null;
+-			if (index.has(name.root)) return {
+-				component: name.root,
+-				file: index.files.get(name.root) ?? null
+-			};
+-			return candidates.has(name.root) ? resolveDeclared(name.root) : null;
+-		}
+-		const importedName = importNameOf(imported, name.root, name.property);
+-		const binding = importedName.exportName ? definingExportOf(importedName.source, importedName.exportName, file, deps) : null;
+-		const component = componentFromImport(index, binding, importedName, patterns);
+-		if (component) return component;
+-		if (!binding) {
+-			complete = false;
+-			return index.has(importedName.name) ? {
+-				component: importedName.name,
+-				file: index.files.get(importedName.name) ?? null
+-			} : null;
+-		}
+-		if (binding.file === file || NODE_MODULES$1.test(binding.file)) return null;
+-		if (importedName.suffix) return null;
+-		if (visiting.has(binding.file)) {
+-			complete = false;
+-			return null;
+-		}
+-		const result = lookup(binding.file, binding.name, patterns, visiting, deps);
+-		if (!result.complete) complete = false;
+-		return result.target;
+-	};
+-	const resolveDeclared = (name) => {
+-		const cached = wrappers.get(name);
+-		if (cached !== void 0) return cached;
+-		if (localVisiting.has(name)) {
+-			complete = false;
+-			return null;
+-		}
+-		localVisiting.add(name);
+-		let target = null;
+-		const fn = componentFunction(bindings, name);
+-		if (fn) {
+-			const { names, propsNames } = classNameBindings(fn);
+-			if (names.size || propsNames.size) walk(fn.body, (node) => {
+-				if (target || node.type !== "JSXOpeningElement") return;
+-				if (node.attributes?.some((attr) => attr.type === "JSXAttribute" && attr.name?.name === "className" && forwardsClassName(attr.value, names, propsNames) || attr.type === "JSXSpreadAttribute" && forwardsClassName(attr, names, propsNames))) target = targetOf(node);
+-			});
+-		}
+-		localVisiting.delete(name);
+-		wrappers.set(name, target);
+-		return target;
+-	};
+-	for (const name of candidates) if (name === "default" || /^[A-Z]/.test(name)) resolveDeclared(name);
+-	return {
+-		wrappers,
+-		complete
+-	};
+-}
+-function lookup(file, exportName, patterns, visiting, deps, parsedAst) {
+-	deps?.add(file);
+-	if (mtimeOf(file) === null) return {
+-		target: null,
+-		complete: false
+-	};
+-	const key = `${file}|${patterns.map((p) => p.source).join(",")}`;
+-	const cached = cache$1.get(key);
+-	const now = Date.now();
+-	if (cached && (now - cached.checkedAt < 1e3 || signatureOf(cached.deps) === cached.signature)) {
+-		if (now - cached.checkedAt >= 1e3) cached.checkedAt = now;
+-		if (deps) for (const dep of cached.deps) deps.add(dep);
+-		return {
+-			target: cached.wrappers.get(exportName) ?? null,
+-			complete: true
+-		};
+-	}
+-	visiting.add(file);
+-	const own = /* @__PURE__ */ new Set();
+-	const { wrappers, complete } = build(file, patterns, visiting, own, parsedAst);
+-	visiting.delete(file);
+-	if (deps) for (const dep of own) deps.add(dep);
+-	const depList = [...own];
+-	if (complete) cache$1.set(key, {
+-		deps: depList,
+-		signature: signatureOf(depList),
+-		checkedAt: now,
+-		wrappers
+-	});
+-	return {
+-		target: wrappers.get(exportName) ?? null,
+-		complete
+-	};
+-}
+-function wrapperTargetOf(file, exportName, patterns = [], parsedAst) {
+-	return lookup(file, exportName, patterns, /* @__PURE__ */ new Set(), void 0, parsedAst).target;
+-}
+ 
+ //#endregion
+ //#region src/rules/messages.ts
+@@ -3097,7 +2992,7 @@ const DEFAULT_VARIANT_FUNCTIONS = ["cva", "tv"];
+ const CLASS_ATTRIBUTE = /class(name)?s?$/i;
+ const NODE_MODULES = /[\\/]node_modules[\\/]/;
+ function isClassAttribute(name) {
+-	return CLASS_ATTRIBUTE.test(name);
++	return name === "tw" || CLASS_ATTRIBUTE.test(name);
+ }
+ function jsxNameText(jsxName) {
+ 	if (jsxName?.type === "JSXMemberExpression") return `${jsxNameText(jsxName.object)}.${jsxName.property?.name ?? ""}`;
+@@ -3116,6 +3011,363 @@ function regexpOf(pattern) {
+ 	return re;
+ }
+ function createComponentTracker(context, options = {}) {
++ const scalarLegacyTracker = scalarLegacyCreateComponentTracker(context, options, true);
++	const filename = fileOf(context);
++	const index = componentsFor(filename);
++	const patterns = (options.componentImports ?? []).map(regexpOf);
++	const ignored = (options.ignoreImports ?? []).map(regexpOf);
++	const imports = /* @__PURE__ */ new Map();
++	const skipped = /* @__PURE__ */ new Set();
++	const bindings = /* @__PURE__ */ new Map();
++	const wrappers = /* @__PURE__ */ new Map();
++	const bindingOf = (root, name, variable) => {
++		const key = variable ?? root;
++		let exports = bindings.get(key);
++		if (!exports) { exports = new Map(); bindings.set(key, exports); }
++		if (exports.has(name)) return exports.get(name);
++		const source = imports.get(root)?.source;
++		const binding = source && filename ? definingExportOf(source, name, filename) : null;
++		exports.set(name, binding);
++		return binding;
++	};
++	const wrapperOf = (key, binding, local, variable, exportName = "") => {
++		const identity = variable ?? key;
++		let targets = wrappers.get(identity);
++		if (!targets) { targets = new Map(); wrappers.set(identity, targets); }
++		const cached = targets.get(exportName);
++		if (cached !== void 0) return cached;
++		let target = null;
++		if (binding) {
++			if (binding.file !== filename && !NODE_MODULES.test(binding.file)) target = scalarLegacyWrapperTargetOf(binding.file, binding.name, patterns, undefined, true);
++		} else if (local && filename && /^[A-Z]/.test(local)) target = scalarLegacyWrapperTargetOf(filename, local, patterns, undefined, true);
++		targets.set(exportName, target);
++		return target;
++	};
++	const wrapperLexical = { variable: node => variableOf(node, context), parameter: (fn, name) => findVariable(context.sourceCode?.getScope?.(fn.body), name) };
++	const lexicalVisiting = new Set();
++	const resolve = (jsxName) => {
++		const member = jsxName?.type === "JSXMemberExpression" || jsxName?.type === "MemberExpression" && !jsxName.computed;
++		const rootNode = member ? jsxName.object : jsxName;
++		const root = rootNode?.name;
++		if (!root) return null;
++		const property = member ? jsxName.property?.name ?? "" : null;
++		const lexical = variableOf(rootNode, context);
++		const definitions = lexical?.defs ?? [];
++		if (definitions.length && !definitions.some((definition) => definition.type === "ImportBinding")) {
++			if (lexicalVisiting.has(lexical)) return null;
++			lexicalVisiting.add(lexical);
++			try {
++				if (definitions.length !== 1 || property !== null || isWritten(lexical)) return null;
++				if (definitions[0].type === "Parameter") return null;
++				const declaration = definitions[0].node;
++				let expression = declaration?.type === "VariableDeclarator" ? declaration.init : declaration;
++				if (expression?.type === "Identifier" || expression?.type === "MemberExpression") {
++					const target = resolve(expression);
++					return target ? { ...target, wrapper: root } : null;
++				}
++				for (let hop = 0; hop < 6 && expression?.type === "CallExpression" && expression.arguments?.[0]; hop++) expression = expression.arguments[0];
++				if (!["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(expression?.type)) return null;
++				if (onlyIntrinsicScalarClassReads(expression, wrapperLexical, filename, patterns)) return null;
++                const conservative = scalarLegacyTracker.resolve(jsxName);
++                return conservative;
++
++			} finally {
++				lexicalVisiting.delete(lexical);
++			}
++		}
++		if (definitions.some(definition => definition.type === "ImportBinding") && skipped.has(root)) return null;
++		const imported = imports.get(root);
++		if (imported) {
++			const importedName = importNameOf(imported, root, property);
++			if (imported.namespace && property === null) importedName.name = root;
++			const { exportName, name } = importedName;
++			const binding = exportName ? bindingOf(root, exportName, lexical) : null;
++			const component = componentFromImport(index, binding, importedName, patterns);
++			if (component) return {
++				...component,
++				wrapper: null
++			};
++			if (binding) {
++				if (NODE_MODULES.test(binding.file)) return null;
++				if (property !== null && !imported.namespace) return null;
++				const target = wrapperOf(`${root}.${exportName}`, binding, null, lexical, exportName);
++				if (!target) return null;
++				const wrapper = property === null ? name : `${root}.${property}`;
++				return {
++					component: target.component,
++					file: target.file,
++					wrapper
++				};
++			}
++			if (index.has(name) || index.has(imported.original)) return {
++				component: name,
++				file: index.files.get(name) ?? index.files.get(imported.original) ?? null,
++				wrapper: null
++			};
++			return null;
++		}
++		const name = property === null ? root : `${root}${property}`;
++		if (index.has(name)) return {
++			component: name,
++			file: index.files.get(name) ?? null,
++			wrapper: null
++		};
++		if (property !== null) return null;
++		const target = wrapperOf(root, null, root);
++		return target ? {
++			component: target.component,
++			file: target.file,
++			wrapper: name
++		} : null;
++	};
++	return {
++		collectImport(node) {
++            scalarLegacyTracker.collectImport(node);
++			const source = node.source?.value;
++			if (typeof source !== "string") return;
++			const matchesIgnore = ignored.some((p) => p.test(source));
++			for (const spec of node.specifiers ?? []) {
++				const local = spec.local?.name;
++				if (!local) continue;
++				const original = spec.type === "ImportSpecifier" ? spec.imported?.name ?? spec.imported?.value ?? local : spec.type === "ImportDefaultSpecifier" ? "default" : local;
++				imports.set(local, {
++					source,
++					original,
++					namespace: spec.type === "ImportNamespaceSpecifier"
++				});
++				if (matchesIgnore) skipped.add(local);
++			}
++		},
++		resolve
++	};
++}
++function onlyIntrinsicScalarClassReads(fn, lexical, file, patterns = []) {
++ const nonCanonicalOpening = (opening) => {
++  if (opening.name?.type === "JSXIdentifier" && /^[a-z]/.test(opening.name.name)) return true;
++  const root = opening.name?.type === "JSXMemberExpression" ? opening.name.object : opening.name;
++  const property = opening.name?.type === "JSXMemberExpression" ? opening.name.property?.name : null;
++  const variable = lexical.variable(root), definitions = variable?.defs ?? [];
++  if (definitions.length !== 1 || definitions[0].type !== "ImportBinding") return false;
++  const def = definitions[0], declaration = def.parent ?? def.node?.parent, source = declaration?.source?.value;
++  if (typeof source !== "string") return false;
++  const imported = { source, original: def.node?.type === "ImportSpecifier" ? def.node.imported?.name ?? def.node.imported?.value : def.node?.type === "ImportDefaultSpecifier" ? "default" : root?.name, namespace: def.node?.type === "ImportNamespaceSpecifier" };
++  const name = importNameOf(imported, root.name, property), binding = name.exportName ? definingExportOf(source, name.exportName, file) : null;
++  return !!binding && NODE_MODULES.test(binding.file) && !componentFromImport(componentsFor(file), binding, name, patterns);
++ };
++ const { names, propsNames } = classNameBindings(fn, lexical);
++ if (!names.size && !propsNames.size) return false;
++ for (const variable of [...names, ...propsNames]) for (const ref of variable.references ?? []) {
++  if (!ref.isRead?.()) continue;
++  let typeOnly = false;
++  for (let node = ref.identifier.parent; node && node !== fn; node = node.parent) {
++   if (node.type?.startsWith("TS") && !["TSAsExpression", "TSNonNullExpression", "TSSatisfiesExpression", "TSInstantiationExpression"].includes(node.type)) { typeOnly = true; break; }
++  }
++  if (typeOnly) continue;
++  let value = ref.identifier;
++  if (propsNames.has(variable)) {
++   const member = value.parent;
++   if (member?.type !== "MemberExpression" || member.object !== value) return false;
++   const key = !member.computed && member.property?.type === "Identifier" ? member.property.name : member.computed && member.property?.type === "Literal" && typeof member.property.value === "string" ? member.property.value : null;
++   if (key === null) return false;
++   if (key !== "className") continue;
++   value = member;
++  }
++  let parent = value.parent;
++  while (parent && parent.type !== "JSXExpressionContainer") {
++   if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression", "VariableDeclarator", "AssignmentExpression", "ReturnStatement", "Property", "SpreadElement", "JSXSpreadAttribute"].includes(parent.type)) return false;
++   value = parent; parent = parent.parent;
++  }
++  const attribute = parent?.parent, opening = attribute?.parent;
++  if (attribute?.type !== "JSXAttribute" || attribute.name?.name !== "className" || opening?.type !== "JSXOpeningElement" || !nonCanonicalOpening(opening)) return false;
++ }
++ return true;
++}
++
++const scalarLegacyWrapperCache = new Map();
++function scalarLegacyClassNameBindings(fn) {
++	const names = /* @__PURE__ */ new Set();
++	const propsNames = /* @__PURE__ */ new Set();
++	const param = fn.params?.[0];
++	if (!param) return {
++		names,
++		propsNames
++	};
++	const pattern = param.type === "AssignmentPattern" ? param.left : param;
++	if (pattern.type === "ObjectPattern") {
++		for (const prop of pattern.properties) {
++			if (prop.type !== "Property") continue;
++			if ((prop.key?.name ?? prop.key?.value) !== "className") continue;
++			const value = prop.value?.type === "AssignmentPattern" ? prop.value.left : prop.value;
++			if (value?.type === "Identifier") names.add(value.name);
++		}
++		if (!names.size) {
++			for (const prop of pattern.properties) if (prop.type === "RestElement" && prop.argument?.type === "Identifier") propsNames.add(prop.argument.name);
++		}
++	} else if (pattern.type === "Identifier") propsNames.add(pattern.name);
++	return {
++		names,
++		propsNames
++	};
++}
++function scalarLegacyForwardsClassName(expr, names, propsNames) {
++	let found = false;
++	walk(expr, (node) => {
++		if (found) return;
++		if (node.type === "Identifier" && names.has(node.name)) found = true;
++		if (node.type === "MemberExpression" && node.object?.type === "Identifier" && propsNames.has(node.object.name) && node.property?.name === "className") found = true;
++		if (node.type === "JSXSpreadAttribute" && node.argument?.type === "Identifier" && propsNames.has(node.argument.name)) found = true;
++	});
++	return found;
++}
++
++function scalarLegacyBuild(file, patterns, visiting, deps, parsedAst, scalarProof = false) {
++	const wrappers = /* @__PURE__ */ new Map();
++	let complete = true;
++	deps.add(file);
++	let ast = parsedAst;
++	if (!ast) {
++		let source;
++		try {
++			source = fs.readFileSync(file, "utf-8");
++		} catch {
++			return {
++				wrappers,
++				complete
++			};
++		}
++		if (!source.includes("className") && !source.includes("...")) return {
++			wrappers,
++			complete
++		};
++		try {
++			ast = parseSource(source, file);
++		} catch {
++			return {
++				wrappers,
++				complete
++			};
++		}
++	}
++	let scalarLexical = null;
++	if (scalarProof) try { scalarLexical = parseWrapperBindings(fs.readFileSync(file, "utf-8"), file); ast = scalarLexical.ast; } catch {}
++	const imports = /* @__PURE__ */ new Map();
++	for (const statement of ast.body) {
++		if (statement.type !== "ImportDeclaration") continue;
++		const source = statement.source?.value;
++		if (typeof source !== "string") continue;
++		for (const spec of statement.specifiers ?? []) {
++			const local = spec.local?.name;
++			if (!local) continue;
++			const original = spec.type === "ImportSpecifier" ? spec.imported?.name ?? spec.imported?.value ?? local : spec.type === "ImportDefaultSpecifier" ? "default" : local;
++			imports.set(local, {
++				source,
++				original,
++				namespace: spec.type === "ImportNamespaceSpecifier"
++			});
++		}
++	}
++	const index = componentsFor(file);
++	const { bindings, candidates } = indexLocalBindings(ast);
++	const localVisiting = /* @__PURE__ */ new Set();
++	const targetOf = (element) => {
++		const name = jsxElementName(element);
++		if (!name?.root) return null;
++		const imported = imports.get(name.root);
++		if (!imported) {
++			if (name.property !== null) return null;
++			if (index.has(name.root)) return {
++				component: name.root,
++				file: index.files.get(name.root) ?? null
++			};
++			return candidates.has(name.root) ? resolveDeclared(name.root) : null;
++		}
++		const importedName = importNameOf(imported, name.root, name.property);
++		const binding = importedName.exportName ? definingExportOf(importedName.source, importedName.exportName, file, deps) : null;
++		const component = componentFromImport(index, binding, importedName, patterns);
++		if (component) return component;
++		if (!binding) {
++			complete = false;
++			return index.has(importedName.name) ? {
++				component: importedName.name,
++				file: index.files.get(importedName.name) ?? null
++			} : null;
++		}
++		if (binding.file === file || NODE_MODULES$1.test(binding.file)) return null;
++		if (importedName.suffix) return null;
++		if (visiting.has(binding.file)) {
++			complete = false;
++			return null;
++		}
++		const result = scalarLegacyLookup(binding.file, binding.name, patterns, visiting, deps, undefined, scalarProof);
++		if (!result.complete) complete = false;
++		return result.target;
++	};
++	const resolveDeclared = (name) => {
++		const cached = wrappers.get(name);
++		if (cached !== void 0) return cached;
++		if (localVisiting.has(name)) {
++			complete = false;
++			return null;
++		}
++		localVisiting.add(name);
++		let target = null;
++		const fn = componentFunction(bindings, name);
++		if (fn && !(scalarProof && scalarLexical && onlyIntrinsicScalarClassReads(fn, scalarLexical, file, patterns))) {
++			const { names, propsNames } = scalarLegacyClassNameBindings(fn);
++			if (names.size || propsNames.size) walk(fn.body, (node) => {
++				if (target || node.type !== "JSXOpeningElement") return;
++				if (node.attributes?.some((attr) => attr.type === "JSXAttribute" && attr.name?.name === "className" && scalarLegacyForwardsClassName(attr.value, names, propsNames) || attr.type === "JSXSpreadAttribute" && scalarLegacyForwardsClassName(attr, names, propsNames))) target = targetOf(node);
++			});
++		}
++		localVisiting.delete(name);
++		wrappers.set(name, target);
++		return target;
++	};
++	for (const name of candidates) if (name === "default" || /^[A-Z]/.test(name)) resolveDeclared(name);
++	return {
++		wrappers,
++		complete
++	};
++}
++function scalarLegacyLookup(file, exportName, patterns, visiting, deps, parsedAst, scalarProof = false) {
++	deps?.add(file);
++	if (mtimeOf(file) === null) return {
++		target: null,
++		complete: false
++	};
++	const key = `${file}|${patterns.map((p) => p.source).join(",")}|${scalarProof}`;
++	const cached = scalarLegacyWrapperCache.get(key);
++	const now = Date.now();
++	if (cached && (now - cached.checkedAt < 1e3 || signatureOf(cached.deps) === cached.signature)) {
++		if (now - cached.checkedAt >= 1e3) cached.checkedAt = now;
++		if (deps) for (const dep of cached.deps) deps.add(dep);
++		return {
++			target: cached.wrappers.get(exportName) ?? null,
++			complete: true
++		};
++	}
++	visiting.add(file);
++	const own = /* @__PURE__ */ new Set();
++	const { wrappers, complete } = scalarLegacyBuild(file, patterns, visiting, own, parsedAst, scalarProof);
++	visiting.delete(file);
++	if (deps) for (const dep of own) deps.add(dep);
++	const depList = [...own];
++	if (complete) scalarLegacyWrapperCache.set(key, {
++		deps: depList,
++		signature: signatureOf(depList),
++		checkedAt: now,
++		wrappers
++	});
++	return {
++		target: wrappers.get(exportName) ?? null,
++		complete
++	};
++}
++function scalarLegacyWrapperTargetOf(file, exportName, patterns = [], parsedAst, scalarProof = false) {
++	return scalarLegacyLookup(file, exportName, patterns, /* @__PURE__ */ new Set(), void 0, parsedAst, scalarProof).target;
++}
++
++function scalarLegacyCreateComponentTracker(context, options = {}, scalarProof = false) {
+ 	const filename = fileOf(context);
+ 	const index = componentsFor(filename);
+ 	const patterns = (options.componentImports ?? []).map(regexpOf);
+@@ -3138,8 +3390,8 @@ function createComponentTracker(context, options = {}) {
+ 		if (cached !== void 0) return cached;
+ 		let target = null;
+ 		if (binding) {
+-			if (binding.file !== filename && !NODE_MODULES.test(binding.file)) target = wrapperTargetOf(binding.file, binding.name, patterns);
+-		} else if (local && filename && /^[A-Z]/.test(local)) target = wrapperTargetOf(filename, local, patterns, context.sourceCode?.ast);
++			if (binding.file !== filename && !NODE_MODULES.test(binding.file)) target = scalarLegacyWrapperTargetOf(binding.file, binding.name, patterns, undefined, scalarProof);
++		} else if (local && filename && /^[A-Z]/.test(local)) target = scalarLegacyWrapperTargetOf(filename, local, patterns, context.sourceCode?.ast, scalarProof);
+ 		wrappers.set(key, target);
+ 		return target;
+ 	};
+@@ -3211,6 +3463,7 @@ function createComponentTracker(context, options = {}) {
+ 		resolve
+ 	};
+ }
++
+ function findVariable(scope, name) {
+ 	for (let s = scope; s; s = s.upper) {
+ 		const variable = s.set?.get(name);
+@@ -3359,6 +3612,93 @@ function forwardedValuesOf(node, context, name, path) {
+ 		alternatives
+ 	};
+ }
++// A rest binding can only remove known keys from a genuine style parameter.
++// Unknown spreads, reassignment, mutation, alias escape, getters/defaults in the
++// subtraction pattern, and arbitrary object sources remain rejected.
++function forwardedStyleRemainder(node, context, path = new Set()) {
++ node = unwrapTs(node);
++ if (node?.type !== 'Identifier') return null;
++ const variable = variableOf(node, context);
++ if (!variable || path.has(variable) || isWritten(variable) || isEscaped(variable, context)) return null;
++ const def = variable.defs?.[0];
++ const declaration = def?.node;
++ if (def?.type !== 'Variable' || declaration?.type !== 'VariableDeclarator' || declaration.id.type !== 'ObjectPattern') return null;
++ const pattern = declaration.id;
++ const rest = pattern.properties.at(-1);
++ if (rest?.type !== 'RestElement' || rest.argument !== def.name || rest.argument.name !== node.name) return null;
++ const removed = new Set();
++ for (const property of pattern.properties.slice(0,-1)) {
++  if (property.type !== 'Property' || property.kind !== 'init' || property.method || property.value.type !== 'Identifier') return null;
++  const key = keyName$1(property);
++  if (key === null) return null;
++  removed.add(key);
++ }
++ let source = unwrapTs(declaration.init);
++ const next = new Set(path).add(variable);
++ if (source?.type === 'Identifier') {
++  const copy = variableOf(source, context);
++  const copyDef = copy?.defs?.[0];
++  if (copyDef?.type === 'Variable') {
++   if (!copy || next.has(copy) || isWritten(copy) || isEscaped(copy, context) || copyDef.node.id.type !== 'Identifier') return null;
++   const expression = unwrapTs(copyDef.node.init);
++   if (expression?.type !== 'ObjectExpression' || expression.properties.length !== 1 || expression.properties[0].type !== 'SpreadElement') return null;
++   source = unwrapTs(expression.properties[0].argument);
++   next.add(copy);
++  }
++ }
++ if (source?.type === 'LogicalExpression' && source.operator === '??') {
++  const empty = unwrapTs(source.right);
++  if (empty?.type !== 'ObjectExpression' || empty.properties.length) return null;
++  source = unwrapTs(source.left);
++ }
++ const parameter = forwardedPropOf(source, context, 'style');
++ if (!parameter || isEscaped(parameter.variable, context)) return null;
++ return {source,removed,path:next,parameter};
++}
++function removedStyleDefaultHasRawColor(node, context, seen = new Set(), depth = 0) {
++ node = unwrapTs(node);
++ if (!node) return false;
++ if (depth > 32) return true;
++ if (node.type === 'Identifier') {
++  const variable = variableOf(node, context);
++  if (variable && seen.has(variable)) return true;
++  const resolved = resolveIdentifier(node, context, seen);
++  if (!resolved) return node.name !== 'undefined';
++  return removedStyleDefaultHasRawColor(resolved.init, context, new Set(seen).add(resolved.variable), depth + 1);
++ }
++ if (node.type === 'Literal') return typeof node.value === 'string' && hasRawColor(node.value);
++ if (node.type === 'TemplateLiteral') return hasRawColor(node.quasis.map(q=>q.value?.cooked??'').join('￼')) || node.expressions.some(value=>removedStyleDefaultHasRawColor(value,context,seen,depth+1));
++ if (node.type === 'ConditionalExpression') return removedStyleDefaultHasRawColor(node.consequent,context,seen,depth+1)||removedStyleDefaultHasRawColor(node.alternate,context,seen,depth+1);
++ if (node.type === 'LogicalExpression') return removedStyleDefaultHasRawColor(node.left,context,seen,depth+1)||removedStyleDefaultHasRawColor(node.right,context,seen,depth+1);
++ if (['BinaryExpression','CallExpression','NewExpression','AssignmentExpression','SequenceExpression'].includes(node.type)) return true;
++ if (node.type === 'ArrayExpression') return node.elements.some(value=>removedStyleDefaultHasRawColor(value,context,seen,depth+1));
++ if (node.type === 'ObjectExpression') return node.properties.some(property=>{
++  if (property.type === 'Property') return property.kind !== 'init' || property.method || removedStyleDefaultHasRawColor(property.value,context,seen,depth+1);
++  if (property.type !== 'SpreadElement') return true;
++  const object = resolveObject(property.argument, context, seen);
++  if (!object) return true;
++  return objectEntries(object,context,seen).some(entry=>'unknown' in entry || removedStyleDefaultHasRawColor(entry.value,context,seen,depth+1));
++ });
++ if (node.type === 'MemberExpression') return removedStyleDefaultHasRawColor(node.object,context,seen,depth+1);
++ return false;
++}
++function subtractedStyleDefault(node, removed, context, path) {
++ const object = resolveObject(node, context, path);
++ if (!object) return null;
++ const properties = [];
++ for (const entry of objectEntries(object, context, path)) {
++  if ('unknown' in entry) {
++   properties.push(entry.unknown);
++  } else if (removed.has(entry.key)) {
++   // Do not lose a known raw color by routing a removed default into a custom property.
++   if (removedStyleDefaultHasRawColor(entry.value, context, new Set(path))) return null;
++  } else {
++   properties.push({type:'Property',computed:false,kind:'init',method:false,shorthand:false,key:{type:'Literal',value:entry.key},value:entry.value});
++  }
++ }
++ return {type:'ObjectExpression',properties};
++}
++
+ function keyName$1(prop) {
+ 	if (prop.computed) return staticKey(prop.key);
+ 	if (prop.key?.type === "Identifier") return prop.key.name;
+@@ -3617,7 +3957,7 @@ function collectFromValue(value, context, options = {}) {
+ 		...options,
+ 		valuesMode: true
+ 	});
+-	return collectClassStrings(value, context, options);
++	return collectClassStrings(value, context, { ...options, valuesMode: true });
+ }
+ const sharedByProgram = /* @__PURE__ */ new WeakMap();
+ const NO_VISITORS = {};
+@@ -3678,7 +4018,7 @@ function sharedFor(context, options) {
+ 		imports: /* @__PURE__ */ new WeakSet(),
+ 		consumedCalls,
+ 		sites: /* @__PURE__ */ new WeakMap(),
+-		hasSites: typeof text !== "string" || /class/i.test(text) || helperCall.test(text)
++		hasSites: typeof text !== "string" || /(?:class|\btw\b)/i.test(text) || helperCall.test(text)
+ 	};
+ 	byKey.set(key, shared);
+ 	return shared;
+@@ -3687,6 +4027,7 @@ function classSiteVisitors(context, options, onSite) {
+ 	const shared = sharedFor(context, options);
+ 	if (!shared.hasSites && !options.scanAllStrings) return NO_VISITORS;
+ 	const tracker = shared.tracker ??= createComponentTracker(context, options);
++ const scalarLegacyTracker = shared.scalarLegacyTracker ??= scalarLegacyCreateComponentTracker(context, options);
+ 	const { helpers, collectOptions, consumedCalls, sites } = shared;
+ 	const reportedStrings = /* @__PURE__ */ new WeakSet();
+ 	const claimedVocabulary = /* @__PURE__ */ new WeakSet();
+@@ -3702,16 +4043,21 @@ function classSiteVisitors(context, options, onSite) {
+ 			vocabularyStrings
+ 		});
+ 	};
+-	const elementOf = (node) => {
+-		const element = node.parent;
+-		return element?.type === "JSXOpeningElement" ? tracker.resolve(element.name) : null;
++	const usesScalarTracker = (node) => {
++  if (node?.type !== "JSXAttribute" || node.name?.name !== "className") return false;
++  const value = node.value?.type === "JSXExpressionContainer" ? node.value.expression : null;
++  return !value || !resolveObject(value, context, new Set());
++ };
++ const elementOf = (node) => {
++  const element = node.parent, selected = usesScalarTracker(node) ? tracker : scalarLegacyTracker;
++  return element?.type === "JSXOpeningElement" ? selected.resolve(element.name) : null;
+ 	};
+-	const enclosingOf = (element, accepts) => {
++	const enclosingOf = (element, accepts, selected = tracker) => {
+ 		let direct = true;
+ 		for (let node = element?.parent; node; node = node.parent) {
+ 			if (node.type !== "JSXElement") continue;
+ 			const name = node.openingElement?.name;
+-			const resolved = tracker.resolve(name);
++			const resolved = selected.resolve(name);
+ 			if (resolved && accepts(resolved.component)) return {
+ 				name: jsxNameText(name),
+ 				direct
+@@ -3720,16 +4066,16 @@ function classSiteVisitors(context, options, onSite) {
+ 		}
+ 		return null;
+ 	};
+-	const closedParentOf = (element, accepts) => {
++	const closedParentOf = (element, accepts, selected = tracker) => {
+ 		for (let node = element?.parent; node; node = node.parent) {
+ 			if (node.type !== "JSXElement") continue;
+ 			const name = node.openingElement?.name;
+-			const resolved = tracker.resolve(name);
++			const resolved = selected.resolve(name);
+ 			return resolved && !accepts(resolved.component) ? jsxNameText(name) : null;
+ 		}
+ 		return null;
+ 	};
+-	const siteFor = (node, value, attribute, resolved, element = null) => {
++	const siteFor = (node, value, attribute, resolved, element = null, legacyMode = false) => {
+ 		return {
+ 			...value ? collectFromValue(value, context, collectOptions) : collectClassStrings(node, context, collectOptions),
+ 			component: resolved?.component ?? null,
+@@ -3737,8 +4083,8 @@ function classSiteVisitors(context, options, onSite) {
+ 			wrapper: resolved?.wrapper ?? null,
+ 			attribute,
+ 			node,
+-			enclosingContainer: (accepts) => element ? enclosingOf(element, accepts) : null,
+-			closedParent: (accepts) => element ? closedParentOf(element, accepts) : null
++			enclosingContainer: (accepts) => element ? enclosingOf(element, accepts, legacyMode ? scalarLegacyTracker : tracker) : null,
++			closedParent: (accepts) => element ? closedParentOf(element, accepts, legacyMode ? scalarLegacyTracker : tracker) : null
+ 		};
+ 	};
+ 	const jsxElementOf = (node) => {
+@@ -3748,7 +4094,7 @@ function classSiteVisitors(context, options, onSite) {
+ 	const attributeSites = (node) => {
+ 		let list = sites.get(node);
+ 		if (list) return list;
+-		list = [siteFor(node, node.value, node.name.name, elementOf(node), jsxElementOf(node))];
++		list = [siteFor(node, node.value, node.name.name, elementOf(node), jsxElementOf(node), !usesScalarTracker(node))];
+ 		sites.set(node, list);
+ 		return list;
+ 	};
+@@ -3762,7 +4108,7 @@ function classSiteVisitors(context, options, onSite) {
+ 			const element = jsxElementOf(node);
+ 			const finals = /* @__PURE__ */ new Map();
+ 			for (const entry of objectEntries(object, context, /* @__PURE__ */ new Set())) if ("key" in entry && isClassAttribute(entry.key)) finals.set(entry.key, entry.value);
+-			for (const [key, value] of finals) list.push(siteFor(value, value, key, resolved, element));
++			for (const [key, value] of finals) list.push(siteFor(value, value, key, resolved, element, true));
+ 		}
+ 		sites.set(node, list);
+ 		return list;
+@@ -3779,6 +4125,7 @@ function classSiteVisitors(context, options, onSite) {
+ 			if (shared.imports.has(node)) return;
+ 			shared.imports.add(node);
+ 			tracker.collectImport(node);
++            scalarLegacyTracker.collectImport(node);
+ 		},
+ 		JSXAttribute(node) {
+ 			const name = node.name?.name;
+@@ -4483,6 +4830,7 @@ function compilePropertyPolicy(options) {
+ 	const decide = (component, property) => {
+ 		const policy = component ? policyFor(component) : baseline;
+ 		if (policy.deny(property)) return {
++			denied: true,
+ 			exempt: false,
+ 			message: policy.message
+ 		};
+@@ -4530,6 +4878,369 @@ const MESSAGES$4 = {
+ 	customPropColor: "Custom property {{property}} hardcodes a color. Define it as a theme token instead of injecting a raw value.",
+ 	styleElement: "A <style> element injects CSS outside the design system. Use classes, or declare the rule in your theme CSS."
+ };
++// Native SDK style carriers require numeric runtime values rather than web CSS variables.
++// Keep this analysis fail-closed: lexical provenance, immutable aliases and inspectable
++// expressions are required; names, filenames and type assertions never grant permission.
++function nativeStyleAnalysis(context) {
++	const numericGeometry = new Set(["width", "height", "gap", "top", "paddingTop", "paddingBottom", "borderRadius", "fontSize", "marginTop", "lineHeight"]);
++	const numericTransforms = new Set(["scale", "scaleX", "scaleY", "translateX", "translateY"]);
++	const binding = (node) => variableOf(node, context);
++	const overwritten = (variable) => variable?.references?.some((ref) => ref.isWrite?.() && !ref.init);
++	const imported = (node) => {
++		const variable = binding(node);
++		if (!variable || isWritten(variable)) return null;
++		const def = variable.defs?.[0];
++		if (def?.type !== "ImportBinding") return null;
++		const declaration = def.parent ?? def.node.parent;
++		if (declaration?.type !== "ImportDeclaration" || declaration.importKind === "type" || def.node.importKind === "type") return null;
++		return { source: declaration.source.value, name: def.node.type === "ImportNamespaceSpecifier" ? "*" : def.node.type === "ImportDefaultSpecifier" ? "default" : def.node.imported.name ?? def.node.imported.value };
++	};
++	const memberKey = (node) => node.computed ? node.property?.type === "Literal" ? node.property.value : null : node.property?.name;
++	const origin = (node, seen = new Set()) => {
++		node = unwrap(node);
++		if (!node) return null;
++		if (node.type === "Identifier" || node.type === "JSXIdentifier") {
++			const source = imported(node);
++			if (source) return source;
++			const resolved = resolveIdentifier(node, context, seen);
++			if (!resolved || resolved.variable.defs?.[0]?.parent?.kind !== "const") return null;
++			return origin(resolved.init, new Set([...seen, resolved.variable]));
++		}
++		if (node.type === "MemberExpression" || node.type === "JSXMemberExpression") {
++			const parent = origin(node.object, seen);
++			const key = node.type === "JSXMemberExpression" ? node.property.name : memberKey(node);
++			if (!parent || !key || !["*", "default"].includes(parent.name) || parent.name === "default" && parent.owner && parent.owner !== "*") return null;
++			return { source: parent.source, name: key, owner: parent.name };
++		}
++		return null;
++	};
++	const from = (node, source, names) => {
++		const found = origin(node);
++		return found?.source === source && names.includes(found.name) && !(["react-native", "expo-glass-effect", "uniwind", "react-native-safe-area-context"].includes(source) && found.owner === "default") && !(source === "react-native-reanimated" && ["useAnimatedStyle", "useSharedValue"].includes(found.name) && found.owner === "default");
++	};
++	const nativeReceiver = (node, seen = new Set()) => {
++		node = unwrap(node);
++		if (!node) return false;
++		const receiver = origin(node);
++		if (from(node, "react-native", ["View", "Text"]) || receiver?.source === "react-native-reanimated" && receiver.owner === "default" && ["View", "Text"].includes(receiver.name) || from(node, "expo-glass-effect", ["GlassView"])) return true;
++		if (node.type === "Identifier" || node.type === "JSXIdentifier") {
++			const resolved = resolveIdentifier(node, context, seen);
++			if (!resolved || resolved.variable.defs?.[0]?.parent?.kind !== "const") return false;
++			return nativeReceiver(resolved.init, new Set([...seen, resolved.variable]));
++		}
++		if (node.type === "CallExpression" && node.arguments.length === 1 && (from(node.callee, "uniwind", ["withUniwind"]) || from(node.callee, "react-native-reanimated", ["createAnimatedComponent"]))) return nativeReceiver(node.arguments[0], seen);
++		return false;
++	};
++	const typeAt = (type, key, seen = new Set()) => {
++		type = type?.type === "TSTypeAnnotation" ? type.typeAnnotation : type;
++		if (!type) return null;
++		if (type.type === "TSTypeReference" && type.typeName?.type === "Identifier") {
++			const variable = binding(type.typeName);
++			if (!variable || seen.has(variable)) return null;
++			const def = variable.defs?.[0];
++			if (def?.node?.type === "TSTypeAliasDeclaration") return typeAt(def.node.typeAnnotation, key, new Set([...seen, variable]));
++			if (def?.node?.type === "TSInterfaceDeclaration") return typeAt(def.node.body, key, new Set([...seen, variable]));
++		}
++		if (["TSIntersectionType", "TSUnionType"].includes(type.type)) {
++			const found = type.types.map((part) => typeAt(part, key, seen)).filter(Boolean);
++			if (type.type === "TSIntersectionType") return found.length === 1 ? found[0] : null;
++			return found.length === type.types.length ? { type: "TSUnionType", types: found } : null;
++		}
++		if (type.type === "TSTypeLiteral" || type.type === "TSInterfaceBody") return (type.members ?? type.body).find((part) => part.type === "TSPropertySignature" && !part.computed && (part.key.name ?? part.key.value) === key)?.typeAnnotation?.typeAnnotation ?? null;
++		return null;
++	};
++	const numericType = (type) => {
++		type = type?.type === "TSTypeAnnotation" ? type.typeAnnotation : type;
++		if (type?.type === "TSNumberKeyword") return true;
++		return type?.type === "TSUnionType" && type.types.some((part) => part.type === "TSNumberKeyword") && type.types.every((part) => ["TSNumberKeyword", "TSNullKeyword", "TSUndefinedKeyword"].includes(part.type) || part.type === "TSLiteralType" && part.literal?.value === null);
++	};
++	const parameterType = (node) => {
++		const variable = binding(node);
++		const def = variable?.defs?.[0];
++		if (def?.type !== "Parameter" || overwritten(variable)) return null;
++		let part = def.name;
++		while (part?.parent && part.parent !== def.node) {
++			if (part.parent.type === "Property" && part.parent.value === part) {
++				const property = part.parent;
++				const pattern = property.parent;
++				return pattern?.type === "ObjectPattern" && !property.computed ? typeAt(pattern.typeAnnotation, property.key.name ?? property.key.value) : null;
++			}
++			if (part.parent.type === "AssignmentPattern") part = part.parent;
++			else break;
++		}
++		return (part.typeAnnotation ?? def.name.typeAnnotation)?.typeAnnotation ?? null;
++	};
++	const returnedValues = (node) => {
++		const values = [];
++		const visit = (part) => {
++			if (!part || typeof part !== "object") return;
++			if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(part.type)) return;
++			if (part.type === "ReturnStatement") {
++				values.push(part.argument);
++				return;
++			}
++			for (const [key, value] of Object.entries(part)) {
++				if (["parent", "loc", "range", "tokens", "comments"].includes(key)) continue;
++				if (Array.isArray(value)) value.forEach(visit);
++				else if (value?.type) visit(value);
++			}
++		};
++		visit(node);
++		return values;
++	};
++	const localReturns = (call, seen) => {
++		if (call?.type !== "CallExpression" || call.callee?.type !== "Identifier") return null;
++		const variable = binding(call.callee);
++		if (!variable || seen.has(variable) || isWritten(variable)) return null;
++		const def = variable.defs?.[0];
++		const fn = def?.type === "FunctionName" ? def.node : unwrap(resolveIdentifier(call.callee, context, seen)?.init);
++		if (!["FunctionDeclaration", "ArrowFunctionExpression", "FunctionExpression"].includes(fn?.type) || fn.async || fn.generator) return null;
++		const values = fn.body.type === "BlockStatement" ? returnedValues(fn.body) : [fn.body];
++		return values.length ? {values, seen: new Set([...seen, variable])} : null;
++	};
++	const numericAnimation = (node, seen) => {
++		if (numeric(node, seen) !== null) return true;
++		if (node?.type !== "CallExpression") return false;
++		if (from(node.callee, "react-native-reanimated", ["withTiming", "withSpring"])) return numeric(node.arguments[0], seen) !== null;
++		if (from(node.callee, "react-native-reanimated", ["withRepeat"])) return numericAnimation(node.arguments[0], seen);
++		if (from(node.callee, "react-native-reanimated", ["withSequence"])) return node.arguments.length > 0 && node.arguments.every((arg) => numericAnimation(arg, seen));
++		if (from(node.callee, "react-native-reanimated", ["withDelay"])) return numeric(node.arguments[0], seen) !== null && numericAnimation(node.arguments[1], seen);
++		return false;
++	};
++	const safeSharedUpdates = (variable, seen) => (variable.references ?? []).every((ref) => {
++		if (!ref.isRead?.()) return true;
++
++		const member = ref.identifier.parent;
++		if (member?.type !== "MemberExpression" || member.object !== ref.identifier) {
++			// SharedValue objects can be mutated through aliases, returned/stored values,
++			// and opaque consumers. Only React's actual dependency array is read-only.
++			if (member?.type === "ArrayExpression") {
++				const call = member.parent;
++				return call?.type === "CallExpression" && call.arguments[1] === member && from(call.callee, "react", ["useEffect", "useLayoutEffect", "useMemo", "useCallback"]);
++			}
++			return false;
++		}
++		if (memberKey(member) !== "value") return false;
++		const parent = member.parent;
++		if (parent?.type === "MemberExpression") return false;
++		if (parent?.type === "AssignmentExpression" && parent.left === member) return memberKey(member) === "value" && parent.operator === "=" && numericAnimation(parent.right, seen);
++		return parent?.type !== "UpdateExpression" && !(parent?.type === "UnaryExpression" && parent.operator === "delete");
++	});
++	const constantNumber = (node, seen = new Set()) => {
++		node = unwrap(node);
++		if (!node) return undefined;
++		if (node.type === "Literal") return typeof node.value === "number" && Number.isFinite(node.value) ? node.value : undefined;
++		if (node.type === "Identifier") {
++			const resolved = resolveIdentifier(node, context, seen);
++			return resolved ? constantNumber(resolved.init, new Set([...seen, resolved.variable])) : undefined;
++		}
++		if (node.type === "UnaryExpression" && ["+", "-"].includes(node.operator)) {
++			const value = constantNumber(node.argument, seen);
++			return value === undefined ? undefined : node.operator === "-" ? -value : value;
++		}
++		if (node.type === "BinaryExpression") {
++			const left = constantNumber(node.left, seen), right = constantNumber(node.right, seen);
++			if (node.operator === "*" && (left === 0 || right === 0)) return 0;
++			if (node.operator === "**" && right === 0) return 1;
++			if (left === undefined || right === undefined) return undefined;
++			switch (node.operator) {
++				case "+": return left + right;
++				case "-": return left - right;
++				case "*": return left * right;
++				case "/": return left / right;
++				case "%": return left % right;
++				case "**": return left ** right;
++				default: return undefined;
++			}
++		}
++		return undefined;
++	};
++	// 0: finite numeric literals, 1: numeric runtime, null: not proven numeric.
++	const numeric = (node, seen = new Set()) => {
++		// A cast does not prove a value's runtime type.
++		if (!node || ["TSAsExpression", "TSTypeAssertion", "TSNonNullExpression"].includes(node.type)) return null;
++		node = unwrap(node);
++		if (!node) return null;
++		if (constantNumber(node, seen) !== undefined) return 0;
++		if (node.type === "Literal") return typeof node.value === "number" && Number.isFinite(node.value) ? 0 : null;
++		if (node.type === "Identifier") {
++			if (numericType(parameterType(node))) return 1;
++			const resolved = resolveIdentifier(node, context, seen);
++			if (!resolved) return null;
++			return numeric(resolved.init, new Set([...seen, resolved.variable]));
++		}
++		if (node.type === "UnaryExpression" && ["+", "-"].includes(node.operator)) return numeric(node.argument, seen);
++		if (node.type === "BinaryExpression" && ["+", "-", "*", "/", "%", "**"].includes(node.operator)) {
++			const left = numeric(node.left, seen), right = numeric(node.right, seen);
++			return left !== null && right !== null ? Math.max(left, right) : null;
++		}
++		if (node.type === "ConditionalExpression" || node.type === "LogicalExpression" && ["??", "||"].includes(node.operator)) {
++			const left = numeric(node.consequent ?? node.left, seen), right = numeric(node.alternate ?? node.right, seen);
++			return left !== null && right !== null ? Math.max(left, right) : null;
++		}
++		if (node.type === "MemberExpression") {
++			const key = memberKey(node), base = unwrap(node.object);
++			if (base?.type !== "Identifier") return null;
++			const variable = binding(base), def = variable?.defs?.[0];
++			if (!variable || seen.has(variable) || overwritten(variable)) return null;
++			const init = unwrap(def?.node?.init);
++			const shared = init?.type === "CallExpression" && from(init.callee, "react-native-reanimated", ["useSharedValue"]);
++			if (!shared && (isMutated(variable) || isEscaped(variable, context))) return null;
++			if (init?.type === "CallExpression" && from(init.callee, "react-native-safe-area-context", ["useSafeAreaInsets"]) && init.arguments.length === 0 && !isMutated(variable) && ["top", "bottom", "left", "right"].includes(key)) return 1;
++			if (key === "value" && init?.type === "CallExpression" && from(init.callee, "react-native-reanimated", ["useSharedValue"]) && init.arguments.length === 1 && numeric(init.arguments[0], new Set([...seen, variable])) !== null && safeSharedUpdates(variable, new Set([...seen, variable]))) return 1;
++			const returns = localReturns(init, seen);
++			if (returns) {
++				const fields = returns.values.map((returned) => {
++					if (returned?.type !== "ObjectExpression") return null;
++					const entries = [...objectEntries(returned, context, returns.seen)];
++					if (entries.some((entry) => "unknown" in entry)) return null;
++					const entry = entries.findLast((entry) => entry.key === key);
++					return entry ? numeric(entry.value, returns.seen) : null;
++				});
++				if (fields.length && fields.every((field) => field === 0)) return 0;
++			}
++			const type = parameterType(base);
++			if (numericType(typeAt(type, key))) return 1;
++			if (type?.type === "TSTypeReference" && type.typeName?.name === "Record" && !binding(type.typeName)?.defs?.length) {
++				const args = (type.typeArguments ?? type.typeParameters)?.params;
++				if (args?.[0]?.type === "TSStringKeyword" && numericType(args[1]) && node.computed) return 1;
++			}
++			const resolved = resolveMemberValue(node, context, seen);
++			return !("unresolved" in resolved) && resolved.value ? numeric(resolved.value, seen) : null;
++		}
++		if (node.type === "CallExpression" && node.callee.type === "MemberExpression" && node.callee.object.type === "Identifier" && node.callee.object.name === "Math" && !binding(node.callee.object)?.defs?.length && ["min", "max", "round", "floor", "ceil", "abs", "trunc", "sqrt"].includes(memberKey(node.callee))) {
++			const args = node.arguments.map((arg) => numeric(arg, seen));
++			return args.length && args.every((arg) => arg !== null) ? Math.max(...args) : null;
++		}
++		return null;
++	};
++	const runtimeGeometry = (key, value) => {
++		if (numericGeometry.has(key)) {
++			if (numeric(value) === 1) return true;
++			if (key === "width" && value?.type === "TemplateLiteral" && value.expressions.length === 1 && value.quasis[0].value.cooked === "" && value.quasis[1].value.cooked === "%") return numeric(value.expressions[0]) === 1;
++		}
++		if (key === "transform" && value?.type === "ArrayExpression" && value.elements.length > 0) return value.elements.every((element) => element?.type === "ObjectExpression" && element.properties.length === 1 && element.properties[0].type === "Property" && !element.properties[0].computed && numericTransforms.has(element.properties[0].key.name ?? element.properties[0].key.value) && numeric(element.properties[0].value) === 1);
++		return false;
++	};
++	const animatedReturns = (node) => {
++		if (node?.type !== "CallExpression" || !from(node.callee, "react-native-reanimated", ["useAnimatedStyle"])) return null;
++		let callback = unwrap(node.arguments[0]);
++		if (callback?.type === "Identifier") callback = unwrap(resolveIdentifier(callback, context, new Set())?.init);
++		if (!["ArrowFunctionExpression", "FunctionExpression"].includes(callback?.type) || callback.async || callback.generator) return null;
++		if (callback.body.type !== "BlockStatement") return [callback.body];
++		// Only a direct return is inspectable without control-flow analysis.
++		return callback.body.body.length === 1 && callback.body.body[0].type === "ReturnStatement" && callback.body.body[0].argument ? [callback.body.body[0].argument] : null;
++	};
++	return { nativeReceiver, runtimeGeometry, animatedReturns };
++}
++
++// next/og uses a finite inline-style renderer rather than the browser's class system.
++// Ownership is lexical: exported components and any browser use remain subject to policy.
++const IMAGE_RESPONSE_PROPERTIES = new Set([
++ "display", "position", "top", "right", "bottom", "left", "width", "height",
++ "minWidth", "minHeight", "maxWidth", "maxHeight", "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
++ "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "gap", "rowGap", "columnGap",
++ "flexDirection", "flexWrap", "flexGrow", "flexShrink", "flexBasis", "alignItems", "alignSelf", "alignContent", "justifyContent",
++ "background", "backgroundColor", "backgroundImage", "backgroundSize", "backgroundPosition", "backgroundRepeat",
++ "color", "fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight", "letterSpacing", "textAlign", "textTransform", "textDecoration", "textOverflow",
++ "whiteSpace", "wordBreak", "overflowWrap", "overflow", "opacity", "border", "borderWidth", "borderColor", "borderStyle", "borderRadius",
++ "borderTop", "borderRight", "borderBottom", "borderLeft", "boxShadow", "transform", "transformOrigin", "objectFit", "objectPosition"
++]);
++function imageResponseOwnership(context) {
++ const functions = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
++ const constructor = (node) => {
++  if (node?.type !== "Identifier") return false;
++  const variable = variableOf(node, context);
++  if (!variable || isWritten(variable) || variable.defs?.length !== 1) return false;
++  const spec = variable.defs[0].node;
++  return spec?.type === "ImportSpecifier" && (spec.imported?.name ?? spec.imported?.value) === "ImageResponse" && spec.importKind !== "type" && spec.parent?.importKind !== "type" && spec.parent?.source?.value === "next/og";
++ };
++ const ownedFunction = (fn, seen) => {
++  if (seen.has(fn)) return false;
++  const declaration = fn.type === "FunctionDeclaration" ? fn : fn.parent?.type === "VariableDeclarator" && fn.parent.init === fn ? fn.parent : null;
++  const id = declaration?.id;
++  if (id?.type !== "Identifier") return false;
++  for (let owner = declaration; owner && owner.type !== "Program"; owner = owner.parent) {
++   if (owner.type === "ExportNamedDeclaration" || owner.type === "ExportDefaultDeclaration") return false;
++   if (owner.type.endsWith("Statement") || owner.type === "FunctionDeclaration") {
++    if (owner.parent?.type?.startsWith("Export")) return false;
++    break;
++   }
++  }
++  // A named function expression has a second, inner binding that can publish the renderer.
++  if (fn.type === "FunctionExpression" && fn.id) {
++   const inner = variableOf(fn.id, context);
++   if (!inner || inner.references?.length) return false;
++  }
++  const variable = variableOf(id, context);
++  if (!variable || isWritten(variable) || variable.defs?.length !== 1) return false;
++  const reads = variable.references.filter(ref => ref.isRead?.());
++  if (!reads.length) return false;
++  const next = new Set([...seen, fn]);
++  return reads.every(ref => {
++   const use = ref.identifier;
++   const parent = use.parent;
++   return (parent?.type === "JSXOpeningElement" || parent?.type === "JSXClosingElement") && parent.name === use && owned(parent.parent, next);
++  });
++ };
++ const owned = (node, seen = new Set()) => {
++  if (node?.type === "JSXAttribute" || node?.type === "JSXSpreadAttribute") {
++   const receiver = node.parent?.name;
++   if (receiver?.type !== "JSXIdentifier" || !/^[a-z]/.test(receiver.name)) return false;
++  }
++  let program = node;
++  while (program?.parent) program = program.parent;
++  if (program?.body?.some(statement => statement.type === "ExpressionStatement" && statement.expression?.value === "use client")) return false;
++  for (let child = node, parent = node?.parent; parent; child = parent, parent = parent.parent) {
++   if (parent.type === "NewExpression" && parent.arguments[0] === child && constructor(parent.callee)) return true;
++   if (functions.has(parent.type)) return ownedFunction(parent, seen);
++   // Follow only React child/return paths, never calls, assignments or opaque wrappers.
++   // A custom component can publish its children into a browser renderer. Its
++   // lexical privacy alone cannot prove the ownership of values it receives.
++   if (parent.type === "JSXElement" && child !== parent.openingElement) {
++    const receiver = parent.openingElement?.name;
++    if (receiver?.type !== "JSXIdentifier" || !/^[a-z]/.test(receiver.name)) return false;
++   }
++   if (["JSXOpeningElement", "JSXClosingElement", "JSXElement", "JSXFragment", "JSXExpressionContainer"].includes(parent.type)) continue;
++   if (parent.type === "ConditionalExpression" && parent.test !== child) continue;
++   if (parent.type === "LogicalExpression" && (parent.operator !== "&&" || parent.right === child)) continue;
++   if (parent.type === "ReturnStatement" && parent.argument === child || parent.type === "BlockStatement" || parent.type === "IfStatement" && parent.test !== child) continue;
++   return false;
++  }
++  return false;
++ };
++ return owned;
++}
++// The finite image contract covers scalar values of allow-listed keys whose owning
++// object is inline or module-private. Composite, callable or exported origins stay checked.
++const IMAGE_RESPONSE_COMPOSITE_VALUES = new Set(["ObjectExpression", "ArrayExpression", "FunctionExpression", "ArrowFunctionExpression", "ClassExpression", "JSXElement", "JSXFragment"]);
++function imageResponseFiniteEntry(context) {
++ const exported = (declarator) => {
++  if (declarator?.type !== "VariableDeclarator" || declarator.id?.type !== "Identifier") return true;
++  if (declarator.parent?.type !== "VariableDeclaration" || declarator.parent.parent?.type?.startsWith("Export")) return true;
++  const variable = variableOf(declarator.id, context);
++  if (!variable || variable.defs?.length !== 1) return true;
++  return variable.references.some(ref => ref.identifier?.parent?.type?.startsWith("Export") || ref.identifier?.parent?.type === "TSExportAssignment");
++ };
++ return (key, value) => {
++  if (!IMAGE_RESPONSE_PROPERTIES.has(key)) return false;
++  const property = value?.parent;
++  if (property?.type !== "Property" || property.kind !== "init" || property.method || property.value !== value) return false;
++  if (IMAGE_RESPONSE_COMPOSITE_VALUES.has(unwrap(value)?.type)) return false;
++  // Walk the owning literal outwards: an inline JSX value is owned, a const binding must stay private.
++  let node = property.parent;
++  while (node) {
++   const parent = node.parent;
++   if (parent?.type === "JSXExpressionContainer") return true;
++   if (parent?.type === "Property" && parent.value === node && parent.parent?.type === "ObjectExpression") { node = parent.parent; continue; }
++   if (["TSAsExpression", "TSSatisfiesExpression", "TSNonNullExpression", "ConditionalExpression", "LogicalExpression"].includes(parent?.type)) { node = parent; continue; }
++   if (parent?.type === "VariableDeclarator" && parent.init === node) return !exported(parent);
++   return false;
++  }
++  return false;
++ };
++}
++
+ const noInlineStyles = {
+ 	meta: {
+ 		type: "problem",
+@@ -4556,6 +5267,20 @@ const noInlineStyles = {
+ 		} catch (error) {
+ 			return configErrorVisitors(context, error);
+ 		}
++		const native = nativeStyleAnalysis(context);
++        const imageOwned = imageResponseOwnership(context);
++        const imageFinite = imageResponseFiniteEntry(context);
++        // Semantic proof is restricted to the full imported finite mask object;
++        // no property-name blanket exemption, and every other spread/key is still checked.
++        const importedAlphaGeometry = (value) => {
++            value = unwrap(value);
++            if (value?.type !== "MemberExpression" || value.computed || value.optional || value.object?.type !== "Identifier" || value.property?.type !== "Identifier") return false;
++            const text = context.sourceCode?.text;
++            const filename = fileOf(context);
++            if (typeof text !== "string" || !filename) return false;
++            return !!inferImportedStyle({consumerPath:filename,consumerText:text,bindingName:value.object.name,property:value.property.name,
++                compilerOptions:{module:nativeTs.ModuleKind.ESNext,moduleResolution:nativeTs.ModuleResolutionKind.Bundler,allowImportingTsExtensions:true}});
++        };
+ 		const elementName = (attribute) => {
+ 			const name = attribute?.parent?.name;
+ 			if (name?.type === "JSXIdentifier") return /^[A-Z]/.test(name.name) ? name.name : "";
+@@ -4568,7 +5293,7 @@ const noInlineStyles = {
+ 			}
+ 			return "";
+ 		};
+-		const check = (expr, reportAt, seen = /* @__PURE__ */ new Set(), component = "") => {
++		const check = (expr, reportAt, seen = /* @__PURE__ */ new Set(), component = "", nativeTarget = false, imageTarget = false) => {
+ 			expr = unwrap(expr);
+ 			if (!expr) return;
+ 			const forwarded = forwardedValuesOf(expr, context, "style", seen);
+@@ -4579,24 +5304,24 @@ const noInlineStyles = {
+ 					messageId: "dynamicStyle",
+ 					data: { component }
+ 				}, policy.wordsFor(component));
+-				else check(alternative.value, reportAt, seen, component);
++				else check(alternative.value, reportAt, seen, component, nativeTarget, imageTarget);
+ 				seen.delete(forwarded.variable);
+ 				return;
+ 			}
+ 			if (expr.type === "Identifier" && expr.name === "undefined" || expr.type === "Literal" && expr.value === null) return;
+ 			if (expr.type === "ConditionalExpression") {
+-				check(expr.consequent, expr.consequent, seen, component);
+-				check(expr.alternate, expr.alternate, seen, component);
++				check(expr.consequent, expr.consequent, seen, component, nativeTarget, imageTarget);
++				check(expr.alternate, expr.alternate, seen, component, nativeTarget, imageTarget);
+ 				return;
+ 			}
+ 			if (expr.type === "LogicalExpression") {
+-				if (expr.operator !== "&&") check(expr.left, expr.left, seen, component);
+-				check(expr.right, expr.right, seen, component);
++				if (expr.operator !== "&&") check(expr.left, expr.left, seen, component, nativeTarget, imageTarget);
++				check(expr.right, expr.right, seen, component, nativeTarget, imageTarget);
+ 				return;
+ 			}
+ 			if (expr.type === "Identifier") {
+-				const init = resolveIdentifier(expr, context, seen)?.init;
+-				if (init) return check(init, reportAt, seen, component);
++				const resolved = resolveIdentifier(expr, context, seen);
++				if (resolved) return check(resolved.init, reportAt, nativeTarget ? new Set([...seen, resolved.variable]) : seen, component, nativeTarget, imageTarget);
+ 				emit({
+ 					node: reportAt,
+ 					messageId: "dynamicStyle",
+@@ -4606,7 +5331,16 @@ const noInlineStyles = {
+ 			}
+ 			if (expr.type === "MemberExpression") {
+ 				const found = resolveMemberValue(expr, context, seen);
+-				if (!("unresolved" in found) && found.value) return check(found.value, reportAt, seen, component);
++				if (!("unresolved" in found) && found.value) return check(found.value, reportAt, seen, component, nativeTarget, imageTarget);
++			}
++			if (nativeTarget && expr.type === "ArrayExpression") {
++				for (const entry of expr.elements) if (entry) check(entry.type === "SpreadElement" ? entry.argument : entry, entry, seen, component, nativeTarget, imageTarget);
++				return;
++			}
++			const animated = nativeTarget ? native.animatedReturns(expr) : null;
++			if (animated) {
++				for (const returned of animated) check(returned, returned, seen, component, nativeTarget, imageTarget);
++				return;
+ 			}
+ 			if (expr.type !== "ObjectExpression") {
+ 				emit({
+@@ -4620,8 +5354,26 @@ const noInlineStyles = {
+ 			for (const entry of objectEntries(expr, context, seen)) {
+ 				if ("unknown" in entry) {
+ 					const prop = entry.unknown;
++                    if (!nativeTarget && prop.type === "SpreadElement" && importedAlphaGeometry(prop.argument)) continue;
++					const remainder = prop.type === "SpreadElement" ? forwardedStyleRemainder(prop.argument, context, seen) : null;
++                    if (remainder) {
++                        const forwarded = forwardedValuesOf(remainder.source, context, "style", remainder.path);
++                        // Empty alternatives are valid only for the already-proved public parameter
++                        // with no owned fallback/object default. Never treat unresolved traversal as empty.
++                        if (!forwarded || forwarded.variable !== remainder.parameter.variable || remainder.path.has(forwarded.variable) ||
++                            (forwarded.alternatives.length === 0 && (remainder.parameter.fallback || remainder.parameter.objectDefault))) {
++                            emit({node:prop,messageId:"dynamicStyle",data:{component}},policy.wordsFor(component));
++                            continue;
++                        }
++                        for (const alternative of forwarded.alternatives) {
++                            const filtered = "value" in alternative ? subtractedStyleDefault(alternative.value, remainder.removed, context, remainder.path) : null;
++                            if (filtered) check(filtered, prop, seen, component, nativeTarget, imageTarget);
++                            else emit({node:prop,messageId:"dynamicStyle",data:{component}},policy.wordsFor(component));
++                        }
++                        continue;
++                    }
+ 					if (prop.type === "SpreadElement" && isForwardedProp(unwrap(prop.argument), context, "style")) {
+-						check(prop.argument, prop, seen, component);
++						check(prop.argument, prop, seen, component, nativeTarget, imageTarget);
+ 						continue;
+ 					}
+ 					emit({
+@@ -4635,7 +5387,7 @@ const noInlineStyles = {
+ 			}
+ 			for (const [key, value] of properties) {
+ 				const verdict = policy.decide(component, key);
+-				if (verdict.exempt) continue;
++				if (verdict.exempt || nativeTarget && native.runtimeGeometry(key, value) || !verdict.denied && imageTarget && imageFinite(key, value)) continue;
+ 				if (!key.startsWith("--")) emit({
+ 					node: value,
+ 					messageId: "inlineStyle",
+@@ -4665,7 +5417,7 @@ const noInlineStyles = {
+ 				if (node.name?.name !== "style") return;
+ 				const value = node.value;
+ 				if (value?.type !== "JSXExpressionContainer") return;
+-				check(value.expression, value.expression, /* @__PURE__ */ new Set(), elementName(node));
++				check(value.expression, value.expression, /* @__PURE__ */ new Set(), elementName(node), native.nativeReceiver(node.parent?.name), imageOwned(node));
+ 			},
+ 			JSXSpreadAttribute(node) {
+ 				const object = resolveObject(node.argument, context, /* @__PURE__ */ new Set());
+@@ -4678,7 +5430,7 @@ const noInlineStyles = {
+ 					messageId: "dynamicStyle",
+ 					data: { component }
+ 				}, policy.wordsFor(component));
+-				else check(value, value, /* @__PURE__ */ new Set(), component);
++				else check(value, value, /* @__PURE__ */ new Set(), component, native.nativeReceiver(node.parent?.name), imageOwned(node));
+ 			}
+ 		};
+ 	}
+@@ -5485,6 +6237,7 @@ const noUnknownClasses = {
+ 				const wordsFor = /* @__PURE__ */ new Map();
+ 				const tokens = splitClasses(value).filter((token) => {
+ 					if (settled(token)) return false;
++					if (isReactEmailConfigUtility(filename, context.sourceCode.getText(), token, node.range)) return false;
+ 					const exemption = policy.decide(site.component, token);
+ 					if (exemption.kind === "ok") return false;
+ 					wordsFor.set(token, exemption.message);
+diff --git a/dist/react-email-config-owner.js b/dist/react-email-config-owner.js
+new file mode 100644
+index 000000000..03a9eb5f4
+--- /dev/null
++++ b/dist/react-email-config-owner.js
+@@ -0,0 +1,19 @@
++import ts from 'typescript';
++import {readFileSync,existsSync} from 'node:fs';
++import {dirname,resolve} from 'node:path';
++
++const utilityOwners = [
++ [/^(?:m[trblxyse]?|p[trblxyse]?|gap(?:-[xy])?)-(.+)$/, 'spacing'],
++ [/^max-w-(.+)$/, 'maxWidth'],
++ [/^leading-(.+)$/, 'lineHeight'],
++ [/^tracking-(.+)$/, 'letterSpacing'],
++];
++const parse = (filename,text) => ts.createSourceFile(filename,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
++function nodes(root,predicate){const rows=[];function visit(node){if(predicate(node))rows.push(node);ts.forEachChild(node,visit)}visit(root);return rows}
++function key(node){return ts.isIdentifier(node)||ts.isStringLiteral(node)?node.text:null}
++function field(object,name){if(!object||!ts.isObjectLiteralExpression(object)||object.properties.some(p=>!ts.isPropertyAssignment(p)||key(p.name)===null))return null;const found=object.properties.filter(p=>ts.isPropertyAssignment(p)&&key(p.name)===name);return found.length===1?found[0].initializer:null}
++function imports(source,local){const rows=[];for(const statement of source.statements){if(!ts.isImportDeclaration(statement)||!ts.isStringLiteral(statement.moduleSpecifier))continue;if(statement.importClause?.isTypeOnly)continue;const bindings=statement.importClause?.namedBindings;if(!bindings||!ts.isNamedImports(bindings))continue;for(const entry of bindings.elements)if(!entry.isTypeOnly&&entry.name.text===local)rows.push({name:entry.propertyName?.text??entry.name.text,module:statement.moduleSpecifier.text})}return rows}
++function shadowed(source,name){return nodes(source,node=>(ts.isVariableDeclaration(node)||ts.isParameter(node)||ts.isBindingElement(node)||ts.isFunctionDeclaration(node)||ts.isClassDeclaration(node))&&node.name&&key(node.name)===name).length>0}
++function ownsConfigToken(filename,source,identifier,category,token){if(shadowed(source,identifier))return false;const imported=imports(source,identifier);if(imported.length!==1||!imported[0].module.startsWith('.'))return false;const stem=resolve(dirname(filename),imported[0].module);const candidates=[stem,stem+'.ts',stem+'.tsx',stem+'.js'];const owner=candidates.find(existsSync);if(!owner)return false;let text;try{text=readFileSync(owner,'utf8')}catch{return false}const file=parse(owner,text);if(file.parseDiagnostics.length)return false;const bindings=[];for(const statement of file.statements){if(!ts.isVariableStatement(statement)||!statement.modifiers?.some(m=>m.kind===ts.SyntaxKind.ExportKeyword)||!(statement.declarationList.flags&ts.NodeFlags.Const))continue;for(const declaration of statement.declarationList.declarations)if(key(declaration.name)===imported[0].name)bindings.push(declaration)}if(bindings.length!==1)return false;if(nodes(file,node=>ts.isIdentifier(node)&&node.text===imported[0].name&&node!==bindings[0].name).length)return false;const theme=field(bindings[0].initializer,'theme');const extension=field(theme,'extend');const values=field(extension,category);const value=field(values,token);return !!value&&(ts.isStringLiteral(value)||ts.isNumericLiteral(value))}
++/** Recognize only a token declared by the actual ancestor React Email Tailwind config. */
++export function isReactEmailConfigUtility(filename,sourceText,token,range){if(token.includes(':')||!range||(!sourceText.includes('@react-email/components')&&!sourceText.includes('@react-email/tailwind')))return false;const owner=utilityOwners.map(([pattern,category])=>({match:token.match(pattern),category})).find(r=>r.match);if(!owner)return false;const source=parse(filename,sourceText);if(source.parseDiagnostics.length)return false;const literal=nodes(source,node=>ts.isStringLiteral(node)&&node.getStart(source)===range[0]&&node.end===range[1])[0];if(!literal)return false;let ancestor=literal.parent;while(ancestor){if(ts.isJsxElement(ancestor)){const opening=ancestor.openingElement;if(ts.isIdentifier(opening.tagName)){const local=opening.tagName.text;const binding=imports(source,local);if(!shadowed(source,local)&&binding.length===1&&binding[0].name==='Tailwind'&&['@react-email/components','@react-email/tailwind'].includes(binding[0].module)){if(opening.attributes.properties.some(p=>ts.isJsxSpreadAttribute(p)))return false;const configs=opening.attributes.properties.filter(p=>ts.isJsxAttribute(p)&&key(p.name)==='config');if(configs.length!==1)return false;const config=opening.attributes.properties.find(p=>ts.isJsxAttribute(p)&&key(p.name)==='config');const expression=config?.initializer&&ts.isJsxExpression(config.initializer)?config.initializer.expression:null;return !!expression&&ts.isIdentifier(expression)&&ownsConfigToken(filename,source,expression.text,owner.category,owner.match[1])}}}ancestor=ancestor.parent}return false}
+diff --git a/package.json b/package.json
+index 01d01a15e..318c9f387 100644
+--- a/package.json
++++ b/package.json
+@@ -47,7 +47,9 @@
+   "dependencies": {
+     "@eslint/core": "^0.17.0",
+     "@typescript-eslint/parser": "^8.40.0",
+-    "cn": "0.2.6"
++    "cn": "0.2.6",
++    "typescript": "5.9.3",
++    "css-tree": "1.1.3"
+   },
+   "peerDependencies": {
+     "eslint": ">=9.30.0"
+@@ -78,4 +80,4 @@
+     "typecheck": "tsc --noEmit",
+     "test": "vitest run --config vitest.config.ts"
+   }
+-}
+\ No newline at end of file
++}

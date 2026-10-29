@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	passportActionLabel,
 	passportRowFromGateway,
+	passportRowFromOrganizationActivity,
 	passportRowFromOrganizationControl,
 } from "@/src/lib/agent-passport.ts";
 import type { AuditEntry } from "@/src/lib/api/gateway.ts";
@@ -23,6 +24,9 @@ function gatewayEntry(overrides: Partial<AuditEntry> = {}): AuditEntry {
 		latency_ms: 42,
 		model: "gpt-5",
 		output_tokens: 5,
+		prompt_cache_outcome: null,
+		prompt_cache_read_tokens: null,
+		prompt_cache_write_tokens: null,
 		provider: "openai",
 		request_id: "request-1",
 		session_id: "session-1",
@@ -86,4 +90,39 @@ describe("agent passport activity", () => {
 		).toBe("Prompt version restored");
 		expect(passportActionLabel("custom.event")).toBe("Custom event");
 	});
+});
+
+it("keeps service events without model fields usable in the organization passport", () => {
+	const row = passportRowFromOrganizationActivity(
+		{
+			actorId: null,
+			agentId: "agent",
+			apiKey: "prefix",
+			backend: null,
+			command: null,
+			costMicroUsd: null,
+			durationMs: null,
+			error: null,
+			evalScore: null,
+			eventType: "service_call",
+			feature: null,
+			gatewayId: "gateway",
+			id: "event",
+			inputTokens: 0,
+			latencyMs: 0,
+			managedInference: false,
+			outputTokens: 0,
+			projectId: null,
+			provider: "service",
+			providerCostMicroUsd: null,
+			requestId: "request",
+			sessionId: null,
+			teamId: null,
+			timestamp: "now",
+			userName: null,
+		},
+		"Agent"
+	);
+	expect(row.details).toBe("No additional metadata");
+	expect(row.target).toBe("service");
 });

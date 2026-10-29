@@ -42,7 +42,7 @@ if (!raw) {
 let goal;
 try {
 	goal = JSON.parse(raw);
-} catch (e) {
+} catch  {
 	return { kind: "none" };
 }
 if (!goal || !goal.condition || goal.status !== "active") {

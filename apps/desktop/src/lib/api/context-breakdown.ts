@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/context-breakdown.ts
 //
 // Typed client for `GET /api/conversations/:id/context` — the per-category token
@@ -24,6 +25,33 @@ interface ContextResponse {
  * The remembered context breakdown for a conversation, or `null` when Core has
  * none (fresh process, evicted, or the transport failed).
  */
+const contextResponseResponseCodec: z.ZodType<ContextResponse> = z
+	.object({
+		breakdown: z
+			.union([
+				z
+					.object({
+						attributed: z.number(),
+						plane: z.enum(["acp", "openai"]),
+						reserveOutput: z.number(),
+						segments: z.array(
+							z
+								.object({
+									detail: z.string().optional(),
+									kind: z.string(),
+									label: z.string(),
+									tokens: z.number(),
+								})
+								.passthrough()
+						),
+						window: z.number(),
+					})
+					.passthrough(),
+				z.null(),
+			])
+			.optional(),
+	})
+	.passthrough();
 export async function getContextBreakdown(
 	target: ApiTarget,
 	conversationId: string
@@ -31,7 +59,9 @@ export async function getContextBreakdown(
 	try {
 		const res = await request<ContextResponse>(
 			target,
-			`/api/conversations/${encodeURIComponent(conversationId)}/context`
+			`/api/conversations/${encodeURIComponent(conversationId)}/context`,
+			{},
+			contextResponseResponseCodec
 		);
 		return res.breakdown ?? null;
 	} catch {

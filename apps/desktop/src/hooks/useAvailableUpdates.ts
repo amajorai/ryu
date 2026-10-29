@@ -24,6 +24,10 @@ import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { sileo } from "sileo";
 import { applyReleaseUpdate } from "@/src/components/updater/AutoUpdater.tsx";
+import {
+	pluginHasUpdate,
+	showsAppUpdateRow,
+} from "@/src/hooks/available-updates-policy.ts";
 import { fetchAgentCatalog, runAgentUpdate } from "@/src/lib/api/agents.ts";
 import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import { installMcpServer, listMcpUpdates } from "@/src/lib/api/mcp.ts";
@@ -39,9 +43,9 @@ import {
 	type UpdateCheck,
 	updateCheckFailed,
 } from "@/src/lib/api/update.ts";
-import { getAppVersion, releaseIsNewerThanApp } from "@/src/lib/app-version.ts";
+import { getAppVersion } from "@/src/lib/app-version.ts";
 import { fetchCatalog, installSidecar } from "@/src/lib/services-api.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import { isLocalNode, useNodeStore } from "@/src/store/useNodeStore.ts";
 
 /** The artifact families that can carry an available update. */
 export type UpdateKind =
@@ -72,6 +76,10 @@ export interface AvailableUpdate {
 	name: string;
 	/** Release notes / changelog, when the source provides them (app only today). */
 	notes?: string | null;
+	/** Installed skill slug (skills only), to look up the skill's enabled state. */
+	slug?: string;
+	/** Catalog source that must apply the update (skills, MCP servers). */
+	source?: string;
 }
 
 // Match the owning Store sections' react-query keys so no duplicate fetch fires.
@@ -234,10 +242,14 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 	// "Ryu app 0.0.14 → 0.1.3" that could never clear: its apply reaches
 	// `installUpdate`, the Tauri updater correctly finds nothing newer than the
 	// running 0.1.3 bundle, and the user gets a manual-download toast instead.
+	//
+	// That gate is LOCAL-only. A remote node updates itself through
+	// `POST /api/update/apply`, so its own verdict is the truth there: a remote
+	// Core on 0.1.0 viewed from an app already on 0.1.3 still needs the update.
 	const appVerdict = appQ.data;
 	if (
-		appVerdict?.update_available &&
-		releaseIsNewerThanApp(appVersionQ.data, appVerdict.latest)
+		appVerdict &&
+		showsAppUpdateRow(appVerdict, isLocalNode(node), appVersionQ.data)
 	) {
 		updates.push({
 			key: "app:ryu",
@@ -301,14 +313,17 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 	}
 
 	// Plugins — join installed apps (installedVersion) with the catalog (version).
+	//
+	// Semver, within the installed build's channel. A plain `!==` offered
+	// downgrades (a stale catalog) and cross-channel "updates" — a plugin on a
+	// beta train against the stable catalog version — that Core's channel-scoped
+	// apply resolves to a no-op, so the row could never clear.
 	const installedById = new Map((appsQ.data ?? []).map((a) => [a.id, a]));
 	for (const entry of pluginCatalogQ.data ?? []) {
 		const installed = installedById.get(entry.id);
 		if (
 			installed?.installed &&
-			installed.installedVersion &&
-			entry.version &&
-			installed.installedVersion !== entry.version
+			pluginHasUpdate(installed.installedVersion, entry.version)
 		) {
 			updates.push({
 				key: `plugin:${entry.id}`,
@@ -344,8 +359,10 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 			kind: "skill",
 			id: entry.id,
 			name: entry.name,
+			slug: entry.slug,
 			currentVersion: null,
 			latestVersion: null,
+			source: entry.source,
 		});
 	}
 
@@ -359,6 +376,7 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 			name: entry.name,
 			currentVersion: entry.currentVersion,
 			latestVersion: entry.latestVersion,
+			source: entry.source ?? undefined,
 		});
 	}
 
@@ -451,11 +469,13 @@ export function useAvailableUpdates(): UseAvailableUpdatesResult {
 					};
 				}
 				case "skill": {
-					await installSkill(target, update.id);
+					// Apply on the source that found the update, not the active one.
+					await installSkill(target, update.id, update.source);
 					return { detail: `${update.name} updated.`, silent: false };
 				}
 				case "mcp": {
-					await installMcpServer(target, update.id, true);
+					// Apply on the registry the check ran against, not the active one.
+					await installMcpServer(target, update.id, true, update.source);
 					return { detail: `${update.name} updated.`, silent: false };
 				}
 				default:

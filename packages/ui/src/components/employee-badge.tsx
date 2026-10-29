@@ -1,7 +1,8 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { Logo } from "./logo.tsx";
 import { PassCardShell } from "./pass-card-shell.tsx";
 
@@ -59,6 +60,10 @@ export interface EmployeeBadgeProps {
 	 */
 	metalTheme?: "auto" | "dark" | "light";
 	name: string;
+	/**
+	 * Makes the card a button: it joins the tab order, is announced by the
+	 * agent's {@link name}, and Enter or Space activates it as a click does.
+	 */
 	onClick?: () => void;
 	/**
 	 * Paint the animated metal ring around the card. Defaults on for the one hero
@@ -128,12 +133,22 @@ export function EmployeeBadge({
 	stats,
 	still = false,
 }: EmployeeBadgeProps) {
+	const tl = useLiteralMessages();
 	const hiredLabel = formatHiredAt(hiredAt);
 	const badgeId = formatEmployeeId(employeeId);
 	// Level sits in the header, not in the footer row. Prepending it there pushed
 	// a caller-supplied stat off the end of the slice — a silent data loss, since
 	// both call sites pass exactly three.
 	const footerStats = (stats ?? []).slice(0, MAX_FOOTER_STATS);
+	// A clickable card is a button for the keyboard too, the way the Agents
+	// page's badge card is: Enter or Space opens it, and Space is held back so
+	// it does not also scroll the page.
+	const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			onClick?.();
+		}
+	};
 
 	return (
 		<PassCardShell
@@ -147,20 +162,24 @@ export function EmployeeBadge({
 			    to two or three lines, so the card grows past the floor instead of
 			    clipping. The hero block takes the slack (`flex-1`), which is what
 			    keeps a short name from leaving the footer floating in the middle. */}
-			{/* biome-ignore lint/a11y/noStaticElementInteractions: the shell owns the
-			    pointer gestures, so the click target has to be this inner surface. */}
-			{/* biome-ignore lint/a11y/useKeyWithClickEvents: as above — a nested
-			    button would swallow the shell's drag-to-turn. */}
 			<div
-				className="relative flex min-h-[27rem] w-full flex-1 flex-col gap-6 p-7"
+				aria-label={onClick ? name : undefined}
+				className={cn(
+					"relative flex min-h-[27rem] w-full flex-1 flex-col gap-6 p-7",
+					onClick &&
+						"rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+				)}
 				onClick={onClick}
+				onKeyDown={onClick ? handleKeyDown : undefined}
+				role={onClick ? "button" : undefined}
+				tabIndex={onClick ? 0 : undefined}
 			>
 				<div className="flex items-center justify-between gap-3">
 					<span className="flex items-center gap-2">
 						<Logo size="20px" variant="outline" />
 						<span className="font-medium text-sm">Ryu</span>
 					</span>
-					<span className="flex items-center gap-3 text-[11px] text-muted-foreground tabular-nums">
+					<span className="type-caption flex items-center gap-3 text-muted-foreground tabular-nums">
 						{level === undefined ? null : <span>Lv {level}</span>}
 						<span>{badgeId}</span>
 					</span>
@@ -201,8 +220,8 @@ export function EmployeeBadge({
 				</div>
 
 				{hiredLabel ? (
-					<span className="text-[11px] text-muted-foreground tabular-nums">
-						Hired {hiredLabel}
+					<span className="type-caption text-muted-foreground tabular-nums">
+						{tl("Hired {hiredLabel}", { hiredLabel })}
 					</span>
 				) : null}
 			</div>

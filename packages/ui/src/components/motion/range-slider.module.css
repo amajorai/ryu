@@ -1,0 +1,15 @@
+.inline1 {
+	width: var(--range-slider-1-width);
+}
+/* Applied only with `fillColor`: this unlayered rule would otherwise override
+ * the neutral `bg-foreground/15` default fill. */
+.fillTint {
+	background-color: var(--range-slider-1-background-color);
+}
+.inline2 {
+	left: var(--range-slider-2-left);
+}
+.inline3 {
+	left: var(--range-slider-3-left);
+	translate: var(--range-slider-3-x) var(--range-slider-3-y);
+}

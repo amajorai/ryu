@@ -39,7 +39,7 @@ const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
 	const requestUrl = input instanceof Request ? input.url : String(input);
 	const url = new URL(requestUrl, window.location.origin);
-	const json = (body: unknown, status = 200) =>
+	const json = <FixturePayload,>(body: FixturePayload, status = 200) =>
 		new Response(JSON.stringify(body), {
 			headers: { "content-type": "application/json" },
 			status,
@@ -162,8 +162,8 @@ function Story() {
 				<main className="min-h-screen bg-background p-8 text-foreground">
 					<div className="mx-auto flex min-h-[720px] max-w-3xl flex-col gap-6 rounded-3xl border border-border/70 bg-card p-8 shadow-2xl">
 						<header className="border-border/70 border-b pb-6">
-							<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
-								Ryu Console · managed workspace
+							<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
+								Agent · managed workspace
 							</p>
 							<h1 className="mt-2 font-semibold text-3xl tracking-tight">
 								Bot realm defaults

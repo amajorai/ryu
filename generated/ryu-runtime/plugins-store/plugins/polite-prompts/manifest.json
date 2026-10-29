@@ -1,0 +1,70 @@
+{
+  "tags": ["prompt", "tone", "rewrite", "composer"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/polite-prompts",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/polite-prompts",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/polite-prompts",
+  "name": "Polite Prompts",
+  "version": "0.1.14",
+  "stability": "experimental",
+  "description": "Notices when a message is written in anger (insults, profanity aimed at the agent, shouting) and has a side model rewrite it into a calm, respectful prompt before it is sent. Every technical detail, constraint, code block and the urgency of the request are kept; only the abuse is dropped. Messages that read as ordinary are sent untouched without a model call, and `/polite` rewrites one message on demand.",
+  "tagline": "Vent freely, send something kind",
+  "keywords": ["prompt", "tone", "rewrite", "composer"],
+  "category": "Productivity",
+  "icon": "bubble-chat-edit",
+  "iconDither": { "from": 145, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "full" },
+    "mobile": { "support": "full" },
+    "extension": { "support": "full" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "permission_grants": ["hook:side-model", "preferences:read"],
+  "activation_events": ["*"],
+  "contributes": {
+    "settings_tabs": [
+      {
+        "id": "polite-prompts.settings",
+        "title": "Polite Prompts",
+        "scope": "node",
+        "fields": [
+          {
+            "type": "toggle",
+            "pref_key": "polite-prompts-auto",
+            "label": "Rewrite abusive messages automatically",
+            "description": "When a message contains insults, profanity aimed at the agent or shouting, rewrite it politely before it is sent. Off leaves `/polite` as the only way in.",
+            "default": true
+          },
+          {
+            "type": "model_picker",
+            "pref_key": "polite-prompts-model",
+            "label": "Rewrite model",
+            "description": "Optional. Empty uses the local engine (or the node default)."
+          }
+        ]
+      }
+    ],
+    "slash_commands": [
+      {
+        "id": "polite-prompts.polite",
+        "command": "/polite",
+        "description": "Rewrite this one message politely and send it, e.g. '/polite why is this STILL broken'. Works with automatic rewriting off."
+      }
+    ],
+    "turn_hooks": [
+      {
+        "id": "polite-prompts.rewrite",
+        "on": "pre_user_turn",
+        "code_file": "hooks/rewrite.js"
+      }
+    ]
+  }
+}

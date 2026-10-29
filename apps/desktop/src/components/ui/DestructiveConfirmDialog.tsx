@@ -19,10 +19,12 @@ export function DestructiveConfirmDialog({
 	open,
 	title,
 	busy = false,
+	error,
 	impact,
 }: {
 	busy?: boolean;
 	description: string;
+	error?: string | null;
 	impact?: ReactNode;
 	label: string;
 	onConfirm: () => boolean | Promise<boolean>;
@@ -65,6 +67,15 @@ export function DestructiveConfirmDialog({
 					<AlertDialogTitle>{title}</AlertDialogTitle>
 					<AlertDialogDescription>{description}</AlertDialogDescription>
 				</AlertDialogHeader>
+				{error ? (
+					<p
+						aria-live="polite"
+						className="text-sm text-status-destructive"
+						role="alert"
+					>
+						{error}
+					</p>
+				) : null}
 				{impact ? (
 					<div className="rounded-lg border bg-muted/40 p-3 text-sm">
 						{impact}

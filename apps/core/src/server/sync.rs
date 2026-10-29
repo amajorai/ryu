@@ -22,6 +22,7 @@
 //! Placement (Core vs Gateway, CLAUDE.md §1): conversation state is
 //! *what runs* (orchestration), so the sync client belongs in Core.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::time::Duration;
 
@@ -29,7 +30,7 @@ use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use super::conversations::{ConversationStore, Tenancy};
+use super::conversations::{ConversationStore, SyncLink, SyncParent, Tenancy};
 
 /// Errors specific to the sync client.
 #[derive(Debug)]
@@ -99,6 +100,18 @@ pub struct SyncMessage {
     pub content: String,
     /// Unix milliseconds.
     pub created_at: i64,
+    /// The message this one replies to in the source's version tree. Sent only
+    /// by a source whose conversation is branched (non-NULL leaf); a flat source
+    /// and an older peer omit it, and the receiver then appends the row to its
+    /// own thread. `skip_serializing_if` keeps a flat push byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<String>,
+    /// Set by a branched source on a row with no parent: a genuine root of its
+    /// version tree (a first turn, or an edited first turn). The relay merges
+    /// rows from every device, so a parentless row without this mark (a flat
+    /// source's or an older peer's) is never read as a root. Omitted when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub version_root: bool,
 }
 
 /// Stable-id LWW snapshot for a Spaces document. The Space metadata rides with
@@ -467,6 +480,10 @@ impl SyncClient {
             .get(&url)
             .bearer_auth(&self.token)
             .header("accept", "text/event-stream")
+            // The client-wide 30 s total timeout also bounds body reads, which
+            // would cut this long-lived stream off halfway through every sync
+            // window. Outlive the caller's `SYNC_INTERVAL` window instead.
+            .timeout(SYNC_INTERVAL + Duration::from_secs(5))
             .send()
             .await?;
 
@@ -634,6 +651,9 @@ pub fn spawn_sync_loop(
 ) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(SYNC_INTERVAL);
+        // A tick that overruns (a slow push or pull) must not be followed by a
+        // burst of catch-up ticks.
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // Loop-local watermark: 0 = full sync on the first enabled pull, then
         // advanced to "now" after each success. Kept in memory only: no new
         // persistence path, so a restart simply does one extra full pull.
@@ -642,6 +662,22 @@ pub fn spawn_sync_loop(
         // Throttle the "no token" warning so a signed-out user with sync on does
         // not spam the log every tick.
         let mut warned_unauthenticated = false;
+        // Throttle the "token rejected" warning the same way: a revoked or
+        // expired token is reported once, not on every tick.
+        let mut warned_rejected = false;
+        // Sync revision of each conversation as last pushed successfully, for the
+        // push destination in `pushed_scope`. A conversation whose revision is
+        // unchanged is skipped instead of being rebuilt and re-uploaded every
+        // tick. Memory only: a restart pushes everything once, as before.
+        let mut pushed_revs: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        let mut pushed_scope: Option<(String, u64, Tenancy)> = None;
+        // `updated_at` of each Spaces document as last pushed successfully, for
+        // the same destination. The server ignores a push whose `updated_at` is
+        // not newer, so an unchanged document is skipped instead of re-uploading
+        // its full body every tick. Memory only, like `pushed_revs`.
+        let mut pushed_doc_stamps: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
 
         loop {
             interval.tick().await;
@@ -694,20 +730,66 @@ pub fn spawn_sync_loop(
                         .await
                 }
             };
+            // A different server, account or tenancy is a different mirror, so
+            // what was pushed before says nothing about it.
+            let scope = (
+                client.server_url.clone(),
+                token_fingerprint(&client.token),
+                replay_ctx.clone(),
+            );
+            if pushed_scope.as_ref() != Some(&scope) {
+                pushed_revs.clear();
+                pushed_doc_stamps.clear();
+                pushed_scope = Some(scope);
+            }
+            // Read before building any payload: a change that lands mid-push bumps
+            // the revision past the recorded one, so the next tick pushes again.
+            let revisions = match conversations.sync_revisions().await {
+                Ok(revisions) => revisions,
+                Err(e) => {
+                    tracing::warn!("cloud sync: reading sync revisions failed: {e}");
+                    std::collections::HashMap::new()
+                }
+            };
+            // Set when the server rejects the stored token (401/403). Every
+            // other request this tick would fail the same way, so the tick stops
+            // there: a revoked token costs one request a minute, not one per
+            // conversation and document.
+            let mut rejected = false;
             match local_conversations {
                 Ok(summaries) => {
                     for summary in &summaries {
-                        if let Err(e) = client.push(&conversations, &summary.id).await {
-                            tracing::warn!(
-                                "cloud sync: push of conversation {} failed: {e}",
-                                summary.id
-                            );
+                        let revision = revisions.get(&summary.id).copied();
+                        if revision.is_some() && pushed_revs.get(&summary.id).copied() == revision {
+                            continue;
+                        }
+                        match client.push(&conversations, &summary.id).await {
+                            Ok(()) => {
+                                warned_rejected = false;
+                                if let Some(revision) = revision {
+                                    pushed_revs.insert(summary.id.clone(), revision);
+                                }
+                            }
+                            Err(e) if is_auth_rejection(&e) => {
+                                warn_token_rejected(&mut warned_rejected, &e);
+                                rejected = true;
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "cloud sync: push of conversation {} failed: {e}",
+                                    summary.id
+                                );
+                            }
                         }
                     }
                 }
                 Err(e) => {
                     tracing::warn!("cloud sync: listing local conversations failed: {e}");
                 }
+            }
+            if rejected {
+                continue;
             }
 
             // Receive remote changes since the last server-owned watermark.
@@ -725,8 +807,24 @@ pub fn spawn_sync_loop(
                             }
                             Tenancy::SharedOrg { .. } => true,
                         };
-                        if visible_to_account {
-                            if let Err(error) = client.push_document(&payload).await {
+                        if !visible_to_account {
+                            continue;
+                        }
+                        if !document_needs_push(&pushed_doc_stamps, &payload) {
+                            continue;
+                        }
+                        match client.push_document(&payload).await {
+                            Ok(()) => {
+                                warned_rejected = false;
+                                pushed_doc_stamps
+                                    .insert(payload.document_id.clone(), payload.updated_at);
+                            }
+                            Err(error) if is_auth_rejection(&error) => {
+                                warn_token_rejected(&mut warned_rejected, &error);
+                                rejected = true;
+                                break;
+                            }
+                            Err(error) => {
                                 tracing::warn!(
                                     "cloud sync: push of document {} failed: {error}",
                                     payload.document_id
@@ -738,6 +836,9 @@ pub fn spawn_sync_loop(
                 Err(error) => {
                     tracing::warn!("cloud sync: listing local documents failed: {error:#}")
                 }
+            }
+            if rejected {
+                continue;
             }
 
             // The captured wall time is only a compatibility fallback for an
@@ -752,10 +853,18 @@ pub fn spawn_sync_loop(
                 .await
             {
                 Ok(outcome) => {
+                    warned_rejected = false;
                     if outcome.applied > 0 {
                         tracing::info!("cloud sync: pulled {} document(s)", outcome.applied);
                     }
                     document_pull_since_ms = outcome.snapshot_at.unwrap_or(document_now_ms);
+                }
+                Err(error) if is_auth_rejection(&error) => {
+                    // Typically reached when every conversation and document
+                    // was already current, so no push hit the rejection first.
+                    // The stream and conversation pull would be refused too.
+                    warn_token_rejected(&mut warned_rejected, &error);
+                    continue;
                 }
                 Err(error) => tracing::warn!("cloud sync: document pull failed: {error}"),
             }
@@ -791,6 +900,7 @@ pub fn spawn_sync_loop(
                 .await
             {
                 Ok(outcome) => {
+                    warned_rejected = false;
                     if outcome.applied > 0 {
                         tracing::info!("cloud sync: pulled {} conversation(s)", outcome.applied);
                     }
@@ -805,6 +915,35 @@ pub fn spawn_sync_loop(
 }
 
 // ── Pure helpers (no HTTP — tested independently) ────────────────────────────
+
+/// True when the server refused the stored token itself. Every request in the
+/// tick would fail the same way, so the loop stops the tick instead of retrying
+/// each conversation and document. Other 4xx codes (an oversized conversation's
+/// 413, say) stay per-item failures so one bad item cannot block the rest.
+fn is_auth_rejection(error: &SyncError) -> bool {
+    matches!(error, SyncError::ServerError(401 | 403, _))
+}
+
+/// Log a token rejection once until a later request succeeds again.
+fn warn_token_rejected(warned: &mut bool, error: &SyncError) {
+    if !*warned {
+        tracing::warn!(
+            "cloud sync: server rejected the stored token ({error}); pausing sync until device login is refreshed"
+        );
+        *warned = true;
+    }
+}
+
+/// True unless this exact `updated_at` of the document was already pushed
+/// successfully to the current destination. Keyed on `updated_at` (not
+/// `revision`) because that is the server's last-writer-wins guard: an icon or
+/// visibility edit moves only `updated_at`, and an equal one is a server no-op.
+fn document_needs_push(
+    pushed: &std::collections::HashMap<String, i64>,
+    payload: &DocumentSyncPayload,
+) -> bool {
+    pushed.get(&payload.document_id) != Some(&payload.updated_at)
+}
 
 /// Serialize every non-system, non-binary Spaces document with its stable Space
 /// metadata. The server mirror remains a transport; local Spaces is authoritative.
@@ -916,14 +1055,17 @@ pub async fn build_sync_payload(
     store: &ConversationStore,
     conversation_id: &str,
 ) -> Result<SyncPayload> {
-    let summaries = store.list_conversations().await?;
-    let summary = summaries
-        .iter()
-        .find(|s| s.id == conversation_id)
-        .ok_or_else(|| anyhow::anyhow!("conversation {} not found in store", conversation_id))?
-        .clone();
+    // One-row read. Listing every conversation here made each sync tick
+    // quadratic: the loop calls this once per conversation.
+    let summary = store
+        .get_summary(conversation_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("conversation {} not found in store", conversation_id))?;
 
     let stored_messages = store.get_messages(conversation_id).await?;
+    // Parents describe a tree only once the conversation has branched; a flat
+    // conversation's rows are ordered by time, so it sends none.
+    let branched = store.active_leaf(conversation_id).await?.is_some();
 
     let messages = stored_messages
         .into_iter()
@@ -932,6 +1074,8 @@ pub async fn build_sync_payload(
             role: m.role,
             content: m.content,
             created_at: m.created_at,
+            version_root: branched && m.parent_message_id.is_none(),
+            parent_message_id: m.parent_message_id.filter(|_| branched),
         })
         .collect();
 
@@ -956,6 +1100,15 @@ pub async fn build_sync_payload(
         updated_at: summary.updated_at,
         messages,
     })
+}
+
+/// A non-reversible fingerprint of the sync token, so the push record resets
+/// when the signed-in account changes without holding a second token copy.
+fn token_fingerprint(token: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    token.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Whether THIS node is bound to an org (a shared "company brain"). The one place
@@ -1002,6 +1155,11 @@ fn resolve_replay_context() -> Option<Tenancy> {
 ///   newer than the stored value (last-writer-wins).
 /// - Messages: union-merged by `id` — messages absent from the local store
 ///   are inserted; messages already present are left unchanged (append-only).
+/// - Version tree: in a branched receiver, inserted rows keep their source
+///   parent when the receiver holds it and it keeps the tree acyclic; rows
+///   without one continue its active thread, and the leaf only advances onto
+///   rows that descend from it (see [`ConversationStore::link_synced_messages`]).
+///   A never-branched receiver stays flat.
 ///
 /// **Tenancy (fail-closed).** Replay is a CREATION path: a payload for a
 /// conversation this device has never seen mints the row. `tenancy` is the receiving
@@ -1055,6 +1213,52 @@ pub async fn apply_sync_payload_at(
     tenancy: Tenancy,
     node_bound: bool,
 ) -> Result<()> {
+    let inserted = insert_sync_payload(store, payload, tenancy, node_bound).await?;
+    store
+        .link_synced_messages(
+            &payload.conversation_id,
+            &sync_links(&payload.messages),
+            &inserted,
+        )
+        .await
+}
+
+/// [`apply_sync_payload`] without placing the inserted rows in the version
+/// tree, returning the ids it inserted. For a caller that links them itself
+/// (the RNP resume handler's `link_resumed_messages`).
+pub async fn apply_sync_payload_unlinked(
+    store: &ConversationStore,
+    payload: &SyncPayload,
+    tenancy: Tenancy,
+) -> Result<HashSet<String>> {
+    insert_sync_payload(store, payload, tenancy, node_bound()).await
+}
+
+/// Each message's source tree position, read per row. A pulled payload merges
+/// rows pushed by every device, so whether some row carries a parent says
+/// nothing about another: only a row the source marked [`SyncMessage::version_root`]
+/// is a root, and any other parentless row (a flat source's or an older peer's)
+/// has an unknown position.
+fn sync_links(messages: &[SyncMessage]) -> Vec<SyncLink> {
+    messages
+        .iter()
+        .map(|message| SyncLink {
+            id: message.id.clone(),
+            parent: match &message.parent_message_id {
+                Some(parent) => SyncParent::Message(parent.clone()),
+                None if message.version_root => SyncParent::Root,
+                None => SyncParent::Unknown,
+            },
+        })
+        .collect()
+}
+
+async fn insert_sync_payload(
+    store: &ConversationStore,
+    payload: &SyncPayload,
+    tenancy: Tenancy,
+    node_bound: bool,
+) -> Result<HashSet<String>> {
     let tenancy = effective_replay_tenancy(payload, &tenancy);
     if tenancy == Tenancy::Unattributed && node_bound {
         anyhow::bail!(
@@ -1092,8 +1296,9 @@ pub async fn apply_sync_payload_at(
 
     // Union-merge messages. The store's insert is idempotent and deliberately
     // metadata-neutral; metadata was resolved by LWW above.
+    let mut inserted = HashSet::new();
     for msg in &payload.messages {
-        store
+        if store
             .append_sync_message_with_id(
                 &payload.conversation_id,
                 &msg.id,
@@ -1102,10 +1307,13 @@ pub async fn apply_sync_payload_at(
                 payload.agent_id.as_deref(),
                 msg.created_at,
             )
-            .await?;
+            .await?
+        {
+            inserted.insert(msg.id.clone());
+        }
     }
 
-    Ok(())
+    Ok(inserted)
 }
 
 #[cfg(test)]
@@ -1229,6 +1437,84 @@ mod tests {
         assert_eq!(unchanged.source, "# First draft");
     }
 
+    #[tokio::test]
+    async fn concurrent_document_edit_on_two_devices_keeps_both_bodies() {
+        let device_a = super::super::spaces::SpaceStore::open_in_memory().unwrap();
+        let device_b = super::super::spaces::SpaceStore::open_in_memory().unwrap();
+        let owner = super::super::spaces::DocOwner::unattributed();
+        let space_id = device_a
+            .create_space("Research", None, &owner)
+            .await
+            .unwrap();
+        let document_id = device_a
+            .create_page(&space_id, "Plan", &owner)
+            .await
+            .unwrap();
+        device_a
+            .update_document(&document_id, "Plan", "# Shared start")
+            .await
+            .unwrap();
+        let initial = build_document_sync_payloads(&device_a)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|payload| payload.document_id == document_id)
+            .unwrap();
+        assert!(
+            apply_document_sync_payload(&device_b, &initial, Tenancy::Unattributed)
+                .await
+                .unwrap()
+        );
+        // Receiving a snapshot records it as B's sync base, so a plain relay with
+        // no local edit is not a conflict.
+        assert!(device_b
+            .list_document_versions(&document_id)
+            .await
+            .unwrap()
+            .iter()
+            .all(|version| version.capture_type != ryu_spaces::SYNC_CONFLICT_CAPTURE_TYPE));
+
+        // Both devices edit offline; A's edit is newer.
+        device_b
+            .update_document(&document_id, "Plan", "# B's offline edit")
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        device_a
+            .update_document(&document_id, "Plan", "# A's newer edit")
+            .await
+            .unwrap();
+        let newer = build_document_sync_payloads(&device_a)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|payload| payload.document_id == document_id)
+            .unwrap();
+        assert!(
+            apply_document_sync_payload(&device_b, &newer, Tenancy::Unattributed)
+                .await
+                .unwrap()
+        );
+
+        // Newest wins the document body, and B's edit survives as a pinned
+        // history version instead of being silently discarded.
+        let shown = device_b.get_document(&document_id).await.unwrap().unwrap();
+        assert_eq!(shown.source, "# A's newer edit");
+        let kept = device_b
+            .list_document_versions(&document_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|version| version.capture_type == ryu_spaces::SYNC_CONFLICT_CAPTURE_TYPE)
+            .expect("B's concurrent edit is kept in history");
+        let body = device_b
+            .get_document_version(&kept.id)
+            .await
+            .unwrap()
+            .expect("kept version is readable");
+        assert_eq!(body.source, "# B's offline edit");
+    }
+
     /// Proves "two DBs, one synced conversation" (AC2):
     /// - store_a gets messages appended,
     /// - a payload is built from store_a,
@@ -1342,6 +1628,8 @@ mod tests {
                 role: "user".to_string(),
                 content: "hello".to_string(),
                 created_at: base_ts,
+                parent_message_id: None,
+                version_root: false,
             }],
         };
 
@@ -1362,6 +1650,8 @@ mod tests {
                 role: "user".to_string(),
                 content: "hello".to_string(),
                 created_at: base_ts,
+                parent_message_id: None,
+                version_root: false,
             }],
         };
 
@@ -1484,6 +1774,8 @@ mod tests {
                 role: "user".to_owned(),
                 content: "secret".to_owned(),
                 created_at: 1,
+                parent_message_id: None,
+                version_root: false,
             }],
         };
 
@@ -1592,6 +1884,8 @@ mod tests {
                 role: "user".to_owned(),
                 content: "steal".to_owned(),
                 created_at: 1,
+                parent_message_id: None,
+                version_root: false,
             }],
         };
 
@@ -1646,6 +1940,8 @@ mod tests {
                 role: "user".to_owned(),
                 content: "hi".to_owned(),
                 created_at: 1,
+                parent_message_id: None,
+                version_root: false,
             }],
         }
     }
@@ -2050,5 +2346,398 @@ mod tests {
         assert!(SyncError::Store(anyhow::anyhow!("boom"))
             .to_string()
             .contains("boom"));
+    }
+
+    /// Only a refusal of the token itself stops the tick; per-item and transient
+    /// failures keep retrying item by item.
+    #[test]
+    fn is_auth_rejection_matches_only_token_refusals() {
+        let rejected = |status| is_auth_rejection(&SyncError::ServerError(status, String::new()));
+        assert!(rejected(401));
+        assert!(rejected(403));
+        for status in [413, 500, 502] {
+            assert!(!rejected(status));
+        }
+        assert!(!is_auth_rejection(&SyncError::Unauthenticated));
+        let store_error = SyncError::Store(anyhow::anyhow!("boom"));
+        assert!(!is_auth_rejection(&store_error));
+    }
+
+    #[test]
+    fn warn_token_rejected_sets_the_throttle_flag() {
+        let mut warned = false;
+        let error = SyncError::ServerError(401, String::new());
+        warn_token_rejected(&mut warned, &error);
+        assert!(warned);
+        warn_token_rejected(&mut warned, &error);
+        assert!(warned);
+    }
+
+    /// An unchanged document is not re-uploaded every tick; a newer `updated_at`
+    /// (any edit, including icon or visibility) is pushed again.
+    #[test]
+    fn document_needs_push_skips_only_an_already_pushed_stamp() {
+        let mut payload = DocumentSyncPayload {
+            document_id: "doc".to_owned(),
+            title: "Doc".to_owned(),
+            source: "body".to_owned(),
+            kind: "page".to_owned(),
+            parent_id: None,
+            icon: None,
+            created_at: 1,
+            updated_at: 10,
+            revision: 1,
+            owner_user_id: None,
+            space: ryu_spaces::SpaceSyncRecord {
+                id: "space".to_owned(),
+                name: "Space".to_owned(),
+                description: None,
+                created_at: 1,
+                updated_at: 1,
+                retrieval_mode: "hybrid".to_owned(),
+                visibility: "private".to_owned(),
+                team_id: None,
+            },
+        };
+        let mut pushed = std::collections::HashMap::new();
+        assert!(document_needs_push(&pushed, &payload));
+
+        pushed.insert(payload.document_id.clone(), payload.updated_at);
+        assert!(!document_needs_push(&pushed, &payload));
+
+        payload.updated_at = 11;
+        assert!(document_needs_push(&pushed, &payload));
+
+        payload.document_id = "other".to_owned();
+        payload.updated_at = 10;
+        assert!(document_needs_push(&pushed, &payload));
+    }
+
+    // ── Version tree (branched receivers) ────────────────────────────────────
+
+    async fn append_turns(
+        store: &ConversationStore,
+        conv: &str,
+        turns: &[(&str, &str)],
+    ) -> Vec<String> {
+        let mut ids = Vec::new();
+        for (role, text) in turns {
+            ids.push(
+                store
+                    .append_message(conv, role, text, None, None, None)
+                    .await
+                    .unwrap(),
+            );
+        }
+        ids
+    }
+
+    async fn active_contents(store: &ConversationStore, conv: &str) -> Vec<String> {
+        store
+            .get_active_messages(conv)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|message| message.content)
+            .collect()
+    }
+
+    /// Device A and device B share `u1, a1`, and B has branched (its leaf is set).
+    async fn shared_history_with_branched_receiver(
+        conv: &str,
+    ) -> (ConversationStore, ConversationStore, Vec<String>) {
+        let store_a = ConversationStore::open_in_memory().unwrap();
+        let store_b = ConversationStore::open_in_memory().unwrap();
+        let ids = append_turns(&store_a, conv, &[("user", "u1"), ("assistant", "a1")]).await;
+        let payload = build_sync_payload(&store_a, conv).await.unwrap();
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        store_b
+            .select_version(conv, &ids[1])
+            .await
+            .unwrap()
+            .expect("leaf");
+        (store_a, store_b, ids)
+    }
+
+    #[tokio::test]
+    async fn flat_source_turns_append_to_a_branched_receivers_thread() {
+        let conv = "conv-tree-flat-source";
+        let (store_a, store_b, _) = shared_history_with_branched_receiver(conv).await;
+        let added = append_turns(&store_a, conv, &[("user", "u2"), ("assistant", "a2")]).await;
+
+        let payload = build_sync_payload(&store_a, conv).await.unwrap();
+        assert!(
+            payload
+                .messages
+                .iter()
+                .all(|m| m.parent_message_id.is_none()),
+            "a never-branched source sends no parents"
+        );
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_contents(&store_b, conv).await,
+            ["u1", "a1", "u2", "a2"]
+        );
+        assert_eq!(
+            store_b.active_leaf(conv).await.unwrap().as_deref(),
+            Some(added[1].as_str())
+        );
+        let recent = store_b.get_recent_messages(conv, 2).await.unwrap();
+        assert_eq!(
+            recent
+                .iter()
+                .map(|m| m.content.as_str())
+                .collect::<Vec<_>>(),
+            ["u2", "a2"],
+            "synced turns reach the next turn's model context"
+        );
+        // Re-applying is idempotent and leaves the tree alone.
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        assert_eq!(
+            active_contents(&store_b, conv).await,
+            ["u1", "a1", "u2", "a2"]
+        );
+    }
+
+    #[tokio::test]
+    async fn branched_source_parents_advance_a_receiver_whose_leaf_they_follow() {
+        let conv = "conv-tree-branched-source";
+        let (store_a, store_b, ids) = shared_history_with_branched_receiver(conv).await;
+        store_a
+            .select_version(conv, &ids[1])
+            .await
+            .unwrap()
+            .expect("leaf");
+        let added = append_turns(&store_a, conv, &[("user", "u2"), ("assistant", "a2")]).await;
+
+        let payload = build_sync_payload(&store_a, conv).await.unwrap();
+        let parents: Vec<Option<&str>> = payload
+            .messages
+            .iter()
+            .map(|m| m.parent_message_id.as_deref())
+            .collect();
+        assert_eq!(
+            parents,
+            [
+                None,
+                Some(ids[0].as_str()),
+                Some(ids[1].as_str()),
+                Some(added[0].as_str())
+            ]
+        );
+        let roots: Vec<bool> = payload.messages.iter().map(|m| m.version_root).collect();
+        assert_eq!(roots, [true, false, false, false]);
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_contents(&store_b, conv).await,
+            ["u1", "a1", "u2", "a2"]
+        );
+        let stored = store_b.get_messages(conv).await.unwrap();
+        assert_eq!(
+            stored[2].parent_message_id.as_deref(),
+            Some(ids[1].as_str())
+        );
+        assert_eq!(
+            stored[3].parent_message_id.as_deref(),
+            Some(added[0].as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn synced_turns_never_move_the_leaf_off_newer_local_turns() {
+        let conv = "conv-tree-local-newer";
+        let (store_a, store_b, ids) = shared_history_with_branched_receiver(conv).await;
+        // B kept chatting after the shared a1.
+        let local = append_turns(&store_b, conv, &[("user", "b-u2"), ("assistant", "b-a2")]).await;
+        // A branched too and continued from the same a1.
+        store_a
+            .select_version(conv, &ids[1])
+            .await
+            .unwrap()
+            .expect("leaf");
+        append_turns(&store_a, conv, &[("user", "a-u2"), ("assistant", "a-a2")]).await;
+
+        let payload = build_sync_payload(&store_a, conv).await.unwrap();
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_contents(&store_b, conv).await,
+            ["u1", "a1", "b-u2", "b-a2"]
+        );
+        assert_eq!(
+            store_b.active_leaf(conv).await.unwrap().as_deref(),
+            Some(local[1].as_str())
+        );
+        // A's turns are an alternate version beneath a1, reachable via the pager.
+        let active = store_b.get_active_messages(conv).await.unwrap();
+        assert_eq!(active[2].sibling_count, 2);
+        let synced = active[2]
+            .sibling_ids
+            .iter()
+            .find(|id| **id != local[0])
+            .expect("synced sibling")
+            .clone();
+        store_b.select_version(conv, &synced).await.unwrap();
+        assert_eq!(
+            active_contents(&store_b, conv).await,
+            ["u1", "a1", "a-u2", "a-a2"]
+        );
+    }
+
+    #[tokio::test]
+    async fn flat_receiver_keeps_flat_reads_for_any_peer() {
+        let conv = "conv-tree-flat-receiver";
+        let store_a = ConversationStore::open_in_memory().unwrap();
+        let store_b = ConversationStore::open_in_memory().unwrap();
+        let ids = append_turns(&store_a, conv, &[("user", "u1"), ("assistant", "a1")]).await;
+        // An older peer's payload: no parents anywhere.
+        let payload = build_sync_payload(&store_a, conv).await.unwrap();
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        assert_eq!(store_b.active_leaf(conv).await.unwrap(), None);
+        assert!(store_b
+            .get_messages(conv)
+            .await
+            .unwrap()
+            .iter()
+            .all(|m| m.parent_message_id.is_none()));
+
+        // A branched source's parents are not stored: the receiver stays flat,
+        // and branching later rebuilds its parents chronologically.
+        store_a
+            .select_version(conv, &ids[1])
+            .await
+            .unwrap()
+            .expect("leaf");
+        append_turns(&store_a, conv, &[("user", "u2")]).await;
+        let payload = build_sync_payload(&store_a, conv).await.unwrap();
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        assert_eq!(store_b.active_leaf(conv).await.unwrap(), None);
+        assert_eq!(active_contents(&store_b, conv).await, ["u1", "a1", "u2"]);
+        assert!(store_b
+            .get_messages(conv)
+            .await
+            .unwrap()
+            .iter()
+            .all(|m| m.parent_message_id.is_none()));
+    }
+
+    #[tokio::test]
+    async fn merged_payload_keeps_a_flat_peers_turns_on_the_branched_thread() {
+        let conv = "conv-tree-merged-relay";
+        let (store_a, store_b, ids) = shared_history_with_branched_receiver(conv).await;
+        // A branches, continues, and pushes with parents; the relay then merges
+        // in u2, a2 that a never-branched device C pushed with none.
+        store_a
+            .select_version(conv, &ids[1])
+            .await
+            .unwrap()
+            .expect("leaf");
+        append_turns(&store_a, conv, &[("user", "a-u2")]).await;
+        let mut payload = build_sync_payload(&store_a, conv).await.unwrap();
+        assert!(
+            payload.messages[0].version_root,
+            "a branched source marks its root"
+        );
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        assert_eq!(active_contents(&store_b, conv).await, ["u1", "a1", "a-u2"]);
+        let base = payload.messages.last().unwrap().created_at;
+        for (offset, (id, role, text)) in [("c-u2", "user", "u2"), ("c-a2", "assistant", "a2")]
+            .into_iter()
+            .enumerate()
+        {
+            payload.messages.push(SyncMessage {
+                id: id.to_owned(),
+                role: role.to_owned(),
+                content: text.to_owned(),
+                created_at: base + 1 + offset as i64,
+                parent_message_id: None,
+                version_root: false,
+            });
+        }
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            active_contents(&store_b, conv).await,
+            ["u1", "a1", "a-u2", "u2", "a2"],
+            "the flat peer's turns continue the selected version, not new roots"
+        );
+        let active = store_b.get_active_messages(conv).await.unwrap();
+        assert_eq!(active[0].sibling_count, 1, "no extra first-turn versions");
+    }
+
+    #[test]
+    fn sync_message_parent_is_optional_on_the_wire() {
+        let legacy: SyncMessage = serde_json::from_value(serde_json::json!({
+            "id": "m1", "role": "user", "content": "hi", "created_at": 1
+        }))
+        .unwrap();
+        assert_eq!(legacy.parent_message_id, None);
+        let flat = serde_json::to_value(&legacy).unwrap();
+        assert!(
+            flat.get("parent_message_id").is_none() && flat.get("version_root").is_none(),
+            "flat push is byte-identical"
+        );
+
+        let threaded: SyncMessage = serde_json::from_value(serde_json::json!({
+            "id": "m2", "role": "assistant", "content": "yo", "created_at": 2,
+            "parent_message_id": "m1"
+        }))
+        .unwrap();
+        assert_eq!(threaded.parent_message_id.as_deref(), Some("m1"));
+        assert!(!threaded.version_root);
+
+        let root: SyncMessage = serde_json::from_value(serde_json::json!({
+            "id": "m0", "role": "user", "content": "hi", "created_at": 0,
+            "version_root": true
+        }))
+        .unwrap();
+        assert!(root.version_root);
+        assert_eq!(
+            serde_json::to_value(&root).unwrap()["version_root"],
+            serde_json::json!(true)
+        );
+    }
+
+    #[test]
+    fn sync_links_tell_roots_from_unknown_positions() {
+        let message = |id: &str, parent: Option<&str>, version_root: bool| SyncMessage {
+            id: id.to_owned(),
+            role: "user".to_owned(),
+            content: String::new(),
+            created_at: 0,
+            parent_message_id: parent.map(str::to_owned),
+            version_root,
+        };
+        let flat = sync_links(&[message("a", None, false), message("b", None, false)]);
+        assert!(flat.iter().all(|link| link.parent == SyncParent::Unknown));
+        let threaded = sync_links(&[
+            message("a", None, true),
+            message("b", Some("a"), false),
+            // A merged payload: another device's flat row is not a root.
+            message("c", None, false),
+        ]);
+        assert_eq!(threaded[0].parent, SyncParent::Root);
+        assert_eq!(threaded[1].parent, SyncParent::Message("a".to_owned()));
+        assert_eq!(threaded[2].parent, SyncParent::Unknown);
     }
 }

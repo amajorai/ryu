@@ -26,9 +26,9 @@ Built and verified green (`bun x tsc --noEmit` = 0, `bun test` passing). Key fac
 - **Core node access**: `src/core/CoreContext.tsx` exposes `useCore()` → `{ url, token, target, setTarget }`. `src/core/target.ts` seeds from env (`RYU_CORE_URL` default `http://127.0.0.1:7980`, `RYU_CORE_TOKEN`). Tabs call typed `@ryuhq/core-client/<module>` functions with the `ApiTarget` from `useCore()`. **Never** read env or build a target inside a surface - always `useCore()`.
 - **Multi-node**: `src/core/nodes.ts` reads/writes the shared `~/.ryu/nodes.json` (`{ default, nodes:[{name,url,token,mesh?}] }`; active = the `default` name; missing→`local`/`127.0.0.1:2049`) and `healthCheck(target)`. The current shell has a `Ctrl+N` NodePicker. In the redesign, fold this into the **sidebar header node-selector** (desktop has a node-selector at the sidebar top).
 - **Chat intent bridge**: `src/core/ChatIntentContext.tsx` lets the palette trigger chat-scoped actions (New chat / Sessions / Toggle double-check). Keep or adapt this pattern for cross-surface actions.
-- **17 surface components** in `src/tabs/*.tsx`, each self-contained (fetch + render + keybindings), registered in `src/tabs/registry.ts`. These are your reusable content. The `TabModule`/`TabProps` contract is in `src/tabs/types.ts`.
+- **Surface components** in `src/tabs/*.tsx`, each self-contained (fetch + render + keybindings). These are your reusable content. (The flat-tab `src/tabs/registry.ts` and its `TabModule` contract have since been retired; `src/workspace/router.ts` is the only registration point.)
 - **Shared UI**: `src/ui/` has `ListTab.tsx` (generic list primitive), `StatusBar.tsx`, `toast.tsx`, `theme.ts` (`ryuTheme`). `src/core/featureList.ts` powers the list tabs. `InputFocusContext` gates plain-key globals while a text input is focused.
-- **Chat reference**: `src/tabs/chat.tsx` is the fullest surface (SSE streaming via `src/core/chatStream.ts`, agent picker, `/btw /goal(cap25) /check /model /team /sessions /new /newchat`). It becomes the home surface.
+- **Chat reference**: the chat surface (originally `src/tabs/chat.tsx`, since retired) is the fullest surface (SSE streaming via `src/core/chatStream.ts`, agent picker, `/btw /goal(cap25) /check /model /team /sessions /new /newchat`). It becomes the home surface.
 
 ### termcn + build gotchas (CRITICAL - violating these breaks the build)
 - **termcn is VENDORED, not CLI-installed.** 48 components in `components/ui/*` (each `// @ts-nocheck`), plus `hooks/`, `lib/`. To add/update, edit + re-run `bun run scripts/vendor-termcn.ts opentui-<name>`. Never hand-edit vendored files. They are excluded from biome (root `biome.json`: `!apps/tui/components/ui`, `!apps/tui/hooks`, `!apps/tui/lib`) and have tsconfig relaxations.
@@ -120,7 +120,7 @@ New surfaces with no existing component (build fresh, lighter): **Home**, **Libr
 
 Replace the flat-tab shell with a desktop-mirrored one. Suggested structure:
 
-- **`src/workspace/WorkspaceContext.tsx`** - the tab/pane model (desktop `TabsContext` analog): open tabs (each `{ id, path, title, pinned }`), an active tab per pane, a pane tree supporting **one split** (two panes side-by-side) minimum, focused pane, and actions: `openTab(path)`, `closeTab`, `restoreTab`, `pinTab`, `splitActive`, `focusPane`, `cycleTab`. Persisted session optional.
+- **`src/workspace/WorkspaceContext.tsx`** - the tab/pane model, now running the shared `@ryu/workbench` reducer (see CONTRACT §4): Center split panes plus Right and Bottom regions, one focused group, and the original actions (`openTab(path)`, `closeTab`, `restoreTab`, `pinTab`, `splitActive`, `focusPane`, `cycleTab`) alongside `moveActiveTo`, `focusDirection`, and show/hide. The CLI entry point persists the layout to `workbench-layout.json`.
 - **`src/workspace/TabStrip.tsx`** - the titlebar tab strip (open tabs, pinned chips, split brackets, active highlight).
 - **`src/workspace/SplitView.tsx`** - render one or two panes side-by-side; route focus/keys to the focused pane.
 - **`src/workspace/router.ts`** - `path` string → surface component map (desktop `TabContent` analog). This is the single registration point; surface builders do NOT edit it (integration does).
@@ -128,7 +128,7 @@ Replace the flat-tab shell with a desktop-mirrored one. Suggested structure:
 - **`src/palette/CommandPalette.tsx`** - Ctrl+K, desktop `NAV_ITEMS` destinations (openTab) + actions (open Settings/Gateway overlays, New chat, Switch node, Quit). Fuzzy filter.
 - **`src/overlays/OverlayHost.tsx`** + an overlay registry - modal centered panels with their own inset nav. Build **Settings** (`src/overlays/settings/*`) and **Gateway** (`src/overlays/gateway/*`) as overlays.
 - **`src/surfaces/*`** - the page surfaces (chat, agents, store, tools, monitors, workflows, spaces, meetings, library, tasks, timeline, home). Each conforms to a **Surface contract** (props: `active`, the pane it lives in; declares title/icon; gates keyboard on active + focused-pane). Reuse the `src/tabs/*` content inside these.
-- Keep `src/core/*` (CoreContext, nodes, chatStream, InputFocusContext, ChatIntentContext) and `src/ui/*` (theme, toast, ListTab, StatusBar). Migrate the old `src/tabs/registry.ts` into the new router; the old flat sidebar in `App.tsx` is replaced.
+- Keep `src/core/*` (CoreContext, nodes, chatStream, InputFocusContext, ChatIntentContext) and `src/ui/*` (theme, toast, ListTab, StatusBar). The old `src/tabs/registry.ts` has been folded into the router and removed; the old flat sidebar in `App.tsx` is replaced.
 
 Every surface, overlay, and section must be built from **termcn components + `ryuTheme`** for visual consistency (mandatory).
 

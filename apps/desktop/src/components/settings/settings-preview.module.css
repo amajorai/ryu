@@ -1,0 +1,23 @@
+.paint {
+	color: var(--settings-preview-foreground);
+	background-color: var(--settings-preview-background);
+}
+.gradient {
+	background-image: var(--settings-preview-image);
+}
+.image {
+	background-image: var(--settings-preview-image);
+	background-position: center;
+	background-size: cover;
+}
+.progress {
+	width: var(--settings-preview-progress);
+}
+.identifier {
+	filter: blur(5px);
+	transition-property: filter;
+}
+.identifierGroup:hover .identifier,
+.identifierGroup:focus-within .identifier {
+	filter: blur(0);
+}

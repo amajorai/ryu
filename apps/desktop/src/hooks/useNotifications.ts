@@ -1,5 +1,12 @@
-import { toast } from "@ryu/ui/components/sileo";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import {
+	type DefaultError,
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback } from "react";
 import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -9,9 +16,11 @@ import {
 	archiveNotification,
 	listNotifications,
 	markNotificationRead,
+	redactConnectSuggestionNotifications,
 	unarchiveNotification,
 } from "@/src/lib/api/notifications.ts";
 import { useActiveNode } from "./useActiveNode.ts";
+import { useUserAvailability } from "./useUserAvailability.ts";
 
 export interface UseNotificationsResult {
 	ack: (id: string) => Promise<boolean>;
@@ -40,6 +49,7 @@ export interface UseNotificationsResult {
  * stay consistent.
  */
 export function useNotifications(archived?: boolean): UseNotificationsResult {
+	const { streamingPrivacyActive } = useUserAvailability();
 	const node = useActiveNode();
 	const target: ApiTarget = {
 		url: node.url,
@@ -52,8 +62,10 @@ export function useNotifications(archived?: boolean): UseNotificationsResult {
 
 	const listQuery = useQuery({
 		queryKey: ["notifications", target.url, meId, archived ?? "all"],
-		queryFn: () =>
-			listNotifications(target, meId as string, undefined, archived),
+		queryFn:
+			meId === null || meId === undefined
+				? skipToken
+				: () => listNotifications(target, meId, undefined, archived),
 		enabled: meId !== null,
 	});
 
@@ -63,7 +75,7 @@ export function useNotifications(archived?: boolean): UseNotificationsResult {
 		).catch(() => undefined);
 	}, [qc]);
 
-	const onError = useCallback((error: unknown) => {
+	const onError = useCallback((error: DefaultError) => {
 		const message = error instanceof Error ? error.message : "request failed";
 		toast.error({ title: "Notifications", description: message });
 	}, []);
@@ -93,7 +105,10 @@ export function useNotifications(archived?: boolean): UseNotificationsResult {
 	});
 
 	return {
-		notifications: listQuery.data ?? [],
+		notifications: redactConnectSuggestionNotifications(
+			listQuery.data ?? [],
+			streamingPrivacyActive
+		),
 		loading: meId !== null && listQuery.isLoading,
 		error: listQuery.error instanceof Error ? listQuery.error.message : null,
 		meId,
@@ -102,7 +117,7 @@ export function useNotifications(archived?: boolean): UseNotificationsResult {
 		archive: (id) => archiveMutation.mutateAsync(id),
 		unarchive: (id) => unarchiveMutation.mutateAsync(id),
 		acking:
-			ackMutation.isPending && typeof ackMutation.variables === "string"
+			ackMutation.isPending && isNativeText(ackMutation.variables)
 				? ackMutation.variables
 				: null,
 	};

@@ -1,6 +1,7 @@
 import { EyeIcon, ViewOffSlashIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -8,7 +9,11 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
+} from "@ryu/ui/components/dialog.tsx";
+import {
+	type ReorderShift,
+	useReorderShift,
+} from "@ryu/ui/hooks/use-reorder-shift.tsx";
 import { useState } from "react";
 import type { ChromeKey, SectionKey } from "./AppSidebar.tsx";
 
@@ -82,6 +87,8 @@ interface RowDnd {
 	onDrop: (key: string) => void;
 	/** Current order of this list, so a target knows which edge to draw the line. */
 	order: string[];
+	/** Slides rows apart to preview the drop. */
+	shift: ReorderShift;
 }
 
 /** A draggable row with a show/hide toggle, shared by the sections list and the
@@ -101,31 +108,36 @@ function ReorderableRow({
 	onToggleHidden: (key: string) => void;
 	rowKey: string;
 }) {
+	const tl = useLiteralMessages();
 	const isDragging = dnd.draggingKey === rowKey;
+	// Rows slide apart to preview the drop; the line is only a fallback.
 	const isDragOver =
 		dnd.dragOverKey === rowKey &&
 		dnd.draggingKey !== null &&
-		dnd.draggingKey !== rowKey;
+		dnd.draggingKey !== rowKey &&
+		!dnd.shift.previewing;
 	const dropBelow =
 		isDragOver &&
 		dnd.draggingKey !== null &&
 		dnd.order.indexOf(dnd.draggingKey) < dnd.order.indexOf(rowKey);
 	return (
-		// biome-ignore lint/a11y/noStaticElementInteractions: row is the drag-and-drop reorder target; the nested button carries the keyboard-reachable affordance
-		// biome-ignore lint/a11y/noNoninteractiveElementInteractions: row is the drag-and-drop reorder target; the nested button carries the keyboard-reachable affordance
+		// row is the drag-and-drop reorder target; the nested button carries the keyboard-reachable affordance
+		// row is the drag-and-drop reorder target; the nested button carries the keyboard-reachable affordance
 		<div
 			className={`relative flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-muted ${isDragging ? "opacity-50" : ""}`}
 			onDragOver={(e) => {
 				if (dnd.draggingKey) {
 					e.preventDefault();
 					e.dataTransfer.dropEffect = "move";
-					dnd.onDragOver(rowKey);
+					dnd.onDragOver(dnd.shift.resolveOver(rowKey, e.clientX, e.clientY));
 				}
 			}}
 			onDrop={(e) => {
 				e.preventDefault();
 				dnd.onDrop(rowKey);
 			}}
+			ref={dnd.shift.register(rowKey)}
+			style={dnd.shift.styleFor(rowKey)}
 		>
 			{isDragOver && (
 				<div
@@ -150,7 +162,17 @@ function ReorderableRow({
 				</span>
 			</button>
 			<Button
-				aria-label={hidden ? `Show ${noun}` : `Hide ${noun}`}
+				aria-label={
+					hidden
+						? tl(
+								"{noun, select, button {Show button} section {Show section} other {Show {noun}}}",
+								{ noun }
+							)
+						: tl(
+								"{noun, select, button {Hide button} section {Hide section} other {Hide {noun}}}",
+								{ noun }
+							)
+				}
 				onClick={() => onToggleHidden(rowKey)}
 				size="icon-sm"
 				variant="ghost"
@@ -232,6 +254,16 @@ export function CustomizeSidebarDialog({
 	const [chromeDragOverKey, setChromeDragOverKey] = useState<string | null>(
 		null
 	);
+	const sectionShift = useReorderShift({
+		activeId: sectionDraggingKey,
+		axis: "y",
+		overId: sectionDragOverKey,
+	});
+	const chromeShift = useReorderShift({
+		activeId: chromeDraggingKey,
+		axis: "y",
+		overId: chromeDragOverKey,
+	});
 
 	const sectionDnd: RowDnd = {
 		draggingKey: sectionDraggingKey,
@@ -244,13 +276,22 @@ export function CustomizeSidebarDialog({
 		},
 		onDragOver: (key) =>
 			setSectionDragOverKey((prev) => (prev === key ? prev : key)),
-		onDrop: (target) => {
+		onDrop: (dropped) => {
+			// The resolved target, not the (shifted) row under the pointer.
+			const target = sectionDragOverKey ?? dropped;
 			if (sectionDraggingKey && sectionDraggingKey !== target) {
-				onReorder(reorder(order, sectionDraggingKey, target) as SectionKey[]);
+				onReorder(
+					/* SAFETY: This private section RowDnd receives dragging and target keys only from ReorderableRows rendered from the typed section order. Local reorder filters and reinserts that existing section key; it does not read a foreign dataTransfer payload. */ reorder(
+						order,
+						sectionDraggingKey,
+						target
+					) as SectionKey[]
+				);
 			}
 			setSectionDraggingKey(null);
 			setSectionDragOverKey(null);
 		},
+		shift: sectionShift,
 	};
 
 	const chromeOrder = topButtonItems.map((i) => i.key);
@@ -272,15 +313,22 @@ export function CustomizeSidebarDialog({
 		},
 		onDragOver: (key) =>
 			setChromeDragOverKey((prev) => (prev === key ? prev : key)),
-		onDrop: (target) => {
+		onDrop: (dropped) => {
+			// The resolved target, not the (shifted) row under the pointer.
+			const target = chromeDragOverKey ?? dropped;
 			if (chromeDraggingKey && chromeDraggingKey !== target) {
 				onReorderChrome(
-					reorder(chromeOrder, chromeDraggingKey, target) as ChromeKey[]
+					/* SAFETY: This separate private chrome RowDnd receives keys from the typed topButtonItems rows. Local reorder only moves those existing chrome keys; the section drag state and foreign dataTransfer contents are not its producers. */ reorder(
+						chromeOrder,
+						chromeDraggingKey,
+						target
+					) as ChromeKey[]
 				);
 			}
 			setChromeDraggingKey(null);
 			setChromeDragOverKey(null);
 		},
+		shift: chromeShift,
 	};
 
 	return (
@@ -374,7 +422,11 @@ export function CustomizeSidebarDialog({
 								key={key}
 								label={labels[key] ?? key}
 								noun="section"
-								onToggleHidden={(k) => onToggleHidden(k as SectionKey)}
+								onToggleHidden={(k) =>
+									onToggleHidden(
+										/* SAFETY: This private ReorderableRow callback directly forwards its rowKey from the enclosing typed section-order map. No event detail or foreign drag payload supplies this toggle key. */ k as SectionKey
+									)
+								}
 								rowKey={key}
 							/>
 						))}

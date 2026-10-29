@@ -1,11 +1,14 @@
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { getOptionColorClass } from "@ryu/ui/lib/data-grid";
-import { cn } from "@ryu/ui/lib/utils";
-import type { CellSelectOption } from "@ryu/ui/types/data-grid";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { DataGridOptionBadge } from "@ryu/ui/components/data-grid/data-grid-option-badge.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { Plus } from "lucide-react";
 import { type DragEvent, useMemo, useState } from "react";
-import type { DbColumn, DbRow } from "@/src/lib/realtime/yjs-database.ts";
+import type {
+	applyCellEdits,
+	DbColumn,
+	DbRow,
+} from "@/src/lib/realtime/yjs-database.ts";
 import { RowCard } from "./RowCard.tsx";
 
 /** Sentinel group value for rows whose group cell is empty or unmatched. */
@@ -37,8 +40,12 @@ export function BoardView({
 	groupByColumnId?: string;
 	readOnly: boolean;
 	onOpenRow: (row: DbRow) => void;
-	setCell: (rowId: string, columnId: string, value: unknown) => void;
-	createRow: (values?: Record<string, unknown>) => void;
+	setCell: (
+		rowId: string,
+		columnId: string,
+		value: Parameters<typeof applyCellEdits>[1][number]["value"]
+	) => void;
+	createRow: (values?: DbRow) => void;
 }) {
 	const [draggingId, setDraggingId] = useState<string | null>(null);
 	const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -56,7 +63,7 @@ export function BoardView({
 			groupColumn.cell.variant === "select" ||
 			groupColumn.cell.variant === "multi-select"
 				? groupColumn.cell.options
-				: ([] as CellSelectOption[]);
+				: [];
 		const buckets = new Map<string, DbRow[]>();
 		buckets.set(NO_GROUP, []);
 		for (const option of options) {
@@ -65,8 +72,7 @@ export function BoardView({
 		for (const row of rows) {
 			const raw = row[groupColumn.id];
 			const value = Array.isArray(raw) ? raw[0] : raw;
-			const key =
-				typeof value === "string" && buckets.has(value) ? value : NO_GROUP;
+			const key = isNativeText(value) && buckets.has(value) ? value : NO_GROUP;
 			buckets.get(key)?.push(row);
 		}
 		const result: BoardGroup[] = options.map((option) => ({
@@ -146,15 +152,9 @@ export function BoardView({
 								{group.label}
 							</span>
 						) : (
-							<Badge
-								className={cn(
-									"border-transparent font-normal",
-									getOptionColorClass(group.color)
-								)}
-								variant="secondary"
-							>
+							<DataGridOptionBadge color={group.color}>
 								{group.label}
-							</Badge>
+							</DataGridOptionBadge>
 						)}
 						<span className="text-muted-foreground text-xs">
 							{group.rows.length}
@@ -183,7 +183,7 @@ export function BoardView({
 						))}
 						{!readOnly && (
 							<Button
-								className="justify-start text-muted-foreground"
+								className="justify-start"
 								onClick={() =>
 									createRow(
 										group.key === NO_GROUP
@@ -197,7 +197,7 @@ export function BoardView({
 									)
 								}
 								size="sm"
-								variant="ghost"
+								variant="ghost-muted"
 							>
 								<Plus className="size-3.5" />
 								New

@@ -14,6 +14,7 @@
 
 import { create } from "zustand";
 import {
+	MAX_NAME_LENGTH,
 	MAX_PRESETS,
 	type PresetBranch,
 	parsePresets,
@@ -32,15 +33,13 @@ function load(): SplitPreset[] {
 }
 
 function persist(presets: SplitPreset[]) {
-	try {
-		if (presets.length === 0) {
-			localStorage.removeItem(SPLIT_PRESETS_KEY);
-			return;
-		}
-		localStorage.setItem(SPLIT_PRESETS_KEY, JSON.stringify(presets));
-	} catch {
-		// Best-effort; ignore quota / private-mode failures.
+	// Publish only after storage acknowledges the write. A refusal leaves both
+	// the previous collection and the caller's draft available for a retry.
+	if (presets.length === 0) {
+		localStorage.removeItem(SPLIT_PRESETS_KEY);
+		return;
 	}
+	localStorage.setItem(SPLIT_PRESETS_KEY, JSON.stringify(presets));
 }
 
 function makePresetId(): string {
@@ -57,7 +56,7 @@ interface SplitPresetState {
 	reload: () => void;
 	renamePreset: (id: string, name: string) => void;
 	/** Store a new named shape; returns it (or null when the name is blank or
-	    the collection is full). */
+	    a new name would exceed the collection limit). */
 	savePreset: (name: string, root: PresetBranch) => SplitPreset | null;
 }
 
@@ -65,8 +64,12 @@ export const useSplitPresetStore = create<SplitPresetState>((set, get) => ({
 	presets: load(),
 
 	savePreset: (name, root) => {
-		const trimmed = name.trim();
-		if (!trimmed || get().presets.length >= MAX_PRESETS) {
+		const trimmed = name.trim().slice(0, MAX_NAME_LENGTH);
+		const existing = get().presets;
+		const replacesName = existing.some(
+			(preset) => preset.name.toLowerCase() === trimmed.toLowerCase()
+		);
+		if (!trimmed || (existing.length >= MAX_PRESETS && !replacesName)) {
 			return null;
 		}
 		const preset: SplitPreset = {
@@ -91,7 +94,7 @@ export const useSplitPresetStore = create<SplitPresetState>((set, get) => ({
 	},
 
 	renamePreset: (id, name) => {
-		const trimmed = name.trim();
+		const trimmed = name.trim().slice(0, MAX_NAME_LENGTH);
 		if (!trimmed) {
 			return;
 		}

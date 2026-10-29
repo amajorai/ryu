@@ -1,33 +1,35 @@
 "use client";
 
 import type React from "react";
-import {
-	lazy,
-	Suspense,
-	useCallback,
-	useEffect,
-	useId,
-	useRef,
-	useState,
-} from "react";
+import { lazy, Suspense, useState } from "react";
 import { cn } from "../lib/utils.ts";
+import type { ExpressiveExpressionSelection } from "./expressive.ts";
+import type { ExpressiveAnimationSelection } from "./expressive-animation.ts";
+import styles from "./logo.module.css";
+import type { LogoColors } from "./logo-colors.ts";
+import { useActiveExpression } from "./logo-expression.ts";
+import { ExpressiveVariant } from "./logo-expressive-variant.tsx";
+import { EyesVariant } from "./logo-eyes-variant.tsx";
+import { useLogoGaze } from "./logo-gaze.ts";
+import { ghostEyeGeometry } from "./logo-ghost-eyes.tsx";
 import {
-	blendExpressiveFrames,
-	type ExpressiveExpressionSelection,
-	expressiveFrame,
-	randomExpressiveExpression,
-} from "./expressive.ts";
+	DefaultVariant,
+	FilledVariant,
+	type GhostVariantProps,
+	OutlineVariant,
+	ShimmerVariant,
+	SkeletonVariant,
+} from "./logo-material-variants.tsx";
+import { OutlineStatic } from "./logo-outline-static.tsx";
 import {
-	type ExpressiveAnimationDecoration,
-	type ExpressiveAnimationSelection,
-	expressiveAnimationPreviewTime,
-	sampleExpressiveAnimation,
-} from "./expressive-animation.ts";
-import { LOGO_DEFAULT_COLORS, type LogoColors } from "./logo-colors.ts";
+	ghostPathD as buildGhostPathD,
+	isExpressiveVariant,
+	type LogoDimensionsStyle,
+	parseLogoSize,
+} from "./logo-shared.ts";
+import { LogoTrace, type LogoTraceOptions } from "./logo-trace.tsx";
 
-const Logo3D = lazy(() => import("./logo-3d.tsx"));
-
-interface LogoProps {
+export interface LogoProps extends LogoTraceOptions {
 	/** Disable gaze, blinking, and random expression changes. */
 	animated?: boolean;
 	/** Expressive ghost animation, or random for the full reference-style cycle. */
@@ -37,13 +39,16 @@ interface LogoProps {
 	bodyStyle?: "solid" | "orb";
 	className?: string;
 	colors?: LogoColors;
+	corners?: "default" | "circle" | "compact";
 	/** Named expressive face, or random for a changing face. */
 	expression?: ExpressiveExpressionSelection;
 	/** Scale the expressive ghost's eyes without changing its body size. */
 	eyeScale?: number;
+	presentation?: "default" | "sidebar-tab";
 	/** Hide the default variant's eyes when another face is layered over its fill. */
 	showEyes?: boolean;
 	size?: string;
+	tone?: "default" | "inherit" | "foreground";
 	variant?:
 		| "3d"
 		| "default"
@@ -51,606 +56,14 @@ interface LogoProps {
 		| "outline"
 		| "skeleton"
 		| "shimmer"
+		| "trace"
 		| "eyes"
 		| "expressive"
 		| "outline-static"
 		| "outline-muted";
 }
 
-// Corner-mask radius for the default variant's dotted overlay, widening with the
-// rendered size. Extracted from `Logo` to keep its cognitive complexity in budget.
-const computeMaskRadius = (sizeValue: number): string => {
-	if (sizeValue < 30) {
-		return "0%";
-	}
-	if (sizeValue < 50) {
-		return "5%";
-	}
-	if (sizeValue < 100) {
-		return "15%";
-	}
-	return "25%";
-};
-
-const computeFinalContrast = (
-	sizeValue: number,
-	contrastAmount: number
-): number => {
-	if (sizeValue < 30) {
-		return 1.1;
-	}
-	if (sizeValue < 50) {
-		return Math.max(contrastAmount * 1.2, 1.3);
-	}
-	return contrastAmount;
-};
-
-interface EyesVariantProps {
-	className?: string;
-	eyePosition: { x: number; y: number };
-	isBlinking: boolean;
-	orbRef: React.RefObject<HTMLDivElement | null>;
-	size: string;
-	sizeValue: number;
-}
-
-// Renders just the two eyes, centered and enlarged in the viewBox. Kept as a
-// standalone component so the eyes can blink/track (state lives in `Logo`) while
-// keeping `Logo`'s own cognitive complexity within budget.
-const EyesVariant: React.FC<EyesVariantProps> = ({
-	size,
-	sizeValue,
-	className,
-	isBlinking,
-	eyePosition,
-	orbRef,
-}) => {
-	// Match the desktop outline variant's eyes in *absolute* size and spacing,
-	// not relative to this (small) circle: the desktop renders the ghost at 64px,
-	// where the eyes resolve to rx=3, ry=5, ~10.7 apart. We reuse that fixed
-	// geometry and simply center the pair in this variant's viewBox (no ghost
-	// body), so the eyes read at the same size users see on the desktop.
-	const referenceScale = 64 / 24;
-	const eyesRx = Math.min(1.5 * referenceScale, 3.0);
-	const eyesRy = Math.min(3.0 * referenceScale, 5.0);
-	const referenceLeftEyeX = 15 * referenceScale;
-	const referenceRightEyeX = Math.max(
-		19 * referenceScale,
-		referenceLeftEyeX + 4
-	);
-	// Pull the pair slightly closer than the desktop reference spacing.
-	const eyesGap = (referenceRightEyeX - referenceLeftEyeX) * 0.9;
-	const eyesCenter = sizeValue / 2;
-	const eyesLeftX = eyesCenter - eyesGap / 2;
-	const eyesRightX = eyesCenter + eyesGap / 2;
-	const eyesBlinkStroke = Math.min(Math.max(2.0 * referenceScale, 1.0), 4.0);
-
-	return (
-		<div
-			className={cn("transition-all duration-300 ease-in-out", className)}
-			ref={orbRef}
-			style={{
-				width: size,
-				height: size,
-				transition: "width 0.3s ease-in-out, height 0.3s ease-in-out",
-			}}
-		>
-			<svg
-				aria-hidden="true"
-				height={size}
-				viewBox={`0 0 ${sizeValue} ${sizeValue}`}
-				width={size}
-			>
-				{isBlinking ? (
-					<>
-						<line
-							stroke="currentColor"
-							strokeLinecap="round"
-							strokeWidth={eyesBlinkStroke}
-							vectorEffect="non-scaling-stroke"
-							x1={eyesLeftX - eyesRx}
-							x2={eyesLeftX + eyesRx}
-							y1={eyesCenter}
-							y2={eyesCenter}
-						/>
-						<line
-							stroke="currentColor"
-							strokeLinecap="round"
-							strokeWidth={eyesBlinkStroke}
-							vectorEffect="non-scaling-stroke"
-							x1={eyesRightX - eyesRx}
-							x2={eyesRightX + eyesRx}
-							y1={eyesCenter}
-							y2={eyesCenter}
-						/>
-					</>
-				) : (
-					<>
-						<ellipse
-							cx={eyesLeftX + eyePosition.x}
-							cy={eyesCenter + eyePosition.y}
-							fill="currentColor"
-							rx={eyesRx}
-							ry={eyesRy}
-						/>
-						<ellipse
-							cx={eyesRightX + eyePosition.x}
-							cy={eyesCenter + eyePosition.y}
-							fill="currentColor"
-							rx={eyesRx}
-							ry={eyesRy}
-						/>
-					</>
-				)}
-			</svg>
-		</div>
-	);
-};
-
-// ── Outline-static variant ────────────────────────────────────────────────────
-// The ghost outline + eyes drawn once, at rest: no blink interval, no mouse
-// tracking, no hooks at all. This is the plain "original" SVG, suitable for tiny
-// chrome surfaces (e.g. a tab logo) where motion would be noise and a global
-// mousemove listener per instance would be wasteful. Kept hookless and separate
-// from the animated `Logo` so it is genuinely static, not merely motion-ignoring.
-const OutlineStatic: React.FC<Pick<LogoProps, "size" | "className">> = ({
-	size = "192px",
-	className,
-}) => {
-	const sizeValue = Number.parseInt(size.replace("px", ""), 10);
-	const scaleFactor = sizeValue / 24;
-
-	const ghostPathD = `M${12 * scaleFactor},${24 * scaleFactor}c${9.2 * scaleFactor},0,${12.9 * scaleFactor}-${4.8 * scaleFactor},${12.4 * scaleFactor}-${14.6 * scaleFactor}C${24.1 * scaleFactor},${0.3 * scaleFactor},${12.8 * scaleFactor}-${3.7 * scaleFactor},${8.8 * scaleFactor},${5.4 * scaleFactor}c-${2.2 * scaleFactor},${5.7 * scaleFactor},${1.1 * scaleFactor},${7.9 * scaleFactor}-${2.9 * scaleFactor},${12.6 * scaleFactor}c-${0.9 * scaleFactor},${1.1 * scaleFactor}-${1.8 * scaleFactor},${2 * scaleFactor}-${2.7 * scaleFactor},${3.1 * scaleFactor}c-${1.2 * scaleFactor},${1.3 * scaleFactor},${0.7 * scaleFactor},${2.2 * scaleFactor},${1.9 * scaleFactor},${2.2 * scaleFactor}C${7.4 * scaleFactor},${23.3 * scaleFactor},${9.7 * scaleFactor},${24 * scaleFactor},${12 * scaleFactor},${24 * scaleFactor}z`;
-
-	const eyeWidth = Math.min(1.5 * scaleFactor, 3.0);
-	const eyeHeight = Math.min(3.0 * scaleFactor, 5.0);
-	const leftEyeX = 15 * scaleFactor;
-	const rightEyeX = Math.max(19 * scaleFactor, leftEyeX + 4);
-	const eyeY = 10 * scaleFactor;
-
-	return (
-		<div className={className} style={{ width: size, height: size }}>
-			<svg
-				aria-hidden="true"
-				height={size}
-				overflow="visible"
-				viewBox={`0 0 ${sizeValue} ${sizeValue}`}
-				width={size}
-			>
-				<path
-					d={ghostPathD}
-					fill="none"
-					stroke="currentColor"
-					strokeLinecap="round"
-					strokeLinejoin="round"
-					strokeWidth="1.5"
-					vectorEffect="non-scaling-stroke"
-				/>
-				<ellipse
-					cx={leftEyeX}
-					cy={eyeY}
-					fill="currentColor"
-					rx={eyeWidth}
-					ry={eyeHeight}
-				/>
-				<ellipse
-					cx={rightEyeX}
-					cy={eyeY}
-					fill="currentColor"
-					rx={eyeWidth}
-					ry={eyeHeight}
-				/>
-			</svg>
-		</div>
-	);
-};
-
-interface ExpressiveDecorationLayerProps {
-	decorations: readonly ExpressiveAnimationDecoration[];
-	outlineOnly: boolean;
-	scaleFactor: number;
-}
-
-const ExpressiveDecorationLayer: React.FC<ExpressiveDecorationLayerProps> = ({
-	decorations,
-	outlineOnly,
-	scaleFactor,
-}) => (
-	<g>
-		{decorations.map((decoration, index) => {
-			const color = outlineOnly
-				? "currentColor"
-				: "color" in decoration
-					? (decoration.color ?? "currentColor")
-					: "currentColor";
-			const key = `${decoration.kind}-${index}`;
-			switch (decoration.kind) {
-				case "dot":
-					return (
-						<circle
-							cx={decoration.x * scaleFactor}
-							cy={decoration.y * scaleFactor}
-							fill={outlineOnly ? "none" : color}
-							key={key}
-							opacity={decoration.opacity}
-							r={decoration.r * scaleFactor}
-							stroke={outlineOnly ? "currentColor" : undefined}
-							strokeWidth={outlineOnly ? 1 : undefined}
-							vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-						/>
-					);
-				case "ring":
-					return (
-						<ellipse
-							cx={decoration.cx * scaleFactor}
-							cy={decoration.cy * scaleFactor}
-							fill="none"
-							key={key}
-							opacity={decoration.opacity}
-							rx={decoration.radiusX * scaleFactor}
-							ry={decoration.radiusY * scaleFactor}
-							stroke={color}
-							strokeDasharray={decoration.dash}
-							strokeLinecap="round"
-							strokeWidth={outlineOnly ? 1 : Math.max(0.7, 0.08 * scaleFactor)}
-							transform={`rotate(${decoration.rotate} ${decoration.cx * scaleFactor} ${decoration.cy * scaleFactor})`}
-							vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-						/>
-					);
-				case "ray":
-					return (
-						<line
-							key={key}
-							opacity={decoration.opacity}
-							stroke={color}
-							strokeLinecap="round"
-							strokeWidth={outlineOnly ? 1 : Math.max(0.8, 0.11 * scaleFactor)}
-							vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-							x1={decoration.x1 * scaleFactor}
-							x2={decoration.x2 * scaleFactor}
-							y1={decoration.y1 * scaleFactor}
-							y2={decoration.y2 * scaleFactor}
-						/>
-					);
-				case "badge":
-					return (
-						<circle
-							cx={decoration.x * scaleFactor}
-							cy={decoration.y * scaleFactor}
-							fill={outlineOnly ? "none" : color}
-							key={key}
-							opacity={decoration.opacity}
-							r={decoration.r * scaleFactor}
-							stroke="currentColor"
-							strokeWidth={outlineOnly ? 1 : Math.max(0.6, 0.08 * scaleFactor)}
-							vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-						/>
-					);
-				case "exclamation":
-					return (
-						<g
-							key={key}
-							opacity={decoration.opacity}
-							transform={`translate(${decoration.x * scaleFactor} ${decoration.y * scaleFactor}) rotate(${decoration.rotate}) scale(${decoration.scale * scaleFactor})`}
-						>
-							<rect
-								fill={outlineOnly ? "none" : "currentColor"}
-								height="3.7"
-								rx="0.42"
-								stroke={outlineOnly ? "currentColor" : undefined}
-								strokeWidth={outlineOnly ? 1 : undefined}
-								vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-								width="0.84"
-								x="-0.42"
-								y="-2.6"
-							/>
-							<circle
-								cy="2.2"
-								fill={outlineOnly ? "none" : "currentColor"}
-								r="0.52"
-								stroke={outlineOnly ? "currentColor" : undefined}
-								strokeWidth={outlineOnly ? 1 : undefined}
-								vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-							/>
-						</g>
-					);
-				case "comet":
-					return (
-						<g
-							key={key}
-							opacity={decoration.opacity}
-							transform={`translate(${decoration.x * scaleFactor} ${decoration.y * scaleFactor}) rotate(${decoration.rotate}) scale(${decoration.scale * scaleFactor})`}
-						>
-							<path
-								d="M-5 0C-3.4-1.4-1.7-1.5 0 0C-1.7 1.5-3.4 1.4-5 0Z"
-								fill="none"
-								stroke={color}
-								strokeLinecap="round"
-								strokeWidth={outlineOnly ? 1 : 0.42}
-								vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-							/>
-							<circle
-								cx="0"
-								cy="0"
-								fill={outlineOnly ? "none" : color}
-								r="0.62"
-								stroke={outlineOnly ? "currentColor" : undefined}
-								strokeWidth={outlineOnly ? 1 : undefined}
-								vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-							/>
-						</g>
-					);
-				case "play":
-					return (
-						<polygon
-							fill={outlineOnly ? "none" : "currentColor"}
-							key={key}
-							opacity={decoration.opacity}
-							points="-1.6,-2.1 2.1,0 -1.6,2.1"
-							stroke={outlineOnly ? "currentColor" : undefined}
-							strokeWidth={outlineOnly ? 1 : undefined}
-							transform={`translate(${decoration.x * scaleFactor} ${decoration.y * scaleFactor}) rotate(${decoration.rotate}) scale(${decoration.scale * scaleFactor})`}
-							vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-						/>
-					);
-			}
-		})}
-	</g>
-);
-
-interface ExpressiveVariantProps {
-	animated: boolean;
-	animation: ExpressiveAnimationSelection;
-	bodyStrokeWidth: number;
-	className?: string;
-	expression: ExpressiveExpressionSelection;
-	eyePosition: { x: number; y: number };
-	eyeScale: number;
-	ghostPathD: string;
-	isBlinking: boolean;
-	orbRef: React.RefObject<HTMLDivElement | null>;
-	outlineOnly: boolean;
-	size: string;
-	sizeValue: number;
-}
-
-/**
- * Renders Ryu's own ghost body with the reference-style expressive timeline.
- * Named states and the random cycle both pass through the same pure sampler, so
- * state changes cross-fade instead of teleporting between unrelated drawings.
- */
-const ExpressiveVariant: React.FC<ExpressiveVariantProps> = ({
-	animated,
-	animation,
-	className,
-	eyeScale,
-	expression,
-	eyePosition,
-	isBlinking,
-	orbRef,
-	ghostPathD,
-	outlineOnly,
-	size,
-	sizeValue,
-	bodyStrokeWidth,
-}) => {
-	const initialFrame = expressiveFrame(expression);
-	const transitionRef = useRef({
-		from: initialFrame,
-		progress: 1,
-		to: initialFrame,
-	});
-	const [transition, setTransition] = useState(transitionRef.current);
-	const [animationTime, setAnimationTime] = useState(0);
-	const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-	const motionEnabled = animated && !prefersReducedMotion;
-
-	useEffect(() => {
-		if (typeof window === "undefined" || !window.matchMedia) {
-			return;
-		}
-		const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-		const update = () => setPrefersReducedMotion(media.matches);
-		update();
-		media.addEventListener?.("change", update);
-		return () => media.removeEventListener?.("change", update);
-	}, []);
-
-	useEffect(() => {
-		const next = expressiveFrame(expression);
-		const current = transitionRef.current;
-		if (current.to.id === next.id && current.progress === 1) {
-			return;
-		}
-		if (!motionEnabled) {
-			const settled = { from: next, progress: 1, to: next };
-			transitionRef.current = settled;
-			setTransition(settled);
-			return;
-		}
-
-		const started = performance.now();
-		const nextTransition = { from: current.to, progress: 0, to: next };
-		transitionRef.current = nextTransition;
-		setTransition(nextTransition);
-		let frameId = 0;
-		const tick = (now: number) => {
-			const progress = Math.min((now - started) / 450, 1);
-			const running = { from: current.to, progress, to: next };
-			transitionRef.current = running;
-			setTransition(running);
-			if (progress < 1) {
-				frameId = requestAnimationFrame(tick);
-			}
-		};
-		frameId = requestAnimationFrame(tick);
-		return () => cancelAnimationFrame(frameId);
-	}, [expression, motionEnabled]);
-
-	useEffect(() => {
-		if (!motionEnabled) {
-			setAnimationTime(0);
-			return;
-		}
-		const started = performance.now();
-		let frameId = 0;
-		const tick = (now: number) => {
-			setAnimationTime((now - started) / 1000);
-			frameId = requestAnimationFrame(tick);
-		};
-		frameId = requestAnimationFrame(tick);
-		return () => cancelAnimationFrame(frameId);
-	}, [motionEnabled]);
-
-	const expressionFrame = blendExpressiveFrames(
-		transition.from,
-		transition.to,
-		transition.progress
-	);
-	const sampleTime = motionEnabled
-		? animationTime
-		: animation === "random"
-			? 0
-			: expressiveAnimationPreviewTime(animation);
-	const sampled = sampleExpressiveAnimation(
-		sampleTime,
-		animation,
-		expressionFrame
-	);
-	const frame = sampled.eyes;
-	const scaleFactor = sizeValue / 24;
-	const expressiveEyeScale = Math.max(0.1, eyeScale);
-	const centerX = 17 * scaleFactor + frame.gaze.x * scaleFactor;
-	const eyeGap = frame.gap * scaleFactor;
-	const gazePosition = sampled.followGaze ? eyePosition : { x: 0, y: 0 };
-	const eyeY = 10 * scaleFactor + frame.gaze.y * scaleFactor + gazePosition.y;
-	const eyeCenters = [centerX - eyeGap / 2, centerX + eyeGap / 2];
-	const openMultiplier = sampled.animation === "idle" && isBlinking ? 0.06 : 1;
-	const center = sizeValue / 2;
-	const bodyTransform = `translate(${sampled.body.x * scaleFactor} ${sampled.body.y * scaleFactor}) rotate(${sampled.body.rotate} ${center} ${center}) translate(${center} ${center}) scale(${sampled.body.scaleX} ${sampled.body.scaleY}) translate(${-center} ${-center})`;
-
-	return (
-		<div
-			className={cn(
-				"transition-[width,height] duration-300 ease-in-out",
-				outlineOnly && "text-muted-foreground",
-				className
-			)}
-			data-expressive-animation={sampled.animation}
-			data-expressive-animation-progress={sampled.progress.toFixed(3)}
-			data-expressive-expression={frame.id}
-			data-expressive-eye-scale={expressiveEyeScale}
-			ref={orbRef}
-			style={{
-				height: size,
-				width: size,
-				transition: "width 0.3s ease-in-out, height 0.3s ease-in-out",
-			}}
-		>
-			<svg
-				aria-hidden="true"
-				height={size}
-				overflow="visible"
-				viewBox={`0 0 ${sizeValue} ${sizeValue}`}
-				width={size}
-			>
-				<ExpressiveDecorationLayer
-					decorations={sampled.decorations}
-					outlineOnly={outlineOnly}
-					scaleFactor={scaleFactor}
-				/>
-				<g transform={bodyTransform}>
-					<path
-						d={ghostPathD}
-						fill="none"
-						opacity={0.96}
-						stroke="currentColor"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						strokeWidth={bodyStrokeWidth}
-						vectorEffect="non-scaling-stroke"
-					/>
-					<g opacity={sampled.eyeAlpha}>
-						{frame.eyes.map((eye, index) => {
-							const width = Math.max(
-								eye.width * scaleFactor * expressiveEyeScale,
-								0.1
-							);
-							const height = Math.max(
-								eye.height *
-									scaleFactor *
-									expressiveEyeScale *
-									eye.open *
-									openMultiplier,
-								0.1
-							);
-							const cx = eyeCenters[index] ?? centerX;
-							const key = index === 0 ? "left" : "right";
-							const transform = `translate(${cx + gazePosition.x} ${eyeY}) rotate(${frame.gaze.roll + eye.tilt})`;
-							if (eye.shape === "x") {
-								const crossSize = Math.max(height, 1.4);
-								const crossStrokeWidth = Math.max(
-									Math.min(width * 0.2, 2.2),
-									1.25
-								);
-								return (
-									<g
-										data-expressive-eye-shape={eye.shape}
-										key={key}
-										transform={transform}
-									>
-										<line
-											stroke="currentColor"
-											strokeLinecap="round"
-											strokeWidth={crossStrokeWidth}
-											vectorEffect="non-scaling-stroke"
-											x1={-crossSize / 2}
-											x2={crossSize / 2}
-											y1={-crossSize / 2}
-											y2={crossSize / 2}
-										/>
-										<line
-											stroke="currentColor"
-											strokeLinecap="round"
-											strokeWidth={crossStrokeWidth}
-											vectorEffect="non-scaling-stroke"
-											x1={crossSize / 2}
-											x2={-crossSize / 2}
-											y1={-crossSize / 2}
-											y2={crossSize / 2}
-										/>
-									</g>
-								);
-							}
-							return (
-								<rect
-									data-expressive-eye-shape={eye.shape}
-									fill={outlineOnly ? "none" : "currentColor"}
-									height={height}
-									key={key}
-									opacity={sampled.eyeAlpha}
-									rx={Math.min(width, height) / 2}
-									stroke={outlineOnly ? "currentColor" : undefined}
-									strokeLinecap={outlineOnly ? "round" : undefined}
-									strokeLinejoin={outlineOnly ? "round" : undefined}
-									strokeWidth={outlineOnly ? 1 : undefined}
-									transform={`rotate(${frame.gaze.roll + eye.tilt} ${cx} ${eyeY})`}
-									vectorEffect={outlineOnly ? "non-scaling-stroke" : undefined}
-									width={width}
-									x={cx - width / 2 + gazePosition.x}
-									y={eyeY - height / 2}
-								/>
-							);
-						})}
-					</g>
-				</g>
-			</svg>
-		</div>
-	);
-};
-
-const isExpressiveVariant = (variant: LogoProps["variant"]): boolean =>
-	variant === "expressive" || variant === "outline-muted";
+const Logo3D = lazy(() => import("./logo-3d.tsx"));
 
 const AnimatedLogo: React.FC<LogoProps> = ({
 	variant = "default",
@@ -664,229 +77,26 @@ const AnimatedLogo: React.FC<LogoProps> = ({
 	expression,
 	showEyes = true,
 }) => {
-	const [isBlinking, setIsBlinking] = useState(false);
-	const [eyePosition, setEyePosition] = useState({ x: 0, y: 0 });
-	const [isMouseIdle, setIsMouseIdle] = useState(false);
-	const orbRef = useRef<HTMLDivElement>(null);
-	const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const randomMoveTimerRef = useRef<ReturnType<typeof setInterval> | null>(
-		null
+	// A state-backed callback ref, so the gaze hook re-observes the element when
+	// a variant change swaps the root node.
+	const [orb, setOrb] = useState<HTMLDivElement | null>(null);
+	const activeExpression = useActiveExpression(variant, animated, expression);
+	const sizeValue = parseLogoSize(size);
+
+	// Non-expressive variants keep blinking and tracking regardless of
+	// `animated`; only the expressive timeline honours it. Variants that never
+	// draw a moving eye skip the work entirely: the shimmer's eyes stay put, and
+	// the default body can hide its eyes.
+	const blinks = !(
+		(isExpressiveVariant(variant) && !animated) ||
+		(variant === "default" && !showEyes)
 	);
-	const shimmerGradientId = useId();
-	const filledMaskId = useId();
-	const expressionSelection = expression ?? "random";
-	const [activeExpression, setActiveExpression] = useState(() =>
-		expressionSelection === "random" && animated
-			? randomExpressiveExpression()
-			: expressionSelection === "random"
-				? "neutral"
-				: expressionSelection
-	);
-	const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-
-	useEffect(() => {
-		if (typeof window === "undefined" || !window.matchMedia) {
-			return;
-		}
-		const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-		const update = () => setPrefersReducedMotion(media.matches);
-		update();
-		media.addEventListener?.("change", update);
-		return () => media.removeEventListener?.("change", update);
-	}, []);
-
-	const finalColors = { ...LOGO_DEFAULT_COLORS, ...colors };
-
-	const sizeValue = Number.parseInt(size.replace("px", ""), 10);
-
-	const blurAmount =
-		sizeValue < 50
-			? Math.max(sizeValue * 0.008, 1)
-			: Math.max(sizeValue * 0.015, 4);
-
-	const contrastAmount =
-		sizeValue < 50
-			? Math.max(sizeValue * 0.004, 1.2)
-			: Math.max(sizeValue * 0.008, 1.5);
-
-	const dotSize =
-		sizeValue < 50
-			? Math.max(sizeValue * 0.004, 0.05)
-			: Math.max(sizeValue * 0.008, 0.1);
-
-	const shadowSpread =
-		sizeValue < 50
-			? Math.max(sizeValue * 0.004, 0.5)
-			: Math.max(sizeValue * 0.008, 2);
-
-	const maskRadius = computeMaskRadius(sizeValue);
-
-	const finalContrast = computeFinalContrast(sizeValue, contrastAmount);
-
-	const scaleFactor = sizeValue / 24;
-
-	// Shared ghost path d-string (no path() wrapper) — used for SVG path and clip-path
-	const ghostPathD = `M${12 * scaleFactor},${24 * scaleFactor}c${9.2 * scaleFactor},0,${12.9 * scaleFactor}-${4.8 * scaleFactor},${12.4 * scaleFactor}-${14.6 * scaleFactor}C${24.1 * scaleFactor},${0.3 * scaleFactor},${12.8 * scaleFactor}-${3.7 * scaleFactor},${8.8 * scaleFactor},${5.4 * scaleFactor}c-${2.2 * scaleFactor},${5.7 * scaleFactor},${1.1 * scaleFactor},${7.9 * scaleFactor}-${2.9 * scaleFactor},${12.6 * scaleFactor}c-${0.9 * scaleFactor},${1.1 * scaleFactor}-${1.8 * scaleFactor},${2 * scaleFactor}-${2.7 * scaleFactor},${3.1 * scaleFactor}c-${1.2 * scaleFactor},${1.3 * scaleFactor},${0.7 * scaleFactor},${2.2 * scaleFactor},${1.9 * scaleFactor},${2.2 * scaleFactor}C${7.4 * scaleFactor},${23.3 * scaleFactor},${9.7 * scaleFactor},${24 * scaleFactor},${12 * scaleFactor},${24 * scaleFactor}z`;
-
-	const scaledClipPath = `path("${ghostPathD}")`;
-
-	const baseEyeWidth = 1.5;
-	const baseEyeHeight = 3.0;
-	const maxEyeWidth = 3.0;
-	const maxEyeHeight = 5.0;
-
-	const eyeWidth = Math.min(baseEyeWidth * scaleFactor, maxEyeWidth);
-	const eyeHeight = Math.min(baseEyeHeight * scaleFactor, maxEyeHeight);
-
-	const baseLeftEyeX = 15;
-	const baseRightEyeX = 19;
-	const baseEyeY = 10;
-	const eyeSpacing = 4;
-
-	const leftEyeX = baseLeftEyeX * scaleFactor;
-	const rightEyeX = Math.max(
-		baseRightEyeX * scaleFactor,
-		leftEyeX + eyeSpacing
-	);
-	const eyeY = baseEyeY * scaleFactor;
-
-	const blinkStrokeWidth = Math.min(Math.max(2.0 * scaleFactor, 1.0), 4.0);
-	const leftBlinkStart = leftEyeX - eyeWidth;
-	const leftBlinkEnd = leftEyeX + eyeWidth;
-	const rightBlinkStart = rightEyeX - eyeWidth;
-	const rightBlinkEnd = rightEyeX + eyeWidth;
-
-	// Memoized so it keeps a stable identity across renders. The idle-gaze effect
-	// below lists it as a dependency; an inline function would be recreated every
-	// render, re-running that effect, which calls setEyePosition — an infinite
-	// "Maximum update depth exceeded" loop while the mouse is idle.
-	const generateRandomEyePosition = useCallback(() => {
-		const maxDistance = Math.min(sizeValue * 0.08, 8.0);
-		const angle = Math.random() * Math.PI * 2;
-		const distance = Math.random() * maxDistance;
-		return {
-			x: Math.cos(angle) * distance,
-			y: Math.sin(angle) * distance,
-		};
-	}, [sizeValue]);
-
-	useEffect(() => {
-		if (!isExpressiveVariant(variant)) {
-			return;
-		}
-		if (expressionSelection !== "random") {
-			setActiveExpression(expressionSelection);
-		} else if (!animated) {
-			setActiveExpression("neutral");
-		}
-	}, [animated, expressionSelection, variant]);
-
-	useEffect(() => {
-		if (
-			!(isExpressiveVariant(variant) && animated) ||
-			expressionSelection !== "random"
-		) {
-			return;
-		}
-		let timer: ReturnType<typeof setTimeout> | null = null;
-		const schedule = () => {
-			timer = setTimeout(
-				() => {
-					setActiveExpression(randomExpressiveExpression());
-					schedule();
-				},
-				2400 + Math.random() * 1800
-			);
-		};
-		schedule();
-		return () => {
-			if (timer) {
-				clearTimeout(timer);
-			}
-		};
-	}, [animated, expressionSelection, variant]);
-
-	useEffect(() => {
-		if (isExpressiveVariant(variant) && !animated) {
-			return;
-		}
-		const blinkInterval = setInterval(
-			() => {
-				setIsBlinking(true);
-				setTimeout(() => setIsBlinking(false), 150);
-			},
-			3000 + Math.random() * 2000
-		);
-		return () => clearInterval(blinkInterval);
-	}, [animated, variant]);
-
-	useEffect(() => {
-		if (isExpressiveVariant(variant) && !animated) {
-			return;
-		}
-		const resetIdleTimer = () => {
-			setIsMouseIdle(false);
-			if (idleTimerRef.current) {
-				clearTimeout(idleTimerRef.current);
-			}
-			if (randomMoveTimerRef.current) {
-				clearInterval(randomMoveTimerRef.current);
-			}
-			idleTimerRef.current = setTimeout(() => {
-				setIsMouseIdle(true);
-			}, 3000);
-		};
-
-		const handleMouseMove = (e: MouseEvent) => {
-			resetIdleTimer();
-			if (!orbRef.current) {
-				return;
-			}
-			const rect = orbRef.current.getBoundingClientRect();
-			const orbCenterX = rect.left + rect.width / 2;
-			const orbCenterY = rect.top + rect.height / 2;
-			const angle = Math.atan2(e.clientY - orbCenterY, e.clientX - orbCenterX);
-			const maxDistance = Math.min(sizeValue * 0.1, 15.0);
-			setEyePosition({
-				x: Math.cos(angle) * maxDistance,
-				y: Math.sin(angle) * maxDistance,
-			});
-		};
-
-		resetIdleTimer();
-		window.addEventListener("mousemove", handleMouseMove);
-		return () => {
-			window.removeEventListener("mousemove", handleMouseMove);
-			if (idleTimerRef.current) {
-				clearTimeout(idleTimerRef.current);
-			}
-			if (randomMoveTimerRef.current) {
-				clearInterval(randomMoveTimerRef.current);
-			}
-		};
-	}, [animated, sizeValue, variant]);
-
-	useEffect(() => {
-		if (!isMouseIdle || (isExpressiveVariant(variant) && !animated)) {
-			return;
-		}
-
-		const moveRandomly = () => {
-			setEyePosition(generateRandomEyePosition());
-		};
-
-		moveRandomly();
-		randomMoveTimerRef.current = setInterval(
-			moveRandomly,
-			2000 + Math.random() * 2000
-		);
-
-		return () => {
-			if (randomMoveTimerRef.current) {
-				clearInterval(randomMoveTimerRef.current);
-			}
-		};
-	}, [animated, generateRandomEyePosition, isMouseIdle, variant]);
+	const { eyePosition, isBlinking } = useLogoGaze({
+		blinks,
+		element: orb,
+		sizeValue,
+		tracks: blinks && variant !== "shimmer",
+	});
 
 	// ── Eyes variant ─────────────────────────────────────────────────────────────
 	// Just the two eyes, centered and enlarged in the viewBox (no ghost body).
@@ -899,12 +109,15 @@ const AnimatedLogo: React.FC<LogoProps> = ({
 				className={className}
 				eyePosition={eyePosition}
 				isBlinking={isBlinking}
-				orbRef={orbRef}
+				orbRef={setOrb}
 				size={size}
 				sizeValue={sizeValue}
 			/>
 		);
 	}
+
+	const scaleFactor = sizeValue / 24;
+	const ghostPathD = buildGhostPathD(scaleFactor);
 
 	// ── Expressive variants ─────────────────────────────────────────────────────
 	// Ryu keeps its recognizable ghost body while the two eye shapes morph
@@ -925,7 +138,7 @@ const AnimatedLogo: React.FC<LogoProps> = ({
 				eyeScale={outlineOnly ? eyeScale * 1.5 : eyeScale}
 				ghostPathD={ghostPathD}
 				isBlinking={isBlinking}
-				orbRef={orbRef}
+				orbRef={setOrb}
 				outlineOnly={outlineOnly}
 				size={size}
 				sizeValue={sizeValue}
@@ -933,594 +146,65 @@ const AnimatedLogo: React.FC<LogoProps> = ({
 		);
 	}
 
-	// ── Filled variant ──────────────────────────────────────────────────────────
-	// The inverse of `outline`: the ghost body is solid, while the eyes are cut
-	// out of it so the surface behind the mark shows through. A luminance mask is
-	// used instead of painting the eyes with a background colour, which keeps the
-	// variant correct on every surface and lets the eyes continue to track.
-	if (variant === "filled") {
-		const strokeMargin = 1.5;
-		const filledViewBox = `${-strokeMargin} ${-strokeMargin} ${sizeValue + strokeMargin * 2} ${sizeValue + strokeMargin * 2}`;
-
-		return (
-			<div
-				className={cn("transition-all duration-300 ease-in-out", className)}
-				ref={orbRef}
-				style={{
-					width: size,
-					height: size,
-					transition: "width 0.3s ease-in-out, height 0.3s ease-in-out",
-				}}
-			>
-				<svg
-					aria-hidden="true"
-					height={size}
-					overflow="visible"
-					viewBox={filledViewBox}
-					width={size}
-				>
-					<defs>
-						<mask
-							height={sizeValue}
-							id={filledMaskId}
-							mask-type="luminance"
-							maskContentUnits="userSpaceOnUse"
-							maskUnits="userSpaceOnUse"
-							width={sizeValue}
-							x="0"
-							y="0"
-						>
-							<rect
-								fill="black"
-								height={sizeValue}
-								width={sizeValue}
-								x="0"
-								y="0"
-							/>
-							<path d={ghostPathD} fill="white" />
-							{isBlinking ? (
-								<>
-									<line
-										stroke="black"
-										strokeLinecap="round"
-										strokeWidth={blinkStrokeWidth}
-										x1={leftBlinkStart}
-										x2={leftBlinkEnd}
-										y1={eyeY}
-										y2={eyeY}
-									/>
-									<line
-										stroke="black"
-										strokeLinecap="round"
-										strokeWidth={blinkStrokeWidth}
-										x1={rightBlinkStart}
-										x2={rightBlinkEnd}
-										y1={eyeY}
-										y2={eyeY}
-									/>
-								</>
-							) : (
-								<>
-									<ellipse
-										cx={leftEyeX + eyePosition.x}
-										cy={eyeY + eyePosition.y}
-										fill="black"
-										rx={eyeWidth}
-										ry={eyeHeight}
-									/>
-									<ellipse
-										cx={rightEyeX + eyePosition.x}
-										cy={eyeY + eyePosition.y}
-										fill="black"
-										rx={eyeWidth}
-										ry={eyeHeight}
-									/>
-								</>
-							)}
-						</mask>
-					</defs>
-					<path
-						d={ghostPathD}
-						fill="currentColor"
-						mask={`url(#${filledMaskId})`}
-					/>
-				</svg>
-			</div>
-		);
-	}
-
-	// ── Outline variant ──────────────────────────────────────────────────────────
-	// Ghost shape as a crisp SVG stroke with currentColor eyes. Fully interactive.
-	if (variant === "outline") {
-		// The ghost path is drawn edge-to-edge, so its 1.5px non-scaling stroke
-		// straddles the viewBox boundary by half its width. Relying on
-		// `overflow: visible` to show that overhang fails inside a compositing
-		// layer — entrance transitions can promote this container on the
-		// desktop start page, and macOS WKWebView rasterizes the
-		// layer to its bounds, shaving the ghost's right edge. Insetting the
-		// geometry inside the viewBox keeps the whole stroke within the box.
-		const strokeMargin = 1.5;
-		const outlineViewBox = `${-strokeMargin} ${-strokeMargin} ${sizeValue + strokeMargin * 2} ${sizeValue + strokeMargin * 2}`;
-		return (
-			<div
-				className={cn("transition-all duration-300 ease-in-out", className)}
-				ref={orbRef}
-				style={{
-					width: size,
-					height: size,
-					transition: "width 0.3s ease-in-out, height 0.3s ease-in-out",
-				}}
-			>
-				<svg
-					aria-hidden="true"
-					height={size}
-					overflow="visible"
-					viewBox={outlineViewBox}
-					width={size}
-				>
-					<path
-						d={ghostPathD}
-						fill="none"
-						stroke="currentColor"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						strokeWidth="1.5"
-						vectorEffect="non-scaling-stroke"
-					/>
-					{isBlinking ? (
-						<>
-							<line
-								stroke="currentColor"
-								strokeLinecap="round"
-								strokeWidth={blinkStrokeWidth}
-								vectorEffect="non-scaling-stroke"
-								x1={leftBlinkStart}
-								x2={leftBlinkEnd}
-								y1={eyeY}
-								y2={eyeY}
-							/>
-							<line
-								stroke="currentColor"
-								strokeLinecap="round"
-								strokeWidth={blinkStrokeWidth}
-								vectorEffect="non-scaling-stroke"
-								x1={rightBlinkStart}
-								x2={rightBlinkEnd}
-								y1={eyeY}
-								y2={eyeY}
-							/>
-						</>
-					) : (
-						<>
-							<ellipse
-								cx={leftEyeX + eyePosition.x}
-								cy={eyeY + eyePosition.y}
-								fill="currentColor"
-								rx={eyeWidth}
-								ry={eyeHeight}
-							/>
-							<ellipse
-								cx={rightEyeX + eyePosition.x}
-								cy={eyeY + eyePosition.y}
-								fill="currentColor"
-								rx={eyeWidth}
-								ry={eyeHeight}
-							/>
-						</>
-					)}
-				</svg>
-			</div>
-		);
-	}
-
-	// ── Skeleton variant ─────────────────────────────────────────────────────────
-	// Shimmer fill clipped to the ghost shape. Eyes in currentColor, no motion.
-	if (variant === "skeleton") {
-		return (
-			<div
-				className={cn(
-					"relative transition-all duration-300 ease-in-out",
-					className
-				)}
-				ref={orbRef}
-				style={{
-					width: size,
-					height: size,
-					transition: "width 0.3s ease-in-out, height 0.3s ease-in-out",
-				}}
-			>
-				<style>{`
-          @keyframes ryu-skeleton-shimmer {
-            0%   { background-position: -200% center; }
-            100% { background-position:  200% center; }
-          }
-          .ryu-logo-skeleton {
-            animation: ryu-skeleton-shimmer 1.8s ease-in-out infinite;
-            background: linear-gradient(
-              90deg,
-              oklch(83% 0.01 264) 0%,
-              oklch(91% 0.03 264) 45%,
-              oklch(95% 0.04 264) 50%,
-              oklch(91% 0.03 264) 55%,
-              oklch(83% 0.01 264) 100%
-            );
-            background-size: 200% 100%;
-          }
-          @media (prefers-color-scheme: dark) {
-            .ryu-logo-skeleton {
-              background: linear-gradient(
-                90deg,
-                oklch(28% 0.02 264) 0%,
-                oklch(36% 0.03 264) 45%,
-                oklch(40% 0.04 264) 50%,
-                oklch(36% 0.03 264) 55%,
-                oklch(28% 0.02 264) 100%
-              );
-              background-size: 200% 100%;
-            }
-          }
-        `}</style>
-				<div
-					className="ryu-logo-skeleton absolute inset-0"
-					style={{ clipPath: scaledClipPath }}
+	const ghostProps: GhostVariantProps = {
+		className,
+		eyePosition,
+		eyes: ghostEyeGeometry(scaleFactor),
+		ghostPathD,
+		isBlinking,
+		orbRef: setOrb,
+		size,
+		sizeValue,
+	};
+	switch (variant) {
+		case "filled":
+			return <FilledVariant {...ghostProps} />;
+		case "outline":
+			return <OutlineVariant {...ghostProps} />;
+		case "skeleton":
+			return <SkeletonVariant {...ghostProps} />;
+		case "shimmer":
+			return <ShimmerVariant {...ghostProps} />;
+		default:
+			return (
+				<DefaultVariant
+					{...ghostProps}
+					animationDuration={animationDuration}
+					colors={colors}
+					showEyes={showEyes}
 				/>
-				<svg
-					aria-hidden="true"
-					className="pointer-events-none absolute inset-0 h-full w-full"
-					style={{ zIndex: 10 }}
-					viewBox={`0 0 ${sizeValue} ${sizeValue}`}
-				>
-					{isBlinking ? (
-						<>
-							<line
-								stroke="currentColor"
-								strokeLinecap="round"
-								strokeWidth={blinkStrokeWidth}
-								x1={leftBlinkStart}
-								x2={leftBlinkEnd}
-								y1={eyeY}
-								y2={eyeY}
-							/>
-							<line
-								stroke="currentColor"
-								strokeLinecap="round"
-								strokeWidth={blinkStrokeWidth}
-								x1={rightBlinkStart}
-								x2={rightBlinkEnd}
-								y1={eyeY}
-								y2={eyeY}
-							/>
-						</>
-					) : (
-						<>
-							<ellipse
-								cx={leftEyeX + eyePosition.x}
-								cy={eyeY + eyePosition.y}
-								fill="currentColor"
-								rx={eyeWidth}
-								ry={eyeHeight}
-							/>
-							<ellipse
-								cx={rightEyeX + eyePosition.x}
-								cy={eyeY + eyePosition.y}
-								fill="currentColor"
-								rx={eyeWidth}
-								ry={eyeHeight}
-							/>
-						</>
-					)}
-				</svg>
-			</div>
-		);
+			);
 	}
-
-	// ── Shimmer variant ──────────────────────────────────────────────────────────
-	// Branded loading state: the ghost OUTLINE and eyes are painted with an animated
-	// linear gradient so a silver highlight sweeps *along* the stroke and eyes. The
-	// shimmer lives in the SVG paint itself (not a translated overlay), so it can
-	// never leak outside the mark. currentColor is the resting tint (theme-adaptive),
-	// white is the moving highlight. No mouse tracking.
-	if (variant === "shimmer") {
-		// Read the media query in an effect, never during render. A render-time
-		// `window.matchMedia()` makes SSR and the first client render disagree on
-		// whether `<animateTransform>` exists, which caused hydration errors on
-		// the login page for reduced-motion users.
-		const reduceMotion = prefersReducedMotion;
-		const shimmerStroke = `url(#${shimmerGradientId})`;
-		return (
-			<div
-				className={cn("transition-all duration-300 ease-in-out", className)}
-				ref={orbRef}
-				style={{
-					width: size,
-					height: size,
-					transition: "width 0.3s ease-in-out, height 0.3s ease-in-out",
-				}}
-			>
-				<svg
-					aria-hidden="true"
-					className="pointer-events-none h-full w-full"
-					height={size}
-					overflow="visible"
-					viewBox={`0 0 ${sizeValue} ${sizeValue}`}
-					width={size}
-				>
-					<defs>
-						<linearGradient
-							gradientUnits="userSpaceOnUse"
-							id={shimmerGradientId}
-							x1="0"
-							x2={sizeValue}
-							y1="0"
-							y2={sizeValue}
-						>
-							<stop offset="0%" stopColor="currentColor" stopOpacity="0.3" />
-							<stop offset="38%" stopColor="currentColor" stopOpacity="0.3" />
-							<stop offset="50%" stopColor="#ffffff" stopOpacity="1" />
-							<stop offset="62%" stopColor="currentColor" stopOpacity="0.3" />
-							<stop offset="100%" stopColor="currentColor" stopOpacity="0.3" />
-							{reduceMotion ? null : (
-								<animateTransform
-									attributeName="gradientTransform"
-									dur="1.6s"
-									from={`-${sizeValue} -${sizeValue}`}
-									repeatCount="indefinite"
-									to={`${sizeValue} ${sizeValue}`}
-									type="translate"
-								/>
-							)}
-						</linearGradient>
-					</defs>
-					<path
-						d={ghostPathD}
-						fill="none"
-						stroke={shimmerStroke}
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						strokeWidth="1.5"
-						vectorEffect="non-scaling-stroke"
-					/>
-					{isBlinking ? (
-						<>
-							<line
-								stroke={shimmerStroke}
-								strokeLinecap="round"
-								strokeWidth={blinkStrokeWidth}
-								x1={leftBlinkStart}
-								x2={leftBlinkEnd}
-								y1={eyeY}
-								y2={eyeY}
-							/>
-							<line
-								stroke={shimmerStroke}
-								strokeLinecap="round"
-								strokeWidth={blinkStrokeWidth}
-								x1={rightBlinkStart}
-								x2={rightBlinkEnd}
-								y1={eyeY}
-								y2={eyeY}
-							/>
-						</>
-					) : (
-						<>
-							<ellipse
-								cx={leftEyeX}
-								cy={eyeY}
-								fill={shimmerStroke}
-								rx={eyeWidth}
-								ry={eyeHeight}
-							/>
-							<ellipse
-								cx={rightEyeX}
-								cy={eyeY}
-								fill={shimmerStroke}
-								rx={eyeWidth}
-								ry={eyeHeight}
-							/>
-						</>
-					)}
-				</svg>
-			</div>
-		);
-	}
-
-	// ── Default variant ──────────────────────────────────────────────────────────
-	return (
-		<div
-			className={cn(
-				"ryu-logo transition-all duration-300 ease-in-out",
-				className
-			)}
-			ref={orbRef}
-			style={
-				{
-					width: size,
-					height: size,
-					"--bg": finalColors.bg,
-					"--c1": finalColors.c1,
-					"--c2": finalColors.c2,
-					"--c3": finalColors.c3,
-					"--animation-duration": `${animationDuration}s`,
-					"--blur-amount": `${blurAmount}px`,
-					"--contrast-amount": finalContrast,
-					"--dot-size": `${dotSize}px`,
-					"--shadow-spread": `${shadowSpread}px`,
-					"--mask-radius": maskRadius,
-					clipPath: scaledClipPath,
-					transition:
-						"width 0.3s ease-in-out, height 0.3s ease-in-out, clip-path 0.3s ease-in-out",
-				} as React.CSSProperties
-			}
-		>
-			<style>{`
-        @property --angle {
-          syntax: "<angle>";
-          inherits: false;
-          initial-value: 0deg;
-        }
-
-        .ryu-logo {
-          display: grid;
-          grid-template-areas: "stack";
-          overflow: hidden;
-          position: relative;
-          transform: scale(1.1);
-        }
-
-        .ryu-logo::before,
-        .ryu-logo::after {
-          content: "";
-          display: block;
-          grid-area: stack;
-          width: 100%;
-          height: 100%;
-          transform: translateZ(0);
-        }
-
-        .ryu-logo::before {
-          background: conic-gradient(
-              from calc(var(--angle) * 2) at 25% 70%,
-              var(--c3),
-              transparent 20% 80%,
-              var(--c3)
-            ),
-            conic-gradient(
-              from calc(var(--angle) * 2) at 45% 75%,
-              var(--c2),
-              transparent 30% 60%,
-              var(--c2)
-            ),
-            conic-gradient(
-              from calc(var(--angle) * -3) at 80% 20%,
-              var(--c1),
-              transparent 40% 60%,
-              var(--c1)
-            ),
-            conic-gradient(
-              from calc(var(--angle) * 2) at 15% 5%,
-              var(--c2),
-              transparent 10% 90%,
-              var(--c2)
-            ),
-            conic-gradient(
-              from calc(var(--angle) * 1) at 20% 80%,
-              var(--c1),
-              transparent 10% 90%,
-              var(--c1)
-            ),
-            conic-gradient(
-              from calc(var(--angle) * -2) at 85% 10%,
-              var(--c3),
-              transparent 20% 80%,
-              var(--c3)
-            );
-          box-shadow: inset var(--bg) 0 0 var(--shadow-spread)
-            calc(var(--shadow-spread) * 0.2);
-          filter: blur(var(--blur-amount)) contrast(var(--contrast-amount));
-          animation: ryu-logo-rotate var(--animation-duration) linear infinite;
-        }
-
-        .ryu-logo::after {
-          background-image: radial-gradient(
-            circle at center,
-            var(--bg) var(--dot-size),
-            transparent var(--dot-size)
-          );
-          background-size: calc(var(--dot-size) * 2) calc(var(--dot-size) * 2);
-          backdrop-filter: blur(calc(var(--blur-amount) * 2))
-            contrast(calc(var(--contrast-amount) * 2));
-          mix-blend-mode: overlay;
-        }
-
-        .ryu-logo[style*="--mask-radius: 0%"]::after {
-          mask-image: none;
-        }
-
-        .ryu-logo:not([style*="--mask-radius: 0%"])::after {
-          mask-image: radial-gradient(
-            black var(--mask-radius),
-            transparent 75%
-          );
-        }
-
-        @keyframes ryu-logo-rotate {
-          to {
-            --angle: 360deg;
-          }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .ryu-logo::before {
-            animation: none;
-          }
-        }
-      `}</style>
-
-			{showEyes ? (
-				<svg
-					aria-hidden="true"
-					className="pointer-events-none absolute inset-0 h-full w-full"
-					style={{ zIndex: 10 }}
-					viewBox={`0 0 ${sizeValue} ${sizeValue}`}
-				>
-					{isBlinking ? (
-						<>
-							<line
-								stroke="white"
-								strokeLinecap="round"
-								strokeWidth={blinkStrokeWidth}
-								x1={leftBlinkStart}
-								x2={leftBlinkEnd}
-								y1={eyeY}
-								y2={eyeY}
-							/>
-							<line
-								stroke="white"
-								strokeLinecap="round"
-								strokeWidth={blinkStrokeWidth}
-								x1={rightBlinkStart}
-								x2={rightBlinkEnd}
-								y1={eyeY}
-								y2={eyeY}
-							/>
-						</>
-					) : (
-						<>
-							<ellipse
-								cx={leftEyeX + eyePosition.x}
-								cy={eyeY + eyePosition.y}
-								fill="white"
-								rx={eyeWidth}
-								ry={eyeHeight}
-								stroke="white"
-								strokeWidth="0.3"
-							/>
-							<ellipse
-								cx={rightEyeX + eyePosition.x}
-								cy={eyeY + eyePosition.y}
-								fill="white"
-								rx={eyeWidth}
-								ry={eyeHeight}
-								stroke="white"
-								strokeWidth="0.3"
-							/>
-						</>
-					)}
-				</svg>
-			) : null}
-		</div>
-	);
 };
 
 // Thin dispatcher: the static outline is a hookless component so it installs no
 // blink interval and no global mousemove listener; animated and expressive
 // variants stay inside the hook-owning `AnimatedLogo`.
-const Logo: React.FC<LogoProps> = (props) => {
+const Logo: React.FC<LogoProps> = ({
+	tone,
+	corners,
+	presentation,
+	...baseProps
+}) => {
+	const presentationClasses = cn(
+		tone === "inherit" && "text-current",
+		tone === "foreground" && "text-foreground",
+		corners === "circle" && "rounded-full object-cover",
+		corners === "compact" && "rounded-glyph-compact object-contain",
+		presentation === "sidebar-tab" &&
+			"transition-[scale,opacity] duration-150 group-hover/row:scale-50 group-hover/row:opacity-0 group-focus-visible/row:scale-50 group-focus-visible/row:opacity-0 group-has-[button:focus-visible]/row:scale-50 group-has-[button:focus-visible]/row:opacity-0"
+	);
+	const props = presentationClasses
+		? { ...baseProps, className: cn(presentationClasses, baseProps.className) }
+		: baseProps;
 	if (props.variant === "3d") {
+		const fallbackStyle: LogoDimensionsStyle = {
+			"--logo-size": props.size ?? "192px",
+		};
 		const fallback = (
 			<div
-				className={props.className}
-				style={{ width: props.size ?? "192px", height: props.size ?? "192px" }}
+				className={cn(styles.dimensions, props.className)}
+				style={fallbackStyle}
 			>
 				<OutlineStatic size="100%" />
 			</div>
@@ -1534,8 +218,10 @@ const Logo: React.FC<LogoProps> = (props) => {
 	if (props.variant === "outline-static") {
 		return <OutlineStatic className={props.className} size={props.size} />;
 	}
+	if (props.variant === "trace") {
+		return <LogoTrace {...props} />;
+	}
 	return <AnimatedLogo {...props} />;
 };
 
-export type { LogoProps };
 export { Logo };

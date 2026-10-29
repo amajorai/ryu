@@ -1,7 +1,6 @@
 import { RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useCallback, useEffect, useState } from "react";
 import { KnowledgeGraph } from "@/src/components/spaces/KnowledgeGraph.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
@@ -76,9 +75,11 @@ export default function KnowledgeGraphPage({ spaceId }: { spaceId?: string }) {
 			</div>
 			<div className="min-h-0 flex-1">
 				{loading || !graph ? (
-					<div className="flex h-full items-center justify-center">
-						<Spinner />
-					</div>
+					<div
+						aria-label="Loading graph"
+						className="size-full animate-skeleton bg-muted motion-reduce:animate-none"
+						role="status"
+					/>
 				) : (
 					<KnowledgeGraph graph={graph} onOpenNode={openNode} />
 				)}

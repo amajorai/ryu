@@ -6,7 +6,11 @@ import type {
 	ShadowContextResult,
 	ShadowProactiveResult,
 } from "../../shared/ipc.ts";
-import { SuggestionEngine, type SuggestionEngineDeps } from "./suggestions.ts";
+import {
+	type ConnectionSuggestion,
+	SuggestionEngine,
+	type SuggestionEngineDeps,
+} from "./suggestions.ts";
 
 function context(partial: Partial<ShadowContext>): ShadowContext {
 	return {
@@ -23,7 +27,9 @@ function context(partial: Partial<ShadowContext>): ShadowContext {
 }
 
 interface Harness {
+	archivedConnectionSuggestions: string[];
 	cleared: { count: number };
+	connectionSuggestions: ConnectionSuggestion[];
 	deps: SuggestionEngineDeps;
 	emitted: IslandSuggestion[];
 	feedbackCalls: { kind: FeedbackKind; type: string }[];
@@ -40,12 +46,20 @@ function makeHarness(): Harness {
 	const emitted: IslandSuggestion[] = [];
 	const cleared = { count: 0 };
 	const feedbackCalls: { kind: FeedbackKind; type: string }[] = [];
+	const archivedConnectionSuggestions: string[] = [];
+	const connectionSuggestions: ConnectionSuggestion[] = [];
 
 	const deps: SuggestionEngineDeps = {
 		getContext: (): Promise<ShadowContextResult> =>
 			Promise.resolve({ available: true, context: ctx }),
 		getProactive: (): Promise<ShadowProactiveResult> =>
 			Promise.resolve(proactive),
+		getConnectionSuggestions: (): Promise<ConnectionSuggestion[]> =>
+			Promise.resolve(connectionSuggestions),
+		archiveConnectionSuggestion: (id): Promise<void> => {
+			archivedConnectionSuggestions.push(id);
+			return Promise.resolve();
+		},
 		complete: (): Promise<string | null> => Promise.resolve(modelText),
 		postFeedback: (kind, type): Promise<void> => {
 			feedbackCalls.push({ kind, type });
@@ -64,6 +78,8 @@ function makeHarness(): Harness {
 		emitted,
 		cleared,
 		feedbackCalls,
+		archivedConnectionSuggestions,
+		connectionSuggestions,
 		setContext: (next): void => {
 			ctx = next;
 		},
@@ -76,17 +92,30 @@ function makeHarness(): Harness {
 	};
 }
 
-// The private tick methods are exercised via casting; the engine is otherwise a
+// The real private tick methods are bound explicitly; the engine is otherwise a
 // black box. This keeps the test honest about the public contract (emit + dedupe
 // + cooldown) without spinning real interval timers.
 interface EnginePrivate {
+	connectionTick(): Promise<void>;
 	maybeFirePending(now: number): Promise<void>;
 	runContextTick(): Promise<void>;
 	runProactiveTick(): Promise<void>;
 }
 
-function asPrivate(engine: SuggestionEngine): EnginePrivate {
-	return engine as unknown as EnginePrivate;
+const SCHEDULER_METHODS = {
+	connection: "connectionTick",
+	pending: "maybeFirePending",
+	context: "runContextTick",
+	proactive: "runProactiveTick",
+} as const;
+
+function engineTicks(engine: SuggestionEngine): EnginePrivate {
+	return {
+		connectionTick: () => engine[SCHEDULER_METHODS.connection](),
+		maybeFirePending: (now: number) => engine[SCHEDULER_METHODS.pending](now),
+		runContextTick: () => engine[SCHEDULER_METHODS.context](),
+		runProactiveTick: () => engine[SCHEDULER_METHODS.proactive](),
+	};
 }
 
 describe("SuggestionEngine", () => {
@@ -96,7 +125,7 @@ describe("SuggestionEngine", () => {
 			debounceMs: 1,
 			cooldownMs: 100_000,
 		});
-		const priv = asPrivate(engine);
+		const priv = engineTicks(engine);
 
 		// First tick establishes the baseline (reason: first -> pending).
 		await priv.runContextTick();
@@ -115,7 +144,7 @@ describe("SuggestionEngine", () => {
 			debounceMs: 1,
 			cooldownMs: 0,
 		});
-		const priv = asPrivate(engine);
+		const priv = engineTicks(engine);
 
 		await priv.runContextTick();
 		await new Promise((r) => setTimeout(r, 5));
@@ -131,7 +160,7 @@ describe("SuggestionEngine", () => {
 		const h = makeHarness();
 		h.setModelText('{"relevant":false,"title":"x","confidence":0.9}');
 		const engine = new SuggestionEngine(h.deps, { debounceMs: 1 });
-		const priv = asPrivate(engine);
+		const priv = engineTicks(engine);
 
 		await priv.runContextTick();
 		await new Promise((r) => setTimeout(r, 5));
@@ -144,7 +173,7 @@ describe("SuggestionEngine", () => {
 		const h = makeHarness();
 		h.setModelText("this is not json at all");
 		const engine = new SuggestionEngine(h.deps, { debounceMs: 1 });
-		const priv = asPrivate(engine);
+		const priv = engineTicks(engine);
 
 		await priv.runContextTick();
 		await new Promise((r) => setTimeout(r, 5));
@@ -168,11 +197,74 @@ describe("SuggestionEngine", () => {
 			},
 		});
 		const engine = new SuggestionEngine(h.deps);
-		await asPrivate(engine).runProactiveTick();
+		await engineTicks(engine).runProactiveTick();
 
 		expect(h.emitted).toHaveLength(1);
 		expect(h.emitted[0]?.source).toBe("shadow_proactive");
 		expect(h.emitted[0]?.suggestionType).toBe("reminder");
+	});
+
+	it("surfaces private connection suggestions without running screen analysis", async () => {
+		const h = makeHarness();
+		h.connectionSuggestions.push({
+			id: "ntf_connect_1",
+			title: "A reset request arrived",
+			body: "Open the source app to review it.",
+			createdAt: new Date().toISOString(),
+		});
+		const engine = new SuggestionEngine(h.deps);
+		await engineTicks(engine).connectionTick();
+
+		expect(h.emitted).toHaveLength(1);
+		expect(h.emitted[0]?.source).toBe("connect_event");
+		expect(h.emitted[0]?.title).toBe("A reset request arrived");
+	});
+
+	it("archives resolved connection suggestions without sending Shadow feedback", async () => {
+		const h = makeHarness();
+		h.connectionSuggestions.push({
+			id: "ntf_connect_2",
+			title: "New activity",
+			body: "Review it in the source app.",
+			createdAt: new Date().toISOString(),
+		});
+		const engine = new SuggestionEngine(h.deps);
+		await engineTicks(engine).connectionTick();
+		await engine.feedback("ntf_connect_2", "dismiss");
+
+		expect(h.archivedConnectionSuggestions).toEqual(["ntf_connect_2"]);
+		expect(h.feedbackCalls).toHaveLength(0);
+	});
+
+	it("surfaces the oldest recent connection suggestion first and skips expired items", async () => {
+		const h = makeHarness();
+		const now = Date.now();
+		h.connectionSuggestions.push(
+			{
+				id: "newer",
+				title: "Newer event",
+				body: "Second in order.",
+				createdAt: new Date(now - 1000).toISOString(),
+			},
+			{
+				id: "expired",
+				title: "Old event",
+				body: "Too old.",
+				createdAt: new Date(now - 7 * 60 * 60 * 1000).toISOString(),
+			},
+			{
+				id: "older_recent",
+				title: "Older recent event",
+				body: "First in order.",
+				createdAt: new Date(now - 2000).toISOString(),
+			}
+		);
+		const engine = new SuggestionEngine(h.deps);
+		await engineTicks(engine).connectionTick();
+
+		expect(h.emitted.map((suggestion) => suggestion.id)).toEqual([
+			"older_recent",
+		]);
 	});
 
 	it("emits cleared and resets state on stop", () => {
@@ -190,7 +282,7 @@ describe("SuggestionEngine", () => {
 			debounceMs: 1,
 			cooldownMs: 0,
 		});
-		const priv = asPrivate(engine);
+		const priv = engineTicks(engine);
 		await priv.runContextTick();
 		await new Promise((r) => setTimeout(r, 5));
 		await priv.runContextTick();

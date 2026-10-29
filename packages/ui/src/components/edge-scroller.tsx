@@ -39,6 +39,12 @@ import {
 	useState,
 } from "react";
 import { cn } from "../lib/utils.ts";
+import styles from "./edge-scroller.module.css";
+
+interface EdgeMaskStyle extends CSSProperties {
+	"--edge-mask-image"?: CSSProperties["maskImage"];
+	"--edge-webkit-mask-image"?: CSSProperties["WebkitMaskImage"];
+}
 
 /** How much of each overflowing edge dissolves into the background. */
 const EDGE_FADE = "2rem";
@@ -86,11 +92,18 @@ export function useHorizontalOverflowState(
 			return;
 		}
 		const max = Math.max(0, el.scrollWidth - el.clientWidth);
+		const rtl = getComputedStyle(el).direction === "rtl";
+		// Normalize modern negative RTL scrollLeft values to a physical offset
+		// from the left edge so the same start/end fade logic works in both dirs.
+		const fromLeft = Math.max(
+			0,
+			Math.min(max, rtl ? max + el.scrollLeft : el.scrollLeft)
+		);
 		// 1px slack: fractional layout widths otherwise leave a permanent
 		// sub-pixel "there is more" on a strip that fits exactly.
 		const nextEdges = {
-			end: max - el.scrollLeft > 1,
-			start: el.scrollLeft > 1,
+			end: max - fromLeft > 1,
+			start: fromLeft > 1,
 		};
 		setEdges((current) =>
 			current.end === nextEdges.end && current.start === nextEdges.start
@@ -111,7 +124,7 @@ export function useHorizontalOverflowState(
 		measure();
 		el.addEventListener("scroll", measure, { passive: true });
 		const observer =
-			typeof ResizeObserver === "undefined"
+			globalThis.ResizeObserver === undefined
 				? null
 				: new ResizeObserver(measure);
 		// The container gives the AVAILABLE width; its content row gives the
@@ -126,7 +139,7 @@ export function useHorizontalOverflowState(
 		};
 		observeContent();
 		const mutationObserver =
-			typeof MutationObserver === "undefined"
+			globalThis.MutationObserver === undefined
 				? null
 				: new MutationObserver(() => {
 						observeContent();
@@ -226,6 +239,10 @@ export function EdgeScroller({
 }) {
 	const ref = useRef<HTMLDivElement>(null);
 	const { dataEdges, edges, measure, style } = useHorizontalOverflowState(ref);
+	const maskStyle: EdgeMaskStyle = {
+		"--edge-mask-image": style?.maskImage,
+		"--edge-webkit-mask-image": style?.WebkitMaskImage,
+	};
 
 	const page = (direction: -1 | 1) => {
 		const el = ref.current;
@@ -256,12 +273,13 @@ export function EdgeScroller({
 				className={cn(
 					"min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain",
 					HORIZONTAL_SCROLLBAR_HIDDEN,
+					styles.mask,
 					contentClassName
 				)}
 				data-edges={dataEdges}
 				data-slot={dataSlot ?? "edge-scroller"}
 				ref={ref}
-				style={style}
+				style={maskStyle}
 			>
 				{children}
 			</div>

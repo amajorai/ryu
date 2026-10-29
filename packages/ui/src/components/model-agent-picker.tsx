@@ -13,6 +13,7 @@ import type {
 	RyuProvider,
 	RyuRuntimeSelection,
 } from "@ryu/app-host/app-bridge";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -30,7 +31,7 @@ import {
 } from "@ryu/ui/components/popover.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useMemo, useState } from "react";
-import "./model-agent-picker.css";
+import styles from "./model-agent-picker.module.css";
 
 export type RyuPickerMode = "agent" | "all" | "model";
 
@@ -162,6 +163,7 @@ export function ModelAgentPicker({
 	placeholder?: string;
 	value?: RyuPickerSelection;
 }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [providerFilter, setProviderFilter] = useState<string | null>(null);
 	const [discoveredModels, setDiscoveredModels] = useState<
@@ -224,7 +226,7 @@ export function ModelAgentPicker({
 	if (!catalog) {
 		return (
 			<div
-				className="ryu-model-agent-picker"
+				className={styles["ryu-model-agent-picker"]}
 				data-testid="ryu-model-agent-picker"
 			>
 				<Button
@@ -248,7 +250,7 @@ export function ModelAgentPicker({
 
 	return (
 		<div
-			className="ryu-model-agent-picker"
+			className={styles["ryu-model-agent-picker"]}
 			data-testid="ryu-model-agent-picker"
 		>
 			<Popover
@@ -290,14 +292,22 @@ export function ModelAgentPicker({
 				</PopoverTrigger>
 				<PopoverContent
 					align="start"
-					className="ryu-model-agent-popover w-[min(24rem,calc(100vw-2rem))] p-0"
+					className={cn(
+						styles["ryu-model-agent-popover"],
+						"w-[min(24rem,calc(100vw-2rem))] p-0"
+					)}
 				>
 					<Command>
 						<CommandInput
 							placeholder={
 								providerFilter
-									? `Search ${catalog.providers.find((provider) => provider.id === providerFilter)?.label ?? "provider"} models...`
-									: "Search Ryu models, agents, providers..."
+									? tl("Search {providerName} models…", {
+											providerName:
+												catalog.providers.find(
+													(provider) => provider.id === providerFilter
+												)?.label ?? "provider",
+										})
+									: "Search Ryu models, agents, providers…"
 							}
 						/>
 						<CommandEmpty>No Ryu runtime option found.</CommandEmpty>
@@ -340,7 +350,7 @@ export function ModelAgentPicker({
 								</CommandGroup>
 							) : null}
 							{showModels && providerFilter && visibleModels.length === 0 ? (
-								<div className="ryu-model-agent-empty">
+								<div className={styles["ryu-model-agent-empty"]}>
 									{discoveringProvider === providerFilter
 										? "Discovering models through Ryu…"
 										: (discoveryErrors[providerFilter] ??
@@ -413,7 +423,7 @@ export function ModelAgentPicker({
 								<CommandGroup heading="Provider lanes">
 									{providerFilter ? (
 										<CommandItem
-											className="ryu-model-agent-provider-reset"
+											className={styles["ryu-model-agent-provider-reset"]}
 											onSelect={() => setProviderFilter(null)}
 											value="all provider lanes"
 										>

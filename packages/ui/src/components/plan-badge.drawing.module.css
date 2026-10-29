@@ -1,0 +1,6 @@
+.badgeInk {
+	color: var(--plan-badge-1-color);
+}
+.badgeGradient {
+	background-image: var(--plan-badge-2-background-image);
+}

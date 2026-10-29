@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { QueryRequestGate } from "./use-query";
+import { QueryRequestGate } from "./use-query.ts";
 
 describe("QueryRequestGate", () => {
 	test("only the newest overlapping request may commit", () => {

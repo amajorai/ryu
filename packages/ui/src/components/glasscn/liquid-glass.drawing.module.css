@@ -1,0 +1,4 @@
+.glassRefraction {
+	-webkit-backdrop-filter: var(--liquid-glass-1--webkit-backdrop-filter);
+	backdrop-filter: var(--liquid-glass-1-backdrop-filter);
+}

@@ -5,6 +5,9 @@
 // execution path or accept the internal budget bypass fields used by the
 // Gateway's own tool loop.
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
+
 import {
 	type ApiTarget,
 	apiUrl,
@@ -28,6 +31,31 @@ export interface ActionCallInput {
 	/** Optional Composio entity/audit selector; never an authorization principal. */
 	userId?: string;
 }
+
+interface ActionWriteBody {
+	agent_id: ActionCallInput["agentId"];
+	arguments: ActionCallInput["arguments"];
+	user_id?: ActionCallInput["userId"];
+}
+
+function actionWriteBody(input: ActionCallInput): ActionWriteBody {
+	const body: ActionWriteBody = {
+		agent_id: input.agentId,
+		arguments: input.arguments,
+	};
+	if (input.userId !== undefined) {
+		body.user_id = input.userId;
+	}
+	return body;
+}
+
+// Core's action/tool dispatcher publishes success/output or denial/error;
+// authorization refusals may omit ok and inherit the HTTP response status.
+const actionResponseSchema = z.object({
+	ok: z.boolean().nullish(),
+	output: appResponseValueSchema.optional(),
+	error: z.string().optional(),
+});
 
 /** Build the action endpoint path without allowing an id to escape its segment. */
 export function actionPath(actionId: string): string {
@@ -53,11 +81,7 @@ export async function callAction(
 		{
 			method: "POST",
 			headers: makeHeaders(target.token, target.userJwt),
-			body: JSON.stringify({
-				agent_id: input.agentId,
-				arguments: input.arguments,
-				...(input.userId === undefined ? {} : { user_id: input.userId }),
-			}),
+			body: JSON.stringify(actionWriteBody(input)),
 		}
 	);
 	const text = await response.text();
@@ -65,7 +89,11 @@ export async function callAction(
 		return { ok: response.ok };
 	}
 	try {
-		const parsed = JSON.parse(text) as ActionCallResult;
+		const decoded = JSON.parse(text);
+		if (decoded === null) {
+			throw new Error("Core returned a null action result");
+		}
+		const parsed = actionResponseSchema.parse({ ...decoded });
 		return {
 			ok: parsed.ok ?? response.ok,
 			output: parsed.output,

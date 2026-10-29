@@ -28,6 +28,7 @@ import {
 	useReadOnly,
 } from "platejs/react";
 import { type ComponentProps, useEffect, useMemo, useState } from "react";
+import { isNativeFunction } from "../../../lib/native-primitive-observation.ts";
 
 type CodeBlockElementProps = PlateElementProps<TCodeBlockElement> & {
 	showLanguageLabel?: boolean;
@@ -237,7 +238,7 @@ function CodeBlockCombobox({
 					<CommandInput
 						className="h-9"
 						onValueChange={(value) => setSearchValue(value)}
-						placeholder="Search language..."
+						placeholder="Search language…"
 						value={searchValue}
 					/>
 					<CommandEmpty>No language found.</CommandEmpty>
@@ -308,7 +309,7 @@ function CopyButton({
 			onClick={() => {
 				Promise.resolve(
 					navigator.clipboard.writeText(
-						typeof value === "function" ? value() : value
+						isNativeFunction(value) ? value() : value
 					)
 				).catch(() => undefined);
 				setHasCopied(true);
@@ -330,7 +331,7 @@ export function CodeLineElement(props: PlateElementProps) {
 }
 
 export function CodeSyntaxLeaf(props: PlateLeafProps<TCodeSyntaxLeaf>) {
-	const tokenClassName = props.leaf.className as string;
+	const tokenClassName = props.leaf.className;
 
 	return <PlateLeaf className={tokenClassName} {...props} />;
 }

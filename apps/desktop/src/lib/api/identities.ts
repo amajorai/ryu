@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/identities.ts
 //
 // Typed client for the Core Identity Vault API (`/api/identities/*`). Field names
@@ -69,7 +71,8 @@ export async function listIdentities(
 	const json = await request<{ profiles?: Profile[] }>(
 		target,
 		"/api/identities",
-		{ signal }
+		{ signal },
+		listIdentitiesResponseSchema
 	);
 	return json.profiles ?? [];
 }
@@ -81,7 +84,8 @@ export async function createConnection(
 	const json = await request<{ connection?: Connection; error?: string }>(
 		target,
 		"/api/identities/connections",
-		{ method: "POST", body: input }
+		{ method: "POST", body: input },
+		createConnectionResponseSchema
 	);
 	if (!json.connection) {
 		throw new Error(json.error ?? "failed to create connection");
@@ -96,7 +100,8 @@ export async function beginLogin(
 	return await request<LoginFlow>(
 		target,
 		`/api/identities/connections/${encodeURIComponent(id)}/login`,
-		{ method: "POST" }
+		{ method: "POST" },
+		loginFlowResponseSchema
 	);
 }
 
@@ -106,7 +111,9 @@ export async function pollConnection(
 ): Promise<ConnectionPoll> {
 	return await request<ConnectionPoll>(
 		target,
-		`/api/identities/connections/${encodeURIComponent(id)}`
+		`/api/identities/connections/${encodeURIComponent(id)}`,
+		{},
+		connectionPollResponseSchema
 	);
 }
 
@@ -118,7 +125,8 @@ export async function importConnection(
 	return await request<ConnectionPoll>(
 		target,
 		`/api/identities/connections/${encodeURIComponent(id)}/import`,
-		{ method: "POST", body: { state } }
+		{ method: "POST", body: { state } },
+		connectionPollResponseSchema
 	);
 }
 
@@ -126,9 +134,87 @@ export async function deleteConnection(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(
+	await request(
 		target,
 		`/api/identities/connections/${encodeURIComponent(id)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		gatewayJsonValueSchema
 	);
+}
+
+const flowStatusSchema = z.union([
+	z.literal("IDLE"),
+	z.literal("IN_PROGRESS"),
+	z.literal("DONE"),
+	z.literal("FAILED"),
+]);
+const connectionStatusSchema = z.union([
+	z.literal("AUTHENTICATED"),
+	z.literal("NEEDS_AUTH"),
+]);
+const connectionSchema = z
+	.object({
+		created_at: z.number(),
+		domain: z.string(),
+		flow_status: flowStatusSchema,
+		id: z.string(),
+		last_checked: z.number(),
+		profile_id: z.string(),
+		source: z.string(),
+		status: connectionStatusSchema,
+		updated_at: z.number(),
+	})
+	.passthrough();
+const listIdentitiesResponseSchema: z.ZodType<{ profiles?: Profile[] }> =
+	retainValidatedResponse(
+		z
+			.object({
+				profiles: z
+					.array(
+						z
+							.object({
+								connections: z.array(connectionSchema),
+								profile_id: z.string(),
+							})
+							.passthrough()
+					)
+					.optional(),
+			})
+			.passthrough()
+	);
+const createConnectionResponseSchema: z.ZodType<{
+	connection?: Connection;
+	error?: string;
+}> = retainValidatedResponse(
+	z
+		.object({
+			connection: connectionSchema.optional(),
+			error: z.string().optional(),
+		})
+		.passthrough()
+);
+const loginFlowResponseSchema: z.ZodType<LoginFlow> = retainValidatedResponse(
+	z
+		.object({
+			flow_id: z.string(),
+			kind: z.union([
+				z.object({ kind: z.literal("hosted"), url: z.string() }).passthrough(),
+				z.object({ kind: z.literal("manual") }).passthrough(),
+			]),
+		})
+		.passthrough()
+);
+const connectionPollResponseSchema: z.ZodType<ConnectionPoll> =
+	retainValidatedResponse(
+		z
+			.object({
+				connection: connectionSchema,
+				flow_status: flowStatusSchema,
+				status: connectionStatusSchema,
+			})
+			.passthrough()
+	);
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

@@ -8,21 +8,26 @@ import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
 import "../../src/index.css";
 
+interface GoalProofMetadata {
+	goal?: boolean;
+}
+type GoalProofMessage = UIMessage<GoalProofMetadata>;
+
 function makeMessage(
 	id: string,
 	role: UIMessage["role"],
 	text: string,
-	metadata?: Record<string, unknown>
-): UIMessage {
+	metadata?: GoalProofMetadata
+): GoalProofMessage {
 	return {
 		id,
 		metadata,
 		parts: [{ text, type: "text" }],
 		role,
-	} as unknown as UIMessage;
+	};
 }
 
-const initialMessages: UIMessage[] = [
+const initialMessages: GoalProofMessage[] = [
 	makeMessage("proof-user", "user", "Show me how goal messages should look."),
 	makeMessage(
 		"proof-assistant",
@@ -38,8 +43,7 @@ function Story() {
 	const [messages, setMessages] = useState(initialMessages);
 	const goalSequence = useRef(0);
 	const goalCount = messages.filter(
-		(message) =>
-			(message as { metadata?: { goal?: unknown } }).metadata?.goal === true
+		(message) => message.metadata?.goal === true
 	).length;
 
 	const appendGoalMessage = () => {
@@ -117,6 +121,7 @@ function Story() {
 						onBranch={() => undefined}
 						onEditMessage={() => undefined}
 						onSend={() => undefined}
+						onStop={() => undefined}
 						status="ready"
 					/>
 				</ChatDisplayPrefs>

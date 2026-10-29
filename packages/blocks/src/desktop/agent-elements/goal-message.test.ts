@@ -6,13 +6,13 @@ import {
 	isGoalMessage,
 } from "./goal-message.ts";
 
-function message(metadata?: unknown): UIMessage {
+function message(metadata?: UIMessage["metadata"]): UIMessage {
 	return {
 		id: "message",
 		metadata,
 		parts: [{ text: "Finish the task", type: "text" }],
 		role: "user",
-	} as UIMessage;
+	};
 }
 
 describe("goal message metadata", () => {

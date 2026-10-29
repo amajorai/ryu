@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import "./SkillRelationsGraph.css";
 import {
 	HierarchyIcon,
 	PotionIcon,
@@ -35,11 +37,14 @@ import {
 
 const HANDLE_CLASS = "!size-1.5 !min-w-0 !min-h-0 !border-0 !bg-foreground/20";
 
-type FlowRelationData = SkillRelationNode &
-	Record<string, unknown> & {
-		dimmed?: boolean;
-		onSelect?: () => void;
-	};
+function flowRelationData(
+	node: SkillRelationNode,
+	dimmed?: boolean,
+	onSelect?: () => void
+) {
+	return { ...node, dimmed, onSelect };
+}
+type FlowRelationData = ReturnType<typeof flowRelationData>;
 type FlowRelationNode = Node<FlowRelationData, "relation">;
 
 function iconFor(kind: SkillRelationNode["kind"]) {
@@ -54,13 +59,13 @@ function iconFor(kind: SkillRelationNode["kind"]) {
 
 function relationNodeClass(node: SkillRelationNode): string {
 	if (node.kind === "agent") {
-		return "border-sky-500/40 bg-sky-500/10";
+		return "border-primary/40 bg-primary/10";
 	}
 	if (node.kind === "tool") {
 		return "border-border/70 bg-muted/60";
 	}
 	return node.enabled
-		? "border-violet-500/50 bg-violet-500/10"
+		? "border-chart-2/50 bg-chart-2/10"
 		: "border-dashed border-muted-foreground/40 bg-muted/55 opacity-75";
 }
 
@@ -80,10 +85,14 @@ function RelationNode({ data, selected }: NodeProps<FlowRelationNode>) {
 		data.usageCount === undefined
 			? null
 			: (formatCount(data.usageCount) ?? String(data.usageCount));
+	const relationNodeVariables1: CSSProperties & {
+		"--skill-relation-size": string;
+	} = { "--skill-relation-size": `${nodeSize(data)}px` };
 	return (
 		<div
 			aria-label={`${data.kind}: ${data.label}`}
 			className={`relative flex shrink-0 flex-col items-center justify-center rounded-full border px-2.5 py-2 text-center shadow-sm transition-[opacity,filter,box-shadow] ${relationNodeClass(data)} ${data.dimmed ? "opacity-20 grayscale" : ""} ${selected ? "ring-2 ring-ring ring-offset-2 ring-offset-background" : ""}`}
+			data-skill-relation-size=""
 			data-testid={`skill-relation-node-${data.kind}`}
 			onKeyDown={(event) => {
 				if (event.key === "Enter" || event.key === " ") {
@@ -92,7 +101,7 @@ function RelationNode({ data, selected }: NodeProps<FlowRelationNode>) {
 				}
 			}}
 			role="button"
-			style={{ height: nodeSize(data), width: nodeSize(data) }}
+			style={relationNodeVariables1}
 			tabIndex={0}
 		>
 			<Handle className={HANDLE_CLASS} position={Position.Left} type="target" />
@@ -101,10 +110,10 @@ function RelationNode({ data, selected }: NodeProps<FlowRelationNode>) {
 				icon={iconFor(data.kind)}
 			/>
 			<div className="mt-1 min-w-0 max-w-full">
-				<div className="line-clamp-2 break-words font-medium text-[10px] leading-tight">
+				<div className="type-compact line-clamp-2 break-words font-medium leading-tight">
 					{data.label}
 				</div>
-				<div className="mt-1 truncate text-[9px] text-muted-foreground">
+				<div className="type-micro mt-1 truncate text-muted-foreground">
 					{data.kind === "agent"
 						? data.scope === "all-enabled"
 							? "All enabled skills"
@@ -120,7 +129,8 @@ function RelationNode({ data, selected }: NodeProps<FlowRelationNode>) {
 			</div>
 			{usage === null ? null : (
 				<Badge
-					className="absolute right-[-4px] bottom-[-2px] shrink-0 font-mono text-[9px]"
+					className="absolute right-[-4px] bottom-[-2px] shrink-0"
+					typography="code-micro"
 					variant="secondary"
 				>
 					{usage}
@@ -143,7 +153,7 @@ function layoutNodes(
 ): FlowRelationNode[] {
 	const positions = layoutForceGraph(nodes, edges);
 	return nodes.map((node) => ({
-		data: { ...node },
+		data: flowRelationData(node),
 		draggable: false,
 		id: node.id,
 		position: positions.get(node.id) ?? { x: 0, y: 0 },
@@ -359,11 +369,11 @@ export default function SkillRelationsGraph({
 					data-testid="skill-relations-legend"
 				>
 					<span className="inline-flex items-center gap-1.5">
-						<span className="size-2 rounded-full bg-sky-500" />
+						<span className="size-2 rounded-full bg-primary" />
 						Agents
 					</span>
 					<span className="inline-flex items-center gap-1.5">
-						<span className="size-2 rounded-full bg-violet-500" />
+						<span className="size-2 rounded-full bg-chart-2" />
 						Skills
 					</span>
 					<span className="inline-flex items-center gap-1.5">
@@ -428,7 +438,10 @@ export default function SkillRelationsGraph({
 										icon={iconFor(selectedNode.kind)}
 									/>
 									<div className="min-w-0">
-										<p className="truncate font-medium text-sm">
+										<p
+											className="truncate font-medium text-sm"
+											title={selectedNode.label}
+										>
 											{selectedNode.label}
 										</p>
 										<p className="text-muted-foreground text-xs capitalize">
@@ -473,7 +486,9 @@ export default function SkillRelationsGraph({
 													className="flex items-center justify-between gap-2 text-xs"
 													key={edge.id}
 												>
-													<span className="truncate">{other.label}</span>
+													<span className="truncate" title={other.label}>
+														{other.label}
+													</span>
 													<span className="shrink-0 text-muted-foreground">
 														{edgeLabel(edge)}
 													</span>

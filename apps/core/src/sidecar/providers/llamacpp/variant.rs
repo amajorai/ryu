@@ -13,7 +13,7 @@
 //! produces a binary that cannot start.
 //!
 //! Only one variant is installed at a time. It lives in its own directory
-//! (`~/.ryu/bin/llamacpp/`) rather than loose in `~/.ryu/bin`, because the
+//! (`<data dir>/engines/chat/llamacpp/`) rather than loose in `bin/`, because the
 //! backends ship *different* `ggml-*` shared libraries under the *same* names:
 //! extracting Vulkan over CUDA in a shared directory leaves a mixed set that
 //! llama.cpp's dynamic backend loader will happily pick up and fail on. The
@@ -23,7 +23,8 @@
 use std::path::PathBuf;
 
 use crate::model_catalog::device::{has_usable_gpu, DeviceInfo, GpuVendor};
-use crate::sidecar::download_manager::ryu_dir;
+use crate::sidecar::download_manager::engine_dir;
+use ryu_sidecar_runtime::layout::EngineGroup;
 
 /// Preference key holding the user's acceleration choice: `auto` (the default)
 /// or one of [`LlamaVariant::as_str`].
@@ -325,7 +326,7 @@ fn parse_cuda_banner(stdout: &str) -> Option<(u32, u32)> {
 /// backend's own `ggml-*` shared libraries). One variant at a time; wiped on a
 /// variant change so two backends' libraries never mix.
 pub fn install_dir() -> PathBuf {
-    ryu_dir().join("bin").join("llamacpp")
+    engine_dir(EngineGroup::Chat, "llamacpp")
 }
 
 /// Executable name with the platform's extension.
@@ -347,13 +348,6 @@ pub fn server_path() -> PathBuf {
 /// Path to the installed `llama-tts` (used by the OuteTTS voice engine).
 pub fn tts_path() -> PathBuf {
     install_dir().join(exe_name("llama-tts"))
-}
-
-/// The pre-variant install location, where `llama-server` lived directly in
-/// `~/.ryu/bin`. Still read (so an existing install is recognized before the
-/// first variant-aware install runs) and cleaned up afterwards.
-pub fn legacy_server_path() -> PathBuf {
-    ryu_dir().join("bin").join(exe_name("llama-server"))
 }
 
 /// Marker file recording which variant is installed in [`install_dir`].
@@ -421,6 +415,8 @@ mod tests {
             gpu_vendor: vendor,
             unified_memory: unified,
             os: std::env::consts::OS.to_string(),
+            disk_free_bytes: None,
+            disk_free_human: String::new(),
         }
     }
 
@@ -583,11 +579,11 @@ mod tests {
 
     #[test]
     fn install_paths_are_variant_scoped() {
-        // The binary must NOT sit loose in ~/.ryu/bin, or two backends'
-        // identically-named ggml libraries would overwrite each other.
+        // The binary lives in its own engine dir, never loose in `bin/`, or two
+        // backends' identically-named ggml libraries would overwrite each other.
         let server = server_path();
         assert!(server.starts_with(install_dir()));
-        assert_ne!(server, legacy_server_path());
+        assert!(install_dir().ends_with("engines/chat/llamacpp"));
         assert!(server
             .file_name()
             .unwrap()

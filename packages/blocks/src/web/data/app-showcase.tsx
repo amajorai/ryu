@@ -70,7 +70,7 @@ export const appShowcases = [
 		manifestId: "@ryu/sites",
 		name: "Sites",
 		shortDescription:
-			"Create, refine, and deploy websites with private drafts and scoped Ryu capabilities.",
+			"Create, refine, and deploy websites with private access.",
 		slug: "sites",
 		surfaceLabel: "Desktop Companion",
 		tagline: "Build websites on Ryu",
@@ -86,8 +86,7 @@ export const appShowcases = [
 				title: "Compose your view",
 			},
 			{
-				description:
-					"Bring monitors, meetings, quests, and other node surfaces into one glanceable board.",
+				description: "Put monitors and meetings on one live board.",
 				title: "See the node at a glance",
 			},
 			{
@@ -99,8 +98,7 @@ export const appShowcases = [
 		icon: LayoutDashboard,
 		manifestId: "@ryu/dashboards",
 		name: "Dashboards",
-		shortDescription:
-			"Compose live widget boards over monitors, meetings, quests, and other node surfaces.",
+		shortDescription: "Put monitors and meetings on one live board.",
 		slug: "dashboards",
 		surfaceLabel: "Web + Desktop",
 		tagline: "Live widget boards over your node",
@@ -190,7 +188,7 @@ export const appShowcases = [
 		manifestId: "@ryu/spaces",
 		name: "Spaces",
 		shortDescription:
-			"Keep notes, documents, and RAG-indexed files in one searchable source of context.",
+			"Keep notes, documents, and searchable files in one place.",
 		slug: "spaces",
 		surfaceLabel: "Core workspace",
 		tagline: "Where every note, doc, and file lives",

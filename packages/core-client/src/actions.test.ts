@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { actionPath, callAction } from "./actions.ts";
 import type { ApiTarget } from "./client.ts";
+import { createFetchFixture } from "./test-support/http-fixture.ts";
 
 const realFetch = globalThis.fetch;
 const target: ApiTarget = {
@@ -22,13 +23,15 @@ test("actionPath encodes action ids as one path segment", () => {
 test("callAction posts the governed action envelope", async () => {
 	let capturedUrl = "";
 	let capturedInit: RequestInit | undefined;
-	globalThis.fetch = ((url: string | URL, init?: RequestInit) => {
-		capturedUrl = String(url);
-		capturedInit = init;
-		return Promise.resolve(
-			Response.json({ ok: true, output: { ticketId: "t-1" } })
-		);
-	}) as unknown as typeof fetch;
+	globalThis.fetch = createFetchFixture(
+		(url: string | URL, init?: RequestInit) => {
+			capturedUrl = String(url);
+			capturedInit = init;
+			return Promise.resolve(
+				Response.json({ ok: true, output: { ticketId: "t-1" } })
+			);
+		}
+	);
 
 	await expect(
 		callAction(target, "app.support/save", {
@@ -54,10 +57,11 @@ test("callAction posts the governed action envelope", async () => {
 });
 
 test("callAction preserves Core denial results", async () => {
-	globalThis.fetch = (() =>
+	globalThis.fetch = createFetchFixture(() =>
 		Promise.resolve(
 			Response.json({ ok: false, error: "approval required" }, { status: 400 })
-		)) as unknown as typeof fetch;
+		)
+	);
 
 	await expect(
 		callAction(target, "app.support/save", {

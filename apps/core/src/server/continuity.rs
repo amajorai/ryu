@@ -20,11 +20,14 @@ use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
 use super::conversations::StoredMessage;
-use super::sync::{apply_sync_payload, SyncMessage, SyncPayload};
+use super::sync::{apply_sync_payload_unlinked, SyncMessage, SyncPayload};
 use super::{
     caller_tenancy, json_error, require_resource_read, require_resource_write, ServerState,
 };
 use crate::identity_verify::VerifiedCaller;
+
+/// Working-tree handoff: capability-probed endpoints beside the v0 bundle.
+pub(crate) mod workspace;
 
 const PROTOCOL: &str = "ryu-node-continuity";
 const VERSION: u8 = 0;
@@ -391,6 +394,8 @@ pub fn router() -> Router<ServerState> {
             post(resume_conversation),
         )
         .layer(DefaultBodyLimit::max(MAX_WIRE_BYTES))
+        // Merged after the layer so the blob routes keep their own body limit.
+        .merge(workspace::router())
 }
 
 #[utoipa::path(
@@ -421,10 +426,8 @@ pub(crate) async fn export_conversation(
     ) {
         return response;
     }
-    let Some(summary) = (match state.conversations.list_conversations().await {
-        Ok(conversations) => conversations
-            .into_iter()
-            .find(|conversation| conversation.id == id),
+    let Some(summary) = (match state.conversations.get_summary(&id).await {
+        Ok(summary) => summary,
         Err(error) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }) else {
         return json_error(
@@ -455,10 +458,8 @@ pub(crate) async fn export_conversation(
         Ok(messages) => messages,
         Err(error) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     };
-    let summary_after_snapshot = match state.conversations.list_conversations().await {
-        Ok(conversations) => conversations
-            .into_iter()
-            .find(|conversation| conversation.id == id),
+    let summary_after_snapshot = match state.conversations.get_summary(&id).await {
+        Ok(summary) => summary,
         Err(error) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     };
     let Some(summary_after_snapshot) = summary_after_snapshot else {
@@ -602,10 +603,8 @@ pub(crate) async fn resume_conversation(
             return response;
         }
     }
-    let existing_summary = match state.conversations.list_conversations().await {
-        Ok(conversations) => conversations
-            .into_iter()
-            .find(|conversation| conversation.id == id),
+    let existing_summary = match state.conversations.get_summary(&id).await {
+        Ok(summary) => summary,
         Err(error) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     };
     let metadata_changed = existed
@@ -657,6 +656,8 @@ pub(crate) async fn resume_conversation(
             role: message.role.clone(),
             content: message.text.clone(),
             created_at: message.created_at,
+            parent_message_id: None,
+            version_root: false,
         })
         .collect();
     let mut imported_context = 0usize;
@@ -682,6 +683,8 @@ pub(crate) async fn resume_conversation(
             role: "user".to_owned(),
             content,
             created_at,
+            parent_message_id: None,
+            version_root: false,
         });
     }
     let payload = SyncPayload {
@@ -697,7 +700,8 @@ pub(crate) async fn resume_conversation(
         updated_at: bundle.source.updated_at,
         messages,
     };
-    if let Err(error) = apply_sync_payload(&state.conversations, &payload, tenancy).await {
+    // Insert without linking: `link_resumed_messages` below places the rows.
+    if let Err(error) = apply_sync_payload_unlinked(&state.conversations, &payload, tenancy).await {
         return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
     }
     let stored_messages = match state.conversations.get_messages(&id).await {
@@ -722,6 +726,32 @@ pub(crate) async fn resume_conversation(
                 format!("message '{}' changed during the handoff", expected.id),
             );
         }
+    }
+    // A branched target reads only the parent chain from its leaf, so chain the
+    // rows this resume added onto it; otherwise the merge would be invisible.
+    // The payload is the bundle transcript followed by its context items.
+    let (transcript_ids, context_ids): (Vec<String>, Vec<String>) = {
+        let ids: Vec<String> = payload
+            .messages
+            .iter()
+            .map(|message| message.id.clone())
+            .collect();
+        let split = bundle.messages.len().min(ids.len());
+        let (transcript, context) = ids.split_at(split);
+        (transcript.to_vec(), context.to_vec())
+    };
+    let inserted_ids: HashSet<String> = transcript_ids
+        .iter()
+        .chain(&context_ids)
+        .filter(|message_id| !existing_by_id.contains_key(message_id.as_str()))
+        .cloned()
+        .collect();
+    if let Err(error) = state
+        .conversations
+        .link_resumed_messages(&id, &transcript_ids, &context_ids, &inserted_ids)
+        .await
+    {
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
     }
     let imported_total = inserted_messages + imported_context;
     let status = if !existed {
@@ -751,6 +781,7 @@ pub(crate) async fn resume_conversation(
 mod tests {
     use super::*;
     use crate::server::conversations::{ConversationStore, Tenancy};
+    use crate::server::sync::apply_sync_payload;
 
     #[test]
     fn shared_types_accept_the_protocol_fixture() {
@@ -805,6 +836,8 @@ mod tests {
                 role: message.role.clone(),
                 content: message.text.clone(),
                 created_at: message.created_at,
+                parent_message_id: None,
+                version_root: false,
             })
             .collect();
         for (index, item) in bundle.context.items.iter().enumerate() {
@@ -813,6 +846,8 @@ mod tests {
                 role: "user".to_owned(),
                 content: context_message(item),
                 created_at: bundle.created_at + index as i64,
+                parent_message_id: None,
+                version_root: false,
             });
         }
         let payload = SyncPayload {
@@ -846,3 +881,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod routes_test;

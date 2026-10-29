@@ -1,0 +1,4 @@
+.mask {
+	-webkit-mask-image: var(--edge-webkit-mask-image);
+	mask-image: var(--edge-mask-image);
+}

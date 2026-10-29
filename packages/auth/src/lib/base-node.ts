@@ -46,22 +46,93 @@ export const planIncludesBaseNode = (
 ): boolean => Boolean(plan && PLANS_INCLUDING_BASE_NODE.includes(plan));
 
 /**
- * The Hetzner type each plan's FREE node is provisioned at.
+ * The Hetzner type each plan's FREE node is provisioned at: ONE BASE SERVER.
  *
- * Each paid managed tier gets a deliberately larger included machine — this is
- * one of the things a top-up cannot sell you, and therefore one of the reasons
- * the tiers exist at all now that they are no longer credit packs. The default
- * EU ladder is Pro `cx23` (2 vCPU · 4 GB · 40 GB), Max `cx33` (4 vCPU · 8 GB ·
- * 80 GB), Teams `cx43` (8 vCPU · 16 GB · 160 GB), and Business `cx53` (16 vCPU
- * · 32 GB · 320 GB).
+ * Founder decision of 2026-10-19: every plan includes the same always-on base
+ * server, the cost-optimized `cx23`, at any seat count. The included node is a
+ * home for the org's agents, not where heavy or parallel work runs: that goes
+ * to Ryu Boxes, paid from credits. One shape for every plan is also what lets a
+ * sold-out larger type stop mattering: there is only one type to find.
  *
- * NOT `cpx22`, which reads like the obvious upgrade and is a trap: Hetzner's
- * June 2026 repricing took it from €7.99 to **€19.49**, while `cx33` is €8.49
- * for twice the cores and twice the RAM. Always price the type against the live
- * catalog before promoting one into a plan — the intuition that "cpx > cx" has
- * not been true since that change.
+ * Plans used to step up (Max `cx33`, Teams `cx43`, Business `cx53`). Servers
+ * created on that ladder are GRANDFATHERED, never resized by a renewal, a seat
+ * change or a plan upgrade; see {@link LEGACY_BASE_NODE_TYPE_BY_PLAN}.
  */
-export const BASE_NODE_TYPE_BY_PLAN: Readonly<Record<string, string>> = {
+export const BASE_NODE_TYPE_BY_PLAN = {
+	pro: "cx23",
+	plus: "cx23",
+	max: "cx23",
+	teams: "cx23",
+	"teams-lite": "cx23",
+	business: "cx23",
+};
+
+/**
+ * The same-price stock fallback for the ORGANIZATION plans in the EU.
+ *
+ * `cpx22` is NOT an upgrade: it has the same 2 vCPU and 4 GB as `cx23` and
+ * costs Ryu roughly three times as much (Hetzner's June 2026 repricing took it
+ * from €7.99 to €19.49). It exists only so that a Teams, Teams Lite or Business
+ * buyer still gets a server when `cx23` is out of stock in every EU region, at
+ * the same price. The margin guard costs those plans on `cpx22` (the worst
+ * case), and their seat revenue absorbs it. Plus, Pro and Max cannot, so they
+ * are sold out instead.
+ *
+ * The node keeps whichever type it was created on: it is never moved between
+ * `cx23` and `cpx22` later.
+ */
+export const ORG_PLAN_STOCK_FALLBACK_NODE_TYPE = "cpx22";
+
+const ORG_PLANS_WITH_STOCK_FALLBACK: readonly PlanId[] = [
+	"teams",
+	"teams-lite",
+	"business",
+];
+
+/**
+ * The type that may stand in for a plan's base node when the base type is out
+ * of stock in every region the node may go, or null when the plan has none (it
+ * is sold out instead). EU only: Singapore has its own single type per plan.
+ */
+export const stockFallbackNodeTypeForPlanAtLocation = (
+	plan: PlanId | null | undefined,
+	location: string | null | undefined
+): string | null => {
+	if (!(plan && ORG_PLANS_WITH_STOCK_FALLBACK.includes(plan))) {
+		return null;
+	}
+	if (location?.trim().toLowerCase() === "sin") {
+		return null;
+	}
+	return ORG_PLAN_STOCK_FALLBACK_NODE_TYPE;
+};
+
+/**
+ * Singapore's catalog does not offer the EU `cx23`, and its available shapes are
+ * materially more expensive than the EU defaults. The organization plans have
+ * enough seat margin to include `cpx22` there. Plus, Pro and Max do not: their
+ * global prices cannot safely absorb a Singapore node on the annual term, so
+ * those customers can still choose Singapore through a priced cloud-instance
+ * add-on but are not promised a free regional node.
+ */
+export const BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE = {
+	teams: "cpx22",
+	"teams-lite": "cpx22",
+	business: "cpx22",
+};
+
+/**
+ * FROZEN: the included types plans provisioned before the 2026-10-19 one-base-
+ * server decision. Never read it to size a new node.
+ *
+ * It answers one question about a GRANDFATHERED node: is it larger than the plan
+ * it is now on would ever have given it? A Business node is `cx53` because it was
+ * provisioned for Business, so a Business renewal must leave it alone, while a
+ * change to Pro (whose node was `cx23`) is a downgrade. The subscription event
+ * does not say which plan came before, but the node's own legacy size does. See
+ * `includedNodeResizeOnPlanChange` in the API's `plan-node-downgrade.ts`.
+ */
+export const LEGACY_BASE_NODE_TYPE_BY_PLAN = {
 	pro: "cx23",
 	plus: "cx23",
 	max: "cx33",
@@ -70,26 +141,58 @@ export const BASE_NODE_TYPE_BY_PLAN: Readonly<Record<string, string>> = {
 	business: "cx53",
 };
 
-/**
- * Singapore's catalog does not offer the EU `cx23`, and its available shapes are
- * materially more expensive than the EU defaults. Teams and Business have
- * enough organization-seat margin to include their regional profiles. Pro and
- * Max do not: their global prices cannot safely absorb a Singapore node on the
- * annual term, so those customers can still choose Singapore through a priced
- * cloud-instance add-on but are not promised a free regional node.
- */
-export const BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE: Readonly<
-	Record<string, string>
-> = {
+/** {@link LEGACY_BASE_NODE_TYPE_BY_PLAN} for Singapore (Business was `cpx32`). */
+export const LEGACY_BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE = {
 	teams: "cpx22",
 	"teams-lite": "cpx22",
 	business: "cpx32",
 };
 
+/** The seat count at which the legacy Teams ladder granted a second node. */
+export const LEGACY_TEAMS_SECOND_NODE_MIN_SEATS = 50;
+
+/**
+ * The type a plan's included node used to be provisioned at in `location`, or
+ * null when the plan included none there. FROZEN; see
+ * {@link LEGACY_BASE_NODE_TYPE_BY_PLAN}.
+ */
+export const legacyBaseNodeTypeForPlanAtLocation = (
+	plan: PlanId | null | undefined,
+	location: string | null | undefined
+): string | null => {
+	if (!(plan && planIncludesBaseNode(plan))) {
+		return null;
+	}
+	const table =
+		location?.trim().toLowerCase() === "sin"
+			? LEGACY_BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE
+			: LEGACY_BASE_NODE_TYPE_BY_PLAN;
+	return new Map<string, string>(Object.entries(table)).get(plan) ?? null;
+};
+
+/**
+ * How many included nodes the legacy ladder granted (Teams and Teams Lite had
+ * a second node from 50 seats). A node it created is kept while the org still
+ * qualifies for it; it is never created any more. FROZEN.
+ */
+export const legacyBaseNodeCountForPlanAtLocation = (
+	plan: PlanId | null | undefined,
+	location: string | null | undefined,
+	seats = 1
+): number => {
+	if (legacyBaseNodeTypeForPlanAtLocation(plan, location) === null) {
+		return 0;
+	}
+	return (plan === "teams" || plan === "teams-lite") &&
+		seats >= LEGACY_TEAMS_SECOND_NODE_MIN_SEATS
+		? 2
+		: 1;
+};
+
 /**
  * The type a plan's included node is provisioned at, or null when it gets none.
- * Teams resolves through the seat ladder; Business has a fixed performance
- * profile and everything else is fixed per plan.
+ * Teams and Teams Lite resolve through {@link TEAMS_NODE_TIERS}, which today is
+ * one base server at every seat count.
  */
 export const baseNodeTypeForPlan = (
 	plan: PlanId | null | undefined,
@@ -101,7 +204,7 @@ export const baseNodeTypeForPlan = (
 	if (plan === "teams" || plan === "teams-lite") {
 		return teamsNodeTierForSeats(seats).type;
 	}
-	return BASE_NODE_TYPE_BY_PLAN[plan] ?? "cx23";
+	return new Map(Object.entries(BASE_NODE_TYPE_BY_PLAN)).get(plan) ?? "cx23";
 };
 
 /** Resolve the included node type for a plan in a specific Hetzner location. */
@@ -114,42 +217,34 @@ export const baseNodeTypeForPlanAtLocation = (
 		return null;
 	}
 	if (location?.trim().toLowerCase() === "sin") {
-		if (plan === "teams" || plan === "teams-lite") {
-			return BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE.teams ?? "cpx22";
-		}
-		return BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE[plan] ?? null;
+		return (
+			new Map(Object.entries(BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE)).get(plan) ??
+			null
+		);
 	}
 	return baseNodeTypeForPlan(plan, seats);
 };
 
 /**
- * TEAMS COMPUTE SCALES WITH THE ORG — by SIZE, not by count.
+ * TEAMS COMPUTE: ONE BASE SERVER, AT EVERY SEAT COUNT.
  *
- * The first attempt granted "one `cx23` per 10 seats", which fixed the wrong
- * variable. Ten 2-vCPU boxes for a hundred people is ten small machines, not one
- * adequate one: a single node serves the org's shared agent traffic, so what a
- * bigger team needs is a bigger node, and only past a point a second one.
+ * The ladder used to scale the node with the org (one `cx43` through 49 seats,
+ * two from 50). Since 2026-10-19 the shared node is the same base server every
+ * plan gets, and capacity that scales with the org is bought as Ryu Boxes from
+ * credits instead: seats are licences, compute is sized separately. The tier
+ * shape stays so a future band is one row here, and so the margin guard and the
+ * provisioner keep resolving the node through the same function.
  *
- * The distinction that matters, because it is easy to conflate: a VM per SEAT is
- * not industry practice and mostly buys idle hardware — seats are human
- * licences. Capacity that scales with org size IS standard (Vercel, Databricks:
- * seats are licences, compute is sized separately). This ladder is the second
- * thing, not the first.
- *
- * The cost stays controlled against revenue because the shared node is sized by
- * plan and seat band, not one idle VM per person. Teams uses one `cx43` through
- * 49 seats and two at the 50-seat ceiling; Business uses one `cx53` across its
- * self-serve range.
- *
- * REVERSIBILITY IS WHY THIS IS SAFE TO SCALE DOWN. Hetzner's `change_type` can
- * move a server between types in place, but a resize that GROWS THE DISK is
- * permanent — such a server can never be downgraded again. `resizeServerSEAM`
- * in `cloud-provision.ts` therefore always passes `upgrade_disk: false`, so the
- * disk stays at its original size and the CPU/RAM tier remains free to move in
- * both directions. Never change that flag to satisfy a disk request: growing a
- * disk is a separate, explicit, ONE-WAY decision, and folding it into an
- * automatic seat-driven resize would silently strand the org on its current tier
- * forever.
+ * REVERSIBILITY. Hetzner's `change_type` can move a server between types in
+ * place, but a resize that GROWS THE DISK is permanent: such a server can never
+ * be made smaller again. Every resize goes through `changeInstance` →
+ * `hetznerChangeServerType` in `cloud-provision.ts`, which always passes
+ * `upgrade_disk: false`, so the disk stays at the size the server was created
+ * with. That is also why a grandfathered node can only be shrunk back to the
+ * base server when it was created on a type whose disk fits the base server's
+ * (`includedNodeResizeOnPlanChange`); a server created natively on a bigger type
+ * has a bigger disk and keeps its size. Never change that flag to satisfy a
+ * disk request: growing a disk is a separate, explicit, ONE-WAY decision.
  */
 export interface TeamsNodeTier {
 	/** How many nodes at this tier. */
@@ -161,17 +256,16 @@ export interface TeamsNodeTier {
 }
 
 /**
- * Ascending. Disk sizes are deliberately NOT part of the promise — see the
- * reversibility note above; a `cx23` resized up keeps its 40 GB.
+ * Ascending. Disk sizes are deliberately NOT part of the promise; see the
+ * reversibility note above.
  */
-export const TEAMS_NODE_TIERS: readonly TeamsNodeTier[] = [
-	{ minSeats: 5, type: "cx43", count: 1 },
-	{ minSeats: 50, type: "cx43", count: 2 },
-];
+export const TEAMS_NODE_TIERS = [
+	{ minSeats: 5, type: "cx23", count: 1 },
+] satisfies readonly [TeamsNodeTier, ...TeamsNodeTier[]];
 
 /** The Teams node tier in force at `seats` — the highest one reached. */
 export const teamsNodeTierForSeats = (seats: number): TeamsNodeTier => {
-	let tier = TEAMS_NODE_TIERS[0] as TeamsNodeTier;
+	let tier: TeamsNodeTier = TEAMS_NODE_TIERS[0];
 	for (const candidate of TEAMS_NODE_TIERS) {
 		if (seats >= candidate.minSeats) {
 			tier = candidate;
@@ -183,9 +277,10 @@ export const teamsNodeTierForSeats = (seats: number): TeamsNodeTier => {
 /**
  * How many free nodes a plan grants at `seats`.
  *
- * Everything except Teams gets exactly one. Teams reaches two included nodes at
- * the 50-seat tier; the server route and the slot index both resolve that count
- * from this function so the declared capacity is provisioned and race-safe.
+ * Every plan gets exactly one today; Teams and Teams Lite resolve through
+ * {@link TEAMS_NODE_TIERS} so a future band needs no second code path. The
+ * server route and the slot index both resolve the count from this function so
+ * the declared capacity is provisioned and race-safe.
  */
 export const baseNodeCountForPlan = (
 	plan: PlanId | null | undefined,
@@ -216,15 +311,12 @@ export const baseNodeCountForPlanAtLocation = (
 
 /**
  * How the qualifying plans are NAMED in customer-facing copy ("…is included
- * with Plus, Pro, Max, Teams or Business"). Presentational only — never parse it. Every string
+ * with Pro, Max, Teams or Business"). Presentational only — never parse it. Every string
  * that used to hardcode "Max" reads this, so widening or narrowing the set is
  * one edit here plus {@link PLANS_INCLUDING_BASE_NODE}, not a nine-file sed.
+ *
+ * Names only the PUBLICLY offered tiers. Plus and Teams Lite also include a node
+ * (see {@link PLANS_INCLUDING_BASE_NODE}) but are private offers, so their names
+ * stay out of public strings; their holders still get the node.
  */
-export const BASE_NODE_PLANS_LABEL = "Plus, Pro, Max, Teams or Business";
-
-/**
- * The same set in a conjunctive sentence position ("included with Plus, Pro, Max,
- * Teams and Business"). Two constants rather than one because English needs both and a
- * caller that picks the wrong one reads as a typo to a customer.
- */
-export const BASE_NODE_PLANS_LABEL_ALL = "Plus, Pro, Max, Teams and Business";
+export const BASE_NODE_PLANS_LABEL = "Pro, Max, Teams or Business";

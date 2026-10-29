@@ -65,10 +65,6 @@ export const seatDiscountBps = (seats: number): number => {
 export const seatPriceUsd = (listUsd: number, seats: number): number =>
 	Math.round(listUsd * (1 - seatDiscountBps(seats) / 10_000) * 100) / 100;
 
-/** What an organisation of `seats` pays per month, in USD. */
-export const seatTotalUsd = (listUsd: number, seats: number): number =>
-	seatPriceUsd(listUsd, seats) * seats;
-
 /**
  * WHERE SELF-SERVE STOPS. Above this, Teams checkout refuses and the buyer is
  * routed to sales.

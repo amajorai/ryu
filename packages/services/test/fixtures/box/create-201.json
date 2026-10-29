@@ -1,0 +1,35 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/boxes"
+  },
+  "status": 201,
+  "body": {
+    "box": {
+      "allowedHosts": [],
+      "billing": {
+        "minimumWaived": false,
+        "paidHourEndsAt": null
+      },
+      "createdAt": "2026-10-21T12:00:00.000Z",
+      "driver": "filesystem-dev",
+      "id": "bx_00000000000000000000000000000001",
+      "image": "ubuntu:24.04",
+      "lastError": null,
+      "name": "conformance",
+      "network": "none",
+      "secrets": [],
+      "size": "default",
+      "snapshotId": null,
+      "status": "ready",
+      "stoppedAt": null,
+      "ttlSeconds": 86400,
+      "updatedAt": "2026-10-21T12:00:00.000Z",
+      "envNames": [],
+      "repo": null,
+      "runningSince": "2026-10-21T12:00:00.000Z"
+    },
+    "ok": true,
+    "type": "box.created"
+  }
+}

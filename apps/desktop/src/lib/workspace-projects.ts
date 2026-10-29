@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { dedupeFolders, folderKey, sameFolder } from "./folder-path.ts";
 
 /** A desktop-local project that can expose more than one source folder. */
@@ -46,41 +48,45 @@ export function findWorkspaceProject(
 	);
 }
 
+const workspaceProjectInputSchema = z.json().optional();
+type WorkspaceProjectInput =
+	| z.infer<typeof workspaceProjectInputSchema>
+	| readonly WorkspaceProject[];
+const workspaceProjectRecordSchema = z.object({
+	id: z.string().trim().catch(""),
+	name: z.string().trim().optional().catch(undefined),
+	folders: z.array(z.string().catch("")).catch([]),
+});
+const workspaceProjectRecordsSchema = z.array(
+	workspaceProjectRecordSchema.optional().catch(undefined)
+);
+
 /** Normalize persisted data without allowing duplicate or empty roots. */
 export function normalizeWorkspaceProjects(
-	raw: unknown,
+	raw: WorkspaceProjectInput,
 	fallbackFolders: readonly string[] = []
 ): WorkspaceProject[] {
 	const projects: WorkspaceProject[] = [];
-	if (Array.isArray(raw)) {
-		for (const value of raw) {
-			if (!(value && typeof value === "object")) {
+	const parsed = workspaceProjectRecordsSchema.safeParse(raw);
+	if (parsed.success) {
+		for (const record of parsed.data) {
+			if (!record) {
 				continue;
 			}
-			const record = value as Record<string, unknown>;
-			const folders = Array.isArray(record.folders)
-				? dedupeFolders(
-						record.folders.filter(
-							(folder): folder is string =>
-								typeof folder === "string" && folder.trim().length > 0
-						)
-					)
-				: [];
-			if (
-				folders.length === 0 &&
-				!(typeof record.id === "string" && record.id.trim())
-			) {
+			const folders = dedupeFolders(
+				record.folders.filter((folder) => folder.trim().length > 0)
+			);
+			if (folders.length === 0 && !record.id) {
 				continue;
 			}
-			const id =
-				typeof record.id === "string" && record.id.trim()
-					? record.id.trim()
-					: projectIdForFolder(folders[0]);
-			const name =
-				typeof record.name === "string" && record.name.trim()
-					? record.name.trim()
-					: undefined;
-			projects.push({ id, folders, ...(name ? { name } : {}) });
+			const project: WorkspaceProject = {
+				id: record.id || projectIdForFolder(folders[0]),
+				folders,
+			};
+			if (record.name) {
+				project.name = record.name;
+			}
+			projects.push(project);
 		}
 	}
 

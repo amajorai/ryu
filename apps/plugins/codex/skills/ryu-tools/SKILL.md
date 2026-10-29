@@ -53,6 +53,10 @@ This plugin bundles an MCP bridge to one Ryu Core node. Every tool below is name
 
 - `ryu_ask` `{ question, conversationId? }` - ask Ryu's side-question model one question with no tool access. Fast and self-contained. Not an agent run; for that, inspect `ryu_list_agents` or run a workflow.
 
+## Account
+
+- `ryu_whoami` - the Ryu account this bridge is signed in to, or a hint to sign in with `ryu-mcp login`. Signing in identifies the user to the Ryu control plane only; it does not authorize node calls, which use the Core token.
+
 ## Common chains
 
 - Bring a node online: `ryu_health` then `ryu_get_active_model`, and if empty, `ryu_search_models` then `ryu_set_active_model`.

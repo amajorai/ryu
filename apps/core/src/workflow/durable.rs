@@ -95,57 +95,7 @@ pub fn select_engine() -> Box<dyn DurableEngine<Workflow, WorkflowRun>> {
 mod tests {
     use super::*;
     use crate::workflow::store::{NodeRunState, NodeStatus, RunStatus};
-    use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
-
-    fn linear_workflow(id: &str) -> Workflow {
-        Workflow {
-            id: id.to_string(),
-            name: "lin".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "in".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Input {
-                        key: Some("text".into()),
-                    },
-                },
-                WorkflowNode {
-                    id: "up".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Transform {
-                        op: "uppercase".into(),
-                        template: None,
-                    },
-                },
-                WorkflowNode {
-                    id: "out".into(),
-                    retry: None,
-                    timeout_ms: None,
-                    kind: NodeKind::Output {
-                        key: Some("result".into()),
-                    },
-                },
-            ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "up".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "up".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        }
-    }
+    use crate::workflow::test_support::linear_workflow;
 
     /// The fallback engine must pass the existing linear transform workflow test.
     /// This mirrors `executor::tests::runs_linear_transform_workflow` but routes

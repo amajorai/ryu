@@ -6,6 +6,7 @@ import {
 	useImagePreviewValue,
 	useScaleInput,
 } from "@platejs/media/react";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva } from "class-variance-authority";
 import { ArrowLeft, ArrowRight, Download, Minus, Plus, X } from "lucide-react";
@@ -18,7 +19,7 @@ const buttonVariants = cva("rounded bg-[rgba(0,0,0,0.5)] px-1", {
 	variants: {
 		variant: {
 			default: "text-white",
-			disabled: "cursor-not-allowed text-gray-400",
+			disabled: "cursor-not-allowed text-muted-foreground",
 		},
 	},
 });
@@ -55,14 +56,8 @@ export function MediaPreviewDialog() {
 		// Validate the URL scheme before binding it to an <a href>: a
 		// `javascript:` / `data:` / `vbscript:` url here would execute on click
 		// (XSS / open-redirect). Only allow real fetchable media schemes.
-		let safeHref: string;
-		try {
-			const parsed = new URL(currentPreview.url, window.location.href);
-			if (!["http:", "https:", "blob:"].includes(parsed.protocol)) {
-				return;
-			}
-			safeHref = parsed.href;
-		} catch {
+		const safeHref = safeMediaUrl(currentPreview.url);
+		if (!safeHref) {
 			return;
 		}
 
@@ -89,9 +84,9 @@ export function MediaPreviewDialog() {
 			<div className="absolute inset-0 flex items-center justify-center">
 				<div className="relative flex max-h-screen w-full items-center">
 					<PreviewImage
-						className={cn(
+						className={
 							"mx-auto block max-h-[calc(100vh-4rem)] w-auto object-contain transition-transform"
-						)}
+						}
 					/>
 					<div
 						className="absolute start-1/2 bottom-0 z-40 flex w-fit -translate-x-1/2 justify-center gap-4 p-2 text-center text-white rtl:translate-x-1/2"
@@ -137,7 +132,7 @@ export function MediaPreviewDialog() {
 							<div className="mx-px">
 								{isEditingScale ? (
 									<>
-										<ScaleInput className="w-10 rounded px-1 text-slate-500 outline" />{" "}
+										<ScaleInput className="w-10 rounded px-1 text-muted-foreground outline" />{" "}
 										<span>%</span>
 									</>
 								) : (

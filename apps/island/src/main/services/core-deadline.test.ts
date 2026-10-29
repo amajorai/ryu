@@ -1,12 +1,20 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 
 test("Core one-shot clients preserve JSON/binary results and their complete-body deadlines", async () => {
 	const root = await mkdtemp(join(tmpdir(), "ryu-island-core-"));
 	let closed = 0;
-	const replies: Record<string, unknown> = {
+	const replies = z.record(z.string(), z.json()).parse({
 		"/v1/chat/completions": { choices: [{ message: { content: "fixture" } }] },
 		"/api/voice/transcribe": { text: "transcribed" },
 		"/api/voice/speech-processing": { text: "cleaned" },
@@ -21,7 +29,7 @@ test("Core one-shot clients preserve JSON/binary results and their complete-body
 			models: { fixture: [{ id: "small", name: "Small" }] },
 		},
 		"/api/conversations": { conversations: [{ id: "thread", title: "" }] },
-	};
+	});
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,
@@ -52,9 +60,23 @@ test("Core one-shot clients preserve JSON/binary results and their complete-body
 		},
 	});
 	try {
+		await symlink(
+			join(import.meta.dirname, "../../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
+		);
+		await copyFile(
+			join(import.meta.dirname, "../../shared/acp.ts"),
+			join(root, "acp.ts")
+		);
 		for (const name of ["core.ts", "response-deadline.ts", "sse.ts"]) {
 			await copyFile(join(import.meta.dirname, name), join(root, name));
 		}
+		const coreSource = await readFile(join(root, "core.ts"), "utf8");
+		await writeFile(
+			join(root, "core.ts"),
+			coreSource.replace("../../shared/acp.ts", "./acp.ts")
+		);
 		await writeFile(
 			join(root, "config.ts"),
 			`let slow = false; export const stall = () => { slow = true; }; export const coreHeaders = () => ({}); export const loadConfig = () => ({ coreBaseUrl: ${JSON.stringify(server.url.toString().replace(/\/$/, ""))} + (slow ? "/slow" : "") });`
@@ -67,11 +89,13 @@ test("Core one-shot clients preserve JSON/binary results and their complete-body
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const result = (await new Response(child.stdout).json()) as {
-			normal: unknown[];
-			stalled: unknown[];
-			elapsedMs: number;
-		};
+		const result = z
+			.object({
+				normal: z.array(z.json()),
+				stalled: z.array(z.json()),
+				elapsedMs: z.number(),
+			})
+			.parse(await new Response(child.stdout).json());
 		expect(await child.exited).toBe(0);
 		expect(result.normal[0]).toEqual({ available: true });
 		expect(result.normal[1]).toEqual({ available: true, text: "fixture" });
@@ -96,7 +120,10 @@ test("Core one-shot clients preserve JSON/binary results and their complete-body
 			available: true,
 			agents: [{ id: "fixture", builtIn: true }],
 		});
-		expect(result.normal[9]).toEqual({ available: true, config: {} });
+		expect(result.normal[9]).toEqual({
+			available: true,
+			config: { configOptions: null, models: null, modes: null },
+		});
 		expect(result.normal[10]).toMatchObject({
 			available: true,
 			models: { fixture: [{ id: "small" }] },

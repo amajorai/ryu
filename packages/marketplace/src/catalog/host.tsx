@@ -34,6 +34,7 @@ import type {
 	InstalledModelEntry,
 	LlmFitEstimate,
 	ModelCatalogState,
+	ModelFormat,
 	SkillsCatalogState,
 	Surface,
 	VersionSnapshot,
@@ -122,7 +123,9 @@ export interface CatalogScanInput {
 	files?: CatalogScanFile[];
 	id: string;
 	kind: CatalogScanKind;
-	metadata?: Record<string, unknown>;
+	/** Forwarded through native request-body JSON.stringify without observation.
+	 * This input port does not guarantee successful serialization or an object DTO. */
+	metadata?: Parameters<typeof JSON.stringify>[0];
 	name: string;
 	readme?: string | null;
 	scorecard: Scorecard | null;
@@ -195,6 +198,17 @@ export function useNoInterfaceLevel(): CatalogInterfaceLevel {
 	return NO_INTERFACE_LEVEL();
 }
 
+/** Stable "every listing may show" predicate. Module-level so the fallback hook
+ *  keeps one identity across renders. */
+const ALL_APP_LISTINGS_ALLOWED = () => true;
+
+/** Fallback for {@link CatalogHost.useAppListingAllowed} on a host with no
+ *  rollout flags. A hook by shape so a call site can pick one or the other and
+ *  still make exactly one hook call. */
+export function useAllAppListingsAllowed(): (appId: string) => boolean {
+	return ALL_APP_LISTINGS_ALLOWED;
+}
+
 /** Resolves a plugin id to a "reveal its settings" action, or `null` when that
  *  plugin has no settings destination on this surface. */
 export type PluginSettingsOpener = (
@@ -238,10 +252,14 @@ export interface LlmfitEstimateOptions {
 }
 
 /** The full set of services the shared catalog sections need from their host. */
-export interface CatalogHost {
-	/** The "Use this model" control for an installed model (desktop-only; a
-	 *  read-only surface renders nothing since installed cards never appear). */
-	ActiveModelControl: ComponentType<{ repoId: string }>;
+export interface CatalogHost<SidecarInstallResult = unknown> {
+	/** Prepare a local model for chat, or select a non-chat model's runtime. */
+	ActiveModelControl: ComponentType<{
+		chatCapable?: boolean;
+		format?: ModelFormat;
+		modelName?: string;
+		repoId: string;
+	}>;
 	/** Whether the SKILL.md authoring routes actually resolve on this surface.
 	 *
 	 *  {@link navigate} says the host CAN deep-link; this says the deep link LANDS
@@ -308,12 +326,15 @@ export interface CatalogHost {
 	 *  sections hide every install/enable/lifecycle/source affordance and render
 	 *  {@link renderAffordance} in the primary-action slot instead. */
 	install: CatalogInstall | null;
-	/** Point-of-use install of an optional Core sidecar (e.g. `llmfit`). */
+	/** Point-of-use install of an optional Core sidecar (e.g. `llmfit`).
+	 * The host owns its fulfilled result; catalog surfaces await and discard it. */
 	installSidecar: (
 		url: string,
 		token: string | null,
-		name: string
-	) => Promise<unknown>;
+		name: string,
+		/** Managed-node user JWT; a managed node has no node token. */
+		userJwt?: string | null
+	) => Promise<SidecarInstallResult>;
 	/** The surface's Markdown renderer, used for skill READMEs + bundled files. */
 	Markdown: ComponentType<CatalogMarkdownProps>;
 	/** Deep-link to an in-app route (desktop: open a tab). Its presence gates the
@@ -335,6 +356,17 @@ export interface CatalogHost {
 	 *  the model detail's node-coupled extras (llmfit, fine-tunes, active-model) are
 	 *  gated behind {@link install} anyway, so a stub is never actually dereferenced. */
 	useActiveNode: () => CatalogNode;
+	/** Whether an app's catalog listing may be shown to this reader.
+	 *
+	 *  A rollout DISCOVERY gate: the host answers from its server-driven rollout
+	 *  flags (the generic app-id → flag map in `@ryu/auth/lib/feature-flags`), so
+	 *  this package never hard-codes an app id. Installed apps are never hidden
+	 *  by it, because installing is the opt-in. Called ONCE per section; the
+	 *  returned predicate is applied to every row.
+	 *
+	 *  Optional — omitted ⇒ {@link useAllAppListingsAllowed}. Both shipped hosts
+	 *  supply it; a host that lists gated apps must too. */
+	useAppListingAllowed?: () => (appId: string) => boolean;
 	/** The surface's Apps (plugins) catalog hook (called at component top level).
 	 *  `options.origin` selects which slice of the catalog to fetch: omitted =
 	 *  the first-party catalog; `"community"` = the GitHub topic-discovered feed.
@@ -389,11 +421,11 @@ export interface CatalogHost {
 
 const CatalogHostContext = createContext<CatalogHost | null>(null);
 
-export function CatalogHostProvider({
+export function CatalogHostProvider<SidecarInstallResult>({
 	host,
 	children,
 }: {
-	host: CatalogHost;
+	host: CatalogHost<SidecarInstallResult>;
 	children: ReactNode;
 }) {
 	return (

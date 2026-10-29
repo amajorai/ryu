@@ -20,7 +20,7 @@
 // echo-loop trap).
 
 import type { UnifiedProvider } from "@platejs/yjs";
-import type { ApiTarget } from "@ryuhq/core-client/client";
+import type { ApiTarget } from "@ryuhq/core-client/client.ts";
 import {
 	DOC_SYNC_AWARENESS,
 	DOC_SYNC_STEP1,
@@ -29,19 +29,44 @@ import {
 	type DocSyncMessage,
 	type JoinAck,
 	RealtimeConnection,
-} from "@ryuhq/core-client/realtime";
+} from "@ryuhq/core-client/realtime.ts";
 import {
 	Awareness,
 	applyAwarenessUpdate,
 	encodeAwarenessUpdate,
 	removeAwarenessStates,
 } from "y-protocols/awareness";
-import { applyUpdate, Doc, encodeStateAsUpdate, encodeStateVector } from "yjs";
+import {
+	applyUpdate,
+	Doc,
+	decodeStateVector,
+	encodeStateAsUpdate,
+	encodeStateVector,
+} from "yjs";
+import { ContentSealLockedError } from "../content-seal.ts";
 import {
 	clearYjsSnapshot,
+	currentCollaborationAccount,
 	loadYjsSnapshot,
+	releaseAccountYjsSnapshots,
 	storeYjsSnapshot,
 } from "./yjs-persistence.ts";
+
+/** Live providers, so a sign-out can flush their local edits first. */
+const liveProviders = new Set<RyuYjsProvider>();
+
+/** True when `current` holds a client clock that `known` has not seen. */
+function stateVectorAhead(
+	current: Map<number, number>,
+	known: Map<number, number> | null
+): boolean {
+	for (const [client, clock] of current) {
+		if (clock > (known?.get(client) ?? 0)) {
+			return true;
+		}
+	}
+	return false;
+}
 
 /**
  * Connection state of a provider, for surfaces that must not claim to be live
@@ -75,6 +100,9 @@ export interface RyuYjsProviderHandlers {
 }
 
 export interface RyuYjsProviderOptions {
+	/** The account the local snapshot belongs to (null: anonymous). Defaults to
+	 * the signed-in account at construction ({@link currentCollaborationAccount}). */
+	account?: string | null;
 	/** Existing awareness to share with the editor; one is created if omitted. */
 	awareness?: Awareness;
 	/** Existing Doc to bind; a fresh one is created if omitted. */
@@ -105,6 +133,10 @@ export class RyuYjsProvider implements UnifiedProvider {
 	private discarded = false;
 	private opening = false;
 	private hydrated = false;
+	/** Hydration hit a locked key: never overwrite the snapshot we could not read. */
+	private persistBlocked = false;
+	/** State vector Core is known to hold (sent while synced); null = unknown. */
+	private serverStateVector: Map<number, number> | null = null;
 	private persistTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Pending reconnect timer, if a retry is scheduled. */
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -114,11 +146,13 @@ export class RyuYjsProvider implements UnifiedProvider {
 	private closedByCaller = false;
 	private status: RyuYjsStatus = "connecting";
 	private readonly options: RyuYjsProviderOptions;
-	private readonly onDocUpdate: (update: Uint8Array, origin: unknown) => void;
+	private readonly onDocUpdate: Parameters<
+		typeof Doc.prototype.on<"update">
+	>[1];
 	private readonly onPersistUpdate: () => void;
 	private readonly onAwarenessUpdate: (
 		changes: { added: number[]; removed: number[]; updated: number[] },
-		origin: unknown
+		origin: Parameters<typeof applyAwarenessUpdate>[2]
 	) => void;
 
 	/** The document room id this provider syncs (the Core document id). */
@@ -127,17 +161,28 @@ export class RyuYjsProvider implements UnifiedProvider {
 	}
 
 	constructor(options: RyuYjsProviderOptions) {
-		this.options = options;
+		this.options = {
+			...options,
+			account:
+				options.account === undefined
+					? currentCollaborationAccount()
+					: options.account,
+		};
 		this.document = options.doc ?? new Doc();
 		this.awareness = options.awareness ?? new Awareness(this.document);
 
 		// Local doc edits -> broadcast as a DocSync Update. Updates we applied from
 		// the network carry `this` as their origin and must NOT be re-sent.
-		this.onDocUpdate = (update: Uint8Array, origin: unknown) => {
+		this.onDocUpdate = (update, origin) => {
 			if (origin === this) {
 				return;
 			}
 			this.send({ tag: DOC_SYNC_UPDATE, payload: update });
+			if (this.isConnected && this.isSynced) {
+				this.serverStateVector = decodeStateVector(
+					encodeStateVector(this.document)
+				);
+			}
 		};
 		this.onPersistUpdate = () => {
 			if (this.persistTimer !== null) {
@@ -151,10 +196,7 @@ export class RyuYjsProvider implements UnifiedProvider {
 
 		// Local awareness changes -> broadcast. Skip awareness we applied from the
 		// network (origin === this) to avoid an echo loop.
-		this.onAwarenessUpdate = (
-			changes: { added: number[]; removed: number[]; updated: number[] },
-			origin: unknown
-		) => {
+		this.onAwarenessUpdate = (changes, origin) => {
 			if (origin === this) {
 				return;
 			}
@@ -169,6 +211,20 @@ export class RyuYjsProvider implements UnifiedProvider {
 			});
 		};
 		this.document.on("update", this.onPersistUpdate);
+		liveProviders.add(this);
+	}
+
+	/** The account this provider's local snapshot is stored under. */
+	get account(): string | null {
+		return this.options.account ?? null;
+	}
+
+	/** Whether the doc holds edits Core has not been sent while synced. */
+	hasUnsyncedChanges(): boolean {
+		return stateVectorAhead(
+			decodeStateVector(encodeStateVector(this.document)),
+			this.serverStateVector
+		);
 	}
 
 	/** Open the realtime connection (document room) and start syncing. Idempotent. */
@@ -185,13 +241,26 @@ export class RyuYjsProvider implements UnifiedProvider {
 	private async hydrateThenOpen(): Promise<void> {
 		try {
 			if (!this.hydrated) {
-				const stored = await loadYjsSnapshot(this.options.roomId);
-				if (stored && stored.length > 0) {
-					applyUpdate(this.document, stored, this);
+				const stored = await loadYjsSnapshot(
+					this.options.roomId,
+					this.options.account
+				);
+				if (stored && stored.update.length > 0) {
+					applyUpdate(this.document, stored.update, this);
+					if (stored.synced) {
+						this.serverStateVector = decodeStateVector(
+							encodeStateVector(this.document)
+						);
+					}
 				}
 				this.hydrated = true;
+				this.persistBlocked = false;
 			}
 		} catch (error) {
+			// A locked key is not a failed decrypt: keep the stored snapshot
+			// untouched (no persist) and try again on the next connect.
+			this.persistBlocked = error instanceof ContentSealLockedError;
+			this.hydrated = !this.persistBlocked;
 			this.options.handlers?.onError?.(
 				error instanceof Error
 					? error
@@ -217,7 +286,7 @@ export class RyuYjsProvider implements UnifiedProvider {
 				onDocumentReset: (epoch) => {
 					this.closedByCaller = true;
 					this.discarded = true;
-					void clearYjsSnapshot(this.options.roomId);
+					void clearYjsSnapshot(this.options.roomId, this.options.account);
 					this.connection?.close();
 					this.options.handlers?.onReset?.(epoch);
 				},
@@ -270,6 +339,7 @@ export class RyuYjsProvider implements UnifiedProvider {
 		}
 		this.disconnect();
 		this.document.off("update", this.onPersistUpdate);
+		liveProviders.delete(this);
 		this.awareness.destroy();
 		// Only destroy a Doc we created; a caller-supplied doc is theirs to manage.
 		if (!this.options.doc) {
@@ -392,6 +462,11 @@ export class RyuYjsProvider implements UnifiedProvider {
 			}
 			case DOC_SYNC_STEP2: {
 				applyUpdate(this.document, message.payload, this);
+				// Our own SyncStep2 (everything Core lacked) went out before this
+				// answer, on the same ordered socket.
+				this.serverStateVector = decodeStateVector(
+					encodeStateVector(this.document)
+				);
 				this.setSynced(true);
 				break;
 			}
@@ -420,14 +495,27 @@ export class RyuYjsProvider implements UnifiedProvider {
 		this.connection?.sendDocSync(message);
 	}
 
+	/** Write the sealed snapshot now (sign-out flush). */
+	async flushSnapshot(): Promise<void> {
+		if (this.persistTimer !== null) {
+			clearTimeout(this.persistTimer);
+			this.persistTimer = null;
+		}
+		await this.persistSnapshot();
+	}
+
 	private async persistSnapshot(): Promise<void> {
-		if (this.discarded) {
+		if (this.discarded || this.persistBlocked) {
 			return;
 		}
 		try {
 			await storeYjsSnapshot(
 				this.options.roomId,
-				encodeStateAsUpdate(this.document)
+				encodeStateAsUpdate(this.document),
+				{
+					account: this.options.account,
+					synced: !this.hasUnsyncedChanges(),
+				}
 			);
 		} catch (error) {
 			this.options.handlers?.onError?.(
@@ -437,4 +525,49 @@ export class RyuYjsProvider implements UnifiedProvider {
 			);
 		}
 	}
+}
+
+/** How long a sign-out waits for a live document to finish syncing. */
+const FLUSH_WAIT_MS = 3000;
+
+function waitForSync(
+	provider: RyuYjsProvider,
+	timeoutMs: number
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	return new Promise((resolve) => {
+		const check = () => {
+			if (!provider.hasUnsyncedChanges() || Date.now() >= deadline) {
+				resolve();
+				return;
+			}
+			setTimeout(check, 100);
+		};
+		check();
+	});
+}
+
+/**
+ * Sign-out or account switch for `account`: give live documents a moment to
+ * send their local edits to Core, write their snapshots, then delete every
+ * snapshot of that account whose edits all reached Core. Snapshots with edits
+ * Core never received are kept (sealed, never loaded for another account) and
+ * counted, so the caller can warn the user instead of losing them silently.
+ */
+export async function releaseCollaborationAccount(
+	account: string | null,
+	timeoutMs = FLUSH_WAIT_MS
+): Promise<{ cleared: number; kept: number }> {
+	const providers = [...liveProviders].filter(
+		(provider) => provider.account === account
+	);
+	await Promise.all(
+		providers.map(async (provider) => {
+			if (provider.hasUnsyncedChanges() && provider.isConnected) {
+				await waitForSync(provider, timeoutMs);
+			}
+			await provider.flushSnapshot();
+		})
+	);
+	return releaseAccountYjsSnapshots(account);
 }

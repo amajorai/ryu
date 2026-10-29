@@ -1,8 +1,9 @@
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { formatDistanceToNow } from "date-fns";
 import { KeyRound, RefreshCw, Trash2 } from "lucide-react";
 import type { OwnedOAuthApp } from "../../utils/api-client.ts";
+import { SettingsItem } from "../shared/settings-rows.tsx";
 import { type PendingAction, scopeLabel } from "./shared.ts";
 
 export function OAuthAppRow({
@@ -23,30 +24,9 @@ export function OAuthAppRow({
 	const isPending = isDeleting || isRotating;
 
 	return (
-		<div className="space-y-3 rounded-lg border p-3">
-			<div className="flex flex-wrap items-start gap-3">
-				<KeyRound className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-				<div className="min-w-0 flex-1">
-					<div className="flex flex-wrap items-center gap-2">
-						<p className="font-medium text-sm">{app.clientName}</p>
-						<Badge variant="secondary">
-							{app.clientType === "public" ? "Public" : "Confidential"}
-						</Badge>
-						<Badge variant="outline">{app.applicationType}</Badge>
-					</div>
-					<p className="mt-1 break-all font-mono text-muted-foreground text-xs">
-						{app.clientId}
-					</p>
-					<p className="mt-1 text-muted-foreground text-xs">
-						Created{" "}
-						{app.createdAt
-							? formatDistanceToNow(new Date(app.createdAt), {
-									addSuffix: true,
-								})
-							: "recently"}
-					</p>
-				</div>
-				<div className="flex shrink-0 items-center gap-1">
+		<SettingsItem
+			actions={
+				<>
 					{app.clientType === "confidential" ? (
 						<Button
 							aria-label={`Rotate secret for ${app.clientName}`}
@@ -69,10 +49,31 @@ export function OAuthAppRow({
 					>
 						<Trash2 className="size-4 text-status-destructive" />
 					</Button>
-				</div>
-			</div>
-
+				</>
+			}
+			title={
+				<span className="flex min-w-0 items-center gap-2">
+					<KeyRound className="size-4 shrink-0 text-muted-foreground" />
+					<span className="truncate">{app.clientName}</span>
+					<Badge className="shrink-0" variant="secondary">
+						{app.clientType === "public" ? "Public" : "Confidential"}
+					</Badge>
+					<Badge className="shrink-0" variant="outline">
+						{app.applicationType}
+					</Badge>
+				</span>
+			}
+		>
 			<div className="space-y-1 text-muted-foreground text-xs">
+				<p className="break-all font-mono">{app.clientId}</p>
+				<p>
+					Created{" "}
+					{app.createdAt
+						? formatDistanceToNow(new Date(app.createdAt), {
+								addSuffix: true,
+							})
+						: "recently"}
+				</p>
 				<p>
 					<strong className="font-medium text-foreground">
 						Redirect URIs:
@@ -88,7 +89,7 @@ export function OAuthAppRow({
 			</div>
 
 			{isPending ? (
-				<div className="flex flex-wrap items-center gap-2 border-t pt-3">
+				<div className="flex flex-wrap items-center gap-2 pt-1">
 					<span className="text-muted-foreground text-xs">
 						{isDeleting
 							? "Delete this OAuth app and revoke its tokens?"
@@ -106,6 +107,6 @@ export function OAuthAppRow({
 					</Button>
 				</div>
 			) : null}
-		</div>
+		</SettingsItem>
 	);
 }

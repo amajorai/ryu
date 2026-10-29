@@ -1,0 +1,17 @@
+/*
+ * Sandbox glovebox figure. The shared quiet tokens (../shared/quiet.css) set the look;
+ * this file adds only the tone of the hatch's open mouth.
+ */
+
+.iso.sgb {
+	--sgb-mouth: #e2e2e2;
+}
+
+.dark .iso.sgb {
+	--sgb-mouth: #050505;
+}
+
+.sgb-mouth {
+	fill: var(--sgb-mouth);
+	stroke: none;
+}

@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
 /** The message fields needed by the chat-local find surface. */
 export interface ChatSearchableMessage {
 	content?: unknown;
@@ -15,14 +17,11 @@ export interface ChatSearchMatch {
 	role: string;
 }
 
-function textFromPart(part: unknown): string {
-	if (typeof part !== "object" || part === null) {
-		return "";
-	}
-	const candidate = part as { text?: unknown; type?: unknown };
-	return candidate.type === "text" && typeof candidate.text === "string"
-		? candidate.text
-		: "";
+function textFromPart<TPart>(part: TPart): string {
+	const result = z
+		.object({ type: z.literal("text"), text: z.string() })
+		.safeParse(part);
+	return result.success ? result.data.text : "";
 }
 
 /** Read the same visible text parts that the transcript renders. */
@@ -30,7 +29,7 @@ export function chatMessageText(message: ChatSearchableMessage): string {
 	if (Array.isArray(message.parts) && message.parts.length > 0) {
 		return message.parts.map(textFromPart).join("\n\n");
 	}
-	return typeof message.content === "string" ? message.content : "";
+	return isNativeText(message.content) ? message.content : "";
 }
 
 /** A snapshot of visible text; rebuild when the loaded messages change. */

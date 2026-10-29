@@ -1,5 +1,6 @@
 import { ArrowUpRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
 import type { CardDither } from "@ryu/marketplace/catalog/types";
 import {
@@ -11,6 +12,7 @@ import {
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { KeyboardEvent } from "react";
 import { StandaloneAppContextMenuItems } from "@/src/components/apps/standalone-app-menu.tsx";
+import layoutStyles from "./pinned-app-stage.module.css";
 
 /** The same density progression as the pinned-agent shelf. */
 export type AppStageLayout = "hero" | "pair" | "grid";
@@ -39,10 +41,7 @@ export function appStageLayout(count: number): AppStageLayout {
 	return "grid";
 }
 
-const LAYOUT_STYLES: Record<
-	AppStageLayout,
-	{ avatarSize: string; grid: string; label: string; tile: string }
-> = {
+const LAYOUT_STYLES = {
 	hero: {
 		avatarSize: "64px",
 		grid: "grid-cols-1",
@@ -58,10 +57,13 @@ const LAYOUT_STYLES: Record<
 	grid: {
 		avatarSize: "32px",
 		grid: "grid-cols-3",
-		label: "text-[11px]",
+		label: "type-caption",
 		tile: "min-h-[76px] flex-col justify-center gap-1 p-1.5",
 	},
-};
+} satisfies Record<
+	AppStageLayout,
+	{ avatarSize: string; grid: string; label: string; tile: string }
+>;
 
 function openOnKeyboard(
 	event: KeyboardEvent<HTMLButtonElement>,
@@ -82,13 +84,17 @@ function AppTile({
 	layout: AppStageLayout;
 	onOpen: (app: PinnedAppItem, newTab: boolean) => void;
 }) {
+	const tl = useLiteralMessages();
 	const styles = LAYOUT_STYLES[layout];
 	const hero = layout === "hero";
 	return (
 		<button
-			aria-label={`Open ${app.label}`}
+			aria-label={tl("Open {label}", { label: app.label })}
 			className={cn(
-				"group/app relative flex items-center overflow-hidden rounded-xl border border-transparent bg-transparent text-left outline-hidden transition-[background-color,border-color,transform] hover:-translate-y-px hover:border-sidebar-border/70 hover:bg-sidebar-accent/60 focus-visible:border-sidebar-border/70 focus-visible:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60",
+				cn(
+					"group/app relative flex items-center overflow-hidden rounded-xl border border-transparent bg-transparent text-left outline-hidden hover:-translate-y-px hover:border-sidebar-border/70 hover:bg-sidebar-accent/60 focus-visible:border-sidebar-border/70 focus-visible:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60 motion-reduce:hover:translate-y-0",
+					layoutStyles.authored1
+				),
 				styles.tile,
 				hero && "sm:gap-4"
 			)}
@@ -106,12 +112,8 @@ function AppTile({
 			<AppIcon
 				cacheKey={app.cacheKey}
 				className={cn(
-					"shrink-0 rounded-2xl",
-					hero
-						? "size-16"
-						: layout === "pair"
-							? "size-11 rounded-xl"
-							: "size-8 rounded-xl"
+					"shrink-0",
+					hero ? "size-16" : layout === "pair" ? "size-11" : "size-8"
 				)}
 				dither={app.dither}
 				iconBackground={app.iconBackground}
@@ -166,7 +168,12 @@ export function PinnedAppStage({
 			data-layout={layout}
 			data-testid="sidebar-app-stage"
 		>
-			<div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
+			<div
+				className={cn(
+					"type-compact flex items-center gap-1.5 px-1 text-muted-foreground uppercase",
+					layoutStyles.authored2
+				)}
+			>
 				<span>Apps</span>
 				<span className="text-muted-foreground/60 tabular-nums">
 					{apps.length}

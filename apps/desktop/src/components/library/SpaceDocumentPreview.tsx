@@ -19,10 +19,12 @@ export function PagePreview({ source }: { source: string }) {
 		[source]
 	);
 	return (
-		<EditorStatic
-			className="pointer-events-none max-h-44 overflow-hidden px-4 py-3 text-sm [&_.slate-p]:my-0 [&_.slate-p]:leading-5"
-			editor={editor}
-			variant="none"
-		/>
+		<div className="px-4 py-3 text-sm [&_.slate-p]:leading-5">
+			<EditorStatic
+				className="pointer-events-none max-h-44 overflow-hidden [&_.slate-p]:my-0"
+				editor={editor}
+				variant="none"
+			/>
+		</div>
 	);
 }

@@ -1,4 +1,5 @@
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useEffect, useRef, useState } from "react";
 import { sileo } from "sileo";
 import { authClient } from "@/lib/auth-client.ts";
@@ -12,6 +13,7 @@ interface ResendVerificationButtonProps {
 export function ResendVerificationButton({
 	email,
 }: ResendVerificationButtonProps) {
+	const tl = useLiteralMessages();
 	const [loading, setLoading] = useState(false);
 	const [cooldown, setCooldown] = useState(0);
 	const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -30,7 +32,15 @@ export function ResendVerificationButton({
 		}
 		setLoading(true);
 		try {
-			await authClient.sendVerificationEmail({ email, callbackURL: "/" });
+			// The auth client resolves with `{ error }` when the server refuses
+			// rather than throwing, so a refusal must not start the cooldown.
+			const result = await authClient.sendVerificationEmail({
+				email,
+				callbackURL: "/",
+			});
+			if (result.error) {
+				throw new Error(result.error.message ?? "Verification email refused");
+			}
 			sileo.success({ title: "Verification email sent. Check your inbox." });
 			setCooldown(COOLDOWN_SECONDS);
 			intervalRef.current = setInterval(() => {
@@ -54,17 +64,19 @@ export function ResendVerificationButton({
 
 	return (
 		<Button
-			className="h-7 shrink-0 px-2 text-status-warning text-xs hover:text-status-warning dark:text-status-warning"
+			appearance="service-retry"
+			className="shrink-0"
 			disabled={cooldown > 0}
 			loading={loading}
 			onClick={handleResend}
 			size="sm"
+			typography="compact"
 			variant="ghost"
 		>
 			{loading
 				? "Sending…"
 				: cooldown > 0
-					? `Resend in ${cooldown}s`
+					? tl("Resend in {cooldown}s", { cooldown: String(cooldown) })
 					: "Resend"}
 		</Button>
 	);

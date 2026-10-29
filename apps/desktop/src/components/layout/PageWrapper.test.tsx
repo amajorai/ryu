@@ -14,7 +14,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 // document. Use a small spec-shaped test double so repeated style mutations
 // exercise the component's observer contract just as they do in a browser.
 const NativeMutationObserver = globalThis.MutationObserver;
-class TestMutationObserver {
+class TestMutationObserver implements MutationObserver {
 	private static readonly instances = new Set<TestMutationObserver>();
 	private target: Node | null = null;
 	private options: MutationObserverInit | null = null;
@@ -22,9 +22,9 @@ class TestMutationObserver {
 
 	constructor(private readonly callback: MutationCallback) {}
 
-	observe(target: Node, options: MutationObserverInit) {
+	observe(target: Node, options?: MutationObserverInit) {
 		this.target = target;
-		this.options = options;
+		this.options = options ?? null;
 		this.connected = true;
 		TestMutationObserver.instances.add(this);
 	}
@@ -36,7 +36,7 @@ class TestMutationObserver {
 		this.options = null;
 	}
 
-	takeRecords() {
+	takeRecords(): MutationRecord[] {
 		return [];
 	}
 
@@ -59,18 +59,17 @@ class TestMutationObserver {
 					attributeName,
 					attributeNamespace: null,
 					oldValue: null,
-					addedNodes: [],
-					removedNodes: [],
+					addedNodes: document.createDocumentFragment().childNodes,
+					removedNodes: document.createDocumentFragment().childNodes,
 					previousSibling: null,
 					nextSibling: null,
-				} as unknown as MutationRecord;
-				observer.callback([record], observer as unknown as MutationObserver);
+				} satisfies MutationRecord;
+				observer.callback([record], observer);
 			});
 		}
 	}
 }
-globalThis.MutationObserver =
-	TestMutationObserver as unknown as typeof MutationObserver;
+globalThis.MutationObserver = TestMutationObserver;
 const rootSetAttribute = document.documentElement.setAttribute.bind(
 	document.documentElement
 );
@@ -100,14 +99,14 @@ mock.module("@/src/lib/tauri-ready.ts", () => ({
 const { PageWrapper } = await import("./PageWrapper.tsx");
 const originalStyle = globalThis.getComputedStyle;
 let corner = "32px";
-globalThis.getComputedStyle = ((element: Element) => {
+globalThis.getComputedStyle = (element: Element) => {
 	const style = document.createElement("div").style;
 	style.borderTopLeftRadius = element.classList.contains("rounded-none")
 		? "0px"
 		: corner;
 	style.zoom = "1";
 	return style;
-}) as typeof getComputedStyle;
+};
 afterAll(() => {
 	globalThis.getComputedStyle = originalStyle;
 	document.documentElement.setAttribute = rootSetAttribute;

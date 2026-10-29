@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/retrieval.ts
 //
 // Typed client for Core's retrieval surface (`/api/retrieval/{search,index}`).
@@ -67,7 +69,8 @@ export async function searchRetrieval(
 				include_memory: input.includeMemory,
 				min_score: input.minScore,
 			},
-		}
+		},
+		responseCodec1
 	);
 	return (json.chunks ?? []).map((c) => ({
 		id: c.id,
@@ -108,7 +111,8 @@ export async function indexChunk(
 				source: input.source ?? "memory",
 				space_id: input.spaceId,
 			},
-		}
+		},
+		responseCodec2
 	);
 	return json.id ?? input.id;
 }
@@ -125,7 +129,41 @@ export async function listSpaceSummaries(
 ): Promise<SpaceSummary[]> {
 	const json = await request<{ spaces?: { id: string; name: string }[] }>(
 		target,
-		"/api/spaces"
+		"/api/spaces",
+		undefined,
+		responseCodec3
 	);
 	return (json.spaces ?? []).map((s) => ({ id: s.id, name: s.name }));
 }
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const chunkSourceResponseCodec = z.union([
+	z.literal("memory"),
+	z.literal("space"),
+]);
+const rawScoredChunkResponseCodec = z
+	.object({
+		content: z.string(),
+		id: z.string(),
+		score: z.number(),
+		source: chunkSourceResponseCodec,
+		space_id: z.union([z.string(), z.null()]).optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec1 = z
+	.object({ chunks: z.array(rawScoredChunkResponseCodec).optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec2 = z
+	.object({ success: z.boolean().optional(), id: z.string().optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec3 = z
+	.object({
+		spaces: z
+			.array(
+				z
+					.object({ id: z.string(), name: z.string() })
+					.catchall(gatewayJsonValueSchema)
+			)
+			.optional(),
+	})
+	.catchall(gatewayJsonValueSchema);

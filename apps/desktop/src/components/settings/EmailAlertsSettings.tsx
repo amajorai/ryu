@@ -16,13 +16,14 @@
 
 import { HelpCircleIcon, Mail01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { toast } from "@ryu/ui/components/sileo";
-import { Switch } from "@ryu/ui/components/switch";
-import { useCallback, useEffect, useState } from "react";
-import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import { ApiError, type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import {
 	type AlertNotifyTarget,
 	getAlertDelivery,
@@ -31,7 +32,6 @@ import {
 	putEmailTransport,
 	testEmail,
 } from "@/src/lib/api/email-transport.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
 const DEFAULT_PORT = 587;
@@ -52,8 +52,13 @@ const EMPTY_TRANSPORT: TransportForm = {
 	username: "",
 };
 
-function activeTarget(): ApiTarget {
-	return toTarget(useNodeStore.getState().getActiveNode());
+function emailErrorMessage<TError>(error: TError): string {
+	if (error instanceof ApiError && error.serverMessage) {
+		return error.serverMessage;
+	}
+	return error instanceof Error
+		? error.message
+		: "The SMTP relay rejected the send.";
 }
 
 /** Parse the port field, falling back to the last-known saved port on NaN. */
@@ -62,7 +67,7 @@ function parsePort(value: string, fallback: number): number {
 	return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-function SmtpTransportCard() {
+function SmtpTransportCard({ target }: { target: ApiTarget }) {
 	const [form, setForm] = useState<TransportForm>(EMPTY_TRANSPORT);
 	const [password, setPassword] = useState("");
 	const [passwordSet, setPasswordSet] = useState(false);
@@ -79,7 +84,7 @@ function SmtpTransportCard() {
 		setLoading(true);
 		setLoadFailed(false);
 		try {
-			const t = await getEmailTransport(activeTarget());
+			const t = await getEmailTransport(target);
 			setForm({
 				from: t.from,
 				host: t.host,
@@ -96,7 +101,7 @@ function SmtpTransportCard() {
 		} finally {
 			setLoading(false);
 		}
-	}, []);
+	}, [target]);
 
 	useEffect(() => {
 		load().catch(() => undefined);
@@ -107,7 +112,7 @@ function SmtpTransportCard() {
 		setSaving(true);
 		try {
 			const port = parsePort(form.port, savedPort);
-			await putEmailTransport(activeTarget(), {
+			await putEmailTransport(target, {
 				from: form.from.trim(),
 				host: form.host.trim(),
 				port,
@@ -115,7 +120,7 @@ function SmtpTransportCard() {
 				username: form.username.trim(),
 				// Only send the password when the user typed one; blank keeps the
 				// stored secret intact (Core has no clear-password path).
-				...(password.trim() ? { password } : {}),
+				...(password.trim() ? { password } : undefined),
 			});
 			setSavedPort(port);
 			setForm((p) => ({ ...p, port: String(port) }));
@@ -132,7 +137,7 @@ function SmtpTransportCard() {
 		} finally {
 			setSaving(false);
 		}
-	}, [form, password, savedPort]);
+	}, [form, password, savedPort, target]);
 
 	const handleSave = useCallback(() => {
 		save()
@@ -159,22 +164,19 @@ function SmtpTransportCard() {
 					return;
 				}
 				try {
-					await testEmail(activeTarget(), to);
+					await testEmail(target, to);
 					toast.success("Test email sent", {
 						description: `Delivered to ${to}. Check the inbox.`,
 					});
 				} catch (e) {
 					toast.error("Test email failed", {
-						description:
-							e instanceof Error
-								? e.message
-								: "The SMTP relay rejected the send.",
+						description: emailErrorMessage(e),
 					});
 				}
 			})
 			.catch(() => undefined)
 			.finally(() => setTesting(false));
-	}, [save, testTo]);
+	}, [save, testTo, target]);
 
 	if (loadFailed) {
 		return (
@@ -235,6 +237,11 @@ function SmtpTransportCard() {
 						STARTTLS
 					</Label>
 				</div>
+				<p className="col-span-2 -mt-2 text-muted-foreground text-xs">
+					With STARTTLS off, Ryu uses implicit TLS (SMTPS). Only a relay on this
+					machine (localhost) on a port other than 465 is reached without
+					encryption.
+				</p>
 				<div className="space-y-1.5">
 					<Label htmlFor="smtp-username">Username</Label>
 					<Input
@@ -310,9 +317,27 @@ function SmtpTransportCard() {
 	);
 }
 
-function AlertDeliveryCard() {
+/**
+ * One webhook row. A saved webhook arrives redacted (`url` is the placeholder)
+ * with the `secretRef` Core needs to keep the stored URL and a host `preview`;
+ * editing the field drops both, so the typed URL replaces the stored one.
+ */
+interface WebhookEntry {
+	preview?: string;
+	secretRef?: string;
+	url: string;
+}
+
+function webhookTarget(entry: WebhookEntry): AlertNotifyTarget {
+	const url = entry.url.trim();
+	return entry.secretRef
+		? { kind: "webhook", url, secret_ref: entry.secretRef }
+		: { kind: "webhook", url };
+}
+
+function AlertDeliveryCard({ target }: { target: ApiTarget }) {
 	const [emails, setEmails] = useState<string[]>([]);
-	const [webhooks, setWebhooks] = useState<string[]>([]);
+	const [webhooks, setWebhooks] = useState<WebhookEntry[]>([]);
 	// Non-webhook targets (Telegram / Expo push) the card does not edit; preserved
 	// verbatim so a save never drops targets configured elsewhere.
 	const [otherTargets, setOtherTargets] = useState<AlertNotifyTarget[]>([]);
@@ -324,15 +349,20 @@ function AlertDeliveryCard() {
 		setLoading(true);
 		setLoadFailed(false);
 		try {
-			const cfg = await getAlertDelivery(activeTarget());
+			const cfg = await getAlertDelivery(target);
 			setEmails(cfg.emails ?? []);
 			const targets = cfg.targets ?? [];
 			setWebhooks(
 				targets
 					.filter(
-						(t): t is { kind: "webhook"; url: string } => t.kind === "webhook"
+						(t): t is Extract<AlertNotifyTarget, { kind: "webhook" }> =>
+							t.kind === "webhook"
 					)
-					.map((t) => t.url)
+					.map((t) => ({
+						url: t.url,
+						secretRef: t.secret_ref,
+						preview: t.preview,
+					}))
 			);
 			setOtherTargets(targets.filter((t) => t.kind !== "webhook"));
 		} catch {
@@ -340,20 +370,19 @@ function AlertDeliveryCard() {
 		} finally {
 			setLoading(false);
 		}
-	}, []);
+	}, [target]);
 
 	useEffect(() => {
 		load().catch(() => undefined);
 	}, [load]);
 
 	const save = useCallback(
-		(nextEmails: string[], nextWebhooks: string[]) => {
+		(nextEmails: string[], nextWebhooks: WebhookEntry[]) => {
 			setSaving(true);
 			const webhookTargets: AlertNotifyTarget[] = nextWebhooks
-				.map((url) => url.trim())
-				.filter((url) => url.length > 0)
-				.map((url) => ({ kind: "webhook", url }));
-			putAlertDelivery(activeTarget(), {
+				.filter((entry) => entry.url.trim().length > 0)
+				.map(webhookTarget);
+			putAlertDelivery(target, {
 				emails: nextEmails.map((e) => e.trim()).filter((e) => e.length > 0),
 				targets: [...webhookTargets, ...otherTargets],
 			})
@@ -364,7 +393,7 @@ function AlertDeliveryCard() {
 				})
 				.finally(() => setSaving(false));
 		},
-		[otherTargets]
+		[otherTargets, target]
 	);
 
 	const updateEmail = (i: number, value: string) => {
@@ -378,9 +407,11 @@ function AlertDeliveryCard() {
 	};
 
 	const updateWebhook = (i: number, value: string) => {
-		setWebhooks((prev) => prev.map((w, idx) => (idx === i ? value : w)));
+		setWebhooks((prev) =>
+			prev.map((w, idx) => (idx === i ? { url: value } : w))
+		);
 	};
-	const addWebhook = () => setWebhooks((prev) => [...prev, ""]);
+	const addWebhook = () => setWebhooks((prev) => [...prev, { url: "" }]);
 	const removeWebhook = (i: number) => {
 		const next = webhooks.filter((_, idx) => idx !== i);
 		setWebhooks(next);
@@ -420,13 +451,19 @@ function AlertDeliveryCard() {
 					{emails.map((email, i) => (
 						<div className="flex items-center gap-2" key={`email-${i}`}>
 							<Input
+								aria-label={`Email recipient ${i + 1}`}
 								disabled={loading}
 								onBlur={() => save(emails, webhooks)}
 								onChange={(e) => updateEmail(i, e.target.value)}
 								placeholder="alerts@example.com"
 								value={email}
 							/>
-							<Button onClick={() => removeEmail(i)} size="sm" variant="ghost">
+							<Button
+								aria-label={`Remove email recipient ${i + 1}`}
+								onClick={() => removeEmail(i)}
+								size="sm"
+								variant="ghost"
+							>
 								Remove
 							</Button>
 						</div>
@@ -449,16 +486,24 @@ function AlertDeliveryCard() {
 					webhooks or any JSON POST endpoint).
 				</p>
 				<div className="space-y-2">
-					{webhooks.map((url, i) => (
+					{webhooks.map((entry, i) => (
 						<div className="flex items-center gap-2" key={`webhook-${i}`}>
 							<Input
+								aria-label={`Webhook URL ${i + 1}`}
 								disabled={loading}
 								onBlur={() => save(emails, webhooks)}
 								onChange={(e) => updateWebhook(i, e.target.value)}
 								placeholder="https://hooks.example.com/…"
-								value={url}
+								type={entry.secretRef ? "password" : undefined}
+								value={entry.url}
 							/>
+							{entry.secretRef ? (
+								<span className="shrink-0 text-muted-foreground text-xs">
+									Saved{entry.preview ? ` · ${entry.preview}` : ""}
+								</span>
+							) : null}
 							<Button
+								aria-label={`Remove webhook URL ${i + 1}`}
 								onClick={() => removeWebhook(i)}
 								size="sm"
 								variant="ghost"
@@ -483,7 +528,10 @@ function AlertDeliveryCard() {
 
 export function EmailAlertsSettings() {
 	// Subscribe reactively so switching to a managed node hides the cards live.
-	const isManaged = useNodeStore((s) => Boolean(s.getActiveNode().managed));
+	const node = useActiveNode();
+	const target = useMemo(() => toTarget(node), [node]);
+	const nodeKey = `${node.name}:${node.url}`;
+	const isManaged = Boolean(node.managed);
 
 	if (isManaged) {
 		return (
@@ -517,14 +565,14 @@ export function EmailAlertsSettings() {
 						Credentials stay on this node and are never sent to Ryu Cloud.
 					</span>
 				</div>
-				<SmtpTransportCard />
+				<SmtpTransportCard key={nodeKey} target={target} />
 			</SettingsSection>
 
 			<SettingsSection
 				caption="Where policy alerts (budget caps, firewall blocks, wallet-empty) are delivered on this node. The alert tier that fires is set in the Gateway config; this only chooses the recipients."
 				title="Alert delivery"
 			>
-				<AlertDeliveryCard />
+				<AlertDeliveryCard key={nodeKey} target={target} />
 			</SettingsSection>
 		</div>
 	);

@@ -22,13 +22,18 @@ import {
 	useEffect,
 	useMemo,
 	useState,
+	useSyncExternalStore,
 } from "react";
 import { useCore } from "./CoreContext.tsx";
 import {
+	type ContributedSlashCommand,
 	type ContributedView,
-	fetchContributedViews,
+	fetchContributedContent,
 	viewClaimingSurface,
 } from "./contributions.ts";
+import { getCliIdentitySnapshot, subscribeCliIdentity } from "./identity.ts";
+
+type SlashCommandLoadState = "error" | "loading" | "ready";
 
 interface ContributionsContextValue {
 	/** True until the first fetch settles. The generic `/plugin-view` surface shows a
@@ -38,6 +43,10 @@ interface ContributionsContextValue {
 	loading: boolean;
 	/** Refetch the feed (after a plugin enable/disable, or on user request). */
 	reload: () => void;
+	/** Load state allows Chat to offer an explicit retry when the feed is unavailable. */
+	slashCommandState: SlashCommandLoadState;
+	/** Slash commands from the same enabled, CLI-targeted Core contribution feed. */
+	slashCommands: ContributedSlashCommand[];
 	/** Declarative views contributed by the enabled plugins targeting this surface. */
 	views: ContributedView[];
 }
@@ -45,6 +54,13 @@ interface ContributionsContextValue {
 /** Stable empty payload so an unreachable Core yields an identical reference every
  *  render — keeps consumer effects from re-running on nothing. */
 const EMPTY: ContributedView[] = [];
+const EMPTY_COMMANDS: ContributedSlashCommand[] = [];
+
+interface SlashCommandResult {
+	commands: ContributedSlashCommand[];
+	state: SlashCommandLoadState;
+	targetKey: string;
+}
 
 const ContributionsContext = createContext<ContributionsContextValue | null>(
 	null
@@ -52,20 +68,69 @@ const ContributionsContext = createContext<ContributionsContextValue | null>(
 
 export function ContributionsProvider({ children }: { children: ReactNode }) {
 	const { target, url, token } = useCore();
-	const [views, setViews] = useState<ContributedView[]>(EMPTY);
-	const [loading, setLoading] = useState(true);
+	const installedIdentity = useSyncExternalStore(
+		subscribeCliIdentity,
+		getCliIdentitySnapshot,
+		getCliIdentitySnapshot
+	);
+	const identityPending = !target.userJwt && installedIdentity.refreshing;
+	const [viewResult, setViewResult] = useState<{
+		views: ContributedView[];
+		targetKey: string;
+	}>({ views: EMPTY, targetKey: "" });
 	const [reloadToken, setReloadToken] = useState(0);
+	const targetKey = JSON.stringify([
+		url,
+		token ?? null,
+		target.userJwt ?? null,
+		target.userJwt ? null : installedIdentity.version,
+	]);
+	// Fence published data in the render itself, before the new identity's
+	// effect runs. Transport admission may stay unchanged while its user changes.
+	const views = viewResult.targetKey === targetKey ? viewResult.views : EMPTY;
+	const [slashCommandResult, setSlashCommandResult] =
+		useState<SlashCommandResult>({
+			commands: EMPTY_COMMANDS,
+			state: "loading",
+			targetKey: "",
+		});
+	const slashCommands =
+		slashCommandResult.targetKey === targetKey
+			? slashCommandResult.commands
+			: EMPTY_COMMANDS;
+	const slashCommandState =
+		slashCommandResult.targetKey === targetKey
+			? slashCommandResult.state
+			: "loading";
+	const loading = slashCommandState === "loading";
 
 	const reload = useCallback(() => setReloadToken((n) => n + 1), []);
 
 	useEffect(() => {
+		if (identityPending) {
+			return;
+		}
 		let cancelled = false;
 		const controller = new AbortController();
-		setLoading(true);
-		fetchContributedViews(target, controller.signal)
+		setSlashCommandResult((current) => ({
+			commands:
+				current.targetKey === targetKey ? current.commands : EMPTY_COMMANDS,
+			state: "loading",
+			targetKey,
+		}));
+		fetchContributedContent(target, controller.signal)
 			.then((next) => {
 				if (!cancelled) {
-					setViews(next.length === 0 ? EMPTY : next);
+					setViewResult({
+						views: next.views.length === 0 ? EMPTY : next.views,
+						targetKey,
+					});
+					setSlashCommandResult({
+						commands:
+							next.commands.length === 0 ? EMPTY_COMMANDS : next.commands,
+						state: "ready",
+						targetKey,
+					});
 				}
 			})
 			.catch(() => {
@@ -73,12 +138,15 @@ export function ContributionsProvider({ children }: { children: ReactNode }) {
 				// on its built-in surfaces rather than surfacing an error the user
 				// cannot act on.
 				if (!cancelled) {
-					setViews(EMPTY);
-				}
-			})
-			.finally(() => {
-				if (!cancelled) {
-					setLoading(false);
+					setViewResult({ views: EMPTY, targetKey });
+					setSlashCommandResult((current) => ({
+						commands:
+							current.targetKey === targetKey
+								? current.commands
+								: EMPTY_COMMANDS,
+						state: "error",
+						targetKey,
+					}));
 				}
 			});
 		return () => {
@@ -86,11 +154,11 @@ export function ContributionsProvider({ children }: { children: ReactNode }) {
 			controller.abort();
 		};
 		// url/token are primitives; including them refetches on a node switch.
-	}, [target, url, token, reloadToken]);
+	}, [target, targetKey, url, token, reloadToken, identityPending]);
 
 	const value = useMemo<ContributionsContextValue>(
-		() => ({ views, loading, reload }),
-		[views, loading, reload]
+		() => ({ views, loading, reload, slashCommands, slashCommandState }),
+		[views, loading, reload, slashCommands, slashCommandState]
 	);
 	return (
 		<ContributionsContext.Provider value={value}>
@@ -106,6 +174,8 @@ export function useContributions(): ContributionsContextValue {
 	return (
 		useContext(ContributionsContext) ?? {
 			views: EMPTY,
+			slashCommands: EMPTY_COMMANDS,
+			slashCommandState: "loading",
 			loading: false,
 			reload: () => undefined,
 		}

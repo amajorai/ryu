@@ -14,6 +14,7 @@
 //! | Subscription windows | 5 min | The same cadence (and the same underlying reader) the desktop's usage bar already polls at. Deliberately NOT shortened. |
 //! | BYOK provider credit | 5 min | A prepaid balance moves only as fast as you spend it. |
 //! | Ryu $ wallet | 60 s | The Gateway relearns it on every billed call, so a short TTL is cheap and keeps a "$5" rule honest. |
+//! | Provider-scoped accounts | the subscriptions cache's TTL | Read cache-only through `crate::subscriptions`; never awaited on the turn path. |
 //!
 //! ## Cold vs. stale
 //!
@@ -29,7 +30,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use super::{RequiredSignals, Signals, WindowReading};
+use super::{
+    AccountWindows, ProviderAccounts, ProviderScope, RequiredSignals, Signals, WindowReading,
+};
 
 /// Subscription windows and BYOK balances: the desktop's existing cadence.
 const SLOW_TTL: Duration = Duration::from_secs(5 * 60);
@@ -125,6 +128,10 @@ pub async fn collect(required: &RequiredSignals) -> Signals {
             Some(windows) => signals.subscription_windows.push((agent.clone(), windows)),
             None => cold.push(ColdFetch::Windows(agent.clone())),
         }
+    }
+    if !required.provider_accounts.is_empty() {
+        signals.provider_accounts = collect_provider_accounts(&required.provider_accounts).await;
+        signals.pi_provider = Some(crate::pi_config::current().provider);
     }
 
     if cold.is_empty() {
@@ -335,10 +342,162 @@ async fn fetch_windows(agent_id: &str) -> Vec<WindowReading> {
     windows
 }
 
+/// Per-account windows for provider-scoped rules.
+///
+/// Unlike the agent windows above, these are never fetched on the turn path:
+/// every read is [`UsageMode::Cached`](crate::subscriptions::UsageMode::Cached)
+/// against the shared, credential-revision-keyed subscriptions cache. A miss
+/// schedules a background read and leaves the account out, so a cold cache
+/// makes the rule abstain instead of costing the turn a vendor round-trip.
+async fn collect_provider_accounts(scopes: &[ProviderScope]) -> Vec<ProviderAccounts> {
+    let mut providers: Vec<ProviderAccounts> = Vec::new();
+    for scope in scopes {
+        if providers.iter().any(|p| p.provider_id == scope.provider_id) {
+            continue;
+        }
+        let wants_pool = scopes
+            .iter()
+            .any(|s| s.provider_id == scope.provider_id && s.account_id.is_none());
+        let exact: Vec<&str> = scopes
+            .iter()
+            .filter(|s| s.provider_id == scope.provider_id)
+            .filter_map(|s| s.account_id.as_deref())
+            .collect();
+        let label = crate::pi_config::provider_meta(&scope.provider_id)
+            .map_or_else(|| scope.provider_id.clone(), |meta| meta.label.to_owned());
+        let Some(kind) = crate::subscriptions::provider_kind(&scope.provider_id) else {
+            providers.push(ProviderAccounts {
+                provider_id: scope.provider_id.clone(),
+                label,
+                accounts: Vec::new(),
+            });
+            continue;
+        };
+        let policy = crate::subscriptions::load_policy(&scope.provider_id).await;
+        let infos = {
+            let provider = scope.provider_id.clone();
+            crate::subscriptions::blocking(move || {
+                crate::pi_config::list_provider_accounts(&provider)
+            })
+            .await
+        };
+        let mut accounts = Vec::new();
+        for info in infos {
+            let eligible = !info.needs_reauth
+                && policy
+                    .as_ref()
+                    .is_none_or(|policy| policy.allowed(&info.account_id));
+            let named = exact.contains(&info.account_id.as_str());
+            if !named && !(wants_pool && eligible) {
+                continue;
+            }
+            if let Some(windows) = account_windows(&scope.provider_id, kind, &info).await {
+                accounts.push(AccountWindows {
+                    account_id: info.account_id,
+                    eligible,
+                    windows,
+                });
+            }
+        }
+        providers.push(ProviderAccounts {
+            provider_id: scope.provider_id.clone(),
+            label,
+            accounts,
+        });
+    }
+    providers
+}
+
+/// One listed saved account's cached windows, or `None` when nothing usable is
+/// cached (pending or unavailable).
+async fn account_windows(
+    provider_id: &str,
+    kind: crate::subscriptions::ProviderKind,
+    info: &crate::pi_config::accounts::AccountInfo,
+) -> Option<Vec<WindowReading>> {
+    let reading = crate::subscriptions::reading::read_info(
+        provider_id,
+        kind,
+        info,
+        crate::subscriptions::reading::ReadOptions {
+            mode: crate::subscriptions::UsageMode::Cached,
+            max_age: crate::subscriptions::DEFAULT_MAX_AGE,
+            model: None,
+            include_label: false,
+        },
+    )
+    .await;
+    if !reading.available {
+        return None;
+    }
+    let windows = windows_from_reading(&reading.windows);
+    (!windows.is_empty()).then_some(windows)
+}
+
+/// Flatten projected reading windows (`label`, `model`, `usedPercent`).
+fn windows_from_reading(windows: &[serde_json::Value]) -> Vec<WindowReading> {
+    windows
+        .iter()
+        .filter_map(|window| {
+            Some(WindowReading {
+                label: window
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                model: window
+                    .get("model")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+                used_percent: window
+                    .get("usedPercent")
+                    .and_then(serde_json::Value::as_f64)?,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ryu_usage::{UsageMeter, UsageValue, UsageValueKind};
+
+    #[test]
+    fn projected_reading_windows_flatten_to_window_readings() {
+        let windows = vec![
+            serde_json::json!({
+                "targetId": "window:Weekly::604800",
+                "label": "Weekly",
+                "scope": "account",
+                "model": null,
+                "usedPercent": 62.5,
+                "remainingPercent": 37.5,
+            }),
+            serde_json::json!({
+                "label": "Opus",
+                "scope": "model",
+                "model": "opus",
+                "usedPercent": 90.0,
+            }),
+            // No percent: not a window a threshold can judge.
+            serde_json::json!({ "label": "Broken" }),
+        ];
+        assert_eq!(
+            windows_from_reading(&windows),
+            vec![
+                WindowReading {
+                    label: "Weekly".to_string(),
+                    model: None,
+                    used_percent: 62.5,
+                },
+                WindowReading {
+                    label: "Opus".to_string(),
+                    model: Some("opus".to_string()),
+                    used_percent: 90.0,
+                },
+            ]
+        );
+    }
 
     #[test]
     fn stale_entry_is_detected_by_ttl() {

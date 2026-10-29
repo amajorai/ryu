@@ -16,9 +16,17 @@ import {
 	removeLeaf,
 	replaceLeaf,
 	type SplitBranch,
+	type SplitNode,
 	setSizesAt,
 	swapLeaves,
 } from "./splitTree.ts";
+
+function requireBranch(node: SplitNode | null | undefined): SplitBranch {
+	if (node?.type !== "branch") {
+		throw new Error("Expected a split branch from this tree operation");
+	}
+	return node;
+}
 
 const pair = (a: string, b: string): SplitBranch =>
 	makeBranch("columns", [makeLeaf(a), makeLeaf(b)]);
@@ -52,7 +60,7 @@ describe("insertLeaf", () => {
 	it("splits a lone leaf into a perpendicular pair", () => {
 		const tree = insertLeaf(makeLeaf("a"), "a", "b", "down");
 		expect(tree.type).toBe("branch");
-		const branch = tree as SplitBranch;
+		const branch = requireBranch(tree);
 		expect(branch.orientation).toBe("rows");
 		expect(leafOrder(branch)).toEqual(["a", "b"]);
 	});
@@ -63,7 +71,7 @@ describe("insertLeaf", () => {
 	});
 
 	it("becomes a sibling when the parent runs along the drop axis", () => {
-		const tree = insertLeaf(pair("a", "b"), "a", "c", "right") as SplitBranch;
+		const tree = requireBranch(insertLeaf(pair("a", "b"), "a", "c", "right"));
 		expect(leafOrder(tree)).toEqual(["a", "c", "b"]);
 		expect(tree.children).toHaveLength(3);
 		// The new sibling takes half the target's fraction: 0.25/0.25/0.5.
@@ -73,9 +81,9 @@ describe("insertLeaf", () => {
 	});
 
 	it("nests a perpendicular pair inside a run", () => {
-		const tree = insertLeaf(pair("a", "b"), "b", "c", "down") as SplitBranch;
+		const tree = requireBranch(insertLeaf(pair("a", "b"), "b", "c", "down"));
 		expect(tree.children).toHaveLength(2);
-		const nested = tree.children[1] as SplitBranch;
+		const nested = requireBranch(tree.children[1]);
 		expect(nested.type).toBe("branch");
 		expect(nested.orientation).toBe("rows");
 		expect(leafOrder(nested)).toEqual(["b", "c"]);
@@ -86,9 +94,9 @@ describe("insertLeaf", () => {
 			makeLeaf("a"),
 			makeBranch("rows", [makeLeaf("b"), makeLeaf("c")]),
 		]);
-		const next = insertLeaf(tree, "c", "d", "down") as SplitBranch;
+		const next = requireBranch(insertLeaf(tree, "c", "d", "down"));
 		expect(leafOrder(next)).toEqual(["a", "b", "c", "d"]);
-		const rows = next.children[1] as SplitBranch;
+		const rows = requireBranch(next.children[1]);
 		expect(rows.children).toHaveLength(3);
 	});
 
@@ -108,7 +116,7 @@ describe("removeLeaf", () => {
 			makeLeaf("a"),
 			makeBranch("rows", [makeLeaf("b"), makeLeaf("c")]),
 		]);
-		const next = removeLeaf(tree, "c") as SplitBranch;
+		const next = requireBranch(removeLeaf(tree, "c"));
 		expect(next.type).toBe("branch");
 		expect(leafOrder(next)).toEqual(["a", "b"]);
 		// The rows branch collapsed away; a+b sit flat in the columns run.
@@ -121,7 +129,7 @@ describe("removeLeaf", () => {
 			[makeLeaf("a"), makeLeaf("b"), makeLeaf("c")],
 			[0.5, 0.25, 0.25]
 		);
-		const next = removeLeaf(tree, "a") as SplitBranch;
+		const next = requireBranch(removeLeaf(tree, "a"));
 		expect(next.sizes[0]).toBeCloseTo(0.5);
 		expect(next.sizes[1]).toBeCloseTo(0.5);
 	});
@@ -137,7 +145,7 @@ describe("normalizeNode", () => {
 			makeLeaf("a"),
 			makeBranch("columns", [makeLeaf("b"), makeLeaf("c")]),
 		]);
-		const next = normalizeNode(tree) as SplitBranch;
+		const next = requireBranch(normalizeNode(tree));
 		expect(next.children).toHaveLength(3);
 		expect(leafOrder(next)).toEqual(["a", "b", "c"]);
 		// The nested run's halves split their parent's half: 0.5/0.25/0.25.
@@ -151,7 +159,7 @@ describe("normalizeNode", () => {
 			sizes: [0, 0],
 			children: [makeLeaf("a"), makeLeaf("b")],
 		};
-		const next = normalizeNode(tree) as SplitBranch;
+		const next = requireBranch(normalizeNode(tree));
 		expect(next.sizes[0]).toBeCloseTo(0.5);
 	});
 });
@@ -162,7 +170,7 @@ describe("pruneToMembers", () => {
 			makeLeaf("a"),
 			makeBranch("rows", [makeLeaf("b"), makeLeaf("c")]),
 		]);
-		const next = pruneToMembers(tree, new Set(["a", "b"])) as SplitBranch;
+		const next = requireBranch(pruneToMembers(tree, new Set(["a", "b"])));
 		expect(leafOrder(next)).toEqual(["a", "b"]);
 	});
 
@@ -185,8 +193,8 @@ describe("swapLeaves / setSizesAt / appendLeaves", () => {
 			makeLeaf("a"),
 			makeBranch("rows", [makeLeaf("b"), makeLeaf("c")]),
 		]);
-		const next = setSizesAt(tree, [1], [0.7, 0.3]) as SplitBranch;
-		const rows = next.children[1] as SplitBranch;
+		const next = requireBranch(setSizesAt(tree, [1], [0.7, 0.3]));
+		const rows = requireBranch(next.children[1]);
 		expect(rows.sizes[0]).toBeCloseTo(0.7);
 		expect(next.sizes[0]).toBeCloseTo(0.5);
 	});
@@ -219,17 +227,17 @@ describe("equalizeNode", () => {
 		);
 
 	it("evens every branch at every depth", () => {
-		const next = equalizeNode(skewed()) as SplitBranch;
+		const next = requireBranch(equalizeNode(skewed()));
 		expect(next.sizes).toEqual(equalSizes(2));
-		expect((next.children[1] as SplitBranch).sizes).toEqual(equalSizes(3));
+		expect(requireBranch(next.children[1]).sizes).toEqual(equalSizes(3));
 	});
 
 	it("leaves structure, orientation and pane order untouched", () => {
 		const before = skewed();
-		const next = equalizeNode(before) as SplitBranch;
+		const next = requireBranch(equalizeNode(before));
 		expect(leafOrder(next)).toEqual(leafOrder(before));
 		expect(next.orientation).toBe("columns");
-		expect((next.children[1] as SplitBranch).orientation).toBe("rows");
+		expect(requireBranch(next.children[1]).orientation).toBe("rows");
 		// Pure — the input is never mutated.
 		expect(before.sizes).toEqual([0.9, 0.1]);
 	});
@@ -283,7 +291,7 @@ describe("replaceLeaf", () => {
 			[makeLeaf("a"), makeBranch("rows", [makeLeaf("b"), makeLeaf("c")])],
 			[0.7, 0.3]
 		);
-		const next = replaceLeaf(tree, "b", "z") as SplitBranch;
+		const next = requireBranch(replaceLeaf(tree, "b", "z"));
 		expect(leafOrder(next)).toEqual(["a", "z", "c"]);
 		expect(next.sizes).toEqual([0.7, 0.3]);
 	});

@@ -5,9 +5,9 @@ import {
 	Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
-import { RangeSlider } from "@ryu/ui/components/motion/range-slider";
-import { NotificationStack } from "@ryu/ui/components/notification-stack";
-import { cn } from "@ryu/ui/lib/utils";
+import { RangeSlider } from "@ryu/ui/components/motion/range-slider.tsx";
+import { NotificationStack } from "@ryu/ui/components/notification-stack.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { NotificationBell } from "../../components/ui/notification-bell.tsx";
@@ -16,11 +16,7 @@ import "../../src/index.css";
 
 type Layout = "split" | "grouped" | "unified";
 
-const LAYOUTS: Array<{
-	description: string;
-	id: Layout;
-	label: string;
-}> = [
+const LAYOUTS = [
 	{
 		description: "Announcements keep their own stack above the Inbox tray.",
 		id: "split",
@@ -36,14 +32,14 @@ const LAYOUTS: Array<{
 		id: "unified",
 		label: "Unified",
 	},
-];
+] satisfies Array<{ description: string; id: Layout; label: string }>;
 
-const ICONS: Record<string, IconSvgElement> = {
+const ICONS = {
 	announcement: Megaphone01Icon,
 	approval: Shield01Icon,
 	task: CheckListIcon,
 	notification: Notification01Icon,
-};
+} satisfies Record<(typeof ITEMS)[number]["icon"], IconSvgElement>;
 
 const ITEMS = [
 	{
@@ -103,7 +99,7 @@ function DemoItems({
 		actions: (
 			<button
 				aria-label={`Mark ${item.title} read`}
-				className="relative z-20 rounded-lg px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+				className="type-compact relative z-20 rounded-lg px-1.5 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 				onClick={() => onMarkRead(item.id)}
 				type="button"
 			>
@@ -114,7 +110,7 @@ function DemoItems({
 		description: item.description,
 		id: item.id,
 		leading: (
-			<span className="flex size-7 items-center justify-center rounded-[10px] bg-primary/10 text-primary">
+			<span className="flex size-7 items-center justify-center rounded-(--radius-lg) bg-primary/10 text-primary">
 				<HugeiconsIcon className="size-3.5" icon={ICONS[item.icon]} />
 			</span>
 		),
@@ -122,7 +118,7 @@ function DemoItems({
 		onActivate: () => onActivate(item.title),
 		title: showCategory ? (
 			<span className="flex min-w-0 items-center gap-1.5">
-				<span className="shrink-0 rounded bg-muted px-1 py-0.5 font-normal text-[9px] text-muted-foreground uppercase">
+				<span className="type-micro shrink-0 rounded bg-muted px-1 py-0.5 font-normal text-muted-foreground uppercase">
 					{item.category}
 				</span>
 				<span className="truncate">{item.title}</span>
@@ -181,25 +177,25 @@ function NotificationLayoutProof() {
 
 	return (
 		<main
-			className="min-h-screen bg-[#09090b] px-6 py-8 text-zinc-100"
+			className="dark min-h-screen bg-background px-6 py-8 text-foreground"
 			data-testid="notification-layout-proof"
 		>
 			<div className="mx-auto flex max-w-5xl flex-col gap-6">
 				<header className="flex items-start justify-between gap-6">
 					<div>
-						<p className="font-medium text-[11px] text-zinc-500 uppercase tracking-[0.18em]">
+						<p className="type-caption font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
 							Ryu desktop verification
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
 							Notification tray
 						</h1>
-						<p className="mt-2 max-w-2xl text-sm text-zinc-400 leading-6">
+						<p className="mt-2 max-w-2xl text-muted-foreground text-sm leading-6">
 							The sidebar announcement stack and Inbox can share one compact
 							space, or stay separate when that is easier to scan.
 						</p>
 					</div>
 					<div
-						className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 font-medium text-emerald-300 text-xs"
+						className="rounded-full border border-success/20 bg-success/10 px-3 py-1.5 font-medium text-success text-xs"
 						data-testid="proof-status"
 					>
 						{lastAction}
@@ -210,7 +206,7 @@ function NotificationLayoutProof() {
 					<div className="flex items-start justify-between gap-4">
 						<div>
 							<p className="font-medium text-sm">Notification layout</p>
-							<p className="mt-1 max-w-xl text-xs text-zinc-500">
+							<p className="mt-1 max-w-xl text-muted-foreground text-xs">
 								{active.description}
 							</p>
 						</div>
@@ -233,11 +229,11 @@ function NotificationLayoutProof() {
 							step={1}
 							value={step}
 						/>
-						<div className="mt-2 flex justify-between text-[10px] text-zinc-500">
+						<div className="type-compact mt-2 flex justify-between text-muted-foreground">
 							{LAYOUTS.map((item) => (
 								<span
 									className={cn(
-										item.id === layout && "font-medium text-zinc-100"
+										item.id === layout && "font-medium text-foreground"
 									)}
 									key={item.id}
 								>
@@ -249,15 +245,17 @@ function NotificationLayoutProof() {
 				</section>
 
 				<section className="grid gap-5 lg:grid-cols-[280px_1fr]">
-					<aside className="rounded-3xl border border-white/10 bg-[#111113] p-3">
+					<aside className="rounded-3xl border border-white/10 bg-sidebar p-3">
 						<div className="mb-3 flex items-center justify-between px-1">
 							<span className="font-medium text-xs">Sidebar footer</span>
-							<span className="text-[10px] text-zinc-500">live preview</span>
+							<span className="type-compact text-muted-foreground">
+								live preview
+							</span>
 						</div>
 						{layout === "split" ? (
 							<div className="flex flex-col gap-3">
 								<div data-testid="announcement-surface">
-									<p className="mb-1 px-1 text-[10px] text-zinc-500 uppercase tracking-wider">
+									<p className="type-compact mb-1 px-1 text-muted-foreground uppercase tracking-wider">
 										Announcements
 									</p>
 									<NotificationStack
@@ -268,7 +266,7 @@ function NotificationLayoutProof() {
 									/>
 								</div>
 								<div data-testid="inbox-surface">
-									<p className="mb-1 px-1 text-[10px] text-zinc-500 uppercase tracking-wider">
+									<p className="type-compact mb-1 px-1 text-muted-foreground uppercase tracking-wider">
 										Inbox
 									</p>
 									<NotificationStack
@@ -281,7 +279,7 @@ function NotificationLayoutProof() {
 							</div>
 						) : (
 							<div data-testid="notification-surface">
-								<p className="mb-1 px-1 text-[10px] text-zinc-500 uppercase tracking-wider">
+								<p className="type-compact mb-1 px-1 text-muted-foreground uppercase tracking-wider">
 									Notifications
 								</p>
 								<NotificationStack
@@ -298,9 +296,9 @@ function NotificationLayoutProof() {
 							data-testid="notification-bell-footer"
 						>
 							<div className="min-w-0 flex-1 px-1">
-								<p className="font-medium text-xs text-zinc-200">Inbox</p>
+								<p className="font-medium text-foreground text-xs">Inbox</p>
 								<p
-									className="mt-0.5 text-[10px] text-zinc-500"
+									className="type-compact mt-0.5 text-muted-foreground"
 									data-testid="bell-count-label"
 								>
 									{bellCount} unread
@@ -314,23 +312,23 @@ function NotificationLayoutProof() {
 								renderTrigger={(triggerProps) => (
 									<NotificationBell
 										{...triggerProps}
-										className="rounded-xl! bg-transparent! text-zinc-300! hover:bg-white/10! hover:text-white!"
+										appearance="inbox-sidebar"
 										color="red"
 										count={bellCount}
 										data-testid="notification-bell"
+										expanded={trayOpen}
 										max={99}
 										size={40}
-										style={{ height: 28, width: 28 }}
 									/>
 								)}
 							>
 								<div
-									className="w-[23rem] space-y-3 p-3 text-zinc-100"
+									className="w-[23rem] space-y-3 p-3 text-foreground"
 									data-testid="notification-tray-panel"
 								>
 									<div className="flex items-center justify-between px-1">
 										<span className="font-semibold text-sm">Inbox</span>
-										<span className="text-xs text-zinc-500">
+										<span className="text-muted-foreground text-xs">
 											{bellCount} unread
 										</span>
 									</div>
@@ -348,7 +346,7 @@ function NotificationLayoutProof() {
 					<div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.02] p-5">
 						<div>
 							<p className="font-medium text-sm">What this proves</p>
-							<p className="mt-1 text-xs text-zinc-500 leading-5">
+							<p className="mt-1 text-muted-foreground text-xs leading-5">
 								The same stacked-card primitive handles announcements and Inbox
 								content. Hover, focus, tap, or use the footer to expand it.
 							</p>
@@ -366,14 +364,14 @@ function NotificationLayoutProof() {
 									key={item.id}
 								>
 									<p className="font-medium text-xs">{item.label}</p>
-									<p className="mt-1 text-[11px] text-zinc-500 leading-4">
+									<p className="type-caption mt-1 text-muted-foreground leading-4">
 										{item.description}
 									</p>
 								</div>
 							))}
 						</div>
-						<div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-xs text-zinc-400">
-							<p className="font-medium text-zinc-200">Interaction check</p>
+						<div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-muted-foreground text-xs">
+							<p className="font-medium text-foreground">Interaction check</p>
 							<p className="mt-1 leading-5">
 								The bell rings when a new item arrives, the count rolls to its
 								new value, and read actions remain in the card action slot
@@ -381,7 +379,7 @@ function NotificationLayoutProof() {
 							</p>
 							<button
 								aria-label="Simulate new notification"
-								className="mt-3 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 font-medium text-[11px] text-zinc-200 transition-colors hover:bg-white/10"
+								className="type-caption mt-3 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 font-medium text-foreground transition-colors hover:bg-white/10"
 								onClick={() => {
 									setVisibleItemCount((current) =>
 										Math.min(ITEMS.length, current + 1)
@@ -399,6 +397,8 @@ function NotificationLayoutProof() {
 		</main>
 	);
 }
+
+document.documentElement.classList.add("dark");
 
 createRoot(document.getElementById("root")!).render(
 	<NotificationLayoutProof />

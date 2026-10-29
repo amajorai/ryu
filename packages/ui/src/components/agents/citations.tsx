@@ -1,9 +1,10 @@
 "use client";
 
-import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure";
-import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease";
-import { getFaviconUrl } from "@ryu/ui/lib/favicon";
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
+import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
+import { getFaviconUrl } from "@ryu/ui/lib/favicon.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { BookOpenText, ChevronDown, ExternalLink, Globe2 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useCallback, useId, useState } from "react";
@@ -37,6 +38,7 @@ export interface CitationListProps {
 	citations: CitationItem[];
 	className?: string;
 	idPrefix?: string;
+	surface?: "default" | "transcript";
 }
 
 export interface CitationStackProps {
@@ -49,17 +51,32 @@ function citationTargetId(prefix: string, citationId: string) {
 	return `${prefix}-${citationId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
+function safeCitationUrl(value: string | undefined): string | null {
+	if (!value?.trim()) {
+		return null;
+	}
+	try {
+		const url = new URL(value);
+		return url.protocol === "http:" || url.protocol === "https:"
+			? url.href
+			: null;
+	} catch {
+		return null;
+	}
+}
+
 export function Citation({
 	citationId,
 	index,
 	idPrefix,
 	className,
 }: CitationProps) {
+	const tl = useLiteralMessages();
 	return (
 		<a
-			aria-label={`View citation ${index}`}
+			aria-label={tl("View citation {index}", { index })}
 			className={cn(
-				"mx-0.5 inline-flex min-w-4 -translate-y-0.5 items-center justify-center rounded-md bg-muted/60 px-1 py-0.5 font-medium text-[10px] text-muted-foreground leading-none no-underline outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+				"type-compact mx-0.5 inline-flex min-w-4 -translate-y-0.5 items-center justify-center rounded-md bg-muted/60 px-1 py-0.5 font-medium text-muted-foreground leading-none no-underline outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
 				className
 			)}
 			href={`#${citationTargetId(idPrefix, citationId)}`}
@@ -76,7 +93,8 @@ export function CitationFavicon({
 	url?: string;
 	className?: string;
 }) {
-	const favicon = url ? getFaviconUrl(url) : null;
+	const safeUrl = safeCitationUrl(url);
+	const favicon = safeUrl ? getFaviconUrl(safeUrl) : null;
 	const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
 	return (
@@ -88,7 +106,6 @@ export function CitationFavicon({
 			)}
 		>
 			{favicon && failedUrl !== favicon ? (
-				// biome-ignore lint/performance/noImgElement: Dynamic cross-site favicons keep this framework-agnostic registry component portable.
 				<img
 					alt=""
 					className="size-4 rounded-sm object-contain"
@@ -111,10 +128,17 @@ export function CitationStack({
 	className,
 }: CitationStackProps) {
 	return (
-		<span aria-hidden="true" className={cn("flex -space-x-1.5", className)}>
+		<span
+			aria-hidden="true"
+			className={cn(
+				"flex -space-x-1.5 [--avatar-overlap:--spacing(1.5)] [--avatar-size:--spacing(6)]",
+				className
+			)}
+			data-avatar-stack=""
+		>
 			{citations.slice(0, limit).map((citation) => (
 				<CitationFavicon
-					className="size-6 rounded-full bg-background ring-2 ring-background"
+					className="size-6 rounded-full bg-background"
 					key={citation.id}
 					url={citation.url}
 				/>
@@ -132,9 +156,10 @@ function CitationRow({
 	index: number;
 	idPrefix: string;
 }) {
+	const safeUrl = safeCitationUrl(citation.url);
 	const content = (
 		<>
-			<CitationFavicon url={citation.url} />
+			<CitationFavicon url={safeUrl ?? undefined} />
 			<span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
 				<span className="truncate font-medium text-foreground/80 text-sm transition-colors group-hover/citation:text-foreground">
 					{citation.title}
@@ -146,10 +171,10 @@ function CitationRow({
 				) : null}
 			</span>
 			<span className="flex shrink-0 items-center gap-1.5">
-				<span className="grid size-5 place-items-center rounded-md bg-foreground/[0.05] font-medium text-[10px] text-muted-foreground tabular-nums">
+				<span className="type-compact grid size-5 place-items-center rounded-md bg-foreground/[0.05] font-medium text-muted-foreground tabular-nums">
 					{index}
 				</span>
-				{citation.url ? (
+				{safeUrl ? (
 					<ExternalLink className="size-3.5 text-muted-foreground/40 transition-colors group-hover/citation:text-muted-foreground" />
 				) : null}
 			</span>
@@ -159,10 +184,10 @@ function CitationRow({
 		"group/citation flex items-center gap-2 rounded-md px-1.5 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring";
 	const id = citationTargetId(idPrefix, citation.id);
 
-	return citation.url ? (
+	return safeUrl ? (
 		<a
 			className={className}
-			href={citation.url}
+			href={safeUrl}
 			id={id}
 			rel="noreferrer noopener"
 			target="_blank"
@@ -177,6 +202,7 @@ function CitationRow({
 }
 
 export function CitationList({
+	surface = "default",
 	citations,
 	idPrefix,
 	className,
@@ -187,7 +213,13 @@ export function CitationList({
 		idPrefix ?? `citation-list-${baseId.replace(/:/g, "")}`;
 
 	return (
-		<div className={cn("grid gap-0.5", className)}>
+		<div
+			className={cn(
+				"grid gap-0.5",
+				surface === "transcript" && "rounded-xl bg-muted/60 p-2",
+				className
+			)}
+		>
 			<AnimatePresence mode="popLayout">
 				{citations.map((citation, index) => (
 					<motion.div
@@ -254,7 +286,7 @@ export function Citations({
 			>
 				<BookOpenText className="size-4" />
 				<span className="font-medium">{title}</span>
-				<span className="rounded-full bg-muted px-1.5 py-0.5 font-medium text-[10px] tabular-nums">
+				<span className="type-compact rounded-full bg-muted px-1.5 py-0.5 font-medium tabular-nums">
 					{citations.length}
 				</span>
 				<motion.span

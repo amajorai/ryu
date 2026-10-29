@@ -34,7 +34,7 @@
 //! What is shared and what is not, exactly, because the halves fail differently:
 //!
 //! - **Shared: ranking.** `skills.search` ranks through
-//!   [`ryu_tool_registry::run_search`] — the same Needle 2 default, the same Semantic
+//!   [`ryu_tool_registry::run_search`] — the same Needle 3 default, the same Semantic
 //!   embedder seam, and the same `tools.active_ranker` pref that
 //!   `McpRegistry::search_scoped` (`tool_search`) obeys. Flip the pref and skill search
 //!   changes with tool search. Each [`ryu_skills::SkillRecord`] is mapped to a
@@ -492,7 +492,7 @@ pub async fn dispatch(
 /// [`SkillRegistry`] only — there is no `McpRegistry` handle to borrow it from.
 /// The pref key itself ([`RANKER_PREF_KEY`]) is the shared constant, so the two
 /// resolutions cannot drift on *which* pref they read. An unopenable store
-/// degrades to the Needle 2 default, exactly as it does for `tool_search`.
+/// degrades to the Needle 3 default, exactly as it does for `tool_search`.
 async fn resolve_ranker() -> ToolRanker {
     let pref = match crate::server::preferences::PreferencesStore::open_default() {
         Ok(p) => p.get(RANKER_PREF_KEY).await.ok().flatten(),
@@ -703,11 +703,15 @@ async fn do_search(
 
     let ranker = resolve_ranker().await;
     // Built lazily for the selected model/embedding ranker. `from_registry` loads
-    // the model registry off disk, while the Needle 2 selector resolves its own
+    // the model registry off disk, while the Needle 3 selector resolves its own
     // pinned runtime on first use.
     let embedder = matches!(ranker, ToolRanker::Semantic)
         .then(crate::tool_registry_host::CoreToolEmbedder::from_registry);
-    let selector = matches!(ranker, ToolRanker::Needle2).then(crate::needle2::selector);
+    let selector: Option<std::sync::Arc<dyn ryu_tool_registry::ToolSelector>> = match ranker {
+        ToolRanker::Needle3 => Some(crate::needle3::selector()),
+        ToolRanker::Needle2 => Some(crate::needle2::selector()),
+        _ => None,
+    };
     let results = rank_skills(
         query,
         limit,
@@ -766,7 +770,7 @@ fn do_load(
             ),
         })),
         Some(s) => {
-            crate::stats_beacon::record_marketplace_event("skill", &s.id, false);
+            crate::stats_beacon::record_skill_load(&s);
             Ok(json!({
                 "ok": true,
                 "id": s.id,
@@ -815,7 +819,7 @@ fn sanitize_slug(raw: &str) -> Option<String> {
 /// Render a structured `SKILL.md`: quoted-safe YAML front-matter (name, optional
 /// description, optional allowed-tools) followed by the four `##` body sections.
 ///
-/// The front-matter is serialized with `serde_yml` (the same crate `parse_skill_md`
+/// The front-matter is serialized with `noyalib::compat::serde_yaml` (the same crate `parse_skill_md`
 /// reads back), so a `name`/`description` containing quotes, colons, newlines, or a
 /// `---` sequence is escaped correctly instead of breaking the block.
 fn render_skill_md(
@@ -835,8 +839,12 @@ fn render_skill_md(
     if !allowed_tools.is_empty() {
         front.insert("allowed-tools".to_owned(), json!(allowed_tools));
     }
-    let yaml = serde_yml::to_string(&Value::Object(front))
+    let mut yaml = noyalib::compat::serde_yaml::to_string(&Value::Object(front))
         .map_err(|e| anyhow::anyhow!("failed to render skill front-matter: {e}"))?;
+    // noyalib's serde_yaml shim omits the trailing newline the closing `---` fence needs.
+    if !yaml.ends_with('\n') {
+        yaml.push('\n');
+    }
 
     Ok(format!(
         "---\n{yaml}---\n\n## Purpose\n\n{purpose}\n\n## Procedure\n\n{procedure}\n\n## Failure modes\n\n{failure_modes}\n\n## Verification\n\n{verification}\n",

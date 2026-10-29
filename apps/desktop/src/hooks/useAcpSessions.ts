@@ -7,7 +7,12 @@
 // per (node, agent); only fetched when an agent id is present. Every decision
 // lives in Core (`/api/agents/:id/sessions`).
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import {
 	type AcpSessionList,
@@ -36,15 +41,22 @@ export function useAcpSessions(
 	const enabled = Boolean(agentId);
 	const query = useQuery({
 		queryKey: ["acp-sessions", node.url, agentId],
-		queryFn: () => fetchAcpSessions(target, agentId as string),
+		queryFn:
+			agentId === null || agentId === undefined
+				? skipToken
+				: () => fetchAcpSessions(target, agentId),
 		enabled,
 		// Probing spawns the agent subprocess; don't refetch on focus.
 		refetchOnWindowFocus: false,
 	});
 
 	const removeMutation = useMutation({
-		mutationFn: (sessionId: string) =>
-			deleteAcpSession(target, agentId as string, sessionId),
+		mutationFn: (sessionId: string) => {
+			if (agentId === null || agentId === undefined) {
+				throw new Error("Select an agent before deleting a session.");
+			}
+			return deleteAcpSession(target, agentId, sessionId);
+		},
 		onSuccess: () => {
 			queryClient.invalidateQueries({
 				queryKey: ["acp-sessions", node.url, agentId],
@@ -60,7 +72,7 @@ export function useAcpSessions(
 	return {
 		data: query.data ?? null,
 		loading: enabled && query.isLoading,
-		error: (query.error as Error | null)?.message ?? null,
+		error: query.error?.message ?? null,
 		remove,
 		removing: removeMutation.isPending,
 	};

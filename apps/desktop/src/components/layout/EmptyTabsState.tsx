@@ -1,15 +1,21 @@
+import { z } from "zod";
+import layoutStyles from "./EmptyTabsState.module.css";
 // Shown in the main content area whenever every tab is closed. Rather than a
 // bare "no tabs" placeholder, this is a personalized launchpad: a greeting, a
 // row of quick actions to start something new, and "jump back in" lists of the
-// user's recent agents and spaces. It mounts only while the window has
-// zero tabs (see Layout), so the data hooks it pulls (agents/spaces) only
-// fetch in that idle state.
+// user's recent agents and spaces. It mounts while Center has no route items
+// (see Layout), even if a side region still hosts a route.
 
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Logo as RyuLogo } from "@ryu/ui/components/logo";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import { cn } from "@ryu/ui/lib/utils";
+import { Logo as RyuLogo } from "@ryu/ui/components/logo.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
+import {
+	type ReorderShift,
+	useReorderShift,
+} from "@ryu/ui/hooks/use-reorder-shift.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { UIMessage } from "ai";
 import {
 	ArrowRight,
 	Bot,
@@ -17,8 +23,8 @@ import {
 	Layers,
 	type LucideIcon,
 	MessageSquarePlus,
+	Package,
 	Settings2,
-	Sparkles,
 	Workflow,
 } from "lucide-react";
 import {
@@ -39,13 +45,17 @@ import { ImportThreadsDialog } from "@/src/components/chat/ImportThreadsDialog.t
 import { WorkspaceBar } from "@/src/components/chat/WorkspaceBar.tsx";
 import { LiveActivityDock } from "@/src/components/live/LiveActivityDock.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import {
+	openTabFromEmptyCenter,
+	useTabsContext,
+} from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { useEngineModels } from "@/src/hooks/useEngineModels.ts";
 import { useGettingStarted } from "@/src/hooks/useGettingStarted.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { useNodeDefaultAgentId } from "@/src/hooks/useNodeDefaultAgent.ts";
+import { useNodeTabOverride } from "@/src/hooks/useNodeDisplayMode.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import { useTeams } from "@/src/hooks/useTeams.ts";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
@@ -117,7 +127,7 @@ function QuickActionCard({ action }: { action: QuickAction }) {
 	return (
 		<button
 			className={cn(
-				"group flex min-h-40 flex-col justify-between gap-4 overflow-hidden rounded-xl p-4 text-left backdrop-blur-sm transition-all duration-200",
+				"group flex min-h-40 flex-col justify-between gap-4 overflow-hidden rounded-xl p-4 text-left transition-colors duration-200",
 				action.primary
 					? "bg-primary/10 hover:bg-primary/15"
 					: "bg-muted/50 hover:bg-muted/70"
@@ -156,7 +166,7 @@ const DEFAULT_HOME_SECTION_ORDER: HomeSectionKey[] = [
 const HOME_SECTION_ORDER_KEY = "ryu:home-section-order";
 
 function isHomeSectionKey(value: string): value is HomeSectionKey {
-	return (DEFAULT_HOME_SECTION_ORDER as string[]).includes(value);
+	return DEFAULT_HOME_SECTION_ORDER.some((key) => key === value);
 }
 
 /** Loads the persisted order, reconciling any keys added since it was saved. */
@@ -166,7 +176,7 @@ function loadHomeSectionOrder(): HomeSectionKey[] {
 		if (!stored) {
 			return [...DEFAULT_HOME_SECTION_ORDER];
 		}
-		const parsed = JSON.parse(stored) as string[];
+		const parsed = z.array(z.string()).parse(JSON.parse(stored));
 		const order = [...new Set(parsed.filter(isHomeSectionKey))];
 		// Reconcile keys added since the order was last saved: insert each missing
 		// key at its default position (before the first saved key that follows it in
@@ -210,6 +220,8 @@ interface HomeSectionDnd {
 	onDrop: (key: HomeSectionKey) => void;
 	/** Current order, so a target can tell which side to draw the drop line. */
 	order: HomeSectionKey[];
+	/** Slides sections apart to preview the drop. */
+	shift: ReorderShift;
 }
 
 /**
@@ -235,11 +247,13 @@ function HomeSection({
 	// the shared dnd wiring (the transient onboarding section stays put).
 	const reorderable = dnd !== undefined && sectionKey !== undefined;
 	const isDragging = reorderable && dnd.draggingKey === sectionKey;
+	// Sections slide apart to preview the drop; the line is only a fallback.
 	const isDragOver =
 		reorderable &&
 		dnd.dragOverKey === sectionKey &&
 		dnd.draggingKey !== null &&
-		dnd.draggingKey !== sectionKey;
+		dnd.draggingKey !== sectionKey &&
+		!dnd.shift.previewing;
 	// The drop inserts after the target when dragging downward, before it when
 	// dragging upward — so draw the indicator line on the matching edge.
 	const dropBelow =
@@ -247,8 +261,8 @@ function HomeSection({
 		dnd.draggingKey !== null &&
 		dnd.order.indexOf(dnd.draggingKey) < dnd.order.indexOf(sectionKey);
 	return (
-		// biome-ignore lint/a11y/noStaticElementInteractions: section is the drag-and-drop reorder target; the header button carries the keyboard-reachable affordance
-		// biome-ignore lint/a11y/noNoninteractiveElementInteractions: section is the drag-and-drop reorder target; the header button carries the keyboard-reachable affordance
+		// section is the drag-and-drop reorder target; the header button carries the keyboard-reachable affordance
+		// section is the drag-and-drop reorder target; the header button carries the keyboard-reachable affordance
 		<section
 			className={cn(
 				"group/section relative flex min-w-0 flex-col gap-2",
@@ -258,7 +272,9 @@ function HomeSection({
 				if (reorderable && dnd.draggingKey) {
 					e.preventDefault();
 					e.dataTransfer.dropEffect = "move";
-					dnd.onDragOver(sectionKey);
+					dnd.onDragOver(
+						dnd.shift.resolveOver(sectionKey, e.clientX, e.clientY)
+					);
 				}
 			}}
 			onDrop={(e) => {
@@ -267,6 +283,8 @@ function HomeSection({
 					dnd.onDrop(sectionKey);
 				}
 			}}
+			ref={reorderable ? dnd.shift.register(sectionKey) : undefined}
+			style={reorderable ? dnd.shift.styleFor(sectionKey) : undefined}
 		>
 			{isDragOver && (
 				<div
@@ -412,6 +430,10 @@ function LaunchpadComposer() {
 	// new-chat surface, which is the only place ChatPage offers the toggle too. It
 	// rides the tab seed so the spawned chat opens already unsaved.
 	const [ghost, setGhost] = useState(false);
+	// The computer chip's pick (`null` = the default computer); rides the new tab
+	// as its computer binding.
+	const [computer, setComputer] = useState<string | null>(null);
+	const tabOverridesEnabled = useNodeTabOverride();
 	const [temporaryMemory, setTemporaryMemory] = useState(false);
 	const [isDragOver, setIsDragOver] = useState(false);
 	const temporaryMemoryControl =
@@ -524,6 +546,9 @@ function LaunchpadComposer() {
 			attachedImages={images}
 			autoFocus
 			isDragOver={isDragOver}
+			liveCall={
+				composer.voiceMode.active ? composer.voiceMode.liveCall : undefined
+			}
 			onAttach={onAttach}
 			onPaste={onPaste}
 			onRemoveImage={onRemoveImage}
@@ -547,6 +572,9 @@ function LaunchpadComposer() {
 					initialPluginFlags: temporaryMemory
 						? { [TEMPORARY_CONTEXT_FLAG]: true }
 						: undefined,
+					// Ignored by the tab while per-tab computers are off, so only
+					// bind when the binding will be honoured.
+					node: tabOverridesEnabled ? (computer ?? undefined) : undefined,
 				});
 				// The images now live on the tab seed; drop them here so they don't
 				// re-attach to the next thing typed on the launchpad.
@@ -557,20 +585,25 @@ function LaunchpadComposer() {
 			status="ready"
 			workspaceBar={
 				interfaceLevel === "simple" ? undefined : (
-					<WorkspaceBar target={target} />
+					<WorkspaceBar
+						computer={{ value: computer, onChange: setComputer }}
+						target={target}
+					/>
 				)
 			}
 		/>
 	);
-	const renderedComposer = composer.voiceMode.active
-		? composer.voiceMode.render(composerNode)
-		: composerNode;
 
 	return (
 		<div
 			className="relative"
 			onDragLeave={(e) => {
-				if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+				if (
+					!(
+						e.relatedTarget instanceof Node &&
+						e.currentTarget.contains(e.relatedTarget)
+					)
+				) {
 					setIsDragOver(false);
 				}
 			}}
@@ -580,14 +613,54 @@ function LaunchpadComposer() {
 			}}
 			onDrop={handleDrop}
 		>
-			{renderedComposer}
+			{composer.voiceMode.active && composer.voiceMode.messages?.length ? (
+				<VoiceLaunchpadTranscript messages={composer.voiceMode.messages} />
+			) : null}
+			{composerNode}
 		</div>
 	);
 }
 
-/** Shown when every tab is closed — a personalized launchpad back into work. */
+/**
+ * Completed voice-call turns on the launchpad. There is no chat transcript here
+ * (the launchpad never binds a conversation), so honour "Show transcript in
+ * voice mode" with a compact read-only list above the call composer.
+ */
+function VoiceLaunchpadTranscript({ messages }: { messages: UIMessage[] }) {
+	return (
+		<ol
+			aria-label="Voice call transcript"
+			aria-live="polite"
+			className="scroll-fade mb-3 flex max-h-48 flex-col gap-1.5 overflow-y-auto px-1 text-sm"
+			data-testid="voice-launchpad-transcript"
+		>
+			{messages.map((message) => (
+				<li
+					className={cn(
+						"max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-1.5",
+						message.role === "user"
+							? "self-end bg-muted text-foreground"
+							: "self-start text-foreground"
+					)}
+					key={message.id}
+				>
+					{message.parts
+						.map((part) => (part.type === "text" ? part.text : ""))
+						.join("")}
+				</li>
+			))}
+		</ol>
+	);
+}
+
+/** Shown when Center has no routes — a personalized launchpad back into work. */
 export function EmptyTabsState() {
 	const { openTab } = useTabsContext();
+	const openInCenter = useCallback(
+		(path: string, opts?: { conversationId?: string; title?: string }) =>
+			openTabFromEmptyCenter(openTab, path, opts),
+		[openTab]
+	);
 	const { data: session } = useSession();
 	const { agents } = useAgents();
 	const { spaces } = useSpacesContext();
@@ -620,14 +693,14 @@ export function EmptyTabsState() {
 			label: "New chat",
 			description: "Start a conversation",
 			icon: MessageSquarePlus,
-			onSelect: () => openTab("/chat", { forceNew: true }),
+			onSelect: () => openInCenter("/chat"),
 			primary: true,
 		},
 		{
 			label: "Agents",
 			description: "Build and run agents",
 			icon: Bot,
-			onSelect: () => openTab("/library/agent", { title: "Agents" }),
+			onSelect: () => openInCenter("/library/agent", { title: "Agents" }),
 		},
 		{
 			label: "Import thread",
@@ -645,19 +718,19 @@ export function EmptyTabsState() {
 			label: "Spaces",
 			description: "Knowledge for your agents",
 			icon: Layers,
-			onSelect: () => openTab("/library/space", { title: "Spaces" }),
+			onSelect: () => openInCenter("/library/space", { title: "Spaces" }),
 		},
 		{
 			label: "Workflows",
 			description: "Automate multi-step tasks",
 			icon: Workflow,
-			onSelect: () => openTab("/library/workflow", { title: "Workflows" }),
+			onSelect: () => openInCenter("/library/workflow", { title: "Workflows" }),
 		},
 		{
 			label: "Customize",
 			description: "Models, skills, and more",
-			icon: Sparkles,
-			onSelect: () => openTab("/store", { title: "Customize" }),
+			icon: Package,
+			onSelect: () => openInCenter("/store", { title: "Customize" }),
 		},
 	];
 
@@ -681,9 +754,9 @@ export function EmptyTabsState() {
 					),
 					name: a.name,
 					subtitle: a.description,
-					open: () => openTab(`/agents/${a.id}/edit`, { title: a.name }),
+					open: () => openInCenter(`/agents/${a.id}/edit`, { title: a.name }),
 				})),
-		[agents, openTab]
+		[agents, openInCenter]
 	);
 
 	const recentSpaces = useMemo<RecentRow[]>(
@@ -706,10 +779,10 @@ export function EmptyTabsState() {
 					open: () => {
 						stampRecent("space", s.id);
 						// Open the space itself (detail) rather than the Library list.
-						openTab(`/spaces/${s.id}`, { title: s.name });
+						openInCenter(`/spaces/${s.id}`, { title: s.name });
 					},
 				})),
-		[spaces, openTab]
+		[spaces, openInCenter]
 	);
 
 	// Section order + drag-to-reorder, persisted to localStorage — mirrors the
@@ -717,6 +790,11 @@ export function EmptyTabsState() {
 	const [order, setOrder] = useState<HomeSectionKey[]>(loadHomeSectionOrder);
 	const [draggingKey, setDraggingKey] = useState<HomeSectionKey | null>(null);
 	const [dragOverKey, setDragOverKey] = useState<HomeSectionKey | null>(null);
+	const sectionShift = useReorderShift({
+		activeId: draggingKey,
+		axis: "y",
+		overId: dragOverKey,
+	});
 
 	const reorderSections = (next: HomeSectionKey[]) => {
 		setOrder(next);
@@ -747,7 +825,9 @@ export function EmptyTabsState() {
 			setDragOverKey(null);
 		},
 		onDragOver: (key) => setDragOverKey((prev) => (prev === key ? prev : key)),
-		onDrop: handleDropSection,
+		// Drop on the resolved target, not the (shifted) section under the pointer.
+		onDrop: (key) => handleDropSection(dragOverKey ?? key),
+		shift: sectionShift,
 	};
 
 	const renderHomeSection = (key: HomeSectionKey) => {
@@ -789,7 +869,7 @@ export function EmptyTabsState() {
 					<HomeSection
 						dnd={sectionDnd}
 						key={key}
-						onSeeAll={() => openTab("/library/agent", { title: "Agents" })}
+						onSeeAll={() => openInCenter("/library/agent", { title: "Agents" })}
 						sectionKey={key}
 						title="Recent agents"
 					>
@@ -804,7 +884,7 @@ export function EmptyTabsState() {
 					<HomeSection
 						dnd={sectionDnd}
 						key={key}
-						onSeeAll={() => openTab("/library/space", { title: "Spaces" })}
+						onSeeAll={() => openInCenter("/library/space", { title: "Spaces" })}
 						sectionKey={key}
 						title="Recent spaces"
 					>
@@ -834,7 +914,12 @@ export function EmptyTabsState() {
 								<RyuLogo size="56px" variant="outline" />
 							</div>
 							<div className="space-y-1">
-								<h1 className="font-heading text-[26px] text-foreground tracking-tight">
+								<h1
+									className={cn(
+										"font-heading text-foreground tracking-tight",
+										layoutStyles.authored1
+									)}
+								>
 									{greeting()}
 									{name ? `, ${name}` : ""}
 								</h1>
@@ -869,7 +954,9 @@ export function EmptyTabsState() {
 			</div>
 			<ImportThreadsDialog
 				agents={agents}
-				onImported={(conversationId) => openTab("/chat", { conversationId })}
+				onImported={(conversationId) =>
+					openInCenter("/chat", { conversationId })
+				}
 				onOpenChange={setImportOpen}
 				open={importOpen}
 				target={importTarget}

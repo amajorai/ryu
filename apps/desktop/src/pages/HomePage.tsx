@@ -15,15 +15,15 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog";
-import { Button, buttonVariants } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
+} from "@ryu/ui/components/dialog.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -35,7 +35,7 @@ import {
 	DropdownMenuSubContent,
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -43,17 +43,16 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import {
-	ResizableHandle,
-	ResizablePanel,
-	ResizablePanelGroup,
-} from "@ryu/ui/components/resizable";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { ToggleGroup, ToggleGroupItem } from "@ryu/ui/components/toggle-group";
-import { RealtimeConnection } from "@ryuhq/core-client/realtime";
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@ryu/ui/components/toggle-group.tsx";
+import { RealtimeConnection } from "@ryuhq/core-client/realtime.ts";
 import {
 	CheckIcon,
 	ChevronDownIcon,
@@ -68,8 +67,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AddWidgetDialog } from "@/src/components/dashboard/AddWidgetDialog.tsx";
-import { DashboardBuilderChat } from "@/src/components/dashboard/DashboardBuilderChat.tsx";
 import {
+	CANVAS_CELL,
 	DashboardCanvas,
 	DEFAULT_NODE_H,
 	DEFAULT_NODE_W,
@@ -79,11 +78,12 @@ import {
 	type WidgetLiveState,
 } from "@/src/components/dashboard/DashboardGrid.tsx";
 import { WIDGET_DEFINITIONS } from "@/src/components/dashboard/widgets/registry.tsx";
+import { useIsActiveTab } from "@/src/contexts/TabsContext.tsx";
 import { useTitleBar } from "@/src/contexts/TitleBarContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAssistantSurface } from "@/src/hooks/useAssistantBuilder.ts";
 import { useAssistantPageContext } from "@/src/hooks/useAssistantPageContext.ts";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { type ApiTarget, realtimeJwtForTarget } from "@/src/lib/api/client.ts";
 import {
 	type CanvasLayoutRect,
 	createDashboard,
@@ -105,9 +105,14 @@ import {
 	type Widget,
 	type WidgetInput,
 } from "@/src/lib/api/dashboard.ts";
-import { getRealtimeJwt } from "@/src/lib/realtime/jwt.ts";
+import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
 
-/** Quick-add presets so the grid is usable without the AI builder. */
+/**
+ * Quick-add presets so the grid is usable without the AI builder. Only the ones
+ * whose source type the node's catalog lists are offered or seeded (see
+ * `presetsFor`): the Core-metric presets reappear on a host that can read Core
+ * endpoints, and stay hidden on the Dashboards sidecar, which cannot.
+ */
 const PRESETS: Array<{ label: string } & WidgetInput> = [
 	{
 		label: "Connected clients",
@@ -156,14 +161,23 @@ const PRESETS: Array<{ label: string } & WidgetInput> = [
 
 /**
  * Non-overlapping grid placements for the auto-seeded starter (keyed by preset
- * label), so the four widgets tile the 12-column grid neatly on first launch.
+ * label), so the widgets tile the 12-column grid neatly on first launch. The note
+ * sits top-left so a starter of just the presets the host supports still starts at
+ * the origin.
  */
-const STARTER_LAYOUTS: Record<string, GridLayoutRect> = {
-	"Connected clients": { x: 0, y: 0, w: 3, h: 3 },
-	"Open quests": { x: 3, y: 0, w: 5, h: 4 },
-	Note: { x: 8, y: 0, w: 4, h: 4 },
-	Monitors: { x: 0, y: 4, w: 8, h: 4 },
-};
+const STARTER_LAYOUTS = new Map<string, GridLayoutRect>([
+	["Note", { x: 0, y: 0, w: 4, h: 4 }],
+	["Connected clients", { x: 4, y: 0, w: 3, h: 3 }],
+	["Open quests", { x: 7, y: 0, w: 5, h: 4 }],
+	["Monitors", { x: 0, y: 4, w: 8, h: 4 }],
+]);
+
+/** The presets whose source type the node's catalog says it can resolve. */
+function presetsFor(sourceTypes: readonly string[]): typeof PRESETS {
+	return PRESETS.filter((preset) =>
+		sourceTypes.includes(preset.source?.type ?? "static")
+	);
+}
 
 /**
  * The prompt the "Generate a dashboard for me" button auto-sends to the AI
@@ -171,7 +185,7 @@ const STARTER_LAYOUTS: Record<string, GridLayoutRect> = {
  * `dashboard_builder.*` tools.
  */
 const AI_STARTER_PROMPT =
-	"Build me a useful starter Home dashboard. Add a few widgets that show my Ryu activity at a glance — for example connected clients, open quests, active monitors, and a short welcome note — using sensible core_endpoint sources, and arrange them neatly on the 12-column grid. Keep it clean and not overwhelming.";
+	"Build me a useful starter Home dashboard. Start with a short welcome note, then add a few widgets that use only the source types this node supports — for example a public HTTPS JSON endpoint or a Composio action I have connected — and arrange them neatly on the 12-column grid. Keep it clean and not overwhelming.";
 
 /**
  * Nodes for which we've already auto-seeded a starter Home this session. Guards
@@ -180,17 +194,29 @@ const AI_STARTER_PROMPT =
 const bootstrappedNodes = new Set<string>();
 
 /**
- * Seed the curated starter widgets onto a freshly created dashboard. Best-effort:
- * a failed widget just yields a smaller starter rather than aborting the rest, so
- * first launch always lands on a populated (not blank) Home.
+ * Seed the curated starter widgets onto a freshly created dashboard. Only presets
+ * whose source type the catalog lists are seeded, so first launch never writes a
+ * widget the node would reject or could only show as broken. Best-effort: a
+ * missing catalog seeds just the static note, and a failed widget yields a
+ * smaller starter rather than aborting the rest, so first launch always lands on
+ * a populated (not blank) Home.
  */
 async function seedStarterWidgets(
 	target: ApiTarget,
 	dashboardId: string
 ): Promise<void> {
-	for (const preset of PRESETS) {
+	let sourceTypes: string[] = ["static"];
+	try {
+		const catalog = await getCatalog(target);
+		if (Array.isArray(catalog.source_types)) {
+			sourceTypes = catalog.source_types;
+		}
+	} catch {
+		// No catalog: seed only the host-independent static note.
+	}
+	for (const preset of presetsFor(sourceTypes)) {
 		const { label, ...input } = preset;
-		const layout = STARTER_LAYOUTS[label] ?? input.layout;
+		const layout = STARTER_LAYOUTS.get(label) ?? input.layout;
 		try {
 			await createWidget(target, dashboardId, { ...input, layout });
 		} catch {
@@ -215,6 +241,62 @@ function dashboardSnapshot(widgets: Widget[]): string {
 /** The next free row beneath all current widgets (so a quick-add stacks). */
 function nextRow(widgets: Widget[]): number {
 	return widgets.reduce((max, w) => Math.max(max, w.layout.y + w.layout.h), 0);
+}
+
+/** Place a new Canvas widget near the viewport center without covering a card. */
+function findCanvasRect(
+	widgets: Widget[],
+	center: { x: number; y: number },
+	w: number,
+	h: number
+): CanvasLayoutRect {
+	const gap = 24;
+	const stepX = w + gap;
+	const stepY = h + gap;
+	const existing = widgets.map(
+		(widget) =>
+			widget.canvas ?? {
+				h: widget.layout.h * CANVAS_CELL,
+				w: widget.layout.w * CANVAS_CELL,
+				x: widget.layout.x * CANVAS_CELL,
+				y: widget.layout.y * CANVAS_CELL,
+			}
+	);
+	const origin = { x: center.x - w / 2, y: center.y - h / 2 };
+	const overlaps = (x: number, y: number) =>
+		existing.some(
+			(rect) =>
+				x < rect.x + rect.w + gap &&
+				x + w + gap > rect.x &&
+				y < rect.y + rect.h + gap &&
+				y + h + gap > rect.y
+		);
+
+	if (!overlaps(origin.x, origin.y)) {
+		return { ...origin, w, h };
+	}
+
+	// Search outward in a deterministic diamond spiral. The canvas is infinite,
+	// so moving one widget-width/height per step always gives existing cards room.
+	for (let radius = 1; radius <= widgets.length + 2; radius += 1) {
+		for (let dx = radius; dx >= -radius; dx -= 1) {
+			const vertical = radius - Math.abs(dx);
+			const offsets = vertical === 0 ? [0] : [vertical, -vertical];
+			for (const dy of offsets) {
+				const x = origin.x + dx * stepX;
+				const y = origin.y + dy * stepY;
+				if (!overlaps(x, y)) {
+					return { h, w, x, y };
+				}
+			}
+		}
+	}
+
+	const lowestEdge = existing.reduce(
+		(max, rect) => Math.max(max, rect.y + rect.h),
+		origin.y
+	);
+	return { h, w, x: origin.x, y: lowestEdge + gap };
 }
 
 export default function HomePage() {
@@ -246,12 +328,10 @@ export default function HomePage() {
 	const [error, setError] = useState<string | null>(null);
 	// Bumped to re-trigger the initial load effect from the Retry affordance.
 	const [reloadKey, setReloadKey] = useState(0);
+	// "Build with AI" mode: while on, the global Ask Ryu assistant is this
+	// dashboard's builder (see `useAssistantSurface` below). There is no second
+	// chat pane on Home.
 	const [builderOpen, setBuilderOpen] = useState(false);
-	// A one-shot prompt handed to the AI builder when the user clicks "Generate a
-	// dashboard for me"; consumed (cleared) by the builder once sent.
-	const [builderAutoPrompt, setBuilderAutoPrompt] = useState<string | null>(
-		null
-	);
 	// True while an AI "generate" turn is in flight, so the empty area shows an
 	// "assembling…" state instead of the call-to-action.
 	const [generating, setGenerating] = useState(false);
@@ -260,6 +340,7 @@ export default function HomePage() {
 	// dashboard (and all of its widgets).
 	const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 	const [coreEndpoints, setCoreEndpoints] = useState<string[]>([]);
+	const [sourceTypes, setSourceTypes] = useState<string[]>(["static"]);
 	// Name dialog state, shared by "New dashboard" (create) and "Rename".
 	const [nameDialog, setNameDialog] = useState<{
 		mode: "create" | "rename";
@@ -268,11 +349,24 @@ export default function HomePage() {
 
 	// Fetch the catalog once so the Add-widget picker offers the live endpoint list.
 	useEffect(() => {
+		let active = true;
+		setSourceTypes(["static"]);
 		getCatalog(target)
-			.then((c) => setCoreEndpoints(c.core_endpoints))
+			.then((c) => {
+				if (!active) {
+					return;
+				}
+				setCoreEndpoints(c.core_endpoints);
+				setSourceTypes(
+					Array.isArray(c.source_types) ? c.source_types : ["static"]
+				);
+			})
 			.catch(() => {
-				// Non-fatal: the picker falls back to a sensible default list.
+				// A missing catalog leaves only the host-independent static source.
 			});
+		return () => {
+			active = false;
+		};
 	}, [target]);
 
 	// Load the dashboard list, creating a default "Home" when none exist yet.
@@ -367,7 +461,7 @@ export default function HomePage() {
 		}
 		let cancelled = false;
 		let connection: RealtimeConnection | null = null;
-		void getRealtimeJwt().then((jwt) => {
+		void realtimeJwtForTarget(target).then((jwt) => {
 			if (cancelled) {
 				return;
 			}
@@ -568,12 +662,12 @@ export default function HomePage() {
 			// appears where the user is looking (the grid layout still round-trips).
 			const canvas =
 				viewMode === "canvas"
-					? {
-							x: canvasCenterRef.current.x - DEFAULT_NODE_W / 2,
-							y: canvasCenterRef.current.y - DEFAULT_NODE_H / 2,
-							w: input.canvas?.w ?? DEFAULT_NODE_W,
-							h: input.canvas?.h ?? DEFAULT_NODE_H,
-						}
+					? findCanvasRect(
+							widgets,
+							canvasCenterRef.current,
+							input.canvas?.w ?? DEFAULT_NODE_W,
+							input.canvas?.h ?? DEFAULT_NODE_H
+						)
 					: input.canvas;
 			try {
 				const widget = await createWidget(target, dashboardId, {
@@ -602,12 +696,16 @@ export default function HomePage() {
 		]
 	);
 
-	// Open the AI builder and hand it a starter prompt so the local model
-	// authors the dashboard — the one-click "generate one for me" path.
+	// Open the AI builder and hand the assistant a starter prompt so the model
+	// authors the dashboard — the one-click "generate one for me" path. The
+	// prompt is queued only once the dashboard surface is the active takeover
+	// (see below); queued earlier, an already-open assistant would send it as
+	// plain chat without the builder's tools.
+	const [starterPending, setStarterPending] = useState(false);
 	const handleGenerateWithAi = useCallback(() => {
 		setGenerating(true);
 		setBuilderOpen(true);
-		setBuilderAutoPrompt(AI_STARTER_PROMPT);
+		setStarterPending(true);
 	}, []);
 
 	// The AI turn produced widgets: drop the "assembling…" state so the grid shows.
@@ -690,6 +788,8 @@ export default function HomePage() {
 			toast.error("Couldn't delete dashboard", {
 				description: "Check your connection and try again.",
 			});
+		} finally {
+			setConfirmDeleteOpen(false);
 		}
 	}, [
 		dashboardId,
@@ -720,25 +820,21 @@ export default function HomePage() {
 	const snapshot = useMemo(() => dashboardSnapshot(widgets), [widgets]);
 
 	// ── The dashboard as an assistant surface ────────────────────────────────
-	// While the user is in "Build with AI" mode, the global Ask Ryu panel becomes
-	// THIS dashboard's builder too — same `dashboard_builder.*` tools, same live
-	// snapshot — so opening the dock does not start an unrelated second chat.
-	//
-	// Two deliberate scopings. It registers only while `builderOpen`, because a
-	// takeover replaces the generic assistant, and merely *looking at* Home is not
-	// a request to give up general chat. And `dock: false`, because the user
-	// already has the in-page pane open — popping the sidebar as well would be the
-	// app talking over them. (Retiring `DashboardBuilderChat` in favour of this one
-	// surface is the natural follow-on; it is left in place here.)
+	// "Build with AI" is the global Ask Ryu assistant docked as this dashboard's
+	// builder — `dashboard_builder.*` tools, live board as page context — not a chat pane of
+	// Home's own. It registers only while `builderOpen`, because a takeover
+	// replaces the generic assistant, and merely *looking at* Home is not a
+	// request to give up general chat. Choosing "Build" is an explicit request, so
+	// the surface docks the panel open (the default for builder pages).
 	const widgetKinds = useMemo(
 		() => WIDGET_DEFINITIONS.map((d) => d.kind).join(", "),
 		[]
 	);
+	const quickAddPresets = useMemo(() => presetsFor(sourceTypes), [sourceTypes]);
 	useAssistantSurface(
 		builderOpen
 			? {
 					kind: "dashboard",
-					dock: false,
 					label: `Build ${dashboardName}`,
 					description:
 						"Say what you want to see and I'll assemble the widgets on this board.",
@@ -750,25 +846,29 @@ export default function HomePage() {
 						"dashboard_builder tools. For edits prefer",
 						'dashboard_builder.configure_dashboard with dashboard_id "{{targetId}}"',
 						"using widgets_upsert (pass each widget's layout x/y/w/h to place it on",
-						"the 12-column grid) and widgets_remove. Pick a sensible source:",
-						"core_endpoint for internal metrics (connections, quests, monitors,",
-						"system_status, …), monitor, workflow, composio, http, or agent. If a save",
-						"is rejected, read the error and fix it. Keep replies short and confirm",
-						"what you changed.",
-						"\n\nCurrent dashboard:\n{{snapshot}}",
+						"the 12-column grid) and widgets_remove. Pick a sensible source from",
+						`the types this node supports: ${sourceTypes.join(", ")}. Never use`,
+						"any other source type. If a save is rejected, read the error and fix",
+						"it. Call",
+						"dashboard_builder.get_dashboard when you need the current widgets.",
+						"Keep replies short and confirm what you changed.",
 					].join(" "),
 					tools: [
 						"dashboard_builder.configure_dashboard",
 						"dashboard_builder.get_dashboard",
 					],
 					prompts: [
-						"Add a chart of my monitors",
+						"Chart a public JSON API",
 						"Show my unread email",
 						"Tidy the layout",
 					],
-					snapshot,
+					// The live board travels as the removable page context below.
+					snapshot: "",
 					targetId: dashboardId,
 					targetName: dashboardName,
+					// One conversation per board, so switching dashboards never
+					// carries the previous board's turns into this one's edits.
+					thread: dashboardId ? `dashboard:${dashboardId}` : undefined,
 					resolveId: resolveDashboardId,
 					onChanged: (id) => {
 						void reload(id).then(() => setGenerating(false));
@@ -776,6 +876,36 @@ export default function HomePage() {
 				}
 			: null
 	);
+
+	const activeSurfaceKind = useAssistantStore((s) => s.builder?.kind);
+	useEffect(() => {
+		if (starterPending && activeSurfaceKind === "dashboard") {
+			setStarterPending(false);
+			useAssistantStore.getState().setPendingPrompt(AI_STARTER_PROMPT);
+		}
+	}, [starterPending, activeSurfaceKind]);
+
+	// Closing the assistant ends build mode, so the surface is released and the
+	// assistant goes back to general chat. Only while Home is focused: leaving
+	// the tab also tears the takeover down, and coming back should resume it.
+	const isActiveTab = useIsActiveTab();
+	const assistantMode = useAssistantStore((s) => s.mode);
+	const builderShownRef = useRef(false);
+	useEffect(() => {
+		if (!(builderOpen && isActiveTab)) {
+			builderShownRef.current = false;
+			return;
+		}
+		if (assistantMode !== "closed") {
+			builderShownRef.current = true;
+			return;
+		}
+		if (builderShownRef.current) {
+			builderShownRef.current = false;
+			setBuilderOpen(false);
+			setGenerating(false);
+		}
+	}, [builderOpen, isActiveTab, assistantMode]);
 
 	// …and the same board as plain CONTEXT, resolved at send time. A dashboard's
 	// widgets refresh on their own, so a snapshot pushed at mount would describe a
@@ -799,7 +929,7 @@ export default function HomePage() {
 		() => (
 			<div className="flex items-center gap-1.5">
 				<ToggleGroup
-					className="rounded-lg bg-muted/60 p-0.5"
+					appearance="segmented"
 					onValueChange={(values: string[]) => {
 						const v = values[0];
 						if (v === "grid" || v === "canvas") {
@@ -812,29 +942,25 @@ export default function HomePage() {
 				>
 					<ToggleGroupItem
 						aria-label="Grid view"
-						className="h-7 gap-1 px-2 text-xs"
+						density="dashboard-tab"
 						value="grid"
 					>
 						<LayoutGridIcon className="size-3.5" /> Grid
 					</ToggleGroupItem>
 					<ToggleGroupItem
 						aria-label="Canvas view"
-						className="h-7 gap-1 px-2 text-xs"
+						density="dashboard-tab"
 						value="canvas"
 					>
 						<FrameIcon className="size-3.5" /> Canvas
 					</ToggleGroupItem>
 				</ToggleGroup>
 				<DropdownMenu>
-					<DropdownMenuTrigger
-						className={buttonVariants({
-							variant: "ghost",
-							size: "sm",
-							className: "gap-0.5 font-medium",
-						})}
-					>
-						{dashboardName}
-						<ChevronDownIcon className="size-3.5 text-muted-foreground" />
+					<DropdownMenuTrigger render={<Button size="sm" variant="ghost" />}>
+						<span className="flex items-center gap-0.5">
+							{dashboardName}
+							<ChevronDownIcon className="size-3.5 text-muted-foreground" />
+						</span>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end" className="min-w-52">
 						<DropdownMenuGroup>
@@ -849,7 +975,9 @@ export default function HomePage() {
 											d.id === dashboardId ? "size-4" : "size-4 opacity-0"
 										}
 									/>
-									<span className="truncate">{d.name}</span>
+									<span className="truncate" title={d.name}>
+										{d.name}
+									</span>
 								</DropdownMenuItem>
 							))}
 						</DropdownMenuGroup>
@@ -862,7 +990,7 @@ export default function HomePage() {
 								<PlusIcon className="size-4" /> Add widget
 							</DropdownMenuSubTrigger>
 							<DropdownMenuSubContent>
-								{PRESETS.map((preset) => (
+								{quickAddPresets.map((preset) => (
 									<DropdownMenuItem
 										key={preset.label}
 										onClick={() => handleCreateWidget(preset)}
@@ -913,11 +1041,7 @@ export default function HomePage() {
 	useTitleBar(null, dashboardActions);
 
 	if (loading && widgets.length === 0 && !error) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	const buildLoadErrorArea = () => (
@@ -1025,65 +1149,26 @@ export default function HomePage() {
 			{error && widgets.length > 0 && (
 				<div className="flex items-center gap-3 bg-destructive/10 px-4 py-2 text-status-destructive text-xs">
 					<span className="flex-1">{error}</span>
-					<Button
-						className="h-6 px-2 text-xs"
-						onClick={handleRetry}
-						size="sm"
-						variant="ghost"
-					>
+					<Button onClick={handleRetry} size="tiny" variant="ghost">
 						Try again
 					</Button>
 					<Button
 						aria-label="Dismiss error"
-						className="h-6 px-2 text-xs"
 						onClick={() => setError(null)}
-						size="sm"
+						size="tiny"
 						variant="ghost"
 					>
 						Dismiss
 					</Button>
 				</div>
 			)}
-			{builderOpen ? (
-				<ResizablePanelGroup
-					className="min-h-0 flex-1"
-					orientation="horizontal"
-				>
-					<ResizablePanel className="min-h-0" defaultSize={64} minSize={40}>
-						{gridArea}
-					</ResizablePanel>
-					<ResizableHandle withHandle />
-					<ResizablePanel
-						className="flex min-h-0 flex-col"
-						defaultSize={36}
-						id="dashboard-builder-chat"
-						minSize={24}
-					>
-						<DashboardBuilderChat
-							autoPrompt={builderAutoPrompt}
-							dashboardId={dashboardId}
-							dashboardName={dashboardName}
-							dashboardSnapshot={snapshot}
-							onAutoPromptConsumed={() => setBuilderAutoPrompt(null)}
-							onDashboardChanged={(id) =>
-								// After each settled turn: re-hydrate the grid, then clear the
-								// "assembling…" state (whether or not widgets landed) so the
-								// empty area falls back to the call-to-action on a no-op turn.
-								reload(id).then(() => setGenerating(false))
-							}
-							resolveDashboardId={resolveDashboardId}
-							target={target}
-						/>
-					</ResizablePanel>
-				</ResizablePanelGroup>
-			) : (
-				<div className="min-h-0 flex-1">{gridArea}</div>
-			)}
+			<div className="min-h-0 flex-1">{gridArea}</div>
 			<AddWidgetDialog
 				coreEndpoints={coreEndpoints}
 				onCreate={handleCreateWidget}
 				onOpenChange={setAddOpen}
 				open={addOpen}
+				sourceTypes={sourceTypes}
 			/>
 			<Dialog
 				onOpenChange={(open) => {
@@ -1102,6 +1187,7 @@ export default function HomePage() {
 						</DialogTitle>
 					</DialogHeader>
 					<Input
+						aria-label="Dashboard name"
 						autoFocus
 						onChange={(e) =>
 							setNameDialog((prev) =>

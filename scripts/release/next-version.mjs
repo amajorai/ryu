@@ -71,15 +71,28 @@ export const CHANNELS = ["stable", "beta", "nightly", "canary"];
 const VERSION_RE =
 	/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
 
+// This calculator is copied into release bootstraps before dependencies are
+// installed. The native String decoder keeps it standalone and rejects boxed
+// strings or objects with custom coercion instead of interpreting them as tags.
+function versionText(input) {
+	try {
+		const text = String.prototype.valueOf.call(input);
+		return text === input ? text : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Parse a semver string into its components. Returns `null` for anything that is
  * not valid semver, so callers can skip junk tags rather than crash on them.
  */
 export function parseVersion(input) {
-	if (typeof input !== "string") {
+	const text = versionText(input);
+	if (text === undefined) {
 		return null;
 	}
-	const match = VERSION_RE.exec(input.trim().replace(/^[vV]/, ""));
+	const match = VERSION_RE.exec(text.trim().replace(/^[vV]/, ""));
 	if (!match) {
 		return null;
 	}
@@ -145,8 +158,8 @@ function comparePrerelease(a, b) {
  * never claim to be the newest.
  */
 export function comparePrecedence(a, b) {
-	const left = typeof a === "string" ? parseVersion(a) : a;
-	const right = typeof b === "string" ? parseVersion(b) : b;
+	const left = versionText(a) === undefined ? a : parseVersion(a);
+	const right = versionText(b) === undefined ? b : parseVersion(b);
 	if (!(left || right)) {
 		return 0;
 	}

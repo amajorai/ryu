@@ -1,8 +1,62 @@
+import { useReorderShift } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 
-const EXPECTED_INDICATORS = 7;
+// The drop line is now only the fallback for a target the slide cannot reach
+// (another bracket or list); within a list the rows slide apart instead.
+const EXPECTED_INDICATORS = 4;
+const SLIDE_ROWS = ["Alpha", "Bravo", "Charlie", "Delta"];
+
+/** A real `useReorderShift` list: "Drag Alpha onto Charlie" puts it in the
+ *  same state a native drag would, so the spec can read the rows' shifts. */
+function SlidingList() {
+	const [activeId, setActiveId] = useState<string | null>(null);
+	const [overId, setOverId] = useState<string | null>(null);
+	const shift = useReorderShift({ activeId, axis: "y", overId });
+	useEffect(() => {
+		if (activeId) {
+			// The hook measures the resting rows once the drag has started.
+			const frame = requestAnimationFrame(() => setOverId("Charlie"));
+			return () => cancelAnimationFrame(frame);
+		}
+	}, [activeId]);
+	return (
+		<section className="flex flex-col gap-4 rounded-xl border bg-card p-5">
+			<div className="flex items-start justify-between gap-4">
+				<div>
+					<p className="font-medium text-sm">Sliding reorder</p>
+					<p className="text-muted-foreground text-xs">
+						Neighbours slide aside and the dragged row glides into the gap.
+					</p>
+				</div>
+				<button
+					className="rounded-md border px-2 py-1 text-xs"
+					onClick={() => {
+						setOverId(null);
+						setActiveId(activeId ? null : "Alpha");
+					}}
+					type="button"
+				>
+					{activeId ? "Release" : "Drag Alpha onto Charlie"}
+				</button>
+			</div>
+			<ul className="flex flex-col gap-1" data-testid="slide-list">
+				{SLIDE_ROWS.map((row) => (
+					<li
+						className={`rounded-md border bg-background px-3 py-2 text-sm ${activeId === row ? "opacity-40" : ""}`}
+						data-slide-row={row}
+						key={row}
+						ref={shift.register(row)}
+						style={shift.styleFor(row)}
+					>
+						{row}
+					</li>
+				))}
+			</ul>
+		</section>
+	);
+}
 
 function ReorderIndicatorProof() {
 	const [metrics, setMetrics] = useState({ count: 0, rounded: false });
@@ -30,11 +84,9 @@ function ReorderIndicatorProof() {
 						<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
 							React verification artifact
 						</p>
-						<h1 className="font-semibold text-2xl">
-							Rounded reorder indicators
-						</h1>
+						<h1 className="font-semibold text-2xl">Reorder previews</h1>
 						<p className="mt-1 text-muted-foreground text-sm">
-							Every blue drag marker uses the shared rounded-cap utility.
+							Lists slide apart; the fallback drop markers keep rounded caps.
 						</p>
 					</div>
 					<p
@@ -46,7 +98,9 @@ function ReorderIndicatorProof() {
 					</p>
 				</header>
 
-				<div className="grid gap-4 md:grid-cols-3">
+				<SlidingList />
+
+				<div className="grid gap-4 md:grid-cols-2">
 					<section className="relative flex min-h-44 flex-col gap-4 rounded-xl border bg-card p-5">
 						<div>
 							<p className="font-medium text-sm">Tab reordering</p>
@@ -87,33 +141,6 @@ function ReorderIndicatorProof() {
 								aria-hidden
 								className="reorder-drop-indicator pointer-events-none absolute inset-x-2 bottom-2 h-0.5 bg-primary"
 								data-reorder-line="section-after"
-							/>
-						</div>
-					</section>
-
-					<section className="relative flex min-h-44 flex-col gap-4 rounded-xl border bg-card p-5">
-						<div>
-							<p className="font-medium text-sm">Editor drag targets</p>
-							<p className="text-muted-foreground text-xs">
-								Blocks, table rows, and columns.
-							</p>
-						</div>
-						<div className="relative flex h-16 flex-col justify-center gap-2 rounded-lg border bg-background px-5">
-							<span
-								aria-hidden
-								className="reorder-drop-indicator absolute inset-x-2 top-2 h-0.5 bg-brand/50"
-								data-reorder-line="block"
-							/>
-							<span className="text-sm">Document row</span>
-							<span
-								aria-hidden
-								className="reorder-drop-indicator absolute inset-x-2 bottom-2 h-0.5 bg-brand/50"
-								data-reorder-line="table-row"
-							/>
-							<span
-								aria-hidden
-								className="reorder-drop-indicator absolute inset-y-2 right-2 w-1 bg-brand/50"
-								data-reorder-line="column"
 							/>
 						</div>
 					</section>

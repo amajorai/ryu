@@ -150,6 +150,28 @@
       "sidecar": "reasoning",
       "route": "/check",
       "grant": "reasoning:check"
+    },
+    {
+      "capability": "verify.claim",
+      "version": "1.0.0",
+      "title": "Verification",
+      "selectable": true,
+      "default": true,
+      "tools": {
+        "verify.claim": {
+          "tool": "reasoning.check",
+          "adapter": {
+            "tools": ["reasoning.policies"],
+            "code_file": "adapters/verify.claim.js"
+          }
+        },
+        "verify.scopes": {
+          "tool": "reasoning.policies",
+          "adapter": {
+            "code_file": "adapters/verify.scopes.js"
+          }
+        }
+      }
     }
   ],
   "permission_grants": [
@@ -157,6 +179,7 @@
     "hook:side-model",
     "hook:run-agent",
     "mcp:reasoning",
+    "tool:execute",
     "ui:declarative-http"
   ],
   "permission_levels": [

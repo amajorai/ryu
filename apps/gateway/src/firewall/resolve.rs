@@ -6,6 +6,8 @@
 //! ```text
 //! node  (base)   gateway-local config.firewall — the box admin's baseline
 //!   ▼
+//! floor          Ryu's platform floor, hosted fleet only (`platform_floor`)
+//!   ▼
 //! org   (mid)    control-plane bundle (hosted) OR gateway-local store (standalone)
 //!   ▼
 //! agent (leaf)   per-agent overlay, keyed by x-ryu-agent-id
@@ -74,8 +76,20 @@ const ALL_LOCKABLE_FIELDS: &[&str] = &[
 /// from the resolver's local store instead.
 #[derive(Debug, Clone, Default)]
 pub struct PolicyBundle {
+    /// Ryu's platform floor (spec 02.3), set only where it binds (fleet
+    /// custody). Applied first, directly on the node base and tighten-only
+    /// against it, and then every lockable field is locked, so the org, team,
+    /// agent and request scopes can only tighten what the floor and the node
+    /// set. Its evaluator bindings merge tighten-only by id
+    /// ([`merge_floor_bindings`]) and its inspector model stays pinned.
+    pub platform_floor: Option<Arc<crate::platform_floor::PlatformFloor>>,
     /// The org-effective firewall overlay (already cascaded by the control plane).
     pub firewall: Option<FirewallOverlay>,
+    /// The node's team overlay, when the node runs for a team. Applied after the
+    /// org overlay as tighten-only (every field treated as locked), because a
+    /// team may be administered below the organization and must never loosen
+    /// what the node or the organization set.
+    pub team_firewall: Option<FirewallOverlay>,
     /// Per-agent overlays for this org, keyed by agent id.
     pub agent_overlays: HashMap<String, FirewallOverlay>,
 }
@@ -84,7 +98,10 @@ impl PolicyBundle {
     /// Whether this bundle carries any overlay data at all. An empty bundle lets
     /// the resolver fall back to its local (standalone) overlay store.
     pub fn is_empty(&self) -> bool {
-        self.firewall.is_none() && self.agent_overlays.is_empty()
+        self.platform_floor.is_none()
+            && self.firewall.is_none()
+            && self.team_firewall.is_none()
+            && self.agent_overlays.is_empty()
     }
 }
 
@@ -260,6 +277,24 @@ impl FirewallResolver {
         // to scopes narrower than it, so we grow the set AFTER applying each.
         let mut locked: HashSet<String> = resolved.locked_fields.iter().cloned().collect();
 
+        // ── platform floor (fleet only): tighten-only, then everything locked ──
+        // Applied under every field locked, so the floor itself can only raise
+        // the node base, never lower it. Then every lockable field is locked
+        // for the narrower scopes whatever the floor's wire `locked_fields`
+        // says, so no tenant overlay can loosen a dial the floor or the node
+        // set. Evaluator bindings merge tighten-only by id, not through the
+        // overlay merge, whose unlocked-base branch would let the floor replace
+        // a node binding with a weaker one.
+        let platform_floor = bundle.and_then(|b| b.platform_floor.as_deref());
+        if let Some(floor) = platform_floor {
+            let mut ov = normalize_overlay(&floor.overlay);
+            ov.evaluators = None;
+            ov.locked_fields.clear();
+            apply_overlay(&mut resolved, &ov, &all_lockable_fields());
+            resolved.evaluators = merge_floor_bindings(&resolved.evaluators, &floor.evaluators);
+            locked.extend(all_lockable_fields());
+        }
+
         // ── org scope: hosted bundle wins; else the standalone-local store ──────
         // Normalize before use (FIX 2): strip the node-only wrap field/lock so a
         // hosted bundle overlay can never leak it into the value OR the lock union
@@ -271,6 +306,18 @@ impl FirewallResolver {
             .map(|ov| normalize_overlay(&ov));
         if let Some(ov) = &org_overlay {
             apply_overlay(&mut resolved, ov, &locked);
+            for f in &ov.locked_fields {
+                locked.insert(f.clone());
+            }
+        }
+
+        // ── team scope (hosted only): tighten-only, like the request scope ──────
+        // Applied under EVERY field locked, so a team can enable protections,
+        // raise severity, add patterns, and add locks, but never loosen the node
+        // base or the org overlay. Its locks then bind the agent leaf.
+        if let Some(ov) = bundle.and_then(|b| b.team_firewall.as_ref()) {
+            let ov = normalize_overlay(ov);
+            apply_overlay(&mut resolved, &ov, &all_lockable_fields());
             for f in &ov.locked_fields {
                 locked.insert(f.clone());
             }
@@ -294,11 +341,14 @@ impl FirewallResolver {
         // locks are not unioned in: a leaf lock binds nothing.
         if let Some(ov) = request_overlay {
             let ov = normalize_overlay(ov);
-            let all_fields: HashSet<String> = ALL_LOCKABLE_FIELDS
-                .iter()
-                .map(|f| (*f).to_string())
-                .collect();
-            apply_overlay(&mut resolved, &ov, &all_fields);
+            apply_overlay(&mut resolved, &ov, &all_lockable_fields());
+        }
+
+        // The floor's inspector model is a floor choice, not a selection a
+        // narrower scope may swap (the locked-inspector merge otherwise takes
+        // the incoming model), so it is restored after every scope.
+        if let Some(inspector) = platform_floor.and_then(|floor| floor.overlay.inspector.as_ref()) {
+            resolved.inspector.model = inspector.model.clone();
         }
 
         // Finalize the union of locks. Sort so a stable serialization → a stable
@@ -523,6 +573,64 @@ fn merge_evaluator_bindings(
     for o in overlay {
         if !base.iter().any(|b| b.id == o.id) {
             merged.push(o.clone());
+        }
+    }
+    merged
+}
+
+/// [`ALL_LOCKABLE_FIELDS`] as the lock set a tighten-only scope is applied under.
+fn all_lockable_fields() -> HashSet<String> {
+    ALL_LOCKABLE_FIELDS
+        .iter()
+        .map(|field| (*field).to_string())
+        .collect()
+}
+
+/// Merge the platform floor's evaluator bindings onto the node base,
+/// tighten-only by `id` whether or not the node binding is locked (the
+/// contract in `packages/api/src/lib/platform-floor.ts`). For a common id:
+///   - `enabled` = node || floor;
+///   - `inline_action` = the stricter of the two ([`stricter_optional_policy`]);
+///   - `offline` = whichever side sets one; when both do, the higher
+///     `threshold`, and the floor's judge model when it names one, else the
+///     node's;
+///   - `locked` = true.
+///
+/// A floor id the node does not configure is appended as sent (the parser
+/// already forced it enabled and locked). Output order follows
+/// [`merge_evaluator_bindings`]: node bindings in place, then floor-only ones.
+fn merge_floor_bindings(
+    base: &[EvaluatorBinding],
+    floor: &[EvaluatorBinding],
+) -> Vec<EvaluatorBinding> {
+    let mut merged: Vec<EvaluatorBinding> = Vec::with_capacity(base.len() + floor.len());
+    for node in base {
+        let Some(pinned) = floor.iter().find(|candidate| candidate.id == node.id) else {
+            merged.push(node.clone());
+            continue;
+        };
+        let offline = match (&node.offline, &pinned.offline) {
+            (Some(node_offline), Some(floor_offline)) => Some(crate::evaluators::OfflineConfig {
+                threshold: node_offline.threshold.max(floor_offline.threshold),
+                judge_model: floor_offline
+                    .judge_model
+                    .clone()
+                    .or_else(|| node_offline.judge_model.clone()),
+            }),
+            (Some(only), None) | (None, Some(only)) => Some(only.clone()),
+            (None, None) => None,
+        };
+        merged.push(EvaluatorBinding {
+            id: node.id.clone(),
+            enabled: node.enabled || pinned.enabled,
+            inline_action: stricter_optional_policy(&node.inline_action, &pinned.inline_action),
+            offline,
+            locked: true,
+        });
+    }
+    for pinned in floor {
+        if !base.iter().any(|node| node.id == pinned.id) {
+            merged.push(pinned.clone());
         }
     }
     merged
@@ -832,9 +940,59 @@ mod tests {
     }
 
     #[test]
+    fn team_overlay_can_only_tighten_the_node_and_org() {
+        let mut base = unlocked_base();
+        base.enabled = true;
+        base.redact_pii = false;
+        let r = FirewallResolver::new(base);
+        let bundle = PolicyBundle {
+            platform_floor: None,
+            firewall: Some(FirewallOverlay {
+                policy: Some(FirewallPolicy::Sanitize),
+                ..Default::default()
+            }),
+            team_firewall: Some(FirewallOverlay {
+                // Attempted loosening: ignored.
+                enabled: Some(false),
+                policy: Some(FirewallPolicy::WarnAndContinue),
+                redact_pii: Some(true),
+                locked_fields: vec!["redact_pii".into()],
+                ..Default::default()
+            }),
+            agent_overlays: HashMap::from([(
+                "agent".to_owned(),
+                FirewallOverlay {
+                    redact_pii: Some(false),
+                    ..Default::default()
+                },
+            )]),
+        };
+        let resolved = r.resolve(Some("o"), Some("agent"), Some(&bundle));
+        assert!(resolved.enabled, "a team cannot disable the firewall");
+        assert_eq!(resolved.policy, FirewallPolicy::Sanitize);
+        assert!(resolved.redact_pii, "the team lock binds the agent leaf");
+
+        let stricter = PolicyBundle {
+            platform_floor: None,
+            firewall: None,
+            team_firewall: Some(FirewallOverlay {
+                policy: Some(FirewallPolicy::Block),
+                ..Default::default()
+            }),
+            agent_overlays: HashMap::new(),
+        };
+        assert_eq!(
+            r.resolve(Some("o"), None, Some(&stricter)).policy,
+            FirewallPolicy::Block
+        );
+    }
+
+    #[test]
     fn org_some_overrides_none_inherits() {
         let r = FirewallResolver::new(unlocked_base());
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 policy: Some(FirewallPolicy::Block),
                 redact_pii: Some(false),
@@ -863,6 +1021,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 policy: Some(FirewallPolicy::WarnAndContinue),
                 ..Default::default()
@@ -891,6 +1051,8 @@ mod tests {
         let mut agent_overlays = HashMap::new();
         agent_overlays.insert("a1".to_string(), FirewallOverlay::default());
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 alert: Some(AlertTier::Fanout),
                 ..Default::default()
@@ -914,6 +1076,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 alert: Some(AlertTier::Warn),
                 ..Default::default()
@@ -938,6 +1102,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 alert: Some(AlertTier::Email),
                 ..Default::default()
@@ -965,6 +1131,8 @@ mod tests {
 
         // Going quieter is refused at the org level…
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 alert: Some(AlertTier::Silent),
                 ..Default::default()
@@ -987,6 +1155,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 alert: Some(AlertTier::Silent),
                 ..Default::default()
@@ -1009,6 +1179,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 alert: Some(AlertTier::Silent),
                 ..Default::default()
@@ -1031,6 +1203,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 alert: Some(AlertTier::Email),
                 locked_fields: vec!["alert".into()],
@@ -1088,6 +1262,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 custom_patterns: vec![CustomPattern {
                     name: "org_pat".into(),
@@ -1121,6 +1297,8 @@ mod tests {
         let r = FirewallResolver::new(node);
 
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 enabled: Some(false), // attempt to loosen
                 ..Default::default()
@@ -1142,6 +1320,8 @@ mod tests {
         let r = FirewallResolver::new(node);
 
         let loosen = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 policy: Some(FirewallPolicy::WarnAndContinue),
                 ..Default::default()
@@ -1155,6 +1335,8 @@ mod tests {
         );
 
         let tighten = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 policy: Some(FirewallPolicy::Block),
                 ..Default::default()
@@ -1183,6 +1365,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 enabled: Some(true),
                 locked_fields: vec!["enabled".into()],
@@ -1210,6 +1394,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 enabled: Some(false),                          // attempt: disable
                 scan_inbound: Some(false),                     // attempt: skip scan
@@ -1236,6 +1422,8 @@ mod tests {
         node.policy = FirewallPolicy::Sanitize;
         let r = FirewallResolver::new(node);
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 policy: Some(FirewallPolicy::Block),
                 log_detections: Some(false), // explicit unlocked notification setting
@@ -1266,6 +1454,8 @@ mod tests {
         node.locked_fields = vec!["inspector".into()];
         let r = FirewallResolver::new(node);
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 inspector: Some(InspectorConfig {
                     enabled: false,
@@ -1319,6 +1509,8 @@ mod tests {
         // Explicitly unlock this fixture so the redaction overlay changes the
         // resolved config rather than testing a correctly rejected loosening.
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 redact_pii: Some(false),
                 ..Default::default()
@@ -1351,6 +1543,8 @@ mod tests {
         let r = FirewallResolver::new(node);
 
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 inspector: Some(InspectorConfig {
                     enabled: false,                          // attempt: disable
@@ -1400,6 +1594,8 @@ mod tests {
         let r = FirewallResolver::new(node);
 
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 inspector: Some(InspectorConfig {
                     enabled: true,
@@ -1431,6 +1627,8 @@ mod tests {
         // also never poisons the scanner-cache key).
         let r = FirewallResolver::new(base());
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 wrap_untrusted_tool_results: Some(false),
                 locked_fields: vec!["wrap_untrusted_tool_results".into()],
@@ -1568,6 +1766,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 evaluators: Some(vec![
                     binding("a", true, Some(FirewallPolicy::Block), false),
@@ -1611,6 +1811,8 @@ mod tests {
             },
         );
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(FirewallOverlay {
                 evaluators: Some(vec![binding("a", true, Some(FirewallPolicy::Block), true)]),
                 ..Default::default()
@@ -1664,6 +1866,8 @@ mod tests {
             assert!(config.scan_outbound && config.redact_pii && config.redact_secrets);
         }
         let bundle = PolicyBundle {
+            platform_floor: None,
+            team_firewall: None,
             firewall: Some(disable_egress()),
             agent_overlays: HashMap::from([("agent".into(), disable_egress())]),
         };

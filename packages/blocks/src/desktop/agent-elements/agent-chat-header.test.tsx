@@ -14,7 +14,7 @@ test("renders a host-owned conversation header above the chat stage", () => {
 					id: "user-1",
 					parts: [{ text: "Hello", type: "text" }],
 					role: "user",
-				} as UIMessage,
+				} satisfies UIMessage,
 			]}
 			onSend={() => undefined}
 			onStop={() => undefined}
@@ -45,7 +45,7 @@ test("renders an assistant-only page-tool result", () => {
 						},
 					],
 					role: "assistant",
-				} as UIMessage,
+				} satisfies UIMessage,
 			]}
 			onSend={() => undefined}
 			onStop={() => undefined}
@@ -55,4 +55,22 @@ test("renders an assistant-only page-tool result", () => {
 
 	expect(markup).toContain("list_agent_skills result: - local skill");
 	expect(markup).toContain('data-transcript-anchor-id="page-tool-result"');
+});
+
+test("app context and quoted text stay above an editable composer", () => {
+	const markup = renderToStaticMarkup(
+		<AgentChat
+			composerHeader={<div data-testid="app-context">Selected bolt</div>}
+			messages={[]}
+			onSend={() => undefined}
+			onStop={() => undefined}
+			quote="Quoted selection"
+			status="ready"
+		/>
+	);
+	const contextIndex = markup.indexOf('data-testid="app-context"');
+	const inputIndex = markup.indexOf("<textarea");
+	expect(contextIndex).toBeGreaterThanOrEqual(0);
+	expect(inputIndex).toBeGreaterThan(contextIndex);
+	expect(markup).toContain("Quoted selection");
 });

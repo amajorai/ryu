@@ -2,25 +2,25 @@
 //
 // A shared asset-insertion dialog with three tabs — Icons (Iconify: Lucide +
 // Hugeicons + 148 more sets), Logos (SVGL brand marks), and GIFs (Core proxy).
-// Both the Spaces whiteboard and the creative canvas mount it and adapt the
-// returned {@link AssetSelection} into their own element/node. Icons + logos need
-// no configuration; GIFs need a free provider key on the node (the tab explains
-// how when unconfigured).
+// This legacy Desktop component currently has no production caller. The Canvas
+// satellite owns its own picker in apps-store/canvas/ui/src/AssetPicker.tsx.
+// Icons + logos need no configuration; GIFs need a free provider key on the node.
 
 import {
 	Dialog,
 	DialogContent,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	Tabs,
 	TabsContent,
 	TabsList,
 	TabsTrigger,
-} from "@ryu/ui/components/tabs";
+} from "@ryu/ui/components/tabs.tsx";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TitleTooltip } from "@/src/components/layout/overflow-tooltip.tsx";
@@ -40,11 +40,11 @@ import { toTarget } from "@/src/lib/api/client.ts";
 
 type AssetTab = "icons" | "logos" | "gifs";
 
-const PLACEHOLDER: Record<AssetTab, string> = {
+const PLACEHOLDER = {
 	icons: "Search icons (Lucide, Hugeicons, and more)…",
 	logos: "Search brand logos…",
 	gifs: "Search GIFs…",
-};
+} satisfies Record<AssetTab, string>;
 
 export interface AssetPickerProps {
 	onOpenChange: (open: boolean) => void;
@@ -211,7 +211,11 @@ export function AssetPicker({
 				</DialogHeader>
 				<Tabs
 					className="flex min-h-0 flex-1 flex-col"
-					onValueChange={(v) => setTab(v as AssetTab)}
+					onValueChange={(value) => {
+						if (value === "icons" || value === "logos" || value === "gifs") {
+							setTab(value);
+						}
+					}}
 					value={tab}
 				>
 					<TabsList variant="pills">
@@ -222,8 +226,9 @@ export function AssetPicker({
 					<div className="relative mt-3">
 						<Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
 						<Input
+							aria-label="Search assets"
 							autoFocus
-							className="pl-8"
+							leadingAdornment="compact"
 							onChange={(e) => setQuery(e.target.value)}
 							placeholder={PLACEHOLDER[tab]}
 							value={query}
@@ -232,9 +237,7 @@ export function AssetPicker({
 
 					<div className="scroll-fade mt-3 min-h-0 flex-1 overflow-y-auto">
 						{loading ? (
-							<div className="flex h-40 items-center justify-center">
-								<Spinner />
-							</div>
+							<SkeletonRows spacing="spacious" />
 						) : error ? (
 							<EmptyState message={error} />
 						) : (
@@ -250,12 +253,12 @@ export function AssetPicker({
 													label={hit.id}
 													onClick={() => pickIcon(hit)}
 												>
-													{/** biome-ignore lint/performance/noImgElement: remote SVG preview, not a bundled asset */}
+													{/** remote SVG preview, not a bundled asset */}
 													<img
 														alt={hit.id}
 														className="size-6"
 														loading="lazy"
-														src={hit.previewUrl}
+														src={safeMediaUrl(hit.previewUrl) ?? undefined}
 													/>
 												</Tile>
 											))}
@@ -273,12 +276,12 @@ export function AssetPicker({
 													label={hit.title}
 													onClick={() => pickLogo(hit)}
 												>
-													{/** biome-ignore lint/performance/noImgElement: remote SVG preview, not a bundled asset */}
+													{/** remote SVG preview, not a bundled asset */}
 													<img
 														alt={hit.title}
 														className="size-10 object-contain"
 														loading="lazy"
-														src={hit.svgUrl}
+														src={safeMediaUrl(hit.svgUrl) ?? undefined}
 													/>
 												</Tile>
 											))}
@@ -299,12 +302,12 @@ export function AssetPicker({
 														onClick={() => pickGif(hit)}
 														type="button"
 													>
-														{/** biome-ignore lint/performance/noImgElement: remote GIF preview, not a bundled asset */}
+														{/** remote GIF preview, not a bundled asset */}
 														<img
 															alt={hit.title}
 															className="aspect-square w-full object-cover"
 															loading="lazy"
-															src={hit.preview_url}
+															src={safeMediaUrl(hit.preview_url) ?? undefined}
 														/>
 													</button>
 												))}

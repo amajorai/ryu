@@ -1,0 +1,21 @@
+.surface {
+	color: #f4f4f5;
+	background-color: #09090b;
+}
+.kicker {
+	color: #c4b5fd;
+	letter-spacing: 1.4px;
+}
+.caption {
+	color: #a1a1aa;
+}
+.dock {
+	background-color: #111113;
+	border-color: #27272a;
+}
+.dockHeader {
+	border-color: #27272a;
+}
+.tabReadback {
+	border-color: #3f3f46;
+}

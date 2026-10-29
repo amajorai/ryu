@@ -21,16 +21,23 @@ run budget) inject via the global `SandboxHost` seam (`host.rs`, `install_host`)
 - `ExecSpec` / `ExecOutput` / `SandboxCapabilities` / `SandboxScope` /
   `WorkspaceAccess` / `WorkspaceId` — the exec contract; capabilities are lowered
   from `ryu-kernel-contracts` `PermissionSet`.
-- `heartbeat.rs` — per-run metering heartbeat (kill-isolation + Gateway
-  `sandbox/tick` debit). `session.rs` — long-lived-workspace path.
+- `heartbeat.rs` — per-run metering heartbeat (sticky kill-isolation + Gateway
+  `sandbox/tick` debit and idempotent `sandbox/complete` release). `session.rs` —
+  long-lived-workspace path.
 - Backends: `wasmtime.rs` (feature `sandbox-wasmtime`), `docker.rs`,
-  `microsandbox.rs`, `opensandbox.rs`, `daytona.rs` (remote REST).
+  `microsandbox.rs`, `opensandbox.rs`, `mxc.rs` (Windows MXC process container via
+  `wxc-exec`), `daytona.rs` (remote REST),
+  `box_backend.rs`, `local.rs` (host subprocess, **no isolation**, requires
+  `RYU_SANDBOX_LOCAL_ENABLE=1`), `ssh.rs` (system `ssh` client, requires
+  `RYU_SANDBOX_SSH_HOST`), and `singularity.rs` (`apptainer`/`singularity`
+  CLI, Linux). `modal` and `vercel_sandbox` are recognised names reported as
+  not implemented, with an actionable error when selected.
 
 ## Swap seam
 
 `select_backend(preferred)` picks by name. **wasmtime/WASI** is the in-process
 default (only one built INTO Core, always resolves); command backends (docker,
-microsandbox, opensandbox) and remote Daytona are detect-gated swaps. There is no
+microsandbox, opensandbox, mxc) and remote Daytona are detect-gated swaps. There is no
 lower-isolation fallback below the default by design — a missing strong backend
 fails loudly, never silently downgrades.
 

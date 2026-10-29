@@ -6,9 +6,9 @@
 
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useMemo } from "react";
 import {
 	SettingsCard,
@@ -54,10 +54,7 @@ export function AgentChannelsSection({ agentId }: { agentId: string | null }) {
 				)}
 
 				{authed && loading ? (
-					<div className="flex items-center gap-2 text-muted-foreground text-xs">
-						<Spinner className="size-3" />
-						Loading channels…
-					</div>
+					<SkeletonRows label="Loading channels…" spacing="comfortable" />
 				) : null}
 
 				{authed && !loading && bound.length === 0 ? (
@@ -70,7 +67,7 @@ export function AgentChannelsSection({ agentId }: { agentId: string | null }) {
 				{bound.length > 0 ? (
 					<div className="flex flex-wrap gap-1.5">
 						{bound.map((channel) => (
-							<Badge className="gap-1.5" key={channel.id} variant="outline">
+							<Badge key={channel.id} spacing="relaxed" variant="outline">
 								<span className="size-1.5 rounded-full bg-success" />
 								{channel.name}
 								<span className="text-muted-foreground">

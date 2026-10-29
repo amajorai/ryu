@@ -1,11 +1,24 @@
-import type { HostArtifact } from "./artifact-host-context.tsx";
+import { z } from "zod";
+import type { NativeArtifactObservation } from "./native-artifact-observation.ts";
+import { nativeSdkSchemaAdmits } from "./utils/native-sdk-admission.ts";
+
+const nativeTextSchema = z.string();
+
 import { artifactFromInput } from "./tools/artifact-tool.ts";
+import {
+	type NativeSdkValue,
+	nativeSdkObjectSchema,
+} from "./utils/native-sdk-observation.ts";
 import { normalizeAssistantToolParts } from "./utils/tool-part-normalizer.ts";
 
 /** The two places an agent-authored JSON UI can live in the transcript. */
 export type JsonRenderPlacement = "inline" | "turn-end";
 export type AgentUiFormat = "json-render" | "a2ui";
 
+interface EditStats {
+	deletions: number;
+	insertions: number;
+}
 export interface EditedFile {
 	deletions: number;
 	insertions: number;
@@ -35,14 +48,20 @@ export interface JsonRenderTurnEndCard {
 	format?: AgentUiFormat;
 	id: string;
 	kind: "json-render";
-	spec: unknown;
+	spec: NativeSdkValue;
 	title?: string;
+	/** Source tool call, under which the widget's interactive state is saved. */
+	toolCallId?: string;
 }
 
 export interface ArtifactTurnEndCard {
-	artifact: HostArtifact;
+	artifact: NativeArtifactObservation;
 	id: string;
 	kind: "artifact";
+	/** Source tool call. The card renders under the same artifact id as the
+	 *  inline tool row (`artifact-<toolCallId>`), so a page's saved state carries
+	 *  over when the card moves to the end of the turn. */
+	toolCallId?: string;
 }
 
 export type TurnEndCard =
@@ -73,32 +92,74 @@ const PATCH_FILE = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/;
 const STAT_INSERTIONS = /\+(\d+)/;
 const STAT_DELETIONS = /-(\d+)/;
 
-type RecordValue = Record<string, unknown>;
-
-function isRecord(value: unknown): value is RecordValue {
-	return typeof value === "object" && value !== null;
+/** Only fields actually read by the live SDK card projection; opaque future payloads remain untouched. */
+interface RecordValue {
+	command?: NativeSdkValue;
+	content?: NativeSdkValue;
+	diff?: NativeSdkValue;
+	diff_stats?: NativeSdkValue;
+	diffStats?: NativeSdkValue;
+	edits?: NativeSdkValue;
+	elements?: NativeSdkValue;
+	errorText?: NativeSdkValue;
+	file_path?: NativeSdkValue;
+	filename?: NativeSdkValue;
+	filePath?: NativeSdkValue;
+	format?: NativeSdkValue;
+	hunks?: NativeSdkValue;
+	input?: NativeSdkValue;
+	lines?: NativeSdkValue;
+	new_str?: NativeSdkValue;
+	new_string?: NativeSdkValue;
+	notebook_path?: NativeSdkValue;
+	notebookPath?: NativeSdkValue;
+	old_content?: NativeSdkValue;
+	old_str?: NativeSdkValue;
+	old_string?: NativeSdkValue;
+	output?: NativeSdkValue;
+	patch?: NativeSdkValue;
+	path?: NativeSdkValue;
+	placement?: NativeSdkValue;
+	replace_all?: NativeSdkValue;
+	result?: NativeSdkValue;
+	root?: NativeSdkValue;
+	spec?: NativeSdkValue;
+	state?: NativeSdkValue;
+	structured_patch?: NativeSdkValue;
+	structuredPatch?: NativeSdkValue;
+	title?: NativeSdkValue;
+	toolCallId?: NativeSdkValue;
+	toolName?: NativeSdkValue;
+	type?: NativeSdkValue;
 }
 
-function recordOf(value: unknown): RecordValue {
+function isRecord(value: NativeSdkValue): value is RecordValue {
+	return nativeSdkSchemaAdmits(nativeSdkObjectSchema, value);
+}
+function isText(value: NativeSdkValue): value is string {
+	return nativeSdkSchemaAdmits(nativeTextSchema, value);
+}
+
+function recordOf(value: NativeSdkValue): RecordValue {
 	return isRecord(value) ? value : {};
 }
 
-function partToolName(part: unknown): string {
+function partToolName(part: NativeSdkValue): string {
 	const value = recordOf(part);
-	if (typeof value.toolName === "string" && value.toolName.trim()) {
+	if (isText(value.toolName) && value.toolName.trim()) {
 		return value.toolName.trim();
 	}
-	if (typeof value.type === "string" && value.type.startsWith("tool-")) {
+	if (isText(value.type) && value.type.startsWith("tool-")) {
 		return value.type.slice("tool-".length);
 	}
 	return "";
 }
 
-function partInput(part: unknown): RecordValue {
+function partInput(part: NativeSdkValue): RecordValue {
 	return recordOf(recordOf(part).input);
 }
 
-function partOutput(part: unknown): RecordValue {
+function partOutput(part: NativeSdkValue): RecordValue {
 	const value = recordOf(part);
 	return recordOf(value.output ?? value.result);
 }
@@ -107,7 +168,7 @@ function firstString(...records: RecordValue[]): string | undefined {
 	for (const record of records) {
 		for (const key of PATH_KEYS) {
 			const value = record[key];
-			if (typeof value === "string" && value.trim()) {
+			if (isText(value) && value.trim()) {
 				return value.trim();
 			}
 		}
@@ -115,31 +176,28 @@ function firstString(...records: RecordValue[]): string | undefined {
 	return undefined;
 }
 
-function lineCount(value: unknown): number {
-	if (typeof value !== "string" || value.length === 0) {
+function lineCount(value: NativeSdkValue): number {
+	if (!isText(value) || value.length === 0) {
 		return 0;
 	}
 	return value.split(/\r?\n/).length;
 }
 
-function addStats(
-	left: { deletions: number; insertions: number },
-	right: { deletions: number; insertions: number }
-): { deletions: number; insertions: number } {
+function addStats(left: EditStats, right: EditStats): EditStats {
 	return {
 		deletions: left.deletions + right.deletions,
 		insertions: left.insertions + right.insertions,
 	};
 }
 
-function emptyStats(): { deletions: number; insertions: number } {
+function emptyStats(): EditStats {
 	return { deletions: 0, insertions: 0 };
 }
 
 function addFile(
 	files: Map<string, EditedFile>,
 	path: string,
-	stats: { deletions: number; insertions: number }
+	stats: EditStats
 ): void {
 	const normalizedPath = path.trim();
 	if (!normalizedPath) {
@@ -153,11 +211,8 @@ function addFile(
 	});
 }
 
-function statsFromDiffText(value: unknown): {
-	deletions: number;
-	insertions: number;
-} {
-	if (typeof value !== "string") {
+function statsFromDiffText(value: NativeSdkValue): EditStats {
+	if (!isText(value)) {
 		return emptyStats();
 	}
 	const insertions = Number.parseInt(
@@ -171,11 +226,8 @@ function statsFromDiffText(value: unknown): {
 	};
 }
 
-function statsFromPatchText(value: unknown): {
-	deletions: number;
-	insertions: number;
-} {
-	if (typeof value !== "string") {
+function statsFromPatchText(value: NativeSdkValue): EditStats {
+	if (!isText(value)) {
 		return emptyStats();
 	}
 	let insertions = 0;
@@ -190,11 +242,8 @@ function statsFromPatchText(value: unknown): {
 	return { deletions, insertions };
 }
 
-function statsFromStructuredPatch(value: unknown): {
-	deletions: number;
-	insertions: number;
-} {
-	if (typeof value === "string") {
+function statsFromStructuredPatch(value: NativeSdkValue): EditStats {
+	if (isText(value)) {
 		return statsFromPatchText(value);
 	}
 	if (!Array.isArray(value)) {
@@ -202,7 +251,7 @@ function statsFromStructuredPatch(value: unknown): {
 	}
 	let stats = emptyStats();
 	for (const entry of value) {
-		if (typeof entry === "string") {
+		if (isText(entry)) {
 			stats = addStats(stats, statsFromPatchText(entry));
 			continue;
 		}
@@ -224,7 +273,7 @@ function editStats(
 	tool: string,
 	input: RecordValue,
 	output: RecordValue
-): { deletions: number; insertions: number } {
+): EditStats {
 	const diffStats = [
 		input.diffStats,
 		input.diff_stats,
@@ -266,9 +315,9 @@ function editStats(
 
 function recordPatchFiles(
 	files: Map<string, EditedFile>,
-	patch: unknown
+	patch: NativeSdkValue
 ): boolean {
-	if (typeof patch !== "string") {
+	if (!isText(patch)) {
 		return false;
 	}
 	let currentPath: string | undefined;
@@ -325,15 +374,15 @@ function addMultiEditFiles(
 	return found;
 }
 
-function isFailedPart(part: unknown): boolean {
+function isFailedPart(part: NativeSdkValue): boolean {
 	const value = recordOf(part);
 	return (
 		value.state === "output-error" ||
-		(typeof value.errorText === "string" && value.errorText.trim().length > 0)
+		(isText(value.errorText) && value.errorText.trim().length > 0)
 	);
 }
 
-function isIncompletePart(part: unknown): boolean {
+function isIncompletePart(part: NativeSdkValue): boolean {
 	const state = recordOf(part).state;
 	return ["input-available", "input-streaming", "streaming"].includes(
 		String(state)
@@ -341,7 +390,9 @@ function isIncompletePart(part: unknown): boolean {
 }
 
 /** Extract the completed file writes/edits represented by one assistant turn. */
-export function deriveEditedFiles(parts: unknown[]): EditedFile[] {
+export function deriveEditedFiles(
+	parts: NativeSdkValue[] | null | undefined
+): EditedFile[] {
 	const files = new Map<string, EditedFile>();
 	const normalizedParts = normalizeAssistantToolParts(parts ?? []);
 	for (const part of normalizedParts) {
@@ -380,14 +431,12 @@ function reversibleTextEdit({
 	before,
 	path,
 }: {
-	after: unknown;
-	before: unknown;
+	after: NativeSdkValue;
+	before: NativeSdkValue;
 	path: string | undefined;
 }): ReversibleTextEdit | undefined {
 	if (
-		!path ||
-		typeof before !== "string" ||
-		typeof after !== "string" ||
+		!(path && isText(before) && isText(after)) ||
 		after.length === 0 ||
 		after === before
 	) {
@@ -417,7 +466,7 @@ function singleInputEdit(
 	}
 	if (
 		tool === "str_replace_editor" &&
-		typeof input.command === "string" &&
+		isText(input.command) &&
 		input.command !== "str_replace"
 	) {
 		return undefined;
@@ -455,7 +504,9 @@ function multiInputEdits(
 }
 
 /** Build an exact text-replacement reversal only when the whole turn is safe. */
-export function deriveUndoPlan(parts: unknown[]): FileEditUndoPlan | undefined {
+export function deriveUndoPlan(
+	parts: NativeSdkValue[] | null | undefined
+): FileEditUndoPlan | undefined {
 	const normalizedParts = normalizeAssistantToolParts(parts ?? []);
 	const edits: ReversibleTextEdit[] = [];
 	let foundWrite = false;
@@ -500,7 +551,7 @@ export function deriveUndoPlan(parts: unknown[]): FileEditUndoPlan | undefined {
 	return { edits, kind: "text-replacements" };
 }
 
-function isUiRenderPart(part: unknown): boolean {
+function isUiRenderPart(part: NativeSdkValue): boolean {
 	const value = recordOf(part);
 	return (
 		value.type === "tool-ui.render" ||
@@ -508,7 +559,7 @@ function isUiRenderPart(part: unknown): boolean {
 	);
 }
 
-function isArtifactRenderPart(part: unknown): boolean {
+function isArtifactRenderPart(part: NativeSdkValue): boolean {
 	const value = recordOf(part);
 	return (
 		value.type === "tool-artifact.render" ||
@@ -516,65 +567,74 @@ function isArtifactRenderPart(part: unknown): boolean {
 	);
 }
 
-function isRenderableSpec(value: unknown, format?: AgentUiFormat): boolean {
+function isRenderableSpec(
+	value: NativeSdkValue,
+	format?: AgentUiFormat
+): boolean {
 	if (format === "a2ui") {
-		return Array.isArray(value) || typeof value === "string" || isRecord(value);
+		return Array.isArray(value) || isText(value) || isRecord(value);
 	}
 	if (!isRecord(value)) {
 		return false;
 	}
-	return typeof value.root === "string" && isRecord(value.elements);
+	return isText(value.root) && isRecord(value.elements);
 }
 
-function formatOf(part: unknown): AgentUiFormat | undefined {
+function formatOf(part: NativeSdkValue): AgentUiFormat | undefined {
 	const format = partInput(part).format;
 	return format === "json-render" || format === "a2ui" ? format : undefined;
 }
 
-function titleOf(value: unknown): string | undefined {
-	if (typeof value !== "string") {
+function titleOf(value: NativeSdkValue): string | undefined {
+	if (!isText(value)) {
 		return undefined;
 	}
 	const title = value.trim();
 	return title ? title.slice(0, 120) : undefined;
 }
 
-function placementOf(part: unknown): JsonRenderPlacement {
+function placementOf(part: NativeSdkValue): JsonRenderPlacement {
 	return partInput(part).placement === "turn-end" ? "turn-end" : "inline";
 }
 
-export function isTurnEndJsonRenderPart(part: unknown): boolean {
-	const input = partInput(part);
-	const format = formatOf(part);
+export function isTurnEndJsonRenderPart(part: NativeSdkValue): boolean {
+	const parsedPart = part;
+	const input = partInput(parsedPart);
+	const format = formatOf(parsedPart);
 	return (
-		isUiRenderPart(part) &&
-		!isIncompletePart(part) &&
-		placementOf(part) === "turn-end" &&
+		isUiRenderPart(parsedPart) &&
+		!isIncompletePart(parsedPart) &&
+		placementOf(parsedPart) === "turn-end" &&
 		isRenderableSpec(input.spec, format)
 	);
 }
 
-export function isTurnEndArtifactPart(part: unknown): boolean {
+export function isTurnEndArtifactPart(part: NativeSdkValue): boolean {
+	const parsedPart = part;
 	return (
-		isArtifactRenderPart(part) &&
-		!isIncompletePart(part) &&
-		partInput(part).placement === "turn-end" &&
-		artifactFromInput(partInput(part)) !== null
+		isArtifactRenderPart(parsedPart) &&
+		!isIncompletePart(parsedPart) &&
+		partInput(parsedPart).placement === "turn-end" &&
+		artifactFromInput(partInput(parsedPart)) !== null
 	);
 }
 
 /** True for edit tool parts that are represented by the completed file card. */
-export function isEditedFilePart(part: unknown): boolean {
+export function isEditedFilePart(part: NativeSdkValue): boolean {
+	const parsedPart = part;
 	return (
-		WRITE_TOOLS.has(partToolName(part)) &&
-		!isFailedPart(part) &&
-		!isIncompletePart(part)
+		WRITE_TOOLS.has(partToolName(parsedPart)) &&
+		!isFailedPart(parsedPart) &&
+		!isIncompletePart(parsedPart)
 	);
 }
 
 /** True when the part will be represented by a completed end-of-turn card. */
-export function isTurnEndCardPart(part: unknown): boolean {
-	return isTurnEndJsonRenderPart(part) || isTurnEndArtifactPart(part);
+export function isTurnEndCardPart(part: NativeSdkValue): boolean {
+	const parsedPart = part;
+	return (
+		isTurnEndJsonRenderPart(parsedPart) || isTurnEndArtifactPart(parsedPart)
+	);
 }
 
 /**
@@ -583,7 +643,7 @@ export function isTurnEndCardPart(part: unknown): boolean {
  * cards without a second server-side summary channel.
  */
 export function deriveTurnEndCards(
-	parts: unknown[],
+	parts: NativeSdkValue[] | null | undefined,
 	sourceId = "turn"
 ): TurnEndCard[] {
 	const normalizedParts = normalizeAssistantToolParts(parts ?? []);
@@ -591,35 +651,52 @@ export function deriveTurnEndCards(
 	const files = deriveEditedFiles(normalizedParts);
 	if (files.length > 0) {
 		const undoPlan = deriveUndoPlan(normalizedParts);
-		cards.push({
+		const card: FileEditsTurnEndCard = {
 			files,
 			id: `${sourceId}-edited-files`,
 			kind: "file-edits",
-			...(undoPlan ? { undoPlan } : {}),
-		});
+		};
+		if (undoPlan) {
+			card.undoPlan = undoPlan;
+		}
+		cards.push(card);
 	}
 
 	for (const [index, part] of normalizedParts.entries()) {
 		if (isTurnEndJsonRenderPart(part)) {
 			const input = partInput(part);
 			const format = formatOf(part);
-			cards.push({
-				...(format ? { format } : {}),
+			const formatFields: Pick<JsonRenderTurnEndCard, "format"> = {};
+			if (format) {
+				formatFields.format = format;
+			}
+			const toolCallId = recordOf(part).toolCallId;
+			const card: JsonRenderTurnEndCard = {
+				...formatFields,
 				id: `${sourceId}-json-${index}`,
 				kind: "json-render",
 				spec: input.spec,
 				title: titleOf(input.title),
-			});
+			};
+			if (isText(toolCallId) && toolCallId) {
+				card.toolCallId = toolCallId;
+			}
+			cards.push(card);
 			continue;
 		}
 		if (isTurnEndArtifactPart(part)) {
 			const artifact = artifactFromInput(partInput(part));
 			if (artifact) {
-				cards.push({
+				const card: ArtifactTurnEndCard = {
 					artifact,
 					id: `${sourceId}-artifact-${index}`,
 					kind: "artifact",
-				});
+				};
+				const toolCallId = recordOf(part).toolCallId;
+				if (isText(toolCallId) && toolCallId) {
+					card.toolCallId = toolCallId;
+				}
+				cards.push(card);
 			}
 		}
 	}
@@ -627,6 +704,8 @@ export function deriveTurnEndCards(
 }
 
 /** Used by Detail=None so a turn-end result card remains visible after tool rows hide. */
-export function hasTurnEndCards(parts: unknown[]): boolean {
+export function hasTurnEndCards(
+	parts: NativeSdkValue[] | null | undefined
+): boolean {
 	return deriveTurnEndCards(parts).length > 0;
 }

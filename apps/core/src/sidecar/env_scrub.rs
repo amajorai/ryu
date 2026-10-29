@@ -1,6 +1,7 @@
 //! Child-process environment scrubbing (security, defense-in-depth).
 //!
-//! Core spawns untrusted-ish subprocesses (the Deno PTC sandbox, per-request MCP
+//! Core spawns untrusted-ish subprocesses (programs the JS sandbox's
+//! `childProcess.run` starts, per-request MCP
 //! stdio servers). By default `std::process::Command` / `tokio::process::Command`
 //! inherit Core's **entire** environment, which can carry provider API keys,
 //! gateway tokens, credits secrets, and other credentials. A subprocess has no
@@ -9,7 +10,7 @@
 //! Two strategies:
 //!   - [`scrub_child_env`] (deny-list): drop any var whose KEY looks secret-like
 //!     (contains `KEY`/`TOKEN`/`SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL`/`AUTH`,
-//!     case-insensitive), keeping everything else. Used for the Deno sandbox,
+//!     case-insensitive), keeping everything else. Used for the JS sandbox,
 //!     which needs a mostly-normal env (PATH, DENO_DIR, HOME, ...) minus secrets.
 //!   - [`mcp_safe_env`] (allow-list): pass ONLY a small fixed set of benign vars
 //!     ([`MCP_SAFE_ALLOWLIST`]) plus any `XDG_*` var. Used for MCP stdio servers,
@@ -76,21 +77,19 @@ pub const MCP_SAFE_ALLOWLIST: &[&str] = &[
     // Ghost sidecar (moved from a hardcoded built-in MCP server to its plugin
     // manifest's `mcp_servers`): these profile-aware values are seeded into Core's
     // process env in `main.rs::seed_ghost_sidecar_env` and must survive the
-    // env-clear allowlist to reach the spawned Ghost child. Neither is a secret —
-    // one is a loopback overlay URL, the other a data-dir path.
+    // env-clear allowlist to reach the spawned Ghost child. None is a secret —
+    // one is a loopback overlay URL, the others data-dir paths.
     "RYU_GHOST_OVERLAY_URL",
     "GHOST_DATA_DIR",
+    "GHOST_MODELS_DIR",
     // `DISPLAY` (X11): a virtual-desktop node runs Core against a headless X display
     // (`Xvfb`/`Xvnc`), and Ghost must see that display to capture + drive the same
     // screen the desktop app streams. The variable names the display, not a secret;
     // the spawned MCP child inherits whatever display the node operator configured.
     "DISPLAY",
-    // Research (same move as ghost: from a hardcoded built-in MCP provider to its
-    // app manifest's `mcp_servers`, `ryu-research mcp`). In-process, the tools read
-    // this var straight out of Core's env; spawned as a child they get nothing but
-    // this allowlist, so without the entry a dev stack's tools would silently talk
-    // to the RELEASE autoresearch engine on :8087 instead of the dev one on :9087.
-    // `profile::apply_env_defaults` seeds it; it is a loopback URL, not a secret.
+    // Research: an operator-set explicit engine address (Core no longer seeds it;
+    // the app derives its profile-shifted engine port itself). Passed through so
+    // an explicit override reaches the app's MCP child. Loopback URL, not a secret.
     "RYU_RESEARCH_UPSTREAM",
     // Store-owning app MCP servers need the same resolved data directory and
     // profile as their HTTP sidecars. Both values are non-secret routing state;
@@ -98,6 +97,11 @@ pub const MCP_SAFE_ALLOWLIST: &[&str] = &[
     // node's HTTP and stdio stores on dev/canary/beta or a relocated RYU_DIR.
     "RYU_DIR",
     "RYU_PROFILE",
+    // The explicit port-offset override that, with `RYU_PROFILE`, is how a child
+    // derives the same profile-shifted ports Core uses (`ryu_sidecar_runtime::
+    // profiled_port`). Without it a standalone host's offset would not reach app
+    // sidecars that compute their own private ports (e.g. Research's engine).
+    "RYU_PORT_OFFSET",
 ];
 
 /// Whether an env KEY is secret-like (contains any [`SENSITIVE_MARKERS`] token,
@@ -178,13 +182,13 @@ mod tests {
             ("HTTP_AUTHORIZATION", "bearer"),
             ("DATABASE_URL", "postgres://db/ryu"),
             ("HOME", "/home/u"),
-            ("DENO_DIR", "/cache/deno"),
+            ("TMPDIR", "/tmp"),
         ]);
         let out = scrub_child_env(base, &[]);
         // Non-secret vars survive.
         assert!(has(&out, "PATH"));
         assert!(has(&out, "HOME"));
-        assert!(has(&out, "DENO_DIR"));
+        assert!(has(&out, "TMPDIR"));
         // Every secret-like key is dropped (KEY/TOKEN/SECRET/PASSWORD/PASSWD/
         // CREDENTIAL/AUTH).
         for dropped in [
@@ -254,9 +258,11 @@ mod tests {
         let base = pairs(&[
             ("RYU_RESEARCH_UPSTREAM", "http://127.0.0.1:9087"),
             ("RYU_GHOST_OVERLAY_URL", "http://127.0.0.1:7986"),
-            ("GHOST_DATA_DIR", "/home/u/.ghost"),
+            ("GHOST_DATA_DIR", "/home/u/.ryu-dev/services/ghost"),
+            ("GHOST_MODELS_DIR", "/home/u/.ryu-dev/models/vision/ghost"),
             ("RYU_DIR", "/home/u/.ryu-dev"),
             ("RYU_PROFILE", "dev"),
+            ("RYU_PORT_OFFSET", "1000"),
             // A virtual-desktop node: the X display the desktop app streams.
             ("DISPLAY", ":99"),
             // A neighbouring RYU_* var that is NOT allowlisted must still drop —
@@ -267,6 +273,7 @@ mod tests {
         assert!(has(&out, "RYU_RESEARCH_UPSTREAM"));
         assert!(has(&out, "RYU_GHOST_OVERLAY_URL"));
         assert!(has(&out, "GHOST_DATA_DIR"));
+        assert!(has(&out, "GHOST_MODELS_DIR"));
         assert!(has(&out, "DISPLAY"), "the virtual display must reach Ghost");
         assert!(
             !has(&out, "XAUTHORITY"),
@@ -274,6 +281,7 @@ mod tests {
         );
         assert!(has(&out, "RYU_DIR"));
         assert!(has(&out, "RYU_PROFILE"));
+        assert!(has(&out, "RYU_PORT_OFFSET"));
         assert!(!has(&out, "RYU_GATEWAY_URL"));
     }
 

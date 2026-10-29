@@ -5,6 +5,13 @@
 // fetch + ReadableStream (not EventSource) so the bearer token can be attached —
 // same approach as the monitors alert stream.
 
+import { z } from "zod";
+import {
+	type AppJsonValue,
+	appJsonValueSchema,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
+
 import {
 	type ApiTarget,
 	apiUrl,
@@ -32,7 +39,7 @@ export interface Meeting {
 	doc_id?: string | null;
 	ended_at?: string | null;
 	/** Notion-style glyph JSON (GlyphValue), when set. */
-	icon?: unknown | null;
+	icon?: AppJsonValue | null;
 	id: string;
 	notes?: MeetingNotes | null;
 	participants: string[];
@@ -74,7 +81,12 @@ export interface DetectionConfig {
 }
 
 export async function listMeetings(target: ApiTarget): Promise<Meeting[]> {
-	const json = await request<{ meetings?: Meeting[] }>(target, "/api/meetings");
+	const json = await request(
+		target,
+		"/api/meetings",
+		{},
+		meetingListResponseSchema
+	);
 	return json.meetings ?? [];
 }
 
@@ -82,9 +94,11 @@ export async function getMeeting(
 	target: ApiTarget,
 	id: string
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
-		`/api/meetings/${id}`
+		`/api/meetings/${id}`,
+		{},
+		meetingEnvelopeResponseSchema
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "meeting not found");
@@ -96,10 +110,11 @@ export async function startMeeting(
 	target: ApiTarget,
 	data: StartMeetingInput = {}
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
 		"/api/meetings",
-		{ method: "POST", body: data }
+		{ method: "POST", body: data },
+		meetingEnvelopeResponseSchema
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "failed to start meeting");
@@ -111,10 +126,11 @@ export async function finalizeMeeting(
 	target: ApiTarget,
 	id: string
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
 		`/api/meetings/${id}/finalize`,
-		{ method: "POST" }
+		{ method: "POST" },
+		meetingEnvelopeResponseSchema
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "failed to finalize meeting");
@@ -126,7 +142,12 @@ export async function deleteMeeting(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/meetings/${id}`, { method: "DELETE" });
+	await request(
+		target,
+		`/api/meetings/${id}`,
+		{ method: "DELETE" },
+		meetingDeleteResponseSchema
+	);
 }
 
 /** Rename a meeting (`POST /api/meetings/:id/title`; locks out auto-rename). */
@@ -135,10 +156,11 @@ export async function renameMeeting(
 	id: string,
 	title: string
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
 		`/api/meetings/${id}/title`,
-		{ method: "POST", body: { title } }
+		{ method: "POST", body: { title } },
+		meetingEnvelopeResponseSchema
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "failed to rename meeting");
@@ -150,12 +172,13 @@ export async function renameMeeting(
 export async function setMeetingIcon(
 	target: ApiTarget,
 	id: string,
-	icon: unknown | null
+	icon: Parameters<typeof JSON.stringify>[0]
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
 		`/api/meetings/${id}/icon`,
-		{ method: "POST", body: { icon } }
+		{ method: "POST", body: { icon } },
+		meetingEnvelopeResponseSchema
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "failed to set meeting icon");
@@ -172,9 +195,11 @@ export async function getTranscript(
 	target: ApiTarget,
 	id: string
 ): Promise<Transcript> {
-	const json = await request<Transcript>(
+	const json = await request(
 		target,
-		`/api/meetings/${id}/transcript`
+		`/api/meetings/${id}/transcript`,
+		{},
+		meetingTranscriptResponseSchema
 	);
 	return { segments: json.segments ?? [], text: json.text ?? "" };
 }
@@ -182,9 +207,11 @@ export async function getTranscript(
 export async function getDetectionConfig(
 	target: ApiTarget
 ): Promise<DetectionConfig> {
-	const json = await request<DetectionConfig>(
+	const json = await request(
 		target,
-		"/api/meetings/detection-config"
+		"/api/meetings/detection-config",
+		{},
+		meetingDetectionResponseSchema
 	);
 	return { enabled: json.enabled ?? true, apps: json.apps ?? [] };
 }
@@ -193,11 +220,113 @@ export async function setDetectionConfig(
 	target: ApiTarget,
 	data: Partial<DetectionConfig>
 ): Promise<void> {
-	await request(target, "/api/meetings/detection-config", {
-		method: "PUT",
-		body: data,
-	});
+	await request(
+		target,
+		"/api/meetings/detection-config",
+		{
+			method: "PUT",
+			body: data,
+		},
+		meetingDetectionResponseSchema
+	);
 }
+
+const meetingStatusFields = z.enum([
+	"detected",
+	"recording",
+	"processing",
+	"done",
+]);
+const meetingNotesFields = z.object({
+	summary: z.string(),
+	key_points: z.array(z.string()),
+	action_items: z.array(z.string()),
+	decisions: z.array(z.string()),
+	generated_at: z.string().optional(),
+	model: z.string().optional(),
+});
+const meetingFields = z.object({
+	id: z.string(),
+	title: z.string(),
+	title_custom: z.boolean().optional(),
+	icon: appJsonValueSchema.nullable().optional(),
+	app: z.string().nullable().optional(),
+	source: z.enum(["manual", "auto"]),
+	status: meetingStatusFields,
+	started_at: z.string(),
+	ended_at: z.string().nullable().optional(),
+	participants: z.array(z.string()),
+	notes: meetingNotesFields.nullable().optional(),
+	space_id: z.string().nullable().optional(),
+	doc_id: z.string().nullable().optional(),
+	created_at: z.string(),
+	updated_at: z.string(),
+});
+const meetingSegmentFields = z.object({
+	id: z.number(),
+	meeting_id: z.string(),
+	t_offset_ms: z.number(),
+	speaker: z.string().nullable().optional(),
+	text: z.string(),
+	created_at: z.string(),
+});
+// The complete existing Meeting/Segment owners also validate REST responses.
+// Older-node absent fields retain the established public fallbacks/error phases.
+function meetingResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+const meetingResponseSchema = meetingResponse(meetingFields);
+export const meetingListResponseSchema = meetingResponse(
+	z.object({
+		meetings: z.array(meetingResponseSchema).nullish(),
+		error: z.string().optional(),
+	})
+);
+export const meetingEnvelopeResponseSchema = meetingResponse(
+	z.object({
+		meeting: meetingResponseSchema.nullish(),
+		error: z.string().optional(),
+	})
+);
+export const meetingDeleteResponseSchema = meetingResponse(
+	z.object({ ok: z.boolean() })
+);
+export const meetingTranscriptResponseSchema = meetingResponse(
+	z.object({
+		segments: z.array(meetingResponse(meetingSegmentFields)).nullish(),
+		text: z.string().nullish(),
+	})
+);
+export const meetingDetectionResponseSchema = meetingResponse(
+	z.object({
+		enabled: z.boolean().nullish(),
+		apps: z.array(z.string()).nullish(),
+	})
+);
+
+const meetingEventFields = z.discriminatedUnion("type", [
+	z.object({
+		type: z.literal("detected"),
+		app: z.string(),
+		title: z.string(),
+		detected_at: z.string(),
+	}),
+	z.object({ type: z.literal("started"), meeting: meetingFields }),
+	z.object({ type: z.literal("segment"), segment: meetingSegmentFields }),
+	z.object({
+		type: z.literal("status"),
+		meeting_id: z.string(),
+		status: meetingStatusFields,
+	}),
+	z.object({ type: z.literal("finalized"), meeting: meetingFields }),
+]);
+const meetingEventResponse = z.custom<z.output<typeof meetingEventFields>>(
+	(value) => meetingEventFields.safeParse(value).success
+);
 
 const SSE_FRAME_SEPARATOR = "\n\n";
 const DATA_PREFIX = "data:";
@@ -242,7 +371,7 @@ export async function streamMeetingEvents(
 				.join("\n");
 			if (data) {
 				try {
-					onEvent(JSON.parse(data) as MeetingEvent);
+					onEvent(meetingEventResponse.parse(JSON.parse(data)));
 				} catch {
 					// Ignore malformed frames; the next event self-heals the feed.
 				}

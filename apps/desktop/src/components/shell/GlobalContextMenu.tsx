@@ -12,6 +12,7 @@ import {
 	Settings01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { ClassicThemeIcon } from "@ryu/ui/components/classic-theme-icon.tsx";
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -24,11 +25,18 @@ import {
 	ContextMenuSubContent,
 	ContextMenuSubTrigger,
 	ContextMenuTrigger,
-} from "@ryu/ui/components/context-menu";
-import { toast } from "@ryu/ui/components/sileo";
+} from "@ryu/ui/components/context-menu.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { Laptop, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
-import { type ReactNode, useEffect, useEffectEvent, useState } from "react";
+import {
+	type ReactNode,
+	useEffect,
+	useEffectEvent,
+	useRef,
+	useState,
+} from "react";
 import { isDeveloperMode } from "@/src/hooks/useDeveloperMode.ts";
 import {
 	DEFAULT_SCALE,
@@ -52,8 +60,7 @@ interface GlobalContextMenuProps {
 	children: ReactNode;
 }
 
-const isMac =
-	typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
+const isMac = "navigator" in globalThis && navigator.userAgent.includes("Mac");
 const mod = isMac ? "⌘" : "Ctrl";
 
 function readScale(): number {
@@ -66,11 +73,22 @@ function clampScale(value: number): number {
 	return Math.min(SCALE_MAX, Math.max(SCALE_MIN, value));
 }
 function canEditSelection(): boolean {
+	const active = document.activeElement;
+	if (
+		active instanceof HTMLInputElement ||
+		active instanceof HTMLTextAreaElement
+	) {
+		const start = active.selectionStart;
+		const end = active.selectionEnd;
+		if (isNativeNumber(start) && isNativeNumber(end)) {
+			return start !== end;
+		}
+	}
 	const sel = window.getSelection();
 	return Boolean(sel && !sel.isCollapsed && sel.toString().length > 0);
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
+function isEditableTarget(target: EventTarget | null): target is HTMLElement {
 	if (!(target instanceof HTMLElement)) {
 		return false;
 	}
@@ -156,6 +174,8 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 	const isFullscreen = useFullscreen();
 	const [hasSelection, setHasSelection] = useState(false);
 	const [editableFocused, setEditableFocused] = useState(false);
+	const contextMenuOpenRef = useRef(false);
+	const editableTargetRef = useRef<HTMLElement | null>(null);
 	const [showDevTools, setShowDevTools] = useState(
 		() => Boolean(import.meta.env.DEV) || isDeveloperMode()
 	);
@@ -181,13 +201,25 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 	}, []);
 
 	const refreshEditState = useEffectEvent(() => {
+		const active = document.activeElement;
+		if (isEditableTarget(active)) {
+			editableTargetRef.current = active;
+		} else if (!contextMenuOpenRef.current) {
+			editableTargetRef.current = null;
+		}
 		setHasSelection(canEditSelection());
-		setEditableFocused(isEditableTarget(document.activeElement));
+		setEditableFocused(isEditableTarget(active));
 		setShowDevTools(Boolean(import.meta.env.DEV) || isDeveloperMode());
 	});
 
 	useEffect(() => {
 		const onSelectionChange = () => {
+			// Base UI moves focus into the menu when it opens. Keep the edit state
+			// captured from the right-click target until the menu closes so its
+			// Copy/Cut/Paste choices remain available for the original selection.
+			if (contextMenuOpenRef.current) {
+				return;
+			}
 			refreshEditState();
 		};
 		document.addEventListener("selectionchange", onSelectionChange);
@@ -201,18 +233,22 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 	}, []);
 
 	const handleCut = () => {
+		editableTargetRef.current?.focus();
 		document.execCommand("cut");
 	};
 	const handleCopy = () => {
+		editableTargetRef.current?.focus();
 		document.execCommand("copy");
 	};
 	const handlePaste = async () => {
+		const target = editableTargetRef.current;
+		target?.focus();
 		if (document.execCommand("paste")) {
 			return;
 		}
 		try {
 			const text = await navigator.clipboard.readText();
-			const el = document.activeElement;
+			const el = target ?? document.activeElement;
 			if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
 				const start = el.selectionStart ?? el.value.length;
 				const end = el.selectionEnd ?? el.value.length;
@@ -226,6 +262,7 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 		}
 	};
 	const handleSelectAll = () => {
+		editableTargetRef.current?.focus();
 		document.execCommand("selectAll");
 	};
 
@@ -327,9 +364,8 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 	return (
 		<ContextMenu
 			onOpenChange={(open) => {
-				if (open) {
-					refreshEditState();
-				}
+				contextMenuOpenRef.current = open;
+				refreshEditState();
 			}}
 		>
 			<ContextMenuTrigger className="flex h-screen min-h-0 w-full min-w-0 flex-col">
@@ -389,8 +425,7 @@ export function GlobalContextMenu({ children }: GlobalContextMenuProps) {
 						</ContextMenuItem>
 						<ContextMenuSub>
 							<ContextMenuSubTrigger>
-								<Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-								<Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+								<ClassicThemeIcon className="size-4 shrink-0" />
 								<span>Appearance</span>
 							</ContextMenuSubTrigger>
 							<ContextMenuSubContent>

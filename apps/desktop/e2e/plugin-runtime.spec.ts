@@ -1,3 +1,4 @@
+import type { HostAgentSummary } from "@ryu/app-host/rpc";
 // REAL BROWSER SECURITY CERTIFICATE for the third-party plugin runtime (#446).
 //
 // Runs in real Chromium (Playwright). This is the ONLY test that can prove the
@@ -28,7 +29,7 @@ const OWN_ROUTE = `/plugin/${encodeURIComponent(PLUGIN_ID)}`;
 interface HostEvent {
 	accepted?: boolean;
 	claim?: { path: string; title: string };
-	returned?: Record<string, unknown>[];
+	returned?: HostAgentSummary[];
 	type: "connected" | "listAgents" | "registerRoute";
 }
 

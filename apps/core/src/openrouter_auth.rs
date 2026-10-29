@@ -1,24 +1,26 @@
 //! OpenRouter API key resolution.
 //!
-//! A process-global OpenRouter API key, resolved **preferences-first** — the
-//! user (or, on a managed node, the operator) sets it in desktop Settings →
-//! Integrations, persisted to `~/.ryu/preferences.db` under
-//! [`OPENROUTER_API_KEY_PREF_KEY`] — then falls back to the
-//! `RYU_OPENROUTER_API_KEY` / `OPENROUTER_API_KEY` environment variables for
-//! headless / managed-node setups. Mirrors [`crate::composio_auth`].
+//! A process-global OpenRouter API key, resolved **preferences-first** (the user
+//! sets it in desktop Settings > Integrations, persisted to
+//! `~/.ryu/preferences.db` under [`OPENROUTER_API_KEY_PREF_KEY`]), then falling
+//! back to the `RYU_OPENROUTER_API_KEY` / `OPENROUTER_API_KEY` environment
+//! variables for headless self-hosted setups. Mirrors [`crate::composio_auth`].
 //!
 //! Why a resolver and not a bare env read (A4 / #501): the gateway child
 //! inherits Core's environment, so a plain `OPENROUTER_API_KEY` already flows
 //! through. The resolver adds the **preference** source — a key set in the UI
 //! and persisted (never on Core's process env) still reaches the gateway — and
-//! gives the spawn path one place to ask. On a managed Ryu Cloud node the
-//! operator sets the env once and every end user gets OpenRouter routing with
-//! zero setup; the key presence alone activates the gateway's `openrouter`
-//! provider (`apps/gateway/src/config.rs`).
+//! gives the spawn path one place to ask. Key presence alone activates the
+//! gateway's `openrouter` provider (`apps/gateway/src/config.rs`).
 //!
 //! Placement note (Core vs Gateway): this is a credential for reaching a
 //! provider account — *what is configured to run*, supplied to the data-plane
 //! gateway — so it lives in Core. The key is never logged.
+//!
+//! Managed nodes (D8): a Ryu-managed node never holds a Ryu provider key. The
+//! env fallback is ignored there, and the node's managed traffic goes to the
+//! hosted Gateway fleet with the node's own `rgw_` credential, so no local
+//! gateway is spawned and nothing is injected (`sidecar::gateway`).
 
 use std::sync::RwLock;
 
@@ -48,6 +50,12 @@ pub fn key() -> Option<String> {
         if let Some(k) = guard.as_ref() {
             return Some(k.clone());
         }
+    }
+    // D8: a managed node never holds a Ryu provider key. Its env is provisioned
+    // by Ryu, so a key there would be Ryu's; only a key the tenant saved in
+    // Settings (the preference cache above) is the tenant's own.
+    if crate::sidecar::gateway::managed_node() {
+        return None;
     }
     std::env::var("RYU_OPENROUTER_API_KEY")
         .or_else(|_| std::env::var("OPENROUTER_API_KEY"))

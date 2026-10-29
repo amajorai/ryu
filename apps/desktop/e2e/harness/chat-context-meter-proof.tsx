@@ -19,7 +19,7 @@ function message(
 		id,
 		parts: parts ?? [{ text, type: "text" }],
 		role,
-	} as unknown as UIMessage;
+	};
 }
 
 function chatMessages(id: string, used: number): UIMessage[] {
@@ -54,8 +54,6 @@ function MeterCard({
 	label: string;
 	used: number;
 }) {
-	const [contextOpened, setContextOpened] = useState(false);
-
 	return (
 		<section
 			className="flex min-w-0 flex-col gap-2"
@@ -74,7 +72,6 @@ function MeterCard({
 					currentUser={{ id: "proof-user", name: "You" }}
 					emptyStatePosition="center"
 					messages={chatMessages(id, used)}
-					onOpenContext={() => setContextOpened(true)}
 					onSend={() => {
 						// The proof only inspects the rendered context state.
 					}}
@@ -84,15 +81,7 @@ function MeterCard({
 					status="ready"
 				/>
 			</div>
-			<div
-				aria-live="polite"
-				className="min-h-5 px-1 text-muted-foreground text-xs"
-				data-testid={`${id}-context-opened`}
-			>
-				{contextOpened
-					? "Context breakdown opened"
-					: "Context breakdown closed"}
-			</div>
+
 		</section>
 	);
 }

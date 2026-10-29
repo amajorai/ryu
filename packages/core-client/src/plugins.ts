@@ -1,4 +1,4 @@
-// apps/desktop/src/lib/api/plugins.ts
+// packages/core-client/src/plugins.ts
 //
 // Typed client for Core's Plugin lifecycle endpoints (`/api/plugins`). A Plugin
 // is a manifest.json bundle descriptor (manifest) with a persisted lifecycle
@@ -8,6 +8,24 @@
 // Wire shapes use snake_case as serialised by Rust/serde; camelCase types are
 // the client-side view exposed to React components. The internal symbol names
 // (App*, fetchApps, etc.) are kept stable to limit churn across importers.
+//
+// `apps/desktop/src/lib/api/plugins.ts` re-exports the shared wire types from
+// this module, so keep exported types compatible with the desktop's consumers.
+
+import { z } from "zod";
+import {
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
+
+const pluginString = z.string();
+const pluginJsonFields = z.record(z.string(), appResponseValueSchema);
+// Decode only HTTP JSON; retain the complete native tree and original keys.
+const pluginJsonObject = z.custom<z.output<typeof pluginJsonFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		pluginJsonFields.safeParse(value).success
+);
 
 import {
 	type ApiTarget,
@@ -16,6 +34,225 @@ import {
 	makeHeaders,
 	request,
 } from "./client.ts";
+
+const pluginPreviewFields = z.object({
+	action: z.enum(["install", "enable", "disable", "uninstall", "update"]),
+	dryRun: z.literal(true),
+	success: z.boolean(),
+});
+const pluginPreviewResponse = z.custom<
+	z.output<typeof pluginPreviewFields> & z.output<typeof pluginJsonFields>
+>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginPreviewFields.safeParse(value).success
+);
+const pluginHookFields = z.object({
+	id: pluginString,
+	title: pluginString,
+	description: pluginString.nullable().optional(),
+	plugin: pluginString.optional(),
+	payload_example: appResponseValueSchema.optional(),
+});
+const pluginHookArrayFields = z.array(pluginHookFields);
+const pluginHooksResponse = z.custom<z.output<typeof pluginHookArrayFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		pluginHookArrayFields.safeParse(value).success
+);
+const pluginHookEnvelopeFields = z.object({
+	hook_events: pluginHooksResponse.optional(),
+});
+const pluginHookEnvelope = z.custom<z.output<typeof pluginHookEnvelopeFields>>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginHookEnvelopeFields.safeParse(value).success
+);
+
+const pluginProvenanceFields = z.object({
+	source_id: pluginString.optional(),
+	publisher_org: pluginString.optional(),
+	org_verified: z.boolean(),
+	org_verified_tier: pluginString.optional(),
+	signature_verified: z.boolean(),
+	manifest_sha256: pluginString.optional(),
+	builtin: z.boolean(),
+	captured_at: pluginString.optional(),
+});
+const pluginRecordFields = z.object({
+	id: pluginString,
+	version: pluginString,
+	enabled: z.boolean(),
+	approved_grants: z.array(pluginString),
+	channel: pluginString.optional(),
+	provenance: pluginProvenanceFields.nullable().optional(),
+	created_at: pluginString.nullable(),
+	updated_at: pluginString.nullable(),
+});
+const pluginRecord = z.custom<z.output<typeof pluginRecordFields>>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginRecordFields.safeParse(value).success
+);
+const pluginRecordEnvelopeFields = z.object({ app: pluginRecord });
+const pluginRecordEnvelope = z.custom<
+	z.output<typeof pluginRecordEnvelopeFields>
+>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginRecordEnvelopeFields.safeParse(value).success
+);
+
+const pluginSidecarFields = z.object({
+	name: pluginString,
+	running: z.boolean(),
+	lazy: z.boolean().optional(),
+	pid: z.number().optional(),
+	memory_bytes: z.number().optional(),
+	cpu_percent: z.number().optional(),
+	failure_reason: pluginString.optional(),
+});
+const pluginSidecarArrayFields = z.array(pluginSidecarFields);
+const pluginSidecarArray = z.custom<z.output<typeof pluginSidecarArrayFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		pluginSidecarArrayFields.safeParse(value).success
+);
+const pluginSidecarEnvelopeFields = z.object({
+	sidecars: pluginSidecarArray.optional(),
+	native_permissions: appResponseValueSchema.optional(),
+	node_runtime: pluginString.nullable().optional(),
+	missing_binaries: appResponseValueSchema.optional(),
+});
+const pluginSidecarEnvelope = z.custom<
+	z.output<typeof pluginSidecarEnvelopeFields>
+>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginSidecarEnvelopeFields.safeParse(value).success
+);
+const pluginUninstallFields = z.object({
+	disabled: z.array(pluginString).nullable().optional(),
+	externally_managed: z.boolean().optional(),
+	notice: pluginString.optional(),
+	removed: pluginString.nullable().optional(),
+	success: z.boolean().nullable().optional(),
+	cleanup: appResponseValueSchema.optional(),
+	cleanup_errors: appResponseValueSchema.optional(),
+});
+const pluginUninstallResponse = z.custom<
+	z.output<typeof pluginUninstallFields>
+>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginUninstallFields.safeParse(value).success
+);
+const pluginCommandsFields = z.array(
+	z.object({
+		name: pluginString,
+		path: pluginString,
+		method: pluginString.nullable().optional(),
+		summary: pluginString.nullable().optional(),
+	})
+);
+const pluginSurfaceEntryFields = z.object({
+	commands: pluginCommandsFields.optional(),
+	support: pluginString.optional(),
+	ui: appResponseValueSchema.optional(),
+});
+const pluginSurfacesFields = z.record(z.string(), pluginSurfaceEntryFields);
+const pluginSurfaces = z.custom<z.output<typeof pluginSurfacesFields>>(
+	(value) =>
+		pluginSurfacesFields.safeParse(value).success &&
+		Object.entries(Object.call(undefined, value)).every(
+			([, entry]) => pluginSurfaceEntryFields.safeParse(entry).success
+		)
+);
+const pluginManifestFields = z.object({
+	built_in: z.boolean(),
+	companion: z
+		.object({
+			label: pluginString,
+			icon: pluginString.nullable().optional(),
+			shortcut: pluginString.nullable().optional(),
+		})
+		.nullable()
+		.optional(),
+	enabled: z.boolean(),
+	id: pluginString,
+	installed: z.boolean(),
+	installed_version: pluginString.nullable(),
+	local_only: z.boolean(),
+	name: pluginString,
+	permission_grants: z.array(pluginString),
+	requires: z
+		.object({
+			apps: z
+				.array(
+					z.object({
+						id: pluginString,
+						min_version: pluginString.nullable().optional(),
+					})
+				)
+				.optional(),
+			grants: z.array(pluginString).optional(),
+		})
+		.nullable()
+		.optional(),
+	runnables: z.array(
+		z.object({
+			id: pluginString,
+			kind: pluginString,
+			name: pluginString,
+			config: appResponseValueSchema.optional(),
+		})
+	),
+	sidecar_name: pluginString.nullable(),
+	surface_support: z
+		.array(
+			z.object({
+				surface: pluginString,
+				support: pluginString.nullable().optional(),
+				inheritedFrom: pluginString.nullable().optional(),
+			})
+		)
+		.optional(),
+	surfaces: pluginSurfaces.nullable().optional(),
+	targets: z
+		.array(
+			z.enum([
+				"gateway",
+				"core",
+				"desktop",
+				"island",
+				"mobile",
+				"extension",
+				"web",
+				"cli",
+			])
+		)
+		.optional(),
+	version: pluginString,
+	windows_first: z.boolean(),
+});
+const pluginManifestArrayFields = z.array(pluginManifestFields);
+const pluginManifestArray = z.custom<
+	z.output<typeof pluginManifestArrayFields>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		pluginManifestArrayFields.safeParse(value).success
+);
+const pluginManifestEnvelopeFields = z.object({
+	apps: pluginManifestArray.optional(),
+});
+const pluginManifestEnvelope = z.custom<
+	z.output<typeof pluginManifestEnvelopeFields>
+>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginManifestEnvelopeFields.safeParse(value).success
+);
 
 // ── Wire types (Rust/serde shape) ────────────────────────────────────────────
 
@@ -240,6 +477,50 @@ export type DependencyError =
 			incoming: string;
 	  };
 
+export const dependencyErrorSchema = z.discriminatedUnion("code", [
+	z.object({ code: z.literal("not_installed"), plugin: z.string() }),
+	z.object({ code: z.literal("self_dependency"), plugin: z.string() }),
+	z.object({
+		code: z.literal("missing_dependency"),
+		plugin: z.string(),
+		dependency: z.string(),
+		required: z.string().nullable(),
+	}),
+	z.object({
+		code: z.literal("version_mismatch"),
+		plugin: z.string(),
+		dependency: z.string(),
+		required: z.string(),
+		installed: z.string(),
+	}),
+	z.object({
+		code: z.literal("invalid_version_req"),
+		plugin: z.string(),
+		dependency: z.string(),
+		requirement: z.string(),
+		reason: z.string(),
+	}),
+	z.object({ code: z.literal("cycle"), cycle: z.array(z.string()) }),
+	z.object({
+		code: z.literal("blocked_by_dependents"),
+		plugin: z.string(),
+		dependents: z.array(z.string()),
+	}),
+	z.object({
+		code: z.literal("dependent_version_mismatch"),
+		plugin: z.string(),
+		dependency: z.string(),
+		required: z.string(),
+		incoming: z.string(),
+	}),
+]);
+const toDependencyError = dependencyErrorSchema.nullable().catch(null).parse;
+
+/** A failure code added by a newer Core that this client does not recognize yet. */
+export interface FutureDependencyFailure {
+	code: string;
+}
+
 /** Structured error from enable/disable — used to surface Gateway denial,
  *  unreachability, or an unsatisfiable dependency graph via the UI without
  *  leaking raw status codes. */
@@ -268,9 +549,13 @@ export interface AppLifecycleError {
  *  one a user hits most: Core refuses by default rather than silently cascading, so
  *  the message must name exactly which plugins to disable first. */
 export function describeDependencyError(
-	err: DependencyError,
+	input: DependencyError | FutureDependencyFailure,
 	displayName: (id: string) => string = (id) => id
 ): string {
+	const err = toDependencyError(input);
+	if (!err) {
+		return "This change conflicts with the current plugin dependencies.";
+	}
 	switch (err.code) {
 		case "blocked_by_dependents": {
 			const names = err.dependents.map(displayName).join(", ");
@@ -297,16 +582,6 @@ export function describeDependencyError(
 			// crash — fall back to a generic sentence.
 			return "This change conflicts with the current plugin dependencies.";
 	}
-}
-
-/** Narrow an unknown JSON value to a {@link DependencyError}. Anything without a
- *  string `code` is not one. */
-function toDependencyError(value: unknown): DependencyError | null {
-	if (typeof value !== "object" || value === null) {
-		return null;
-	}
-	const code = (value as { code?: unknown }).code;
-	return typeof code === "string" ? (value as DependencyError) : null;
 }
 
 // ── Mappers ───────────────────────────────────────────────────────────────────
@@ -351,7 +626,12 @@ function toAppCommands(surfaces: AppManifestWire["surfaces"]): AppCommand[] {
 	const raw = surfaces?.cli?.commands ?? [];
 	const commands: AppCommand[] = [];
 	for (const c of raw) {
-		if (typeof c?.name !== "string" || typeof c?.path !== "string") {
+		if (
+			!(
+				pluginString.safeParse(c?.name).success &&
+				pluginString.safeParse(c?.path).success
+			)
+		) {
 			continue;
 		}
 		if (!isSafeCommandPath(c.path)) {
@@ -430,21 +710,22 @@ async function parseLifecycleError(
 	resp: Response,
 	path: string
 ): Promise<AppLifecycleError> {
-	let body: Record<string, unknown> = {};
+	// Keep the actual native JSON.parse return carrier opaque here. Error fields
+	// are classified individually below; no object/DTO domain is asserted.
+	let body: ReturnType<typeof JSON.parse> = {};
 	try {
 		const text = await resp.text();
-		body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+		body = text ? JSON.parse(text) : {};
 	} catch {
 		// ignore parse errors
 	}
 
 	const status = resp.status;
-	const rawMessage =
-		typeof body.message === "string"
-			? body.message
-			: typeof body.error === "string"
-				? body.error
-				: `${path} failed: ${status}`;
+	const rawMessage = pluginString.safeParse(body.message).success
+		? pluginString.parse(body.message)
+		: pluginString.safeParse(body.error).success
+			? pluginString.parse(body.error)
+			: `${path} failed: ${status}`;
 
 	const grantsDenied = status === 403;
 	const gatewayUnreachable = status === 503;
@@ -456,21 +737,24 @@ async function parseLifecycleError(
 	// 409 `code:"built_in"` = uninstall refused because the target is compiled into
 	// the binary (only disable is possible). Distinct from the dependency refusal.
 	const builtIn = status === 409 && body.code === "built_in";
-	const hint = typeof body.hint === "string" ? body.hint : null;
+	const hint = pluginString.safeParse(body.hint).success
+		? pluginString.parse(body.hint)
+		: null;
 
 	let message = rawMessage;
 	if (dependencyError) {
 		message = describeDependencyError(dependencyError);
 	} else if (grantsDenied) {
 		const denied = Array.isArray(body.denied_grants)
-			? (body.denied_grants as string[]).join(", ")
+			? body.denied_grants.join(", ")
 			: null;
 		message = denied
 			? `Gateway denied grants: ${denied}`
 			: "Gateway denied one or more permission grants.";
 	} else if (gatewayUnreachable) {
-		const reason =
-			typeof body.reason === "string" ? body.reason : "gateway unreachable";
+		const reason = pluginString.safeParse(body.reason).success
+			? pluginString.parse(body.reason)
+			: "gateway unreachable";
 		message = `Gateway unreachable (fail-closed): ${reason}`;
 	}
 
@@ -503,7 +787,7 @@ export interface AppLifecyclePreview {
 	action: AppLifecycleAction;
 	dryRun: true;
 	success: boolean;
-	[key: string]: unknown;
+	[key: string]: AppResponseValue;
 }
 
 export interface AppLifecyclePreviewOptions {
@@ -557,7 +841,7 @@ export async function previewAppLifecycle(
 		const err = await parseLifecycleError(resp, path);
 		throw Object.assign(new Error(err.message), err);
 	}
-	return (await resp.json()) as AppLifecyclePreview;
+	return pluginPreviewResponse.parse(await resp.json());
 }
 
 /** `GET /api/plugins` — list all app manifests merged with their lifecycle state. */
@@ -569,18 +853,18 @@ export async function fetchApps(target: ApiTarget): Promise<AppInfo[]> {
 	if (!resp.ok) {
 		throw new Error(`/api/plugins failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as { apps?: AppManifestWire[] };
+	const json = pluginManifestEnvelope.parse(await resp.json());
 	return (json.apps ?? []).map(toAppInfo);
 }
 
 /** One app event an enabled app declares it emits (`contributes.hook_events`),
  *  tagged server-side with its owning `plugin` id. */
 export interface HookEventInfo {
-	description?: string;
+	description?: string | null;
 	/** Fully-qualified event id: `<owning plugin id>#<event name>` — the exact string
 	 *  a workflow's `event` trigger or a plugin hook's `on` must name. */
 	id: string;
-	payload_example?: Record<string, unknown>;
+	payload_example?: AppResponseValue;
 	plugin?: string;
 	title: string;
 }
@@ -601,7 +885,7 @@ export async function fetchHookEvents(
 	if (!resp.ok) {
 		throw new Error(`/api/plugins/contributions failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as { hook_events?: HookEventInfo[] };
+	const json = pluginHookEnvelope.parse(await resp.json());
 	return json.hook_events ?? [];
 }
 
@@ -619,7 +903,7 @@ export async function installApp(
 		const err = await parseLifecycleError(resp, path);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as { app: AppRecordWire };
+	const json = pluginRecordEnvelope.parse(await resp.json());
 	return toAppRecord(json.app);
 }
 
@@ -641,7 +925,7 @@ export async function enableApp(
 		const err = await parseLifecycleError(resp, path);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as { app: AppRecordWire };
+	const json = pluginRecordEnvelope.parse(await resp.json());
 	return toAppRecord(json.app);
 }
 
@@ -666,7 +950,7 @@ export async function disableApp(
 		const err = await parseLifecycleError(resp, path);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as { app: AppRecordWire };
+	const json = pluginRecordEnvelope.parse(await resp.json());
 	return toAppRecord(json.app);
 }
 
@@ -714,13 +998,7 @@ export async function uninstallApp(
 		const err = await parseLifecycleError(resp, path);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as {
-		disabled?: string[];
-		externally_managed?: boolean;
-		notice?: string;
-		removed?: string;
-		success?: boolean;
-	};
+	const json = pluginUninstallResponse.parse(await resp.json());
 	const result: AppUninstallResult = {
 		success: json.success ?? true,
 		removed: json.removed ?? id,
@@ -756,7 +1034,7 @@ export async function updateApp(
 		const err = await parseLifecycleError(resp, path);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as { app: AppRecordWire };
+	const json = pluginRecordEnvelope.parse(await resp.json());
 	return toAppRecord(json.app);
 }
 
@@ -787,18 +1065,20 @@ export async function parseAppDisabled(
 		if (!text) {
 			return null;
 		}
-		const body = JSON.parse(text) as {
-			app?: unknown;
-			error?: unknown;
-			message?: unknown;
-		};
-		if (body.error === "app_disabled" && typeof body.app === "string") {
+		const parsed = pluginJsonObject.safeParse(JSON.parse(text));
+		if (!parsed.success) {
+			return null;
+		}
+		const body = parsed.data;
+		if (
+			body.error === "app_disabled" &&
+			pluginString.safeParse(body.app).success
+		) {
 			return {
-				app: body.app,
-				message:
-					typeof body.message === "string"
-						? body.message
-						: `Enable the ${body.app} app`,
+				app: pluginString.parse(body.app),
+				message: pluginString.safeParse(body.message).success
+					? pluginString.parse(body.message)
+					: `Enable the ${body.app} app`,
 			};
 		}
 	} catch {
@@ -818,32 +1098,70 @@ export interface CatalogEntry {
 	id: string;
 	kinds: string[];
 	/** Non-executable capability layers this listing extends. */
-	layers?: { capability: string; title?: string | null }[];
+	layers?: AppResponseValue[];
 	/** Server-derived A Major Pass inclusion marker for catalog presentation. */
 	membership_included?: boolean;
 	name: string;
 	permission_grants: string[];
 	/** Commerce metadata for hosted Marketplace listings; absent/null means free. */
-	pricing?: {
-		amountMinor?: number;
-		currency?: string;
-		kind?: string;
-		model?: string;
-	} | null;
+	pricing?: z.output<typeof pluginJsonFields> | null;
 	source: string;
 	/** Per-surface support levels and shared-shell inheritance. */
 	surface_support?: SurfaceSupportSummary[];
-	tags: string[];
+	tags: AppResponseValue[];
 	version: string;
 }
+
+// Complete typed catalog view plus the original full native JSON record.
+// Remote tags/layers and pricing are explicitly copied as upstream JSON by
+// Core; do not assert their individual cells are strings or commerce fields.
+const pluginCatalogSurfaceFields = z.object({
+	surface: pluginString,
+	support: pluginString.nullish(),
+	inheritedFrom: pluginString.nullish(),
+});
+const pluginCatalogEntryFields = z.object({
+	built_in: z.boolean(),
+	description: pluginString,
+	id: pluginString,
+	kinds: z.array(pluginString),
+	layers: z.array(appResponseValueSchema).optional(),
+	membership_included: z.boolean().optional(),
+	name: pluginString,
+	permission_grants: z.array(pluginString),
+	pricing: pluginJsonObject.nullish(),
+	source: pluginString,
+	surface_support: z.array(pluginCatalogSurfaceFields).optional(),
+	tags: z.array(appResponseValueSchema),
+	version: pluginString,
+});
+const pluginCatalogEntryResponse = z.custom<
+	z.output<typeof pluginCatalogEntryFields>
+>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginCatalogEntryFields.safeParse(value).success
+);
+const pluginCatalogResponseFields = z.object({
+	entries: z.array(pluginCatalogEntryResponse).nullish(),
+});
+const pluginCatalogResponse = z.custom<
+	z.output<typeof pluginCatalogResponseFields>
+>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		pluginCatalogResponseFields.safeParse(value).success
+);
 
 /** `GET /api/plugins/catalog` — browse installable apps from the remote registry. */
 export async function fetchAppsCatalog(
 	target: ApiTarget
 ): Promise<CatalogEntry[]> {
-	const data = await request<{ entries?: CatalogEntry[] }>(
+	const data = await request(
 		target,
-		"/api/plugins/catalog"
+		"/api/plugins/catalog",
+		{},
+		pluginCatalogResponse
 	);
 	return data.entries ?? [];
 }
@@ -904,9 +1222,7 @@ export async function fetchSidecarStatus(
 	if (!resp.ok) {
 		throw new Error(`/api/sidecar/status failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as {
-		sidecars?: Array<{ name: string; running: boolean }>;
-	};
+	const json = pluginSidecarEnvelope.parse(await resp.json());
 	const map: Record<string, boolean> = {};
 	for (const s of json.sidecars ?? []) {
 		map[s.name] = s.running;
@@ -937,17 +1253,59 @@ export interface SidecarLifecyclePreview {
 	dryRun: true;
 	name: string;
 	success: boolean;
-	[key: string]: unknown;
+	[key: string]: AppResponseValue;
 }
+
+const sidecarPreviewInstallFields = z.object({
+	success: z.literal(true),
+	dryRun: z.literal(true),
+	action: z.literal("install"),
+	name: pluginString,
+	supported: z.boolean().optional(),
+	installed: z.boolean().optional(),
+	force: z.boolean().optional(),
+	version: pluginString.nullish(),
+	writes: z.array(pluginString).optional(),
+});
+const sidecarPreviewUninstallFields = z.object({
+	success: z.literal(true),
+	dryRun: z.literal(true),
+	action: z.literal("uninstall"),
+	name: pluginString,
+	removeData: z.boolean().optional(),
+	installed: z.boolean().optional(),
+	writes: z.array(pluginString).optional(),
+});
+const sidecarPreviewUnavailableFields = z.object({
+	success: z.literal(false),
+	error: pluginString,
+});
+export type SidecarPreviewUnavailable = z.output<
+	typeof sidecarPreviewUnavailableFields
+>;
+const sidecarPreviewReceiptFields = z.union([
+	sidecarPreviewInstallFields,
+	sidecarPreviewUninstallFields,
+	sidecarPreviewUnavailableFields,
+]);
+const sidecarPreviewResponse = z.custom<
+	z.output<typeof sidecarPreviewReceiptFields> &
+		z.output<typeof pluginJsonFields>
+>(
+	(value) =>
+		pluginJsonObject.safeParse(value).success &&
+		sidecarPreviewReceiptFields.safeParse(value).success
+);
 
 export function previewSidecarInstall(
 	target: ApiTarget,
 	name: string
-): Promise<SidecarLifecyclePreview> {
-	return request<SidecarLifecyclePreview>(
+): Promise<SidecarLifecyclePreview | SidecarPreviewUnavailable> {
+	return request(
 		target,
 		`/api/setup/${encodeURIComponent(name)}/install?dryRun=true`,
-		{ method: "POST" }
+		{ method: "POST" },
+		sidecarPreviewResponse
 	);
 }
 
@@ -955,12 +1313,13 @@ export function previewSidecarUninstall(
 	target: ApiTarget,
 	name: string,
 	withData = false
-): Promise<SidecarLifecyclePreview> {
+): Promise<SidecarLifecyclePreview | SidecarPreviewUnavailable> {
 	const route = withData ? "uninstall-with-data" : "uninstall";
-	return request<SidecarLifecyclePreview>(
+	return request(
 		target,
 		`/api/setup/${encodeURIComponent(name)}/${route}?dryRun=true`,
-		{ method: "POST" }
+		{ method: "POST" },
+		sidecarPreviewResponse
 	);
 }
 

@@ -25,13 +25,8 @@
 // actionless "App not enabled" prose the catch-all would give. Same recovery
 // `SpacesPage` shows for Core's `503 app_disabled`.
 
-import {
-	createElement,
-	lazy,
-	type ReactNode,
-	useEffect,
-	useState,
-} from "react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { createElement, type ReactNode, useEffect, useState } from "react";
 import { AppDisabledNotice } from "@/src/components/AppDisabledNotice.tsx";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import {
@@ -49,18 +44,26 @@ import {
 	DASHBOARDS_HOME_BUTTON_ID,
 	DASHBOARDS_PLUGIN_ID,
 } from "@/src/lib/dashboards/app.ts";
+import { queryClient } from "@/src/lib/query-client.ts";
+import {
+	draftsListQuery,
+	draftsSentQuery,
+	draftsSettingsQuery,
+	prefetchRouteQueries,
+} from "@/src/lib/route-queries.ts";
 import {
 	WHATSAPP_BUTTON_ID,
 	WHATSAPP_DEFAULT_PATH,
 	WHATSAPP_PLUGIN_ID,
 } from "@/src/lib/whatsapp-app.ts";
 import { resolveAppShellPath } from "./app-shell-path.ts";
-import { contributionRegistry } from "./registry.ts";
+import { lazyRoute } from "./lazy-route.ts";
+import { contributionRegistry, type RoutePreload } from "./registry.ts";
 
-const ChannelsPage = lazy(() => import("@/src/pages/ChannelsPage.tsx"));
-const DraftsPage = lazy(() => import("@/src/pages/DraftsPage.tsx"));
-const HomePage = lazy(() => import("@/src/pages/HomePage.tsx"));
-const MissionControlPage = lazy(
+const ChannelsPage = lazyRoute(() => import("@/src/pages/ChannelsPage.tsx"));
+const DraftsPage = lazyRoute(() => import("@/src/pages/DraftsPage.tsx"));
+const HomePage = lazyRoute(() => import("@/src/pages/HomePage.tsx"));
+const MissionControlPage = lazyRoute(
 	() => import("@/src/pages/MissionControlPage.tsx")
 );
 
@@ -76,8 +79,25 @@ export interface AppShellPage {
 	label: string;
 	/** The owning app's manifest id. */
 	plugin: string;
+	/** Fetches the page's chunk ahead of a click (hover/focus prefetch). */
+	preload: RoutePreload;
 	/** The shell component to render there. */
 	render: () => ReactNode;
+}
+
+/** The enable-this-app card, worded as one translatable sentence. */
+function AppShellDisabledNotice({
+	app,
+	label,
+}: {
+	app: string;
+	label: string;
+}) {
+	const tl = useLiteralMessages();
+	return createElement(AppDisabledNotice, {
+		app,
+		message: tl("Enable the {label} app", { label }),
+	});
 }
 
 /**
@@ -92,6 +112,7 @@ const APP_SHELL_PAGES: readonly AppShellPage[] = [
 		button: DASHBOARDS_HOME_BUTTON_ID,
 		fallbackPath: DASHBOARD_DEFAULT_PATH,
 		label: "Dashboards",
+		preload: HomePage.preload,
 		render: () => createElement(HomePage),
 	},
 	{
@@ -99,6 +120,7 @@ const APP_SHELL_PAGES: readonly AppShellPage[] = [
 		button: MISSION_CONTROL_BUTTON_ID,
 		fallbackPath: MISSION_CONTROL_DEFAULT_PATH,
 		label: "Mission Control",
+		preload: MissionControlPage.preload,
 		render: () => createElement(MissionControlPage),
 	},
 	{
@@ -106,6 +128,15 @@ const APP_SHELL_PAGES: readonly AppShellPage[] = [
 		button: DRAFTS_BUTTON_ID,
 		fallbackPath: DRAFTS_DEFAULT_PATH,
 		label: "Drafts",
+		preload: () =>
+			Promise.all([
+				DraftsPage.preload(),
+				prefetchRouteQueries((target) => [
+					queryClient.prefetchQuery(draftsListQuery(target)),
+					queryClient.prefetchQuery(draftsSentQuery(target)),
+					queryClient.prefetchQuery(draftsSettingsQuery(target)),
+				]),
+			]).then<void>(() => undefined),
 		render: () => createElement(DraftsPage),
 	},
 	{
@@ -113,6 +144,7 @@ const APP_SHELL_PAGES: readonly AppShellPage[] = [
 		button: WHATSAPP_BUTTON_ID,
 		fallbackPath: WHATSAPP_DEFAULT_PATH,
 		label: "WhatsApp",
+		preload: ChannelsPage.preload,
 		render: () =>
 			createElement(ChannelsPage, {
 				initialChannelType: "whatsapp",
@@ -140,15 +172,16 @@ export function useAppShellRoutes(): void {
 				contributionRegistry.registerRoute({
 					kind: "exact",
 					path: path ?? page.fallbackPath,
+					preload: path ? page.preload : undefined,
 					// No declaration → the app is disabled (or not installed): offer the
 					// one-click Enable instead of the page. Registered at the cold-start
 					// path only, so an app that MOVED itself keeps a single live route.
 					render: path
 						? page.render
 						: () =>
-								createElement(AppDisabledNotice, {
+								createElement(AppShellDisabledNotice, {
 									app: page.plugin,
-									message: `Enable the ${page.label} app`,
+									label: page.label,
 								}),
 				})
 			);

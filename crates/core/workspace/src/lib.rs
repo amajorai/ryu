@@ -19,6 +19,18 @@
 
 mod win_process;
 
+pub mod checkpoints;
 pub mod git;
+pub mod handoff;
 pub mod source_history;
 pub mod worktree;
+
+#[cfg(test)]
+#[path = "checkpoints/rewind_pin_tests.rs"]
+mod checkpoint_rewind_pin_tests;
+#[cfg(test)]
+#[path = "git/hooks_tests.rs"]
+mod git_hooks_tests;
+#[cfg(test)]
+#[path = "worktree_branch_tests.rs"]
+mod worktree_branch_tests;

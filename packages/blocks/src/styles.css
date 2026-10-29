@@ -218,7 +218,19 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.showcase-loop {
-		animation: none !important;
+	.animate-scan-sweep,
+	.animate-threat-resolve,
+	.animate-tool-float,
+	.animate-chunk-appear,
+	.animate-vec-orbit,
+	.animate-budget-fill,
+	.animate-edge-trace,
+	.animate-node-pulse,
+	.animate-glow-breathe,
+	.animate-flow-right,
+	.animate-flow-left,
+	.animate-flow-down,
+	.animate-marquee {
+		animation: none;
 	}
 }

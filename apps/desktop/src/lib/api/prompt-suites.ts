@@ -1,9 +1,34 @@
-import type { ApiTarget } from "./client.ts";
+import type { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
+import type { ApiTarget, RequestOptions } from "./client.ts";
 import { request } from "./client.ts";
+import type { PluginValue } from "./plugin-wire-values.ts";
+import {
+	promptReviewEnvelopeSchema,
+	promptReviewSaveInputSchema,
+	promptReviewsEnvelopeSchema,
+	type promptReviewWireSchema,
+	promptRunEnvelopeSchema,
+	promptRunMetaEnvelopeSchema,
+	type promptRunMetaWireSchema,
+	promptRunSaveInputSchema,
+	promptRunsEnvelopeSchema,
+	type promptRunWireSchema,
+	promptSuiteCreateInputSchema,
+	promptSuiteEnvelopeSchema,
+	promptSuiteListEnvelopeSchema,
+	promptSuiteSaveEnvelopeSchema,
+	promptSuiteUpdateInputSchema,
+	promptSuiteVersionEnvelopeSchema,
+	promptSuiteVersionsEnvelopeSchema,
+	type promptSuiteVersionWireSchema,
+	type promptSuiteWireSchema,
+	promptTraceEnvelopeSchema,
+} from "./prompt-suite-wire-contracts.ts";
 
 export interface PromptSuiteRecord {
 	agentId: string;
-	config: Record<string, unknown>;
+	config: PluginValue;
 	createdAt: number;
 	id: string;
 	name: string;
@@ -18,7 +43,7 @@ export interface PromptSuiteVersionMeta {
 }
 
 export interface PromptSuiteVersion extends PromptSuiteVersionMeta {
-	config: Record<string, unknown>;
+	config: PluginValue;
 }
 
 export interface PromptRunMeta {
@@ -29,8 +54,8 @@ export interface PromptRunMeta {
 }
 
 export interface PromptRun extends PromptRunMeta {
-	request: Record<string, unknown>;
-	result: Record<string, unknown>;
+	request: PluginValue;
+	result: PluginValue;
 }
 
 export interface PromptReview {
@@ -43,44 +68,11 @@ export interface PromptReview {
 	updatedAt: number;
 }
 
-interface PromptSuiteWire {
-	agent_id: string;
-	config: Record<string, unknown>;
-	created_at: number;
-	id: string;
-	name: string;
-	updated_at: number;
-}
-
-interface PromptSuiteVersionWire {
-	config?: Record<string, unknown>;
-	created_at: number;
-	id: string;
-	label?: string | null;
-	suite_id: string;
-}
-
-interface PromptRunMetaWire {
-	created_at: number;
-	id: string;
-	name: string;
-	suite_id: string;
-}
-
-interface PromptRunWire extends PromptRunMetaWire {
-	request: Record<string, unknown>;
-	result: Record<string, unknown>;
-}
-
-interface PromptReviewWire {
-	comment?: string | null;
-	highlighted?: boolean;
-	pass?: boolean | null;
-	result_key: string;
-	run_id: string;
-	score?: number | null;
-	updated_at: number;
-}
+type PromptSuiteWire = z.output<typeof promptSuiteWireSchema>;
+type PromptSuiteVersionWire = z.output<typeof promptSuiteVersionWireSchema>;
+type PromptRunMetaWire = z.output<typeof promptRunMetaWireSchema>;
+type PromptRunWire = z.output<typeof promptRunWireSchema>;
+type PromptReviewWire = z.output<typeof promptReviewWireSchema>;
 
 function toSuite(value: PromptSuiteWire): PromptSuiteRecord {
 	return {
@@ -136,37 +128,41 @@ export async function listPromptSuites(
 	target: ApiTarget,
 	agentId: string
 ): Promise<PromptSuiteRecord[]> {
-	const json = await request<{ suites?: PromptSuiteWire[] }>(
-		target,
-		`/api/prompt-suites?agent_id=${encodeURIComponent(agentId)}`
+	const json = promptSuiteListEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites?agent_id=${encodeURIComponent(agentId)}`,
+			undefined,
+			gatewayJsonValueSchema
+		)
 	);
 	return (json.suites ?? []).map(toSuite);
 }
 
 export async function createPromptSuite(
 	target: ApiTarget,
-	input: {
-		agentId: string;
-		config: Record<string, unknown>;
-		label?: string;
-		name: string;
-	}
+	input: Parameters<typeof promptSuiteCreateInputSchema.parse>[0]
 ): Promise<{
 	suite: PromptSuiteRecord;
-	version: PromptSuiteVersionMeta | null;
+	version: PromptSuiteVersion | null;
 }> {
-	const json = await request<{
-		suite: PromptSuiteWire;
-		version?: PromptSuiteVersionWire | null;
-	}>(target, "/api/prompt-suites", {
-		body: {
-			agent_id: input.agentId,
-			config: input.config,
-			...(input.label?.trim() ? { label: input.label.trim() } : {}),
-			name: input.name,
-		},
-		method: "POST",
-	});
+	const parsed = promptSuiteCreateInputSchema.parse(input);
+	const json = promptSuiteSaveEnvelopeSchema.parse(
+		await request(
+			target,
+			"/api/prompt-suites",
+			{
+				body: {
+					agent_id: parsed.agentId,
+					config: parsed.config,
+					...promptSuiteLabelFields(parsed.label),
+					name: parsed.name,
+				},
+				method: "POST",
+			},
+			gatewayJsonValueSchema
+		)
+	);
 	return {
 		suite: toSuite(json.suite),
 		version: json.version ? toVersion(json.version) : null,
@@ -177,9 +173,13 @@ export async function getPromptSuite(
 	target: ApiTarget,
 	suiteId: string
 ): Promise<PromptSuiteRecord> {
-	const json = await request<{ suite: PromptSuiteWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}`
+	const json = promptSuiteEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}`,
+			undefined,
+			gatewayJsonValueSchema
+		)
 	);
 	return toSuite(json.suite);
 }
@@ -187,22 +187,27 @@ export async function getPromptSuite(
 export async function updatePromptSuite(
 	target: ApiTarget,
 	suiteId: string,
-	input: { config: Record<string, unknown>; label?: string; name: string }
+	input: Parameters<typeof promptSuiteUpdateInputSchema.parse>[0]
 ): Promise<{
 	suite: PromptSuiteRecord;
-	version: PromptSuiteVersionMeta | null;
+	version: PromptSuiteVersion | null;
 }> {
-	const json = await request<{
-		suite: PromptSuiteWire;
-		version?: PromptSuiteVersionWire | null;
-	}>(target, `/api/prompt-suites/${encodeURIComponent(suiteId)}`, {
-		body: {
-			config: input.config,
-			...(input.label?.trim() ? { label: input.label.trim() } : {}),
-			name: input.name,
-		},
-		method: "PUT",
-	});
+	const parsed = promptSuiteUpdateInputSchema.parse(input);
+	const json = promptSuiteSaveEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}`,
+			{
+				body: {
+					config: parsed.config,
+					...promptSuiteLabelFields(parsed.label),
+					name: parsed.name,
+				},
+				method: "PUT",
+			},
+			gatewayJsonValueSchema
+		)
+	);
 	return {
 		suite: toSuite(json.suite),
 		version: json.version ? toVersion(json.version) : null,
@@ -213,18 +218,27 @@ export async function deletePromptSuite(
 	target: ApiTarget,
 	suiteId: string
 ): Promise<void> {
-	await request(target, `/api/prompt-suites/${encodeURIComponent(suiteId)}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/api/prompt-suites/${encodeURIComponent(suiteId)}`,
+		{
+			method: "DELETE",
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 export async function listPromptSuiteVersions(
 	target: ApiTarget,
 	suiteId: string
 ): Promise<PromptSuiteVersionMeta[]> {
-	const json = await request<{ versions?: PromptSuiteVersionWire[] }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/versions`
+	const json = promptSuiteVersionsEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/versions`,
+			undefined,
+			gatewayJsonValueSchema
+		)
 	);
 	return (json.versions ?? []).map((version) => ({
 		createdAt: version.created_at,
@@ -239,9 +253,13 @@ export async function getPromptSuiteVersion(
 	suiteId: string,
 	versionId: string
 ): Promise<PromptSuiteVersion> {
-	const json = await request<{ version: PromptSuiteVersionWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/versions/${encodeURIComponent(versionId)}`
+	const json = promptSuiteVersionEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/versions/${encodeURIComponent(versionId)}`,
+			undefined,
+			gatewayJsonValueSchema
+		)
 	);
 	return toVersion(json.version);
 }
@@ -251,13 +269,16 @@ export async function createPromptSuiteVersion(
 	suiteId: string,
 	label?: string
 ): Promise<PromptSuiteVersionMeta> {
-	const json = await request<{ version: PromptSuiteVersionWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/versions`,
-		{
-			body: label?.trim() ? { label: label.trim() } : {},
-			method: "POST",
-		}
+	const json = promptSuiteVersionEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/versions`,
+			{
+				body: promptSuiteLabelFields(label),
+				method: "POST",
+			},
+			gatewayJsonValueSchema
+		)
 	);
 	return toVersion(json.version);
 }
@@ -267,10 +288,13 @@ export async function restorePromptSuiteVersion(
 	suiteId: string,
 	versionId: string
 ): Promise<PromptSuiteRecord> {
-	const json = await request<{ suite: PromptSuiteWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/versions/${encodeURIComponent(versionId)}/restore`,
-		{ method: "POST" }
+	const json = promptSuiteEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/versions/${encodeURIComponent(versionId)}/restore`,
+			{ method: "POST" },
+			gatewayJsonValueSchema
+		)
 	);
 	return toSuite(json.suite);
 }
@@ -279,9 +303,13 @@ export async function listPromptRuns(
 	target: ApiTarget,
 	suiteId: string
 ): Promise<PromptRunMeta[]> {
-	const json = await request<{ runs?: PromptRunMetaWire[] }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs`
+	const json = promptRunsEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs`,
+			undefined,
+			gatewayJsonValueSchema
+		)
 	);
 	return (json.runs ?? []).map(toRunMeta);
 }
@@ -289,16 +317,16 @@ export async function listPromptRuns(
 export async function savePromptRun(
 	target: ApiTarget,
 	suiteId: string,
-	input: {
-		name: string;
-		request: Record<string, unknown>;
-		result: Record<string, unknown>;
-	}
+	input: Parameters<typeof promptRunSaveInputSchema.parse>[0]
 ): Promise<PromptRunMeta> {
-	const json = await request<{ run: PromptRunMetaWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs`,
-		{ body: input, method: "POST" }
+	const parsed = promptRunSaveInputSchema.parse(input);
+	const json = promptRunMetaEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs`,
+			{ body: parsed, method: "POST" },
+			gatewayJsonValueSchema
+		)
 	);
 	return toRunMeta(json.run);
 }
@@ -308,9 +336,13 @@ export async function getPromptRun(
 	suiteId: string,
 	runId: string
 ): Promise<PromptRun> {
-	const json = await request<{ run: PromptRunWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}`
+	const json = promptRunEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}`,
+			undefined,
+			gatewayJsonValueSchema
+		)
 	);
 	return toRun(json.run);
 }
@@ -321,10 +353,13 @@ export async function renamePromptRun(
 	runId: string,
 	name: string
 ): Promise<PromptRunMeta> {
-	const json = await request<{ run: PromptRunMetaWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}`,
-		{ body: { name }, method: "PUT" }
+	const json = promptRunMetaEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}`,
+			{ body: { name }, method: "PUT" },
+			gatewayJsonValueSchema
+		)
 	);
 	return toRunMeta(json.run);
 }
@@ -337,7 +372,8 @@ export async function deletePromptRun(
 	await request(
 		target,
 		`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		gatewayJsonValueSchema
 	);
 }
 
@@ -347,13 +383,17 @@ export async function duplicatePromptRun(
 	runId: string,
 	name?: string
 ): Promise<PromptRunMeta> {
-	const json = await request<{ run: PromptRunMetaWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}/duplicate`,
-		{
-			...(name?.trim() ? { body: { name: name.trim() } } : {}),
-			method: "POST",
-		}
+	const options: RequestOptions = { method: "POST" };
+	if (name?.trim()) {
+		options.body = { name: name.trim() };
+	}
+	const json = promptRunMetaEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}/duplicate`,
+			options,
+			gatewayJsonValueSchema
+		)
 	);
 	return toRunMeta(json.run);
 }
@@ -363,9 +403,13 @@ export async function listPromptReviews(
 	suiteId: string,
 	runId: string
 ): Promise<PromptReview[]> {
-	const json = await request<{ reviews?: PromptReviewWire[] }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}/reviews`
+	const json = promptReviewsEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}/reviews`,
+			undefined,
+			gatewayJsonValueSchema
+		)
 	);
 	return (json.reviews ?? []).map(toReview);
 }
@@ -374,27 +418,25 @@ export async function savePromptReview(
 	target: ApiTarget,
 	suiteId: string,
 	runId: string,
-	input: {
-		comment?: string;
-		highlighted?: boolean;
-		pass?: boolean | null;
-		resultKey: string;
-		score?: number | null;
-	}
+	input: Parameters<typeof promptReviewSaveInputSchema.parse>[0]
 ): Promise<PromptReview> {
-	const json = await request<{ review: PromptReviewWire }>(
-		target,
-		`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}/reviews`,
-		{
-			body: {
-				...(input.comment === undefined ? {} : { comment: input.comment }),
-				highlighted: input.highlighted ?? false,
-				pass: input.pass ?? null,
-				result_key: input.resultKey,
-				score: input.score ?? null,
+	const parsed = promptReviewSaveInputSchema.parse(input);
+	const json = promptReviewEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/runs/${encodeURIComponent(runId)}/reviews`,
+			{
+				body: {
+					...promptReviewCommentFields(parsed.comment),
+					highlighted: parsed.highlighted ?? false,
+					pass: parsed.pass ?? null,
+					result_key: parsed.resultKey,
+					score: parsed.score ?? null,
+				},
+				method: "POST",
 			},
-			method: "POST",
-		}
+			gatewayJsonValueSchema
+		)
 	);
 	return toReview(json.review);
 }
@@ -406,21 +448,22 @@ export async function importPromptTrace(
 	runId: string
 ): Promise<{
 	added: boolean;
-	case: Record<string, unknown>;
+	case: PluginValue;
 	sourceRunId: string;
 	suite: PromptSuiteRecord;
-	version: PromptSuiteVersionMeta | null;
+	version: PromptSuiteVersion | null;
 }> {
-	const json = await request<{
-		added: boolean;
-		case: Record<string, unknown>;
-		source_run_id: string;
-		suite: PromptSuiteWire;
-		version?: PromptSuiteVersionWire | null;
-	}>(target, `/api/prompt-suites/${encodeURIComponent(suiteId)}/traces`, {
-		body: { run_id: runId },
-		method: "POST",
-	});
+	const json = promptTraceEnvelopeSchema.parse(
+		await request(
+			target,
+			`/api/prompt-suites/${encodeURIComponent(suiteId)}/traces`,
+			{
+				body: { run_id: runId },
+				method: "POST",
+			},
+			gatewayJsonValueSchema
+		)
+	);
 	return {
 		added: json.added,
 		case: json.case,
@@ -428,4 +471,29 @@ export async function importPromptTrace(
 		suite: toSuite(json.suite),
 		version: json.version ? toVersion(json.version) : null,
 	};
+}
+
+type PromptSuiteLabelFields = Pick<
+	z.output<typeof promptSuiteCreateInputSchema>,
+	"label"
+>;
+function promptSuiteLabelFields(label?: string | null): PromptSuiteLabelFields {
+	const fields: PromptSuiteLabelFields = {};
+	if (label?.trim()) {
+		fields.label = label.trim();
+	}
+	return fields;
+}
+type PromptReviewCommentFields = Pick<
+	z.output<typeof promptReviewSaveInputSchema>,
+	"comment"
+>;
+function promptReviewCommentFields(
+	comment?: string | null
+): PromptReviewCommentFields {
+	const fields: PromptReviewCommentFields = {};
+	if (comment !== undefined) {
+		fields.comment = comment;
+	}
+	return fields;
 }

@@ -113,7 +113,7 @@ export const ToolApprovalFooter = memo(function ToolApprovalFooter({
 		<div className="flex items-center justify-between gap-2 bg-muted py-1 pr-2 pl-2.5">
 			<span
 				className={cn(
-					"inline-flex items-center gap-1.5 font-medium text-[11px]",
+					"type-caption inline-flex items-center gap-1.5 font-medium",
 					decision === "rejected"
 						? "text-status-destructive"
 						: "text-muted-foreground"

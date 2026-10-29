@@ -17,7 +17,7 @@ export interface AttachmentButtonProps {
 	onClick?: () => void;
 }
 
-function isIconName(value: unknown): value is AttachmentButtonIcon {
+function isIconName<T>(value: T): value is T & AttachmentButtonIcon {
 	return value === "plus" || value === "paperclip";
 }
 
@@ -41,8 +41,9 @@ export const AttachmentButton = memo(function AttachmentButton({
 	return (
 		<Button
 			aria-label="Attach"
-			className="size-7 rounded-full"
+			className="size-7"
 			onClick={onClick}
+			radius="pill"
 			size="icon"
 			type="button"
 			variant="ghost"

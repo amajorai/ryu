@@ -35,6 +35,66 @@ impl OAuthClient {
 const FLOW_TTL_SECS: i64 = 10 * 60;
 const MAX_OAUTH_BODY_BYTES: usize = 1024 * 1024;
 const REFRESH_SKEW_SECS: i64 = 60;
+const MAX_MCP_PARAMETER_HEADERS: usize = 50;
+const MAX_MCP_PARAMETER_HEADER_BYTES: usize = 16 * 1024;
+
+fn is_http_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+fn validate_mcp_transport_headers(headers: &[(String, String)]) -> Result<()> {
+    let mut parameter_count = 0;
+    let mut parameter_bytes = 0;
+    for (name, value) in headers {
+        let lower_name = name.to_ascii_lowercase();
+        let standard = matches!(
+            lower_name.as_str(),
+            "accept"
+                | "content-type"
+                | "mcp-method"
+                | "mcp-name"
+                | "mcp-session-id"
+                | "mcp-protocol-version"
+        );
+        let parameter = lower_name
+            .strip_prefix("mcp-param-")
+            .is_some_and(|suffix| !suffix.is_empty() && suffix.bytes().all(is_http_token_byte));
+        if !(standard || parameter) {
+            bail!("unsupported MCP transport header");
+        }
+        if parameter {
+            parameter_count += 1;
+            parameter_bytes += name.len() + value.len();
+            if parameter_count > MAX_MCP_PARAMETER_HEADERS
+                || parameter_bytes > MAX_MCP_PARAMETER_HEADER_BYTES
+                || value.len() > 8 * 1024
+                || !value
+                    .bytes()
+                    .all(|byte| byte == b'\t' || (0x20..=0x7e).contains(&byte))
+            {
+                bail!("MCP parameter header budget exceeded");
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
@@ -381,6 +441,20 @@ impl McpOAuthManager {
             CallbackMode::Auto => CallbackMode::Loopback,
             mode => mode,
         };
+        // The shared hosted callback is only safe when every response carries the
+        // RFC 9207 `iss` parameter (see `complete_claimed_callback`). Refuse a
+        // server that does not advertise it now, before the consent round trip,
+        // instead of failing the callback after the user has already approved.
+        // The callback still enforces `iss`, so a server that advertises support
+        // and then omits it is rejected there.
+        if callback_mode == CallbackMode::Hosted
+            && !metadata.authorization_response_iss_parameter_supported
+        {
+            bail!(
+                "this MCP authorization server does not return the RFC 9207 `iss` parameter, \
+                 which hosted nodes require; connect it from a local desktop app instead"
+            );
+        }
         let (redirect_uri, listener) = match callback_mode {
             CallbackMode::Hosted => (
                 hosted_redirect
@@ -419,18 +493,11 @@ impl McpOAuthManager {
         let state = random_urlsafe(32);
         let flow_id = format!("oauth_flow_{}", uuid::Uuid::new_v4().simple());
         let expires_at = now + FLOW_TTL_SECS;
-        let requested_scopes = if challenge_scopes.is_empty() {
-            resource_metadata
-                .scopes_supported
-                .clone()
-                .into_iter()
-                .chain(metadata.scopes_supported.clone())
-                .collect::<std::collections::BTreeSet<_>>()
-                .into_iter()
-                .collect()
-        } else {
-            challenge_scopes
-        };
+        let requested_scopes = consent_scopes(
+            challenge_scopes,
+            &resource_metadata.scopes_supported,
+            &metadata.scopes_supported,
+        );
         let mut scopes: std::collections::BTreeSet<String> = requested_scopes.into_iter().collect();
         {
             let store = &self.store;
@@ -617,10 +684,23 @@ impl McpOAuthManager {
                 sanitize_oauth_error_code(&error)
             );
         }
+        // RFC 9207 mix-up defence. The hosted callback is one URL shared by every
+        // authorization server, and the server selected for this flow sees the
+        // state, so only the returned `iss` proves the response came from it. Its
+        // own metadata cannot waive that (a malicious server would simply not
+        // advertise support). The loopback listener is a fresh port per flow, so
+        // there the redirect itself binds the response and an issuerless reply
+        // stays acceptable unless the server promised to send `iss`.
         if let Some(returned_issuer) = returned_issuer.as_deref() {
             if trim_trailing_slash(returned_issuer) != trim_trailing_slash(&pending.issuer) {
                 bail!("OAuth issuer did not match");
             }
+        } else if pending.view.callback_mode == CallbackMode::Hosted {
+            bail!(
+                "OAuth callback omitted the required issuer: hosted callbacks need an \
+                 authorization server that returns the RFC 9207 `iss` parameter; \
+                 use a local desktop connection instead"
+            );
         } else if pending.require_issuer_parameter {
             bail!("OAuth callback omitted the required issuer");
         }
@@ -1041,20 +1121,8 @@ impl McpOAuthManager {
                 None,
             )
             .await?;
+        validate_mcp_transport_headers(&headers)?;
         let mut headers = headers;
-        if headers.iter().any(|(name, _)| {
-            !matches!(
-                name.to_ascii_lowercase().as_str(),
-                "accept"
-                    | "content-type"
-                    | "mcp-method"
-                    | "mcp-name"
-                    | "mcp-session-id"
-                    | "mcp-protocol-version"
-            )
-        }) {
-            bail!("unsupported MCP transport header");
-        }
         // Providers may echo credentials in errors or content. Never reflect custody material.
         let record = self
             .store
@@ -1572,7 +1640,9 @@ pub async fn request(
             body,
         });
     }
-    ryu_egress::guarded_request(
+    // Direct, like `mcp_transport::stream`: tokens and MCP frames must reach only
+    // the screened, pinned address, never an env proxy that resolves the host.
+    ryu_egress::guarded_request_direct(
         ryu_egress::GuardedRequest {
             method: method.into(),
             url: url.into(),
@@ -1589,6 +1659,36 @@ pub async fn request(
     .await
     .map_err(|_| anyhow::anyhow!("OAuth upstream request failed"))
 }
+/// Scopes to request at consent. The challenge's scopes win; otherwise the
+/// protected resource's own `scopes_supported` (as MCP authorization directs).
+/// The authorization server's list is server-wide and often names unrelated or
+/// administrative scopes, so it is used only when the resource publishes none.
+/// `offline_access` grants no resource authority; it only lets providers that
+/// gate refresh tokens on it issue one, so it is kept from the server's list
+/// whenever the request is not a step-up challenge.
+fn consent_scopes(
+    challenge: Vec<String>,
+    resource_supported: &[String],
+    server_supported: &[String],
+) -> Vec<String> {
+    let from_challenge = !challenge.is_empty();
+    let mut chosen: std::collections::BTreeSet<String> = if from_challenge {
+        challenge.into_iter().collect()
+    } else if !resource_supported.is_empty() {
+        resource_supported.iter().cloned().collect()
+    } else {
+        server_supported.iter().cloned().collect()
+    };
+    if !from_challenge
+        && server_supported
+            .iter()
+            .any(|scope| scope == OFFLINE_ACCESS_SCOPE)
+    {
+        chosen.insert(OFFLINE_ACCESS_SCOPE.to_owned());
+    }
+    chosen.into_iter().collect()
+}
+const OFFLINE_ACCESS_SCOPE: &str = "offline_access";
 fn parse_token_response(status: reqwest::StatusCode, bytes: &[u8]) -> Result<TokenResponse> {
     let mut token: TokenResponse = serde_json::from_slice(bytes).unwrap_or(TokenResponse {
         access_token: String::new(),
@@ -1739,6 +1839,24 @@ mod tests {
     }
 
     #[test]
+    fn custom_mcp_parameter_headers_are_token_validated_and_bounded() {
+        assert!(validate_mcp_transport_headers(&[
+            ("Mcp-Method".into(), "tools/call".into()),
+            ("Mcp-Param-Region".into(), "us-west1".into()),
+        ])
+        .is_ok());
+        assert!(
+            validate_mcp_transport_headers(&[("Mcp-Param-Bad Name".into(), "value".into(),)])
+                .is_err()
+        );
+        assert!(validate_mcp_transport_headers(&[(
+            "Mcp-Param-Region".into(),
+            "x".repeat(8 * 1024 + 1),
+        )])
+        .is_err());
+    }
+
+    #[test]
     fn token_bundle_debug_is_always_redacted() {
         let bundle = TokenBundle {
             static_headers_hash: crate::mcp_transport::default_configuration_hash(),
@@ -1795,6 +1913,131 @@ mod tests {
             .is_err());
     }
 
+    /// A token endpoint that only counts requests and answers each with an OAuth
+    /// error, so a test can prove whether Core ever sent the code + PKCE verifier.
+    async fn counting_token_endpoint() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/token", listener.local_addr().unwrap());
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut buffer = vec![0; 16384];
+                    let _ = stream.read(&mut buffer).await;
+                    let body = r#"{"error":"invalid_grant"}"#;
+                    let _ = stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                body.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                });
+            }
+        });
+        (endpoint, hits)
+    }
+
+    #[tokio::test]
+    async fn hosted_callback_requires_issuer_even_when_provider_metadata_does_not() {
+        let (token_endpoint, token_hits) = counting_token_endpoint().await;
+        let manager =
+            McpOAuthManager::new(crate::IdentityStore::open_in_memory().unwrap(), None, None);
+        let flow_id = "issuer-bound-hosted".to_owned();
+        let mut pending = pending_flow(&flow_id);
+        // The selected (possibly malicious) server does not advertise RFC 9207.
+        pending.require_issuer_parameter = false;
+        pending.token_endpoint = token_endpoint;
+        manager.flows.write().await.insert(flow_id.clone(), pending);
+
+        // A relayed, issuerless code arrives at the shared hosted callback with
+        // the state the selected server saw.
+        let error = manager
+            .complete_hosted_callback(
+                Some("foreign-code".to_owned()),
+                Some("one-time-state".to_owned()),
+                None,
+                None,
+            )
+            .await
+            .expect_err("a shared hosted callback must bind every response to its issuer");
+        assert!(error.to_string().contains("omitted the required issuer"));
+        assert_eq!(
+            token_hits.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "neither the code nor the PKCE verifier may reach the selected token endpoint"
+        );
+        let flows = manager.flows.read().await;
+        let failed = flows.get(&flow_id).unwrap();
+        assert_eq!(failed.view.status, FlowState::Failed);
+        assert!(
+            failed.verifier.is_empty(),
+            "failed callbacks scrub PKCE state"
+        );
+    }
+
+    #[tokio::test]
+    async fn hosted_callback_with_matching_issuer_and_issuerless_loopback_reach_the_token_endpoint()
+    {
+        let (token_endpoint, token_hits) = counting_token_endpoint().await;
+        let manager =
+            McpOAuthManager::new(crate::IdentityStore::open_in_memory().unwrap(), None, None);
+
+        // Hosted + the stored issuer (trailing slash is canonicalised away).
+        let hosted = "hosted-with-iss".to_owned();
+        let mut pending = pending_flow(&hosted);
+        pending.token_endpoint = token_endpoint.clone();
+        manager.flows.write().await.insert(hosted.clone(), pending);
+        let error = manager
+            .complete_hosted_callback(
+                Some("code".to_owned()),
+                Some("one-time-state".to_owned()),
+                Some("https://auth.example/".to_owned()),
+                None,
+            )
+            .await
+            .expect_err("the fixture token endpoint answers invalid_grant");
+        assert!(
+            error.to_string().contains("token exchange failed"),
+            "{error:#}"
+        );
+        assert_eq!(token_hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Loopback: the per-flow listener port binds the response, so a server
+        // that does not support RFC 9207 still completes without `iss`.
+        let loopback = "loopback-without-iss".to_owned();
+        let mut pending = pending_flow(&loopback);
+        pending.view.callback_mode = CallbackMode::Loopback;
+        pending.state = "loopback-state".to_owned();
+        pending.redirect_uri = "http://127.0.0.1:1/oauth/callback".to_owned();
+        pending.token_endpoint = token_endpoint;
+        manager
+            .flows
+            .write()
+            .await
+            .insert(loopback.clone(), pending);
+        let error = manager
+            .complete_callback(
+                &loopback,
+                Some("code".to_owned()),
+                Some("loopback-state".to_owned()),
+                None,
+                None,
+            )
+            .await
+            .expect_err("the fixture token endpoint answers invalid_grant");
+        assert!(
+            error.to_string().contains("token exchange failed"),
+            "{error:#}"
+        );
+        assert_eq!(token_hits.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
     #[tokio::test]
     async fn every_error_after_callback_claim_fails_and_scrubs_the_flow() {
         let manager =
@@ -1811,7 +2054,7 @@ mod tests {
                 &flow_id,
                 None,
                 Some("one-time-state".to_owned()),
-                None,
+                Some("https://auth.example".to_owned()),
                 None,
             )
             .await
@@ -2027,7 +2270,9 @@ mod custody_tests {
                     };
                     let response =
                         serde_json::json!({"jsonrpc":"2.0","id":frame["id"],"result":value});
-                    let event=format!(": heartbeat\n\ndata: {{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}}\n\ndata: {response}\n\n");
+                    let event = format!(
+                        ": heartbeat\n\ndata: {{\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}}\n\ndata: {response}\n\n"
+                    );
                     if let Some(writer) = writers.lock().await.get_mut(&session) {
                         writer
                             .write_all(format!("{:x}\r\n{}\r\n", event.len(), event).as_bytes())
@@ -2216,6 +2461,96 @@ mod custody_tests {
         task.abort();
     }
 
+    #[test]
+    fn consent_requests_challenge_then_resource_scopes_before_server_scopes() {
+        let owned = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+        let resource = owned(&["mail.read"]);
+        let server = owned(&["mail.read", "mail.send", "directory.admin"]);
+        assert_eq!(
+            consent_scopes(owned(&["mail.send"]), &resource, &server),
+            ["mail.send"]
+        );
+        assert_eq!(consent_scopes(vec![], &resource, &server), ["mail.read"]);
+        assert_eq!(
+            consent_scopes(vec![], &[], &server),
+            ["directory.admin", "mail.read", "mail.send"]
+        );
+        assert!(consent_scopes(vec![], &[], &[]).is_empty());
+        // Refresh-token issuance is preserved when the server gates it on
+        // offline_access, without widening resource authority.
+        let server_with_refresh = owned(&["mail.read", "directory.admin", "offline_access"]);
+        assert_eq!(
+            consent_scopes(vec![], &resource, &server_with_refresh),
+            ["mail.read", "offline_access"]
+        );
+        // A step-up challenge stays exactly what the resource asked for.
+        assert_eq!(
+            consent_scopes(owned(&["mail.send"]), &resource, &server_with_refresh),
+            ["mail.send"]
+        );
+    }
+
+    #[tokio::test]
+    async fn hosted_flow_start_refuses_a_server_without_rfc9207_issuer_support() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let provider = origin.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let origin = provider.clone();
+                tokio::spawn(async move {
+                    let mut buffer = vec![0; 16384];
+                    let n = stream.read(&mut buffer).await.unwrap();
+                    let request = String::from_utf8_lossy(&buffer[..n]);
+                    let body = if request.contains("/.well-known/oauth-protected-resource") {
+                        serde_json::json!({"resource":origin,"authorization_servers":[origin],"scopes_supported":["read"]})
+                    } else {
+                        serde_json::json!({"issuer":origin,"authorization_endpoint":format!("{origin}/authorize"),"token_endpoint":format!("{origin}/token"),"code_challenge_methods_supported":["S256"],"scopes_supported":["read"]})
+                    }
+                    .to_string();
+                    stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                });
+            }
+        });
+        let manager = McpOAuthManager::new(
+            crate::IdentityStore::open_in_memory().unwrap(),
+            Some("https://passport.example/callback".into()),
+            None,
+        );
+        let spec = |callback_mode| ConnectSpec {
+            access_level: crate::ConnectionAccessLevel::ReadOnly,
+            owner_user_id: "owner".into(),
+            profile_id: "profile".into(),
+            plugin_id: "plugin".into(),
+            server_name: "server".into(),
+            resource_url: format!("{origin}/mcp"),
+            auth: OAuthClient {
+                client_id: Some("client".into()),
+            },
+            callback_mode,
+            static_headers: Default::default(),
+            challenge: Some(format!(
+                "Bearer resource_metadata=\"{origin}/.well-known/oauth-protected-resource\""
+            )),
+        };
+        // Hosted (explicit, and Auto on a node with an HTTPS public URL) is
+        // refused up front with an actionable message.
+        for mode in [CallbackMode::Hosted, CallbackMode::Auto] {
+            let error = manager
+                .start_connect(spec(mode))
+                .await
+                .expect_err("hosted flows need RFC 9207 issuer support");
+            assert!(error.to_string().contains("RFC 9207"), "{error}");
+        }
+        // A loopback flow binds the redirect itself, so the same server starts.
+        manager
+            .start_connect(spec(CallbackMode::Loopback))
+            .await
+            .expect("loopback flows do not need `iss`");
+        task.abort();
+    }
+
     #[tokio::test]
     async fn discovery_pkce_hosted_callback_and_metadata_roundtrip() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2232,7 +2567,7 @@ mod custody_tests {
                     let body=if request.contains("/.well-known/oauth-protected-resource") {
                         serde_json::json!({"resource":origin,"authorization_servers":[origin],"scopes_supported":["read"]})
                     } else if request.contains("/.well-known/oauth-authorization-server") {
-                        serde_json::json!({"issuer":origin,"authorization_endpoint":format!("{origin}/authorize"),"token_endpoint":format!("{origin}/token"),"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true})
+                        serde_json::json!({"issuer":origin,"authorization_endpoint":format!("{origin}/authorize"),"token_endpoint":format!("{origin}/token"),"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true,"scopes_supported":["read","directory.admin","offline_access"]})
                     } else {
                         assert!(request.contains("code_verifier=")); assert!(request.contains("grant_type=authorization_code"));
                         serde_json::json!({"access_token":"fixture-authorized","refresh_token":"fixture-rotation","expires_in":3600})
@@ -2269,6 +2604,9 @@ mod custody_tests {
         let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
         assert_eq!(params["code_challenge_method"], "S256");
         assert_eq!(params["redirect_uri"], "https://passport.example/callback");
+        // Only the protected resource's scopes (plus offline_access for a
+        // refresh token), not the server-wide list.
+        assert_eq!(params["scope"], "offline_access read");
         assert!(manager.flow("other", &started.flow_id).await.is_err());
         assert!(manager
             .complete_hosted_callback(
@@ -2332,7 +2670,11 @@ mod custody_tests {
                     let (status, headers, body) = if request.starts_with("POST /token") {
                         calls.fetch_add(1, Ordering::SeqCst);
                         tokio::time::sleep(Duration::from_millis(50)).await;
-                        ("200 OK","","{\"access_token\":\"fixture-fresh\",\"refresh_token\":\"fixture-refresh\",\"expires_in\":3600}")
+                        (
+                            "200 OK",
+                            "",
+                            "{\"access_token\":\"fixture-fresh\",\"refresh_token\":\"fixture-refresh\",\"expires_in\":3600}",
+                        )
                     } else if request.starts_with("POST /redirect") {
                         ("302 Found", "Location: http://127.0.0.1/forbidden\r\n", "")
                     } else if request.starts_with("POST /echo") {
@@ -2347,7 +2689,10 @@ mod custody_tests {
                             "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n",
                         )
                     };
-                    let response=format!("HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+                    let response = format!(
+                        "HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
                     stream.write_all(response.as_bytes()).await.unwrap();
                 });
             }
@@ -2512,7 +2857,7 @@ mod custody_tests {
             "racing",
             Some("fixture-code".into()),
             Some(state.clone()),
-            None,
+            Some("https://auth.example".into()),
             None,
         );
         let uninstall = async {
@@ -2534,7 +2879,7 @@ mod custody_tests {
                 "racing",
                 Some("fixture-code".into()),
                 Some(state),
-                None,
+                Some("https://auth.example".into()),
                 None
             )
             .await

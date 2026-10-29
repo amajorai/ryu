@@ -1,3 +1,6 @@
+import { z } from "zod";
+import type { GatewayJsonValue } from "./gateway-json-contracts.ts";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/sandbox.ts
 //
 // Typed client for Core's sandbox-backend endpoint (`/api/sandbox/backend`).
@@ -39,7 +42,7 @@ export async function fetchSandboxBackends(
 	const json = await request<{
 		active?: string;
 		available?: SandboxBackendWire[];
-	}>(target, "/api/sandbox/backend");
+	}>(target, "/api/sandbox/backend", {}, fetchSandboxBackendsResponseSchema);
 	return {
 		active: json.active ?? "wasmtime",
 		available: (json.available ?? []).map(
@@ -62,7 +65,12 @@ export async function setSandboxBackend(
 		success?: boolean;
 		error?: string;
 		active?: string;
-	}>(target, "/api/sandbox/backend", { method: "POST", body: { name } });
+	}>(
+		target,
+		"/api/sandbox/backend",
+		{ method: "POST", body: { name } },
+		setSandboxBackendResponseSchema
+	);
 	if (json.success === false) {
 		throw new Error(json.error ?? `Failed to set sandbox backend "${name}"`);
 	}
@@ -74,7 +82,7 @@ export interface SandboxBackendPreview {
 	action: "set";
 	dryRun: true;
 	success: boolean;
-	[key: string]: unknown;
+	[key: string]: GatewayJsonValue;
 }
 
 /** Validate a default backend choice without writing sandbox-backend.json. */
@@ -82,8 +90,71 @@ export function previewSandboxBackend(
 	target: ApiTarget,
 	name: string
 ): Promise<SandboxBackendPreview> {
-	return request<SandboxBackendPreview>(target, "/api/sandbox/backend", {
-		method: "POST",
-		body: { dryRun: true, name },
-	});
+	return request<SandboxBackendPreview>(
+		target,
+		"/api/sandbox/backend",
+		{
+			method: "POST",
+			body: { dryRun: true, name },
+		},
+		sandboxBackendPreviewResponseSchema
+	);
+}
+
+const fetchSandboxBackendsResponseSchema = retainValidatedResponse(
+	z.custom<{
+		active?: string;
+		available?: SandboxBackendWire[];
+	}>(
+		(value) =>
+			z
+				.object({
+					active: z.string().optional(),
+					available: z
+						.array(
+							z
+								.object({
+									detected: z.boolean().optional(),
+									display_name: z.string().optional(),
+									name: z.string(),
+									supported: z.boolean().optional(),
+								})
+								.passthrough()
+						)
+						.optional(),
+				})
+				.passthrough()
+				.safeParse(value).success
+	)
+);
+const setSandboxBackendResponseSchema = retainValidatedResponse(
+	z.custom<{
+		success?: boolean;
+		error?: string;
+		active?: string;
+	}>(
+		(value) =>
+			z
+				.object({
+					success: z.boolean().optional(),
+					error: z.string().optional(),
+					active: z.string().optional(),
+				})
+				.passthrough()
+				.safeParse(value).success
+	)
+);
+const sandboxBackendPreviewResponseSchema: z.ZodType<SandboxBackendPreview> =
+	retainValidatedResponse(
+		z
+			.object({
+				action: z.literal("set"),
+				dryRun: z.literal(true),
+				success: z.boolean(),
+			})
+			.catchall(gatewayJsonValueSchema)
+	);
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

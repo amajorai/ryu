@@ -1,27 +1,27 @@
 import type { ComposerSettingItem } from "@/components/agent-elements/input/composer-settings-menu.tsx";
 
 /** Human labels for Pi provider ids (mirrors Core `pi_config::PROVIDERS`). */
-const PI_PROVIDER_LABELS: Record<string, string> = {
-	anthropic: "Anthropic",
-	openai: "OpenAI",
-	google: "Google Gemini",
-	deepseek: "DeepSeek",
-	groq: "Groq",
-	mistral: "Mistral",
-	xai: "xAI",
-	cerebras: "Cerebras",
-	fireworks: "Fireworks AI",
-	together: "Together AI",
-	nvidia: "NVIDIA NIM",
-	moonshot: "Moonshot AI",
-	openrouter: "OpenRouter",
-	gateway: "Ryu Gateway",
-	"openai-codex": "ChatGPT (Plus/Pro)",
-	chatgpt: "ChatGPT (native)",
-	"claude-pro-max": "Claude (Pro/Max)",
-	"github-copilot": "GitHub Copilot",
-	"ryu-openrouter": "Ryu (managed)",
-};
+const PI_PROVIDER_LABELS = new Map<string, string>([
+	["anthropic", "Anthropic"],
+	["openai", "OpenAI"],
+	["google", "Google Gemini"],
+	["deepseek", "DeepSeek"],
+	["groq", "Groq"],
+	["mistral", "Mistral"],
+	["xai", "xAI"],
+	["cerebras", "Cerebras"],
+	["fireworks", "Fireworks AI"],
+	["together", "Together AI"],
+	["nvidia", "NVIDIA NIM"],
+	["moonshot", "Moonshot AI"],
+	["openrouter", "OpenRouter"],
+	["gateway", "Ryu Gateway"],
+	["openai-codex", "ChatGPT (Plus/Pro)"],
+	["chatgpt", "ChatGPT (native)"],
+	["claude-pro-max", "Claude (Pro/Max)"],
+	["github-copilot", "GitHub Copilot"],
+	["ryu-openrouter", "Ryu Router"],
+]);
 
 export interface ModelMenuOption extends ComposerSettingItem {
 	group: string | null;
@@ -29,7 +29,7 @@ export interface ModelMenuOption extends ComposerSettingItem {
 
 export function providerLabel(providerId: string): string {
 	const key = providerId.trim().toLowerCase();
-	return PI_PROVIDER_LABELS[key] ?? titleCaseProvider(key);
+	return PI_PROVIDER_LABELS.get(key) ?? titleCaseProvider(key);
 }
 
 function titleCaseProvider(id: string): string {

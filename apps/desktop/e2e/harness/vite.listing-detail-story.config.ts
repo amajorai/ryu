@@ -35,4 +35,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "listing-detail-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

@@ -6,7 +6,7 @@ is **deterministic** and **proven by cases** before anything can call it.
 ```
 node tools/toolsmith/index.mjs scaffold --id @scope/name --tool slug [--kind inline_tool|adapter] [--out DIR]
 node tools/toolsmith/index.mjs verify   <plugin dir>
-node tools/toolsmith/index.mjs sync     <plugin dir> [--check]
+node tools/toolsmith/index.mjs sync     <plugin dir> [--check] [--cases cases/<tool>.json]
 ```
 
 Re-running `scaffold` on an existing package regenerates `tool.test.mjs` only. The
@@ -55,7 +55,7 @@ Three mechanisms enforce it, and all three must pass:
 1. **Static purity scan** (`purity.mjs`) — rejects `Date.now()`, argless
    `new Date()`, `Math.random()`, `crypto` randomness, `performance.now()`,
    `fetch`, `process.env`, timers, `globalThis`, `eval`, `new Function`,
-   `require`, `import`/`export`, and `Deno.*`. Runs on the source, so an offender
+   `require`, `import`/`export`, and `childProcess.*`. Runs on the source, so an offender
    in an untested branch is still caught. Comments and string literals are blanked
    first, so prose *about* a rule does not trip it.
 2. **Shadowed globals** (`harness.mjs`) — each of those names is bound as a
@@ -110,8 +110,28 @@ the real runtime would refuse.
 }
 ```
 
+Stub `provider` with the shape the provider tool really returns. The example is
+an MCP tool's result; an `http` tool answers `{status, body}`, the bare body on a
+2xx with `unwrap_body`, or `{available: false, …}` on a 401/403 or unreachable
+host with `fail_open`. An MCP-envelope stub for an `http` tool passes here and
+does nothing once installed.
+
 At least **three** cases are required — happy path, edge case, failure. One happy
 path proves nothing about a tool.
+
+A package that ships several bodies (one adapter per `browser.*` verb, say) keeps
+one table per body under `cases/<tool>.json`, in the same format, beside or
+instead of `cases.json`. `verify` runs purity, contract and drift for every table,
+and the generated `tool.test.mjs` (`definePackageToolTests`) registers them all;
+`sync --cases cases/<tool>.json` targets one. An adapter table's `adapter_tools`
+must equal the manifest's `adapter.tools`, since the harness enforces it as the
+`callNamed` allowlist. Results are compared through a JSON snapshot, like recorded
+calls, because they leave the sandbox as JSON: an `undefined`-valued key is
+simply absent from `expect`.
+
+A body that waits on a clock (`Date.now()` plus timers, e.g. a polling crawl
+adapter) cannot pass the purity scan and so cannot carry a case table until the
+wait moves out of the body.
 
 ## The gate
 
@@ -124,12 +144,12 @@ The order is load-bearing:
 
 1. **Purity scan.** First, because it is the only step that runs *before* the body
    does. Its denylist covers every escape from the harness (`import`, `require`,
-   `eval`, `new Function`, `process`, `fetch`, `Deno`), so clearing it is what
+   `eval`, `new Function`, `process`, `fetch`, `childProcess`), so clearing it is what
    makes step 4 safe to run on someone else's code at all. **Never call `runCase`
    on an unscanned body.**
 2. **Manifest contract.** The seat exists; the tool is routable (real description,
    `input_schema`) and callable (`tool:execute` granted — without it Core registers
-   an `inline_deno` tool and then refuses every call).
+   an `inline_js` tool and then refuses every call).
 3. **Drift check.** The manifest carries exactly the body the cases tested.
 4. **Cases.** `node --test`, every case twice. Inside the suite a purity
    violation ABORTS registration of the case tests, so nothing impure is ever
@@ -141,12 +161,12 @@ The purity scan is a conservative regex denylist over source with comments and
 strings blanked; it does not model regex literals, and the body runs with full
 Node privileges in this process. Use it on tool bodies you or your team wrote and
 have read. It is **not** a vetting step for an untrusted third-party plugin — the
-thing that actually confines that code is Core's Deno sandbox.
+thing that actually confines that code is Core's JS sandbox.
 
 ## Why `sync` exists
 
 `ToolConfig` (`crates/core/kernel-contracts/src/schema.rs`) has **no `code_file`
-field** — an `inline_deno` tool's only loadable form is a JSON string in the
+field** — an `inline_js` tool's only loadable form is a JSON string in the
 manifest. Authoring in that string is what AGENTS.md bans for hooks and adapters,
 for a reason that applies here identically: nobody audits a `\n`-escaped blob, and
 that is where malicious code hides.
@@ -198,7 +218,7 @@ this file is the contributor-facing contract and may name monorepo internals the
   seal + drift check is the substitute.
 - **`packaged_plugin_manifests_declare_no_inline_sandbox_code`** (Core) checks
   `contributes.turn_hooks[].code` and `provides[].tools.*.adapter.code`, but not
-  `runnables[].config.code`. An `inline_deno` tool can therefore still ship a
+  `runnables[].config.code`. An `inline_js` tool can therefore still ship a
   hand-written blob and no Core test objects; `toolsmith verify` is what closes
   that for packages that opt in.
 
@@ -212,7 +232,7 @@ this file is the contributor-facing contract and may name monorepo internals the
   `write_tool` / `verify_tool` / `install_tool`
   (`apps/core/src/runnable/self_build.rs` + `tool_build.rs`): an agent in chat
   can author a body + case table, run the SAME four checks here — purity,
-  contract, drift, cases — with the cases executed **inside Core's deny-all Deno
+  contract, drift, cases — with the cases executed **inside Core's deny-all JS
   sandbox** (`ryu_tool_exec::run_eval_js`) instead of this Node process, and
   only a passing tool is ever hot-installed. No Node on the user's machine, no
   `tools/` directory shipped. `verify` (CLI) and `verify_tool` (runtime) are the

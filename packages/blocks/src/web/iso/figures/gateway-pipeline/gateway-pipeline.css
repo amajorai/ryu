@@ -1,0 +1,26 @@
+/*
+ * Gateway pipeline figure. The shared quiet tokens (../shared/quiet.css) set the look;
+ * this file adds only the edge tone the gate the request is passing steps up to.
+ */
+
+.iso.gwp {
+	--gwp-on: #404040;
+}
+
+.dark .iso.gwp {
+	--gwp-on: #d4d4d4;
+}
+
+.gwp-live [data-stage] .iso-edge {
+	transition: stroke 600ms ease;
+}
+
+.gwp-live [data-stage][data-on] .iso-edge {
+	stroke: var(--gwp-on);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.gwp-live [data-stage] .iso-edge {
+		transition: none;
+	}
+}

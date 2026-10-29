@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import "./gateway-dialog.css";
 import {
 	Activity01Icon,
 	Add01Icon,
@@ -10,6 +12,7 @@ import {
 	Delete01Icon,
 	Dollar01Icon,
 	EyeIcon,
+	FlowConnectionIcon,
 	GitBranchIcon,
 	Key01Icon,
 	LaptopIcon,
@@ -17,6 +20,7 @@ import {
 	PencilEdit01Icon,
 	Plug01Icon,
 	PlugSocketIcon,
+	PolicyIcon,
 	Refresh01Icon,
 	Settings01Icon,
 	Share08Icon,
@@ -33,6 +37,21 @@ import {
 	type EvaluatorCatalogItem,
 } from "@ryu/blocks/desktop/evaluator-catalog.tsx";
 import {
+	LockedByBroader,
+	LockToggle,
+	PipelineBadge,
+} from "@ryu/blocks/desktop/guardrails/controls.tsx";
+import {
+	GUARDRAIL_ACTION_LABELS as POLICY_LABELS,
+	GUARDRAIL_ACTION_OPTIONS as POLICY_OPTIONS,
+} from "@ryu/blocks/desktop/guardrails/copy.ts";
+import {
+	DlpCard,
+	FirewallCard,
+} from "@ryu/blocks/desktop/guardrails/firewall-cards.tsx";
+import type { GuardrailScopeCtx } from "@ryu/blocks/desktop/guardrails/types.ts";
+import ResizableSettingsLayout from "@ryu/blocks/desktop/resizable-settings-layout.tsx";
+import {
 	SettingsIconTile,
 	type SettingsTint,
 } from "@ryu/blocks/desktop/settings-nav.tsx";
@@ -47,14 +66,6 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@ryu/ui/components/dialog.tsx";
-import {
-	Empty,
-	EmptyContent,
-	EmptyDescription,
-	EmptyHeader,
-	EmptyMedia,
-	EmptyTitle,
-} from "@ryu/ui/components/empty.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
@@ -72,21 +83,19 @@ import {
 	SidebarMenuButton,
 	SidebarMenuItem,
 } from "@ryu/ui/components/sidebar.tsx";
-import { toast } from "@ryu/ui/components/sileo.tsx";
-import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatNumber as formatSharedNumber } from "@ryu/ui/lib/number-format.ts";
 import { useQuery } from "@tanstack/react-query";
-import type { ReactElement } from "react";
+import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentModelPickerField } from "@/components/agent-elements/input/agent-model-picker-field.tsx";
-import { AgentSelectionField } from "@/components/agent-elements/input/agent-selection-field.tsx";
 import { WEB_URL } from "@/lib/app-urls.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { toCatalogItem } from "@/src/components/evaluators/catalog-utils.ts";
@@ -100,30 +109,51 @@ import {
 	AgentSyncExportSection,
 	AgentSyncImportSection,
 } from "@/src/components/gateway/AgentSyncSections.tsx";
-import { ApiSection } from "@/src/components/gateway/ApiSection.tsx";
+import {
+	ApiSection,
+	GatewayClientKeys,
+} from "@/src/components/gateway/ApiSection.tsx";
 import { AutoRetrySection } from "@/src/components/gateway/AutoRetrySection.tsx";
-import { BotRealmDefaultCard } from "@/src/components/gateway/BotRealmDefaultCard.tsx";
 import { BudgetChargeInclusionFields } from "@/src/components/gateway/BudgetRuleFields.tsx";
+import { ByokCard } from "@/src/components/gateway/ByokCard.tsx";
 import {
 	budgetUsdToMicroUsd,
 	formatBudgetUsd,
 	microUsdToBudgetInput,
 } from "@/src/components/gateway/budget-copy.ts";
+import { CloudEnvironmentsSettings } from "@/src/components/gateway/CloudEnvironmentsSettings.tsx";
 import { ComputerUseSettings } from "@/src/components/gateway/ComputerUseSettings.tsx";
+import { DefaultsSection } from "@/src/components/gateway/DefaultsSection.tsx";
+import { EgressPoolsEditor } from "@/src/components/gateway/EgressPoolsEditor.tsx";
 import { EnvironmentsSection } from "@/src/components/gateway/EnvironmentsSection.tsx";
 import { FallbackRulesSection } from "@/src/components/gateway/FallbackRulesSection.tsx";
+import { GatewayNodeScopePicker } from "@/src/components/gateway/GatewayNodeScopePicker.tsx";
 import { GatewayPostureCard } from "@/src/components/gateway/GatewayPostureCard.tsx";
+import { GatewayProviderApplication } from "@/src/components/gateway/GatewayProviderApplication.tsx";
+import { GatewaySdkAccounts } from "@/src/components/gateway/GatewaySdkAccounts.tsx";
+import {
+	GatewayCloudSpeechAccounts,
+	GatewaySpeechSettings,
+} from "@/src/components/gateway/GatewaySpeechSettings.tsx";
+import { GatewayWebAccounts } from "@/src/components/gateway/GatewayWebAccounts.tsx";
 import { GitSettingsSection } from "@/src/components/gateway/GitSettingsSection.tsx";
+import { GuardrailPoliciesSection } from "@/src/components/gateway/GuardrailPoliciesSection.tsx";
 import { HooksSection } from "@/src/components/gateway/HooksSection.tsx";
 import { McpSection } from "@/src/components/gateway/McpSection.tsx";
+import { ModelsDefaultsCard } from "@/src/components/gateway/ModelsDefaultsCard.tsx";
 import { NodeOnboardingSettings } from "@/src/components/gateway/NodeOnboardingSettings.tsx";
 import { ProviderControlCenter } from "@/src/components/gateway/ProviderControlCenter.tsx";
+import { ManagedKeyNote } from "@/src/components/gateway/ProviderKeyRow.tsx";
+import { ProviderPoolsEditor } from "@/src/components/gateway/ProviderPoolsEditor.tsx";
+import { RoutePoolFields } from "@/src/components/gateway/RoutePoolFields.tsx";
+import { TrafficMapSection } from "@/src/components/gateway/TrafficMapSection.tsx";
+import { TrustedFoldersCard } from "@/src/components/gateway/TrustedFoldersCard.tsx";
 import { UsageCostSection } from "@/src/components/gateway/UsageCostSection.tsx";
 import { WorkspaceSection } from "@/src/components/gateway/WorkspaceSection.tsx";
 import { WorktreesSection } from "@/src/components/gateway/WorktreesSection.tsx";
-import ResizableSettingsLayout from "@/src/components/ResizableSettingsLayout.tsx";
 import { ConnectionsTab } from "@/src/components/settings/ConnectionsTab.tsx";
 import { DangerZoneSettings } from "@/src/components/settings/DangerZoneSettings.tsx";
+import { DesktopRouteSettings } from "@/src/components/settings/DesktopRouteSettings.tsx";
 import { EmailAlertsSettings } from "@/src/components/settings/EmailAlertsSettings.tsx";
 import { EncryptionSettings } from "@/src/components/settings/EncryptionSettings.tsx";
 import { EntitySettings } from "@/src/components/settings/EntitySettings.tsx";
@@ -144,10 +174,21 @@ import {
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { UpdatesSettings } from "@/src/components/settings/UpdatesSettings.tsx";
-import { useActiveNodeGetter } from "@/src/hooks/useActiveNode.ts";
+import { NodeScopeProvider } from "@/src/contexts/NodeScopeContext.tsx";
+import {
+	useActiveNode,
+	useActiveNodeGetter,
+} from "@/src/hooks/useActiveNode.ts";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
-import { useGatewayConfigurable } from "@/src/hooks/useGatewayConfigurable.ts";
+import {
+	useCanManagePermission,
+	useGatewayConfigurable,
+} from "@/src/hooks/useGatewayConfigurable.ts";
 import { useGatewayStatus } from "@/src/hooks/useGatewayStatus.ts";
+import {
+	NO_DEFAULT_MODEL_INPUT_HINT,
+	useNodeDefaultModel,
+} from "@/src/hooks/useNodeDefaultModel.ts";
 import {
 	APP_SECTION_PREFIX,
 	buildEntityNavGroups,
@@ -160,17 +201,14 @@ import { useSettingReveal } from "@/src/hooks/useSettingReveal.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
 import { CATALOG_SCAN_AGENT_PREF } from "@/src/lib/api/catalog-scan.ts";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { ApiError, type ApiTarget } from "@/src/lib/api/client.ts";
 import type {
 	AuditEntry,
 	BudgetAction,
 	BudgetChargeInclusion,
 	BudgetRule,
 	BudgetSpend,
-	ByokProvider,
 	ClassifyTierState,
-	CustomPattern,
-	CustomPatternKind,
 	EvalCaseScore,
 	EvalRunAggregate,
 	EvalRunResult,
@@ -182,7 +220,7 @@ import type {
 	GatewayConfig,
 	GatewayFirewallConfig,
 	GatewayFirewallOverlay,
-	GatewayFirewallPolicy,
+	GatewayFirewallView,
 	GatewayMetrics,
 	GatewayProvidersConfig,
 	GatewayRoutingConfig,
@@ -195,9 +233,9 @@ import type {
 	ModelRouterType,
 	ProviderCircuitState,
 	ProviderKind,
+	ProviderPoolStrategy,
 	RouteStrategy,
 	SmartRoutingConfig,
-	StagePicker,
 } from "@/src/lib/api/gateway.ts";
 import {
 	ALERT_TIERS,
@@ -206,7 +244,6 @@ import {
 	CLASSIFY_TIER_COPY,
 	classifyTierCannotServeModel,
 	classifyTierServable,
-	clearGatewayProvider,
 	DEFAULT_BUDGET_INCLUSION,
 	DEFAULT_INSPECTOR,
 	DEFAULT_SESSION_BUDGET,
@@ -218,40 +255,39 @@ import {
 	fetchEvaluators,
 	fetchGatewayAudit,
 	fetchGatewayConfig,
+	formatPoolList,
 	MODALITIES,
 	MODEL_ROUTER_TYPE_DESCRIPTIONS,
 	MODEL_ROUTER_TYPE_LABELS,
+	parsePoolList,
 	routeStrategyCopy,
 	routingViewIncludesModalityMap,
 	routingViewIncludesSmartRouting,
 	runGatewayEvals,
-	setGatewayProvider,
+	sameGuardrailSections,
 	updateGatewayConfig,
 	withModalityMapping,
+	withRoutingDraftEdits,
 } from "@/src/lib/api/gateway.ts";
 import {
-	type AgentSelection,
-	EMPTY_AGENT_SELECTION,
 	getComposioApiKey,
 	getExecApprovalEnabled,
 	getFalApiKey,
-	getLaneAgentSelection,
 	getPreference,
 	getReplicateApiKey,
 	setComposioApiKey,
 	setExecApprovalEnabled,
 	setFalApiKey,
-	setLaneAgentSelection,
 	setPreference,
 	setReplicateApiKey,
 } from "@/src/lib/api/preferences.ts";
-import { deleteProviderKey, setProviderKey } from "@/src/lib/api/secrets.ts";
 import { fetchSidecarStatus } from "@/src/lib/api/system.ts";
 import { requestSettingReveal } from "@/src/lib/settings-focus.ts";
 import type { SettingsEntry } from "@/src/lib/settings-index.ts";
 import { formatTime } from "@/src/lib/timezone.ts";
 import { PreflightPage } from "@/src/pages/PreflightPage.tsx";
 import type { GatewaySection } from "@/src/store/useGatewayDialog.ts";
+import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 
 /**
@@ -260,7 +296,7 @@ import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
  */
 function PolicyReadOnlyBanner() {
 	return (
-		<div className="mx-3 flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
+		<SettingsCard className="flex items-start gap-2 text-muted-foreground text-sm">
 			<HugeiconsIcon
 				className="mt-0.5 size-4 shrink-0"
 				icon={SquareLock01Icon}
@@ -271,7 +307,7 @@ function PolicyReadOnlyBanner() {
 				permission in this workspace, so changes are disabled. Ask a workspace
 				owner or admin to grant it.
 			</span>
-		</div>
+		</SettingsCard>
 	);
 }
 
@@ -283,11 +319,17 @@ function formatPercent(rate: number): string {
 	return `${(rate * 100).toFixed(1)}%`;
 }
 
+/**
+ * One stat inside a metrics `SettingsCard`. No surface of its own: that card is
+ * the only box, so a row of stats reads as one card, not tiles in a card.
+ */
 function MetricTile({ label, value }: { label: string; value: string }) {
 	return (
-		<div className="rounded-lg bg-muted/40 p-3">
+		<div className="min-w-0">
 			<div className="text-muted-foreground text-xs">{label}</div>
-			<div className="mt-1 font-medium text-lg tabular-nums">{value}</div>
+			<div className="mt-0.5 truncate font-medium text-lg tabular-nums">
+				{value}
+			</div>
 		</div>
 	);
 }
@@ -337,9 +379,9 @@ function ProvidersCard({
 			title="Providers"
 		>
 			{providers.length === 0 ? (
-				<p className="px-3 text-muted-foreground text-sm">
+				<SettingsCard className="text-center text-muted-foreground text-sm">
 					No providers reported.
-				</p>
+				</SettingsCard>
 			) : (
 				<SettingsGroup>
 					{providers.map((name) => {
@@ -411,7 +453,7 @@ function GatewayKeysCard({
 					setLoadError(null);
 				}
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setLoadError(
 						e instanceof Error ? e.message : "Failed to load auth config"
@@ -437,7 +479,7 @@ function GatewayKeysCard({
 
 	return (
 		<SettingsSection
-			caption="Issue or revoke keys in the web dashboard. Plaintext values are shown only at creation time and never stored in the desktop."
+			caption="Issue or revoke keys in Console on the web. Plaintext values are shown only at creation time and never stored in the desktop."
 			headerAction={
 				<Button onClick={handleManageInWeb} size="sm" variant="ghost">
 					<HugeiconsIcon className="size-4" icon={Share08Icon} />
@@ -446,120 +488,75 @@ function GatewayKeysCard({
 			}
 			title="Gateway keys"
 		>
-			<div className="flex flex-col gap-3">
-				{reachable && loading ? (
-					<div className="flex items-center gap-2 px-3 text-muted-foreground text-sm">
-						<Spinner className="size-4" />
-						Loading…
-					</div>
-				) : null}
-				{reachable && !loading && loadError ? (
-					<p className="px-3 text-sm text-status-destructive">{loadError}</p>
-				) : null}
-				{reachable && !(loading || loadError) ? (
-					<>
-						{requireAuth ? null : (
-							<div className="mx-3 flex items-start gap-2 rounded-md border border-warning bg-warning px-3 py-2 text-sm text-status-warning dark:border-warning dark:bg-warning dark:text-status-warning">
-								<HugeiconsIcon
-									className="mt-0.5 size-4 shrink-0"
-									icon={Shield01Icon}
-								/>
-								<span>
-									<span className="font-medium">Auth disabled.</span> The
-									gateway accepts requests without an API key. Enable{" "}
-									<span className="font-mono">require_auth</span> in the gateway
-									config or via the web org settings to require authentication.
-								</span>
-							</div>
-						)}
+			{reachable && loading ? (
+				<SettingsCard>
+					<SkeletonRows label="Loading…" spacing="panel" />
+				</SettingsCard>
+			) : null}
+			{reachable && !loading && loadError ? (
+				<SettingsCard className="text-muted-foreground text-sm">
+					<span title={loadError}>Couldn't load the gateway's API keys.</span>
+				</SettingsCard>
+			) : null}
+			{reachable && !(loading || loadError) ? (
+				<>
+					{requireAuth ? null : (
+						<SettingsCard className="flex items-start gap-2 text-sm text-status-warning">
+							<HugeiconsIcon
+								className="mt-0.5 size-4 shrink-0"
+								icon={Shield01Icon}
+							/>
+							<span>
+								<span className="font-medium">Auth disabled.</span> The gateway
+								accepts requests without an API key. Enable{" "}
+								<span className="font-mono">require_auth</span> in the gateway
+								config or via the web org settings to require authentication.
+							</span>
+						</SettingsCard>
+					)}
 
-						{keys.length === 0 ? (
-							<p className="px-3 text-muted-foreground text-sm">
-								No API keys configured. Use the web org settings to issue keys.
-							</p>
-						) : (
-							<SettingsGroup>
-								{keys.map((k) => (
-									<SettingsItem
-										actions={
-											<div className="flex items-center gap-2">
-												{k.trusted_forwarder ? (
-													<Badge variant="secondary">trusted forwarder</Badge>
-												) : null}
-												{k.org_id ? (
-													<Badge
-														className="font-mono text-xs"
-														variant="secondary"
-													>
-														org
-													</Badge>
-												) : null}
-											</div>
-										}
-										description={
-											<span className="font-mono">
+					{keys.length === 0 ? (
+						<SettingsCard className="text-center text-muted-foreground text-sm">
+							No API keys configured. Use the web org settings to issue keys.
+						</SettingsCard>
+					) : (
+						<SettingsGroup>
+							{keys.map((k) => (
+								<SettingsItem
+									actions={
+										<div className="flex items-center gap-2">
+											<span className="font-mono text-muted-foreground text-xs">
 												{maskedKeyPrefix(k.name)}
 											</span>
-										}
-										key={k.name}
-										title={k.name}
-									/>
-								))}
-							</SettingsGroup>
-						)}
-					</>
-				) : null}
-				{reachable ? null : (
-					<p className="px-3 text-muted-foreground text-sm">
-						Gateway unreachable, so the key list is unavailable. Start the
-						gateway and refresh.
-					</p>
-				)}
-			</div>
+											{k.trusted_forwarder ? (
+												<Badge variant="secondary">trusted forwarder</Badge>
+											) : null}
+											{k.org_id ? (
+												<Badge typography="code" variant="secondary">
+													org
+												</Badge>
+											) : null}
+										</div>
+									}
+									key={k.name}
+									title={k.name}
+								/>
+							))}
+						</SettingsGroup>
+					)}
+				</>
+			) : null}
+			{reachable ? null : (
+				<SettingsCard className="text-center text-muted-foreground text-sm">
+					Gateway unreachable, so the key list is unavailable. Start the gateway
+					and refresh.
+				</SettingsCard>
+			)}
 		</SettingsSection>
 	);
 }
 
 // ── BYOK provider-key vault (Unit U026) ─────────────────────────────────────
-
-const BYOK_PROVIDERS: {
-	slug: ByokProvider;
-	label: string;
-	placeholder: string;
-}[] = [
-	{ slug: "openai", label: "OpenAI", placeholder: "sk-..." },
-	{ slug: "anthropic", label: "Anthropic", placeholder: "sk-ant-..." },
-	{ slug: "openrouter", label: "OpenRouter", placeholder: "sk-or-..." },
-	{ slug: "gemini", label: "Gemini", placeholder: "AIza..." },
-];
-
-/**
- * Whether a BYOK provider currently has a key set, read from the redacted
- * gateway config. Most providers map 1:1 to a top-level config field; "gemini"
- * is special-cased because its key lives in the genai backend's `keys` list.
- */
-function isByokProviderSet(
-	providers: GatewayProvidersConfig | null,
-	slug: ByokProvider
-): boolean {
-	if (slug === "gemini") {
-		return providers?.genai?.keys.includes("gemini") ?? false;
-	}
-	return providers?.[slug] != null;
-}
-
-/**
- * Note shown in place of a key input on a managed (Ryu Cloud) node. The fleet
- * holds provider keys in its server-side vault (WS1), so the desktop must never
- * offer a field that could POST a personal key to the shared hosted gateway.
- */
-function ManagedKeyNote() {
-	return (
-		<p className="text-muted-foreground text-xs">
-			Provided by Ryu Cloud. Keys held server-side.
-		</p>
-	);
-}
 
 /**
  * Banner atop the Keys section on a managed node, explaining why every key card
@@ -567,224 +564,17 @@ function ManagedKeyNote() {
  */
 function ManagedKeysBanner() {
 	return (
-		<div className="mx-3 flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground text-sm">
+		<SettingsCard className="flex items-start gap-2 text-muted-foreground text-sm">
 			<HugeiconsIcon
 				className="mt-0.5 size-4 shrink-0"
 				icon={SquareLock01Icon}
 			/>
 			<span>
-				<span className="font-medium text-foreground">
-					Ryu Cloud managed server.
-				</span>{" "}
+				<span className="font-medium text-foreground">Ryu Cloud computer.</span>{" "}
 				Provider keys are held securely server-side by Ryu Cloud and can't be
 				changed from the desktop.
 			</span>
-		</div>
-	);
-}
-
-function ProviderRow({
-	slug,
-	label,
-	placeholder,
-	isSet,
-	onSave,
-	onClear,
-	readOnly = false,
-	canConfigure = true,
-}: {
-	slug: ByokProvider;
-	label: string;
-	placeholder: string;
-	isSet: boolean;
-	onSave: (slug: ByokProvider, key: string) => Promise<void>;
-	onClear: (slug: ByokProvider) => Promise<void>;
-	/** Managed (Ryu Cloud) node: render key state read-only, no input, no writers. */
-	readOnly?: boolean;
-	/** When false the caller lacks `gateway.configure`; writers disabled. */
-	canConfigure?: boolean;
-}) {
-	const [input, setInput] = useState("");
-	const [showKey, setShowKey] = useState(false);
-	const [saving, setSaving] = useState(false);
-	const [clearing, setClearing] = useState(false);
-	const [rowError, setRowError] = useState<string | null>(null);
-
-	const handleSave = async () => {
-		if (canConfigure === false) {
-			return;
-		}
-		const trimmed = input.trim();
-		if (!trimmed) {
-			return;
-		}
-		setSaving(true);
-		setRowError(null);
-		try {
-			await onSave(slug, trimmed);
-			setInput("");
-		} catch (e) {
-			setRowError(e instanceof Error ? e.message : "Failed to save key");
-		} finally {
-			setSaving(false);
-		}
-	};
-
-	const handleClear = async () => {
-		setClearing(true);
-		setRowError(null);
-		try {
-			await onClear(slug);
-		} catch (e) {
-			setRowError(e instanceof Error ? e.message : "Failed to clear key");
-		} finally {
-			setClearing(false);
-		}
-	};
-
-	return (
-		<SettingsItem
-			actions={
-				<div className="flex items-center gap-2">
-					{readOnly ? (
-						<Badge variant="secondary">Ryu Cloud</Badge>
-					) : isSet ? (
-						<Badge variant="default">Key set</Badge>
-					) : (
-						<Badge variant="secondary">No key</Badge>
-					)}
-					{!readOnly && isSet && (
-						<Button
-							loading={clearing}
-							onClick={() => handleClear()}
-							size="sm"
-							variant="ghost"
-						>
-							{!clearing && (
-								<HugeiconsIcon className="size-3" icon={Delete01Icon} />
-							)}
-							Clear
-						</Button>
-					)}
-				</div>
-			}
-			title={
-				<span className="flex items-center gap-2">
-					<HugeiconsIcon
-						className="size-4 text-muted-foreground"
-						icon={Key01Icon}
-					/>
-					{label}
-				</span>
-			}
-		>
-			{readOnly ? (
-				<ManagedKeyNote />
-			) : (
-				<div className="flex w-full items-center gap-2">
-					<div className="relative flex-1">
-						<Input
-							className="pr-8"
-							onChange={(e) => setInput(e.target.value)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									handleSave();
-								}
-							}}
-							placeholder={
-								isSet ? "•••••••• (leave blank to keep current)" : placeholder
-							}
-							type={showKey ? "text" : "password"}
-							value={input}
-						/>
-						<button
-							aria-label={showKey ? "Hide key" : "Show key"}
-							className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-							onClick={() => setShowKey((v) => !v)}
-							type="button"
-						>
-							{showKey ? (
-								<HugeiconsIcon className="size-4" icon={ViewOffSlashIcon} />
-							) : (
-								<HugeiconsIcon className="size-4" icon={EyeIcon} />
-							)}
-						</button>
-					</div>
-					<Button
-						disabled={!input.trim() || canConfigure === false}
-						loading={saving}
-						onClick={() => handleSave()}
-						size="sm"
-					>
-						Save
-					</Button>
-				</div>
-			)}
-
-			{rowError ? (
-				<p className="text-status-destructive text-xs">{rowError}</p>
-			) : null}
-		</SettingsItem>
-	);
-}
-
-function ByokCard({
-	target,
-	providers,
-	onRefresh,
-	managed = false,
-	canConfigure = true,
-}: {
-	target: ApiTarget;
-	providers: GatewayProvidersConfig | null;
-	onRefresh: () => Promise<void>;
-	/** Managed (Ryu Cloud) node: read-only, and the key writers are no-ops so a
-	 *  personal key can never be POSTed to the shared hosted fleet. */
-	managed?: boolean;
-	/** When false the caller lacks `gateway.configure`; writers disabled. */
-	canConfigure?: boolean;
-}) {
-	const handleSave = async (slug: ByokProvider, key: string) => {
-		// Security gate (WS4): on a managed node the fleet holds keys server-side;
-		// never let a personal key leave the client to the shared gateway.
-		if (managed) {
-			return;
-		}
-		await setProviderKey(slug, key);
-		await setGatewayProvider(target, slug, key);
-		await onRefresh();
-	};
-
-	const handleClear = async (slug: ByokProvider) => {
-		if (managed) {
-			return;
-		}
-		await deleteProviderKey(slug);
-		await clearGatewayProvider(target, slug);
-		await onRefresh();
-	};
-
-	return (
-		<SettingsSection
-			caption="Add your own API keys for OpenAI, Anthropic, OpenRouter, or Gemini. Keys are stored in the OS credential store, encrypted at rest, and pushed to the local gateway; they are never sent to a Ryu server or written to a plaintext file. The badge shows whether a key is set; the value itself is never shown again."
-			title="Provider keys (BYOK)"
-		>
-			<SettingsGroup>
-				{BYOK_PROVIDERS.map(({ slug, label, placeholder }) => (
-					<ProviderRow
-						canConfigure={canConfigure}
-						isSet={isByokProviderSet(providers, slug)}
-						key={slug}
-						label={label}
-						onClear={handleClear}
-						onSave={handleSave}
-						placeholder={placeholder}
-						readOnly={managed}
-						slug={slug}
-					/>
-				))}
-			</SettingsGroup>
-		</SettingsSection>
+		</SettingsCard>
 	);
 }
 
@@ -933,7 +723,6 @@ function ComposioKeyCard({
 						<div className="flex w-full items-center gap-2">
 							<div className="relative flex-1">
 								<Input
-									className="pr-8"
 									disabled={!loaded}
 									onChange={(e) => setInput(e.target.value)}
 									onKeyDown={(e) => {
@@ -944,6 +733,7 @@ function ComposioKeyCard({
 									placeholder={
 										isSet ? "•••••••• (leave blank to keep current)" : "comp_…"
 									}
+									trailingAdornment="compact"
 									type={showKey ? "text" : "password"}
 									value={input}
 								/>
@@ -1129,7 +919,6 @@ function MediaKeyCard({
 						<div className="flex w-full items-center gap-2">
 							<div className="relative flex-1">
 								<Input
-									className="pr-8"
 									disabled={!loaded}
 									onChange={(e) => setInput(e.target.value)}
 									onKeyDown={(e) => {
@@ -1142,6 +931,7 @@ function MediaKeyCard({
 											? "•••••••• (leave blank to keep current)"
 											: placeholder
 									}
+									trailingAdornment="compact"
 									type={showKey ? "text" : "password"}
 									value={input}
 								/>
@@ -1177,19 +967,19 @@ function MediaKeyCard({
 	);
 }
 
-const ACTION_LABELS: Record<BudgetAction, string> = {
+const ACTION_LABELS = {
 	notify: "Notify",
 	downgrade: "Downgrade",
 	restrict: "Restrict",
 	stop: "Stop (402)",
-};
+} satisfies Record<BudgetAction, string>;
 
-const ACTION_DESCRIPTIONS: Record<BudgetAction, string> = {
+const ACTION_DESCRIPTIONS = {
 	notify: "Allow but flag in metrics",
 	downgrade: "Switch to a cheaper model",
 	restrict: "Cap max_tokens and strip tools",
 	stop: "Reject with 402 budget_exceeded",
-};
+} satisfies Record<BudgetAction, string>;
 
 // ── Alert tier copy (shared by the budget dialogs and the guardrails card) ────
 //
@@ -1206,20 +996,20 @@ const ACTION_DESCRIPTIONS: Record<BudgetAction, string> = {
 // `dispatch` rather than either comment if this copy ever needs changing.
 
 /** Short tier names, for inline summaries. */
-const ALERT_TIER_LABELS: Record<GatewayAlertTier, string> = {
+const ALERT_TIER_LABELS = {
 	silent: "Silent",
 	warn: "Warn",
 	fanout: "Fanout",
 	email: "Email",
-};
+} satisfies Record<GatewayAlertTier, string>;
 
 /** What each tier delivers, as a mid-sentence clause. */
-const ALERT_TIER_DESCRIPTIONS: Record<GatewayAlertTier, string> = {
+const ALERT_TIER_DESCRIPTIONS = {
 	silent: "No notification (default)",
 	warn: "In-app notification only",
 	fanout: "Webhook, Telegram, and mobile push",
 	email: "Email recipients only (instead of the fan-out channels)",
-};
+} satisfies Record<GatewayAlertTier, string>;
 
 /** `Label — clause` options, ascending in severity (the Rust `Ord` order). */
 const ALERT_TIER_OPTIONS: { value: GatewayAlertTier; label: string }[] =
@@ -1297,9 +1087,9 @@ function AlertTierSelect({
 	return (
 		<Select
 			items={ALERT_TIER_OPTIONS}
-			onValueChange={(v: string | null) => {
+			onValueChange={(v) => {
 				if (v) {
-					onChange(v as GatewayAlertTier);
+					onChange(v);
 				}
 			}}
 			value={value}
@@ -1372,6 +1162,13 @@ function BudgetRuleDialog({
 			setErr("Spend cap must be a non-negative USD amount (up to 6 decimals).");
 			return;
 		}
+		if (form.action === "restrict") {
+			const maxTokens = Number(form.restrict_max_tokens.trim());
+			if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) {
+				setErr("Max tokens cap must be a positive whole number.");
+				return;
+			}
+		}
 		setSaving(true);
 		setErr(null);
 		try {
@@ -1438,7 +1235,7 @@ function BudgetRuleDialog({
 								setForm((f) => ({ ...f, limitUsd: e.target.value }))
 							}
 							placeholder="1.00"
-							step="0.01"
+							step="0.000001"
 							type="number"
 							value={form.limitUsd}
 						/>
@@ -1458,25 +1255,25 @@ function BudgetRuleDialog({
 						</Label>
 						<Select
 							items={ACTION_LABELS}
-							onValueChange={(v) =>
-								v && setForm((f) => ({ ...f, action: v as BudgetAction }))
-							}
+							onValueChange={(v) => v && setForm((f) => ({ ...f, action: v }))}
 							value={form.action}
 						>
 							<SelectTrigger id="budget-action">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								{(
-									Object.entries(ACTION_LABELS) as [BudgetAction, string][]
-								).map(([val, label]) => (
-									<SelectItem key={val} value={val}>
-										<span className="font-medium">{label}</span>
-										<span className="ml-1 text-muted-foreground text-xs">
-											— {ACTION_DESCRIPTIONS[val]}
-										</span>
-									</SelectItem>
-								))}
+								{
+									/* SAFETY: This authored complete string-label map is checked against its closed native domain key union; Object.entries returns its own keys but erases their literal-key types. */ (
+										Object.entries(ACTION_LABELS) as [BudgetAction, string][]
+									).map(([val, label]) => (
+										<SelectItem key={val} value={val}>
+											<span className="font-medium">{label}</span>
+											<span className="ml-1 text-muted-foreground text-xs">
+												— {ACTION_DESCRIPTIONS[val]}
+											</span>
+										</SelectItem>
+									))
+								}
 							</SelectContent>
 						</Select>
 					</div>
@@ -1529,7 +1326,9 @@ function BudgetRuleDialog({
 						</p>
 					</div>
 					{err ? (
-						<p className="text-sm text-status-destructive">{err}</p>
+						<p className="text-sm text-status-destructive" role="alert">
+							{err}
+						</p>
 					) : null}
 				</div>
 				<DialogFooter>
@@ -1551,19 +1350,47 @@ function BudgetRuleDialog({
 
 // ── RoutingCard ───────────────────────────────────────────────────────────────
 
-const PROVIDER_LABELS: Record<ProviderKind, string> = {
+const PROVIDER_LABELS = {
 	openai: "OpenAI",
 	anthropic: "Anthropic",
 	local: "Local",
 	openrouter: "OpenRouter",
 	core: "Core",
 	genai: "Gemini",
-};
+	mistral: "Mistral",
+	huggingface: "Hugging Face",
+	nvidia: "NVIDIA NIM",
+	together: "Together AI",
+	fireworks: "Fireworks AI",
+} satisfies Record<ProviderKind, string>;
+
+const NON_CHAT_POOL_PROVIDERS = new Set([
+	"classify",
+	"voyage",
+	"jina",
+	"cohere",
+	"deepgram",
+	"elevenlabs",
+	"inworld",
+	"fal",
+	"replicate",
+]);
 
 interface ModelMappingFormState {
 	model: string;
-	provider: ProviderKind;
+	provider: string;
 	provider_model: string;
+}
+
+function mappingFromForm(form: ModelMappingFormState): ModelMapping {
+	const providerModel = form.provider.startsWith("pool:")
+		? ""
+		: form.provider_model.trim();
+	const mapping: ModelMapping = { provider: form.provider };
+	if (providerModel) {
+		mapping.provider_model = providerModel;
+	}
+	return mapping;
 }
 
 const DEFAULT_MAPPING_FORM: ModelMappingFormState = {
@@ -1586,7 +1413,7 @@ function ModelMappingDialog({
 	description: string;
 	initial?: ModelMappingFormState;
 	modelReadOnly?: boolean;
-	providers: ProviderKind[];
+	providers: string[];
 	onSave: (form: ModelMappingFormState) => Promise<void>;
 }) {
 	const [open, setOpen] = useState(false);
@@ -1654,10 +1481,10 @@ function ModelMappingDialog({
 						<Select
 							items={providers.map((p) => ({
 								value: p,
-								label: PROVIDER_LABELS[p] ?? p,
+								label: modalityProviderLabel(p),
 							}))}
 							onValueChange={(v) =>
-								v && setForm((f) => ({ ...f, provider: v as ProviderKind }))
+								v && setForm((f) => ({ ...f, provider: v }))
 							}
 							value={form.provider}
 						>
@@ -1667,31 +1494,37 @@ function ModelMappingDialog({
 							<SelectContent>
 								{providers.map((p) => (
 									<SelectItem key={p} value={p}>
-										{PROVIDER_LABELS[p] ?? p}
+										{modalityProviderLabel(p)}
 									</SelectItem>
 								))}
 							</SelectContent>
 						</Select>
 					</div>
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="mapping-provider-model">
-							Provider model name (optional)
-						</Label>
-						<Input
-							id="mapping-provider-model"
-							onChange={(e) =>
-								setForm((f) => ({
-									...f,
-									provider_model: e.target.value,
-								}))
-							}
-							placeholder="e.g. gpt-4o (leave blank to keep original)"
-							value={form.provider_model}
-						/>
+					{form.provider.startsWith("pool:") ? (
 						<p className="text-muted-foreground text-xs">
-							Rewrite the model name when forwarding to the provider.
+							Each pool member uses the exact upstream model saved in that pool.
 						</p>
-					</div>
+					) : (
+						<div className="flex flex-col gap-1.5">
+							<Label htmlFor="mapping-provider-model">
+								Provider model name (optional)
+							</Label>
+							<Input
+								id="mapping-provider-model"
+								onChange={(e) =>
+									setForm((f) => ({
+										...f,
+										provider_model: e.target.value,
+									}))
+								}
+								placeholder="e.g. gpt-4o (leave blank to keep original)"
+								value={form.provider_model}
+							/>
+							<p className="text-muted-foreground text-xs">
+								Rewrite the model name when forwarding to the provider.
+							</p>
+						</div>
+					)}
 					{err ? (
 						<p className="text-sm text-status-destructive">{err}</p>
 					) : null}
@@ -1738,25 +1571,42 @@ function ModelMappingDialog({
  * accept it — and hardcoding a media-only allowlist here is exactly the closed
  * list that broke `fal`/`replicate`/`modal` in the first place.
  */
-const MODALITY_PROVIDER_LABELS: Record<string, string> = {
-	...PROVIDER_LABELS,
-	modal: "Modal",
-	replicate: "Replicate",
-	fal: "fal.ai",
-	classify: "Classify tier",
-	// Credit-pool providers: the Gateway registers these as ALIASES over the
-	// OpenAI / Anthropic impls (`register_as` in `apps/gateway/src/providers/mod.rs`),
-	// so they carry their own ids and belong here like any other selectable
-	// provider. They are named for what an operator configured, not for the impl
-	// underneath — an operator who set up a segregated Bedrock pool must not see
-	// it presented as "Anthropic".
-	cloudflare: "Cloudflare Workers AI",
-	bedrock: "Amazon Bedrock",
-	vertex: "Google Vertex AI",
-};
+const MODALITY_PROVIDER_LABELS = new Map<string, string>(
+	Object.entries({
+		...PROVIDER_LABELS,
+		modal: "Modal",
+		replicate: "Replicate",
+		fal: "fal.ai",
+		classify: "Classify tier",
+		kiro: "Kiro",
+		// Credit-pool providers: the Gateway registers these as ALIASES over the
+		// OpenAI / Anthropic impls (`register_as` in `apps/gateway/src/providers/mod.rs`),
+		// so they carry their own ids and belong here like any other selectable
+		// provider. They are named for what an operator configured, not for the impl
+		// underneath — an operator who set up a segregated Bedrock pool must not see
+		// it presented as "Anthropic".
+		cloudflare: "Cloudflare Workers AI",
+		bedrock: "Amazon Bedrock",
+		vertex: "Google Vertex AI",
+		// The donated OpenAI allowance is its own id so its spend is never mixed
+		// with the operator's own `openai` key; its label keeps the two apart too.
+		"openai-credits": "OpenAI (donated credits)",
+		voyage: "Voyage AI",
+		jina: "Jina AI",
+		cohere: "Cohere",
+		deepgram: "Deepgram",
+		assemblyai: "AssemblyAI",
+		elevenlabs: "ElevenLabs",
+		inworld: "Inworld",
+		qwen: "Qwen",
+	})
+);
 
 function modalityProviderLabel(id: string): string {
-	return MODALITY_PROVIDER_LABELS[id] ?? id;
+	if (id.startsWith("pool:")) {
+		return `Pool · ${id.slice(5)}`;
+	}
+	return MODALITY_PROVIDER_LABELS.get(id) ?? id;
 }
 
 /**
@@ -1764,7 +1614,7 @@ function modalityProviderLabel(id: string): string {
  * variant added on the Rust side surfaces here as a type error rather than as a
  * quietly missing row.
  */
-const MODALITY_COPY: Record<Modality, { label: string; note: string }> = {
+const MODALITY_COPY = {
 	chat: {
 		label: "Chat",
 		note: "Rarely reached. Ordinary chat is routed by the model map above, not by this row. The router only consults the chat entry for an agent that carries a per-agent chat MODEL slot and no provider slot; with a provider slot set, that slot wins outright.",
@@ -1785,7 +1635,11 @@ const MODALITY_COPY: Record<Modality, { label: string; note: string }> = {
 		label: "Video generation",
 		note: "Used by POST /v1/videos/generations. It is job-based, so the client polls for the result.",
 	},
-};
+	audio: {
+		label: "Music and sound effects",
+		note: "Used by POST /v1/audio/generations. It is job-based like video; speech from text stays on the Audio row.",
+	},
+} satisfies Record<Modality, { label: string; note: string }>;
 
 interface ModalityMappingFormState {
 	model: string;
@@ -1982,7 +1836,7 @@ function ModalityRowDescription({
 }
 
 /**
- * The five modality rows. Extracted from {@link RoutingCard} so each editor in
+ * The six modality rows. Extracted from {@link RoutingCard} so each editor in
  * that card stays independently readable, and because the row list comes from
  * `MODALITIES` (the Rust enum's wire form) rather than from whatever happens to
  * be configured — an UNMAPPED modality has to be visible to state what it falls
@@ -2015,14 +1869,15 @@ function ModalityRoutingRows({
 }) {
 	if (!served) {
 		return (
-			<p className="text-sm text-status-warning">
+			<SettingsCard className="text-sm text-status-warning">
 				This gateway does not report its modality map, so it cannot be edited
 				here, and it cannot be preserved either: saving anything in this card
 				replaces the whole routing section, so a{" "}
 				<span className="font-mono">[routing.modality_map]</span> written by
 				hand in <span className="font-mono">gateway.toml</span> is dropped.
-				Update the gateway to route image, speech and video from the app.
-			</p>
+				Update the gateway to route image, speech, video and generated audio
+				from the app.
+			</SettingsCard>
 		);
 	}
 	return (
@@ -2082,15 +1937,19 @@ function ModalityRoutingRows({
 								</Button>
 							</div>
 						}
-						description={
-							<ModalityRowDescription
-								configuredProviders={configuredProviders}
-								defaultProvider={defaultProvider}
-								mapping={mapping}
-							/>
-						}
 						key={modality}
-						title={MODALITY_COPY[modality].label}
+						title={
+							<span className="flex min-w-0 flex-col">
+								<span>{MODALITY_COPY[modality].label}</span>
+								<span className="text-muted-foreground text-xs">
+									<ModalityRowDescription
+										configuredProviders={configuredProviders}
+										defaultProvider={defaultProvider}
+										mapping={mapping}
+									/>
+								</span>
+							</span>
+						}
 					/>
 				);
 			})}
@@ -2242,6 +2101,11 @@ export function SmartRoutingCard({
 	const [config, setConfig] = useState<SmartRoutingConfig | null>(null);
 	const [draft, setDraft] = useState<SmartRoutingConfig | null>(null);
 	const [rules, setRules] = useState<RuleRow[]>([]);
+	// The pool fields are edited as typed text and parsed on save, so a trailing
+	// comma or space survives the keystroke that types it.
+	const [poolModels, setPoolModels] = useState("");
+	const [poolProviders, setPoolProviders] = useState("");
+	const [loadAttempt, setLoadAttempt] = useState(0);
 	// Did this gateway actually report `routing.smart_routing`? Three-state on
 	// purpose, exactly like `modalityMapServed`: `null` = not loaded yet. Folding
 	// "unknown" into `false` would flash a data-loss warning at every healthy,
@@ -2283,6 +2147,8 @@ export function SmartRoutingCard({
 				const sr = cfg.routing.smart_routing ?? DEFAULT_SMART_ROUTING;
 				setConfig(sr);
 				setDraft(sr);
+				setPoolModels(formatPoolList(sr.allowed_models));
+				setPoolProviders(formatPoolList(sr.allowed_providers));
 				setRules(
 					sr.rules.map((r) => ({
 						id: crypto.randomUUID(),
@@ -2293,7 +2159,7 @@ export function SmartRoutingCard({
 				);
 				setLoadError(null);
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setLoadError(
 						e instanceof Error ? e.message : "Failed to load smart routing"
@@ -2303,7 +2169,7 @@ export function SmartRoutingCard({
 		return () => {
 			cancelled = true;
 		};
-	}, [reachable, config, target]);
+	}, [reachable, config, target, loadAttempt]);
 
 	const patch = (p: Partial<SmartRoutingConfig>) => {
 		setDraft((prev) => (prev ? { ...prev, ...p } : prev));
@@ -2334,6 +2200,7 @@ export function SmartRoutingCard({
 	const removeRule = (id: string) => {
 		setRules((prev) => prev.filter((r) => r.id !== id));
 		setSaveOk(false);
+		setSaveError(null);
 	};
 
 	const handleSave = async () => {
@@ -2342,6 +2209,43 @@ export function SmartRoutingCard({
 		// with a fabricated default — destroying config in order to "save" it.
 		// `null` (not loaded yet) is refused for the same reason.
 		if (!draft || served !== true) {
+			return;
+		}
+		// A newly added rule starts blank. Silently filtering that row in
+		// `cleanRules` makes Save look successful while discarding the user's
+		// unfinished target. Random routing also requires two positive-weight
+		// targets to be active, so do not report a successful one-target save.
+		const ruleEditorVisible =
+			routerType === "random" || routerType === "llm_classifier";
+		const hasInvalidRule =
+			ruleEditorVisible &&
+			rules.some((rule) => {
+				const weight = Number(rule.weight);
+				return (
+					(routerType !== "random" && !rule.description.trim()) ||
+					!rule.model.trim() ||
+					!Number.isFinite(weight) ||
+					(routerType === "random" ? weight <= 0 : weight < 0)
+				);
+			});
+		if (hasInvalidRule) {
+			setSaveError(
+				"Complete or remove each incomplete rule. Classifier rules need a description and model. Random targets need a model and positive weight."
+			);
+			setSaveOk(false);
+			return;
+		}
+		if (
+			routerType === "random" &&
+			rules.filter((rule) => {
+				const weight = Number(rule.weight);
+				return rule.model.trim() && Number.isFinite(weight) && weight > 0;
+			}).length < 2
+		) {
+			setSaveError(
+				"Weighted random needs at least two targets with positive weights. Add a target before saving."
+			);
+			setSaveOk(false);
 			return;
 		}
 		setSaving(true);
@@ -2409,7 +2313,7 @@ export function SmartRoutingCard({
 				escalation_strong_model: draft.escalation_strong_model?.trim() ?? "",
 				escalation_judge_model: draft.escalation_judge_model?.trim() ?? "",
 				escalation_confirmations:
-					typeof escalationConfirmations === "number" &&
+					isNativeNumber(escalationConfirmations) &&
 					Number.isInteger(escalationConfirmations) &&
 					escalationConfirmations >= 1
 						? escalationConfirmations
@@ -2426,10 +2330,32 @@ export function SmartRoutingCard({
 					: 500,
 				rules: cleanRules,
 				default_model: defaultModel ? defaultModel : null,
+				allowed_models: parsePoolList(poolModels),
+				allowed_providers: parsePoolList(poolProviders),
+				// Agent pools and overrides are edited per agent, so take them from
+				// the fresh config rather than this card's possibly stale draft.
+				agent_pools:
+					cfg.routing.smart_routing?.agent_pools ?? draft.agent_pools ?? {},
+				agent_routes:
+					cfg.routing.smart_routing?.agent_routes ?? draft.agent_routes ?? {},
 			};
 			const next: GatewayRoutingConfig = { ...cfg.routing, smart_routing };
-			await updateGatewayConfig(target, { routing: next });
+			await updateGatewayConfig(target, {
+				routing: next,
+				expectedRevision: cfg.configRevision ?? undefined,
+			});
 			setConfig(smart_routing);
+			setDraft(smart_routing);
+			setPoolModels(formatPoolList(smart_routing.allowed_models));
+			setPoolProviders(formatPoolList(smart_routing.allowed_providers));
+			setRules(
+				smart_routing.rules.map((rule) => ({
+					id: crypto.randomUUID(),
+					description: rule.description,
+					model: rule.model,
+					weight: String(rule.weight ?? 1),
+				}))
+			);
 			setSaveOk(true);
 			setTimeout(() => setSaveOk(false), 3000);
 		} catch (e) {
@@ -2501,18 +2427,34 @@ export function SmartRoutingCard({
 			}
 			title="Smart routing"
 		>
-			<div className="flex flex-col gap-5 px-3">
+			<div className="flex flex-col gap-3">
 				{reachable && loadError ? (
-					<p className="text-sm text-status-destructive">{loadError}</p>
+					<div role="alert">
+						<SettingsCard className="flex flex-wrap items-center justify-between gap-3">
+							<p className="min-w-0 flex-1 break-words text-muted-foreground text-sm">
+								{loadError}
+							</p>
+							<Button
+								onClick={() => {
+									setLoadError(null);
+									setLoadAttempt((attempt) => attempt + 1);
+								}}
+								size="sm"
+								variant="secondary"
+							>
+								Retry
+							</Button>
+						</SettingsCard>
+					</div>
 				) : null}
 				{reachable ? null : (
-					<p className="text-muted-foreground text-sm">
+					<SettingsCard className="text-muted-foreground text-sm">
 						Gateway unreachable. Start the gateway and refresh to configure
 						smart routing.
-					</p>
+					</SettingsCard>
 				)}
 				{served === false ? (
-					<p className="text-sm text-status-warning">
+					<SettingsCard className="text-sm text-status-warning">
 						This gateway does not report its smart-routing config, so it cannot
 						be edited here, and it cannot be preserved either: saving anything
 						in this card replaces the whole routing section, so a{" "}
@@ -2521,13 +2463,14 @@ export function SmartRoutingCard({
 						dropped. The switch below shows off because nothing was reported,
 						not because routing is off. Update the gateway to configure smart
 						routing from the app.
-					</p>
+					</SettingsCard>
 				) : null}
 
 				<SettingsGroup>
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Enable smart routing"
 								checked={draft?.enabled ?? false}
 								disabled={isDisabled}
 								onCheckedChange={(v) => patch({ enabled: v })}
@@ -2538,422 +2481,460 @@ export function SmartRoutingCard({
 					/>
 				</SettingsGroup>
 
-				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="smart-router-type">Router type</Label>
-					<Select
-						items={MODEL_ROUTER_TYPE_LABELS}
-						onValueChange={(v) =>
-							v && patch({ router_type: v as ModelRouterType })
-						}
-						value={routerType}
-					>
-						<SelectTrigger disabled={isDisabled} id="smart-router-type">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{(
-								Object.entries(MODEL_ROUTER_TYPE_LABELS) as [
-									ModelRouterType,
-									string,
-								][]
-							).map(([value, label]) => (
-								<SelectItem key={value} value={value}>
-									<span className="font-medium">{label}</span>
-									<span className="ml-1 text-muted-foreground text-xs">
-										— {MODEL_ROUTER_TYPE_DESCRIPTIONS[value]}
-									</span>
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-					<p className="text-muted-foreground text-xs">
-						Choose the model-selection algorithm. The normal provider routing,
-						governance, budgets, and audit path still run after this choice.
-					</p>
-				</div>
-
-				{routerType === "llm_classifier" ? (
+				{/* The router form is one card: each algorithm's fields stack inside it
+				    rather than in a bordered box of their own. */}
+				<SettingsCard className="flex flex-col gap-5">
 					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="smart-strategy">Strategy</Label>
+						<Label htmlFor="smart-router-type">Router type</Label>
 						<Select
-							items={strategyCopy.labels}
-							onValueChange={(v) =>
-								v && patch({ strategy: v as RouteStrategy })
-							}
-							value={draft?.strategy ?? "llm"}
+							items={MODEL_ROUTER_TYPE_LABELS}
+							onValueChange={(v) => v && patch({ router_type: v })}
+							value={routerType}
 						>
-							<SelectTrigger disabled={isDisabled} id="smart-strategy">
+							<SelectTrigger disabled={isDisabled} id="smart-router-type">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								{(
-									Object.entries(strategyCopy.labels) as [
-										RouteStrategy,
-										string,
-									][]
-								).map(([val, label]) => (
-									<SelectItem key={val} value={val}>
-										<span className="font-medium">{label}</span>
-										<span className="ml-1 text-muted-foreground text-xs">
-											— {strategyCopy.descriptions[val]}
-										</span>
-									</SelectItem>
-								))}
+								{
+									/* SAFETY: This authored complete string-label map is checked against its closed native domain key union; Object.entries returns its own keys but erases their literal-key types. */ (
+										Object.entries(MODEL_ROUTER_TYPE_LABELS) as [
+											ModelRouterType,
+											string,
+										][]
+									).map(([value, label]) => (
+										<SelectItem key={value} value={value}>
+											<span className="font-medium">{label}</span>
+											<span className="ml-1 text-muted-foreground text-xs">
+												— {MODEL_ROUTER_TYPE_DESCRIPTIONS[value]}
+											</span>
+										</SelectItem>
+									))
+								}
 							</SelectContent>
 						</Select>
 						<p className="text-muted-foreground text-xs">
-							How the matching rule is chosen. LLM asks a cheap classifier;
-							Embedding cosine-matches rule text; Keyword is a zero-cost word
-							match.
+							Choose the model-selection algorithm. The normal provider routing,
+							governance, budgets, and audit path still run after this choice.
 						</p>
 					</div>
-				) : null}
 
-				{routerType === "llm_classifier" &&
-				(draft?.strategy ?? "llm") === "llm" ? (
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="smart-classifier-model">Classifier model</Label>
-						<AgentModelPickerField
-							ariaLabel="Classifier model"
-							disabled={isDisabled}
-							mode="model"
-							onChange={(next) => patch({ classifier_model: next })}
-							placeholder="e.g. gpt-4o-mini, or a local model"
-							target={target}
-							value={draft?.classifier_model ?? ""}
-						/>
-						<p className="text-muted-foreground text-xs">
-							A cheap, fast model used only to sort requests. Any routable model
-							id works (including local models or openrouter/ slugs).
-						</p>
-						{classifierDefaulted ? (
-							<p className="text-muted-foreground text-xs">
-								No classifier model is picked, so smart routing uses this node's
-								local classifier ({CLASSIFY_MODEL_ID}). Enter a model id to
-								route with something else.
-							</p>
-						) : null}
-						{classifierUnserved ? (
-							<p className="text-status-destructive text-xs">
-								Smart routing is on with the local classify tier as its
-								classifier, but {classifierUnservedReason}, so the
-								classification call will fail and every request will quietly
-								keep the model it asked for. Pick a model this node can reach.
-							</p>
-						) : null}
-						<ClassifyTierNote
-							disabled={isDisabled}
-							onUse={() => patch({ classifier_model: CLASSIFY_MODEL_ID })}
-							state={classifyTier}
-							value={draft?.classifier_model ?? ""}
-						/>
-					</div>
-				) : null}
-
-				{routerType === "llm_classifier" && draft?.strategy === "embedding" ? (
-					<>
+					{routerType === "llm_classifier" ? (
 						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="smart-embedding-model">Embedding model</Label>
-							<Input
-								disabled={isDisabled}
-								id="smart-embedding-model"
-								onChange={(e) => patch({ embedding_model: e.target.value })}
-								placeholder="nomic-embed-text-v1.5 (default local)"
-								value={draft?.embedding_model ?? ""}
-							/>
-							<p className="text-muted-foreground text-xs">
-								Embedder used to match rules by meaning. Leave blank for the
-								default local embedder.
-							</p>
-						</div>
-						<div className="flex flex-col gap-1.5">
-							<FluidSlider
-								disabled={isDisabled}
-								format={(v) => v.toFixed(2)}
-								label="Similarity threshold"
-								max={1}
-								min={0}
-								onValueChange={(similarity_threshold) =>
-									patch({ similarity_threshold })
-								}
-								step={0.05}
-								value={draft?.similarity_threshold ?? 0.35}
-							/>
-							<p className="text-muted-foreground text-xs">
-								Minimum cosine similarity for a rule to match. Higher is
-								stricter.
-							</p>
-						</div>
-					</>
-				) : null}
-
-				{routerType === "random" ? (
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="smart-random-seed">Seed (optional)</Label>
-						<Input
-							disabled={isDisabled}
-							id="smart-random-seed"
-							inputMode="numeric"
-							onChange={(event) => {
-								const raw = event.target.value.trim();
-								const seed = Number(raw);
-								patch({
-									random_seed:
-										raw === "" || !Number.isSafeInteger(seed) || seed < 0
-											? null
-											: seed,
-								});
-							}}
-							placeholder="Leave blank for normal traffic"
-							value={draft?.random_seed ?? ""}
-						/>
-						<p className="text-muted-foreground text-xs">
-							Targets are selected independently per request. A seed reproduces
-							the sequence for tests and benchmarks; it does not make a
-							conversation sticky.
-						</p>
-					</div>
-				) : null}
-
-				{routerType === "stage_router" ? (
-					<div className="flex flex-col gap-4 rounded-md border p-3">
-						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="smart-stage-capable">Capable model</Label>
-							<AgentModelPickerField
-								ariaLabel="Stage capable model"
-								disabled={isDisabled}
-								mode="model"
-								onChange={(next) => patch({ stage_capable_model: next })}
-								placeholder="Model for exploration and recovery"
-								target={target}
-								value={draft?.stage_capable_model ?? ""}
-							/>
-						</div>
-						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="smart-stage-efficient">Efficient model</Label>
-							<AgentModelPickerField
-								ariaLabel="Stage efficient model"
-								disabled={isDisabled}
-								mode="model"
-								onChange={(next) => patch({ stage_efficient_model: next })}
-								placeholder="Model for settled mechanical work"
-								target={target}
-								value={draft?.stage_efficient_model ?? ""}
-							/>
-						</div>
-						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="smart-stage-picker">Ambiguous-turn default</Label>
+							<Label htmlFor="smart-strategy">Strategy</Label>
 							<Select
-								items={{
-									capable_first: "Capable first",
-									efficient_first: "Efficient first",
-								}}
-								onValueChange={(value) =>
-									value && patch({ stage_picker: value as StagePicker })
-								}
-								value={draft?.stage_picker ?? "capable_first"}
+								items={strategyCopy.labels}
+								onValueChange={(v) => v && patch({ strategy: v })}
+								value={draft?.strategy ?? "llm"}
 							>
-								<SelectTrigger disabled={isDisabled} id="smart-stage-picker">
+								<SelectTrigger disabled={isDisabled} id="smart-strategy">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="capable_first">Capable first</SelectItem>
-									<SelectItem value="efficient_first">
-										Efficient first
-									</SelectItem>
+									{
+										/* SAFETY: This authored complete string-label map is checked against its closed native domain key union; Object.entries returns its own keys but erases their literal-key types. */ (
+											Object.entries(strategyCopy.labels) as [
+												RouteStrategy,
+												string,
+											][]
+										).map(([val, label]) => (
+											<SelectItem key={val} value={val}>
+												<span className="font-medium">{label}</span>
+												<span className="ml-1 text-muted-foreground text-xs">
+													— {strategyCopy.descriptions[val]}
+												</span>
+											</SelectItem>
+										))
+									}
 								</SelectContent>
 							</Select>
+							<p className="text-muted-foreground text-xs">
+								How the matching rule is chosen. LLM asks a cheap classifier;
+								Embedding cosine-matches rule text; Keyword is a zero-cost word
+								match.
+							</p>
 						</div>
-						<FluidSlider
-							disabled={isDisabled}
-							format={(value) => value.toFixed(2)}
-							label="Signal confidence threshold"
-							max={1}
-							min={0}
-							onValueChange={(stage_confidence_threshold) =>
-								patch({ stage_confidence_threshold })
-							}
-							step={0.05}
-							value={draft?.stage_confidence_threshold ?? 0.5}
-						/>
-						<p className="text-muted-foreground text-xs">
-							Ryu reads recent tool/result history. Errors and exploration favor
-							the capable model; writes and passing tests favor the efficient
-							model.
-						</p>
-					</div>
-				) : null}
+					) : null}
 
-				{routerType === "escalation" ? (
-					<div className="flex flex-col gap-4 rounded-md border p-3">
+					{routerType === "llm_classifier" &&
+					(draft?.strategy ?? "llm") === "llm" ? (
 						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="smart-escalation-weak">Weak model</Label>
+							<Label htmlFor="smart-classifier-model">Classifier model</Label>
 							<AgentModelPickerField
-								ariaLabel="Escalation weak model"
+								ariaLabel="Classifier model"
 								disabled={isDisabled}
 								mode="model"
-								onChange={(next) => patch({ escalation_weak_model: next })}
-								placeholder="Default model for routine turns"
+								onChange={(next) => patch({ classifier_model: next })}
+								placeholder="e.g. gpt-4o-mini, or a local model"
 								target={target}
-								value={draft?.escalation_weak_model ?? ""}
+								value={draft?.classifier_model ?? ""}
 							/>
-						</div>
-						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="smart-escalation-strong">Strong model</Label>
-							<AgentModelPickerField
-								ariaLabel="Escalation strong model"
+							<p className="text-muted-foreground text-xs">
+								A cheap, fast model used only to sort requests. Any routable
+								model id works (including local models or openrouter/ slugs).
+							</p>
+							{classifierDefaulted ? (
+								<p className="text-muted-foreground text-xs">
+									No classifier model is picked, so smart routing uses this
+									node's local classifier ({CLASSIFY_MODEL_ID}). Enter a model
+									id to route with something else.
+								</p>
+							) : null}
+							{classifierUnserved ? (
+								<p className="text-status-destructive text-xs">
+									Smart routing is on with the local classify tier as its
+									classifier, but {classifierUnservedReason}, so the
+									classification call will fail and every request will quietly
+									keep the model it asked for. Pick a model this node can reach.
+								</p>
+							) : null}
+							<ClassifyTierNote
 								disabled={isDisabled}
-								mode="model"
-								onChange={(next) => patch({ escalation_strong_model: next })}
-								placeholder="Model for confirmed trouble"
-								target={target}
-								value={draft?.escalation_strong_model ?? ""}
+								onUse={() => patch({ classifier_model: CLASSIFY_MODEL_ID })}
+								state={classifyTier}
+								value={draft?.classifier_model ?? ""}
 							/>
 						</div>
+					) : null}
+
+					{routerType === "llm_classifier" &&
+					draft?.strategy === "embedding" ? (
+						<>
+							<div className="flex flex-col gap-1.5">
+								<Label htmlFor="smart-embedding-model">Embedding model</Label>
+								<Input
+									disabled={isDisabled}
+									id="smart-embedding-model"
+									onChange={(e) => patch({ embedding_model: e.target.value })}
+									placeholder="nomic-embed-text-v1.5 (default local)"
+									value={draft?.embedding_model ?? ""}
+								/>
+								<p className="text-muted-foreground text-xs">
+									Embedder used to match rules by meaning. Leave blank for the
+									default local embedder.
+								</p>
+							</div>
+							<div className="flex flex-col gap-1.5">
+								<FluidSlider
+									disabled={isDisabled}
+									format={(v) => v.toFixed(2)}
+									label="Similarity threshold"
+									max={1}
+									min={0}
+									onValueChange={(similarity_threshold) =>
+										patch({ similarity_threshold })
+									}
+									step={0.05}
+									value={draft?.similarity_threshold ?? 0.35}
+								/>
+								<p className="text-muted-foreground text-xs">
+									Minimum cosine similarity for a rule to match. Higher is
+									stricter.
+								</p>
+							</div>
+						</>
+					) : null}
+
+					{routerType === "random" ? (
 						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="smart-escalation-judge">Judge model</Label>
-							<AgentModelPickerField
-								ariaLabel="Escalation judge model"
-								disabled={isDisabled}
-								mode="model"
-								onChange={(next) => patch({ escalation_judge_model: next })}
-								placeholder="Small model that returns ESCALATE or DECLINE"
-								target={target}
-								value={draft?.escalation_judge_model ?? ""}
-							/>
-						</div>
-						<div className="flex flex-col gap-1.5">
-							<Label htmlFor="smart-escalation-confirmations">
-								Confirmations before escalation
-							</Label>
+							<Label htmlFor="smart-random-seed">Seed (optional)</Label>
 							<Input
 								disabled={isDisabled}
-								id="smart-escalation-confirmations"
+								id="smart-random-seed"
 								inputMode="numeric"
-								min={1}
-								onChange={(event) =>
+								onChange={(event) => {
+									const raw = event.target.value.trim();
+									const seed = Number(raw);
 									patch({
-										escalation_confirmations: Number(event.target.value),
-									})
-								}
-								placeholder="2"
-								value={draft?.escalation_confirmations ?? 2}
+										random_seed:
+											raw === "" || !Number.isSafeInteger(seed) || seed < 0
+												? null
+												: seed,
+									});
+								}}
+								placeholder="Leave blank for normal traffic"
+								value={draft?.random_seed ?? ""}
 							/>
+							<p className="text-muted-foreground text-xs">
+								Targets are selected independently per request. A seed
+								reproduces the sequence for tests and benchmarks; it does not
+								make a conversation sticky.
+							</p>
 						</div>
-						<p className="text-muted-foreground text-xs">
-							The judge sees the current transcript before routing. Consecutive
-							ESCALATE verdicts latch sessions to the strong model; judge
-							failures use the weak model. This preflight mode does not replay a
-							completed weak response through the strong model.
-						</p>
-					</div>
-				) : null}
+					) : null}
 
-				{routerType === "llm_classifier" || routerType === "random" ? (
-					<>
-						<div className="flex flex-col gap-2">
-							<div className="flex items-center justify-between">
-								<Label>Rules</Label>
-								<Button
-									disabled={isDisabled}
-									onClick={addRule}
-									size="sm"
-									variant="ghost"
-								>
-									<HugeiconsIcon className="size-4" icon={Add01Icon} />
-									Add rule
-								</Button>
-							</div>
-							{rules.length === 0 ? (
-								<p className="text-muted-foreground text-sm">
-									No targets yet. Add a model below
-									{routerType === "random"
-										? " and give it a relative weight"
-										: " with a matching rule"}
-									.
-								</p>
-							) : (
-								<div className="flex flex-col gap-3">
-									{rules.map((rule, idx) => (
-										<div className="flex items-start gap-2" key={rule.id}>
-											<div className="flex flex-1 flex-col gap-1.5">
-												<Input
-													disabled={isDisabled}
-													onChange={(e) =>
-														updateRule(rule.id, "description", e.target.value)
-													}
-													placeholder={
-														routerType === "random"
-															? "Optional target label"
-															: "When the request is about… (plain language)"
-													}
-													value={rule.description}
-												/>
-												<AgentModelPickerField
-													ariaLabel={`Route to model for rule ${idx + 1}`}
-													disabled={isDisabled}
-													mode="model"
-													onChange={(next) =>
-														updateRule(rule.id, "model", next)
-													}
-													placeholder="Route to model id (e.g. claude-sonnet-4-5)"
-													target={target}
-													value={rule.model}
-												/>
-												{routerType === "random" ? (
-													<Input
-														disabled={isDisabled}
-														inputMode="decimal"
-														min={0}
-														onChange={(e) =>
-															updateRule(rule.id, "weight", e.target.value)
-														}
-														placeholder="Relative weight (default 1)"
-														value={rule.weight}
-													/>
-												) : null}
-											</div>
-											<Button
-												onClick={() => removeRule(rule.id)}
-												size="icon"
-												variant="ghost"
-											>
-												<HugeiconsIcon
-													className="size-3.5 text-status-destructive"
-													icon={Delete01Icon}
-												/>
-												<span className="sr-only">Remove rule {idx + 1}</span>
-											</Button>
-										</div>
-									))}
-								</div>
-							)}
-						</div>
-
-						{routerType === "llm_classifier" ? (
+					{routerType === "stage_router" ? (
+						<div className="flex flex-col gap-4">
 							<div className="flex flex-col gap-1.5">
-								<Label htmlFor="smart-default-model">
-									Default model when no rule matches
-								</Label>
+								<Label htmlFor="smart-stage-capable">Capable model</Label>
 								<AgentModelPickerField
-									ariaLabel="Default model when no rule matches"
+									ariaLabel="Stage capable model"
 									disabled={isDisabled}
 									mode="model"
-									onChange={(next) => patch({ default_model: next })}
-									placeholder="Leave blank to keep the originally requested model"
+									onChange={(next) => patch({ stage_capable_model: next })}
+									placeholder="Model for exploration and recovery"
 									target={target}
-									value={draft?.default_model ?? ""}
+									value={draft?.stage_capable_model ?? ""}
 								/>
 							</div>
-						) : null}
-					</>
-				) : null}
+							<div className="flex flex-col gap-1.5">
+								<Label htmlFor="smart-stage-efficient">Efficient model</Label>
+								<AgentModelPickerField
+									ariaLabel="Stage efficient model"
+									disabled={isDisabled}
+									mode="model"
+									onChange={(next) => patch({ stage_efficient_model: next })}
+									placeholder="Model for settled mechanical work"
+									target={target}
+									value={draft?.stage_efficient_model ?? ""}
+								/>
+							</div>
+							<div className="flex flex-col gap-1.5">
+								<Label htmlFor="smart-stage-picker">
+									Ambiguous-turn default
+								</Label>
+								<Select
+									items={{
+										capable_first: "Capable first",
+										efficient_first: "Efficient first",
+									}}
+									onValueChange={(value) =>
+										value && patch({ stage_picker: value })
+									}
+									value={draft?.stage_picker ?? "capable_first"}
+								>
+									<SelectTrigger disabled={isDisabled} id="smart-stage-picker">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="capable_first">Capable first</SelectItem>
+										<SelectItem value="efficient_first">
+											Efficient first
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+							<FluidSlider
+								disabled={isDisabled}
+								format={(value) => value.toFixed(2)}
+								label="Signal confidence threshold"
+								max={1}
+								min={0}
+								onValueChange={(stage_confidence_threshold) =>
+									patch({ stage_confidence_threshold })
+								}
+								step={0.05}
+								value={draft?.stage_confidence_threshold ?? 0.5}
+							/>
+							<p className="text-muted-foreground text-xs">
+								Ryu reads recent tool/result history. Errors and exploration
+								favor the capable model; writes and passing tests favor the
+								efficient model.
+							</p>
+						</div>
+					) : null}
+
+					{routerType === "escalation" ? (
+						<div className="flex flex-col gap-4">
+							<div className="flex flex-col gap-1.5">
+								<Label htmlFor="smart-escalation-weak">Weak model</Label>
+								<AgentModelPickerField
+									ariaLabel="Escalation weak model"
+									disabled={isDisabled}
+									mode="model"
+									onChange={(next) => patch({ escalation_weak_model: next })}
+									placeholder="Default model for routine turns"
+									target={target}
+									value={draft?.escalation_weak_model ?? ""}
+								/>
+							</div>
+							<div className="flex flex-col gap-1.5">
+								<Label htmlFor="smart-escalation-strong">Strong model</Label>
+								<AgentModelPickerField
+									ariaLabel="Escalation strong model"
+									disabled={isDisabled}
+									mode="model"
+									onChange={(next) => patch({ escalation_strong_model: next })}
+									placeholder="Model for confirmed trouble"
+									target={target}
+									value={draft?.escalation_strong_model ?? ""}
+								/>
+							</div>
+							<div className="flex flex-col gap-1.5">
+								<Label htmlFor="smart-escalation-judge">Judge model</Label>
+								<AgentModelPickerField
+									ariaLabel="Escalation judge model"
+									disabled={isDisabled}
+									mode="model"
+									onChange={(next) => patch({ escalation_judge_model: next })}
+									placeholder="Small model that returns ESCALATE or DECLINE"
+									target={target}
+									value={draft?.escalation_judge_model ?? ""}
+								/>
+							</div>
+							<div className="flex flex-col gap-1.5">
+								<Label htmlFor="smart-escalation-confirmations">
+									Confirmations before escalation
+								</Label>
+								<Input
+									disabled={isDisabled}
+									id="smart-escalation-confirmations"
+									inputMode="numeric"
+									min={1}
+									onChange={(event) =>
+										patch({
+											escalation_confirmations: Number(event.target.value),
+										})
+									}
+									placeholder="2"
+									value={draft?.escalation_confirmations ?? 2}
+								/>
+							</div>
+							<p className="text-muted-foreground text-xs">
+								The judge sees the current transcript before routing.
+								Consecutive ESCALATE verdicts latch sessions to the strong
+								model; judge failures use the weak model. This preflight mode
+								does not replay a completed weak response through the strong
+								model.
+							</p>
+						</div>
+					) : null}
+
+					{routerType === "llm_classifier" || routerType === "random" ? (
+						<>
+							<div className="flex flex-col gap-2">
+								<div className="flex items-center justify-between">
+									<Label>Rules</Label>
+									<Button
+										disabled={isDisabled}
+										onClick={addRule}
+										size="sm"
+										variant="ghost"
+									>
+										<HugeiconsIcon className="size-4" icon={Add01Icon} />
+										Add rule
+									</Button>
+								</div>
+								{rules.length === 0 ? (
+									<p className="text-muted-foreground text-sm">
+										No targets yet. Add a model below
+										{routerType === "random"
+											? " and give it a relative weight"
+											: " with a matching rule"}
+										.
+									</p>
+								) : (
+									<div className="flex flex-col gap-3">
+										{rules.map((rule, idx) => (
+											<div className="flex items-start gap-2" key={rule.id}>
+												<div className="flex flex-1 flex-col gap-1.5">
+													<Input
+														aria-label={`Rule ${idx + 1} description`}
+														disabled={isDisabled}
+														onChange={(e) =>
+															updateRule(rule.id, "description", e.target.value)
+														}
+														placeholder={
+															routerType === "random"
+																? "Optional target label"
+																: "When the request is about… (plain language)"
+														}
+														value={rule.description}
+													/>
+													<AgentModelPickerField
+														ariaLabel={`Route to model for rule ${idx + 1}`}
+														disabled={isDisabled}
+														mode="model"
+														onChange={(next) =>
+															updateRule(rule.id, "model", next)
+														}
+														placeholder="Route to model id (e.g. claude-sonnet-4-5)"
+														target={target}
+														value={rule.model}
+													/>
+													{routerType === "random" ? (
+														<Input
+															aria-label={`Rule ${idx + 1} weight`}
+															disabled={isDisabled}
+															inputMode="decimal"
+															min={0}
+															onChange={(e) =>
+																updateRule(rule.id, "weight", e.target.value)
+															}
+															placeholder="Relative weight (default 1)"
+															value={rule.weight}
+														/>
+													) : null}
+												</div>
+												<Button
+													disabled={isDisabled}
+													onClick={() => removeRule(rule.id)}
+													size="icon"
+													variant="ghost"
+												>
+													<HugeiconsIcon
+														className="size-3.5 text-status-destructive"
+														icon={Delete01Icon}
+													/>
+													<span className="sr-only">Remove rule {idx + 1}</span>
+												</Button>
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+
+							{routerType === "llm_classifier" ? (
+								<div className="flex flex-col gap-1.5">
+									<Label htmlFor="smart-default-model">
+										Default model when no rule matches
+									</Label>
+									<AgentModelPickerField
+										ariaLabel="Default model when no rule matches"
+										disabled={isDisabled}
+										mode="model"
+										onChange={(next) => patch({ default_model: next })}
+										placeholder="Leave blank to keep the originally requested model"
+										target={target}
+										value={draft?.default_model ?? ""}
+									/>
+								</div>
+							) : null}
+						</>
+					) : null}
+				</SettingsCard>
+
+				<SettingsCard className="flex flex-col gap-3">
+					<div className="flex flex-col gap-0.5">
+						<span className="text-sm">Routing pool</span>
+						<p className="text-muted-foreground text-xs">
+							Limit which targets smart routing may pick on this node. Rules and
+							tiers outside the pool are skipped. Each agent can narrow this
+							pool further in its own settings, but never widen it.
+						</p>
+					</div>
+					<RoutePoolFields
+						disabled={isDisabled}
+						idPrefix="smart-routing"
+						models={poolModels}
+						onModelsChange={(next) => {
+							setSaveError(null);
+							setPoolModels(next);
+						}}
+						onProvidersChange={(next) => {
+							setSaveError(null);
+							setPoolProviders(next);
+						}}
+						providers={poolProviders}
+					/>
+				</SettingsCard>
 
 				{saveError ? (
-					<p className="text-sm text-status-destructive">{saveError}</p>
+					<p className="px-3.5 text-sm text-status-destructive" role="alert">
+						{saveError}
+					</p>
 				) : null}
 				{saveOk ? (
-					<p className="text-sm text-status-success">
+					<p className="px-3.5 text-sm text-status-success">
 						Saved. New requests use the updated router.
 					</p>
 				) : null}
@@ -2962,7 +2943,7 @@ export function SmartRoutingCard({
 	);
 }
 
-function RoutingCard({
+export function RoutingCard({
 	target,
 	reachable,
 	configuredProviders,
@@ -2976,14 +2957,29 @@ function RoutingCard({
 }) {
 	const [config, setConfig] = useState<GatewayRoutingConfig | null>(null);
 	const [configError, setConfigError] = useState<string | null>(null);
+	const [configReadAttempt, setConfigReadAttempt] = useState(0);
 	const [draft, setDraft] = useState<GatewayRoutingConfig | null>(null);
+	const [supportedPoolStrategies, setSupportedPoolStrategies] = useState<
+		ProviderPoolStrategy[] | undefined
+	>();
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [saveOk, setSaveOk] = useState(false);
+	const [mappingError, setMappingError] = useState<string | null>(null);
 
 	const providers: ProviderKind[] = configuredProviders.filter(
 		(p): p is ProviderKind => p in PROVIDER_LABELS
 	);
+	const poolProviders = configuredProviders.filter(
+		(provider) => !NON_CHAT_POOL_PROVIDERS.has(provider)
+	);
+	const poolAliases = Object.keys(draft?.provider_pools ?? {}).map(
+		(name) => `pool:${name}`
+	);
+	const mappingProviders = [
+		...configuredProviders.filter((provider) => provider !== "classify"),
+		...poolAliases,
+	];
 
 	useEffect(() => {
 		if (!reachable || config !== null) {
@@ -2995,10 +2991,11 @@ function RoutingCard({
 				if (!cancelled) {
 					setConfig(cfg.routing);
 					setDraft(cfg.routing);
+					setSupportedPoolStrategies(cfg.strategyCapabilities?.chat);
 					setConfigError(null);
 				}
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setConfigError(
 						e instanceof Error ? e.message : "Failed to load routing config"
@@ -3008,23 +3005,40 @@ function RoutingCard({
 		return () => {
 			cancelled = true;
 		};
-	}, [reachable, config, target]);
+	}, [reachable, config, configReadAttempt, target]);
 
+	/**
+	 * Save the draft's default provider, fallback chain and cost tiers. Like the
+	 * row savers below, the body is rebuilt from a fresh `GET` (only the fields
+	 * this draft changed since it loaded are applied) and carries that read's
+	 * revision, so Smart Routing, eval routing or tier edits saved elsewhere are
+	 * kept, and a concurrent write surfaces as a conflict instead of a revert.
+	 */
 	const handleSave = async () => {
-		if (!draft) {
+		if (!(draft && config)) {
 			return;
 		}
 		setSaving(true);
 		setSaveError(null);
 		setSaveOk(false);
 		try {
-			await updateGatewayConfig(target, { routing: draft });
-			setConfig(draft);
+			const cfg = await fetchGatewayConfig(target);
+			const next = withRoutingDraftEdits(cfg.routing, config, draft);
+			await updateGatewayConfig(target, {
+				routing: next,
+				expectedRevision: cfg.configRevision ?? undefined,
+			});
+			setConfig(next);
+			setDraft(next);
 			setSaveOk(true);
 			setTimeout(() => setSaveOk(false), 3000);
 		} catch (e) {
 			setSaveError(
-				e instanceof Error ? e.message : "Failed to save routing config"
+				e instanceof ApiError && e.status === 409
+					? "Routing changed elsewhere while saving. Save again to apply your edits on top of it."
+					: e instanceof Error
+						? e.message
+						: "Failed to save routing config"
 			);
 		} finally {
 			setSaving(false);
@@ -3039,29 +3053,37 @@ function RoutingCard({
 
 	const addMapping = async (form: ModelMappingFormState) => {
 		const cfg = await fetchGatewayConfig(target);
-		const mapping: ModelMapping = {
-			provider: form.provider,
-			...(form.provider_model.trim()
-				? { provider_model: form.provider_model.trim() }
-				: {}),
-		};
+		const mapping = mappingFromForm(form);
 		const next: GatewayRoutingConfig = {
 			...cfg.routing,
 			model_map: { ...cfg.routing.model_map, [form.model.trim()]: mapping },
 		};
-		await updateGatewayConfig(target, { routing: next });
+		await updateGatewayConfig(target, {
+			routing: next,
+			expectedRevision: cfg.configRevision ?? undefined,
+		});
 		setConfig(next);
 		setDraft(next);
 	};
 
 	const removeMapping = async (model: string) => {
-		const cfg = await fetchGatewayConfig(target);
-		const model_map = { ...cfg.routing.model_map };
-		delete model_map[model];
-		const next: GatewayRoutingConfig = { ...cfg.routing, model_map };
-		await updateGatewayConfig(target, { routing: next });
-		setConfig(next);
-		setDraft(next);
+		setMappingError(null);
+		try {
+			const cfg = await fetchGatewayConfig(target);
+			const model_map = { ...cfg.routing.model_map };
+			delete model_map[model];
+			const next: GatewayRoutingConfig = { ...cfg.routing, model_map };
+			await updateGatewayConfig(target, {
+				routing: next,
+				expectedRevision: cfg.configRevision ?? undefined,
+			});
+			setConfig(next);
+			setDraft(next);
+		} catch (e) {
+			setMappingError(
+				e instanceof Error ? e.message : "Failed to remove model mapping."
+			);
+		}
 	};
 
 	/**
@@ -3088,7 +3110,42 @@ function RoutingCard({
 	) => {
 		const cfg = await fetchGatewayConfig(target);
 		const next = withModalityMapping(cfg.routing, modality, mapping);
-		await updateGatewayConfig(target, { routing: next });
+		await updateGatewayConfig(target, {
+			routing: next,
+			expectedRevision: cfg.configRevision ?? undefined,
+		});
+		setConfig(next);
+		setDraft(next);
+	};
+
+	const saveProviderPool = async (
+		name: string,
+		pool: NonNullable<GatewayRoutingConfig["provider_pools"]>[string] | null
+	) => {
+		const cfg = await fetchGatewayConfig(target);
+		if (cfg.routing.provider_pools === undefined) {
+			throw new Error("This Gateway does not report named provider pools.");
+		}
+		setSupportedPoolStrategies(cfg.strategyCapabilities?.chat);
+		const provider_pools = { ...cfg.routing.provider_pools };
+		if (pool) {
+			provider_pools[name] = pool;
+		} else {
+			const alias = `pool:${name}`;
+			if (
+				Object.values(cfg.routing.model_map).some(
+					(mapping) => mapping.provider === alias
+				)
+			) {
+				throw new Error(`Remove model mappings to ${alias} first.`);
+			}
+			delete provider_pools[name];
+		}
+		const next: GatewayRoutingConfig = { ...cfg.routing, provider_pools };
+		await updateGatewayConfig(target, {
+			routing: next,
+			expectedRevision: cfg.configRevision ?? undefined,
+		});
 		setConfig(next);
 		setDraft(next);
 	};
@@ -3118,7 +3175,8 @@ function RoutingCard({
 		patchDraft({ fallback_chain: [...draft.fallback_chain, provider] });
 	};
 
-	const removeFallback = (provider: ProviderKind) => {
+	// `fallback_chain` holds open `ProviderId` registry ids, not only `ProviderKind`.
+	const removeFallback = (provider: string) => {
 		if (!draft) {
 			return;
 		}
@@ -3145,311 +3203,382 @@ function RoutingCard({
 	const modalityMap = draft?.modality_map ?? {};
 
 	return (
-		<SettingsSection
-			caption={
-				<>
-					Ryu's user-level model routing, which runs before any upstream
-					provider routing. Pick which provider handles requests by default, map
-					specific models to providers, and order the fallback chain for when a
-					provider is unavailable.{" "}
-					<span className="font-medium text-foreground">
-						Two-layer guardrail model:
-					</span>{" "}
-					Ryu evaluates firewall rules, PII/DLP, and per-agent budgets here, at
-					the gateway, before the request leaves to any upstream provider. When
-					you route to OpenRouter, OpenRouter's own auto-routing and guardrails
-					run as an additional layer on top; they do not replace Ryu's
-					user-level controls. Use{" "}
-					<span className="font-mono">openrouter/auto</span> to let OpenRouter
-					pick the best available model, or{" "}
-					<span className="font-mono">openrouter/pareto-code</span> to pick a
-					coding model; any{" "}
-					<span className="font-mono">openrouter/&lt;model&gt;</span> slug is
-					supported.
-				</>
-			}
-			headerAction={
-				providers.length > 0 ? (
-					<ModelMappingDialog
-						description="Route a model name (exact or prefix) to a specific provider. Optionally rewrite the model name before forwarding."
-						onSave={addMapping}
-						providers={providers}
-						title="Add model mapping"
-						trigger={
-							<Button disabled={isDisabled} size="sm" variant="ghost">
-								<HugeiconsIcon className="size-4" icon={Add01Icon} />
-								Add mapping
+		<div className="flex flex-col gap-4">
+			<SettingsSection
+				caption={
+					<>
+						Ryu's user-level model routing, which runs before any upstream
+						provider routing. Pick which provider handles requests by default,
+						map specific models to providers, and order the fallback chain for
+						when a provider is unavailable.{" "}
+						<span className="font-medium text-foreground">
+							Two-layer guardrail model:
+						</span>{" "}
+						Ryu evaluates firewall rules, PII/DLP, and per-agent budgets here,
+						at the gateway, before the request leaves to any upstream provider.
+						When you route to OpenRouter, OpenRouter's own auto-routing and
+						guardrails run as an additional layer on top; they do not replace
+						Ryu's user-level controls. Use{" "}
+						<span className="font-mono">openrouter/auto</span> to let OpenRouter
+						pick the best available model, or{" "}
+						<span className="font-mono">openrouter/pareto-code</span> to pick a
+						coding model; any{" "}
+						<span className="font-mono">openrouter/&lt;model&gt;</span> slug is
+						supported.
+					</>
+				}
+				title="Routing"
+			>
+				<div className="flex flex-col gap-3">
+					{reachable && configError ? (
+						<SettingsCard className="flex flex-wrap items-center justify-between gap-3">
+							<p
+								className="min-w-0 flex-1 break-words text-muted-foreground text-sm"
+								role="alert"
+							>
+								{configError}
+							</p>
+							<Button
+								onClick={() => setConfigReadAttempt((attempt) => attempt + 1)}
+								size="sm"
+								variant="secondary"
+							>
+								Retry
 							</Button>
-						}
-					/>
-				) : (
-					<Button disabled size="sm" variant="ghost">
-						<HugeiconsIcon className="size-4" icon={Add01Icon} />
-						Add mapping
-					</Button>
-				)
-			}
-			title="Routing"
-		>
-			<div className="flex flex-col gap-5 px-3">
-				{reachable && configError ? (
-					<p className="text-sm text-status-destructive">{configError}</p>
-				) : null}
-				{reachable ? null : (
-					<p className="text-muted-foreground text-sm">
-						Gateway unreachable, so controls are disabled. Start the gateway and
-						refresh to configure routing.
-					</p>
-				)}
+						</SettingsCard>
+					) : null}
+					{reachable ? null : (
+						<SettingsCard className="text-muted-foreground text-sm">
+							Gateway unreachable, so controls are disabled. Start the gateway
+							and refresh to configure routing.
+						</SettingsCard>
+					)}
 
-				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="routing-default-provider">Default provider</Label>
-					<Select
-						disabled={isDisabled}
-						items={providers.map((p) => ({
-							value: p,
-							label: PROVIDER_LABELS[p] ?? p,
-						}))}
-						onValueChange={(v) =>
-							v && patchDraft({ default_provider: v as ProviderKind })
-						}
-						value={draft?.default_provider ?? "openai"}
-					>
-						<SelectTrigger id="routing-default-provider">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{providers.map((p) => (
-								<SelectItem key={p} value={p}>
-									{PROVIDER_LABELS[p] ?? p}
-								</SelectItem>
-							))}
-							{providers.length === 0 ? (
-								<SelectItem disabled value="__none__">
-									No providers configured
-								</SelectItem>
-							) : null}
-						</SelectContent>
-					</Select>
-					<p className="text-muted-foreground text-xs">
-						Used when no model-map entry matches the requested model name.
-					</p>
-				</div>
-
-				<div className="flex flex-col gap-2">
-					<Label>Model mappings</Label>
-					{mappingEntries.length === 0 ? (
-						<p className="text-muted-foreground text-sm">
-							No model mappings. Requests are routed by built-in prefix rules
-							then fall back to the default provider.
-						</p>
-					) : (
-						<SettingsGroup>
-							{mappingEntries.map(([model, mapping]) => (
-								<SettingsItem
-									actions={
-										<div className="flex shrink-0 items-center gap-1">
-											<ModelMappingDialog
-												description="Update the provider or model name for this mapping."
-												initial={{
-													model,
-													provider: mapping.provider,
-													provider_model: mapping.provider_model ?? "",
-												}}
-												modelReadOnly
-												onSave={async (form) => {
-													const cfg = await fetchGatewayConfig(target);
-													const updated: ModelMapping = {
-														provider: form.provider,
-														...(form.provider_model.trim()
-															? {
-																	provider_model: form.provider_model.trim(),
-																}
-															: {}),
-													};
-													const next: GatewayRoutingConfig = {
-														...cfg.routing,
-														model_map: {
-															...cfg.routing.model_map,
-															[model]: updated,
-														},
-													};
-													await updateGatewayConfig(target, {
-														routing: next,
-													});
-													setConfig(next);
-													setDraft(next);
-												}}
-												providers={providers}
-												title="Edit model mapping"
-												trigger={
-													<Button size="icon" variant="ghost">
-														<HugeiconsIcon
-															className="size-3.5"
-															icon={PencilEdit01Icon}
-														/>
-														<span className="sr-only">
-															Edit mapping for {model}
-														</span>
-													</Button>
-												}
-											/>
-											<Button
-												onClick={() => removeMapping(model)}
-												size="icon"
-												variant="ghost"
-											>
-												<HugeiconsIcon
-													className="size-3.5 text-status-destructive"
-													icon={Delete01Icon}
-												/>
-												<span className="sr-only">
-													Remove mapping for {model}
-												</span>
-											</Button>
-										</div>
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<Select
+									disabled={isDisabled || providers.length === 0}
+									items={providers.map((p) => ({
+										value: p,
+										label: PROVIDER_LABELS[p] ?? p,
+									}))}
+									onValueChange={(v) =>
+										v && patchDraft({ default_provider: v })
 									}
-									description={
-										<>
-											{PROVIDER_LABELS[mapping.provider] ?? mapping.provider}
+									value={draft?.default_provider ?? "openai"}
+								>
+									<SelectTrigger className="w-48" id="routing-default-provider">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{providers.map((p) => (
+											<SelectItem key={p} value={p}>
+												{PROVIDER_LABELS[p] ?? p}
+											</SelectItem>
+										))}
+										{providers.length === 0 ? (
+											<SelectItem disabled value="__none__">
+												No providers configured
+											</SelectItem>
+										) : null}
+									</SelectContent>
+								</Select>
+							}
+							description="Used when no model-map entry matches the requested model name."
+							title={
+								<Label htmlFor="routing-default-provider">
+									Default provider
+								</Label>
+							}
+						/>
+					</SettingsGroup>
+				</div>
+			</SettingsSection>
+
+			<SettingsSection
+				caption={
+					poolAliases.length > 0
+						? "Named chat pools from Gateway configuration are available as mapping targets."
+						: undefined
+				}
+				headerAction={
+					mappingProviders.length > 0 ? (
+						<ModelMappingDialog
+							description="Route a model name (exact or prefix) to a specific provider. Optionally rewrite the model name before forwarding."
+							onSave={addMapping}
+							providers={mappingProviders}
+							title="Add model mapping"
+							trigger={
+								<Button disabled={isDisabled} size="sm" variant="ghost">
+									<HugeiconsIcon className="size-4" icon={Add01Icon} />
+									Add mapping
+								</Button>
+							}
+						/>
+					) : (
+						<Button disabled size="sm" variant="ghost">
+							<HugeiconsIcon className="size-4" icon={Add01Icon} />
+							Add mapping
+						</Button>
+					)
+				}
+				title="Model mappings"
+			>
+				{mappingError ? (
+					<p className="px-3.5 text-sm text-status-destructive" role="alert">
+						{mappingError}
+					</p>
+				) : null}
+				{mappingEntries.length === 0 ? (
+					<SettingsCard className="text-center text-muted-foreground text-sm">
+						No model mappings. Requests are routed by built-in prefix rules then
+						fall back to the default provider.
+					</SettingsCard>
+				) : (
+					<SettingsGroup>
+						{mappingEntries.map(([model, mapping]) => (
+							<SettingsItem
+								actions={
+									<div className="flex shrink-0 items-center gap-1">
+										<ModelMappingDialog
+											description="Update the provider or model name for this mapping."
+											initial={{
+												model,
+												provider: mapping.provider,
+												provider_model: mapping.provider_model ?? "",
+											}}
+											modelReadOnly
+											onSave={async (form) => {
+												const cfg = await fetchGatewayConfig(target);
+												const updated = mappingFromForm(form);
+												const next: GatewayRoutingConfig = {
+													...cfg.routing,
+													model_map: {
+														...cfg.routing.model_map,
+														[model]: updated,
+													},
+												};
+												await updateGatewayConfig(target, {
+													routing: next,
+													expectedRevision: cfg.configRevision ?? undefined,
+												});
+												setConfig(next);
+												setDraft(next);
+											}}
+											providers={mappingProviders}
+											title="Edit model mapping"
+											trigger={
+												<Button
+													disabled={isDisabled}
+													size="icon"
+													variant="ghost"
+												>
+													<HugeiconsIcon
+														className="size-3.5"
+														icon={PencilEdit01Icon}
+													/>
+													<span className="sr-only">
+														Edit mapping for {model}
+													</span>
+												</Button>
+											}
+										/>
+										<Button
+											disabled={isDisabled}
+											onClick={() => removeMapping(model)}
+											size="icon"
+											variant="ghost"
+										>
+											<HugeiconsIcon
+												className="size-3.5 text-status-destructive"
+												icon={Delete01Icon}
+											/>
+											<span className="sr-only">
+												Remove mapping for {model}
+											</span>
+										</Button>
+									</div>
+								}
+								key={model}
+								title={
+									<span className="flex min-w-0 flex-col">
+										<span className="truncate font-mono">{model}</span>
+										<span className="text-muted-foreground text-xs">
+											{modalityProviderLabel(mapping.provider)}
 											{mapping.provider_model
 												? ` → ${mapping.provider_model}`
 												: null}
-										</>
-									}
-									key={model}
-									title={<span className="font-mono">{model}</span>}
-								/>
-							))}
-						</SettingsGroup>
-					)}
-				</div>
-
-				{modalityMapServed === null ? null : (
-					<div className="flex flex-col gap-2">
-						<Label>Modality routing</Label>
-						<p className="text-muted-foreground text-xs">
-							Which provider serves image, speech and video requests. Consulted
-							BEFORE the model mappings above for any non-chat request, so this
-							is the swap point for media providers such as fal, Replicate and
-							Modal. A per-agent slot forwarded by Core still outranks it. Each
-							row saves immediately.
-						</p>
-						<ModalityRoutingRows
-							configuredProviders={configuredProviders}
-							defaultProvider={draft?.default_provider ?? "openai"}
-							disabled={isDisabled}
-							modalityMap={modalityMap}
-							onSave={saveModalityMapping}
-							served={modalityMapServed}
-						/>
-					</div>
+										</span>
+									</span>
+								}
+							/>
+						))}
+					</SettingsGroup>
 				)}
+			</SettingsSection>
 
-				<div className="flex flex-col gap-2">
-					<Label>Fallback chain</Label>
-					<p className="text-muted-foreground text-xs">
-						Ordered list of providers tried when the primary provider is
-						unavailable. Use the arrows to reorder.
-					</p>
-					{(draft?.fallback_chain ?? []).length === 0 ? (
-						<p className="text-muted-foreground text-sm">
-							No fallback chain configured. Add providers below to enable
-							automatic fallback.
-						</p>
-					) : (
-						<SettingsGroup>
-							{(draft?.fallback_chain ?? []).map((provider, i) => (
-								<SettingsItem
-									actions={
-										<div className="flex items-center gap-1">
-											<Button
-												disabled={i === 0}
-												onClick={() => moveFallback(i, "up")}
-												size="icon"
-												variant="ghost"
-											>
-												<HugeiconsIcon
-													className="size-3.5"
-													icon={ArrowUp01Icon}
-												/>
-												<span className="sr-only">Move up</span>
-											</Button>
-											<Button
-												disabled={
-													i === (draft?.fallback_chain ?? []).length - 1
+			{draft?.provider_pools === undefined ? null : (
+				<ProviderPoolsEditor
+					disabled={isDisabled}
+					modelMap={draft.model_map}
+					onSave={saveProviderPool}
+					pools={draft.provider_pools}
+					providers={poolProviders}
+					supportedStrategies={supportedPoolStrategies}
+				/>
+			)}
+
+			{modalityMapServed === null ? null : (
+				<SettingsSection
+					caption="Which provider serves image, speech and video requests. Consulted BEFORE the model mappings above for any non-chat request, so this is the swap point for media providers such as fal, Replicate and Modal. A per-agent slot forwarded by Core still outranks it. Each row saves immediately."
+					title="Modality routing"
+				>
+					<ModalityRoutingRows
+						configuredProviders={configuredProviders}
+						defaultProvider={draft?.default_provider ?? "openai"}
+						disabled={isDisabled}
+						modalityMap={modalityMap}
+						onSave={saveModalityMapping}
+						served={modalityMapServed}
+					/>
+				</SettingsSection>
+			)}
+
+			<SettingsSection
+				caption="Providers tried when the primary is unavailable. Lower cost tiers go first; use the arrows to order providers within a tier."
+				title="Fallback chain"
+			>
+				{(draft?.fallback_chain ?? []).length === 0 ? (
+					<SettingsCard className="text-center text-muted-foreground text-sm">
+						No fallback chain configured. Add providers below to enable
+						automatic fallback.
+					</SettingsCard>
+				) : (
+					<SettingsGroup>
+						{(draft?.fallback_chain ?? []).map((provider, i) => (
+							<SettingsItem
+								actions={
+									<div className="flex items-center gap-1">
+										<Select
+											disabled={isDisabled}
+											items={[
+												{ value: "0", label: "Subscription" },
+												{ value: "1", label: "Low cost" },
+												{ value: "2", label: "Free" },
+											]}
+											onValueChange={(value) => {
+												if (value && draft) {
+													patchDraft({
+														provider_tiers: {
+															...draft.provider_tiers,
+															[provider]: Number(value),
+														},
+													});
 												}
-												onClick={() => moveFallback(i, "down")}
-												size="icon"
-												variant="ghost"
+											}}
+											value={String(draft?.provider_tiers?.[provider] ?? 0)}
+										>
+											<SelectTrigger
+												aria-label={`Cost tier for ${provider}`}
+												className="w-32"
 											>
-												<HugeiconsIcon
-													className="size-3.5"
-													icon={ArrowDown01Icon}
-												/>
-												<span className="sr-only">Move down</span>
-											</Button>
-											<Button
-												onClick={() => removeFallback(provider)}
-												size="icon"
-												variant="ghost"
-											>
-												<HugeiconsIcon
-													className="size-3.5 text-status-destructive"
-													icon={Delete01Icon}
-												/>
-												<span className="sr-only">
-													Remove {provider} from fallback chain
-												</span>
-											</Button>
-										</div>
-									}
-									key={provider}
-									title={PROVIDER_LABELS[provider] ?? provider}
-								/>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="0">Subscription</SelectItem>
+												<SelectItem value="1">Low cost</SelectItem>
+												<SelectItem value="2">Free</SelectItem>
+											</SelectContent>
+										</Select>
+										<Button
+											disabled={isDisabled || i === 0}
+											onClick={() => moveFallback(i, "up")}
+											size="icon"
+											variant="ghost"
+										>
+											<HugeiconsIcon
+												className="size-3.5"
+												icon={ArrowUp01Icon}
+											/>
+											<span className="sr-only">Move up</span>
+										</Button>
+										<Button
+											disabled={
+												isDisabled ||
+												i === (draft?.fallback_chain ?? []).length - 1
+											}
+											onClick={() => moveFallback(i, "down")}
+											size="icon"
+											variant="ghost"
+										>
+											<HugeiconsIcon
+												className="size-3.5"
+												icon={ArrowDown01Icon}
+											/>
+											<span className="sr-only">Move down</span>
+										</Button>
+										<Button
+											disabled={isDisabled}
+											onClick={() => removeFallback(provider)}
+											size="icon"
+											variant="ghost"
+										>
+											<HugeiconsIcon
+												className="size-3.5 text-status-destructive"
+												icon={Delete01Icon}
+											/>
+											<span className="sr-only">
+												Remove {provider} from fallback chain
+											</span>
+										</Button>
+									</div>
+								}
+								key={provider}
+								title={modalityProviderLabel(provider)}
+							/>
+						))}
+					</SettingsGroup>
+				)}
+				{providers.length > 0 ? (
+					<div className="flex flex-wrap gap-2 px-1.5">
+						{providers
+							.filter((p) => !(draft?.fallback_chain ?? []).includes(p))
+							.map((p) => (
+								<Button
+									disabled={isDisabled}
+									key={p}
+									onClick={() => addFallback(p)}
+									size="sm"
+									variant="ghost"
+								>
+									<HugeiconsIcon className="size-3.5" icon={Add01Icon} />
+									{PROVIDER_LABELS[p] ?? p}
+								</Button>
 							))}
-						</SettingsGroup>
-					)}
-					{providers.length > 0 ? (
-						<div className="flex flex-wrap gap-2">
-							{providers
-								.filter((p) => !(draft?.fallback_chain ?? []).includes(p))
-								.map((p) => (
-									<Button
-										disabled={isDisabled}
-										key={p}
-										onClick={() => addFallback(p)}
-										size="sm"
-										variant="ghost"
-									>
-										<HugeiconsIcon className="size-3.5" icon={Add01Icon} />
-										{PROVIDER_LABELS[p] ?? p}
-									</Button>
-								))}
-						</div>
-					) : null}
-				</div>
+					</div>
+				) : null}
+			</SettingsSection>
 
-				<div className="flex items-center gap-3">
-					<Button
-						disabled={isDisabled || draft === config}
-						loading={saving}
-						onClick={() => handleSave()}
-						size="sm"
-					>
-						Save
-					</Button>
-					{saveOk ? (
-						<span className="text-sm text-status-success">
-							Saved. Gateway will apply on next restart.
-						</span>
-					) : null}
-					{saveError ? (
-						<span className="text-sm text-status-destructive">{saveError}</span>
-					) : null}
-				</div>
+			<div className="flex flex-wrap items-center gap-3 px-3.5">
+				<Button
+					disabled={isDisabled || draft === config}
+					loading={saving}
+					onClick={() => handleSave()}
+					size="sm"
+				>
+					Save
+				</Button>
+				{saveOk ? (
+					<span className="text-sm text-status-success">
+						Saved. Gateway will apply on next restart.
+					</span>
+				) : null}
+				{saveError ? (
+					<span className="text-sm text-status-destructive">{saveError}</span>
+				) : null}
 			</div>
-		</SettingsSection>
+		</div>
 	);
 }
 
@@ -3552,53 +3681,43 @@ function LiveSpendCard({ target }: { target: ApiTarget }) {
 			title="Live spend"
 		>
 			{loading && !spend ? (
-				<div className="flex items-center gap-2 px-3.5 text-muted-foreground text-sm">
-					<Spinner className="size-4" />
-					Loading…
-				</div>
+				<SettingsCard>
+					<SkeletonRows label="Loading…" spacing="budget" />
+				</SettingsCard>
 			) : null}
 			{!loading && spend && !spend.reachable ? (
-				<p className="px-3.5 text-muted-foreground text-sm">
+				<SettingsCard className="text-center text-muted-foreground text-sm">
 					Gateway unreachable. Live spend appears once it is running.
-				</p>
+				</SettingsCard>
 			) : null}
 			{!loading && spend?.reachable && !anySpend ? (
-				<p className="px-3.5 text-muted-foreground text-sm">
+				<SettingsCard className="text-center text-muted-foreground text-sm">
 					No spend tracked yet. Configure a budget above, then spend appears
 					here as traffic flows.
-				</p>
+				</SettingsCard>
 			) : null}
 			{spend?.reachable && anySpend ? (
 				<div className="flex flex-col gap-4">
 					{userEntries.length > 0 ? (
-						<div className="flex flex-col gap-1.5">
-							<Label className="px-3.5 text-muted-foreground text-xs">
-								Per-user
-							</Label>
+						<SettingsSection title="Per-user">
 							<SpendRows
 								idPrefix="user"
 								limits={spend.limits.users}
 								spend={spend.users}
 							/>
-						</div>
+						</SettingsSection>
 					) : null}
 					{agentEntries.length > 0 ? (
-						<div className="flex flex-col gap-1.5">
-							<Label className="px-3.5 text-muted-foreground text-xs">
-								Per-agent
-							</Label>
+						<SettingsSection title="Per-agent">
 							<SpendRows
 								idPrefix="agent"
 								limits={spend.limits.agents}
 								spend={spend.agents}
 							/>
-						</div>
+						</SettingsSection>
 					) : null}
 					{sessionEntries.length > 0 ? (
-						<div className="flex flex-col gap-1.5">
-							<Label className="px-3.5 text-muted-foreground text-xs">
-								Per-session
-							</Label>
+						<SettingsSection title="Per-session">
 							<SpendRows
 								idPrefix="session"
 								limits={sessionEntries.reduce<Record<string, number>>(
@@ -3611,7 +3730,7 @@ function LiveSpendCard({ target }: { target: ApiTarget }) {
 								max={MAX_SESSION_ROWS}
 								spend={spend.sessions}
 							/>
-						</div>
+						</SettingsSection>
 					) : null}
 				</div>
 			) : null}
@@ -3619,7 +3738,7 @@ function LiveSpendCard({ target }: { target: ApiTarget }) {
 	);
 }
 
-function BudgetsCard({
+export function BudgetsCard({
 	target,
 	canConfigure,
 }: {
@@ -3638,7 +3757,7 @@ function BudgetsCard({
 		try {
 			const [cfg, agentList] = await Promise.all([
 				fetchGatewayConfig(target),
-				fetchAgents(target).catch(() => [] as AgentSummary[]),
+				fetchAgents(target).catch(() => []),
 			]);
 			setBudgets(cfg.budgets);
 			setAgents(agentList);
@@ -3661,12 +3780,15 @@ function BudgetsCard({
 		async (scope: "users" | "agents", id: string, rule: BudgetRule) => {
 			const cfg = await fetchGatewayConfig(target);
 			const next: GatewayBudgetConfig = {
-				users: { ...(cfg.budgets.users ?? {}) },
-				agents: { ...(cfg.budgets.agents ?? {}) },
+				users: { ...cfg.budgets.users },
+				agents: { ...cfg.budgets.agents },
 				session: cfg.budgets.session ?? DEFAULT_SESSION_BUDGET,
 			};
 			next[scope][id] = rule;
-			await updateGatewayConfig(target, { budgets: next });
+			await updateGatewayConfig(target, {
+				budgets: next,
+				expectedRevision: cfg.configRevision ?? undefined,
+			});
 			setBudgets(next);
 		},
 		[target]
@@ -3676,12 +3798,15 @@ function BudgetsCard({
 		async (scope: "users" | "agents", id: string) => {
 			const cfg = await fetchGatewayConfig(target);
 			const next: GatewayBudgetConfig = {
-				users: { ...(cfg.budgets.users ?? {}) },
-				agents: { ...(cfg.budgets.agents ?? {}) },
+				users: { ...cfg.budgets.users },
+				agents: { ...cfg.budgets.agents },
 				session: cfg.budgets.session ?? DEFAULT_SESSION_BUDGET,
 			};
 			delete next[scope][id];
-			await updateGatewayConfig(target, { budgets: next });
+			await updateGatewayConfig(target, {
+				budgets: next,
+				expectedRevision: cfg.configRevision ?? undefined,
+			});
 			setBudgets(next);
 		},
 		[target]
@@ -3691,11 +3816,14 @@ function BudgetsCard({
 		async (rule: BudgetRule) => {
 			const cfg = await fetchGatewayConfig(target);
 			const next: GatewayBudgetConfig = {
-				users: { ...(cfg.budgets.users ?? {}) },
-				agents: { ...(cfg.budgets.agents ?? {}) },
+				users: { ...cfg.budgets.users },
+				agents: { ...cfg.budgets.agents },
 				session: rule,
 			};
-			await updateGatewayConfig(target, { budgets: next });
+			await updateGatewayConfig(target, {
+				budgets: next,
+				expectedRevision: cfg.configRevision ?? undefined,
+			});
 			setBudgets(next);
 		},
 		[target]
@@ -3705,18 +3833,24 @@ function BudgetsCard({
 	const agentEntries = Object.entries(budgets?.agents ?? {});
 
 	return (
-		<SettingsSection
-			caption="Spend caps per user, per agent, and a single global per-session cap. Choose whether model, media, or paid-tool charges count. When a cap is reached the gateway applies the configured action (notify / downgrade / restrict / stop) and, separately, the rule's notification tier decides who is told. Changes take effect immediately."
-			title="Budgets"
-		>
+		<SettingsSection caption="Spend caps per user, per agent, and a single global per-session cap. Choose whether model, media, or paid-tool charges count. When a cap is reached the gateway applies the configured action (notify / downgrade / restrict / stop) and, separately, the rule's notification tier decides who is told. Changes take effect immediately.">
 			{loading ? (
-				<div className="flex items-center gap-2 px-3 text-muted-foreground text-sm">
-					<Spinner className="size-4" />
-					Loading…
-				</div>
+				<SettingsCard>
+					<SkeletonRows label="Loading…" spacing="panel" />
+				</SettingsCard>
 			) : null}
 			{!loading && err ? (
-				<p className="px-3 text-sm text-status-destructive">{err}</p>
+				<SettingsCard className="flex flex-wrap items-center justify-between gap-3">
+					<p
+						className="min-w-0 flex-1 break-words text-muted-foreground text-sm"
+						role="alert"
+					>
+						{err}
+					</p>
+					<Button onClick={() => load()} size="sm" variant="secondary">
+						Retry
+					</Button>
+				</SettingsCard>
 			) : null}
 			{loading || err ? null : (
 				<div className="flex flex-col gap-6">
@@ -3824,14 +3958,33 @@ function BudgetScopeSection({
 	/** Node target — threaded to each row's edit dialog for the model picker. */
 	target: ApiTarget;
 }) {
+	const [removingId, setRemovingId] = useState<string | null>(null);
+	const [removeError, setRemoveError] = useState<{
+		id: string;
+		message: string;
+	} | null>(null);
+
+	const remove = async (id: string) => {
+		setRemovingId(id);
+		setRemoveError(null);
+		try {
+			await onRemove(id);
+		} catch (e) {
+			setRemoveError({
+				id,
+				message: e instanceof Error ? e.message : "Failed to remove budget.",
+			});
+		} finally {
+			setRemovingId(null);
+		}
+	};
+
 	return (
-		<div className="flex flex-col gap-2">
-			<div className="flex items-center justify-between px-3">
-				<Label>{label}</Label>
-				{addDialog}
-			</div>
+		<SettingsSection headerAction={addDialog} title={label}>
 			{entries.length === 0 ? (
-				<p className="px-3 text-muted-foreground text-sm">{emptyText}</p>
+				<SettingsCard className="text-center text-muted-foreground text-sm">
+					{emptyText}
+				</SettingsCard>
 			) : (
 				<SettingsGroup>
 					{entries.map(([id, rule]) => (
@@ -3878,8 +4031,8 @@ function BudgetScopeSection({
 										}
 									/>
 									<Button
-										disabled={!canConfigure}
-										onClick={() => onRemove(id)}
+										disabled={!canConfigure || removingId === id}
+										onClick={() => void remove(id)}
 										size="icon"
 										variant="ghost"
 									>
@@ -3889,35 +4042,56 @@ function BudgetScopeSection({
 										/>
 										<span className="sr-only">Remove budget for {id}</span>
 									</Button>
+									{removeError?.id === id ? (
+										<div className="flex items-center gap-2">
+											<p
+												className="text-status-destructive text-xs"
+												role="alert"
+											>
+												Couldn't remove budget: {removeError.message}
+											</p>
+											<Button
+												disabled={removingId === id}
+												loading={removingId === id}
+												onClick={() => void remove(id)}
+												size="sm"
+												variant="ghost"
+											>
+												Retry
+											</Button>
+										</div>
+									) : null}
 								</div>
 							}
-							description={
-								<>
-									{rule.limit === 0
-										? "unlimited"
-										: `${formatBudgetUsd(rule.limit)} spend`}
-									{" · "}
-									{ACTION_LABELS[rule.action] ?? rule.action}
-									{rule.action === "downgrade" && rule.downgrade_to
-										? ` → ${rule.downgrade_to}`
-										: null}
-									{rule.action === "restrict" && rule.restrict_max_tokens
-										? ` (max ${rule.restrict_max_tokens})`
-										: null}
-									{/* Only shown once raised: `silent` is every rule's default, so
-									    printing it on every row would be noise. */}
-									{rule.alert && rule.alert !== "silent"
-										? ` · notifies ${ALERT_TIER_LABELS[rule.alert]}`
-										: null}
-								</>
-							}
 							key={id}
-							title={id}
+							title={
+								<span className="flex min-w-0 flex-col">
+									<span className="truncate">{id}</span>
+									<span className="text-muted-foreground text-xs">
+										{rule.limit === 0
+											? "unlimited"
+											: `${formatBudgetUsd(rule.limit)} spend`}
+										{" · "}
+										{ACTION_LABELS[rule.action] ?? rule.action}
+										{rule.action === "downgrade" && rule.downgrade_to
+											? ` → ${rule.downgrade_to}`
+											: null}
+										{rule.action === "restrict" && rule.restrict_max_tokens
+											? ` (max ${rule.restrict_max_tokens})`
+											: null}
+										{/* Only shown once raised: `silent` is every rule's default, so
+										    printing it on every row would be noise. */}
+										{rule.alert && rule.alert !== "silent"
+											? ` · notifies ${ALERT_TIER_LABELS[rule.alert]}`
+											: null}
+									</span>
+								</span>
+							}
 						/>
 					))}
 				</SettingsGroup>
 			)}
-		</div>
+		</SettingsSection>
 	);
 }
 
@@ -3991,9 +4165,9 @@ function SessionBudgetEditor({
 	};
 
 	return (
-		<div className="flex flex-col gap-2">
-			<div className="flex items-center justify-between px-3">
-				<Label>Per-session (global)</Label>
+		<SettingsSection
+			caption="One spend cap applied to every chat session (keyed by session id). Set the cap to 0 to turn it off."
+			headerAction={
 				<Button
 					disabled={!canConfigure}
 					loading={saving}
@@ -4003,31 +4177,33 @@ function SessionBudgetEditor({
 				>
 					Save
 				</Button>
-			</div>
-			<div className="flex flex-col gap-4 px-3">
-				<p className="text-muted-foreground text-xs">
-					One spend cap applied to every chat session (keyed by session id). Set
-					the cap to 0 to turn it off.
-				</p>
-				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="session-budget-limit">Spend cap (USD)</Label>
-					<Input
-						id="session-budget-limit"
-						min={0}
-						onChange={(e) => {
-							setLimitUsd(e.target.value);
-							setSaveOk(false);
-						}}
-						placeholder="0 = off"
-						step="0.01"
-						type="number"
-						value={limitUsd}
-					/>
-					<p className="text-muted-foreground text-xs">
-						Lifetime charged spend per session. 0 = unlimited (off). The Gateway
-						stores this as micro-USD.
-					</p>
-				</div>
+			}
+			title="Per-session (global)"
+		>
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<Input
+							className="w-32"
+							id="session-budget-limit"
+							min={0}
+							onChange={(e) => {
+								setLimitUsd(e.target.value);
+								setSaveOk(false);
+							}}
+							placeholder="0 = off"
+							step="0.01"
+							type="number"
+							value={limitUsd}
+						/>
+					}
+					description="Lifetime charged spend per session. 0 = unlimited (off). The Gateway stores this as micro-USD."
+					title={<Label htmlFor="session-budget-limit">Spend cap (USD)</Label>}
+				/>
+			</SettingsGroup>
+			{/* The inclusion fields are a plain list of checkbox rows; the card
+			    gives them the same surface as the rows above. */}
+			<SettingsCard className="py-2.5">
 				<BudgetChargeInclusionFields
 					idPrefix="session-budget-include"
 					onChange={(next) => {
@@ -4036,163 +4212,191 @@ function SessionBudgetEditor({
 					}}
 					value={include}
 				/>
-				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="session-budget-action">
-						Action when spend cap is reached
-					</Label>
-					<Select
-						items={ACTION_LABELS}
-						onValueChange={(v) => {
-							if (v) {
-								setAction(v as BudgetAction);
-								setSaveOk(false);
-							}
-						}}
-						value={action}
-					>
-						<SelectTrigger id="session-budget-action">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							{(Object.entries(ACTION_LABELS) as [BudgetAction, string][]).map(
-								([val, label]) => (
-									<SelectItem key={val} value={val}>
-										<span className="font-medium">{label}</span>
-										<span className="ml-1 text-muted-foreground text-xs">
-											— {ACTION_DESCRIPTIONS[val]}
-										</span>
-									</SelectItem>
-								)
-							)}
-						</SelectContent>
-					</Select>
-				</div>
-				{action === "downgrade" ? (
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="session-budget-downgrade-to">
-							Downgrade to model
-						</Label>
-						<AgentModelPickerField
-							ariaLabel="Downgrade to model"
-							mode="model"
-							onChange={(next) => {
-								setDowngradeTo(next);
-								setSaveOk(false);
+			</SettingsCard>
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<Select
+							items={ACTION_LABELS}
+							onValueChange={(v) => {
+								if (v) {
+									setAction(v);
+									setSaveOk(false);
+								}
 							}}
-							placeholder="e.g. gpt-4o-mini"
-							target={target}
-							value={downgradeTo}
-						/>
-						<p className="text-muted-foreground text-xs">
-							Model to route to once the session cap is exhausted. Falls back to
-							Restrict if left empty.
-						</p>
-					</div>
+							value={action}
+						>
+							<SelectTrigger id="session-budget-action">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{
+									/* SAFETY: This authored complete string-label map is checked against its closed native domain key union; Object.entries returns its own keys but erases their literal-key types. */ (
+										Object.entries(ACTION_LABELS) as [BudgetAction, string][]
+									).map(([val, label]) => (
+										<SelectItem key={val} value={val}>
+											<span className="font-medium">{label}</span>
+											<span className="ml-1 text-muted-foreground text-xs">
+												— {ACTION_DESCRIPTIONS[val]}
+											</span>
+										</SelectItem>
+									))
+								}
+							</SelectContent>
+						</Select>
+					}
+					title={
+						<Label htmlFor="session-budget-action">
+							Action when spend cap is reached
+						</Label>
+					}
+				/>
+				{action === "downgrade" ? (
+					<SettingsItem
+						actions={
+							<AgentModelPickerField
+								ariaLabel="Downgrade to model"
+								mode="model"
+								onChange={(next) => {
+									setDowngradeTo(next);
+									setSaveOk(false);
+								}}
+								placeholder="e.g. gpt-4o-mini"
+								target={target}
+								value={downgradeTo}
+							/>
+						}
+						description="Model to route to once the session cap is exhausted. Falls back to Restrict if left empty."
+						title={
+							<Label htmlFor="session-budget-downgrade-to">
+								Downgrade to model
+							</Label>
+						}
+					/>
 				) : null}
 				{action === "restrict" ? (
-					<div className="flex flex-col gap-1.5">
-						<Label htmlFor="session-budget-restrict-max">Max tokens cap</Label>
-						<Input
-							id="session-budget-restrict-max"
-							min={1}
-							onChange={(e) => {
-								setRestrictMax(e.target.value);
+					<SettingsItem
+						actions={
+							<Input
+								className="w-32"
+								id="session-budget-restrict-max"
+								min={1}
+								onChange={(e) => {
+									setRestrictMax(e.target.value);
+									setSaveOk(false);
+								}}
+								placeholder="256"
+								type="number"
+								value={restrictMax}
+							/>
+						}
+						title={
+							<Label htmlFor="session-budget-restrict-max">
+								Max tokens cap
+							</Label>
+						}
+					/>
+				) : null}
+				<SettingsItem
+					actions={
+						<AlertTierSelect
+							id="session-budget-alert"
+							onChange={(next) => {
+								setAlert(next);
 								setSaveOk(false);
 							}}
-							placeholder="256"
-							type="number"
-							value={restrictMax}
+							value={alert}
 						/>
-					</div>
-				) : null}
-				<div className="flex flex-col gap-1.5">
-					<Label htmlFor="session-budget-alert">
-						Notify when this cap fires
-					</Label>
-					<AlertTierSelect
-						id="session-budget-alert"
-						onChange={(next) => {
-							setAlert(next);
-							setSaveOk(false);
-						}}
-						value={alert}
-					/>
-					<p className="text-muted-foreground text-xs">
-						{ALERT_TIER_TARGETS_NOTE}
-					</p>
-				</div>
-				{saveError ? (
-					<p className="text-sm text-status-destructive">{saveError}</p>
-				) : null}
-				{saveOk ? (
-					<p className="text-sm text-status-success">
-						Saved. Changes take effect immediately.
-					</p>
-				) : null}
-			</div>
-		</div>
+					}
+					description={ALERT_TIER_TARGETS_NOTE}
+					title={
+						<Label htmlFor="session-budget-alert">
+							Notify when this cap fires
+						</Label>
+					}
+				/>
+			</SettingsGroup>
+			{saveError ? (
+				<p className="px-3.5 text-sm text-status-destructive">{saveError}</p>
+			) : null}
+			{saveOk ? (
+				<p className="px-3.5 text-sm text-status-success">
+					Saved. Changes take effect immediately.
+				</p>
+			) : null}
+		</SettingsSection>
 	);
 }
-
-const POLICY_OPTIONS: { value: GatewayFirewallPolicy; label: string }[] = [
-	{ value: "block", label: "Block — reject with 403" },
-	{ value: "warn_and_continue", label: "Warn and continue — log only" },
-	{ value: "sanitize", label: "Sanitize — redact detected patterns" },
-];
-
-/** Short, human-readable names for firewall policies, for inline copy. */
-const POLICY_LABELS: Record<GatewayFirewallPolicy, string> = {
-	block: "Block",
-	warn_and_continue: "Warn and continue",
-	sanitize: "Sanitize",
-};
 
 /**
  * Command-approval gate: scan every ACP agent's native tool calls (Claude/Codex
  * `Bash`/`Write`/`Edit`, …) through the gateway command-approval scanner at the
  * `request_permission` seam before they run. Backed by the `exec-approval-mode`
- * Core preference; Core seeds it into `RYU_EXEC_APPROVAL_MODE` at startup, so the
- * change is restart-to-apply. When on, the scan is fail-closed and defers to the
+ * Core preference; Core applies preference writes to the live scanner unless an
+ * operator environment override takes precedence. When on, the scan is fail-closed and defers to the
  * firewall / allow-deny rules configured in the cards above.
  */
-function CommandApprovalCard({ target }: { target: ApiTarget }) {
+function CommandApprovalCard({
+	target,
+	canConfigure,
+}: {
+	target: ApiTarget;
+	canConfigure: boolean;
+}) {
 	// Armed by default (matches Core: unset pref scans; explicit off disarms).
 	const [enabled, setEnabled] = useState(true);
 	const [loaded, setLoaded] = useState(false);
+	const [saving, setSaving] = useState(false);
 	const [status, setStatus] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
-		getExecApprovalEnabled(target).then((value) => {
-			if (!cancelled) {
-				setEnabled(value);
-				setLoaded(true);
-			}
-		});
+		setLoaded(false);
+		getExecApprovalEnabled(target)
+			.then((value) => {
+				if (!cancelled) {
+					setEnabled(value);
+					setLoaded(true);
+				}
+			})
+			.catch(() => {
+				if (!cancelled) {
+					setStatus(
+						"Could not load command approval. Reopen settings to retry."
+					);
+				}
+			});
 		return () => {
 			cancelled = true;
 		};
 	}, [target]);
 
 	const handleToggle = async (next: boolean) => {
+		if (!(canConfigure && loaded) || saving) {
+			return;
+		}
+		const previous = enabled;
+		setSaving(true);
 		setEnabled(next);
 		setStatus(null);
-		const ok = await setExecApprovalEnabled(target, next);
-		if (ok) {
+		try {
+			await setExecApprovalEnabled(target, next);
 			setStatus(
 				next
-					? "Enabled. Restart the node to apply."
-					: "Disabled. Restart the node to apply."
+					? "Enabled. Saved for this node."
+					: "Disabled. Saved for this node."
 			);
-		} else {
-			setEnabled(!next);
+		} catch {
+			setEnabled(previous);
 			setStatus("Failed to update.");
+		} finally {
+			setSaving(false);
 		}
 	};
 
 	return (
 		<SettingsSection
-			caption="Pre-scan every agent's native tool calls (Claude/Codex Bash, Write, Edit, and the rest) through the command-approval scanner before they run, closing the gap where an agent's own file/shell tools bypassed the gateway. On by default and fail-closed: it defers to the firewall and allow/deny rules above, and it is the only governance on headless runs (their permission prompts auto-approve). Restart the node to apply."
+			caption="Pre-scan every agent's native tool calls (Claude/Codex Bash, Write, Edit, and the rest) through the command-approval scanner before they run, closing the gap where an agent's own file/shell tools bypassed the gateway. On by default and fail-closed: it defers to the firewall and allow/deny rules above, headless runs reject commands that need human approval. Changes apply immediately unless an operator environment override takes precedence."
 			title="Command approval"
 		>
 			<div className="flex flex-col gap-3">
@@ -4201,7 +4405,7 @@ function CommandApprovalCard({ target }: { target: ApiTarget }) {
 						actions={
 							<Switch
 								checked={enabled}
-								disabled={!loaded}
+								disabled={!(canConfigure && loaded) || saving}
 								id="exec-approval-enabled"
 								onCheckedChange={handleToggle}
 							/>
@@ -4211,7 +4415,7 @@ function CommandApprovalCard({ target }: { target: ApiTarget }) {
 					/>
 				</SettingsGroup>
 				{status ? (
-					<p className="px-3 text-muted-foreground text-sm">{status}</p>
+					<p className="px-3.5 text-muted-foreground text-sm">{status}</p>
 				) : null}
 			</div>
 		</SettingsSection>
@@ -4231,80 +4435,19 @@ function CommandApprovalCard({ target }: { target: ApiTarget }) {
 
 type FwScope = "node" | "org" | "agent";
 
-/** Boolean-valued firewall fields (excludes `policy` and `inspector`). */
-type FirewallBoolField =
-	| "enabled"
-	| "scan_inbound"
-	| "scan_outbound"
-	| "log_detections"
-	| "redact_pii"
-	| "redact_secrets";
-
-/** Everything a scoped guardrail control needs to render and edit one field. */
-interface ScopeCtx {
-	/** Fields frozen by a broader scope: read-only here. */
-	broaderLocked: Set<string>;
-	/** Gateway unreachable / config not loaded. */
-	disabled: boolean;
-	isOverlay: boolean;
-	/** Fields this scope currently freezes. */
-	lockedHere: Set<string>;
-	/** Node base config (concrete values; the inherit source for overlays). */
-	node: GatewayFirewallConfig;
-	/** The overlay currently being edited ({} when node scope). */
-	overlay: GatewayFirewallOverlay;
-	/** Active org/agent id ("" when node scope). Used for remount keys. */
-	overlayId: string;
-	/** Overlay scope has a concrete id selected. */
-	overlayReady: boolean;
-	scope: FwScope;
-	setNodeField: (patch: Partial<GatewayFirewallConfig>) => void;
-	setOverlayField: (patch: Partial<GatewayFirewallOverlay>) => void;
-	toggleLock: (field: string) => void;
-}
+/**
+ * Everything a scoped guardrail control needs: the shared editor context from
+ * `@ryu/blocks`, bound to this dialog's gateway wire types so the desktop-only
+ * cards below (inspector, evaluators) can read the inspector and evaluator
+ * slots the shared shape leaves out.
+ */
+type ScopeCtx = GuardrailScopeCtx<GatewayFirewallView, GatewayFirewallOverlay>;
 
 const INSPECTOR_MODE_ITEMS: { value: InspectorMode; label: string }[] = [
 	{ value: "injection", label: "Injection — jailbreak / prompt-injection" },
 	{ value: "dlp", label: "DLP — PII / secret leaks" },
 	{ value: "both", label: "Both" },
 ];
-
-const PATTERN_KIND_ITEMS: { value: CustomPatternKind; label: string }[] = [
-	{ value: "pii", label: "PII" },
-	{ value: "secret", label: "Secret" },
-	{ value: "prompt_injection", label: "Prompt injection" },
-];
-
-/** Map an overlay tri-state boolean to the select value. */
-function boolToTri(value: boolean | null | undefined): string {
-	if (value === null || value === undefined) {
-		return "inherit";
-	}
-	return value ? "on" : "off";
-}
-
-/** Map the select value back to the overlay tri-state boolean. */
-function triToBool(value: string | null): boolean | null {
-	if (value === "on") {
-		return true;
-	}
-	if (value === "off") {
-		return false;
-	}
-	return null;
-}
-
-/** Best-effort client-side regex validity hint (browser engine, not Rust). */
-function isValidJsRegex(src: string): boolean {
-	if (src.length === 0) {
-		return true;
-	}
-	try {
-		return Boolean(new RegExp(src));
-	} catch {
-		return false;
-	}
-}
 
 /** Clamp a numeric text input to a non-negative integer. */
 function clampInt(raw: string, min: number): number {
@@ -4313,586 +4456,6 @@ function clampInt(raw: string, min: number): number {
 		return min;
 	}
 	return n;
-}
-
-/** Lock/unlock toggle for a lockable field (node scope only). */
-function LockToggle({
-	locked,
-	disabled,
-	onToggle,
-}: {
-	locked: boolean;
-	disabled: boolean;
-	onToggle: () => void;
-}) {
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<Button
-						aria-label={locked ? "Unlock field" : "Lock field"}
-						aria-pressed={locked}
-						disabled={disabled}
-						onClick={onToggle}
-						size="icon-sm"
-						variant={locked ? "secondary" : "ghost"}
-					>
-						<HugeiconsIcon
-							className={locked ? "size-4" : "size-4 text-muted-foreground"}
-							icon={SquareLock01Icon}
-						/>
-					</Button>
-				}
-			/>
-			<TooltipContent>
-				{locked
-					? "Locked. Narrower scopes (org, agent) cannot loosen this field."
-					: "Lock so narrower scopes cannot loosen this field."}
-			</TooltipContent>
-		</Tooltip>
-	);
-}
-
-/** Read-only indicator shown when a broader scope froze a field. */
-function LockedByBroader({ summary }: { summary: string }) {
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<span className="flex items-center gap-1.5 text-muted-foreground text-sm">
-						<HugeiconsIcon className="size-3.5" icon={SquareLock01Icon} />
-						{summary}
-					</span>
-				}
-			/>
-			<TooltipContent>
-				Locked by a broader scope. Change it there to unlock this field.
-			</TooltipContent>
-		</Tooltip>
-	);
-}
-
-/** Inherit / On / Off selector for an overlay boolean field. */
-function TriStateBool({
-	value,
-	inheritedLabel,
-	disabled,
-	onChange,
-	id,
-}: {
-	value: boolean | null | undefined;
-	inheritedLabel: string;
-	disabled: boolean;
-	onChange: (next: boolean | null) => void;
-	id: string;
-}) {
-	const items = [
-		{ value: "inherit", label: `Inherit (${inheritedLabel})` },
-		{ value: "on", label: "On" },
-		{ value: "off", label: "Off" },
-	];
-	return (
-		<Select
-			disabled={disabled}
-			items={items}
-			onValueChange={(v: string | null) => onChange(triToBool(v))}
-			value={boolToTri(value)}
-		>
-			<SelectTrigger className="w-40" id={id}>
-				<SelectValue />
-			</SelectTrigger>
-			<SelectContent>
-				{items.map((it) => (
-					<SelectItem key={it.value} value={it.value}>
-						{it.label}
-					</SelectItem>
-				))}
-			</SelectContent>
-		</Select>
-	);
-}
-
-/** One boolean guardrail field, rendered per the active scope. */
-function GuardrailBoolRow({
-	ctx,
-	field,
-	title,
-	description,
-}: {
-	ctx: ScopeCtx;
-	field: FirewallBoolField;
-	title: string;
-	description?: string;
-}) {
-	const nodeVal = Boolean(ctx.node[field]);
-	const overlayVal = ctx.overlay[field];
-	const resolved =
-		overlayVal === null || overlayVal === undefined ? nodeVal : overlayVal;
-
-	let actions: ReactElement;
-	if (ctx.broaderLocked.has(field)) {
-		actions = <LockedByBroader summary={resolved ? "On" : "Off"} />;
-	} else if (ctx.isOverlay) {
-		actions = (
-			<TriStateBool
-				disabled={ctx.disabled || !ctx.overlayReady}
-				id={`fw-${field}`}
-				inheritedLabel={nodeVal ? "On" : "Off"}
-				onChange={(next) =>
-					ctx.setOverlayField({
-						[field]: next,
-					} as Partial<GatewayFirewallOverlay>)
-				}
-				value={overlayVal}
-			/>
-		);
-	} else {
-		actions = (
-			<div className="flex items-center gap-2">
-				<LockToggle
-					disabled={ctx.disabled}
-					locked={ctx.lockedHere.has(field)}
-					onToggle={() => ctx.toggleLock(field)}
-				/>
-				<Switch
-					checked={nodeVal}
-					disabled={ctx.disabled}
-					id={`fw-${field}`}
-					onCheckedChange={(c: boolean) =>
-						ctx.setNodeField({
-							[field]: c,
-						} as Partial<GatewayFirewallConfig>)
-					}
-				/>
-			</div>
-		);
-	}
-
-	return (
-		<SettingsItem actions={actions} description={description} title={title} />
-	);
-}
-
-/** The firewall policy field, rendered per the active scope. */
-function GuardrailPolicyRow({ ctx }: { ctx: ScopeCtx }) {
-	const nodeVal = ctx.node.policy;
-	const overlayVal = ctx.overlay.policy;
-	const resolved = overlayVal ?? nodeVal;
-
-	if (ctx.broaderLocked.has("policy")) {
-		return (
-			<div className="flex flex-col gap-1.5 px-3">
-				<Label>Policy</Label>
-				<LockedByBroader summary={POLICY_LABELS[resolved] ?? resolved} />
-			</div>
-		);
-	}
-
-	if (ctx.isOverlay) {
-		const items = [
-			{
-				value: "inherit",
-				label: `Inherit (${POLICY_LABELS[nodeVal] ?? nodeVal})`,
-			},
-			...POLICY_OPTIONS,
-		];
-		return (
-			<div className="flex flex-col gap-1.5 px-3">
-				<Label htmlFor="fw-policy">Policy</Label>
-				<Select
-					disabled={ctx.disabled || !ctx.overlayReady}
-					items={items}
-					onValueChange={(v: string | null) =>
-						ctx.setOverlayField({
-							policy:
-								v && v !== "inherit" ? (v as GatewayFirewallPolicy) : null,
-						})
-					}
-					value={overlayVal ?? "inherit"}
-				>
-					<SelectTrigger id="fw-policy">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{items.map((opt) => (
-							<SelectItem key={opt.value} value={opt.value}>
-								{opt.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			</div>
-		);
-	}
-
-	return (
-		<div className="flex flex-col gap-1.5 px-3">
-			<div className="flex items-center justify-between">
-				<Label htmlFor="fw-policy">Policy</Label>
-				<LockToggle
-					disabled={ctx.disabled}
-					locked={ctx.lockedHere.has("policy")}
-					onToggle={() => ctx.toggleLock("policy")}
-				/>
-			</div>
-			<Select
-				disabled={ctx.disabled}
-				items={POLICY_OPTIONS}
-				onValueChange={(v: string | null) =>
-					ctx.setNodeField({
-						policy: (v ?? "warn_and_continue") as GatewayFirewallPolicy,
-					})
-				}
-				value={nodeVal}
-			>
-				<SelectTrigger id="fw-policy">
-					<SelectValue />
-				</SelectTrigger>
-				<SelectContent>
-					{POLICY_OPTIONS.map((opt) => (
-						<SelectItem key={opt.value} value={opt.value}>
-							{opt.label}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
-		</div>
-	);
-}
-
-/**
- * The firewall's alert tier — who gets told when the firewall matches — rendered
- * per the active scope, beside `policy` (which decides what happens to the
- * request). The two are orthogonal by design in the gateway.
- *
- * Structurally a mirror of {@link GuardrailPolicyRow}: same three branches
- * (broader-locked read-only / overlay `Inherit (…)` select / node select + lock
- * toggle), same `ctx` plumbing. Two things about the gateway side are worth
- * stating, because an earlier revision of this comment asserted the opposite of
- * each and both are cross-process claims that were re-read here rather than
- * assumed:
- *
- * 1. The lock toggle is REAL. `apply_overlay`
- *    (apps/gateway/src/firewall/resolve.rs) honours locks through explicit
- *    per-field arms, and `alert` has one: on a locked field it takes
- *    `louder_alert` = `max` over `AlertTier`'s ascending-severity `Ord`, so a
- *    narrower scope may only RAISE the tier, never go quieter. `"alert"` is also
- *    one of the canonical lockable names on `FirewallConfig::locked_fields`. (It
- *    is deliberately NOT in `default_firewall_locked_fields` — a notification
- *    dial is not a protection dial, so it starts unlocked.)
- * 2. Scoped tiers do NOT cover every alert site, and the boundary is not
- *    inbound-vs-outbound. In `pipeline/mod.rs`, `pre_process`,
- *    `apply_inline_input_evaluators` and `apply_inline_output_evaluators` read
- *    the per-request `state.resolved_scanner(ctx)` — so an org/agent tier governs
- *    those, including an OUTBOUND block raised by an output-target evaluator.
- *    But `run`'s stage-9 outbound response scan, `run_multimodal`'s inbound scan
- *    and `submit_video_job`'s inbound scan read `state.with_firewall` (the node
- *    base), so those three fire the NODE tier whatever an overlay says. The node
- *    scope is the only one that covers all six. The full call-site table lives on
- *    `GatewayFirewallOverlay.alert`.
- */
-function GuardrailAlertRow({ ctx }: { ctx: ScopeCtx }) {
-	// `??` at every read: `alert` is optional on the wire for older gateways, and a
-	// Select bound to `undefined` renders uncontrolled (it would then save whatever
-	// the placeholder implied).
-	const nodeVal: GatewayAlertTier = ctx.node.alert ?? "silent";
-	const overlayVal = ctx.overlay.alert;
-	const resolved: GatewayAlertTier = overlayVal ?? nodeVal;
-
-	const note = (
-		<p className="text-muted-foreground text-xs">{ALERT_TIER_TARGETS_NOTE}</p>
-	);
-
-	if (ctx.broaderLocked.has("alert")) {
-		return (
-			<div className="flex flex-col gap-1.5 px-3">
-				<Label>Alerts</Label>
-				<LockedByBroader summary={ALERT_TIER_LABELS[resolved] ?? resolved} />
-			</div>
-		);
-	}
-
-	if (ctx.isOverlay) {
-		const items = [
-			{
-				value: "inherit",
-				label: `Inherit (${ALERT_TIER_LABELS[nodeVal] ?? nodeVal})`,
-			},
-			...ALERT_TIER_OPTIONS,
-		];
-		return (
-			<div className="flex flex-col gap-1.5 px-3">
-				<Label htmlFor="fw-alert">Alerts</Label>
-				<Select
-					disabled={ctx.disabled || !ctx.overlayReady}
-					items={items}
-					onValueChange={(v: string | null) =>
-						ctx.setOverlayField({
-							alert: v && v !== "inherit" ? (v as GatewayAlertTier) : null,
-						})
-					}
-					value={overlayVal ?? "inherit"}
-				>
-					<SelectTrigger id="fw-alert">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{items.map((opt) => (
-							<SelectItem key={opt.value} value={opt.value}>
-								{opt.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-				{note}
-			</div>
-		);
-	}
-
-	return (
-		<div className="flex flex-col gap-1.5 px-3">
-			<div className="flex items-center justify-between">
-				<Label htmlFor="fw-alert">Alerts</Label>
-				<LockToggle
-					disabled={ctx.disabled}
-					locked={ctx.lockedHere.has("alert")}
-					onToggle={() => ctx.toggleLock("alert")}
-				/>
-			</div>
-			<Select
-				disabled={ctx.disabled}
-				items={ALERT_TIER_OPTIONS}
-				onValueChange={(v: string | null) =>
-					ctx.setNodeField({ alert: (v ?? "silent") as GatewayAlertTier })
-				}
-				value={nodeVal}
-			>
-				<SelectTrigger id="fw-alert">
-					<SelectValue />
-				</SelectTrigger>
-				<SelectContent>
-					{ALERT_TIER_OPTIONS.map((opt) => (
-						<SelectItem key={opt.value} value={opt.value}>
-							{opt.label}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
-			{note}
-		</div>
-	);
-}
-
-/** Add/edit/remove custom firewall patterns for the active scope. Remounted on
- * scope/id change (via a `key` from the parent) so its local row state reseeds. */
-function CustomPatternsEditor({ ctx }: { ctx: ScopeCtx }) {
-	const source =
-		(ctx.isOverlay ? ctx.overlay.custom_patterns : ctx.node.custom_patterns) ??
-		[];
-	const [rows, setRows] = useState<Array<CustomPattern & { id: string }>>(() =>
-		source.map((p) => ({ ...p, id: crypto.randomUUID() }))
-	);
-
-	const editable = !ctx.disabled && (!ctx.isOverlay || ctx.overlayReady);
-
-	const commit = (next: Array<CustomPattern & { id: string }>) => {
-		setRows(next);
-		const serialized: CustomPattern[] = next.map((r) => ({
-			name: r.name,
-			regex: r.regex,
-			kind: r.kind,
-		}));
-		if (ctx.isOverlay) {
-			ctx.setOverlayField({ custom_patterns: serialized });
-		} else {
-			ctx.setNodeField({ custom_patterns: serialized });
-		}
-	};
-
-	const updateRow = (id: string, patch: Partial<CustomPattern>) => {
-		commit(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-	};
-
-	const removeRow = (id: string) => {
-		commit(rows.filter((r) => r.id !== id));
-	};
-
-	const addRow = () => {
-		commit([
-			...rows,
-			{ id: crypto.randomUUID(), name: "", regex: "", kind: "pii" },
-		]);
-	};
-
-	return (
-		<div className="flex flex-col gap-2 px-3">
-			<div className="flex items-center justify-between">
-				<Label>Custom patterns</Label>
-				<Button disabled={!editable} onClick={addRow} size="sm" variant="ghost">
-					<HugeiconsIcon className="size-4" icon={Add01Icon} />
-					Add pattern
-				</Button>
-			</div>
-			{ctx.isOverlay ? (
-				<p className="text-muted-foreground text-xs">
-					Overlay patterns are appended to the inherited set, never replacing
-					it.
-				</p>
-			) : null}
-			{rows.length === 0 ? (
-				<p className="text-muted-foreground text-sm">No custom patterns.</p>
-			) : (
-				<div className="flex flex-col gap-2">
-					{rows.map((r) => {
-						const valid = isValidJsRegex(r.regex);
-						return (
-							<div
-								className="flex flex-col gap-1.5 rounded-md border p-2"
-								key={r.id}
-							>
-								<div className="flex items-center gap-2">
-									<Input
-										aria-label="Pattern name"
-										disabled={!editable}
-										onChange={(e) => updateRow(r.id, { name: e.target.value })}
-										placeholder="Name (e.g. internal_id)"
-										value={r.name}
-									/>
-									<Select
-										disabled={!editable}
-										items={PATTERN_KIND_ITEMS}
-										onValueChange={(v: string | null) =>
-											updateRow(r.id, {
-												kind: (v ?? "pii") as CustomPatternKind,
-											})
-										}
-										value={r.kind}
-									>
-										<SelectTrigger className="w-44">
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{PATTERN_KIND_ITEMS.map((it) => (
-												<SelectItem key={it.value} value={it.value}>
-													{it.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-									<Button
-										aria-label="Remove pattern"
-										disabled={!editable}
-										onClick={() => removeRow(r.id)}
-										size="icon-sm"
-										variant="ghost"
-									>
-										<HugeiconsIcon className="size-4" icon={Delete01Icon} />
-									</Button>
-								</div>
-								<Input
-									aria-invalid={!valid}
-									aria-label="Pattern regex"
-									className="font-mono text-xs"
-									disabled={!editable}
-									onChange={(e) => updateRow(r.id, { regex: e.target.value })}
-									placeholder="Regex (Rust regex syntax)"
-									value={r.regex}
-								/>
-								{valid ? null : (
-									<p className="text-status-destructive text-xs">
-										Invalid regex. Checked with the browser engine; the gateway
-										uses Rust regex syntax, which differs slightly.
-									</p>
-								)}
-							</div>
-						);
-					})}
-				</div>
-			)}
-		</div>
-	);
-}
-
-function PipelineBadge({ active }: { active: boolean }) {
-	return active ? null : (
-		<Badge className="text-[10px]" variant="secondary">
-			Not in pipeline
-		</Badge>
-	);
-}
-
-function DlpCard({ ctx }: { ctx: ScopeCtx }) {
-	const resolvedPolicy = ctx.overlay.policy ?? ctx.node.policy;
-	const isSanitize = resolvedPolicy === "sanitize";
-
-	return (
-		<SettingsSection
-			caption="Choose which categories are redacted when the firewall policy is set to Sanitize. PII covers email, phone, SSN, credit cards; Secrets covers API keys, tokens, and PEM keys."
-			title="DLP / Redaction"
-		>
-			<div className="flex flex-col gap-3">
-				{isSanitize ? null : (
-					<p className="mx-3 rounded-md border border-warning bg-warning px-3 py-2 text-sm text-status-warning dark:border-warning dark:bg-warning dark:text-status-warning">
-						Redaction toggles apply only when the firewall policy is set to
-						Sanitize. Resolved policy for this scope:{" "}
-						{POLICY_LABELS[resolvedPolicy] ?? resolvedPolicy}.
-					</p>
-				)}
-
-				<SettingsGroup>
-					<GuardrailBoolRow
-						ctx={ctx}
-						description="Email, phone numbers, SSN, credit cards, IBANs, IPv4 addresses"
-						field="redact_pii"
-						title="Redact PII"
-					/>
-					<GuardrailBoolRow
-						ctx={ctx}
-						description="API keys, bearer tokens, PEM private keys, database connection strings"
-						field="redact_secrets"
-						title="Redact secrets"
-					/>
-				</SettingsGroup>
-			</div>
-		</SettingsSection>
-	);
-}
-
-function FirewallCard({ ctx, caption }: { ctx: ScopeCtx; caption: string }) {
-	return (
-		<SettingsSection caption={caption} title="Guardrails">
-			<div className="flex flex-col gap-3">
-				<SettingsGroup>
-					<GuardrailBoolRow ctx={ctx} field="enabled" title="Enabled" />
-					<GuardrailBoolRow
-						ctx={ctx}
-						field="scan_inbound"
-						title="Scan inbound"
-					/>
-					<GuardrailBoolRow
-						ctx={ctx}
-						field="scan_outbound"
-						title="Scan outbound"
-					/>
-					<GuardrailBoolRow
-						ctx={ctx}
-						description="Record every firewall detection in the audit log"
-						field="log_detections"
-						title="Log detections"
-					/>
-				</SettingsGroup>
-
-				<GuardrailPolicyRow ctx={ctx} />
-
-				{/* Beside `policy`: enforcement (what happens to the request) and alerting
-				    (who is told) are orthogonal in the gateway, and reading them together
-				    is the only way to see that a Block rule is delivering nothing. */}
-				<GuardrailAlertRow ctx={ctx} />
-
-				<CustomPatternsEditor ctx={ctx} key={`${ctx.scope}:${ctx.overlayId}`} />
-			</div>
-		</SettingsSection>
-	);
 }
 
 function InspectorCard({
@@ -4970,6 +4533,7 @@ function InspectorCard({
 					{ctx.isOverlay ? null : (
 						<LockToggle
 							disabled={ctx.disabled}
+							fieldLabel="LLM inspector"
 							locked={ctx.lockedHere.has("inspector")}
 							onToggle={() => ctx.toggleLock("inspector")}
 						/>
@@ -4978,20 +4542,19 @@ function InspectorCard({
 			}
 			title="LLM inspector"
 		>
-			<div className="flex flex-col gap-3">
-				{broaderLocked ? (
-					<div className="px-3">
-						<LockedByBroader
-							summary={`Inspector locked (${effective.enabled ? "on" : "off"})`}
-						/>
-					</div>
-				) : null}
-
-				{!broaderLocked && ctx.isOverlay ? (
-					<SettingsGroup>
+			{broaderLocked ? (
+				<SettingsCard>
+					<LockedByBroader
+						summary={`Inspector locked (${effective.enabled ? "on" : "off"})`}
+					/>
+				</SettingsCard>
+			) : (
+				<SettingsGroup>
+					{ctx.isOverlay ? (
 						<SettingsItem
 							actions={
 								<Switch
+									aria-label="Override inspector"
 									checked={overriding}
 									disabled={ctx.disabled || !ctx.overlayReady}
 									id="inspector-override"
@@ -5005,30 +4568,28 @@ function InspectorCard({
 							}
 							title="Override inspector"
 						/>
-					</SettingsGroup>
-				) : null}
-
-				{broaderLocked ? null : (
-					<>
-						<SettingsGroup>
-							<SettingsItem
-								actions={
-									<Switch
-										checked={effective.enabled}
-										disabled={editorDisabled}
-										id="inspector-enabled"
-										onCheckedChange={(c: boolean) =>
-											patchInspector({ enabled: c })
-										}
-									/>
-								}
-								description="Run the inspector on inbound turns"
-								title="Enabled"
+					) : null}
+					<SettingsItem
+						actions={
+							<Switch
+								aria-label="Enable LLM inspector"
+								checked={effective.enabled}
+								disabled={editorDisabled}
+								id="inspector-enabled"
+								onCheckedChange={(c: boolean) => patchInspector({ enabled: c })}
 							/>
-						</SettingsGroup>
-
-						<div className="flex flex-col gap-1.5 px-3">
-							<Label htmlFor="inspector-model">Model</Label>
+						}
+						description="Run the inspector on inbound turns"
+						title="Enabled"
+					/>
+					{/* The description describes the WIRE, not the box: the substitution
+					    happens in the save transport (`withResolvedInspectorModels`), so
+					    the field itself still renders empty until the next refetch. The
+					    old copy promised "the box is never really blank" and credited a
+					    gateway-side substitution that lands too late to keep the local
+					    classifier running. */}
+					<SettingsItem
+						actions={
 							<AgentModelPickerField
 								ariaLabel="Inspector model"
 								disabled={editorDisabled}
@@ -5038,46 +4599,36 @@ function InspectorCard({
 								target={target}
 								value={effective.model}
 							/>
-							{/* Describes the WIRE, not the box: the substitution happens in
-							    the save transport (`withResolvedInspectorModels`), so the
-							    field itself still renders empty until the next refetch. The
-							    old copy promised "the box is never really blank" and credited
-							    a gateway-side substitution that lands too late to keep the
-							    local classifier running. */}
-							<p className="text-muted-foreground text-xs">
-								Any routable model id. Leave empty for this node's local
-								classifier (Gemma 3 270M). Saving writes that id explicitly,
-								because a blank value would leave the local classifier stopped.
+						}
+						description="Any routable model id. Leave empty for this node's local classifier (Gemma 3 270M). Saving writes that id explicitly, because a blank value would leave the local classifier stopped."
+						title={<Label htmlFor="inspector-model">Model</Label>}
+					>
+						{unservedModel ? (
+							<p className="text-status-destructive text-xs">
+								The inspector is on and pointed at the local classifier, but{" "}
+								{unservedReason}. The inspection call will fail, and the
+								inspector fails open, so it will allow every turn while still
+								reporting as enabled. Pick a model this node can reach.
 							</p>
-							{unservedModel ? (
-								<p className="text-status-destructive text-xs">
-									The inspector is on and pointed at the local classifier, but{" "}
-									{unservedReason}. The inspection call will fail, and the
-									inspector fails open, so it will allow every turn while still
-									reporting as enabled. Pick a model this node can reach.
-								</p>
-							) : null}
-							{/* Judged on the RESOLVED model, so a blank box doesn't offer
-							    "Use it" for the model the gateway already substitutes. */}
-							<ClassifyTierNote
-								disabled={editorDisabled}
-								onUse={() => patchInspector({ model: CLASSIFY_MODEL_ID })}
-								state={classifyTier}
-								value={resolvedModel}
-							/>
-						</div>
-
-						<div className="flex flex-col gap-1.5 px-3">
-							<Label htmlFor="inspector-mode">Mode</Label>
+						) : null}
+						{/* Judged on the RESOLVED model, so a blank box doesn't offer
+						    "Use it" for the model the gateway already substitutes. */}
+						<ClassifyTierNote
+							disabled={editorDisabled}
+							onUse={() => patchInspector({ model: CLASSIFY_MODEL_ID })}
+							state={classifyTier}
+							value={resolvedModel}
+						/>
+					</SettingsItem>
+					<SettingsItem
+						actions={
 							<Select
 								disabled={editorDisabled}
 								items={INSPECTOR_MODE_ITEMS}
-								onValueChange={(v: string | null) =>
-									patchInspector({ mode: (v ?? "both") as InspectorMode })
-								}
+								onValueChange={(v) => patchInspector({ mode: v ?? "both" })}
 								value={effective.mode}
 							>
-								<SelectTrigger id="inspector-mode">
+								<SelectTrigger className="w-64" id="inspector-mode">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -5088,21 +4639,22 @@ function InspectorCard({
 									))}
 								</SelectContent>
 							</Select>
-						</div>
-
-						<div className="flex flex-col gap-1.5 px-3">
-							<Label htmlFor="inspector-action">Action on flag</Label>
+						}
+						title={<Label htmlFor="inspector-mode">Mode</Label>}
+					/>
+					<SettingsItem
+						actions={
 							<Select
 								disabled={editorDisabled}
 								items={POLICY_OPTIONS}
-								onValueChange={(v: string | null) =>
+								onValueChange={(v) =>
 									patchInspector({
-										action: (v ?? "warn_and_continue") as GatewayFirewallPolicy,
+										action: v ?? "warn_and_continue",
 									})
 								}
 								value={effective.action}
 							>
-								<SelectTrigger id="inspector-action">
+								<SelectTrigger className="w-64" id="inspector-action">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -5113,37 +4665,41 @@ function InspectorCard({
 									))}
 								</SelectContent>
 							</Select>
-						</div>
-
-						<div className="flex gap-3 px-3">
-							<div className="flex flex-1 flex-col gap-1.5">
-								<Label htmlFor="inspector-min-chars">Min characters</Label>
-								<Input
-									disabled={editorDisabled}
-									id="inspector-min-chars"
-									inputMode="numeric"
-									onChange={(e) =>
-										patchInspector({ min_chars: clampInt(e.target.value, 0) })
-									}
-									value={String(effective.min_chars)}
-								/>
-							</div>
-							<div className="flex flex-1 flex-col gap-1.5">
-								<Label htmlFor="inspector-timeout">Timeout (ms)</Label>
-								<Input
-									disabled={editorDisabled}
-									id="inspector-timeout"
-									inputMode="numeric"
-									onChange={(e) =>
-										patchInspector({ timeout_ms: clampInt(e.target.value, 0) })
-									}
-									value={String(effective.timeout_ms)}
-								/>
-							</div>
-						</div>
-					</>
-				)}
-			</div>
+						}
+						title={<Label htmlFor="inspector-action">Action on flag</Label>}
+					/>
+					<SettingsItem
+						actions={
+							<Input
+								className="w-28"
+								disabled={editorDisabled}
+								id="inspector-min-chars"
+								inputMode="numeric"
+								onChange={(e) =>
+									patchInspector({ min_chars: clampInt(e.target.value, 0) })
+								}
+								value={String(effective.min_chars)}
+							/>
+						}
+						title={<Label htmlFor="inspector-min-chars">Min characters</Label>}
+					/>
+					<SettingsItem
+						actions={
+							<Input
+								className="w-28"
+								disabled={editorDisabled}
+								id="inspector-timeout"
+								inputMode="numeric"
+								onChange={(e) =>
+									patchInspector({ timeout_ms: clampInt(e.target.value, 0) })
+								}
+								value={String(effective.timeout_ms)}
+							/>
+						}
+						title={<Label htmlFor="inspector-timeout">Timeout (ms)</Label>}
+					/>
+				</SettingsGroup>
+			)}
 		</SettingsSection>
 	);
 }
@@ -5195,7 +4751,7 @@ function EvaluatorsCard({
 					setError(null);
 				}
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setError(
 						e instanceof Error ? e.message : "Failed to load evaluator catalog"
@@ -5285,15 +4841,18 @@ function EvaluatorsCard({
 					<Select
 						disabled={ctx.disabled}
 						items={POLICY_OPTIONS}
-						onValueChange={(v: string | null) =>
+						onValueChange={(v) =>
 							upsert(item.id, {
-								inlineAction: (v ??
-									"warn_and_continue") as GatewayFirewallPolicy,
+								inlineAction: v ?? "warn_and_continue",
 							})
 						}
 						value={action}
 					>
-						<SelectTrigger className="h-8 w-28 text-xs">
+						<SelectTrigger
+							appearance="gateway-action"
+							aria-label={`${item.name} action`}
+							className="w-28"
+						>
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
@@ -5316,6 +4875,7 @@ function EvaluatorsCard({
 				{ctx.isOverlay || !enabled ? null : (
 					<LockToggle
 						disabled={ctx.disabled}
+						fieldLabel={item.name}
 						locked={binding?.locked ?? false}
 						onToggle={() =>
 							upsert(item.id, { locked: !(binding?.locked ?? false) })
@@ -5336,23 +4896,24 @@ function EvaluatorsCard({
 			}
 			title="Evaluators"
 		>
-			<div className="px-3">
-				<EvaluatorCatalog
-					disabled={ctx.disabled}
-					error={error}
-					items={items}
-					loading={loading}
-					mode="inline"
-					onCreateCode={() => setEditorMode("code")}
-					onCreateJudge={() => setEditorMode("judge")}
-					onDeleteCustom={(id) => {
-						handleDeleteCustom(id).catch(() => undefined);
-					}}
-					onSearchChange={setSearch}
-					renderControl={renderControl}
-					search={search}
-				/>
-			</div>
+			{/* This list shows only inline-capable evaluators and the Gateway never
+			    runs code inline, so it offers the judge editor alone; a code
+			    evaluator would be saved but never listed here. The agent Evals
+			    surface creates code evaluators. */}
+			<EvaluatorCatalog
+				disabled={ctx.disabled}
+				error={error}
+				items={items}
+				loading={loading}
+				mode="inline"
+				onCreateJudge={() => setEditorMode("judge")}
+				onDeleteCustom={(id) => {
+					handleDeleteCustom(id).catch(() => undefined);
+				}}
+				onSearchChange={setSearch}
+				renderControl={renderControl}
+				search={search}
+			/>
 			<EvaluatorEditorDialog
 				existingCustom={customSet}
 				existingIds={allIds}
@@ -5412,6 +4973,7 @@ function GuardrailsSection({
 	const [scope, setScope] = useState<FwScope>("node");
 	const [orgId, setOrgId] = useState("");
 	const [agentId, setAgentId] = useState("");
+	const [reloadKey, setReloadKey] = useState(0);
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [saveOk, setSaveOk] = useState(false);
@@ -5421,6 +4983,7 @@ function GuardrailsSection({
 			return;
 		}
 		let cancelled = false;
+		setConfigError(null);
 		fetchGatewayConfig(target)
 			.then((cfg) => {
 				if (!cancelled) {
@@ -5429,17 +4992,21 @@ function GuardrailsSection({
 					setConfigError(null);
 				}
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setConfigError(
-						e instanceof Error ? e.message : "Failed to load guardrails config"
+						e instanceof ApiError && e.serverMessage
+							? e.serverMessage
+							: e instanceof Error
+								? e.message
+								: "Failed to load guardrails config"
 					);
 				}
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [reachable, config, target]);
+	}, [reachable, config, reloadKey, target]);
 
 	const clearSaveState = () => {
 		setSaveOk(false);
@@ -5467,7 +5034,7 @@ function GuardrailsSection({
 				return prev;
 			}
 			const store = { ...prev[overlayStoreKey] };
-			store[activeId] = { ...(store[activeId] ?? {}), ...patch };
+			store[activeId] = { ...store[activeId], ...patch };
 			return { ...prev, [overlayStoreKey]: store };
 		});
 		clearSaveState();
@@ -5492,14 +5059,33 @@ function GuardrailsSection({
 		clearSaveState();
 	};
 
+	/** Another surface changed the guardrails: reload the settings that won. */
+	const showSaveConflict = () => {
+		setConfig(null);
+		setDraft(null);
+		setSaveError(
+			"Guardrails changed elsewhere. The latest settings were reloaded; reapply your changes."
+		);
+	};
+
 	const handleSave = async () => {
-		if (!draft) {
+		if (!(draft && config)) {
 			return;
 		}
 		setSaving(true);
 		setSaveError(null);
 		setSaveOk(false);
 		try {
+			// The draft is loaded once and replaces all three sections, so re-read
+			// first: saving over a change made elsewhere meanwhile (the posture card,
+			// another window) would silently revert it. Changes to other sections
+			// also move the revision but do not conflict with this save. The read's
+			// revision then guards the gap between this read and the write.
+			const current = await fetchGatewayConfig(target);
+			if (!sameGuardrailSections(config, current)) {
+				showSaveConflict();
+				return;
+			}
 			// Sent as-drafted on purpose: `updateGatewayConfig` runs every patch through
 			// `withResolvedInspectorModels`, so a blank `inspector.model` becomes the
 			// classify id before it reaches Core — which reads this body to decide
@@ -5510,13 +5096,27 @@ function GuardrailsSection({
 				firewall: draft.firewall,
 				firewall_org_overlays: draft.firewall_org_overlays,
 				firewall_agent_overlays: draft.firewall_agent_overlays,
+				expectedRevision: current.configRevision ?? undefined,
 			});
-			setConfig(draft);
+			// Re-read the stored result as the baseline the next save compares.
+			const saved = await fetchGatewayConfig(target).catch(() => null);
+			setConfig(saved ?? draft);
+			if (saved) {
+				setDraft(saved);
+			}
 			setSaveOk(true);
 			setTimeout(() => setSaveOk(false), 3000);
 		} catch (e) {
+			if (e instanceof ApiError && e.status === 409) {
+				showSaveConflict();
+				return;
+			}
 			setSaveError(
-				e instanceof Error ? e.message : "Failed to save guardrails config"
+				e instanceof ApiError && e.serverMessage
+					? e.serverMessage
+					: e instanceof Error
+						? e.message
+						: "Failed to save guardrails config"
 			);
 		} finally {
 			setSaving(false);
@@ -5561,89 +5161,113 @@ function GuardrailsSection({
 			>
 				<div className="flex flex-col gap-3">
 					{reachable ? null : (
-						<p className="px-3 text-muted-foreground text-sm">
+						<SettingsCard className="text-muted-foreground text-sm">
 							Gateway unreachable, so controls are disabled. Start the gateway
 							and refresh to configure guardrails.
-						</p>
+						</SettingsCard>
 					)}
 					{reachable && configError ? (
-						<p className="px-3 text-sm text-status-destructive">
-							{configError}
-						</p>
+						<div role="alert">
+							<SettingsCard className="flex flex-wrap items-center justify-between gap-3">
+								<p className="min-w-0 flex-1 break-words text-muted-foreground text-sm">
+									{configError}
+								</p>
+								<Button
+									onClick={() => setReloadKey((current) => current + 1)}
+									size="sm"
+									variant="secondary"
+								>
+									Retry
+								</Button>
+							</SettingsCard>
+						</div>
 					) : null}
 
-					<div className="flex flex-col gap-1.5 px-3">
-						<Label htmlFor="fw-scope">Scope</Label>
-						<Select
-							disabled={!reachable}
-							items={SCOPE_ITEMS}
-							onValueChange={(v: string | null) =>
-								setScope((v ?? "node") as FwScope)
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<Select
+									disabled={!reachable}
+									items={SCOPE_ITEMS}
+									onValueChange={(v) => setScope(v ?? "node")}
+									value={scope}
+								>
+									<SelectTrigger className="w-48" id="fw-scope">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{SCOPE_ITEMS.map((it) => (
+											<SelectItem key={it.value} value={it.value}>
+												{it.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 							}
-							value={scope}
-						>
-							<SelectTrigger id="fw-scope">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								{SCOPE_ITEMS.map((it) => (
-									<SelectItem key={it.value} value={it.value}>
-										{it.label}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</div>
-
-					{scope === "org" ? (
-						<div className="flex flex-col gap-1.5 px-3">
-							<Label htmlFor="fw-org-id">Org id</Label>
-							<Input
-								disabled={!reachable}
-								id="fw-org-id"
-								list="fw-org-ids"
-								onChange={(e) => setOrgId(e.target.value)}
-								placeholder="Org id (x-ryu-org-id)"
-								value={orgId}
+							title={<Label htmlFor="fw-scope">Scope</Label>}
+						/>
+						{scope === "org" ? (
+							<SettingsItem
+								actions={
+									<>
+										<Input
+											className="w-56"
+											disabled={!reachable}
+											id="fw-org-id"
+											list="fw-org-ids"
+											onChange={(e) => setOrgId(e.target.value)}
+											placeholder="Org id (x-ryu-org-id)"
+											value={orgId}
+										/>
+										<datalist id="fw-org-ids">
+											{Object.keys(draft?.firewall_org_overlays ?? {}).map(
+												(id) => (
+													<option key={id} value={id} />
+												)
+											)}
+										</datalist>
+									</>
+								}
+								description={
+									overlayReady
+										? undefined
+										: "Enter an org id to author its overlay."
+								}
+								title={<Label htmlFor="fw-org-id">Org id</Label>}
 							/>
-							<datalist id="fw-org-ids">
-								{Object.keys(draft?.firewall_org_overlays ?? {}).map((id) => (
-									<option key={id} value={id} />
-								))}
-							</datalist>
-							{overlayReady ? null : (
-								<p className="text-muted-foreground text-xs">
-									Enter an org id to author its overlay.
-								</p>
-							)}
-						</div>
-					) : null}
-
-					{scope === "agent" ? (
-						<div className="flex flex-col gap-1.5 px-3">
-							<Label htmlFor="fw-agent-id">Agent</Label>
-							<AgentModelPickerField
-								ariaLabel="Agent"
-								disabled={!reachable}
-								mode="agent"
-								onChange={setAgentId}
-								placeholder="Agent id (x-ryu-agent-id)"
-								target={target}
-								value={agentId}
+						) : null}
+						{scope === "agent" ? (
+							<SettingsItem
+								actions={
+									<AgentModelPickerField
+										ariaLabel="Agent"
+										disabled={!reachable}
+										mode="agent"
+										onChange={setAgentId}
+										placeholder="Agent id (x-ryu-agent-id)"
+										target={target}
+										value={agentId}
+									/>
+								}
+								description={
+									overlayReady
+										? undefined
+										: "Choose or enter an agent id to author its overlay."
+								}
+								title={<Label htmlFor="fw-agent-id">Agent</Label>}
 							/>
-							{overlayReady ? null : (
-								<p className="text-muted-foreground text-xs">
-									Choose or enter an agent id to author its overlay.
-								</p>
-							)}
-						</div>
-					) : null}
+						) : null}
+					</SettingsGroup>
 				</div>
 			</SettingsSection>
 
 			{ctx ? (
 				<>
-					<FirewallCard caption={scopeCaption(scope, activeId)} ctx={ctx} />
+					<FirewallCard
+						alertNote={ALERT_TIER_TARGETS_NOTE}
+						caption={scopeCaption(scope, activeId)}
+						ctx={ctx}
+					/>
 					<DlpCard ctx={ctx} />
 					<InspectorCard
 						ctx={ctx}
@@ -5655,7 +5279,7 @@ function GuardrailsSection({
 						pipelineStages={draft?.pipeline_stages}
 						target={target}
 					/>
-					<div className="flex items-center gap-3 px-1">
+					<div className="flex flex-wrap items-center gap-3 px-3.5">
 						<Button
 							disabled={!(reachable && dirty && canConfigure)}
 							loading={saving}
@@ -5665,10 +5289,16 @@ function GuardrailsSection({
 							Save guardrails
 						</Button>
 						{saveOk ? (
-							<span className="text-sm text-status-success">Saved.</span>
+							<span
+								aria-live="polite"
+								className="text-sm text-status-success"
+								role="status"
+							>
+								Saved.
+							</span>
 						) : null}
 						{saveError ? (
-							<span className="text-sm text-status-destructive">
+							<span className="text-sm text-status-destructive" role="alert">
 								{saveError}
 							</span>
 						) : null}
@@ -5676,7 +5306,8 @@ function GuardrailsSection({
 				</>
 			) : null}
 
-			<CommandApprovalCard target={target} />
+			<CommandApprovalCard canConfigure={canConfigure} target={target} />
+			<TrustedFoldersCard canConfigure={canConfigure} target={target} />
 			<CatalogScannerCard canConfigure={canConfigure} target={target} />
 
 			{/* Which agents these filters actually see. Every rule above only
@@ -5756,34 +5387,36 @@ function CatalogScannerCard({
 					<SettingsGroup>
 						<SettingsItem
 							actions={
-								<AgentModelPickerField
-									ariaLabel="Catalog scanning agent"
-									className="min-w-[220px]"
-									disabled={!(canConfigure && loaded) || saving}
-									mode="agent"
-									onChange={(next) => {
-										void updateAgent(next);
-									}}
-									placeholder="Use default agent"
-									target={target}
-									value={agentId}
-								/>
+								<div className="flex items-center gap-1">
+									<AgentModelPickerField
+										ariaLabel="Catalog scanning agent"
+										className="min-w-[220px]"
+										disabled={!(canConfigure && loaded) || saving}
+										mode="agent"
+										onChange={(next) => {
+											void updateAgent(next);
+										}}
+										placeholder="Use default agent"
+										target={target}
+										value={agentId}
+									/>
+									<Button
+										disabled={!(canConfigure && loaded && agentId) || saving}
+										onClick={() => void updateAgent("")}
+										size="sm"
+										variant="ghost"
+									>
+										Use default agent
+									</Button>
+								</div>
 							}
 							description="Used by Audit with agent across all Health views. Leave unset to follow the default chat agent."
 							settingsId="catalog-scan-agent"
 							title="Scanning agent"
 						/>
 					</SettingsGroup>
-					<Button
-						disabled={!(canConfigure && loaded && agentId) || saving}
-						onClick={() => void updateAgent("")}
-						size="sm"
-						variant="ghost"
-					>
-						Use default agent
-					</Button>
 					{status ? (
-						<p className="px-3 text-muted-foreground text-sm">{status}</p>
+						<p className="px-3.5 text-muted-foreground text-sm">{status}</p>
 					) : null}
 				</div>
 			</SettingsSection>
@@ -5871,7 +5504,7 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 									<div className="mt-1 max-w-48 truncate font-mono text-xs">
 										{entry.command ?? entry.model ?? entry.provider ?? "—"}
 									</div>
-									<div className="text-[10px] text-muted-foreground">
+									<div className="type-compact text-muted-foreground">
 										{entry.provider ?? entry.backend ?? "Gateway"}
 									</div>
 								</td>
@@ -5883,7 +5516,7 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 										{entry.user_name ?? entry.user_id ?? "system / gateway"}
 									</div>
 								</td>
-								<td className="min-w-44 py-2 pr-3 font-mono text-[10px] text-muted-foreground">
+								<td className="type-compact min-w-44 py-2 pr-3 font-mono text-muted-foreground">
 									<div className="break-all">request {entry.request_id}</div>
 									{entry.session_id ? (
 										<div className="mt-1 break-all">
@@ -5928,13 +5561,25 @@ function AuditPanel({ target }: { target: ApiTarget }) {
 	const [loading, setLoading] = useState(false);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [errorsOnly, setErrorsOnly] = useState(false);
+	// GatewayDialog rebuilds its ApiTarget object on parent renders (for example,
+	// when the status poll or scoped-settings roster resolves). Keep this panel's
+	// fetch identity tied to the actual node credentials so those unrelated
+	// renders don't re-read the audit log or hide a transient read failure.
+	const auditTarget = useMemo(
+		() => ({
+			token: target.token,
+			url: target.url,
+			userJwt: target.userJwt ?? null,
+		}),
+		[target.token, target.url, target.userJwt]
+	);
 
 	const load = useCallback(
 		async (opts: { errorsOnly: boolean }) => {
 			setLoading(true);
 			setLoadError(null);
 			try {
-				const result = await fetchGatewayAudit(target, {
+				const result = await fetchGatewayAudit(auditTarget, {
 					errorsOnly: opts.errorsOnly,
 					limit: 100,
 				});
@@ -5948,7 +5593,7 @@ function AuditPanel({ target }: { target: ApiTarget }) {
 				setLoading(false);
 			}
 		},
-		[target]
+		[auditTarget]
 	);
 
 	useEffect(() => {
@@ -5971,8 +5616,9 @@ function AuditPanel({ target }: { target: ApiTarget }) {
 							onCheckedChange={handleToggleErrors}
 						/>
 						<Label
-							className="cursor-pointer text-sm"
+							className="cursor-pointer"
 							htmlFor="audit-errors-only"
+							variant="choice"
 						>
 							Errors only
 						</Label>
@@ -5990,15 +5636,13 @@ function AuditPanel({ target }: { target: ApiTarget }) {
 			}
 			title="Audit log"
 		>
-			<div className="px-3">
-				<AuditBody
-					entries={entries}
-					loadError={loadError}
-					loading={loading}
-					onRefresh={() => load({ errorsOnly })}
-					reachable={reachable}
-				/>
-			</div>
+			<AuditBody
+				entries={entries}
+				loadError={loadError}
+				loading={loading}
+				onRefresh={() => load({ errorsOnly })}
+				reachable={reachable}
+			/>
 		</SettingsSection>
 	);
 }
@@ -6027,74 +5671,85 @@ function AuditBody({
 }) {
 	if (loading) {
 		return (
-			<div className="flex items-center gap-2 text-muted-foreground text-sm">
-				<Spinner className="size-4" />
-				Loading…
-			</div>
+			<SettingsCard>
+				<SkeletonRows label="Loading…" spacing="comfortable" />
+			</SettingsCard>
 		);
 	}
 	if (loadError) {
 		return (
-			<Empty>
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={Activity01Icon} />
-					</EmptyMedia>
-					<EmptyTitle>Could not load audit log</EmptyTitle>
-					<EmptyDescription>{loadError}</EmptyDescription>
-				</EmptyHeader>
-				<EmptyContent>
-					<Button onClick={onRefresh} size="sm" variant="ghost">
+			<AuditNotice
+				action={
+					<Button onClick={onRefresh} size="sm" variant="secondary">
 						Try again
 					</Button>
-				</EmptyContent>
-			</Empty>
+				}
+				detail={loadError}
+				title="Could not load audit log"
+			/>
 		);
 	}
 	if (reachable === false) {
 		return (
-			<Empty>
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={Activity01Icon} />
-					</EmptyMedia>
-					<EmptyTitle>Audit log unavailable</EmptyTitle>
-					<EmptyDescription>
+			<AuditNotice
+				action={
+					<Button onClick={onRefresh} size="sm" variant="secondary">
+						Try again
+					</Button>
+				}
+				detail={
+					<>
 						The gateway is unreachable or audit logging is disabled. Start the
 						gateway with <span className="font-mono">RYU_AUDIT_LOG=1</span> to
 						enable audit logging.
-					</EmptyDescription>
-				</EmptyHeader>
-				<EmptyContent>
-					<Button onClick={onRefresh} size="sm" variant="ghost">
-						Try again
-					</Button>
-				</EmptyContent>
-			</Empty>
+					</>
+				}
+				title="Audit log unavailable"
+			/>
 		);
 	}
 	if (entries.length === 0) {
 		return (
-			<Empty>
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={Activity01Icon} />
-					</EmptyMedia>
-					<EmptyTitle>No audit entries yet</EmptyTitle>
-					<EmptyDescription>
-						Run a model, tool, or control action through the gateway and refresh
-						to see its trace.
-					</EmptyDescription>
-				</EmptyHeader>
-				<EmptyContent>
-					<Button onClick={onRefresh} size="sm" variant="ghost">
+			<AuditNotice
+				action={
+					<Button onClick={onRefresh} size="sm" variant="secondary">
 						Refresh audit log
 					</Button>
-				</EmptyContent>
-			</Empty>
+				}
+				detail="Run a model, tool, or control action through the gateway and refresh to see its trace."
+				title="No audit entries yet"
+			/>
 		);
 	}
-	return <AuditTable entries={entries} />;
+	return (
+		<SettingsCard>
+			<AuditTable entries={entries} />
+		</SettingsCard>
+	);
+}
+
+/**
+ * The audit panel's non-table states: one card holding a plain sentence, its
+ * muted detail, and the recovery action on the right.
+ */
+function AuditNotice({
+	action,
+	detail,
+	title,
+}: {
+	action: ReactNode;
+	detail: ReactNode;
+	title: string;
+}) {
+	return (
+		<SettingsCard className="flex flex-wrap items-center justify-between gap-3">
+			<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+				<p className="text-sm">{title}</p>
+				<p className="break-words text-muted-foreground text-xs">{detail}</p>
+			</div>
+			{action}
+		</SettingsCard>
+	);
 }
 
 function scoreBarColor(pct: number): string {
@@ -6110,12 +5765,16 @@ function scoreBarColor(pct: number): string {
 function scoreBar(value: number) {
 	const pct = Math.round(value * 100);
 	const color = scoreBarColor(pct);
+	const gatewayScoreVariables1: CSSProperties & {
+		"--gateway-score-width": string;
+	} = { "--gateway-score-width": `${pct}%` };
 	return (
 		<div className="flex items-center gap-2">
 			<div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
 				<div
 					className={`h-full rounded-full ${color}`}
-					style={{ width: `${pct}%` }}
+					data-gateway-score-bar=""
+					style={gatewayScoreVariables1}
 				/>
 			</div>
 			<span className="w-10 text-right font-mono text-xs tabular-nums">
@@ -6131,14 +5790,18 @@ function AggregateCard({ agg }: { agg: EvalRunAggregate }) {
 			caption={`Summary across all ${agg.total_cases} case${agg.total_cases === 1 ? "" : "s"}.`}
 			title="Aggregate"
 		>
-			<div className="grid grid-cols-2 gap-x-8 gap-y-3 px-3">
+			<SettingsCard className="grid grid-cols-2 gap-x-8 gap-y-3">
 				<div>
 					<div className="mb-1 text-muted-foreground text-xs">Overall</div>
 					{scoreBar(agg.mean_overall)}
 				</div>
 				<div>
 					<div className="mb-1 text-muted-foreground text-xs">Latency</div>
-					{scoreBar(agg.mean_latency)}
+					{agg.latency_available_cases === 0 ? (
+						<span className="text-muted-foreground text-sm">Not measured</span>
+					) : (
+						scoreBar(agg.mean_latency)
+					)}
 				</div>
 				<div>
 					<div className="mb-1 text-muted-foreground text-xs">
@@ -6150,7 +5813,11 @@ function AggregateCard({ agg }: { agg: EvalRunAggregate }) {
 					<div className="mb-1 text-muted-foreground text-xs">
 						Policy pass rate
 					</div>
-					{scoreBar(agg.policy_pass_rate)}
+					{agg.policy_available_cases === 0 ? (
+						<span className="text-muted-foreground text-sm">Not measured</span>
+					) : (
+						scoreBar(agg.policy_pass_rate)
+					)}
 				</div>
 				{agg.mean_substring_match === null ? null : (
 					<div>
@@ -6160,7 +5827,7 @@ function AggregateCard({ agg }: { agg: EvalRunAggregate }) {
 						{scoreBar(agg.mean_substring_match)}
 					</div>
 				)}
-			</div>
+			</SettingsCard>
 		</SettingsSection>
 	);
 }
@@ -6168,7 +5835,7 @@ function AggregateCard({ agg }: { agg: EvalRunAggregate }) {
 function CasesTable({ cases }: { cases: EvalCaseScore[] }) {
 	return (
 		<SettingsSection caption="Per-prompt scores." title="Cases">
-			<div className="overflow-x-auto px-3">
+			<SettingsCard className="overflow-x-auto">
 				<table className="w-full text-sm">
 					<thead>
 						<tr className="border-b text-left text-muted-foreground text-xs">
@@ -6193,15 +5860,23 @@ function CasesTable({ cases }: { cases: EvalCaseScore[] }) {
 									{Math.round(c.overall * 100)}%
 								</td>
 								<td className="py-2 pr-4 font-mono text-xs tabular-nums">
-									{Math.round(c.latency_score * 100)}%
+									{c.latency_available === false
+										? "—"
+										: `${Math.round(c.latency_score * 100)}%`}
 								</td>
 								<td className="py-2 pr-4 font-mono text-xs tabular-nums">
 									{Math.round(c.token_efficiency * 100)}%
 								</td>
 								<td className="py-2 pr-4">
-									<Badge variant={c.policy_pass ? "default" : "destructive"}>
-										{c.policy_pass ? "pass" : "fail"}
-									</Badge>
+									{c.policy_available === false ? (
+										<span className="text-muted-foreground text-xs">
+											not measured
+										</span>
+									) : (
+										<Badge variant={c.policy_pass ? "default" : "destructive"}>
+											{c.policy_pass ? "pass" : "fail"}
+										</Badge>
+									)}
 								</td>
 								<td className="py-2 font-mono text-xs tabular-nums">
 									{c.substring_match === null
@@ -6212,7 +5887,7 @@ function CasesTable({ cases }: { cases: EvalCaseScore[] }) {
 						))}
 					</tbody>
 				</table>
-			</div>
+			</SettingsCard>
 		</SettingsSection>
 	);
 }
@@ -6221,10 +5896,22 @@ function RunEvalsPanel({ target }: { target: ApiTarget }) {
 	const [running, setRunning] = useState(false);
 	const [result, setResult] = useState<EvalRunResult | null>(null);
 	const [runError, setRunError] = useState<string | null>(null);
-	const [model, setModel] = useState("gpt-4o-mini");
+	const nodeDefault = useNodeDefaultModel(target);
+	const [model, setModel] = useState("");
+	// Pre-fill the node's default model once it resolves; a typed id wins.
+	const modelEditedRef = useRef(false);
+	useEffect(() => {
+		if (nodeDefault.model && !modelEditedRef.current) {
+			setModel(nodeDefault.model);
+		}
+	}, [nodeDefault.model]);
 	const abortRef = useRef<AbortController | null>(null);
+	const runModel = model.trim();
 
 	const handleRun = async () => {
+		if (!runModel) {
+			return;
+		}
 		abortRef.current?.abort();
 		const ac = new AbortController();
 		abortRef.current = ac;
@@ -6234,13 +5921,19 @@ function RunEvalsPanel({ target }: { target: ApiTarget }) {
 		try {
 			const res = await runGatewayEvals(
 				target,
-				{ model: model.trim() || "gpt-4o-mini", dataset: [] },
+				{ model: runModel, dataset: [] },
 				ac.signal
 			);
 			setResult(res);
 		} catch (e) {
 			if (!(e instanceof DOMException && e.name === "AbortError")) {
-				setRunError(e instanceof Error ? e.message : "Eval run failed.");
+				setRunError(
+					e instanceof ApiError && e.serverMessage
+						? e.serverMessage
+						: e instanceof Error
+							? e.message
+							: "Eval run failed."
+				);
 			}
 		} finally {
 			setRunning(false);
@@ -6248,252 +5941,61 @@ function RunEvalsPanel({ target }: { target: ApiTarget }) {
 	};
 
 	return (
-		<SettingsSection
-			caption="Replay the built-in 3-case dataset through the gateway pipeline and get a scorecard: latency, token efficiency, policy pass, and optional substring match. LLM-judge scoring needs a per-case rubric; it lives in Prompt Studio."
-			title="Run evals"
-		>
-			<div className="flex flex-col gap-4 px-3">
-				<div className="flex items-end gap-3">
-					<div className="flex flex-col gap-1">
-						<Label htmlFor="eval-model">Model</Label>
-						<Input
-							className="w-48"
-							id="eval-model"
-							onChange={(e) => setModel(e.target.value)}
-							placeholder="gpt-4o-mini"
-							value={model}
+		<>
+			<SettingsSection
+				caption="Replay the built-in 3-case dataset through the gateway pipeline and get a scorecard: latency, token efficiency, policy pass, and optional substring match. LLM-judge scoring needs a per-case rubric; it lives in Prompt Studio."
+				title="Run evals"
+			>
+				<div className="flex flex-col gap-4">
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<div className="flex items-center gap-2">
+									<Input
+										className="w-48"
+										id="eval-model"
+										onChange={(e) => {
+											modelEditedRef.current = true;
+											setModel(e.target.value);
+										}}
+										placeholder="Model id"
+										value={model}
+									/>
+									<Button
+										disabled={!runModel}
+										loading={running}
+										onClick={() => {
+											handleRun().catch((_e) => undefined);
+										}}
+										size="sm"
+									>
+										{running ? "Running…" : "Run"}
+									</Button>
+								</div>
+							}
+							description={
+								runModel || nodeDefault.loading
+									? undefined
+									: NO_DEFAULT_MODEL_INPUT_HINT
+							}
+							title={<Label htmlFor="eval-model">Model</Label>}
 						/>
-					</div>
-					<Button
-						loading={running}
-						onClick={() => {
-							handleRun().catch((_e: unknown) => undefined);
-						}}
-					>
-						{running ? "Running…" : "Run"}
-					</Button>
+					</SettingsGroup>
+
+					{runError ? (
+						<SettingsCard className="text-sm text-status-destructive">
+							{runError}
+						</SettingsCard>
+					) : null}
 				</div>
-
-				{runError ? (
-					<p className="text-sm text-status-destructive">{runError}</p>
-				) : null}
-
-				{result ? (
-					<div className="flex flex-col gap-4">
-						<AggregateCard agg={result.aggregate} />
-						<CasesTable cases={result.cases} />
-					</div>
-				) : null}
-			</div>
-		</SettingsSection>
-	);
-}
-
-/**
- * The node-wide default target: what every agent/model setting on this node
- * falls back to when it is left unset — plugin settings fields, chat
- * auto-rename, `/btw`, the advisor, context compaction, chat suggestions, and
- * the agent-auto no-match fallback.
- *
- * Node-scoped rather than per-user because it is inherited by everyone and
- * everything on the node. It writes the same `AgentSelection` shape a plugin
- * field writes, so there is one value vocabulary rather than a special case for
- * "the global one".
- */
-// How long the resident local chat model stays loaded after its last request
-// before llama-server unloads it from memory (auto-reload on the next request).
-// Mirrors Core's `engine.llamacpp.sleep-idle-seconds` preference; the stored
-// value is seconds, and `"0"` means "never unload".
-const LOCAL_MODEL_IDLE_PREF = "engine.llamacpp.sleep-idle-seconds";
-const LOCAL_MODEL_IDLE_OPTIONS = [
-	{ value: "0", label: "Never" },
-	{ value: "60", label: "1 minute" },
-	{ value: "300", label: "5 minutes" },
-	{ value: "900", label: "15 minutes" },
-	{ value: "1800", label: "30 minutes" },
-	{ value: "3600", label: "1 hour" },
-];
-
-function DefaultsSection({
-	canConfigure,
-	managed,
-	target,
-}: {
-	canConfigure: boolean;
-	managed: boolean;
-	target: ApiTarget;
-}) {
-	const [localSelection, setLocalSelection] = useState(EMPTY_AGENT_SELECTION);
-	const [cloudSelection, setCloudSelection] = useState(EMPTY_AGENT_SELECTION);
-	const [loaded, setLoaded] = useState(false);
-	const [idleSeconds, setIdleSeconds] = useState("300");
-	const [idleLoaded, setIdleLoaded] = useState(false);
-	useEffect(() => {
-		let cancelled = false;
-		Promise.all([
-			getLaneAgentSelection(target, "local"),
-			getLaneAgentSelection(target, "cloud"),
-		])
-			.then(([local, cloud]) => {
-				if (!cancelled) {
-					setLocalSelection(local);
-					setCloudSelection(cloud);
-					setLoaded(true);
-				}
-			})
-			.catch(() => {
-				if (!cancelled) {
-					setLoaded(true);
-				}
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [target]);
-
-	const save = useCallback(
-		async (lane: "local" | "cloud", next: AgentSelection) => {
-			const previous = lane === "local" ? localSelection : cloudSelection;
-			const setSelection =
-				lane === "local" ? setLocalSelection : setCloudSelection;
-			setSelection(next);
-			const ok = await setLaneAgentSelection(target, lane, next);
-			if (!ok) {
-				setSelection(previous);
-				toast.error("Couldn't save the default", {
-					description: "Check your connection and try again.",
-				});
-			}
-		},
-		[target, cloudSelection, localSelection]
-	);
-
-	useEffect(() => {
-		let cancelled = false;
-		getPreference(target, LOCAL_MODEL_IDLE_PREF)
-			.then((raw) => {
-				if (!cancelled) {
-					if (raw != null) {
-						setIdleSeconds(raw);
-					}
-					setIdleLoaded(true);
-				}
-			})
-			.catch(() => {
-				if (!cancelled) {
-					setIdleLoaded(true);
-				}
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [target]);
-
-	const saveIdleSeconds = useCallback(
-		async (next: string) => {
-			const previous = idleSeconds;
-			setIdleSeconds(next);
-			const ok = await setPreference(target, LOCAL_MODEL_IDLE_PREF, next);
-			if (!ok) {
-				setIdleSeconds(previous);
-				toast.error("Couldn't save the auto-unload setting", {
-					description: "Check your connection and try again.",
-				});
-			}
-		},
-		[target, idleSeconds]
-	);
-
-	return (
-		<SettingsSection
-			caption="Ryu keeps two node-scoped defaults. Normal chats use the cloud lane when it is configured; plugins, side-model calls, and local utilities use the local lane. Ryu can carry its agent, provider, model, and effort together. External ACP agents retain their own controls."
-			title="Default agents & models"
-		>
-			<SettingsCard className="space-y-4">
-				<div className="flex flex-col gap-1.5">
-					<Label className="text-muted-foreground text-xs">
-						Default local agent
-					</Label>
-					{loaded ? (
-						<AgentSelectionField
-							allowedProviderIds={["local"]}
-							ariaLabel="Default local agent or model"
-							disabled={!canConfigure}
-							onChange={(next) => {
-								save("local", next).catch(() => undefined);
-							}}
-							placeholder="Ryu · local · Gemma 4"
-							preserveRyuRoute
-							target={target}
-							value={localSelection}
-						/>
-					) : (
-						<Skeleton className="h-8 w-full" />
-					)}
-					<p className="text-muted-foreground text-xs">
-						Local lane for plugins, side-model calls, and utility work. Fresh
-						nodes start at Ryu on the installed Gemma 4 model.
-					</p>
-				</div>
-			</SettingsCard>
-
-			<BotRealmDefaultCard
-				canConfigure={canConfigure}
-				loaded={loaded}
-				managed={managed}
-				onChange={(next) => {
-					save("cloud", next).catch(() => undefined);
-				}}
-				target={target}
-				value={cloudSelection}
-			/>
-
-			{canConfigure ? null : (
-				<p className="px-1 text-muted-foreground text-xs">
-					Only organization owners and admins can change the local or Bot realm
-					default.
-				</p>
-			)}
-
-			<SettingsCard className="space-y-4">
-				<div className="flex flex-col gap-1.5">
-					<Label className="text-muted-foreground text-xs">
-						Auto-unload local model
-					</Label>
-					{idleLoaded ? (
-						<Select
-							onValueChange={(v: string | null) => {
-								if (v) {
-									saveIdleSeconds(v).catch(() => undefined);
-								}
-							}}
-							value={idleSeconds}
-						>
-							<SelectTrigger className="h-8 w-40">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								{LOCAL_MODEL_IDLE_OPTIONS.map((opt) => (
-									<SelectItem key={opt.value} value={opt.value}>
-										{opt.label}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					) : (
-						<Skeleton className="h-8 w-40" />
-					)}
-					<p className="text-muted-foreground text-xs">
-						Applies to the llama.cpp engine, Ryu's on-device engine. The model
-						stays loaded this long after its last request, then frees its
-						memory; the next message reloads it. "Never" keeps it resident.
-						Other local engines (Ollama, vLLM, SGLang, MLX, Apple Foundation
-						Models) manage their own memory, so this setting has no effect on
-						them.
-					</p>
-				</div>
-			</SettingsCard>
-		</SettingsSection>
+			</SettingsSection>
+			{result ? (
+				<>
+					<AggregateCard agg={result.aggregate} />
+					<CasesTable cases={result.cases} />
+				</>
+			) : null}
+		</>
 	);
 }
 
@@ -6587,6 +6089,22 @@ const GATEWAY_SECTIONS: {
 		icon: Shield01Icon,
 		keywords:
 			"guardrails firewall pii moderation safety filter egress agents routing governed bypass",
+	},
+	{
+		value: "traffic-map",
+		label: "Traffic map",
+		hint: "Watch requests flow through every check to a provider, and open any layer's settings from the map.",
+		icon: FlowConnectionIcon,
+		keywords:
+			"traffic map canvas live topology flow requests blocked layer floor policy provider pulses",
+	},
+	{
+		value: "policies",
+		label: "Guardrail policies",
+		hint: "Write a policy once and assign it to your organization, teams, members, keys, or agents.",
+		icon: PolicyIcon,
+		keywords:
+			"guardrail policy policies named assign organization team member key agent permissions effective",
 	},
 	{
 		value: "runtime",
@@ -6694,9 +6212,16 @@ const GATEWAY_SECTIONS: {
 		keywords: "environment setup cleanup variables actions project worktree",
 	},
 	{
+		value: "cloud-environments",
+		label: "Cloud environments",
+		hint: "Configure repository setup, internet access, and personal vault entries.",
+		icon: Package01Icon,
+		keywords: "cloud environment repository install script vault secret vpn",
+	},
+	{
 		value: "import",
 		label: "Import agents",
-		hint: "Preview Claude, Codex, and Cursor setup before bringing it into Ryu.",
+		hint: "Preview setup from Claude, Codex, Cursor, OpenClaw, Hermes, and more before bringing it into Ryu.",
 		icon: ArrowDown01Icon,
 		keywords:
 			"import sync claude codex cursor skills mcp plugins threads sessions",
@@ -6788,11 +6313,10 @@ function OverviewSection({
 }) {
 	if (!reachable) {
 		return (
-			<SettingsSection
-				caption={`Core is up but could not reach a healthy gateway${status?.url ? ` at ${status.url}` : ""}. Start the gateway, then refresh.`}
-				title="Gateway unreachable"
-			>
-				<span />
+			<SettingsSection title="Gateway unreachable">
+				<SettingsCard className="text-muted-foreground text-sm">
+					{`Core is up but could not reach a healthy gateway${status?.url ? ` at ${status.url}` : ""}. Start the gateway, then refresh.`}
+				</SettingsCard>
 			</SettingsSection>
 		);
 	}
@@ -6810,46 +6334,63 @@ function OverviewSection({
 				caption={`${status?.url ?? "gateway"}${h?.version ? ` · v${h.version}` : ""}`}
 				title="Health"
 			>
-				<div className="flex flex-wrap items-center gap-2 px-3">
-					<Badge variant={h?.status === "ok" ? "default" : "secondary"}>
-						{h?.status ?? "unknown"}
-					</Badge>
-					<Badge variant="secondary">
-						{h?.authRequired ? "auth required" : "no auth"}
-					</Badge>
-					<span className="text-muted-foreground text-sm">
-						{h?.providers.length ?? 0} provider
-						{(h?.providers.length ?? 0) === 1 ? "" : "s"}
-					</span>
-				</div>
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Badge variant={h?.status === "ok" ? "default" : "secondary"}>
+								{h?.status ?? "unknown"}
+							</Badge>
+						}
+						title="Status"
+					/>
+					<SettingsItem
+						actions={
+							<Badge variant="secondary">
+								{h?.authRequired ? "auth required" : "no auth"}
+							</Badge>
+						}
+						title="Authentication"
+					/>
+					<SettingsItem
+						actions={
+							<span className="text-muted-foreground text-sm tabular-nums">
+								{h?.providers.length ?? 0} provider
+								{(h?.providers.length ?? 0) === 1 ? "" : "s"}
+							</span>
+						}
+						title="Providers"
+					/>
+				</SettingsGroup>
 			</SettingsSection>
 
 			{metrics ? (
 				<>
-					<section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-						<MetricTile
-							label="Requests"
-							value={formatNumber(metrics.requests.total)}
-						/>
-						<MetricTile
-							label="Errors"
-							value={formatNumber(metrics.requests.errors)}
-						/>
-						<MetricTile
-							label="Cache hit rate"
-							value={formatPercent(metrics.cache.hitRate)}
-						/>
-						<MetricTile
-							label="Tokens (in/out)"
-							value={`${formatNumber(metrics.tokens.input)} / ${formatNumber(metrics.tokens.output)}`}
-						/>
-					</section>
+					<SettingsSection title="Traffic">
+						<SettingsCard className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+							<MetricTile
+								label="Requests"
+								value={formatNumber(metrics.requests.total)}
+							/>
+							<MetricTile
+								label="Errors"
+								value={formatNumber(metrics.requests.errors)}
+							/>
+							<MetricTile
+								label="Cache hit rate"
+								value={formatPercent(metrics.cache.hitRate)}
+							/>
+							<MetricTile
+								label="Tokens (in/out)"
+								value={`${formatNumber(metrics.tokens.input)} / ${formatNumber(metrics.tokens.output)}`}
+							/>
+						</SettingsCard>
+					</SettingsSection>
 
 					<SettingsSection
 						caption="Exact and semantic cache hits reduce upstream calls."
 						title="Cache"
 					>
-						<div className="grid grid-cols-3 gap-3 px-3">
+						<SettingsCard className="grid grid-cols-3 gap-x-4 gap-y-3">
 							<MetricTile
 								label="Exact hits"
 								value={formatNumber(metrics.cache.exactHits)}
@@ -6862,14 +6403,14 @@ function OverviewSection({
 								label="Misses"
 								value={formatNumber(metrics.cache.misses)}
 							/>
-						</div>
+						</SettingsCard>
 					</SettingsSection>
 
 					<SettingsSection
 						caption="Requests affected by budget controls and the firewall. (Eval scoring is not yet exposed by the gateway.)"
 						title="Budget & policy"
 					>
-						<div className="grid grid-cols-2 gap-3 px-3 sm:grid-cols-3">
+						<SettingsCard className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
 							<MetricTile
 								label="Budget exceeded"
 								value={formatNumber(metrics.requests.budgetExceeded)}
@@ -6894,15 +6435,14 @@ function OverviewSection({
 								label="Rate limited"
 								value={formatNumber(metrics.requests.rateLimited)}
 							/>
-						</div>
+						</SettingsCard>
 					</SettingsSection>
 				</>
 			) : (
-				<SettingsSection
-					caption="The gateway is healthy but did not return a metrics snapshot."
-					title="Metrics unavailable"
-				>
-					<span />
+				<SettingsSection title="Metrics">
+					<SettingsCard className="text-center text-muted-foreground text-sm">
+						The gateway is healthy but did not return a metrics snapshot.
+					</SettingsCard>
 				</SettingsSection>
 			)}
 
@@ -6933,7 +6473,14 @@ const GATEWAY_NAV_GROUPS: { items: GatewaySection[]; title?: string }[] = [
 	},
 	{
 		title: "Limits & safety",
-		items: ["budgets", "guardrails", "runtime", "hooks"],
+		items: [
+			"budgets",
+			"guardrails",
+			"traffic-map",
+			"policies",
+			"runtime",
+			"hooks",
+		],
 	},
 	{
 		title: "Connect",
@@ -6941,7 +6488,7 @@ const GATEWAY_NAV_GROUPS: { items: GatewaySection[]; title?: string }[] = [
 	},
 	{
 		title: "Developer",
-		items: ["git", "worktrees", "environments", "mcp"],
+		items: ["git", "worktrees", "environments", "cloud-environments", "mcp"],
 	},
 	{
 		title: "Transfer",
@@ -6977,7 +6524,7 @@ const GATEWAY_NAV_GROUPS: { items: GatewaySection[]; title?: string }[] = [
  * are grey. A section with no entry falls back to grey, which is correct for
  * "infrastructure" and wrong for nothing.
  */
-const SECTION_TINTS: Partial<Record<GatewaySection, SettingsTint>> = {
+const SECTION_TINTS = {
 	overview: "blue",
 	workspace: "indigo",
 	permissions: "orange",
@@ -6987,6 +6534,8 @@ const SECTION_TINTS: Partial<Record<GatewaySection, SettingsTint>> = {
 	routing: "teal",
 	budgets: "green",
 	guardrails: "red",
+	"traffic-map": "teal",
+	policies: "red",
 	runtime: "purple",
 	hooks: "red",
 	network: "blue",
@@ -6997,6 +6546,7 @@ const SECTION_TINTS: Partial<Record<GatewaySection, SettingsTint>> = {
 	git: "blue",
 	worktrees: "indigo",
 	environments: "gray",
+	"cloud-environments": "gray",
 	import: "blue",
 	export: "indigo",
 	"email-alerts": "orange",
@@ -7012,7 +6562,7 @@ const SECTION_TINTS: Partial<Record<GatewaySection, SettingsTint>> = {
 	health: "green",
 	onboarding: "purple",
 	danger: "red",
-};
+} satisfies Partial<Record<GatewaySection, SettingsTint>>;
 
 /** Case-insensitive match of a query against a section's label, hint, keywords. */
 function sectionMatches(
@@ -7028,25 +6578,75 @@ function sectionMatches(
 		.every((term) => haystack.includes(term));
 }
 
+interface GatewayDialogProps {
+	defaultSection?: string;
+	onOpenChange: (open: boolean) => void;
+	open: boolean;
+}
+
 /**
  * Gateway settings rendered as a dialog with the same inset-sidebar design and
  * layout as the main {@link SettingsDialog}. Self-contained: it loads its own
  * gateway status and renders every gateway section in the content pane.
+ *
+ * The "Settings for <computer>" picker scopes the dialog, not the app: this
+ * shell holds the chosen computer and provides it to every section through
+ * {@link NodeScopeProvider}, so `useActiveNode()` below resolves to it while
+ * chats keep using the app-wide active computer. Each opening starts on the
+ * app-wide computer, and a scoped computer that is removed falls back to it.
  */
-export function GatewayDialog({
+export function GatewayDialog(props: GatewayDialogProps) {
+	const [scopeName, setScopeName] = useState<string | undefined>();
+	const [wasOpen, setWasOpen] = useState(props.open);
+	if (props.open !== wasOpen) {
+		setWasOpen(props.open);
+		if (props.open) {
+			setScopeName(undefined);
+		}
+	}
+	const scopeExists = useNodeStore((s) =>
+		s.nodes.some((n) => n.name === scopeName)
+	);
+	useEffect(() => {
+		if (scopeName !== undefined && !scopeExists) {
+			setScopeName(undefined);
+		}
+	}, [scopeName, scopeExists]);
+	const scope = scopeExists ? scopeName : undefined;
+	return (
+		<NodeScopeProvider nodeName={scope}>
+			<GatewayDialogContent
+				{...props}
+				onScopeChange={setScopeName}
+				scope={scope}
+			/>
+		</NodeScopeProvider>
+	);
+}
+
+function GatewayDialogContent({
 	open,
 	onOpenChange,
 	defaultSection = "overview",
-}: {
-	defaultSection?: string;
-	onOpenChange: (open: boolean) => void;
-	open: boolean;
+	scope,
+	onScopeChange,
+}: GatewayDialogProps & {
+	onScopeChange: (name: string) => void;
+	scope: string | undefined;
 }) {
 	const { status, loading, error, refresh } = useGatewayStatus(open);
 	const canConfigure = useGatewayConfigurable();
+	const canViewTraffic = useCanManagePermission("audit.view");
 	const getActiveNode = useActiveNodeGetter();
 	const [configProviders, setConfigProviders] =
 		useState<GatewayProvidersConfig | null>(null);
+	const [configRevision, setConfigRevision] = useState<string | null>(null);
+	const [webServiceSchema, setWebServiceSchema] = useState<
+		number | undefined
+	>();
+	const [appliedProviderRevision, setAppliedProviderRevision] = useState<
+		string | null | undefined
+	>(undefined);
 	// Section is a string, not just GatewaySection: dynamic app/plugin entities use
 	// `app:<id>` / `plugin:<id>` values that aren't part of the static union.
 	const [section, setSection] = useState<string>(defaultSection);
@@ -7055,7 +6655,7 @@ export function GatewayDialog({
 	// what I want" to the pane that holds it.
 	const [search, setSearch] = useState("");
 	const openSettings = useSettingsDialog((s) => s.openSettings);
-	const contentRef = useSettingReveal(section);
+	const contentRef = useSettingReveal(section, "gateway");
 
 	// Node-scoped app/plugin settings tabs (user-scoped ones render in the App
 	// Settings dialog instead). Each becomes its own nav item under Apps / Plugins.
@@ -7135,7 +6735,7 @@ export function GatewayDialog({
 			items: group.items.filter(visible).map((value) => {
 				const meta = GATEWAY_SECTIONS.find((s) => s.value === value);
 				return {
-					value: value as string,
+					value,
 					label: meta?.label ?? value,
 					// The tile is a landmark, not information: every row still says what
 					// it is in words, so a section with no tint just renders grey.
@@ -7160,11 +6760,15 @@ export function GatewayDialog({
 					(item) =>
 						!query || item.label.toLowerCase().includes(query.toLowerCase())
 				)
-				.map((item) => ({
-					...item,
-					icon: group.title === "Apps" ? Package01Icon : PlugSocketIcon,
-					tint: "gray" as SettingsTint,
-				})),
+				.map(
+					(item) =>
+						({
+							...item,
+							icon: group.title === "Apps" ? Package01Icon : PlugSocketIcon,
+							tint: "gray",
+						}) satisfies (typeof group.items)[number] &
+							ComponentProps<typeof SettingsIconTile>
+				),
 		});
 		const entities = entityGroups
 			.map(withEntityIcon)
@@ -7174,12 +6778,53 @@ export function GatewayDialog({
 		);
 	}, [entityGroups, search]);
 
-	const node = getActiveNode();
-	const target: ApiTarget = {
-		url: node.url,
-		token: node.token ?? null,
-		userJwt: node.userJwt ?? null,
-	};
+	const node = useActiveNode();
+	const target: ApiTarget = useMemo(
+		() => ({
+			url: node.url,
+			token: node.token ?? null,
+			userJwt: node.userJwt ?? null,
+		}),
+		[node.url, node.token, node.userJwt]
+	);
+	const reachable = status?.reachable ?? false;
+	// The loaded config belongs to one dialog session on one node: forget it only
+	// when the dialog opens/closes or the target changes (reset during render, so
+	// no frame shows another node's config). A status poll that briefly reports
+	// the gateway unreachable (e.g. while it restarts after "Apply saved
+	// connections") keeps the last-known config mounted; clearing it would unmount
+	// the account sections and discard typed-but-unsaved credential drafts.
+	const configOwner = open ? target : null;
+	const [loadedConfigOwner, setLoadedConfigOwner] = useState(configOwner);
+	if (loadedConfigOwner !== configOwner) {
+		setLoadedConfigOwner(configOwner);
+		setConfigProviders(null);
+		setConfigRevision(null);
+		setWebServiceSchema(undefined);
+		setAppliedProviderRevision(undefined);
+	}
+	// (Re)load whenever the gateway is reachable — including when it comes back
+	// after a transient outage. Account editors are keyed by account ID, so a
+	// refetch keeps their drafts.
+	useEffect(() => {
+		if (!(open && reachable)) {
+			return;
+		}
+		let active = true;
+		fetchGatewayConfig(target)
+			.then((config) => {
+				if (active) {
+					setConfigProviders(config.providers);
+					setConfigRevision(config.configRevision ?? null);
+					setWebServiceSchema(config.webServiceSchema);
+					setAppliedProviderRevision(config.appliedProviderRevision);
+				}
+			})
+			.catch(() => undefined);
+		return () => {
+			active = false;
+		};
+	}, [open, reachable, target]);
 	// Managed (Ryu Cloud) node: keys are held server-side in the fleet vault, so
 	// the key cards render read-only and their writers no-op (WS4). Synchronous —
 	// travels on the node record from hydrateCloudNodes, no async probe needed.
@@ -7189,13 +6834,23 @@ export function GatewayDialog({
 		await refresh();
 		try {
 			const cfg = await fetchGatewayConfig(target);
+			const currentNode = getActiveNode();
+			if (
+				currentNode.url !== target.url ||
+				(currentNode.token ?? null) !== target.token ||
+				(currentNode.userJwt ?? null) !== target.userJwt
+			) {
+				return;
+			}
 			setConfigProviders(cfg.providers);
+			setConfigRevision(cfg.configRevision ?? null);
+			setWebServiceSchema(cfg.webServiceSchema);
+			setAppliedProviderRevision(cfg.appliedProviderRevision);
 		} catch {
 			// Config fetch fails silently — health view is the primary surface.
 		}
 	};
 
-	const reachable = status?.reachable ?? false;
 	const health = status?.health ?? null;
 	const metrics = status?.metrics ?? null;
 	const activeEntity = entityById.get(section);
@@ -7205,27 +6860,25 @@ export function GatewayDialog({
 
 	const body = (() => {
 		if (loading && !status) {
-			return (
-				<div className="flex h-40 items-center justify-center">
-					<Spinner />
-				</div>
-			);
+			return <SkeletonRows spacing="spacious" />;
 		}
 		if (error && !status) {
 			return (
-				<Empty>
-					<EmptyHeader>
-						<EmptyMedia variant="icon">
-							<HugeiconsIcon icon={Shield01Icon} />
-						</EmptyMedia>
-						<EmptyTitle>Could not reach Core</EmptyTitle>
-						<EmptyDescription>{error}</EmptyDescription>
-					</EmptyHeader>
-					<Button onClick={() => refreshWithConfig()} variant="ghost">
-						<HugeiconsIcon className="size-4" icon={Refresh01Icon} />
-						Retry
-					</Button>
-				</Empty>
+				<SettingsSection title="Could not reach Core">
+					<SettingsCard className="flex flex-wrap items-center justify-between gap-3">
+						<p className="min-w-0 flex-1 break-words text-muted-foreground text-sm">
+							{error}
+						</p>
+						<Button
+							onClick={() => refreshWithConfig()}
+							size="sm"
+							variant="secondary"
+						>
+							<HugeiconsIcon className="size-4" icon={Refresh01Icon} />
+							Retry
+						</Button>
+					</SettingsCard>
+				</SettingsSection>
 			);
 		}
 		return (
@@ -7241,11 +6894,14 @@ export function GatewayDialog({
 				) : null}
 				{section === "workspace" ? <WorkspaceSection /> : null}
 				{section === "defaults" ? (
-					<DefaultsSection
-						canConfigure={canConfigure}
-						managed={managed}
-						target={target}
-					/>
+					<>
+						<DefaultsSection
+							canConfigure={canConfigure}
+							managed={managed}
+							target={target}
+						/>
+						<ModelsDefaultsCard canConfigure={canConfigure} target={target} />
+					</>
 				) : null}
 				{/* LLM Providers. Provider *selection* (which model/keys/routing the
 				    local Pi agent uses) is strictly Core — "what runs" — NOT account/org
@@ -7262,11 +6918,50 @@ export function GatewayDialog({
 								<GatewayKeysCard reachable={reachable} target={target} />
 								<ByokCard
 									canConfigure={canConfigure}
+									expectedRevision={configRevision ?? undefined}
 									managed={managed}
 									onRefresh={refreshWithConfig}
 									providers={configProviders}
 									target={target}
 								/>
+								<GatewaySdkAccounts
+									canConfigure={canConfigure}
+									expectedRevision={configRevision ?? undefined}
+									managed={managed}
+									onRefresh={refreshWithConfig}
+									providers={configProviders}
+									target={target}
+								/>
+								{webServiceSchema === 1 ? (
+									<GatewaySpeechSettings
+										canConfigure={canConfigure}
+										canView={configProviders !== null}
+										key={`speech-settings:${node.url}`}
+										managed={managed}
+										onRefresh={refreshWithConfig}
+										target={target}
+									/>
+								) : null}
+								<GatewayCloudSpeechAccounts
+									canConfigure={canConfigure}
+									canView={configProviders !== null}
+									key={`cloud-speech:${node.url}`}
+									managed={managed}
+									onRefresh={refreshWithConfig}
+									providers={configProviders}
+									target={target}
+								/>
+								{webServiceSchema === 1 ? (
+									<GatewayWebAccounts
+										canConfigure={canConfigure}
+										canView={configProviders !== null}
+										key={`web-accounts:${node.url}`}
+										managed={managed}
+										onRefresh={refreshWithConfig}
+										target={target}
+										webServiceSchema={webServiceSchema}
+									/>
+								) : null}
 								<MediaKeyCard
 									canConfigure={canConfigure}
 									caption="Cloud image & video generation via Replicate."
@@ -7300,6 +6995,12 @@ export function GatewayDialog({
 									reachable={reachable}
 									target={target}
 								/>
+								<EgressPoolsEditor
+									canConfigure={canConfigure}
+									providers={health?.providers ?? []}
+									reachable={reachable}
+									target={target}
+								/>
 								<SmartRoutingCard
 									canConfigure={canConfigure}
 									reachable={reachable}
@@ -7320,6 +7021,12 @@ export function GatewayDialog({
 						<RoutingCard
 							canConfigure={canConfigure}
 							configuredProviders={health?.providers ?? []}
+							reachable={reachable}
+							target={target}
+						/>
+						<EgressPoolsEditor
+							canConfigure={canConfigure}
+							providers={health?.providers ?? []}
 							reachable={reachable}
 							target={target}
 						/>
@@ -7347,6 +7054,24 @@ export function GatewayDialog({
 						/>
 					</>
 				) : null}
+				{section === "traffic-map" ? (
+					<TrafficMapSection
+						canConfigure={canConfigure}
+						canViewTraffic={canViewTraffic}
+						onNavigate={setSection}
+						reachable={reachable}
+						renderSafetyFilters={() => (
+							<GuardrailsSection
+								canConfigure={canConfigure}
+								reachable={reachable}
+								target={target}
+							/>
+						)}
+						status={status}
+						target={target}
+					/>
+				) : null}
+				{section === "policies" ? <GuardrailPoliciesSection /> : null}
 				{section === "runtime" ? (
 					<>
 						{canConfigure ? null : <PolicyReadOnlyBanner />}
@@ -7363,6 +7088,9 @@ export function GatewayDialog({
 					<WorktreesSection canConfigure={canConfigure} target={target} />
 				) : null}
 				{section === "environments" ? <EnvironmentsSection /> : null}
+				{section === "cloud-environments" ? (
+					<CloudEnvironmentsSettings />
+				) : null}
 				{section === "budgets" ? (
 					<>
 						{canConfigure ? null : <PolicyReadOnlyBanner />}
@@ -7374,14 +7102,74 @@ export function GatewayDialog({
 					<>
 						{managed ? <ManagedKeysBanner /> : null}
 						{canConfigure || managed ? null : <PolicyReadOnlyBanner />}
-						<GatewayKeysCard reachable={reachable} target={target} />
+						{managed ? (
+							<GatewayKeysCard reachable={reachable} target={target} />
+						) : (
+							<GatewayClientKeys
+								baseUrl={status?.url ?? target.url}
+								canConfigure={canConfigure}
+								gatewayReady={reachable && status?.url != null}
+								key={`client-keys:${node.url}`}
+								managed={false}
+								target={target}
+							/>
+						)}
+						<GatewayProviderApplication
+							appliedRevision={appliedProviderRevision}
+							canConfigure={canConfigure}
+							key={`provider-application:${node.url}`}
+							managed={managed}
+							onRefresh={refreshWithConfig}
+							reachable={reachable}
+							revision={configRevision}
+							target={target}
+						/>
 						<ByokCard
 							canConfigure={canConfigure}
+							expectedRevision={configRevision ?? undefined}
 							managed={managed}
 							onRefresh={refreshWithConfig}
 							providers={configProviders}
 							target={target}
 						/>
+						<GatewaySdkAccounts
+							canConfigure={canConfigure}
+							expectedRevision={configRevision ?? undefined}
+							managed={managed}
+							onRefresh={refreshWithConfig}
+							providers={configProviders}
+							target={target}
+						/>
+						{webServiceSchema === 1 ? (
+							<GatewaySpeechSettings
+								canConfigure={canConfigure}
+								canView={configProviders !== null}
+								key={`speech-settings:${node.url}`}
+								managed={managed}
+								onRefresh={refreshWithConfig}
+								target={target}
+							/>
+						) : null}
+						<GatewayCloudSpeechAccounts
+							canConfigure={canConfigure}
+							canView={configProviders !== null}
+							key={`cloud-speech:${node.url}`}
+							managed={managed}
+							onRefresh={refreshWithConfig}
+							providers={configProviders}
+							target={target}
+						/>
+						{webServiceSchema === 1 ? (
+							<GatewayWebAccounts
+								canConfigure={canConfigure}
+								canView={configProviders !== null}
+								key={`web-accounts:${node.url}`}
+								managed={managed}
+								onRefresh={refreshWithConfig}
+								target={target}
+								webServiceSchema={webServiceSchema}
+							/>
+						) : null}
 						<ComposioKeyCard
 							canConfigure={canConfigure}
 							managed={managed}
@@ -7413,6 +7201,7 @@ export function GatewayDialog({
 				{section === "network" ? (
 					<>
 						<NetworkSettings />
+						<DesktopRouteSettings />
 						<ManagedInferenceSettings />
 						<NodeRoutingSettings />
 					</>
@@ -7428,6 +7217,8 @@ export function GatewayDialog({
 				{section === "audit" ? <AuditPanel target={target} /> : null}
 				{section === "api" ? (
 					<ApiSection
+						canConfigure={canConfigure}
+						canViewTraffic={canViewTraffic}
 						managed={managed}
 						reachable={reachable}
 						statusUrl={status?.url ?? null}
@@ -7488,7 +7279,7 @@ export function GatewayDialog({
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			{/* Goes edge-to-edge below `md` (the useIsMobile line), matching the
 			    App Settings dialog. */}
-			<DialogContent className="!w-[85vw] !max-w-7xl max-md:!w-screen max-md:!max-w-none [&>[data-slot=dialog-close]]:!top-5 [&>[data-slot=dialog-close]]:!right-5 h-[85vh] gap-0 overflow-hidden p-0 max-md:h-[100dvh] max-md:rounded-none">
+			<DialogContent appearance="gateway-settings">
 				<ResizableSettingsLayout
 					content={
 						<div className="px-4 py-4 md:px-8 md:py-6" ref={contentRef}>
@@ -7502,22 +7293,28 @@ export function GatewayDialog({
 									</p>
 								) : null}
 							</div>
-							{body}
+							{/* Keyed by computer: sections that loaded on mount re-read the
+							    newly picked computer instead of showing the last one's values. */}
+							<div key={node.name}>{body}</div>
 						</div>
 					}
 					sidebar={
 						<>
-							<SidebarGroup className="py-1">
+							<SidebarGroup spacing="compact">
+								<GatewayNodeScopePicker
+									onScopeChange={onScopeChange}
+									scope={scope}
+								/>
 								<Input
 									aria-label="Search settings"
-									className="h-8 text-sm"
 									onChange={(e) => setSearch(e.target.value)}
 									placeholder="Search settings…"
+									size="settings-search"
 									value={search}
 								/>
 							</SidebarGroup>
 							{navGroups.map((group) => (
-								<SidebarGroup className="py-1" key={group.title ?? "general"}>
+								<SidebarGroup key={group.title ?? "general"} spacing="compact">
 									{group.title && (
 										<SidebarGroupLabel>{group.title}</SidebarGroupLabel>
 									)}
@@ -7553,7 +7350,7 @@ export function GatewayDialog({
 									showEmptyState={navGroups.length === 0}
 								/>
 							) : null}
-							<SidebarGroup className="mt-auto py-1">
+							<SidebarGroup className="mt-auto" spacing="compact">
 								<SidebarGroupLabel>App</SidebarGroupLabel>
 								<SidebarMenu>
 									<SidebarMenuItem>

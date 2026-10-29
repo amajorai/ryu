@@ -48,16 +48,10 @@ function Proof() {
 	const [windowTransparent, setWindowTransparent] = useWindowTransparency();
 
 	return (
-		<div
-			className="min-h-dvh p-8 text-foreground"
-			style={{
-				background:
-					"radial-gradient(circle at 8% 5%, color-mix(in oklab, var(--primary) 30%, transparent), transparent 28%), radial-gradient(circle at 92% 88%, color-mix(in oklab, var(--chart-4) 24%, transparent), transparent 34%), #17152a",
-			}}
-		>
+		<div className="min-h-dvh bg-os-desktop p-8 text-foreground">
 			<div className="mx-auto flex max-w-5xl flex-col gap-6">
 				<header className="flex flex-col gap-2">
-					<p className="font-medium text-primary text-xs uppercase tracking-[0.16em]">
+					<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 						Appearance
 					</p>
 					<h1 className="font-heading font-semibold text-3xl tracking-tight">
@@ -70,7 +64,7 @@ function Proof() {
 				</header>
 
 				<div
-					className="relative flex min-h-[24rem] overflow-hidden rounded-[2rem] border border-white/20 bg-background shadow-2xl"
+					className="relative flex min-h-[24rem] overflow-hidden rounded-4xl border border-white/20 bg-background shadow-2xl"
 					data-ryu-window-root="true"
 					data-testid="window-root"
 				>

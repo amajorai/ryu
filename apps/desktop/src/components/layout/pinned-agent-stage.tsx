@@ -4,10 +4,12 @@ import {
 	PinOffIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { KeyboardEvent } from "react";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import layoutStyles from "./pinned-agent-stage.module.css";
 
 /** The three visual densities used by the Bot-mode pinned roster. */
 export type PinnedAgentLayout = "hero" | "pair" | "grid";
@@ -30,15 +32,7 @@ export function pinnedAgentLayout(count: number): PinnedAgentLayout {
 	return "grid";
 }
 
-const LAYOUT_STYLES: Record<
-	PinnedAgentLayout,
-	{
-		avatarSize: string;
-		grid: string;
-		name: string;
-		tile: string;
-	}
-> = {
+const LAYOUT_STYLES = {
 	hero: {
 		avatarSize: "64px",
 		grid: "grid-cols-1",
@@ -54,10 +48,18 @@ const LAYOUT_STYLES: Record<
 	grid: {
 		avatarSize: "32px",
 		grid: "grid-cols-3",
-		name: "text-[11px]",
+		name: "type-caption",
 		tile: "min-h-[76px] flex-col justify-center gap-1 p-1.5",
 	},
-};
+} satisfies Record<
+	PinnedAgentLayout,
+	{
+		avatarSize: string;
+		grid: string;
+		name: string;
+		tile: string;
+	}
+>;
 
 function openOnKeyboard(
 	event: KeyboardEvent<HTMLDivElement>,
@@ -85,16 +87,20 @@ function PinnedAgentTile({
 	onOpen: () => void;
 	onUnpin: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const styles = LAYOUT_STYLES[layout];
 	const hero = layout === "hero";
 	const showTitle = layout !== "grid" && Boolean(agent.title);
 
 	return (
-		// biome-ignore lint/a11y/useSemanticElements: the tile contains two secondary controls, so a button would be invalidly nested.
+		// the tile contains two secondary controls, so a button would be invalidly nested.
 		<div
-			aria-label={`Open ${agent.name}`}
+			aria-label={tl("Open {name}", { name: agent.name })}
 			className={cn(
-				"group/pinned relative flex cursor-pointer items-center overflow-hidden rounded-xl border border-transparent bg-transparent text-left outline-hidden transition-[background-color,border-color,transform] focus-within:border-sidebar-border/70 focus-within:bg-sidebar-accent/60 hover:-translate-y-px hover:border-sidebar-border/70 hover:bg-sidebar-accent/60 focus-visible:border-sidebar-border/70 focus-visible:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60",
+				cn(
+					"group/pinned relative flex cursor-pointer items-center overflow-hidden rounded-xl border border-transparent bg-transparent text-left outline-hidden focus-within:border-sidebar-border/70 focus-within:bg-sidebar-accent/60 hover:-translate-y-px hover:border-sidebar-border/70 hover:bg-sidebar-accent/60 focus-visible:border-sidebar-border/70 focus-visible:bg-sidebar-accent/60 focus-visible:ring-2 focus-visible:ring-ring/60 motion-reduce:hover:translate-y-0",
+					layoutStyles.authored1
+				),
 				styles.tile,
 				hero && "sm:gap-4"
 			)}
@@ -106,12 +112,10 @@ function PinnedAgentTile({
 		>
 			<AgentAvatar
 				avatarUrl={agent.avatarUrl}
-				className={cn(
-					"shrink-0 rounded-2xl object-cover",
-					hero ? "rounded-2xl" : "rounded-xl"
-				)}
+				className={cn("shrink-0 object-cover", hero ? "" : "")}
 				engine={engineForAgent(agent)}
 				glyph={agent.avatarGlyph}
+				presentation="compact"
 				size={styles.avatarSize}
 			/>
 			<div className={cn("min-w-0", hero ? "flex-1" : "w-full text-center")}>
@@ -122,7 +126,10 @@ function PinnedAgentTile({
 					{agent.name}
 				</div>
 				{showTitle ? (
-					<div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+					<div
+						className="type-compact mt-0.5 truncate text-muted-foreground"
+						title={agent.title}
+					>
 						{agent.title}
 					</div>
 				) : null}
@@ -134,7 +141,7 @@ function PinnedAgentTile({
 				)}
 			>
 				<button
-					aria-label={`Edit ${agent.name}`}
+					aria-label={tl("Edit {name}", { name: agent.name })}
 					className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60"
 					onClick={(event) => {
 						event.stopPropagation();
@@ -145,7 +152,7 @@ function PinnedAgentTile({
 					<HugeiconsIcon icon={PencilEdit01Icon} size={12} />
 				</button>
 				<button
-					aria-label={`Unpin ${agent.name}`}
+					aria-label={tl("Unpin {name}", { name: agent.name })}
 					aria-pressed="true"
 					className="flex size-6 items-center justify-center rounded-md text-primary hover:bg-accent hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60"
 					onClick={(event) => {
@@ -193,7 +200,12 @@ export function PinnedAgentStage({
 			data-pinned-count={agents.length}
 			data-testid="pinned-agent-stage"
 		>
-			<div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
+			<div
+				className={cn(
+					"type-compact flex items-center gap-1.5 px-1 text-muted-foreground uppercase",
+					layoutStyles.authored2
+				)}
+			>
 				<HugeiconsIcon className="size-3 text-primary/80" icon={PinIcon} />
 				<span>Pinned</span>
 				<span className="text-muted-foreground/60 tabular-nums">

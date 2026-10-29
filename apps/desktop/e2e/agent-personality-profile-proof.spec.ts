@@ -1,9 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
-
-const PROOF_DIR = "/Users/jiawei/Documents/Code/ryu/apps/desktop/artifacts";
-const PROOF_SCREENSHOT = `${PROOF_DIR}/agent-personality-profile-proof.png`;
-const PROOF_LOG = `${PROOF_DIR}/agent-personality-profile-proof.log.json`;
 
 test("assigns and saves a personality profile on one agent", async ({
 	page,
@@ -44,10 +40,12 @@ test("assigns and saves a personality profile on one agent", async ({
 		.getByRole("heading", { name: "Agent personality profiles" })
 		.click();
 
-	await mkdir(PROOF_DIR, { recursive: true });
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("agent-personality-profile-proof.png"),
+		fullPage: true,
+	});
 	await writeFile(
-		PROOF_LOG,
+		test.info().outputPath("agent-personality-profile-proof.log.json"),
 		JSON.stringify({ consoleErrors, failedRequests }, null, 2)
 	);
 

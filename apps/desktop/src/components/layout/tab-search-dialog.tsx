@@ -5,6 +5,7 @@ import {
 	Message01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Command,
 	CommandDialog,
@@ -19,7 +20,7 @@ import {
 	ContextMenuContent,
 	ContextMenuItem,
 	ContextMenuTrigger,
-} from "@ryu/ui/components/context-menu";
+} from "@ryu/ui/components/context-menu.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -56,11 +57,12 @@ export function TabSearchRow({
 	setOpen: (open: boolean) => void;
 	tab: TabSearchTab;
 }) {
+	const tl = useLiteralMessages();
 	const isActive = tab.id === activeTabId;
 
 	return (
 		<CommandItem
-			className="min-h-12 gap-2.5 px-2"
+			className="min-h-12"
 			data-active={isActive}
 			data-tab-search-id={tab.id}
 			onSelect={() => {
@@ -80,17 +82,20 @@ export function TabSearchRow({
 				<span className="block truncate font-medium text-sm">
 					<AnimatedTitle text={tab.title} />
 				</span>
-				<span className="block truncate text-muted-foreground text-xs">
+				<span
+					className="block truncate text-muted-foreground text-xs"
+					title={tab.path}
+				>
 					{tab.path}
 				</span>
 			</span>
 			{isActive && (
-				<span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-[10px] text-primary">
+				<span className="type-compact shrink-0 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">
 					Current
 				</span>
 			)}
 			<button
-				aria-label={`Close ${tab.title}`}
+				aria-label={tl("Close {title}", { title: tab.title })}
 				className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
 				data-tab-search-close
 				onClick={(event) => {
@@ -117,6 +122,7 @@ export function TabSearchDialog({
 	onOpenChange,
 	tabs,
 }: TabSearchDialogProps) {
+	const tl = useLiteralMessages();
 	const [open, setOpenState] = useState(false);
 	const setOpen = (next: boolean) => {
 		setOpenState(next);
@@ -131,7 +137,7 @@ export function TabSearchDialog({
 						aria-label="Search open tabs"
 						className={cn(
 							"ml-0.5 flex size-7 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:bg-background/50 hover:text-muted-foreground",
-							floatingTabs ? "rounded-full" : "rounded-t-[10px]"
+							floatingTabs ? "rounded-full" : "rounded-t-lg"
 						)}
 						data-tab-search-trigger
 						data-tauri-drag-region={false}
@@ -157,10 +163,15 @@ export function TabSearchDialog({
 			>
 				<Command>
 					<CommandInput autoFocus placeholder="Search open tabs…" />
-					<CommandList className="max-h-[min(60vh,28rem)] p-1">
+					<CommandList className="max-h-[min(60vh,28rem)]">
 						<CommandEmpty>No open tabs match your search.</CommandEmpty>
 						<CommandGroup
-							heading={`${tabs.length} open tab${tabs.length === 1 ? "" : "s"}`}
+							heading={tl(
+								"{count, plural, one {# open tab} other {# open tabs}}",
+								{
+									count: tabs.length,
+								}
+							)}
 						>
 							{tabs.map((tab) => (
 								<TabSearchRow

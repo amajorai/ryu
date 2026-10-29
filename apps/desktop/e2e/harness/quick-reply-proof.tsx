@@ -17,14 +17,13 @@ import { TabsProvider } from "../../src/contexts/TabsContext.tsx";
 import { DEFAULT_QUICK_PREVIEW_MODIFIER } from "../../src/hooks/useQuickPreviewModifier.ts";
 import { DEFAULT_QUICK_REPLY_MODIFIER } from "../../src/hooks/useQuickReplyModifier.ts";
 import { useQuickReplyStore } from "../../src/store/useQuickReplyStore.ts";
-import type { Conversation } from "../../src/types/chat.ts";
+import type { Conversation } from "../../types/chat.ts";
 import "../../src/index.css";
 
 const TARGET_URL = "http://127.0.0.1:8980";
 const CONVERSATION_ID = "conv-quick-reply";
-const CONVERSATION = {
-	agentId: null,
-	branch: null,
+const CONVERSATION: Conversation = {
+	createdAt: Date.now(),
 	folderPath: "/Users/jiawei/Documents/Code/ryu",
 	id: CONVERSATION_ID,
 	lastMessage: "The sidebar can keep this thread in view.",
@@ -34,10 +33,9 @@ const CONVERSATION = {
 	participants: [],
 	runStatus: "idle",
 	title: "Review the release notes",
-	updatedAt: new Date().toISOString(),
+	updatedAt: Date.now(),
 	visibility: "private",
-	worktreePath: null,
-} as unknown as Conversation;
+};
 
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
@@ -119,6 +117,7 @@ function Story() {
 			onOpenInNewWindow: () => undefined,
 			onOpenNewSideChat: () => undefined,
 			onOpenSideChat: () => undefined,
+			onMoveToProject: () => undefined,
 			onRemoveFromProject: () => undefined,
 			onRenameConversation: () => undefined,
 			onRequestConversationVisibility: () => undefined,
@@ -127,6 +126,7 @@ function Story() {
 			onToggleArchive: () => undefined,
 			onTogglePin: () => undefined,
 			pinnedIds: new Set<string>(),
+			projectTargets: [],
 			projectNameForFolder: () => "ryu",
 			target: { token: null, url: TARGET_URL },
 			unreadIds: unread ? new Set([CONVERSATION_ID]) : new Set<string>(),
@@ -151,7 +151,7 @@ function Story() {
 							<main className="min-h-screen bg-background p-8 text-foreground">
 								<div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
 									<header className="lg:col-span-2">
-										<p className="font-medium text-primary text-xs uppercase tracking-[0.16em]">
+										<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 											Sidebar interaction proof
 										</p>
 										<h1 className="mt-1 font-heading font-semibold text-2xl tracking-tight">

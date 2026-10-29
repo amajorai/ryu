@@ -103,7 +103,7 @@ const api: AppearanceBridgeApi = {
 	mount,
 };
 
-(
-	window as unknown as { __ryuAppearanceBridge: AppearanceBridgeApi }
+/* SAFETY: This assignment publishes the complete locally checked AppearanceBridgeApi value on the native browser Window under __ryuAppearanceBridge. The view owns only that publication slot; it makes no claim about plugin messages or native SDK members. */ (
+	window as typeof window & { __ryuAppearanceBridge: AppearanceBridgeApi }
 ).__ryuAppearanceBridge = api;
 document.body.setAttribute("data-harness-ready", "1");

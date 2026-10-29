@@ -1,12 +1,13 @@
+import { createTabsProofContext } from "./tabs-proof-context.ts";
+
+declare const window: Window;
+
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { GitGraphPanel } from "../../src/components/git/GitGraphPanel.tsx";
 import { SidebarSideChats } from "../../src/components/layout/AppSidebar.tsx";
-import {
-	TabsContext,
-	type TabsContextValue,
-} from "../../src/contexts/TabsContext.tsx";
+import { TabsContext } from "../../src/contexts/TabsContext.tsx";
 import type { BtwEntry } from "../../src/lib/api/btw.ts";
 import type { ApiTarget } from "../../src/lib/api/client.ts";
 import "../../src/index.css";
@@ -56,7 +57,10 @@ const SIDE_CHATS: BtwEntry[] = [
 ];
 
 interface TauriInternals {
-	invoke: (command: string, args?: { command?: string }) => Promise<unknown>;
+	invoke: (
+		command: string,
+		args?: { command?: string }
+	) => Promise<{ code: number; stderr: string; stdout: string }>;
 }
 
 const internals: TauriInternals = {
@@ -78,13 +82,13 @@ const internals: TauriInternals = {
 	},
 };
 
-(
-	window as unknown as { __TAURI_INTERNALS__: TauriInternals }
+/* SAFETY: This module assigns the locally typed complete internals object to its own controlled fixture window. Its authored invoke routes return local git outputs; the intersection preserves Window rather than discarding its native type. */ (
+	window as Window & { __TAURI_INTERNALS__: TauriInternals }
 ).__TAURI_INTERNALS__ = internals;
 
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
 	if (url.includes("/api/conversations/") && url.endsWith("/btw")) {
 		return Promise.resolve(
 			new Response(JSON.stringify(SIDE_CHATS), {
@@ -94,9 +98,9 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 		);
 	}
 	return realFetch(input, init);
-}) as typeof fetch;
+};
 
-const tabs = {
+const tabs = createTabsProofContext({
 	openTab: (path: string) => {
 		const output = document.querySelector<HTMLOutputElement>(
 			"[data-testid='opened-tab']"
@@ -107,7 +111,7 @@ const tabs = {
 		}
 		return "proof-tab";
 	},
-} as unknown as TabsContextValue;
+});
 
 const target: ApiTarget = { token: null, url: "http://proof.local" };
 

@@ -25,6 +25,8 @@
 // `keybindings:darwin` only, and every Mac the user signs into shares that one
 // set while their Windows machines share `keybindings:win32`.
 
+import { isSealedLocalKey } from "../content-seal.ts";
+
 /** The platforms whose shortcuts are stored separately. */
 export type SyncPlatform = "darwin" | "win32" | "linux";
 
@@ -67,6 +69,12 @@ export type SyncGroup =
 	| "shortcuts";
 
 export interface SyncableKey {
+	/**
+	 * The value carries content one account authored (names it typed,
+	 * conversation ids, routes), not just a preference. Such a value is never
+	 * handed to an account it cannot be attributed to (see `local-store.ts`).
+	 */
+	accountContent?: true;
 	group: SyncGroup;
 	/** The desktop's own storage key. */
 	key: string;
@@ -88,6 +96,7 @@ export const SYNCABLE_KEYS: SyncableKey[] = [
 	{ key: "ryu_dark_preset", label: "Dark theme preset", group: "appearance" },
 	{
 		key: "ryu_custom_themes",
+		accountContent: true,
 		label: "Saved custom themes",
 		group: "appearance",
 	},
@@ -201,6 +210,27 @@ export const SYNCABLE_KEYS: SyncableKey[] = [
 		label: "Group lists by date",
 		group: "layout",
 	},
+	// Sidebar sections (Projects, Chats, and the user's own) follow the account.
+	// Assignments name main-thread conversation ids; a row this node does not have
+	// simply does not render, and its placement is kept for the node that does.
+	{
+		key: "ryu:bot-chat-sections:v1",
+		accountContent: true,
+		label: "Sidebar sections",
+		group: "layout",
+	},
+	{
+		key: "ryu:bot-chat-section-order:v1",
+		accountContent: true,
+		label: "Sidebar section order (Bot mode)",
+		group: "layout",
+	},
+	{
+		key: "ryu:bot-chat-section-collapsed:v1",
+		accountContent: true,
+		label: "Collapsed sidebar sections (Bot mode)",
+		group: "layout",
+	},
 	// Portable: it is a layout preference, not a pointer at anything machine-local.
 	// The picker's SELECTION is not synced for the opposite reason — it is a folder
 	// path or a space id, which name things that exist on one node.
@@ -237,6 +267,7 @@ export const SYNCABLE_KEYS: SyncableKey[] = [
 	// has to go.
 	{
 		key: "ryu_split_presets",
+		accountContent: true,
 		label: "Split layout presets",
 		group: "layout",
 	},
@@ -355,9 +386,19 @@ export const SYNCABLE_KEYS: SyncableKey[] = [
 
 const SYNCABLE_SET = new Set(SYNCABLE_KEYS.map((k) => k.key));
 
-/** Whether a storage key is eligible for sync. */
+/** Allowlisted keys whose values carry account-authored content. */
+export const ACCOUNT_CONTENT_KEYS: readonly string[] = SYNCABLE_KEYS.filter(
+	(k) => k.accountContent
+).map((k) => k.key);
+
+/**
+ * Whether a storage key is eligible for sync. Keys sealed with this device's
+ * key (`content-seal.ts`: session tabs, workbench layout, signed-in user, bot
+ * feed engagement, Prompt Studio suites) never are: their stored form only
+ * opens on this device, and their content must not leave it.
+ */
 export function isSyncableKey(key: string): boolean {
-	return SYNCABLE_SET.has(key);
+	return SYNCABLE_SET.has(key) && !isSealedLocalKey(key);
 }
 
 /** Human label for a wire key, including the per-OS shortcut slots. */
@@ -384,10 +425,10 @@ export function groupForKey(key: string): SyncGroup {
 }
 
 /** Display order + names for the groups. */
-export const SYNC_GROUP_LABELS: Record<SyncGroup, string> = {
+export const SYNC_GROUP_LABELS = {
 	appearance: "Appearance",
 	layout: "Layout",
 	behavior: "Behavior",
 	chat: "Chat",
 	shortcuts: "Keyboard Shortcuts",
-};
+} satisfies Record<SyncGroup, string>;

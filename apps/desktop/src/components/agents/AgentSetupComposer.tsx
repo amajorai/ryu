@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComposerModelSection } from "@ryu/blocks/composer/composer-acp-sections";
+import type { ComposerModelSection } from "@ryu/blocks/composer/composer-acp-sections.ts";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -16,12 +16,12 @@ import { Maximize2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useComposerAgentControls } from "@/components/agent-elements/input/composer-agent-controls.tsx";
 import { MarkdownEditor } from "@/src/components/editor/MarkdownEditor.tsx";
-import { useEngineModels } from "@/src/hooks/useEngineModels.ts";
+import { useEngineModelsState } from "@/src/hooks/useEngineModels.ts";
 import {
 	agentIdForEngine,
 	engineForAgentSelection,
 } from "@/src/lib/agent-engine.ts";
-import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import type { AgentIdentityMode, AgentSummary } from "@/src/lib/api/agents.ts";
 import { modelsForAgent } from "@/src/lib/models.ts";
 
 export interface AgentSetupComposerProps {
@@ -30,6 +30,10 @@ export interface AgentSetupComposerProps {
 	disabled?: boolean;
 	/** Runtime/agent selection, e.g. `acp:pi` or `acp:claude`. */
 	engine: string;
+	/** One line under the engine picker about how the engine runs. */
+	engineNote?: string | null;
+	/** The agent's identity mode, which can decide which engines start. */
+	identityMode?: AgentIdentityMode;
 	instructions: string;
 	model: string;
 	/** Provider/runtime saved in the agent's chat-model slot. */
@@ -51,6 +55,8 @@ export function AgentSetupComposer({
 	agents,
 	disabled = false,
 	engine,
+	engineNote = null,
+	identityMode,
 	instructions,
 	model,
 	modelEngine,
@@ -66,7 +72,8 @@ export function AgentSetupComposer({
 		() => agents.filter((agent) => agent.lifecycleStatus !== "draft"),
 		[agents]
 	);
-	const engineModels = useEngineModels();
+	const { models: engineModels, settled: engineModelsSettled } =
+		useEngineModelsState();
 	const agentId = agentIdForEngine(engine, selectableAgents);
 	const modelOptions = useMemo(() => {
 		const options = modelsForAgent(agentId, selectableAgents, engineModels);
@@ -90,11 +97,15 @@ export function AgentSetupComposer({
 	// A newly selected runtime should always have a usable model in the bottom
 	// control. Existing non-empty selections are preserved so an explicitly saved
 	// model that is not in the offline catalog is never erased while it loads.
+	// The pick waits for Core's catalog to answer: the composer can mount with
+	// the engine already known (the New agent dialog's details step follows its
+	// identity step), and picking from the offline fallback then would keep a
+	// placeholder model instead of Core's default.
 	useEffect(() => {
-		if (engine && !model && modelOptions.length > 0) {
+		if (engine && !model && engineModelsSettled && modelOptions.length > 0) {
 			onModelChange(modelOptions[0].id);
 		}
-	}, [engine, model, modelOptions, onModelChange]);
+	}, [engine, engineModelsSettled, model, modelOptions, onModelChange]);
 
 	const handleSelectAgent = (nextAgentId: string) => {
 		const nextAgent = selectableAgents.find(
@@ -154,6 +165,7 @@ export function AgentSetupComposer({
 				"overflow-hidden rounded-2xl border border-border/70 bg-muted/60",
 				className
 			)}
+			data-identity-mode={identityMode}
 			data-model-engine={modelEngine ?? undefined}
 			data-testid="agent-setup-composer"
 		>
@@ -178,13 +190,21 @@ export function AgentSetupComposer({
 					<Maximize2 className="size-4" />
 				</Button>
 			</div>
+			{engineNote ? (
+				<p
+					className="border-border/60 border-t px-4 py-2 text-muted-foreground text-xs leading-snug"
+					data-testid="agent-setup-engine-note"
+				>
+					{engineNote}
+				</p>
+			) : null}
 
 			<Dialog onOpenChange={setExpanded} open={expanded}>
 				<DialogContent
-					className="flex h-[min(90vh,760px)] max-w-4xl flex-col gap-0 overflow-hidden p-0"
+					appearance="agent-editor"
 					data-testid="agent-setup-full-editor"
 				>
-					<DialogHeader className="shrink-0 border-border/60 border-b px-6 py-4">
+					<DialogHeader className="shrink-0" purpose="agent-editor">
 						<DialogTitle>Agent instructions</DialogTitle>
 						<DialogDescription>
 							Write in Markdown, then choose the agent and model from the same
@@ -198,7 +218,10 @@ export function AgentSetupComposer({
 							toolbar="inline"
 						/>
 					</div>
-					<DialogFooter className="shrink-0 items-center justify-between border-border/60 border-t px-4 py-3 sm:flex-row sm:justify-between">
+					<DialogFooter
+						className="shrink-0 items-center justify-between sm:flex-row sm:justify-between"
+						purpose="agent-editor"
+					>
 						{renderPicker()}
 						<Button onClick={() => setExpanded(false)} type="button">
 							Done

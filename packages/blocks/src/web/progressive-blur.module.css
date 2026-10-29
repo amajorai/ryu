@@ -1,0 +1,18 @@
+.blur {
+	height: var(--blur-height);
+	-webkit-user-select: none;
+	user-select: none;
+	background: var(--blur-background);
+
+	-webkit-backdrop-filter: blur(var(--blur-amount));
+	backdrop-filter: blur(var(--blur-amount));
+}
+
+.top {
+	top: 0;
+	mask-image: linear-gradient(to bottom, black 50%, transparent);
+}
+.bottom {
+	bottom: 0;
+	mask-image: linear-gradient(to top, black 50%, transparent);
+}

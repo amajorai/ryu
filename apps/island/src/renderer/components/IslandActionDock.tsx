@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
 	ACTION_CIRCLE,
 	ACTION_OVERLAP,
@@ -20,7 +20,13 @@ export interface IslandAction {
 // glass look as the logo circle. They overlap like an avatar group — the ring on
 // each shows the stacking seam so part of every circle stays visible.
 const DOCK_CIRCLE =
-	"relative flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-card/80 text-foreground shadow-xl ring-1 ring-border backdrop-blur-2xl transition-colors hover:bg-card/90";
+	"island-surface-height island-row-offset island-stack-layer relative flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-card/80 text-foreground shadow-xl ring-1 ring-border backdrop-blur-2xl transition-colors hover:bg-card/90";
+
+interface IslandActionGeometry extends CSSProperties {
+	"--island-row-offset": string;
+	"--island-stack-layer": string;
+	"--island-surface-height": string;
+}
 
 /**
  * The quick-action islands beside the composer input (text mode): a stacked
@@ -35,29 +41,30 @@ const DOCK_CIRCLE =
 export function IslandActionDock({ actions }: { actions: IslandAction[] }) {
 	return (
 		<div className="flex items-center">
-			{actions.map((action, index) => (
-				<motion.button
-					animate={{ width: ACTION_CIRCLE.width, opacity: 1 }}
-					aria-label={action.label}
-					className={DOCK_CIRCLE}
-					initial={{ width: 0, opacity: 0 }}
-					key={action.key}
-					onClick={action.onClick}
-					style={{
-						height: ACTION_CIRCLE.height,
-						// Avatar-group overlap: pull every circle after the first back over
-						// its neighbour; stack the left ones on top so they read front-to-back.
-						marginLeft: index === 0 ? 0 : -ACTION_OVERLAP,
-						zIndex: actions.length - index,
-					}}
-					title={action.label}
-					transition={{ ...ISLAND_SPRING, delay: index * 0.05 }}
-					type="button"
-					whileHover={{ scale: 1.08 }}
-				>
-					{action.icon}
-				</motion.button>
-			))}
+			{actions.map((action, index) => {
+				const geometry: IslandActionGeometry = {
+					"--island-surface-height": `${ACTION_CIRCLE.height}px`,
+					"--island-row-offset": `${index === 0 ? 0 : -ACTION_OVERLAP}px`,
+					"--island-stack-layer": `${actions.length - index}`,
+				};
+				return (
+					<motion.button
+						animate={{ width: ACTION_CIRCLE.width, opacity: 1 }}
+						aria-label={action.label}
+						className={DOCK_CIRCLE}
+						initial={{ width: 0, opacity: 0 }}
+						key={action.key}
+						onClick={action.onClick}
+						style={geometry}
+						title={action.label}
+						transition={{ ...ISLAND_SPRING, delay: index * 0.05 }}
+						type="button"
+						whileHover={{ scale: 1.08 }}
+					>
+						{action.icon}
+					</motion.button>
+				);
+			})}
 		</div>
 	);
 }

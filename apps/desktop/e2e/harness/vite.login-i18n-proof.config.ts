@@ -20,6 +20,8 @@ export default defineConfig({
 	optimizeDeps: {
 		entries: ["login-i18n-proof.html"],
 		exclude: ["@ryu/blocks", "@ryu/i18n", "@ryu/ui"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		dedupe: ["react", "react-dom"],

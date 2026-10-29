@@ -5,7 +5,7 @@
 //! (`GET /api/activity/stream`) that mirrors `GET /api/runs/stream`.
 
 use axum::{
-    extract::{Query, State},
+    extract::{Extension, Query, State},
     http::StatusCode,
     Json,
 };
@@ -30,6 +30,7 @@ const MAX_LIMIT: u32 = 500;
 pub async fn list_activity(
     State(state): State<ServerState>,
     Query(params): Query<HashMap<String, String>>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> Json<serde_json::Value> {
     let limit = params
         .get("limit")
@@ -37,8 +38,32 @@ pub async fn list_activity(
         .unwrap_or(DEFAULT_LIMIT)
         .clamp(1, MAX_LIMIT);
     let before = params.get("before").and_then(|v| v.parse::<i64>().ok());
+    // Approval rows carry the request's title and summary, so they are listed
+    // only for a caller `GET /api/approvals` would admit. A page can therefore
+    // hold fewer than `limit` items; `before` paging still works off the last one.
+    let may_view_approvals = super::approvals_api::caller_may_view_approvals(&state, &caller).await;
+    let skipped_before = state.activity.unreadable_rows();
     match state.activity.list(limit, before).await {
-        Ok(items) => Json(json!({ "items": items })),
+        Ok(items) => {
+            let items = crate::activity::visible_items(items, may_view_approvals);
+            // Sealed rows that do not open are skipped (never the whole feed),
+            // counted, and reported here and in the log.
+            let unreadable = state
+                .activity
+                .unreadable_rows()
+                .saturating_sub(skipped_before);
+            if unreadable > 0 {
+                tracing::warn!(
+                    store = "activity.db",
+                    unreadable,
+                    total_unreadable = state.activity.unreadable_rows(),
+                    "activity feed skipped rows that do not open"
+                );
+                Json(json!({ "items": items, "unreadable": unreadable }))
+            } else {
+                Json(json!({ "items": items }))
+            }
+        }
         Err(e) => Json(json!({ "items": [], "error": e.to_string() })),
     }
 }
@@ -123,32 +148,45 @@ enum ActivityStreamFrame {
 )]
 pub async fn activity_stream(
     State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> axum::response::sse::Sse<
     impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
 > {
     use axum::response::sse::{Event, KeepAlive, Sse};
     use tokio::sync::broadcast::error::RecvError;
 
+    // Decided once at connect. This route is only served on unbound nodes
+    // (`require_managed_activity_boundary`), where the answer depends on the
+    // caller being verified, not on a role that could change mid-stream.
+    let may_view_approvals = super::approvals_api::caller_may_view_approvals(&state, &caller).await;
     // Subscribe BEFORE snapshotting so an item recorded in the gap between the two
     // is still delivered as a delta.
     let rx = state.activity.subscribe();
     let snapshot = ActivityStreamFrame::Snapshot {
-        items: state
-            .activity
-            .list(DEFAULT_LIMIT, None)
-            .await
-            .unwrap_or_default(),
+        items: crate::activity::visible_items(
+            state
+                .activity
+                .list(DEFAULT_LIMIT, None)
+                .await
+                .unwrap_or_default(),
+            may_view_approvals,
+        ),
     };
 
     let stream = futures_util::stream::unfold(
         (rx, Some(snapshot)),
-        |(mut rx, pending_snapshot)| async move {
+        move |(mut rx, pending_snapshot)| async move {
             if let Some(snap) = pending_snapshot {
                 let data = serde_json::to_string(&snap).unwrap_or_default();
                 return Some((Ok(Event::default().data(data)), (rx, None)));
             }
             loop {
                 match rx.recv().await {
+                    Ok(item)
+                        if !may_view_approvals && crate::activity::is_approval_derived(&item) =>
+                    {
+                        continue;
+                    }
                     Ok(item) => {
                         let frame = ActivityStreamFrame::Item { item };
                         let data = serde_json::to_string(&frame).unwrap_or_default();

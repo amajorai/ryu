@@ -1,0 +1,10 @@
+.color {
+	background-color: var(--crm-color);
+}
+.option {
+	color: white;
+	background-color: var(--crm-color);
+}
+.share {
+	width: var(--crm-share);
+}

@@ -6,12 +6,149 @@
 // lives in Core over the public no-key skills.sh endpoints — this module only
 // shapes requests and parses responses, so desktop/mobile/extension reuse it.
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
 import {
 	ApiError,
 	type ApiTarget,
 	buyerTokenHeader,
 	request,
 } from "./client.ts";
+
+// Complete native Skills publishers: skills_catalog/mod.rs and distribution.rs,
+// core/skills SkillSummary, and catalog_source SourceMeta. Preserve raw JSON.
+function skillNativeResponse<S extends z.ZodObject>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+const skillCardFields = z.object({
+	id: z.string(),
+	source: z.string().optional(),
+	slug: z.string().optional(),
+	name: z.string().optional(),
+	description: z.string().nullish(),
+	installs: z.number().optional(),
+	downloads: z.number().optional(),
+	installed: z.boolean().optional(),
+	trust_level: z.string().nullish(),
+});
+const skillFileFields = z.object({
+	path: z.string(),
+	contents: z.string().optional(),
+});
+const skillAuditFields = z.object({
+	name: z.string(),
+	status: z.string(),
+	url: z.string().nullable(),
+	summary: z.string().nullish(),
+	risk_level: z.string().nullish(),
+	audited_at: z.string().nullish(),
+});
+const skillMetadataFields = z.object({
+	installs: z.string().nullish(),
+	github_stars: z.string().nullish(),
+	first_seen: z.string().nullish(),
+	github_created_at: z.string().nullish(),
+	github_updated_at: z.string().nullish(),
+	github_pushed_at: z.string().nullish(),
+	security_audits: z.array(skillAuditFields).optional(),
+	repository_url: z.string().nullish(),
+});
+const skillSearchResponse = skillNativeResponse(
+	z.object({ skills: z.array(skillCardFields).optional() })
+);
+const skillDetailResponse = skillNativeResponse(
+	z.object({
+		card: skillCardFields,
+		description: z.string().nullish(),
+		readme: z.string().nullish(),
+		metadata: skillMetadataFields.optional(),
+		files: z.array(skillFileFields).optional(),
+		url: z.string().optional(),
+	})
+);
+const skillTargetFields = z.object({
+	id: z.string(),
+	name: z.string(),
+	projectSkillsDir: z.string(),
+	globalSkillsDir: z.string().nullable(),
+	resolvedGlobalPath: z.string().nullable(),
+	featured: z.boolean(),
+	detected: z.boolean(),
+	selectable: z.boolean(),
+	unavailableReason: z.string().nullable(),
+});
+const skillPreferencesFields = z.object({
+	version: z.literal(1),
+	configured: z.boolean(),
+	targetIds: z.array(z.string()),
+});
+const skillTargetsResponse = skillNativeResponse(
+	z.object({
+		targets: z.array(skillTargetFields),
+		preferences: skillPreferencesFields,
+		droppedTargetIds: z.array(z.string()),
+		warning: z.string().nullable(),
+	})
+);
+const skillDistributionTargetFields = z.object({
+	targetId: z.string(),
+	status: z.enum(["copied", "current", "conflict", "failed"]),
+	path: z.string().nullable(),
+	message: z.string().nullable(),
+});
+const skillDistributionFields = z.object({
+	skillId: z.string(),
+	targets: z.array(skillDistributionTargetFields),
+});
+const skillDistributionResponse = skillNativeResponse(
+	z.object({
+		success: z.boolean().optional(),
+		error: z.string().optional(),
+		distribution: skillDistributionFields.optional(),
+	})
+);
+const skillInstallResponse = skillNativeResponse(
+	z.object({
+		success: z.boolean().optional(),
+		canonicalInstalled: z.boolean().optional(),
+		error: z.string().optional(),
+		result: z.object({ slug: z.string(), path: z.string() }).optional(),
+		distribution: skillDistributionFields.optional(),
+	})
+);
+const skillInstalledFields = z.object({
+	id: z.string(),
+	name: z.string().optional(),
+	description: z.string().nullish(),
+	enabled: z.boolean().optional(),
+	allowed_tools: z.array(z.string()).optional(),
+	always_on: z.boolean().optional(),
+	kind: z.string().optional(),
+});
+export const skillInstalledResponse = skillNativeResponse(
+	z.object({ skills: z.array(skillInstalledFields).optional() })
+);
+const skillSourceFields = z.object({
+	id: z.string(),
+	display_name: z.string(),
+	builtin: z.boolean().optional(),
+	base_url: z.string().nullish(),
+	has_auth: z.boolean().optional(),
+});
+const skillSourcesResponse = skillNativeResponse(
+	z.object({
+		kind: z.string().optional(),
+		active: z.string().optional(),
+		sources: z.array(skillSourceFields).optional(),
+	})
+);
+const skillSourceWriteResponse = skillNativeResponse(
+	z.object({ ok: z.boolean().optional(), error: z.string().optional() })
+);
 
 /** A Skill row in the left-hand selector. */
 export interface SkillCard {
@@ -60,15 +197,7 @@ export interface SkillDetail {
 	url: string;
 }
 
-interface CardWire {
-	downloads?: number;
-	id: string;
-	installed?: boolean;
-	installs?: number;
-	name?: string;
-	slug?: string;
-	source?: string;
-}
+type CardWire = z.output<typeof skillCardFields>;
 
 function toCard(w: CardWire): SkillCard {
 	return {
@@ -103,9 +232,11 @@ export async function searchSkills(
 	if (params.installedOnly) {
 		q.set("installed_only", "true");
 	}
-	const json = await request<{ skills?: CardWire[] }>(
+	const json = await request(
 		target,
-		`/api/skills/catalog?${q.toString()}`
+		`/api/skills/catalog?${q.toString()}`,
+		undefined,
+		skillSearchResponse
 	);
 	return (json.skills ?? []).map(toCard);
 }
@@ -115,23 +246,12 @@ export async function fetchSkillDetail(
 	target: ApiTarget,
 	id: string
 ): Promise<SkillDetail> {
-	const json = await request<{
-		card: CardWire;
-		description?: string | null;
-		readme?: string | null;
-		files?: SkillFile[];
-		metadata?: {
-			first_seen?: string | null;
-			github_created_at?: string | null;
-			github_pushed_at?: string | null;
-			github_stars?: string | null;
-			github_updated_at?: string | null;
-			installs?: string | null;
-			repository_url?: string | null;
-			security_audits?: SkillAudit[];
-		};
-		url?: string;
-	}>(target, `/api/skills/catalog/detail?id=${encodeURIComponent(id)}`);
+	const json = await request(
+		target,
+		`/api/skills/catalog/detail?id=${encodeURIComponent(id)}`,
+		undefined,
+		skillDetailResponse
+	);
 	const metadata = json.metadata ?? {};
 	return {
 		card: toCard(json.card),
@@ -222,25 +342,40 @@ export class SkillTargetsRequiredError extends Error {
 export async function fetchSkillTargets(
 	target: ApiTarget
 ): Promise<SkillTargetsSnapshot> {
-	return request(target, "/api/skills/targets");
+	return request(
+		target,
+		"/api/skills/targets",
+		undefined,
+		skillTargetsResponse
+	);
 }
 
 export async function saveSkillTargetPreferences(
 	target: ApiTarget,
 	targetIds: string[]
 ): Promise<SkillTargetsSnapshot> {
-	return request(target, "/api/skills/targets/preferences", {
-		method: "PUT",
-		body: { targetIds },
-	});
+	return request(
+		target,
+		"/api/skills/targets/preferences",
+		{
+			method: "PUT",
+			body: { targetIds },
+		},
+		skillTargetsResponse
+	);
 }
 
 export async function resetSkillTargetPreferences(
 	target: ApiTarget
 ): Promise<SkillTargetsSnapshot> {
-	return request(target, "/api/skills/targets/preferences", {
-		method: "DELETE",
-	});
+	return request(
+		target,
+		"/api/skills/targets/preferences",
+		{
+			method: "DELETE",
+		},
+		skillTargetsResponse
+	);
 }
 
 export async function distributeSkill(
@@ -248,17 +383,18 @@ export async function distributeSkill(
 	skillId: string,
 	choice: SkillTargetChoice
 ): Promise<SkillDistributionResult> {
-	const json = await request<{
-		distribution?: SkillDistributionResult;
-		error?: string;
-		success?: boolean;
-	}>(target, `/api/skills/${encodeURIComponent(skillId)}/distribute`, {
-		method: "POST",
-		body: {
-			targetIds: choice.targetIds,
-			rememberTargetIds: choice.remember,
+	const json = await request(
+		target,
+		`/api/skills/${encodeURIComponent(skillId)}/distribute`,
+		{
+			method: "POST",
+			body: {
+				targetIds: choice.targetIds,
+				rememberTargetIds: choice.remember,
+			},
 		},
-	});
+		skillDistributionResponse
+	);
 	if (json.success === false || !json.distribution) {
 		throw new Error(json.error ?? `Failed to distribute ${skillId}`);
 	}
@@ -272,6 +408,11 @@ export async function installSkill(
 	source?: string,
 	options: SkillInstallOptions = {}
 ): Promise<SkillInstallResult> {
+	const body: SkillInstallOptions & { id: string; source?: string } = { id };
+	if (source) {
+		body.source = source;
+	}
+	Object.assign(body, options);
 	let json: {
 		distribution?: SkillDistributionResult;
 		error?: string;
@@ -279,17 +420,18 @@ export async function installSkill(
 		success?: boolean;
 	};
 	try {
-		json = await request(target, "/api/skills/catalog/install", {
-			method: "POST",
-			body: {
-				id,
-				...(source ? { source } : {}),
-				...options,
+		json = await request(
+			target,
+			"/api/skills/catalog/install",
+			{
+				method: "POST",
+				body,
+				// Forward the buyer's control-plane session so a PAID marketplace item's
+				// entitlement check (#491) can resolve the org + license. Free items ignore it.
+				headers: buyerTokenHeader(target),
 			},
-			// Forward the buyer's control-plane session so a PAID marketplace item's
-			// entitlement check (#491) can resolve the org + license. Free items ignore it.
-			headers: buyerTokenHeader(target),
-		});
+			skillInstallResponse
+		);
 	} catch (error) {
 		if (
 			error instanceof ApiError &&
@@ -326,19 +468,13 @@ export interface InstalledSkill {
 	name: string;
 }
 
-interface InstalledSkillWire {
-	allowed_tools?: string[];
-	description?: string | null;
-	enabled?: boolean;
-	id: string;
-	name?: string;
-}
-
 /** List the installed skills (enabled + disabled) with their active state. */
 export async function listSkills(target: ApiTarget): Promise<InstalledSkill[]> {
-	const json = await request<{ skills?: InstalledSkillWire[] }>(
+	const json = await request(
 		target,
-		"/api/skills"
+		"/api/skills",
+		undefined,
+		skillInstalledResponse
 	);
 	return (json.skills ?? []).map((s) => ({
 		id: s.id,
@@ -355,10 +491,15 @@ export async function setSkillActive(
 	id: string,
 	active: boolean
 ): Promise<void> {
-	await request<{ success?: boolean }>(target, "/api/skills/activate", {
-		method: "POST",
-		body: { id, active },
-	});
+	await request(
+		target,
+		"/api/skills/activate",
+		{
+			method: "POST",
+			body: { id, active },
+		},
+		appResponseValueSchema
+	);
 }
 
 // ── Catalog sources (#463) ───────────────────────────────────────────────────
@@ -376,12 +517,7 @@ export interface SkillCatalogSource {
 	id: string;
 }
 
-interface SkillSourceWire {
-	base_url?: string | null;
-	builtin?: boolean;
-	display_name: string;
-	id: string;
-}
+type SkillSourceWire = z.output<typeof skillSourceFields>;
 
 /** The active source id plus every source available for the skill kind. */
 export interface SkillCatalogSources {
@@ -402,10 +538,12 @@ function toSkillSource(w: SkillSourceWire): SkillCatalogSource {
 export async function fetchSkillSources(
 	target: ApiTarget
 ): Promise<SkillCatalogSources> {
-	const json = await request<{
-		active?: string;
-		sources?: SkillSourceWire[];
-	}>(target, "/api/catalog/sources?kind=skill");
+	const json = await request(
+		target,
+		"/api/catalog/sources?kind=skill",
+		undefined,
+		skillSourcesResponse
+	);
 	return {
 		active: json.active ?? "",
 		sources: (json.sources ?? []).map(toSkillSource),
@@ -417,10 +555,15 @@ export async function selectSkillSource(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(target, "/api/catalog/sources/select", {
-		method: "POST",
-		body: { kind: "skill", id },
-	});
+	await request(
+		target,
+		"/api/catalog/sources/select",
+		{
+			method: "POST",
+			body: { kind: "skill", id },
+		},
+		appResponseValueSchema
+	);
 }
 
 /** Parameters for adding a custom Claude plugin marketplace as a skill source. */
@@ -435,7 +578,7 @@ export async function addMarketplaceSource(
 	target: ApiTarget,
 	params: AddMarketplaceParams
 ): Promise<void> {
-	const json = await request<{ ok?: boolean; error?: string }>(
+	const json = await request(
 		target,
 		"/api/catalog/sources",
 		{
@@ -446,7 +589,8 @@ export async function addMarketplaceSource(
 				display_name: params.displayName,
 				base_url: params.baseUrl,
 			},
-		}
+		},
+		skillSourceWriteResponse
 	);
 	if (json.ok === false) {
 		throw new Error(json.error ?? "Failed to add marketplace");
@@ -458,13 +602,14 @@ export async function removeMarketplaceSource(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	const json = await request<{ ok?: boolean; error?: string }>(
+	const json = await request(
 		target,
 		"/api/catalog/sources",
 		{
 			method: "DELETE",
 			body: { kind: "skill", id },
-		}
+		},
+		skillSourceWriteResponse
 	);
 	if (json.ok === false) {
 		throw new Error(json.error ?? "Failed to remove marketplace");
@@ -479,13 +624,14 @@ export async function reorderMarketplaceSource(
 	id: string,
 	direction: MarketplaceMoveDirection
 ): Promise<void> {
-	const json = await request<{ ok?: boolean; error?: string }>(
+	const json = await request(
 		target,
 		"/api/catalog/sources/reorder",
 		{
 			method: "POST",
 			body: { kind: "skill", id, direction },
-		}
+		},
+		skillSourceWriteResponse
 	);
 	if (json.ok === false) {
 		throw new Error(json.error ?? "Failed to reorder marketplace");

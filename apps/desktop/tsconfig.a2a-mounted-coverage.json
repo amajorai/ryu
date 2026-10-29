@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "vite/client"]
+  },
+  "include": [
+    "src/components/settings/A2aSettings.tsx",
+    "e2e/a2a-settings-proof.spec.ts",
+    "e2e/harness/a2a-settings-proof.tsx",
+    "e2e/a2a-proof.playwright.config.ts",
+    "e2e/harness/a2a-proof.vite.config.ts",
+    "e2e/a2a-static.playwright.config.ts",
+    "e2e/harness/vite.a2a-static.config.ts"
+  ]
+}

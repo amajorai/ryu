@@ -1,3 +1,4 @@
+import { useProviderCatalog } from "@/src/hooks/provider-query-scope.ts";
 // apps/desktop/src/components/settings/shared/SideModelPicker.tsx
 //
 // Shared "model + effort" picker for side models — used by the double-check
@@ -19,10 +20,8 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
-import { useQuery } from "@tanstack/react-query";
 import { AgentModelPickerField } from "@/components/agent-elements/input/agent-model-picker-field.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import { fetchPiCatalog } from "@/src/lib/api/pi-config.ts";
 import type { SideModelConfig } from "@/src/lib/api/preferences.ts";
 
 // Non-empty sentinel: Base UI Select is unreliable with empty-string values, so
@@ -45,10 +44,7 @@ export function SideModelPicker({
 	onChange,
 	target,
 }: SideModelPickerProps) {
-	const { data: catalog } = useQuery({
-		queryKey: ["pi-config-catalog", target.url],
-		queryFn: () => fetchPiCatalog(target),
-	});
+	const { data: catalog } = useProviderCatalog(target, {});
 
 	const effortItems: SelItem[] = [
 		{ value: DEFAULT_EFFORT, label: "Provider default" },
@@ -59,7 +55,9 @@ export function SideModelPicker({
 	return (
 		<div className="space-y-3">
 			<div className="flex flex-col gap-1.5">
-				<Label className="text-muted-foreground text-xs">Model</Label>
+				<Label size="compact" tone="muted">
+					Model
+				</Label>
 				<AgentModelPickerField
 					ariaLabel="Model"
 					mode="model"
@@ -74,7 +72,7 @@ export function SideModelPicker({
 			</div>
 
 			<div className="flex flex-col gap-1.5">
-				<Label className="text-muted-foreground text-xs">
+				<Label size="compact" tone="muted">
 					Thinking / effort level
 				</Label>
 				<Select
@@ -84,12 +82,12 @@ export function SideModelPicker({
 					}
 					value={effortValue}
 				>
-					<SelectTrigger className="h-8 text-sm">
+					<SelectTrigger className="h-8">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
 						{effortItems.map((it) => (
-							<SelectItem className="text-sm" key={it.value} value={it.value}>
+							<SelectItem key={it.value} value={it.value}>
 								{it.label}
 							</SelectItem>
 						))}

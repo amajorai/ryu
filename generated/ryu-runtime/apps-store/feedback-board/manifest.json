@@ -69,11 +69,14 @@
       },
       "port": 8076,
       "health_path": "/health",
+      "host_api": { "grants": ["crypto:seal"] },
       "lazy": true,
       "idle_stop_secs": 900,
       "http": {
         "mount": "/api/feedback-board",
         "public_mount": "/feedback",
+        "forward_cookie_names": ["ryu_feedback-board_voter"],
+        "forward_caller_rate_subject": true,
         "max_body_bytes": 262144,
         "routes": [
           {
@@ -113,6 +116,11 @@
           },
           {
             "path": "/admin/requests/:requestId",
+            "method": "PUT",
+            "permission": "feedback-board.manage"
+          },
+          {
+            "path": "/admin/requests/:requestId/comments/:commentId",
             "method": "PUT",
             "permission": "feedback-board.manage"
           },

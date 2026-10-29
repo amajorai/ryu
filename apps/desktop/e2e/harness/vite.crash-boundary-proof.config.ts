@@ -39,4 +39,6 @@ export default defineConfig({
 		port: Number(process.env.RYU_CRASH_PROOF_PORT ?? "5226"),
 		strictPort: true,
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

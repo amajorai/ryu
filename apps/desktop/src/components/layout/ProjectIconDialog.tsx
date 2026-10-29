@@ -5,7 +5,7 @@
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
 import { GlyphPicker } from "@ryu/ui/components/glyph-picker.tsx";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 import {
 	type ProjectIcon,
@@ -29,7 +29,8 @@ export function ProjectGlyph({
 }) {
 	return (
 		<GlyphDisplay
-			className={cn("rounded-[3px]", className)}
+			className={cn("", className)}
+			corners="compact"
 			fallback={fallback}
 			size={size}
 			value={icon ?? null}

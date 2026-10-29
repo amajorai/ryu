@@ -1,38 +1,19 @@
-import { toast } from "@ryu/ui/components/sileo";
-import { useEffect } from "react";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { useEffect, useMemo, useRef } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type DesktopNotification,
 	streamDesktopNotifications,
 } from "@/src/lib/api/events.ts";
+import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
-/** Raise a native OS notification (best-effort; requests permission once). */
-function osNotify(n: DesktopNotification): void {
-	if (typeof Notification === "undefined") {
+/** Raise an OS notification (no-op when the user turned them off). */
+function osNotify(n: DesktopNotification, isCurrent: () => boolean): void {
+	if (!isCurrent()) {
 		return;
 	}
-	const show = () => {
-		try {
-			const notification = new Notification(n.title, {
-				body: n.body ?? undefined,
-			});
-			notification.onclick = () => window.focus();
-		} catch {
-			// Notification construction can throw on some platforms; ignore.
-		}
-	};
-	if (Notification.permission === "granted") {
-		show();
-	} else if (Notification.permission === "default") {
-		Notification.requestPermission()
-			.then((perm) => {
-				if (perm === "granted") {
-					show();
-				}
-			})
-			.catch(() => undefined);
-	}
+	showOsNotification({ title: n.title, body: n.body }).catch(() => undefined);
 }
 
 /**
@@ -46,6 +27,9 @@ export function useDesktopNotificationsStream(): void {
 	const url = node.url;
 	const token = node.token ?? null;
 	const userJwt = node.userJwt ?? null;
+	const authority = useMemo(() => ({}), [url, token, userJwt]);
+	const currentAuthority = useRef(authority);
+	currentAuthority.current = authority;
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -57,7 +41,11 @@ export function useDesktopNotificationsStream(): void {
 					? toast.error
 					: toast.success;
 			notify({ title: n.title, description: n.body ?? undefined });
-			osNotify(n);
+			osNotify(
+				n,
+				() =>
+					currentAuthority.current === authority && !controller.signal.aborted
+			);
 		};
 
 		// The shared event multiplexer owns reconnect/backoff for this channel.
@@ -68,5 +56,5 @@ export function useDesktopNotificationsStream(): void {
 		return () => {
 			controller.abort();
 		};
-	}, [url, token, userJwt]);
+	}, [url, token, userJwt, authority]);
 }

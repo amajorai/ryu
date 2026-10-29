@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/workspace.ts
 //
 // Typed client for Core's workspace filesystem endpoints:
@@ -5,7 +6,7 @@
 //     lists directories on the ACTIVE node's filesystem, which may be remote).
 //   - `POST /api/workspace/new-folder` `{ name }` (the composer's "Start from
 //     scratch" flow — Core creates ~/Documents/Ryu/<name> and returns its path).
-//   - `POST /api/workspace/clone` `{ url, name? }` (clone a GitHub repository
+//   - `POST /api/workspace/clone` `{ url, name? }` (clone a Git repository
 //     onto the ACTIVE node and return its new project path).
 
 import { type ApiTarget, authenticatedFetch, readJsonBody } from "./client.ts";
@@ -44,16 +45,48 @@ export interface DirectoryListing {
 	path: string;
 }
 
-const GITHUB_CLONE_SOURCE =
-	/^(?:https:\/\/(?:www\.)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::22)?\/)[A-Za-z0-9_.-]+\/([A-Za-z0-9_.-]+)\/?$/i;
+// Core's response publishers live in server/git.rs: create_project_folder,
+// clone_project_folder, and list_directory. Validate their filesystem DTOs before
+// a desktop caller can render entries or register a returned project path.
+const directoryEntrySchema = z.object({ name: z.string(), path: z.string() });
+const directoryListingSchema = z.object({
+	entries: z.array(directoryEntrySchema),
+	home: z.string(),
+	label: z.string().optional(),
+	parent: z.string().nullable(),
+	path: z.string(),
+});
+const createdFolderSchema = z.object({ path: z.string() });
+const clonedFolderSchema = z.object({
+	success: z.literal(true).optional(),
+	name: z.string(),
+	path: z.string(),
+});
 
-/** Return the default folder name for a supported GitHub clone URL. */
-export function githubRepositoryName(source: string): string | null {
-	const match = source.trim().match(GITHUB_CLONE_SOURCE);
-	if (!match?.[1]) {
+/** Return the default folder name for an HTTPS or SSH Git clone URL. */
+export function gitRepositoryName(source: string): string | null {
+	const trimmed = source.trim();
+	const scpMatch = /^git@[^/:]+:(.+)$/i.exec(trimmed);
+	let repositoryPath: string | null = scpMatch?.[1] ?? null;
+
+	if (repositoryPath === null) {
+		try {
+			const parsed = new URL(trimmed);
+			if (parsed.protocol !== "https:" && parsed.protocol !== "ssh:") {
+				return null;
+			}
+			repositoryPath = parsed.pathname;
+		} catch {
+			return null;
+		}
+	}
+
+	const segments = repositoryPath.split("/").filter(Boolean);
+	const leaf = segments.at(-1);
+	if (!leaf || leaf === "." || leaf === "..") {
 		return null;
 	}
-	const name = match[1].replace(/\.git$/i, "");
+	const name = leaf.replace(/\.git$/i, "");
 	return name && name !== "." && name !== ".." ? name : null;
 }
 
@@ -70,7 +103,11 @@ export async function listDirectory(
 ): Promise<DirectoryListing> {
 	const query = path ? `?path=${encodeURIComponent(path)}` : "";
 	const resp = await authenticatedFetch(target, `/api/workspace/list${query}`);
-	const { data, error } = await readJsonBody<DirectoryListing>(resp, "list");
+	const { data, error } = await readJsonBody(
+		resp,
+		"list",
+		directoryListingSchema
+	);
 	if (error || !data) {
 		throw new Error(error ?? `list failed: ${resp.status}`);
 	}
@@ -93,9 +130,10 @@ export async function createProjectFolder(
 			method: "POST",
 			body: JSON.stringify({ name }),
 		});
-		const { data, error } = await readJsonBody<CreateFolderResult>(
+		const { data, error } = await readJsonBody(
 			resp,
-			"create"
+			"create",
+			createdFolderSchema
 		);
 		if (error) {
 			return { error };
@@ -106,7 +144,7 @@ export async function createProjectFolder(
 	}
 }
 
-/** Clone a GitHub repository onto the active node and return its project path. */
+/** Clone a Git repository onto the active node and return its project path. */
 export async function cloneProjectFolder(
 	target: ApiTarget,
 	url: string,
@@ -118,12 +156,13 @@ export async function cloneProjectFolder(
 			method: "POST",
 			body: JSON.stringify({
 				url,
-				...(trimmedName ? { name: trimmedName } : {}),
+				...(trimmedName ? { name: trimmedName } : undefined),
 			}),
 		});
-		const { data, error } = await readJsonBody<CloneFolderResult>(
+		const { data, error } = await readJsonBody(
 			resp,
-			"clone"
+			"clone",
+			clonedFolderSchema
 		);
 		if (error) {
 			return { error };

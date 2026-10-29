@@ -78,9 +78,9 @@ pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
     },
     // Browser is the workspace's real-Chromium sidecar (an Electron GUI app,
     // `browser` sidecar on :7993) that backs the workspace "Browser" tab. A core
-    // built-in and therefore uninstall-protected (`is_system_plugin`), but NOT
-    // pre-installed: no release publishes a spawnable `ryu-browser-<os>-<arch>`
-    // asset yet, so it is opt-in from the Store (see the note in `CORE_PREINSTALLED`).
+    // built-in and therefore uninstall-protected (`is_system_plugin`), and
+    // pre-installed now that every desktop platform has an installable release asset
+    // (see the entry in `CORE_PREINSTALLED`).
     // Cross-platform Electron, runs locally on the node.
     SystemPlugin {
         manifest_id: BROWSER_PLUGIN_ID,
@@ -92,10 +92,9 @@ pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
 
 /// The Browser app's plugin id — the workspace's real-Chromium sidecar that backs
 /// the "Browser" workspace tab. A core built-in (see [`SYSTEM_PLUGINS`]) and so
-/// non-uninstallable, but **opt-in**: deliberately absent from [`CORE_PREINSTALLED`]
-/// until a release publishes an installable sidecar binary (the WHY is documented at
-/// that absence). While it is disabled the desktop's Browser tab keeps its sandboxed
-/// iframe fallback, which works.
+/// non-uninstallable, and pre-installed (see its entry in [`CORE_PREINSTALLED`] for
+/// the release-asset condition that membership depends on). While it is disabled
+/// the desktop's Browser tab keeps its sandboxed iframe fallback.
 pub const BROWSER_PLUGIN_ID: &str = "@ryu/browser";
 
 /// Native workspace entry for the Gateway-owned WhatsApp Personal and WhatsApp
@@ -118,9 +117,10 @@ pub const SPACES_PLUGIN_ID: &str = "@ryu/spaces";
 /// the "Meetings" Space.
 ///
 /// The FIRST first-party plugin to declare a real `requires` edge (→ Spaces). The
-/// coupling is not decorative: `server/meetings_api.rs::save_notes_to_space` calls
-/// `state.spaces.ingest_document`, and `ensure_meetings_space` calls
-/// `state.spaces.{list_spaces, create_space}`.
+/// coupling is not decorative: its sidecar files notes through the
+/// `spaces.fileNotes` kernel capability (`server::app_file_notes`), which calls
+/// `state.spaces.{ensure_system_space, ingest_document}` and pins this id, because
+/// `spaces:docs` alone does not cover writing into that system Space.
 pub const MEETINGS_PLUGIN_ID: &str = "@ryu/meetings";
 
 /// The Outpost app's plugin id — social scheduling + publishing over the `ryu-social`
@@ -211,8 +211,10 @@ pub const OUTREACH_PLUGIN_ID: &str = "@ryu/outreach";
 /// spends model budget and can propose changes across enabled apps.
 pub const AUTOPILOT_PLUGIN_ID: &str = "@ryu/autopilot";
 
-/// Projects is the local work-management layer between a customer record and
-/// an automation run. It is a Core-tier, opt-in Companion over shared storage.
+/// Projects is the top of the Projects › Bots/Groups › Sessions hierarchy: each
+/// project owns a coordinator main thread, its member bots and Groups (each with
+/// a main thread of its own), shared context and model defaults. Core-tier and
+/// pre-installed (see [`CORE_PREINSTALLED`]).
 pub const PROJECTS_PLUGIN_ID: &str = "@ryu/projects";
 
 /// Invoices is a local accounts-receivable register. It tracks status and due
@@ -410,17 +412,20 @@ pub const LEARNING_PLUGIN_ID: &str = "@ryu/learning";
 /// The Self-Healing app's plugin id — the `/api/healing/*` diagnose→propose-fix
 /// surface, now served OUT-OF-PROCESS by the `ryu-healing` sidecar (`public_mount`).
 /// `requires` the `approvals` app (it delivers fixes into that inbox), so the graph
-/// refuses to disable Approvals out from under it. Pre-installed; Core keeps only the
-/// welded action side (`healing_client::CoreHealingHost`) and drives the sidecar over
-/// loopback, with the run-status bus loop spawned unconditionally in `main.rs`.
+/// refuses to disable Approvals out from under it. Core names no healing behaviour:
+/// the sidecar subscribes to the `core#run.failed` kernel event and applies its
+/// verdicts through grant-gated kernel capabilities (`server::app_runs`).
 pub const HEALING_PLUGIN_ID: &str = "@ryu/healing";
 
 /// The Monitors app's plugin id — the `/api/monitors/*` website-watch surface
 /// (price/stock/keyword/content/uptime + alerts). Now served OUT-OF-PROCESS by the
 /// `ryu-monitors` sidecar (`public_mount`, App-gated via the ext proxy). Pre-installed,
-/// no `requires` (the scheduler is kernel infra). Core keeps only the loopback driver
-/// (`monitors_client`: `JobTarget::Monitor` run + backing-job reconcile) and the two
-/// ext-bearer host callbacks (Spider fetch + alert fan-out); the interleaved
+/// no `requires` (the scheduler is kernel infra). Core reaches it only through the
+/// generic `jobs.*` / `data.*` fan-out contracts it provides (`scheduler::app_jobs`,
+/// `server::data_admin`) and through the legacy job-target shim
+/// (`scheduler::legacy_targets`, which maps persisted monitor jobs onto app jobs).
+/// It calls back through the `mcp.callTool` / `notify.fanout` kernel capabilities,
+/// which pin this id; the interleaved
 /// `/api/activity/*`, `/api/events/*`, and `/api/notifications/*` streams are separate
 /// kernel concerns and stay ungated.
 pub const MONITORS_PLUGIN_ID: &str = "@ryu/monitors";
@@ -430,8 +435,11 @@ pub const MONITORS_PLUGIN_ID: &str = "@ryu/monitors";
 /// leaf: pre-installed, no `requires`. Gate-only (the device store + `hardware_ws` are
 /// `ServerState`-adjacent and the RHP link is coupled to voice/dashboards), so it is
 /// NOT behind a cargo feature. The gate covers ONLY the protected device-management
-/// routes; the PUBLIC device channel (`/api/hardware/{ws,pair,display}`) stays ungated
-/// so physical ESP32 devices can connect and pair regardless of the app's enabled bit.
+/// routes; the PUBLIC device channel (`/api/hardware/{ws,display}`, which authenticates
+/// a per-device Bearer in-handler) and the PROTECTED pairing routes
+/// (`/api/hardware/pair*`, `/api/hardware/identity/reset`) stay ungated by the app bit
+/// so physical ESP32 devices can connect and pair regardless of it. The app bit does
+/// gate the agent-facing `device` MCP tools.
 pub const HARDWARE_PLUGIN_ID: &str = "@ryu/hardware";
 
 /// The Workflows app's plugin id — the protected workflow surface: the DAG CRUD
@@ -470,7 +478,7 @@ pub const VOICE_PLUGIN_ID: &str = "@ryu/voice";
 
 /// The Media-Generation app's plugin id — the generative-media PRODUCERS
 /// (`/api/images/generate`, `/api/video/generate`, `/api/video/jobs/:id`,
-/// `/api/gifs/search`, `/api/assets/images/search`). Governance-shell leaf: pre-installed, no `requires`. Gate-only,
+/// `/api/audio/generate`, `/api/audio/jobs/:id`, `/api/gifs/search`, `/api/assets/images/search`). Governance-shell leaf: pre-installed, no `requires`. Gate-only,
 /// so it is NOT behind a cargo feature. The gate covers ONLY the producers; the shared
 /// no-cloud blob store (`/api/media/:file` serve + `/api/media/upload`) stays UNGATED
 /// kernel storage because it also serves TTS audio and legacy media URLs. New user
@@ -533,6 +541,9 @@ pub const HELP_CENTER_PLUGIN_ID: &str = "@ryu/help-center";
 /// versioned Site projects, wildcard-managed URLs, domains, connectors, and
 /// the Help Center widget integration surface.
 pub const SITES_PLUGIN_ID: &str = "@ryu/sites";
+
+/// The first-party Ryu Forms builder and respondent app.
+pub const FORMS_PLUGIN_ID: &str = "@ryu/forms";
 
 /// The Chat Broadcast app's desktop-only companion. It lists caller-visible
 /// conversations and, after an explicit confirmation in its UI, posts a real
@@ -670,9 +681,14 @@ pub const CORE_PLUGINS: &[&str] = &[
     // those reviewed Core routes; it remains opt-in (not pre-installed).
     "@ryu/agent-status",
     // Ego Browser is an official, opt-in browser.control provider. It is Core
-    // tier so a verified marketplace package can use its reviewed inline-Deno
+    // tier so a verified marketplace package can use its reviewed inline-JS
     // bridge, but it is not pre-installed because Ego lite is a separate BYO app.
     "@ryu/ego-browser",
+    // Codex Computer Use is an opt-in computer.control provider backed by a
+    // pinned npx stdio MCP server. Core tier lets that manifest-owned server
+    // register without the reserved `mcp:server` grant; it is not pre-installed,
+    // because it drives the real desktop and needs Node.js and the ChatGPT macOS app.
+    "@ryu/codex-computer-use",
     // Expect and Agentation are local Node MCP servers. Core-tier is required so
     // their manifest-owned stdio servers can register without the reserved
     // `mcp:server` marketplace grant; both remain explicit opt-ins because their
@@ -697,14 +713,22 @@ pub const CORE_PLUGINS: &[&str] = &[
     "@ryu/zvec-grep",
     // The default `web.search` provider. Core-tier for the same reason `spider` is:
     // it is a default TOOL app that must exist out of the box, and pre-installed
-    // requires Core-tier. The other five search providers (tavily, brave, serper,
-    // firecrawl, parallel) stay Community + opt-in, because each needs a key before
-    // it can do anything useful. `parallel` is the one that could argue otherwise —
-    // its public Search MCP endpoint works with no credential, exactly like exa's —
-    // but its extract half is still BYOK, and pre-installed is a pick, not a listing:
-    // two default providers of `web.search` would make the choice depend on
-    // manifest ordering. exa keeps it; parallel is the swap you opt into.
+    // requires Core-tier. The other six search providers (tavily, brave, serper,
+    // firecrawl, parallel, deepseek) stay Community + opt-in. Tavily, Brave, Serper,
+    // Firecrawl, and DeepSeek need a key for search; Parallel has an anonymous search path but
+    // still needs a key for extraction. Its public Search MCP endpoint makes it a
+    // useful zero-setup swap, but pre-installed is a pick, not a listing: two
+    // default providers of `web.search` would make the choice depend on manifest
+    // ordering. exa keeps it; parallel is the swap you opt into.
     "@ryu/exa",
+    // Ryu Cloud hosted search. Core-tier because its compiled fixture reaches Core's
+    // own `/api/cloud/web-search` loopback with the node token; that route alone
+    // holds the Gateway relay credential. Pre-installed (below) but NOT the default:
+    // exa keeps `default: true`, so a fresh node's binding is unchanged and the user
+    // picks Ryu Cloud in the layer picker. It is also selected-only
+    // (`binding::is_selected_only_provider`): never auto-picked, even as the sole
+    // enabled provider, and its tool is hidden from direct agent calls.
+    "@ryu/cloud-search",
     // The Ryu Docs MCP plugin — read-only access to the docs site
     // (docs.ryuhq.com/mcp) as MCP tools. Core-tier is a REQUIREMENT, not a
     // promotion, for the same reason `scrapling` is: `may_register_mcp_servers`
@@ -739,6 +763,10 @@ pub const CORE_PLUGINS: &[&str] = &[
     // not pre-installed mirror of a first-class Claude Code tool would read as a
     // regression.
     "@ryu/pi-monitor",
+    // The fourth Pi extension: `copy_paste`, byte-exact copy/move of text blocks
+    // so the managed Pi agent never has to retype what it relocates. Core-tier
+    // for the same `may_ship_pi_extensions` reason as its siblings.
+    "@ryu/pi-copy",
     // Workspace real-Chromium browser sidecar — core built-in, installable from the
     // Store but NOT pre-installed (no publishable sidecar asset; see `CORE_PREINSTALLED`).
     BROWSER_PLUGIN_ID,
@@ -758,6 +786,26 @@ pub const CORE_PLUGINS: &[&str] = &[
     // and does nothing until the user points a provider at 127.0.0.1:47821 with their
     // own key (it is a transparent proxy and holds no credential — see its README).
     "@ryu/pxpipe",
+    // Laya is an opt-in Core-tier local model package. It provisions a private
+    // Python runtime and pinned Hugging Face checkpoints, so Community-tier
+    // enablement would be blocked by the external-runtime/sidecar grant gate.
+    "@ryu/laya",
+    // Ollaya is an optional local API provider for typed decisions. Its HTTP
+    // tools are fixed to the loopback service and require the node's explicit
+    // `tool:http-egress:127.0.0.1` approval when enabled.
+    "@ryu/ollaya",
+    // Kev is an opt-in local System One decision server. Its tools stay on the
+    // selected node's loopback interface and it does not download or spawn Kev.
+    "@ryu/kev",
+    // Cloudflare Clef is an optional Workers AI decision provider. Its sidecar
+    // only calls api.cloudflare.com and receives node-scoped credentials through
+    // the encrypted secret store; it is never pre-installed.
+    "@ryu/cloudflare-clef",
+    // Needle 3 and FunctionGemma are independently installable local model
+    // adapters. Their manifests own their pinned weight snapshots and normalized
+    // Shadow planner contributions; neither is pre-installed.
+    "@ryu/needle3",
+    "@ryu/functiongemma",
     // Mail (Agent Inboxes) — manifest-driven app; its `ryu-mail` sidecar is spawned
     // by the generic loader (see MAIL_PLUGIN_ID).
     MAIL_PLUGIN_ID,
@@ -831,6 +879,11 @@ pub const CORE_PLUGINS: &[&str] = &[
     // inside the hook), meaning a sandbox spawn per user turn plus a side-model call
     // on each correction it does catch.
     "@ryu/no-more-mistakes",
+    // Rewrites a hostile message into a polite one before it is sent. Absent from
+    // `CORE_PREINSTALLED` for the same reason: the hostility gate is a regex sweep
+    // inside an un-gated `pre_user_turn` hook (a sandbox spawn per user turn), plus a
+    // side-model call on each message it flags.
+    "@ryu/polite-prompts",
     // Agent-to-agent mailbox: every agent gets `agents.directory` / `agents.send` /
     // `agents.thread`, and a `pre_user_turn` hook delivers whatever
     // arrived for it. Off by default — the delivery hook cannot be `match`-gated (the
@@ -871,7 +924,7 @@ pub const CORE_PLUGINS: &[&str] = &[
     // fresh store until explicit install.
     "@ryu/canvas",
     // The Fine-tuning app — a full-page Companion (`ui_format:"html"`) that drives
-    // Core's fine-tune orchestration via `finetune:runs` and owns its Unsloth Python
+    // its own `ryu-finetune` sidecar via the ext-proxy and owns its Unsloth Python
     // training sidecar (spawned on the Core-tier auto-run path, so it declares no
     // `sidecar:process` grant — the Gateway denies that grant at enable). Opt-in;
     // explicit install carries its approved grants + `ui_code` HTML blob. Replaces
@@ -953,6 +1006,25 @@ pub const CORE_PLUGINS: &[&str] = &[
     // Expenses — same opt-in sidecar posture as Harbor, but with a companion bundle
     // carried by the explicit install path and an MCP server for the ledger agent.
     EXPENSES_PLUGIN_ID,
+    // Family — the shared family hub over the `ryu-family` sidecar
+    // (`apps-store/family/`): the Expenses posture, an opt-in sidecar app with a
+    // companion bundle and an MCP server for its planner agent. Core-tier so the
+    // managed sidecar and manifest-owned MCP server run through the generic
+    // lifecycle; not pre-installed. A literal id, not a Core constant:
+    // `app_boundary_guard` freezes per-app id constants.
+    "@ryu/family",
+    // Places — the shared family map over the `ryu-places` sidecar
+    // (`apps-store/places/`): same opt-in sidecar + MCP posture as Expenses. No
+    // `requires` edge; it owns its sidecar and its own SQLite database. Its
+    // Companion is carried by the Marketplace/standalone package, so it needs no
+    // `plugins::seed` row. A literal id, not a Core constant: `app_boundary_guard`
+    // freezes per-app id constants.
+    "@ryu/places",
+    // Decks — USB control decks over the `ryu-decks` sidecar (`apps-store/decks/`).
+    // Core-tier because only a Core-tier app's managed sidecar spawns; not
+    // pre-installed, because it opens USB devices and its binary is not on a normal
+    // install. A literal id: `app_boundary_guard` freezes per-app id constants.
+    "@ryu/decks",
     OUTREACH_PLUGIN_ID,
     AUTOPILOT_PLUGIN_ID,
     PROJECTS_PLUGIN_ID,
@@ -1015,6 +1087,13 @@ pub const CORE_PLUGINS: &[&str] = &[
     // control surface, while managed routing and quotas remain enforced at the
     // control-plane/edge seam.
     SITES_PLUGIN_ID,
+    // Forms is a first-party form builder and response inbox. Its app-owned HTTP
+    // routes use the generic ext-proxy and its manifest permissions.
+    FORMS_PLUGIN_ID,
+    // Bot Flows is a first-party bot builder whose satellite sidecar also serves
+    // the public chat pages and embed script, so it must be Core tier for that
+    // sidecar to spawn. Its routes use the generic ext-proxy.
+    "@ryu/bot-flows",
     // Chat Broadcast — a desktop-only Companion whose host bridge lists visible
     // conversations and posts a confirmed message into selected chats. It has no
     // sidecar or public route, so the Core-tier manifest can be pre-installed.
@@ -1047,7 +1126,7 @@ pub const CORE_PLUGINS: &[&str] = &[
     // *listable*, never what runs, because agents default to their own voice (§8) and
     // no built-in sets `force-for-plugin`. This is the same argument `exa` makes one
     // block down (seed a provider so the capability is non-empty), minus the caveat
-    // that sank `@ryu/browser` — there is no binary to fail to spawn.
+    // that once demoted `@ryu/browser` — there is no binary to fail to spawn.
     OUTPUT_STYLES_PLUGIN_ID,
     // The UGC campaign tracker. Core-tier is a REQUIREMENT here, not a promotion —
     // the same argument `pxpipe` and the four document-parsing apps make above: it
@@ -1177,13 +1256,19 @@ pub const CORE_PLUGINS: &[&str] = &[
 /// answer review, progressive chat titles) work on **every surface** with zero
 /// setup, exactly like the built-in chat commands they replaced. This is only
 /// affordable because each declares a cheap `match` pre-gate (see
-/// [`crate::plugin_manifest::HookMatch`]) — or, for `chat-title`, a preference
-/// read inside the hook: an idle hook costs a flag/prefix check or one KV read,
-/// never a sandbox spawn when matched out. They stay real, swappable plugins —
+/// [`crate::plugin_manifest::HookMatch`]) — for `chat-title`, a reply cadence
+/// over its preferences: an idle hook costs a flag/prefix check, one KV read or
+/// a few preference reads, never a sandbox spawn when matched out. They stay real, swappable plugins —
 /// a user can disable any of them, and the fixture is the reference a third
 /// party can fork.
 pub const CORE_PREINSTALLED: &[&str] = &[
     "@ryu/engines",
+    // Projects are the top of the Projects › Bots/Groups › Sessions hierarchy:
+    // the desktop's Projects sidebar section, the onboarding "Create your first
+    // project" step and every project main thread come from this app, so a fresh
+    // node needs it enabled. Its `ryu-projects` sidecar ships in every release
+    // bundle (`release.yml` sidecar_bins), so seeding it never offers a dead app.
+    PROJECTS_PLUGIN_ID,
     "@ryu/durable",
     "@ryu/goal",
     "@ryu/proof",
@@ -1216,6 +1301,11 @@ pub const CORE_PREINSTALLED: &[&str] = &[
     // add. Toggling it off takes effect in a new chat (Pi reads its extensions at
     // process start), exactly like its siblings.
     "@ryu/pi-monitor",
+    // `copy_paste` for the managed Pi agent. Pre-installed because it is a default
+    // file tool: without it the flagship agent can only move text by retyping it,
+    // which wastes output tokens and lets weaker local models mangle the block.
+    // Toggling it off takes effect in a new chat, exactly like its siblings.
+    "@ryu/pi-copy",
     // The pre-installed tool apps — record seeded enabled on a fresh
     // install so they show up like the auto-downloaded default models. The actual
     // process runs through its own sidecar/MCP lifecycle; enabling the record just
@@ -1228,20 +1318,23 @@ pub const CORE_PREINSTALLED: &[&str] = &[
     // Seeding the record enabled is exactly what surfaces those tools — no
     // double-listing, since nothing else owns them. (`@ryu/browser` carries the
     // same shape — seven `http` runnables that give `browser.control` registry tool
-    // ids to bind to — but is NOT seeded; see the note below its former entry.)
+    // ids to bind to — and is seeded too; see its entry further down for the
+    // release-asset condition that depends on.)
     //
     // CAVEAT this list cannot fix on its own: seeding is what surfaces those tools,
     // so a pre-installed app whose PROCESS cannot start ships tools that fail on every
-    // call. `ghost` and `shadow` are in that state today — neither has a public
-    // release repo (see `sidecar/tools/ghost/downloader.rs`), so `computer.*` /
-    // `ghost.*` / the four shadow `http` tools are offered and then die on spawn.
-    // Removing them from here is NOT the fix (ghost is the `"default": true` provider
-    // of `computer.control`, and its tools are a headline capability): the fix is CI
-    // publishing `ghost-<os>-<arch>` / `shadow-<os>-<arch>`. Until then Core at least
-    // reports the cause instead of a bare 502 — see
-    // `manifest_sidecar::missing_sidecar_binary_reports`, which covers manifest
-    // `local` sidecars; ghost/shadow are built-in `impl Sidecar`s with their own
-    // downloaders and are NOT covered by that record.
+    // call. `ghost` and `shadow` were in that state: their downloaders resolve
+    // `amajorai/{ghost,shadow}/releases/latest/download/<bin>-<platform_tag>.tar.gz|.zip`,
+    // but the satellites' dispatch-only release workflow was never dispatched, so the
+    // train-tag releases carried notes and no archives. `mirror-releases.yml`
+    // (`satellite-sources` + `satellite-binaries`) now refreshes both satellites from
+    // the tag, dispatches their builds and fails the run unless every archive and
+    // `.sha256` exists. Removing them from here was never the fix (ghost is the
+    // `"default": true` provider of `computer.control`). A host outside
+    // `sidecar::tools::SATELLITE_ARCHIVE_PLATFORMS` is refused with an error naming its
+    // platform and the `RYU_*_RELEASE_URL` override; ghost/shadow are built-in
+    // `impl Sidecar`s, so `manifest_sidecar::missing_sidecar_binary_reports` (which
+    // covers manifest `local` sidecars) does not include them.
     "@ryu/ghost",
     "@ryu/shadow",
     "@ryu/spider",
@@ -1259,11 +1352,17 @@ pub const CORE_PREINSTALLED: &[&str] = &[
     // that only breaks ties among ALREADY-ENABLED providers, it never installs
     // anything.
     //
-    // Safe to ship on because exa is the one search provider that needs no
-    // credential: its binding falls back to Exa's public MCP endpoint when no
-    // `RYU_EXA_API_KEY` is set (see fixtures/exa.manifest.json). Every other
-    // search provider is BYOK-only and stays opt-in.
+    // Safe to ship on because exa is the one search provider seeded by default:
+    // its binding falls back to Exa's public MCP endpoint when no
+    // `RYU_EXA_API_KEY` is set (see fixtures/exa.manifest.json). Parallel also
+    // supports anonymous search, but stays opt-in because its extraction provider
+    // is BYOK-only and it must not become a second default.
     "@ryu/exa",
+    // Ryu Cloud hosted search is seeded so it is selectable in the `web.search`
+    // layer picker without a Store install. It declares no `default`, so exa stays
+    // the bound provider until the user switches. Off Ryu Cloud it returns a
+    // readable `available: false` instead of erroring.
+    "@ryu/cloud-search",
     // `docs` is pre-installed so every agent can look up Ryu documentation without
     // leaving the chat. Unlike its sibling pre-installed tool apps it needs no
     // binary and no key: the MCP server is REMOTE (`https://docs.ryuhq.com/mcp`),
@@ -1275,40 +1374,30 @@ pub const CORE_PREINSTALLED: &[&str] = &[
     // a fresh install, but no provider token exists until the user explicitly
     // connects an identity profile from Marketplace → Connections.
     COMPOSIO_CONNECT_PLUGIN_ID,
-    // NOTE: @ryu/browser is deliberately NOT pre-installed, and this is the one
-    // membership decision here that is driven by RELEASE reality rather than product
-    // taste. It was pre-installed ("so the Browser tab uses the real-Chromium sidecar out
-    // of the box, not the fallback iframe") — but no release publishes a binary the
-    // sidecar loader can install. Its `local` sidecar declares `command:
-    // "ryu-browser"`, which `manifest_sidecar::ensure_local_sidecar_present` resolves
-    // to the release asset `ryu-browser-<os>-<arch>` (`update::platform_tag()`, e.g.
-    // `ryu-browser-macos-aarch64`, no extension, directly spawnable). What the
-    // browser job actually uploads is electron-builder's
-    // `ryu-browser-mac-arm64.zip`/`.dmg` — a different name AND a non-spawnable
-    // bundle. So on every fresh install the app was seeded ENABLED, the desktop's
-    // `BrowserTabPanel` feature-detected it and switched off the working iframe
-    // fallback, and the panel then showed "Browser sidecar unreachable (502)"
-    // permanently. Not pre-installed restores the honest fallback: the tab works, and the
-    // Store is the one place that offers the sidecar.
+    // @ryu/browser is pre-installed again, so the workspace Browser tab uses the
+    // real-Chromium sidecar out of the box. It was removed once because membership
+    // here is platform-blind and no release published an asset its `local` sidecar
+    // could install on every platform the desktop ships — a seeded-enabled record
+    // with an uninstallable binary made the desktop's `BrowserTabPanel` drop its
+    // working iframe fallback for a permanent "Browser sidecar unreachable (502)".
     //
-    // Consequences, both intentional:
-    //  - `browser.control` (whose ONLY provider is this app) has zero enabled
-    //    providers on a fresh install, so its 7 `http` tool runnables are not offered
-    //    to agents. That is strictly better than offering tools whose every call dies
-    //    on spawn, and agents still browse via `agentbrowser`/`spider`, which are
-    //    pre-installed and DO ship. This is the deliberate exception to the exa /
-    //    markitdown argument above (seed a provider so the capability is non-empty):
-    //    that argument only holds for a provider that can actually run.
-    //  - Uninstall-protection is UNCHANGED: browser is in `SYSTEM_PLUGINS`, so
-    //    `is_uninstall_protected` still returns true via its `is_system_plugin` branch (it
-    //    never depended on the pre-installed branch here).
+    // What now ships (private `release.yml` `browser` job, all required by the
+    // publish gate, each with a `.sha256`):
+    //  - `ryu-browser-linux-x86_64` (AppImage; the manifest sets
+    //    `APPIMAGE_EXTRACT_AND_RUN=1` for hosts without libfuse2) and
+    //    `ryu-browser-windows-x86_64.exe` (portable exe) — single spawnable files
+    //    under the `<command>-<platform_tag>[.exe]` name;
+    //  - `ryu-browser-macos-aarch64.tar.gz` and `ryu-browser-macos-x86_64.tar.gz` —
+    //    the ad-hoc-signed `.app`, installed through the manifest's
+    //    `process.bundles` entries (verified, safely extracted, atomically
+    //    installed by `sidecar::bundle_install`, then the declared entrypoint
+    //    inside the `.app` is spawned). A macOS Electron app cannot be one file.
     //
-    // Re-add this line the moment the release publishes an installable, spawnable
-    // asset under the `platform_tag()` name. For an Electron bundle that means moving
-    // the manifest sidecar from `local` to `binary` (which supports `archive` +
-    // `binary_name` extraction), not renaming the zip — macOS cannot ship an Electron
-    // app as one executable file.
-    //
+    // Keep it here only while that holds for EVERY desktop platform:
+    // `tools/satellite-binary-contract.test.mjs` pins the manifest bundles, the
+    // staged names and the publish gate together. The sidecar is `lazy`, so a
+    // headless node pays nothing until something actually uses the browser.
+    BROWSER_PLUGIN_ID,
     // NOTE: @ryu/mail is intentionally NOT pre-installed. It is sidecar-only now
     // (the in-process path was deleted, Track C). The release now builds + ships the
     // `ryu-mail` binary alongside the other 10 sidecar bins (see
@@ -1393,8 +1482,9 @@ pub const CORE_PREINSTALLED: &[&str] = &[
     //    so five apps the user never asked for produced a spawn error each, on
     //    every boot, in a state the user had no obvious way to leave.
     //
-    // This is `@ryu/browser`'s argument (see its NOTE above), reached from the
-    // other direction: browser was demoted because its binary does not ship, these
+    // This is the argument that once demoted `@ryu/browser` (see its entry above),
+    // reached from the other direction: browser was demoted while its binary did not
+    // ship on every platform, these
     // five because they should not have been pre-installed once they grew binaries
     // at all. Nothing here is deleted — all five remain Core-tier and installable
     // in `CORE_PLUGINS`, one click from the Store, with `clips`→`shadow` and
@@ -1471,6 +1561,9 @@ pub const CORE_PREINSTALLED: &[&str] = &[
     // local companion is honest about preview-only state; managed routing and
     // quotas remain control-plane-owned.
     SITES_PLUGIN_ID,
+    // Forms is pre-installed as the first-party form editor and response inbox.
+    // Its respondent routes are declared by the app manifest and generic proxy.
+    FORMS_PLUGIN_ID,
     // Chat Broadcast is pre-installed because it is a zero-process desktop
     // companion and its explicit confirmation is the user-controlled send gate.
     CHAT_BROADCAST_PLUGIN_ID,
@@ -1540,7 +1633,9 @@ fn is_core_plugin_id(manifest_id: &str) -> bool {
     false
 }
 
-fn is_exact_compiled_manifest(manifest: &crate::plugin_manifest::PluginManifest) -> bool {
+pub(crate) fn is_exact_compiled_manifest(
+    manifest: &crate::plugin_manifest::PluginManifest,
+) -> bool {
     if !is_compiled_in_manifest(&manifest.id) {
         return false;
     }
@@ -1552,6 +1647,7 @@ fn is_exact_compiled_manifest(manifest: &crate::plugin_manifest::PluginManifest)
     let digests = DIGESTS.get_or_init(|| {
         crate::plugin_manifest::PluginManifestLoader::load_builtins()
             .into_iter()
+            .chain(crate::plugin_manifest::PluginManifestLoader::load_install_catalog())
             .map(|builtin| {
                 let digest = crate::plugins::isolation::manifest_sha256_for_trust(&builtin);
                 (builtin.id, digest)
@@ -1828,9 +1924,47 @@ pub fn is_uninstall_protected(manifest_id: &str) -> bool {
     is_mandatory(manifest_id) || is_system_plugin(manifest_id) || is_preinstalled(manifest_id)
 }
 
+/// Whether Desktop and the Store label `manifest_id` **System**. It is defined as
+/// [`is_uninstall_protected`] — the very predicate the uninstall refuses on — so
+/// the label and the protection cannot disagree (a plugin that cannot be removed
+/// always reads System, and a System plugin is never removable).
+/// `tools/core-plugin-policy.mjs` (`coreUninstallProtectedIds`) parses the same
+/// three lists for the Marketplace index's `system` flag.
+///
+/// Distinct from the `built_in` projection, which is [`find_system_plugin`]: that
+/// one picks the sidecar-managed card, not the label.
+pub fn is_system_labelled(manifest_id: &str) -> bool {
+    is_uninstall_protected(manifest_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_label_and_uninstall_protection_agree() {
+        let mut ids: Vec<&str> = MANDATORY_PLUGINS
+            .iter()
+            .chain(CORE_PREINSTALLED)
+            .copied()
+            .chain(SYSTEM_PLUGINS.iter().map(|s| s.manifest_id))
+            .collect();
+        // Opt-in built-ins and community ids are neither protected nor System.
+        ids.extend(["@ryu/firewall", "@ryu/routing", "com.example.community"]);
+        for id in ids {
+            assert_eq!(
+                is_system_labelled(id),
+                is_uninstall_protected(id),
+                "{id}: the System label must equal uninstall protection"
+            );
+        }
+        // The two that used to read non-system while being protected.
+        for id in ["@ryu/docs", COMPOSIO_CONNECT_PLUGIN_ID] {
+            assert!(is_uninstall_protected(id), "{id} is protected");
+            assert!(is_system_labelled(id), "{id} is labelled System");
+        }
+        assert!(!is_system_labelled("com.example.community"));
+    }
 
     #[test]
     fn system_apps_contains_default_tool_apps() {
@@ -2107,6 +2241,20 @@ mod tests {
     }
 
     #[test]
+    fn compiled_digest_cache_covers_runtime_and_install_catalogs() {
+        for manifest in crate::plugin_manifest::PluginManifestLoader::load_builtins()
+            .into_iter()
+            .chain(crate::plugin_manifest::PluginManifestLoader::load_install_catalog())
+        {
+            assert!(
+                is_exact_compiled_manifest(&manifest),
+                "embedded {} must retain compiled provenance",
+                manifest.id
+            );
+        }
+    }
+
+    #[test]
     fn clips_bundle_round_trip_retains_core_tier() {
         // Bundle JSON may use the legacy bare `shadow` dependency id. The
         // production loader canonicalizes that edge before activation; exercise
@@ -2282,8 +2430,8 @@ mod tests {
         // pre-installed seed forever.
         assert_eq!(spaces.version, "1.0.0");
 
-        // It declares the grant it really uses (`save_notes_to_space` →
-        // `spaces.ingest_document`), the same grant the Whiteboard declares.
+        // It declares the grant its `spaces.fileNotes` kernel-capability call
+        // requires (`spaces:docs`), the same grant the Whiteboard declares.
         assert!(meetings
             .permission_grants
             .contains(&"spaces:docs".to_owned()));
@@ -2735,6 +2883,21 @@ mod tests {
         // Island settings tab until the user installs the app from the Store).
         assert!(CORE_PLUGINS.contains(&"@ryu/island"));
         assert!(!is_preinstalled("@ryu/island"));
+        // Places (opt-in sidecar + MCP app) stays Core-tier through a literal id;
+        // `app_boundary_guard` forbids a new per-app id constant for it.
+        assert!(CORE_PLUGINS.contains(&"@ryu/places"));
+        assert_eq!(
+            tier_for("@ryu/places"),
+            crate::plugin_manifest::PluginTier::Core
+        );
+        assert!(!is_preinstalled("@ryu/places"));
+        // Decks (opt-in sidecar app that opens local hardware) is the same shape.
+        assert!(CORE_PLUGINS.contains(&"@ryu/decks"));
+        assert_eq!(
+            tier_for("@ryu/decks"),
+            crate::plugin_manifest::PluginTier::Core
+        );
+        assert!(!is_preinstalled("@ryu/decks"));
     }
 
     // ── Registration integrity: every id in a membership list must exist ──────
@@ -3275,32 +3438,41 @@ mod tests {
         }
     }
 
-    /// The Browser app must stay INSTALLABLE but never auto-seeded: no release
-    /// publishes the `ryu-browser-<os>-<arch>` asset its `local` sidecar resolves, and
-    /// a seeded-enabled record makes the desktop drop its working iframe fallback for
-    /// a panel that 502s forever. Re-adding it to `CORE_PREINSTALLED` without shipping
-    /// that asset re-breaks the Browser tab on every fresh install, so the invariant is
-    /// pinned here. Uninstall-protection must be unaffected (it comes from
-    /// `SYSTEM_PLUGINS`/`is_system_plugin`, not from being pre-installed).
+    /// The Browser app is pre-installed only because the release ships an installable
+    /// sidecar asset for every desktop platform — single files on Linux/Windows and a
+    /// `process.bundles` app bundle on both macOS arches. If its manifest ever loses
+    /// a macOS bundle entry, the seeded record would bring back the permanent 502 on
+    /// the main desktop platform, so the pairing is pinned here. Uninstall-protection
+    /// still comes from `SYSTEM_PLUGINS`/`is_system_plugin`.
     #[test]
-    fn browser_is_installable_but_not_seeded_until_its_sidecar_ships() {
-        assert!(
-            CORE_PLUGINS.contains(&BROWSER_PLUGIN_ID),
-            "browser must stay Core-tier + installable from the Store"
-        );
-        assert!(
-            !CORE_PREINSTALLED.contains(&BROWSER_PLUGIN_ID),
-            "browser must NOT be pre-installed while no release publishes a spawnable \
-             ryu-browser binary — a seeded record turns the workspace Browser tab into \
-             a permanent 'sidecar unreachable (502)'"
-        );
-        assert!(!is_preinstalled(BROWSER_PLUGIN_ID));
-        // Still a SYSTEM plugin, so protection is unchanged by the line removal.
+    fn browser_is_preinstalled_only_with_a_macos_bundle_for_every_desktop_arch() {
+        assert!(CORE_PLUGINS.contains(&BROWSER_PLUGIN_ID));
+        assert!(CORE_PREINSTALLED.contains(&BROWSER_PLUGIN_ID));
+        assert!(is_preinstalled(BROWSER_PLUGIN_ID));
         assert!(is_system_plugin(BROWSER_PLUGIN_ID));
-        assert!(
-            is_uninstall_protected(BROWSER_PLUGIN_ID),
-            "browser is uninstall-protected via is_system_plugin, independently of pre-installed"
-        );
+        assert!(is_uninstall_protected(BROWSER_PLUGIN_ID));
+
+        let manifest: crate::plugin_manifest::PluginManifest =
+            serde_json::from_str(include_str!("../../../../generated/ryu-runtime/apps-store/browser/manifest.json"))
+                .expect("browser manifest parses");
+        let sidecar = manifest
+            .sidecars
+            .iter()
+            .find(|s| s.name == "browser")
+            .expect("browser sidecar");
+        crate::plugin_manifest::schema::validate_sidecar_spec(sidecar)
+            .expect("browser sidecar validates");
+        let crate::plugin_manifest::schema::SidecarProcess::Local(local) = &sidecar.process else {
+            panic!("browser sidecar must stay a `local` process");
+        };
+        for platform in ["macos-aarch64", "macos-x86_64"] {
+            let bundle = local
+                .bundles
+                .get(platform)
+                .unwrap_or_else(|| panic!("no bundle for {platform}: macOS cannot run browser"));
+            assert_eq!(bundle.format, "tar.gz");
+            assert!(bundle.entrypoint.contains(".app/Contents/MacOS/"));
+        }
     }
 
     #[test]

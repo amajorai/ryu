@@ -1,0 +1,46 @@
+.fixture1 {
+	position: relative;
+	width: 260px;
+	height: 420px;
+}
+
+.fixture2 {
+	position: relative;
+	width: 260px;
+	height: 420px;
+}
+
+.fixture3 {
+	width: 260px;
+	height: 420px;
+}
+
+.fixture4 {
+	width: 260px;
+	height: 420px;
+}
+
+.column,
+.peekColumn {
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+	width: 260px;
+	height: 100%;
+	background: var(--sidebar);
+}
+.column[data-variant="clipped"] {
+	overflow: hidden;
+	transform: translateX(0);
+}
+.column[data-variant="clip-only"] {
+	overflow: clip;
+}
+.peekColumn {
+	overflow: hidden;
+	transform: translateX(calc(-100% - 12px));
+	transition: transform 200ms ease-out;
+}
+.peekColumn[data-peeked="true"] {
+	transform: translateX(0);
+}

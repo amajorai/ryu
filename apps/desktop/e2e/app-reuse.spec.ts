@@ -146,7 +146,11 @@ test("packed Slides runs in an opaque iframe and exports a real frame", async ({
 		'<iframe title="Slides" sandbox="allow-scripts allow-downloads" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>'
 	);
 	await page.locator("iframe").evaluate((frame, source) => {
-		(frame as HTMLIFrameElement).srcdoc = source;
+		if (!(frame instanceof HTMLIFrameElement)) {
+			throw new Error("Expected proof element to be an HTMLIFrameElement.");
+		}
+
+		frame.srcdoc = source;
 	}, html);
 	const frame = page.frameLocator("iframe");
 	await frame.getByRole("button", { name: "Open First frame" }).click();
@@ -192,7 +196,11 @@ for (const app of ["finetune", "workflows"]) {
 			'<iframe title="App" sandbox="allow-scripts" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe>'
 		);
 		await page.locator("iframe").evaluate((frame, source) => {
-			(frame as HTMLIFrameElement).srcdoc = source;
+			if (!(frame instanceof HTMLIFrameElement)) {
+				throw new Error("Expected proof element to be an HTMLIFrameElement.");
+			}
+
+			frame.srcdoc = source;
 		}, html);
 		const frame = page.frameLocator("iframe");
 		await expect(frame.locator(".ryu-app-toolbar")).toBeVisible();

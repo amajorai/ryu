@@ -9,6 +9,7 @@
 
 import { AlertCircleIcon } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useSystemStatusContext } from "@/src/contexts/SystemStatusContext.tsx";
 import { useNodeHealth } from "@/src/hooks/useNodeHealth.ts";
 import { MIN_CORE_VERSION } from "@/src/lib/node-compat.ts";
@@ -36,6 +37,7 @@ export interface SystemAnnouncement {
 export function useSystemAnnouncements(): SystemAnnouncement[] {
 	const { coreReachable, gatewayReachable, loading } = useSystemStatusContext();
 	const { data: nodeHealth } = useNodeHealth();
+	const tl = useLiteralMessages();
 
 	const items: SystemAnnouncement[] = [];
 
@@ -73,7 +75,10 @@ export function useSystemAnnouncements(): SystemAnnouncement[] {
 		items.push({
 			id: "system:node-outdated",
 			title: "Node needs updating",
-			body: `This node runs Core v${nodeHealth.version ?? "?"} · the app expects v${MIN_CORE_VERSION}+. Some features may be unavailable until it's updated.`,
+			body: tl(
+				"This node runs Core v{version} · the app expects v{minVersion}+. Some features may be unavailable until it's updated.",
+				{ version: nodeHealth.version ?? "?", minVersion: MIN_CORE_VERSION }
+			),
 			icon: AlertCircleIcon,
 			accent: "var(--warning)",
 		});

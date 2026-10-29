@@ -29,7 +29,7 @@ export default defineConfig({
 						"@/src/contributions/RouteOutlet.tsx":
 							"/tmp/ryu-navigation-baseline/RouteOutlet.tsx",
 					}
-				: {}),
+				: undefined),
 			"@": desktopRoot,
 		},
 		dedupe: ["react", "react-dom"],
@@ -53,4 +53,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "navigation-performance-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

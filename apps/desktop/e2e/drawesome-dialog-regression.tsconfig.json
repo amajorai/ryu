@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "drawesome-dialog-regression.spec.ts",
+    "drawesome-dialog-regression.host.ts",
+    "drawesome-dialog-regression.playwright.config.ts",
+    "harness/drawesome-dialog-regression.tsx",
+    "harness/vite.drawesome-dialog-regression.config.ts"
+  ],
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  }
+}

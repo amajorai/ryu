@@ -7,6 +7,7 @@
 
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{Arc, OnceLock},
     time::Duration,
 };
@@ -22,6 +23,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
 use super::{conversations::Tenancy, ServerState};
@@ -31,9 +33,19 @@ const MAX_ID_COUNT: usize = 200;
 const MAX_AGENT_SUGGESTIONS: usize = 4;
 const MAX_PROFILE_JOBS: usize = 64;
 const MAX_PROFILE_JOBS_PER_OWNER: usize = 2;
-const PROFILE_JOB_QUEUE_TTL_MS: i64 = 5 * 60 * 1000;
 const PROFILE_JOB_MAX_AGE_MS: i64 = 30 * 60 * 1000;
 const PROFILE_JOB_RETENTION_MS: i64 = 60 * 60 * 1000;
+/// How long a cancelled draft may take to stop its model turn before the
+/// driver gives up waiting and releases the job's slot anyway.
+const PROFILE_DRAFT_CANCEL_GRACE: Duration = Duration::from_secs(30);
+/// How often a cancelled draft re-signals its turn. Repeating the signal covers
+/// a cancel that lands before the agent has registered the turn it could stop.
+const PROFILE_DRAFT_CANCEL_RESIGNAL: Duration = Duration::from_millis(250);
+/// Conversation ids of profile drafts still in flight. A draft's turn persists
+/// into its reserved conversation, so a Core that exits mid-draft would leave a
+/// half-built profile chat behind; [`sweep_abandoned_profile_drafts`] removes
+/// whatever this list still names at the next startup.
+const PENDING_PROFILE_DRAFTS_PREF: &str = "onboarding-profile-pending-drafts";
 
 /// Tool ids the profile builder may place in a generated agent recipe. These
 /// are stable, first-party Ryu tools rather than arbitrary ids copied from an
@@ -77,7 +89,6 @@ fn default_recent_days() -> u32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JobState {
-    Queued,
     Building,
     Completed,
     Failed,
@@ -87,7 +98,6 @@ enum JobState {
 impl JobState {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Queued => "queued",
             Self::Building => "building",
             Self::Completed => "completed",
             Self::Failed => "failed",
@@ -124,18 +134,40 @@ fn profile_onboarding_snapshot_matches(
     profile_onboarding_snapshot(state) == *expected
 }
 
+/// The validated, caller-bound inputs a profile build runs with. Captured once
+/// at `start` so the detached build never re-reads request state.
 #[derive(Debug, Clone)]
-struct ProfileJob {
+struct ProfileJobInputs {
     onboarding: ProfileOnboardingSnapshot,
     composio_connection_scope: Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
     owner_user_id: String,
     org_id: String,
     input: StartBody,
+}
+
+/// One onboarding profile build.
+///
+/// The build starts as soon as the job is created. It runs in two phases:
+/// drafting (source reads and the model turn, which persists into the
+/// owner-scoped profile conversation and stays cancellable through `cancel`)
+/// and materialisation (the profile memory, after which the conversation is
+/// kept). `materialized` flips under the job lock right before the second
+/// phase, so a cancel either withdraws the draft, stopping its turn and
+/// deleting its conversation, or is refused because writing has begun.
+/// `background` records only that the user chose to leave the progress view;
+/// it never gates the build. `driver_active` stays set until the job's driver
+/// has returned, so a cancelled job whose model turn is still stopping keeps
+/// counting against the per-owner and node caps.
+#[derive(Debug, Clone)]
+struct ProfileJob {
+    inputs: ProfileJobInputs,
     state: JobState,
     started_at_ms: i64,
     materialized: bool,
     background: bool,
     cancel_requested: bool,
+    cancel: CancellationToken,
+    driver_active: bool,
     conversation_id: Option<String>,
     error: Option<String>,
     agent_suggestions: Vec<AgentSuggestion>,
@@ -183,9 +215,14 @@ struct ProfileModelResponse {
 #[serde(rename_all = "camelCase")]
 struct ProfileJobView {
     agent_suggestions: Vec<AgentSuggestion>,
+    /// The user chose to leave the progress view while the build continues.
+    background: bool,
     conversation_id: Option<String>,
     error: Option<String>,
     id: String,
+    /// Legacy flag for clients that predate `background`: true once the user
+    /// chose to leave the progress view or the profile is being (or was)
+    /// saved. Read `background` and `state` instead.
     materialized: bool,
     state: &'static str,
     started_at_ms: i64,
@@ -219,6 +256,13 @@ fn profile_job_is_terminal(job: &ProfileJob) -> bool {
     )
 }
 
+/// Whether a job still counts against the per-owner and node caps. A cancelled
+/// or expired job reports a terminal state at once, but its driver may still be
+/// stopping the model turn; the slot is released only when the driver returns.
+fn profile_job_holds_slot(job: &ProfileJob) -> bool {
+    !profile_job_is_terminal(job) || job.driver_active
+}
+
 /// Bound the process-global job table and withdraw work that a disconnected
 /// client left behind. Terminal rows remain briefly so the desktop can fetch a
 /// final status, while old live rows are marked failed/cancelled instead of
@@ -228,12 +272,13 @@ fn prune_profile_jobs(guard: &mut HashMap<String, ProfileJob>, now: i64) {
         let age = now.saturating_sub(job.started_at_ms);
         if !profile_job_is_terminal(job) && age > PROFILE_JOB_MAX_AGE_MS {
             job.cancel_requested = true;
+            job.cancel.cancel();
             job.state = JobState::Failed;
             job.error = Some("profile job expired; start onboarding again".to_owned());
         }
     }
     guard.retain(|_, job| {
-        !profile_job_is_terminal(job)
+        profile_job_holds_slot(job)
             || now.saturating_sub(job.started_at_ms) <= PROFILE_JOB_RETENTION_MS
     });
     if guard.len() <= MAX_PROFILE_JOBS {
@@ -241,7 +286,7 @@ fn prune_profile_jobs(guard: &mut HashMap<String, ProfileJob>, now: i64) {
     }
     let mut terminal_ids = guard
         .iter()
-        .filter(|(_, job)| profile_job_is_terminal(job))
+        .filter(|(_, job)| !profile_job_holds_slot(job))
         .map(|(id, job)| (id.clone(), job.started_at_ms))
         .collect::<Vec<_>>();
     terminal_ids.sort_by_key(|(_, started_at_ms)| *started_at_ms);
@@ -729,28 +774,9 @@ async fn profile_connection_scope(
                 format!("selected Composio sources are unavailable: {cause}"),
             )
         })?;
-    let available = listed
-        .get("data")
-        .and_then(Value::as_array)
+    let available = crate::agent_access::active_composio_bindings(&listed)
         .into_iter()
-        .flatten()
-        .filter_map(|connection| {
-            let id = connection.get("id").and_then(Value::as_str)?.trim();
-            let toolkit = connection.get("toolkit").and_then(Value::as_str)?.trim();
-            let active = connection
-                .get("active")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            (active && !id.is_empty() && !toolkit.is_empty()).then(|| {
-                (
-                    id.to_owned(),
-                    crate::sidecar::adapters::ComposioConnectionBinding {
-                        id: id.to_owned(),
-                        toolkit: toolkit.to_ascii_lowercase(),
-                    },
-                )
-            })
-        })
+        .map(|binding| (binding.id.clone(), binding))
         .collect::<HashMap<_, _>>();
     let mut selected = Vec::with_capacity(source_ids.len());
     for source_id in source_ids {
@@ -832,10 +858,14 @@ async fn profile_imported_conversations(
 fn view(id: &str, job: &ProfileJob) -> ProfileJobView {
     ProfileJobView {
         agent_suggestions: job.agent_suggestions.clone(),
+        background: job.background,
         conversation_id: job.conversation_id.clone(),
         error: job.error.clone(),
         id: id.to_owned(),
-        materialized: job.materialized,
+        // Older desktops show "Continue setup" (and hide "Run in background")
+        // only once this is true, and older nodes set it as soon as the user
+        // chose the background. Keep that meaning on the wire.
+        materialized: job.materialized || job.background,
         state: job.state.as_str(),
         started_at_ms: job.started_at_ms,
     }
@@ -869,7 +899,7 @@ pub fn routes() -> Router<ServerState> {
     tag = "Preferences",
     summary = "Start onboarding profile build",
     request_body = StartBody,
-    responses((status = 202, description = "Profile build queued", body = ProfileJobView))
+    responses((status = 202, description = "Profile build started", body = ProfileJobView))
 )]
 pub(crate) async fn start(
     State(state): State<ServerState>,
@@ -907,9 +937,9 @@ pub(crate) async fn start(
     let owner_job_count = guard
         .values()
         .filter(|job| {
-            !profile_job_is_terminal(job)
-                && job.owner_user_id == owner_user_id
-                && job.org_id == org_id
+            profile_job_holds_slot(job)
+                && job.inputs.owner_user_id == owner_user_id
+                && job.inputs.org_id == org_id
         })
         .count();
     if owner_job_count >= MAX_PROFILE_JOBS_PER_OWNER {
@@ -927,16 +957,22 @@ pub(crate) async fn start(
 
     let id = uuid::Uuid::new_v4().to_string();
     let job = ProfileJob {
-        onboarding,
-        composio_connection_scope,
-        owner_user_id,
-        org_id,
-        input: body,
-        state: JobState::Queued,
+        inputs: ProfileJobInputs {
+            onboarding,
+            composio_connection_scope,
+            owner_user_id,
+            org_id,
+            input: body,
+        },
+        // The build starts immediately; there is no queue to wait in.
+        state: JobState::Building,
         started_at_ms: now_ms(),
         materialized: false,
         background: false,
         cancel_requested: false,
+        cancel: CancellationToken::new(),
+        // `run_job` is spawned below and clears this when it returns.
+        driver_active: true,
         conversation_id: None,
         error: None,
         agent_suggestions: Vec::new(),
@@ -973,13 +1009,13 @@ pub(crate) async fn status(
     };
     let mut guard = jobs().lock().await;
     prune_profile_jobs(&mut guard, now_ms());
-    let Some(job) = guard.get(&id).cloned() else {
+    let Some(job) = guard.get(&id) else {
         return error(StatusCode::NOT_FOUND, "profile job not found");
     };
-    if job.owner_user_id != caller.user_id || job.org_id != caller.org_id.unwrap_or_default() {
+    if !job_belongs_to(job, &caller) {
         return error(StatusCode::NOT_FOUND, "profile job not found");
     }
-    Json(view(&id, &job)).into_response()
+    Json(view(&id, job)).into_response()
 }
 
 #[utoipa::path(
@@ -1002,13 +1038,10 @@ pub(crate) async fn cancel(
     let Some(job) = guard.get_mut(&id) else {
         return error(StatusCode::NOT_FOUND, "profile job not found");
     };
-    if job.owner_user_id != caller.user_id || job.org_id != caller.org_id.unwrap_or_default() {
+    if !job_belongs_to(job, &caller) {
         return error(StatusCode::NOT_FOUND, "profile job not found");
     }
-    if !job.materialized {
-        job.cancel_requested = true;
-        job.state = JobState::Cancelled;
-    }
+    request_cancel(job);
     Json(view(&id, job)).into_response()
 }
 
@@ -1032,83 +1065,188 @@ pub(crate) async fn background(
     let Some(job) = guard.get_mut(&id) else {
         return error(StatusCode::NOT_FOUND, "profile job not found");
     };
-    if job.owner_user_id != caller.user_id || job.org_id != caller.org_id.unwrap_or_default() {
+    if !job_belongs_to(job, &caller) {
         return error(StatusCode::NOT_FOUND, "profile job not found");
     }
+    // Purely a UI choice: the build is already running and keeps running
+    // whether or not the user stays on the progress view.
     job.background = true;
     Json(view(&id, job)).into_response()
 }
 
-async fn run_job(id: String, state: ServerState) {
-    loop {
-        let should_materialize = {
-            let mut guard = jobs().lock().await;
-            let Some(job) = guard.get_mut(&id) else {
-                return;
-            };
-            if job.cancel_requested {
-                if job.state != JobState::Failed {
-                    job.state = JobState::Cancelled;
-                }
-                return;
-            }
-            if now_ms().saturating_sub(job.started_at_ms) > PROFILE_JOB_QUEUE_TTL_MS {
-                job.state = JobState::Failed;
-                job.error = Some("profile job expired before it was started".to_owned());
-                return;
-            }
-            // Keep the pre-materialisation job cancellable. The desktop exposes
-            // “Run in background” after its 20-second affordance; only that
-            // explicit action creates the durable profile conversation.
-            if job.background {
-                job.state = JobState::Building;
-                true
-            } else {
-                false
-            }
-        };
-        if should_materialize {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+fn job_belongs_to(job: &ProfileJob, caller: &crate::identity_verify::VerifiedCaller) -> bool {
+    job.inputs.owner_user_id == caller.user_id
+        && job.inputs.org_id == caller.org_id.as_deref().unwrap_or_default()
+}
+
+/// Withdraw a build that has not started writing durable state. Returns whether
+/// the job was cancelled; a terminal or materialising job is left unchanged.
+fn request_cancel(job: &mut ProfileJob) -> bool {
+    if job.materialized || profile_job_is_terminal(job) {
+        return false;
     }
+    job.cancel_requested = true;
+    job.state = JobState::Cancelled;
+    job.cancel.cancel();
+    true
+}
 
-    let (conversation_id, input, onboarding, composio_connection_scope, owner_user_id, org_id) = {
-        let mut guard = jobs().lock().await;
-        let Some(job) = guard.get_mut(&id) else {
-            return;
-        };
-        if job.cancel_requested || job.state == JobState::Cancelled {
-            job.state = JobState::Cancelled;
-            return;
-        }
-        let conversation_id = format!("profile-{}", uuid::Uuid::new_v4());
-        job.materialized = true;
-        job.conversation_id = Some(conversation_id.clone());
-        (
-            conversation_id,
-            job.input.clone(),
-            job.onboarding.clone(),
-            job.composio_connection_scope.clone(),
-            job.owner_user_id.clone(),
-            job.org_id.clone(),
-        )
-    };
+/// The parsed result of the profile turn, held until it is materialised. The
+/// turn itself has already persisted its prompt and reply (with their tool and
+/// source parts) into the profile conversation.
+#[derive(Debug, Clone)]
+struct ProfileDraft {
+    agent_id: String,
+    agent_suggestions: Vec<AgentSuggestion>,
+    profile: String,
+}
 
-    let result = build_profile(
-        &state,
-        &conversation_id,
-        &input,
-        &onboarding,
-        composio_connection_scope,
-        &owner_user_id,
-        &org_id,
+async fn run_job(id: String, state: ServerState) {
+    let draft_state = state.clone();
+    let discard_state = state.clone();
+    drive_job(
+        &id,
+        move |inputs, conversation_id| async move {
+            draft_profile(&draft_state, &inputs, &conversation_id).await
+        },
+        move |inputs, conversation_id, draft| async move {
+            // Accepted: the conversation is the user's profile chat from here
+            // on, so a restart must no longer sweep it.
+            clear_pending_profile_draft(&state.preferences, &conversation_id).await;
+            materialize_profile(&state, &inputs, &conversation_id, draft).await
+        },
+        move |conversation_id| async move {
+            discard_profile_draft(&discard_state, &conversation_id).await;
+        },
+        |conversation_id| {
+            // Every canceller: an ACP agent runs the turn on a detached task
+            // that dropping the draft future does not stop.
+            super::cancel_conversation_turn(conversation_id);
+        },
+        PROFILE_DRAFT_CANCEL_GRACE,
     )
     .await;
+}
+
+/// Run one job through its draft and materialisation phases, then release the
+/// job's slot. The phases are injected so the lifecycle (start immediately,
+/// cancel only before materialisation, record the outcome) is testable without
+/// a model.
+///
+/// On a cancel the draft turn is stopped, not merely abandoned: `stop_turn` is
+/// signalled until the draft future ends (bounded by `cancel_grace`), and only
+/// then does `discard` run, so a turn that is still persisting cannot write
+/// into a conversation that was already removed. `discard` runs whenever a
+/// draft is withdrawn before materialisation (a cancel, an expired job, or a
+/// failed draft) so the conversation the draft wrote does not outlive it.
+async fn drive_job<Draft, DraftFut, Commit, CommitFut, Discard, DiscardFut, Stop>(
+    id: &str,
+    draft: Draft,
+    commit: Commit,
+    discard: Discard,
+    stop_turn: Stop,
+    cancel_grace: Duration,
+) where
+    Draft: FnOnce(ProfileJobInputs, String) -> DraftFut,
+    DraftFut: Future<Output = anyhow::Result<ProfileDraft>>,
+    Commit: FnOnce(ProfileJobInputs, String, ProfileDraft) -> CommitFut,
+    CommitFut: Future<Output = anyhow::Result<()>>,
+    Discard: FnOnce(String) -> DiscardFut,
+    DiscardFut: Future<Output = ()>,
+    Stop: Fn(&str),
+{
+    drive_job_phases(id, draft, commit, discard, stop_turn, cancel_grace).await;
+    if let Some(job) = jobs().lock().await.get_mut(id) {
+        job.driver_active = false;
+    }
+}
+
+async fn drive_job_phases<Draft, DraftFut, Commit, CommitFut, Discard, DiscardFut, Stop>(
+    id: &str,
+    draft: Draft,
+    commit: Commit,
+    discard: Discard,
+    stop_turn: Stop,
+    cancel_grace: Duration,
+) where
+    Draft: FnOnce(ProfileJobInputs, String) -> DraftFut,
+    DraftFut: Future<Output = anyhow::Result<ProfileDraft>>,
+    Commit: FnOnce(ProfileJobInputs, String, ProfileDraft) -> CommitFut,
+    CommitFut: Future<Output = anyhow::Result<()>>,
+    Discard: FnOnce(String) -> DiscardFut,
+    DiscardFut: Future<Output = ()>,
+    Stop: Fn(&str),
+{
+    let (inputs, cancel) = {
+        let guard = jobs().lock().await;
+        let Some(job) = guard.get(id) else {
+            return;
+        };
+        if job.cancel_requested || profile_job_is_terminal(job) {
+            return;
+        }
+        (job.inputs.clone(), job.cancel.clone())
+    };
+    let conversation_id = format!("profile-{}", uuid::Uuid::new_v4());
+
+    let mut draft_turn = Box::pin(draft(inputs.clone(), conversation_id.clone()));
+    let drafted = tokio::select! {
+        biased;
+        () = cancel.cancelled() => None,
+        result = &mut draft_turn => Some(result),
+    };
+    if drafted.is_none() {
+        let stopped = tokio::time::timeout(cancel_grace, async {
+            loop {
+                stop_turn(&conversation_id);
+                tokio::select! {
+                    _ = &mut draft_turn => break,
+                    () = tokio::time::sleep(PROFILE_DRAFT_CANCEL_RESIGNAL) => {}
+                }
+            }
+        })
+        .await;
+        if stopped.is_err() {
+            tracing::warn!(
+                conversation_id = %conversation_id,
+                "onboarding: a cancelled profile draft did not stop within its grace period"
+            );
+        }
+    }
+    // Dropping the future also ends a turn that is bound to its stream.
+    drop(draft_turn);
+
+    let accepted = {
+        let mut guard = jobs().lock().await;
+        match (guard.get_mut(id), drafted) {
+            // Cancelled, expired, or pruned while drafting: withdraw the draft.
+            (None, _) | (_, None) => None,
+            (Some(job), _) if job.cancel_requested || profile_job_is_terminal(job) => None,
+            (Some(job), Some(Ok(draft))) => {
+                // Flipped under the job lock, so a concurrent cancel either
+                // landed above or is refused from here on.
+                job.materialized = true;
+                job.conversation_id = Some(conversation_id.clone());
+                Some(draft)
+            }
+            (Some(job), Some(Err(err))) => {
+                job.state = JobState::Failed;
+                job.error = Some(err.to_string());
+                None
+            }
+        }
+    };
+    let Some(draft) = accepted else {
+        discard(conversation_id).await;
+        return;
+    };
+
+    let agent_suggestions = draft.agent_suggestions.clone();
+    let result = commit(inputs, conversation_id, draft).await;
     let mut guard = jobs().lock().await;
-    if let Some(job) = guard.get_mut(&id) {
+    if let Some(job) = guard.get_mut(id) {
         match result {
-            Ok(agent_suggestions) => {
+            Ok(()) => {
                 job.agent_suggestions = agent_suggestions;
                 job.state = JobState::Completed;
             }
@@ -1120,18 +1258,132 @@ async fn run_job(id: String, state: ServerState) {
     }
 }
 
-async fn build_profile(
-    state: &ServerState,
-    conversation_id: &str,
-    input: &StartBody,
-    onboarding: &ProfileOnboardingSnapshot,
-    composio_connection_scope: Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
-    owner_user_id: &str,
-    org_id: &str,
-) -> anyhow::Result<Vec<AgentSuggestion>> {
-    verify_profile_onboarding_snapshot(state, onboarding).await?;
-    let team_knowledge = onboarding.setup_kind == NodeSetupKind::Team;
+/// Remove the conversation a withdrawn draft wrote: its row and the prompt and
+/// partial reply the stopped turn persisted. The draft's pending marker is
+/// cleared only once the row is gone, so a failed delete is retried by the
+/// next startup sweep.
+async fn discard_profile_draft(state: &ServerState, conversation_id: &str) {
+    crate::sidecar::adapters::acp::close_conversation_instances(conversation_id);
+    match state
+        .conversations
+        .delete_conversation(conversation_id)
+        .await
+    {
+        Ok(_) => clear_pending_profile_draft(&state.preferences, conversation_id).await,
+        Err(error) => tracing::warn!(
+            conversation_id,
+            "onboarding: could not remove a withdrawn profile draft conversation: {error:#}"
+        ),
+    }
+}
 
+/// Serialises read-modify-write of [`PENDING_PROFILE_DRAFTS_PREF`].
+fn pending_profile_drafts_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+async fn read_pending_profile_drafts(
+    preferences: &crate::server::preferences::PreferencesStore,
+) -> Vec<String> {
+    preferences
+        .get(PENDING_PROFILE_DRAFTS_PREF)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+async fn write_pending_profile_drafts(
+    preferences: &crate::server::preferences::PreferencesStore,
+    ids: &[String],
+) -> anyhow::Result<()> {
+    if ids.is_empty() {
+        preferences.delete(PENDING_PROFILE_DRAFTS_PREF).await
+    } else {
+        preferences
+            .set(PENDING_PROFILE_DRAFTS_PREF, &serde_json::to_string(ids)?)
+            .await
+    }
+}
+
+/// Record a draft's conversation before anything is written to it.
+async fn mark_pending_profile_draft(
+    preferences: &crate::server::preferences::PreferencesStore,
+    conversation_id: &str,
+) -> anyhow::Result<()> {
+    let _guard = pending_profile_drafts_lock().lock().await;
+    let mut ids = read_pending_profile_drafts(preferences).await;
+    if !ids.iter().any(|id| id == conversation_id) {
+        ids.push(conversation_id.to_owned());
+    }
+    write_pending_profile_drafts(preferences, &ids)
+        .await
+        .context("recording the pending profile draft")
+}
+
+async fn clear_pending_profile_draft(
+    preferences: &crate::server::preferences::PreferencesStore,
+    conversation_id: &str,
+) {
+    let _guard = pending_profile_drafts_lock().lock().await;
+    let mut ids = read_pending_profile_drafts(preferences).await;
+    let before = ids.len();
+    ids.retain(|id| id != conversation_id);
+    if ids.len() == before {
+        return;
+    }
+    if let Err(error) = write_pending_profile_drafts(preferences, &ids).await {
+        tracing::warn!(
+            conversation_id,
+            "onboarding: could not clear a pending profile draft marker: {error:#}"
+        );
+    }
+}
+
+/// Remove profile drafts a previous Core process left mid-build. Jobs live
+/// only in memory, so at startup every conversation still marked pending
+/// belongs to a draft that can no longer finish. Returns how many were removed.
+pub(crate) async fn sweep_abandoned_profile_drafts(
+    preferences: &crate::server::preferences::PreferencesStore,
+    conversations: &crate::server::conversations::ConversationStore,
+) -> usize {
+    let _guard = pending_profile_drafts_lock().lock().await;
+    let mut kept = Vec::new();
+    let mut removed = 0;
+    for conversation_id in read_pending_profile_drafts(preferences).await {
+        // Only ids this module minted; anything else is dropped from the list.
+        if !conversation_id.starts_with("profile-") {
+            continue;
+        }
+        match conversations.delete_conversation(&conversation_id).await {
+            Ok(_) => removed += 1,
+            Err(error) => {
+                tracing::warn!(
+                    conversation_id = %conversation_id,
+                    "onboarding: could not remove an abandoned profile draft: {error:#}"
+                );
+                kept.push(conversation_id);
+            }
+        }
+    }
+    if let Err(error) = write_pending_profile_drafts(preferences, &kept).await {
+        tracing::warn!("onboarding: could not update pending profile drafts: {error:#}");
+    }
+    removed
+}
+
+/// The owner-scoped profile conversation row. The draft reserves it before the
+/// model turn: on an org-bound node the turn's conversation-reading and
+/// Composio tools resolve their principal from this row's owner, and fail
+/// closed without it.
+async fn ensure_profile_conversation(
+    state: &ServerState,
+    inputs: &ProfileJobInputs,
+    conversation_id: &str,
+) -> anyhow::Result<()> {
+    let team_knowledge = inputs.onboarding.setup_kind == NodeSetupKind::Team;
     state
         .conversations
         .ensure_conversation(
@@ -1142,9 +1394,32 @@ async fn build_profile(
             } else {
                 "Your private Ryu profile"
             }),
-            Tenancy::owned_by(Some(owner_user_id), Some(org_id)),
+            Tenancy::owned_by(Some(&inputs.owner_user_id), Some(&inputs.org_id)),
         )
-        .await?;
+        .await
+}
+
+/// Read the approved sources through the agent and draft the profile. The turn
+/// persists like any chat turn, so it keeps the user's personalization context
+/// and the reply's tool and source parts; the conversation is marked pending
+/// first, and a withdrawn draft (a cancel, a failure, or a Core restart) has the
+/// whole conversation removed, so it leaves no conversation, message, or memory
+/// behind.
+async fn draft_profile(
+    state: &ServerState,
+    inputs: &ProfileJobInputs,
+    conversation_id: &str,
+) -> anyhow::Result<ProfileDraft> {
+    let ProfileJobInputs {
+        onboarding,
+        composio_connection_scope,
+        input,
+        ..
+    } = inputs;
+    verify_profile_onboarding_snapshot(state, onboarding).await?;
+    let team_knowledge = onboarding.setup_kind == NodeSetupKind::Team;
+    mark_pending_profile_draft(&state.preferences, conversation_id).await?;
+    ensure_profile_conversation(state, inputs, conversation_id).await?;
 
     let selection = input
         .cloud_selection
@@ -1218,7 +1493,7 @@ async fn build_profile(
         state.mcp.clone(),
         state.skills.clone(),
         state.traces.clone(),
-        composio_connection_scope,
+        composio_connection_scope.clone(),
         input.imported_conversation_ids.clone(),
     )
     .await?;
@@ -1230,6 +1505,35 @@ async fn build_profile(
     if profile.trim().is_empty() {
         anyhow::bail!("the profile agent returned no profile draft");
     }
+    Ok(ProfileDraft {
+        agent_id,
+        agent_suggestions,
+        profile,
+    })
+}
+
+/// Keep the accepted draft: its profile conversation (already written by the
+/// draft turn) stays, and the scoped profile memory is written.
+async fn materialize_profile(
+    state: &ServerState,
+    inputs: &ProfileJobInputs,
+    conversation_id: &str,
+    draft: ProfileDraft,
+) -> anyhow::Result<()> {
+    let ProfileJobInputs {
+        onboarding,
+        owner_user_id,
+        org_id,
+        ..
+    } = inputs;
+    let ProfileDraft {
+        agent_id, profile, ..
+    } = draft;
+    verify_profile_onboarding_snapshot(state, onboarding).await?;
+    let team_knowledge = onboarding.setup_kind == NodeSetupKind::Team;
+
+    // Idempotent: the draft created this owner-scoped row before its turn ran.
+    ensure_profile_conversation(state, inputs, conversation_id).await?;
 
     let tags = vec!["onboarding".to_owned(), "profile-bootstrap".to_owned()];
     verify_profile_onboarding_snapshot(state, onboarding).await?;
@@ -1263,7 +1567,7 @@ async fn build_profile(
         };
         write_memory(state, onboarding, owner_user_id, &agent_id, user_memory).await?;
     }
-    Ok(agent_suggestions)
+    Ok(())
 }
 
 async fn write_memory(
@@ -1324,6 +1628,7 @@ mod tests {
         crate::identity_verify::VerifiedCaller {
             user_id: user_id.to_owned(),
             email: None,
+            email_verified: false,
             org_id: Some("org-1".to_owned()),
             role: crate::identity_verify::OrgRole::Owner,
             teams: vec![crate::identity_verify::TeamMembership {
@@ -1524,4 +1829,439 @@ You repeat release checks across several recent sessions.
         ));
         assert!(!profile_conversation_is_readable(&owner, &team_other, true));
     }
+
+    fn test_job() -> ProfileJob {
+        ProfileJob {
+            inputs: ProfileJobInputs {
+                onboarding: ProfileOnboardingSnapshot {
+                    company_context: String::new(),
+                    company_knowledge_enabled: false,
+                    setup_kind: NodeSetupKind::Personal,
+                },
+                composio_connection_scope: None,
+                owner_user_id: "owner-1".to_owned(),
+                org_id: "org-1".to_owned(),
+                input: StartBody {
+                    cloud_selection: None,
+                    source_ids: Vec::new(),
+                    imported_conversation_ids: Vec::new(),
+                    recent_days: 90,
+                    share_user_org: false,
+                },
+            },
+            state: JobState::Building,
+            started_at_ms: now_ms(),
+            materialized: false,
+            background: false,
+            cancel_requested: false,
+            cancel: CancellationToken::new(),
+            driver_active: true,
+            conversation_id: None,
+            error: None,
+            agent_suggestions: Vec::new(),
+        }
+    }
+
+    /// A stop hook for drafts that never reach a cancel.
+    fn no_stop(_: &str) {}
+
+    const TEST_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+    async fn insert_test_job() -> String {
+        let id = format!("test-{}", uuid::Uuid::new_v4());
+        jobs().lock().await.insert(id.clone(), test_job());
+        id
+    }
+
+    async fn job_snapshot(id: &str) -> ProfileJob {
+        jobs()
+            .lock()
+            .await
+            .get(id)
+            .cloned()
+            .expect("test job is still tracked")
+    }
+
+    fn test_draft() -> ProfileDraft {
+        ProfileDraft {
+            agent_id: "ryu".to_owned(),
+            agent_suggestions: vec![AgentSuggestion {
+                description: "Drafts a weekly summary.".to_owned(),
+                id: "weekly-0".to_owned(),
+                name: "weekly".to_owned(),
+                reason: "Repeated weekly summaries.".to_owned(),
+                system_prompt: "Summarize the week.".to_owned(),
+                title: "Weekly".to_owned(),
+                tools: Vec::new(),
+            }],
+            profile: "Profile".to_owned(),
+        }
+    }
+
+    /// Records which phases ran and with which conversation id.
+    #[derive(Clone, Default)]
+    struct PhaseLog {
+        drafted: Arc<std::sync::Mutex<Option<String>>>,
+        committed: Arc<std::sync::Mutex<Option<String>>>,
+        discarded: Arc<std::sync::Mutex<Option<String>>>,
+    }
+
+    impl PhaseLog {
+        fn record(slot: &std::sync::Mutex<Option<String>>, conversation_id: String) {
+            *slot.lock().unwrap() = Some(conversation_id);
+        }
+
+        fn get(slot: &std::sync::Mutex<Option<String>>) -> Option<String> {
+            slot.lock().unwrap().clone()
+        }
+
+        fn discard(&self) -> impl FnOnce(String) -> std::future::Ready<()> {
+            let discarded = self.discarded.clone();
+            move |conversation_id| {
+                Self::record(&discarded, conversation_id);
+                std::future::ready(())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn foreground_profile_job_completes_without_the_background_flag() {
+        let id = insert_test_job().await;
+        let log = PhaseLog::default();
+        let drafted = log.drafted.clone();
+        let committed = log.committed.clone();
+
+        drive_job(
+            &id,
+            move |_, conversation_id| async move {
+                PhaseLog::record(&drafted, conversation_id);
+                anyhow::Ok(test_draft())
+            },
+            move |_, conversation_id, _| async move {
+                PhaseLog::record(&committed, conversation_id);
+                anyhow::Ok(())
+            },
+            log.discard(),
+            no_stop,
+            TEST_GRACE,
+        )
+        .await;
+
+        let job = job_snapshot(&id).await;
+        assert!(!job.background, "the user never chose Run in background");
+        assert_eq!(job.state, JobState::Completed);
+        assert!(job.materialized);
+        assert!(!job.driver_active, "a finished driver releases its slot");
+        assert!(!profile_job_holds_slot(&job));
+        assert_eq!(job.agent_suggestions.len(), 1);
+        let drafted = PhaseLog::get(&log.drafted);
+        assert!(
+            drafted.is_some(),
+            "the build ran without the background flag"
+        );
+        assert_eq!(PhaseLog::get(&log.committed), drafted);
+        assert_eq!(job.conversation_id, drafted);
+        assert_eq!(PhaseLog::get(&log.discarded), None);
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_drafting_profile_job_stops_its_turn_and_discards_the_draft() {
+        let id = insert_test_job().await;
+        let log = PhaseLog::default();
+        let (draft_started_tx, draft_started_rx) = tokio::sync::oneshot::channel::<()>();
+        // The model turn runs elsewhere (an ACP agent's detached task) and only
+        // ends when it is told to stop, like a real cancelled turn.
+        let turn_stopped = Arc::new(tokio::sync::Notify::new());
+        let stop_signals = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let (release_turn_tx, release_turn_rx) = tokio::sync::oneshot::channel::<()>();
+        let committed = log.committed.clone();
+        let drafted = log.drafted.clone();
+        let discard = log.discard();
+        let task_id = id.clone();
+        let turn_stopped_in_draft = turn_stopped.clone();
+        let stop_signals_in_hook = stop_signals.clone();
+        let turn_stopped_in_hook = turn_stopped.clone();
+        let task = tokio::spawn(async move {
+            drive_job(
+                &task_id,
+                move |_, conversation_id| async move {
+                    PhaseLog::record(&drafted, conversation_id);
+                    let _ = draft_started_tx.send(());
+                    turn_stopped_in_draft.notified().await;
+                    // The stopped turn still needs a moment to wind down.
+                    let _ = release_turn_rx.await;
+                    Err::<ProfileDraft, _>(anyhow::anyhow!("turn cancelled"))
+                },
+                move |_, conversation_id, _| async move {
+                    PhaseLog::record(&committed, conversation_id);
+                    anyhow::Ok(())
+                },
+                discard,
+                move |conversation_id: &str| {
+                    stop_signals_in_hook
+                        .lock()
+                        .unwrap()
+                        .push(conversation_id.to_owned());
+                    turn_stopped_in_hook.notify_one();
+                },
+                TEST_GRACE,
+            )
+            .await;
+        });
+        draft_started_rx.await.expect("the draft phase started");
+
+        let cancelled = {
+            let mut guard = jobs().lock().await;
+            request_cancel(guard.get_mut(&id).expect("test job is tracked"))
+        };
+        assert!(cancelled);
+
+        // The job reports Cancelled at once but keeps its slot, and nothing is
+        // discarded, while its turn is still stopping.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while stop_signals.lock().unwrap().is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("cancel signals the running turn");
+        let stopping = job_snapshot(&id).await;
+        assert_eq!(stopping.state, JobState::Cancelled);
+        assert!(
+            profile_job_holds_slot(&stopping),
+            "a cancelled job counts against the caps until its turn ends"
+        );
+        assert_eq!(PhaseLog::get(&log.discarded), None);
+
+        release_turn_tx.send(()).expect("the turn is winding down");
+        tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .expect("the stopped turn lets the driver finish")
+            .expect("driver task joins");
+
+        let job = job_snapshot(&id).await;
+        assert_eq!(job.state, JobState::Cancelled);
+        assert!(!job.materialized);
+        assert!(job.conversation_id.is_none());
+        assert!(!profile_job_holds_slot(&job), "the slot is released");
+        assert_eq!(PhaseLog::get(&log.committed), None);
+        let drafted = PhaseLog::get(&log.drafted);
+        assert_eq!(
+            stop_signals.lock().unwrap().first(),
+            drafted.as_ref(),
+            "the draft's own turn is the one stopped"
+        );
+        assert_eq!(
+            PhaseLog::get(&log.discarded),
+            drafted,
+            "the draft's conversation is removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_draft_that_ignores_stop_is_abandoned_after_the_grace() {
+        let id = insert_test_job().await;
+        let log = PhaseLog::default();
+        let (draft_started_tx, draft_started_rx) = tokio::sync::oneshot::channel::<()>();
+        let drafted = log.drafted.clone();
+        let discard = log.discard();
+        let stops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let stops_in_hook = stops.clone();
+        let task_id = id.clone();
+        let task = tokio::spawn(async move {
+            drive_job(
+                &task_id,
+                move |_, conversation_id| async move {
+                    PhaseLog::record(&drafted, conversation_id);
+                    let _ = draft_started_tx.send(());
+                    std::future::pending::<anyhow::Result<ProfileDraft>>().await
+                },
+                |_, _, _| async { anyhow::Ok(()) },
+                discard,
+                move |_: &str| {
+                    stops_in_hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                },
+                std::time::Duration::from_millis(600),
+            )
+            .await;
+        });
+        draft_started_rx.await.expect("the draft phase started");
+        {
+            let mut guard = jobs().lock().await;
+            assert!(request_cancel(
+                guard.get_mut(&id).expect("test job is tracked")
+            ));
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .expect("the grace bounds the wait")
+            .expect("driver task joins");
+
+        let job = job_snapshot(&id).await;
+        assert_eq!(job.state, JobState::Cancelled);
+        assert!(!profile_job_holds_slot(&job));
+        assert!(
+            stops.load(std::sync::atomic::Ordering::SeqCst) >= 2,
+            "the stop is re-signalled while the turn keeps running"
+        );
+        assert_eq!(PhaseLog::get(&log.discarded), PhaseLog::get(&log.drafted));
+    }
+
+    #[test]
+    fn the_wire_materialized_flag_keeps_its_legacy_background_meaning() {
+        let mut job = test_job();
+        assert!(!view("job", &job).materialized);
+        // An older desktop shows "Continue setup" only once this is true.
+        job.background = true;
+        let backgrounded = view("job", &job);
+        assert!(backgrounded.background);
+        assert!(backgrounded.materialized);
+        // The internal flag is untouched, so the draft stays cancellable.
+        assert!(!job.materialized);
+        assert!(request_cancel(&mut job));
+    }
+
+    #[tokio::test]
+    async fn the_startup_sweep_removes_only_abandoned_profile_drafts() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let preferences =
+            crate::server::preferences::PreferencesStore::open(directory.path().join("prefs.db"))
+                .expect("preferences store");
+        let conversations =
+            crate::server::conversations::ConversationStore::open_in_memory().expect("store");
+        for conversation_id in ["profile-abandoned", "profile-accepted"] {
+            mark_pending_profile_draft(&preferences, conversation_id)
+                .await
+                .expect("marked");
+            conversations
+                .ensure_conversation(conversation_id, Some("ryu"), None, Tenancy::Unattributed)
+                .await
+                .expect("conversation");
+        }
+        // An accepted draft is cleared before it is materialised.
+        clear_pending_profile_draft(&preferences, "profile-accepted").await;
+
+        let removed = sweep_abandoned_profile_drafts(&preferences, &conversations).await;
+
+        assert_eq!(removed, 1);
+        assert!(conversations
+            .get_access_meta("profile-abandoned")
+            .await
+            .expect("lookup")
+            .is_none());
+        assert!(conversations
+            .get_access_meta("profile-accepted")
+            .await
+            .expect("lookup")
+            .is_some());
+        assert!(read_pending_profile_drafts(&preferences).await.is_empty());
+        assert_eq!(
+            sweep_abandoned_profile_drafts(&preferences, &conversations).await,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn a_materializing_profile_job_refuses_cancel_and_completes() {
+        let id = insert_test_job().await;
+        let log = PhaseLog::default();
+        let (commit_started_tx, commit_started_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let discard = log.discard();
+        let task_id = id.clone();
+        let task = tokio::spawn(async move {
+            drive_job(
+                &task_id,
+                |_, _| async { anyhow::Ok(test_draft()) },
+                move |_, _, _| async move {
+                    let _ = commit_started_tx.send(());
+                    let _ = release_rx.await;
+                    anyhow::Ok(())
+                },
+                discard,
+                no_stop,
+                TEST_GRACE,
+            )
+            .await;
+        });
+        commit_started_rx.await.expect("materialization started");
+
+        let cancelled = {
+            let mut guard = jobs().lock().await;
+            request_cancel(guard.get_mut(&id).expect("test job is tracked"))
+        };
+        assert!(!cancelled, "durable writes have begun");
+        release_tx.send(()).expect("commit is waiting");
+        task.await.expect("driver task joins");
+
+        let job = job_snapshot(&id).await;
+        assert_eq!(job.state, JobState::Completed);
+        assert!(job.materialized);
+        assert!(!job.cancel_requested);
+        assert_eq!(PhaseLog::get(&log.discarded), None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_profile_draft_is_reported_and_discarded_without_materializing() {
+        let id = insert_test_job().await;
+        let log = PhaseLog::default();
+        let drafted = log.drafted.clone();
+        drive_job(
+            &id,
+            move |_, conversation_id| async move {
+                PhaseLog::record(&drafted, conversation_id);
+                Err::<ProfileDraft, _>(anyhow::anyhow!("model unavailable"))
+            },
+            |_, _, _| async {
+                Err::<(), _>(anyhow::anyhow!("a failed draft must not materialize"))
+            },
+            log.discard(),
+            no_stop,
+            TEST_GRACE,
+        )
+        .await;
+
+        let job = job_snapshot(&id).await;
+        assert_eq!(job.state, JobState::Failed);
+        assert_eq!(job.error.as_deref(), Some("model unavailable"));
+        assert!(!job.materialized);
+        assert!(job.conversation_id.is_none());
+        assert!(PhaseLog::get(&log.discarded).is_some());
+        assert_eq!(PhaseLog::get(&log.discarded), PhaseLog::get(&log.drafted));
+        assert!(!request_cancel(&mut job.clone()));
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_profile_job_never_starts_drafting() {
+        let id = insert_test_job().await;
+        {
+            let mut guard = jobs().lock().await;
+            assert!(request_cancel(
+                guard.get_mut(&id).expect("test job is tracked")
+            ));
+        }
+        let log = PhaseLog::default();
+        let drafted = log.drafted.clone();
+        drive_job(
+            &id,
+            move |_, conversation_id| async move {
+                PhaseLog::record(&drafted, conversation_id);
+                anyhow::Ok(test_draft())
+            },
+            |_, _, _| async { anyhow::Ok(()) },
+            log.discard(),
+            no_stop,
+            TEST_GRACE,
+        )
+        .await;
+
+        let job = job_snapshot(&id).await;
+        assert_eq!(job.state, JobState::Cancelled);
+        assert_eq!(PhaseLog::get(&log.drafted), None);
+        assert_eq!(PhaseLog::get(&log.discarded), None);
+    }
 }
+
+#[cfg(test)]
+#[path = "onboarding_profile_availability_test.rs"]
+mod availability_test;

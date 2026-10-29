@@ -26,6 +26,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import { CapabilityBindingConflictError } from "./capability-layers.ts";
 import type { ApiTarget } from "./client.ts";
 import {
@@ -34,6 +35,7 @@ import {
 	fetchParseBackends,
 	setParseBackend,
 } from "./documents.ts";
+import type { GatewayJsonValue } from "./gateway-json-contracts.ts";
 
 // src/lib/api → src/lib → src → apps/desktop → apps → repo root.
 const REPO_ROOT = join(import.meta.dir, "../../../../..");
@@ -61,8 +63,7 @@ const DOCUMENTS_TS = repoSource("apps/desktop/src/lib/api/documents.ts");
  * Matches `.route(` followed by the quoted path across any whitespace, because
  * rustfmt splits a registration onto its own lines the moment the handler list
  * gets long — an indentation-sensitive `includes()` would report a REGISTERED
- * route as missing (and, worse, would let the "these two are unmounted"
- * assertions below pass after someone mounted them in the multi-line form).
+ * route as missing.
  * The quotes are what keep it off doc comments, which name paths unquoted.
  */
 function isRegistered(path: string): boolean {
@@ -105,15 +106,14 @@ describe("the routes this client calls exist in Core", () => {
 		);
 	});
 
-	it("documents the submit/poll routes as unmounted, and they are", () => {
-		// `parseDocument` addresses handlers Core deliberately does not register:
-		// their consumer (`stageComposerFiles`) is imported by no surface yet. That
-		// is a known, written-down gap — this asserts it is still the TRUE state, so
-		// the day someone mounts them the stale "calling them 404s" note in this
-		// module's header goes red instead of quietly misleading the next reader.
-		expect(isRegistered("/api/documents/parse")).toBe(false);
-		expect(isRegistered("/api/documents/parse/jobs/:job_id")).toBe(false);
-		expect(DOCUMENTS_TS).toContain("not in Core's route table");
+	it("registers the submit/poll routes parseDocument calls", () => {
+		// `parseDocument` submits and then polls; both halves must exist in Core's
+		// route table, and this module's header must say so.
+		expect(isRegistered("/api/documents/parse")).toBe(true);
+		expect(isRegistered("/api/documents/parse/jobs/:job_id")).toBe(true);
+		expect(DOCUMENTS_TS).toContain(
+			"All three parse routes are registered in Core"
+		);
 	});
 });
 
@@ -131,14 +131,8 @@ interface Call {
 	url: string;
 }
 
-function jsonResponse(payload: unknown, status = 200): unknown {
-	return {
-		ok: status >= 200 && status < 300,
-		status,
-		headers: new Headers({ "content-type": "application/json" }),
-		text: async () => JSON.stringify(payload),
-		json: async () => payload,
-	};
+function jsonResponse(payload: GatewayJsonValue, status = 200): Response {
+	return Response.json(payload, { status });
 }
 
 /**
@@ -151,19 +145,22 @@ function jsonResponse(payload: unknown, status = 200): unknown {
  * reason.
  */
 async function withFetch<T>(
-	routes: (url: string, init?: RequestInit) => unknown,
+	routes: (url: string, init?: RequestInit) => Response,
 	run: () => Promise<T>
 ): Promise<{ calls: Call[]; result: T }> {
 	const original = globalThis.fetch;
 	const calls: Call[] = [];
-	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
-		calls.push({
-			body: init?.body === undefined ? null : String(init.body),
-			method: init?.method ?? "GET",
-			url: String(url),
-		});
-		return routes(String(url), init);
-	}) as unknown as typeof fetch;
+	globalThis.fetch = Object.assign(
+		async (...[url, init]: Parameters<typeof globalThis.fetch>) => {
+			calls.push({
+				body: init?.body === undefined ? null : String(init.body),
+				method: init?.method ?? "GET",
+				url: String(url),
+			});
+			return routes(String(url), init);
+		},
+		{ preconnect: original.preconnect }
+	);
 	try {
 		return { calls, result: await run() };
 	} finally {
@@ -246,6 +243,10 @@ describe("fetchParseBackends", () => {
 	});
 });
 
+const bindingBodySchema = z.object({
+	overrides: z.record(z.string(), z.string()),
+});
+
 describe("setParseBackend", () => {
 	/** Route GET bindings → `current`, PUT → echo, everything else → 404. */
 	function bindingRoutes(current: Record<string, string>) {
@@ -256,7 +257,9 @@ describe("setParseBackend", () => {
 				}
 				return jsonResponse({
 					ok: true,
-					overrides: JSON.parse(String(init?.body ?? "{}")).overrides,
+					overrides: bindingBodySchema.parse(
+						JSON.parse(String(init?.body ?? "{}"))
+					).overrides,
 				});
 			}
 			return jsonResponse({ error: `unrouted ${url}` }, 404);
@@ -268,8 +271,7 @@ describe("setParseBackend", () => {
 		if (!put?.body) {
 			throw new Error("no PUT was made — the binding write did not happen");
 		}
-		return (JSON.parse(put.body) as { overrides: Record<string, string> })
-			.overrides;
+		return bindingBodySchema.parse(JSON.parse(put.body)).overrides;
 	}
 
 	it("pinning a parser preserves every other capability's override", async () => {

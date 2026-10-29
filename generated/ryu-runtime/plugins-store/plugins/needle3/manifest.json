@@ -1,0 +1,129 @@
+{
+  "id": "@ryu/needle3",
+  "name": "Needle 3 Local Planner",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Run Cactus Compute's Apache-2.0 Needle 3 tool-calling model locally as a selectable Shadow computer-use planner. The model weights are pinned and installed into the plugin runtime; the small cactus-needle runtime is installed separately.",
+  "tagline": "Tiny on-device tool-calling for Shadow",
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://huggingface.co/Cactus-Compute/needle3",
+  "homepage": "https://huggingface.co/Cactus-Compute/needle3",
+  "license": "Apache-2.0",
+  "category": "Models",
+  "icon": "ai-brain-01",
+  "iconDither": { "from": 240, "to": "transparent", "direction": "down" },
+  "tags": [
+    "models",
+    "huggingface",
+    "local",
+    "computer-use",
+    "tool-calling",
+    "needle"
+  ],
+  "keywords": [
+    "models",
+    "huggingface",
+    "local",
+    "computer-use",
+    "tool-calling",
+    "needle"
+  ],
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-needle3-status",
+      "name": "Needle 3 Status",
+      "kind": "tool",
+      "config": {
+        "slug": "needle3.status",
+        "backend": "http",
+        "method": "GET",
+        "url": "core:/api/ext/@ryu/needle3/capability",
+        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Check whether the pinned Needle 3 model bundle and local tool-calling runtime are available.",
+        "input_schema": { "type": "object", "properties": {} }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:127.0.0.1"],
+  "permission_levels": [
+    {
+      "id": "needle3.view",
+      "label": "Can view local model status",
+      "description": "See whether the pinned Needle 3 model and runtime are ready."
+    },
+    {
+      "id": "needle3.predict",
+      "label": "Can run local computer-use decisions",
+      "description": "Run a bounded, local tool-selection pass over Shadow's current action choices.",
+      "implies": ["needle3.view"]
+    }
+  ],
+  "sidecars": [
+    {
+      "name": "needle3",
+      "port": 8103,
+      "health_path": "/health",
+      "lazy": false,
+      "idle_stop_secs": 1800,
+      "process": {
+        "kind": "python",
+        "entry": "ryu_needle3",
+        "port_env": "RYU_NEEDLE3_PORT",
+        "python_version": "3.11",
+        "pyproject_extra": "server",
+        "source": { "url": "", "format": "directory", "path": "sidecar" },
+        "model_snapshots": [
+          {
+            "source": "hf:Cactus-Compute/needle3",
+            "revision": "b274efcb211a9eef48c9a88da4b43bd569696a39",
+            "dest_under_runtime": "models/needle3",
+            "files": ["LICENSE", "needle3.cact"]
+          }
+        ],
+        "env": {
+          "RYU_NEEDLE3_HOST": "127.0.0.1",
+          "RYU_NEEDLE3_MODEL_ROOT": "${RYU_RUNTIME_DIR}/models/needle3",
+          "HF_HOME": "${RYU_MODELS_DIR}/hf",
+          "HF_HUB_DISABLE_TELEMETRY": "1",
+          "NEEDLE_TELEMETRY": "0",
+          "DO_NOT_TRACK": "1"
+        }
+      },
+      "http": {
+        "max_body_bytes": 524288,
+        "routes": [
+          { "path": "/health" },
+          { "path": "/capability", "permission": "needle3.view" },
+          {
+            "path": "/computer-use",
+            "method": "POST",
+            "permission": "needle3.predict"
+          }
+        ]
+      }
+    }
+  ],
+  "contributes": {
+    "computer_use_planners": [
+      {
+        "id": "needle3.base",
+        "label": "Needle 3 · Base",
+        "model_id": "needle3",
+        "description": "Apache-2.0, 29–121M-parameter on-device tool-calling model."
+      }
+    ]
+  }
+}

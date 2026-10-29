@@ -34,7 +34,6 @@ import {
 	loadFavorites,
 	loadRecents,
 	RECENTS_KEY,
-	type RecentEntry,
 	refKey,
 	stampRecent,
 	stampRecentFromPath,
@@ -221,10 +220,7 @@ describe("loadRecents resilience", () => {
 	});
 
 	test("returns [] when the stored value is not an array", () => {
-		localStorage.setItem(
-			RECENTS_KEY,
-			JSON.stringify(42 as unknown as RecentEntry[])
-		);
+		localStorage.setItem(RECENTS_KEY, JSON.stringify(42));
 		expect(loadRecents()).toEqual([]);
 	});
 });

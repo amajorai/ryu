@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -7,7 +8,7 @@ import { SearchInput } from "./blog.tsx";
 
 /**
  * Block-local help-article shape, the subset the presentational layer needs.
- * The live app's Notion `HelpArticle` is a structural superset.
+ * The live app's MDX `HelpArticle` is a structural superset.
  */
 export interface HelpArticleData {
 	category: string;
@@ -18,7 +19,7 @@ export interface HelpArticleData {
 	title: string;
 }
 
-/** Category tabs, presentational (Link-wrapped triggers). */
+/** Category navigation styled with the shared tab primitives. */
 export function HelpCategories({
 	categories,
 	activeCategory,
@@ -28,75 +29,80 @@ export function HelpCategories({
 }) {
 	return (
 		<Tabs value={activeCategory ?? "All"}>
-			<TabsList variant="pills">
-				<Link href="/help">
-					<TabsTrigger
-						className={activeCategory ? "" : "pointer-events-none"}
-						data-state={activeCategory ? "inactive" : "active"}
-						value="All"
-					>
-						All Articles
-					</TabsTrigger>
-				</Link>
+			<TabsList className="w-full" manageLayout={false} variant="pills">
+				<TabsTrigger
+					data-state={activeCategory ? "inactive" : "active"}
+					nativeButton={false}
+					render={<Link href="/help" />}
+					value="All"
+				>
+					All
+				</TabsTrigger>
 				{categories.map((category) => (
-					<Link
-						href={`/help/category/${encodeURIComponent(category)}`}
+					<TabsTrigger
+						data-state={activeCategory === category ? "active" : "inactive"}
 						key={category}
+						nativeButton={false}
+						render={
+							<Link href={`/help/category/${encodeURIComponent(category)}`} />
+						}
+						value={category}
 					>
-						<TabsTrigger
-							className={
-								activeCategory === category
-									? "pointer-events-none capitalize"
-									: "capitalize"
-							}
-							data-state={activeCategory === category ? "active" : "inactive"}
-							value={category}
-						>
-							{category}
-						</TabsTrigger>
-					</Link>
+						{category}
+					</TabsTrigger>
 				))}
 			</TabsList>
 		</Tabs>
 	);
 }
 
-/** A single help-article card, presentational. */
+/** A heading line: Markdown `#` syntax, or processed text ending in a `[#slug]` anchor. */
+const HEADING_LINE = /^(#+\s+.*|.*\[#[^\]]+\]\s*)$/;
+
+/**
+ * Plain-text excerpt: the first paragraph that is not a heading, with link
+ * targets, heading anchors and emphasis marks removed.
+ */
+export function articleExcerpt(content: string): string {
+	const paragraphs = content
+		.split(/\n\s*\n/)
+		.map((block) =>
+			block
+				.split("\n")
+				.filter((line) => !HEADING_LINE.test(line.trim()))
+				.join(" ")
+				.trim()
+		)
+		.filter(Boolean);
+	return (paragraphs[0] ?? "")
+		.replace(/\s*\[#[^\]]+\]/g, "")
+		.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+		.replace(/[*_`]/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+/** A single help article as a list row: title and a two-line excerpt. */
 export function HelpArticleCard({ article }: { article: HelpArticleData }) {
+	const excerpt = article.content ? articleExcerpt(article.content) : "";
 	return (
-		<Link href={`/help/${article.slug}`}>
-			<div className="group rounded-lg border p-4 transition-all duration-200 hover:border-primary/50 hover:shadow-md">
-				<div className="flex flex-col gap-2">
-					<div className="flex items-start justify-between gap-2">
-						<h3 className="font-medium text-lg transition-colors group-hover:text-primary">
-							{article.title}
-						</h3>
-						{article.category && (
-							<span className="whitespace-nowrap rounded-md bg-muted px-2 py-1 text-xs">
-								{article.category}
-							</span>
-						)}
-					</div>
-					{article.content && (
-						<p className="line-clamp-2 text-muted-foreground text-sm">
-							{article.content
-								.replace(/^#+\s+.+\n*/g, "")
-								.trim()
-								.substring(0, 150)}
-						</p>
-					)}
-					<div className="mt-2 text-muted-foreground text-xs">
-						Updated{" "}
-						{new Date(article.last_edited_time ?? "").toLocaleDateString(
-							"en-US",
-							{ timeZone: "UTC" }
-						)}
-					</div>
-				</div>
-			</div>
-		</Link>
+		<li>
+			<Link className="group block py-4" href={`/help/${article.slug}`}>
+				<span className="font-heading font-medium text-base text-foreground underline-offset-4 group-hover:underline">
+					{article.title}
+				</span>
+				{excerpt ? (
+					<p className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-relaxed">
+						{excerpt}
+					</p>
+				) : null}
+			</Link>
+		</li>
 	);
 }
+
+/** Below this many articles a search box has nothing to narrow down. */
+const MIN_SEARCHABLE_ARTICLES = 8;
 
 /** The searchable, category-grouped help article list, presentational. */
 export function HelpArticlesSearch({
@@ -108,6 +114,7 @@ export function HelpArticlesSearch({
 	category?: string;
 	className?: string;
 }) {
+	const tl = useLiteralMessages();
 	const [searchQuery, setSearchQuery] = useState("");
 
 	const filteredArticles = useMemo(() => {
@@ -126,56 +133,59 @@ export function HelpArticlesSearch({
 	if (articles.length === 0) {
 		return (
 			<div className={className}>
-				<div className="py-12 text-center">
-					<h3 className="mb-2 font-medium text-lg">No help articles found</h3>
-					<p className="text-muted-foreground">
-						{category
-							? `No articles available in the "${category}" category.`
-							: "No help articles are available at the moment."}
-					</p>
-				</div>
+				<p className="py-12 text-muted-foreground">
+					{category
+						? tl('No articles in "{category}" yet.', { category })
+						: "No help articles yet."}
+				</p>
 			</div>
 		);
 	}
 
-	const groupedArticles = category
-		? { [category]: filteredArticles }
-		: filteredArticles.reduce(
-				(groups, article) => {
-					const cat = article.category || "Uncategorized";
-					if (!groups[cat]) {
-						groups[cat] = [];
-					}
-					groups[cat].push(article);
-					return groups;
-				},
-				{} as Record<string, HelpArticleData[]>
-			);
+	const groupedArticles = new Map<string, HelpArticleData[]>();
+	if (category) {
+		groupedArticles.set(category, filteredArticles);
+	} else {
+		for (const article of filteredArticles) {
+			const cat = article.category || "Uncategorized";
+			const rows = groupedArticles.get(cat) ?? [];
+			rows.push(article);
+			groupedArticles.set(cat, rows);
+		}
+	}
+	const showGroupTitles = groupedArticles.size > 1;
+	// Same order as the category tabs, which getHelpCategories() sorts by name.
+	const groups = [...groupedArticles].sort(([a], [b]) => a.localeCompare(b));
 
 	return (
 		<div className={className}>
-			<div className="mb-8">
-				<SearchInput onSearch={setSearchQuery} placeholder="Search articles" />
-			</div>
-			{filteredArticles.length === 0 ? (
-				<div className="py-12 text-center">
-					<h3 className="mb-2 font-medium text-lg">No results found</h3>
-					<p className="text-muted-foreground">
-						No help articles found matching "{searchQuery}".
-					</p>
+			{articles.length >= MIN_SEARCHABLE_ARTICLES ? (
+				<div className="mb-8">
+					<SearchInput
+						className="w-full max-w-xs"
+						onSearch={setSearchQuery}
+						placeholder="Search articles"
+					/>
 				</div>
+			) : null}
+			{filteredArticles.length === 0 ? (
+				<p className="py-12 text-muted-foreground">
+					{tl('No articles match "{searchQuery}".', { searchQuery })}
+				</p>
 			) : (
-				<div className="space-y-8">
-					{Object.entries(groupedArticles).map(([cat, catArticles]) => (
-						<div key={cat}>
-							{!category && (
-								<h2 className="mb-4 font-medium text-xl capitalize">{cat}</h2>
-							)}
-							<div className="grid gap-4 md:grid-cols-2">
+				<div className="space-y-12">
+					{groups.map(([cat, catArticles]) => (
+						<div data-slot="help-article-group" key={cat}>
+							{showGroupTitles ? (
+								<h2 className="mb-2 font-medium text-muted-foreground text-sm">
+									{cat}
+								</h2>
+							) : null}
+							<ul className="max-w-3xl">
 								{catArticles.map((article) => (
 									<HelpArticleCard article={article} key={article.id} />
 								))}
-							</div>
+							</ul>
 						</div>
 					))}
 				</div>

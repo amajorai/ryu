@@ -2,8 +2,8 @@ import { PotionIcon } from "@hugeicons/core-free-icons";
 import {
 	LibraryToolbar,
 	type LibraryViewMode,
-} from "@ryu/blocks/desktop/library";
-import { Input } from "@ryu/ui/components/input";
+} from "@ryu/blocks/desktop/library.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import SidebarLibrarySection from "../../src/components/library/SidebarLibrarySection.tsx";

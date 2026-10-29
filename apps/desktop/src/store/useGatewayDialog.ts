@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { readProductMode } from "@/src/lib/product-mode.ts";
 
 // The named sections of the Gateway settings dialog. Kept here (not in
 // GatewayDialog.tsx) so external openers — the command palette, deep links, the
@@ -18,6 +19,10 @@ export type GatewaySection =
 	| "providers"
 	| "routing"
 	| "guardrails"
+	// The live traffic map: every layer a request passes, with its settings.
+	| "traffic-map"
+	// The organization's named guardrail policies and their assignments.
+	| "policies"
 	| "budgets"
 	| "runtime"
 	| "hooks"
@@ -37,6 +42,7 @@ export type GatewaySection =
 	| "git"
 	| "worktrees"
 	| "environments"
+	| "cloud-environments"
 	// Ryu-canonical import/export sync for Claude, Codex, Cursor, and portable
 	// bundles. Kept as two sections because each direction has an independent
 	// opt-in toggle and a different safety model.
@@ -80,9 +86,19 @@ interface GatewayDialogState {
 // A tiny global so any surface can open the Gateway dialog at a chosen section.
 // The dialog itself is rendered once (in NodeSelector) and reads this store, so
 // there is a single instance regardless of how many places trigger it.
+//
+// Gateway is node configuration, so it opens only in the Console realm. Bot and
+// OS do not mount the dialog; refusing the request here keeps a hotkey or deep
+// link from leaving it queued to pop open on the next switch to Console. Core
+// and the control plane still enforce the matching permissions on every write.
 export const useGatewayDialog = create<GatewayDialogState>((set) => ({
 	open: false,
 	section: "overview",
-	openGateway: (section = "overview") => set({ open: true, section }),
+	openGateway: (section = "overview") => {
+		if (readProductMode() !== "console") {
+			return;
+		}
+		set({ open: true, section });
+	},
 	setOpen: (open) => set({ open }),
 }));

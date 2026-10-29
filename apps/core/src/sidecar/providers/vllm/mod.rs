@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 
+use super::engine_child;
+use super::readiness;
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 use crate::win_process::NoWindow;
 use process::DEFAULT_PORT;
@@ -60,6 +62,13 @@ impl Default for VllmManager {
     }
 }
 
+/// The model vLLM binds at launch: explicit `with_model` > the user's
+/// active-model selection for this engine > `RYU_VLLM_MODEL` > the small default.
+/// Also answers which model a route that left `model` unset should request.
+pub(crate) async fn launch_model(explicit: Option<String>) -> String {
+    super::resolve_launch_model("vllm", explicit, "RYU_VLLM_MODEL", DEFAULT_VLLM_MODEL).await
+}
+
 impl Sidecar for VllmManager {
     fn name(&self) -> &'static str {
         "vllm"
@@ -74,22 +83,34 @@ impl Sidecar for VllmManager {
         let port = self.port;
         let process = Arc::clone(&self.process);
         let running = Arc::clone(&self.running);
+        let client = self.client.clone();
 
         Box::pin(async move {
+            // Never respawn a resident engine: storing a new child drops the
+            // serving one (spawned with kill_on_drop(false)), orphaning it with
+            // its port and GPU memory. A child still loading after an earlier
+            // readiness timeout is waited on again. Model switches stop first
+            // (restart_sidecar / set_active_local_engine).
+            if engine_child::held_child_is_running(&process) {
+                engine_child::wait_for_listener(
+                    &process,
+                    port,
+                    "vLLM",
+                    engine_child::READY_TIMEOUT,
+                )
+                .await?;
+                running.store(true, Ordering::Relaxed);
+                tracing::info!("vllm already running — nothing to start");
+                return Ok(());
+            }
+
             // Resolve the model to serve, in precedence order: explicit
             // `with_model` (caller override) > the user's active-model selection
             // when it targets vLLM > `RYU_VLLM_MODEL` env > a sensible small
             // default. vLLM cannot start without one, so we never error here —
             // activation always has a model to bind. Keeping `with_model` first
             // preserves the documented contract.
-            let model = match model {
-                Some(m) => m,
-                None => match crate::model_catalog::active_model_ref_for_engine("vllm").await {
-                    Some(r) => r,
-                    None => std::env::var("RYU_VLLM_MODEL")
-                        .unwrap_or_else(|_| DEFAULT_VLLM_MODEL.to_string()),
-                },
-            };
+            let model = launch_model(model).await;
 
             installer::ensure_installed()
                 .await
@@ -109,22 +130,32 @@ impl Sidecar for VllmManager {
                     crate::inference::LaunchConfig::default()
                 }
             };
-            let mut proc = VllmProcess::new(python, model, port).with_launch(launch);
+            readiness::ensure_port_free("vllm", port).await?;
+            // Serve the installed snapshot from disk when there is one.
+            let weights = crate::sidecar::providers::python_engine_model(&model);
+            let mut proc = VllmProcess::new(python, weights.model_arg, port)
+                .with_served_model_name(weights.served_name)
+                .with_launch(launch);
             proc.start().await.context("spawning vLLM process")?;
             *process.lock().unwrap() = Some(proc);
 
-            // Wait up to 120 s for the HTTP server to become reachable.
-            let addr = format!("127.0.0.1:{port}");
-            tokio::time::timeout(std::time::Duration::from_secs(120), async {
-                loop {
-                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            // Readiness is the live child answering the OpenAI API with the
+            // model it was asked to serve — never a bare TCP connect, which a
+            // stale listener on the port would satisfy.
+            let probe = readiness::ReadyProbe {
+                engine: "vllm",
+                port,
+                health_path: Some("/health"),
+                expected_model: Some(model.as_str()),
+                timeout: std::time::Duration::from_secs(120),
+            };
+            if let Err(error) = readiness::wait_for_child(&client, &probe, &process).await {
+                let failed_child = process.lock().unwrap().take();
+                if let Some(mut child) = failed_child {
+                    let _ = child.stop().await;
                 }
-            })
-            .await
-            .context("vLLM did not start within 120 s")?;
+                return Err(error).context("vLLM readiness check failed");
+            }
 
             running.store(true, Ordering::Relaxed);
             tracing::info!("vllm started");
@@ -193,16 +224,52 @@ impl Sidecar for VllmManager {
 
             crate::sidecar::remove_from_version_store("vllm");
 
-            if delete_data {
-                // vLLM downloads models via HuggingFace Hub into ~/.cache/huggingface/hub.
-                // Removing ~/.cache/huggingface clears all downloaded model weights.
-                if let Some(home) = dirs::home_dir() {
-                    crate::sidecar::remove_dir(&home.join(".cache").join("huggingface")).await;
-                }
-            }
+            // `delete_data` deletes nothing outside Ryu, and nothing shared: the
+            // weights live in the catalog's `models/chat/snapshots/` (removed
+            // through the catalog) and the shared `models/hf` Hub cache that
+            // every Ryu Python runtime uses. Never `~/.cache/huggingface`.
+            let _ = delete_data;
 
             tracing::info!("vllm uninstalled");
             Ok(())
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// A second start (start-all, the services panel) while the engine is
+    /// resident keeps the serving child instead of spawning a competitor that
+    /// would replace, and so orphan, it. Returning before install also proves
+    /// no spawn path ran.
+    #[tokio::test]
+    async fn start_keeps_a_live_engine_instead_of_respawning() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mgr = VllmManager::new().with_port(port);
+        let child = tokio::process::Command::new("/bin/sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn sleeping child fixture");
+        *mgr.process.lock().unwrap() = Some(VllmProcess::from_child_for_test(child));
+        let pid = || {
+            mgr.process
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(VllmProcess::pid)
+        };
+        let serving = pid();
+        assert!(serving.is_some());
+
+        mgr.start().await.expect("a live engine is already started");
+        assert_eq!(pid(), serving, "the serving child must not be replaced");
+        assert!(mgr.is_running());
+
+        mgr.stop().await.expect("stop the fixture child");
+        assert!(!mgr.is_running());
     }
 }

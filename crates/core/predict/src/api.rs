@@ -31,6 +31,10 @@ use serde_json::json;
 
 use crate::{PredictConfig, PredictHost, PREDICT_CONFIG_PREF};
 
+#[cfg(test)]
+#[path = "api_tests.rs"]
+mod tests;
+
 /// Router state for the predict HTTP surface: the [`PredictHost`] that inverts the
 /// kernel couplings (enabled flag, preferences, agent-bound model, default model,
 /// Gateway side-model call). Cloneable so the router bakes a concrete state and

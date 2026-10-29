@@ -1,0 +1,19 @@
+{
+  "extends": "@ryu/config/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@ryuhq/client": ["../client/src/index.ts"],
+      "@ryuhq/services": ["../services/src/index.ts"],
+      "@ryuhq/services/webhooks": ["../services/src/webhooks/index.ts"],
+      "@ryuhq/services/errors": ["../services/src/errors.ts"],
+      "@ryuhq/services/tools": ["../services/src/tools/index.ts"]
+    },
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": ["src/**/*"]
+}

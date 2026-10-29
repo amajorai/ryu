@@ -1,19 +1,26 @@
-import { useQuery } from "@tanstack/react-query";
-import { hasOrgAuth, listOrgs, type OrgListEntry } from "@/src/lib/api/orgs.ts";
+import { skipToken, useQuery } from "@tanstack/react-query";
+import { fetchMyPermissions, type Permission } from "@/src/lib/api/org.ts";
+import { hasOrgAuth } from "@/src/lib/api/orgs.ts";
 import { queryClient as appQueryClient } from "@/src/lib/query-client.ts";
-import { isOrganizationAdminRole } from "@/src/lib/resource-visibility.ts";
 
-const ORG_LIST_KEY = ["settings", "orgs"] as const;
+/**
+ * The effective permission that admits a caller to Console on a Ryu-managed
+ * node. It is the same permission Core and the control plane enforce on node
+ * configuration (Gateway, MCP servers, shared vault values), so the product
+ * switch can never offer a surface whose writes the server would refuse. Custom
+ * roles that grant it admit their holders; built-in members and viewers lack it.
+ */
+export const CONSOLE_PERMISSION: Permission = "gateway.configure";
 
 export function canAccessConsoleForNode({
 	managed,
 	orgId,
-	organizations,
+	permissions,
 	settled,
 }: {
 	managed: boolean;
 	orgId: string | null | undefined;
-	organizations: OrgListEntry[] | undefined;
+	permissions: readonly string[] | undefined;
 	settled: boolean;
 }): boolean {
 	// Local, LAN, and self-hosted nodes have no organization authority to check;
@@ -21,46 +28,49 @@ export function canAccessConsoleForNode({
 	if (!managed) {
 		return true;
 	}
-	if (!(settled && orgId && organizations)) {
+	if (!(settled && orgId && permissions)) {
 		return false;
 	}
-	const organization = organizations.find(
-		(candidate) => candidate.id === orgId
-	);
-	return organization ? isOrganizationAdminRole(organization.role) : false;
+	return permissions.includes(CONSOLE_PERMISSION);
+}
+
+export interface ConsoleAccessResult {
+	canSwitchToConsole: boolean;
+	consoleOnly: boolean;
+	loading: boolean;
 }
 
 /** Server-backed visibility gate for the Bot → Console product switch. */
 export function useConsoleAccess(node: {
 	managed?: boolean;
 	orgId?: string | null;
-}): {
-	canSwitchToConsole: boolean;
-	consoleOnly: boolean;
-	loading: boolean;
-} {
+}): ConsoleAccessResult {
 	const authenticated = hasOrgAuth();
-	const organizationsQuery = useQuery(
+	const managed = node.managed === true;
+	const orgId = node.orgId ?? null;
+	// The control plane answers 403 for a caller outside the node's org, which
+	// leaves the query errored and Console closed.
+	const permissionsQuery = useQuery(
 		{
-			enabled: authenticated,
-			queryFn: listOrgs,
-			queryKey: ORG_LIST_KEY,
+			enabled: authenticated && managed && orgId !== null,
+			queryFn: orgId === null ? skipToken : () => fetchMyPermissions(orgId),
+			queryKey: ["workspace-my-permissions", orgId],
 		},
 		appQueryClient
 	);
-	const managed = node.managed === true;
 	const loading =
 		managed &&
 		authenticated &&
-		!organizationsQuery.isSuccess &&
-		!organizationsQuery.isError;
+		orgId !== null &&
+		!permissionsQuery.isSuccess &&
+		!permissionsQuery.isError;
 
 	return {
 		canSwitchToConsole: canAccessConsoleForNode({
 			managed,
-			orgId: node.orgId,
-			organizations: organizationsQuery.data,
-			settled: organizationsQuery.isSuccess,
+			orgId,
+			permissions: permissionsQuery.data,
+			settled: permissionsQuery.isSuccess,
 		}),
 		consoleOnly: !managed,
 		loading,

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-collab"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Authoritative CRDT document engine for Ryu: Core's durable server-side replica of every live collaborative Yjs document. Owns the DocRegistry (lazily rehydrated per-doc yrs::Doc behind a single-writer Mutex, with apply/state-vector/diff/snapshot/materialize/flush primitives), the CollabStore (rusqlite append-only doc_updates log + compacted doc_snapshots projection at ~/.ryu/collab.db), the self-framed DocSyncMessage wire protocol, the pure classify_doc_sync write-ACL gate, and the Y.Doc->source projection the non-collaborative RAG/search readers consume. 'Authoritative' = durable owner, not arbiter (yrs converges arbiter-free). An extracted Core capability crate consumed as a NON-optional in-process path dependency (the kernel's ServerState holds a DocRegistry unconditionally; the realtime_ws transport drives it directly, never over IPC). The single ~/.ryu kernel coupling inverts through the narrow CollabHost trait. ZERO dependency on apps/core."
@@ -10,8 +10,19 @@ repository = "https://github.com/amajorai/ryu"
 # crate in-process. rusqlite is pinned 0.40.0 workspace-wide (links= collision
 # otherwise). This crate has ZERO dependency on apps/core.
 [dependencies]
+# The data-dir layout (`db/`, `state/`, …) shared by every Ryu process.
+ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.0" }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.40.0", features = ["bundled"] }
 serde_json = "1"
 yrs = "0.27"
+tracing = "0.1"
+# Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
+# backend from this crate: Core links it through its own dependency.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["sqlite"] }
+
+[dev-dependencies]
+tempfile = "3"
+# Test builds only: lets unit tests construct sealing stores without a host.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["test-ephemeral-host"] }

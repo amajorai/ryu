@@ -26,13 +26,7 @@ const ROUTE = "/chat";
 const ENABLED: PlanOptions = { autoRetryEnabled: true, routeKey: ROUTE };
 
 /** Drive `count` consecutive crashes through the planner, as the boundary does. */
-function crashRepeatedly(
-	count: number,
-	options: PlanOptions = ENABLED
-): {
-	episode: RecoveryEpisode | null;
-	plans: ReturnType<typeof planRecovery>[];
-} {
+function crashRepeatedly(count: number, options: PlanOptions = ENABLED) {
 	let episode: RecoveryEpisode | null = null;
 	const plans: ReturnType<typeof planRecovery>[] = [];
 	for (let i = 0; i < count; i++) {
@@ -51,7 +45,7 @@ describe("planRecovery budget", () => {
 			expect(plans[i]?.decision).toEqual({
 				kind: "retry",
 				attempt: i + 1,
-				delayMs: RETRY_BACKOFF_MS[i] as number,
+				delayMs: RETRY_BACKOFF_MS[i],
 			});
 		}
 		expect(plans.at(-1)?.decision).toEqual({
@@ -79,9 +73,7 @@ describe("planRecovery budget", () => {
 		// like a hitch, not a hang.
 		expect(total).toBeLessThanOrEqual(3000);
 		for (let i = 1; i < RETRY_BACKOFF_MS.length; i++) {
-			expect(RETRY_BACKOFF_MS[i] as number).toBeGreaterThan(
-				RETRY_BACKOFF_MS[i - 1] as number
-			);
+			expect(RETRY_BACKOFF_MS[i]).toBeGreaterThan(RETRY_BACKOFF_MS[i - 1]);
 		}
 	});
 });
@@ -110,7 +102,7 @@ describe("planRecovery gates", () => {
 		expect(elsewhere.decision).toEqual({
 			kind: "retry",
 			attempt: 1,
-			delayMs: RETRY_BACKOFF_MS[0] as number,
+			delayMs: RETRY_BACKOFF_MS[0],
 		});
 		expect(elsewhere.episode.routeKey).toBe("/settings");
 	});

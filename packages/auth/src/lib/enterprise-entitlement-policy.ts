@@ -1,3 +1,4 @@
+import { z } from "zod";
 export const ENTERPRISE_CAPABILITIES = [
 	"enterprise.sso.oidc",
 	"enterprise.sso.saml",
@@ -14,20 +15,12 @@ export type EnterpriseGrantStatus =
 	| "suspended"
 	| "trialing";
 
-const ENTERPRISE_CAPABILITY_SET = new Set<string>(ENTERPRISE_CAPABILITIES);
-
-export function normalizeEnterpriseCapabilities(
-	value: unknown
-): EnterpriseCapability[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	return value.filter(
-		(capability): capability is EnterpriseCapability =>
-			typeof capability === "string" &&
-			ENTERPRISE_CAPABILITY_SET.has(capability)
-	);
-}
+export const normalizeEnterpriseCapabilities = z
+	.array(z.enum(ENTERPRISE_CAPABILITIES).nullable().catch(null))
+	.catch(() => [])
+	.transform((capabilities) =>
+		capabilities.filter((capability) => capability !== null)
+	).parse;
 
 export function isEnterpriseGrantActive(
 	status: EnterpriseGrantStatus,

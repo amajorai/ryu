@@ -3,7 +3,7 @@
 //! One searchable catalog across **MCP servers + built-ins + Composio + plugin
 //! tools + Agent Skills** — no parallel registry. [`run_search`] ranks descriptors
 //! with a
-//! **swappable [`ToolRanker`]** (Needle 2 default, BM25 and semantic fallbacks,
+//! **swappable [`ToolRanker`]** (Needle 3 default, Needle 2 rollback, BM25 and semantic fallbacks,
 //! selectable via a pref key mirroring `catalog.active_source.{kind}`).
 //! [`describe_from_parts`] / [`describe_composio`] return a tool's argument
 //! schema.
@@ -47,9 +47,22 @@ use serde_json::Value;
 pub trait ToolEmbedder: Send + Sync {
     /// Embed one text into a vector, or `None` when the embedder is unreachable.
     async fn embed(&self, text: &str) -> Option<Vec<f32>>;
+
+    /// Embed several texts, one result per input in order. `None` marks a text
+    /// that could not be embedded. The default embeds one at a time; an
+    /// embedder with a batch endpoint or a cache should override it, because
+    /// the semantic ranker embeds every candidate's text on each search.
+    async fn embed_batch(&self, texts: &[String]) -> Vec<Option<Vec<f32>>> {
+        let mut out = Vec::with_capacity(texts.len());
+        for text in texts {
+            out.push(self.embed(text).await);
+        }
+        out
+    }
 }
 
-/// A model-backed selector used by [`ToolRanker::Needle2`].
+/// A model-backed selector used by [`ToolRanker::Needle3`] or
+/// [`ToolRanker::Needle2`].
 ///
 /// The selector returns canonical descriptor ids in preference order. An empty
 /// `Some` result is an explicit "nothing matches" response; `None` means the
@@ -90,7 +103,7 @@ pub enum ToolKind {
     CoreApi,
     /// A declarative `command` app tool: execs an allowlisted local CLI through
     /// the governed tool-exec path. Surfaced as its own kind so `?kind=command`
-    /// selects these; the other app backends (http/inline_deno/alias) stay `App`.
+    /// selects these; the other app backends (http/inline_js/alias) stay `App`.
     Command,
     /// An Agent Skill: instruction text loaded with `skills.load`, **not** a
     /// callable function. Ids are namespaced `skills.<slug>` so a skill row lives
@@ -291,6 +304,13 @@ pub struct DescribedTool {
     pub shallow: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameters: Option<Value>,
+    /// True only when the tool's own metadata explicitly marks it as free of side
+    /// effects (an MCP `readOnlyHint: true` without `destructiveHint: true`). The
+    /// Gateway may then run it concurrently with neighbouring read-only calls.
+    /// Additive and fail-closed: absent on the wire (and `false` when read by an
+    /// older peer) for writes, unknown effects, Composio, skills and ext-api.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
 }
 
 /// One argument of a [`DescribedTool`] (Contract 1).
@@ -368,13 +388,15 @@ pub fn described_args(schema: Option<&Value>) -> Vec<DescribedArg> {
 /// Pref key selecting the active ranker, mirroring `catalog.active_source.{kind}`.
 pub const RANKER_PREF_KEY: &str = "tools.active_ranker";
 
-/// A swappable tool ranking strategy. Needle 2 is the default model-assisted
-/// selector; BM25 and `Semantic` remain explicit, deterministic fallback/opt-out
-/// strategies. Needle 2 only reorders candidates and never authorizes or executes
-/// a tool.
+/// A swappable tool ranking strategy. Needle 3 is the default model-assisted
+/// selector; Needle 2 remains an explicit rollback, while BM25 and `Semantic`
+/// remain deterministic fallback/opt-out strategies. Needle only reorders
+/// candidates and never authorizes or executes a tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolRanker {
-    /// Cactus Needle 2 selects relevant tools/skills from the candidate catalog.
+    /// Cactus Needle 3 selects relevant tools/skills from the candidate catalog.
+    Needle3,
+    /// Cactus Needle 2 is retained as an explicit compatibility fallback.
     Needle2,
     /// Classic BM25 lexical ranking over name + description + arg names.
     Bm25,
@@ -385,13 +407,14 @@ pub enum ToolRanker {
 }
 
 impl ToolRanker {
-    /// Resolve the ranker from a pref string; defaults to Needle 2.
+    /// Resolve the ranker from a pref string; defaults to Needle 3.
     pub fn from_pref(s: Option<&str>) -> ToolRanker {
         match s.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
             Some("semantic") => ToolRanker::Semantic,
             Some("bm25") => ToolRanker::Bm25,
-            Some("needle") | Some("needle2") | Some("cactus") | None => ToolRanker::Needle2,
-            _ => ToolRanker::Needle2,
+            Some("needle2") => ToolRanker::Needle2,
+            Some("needle") | Some("needle3") | Some("cactus") | None => ToolRanker::Needle3,
+            _ => ToolRanker::Needle3,
         }
     }
 
@@ -416,7 +439,7 @@ impl ToolRanker {
 
     /// Rank descriptors with an optional model-backed selector.
     ///
-    /// Needle 2 is intentionally a hybrid: its selected ids lead the result,
+    /// Needle is intentionally a hybrid: its selected ids lead the result,
     /// while BM25 fills the remaining slots. That preserves recall when the
     /// tiny selector emits only one call for a multi-tool request. If the model
     /// explicitly returns no call, the result is empty; if the runtime fails or
@@ -429,7 +452,7 @@ impl ToolRanker {
         embedder: Option<&dyn ToolEmbedder>,
         selector: Option<&dyn ToolSelector>,
     ) -> Vec<ToolDescriptor> {
-        if self == ToolRanker::Needle2 {
+        if matches!(self, ToolRanker::Needle2 | ToolRanker::Needle3) {
             if let Some(selector) = selector {
                 if let Some(selected_ids) = selector.select(query, &items).await {
                     if let Some(ordered) = needle_order(query, &items, limit, &selected_ids) {
@@ -461,7 +484,7 @@ impl ToolRanker {
     }
 }
 
-/// Reorder candidates according to canonical ids returned by Needle 2.
+/// Reorder candidates according to canonical ids returned by Needle.
 ///
 /// `None` means the selector returned only ids that were not present in the
 /// candidate set, which is treated as a runtime/schema failure and causes the
@@ -509,6 +532,14 @@ fn needle_order(
         .cloned()
         .collect();
     bm25_score(query, &mut remainder);
+    // Sort only the filler: selector picks keep their lead, and the stable
+    // sort keeps catalog order among tied (for example zero) scores.
+    remainder.sort_by(|a, b| {
+        b.score
+            .unwrap_or(0.0)
+            .partial_cmp(&a.score.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     ordered.extend(remainder);
     ordered.truncate(limit);
     Some(ordered)
@@ -551,10 +582,12 @@ async fn semantic_score(
         // Embedder unreachable → documented BM25 fallback.
         return false;
     };
-    for d in items.iter_mut() {
-        let score = match embedder.embed(&doc_text(d)).await {
-            Some(doc_vec) => cosine(&q_vec, &doc_vec),
-            None => 0.0,
+    let docs: Vec<String> = items.iter().map(doc_text).collect();
+    let doc_vecs = embedder.embed_batch(&docs).await;
+    for (index, d) in items.iter_mut().enumerate() {
+        let score = match doc_vecs.get(index) {
+            Some(Some(doc_vec)) => cosine(&q_vec, doc_vec),
+            _ => 0.0,
         };
         d.score = Some(score);
     }
@@ -637,7 +670,7 @@ fn bm25_score(query: &str, items: &mut [ToolDescriptor]) {
 /// already fetched (empty when Composio is not wanted/configured); they are
 /// **searchable-not-listed** and bypass the `kind` filter (Core only fetches
 /// them when `kind` includes Composio), matching the pre-extraction ordering.
-/// The merged set is ranked by `ranker` (Needle 2 default; Semantic uses
+/// The merged set is ranked by `ranker` (Needle 3 default; Semantic uses
 /// `embedder`).
 pub async fn run_search(
     query: &str,
@@ -661,7 +694,7 @@ pub async fn run_search(
     .await
 }
 
-/// [`run_search`] with the Core-provided Needle 2 selector.
+/// [`run_search`] with the Core-provided Needle selector.
 pub async fn run_search_with_selector(
     query: &str,
     builtin_candidates: Vec<ToolDescriptor>,
@@ -700,6 +733,7 @@ pub fn describe_composio(id: &str) -> DescribedTool {
         }],
         shallow: true,
         parameters: None,
+        read_only: false,
     }
 }
 
@@ -722,6 +756,9 @@ pub fn describe_from_parts(
         args: described_args(input_schema),
         shallow: input_schema.is_none(),
         parameters: input_schema.cloned(),
+        // Callers that hold the tool's annotations set this afterwards; the
+        // registry never infers an effect from a name or schema.
+        read_only: false,
     }
 }
 
@@ -930,6 +967,65 @@ mod tests {
         assert_eq!(out[0].id, "skills.web-research");
     }
 
+    /// Counts single and batch calls. `fail` texts cannot be embedded.
+    struct CountingEmbedder {
+        singles: std::sync::atomic::AtomicUsize,
+        batches: std::sync::atomic::AtomicUsize,
+    }
+
+    fn fake_vector(text: &str) -> Option<Vec<f32>> {
+        if text.contains("fail") {
+            return None;
+        }
+        Some(if text.contains("web") {
+            vec![1.0, 0.0]
+        } else {
+            vec![0.0, 1.0]
+        })
+    }
+
+    #[async_trait]
+    impl ToolEmbedder for CountingEmbedder {
+        async fn embed(&self, text: &str) -> Option<Vec<f32>> {
+            self.singles
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            fake_vector(text)
+        }
+
+        async fn embed_batch(&self, texts: &[String]) -> Vec<Option<Vec<f32>>> {
+            self.batches
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            texts.iter().map(|text| fake_vector(text)).collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn semantic_score_embeds_documents_in_one_batch() {
+        let embedder = CountingEmbedder {
+            singles: std::sync::atomic::AtomicUsize::new(0),
+            batches: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let mut items = vec![
+            desc("exa.search", "search", "search the web", ToolKind::Mcp),
+            desc("fs.read", "read", "read a local file", ToolKind::Builtin),
+            desc("broken.tool", "fail", "cannot embed", ToolKind::Builtin),
+        ];
+        assert!(semantic_score("web", &mut items, &embedder).await);
+        // One single call for the query, one batch for every document.
+        assert_eq!(
+            embedder.singles.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert_eq!(
+            embedder.batches.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert_eq!(items[0].score, Some(1.0));
+        assert_eq!(items[1].score, Some(0.0));
+        // A document that cannot be embedded still scores 0.0 on its own.
+        assert_eq!(items[2].score, Some(0.0));
+    }
+
     struct MockSelector {
         selected: Option<Vec<String>>,
     }
@@ -961,6 +1057,26 @@ mod tests {
         assert_eq!(
             ranked.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
             vec!["foo.send", "foo.search", "foo.noise"]
+        );
+    }
+
+    #[tokio::test]
+    async fn needle2_bm25_fill_is_sorted_by_relevance_not_catalog_order() {
+        let items = vec![
+            desc("foo.noise", "noise", "unrelated", ToolKind::Mcp),
+            desc("foo.other", "other", "also unrelated", ToolKind::Mcp),
+            desc("foo.search", "search", "find things", ToolKind::Mcp),
+            desc("foo.send", "send", "send a message", ToolKind::Mcp),
+        ];
+        let selector = MockSelector {
+            selected: Some(vec!["foo.send".to_owned()]),
+        };
+        let ranked = ToolRanker::Needle2
+            .rank_with_selector("search", items, 2, None, Some(&selector))
+            .await;
+        assert_eq!(
+            ranked.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+            vec!["foo.send", "foo.search"]
         );
     }
 
@@ -1100,13 +1216,14 @@ mod tests {
 
     #[tokio::test]
     async fn ranker_selectable_from_pref() {
-        assert_eq!(ToolRanker::from_pref(None), ToolRanker::Needle2);
+        assert_eq!(ToolRanker::from_pref(None), ToolRanker::Needle3);
         assert_eq!(ToolRanker::from_pref(Some("bm25")), ToolRanker::Bm25);
         assert_eq!(
             ToolRanker::from_pref(Some("semantic")),
             ToolRanker::Semantic
         );
         assert_eq!(ToolRanker::from_pref(Some("needle2")), ToolRanker::Needle2);
+        assert_eq!(ToolRanker::from_pref(Some("needle3")), ToolRanker::Needle3);
         // BM25 path produces a deterministic exact-match-first ordering. (The
         // Semantic path needs a reachable embedder, which is not asserted here.)
         let items = vec![
@@ -1174,6 +1291,36 @@ mod tests {
         assert!(bare.args.is_empty());
     }
 
+    /// `read_only` is additive and fail-closed: `false` is omitted from the wire
+    /// (so non-read tools keep their exact bytes), `true` is emitted, and a payload
+    /// from an older Core without the field reads back as `false`.
+    #[test]
+    fn described_tool_read_only_defaults_false_and_is_skipped_when_false() {
+        let write = describe_from_parts("fs.write", "write", "", ToolKind::Mcp, None);
+        assert!(!write.read_only);
+        let wire = serde_json::to_value(&write).unwrap();
+        assert!(
+            wire.get("read_only").is_none(),
+            "false must not be serialized: {wire}"
+        );
+        assert!(!describe_composio("composio.GITHUB_GET_REPO").read_only);
+
+        let read = DescribedTool {
+            read_only: true,
+            ..describe_from_parts("fs.read", "read", "", ToolKind::Mcp, None)
+        };
+        let wire = serde_json::to_value(&read).unwrap();
+        assert_eq!(wire["read_only"], serde_json::json!(true));
+        let back: DescribedTool = serde_json::from_value(wire).unwrap();
+        assert!(back.read_only);
+
+        let legacy: DescribedTool = serde_json::from_value(serde_json::json!({
+            "id": "fs.read", "name": "read", "kind": "mcp", "args": [], "shallow": true
+        }))
+        .unwrap();
+        assert!(!legacy.read_only, "an older Core payload must fail closed");
+    }
+
     #[tokio::test]
     async fn run_search_filters_builtins_by_kind_but_appends_composio() {
         // `kind = Composio`: built-ins filtered out, the caller-fetched Composio
@@ -1211,5 +1358,66 @@ mod tests {
         .await;
         assert_eq!(out.len(), 1);
         assert!(out.iter().all(|d| d.kind != ToolKind::Composio));
+    }
+
+    /// The golden queries `apps/connect/src/tool-search.ts` (Connect's
+    /// TypeScript port of this scorer) is checked against as well. A change
+    /// to [`bm25_score`] or [`tokenize`] that moves a ranking must update
+    /// `fixtures/bm25-golden.json` and keep the port in step.
+    #[tokio::test]
+    async fn bm25_golden_queries_match_the_shared_fixture() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../fixtures/bm25-golden.json")).unwrap();
+        let corpus: Vec<ToolDescriptor> = fixture["corpus"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                let mut d = desc(
+                    row["id"].as_str().unwrap(),
+                    row["name"].as_str().unwrap(),
+                    row["description"].as_str().unwrap(),
+                    ToolKind::Mcp,
+                );
+                d.arg_names = row["argNames"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|name| name.as_str().unwrap().to_string())
+                    .collect();
+                d
+            })
+            .collect();
+        for case in fixture["queries"].as_array().unwrap() {
+            let query = case["query"].as_str().unwrap();
+            let ranked = ToolRanker::Bm25
+                .rank(query, corpus.clone(), corpus.len(), None)
+                .await;
+            let positive: Vec<(String, f32)> = ranked
+                .iter()
+                .filter(|d| d.score.unwrap_or(0.0) > 0.0)
+                .map(|d| (d.id.clone(), d.score.unwrap_or(0.0)))
+                .collect();
+            if std::env::var_os("RYU_BM25_GOLDEN_PRINT").is_some() {
+                let rows: Vec<Value> = positive
+                    .iter()
+                    .map(|(id, score)| {
+                        serde_json::json!({"id": id, "score": (f64::from(*score) * 10_000.0).round() / 10_000.0})
+                    })
+                    .collect();
+                println!("{query:?} => {}", serde_json::to_string(&rows).unwrap());
+                continue;
+            }
+            let expected = case["expected"].as_array().unwrap();
+            assert_eq!(positive.len(), expected.len(), "query {query:?}");
+            for ((id, score), row) in positive.iter().zip(expected) {
+                assert_eq!(id, row["id"].as_str().unwrap(), "query {query:?}");
+                let want = row["score"].as_f64().unwrap();
+                assert!(
+                    (f64::from(*score) - want).abs() < 1e-3,
+                    "query {query:?}: {id} scored {score}, fixture says {want}"
+                );
+            }
+        }
     }
 }

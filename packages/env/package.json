@@ -5,7 +5,11 @@
   "type": "module",
   "exports": {
     "./server": "./src/server.ts",
-    "./web": "./src/web.ts",
+    "./mail-realtime-store": "./src/mail-realtime-store.ts",
+    "./web": {
+      "browser": "./src/web.browser.ts",
+      "default": "./src/web.ts"
+    },
     "./native": "./src/native.ts"
   },
   "dependencies": {

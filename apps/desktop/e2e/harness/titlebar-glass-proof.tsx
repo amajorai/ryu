@@ -1,6 +1,6 @@
 // Native/browser proof of the shipping Layout, TabsProvider, TitleBar, drag
 // handlers and artifact renderer. Only backend data is isolated test data.
-import { Toaster } from "@ryu/ui/components/sileo";
+import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { createRoot } from "react-dom/client";
@@ -14,6 +14,10 @@ import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import { TitlebarScrollGeometry } from "./titlebar-scroll-geometry.tsx";
 import "@fontsource-variable/geist";
 import "../../src/index.css";
+
+// OS is rollout-flagged (off by default) and this proof exercises it, so switch
+// it on as the app's flag sync (ProductModeAccessSync) would.
+useProductModeStore.getState().setOsAccess(true);
 
 // Real desktop shell/pages; only unavailable backend responses are isolated.
 const nativeFetch = globalThis.fetch.bind(globalThis);

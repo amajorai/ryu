@@ -36,6 +36,44 @@ const commands: SlashCommand[] = [
 ];
 
 describe("parseSlashCommandContribution", () => {
+	test("retains optional live values while normalizing aliases and ignoring inherited fields", () => {
+		const input = {
+			command: "/future",
+			body: undefined,
+			future: { optional: undefined },
+			parameters: [
+				{
+					allowCustom: "true",
+					name: "mode",
+					choices: ["fast", { id: "slow", label: "Slow", future: [null] }],
+				},
+			],
+		};
+		expect(parseSlashCommandContribution(input)).toEqual({
+			args: [
+				{
+					custom: {
+						description: "Type a value that is not in the registered options.",
+						label: "Use a custom value",
+					},
+					description: undefined,
+					name: "mode",
+					options: [
+						{ label: "fast", value: "fast" },
+						{ description: undefined, label: "Slow", value: "slow" },
+					],
+				},
+			],
+			body: undefined,
+			description: "",
+			hint: null,
+			name: "future",
+			source: "plugin",
+		});
+		expect(input.future).toEqual({ optional: undefined });
+		const inherited = Object.create({ command: "/inherited" });
+		expect(parseSlashCommandContribution(inherited)).toBeNull();
+	});
 	test("normalizes plugin argument choices and custom values", () => {
 		expect(
 			parseSlashCommandContribution({

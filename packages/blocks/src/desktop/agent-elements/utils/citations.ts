@@ -1,36 +1,88 @@
+import { z } from "zod";
 import type { Citation } from "../inline-citation.tsx";
 
-interface ToolPartLike {
+/** Fields read from native web-tool carriers; each field degrades independently. */
+interface CitationFieldCarrier {
+	description?: unknown;
 	input?: unknown;
+	link?: unknown;
 	output?: unknown;
 	result?: unknown;
-	toolName?: string;
-	type?: string;
+	results?: unknown;
+	snippet?: unknown;
+	summary?: unknown;
+	text?: unknown;
+	title?: unknown;
+	toolName?: unknown;
+	type?: unknown;
+	uri?: unknown;
+	url?: unknown;
 }
+
+const citationCarrierSchema = z.custom<CitationFieldCarrier>(
+	(value) => Array.isArray(value) || z.object({}).safeParse(value).success
+);
+const citationKindSchema = z.custom<CitationFieldCarrier & { type: string }>(
+	(value) => {
+		const carrier = citationCarrierSchema.safeParse(value);
+		return carrier.success && z.string().safeParse(carrier.data.type).success;
+	}
+);
+// Retain the original two input-property reads on a native part carrier.
+const citationInputPartSchema = z.custom<
+	CitationFieldCarrier & { input: CitationFieldCarrier }
+>((value) => {
+	const carrier = citationCarrierSchema.safeParse(value);
+	return (
+		carrier.success &&
+		citationCarrierSchema.safeParse(carrier.data.input).success
+	);
+});
+const citationStringSchema = z.string();
+const citedWebToolSchema = z.enum(["WebFetch", "WebSearch"]);
+
+type CitationOutputView =
+	| { kind: "array"; items: unknown[]; carrier: CitationFieldCarrier }
+	| { kind: "record"; carrier: CitationFieldCarrier }
+	| { kind: "string"; text: string }
+	| { kind: "ignored" };
+
+/** Decode the native JSON-string form without rejecting unrelated payload fields. */
+const citationOutputSchema = z
+	.unknown()
+	.transform((output): CitationOutputView => {
+		let decoded = output;
+		const encoded = citationStringSchema.safeParse(output);
+		if (encoded.success) {
+			try {
+				decoded = JSON.parse(encoded.data);
+			} catch {
+				/* Raw prose remains a fetch description. */
+			}
+		}
+		const carrier = citationCarrierSchema.safeParse(decoded);
+		if (Array.isArray(decoded) && carrier.success) {
+			return { kind: "array", items: decoded, carrier: carrier.data };
+		}
+		if (carrier.success) {
+			return { kind: "record", carrier: carrier.data };
+		}
+		const text = citationStringSchema.safeParse(decoded);
+		return text.success
+			? { kind: "string", text: text.data }
+			: { kind: "ignored" };
+	});
 
 const CODE_FENCE_SPLIT_RE = /(```[\s\S]*?```)/g;
 const INLINE_CODE_SPLIT_RE = /(`[^`\n]+`)/g;
 /** Bare `[n]` that is not already a markdown link `[n](...)` or definition `[n]:`. */
 const BARE_CITE_MARKER_RE = /\[(\d+)\](?!\(|:)/g;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-/** Best-effort parse of a tool output that may arrive as a JSON string. */
-function normalizeOutput(output: unknown): unknown {
-	if (typeof output !== "string") {
-		return output;
-	}
-	try {
-		return JSON.parse(output);
-	} catch {
-		return output;
-	}
+function asString(
+	value: Parameters<typeof citationStringSchema.safeParse>[0]
+): string | undefined {
+	const text = citationStringSchema.safeParse(value);
+	return text.success && text.data.trim() ? text.data : undefined;
 }
 
 function hostnameTitle(url: string): string {
@@ -41,33 +93,42 @@ function hostnameTitle(url: string): string {
 	}
 }
 
-function toolNameOf(part: ToolPartLike): string {
+function toolNameOf(
+	part: CitationFieldCarrier
+): z.output<typeof citedWebToolSchema> | null {
 	if (part.type === "dynamic-tool") {
-		return part.toolName ?? "";
+		const name = citedWebToolSchema.safeParse(part.toolName ?? "");
+		return name.success ? name.data : null;
 	}
-	return typeof part.type === "string" && part.type.startsWith("tool-")
-		? part.type.slice("tool-".length)
-		: "";
+	const kind = citationKindSchema.safeParse(part);
+	const name =
+		kind.success && kind.data.type.startsWith("tool-")
+			? citedWebToolSchema.safeParse(kind.data.type.slice("tool-".length))
+			: null;
+	return name?.success ? name.data : null;
 }
 
-function pickUrl(record: Record<string, unknown>): string | undefined {
+function pickUrl(record: CitationFieldCarrier): string | undefined {
 	return asString(record.url) ?? asString(record.link) ?? asString(record.uri);
 }
 
-function citationFromWebFetch(part: ToolPartLike): Omit<Citation, "number">[] {
-	const input = isRecord(part.input) ? part.input : {};
-	const url = pickUrl(input);
+function citationFromWebFetch(
+	part: CitationFieldCarrier
+): Omit<Citation, "number">[] {
+	const input = citationInputPartSchema.safeParse(part);
+	const url = pickUrl(input.success ? input.data.input : {});
 	if (!url) {
 		return [];
 	}
-	const output = normalizeOutput(part.output);
+	const output = citationOutputSchema.parse(part.output);
 	let title: string | undefined;
 	let description: string | undefined;
-	if (isRecord(output)) {
-		title = asString(output.title);
-		description = asString(output.summary) ?? asString(output.text);
-	} else if (typeof output === "string") {
-		description = output;
+	if (output.kind === "record" || output.kind === "array") {
+		title = asString(output.carrier.title);
+		description =
+			asString(output.carrier.summary) ?? asString(output.carrier.text);
+	} else if (output.kind === "string") {
+		description = output.text;
 	}
 	return [
 		{
@@ -79,55 +140,52 @@ function citationFromWebFetch(part: ToolPartLike): Omit<Citation, "number">[] {
 }
 
 function citationsFromWebSearch(
-	part: ToolPartLike
+	part: CitationFieldCarrier
 ): Omit<Citation, "number">[] {
-	const output = normalizeOutput(part.output ?? part.result);
-	// A bare array is already the result list; otherwise pull `.results`. Check
-	// Array.isArray first — arrays are records too, so `isRecord` alone would
-	// misroute a bare-array output into the `.results` (undefined) branch.
-	const results = Array.isArray(output)
-		? output
-		: isRecord(output)
-			? output.results
-			: output;
+	const output = citationOutputSchema.parse(part.output ?? part.result);
+	// Bare arrays take precedence over a record's results property.
+	const results =
+		output.kind === "array"
+			? output.items
+			: output.kind === "record"
+				? output.carrier.results
+				: undefined;
 	if (!Array.isArray(results)) {
 		return [];
 	}
 	const out: Omit<Citation, "number">[] = [];
 	for (const item of results) {
-		if (!isRecord(item)) {
+		const carrier = citationCarrierSchema.safeParse(item);
+		if (!carrier.success) {
 			continue;
 		}
-		const url = pickUrl(item);
+		const url = pickUrl(carrier.data);
 		if (!url) {
 			continue;
 		}
 		out.push({
-			title: asString(item.title) ?? hostnameTitle(url),
+			title: asString(carrier.data.title) ?? hostnameTitle(url),
 			url,
-			description: asString(item.snippet) ?? asString(item.description),
+			description:
+				asString(carrier.data.snippet) ?? asString(carrier.data.description),
 		});
 	}
 	return out;
 }
 
-/**
- * Extract cited sources from an assistant message's web tool parts. Only
- * entries with a real URL become citations (WebFetch always carries one;
- * WebSearch results may). Deduped by URL and numbered in first-seen order, so
- * the result is empty (renders nothing) when the turn used no web tools.
- */
+/** Extract web citations, deduped and numbered in their original encounter order. */
 export function extractCitations(parts: unknown[]): Citation[] {
 	const collected: Omit<Citation, "number">[] = [];
 	for (const part of parts) {
-		if (!isRecord(part)) {
+		const carrier = citationCarrierSchema.safeParse(part);
+		if (!carrier.success) {
 			continue;
 		}
-		const name = toolNameOf(part as ToolPartLike);
+		const name = toolNameOf(carrier.data);
 		if (name === "WebFetch") {
-			collected.push(...citationFromWebFetch(part as ToolPartLike));
+			collected.push(...citationFromWebFetch(carrier.data));
 		} else if (name === "WebSearch") {
-			collected.push(...citationsFromWebSearch(part as ToolPartLike));
+			collected.push(...citationsFromWebSearch(carrier.data));
 		}
 	}
 	const seen = new Set<string>();

@@ -25,6 +25,9 @@
 
 import {
 	type AppRequestMethod,
+	type AppRequestValue,
+	type AppResponseValue,
+	type MountedAppPathInput,
 	mountedAppRequest,
 	resolveMountedAppPath,
 } from "./app-request.ts";
@@ -49,7 +52,7 @@ export type BlueprintMethod = "DELETE" | "GET" | "POST";
 
 export interface BlueprintRequestInput {
 	/** JSON body. Omit for GET/DELETE. */
-	body?: unknown;
+	body?: AppRequestValue;
 	/** Defaults to `"GET"`. */
 	method?: BlueprintMethod;
 	/** Path RELATIVE to `/api/blueprint`, leading slash included, query and all. */
@@ -73,7 +76,7 @@ export interface BlueprintRequestInput {
  * `..` is what stops `%2e%2e` and its variants, which decode into dot segments only
  * AFTER a literal check would have run.
  */
-export function resolveBlueprintPath(path: unknown): string | null {
+export function resolveBlueprintPath(path: MountedAppPathInput): string | null {
 	return resolveMountedAppPath(BLUEPRINT_MOUNT, path);
 }
 
@@ -87,7 +90,7 @@ export function resolveBlueprintPath(path: unknown): string | null {
 export async function blueprintRequest(
 	target: ApiTarget,
 	input: BlueprintRequestInput
-): Promise<unknown> {
+): Promise<AppResponseValue> {
 	return await mountedAppRequest(target, input, {
 		allowedMethods: ALLOWED_METHODS,
 		invalidMethodMessage: (method) =>

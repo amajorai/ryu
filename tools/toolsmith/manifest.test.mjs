@@ -38,7 +38,7 @@ const INLINE_MANIFEST = {
 			kind: "tool",
 			config: {
 				slug: "probe",
-				backend: "inline_deno",
+				backend: "inline_js",
 				description: "Probe a thing and return whether it responded.",
 				input_schema: { type: "object", properties: {} },
 				code: "return 1;",
@@ -51,6 +51,7 @@ const ADAPTER_MANIFEST = {
 	id: "@demo/pkg",
 	version: "1.0.0",
 	description: "A demo package.",
+	permission_grants: ["tool:execute"],
 	provides: [
 		{
 			capability: "web.search",
@@ -67,13 +68,13 @@ const ADAPTER_MANIFEST = {
 
 // ── findManifestSeat ─────────────────────────────────────────────────────────
 
-test("finds an inline_deno seat by slug", () => {
+test("finds an inline_js seat by slug", () => {
 	const { seat } = findManifestSeat(
 		pkg(INLINE_MANIFEST),
 		{ tool: "probe" },
 		"inline_tool"
 	);
-	assert.equal(seat.type, "inline_deno");
+	assert.equal(seat.type, "inline_js");
 	assert.equal(seat.config.slug, "probe");
 });
 
@@ -221,6 +222,22 @@ test("a well-formed inline tool reports no contract problems", () => {
 	assert.deepEqual(contractFor(INLINE_MANIFEST), []);
 });
 
+test("the deprecated inline_deno backend name still passes the contract", () => {
+	// Core loads `inline_deno` as `inline_js`, so a package written before the
+	// rename must not be refused here either.
+	const manifest = structuredClone(INLINE_MANIFEST);
+	manifest.runnables[0].config.backend = "inline_deno";
+	assert.deepEqual(contractFor(manifest), []);
+});
+
+test("a backend other than inline_js is reported", () => {
+	const manifest = structuredClone(INLINE_MANIFEST);
+	manifest.runnables[0].config.backend = "http";
+	const problems = contractFor(manifest);
+	assert.equal(problems.length, 1);
+	assert.match(problems[0], /expected 'inline_js'/);
+});
+
 test("a missing tool:execute grant is reported", () => {
 	// The silent one. Without the grant Core registers the tool, serves it in
 	// discovery, and refuses every call — nothing else in the pipeline notices.
@@ -281,4 +298,58 @@ test("a nested adapter code_file is reported (the flat-layout rule)", () => {
 		"adapter"
 	);
 	assert.equal(problems.length, 1);
+});
+
+test("code_file names Core rejects are reported (traversal, leading dot, bad chars)", () => {
+	// Same rule as Core's `validate_code_file_path` and the SDK's
+	// `isValidCodeFilePath`: `a..js` contains `..`, so Core refuses it at install.
+	for (const code_file of [
+		"adapters/a..js",
+		"adapters/..js",
+		"adapters/.hidden.js",
+		"adapters/x..y.mjs",
+		"adapters/web search.js",
+		"adapters/web.search.ts",
+		"hooks/../guard.js",
+	]) {
+		const problems = contractFor(
+			ADAPTER_MANIFEST,
+			{ tool: "web.search", code_file },
+			"adapter"
+		);
+		assert.equal(problems.length, 1, code_file);
+		assert.match(problems[0], /is not '<hooks\|adapters>/, code_file);
+	}
+});
+
+test("well-formed code_file names pass the path rule", () => {
+	for (const code_file of [
+		"adapters/web.search.js",
+		"adapters/web_search-v2.mjs",
+		"hooks/guard.js",
+	]) {
+		const problems = contractFor(
+			ADAPTER_MANIFEST,
+			{ tool: "web.search", code_file },
+			"adapter"
+		);
+		assert.ok(
+			problems.every((p) => !/is not '<hooks\|adapters>/.test(p)),
+			`${code_file}: ${problems.join("; ")}`
+		);
+	}
+});
+
+test("an adapter without the tool:execute grant is reported", () => {
+	// Same silent failure as an inline tool: the provider is listed in its layer,
+	// and Core refuses every verb call routed through the adapter.
+	const manifest = structuredClone(ADAPTER_MANIFEST);
+	manifest.permission_grants = [];
+	const problems = contractFor(
+		manifest,
+		{ tool: "web.search", code_file: "adapters/web.search.js" },
+		"adapter"
+	);
+	assert.equal(problems.length, 1);
+	assert.match(problems[0], /tool:execute/);
 });

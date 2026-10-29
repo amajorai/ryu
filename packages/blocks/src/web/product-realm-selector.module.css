@@ -1,0 +1,14 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	.explore {
+		outline-offset: -3px;
+	}
+	.card::after {
+		border-radius: inherit;
+	}
+	.scrim {
+		backdrop-filter: blur(2px);
+	}
+}

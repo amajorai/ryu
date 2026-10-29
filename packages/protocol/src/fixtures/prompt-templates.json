@@ -1,0 +1,105 @@
+{
+  "$comment": "Golden prompt-template cases. Pinned by packages/protocol/src/prompt-hub.test.ts (variables, errors), packages/sdk/src/prompts/template.test.ts (variables, errors, output) and apps/core/src/prompt_registry.rs tests (variables, errors).",
+  "cases": [
+    {
+      "name": "plain text has no variables",
+      "template": "You are a helpful assistant.",
+      "variables": [],
+      "values": {},
+      "output": "You are a helpful assistant."
+    },
+    {
+      "name": "simple variables in first-use order",
+      "template": "Hello {{ name }}, welcome to {{place}}. Bye {{name}}.",
+      "variables": ["name", "place"],
+      "values": { "name": "Ada", "place": "Ryu" },
+      "output": "Hello Ada, welcome to Ryu. Bye Ada."
+    },
+    {
+      "name": "triple and ampersand tags never escape",
+      "template": "{{{html}}} and {{& html}} and {{html}}",
+      "variables": ["html"],
+      "values": { "html": "<b>&</b>" },
+      "output": "<b>&</b> and <b>&</b> and <b>&</b>"
+    },
+    {
+      "name": "dotted paths report the root",
+      "template": "{{user.name}} ({{user.plan}})",
+      "variables": ["user"],
+      "values": { "user": { "name": "Ada", "plan": "pro" } },
+      "output": "Ada (pro)"
+    },
+    {
+      "name": "missing values render empty",
+      "template": "[{{missing}}]",
+      "variables": ["missing"],
+      "values": {},
+      "output": "[]"
+    },
+    {
+      "name": "numbers and booleans stringify",
+      "template": "{{count}} {{flag}}",
+      "variables": ["count", "flag"],
+      "values": { "count": 3, "flag": true },
+      "output": "3 true"
+    },
+    {
+      "name": "comments are dropped",
+      "template": "a{{! ignore this }}b",
+      "variables": [],
+      "values": {},
+      "output": "ab"
+    },
+    {
+      "name": "list sections iterate items",
+      "template": "Rules:\n{{#rules}}\n- {{.}}\n{{/rules}}\nEnd",
+      "variables": ["rules"],
+      "values": { "rules": ["be brief", "cite sources"] },
+      "output": "Rules:\n- be brief\n- cite sources\nEnd"
+    },
+    {
+      "name": "object items resolve fields then parents",
+      "template": "{{#docs}}{{title}} by {{author}}; {{/docs}}",
+      "variables": ["docs", "title", "author"],
+      "values": {
+        "docs": [{ "title": "A" }, { "title": "B", "author": "Bo" }],
+        "author": "Ada"
+      },
+      "output": "A by Ada; B by Bo; "
+    },
+    {
+      "name": "inverted sections render on empty",
+      "template": "{{#items}}x{{/items}}{{^items}}none{{/items}}",
+      "variables": ["items"],
+      "values": { "items": [] },
+      "output": "none"
+    },
+    {
+      "name": "truthy scalar section renders once",
+      "template": "{{#formal}}Dear {{name}},{{/formal}}{{^formal}}Hi {{name}},{{/formal}}",
+      "variables": ["formal", "name"],
+      "values": { "formal": false, "name": "Ada" },
+      "output": "Hi Ada,"
+    },
+    {
+      "name": "unterminated tag is an error",
+      "template": "Hello {{name",
+      "error": true
+    },
+    {
+      "name": "mismatched section is an error",
+      "template": "{{#a}}x{{/b}}",
+      "error": true
+    },
+    {
+      "name": "unclosed section is an error",
+      "template": "{{#a}}x",
+      "error": true
+    },
+    {
+      "name": "invalid tag name is an error",
+      "template": "{{ two words }}",
+      "error": true
+    }
+  ]
+}

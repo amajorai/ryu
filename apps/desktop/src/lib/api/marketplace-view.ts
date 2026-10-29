@@ -5,7 +5,7 @@
 // strips (in each catalog section) map a control-plane `MarketplaceCard` to the
 // block's money-logic-free `MarketplaceCardData` the same way.
 
-import type { MarketplaceCardData } from "@ryu/blocks/desktop/marketplace";
+import type { MarketplaceCardData } from "@ryu/blocks/desktop/marketplace.tsx";
 import type { ReactNode } from "react";
 import {
 	formatPricingLabel,

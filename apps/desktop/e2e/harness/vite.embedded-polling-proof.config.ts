@@ -9,6 +9,8 @@ export default defineConfig({
 	css: { postcss: { plugins: [tailwindcss()] } },
 	optimizeDeps: {
 		entries: ["embedded-polling-proof.html", "embedded-polling-child.html"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		dedupe: ["react", "react-dom"],

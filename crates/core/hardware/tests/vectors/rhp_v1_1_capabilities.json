@@ -1,0 +1,233 @@
+{
+  "description": "RHP v1.1 capability descriptors, validation, JSON-schema translation and tool naming",
+  "register_valid": {
+    "type": "capabilities_register",
+    "generation": 1,
+    "capabilities": [
+      {
+        "name": "device.status",
+        "description": "Battery, charging state and firmware version.",
+        "params": {
+          "required": {},
+          "optional": {}
+        },
+        "timeout_ms": 5000,
+        "sensitive": false,
+        "confirm": "none"
+      },
+      {
+        "name": "display.show_text",
+        "description": "Show a short message on the watch face.",
+        "params": {
+          "required": {
+            "text": {
+              "type": "string",
+              "description": "Text to show.",
+              "max_len": 120
+            }
+          },
+          "optional": {
+            "seconds": {
+              "type": "integer",
+              "description": "How long to show it.",
+              "min": 1,
+              "max": 60
+            }
+          }
+        },
+        "timeout_ms": 5000,
+        "sensitive": false,
+        "confirm": "none"
+      }
+    ]
+  },
+  "json_schema_display_show_text": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Text to show.",
+        "maxLength": 120
+      },
+      "seconds": {
+        "type": "integer",
+        "description": "How long to show it.",
+        "minimum": 1,
+        "maximum": 60
+      }
+    },
+    "required": ["text"],
+    "additionalProperties": false
+  },
+  "invalid_descriptors": [
+    {
+      "descriptor": {
+        "name": "Device.Status",
+        "description": "x",
+        "params": {
+          "required": {},
+          "optional": {}
+        }
+      },
+      "code": "invalid_name"
+    },
+    {
+      "descriptor": {
+        "name": "led__set",
+        "description": "x",
+        "params": {
+          "required": {},
+          "optional": {}
+        }
+      },
+      "code": "invalid_name"
+    },
+    {
+      "descriptor": {
+        "name": "system.reboot",
+        "description": "x",
+        "params": {
+          "required": {},
+          "optional": {}
+        }
+      },
+      "code": "reserved"
+    },
+    {
+      "descriptor": {
+        "name": "led.set",
+        "description": "x",
+        "params": {
+          "required": {
+            "cfg": {
+              "type": "object",
+              "description": "x"
+            }
+          },
+          "optional": {}
+        }
+      },
+      "code": "invalid_schema"
+    },
+    {
+      "descriptor": {
+        "name": "led.set",
+        "description": "x",
+        "params": {
+          "required": {},
+          "optional": {}
+        },
+        "timeout_ms": 50
+      },
+      "code": "invalid_schema"
+    },
+    {
+      "descriptor": {
+        "name": "led.set",
+        "description": "",
+        "params": {
+          "required": {},
+          "optional": {}
+        }
+      },
+      "code": "invalid_schema"
+    },
+    {
+      "descriptor": {
+        "name": "led.set",
+        "description": "x",
+        "params": {
+          "required": {
+            "a": {
+              "type": "string",
+              "description": "x"
+            }
+          },
+          "optional": {
+            "a": {
+              "type": "string",
+              "description": "x"
+            }
+          }
+        }
+      },
+      "code": "invalid_schema"
+    }
+  ],
+  "args_cases": [
+    {
+      "capability": "display.show_text",
+      "args": {
+        "text": "Hi",
+        "seconds": 5
+      },
+      "ok": true
+    },
+    {
+      "capability": "display.show_text",
+      "args": {
+        "seconds": 5
+      },
+      "ok": false,
+      "code": "invalid_args"
+    },
+    {
+      "capability": "display.show_text",
+      "args": {
+        "text": "Hi",
+        "seconds": 61
+      },
+      "ok": false,
+      "code": "invalid_args"
+    },
+    {
+      "capability": "display.show_text",
+      "args": {
+        "text": "Hi",
+        "extra": 1
+      },
+      "ok": false,
+      "code": "invalid_args"
+    },
+    {
+      "capability": "display.show_text",
+      "args": {
+        "text": 5
+      },
+      "ok": false,
+      "code": "invalid_args"
+    },
+    {
+      "capability": "display.show_text",
+      "args": {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "ok": false,
+      "code": "invalid_args"
+    },
+    {
+      "capability": "display.show_text",
+      "args": {
+        "text": "Hi",
+        "seconds": 2.5
+      },
+      "ok": false,
+      "code": "invalid_args"
+    }
+  ],
+  "tool_name_rule": "device_key = device_id if it matches ^[a-z0-9]+(_[a-z0-9]+)*$ and len <= 22, else 'd' + first 12 lowercase hex of SHA-256(device_id); tool_name = device_key + '__' + capability name with '.' replaced by '-'; tool_id = 'device.' + tool_name",
+  "tool_names": [
+    {
+      "device_id": "rhw_0123456789abcdef",
+      "capability": "display.show_text",
+      "tool_name": "rhw_0123456789abcdef__display-show_text",
+      "tool_id": "device.rhw_0123456789abcdef__display-show_text"
+    },
+    {
+      "device_id": "rhw_0123456789abcdef0123456789abcdef",
+      "capability": "device.status",
+      "tool_name": "de63e5a6ad859__device-status",
+      "tool_id": "device.de63e5a6ad859__device-status"
+    }
+  ]
+}

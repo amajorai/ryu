@@ -1,45 +1,18 @@
 {
   "slug": "real-estate",
   "name": "Real Estate",
-  "navLabel": "Real Estate",
-  "category": "Industries",
   "icon": "Home",
   "tagline": "Draft property listings, prepare lead follow-ups, and update connected records with your approval.",
-  "heroEyebrow": "Ryu for Real Estate",
   "heroTitle": "Ryu for real estate",
-  "heroSubtitle": "Draft property listings, prepare lead follow-ups, and update connected records with your approval.",
   "visualKey": "ConnectionsVisual",
-  "intro": "Real estate runs on follow-up, paperwork, and being first to respond. Ryu gives you an agent that drafts listings, chases leads, and keeps your CRM current by acting directly in your MLS, email, and calendar through Connections. Client contact details stay governed, and you review every message before it goes out.",
-  "highlights": [
-    {
-      "title": "Acts in your tools",
-      "description": "Connections let an agent update your CRM, send email, and book showings in Google Workspace and your calendar.",
-      "icon": "Plug"
-    },
-    {
-      "title": "Listings in minutes",
-      "description": "Turn property facts and photos into polished listing copy, social posts, and email blasts in your voice.",
-      "icon": "Sparkles"
-    },
-    {
-      "title": "Never miss a lead",
-      "description": "Workflows triggered by a new inquiry draft an instant, personalized reply and queue the follow-up sequence.",
-      "icon": "Zap"
-    },
-    {
-      "title": "Client data stays yours",
-      "description": "Local-first by default with no telemetry, so buyer and seller details are not handed to a public chatbot.",
-      "icon": "Shield"
-    }
-  ],
   "useCases": [
     {
       "title": "Listing copy",
-      "description": "Turn square footage, features, and neighborhood notes into a compelling listing description plus social captions."
+      "description": "Turn square footage, features, and neighborhood notes into a listing description and social captions."
     },
     {
       "title": "Lead follow-up",
-      "description": "Draft a personalized reply to each new inquiry and log it to the CRM, so no portal lead sits cold for hours."
+      "description": "Draft a reply to each new inquiry and log it to the CRM."
     },
     {
       "title": "Comparative market analysis",
@@ -55,31 +28,21 @@
     },
     {
       "title": "Buyer matching",
-      "description": "Ground an agent on your active listings and a buyer's criteria so it surfaces the best fits with reasons why."
+      "description": "Give an agent your active listings and a buyer's criteria so it finds the best fits, with reasons."
     }
-  ],
-  "examplePrompts": [
-    "Write a listing description and three social captions for a 3-bed townhouse with a renovated kitchen and a rooftop terrace.",
-    "Draft a friendly reply to this new portal inquiry and log the contact to my CRM.",
-    "Pull recent comps for this address and build a one-page pricing rationale.",
-    "Propose three showing times next week that fit this buyer's availability and draft the calendar invites.",
-    "Summarize this offer into a one-page brief comparing it to the asking price and terms."
   ],
   "faq": [
     {
       "q": "Can Ryu connect to my CRM and listing tools?",
-      "a": "Yes. Through Connections an agent can read and write in CRMs, Google Workspace, email, and calendars, and across 250+ tools via MCP, so it updates records and sends messages where you already work."
+      "a": "Yes, if the tool has a supported app connection or MCP server. What an agent can do depends on that tool and your account's access, so test the workflow before it updates records or sends messages."
     },
     {
       "q": "Will it send emails to clients without my say-so?",
-      "a": "No. Ryu assists, you approve. Replies and listings are drafted for you to review, and every action runs through the Gateway with a full audit trail of what the agent did."
+      "a": "Not by default. Sending is a risky action, so it waits for your approval unless you change that rule. Workflow history and the Gateway's records of routed model calls show what ran, but not every action."
     },
     {
       "q": "Is my buyer and seller data kept private?",
-      "a": "Ryu is local-first with no telemetry, so client details can stay on your machine. When you route to a cloud model, the Gateway redacts sensitive data on egress and logs every call."
+      "a": "Yes. With a local model, client details stay on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     }
-  ],
-  "ctaTitle": "Give every agent a tireless assistant.",
-  "ctaSubtitle": "Draft listings, follow up instantly, and keep your CRM current while you focus on clients.",
-  "ctaNote": "Acts in your tools · Local-first · Full audit trail"
+  ]
 }

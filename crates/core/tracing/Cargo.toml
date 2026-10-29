@@ -1,9 +1,9 @@
 [package]
 name = "ryu-tracing"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Per-run observability trace primitive for Ryu: the ordered-span store (`Span` v1 contract + SQLite-backed `TraceStore`) that records tool-call/model-call spans keyed by `conversation_id` (the run id) — open/close spans, args-hash privacy fingerprinting, and newest-first per-run span reads that back the desktop per-run trace viewer (M4). Placement rationale (Core, not Gateway): span ordering and tool-call sequencing are *what ran* (orchestration); token counts and cost are *what is measured/paid* and stay Gateway-side — this store deliberately holds NO tokens/cost fields. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the store opens at boot and backs a `ServerState` field). `TraceStore::open` takes an explicit db path, so the crate has ZERO dependency on apps/core — the default-path choice (`~/.ryu/traces.db`) stays Core-side wiring."
+description = "Per-run observability trace primitive for Ryu: the hierarchical span store (trace_id/span_id/parent_span_id, agent_run/workflow_run/workflow_step/model_call/tool_call/retrieval/memory/guardrail kinds, status, attributes, consent-gated inputs/outputs) backed by SQLite, the run trace tree and trace search reads behind the desktop trace viewer, and the OTLP exporter presets (Langfuse, LangSmith, Braintrust, Arize Phoenix, Helicone, Datadog). Token counts and cost stay Gateway-side; this store holds NO token or cost fields. ZERO dependency on apps/core: `TraceStore::open` takes an explicit db path."
 repository = "https://github.com/amajorai/ryu"
 
 # Versions are matched to apps/core/Cargo.toml so there is no version skew when
@@ -18,7 +18,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 sha2 = "0.10"
 tracing = "0.1"
 # sync: `Mutex` guards the SQLite connection.
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "rt"] }
+# Langfuse Basic auth in the OTLP exporter presets.
+base64 = "0.22"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

@@ -9,8 +9,10 @@
 //! PROTECTED router (node bearer via `require_auth`, loopback-dev `None` ⇒
 //! allow — the same posture as every other `/api/*` route), strips the
 //! browser-context headers, stamps Shadow's shared-secret bearer
-//! ([`crate::sidecar::tools::shadow::api_token`]), and streams the response
-//! back (the `/agent` SSE stream and `/frame` JPEG bytes both pass through).
+//! ([`crate::sidecar::tools::shadow::verified_api_token`]), and streams the
+//! response back (the `/agent` SSE stream and `/frame` JPEG bytes both pass
+//! through). The bearer — and the request itself — go only to a listener that
+//! proved it is Shadow; anything else on the port gets a 502 instead.
 //!
 //! Only an explicit allowlist of Shadow's read/control endpoints is forwarded —
 //! the ones the desktop actually uses. Mutation lanes that belong to other
@@ -19,13 +21,15 @@
 //! (`ShadowManager::stop`).
 
 use axum::body::Body;
-use axum::extract::{Path, Request};
+use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::Router;
 
 use crate::server::ServerState;
+
+mod computer_use_settings;
 
 /// Max request body Core buffers + forwards (mirrors the ext-proxy default).
 const MAX_PROXY_BYTES: usize = 10 * 1024 * 1024;
@@ -50,9 +54,16 @@ const GET_ALLOWLIST: &[&str] = &[
     "activity/recent",
     "proactive",
     "capture/control",
+    "computer-use/config",
     "agent/tools",
 ];
-const POST_ALLOWLIST: &[&str] = &["agent", "api/feedback", "capture/control"];
+const POST_ALLOWLIST: &[&str] = &[
+    "agent",
+    "api/feedback",
+    "capture/control",
+    "computer-use/config",
+    "computer-use/run",
+];
 
 /// True when `sub_path` (no leading slash) is a forwardable Shadow endpoint for
 /// `method`. Exact match only — no parametric or wildcard routes exist in the
@@ -90,13 +101,52 @@ fn is_browser_context(name: &str) -> bool {
     matches!(name.to_ascii_lowercase().as_str(), "origin" | "referer")
 }
 
-async fn shadow_proxy(Path(rest): Path<String>, req: Request) -> Response {
+/// The node owner over the node credential, with no cloud identity: what the
+/// auth middleware resolves for the node bearer without a user header.
+///
+/// Session Box routing acquires a node-owner conversation's Box with it when
+/// no turn authority was recorded. That is only ever a conversation without an
+/// owner on an unbound node, where a local owner is gated by the node's Box
+/// configuration alone (design §7.2).
+pub(crate) fn node_owner_authority() -> super::ResolvedAuthorization {
+    super::ResolvedAuthorization {
+        context: crate::authorization::AuthorizationContext::owner(crate::pairing::now_secs()),
+        bindings: crate::authorization::RequestBindings::default(),
+        caller: None,
+        verified_user_jwt: None,
+    }
+}
+
+async fn shadow_proxy(
+    State(state): State<ServerState>,
+    Path(rest): Path<String>,
+    req: Request,
+) -> Response {
     // The wildcard tail arrives without a leading slash; normalize + gate.
     let sub_path = rest.trim_start_matches('/').to_owned();
     if !is_allowed(req.method(), &sub_path) {
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    if sub_path == "computer-use/config" {
+        return computer_use_settings::handle(&state, req).await;
+    }
+
+    // Shadow computer use drives the node's own display. A conversation whose
+    // computer use runs on its session Box is kept off it by the tool registry's
+    // `conversation_gate` (`box_desktop`), the only place a conversation is known;
+    // this proxy sees no conversation, so it enforces nothing of the kind.
+
+    // Resolve the bearer first: it is released only when the listener proved it
+    // is Shadow. Without that, forward nothing — the request itself (prompts,
+    // config) is as private as the token.
+    let Some(token) = crate::sidecar::tools::shadow::verified_api_token().await else {
+        return (
+            StatusCode::BAD_GATEWAY,
+            "shadow unavailable: no verified Shadow is listening",
+        )
+            .into_response();
+    };
     let base = crate::sidecar::tools::shadow::base_url();
     let (parts, body) = req.into_parts();
     let body_bytes = match axum::body::to_bytes(body, MAX_PROXY_BYTES).await {
@@ -106,7 +156,7 @@ async fn shadow_proxy(Path(rest): Path<String>, req: Request) -> Response {
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "shadow proxy: request body too large",
             )
-                .into_response()
+                .into_response();
         }
     };
     let query = parts
@@ -126,6 +176,7 @@ async fn shadow_proxy(Path(rest): Path<String>, req: Request) -> Response {
         if is_hop_by_hop(name.as_str())
             || is_browser_context(name.as_str())
             || name.as_str().eq_ignore_ascii_case("authorization")
+            || name.as_str().eq_ignore_ascii_case("x-ryu-conversation-id")
         {
             continue;
         }
@@ -137,11 +188,9 @@ async fn shadow_proxy(Path(rest): Path<String>, req: Request) -> Response {
         }
     }
     // Stamp Shadow's shared-secret bearer (replacing the caller's node bearer,
-    // dropped above). A missing token falls through to Shadow's 401.
-    if let Some(token) = crate::sidecar::tools::shadow::api_token() {
-        if let Ok(val) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
-            headers.insert(reqwest::header::AUTHORIZATION, val);
-        }
+    // dropped above).
+    if let Ok(val) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+        headers.insert(reqwest::header::AUTHORIZATION, val);
     }
 
     let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes())
@@ -188,8 +237,11 @@ mod tests {
         assert!(is_allowed(&Method::GET, "timeline"));
         assert!(is_allowed(&Method::GET, "journal/weekly"));
         assert!(is_allowed(&Method::GET, "capture/control"));
+        assert!(is_allowed(&Method::GET, "computer-use/config"));
         assert!(is_allowed(&Method::POST, "capture/control"));
         assert!(is_allowed(&Method::POST, "agent"));
+        assert!(is_allowed(&Method::POST, "computer-use/config"));
+        assert!(is_allowed(&Method::POST, "computer-use/run"));
         assert!(is_allowed(&Method::POST, "api/feedback"));
         // Wrong method.
         assert!(!is_allowed(&Method::POST, "timeline"));
@@ -203,5 +255,16 @@ mod tests {
         // No prefix/suffix sloppiness.
         assert!(!is_allowed(&Method::GET, "timeline/extra"));
         assert!(!is_allowed(&Method::GET, "journal/../ingest"));
+    }
+
+    #[test]
+    fn shadow_proxy_node_owner_authority_is_the_local_owner() {
+        let authority = node_owner_authority();
+        assert_eq!(
+            crate::server::session_box::owner_of(&authority).unwrap(),
+            "node-owner"
+        );
+        assert!(authority.caller.is_none());
+        assert!(authority.verified_user_jwt.is_none());
     }
 }

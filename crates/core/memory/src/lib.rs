@@ -61,6 +61,13 @@ use ryu_kernel_contracts::ResourceKey;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+pub mod working;
+pub use working::{
+    merge_patch, render_working_memory_block, WorkingMemory, WorkingMemoryConfig,
+    WorkingMemoryError, WorkingMemoryMode, WorkingMemoryScope, WorkingMemoryWrite,
+    DEFAULT_WORKING_MEMORY_TEMPLATE, MAX_WORKING_MEMORY_BYTES,
+};
+
 /// Default number of recent turns assembled as short-term context.
 pub const DEFAULT_SHORT_TERM_LIMIT: usize = 10;
 /// Default number of long-term entries recalled per request.
@@ -1007,6 +1014,7 @@ impl MemoryStore {
     fn init_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
              CREATE TABLE IF NOT EXISTS memory_entries (
                  id          TEXT PRIMARY KEY,
                  user_id     TEXT NOT NULL,
@@ -1063,6 +1071,7 @@ impl MemoryStore {
                  ON memory_entries(lifecycle, updated_at);",
         )
         .context("creating memory level index")?;
+        working::init_schema(conn)?;
         Ok(())
     }
 
@@ -2157,6 +2166,9 @@ struct EncryptedRow {
     lifecycle: String,
     supersedes_id: Option<String>,
 }
+
+#[cfg(test)]
+mod proposal_tests;
 
 #[cfg(test)]
 mod tests {

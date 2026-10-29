@@ -18,6 +18,7 @@
 
 import { Add01Icon, CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { type CSSProperties, useState } from "react";
@@ -54,11 +55,12 @@ export default function SkillBadgeCard({
 	className?: string;
 	style?: CSSProperties;
 }) {
+	const tl = useLiteralMessages();
 	const [imgFailed, setImgFailed] = useState(false);
 	const avatar = skillAvatarUrl(card);
 	const art =
 		avatar && !imgFailed ? (
-			// biome-ignore lint/performance/noImgElement: a remote raster avatar is the
+			// a remote raster avatar is the
 			// skill's identity mark; no bundle can pre-optimize a GitHub owner's avatar.
 			<img
 				alt=""
@@ -80,7 +82,7 @@ export default function SkillBadgeCard({
 			style={style}
 		>
 			<button
-				aria-label={`Open ${card.name}`}
+				aria-label={tl("Open {name}", { name: card.name })}
 				className="relative flex w-full cursor-pointer flex-col overflow-hidden rounded-2xl outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
 				onClick={onOpen}
 				type="button"
@@ -93,16 +95,21 @@ export default function SkillBadgeCard({
 				{/* Name + one-line description below the art. */}
 				<div className="flex min-h-24 flex-col justify-between gap-1 p-3">
 					<div className="min-w-0">
-						<p className="truncate font-medium text-sm">{card.name}</p>
+						<p className="truncate font-medium text-sm" title={card.name}>
+							{card.name}
+						</p>
 						<p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">
 							{card.description?.trim() ||
 								(card.installs > 0
-									? `${card.source} · ${card.installs} installs`
+									? tl("{source} · {installs} installs", {
+											source: card.source,
+											installs: card.installs,
+										})
 									: card.source) ||
 								titleCase(card.slug)}
 						</p>
 					</div>
-					<span className="truncate font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+					<span className="type-compact truncate font-medium text-muted-foreground uppercase tracking-wide">
 						{card.source}
 					</span>
 				</div>
@@ -111,7 +118,9 @@ export default function SkillBadgeCard({
 			<div className="absolute top-2 right-2 z-20">
 				<button
 					aria-label={
-						installed ? `${card.name} is installed` : `Add ${card.name}`
+						installed
+							? tl("{name} is installed", { name: card.name })
+							: tl("Add {name}", { name: card.name })
 					}
 					className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-border/70 bg-background/90 font-medium text-xs shadow-sm backdrop-blur transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/40"
 					onClick={(event) => {

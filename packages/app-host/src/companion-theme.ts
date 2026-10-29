@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /** The small host seam shared by every sandboxed Companion entrypoint. */
 export const COMPANION_THEME_TOKEN_NAMES = [
 	// Semantic surface and status roles.
@@ -103,28 +105,98 @@ export const COMPANION_THEME_MUTATION_ATTRIBUTES = [
 
 const THEME_TOKEN_NAME_RE = /^--[a-z0-9-]+$/;
 const THEME_TOKEN_VALUE_UNSAFE_RE = /[{}<>;]/;
+const themeTokenValueSchema = z
+	.string()
+	.min(1)
+	.refine((value) => !THEME_TOKEN_VALUE_UNSAFE_RE.test(value));
 
-export interface CompanionThemeBridge {
-	shell?: {
-		/** Emits the complete resolved palette plus reserved appearance state. */
-		subscribeTheme?: (options: {
-			onChange: (tokens: CompanionThemeTokens) => void;
-		}) => { dispose(): void };
-	};
+interface CompanionThemeSubscribeOptions {
+	onChange: (tokens: CompanionThemeTokens) => void;
+}
+interface CompanionThemeSubscription {
+	dispose(): void;
+}
+/** Emits the complete resolved palette plus reserved appearance state. */
+type CompanionThemeSubscribe = (
+	options: CompanionThemeSubscribeOptions
+) => CompanionThemeSubscription;
+
+const companionThemeBridgeSchema = z.object({
+	shell: z
+		.object({
+			// The trusted host owns the call signature; app bridges may expose
+			// different services, so validate this callable seam independently.
+			subscribeTheme: z
+				.custom<CompanionThemeSubscribe>(
+					(value) => z.function().safeParse(value).success
+				)
+				.optional(),
+		})
+		.optional(),
+});
+
+export type CompanionThemeBridge = z.output<typeof companionThemeBridgeSchema>;
+
+const companionThemeEnvironmentSchema = z.object({
+	ryu: z.unknown().optional(),
+	window: z.object({ ryu: z.unknown().optional() }),
+});
+
+function readCompanionThemeBridge(): CompanionThemeBridge | undefined {
+	if (globalThis.window === undefined) {
+		return undefined;
+	}
+	const environment = companionThemeEnvironmentSchema.safeParse(globalThis);
+	if (!environment.success) {
+		return undefined;
+	}
+	const candidate = environment.data.window.ryu ?? environment.data.ryu;
+	const parsed = companionThemeBridgeSchema.safeParse(candidate);
+	return parsed.success ? parsed.data : undefined;
 }
 
-export type CompanionThemeTokens = Record<string, string>;
+/** Resolved host CSS custom properties, including app-specific semantic tokens. */
+export interface CompanionThemeTokens {
+	[name: string]: string;
+}
 
 export interface CompanionThemeReadOptions {
 	/** Use the desktop's local preference keys for first-paint state before boot effects run. */
 	includeStoredPreferences?: boolean;
 }
 
+/** DOM operations consumed when marking a mounted app. */
+export interface CompanionAppRoot {
+	classList: Pick<DOMTokenList, "add">;
+	dataset: DOMStringMap;
+}
+/** DOM operations consumed by live token and appearance projection. */
+export interface CompanionThemeRoot {
+	classList: Pick<DOMTokenList, "toggle">;
+	removeAttribute(name: string): void;
+	setAttribute(name: string, value: string): void;
+	style: Pick<CSSStyleDeclaration, "setProperty">;
+}
+/** DOM and browser services consumed when capturing first-paint preferences. */
+export interface CompanionThemeReadRoot {
+	classList: Pick<DOMTokenList, "contains">;
+	getAttribute(name: string): string | null;
+	ownerDocument?: {
+		defaultView: {
+			getComputedStyle(
+				root: CompanionThemeReadRoot
+			): Pick<CSSStyleDeclaration, "getPropertyValue">;
+			localStorage: Pick<Storage, "getItem">;
+			navigator: Pick<Navigator, "language">;
+		} | null;
+	};
+}
+
 export type CompanionAppSurface = "standard" | "editor" | "canvas";
 
 /** Mark a mounted Companion root as using the fixed Ryu App UI contract. */
 export function markCompanionAppRoot(
-	root: HTMLElement | null,
+	root: CompanionAppRoot | null,
 	options: { surface?: CompanionAppSurface } = {}
 ): void {
 	if (!root) {
@@ -136,7 +208,7 @@ export function markCompanionAppRoot(
 }
 
 function setStateAttribute(
-	root: HTMLElement,
+	root: CompanionThemeRoot,
 	attribute: string,
 	value: string | undefined,
 	activeValue: string
@@ -162,7 +234,7 @@ function systemTimeZone(): string {
 /** Apply reserved appearance metadata carried alongside the CSS tokens. */
 function applyCompanionThemeState(
 	tokens: CompanionThemeTokens,
-	root: HTMLElement
+	root: CompanionThemeRoot
 ): void {
 	const mode = tokens["--ryu-theme-mode"];
 	if (mode === "dark" || mode === "light") {
@@ -241,7 +313,7 @@ function applyCompanionThemeState(
  * overlay preferences).
  */
 export function readCompanionThemeTokens(
-	root: HTMLElement | null = typeof document === "undefined"
+	root: CompanionThemeReadRoot | null = globalThis.document === undefined
 		? null
 		: document.documentElement,
 	options: CompanionThemeReadOptions = {}
@@ -345,7 +417,7 @@ export function readCompanionThemeTokens(
 /** Apply only valid CSS custom-property tokens from the trusted host. */
 export function applyCompanionThemeTokens(
 	tokens: CompanionThemeTokens,
-	root: HTMLElement | null = typeof document === "undefined"
+	root: CompanionThemeRoot | null = globalThis.document === undefined
 		? null
 		: document.documentElement
 ): void {
@@ -353,13 +425,9 @@ export function applyCompanionThemeTokens(
 		return;
 	}
 	for (const [name, value] of Object.entries(tokens)) {
-		if (
-			THEME_TOKEN_NAME_RE.test(name) &&
-			typeof value === "string" &&
-			value.length > 0 &&
-			!THEME_TOKEN_VALUE_UNSAFE_RE.test(value)
-		) {
-			root.style.setProperty(name, value);
+		const parsed = themeTokenValueSchema.safeParse(value);
+		if (THEME_TOKEN_NAME_RE.test(name) && parsed.success) {
+			root.style.setProperty(name, parsed.data);
 		}
 	}
 	applyCompanionThemeState(tokens, root);
@@ -367,16 +435,8 @@ export function applyCompanionThemeTokens(
 
 /** Subscribe to the live host theme. Safe to call before a bridge exists. */
 export function subscribeCompanionTheme(
-	bridge: CompanionThemeBridge | undefined = typeof window === "undefined"
-		? undefined
-		: (() => {
-				const global = globalThis as typeof globalThis & {
-					ryu?: CompanionThemeBridge;
-					window?: { ryu?: CompanionThemeBridge };
-				};
-				return global.window?.ryu ?? global.ryu;
-			})(),
-	root: HTMLElement | null = typeof document === "undefined"
+	bridge: CompanionThemeBridge | undefined = readCompanionThemeBridge(),
+	root: CompanionThemeRoot | null = globalThis.document === undefined
 		? null
 		: document.documentElement
 ): () => void {

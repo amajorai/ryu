@@ -50,6 +50,7 @@ import {
 	APP_ICON_TILE_CARD_SURFACE,
 } from "@ryu/ui/lib/app-icon-tile";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
 
@@ -61,6 +62,7 @@ export type MarketplaceItemKind =
 	| "skill"
 	| "model"
 	| "mcp"
+	| "knowledge"
 	| "agent"
 	| "stack_template"
 	| "workflow"
@@ -147,7 +149,7 @@ const noop = () => {
 export function TrustBadge({ status }: { status: MarketplaceVerification }) {
 	if (status === "verified") {
 		return (
-			<Badge className="gap-1" variant="secondary">
+			<Badge variant="secondary">
 				<HugeiconsIcon
 					className="size-3 text-status-success"
 					icon={ShieldKeyIcon}
@@ -158,7 +160,7 @@ export function TrustBadge({ status }: { status: MarketplaceVerification }) {
 	}
 	if (status === "unsigned") {
 		return (
-			<Badge className="gap-1" variant="outline">
+			<Badge variant="outline">
 				<HugeiconsIcon
 					className="size-3 text-status-warning"
 					icon={Alert02Icon}
@@ -169,7 +171,7 @@ export function TrustBadge({ status }: { status: MarketplaceVerification }) {
 	}
 	if (status === "invalid") {
 		return (
-			<Badge className="gap-1" variant="destructive">
+			<Badge variant="destructive">
 				<HugeiconsIcon className="size-3" icon={UnavailableIcon} />
 				Signature invalid
 			</Badge>
@@ -196,6 +198,7 @@ function MarketplaceCardLogo({
 	name: string;
 	id: string;
 }) {
+	const safeIconUrl = safeMediaUrl(iconUrl);
 	if (composerIconFor(id)) {
 		return <AppIconArtwork className="size-10" id={id} />;
 	}
@@ -208,12 +211,12 @@ function MarketplaceCardLogo({
 				"size-10"
 			)}
 		>
-			{iconUrl ? (
+			{safeIconUrl ? (
 				<img
 					alt={`${name} logo`}
 					className="size-full object-cover"
 					loading="lazy"
-					src={iconUrl}
+					src={safeIconUrl}
 				/>
 			) : (
 				<span aria-hidden="true" className="font-medium text-sm uppercase">
@@ -274,9 +277,14 @@ export function MarketplaceItemCard({
 				name={card.name}
 			/>
 			<div className="min-w-0">
-				<h3 className="truncate font-medium text-sm">{card.name}</h3>
+				<h3 className="truncate font-medium text-sm" title={card.name}>
+					{card.name}
+				</h3>
 				{card.author ? (
-					<p className="truncate text-muted-foreground text-xs">
+					<p
+						className="truncate text-muted-foreground text-xs"
+						title={card.author}
+					>
 						{card.author}
 					</p>
 				) : null}
@@ -312,7 +320,7 @@ export function MarketplaceItemCard({
 				{heading}
 				<div className="flex shrink-0 flex-col items-end gap-1">
 					{isPaid ? (
-						<Badge className="gap-1" variant="secondary">
+						<Badge variant="secondary">
 							<HugeiconsIcon className="size-3" icon={Tag01Icon} />
 							{card.priceLabel}
 						</Badge>
@@ -330,19 +338,19 @@ export function MarketplaceItemCard({
 				</p>
 			) : null}
 			{isBundle ? (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="type-caption text-muted-foreground">
 					{card.bundleMemberCount ?? 0} items · one-click install
 				</p>
 			) : null}
 			{card.communityStats &&
 			(card.communityStats.downloads > 0 || card.communityStats.runs > 0) ? (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="type-caption text-muted-foreground">
 					Community · {formatCount(card.communityStats.downloads)} installs ·{" "}
 					{formatCount(card.communityStats.runs)} runs
 				</p>
 			) : null}
 			{card.languagePack ? (
-				<p className="text-[11px] text-muted-foreground">
+				<p className="type-caption text-muted-foreground">
 					{card.languagePack.locale} ·{" "}
 					{card.languagePack.direction === "rtl"
 						? (i18n?.t("language.direction_rtl") ?? "Right to left")
@@ -355,7 +363,7 @@ export function MarketplaceItemCard({
 			) : null}
 
 			<div className="mt-auto flex items-center justify-between gap-2">
-				<Badge className="text-[10px]" variant="outline">
+				<Badge size="compact" variant="outline">
 					v{card.version}
 				</Badge>
 				{isBundle ? (
@@ -364,7 +372,7 @@ export function MarketplaceItemCard({
 					</Button>
 				) : isLanguagePack ? (
 					card.active ? (
-						<Badge className="gap-1" variant="secondary">
+						<Badge variant="secondary">
 							<HugeiconsIcon
 								className="size-3.5 text-status-success"
 								icon={CheckmarkBadge04Icon}
@@ -384,7 +392,7 @@ export function MarketplaceItemCard({
 					)
 				) : isPaid ? (
 					card.owned ? (
-						<Badge className="gap-1" variant="secondary">
+						<Badge variant="secondary">
 							<HugeiconsIcon
 								className="size-3.5 text-status-success"
 								icon={CheckmarkBadge04Icon}
@@ -449,7 +457,7 @@ export function MarketplaceBrowseView({
 		);
 	} else if (error) {
 		body = (
-			<Empty className="py-12">
+			<Empty>
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={Alert02Icon} />
@@ -472,7 +480,7 @@ export function MarketplaceBrowseView({
 		);
 	} else if (cards.length === 0) {
 		body = (
-			<Empty className="py-12">
+			<Empty>
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={Store01Icon} />
@@ -547,7 +555,9 @@ export function MarketplaceBrowseView({
 						icon={Search01Icon}
 					/>
 					<Input
-						className="h-9 pl-9 text-sm"
+						aria-label="Search the marketplace"
+						className="h-9"
+						leadingAdornment="default"
 						onChange={(e) => onQueryChange(e.target.value)}
 						placeholder="Search the marketplace…"
 						value={query}

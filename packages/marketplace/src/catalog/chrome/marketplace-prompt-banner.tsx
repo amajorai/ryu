@@ -82,10 +82,10 @@ export function MarketplacePromptBanner({
 		[banner, isDark, seed]
 	);
 	const visiblePrompts = prompts.slice(0, 3);
-	const foreground = isDark ? "text-white" : "text-neutral-950";
+	const foreground = isDark ? "text-white" : "text-black";
 	const rowClass = isDark
 		? "bg-black/65 text-white hover:bg-black/80"
-		: "bg-white/75 text-neutral-950 hover:bg-white/90";
+		: "bg-white/75 text-black hover:bg-white/90";
 
 	return (
 		<section
@@ -128,10 +128,12 @@ export function MarketplacePromptBanner({
 						<span className="min-w-0 max-w-[10rem] shrink-0 truncate rounded-full bg-black/5 px-2 py-1 font-medium text-primary text-xs dark:bg-white/10">
 							@{name}
 						</span>
-						<span className="min-w-0 flex-1 truncate">{prompt}</span>
+						<span className="min-w-0 flex-1 truncate" title={prompt}>
+							{prompt}
+						</span>
 						<span
 							aria-hidden="true"
-							className="flex size-6 shrink-0 items-center justify-center rounded-full bg-white/15 transition-transform group-hover:translate-x-0.5"
+							className="flex size-6 shrink-0 items-center justify-center rounded-full bg-white/15 transition-transform motion-safe:group-hover:translate-x-0.5"
 						>
 							<ArrowRight className="size-3.5" />
 						</span>

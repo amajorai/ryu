@@ -3,22 +3,33 @@
 // RYU_CORE_URL   - base URL of the Core node (default http://127.0.0.1:7980)
 // RYU_CORE_TOKEN - optional bearer token; pass null (no header) when unset
 //
-// Mirrors apps/mcp/src/target.ts so the TUI resolves the active node the same way
-// the MCP server does. Multi-node switching is layered on top via CoreContext
-// (the Account/Services tabs can later swap the active target through it).
+// buildTarget() is env-only and mirrors apps/mcp/src/target.ts; it serves the
+// process-level seams (auto-update, identity broker, referral). Which node a
+// command or the TUI actually talks to goes through the saved node registry in
+// nodeTarget.ts, which buildInteractiveTarget delegates to.
 
 import type { ApiTarget } from "@ryuhq/core-client/client";
+import { withCoreIdentityCheck } from "./coreIdentity.ts";
+import { DEFAULT_CORE_URL } from "./defaultCoreUrl.ts";
+import { loadNodes, type NodesConfig } from "./nodes.ts";
+import { resolveNodeTarget } from "./nodeTarget.ts";
 
-// Profile-aware: under RYU_PROFILE=dev (the repo's `bun dev` default) Core binds
-// :8980 (+1000 offset, matching apps/core/src/profile.rs); release stays :7980.
-const ryuProfile = (process.env.RYU_PROFILE ?? "").trim().toLowerCase();
-export const DEFAULT_CORE_URL =
-	ryuProfile && ryuProfile !== "release"
-		? "http://127.0.0.1:8980"
-		: "http://127.0.0.1:7980";
+export { DEFAULT_CORE_URL } from "./defaultCoreUrl.ts";
 
 export const buildTarget = (): ApiTarget => {
 	const url = process.env.RYU_CORE_URL?.trim() || DEFAULT_CORE_URL;
 	const token = process.env.RYU_CORE_TOKEN?.trim() || null;
-	return { url, token };
+	return withCoreIdentityCheck({ url, token });
 };
+
+/**
+ * The node the interactive TUI opens on: `--node <name|url>` when given, else
+ * RYU_CORE_URL, else the active node saved by `ryu node use` / the node picker.
+ * Throws {@link UnknownNodeError} for a `--node` value that is neither.
+ */
+export function buildInteractiveTarget(
+	nodeRef: string | null,
+	config: NodesConfig = loadNodes()
+): ApiTarget {
+	return resolveNodeTarget(nodeRef, config);
+}

@@ -1,9 +1,23 @@
 import {
+	type PanelIconPresentation,
+	panelIconPresentationClasses,
+} from "@ryu/ui/components/icon.tsx";
+
+interface WorkspaceDockStyle extends CSSProperties {
+	"--workspace-display"?: "flex" | "block" | "none";
+	"--workspace-height"?: string;
+	"--workspace-pointer-events"?: "auto" | "none";
+	"--workspace-right"?: string;
+	"--workspace-transform"?: "translateX(0)" | "translateX(100%)";
+	"--workspace-transition"?: string;
+	"--workspace-width"?: string;
+}
+
+import {
 	ArrowDown01Icon,
 	ArrowRight01Icon,
 	BrowserIcon,
 	Cancel01Icon,
-	CheckListIcon,
 	ComputerTerminal01Icon,
 	DashboardSquare01Icon,
 	File01Icon,
@@ -12,6 +26,7 @@ import {
 	GitBranchIcon,
 	Globe02Icon,
 	Megaphone01Icon,
+	Message01Icon,
 	MonitorDotFreeIcons,
 	PieChartIcon,
 	PinIcon,
@@ -37,6 +52,8 @@ import {
 	COMPANION_THEME_MUTATION_ATTRIBUTES,
 	readCompanionThemeTokens,
 } from "@ryu/app-host/companion-theme";
+import { CLOUD_TASKS_BOX_BACKEND_FLAG } from "@ryu/auth/lib/feature-flags";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -61,6 +78,8 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { useIsMobile } from "@ryu/ui/hooks/use-mobile.ts";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { invoke } from "@tauri-apps/api/core";
 import { useTheme } from "next-themes";
@@ -80,10 +99,7 @@ import {
 	useState,
 } from "react";
 import { ArtifactRenderer } from "@/src/components/chat/ArtifactRenderer.tsx";
-import {
-	type InspectedPart,
-	PartInspector,
-} from "@/src/components/chat/PartInspector.tsx";
+import { PartInspector } from "@/src/components/chat/PartInspector.tsx";
 import {
 	RichPatchDiff,
 	splitPatchByFile,
@@ -119,18 +135,28 @@ import {
 	isPluginTabKind,
 	isRouteTabKind,
 	nativeDockPanelKey,
+	restoreDockTabKind,
 	routeTabKind,
 	routeTabPath,
+	serializeRestoredDockTab,
 } from "@/src/components/panels/dock-panels.ts";
+import {
+	FileAnnotationViewer,
+	fileTreeRowPathFromEvent,
+} from "@/src/components/panels/FileAnnotationViewer.tsx";
 import { MissionControlPanel } from "@/src/components/panels/MissionControlPanel.tsx";
 import { useProjectDockSlots } from "@/src/components/panels/project-dock-context.tsx";
+import {
+	SessionBoxChildScreens,
+	SessionBoxPanel,
+} from "@/src/components/panels/SessionBoxPanel.tsx";
 import { SubagentAvatar } from "@/src/components/panels/subagent-identity.tsx";
 import { UgcPanel } from "@/src/components/panels/UgcPanel.tsx";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import {
 	CurrentTabIdProvider,
 	IsActiveTabProvider,
-	TabsContext,
+	TabsStateProvider,
 	useCurrentTabId,
 	useIsActiveTab,
 	useTabsContext,
@@ -146,6 +172,7 @@ import {
 	setDiffViewPrefs,
 	useDiffViewPrefs,
 } from "@/src/hooks/useDiffViewPrefs.ts";
+import { useFeatureFlag } from "@/src/hooks/useFeatureFlag.ts";
 import {
 	fileTreePrefsToOptions,
 	setFileTreePrefs,
@@ -154,6 +181,7 @@ import {
 import { useFileTreeThemeStyles } from "@/src/hooks/useFileTreeThemeStyles.ts";
 import { invalidateGitStatus } from "@/src/hooks/useGitStatus.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
+import { useSessionBoxScreenRequest } from "@/src/hooks/useSessionBox.ts";
 import {
 	sidebarFloatingChrome,
 	useSidebarVariant,
@@ -166,19 +194,26 @@ import {
 	MISSION_CONTROL_BUTTON_ID,
 	MISSION_CONTROL_PLUGIN_ID,
 } from "@/src/lib/api/mission-control.ts";
-import type { PluginDockPanel } from "@/src/lib/api/plugins.ts";
-import type { Artifact } from "@/src/lib/artifacts.ts";
+import { pluginDockSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
+import type {
+	PluginDockPanel,
+	PluginFileHandler,
+} from "@/src/lib/api/plugins.ts";
 import { CONTRIBUTED_LINK_OPENED_EVENT } from "@/src/lib/contributed-link-handler.ts";
 import type { DefaultFileOpener } from "@/src/lib/default-file-opener.ts";
+import type { FileAnnotationNote } from "@/src/lib/file-annotations.ts";
 import {
 	joinPath,
 	readGitProjectFile,
 	readProjectFile,
 	writeProjectFile,
 } from "@/src/lib/files.ts";
+import type { ArtifactView } from "@/src/lib/live-artifacts.ts";
 import { clearMediaSource, publishMediaSource } from "@/src/lib/media-pip.ts";
 import { pageRoute, SIDE_PANEL_PAGES } from "@/src/lib/page-routes.ts";
+import { fileHandlersFor } from "@/src/lib/plugin-file-handlers.ts";
 import type {
+	PersistedDockTabKind,
 	WorkspaceSessionDock,
 	WorkspaceSessionState,
 	WorkspaceSessionTab,
@@ -202,6 +237,19 @@ import {
 } from "@/src/store/useProjectDockStore.ts";
 import { useSidePanelRouteStore } from "@/src/store/useSidePanelRouteStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import {
+	type ConversationPanelSource,
+	usePublishConversationPanelSource,
+} from "@/src/workbench/conversation-panel-registry.ts";
+import { ARTIFACT_PANEL_PREFIX } from "@/src/workbench/shell-panels.ts";
+import {
+	useWorkbenchDockBridge,
+	type WorkbenchDockBridge,
+} from "@/src/workbench/workbench-dock-bridge.tsx";
+import { PinnedSummaryToggleButton } from "./PinnedSummaryToggleButton.tsx";
+import { PluginFilePanel } from "./PluginFilePanel.tsx";
+import { WorkbenchChatPanels } from "./WorkbenchChatPanels.tsx";
+import panelStyles from "./WorkspacePanels.module.css";
 
 // ── Panel layout icons — same visual language as SidebarToggleIcon ────────────
 
@@ -419,12 +467,15 @@ function defaultFileOpenerForEditorId(id: string): DefaultFileOpener | null {
 	return null;
 }
 
-function useAvailableEditorIds(): Set<string> {
+function useAvailableEditorIds(enabled = true): Set<string> {
 	const [availableEditorIds, setAvailableEditorIds] = useState<Set<string>>(
 		() => new Set(["explorer"])
 	);
 
 	useEffect(() => {
+		if (!enabled) {
+			return;
+		}
 		let cancelled = false;
 		invoke<Array<{ available: boolean; id: string }>>(
 			"get_editor_availability",
@@ -451,7 +502,7 @@ function useAvailableEditorIds(): Set<string> {
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [enabled]);
 
 	return availableEditorIds;
 }
@@ -510,10 +561,11 @@ function LogoImg({
 }) {
 	const { resolvedTheme } = useTheme();
 	const [failed, setFailed] = useState(false);
-	let resolved = spec;
-	if (typeof spec !== "string") {
-		resolved = resolvedTheme === "dark" ? spec.dark : spec.light;
-	}
+	const resolved = isNativeText(spec)
+		? spec
+		: resolvedTheme === "dark"
+			? spec.dark
+			: spec.light;
 	if (failed) {
 		return <GlyphIcon glyph={glyph} />;
 	}
@@ -522,9 +574,9 @@ function LogoImg({
 			alt={label}
 			className="size-3.5 shrink-0 object-contain"
 			// Re-fetch (and reset the fallback) when the themed variant changes.
-			key={resolved as string}
+			key={resolved}
 			onError={() => setFailed(true)}
-			src={resolveUrl(resolved as string)}
+			src={resolveUrl(resolved)}
 		/>
 	);
 }
@@ -561,7 +613,7 @@ function EditorButtonGroup({ folder }: { folder?: string | null }) {
 	const [activeId, setActiveId] = useState(() =>
 		editorIdForDefaultFileOpener(defaultFileOpener)
 	);
-	const availableEditorIds = useAvailableEditorIds();
+	const availableEditorIds = useAvailableEditorIds(canUseNativeShell);
 	const editorDefs = useMemo(
 		() => EDITOR_DEFS.filter((def) => availableEditorIds.has(def.id)),
 		[availableEditorIds]
@@ -606,7 +658,7 @@ function EditorButtonGroup({ folder }: { folder?: string | null }) {
 				<TooltipTrigger
 					render={
 						<button
-							className="flex h-7 items-center px-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+							className="type-caption flex h-7 items-center px-1.5 text-muted-foreground transition-colors hover:text-foreground"
 							onClick={() => run(activeDef.id)}
 							type="button"
 						>
@@ -619,26 +671,24 @@ function EditorButtonGroup({ folder }: { folder?: string | null }) {
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					aria-label="Choose editor"
-					className="flex h-7 items-center px-0.5 text-muted-foreground transition-colors hover:text-foreground"
+					className="flex h-7 items-center"
+					variant="panel-picker"
 				>
 					<HugeiconsIcon className="size-3" icon={ArrowDown01Icon} />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start" side="bottom">
 					{editorDefs.map((def) => (
 						<DropdownMenuItem
-							className={cn(
-								"gap-2.5 text-xs",
-								def.id === activeId
-									? "text-foreground"
-									: "text-muted-foreground"
-							)}
+							density="compact"
 							key={def.id}
 							onClick={() => run(def.id)}
+							spacing="spacious"
+							tone={def.id === activeId ? "foreground" : "muted"}
 						>
 							<EditorIcon def={def} />
 							{def.shortLabel}
 							{def.id === activeId && (
-								<span className="ml-auto text-[10px] opacity-50">active</span>
+								<span className="type-compact ml-auto opacity-50">active</span>
 							)}
 						</DropdownMenuItem>
 					))}
@@ -656,7 +706,7 @@ function EditorButtonGroup({ folder }: { folder?: string | null }) {
 // union used to be closed, which meant shipping an app (Browser, Simulator)
 // required editing this file; `contributes.dock_panels` inverts that — see
 // `./dock-panels.ts` for the placement/order/resolution rules.
-type TabKind = DockTabKind;
+type TabKind = DockTabKind | "unavailable";
 
 /** True inside a page hosted BY a dock (see {@link DockRoutePage}). The one
  *  consumer is {@link WorkspacePanels} itself, which renders its children bare in
@@ -669,12 +719,14 @@ interface PanelTab {
 	/** The artifact this artifact tab shows (only `kind === "artifact"`). Each
 	 *  artifact gets its OWN tab — opening a second artifact never replaces the
 	 *  first (the dock's artifact surface has no one-at-a-time limit). */
-	artifact?: Artifact;
+	artifact?: ArtifactView;
 	/** One-shot command queued when an environment action opens a terminal tab. */
 	initialCommand?: TerminalCommandRequest;
 	initialCommandNonce?: number;
 	kind: TabKind;
 	label: string;
+	persistedKind?: PersistedDockTabKind;
+	persistedTab?: WorkspaceSessionTab;
 	/** True when this tab is project-shared (visible in every chat for the folder). */
 	pinned?: boolean;
 	/**
@@ -716,6 +768,10 @@ const RIGHT_TAB_TYPES: TabTypeDef[] = [
 	{ kind: "context", label: "Context", icon: PieChartIcon },
 	{ kind: "sources", label: "Sources", icon: Globe02Icon },
 	{ kind: "subagents", label: "Subagents", icon: Robot01Icon },
+	// This conversation's own Box screen (its session Box, or a sub-agent's).
+	// Offered only while the Box rollout flag is on; see `rightTabTypes`.
+	{ kind: "box-screen", label: "Box screen", icon: MonitorDotFreeIcons },
+	{ kind: "agent-activity", label: "Agent activity", icon: Robot01Icon },
 	// What this chat DID, grouped per turn with the agent's own rationale. Menu-
 	// only: unlike the panels below it is not raised by a click anywhere in the
 	// chat, so the "+" menu is its single entry point.
@@ -746,21 +802,22 @@ const PAGE_TAB_TYPES: TabTypeDef[] = SIDE_PANEL_PAGES.flatMap((p) => {
 /** The glyph of each shell-owned tab kind. The programmatic panels
  *  (cowork/subagent/artifact/inspector) are opened by the chat rather than the
  *  "+" menu, so they live here and not in the arrays above. */
-const BUILTIN_TAB_ICONS: Record<BuiltinTabKind, typeof ComputerTerminal01Icon> =
-	{
-		terminal: ComputerTerminal01Icon,
-		codereview: FileCodeIcon,
-		files: FolderOpenIcon,
-		gitgraph: GitBranchIcon,
-		cowork: DashboardSquare01Icon,
-		sources: Globe02Icon,
-		subagents: Robot01Icon,
-		subagent: Robot01Icon,
-		artifact: BrowserIcon,
-		inspector: SourceCodeIcon,
-		context: PieChartIcon,
-		mission: Radar01Icon,
-	};
+const BUILTIN_TAB_ICONS = {
+	terminal: ComputerTerminal01Icon,
+	codereview: FileCodeIcon,
+	files: FolderOpenIcon,
+	gitgraph: GitBranchIcon,
+	cowork: DashboardSquare01Icon,
+	sources: Globe02Icon,
+	subagents: Robot01Icon,
+	subagent: Robot01Icon,
+	artifact: BrowserIcon,
+	inspector: SourceCodeIcon,
+	context: PieChartIcon,
+	mission: Radar01Icon,
+	"agent-activity": Robot01Icon,
+	"box-screen": MonitorDotFreeIcons,
+} satisfies Record<BuiltinTabKind, typeof ComputerTerminal01Icon>;
 
 /** A contributed panel as a dock tab type. A `native` panel takes the glyph of
  *  its registered shell component (bundled, offline-safe); anything else falls
@@ -792,7 +849,7 @@ export function routeAppIcon(
 function contributedTabType(panel: PluginDockPanel): TabTypeDef {
 	const native =
 		panel.panel === "native"
-			? NATIVE_DOCK_PANELS[nativeDockPanelKey(panel)]
+			? NATIVE_DOCK_PANELS.get(nativeDockPanelKey(panel))
 			: undefined;
 	return {
 		kind: dockTabKind(panel),
@@ -807,7 +864,7 @@ function makeTab(
 	kind: TabKind,
 	label: string,
 	n?: number,
-	artifact?: Artifact,
+	artifact?: ArtifactView,
 	uid?: string,
 	initialCommand?: TerminalCommandRequest,
 	initialCommandNonce?: number
@@ -822,16 +879,27 @@ function makeTab(
 		kind,
 		label: n == null ? label : `${label} ${n}`,
 		artifact,
-		...(initialCommand ? { initialCommand, initialCommandNonce } : {}),
+		...(initialCommand ? { initialCommand, initialCommandNonce } : undefined),
 	};
 }
 
 function restoreLocalPanelTabs(
 	dock: WorkspaceSessionDock | undefined
 ): PanelTab[] {
-	return (dock?.tabs ?? [])
-		.filter((tab) => !tab.project)
-		.map((tab) => makeTab(tab.kind, tab.label, undefined, undefined, tab.uid));
+	return (dock?.tabs ?? []).flatMap((tab) => {
+		const restored = restoreDockTabKind(tab.kind);
+		if (tab.project && restored.kind !== "unavailable") {
+			return [];
+		}
+		const panel: PanelTab = {
+			...makeTab(restored.kind, tab.label, undefined, undefined, tab.uid),
+			...restored,
+		};
+		if (restored.kind === "unavailable") {
+			panel.persistedTab = tab;
+		}
+		return [panel];
+	});
 }
 
 function serializeWorkspaceDock(
@@ -843,17 +911,7 @@ function serializeWorkspaceDock(
 			0,
 			tabs.findIndex((tab) => tab.uid === activeUid)
 		),
-		tabs: tabs.map((tab) => ({
-			kind: tab.kind,
-			label: tab.label,
-			uid: tab.uid,
-			...(tab.projectHosted
-				? {
-						project: true,
-						...(tab.pinned ? { pinned: true } : {}),
-					}
-				: {}),
-		})),
+		tabs: tabs.map(serializeRestoredDockTab),
 	};
 }
 
@@ -871,9 +929,10 @@ function findRestoredTabUid(
 		exact ??
 		tabs.find(
 			(candidate) =>
-				candidate.kind === tab.kind &&
+				(candidate.persistedKind ?? candidate.kind) === tab.kind &&
 				candidate.label === tab.label &&
-				Boolean(candidate.projectHosted) === Boolean(tab.project)
+				Boolean(candidate.persistedTab?.project ?? candidate.projectHosted) ===
+					Boolean(tab.project)
 		);
 	return matching?.uid ?? tabs[0]?.uid ?? "";
 }
@@ -893,7 +952,7 @@ function usePanelTabs(initial: PanelTab[]) {
 	/** Open one ARTIFACT per tab: focus the existing tab showing the same artifact
 	 *  id, or stack a new one. This is what lets several artifacts sit side by
 	 *  side in the dock (no one-at-a-time limit) while re-opening one re-focuses. */
-	const openArtifact = (artifact: Artifact) => {
+	const openArtifact = (artifact: ArtifactView) => {
 		const existing = tabs.find(
 			(t) => t.kind === "artifact" && t.artifact?.id === artifact.id
 		);
@@ -1009,10 +1068,12 @@ interface TabIconSpec {
 
 function TabIcon({
 	className,
+	presentation,
 	size = 12,
 	spec,
 }: {
 	className?: string;
+	presentation?: PanelIconPresentation;
 	/** Edge length in px for a contributed (masked SVG) icon — it needs an
 	 *  explicit box, unlike a Hugeicons element sized by `className`. */
 	size?: number;
@@ -1022,18 +1083,40 @@ function TabIcon({
 		// `animate={false}`: the strip remounts this on every tab change, and the
 		// avatar's stock 600ms entrance would replay each time.
 		return (
-			<SubagentAvatar animate={false} className={className} seed={spec.seed} />
+			<SubagentAvatar
+				animate={false}
+				className={className}
+				presentation={presentation}
+				seed={spec.seed}
+			/>
 		);
 	}
 	if (spec.glyph) {
-		return <HugeiconsIcon className={className} icon={spec.glyph} />;
+		return (
+			<HugeiconsIcon
+				className={cn(panelIconPresentationClasses(presentation), className)}
+				icon={spec.glyph}
+			/>
+		);
 	}
 	if (spec.iconId) {
-		return <Icon className={className} icon={spec.iconId} size={size} />;
+		return (
+			<Icon
+				className={className}
+				icon={spec.iconId}
+				presentation={presentation}
+				size={size}
+			/>
+		);
 	}
 	// A contributed panel that declared no icon: the generic plugin glyph, so the
 	// tab still reads as "an app's panel" rather than as a built-in.
-	return <HugeiconsIcon className={className} icon={PlugSocketIcon} />;
+	return (
+		<HugeiconsIcon
+			className={cn(panelIconPresentationClasses(presentation), className)}
+			icon={PlugSocketIcon}
+		/>
+	);
 }
 
 /** The icon of a tab TYPE (the "+" menu / launchpad cards). */
@@ -1071,7 +1154,7 @@ interface PanelTabBarProps {
 	tabs: PanelTab[];
 }
 
-function PanelTabBar({
+export function PanelTabBar({
 	tabs,
 	activeUid,
 	onActivate,
@@ -1095,12 +1178,15 @@ function PanelTabBar({
 		// surface, so the strip itself is transparent.
 		<div className="flex shrink-0 items-center gap-1 bg-sidebar px-1.5 py-1.5">
 			{tabs.map((tab) => {
-				const canPin = Boolean(onTogglePin) && isPinnableDockTabKind(tab.kind);
+				const canPin =
+					Boolean(onTogglePin) &&
+					tab.kind !== "unavailable" &&
+					isPinnableDockTabKind(tab.kind);
 				const pinBlocked = Boolean(pinDisabledReason);
 				return (
 					<ContextMenu key={tab.uid}>
 						<ContextMenuTrigger className="flex h-8 max-w-[180px] shrink-0 items-center">
-							{/* biome-ignore lint/a11y/noStaticElementInteractions: custom tab interaction, mirrors the window tab bar */}
+							{/* custom tab interaction, mirrors the window tab bar */}
 							<div
 								className={cn(
 									"group/tab relative flex h-8 w-full min-w-0 items-center rounded-full transition-colors",
@@ -1128,11 +1214,12 @@ function PanelTabBar({
 									type="button"
 								>
 									<TabIcon
-										className="absolute size-3 transition-all duration-150 group-hover/tab:scale-50 group-hover/tab:opacity-0"
+										className="absolute size-3"
+										presentation="panel-tab"
 										spec={iconForKind(tab.kind)}
 									/>
 									<HugeiconsIcon
-										className="absolute size-3 scale-50 opacity-0 transition-all duration-150 group-hover/tab:scale-100 group-hover/tab:opacity-100"
+										className="absolute size-3 scale-50 opacity-0 transition-[opacity,scale] duration-150 group-focus-within/tab:scale-100 group-focus-within/tab:opacity-100 group-hover/tab:scale-100 group-hover/tab:opacity-100"
 										icon={Cancel01Icon}
 									/>
 								</button>
@@ -1186,15 +1273,15 @@ function PanelTabBar({
 										{tab.pinned ? "Unpin tab" : "Pin tab"}
 									</ContextMenuItem>
 									{tab.pinned ? (
-										<div className="px-2 pb-1.5 text-[11px] text-muted-foreground leading-snug">
+										<div className="type-caption px-2 pb-1.5 text-muted-foreground leading-snug">
 											Shared across chats in this project
 										</div>
 									) : pinDisabledReason ? (
-										<div className="px-2 pb-1.5 text-[11px] text-muted-foreground leading-snug">
+										<div className="type-caption px-2 pb-1.5 text-muted-foreground leading-snug">
 											{pinDisabledReason}
 										</div>
 									) : (
-										<div className="px-2 pb-1.5 text-[11px] text-muted-foreground leading-snug">
+										<div className="type-caption px-2 pb-1.5 text-muted-foreground leading-snug">
 											Share this tab across all chats in the project
 										</div>
 									)}
@@ -1230,16 +1317,18 @@ function PanelTabBar({
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					aria-label="New tab"
-					className="ml-0.5 flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+					className="ml-0.5 flex size-7 items-center justify-center"
+					variant="panel-action"
 				>
 					<HugeiconsIcon className="size-3.5" icon={PlusSignIcon} />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start" side="bottom">
 					{addTypes.map((t) => (
 						<DropdownMenuItem
-							className="gap-2.5 text-xs"
+							density="compact"
 							key={t.kind}
 							onClick={() => onAdd(t.kind)}
+							spacing="spacious"
 						>
 							<TabIcon
 								className="size-3.5 shrink-0"
@@ -1251,7 +1340,7 @@ function PanelTabBar({
 					))}
 					{pageTypes && pageTypes.length > 0 ? (
 						<DropdownMenuSub>
-							<DropdownMenuSubTrigger className="gap-2.5 text-xs">
+							<DropdownMenuSubTrigger density="compact" spacing="spacious">
 								<HugeiconsIcon
 									className="size-3.5 shrink-0"
 									icon={File01Icon}
@@ -1261,9 +1350,10 @@ function PanelTabBar({
 							<DropdownMenuSubContent>
 								{pageTypes.map((t) => (
 									<DropdownMenuItem
-										className="gap-2.5 text-xs"
+										density="compact"
 										key={t.kind}
 										onClick={() => onAdd(t.kind)}
+										spacing="spacious"
 									>
 										<TabIcon
 											className="size-3.5 shrink-0"
@@ -1330,11 +1420,15 @@ function PanelEmptyState({
 							type="button"
 						>
 							<TabIcon
-								className="size-5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+								className="size-5 shrink-0"
+								presentation="panel-launchpad"
 								size={20}
 								spec={tabTypeIcon(t)}
 							/>
-							<span className="truncate font-medium text-foreground text-sm">
+							<span
+								className="truncate font-medium text-foreground text-sm"
+								title={t.label}
+							>
 								{t.label}
 							</span>
 						</button>
@@ -1354,41 +1448,187 @@ export function FileTreePanel({
 	active?: boolean;
 	folder?: string | null;
 }) {
+	const { canUseNativeShell } = useAppSurface();
 	const [paths, setPaths] = useState<readonly string[]>([]);
+	const scopeRef = useRef({ folder, native: canUseNativeShell });
+	const pendingMoveRef = useRef<typeof scopeRef.current | null>(null);
+	const mountedRef = useRef(false);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
+	if (
+		scopeRef.current.folder !== folder ||
+		scopeRef.current.native !== canUseNativeShell
+	) {
+		scopeRef.current = { folder, native: canUseNativeShell };
+	}
+	const operationScope = scopeRef.current;
+	const resolvedListingScopeRef = useRef<typeof operationScope | null>(null);
+	const canMoveItem = useCallback(() => {
+		const scope = operationScope;
+		return Boolean(
+			mountedRef.current &&
+				scopeRef.current === scope &&
+				scope.native &&
+				scope.folder &&
+				pendingMoveRef.current !== scope
+		);
+	}, [operationScope]);
+	const moveItems = useCallback(
+		async (
+			items: readonly { sourcePath: string; destinationPath: string }[]
+		) => {
+			const scope = operationScope;
+			if (!(canMoveItem() && scope.folder) || items.length === 0) {
+				return;
+			}
+			pendingMoveRef.current = scope;
+			const refused: string[] = [];
+			try {
+				for (const item of items) {
+					// Do not start another write after the owning panel loses authority.
+					if (!mountedRef.current || scopeRef.current !== scope) {
+						break;
+					}
+					const sourcePath = item.sourcePath.replace(/\/+$/, "");
+					const destinationPath = item.destinationPath.replace(/\/+$/, "");
+					if (sourcePath === destinationPath) {
+						continue;
+					}
+					try {
+						await invoke("move_workspace_item", {
+							root: scope.folder,
+							sourcePath,
+							destinationPath,
+						});
+					} catch (error) {
+						const message =
+							error instanceof Error ? error.message : String(error);
+						refused.push(
+							items.length === 1 ? message : `${sourcePath}: ${message}`
+						);
+					}
+				}
+				if (
+					refused.length &&
+					mountedRef.current &&
+					scopeRef.current === scope
+				) {
+					toast.error("Couldn't move that workspace item", {
+						description: refused.join("\n"),
+					});
+				}
+			} finally {
+				if (pendingMoveRef.current === scope) {
+					pendingMoveRef.current = null;
+				}
+				// Each move is exclusive independently. Successful items remain moved
+				// after another item's refusal; replace all optimistic model changes
+				// with the actual filesystem, including any partial result.
+				if (mountedRef.current && scopeRef.current === scope) {
+					setListingAttempt((attempt) => attempt + 1);
+				}
+			}
+		},
+		[operationScope, canMoveItem]
+	);
+	const moveItem = useCallback(
+		(sourcePath: string, destinationPath: string) =>
+			moveItems([{ sourcePath, destinationPath }]),
+		[moveItems]
+	);
 	const [loading, setLoading] = useState(false);
-	const terminalShell = useWorkspaceStore((s) => s.terminalShell);
+	const [listingError, setListingError] = useState<string | null>(null);
+	const [listingAttempt, setListingAttempt] = useState(0);
+	const [pluginFile, setPluginFile] = useState<{
+		path: string;
+		handler: PluginFileHandler;
+	} | null>(null);
+	// Workspace-relative path shown in the annotation viewer. Notes are kept per
+	// path for the panel's lifetime so "Back to files" does not discard them.
+	const [viewerPath, setViewerPath] = useState<string | null>(null);
+	const [notesByPath, setNotesByPath] = useState<
+		Readonly<Record<string, FileAnnotationNote[]>>
+	>({});
+	const defaultFileOpener = useWorkspaceStore((s) => s.defaultFileOpener);
 	const searchRequest = useFileTreeSearchStore((state) =>
 		active ? state.request : null
 	);
 
 	useEffect(() => {
-		if (!folder) {
+		let cancelled = false;
+		setListingError(null);
+		if (!(folder && canUseNativeShell)) {
 			setPaths([]);
+			setLoading(false);
 			return;
 		}
 		setLoading(true);
-		const shellArg = terminalShell === "auto" ? null : terminalShell;
-		// All project files, not just tracked ones: `--cached` (tracked) +
-		// `--others` (untracked) − `--exclude-standard` (drops .gitignore noise
-		// like node_modules/target). This is what an IDE file tree shows.
-		invoke<{ stdout: string; stderr: string; code: number }>("shell_execute", {
-			command: "git ls-files --cached --others --exclude-standard",
-			cwd: folder,
-			shell: shellArg,
-		})
-			.then((r) => setPaths(r.stdout.trim().split("\n").filter(Boolean)))
-			.catch(() => setPaths([]))
-			.finally(() => setLoading(false));
-	}, [folder, terminalShell]);
+		// Native listing filters physically absent cached git entries and returns
+		// JSON paths, preserving filenames containing newlines without shell parsing.
+		invoke<string[]>("list_workspace_files", { root: folder })
+			.then((result) => {
+				if (!cancelled) {
+					resolvedListingScopeRef.current = operationScope;
+					setPaths(result);
+				}
+			})
+			.catch((error) => {
+				if (!cancelled) {
+					setPaths([]);
+					setListingError(
+						error instanceof Error ? error.message : String(error)
+					);
+				}
+			})
+			.finally(() => {
+				if (!cancelled) {
+					setLoading(false);
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [folder, canUseNativeShell, listingAttempt, operationScope]);
 
 	const prefs = useFileTreePrefs();
 	const searchEnabled = prefs.showSearch || searchRequest !== null;
 	const options = useMemo(
-		() => fileTreePrefsToOptions({ ...prefs, showSearch: searchEnabled }),
-		[prefs, searchEnabled]
+		() =>
+			fileTreePrefsToOptions({
+				...prefs,
+				showSearch: searchEnabled,
+				renaming: prefs.renaming && canUseNativeShell,
+				dragAndDrop: prefs.dragAndDrop && canUseNativeShell,
+			}),
+		[prefs, searchEnabled, canUseNativeShell]
 	);
 	const themeStyles = useFileTreeThemeStyles(prefs);
-	const availableEditorIds = useAvailableEditorIds();
+	const treeThemeHost = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		const host = treeThemeHost.current;
+		if (!(host && themeStyles)) {
+			return;
+		}
+		const keys: string[] = [];
+		for (const [key, value] of Object.entries(themeStyles)) {
+			if (value === undefined || value === null) {
+				continue;
+			}
+			const property = key === "colorScheme" ? "color-scheme" : key;
+			host.style.setProperty(property, String(value));
+			keys.push(property);
+		}
+		return () => {
+			for (const key of keys) {
+				host.style.removeProperty(key);
+			}
+		};
+	}, [themeStyles]);
+	const availableEditorIds = useAvailableEditorIds(canUseNativeShell);
 	const availableEditors = useMemo(
 		() =>
 			EDITOR_DEFS.filter(
@@ -1397,6 +1637,22 @@ export function FileTreePanel({
 		[availableEditorIds]
 	);
 
+	if (!canUseNativeShell) {
+		return (
+			<div className="flex h-full items-center justify-center text-muted-foreground text-xs">
+				Project files require the local Desktop filesystem.
+			</div>
+		);
+	}
+	if (pluginFile && folder) {
+		return (
+			<PluginFilePanel
+				handler={pluginFile.handler}
+				onClose={() => setPluginFile(null)}
+				path={pluginFile.path}
+			/>
+		);
+	}
 	if (!folder) {
 		return (
 			<div className="flex h-full items-center justify-center text-muted-foreground text-xs">
@@ -1405,10 +1661,30 @@ export function FileTreePanel({
 		);
 	}
 
-	if (loading) {
+	if (
+		loading &&
+		(resolvedListingScopeRef.current !== operationScope || paths.length === 0)
+	) {
 		return (
-			<div className="flex h-full animate-pulse items-center justify-center text-muted-foreground text-xs">
-				Loading files...
+			<div className="flex h-full animate-skeleton items-center justify-center text-muted-foreground text-xs">
+				Loading files…
+			</div>
+		);
+	}
+
+	if (listingError) {
+		return (
+			<div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center text-xs">
+				<p className="text-destructive" role="alert">
+					{listingError}
+				</p>
+				<button
+					className="rounded-md border border-border px-3 py-1.5 hover:bg-muted"
+					onClick={() => setListingAttempt((attempt) => attempt + 1)}
+					type="button"
+				>
+					Retry file listing
+				</button>
 			</div>
 		);
 	}
@@ -1421,11 +1697,54 @@ export function FileTreePanel({
 		);
 	}
 
+	// The viewer overlays the tree instead of replacing it so the tree's model
+	// keeps its expansion and scroll position for "Back to files".
+	const openViewerExternally = () => {
+		if (!viewerPath) {
+			return;
+		}
+		const editor =
+			defaultFileOpener === "system"
+				? null
+				: (availableEditors.find((def) => def.id === defaultFileOpener)?.id ??
+					null);
+		invoke("open_workspace_item", {
+			editor,
+			path: viewerPath,
+			root: folder,
+		}).catch((error: unknown) =>
+			toast.error("Couldn't open that workspace item", {
+				description: error instanceof Error ? error.message : String(error),
+			})
+		);
+	};
+
 	return (
-		<div className="flex h-full flex-col">
+		<div className="relative flex h-full flex-col">
+			{viewerPath ? (
+				<div className="absolute inset-0 z-10 bg-background">
+					<FileAnnotationViewer
+						folder={folder}
+						key={viewerPath}
+						notes={notesByPath[viewerPath] ?? []}
+						onClose={() => setViewerPath(null)}
+						onNotesChange={(notes) =>
+							setNotesByPath((current) => ({
+								...current,
+								[viewerPath]: notes,
+							}))
+						}
+						onOpenExternally={openViewerExternally}
+						path={viewerPath}
+					/>
+				</div>
+			) : null}
 			{/* Inline controls — the simple subset. Full option set lives in
 			    Settings › Appearance › File tree. */}
-			<div className="flex shrink-0 items-center gap-1 border-border/60 border-b bg-sidebar px-1.5 py-1">
+			<div
+				className="flex shrink-0 items-center gap-1 border-border/60 border-b bg-sidebar px-1.5 py-1"
+				inert={viewerPath !== null}
+			>
 				<div className="flex shrink-0 items-center rounded-md bg-background p-0.5">
 					{(
 						[
@@ -1437,7 +1756,7 @@ export function FileTreePanel({
 						<button
 							aria-pressed={prefs.density === value}
 							className={cn(
-								"rounded px-2 py-0.5 text-[11px] transition-colors",
+								"type-caption rounded px-2 py-0.5 transition-colors",
 								prefs.density === value
 									? "bg-sidebar-accent text-foreground"
 									: "text-muted-foreground hover:text-foreground"
@@ -1480,15 +1799,23 @@ export function FileTreePanel({
 			    constructor-time OPTIONS (not the whole prefs blob) so display options
 			    take effect — theme is applied as host CSS variables instead, and
 			    keying on it would throw away expansion/scroll state on every switch. */}
-			<div className="min-h-0 flex-1 overflow-hidden p-1">
+			<div
+				className="min-h-0 flex-1 overflow-hidden p-1"
+				inert={viewerPath !== null}
+				ref={treeThemeHost}
+			>
 				<FileTreeView
 					availableEditors={availableEditors}
+					canMoveItem={canMoveItem}
 					folder={folder}
-					key={JSON.stringify(options)}
+					key={JSON.stringify([folder, options])}
+					onMoveItem={moveItem}
+					onMoveItems={moveItems}
+					onOpenPluginFile={(path, handler) => setPluginFile({ path, handler })}
+					onViewFile={setViewerPath}
 					options={options}
 					paths={paths}
 					searchRequest={searchRequest}
-					style={themeStyles}
 				/>
 			</div>
 		</div>
@@ -1502,6 +1829,11 @@ export function FileTreePanel({
 // (via `key`) when display prefs change, since those are constructor-time.
 function FileTreeView({
 	availableEditors,
+	canMoveItem,
+	onMoveItem,
+	onMoveItems,
+	onOpenPluginFile,
+	onViewFile,
 	folder,
 	paths,
 	options,
@@ -1509,18 +1841,81 @@ function FileTreeView({
 	style,
 }: {
 	availableEditors: readonly EditorDef[];
+	canMoveItem(): boolean;
+	onMoveItem(sourcePath: string, destinationPath: string): Promise<void>;
+	onMoveItems(
+		items: readonly { sourcePath: string; destinationPath: string }[]
+	): Promise<void>;
+	onOpenPluginFile(path: string, handler: PluginFileHandler): void;
+	/** Opens a workspace-relative file in the dock's annotation viewer. */
+	onViewFile(path: string): void;
 	folder: string;
 	options: ReturnType<typeof fileTreePrefsToOptions>;
 	paths: readonly string[];
 	searchRequest: FileTreeSearchRequest | null;
 	style?: CSSProperties;
 }) {
-	const { model } = useFileTree({ ...options, paths });
+	const { model } = useFileTree({
+		...options,
+		paths,
+		renaming: options.renaming
+			? {
+					canRename: () => canMoveItem(),
+					onRename: ({ sourcePath, destinationPath }) => {
+						void onMoveItem(sourcePath, destinationPath);
+					},
+					onError: (message) =>
+						toast.error("Couldn't rename that workspace item", {
+							description: message,
+						}),
+				}
+			: false,
+		dragAndDrop: options.dragAndDrop
+			? {
+					canDrag: (draggedPaths) => draggedPaths.length > 0 && canMoveItem(),
+					canDrop: ({ draggedPaths }) =>
+						draggedPaths.length > 0 && canMoveItem(),
+					onDropComplete: ({ draggedPaths, target }) => {
+						const directory = target.directoryPath?.replace(/\/+$/, "") ?? "";
+						void onMoveItems(
+							draggedPaths.map((sourcePath) => {
+								const normalizedSource = sourcePath.replace(/\/+$/, "");
+								const leaf = normalizedSource.slice(
+									normalizedSource.lastIndexOf("/") + 1
+								);
+								return {
+									sourcePath,
+									destinationPath: directory ? `${directory}/${leaf}` : leaf,
+								};
+							})
+						);
+					},
+					onDropError: (message) =>
+						toast.error("Couldn't move that workspace item", {
+							description: message,
+						}),
+				}
+			: false,
+	});
 	const fileTreeSearch = useFileTreeSearch(model);
 	const requestWasActiveRef = useRef(false);
 	const lastRequestNonceRef = useRef<number | null>(null);
 	useEffect(() => {
-		model.resetPaths(paths);
+		const directories = new Set<string>();
+		for (const path of paths) {
+			for (
+				let slash = path.indexOf("/");
+				slash >= 0;
+				slash = path.indexOf("/", slash + 1)
+			) {
+				directories.add(path.slice(0, slash + 1));
+			}
+		}
+		const initialExpandedPaths = [...directories].filter((directory) => {
+			const item = model.getItem(directory);
+			return item && "isExpanded" in item && item.isExpanded();
+		});
+		model.resetPaths(paths, { initialExpandedPaths });
 	}, [paths, model]);
 	useEffect(() => {
 		if (!searchRequest) {
@@ -1542,35 +1937,71 @@ function FileTreeView({
 			fileTreeSearch.setValue(searchRequest.query);
 		}
 	}, [fileTreeSearch, searchRequest]);
+	// Rows are buttons rendered by @pierre/trees, so one delegated listener
+	// covers pointer clicks and keyboard activation without wrapping the tree in
+	// an interactive element of our own.
+	const hostRef = useRef<HTMLDivElement>(null);
+	const onViewFileRef = useRef(onViewFile);
+	onViewFileRef.current = onViewFile;
+	useEffect(() => {
+		const host = hostRef.current;
+		if (!host) {
+			return;
+		}
+		const handleClick = (event: MouseEvent) => {
+			if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
+				return;
+			}
+			const path = fileTreeRowPathFromEvent(event.composedPath());
+			if (path) {
+				onViewFileRef.current(path);
+			}
+		};
+		host.addEventListener("click", handleClick);
+		return () => host.removeEventListener("click", handleClick);
+	}, []);
 	return (
-		<FileTree
-			className="h-full w-full"
-			model={model}
-			renderContextMenu={(item, context) => (
-				<FileTreeContextActions
-					availableEditors={availableEditors}
-					context={context}
-					folder={folder}
-					item={item}
-				/>
-			)}
-			style={style}
-		/>
+		<div className="h-full w-full" ref={hostRef}>
+			<FileTree
+				className="h-full w-full"
+				model={model}
+				renderContextMenu={(item, context) => (
+					<FileTreeContextActions
+						availableEditors={availableEditors}
+						context={context}
+						folder={folder}
+						item={item}
+						onOpenPluginFile={onOpenPluginFile}
+						onViewFile={onViewFile}
+					/>
+				)}
+				style={style}
+			/>
+		</div>
 	);
 }
 
 function FileTreeContextActions({
 	availableEditors,
+	onOpenPluginFile,
+	onViewFile,
 	context,
 	folder,
 	item,
 }: {
 	availableEditors: readonly EditorDef[];
+	onOpenPluginFile(path: string, handler: PluginFileHandler): void;
+	onViewFile(path: string): void;
 	context: FileTreeContextMenuOpenContext;
 	folder: string;
 	item: FileTreeContextMenuItem;
 }) {
 	const { canUseNativeShell } = useAppSurface();
+	const { file_handlers: handlers = [], companions } = usePluginContributions();
+	const fileHandlers =
+		item.kind === "file"
+			? fileHandlersFor(item.path, handlers, companions)
+			: [];
 	const defaultFileOpener = useWorkspaceStore((s) => s.defaultFileOpener);
 	const configuredEditor =
 		defaultFileOpener === "system" ? null : defaultFileOpener;
@@ -1605,6 +2036,35 @@ function FileTreeContextActions({
 			data-file-tree-context-menu-root="true"
 			role="menu"
 		>
+			{item.kind === "file" ? (
+				<button
+					className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
+					onClick={() => {
+						context.close({ restoreFocus: false });
+						onViewFile(item.path);
+					}}
+					role="menuitem"
+					type="button"
+				>
+					<HugeiconsIcon className="size-4" icon={Message01Icon} />
+					View and annotate
+				</button>
+			) : null}
+			{fileHandlers.map((handler) => (
+				<Button
+					className="w-full justify-start"
+					key={`${handler.plugin}:${handler.id}`}
+					onClick={() => {
+						context.close({ restoreFocus: false });
+						onOpenPluginFile(joinPath(folder, item.path), handler);
+					}}
+					role="menuitem"
+					size="sm"
+					variant="ghost"
+				>
+					Open in {handler.title}
+				</Button>
+			))}
 			<button
 				className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
 				onClick={() => run("open_workspace_item", defaultEditor?.id)}
@@ -1758,45 +2218,57 @@ export function PatchDiffPanel({
 				return "";
 			}
 			const shellArg = terminalShell === "auto" ? null : terminalShell;
-			try {
-				const r = await invoke<{
-					stdout: string;
-					stderr: string;
-					code: number;
-				}>("shell_execute", { command, cwd: folder, shell: shellArg });
-				return r.stdout;
-			} catch {
-				return "";
+			const result = await invoke<{
+				stdout: string;
+				stderr: string;
+				code: number;
+			}>("shell_execute", { command, cwd: folder, shell: shellArg });
+			if (result.code !== 0) {
+				throw new Error(
+					result.stderr.trim() ||
+						`The Git command exited with status ${result.code}.`
+				);
 			}
+			return result.stdout;
 		},
 		[folder, terminalShell]
 	);
 
-	// Populate the Commit / Branch sub-menus.
+	// Populate the Commit / Branch sub-menus. Best-effort: a folder that is not a
+	// Git repo (or has no commits yet) fails here and the sub-menus stay empty.
 	useEffect(() => {
 		if (!folder) {
 			setCommits([]);
 			setBranches([]);
 			return;
 		}
-		git(`git log -n 50 --pretty=format:${GIT_LOG_FORMAT}`).then((out) => {
-			const list: CommitInfo[] = [];
-			for (const line of out.split("\n")) {
-				const tab = line.indexOf("\t");
-				if (tab > 0) {
-					list.push({ sha: line.slice(0, tab), subject: line.slice(tab + 1) });
+		setCommits([]);
+		setBranches([]);
+		git(`git log -n 50 --pretty=format:${GIT_LOG_FORMAT}`)
+			.then((out) => {
+				const list: CommitInfo[] = [];
+				for (const line of out.split("\n")) {
+					const tab = line.indexOf("\t");
+					if (tab > 0) {
+						list.push({
+							sha: line.slice(0, tab),
+							subject: line.slice(tab + 1),
+						});
+					}
 				}
-			}
-			setCommits(list);
-		});
-		git("git branch --format=%(refname:short)").then((out) => {
-			setBranches(
-				out
-					.split("\n")
-					.map((b) => b.trim())
-					.filter(Boolean)
-			);
-		});
+				setCommits(list);
+			})
+			.catch(() => undefined);
+		git('git branch --format="%(refname:short)"')
+			.then((out) => {
+				setBranches(
+					out
+						.split("\n")
+						.map((b) => b.trim())
+						.filter(Boolean)
+				);
+			})
+			.catch(() => undefined);
 	}, [folder, git]);
 
 	const refresh = useCallback(() => {
@@ -1814,7 +2286,7 @@ export function PatchDiffPanel({
 				: git(buildDiffCommand(mode, commit, branch));
 		request
 			.then((out) => setPatch(out))
-			.catch((error: unknown) => {
+			.catch((error) => {
 				setPatch("");
 				setDiffError(
 					error instanceof Error
@@ -1926,8 +2398,8 @@ export function PatchDiffPanel({
 	let body: ReactNode;
 	if (loading) {
 		body = (
-			<div className="flex h-full animate-pulse items-center justify-center text-muted-foreground text-xs">
-				Loading diff...
+			<div className="flex h-full animate-skeleton items-center justify-center text-muted-foreground text-xs">
+				Loading diff…
 			</div>
 		);
 	} else if (diffError) {
@@ -1981,9 +2453,14 @@ export function PatchDiffPanel({
 				data-diff-toolbar="true"
 			>
 				<DropdownMenu>
-					<DropdownMenuTrigger className="flex min-w-0 max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/50 hover:text-foreground">
+					<DropdownMenuTrigger
+						className="flex min-w-0 max-w-full items-center"
+						variant="breadcrumbs"
+					>
 						<HugeiconsIcon className="size-3.5 shrink-0" icon={FileCodeIcon} />
-						<span className="truncate">{modeLabel}</span>
+						<span className="truncate" title={modeLabel}>
+							{modeLabel}
+						</span>
 						<HugeiconsIcon
 							className="size-3 shrink-0 opacity-60"
 							icon={ArrowDown01Icon}
@@ -1991,7 +2468,7 @@ export function PatchDiffPanel({
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="start" side="bottom">
 						<DropdownMenuItem
-							className="text-xs"
+							density="compact"
 							onClick={() => {
 								setMode("working");
 								setDismissedReviewNonce(fileReviewRequest?.nonce ?? null);
@@ -2000,60 +2477,62 @@ export function PatchDiffPanel({
 							Working tree
 						</DropdownMenuItem>
 						<DropdownMenuItem
-							className="text-xs"
-							onClick={() => setMode("staged")}
+							density="compact"
+							onClick={() => {
+								setEditMode(false);
+								setMode("staged");
+							}}
 						>
 							Staged
 						</DropdownMenuItem>
 						<DropdownMenuSub>
-							<DropdownMenuSubTrigger className="text-xs">
+							<DropdownMenuSubTrigger density="compact">
 								Commit
 							</DropdownMenuSubTrigger>
 							<DropdownMenuSubContent className="max-h-[60vh] max-w-[360px] overflow-auto">
 								{commits.length === 0 ? (
-									<DropdownMenuItem
-										className="text-muted-foreground text-xs"
-										disabled
-									>
+									<DropdownMenuItem density="compact" disabled tone="muted">
 										No commits
 									</DropdownMenuItem>
 								) : (
 									commits.map((c) => (
 										<DropdownMenuItem
-											className="gap-2 text-xs"
+											density="compact"
 											key={c.sha}
 											onClick={() => {
+												setEditMode(false);
 												setCommit(c);
 												setMode("commit");
 											}}
+											spacing="comfortable"
 										>
-											<span className="shrink-0 font-mono text-[10px] opacity-60">
+											<span className="type-compact shrink-0 font-mono opacity-60">
 												{shortSha(c.sha)}
 											</span>
-											<span className="truncate">{c.subject}</span>
+											<span className="truncate" title={c.subject}>
+												{c.subject}
+											</span>
 										</DropdownMenuItem>
 									))
 								)}
 							</DropdownMenuSubContent>
 						</DropdownMenuSub>
 						<DropdownMenuSub>
-							<DropdownMenuSubTrigger className="text-xs">
+							<DropdownMenuSubTrigger density="compact">
 								Branch
 							</DropdownMenuSubTrigger>
 							<DropdownMenuSubContent className="max-h-[60vh] max-w-[360px] overflow-auto">
 								{branches.length === 0 ? (
-									<DropdownMenuItem
-										className="text-muted-foreground text-xs"
-										disabled
-									>
+									<DropdownMenuItem density="compact" disabled tone="muted">
 										No branches
 									</DropdownMenuItem>
 								) : (
 									branches.map((b) => (
 										<DropdownMenuItem
-											className="text-xs"
+											density="compact"
 											key={b}
 											onClick={() => {
+												setEditMode(false);
 												setBranch(b);
 												setMode("branch");
 											}}
@@ -2079,7 +2558,7 @@ export function PatchDiffPanel({
 						<button
 							aria-pressed={diffPrefs.diffStyle === value}
 							className={cn(
-								"h-6 rounded-full px-2 font-medium text-[11px] transition-colors",
+								"type-caption h-6 rounded-full px-2 font-medium transition-colors",
 								diffPrefs.diffStyle === value
 									? "bg-muted text-foreground"
 									: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -2095,11 +2574,13 @@ export function PatchDiffPanel({
 				<button
 					aria-pressed={editMode}
 					className={cn(
-						"h-6 rounded-full px-2.5 font-medium text-[11px] transition-colors",
+						"type-caption h-6 rounded-full px-2.5 font-medium transition-colors",
+						mode !== "working" && "cursor-not-allowed opacity-50",
 						editMode
 							? "bg-primary text-primary-foreground"
 							: "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
 					)}
+					disabled={mode !== "working"}
 					onClick={() => setEditMode((current) => !current)}
 					type="button"
 				>
@@ -2168,13 +2649,21 @@ function IframePanel({
 
 	const navigate = (raw: string) => {
 		let url = raw.trim();
-		if (!url) {
+		if (!url || BLOCKED_URL_RE.test(url)) {
 			return;
 		}
 		if (!URL_PROTOCOL_RE.test(url)) {
 			url = `https://${url}`;
 		}
 		if (BLOCKED_URL_RE.test(url)) {
+			return;
+		}
+		try {
+			const protocol = new URL(url).protocol;
+			if (protocol !== "http:" && protocol !== "https:") {
+				return;
+			}
+		} catch {
 			return;
 		}
 		setSrc(url);
@@ -2198,7 +2687,8 @@ function IframePanel({
 						icon={Globe02Icon}
 					/>
 					<input
-						className="min-w-0 flex-1 rounded-md bg-background px-2 py-0.5 text-xs outline-none focus:border-primary/60"
+						aria-label="Address"
+						className="min-w-0 flex-1 rounded-md bg-background px-2 py-0.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
 						onChange={(e) => setInputVal(e.target.value)}
 						placeholder="Enter URL…"
 						spellCheck={false}
@@ -2273,9 +2763,12 @@ export function BrowserTabPanel({
 			/>
 		);
 	}
+	// Keyed by the request nonce so a repeated request for the same URL still
+	// navigates the iframe again.
 	return (
 		<IframePanel
 			initialUrl={requestedOpen?.url ?? "https://www.google.com"}
+			key={requestedOpen?.nonce}
 			title={title}
 		/>
 	);
@@ -2315,7 +2808,7 @@ function formatBrowserContext(context: BrowserContextResult | null): string {
 		);
 		for (const tool of context.webmcp_tools) {
 			lines.push(
-				`- ${tool.name}${tool.title ? ` (${tool.title})` : ""} origin=${tool.origin || "unknown"} readOnly=${tool.annotations.readOnlyHint} untrustedOutput=${tool.annotations.untrustedContentHint} description=${tool.description} input_schema=${tool.input_schema}`
+				`- ${tool.name} tool_id=${tool.tool_id}${tool.title ? ` (${tool.title})` : ""} origin=${tool.origin || "unknown"} readOnly=${tool.annotations.readOnlyHint} consequential=${tool.annotations.consequentialHint} debugging=${tool.annotations.debugging} untrustedOutput=${tool.annotations.untrustedContentHint} description=${tool.description} input_schema=${tool.input_schema}`
 			);
 		}
 	}
@@ -2349,12 +2842,14 @@ function BrowserSidecarPanel({
 	const [context, setContext] = useState<BrowserContextResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [isAnnotating, setIsAnnotating] = useState(false);
+	const [askRyuPending, setAskRyuPending] = useState(false);
+	const askRyuPendingRef = useRef(false);
 	const [isFrozen, setIsFrozen] = useState(false);
 	const [themeTokens, setThemeTokens] = useState(() =>
 		readCompanionThemeTokens(undefined, { includeStoredPreferences: true })
 	);
 	useEffect(() => {
-		if (typeof MutationObserver === "undefined") {
+		if (!globalThis.MutationObserver) {
 			return;
 		}
 		const observer = new MutationObserver(() => {
@@ -2440,7 +2935,8 @@ function BrowserSidecarPanel({
 					}),
 				}
 			);
-			const nextContext = (await resp.json()) as BrowserContextResult;
+			const nextContext =
+				/* SAFETY: The successful browser sidecar context route returns the TabManager.context contract; call rejects non-success replies first. */ (await resp.json()) as BrowserContextResult;
 			setContext(nextContext);
 			if (includeScreenshot && nextContext.screenshot?.image) {
 				publishBrowserImage(
@@ -2458,7 +2954,10 @@ function BrowserSidecarPanel({
 		setError(null);
 		try {
 			const resp = await call(`${base}/tabs`);
-			const data = (await resp.json()) as { tabs: SidecarTab[] };
+			const data =
+				/* SAFETY: The browser GET /tabs publisher wraps tabView results in tabs; call rejects non-success replies before this projection. */ (await resp.json()) as {
+					tabs: SidecarTab[];
+				};
 			setTabs(data.tabs);
 			setActiveId((prev) =>
 				prev && data.tabs.some((tab) => tab.id === prev)
@@ -2480,6 +2979,8 @@ function BrowserSidecarPanel({
 
 	useEffect(() => {
 		const onLinkOpened = (event: Event) => {
+			// SAFETY: openContributedLink publishes this named event with the full native
+			// panel.plugin string plus URL; DOM EventListener erases its detail type.
 			const plugin = (event as CustomEvent<{ plugin?: string }>).detail?.plugin;
 			if (plugin === BROWSER_PLUGIN_ID) {
 				refresh().catch(() => undefined);
@@ -2505,7 +3006,10 @@ function BrowserSidecarPanel({
 					headers: { ...headers, "Content-Type": "application/json" },
 					body: JSON.stringify({ url }),
 				});
-				const data = (await resp.json()) as { tab: SidecarTab };
+				const data =
+					/* SAFETY: The successful browser POST /tabs publisher returns tabView(tab) in tab; error responses are rejected by call. */ (await resp.json()) as {
+						tab: SidecarTab;
+					};
 				setActiveId(data.tab.id);
 				setInputVal("");
 				await refresh();
@@ -2516,10 +3020,15 @@ function BrowserSidecarPanel({
 		[call, headers, refresh]
 	);
 
+	// Each request is opened exactly once, keyed by its nonce. `openTab` changes
+	// identity whenever the node's credentials refresh, which must not replay a
+	// request that was already handled.
+	const handledNonceRef = useRef<number | undefined>(undefined);
 	useEffect(() => {
-		if (!requestedUrl) {
+		if (!requestedUrl || requestedNonce === handledNonceRef.current) {
 			return;
 		}
+		handledNonceRef.current = requestedNonce;
 		openTab(requestedUrl).catch(() => undefined);
 	}, [openTab, requestedNonce, requestedUrl]);
 
@@ -2532,7 +3041,10 @@ function BrowserSidecarPanel({
 						method: "POST",
 					}
 				);
-				const data = (await resp.json()) as { image: string };
+				const data =
+					/* SAFETY: The browser screenshot route returns its PNG payload under image only on success; call rejects error replies. */ (await resp.json()) as {
+						image: string;
+					};
 				publishBrowserImage(id, data.image);
 			} catch (e) {
 				setError(e instanceof Error ? e.message : "screenshot failed");
@@ -2550,7 +3062,20 @@ function BrowserSidecarPanel({
 			clearMediaSource(`browser:${activeId}`);
 			return;
 		}
-		const tick = () => screenshot(activeId).catch(() => undefined);
+		// A screenshot can take longer than the interval on a busy page; skip ticks
+		// while one is in flight instead of stacking base64 requests behind it.
+		let inFlight = false;
+		const tick = () => {
+			if (inFlight) {
+				return;
+			}
+			inFlight = true;
+			screenshot(activeId)
+				.catch(() => undefined)
+				.finally(() => {
+					inFlight = false;
+				});
+		};
 		tick();
 		const timer = window.setInterval(tick, 800);
 		return () => window.clearInterval(timer);
@@ -2579,10 +3104,10 @@ function BrowserSidecarPanel({
 			setIsFrozen(false);
 			return;
 		}
-		setIsAnnotating(true);
 		setIsFrozen(true);
 		try {
 			await getContext(activeId, [], true);
+			setIsAnnotating(true);
 		} catch (e) {
 			setIsAnnotating(false);
 			setIsFrozen(false);
@@ -2606,7 +3131,9 @@ function BrowserSidecarPanel({
 						body: JSON.stringify(input),
 					}
 				);
-				const annotation = (await resp.json()) as BrowserAnnotation;
+				const annotation =
+					/* SAFETY: The successful browser annotations publisher returns TabManager.annotate as BrowserAnnotation; call rejects errors first. */ (await resp.json()) as BrowserAnnotation;
+				setError(null);
 				setContext((current) =>
 					current
 						? { ...current, annotations: [...current.annotations, annotation] }
@@ -2631,6 +3158,7 @@ function BrowserSidecarPanel({
 					`${base}/tabs/${encodeURIComponent(activeId)}/annotations/${encodeURIComponent(annotationId)}`,
 					{ method: "DELETE" }
 				);
+				setError(null);
 				setContext((current) =>
 					current
 						? {
@@ -2656,6 +3184,7 @@ function BrowserSidecarPanel({
 			await call(`${base}/tabs/${encodeURIComponent(activeId)}/annotations`, {
 				method: "DELETE",
 			});
+			setError(null);
 			setContext((current) =>
 				current ? { ...current, annotations: [] } : current
 			);
@@ -2664,12 +3193,26 @@ function BrowserSidecarPanel({
 		}
 	}, [activeId, call]);
 
-	const askRyu = useCallback(() => {
-		setPendingPrompt(
-			"Review the embedded browser context and every saved annotation. Address each requested visual change in the live tab, using the browser context, snapshot, and control tools as needed."
-		);
-		openAssistant("sidebar");
-	}, [openAssistant, setPendingPrompt]);
+	const askRyu = useCallback(async () => {
+		if (!activeId || askRyuPendingRef.current) {
+			return;
+		}
+		askRyuPendingRef.current = true;
+		setAskRyuPending(true);
+		try {
+			const latest = await getContext(activeId, [], false);
+			setPendingPrompt(
+				`Review the embedded browser context and every saved annotation. Address each requested visual change in the live tab, using the browser context, snapshot, and control tools as needed.\n\n${formatBrowserContext(latest)}`
+			);
+			setError(null);
+			openAssistant("sidebar");
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "browser notes unavailable");
+		} finally {
+			askRyuPendingRef.current = false;
+			setAskRyuPending(false);
+		}
+	}, [activeId, getContext, openAssistant, setPendingPrompt]);
 
 	const activeTab = tabs.find((tab) => tab.id === activeId);
 	useAssistantPageContext(
@@ -2723,7 +3266,8 @@ function BrowserSidecarPanel({
 						icon={Globe02Icon}
 					/>
 					<input
-						className="min-w-0 flex-1 rounded-md bg-background px-2 py-0.5 text-xs outline-none focus:border-primary/60"
+						aria-label="URL to open"
+						className="min-w-0 flex-1 rounded-md bg-background px-2 py-0.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
 						onChange={(e) => setInputVal(e.target.value)}
 						placeholder="Open a URL in the browser sidecar…"
 						spellCheck={false}
@@ -2779,15 +3323,21 @@ function BrowserSidecarPanel({
 						</div>
 					)}
 					<BrowserAnnotationSurface
+						askRyuPending={askRyuPending}
 						context={context}
 						imageUrl={shot}
 						isAnnotating={isAnnotating}
 						onAnnotate={annotate}
-						onAskRyu={askRyu}
+						onAskRyu={() => askRyu().catch(() => undefined)}
 						onClearAnnotations={clearAnnotations}
 						onContext={(selections) =>
 							activeId
-								? getContext(activeId, selections, true)
+								? getContext(activeId, selections, true).catch((e: unknown) => {
+										setError(
+											e instanceof Error ? e.message : "browser context failed"
+										);
+										return null;
+									})
 								: Promise.resolve(null)
 						}
 						onDeleteAnnotation={deleteAnnotation}
@@ -2888,8 +3438,13 @@ function SimulatorSidecarPanel() {
 				call(`${SIM_BASE}/capabilities`),
 				call(`${SIM_BASE}/devices`),
 			]);
-			setCaps((await capResp.json()) as SimCapabilities);
-			const data = (await devResp.json()) as { devices: SimDevice[] };
+			setCaps(
+				/* SAFETY: The simulator capabilities success route returns DeviceDriver.probe with its typed per-platform capability fields. */ (await capResp.json()) as SimCapabilities
+			);
+			const data =
+				/* SAFETY: The simulator devices success route wraps DeviceDriver.list typed Device records in devices; call rejects errors. */ (await devResp.json()) as {
+					devices: SimDevice[];
+				};
 			setDevices(data.devices);
 			setSelectedId((prev) => prev ?? data.devices[0]?.id ?? null);
 		} catch (e) {
@@ -2911,7 +3466,10 @@ function SimulatorSidecarPanel() {
 				const resp = await call(
 					`${SIM_BASE}/devices/${encodeURIComponent(id)}/screenshot`
 				);
-				const data = (await resp.json()) as { image: string };
+				const data =
+					/* SAFETY: The simulator screenshot success route serializes the PNG buffer as base64 image; call rejects error responses. */ (await resp.json()) as {
+						image: string;
+					};
 				setShot(`data:image/png;base64,${data.image}`);
 			} catch {
 				// A shutdown device has no screen — keep the last frame, don't error-spam.
@@ -2941,7 +3499,11 @@ function SimulatorSidecarPanel() {
 	}, [selected, screenshot]);
 
 	const action = useCallback(
-		async (id: string, path: string, body?: unknown) => {
+		async (
+			id: string,
+			path: string,
+			body?: Parameters<typeof JSON.stringify>[0]
+		) => {
 			setBusy(true);
 			setError(null);
 			try {
@@ -3081,8 +3643,8 @@ function SimulatorSidecarPanel() {
 					{error ? (
 						<p className="text-center text-muted-foreground text-xs">{error}</p>
 					) : shot ? (
-						// biome-ignore lint/performance/noImgElement: sidecar screenshot data URI, not a static asset.
-						// biome-ignore lint/a11y/noStaticElementInteractions: the device screen is the interactive surface (Android tap).
+						// sidecar screenshot data URI, not a static asset.
+						// the device screen is the interactive surface (Android tap).
 						<img
 							alt="Device screen"
 							className={cn(
@@ -3090,7 +3652,7 @@ function SimulatorSidecarPanel() {
 								canTap && "cursor-crosshair"
 							)}
 							onClick={canTap ? tapAt : undefined}
-							src={shot}
+							src={safeMediaUrl(shot) ?? undefined}
 						/>
 					) : (
 						<p className="max-w-xs text-center text-muted-foreground text-xs">
@@ -3131,15 +3693,15 @@ function SimDeviceList({
 				const list = devices.filter((d) => d.platform === platform);
 				return (
 					<div key={platform}>
-						<div className="border-border/40 border-b bg-muted/30 px-2 py-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+						<div className="type-compact border-border/40 border-b bg-muted/30 px-2 py-1 font-medium text-muted-foreground uppercase tracking-wide">
 							{label}
 						</div>
 						{cap && !cap.available ? (
-							<p className="px-2 py-1.5 text-[11px] text-muted-foreground/80">
+							<p className="type-caption px-2 py-1.5 text-muted-foreground/80">
 								{cap.reason ?? "Not available on this node."}
 							</p>
 						) : list.length === 0 ? (
-							<p className="px-2 py-1.5 text-[11px] text-muted-foreground/80">
+							<p className="type-caption px-2 py-1.5 text-muted-foreground/80">
 								No devices found.
 							</p>
 						) : (
@@ -3161,8 +3723,10 @@ function SimDeviceList({
 												: "bg-muted-foreground/40"
 										)}
 									/>
-									<span className="min-w-0 flex-1 truncate">{d.name}</span>
-									<span className="shrink-0 text-[10px] text-muted-foreground/60">
+									<span className="min-w-0 flex-1 truncate" title={d.name}>
+										{d.name}
+									</span>
+									<span className="type-compact shrink-0 text-muted-foreground/60">
 										{d.os}
 									</span>
 								</button>
@@ -3312,14 +3876,19 @@ function SimpleTerminal({
 	};
 
 	return (
-		// biome-ignore lint/a11y/useKeyWithClickEvents: click-to-focus on a container is intentional
+		// click-to-focus on a container is intentional
 		<div
-			className="flex h-full flex-col bg-sidebar text-sidebar-foreground"
+			className={cn(
+				"flex h-full flex-col bg-sidebar text-sidebar-foreground",
+				panelStyles.codeFont
+			)}
 			onClick={() => inputRef.current?.focus()}
-			style={{ fontFamily: "var(--font-code)" }}
 		>
 			<div
-				className="min-h-0 flex-1 overflow-auto p-2 font-mono text-[12.5px] leading-[1.55]"
+				className={cn(
+					"min-h-0 flex-1 overflow-auto p-2 font-mono",
+					panelStyles.codeMetrics
+				)}
 				ref={outputRef}
 			>
 				{lines.map((line, i) => {
@@ -3330,7 +3899,7 @@ function SimpleTerminal({
 						lineClassName = "text-status-destructive";
 					}
 					return (
-						// biome-ignore lint/suspicious/noArrayIndexKey: stable sequential terminal lines
+						// stable sequential terminal lines
 						<div className={lineClassName} key={i}>
 							<pre className="whitespace-pre-wrap font-mono">
 								{line.text || " "}
@@ -3339,16 +3908,27 @@ function SimpleTerminal({
 					);
 				})}
 				{running && (
-					<div className="animate-pulse font-mono text-[12.5px] text-muted-foreground">
+					<div
+						className={cn(
+							"animate-skeleton font-mono text-muted-foreground",
+							panelStyles.codeSize
+						)}
+					>
 						...
 					</div>
 				)}
 			</div>
-			<div className="flex shrink-0 items-center px-2 py-1.5 font-mono text-[12.5px]">
+			<div
+				className={cn(
+					"flex shrink-0 items-center px-2 py-1.5 font-mono",
+					panelStyles.codeSize
+				)}
+			>
 				<span className="mr-1.5 shrink-0 select-none text-primary">
 					{promptLabel}
 				</span>
 				<input
+					aria-label="Terminal input"
 					autoCapitalize="none"
 					autoComplete="off"
 					autoFocus
@@ -3395,30 +3975,45 @@ interface NativeDockPanelDef {
  *  Browser and Simulator tabs that used to be members of the shell's closed
  *  `TabKind` union; their components below are unchanged, so an enabled app
  *  renders exactly what it did before. */
-const NATIVE_DOCK_PANELS: Record<string, NativeDockPanelDef> = {
-	"@ryu/browser/browser": {
-		icon: Globe02Icon,
-		render: ({ active, label }) => (
-			<BrowserTabPanel active={active} title={label} />
-		),
-	},
-	"@ryu/simulator/simulator": {
-		icon: SmartPhone01Icon,
-		render: () => <SimulatorTabPanel />,
-	},
-	"@ryu/ugc/ugc": {
-		icon: Megaphone01Icon,
-		render: () => <UgcPanel />,
-	},
-	"@ryu/crm/crm": {
-		icon: UserGroupIcon,
-		render: () => <CrmPanel />,
-	},
-	"@ryu/desktop/desktop": {
-		icon: MonitorDotFreeIcons,
-		render: ({ active }) => <DesktopStreamPanel active={active} />,
-	},
-};
+const NATIVE_DOCK_PANELS = new Map<string, NativeDockPanelDef>([
+	[
+		"@ryu/browser/browser",
+		{
+			icon: Globe02Icon,
+			render: ({ active, label }) => (
+				<BrowserTabPanel active={active} title={label} />
+			),
+		},
+	],
+	[
+		"@ryu/simulator/simulator",
+		{
+			icon: SmartPhone01Icon,
+			render: () => <SimulatorTabPanel />,
+		},
+	],
+	[
+		"@ryu/ugc/ugc",
+		{
+			icon: Megaphone01Icon,
+			render: () => <UgcPanel />,
+		},
+	],
+	[
+		"@ryu/crm/crm",
+		{
+			icon: UserGroupIcon,
+			render: () => <CrmPanel />,
+		},
+	],
+	[
+		"@ryu/desktop/desktop",
+		{
+			icon: MonitorDotFreeIcons,
+			render: ({ active }) => <DesktopStreamPanel active={active} />,
+		},
+	],
+]);
 
 function DockPanelPlaceholder({ text }: { text: string }) {
 	return (
@@ -3444,7 +4039,7 @@ function PluginDockTabContent({
 	active: boolean;
 	dockPanels: PluginDockPanel[];
 	label: string;
-	tabKind: TabKind;
+	tabKind: DockTabKind;
 }) {
 	const panel = findDockPanel(dockPanels, tabKind);
 	if (!panel) {
@@ -3452,9 +4047,10 @@ function PluginDockTabContent({
 			<DockPanelPlaceholder text="This panel's app is no longer enabled." />
 		);
 	}
-	const emptyText = panel.spec?.emptyText;
+	const spec = pluginDockSpec(panel);
+	const emptyText = spec?.emptyText;
 	if (panel.panel === "native") {
-		const def = NATIVE_DOCK_PANELS[nativeDockPanelKey(panel)];
+		const def = NATIVE_DOCK_PANELS.get(nativeDockPanelKey(panel));
 		if (!def) {
 			return (
 				<DockPanelPlaceholder
@@ -3464,21 +4060,21 @@ function PluginDockTabContent({
 		}
 		return def.render({ active, label });
 	}
-	if (panel.panel === "companion" && panel.spec?.companion) {
+	if (panel.panel === "companion" && spec?.companion) {
 		// The app's own sandboxed surface, mounted through the same gated page the
 		// companion route uses (no plugin code runs unless the runtime flag is on).
 		return (
 			<div className="h-full overflow-auto">
-				<PluginCompanionPage companionId={panel.spec.companion} />
+				<PluginCompanionPage companionId={spec.companion} />
 			</div>
 		);
 	}
-	if (panel.panel === "view" && panel.spec?.view) {
+	if (panel.panel === "view" && spec?.view) {
 		// One of the plugin's own declarative views, rendered with the host's
 		// components by the same page the view route uses — the app returned DATA.
 		return (
 			<div className="h-full overflow-auto">
-				<PluginViewPage pluginId={panel.plugin} viewId={panel.spec.view} />
+				<PluginViewPage pluginId={panel.plugin} viewId={spec.view} />
 			</div>
 		);
 	}
@@ -3521,16 +4117,39 @@ function DockRoutePage({
 	label,
 	uid,
 }: {
-	kind: TabKind;
+	kind: DockTabKind;
 	label: string;
 	uid: string;
 }) {
 	const path = routeTabPath(kind);
-	const parentTabs = useTabsContext();
 	const routeTab = useMemo(
 		() => ({ id: uid, path, title: label }),
 		[uid, path, label]
 	);
+	if (!isDockableRoutePath(path)) {
+		return (
+			<DockPanelPlaceholder text="This page can't be opened in a panel." />
+		);
+	}
+	return (
+		<DockPageBoundary uid={uid}>
+			<div className="h-full min-h-0 overflow-auto">
+				<RouteOutlet onClose={() => undefined} tab={routeTab} />
+			</div>
+		</DockPageBoundary>
+	);
+}
+
+/** Reuse the dock host isolation when a permanent app embeds the existing chat page. */
+export function DockPageBoundary({
+	uid,
+	children,
+}: {
+	uid: string;
+	children: ReactNode;
+}) {
+	const parentTabs = useTabsContext();
+	const parentTabId = useCurrentTabId();
 	// Neuter every verb that MUTATES AN EXISTING TAB, at one seam, for the whole
 	// subtree.
 	//
@@ -3549,40 +4168,92 @@ function DockRoutePage({
 	const scopedTabs = useMemo(
 		() => ({
 			...parentTabs,
+			activeTabId: parentTabId ?? parentTabs.activeTabId,
 			bindTabConversation: () => undefined,
 			updateTabBusy: () => undefined,
 			updateTabIcon: () => undefined,
 			updateTabsIconWhere: () => undefined,
 			updateTabTitle: () => undefined,
 		}),
-		[parentTabs]
+		[parentTabs, parentTabId]
 	);
-	if (!isDockableRoutePath(path)) {
-		return (
-			<DockPanelPlaceholder text="This page can't be opened in a panel." />
-		);
-	}
 	return (
 		<DockRouteHostContext.Provider value={true}>
-			{/* Providing (not consuming) a narrowed context value — the one sanctioned
-			    reason app code touches `TabsContext` directly. */}
-			<TabsContext.Provider value={scopedTabs}>
+			{/* Scope both direct context consumers and selector subscribers so the
+			    embedded page cannot mutate its containing window tab. */}
+			<TabsStateProvider value={scopedTabs}>
 				<CurrentTabIdProvider tabId={uid}>
 					<IsActiveTabProvider isActive={false}>
-						<TitleBarProvider>
-							<div className="h-full min-h-0 overflow-auto">
-								<RouteOutlet onClose={() => undefined} tab={routeTab} />
-							</div>
-						</TitleBarProvider>
+						<TitleBarProvider>{children}</TitleBarProvider>
 					</IsActiveTabProvider>
 				</CurrentTabIdProvider>
-			</TabsContext.Provider>
+			</TabsStateProvider>
 		</DockRouteHostContext.Provider>
 	);
 }
 
+/**
+ * The Subagents tab with the conversation's sub-agent Boxes listed above it:
+ * each parallel sub-agent that runs on a Box of its own gets a View screen
+ * action. Without sub-agent Boxes it renders the Subagents panel alone.
+ */
+function SubagentsWithBoxScreens({
+	children,
+	contextView,
+}: {
+	children: ReactNode;
+	contextView?: ContextPanelView | null;
+}) {
+	if (!contextView?.conversationId) {
+		return <>{children}</>;
+	}
+	return (
+		<div className="flex h-full min-h-0 flex-col">
+			<SessionBoxChildScreens
+				conversationId={contextView.conversationId}
+				target={contextView.target}
+			/>
+			<div className="min-h-0 flex-1">{children}</div>
+		</div>
+	);
+}
+
+/** Open the Box screen as a workbench tab when the chat asks for it. */
+function SessionBoxWorkbenchBridge({
+	bridge,
+	conversationId,
+}: {
+	bridge: WorkbenchDockBridge;
+	conversationId: string;
+}) {
+	const request = useSessionBoxScreenRequest(conversationId);
+	const { tabs: windowTabs } = useTabsContext();
+	const currentTabId = useCurrentTabId();
+	const title =
+		windowTabs.find((tab) => tab.id === currentTabId)?.title || "Chat";
+	const handled = useRef(request?.nonce);
+	const openPanel = bridge.openPanel;
+	useEffect(() => {
+		if (!request || handled.current === request.nonce) {
+			return;
+		}
+		handled.current = request.nonce;
+		openPanel(
+			{
+				conversation: { id: conversationId, title },
+				id: "box-screen",
+				label: "Box screen",
+				region: "right",
+			},
+			{ preserveFocus: true }
+		);
+	}, [conversationId, openPanel, request, title]);
+	return null;
+}
+
 function TabContent({
 	active = true,
+	agentActivityPanel,
 	tab,
 	folder,
 	fileReviewRequest,
@@ -3594,6 +4265,8 @@ function TabContent({
 	inspectorView,
 }: {
 	active?: boolean;
+	/** Live profile content for the chat-local agent activity tab. */
+	agentActivityPanel?: ReactNode | null;
 	/** Live (not snapshotted) inputs for the context-breakdown tab. */
 	contextView?: ContextPanelView | null;
 	cowork?: CoworkData;
@@ -3601,13 +4274,18 @@ function TabContent({
 	dockPanels: PluginDockPanel[];
 	fileReviewRequest?: FileReviewRequest | null;
 	folder?: string | null;
-	inspectorView?: InspectedPart | null;
+	inspectorView?: unknown;
 	onClearSubagentView?: () => void;
 	subagentView?: SubagentView | null;
 	tab: PanelTab;
 }) {
 	const { canUseNativeShell } = useAppSurface();
 
+	if (tab.kind === "unavailable") {
+		return (
+			<DockPanelPlaceholder text="This panel is unavailable in this version." />
+		);
+	}
 	if (!canUseNativeShell && NATIVE_SHELL_TAB_KINDS.has(tab.kind)) {
 		return <DockPanelPlaceholder text="Available in the desktop app." />;
 	}
@@ -3637,6 +4315,13 @@ function TabContent({
 	if (tab.kind === "context") {
 		return <ContextPanel view={contextView} />;
 	}
+	if (tab.kind === "agent-activity") {
+		return (
+			agentActivityPanel ?? (
+				<DockPanelPlaceholder text="Choose an individual agent to view its activity." />
+			)
+		);
+	}
 	if (tab.kind === "sources") {
 		return cowork ? (
 			<SourcesWorkspacePanel messages={cowork.messages} />
@@ -3646,13 +4331,26 @@ function TabContent({
 	}
 	if (tab.kind === "subagents") {
 		return cowork ? (
-			<SubagentsWorkspacePanel
-				messages={cowork.messages}
-				onClearRequestedSubagent={onClearSubagentView}
-				requestedSubagent={subagentView}
-			/>
+			<SubagentsWithBoxScreens contextView={contextView}>
+				<SubagentsWorkspacePanel
+					messages={cowork.messages}
+					onClearRequestedSubagent={onClearSubagentView}
+					requestedSubagent={subagentView}
+				/>
+			</SubagentsWithBoxScreens>
 		) : (
 			<DockPanelPlaceholder text="Open a chat to see its subagents here." />
+		);
+	}
+	if (tab.kind === "box-screen") {
+		return contextView?.conversationId ? (
+			<SessionBoxPanel
+				active={active}
+				conversationId={contextView.conversationId}
+				target={contextView.target}
+			/>
+		) : (
+			<DockPanelPlaceholder text="Open a chat to see its Box screen here." />
 		);
 	}
 	if (tab.kind === "inspector") {
@@ -3667,11 +4365,13 @@ function TabContent({
 	}
 	if (tab.kind === "subagent") {
 		return cowork ? (
-			<SubagentsWorkspacePanel
-				messages={cowork.messages}
-				onClearRequestedSubagent={onClearSubagentView}
-				requestedSubagent={subagentView}
-			/>
+			<SubagentsWithBoxScreens contextView={contextView}>
+				<SubagentsWorkspacePanel
+					messages={cowork.messages}
+					onClearRequestedSubagent={onClearSubagentView}
+					requestedSubagent={subagentView}
+				/>
+			</SubagentsWithBoxScreens>
 		) : (
 			<DockPanelPlaceholder text="Open a chat to see its subagents here." />
 		);
@@ -3745,6 +4445,7 @@ function TabContent({
  */
 export function ProjectDockTabContent({
 	active = true,
+	request,
 	tab,
 	folder,
 	dockPanels,
@@ -3752,21 +4453,111 @@ export function ProjectDockTabContent({
 	active?: boolean;
 	dockPanels: PluginDockPanel[];
 	folder?: string | null;
+	/**
+	 * A one-shot request: a command for a terminal tab to run, or the files a
+	 * Changes tab reviews. A new nonce runs it again.
+	 */
+	request?: {
+		command?: TerminalCommandRequest;
+		nonce: number;
+		reviewPaths?: string[];
+	};
 	tab: Pick<ProjectDockTab, "kind" | "label" | "uid">;
 }) {
+	const fileReviewRequest = useMemo(
+		() =>
+			request?.reviewPaths
+				? { nonce: request.nonce, paths: request.reviewPaths }
+				: null,
+		[request]
+	);
 	return (
 		<TabContent
 			active={active}
 			dockPanels={dockPanels}
+			fileReviewRequest={fileReviewRequest}
 			folder={folder}
 			tab={{
 				uid: tab.uid,
-				kind: tab.kind,
+				...restoreDockTabKind(tab.kind),
+				initialCommand: request?.command,
+				initialCommandNonce: request?.command ? request.nonce : undefined,
 				label: tab.label,
 				projectHosted: true,
 			}}
 		/>
 	);
+}
+
+/**
+ * Content for a chat-bound panel (Context, Sources, Subagents …) hosted as a
+ * workbench tab outside its chat. Reads the chat's published live source, so
+ * the same renderers as the chat's own dock show the same data.
+ */
+export function ConversationPanelContent({
+	active = true,
+	kind,
+	label,
+	source,
+	uid,
+}: {
+	active?: boolean;
+	kind: string;
+	label: string;
+	source: ConversationPanelSource;
+	uid: string;
+}) {
+	// An artifact panel's kind carries the artifact id (`artifact:<id>`); the
+	// artifact itself comes from the chat that opened it.
+	if (kind.startsWith(ARTIFACT_PANEL_PREFIX)) {
+		const artifact =
+			source.artifacts?.[kind.slice(ARTIFACT_PANEL_PREFIX.length)];
+		return (
+			<TabContent
+				active={active}
+				dockPanels={[]}
+				tab={{ artifact, kind: "artifact", label, uid }}
+			/>
+		);
+	}
+	return (
+		<TabContent
+			active={active}
+			agentActivityPanel={source.agentActivityPanel}
+			contextView={source.contextView}
+			cowork={source.cowork}
+			dockPanels={[]}
+			inspectorView={source.inspectorView}
+			onClearSubagentView={source.onClearSubagentView}
+			subagentView={source.subagentView}
+			tab={{ uid, ...restoreDockTabKind(kind), label }}
+		/>
+	);
+}
+
+/**
+ * The glyph a dock tab kind shows (built-in, app panel, page, or artifact),
+ * for the same panel hosted as a workbench tab.
+ */
+export function DockKindIcon({ kind }: { kind: string }) {
+	const { dock_panels: dockPanels } = usePluginContributions();
+	const { apps } = useApps();
+	const resolved = kind.startsWith(ARTIFACT_PANEL_PREFIX)
+		? "artifact"
+		: restoreDockTabKind(kind).kind;
+	let spec: TabIconSpec = {};
+	if (resolved === "unavailable") {
+		spec = {};
+	} else if (isPluginTabKind(resolved)) {
+		const panel = findDockPanel(dockPanels, resolved);
+		spec = panel ? tabTypeIcon(contributedTabType(panel)) : {};
+	} else if (isRouteTabKind(resolved)) {
+		const appIcon = routeAppIcon(routeTabPath(resolved), apps);
+		spec = appIcon ? { iconId: appIcon } : { glyph: File01Icon };
+	} else {
+		spec = { glyph: BUILTIN_TAB_ICONS[resolved] };
+	}
+	return <TabIcon className="size-3.5" size={14} spec={spec} />;
 }
 
 /** Portal target for a project-hosted tab. Only the focused chat pane registers
@@ -3882,31 +4673,20 @@ export function PanelToggleButtons({
 			    background, and the divider only cut it in half. */}
 			{folder ? <EditorButtonGroup folder={folder} /> : null}
 			{onPinnedSummaryToggle ? (
-				<Tooltip>
-					<TooltipTrigger
-						render={
-							<button
-								className={cn(
-									"flex size-8 shrink-0 items-center justify-center rounded-xl transition-colors hover:bg-muted hover:text-foreground",
-									pinnedSummaryOpen
-										? "text-foreground"
-										: "text-muted-foreground"
-								)}
-								onClick={onPinnedSummaryToggle}
-								type="button"
-							>
-								<HugeiconsIcon className="size-4" icon={CheckListIcon} />
-							</button>
-						}
-					/>
-					<TooltipContent>{`${pinnedSummaryOpen ? "Hide" : "Show"} pinned summary`}</TooltipContent>
-				</Tooltip>
+				<PinnedSummaryToggleButton
+					onToggle={onPinnedSummaryToggle}
+					open={pinnedSummaryOpen ?? false}
+				/>
 			) : null}
 			{showBottomPanelToggle ? (
 				<Tooltip>
 					<TooltipTrigger
 						render={
 							<button
+								aria-label={
+									bottomOpen ? "Hide bottom panel" : "Show bottom panel"
+								}
+								aria-pressed={bottomOpen}
 								className="flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 								onClick={onBottomToggle}
 								type="button"
@@ -3926,6 +4706,8 @@ export function PanelToggleButtons({
 				<TooltipTrigger
 					render={
 						<button
+							aria-label={rightOpen ? "Hide right panel" : "Show right panel"}
+							aria-pressed={rightOpen}
 							className="flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 							onClick={onRightToggle}
 							type="button"
@@ -3947,12 +4729,18 @@ export function PanelToggleButtons({
 // ── Main WorkspacePanels component ────────────────────────────────────────────
 
 export interface WorkspacePanelsProps {
+	/** Whether this chat has an individual agent whose profile can be opened. */
+	agentActivityAvailable?: boolean;
+	/** Current chat agent's profile and activity content. */
+	agentActivityPanel?: ReactNode | null;
+	/** Request to focus this chat's agent activity tab in the right dock. */
+	agentActivityRequest?: { nonce: number } | null;
 	/**
 	 * A request to open a rendered/canvas artifact in the right panel. Like
 	 * `subagentRequest`, the `nonce` changes on every click so re-selecting the
 	 * same artifact re-focuses the tab. Null when nothing has been requested.
 	 */
-	artifactRequest?: { artifact: Artifact; nonce: number } | null;
+	artifactRequest?: { artifact: ArtifactView; nonce: number } | null;
 	bottomOpen: boolean;
 	children: ReactNode;
 	/** Open a complete run collection from its capped pinned-summary section. */
@@ -3981,7 +4769,7 @@ export interface WorkspacePanelsProps {
 	 * on every click so re-inspecting refreshes the same reusable tab. Null when
 	 * nothing has been requested.
 	 */
-	inspectorRequest?: { part: InspectedPart; nonce: number } | null;
+	inspectorRequest?: { part: unknown; nonce: number } | null;
 	onBottomOpenChange: (v: boolean) => void;
 	onRightOpenChange: (v: boolean) => void;
 	/**
@@ -4017,6 +4805,10 @@ const MIN_CHAT_WIDTH = 520;
 /**
  * The workspace docks around a page's content.
  *
+ * Where the workbench frame is mounted ({@link useWorkbenchDockBridge}), the
+ * chat's panels open as workbench tabs instead ({@link WorkbenchChatPanels});
+ * these docks remain for the layouts without the frame.
+ *
  * Inside a page that is ITSELF hosted in a dock ({@link DockRoutePage}), this
  * renders the content bare: `/chat` is a hostable page and ChatPage's root is a
  * `WorkspacePanels`, so without the short-circuit the dock would mount a dock
@@ -4025,14 +4817,34 @@ const MIN_CHAT_WIDTH = 520;
  */
 export function WorkspacePanels(props: WorkspacePanelsProps) {
 	const hostedInDock = useContext(DockRouteHostContext);
+	const workbenchDocks = useWorkbenchDockBridge();
 	if (hostedInDock) {
 		return <>{props.children}</>;
+	}
+	// With the workbench frame mounted, the chat's panels are workbench tabs in
+	// the shared Right/Bottom panes rather than docks of its own.
+	if (workbenchDocks) {
+		const conversationId = props.contextView?.conversationId;
+		return (
+			<>
+				{conversationId ? (
+					<SessionBoxWorkbenchBridge
+						bridge={workbenchDocks}
+						conversationId={conversationId}
+					/>
+				) : null}
+				<WorkbenchChatPanels {...props} bridge={workbenchDocks} />
+			</>
+		);
 	}
 	return <WorkspacePanelsImpl {...props} />;
 }
 
 function WorkspacePanelsImpl({
 	children,
+	agentActivityAvailable = false,
+	agentActivityPanel,
+	agentActivityRequest,
 	fileReviewRequest,
 	fileSearchRequest,
 	folder,
@@ -4050,6 +4862,12 @@ function WorkspacePanelsImpl({
 	renderPinnedSummary,
 }: WorkspacePanelsProps) {
 	const { canUseNativeShell } = useAppSurface();
+	// Publish this chat's live panel data so Context/Sources/Subagents tabs
+	// placed anywhere in the workbench read this conversation (and only it).
+	usePublishConversationPanelSource(contextView?.conversationId, {
+		contextView: contextView ?? null,
+		cowork,
+	});
 	const { tabs: windowTabs, updateTabWorkspaceSession } = useTabsContext();
 	const currentTabId = useCurrentTabId();
 	const currentWindowTab = windowTabs.find((tab) => tab.id === currentTabId);
@@ -4125,7 +4943,8 @@ function WorkspacePanelsImpl({
 			let known = [...(useProjectDockStore.getState().byFolder[folder] ?? [])];
 			const used = new Set<string>();
 			for (const descriptor of dock.tabs) {
-				if (!descriptor.project) {
+				const rendererKind = restoreDockTabKind(descriptor.kind).kind;
+				if (!descriptor.project || rendererKind === "unavailable") {
 					continue;
 				}
 				const existing = known.find(
@@ -4140,12 +4959,12 @@ function WorkspacePanelsImpl({
 				const restored =
 					existing ??
 					addProjectTab(folder, {
-						kind: descriptor.kind,
+						kind: rendererKind,
 						label: descriptor.label,
 						side,
 						pinned: descriptor.pinned === true,
 						ownerTabId: currentTabId,
-						...(descriptor.uid ? { uid: descriptor.uid } : {}),
+						...(descriptor.uid ? { uid: descriptor.uid } : undefined),
 					});
 				used.add(restored.uid);
 				if (!existing) {
@@ -4176,7 +4995,7 @@ function WorkspacePanelsImpl({
 	const bottomTabs = useMemo((): PanelTab[] => {
 		const project: PanelTab[] = visibleBottomProject.map((t) => ({
 			uid: t.uid,
-			kind: t.kind,
+			...restoreDockTabKind(t.kind),
 			label: t.label,
 			pinned: t.pinned,
 			projectHosted: true,
@@ -4189,7 +5008,7 @@ function WorkspacePanelsImpl({
 	const rightTabs = useMemo((): PanelTab[] => {
 		const project: PanelTab[] = visibleRightProject.map((t) => ({
 			uid: t.uid,
-			kind: t.kind,
+			...restoreDockTabKind(t.kind),
 			label: t.label,
 			pinned: t.pinned,
 			projectHosted: true,
@@ -4321,6 +5140,8 @@ function WorkspacePanelsImpl({
 		MISSION_CONTROL_PLUGIN_ID,
 		MISSION_CONTROL_BUTTON_ID
 	);
+	// The session Box screen is offered while the Box rollout is on (the default).
+	const boxScreensEnabled = useFeatureFlag(CLOUD_TASKS_BOX_BACKEND_FLAG);
 	const rightTabTypes = useMemo(
 		() => [
 			// Only the OFFERING is gated. `BUILTIN_TAB_ICONS.mission` and the
@@ -4329,11 +5150,19 @@ function WorkspacePanelsImpl({
 			...RIGHT_TAB_TYPES.filter(
 				(type) =>
 					(canUseNativeShell || !NATIVE_SHELL_TAB_KINDS.has(type.kind)) &&
-					(type.kind !== "mission" || missionPath !== null)
+					(type.kind !== "mission" || missionPath !== null) &&
+					(type.kind !== "agent-activity" || agentActivityAvailable) &&
+					(type.kind !== "box-screen" || boxScreensEnabled)
 			),
 			...dockPanelsFor(dockPanels, "right").map(contributedTabType),
 		],
-		[canUseNativeShell, dockPanels, missionPath]
+		[
+			agentActivityAvailable,
+			boxScreensEnabled,
+			canUseNativeShell,
+			dockPanels,
+			missionPath,
+		]
 	);
 	// The subagent currently pinned to the right panel's subagent tab (if any).
 	// DECLARED ABOVE `iconForKind`: that callback's dep array reads it at render
@@ -4343,6 +5172,9 @@ function WorkspacePanelsImpl({
 	// add-menu — a programmatic panel, or a contributed one whose app just left.
 	const iconForKind = useCallback(
 		(kind: TabKind): TabIconSpec => {
+			if (kind === "unavailable") {
+				return {};
+			}
 			// The subagent tab hosts ONE subagent, so it wears that subagent's own
 			// avatar — the same glyph the pinned summary's row and the transcript
 			// header show — instead of a generic robot every subagent shares. The
@@ -4372,9 +5204,7 @@ function WorkspacePanelsImpl({
 	// The artifact is carried ON the artifact tab itself (each artifact = one tab),
 	// so there is no separate pinned artifact view — see `openArtifact`.
 	// The raw message part currently pinned to the right panel's inspector tab.
-	const [inspectorView, setInspectorView] = useState<InspectedPart | null>(
-		null
-	);
+	const [inspectorView, setInspectorView] = useState<unknown>(null);
 
 	// Open (or re-focus) the subagent tab when ChatPage requests one. `openTab` is
 	// re-created each render, so hold it in a ref and depend only on the request —
@@ -4412,6 +5242,26 @@ function WorkspacePanelsImpl({
 			onRightOpenChange(true);
 		}
 	}, [fileReviewRequest, onRightOpenChange, rightOpen]);
+
+	// "View screen" (cloud task strip, sub-agent list): open or focus this
+	// conversation's Box screen tab. The tab picks the requested Box itself.
+	const boxScreenRequest = useSessionBoxScreenRequest(
+		contextView?.conversationId
+	);
+	const handledBoxScreenNonce = useRef(boxScreenRequest?.nonce);
+	useEffect(() => {
+		if (
+			!boxScreenRequest ||
+			handledBoxScreenNonce.current === boxScreenRequest.nonce
+		) {
+			return;
+		}
+		handledBoxScreenNonce.current = boxScreenRequest.nonce;
+		openRightTabRef.current("box-screen", "Box screen");
+		if (!rightOpen) {
+			onRightOpenChange(true);
+		}
+	}, [boxScreenRequest, onRightOpenChange, rightOpen]);
 
 	useEffect(() => {
 		if (!subagentRequest) {
@@ -4458,6 +5308,16 @@ function WorkspacePanelsImpl({
 		openRightTabRef.current("context", "Context");
 	}, [contextRequest]);
 
+	useEffect(() => {
+		if (!agentActivityRequest) {
+			return;
+		}
+		openRightTabRef.current("agent-activity", "Agent activity");
+		if (!rightOpen) {
+			onRightOpenChange(true);
+		}
+	}, [agentActivityRequest, onRightOpenChange, rightOpen]);
+
 	// A capped pinned-summary section raises its complete collection in a reusable
 	// workspace tab. The panel reads `cowork.messages` live, so the list continues
 	// to update after it opens.
@@ -4500,7 +5360,7 @@ function WorkspacePanelsImpl({
 		if (pinnedSame) {
 			setRightActiveUid(pinnedSame.uid);
 		} else {
-			openRightTabRef.current(pendingRoute.kind as TabKind, pendingRoute.label);
+			openRightTabRef.current(pendingRoute.kind, pendingRoute.label);
 		}
 		if (!rightOpen) {
 			onRightOpenChange(true);
@@ -4532,6 +5392,7 @@ function WorkspacePanelsImpl({
 				setRightActiveUid(pinnedSame.uid);
 			}
 		} else if (isBottom) {
+			// SAFETY: All dock-request producers publish terminal, the browser plugin constant, or dockTabKind's plugin-tagged result; each is a TabKind member.
 			openBottomTabRef.current(
 				pendingDockPanel.kind as TabKind,
 				pendingDockPanel.label,
@@ -4539,6 +5400,7 @@ function WorkspacePanelsImpl({
 				pendingDockPanel.nonce
 			);
 		} else {
+			// SAFETY: All dock-request producers publish terminal, the browser plugin constant, or dockTabKind's plugin-tagged result; each is a TabKind member.
 			openRightTabRef.current(
 				pendingDockPanel.kind as TabKind,
 				pendingDockPanel.label,
@@ -4612,7 +5474,7 @@ function WorkspacePanelsImpl({
 
 	const addToProject = (
 		side: DockSide,
-		kind: TabKind,
+		kind: DockTabKind,
 		label: string,
 		visible: ProjectDockTab[]
 	) => {
@@ -4633,7 +5495,7 @@ function WorkspacePanelsImpl({
 
 	const addBottomTab = (kind: TabKind) => {
 		const label = bottomTabTypes.find((t) => t.kind === kind)?.label ?? kind;
-		if (folder && isPinnableDockTabKind(kind)) {
+		if (folder && kind !== "unavailable" && isPinnableDockTabKind(kind)) {
 			const entry = addToProject("bottom", kind, label, visibleBottomProject);
 			if (entry) {
 				setBottomActiveUid(entry.uid);
@@ -4650,7 +5512,7 @@ function WorkspacePanelsImpl({
 			rightTabTypes.find((t) => t.kind === kind)?.label ??
 			PAGE_TAB_TYPES.find((t) => t.kind === kind)?.label ??
 			kind;
-		if (folder && isPinnableDockTabKind(kind)) {
+		if (folder && kind !== "unavailable" && isPinnableDockTabKind(kind)) {
 			const entry = addToProject("right", kind, label, visibleRightProject);
 			if (entry) {
 				setRightActiveUid(entry.uid);
@@ -4735,7 +5597,7 @@ function WorkspacePanelsImpl({
 		if (!folder) {
 			return;
 		}
-		toggleProjectPin(folder, uid);
+		toggleProjectPin(folder, uid, currentTabId ?? undefined);
 	};
 
 	// Move a tab between the two docks, preserving its identity, and reveal the
@@ -4835,6 +5697,7 @@ function WorkspacePanelsImpl({
 				) : activeBottomTab ? (
 					<TabContent
 						active={isFocusedWindowTab}
+						agentActivityPanel={agentActivityPanel}
 						contextView={contextView}
 						dockPanels={dockPanels}
 						fileReviewRequest={fileReviewRequest}
@@ -4880,6 +5743,7 @@ function WorkspacePanelsImpl({
 				) : activeRightTab ? (
 					<TabContent
 						active={isFocusedWindowTab}
+						agentActivityPanel={agentActivityPanel}
 						contextView={contextView}
 						cowork={cowork}
 						dockPanels={dockPanels}
@@ -4993,11 +5857,16 @@ function WorkspacePanelsImpl({
 
 				{/* In-flow spacer: animates the chat's height when the bottom panel docks */}
 				<div
-					className="shrink-0"
-					style={{
-						height: bottomOpen ? effectiveBottomHeight + 12 : 0,
-						transition: bottomResizing ? "none" : `height 300ms ${DOCK_EASE}`,
-					}}
+					className={cn("shrink-0", panelStyles.bottomSpacer)}
+					style={
+						// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
+						{
+							"--workspace-height": `${bottomOpen ? effectiveBottomHeight + 12 : 0}px`,
+							"--workspace-transition": bottomResizing
+								? "none"
+								: `height 300ms ${DOCK_EASE}`,
+						} satisfies WorkspaceDockStyle as WorkspaceDockStyle
+					}
 				/>
 
 				{/* The one bottom-panel instance — pinned to the bottom edge. It has no
@@ -5007,11 +5876,17 @@ function WorkspacePanelsImpl({
 				    has reached full height, so on first mount the panel would otherwise
 				    flash visible until a later reflow. */}
 				<div
-					className="absolute inset-x-0 bottom-0 z-20 flex flex-col"
-					style={{
-						height: effectiveBottomHeight + 12,
-						display: bottomOpen ? "flex" : "none",
-					}}
+					className={cn(
+						"absolute inset-x-0 bottom-0 z-20 flex flex-col",
+						panelStyles.bottomPanel
+					)}
+					style={
+						// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
+						{
+							"--workspace-height": `${effectiveBottomHeight + 12}px`,
+							"--workspace-display": bottomOpen ? "flex" : "none",
+						} satisfies WorkspaceDockStyle as WorkspaceDockStyle
+					}
 				>
 					{bottomResizeHandle}
 					{bottomCard(closeBottom)}
@@ -5021,22 +5896,32 @@ function WorkspacePanelsImpl({
 			{/* In-flow spacer: animates the chat's width when the pinned summary
 			    column docks (stacked left of the right panel's spacer) */}
 			<div
-				className="shrink-0"
-				style={{
-					width: pinnedDocked ? pinnedColumnWidth : 0,
-					transition: rightResizing ? "none" : `width 300ms ${DOCK_EASE}`,
-				}}
+				className={cn("shrink-0", panelStyles.widthSpacer)}
+				style={
+					// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
+					{
+						"--workspace-width": `${pinnedDocked ? pinnedColumnWidth : 0}px`,
+						"--workspace-transition": rightResizing
+							? "none"
+							: `width 300ms ${DOCK_EASE}`,
+					} satisfies WorkspaceDockStyle as WorkspaceDockStyle
+				}
 			/>
 
 			{/* In-flow spacer: animates the chat's width when the right panel docks.
 			    Stays at zero while the panel is an overlay (mobile) — there is
 			    nothing to push the chat out of the way of. */}
 			<div
-				className="shrink-0"
-				style={{
-					width: rightDockWidth,
-					transition: rightResizing ? "none" : `width 300ms ${DOCK_EASE}`,
-				}}
+				className={cn("shrink-0", panelStyles.widthSpacer)}
+				style={
+					// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
+					{
+						"--workspace-width": `${rightDockWidth}px`,
+						"--workspace-transition": rightResizing
+							? "none"
+							: `width 300ms ${DOCK_EASE}`,
+					} satisfies WorkspaceDockStyle as WorkspaceDockStyle
+				}
 			/>
 
 			{/* The docked pinned-summary column — edge-pinned like the right panel
@@ -5045,13 +5930,22 @@ function WorkspacePanelsImpl({
 			    over it. display:none when hidden, same as the bottom panel, so it
 			    never flashes on first mount. */}
 			<div
-				className={cn("absolute bottom-0 z-10", dockTop)}
-				style={{
-					right: rightDockWidth,
-					width: pinnedColumnWidth,
-					display: pinnedDocked ? "block" : "none",
-					transition: rightResizing ? "none" : `right 300ms ${DOCK_EASE}`,
-				}}
+				className={cn(
+					"absolute bottom-0 z-10",
+					dockTop,
+					panelStyles.pinnedPanel
+				)}
+				style={
+					// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
+					{
+						"--workspace-right": `${rightDockWidth}px`,
+						"--workspace-width": `${pinnedColumnWidth}px`,
+						"--workspace-display": pinnedDocked ? "block" : "none",
+						"--workspace-transition": rightResizing
+							? "none"
+							: `right 300ms ${DOCK_EASE}`,
+					} satisfies WorkspaceDockStyle as WorkspaceDockStyle
+				}
 			>
 				<div
 					className={cn(
@@ -5071,9 +5965,15 @@ function WorkspacePanelsImpl({
 				<div
 					className={cn(
 						"pointer-events-none absolute z-20",
+						panelStyles.floatingPinned,
 						titleBarClearsContent ? "top-[64px]" : "top-0"
 					)}
-					style={{ right: rightDockWidth + PANEL_GUTTER }}
+					style={
+						// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
+						{
+							"--workspace-right": `${rightDockWidth + PANEL_GUTTER}px`,
+						} satisfies WorkspaceDockStyle as WorkspaceDockStyle
+					}
 				>
 					{renderPinnedSummary?.({ floating: true })}
 				</div>
@@ -5087,15 +5987,28 @@ function WorkspacePanelsImpl({
 			    button that hides it. Floating chrome clears the titlebar's top-2
 			    offset (58px); inset chrome sits flush under h-12. */}
 			<div
-				className={cn("absolute right-0 bottom-0 z-20 flex flex-row", dockTop)}
+				aria-hidden={!rightVisible}
+				className={cn(
+					"absolute right-0 bottom-0 z-20 flex flex-row",
+					dockTop,
+					panelStyles.rightPanel
+				)}
+				inert={!rightVisible}
 				onMouseEnter={rightOpen || isMobile ? undefined : showRightPeek}
 				onMouseLeave={rightOpen || isMobile ? undefined : hideRightPeek}
-				style={{
-					width: rightPanelWidth,
-					transform: rightVisible ? "translateX(0)" : "translateX(100%)",
-					pointerEvents: rightVisible ? "auto" : "none",
-					transition: rightResizing ? "none" : `transform 300ms ${DOCK_EASE}`,
-				}}
+				style={
+					// SAFETY: satisfies validates full React CSSProperties and the finite workspace CSS variable slots; this checked-owner cast only removes fresh-literal metadata.
+					{
+						"--workspace-width": `${rightPanelWidth}px`,
+						"--workspace-transform": rightVisible
+							? "translateX(0)"
+							: "translateX(100%)",
+						"--workspace-pointer-events": rightVisible ? "auto" : "none",
+						"--workspace-transition": rightResizing
+							? "none"
+							: `transform 300ms ${DOCK_EASE}`,
+					} satisfies WorkspaceDockStyle as WorkspaceDockStyle
+				}
 			>
 				{!isMobile && rightResizeHandle}
 				{rightCard(closeRight)}

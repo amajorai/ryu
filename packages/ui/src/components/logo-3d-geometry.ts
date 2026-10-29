@@ -1,4 +1,9 @@
-import { BufferGeometry, Float32BufferAttribute, Shape, Vector3 } from "three";
+import {
+	BufferGeometry,
+	Shape as ContourPath,
+	Float32BufferAttribute,
+	Vector3,
+} from "three";
 
 /** Loft the canonical ghost contour through rounded horizontal cross-sections.
  * This avoids carrying the tail's concavity across the face as a radial ridge.
@@ -49,15 +54,15 @@ export function createGhostGeometry() {
 	if (cachedGeometry) {
 		return cachedGeometry.clone();
 	}
-	const shape = new Shape();
-	shape.moveTo(12, 24);
-	shape.bezierCurveTo(21.2, 24, 24.9, 19.2, 24.4, 9.4);
-	shape.bezierCurveTo(24.1, 0.3, 12.8, -3.7, 8.8, 5.4);
-	shape.bezierCurveTo(6.6, 11.1, 9.9, 13.3, 5.9, 18);
-	shape.bezierCurveTo(5, 19.1, 4.1, 20, 3.2, 21.1);
-	shape.bezierCurveTo(2, 22.4, 3.9, 23.3, 5.1, 23.3);
-	shape.bezierCurveTo(7.4, 23.3, 9.7, 24, 12, 24);
-	let contour = shape.getSpacedPoints(256).slice(0, -1);
+	const outline = new ContourPath();
+	outline.moveTo(12, 24);
+	outline.bezierCurveTo(21.2, 24, 24.9, 19.2, 24.4, 9.4);
+	outline.bezierCurveTo(24.1, 0.3, 12.8, -3.7, 8.8, 5.4);
+	outline.bezierCurveTo(6.6, 11.1, 9.9, 13.3, 5.9, 18);
+	outline.bezierCurveTo(5, 19.1, 4.1, 20, 3.2, 21.1);
+	outline.bezierCurveTo(2, 22.4, 3.9, 23.3, 5.1, 23.3);
+	outline.bezierCurveTo(7.4, 23.3, 9.7, 24, 12, 24);
+	let contour = outline.getSpacedPoints(256).slice(0, -1);
 	// Smooth the small tangent discontinuities at the original SVG curve joins.
 	for (let pass = 0; pass < 8; pass += 1) {
 		contour = contour.map((point, index) => {

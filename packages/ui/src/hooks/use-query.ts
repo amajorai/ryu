@@ -70,7 +70,7 @@ export function useQuery<T>(opts: {
 					setError(null);
 				}
 			})
-			.catch((reason: unknown) => {
+			.catch((reason) => {
 				if (aliveRef.alive && gateRef.current.isCurrent(request)) {
 					setError(reason);
 				}
@@ -115,7 +115,6 @@ export function useQuery<T>(opts: {
 				clearInterval(timer);
 			}
 		};
-		// biome-ignore lint/correctness/useExhaustiveDependencies: key is the content hash of queryKey; run is stable.
 	}, [key, refetchInterval, run]);
 
 	const refetch = useCallback(() => {

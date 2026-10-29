@@ -1,5 +1,5 @@
-import { TextShimmer } from "@ryu/ui/components/motion/text-shimmer";
-import { cn } from "@ryu/ui/lib/utils";
+import { TextShimmer } from "@ryu/ui/components/motion/text-shimmer.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 
 export interface ThinkingShimmerProps {
@@ -12,7 +12,7 @@ export interface ThinkingShimmerProps {
 
 export function ThinkingShimmer({
 	children = "Thinking…",
-	duration = 1.8,
+	duration = 0.9,
 	className,
 }: ThinkingShimmerProps) {
 	return (

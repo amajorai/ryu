@@ -1,3 +1,4 @@
+import { createFetchFixture } from "../test-fixtures/native-fetch-fixture.ts";
 // apps/desktop/src/store/useNodeStore.test.ts
 //
 // Tests for per-tab node routing — the primitive that lets each desktop tab
@@ -131,14 +132,17 @@ describe("auto node selection", () => {
 	function stubFetch(reachable: string | string[] | null): () => number {
 		let calls = 0;
 		const up = reachable === null ? [] : [reachable].flat();
-		globalThis.fetch = ((input: RequestInfo | URL) => {
-			calls += 1;
-			const url = String(input);
-			if (up.some((prefix) => url.startsWith(prefix))) {
-				return Promise.resolve(new Response(null, { status: 200 }));
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			(input: RequestInfo | URL) => {
+				calls += 1;
+				const url = String(input);
+				if (up.some((prefix) => url.startsWith(prefix))) {
+					return Promise.resolve(new Response(null, { status: 200 }));
+				}
+				return Promise.reject(new Error("unreachable"));
 			}
-			return Promise.reject(new Error("unreachable"));
-		}) as typeof fetch;
+		);
 		return () => calls;
 	}
 
@@ -167,6 +171,30 @@ describe("auto node selection", () => {
 
 		expect(calls()).toBe(0);
 		expect(useNodeStore.getState().autoSelectedNode).toBeNull();
+	});
+
+	test("public reachability probes never forward node credentials", async () => {
+		const probes: RequestInit[] = [];
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			(_input: RequestInfo | URL, init?: RequestInit) => {
+				probes.push(init ?? {});
+				return Promise.resolve(new Response(null, { status: 200 }));
+			}
+		);
+		useNodeStore.setState({
+			nodes: [{ ...REMOTE, userJwt: "node-bound-delegation" }],
+			defaultNode: REMOTE.name,
+			autoSelect: true,
+			autoSelectedNode: null,
+		});
+
+		await useNodeStore.getState().probeAutoSelect();
+
+		expect(probes).toHaveLength(1);
+		const headers = new Headers(probes[0]?.headers);
+		expect(headers.get("Authorization") ?? undefined).toBeUndefined();
+		expect(headers.get("x-ryu-user-jwt") ?? undefined).toBeUndefined();
 	});
 
 	test("ON: an unreachable default falls through to a reachable remote", async () => {

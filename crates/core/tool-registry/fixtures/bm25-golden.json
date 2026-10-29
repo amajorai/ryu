@@ -1,0 +1,261 @@
+{
+  "about": "Golden BM25 queries shared by crates/core/tool-registry (the reference scorer) and apps/connect/src/tool-search.ts and packages/protocol/src/tool-discovery-ranking.ts (its TypeScript ports). All three test suites rank this corpus and must produce these ids in this order with these scores (within 0.001). Regenerate the expected values only from the Rust scorer. Print them with RYU_BM25_GOLDEN_PRINT=1 cargo test -p ryu-tool-registry bm25_golden -- --nocapture.",
+  "corpus": [
+    {
+      "id": "composio.GITHUB_GET_THE_AUTHENTICATED_USER",
+      "name": "composio.GITHUB_GET_THE_AUTHENTICATED_USER",
+      "description": "Gets the profile of the GitHub user the connection belongs to.",
+      "argNames": []
+    },
+    {
+      "id": "composio.GITHUB_LIST_REPOSITORY_ISSUES",
+      "name": "composio.GITHUB_LIST_REPOSITORY_ISSUES",
+      "description": "Lists open or closed issues in one repository.",
+      "argNames": ["owner", "repo", "state", "labels"]
+    },
+    {
+      "id": "composio.GITHUB_GET_AN_ISSUE",
+      "name": "composio.GITHUB_GET_AN_ISSUE",
+      "description": "Gets one issue or pull request by number.",
+      "argNames": ["owner", "repo", "issue_number"]
+    },
+    {
+      "id": "composio.GITHUB_CREATE_AN_ISSUE",
+      "name": "composio.GITHUB_CREATE_AN_ISSUE",
+      "description": "Creates an issue in a repository that has issues enabled.",
+      "argNames": ["owner", "repo", "title", "body"]
+    },
+    {
+      "id": "composio.GITHUB_CREATE_AN_ISSUE_COMMENT",
+      "name": "composio.GITHUB_CREATE_AN_ISSUE_COMMENT",
+      "description": "Adds a comment to an issue or pull request.",
+      "argNames": ["owner", "repo", "issue_number", "body"]
+    },
+    {
+      "id": "composio.GMAIL_SEND_EMAIL",
+      "name": "composio.GMAIL_SEND_EMAIL",
+      "description": "Sends an email from the connected Gmail mailbox.",
+      "argNames": ["recipient_email", "subject", "body"]
+    },
+    {
+      "id": "composio.GMAIL_FETCH_EMAILS",
+      "name": "composio.GMAIL_FETCH_EMAILS",
+      "description": "Fetches recent messages from the connected Gmail mailbox.",
+      "argNames": ["query", "max_results"]
+    },
+    {
+      "id": "composio.SLACK_SEND_MESSAGE",
+      "name": "composio.SLACK_SEND_MESSAGE",
+      "description": "Posts a message to a Slack channel or direct message.",
+      "argNames": ["channel", "text"]
+    },
+    {
+      "id": "remote.echo",
+      "name": "remote.echo",
+      "description": "Echoes its input back, for checking a registered server.",
+      "argNames": ["text"]
+    },
+    {
+      "id": "remote.search",
+      "name": "remote.search",
+      "description": "Searches the web and returns ranked results.",
+      "argNames": ["query", "limit"]
+    },
+    {
+      "id": "notes.create",
+      "name": "create",
+      "description": "Creates a note in the team notebook.",
+      "argNames": ["title", "body"]
+    },
+    {
+      "id": "weather.forecast",
+      "name": "forecast",
+      "description": "Returns a seven day weather forecast for a city. Prévisions météo.",
+      "argNames": ["city"]
+    }
+  ],
+  "queries": [
+    {
+      "query": "create an issue",
+      "expected": [
+        {
+          "id": "composio.GITHUB_CREATE_AN_ISSUE_COMMENT",
+          "score": 5.5289
+        },
+        {
+          "id": "composio.GITHUB_CREATE_AN_ISSUE",
+          "score": 5.4545
+        },
+        {
+          "id": "composio.GITHUB_GET_AN_ISSUE",
+          "score": 3.7626
+        },
+        {
+          "id": "notes.create",
+          "score": 2.1306
+        },
+        {
+          "id": "composio.GMAIL_SEND_EMAIL",
+          "score": 1.0405
+        }
+      ]
+    },
+    {
+      "query": "send email",
+      "expected": [
+        {
+          "id": "composio.GMAIL_SEND_EMAIL",
+          "score": 6.2145
+        },
+        {
+          "id": "composio.SLACK_SEND_MESSAGE",
+          "score": 2.3228
+        }
+      ]
+    },
+    {
+      "query": "Slack message",
+      "expected": [
+        {
+          "id": "composio.SLACK_SEND_MESSAGE",
+          "score": 7.4522
+        }
+      ]
+    },
+    {
+      "query": "remote.echo",
+      "expected": [
+        {
+          "id": "remote.echo",
+          "score": 1005.9563
+        },
+        {
+          "id": "remote.search",
+          "score": 2.6269
+        }
+      ]
+    },
+    {
+      "query": "CREATE",
+      "expected": [
+        {
+          "id": "notes.create",
+          "score": 1002.1306
+        },
+        {
+          "id": "composio.GITHUB_CREATE_AN_ISSUE",
+          "score": 1.734
+        },
+        {
+          "id": "composio.GITHUB_CREATE_AN_ISSUE_COMMENT",
+          "score": 1.6818
+        }
+      ]
+    },
+    {
+      "query": "issue comment on a pull request",
+      "expected": [
+        {
+          "id": "composio.GITHUB_CREATE_AN_ISSUE_COMMENT",
+          "score": 8.967
+        },
+        {
+          "id": "composio.GITHUB_GET_AN_ISSUE",
+          "score": 5.4074
+        },
+        {
+          "id": "composio.GITHUB_CREATE_AN_ISSUE",
+          "score": 2.6798
+        },
+        {
+          "id": "weather.forecast",
+          "score": 1.0646
+        },
+        {
+          "id": "composio.SLACK_SEND_MESSAGE",
+          "score": 0.9766
+        },
+        {
+          "id": "notes.create",
+          "score": 0.8334
+        },
+        {
+          "id": "remote.echo",
+          "score": 0.7888
+        }
+      ]
+    },
+    {
+      "query": "search",
+      "expected": [
+        {
+          "id": "remote.search",
+          "score": 3.4408
+        }
+      ]
+    },
+    {
+      "query": "météo",
+      "expected": [
+        {
+          "id": "weather.forecast",
+          "score": 2.3936
+        }
+      ]
+    },
+    {
+      "query": "tell my team the deploy finished",
+      "expected": [
+        {
+          "id": "notes.create",
+          "score": 3.6306
+        },
+        {
+          "id": "composio.GITHUB_GET_THE_AUTHENTICATED_USER",
+          "score": 1.5989
+        },
+        {
+          "id": "remote.search",
+          "score": 1.0058
+        },
+        {
+          "id": "composio.GMAIL_FETCH_EMAILS",
+          "score": 0.8636
+        },
+        {
+          "id": "composio.GMAIL_SEND_EMAIL",
+          "score": 0.8437
+        }
+      ]
+    },
+    {
+      "query": "check my inbox for new mail",
+      "expected": [
+        {
+          "id": "remote.echo",
+          "score": 1.8763
+        },
+        {
+          "id": "weather.forecast",
+          "score": 1.8274
+        }
+      ]
+    },
+    {
+      "query": "will it rain tomorrow",
+      "expected": []
+    },
+    {
+      "query": "look something up online",
+      "expected": []
+    },
+    {
+      "query": "unrelated words only",
+      "expected": []
+    },
+    {
+      "query": "",
+      "expected": []
+    }
+  ]
+}

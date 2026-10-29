@@ -4,12 +4,17 @@ import { Button as ButtonPrimitive } from "@base-ui/react/button";
 import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { VariantProps } from "class-variance-authority";
+import type { CSSProperties } from "react";
 import { buttonVariants } from "./button-variants.ts";
 import {
 	FadeOverflowText,
 	FadeOverflowTextChildren,
 } from "./fade-overflow-text.tsx";
 import { Spinner } from "./spinner.tsx";
+
+interface ButtonProgressStyle extends CSSProperties {
+	"--button-progress": string;
+}
 
 type ButtonProps = ButtonPrimitive.Props &
 	VariantProps<typeof buttonVariants> & {
@@ -38,6 +43,11 @@ function Button({
 	className,
 	variant = "default",
 	size = "default",
+	radius,
+	spacing,
+	edge,
+	typography,
+	appearance,
 	progress,
 	loading = false,
 	disabled,
@@ -55,7 +65,16 @@ function Button({
 	};
 	const isLoading = loading || variant === "loading";
 	const classNameWithLoading = cn(
-		buttonVariants({ variant, size, className }),
+		buttonVariants({
+			variant,
+			size,
+			radius,
+			appearance,
+			spacing,
+			edge,
+			typography,
+			className,
+		}),
 		isLoading && "relative"
 	);
 	const buttonStateProps = {
@@ -68,6 +87,9 @@ function Button({
 
 	if (variant === "progress") {
 		const value = Math.min(100, Math.max(0, progress ?? 0));
+		const progressStyle: ButtonProgressStyle = {
+			"--button-progress": `${value}%`,
+		};
 
 		return (
 			<ButtonPrimitive
@@ -84,9 +106,9 @@ function Button({
 			>
 				<span
 					aria-hidden="true"
-					className="absolute inset-y-0 start-0 bg-[color-mix(in_oklch,var(--secondary-foreground),transparent_85%)] transition-[width] duration-300 ease-out"
+					className="absolute inset-y-0 start-0 w-(--button-progress) bg-[color-mix(in_oklch,var(--secondary-foreground),transparent_85%)] transition-[width] duration-300 ease-out"
 					data-slot="button-progress-fill"
-					style={{ width: `${value}%` }}
+					style={progressStyle}
 				/>
 				<span className="relative inline-flex items-center justify-center gap-1.5">
 					<FadeOverflowTextChildren>

@@ -9,7 +9,8 @@
 // clock over the pause. On Stop the finalized `ClipContext` is handed back via
 // `onClipReady` so the composer can turn it into an attachment.
 
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -18,8 +19,8 @@ import {
 	DropdownMenuLabel,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/dropdown-menu.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	IconAppWindow,
 	IconCheck,
@@ -32,7 +33,7 @@ import {
 	IconVideo,
 	IconVolume,
 } from "@tabler/icons-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	type ClipCaptureSources,
@@ -41,7 +42,7 @@ import {
 	type ClipTarget,
 	getSources,
 } from "@/src/lib/api/clips.ts";
-import { useClipStore } from "@/src/store/useClipStore.ts";
+import { recordingScope, useClipStore } from "@/src/store/useClipStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
 /** Format a millisecond duration as `mm:ss`. */
@@ -65,10 +66,7 @@ const AUDIO_META: {
 ];
 
 /** Resolve the label + glyph for the currently-selected video surface. */
-function describeTarget(
-	target: ClipTarget,
-	sources: ClipSources | null
-): { Icon: typeof IconDeviceDesktop; label: string } {
+function describeTarget(target: ClipTarget, sources: ClipSources | null) {
 	if (target.kind === "display") {
 		const display = sources?.displays.find((d) => d.id === target.displayId);
 		return { label: display?.label ?? "Display", Icon: IconDeviceDesktop };
@@ -86,10 +84,44 @@ export interface RecordingControlsProps {
 }
 
 export function RecordingControls({ onClipReady }: RecordingControlsProps) {
+	const tl = useLiteralMessages();
 	const node = useNodeStore((s) => s.getActiveNode());
 	const target = useMemo(() => toTarget(node), [node]);
+	const targetScope = recordingScope(target);
+	const currentTargetScope = useRef(targetScope);
+	currentTargetScope.current = targetScope;
+	const sourceRequestId = useRef(0);
+
+	const abandonRecording = useClipStore((s) => s.abandonRecording);
+	const syncSessionTarget = useClipStore((s) => s.syncSessionTarget);
+	useEffect(() => {
+		// Recording state lives in the store and outlives this component (the
+		// assistant panel unmounts it when closed). A remount, a new node object,
+		// or a rotated managed-node delegation for the same identity must keep
+		// Stop reachable; only a recording from another scope is abandoned, and
+		// the store stops it on the node that owns it - including when the scope
+		// moved while this component was unmounted.
+		const { sessionScope, status } = useClipStore.getState();
+		if (status !== "idle" && sessionScope !== targetScope) {
+			abandonRecording();
+		}
+		setAvailable(null);
+		setSourcesError(null);
+		setSourcesLoading(false);
+		return () => {
+			// Invalidate completion handlers on target changes and unmount.
+			sourceRequestId.current += 1;
+		};
+	}, [targetScope, abandonRecording]);
+	// Declared after the scope check so a changed scope is abandoned first; a
+	// same-scope target (fresh delegation) becomes the recording's stop target.
+	useEffect(() => {
+		syncSessionTarget(target);
+	}, [target, syncSessionTarget]);
 
 	const status = useClipStore((s) => s.status);
+	const error = useClipStore((s) => s.error);
+	const pendingAction = useClipStore((s) => s.pendingAction);
 	const elapsedMs = useClipStore((s) => s.elapsedMs);
 	const isPaused = useClipStore((s) => s.isPaused);
 	const sources = useClipStore((s) => s.sources);
@@ -105,6 +137,9 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 	// Enumerated capture surfaces, fetched lazily when the picker opens.
 	const [available, setAvailable] = useState<ClipSources | null>(null);
 
+	const [sourcesError, setSourcesError] = useState<string | null>(null);
+	const [sourcesLoading, setSourcesLoading] = useState(false);
+	const isStarting = status === "starting";
 	const isRecording = status === "recording";
 	const isStopping = status === "stopping";
 
@@ -142,9 +177,32 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 		if (!open) {
 			return;
 		}
+		const requestId = ++sourceRequestId.current;
+		const requestScope = targetScope;
+		const isCurrentRequest = () =>
+			requestId === sourceRequestId.current &&
+			requestScope === currentTargetScope.current;
+		setSourcesLoading(true);
+		setSourcesError(null);
 		getSources(target)
-			.then((next) => setAvailable(next))
-			.catch(() => setAvailable({ displays: [], windows: [] }));
+			.then((next) => {
+				if (isCurrentRequest()) {
+					setAvailable(next);
+				}
+			})
+			.catch((err) => {
+				if (!isCurrentRequest()) {
+					return;
+				}
+				setSourcesError(
+					err instanceof Error ? err.message : "Unable to load capture sources"
+				);
+			})
+			.finally(() => {
+				if (isCurrentRequest()) {
+					setSourcesLoading(false);
+				}
+			});
 	};
 
 	const { Icon: TargetIcon, label: targetLabel } = describeTarget(
@@ -154,7 +212,12 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 
 	if (isRecording || isStopping) {
 		return (
-			<div className="flex items-center gap-1.5">
+			<div className="flex flex-wrap items-center gap-1.5">
+				{error ? (
+					<span className="text-status-destructive text-xs" role="alert">
+						{error}
+					</span>
+				) : null}
 				<span
 					className={cn(
 						"inline-flex items-center gap-1.5 font-medium text-xs tabular-nums",
@@ -164,16 +227,19 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 					<span
 						className={cn(
 							"size-1.5 rounded-full",
-							isPaused ? "bg-muted-foreground" : "animate-pulse bg-destructive"
+							isPaused
+								? "bg-muted-foreground"
+								: "bg-destructive motion-safe:animate-pulse"
 						)}
 					/>
 					{formatElapsed(elapsedMs)}
 				</span>
 				<Button
 					aria-label={isPaused ? "Resume recording" : "Pause recording"}
-					className="size-7 rounded-full"
-					disabled={isStopping}
+					className="size-7"
+					disabled={isStopping || pendingAction !== null}
 					onClick={handlePauseToggle}
+					radius="pill"
 					size="icon"
 					type="button"
 					variant="ghost"
@@ -185,10 +251,12 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 					)}
 				</Button>
 				<Button
+					appearance="dictation-recording"
 					aria-label="Stop recording"
-					className="size-7 rounded-full text-status-destructive"
-					disabled={isStopping}
+					className="size-7"
+					disabled={isStopping || pendingAction !== null}
 					onClick={handleStop}
+					radius="pill"
 					size="icon"
 					type="button"
 					variant="ghost"
@@ -200,17 +268,24 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 	}
 
 	return (
-		<div className="flex items-center gap-1">
+		<div className="flex flex-wrap items-center gap-1">
+			{error ? (
+				<span className="text-status-destructive text-xs" role="alert">
+					{error}
+				</span>
+			) : null}
 			<DropdownMenu onOpenChange={loadSources}>
 				<DropdownMenuTrigger
 					render={
 						<Button
-							aria-label={`Capture source: ${targetLabel}`}
-							className="h-7 gap-1 rounded-full px-2 text-muted-foreground"
+							aria-label={tl("Capture source: {targetLabel}", { targetLabel })}
+							className="h-7"
+							disabled={isStarting}
+							radius="pill"
 							size="sm"
 							title="Choose what to record"
 							type="button"
-							variant="ghost"
+							variant="ghost-muted"
 						/>
 					}
 				>
@@ -219,6 +294,21 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 					<IconChevronDown className="size-3" />
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="start" className="min-w-56" sideOffset={6}>
+					{sourcesLoading ? (
+						<div className="px-2 py-1 text-muted-foreground text-xs">
+							Loading capture sources…
+						</div>
+					) : null}
+					{sourcesError ? (
+						<div
+							className="px-2 py-1 text-status-destructive text-xs"
+							role="alert"
+						>
+							{tl("{sourcesError}. Close and reopen to retry.", {
+								sourcesError,
+							})}
+						</div>
+					) : null}
 					<DropdownMenuItem
 						onClick={() => setCaptureTarget({ kind: "screen" })}
 					>
@@ -277,7 +367,9 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 										}
 									>
 										<IconAppWindow className="size-4 shrink-0 text-muted-foreground" />
-										<span className="flex-1 truncate">{win.title}</span>
+										<span className="flex-1 truncate" title={win.title}>
+											{win.title}
+										</span>
 										{activeWindow ? (
 											<IconCheck className="size-4 shrink-0" />
 										) : null}
@@ -295,25 +387,26 @@ export function RecordingControls({ onClipReady }: RecordingControlsProps) {
 					<Button
 						aria-label={`${active ? "Disable" : "Enable"} ${label}`}
 						aria-pressed={active}
-						className={cn(
-							"size-7 rounded-full",
-							active ? "bg-primary/15 text-primary" : "text-muted-foreground"
-						)}
+						className="size-7"
+						disabled={isStarting}
 						key={key}
 						onClick={() => setSource(key, !active)}
+						radius="pill"
 						size="icon"
 						title={label}
 						type="button"
-						variant="ghost"
+						variant={active ? "secondary" : "ghost-muted"}
 					>
 						<Icon className="size-4" />
 					</Button>
 				);
 			})}
 			<Button
-				aria-label="Start recording"
-				className="size-7 rounded-full"
+				aria-label={isStarting ? "Starting recording" : "Start recording"}
+				className="size-7"
+				disabled={isStarting}
 				onClick={handleStart}
+				radius="pill"
 				size="icon"
 				title="Start recording"
 				type="button"

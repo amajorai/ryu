@@ -58,17 +58,13 @@ export function ConsentCardView({
 								<p className="font-medium text-foreground text-xs">
 									{cap.title}
 								</p>
-								<p className="mt-0.5 text-[11px] text-muted-foreground">
+								<p className="type-caption mt-0.5 text-muted-foreground">
 									{cap.body}
 								</p>
 							</div>
 							<div className="flex gap-2">
 								<Button
-									className={
-										value === true
-											? ""
-											: "bg-muted text-foreground hover:bg-accent"
-									}
+									appearance={value === true ? "default" : "island-panel"}
 									onClick={() => onSet(cap.key, true)}
 									size="xs"
 									variant={value === true ? "default" : "ghost"}
@@ -76,10 +72,10 @@ export function ConsentCardView({
 									Allow
 								</Button>
 								<Button
-									className={
+									appearance={
 										value === false
-											? "bg-secondary text-foreground"
-											: "text-muted-foreground hover:text-foreground"
+											? "island-consent-declined"
+											: "island-kind-inactive"
 									}
 									onClick={() => onSet(cap.key, false)}
 									size="xs"
@@ -88,7 +84,7 @@ export function ConsentCardView({
 									Decline
 								</Button>
 								{answered ? (
-									<span className="ml-auto self-center text-[11px] text-muted-foreground">
+									<span className="type-caption ml-auto self-center text-muted-foreground">
 										{value ? "Allowed" : "Declined"}
 									</span>
 								) : null}

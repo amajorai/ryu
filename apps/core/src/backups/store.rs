@@ -56,7 +56,7 @@ pub struct BackupService {
 
 impl BackupService {
     pub fn open(root: PathBuf) -> Result<Self> {
-        let path = root.join("backups/state.json");
+        let path = state_dir(&root).join("state.json");
         let mut store: Store = match std::fs::read(&path) {
             Ok(bytes) => {
                 ensure!(bytes.len() <= 4 * 1024 * 1024, "Backup state is too large");
@@ -84,6 +84,9 @@ impl BackupService {
         if path.exists() {
             persist(&root, &store)?;
         }
+        // Staging from an interrupted job may hold SQLite snapshot copies or
+        // a half-extracted recovery tree; nothing is running yet, so clear it.
+        super::sweep_stale_staging(&root);
         Ok(Self {
             root,
             store: Mutex::new(store),
@@ -106,9 +109,14 @@ impl BackupService {
     }
 }
 
+/// `<data dir>/state/backups` — backup destinations, policies and operations.
+pub(super) fn state_dir(root: &std::path::Path) -> PathBuf {
+    ryu_sidecar_runtime::layout::state_path(root, "backups")
+}
+
 fn persist(root: &std::path::Path, store: &Store) -> Result<()> {
     use std::io::Write;
-    let directory = root.join("backups");
+    let directory = state_dir(root);
     ryu_backup::archive::private_directory(&directory)?;
     let bytes = serde_json::to_vec(store)?;
     ensure!(bytes.len() <= 4 * 1024 * 1024, "Backup state is too large");

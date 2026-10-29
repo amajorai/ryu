@@ -200,7 +200,7 @@ export function useMergedAgentThreads({
 				loadMessages(id)
 					.then((history) => ({ id, history }))
 					// One unreadable thread must not blank the whole scroll.
-					.catch(() => ({ id, history: [] as Message[] }))
+					.catch(() => ({ id, history: [] }))
 			)
 		)
 			.then((results) => {

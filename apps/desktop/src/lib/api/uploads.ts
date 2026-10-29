@@ -1,3 +1,8 @@
+import {
+	uploadErrorViewSchema,
+	uploadLegacyViewSchema,
+} from "@ryuhq/core-client/upload-wire-contracts.ts";
+import { z } from "zod";
 // apps/desktop/src/lib/api/uploads.ts
 //
 // User file uploads → Core's Uploads system space (`POST /api/uploads`). Chat
@@ -18,21 +23,17 @@ export interface UploadObject {
 	url: string;
 }
 
-interface UploadWire {
-	content_type?: string;
-	file_name?: string;
-	id: string;
-	size?: number;
-	space_id?: string;
-	url: string;
-}
-
 /** Read a File into a `data:` URL (for AI-SDK multimodal file parts). */
 export function fileToDataUrl(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onload = () => {
-			resolve(reader.result as string);
+			const dataUrl = z.string().safeParse(reader.result);
+			if (dataUrl.success) {
+				resolve(dataUrl.data);
+			} else {
+				reject(new Error(`failed to read ${file.name}`));
+			}
 		};
 		reader.onerror = () => {
 			reject(reader.error ?? new Error(`failed to read ${file.name}`));
@@ -53,11 +54,14 @@ export async function uploadUserFile(
 	const fileName =
 		opts?.fileName ??
 		(file instanceof File && file.name ? file.name : "upload");
-	const headers: Record<string, string> = {
-		"x-filename": fileName,
+	// The name travels as `?name=`, not `x-filename`: a header value must be a
+	// ByteString (fetch throws on U+202F in macOS screenshot names, CJK, emoji)
+	// and Core reads the header with `to_str`, which drops any Latin-1 name.
+	const headers = {
 		"content-type": file.type || "application/octet-stream",
 	};
-	const res = await authenticatedFetch(target, "/api/uploads", {
+	const path = `/api/uploads?name=${encodeURIComponent(fileName)}`;
+	const res = await authenticatedFetch(target, path, {
 		method: "POST",
 		headers,
 		body: file,
@@ -66,14 +70,14 @@ export async function uploadUserFile(
 	if (!res.ok) {
 		let detail = "";
 		try {
-			const err = (await res.json()) as { error?: string };
+			const err = uploadErrorViewSchema.parse(await res.json());
 			detail = err.error ? `: ${err.error}` : "";
 		} catch {
 			// ignore
 		}
 		throw new Error(`Upload failed (${res.status})${detail}`);
 	}
-	const data = (await res.json()) as UploadWire;
+	const data = uploadLegacyViewSchema.parse(await res.json());
 	return {
 		id: data.id,
 		spaceId: data.space_id ?? "",
@@ -94,7 +98,7 @@ export async function stageImageUpload(
 	file: File
 ): Promise<{ dataUrl: string; upload: UploadObject | null }> {
 	const dataUrlPromise = fileToDataUrl(file);
-	const uploadPromise = uploadUserFile(target, file).catch((err: unknown) => {
+	const uploadPromise = uploadUserFile(target, file).catch((err) => {
 		console.warn("[uploads] failed to persist chat attachment:", err);
 		return null;
 	});

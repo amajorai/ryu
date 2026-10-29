@@ -33,4 +33,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "memory-citations-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

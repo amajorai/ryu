@@ -1,15 +1,18 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ToolResult,
 	ToolResultOutput,
+	type ToolResultOutputProps,
 } from "@ryu/ui/components/agents/tool-result";
+import {
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { memo, useMemo } from "react";
 import { useChatDisplayPrefs } from "../chat-display-prefs.tsx";
 import { areToolPropsEqual, getToolStatus } from "../utils/format-tool.ts";
 import { unwrapMcpOutput } from "../utils/unwrap-mcp-output.ts";
-import {
-	type ToolApproval,
-	ToolApprovalFooter,
-} from "./tool-approval-footer.tsx";
+import { ToolApprovalFooter } from "./tool-approval-footer.tsx";
 import type { McpToolInfo } from "./tool-registry.ts";
 
 export interface McpToolProps {
@@ -17,6 +20,11 @@ export interface McpToolProps {
 	defaultOpen?: boolean;
 	mcpInfo: McpToolInfo;
 	part: any;
+}
+
+interface McpDisplayBlock {
+	code: string;
+	language: NonNullable<ToolResultOutputProps["language"]>;
 }
 
 const PRIORITY_ARGS = [
@@ -33,57 +41,64 @@ const PRIORITY_ARGS = [
 	"title",
 ];
 
-const ACTIVE_VERBS: Record<string, string> = {
-	List: "Listing",
-	Get: "Getting",
-	Create: "Creating",
-	Update: "Updating",
-	Delete: "Deleting",
-	Search: "Searching",
-	Fetch: "Fetching",
-	Retrieve: "Retrieving",
-	Send: "Sending",
-	Generate: "Generating",
-	Add: "Adding",
-	Remove: "Removing",
-	Modify: "Modifying",
-	Draft: "Drafting",
-	Manage: "Managing",
-	Query: "Querying",
-	Start: "Starting",
-	Set: "Setting",
-	Check: "Checking",
-	Find: "Finding",
-};
+const ACTIVE_VERBS = new Map(
+	Object.entries({
+		List: "Listing",
+		Get: "Getting",
+		Create: "Creating",
+		Update: "Updating",
+		Delete: "Deleting",
+		Search: "Searching",
+		Fetch: "Fetching",
+		Retrieve: "Retrieving",
+		Send: "Sending",
+		Generate: "Generating",
+		Add: "Adding",
+		Remove: "Removing",
+		Modify: "Modifying",
+		Draft: "Drafting",
+		Manage: "Managing",
+		Query: "Querying",
+		Start: "Starting",
+		Set: "Setting",
+		Check: "Checking",
+		Find: "Finding",
+	})
+);
 
-const COMPLETED_VERBS: Record<string, string> = {
-	List: "Listed",
-	Get: "Got",
-	Create: "Created",
-	Update: "Updated",
-	Delete: "Deleted",
-	Search: "Searched",
-	Fetch: "Fetched",
-	Retrieve: "Retrieved",
-	Send: "Sent",
-	Generate: "Generated",
-	Add: "Added",
-	Remove: "Removed",
-	Modify: "Modified",
-	Draft: "Drafted",
-	Manage: "Managed",
-	Query: "Queried",
-	Start: "Started",
-	Set: "Set",
-	Check: "Checked",
-	Find: "Found",
-};
+const COMPLETED_VERBS = new Map(
+	Object.entries({
+		List: "Listed",
+		Get: "Got",
+		Create: "Created",
+		Update: "Updated",
+		Delete: "Deleted",
+		Search: "Searched",
+		Fetch: "Fetched",
+		Retrieve: "Retrieved",
+		Send: "Sent",
+		Generate: "Generated",
+		Add: "Added",
+		Remove: "Removed",
+		Modify: "Modified",
+		Draft: "Drafted",
+		Manage: "Managed",
+		Query: "Queried",
+		Start: "Started",
+		Set: "Set",
+		Check: "Checked",
+		Find: "Found",
+	})
+);
 
 function getActiveTitle(info: McpToolInfo): string {
 	const words = info.displayName.split(" ");
 	const verb = words[0];
+	if (!verb) {
+		return info.displayName;
+	}
 	const rest = words.slice(1).join(" ");
-	const active = ACTIVE_VERBS[verb];
+	const active = ACTIVE_VERBS.get(verb);
 	if (active) {
 		return rest ? `${active} ${rest}` : active;
 	}
@@ -93,8 +108,11 @@ function getActiveTitle(info: McpToolInfo): string {
 function getCompletedTitle(info: McpToolInfo): string {
 	const words = info.displayName.split(" ");
 	const verb = words[0];
+	if (!verb) {
+		return info.displayName;
+	}
 	const rest = words.slice(1).join(" ");
-	const completed = COMPLETED_VERBS[verb];
+	const completed = COMPLETED_VERBS.get(verb);
 	return completed
 		? rest
 			? `${completed} ${rest}`
@@ -103,7 +121,7 @@ function getCompletedTitle(info: McpToolInfo): string {
 }
 
 function formatMcpArgs(input: any): string {
-	if (!input || typeof input !== "object") {
+	if (!(input && isNativeObjectLike(input))) {
 		return "";
 	}
 	const entries = Object.entries(input).filter(
@@ -133,8 +151,8 @@ function formatMcpArgs(input: any): string {
 		if (parts.length >= 2) {
 			break;
 		}
-		const val = typeof value === "string" ? value : JSON.stringify(value);
-		const display = val.length > 30 ? `${val.slice(0, 27)}...` : val;
+		const val = isNativeText(value) ? value : JSON.stringify(value);
+		const display = val.length > 30 ? `${val.slice(0, 27)}…` : val;
 		parts.push(`${key}: ${display}`);
 	}
 	return parts.join("  ");
@@ -142,13 +160,13 @@ function formatMcpArgs(input: any): string {
 
 function formatOutputForDisplay(output: any): string {
 	const unwrapped = unwrapMcpOutput(output);
-	if (typeof unwrapped === "string") {
+	if (isNativeText(unwrapped)) {
 		return unwrapped.length > 3000
-			? `${unwrapped.slice(0, 3000)}\n...`
+			? `${unwrapped.slice(0, 3000)}\n…`
 			: unwrapped;
 	}
 	const text = JSON.stringify(unwrapped, null, 2);
-	return text.length > 3000 ? `${text.slice(0, 3000)}\n...` : text;
+	return text.length > 3000 ? `${text.slice(0, 3000)}\n…` : text;
 }
 
 export const McpTool = memo(function McpTool({
@@ -159,6 +177,7 @@ export const McpTool = memo(function McpTool({
 }: McpToolProps) {
 	const { isPending, isInterrupted } = getToolStatus(part, chatStatus);
 	const { expandCodeBlocks } = useChatDisplayPrefs();
+	const tl = useLiteralMessages();
 
 	const title = useMemo(() => {
 		if (part.state === "input-streaming") {
@@ -188,33 +207,33 @@ export const McpTool = memo(function McpTool({
 	// to be wrapped in a fence and sent through the markdown renderer purely to
 	// reach a highlighter; `ToolResultOutput` highlights it directly, so the
 	// payload can no longer be reinterpreted as markup on the way to the screen.
-	const outputBlock = useMemo(() => {
+	const outputBlock = useMemo<McpDisplayBlock | null>(() => {
 		const trimmed = displayOutput?.trim();
-		if (!trimmed) {
+		if (!(trimmed && displayOutput)) {
 			return null;
 		}
 		const language =
 			trimmed.startsWith("{") || trimmed.startsWith("[") ? "json" : "text";
-		return { code: displayOutput as string, language } as const;
+		return { code: displayOutput, language };
 	}, [displayOutput]);
 
 	// The chat tool loop (DA7) attaches an `approval` object to the part input
 	// when a requested tool needs the user's go-ahead. When present, render the
 	// shared approval footer so the user can approve or skip the call.
-	const approval = (part.input?.approval ?? part.args?.approval) as
-		| ToolApproval
-		| undefined;
+	const approval = part.input?.approval ?? part.args?.approval;
 
 	if (isInterrupted && !part.output) {
 		return (
 			<span className="text-muted-foreground text-sm">
-				{mcpInfo.displayName} interrupted
+				{tl("{displayName} interrupted", {
+					displayName: mcpInfo.displayName,
+				})}
 			</span>
 		);
 	}
 
 	return (
-		<div className="an-tool-mcp">
+		<div>
 			<ToolResult
 				collapseOnComplete={!expandCodeBlocks}
 				defaultOpen={defaultOpen ?? false}

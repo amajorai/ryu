@@ -56,17 +56,29 @@ function rectFor(widget: Widget): CanvasLayoutRect {
 	};
 }
 
-interface WidgetNodeData {
-	error?: string | null;
-	motionEnabled: boolean;
-	onRefresh: () => void;
-	onRemove: () => void;
-	/** Persist this node's current geometry (called on drag/resize settle). */
-	persist: () => void;
-	value: unknown;
-	widget: Widget;
-	[key: string]: unknown;
+function widgetNodeData(
+	widget: Widget,
+	liveState: WidgetLiveState | undefined,
+	motionEnabled: boolean,
+	onRefresh: (id: string) => void,
+	onRemove: (id: string) => void,
+	persist: (id: string) => void
+) {
+	return {
+		widget,
+		value:
+			liveState && liveState.value !== undefined
+				? liveState.value
+				: widget.last_value,
+		error: liveState?.error ?? widget.last_error,
+		motionEnabled,
+		onRefresh: () => onRefresh(widget.id),
+		onRemove: () => onRemove(widget.id),
+		persist: () => persist(widget.id),
+	};
 }
+
+type WidgetNodeData = ReturnType<typeof widgetNodeData>;
 
 type WidgetNode = Node<WidgetNodeData, "widget">;
 
@@ -76,7 +88,7 @@ function WidgetNodeView({ data, dragging, selected }: NodeProps<WidgetNode>) {
 	return (
 		<>
 			<NodeResizer
-				handleClassName="!size-2 !rounded-[3px] !border-background !bg-primary"
+				handleClassName="!size-2 !rounded-glyph-compact !border-background !bg-primary"
 				isVisible={selected}
 				lineClassName="!border-primary/40"
 				minHeight={MIN_NODE_H}
@@ -189,21 +201,14 @@ function CanvasInner({
 		setNodes((prev) => {
 			const byId = new Map(prev.map((n) => [n.id, n]));
 			return widgets.map((w) => {
-				const liveState = live[w.id];
-				const value =
-					liveState && liveState.value !== undefined
-						? liveState.value
-						: w.last_value;
-				const error = liveState?.error ?? w.last_error;
-				const data: WidgetNodeData = {
-					widget: w,
-					value,
-					error,
-					onRefresh: () => onRefresh(w.id),
-					onRemove: () => onRemove(w.id),
-					persist: () => persist(w.id),
+				const data = widgetNodeData(
+					w,
+					live[w.id],
 					motionEnabled,
-				};
+					onRefresh,
+					onRemove,
+					persist
+				);
 				const existing = byId.get(w.id);
 				if (existing) {
 					// Preserve live geometry; refresh only the render data.

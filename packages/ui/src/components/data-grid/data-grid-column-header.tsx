@@ -1,11 +1,15 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
+	DropdownMenuSub,
+	DropdownMenuSubContent,
+	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
 import {
@@ -14,8 +18,10 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { getColumnVariant } from "@ryu/ui/lib/data-grid.ts";
+import { collectFilterOptions } from "@ryu/ui/lib/data-grid-fill.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type {
+	Column,
 	ColumnSort,
 	Header,
 	SortDirection,
@@ -26,12 +32,16 @@ import {
 	ChevronDownIcon,
 	ChevronUpIcon,
 	EyeOffIcon,
+	FilterIcon,
+	FilterXIcon,
+	MoveHorizontalIcon,
 	PinIcon,
 	PinOffIcon,
 	Settings2Icon,
 	XIcon,
 } from "lucide-react";
-import { type ComponentProps, memo, useCallback } from "react";
+import { type ComponentProps, memo, useCallback, useMemo } from "react";
+import { isNativeText } from "../../lib/native-primitive-observation.ts";
 
 interface DataGridColumnHeaderProps<TData, TValue>
 	extends ComponentProps<typeof DropdownMenuTrigger> {
@@ -49,7 +59,7 @@ export function DataGridColumnHeader<TData, TValue>({
 	const column = header.column;
 	const label = column.columnDef.meta?.label
 		? column.columnDef.meta.label
-		: typeof column.columnDef.header === "string"
+		: isNativeText(column.columnDef.header)
 			? column.columnDef.header
 			: column.id;
 
@@ -146,6 +156,12 @@ export function DataGridColumnHeader<TData, TValue>({
 							</Tooltip>
 						)}
 						<span className="truncate">{label}</span>
+						{column.getIsFiltered() && (
+							<FilterIcon
+								aria-label="Filtered"
+								className="size-3.5 shrink-0 text-primary"
+							/>
+						)}
 					</div>
 					<ChevronDownIcon className="shrink-0 text-muted-foreground" />
 				</DropdownMenuTrigger>
@@ -189,9 +205,34 @@ export function DataGridColumnHeader<TData, TValue>({
 							)}
 						</>
 					)}
-					{column.getCanPin() && (
+					{column.getCanFilter() && (
 						<>
 							{column.getCanSort() && <DropdownMenuSeparator />}
+							<DropdownMenuSub>
+								<DropdownMenuSubTrigger className="[&_svg]:text-muted-foreground">
+									<FilterIcon />
+									Filter
+								</DropdownMenuSubTrigger>
+								<DropdownMenuSubContent className="max-h-80 w-56 overflow-y-auto">
+									<DataGridColumnFilterItems column={column} table={table} />
+								</DropdownMenuSubContent>
+							</DropdownMenuSub>
+							{column.getIsFiltered() && (
+								<DropdownMenuItem
+									className="[&_svg]:text-muted-foreground"
+									onClick={() => column.setFilterValue(undefined)}
+								>
+									<FilterXIcon />
+									Clear filter
+								</DropdownMenuItem>
+							)}
+						</>
+					)}
+					{column.getCanPin() && (
+						<>
+							{(column.getCanSort() || column.getCanFilter()) && (
+								<DropdownMenuSeparator />
+							)}
 
 							{isPinnedLeft ? (
 								<DropdownMenuItem
@@ -229,6 +270,18 @@ export function DataGridColumnHeader<TData, TValue>({
 							)}
 						</>
 					)}
+					{column.getCanResize() && table.options.meta?.onColumnAutoFit && (
+						<>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem
+								className="[&_svg]:text-muted-foreground"
+								onClick={() => table.options.meta?.onColumnAutoFit?.(column.id)}
+							>
+								<MoveHorizontalIcon />
+								Auto-fit width
+							</DropdownMenuItem>
+						</>
+					)}
 					{column.getCanHide() && (
 						<>
 							<DropdownMenuSeparator />
@@ -250,6 +303,89 @@ export function DataGridColumnHeader<TData, TValue>({
 	);
 }
 
+const FILTER_OPTION_LIMIT = 200;
+
+/**
+ * Excel-style AutoFilter checklist: one checkbox per distinct value (blanks
+ * last). Unchecking hides matching rows; checking everything clears the filter.
+ */
+function DataGridColumnFilterItems<TData, TValue>({
+	column,
+	table,
+}: {
+	column: Column<TData, TValue>;
+	table: Table<TData>;
+}) {
+	const tl = useLiteralMessages();
+	const coreRows = table.getCoreRowModel().rows;
+	const cellOpts = column.columnDef.meta?.cell;
+	const options = useMemo(
+		() =>
+			collectFilterOptions(
+				coreRows.map((row) => row.getValue(column.id)),
+				cellOpts
+			),
+		[coreRows, column.id, cellOpts]
+	);
+	const shown = options.slice(0, FILTER_OPTION_LIMIT);
+	const filterValue = column.getFilterValue();
+	const selected = Array.isArray(filterValue)
+		? new Set(filterValue.map(String))
+		: null;
+
+	const onToggle = (key: string, checked: boolean) => {
+		const next = new Set(selected ?? options.map((option) => option.key));
+		if (checked) {
+			next.add(key);
+		} else {
+			next.delete(key);
+		}
+		column.setFilterValue(
+			next.size === options.length ? undefined : Array.from(next)
+		);
+	};
+
+	return (
+		<>
+			<DropdownMenuCheckboxItem
+				checked={selected === null}
+				onClick={() =>
+					column.setFilterValue(selected === null ? [] : undefined)
+				}
+			>
+				Select all
+			</DropdownMenuCheckboxItem>
+			<DropdownMenuSeparator />
+			{shown.map((option) => (
+				<DropdownMenuCheckboxItem
+					checked={selected === null || selected.has(option.key)}
+					key={option.key}
+					onClick={() =>
+						onToggle(
+							option.key,
+							!(selected === null || selected.has(option.key))
+						)
+					}
+				>
+					<span className="flex-1 truncate">{option.label}</span>
+					<span className="text-muted-foreground text-xs tabular-nums">
+						{option.count}
+					</span>
+				</DropdownMenuCheckboxItem>
+			))}
+			{options.length > shown.length && (
+				<p className="px-2 py-1 text-muted-foreground text-xs">
+					{tl("Showing the first {limit} of {total} values", {
+						limit: FILTER_OPTION_LIMIT,
+						total: String(options.length),
+					})}
+				</p>
+			)}
+		</>
+	);
+}
+
+// SAFETY: React.memo retains this complete native generic props forwarding and comparator. This restores the generic JSX component signature erased by React's memo overload; the runtime memo descriptor is used only by JSX, never invoked as an ordinary function.
 const DataGridColumnResizer = memo(DataGridColumnResizerImpl, (prev, next) => {
 	const prevColumn = prev.header.column;
 	const nextColumn = next.header.column;
@@ -278,15 +414,22 @@ function DataGridColumnResizerImpl<TData, TValue>({
 	table,
 	label,
 }: DataGridColumnResizerProps<TData, TValue>) {
+	const tl = useLiteralMessages();
 	const defaultColumnDef = table._getDefaultColumnDef();
 
+	// Excel: double-click a column border to fit it to its contents.
 	const onDoubleClick = useCallback(() => {
-		header.column.resetSize();
-	}, [header.column]);
+		const onColumnAutoFit = table.options.meta?.onColumnAutoFit;
+		if (onColumnAutoFit) {
+			onColumnAutoFit(header.column.id);
+		} else {
+			header.column.resetSize();
+		}
+	}, [header.column, table.options.meta]);
 
 	return (
 		<div
-			aria-label={`Resize ${label} column`}
+			aria-label={tl("Resize {label} column", { label })}
 			aria-orientation="vertical"
 			aria-valuemax={defaultColumnDef.maxSize}
 			aria-valuemin={defaultColumnDef.minSize}

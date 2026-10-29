@@ -35,10 +35,27 @@ describe("grantLabel — known grants", () => {
 		// dialog, which is exactly what the curated table exists to prevent.
 		expect(grantLabel("widget:render")).toBe("Show interactive cards in chat");
 		expect(grantLabel("warmup:crud")).toBe("Schedule keep-alive pings");
+		expect(grantLabel("subscriptions:read")).toBe(
+			"See your subscription accounts"
+		);
+		// Labels are often email addresses; consent must say so.
+		expect(grantDescription("subscriptions:read")).toContain("email");
 		expect(grantLabel("calendar:crud")).toBe("Access your calendar");
 		expect(grantLabel("chat.sendFollowUp")).toBe("Send follow-up messages");
 		expect(grantLabel("notifications:send-to-user")).toBe(
 			"Notify organization members"
+		);
+	});
+
+	it("labels the reviewed tool-plane grant instead of humanizing it", () => {
+		// `tools.invoke` is on the Gateway's default allowlist and held by shipped
+		// apps (Monitors, Dashboards, UGC, Social, Sites). Without an entry it
+		// rendered as the fallback "Tools invoke", which says nothing about tool
+		// runs or credit spend.
+		expect(grantLabel("tools.invoke")).toBe("Use your connected tools");
+		expect(grantLabel("TOOLS.INVOKE")).toBe("Use your connected tools");
+		expect(grantDescription("tools.invoke")).toBe(
+			"Run tools connected to Ryu and request work from Ryu-managed providers. Paid provider requests can use your Ryu credits."
 		);
 	});
 
@@ -52,6 +69,13 @@ describe("grantLabel — known grants", () => {
 });
 
 describe("grantLabel — unknown grants humanize gracefully", () => {
+	it("humanizes identifiers that match inherited object properties", () => {
+		expect(grantLabel("constructor")).toBe("Constructor");
+		expect(grantLabel("__proto__")).toBe("Proto");
+		expect(grantDescription("constructor")).toBeNull();
+		expect(grantDescription("__proto__")).toBeNull();
+	});
+
 	it("splits on separators and capitalizes the first word", () => {
 		expect(grantLabel("foo:bar")).toBe("Foo bar");
 		expect(grantLabel("some_new-grant/here")).toBe("Some new grant here");
@@ -74,7 +98,7 @@ describe("grantLabel — unknown grants humanize gracefully", () => {
 describe("grantDescription", () => {
 	it("returns the curated one-liner for a known grant", () => {
 		expect(grantDescription("hook:run-agent")).toBe(
-			"Start a tool-using agent that can act with your connected tools and data."
+			"Start a read-only tool-using agent that can look at your connected tools and data."
 		);
 		expect(grantDescription("SHELL")).toBe(
 			"Execute shell commands on this device."

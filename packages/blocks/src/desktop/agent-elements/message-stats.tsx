@@ -1,50 +1,29 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
 } from "@ryu/ui/components/hover-card";
 import { NumberTicker } from "@ryu/ui/components/number-ticker";
-import { formatCount, formatCurrency } from "@ryu/ui/lib/number-format.ts";
+import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import type { UIMessage } from "ai";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveAcpElapsedMs } from "./acp-elapsed.ts";
-import { ContextRing } from "./context-usage.tsx";
-
-/**
- * Per-message inference statistics streamed by Core as a `data-ryu-stats`
- * part (see `build_stats_part` in `apps/core/src/sidecar/adapters/mod.rs`).
- * Mirrors Jan AI's persisted shape: the engine's own token speed when
- * available, with token counts and timing context.
- */
-interface RyuStats {
-	/** Prompt tokens served from the provider's cache (`cached_tokens`). */
-	cachedTokens?: number;
-	completionTokens: number;
-	durationMs?: number;
-	promptPerSecond?: number;
-	promptTokens?: number;
-	/** Reasoning tokens billed as completion (`reasoning_tokens`). */
-	reasoningTokens?: number;
-	tokensPerSecond: number;
-	totalTokens?: number;
-	ttftMs?: number;
-}
-
-const STATS_PART_TYPE = "data-ryu-stats";
-
-function extractStats(msg: UIMessage): RyuStats | null {
-	const parts = (msg.parts ?? []) as Array<{ type?: string; data?: unknown }>;
-	for (const part of parts) {
-		if (part?.type === STATS_PART_TYPE && part.data) {
-			const data = part.data as Partial<RyuStats>;
-			if (typeof data.tokensPerSecond === "number") {
-				return data as RyuStats;
-			}
-		}
-	}
-	return null;
-}
+import { ContextRing, deriveCacheMissTokens } from "./context-usage.tsx";
+import {
+	extractGenerationStats,
+	extractNativeAcpUsage,
+	inferenceNumber,
+	isInferenceNumber,
+	type NativeInferenceFields,
+} from "./message-stats-native.ts";
+import {
+	addCompletionTokens,
+	formatSessionCurrency,
+	type NativeTokenOperand,
+	tokenCountLabel,
+} from "./native-token-count.mjs";
+import type { RenderedMessage } from "./utils/native-sdk-observation.ts";
 
 function StatRow({ label, value }: { label: string; value: string }) {
 	return (
@@ -65,24 +44,24 @@ export function MessageStats({
 	contextSize,
 	className,
 }: {
-	msg: UIMessage;
+	msg: Pick<RenderedMessage, "parts">;
 	/** The active model's context window, used as the ring denominator. */
 	contextSize?: number;
 	className?: string;
 }) {
-	const stats = useMemo(() => extractStats(msg), [msg]);
+	const tl = useLiteralMessages();
+	const stats = useMemo(() => extractGenerationStats(msg), [msg]);
 	if (!stats) {
 		return null;
 	}
 
 	const speed = Math.round(stats.tokensPerSecond);
-	const used = stats.totalTokens;
+	const used = stats.currentUsage ?? stats.current_usage ?? stats.totalTokens;
+	const window = stats.contextWindow ?? stats.context_window ?? contextSize;
 	const hasRing =
-		typeof contextSize === "number" &&
-		contextSize > 0 &&
-		typeof used === "number";
-	const pct = hasRing ? (used / contextSize) * 100 : 0;
-	const remaining = hasRing ? Math.max(0, contextSize - used) : 0;
+		isInferenceNumber(window) && window > 0 && isInferenceNumber(used);
+	const pct = hasRing ? (used / window) * 100 : 0;
+	const remaining = hasRing ? Math.max(0, window - used) : 0;
 
 	// Base UI carries the open/close delays on the TRIGGER (`delay`), not on the
 	// root — where they sat as unknown props that were silently dropped, so the
@@ -90,23 +69,23 @@ export function MessageStats({
 	return (
 		<HoverCard>
 			<HoverCardTrigger
-				className={cn(
-					"flex w-fit cursor-default select-none items-center gap-1.5 text-muted-foreground",
-					className
-				)}
+				appearance="statistics"
+				className={cn("flex w-fit select-none items-center", className)}
 				closeDelay={80}
 				delay={120}
 			>
 				{hasRing ? <ContextRing pct={pct} /> : null}
-				<span className="tabular-nums">{speed} tok/s</span>
+				<span className="tabular-nums">
+					{tl("{speed} tok/s", { speed: String(speed) })}
+				</span>
 			</HoverCardTrigger>
-			<HoverCardContent className="w-60 text-xs">
+			<HoverCardContent className="w-60" typography="compact">
 				<div className="flex flex-col gap-1.5">
 					<StatRow
 						label="Generation"
 						value={`${stats.tokensPerSecond.toFixed(2)} tok/s`}
 					/>
-					{typeof stats.promptPerSecond === "number" ? (
+					{isInferenceNumber(stats.promptPerSecond) ? (
 						<StatRow
 							label="Reading"
 							value={`${stats.promptPerSecond.toFixed(2)} tok/s`}
@@ -114,23 +93,38 @@ export function MessageStats({
 					) : null}
 					<StatRow
 						label="Completion"
-						value={`${stats.completionTokens} tokens`}
+						value={tokenCountLabel(stats.completionTokens)}
 					/>
-					{typeof stats.promptTokens === "number" ? (
+					{isInferenceNumber(stats.promptTokens) ? (
 						<StatRow label="Prompt" value={`${stats.promptTokens} tokens`} />
 					) : null}
-					{/* Already on the wire from `build_stats_part` — the interface
-					    simply never declared them, so the card threw them away. */}
-					{typeof stats.cachedTokens === "number" ? (
-						<StatRow label="Cached" value={`${stats.cachedTokens} tokens`} />
+					{isInferenceNumber(stats.cacheReadTokens ?? stats.cachedTokens) ? (
+						<StatRow
+							label="Cache hits"
+							value={tokenCountLabel(
+								stats.cacheReadTokens ?? stats.cachedTokens
+							)}
+						/>
 					) : null}
-					{typeof stats.reasoningTokens === "number" ? (
+					{isInferenceNumber(stats.cacheWriteTokens) ? (
+						<StatRow
+							label="Cache writes"
+							value={`${stats.cacheWriteTokens} tokens`}
+						/>
+					) : null}
+					{isInferenceNumber(stats.cacheMissTokens) ? (
+						<StatRow
+							label="Cache misses"
+							value={`${stats.cacheMissTokens} tokens`}
+						/>
+					) : null}
+					{isInferenceNumber(stats.reasoningTokens) ? (
 						<StatRow
 							label="Reasoning"
 							value={`${stats.reasoningTokens} tokens`}
 						/>
 					) : null}
-					{typeof stats.ttftMs === "number" ? (
+					{isInferenceNumber(stats.ttftMs) ? (
 						<StatRow label="First token" value={`${stats.ttftMs} ms`} />
 					) : null}
 					{hasRing ? (
@@ -138,7 +132,7 @@ export function MessageStats({
 							<div className="my-0.5 h-px bg-border" />
 							<StatRow
 								label="Context"
-								value={`${used} / ${contextSize} (${Math.round(pct)}%)`}
+								value={`${used} / ${window} (${Math.round(pct)}%)`}
 							/>
 							<StatRow label="Remaining" value={`${remaining} tokens`} />
 						</>
@@ -157,52 +151,9 @@ export function MessageStats({
  * sets `done:true` with the finalized duration + tokens/sec. See
  * `apps/core/src/sidecar/adapters/mod.rs` (`ui_data`).
  */
-interface AcpUsage {
-	/** Prompt tokens served from cache this turn (ACP `cachedReadTokens`). */
-	cachedReadTokens?: number;
-	/** Prompt tokens written to cache this turn (ACP `cachedWriteTokens`). */
-	cachedWriteTokens?: number;
-	completionTokens?: number;
-	/** True on the finalized frame; false/absent while still streaming. */
-	done?: boolean;
-	durationMs?: number;
-	id?: string;
-	promptTokens?: number;
-	/**
-	 * Cumulative spend for the whole ACP SESSION, not this turn — the protocol
-	 * only reports it that way (`UsageUpdate.cost`), so it is labelled as such.
-	 */
-	sessionCostAmount?: number;
-	sessionCostCurrency?: string;
-	/** Cumulative token total for the session (the per-turn keys are deltas). */
-	sessionTotalTokens?: number;
-	/** Reasoning tokens this turn (ACP `thoughtTokens`). */
-	thoughtTokens?: number;
-	tokensPerSecond?: number;
-	/** The model's context window, ring denominator. */
-	total?: number;
-	totalTokens?: number;
-	/**
-	 * Time from the turn starting to the agent's first visible output (reply text
-	 * OR a reasoning chunk). Labelled "First response", not "First token": on a
-	 * session's first turn it includes process spawn and `session/new`, so it is
-	 * NOT comparable to the local engine's `ttftMs`.
-	 */
-	ttftMs?: number;
-	/** Context tokens used (conversation), for the optional usage ring. */
-	used?: number;
-}
-
-const ACP_USAGE_PART_TYPE = "data-acp-usage";
+type AcpUsage = NativeInferenceFields;
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
-
-function extractAcpUsage(msg: UIMessage): AcpUsage | null {
-	const part = (msg.parts ?? []).find(
-		(p) => (p as { type?: string })?.type === ACP_USAGE_PART_TYPE
-	) as { type?: string; data?: AcpUsage } | undefined;
-	return part?.data ?? null;
-}
 
 /** Format a millisecond duration as "12s" (<60s) or "1m 23s" (>=60s). */
 export function formatDuration(ms: number): string {
@@ -227,12 +178,12 @@ export function formatDuration(ms: number): string {
  * turns rendered a confident, wrong "0 tokens". Absence is not zero, and the
  * caller suppresses the segment instead.
  */
-function usageTokenCount(usage: AcpUsage): number | null {
-	if (typeof usage.totalTokens === "number") {
+function usageTokenCount(usage: AcpUsage): NativeTokenOperand | null {
+	if (isInferenceNumber(usage.totalTokens)) {
 		return usage.totalTokens;
 	}
-	if (typeof usage.completionTokens === "number") {
-		return (usage.promptTokens ?? 0) + usage.completionTokens;
+	if (isInferenceNumber(usage.completionTokens)) {
+		return addCompletionTokens(usage.promptTokens, usage.completionTokens);
 	}
 	// `used` is NOT this turn's spend — it is context-window occupancy for the
 	// whole session (ACP `UsageUpdate.used`, and the cumulative total on the final
@@ -259,40 +210,48 @@ function acpBreakdownRows(usage: AcpUsage): Array<{
 	value: string;
 }> {
 	const rows: Array<{ label: string; value: string }> = [];
-	const push = (label: string, value: number | undefined, unit: string) => {
-		if (typeof value === "number") {
+	const cacheMissTokens =
+		usage.cacheMissTokens ??
+		deriveCacheMissTokens(
+			inferenceNumber(usage.promptTokens),
+			inferenceNumber(usage.cachedReadTokens),
+			inferenceNumber(usage.cachedWriteTokens)
+		);
+	const push = (label: string, value: NativeTokenOperand, unit: string) => {
+		if (isInferenceNumber(value)) {
 			rows.push({ label, value: `${formatCount(value) ?? "—"} ${unit}` });
 		}
 	};
-	if (typeof usage.tokensPerSecond === "number" && usage.tokensPerSecond > 0) {
+	if (isInferenceNumber(usage.tokensPerSecond) && usage.tokensPerSecond > 0) {
 		rows.push({
 			label: "Generation",
 			value: `${usage.tokensPerSecond.toFixed(2)} tok/s`,
 		});
 	}
 	push("Completion", usage.completionTokens, "tokens");
-	push("Prompt", usage.promptTokens, "tokens");
+	push(
+		isInferenceNumber(cacheMissTokens) ? "Cache misses" : "Prompt",
+		isInferenceNumber(cacheMissTokens) ? cacheMissTokens : usage.promptTokens,
+		"tokens"
+	);
 	push("Reasoning", usage.thoughtTokens, "tokens");
-	push("Cache read", usage.cachedReadTokens, "tokens");
-	push("Cache write", usage.cachedWriteTokens, "tokens");
+	push("Cache hits", usage.cachedReadTokens, "tokens");
+	push("Cache writes", usage.cachedWriteTokens, "tokens");
 	// Deliberately NOT "First token": on a session's first turn this includes the
 	// agent process spawning and `session/new`, so it is not the local engine's
 	// metric under the same name.
 	push("First response", usage.ttftMs, "ms");
-	if (typeof usage.durationMs === "number" && usage.done) {
+	if (isInferenceNumber(usage.durationMs) && usage.done) {
 		// Whole-turn wall clock — it spans tool calls, MCP round-trips and any
 		// approval the user sat on. Labelled "Turn" so it is not read as the
 		// model's generation window.
 		rows.push({ label: "Turn", value: formatDuration(usage.durationMs) });
 	}
 	push("Session total", usage.sessionTotalTokens, "tokens");
-	if (
-		typeof usage.sessionCostAmount === "number" &&
-		usage.sessionCostCurrency
-	) {
+	if (isInferenceNumber(usage.sessionCostAmount) && usage.sessionCostCurrency) {
 		rows.push({
 			label: "Session cost",
-			value: formatCurrency(
+			value: formatSessionCurrency(
 				usage.sessionCostAmount,
 				usage.sessionCostCurrency,
 				{
@@ -300,6 +259,22 @@ function acpBreakdownRows(usage: AcpUsage): Array<{
 					minimumFractionDigits: 2,
 				}
 			),
+		});
+	}
+	if (
+		isInferenceNumber(usage.used) &&
+		usage.used > 0 &&
+		isInferenceNumber(usage.total) &&
+		usage.total > 0
+	) {
+		const pct = (usage.used / usage.total) * 100;
+		rows.push({
+			label: "Context window",
+			value: `${formatCount(usage.used) ?? "—"} / ${formatCount(usage.total) ?? "—"} (${Math.round(pct)}%)`,
+		});
+		rows.push({
+			label: "Remaining",
+			value: `${formatCount(Math.max(0, usage.total - usage.used)) ?? "—"} tokens`,
 		});
 	}
 	return rows;
@@ -317,7 +292,7 @@ export function AcpUsageStats({
 	className,
 	isLive = true,
 }: {
-	msg: UIMessage;
+	msg: Pick<RenderedMessage, "parts">;
 	className?: string;
 	/**
 	 * Whether this turn is the one currently streaming. Defaults to true so a
@@ -327,10 +302,11 @@ export function AcpUsageStats({
 	 */
 	isLive?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	// No useMemo: extractAcpUsage is a cheap array.find — memoizing it with
 	// [msg] can stale during streaming when the AI SDK reconciles data parts in
 	// place without replacing the message object reference.
-	const usage = extractAcpUsage(msg);
+	const usage = extractNativeAcpUsage(msg);
 
 	// Live elapsed timer: record when the component first mounts with usage data,
 	// then tick every second while the turn is still streaming.
@@ -357,8 +333,8 @@ export function AcpUsageStats({
 
 	const elapsedMs = usage
 		? resolveAcpElapsedMs({
-				done: usage.done,
-				durationMs: usage.durationMs,
+				done: usage.done === true,
+				durationMs: inferenceNumber(usage.durationMs),
 				frozenMs: frozenRef.current,
 				isLive,
 				now,
@@ -382,16 +358,24 @@ export function AcpUsageStats({
 	// `> 0`, not merely present: a turn that genuinely produced tokens in under a
 	// millisecond does not exist, so a rounded 0 tok/s is always noise.
 	const speed =
-		typeof usage.tokensPerSecond === "number" && usage.tokensPerSecond > 0
+		isInferenceNumber(usage.tokensPerSecond) && usage.tokensPerSecond > 0
 			? Math.round(usage.tokensPerSecond)
 			: null;
 
 	const duration = elapsedMs === null ? null : formatDuration(elapsedMs);
 	const showSpeed = Boolean(usage.done) && speed !== null;
+	const contextUsed = usage.used;
+	const contextWindow = usage.total;
+	const hasContextWindow =
+		isInferenceNumber(contextUsed) &&
+		contextUsed > 0 &&
+		isInferenceNumber(contextWindow) &&
+		contextWindow > 0;
+	const contextPct = hasContextWindow ? (contextUsed / contextWindow) * 100 : 0;
 
 	// Nothing measurable at all (an agent that reports no usage on a turn that
 	// also produced no timing) — render nothing rather than an empty footer row.
-	if (tokens === null && !(showSpeed || duration)) {
+	if (tokens === null && !(showSpeed || duration || hasContextWindow)) {
 		return null;
 	}
 
@@ -402,6 +386,12 @@ export function AcpUsageStats({
 				className
 			)}
 		>
+			{hasContextWindow ? (
+				<>
+					<ContextRing pct={contextPct} />
+					<span>{Math.round(contextPct)}%</span>
+				</>
+			) : null}
 			{tokens === null ? null : (
 				<span className="inline-flex items-center gap-1">
 					<NumberTicker startOnView={false} value={tokens} />
@@ -411,7 +401,7 @@ export function AcpUsageStats({
 			{showSpeed ? (
 				<>
 					{tokens === null ? null : <span aria-hidden="true">·</span>}
-					<span>{speed} tok/s</span>
+					<span>{tl("{speed} tok/s", { speed: String(speed) })}</span>
 				</>
 			) : null}
 			{duration ? (
@@ -434,7 +424,7 @@ export function AcpUsageStats({
 			<HoverCardTrigger closeDelay={80} delay={120}>
 				{row}
 			</HoverCardTrigger>
-			<HoverCardContent className="w-60 text-xs">
+			<HoverCardContent className="w-60" typography="compact">
 				<div className="flex flex-col gap-1.5">
 					{breakdown.map((r) => (
 						<StatRow key={r.label} label={r.label} value={r.value} />

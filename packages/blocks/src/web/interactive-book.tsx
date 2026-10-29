@@ -7,6 +7,7 @@
  * The upstream permission notice is retained in ../../THIRD_PARTY_NOTICES.md.
  */
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	BookOpen,
@@ -18,6 +19,7 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import styles from "./interactive-book.module.css";
 
 /** A page in the page-flip book used by product stories. */
 export interface BookPage {
@@ -49,6 +51,7 @@ export function InteractiveBook({
 	coverKicker = "Open the boundary",
 	pages,
 }: InteractiveBookProps) {
+	const tl = useLiteralMessages();
 	const [isOpen, setIsOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const coverRef = useRef<HTMLButtonElement>(null);
@@ -132,9 +135,9 @@ export function InteractiveBook({
 
 	return (
 		<div
-			aria-label={`${bookTitle} interactive book`}
+			aria-label={tl("{bookTitle} interactive book", { bookTitle })}
 			className={cn(
-				"relative mx-auto flex min-h-[30rem] w-full max-w-[42rem] items-center justify-center overflow-hidden rounded-2xl border border-border/70 bg-muted/20 px-3 py-10 [perspective:2000px] sm:px-10",
+				"relative mx-auto flex min-h-[23rem] w-full max-w-[42rem] items-center justify-center overflow-hidden px-3 py-6 [perspective:2000px] sm:px-10",
 				className
 			)}
 			data-state={isOpen ? "open" : "closed"}
@@ -144,22 +147,18 @@ export function InteractiveBook({
 			tabIndex={-1}
 		>
 			<motion.div
-				animate={{ x: isOpen && !compact ? 136 : 0 }}
-				className="relative h-[25rem] w-full max-w-[17rem] [transform-style:preserve-3d]"
+				animate={{ x: isOpen && !compact ? 120 : 0 }}
+				className="relative h-[20rem] w-full max-w-[15rem] [transform-style:preserve-3d]"
 				initial={{ x: 0 }}
-				style={{ transformStyle: "preserve-3d" }}
 				transition={{ duration, ease: [0.25, 0, 0, 1] }}
 			>
 				<div
 					aria-hidden="true"
-					className="absolute inset-0 flex flex-col items-center justify-center rounded-l-xl border border-border bg-card p-5 text-center text-foreground shadow-sm"
-					style={{
-						transform: "translateX(-100%)",
-						visibility:
-							isOpen && !compact && currentPageIndex === -1
-								? "visible"
-								: "hidden",
-					}}
+					className={cn(
+						"absolute inset-0 flex flex-col items-center justify-center rounded-l-xl border border-border bg-card p-5 text-center text-foreground shadow-sm",
+						styles.insideCover
+					)}
+					data-visible={isOpen && !compact && currentPageIndex === -1}
 				>
 					<BookOpen
 						aria-hidden="true"
@@ -175,50 +174,55 @@ export function InteractiveBook({
 				<motion.button
 					animate={{ rotateY: isOpen ? -180 : 0, zIndex: isOpen ? 0 : 50 }}
 					aria-hidden={isOpen}
-					aria-label={isOpen ? `Close ${bookTitle}` : `Open ${bookTitle}`}
-					className="absolute inset-0 z-50 flex h-full w-full origin-left flex-col overflow-hidden rounded-r-xl rounded-l-md border border-foreground/20 bg-foreground p-5 text-left text-background shadow-2xl [backface-visibility:hidden] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
+					aria-label={
+						isOpen
+							? tl("Close {bookTitle}", { bookTitle })
+							: tl("Open {bookTitle}", { bookTitle })
+					}
+					className="absolute inset-0 z-50 flex h-full w-full origin-left flex-col overflow-hidden rounded-r-xl rounded-l-md border border-border bg-card p-5 text-left text-foreground shadow-sm [backface-visibility:hidden] [transform-style:preserve-3d] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
 					onClick={() => {
 						setIsOpen(true);
 						rootRef.current?.focus();
 					}}
 					ref={coverRef}
-					style={{ transformStyle: "preserve-3d" }}
 					tabIndex={isOpen ? -1 : 0}
 					transition={{ duration, ease: [0.25, 0, 0, 1] }}
 					type="button"
 				>
-					<div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_10%,rgba(255,255,255,0.18),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.1),transparent_36%)]" />
-					<div className="relative flex items-center justify-between font-mono text-[9px] text-background/60 uppercase tracking-[0.18em]">
+					<div className={cn("absolute inset-0", styles.coverSheen)} />
+					<div className="type-micro relative flex items-center justify-between font-mono text-muted-foreground uppercase tracking-(--tracking-section)">
 						<span>{coverKicker}</span>
 						<BookOpen aria-hidden="true" className="size-4" />
 					</div>
 					<div className="relative mt-auto">
-						<p className="font-mono text-[10px] text-background/60 uppercase tracking-[0.2em]">
+						<p className="type-compact font-mono text-muted-foreground uppercase tracking-(--tracking-section)">
 							Ryu service
 						</p>
-						<h2 className="mt-2 font-heading font-medium text-3xl leading-none tracking-[-0.06em]">
+						<h2 className="mt-2 font-heading font-medium text-3xl leading-none tracking-tighter">
 							{bookTitle}
 						</h2>
-						<p className="mt-4 border-background/25 border-t pt-2 font-mono text-[10px] text-background/70 uppercase tracking-[0.16em]">
+						<p className="type-compact mt-4 border-border border-t pt-2 font-mono text-muted-foreground uppercase tracking-(--tracking-section)">
 							{bookAuthor}
 						</p>
 					</div>
-					<span className="relative mt-8 font-mono text-[9px] text-background/50 uppercase tracking-[0.16em]">
-						Click to open · arrows to turn
+					<span className="type-micro relative mt-6 hidden font-mono text-muted-foreground uppercase tracking-(--tracking-section) md:inline">
+						Click to open
 					</span>
 					<span
 						aria-hidden="true"
-						className="absolute inset-0 flex flex-col items-center justify-center rounded-r-md rounded-l-xl border border-border bg-card p-5 text-center text-foreground [backface-visibility:hidden]"
-						style={{ transform: "rotateY(180deg) translateZ(0.5px)" }}
+						className={cn(
+							"absolute inset-0 flex flex-col items-center justify-center rounded-r-md rounded-l-xl border border-border bg-card p-5 text-center text-foreground [backface-visibility:hidden]",
+							styles.backFace
+						)}
 					>
 						<BookOpen
 							aria-hidden="true"
 							className="size-7 text-muted-foreground"
 						/>
-						<span className="mt-5 font-heading font-medium text-2xl tracking-[-0.04em]">
+						<span className="mt-5 font-heading font-medium text-2xl tracking-tight">
 							{bookTitle}
 						</span>
-						<span className="mt-2 font-mono text-[9px] text-muted-foreground uppercase tracking-[0.16em]">
+						<span className="type-micro mt-2 font-mono text-muted-foreground uppercase tracking-(--tracking-section)">
 							Interactive edition
 						</span>
 					</span>
@@ -227,58 +231,80 @@ export function InteractiveBook({
 				<div className="absolute inset-0 z-0 [transform-style:preserve-3d]">
 					{pages.map((page, index) => {
 						const isFlipped = index <= currentPageIndex;
+						const isCurrentFront = isOpen && index === currentPageIndex + 1;
+						const frontFaceContent = (
+							<>
+								<span className="type-micro font-mono text-muted-foreground uppercase tracking-(--tracking-section)">
+									{String(page.pageNumber * 2 - 1).padStart(2, "0")}
+								</span>
+								{page.title ? (
+									<h3 className="mt-6 font-heading font-medium text-2xl leading-tight tracking-tight">
+										{page.title}
+									</h3>
+								) : null}
+								<div className="mt-5 font-mono text-muted-foreground text-xs leading-6">
+									{page.content}
+								</div>
+								<span className="type-micro mt-auto border-border border-t pt-3 font-mono text-muted-foreground uppercase tracking-(--tracking-table-label)">
+									{index === pages.length - 1
+										? "Last page"
+										: "Tap the page or press →"}
+								</span>
+							</>
+						);
 						return (
 							<motion.div
 								animate={{
 									rotateY: isFlipped ? -180 : 0,
 									zIndex: isFlipped ? index + 1 : pages.length - index,
 								}}
-								className="absolute inset-0 origin-left rounded-r-xl rounded-l-md border border-border bg-card shadow-sm [transform-style:preserve-3d]"
+								className={cn(
+									"absolute inset-0 origin-left rounded-r-xl rounded-l-md border border-border bg-card shadow-sm [transform-style:preserve-3d]",
+									styles.page
+								)}
+								data-hidden={compact && isFlipped}
 								initial={{ rotateY: 0, zIndex: pages.length - index }}
 								key={page.pageNumber}
-								style={{
-									visibility: compact && isFlipped ? "hidden" : undefined,
-								}}
 								transition={{ duration, ease: [0.645, 0.045, 0.355, 1] }}
 							>
-								<button
-									aria-hidden={!isOpen || index !== currentPageIndex + 1}
-									aria-label={`Read page ${page.pageNumber * 2 - 1}`}
-									className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-r-xl rounded-l-md bg-card p-5 text-left text-foreground [backface-visibility:hidden] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
-									onClick={nextPage}
-									tabIndex={isOpen && index === currentPageIndex + 1 ? 0 : -1}
-									type="button"
-								>
-									<span className="font-mono text-[9px] text-muted-foreground uppercase tracking-[0.16em]">
-										{String(page.pageNumber * 2 - 1).padStart(2, "0")}
-									</span>
-									{page.title ? (
-										<h3 className="mt-8 font-heading font-medium text-2xl leading-tight tracking-[-0.04em]">
-											{page.title}
-										</h3>
-									) : null}
-									<div className="mt-5 font-mono text-muted-foreground text-xs leading-6">
-										{page.content}
+								{index === pages.length - 1 ? (
+									<div
+										aria-hidden={!isCurrentFront}
+										className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-r-xl rounded-l-md bg-card p-5 text-left text-foreground [backface-visibility:hidden]"
+									>
+										{frontFaceContent}
 									</div>
-									<span className="mt-auto border-border border-t pt-3 font-mono text-[9px] text-muted-foreground uppercase tracking-[0.14em]">
-										Tap the page or press →
-									</span>
-								</button>
+								) : (
+									<button
+										aria-hidden={!isCurrentFront}
+										aria-label={tl("Read page {pageNumber}", {
+											pageNumber: page.pageNumber * 2 - 1,
+										})}
+										className="absolute inset-0 flex h-full w-full flex-col overflow-hidden rounded-r-xl rounded-l-md bg-card p-5 text-left text-foreground [backface-visibility:hidden] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
+										onClick={nextPage}
+										tabIndex={isCurrentFront ? 0 : -1}
+										type="button"
+									>
+										{frontFaceContent}
+									</button>
+								)}
 								<button
 									aria-hidden={!isOpen || compact || index !== currentPageIndex}
-									aria-label={`Read page ${page.pageNumber * 2}`}
-									className="absolute inset-0 flex h-full w-full origin-center flex-col overflow-hidden rounded-r-md rounded-l-xl border-border border-r bg-card p-5 text-left text-foreground [backface-visibility:hidden] [transform:rotateY(180deg)] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4"
+									aria-label={tl("Read page {pageNumber}", {
+										pageNumber: page.pageNumber * 2,
+									})}
+									className={cn(
+										"absolute inset-0 flex h-full w-full origin-center flex-col overflow-hidden rounded-r-md rounded-l-xl border-border border-r bg-card p-5 text-left text-foreground [backface-visibility:hidden] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-4",
+										styles.backFace
+									)}
+									data-hidden={compact}
 									onClick={previousPage}
-									style={{
-										transform: "rotateY(180deg) translateZ(0.5px)",
-										visibility: compact ? "hidden" : undefined,
-									}}
 									tabIndex={
 										isOpen && !compact && index === currentPageIndex ? 0 : -1
 									}
 									type="button"
 								>
-									<span className="font-mono text-[9px] text-muted-foreground uppercase tracking-[0.16em]">
+									<span className="type-micro font-mono text-muted-foreground uppercase tracking-(--tracking-section)">
 										{String(page.pageNumber * 2).padStart(2, "0")}
 									</span>
 									<div className="mt-8 font-mono text-muted-foreground text-xs leading-6">
@@ -288,14 +314,14 @@ export function InteractiveBook({
 											</span>
 										)}
 									</div>
-									<span className="mt-auto border-border border-t pt-3 font-mono text-[9px] text-muted-foreground uppercase tracking-[0.14em]">
+									<span className="type-micro mt-auto border-border border-t pt-3 font-mono text-muted-foreground uppercase tracking-(--tracking-table-label)">
 										Tap to turn back · press ←
 									</span>
 								</button>
 							</motion.div>
 						);
 					})}
-					<div className="absolute inset-0 -z-10 rounded-r-xl rounded-l-md border border-border bg-card shadow-xl" />
+					<div className="absolute inset-0 -z-10 rounded-r-xl rounded-l-md border border-border bg-card" />
 				</div>
 			</motion.div>
 
@@ -303,8 +329,8 @@ export function InteractiveBook({
 				{isOpen ? (
 					<>
 						<button
-							aria-label={`Close ${bookTitle}`}
-							className="absolute top-3 right-3 z-[100] rounded-full border border-border bg-background/80 p-2 text-muted-foreground backdrop-blur transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+							aria-label={tl("Close {bookTitle}", { bookTitle })}
+							className="absolute top-3 right-3 z-[100] rounded-full border border-border bg-background p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
 							onClick={closeBook}
 							type="button"
 						>
@@ -313,7 +339,7 @@ export function InteractiveBook({
 						<div className="absolute inset-x-3 bottom-3 flex items-center justify-between gap-3 sm:inset-x-10">
 							<button
 								aria-label="Previous page"
-								className="rounded-full border border-border bg-background/80 p-2 text-muted-foreground backdrop-blur transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+								className="rounded-full border border-border bg-background p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
 								disabled={isAtBeginning}
 								onClick={previousPage}
 								type="button"
@@ -322,14 +348,17 @@ export function InteractiveBook({
 							</button>
 							<span
 								aria-live="polite"
-								className="font-mono text-[10px] text-muted-foreground uppercase tracking-[0.14em]"
+								className="type-compact font-mono text-muted-foreground uppercase tracking-(--tracking-table-label)"
 							>
-								{`Page ${Math.min(currentPageIndex + 2, totalPages)} / ${totalPages}`}
+								{tl("Page {pageNumber} / {totalPages}", {
+									pageNumber: Math.min(currentPageIndex + 2, totalPages),
+									totalPages,
+								})}
 							</span>
 							<div className="flex items-center gap-2">
 								<button
 									aria-label="Read the passport again"
-									className="rounded-full border border-border bg-background/80 p-2 text-muted-foreground backdrop-blur transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+									className="rounded-full border border-border bg-background p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
 									onClick={() => setCurrentPageIndex(-1)}
 									type="button"
 								>
@@ -337,7 +366,7 @@ export function InteractiveBook({
 								</button>
 								<button
 									aria-label="Next page"
-									className="rounded-full border border-border bg-background/80 p-2 text-muted-foreground backdrop-blur transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+									className="rounded-full border border-border bg-background p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
 									disabled={isAtEnd}
 									onClick={nextPage}
 									type="button"

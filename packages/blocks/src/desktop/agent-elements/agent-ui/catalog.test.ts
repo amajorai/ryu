@@ -19,6 +19,8 @@ const EXPECTED_COMPONENTS = [
 	"Badge",
 	"Alert",
 	"Table",
+	"Chart",
+	"Stat",
 	"Progress",
 	"Skeleton",
 	"Button",

@@ -12,6 +12,7 @@
     "brave",
     "headroom",
     "firecrawl",
+    "jina-reader",
     "serper",
     "mem0",
     "spidercloud",
@@ -19,6 +20,9 @@
     "zvec-grep",
     "honcho",
     "bytebot",
-    "writing-style"
+    "writing-style",
+    "is-agentic",
+    "isitagentready",
+    "ora"
   ]
 }

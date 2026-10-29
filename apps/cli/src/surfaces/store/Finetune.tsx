@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
+import { tf } from "../../i18n/translate.ts";
 
 interface FinetunePanelProps {
 	/** True while Fine-tune is the visible store section. Unused (no keyboard). */
@@ -54,7 +55,7 @@ export function FinetunePanel(_props: FinetunePanelProps) {
 			</Card>
 			<box paddingTop={1}>
 				<text fg={theme.colors.mutedForeground}>
-					{`Runs against ${url} · start a job from the desktop app`}
+					{tf("Runs against {url} · start a job from the desktop app", { url })}
 				</text>
 			</box>
 		</box>

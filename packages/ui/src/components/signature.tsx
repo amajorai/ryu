@@ -3,21 +3,7 @@
 import { motion } from "motion/react";
 import { useEffect, useId, useState } from "react";
 
-interface SignatureGlyph {
-	advanceWidth?: number;
-	getPath: (
-		x: number,
-		y: number,
-		fontSize: number
-	) => {
-		toPathData: (decimalPlaces?: number) => string;
-	};
-}
-
-interface SignatureFont {
-	charToGlyph: (char: string) => SignatureGlyph;
-	unitsPerEm: number;
-}
+type SignatureFont = ReturnType<typeof import("opentype.js")["parse"]>;
 
 const SVG_HEIGHT = 100;
 const PATH_DELAY_STEP = 0.2;
@@ -85,7 +71,7 @@ async function loadFontFromPaths(fontPaths: string[]): Promise<SignatureFont> {
 			}
 
 			const fontBuffer = await response.arrayBuffer();
-			const font = parse(fontBuffer) as SignatureFont;
+			const font = parse(fontBuffer);
 			fontCache.set(cacheKey, font);
 
 			return font;

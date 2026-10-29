@@ -30,9 +30,11 @@ import {
 	isPluginTabKind,
 	isRouteTabKind,
 	nativeDockPanelKey,
-	panelDocksIn,
+	panelPreferredRegion,
+	restoreDockTabKind,
 	routeTabKind,
 	routeTabPath,
+	serializeRestoredDockTab,
 } from "./dock-panels.ts";
 
 function panel(over: Partial<PluginDockPanel> = {}): PluginDockPanel {
@@ -83,27 +85,52 @@ describe("tab kinds", () => {
 });
 
 describe("placement", () => {
+	test("maps every known placement to its preferred workbench region", () => {
+		expect(panelPreferredRegion(panel({ placement: "bottom" }))).toBe("bottom");
+		expect(panelPreferredRegion(panel({ placement: "right" }))).toBe("right");
+		expect(panelPreferredRegion(panel({ placement: "left" }))).toBe("left");
+		expect(panelPreferredRegion(panel({ placement: "center" }))).toBe("center");
+		expect(panelPreferredRegion(panel({ placement: "both" }))).toBe("bottom");
+	});
+
+	test("an unknown placement prefers the bottom region", () => {
+		// SAFETY: Deliberately emulate an unknown future wire placement to verify compatibility fallback.
+		const rogue = panel({
+			placement: "top" as PluginDockPanel["placement"],
+		});
+		expect(panelPreferredRegion(rogue)).toBe("bottom");
+	});
+
 	test('"both" offers the panel in each dock', () => {
 		const p = panel({ placement: "both" });
-		expect(panelDocksIn(p, "bottom")).toBe(true);
-		expect(panelDocksIn(p, "right")).toBe(true);
+		expect(dockPanelsFor([p], "bottom")).toContain(p);
+		expect(dockPanelsFor([p], "right")).toContain(p);
 	});
 
 	test("a single-dock placement is honoured", () => {
-		expect(panelDocksIn(panel({ placement: "right" }), "right")).toBe(true);
-		expect(panelDocksIn(panel({ placement: "right" }), "bottom")).toBe(false);
-		expect(panelDocksIn(panel({ placement: "bottom" }), "bottom")).toBe(true);
-		expect(panelDocksIn(panel({ placement: "bottom" }), "right")).toBe(false);
+		expect(
+			dockPanelsFor([panel({ placement: "right" })], "right")
+		).toHaveLength(1);
+		expect(
+			dockPanelsFor([panel({ placement: "right" })], "bottom")
+		).toHaveLength(0);
+		expect(
+			dockPanelsFor([panel({ placement: "bottom" })], "bottom")
+		).toHaveLength(1);
+		expect(
+			dockPanelsFor([panel({ placement: "bottom" })], "right")
+		).toHaveLength(0);
 	});
 
 	test("an unknown placement falls back to the bottom dock, never nowhere", () => {
 		// Mirrors the Rust lenient deserializer: a placement from a newer manifest
 		// must leave the panel reachable rather than silently unopenable.
+		// SAFETY: Deliberately emulate an unknown future wire placement to verify compatibility fallback.
 		const rogue = panel({
 			placement: "floating" as PluginDockPanel["placement"],
 		});
-		expect(panelDocksIn(rogue, "bottom")).toBe(true);
-		expect(panelDocksIn(rogue, "right")).toBe(false);
+		expect(dockPanelsFor([rogue], "bottom")).toContain(rogue);
+		expect(dockPanelsFor([rogue], "right")).toHaveLength(0);
 	});
 });
 
@@ -268,5 +295,62 @@ describe("page tabs (route: kinds)", () => {
 		for (const path of Object.values(PAGE_ROUTES)) {
 			expect(isDockableRoutePath(path)).toBe(true);
 		}
+	});
+});
+
+describe("restoring persisted dock tab kinds", () => {
+	test("keeps every current renderer kind", () => {
+		for (const kind of [
+			"terminal",
+			"files",
+			"plugin:@ryu/browser:browser",
+			"route:/library/space",
+		] as const) {
+			expect(restoreDockTabKind(kind)).toEqual({ kind });
+		}
+	});
+	test("preserves distinct historical and future identifiers on unavailable tabs", () => {
+		expect(restoreDockTabKind("browser")).toEqual({
+			kind: "unavailable",
+			persistedKind: "browser",
+		});
+		expect(restoreDockTabKind("future-panel")).toEqual({
+			kind: "unavailable",
+			persistedKind: "future-panel",
+		});
+	});
+});
+
+test("unavailable project tabs retain their kind, identity and pinned metadata on save", () => {
+	const original = {
+		kind: "future-panel",
+		label: "Future",
+		uid: "tab-19",
+		project: true,
+		pinned: true,
+	};
+	const restored = {
+		...restoreDockTabKind(original.kind),
+		label: original.label,
+		uid: original.uid,
+		persistedTab: original,
+	};
+	expect(serializeRestoredDockTab(restored)).toEqual(original);
+});
+test("known project tabs keep the existing persistence contract", () => {
+	expect(
+		serializeRestoredDockTab({
+			kind: "terminal",
+			label: "Terminal",
+			uid: "tab-7",
+			projectHosted: true,
+			pinned: true,
+		})
+	).toEqual({
+		kind: "terminal",
+		label: "Terminal",
+		uid: "tab-7",
+		project: true,
+		pinned: true,
 	});
 });

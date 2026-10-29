@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { PluginStoreTab } from "@/src/lib/api/plugins.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -17,6 +17,8 @@ const node = {
 };
 const tab = {
 	app_enabled: true,
+	app_installed: true,
+	title: "Catalog",
 	id: "catalog",
 	plugin: "com.example.store",
 	spec: {
@@ -26,7 +28,7 @@ const tab = {
 			map: { id: "id", title: "title" },
 		},
 	},
-} as PluginStoreTab;
+} satisfies PluginStoreTab;
 
 mock.module("@/src/hooks/useActiveNode.ts", () => ({
 	useActiveNode: () => node,

@@ -6,4 +6,4 @@ export {
 	type BouncyAccordionClassNames,
 	type BouncyAccordionItem,
 	type BouncyAccordionProps,
-} from "@ryu/ui/components/bouncy-accordion";
+} from "@ryu/ui/components/bouncy-accordion.tsx";

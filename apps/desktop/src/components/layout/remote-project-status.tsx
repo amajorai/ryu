@@ -1,7 +1,7 @@
 import {
 	type ConnectionDotState,
 	ConnectionStatusDot,
-} from "@ryu/ui/components/connection-status";
+} from "@ryu/ui/components/connection-status.tsx";
 
 /** Resolve the compact status state from the shared active-node probe. */
 export function remoteProjectStatusState(
@@ -35,7 +35,7 @@ export function RemoteProjectStatus({
 				: "checking";
 	return (
 		<span
-			className="flex min-w-0 max-w-24 shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground"
+			className="type-compact flex min-w-0 max-w-24 shrink-0 items-center gap-1.5 text-muted-foreground"
 			data-project-connection-status={state}
 			data-project-node-name={label}
 		>

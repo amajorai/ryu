@@ -87,7 +87,9 @@ window.fetch = async (input, init) => {
 	});
 };
 
-(window as FixtureWindow).__backgroundFixture = fixture;
+/* SAFETY: This assignment publishes the complete locally typed fixture holder above; native process records and string stop requests retain their existing authored types. */ (
+	window as FixtureWindow
+).__backgroundFixture = fixture;
 
 const queryClient = new QueryClient({
 	defaultOptions: {
@@ -118,7 +120,7 @@ function Story() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<QueryClientProvider client={queryClient}>
 		<Story />
 	</QueryClientProvider>

@@ -20,7 +20,15 @@ export function resolveWorkspaceFilePath(
 	}
 	const absolute = raw.startsWith("/") || WINDOWS_ABSOLUTE_RE.test(raw);
 	if (absolute) {
-		return raw === root || raw.startsWith(`${root}/`) ? raw : null;
+		if (raw === root) {
+			return raw;
+		}
+		if (!raw.startsWith(`${root}/`)) {
+			return null;
+		}
+		// The prefix alone is not containment: `<root>/../../etc/x` passes it.
+		const rest = raw.slice(root.length + 1).split("/");
+		return rest.some((part) => part === ".." || part === ".") ? null : raw;
 	}
 	const parts = raw.replace(/^\.\//, "").split("/");
 	if (parts.some((part) => part === ".." || part === "")) {

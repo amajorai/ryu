@@ -1,4 +1,4 @@
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MorphingTabSurface } from "../../src/components/layout/MorphingTabSurface.tsx";
@@ -43,7 +43,7 @@ function PreviewTab({
 			aria-pressed={active}
 			className={cn(
 				"relative isolate flex h-12 min-w-32 items-center gap-2 px-4 font-medium text-sm transition-colors",
-				floatingTabs ? "rounded-full" : "rounded-t-[14px]",
+				floatingTabs ? "rounded-full" : "rounded-t-(--radius-xl)",
 				floatingTabs
 					? active
 						? "bg-muted text-foreground"
@@ -91,7 +91,7 @@ function ProofStory() {
 			<div className="mx-auto flex max-w-4xl flex-col gap-6">
 				<header className="flex flex-wrap items-start justify-between gap-4">
 					<div>
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							React verification artifact
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
@@ -107,8 +107,8 @@ function ProofStory() {
 						className={cn(
 							"rounded-full border px-3 py-1.5 font-medium text-xs",
 							proofPassed
-								? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
-								: "border-amber-400/30 bg-amber-400/10 text-amber-200"
+								? "border-success/30 bg-success/10 text-success"
+								: "border-warning/30 bg-warning/10 text-warning"
 						)}
 						data-proof-status={proofPassed ? "pass" : "pending"}
 						data-testid="proof-status"

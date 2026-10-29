@@ -10,6 +10,7 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
 use super::{RegistryTool, ToolPrincipal};
+use crate::agent_access::AgentAccountPolicy;
 use crate::agents::AgentStore;
 use crate::scheduler::store::{JobTarget, Schedule, ScheduledJob};
 
@@ -311,6 +312,34 @@ fn target_agent_id(arguments: &Value, calling_agent_id: Option<&str>) -> Result<
         .ok_or_else(|| anyhow!("routine needs an 'agent_id' or a calling agent"))
 }
 
+/// The agent an existing agent routine runs.
+fn job_agent_id(job: &ScheduledJob) -> Option<&str> {
+    match &job.target {
+        JobTarget::Agent { agent_id, .. } => Some(agent_id),
+        _ => None,
+    }
+}
+
+/// A routine runs under its target agent's own record, so a caller with
+/// limited account access may only create, change, run or delete routines
+/// whose agent is within that access; otherwise it could reach the user's
+/// accounts through a routine for a wider agent such as the default agent.
+async fn require_target_within_policy(
+    agent_store: Option<&AgentStore>,
+    account_policy: Option<&AgentAccountPolicy>,
+    calling_agent_id: Option<&str>,
+    job: &ScheduledJob,
+) -> Result<()> {
+    let target = job_agent_id(job).map(str::to_owned);
+    crate::agent_access::require_delegation_within_policy(
+        agent_store,
+        account_policy,
+        calling_agent_id,
+        target,
+    )
+    .await
+}
+
 async fn create(
     arguments: Value,
     principal: &ToolPrincipal,
@@ -318,12 +347,20 @@ async fn create(
     conversations: Option<&crate::server::conversations::ConversationStore>,
     calling_agent_id: Option<&str>,
     host_conversation_id: Option<&str>,
+    account_policy: Option<&AgentAccountPolicy>,
 ) -> Result<Value> {
     let (owner_user_id, org_id) = principal_owner(principal)?;
     let agent_id = target_agent_id(&arguments, calling_agent_id)?;
     let enabled = optional_bool(&arguments, "enabled", true)?;
     let schedule = parse_schedule(&arguments)?;
     validate_schedule(&schedule)?;
+    crate::agent_access::require_delegation_within_policy(
+        agent_store,
+        account_policy,
+        calling_agent_id,
+        [agent_id.clone()],
+    )
+    .await?;
     validate_agent(agent_store, &agent_id, enabled).await?;
     let conversation_id = selected_conversation(&arguments, host_conversation_id)?;
     validate_conversation(principal, conversations, conversation_id.as_deref()).await?;
@@ -360,7 +397,9 @@ async fn update(
     principal: &ToolPrincipal,
     agent_store: Option<&AgentStore>,
     conversations: Option<&crate::server::conversations::ConversationStore>,
+    calling_agent_id: Option<&str>,
     host_conversation_id: Option<&str>,
+    account_policy: Option<&AgentAccountPolicy>,
 ) -> Result<Value> {
     let job_id = required_string(&arguments, "job_id")?;
     let mut job = crate::scheduler::store::load_job(job_id)
@@ -373,6 +412,8 @@ async fn update(
     if !is_agent_job(&job) {
         return Err(anyhow!("routine '{job_id}' is not an agent routine"));
     }
+    require_target_within_policy(agent_store, account_policy, calling_agent_id, &job).await?;
+    let expected = job.clone();
     let current_target = match &job.target {
         JobTarget::Agent {
             agent_id,
@@ -429,7 +470,9 @@ async fn update(
         conversation_id,
     };
     job.updated_at = chrono::Utc::now().to_rfc3339();
-    crate::scheduler::store::save_job(&job).map_err(|error| anyhow!("saving routine: {error}"))?;
+    let job = crate::scheduler::store::update_job_if_current(expected, job)
+        .await
+        .map_err(|error| anyhow!("saving routine: {error}"))?;
     Ok(json!({ "ok": true, "routine": job }))
 }
 
@@ -448,7 +491,13 @@ fn list(arguments: Value, principal: &ToolPrincipal) -> Result<Value> {
     Ok(json!({ "routines": jobs }))
 }
 
-fn delete(arguments: Value, principal: &ToolPrincipal) -> Result<Value> {
+async fn delete(
+    arguments: Value,
+    principal: &ToolPrincipal,
+    agent_store: Option<&AgentStore>,
+    calling_agent_id: Option<&str>,
+    account_policy: Option<&AgentAccountPolicy>,
+) -> Result<Value> {
     let job_id = required_string(&arguments, "job_id")?;
     let job = crate::scheduler::store::load_job(job_id)
         .map_err(|_| anyhow!("routine '{job_id}' not found"))?;
@@ -460,12 +509,19 @@ fn delete(arguments: Value, principal: &ToolPrincipal) -> Result<Value> {
     if !is_agent_job(&job) {
         return Err(anyhow!("routine '{job_id}' is not an agent routine"));
     }
+    require_target_within_policy(agent_store, account_policy, calling_agent_id, &job).await?;
     let deleted = crate::scheduler::store::delete_job(job_id)
         .map_err(|error| anyhow!("deleting routine: {error}"))?;
     Ok(json!({ "ok": deleted, "deleted": deleted, "job_id": job_id }))
 }
 
-async fn run_now(arguments: Value, principal: &ToolPrincipal) -> Result<Value> {
+async fn run_now(
+    arguments: Value,
+    principal: &ToolPrincipal,
+    agent_store: Option<&AgentStore>,
+    calling_agent_id: Option<&str>,
+    account_policy: Option<&AgentAccountPolicy>,
+) -> Result<Value> {
     let job_id = required_string(&arguments, "job_id")?;
     let job = crate::scheduler::store::load_job(job_id)
         .map_err(|_| anyhow!("routine '{job_id}' not found"))?;
@@ -477,6 +533,14 @@ async fn run_now(arguments: Value, principal: &ToolPrincipal) -> Result<Value> {
     if !is_agent_job(&job) {
         return Err(anyhow!("routine '{job_id}' is not an agent routine"));
     }
+    require_target_within_policy(agent_store, account_policy, calling_agent_id, &job).await?;
+    // Held across the run and its history write so it never overlaps a
+    // scheduled firing or another manual run of the same routine.
+    let _in_flight = crate::scheduler::claim_in_flight(&job.id)
+        .ok_or_else(|| anyhow!("routine '{job_id}' is already running"))?;
+    let claim = crate::scheduler::store::capture_execution(&job)
+        .await
+        .map_err(|error| anyhow!("routine changed before execution: {error}"))?;
     let started_at = chrono::Utc::now().to_rfc3339();
     let result = Box::pin(crate::scheduler::run_target_for_job(&job)).await;
     let finished_at = chrono::Utc::now().to_rfc3339();
@@ -484,8 +548,8 @@ async fn run_now(arguments: Value, principal: &ToolPrincipal) -> Result<Value> {
         Ok(id) => (true, id, None),
         Err(error) => (false, None, Some(error)),
     };
-    crate::scheduler::store::append_execution(
-        job_id,
+    crate::scheduler::store::append_execution_claim(
+        claim,
         crate::scheduler::store::ExecRecord {
             started_at,
             finished_at,
@@ -498,6 +562,7 @@ async fn run_now(arguments: Value, principal: &ToolPrincipal) -> Result<Value> {
             error: error.clone(),
         },
     )
+    .await
     .map_err(|save_error| anyhow!("saving routine history: {save_error}"))?;
     Ok(json!({
         "ok": success,
@@ -511,8 +576,36 @@ async fn run_now(arguments: Value, principal: &ToolPrincipal) -> Result<Value> {
 
 /// Dispatch a routine tool with the caller's server-derived identity and chat
 /// scope. `host_conversation_id` is never read from model arguments; it is the
-/// conversation that Core already knows owns this turn.
+/// conversation that Core already knows owns this turn. `account_policy` is the
+/// calling agent's account policy; a limited caller may only manage routines
+/// whose agent is within it (listing stays open).
 #[allow(clippy::too_many_arguments)]
+/// The agent a `create`, `update` or `run_now` call would run: the new
+/// routine's target, or the stored routine's. Empty for calls that run no
+/// agent, and for a routine that does not exist (the call itself then fails).
+/// The dispatch core checks these against the calling agent's account policy,
+/// because a routine runs its agent with that agent's own account access.
+pub fn routine_target_agents(
+    tool: &str,
+    arguments: &Value,
+    calling_agent_id: Option<&str>,
+) -> Result<Vec<String>> {
+    match tool {
+        "create" => Ok(vec![target_agent_id(arguments, calling_agent_id)?]),
+        "update" | "run_now" => {
+            let job_id = required_string(arguments, "job_id")?;
+            Ok(match crate::scheduler::store::load_job(job_id) {
+                Ok(ScheduledJob {
+                    target: JobTarget::Agent { agent_id, .. },
+                    ..
+                }) => vec![agent_id],
+                _ => Vec::new(),
+            })
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
 pub async fn dispatch(
     tool: &str,
     arguments: Value,
@@ -521,6 +614,7 @@ pub async fn dispatch(
     conversations: Option<&crate::server::conversations::ConversationStore>,
     calling_agent_id: Option<&str>,
     host_conversation_id: Option<&str>,
+    account_policy: Option<&AgentAccountPolicy>,
 ) -> Result<Value> {
     match tool {
         "list" => list(arguments, principal),
@@ -532,6 +626,7 @@ pub async fn dispatch(
                 conversations,
                 calling_agent_id,
                 host_conversation_id,
+                account_policy,
             )
             .await
         }
@@ -541,12 +636,32 @@ pub async fn dispatch(
                 principal,
                 agent_store,
                 conversations,
+                calling_agent_id,
                 host_conversation_id,
+                account_policy,
             )
             .await
         }
-        "delete" => delete(arguments, principal),
-        "run_now" => run_now(arguments, principal).await,
+        "delete" => {
+            delete(
+                arguments,
+                principal,
+                agent_store,
+                calling_agent_id,
+                account_policy,
+            )
+            .await
+        }
+        "run_now" => {
+            run_now(
+                arguments,
+                principal,
+                agent_store,
+                calling_agent_id,
+                account_policy,
+            )
+            .await
+        }
         other => Err(anyhow!("unknown routines tool '{other}'")),
     }
 }

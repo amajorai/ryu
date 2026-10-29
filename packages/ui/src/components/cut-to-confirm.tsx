@@ -1,14 +1,24 @@
 "use client";
 
-import { Scissors } from "lucide-react";
+import { Ticket } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import styles from "./cut-to-confirm.module.css";
+
+interface GripStyle extends React.CSSProperties {
+	"--grip-left": string;
+	"--grip-top": string;
+	"--grip-transform": string;
+	"--grip-transition"?: string;
+}
+
 import { cn } from "../lib/utils.ts";
+import { TEAR_LINE_RATIO, TearTicket } from "./tear-ticket.tsx";
 
 /**
- * A destructive confirmation you perform on the object itself: drag a blade
- * across the card until it is severed. The wrapper is generic — it knows
+ * A destructive confirmation you perform on the object itself: pull the ticket
+ * stub down along its perforation until it tears free. The wrapper is generic — it knows
  * nothing about billing, plans or portals; it takes a child, a label and an
  * `onConfirm`, and it decides when the gesture was deliberate enough to fire.
  *
@@ -17,11 +27,11 @@ import { cn } from "../lib/utils.ts";
  *
  *  - **Not triggerable by accident.** The gesture can only start on a dedicated
  *    44×44 grip, must survive `armMs` of dwell before travel counts at all,
- *    aborts if the pointer wanders out of a vertical corridor, aborts on
- *    `pointercancel`, and needs `threshold` of the card's width. A stray swipe
+ *    aborts if the pointer wanders out of a horizontal corridor, aborts on
+ *    `pointercancel`, and needs `threshold` of the card's height. A stray swipe
  *    over the card does nothing — the card is not the control, the grip is.
  *  - **Reversible until it completes.** Letting go short of the threshold
- *    springs the blade back and fires `onAbort`. Nothing is dispatched until
+ *    springs the stub back and fires `onAbort`. Nothing is dispatched until
  *    progress reaches 1, and once it has, nothing — not Escape, not a second
  *    press — can undo it from inside: the only way back is {@link
  *    CutToConfirmProps.resetKey}, which the caller bumps when the action it
@@ -42,15 +52,17 @@ export interface CutToConfirmProps {
 	/** The live card. Rendered exactly once — see the note on {@link CutToConfirm}. */
 	children: React.ReactNode;
 	className?: string;
-	/** Vertical corridor, px. Leaving it aborts. Default 56. */
+	/** Horizontal corridor, px. Leaving it aborts. Default 56. */
 	corridorPx?: number;
 	disabled?: boolean;
-	/** Accessible name, e.g. "Slice the card to cancel your Max plan". */
+	/** Accessible name, e.g. "Tear the stub to cancel your Max plan". */
 	label: string;
 	/** An armed gesture abandoned before threshold. For copy, not for effects. */
 	onAbort?: () => void;
-	/** Fires ONCE, after the sever animation, when progress reaches 1. */
+	/** Fires ONCE, after the tear animation, when progress reaches 1. */
 	onConfirm: () => void;
+	/** Lock the owning dialog once the tear has committed. */
+	onTearStart?: () => void;
 	renderHint?: (progress: number) => React.ReactNode;
 	/**
 	 * Change this to put the card back together after a committed gesture. The
@@ -60,7 +72,7 @@ export interface CutToConfirmProps {
 	 * as if the handoff were in flight.
 	 */
 	resetKey?: number | string;
-	/** Fraction of the card width the blade must travel. Default 0.92. */
+	/** The grip's end position as a fraction of card height. Default 0.92. */
 	threshold?: number;
 }
 
@@ -74,30 +86,23 @@ const ARM_SLOP_PX = 8;
 /** One deliberate act — one arrow press, one tap. Five of them commit. */
 const STEP = 0.2;
 /**
- * Five presses to commit. `ArrowRight`/`ArrowUp` add, `ArrowLeft`/`ArrowDown`
- * subtract, and `End`/`PageUp`/`PageDown` are deliberately absent: on a normal
+ * Five presses to commit. `ArrowDown` adds and `ArrowUp` subtracts; `End`/
+ * `PageUp`/`PageDown` are deliberately absent: on a normal
  * slider `End` jumps to the maximum, which here would let ONE keypress cancel a
  * subscription. Auto-repeat is dropped in the handler for the same reason — a
  * HELD arrow is also one keypress, at a repeat rate the OS picks, not us.
  * `Home` and `Escape` still zero it, because retreating in one keypress is
  * always safe, so neither is guarded against repeat.
  */
-const KEY_DELTAS: Record<string, number> = {
-	ArrowDown: -STEP,
-	ArrowLeft: -STEP,
-	ArrowRight: STEP,
-	ArrowUp: STEP,
-};
+const KEY_DELTAS = new Map<string, number>([
+	["ArrowDown", STEP],
+	["ArrowUp", -STEP],
+]);
 /** How long the card takes to come apart before `onConfirm` fires. */
-const SEVER_MS = 420;
+const TEAR_MS = 420;
 /** The spring-back when an armed gesture is abandoned. */
 const RETURN_MS = 260;
 const PERCENT = 100;
-/** Resting kerf: a hairline, so the cut line reads as scored, not open. */
-const KERF_MIN_PX = 1;
-const KERF_GROWTH_PX = 3;
-const KERF_SEVERED_PX = 12;
-
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
 export function CutToConfirm({
@@ -109,6 +114,7 @@ export function CutToConfirm({
 	label,
 	onAbort,
 	onConfirm,
+	onTearStart,
 	renderHint,
 	resetKey,
 	threshold = DEFAULT_THRESHOLD,
@@ -118,17 +124,17 @@ export function CutToConfirm({
 	const gripRef = useRef<HTMLDivElement>(null);
 	const [progress, setProgress] = useState(0);
 	const [dragging, setDragging] = useState(false);
-	const [severed, setSevered] = useState(false);
-	const [width, setWidth] = useState(0);
+	const [torn, setTorn] = useState(false);
+	const [size, setSize] = useState({ height: 0, width: 0 });
 	const [announcement, setAnnouncement] = useState("");
 
 	// The single-commit latch. `progress === 1` is not enough on its own: a fifth
-	// ArrowRight followed by a sixth, and a pointer release landing exactly at
-	// threshold while the sever animation is already running, both re-enter the
+	// ArrowDown followed by a sixth, and a pointer release landing exactly at
+	// threshold while the tear animation is already running, both re-enter the
 	// commit path with progress already at 1.
 	const committedRef = useRef(false);
 	const armTimerRef = useRef<number | null>(null);
-	const severTimerRef = useRef<number | null>(null);
+	const confirmAfterTearRef = useRef(false);
 	const progressRef = useRef(0);
 	const drag = useRef<{
 		armed: boolean;
@@ -147,15 +153,17 @@ export function CutToConfirm({
 		progressRef.current = progress;
 	}, [progress]);
 
-	// The card is sized by its own container, so the travel distance is only
+	// The card is sized by its own container, so the grip's down-track is only
 	// knowable at runtime — and it changes when the dialog reflows on a rotate.
 	useEffect(() => {
 		const root = rootRef.current;
 		if (!root) {
 			return;
 		}
-		setWidth(root.clientWidth);
-		const observer = new ResizeObserver(() => setWidth(root.clientWidth));
+		const measure = () =>
+			setSize({ height: root.clientHeight, width: root.clientWidth });
+		measure();
+		const observer = new ResizeObserver(measure);
 		observer.observe(root);
 		return () => observer.disconnect();
 	}, []);
@@ -165,39 +173,41 @@ export function CutToConfirm({
 			if (armTimerRef.current !== null) {
 				clearTimeout(armTimerRef.current);
 			}
-			if (severTimerRef.current !== null) {
-				clearTimeout(severTimerRef.current);
-			}
 		},
 		[]
 	);
 
-	// The blade's own travel, in px. The grip is a 44px object with a centre, so
-	// the distance the hand covers is the threshold width minus the grip — which
-	// keeps the grip fully inside the card at both ends instead of hanging off it.
-	const travelSpan = Math.max(1, width * threshold - GRIP_PX);
+	// Start at the perforation and pull the stub down. Keep the full grip inside
+	// the card at both ends, including before the first measure.
+	const gripStartY = Math.min(
+		Math.max(GRIP_PX / 2, size.height * TEAR_LINE_RATIO),
+		Math.max(GRIP_PX / 2, size.height - GRIP_PX / 2)
+	);
+	const gripEndY = Math.max(
+		gripStartY + 1,
+		Math.min(size.height * threshold, size.height - GRIP_PX / 2)
+	);
+	const travelSpan = Math.max(1, gripEndY - gripStartY);
 
 	const commit = useCallback(() => {
 		if (committedRef.current) {
 			return;
 		}
 		committedRef.current = true;
+		confirmAfterTearRef.current = false;
 		drag.current = null;
 		setDragging(false);
 		setProgress(1);
-		setSevered(true);
-		setAnnouncement("Cut complete.");
-		// Under reduced motion there is no sever to wait on: the request was for
+		setTorn(true);
+		setAnnouncement("Ticket stub torn free.");
+		onTearStart?.();
+		// Under reduced motion there is no tear to wait on: the request was for
 		// less movement, not for a slower confirmation.
 		if (reduceMotion) {
+			confirmAfterTearRef.current = true;
 			onConfirm();
-			return;
 		}
-		severTimerRef.current = window.setTimeout(() => {
-			severTimerRef.current = null;
-			onConfirm();
-		}, SEVER_MS);
-	}, [onConfirm, reduceMotion]);
+	}, [onConfirm, onTearStart, reduceMotion]);
 
 	const abort = useCallback(
 		(wasArmed: boolean) => {
@@ -206,17 +216,8 @@ export function CutToConfirm({
 				clearTimeout(armTimerRef.current);
 				armTimerRef.current = null;
 			}
-			// A pending sever is cleared too, even though every caller of `abort`
-			// already refuses to run once committed. Anything that resets the visual
-			// state must not be able to leave a live commit timer behind it: the copy
-			// under an aborted card says nothing happened, and a timer that outlives
-			// it makes that sentence a lie 420ms before the handoff.
-			if (severTimerRef.current !== null) {
-				clearTimeout(severTimerRef.current);
-				severTimerRef.current = null;
-			}
 			setDragging(false);
-			setSevered(false);
+			setTorn(false);
 			setProgress(0);
 			if (wasArmed) {
 				onAbort?.();
@@ -255,13 +256,10 @@ export function CutToConfirm({
 		if (resetKey === undefined) {
 			return;
 		}
-		if (severTimerRef.current !== null) {
-			clearTimeout(severTimerRef.current);
-			severTimerRef.current = null;
-		}
 		committedRef.current = false;
+		confirmAfterTearRef.current = false;
 		progressRef.current = 0;
-		setSevered(false);
+		setTorn(false);
 		setProgress(0);
 		setAnnouncement("");
 	}, [resetKey]);
@@ -271,16 +269,16 @@ export function CutToConfirm({
 			if (disabled || committedRef.current) {
 				return;
 			}
-			// Fail closed until the card has actually been measured. `width` is 0 on
+			// Fail closed until the card has actually been measured. `size` is 0 on
 			// the first paint (the ResizeObserver has not fired, and the dialog is
 			// still animating in), which collapses `travelSpan` to its 1px floor — a
-			// single pixel of travel would then read as a completed cut.
-			if (width < GRIP_PX * 2) {
+			// single pixel of travel would then read as a completed tear.
+			if (size.width < GRIP_PX * 2 || size.height < GRIP_PX * 2) {
 				return;
 			}
 			// The card behind the grip is a `still` PassCardShell, so it never claims
 			// the pointer — but the browser's own text/image drag still would, and
-			// swallow the moves the blade reads.
+			// swallow the moves the stub reads.
 			event.preventDefault();
 			event.currentTarget.setPointerCapture(event.pointerId);
 			drag.current = {
@@ -299,7 +297,7 @@ export function CutToConfirm({
 				}
 			}, armMs);
 		},
-		[armMs, disabled, width]
+		[armMs, disabled, size.height, size.width]
 	);
 
 	const handlePointerMove = useCallback(
@@ -312,9 +310,9 @@ export function CutToConfirm({
 			) {
 				return;
 			}
-			// The corridor is what separates a cut from a scroll: a finger that
-			// drifts off the line was never drawing a straight blade across a card.
-			if (Math.abs(event.clientY - current.startY) > corridorPx) {
+			// The corridor separates a tear from a sideways drift. A finger that
+			// leaves it was never pulling the stub free.
+			if (Math.abs(event.clientX - current.startX) > corridorPx) {
 				abort(current.armed);
 				return;
 			}
@@ -338,7 +336,7 @@ export function CutToConfirm({
 				current.moved = true;
 			}
 			const next = clamp01(
-				current.startProgress + (event.clientX - current.startX) / travelSpan
+				current.startProgress + (event.clientY - current.startY) / travelSpan
 			);
 			progressRef.current = next;
 			setProgress(next);
@@ -408,7 +406,7 @@ export function CutToConfirm({
 				step(-1);
 				return;
 			}
-			const delta = KEY_DELTAS[event.key];
+			const delta = KEY_DELTAS.get(event.key);
 			if (delta === undefined) {
 				return;
 			}
@@ -416,7 +414,7 @@ export function CutToConfirm({
 			// A HELD arrow is one keypress. Without this, the OS's repeat rate — not
 			// this component — decides how many of the five steps a single sustained
 			// press is worth, and under `prefers-reduced-motion` `commit` fires
-			// `onConfirm` synchronously, so there is not even a sever to notice.
+			// `onConfirm` synchronously, so there is not even a tear to notice.
 			if (event.repeat) {
 				return;
 			}
@@ -429,7 +427,7 @@ export function CutToConfirm({
 	// grip lives inside a Dialog whose dismiss listener sits on the document: a
 	// synthetic `stopPropagation` runs at React's root container, too late to keep
 	// the first Escape after arming from closing the whole dialog instead of
-	// resetting the blade. At rest it is left alone, so Escape still dismisses.
+	// resetting the stub. At rest it is left alone, so Escape still dismisses.
 	useEffect(() => {
 		const grip = gripRef.current;
 		if (!grip) {
@@ -438,8 +436,8 @@ export function CutToConfirm({
 		const onEscape = (event: KeyboardEvent) => {
 			// Committed is NOT armed. Past the commit there is nothing left to retreat
 			// from — the handoff is already scheduled — so Escape must fall through to
-			// the dialog's own dismiss rather than reset the blade and tell the user
-			// nothing was cancelled while the sever timer runs out behind the copy.
+			// the dialog's own dismiss rather than reset the stub and tell the user
+			// nothing was cancelled while the tear timer runs out behind the copy.
 			if (
 				event.key !== "Escape" ||
 				committedRef.current ||
@@ -461,90 +459,70 @@ export function CutToConfirm({
 	// is the number a user actually needs ("three more"), not the one they can
 	// already see on the card.
 	const stepsLeft = Math.max(0, Math.ceil((1 - progress) / STEP));
-	const gripX = GRIP_PX / 2 + progress * travelSpan;
-	const kerfPx = severed
-		? KERF_SEVERED_PX
-		: KERF_MIN_PX + progress * KERF_GROWTH_PX;
+	const confirmAfterTear = useCallback(() => {
+		if (!committedRef.current || confirmAfterTearRef.current) {
+			return;
+		}
+		confirmAfterTearRef.current = true;
+		onConfirm();
+	}, [onConfirm]);
+
+	const gripStyle: GripStyle = {
+		"--grip-left": `${size.width / 2}px`,
+		"--grip-top": `${gripStartY}px`,
+		"--grip-transform": `translate(-50%, calc(-50% + ${progress * travelSpan}px))`,
+		"--grip-transition":
+			dragging || reduceMotion
+				? undefined
+				: `transform ${RETURN_MS}ms ease-out, opacity ${RETURN_MS}ms ease-out`,
+	};
 
 	return (
 		<div className={cn("select-none", className)}>
-			{/* The blade's frame of reference is the CARD, not the component: the hint
-			    below would otherwise drag the cut line off centre by half its height,
-			    and the travel span would be measured against the wrong box. */}
+			{/* The grip's frame of reference is the card, keeping its down-track aligned
+			    with the perforation even though the hint sits below the card. */}
 			<div className="relative" ref={rootRef}>
-				{/* ONE live card, always. Two real halves would mean a second
-				    PassCardShell — a second metal-fx ring and a second warp GL context —
-				    and metal-fx asks an IntersectionObserver once whether an instance
-				    may paint and never revises it, so a ring created mid-animation can
-				    come up permanently blank. Two dead rings at the climax of the
-				    gesture is worse than a clean drop. The sanctioned route to true
-				    halves is rasterising first (`PassStudioHandle.exportStill()`), not
-				    cloning the live card. */}
-				<div
-					className={cn(
-						// Tailwind v4 writes `translate` and `rotate` as their own
-						// properties, so naming `transform` here would transition neither.
-						"transition-[translate,rotate,opacity,filter] ease-in",
-						severed &&
-							!reduceMotion &&
-							"translate-y-8 rotate-[1.2deg] opacity-0 blur-[2px]"
-					)}
-					style={{ transitionDuration: `${SEVER_MS}ms` }}
+				<TearTicket
+					durationMs={TEAR_MS}
+					onTearComplete={confirmAfterTear}
+					progress={progress}
+					stubLabel="cancel"
+					torn={torn}
 				>
 					{children}
-				</div>
-
-				{/* The cut line: a scored guide across the card, and the kerf the blade
-				    has actually opened so far. Both are decoration over the card — the
-				    control is the grip. */}
-				<div
-					aria-hidden="true"
-					className="pointer-events-none absolute inset-x-0 top-1/2"
-				>
-					<div className="absolute inset-x-0 top-0 -translate-y-1/2 border-destructive/30 border-t border-dashed" />
-					<div
-						className="absolute top-0 left-0 -translate-y-1/2 rounded-full bg-black/70 shadow-[0_0_14px_rgba(0,0,0,0.55)] transition-[height,width]"
-						style={{
-							height: `${kerfPx}px`,
-							transitionDuration: severed ? `${SEVER_MS}ms` : "0ms",
-							width: severed ? "100%" : `${gripX}px`,
-						}}
-					/>
-				</div>
+				</TearTicket>
 
 				<div
 					aria-disabled={disabled || undefined}
 					aria-label={label}
+					aria-orientation="vertical"
 					aria-valuemax={PERCENT}
 					aria-valuemin={0}
 					aria-valuenow={percent}
 					aria-valuetext={
 						stepsLeft === 0
-							? "Cut through."
-							: `${percent}% cut. ${stepsLeft} more ${
+							? "Stub detached."
+							: `${percent}% torn. ${stepsLeft} more ${
 									stepsLeft === 1
 										? "tap or arrow press"
 										: "taps or arrow presses"
-								} to cut through.`
+								} to tear the stub free.`
 					}
 					className={cn(
-						"absolute top-1/2 flex size-11 items-center justify-center rounded-full",
+						"absolute left-1/2 flex size-11 items-center justify-center rounded-full",
 						// The hit area is DELIBERATELY bigger than the grip, and the margin
 						// is not comfort — it is what makes the tap route usable. One step
-						// carries the grip 0.2 × travelSpan, which on the 19rem card the
-						// cancel dialog uses is 47px: further than the grip's own 44px, so
-						// a second tap aimed at the same spot would land on the card and do
-						// nothing. Someone driving a head pointer or eye tracker — the
-						// population WCAG 2.5.7 exists for — would have to re-acquire a
-						// moving 44px target five times. 64px of target always overlaps the
-						// step, at every card width the dialog can produce.
+						// carries the grip about 12px on the 19rem cancel card. A 64px
+						// target overlaps the next position, so someone using a head pointer
+						// or eye tracker can tap the same area through all five steps.
+						styles.grip,
 						"before:absolute before:-inset-2.5 before:rounded-full before:content-['']",
 						"border border-destructive/50 bg-background/90 text-status-destructive shadow-lg backdrop-blur-sm",
 						"outline-none focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2",
 						disabled
 							? "pointer-events-none opacity-40"
-							: "cursor-ew-resize hover:border-destructive",
-						severed && "opacity-0"
+							: "cursor-ns-resize hover:border-destructive",
+						torn && "opacity-0"
 					)}
 					onKeyDown={handleKeyDown}
 					onPointerCancel={handlePointerCancel}
@@ -553,21 +531,10 @@ export function CutToConfirm({
 					onPointerUp={handlePointerUp}
 					ref={gripRef}
 					role="slider"
-					style={{
-						left: `${gripX}px`,
-						// Only the GRIP claims the touch gesture. `touch-action: none` on
-						// the wrapper would stop the dialog scrolling under a finger that
-						// never went near the blade.
-						touchAction: "none",
-						transform: "translate(-50%, -50%)",
-						transition:
-							dragging || reduceMotion
-								? undefined
-								: `left ${RETURN_MS}ms ease-out, opacity ${RETURN_MS}ms ease-out`,
-					}}
+					style={gripStyle}
 					tabIndex={disabled ? -1 : 0}
 				>
-					<Scissors className="size-4" />
+					<Ticket className="size-4" />
 				</div>
 			</div>
 

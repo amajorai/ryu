@@ -3,295 +3,174 @@
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	BookOpen,
-	ChevronUp,
+	CircleUserRound,
 	Download,
-	Home,
-	Package,
-	Target,
-	X,
+	LayoutGrid,
+	Store,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import type { Route } from "next";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
+import type { ComponentType, ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import type { MobileNavSheetsProps } from "./mobile-nav-sheet.tsx";
 import {
-	PRODUCT_NAV_GROUPS,
-	PRODUCT_REALMS,
-	productRealmsFor,
-} from "./data/product-realms.ts";
-import {
-	DOCS_URL,
-	resourceCategories,
-	resourcesByCategory,
-} from "./data/resources.tsx";
-import { solutionCategories, solutionsByCategory } from "./data/solutions.ts";
+	focusableElements,
+	NO_HIDDEN_PRODUCTS,
+	SHEET_TITLES,
+	type SheetKey,
+} from "./mobile-nav-sheet-data.ts";
 import { ProgressiveBlur } from "./progressive-blur.tsx";
+import "./mobile-nav.css";
 
-// The mobile bottom nav mirrors the desktop header's primary navigation:
-// Products, Solutions, and Resources are the same mega-menu groups (fed from the
-// same data files), but tapping them opens a bottom sheet instead of a hover
-// dropdown. Marketplace/Book a demo/Sign in stay in the header, while Open Source
-// stays in the footer — the bottom bar only carries destinations a visitor reaches
-// for every page.
+export {
+	PRODUCT_SHEET,
+	RESOURCE_SHEET,
+	type SheetGroup,
+	type SheetLinkData,
+} from "./mobile-nav-sheet-data.ts";
+
+// The animated sheet (and motion with it) loads on the first open or on intent
+// to open. A failed chunk load leaves the tabs inert instead of handing the
+// rejection to the route's error boundary.
+const MobileNavSheets = lazy<ComponentType<MobileNavSheetsProps>>(() =>
+	import("./mobile-nav-sheet.tsx").catch(() => ({ default: NoSheets }))
+);
+
+function NoSheets() {
+	return null;
+}
+
+// The mobile bottom nav mirrors the desktop header: Products and Resources are
+// the same menu groups (fed from the same data files) opened as a sheet instead
+// of a hover dropdown, Download is the header's primary CTA, and Account is the
+// header's user menu. Marketplace keeps its own tab. Enterprise keeps its slot
+// in the mobile top bar and the logo stays the way home, as on desktop. The bar
+// is symmetric: two tabs, the raised Download action, two tabs.
 const RESOURCE_ACTIVE_PREFIXES = [
-	"/docs",
+	"/pricing",
+	"/gifts",
 	"/academy",
 	"/certifications",
-	"/marketplace",
-	"/compare",
-	"/pricing",
-	"/subscriptions",
-	"/community",
+	"/guides",
+	"/help",
 	"/blog",
 	"/changelog",
-	"/help",
+	"/stories",
+	"/challenges",
+	"/compare",
+	"/community",
+	"/perks",
 ];
 
-const PRODUCT_SHEET = [
-	...PRODUCT_NAV_GROUPS.map((group, index) => ({
-		title: group.title,
-		links: [
-			...productRealmsFor(group.ids).map(({ label, href }) => ({
-				label,
-				href,
-				external: false,
-			})),
-			...(index === 2
-				? [
-						{
-							label: "Ryu Apps",
-							href: "/products/apps",
-							external: false,
-						},
-					]
-				: []),
-		],
-	})),
-	{
-		title: "Platform",
-		links: [
-			...PRODUCT_REALMS.filter((realm) => realm.id === "gateway").map(
-				({ label, href }) => ({ label, href, external: false })
-			),
-			{ label: "SDKs", href: "/products/sdk", external: false },
-			{ label: "Core", href: "/products/core", external: false },
-		],
-	},
-	{
-		title: "Infrastructure",
-		links: [
-			{ label: "Ryu Cloud", href: "/platform#infra", external: false },
-			{ label: "Self-hosted", href: "/platform#infra", external: false },
-		],
-	},
-] as const;
-
-const SOLUTION_SHEET = solutionCategories.map((category) => ({
-	title: category,
-	links: solutionsByCategory(category).map((solution) => ({
-		label: solution.navLabel,
-		href: `/for/${solution.slug}`,
-		external: false,
-	})),
-}));
-
-const RESOURCE_SHEET = resourceCategories.map((category) => ({
-	title: category,
-	links: resourcesByCategory(category).map((resource) => ({
-		label: resource.label,
-		href: resource.href,
-		external: resource.external ?? false,
-	})),
-}));
-
-const SHEET_TITLES = {
-	products: "Products",
-	solutions: "Solutions",
-	resources: "Resources",
-} as const;
-
-const SHEET_FOOTERS = {
-	products: {
-		label: "Explore all products →",
-		href: "/products",
-		external: false,
-	},
-	solutions: { label: "View all roles →", href: "/for", external: false },
-	resources: { label: "Read the docs →", href: DOCS_URL, external: true },
-} as const;
-
-type SheetKey = keyof typeof SHEET_TITLES;
-type TabKey = "home" | SheetKey | "download";
-
-const FOCUSABLE_SELECTOR =
-	'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-function focusableElements(root: HTMLElement): HTMLElement[] {
-	return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-}
+type TabKey = SheetKey | "marketplace" | "download";
 
 interface MobileNavProps {
+	/**
+	 * The right-most tab. Hosts pass their account menu here, rendered with
+	 * `mobileNavTabClassName` and `MobileNavTabBody` so it lines up with the
+	 * other tabs. Without one, the tab is a plain sign-in link.
+	 */
+	account?: ReactNode;
 	className?: string;
+	/**
+	 * Product realm ids the host has not rolled out (a standalone service whose
+	 * rollout flag is off). They are dropped from the Products sheet.
+	 */
+	hiddenProductIds?: readonly string[];
 }
 
+function isPathWithin(pathname: string, prefix: string): boolean {
+	return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+// Same routes the desktop header's Products trigger highlights for.
 function isTabActive(key: TabKey, pathname: string): boolean {
 	switch (key) {
-		case "home":
-			return pathname === "/";
 		case "products":
 			return (
+				isPathWithin(pathname, "/products") ||
 				pathname === "/bot" ||
-				pathname === "/console" ||
-				pathname === "/build" ||
-				pathname === "/platform" ||
-				pathname.startsWith("/products/apps")
+				pathname === "/agent" ||
+				pathname === "/platform"
 			);
-		case "solutions":
-			return pathname.startsWith("/for");
 		case "resources":
 			return RESOURCE_ACTIVE_PREFIXES.some((prefix) =>
-				pathname.startsWith(prefix)
+				isPathWithin(pathname, prefix)
 			);
+		case "marketplace":
+			return isPathWithin(pathname, "/marketplace");
 		case "download":
-			return pathname.startsWith("/download");
+			return isPathWithin(pathname, "/download");
 	}
 }
 
-function SheetLink({
-	external = false,
-	href,
-	label,
-	onClose,
-	primary = false,
-}: {
-	external?: boolean;
-	href: string;
-	label: string;
-	onClose: () => void;
-	primary?: boolean;
-}) {
-	const className = cn(
-		"block rounded-lg px-1.5 py-1.5 text-sm transition-colors",
-		primary
-			? "font-medium text-foreground hover:text-accent-foreground"
-			: "text-muted-foreground hover:bg-muted hover:text-foreground"
+/**
+ * Shared tab metrics: every tab is the same column, with a 24px icon box and a
+ * label on one baseline, so an avatar, an icon, and a menu trigger all line up.
+ */
+export function mobileNavTabClassName(active = false): string {
+	return cn(
+		"flex h-full w-full flex-col items-center justify-center gap-1 rounded-xl outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+		active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
 	);
-	if (external) {
-		return (
-			<a
-				className={className}
-				href={href}
-				onClick={onClose}
-				rel="noopener noreferrer"
-				target="_blank"
-			>
-				{label}
-			</a>
-		);
-	}
+}
+
+export function MobileNavTabBody({
+	icon,
+	label,
+}: {
+	icon: ReactNode;
+	label: ReactNode;
+}) {
 	return (
-		<Link className={className} href={href as Route} onClick={onClose}>
-			{label}
+		<>
+			<span
+				aria-hidden="true"
+				className="flex size-6 items-center justify-center [&_svg]:size-5"
+			>
+				{icon}
+			</span>
+			<span className="font-medium text-xs leading-none">{label}</span>
+		</>
+	);
+}
+
+/** The account tab for a signed-out visitor. */
+export function MobileNavSignInTab() {
+	return (
+		<Link className={mobileNavTabClassName()} href="/login">
+			<MobileNavTabBody icon={<CircleUserRound />} label="Sign in" />
 		</Link>
 	);
 }
 
-function Sheet({
-	dialogRef,
-	kind,
-	onClose,
-}: {
-	dialogRef: RefObject<HTMLDivElement | null>;
-	kind: SheetKey;
-	onClose: () => void;
-}) {
-	const groups =
-		kind === "products"
-			? PRODUCT_SHEET
-			: kind === "solutions"
-				? SOLUTION_SHEET
-				: RESOURCE_SHEET;
-	const footer = SHEET_FOOTERS[kind];
-	return (
-		<div
-			aria-labelledby={`${kind}-mobile-nav-title`}
-			aria-modal="true"
-			className="border-border/60 border-b bg-background px-4 pt-3 pb-2 shadow-2xl"
-			id="mobile-nav-sheet"
-			ref={dialogRef}
-			role="dialog"
-			tabIndex={-1}
-		>
-			<div className="mb-2 flex items-center justify-between">
-				<p className="font-medium text-lg" id={`${kind}-mobile-nav-title`}>
-					{SHEET_TITLES[kind]}
-				</p>
-				<button
-					aria-label={`Close ${SHEET_TITLES[kind]} menu`}
-					className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-					onClick={onClose}
-					type="button"
-				>
-					<X className="size-4" />
-				</button>
-			</div>
-			<div className="max-h-[60vh] overflow-y-auto pr-1">
-				{groups.map((group) => (
-					<div className="mb-3" key={group.title}>
-						<p className="mb-1 px-1.5 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-							{group.title}
-						</p>
-						<div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-							{group.links.map((link) => (
-								<SheetLink
-									external={link.external}
-									href={link.href}
-									key={`${link.href}-${link.label}`}
-									label={link.label}
-									onClose={onClose}
-								/>
-							))}
-						</div>
-					</div>
-				))}
-			</div>
-			<div className="mt-1 border-border/60 border-t pt-2 pb-1">
-				<SheetLink
-					external={footer.external}
-					href={footer.href}
-					label={footer.label}
-					onClose={onClose}
-					primary
-				/>
-			</div>
-		</div>
-	);
-}
-
-export function MobileNav({ className }: MobileNavProps) {
+export function MobileNav({
+	account,
+	className,
+	hiddenProductIds = NO_HIDDEN_PRODUCTS,
+}: MobileNavProps) {
 	const pathname = usePathname();
 	const [open, setOpen] = useState<SheetKey | null>(null);
 	const dialogRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
 	const wasOpen = useRef(false);
+	// Whether the sheet module has been asked for: on the first open, or earlier
+	// when a pointer or focus lands on a sheet tab.
+	const [sheetsRequested, setSheetsRequested] = useState(false);
+	const requestSheets = () => setSheetsRequested(true);
 
 	// A navigation closes any open sheet — the destination is already chosen.
 	useEffect(() => {
 		setOpen(null);
 	}, [pathname]);
 
-	// Move focus into the sheet when it opens, and back to the button that opened
-	// it when it closes. This keeps keyboard users in the same navigation context
-	// instead of leaving focus behind the scrim.
+	// The sheet moves focus into itself when it opens (it may still be loading
+	// here); on close, focus goes back to the button that opened it. This keeps
+	// keyboard users in the same navigation context instead of leaving focus
+	// behind the scrim.
 	useEffect(() => {
 		if (open) {
 			wasOpen.current = true;
-			const first = dialogRef.current
-				? focusableElements(dialogRef.current)[0]
-				: undefined;
-			first?.focus();
 			return;
 		}
 		if (wasOpen.current) {
@@ -340,109 +219,85 @@ export function MobileNav({ className }: MobileNavProps) {
 	const toggle = (key: SheetKey) =>
 		setOpen((current) => (current === key ? null : key));
 
-	const tabClass = (active: boolean) =>
-		cn(
-			"relative flex w-full flex-col items-center justify-center gap-1 rounded-lg py-2 transition-colors",
-			active ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+	const sheetTab = (key: SheetKey, icon: ReactNode) => {
+		const isOpen = open === key;
+		return (
+			<button
+				aria-controls="mobile-nav-sheet"
+				aria-expanded={isOpen}
+				className={mobileNavTabClassName(isOpen || isTabActive(key, pathname))}
+				onClick={(event) => {
+					triggerRef.current = event.currentTarget;
+					requestSheets();
+					toggle(key);
+				}}
+				onFocus={requestSheets}
+				onPointerEnter={requestSheets}
+				onTouchStart={requestSheets}
+				type="button"
+			>
+				<MobileNavTabBody icon={icon} label={SHEET_TITLES[key]} />
+			</button>
 		);
+	};
+
+	const marketplaceActive = isTabActive("marketplace", pathname);
+	const downloadActive = isTabActive("download", pathname);
 
 	return (
 		<div
 			className={cn("fixed right-0 bottom-0 left-0 z-50 md:hidden", className)}
+			data-mobile-nav=""
+			data-sheet-open={open ? "" : undefined}
 		>
-			<AnimatePresence>
-				{open ? (
-					<motion.button
-						animate={{ opacity: 1 }}
-						aria-label="Close menu"
-						className="fixed inset-0 z-30 bg-black/40"
-						exit={{ opacity: 0 }}
-						initial={{ opacity: 0 }}
-						key="backdrop"
-						onClick={() => setOpen(null)}
-						type="button"
+			{sheetsRequested ? (
+				<Suspense fallback={null}>
+					<MobileNavSheets
+						dialogRef={dialogRef}
+						hiddenProductIds={hiddenProductIds}
+						onClose={() => setOpen(null)}
+						open={open}
 					/>
-				) : null}
-				{open ? (
-					<motion.div
-						animate={{ opacity: 1, y: 0 }}
-						className="absolute right-0 bottom-full left-0 z-50"
-						exit={{ opacity: 0, y: 24 }}
-						initial={{ opacity: 0, y: 24 }}
-						key="sheet"
-						transition={{ duration: 0.2, ease: "easeOut" }}
-					>
-						<Sheet
-							dialogRef={dialogRef}
-							kind={open}
-							onClose={() => setOpen(null)}
-						/>
-					</motion.div>
-				) : null}
-			</AnimatePresence>
+				</Suspense>
+			) : null}
 
-			<div className="relative h-20">
-				<ProgressiveBlur
-					blurAmount="24px"
-					height="80px"
-					position="bottom"
-					useThemeBackground
-				/>
-				<nav
-					aria-label="Mobile navigation"
-					className="relative z-40 grid h-full grid-cols-5 items-center"
-				>
-					<Link className={tabClass(isTabActive("home", pathname))} href="/">
-						<Home className="size-5" />
-						<span className="text-xs">Home</span>
-					</Link>
+			{/* The bar has no surface of its own: the progressive blur behind it
+			    fades the page out under the tabs instead of a solid band. */}
+			<ProgressiveBlur
+				blurAmount="24px"
+				height="calc(8rem + env(safe-area-inset-bottom))"
+				position="bottom"
+			/>
+			<nav
+				aria-label="Mobile navigation"
+				className="relative z-40 box-content grid h-16 grid-cols-5 items-stretch px-2 pb-[env(safe-area-inset-bottom)]"
+			>
+				{sheetTab("products", <LayoutGrid />)}
+				{sheetTab("resources", <BookOpen />)}
 
-					{(
-						[
-							{ key: "products", icon: Package },
-							{ key: "solutions", icon: Target },
-							{ key: "resources", icon: BookOpen },
-						] as const
-					).map(({ key, icon: Icon }) => {
-						const isOpen = open === key;
-						return (
-							<button
-								aria-controls="mobile-nav-sheet"
-								aria-expanded={isOpen}
-								className={tabClass(isOpen || isTabActive(key, pathname))}
-								key={key}
-								onClick={(event) => {
-									triggerRef.current = event.currentTarget;
-									toggle(key);
-								}}
-								type="button"
-							>
-								<Icon className="size-5" />
-								<span className="text-xs">{SHEET_TITLES[key]}</span>
-								<ChevronUp
-									className={cn(
-										"absolute bottom-1 size-3 transition-transform",
-										isOpen ? "rotate-180" : ""
-									)}
-								/>
-							</button>
-						);
-					})}
-
+				<div className="relative flex justify-center">
 					<Link
-						className={cn(
-							tabClass(isTabActive("download", pathname)),
-							"relative"
-						)}
+						aria-current={downloadActive ? "page" : undefined}
+						className="absolute -top-5 flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg outline-none transition-transform focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-95"
 						href="/download"
 					>
-						<span className="flex h-8 w-14 items-center justify-center rounded-full bg-foreground text-background">
-							<Download className="size-5" />
-						</span>
-						<span className="text-xs">Download</span>
+						<Download aria-hidden="true" className="size-6" />
+						<span className="sr-only">Download</span>
 					</Link>
-				</nav>
-			</div>
+				</div>
+
+				<Link
+					aria-current={marketplaceActive ? "page" : undefined}
+					className={mobileNavTabClassName(marketplaceActive)}
+					href="/marketplace"
+				>
+					<MobileNavTabBody icon={<Store />} label="Marketplace" />
+				</Link>
+
+				<div className="flex" data-testid="mobile-account-menu">
+					{account ?? <MobileNavSignInTab />}
+				</div>
+			</nav>
 		</div>
 	);
 }

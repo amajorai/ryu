@@ -30,7 +30,7 @@ pub fn ytdlp_bin_path() -> PathBuf {
     } else {
         "yt-dlp"
     };
-    crate::paths::ryu_dir().join("bin").join(name)
+    crate::paths::bin_dir().join(name)
 }
 
 /// A downloaded video plus any captions yt-dlp pulled alongside it.

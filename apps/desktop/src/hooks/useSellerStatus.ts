@@ -17,6 +17,7 @@ import {
 	type SellerError,
 	type SellerStatus,
 	startOnboarding,
+	toSellerError,
 } from "@/src/lib/api/seller.ts";
 
 interface UseSellerStatus {
@@ -57,7 +58,7 @@ export function useSellerStatus(): UseSellerStatus {
 			setStatus(data);
 			setError(null);
 		} catch (e) {
-			setError(e as SellerError);
+			setError(toSellerError(e));
 		} finally {
 			setLoading(false);
 		}

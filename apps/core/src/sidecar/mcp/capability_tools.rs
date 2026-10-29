@@ -1,5 +1,6 @@
 //! The **capability tool facade** — stable, provider-independent tool ids for the
-//! hot-swappable layers (search, extract, crawl, browser, computer-use, memory).
+//! hot-swappable layers (search, extract, crawl, browser, computer-use, memory,
+//! verification).
 //!
 //! ## Why this exists
 //!
@@ -72,6 +73,10 @@ pub const SERVER_BROWSER: &str = "browser";
 pub const SERVER_COMPUTER: &str = "computer";
 /// Reserved server name for the memory layer.
 pub const SERVER_MEMORY: &str = "memory";
+/// Reserved server name for typed decision models.
+pub const SERVER_DECISION: &str = "decision";
+/// Reserved server name for the claim-verification layer.
+pub const SERVER_VERIFY: &str = "verify";
 
 /// Capability name for web search.
 pub const CAP_WEB_SEARCH: &str = "web.search";
@@ -85,10 +90,21 @@ pub const CAP_BROWSER: &str = "browser.control";
 pub const CAP_COMPUTER: &str = "computer.control";
 /// Capability name for the memory layer.
 pub const CAP_MEMORY: &str = "memory";
+/// Capability name for the typed decision-model layer.
+pub const CAP_DECISION_TYPED: &str = "decision.typed";
+/// Capability name for the claim-verification layer.
+pub const CAP_VERIFY: &str = "verify.claim";
 
 /// Every reserved server name this module owns. Used by the registry's
 /// `contains_server` / summary paths so a plugin cannot squat one.
-pub const SERVERS: &[&str] = &[SERVER_WEB, SERVER_BROWSER, SERVER_COMPUTER, SERVER_MEMORY];
+pub const SERVERS: &[&str] = &[
+    SERVER_WEB,
+    SERVER_BROWSER,
+    SERVER_COMPUTER,
+    SERVER_MEMORY,
+    SERVER_DECISION,
+    SERVER_VERIFY,
+];
 
 /// Whether `name` is one of the facade's reserved server names.
 pub fn is_server(name: &str) -> bool {
@@ -115,6 +131,15 @@ pub fn server_description(name: &str) -> Option<&'static str> {
         SERVER_MEMORY => Some(
             "Swappable memory layer: search, store, and forget durable facts. The built-in store \
              is always available; an external provider can be selected alongside it.",
+        ),
+        SERVER_DECISION => Some(
+            "Swappable typed-decision model layer: ask choice, score, or boolean questions about \
+             a text or JSON state and receive structured answers.",
+        ),
+        SERVER_VERIFY => Some(
+            "Swappable verification layer: check a claim against a source of truth and get a \
+             verdict (proved, refuted, undecided, inconsistent, or unverifiable) with the \
+             evidence that decided it. Which checker answers is selected in the layer picker.",
         ),
         _ => None,
     }
@@ -145,6 +170,118 @@ fn schema_search() -> Value {
             "limit": { "type": "integer", "description": "Maximum number of results (default 10).", "minimum": 1, "maximum": 100 }
         },
         "required": ["query"]
+    })
+}
+
+fn schema_decision_predict() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "state": {
+                "description": "The text, JSON object, or list to reason about.",
+                "oneOf": [
+                    { "type": "string" },
+                    { "type": "object" },
+                    { "type": "array" }
+                ]
+            },
+            "questions": {
+                "type": "object",
+                "description": "Question ids mapped to typed choice, score, or yes/no definitions.",
+                "additionalProperties": { "type": "object" }
+            },
+            "model": {
+                "type": "string",
+                "description": "Optional provider-specific model id. Omit to use the selected provider's default."
+            }
+        },
+        "required": ["state", "questions"]
+    })
+}
+
+fn schema_decision_predict_multimodal() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "state": {
+                "description": "The text, JSON object, or list to reason about.",
+                "oneOf": [
+                    { "type": "string" },
+                    { "type": "object" },
+                    { "type": "array" }
+                ]
+            },
+            "questions": {
+                "type": "object",
+                "description": "Question ids mapped to typed choice, score, or yes/no definitions.",
+                "additionalProperties": { "type": "object" }
+            },
+            "images": {
+                "type": "array",
+                "description": "Up to four embedded PNG, JPEG, or WebP images. Remote URLs are not accepted; use a data URL or {content_type, base64}.",
+                "maxItems": 4,
+                "items": {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "pattern": "^[Dd][Aa][Tt][Aa]:image/(png|jpeg|webp);base64,"
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "content_type": { "type": "string", "enum": ["image/png", "image/jpeg", "image/webp"] },
+                                "base64": { "type": "string" }
+                            },
+                            "required": ["content_type", "base64"]
+                        }
+                    ]
+                }
+            },
+            "model": {
+                "type": "string",
+                "description": "Optional provider-specific model id. Omit to use the selected provider's default."
+            }
+        },
+        "required": ["state", "questions"]
+    })
+}
+
+/// The verification verdict vocabulary every `verify.claim` provider maps onto.
+///
+/// Five values, not pass/fail, for the same reason the reasoning solver has seven:
+/// "the source does not settle it" and "this could not be checked" are different
+/// situations from "this is false", and a checker that collapses them reports
+/// unverified text as verified. `unverifiable` covers every case where no verdict
+/// was reached for the whole claim (nothing formalizable, only part of it
+/// formalizable, ambiguous readings, a budget ran out, no matching scope) and must
+/// never be read as approval. `proved` means every part of the claim was checked
+/// and entailed.
+pub const VERIFY_VERDICTS: &[&str] = &[
+    "proved",
+    "refuted",
+    "undecided",
+    "inconsistent",
+    "unverifiable",
+];
+
+fn schema_verify_claim() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "claim": {
+                "type": "string",
+                "description": "The statement or answer to check, in plain language."
+            },
+            "question": {
+                "type": "string",
+                "description": "Optional: what was asked. Supplies the facts the claim is checked under."
+            },
+            "scope": {
+                "type": "string",
+                "description": "Optional: which source of truth to check against, as an id from verify.scopes. Omit when only one scope exists."
+            }
+        },
+        "required": ["claim"]
     })
 }
 
@@ -181,6 +318,7 @@ fn schema_browser_navigate() -> Value {
     // offering it, since the model cannot tell the difference from the result.
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "url": { "type": "string", "description": "URL to open in a new browser tab." }
         },
@@ -196,6 +334,7 @@ fn schema_browser_tab_only() -> Value {
     // first; both return the id.
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "tab_id": { "type": "string", "description": "Target tab id, from browser.tabs or browser.navigate." }
         },
@@ -206,6 +345,7 @@ fn schema_browser_tab_only() -> Value {
 fn schema_browser_click() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "ref": { "type": "string", "description": "Element reference from a prior browser.snapshot (e.g. \"@e3\")." },
             "tab_id": { "type": "string", "description": "Target tab; omit for the active tab." }
@@ -217,6 +357,7 @@ fn schema_browser_click() -> Value {
 fn schema_browser_type() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "ref": { "type": "string", "description": "Element reference from a prior browser.snapshot." },
             "text": { "type": "string", "description": "Text to type into the element." },
@@ -231,6 +372,7 @@ fn schema_browser_type() -> Value {
 fn schema_browser_scroll() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "direction": { "type": "string", "enum": ["up", "down", "left", "right"] },
             "amount": { "type": "integer", "description": "Scroll distance in pixels (provider default when omitted)." },
@@ -243,6 +385,7 @@ fn schema_browser_scroll() -> Value {
 fn schema_browser_context() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "tab_id": { "type": "string", "description": "Target tab id." },
             "include_screenshot": { "type": "boolean", "description": "Include the current PNG frame; set false for a text-only context refresh." },
@@ -269,6 +412,7 @@ fn schema_browser_context() -> Value {
 fn schema_browser_annotate() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "tab_id": { "type": "string", "description": "Target tab id." },
             "kind": { "type": "string", "enum": ["area", "element", "elements"] },
@@ -284,6 +428,7 @@ fn schema_browser_annotate() -> Value {
 fn schema_browser_hover() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "ref": { "type": "string", "description": "Element reference from browser.snapshot." },
             "tab_id": { "type": "string", "description": "Target tab; omit for the active tab." }
@@ -295,6 +440,7 @@ fn schema_browser_hover() -> Value {
 fn schema_browser_click_at() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "x": { "type": "number", "description": "Viewport x coordinate in CSS pixels." },
             "y": { "type": "number", "description": "Viewport y coordinate in CSS pixels." },
@@ -309,6 +455,7 @@ fn schema_browser_click_at() -> Value {
 fn schema_browser_key() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "keys": { "type": "array", "description": "Key tokens pressed together, e.g. [\"cmd\", \"l\"] or [\"Escape\"].", "items": { "type": "string" } },
             "tab_id": { "type": "string", "description": "Target tab; omit for the active tab." }
@@ -320,6 +467,7 @@ fn schema_browser_key() -> Value {
 fn schema_browser_drag() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "from": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" } }, "required": ["x", "y"] },
             "to": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" } }, "required": ["x", "y"] },
@@ -335,12 +483,13 @@ fn schema_computer_capture() -> Value {
     // silently ignore is worse than not offering it, because the model cannot tell
     // from the result which mode it actually got. (Ghost, the only provider today,
     // always returns set-of-mark output — an image plus an indexed element list.)
-    json!({ "type": "object", "properties": {} })
+    json!({ "type": "object", "properties": {}, "additionalProperties": false })
 }
 
 fn schema_computer_click() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "x": { "type": "integer", "description": "Screen x coordinate." },
             "y": { "type": "integer", "description": "Screen y coordinate." },
@@ -354,6 +503,7 @@ fn schema_computer_click() -> Value {
 fn schema_computer_type() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": { "text": { "type": "string", "description": "Text to type at the current focus." } },
         "required": ["text"]
     })
@@ -367,6 +517,7 @@ fn schema_computer_key() -> Value {
     // mapping can express, so a string here would be unserveable by construction.
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "keys": {
                 "type": "array",
@@ -381,6 +532,7 @@ fn schema_computer_key() -> Value {
 fn schema_computer_scroll() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": {
             "x": { "type": "integer", "description": "Screen x to scroll at. Strongly recommended: a provider that has no coordinate falls back to a fixed point, which may not be over the content you mean." },
             "y": { "type": "integer", "description": "Screen y to scroll at. See `x`." },
@@ -394,9 +546,14 @@ fn schema_computer_scroll() -> Value {
 fn schema_computer_focus_app() -> Value {
     json!({
         "type": "object",
+        "additionalProperties": false,
         "properties": { "app": { "type": "string", "description": "Application name to bring to the front." } },
         "required": ["app"]
     })
+}
+
+fn schema_browser_tabs() -> Value {
+    json!({ "type": "object", "properties": {}, "additionalProperties": false })
 }
 
 fn schema_empty() -> Value {
@@ -473,8 +630,53 @@ fn schema_memory_forget() -> Value {
 /// Keep it that way when adding a verb: a verb no provider can serve is never
 /// advertised, so it fails silently rather than loudly. Before adding one, name the
 /// provider that will serve it and check the grammar can express its request shape.
+///
+/// Every verb is also one promoted capability in Ryu's capability taxonomy
+/// (`crates/gateway/contracts/fixtures/capability-taxonomy-v1.json`), with `layer`
+/// set to the verb's `capability`. Add the taxonomy row in the same change;
+/// `ryu-gw-contracts`' `capability_taxonomy_fixture` test reads this table and
+/// fails until it is there.
 pub fn verbs() -> &'static [Verb] {
     &[
+        Verb {
+            id: "decision.predict",
+            server: SERVER_DECISION,
+            name: "predict",
+            capability: CAP_DECISION_TYPED,
+            description: "Answer typed choice, score, or yes/no questions about a text or JSON state. Uses the currently selected Decision Models provider and returns structured answers rather than prose.",
+            schema: schema_decision_predict,
+        },
+        Verb {
+            id: "decision.predict_multimodal",
+            server: SERVER_DECISION,
+            name: "predict_multimodal",
+            capability: CAP_DECISION_TYPED,
+            description: "Answer typed questions about a text or JSON state plus embedded images. This verb appears only when the selected Decision Models provider supports image inputs.",
+            schema: schema_decision_predict_multimodal,
+        },
+        Verb {
+            id: "verify.claim",
+            server: SERVER_VERIFY,
+            name: "claim",
+            capability: CAP_VERIFY,
+            description: "Check a plain-language claim against a source of truth and return a \
+                          verdict: proved (the source entails it), refuted (the source contradicts \
+                          it, with a counterexample), undecided (consistent but not implied), \
+                          inconsistent (the source contradicts itself), or unverifiable (no verdict \
+                          covers the whole claim, as when only part of it could be checked). Only \
+                          `proved` means the claim is backed. Backed by the currently selected \
+                          verification provider.",
+            schema: schema_verify_claim,
+        },
+        Verb {
+            id: "verify.scopes",
+            server: SERVER_VERIFY,
+            name: "scopes",
+            capability: CAP_VERIFY,
+            description: "List the sources of truth verify.claim can check against, with their ids, \
+                          names, and descriptions.",
+            schema: schema_empty,
+        },
         Verb {
             id: "web.search",
             server: SERVER_WEB,
@@ -562,7 +764,7 @@ pub fn verbs() -> &'static [Verb] {
             name: "tabs",
             capability: CAP_BROWSER,
             description: "List the open browser tabs with their ids, urls, and titles.",
-            schema: schema_empty,
+            schema: schema_browser_tabs,
         },
         Verb {
             id: "browser.context",
@@ -724,6 +926,29 @@ pub fn verbs() -> &'static [Verb] {
 pub fn verb_by_id(id: &str) -> Option<&'static Verb> {
     let normalized = super::canonical_tool_id(id);
     verbs().iter().find(|v| v.id == normalized)
+}
+
+/// Whether `id` is a machine verb: a `computer.*` or `browser.*` verb, which a
+/// conversation with a session Box runs on that Box instead of the node.
+pub fn is_machine_verb(id: &str) -> bool {
+    verb_by_id(id).is_some_and(|verb| MACHINE_CAPABILITIES.contains(&verb.capability))
+}
+
+/// Capabilities where "swap the provider" changes WHICH MACHINE is acted on, not
+/// merely who answers. Every provider of one of these must say what it drives.
+pub const MACHINE_CAPABILITIES: [&str; 2] = [CAP_COMPUTER, CAP_BROWSER];
+
+/// The machine-control providers Core serves itself rather than through a
+/// plugin manifest, as `(provider id, capability, target)`: the session Box,
+/// which runs `computer.*` and `browser.*` on a conversation's own Box screen.
+pub fn core_machine_providers(
+) -> Vec<(String, &'static str, crate::plugin_manifest::ProviderTarget)> {
+    let descriptor = super::box_desktop::provider_descriptor();
+    descriptor
+        .capabilities
+        .iter()
+        .map(|capability| (descriptor.id.to_owned(), *capability, descriptor.target))
+        .collect()
 }
 
 /// The preference key holding the user's default for one canonical argument of a
@@ -974,9 +1199,19 @@ pub fn resolve_verbs(enabled: &[PluginManifest], config: &BindingConfig) -> Vec<
 /// spelling. Keep unknown future verbs unclassified until their effects are reviewed.
 fn verb_annotations(id: &str) -> Option<Value> {
     let read_only = match id {
-        "web.search" | "web.extract" | "browser.snapshot" | "browser.screenshot"
-        | "browser.tabs" | "browser.context" | "computer.capture" | "memory.search"
-        | "memory.context" => true,
+        "web.search"
+        | "web.extract"
+        | "decision.predict"
+        | "decision.predict_multimodal"
+        | "browser.snapshot"
+        | "browser.screenshot"
+        | "browser.tabs"
+        | "browser.context"
+        | "computer.capture"
+        | "memory.search"
+        | "memory.context"
+        | "verify.claim"
+        | "verify.scopes" => true,
         "web.crawl"
         | "browser.navigate"
         | "browser.click"
@@ -1005,17 +1240,35 @@ fn verb_annotations(id: &str) -> Option<Value> {
 
 /// The registry rows for a set of resolved verbs.
 pub fn tools(resolved: &[ResolvedVerb]) -> Vec<RegistryTool> {
-    resolved
+    resolved.iter().map(|r| verb_row(r.verb)).collect()
+}
+
+fn verb_row(verb: &'static Verb) -> RegistryTool {
+    RegistryTool {
+        id: verb.id.to_owned(),
+        server: verb.server.to_owned(),
+        name: verb.name.to_owned(),
+        description: Some(verb.description.to_owned()),
+        input_schema: Some((verb.schema)()),
+        annotations: verb_annotations(verb.id),
+        ..Default::default()
+    }
+}
+
+/// The registry rows of the `computer.*` and `browser.*` verbs the session
+/// Box serves (Core's own provider, [`core_machine_providers`]) that no
+/// enabled provider in `provided` already serves. Listed when the node serves
+/// machine verbs from session Boxes, so a node without a local display
+/// provider still offers them: each call then runs on the conversation's Box.
+pub fn session_box_tools(provided: &[&str]) -> Vec<RegistryTool> {
+    let served: Vec<&'static str> = core_machine_providers()
+        .into_iter()
+        .map(|(_, capability, _)| capability)
+        .collect();
+    verbs()
         .iter()
-        .map(|r| RegistryTool {
-            id: r.verb.id.to_owned(),
-            server: r.verb.server.to_owned(),
-            name: r.verb.name.to_owned(),
-            description: Some(r.verb.description.to_owned()),
-            input_schema: Some((r.verb.schema)()),
-            annotations: verb_annotations(r.verb.id),
-            ..Default::default()
-        })
+        .filter(|verb| served.contains(&verb.capability) && !provided.contains(&verb.id))
+        .map(verb_row)
         .collect()
 }
 
@@ -1260,6 +1513,13 @@ pub fn map_response(binding: &CapabilityToolBinding, provider_id: &str, raw: Val
             // payload straight through instead so the caller sees what happened.
             None => return json!({ "provider": provider_id, "raw": raw }),
         },
+        // No `results` path: the whole body is the single result (Serper's scrape).
+        // That makes the path-absence check above unusable, so detect the same two
+        // `tool_exec` failure envelopes directly — otherwise a rejected key maps to
+        // one content-less "result" instead of surfacing the failure.
+        None if is_failure_envelope(&raw) => {
+            return json!({ "provider": provider_id, "raw": raw });
+        }
         None => raw.clone(),
     };
     let items: Vec<Value> = match located {
@@ -1269,6 +1529,23 @@ pub fn map_response(binding: &CapabilityToolBinding, provider_id: &str, raw: Val
     };
     let results: Vec<Value> = items.iter().map(|item| map_item(map, item)).collect();
     json!({ "provider": provider_id, "results": results })
+}
+
+/// `tool_exec`'s `fail_open` `{available:false,…}` envelope, or its wrapped
+/// non-2xx `{status, body}` envelope.
+fn is_failure_envelope(raw: &Value) -> bool {
+    let Some(obj) = raw.as_object() else {
+        return false;
+    };
+    if obj.get("available") == Some(&Value::Bool(false)) {
+        return true;
+    }
+    obj.len() == 2
+        && obj.contains_key("body")
+        && obj
+            .get("status")
+            .and_then(Value::as_u64)
+            .is_some_and(|status| !(200..300).contains(&status))
 }
 
 fn map_item(map: &CapabilityResponseMap, item: &Value) -> Value {
@@ -1284,6 +1561,146 @@ fn map_item(map: &CapabilityResponseMap, item: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn decision_predict_is_a_read_only_swappable_verb() {
+        use super::*;
+
+        let verb = verbs()
+            .iter()
+            .find(|verb| verb.id == "decision.predict")
+            .expect("the typed decision facade is registered");
+        let schema = (verb.schema)();
+        assert_eq!(verb.server, SERVER_DECISION);
+        assert_eq!(verb.capability, CAP_DECISION_TYPED);
+        assert_eq!(
+            schema["required"],
+            serde_json::json!(["state", "questions"])
+        );
+        assert!(schema["properties"]["model"].is_object());
+        assert!(schema["properties"]["images"].is_null());
+        assert!(schema["properties"]["task"].is_null());
+        assert!(schema["properties"]["lang"].is_null());
+        assert_eq!(
+            verb_annotations(verb.id).as_ref().unwrap()["readOnlyHint"],
+            true
+        );
+        assert!(is_server(SERVER_DECISION));
+    }
+
+    #[test]
+    fn multimodal_decision_verb_is_advertised_only_by_providers_that_declare_it() {
+        use super::*;
+        use crate::plugin_manifest::{ProvidesEntry, ProvidesLayerKind};
+        use crate::plugins::binding::BindingConfig;
+
+        let verb = verbs()
+            .iter()
+            .find(|verb| verb.id == "decision.predict_multimodal")
+            .expect("the multimodal decision facade is registered");
+        let schema = (verb.schema)();
+        assert_eq!(verb.server, SERVER_DECISION);
+        assert_eq!(verb.capability, CAP_DECISION_TYPED);
+        assert_eq!(schema["properties"]["images"]["maxItems"], 4);
+        assert_eq!(
+            schema["required"],
+            serde_json::json!(["state", "questions"])
+        );
+
+        let mut text_tools = BTreeMap::new();
+        text_tools.insert(
+            "decision.predict".to_owned(),
+            CapabilityToolBinding {
+                tool: "text.predict".to_owned(),
+                ..Default::default()
+            },
+        );
+        let mut image_tools = text_tools.clone();
+        image_tools.insert(
+            "decision.predict_multimodal".to_owned(),
+            CapabilityToolBinding {
+                tool: "image.predict".to_owned(),
+                ..Default::default()
+            },
+        );
+
+        fn provider(tools: BTreeMap<String, CapabilityToolBinding>) -> PluginManifest {
+            PluginManifest {
+                id: "@ryu/provider".to_owned(),
+                provides: vec![ProvidesEntry {
+                    capability: CAP_DECISION_TYPED.to_owned(),
+                    title: Some("Typed Decisions".to_owned()),
+                    version: "1.0.0".to_owned(),
+                    selectable: true,
+                    default_provider: true,
+                    layer_kind: Some(ProvidesLayerKind::DecisionModel),
+                    tools,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+        }
+
+        let config = BindingConfig::default();
+        assert!(!resolve_verbs(&[provider(text_tools)], &config)
+            .iter()
+            .any(|item| item.verb.id == "decision.predict_multimodal"));
+        assert!(resolve_verbs(&[provider(image_tools)], &config)
+            .iter()
+            .any(|item| item.verb.id == "decision.predict_multimodal"));
+    }
+
+    #[test]
+    fn decision_predict_routes_through_the_selected_provider() {
+        use super::*;
+        use crate::plugin_manifest::{ProvidesEntry, ProvidesLayerKind};
+        use crate::plugins::binding::BindingConfig;
+
+        fn provider(id: &str, tool: &str, is_default: bool) -> PluginManifest {
+            let mut tools = BTreeMap::new();
+            tools.insert(
+                "decision.predict".to_owned(),
+                CapabilityToolBinding {
+                    tool: tool.to_owned(),
+                    ..Default::default()
+                },
+            );
+            PluginManifest {
+                id: id.to_owned(),
+                name: id.to_owned(),
+                version: "1.0.0".to_owned(),
+                provides: vec![ProvidesEntry {
+                    capability: CAP_DECISION_TYPED.to_owned(),
+                    title: Some("Typed Decisions".to_owned()),
+                    version: "1.0.0".to_owned(),
+                    selectable: true,
+                    default_provider: is_default,
+                    layer_kind: Some(ProvidesLayerKind::DecisionModel),
+                    tools,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+        }
+
+        let providers = vec![
+            provider("@ryu/laya", "laya.predict", true),
+            provider("@ryu/ollaya", "ollaya.predict", false),
+        ];
+        let config = BindingConfig {
+            overrides: [(CAP_DECISION_TYPED.to_owned(), "@ryu/ollaya".to_owned())]
+                .into_iter()
+                .collect(),
+        };
+        let resolved = resolve_verbs(&providers, &config);
+        let decision = resolved
+            .iter()
+            .find(|item| item.verb.id == "decision.predict")
+            .expect("the selected provider serves decision.predict");
+
+        assert_eq!(decision.provider_id, "@ryu/ollaya");
+        assert_eq!(decision.binding.tool, "ollaya.predict");
+    }
+
     #[test]
     fn every_canonical_verb_has_explicit_effect_metadata() {
         use crate::agent_execution::{classify_tool_with_metadata, ToolEffect};
@@ -1328,10 +1745,11 @@ mod tests {
         let resolved = super::resolve_verbs(&[provider], &Default::default());
         let tools = super::tools(&resolved);
         assert!(!tools.is_empty());
-        assert!(tools.iter().all(|tool| tool
-            .annotations
-            .as_ref()
-            .is_some_and(|a| a["readOnlyHint"] == true)));
+        assert!(tools.iter().all(|tool| {
+            tool.annotations
+                .as_ref()
+                .is_some_and(|a| a["readOnlyHint"] == true)
+        }));
     }
 
     use super::*;
@@ -1409,10 +1827,6 @@ mod tests {
         }
     }
 
-    // Capabilities where "swap the provider" changes WHICH MACHINE is acted on, not
-    // merely who answers. Every provider of one of these must say what it drives.
-    const MACHINE_CAPABILITIES: [&str; 2] = [CAP_COMPUTER, CAP_BROWSER];
-
     #[test]
     fn every_machine_controlling_provider_declares_what_it_acts_on() {
         // Swapping web.search from exa to tavily changes who answers the same
@@ -1444,6 +1858,10 @@ mod tests {
         // bytebot as interchangeable ways to drive "your computer". If a future
         // provider genuinely drives the local machine it may join ghost here, but
         // that has to be a deliberate edit to this test, not a silent default.
+        // Reviewed joiner: `@ryu/codex-computer-use` (OpenAI's Codex engine on a
+        // target app here) truly acts on this device, so `local-machine` is right.
+        // The session Box (Core-served, not a manifest) is a computer.control
+        // provider too, and it drives a separate machine.
         let targets: Vec<_> = builtins()
             .iter()
             .flat_map(|m| {
@@ -1453,7 +1871,20 @@ mod tests {
                     .map(|e| (m.id.clone(), e.target))
                     .collect::<Vec<_>>()
             })
+            .chain(
+                core_machine_providers()
+                    .into_iter()
+                    .filter(|(_, capability, _)| *capability == CAP_COMPUTER)
+                    .map(|(id, _, target)| (id, Some(target))),
+            )
             .collect();
+        assert!(
+            targets.contains(&(
+                super::super::box_desktop::PROVIDER_ID.to_owned(),
+                Some(crate::plugin_manifest::ProviderTarget::RemoteDesktop)
+            )),
+            "the session Box must be registered as a remote-desktop computer provider: {targets:?}"
+        );
         assert!(
             targets.len() >= 2,
             "expected at least two computer.control providers, found {targets:?}"
@@ -1466,6 +1897,83 @@ mod tests {
              is now true the picker's swap wording is fine, but verify it rather than \
              letting a missing declaration look like agreement"
         );
+    }
+
+    #[test]
+    fn machine_verbs_are_exactly_the_computer_and_browser_verbs() {
+        for verb in verbs() {
+            assert_eq!(
+                is_machine_verb(verb.id),
+                MACHINE_CAPABILITIES.contains(&verb.capability),
+                "{}",
+                verb.id
+            );
+        }
+        assert!(is_machine_verb("computer.click"));
+        assert!(is_machine_verb("browser.navigate"));
+        assert!(!is_machine_verb("web.search"));
+        assert!(!is_machine_verb("memory.store"));
+        assert!(!is_machine_verb("shadow.computer_use"));
+        assert!(!is_machine_verb("computer.unknown"));
+    }
+
+    #[test]
+    fn core_served_machine_providers_target_a_remote_desktop() {
+        let providers = core_machine_providers();
+        for capability in MACHINE_CAPABILITIES {
+            assert!(
+                providers.iter().any(|(id, served, target)| {
+                    id == super::super::box_desktop::PROVIDER_ID
+                        && *served == capability
+                        && *target == crate::plugin_manifest::ProviderTarget::RemoteDesktop
+                }),
+                "{capability}: {providers:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn machine_verb_schemas_refuse_undeclared_arguments() {
+        // A model must not be able to name a Box, URL or session: every
+        // computer.* and browser.* schema is closed, so the target comes only
+        // from Core state.
+        for verb in verbs().iter().filter(|verb| is_machine_verb(verb.id)) {
+            let schema = (verb.schema)();
+            assert_eq!(
+                schema["additionalProperties"],
+                json!(false),
+                "{} must refuse undeclared arguments",
+                verb.id
+            );
+            let properties = schema["properties"].as_object().expect("properties");
+            for field in [
+                "box",
+                "boxId",
+                "box_id",
+                "session",
+                "sessionId",
+                "session_id",
+                "endpoint",
+                "target",
+                "display",
+                "workspaceId",
+            ] {
+                assert!(
+                    !properties.contains_key(field),
+                    "{} must not accept '{field}'",
+                    verb.id
+                );
+            }
+            if verb.capability == CAP_COMPUTER {
+                assert!(
+                    !properties.contains_key("url"),
+                    "{} must not accept a URL",
+                    verb.id
+                );
+            }
+        }
+        // `browser.tabs` no longer shares the open verify.scopes schema.
+        assert_eq!(schema_empty()["additionalProperties"], Value::Null);
     }
 
     #[test]
@@ -1509,7 +2017,9 @@ mod tests {
             }
         }
         for (capability, providers) in by_capability {
-            if providers.len() < 2 {
+            // Fan-out capabilities are called on every provider and never bound, so
+            // several non-selectable providers are their normal shape.
+            if providers.len() < 2 || crate::plugins::binding::is_fanout_capability(capability) {
                 continue;
             }
             let ids: Vec<&str> = providers.iter().map(|m| m.id.as_str()).collect();
@@ -1577,6 +2087,47 @@ mod tests {
             .expect("web.search must survive the swap");
         assert_eq!(search_after.provider_id, "@ryu/tavily");
         assert_eq!(search_after.binding.tool, "tavily.search");
+    }
+
+    #[test]
+    fn the_shipped_verification_layer_resolves_to_the_reasoning_solver() {
+        // The verify layer is only useful if the shipped provider serves BOTH verbs:
+        // a claim check with no way to list scopes leaves a multi-policy node unable
+        // to name what it checks against. Both bodies are adapters because the
+        // reasoning server answers in an MCP text envelope and its verdict
+        // vocabulary must be mapped onto the canonical one, which no response map
+        // can express.
+        let resolved = resolve_verbs(&builtins(), &BindingConfig::default());
+        for (verb, tool) in [
+            ("verify.claim", "reasoning.check"),
+            ("verify.scopes", "reasoning.policies"),
+        ] {
+            let r = resolved
+                .iter()
+                .find(|r| r.verb.id == verb)
+                .unwrap_or_else(|| panic!("the shipped fixtures must serve {verb}"));
+            assert_eq!(r.provider_id, "@ryu/reasoning", "{verb}");
+            assert_eq!(r.binding.tool, tool, "{verb}");
+            let adapter = r.binding.adapter.as_ref().expect("adapter-mapped");
+            assert!(
+                !adapter.code.is_empty(),
+                "{verb}: adapter body must be hydrated"
+            );
+        }
+        let claim = resolved
+            .iter()
+            .find(|r| r.verb.id == "verify.claim")
+            .unwrap();
+        assert_eq!(
+            claim.binding.adapter.as_ref().unwrap().tools,
+            vec!["reasoning.policies".to_owned()],
+            "the claim adapter may only reach the policy list besides its own tool"
+        );
+        // The adapter speaks the canonical vocabulary, not the solver's.
+        let body = &claim.binding.adapter.as_ref().unwrap().code;
+        for verdict in VERIFY_VERDICTS {
+            assert!(body.contains(&format!("\"{verdict}\"")), "{verdict}");
+        }
     }
 
     #[test]
@@ -2376,6 +2927,46 @@ mod tests {
             );
             assert_eq!(mapped["raw"], failure, "the real payload must survive");
         }
+    }
+
+    #[test]
+    fn a_pathless_response_map_does_not_turn_a_failure_into_a_result() {
+        // The shipped Serper `web.extract` binding maps the WHOLE body as one
+        // result (no `results` path), so the missing-path guard above never fires
+        // for it. A rejected key must still surface as a failure, not as a single
+        // result with no content.
+        let manifests = builtins();
+        let serper = manifests
+            .iter()
+            .find(|m| m.id == "@ryu/serper")
+            .expect("serper ships");
+        let binding = serper
+            .provides
+            .iter()
+            .find_map(|p| p.tools.get("web.extract"))
+            .expect("serper serves web.extract");
+        assert!(
+            binding
+                .response
+                .as_ref()
+                .is_some_and(|r| r.results.is_none()),
+            "this test covers the pathless shape"
+        );
+        for failure in [
+            json!({ "available": false, "reason": "endpoint returned HTTP 403", "hint": "check the key" }),
+            json!({ "status": 400, "body": { "message": "bad url" } }),
+        ] {
+            let mapped = map_response(binding, "@ryu/serper", failure.clone());
+            assert!(mapped.get("results").is_none(), "{mapped}");
+            assert_eq!(mapped["raw"], failure);
+        }
+        let ok = map_response(
+            binding,
+            "@ryu/serper",
+            json!({ "text": "page", "markdown": "# page" }),
+        );
+        assert_eq!(ok["results"][0]["content"], json!("page"));
+        assert_eq!(ok["results"][0]["markdown"], json!("# page"));
     }
 
     #[test]

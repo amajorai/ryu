@@ -128,11 +128,6 @@ const FEATURE_BY_KEY = new Map(
 export const featureByKey = (key: string): FeatureDef | undefined =>
 	FEATURE_BY_KEY.get(key);
 
-/** The persisted `UserUnlocks` shape this module reads (lean projection). */
-interface UserUnlocksDoc {
-	unlocked?: string[];
-}
-
 /**
  * Optional live billing context for the paid fast-path. When a caller in the
  * API layer has the user's Polar subscription/license mapped to the views
@@ -171,9 +166,7 @@ export async function hasFeature(
 	}
 
 	// 2) Explicitly unlocked (points spend, milestone, or paid backfill).
-	const doc = (await UserUnlocks.findById(userId)
-		.lean()
-		.exec()) as UserUnlocksDoc | null;
+	const doc = await UserUnlocks.findById(userId).lean().exec();
 	if (doc?.unlocked?.includes(key)) {
 		return true;
 	}

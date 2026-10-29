@@ -251,6 +251,7 @@ describe("turn-end card contract", () => {
 					},
 					placement: "turn-end",
 				},
+				toolCallId: "call-artifact",
 				type: "tool-artifact.render",
 			},
 		];
@@ -287,6 +288,8 @@ describe("turn-end card contract", () => {
 				},
 				id: "assistant-1-artifact-3",
 				kind: "artifact",
+				// Carried so the card shares the inline row's saved page state.
+				toolCallId: "call-artifact",
 			},
 		]);
 		expect(hasTurnEndCards(parts)).toBe(true);

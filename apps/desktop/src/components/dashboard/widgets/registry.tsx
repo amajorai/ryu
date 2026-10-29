@@ -5,7 +5,7 @@
 // all read from here instead of repeating the list. Adding a kind means: add its
 // schema in ./schema.ts, its body component, and one entry below.
 
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { lazy, type ReactNode, Suspense } from "react";
 import type { z } from "zod";
 import type { Widget } from "@/src/lib/api/dashboard.ts";
@@ -125,13 +125,7 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
 		defaultSize: { w: 6, h: 5 },
 		configSchema: mapConfigSchema,
 		render: ({ widget, value }) => (
-			<Suspense
-				fallback={
-					<div className="grid size-full place-items-center">
-						<Spinner />
-					</div>
-				}
-			>
+			<Suspense fallback={<Skeleton className="size-full" radius="row" />}>
 				<MapBody config={widget.config} value={value} />
 			</Suspense>
 		),
@@ -147,6 +141,7 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
 	},
 ];
 
+// SAFETY: The immediately preceding authored catalog includes each of the ten widgetKindSchema literals exactly once. Mapping each entry to its own kind preserves every complete WidgetDefinition; Object.fromEntries only erases that finite key coverage.
 const REGISTRY: Record<WidgetKind, WidgetDefinition> = Object.fromEntries(
 	WIDGET_DEFINITIONS.map((def) => [def.kind, def])
 ) as Record<WidgetKind, WidgetDefinition>;

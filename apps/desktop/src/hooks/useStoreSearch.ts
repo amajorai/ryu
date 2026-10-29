@@ -20,10 +20,11 @@ import { fetchAgentCatalog } from "@/src/lib/api/agents.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { searchMcpCatalog } from "@/src/lib/api/mcp.ts";
 import { searchModels } from "@/src/lib/api/models.ts";
-import { fetchAppsCatalog } from "@/src/lib/api/plugins.ts";
+import { fetchApps, fetchAppsCatalog } from "@/src/lib/api/plugins.ts";
 import { searchSkills } from "@/src/lib/api/skills.ts";
 import { useDebouncedValue } from "./use-debounced-value.ts";
 import { useActiveNode } from "./useActiveNode.ts";
+import { useStoreListingAllowed } from "./useFeatureFlag.ts";
 
 const SEARCH_DEBOUNCE_MS = 300;
 // Each realm contributes at most a handful of hits to the aggregated view; the
@@ -66,7 +67,7 @@ export interface UseStoreSearchResult {
 	isError: boolean;
 	loading: boolean;
 	/** Re-run every realm's search (used by the results view's Retry action). */
-	refetch: () => Promise<unknown>;
+	refetch: ReturnType<typeof useStoreSearch>["refetch"];
 }
 
 function matches(
@@ -76,7 +77,7 @@ function matches(
 	return fields.some((f) => f?.toLowerCase().includes(query));
 }
 
-export function useStoreSearch(query: string): UseStoreSearchResult {
+export function useStoreSearch(query: string) {
 	const activeNode = useActiveNode();
 	const target = useMemo<ApiTarget>(
 		() => ({
@@ -87,6 +88,10 @@ export function useStoreSearch(query: string): UseStoreSearchResult {
 		[activeNode.url, activeNode.token, activeNode.userJwt]
 	);
 	const { url } = target;
+
+	// The same rollout discovery gate the Apps tab applies: a gated, uninstalled
+	// app must not surface here either.
+	const listingAllowed = useStoreListingAllowed();
 
 	const debounced = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
 	const enabled = debounced.length > 0;
@@ -145,6 +150,20 @@ export function useStoreSearch(query: string): UseStoreSearchResult {
 			() => ({
 				queryKey: ["apps", "catalog", url],
 				queryFn: () => fetchAppsCatalog(target),
+				enabled,
+			}),
+			[target, url, enabled]
+		)
+	);
+
+	// The catalog carries no installed flag, so the rollout gate's "installed
+	// copies always show" rule joins it against the lifecycle records, under the
+	// same key `useAppsCatalog` and Store Home use (one shared fetch).
+	const appsInstalledQuery = useQuery(
+		useMemo(
+			() => ({
+				queryKey: ["apps", "list", url],
+				queryFn: () => fetchApps(target),
 				enabled,
 			}),
 			[target, url, enabled]
@@ -218,8 +237,21 @@ export function useStoreSearch(query: string): UseStoreSearchResult {
 		// the Plugins realm while the Store tabs — which do read `type` — showed
 		// them under Apps. Same rule, one source; see `isCompanionApp` in
 		// packages/marketplace/src/catalog/apps-catalog-section.tsx.
-		const pluginMatches = (appsQuery.data ?? []).filter((e) =>
-			matches(lower, e.name, e.description, e.kinds.join(" "), e.tags.join(" "))
+		const installedIds = new Set(
+			(appsInstalledQuery.data ?? [])
+				.filter((a) => a.installed)
+				.map((a) => a.id)
+		);
+		const pluginMatches = (appsQuery.data ?? []).filter(
+			(e) =>
+				listingAllowed({ id: e.id, installed: installedIds.has(e.id) }) &&
+				matches(
+					lower,
+					e.name,
+					e.description,
+					e.kinds.join(" "),
+					e.tags.join(" ")
+				)
 		);
 		const isApp = (e: (typeof pluginMatches)[number]) =>
 			e.type ? e.type === "app" : e.kinds.includes("companion");
@@ -281,7 +313,9 @@ export function useStoreSearch(query: string): UseStoreSearchResult {
 		skillsQuery.data,
 		mcpQuery.data,
 		appsQuery.data,
+		appsInstalledQuery.data,
 		agentsQuery.data,
+		listingAllowed,
 	]);
 
 	const loading =

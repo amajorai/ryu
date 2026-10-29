@@ -36,4 +36,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "view-mode-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

@@ -115,7 +115,9 @@ impl Sidecar for OuteTtsManager {
         Box::pin(async move {
             crate::sidecar::remove_from_version_store("outetts");
             if delete_data {
-                tracing::info!("outetts delete_data: leaving ~/.ryu/models intact");
+                // OuteTTS's own weights folder only. `llama-tts` belongs to the
+                // shared llama.cpp engine and stays.
+                crate::sidecar::remove_dir(&downloader::models_dir()).await;
             }
             tracing::info!("outetts uninstalled");
             Ok(())
@@ -151,6 +153,26 @@ pub async fn synthesize(text: &str) -> Result<Vec<u8>> {
     let seq = TTS_SEQ.fetch_add(1, Ordering::Relaxed);
     let out_path = std::env::temp_dir().join(format!("ryu-tts-{}-{seq}.wav", std::process::id()));
 
+    // Saved OuteTTS settings (threads, GPU offload, seed, …) ride after the
+    // managed model, vocoder, prompt and output arguments.
+    let launch = super::engine_launch_config("outetts").await;
+    let mut tuning = crate::inference::native_args("outetts", &launch.native);
+    tuning.extend(super::strip_managed_args(
+        &launch.extra_args,
+        &[
+            "-m",
+            "--model",
+            "-mv",
+            "--model-vocoder",
+            "-p",
+            "--prompt",
+            "-o",
+            "--output",
+            "-f",
+            "--file",
+        ],
+    ));
+
     let status = tokio::process::Command::new(&binary)
         .arg("-m")
         .arg(&model)
@@ -160,6 +182,7 @@ pub async fn synthesize(text: &str) -> Result<Vec<u8>> {
         .arg(text)
         .arg("-o")
         .arg(&out_path)
+        .args(&tuning)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .no_window()

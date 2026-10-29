@@ -53,26 +53,25 @@ export default function MarketplaceHelpDialog() {
 
 			<Dialog onOpenChange={setOpen} open={open}>
 				<DialogContent
-					className="max-h-[min(90vh,42rem)] max-w-xl overflow-y-auto p-0 sm:max-w-xl"
+					appearance="marketplace-guide"
 					data-testid="marketplace-help-dialog"
-					overlayClassName="bg-black/55 backdrop-blur-sm"
 				>
 					<AnnouncementVisual
 						accent="#6d4aff"
+						appearance="marketplace-guide"
 						backgroundColors={APP_PLUGIN_VISUAL_COLORS}
-						className="min-h-[13rem] rounded-none sm:min-h-[16rem] sm:rounded-t-4xl"
 						iconContent={<AppsAndPluginsVisual />}
 						seed="marketplace-apps-and-plugins"
 					/>
 					<div className="flex flex-col gap-5 p-6 sm:p-8">
-						<DialogHeader className="gap-2 pr-8">
-							<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.18em]">
+						<DialogHeader purpose="marketplace-guide">
+							<p className="type-compact font-medium text-muted-foreground uppercase tracking-widest">
 								Marketplace guide
 							</p>
-							<DialogTitle className="font-medium text-2xl tracking-tight sm:text-3xl">
+							<DialogTitle typography="marketplace-guide">
 								Apps &amp; plugins
 							</DialogTitle>
-							<DialogDescription className="max-w-xl text-sm leading-6">
+							<DialogDescription typography="marketplace-guide">
 								Apps are complete experiences you use inside Ryu, like Checks or
 								Learning. Plugins add capabilities to Ryu, such as tools,
 								skills, agents, and workflows.
@@ -114,7 +113,7 @@ function AppsAndPluginsVisual() {
 
 function VisualIcon({ icon }: { icon: IconSvgElement }) {
 	return (
-		<span className="grid size-20 place-items-center rounded-[1.5rem] border border-white/35 bg-black/15 shadow-2xl ring-1 ring-black/15 backdrop-blur-sm sm:size-24">
+		<span className="grid size-20 place-items-center rounded-3xl border border-white/35 bg-black/15 shadow-2xl ring-1 ring-black/15 backdrop-blur-sm sm:size-24">
 			<HugeiconsIcon className="size-10 text-white sm:size-12" icon={icon} />
 		</span>
 	);

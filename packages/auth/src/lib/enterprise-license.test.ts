@@ -2,13 +2,26 @@ import { describe, expect, it } from "bun:test";
 import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import { verifySelfHostedEnterpriseLicense } from "./enterprise-license.ts";
 
-function encode(value: unknown): string {
+interface SignedLicenseFixture {
+	aud?: string;
+	capabilities?: string[];
+	exp?: number;
+	iat?: number;
+	iss?: string;
+	licenseId?: string;
+	nbf?: number;
+	organizationId?: string;
+	plan?: string;
+}
+function encode(
+	value: SignedLicenseFixture | { alg: string; typ: string }
+): string {
 	return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
 function createLicense(
 	privateKey: KeyObject,
-	payload: Record<string, unknown>
+	payload: SignedLicenseFixture
 ): string {
 	const header = encode({ alg: "RS256", typ: "JWT" });
 	const body = encode(payload);

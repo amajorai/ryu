@@ -9,9 +9,13 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Alert, AlertDescription, AlertTitle } from "@ryu/ui/components/alert";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import {
+	Alert,
+	AlertDescription,
+	AlertTitle,
+} from "@ryu/ui/components/alert.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardAction,
@@ -20,10 +24,13 @@ import {
 	CardFooter,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { Switch } from "@ryu/ui/components/switch";
-import { ToggleGroup, ToggleGroupItem } from "@ryu/ui/components/toggle-group";
+} from "@ryu/ui/components/card.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import {
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@ryu/ui/components/toggle-group.tsx";
 import { useMemo, useState } from "react";
 import { shareOriginsForNode } from "@/src/lib/api/node-share.ts";
 import { isLocalNode, useNodeStore } from "@/src/store/useNodeStore.ts";
@@ -121,8 +128,9 @@ function NodeSummary() {
 
 	return (
 		<Card
-			className="border-border/60 shadow-none"
+			borderTone="subtle"
 			data-testid="exchange-current-node"
+			elevation="flat"
 		>
 			<CardHeader>
 				<CardTitle>Current node</CardTitle>
@@ -130,7 +138,7 @@ function NodeSummary() {
 					Your active node is never silently turned into a provider.
 				</CardDescription>
 			</CardHeader>
-			<CardContent className="space-y-4">
+			<CardContent spacing="relaxed">
 				<div className="flex items-center gap-3 rounded-2xl bg-muted/45 p-4">
 					<div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-background text-foreground shadow-sm">
 						<HugeiconsIcon className="size-5" icon={CloudServerIcon} />
@@ -167,7 +175,7 @@ function ExchangeHero({ mode }: { mode: ComputeShareMode }) {
 			data-testid={`${mode}-hero`}
 		>
 			<div className="p-6 lg:p-8">
-				<p className="font-mono text-[11px] text-background/55 uppercase tracking-[0.18em]">
+				<p className="type-caption font-mono text-background/55 uppercase tracking-(--tracking-exchange-kicker)">
 					{compute ? "Ryu Compute" : "Ryu Share"}
 				</p>
 				<h2 className="mt-4 max-w-xl font-heading font-medium text-3xl tracking-tight lg:text-4xl">
@@ -181,10 +189,7 @@ function ExchangeHero({ mode }: { mode: ComputeShareMode }) {
 						: "Share a clean Ryu workcell or an approved agent on your terms. You choose when it can earn."}
 				</p>
 				<div className="mt-6 flex flex-wrap gap-2">
-					<Badge
-						className="border-background/15 bg-background/10 text-background"
-						variant="outline"
-					>
+					<Badge appearance="exchange-hero" variant="outline">
 						{compute ? "No host login" : "Pause any time"}
 					</Badge>
 				</div>
@@ -206,7 +211,7 @@ function ExchangeHero({ mode }: { mode: ComputeShareMode }) {
 								icon={compute ? CpuIcon : Share01Icon}
 							/>
 						</div>
-						<div className="absolute top-1/2 right-0 flex -translate-y-1/2 items-center gap-2 text-[10px] text-background/60">
+						<div className="type-compact absolute top-1/2 right-0 flex -translate-y-1/2 items-center gap-2 text-background/60">
 							<span className="h-px w-8 bg-background/20" />
 							{compute ? "workcell" : "payout"}
 						</div>
@@ -234,8 +239,8 @@ function ContractGrid({ mode }: { mode: ComputeShareMode }) {
 			</div>
 			<div className="grid gap-3 md:grid-cols-3">
 				{items.map((item) => (
-					<Card className="border-border/60 shadow-none" key={item.title}>
-						<CardContent className="space-y-3 p-5">
+					<Card borderTone="subtle" elevation="flat" key={item.title}>
+						<CardContent inset="comfortable" spacing="comfortable">
 							<HugeiconsIcon className="size-5 text-primary" icon={item.icon} />
 							<div>
 								<p className="font-medium text-sm">{item.title}</p>
@@ -256,7 +261,7 @@ function ComputeFinder() {
 	const [duration, setDuration] = useState<LeaseDuration>("1h");
 
 	return (
-		<Card className="border-border/60 shadow-none" data-testid="compute-finder">
+		<Card borderTone="subtle" data-testid="compute-finder" elevation="flat">
 			<CardHeader>
 				<CardTitle>Find capacity</CardTitle>
 				<CardDescription>Set the shape of the next lease.</CardDescription>
@@ -264,7 +269,7 @@ function ComputeFinder() {
 					<Badge variant="outline">Preview</Badge>
 				</CardAction>
 			</CardHeader>
-			<CardContent className="space-y-5">
+			<CardContent spacing="generous">
 				<fieldset className="space-y-2">
 					<legend className="font-medium text-muted-foreground text-xs">
 						Workload
@@ -325,7 +330,7 @@ function ComputeFinder() {
 					</p>
 				</div>
 			</CardContent>
-			<CardFooter className="flex flex-wrap gap-3 border-border/50 border-t pt-4">
+			<CardFooter appearance="exchange-actions">
 				<Button disabled>
 					Find capacity
 					<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
@@ -354,7 +359,7 @@ function ShareBuilder() {
 			: activeNode.name;
 
 	return (
-		<Card className="border-border/60 shadow-none" data-testid="share-builder">
+		<Card borderTone="subtle" data-testid="share-builder" elevation="flat">
 			<CardHeader>
 				<CardTitle>Build your offer</CardTitle>
 				<CardDescription>
@@ -364,7 +369,7 @@ function ShareBuilder() {
 					<Badge variant="outline">Preview</Badge>
 				</CardAction>
 			</CardHeader>
-			<CardContent className="space-y-5">
+			<CardContent spacing="generous">
 				<fieldset className="space-y-2">
 					<legend className="font-medium text-muted-foreground text-xs">
 						Offer type
@@ -442,7 +447,9 @@ function ShareBuilder() {
 				<div className="grid gap-3 sm:grid-cols-2">
 					<div className="rounded-2xl bg-muted/45 p-4">
 						<p className="text-muted-foreground text-xs">Node</p>
-						<p className="mt-1 truncate font-medium text-sm">{nodeLabel}</p>
+						<p className="mt-1 truncate font-medium text-sm" title={nodeLabel}>
+							{nodeLabel}
+						</p>
 					</div>
 					<div className="rounded-2xl bg-muted/45 p-4">
 						<p className="text-muted-foreground text-xs">Safe origins</p>
@@ -456,7 +463,7 @@ function ShareBuilder() {
 					</div>
 				</div>
 			</CardContent>
-			<CardFooter className="flex flex-wrap gap-3 border-border/50 border-t pt-4">
+			<CardFooter appearance="exchange-actions">
 				<Button disabled>
 					Publish listing
 					<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
@@ -515,9 +522,8 @@ export function ComputeShareSurface({ mode }: { mode: ComputeShareMode }) {
 							? "Rent governed capacity for the next run."
 							: "Earn from an idle node without giving up control."
 					}
-					subtitleClassName="font-normal text-muted-foreground text-sm"
 					title={compute ? "Compute" : "Share"}
-					titleClassName="text-2xl"
+					typography="exchange"
 				/>
 				<Badge className="mt-1 shrink-0" variant="outline">
 					Early access
@@ -539,7 +545,7 @@ export function ComputeShareSurface({ mode }: { mode: ComputeShareMode }) {
 					)}
 					<ContractGrid mode={mode} />
 					{!compute && <ShareSafety />}
-					<Alert className="border-border/60" variant="info">
+					<Alert borderTone="subtle" variant="info">
 						<HugeiconsIcon icon={compute ? CpuIcon : Share01Icon} />
 						<AlertTitle>Exchange preview</AlertTitle>
 						<AlertDescription>

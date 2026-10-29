@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { fetchTimeline } from "./shadow.ts";
+import { createFetchFixture } from "./test-support/http-fixture.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -18,6 +19,10 @@ describe("shadow timeline client", () => {
 					entries: [
 						{
 							app_name: "Editor",
+							bundle_id: null,
+							app_path: null,
+							display_id: null,
+							segment_file: "native-segment",
 							event_type: "app_switch",
 							track: 3,
 							ts: 1,
@@ -29,7 +34,7 @@ describe("shadow timeline client", () => {
 				{ status: 200 }
 			);
 		});
-		globalThis.fetch = fetchMock as unknown as typeof fetch;
+		globalThis.fetch = createFetchFixture(fetchMock);
 
 		await expect(
 			fetchTimeline(

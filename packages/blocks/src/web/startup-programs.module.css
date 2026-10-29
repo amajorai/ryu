@@ -1,0 +1,12 @@
+.marquee {
+	composes: marquee from "./animations.module.css";
+}
+[class~="group"]:hover .marquee,
+[class~="group"]:focus-within .marquee {
+	animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+	.marquee.marquee {
+		animation-play-state: paused;
+	}
+}

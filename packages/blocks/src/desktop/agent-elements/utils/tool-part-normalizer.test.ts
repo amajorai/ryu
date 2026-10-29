@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { nativeSdkObjectSchema } from "./native-sdk-observation.ts";
 import {
 	normalizeAssistantToolParts,
 	normalizeToolPart,
@@ -23,7 +24,7 @@ describe("normalizeToolPart", () => {
 			output: '{"stdout":"a"}',
 			result: "[1,2]",
 		};
-		const normalized = normalizeToolPart(part) as Record<string, unknown>;
+		const normalized = nativeSdkObjectSchema.parse(normalizeToolPart(part));
 		expect(normalized).not.toBe(part);
 		expect(normalized.input).toEqual({ command: "ls" });
 		expect(normalized.output).toEqual({ stdout: "a" });
@@ -52,7 +53,7 @@ describe("normalizeToolPart", () => {
 			input: '{"a":1}',
 			output: { already: "object" },
 		};
-		const normalized = normalizeToolPart(part) as Record<string, unknown>;
+		const normalized = nativeSdkObjectSchema.parse(normalizeToolPart(part));
 		expect(normalized.input).toEqual({ a: 1 });
 		// unchanged field keeps its identity
 		expect(normalized.output).toBe(part.output);
@@ -69,6 +70,6 @@ describe("normalizeAssistantToolParts", () => {
 		const parts = [{ type: "tool-Bash", input: '{"a":1}' }];
 		const out = normalizeAssistantToolParts(parts);
 		expect(out).not.toBe(parts);
-		expect((out[0] as { input: unknown }).input).toEqual({ a: 1 });
+		expect(nativeSdkObjectSchema.parse(out[0]).input).toEqual({ a: 1 });
 	});
 });

@@ -1,8 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/18/01a0137e-1cd7-7f50-add7-23f4915d2d1d/simple-workspace-proof.png";
-
 test("proves Simple workspace and branch-gated PR behavior", async ({
 	page,
 }) => {
@@ -34,5 +31,8 @@ test("proves Simple workspace and branch-gated PR behavior", async ({
 	await page.getByTestId("toggle-branch").click();
 	await expect(page.getByTestId("create-pull-request")).toBeVisible();
 
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("simple-workspace-proof.png"),
+		fullPage: true,
+	});
 });

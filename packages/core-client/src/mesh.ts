@@ -16,6 +16,8 @@
 // mesh-status would under-report it when mesh is disabled.
 
 import { type ApiTarget, request } from "./client.ts";
+import { meshStatusResponseSchema } from "./mesh-wire.ts";
+import { webhookIngressResponseSchema } from "./webhooks.ts";
 
 /** A peer node on the tailnet, as surfaced in Contract 6. */
 export interface MeshPeer {
@@ -69,6 +71,8 @@ interface RawPeer {
 export interface RawMeshStatus {
 	backend?: string | null;
 	backend_state?: string;
+	/** Complete native public-tunnel metadata; older nodes omit it. */
+	cloudflaredUrl?: string | null;
 	control_server?: string | null;
 	enabled?: boolean;
 	magic_dns_name?: string | null;
@@ -117,9 +121,14 @@ export async function fetchMeshStatus(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<MeshStatus> {
-	const raw = await request<RawMeshStatus>(target, "/api/mesh/status", {
-		signal,
-	});
+	const raw = await request(
+		target,
+		"/api/mesh/status",
+		{
+			signal,
+		},
+		meshStatusResponseSchema
+	);
 	return normalizeMeshStatus(raw);
 }
 
@@ -145,12 +154,6 @@ export interface WebhookIngressStatus {
 	up: boolean;
 }
 
-interface RawWebhookIngressStatus {
-	kind?: string;
-	public_url?: string | null;
-	up?: boolean;
-}
-
 /**
  * Fetch webhook-ingress status. Soft dependency: Core always answers HTTP 200,
  * with `up:false` when no public URL is resolved — so callers gate the ingress
@@ -161,10 +164,11 @@ export async function fetchWebhookIngressStatus(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<WebhookIngressStatus> {
-	const raw = await request<RawWebhookIngressStatus>(
+	const raw = await request(
 		target,
 		"/api/webhook-ingress/status",
-		{ signal }
+		{ signal },
+		webhookIngressResponseSchema
 	);
 	return {
 		kind: raw.kind ?? "",

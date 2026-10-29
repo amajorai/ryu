@@ -20,7 +20,7 @@ pub const RESTATE_INGRESS_PORT: u16 = 8080;
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
 pub fn restate_dir() -> PathBuf {
-    crate::paths::ryu_dir().join("restate")
+    crate::paths::service_dir("restate")
 }
 
 fn pid_path() -> PathBuf {
@@ -148,31 +148,9 @@ impl RestateProcess {
         }
     }
 
-    /// Kill any leftover process whose PID is recorded in the PID file.
+    /// Stop a leftover process recorded in the PID file, but only while it is
+    /// still this binary's own orphan (the PID may have been reused since).
     pub async fn cleanup_orphan(&self) {
-        let Ok(content) = tokio::fs::read_to_string(&self.pid_path).await else {
-            return;
-        };
-        let Ok(pid) = content.trim().parse::<i32>() else {
-            return;
-        };
-
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::{kill, Signal};
-            use nix::unistd::Pid;
-            let nix_pid = Pid::from_raw(pid);
-            let _ = kill(nix_pid, Signal::SIGTERM);
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            let _ = kill(nix_pid, Signal::SIGKILL);
-        }
-
-        #[cfg(windows)]
-        {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/PID", &pid.to_string()])
-                .no_window()
-                .output();
-        }
+        crate::sidecar::tools::orphan::reap(&self.pid_path, &self.binary_path, "restate").await;
     }
 }

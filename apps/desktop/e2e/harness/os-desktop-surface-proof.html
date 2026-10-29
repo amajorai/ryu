@@ -3,10 +3,16 @@
 	<head>
 		<meta charset="UTF-8">
 		<meta content="width=device-width, initial-scale=1.0" name="viewport">
-		<title>Ryu OS desktop surface proof</title>
+		<title>OS desktop surface proof</title>
 	</head>
 	<body>
 		<div id="root"></div>
+		<script>
+			localStorage.setItem("ryu_oidc_user", JSON.stringify({
+				name: "Jiawei",
+				email: "jiawei@example.test"
+			}));
+		</script>
 		<script src="./os-desktop-surface-proof.tsx" type="module"></script>
 	</body>
 </html>

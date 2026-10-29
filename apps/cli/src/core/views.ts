@@ -21,6 +21,20 @@
 // Everything here is pure and dependency-free; the renderer lives in
 // src/ui/DeclarativeView.tsx and the Core-backed shell in src/ui/ContributedView.tsx.
 
+import { z } from "zod";
+
+const viewPayloadSchema = z.json();
+type ViewPayload = z.infer<typeof viewPayloadSchema>;
+const viewTextSchema = z.string();
+const viewArraySchema = z.array(viewPayloadSchema);
+
+/** JSON source-row contract mirrors the app-host vocabulary. */
+export const viewSourceRowSchema = z.record(
+	z.string(),
+	z.json().optional().catch(undefined)
+);
+export type ViewSourceRow = z.infer<typeof viewSourceRowSchema>;
+
 /** The seven standardized view kinds — the discriminant a renderer switches on. */
 export const VIEW_KINDS = [
 	"list-detail",
@@ -33,6 +47,7 @@ export const VIEW_KINDS = [
 ] as const;
 
 export type ViewKind = (typeof VIEW_KINDS)[number];
+const viewKindSchema = z.enum(VIEW_KINDS);
 
 /** Visual tone shared by badges and stats, mapped by each renderer to its own
  *  palette (a `@ryu/ui` Badge variant on desktop, a themed termcn Badge here). */
@@ -61,7 +76,7 @@ export type ViewSourceHttpMethod = (typeof VIEW_SOURCE_HTTP_METHODS)[number];
  *  its own authenticated Core seam (the spec never sees a token); `path` and string
  *  leaves of `body` template from the collected form values and the selected item. */
 export interface ViewActionHttp {
-	body?: unknown;
+	body?: ViewPayload;
 	method: ViewActionHttpMethod;
 	path: string;
 }
@@ -79,7 +94,7 @@ export interface ViewAction {
 	id: string;
 	intent?: string;
 	label: string;
-	payload?: unknown;
+	payload?: ViewPayload;
 	style?: ViewActionStyle;
 }
 
@@ -87,8 +102,8 @@ export interface ViewAction {
  *  `values`, the selected/owning row (`item` — the RAW source row when the view is
  *  source-fetched), and the owning contribution id. */
 export interface ViewActionContext {
-	item?: Record<string, unknown>;
-	values?: Record<string, unknown>;
+	item?: ViewSourceRow;
+	values?: ViewSourceRow;
 	viewId?: string;
 }
 
@@ -182,7 +197,7 @@ export interface ViewSourceMap {
  *  (the `{{item.<key>}}` templating base for actions fired on it). */
 export interface SourceItem {
 	item: ViewItem;
-	raw: Record<string, unknown>;
+	raw: ViewSourceRow;
 }
 
 // ── The discriminated union on `view` ────────────────────────────────────────
@@ -255,21 +270,25 @@ const TEMPLATE_TOKEN = /\{\{\s*([\w.-]+)\s*\}\}/g;
 /** Matches a string that is EXACTLY one template token (raw substitution). */
 const SOLE_TEMPLATE_TOKEN = /^\{\{\s*([\w.-]+)\s*\}\}$/;
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-	typeof v === "object" && v !== null;
-
-function resolveToken(token: string, ctx: ViewActionContext): unknown {
-	if (token.startsWith("item.")) {
-		return ctx.item?.[token.slice("item.".length)];
-	}
-	return ctx.values?.[token];
+function resolveToken(
+	token: string,
+	ctx: ViewActionContext
+): ViewPayload | undefined {
+	return token.startsWith("item.")
+		? ctx.item?.[token.slice("item.".length)]
+		: ctx.values?.[token];
 }
-
-function stringifyToken(value: unknown): string {
+function stringifyToken(value: ViewPayload | undefined): string {
 	if (value === null || value === undefined) {
 		return "";
 	}
-	return typeof value === "object" ? JSON.stringify(value) : String(value);
+	const scalar = z
+		.union([z.string(), z.number(), z.boolean()])
+		.safeParse(value);
+	return scalar.success ? String(scalar.data) : JSON.stringify(value);
+}
+export interface ViewTemplateOptions {
+	uriEncode?: boolean;
 }
 
 /** Interpolate `{{field}}` (form values) and `{{item.<key>}}` (selected item)
@@ -278,7 +297,7 @@ function stringifyToken(value: unknown): string {
 export function renderTemplate(
 	template: string,
 	ctx: ViewActionContext,
-	opts?: { uriEncode?: boolean }
+	opts?: ViewTemplateOptions
 ): string {
 	return template.replace(TEMPLATE_TOKEN, (_match, token: string) => {
 		const text = stringifyToken(resolveToken(token, ctx));
@@ -288,23 +307,35 @@ export function renderTemplate(
 
 /** Recursively template a JSON body: a string leaf that is exactly one token
  *  substitutes the RAW value (type-preserving); mixed strings interpolate. */
-function renderBody(body: unknown, ctx: ViewActionContext): unknown {
-	if (typeof body === "string") {
-		const sole = SOLE_TEMPLATE_TOKEN.exec(body);
-		if (sole?.[1]) {
-			return resolveToken(sole[1], ctx);
-		}
-		return renderTemplate(body, ctx);
+export type RenderedViewBody =
+	| ViewPayload
+	| undefined
+	| RenderedViewBody[]
+	| RenderedViewObject;
+interface RenderedViewObject {
+	[key: string]: RenderedViewBody;
+}
+function renderBody(
+	body: ViewPayload,
+	ctx: ViewActionContext
+): RenderedViewBody {
+	const text = viewTextSchema.safeParse(body);
+	if (text.success) {
+		const sole = SOLE_TEMPLATE_TOKEN.exec(text.data);
+		return sole?.[1]
+			? resolveToken(sole[1], ctx)
+			: renderTemplate(text.data, ctx);
 	}
 	if (Array.isArray(body)) {
 		return body.map((entry) => renderBody(entry, ctx));
 	}
-	if (isRecord(body)) {
-		const out: Record<string, unknown> = {};
-		for (const [key, value] of Object.entries(body)) {
-			out[key] = renderBody(value, ctx);
+	const record = viewSourceRowSchema.safeParse(body);
+	if (record.success) {
+		const output: RenderedViewObject = {};
+		for (const [key, value] of Object.entries(record.data)) {
+			output[key] = value === undefined ? undefined : renderBody(value, ctx);
 		}
-		return out;
+		return output;
 	}
 	return body;
 }
@@ -321,7 +352,7 @@ export function isCoreApiPath(path: string): boolean {
 
 /** A fully-rendered declarative HTTP action, ready for the host's fetch seam. */
 export interface RenderedActionHttp {
-	body?: unknown;
+	body?: RenderedViewBody;
 	method: ViewActionHttpMethod;
 	path: string;
 }
@@ -345,7 +376,7 @@ export function renderActionHttp(
 }
 
 function rowText(
-	row: Record<string, unknown>,
+	row: ViewSourceRow,
 	key: string | undefined
 ): string | undefined {
 	if (!key) {
@@ -355,7 +386,7 @@ function rowText(
 	if (value === null || value === undefined) {
 		return undefined;
 	}
-	return typeof value === "object" ? JSON.stringify(value) : String(value);
+	return stringifyToken(value);
 }
 
 /** Map a source-fetch response payload to renderable {@link SourceItem}s per the
@@ -364,51 +395,58 @@ function rowText(
  *  response degrades to the empty state rather than crashing the shell. */
 export function sourceItemsFromResponse(
 	source: ViewSource,
-	payload: unknown
+	payload: Parameters<typeof viewPayloadSchema.safeParse>[0]
 ): SourceItem[] {
-	let rows: unknown;
-	if (Array.isArray(payload)) {
-		rows = payload;
-	} else if (isRecord(payload)) {
-		rows = source.items
-			? payload[source.items]
-			: Object.values(payload).find((v) => Array.isArray(v));
+	const parsed = viewPayloadSchema.safeParse(payload);
+	if (!parsed.success) {
+		return [];
 	}
+	const array = viewArraySchema.safeParse(parsed.data);
+	const record = viewSourceRowSchema.safeParse(parsed.data);
+	const rows = array.success
+		? array.data
+		: record.success
+			? source.items
+				? record.data[source.items]
+				: Object.values(record.data).find((value) => Array.isArray(value))
+			: undefined;
 	if (!Array.isArray(rows)) {
 		return [];
 	}
 	const map = source.map ?? {};
-	const out: SourceItem[] = [];
+	const output: SourceItem[] = [];
 	for (const row of rows) {
-		if (!isRecord(row)) {
+		const parsedRow = viewSourceRowSchema.safeParse(row);
+		if (!parsedRow.success) {
 			continue;
 		}
-		const id = rowText(row, map.id ?? "id");
-		const title = rowText(row, map.title ?? "title");
+		const raw = parsedRow.data;
+		const id = rowText(raw, map.id ?? "id");
+		const title = rowText(raw, map.title ?? "title");
 		if (!(id && title)) {
 			continue;
 		}
-		out.push({
-			raw: row,
+		output.push({
+			raw,
 			item: {
 				id,
 				title,
-				subtitle: rowText(row, map.subtitle),
-				detail: rowText(row, map.detail),
-				accessory: rowText(row, map.accessory),
+				subtitle: rowText(raw, map.subtitle),
+				detail: rowText(raw, map.detail),
+				accessory: rowText(raw, map.accessory),
 			},
 		});
 	}
-	return out;
+	return output;
 }
 
 /** True when `kind` is one of the seven known {@link VIEW_KINDS}. An unknown kind
  *  is NOT an error: Core passes new kinds through verbatim, so an older shell
  *  renders a readable "unsupported view" fallback instead of failing. */
-export function isKnownViewKind(kind: unknown): kind is ViewKind {
-	return (
-		typeof kind === "string" && (VIEW_KINDS as readonly string[]).includes(kind)
-	);
+export function isKnownViewKind(
+	kind: Parameters<typeof viewKindSchema.safeParse>[0]
+): kind is ViewKind {
+	return viewKindSchema.safeParse(kind).success;
 }
 
 // ── Validation (pure) ────────────────────────────────────────────────────────
@@ -432,12 +470,16 @@ export interface ViewValidation {
  * OPTIONAL fields, so a newer app targeting an older shell degrades to a known-kind
  * empty view rather than an error.
  */
-export function validateView(value: unknown): ViewValidation {
+export function validateView(
+	value: Parameters<typeof viewSourceRowSchema.safeParse>[0]
+): ViewValidation {
 	const errors: string[] = [];
-	if (!isRecord(value)) {
+	const parsed = viewSourceRowSchema.safeParse(value);
+	if (!parsed.success) {
 		return { ok: false, errors: ["view spec must be an object"] };
 	}
-	const kind = value.view;
+	const record = parsed.data;
+	const kind = record.view;
 	if (!isKnownViewKind(kind)) {
 		return {
 			ok: false,
@@ -445,7 +487,7 @@ export function validateView(value: unknown): ViewValidation {
 		};
 	}
 	const requireArray = (key: string) => {
-		if (!Array.isArray((value as Record<string, unknown>)[key])) {
+		if (!Array.isArray(record[key])) {
 			errors.push(`${kind}: "${key}" must be an array`);
 		}
 	};
@@ -467,7 +509,7 @@ export function validateView(value: unknown): ViewValidation {
 			requireArray("filters");
 			break;
 		case "empty-state":
-			if (typeof value.title !== "string" || value.title.length === 0) {
+			if (!viewTextSchema.min(1).safeParse(record.title).success) {
 				errors.push('empty-state: "title" must be a non-empty string');
 			}
 			break;
@@ -479,3 +521,169 @@ export function validateView(value: unknown): ViewValidation {
 	}
 	return { ok: errors.length === 0, errors };
 }
+
+// Parsing schemas mirror the canonical app-host vocabulary; parity is verified in contract tests.
+const viewToneSchema = z.enum([
+	"neutral",
+	"success",
+	"warning",
+	"danger",
+	"info",
+]);
+const viewActionSchema = z.looseObject({
+	id: z.string(),
+	label: z.string(),
+	confirm: z.string().optional(),
+	icon: z.string().optional(),
+	intent: z.string().optional(),
+	payload: viewPayloadSchema.optional(),
+	style: z.enum(["primary", "default", "danger"]).optional(),
+	http: z
+		.looseObject({
+			method: z.enum(VIEW_ACTION_HTTP_METHODS),
+			path: z.string(),
+			body: viewPayloadSchema.optional(),
+		})
+		.optional(),
+});
+const viewBadgeSchema = z.looseObject({
+	label: z.string(),
+	tone: viewToneSchema.optional(),
+});
+const viewOptionSchema = z.looseObject({
+	label: z.string(),
+	value: z.string(),
+});
+const viewItemSchema = z.looseObject({
+	id: z.string(),
+	title: z.string(),
+	accessory: z.string().optional(),
+	actions: z.array(viewActionSchema).optional(),
+	avatar: z.string().optional(),
+	badges: z.array(viewBadgeSchema).optional(),
+	detail: z.string().optional(),
+	icon: z.string().optional(),
+	subtitle: z.string().optional(),
+});
+const viewSourceSchema = z.looseObject({
+	filter: z
+		.array(
+			z.looseObject({
+				key: z.string(),
+				equals: z.string().optional(),
+				in: z.array(z.string()).optional(),
+				notIn: z.array(z.string()).optional(),
+			})
+		)
+		.optional(),
+	http: z.looseObject({
+		method: z.literal("GET").optional(),
+		path: z.string(),
+	}),
+	items: z.string().optional(),
+	limit: z.number().optional(),
+	refreshMs: z.number().optional(),
+	total: z.string().optional(),
+	map: z
+		.looseObject({
+			accessory: z.string().optional(),
+			avatar: z.string().optional(),
+			detail: z.string().optional(),
+			icon: z.string().optional(),
+			id: z.string().optional(),
+			subtitle: z.string().optional(),
+			subtitleTransform: z.enum(["basename", "humanize"]).optional(),
+			title: z.string().optional(),
+			titleFallback: z.string().optional(),
+		})
+		.optional(),
+});
+
+/** Validate renderer-owned fields while retaining forward-compatible public metadata. */
+export const viewSpecSchema = z.discriminatedUnion("view", [
+	z.looseObject({
+		view: z.literal("list-detail"),
+		items: z.array(viewItemSchema),
+		actions: z.array(viewActionSchema).optional(),
+		emptyText: z.string().optional(),
+		itemActions: z.array(viewActionSchema).optional(),
+		source: viewSourceSchema.optional(),
+	}),
+	z.looseObject({
+		view: z.literal("data-table"),
+		actions: z.array(viewActionSchema).optional(),
+		emptyText: z.string().optional(),
+		columns: z.array(
+			z.looseObject({
+				id: z.string(),
+				header: z.string(),
+				align: z.enum(["left", "center", "right"]).optional(),
+			})
+		),
+		rows: z.array(
+			z.looseObject({
+				id: z.string(),
+				cells: z.record(z.string(), z.union([z.string(), z.number()])),
+				actions: z.array(viewActionSchema).optional(),
+				badges: z.array(viewBadgeSchema).optional(),
+			})
+		),
+	}),
+	z.looseObject({
+		view: z.literal("form"),
+		actions: z.array(viewActionSchema).optional(),
+		submit: viewActionSchema.optional(),
+		fields: z.array(
+			z.looseObject({
+				id: z.string(),
+				label: z.string(),
+				type: z.enum(["text", "textarea", "number", "select", "switch"]),
+				options: z.array(viewOptionSchema).optional(),
+				placeholder: z.string().optional(),
+				required: z.boolean().optional(),
+				value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+			})
+		),
+	}),
+	z.looseObject({
+		view: z.literal("action-panel"),
+		actions: z.array(viewActionSchema),
+		title: z.string().optional(),
+	}),
+	z.looseObject({
+		view: z.literal("filter-bar"),
+		filters: z.array(
+			z.looseObject({
+				id: z.string(),
+				label: z.string(),
+				options: z.array(viewOptionSchema),
+				value: z.string().optional(),
+			})
+		),
+	}),
+	z.looseObject({
+		view: z.literal("empty-state"),
+		title: z.string(),
+		action: viewActionSchema.optional(),
+		description: z.string().optional(),
+		icon: z.string().optional(),
+	}),
+	z.looseObject({
+		view: z.literal("stat-card-row"),
+		stats: z.array(
+			z.looseObject({
+				id: z.string(),
+				label: z.string(),
+				value: z.union([z.string(), z.number()]),
+				delta: z.string().optional(),
+				tone: viewToneSchema.optional(),
+			})
+		),
+	}),
+]) satisfies z.ZodType<ViewSpec>;
+
+/** The transport retains malformed or future-kind JSON specs until renderer refinement. */
+export const rawViewSpecSchema = z
+	.record(z.string(), z.json())
+	.and(z.object({ view: z.string() }));
+export type RawViewSpec = z.infer<typeof rawViewSpecSchema>;

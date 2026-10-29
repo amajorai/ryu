@@ -1,0 +1,58 @@
+{
+  "id": "@ryu/kill-switch",
+  "name": "Kill Switch",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Stop running chats and bots on the selected node and pause new work until you resume execution.",
+  "tagline": "Stop chats and bots immediately",
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "category": "Productivity",
+  "tags": ["chat", "bots", "safety", "control"],
+  "keywords": ["kill switch", "stop", "pause", "cancel", "bots"],
+  "icon": "stop-circle",
+  "iconDither": { "from": 198, "to": "transparent", "direction": "down" },
+  "engines": { "ryu": ">=0.4.0" },
+  "surfaces": {
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "gateway": { "support": "none" },
+    "web": { "support": "none" },
+    "mobile": { "support": "none" },
+    "cli": { "support": "none" },
+    "island": { "support": "none" },
+    "extension": { "support": "none" }
+  },
+  "permission_grants": ["execution:control"],
+  "activation_events": ["*"],
+  "runnables": [],
+  "contributes": {
+    "context_menu_items": [
+      {
+        "id": "kill-switch.stop",
+        "label": "Stop all chats and bots",
+        "icon": "stop-circle",
+        "anchor": "conversation",
+        "capability": "execution.pause",
+        "order": -100,
+        "feedback": {
+          "loading": "Stopping chats and bots…",
+          "success": "Chats and bots paused on this node",
+          "error": "Could not stop chats and bots"
+        }
+      },
+      {
+        "id": "kill-switch.resume",
+        "label": "Resume chats and bots",
+        "icon": "play-circle",
+        "anchor": "conversation",
+        "capability": "execution.resume",
+        "order": -99,
+        "feedback": {
+          "loading": "Resuming execution…",
+          "success": "This node can accept new chats and bot turns",
+          "error": "Could not resume execution"
+        }
+      }
+    ]
+  }
+}

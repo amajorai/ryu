@@ -19,6 +19,7 @@
 
 import { Database01Icon, StickyNote01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -40,7 +41,7 @@ import {
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useSpaceFileUpload } from "@/src/hooks/useSpaceFileUpload.ts";
 
 /** The system space every other upload path in the app already writes to, and so
@@ -58,7 +59,8 @@ export function AddToSpaceDialog({
 	 *  create-menu entry point, which has no row to infer a target from. */
 	spaceId: string | null;
 }) {
-	const { openTab } = useTabsContext();
+	const tl = useLiteralMessages();
+	const openTab = useTabSelector((state) => state.openTab);
 	const { spaces, createPage, createDatabase } = useSpacesContext();
 	const [pickedId, setPickedId] = useState<string | null>(null);
 	const [creating, setCreating] = useState(false);
@@ -121,7 +123,9 @@ export function AddToSpaceDialog({
 			<DialogContent>
 				<DialogHeader>
 					<DialogTitle>
-						{target ? `Add to ${target.name}` : "Add to a space"}
+						{target
+							? tl("Add to {spaceName}", { spaceName: target.name })
+							: "Add to a space"}
 					</DialogTitle>
 					<DialogDescription>
 						Upload files, or start a new page or database in this space.
@@ -140,7 +144,7 @@ export function AddToSpaceDialog({
 								}}
 								value={targetId ?? ""}
 							>
-								<SelectTrigger className="h-9 w-full text-sm">
+								<SelectTrigger className="h-9 w-full">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>

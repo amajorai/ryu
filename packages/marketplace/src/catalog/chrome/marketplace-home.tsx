@@ -1,6 +1,12 @@
 "use client";
 
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import {
+	Empty,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyTitle,
+} from "@ryu/ui/components/empty.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ComponentProps } from "react";
 import type {
@@ -54,20 +60,32 @@ export interface MarketplaceHomeRecommendations {
  */
 export default function MarketplaceHome({
 	className,
+	failed = false,
+	hideEmptyShelves = false,
 	loading = false,
+	onRetry,
 	recommendations,
 	shelves,
 }: {
 	className?: string;
+	/** The host's shelf feeds failed to load. With nothing to show, Home then says
+	 * so (and offers `onRetry`) instead of implying the store is empty. */
+	failed?: boolean;
+	/** Drop shelves that finished loading with no items. Off by default so the
+	 * desktop keeps every canonical shelf mounted; the public web opts in so a
+	 * signed-out visitor never sees a stack of empty placeholders. */
+	hideEmptyShelves?: boolean;
 	loading?: boolean;
+	onRetry?: () => void;
 	recommendations: MarketplaceHomeRecommendations;
 	shelves: MarketplaceHomeShelf[];
 }) {
 	const shelvesByKey = new Map(shelves.map((shelf) => [shelf.key, shelf]));
-	// Every host supplies data, never layout. Missing/empty data still leaves the
-	// canonical shelf mounted, so a failed or signed-out feed cannot make Home
-	// change shape on one surface but not the other.
-	const orderedShelves = MARKETPLACE_HOME_SHELVES.map(
+	// Every host supplies data, never layout. By default missing/empty data still
+	// leaves the canonical shelf mounted, so a failed or signed-out feed cannot
+	// make Home change shape on one surface but not the other. A host may opt out
+	// with `hideEmptyShelves`, which drops shelves that loaded with no items.
+	const canonicalShelves = MARKETPLACE_HOME_SHELVES.map(
 		(definition) =>
 			shelvesByKey.get(definition.key) ?? {
 				items: [],
@@ -75,6 +93,11 @@ export default function MarketplaceHome({
 				loading,
 			}
 	);
+	const orderedShelves = hideEmptyShelves
+		? canonicalShelves.filter(
+				(shelf) => shelf.loading || shelf.items.length > 0
+			)
+		: canonicalShelves;
 
 	return (
 		<div
@@ -86,6 +109,34 @@ export default function MarketplaceHome({
 				{orderedShelves.map((shelf) => (
 					<MarketplaceHomeShelfView key={shelf.key} shelf={shelf} />
 				))}
+				{orderedShelves.length === 0 && failed ? (
+					<Empty data-slot="marketplace-home-error" spacing="snug">
+						<EmptyHeader>
+							<EmptyTitle>Couldn't load the Marketplace</EmptyTitle>
+							<EmptyDescription>
+								{onRetry ? (
+									<button
+										className="font-medium text-foreground underline-offset-4 hover:underline"
+										onClick={onRetry}
+										type="button"
+									>
+										Try again →
+									</button>
+								) : (
+									"Reload the page, or browse a category above."
+								)}
+							</EmptyDescription>
+						</EmptyHeader>
+					</Empty>
+				) : null}
+				{orderedShelves.length === 0 && !failed ? (
+					<Empty data-slot="marketplace-home-empty" spacing="snug">
+						<EmptyHeader>
+							<EmptyTitle>Nothing to show here yet</EmptyTitle>
+							<EmptyDescription>Browse a category above.</EmptyDescription>
+						</EmptyHeader>
+					</Empty>
+				) : null}
 			</div>
 		</div>
 	);
@@ -114,18 +165,23 @@ function MarketplaceHomeShelfView({ shelf }: { shelf: MarketplaceHomeShelf }) {
 						<StoreCatalogCard {...item} key={item.id} />
 					))}
 				</StoreCardGrid>
-			) : (
+			) : null}
+			{shelf.items.length === 0 && shelf.loading ? (
+				<div aria-busy="true" data-slot="marketplace-home-loading">
+					<StoreCardGrid>
+						<Skeleton className="h-20" radius="row" />
+						<Skeleton className="h-20" radius="row" />
+					</StoreCardGrid>
+				</div>
+			) : null}
+			{shelf.items.length === 0 && !shelf.loading ? (
 				<div
 					className="flex min-h-16 items-center justify-center rounded-lg border border-dashed px-4 text-muted-foreground text-sm"
 					data-slot="marketplace-home-empty"
 				>
-					{shelf.loading ? (
-						<Spinner className="size-4" />
-					) : (
-						<span>{shelf.emptyLabel ?? definition.emptyLabel}</span>
-					)}
+					<span>{shelf.emptyLabel ?? definition.emptyLabel}</span>
 				</div>
-			)}
+			) : null}
 		</section>
 	);
 }

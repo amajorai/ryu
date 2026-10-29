@@ -4,34 +4,30 @@
 //! everything except `/health` requires a shared secret). Native clients read
 //! the same persisted token Shadow resolves: `SHADOW_API_TOKEN` env first
 //! (operator override), then the token file Core mints/injects at spawn
-//! (`<ryu-dir>/shadow/api-token` — profile-aware, mirroring Core's
-//! `sidecar/tools/shadow::api_token`), then the standalone default
-//! `~/.shadow/api-token` (a dev-started `shadow start` with no
-//! `SHADOW_DATA_DIR`). `None` = no token found; Shadow will reject the call
-//! (fail closed) and callers degrade like an absent Shadow.
+//! (`<data dir>/services/shadow/api-token`, mirroring Core's
+//! `sidecar/tools/shadow::api_token`).
+//!
+//! The token is never attached blindly. Any local process can bind Shadow's
+//! port while Shadow is down, so [`send_verified`] first runs the loopback peer
+//! proof (`ryu_sidecar_runtime::peer_proof`): the listener must answer a fresh
+//! `/health?challenge=...` with an HMAC proof that it holds the token. A
+//! listener that cannot prove it, or a missing token, fails the call before
+//! anything is sent, and callers degrade like an absent Shadow.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-/// The persisted token file candidates, in resolution order.
-fn token_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    // Core honours an explicit RYU_DIR override before the profile default; read
-    // the same location so a relocated data dir still resolves the token.
-    if let Ok(dir) = std::env::var("RYU_DIR") {
-        let dir = dir.trim();
-        if !dir.is_empty() {
-            paths.push(PathBuf::from(dir).join("shadow").join("api-token"));
-        }
-    }
-    paths.push(
-        crate::profile::ryu_home_dir()
-            .join("shadow")
-            .join("api-token"),
-    );
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join(".shadow").join("api-token"));
-    }
-    paths
+use ryu_sidecar_runtime::peer_proof::{send_with_verified_bearer, ProofCache};
+
+/// The desktop's recent Shadow proof, so a burst of calls (the companion poll,
+/// the tray's read-then-write toggle) does not re-challenge Shadow each time.
+static SHADOW_PEER_PROOF: ProofCache = ProofCache::new(Duration::from_secs(2));
+
+/// The persisted token file: `<data dir>/services/shadow/api-token`, with the
+/// data dir resolved like Core (`RYU_DIR` > Storage pointer > profile default).
+fn token_path() -> PathBuf {
+    ryu_sidecar_runtime::layout::service_dir(&crate::profile::ryu_home_dir(), "shadow")
+        .join("api-token")
 }
 
 /// Resolve the Shadow API token, or `None` when unavailable.
@@ -42,21 +38,22 @@ pub fn api_token() -> Option<String> {
             return Some(trimmed.to_owned());
         }
     }
-    for path in token_paths() {
-        if let Ok(existing) = std::fs::read_to_string(&path) {
-            let trimmed = existing.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_owned());
-            }
-        }
-    }
-    None
+    let existing = std::fs::read_to_string(token_path()).ok()?;
+    let trimmed = existing.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-/// Attach the Shadow bearer to a request when a token is available.
-pub fn with_auth(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    match api_token() {
-        Some(token) => req.bearer_auth(token),
-        None => req,
-    }
+/// Send `req` to Shadow with its bearer, but only once the listener at the
+/// request's origin proved it holds the token. Fails closed: with no token, or
+/// a listener that gives no valid proof, nothing is sent and the error says
+/// why.
+pub async fn send_verified(req: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
+    let token = api_token().ok_or_else(|| {
+        "no Shadow API token found (SHADOW_API_TOKEN or services/shadow/api-token); \
+         nothing was sent to Shadow"
+            .to_owned()
+    })?;
+    send_with_verified_bearer(req, &token, &SHADOW_PEER_PROOF)
+        .await
+        .map_err(|error| format!("Shadow request not sent or failed: {error}"))
 }

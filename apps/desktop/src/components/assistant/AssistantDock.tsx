@@ -1,4 +1,4 @@
-import { Logo } from "@ryu/ui/components/logo";
+import { Logo } from "@ryu/ui/components/logo.tsx";
 import { useEffect, useState } from "react";
 import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
 import { AssistantPanel } from "./AssistantPanel.tsx";
@@ -74,7 +74,7 @@ export function AssistantDock() {
 			trigger={
 				// The island's exact eyes: 34px in a 40px circle, drawn in the skin's
 				// light text color (currentColor) on the dark glass.
-				<Logo className="text-current" size={EYES_SIZE} variant="eyes" />
+				<Logo size={EYES_SIZE} tone="inherit" variant="eyes" />
 			}
 			triggerLabel="Ask Ryu"
 			triggerSize={TRIGGER_SIZE}

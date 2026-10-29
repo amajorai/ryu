@@ -1,3 +1,8 @@
+import {
+	groupedStringSelectionsSchema,
+	stringSelectionsSchema,
+} from "../../shared/string-selections.ts";
+
 const MODE_KEY = "ryu_acp_mode";
 const CONFIG_KEY = "ryu_acp_config";
 const MODEL_KEY = "ryu_acp_model";
@@ -5,7 +10,7 @@ const MODEL_KEY = "ryu_acp_model";
 function readMap(key: string): Record<string, string> {
 	try {
 		const raw = localStorage.getItem(key);
-		return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+		return raw ? stringSelectionsSchema.parse(JSON.parse(raw)) : {};
 	} catch {
 		return {};
 	}
@@ -45,19 +50,20 @@ export function setAcpModel(agentId: string, modelId: string): void {
 	writeMap(MODEL_KEY, map);
 }
 
+function readGroupedConfig(): Record<string, Record<string, string>> {
+	try {
+		const raw = localStorage.getItem(CONFIG_KEY);
+		return raw ? groupedStringSelectionsSchema.parse(JSON.parse(raw)) : {};
+	} catch {
+		return {};
+	}
+}
+
 export function getAcpConfig(agentId: string | null): Record<string, string> {
 	if (!agentId) {
 		return {};
 	}
-	try {
-		const raw = localStorage.getItem(CONFIG_KEY);
-		const all = raw
-			? (JSON.parse(raw) as Record<string, Record<string, string>>)
-			: {};
-		return all[agentId] ?? {};
-	} catch {
-		return {};
-	}
+	return readGroupedConfig()[agentId] ?? {};
 }
 
 export function setAcpConfigValue(
@@ -65,12 +71,11 @@ export function setAcpConfigValue(
 	configId: string,
 	valueId: string
 ): void {
+	// A corrupt stored blob reads as empty, so this write replaces it instead of
+	// leaving config selections unwritable until storage is cleared.
+	const all = readGroupedConfig();
+	all[agentId] = { ...all[agentId], [configId]: valueId };
 	try {
-		const raw = localStorage.getItem(CONFIG_KEY);
-		const all = raw
-			? (JSON.parse(raw) as Record<string, Record<string, string>>)
-			: {};
-		all[agentId] = { ...(all[agentId] ?? {}), [configId]: valueId };
 		localStorage.setItem(CONFIG_KEY, JSON.stringify(all));
 	} catch {
 		// Storage unavailable.

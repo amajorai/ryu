@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -16,20 +16,32 @@ const node = {
 };
 const requests: Array<{
 	options?: { signal?: AbortSignal };
-	resolve: (value: unknown) => void;
+	resolve: <TValue>(value: TValue) => void;
 }> = [];
 mock.module("@/src/hooks/useActiveNode.ts", () => ({
 	useActiveNode: () => node,
 }));
+// Shipping useApps reads dependency refusals through plugin-dependency-errors,
+// which validates them with the real wire schema. Capture that schema before
+// the transport mock replaces the module so the hook keeps its real parser.
+const { dependencyErrorSchema } = await import("@/src/lib/api/plugins.ts");
 mock.module("@/src/lib/api/plugins.ts", () => ({
+	dependencyErrorSchema,
 	getPluginContributions: () => Promise.resolve({ companions: [], views: [] }),
-	fetchApps: (_target: unknown, options?: { signal?: AbortSignal }) =>
-		new Promise((resolve) => requests.push({ options, resolve })),
+	fetchApps: (
+		_target: Parameters<typeof import("@/src/lib/api/plugins.ts").fetchApps>[0],
+		options?: { signal?: AbortSignal }
+	) => new Promise((resolve) => requests.push({ options, resolve })),
 	disableApp: () => Promise.reject(new Error("unused")),
 	enableApp: () => Promise.reject(new Error("unused")),
 	installApp: () => Promise.reject(new Error("unused")),
 	uninstallApp: () => Promise.reject(new Error("unused")),
 	describeDependencyError: () => "unused",
+}));
+// The dependency-refusal reader validates against the real plugin schema that
+// the roster-only stub above leaves out; no refusal reaches these readers.
+mock.module("@/src/lib/plugin-dependency-errors.ts", () => ({
+	dependencyErrorOf: () => null,
 }));
 mock.module("@/src/lib/core-refresh.ts", () => ({
 	triggerGlobalRefresh: () => undefined,

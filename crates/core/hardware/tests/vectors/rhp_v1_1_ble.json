@@ -1,0 +1,123 @@
+{
+  "description": "RHP v1.1 Mode A BLE relay PDUs on ctrl_up/ctrl_down (0xA1 segment, 0xA2 link control)",
+  "format": "A1 | flags(bit0 START, bit1 END) | seq(u8, per direction, reset to 0 by LINK_OPEN) | [total_len u16be on START] | data; PDU length <= ATT_MTU-3",
+  "link_control": {
+    "LINK_OPEN": "a201",
+    "LINK_CLOSED": "a202",
+    "RESTART": "a203"
+  },
+  "segmentations": [
+    {
+      "name": "hs1_mtu23",
+      "mtu": 23,
+      "first_seq": 0,
+      "message_hex": "010101006bb060e293caa603ef886a98cbd0817e92100540575826d022a2298e39553e0a",
+      "pdus_hex": [
+        "a101000024010101006bb060e293caa603ef886a",
+        "a1000198cbd0817e92100540575826d022a2298e",
+        "a1020239553e0a"
+      ]
+    },
+    {
+      "name": "hs2_mtu185",
+      "mtu": 185,
+      "first_seq": 0,
+      "message_hex": "02fe9d88bd8db2e74cd1d30dd359a86b2ba4a8156fed73ca8c7a98bca633286a7c0f8cedfac183ea3dc1a997a3bd874180bec374771f2826e45e982b2b635fc71f5e29fa07d8e6f3288cfc63afbe573c0ef484d56196ea4aff9b330ea043dfb7243621",
+      "pdus_hex": [
+        "a10300006302fe9d88bd8db2e74cd1d30dd359a86b2ba4a8156fed73ca8c7a98bca633286a7c0f8cedfac183ea3dc1a997a3bd874180bec374771f2826e45e982b2b635fc71f5e29fa07d8e6f3288cfc63afbe573c0ef484d56196ea4aff9b330ea043dfb7243621"
+      ]
+    },
+    {
+      "name": "hs2_mtu23",
+      "mtu": 23,
+      "first_seq": 0,
+      "message_hex": "02fe9d88bd8db2e74cd1d30dd359a86b2ba4a8156fed73ca8c7a98bca633286a7c0f8cedfac183ea3dc1a997a3bd874180bec374771f2826e45e982b2b635fc71f5e29fa07d8e6f3288cfc63afbe573c0ef484d56196ea4aff9b330ea043dfb7243621",
+      "pdus_hex": [
+        "a10100006302fe9d88bd8db2e74cd1d30dd359a8",
+        "a100016b2ba4a8156fed73ca8c7a98bca633286a",
+        "a100027c0f8cedfac183ea3dc1a997a3bd874180",
+        "a10003bec374771f2826e45e982b2b635fc71f5e",
+        "a1000429fa07d8e6f3288cfc63afbe573c0ef484",
+        "a10205d56196ea4aff9b330ea043dfb7243621"
+      ]
+    },
+    {
+      "name": "hello_ack_mtu247",
+      "mtu": 247,
+      "first_seq": 1,
+      "message_hex": "0471c1ac1548fd62c27c5c05db5b0d599b656885bd02d8a41c611e388a76d5115333fcf562213f85c3766ec0cbdcacfaf86190f357dea28f50a49a4c47e06f4ca5f5a51523c5a60cdedab29b1afb78178e23f0e6b85b0300734db62046fc83309554031c27aab57f5f95289b0604ae983601085de324c75febf324222bf4e3c1c9477cb1bfa6a8b94b106ab719a26c63644ad7d6ec046286c481fefed9ca340e02dd57b83c803ecb89a05666ee945858c2cf29b4acd41b7d5eaadbff0b4034b1e09c033cae5754a046fca3b3fafd3b",
+      "pdus_hex": [
+        "a1030100cf0471c1ac1548fd62c27c5c05db5b0d599b656885bd02d8a41c611e388a76d5115333fcf562213f85c3766ec0cbdcacfaf86190f357dea28f50a49a4c47e06f4ca5f5a51523c5a60cdedab29b1afb78178e23f0e6b85b0300734db62046fc83309554031c27aab57f5f95289b0604ae983601085de324c75febf324222bf4e3c1c9477cb1bfa6a8b94b106ab719a26c63644ad7d6ec046286c481fefed9ca340e02dd57b83c803ecb89a05666ee945858c2cf29b4acd41b7d5eaadbff0b4034b1e09c033cae5754a046fca3b3fafd3b"
+      ]
+    },
+    {
+      "name": "hello_ack_mtu23_seq250",
+      "mtu": 23,
+      "first_seq": 250,
+      "message_hex": "0471c1ac1548fd62c27c5c05db5b0d599b656885bd02d8a41c611e388a76d5115333fcf562213f85c3766ec0cbdcacfaf86190f357dea28f50a49a4c47e06f4ca5f5a51523c5a60cdedab29b1afb78178e23f0e6b85b0300734db62046fc83309554031c27aab57f5f95289b0604ae983601085de324c75febf324222bf4e3c1c9477cb1bfa6a8b94b106ab719a26c63644ad7d6ec046286c481fefed9ca340e02dd57b83c803ecb89a05666ee945858c2cf29b4acd41b7d5eaadbff0b4034b1e09c033cae5754a046fca3b3fafd3b",
+      "pdus_hex": [
+        "a101fa00cf0471c1ac1548fd62c27c5c05db5b0d",
+        "a100fb599b656885bd02d8a41c611e388a76d511",
+        "a100fc5333fcf562213f85c3766ec0cbdcacfaf8",
+        "a100fd6190f357dea28f50a49a4c47e06f4ca5f5",
+        "a100fea51523c5a60cdedab29b1afb78178e23f0",
+        "a100ffe6b85b0300734db62046fc83309554031c",
+        "a1000027aab57f5f95289b0604ae983601085de3",
+        "a1000124c75febf324222bf4e3c1c9477cb1bfa6",
+        "a10002a8b94b106ab719a26c63644ad7d6ec0462",
+        "a1000386c481fefed9ca340e02dd57b83c803ecb",
+        "a1000489a05666ee945858c2cf29b4acd41b7d5e",
+        "a10005aadbff0b4034b1e09c033cae5754a046fc",
+        "a10206a3b3fafd3b"
+      ]
+    }
+  ],
+  "reject": [
+    {
+      "name": "seq_gap",
+      "pdus_hex": ["a10100000500", "a1020211223344"],
+      "why": "second PDU seq 2, expected 1"
+    },
+    {
+      "name": "orphan_continuation",
+      "pdus_hex": ["a1020011"],
+      "why": "no START in progress"
+    },
+    {
+      "name": "start_while_open",
+      "pdus_hex": ["a10100000400", "a10101000400"],
+      "why": "START before END"
+    },
+    {
+      "name": "overflow",
+      "pdus_hex": ["a103000002aabbcc"],
+      "why": "3 data bytes > total_len 2"
+    },
+    {
+      "name": "short_end",
+      "pdus_hex": ["a1030000030102"],
+      "why": "END with 2 of 3 declared bytes"
+    },
+    {
+      "name": "total_len_zero",
+      "pdus_hex": ["a103000000"],
+      "why": "total_len 0"
+    },
+    {
+      "name": "total_len_too_big",
+      "pdus_hex": ["a1010040410000"],
+      "why": "total_len 16449 > 16448"
+    },
+    {
+      "name": "reserved_flag_bits",
+      "pdus_hex": ["a1070000010a"],
+      "why": "flags bit2 set"
+    }
+  ],
+  "classify": {
+    "7b": "legacy_json",
+    "a1": "segment",
+    "a2": "link_control",
+    "other": "drop"
+  }
+}

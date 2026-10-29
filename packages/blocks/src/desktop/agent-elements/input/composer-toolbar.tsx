@@ -13,7 +13,6 @@ import {
 	type GhostControls,
 	type GoalControls,
 	GoalPlusButton,
-	type MediaGenControls,
 	type PluginComposerControlRow,
 } from "./goal-plus-button.tsx";
 import { SendButton } from "./send-button.tsx";
@@ -81,6 +80,14 @@ export interface ComposerToolbarProps {
 
 	/** Content rendered on the left, next to the attachment button. */
 	leftActions?: React.ReactNode;
+	/**
+	 * Live-call controls. When set, the row collapses to a single line of "+",
+	 * the call (`center`), and these controls; host left/right actions, voice
+	 * input, and Send are hidden because the call owns the composer. The "+"
+	 * menu also drops its image/video generation and @ directory rows, which
+	 * would read or rewrite the hidden draft.
+	 */
+	liveCallActions?: React.ReactNode;
 	/** Whether the shared-layout morph is enabled for this toolbar. */
 	motionEnabled?: boolean;
 	onAttach?: () => void;
@@ -131,7 +138,7 @@ function buildMediaGen(
 	onGenerate: (() => void) | undefined,
 	generating: boolean | undefined,
 	disabled: boolean
-): MediaGenControls | undefined {
+) {
 	if (!(enabled && onGenerate)) {
 		return undefined;
 	}
@@ -139,13 +146,19 @@ function buildMediaGen(
 }
 
 /**
- * Resolve the "+" dropdown's media-generation rows and whether the menu should
- * render at all. Kept out of the component body so its boolean chains don't
- * inflate the toolbar's cognitive complexity.
+ * Resolve the "+" dropdown's media-generation and directory rows and whether the
+ * menu should render at all. Kept out of the component body so its boolean
+ * chains don't inflate the toolbar's cognitive complexity.
+ *
+ * A live call hides the typed draft (it comes back when the call ends), so the
+ * rows that read or rewrite that draft — image/video generation and the @
+ * directory — are withheld while the call owns the composer; attach, sketch,
+ * goal, and plugin rows stay.
  */
-function resolvePlusMenu(
+export function resolvePlusMenu(
 	p: Pick<
 		ComposerToolbarProps,
+		| "directoryGroups"
 		| "disabled"
 		| "isStreaming"
 		| "hasInput"
@@ -160,30 +173,31 @@ function resolvePlusMenu(
 		| "isGeneratingVideo"
 		| "showAttach"
 		| "onSketch"
-	>
-): {
-	imageGen: MediaGenControls | undefined;
-	videoGen: MediaGenControls | undefined;
-	showPlusMenu: boolean;
-} {
+	> & { inLiveCall?: boolean }
+) {
 	// Disable a gen row while a run is streaming or the composer is empty —
 	// there'd be no prompt to generate from.
 	const genDisabled = Boolean(p.disabled) || p.isStreaming || !p.hasInput;
 	const imageGen = buildMediaGen(
-		p.hasImageGen,
+		p.inLiveCall ? false : p.hasImageGen,
 		p.onGenerateImage,
 		p.isGeneratingImage,
 		genDisabled
 	);
 	const videoGen = buildMediaGen(
-		p.hasVideoGen,
+		p.inLiveCall ? false : p.hasVideoGen,
 		p.onGenerateVideo,
 		p.isGeneratingVideo,
 		genDisabled
 	);
+	const directoryGroups = p.inLiveCall ? undefined : p.directoryGroups;
 	return {
+		directoryGroups,
 		imageGen,
 		videoGen,
+		showDirectory: Boolean(
+			directoryGroups?.some((group) => group.items.length > 0)
+		),
 		// Attach alone is enough to open the menu. Gating the dropdown on the
 		// *optional* rows made the "+" mean two different things depending on the
 		// surface: a dropdown on the chat page (goal/ghost/plugins/gen wired) but a
@@ -217,6 +231,7 @@ export function ComposerToolbar({
 	doubleCheckControls,
 	pluginControls,
 	leftActions,
+	liveCallActions,
 	rightActions,
 	hasVoice,
 	isRecording,
@@ -243,7 +258,7 @@ export function ComposerToolbar({
 	contextMeter,
 	contextMeterOnOpen,
 	voiceMode,
-	compact = false,
+	compact: compactLayout = false,
 	center,
 	motionEnabled = true,
 	transition,
@@ -252,6 +267,8 @@ export function ComposerToolbar({
 	// message sends (and the host queues it when a turn is active), while Stop
 	// appears only for an active turn with an empty composer. The idle empty state
 	// is voice mode through SendButton's `voiceMode` prop.
+	const inLiveCall = liveCallActions !== undefined;
+	const compact = compactLayout || inLiveCall;
 	let sendState: "idle" | "typing" | "streaming" = "idle";
 	if (hasInput && !disabled) {
 		sendState = "typing";
@@ -261,13 +278,22 @@ export function ComposerToolbar({
 
 	// Media generation lives in the "+" dropdown (alongside Goal / Double-check),
 	// not as standalone buttons. The rows + visibility are resolved in a helper to
-	// keep this component's complexity in check.
-	const { imageGen, videoGen, showPlusMenu } = resolvePlusMenu({
+	// keep this component's complexity in check (including what a live call
+	// withholds).
+	const {
+		directoryGroups: menuDirectoryGroups,
+		imageGen,
+		videoGen,
+		showDirectory,
+		showPlusMenu,
+	} = resolvePlusMenu({
+		directoryGroups,
 		disabled,
 		isStreaming,
 		hasInput,
 		goalControls,
 		ghostControls,
+		inLiveCall,
 		pluginControls,
 		hasImageGen,
 		onGenerateImage,
@@ -278,9 +304,6 @@ export function ComposerToolbar({
 		showAttach,
 		onSketch,
 	});
-	const showDirectory = Boolean(
-		directoryGroups?.some((group) => group.items.length > 0)
-	);
 
 	const leftCluster = (
 		<motion.div
@@ -294,7 +317,7 @@ export function ComposerToolbar({
 		>
 			{(showPlusMenu || showDirectory) && (
 				<GoalPlusButton
-					directoryGroups={directoryGroups}
+					directoryGroups={menuDirectoryGroups}
 					directoryQuery={directoryQuery}
 					disabled={disabled}
 					doubleCheck={doubleCheckControls}
@@ -309,11 +332,20 @@ export function ComposerToolbar({
 					videoGen={videoGen}
 				/>
 			)}
-			{leftActions}
+			{inLiveCall ? null : leftActions}
 		</motion.div>
 	);
 
-	const rightCluster = (
+	const rightCluster = inLiveCall ? (
+		<motion.div
+			className="col-start-3 row-start-1 flex shrink-0 items-center gap-1"
+			data-slot="composer-live-call-actions"
+			layout={motionEnabled ? "position" : false}
+			transition={transition}
+		>
+			{liveCallActions}
+		</motion.div>
+	) : (
 		<motion.div
 			className={
 				compact
@@ -333,13 +365,13 @@ export function ComposerToolbar({
 			{onExpand && (
 				<Button
 					aria-label="Expand composer"
-					className="size-8 text-muted-foreground hover:text-foreground"
+					className="size-8"
 					disabled={disabled}
 					onClick={onExpand}
 					size="icon"
 					title="Expand composer"
 					type="button"
-					variant="ghost"
+					variant="ghost-muted"
 				>
 					<HugeiconsIcon className="size-4" icon={ExpandIcon} />
 				</Button>
@@ -348,7 +380,9 @@ export function ComposerToolbar({
 			    textarea (see input-bar). Here we only surface the transcribing
 			    spinner-wave, so the two waveforms never render at once. */}
 			{hasVoice && isTranscribing && (
-				<Wave aria-label="Transcribing" className="h-4 w-7 text-primary" />
+				<span className="inline-flex h-4 w-7 text-primary">
+					<Wave aria-label="Transcribing" className="h-4 w-7" />
+				</span>
 			)}
 			{/* A right-side attach button used to live here, guarded on `!goalControls`
 			    — one of several menu triggers, so it could render alongside the "+"

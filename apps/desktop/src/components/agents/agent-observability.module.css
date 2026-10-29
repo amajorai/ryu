@@ -1,0 +1,7 @@
+.foreground {
+	color: var(--foreground);
+	-webkit-text-fill-color: var(--foreground);
+}
+.share {
+	width: var(--observability-share);
+}

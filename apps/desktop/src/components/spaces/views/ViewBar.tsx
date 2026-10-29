@@ -1,4 +1,5 @@
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -11,9 +12,9 @@ import {
 	DropdownMenuSubContent,
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
-import { Input } from "@ryu/ui/components/input";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/dropdown-menu.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	ChevronDown,
 	KanbanSquare,
@@ -42,12 +43,12 @@ const VIEW_KINDS: Array<{
 	{ kind: "list", label: "List", icon: List },
 ];
 
-const KIND_ICON: Record<DbViewKind, ComponentType<{ className?: string }>> = {
+const KIND_ICON = {
 	table: TableIcon,
 	board: KanbanSquare,
 	gallery: LayoutGrid,
 	list: List,
-};
+} satisfies Record<DbViewKind, ComponentType<{ className?: string }>>;
 
 /**
  * The view switcher above a database: one chip per saved view, an add-view menu,
@@ -76,6 +77,7 @@ export function ViewBar({
 	) => void;
 	onRemoveView: (viewId: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState("");
 
@@ -100,6 +102,7 @@ export function ViewBar({
 				if (renamingId === view.id) {
 					return (
 						<Input
+							aria-label={tl("Rename view {viewName}", { viewName: view.name })}
 							autoFocus
 							className="my-1 h-7 w-28"
 							key={view.id}
@@ -119,6 +122,7 @@ export function ViewBar({
 				return (
 					<div className="flex items-center" key={view.id}>
 						<button
+							aria-pressed={active}
 							className={cn(
 								"flex items-center gap-1.5 rounded-md px-2 py-1.5 font-medium text-sm transition-colors",
 								active
@@ -143,9 +147,9 @@ export function ViewBar({
 									render={
 										<Button
 											aria-label="View options"
-											className="size-6 text-muted-foreground"
+											className="size-6"
 											size="icon"
-											variant="ghost"
+											variant="ghost-muted"
 										>
 											<ChevronDown className="size-3.5" />
 										</Button>
@@ -153,9 +157,14 @@ export function ViewBar({
 								/>
 								<DropdownMenuContent align="start" className="w-52">
 									<DropdownMenuRadioGroup
-										onValueChange={(value) =>
-											onUpdateView(view.id, { kind: value as DbViewKind })
-										}
+										onValueChange={(value) => {
+											const option = VIEW_KINDS.find(
+												(entry) => entry.kind === value
+											);
+											if (option) {
+												onUpdateView(view.id, { kind: option.kind });
+											}
+										}}
 										value={view.kind}
 									>
 										<DropdownMenuLabel>Layout</DropdownMenuLabel>
@@ -169,7 +178,7 @@ export function ViewBar({
 											</DropdownMenuRadioItem>
 										))}
 									</DropdownMenuRadioGroup>
-									{(view.kind === "board" || view.kind === "gallery") && (
+									{view.kind === "board" && (
 										<>
 											<DropdownMenuSeparator />
 											<DropdownMenuSub>
@@ -234,9 +243,9 @@ export function ViewBar({
 						render={
 							<Button
 								aria-label="Add view"
-								className="size-7 text-muted-foreground"
+								className="size-7"
 								size="icon"
-								variant="ghost"
+								variant="ghost-muted"
 							>
 								<Plus className="size-4" />
 							</Button>

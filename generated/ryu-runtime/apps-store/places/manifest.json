@@ -1,0 +1,349 @@
+{
+  "tags": ["places", "maps", "travel", "trips", "itinerary"],
+  "author": {
+    "name": "Ryu",
+    "url": "https://ryuhq.com"
+  },
+  "repository": "https://github.com/amajorai/ryu-places",
+  "homepage": "https://github.com/amajorai/ryu-places",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/places",
+  "name": "Places",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "category": "Productivity",
+  "description": "Save places you want to visit and places you've been on one shared map, import them from TikTok, Instagram, YouTube, blogs, or a Google Maps export, then plan trips day by day with AI drafts, optimized routes, bookings, split costs, and a checklist. Shared with the members of your organization. Records stay on your node. Search text, and the names and addresses of places you import or an AI draft proposes, go to a Photon geocoder (komoot's public photon.komoot.io unless your node sets RYU_PLACES_GEOCODER_URL), links you import are read from their public pages, and imported link and caption text, plus AI trip requests with the trip's stops and saved place names, goes to Ryu's configured model.",
+  "tagline": "Places to go, places you've been, and the trips in between",
+  "keywords": [
+    "places",
+    "map",
+    "travel",
+    "trip planner",
+    "itinerary",
+    "want to go",
+    "been there"
+  ],
+  "icon": "maps-location-01",
+  "iconDither": {
+    "from": 152,
+    "to": "transparent",
+    "direction": "down"
+  },
+  "surfaces": {
+    "gateway": {
+      "support": "none"
+    },
+    "core": {
+      "support": "full"
+    },
+    "desktop": {
+      "support": "full"
+    },
+    "island": {
+      "support": "limited"
+    },
+    "mobile": {
+      "support": "limited"
+    },
+    "extension": {
+      "support": "none"
+    },
+    "web": {
+      "support": "full"
+    },
+    "cli": {
+      "support": "list"
+    }
+  },
+  "engines": {
+    "ryu": ">=0.1.0"
+  },
+  "runnables": [
+    {
+      "id": "places-agent",
+      "name": "Places Guide",
+      "kind": "agent",
+      "config": {
+        "description": "Finds places, saves them to the shared map, and plans trips day by day.",
+        "system_prompt": "You are Places Guide. Help the user keep one shared map of places they want to visit and places they have been, and plan trips. Use places.search to find real places and places.save with the chosen result's name, coordinates, category, and externalId; never invent coordinates or claim something is saved without a successful tool result. When the user shares a link or a caption, use places.import_link and show the candidates before saving them with places.save (keep the url). For trips, use places.create_trip, places.suggest_itinerary to draft days and places.add_stops once the user agrees (or places.add_stop one at a time, preferring saved placeIds), places.optimize_day to order a day's route, and report the returned itinerary with its distances. Record bookings with places.add_booking only when the user has already booked; you cannot book anything. Record shared costs with places.add_expense in integer minor units with paidBy set to the member who paid (member ids come from places.overview), and report balances from the returned trip. You work on the one map whose members turned on Places Guide agent access, and you act as Places Guide, not as the user or any member: you cannot set or clear anyone's want-to-go or been mark, so ask the user to do that in the Places app, and never speak for a member's mark. If a tool says Places Guide is not connected, tell the user to turn on agent access in the Places app. Ask before deleting a place; you can delete only places you saved. Keep recommendations grounded in search results or saved notes, and do not invent opening hours, prices, travel times, or reviews.",
+        "tools": ["places"]
+      }
+    },
+    {
+      "id": "places-companion",
+      "name": "Places",
+      "kind": "companion",
+      "config": {
+        "label": "Places",
+        "ui_entry": "./dist/index.html",
+        "ui_format": "html",
+        "csp": {
+          "connect_domains": ["https://tiles.openfreemap.org"],
+          "resource_domains": ["https://tiles.openfreemap.org"]
+        }
+      }
+    }
+  ],
+  "sidecars": [
+    {
+      "name": "places",
+      "process": {
+        "kind": "local",
+        "command": "ryu-places",
+        "command_env": "RYU_PLACES_BIN",
+        "port_env": "RYU_PLACES_PORT"
+      },
+      "port": 8026,
+      "health_path": "/health",
+      "lazy": true,
+      "idle_stop_secs": 900,
+      "http": {
+        "mount": "/api/places",
+        "public_mount": "/api/places",
+        "routes": [
+          {
+            "path": "/me",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/me",
+            "method": "PATCH",
+            "permission": "places.view"
+          },
+          {
+            "path": "/members",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/agent",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/agent",
+            "method": "PUT",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/places",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/places",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/places/:id",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/places/:id",
+            "method": "PATCH",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/places/:id",
+            "method": "DELETE",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/places/:id/mark",
+            "method": "PUT",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/places/:id/mark",
+            "method": "DELETE",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/lists",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/lists",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/lists/:id",
+            "method": "PATCH",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/lists/:id",
+            "method": "DELETE",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/activity",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/summary",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/search",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/trips",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/trips",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id",
+            "method": "GET",
+            "permission": "places.view"
+          },
+          {
+            "path": "/trips/:id",
+            "method": "PATCH",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id",
+            "method": "DELETE",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/stops",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/stops/:item",
+            "method": "PATCH",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/stops/:item",
+            "method": "DELETE",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/days/:day/optimize",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/reservations",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/reservations/:item",
+            "method": "PATCH",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/reservations/:item",
+            "method": "DELETE",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/expenses",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/expenses/:item",
+            "method": "DELETE",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/checklist",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/checklist/:item",
+            "method": "PATCH",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/checklist/:item",
+            "method": "DELETE",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/stops/batch",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/trips/:id/suggest",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/import/link",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/import/file",
+            "method": "POST",
+            "permission": "places.manage"
+          },
+          {
+            "path": "/import/save",
+            "method": "POST",
+            "permission": "places.manage"
+          }
+        ]
+      },
+      "host_api": {
+        "grants": ["hook:side-model", "crypto:seal"]
+      }
+    }
+  ],
+  "mcp_servers": {
+    "places": {
+      "command": "ryu-places",
+      "args": ["mcp"],
+      "description": "Places Guide tools for searching real places, importing them from shared links and captions, saving them to the one shared map that turned on agent access, and planning trips: AI-drafted days, day-by-day stops, route optimization, bookings, shared expenses with balances, and checklists."
+    }
+  },
+  "permission_grants": ["app:http", "mcp:places", "hook:side-model"],
+  "permission_levels": [
+    {
+      "id": "places.view",
+      "label": "Can view",
+      "description": "See the shared map, saved places, every member's marks, lists, trips, and recent activity, and search for places."
+    },
+    {
+      "id": "places.manage",
+      "label": "Can plan",
+      "description": "Save, edit, and delete places, set your own want-to-go or been marks, and plan trips: stops, bookings, expenses, and checklists.",
+      "implies": ["places.view"]
+    }
+  ],
+  "companion": {
+    "label": "Places",
+    "icon": "maps-location-01"
+  },
+  "contributes": {
+    "agents": [
+      {
+        "id": "places-agent"
+      }
+    ]
+  }
+}

@@ -10,7 +10,7 @@ const transport = {
 	Response: globalThis.Response,
 	AbortController: globalThis.AbortController,
 };
-if (typeof document === "undefined") {
+if (!globalThis.document) {
 	GlobalRegistrator.register();
 }
 Object.assign(globalThis, transport);

@@ -14,7 +14,7 @@ export const DEFAULT_POPUP_OVERLAY_BLUR = false;
 const listeners = new Set<() => void>();
 
 function applyPopupOverlayBlur(enabled: boolean): void {
-	if (typeof document === "undefined") {
+	if (globalThis.document === undefined) {
 		return;
 	}
 
@@ -42,13 +42,13 @@ function subscribe(cb: () => void): () => void {
 		}
 	};
 
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.addEventListener("storage", onStorage);
 	}
 
 	return () => {
 		listeners.delete(cb);
-		if (typeof window !== "undefined") {
+		if (globalThis.window !== undefined) {
 			window.removeEventListener("storage", onStorage);
 		}
 	};
@@ -66,7 +66,7 @@ export function setPopupOverlayBlur(enabled: boolean): void {
 	for (const listener of listeners) {
 		listener();
 	}
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.dispatchEvent(new Event(THEME_APPEARANCE_CHANGE_EVENT));
 	}
 }

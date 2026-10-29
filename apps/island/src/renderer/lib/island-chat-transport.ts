@@ -19,6 +19,7 @@ import type {
 	CoreStreamPartEvent,
 	CoreUiMessage,
 } from "../../shared/ipc.ts";
+import { validateCoreUiChunkStream } from "./core-stream-boundary.ts";
 
 /** Everything about a turn except its message history. */
 export type IslandTurnRequest = Omit<CoreChatStreamRequest, "messages">;
@@ -47,15 +48,13 @@ function toCoreMessage(
 	message: UIMessage,
 	serverText: string | undefined
 ): CoreUiMessage {
-	const role = message.role as CoreUiMessage["role"];
+	const role = message.role;
 	if (serverText === undefined) {
-		return { id: message.id, role, parts: message.parts as unknown[] };
+		return { id: message.id, role, parts: message.parts };
 	}
 	// Substituted text replaces the text parts; non-text parts (attached images)
 	// are preserved so an image-plus-screen turn keeps both.
-	const nonText = (message.parts as { type?: string }[]).filter(
-		(part) => part?.type !== "text"
-	);
+	const nonText = message.parts.filter((part) => part?.type !== "text");
 	return {
 		id: message.id,
 		role,
@@ -84,7 +83,7 @@ export function createIslandChatTransport(
 			// replaced on subscribe
 		};
 
-		return new ReadableStream<UIMessageChunk>({
+		const rawStream = new ReadableStream<CoreStreamPartEvent["part"]>({
 			start(controller) {
 				const cleanup = (): void => {
 					offPart();
@@ -92,7 +91,7 @@ export function createIslandChatTransport(
 				};
 
 				const emitPart = (event: CoreStreamPartEvent): void => {
-					controller.enqueue(event.part as unknown as UIMessageChunk);
+					controller.enqueue(event.part);
 				};
 
 				const emitEnd = (event: CoreStreamEndEvent): void => {
@@ -155,7 +154,7 @@ export function createIslandChatTransport(
 							});
 						}
 					})
-					.catch((error: unknown) => {
+					.catch((error) => {
 						if (settled) {
 							return;
 						}
@@ -194,6 +193,7 @@ export function createIslandChatTransport(
 				}
 			},
 		});
+		return validateCoreUiChunkStream(rawStream);
 	};
 
 	return {

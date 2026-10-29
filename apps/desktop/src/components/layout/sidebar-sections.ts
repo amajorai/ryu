@@ -44,6 +44,9 @@ import {
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
+import { pluginDocumentSchema } from "@/src/lib/api/plugin-wire-values.ts";
 
 /**
  * The Core app that owns a compiled-in shell surface, keyed by a SURFACE name.
@@ -142,11 +145,12 @@ export const LEGACY_APP_SECTION_KEYS = {
 	workflows: "plugin:@ryu/workflows:workflows",
 } as const satisfies Record<string, DynamicSectionKey>;
 
+const legacyAppSectionKeys = new Map<string, DynamicSectionKey>(
+	Object.entries(LEGACY_APP_SECTION_KEYS)
+);
+
 export function migrateLegacySectionKey(value: string): string {
-	return (
-		LEGACY_APP_SECTION_KEYS[value as keyof typeof LEGACY_APP_SECTION_KEYS] ??
-		value
-	);
+	return legacyAppSectionKeys.get(value) ?? value;
 }
 
 /** Default top-level order, derived from {@link BUILTIN_SECTIONS}. */
@@ -254,9 +258,11 @@ const LEGACY_DEFAULT_SECTION_ORDERS: string[][] = [
 ];
 
 /** Human labels for the built-in sections, shared by the customize dialog. */
-export const SECTION_LABELS = Object.fromEntries(
-	BUILTIN_SECTIONS.map((section) => [section.key, section.label])
-) as Record<BuiltinSectionKey, string>;
+// SAFETY: BUILTIN_SECTIONS is the complete checked authored tuple; mapping every entry publishes its exact string key and label. Native Object.fromEntries preserves those own keys but erases their literal-key union.
+export const SECTION_LABELS =
+	/* SAFETY: Mapping every entry in BUILTIN_SECTIONS covers the complete builtin key union; Object.fromEntries erases that union. */ Object.fromEntries(
+		BUILTIN_SECTIONS.map((section) => [section.key, section.label])
+	) as Record<BuiltinSectionKey, string>;
 
 /** Glyphs for the tabbed-mode button bar plus app-owned compatibility keys.
  *
@@ -264,9 +270,11 @@ export const SECTION_LABELS = Object.fromEntries(
  * but Native and older persisted layouts still resolve their canonical glyphs by
  * key. Keeping these two values here prevents a valid legacy/dynamic key from
  * handing `undefined` to an icon renderer while leaving ownership with the app. */
-export const SECTION_ICONS = Object.fromEntries(
-	BUILTIN_SECTIONS.map((section) => [section.key, section.icon])
-) as Record<BuiltinSectionKey | "teams" | "workflows", IconSvgElement>;
+// SAFETY: Every checked BUILTIN_SECTIONS entry supplies its full native IconSvgElement. The two legacy icon keys are assigned immediately below before module initialization completes; Object.fromEntries erases the literal builtin keys.
+export const SECTION_ICONS =
+	/* SAFETY: The mapped builtin entries supply every native icon; legacy Teams and Workflows keys are filled immediately below before consumers can observe the record. */ Object.fromEntries(
+		BUILTIN_SECTIONS.map((section) => [section.key, section.icon])
+	) as Record<BuiltinSectionKey | "teams" | "workflows", IconSvgElement>;
 
 SECTION_ICONS.teams = UserMultiple02Icon;
 SECTION_ICONS.workflows = WorkflowCircle06Icon;
@@ -281,6 +289,7 @@ export function isSectionKey(value: string): value is SectionKey {
 	// in place across reloads (it renders nothing when that app is disabled/absent).
 	return (
 		isDynamicSectionKey(value) ||
+		// SAFETY: The authored order contains only string keys. Native includes accepts any string search value and returns a boolean; its declaration restricts the search argument to the array literal-key union.
 		(DEFAULT_SECTION_ORDER as string[]).includes(value)
 	);
 }
@@ -289,9 +298,7 @@ export function migrateLegacySectionKeys(values: string[]): string[] {
 	return values.map(migrateLegacySectionKey);
 }
 
-export function migrateLegacySectionRecord<T>(
-	values: Record<string, T>
-): Record<string, T> {
+export function migrateLegacySectionRecord<T>(values: Record<string, T>) {
 	const migrated: Record<string, T> = {};
 	for (const [key, value] of Object.entries(values)) {
 		const nextKey = migrateLegacySectionKey(key);
@@ -324,10 +331,7 @@ export function migrateLegacySectionStorage(
 			}
 			const parsed: unknown = JSON.parse(raw);
 			if (
-				!(
-					Array.isArray(parsed) &&
-					parsed.every((value) => typeof value === "string")
-				)
+				!(Array.isArray(parsed) && parsed.every((value) => isNativeText(value)))
 			) {
 				continue;
 			}
@@ -342,10 +346,12 @@ export function migrateLegacySectionStorage(
 				continue;
 			}
 			const parsed: unknown = JSON.parse(raw);
-			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			const validated = pluginDocumentSchema.safeParse(parsed);
+			if (!validated.success) {
 				continue;
 			}
-			const values = parsed as Record<string, unknown>;
+			// SAFETY: The value came from native JSON.parse and the preceding guard excludes null, arrays, and primitives. Its complete remaining object domain has string property keys and opaque JSON values; no business fields are claimed.
+			const values = validated.data;
 			const migrated = migrateLegacySectionRecord(values);
 			if (Object.keys(migrated).some((value) => !(value in values))) {
 				storage.setItem(key, JSON.stringify(migrated));
@@ -406,7 +412,7 @@ export function loadSectionOrder(): SectionKey[] {
 		if (!stored) {
 			return [...DEFAULT_SECTION_ORDER];
 		}
-		return reconcileSectionOrder(JSON.parse(stored) as string[]);
+		return reconcileSectionOrder(z.array(z.string()).parse(JSON.parse(stored)));
 	} catch {
 		return [...DEFAULT_SECTION_ORDER];
 	}

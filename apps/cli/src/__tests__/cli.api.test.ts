@@ -18,10 +18,13 @@ afterEach(() => {
 
 test("execAppCommand refuses a traversal path without calling fetch", async () => {
 	let fetchCalled = false;
-	globalThis.fetch = (() => {
-		fetchCalled = true;
-		return Promise.reject(new Error("fetch must not be called"));
-	}) as unknown as typeof fetch;
+	globalThis.fetch = Object.assign(
+		() => {
+			fetchCalled = true;
+			return Promise.reject(new Error("fetch must not be called"));
+		},
+		{ preconnect: realFetch.preconnect }
+	);
 
 	for (const path of [
 		"/../../../v1/chat/completions",
@@ -43,10 +46,13 @@ test("execAppCommand refuses a traversal path without calling fetch", async () =
 
 test("execAppCommand issues the request for a safe path", async () => {
 	let calledUrl = "";
-	globalThis.fetch = ((url: string | URL) => {
-		calledUrl = String(url);
-		return Promise.resolve(new Response("ok", { status: 200 }));
-	}) as unknown as typeof fetch;
+	globalThis.fetch = Object.assign(
+		(url: Parameters<typeof realFetch>[0]) => {
+			calledUrl = String(url);
+			return Promise.resolve(new Response("ok", { status: 200 }));
+		},
+		{ preconnect: realFetch.preconnect }
+	);
 
 	const res = await realCoreApi.execAppCommand(
 		target,

@@ -34,26 +34,26 @@ import {
 	setValue,
 	type TMentionElement,
 	TrailingBlockPlugin,
-	type Value,
 } from "platejs";
 import type { PlateElementProps } from "platejs/react";
 import { Plate, PlateElement, usePlateEditor } from "platejs/react";
 import type {
 	ClipboardEvent,
+	DragEvent,
 	KeyboardEvent,
 	ReactNode,
 	RefObject,
 } from "react";
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
+import {
+	type ComposerMentionItem,
+	exportMentionMarkdown,
+	importMentionMarkdown,
+} from "./composer-mention-markdown.ts";
+import { moveMention } from "./composer-mention-move.ts";
+import editorStyles from "./editor-lint.module.css";
 
-export interface ComposerMentionItem {
-	accentColor?: string;
-	icon?: ReactNode;
-	id?: string;
-	kind: string;
-	label: string;
-	visualIcon?: ReactNode;
-}
+export type { ComposerMentionItem } from "./composer-mention-markdown.ts";
 
 export interface ComposerEditorProps {
 	disabled?: boolean;
@@ -88,12 +88,15 @@ function ComposerMentionElement(props: PlateElementProps<TMentionElement>) {
 	return (
 		<PlateElement
 			{...props}
+			// `draggable` lets Slate move the chip natively: a drag selects the void
+			// and a drop elsewhere in the editor removes it from its old spot.
 			attributes={{
 				...props.attributes,
 				contentEditable: false,
 				"data-slate-value": value,
+				draggable: true,
 			}}
-			className="inline-block align-baseline"
+			className="inline-block cursor-grab align-baseline active:cursor-grabbing"
 		>
 			{content}
 		</PlateElement>
@@ -134,7 +137,9 @@ const ComposerEditorKit = [
 	...MarkdownKit,
 ];
 
-const MENTION_LINK_RE = /\[([^\]]+)\]\(mention:([^\s)]+)\)/g;
+// Plate serializes the empty text nodes around an inline mention as U+200B;
+// consume them with the link so `@label` stays a whitespace-delimited token.
+const MENTION_LINK_RE = /\u200B?\[([^\]]+)\]\(mention:([^\s)]+)\)\u200B?/g;
 
 function escapeMarkdownText(value: string): string {
 	return value
@@ -229,9 +234,69 @@ export function ComposerEditor({
 		value: (ed) =>
 			ed
 				.getApi(MarkdownPlugin)
-				.markdown.deserialize(mentionMarkdown(markdown, mentionItems)),
+				.markdown.deserialize(
+					mentionMarkdown(
+						importMentionMarkdown(markdown, mentionItems),
+						mentionItems
+					)
+				),
 	});
 	const lastMarkdownRef = useRef(markdown);
+	// A dragged mention chip is moved here rather than by Slate's own drop, which
+	// re-inserts the fragment verbatim: a chip dropped against a word or another
+	// chip then serializes as `a@b` and is lost when the draft round-trips
+	// through Markdown. Slate also only accepts a drop over another void, so
+	// `dragover` is accepted anywhere in the editor while a chip is in flight.
+	const draggedMentionRef = useRef<TMentionElement | null>(null);
+	const handleMentionDragStart = (event: DragEvent<HTMLDivElement>) => {
+		const element =
+			event.target instanceof Element
+				? event.target.closest("[data-slate-value]")
+				: null;
+		const node = element ? editor.api.toSlateNode(element) : undefined;
+		draggedMentionRef.current =
+			node && "type" in node && node.type === editor.getType(KEYS.mention)
+				? (node as TMentionElement)
+				: null;
+	};
+	const handleMentionDragOver = (event: DragEvent<HTMLDivElement>) => {
+		if (draggedMentionRef.current) {
+			event.preventDefault();
+			event.dataTransfer.dropEffect = "move";
+		}
+	};
+	// Returns `true` once the drop is ours: Plate skips Slate's own drop only
+	// when a props handler returns `true`, not on `preventDefault`.
+	const handleMentionDrop = (event: DragEvent<HTMLDivElement>): boolean => {
+		const mention = draggedMentionRef.current;
+		draggedMentionRef.current = null;
+		if (!mention) {
+			return false;
+		}
+		event.preventDefault();
+		const from = editor.api.findPath(mention);
+		const range = editor.api.findEventRange(event);
+		if (!(from && range)) {
+			return true;
+		}
+		const dropPath = range.anchor.path;
+		const droppedOnItself = from.every(
+			(part, depth) => dropPath[depth] === part
+		);
+		if (droppedOnItself) {
+			return true;
+		}
+		const placed = moveMention(editor, mention, from, range.anchor);
+		if (!placed) {
+			return true;
+		}
+		const caret = editor.api.after(placed);
+		editor.tf.focus();
+		if (caret) {
+			editor.tf.select(caret);
+		}
+		return true;
+	};
 
 	useEffect(() => {
 		if (markdown === lastMarkdownRef.current) {
@@ -239,8 +304,13 @@ export function ComposerEditor({
 		}
 		const next = editor
 			.getApi(MarkdownPlugin)
-			.markdown.deserialize(mentionMarkdown(markdown, mentionItems));
-		setValue(editor, next as Value);
+			.markdown.deserialize(
+				mentionMarkdown(
+					importMentionMarkdown(markdown, mentionItems),
+					mentionItems
+				)
+			);
+		setValue(editor, next);
 		lastMarkdownRef.current = markdown;
 	}, [editor, markdown, mentionItems]);
 
@@ -256,45 +326,85 @@ export function ComposerEditor({
 					onChange(next);
 				}}
 			>
-				<EditorContainer
-					className={cn(
-						"min-h-[40px] overflow-visible rounded-xl border-0 bg-transparent shadow-none",
-						disabled && "cursor-not-allowed opacity-50"
-					)}
-					style={{ maskImage: "none", WebkitMaskImage: "none" }}
-					variant="comment"
+				<div
+					onCopy={(event) => {
+						const clipboardText = event.clipboardData.getData("text/plain");
+						const selectedText =
+							clipboardText || window.getSelection()?.toString() || "";
+						const markdown = exportMentionMarkdown(selectedText, mentionItems);
+						if (markdown === selectedText) {
+							return;
+						}
+						event.preventDefault();
+						event.clipboardData.setData("text/plain", markdown);
+					}}
 				>
-					<Editor
-						className="max-h-[240px] min-h-[40px] overflow-y-auto px-0 py-1.5 text-[14px] leading-[1.6]"
-						disabled={disabled}
-						onKeyDown={onKeyDown}
-						onPaste={(event) => {
-							onPaste?.(event);
-							// Plate's synthetic paste path can leave the caret just after
-							// a newly-created link, so the floating link controls never
-							// enter edit mode. Re-anchor to the inserted link after the
-							// plugin has applied the paste; normal typing is unaffected.
-							window.setTimeout(() => {
-								const entry = editor.api
-									.nodes({
-										at: [],
-										match: { type: editor.getType(KEYS.link) },
-										mode: "all",
-									})
-									.next().value;
-								if (entry) {
-									editor.tf.select(editor.api.start(entry[1]));
-									editor
-										.getApi(LinkPlugin)
-										.floatingLink.show("edit", editor.id);
+					<EditorContainer
+						className={cn(
+							cn(
+								"min-h-[40px] overflow-visible rounded-xl border-0 bg-transparent shadow-none",
+								disabled && "cursor-not-allowed opacity-50"
+							),
+							editorStyles.editorcomposerEditor1
+						)}
+						variant="comment"
+					>
+						<Editor
+							className="max-h-[240px] min-h-[40px] overflow-y-auto px-0 py-1.5 text-[14px] leading-[1.6]"
+							disabled={disabled}
+							onDragEnd={() => {
+								draggedMentionRef.current = null;
+							}}
+							onDragOver={handleMentionDragOver}
+							onDragStart={handleMentionDragStart}
+							onDrop={handleMentionDrop}
+							onKeyDown={onKeyDown}
+							onPaste={(event) => {
+								onPaste?.(event);
+								if (event.defaultPrevented) {
+									return;
 								}
-							}, 0);
-						}}
-						placeholder={placeholder}
-						ref={editorRef}
-						variant="none"
-					/>
-				</EditorContainer>
+								const pastedText = event.clipboardData.getData("text/plain");
+								const importedText = importMentionMarkdown(
+									pastedText,
+									mentionItems
+								);
+								if (importedText !== pastedText) {
+									event.preventDefault();
+									const fragment = editor
+										.getApi(MarkdownPlugin)
+										.markdown.deserialize(
+											mentionMarkdown(importedText, mentionItems)
+										);
+									editor.tf.insertFragment(fragment);
+									return;
+								}
+								// Plate's synthetic paste path can leave the caret just after
+								// a newly-created link, so the floating link controls never
+								// enter edit mode. Re-anchor to the inserted link after the
+								// plugin has applied the paste; normal typing is unaffected.
+								window.setTimeout(() => {
+									const entry = editor.api
+										.nodes({
+											at: [],
+											match: { type: editor.getType(KEYS.link) },
+											mode: "all",
+										})
+										.next().value;
+									if (entry) {
+										editor.tf.select(editor.api.start(entry[1]));
+										editor
+											.getApi(LinkPlugin)
+											.floatingLink.show("edit", editor.id);
+									}
+								}, 0);
+							}}
+							placeholder={placeholder}
+							ref={editorRef}
+							variant="none"
+						/>
+					</EditorContainer>
+				</div>
 			</Plate>
 		</ComposerMentionContext.Provider>
 	);

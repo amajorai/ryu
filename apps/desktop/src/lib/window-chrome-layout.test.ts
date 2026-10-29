@@ -11,7 +11,7 @@ describe("shared shell window chrome", () => {
 			})
 		).toEqual({
 			navClusterPosition: "top-4 left-24",
-			navClusterReserve: "w-48",
+			navClusterReserve: "ryu-nav-cluster-reserve w-48",
 			pageActionsMargin: "mr-2",
 		});
 	});
@@ -25,7 +25,7 @@ describe("shared shell window chrome", () => {
 			})
 		).toEqual({
 			navClusterPosition: "top-4 left-6",
-			navClusterReserve: "w-40",
+			navClusterReserve: "ryu-nav-cluster-reserve w-40",
 			pageActionsMargin: "mr-2",
 		});
 	});
@@ -39,7 +39,7 @@ describe("shared shell window chrome", () => {
 			})
 		).toEqual({
 			navClusterPosition: "top-4 left-6",
-			navClusterReserve: "w-40",
+			navClusterReserve: "ryu-nav-cluster-reserve w-40",
 			pageActionsMargin: "mr-48",
 		});
 		expect(
@@ -60,7 +60,7 @@ describe("shared shell window chrome", () => {
 			})
 		).toEqual({
 			navClusterPosition: "top-2 left-2",
-			navClusterReserve: "w-[4.5rem]",
+			navClusterReserve: "ryu-nav-cluster-reserve w-[4.5rem]",
 			pageActionsMargin: "mr-2",
 		});
 	});

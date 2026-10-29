@@ -381,14 +381,15 @@ async fn classify_embedding(config: &AgentAutoConfig, user_text: &str) -> Option
         }
     };
 
+    let rule_embeddings = rule_description_embeddings(&embedder, config).await;
     let mut best_idx: Option<usize> = None;
     let mut best_score = config.similarity_threshold;
     for (idx, rule) in config.rules.iter().enumerate() {
-        let Ok(emb) = embedder.embed(&rule.description).await else {
+        let Some(emb) = rule_embeddings.get(&rule.description) else {
             warn!(rule = %rule.description, "agent-auto: failed to embed rule description; skipping");
             continue;
         };
-        let score = cosine(&query_emb, &emb);
+        let score = cosine(&query_emb, emb);
         if score >= best_score {
             best_score = score;
             best_idx = Some(idx);
@@ -396,6 +397,73 @@ async fn classify_embedding(config: &AgentAutoConfig, user_text: &str) -> Option
     }
     debug!(?best_idx, best_score, "agent-auto: embedding nearest match");
     best_idx
+}
+
+/// Upper bound on cached rule-description vectors. Rule sets are small; the cap
+/// only stops an endlessly edited config from growing the map without limit.
+const MAX_CACHED_RULE_EMBEDDINGS: usize = 512;
+
+/// Cache key: the embedder's model and dims (a provider swap changes the vector
+/// space) plus the rule description text.
+type RuleEmbeddingKey = (String, usize, String);
+
+fn rule_embedding_cache() -> &'static RwLock<HashMap<RuleEmbeddingKey, Vec<f32>>> {
+    static CACHE: OnceLock<RwLock<HashMap<RuleEmbeddingKey, Vec<f32>>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Vectors for every rule description, keyed by description. Rule descriptions
+/// change only when the config is edited, so they are embedded once per model and
+/// reused; only the query is embedded per turn. Misses go out as one batched
+/// request. A description that cannot be embedded is simply absent.
+async fn rule_description_embeddings(
+    embedder: &Embedder,
+    config: &AgentAutoConfig,
+) -> HashMap<String, Vec<f32>> {
+    let model = embedder.model_id().to_owned();
+    let dims = embedder.dims();
+    let key = |description: &str| (model.clone(), dims, description.to_owned());
+
+    let mut found = HashMap::new();
+    let mut missing = Vec::new();
+    {
+        let cache = rule_embedding_cache()
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for rule in &config.rules {
+            match cache.get(&key(&rule.description)) {
+                Some(vector) => {
+                    found.insert(rule.description.clone(), vector.clone());
+                }
+                None if !missing.contains(&rule.description) => {
+                    missing.push(rule.description.clone());
+                }
+                None => {}
+            }
+        }
+    }
+    if missing.is_empty() {
+        return found;
+    }
+
+    let vectors = match embedder.embed_batch(&missing).await {
+        Ok(vectors) => vectors,
+        Err(error) => {
+            warn!(%error, "agent-auto: failed to embed rule descriptions");
+            return found;
+        }
+    };
+    let mut cache = rule_embedding_cache()
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if cache.len() + missing.len() > MAX_CACHED_RULE_EMBEDDINGS {
+        cache.clear();
+    }
+    for (description, vector) in missing.into_iter().zip(vectors) {
+        cache.insert(key(&description), vector.clone());
+        found.insert(description, vector);
+    }
+    found
 }
 
 /// Build the embedder for the `Embedding` strategy, honouring the config's
@@ -421,7 +489,9 @@ fn build_embedder(config: &AgentAutoConfig) -> Embedder {
 
 /// `Llm` strategy: run the cheap classifier model once (a direct, non-streaming
 /// completion against the local gateway — never the agent-dispatch path, so it
-/// cannot recurse) and map its reply to a rule index.
+/// cannot recurse) and map its reply to a rule index. It carries no session id:
+/// the Gateway would otherwise cache this routing call's model decision for the
+/// whole conversation.
 async fn classify_llm(config: &AgentAutoConfig, user_text: &str) -> Option<usize> {
     let model = config.classifier_model.trim();
     if model.is_empty() {
@@ -439,14 +509,18 @@ async fn classify_llm(config: &AgentAutoConfig, user_text: &str) -> Option<usize
         "messages": [{ "role": "user", "content": prompt }],
     });
 
-    let mut builder = http_client()
+    let request = http_client()
         .post(&url)
         .timeout(Duration::from_millis(config.timeout_ms))
-        // De-prioritize on the shared local engine so a routing decision never
-        // starves an interactive reply.
-        .header("x-ryu-priority", "background")
         .json(&payload);
-    if let Some(token) = crate::sidecar::gateway::gateway_core_token() {
+    // Tagged `agent_auto_route` and, like before, `background` priority on the
+    // shared local engine so a routing decision never starves an interactive
+    // reply (see `SidePurpose::is_background`).
+    let mut builder = crate::sidecar::gateway::with_side_call_headers(
+        request,
+        &crate::sidecar::gateway::SidePurpose::AgentAutoRoute,
+    );
+    if let Some(token) = crate::sidecar::gateway::gateway_inference_token() {
         builder = builder.bearer_auth(token);
     }
 
@@ -462,6 +536,11 @@ async fn classify_llm(config: &AgentAutoConfig, user_text: &str) -> Option<usize
         return None;
     }
     let body: Value = resp.json().await.ok()?;
+    crate::sidecar::gateway::log_side_usage(
+        &crate::sidecar::gateway::SidePurpose::AgentAutoRoute,
+        model,
+        &body,
+    );
     let text = body["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("");
@@ -575,6 +654,27 @@ mod tests {
             cache_by_session: true,
             timeout_ms: default_timeout_ms(),
         }
+    }
+
+    #[tokio::test]
+    async fn rule_description_embeddings_are_cached_per_model() {
+        let config = cfg(RouteStrategy::Embedding);
+        // Unusual dims keep this test's cache keys apart from any other test.
+        let embedder = Embedder::Local { dims: 97 };
+
+        let first = rule_description_embeddings(&embedder, &config).await;
+        assert_eq!(first.len(), config.rules.len());
+        for rule in &config.rules {
+            assert_eq!(
+                first.get(&rule.description),
+                Some(&embedder.embed(&rule.description).await.unwrap())
+            );
+            let key = ("local-hashing".to_owned(), 97, rule.description.clone());
+            assert!(rule_embedding_cache().read().unwrap().contains_key(&key));
+        }
+
+        let second = rule_description_embeddings(&embedder, &config).await;
+        assert_eq!(first, second);
     }
 
     #[test]

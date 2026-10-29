@@ -1,0 +1,103 @@
+.editoraiMenu1 {
+	width: var(--editoraiMenu1-width);
+}
+.editorblockDraggable1 {
+	top: var(--editorblockDraggable1-top);
+}
+.editorblockDraggable2 {
+	top: var(--editorblockDraggable2-top);
+}
+
+.editorblockList1 {
+	list-style-type: var(--editorblockList1-list-style-type);
+}
+
+.editorcalloutNode1 {
+	background-color: var(--editorcalloutNode1-background-color);
+}
+.editorcalloutNode2 {
+	font-family:
+		"Apple Color Emoji", "Segoe UI Emoji", NotoColorEmoji, "Noto Color Emoji",
+		"Segoe UI Symbol", "Android Emoji", EmojiSymbols, sans-serif;
+}
+
+.editorcodeDrawingNode1 {
+	min-height: var(--editorcodeDrawingNode1-min-height);
+}
+.editorcodeDrawingNode2 {
+	height: 100%;
+	min-height: var(--editorcodeDrawingNode2-min-height);
+}
+.editorcodeDrawingNode3 {
+	min-height: var(--editorcodeDrawingNode3-min-height);
+}
+
+.editorcolumnNode1 {
+	width: var(--editorcolumnNode1-width);
+}
+.editoremojiToolbarButton1 {
+	font-family:
+		"Apple Color Emoji", "Segoe UI Emoji", NotoColorEmoji, "Noto Color Emoji",
+		"Segoe UI Symbol", "Android Emoji", EmojiSymbols, sans-serif;
+}
+.editoremojiToolbarButton2 {
+	width: var(--editoremojiToolbarButton2-width);
+}
+.editoremojiToolbarButton3 {
+	height: var(--editoremojiToolbarButton3-height);
+}
+.editoremojiToolbarButton4 {
+	width: var(--editoremojiToolbarButton4-width);
+}
+
+.editormediaAudioNode1 {
+	width: 100%;
+}
+.editormediaEmbedNode1 {
+	width: var(--editormediaEmbedNode1-width);
+}
+
+.editormediaImageNode1 {
+	width: var(--editormediaImageNode1-width);
+}
+
+.editormediaVideoNode1 {
+	width: var(--editormediaVideoNode1-width);
+}
+.editorremoteCursorOverlay1 {
+	background: var(--editorremoteCursorOverlay1-background);
+}
+
+.editortableNode1 {
+	padding-left: var(--editortableNode1-padding-left);
+}
+.editortableNode2 {
+	width: var(--editortableNode2-width);
+	min-width: var(--editortableNode2-min-width);
+	max-width: var(--editortableNode2-max-width);
+}
+.editortableNode3 {
+	width: var(--editortableNode3-width);
+	min-width: var(--editortableNode3-min-width);
+	max-width: var(--editortableNode3-max-width);
+}
+
+.editorcomposerEditor1 {
+	-webkit-mask-image: none;
+	mask-image: none;
+}
+
+.cursorPosition {
+	top: var(--cursor-top);
+	left: var(--cursor-left);
+	width: var(--cursor-width, revert-layer);
+	height: var(--cursor-height);
+}
+
+.cursorGeometry {
+	top: var(--cursor-top);
+	left: var(--cursor-left);
+	width: var(--cursor-width, 2px);
+	height: var(--cursor-height);
+	background: var(--cursor-background);
+}

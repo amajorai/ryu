@@ -117,7 +117,7 @@ pub fn build_output_style_md(
     existing: Option<&str>,
     draft: &OutputStyleDraft,
 ) -> Result<String, String> {
-    use serde_yml::{Mapping, Value};
+    use noyalib::compat::serde_yaml::{Mapping, Value};
 
     let mut map: Mapping = match existing {
         Some(src) => {
@@ -125,7 +125,7 @@ pub fn build_output_style_md(
             if front_raw.trim().is_empty() {
                 Mapping::new()
             } else {
-                serde_yml::from_str(&front_raw).unwrap_or_default()
+                noyalib::compat::serde_yaml::from_str(&front_raw).unwrap_or_default()
             }
         }
         None => Mapping::new(),
@@ -135,27 +135,31 @@ pub fn build_output_style_md(
     if name.is_empty() {
         return Err("output style name is required".to_owned());
     }
-    map.insert(Value::from("name"), Value::from(name));
+    map.insert("name".to_owned(), Value::from(name));
 
     match draft.description.as_deref().map(str::trim) {
         Some(d) if !d.is_empty() => {
-            map.insert(Value::from("description"), Value::from(d));
+            map.insert("description".to_owned(), Value::from(d));
         }
         _ => {
-            map.remove(Value::from("description"));
+            map.remove("description");
         }
     }
 
     // `false` is the documented default, so the key is dropped rather than written —
     // a hand-edited style should stay as small as the one in design §1.
     if draft.keep_coding_instructions {
-        map.insert(Value::from("keep-coding-instructions"), Value::from(true));
+        map.insert("keep-coding-instructions".to_owned(), Value::from(true));
     } else {
-        map.remove(Value::from("keep-coding-instructions"));
+        map.remove("keep-coding-instructions");
     }
 
-    let yaml = serde_yml::to_string(&Value::Mapping(map))
+    let mut yaml = noyalib::compat::serde_yaml::to_string(&Value::Mapping(map))
         .map_err(|e| format!("failed to render frontmatter: {e}"))?;
+    // noyalib's serde_yaml shim omits the trailing newline the closing `---` fence needs.
+    if !yaml.ends_with('\n') {
+        yaml.push('\n');
+    }
 
     Ok(format!("---\n{yaml}---\n\n{}\n", draft.body.trim()))
 }
@@ -370,3 +374,7 @@ mod tests {
         assert!(build_output_style_md(None, &draft).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "store_disk_tests.rs"]
+mod disk_tests;

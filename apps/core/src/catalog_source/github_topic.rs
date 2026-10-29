@@ -1516,8 +1516,7 @@ impl GithubTopicSource {
     }
 
     fn disk_cache_path() -> std::path::PathBuf {
-        crate::paths::ryu_dir()
-            .join("cache")
+        crate::paths::cache_dir()
             .join("github-topic")
             .join("topics.json")
     }

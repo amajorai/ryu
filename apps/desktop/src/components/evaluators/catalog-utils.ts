@@ -3,7 +3,7 @@
 // renders, and splits a set of selected offline evaluators into the two request
 // arrays the runner needs (registry ids vs. Core-run code specs).
 
-import type { EvaluatorCatalogItem } from "@ryu/blocks/desktop/evaluator-catalog";
+import type { EvaluatorCatalogItem } from "@ryu/blocks/desktop/evaluator-catalog.tsx";
 import type { CodeEvaluatorSpec, Evaluator } from "@/src/lib/api/gateway.ts";
 
 /** Project a wire `Evaluator` onto the presentational catalog item. */
@@ -22,6 +22,20 @@ export function toCatalogItem(e: Evaluator): EvaluatorCatalogItem {
 	};
 }
 
+/** Core's agent eval runner can execute populated code definitions locally. */
+export function toOfflineCatalogItem(e: Evaluator): EvaluatorCatalogItem {
+	const item = toCatalogItem(e);
+	if (
+		e.impl.kind === "code" &&
+		e.impl.source.trim().length > 0 &&
+		e.target !== "image" &&
+		e.target !== "audio"
+	) {
+		return { ...item, capOffline: true };
+	}
+	return item;
+}
+
 /**
  * Split selected offline evaluators into the two request arrays:
  *   • `evaluators` — registry ids the gateway scores (regex/heuristic/llm_judge/builtin).
@@ -31,13 +45,13 @@ export function toCatalogItem(e: Evaluator): EvaluatorCatalogItem {
 export function splitOfflineSelection(
 	selectedIds: string[],
 	catalog: Evaluator[]
-): { evaluators: string[]; codeEvaluators: CodeEvaluatorSpec[] } {
+) {
 	const byId = new Map(catalog.map((e) => [e.id, e]));
 	const evaluators: string[] = [];
 	const codeEvaluators: CodeEvaluatorSpec[] = [];
 	for (const id of selectedIds) {
 		const e = byId.get(id);
-		if (e && e.impl.kind === "code") {
+		if (e && e.impl.kind === "code" && toOfflineCatalogItem(e).capOffline) {
 			codeEvaluators.push({
 				id: e.id,
 				lang: e.impl.lang,

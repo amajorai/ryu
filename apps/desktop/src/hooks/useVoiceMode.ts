@@ -9,8 +9,8 @@
 // Distinct from the existing push-to-talk voice INPUT (useVoiceRecorder /
 // /api/voice/transcribe): that stays as-is; this is the separate continuous mode.
 
-import { VoiceSessionConnection } from "@ryuhq/core-client/voice-session";
-import type { VoiceState } from "@ryuhq/protocol/voice";
+import { VoiceSessionConnection } from "@ryuhq/core-client/voice-session.ts";
+import type { RvpCallEnded, VoiceState } from "@ryuhq/protocol/voice";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 
@@ -31,6 +31,8 @@ export interface VoiceModeOptions {
 	agentName?: string;
 	/** Bind turns to the active conversation (so history persists). */
 	conversationId?: string;
+	/** Insert Core's saved call summary without sending another agent turn. */
+	onCallEnded?: (summary: RvpCallEnded) => void;
 	/** Voice Recognition engine (from the shared voice-input preference). */
 	sttEngine?: string;
 	/** Audio engine + voice (from the user's Audio preferences). */
@@ -70,7 +72,7 @@ export interface VoiceMode {
 }
 
 const AUDIO_LEVEL_HISTORY_SIZE = 24;
-const SILENT_LEVELS = new Array<number>(AUDIO_LEVEL_HISTORY_SIZE).fill(0);
+const SILENT_LEVELS = Array.from({ length: AUDIO_LEVEL_HISTORY_SIZE }, () => 0);
 
 function clampAudioLevel(level: number): number {
 	return Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
@@ -111,6 +113,7 @@ export function useVoiceMode(
 	}, []);
 
 	const connRef = useRef<VoiceSessionConnection | null>(null);
+	const mountedRef = useRef(true);
 	// Keep the latest target/options reachable without re-subscribing handlers.
 	const targetRef = useRef(target);
 	targetRef.current = target;
@@ -138,13 +141,14 @@ export function useVoiceMode(
 		setTurns([]);
 		setElapsedSeconds(0);
 		setMuted(false);
-		callStartedAtRef.current = Date.now();
+		callStartedAtRef.current = null;
 		resetLevels();
 		assistantIdRef.current = null;
 		turnSeqRef.current = 0;
 		setPhase("connecting");
 		setActive(true);
 
+		const callOptions = optionsRef.current;
 		const conn = new VoiceSessionConnection(targetRef.current, {
 			conversationId: optionsRef.current.conversationId,
 			agentId: optionsRef.current.agentId,
@@ -152,8 +156,22 @@ export function useVoiceMode(
 			ttsEngine: optionsRef.current.ttsEngine,
 			ttsVoice: optionsRef.current.ttsVoice,
 			handlers: {
+				onCallEnded: (summary) => {
+					if (mountedRef.current) {
+						callOptions.onCallEnded?.(summary);
+					}
+				},
+				onReady: () => {
+					if (connRef.current === conn) {
+						callStartedAtRef.current = Date.now();
+					}
+				},
 				onAudioLevel: pushAudioLevel,
-				onState: (s) => setPhase(s),
+				onState: (s) => {
+					if (connRef.current === conn) {
+						setPhase(s);
+					}
+				},
 				onSpeechStart: () => {
 					// A new user turn — clear the previous turn's live text and close
 					// any still-open assistant line so the next delta starts fresh.
@@ -199,6 +217,9 @@ export function useVoiceMode(
 				},
 				onError: (_code, message) => setError(message),
 				onClose: () => {
+					if (connRef.current !== conn) {
+						return;
+					}
 					connRef.current = null;
 					setActive(false);
 					setElapsedSeconds(0);
@@ -210,7 +231,10 @@ export function useVoiceMode(
 			},
 		});
 		connRef.current = conn;
-		conn.start().catch((e: unknown) => {
+		conn.start().catch((e) => {
+			if (connRef.current !== conn) {
+				return;
+			}
 			setError(
 				e instanceof Error
 					? e.message
@@ -236,12 +260,14 @@ export function useVoiceMode(
 	}, [resetLevels]);
 
 	useEffect(() => {
-		const startedAt = callStartedAtRef.current;
-		if (!active || startedAt === null) {
+		if (!active) {
 			return;
 		}
 		const updateElapsed = () => {
-			setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+			const startedAt = callStartedAtRef.current;
+			setElapsedSeconds(
+				startedAt === null ? 0 : Math.floor((Date.now() - startedAt) / 1000)
+			);
 		};
 		updateElapsed();
 		const timer = window.setInterval(updateElapsed, 1000);
@@ -249,7 +275,14 @@ export function useVoiceMode(
 	}, [active]);
 
 	// Tear down if the component using voice mode unmounts.
-	useEffect(() => () => connRef.current?.close(), []);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+			connRef.current?.close();
+			connRef.current = null;
+		};
+	}, []);
 
 	return {
 		agentName: options.agentName?.trim() || "Ryu",

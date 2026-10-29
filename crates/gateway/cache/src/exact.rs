@@ -9,6 +9,80 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tracing::debug;
 
+use crate::stats::CacheStatsSnapshot;
+use crate::BoxFuture;
+
+/// Opaque boot namespace plus publication sequence supplied by provider runtime.
+/// Boot identity must be generated once per runtime, never per request. A fresh
+/// UUID prevents persistent/shared cache collisions when sequence restarts at zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CacheEpoch {
+    boot: [u8; 16],
+    sequence: u64,
+}
+
+impl CacheEpoch {
+    pub fn new(boot: [u8; 16], sequence: u64) -> Self {
+        Self { boot, sequence }
+    }
+}
+
+/// One captured provider namespace used by both exact and semantic backends.
+#[derive(Debug, Clone, Copy)]
+pub struct CacheScope<'a> {
+    epoch: CacheEpoch,
+    tenant: Option<&'a str>,
+    /// The caller partition inside a tenant (a credential binding). `None`
+    /// keeps the tenant-wide namespace.
+    caller: Option<&'a str>,
+    provider: &'a str,
+    model: &'a str,
+}
+
+impl<'a> CacheScope<'a> {
+    pub fn new(
+        epoch: CacheEpoch,
+        tenant: Option<&'a str>,
+        provider: &'a str,
+        model: &'a str,
+    ) -> Self {
+        Self {
+            epoch,
+            tenant,
+            caller: None,
+            provider,
+            model,
+        }
+    }
+
+    /// Partition the scope by caller so two credentials never share an entry,
+    /// even inside one tenant (or when there is no tenant at all).
+    pub fn with_caller(mut self, caller: &'a str) -> Self {
+        self.caller = Some(caller);
+        self
+    }
+
+    /// Existing semantic backends accept an opaque string in their tenant slot.
+    /// JSON framing distinguishes null/empty tenant and arbitrary field contents.
+    pub fn semantic_scope(&self) -> String {
+        serde_json::json!([
+            "ryu-provider-cache-v3",
+            hex_encode(self.epoch.boot),
+            self.epoch.sequence,
+            self.tenant,
+            self.caller,
+            self.provider,
+            self.model
+        ])
+        .to_string()
+    }
+}
+
+fn hash_segment(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update((bytes.len() as u64).to_be_bytes());
+    hasher.update(bytes);
+}
+
 // ─── Exact-match cache config (moved verbatim from gateway `config.rs`) ───────
 //
 // The serde shape the built-in [`Cache`] consumes. It lives here (not in gateway
@@ -24,6 +98,7 @@ pub struct CacheConfig {
     #[serde(default = "default_cache_ttl")]
     pub ttl_secs: u64,
     /// Maximum number of entries before the oldest are evicted. Default: 1000.
+    /// Also caps the semantic cache, which evicts its oldest entries the same way.
     #[serde(default = "default_cache_max_entries")]
     pub max_entries: usize,
 }
@@ -66,30 +141,32 @@ impl Cache {
         }
     }
 
-    /// Build a deterministic cache key from the tenant, model and messages array.
-    ///
-    /// `org_id` scopes the key per tenant so one org can never be served
-    /// another org's cached response. A discriminant byte keeps `None` (no org,
-    /// e.g. single-tenant or master key) in its own bucket: it can never collide
-    /// with a real org, and two distinct orgs never share a key.
-    pub fn make_key(org_id: Option<&str>, model: &str, messages: &Value) -> String {
+    /// Derive a backend-independent key from the captured provider epoch and
+    /// request dimensions. The epoch is required even for one-account providers.
+    pub fn make_key(
+        scope: &CacheScope<'_>,
+        messages: &Value,
+        tools: Option<&Value>,
+        capability_hints: Option<&str>,
+    ) -> String {
         let mut hasher = Sha256::new();
-        match org_id {
-            Some(org) => {
-                hasher.update([1u8]);
-                hasher.update(org.as_bytes());
+        hasher.update(b"ryu-exact-cache-v2\0");
+        hash_segment(&mut hasher, scope.semantic_scope().as_bytes());
+        hash_segment(&mut hasher, messages.to_string().as_bytes());
+        match tools.filter(|value| !value.is_null()) {
+            Some(value) => {
+                hasher.update([1]);
+                hash_segment(&mut hasher, value.to_string().as_bytes());
             }
-            None => hasher.update([0u8]),
+            None => hasher.update([0]),
         }
-        hasher.update(b"\n");
-        hasher.update(model.as_bytes());
-        hasher.update(b"\n");
-        // Use compact serialisation so key is stable regardless of JSON whitespace
-        hasher.update(
-            serde_json::to_string(messages)
-                .unwrap_or_default()
-                .as_bytes(),
-        );
+        match capability_hints.filter(|value| !value.is_empty()) {
+            Some(value) => {
+                hasher.update([1]);
+                hash_segment(&mut hasher, value.as_bytes());
+            }
+            None => hasher.update([0]),
+        }
         hex_encode(hasher.finalize())
     }
 
@@ -162,7 +239,7 @@ impl Cache {
 /// pipeline, mirroring the provider-side `ProviderRegistry` inversion.
 ///
 /// Only the hot-path verbs are on the trait; the pure key derivation
-/// [`Cache::make_key`] stays a concrete associated function (its call sites name
+/// [`Cache::make_key`] requires the captured scope and stays a concrete associated function (its call sites name
 /// the type and are backend-independent).
 pub trait CacheBackend: Send + Sync {
     /// Return a cached response if one exists and has not expired.
@@ -171,6 +248,24 @@ pub trait CacheBackend: Send + Sync {
     fn insert(&self, key: String, response: Value);
     /// Drop entries whose TTL has elapsed (background sweep).
     fn evict_expired(&self);
+
+    /// Async form of [`get`](Self::get), used by the request pipeline. In-process
+    /// backends keep the default (the sync verb, already complete); network
+    /// backends (Redis) override it so a lookup never blocks a runtime worker.
+    fn get_async<'a>(&'a self, key: &'a str) -> BoxFuture<'a, Option<Value>> {
+        Box::pin(std::future::ready(self.get(key)))
+    }
+
+    /// Async form of [`insert`](Self::insert); see [`get_async`](Self::get_async).
+    fn insert_async(&self, key: String, response: Value) -> BoxFuture<'_, ()> {
+        self.insert(key, response);
+        Box::pin(std::future::ready(()))
+    }
+
+    /// Hit/miss/store/error counters, when the backend keeps them.
+    fn stats(&self) -> Option<CacheStatsSnapshot> {
+        None
+    }
 }
 
 impl CacheBackend for Cache {
@@ -280,6 +375,21 @@ impl CacheRegistry {
     pub fn evict_expired(&self) {
         self.active.evict_expired();
     }
+
+    /// Async lookup on the active backend (the request-path form).
+    pub async fn get_async(&self, key: &str) -> Option<Value> {
+        self.active.get_async(key).await
+    }
+
+    /// Async store on the active backend (the request-path form).
+    pub async fn insert_async(&self, key: String, response: Value) {
+        self.active.insert_async(key, response).await;
+    }
+
+    /// The active backend's counters, if it keeps them.
+    pub fn stats(&self) -> Option<CacheStatsSnapshot> {
+        self.active.stats()
+    }
 }
 
 #[cfg(test)]
@@ -321,13 +431,41 @@ mod cache_tests {
         assert_eq!(c.max_entries, 1000);
     }
 
+    fn key(tenant: Option<&str>, model: &str, messages: &Value) -> String {
+        request_key(tenant, model, messages, None, None)
+    }
+    fn request_key(
+        tenant: Option<&str>,
+        model: &str,
+        messages: &Value,
+        tools: Option<&Value>,
+        hints: Option<&str>,
+    ) -> String {
+        provider_key(tenant, "fixture-provider", model, messages, tools, hints)
+    }
+    fn provider_key(
+        tenant: Option<&str>,
+        provider: &str,
+        model: &str,
+        messages: &Value,
+        tools: Option<&Value>,
+        hints: Option<&str>,
+    ) -> String {
+        Cache::make_key(
+            &CacheScope::new(CacheEpoch::new([1; 16], 0), tenant, provider, model),
+            messages,
+            tools,
+            hints,
+        )
+    }
+
     // ─── make_key: determinism, tenant scoping, field sensitivity ────────────
 
     #[test]
     fn make_key_is_deterministic() {
         let msgs = json!([{ "role": "user", "content": "hi" }]);
-        let a = Cache::make_key(Some("org1"), "gpt-4", &msgs);
-        let b = Cache::make_key(Some("org1"), "gpt-4", &msgs);
+        let a = key(Some("org1"), "gpt-4", &msgs);
+        let b = key(Some("org1"), "gpt-4", &msgs);
         assert_eq!(a, b);
         // SHA-256 hex is 64 chars.
         assert_eq!(a.len(), 64);
@@ -340,17 +478,17 @@ mod cache_tests {
         let spaced: Value =
             serde_json::from_str("[ { \"role\" : \"user\" , \"content\" : \"hi\" } ]").unwrap();
         assert_eq!(
-            Cache::make_key(Some("org1"), "gpt-4", &compact),
-            Cache::make_key(Some("org1"), "gpt-4", &spaced),
+            key(Some("org1"), "gpt-4", &compact),
+            key(Some("org1"), "gpt-4", &spaced),
         );
     }
 
     #[test]
     fn make_key_separates_tenants() {
         let msgs = json!([{ "role": "user", "content": "hi" }]);
-        let org1 = Cache::make_key(Some("org1"), "m", &msgs);
-        let org2 = Cache::make_key(Some("org2"), "m", &msgs);
-        let none = Cache::make_key(None, "m", &msgs);
+        let org1 = key(Some("org1"), "m", &msgs);
+        let org2 = key(Some("org2"), "m", &msgs);
+        let none = key(None, "m", &msgs);
         assert_ne!(org1, org2, "distinct orgs must not share a key");
         assert_ne!(org1, none, "an org must not collide with the no-org bucket");
         assert_ne!(org2, none);
@@ -359,10 +497,177 @@ mod cache_tests {
     #[test]
     fn make_key_none_bucket_is_stable() {
         let msgs = json!([{ "role": "user", "content": "hi" }]);
-        assert_eq!(
-            Cache::make_key(None, "m", &msgs),
-            Cache::make_key(None, "m", &msgs),
+        assert_eq!(key(None, "m", &msgs), key(None, "m", &msgs),);
+    }
+
+    #[test]
+    fn request_key_separates_capability_sensitive_fields() {
+        let messages = json!([{ "role": "user", "content": "send it" }]);
+        let tools_a = json!([{ "type": "function", "function": { "name": "mail.send" } }]);
+        let tools_b = json!([{ "type": "function", "function": { "name": "calendar.create" } }]);
+        let base = request_key(None, "m", &messages, None, None);
+        let a = request_key(None, "m", &messages, Some(&tools_a), Some("a"));
+        let b = request_key(None, "m", &messages, Some(&tools_b), Some("b"));
+        assert_ne!(base, a);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn request_key_separates_resolved_providers() {
+        let messages = json!([{ "role": "user", "content": "hi" }]);
+        let openai = provider_key(Some("org"), "openai", "shared-model", &messages, None, None);
+        let anthropic = provider_key(
+            Some("org"),
+            "anthropic",
+            "shared-model",
+            &messages,
+            None,
+            None,
         );
+        assert_ne!(openai, anthropic);
+    }
+
+    #[test]
+    fn one_account_replacement_and_policy_context_epochs_isolate_identical_requests() {
+        let messages = json!([{ "role":"user", "content":"same request" }]);
+        let cache = Cache::new(cfg(true, 3600, 100));
+        let first = CacheScope::new(
+            CacheEpoch::new([1; 16], 1),
+            Some("tenant"),
+            "openai",
+            "model",
+        );
+        let old_key = Cache::make_key(&first, &messages, None, None);
+        cache.insert(old_key.clone(), json!({"account":"old"}));
+        // The runtime advances this same input for credential, context or policy.
+        for sequence in [2, 3, 4] {
+            let updated = CacheScope::new(
+                CacheEpoch::new([1; 16], sequence),
+                Some("tenant"),
+                "openai",
+                "model",
+            );
+            let updated_key = Cache::make_key(&updated, &messages, None, None);
+            assert_ne!(old_key, updated_key);
+            assert_eq!(cache.get(&updated_key), None);
+            // A delayed completion retains its captured old namespace.
+            cache.insert(old_key.clone(), json!({"account":"late-old"}));
+            assert_eq!(cache.get(&updated_key), None);
+        }
+    }
+
+    #[test]
+    fn shared_plugin_backend_does_not_collide_when_boot_sequence_restarts() {
+        let shared: Arc<dyn CacheBackend> = Arc::new(Cache::new(cfg(true, 3600, 100)));
+        let mut before = CacheRegistry::new(cfg(true, 3600, 100));
+        before.register("shared", shared.clone());
+        assert!(before.set_active("shared"));
+        let mut after = CacheRegistry::new(cfg(true, 3600, 100));
+        after.register("shared", shared);
+        assert!(after.set_active("shared"));
+        let messages = json!([{"content":"same"}]);
+        let old = Cache::make_key(
+            &CacheScope::new(CacheEpoch::new([1; 16], 0), None, "provider", "model"),
+            &messages,
+            None,
+            None,
+        );
+        let new = Cache::make_key(
+            &CacheScope::new(CacheEpoch::new([2; 16], 0), None, "provider", "model"),
+            &messages,
+            None,
+            None,
+        );
+        before.insert(old.clone(), json!({"answer":"old-boot"}));
+        assert_eq!(after.get(&new), None);
+        after.insert(new.clone(), json!({"answer":"new-boot"}));
+        before.insert(old, json!({"answer":"late-old-boot"}));
+        assert_eq!(after.get(&new), Some(json!({"answer":"new-boot"})));
+    }
+
+    #[test]
+    fn semantic_backend_scope_isolates_epochs_and_late_old_writes() {
+        let cache = crate::semantic::SemanticCache::new(
+            crate::semantic::SemanticCacheConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            3600,
+            1000,
+        );
+        let first = CacheScope::new(
+            CacheEpoch::new([1; 16], 1),
+            Some("tenant"),
+            "provider",
+            "model",
+        )
+        .semantic_scope();
+        let second = CacheScope::new(
+            CacheEpoch::new([1; 16], 2),
+            Some("tenant"),
+            "provider",
+            "model",
+        )
+        .semantic_scope();
+        let restarted = CacheScope::new(
+            CacheEpoch::new([2; 16], 1),
+            Some("tenant"),
+            "provider",
+            "model",
+        )
+        .semantic_scope();
+        cache.insert(Some(first.clone()), vec![1.0, 0.0], json!({"answer":"old"}));
+        assert_eq!(cache.lookup(Some(&second), &[1.0, 0.0]), None);
+        assert_eq!(cache.lookup(Some(&restarted), &[1.0, 0.0]), None);
+        cache.insert(
+            Some(second.clone()),
+            vec![1.0, 0.0],
+            json!({"answer":"new"}),
+        );
+        cache.insert(Some(first), vec![1.0, 0.0], json!({"answer":"late-old"}));
+        assert_eq!(
+            cache.lookup(Some(&second), &[1.0, 0.0]),
+            Some(json!({"answer":"new"}))
+        );
+    }
+
+    #[test]
+    fn scope_framing_distinguishes_empty_tenants_and_delimiter_contents() {
+        let epoch = CacheEpoch::new([1; 16], 0);
+        let messages = json!([]);
+        let scopes = [
+            CacheScope::new(epoch, None, "provider", "model"),
+            CacheScope::new(epoch, Some(""), "provider", "model"),
+            CacheScope::new(epoch, Some("a\nb"), "c", "model"),
+            CacheScope::new(epoch, Some("a"), "b\nc", "model"),
+        ];
+        for (index, scope) in scopes.iter().enumerate() {
+            for other in scopes.iter().skip(index + 1) {
+                assert_ne!(scope.semantic_scope(), other.semantic_scope());
+                assert_ne!(
+                    Cache::make_key(scope, &messages, None, None),
+                    Cache::make_key(other, &messages, None, None)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn caller_partition_separates_credentials_in_one_tenant() {
+        let epoch = CacheEpoch::new([1; 16], 0);
+        let messages = json!([{ "role": "user", "content": "hi" }]);
+        let shared = CacheScope::new(epoch, None, "provider", "model");
+        let alpha = shared.with_caller("alpha");
+        let beta = shared.with_caller("beta");
+        assert_ne!(alpha.semantic_scope(), beta.semantic_scope());
+        assert_ne!(alpha.semantic_scope(), shared.semantic_scope());
+        assert_ne!(
+            Cache::make_key(&alpha, &messages, None, None),
+            Cache::make_key(&beta, &messages, None, None)
+        );
+        // A caller id that looks like a tenant never collides with that tenant.
+        let as_tenant = CacheScope::new(epoch, Some("alpha"), "provider", "model");
+        assert_ne!(alpha.semantic_scope(), as_tenant.semantic_scope());
     }
 
     #[test]
@@ -371,10 +676,10 @@ mod cache_tests {
         // from colliding with the no-org bucket. Any change to org, model or
         // messages must move the key.
         let msgs = json!([{ "role": "user", "content": "hi" }]);
-        let base = Cache::make_key(Some("org1"), "gpt-4", &msgs);
-        assert_ne!(base, Cache::make_key(Some("org1"), "gpt-5", &msgs));
+        let base = key(Some("org1"), "gpt-4", &msgs);
+        assert_ne!(base, key(Some("org1"), "gpt-5", &msgs));
         let other = json!([{ "role": "user", "content": "bye" }]);
-        assert_ne!(base, Cache::make_key(Some("org1"), "gpt-4", &other));
+        assert_ne!(base, key(Some("org1"), "gpt-4", &other));
     }
 
     // ─── get / insert: hit, miss, disabled, TTL ──────────────────────────────

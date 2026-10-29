@@ -1,5 +1,5 @@
 {
-  "tags": ["monitoring", "alerts", "uptime", "scraping"],
+  "tags": ["monitoring", "alerts", "uptime", "quota", "provider-usage"],
   "author": { "name": "Ryu", "url": "https://ryuhq.com" },
   "repository": "https://github.com/amajorai/ryu-monitors",
   "homepage": "https://github.com/amajorai/ryu-monitors",
@@ -7,12 +7,19 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/monitors",
   "name": "Monitors",
-  "version": "0.1.14",
+  "version": "0.2.0",
   "stability": "experimental",
   "category": "Developer Tools",
-  "description": "Website monitors: price, stock, keyword, content, and uptime watches with cross-device notification fan-out.",
-  "tagline": "Watch a page and get told when it changes",
-  "keywords": ["monitoring", "alerts", "uptime", "scraping"],
+  "description": "Watch websites and provider usage windows for changes and resets, with cross-device and channel notification fan-out.",
+  "tagline": "Watch pages and quotas, get told when they change",
+  "keywords": [
+    "monitoring",
+    "alerts",
+    "uptime",
+    "quota",
+    "usage reset",
+    "provider usage"
+  ],
   "icon": "radar-01",
   "iconDither": { "from": 357, "to": "transparent", "direction": "down" },
   "surfaces": {
@@ -55,9 +62,31 @@
         "mount": "/api/monitors",
         "public_mount": "/api/monitors",
         "routes": [
+          {
+            "path": "/usage/providers",
+            "method": "GET",
+            "permission": "monitors.view"
+          },
+          {
+            "path": "/usage/query",
+            "method": "POST",
+            "permission": "monitors.edit"
+          },
           { "path": "/alerts/stream", "permission": "monitors.view" },
           { "path": "/alerts", "permission": "monitors.view" },
           { "path": "/alerts/:id/ack", "permission": "monitors.edit" },
+          { "path": "/list", "method": "POST", "permission": "monitors.view" },
+          { "path": "/run", "method": "POST", "permission": "monitors.edit" },
+          {
+            "path": "/data/count",
+            "method": "POST",
+            "permission": "monitors.view"
+          },
+          {
+            "path": "/data/purge",
+            "method": "POST",
+            "permission": "monitors.edit"
+          },
           { "path": "/", "method": "GET", "permission": "monitors.view" },
           { "path": "/", "method": "POST", "permission": "monitors.edit" },
           { "path": "/:id", "method": "GET", "permission": "monitors.view" },
@@ -81,21 +110,76 @@
         ]
       },
       "host_api": {
-        "grants": ["tools.invoke"]
+        "grants": ["tools.invoke", "crypto:seal"]
       }
     }
   ],
-  "permission_grants": ["monitors:crud", "tools.invoke", "ui:declarative-http"],
+  "provides": [
+    {
+      "capability": "jobs.list",
+      "version": "1.0.0",
+      "title": "Scheduled monitor checks",
+      "sidecar": "ryu-monitors",
+      "route": "/list",
+      "grant": "monitors:jobs"
+    },
+    {
+      "capability": "jobs.run",
+      "version": "1.0.0",
+      "title": "Run one monitor check",
+      "sidecar": "ryu-monitors",
+      "route": "/run",
+      "grant": "monitors:jobs"
+    },
+    {
+      "capability": "monitors.list",
+      "version": "1.0.0",
+      "title": "Monitor list for scheduling",
+      "sidecar": "ryu-monitors",
+      "route": "/list",
+      "grant": "monitors:jobs"
+    },
+    {
+      "capability": "monitors.run",
+      "version": "1.0.0",
+      "title": "Monitor check",
+      "sidecar": "ryu-monitors",
+      "route": "/run",
+      "grant": "monitors:jobs"
+    },
+    {
+      "capability": "data.count",
+      "version": "1.0.0",
+      "title": "App data count",
+      "sidecar": "ryu-monitors",
+      "route": "/data/count",
+      "grant": "monitors:data"
+    },
+    {
+      "capability": "data.purge",
+      "version": "1.0.0",
+      "title": "App data purge",
+      "sidecar": "ryu-monitors",
+      "route": "/data/purge",
+      "grant": "monitors:data"
+    }
+  ],
+  "permission_grants": [
+    "monitors:crud",
+    "subscriptions:read",
+    "tools.invoke",
+    "ui:declarative-http"
+  ],
   "permission_levels": [
     {
       "id": "monitors.view",
       "label": "Can view",
-      "description": "See configured website monitors and their check history."
+      "description": "See configured monitors, check history, and provider choices supported on this node."
     },
     {
       "id": "monitors.edit",
       "label": "Can edit",
-      "description": "Create, change, and delete monitors, which decides what this node fetches on a schedule and who gets notified.",
+      "description": "Create, change, and delete monitors; selecting provider windows reads their current normalized usage and controls where alerts are delivered.",
       "implies": ["monitors.view"]
     }
   ],
@@ -156,7 +240,7 @@
       {
         "id": "@ryu/monitors#alert.raised",
         "title": "Monitor alert raised",
-        "description": "A scheduled (or run-now) check tripped its alert condition and the alert was stored. Fires once per transition, not once per check: a site that stays down, or a keyword that stays present, does not re-raise. `kind` says which transition it was — `uptime_down` / `uptime_up` / `keyword` / `content_change` / `price` / `stock` — so a recovery is this same event with `kind: \"uptime_up\"`.",
+        "description": "A scheduled (or run-now) check tripped its alert condition and the alert was stored. Fires once per transition, not once per check. `kind` identifies transitions including `uptime_down` / `uptime_up` / `keyword` / `content_change` / `price` / `stock` / `usage_reset`.",
         "payload_example": {
           "alert_id": 42,
           "monitor_id": "mon_9f2c1b7a4e5d4f0a8c3b6d1e7f905a2c",

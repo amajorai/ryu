@@ -12,6 +12,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import { formatGoalElapsed, getGoalElapsedMs } from "../goal-message.ts";
@@ -80,7 +81,7 @@ export function GoalBar({
 	// Live elapsed timer: re-render every second while the goal is active.
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
-		if (achieved || paused || typeof startedAt !== "number") {
+		if (achieved || paused || !isNativeNumber(startedAt)) {
 			return;
 		}
 		const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -144,6 +145,7 @@ export function GoalBar({
 				/>
 				{editing ? (
 					<input
+						aria-label="Goal"
 						className="min-w-0 flex-1 bg-transparent text-foreground text-sm outline-none placeholder:text-muted-foreground"
 						onChange={(e) => setDraft(e.target.value)}
 						onKeyDown={(e) => {
@@ -178,7 +180,7 @@ export function GoalBar({
 						<span className="mr-1 inline-flex items-center gap-1 text-muted-foreground/80 text-xs">
 							<HugeiconsIcon className="size-3" icon={Clock01Icon} />
 							{elapsed}
-							{typeof turns === "number" && turns > 0 && (
+							{isNativeNumber(turns) && turns > 0 && (
 								<span className="text-muted-foreground/60">
 									· {turns} {turns === 1 ? "turn" : "turns"}
 								</span>
@@ -188,8 +190,8 @@ export function GoalBar({
 					{editing ? (
 						<>
 							<Button
+								appearance="goal-save"
 								aria-label="Save goal"
-								className="size-6 text-muted-foreground/80 hover:text-foreground"
 								onClick={commit}
 								size="icon"
 								type="button"
@@ -198,8 +200,8 @@ export function GoalBar({
 								<HugeiconsIcon className="size-3.5" icon={Tick02Icon} />
 							</Button>
 							<Button
+								appearance="goal-action"
 								aria-label="Cancel"
-								className="size-6 text-muted-foreground/70 hover:text-foreground"
 								onClick={cancel}
 								size="icon"
 								type="button"
@@ -212,8 +214,8 @@ export function GoalBar({
 						<>
 							{!achieved && (paused ? onResume : onPause) && (
 								<Button
+									appearance="goal-action"
 									aria-label={paused ? "Resume goal" : "Pause goal"}
-									className="size-6 text-muted-foreground/70 hover:text-foreground"
 									onClick={paused ? onResume : onPause}
 									size="icon"
 									type="button"
@@ -226,8 +228,8 @@ export function GoalBar({
 								</Button>
 							)}
 							<Button
+								appearance="goal-action"
 								aria-label="Edit goal"
-								className="size-6 text-muted-foreground/70 hover:text-foreground"
 								onClick={() => setEditing(true)}
 								size="icon"
 								type="button"
@@ -236,8 +238,8 @@ export function GoalBar({
 								<HugeiconsIcon className="size-3.5" icon={PencilEdit01Icon} />
 							</Button>
 							<Button
+								appearance="goal-action"
 								aria-label="Clear goal"
-								className="size-6 text-muted-foreground/70 hover:text-foreground"
 								onClick={onClear}
 								size="icon"
 								type="button"

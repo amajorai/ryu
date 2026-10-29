@@ -13,9 +13,9 @@
 //! startup rather than aliased onto dev's ports.
 //!
 //! Design rule (the one that prevents the "adopt-and-share" bug where a spawn
-//! side and the client that dials it disagree): **there is exactly one offset
-//! source — [`port`] — and every port computation on every side calls it.** Never
-//! hardcode a shifted port anywhere.
+//! side and the client that dials it disagree): the profile table lives in
+//! `ryu-sidecar-runtime`; Core's [`port`] and managed sidecars' `profiled_port`
+//! use that same table. Never hardcode a shifted port anywhere.
 //!
 //! The file boundary means some *client* readers of a sidecar's port live outside
 //! `sidecar/**` (the RAG registry, the Shadow clients, the gateway-config reader).
@@ -27,53 +27,16 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-/// Env var naming the active profile. Unset / empty ⇒ `"release"`.
-pub const RYU_PROFILE_ENV: &str = "RYU_PROFILE";
-
-/// Optional explicit port namespace used by standalone app hosts. An app host
-/// keeps `RYU_PROFILE=release` for the normal Core semantics, then supplies a
-/// deterministic app-specific offset so multiple products do not share ports.
-pub const RYU_PORT_OFFSET_ENV: &str = "RYU_PORT_OFFSET";
-
-/// The canonical release profile — the zero-offset, no-suffix default.
-pub const RELEASE_PROFILE: &str = "release";
-
-/// Port offset for the `dev` profile. Kept as a named const because call sites
-/// outside this module reference the dev stack's offset directly.
-pub const DEV_PORT_OFFSET: u16 = 1000;
-
-/// **Every profile the stack knows, and the port offset that isolates it.**
-///
-/// A profile is a whole parallel stack, so two profiles sharing an offset is not
-/// a cosmetic clash — they get separate data dirs and separate keychain slots
-/// while fighting over one listener, which is *worse* than no isolation because
-/// both sides believe they are isolated.
-///
-/// This used to be `if release { 0 } else { 1000 }`, which handed EVERY
-/// non-release name dev's ports: `RYU_PROFILE=canary` got `~/.ryu-canary` and
-/// `master-key-canary` but bound 8980/8981 right on top of the dev stack. The
-/// table exists so that can never silently happen again — there is deliberately
-/// no fallback arm, and an unrecognised profile is rejected at startup by
-/// [`resolve`] rather than being quietly aliased onto dev.
-///
-/// Adding a stack means adding a row here (and to the gateway + desktop mirrors).
-pub const PROFILE_PORT_OFFSETS: &[(&str, u16)] = &[
-    (RELEASE_PROFILE, 0),
-    ("dev", DEV_PORT_OFFSET),
-    ("canary", 2000),
-    ("nightly", 3000),
-    ("beta", 4000),
-];
+pub use ryu_sidecar_runtime::{
+    DEV_PORT_OFFSET, PROFILE_PORT_OFFSETS, RELEASE_PROFILE, RYU_PORT_OFFSET_ENV, RYU_PROFILE_ENV,
+};
 
 // ── Pure resolvers (test these; they take the profile explicitly) ────────────────
 
 /// The port offset for `profile`, or `None` when it is not a known profile.
 /// Prefer this over [`port_offset_for`] anywhere the name is not yet validated.
 pub fn offset_of(profile: &str) -> Option<u16> {
-    PROFILE_PORT_OFFSETS
-        .iter()
-        .find(|(name, _)| *name == profile)
-        .map(|(_, offset)| *offset)
+    ryu_sidecar_runtime::profile_port_offset_for(profile)
 }
 
 /// Comma-separated list of known profiles, for error messages.
@@ -91,27 +54,18 @@ pub fn known_profiles() -> String {
 /// [`resolve`] rejects an unknown `RYU_PROFILE` before anything caches a port,
 /// so reaching here with one means a caller bypassed resolution.
 pub fn port_offset_for(profile: &str) -> u16 {
-    offset_of(profile).unwrap_or_else(|| {
-        panic!(
-            "unknown ryu profile '{profile}' (known: {}) — profiles must come from PROFILE_PORT_OFFSETS",
-            known_profiles()
-        )
-    })
+    ryu_sidecar_runtime::profile_port_offset_for_known(profile)
 }
 
 /// `base + offset(profile)`, saturating (a base near `u16::MAX` never wraps).
 pub fn port_for(base: u16, profile: &str) -> u16 {
-    base.saturating_add(port_offset_for(profile))
+    ryu_sidecar_runtime::profiled_port_for(base, profile)
 }
 
 /// Data-dir / config-dir / keychain-account suffix for a profile. `""` for
 /// release (byte-identical to today), `-<profile>` otherwise (e.g. `-dev`).
 pub fn suffix_for(profile: &str) -> String {
-    if profile == RELEASE_PROFILE {
-        String::new()
-    } else {
-        format!("-{profile}")
-    }
+    ryu_sidecar_runtime::profile_suffix_for(profile)
 }
 
 /// The env-default resolver used everywhere in [`apply_env_defaults`]: an explicit
@@ -138,11 +92,11 @@ fn resolve() -> String {
     // A typo used to produce a stack with its own data dir and keychain slot but
     // dev's listeners — two stacks silently corrupting each other's ports.
     if offset_of(&name).is_none() {
-        eprintln!(
+        crate::log_rotation::write_diagnostic(format!(
             "ryu: unknown {RYU_PROFILE_ENV}='{name}'. Known profiles: {}.\n\
              Add a row to PROFILE_PORT_OFFSETS (and the gateway + desktop mirrors) to define a new one.",
             known_profiles()
-        );
+        ));
         std::process::exit(1);
     }
     name
@@ -174,7 +128,7 @@ pub fn port_offset() -> u16 {
 /// env-default, gateway) computes its concrete port via this. `base` is the
 /// canonical release port (e.g. `8080`); the return is `base + offset`.
 pub fn port(base: u16) -> u16 {
-    base.saturating_add(port_offset())
+    ryu_sidecar_runtime::profiled_port_with_offset(base, port_offset())
 }
 
 /// The active data-dir / config-dir / keychain-account suffix.
@@ -197,19 +151,19 @@ fn default_gateway_config() -> Option<PathBuf> {
 /// those isolated namespaces must receive the same derived defaults.
 ///
 /// These env vars are the seams the out-of-boundary client readers already honour:
-///   - `RYU_DIR`            — data dir (`paths::resolve`), inherited by children.
 ///   - `RYU_BIND`           — Core's listener (`main.rs`).
 ///   - `RYU_GATEWAY_URL`    — the gateway base URL Core forwards to + spawns at.
 ///   - `GATEWAY_CONFIG`     — the gateway config path (child + Core's own reader).
 ///   - `RYU_SHADOW_URL`     — every Shadow client (`clips`, `mcp/shadow`, `meetings`).
 ///   - `RYU_EMBED_BASE_URL` / `RYU_RERANKER_BASE_URL` — the RAG registry clients.
-///   - `RYU_RESEARCH_UPSTREAM` — the autoresearch engine's address, read by BOTH
-///     Core's engine manager (`sidecar::tools::research::engine_base_url`) and, out
-///     of boundary, the `@ryu/research` app's sidecar + `ryu-research mcp` server.
-///     The MCP child sees it only because it is on `env_scrub::MCP_SAFE_ALLOWLIST`.
+/// Data location is resolved separately by `paths`; children which need the
+/// resolved location receive it explicitly instead of inheriting a guessed default.
 ///
-/// The matching *spawn* sides (llama.cpp chat/embed/rerank, Shadow, the SDK app,
-/// and the research sidecar) are threaded directly through [`port`] in
+/// App sidecars derive their own profile-shifted ports from the inherited
+/// `RYU_PROFILE` / `RYU_PORT_OFFSET` (see `ryu_sidecar_runtime::profiled_port`), so
+/// Core seeds no app-specific address here.
+///
+/// The matching *spawn* sides (llama.cpp chat/embed/rerank, Shadow, and the SDK app) are threaded directly through [`port`] in
 /// `sidecar/**`, so both sides shift together.
 pub fn apply_env_defaults() {
     if !should_apply_env_defaults(is_release(), port_offset()) {
@@ -217,33 +171,43 @@ pub fn apply_env_defaults() {
     }
     tracing_note();
 
-    set_if_unset(
-        crate::paths::RYU_DIR_ENV,
-        crate::paths::default_ryu_dir()
-            .to_string_lossy()
-            .into_owned(),
-    );
-    set_if_unset("RYU_BIND", format!("127.0.0.1:{}", port(7980)));
-    set_if_unset(
-        "RYU_GATEWAY_URL",
-        format!("http://127.0.0.1:{}", port(7981)),
-    );
-    if let Some(cfg) = default_gateway_config() {
-        set_if_unset("GATEWAY_CONFIG", cfg.to_string_lossy().into_owned());
+    // Data location is resolved by paths: explicit environment > relocation
+    // pointer > profile default. Seeding RYU_DIR would mask the pointer in
+    // child processes even when this process cached the relocated directory.
+    for (key, value) in environment_defaults_for(port_offset(), default_gateway_config()) {
+        set_if_unset(key, value);
     }
-    set_if_unset("RYU_SHADOW_URL", format!("http://127.0.0.1:{}", port(3030)));
-    set_if_unset(
-        "RYU_EMBED_BASE_URL",
-        format!("http://127.0.0.1:{}", port(8081)),
-    );
-    set_if_unset(
-        "RYU_RERANKER_BASE_URL",
-        format!("http://127.0.0.1:{}", port(8082)),
-    );
-    set_if_unset(
-        "RYU_RESEARCH_UPSTREAM",
-        format!("http://127.0.0.1:{}", port(8087)),
-    );
+}
+
+/// Build the same derived settings seeded at startup without modifying process
+/// environment or consulting profile caches. Data-dir resolution belongs to paths.
+pub(crate) fn environment_defaults_for(
+    offset: u16,
+    gateway_config: Option<PathBuf>,
+) -> Vec<(&'static str, String)> {
+    let port = |base| ryu_sidecar_runtime::profiled_port_with_offset(base, offset);
+    let mut defaults = vec![
+        ("RYU_BIND", format!("127.0.0.1:{}", port(7980))),
+        (
+            "RYU_GATEWAY_URL",
+            format!("http://127.0.0.1:{}", port(7981)),
+        ),
+    ];
+    if let Some(config) = gateway_config {
+        defaults.push(("GATEWAY_CONFIG", config.to_string_lossy().into_owned()));
+    }
+    defaults.extend([
+        ("RYU_SHADOW_URL", format!("http://127.0.0.1:{}", port(3030))),
+        (
+            "RYU_EMBED_BASE_URL",
+            format!("http://127.0.0.1:{}", port(8081)),
+        ),
+        (
+            "RYU_RERANKER_BASE_URL",
+            format!("http://127.0.0.1:{}", port(8082)),
+        ),
+    ]);
+    defaults
 }
 
 fn should_apply_env_defaults(active_is_release: bool, active_port_offset: u16) -> bool {
@@ -259,14 +223,14 @@ fn set_if_unset(key: &str, value: String) {
 }
 
 fn tracing_note() {
-    // `apply_env_defaults` runs before tracing is initialised, so this is a plain
-    // stderr breadcrumb (mirrors the pre-tracing convention in `main`).
-    eprintln!(
+    // `apply_env_defaults` runs before tracing is initialised, so write this
+    // directly to the configured rotating file or fall back to stderr.
+    crate::log_rotation::write_diagnostic(format!(
         "ryu profile: '{}' active — isolated stack (ports +{}, data dir {})",
         profile(),
         port_offset(),
         crate::paths::ryu_dir().display()
-    );
+    ));
 }
 
 #[cfg(test)]
@@ -283,10 +247,10 @@ mod tests {
         assert_eq!(port_for(8080, "dev"), 9080); // llamacpp chat
         assert_eq!(port_for(8081, "dev"), 9081); // llamacpp embed
         assert_eq!(port_for(8082, "dev"), 9082); // llamacpp rerank
-        assert_eq!(port_for(8083, "dev"), 9083); // sdcpp media
+        assert_eq!(port_for(8083, "dev"), 9083); // llamacpp classify
         assert_eq!(port_for(8084, "dev"), 9084); // mlx-vlm
         assert_eq!(port_for(8086, "dev"), 9086); // mlx-lm
-        assert_eq!(port_for(8087, "dev"), 9087); // research sidecar
+        assert_eq!(port_for(8087, "dev"), 9087); // research app engine (app-derived)
         assert_eq!(port_for(8090, "dev"), 9090); // whisper stt
         assert_eq!(port_for(3030, "dev"), 4030); // shadow
         assert_eq!(port_for(3200, "dev"), 4200); // sdk app

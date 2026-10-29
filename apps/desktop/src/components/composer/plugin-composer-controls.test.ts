@@ -19,11 +19,14 @@ import {
 	composerSelectValue,
 	isComposerPluginSectionKey,
 	isKnownComposerControl,
-	type KnownComposerControl,
 	partitionComposerControls,
 	sortComposerControls,
 } from "./plugin-composer-controls.ts";
 
+function control(): PluginComposerControl & { type: "toggle" };
+function control<const TOverride extends Partial<PluginComposerControl>>(
+	over: TOverride
+): PluginComposerControl & TOverride;
 function control(
 	over: Partial<PluginComposerControl> = {}
 ): PluginComposerControl {
@@ -86,33 +89,17 @@ describe("validation", () => {
 describe("placement", () => {
 	test("an explicit placement wins", () => {
 		expect(
-			composerControlPlacement(
-				control({ type: "chip", placement: "menu" }) as KnownComposerControl
-			)
+			composerControlPlacement(control({ type: "chip", placement: "menu" }))
 		).toBe("menu");
 		expect(
-			composerControlPlacement(
-				control({ type: "select", placement: "bar" }) as KnownComposerControl
-			)
+			composerControlPlacement(control({ type: "select", placement: "bar" }))
 		).toBe("bar");
 	});
 
 	test("chips and actions default to the composer bar, selects to the menu", () => {
-		expect(
-			composerControlPlacement(
-				control({ type: "chip" }) as KnownComposerControl
-			)
-		).toBe("bar");
-		expect(
-			composerControlPlacement(
-				control({ type: "action" }) as KnownComposerControl
-			)
-		).toBe("bar");
-		expect(
-			composerControlPlacement(
-				control({ type: "select" }) as KnownComposerControl
-			)
-		).toBe("menu");
+		expect(composerControlPlacement(control({ type: "chip" }))).toBe("bar");
+		expect(composerControlPlacement(control({ type: "action" }))).toBe("bar");
+		expect(composerControlPlacement(control({ type: "select" }))).toBe("menu");
 	});
 });
 
@@ -199,7 +186,7 @@ describe("select values", () => {
 			// Malformed: unpickable / unreadable, so it is dropped.
 			{ value: "", label: "Broken" },
 		],
-	}) as KnownComposerControl;
+	});
 
 	test("drops unusable options", () => {
 		expect(composerSelectOptions(select).map((o) => o.value)).toEqual([
@@ -225,7 +212,7 @@ describe("select values", () => {
 				{ value: "fast", label: "Fast" },
 				{ value: "thorough", label: "Thorough" },
 			],
-		}) as KnownComposerControl;
+		});
 		expect(composerSelectValue(noDefault, {})).toBe("fast");
 	});
 
@@ -233,7 +220,7 @@ describe("select values", () => {
 		const empty = control({
 			type: "select",
 			flag: "mode",
-		}) as KnownComposerControl;
+		});
 		expect(composerSelectValue(empty, {})).toBeUndefined();
 	});
 });

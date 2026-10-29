@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/components/clips/AttachVideoControl.tsx
 //
 // The "Attach video (URL or file)" entry for the composer toolbar, sitting
@@ -10,22 +11,22 @@
 // (download + transcode + keyframe extraction + transcript), so the popover shows
 // a spinner and disables submit until it resolves.
 
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
+} from "@ryu/ui/components/popover.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/select.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	IconAlertTriangle,
 	IconFolder,
@@ -40,6 +41,7 @@ import {
 	type ClipDetailMode,
 	ingestClip,
 } from "@/src/lib/api/clips.ts";
+import { localizeNativeCopy } from "@/src/lib/native-copy.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
 /** The selectable detail modes, in ascending frame-density order. `balanced` is
@@ -86,9 +88,14 @@ export function AttachVideoControl({
 		setError(null);
 		const chosen = await open({
 			multiple: false,
-			filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "webm"] }],
+			filters: [
+				{
+					name: localizeNativeCopy("Video"),
+					extensions: ["mp4", "mov", "mkv", "webm"],
+				},
+			],
 		});
-		if (typeof chosen === "string") {
+		if (isNativeText(chosen)) {
 			setFilePath(chosen);
 			// A picked file supersedes a stale URL so `source` is unambiguous.
 			setUrl("");
@@ -112,7 +119,7 @@ export function AttachVideoControl({
 				reset();
 				setIsOpen(false);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				setError(err instanceof Error ? err.message : "Failed to ingest video");
 			})
 			.finally(() => setBusy(false));
@@ -137,7 +144,8 @@ export function AttachVideoControl({
 								? "Attach video (URL or file)"
 								: "Attach video URL"
 						}
-						className={cn("size-7 rounded-full", className)}
+						className={cn("size-7", className)}
+						radius="pill"
 						size="icon"
 						title={
 							canUseNativeShell
@@ -151,7 +159,12 @@ export function AttachVideoControl({
 			>
 				<IconVideoPlus className="size-4 text-muted-foreground" />
 			</PopoverTrigger>
-			<PopoverContent align="start" className="w-80 gap-3" sideOffset={6}>
+			<PopoverContent
+				align="start"
+				className="w-80"
+				sideOffset={6}
+				spacing="form"
+			>
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor={urlFieldId}>Video URL</Label>
 					<Input
@@ -179,10 +192,10 @@ export function AttachVideoControl({
 					<div className="flex items-center gap-2">
 						<span className="text-muted-foreground text-xs">or</span>
 						<Button
-							className="gap-1.5"
 							disabled={busy}
 							onClick={handleChooseFile}
 							size="sm"
+							spacing="regular"
 							type="button"
 							variant="ghost"
 						>
@@ -202,9 +215,9 @@ export function AttachVideoControl({
 
 				<div className="flex flex-col gap-1.5">
 					<Label>Detail</Label>
-					<Select
+					<Select<ClipDetailMode>
 						items={DETAIL_OPTIONS}
-						onValueChange={(value) => setDetail(value as ClipDetailMode)}
+						onValueChange={(value) => setDetail(value)}
 						value={detail}
 					>
 						<SelectTrigger className="w-full" disabled={busy}>
@@ -228,7 +241,6 @@ export function AttachVideoControl({
 				) : null}
 
 				<Button
-					className="gap-1.5"
 					disabled={!source}
 					loading={busy}
 					onClick={handleSubmit}

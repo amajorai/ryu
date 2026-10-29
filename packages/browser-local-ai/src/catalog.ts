@@ -17,6 +17,15 @@ export interface BrowserModelCapabilities {
 	visionSupport: boolean;
 }
 
+export type BrowserImageTask = "image-segmentation" | "background-removal";
+
+export interface BrowserImageModelDefinition {
+	description: string;
+	id: string;
+	name: string;
+	task: BrowserImageTask;
+}
+
 export type BrowserModelStatus =
 	| "ready"
 	| "not-prepared"
@@ -50,9 +59,9 @@ export const CURATED_BROWSER_MODELS: readonly BrowserModelDefinition[] = [
 	{
 		capabilities: CHAT_ONLY,
 		curated: true,
-		description: "Small, fast chat model for any browser surface.",
-		id: "onnx-community/SmolLM2-135M-ONNX",
-		name: "SmolLM2 135M",
+		description: "Instruction-tuned small chat model for any browser surface.",
+		id: "onnx-community/SmolLM2-135M-Instruct-ONNX-MHA",
+		name: "SmolLM2 135M Instruct",
 		status: "not-prepared",
 		task: "text-generation",
 	},
@@ -86,7 +95,36 @@ export const CURATED_BROWSER_MODELS: readonly BrowserModelDefinition[] = [
 ];
 
 export const DEFAULT_BROWSER_MODEL_ID =
-	CURATED_BROWSER_MODELS[0]?.id ?? "onnx-community/SmolLM2-135M-ONNX";
+	CURATED_BROWSER_MODELS[0]?.id ??
+	"onnx-community/SmolLM2-135M-Instruct-ONNX-MHA";
+
+/** Transformers.js image models that have browser-compatible ONNX exports. */
+export const CURATED_BROWSER_IMAGE_MODELS = {
+	"background-removal": [
+		{
+			description: "Portrait matting with transparent background output.",
+			id: "Xenova/modnet",
+			name: "MODNet",
+			task: "background-removal",
+		},
+	],
+	"image-segmentation": [
+		{
+			description: "Panoptic object masks with labels for subject selection.",
+			id: "Xenova/detr-resnet-50-panoptic",
+			name: "DETR Panoptic",
+			task: "image-segmentation",
+		},
+	],
+} as const satisfies Record<
+	BrowserImageTask,
+	readonly BrowserImageModelDefinition[]
+>;
+
+export const DEFAULT_BROWSER_IMAGE_MODELS = {
+	"background-removal": "Xenova/modnet",
+	"image-segmentation": "Xenova/detr-resnet-50-panoptic",
+} satisfies Record<BrowserImageTask, string>;
 
 const MODEL_ID_PATTERN =
 	/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/;

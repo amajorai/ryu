@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Write};
 
 use anyhow::{bail, Context, Result};
+use noyalib::compat::serde_yaml::Value as YamlValue;
 use ryu_knowledge::{Concept, IndexDoc, LogDoc, LogEntry, OKF_VERSION};
 use serde_json::{json, Map, Value};
-use serde_yml::Value as YamlValue;
 
 use super::spaces::{DocOwner, DocumentContent, RetrievalMode, Space, SpaceStore};
 use crate::portable_packages::{PortablePackageManifest, PACKAGE_MANIFEST_FILE};
@@ -101,12 +101,13 @@ fn database_index_path(index: usize, title: &str) -> String {
 }
 
 fn yaml_value(value: &Value) -> Result<YamlValue> {
-    serde_yml::to_value(value).context("serializing Space frontmatter")
+    noyalib::compat::serde_yaml::to_value(value).context("serializing Space frontmatter")
 }
 
 fn yaml_to_json(value: &YamlValue) -> Result<Value> {
-    let yaml = serde_yml::to_string(value).context("encoding Space frontmatter")?;
-    serde_yml::from_str(&yaml).context("decoding Space frontmatter")
+    let yaml =
+        noyalib::compat::serde_yaml::to_string(value).context("encoding Space frontmatter")?;
+    noyalib::compat::serde_yaml::from_str(&yaml).context("decoding Space frontmatter")
 }
 
 fn extra_json(concept: &Concept, key: &str) -> Option<Value> {
@@ -232,8 +233,8 @@ fn package_archive(manifest: &Value, files: &BTreeMap<String, Vec<u8>>) -> Resul
     let manifest_bytes =
         serde_json::to_vec_pretty(manifest).context("encoding Space package manifest")?;
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
     writer.start_file(PACKAGE_MANIFEST_FILE, options)?;
     writer.write_all(&manifest_bytes)?;
     for (path, data) in files {

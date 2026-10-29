@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import { selectInterfaceById } from "@/src/interfaces/interface-store.ts";
 import {
 	type NavigationRequest,
 	streamNavigationRequests,
@@ -49,6 +50,12 @@ function consumeNavigationRequest(
 		// result of the second call, and it consumes the pending URL on mount.
 		useBrowserOpenRequestStore.getState().open(target);
 		useDockPanelRequestStore.getState().open(BROWSER_PANEL_KIND, "Browser");
+		return;
+	}
+
+	if (isAgentRequest(request) && request.kind === "interface") {
+		// Core already asked the user; the switcher's own access rules still apply.
+		selectInterfaceById(target);
 		return;
 	}
 

@@ -11,7 +11,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useEffect, useMemo, useState } from "react";
 import type { Message as ChatMessage } from "@/types/chat.ts";
 
@@ -45,7 +45,7 @@ function PreviewMessage({ message }: { message: ChatMessage }) {
 			className={`flex flex-col gap-1 ${isUser ? "items-end" : "items-start"}`}
 			data-testid={`quick-preview-message-${message.id}`}
 		>
-			<span className="px-2 text-[10px] text-muted-foreground/70">
+			<span className="type-compact px-2 text-muted-foreground/70">
 				{isUser ? "You" : "Assistant"}
 			</span>
 			<Bubble
@@ -53,7 +53,7 @@ function PreviewMessage({ message }: { message: ChatMessage }) {
 				className="max-w-[92%]"
 				variant={isUser ? "default" : "muted"}
 			>
-				<BubbleContent className="px-3 py-2 text-sm leading-relaxed">
+				<BubbleContent>
 					<Markdown
 						className="[&_p]:my-0 [&_p]:leading-relaxed"
 						content={content}
@@ -126,12 +126,16 @@ export function QuickPreview({
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent
+				appearance="quick-preview"
 				aria-describedby="quick-preview-description"
-				className="max-w-xl gap-3 p-3 sm:p-4"
 				data-testid="quick-preview"
 			>
-				<DialogHeader className="pr-10">
-					<DialogTitle className="flex min-w-0 items-center gap-2 text-base">
+				<DialogHeader purpose="quick-preview">
+					<DialogTitle
+						className="min-w-0"
+						layout="inline"
+						typography="compact-preview"
+					>
 						<span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
 							<HugeiconsIcon icon={Message01Icon} size={15} />
 						</span>
@@ -144,10 +148,7 @@ export function QuickPreview({
 
 				<div className="max-h-[min(32rem,60dvh)] min-h-32 overflow-y-auto rounded-2xl border border-border/60 bg-background/45 p-3">
 					{loading ? (
-						<div className="flex min-h-24 items-center justify-center gap-2 text-muted-foreground text-xs">
-							<Spinner className="size-3.5" />
-							Loading messages…
-						</div>
+						<SkeletonRows label="Loading messages…" spacing="comfortable" />
 					) : failed ? (
 						<p className="flex min-h-24 items-center justify-center text-muted-foreground text-xs">
 							Couldn’t load this preview.
@@ -165,7 +166,7 @@ export function QuickPreview({
 					)}
 				</div>
 
-				<DialogFooter className="flex-row items-center justify-between gap-2 sm:justify-between">
+				<DialogFooter className="flex-row items-center justify-between sm:justify-between">
 					<p className="min-w-0 text-muted-foreground text-xs">
 						Preview only · opening this did not select the chat.
 					</p>

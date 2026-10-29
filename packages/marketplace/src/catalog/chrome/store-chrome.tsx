@@ -1,9 +1,9 @@
 // packages/marketplace/src/catalog/chrome/store-chrome.tsx
 //
-// Moved from apps/desktop/src/components/store/storeChrome.tsx. The section-tab
+// Formerly apps/desktop/src/components/store/storeChrome.tsx (since removed). The section-tab
 // context that the left list header renders. `StoreSectionTab` is declared
 // locally (was imported from @ryu/blocks/desktop/store) so the package carries no
-// desktop-block dependency. The desktop path re-exports the provider + hook.
+// desktop-block dependency. Consumers import the provider + hook from here.
 //
 // Unlike the desktop original, `useStoreChromeOptional` does NOT throw when no
 // provider is mounted — the shared list header falls back to rendering no tabs so

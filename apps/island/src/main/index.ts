@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, screen } from "electron";
 import {
 	type IslandBackground,
 	isMaterialAppearance,
@@ -25,6 +25,7 @@ import {
 	parseHideOnFullscreen,
 } from "../shared/hide-on-fullscreen.ts";
 import { type ConsentState, IPC } from "../shared/ipc.ts";
+import { NOTCH_PREF_KEY, parseNotchMode } from "../shared/notch.ts";
 import {
 	DEFAULT_SCREEN_PRIVACY,
 	parseScreenPrivacy,
@@ -38,8 +39,18 @@ import { setEdgeOffset } from "./edge-offset.ts";
 import { initFullscreenHide, setHideOnFullscreen } from "./fullscreen.ts";
 import { destroyGhostCursor } from "./ghost-cursor.ts";
 import { registerIpc } from "./ipc/index.ts";
+import {
+	isNotchModeEnabled,
+	refreshNotchGeometry,
+	setNotchMode,
+} from "./notch.ts";
 import { initZoneOverlay, setOverlayContentProtection } from "./overlay.ts";
 import { applyEdgeOffset } from "./position.ts";
+import {
+	destroyScreenSurface,
+	followIslandWindow,
+	setScreenSurfaceContentProtection,
+} from "./screen-surface.ts";
 import {
 	getAppearanceRaw,
 	subscribeAppearanceChanges,
@@ -48,6 +59,7 @@ import {
 	getAutoJumpRaw,
 	subscribeAutoJumpChanges,
 } from "./services/auto-jump.ts";
+import { onCoreConfigChange, refreshCoreIdentity } from "./services/config.ts";
 import {
 	applyConsentState,
 	getConsent,
@@ -57,6 +69,7 @@ import {
 	getEdgeOffsetRaw,
 	subscribeEdgeOffsetChanges,
 } from "./services/edge-offset.ts";
+import { createPluginShortcutRegistrar } from "./services/plugin-shortcut-registration.ts";
 import { createPluginShortcutRefresh } from "./services/plugin-shortcuts.ts";
 import {
 	getPreferenceRaw,
@@ -67,6 +80,7 @@ import { getVoicePrefsRaw, subscribeVoiceChanges } from "./services/voice.ts";
 import {
 	focusForCommand,
 	hideWindow,
+	setAppActivator,
 	setVisibilityTarget,
 	showWindow,
 } from "./visibility.ts";
@@ -96,6 +110,8 @@ app.setName(isDevProfile ? "Ryu Island Dev" : "Ryu Island");
 // packaged Info.plist, so hide the Dock at runtime too. `app.dock` is undefined
 // off macOS, so the optional chaining makes this a no-op on Windows/Linux.
 app.dock?.hide();
+// macOS focus path for presentWindow (see visibility.ts).
+setAppActivator(() => app.focus({ steal: true }));
 
 // The currently-registered command-summon accelerator (null until bound),
 // tracked so a settings change can unregister the old one before binding the new.
@@ -121,48 +137,19 @@ let dictationShortcut: string | null = null;
 // The currently-registered agent-ask accelerator (null when disabled/unset).
 // Agent-ask shares the dictation capture pipeline but pastes an agent answer.
 let dictationAskShortcut: string | null = null;
-const pluginShortcuts = new Map<string, string>();
-
-function toElectronAccelerator(shortcut: string): string | null {
-	const parts = shortcut
-		.toLowerCase()
-		.split("+")
-		.map((part) => part.trim());
-	const key = parts.pop();
-	if (!key || parts.length === 0) {
-		return null;
-	}
-	const modifiers = parts.map((part) => {
-		if (part === "ctrl" || part === "control" || part === "mod") {
-			return "CommandOrControl";
-		}
-		if (part === "cmd" || part === "command") {
-			return "Command";
-		}
-		if (part === "alt" || part === "option") {
-			return "Alt";
-		}
-		if (part === "shift") {
-			return "Shift";
-		}
-		return null;
-	});
-	if (modifiers.some((part) => part === null)) {
-		return null;
-	}
-	return [
-		...new Set(modifiers as string[]),
-		key.length === 1 ? key.toUpperCase() : key,
-	].join("+");
-}
-
+const registerPluginShortcuts = createPluginShortcutRegistrar({
+	register: (accelerator, handler) =>
+		globalShortcut.register(accelerator, handler),
+	unregister: (accelerator) => globalShortcut.unregister(accelerator),
+	focus: () => focusForCommand(),
+	sendShortcut: (companionId) =>
+		islandWindow?.webContents.send(IPC.plugins.shortcut, companionId),
+});
 const applyPluginShortcuts = createPluginShortcutRefresh(
 	(result, overrides) => {
-		for (const accelerator of pluginShortcuts.values()) {
-			globalShortcut.unregister(accelerator);
-		}
-		pluginShortcuts.clear();
-		const occupied = new Set(
+		registerPluginShortcuts(
+			result,
+			overrides,
 			[
 				commandShortcut,
 				voiceShortcut,
@@ -170,35 +157,6 @@ const applyPluginShortcuts = createPluginShortcutRefresh(
 				dictationAskShortcut,
 			].filter((value): value is string => value !== null)
 		);
-		if (!result.available) {
-			return;
-		}
-		for (const companion of result.companions) {
-			const actionId = `plugin:${companion.pluginId}`;
-			const configured = Object.hasOwn(overrides, actionId)
-				? overrides[actionId]
-				: companion.shortcut;
-			if (!configured) {
-				continue;
-			}
-			const accelerator = toElectronAccelerator(configured);
-			if (!accelerator || occupied.has(accelerator)) {
-				continue;
-			}
-			try {
-				if (
-					globalShortcut.register(accelerator, () => {
-						focusForCommand();
-						islandWindow?.webContents.send(IPC.plugins.shortcut, companion.id);
-					})
-				) {
-					pluginShortcuts.set(companion.id, accelerator);
-					occupied.add(accelerator);
-				}
-			} catch {
-				/* invalid or unavailable accelerator: leave the app usable */
-			}
-		}
 	}
 );
 
@@ -212,10 +170,17 @@ let islandWindow: BrowserWindow | null = null;
 // The appearance the live window was built with. Changing this mode requires
 // recreating the window: `transparent` and the native material are set at
 // construction time and cannot be toggled on a live window.
-let currentBackground: IslandBackground = "translucent";
+let currentBackground: IslandBackground = "acrylic";
+// The Background the user chose last: the startup read, then each live change.
+// A rebuild builds this value when the old window has closed, so a change that
+// lands while a rebuild is in flight is applied instead of dropped.
+let requestedBackground: IslandBackground = "acrylic";
 // True while a recreation is tearing the old window down, so the transient
 // zero-window moment does not trip `window-all-closed` into quitting the app.
 let recreating = false;
+// True once the app has begun quitting: a rebuild still tearing its old window
+// down must not attach a fresh one then.
+let quitting = false;
 // Whether the island (and its drag overlay) must be excluded from screen capture
 // — the `island-screen-privacy` preference. Tracked here so the state is re-applied
 // to every fresh window after an appearance recreation (content protection is a
@@ -229,6 +194,11 @@ function attachWindow(background: IslandBackground): BrowserWindow {
 	// Re-apply screen privacy: a recreated window starts un-protected, so seed it
 	// from the tracked preference (the overlay mirrors it via its own setter).
 	win.setContentProtection(currentScreenPrivacy);
+	// The on-screen generative UI belongs to this window's chat; never let a
+	// leftover screen outlive it (or keep the app alive after it closes), and
+	// keep it hidden/shown and placed together with the Island.
+	win.on("closed", destroyScreenSurface);
+	followIslandWindow(win);
 	// Track the global cursor so the island's eyes follow the pointer anywhere on
 	// screen (not just over the small window). Cleans itself up on window close.
 	attachCursorTracking(win);
@@ -250,26 +220,35 @@ function attachWindow(background: IslandBackground): BrowserWindow {
 }
 
 /**
- * Rebuild the island window in a new appearance. Closing the old window runs its
- * teardown (`win:*` listeners + the snap-zone overlay) via its `closed` handler,
- * so we wait for that, then build the fresh window + overlay. No-op when the mode
- * is unchanged or a recreation is already in flight.
+ * Rebuild the island window in {@link requestedBackground}. Closing the old
+ * window runs its teardown (`win:*` listeners + the snap-zone overlay) via its
+ * `closed` handler, so we wait for that, then build the fresh window + overlay.
+ * No-op when the built mode already matches (unless `force`, used when the notch
+ * geometry changes). While a rebuild is in flight a new request only waits: the
+ * pending rebuild reads the latest requested mode and notch state when it builds.
  */
-function recreateWindow(background: IslandBackground): void {
-	if (background === currentBackground || recreating) {
+function recreateWindow(force = false): void {
+	if (recreating || (!force && requestedBackground === currentBackground)) {
 		return;
 	}
 	const old = islandWindow;
 	if (!old || old.isDestroyed()) {
-		attachWindow(background);
+		attachWindow(requestedBackground);
 		initZoneOverlay();
 		return;
 	}
 	recreating = true;
 	old.once("closed", () => {
-		attachWindow(background);
-		initZoneOverlay();
-		recreating = false;
+		// `recreating` must clear even if building the new window throws, or every
+		// later Background change would wait on a rebuild that never finishes.
+		try {
+			if (!quitting) {
+				attachWindow(requestedBackground);
+				initZoneOverlay();
+			}
+		} finally {
+			recreating = false;
+		}
 	});
 	old.close();
 }
@@ -285,6 +264,7 @@ function applyScreenPrivacy(enabled: boolean): void {
 		islandWindow.setContentProtection(enabled);
 	}
 	setOverlayContentProtection(enabled);
+	setScreenSurfaceContentProtection(enabled);
 }
 
 /**
@@ -557,29 +537,36 @@ function applyCommandShortcut(raw: string | null): void {
 }
 
 async function bootstrap(): Promise<void> {
+	// Identify the signed-in user to shared nodes from the first Core request.
+	refreshCoreIdentity();
 	// Resolve the persisted appearance + edge offset before building the window so
 	// the first paint is already in the right mode and docked at the saved gap
 	// (no flash/recreate or reposition on a cold start).
 	const [
+		notchRaw,
 		appearanceRaw,
 		edgeOffsetRaw,
 		autoJumpRaw,
 		screenPrivacyRaw,
 		hideOnFullscreenRaw,
 	] = await Promise.all([
+		getPreferenceRaw(NOTCH_PREF_KEY),
 		getAppearanceRaw(),
 		getEdgeOffsetRaw(),
 		getAutoJumpRaw(),
 		getPreferenceRaw(SCREEN_PRIVACY_PREF_KEY),
 		getPreferenceRaw(HIDE_ON_FULLSCREEN_PREF_KEY),
 	]);
+	setNotchMode(parseNotchMode(notchRaw));
 	setEdgeOffset(parseEdgeOffset(edgeOffsetRaw));
 	const background = parseAppearance(appearanceRaw).background;
+	requestedBackground = background;
 	// Seed screen privacy before the window + overlay are built so the very first
 	// frame is already excluded from capture when enabled (content protection is a
 	// per-window property, so the window must be (re)tagged on every create).
 	currentScreenPrivacy = parseScreenPrivacy(screenPrivacyRaw);
 	setOverlayContentProtection(currentScreenPrivacy);
+	setScreenSurfaceContentProtection(currentScreenPrivacy);
 	// Point the auto-jump controller at the live window + appearance before it can
 	// be enabled (the getters are read each tick, so window recreation is handled).
 	initAutoJump(
@@ -614,9 +601,25 @@ async function bootstrap(): Promise<void> {
 	setAutoJump(parseAutoJump(autoJumpRaw));
 	subscribeAutoJumpChanges((raw) => setAutoJump(parseAutoJump(raw)));
 
-	// React to live appearance changes from the desktop's settings.
+	subscribePreferenceChanges(NOTCH_PREF_KEY, (raw) => {
+		setNotchMode(parseNotchMode(raw));
+		recreateWindow(true);
+	});
+	const updateNotchDisplay = () => {
+		if (!isNotchModeEnabled()) {
+			return;
+		}
+		refreshNotchGeometry();
+		recreateWindow(true);
+	};
+	screen.on("display-metrics-changed", updateNotchDisplay);
+	screen.on("display-added", updateNotchDisplay);
+	screen.on("display-removed", updateNotchDisplay);
+	// React to live appearance changes from the desktop's settings. The last
+	// change wins, even one that arrives while a rebuild is in flight.
 	subscribeAppearanceChanges((raw) => {
-		recreateWindow(parseAppearance(raw).background);
+		requestedBackground = parseAppearance(raw).background;
+		recreateWindow();
 	});
 
 	// React to live edge-offset changes: store the new gap and immediately
@@ -624,7 +627,7 @@ async function bootstrap(): Promise<void> {
 	subscribeEdgeOffsetChanges((raw) => {
 		setEdgeOffset(parseEdgeOffset(raw));
 		if (islandWindow && !islandWindow.isDestroyed()) {
-			applyEdgeOffset(islandWindow, isMaterialAppearance(currentBackground));
+			applyEdgeOffset(islandWindow);
 		}
 	});
 
@@ -642,27 +645,43 @@ async function bootstrap(): Promise<void> {
 	// Tab-cycling belongs to voice input; point the shared key hook at it once.
 	setTabCycle("voice", sendCycleAgent);
 	applyCommandShortcut(commandShortcutRaw);
+	// Live changes to an Island-owned chord go through `rebindReserved`: plugin
+	// chords are released first (so the Island chord can claim one a plugin held),
+	// then re-applied against the new reserved set (so a chord the Island gave up
+	// goes straight back to its plugin).
 	subscribePreferenceChanges(COMMAND_SHORTCUT_PREF_KEY, (raw) =>
-		applyCommandShortcut(raw)
+		applyPluginShortcuts.rebindReserved(() => applyCommandShortcut(raw))
 	);
 	subscribeVoiceChanges((raw) => {
-		lastVoiceRaw = raw;
-		applyVoicePrefs(raw);
-		// Dictation defers to the voice shortcut, so re-reconcile it whenever voice
-		// rebinds (its slot may have freed up or newly collided).
-		applyDictationPrefs(lastDictationRaw);
+		applyPluginShortcuts.rebindReserved(() => {
+			lastVoiceRaw = raw;
+			applyVoicePrefs(raw);
+			// Dictation defers to the voice shortcut, so re-reconcile it whenever
+			// voice rebinds (its slot may have freed up or newly collided).
+			applyDictationPrefs(lastDictationRaw);
+		});
 	});
 	// Dictation shortcut: bind it now (command + voice were reconciled above) and
 	// keep it in sync with its preference.
 	applyDictationPrefs(lastDictationRaw);
 	subscribePreferenceChanges(DICTATION_PREF_KEY, (raw) => {
-		lastDictationRaw = raw;
-		applyDictationPrefs(raw);
+		applyPluginShortcuts.rebindReserved(() => {
+			lastDictationRaw = raw;
+			applyDictationPrefs(raw);
+		});
 	});
-	await applyPluginShortcuts();
+	// Plugin chords follow Core: the first read, every saved-shortcut change, a
+	// switch to another Core (different plugins and saved shortcuts), and the
+	// refresh's own idle poll for plugins enabled or disabled in Core.
+	// Subscribed before the first read so a change that lands while it is in
+	// flight supersedes it instead of being lost.
 	subscribePreferenceChanges("keybindings", () => {
 		applyPluginShortcuts().catch(() => undefined);
 	});
+	onCoreConfigChange(() => {
+		applyPluginShortcuts().catch(() => undefined);
+	});
+	await applyPluginShortcuts();
 
 	// The renderer owns the recording lifecycle (it drives the mic + waveform), so
 	// it reports start/stop here. The main process uses it to arm the global key
@@ -728,8 +747,11 @@ async function bootstrap(): Promise<void> {
 	subscribePreferenceChanges(ISLAND_CONSENT_PREF_KEY, applyConsentFromCore);
 
 	app.on("activate", () => {
-		if (BrowserWindow.getAllWindows().length === 0) {
-			attachWindow(currentBackground);
+		// A rebuild in flight attaches its own window when the old one closes. The
+		// closed window destroyed its snap-zone overlay, so build a new one too.
+		if (!recreating && BrowserWindow.getAllWindows().length === 0) {
+			attachWindow(requestedBackground);
+			initZoneOverlay();
 		}
 	});
 }
@@ -744,11 +766,18 @@ if (gotLock) {
 	app.quit();
 }
 
+app.on("before-quit", () => {
+	quitting = true;
+});
+
 app.on("will-quit", () => {
+	// Stop plugin-shortcut retries first so no late snapshot re-registers a chord.
+	applyPluginShortcuts.dispose();
 	globalShortcut.unregisterAll();
 	stopHooks();
 	stopControlServer();
 	destroyGhostCursor();
+	destroyScreenSurface();
 });
 
 app.on("window-all-closed", () => {

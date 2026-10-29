@@ -31,11 +31,12 @@
 // # On `new AsyncFunction(...)` below
 //
 // Compiling a string into a function is the whole job here — the thing under test
-// IS a source fragment, and Core itself compiles it the same way inside Deno. The
+// IS a source fragment, and Core itself compiles it the same way inside its JS
+// sandbox. The
 // ordering that makes it tolerable: both `index.mjs verify` and `defineToolTests`
 // run `scanPurity` FIRST and refuse to execute anything that trips it, and the
 // denylist rejects `import` / `require` / `eval` / `new Function` / `process` /
-// `fetch` / `Deno`. Keep the scan first; never call `runCase` on an unscanned body.
+// `fetch` / `childProcess`. Keep the scan first; never call `runCase` on an unscanned body.
 //
 // **This is a guardrail, not a sandbox.** The scan is a conservative regex denylist
 // over source with comments and strings blanked; it does not model regex literals,
@@ -43,10 +44,10 @@
 // enumerate. The body runs with full Node privileges in this process. So: run the
 // harness on tool bodies you or your team wrote and have read. Do NOT point it at
 // an untrusted third-party plugin as a vetting step — for that, the thing that
-// actually confines the code is Core's Deno sandbox, not this file.
+// actually confines the code is Core's JS sandbox, not this file.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -65,6 +66,15 @@ const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor;
  * Thrown when a tool body reaches for an ambient nondeterministic global.
  * A distinct class so a case can legitimately assert on it (`expectImpure`).
  */
+function storageString(value) {
+	try {
+		const text = String.prototype.valueOf.call(value);
+		return text === value ? text : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export class ImpureAccessError extends Error {
 	constructor(what) {
 		super(
@@ -94,11 +104,11 @@ function shadowGlobals() {
 	});
 
 	const PureDate = new Proxy(Date, {
-		get(target, prop, receiver) {
+		get(target, prop) {
 			if (prop === "now") {
 				return denied("Date.now()");
 			}
-			return Reflect.get(target, prop, receiver);
+			return target[prop];
 		},
 		construct(target, args) {
 			if (args.length === 0) {
@@ -136,7 +146,10 @@ function shadowGlobals() {
 			{ get: (_t, prop) => denied(`globalThis.${String(prop)}`) }
 		),
 		require: denied("require()"),
-		Deno: new Proxy({}, { get: (_t, prop) => denied(`Deno.${String(prop)}`) }),
+		childProcess: new Proxy(
+			{},
+			{ get: (_t, prop) => denied(`childProcess.${String(prop)}`) }
+		),
 	};
 }
 
@@ -165,10 +178,11 @@ function recordable(value) {
 }
 
 /**
- * Build the `host` facade Core injects into an `inline_deno` tool, driven from a
+ * Build the `host` facade Core injects into an `inline_js` tool, driven from a
  * case's `host` fixture.
  *
- * - `sideModel` / `runAgent` read from a QUEUE (`host.sideModel: [r1, r2]`), so a
+ * - `sideModel` / `runAgent` / `reactions.add` (fixture key `reactionsAdd`) read
+ *   from a QUEUE (`host.sideModel: [r1, r2]`), so a
  *   body that calls twice gets two different answers and a body that calls more
  *   often than the fixture allows fails loudly instead of silently reusing one.
  * - `storage` is a real in-memory Map seeded from `host.storage`, because a queue
@@ -178,7 +192,14 @@ function recordable(value) {
  */
 function buildHost(spec, calls) {
 	const queues = new Map();
-	for (const key of ["sideModel", "runAgent", "runFanout"]) {
+	for (const key of [
+		"sideModel",
+		"runAgent",
+		"runFanout",
+		"workflowScript",
+		"workflowRunStatus",
+		"reactionsAdd",
+	]) {
 		const value = spec?.[key];
 		queues.set(key, Array.isArray(value) ? [...value] : []);
 	}
@@ -214,6 +235,22 @@ function buildHost(spec, calls) {
 			record("host.runFanout", args);
 			return dequeue("runFanout", args);
 		},
+		workflows: {
+			script: async (args = {}) => {
+				record("host.workflows.script", args);
+				return dequeue("workflowScript", args);
+			},
+			status: async (args = {}) => {
+				record("host.workflows.status", args);
+				return dequeue("workflowRunStatus", args);
+			},
+		},
+		reactions: {
+			add: async (args = {}) => {
+				record("host.reactions.add", args);
+				return dequeue("reactionsAdd", args);
+			},
+		},
 		storage: {
 			get: async (key, namespace) => {
 				record("host.storage.get", { key, namespace });
@@ -223,7 +260,7 @@ function buildHost(spec, calls) {
 				record("host.storage.set", { key, value, namespace });
 				store.set(
 					nsKey(key, namespace),
-					typeof value === "string" ? value : JSON.stringify(value)
+					storageString(value) ?? JSON.stringify(value)
 				);
 				return null;
 			},
@@ -420,7 +457,11 @@ export async function runCase({ kind, code, testCase, adapterTools }) {
 	if (first.error) {
 		throw first.error;
 	}
-	assert.deepStrictEqual(first.value, testCase.expect);
+	// Compared through the same JSON snapshot as recorded calls: the result leaves
+	// Core's sandbox as JSON, so an `undefined`-valued key (e.g. an optional
+	// `published` a provider omitted) is absent on the wire and a case — written
+	// in JSON — cannot express it any other way.
+	assert.deepStrictEqual(recordable(first.value), testCase.expect);
 
 	if (testCase.expectCalls !== undefined) {
 		// Outcome, not just output: the exact sequence of effects the tool asked
@@ -431,14 +472,51 @@ export async function runCase({ kind, code, testCase, adapterTools }) {
 }
 
 /**
- * Read a tool package's `cases.json`, resolve the body it names, and register a
- * `node:test` test per case plus the whole-file determinism guards.
+ * Every case table a package declares, relative to `dir`: `cases.json` for the
+ * one-tool package, plus `cases/<tool>.json` for each additional body in a
+ * package that ships several (e.g. one adapter per `browser.*` verb). Sorted, so
+ * test registration order never depends on directory iteration order.
+ */
+export function caseFiles(dir) {
+	const files = existsSync(join(dir, "cases.json")) ? ["cases.json"] : [];
+	const nested = join(dir, "cases");
+	if (existsSync(nested)) {
+		for (const name of readdirSync(nested).sort()) {
+			if (name.endsWith(".json")) {
+				files.push(`cases/${name}`);
+			}
+		}
+	}
+	return files;
+}
+
+/**
+ * `defineToolTests` for every case table in a multi-tool package. Fails (rather
+ * than passing vacuously) when the package declares none.
+ */
+export function definePackageToolTests(dir) {
+	const files = caseFiles(dir);
+	if (files.length === 0) {
+		test("package declares at least one case table", () => {
+			assert.fail(`${dir} has neither cases.json nor cases/*.json`);
+		});
+		return;
+	}
+	for (const file of files) {
+		defineToolTests(dir, file);
+	}
+}
+
+/**
+ * Read a tool package's `cases.json` (or `casesFile`, relative to `dir`), resolve
+ * the body it names, and register a `node:test` test per case plus the
+ * whole-file determinism guards.
  *
  * This is the ONE entry point a generated test calls, which is what keeps a
  * generated test five lines long and therefore worth regenerating.
  */
-export function defineToolTests(dir) {
-	const casesPath = join(dir, "cases.json");
+export function defineToolTests(dir, casesFile = "cases.json") {
+	const casesPath = join(dir, casesFile);
 	const spec = JSON.parse(readFileSync(casesPath, "utf8"));
 	const kind = spec.kind ?? "inline_tool";
 	const codePath = join(dir, spec.code_file);

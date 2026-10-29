@@ -52,7 +52,7 @@ function message(
 		id,
 		parts: [{ text, type: "text" }],
 		role,
-	} as unknown as UIMessage;
+	};
 }
 
 /** A compact stand-in for the real header; its height matches the full greeting
@@ -60,9 +60,8 @@ function message(
 function EmptyHeader() {
 	return (
 		<div
-			className="flex flex-col items-center justify-end gap-2 pb-4"
+			className="flex h-42.5 flex-col items-center justify-end gap-2 pb-4"
 			data-testid="empty-header"
-			style={{ height: 170 }}
 		>
 			<div className="flex size-12 items-center justify-center rounded-2xl bg-primary font-semibold text-primary-foreground text-xl">
 				R

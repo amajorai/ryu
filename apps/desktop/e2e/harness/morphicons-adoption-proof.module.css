@@ -1,0 +1,125 @@
+.fixture1 {
+	display: flex;
+	gap: 0.75rem;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.fixture2 {
+	margin: 0;
+	font-size: 0.7rem;
+	font-weight: 700;
+	color: var(--muted-foreground);
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+}
+
+.fixture3 {
+	margin: 0.4rem 0 0;
+	font-size: 1rem;
+	font-weight: 650;
+}
+
+.fixture4 {
+	margin: 1rem 0 0;
+	font-size: 0.82rem;
+	line-height: 1.55;
+	color: var(--muted-foreground);
+}
+
+.fixture5 {
+	min-height: 100vh;
+	padding: 4rem 1.5rem;
+	font-family: var(--font-sans);
+	color: var(--foreground);
+	background:
+		radial-gradient(
+			circle at 75% 0%,
+			color-mix(in oklch, var(--primary), transparent 88%),
+			transparent 42%
+		),
+		var(--background);
+}
+
+.fixture6 {
+	max-width: 58rem;
+	margin: 0 auto;
+}
+
+.fixture7 {
+	display: flex;
+	gap: 0.75rem;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.fixture8 {
+	margin: 0;
+	font-size: 0.72rem;
+	font-weight: 700;
+	color: var(--muted-foreground);
+	text-transform: uppercase;
+	letter-spacing: 0.14em;
+}
+
+.fixture9 {
+	padding: 0.45rem 0.7rem;
+	font-size: 0.72rem;
+	font-weight: 700;
+	color: var(--success);
+	background: color-mix(in oklch, var(--success), transparent 86%);
+	border: 1px solid color-mix(in oklch, var(--success), transparent 50%);
+	border-radius: 999px;
+}
+
+.fixture10 {
+	margin: 0.8rem 0;
+	font-size: 2.4rem;
+	letter-spacing: -0.05em;
+}
+
+.fixture11 {
+	max-width: 42rem;
+	margin: 0;
+	font-size: 1rem;
+	line-height: 1.65;
+	color: var(--muted-foreground);
+}
+
+.fixture12 {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 1rem;
+	margin-top: 2rem;
+}
+
+.fixture13 {
+	display: flex;
+	gap: 0.75rem;
+	align-items: center;
+}
+
+.fixture14 {
+	margin: 0.25rem 0 0;
+	font-size: 0.82rem;
+	color: var(--muted-foreground);
+}
+
+.fixture15 {
+	padding: 0.65rem 0.85rem;
+	margin-left: auto;
+	font: inherit;
+	font-size: 0.8rem;
+	font-weight: 650;
+	color: var(--primary-foreground);
+	cursor: pointer;
+	background: var(--primary);
+	border: 0;
+	border-radius: 0.7rem;
+}
+
+.fixture16 {
+	margin-top: 1.5rem;
+	font-size: 0.76rem;
+	color: var(--muted-foreground);
+}

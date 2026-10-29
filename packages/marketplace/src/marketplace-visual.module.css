@@ -1,0 +1,43 @@
+.transform {
+	transform: var(--marketplace-transform);
+}
+.background {
+	background: var(--marketplace-background);
+}
+.stack {
+	z-index: var(--marketplace-z-index);
+	transform: var(--marketplace-transform);
+	transition-property: transform, z-index;
+}
+.size {
+	width: var(--marketplace-size);
+	height: var(--marketplace-size);
+}
+.progress {
+	width: var(--marketplace-width);
+	transition-timing-function: var(
+		--default-transition-timing-function,
+		cubic-bezier(0.4, 0, 0.2, 1)
+	);
+	transition-duration: var(--default-transition-duration, 150ms);
+	transition-property: width;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.stack {
+		transition-property: none;
+	}
+}
+.opacity {
+	opacity: var(--marketplace-opacity);
+}
+.heroScrim {
+	background-image: linear-gradient(
+		to bottom,
+		transparent 0%,
+		rgb(0 0 0 / 45%) 46%,
+		rgb(0 0 0 / 68%) 70%,
+		rgb(0 0 0 / 68%) 76%,
+		var(--background) 100%
+	);
+}

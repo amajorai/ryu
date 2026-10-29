@@ -50,6 +50,24 @@ pub struct TriggerSubscription {
     /// The workflow id to fire when `target_kind == "workflow"`.
     pub workflow_id: Option<String>,
     pub created_at: String,
+    /// The Composio entity that owns `connected_account_id` on a legacy
+    /// (embedded) row: empty for the user's account, or an agent's own entity
+    /// `agent:<owner>:<agent_id>`. Never serialized, so the owner id is not
+    /// exposed; Connect rows always read as empty.
+    #[serde(skip)]
+    pub account_entity: String,
+    /// Whether the account is one connected to the agent's own identity.
+    pub own_account: bool,
+}
+
+/// The `SELECT` list [`subscription_row`] reads. A legacy row stores its
+/// account's Composio entity in `provider_user_id`; a Connect row stores
+/// Connect's provider identity there, which is never an agent entity.
+const SUBSCRIPTION_COLUMNS: &str = "id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,target_kind,workflow_id,created_at,CASE WHEN owner_user_id='' THEN provider_user_id ELSE '' END";
+
+/// Whether a recorded account entity is an agent's own entity.
+fn is_agent_entity(account_entity: &str) -> bool {
+    account_entity.starts_with("agent:")
 }
 
 /// Identity carried by Connect's verified V3 trigger envelope. This is routing
@@ -69,6 +87,7 @@ pub enum ConnectTarget<'a> {
 }
 
 fn subscription_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TriggerSubscription> {
+    let account_entity: String = row.get(9)?;
     Ok(TriggerSubscription {
         id: row.get(0)?,
         agent_id: row.get(1)?,
@@ -79,6 +98,8 @@ fn subscription_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TriggerSubscrip
         target_kind: row.get(6)?,
         workflow_id: row.get(7)?,
         created_at: row.get(8)?,
+        own_account: is_agent_entity(&account_entity),
+        account_entity,
     })
 }
 
@@ -344,6 +365,46 @@ pub fn verify_workflow_webhook_signature(
     })
 }
 
+/// Verify a replay-resistant workflow webhook whose signature is also bound to
+/// the canonical workflow id selected by the request path.
+pub fn verify_workflow_webhook_signature_v3(
+    secret: &str,
+    workflow_id: &str,
+    raw_body: &[u8],
+    signature_header: Option<&str>,
+    webhook_timestamp: Option<&str>,
+    webhook_id: Option<&str>,
+    now_secs: u64,
+) -> bool {
+    let (Some(timestamp), Some(id), Some(signature)) = (
+        webhook_timestamp,
+        webhook_id,
+        signature_header.and_then(|value| value.trim().strip_prefix("v3,")),
+    ) else {
+        return false;
+    };
+    let Ok(sent_at) = timestamp.parse::<u64>() else {
+        return false;
+    };
+    if sent_at.abs_diff(now_secs) > 300
+        || id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return false;
+    }
+    if workflow_id.is_empty() || workflow_id.contains('/') {
+        return false;
+    }
+    let mut signed =
+        format!("ryu-workflow-webhook-v3\n{workflow_id}\n{timestamp}\n{id}\n").into_bytes();
+    signed.extend_from_slice(raw_body);
+    let expected = hmac_sha256_hex(secret.as_bytes(), &signed);
+    constant_time_eq(signature.as_bytes(), expected.as_bytes())
+}
+
 impl ComposioTriggerStore {
     /// Open (creating if needed) the triggers DB at `db_path` (Core passes
     /// `~/.ryu/composio-triggers.db`; the data dir is a kernel concern, inverted
@@ -591,6 +652,45 @@ impl ComposioTriggerStore {
             "agent",
             agent_id,
             None,
+            "",
+            toolkit,
+            trigger_slug,
+            connected_account_id,
+            config,
+        )
+        .await
+    }
+
+    /// Register a trigger instance on an account connected to an agent's own
+    /// Composio entity and persist an **agent**-target mapping that records
+    /// `account_entity`. The caller has already checked that the entity is the
+    /// agent's own and owns the account; delivery re-checks the entity against
+    /// the agent and its account policy on every event.
+    pub async fn subscribe_own_account(
+        &self,
+        agent_id: &str,
+        account_entity: &str,
+        toolkit: &str,
+        trigger_slug: &str,
+        connected_account_id: &str,
+        config: Value,
+    ) -> Result<TriggerSubscription> {
+        if !is_agent_entity(account_entity)
+            || account_entity.len() <= "agent:".len()
+            || account_entity
+                .chars()
+                .any(|character| character.is_whitespace() || character.is_control())
+        {
+            return Err(anyhow!("an agent's own Composio entity is required"));
+        }
+        if agent_id.trim().is_empty() || !account_entity.ends_with(&format!(":{agent_id}")) {
+            return Err(anyhow!("the account entity does not belong to this agent"));
+        }
+        self.subscribe_target(
+            "agent",
+            agent_id,
+            None,
+            account_entity,
             toolkit,
             trigger_slug,
             connected_account_id,
@@ -614,6 +714,7 @@ impl ComposioTriggerStore {
             "workflow",
             "",
             Some(workflow_id),
+            "",
             toolkit,
             trigger_slug,
             connected_account_id,
@@ -629,6 +730,7 @@ impl ComposioTriggerStore {
         target_kind: &str,
         agent_id: &str,
         workflow_id: Option<&str>,
+        account_entity: &str,
         toolkit: &str,
         trigger_slug: &str,
         connected_account_id: &str,
@@ -679,8 +781,9 @@ impl ComposioTriggerStore {
             conn.execute(
                 "INSERT INTO subscriptions
                     (id, agent_id, toolkit, trigger_slug, connected_account_id,
-                     composio_trigger_id, target_kind, workflow_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                     composio_trigger_id, target_kind, workflow_id, created_at,
+                     provider_user_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     id,
                     agent_id,
@@ -691,6 +794,7 @@ impl ComposioTriggerStore {
                     target_kind,
                     workflow_id,
                     created_at,
+                    account_entity,
                 ],
             )?;
         }
@@ -704,17 +808,17 @@ impl ComposioTriggerStore {
             target_kind: target_kind.to_owned(),
             workflow_id: workflow_id.map(str::to_owned),
             created_at,
+            account_entity: account_entity.to_owned(),
+            own_account: is_agent_entity(account_entity),
         })
     }
 
     /// All subscriptions, newest first.
     pub async fn list(&self) -> Result<Vec<TriggerSubscription>> {
         let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT id, agent_id, toolkit, trigger_slug, connected_account_id,
-                    composio_trigger_id, target_kind, workflow_id, created_at
-             FROM subscriptions WHERE removed_at IS NULL ORDER BY created_at DESC",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {SUBSCRIPTION_COLUMNS} FROM subscriptions WHERE removed_at IS NULL ORDER BY created_at DESC"
+        ))?;
         let rows = stmt
             .query_map([], subscription_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -786,6 +890,38 @@ impl ComposioTriggerStore {
         Ok(n > 0)
     }
 
+    /// Delete every legacy subscription on one account of `account_entity`
+    /// (the user's default entity when empty), disabling each remote instance
+    /// first. Used when that account is disconnected, so no binding outlives
+    /// it. Connect rows are never touched. Returns the rows removed.
+    pub async fn delete_for_connected_account(
+        &self,
+        account_entity: &str,
+        connected_account_id: &str,
+    ) -> Result<usize> {
+        if connected_account_id.trim().is_empty() {
+            return Ok(0);
+        }
+        for sub in self
+            .embedded_subscriptions()
+            .await?
+            .into_iter()
+            .filter(|row| {
+                row.account_entity == account_entity
+                    && row.connected_account_id == connected_account_id
+            })
+        {
+            self.remote_disable(sub.composio_trigger_id.as_deref())
+                .await;
+        }
+        let conn = self.conn.lock().await;
+        let removed = conn.execute(
+            "DELETE FROM subscriptions WHERE owner_user_id='' AND provider_user_id=?1 AND connected_account_id=?2",
+            params![account_entity, connected_account_id],
+        )?;
+        Ok(removed)
+    }
+
     /// All workflow-target subscriptions for a given workflow id.
     pub async fn list_for_workflow(&self, workflow_id: &str) -> Vec<TriggerSubscription> {
         self.list()
@@ -846,7 +982,7 @@ impl ComposioTriggerStore {
         }
         let identity = connect_event_identity(payload)?;
         let conn = self.conn.lock().await;
-        let mut statement = conn.prepare("SELECT id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,target_kind,workflow_id,created_at FROM subscriptions WHERE owner_user_id=? AND provider_user_id=? AND auth_config_id=? AND composio_trigger_id=? AND connected_account_id=? AND trigger_slug=? AND removed_at IS NULL ORDER BY created_at,id")?;
+        let mut statement = conn.prepare(&format!("SELECT {SUBSCRIPTION_COLUMNS} FROM subscriptions WHERE owner_user_id=? AND provider_user_id=? AND auth_config_id=? AND composio_trigger_id=? AND connected_account_id=? AND trigger_slug=? AND removed_at IS NULL ORDER BY created_at,id"))?;
         let rows = statement
             .query_map(
                 params![
@@ -916,6 +1052,8 @@ impl ComposioTriggerStore {
             target_kind: kind.to_owned(),
             workflow_id: workflow.map(str::to_owned),
             created_at,
+            account_entity: String::new(),
+            own_account: false,
         })
     }
 
@@ -940,7 +1078,7 @@ impl ComposioTriggerStore {
             anyhow::bail!("Connect target owner is required");
         }
         let conn = self.conn.lock().await;
-        let mut statement = conn.prepare("SELECT id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,target_kind,workflow_id,created_at FROM subscriptions WHERE owner_user_id=? AND removed_at IS NULL ORDER BY created_at DESC,id")?;
+        let mut statement = conn.prepare(&format!("SELECT {SUBSCRIPTION_COLUMNS} FROM subscriptions WHERE owner_user_id=? AND removed_at IS NULL ORDER BY created_at DESC,id"))?;
         let rows = statement
             .query_map(params![owner_user_id], subscription_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -949,7 +1087,7 @@ impl ComposioTriggerStore {
 
     async fn embedded_subscriptions(&self) -> Result<Vec<TriggerSubscription>> {
         let conn = self.conn.lock().await;
-        let mut statement = conn.prepare("SELECT id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,target_kind,workflow_id,created_at FROM subscriptions WHERE owner_user_id='' ORDER BY created_at DESC")?;
+        let mut statement = conn.prepare(&format!("SELECT {SUBSCRIPTION_COLUMNS} FROM subscriptions WHERE owner_user_id='' ORDER BY created_at DESC"))?;
         let rows = statement
             .query_map([], subscription_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -969,17 +1107,64 @@ impl ComposioTriggerStore {
         Ok(conn.query_row("SELECT 1 FROM subscriptions WHERE owner_user_id=? AND provider_user_id=? AND auth_config_id=? AND composio_trigger_id=? AND connected_account_id=? AND trigger_slug=? AND removed_at IS NOT NULL LIMIT 1", params![owner_user_id,identity.provider_user_id,identity.auth_config_id,identity.trigger_id,identity.connected_account_id,identity.trigger_slug], |_| Ok(())).optional()?.is_some())
     }
 
-    async fn matching(
-        &self,
-        trigger_id: Option<&str>,
-        slug: Option<&str>,
-    ) -> Vec<TriggerSubscription> {
+    /// The legacy rows an event fires. A row on one of the user's accounts
+    /// matches by trigger instance id or, for older payloads, by slug. The slug
+    /// fallback is skipped for an event that belongs elsewhere: one from an
+    /// agent's entity, one carrying an agent row's instance id, or one naming
+    /// a different connected account than the row's. A row on an agent's own
+    /// account matches only by its exact instance id, and only when any
+    /// account and user the event names are that row's own, so an event from
+    /// another entity can never reach the agent. An event whose instance id
+    /// some row recorded fires only the rows with that id, and an unknown
+    /// instance's slug fallback skips rows that recorded a different id.
+    async fn matching(&self, event: &EventIdentity<'_>) -> Vec<TriggerSubscription> {
         let all = self.embedded_subscriptions().await.unwrap_or_default();
-        all.into_iter()
+        let from_agent_account = event.user_id.is_some_and(is_agent_entity)
+            || event.trigger_id.is_some_and(|t| {
+                all.iter().any(|s| {
+                    is_agent_entity(&s.account_entity)
+                        && s.composio_trigger_id.as_deref() == Some(t)
+                })
+            });
+        // A known trigger instance fires only the rows bound to it: a shared slug
+        // must not fan the event out to other instances (and connected accounts).
+        let instance_known = event.trigger_id.is_some_and(|t| {
+            all.iter()
+                .any(|s| s.composio_trigger_id.as_deref() == Some(t))
+        });
+        all.iter()
             .filter(|s| {
-                trigger_id.is_some_and(|t| s.composio_trigger_id.as_deref() == Some(t))
-                    || slug.is_some_and(|sl| s.trigger_slug.eq_ignore_ascii_case(sl))
+                let by_id = event
+                    .trigger_id
+                    .is_some_and(|t| s.composio_trigger_id.as_deref() == Some(t));
+                if is_agent_entity(&s.account_entity) {
+                    return by_id
+                        && event
+                            .connected_account_id
+                            .is_none_or(|id| id == s.connected_account_id)
+                        && event.user_id.is_none_or(|user| user == s.account_entity);
+                }
+                if by_id {
+                    return true;
+                }
+                if instance_known {
+                    return false;
+                }
+                // Unknown instance: the slug may only stand in for rows that never
+                // recorded an instance id.
+                if event.trigger_id.is_some() && s.composio_trigger_id.is_some() {
+                    return false;
+                }
+                let other_account = event.connected_account_id.is_some_and(|id| {
+                    !s.connected_account_id.is_empty() && id != s.connected_account_id
+                });
+                !from_agent_account
+                    && !other_account
+                    && event
+                        .slug
+                        .is_some_and(|sl| s.trigger_slug.eq_ignore_ascii_case(sl))
             })
+            .cloned()
             .collect()
     }
 
@@ -1018,7 +1203,13 @@ impl ComposioTriggerStore {
                     .find_map(|key| payload.get(*key).and_then(Value::as_str))
             });
 
-        let subs = self.matching(trigger_id, slug).await;
+        let event = EventIdentity {
+            trigger_id,
+            slug,
+            connected_account_id: metadata_string("connected_account_id"),
+            user_id: metadata_string("user_id"),
+        };
+        let subs = self.matching(&event).await;
         let mut fired = 0;
         for sub in subs {
             if sub.target_kind == "workflow" {
@@ -1048,6 +1239,32 @@ impl ComposioTriggerStore {
                 continue;
             }
 
+            let may_receive = match crate::host::host() {
+                Ok(h) => {
+                    h.agent_may_receive(
+                        &sub.agent_id,
+                        &sub.connected_account_id,
+                        &sub.account_entity,
+                    )
+                    .await
+                }
+                Err(e) => Err(e),
+            };
+            match may_receive {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::info!(
+                        agent = %sub.agent_id,
+                        trigger = %sub.trigger_slug,
+                        "composio trigger skipped: the agent may no longer use this account"
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    tracing::warn!(agent = %sub.agent_id, error = %e, "composio trigger account check failed");
+                    continue;
+                }
+            }
             let prompt = format!(
                 "A Composio `{}` event fired for the `{}` integration. Handle it. \
                  Event payload (JSON):\n\n{}",
@@ -1076,6 +1293,16 @@ impl ComposioTriggerStore {
         }
         fired
     }
+}
+
+/// What an inbound legacy event says about where it came from.
+struct EventIdentity<'a> {
+    trigger_id: Option<&'a str>,
+    slug: Option<&'a str>,
+    /// V3 `metadata.connected_account_id`, when present.
+    connected_account_id: Option<&'a str>,
+    /// V3 `metadata.user_id` (the account's Composio entity), when present.
+    user_id: Option<&'a str>,
 }
 
 fn normalized_secret(secret: Option<String>) -> Option<String> {
@@ -1205,7 +1432,14 @@ mod tests {
             .unwrap();
         let owned = store.connect_targets("owner-a", &payload).await.unwrap();
         assert_eq!(owned.len(), 2);
-        let legacy_matches = store.matching(Some("ti_a"), Some("SLACK_MSG")).await;
+        let legacy_matches = store
+            .matching(&EventIdentity {
+                trigger_id: Some("ti_a"),
+                slug: Some("SLACK_MSG"),
+                connected_account_id: None,
+                user_id: None,
+            })
+            .await;
         assert_eq!(legacy_matches.len(), 1);
         assert_eq!(legacy_matches[0].id, "legacy");
         assert!(store.delete(&a.id).await.is_err());
@@ -1420,6 +1654,66 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn workflow_v3_signature_binds_workflow_timestamp_id_and_body() {
+        let body = br#"{"event":"deploy"}"#;
+        let workflow_id = "workflow-a";
+        let timestamp = "1735689600";
+        let id = "delivery-1";
+        let mut signed =
+            format!("ryu-workflow-webhook-v3\n{workflow_id}\n{timestamp}\n{id}\n").into_bytes();
+        signed.extend_from_slice(body);
+        let signature = format!("v3,{}", hmac_sha256_hex(b"per-wf-secret", &signed));
+        let verify = |workflow_id: &str, body: &[u8], timestamp: &str, id: &str, now: u64| {
+            verify_workflow_webhook_signature_v3(
+                "per-wf-secret",
+                workflow_id,
+                body,
+                Some(&signature),
+                Some(timestamp),
+                Some(id),
+                now,
+            )
+        };
+        assert!(verify(workflow_id, body, timestamp, id, 1_735_689_600));
+        assert!(!verify("workflow-b", body, timestamp, id, 1_735_689_600));
+        assert!(!verify(
+            workflow_id,
+            body,
+            timestamp,
+            "delivery-2",
+            1_735_689_600
+        ));
+        assert!(!verify(workflow_id, body, "1735689601", id, 1_735_689_601));
+        assert!(!verify(
+            workflow_id,
+            br#"{"event":"other"}"#,
+            timestamp,
+            id,
+            1_735_689_600
+        ));
+        assert!(!verify(workflow_id, body, timestamp, id, 1_735_690_000));
+        assert!(!verify_workflow_webhook_signature_v3(
+            "per-wf-secret",
+            workflow_id,
+            body,
+            Some(&signature[3..]),
+            Some(timestamp),
+            Some(id),
+            1_735_689_600,
+        ));
+        let legacy = format!("v2,{}", signature.trim_start_matches("v3,"));
+        assert!(!verify_workflow_webhook_signature_v3(
+            "per-wf-secret",
+            workflow_id,
+            body,
+            Some(&legacy),
+            Some(timestamp),
+            Some(id),
+            1_735_689_600,
+        ));
+    }
+
     // --- Store + webhook-dispatch tests ---------------------------------------
     //
     // The trigger store's `subscribe*` path is the ONE composio HTTP leg reachable
@@ -1465,6 +1759,19 @@ mod tests {
                 return Err(anyhow!("simulated agent failure"));
             }
             Ok(format!("run_ag_{agent_id}"))
+        }
+
+        /// Mirrors Core's entity rule without an agent store: a user account
+        /// always passes; an own-entity account must end in `:<agent_id>`.
+        async fn agent_may_receive(
+            &self,
+            agent_id: &str,
+            _connected_account_id: &str,
+            account_entity: &str,
+        ) -> Result<bool> {
+            Ok(account_entity.is_empty()
+                || (account_entity.starts_with("agent:")
+                    && account_entity.ends_with(&format!(":{agent_id}"))))
         }
     }
 
@@ -1868,6 +2175,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handle_webhook_fires_only_the_instance_that_fired_when_slugs_are_shared() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        crate::host::set_global_host(std::sync::Arc::new(RecordingHost));
+
+        let (store, _dir) = temp_store().await;
+        {
+            let conn = store.conn.lock().await;
+            for (id, agent, account, instance) in [
+                ("sub_x", "agent-repo-x", "ca_x", Some("ti_1")),
+                ("sub_y", "agent-repo-y", "ca_y", Some("ti_2")),
+                ("sub_old", "agent-unbound", "ca_z", None),
+            ] {
+                conn.execute(
+                    "INSERT INTO subscriptions(id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,created_at) VALUES(?,?,'github','GITHUB_COMMIT_EVENT',?,?,'now')",
+                    params![id, agent, account, instance],
+                )
+                .unwrap();
+            }
+        }
+
+        // The instance id selects exactly its own row.
+        clear_host_calls();
+        let fired = store
+            .handle_webhook(&json!({"metadata":{"trigger_id":"ti_1","trigger_slug":"GITHUB_COMMIT_EVENT"},"data":{}}))
+            .await;
+        assert_eq!(fired, 1);
+        assert_eq!(host_calls()[0].0, "agent:agent-repo-x");
+
+        // An unknown instance falls back to the slug only for rows without one.
+        clear_host_calls();
+        let fired = store
+            .handle_webhook(&json!({"metadata":{"trigger_id":"ti_gone","trigger_slug":"GITHUB_COMMIT_EVENT"},"data":{}}))
+            .await;
+        assert_eq!(fired, 1);
+        assert_eq!(host_calls()[0].0, "agent:agent-unbound");
+        restore_env(prev);
+    }
+
+    #[tokio::test]
     async fn reconcile_webhook_subscription_creates_v3_project_subscription() {
         let _lock = crate::auth::test_env_lock();
         let prev = base_url_snapshot();
@@ -1996,6 +2343,272 @@ mod tests {
         assert_eq!(fired, 1);
         assert_eq!(host_calls()[0].0, "agent:agent-v3");
 
+        restore_env(prev);
+    }
+
+    /// Insert a legacy row directly, so each one has its own instance id.
+    async fn insert_legacy_row(
+        store: &ComposioTriggerStore,
+        id: &str,
+        agent_id: &str,
+        trigger_id: &str,
+        account: &str,
+        entity: &str,
+    ) {
+        store
+            .conn
+            .lock()
+            .await
+            .execute(
+                "INSERT INTO subscriptions(id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,target_kind,created_at,provider_user_id) VALUES(?1,?2,'gmail','GMAIL_NEW',?3,?4,'agent',?1,?5)",
+                params![id, agent_id, account, trigger_id, entity],
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn subscribe_own_account_records_the_agent_entity() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        let base = spawn_mock("200 OK", r#"{"trigger_id":"trig_own"}"#.to_string());
+        crate::auth::set_key("comp_key");
+        std::env::set_var("COMPOSIO_BASE_URL", &base);
+
+        let (store, _dir) = temp_store().await;
+        // A malformed or foreign entity is refused before anything is stored.
+        for (agent, entity) in [
+            ("a1", ""),
+            ("a1", "agent:"),
+            ("a1", "default"),
+            ("a1", "agent:u1:a2"),
+            ("a1", "agent:u1 :a1"),
+            ("", "agent:u1:"),
+        ] {
+            assert!(
+                store
+                    .subscribe_own_account(agent, entity, "gmail", "GMAIL_NEW", "own_1", json!({}))
+                    .await
+                    .is_err(),
+                "{agent} / {entity}"
+            );
+        }
+        assert!(store.list().await.unwrap().is_empty());
+
+        let sub = store
+            .subscribe_own_account(
+                "a1",
+                "agent:u1:a1",
+                "gmail",
+                "GMAIL_NEW",
+                "own_1",
+                json!({}),
+            )
+            .await
+            .expect("subscribe own account");
+        assert!(sub.own_account);
+        assert_eq!(sub.account_entity, "agent:u1:a1");
+        let listed = store.list().await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].account_entity, "agent:u1:a1");
+        assert!(listed[0].own_account);
+        // The listing names the account as the agent's own, never its owner.
+        let wire = serde_json::to_value(&listed[0]).unwrap();
+        assert_eq!(wire["own_account"], json!(true));
+        assert!(wire.get("account_entity").is_none());
+        assert!(!wire.to_string().contains("u1"));
+
+        // A user-account subscription keeps an empty entity.
+        let user = store
+            .subscribe("a1", "gmail", "GMAIL_NEW", "ca_user", json!({}))
+            .await
+            .unwrap();
+        assert!(!user.own_account);
+        assert!(user.account_entity.is_empty());
+        restore_env(prev);
+    }
+
+    #[tokio::test]
+    async fn own_account_rows_fire_only_on_their_own_instance_and_entity() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        crate::host::set_global_host(std::sync::Arc::new(RecordingHost));
+        let (store, _dir) = temp_store().await;
+        insert_legacy_row(&store, "own", "a1", "ti_own", "own_1", "agent:u1:a1").await;
+        // A row whose recorded entity is another agent's is refused by the host.
+        insert_legacy_row(
+            &store,
+            "foreign",
+            "a2",
+            "ti_foreign",
+            "own_9",
+            "agent:u1:a1",
+        )
+        .await;
+
+        // A slug-only payload never fires an own-account row.
+        clear_host_calls();
+        assert_eq!(
+            store
+                .handle_webhook(&json!({ "trigger_slug": "GMAIL_NEW" }))
+                .await,
+            0
+        );
+        assert!(host_calls().is_empty());
+
+        // The exact instance id fires it.
+        clear_host_calls();
+        assert_eq!(
+            store
+                .handle_webhook(&json!({ "metadata": { "trigger_id": "ti_own" } }))
+                .await,
+            1
+        );
+        assert_eq!(host_calls()[0].0, "agent:a1");
+
+        // ...and so does full V3 metadata that names the row's own account.
+        clear_host_calls();
+        let own_event = json!({ "metadata": {
+            "trigger_id": "ti_own",
+            "connected_account_id": "own_1",
+            "user_id": "agent:u1:a1",
+        } });
+        assert_eq!(store.handle_webhook(&own_event).await, 1);
+
+        // Metadata naming another account or another entity does not fire.
+        for metadata in [
+            json!({ "trigger_id": "ti_own", "connected_account_id": "own_2" }),
+            json!({ "trigger_id": "ti_own", "user_id": "agent:u1:a2" }),
+            json!({ "trigger_id": "ti_own", "user_id": "default" }),
+        ] {
+            clear_host_calls();
+            assert_eq!(
+                store.handle_webhook(&json!({ "metadata": metadata })).await,
+                0,
+                "{metadata}"
+            );
+            assert!(host_calls().is_empty());
+        }
+
+        // The host refuses an entity that is not the row's agent's own.
+        clear_host_calls();
+        assert_eq!(
+            store
+                .handle_webhook(&json!({ "metadata": { "trigger_id": "ti_foreign" } }))
+                .await,
+            0
+        );
+        assert!(host_calls().is_empty());
+        restore_env(prev);
+    }
+
+    #[tokio::test]
+    async fn own_account_events_never_reach_user_rows_by_slug() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        crate::host::set_global_host(std::sync::Arc::new(RecordingHost));
+        let (store, _dir) = temp_store().await;
+        insert_legacy_row(&store, "own_b", "b", "ti_b", "own_b", "agent:u1:b").await;
+        insert_legacy_row(&store, "user_a", "a", "ti_user", "ca_user", "").await;
+        store
+            .conn
+            .lock()
+            .await
+            .execute(
+                "INSERT INTO subscriptions(id,agent_id,toolkit,trigger_slug,connected_account_id,composio_trigger_id,target_kind,workflow_id,created_at) VALUES('user_wf','','gmail','GMAIL_NEW','ca_user','ti_wf','workflow','wf-1','wf')",
+                [],
+            )
+            .unwrap();
+
+        // Agent B's own-account event carries the shared slug; it fires only
+        // B's own row, never the user's agent or workflow rows.
+        for metadata in [
+            json!({ "trigger_id": "ti_b", "trigger_slug": "GMAIL_NEW",
+                    "connected_account_id": "own_b", "user_id": "agent:u1:b" }),
+            json!({ "trigger_id": "ti_b", "trigger_slug": "GMAIL_NEW" }),
+        ] {
+            clear_host_calls();
+            assert_eq!(
+                store.handle_webhook(&json!({ "metadata": metadata })).await,
+                1,
+                "{metadata}"
+            );
+            assert_eq!(host_calls().len(), 1);
+            assert_eq!(host_calls()[0].0, "agent:b");
+        }
+
+        // An unknown instance from an agent entity or another account fires
+        // nothing by slug.
+        for metadata in [
+            json!({ "trigger_id": "ti_x", "trigger_slug": "GMAIL_NEW", "user_id": "agent:u1:c" }),
+            json!({ "trigger_id": "ti_x", "trigger_slug": "GMAIL_NEW", "connected_account_id": "ca_other" }),
+        ] {
+            clear_host_calls();
+            assert_eq!(
+                store.handle_webhook(&json!({ "metadata": metadata })).await,
+                0,
+                "{metadata}"
+            );
+            assert!(host_calls().is_empty());
+        }
+
+        // A slug-only event from the user's own account still fires both
+        // user rows.
+        clear_host_calls();
+        assert_eq!(
+            store
+                .handle_webhook(&json!({ "metadata": {
+                    "trigger_slug": "GMAIL_NEW", "connected_account_id": "ca_user"
+                } }))
+                .await,
+            2
+        );
+        restore_env(prev);
+    }
+
+    #[tokio::test]
+    async fn delete_for_connected_account_removes_only_that_accounts_rows() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        // No key: remote teardown is skipped, local rows still go.
+        crate::auth::set_key("");
+        let (store, _dir) = temp_store().await;
+        insert_legacy_row(&store, "own_a", "a1", "ti_1", "own_1", "agent:u1:a1").await;
+        insert_legacy_row(&store, "own_b", "a1", "ti_2", "own_1", "agent:u1:a1").await;
+        insert_legacy_row(
+            &store,
+            "other_account",
+            "a1",
+            "ti_3",
+            "own_2",
+            "agent:u1:a1",
+        )
+        .await;
+        insert_legacy_row(&store, "other_entity", "a2", "ti_4", "own_1", "agent:u1:a2").await;
+        insert_legacy_row(&store, "user", "a1", "ti_5", "own_1", "").await;
+
+        assert_eq!(
+            store
+                .delete_for_connected_account("agent:u1:a1", " ")
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .delete_for_connected_account("agent:u1:a1", "own_1")
+                .await
+                .unwrap(),
+            2
+        );
+        let mut left: Vec<String> = store
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+        left.sort();
+        assert_eq!(left, ["other_account", "other_entity", "user"]);
         restore_env(prev);
     }
 }

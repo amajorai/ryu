@@ -1,5 +1,7 @@
 "use client";
 
+import { useProviderQueryScope } from "@/src/hooks/provider-query-scope.ts";
+
 // Builds the universal picker's body data (Ryu — with its providers nested
 // under it — plus external agents) and hands `useComposerAgentControls` a
 // `renderBody` it can pass to `ComposerSettingsMenu`. This hook owns the extra
@@ -35,6 +37,7 @@ import {
 } from "react";
 import { sileo } from "sileo";
 import type { ComposerSettingsSection } from "@/components/agent-elements/input/composer-settings-menu.tsx";
+import { totalFreeCredit } from "@/components/agent-elements/input/free-model-tag.ts";
 import { isChatModelStem } from "@/components/agent-elements/input/model-groups.ts";
 import { modelMenuItem } from "@/components/agent-elements/input/model-router.ts";
 import {
@@ -104,19 +107,19 @@ const GATEWAY_PROVIDER_ID = "gateway";
 const BROWSER_PROVIDER_ID = "browser";
 
 /** Map a Pi provider id to the engine key its brand logo is registered under. */
-const PROVIDER_ENGINE_KEY: Record<string, string> = {
-	google: "gemini",
-	"claude-pro-max": "claude",
-	"openai-codex": "codex",
-	chatgpt: "chatgpt",
-	anthropic: "anthropic",
-	openai: "openai",
-	mistral: "mistral",
-	openrouter: "openrouter",
-};
+const PROVIDER_ENGINE_KEY = new Map<string, string>([
+	["google", "gemini"],
+	["claude-pro-max", "claude"],
+	["openai-codex", "codex"],
+	["chatgpt", "chatgpt"],
+	["anthropic", "anthropic"],
+	["openai", "openai"],
+	["mistral", "mistral"],
+	["openrouter", "openrouter"],
+]);
 
 function providerEngineKey(providerId: string): string {
-	return PROVIDER_ENGINE_KEY[providerId] ?? providerId;
+	return PROVIDER_ENGINE_KEY.get(providerId) ?? providerId;
 }
 
 /**
@@ -145,7 +148,10 @@ const OFFERED_CREDIT_POOLS: readonly CreditPool[] = ALL_CREDIT_POOLS.filter(
  *
  * Three id spellings are accepted because Core owns the provider id and this
  * surface does not: whichever of `bedrock` / `managed-bedrock` Core publishes,
- * the row binds. A row that matches nothing keeps today's behaviour exactly.
+ * the row binds. Core publishes the `managed-<poolId>` form for every pool
+ * (`managed-vertex`, `managed-openai-credits`, `managed-anthropic-credits`
+ * included), so a new pool needs no edit here. A row that matches nothing keeps
+ * today's behaviour exactly.
  */
 function creditPoolForProvider(provider: PiProvider): CreditPool | null {
 	if (!provider.managed) {
@@ -168,7 +174,7 @@ function creditPoolForProvider(provider: PiProvider): CreditPool | null {
  * There is no bring-your-own-key half: Ryu's pooled capacity is not something a
  * user can hold a key for, so offering one would be a dead end.
  */
-function poolUpsellCopy(pool: CreditPool): { byoKey: null; upgrade: string } {
+function poolUpsellCopy(pool: CreditPool) {
 	return {
 		upgrade: `${pool.label} runs on Ryu's own capacity — included with a Ryu subscription, no API keys.`,
 		byoKey: null,
@@ -185,6 +191,12 @@ export interface UseUniversalPickerParams {
 	/** Keep model rows visible for setup surfaces at every interface level. */
 	forceModelPicker?: boolean;
 	onCreateAgent?: () => void;
+	/** Observe provider/model picks without replacing the normal provider action. */
+	onProviderModelSelection?: (selection: {
+		modelId: string | null;
+		providerId: string;
+		providerLabel: string;
+	}) => void;
 	onSelectAgent: (id: string) => void;
 	/** Optional host override for a concrete provider/model pick. */
 	onSelectProviderModel?: (providerId: string, modelId: string) => void;
@@ -219,6 +231,7 @@ export function useUniversalPicker(
 		onSelectTeam,
 		onCreateAgent,
 		onUseProvider,
+		onProviderModelSelection,
 		onSelectProviderModel,
 		onSelectProviderThinking,
 		activeModelSection,
@@ -285,6 +298,11 @@ export function useUniversalPicker(
 		return index;
 	}, [grantPools]);
 
+	// The user's FREE CREDIT — every grant summed, nearest expiry. Free credit is
+	// spent automatically (first) on Ryu Router models Ryu serves from its own
+	// supply, so it is one figure on the Ryu Router row, not a per-pool split.
+	const freeCredit = useMemo(() => totalFreeCredit(grantPools), [grantPools]);
+
 	const piProviders = useMemo(() => catalog?.providers ?? [], [catalog]);
 	const thinkingLevels = useMemo(
 		() => catalog?.thinkingLevels ?? [],
@@ -315,6 +333,7 @@ export function useUniversalPicker(
 	// installed. Unlike those callers this is not gated on the active agent: the
 	// Local ROW is a route of the Ryu agent, offered whichever agent is selected.
 	const node = useActiveNode();
+	const providerScope = useProviderQueryScope(node);
 	const queryClient = useQueryClient();
 	const installedQuery = useQuery({
 		queryKey: ["models", "installed", node.url],
@@ -408,7 +427,7 @@ export function useUniversalPicker(
 						.catch(() => undefined);
 					saveProvider(GATEWAY_PROVIDER_ID, res.active || stem, thinkingLevel);
 				})
-				.catch((e: unknown) => {
+				.catch((e) => {
 					sileo.error({
 						title: e instanceof Error ? e.message : "Could not switch model",
 					});
@@ -421,9 +440,9 @@ export function useUniversalPicker(
 	// into the cache so `configured`/`accounts` flip without a round trip.
 	const applyCatalog = useCallback(
 		(catalog: PiCatalog) => {
-			queryClient.setQueryData(["pi-config-catalog", node.url], catalog);
+			providerScope.publishCatalog(catalog);
 		},
-		[queryClient, node.url]
+		[providerScope]
 	);
 
 	const renderBody = useCallback(
@@ -447,6 +466,8 @@ export function useUniversalPicker(
 			const providers: ProviderEntry[] = shownProviders.map((p) => {
 				const isActive = activeProviderId === p.id;
 				const pool = creditPoolForProvider(p);
+				// The single managed Ryu Router row (not a legacy pool-bound row).
+				const isRyuRouter = Boolean(p.managed) && pool === null;
 				return {
 					id: p.id,
 					// For a pool-backed row the pool catalog owns the name, not Core:
@@ -480,14 +501,24 @@ export function useUniversalPicker(
 								pool.tier === "free" ||
 								grantedPoolIds.has(pool.id)
 							)
-						: Boolean(p.managed) && !hasManagedPlan,
+						: Boolean(p.managed) && !hasManagedPlan && freeCredit === null,
 					upsellCopy: pool ? poolUpsellCopy(pool) : undefined,
 					// The pool's own remaining granted credit, shown on the row as "$50.00"
 					// so "how much Frontier is left?" is answerable where the choice is
 					// made. Looked up by pool id, so a grant row this build can't map back
 					// to the catalog contributes nothing rather than landing on the wrong
 					// pool — the same rule `grantedPoolIds` applies to the upsell.
-					poolGrant: pool ? grantByPoolId.get(pool.id) : undefined,
+					poolGrant: pool
+						? grantByPoolId.get(pool.id)
+						: isRyuRouter
+							? (freeCredit ?? undefined)
+							: undefined,
+					// "Free" tags come from Core's `freeModels` (the Gateway's own
+					// equivalence table) and show only while free credit remains.
+					freeModelIds:
+						isRyuRouter && freeCredit !== null && p.freeModels?.length
+							? new Set(p.freeModels)
+							: undefined,
 					// Pooled capacity is Ryu's own, so there is no credential for a user
 					// to hold and a pool row is `configured` by definition — the wallet
 					// (and the pool's grant balance) is what gates it, at the Gateway.
@@ -593,6 +624,17 @@ export function useUniversalPicker(
 				}),
 			}));
 
+			const notifyProviderModelSelection = (
+				providerId: string,
+				modelId: string | null
+			) => {
+				const provider = providers.find((item) => item.id === providerId);
+				onProviderModelSelection?.({
+					modelId,
+					providerId,
+					providerLabel: provider?.label ?? providerId,
+				});
+			};
 			const data: UniversalPickerData = {
 				activeAgentId: agentId,
 				agents,
@@ -628,6 +670,7 @@ export function useUniversalPicker(
 					if (effort && onSelectProviderThinking) {
 						onSelectProviderThinking(providerId, effort);
 					}
+					notifyProviderModelSelection(providerId, modelId);
 				},
 				onSelectTeam: onSelectTeam ? (id) => onSelectTeam(id) : undefined,
 				onCreateAgent,
@@ -647,6 +690,7 @@ export function useUniversalPicker(
 					const model = p?.currentModel ?? p?.models[0]?.id ?? null;
 					if (onUseProvider) {
 						onUseProvider(providerId, model);
+						notifyProviderModelSelection(providerId, model);
 						return;
 					}
 					if (providerId === BROWSER_PROVIDER_ID) {
@@ -658,19 +702,23 @@ export function useUniversalPicker(
 							);
 						}
 						onSelectAgent(RYU_AGENT_ID);
+						notifyProviderModelSelection(providerId, model);
 						return;
 					}
 					if (providerId === LOCAL_PROVIDER_ID) {
 						if (model) {
 							switchToLocalModel(model, null);
 						}
+						notifyProviderModelSelection(providerId, model);
 						return;
 					}
 					saveProvider(providerId, model, null);
+					notifyProviderModelSelection(providerId, model);
 				},
 				onSelectProviderModel: (providerId, modelId) => {
 					if (onSelectProviderModel) {
 						onSelectProviderModel(providerId, modelId);
+						notifyProviderModelSelection(providerId, modelId);
 						return;
 					}
 					if (providerId === BROWSER_PROVIDER_ID) {
@@ -680,13 +728,16 @@ export function useUniversalPicker(
 							modelId
 						);
 						onSelectAgent(RYU_AGENT_ID);
+						notifyProviderModelSelection(providerId, modelId);
 						return;
 					}
 					if (providerId === LOCAL_PROVIDER_ID) {
 						switchToLocalModel(modelId, null);
+						notifyProviderModelSelection(providerId, modelId);
 						return;
 					}
 					saveProvider(providerId, modelId, null);
+					notifyProviderModelSelection(providerId, modelId);
 				},
 				onSelectProviderThinking: (providerId, level) => {
 					if (onSelectProviderThinking) {
@@ -719,14 +770,17 @@ export function useUniversalPicker(
 					accountId,
 					accountTarget = "self"
 				) => {
-					switchProviderAccount(
-						toTarget(node),
-						providerId,
-						accountId,
-						accountTarget
-					)
+					providerScope
+						.write(() =>
+							switchProviderAccount(
+								providerScope.target,
+								providerId,
+								accountId,
+								accountTarget
+							)
+						)
 						.then(applyCatalog)
-						.catch((error: unknown) => {
+						.catch((error) => {
 							sileo.error({
 								title:
 									error instanceof Error
@@ -736,9 +790,12 @@ export function useUniversalPicker(
 						});
 				},
 				onRemoveProviderAccount: (providerId, accountId) => {
-					removeProviderAccount(toTarget(node), providerId, accountId)
+					providerScope
+						.write(() =>
+							removeProviderAccount(providerScope.target, providerId, accountId)
+						)
 						.then(applyCatalog)
-						.catch((error: unknown) => {
+						.catch((error) => {
 							sileo.error({
 								title:
 									error instanceof Error
@@ -749,14 +806,23 @@ export function useUniversalPicker(
 				},
 				onSwitchAgentAccount: (agentId, accountId, provider) => {
 					switchAgentAccount(toTarget(node), agentId, { accountId, provider })
-						.then(() => {
+						.then(({ reauthenticate }) => {
+							// Core could not swap this agent's own login in place; the
+							// active account is unchanged until the user signs in again.
+							if (reauthenticate) {
+								sileo.info({
+									title: "Sign in again to use this account",
+									description:
+										"This agent keeps its own login. Run its sign-in again to switch accounts.",
+								});
+							}
 							queryClient
 								.invalidateQueries({
 									queryKey: ["agent-accounts", node.url, agentId],
 								})
 								.catch(() => undefined);
 						})
-						.catch((error: unknown) => {
+						.catch((error) => {
 							sileo.error({
 								title:
 									error instanceof Error
@@ -774,7 +840,7 @@ export function useUniversalPicker(
 								})
 								.catch(() => undefined);
 						})
-						.catch((error: unknown) => {
+						.catch((error) => {
 							sileo.error({
 								title:
 									error instanceof Error
@@ -788,6 +854,7 @@ export function useUniversalPicker(
 			return createElement(UniversalPickerBody, { data, close, mode });
 		},
 		[
+			providerScope,
 			agents,
 			agentId,
 			activeModelSection,
@@ -803,6 +870,7 @@ export function useUniversalPicker(
 			shownProviders,
 			hasManagedPlan,
 			grantedPoolIds,
+			freeCredit,
 			thinkingLevels,
 			config,
 			recentRefs,
@@ -814,6 +882,7 @@ export function useUniversalPicker(
 			onSelectTeam,
 			onCreateAgent,
 			onUseProvider,
+			onProviderModelSelection,
 			onSelectProviderModel,
 			onSelectProviderThinking,
 			openGateway,

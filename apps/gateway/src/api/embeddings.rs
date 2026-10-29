@@ -37,7 +37,9 @@ pub async fn embeddings(
         AuthInputs {
             raw_api_key: headers.get("authorization").and_then(|v| v.to_str().ok()),
             user_id: header_string(&headers, "x-ryu-user-id"),
+            user_jwt: header_string(&headers, "x-ryu-user-jwt"),
             agent_id: header_string(&headers, "x-ryu-agent-id"),
+            agent_provider_access: header_string(&headers, "x-ryu-agent-provider-access"),
             ..Default::default()
         },
     )
@@ -58,7 +60,9 @@ pub async fn rerank(
         AuthInputs {
             raw_api_key: headers.get("authorization").and_then(|v| v.to_str().ok()),
             user_id: header_string(&headers, "x-ryu-user-id"),
+            user_jwt: header_string(&headers, "x-ryu-user-jwt"),
             agent_id: header_string(&headers, "x-ryu-agent-id"),
+            agent_provider_access: header_string(&headers, "x-ryu-agent-provider-access"),
             ..Default::default()
         },
     )

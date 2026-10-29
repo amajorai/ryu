@@ -1,7 +1,7 @@
 import {
 	ConnectionStatusToast as ConnectionStatusToastPrimitive,
 	type ConnectionStatusToastProps,
-} from "@ryu/ui/components/connection-status";
+} from "@ryu/ui/components/connection-status.tsx";
 import { useEffect, useRef, useState } from "react";
 import { useSystemStatusContext } from "@/src/contexts/SystemStatusContext.tsx";
 import {

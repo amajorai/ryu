@@ -4,14 +4,13 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::{Read, Write},
-    path::PathBuf,
+    io::Read,
 };
 
 use anyhow::{ensure, Context, Result};
 use rusqlite::{named_params, params};
 use serde::{Deserialize, Serialize};
-use zip::{write::FileOptions, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 
 use super::{
     blob_path, now_millis, upsert_document_row, upsert_space_row, DocFilter, DocOwner, SpaceStore,
@@ -60,8 +59,8 @@ impl SpaceStore {
         &self,
         space_id: &str,
         filter: DocFilter<'_>,
-        output: PathBuf,
-    ) -> Result<()> {
+        output: File,
+    ) -> Result<File> {
         let space_id = space_id.to_owned();
         let bound = filter.bound_flag();
         let user = filter.owner_user_id.map(str::to_owned);
@@ -69,22 +68,44 @@ impl SpaceStore {
         let teams = filter.team_ids_json;
         let conn = self.conn.clone().lock_owned().await;
         let blob_root = self.blob_root.clone();
+        let blob_cipher = self.seal.keys.blob_cipher.clone();
         tokio::task::spawn_blocking(move || {
-            let mut snapshot = conn.query_row("SELECT name, description, retrieval_mode, icon FROM spaces WHERE id = ?1", [&space_id], |row| Ok(SpaceSnapshot {
+            // The backup is a deliberately plaintext export: sealed names, bodies
+            // and blobs are opened here (and blob checksums cover the decrypted
+            // bytes). Documents whose sealed text does not open are skipped, counted
+            // and logged; their children move to the Space root.
+            let mut snapshot = conn.query_row("SELECT ryu_open('spaces.name', id, name), ryu_open('spaces.description', id, description), retrieval_mode, icon FROM spaces WHERE id = ?1", [&space_id], |row| Ok(SpaceSnapshot {
                 version: 1, name: row.get(0)?, description: row.get(1)?, retrieval_mode: row.get(2)?, icon: row.get(3)?, documents: vec![],
             }))?;
-            let sql = format!("SELECT d.id, d.title, d.source, d.kind, d.parent_id, d.mime, d.blob_sha256, d.byte_size, d.icon, d.created_at, d.updated_at FROM documents d WHERE d.space_id = :space_id AND {DOC_TENANCY_VISIBLE_PREDICATE} ORDER BY d.created_at, d.id LIMIT {}", MAX_DOCUMENTS + 1);
+            let sql = format!("SELECT d.id, ryu_open_soft('documents.title', d.id, d.title), ryu_open_soft('documents.source', d.id, d.source), d.kind, d.parent_id, d.mime, d.blob_sha256, d.byte_size, d.icon, d.created_at, d.updated_at FROM documents d WHERE d.space_id = :space_id AND {DOC_TENANCY_VISIBLE_PREDICATE} ORDER BY d.created_at, d.id LIMIT {}", MAX_DOCUMENTS + 1);
             let mut statement = conn.prepare(&sql)?;
             let mut rows = statement.query(named_params! { ":space_id": space_id, ":bound": bound, ":uid": user, ":org": org, ":teams": teams })?;
             let mut bytes = 0u64;
+            let mut skipped = 0usize;
             while let Some(row) = rows.next()? {
-                let document = SnapshotDocument { id: row.get(0)?, title: row.get(1)?, source: row.get(2)?, kind: row.get(3)?, parent_id: row.get(4)?, mime: row.get(5)?, sha256: row.get(6)?, byte_size: row.get(7)?, icon: row.get(8)?, created_at: row.get(9)?, updated_at: row.get(10)? };
+                let (Some(title), Some(source)) = (row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?) else {
+                    skipped += 1;
+                    continue;
+                };
+                let document = SnapshotDocument { id: row.get(0)?, title, source, kind: row.get(3)?, parent_id: row.get(4)?, mime: row.get(5)?, sha256: row.get(6)?, byte_size: row.get(7)?, icon: row.get(8)?, created_at: row.get(9)?, updated_at: row.get(10)? };
                 bytes += document.source.len() as u64 + document.title.len() as u64 + 2048;
                 ensure!(bytes <= MAX_SOURCE_BYTES && snapshot.documents.len() < MAX_DOCUMENTS, "Space backup exceeds its source/document limit");
                 snapshot.documents.push(document);
             }
-            let mut zip = ZipWriter::new(File::create(output)?);
-            let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated).unix_permissions(0o600).large_file(true);
+            if skipped > 0 {
+                // A child of an omitted document would name a parent the archive
+                // does not hold, which makes the whole Space unrestorable. Promote
+                // it to the Space root instead.
+                let kept: HashSet<String> = snapshot.documents.iter().map(|document| document.id.clone()).collect();
+                for document in &mut snapshot.documents {
+                    if document.parent_id.as_ref().is_some_and(|parent| !kept.contains(parent)) {
+                        document.parent_id = None;
+                    }
+                }
+                tracing::warn!(skipped, space_id = %space_id, "Space backup omitted documents whose sealed text did not open");
+            }
+            let mut zip = ZipWriter::new(output);
+            let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).unix_permissions(0o600).large_file(true);
             zip.start_file("space.json", options)?;
             serde_json::to_writer(&mut zip, &snapshot)?;
             let mut blobs = HashSet::new();
@@ -92,14 +113,13 @@ impl SpaceStore {
                 if let Some(sha) = &document.sha256 {
                     ensure!(valid_sha(sha), "Invalid Space file hash");
                     if !blobs.insert(sha.clone()) { continue; }
-                    let path = blob_path(&blob_root, sha);
-                    ensure!(ryu_backup::encryption::sha256(File::open(&path)?)? == *sha, "Space file checksum mismatch");
                     zip.start_file(format!("blobs/{sha}"), options)?;
-                    std::io::copy(&mut File::open(path)?, &mut zip)?;
+                    let (digest, _) = super::seal::copy_blob(&blob_root, &blob_cipher, sha, &mut zip)?
+                        .context("Space file is missing")?;
+                    ensure!(digest == *sha, "Space file checksum mismatch");
                 }
             }
-            zip.finish()?.sync_all()?;
-            Ok(())
+            Ok(zip.finish()?)
         }).await?
     }
 
@@ -107,14 +127,16 @@ impl SpaceStore {
     /// creates a new private Space. Original documents are never overwritten.
     pub async fn restore_backup(
         &self,
-        archive: PathBuf,
+        archive: File,
         owner: DocOwner,
         name: Option<String>,
     ) -> Result<String> {
         let conn = self.conn.clone();
         let blob_root = self.blob_root.clone();
+        let blob_cipher = self.seal.keys.blob_cipher.clone();
+        self.ensure_writable()?;
         tokio::task::spawn_blocking(move || {
-            let mut zip = ZipArchive::new(File::open(archive)?)?;
+            let mut zip = ZipArchive::new(archive)?;
             ensure!(
                 zip.len() <= MAX_DOCUMENTS + 1,
                 "Too many Space backup files"
@@ -186,30 +208,49 @@ impl SpaceStore {
                         "File size mismatch"
                     );
                     let destination = blob_path(&blob_root, sha);
-                    ryu_backup::archive::private_directory(
-                        destination.parent().context("Invalid blob path")?,
-                    )?;
-                    let mut output = tempfile::NamedTempFile::new_in(
-                        destination.parent().context("Invalid blob path")?,
-                    )?;
-                    ensure!(
-                        std::io::copy(&mut (&mut entry).take(length + 1), &mut output)? == length,
-                        "Incomplete Space file"
-                    );
-                    output.flush()?;
-                    ensure!(
-                        ryu_backup::encryption::sha256(File::open(output.path())?)? == sha,
-                        "Space file checksum mismatch"
-                    );
-                    output.as_file().sync_all()?;
+                    let parent = destination.parent().context("Invalid blob path")?;
+                    ryu_backup::archive::private_directory(parent)?;
                     if destination.exists() {
-                        ensure!(
-                            ryu_backup::encryption::sha256(File::open(&destination)?)? == sha,
-                            "Existing Space blob is damaged"
-                        );
-                    } else {
-                        output.persist_noclobber(&destination)?;
+                        let (digest, _) = super::seal::copy_blob(
+                            &blob_root,
+                            &blob_cipher,
+                            sha,
+                            &mut std::io::sink(),
+                        )?
+                        .context("Existing Space blob is damaged")?;
+                        ensure!(digest == sha, "Existing Space blob is damaged");
+                        continue;
                     }
+                    // Seal while streaming out of the archive into an owner-only
+                    // temp file; the checksum covers the plaintext.
+                    let temp = parent.join(format!("{sha}.{}.part", uuid::Uuid::new_v4().simple()));
+                    let staged = (|| -> Result<()> {
+                        let mut writer = ryu_crypto::SealedFileWriter::create(
+                            &temp,
+                            &blob_cipher,
+                            &super::seal::blob_context(sha),
+                        )?;
+                        let copied =
+                            std::io::copy(&mut (&mut entry).take(length + 1), &mut writer)?;
+                        ensure!(copied == length, "Incomplete Space file");
+                        let finished = writer.finish()?;
+                        let digest: String = finished
+                            .plaintext_sha256
+                            .iter()
+                            .map(|b| format!("{b:02x}"))
+                            .collect();
+                        ensure!(digest == sha, "Space file checksum mismatch");
+                        if destination.exists() {
+                            std::fs::remove_file(&temp)?;
+                        } else {
+                            std::fs::rename(&temp, &destination)?;
+                        }
+                        Ok(())
+                    })();
+                    if staged.is_err() {
+                        let _ = std::fs::remove_file(&temp);
+                    }
+                    staged?;
                 }
             }
             let mut conn = conn.blocking_lock();
@@ -270,6 +311,7 @@ impl SpaceStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[tokio::test]
     async fn preserves_all_document_kinds_files_and_parent_links_in_a_new_private_space() {
@@ -303,7 +345,12 @@ mod tests {
             .await
             .unwrap();
         let file = uuid::Uuid::new_v4().to_string();
-        let sha = super::super::write_blob(&store.blob_root, b"original binary\0bytes").unwrap();
+        let sha = super::super::seal::write_blob(
+            &store.blob_root,
+            &store.seal.keys.blob_cipher,
+            b"original binary\0bytes",
+        )
+        .unwrap();
         {
             let conn = store.conn.lock().await;
             upsert_document_row(
@@ -322,19 +369,21 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "UPDATE documents SET source = ?1 WHERE id = ?2",
+                "UPDATE documents SET source = ryu_seal('documents.source', id, ?1) WHERE id = ?2",
                 params![format!("{{\"pageId\":\"{page}\"}}"), database],
             )
             .unwrap();
         }
-        let temporary = tempfile::tempdir().unwrap();
-        let path = temporary.path().join("space.zip");
-        store
-            .export_backup(&space, DocFilter::unrestricted(), path.clone())
+        let archive = store
+            .export_backup(
+                &space,
+                DocFilter::unrestricted(),
+                tempfile::tempfile().unwrap(),
+            )
             .await
             .unwrap();
         let restored = store
-            .restore_backup(path, DocOwner::owned(Some("bob"), Some("org")), None)
+            .restore_backup(archive, DocOwner::owned(Some("bob"), Some("org")), None)
             .await
             .unwrap();
         assert_ne!(restored, space);
@@ -358,7 +407,8 @@ mod tests {
         }
         let source: String = conn
             .query_row(
-                "SELECT source FROM documents WHERE space_id = ?1 AND kind = 'database'",
+                "SELECT ryu_open('documents.source', id, source) FROM documents
+                 WHERE space_id = ?1 AND kind = 'database'",
                 [&restored],
                 |row| row.get(0),
             )
@@ -424,15 +474,22 @@ mod tests {
             }],
         };
         let mut zip = ZipWriter::new(File::create(&archive).unwrap());
-        zip.start_file("space.json", FileOptions::default())
+        zip.start_file("space.json", SimpleFileOptions::default())
             .unwrap();
         serde_json::to_writer(&mut zip, &snapshot).unwrap();
-        zip.start_file(format!("blobs/{}", "0".repeat(64)), FileOptions::default())
-            .unwrap();
+        zip.start_file(
+            format!("blobs/{}", "0".repeat(64)),
+            SimpleFileOptions::default(),
+        )
+        .unwrap();
         zip.write_all(b"bad").unwrap();
         zip.finish().unwrap();
         assert!(store
-            .restore_backup(archive, DocOwner::unattributed(), None)
+            .restore_backup(
+                File::open(&archive).unwrap(),
+                DocOwner::unattributed(),
+                None
+            )
             .await
             .is_err());
         assert!(store

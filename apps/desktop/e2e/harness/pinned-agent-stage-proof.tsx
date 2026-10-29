@@ -44,7 +44,7 @@ const AGENTS = [
 function OtherAgentRows({ agents }: { agents: AgentSummary[] }) {
 	return (
 		<div className="space-y-0.5 border-sidebar-border/70 border-t px-2 pt-2">
-			<div className="px-1 pb-1 text-[10px] text-muted-foreground uppercase tracking-[0.1em]">
+			<div className="type-compact px-1 pb-1 text-muted-foreground uppercase tracking-section-label">
 				Other agents
 			</div>
 			{agents.map((agent) => (
@@ -53,7 +53,7 @@ function OtherAgentRows({ agents }: { agents: AgentSummary[] }) {
 					key={agent.id}
 				>
 					<AgentAvatar
-						className="size-8 shrink-0 rounded-full object-cover"
+						className="size-8 shrink-0 object-cover"
 						engine={engineForAgent(agent)}
 						glyph={agent.avatarGlyph}
 						size="32px"
@@ -84,7 +84,7 @@ function Preview({ count, label }: { count: number; label: string }) {
 					Agents
 				</span>
 			</header>
-			<div className="overflow-hidden rounded-2xl border border-sidebar-border/80 bg-sidebar shadow-[0_12px_36px_-24px_black]">
+			<div className="overflow-hidden rounded-2xl border border-sidebar-border/80 bg-sidebar shadow-lg">
 				<div className="flex items-center justify-between border-sidebar-border/70 border-b px-4 py-3">
 					<span className="font-semibold text-sm">Agents view</span>
 					<span className="text-muted-foreground text-xs">
@@ -118,7 +118,7 @@ function Story() {
 			<main className="min-h-screen bg-background px-6 py-10 text-foreground sm:px-10">
 				<div className="mx-auto max-w-[1180px]">
 					<header className="mb-8 max-w-2xl">
-						<p className="font-medium text-primary text-xs uppercase tracking-[0.16em]">
+						<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 							Ryu Work · Agents view
 						</p>
 						<h1 className="mt-2 font-semibold text-2xl tracking-tight">

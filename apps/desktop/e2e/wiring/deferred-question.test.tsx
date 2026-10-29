@@ -5,9 +5,12 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useDeferredQuestion } from "../../../../packages/blocks/src/desktop/agent-elements/use-deferred-question.ts";
 
-(
-	globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
+// ReactDOM reads this optional host flag; the fixture installs it on the full
+// existing native global object at the original mutation point.
+const reactActEnvironment: typeof globalThis & {
+	IS_REACT_ACT_ENVIRONMENT?: boolean;
+} = globalThis;
+reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
 interface PendingQuestion {
 	id: string;

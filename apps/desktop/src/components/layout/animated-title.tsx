@@ -1,6 +1,6 @@
 import { useChatDisplayPrefs } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
-import { TextMorph } from "@ryu/ui/components/text-morph";
-import { EASE_OUT_CSS } from "@ryu/ui/lib/ease";
+import { TextMorph } from "@ryu/ui/components/text-morph.tsx";
+import { EASE_OUT_CSS } from "@ryu/ui/lib/ease.ts";
 import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils.ts";
 import { usePrefersReducedMotion } from "@/src/hooks/usePrefersReducedMotion.ts";

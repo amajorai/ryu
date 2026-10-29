@@ -31,7 +31,7 @@ Key environment variables:
 
 - `RYU_BIND`: bind address (default `127.0.0.1:7980`)
 - `RYU_TOKEN`: optional bearer token for API auth
-- `RUST_LOG`: log level (e.g. `ryu_core=debug,info`)
+- `RUST_LOG`: defaults to `info`; set `ryu_core=debug,info` for Core debug output
 
 OpenAPI: `ryu-core --dump-openapi` writes the spec, also served at `GET /api/openapi.json`.
 

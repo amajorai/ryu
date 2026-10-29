@@ -62,7 +62,7 @@ const EDITOR_PROPS: AgentSettingsFormProps = {
 		<div className="flex h-full items-center justify-center p-4">
 			<div className="rounded-lg border border-white/20 bg-background/70 px-3 py-2 text-center text-white shadow-xl backdrop-blur">
 				<p className="font-semibold text-xs">Release desk</p>
-				<p className="mt-1 text-[10px] text-white/70">AGENT</p>
+				<p className="type-compact mt-1 text-white/70">AGENT</p>
 			</div>
 		</div>
 	),
@@ -143,7 +143,7 @@ function AgentHealthScorecardProof() {
 		<main className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-8">
 			<div className="mx-auto flex max-w-5xl flex-col gap-6">
 				<header className="flex flex-col gap-3">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Production editor proof
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight sm:text-4xl">
@@ -218,6 +218,6 @@ function AgentHealthScorecardProof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<AgentHealthScorecardProof />
 );

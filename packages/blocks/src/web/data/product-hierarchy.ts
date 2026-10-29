@@ -84,10 +84,10 @@ export const PRODUCT_HIERARCHY: readonly ProductHierarchyRealm[] = [
 	{
 		description: "Configure Ryu from the control panel.",
 		group: "Interfaces / surfaces",
-		href: "/console",
+		href: "/agent",
 		icon: Settings2,
 		id: "console",
-		label: "Console",
+		label: "Agent",
 		tone: "pink",
 		verb: "Configure",
 	},

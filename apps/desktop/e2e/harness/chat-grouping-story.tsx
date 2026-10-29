@@ -30,7 +30,12 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
+import type { createMessageDecorator } from "../../src/lib/chat-message-decoration.ts";
 import "../../src/index.css";
+
+type DatedFixtureMessage = ReturnType<
+	ReturnType<typeof createMessageDecorator<UIMessage>>
+>[number];
 
 const MS_PER_DAY = 86_400_000;
 /** How long ChatPage's history fetch is stood in for. */
@@ -53,22 +58,22 @@ function stampFor(daysAgo: number, minute: number): Date {
 	);
 }
 
-function user(id: string, text: string, at: Date): UIMessage {
+function user(id: string, text: string, at: Date): DatedFixtureMessage {
 	return {
 		id,
 		role: "user",
 		parts: [{ type: "text", text }],
 		createdAt: at,
-	} as unknown as UIMessage;
+	};
 }
 
-function assistant(id: string, text: string, at: Date): UIMessage {
+function assistant(id: string, text: string, at: Date): DatedFixtureMessage {
 	return {
 		id,
 		role: "assistant",
 		parts: [{ type: "text", text }],
 		createdAt: at,
-	} as unknown as UIMessage;
+	};
 }
 
 /**

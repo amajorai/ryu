@@ -1,9 +1,9 @@
 /* @jsxImportSource @opentui/react */
-import { Markdown } from "@/components/ui/markdown.tsx";
+
+import { memo } from "react";
 import { useTheme, useUnicode } from "@/components/ui/theme-provider.tsx";
-import { ThinkingBlock } from "@/components/ui/thinking-block";
-import { ToolCall } from "@/components/ui/tool-call";
-import type { ChatPart } from "../core/chatTranscript.ts";
+import { ToolCall } from "@/components/ui/tool-call.tsx";
+import { type ChatPart, isSettledToolStatus } from "../core/chatTranscript.ts";
 import {
 	boundTerminalText,
 	completedTodoCount,
@@ -11,9 +11,32 @@ import {
 	TRANSCRIPT_LIMITS,
 	todoStatusPresentation,
 	toolArgumentsForPresentation,
+	toolDiffStat,
+	toolDurationMs,
+	toolPendingLabel,
+	toolSummary,
 } from "../core/transcriptPresentation.ts";
+import { tf } from "../i18n/translate.ts";
+import { ChatMarkdown } from "./ChatMarkdown.tsx";
+import { ReasoningRow } from "./ReasoningRow.tsx";
 
-export function TranscriptParts({ parts }: { parts: ChatPart[] }) {
+// Memoized: a streamed token replaces only the last message, so earlier
+// messages keep their `parts` array and skip re-rendering entirely.
+// `streaming` is true only for the in-flight assistant message, so finished
+// messages keep stable props too.
+export const TranscriptParts = memo(function TranscriptParts({
+	parts,
+	pendingPermissionToolCallId,
+	recoveryHint = false,
+	streaming = false,
+}: {
+	parts: ChatPart[];
+	/** Highlight the tool row a permission prompt is waiting on. */
+	pendingPermissionToolCallId?: string | undefined;
+	/** Show the resend hint under an error (only the latest turn can resend). */
+	recoveryHint?: boolean;
+	streaming?: boolean;
+}) {
 	const theme = useTheme();
 	return (
 		<box flexDirection="column" gap={1}>
@@ -27,7 +50,10 @@ export function TranscriptParts({ parts }: { parts: ChatPart[] }) {
 						});
 						return (
 							<box flexDirection="column" key={`text-${index}`}>
-								<Markdown>{presentation.text}</Markdown>
+								<ChatMarkdown
+									content={presentation.text}
+									streaming={streaming && index === parts.length - 1}
+								/>
 								{presentation.truncated ? (
 									<text fg={theme.colors.mutedForeground}>
 										[message output is bounded]
@@ -38,18 +64,16 @@ export function TranscriptParts({ parts }: { parts: ChatPart[] }) {
 					}
 					case "reasoning":
 						return (
-							<ThinkingBlock
-								content={
-									boundTerminalText(part.text, {
-										label: "thinking",
-										maxChars: TRANSCRIPT_LIMITS.thinkingChars,
-										maxLines: TRANSCRIPT_LIMITS.thinkingLines,
-									}).text
-								}
-								defaultCollapsed
+							<ReasoningRow
+								endedAt={part.endedAt}
 								key={`reasoning-${index}`}
-								label="Thinking"
-								streaming={index === parts.length - 1}
+								startedAt={part.startedAt}
+								streaming={
+									streaming &&
+									index === parts.length - 1 &&
+									part.endedAt === undefined
+								}
+								text={part.text}
 							/>
 						);
 					case "tool": {
@@ -61,19 +85,66 @@ export function TranscriptParts({ parts }: { parts: ChatPart[] }) {
 						return (
 							<ToolCall
 								args={args}
+								awaitingPermission={
+									pendingPermissionToolCallId !== undefined &&
+									part.toolCallId === pendingPermissionToolCallId &&
+									!isSettledToolStatus(part.status)
+								}
 								collapsible
 								defaultCollapsed
+								diffStat={toolDiffStat(part.name, part.args, part.result)}
+								duration={
+									isSettledToolStatus(part.status)
+										? toolDurationMs(part)
+										: undefined
+								}
 								key={`tool-${part.toolCallId ?? index}`}
 								name={part.name}
+								pendingLabel={toolPendingLabel(part.name)}
 								result={formatToolOutput(part.result)}
 								status={part.status}
+								summary={toolSummary(part.name, part.args)}
 							/>
 						);
 					}
 					case "todo":
 						return <TodoPart key={`todo-${index}`} todos={part.todos} />;
+					case "error":
+						return (
+							<ErrorPart
+								hint={recoveryHint && index === parts.length - 1}
+								key={`error-${index}`}
+								message={part.message}
+							/>
+						);
 				}
 			})}
+		</box>
+	);
+});
+
+/** Recovery hint under a failed turn: up-arrow recalls the prompt to resend. */
+const ERROR_PART_HINT = "↑ edit & resend · /model switch";
+const ERROR_PART_HINT_ASCII = "up edit & resend - /model switch";
+
+function ErrorPart({ hint, message }: { hint: boolean; message: string }) {
+	const theme = useTheme();
+	const unicode = useUnicode();
+	const bounded = boundTerminalText(message, {
+		label: "error",
+		maxChars: TRANSCRIPT_LIMITS.errorChars,
+		maxLines: TRANSCRIPT_LIMITS.errorLines,
+	});
+	return (
+		<box flexDirection="column">
+			<text fg={theme.colors.error}>
+				{tf("Error: {message}", { message: bounded.text })}
+			</text>
+			{hint ? (
+				<text fg={theme.colors.mutedForeground}>
+					{unicode ? ERROR_PART_HINT : ERROR_PART_HINT_ASCII}
+				</text>
+			) : null}
 		</box>
 	);
 }

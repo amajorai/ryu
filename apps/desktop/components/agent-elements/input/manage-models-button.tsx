@@ -13,11 +13,11 @@ export function ManageModelsButton({ close }: { close: () => void }) {
 
 	return (
 		<DropdownMenuItem
-			className="gap-2"
 			onClick={() => {
 				close();
 				openGateway("providers");
 			}}
+			spacing="comfortable"
 		>
 			<HugeiconsIcon icon={Settings01Icon} size={16} strokeWidth={2} />
 			<span className="flex-1 truncate">Manage models</span>
@@ -33,11 +33,11 @@ export function ConfigureAutoButton({ close }: { close: () => void }) {
 
 	return (
 		<DropdownMenuItem
-			className="gap-2"
 			onClick={() => {
 				close();
 				openAgentAutoConfig();
 			}}
+			spacing="comfortable"
 		>
 			<IconGitBranch className="size-4" />
 			<span className="flex-1 truncate">Configure Auto</span>

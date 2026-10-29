@@ -12,6 +12,7 @@
 
 import type { RunSummary } from "@/src/hooks/useRuns.ts";
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
+import { runStreamFrameSchema } from "./run-wire-contracts.ts";
 
 const FRAME_SEP = "\n\n";
 const DATA_PREFIX = "data:";
@@ -22,7 +23,7 @@ export type RunStreamFrame =
 	| { type: "run"; run: RunSummary };
 
 /** Split accumulated buffer into complete SSE frames, returning the remainder. */
-function extractFrames(buffer: string): { frames: string[]; rest: string } {
+function extractFrames(buffer: string) {
 	const frames: string[] = [];
 	let rest = buffer;
 	let sep = rest.indexOf(FRAME_SEP);
@@ -47,7 +48,10 @@ function parseFrame(frame: string): RunStreamFrame | null {
 		return null;
 	}
 	try {
-		return JSON.parse(dataLines.join("\n")) as RunStreamFrame;
+		const parsed = runStreamFrameSchema.safeParse(
+			JSON.parse(dataLines.join("\n"))
+		);
+		return parsed.success ? parsed.data : null;
 	} catch {
 		// Ignore malformed frames; the next event self-heals the feed.
 		return null;

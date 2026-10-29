@@ -20,7 +20,8 @@ The **pure** governance primitives — everything that operates over caller-supp
 ## Role in the decomposition
 
 A **pure "engine moves, key custody stays" core crate**. The signing-key custody path
-(`RYU_MARKETPLACE_SIGNING_KEY` resolution, the dev-persisted on-disk key, the process `OnceLock`)
+(`RYU_MARKETPLACE_SIGNING_KEY` resolution, the dev-persisted on-disk key — sealed `encc:v1:` and
+written only when the Gateway has a sealing key, otherwise ephemeral per start — the process `OnceLock`)
 and the **default grant allowlist** stay in `apps/gateway/src/governance/mod.rs` — the marketplace
 trust root, kept where the secret is custodied. The Gateway wrappers resolve the key/allowlist and
 delegate here; behavior is identical.

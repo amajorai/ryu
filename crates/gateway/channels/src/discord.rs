@@ -71,6 +71,21 @@ const THREAD_AUTO_ARCHIVE_MINUTES: u32 = 1440;
 /// Discord render an inline player instead of a generic download chip.
 const VOICE_FILENAME: &str = "reply.wav";
 
+/// Discord channel types that are threads: `ANNOUNCEMENT_THREAD`,
+/// `PUBLIC_THREAD`, `PRIVATE_THREAD`. Only these have a `parent_id` that names
+/// a conversation's parent channel; on any other channel it is a category.
+const THREAD_CHANNEL_TYPES: [u8; 3] = [10, 11, 12];
+
+/// Most channels one Gateway connection remembers thread parents for. The map
+/// holds every channel the bot has seen a message in, including ordinary ones,
+/// so it is cleared rather than grown without bound on a very long connection.
+const THREAD_PARENT_CACHE_MAX: usize = 4096;
+
+/// Per-connection answers from [`DiscordChannel::parent_channel_id`]: the thread
+/// parent for a thread, `None` for any other channel. Only definitive answers are
+/// stored, so a failed lookup is retried on the channel's next message.
+type ThreadParents = HashMap<String, Option<String>>;
+
 pub struct DiscordChannel {
     /// Core route, access policy, pairing store, status reporter — everything the
     /// shared inbound path needs.
@@ -205,7 +220,7 @@ impl DiscordChannel {
         self.http()
             .post(&url)
             .header("Authorization", self.auth_header())
-            .json(&json!({ "content": content }))
+            .json(&message_payload(content))
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await?
@@ -335,7 +350,11 @@ impl DiscordChannel {
             .ok_or_else(|| anyhow::anyhow!("discord Gateway response contained no url"))
     }
 
-    async fn parent_channel_id(&self, channel_id: &str) -> Option<String> {
+    /// Look up whether `channel_id` is a thread and, if so, its parent channel.
+    ///
+    /// `None` means the lookup failed and the answer is unknown (do not cache
+    /// it); `Some(None)` means an ordinary channel; `Some(Some(parent))` a thread.
+    async fn parent_channel_id(&self, channel_id: &str) -> Option<Option<String>> {
         let response = self
             .http()
             .get(format!("{API_BASE}/channels/{channel_id}"))
@@ -346,7 +365,8 @@ impl DiscordChannel {
             .ok()?
             .error_for_status()
             .ok()?;
-        response.json::<DiscordChannelRef>().await.ok()?.parent_id
+        let channel = response.json::<DiscordChannelRef>().await.ok()?;
+        Some(thread_parent(&channel))
     }
 
     async fn dispatch_gateway_message(
@@ -354,7 +374,7 @@ impl DiscordChannel {
         host: Arc<dyn ChannelHost>,
         value: Value,
         me_id: &str,
-        thread_parents: &mut HashMap<String, String>,
+        thread_parents: &mut ThreadParents,
         last_seen: &mut HashMap<String, String>,
     ) {
         let Ok(message) = serde_json::from_value::<DiscordMessage>(value) else {
@@ -370,18 +390,31 @@ impl DiscordChannel {
         if message.author.bot.unwrap_or(false) && !self.options.allow_bots {
             return;
         }
+        // Checked before the parent lookup so an ignored channel costs no REST.
+        if self
+            .options
+            .ignored_channels
+            .iter()
+            .any(|id| id == &message.channel_id)
+        {
+            return;
+        }
         let is_group = message.guild_id.is_some();
         let parent = if is_group {
             if let Some(parent) = thread_parents.get(&message.channel_id) {
-                Some(parent.clone())
+                parent.clone()
             } else if self.channel_ids.iter().any(|id| id == &message.channel_id) {
                 None
             } else {
-                let parent = self.parent_channel_id(&message.channel_id).await;
-                if let Some(parent) = &parent {
-                    thread_parents.insert(message.channel_id.clone(), parent.clone());
+                // A failed lookup scopes this message to the channel itself and
+                // is not cached, so the next message asks again.
+                match self.parent_channel_id(&message.channel_id).await {
+                    Some(parent) => {
+                        remember_thread_parent(thread_parents, &message.channel_id, parent.clone());
+                        parent
+                    }
+                    None => None,
                 }
-                parent
             }
         } else {
             None
@@ -397,7 +430,7 @@ impl DiscordChannel {
             .options
             .ignored_channels
             .iter()
-            .any(|id| id == scope_channel || id == &message.channel_id)
+            .any(|id| id == scope_channel)
         {
             return;
         }
@@ -432,6 +465,7 @@ impl DiscordChannel {
             message_id: Some(message.id.clone()),
             is_group,
             attachments: parse_attachments(&message),
+            channel_action: None,
         };
         let provider_id = format!("message:{}", message.id);
         let channel = Arc::clone(self);
@@ -490,7 +524,7 @@ impl DiscordChannel {
         host: &Arc<dyn ChannelHost>,
         me_id: &str,
         last_seen: &mut HashMap<String, String>,
-        thread_parents: &mut HashMap<String, String>,
+        thread_parents: &mut ThreadParents,
     ) {
         for channel_id in &self.channel_ids {
             let Some(after) = last_seen.get(channel_id) else {
@@ -588,6 +622,7 @@ impl DiscordChannel {
         let scope_channel = if is_group {
             self.parent_channel_id(&channel_id)
                 .await
+                .flatten()
                 .unwrap_or_else(|| channel_id.clone())
         } else {
             channel_id.clone()
@@ -624,6 +659,7 @@ impl DiscordChannel {
             message_id: None,
             is_group,
             attachments: Vec::new(),
+            channel_action: None,
         };
         let channel = Arc::clone(self);
         let provider_id = format!("interaction:{interaction_id}");
@@ -669,6 +705,8 @@ impl Channel for DiscordChannel {
             voice: true,
             attachments: true,
             reactions: true,
+            reply_keyboards: false,
+            inline_buttons: false,
         }
     }
 
@@ -746,6 +784,27 @@ impl Channel for DiscordChannel {
             // Discord requires a length on this bodyless PUT; reqwest emits
             // `content-length: 0` for an empty body, so nothing else is needed.
             .body(Vec::new())
+            .header("Authorization", self.auth_header())
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    /// Take back this bot's own reaction (`DELETE …/reactions/{emoji}/@me`).
+    async fn remove_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> anyhow::Result<()> {
+        let target = target_channel(chat_id);
+        let encoded = encode_emoji(emoji);
+        let url =
+            format!("{API_BASE}/channels/{target}/messages/{message_id}/reactions/{encoded}/@me");
+        self.http()
+            .delete(&url)
             .header("Authorization", self.auth_header())
             .timeout(REQUEST_TIMEOUT)
             .send()
@@ -864,7 +923,7 @@ impl Channel for DiscordChannel {
                     if let Some(reporter) = &self.runtime.status {
                         reporter.error(&err.to_string()).await;
                     }
-                    tokio::time::sleep(ERROR_BACKOFF).await;
+                    tokio::time::sleep(reconnect_delay(reconnect_attempt)).await;
                     continue;
                 }
             };
@@ -877,11 +936,16 @@ impl Channel for DiscordChannel {
                     if let Some(reporter) = &self.runtime.status {
                         reporter.error(&err.to_string()).await;
                     }
-                    tokio::time::sleep(ERROR_BACKOFF).await;
+                    tokio::time::sleep(reconnect_delay(reconnect_attempt)).await;
                     continue;
                 }
             };
-            reconnect_attempt = 0;
+            // Do NOT reset the backoff on a bare socket open: Discord closes a
+            // session right after IDENTIFY for a revoked token (4004) or
+            // disallowed intents (4014). Resetting here re-IDENTIFIED every 3 s,
+            // burning the 1000-per-day identify budget (Discord then resets the
+            // bot token). The counter resets only on READY/RESUMED below.
+            reconnect_attempt = reconnect_attempt.saturating_add(1);
 
             let hello = match ws.next().await {
                 Some(Ok(WsMessage::Text(text))) => serde_json::from_str::<GatewayEnvelope>(&text)
@@ -891,7 +955,7 @@ impl Channel for DiscordChannel {
             };
             let Some(hello) = hello else {
                 warn!("discord Gateway did not send HELLO");
-                tokio::time::sleep(ERROR_BACKOFF).await;
+                tokio::time::sleep(reconnect_delay(reconnect_attempt)).await;
                 continue;
             };
             let heartbeat_ms = hello
@@ -924,7 +988,7 @@ impl Channel for DiscordChannel {
 
             let mut heartbeat = tokio::time::interval(Duration::from_millis(heartbeat_ms));
             heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut thread_parents = HashMap::new();
+            let mut thread_parents = ThreadParents::new();
             loop {
                 tokio::select! {
                     _ = heartbeat.tick() => {
@@ -948,6 +1012,7 @@ impl Channel for DiscordChannel {
                         if envelope.op == 0 {
                             match envelope.event_name.as_deref() {
                                 Some("READY") | Some("RESUMED") => {
+                                    reconnect_attempt = 0;
                                     if let Some(reporter) = &self.runtime.status { reporter.online().await; }
                                     if self.options.history_backfill {
                                         self.backfill(&host, &me_id, &mut last_seen, &mut thread_parents).await;
@@ -960,7 +1025,15 @@ impl Channel for DiscordChannel {
                                 }
                                 Some("INTERACTION_CREATE") => {
                                     if let Some(data) = envelope.d {
-                                        self.handle_interaction(data, Arc::clone(&host), &me_id).await;
+                                        // Off the select loop: the interaction runs a whole
+                                        // turn, which can take minutes, and awaiting it here
+                                        // would starve the heartbeat branch.
+                                        let channel = Arc::clone(&self);
+                                        let host = Arc::clone(&host);
+                                        let me_id = me_id.clone();
+                                        tokio::spawn(async move {
+                                            channel.handle_interaction(data, host, &me_id).await;
+                                        });
                                     }
                                 }
                                 _ => {}
@@ -978,6 +1051,30 @@ impl Channel for DiscordChannel {
 }
 
 // ─── Pure helpers ───────────────────────────────────────────────────────────
+
+/// The parent channel of `channel` when it is a thread, `None` otherwise.
+///
+/// A text channel's `parent_id` is its category, which must never become a
+/// conversation scope: that would treat every categorized channel as a thread
+/// (answering without a mention) and key its history to the category.
+fn thread_parent(channel: &DiscordChannelRef) -> Option<String> {
+    let is_thread = channel
+        .kind
+        .is_some_and(|kind| THREAD_CHANNEL_TYPES.contains(&kind));
+    channel
+        .parent_id
+        .clone()
+        .filter(|parent| is_thread && !parent.is_empty())
+}
+
+/// Store a definitive parent lookup, clearing the per-connection cache first
+/// when it is full so it stays bounded.
+fn remember_thread_parent(cache: &mut ThreadParents, channel_id: &str, parent: Option<String>) {
+    if cache.len() >= THREAD_PARENT_CACHE_MAX && !cache.contains_key(channel_id) {
+        cache.clear();
+    }
+    cache.insert(channel_id.to_owned(), parent);
+}
 
 /// Build the Core conversation key for a Discord inbound message.
 ///
@@ -1086,6 +1183,25 @@ fn encode_emoji(emoji: &str) -> String {
     out
 }
 
+/// The `allowed_mentions` object sent with every message the bot creates.
+///
+/// Reply text is model output that anyone who can address the bot (or any content
+/// injected into its context) can steer. Without this field Discord parses
+/// `@everyone`, `@here` and `<@&role>` out of `content` with the BOT's
+/// permissions, letting a member trigger mass pings they could not send
+/// themselves. Only user mentions are parsed — any member can already ping a user.
+fn allowed_mentions() -> Value {
+    json!({ "parse": ["users"] })
+}
+
+/// The JSON body for one text message create.
+fn message_payload(content: &str) -> Value {
+    json!({
+        "content": content,
+        "allowed_mentions": allowed_mentions(),
+    })
+}
+
 /// The `payload_json` half of a file upload. Discord maps a `files[N]` part to an
 /// entry in `attachments` by its `id`, so the two must agree or the upload is
 /// accepted with no attachment on it.
@@ -1093,6 +1209,7 @@ fn voice_payload(filename: &str) -> Value {
     json!({
         "content": "",
         "attachments": [{ "id": 0, "filename": filename }],
+        "allowed_mentions": allowed_mentions(),
     })
 }
 
@@ -1264,13 +1381,16 @@ struct DiscordAttachment {
     duration_secs: Option<f64>,
 }
 
-/// A created thread, of which only the id is needed.
+/// A channel or created thread, of which only the id, type and parent are needed.
 #[derive(Debug, Deserialize)]
 struct DiscordChannelRef {
     #[serde(default)]
     id: String,
     #[serde(default)]
     parent_id: Option<String>,
+    /// Discord's channel type; see [`THREAD_CHANNEL_TYPES`].
+    #[serde(default, rename = "type")]
+    kind: Option<u8>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1573,6 +1693,23 @@ mod tests {
         assert_eq!(payload["attachments"][0]["filename"], VOICE_FILENAME);
     }
 
+    /// Reply text is model output a member (or injected content) can steer, so no
+    /// message create may let Discord parse `@everyone`, `@here` or role mentions
+    /// out of it with the bot's permissions. User mentions stay pingable.
+    #[test]
+    fn message_creates_never_parse_everyone_here_or_role_mentions() {
+        let content = "@everyone @here <@&123> verify at https://evil.example <@456>";
+        let text = message_payload(content);
+        assert_eq!(text["content"], content);
+        for payload in [text, voice_payload(VOICE_FILENAME)] {
+            let parse = payload["allowed_mentions"]["parse"]
+                .as_array()
+                .expect("every message create must carry allowed_mentions.parse");
+            assert_eq!(parse, &vec![json!("users")]);
+            assert!(payload["allowed_mentions"].get("roles").is_none());
+        }
+    }
+
     #[test]
     fn parses_messages_response() {
         let raw = json!([
@@ -1635,5 +1772,48 @@ mod tests {
         // Everything else is classified from its MIME type and never transcribed.
         assert_eq!(parsed[1].resolved_kind(), AttachmentKind::Image);
         assert!(!parsed[1].resolved_kind().is_speech());
+    }
+
+    fn channel_ref(raw: Value) -> DiscordChannelRef {
+        serde_json::from_value(raw).unwrap()
+    }
+
+    #[test]
+    fn a_category_parent_is_not_a_thread_parent() {
+        let text_channel = channel_ref(json!({ "id": "c1", "type": 0, "parent_id": "category-1" }));
+        assert_eq!(thread_parent(&text_channel), None);
+        let untyped = channel_ref(json!({ "id": "c1", "parent_id": "category-1" }));
+        assert_eq!(thread_parent(&untyped), None);
+    }
+
+    #[test]
+    fn thread_types_resolve_to_their_parent_channel() {
+        for kind in [10, 11, 12] {
+            let thread = channel_ref(json!({ "id": "t1", "type": kind, "parent_id": "c1" }));
+            assert_eq!(thread_parent(&thread).as_deref(), Some("c1"), "type {kind}");
+        }
+        let orphan = channel_ref(json!({ "id": "t1", "type": 11 }));
+        assert_eq!(thread_parent(&orphan), None);
+    }
+
+    #[test]
+    fn ordinary_channels_are_cached_so_they_are_looked_up_once() {
+        let mut cache = ThreadParents::new();
+        remember_thread_parent(&mut cache, "c1", None);
+        remember_thread_parent(&mut cache, "t1", Some("c1".to_owned()));
+        // `Some(None)` is a cached "not a thread", distinct from "never asked".
+        assert_eq!(cache.get("c1"), Some(&None));
+        assert_eq!(cache.get("t1"), Some(&Some("c1".to_owned())));
+        assert_eq!(cache.get("c2"), None);
+
+        for index in 0..THREAD_PARENT_CACHE_MAX {
+            remember_thread_parent(&mut cache, &format!("x{index}"), None);
+        }
+        assert!(cache.len() <= THREAD_PARENT_CACHE_MAX);
+        // Updating a known channel never evicts the rest.
+        let before = cache.len();
+        let known = cache.keys().next().cloned().unwrap();
+        remember_thread_parent(&mut cache, &known, None);
+        assert_eq!(cache.len(), before);
     }
 }

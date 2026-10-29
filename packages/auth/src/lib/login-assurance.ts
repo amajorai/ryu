@@ -1,6 +1,7 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { deleteSessionCookie } from "better-auth/cookies";
+import { z } from "zod";
 
 /** The order used after a password has been accepted. */
 export type LoginFactor = "passkey" | "two-factor" | "email" | "none";
@@ -12,6 +13,11 @@ export interface LoginFactorDecisionInput {
 	hasPasskey: boolean;
 	trustedDevice: boolean;
 	twoFactorEnabled: boolean;
+}
+
+export interface LoginAssuranceChallenge {
+	fallbackFactor: LoginFallbackFactor;
+	loginFactor: Exclude<LoginFactor, "none">;
 }
 
 export interface LoginFactorDecision {
@@ -59,69 +65,78 @@ export const LOGIN_TRUST_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 const LOGIN_PENDING_MAX_AGE_SECONDS = 10 * 60;
 
-interface LoginCookie {
-	attributes: Record<string, unknown>;
-	name: string;
+type FrameworkCookieContext = Parameters<typeof deleteSessionCookie>[0];
+type LoginCookie = ReturnType<
+	FrameworkCookieContext["context"]["createAuthCookie"]
+>;
+type LoginCookieOptions = LoginCookie["attributes"];
+interface AdapterLookupRecord {
+	email?: string;
+	id?: string;
+	userId?: string;
+}
+interface LoginCreatedSession {
+	session?: { token?: string };
+	user?: { email?: string; id?: string; twoFactorEnabled?: boolean | null };
 }
 
 interface AdapterWhere {
 	field: string;
-	value: unknown;
+	value: string;
 }
 
 interface LoginAssuranceContext {
 	body?: unknown;
 	context: {
 		adapter: {
-			findMany<T = unknown>(input: {
+			findMany(input: {
 				model: string;
 				where?: AdapterWhere[];
-			}): Promise<T[]>;
-			findOne<T = unknown>(input: {
+			}): Promise<readonly (object | undefined)[]>;
+			findOne(input: {
 				model: string;
-				where?: AdapterWhere[];
-			}): Promise<T | null>;
+				where: AdapterWhere[];
+			}): Promise<AdapterLookupRecord | null>;
 		};
 		createAuthCookie: (
 			name: string,
 			overrides?: { maxAge?: number }
 		) => LoginCookie;
 		internalAdapter: {
-			deleteSession: (token: string) => Promise<unknown>;
+			deleteSession: (token: string) => Promise<void>;
 		};
-		newSession?: {
-			session?: { token?: string };
-			user?: {
-				email?: string;
-				id?: string;
-				twoFactorEnabled?: boolean | null;
-			};
-		} | null;
+		newSession?: LoginCreatedSession | null;
+		authCookies: FrameworkCookieContext["context"]["authCookies"];
+		options: FrameworkCookieContext["context"]["options"];
+		oauthConfig: Pick<
+			FrameworkCookieContext["context"]["oauthConfig"],
+			"storeStateStrategy"
+		>;
 		secret: string;
-		setNewSession: (session: unknown) => void;
+		setNewSession: (session: null) => void;
 	};
-	getSignedCookie: (name: string, secret: string) => Promise<string | null>;
+	getSignedCookie: (
+		name: string,
+		secret: string
+	) => Promise<string | false | null>;
 	header?: (name: string) => string | null;
 	headers?: Headers;
-	json: (body: unknown, init?: ResponseInit) => unknown;
+	json: (body: LoginAssuranceChallenge) => Promise<LoginAssuranceChallenge>;
 	path?: string;
 	request?: Request;
-	setCookie: (
-		name: string,
-		value: string,
-		options: Record<string, unknown>
-	) => void;
+	setCookie: (name: string, value: string, options: LoginCookieOptions) => void;
 	setSignedCookie: (
 		name: string,
 		value: string,
 		secret: string,
-		options: Record<string, unknown>
-	) => Promise<unknown>;
+		options: LoginCookieOptions
+	) => Promise<string>;
 }
 
 interface PendingLogin {
 	email: string;
 	expiresAt: number;
+	flow: "magic-link" | "password";
 	rememberDevice: boolean;
 	userId: string;
 }
@@ -137,19 +152,37 @@ interface NewLoginSession {
 	userId: string;
 }
 
-function contextOf(value: unknown): LoginAssuranceContext {
-	return value as LoginAssuranceContext;
-}
-
-function recordOf(value: unknown): Record<string, unknown> | null {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function stringValue(value: unknown): string | null {
-	return typeof value === "string" && value.length > 0 ? value : null;
-}
+const stringValue = z.string().min(1).nullable().catch(null).parse;
+const bodySchema = z
+	.object({
+		email: z.string().optional().catch(undefined),
+		factorFallback: z.enum(["two-factor", "email"]).optional().catch(undefined),
+		rememberDevice: z.boolean().catch(false),
+		trustDevice: z.boolean().catch(false),
+		response: z
+			.object({ id: z.string().optional().catch(undefined) })
+			.optional()
+			.catch(undefined),
+	})
+	.catch(() => ({ rememberDevice: false, trustDevice: false }));
+const pendingLoginSchema = z.object({
+	email: z
+		.string()
+		.min(1)
+		.transform((email) => email.trim().toLowerCase()),
+	expiresAt: z.number().refine((expiresAt) => expiresAt > Date.now()),
+	flow: z.enum(["magic-link", "password"]).catch("password"),
+	rememberDevice: z.boolean().catch(false),
+	userId: z.string().min(1),
+});
+// The pending and trust cookies are signed with the same secret, and the
+// signature covers only the value, not the cookie name. Parse trust strictly so
+// a pending payload (which always carries email, flow and rememberDevice) can
+// never be replayed as a 30-day trusted-device cookie.
+const trustedDeviceSchema = z.strictObject({
+	expiresAt: z.number().refine((expiresAt) => expiresAt > Date.now()),
+	userId: z.string().min(1),
+});
 
 function normalizeEmail(value: string): string {
 	return value.trim().toLowerCase();
@@ -159,49 +192,20 @@ function parsePendingLogin(value: string | null): PendingLogin | null {
 	if (!value) {
 		return null;
 	}
-
 	try {
-		const parsed = recordOf(JSON.parse(value));
-		const email = stringValue(parsed?.email);
-		const expiresAt = parsed?.expiresAt;
-		const userId = stringValue(parsed?.userId);
-		if (
-			!(email && userId) ||
-			typeof expiresAt !== "number" ||
-			!Number.isFinite(expiresAt) ||
-			expiresAt <= Date.now()
-		) {
-			return null;
-		}
-		return {
-			email: normalizeEmail(email),
-			expiresAt,
-			rememberDevice: parsed?.rememberDevice === true,
-			userId,
-		};
+		const parsed = pendingLoginSchema.safeParse(JSON.parse(value));
+		return parsed.success ? parsed.data : null;
 	} catch {
 		return null;
 	}
 }
-
 function parseTrustedDevice(value: string | null): TrustedDevice | null {
 	if (!value) {
 		return null;
 	}
-
 	try {
-		const parsed = recordOf(JSON.parse(value));
-		const expiresAt = parsed?.expiresAt;
-		const userId = stringValue(parsed?.userId);
-		if (
-			!userId ||
-			typeof expiresAt !== "number" ||
-			!Number.isFinite(expiresAt) ||
-			expiresAt <= Date.now()
-		) {
-			return null;
-		}
-		return { expiresAt, userId };
+		const parsed = trustedDeviceSchema.safeParse(JSON.parse(value));
+		return parsed.success ? parsed.data : null;
 	} catch {
 		return null;
 	}
@@ -213,7 +217,7 @@ async function signedCookie(
 ): Promise<{ cookie: LoginCookie; value: string | null }> {
 	const cookie = ctx.context.createAuthCookie(name);
 	const value = await ctx.getSignedCookie(cookie.name, ctx.context.secret);
-	return { cookie, value };
+	return { cookie, value: value === false ? null : value };
 }
 
 async function pendingLogin(
@@ -244,7 +248,12 @@ function clearCookie(ctx: LoginAssuranceContext, cookie: LoginCookie): void {
 
 async function setPendingLogin(
 	ctx: LoginAssuranceContext,
-	input: { email: string; rememberDevice: boolean; userId: string }
+	input: {
+		email: string;
+		flow?: PendingLogin["flow"];
+		rememberDevice: boolean;
+		userId: string;
+	}
 ): Promise<void> {
 	const cookie = ctx.context.createAuthCookie(LOGIN_PENDING_COOKIE, {
 		maxAge: LOGIN_PENDING_MAX_AGE_SECONDS,
@@ -254,6 +263,7 @@ async function setPendingLogin(
 		JSON.stringify({
 			email: normalizeEmail(input.email),
 			expiresAt: Date.now() + LOGIN_PENDING_MAX_AGE_SECONDS * 1000,
+			flow: input.flow ?? "password",
 			rememberDevice: input.rememberDevice,
 			userId: input.userId,
 		}),
@@ -293,10 +303,10 @@ async function removeNewSession(
 	ctx: LoginAssuranceContext,
 	session: NewLoginSession
 ): Promise<void> {
-	deleteSessionCookie(
-		ctx as unknown as Parameters<typeof deleteSessionCookie>[0],
-		true
-	);
+	// SAFETY: this framework hook supplies the SDK's cookie definitions, cookie
+	// writer, request headers and OAuth cookie policy used by deleteSessionCookie.
+	// Its broader context type also contains unrelated services unused here.
+	deleteSessionCookie(ctx as FrameworkCookieContext, true);
 	await ctx.context.internalAdapter.deleteSession(session.token);
 	ctx.context.setNewSession(null);
 }
@@ -328,10 +338,9 @@ function pendingMatchesSession(
  * while still allowing the built-in 2FA plugin to own its fallback challenge.
  */
 export async function loginAssuranceAfterPassword(
-	value: unknown
-): Promise<unknown | undefined> {
-	const ctx = contextOf(value);
-	if (ctx.path !== "/sign-in/email") {
+	ctx: LoginAssuranceContext
+): Promise<LoginAssuranceChallenge | undefined> {
+	if (ctx.path !== "/sign-in/email" && ctx.path !== "/sign-in/username") {
 		return;
 	}
 
@@ -340,7 +349,7 @@ export async function loginAssuranceAfterPassword(
 		return;
 	}
 
-	const body = recordOf(ctx.body);
+	const body = bodySchema.parse(ctx.body);
 	const fallback =
 		body?.factorFallback === "two-factor" || body?.factorFallback === "email"
 			? body.factorFallback
@@ -358,7 +367,9 @@ export async function loginAssuranceAfterPassword(
 	}
 
 	const pending = await pendingLogin(ctx);
-	const pendingMatches = pendingMatchesSession(pending.pending, session);
+	const pendingMatches =
+		pending.pending?.flow === "password" &&
+		pendingMatchesSession(pending.pending, session);
 	if (pendingMatches && fallback === "two-factor" && twoFactorEnabled) {
 		await setPendingLogin(ctx, {
 			email: session.userEmail,
@@ -403,22 +414,71 @@ export async function loginAssuranceAfterPassword(
 }
 
 /**
+ * Bind an optional 30-day device choice to a magic-link request. The signed
+ * pending cookie is consumed only after Better Auth finishes the link on this
+ * same browser, so opening the email on another device cannot trust it.
+ */
+export async function loginAssuranceAfterMagicLinkRequest(
+	ctx: LoginAssuranceContext
+): Promise<void> {
+	if (ctx.path !== "/sign-in/magic-link") {
+		return;
+	}
+
+	const email = stringValue(bodySchema.parse(ctx.body)?.email);
+	if (!email) {
+		return;
+	}
+
+	const normalizedEmail = normalizeEmail(email);
+	const pending = await pendingLogin(ctx);
+	const rememberDevice = requestHeader(ctx, "x-ryu-remember-device") === "true";
+	if (!rememberDevice) {
+		if (
+			pending.pending?.flow === "magic-link" &&
+			pending.pending.email === normalizedEmail
+		) {
+			clearCookie(ctx, pending.cookie);
+		}
+		return;
+	}
+
+	const user = await ctx.context.adapter.findOne({
+		model: "user",
+		where: [{ field: "email", value: normalizedEmail }],
+	});
+	const userId = stringValue(user?.id);
+	const userEmail = stringValue(user?.email);
+	if (!(userId && userEmail)) {
+		return;
+	}
+
+	await setPendingLogin(ctx, {
+		email: userEmail,
+		flow: "magic-link",
+		rememberDevice: true,
+		userId,
+	});
+}
+
+/**
  * Prevent an email OTP from a different account being used to finish a
  * pending password login. Direct email-OTP sign-in without a pending cookie is
  * still supported by Better Auth's normal passwordless flow.
  */
-export async function assertPendingEmailMatches(value: unknown): Promise<void> {
-	const ctx = contextOf(value);
+export async function assertPendingEmailMatches(
+	ctx: LoginAssuranceContext
+): Promise<void> {
 	if (ctx.path !== "/sign-in/email-otp") {
 		return;
 	}
 
 	const { pending } = await pendingLogin(ctx);
-	if (!pending) {
+	if (pending?.flow !== "password") {
 		return;
 	}
 
-	const email = stringValue(recordOf(ctx.body)?.email);
+	const email = stringValue(bodySchema.parse(ctx.body)?.email);
 	if (!email || normalizeEmail(email) !== pending.email) {
 		throw new APIError("UNAUTHORIZED", {
 			message: "This sign-in challenge belongs to a different account",
@@ -432,15 +492,14 @@ export async function assertPendingEmailMatches(value: unknown): Promise<void> {
  * password was just accepted before the plugin creates a real session.
  */
 export async function assertPendingPasskeyMatches(
-	value: unknown
+	ctx: LoginAssuranceContext
 ): Promise<void> {
-	const ctx = contextOf(value);
 	const { pending } = await pendingLogin(ctx);
-	if (!pending) {
+	if (pending?.flow !== "password") {
 		return;
 	}
 
-	const response = recordOf(recordOf(ctx.body)?.response);
+	const response = bodySchema.parse(ctx.body).response;
 	const credentialId = stringValue(response?.id);
 	if (!credentialId) {
 		throw new APIError("UNAUTHORIZED", {
@@ -448,7 +507,7 @@ export async function assertPendingPasskeyMatches(
 		});
 	}
 
-	const passkey = await ctx.context.adapter.findOne<{ userId?: unknown }>({
+	const passkey = await ctx.context.adapter.findOne({
 		model: "passkey",
 		where: [{ field: "credentialID", value: credentialId }],
 	});
@@ -464,9 +523,11 @@ export async function assertPendingPasskeyMatches(
  * succeeds. The trust choice is never accepted until the factor endpoint has
  * completed successfully.
  */
-export async function loginAssuranceAfterFactor(value: unknown): Promise<void> {
-	const ctx = contextOf(value);
+export async function loginAssuranceAfterFactor(
+	ctx: LoginAssuranceContext
+): Promise<void> {
 	if (
+		ctx.path !== "/magic-link/verify" &&
 		ctx.path !== "/passkey/verify-authentication" &&
 		ctx.path !== "/sign-in/email-otp" &&
 		ctx.path !== "/two-factor/verify-totp" &&
@@ -482,8 +543,13 @@ export async function loginAssuranceAfterFactor(value: unknown): Promise<void> {
 	}
 
 	const pending = await pendingLogin(ctx);
-	if (pendingMatchesSession(pending.pending, session)) {
-		const body = recordOf(ctx.body);
+	const expectedFlow =
+		ctx.path === "/magic-link/verify" ? "magic-link" : "password";
+	if (
+		pending.pending?.flow === expectedFlow &&
+		pendingMatchesSession(pending.pending, session)
+	) {
+		const body = bodySchema.parse(ctx.body);
 		if (pending.pending?.rememberDevice || body?.trustDevice === true) {
 			await setTrustedDevice(ctx, session.userId);
 		}
@@ -501,10 +567,9 @@ export async function loginAssuranceAfterFactor(value: unknown): Promise<void> {
 
 /** Remove an abandoned pending cookie when Better Auth's 2FA trust cookie lets the password login through. */
 async function cleanupPendingAfterPasswordSignIn(
-	value: unknown
+	ctx: LoginAssuranceContext
 ): Promise<void> {
-	const ctx = contextOf(value);
-	if (ctx.path !== "/sign-in/email") {
+	if (ctx.path !== "/sign-in/email" && ctx.path !== "/sign-in/username") {
 		return;
 	}
 	const session = newLoginSession(ctx);
@@ -512,7 +577,10 @@ async function cleanupPendingAfterPasswordSignIn(
 		return;
 	}
 	const pending = await pendingLogin(ctx);
-	if (pendingMatchesSession(pending.pending, session)) {
+	if (
+		pending.pending?.flow === "password" &&
+		pendingMatchesSession(pending.pending, session)
+	) {
 		clearCookie(ctx, pending.cookie);
 	}
 }
@@ -529,7 +597,8 @@ export function loginAssuranceCleanupPlugin(): BetterAuthPlugin {
 		hooks: {
 			after: [
 				{
-					matcher: (ctx: { path?: string }) => ctx.path === "/sign-in/email",
+					matcher: (ctx: { path?: string }) =>
+						ctx.path === "/sign-in/email" || ctx.path === "/sign-in/username",
 					handler: createAuthMiddleware(async (ctx) => {
 						await cleanupPendingAfterPasswordSignIn(ctx);
 					}),

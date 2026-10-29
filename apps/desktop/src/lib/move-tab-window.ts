@@ -1,4 +1,5 @@
 import type { Tab } from "@/src/contexts/TabsContext.tsx";
+import type { ArtifactView } from "@/src/lib/live-artifacts.ts";
 import {
 	snapshotTab,
 	type TabTransfer,
@@ -9,13 +10,19 @@ import { conversationEntityKey } from "@/src/lib/window-routing.ts";
 import { useArtifactStore } from "@/src/store/useArtifactStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
+/** Outbound live store carriage reaches the unchanged native serializer.
+ * This does not claim a parsed recipient Artifact or widen its wire contract. */
+type OutboundTabTransfer = Omit<TabTransfer, "artifact"> & {
+	artifact?: ArtifactView;
+};
+
 /** Resolves true only after the new renderer has mounted the transferred tab.
  * A failed/cancelled drag or window creation leaves the source untouched. */
 export async function moveTabToWindow(
 	tab: Tab,
 	dragOut = false
 ): Promise<boolean> {
-	const transfer: TabTransfer = {
+	const transfer: OutboundTabTransfer = {
 		version: 1,
 		tab: snapshotTab(tab),
 		node: useNodeStore.getState().getActiveNode(tab.id).name,

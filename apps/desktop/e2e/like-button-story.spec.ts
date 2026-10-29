@@ -184,8 +184,9 @@ test("a SIGNED-OUT visitor sees the count, and a click prompts instead of liking
 		.poll(() =>
 			page.evaluate(
 				() =>
-					(window as unknown as { __likeAuthPrompts: string[] })
-						.__likeAuthPrompts.length
+					/* SAFETY: like-button-story.tsx installs __likeAuthPrompts before this proof page is evaluated. */ (
+						window as Window & { __likeAuthPrompts: string[] }
+					).__likeAuthPrompts.length
 			)
 		)
 		.toBe(1);

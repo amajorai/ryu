@@ -37,4 +37,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "dashboard-chart-blocks-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

@@ -1,3 +1,4 @@
+import type { WorkflowRunRecord } from "@ryu/app-host/rpc";
 // Renders the `data-ryu-workflow` part a workflow-as-chat-turn produces — a
 // live per-node checklist of the DAG as it executes (planner → implementer →
 // verifier …). Core emits repeated frames sharing `"id":"workflow-run"` so the
@@ -5,11 +6,12 @@
 // therefore updates in place rather than stacking. See
 // `apps/core/src/sidecar/adapters/mod.rs` (`route_workflow_chat_stream`).
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { TodoList } from "@ryu/ui/components/agents/todo-list";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
-import type { UIMessage } from "ai";
-import { type FormEvent, useEffect, useState } from "react";
+import { type SubmitEvent, useEffect, useState } from "react";
+import type { RenderedMessage } from "./utils/native-sdk-observation.ts";
 import {
 	extractWorkflowRun,
 	type WorkflowRunProgress,
@@ -27,7 +29,7 @@ export {
 export type WorkflowResumeHandler = (
 	runId: string,
 	payload: string
-) => Promise<unknown>;
+) => Promise<WorkflowRunRecord> | Promise<void>;
 
 /** The latest `data-ryu-workflow` snapshot on a message, or null. A repeated
  *  frame of the same type can arrive as a single object (in-place reconcile) or
@@ -53,9 +55,10 @@ export function WorkflowRunProgressCard({
 	msg,
 	onResume,
 }: {
-	msg: UIMessage;
+	msg: Pick<RenderedMessage, "parts">;
 	onResume?: WorkflowResumeHandler;
 }) {
+	const tl = useLiteralMessages();
 	const run = extractWorkflowRun(msg);
 	if (!run) {
 		return null;
@@ -76,7 +79,9 @@ export function WorkflowRunProgressCard({
 				defaultOpen
 				items={items}
 				maxHeight={320}
-				title={`Workflow: ${run.workflowName}`}
+				title={tl("Workflow: {workflowName}", {
+					workflowName: run.workflowName,
+				})}
 			/>
 			{run.status === "awaiting_input" && onResume ? (
 				<WorkflowResumePrompt key={run.runId} onResume={onResume} run={run} />
@@ -92,6 +97,7 @@ function WorkflowResumePrompt({
 	onResume: WorkflowResumeHandler;
 	run: WorkflowRunProgress;
 }) {
+	const tl = useLiteralMessages();
 	const [payload, setPayload] = useState("");
 	const [submitting, setSubmitting] = useState(false);
 	const [submitted, setSubmitted] = useState(false);
@@ -104,7 +110,7 @@ function WorkflowResumePrompt({
 		setError(null);
 	}, [run.runId]);
 
-	const submit = async (event: FormEvent<HTMLFormElement>) => {
+	const submit = async (event: SubmitEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (submitting || submitted) {
 			return;
@@ -136,7 +142,9 @@ function WorkflowResumePrompt({
 
 	return (
 		<form
-			aria-label={`Resume workflow ${run.workflowName}`}
+			aria-label={tl("Resume workflow {workflowName}", {
+				workflowName: run.workflowName,
+			})}
 			className="mt-2 flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/20 p-3"
 			onSubmit={submit}
 		>

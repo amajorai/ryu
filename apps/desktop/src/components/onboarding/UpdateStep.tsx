@@ -1,13 +1,14 @@
 import { Download01Icon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import { Switch } from "@ryu/ui/components/switch";
-import { cn } from "@ryu/ui/lib/utils";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useState } from "react";
 import { sileo } from "sileo";
+import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import {
 	installUpdate,
 	prepareUpdate,
@@ -53,10 +54,11 @@ export interface UpdateStepViewProps {
 }
 
 function statusCopy(
+	tl: LiteralMessage,
 	status: UpdateStepStatus,
 	availableVersion?: string | null,
 	errorMessage?: string | null
-): { description: string; title: string } {
+) {
 	if (status === "checking") {
 		return {
 			description: "Just a moment…",
@@ -66,7 +68,7 @@ function statusCopy(
 	if (status === "available") {
 		return {
 			description: availableVersion
-				? `Version ${availableVersion} is ready`
+				? tl("Version {availableVersion} is ready", { availableVersion })
 				: "A new version of Ryu is ready",
 			title: "Update available",
 		};
@@ -102,7 +104,8 @@ export function UpdateStepView({
 	prepared = false,
 	status,
 }: UpdateStepViewProps) {
-	const copy = statusCopy(status, availableVersion, errorMessage);
+	const tl = useLiteralMessages();
+	const copy = statusCopy(tl, status, availableVersion, errorMessage);
 	const isAvailable = status === "available";
 	const isError = status === "error";
 
@@ -114,7 +117,7 @@ export function UpdateStepView({
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						<RyuOnboardingAvatar />
 					</div>
 					<PageHeader
 						stagger={false}
@@ -264,7 +267,7 @@ export function UpdateStep({ onContinue }: UpdateStepProps) {
 				}
 				await check(enabled);
 			})
-			.catch((error: unknown) => {
+			.catch((error) => {
 				if (!active) {
 					return;
 				}
@@ -287,7 +290,7 @@ export function UpdateStep({ onContinue }: UpdateStepProps) {
 
 	const handleCheck = useCallback(() => {
 		check(automaticDownload)
-			.catch((error: unknown) => {
+			.catch((error) => {
 				setStatus("error");
 				setErrorMessage(
 					error instanceof Error

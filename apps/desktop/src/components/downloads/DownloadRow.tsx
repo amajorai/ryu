@@ -20,6 +20,8 @@ import {
 	PauseIcon,
 	PlayIcon,
 } from "@hugeicons/core-free-icons";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
+import { toast } from "@ryu/ui/components/sileo";
 import { useEffect, useState } from "react";
 import {
 	TrayAction,
@@ -37,9 +39,29 @@ import {
 	resumeDownload,
 	retryDownload,
 } from "@/src/lib/api/downloads.ts";
+import {
+	downloadBadge,
+	stripRoleSuffix,
+} from "@/src/lib/catalog/downloadBadge.ts";
 import { friendlyDownloadLabel } from "@/src/lib/catalog/friendly.ts";
+import { useDownloadsStore } from "@/src/store/useDownloadsStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import { DownloadTypeBadge } from "./DownloadTypeBadge.tsx";
 import { kindIcon } from "./kindIcons.ts";
+
+/**
+ * Surface a failed pause/resume/cancel/dismiss/retry. The usual cause is Core no
+ * longer knowing the task (it restarted) or refusing the caller; swallowing it
+ * leaves a button that silently does nothing.
+ */
+function reportControlFailure(tl: LiteralMessage, action: string) {
+	return (error: unknown) => {
+		toast.error({
+			title: tl("Couldn't {action} the download", { action }),
+			description: error instanceof Error ? error.message : String(error),
+		});
+	};
+}
 
 export function formatBytes(n: number): string {
 	if (n < 1024) {
@@ -107,10 +129,25 @@ export function DownloadRow({
 }) {
 	const getNode = useNodeStore((s) => s.getActiveNode);
 	const target = toTarget(getNode());
+	const [busy, setBusy] = useState(false);
+	const tl = useLiteralMessages();
+	async function runAction(label: string, action: () => Promise<unknown>) {
+		setBusy(true);
+		try {
+			await action();
+		} catch (error) {
+			reportControlFailure(tl, label.toLowerCase())(error);
+		} finally {
+			setBusy(false);
+		}
+	}
 
-	const displayLabel = friendly
-		? friendlyDownloadLabel(task.label, task.kind)
-		: task.label;
+	// The type badge carries the role, so the redundant "(embedding model)"
+	// parenthetical is stripped from the name; the raw label stays on hover.
+	const badge = downloadBadge(task.role, task.kind, task.label);
+	const displayLabel = stripRoleSuffix(
+		friendly ? friendlyDownloadLabel(task.label, task.kind) : task.label
+	);
 
 	const sizeText = task.total_bytes
 		? `${formatBytes(task.received_bytes)} of ${formatBytes(task.total_bytes)}`
@@ -157,7 +194,7 @@ export function DownloadRow({
 							icon={PauseIcon}
 							label="Pause"
 							onClick={() =>
-								pauseDownload(target, task.id).catch(() => undefined)
+								runAction("Pause", () => pauseDownload(target, task.id))
 							}
 						/>
 					)}
@@ -166,7 +203,7 @@ export function DownloadRow({
 							icon={PlayIcon}
 							label="Resume"
 							onClick={() =>
-								resumeDownload(target, task.id).catch(() => undefined)
+								runAction("Resume", () => resumeDownload(target, task.id))
 							}
 						/>
 					)}
@@ -175,7 +212,7 @@ export function DownloadRow({
 							icon={Cancel01Icon}
 							label="Cancel"
 							onClick={() =>
-								cancelDownload(target, task.id).catch(() => undefined)
+								runAction("Cancel", () => cancelDownload(target, task.id))
 							}
 							tone="danger"
 						/>
@@ -184,7 +221,10 @@ export function DownloadRow({
 							icon={Delete02Icon}
 							label="Dismiss"
 							onClick={() =>
-								clearDownload(target, task.id).catch(() => undefined)
+								runAction("Dismiss", async () => {
+									await clearDownload(target, task.id);
+									useDownloadsStore.getState().removeTask(task.id);
+								})
 							}
 						/>
 					)}
@@ -192,12 +232,13 @@ export function DownloadRow({
 						<TrayAction
 							label="Retry"
 							onClick={() =>
-								retryDownload(target, task.id).catch(() => undefined)
+								runAction("Retry", () => retryDownload(target, task.id))
 							}
 						/>
 					)}
 				</span>
 			}
+			busy={busy}
 			icon={done ? CheckmarkCircle02Icon : kindIcon(task.kind)}
 			meta={meta}
 			metaTone={failed ? "danger" : "default"}
@@ -207,6 +248,7 @@ export function DownloadRow({
 			// label made the whole row a tooltip target.
 			title={<span title={task.label}>{displayLabel}</span>}
 			tone={tone}
+			trailing={badge ? <DownloadTypeBadge badge={badge} /> : undefined}
 		/>
 	);
 }

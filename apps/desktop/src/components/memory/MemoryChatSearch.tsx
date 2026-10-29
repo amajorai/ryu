@@ -7,8 +7,9 @@
 
 import { Message01Icon, Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -16,10 +17,10 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -81,6 +82,7 @@ function ChatSearchHitRow({
 }) {
 	const title = hitLabel(hit, conversationTitle);
 	const relevance = Math.round(hit.score * 100);
+	const tl = useLiteralMessages();
 
 	return (
 		<li
@@ -88,8 +90,8 @@ function ChatSearchHitRow({
 			data-testid="memory-chat-result"
 		>
 			<Button
-				aria-label={`Open ${title}`}
-				className="h-auto w-full justify-start whitespace-normal px-4 py-3 text-left"
+				aria-label={tl("Open {title}", { title })}
+				className="h-auto w-full justify-start whitespace-normal text-left"
 				onClick={() => onOpen(hit.conversationId)}
 				variant="ghost"
 			>
@@ -105,7 +107,9 @@ function ChatSearchHitRow({
 							</span>
 							<Badge variant="secondary">{formatRole(hit.role)}</Badge>
 							{relevance > 0 ? (
-								<Badge variant="outline">{relevance}% match</Badge>
+								<Badge variant="outline">
+									{tl("{relevance}% match", { relevance })}
+								</Badge>
 							) : null}
 						</div>
 						<p className="mt-1 line-clamp-3 whitespace-pre-wrap text-muted-foreground text-sm leading-relaxed">
@@ -299,8 +303,8 @@ export function MemoryChatSearch({
 				/>
 				<Input
 					aria-label="Search past chats"
-					className="pl-9"
 					disabled={loadingPreference || !rememberChats}
+					leadingAdornment="default"
 					onChange={(event) => setQuery(event.target.value)}
 					placeholder="Search past chats by meaning…"
 					ref={searchInputRef}
@@ -309,12 +313,10 @@ export function MemoryChatSearch({
 			</div>
 
 			{loadingPreference || loading ? (
-				<div className="flex justify-center py-16">
-					<Spinner />
-				</div>
+				<SkeletonRows spacing="review" />
 			) : rememberChats ? (
 				error ? (
-					<Empty className="py-12">
+					<Empty>
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
 								<HugeiconsIcon icon={Message01Icon} />
@@ -337,7 +339,7 @@ export function MemoryChatSearch({
 						</EmptyContent>
 					</Empty>
 				) : result?.indexed === false ? (
-					<Empty className="py-12">
+					<Empty>
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
 								<HugeiconsIcon icon={Message01Icon} />
@@ -360,7 +362,7 @@ export function MemoryChatSearch({
 						</EmptyContent>
 					</Empty>
 				) : trimmed.length < 2 ? (
-					<Empty className="py-12">
+					<Empty>
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
 								<HugeiconsIcon icon={Message01Icon} />
@@ -378,7 +380,7 @@ export function MemoryChatSearch({
 						</EmptyContent>
 					</Empty>
 				) : hits.length === 0 ? (
-					<Empty className="py-12">
+					<Empty>
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
 								<HugeiconsIcon icon={Message01Icon} />
@@ -407,7 +409,7 @@ export function MemoryChatSearch({
 					</ul>
 				)
 			) : (
-				<Empty className="py-12">
+				<Empty>
 					<EmptyHeader>
 						<EmptyMedia variant="icon">
 							<HugeiconsIcon icon={Message01Icon} />

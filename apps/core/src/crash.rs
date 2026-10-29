@@ -14,7 +14,7 @@
 //! Gates (both must hold, else a true no-op):
 //!   1. `crash-reports-enabled` is on (default ON, opt-out) — resolved via
 //!      [`crate::privacy::crash_reports_enabled`] from the pref → env → default.
-//!   2. A DSN is configured (`SENTRY_DSN` / `RYU_SENTRY_DSN`). With no DSN the
+//!   2. A DSN is configured (`SENTRY_DSN`). With no DSN the
 //!      whole module is a graceful no-op, so a fresh local install reports nothing
 //!      and never crashes boot.
 //!
@@ -50,22 +50,17 @@ pub fn dsn() -> Option<String> {
     resolve_dsn()
 }
 
-/// The Sentry DSN env vars, in resolution order. `SENTRY_DSN` is the Sentry-standard
-/// name; `RYU_SENTRY_DSN` is the Ryu-namespaced mirror Core forwards to the gateway.
-const SENTRY_DSN_ENVS: [&str; 2] = ["RYU_SENTRY_DSN", "SENTRY_DSN"];
+/// The Sentry DSN env var Core reads (the Sentry-standard name the desktop sets).
+/// Core forwards the resolved value to the gateway as `RYU_SENTRY_DSN`.
+const SENTRY_DSN_ENV: &str = "SENTRY_DSN";
 
-/// Resolve the configured DSN (Ryu mirror first, then the Sentry-standard name).
-/// An empty / unset value means "no crash reporting destination" → no-op.
+/// Resolve the configured DSN. An empty / unset value means "no crash reporting
+/// destination" → no-op.
 fn resolve_dsn() -> Option<String> {
-    for key in SENTRY_DSN_ENVS {
-        if let Ok(dsn) = std::env::var(key) {
-            let trimmed = dsn.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
+    std::env::var(SENTRY_DSN_ENV)
+        .ok()
+        .map(|dsn| dsn.trim().to_string())
+        .filter(|dsn| !dsn.is_empty())
 }
 
 /// Replace the current user's home-dir prefix in `s` with `~` so absolute paths
@@ -171,17 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn dsn_resolution_prefers_ryu_mirror() {
-        // Guard against env pollution from a parallel test: set both, expect mirror.
-        // (std::env is process-global; this test sets+clears its own keys.)
-        // SAFETY: single-threaded test access to these specific keys.
+    fn dsn_resolution_reads_sentry_dsn() {
+        // std::env is process-global; this test sets+clears its own key.
+        // SAFETY: single-threaded test access to this specific key.
         unsafe {
-            std::env::set_var("RYU_SENTRY_DSN", "https://ryu@example/1");
-            std::env::set_var("SENTRY_DSN", "https://std@example/2");
-        }
-        assert_eq!(resolve_dsn().as_deref(), Some("https://ryu@example/1"));
-        unsafe {
-            std::env::remove_var("RYU_SENTRY_DSN");
+            std::env::set_var("SENTRY_DSN", "  https://std@example/2  ");
         }
         assert_eq!(resolve_dsn().as_deref(), Some("https://std@example/2"));
         unsafe {

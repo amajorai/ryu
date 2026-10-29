@@ -25,7 +25,9 @@ import {
 	TrayFooter,
 	TrayHeader,
 	TrayMorph,
+	type TrayPlacement,
 	TrayProgressLine,
+	TrayRefreshButton,
 	TrayScroll,
 	TraySectionLabel,
 	TrayTextButton,
@@ -51,7 +53,11 @@ import { DownloadRow, formatBytes } from "./DownloadRow.tsx";
  * action that pops out to the full page. Always rendered so it stays a stable
  * sidebar control; the panel shows an empty state when nothing is tracked.
  */
-export function DownloadCenter() {
+export function DownloadCenter({
+	placement = "sidebar",
+}: {
+	placement?: TrayPlacement;
+} = {}) {
 	// useShallow: both selectors derive a fresh object/array each call; without a
 	// shallow equality check Zustand's useSyncExternalStore sees a new snapshot
 	// every render ("getSnapshot should be cached") and spins into an infinite
@@ -132,33 +138,37 @@ export function DownloadCenter() {
 			label="Downloads"
 			onOpenChange={setOpen}
 			open={open}
+			placement={placement}
 		>
 			<TrayHeader
 				actions={
-					finished.length > 0 || active.length > 0 ? (
-						<>
-							{active.length > 0 ? (
-								<TrayTextButton
-									disabled={clearing}
-									onClick={() => {
-										clearUnfinished().catch(() => undefined);
-									}}
-								>
-									Clear unfinished
-								</TrayTextButton>
-							) : null}
-							{finished.length > 0 ? (
-								<TrayTextButton
-									disabled={clearing}
-									onClick={() => {
-										clearFinished().catch(() => undefined);
-									}}
-								>
-									Clear finished
-								</TrayTextButton>
-							) : null}
-						</>
-					) : undefined
+					<>
+						<TrayRefreshButton onRefresh={refresh} />
+						{finished.length > 0 || active.length > 0 ? (
+							<>
+								{active.length > 0 ? (
+									<TrayTextButton
+										disabled={clearing}
+										onClick={() => {
+											clearUnfinished().catch(() => undefined);
+										}}
+									>
+										Clear unfinished
+									</TrayTextButton>
+								) : null}
+								{finished.length > 0 ? (
+									<TrayTextButton
+										disabled={clearing}
+										onClick={() => {
+											clearFinished().catch(() => undefined);
+										}}
+									>
+										Clear finished
+									</TrayTextButton>
+								) : null}
+							</>
+						) : null}
+					</>
 				}
 				count={aggregate.inFlight}
 				status={status}

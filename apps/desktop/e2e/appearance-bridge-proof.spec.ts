@@ -1,8 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/09/10/01a08b79-8639-7523-b7d9-851de1081c44/companion-appearance-proof.png";
-
 const APP_HTML = `<!doctype html><html lang="en"><head><style>
   html, body { height: 100%; margin: 0; }
   body { display: grid; place-items: center; background: var(--background); color: var(--foreground); font: 16px/1.5 var(--font-sans), sans-serif; }
@@ -125,9 +122,8 @@ test("a mounted Companion follows the complete live appearance snapshot", async 
 			() =>
 				frame.locator("#probe").evaluate((element) => ({
 					background: getComputedStyle(element).backgroundColor,
-					mutedBackground: getComputedStyle(
-						document.getElementById("muted") as HTMLElement
-					).backgroundColor,
+					mutedBackground: getComputedStyle(document.getElementById("muted")!)
+						.backgroundColor,
 					mode: document.documentElement.getAttribute("data-ryu-theme"),
 					radius: document.documentElement.style.getPropertyValue("--radius"),
 					zoom: document.documentElement.style.getPropertyValue(
@@ -194,5 +190,8 @@ test("a mounted Companion follows the complete live appearance snapshot", async 
 	expect(
 		page.frames().find((candidate) => candidate !== page.mainFrame())
 	).toBe(frameBefore);
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("companion-appearance-proof.png"),
+		fullPage: true,
+	});
 });

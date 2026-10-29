@@ -7,6 +7,8 @@
  * other's React tree.
  */
 
+import { z } from "zod";
+
 export const MEDIA_RECORDING_EVENT = "ryu:media-recording";
 
 export type MediaSourceKind =
@@ -44,24 +46,32 @@ let activeSource: MediaSource | null = null;
 let channel: BroadcastChannel | null = null;
 const listeners = new Set<() => void>();
 
-function isMediaSource(value: unknown): value is MediaSource {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-	const candidate = value as Record<string, unknown>;
-	return (
-		typeof candidate.id === "string" &&
-		typeof candidate.title === "string" &&
-		typeof candidate.updatedAt === "number" &&
-		(candidate.kind === "agent-browser" ||
-			candidate.kind === "browser" ||
-			candidate.kind === "desktop" ||
-			candidate.kind === "recording") &&
-		(typeof candidate.imageUrl === "undefined" ||
-			typeof candidate.imageUrl === "string") &&
-		(typeof candidate.videoUrl === "undefined" ||
-			typeof candidate.videoUrl === "string")
-	);
+const mediaSourceSchema = z
+	.object({
+		id: z.string(),
+		title: z.string(),
+		updatedAt: z.number(),
+		kind: z.enum(["agent-browser", "browser", "desktop", "recording"]),
+		imageUrl: z.string().optional(),
+		videoUrl: z.string().optional(),
+		posterUrl: z.string().optional(),
+		tabId: z.string().optional(),
+	})
+	.passthrough();
+const mediaMessageSchema = z.discriminatedUnion("type", [
+	z.object({ type: z.literal("source"), source: mediaSourceSchema }),
+	z.object({ type: z.literal("clear"), id: z.string().optional() }),
+	z.object({ type: z.literal("request") }),
+]);
+export const mediaRecordingDetailSchema = z.object({
+	id: z.string(),
+	url: z.string(),
+	title: z.string().optional(),
+	posterUrl: z.string().optional(),
+});
+type MediaSourceContent = Omit<MediaSource, "updatedAt">;
+interface MediaSourceDraft extends MediaSourceContent {
+	updatedAt?: number;
 }
 
 function notify(): void {
@@ -70,12 +80,13 @@ function notify(): void {
 	}
 }
 
-function receive(message: unknown): void {
-	if (!message || typeof message !== "object") {
+function receive(event: MessageEvent): void {
+	const parsed = mediaMessageSchema.safeParse(event.data);
+	if (!parsed.success) {
 		return;
 	}
-	const candidate = message as Partial<MediaMessage>;
-	if (candidate.type === "source" && isMediaSource(candidate.source)) {
+	const candidate = parsed.data;
+	if (candidate.type === "source") {
 		activeSource = candidate.source;
 		notify();
 		return;
@@ -99,15 +110,13 @@ function receive(message: unknown): void {
 function ensureChannel(): BroadcastChannel | null {
 	if (
 		channel ||
-		typeof window === "undefined" ||
+		globalThis.window === undefined ||
 		!("BroadcastChannel" in window)
 	) {
 		return channel;
 	}
 	channel = new BroadcastChannel(CHANNEL_NAME);
-	channel.addEventListener("message", (event: MessageEvent<unknown>) => {
-		receive(event.data);
-	});
+	channel.addEventListener("message", receive);
 	return channel;
 }
 
@@ -125,9 +134,7 @@ export function requestMediaSource(): void {
 	ensureChannel()?.postMessage({ type: "request" } satisfies MediaMessage);
 }
 
-export function publishMediaSource(
-	source: Omit<MediaSource, "updatedAt"> & { updatedAt?: number }
-): void {
+export function publishMediaSource(source: MediaSourceDraft): void {
 	activeSource = {
 		...source,
 		updatedAt: source.updatedAt ?? Date.now(),
@@ -152,15 +159,13 @@ export function clearMediaSource(sourceId?: string): void {
 }
 
 export function mediaRecordingSource(
-	detail: unknown
-): Omit<MediaSource, "updatedAt"> | null {
-	if (!detail || typeof detail !== "object") {
+	detail: MediaRecordingDetail | null | undefined
+): MediaSourceContent | null {
+	const parsed = mediaRecordingDetailSchema.safeParse(detail);
+	if (!parsed.success) {
 		return null;
 	}
-	const candidate = detail as Partial<MediaRecordingDetail>;
-	if (typeof candidate.id !== "string" || typeof candidate.url !== "string") {
-		return null;
-	}
+	const candidate = parsed.data;
 	const url = candidate.url.trim();
 	if (!url) {
 		return null;

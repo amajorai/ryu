@@ -6,8 +6,12 @@ import {
 	LockIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Avatar, AvatarFallback, AvatarImage } from "@ryu/ui/components/avatar";
-import { Button } from "@ryu/ui/components/button";
+import {
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
+} from "@ryu/ui/components/avatar.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -15,26 +19,34 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
+} from "@ryu/ui/components/dialog.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
+} from "@ryu/ui/components/select.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getActiveUserId, listAccounts } from "@/lib/auth-client.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import {
+	getHistoryPreview,
+	type HistoryPreview,
+	saveGitHistory,
+	syncGitHistory,
+} from "@/src/lib/api/conversation-history.ts";
 import {
 	type ConversationAccess,
 	type ConversationAccessRole,
 	getConversationAccess,
 	getPrincipalDirectory,
 	getPublicShare,
-	getPublicSnapshotMessages,
 	type PrincipalDirectory,
 	type PublicShareStatus,
 	publishPublicShare,
@@ -55,11 +67,11 @@ function initials(name: string): string {
 	);
 }
 
-function isGeneralAccess(value: unknown): value is GeneralAccess {
+function isGeneralAccess(value: string | null): value is GeneralAccess {
 	return ["private", "org", "team", "public"].includes(String(value));
 }
 
-function isAccessRole(value: unknown): value is ConversationAccessRole {
+function isAccessRole(value: string | null): value is ConversationAccessRole {
 	return value === "viewer" || value === "participant";
 }
 
@@ -92,6 +104,25 @@ export function ShareConversationDialog({
 	const [loading, setLoading] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [historyPreview, setHistoryPreview] = useState<HistoryPreview | null>(
+		null
+	);
+	const [previewLoading, setPreviewLoading] = useState(false);
+	const [previewError, setPreviewError] = useState<string | null>(null);
+	const [gitSaving, setGitSaving] = useState(false);
+	const [gitSaved, setGitSaved] = useState<string | null>(null);
+	const [customInput, setCustomInput] = useState("");
+	const [appliedTerms, setAppliedTerms] = useState<string[]>([]);
+	const draftTerms = useMemo(
+		() =>
+			customInput
+				.split(/\r?\n/)
+				.map((term) => term.trim())
+				.filter(Boolean),
+		[customInput]
+	);
+	const customDirty =
+		JSON.stringify(draftTerms) !== JSON.stringify(appliedTerms);
 
 	const load = useCallback(async () => {
 		setLoading(true);
@@ -120,11 +151,37 @@ export function ShareConversationDialog({
 		}
 	}, [conversationId, owner, target]);
 
+	const loadPrivacyPreview = useCallback(
+		async (terms: string[] = []) => {
+			setPreviewLoading(true);
+			setPreviewError(null);
+			setHistoryPreview(null);
+			setGitSaved(null);
+			try {
+				setHistoryPreview(
+					await getHistoryPreview(target, conversationId, terms)
+				);
+			} catch (previewFailure) {
+				setPreviewError(
+					previewFailure instanceof Error
+						? previewFailure.message
+						: "Could not prepare the privacy preview."
+				);
+			} finally {
+				setPreviewLoading(false);
+			}
+		},
+		[conversationId, target]
+	);
+
 	useEffect(() => {
 		if (open) {
+			setCustomInput("");
+			setAppliedTerms([]);
 			void load();
+			void loadPrivacyPreview([]);
 		}
-	}, [load, open]);
+	}, [load, loadPrivacyPreview, open]);
 
 	const memberById = useMemo(
 		() =>
@@ -166,9 +223,11 @@ export function ShareConversationDialog({
 			],
 		});
 		setPersonToAdd(null);
+		setError(null);
 	};
 
 	const updateRole = (userId: string, role: ConversationAccessRole) => {
+		setError(null);
 		setAccess((current) =>
 			current
 				? {
@@ -184,6 +243,7 @@ export function ShareConversationDialog({
 	};
 
 	const removePerson = (userId: string) => {
+		setError(null);
 		setAccess((current) =>
 			current
 				? {
@@ -197,10 +257,85 @@ export function ShareConversationDialog({
 	};
 
 	const publish = async (): Promise<PublicShareStatus> => {
-		const messages = await getPublicSnapshotMessages(target, conversationId);
-		const nextShare = await publishPublicShare(conversationId, title, messages);
+		if (!historyPreview || customDirty) {
+			throw new Error("Review the redacted copy before publishing.");
+		}
+		const messages = historyPreview.transcript.messages
+			.filter(
+				(message) => message.role === "user" || message.role === "assistant"
+			)
+			.slice(-500)
+			.map((message) => ({
+				content: message.content,
+				created_at: Date.parse(message.createdAt),
+				id: message.id,
+				// SAFETY: The filter immediately above admits only user and assistant roles; slice preserves each admitted message.
+				role: message.role as "assistant" | "user",
+			}));
+		const safeTitle = Array.from(historyPreview.transcript.title)
+			.map((character) => {
+				const codePoint = character.codePointAt(0) ?? 0;
+				return codePoint < 32 || codePoint === 127 ? " " : character;
+			})
+			.join("")
+			.slice(0, 200);
+		const nextShare = await publishPublicShare(
+			conversationId,
+			safeTitle,
+			messages
+		);
 		setPublicShare(nextShare);
 		return nextShare;
+	};
+
+	const saveToGit = async () => {
+		if (!historyPreview?.repoAvailable || customDirty) {
+			return;
+		}
+		setGitSaving(true);
+		setError(null);
+		try {
+			const result = await saveGitHistory(
+				target,
+				conversationId,
+				historyPreview,
+				appliedTerms
+			);
+			setGitSaved(result.checkpoint.checkpointId);
+			toast.success(
+				result.checkpoint.alreadySaved
+					? "Checkpoint is already in Git"
+					: "Conversation saved in Git"
+			);
+		} catch (saveError) {
+			setError(
+				saveError instanceof Error
+					? saveError.message
+					: "Could not save the Git checkpoint."
+			);
+		} finally {
+			setGitSaving(false);
+		}
+	};
+
+	const pushHistory = async () => {
+		if (!historyPreview?.repoRoot || customDirty) {
+			return;
+		}
+		setGitSaving(true);
+		setError(null);
+		try {
+			await syncGitHistory(target, historyPreview.repoRoot, "push");
+			toast.success("Conversation history pushed to origin");
+		} catch (pushError) {
+			setError(
+				pushError instanceof Error
+					? pushError.message
+					: "Could not push Git history."
+			);
+		} finally {
+			setGitSaving(false);
+		}
 	};
 
 	const copyLink = async () => {
@@ -266,7 +401,8 @@ export function ShareConversationDialog({
 				await publish();
 			} else {
 				if (owner) {
-					await revokePublicShare(conversationId);
+					// Only the caller's own public link is being turned off here.
+					await revokePublicShare(conversationId, owner.userId);
 				}
 				await setConversationAccess(target, conversationId, coreAccess);
 				setPublicShare(null);
@@ -287,11 +423,13 @@ export function ShareConversationDialog({
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent
-				className="max-h-[min(760px,calc(100vh-2rem))] max-w-xl overflow-hidden p-0"
+				appearance="conversation-share"
 				data-testid="share-conversation-dialog"
 			>
-				<DialogHeader className="border-b px-6 py-5">
-					<DialogTitle className="pr-8 text-lg">Share “{title}”</DialogTitle>
+				<DialogHeader purpose="records-panel">
+					<DialogTitle typography="conversation-share">
+						Share “{title}”
+					</DialogTitle>
 					<DialogDescription>
 						Invite people to the live chat or publish a private, frozen copy.
 					</DialogDescription>
@@ -299,9 +437,10 @@ export function ShareConversationDialog({
 
 				<div className="min-h-0 overflow-y-auto px-6 py-5">
 					{loading ? (
-						<div className="flex min-h-56 items-center justify-center gap-2 text-muted-foreground text-sm">
-							<Spinner /> Loading sharing settings&hellip;
-						</div>
+						<SkeletonRows
+							label="Loading sharing settings…"
+							spacing="comfortable"
+						/>
 					) : error && !access ? (
 						<div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
 							<p className="font-medium">Sharing is unavailable</p>
@@ -334,7 +473,7 @@ export function ShareConversationDialog({
 									<Select
 										disabled={!canManage}
 										onValueChange={(value) =>
-											addPerson(typeof value === "string" ? value : null)
+											addPerson(isNativeText(value) ? value : null)
 										}
 										value={personToAdd}
 									>
@@ -345,9 +484,14 @@ export function ShareConversationDialog({
 											{availableMembers.map((member) => (
 												<SelectItem key={member.id} value={member.id}>
 													<span className="flex min-w-0 flex-col">
-														<span className="truncate">{member.name}</span>
+														<span className="truncate" title={member.name}>
+															{member.name}
+														</span>
 														{member.email ? (
-															<span className="truncate text-muted-foreground text-xs">
+															<span
+																className="truncate text-muted-foreground text-xs"
+																title={member.email}
+															>
 																{member.email}
 															</span>
 														) : null}
@@ -372,7 +516,10 @@ export function ShareConversationDialog({
 													{ownerName}
 													{ownerIsCurrentUser ? " (you)" : ""}
 												</p>
-												<p className="truncate text-muted-foreground text-xs">
+												<p
+													className="truncate text-muted-foreground text-xs"
+													title={ownerEmail}
+												>
 													{ownerEmail}
 												</p>
 											</div>
@@ -394,8 +541,16 @@ export function ShareConversationDialog({
 													<AvatarFallback>{initials(name)}</AvatarFallback>
 												</Avatar>
 												<div className="min-w-0 flex-1">
-													<p className="truncate font-medium text-sm">{name}</p>
-													<p className="truncate text-muted-foreground text-xs">
+													<p
+														className="truncate font-medium text-sm"
+														title={name}
+													>
+														{name}
+													</p>
+													<p
+														className="truncate text-muted-foreground text-xs"
+														title={member?.email || collaborator.user_id}
+													>
 														{member?.email || collaborator.user_id}
 													</p>
 												</div>
@@ -465,6 +620,7 @@ export function ShareConversationDialog({
 											onValueChange={(value) => {
 												if (isGeneralAccess(value)) {
 													setGeneralAccess(value);
+													setError(null);
 												}
 											}}
 											value={generalAccess}
@@ -510,12 +666,13 @@ export function ShareConversationDialog({
 										{generalAccess === "team" ? (
 											<Select
 												disabled={!canManage}
-												onValueChange={(value) =>
+												onValueChange={(value) => {
 													setAccess({
 														...access,
-														team_id: typeof value === "string" ? value : null,
-													})
-												}
+														team_id: isNativeText(value) ? value : null,
+													});
+													setError(null);
+												}}
 												value={access.team_id}
 											>
 												<SelectTrigger aria-label="Team" className="w-full">
@@ -561,11 +718,157 @@ export function ShareConversationDialog({
 											icon={InformationCircleIcon}
 										/>
 										<p>
-											Your name, tool activity, files, and messages added later
-											are not included. Use Update copy to publish the current
-											transcript again.
+											The public link contains the reviewed, redacted text copy.
+											Tool activity, files, and later messages are excluded. Use
+											Update copy to publish a newer snapshot.
 										</p>
 									</div>
+								) : null}
+							</section>
+
+							<section
+								aria-labelledby="share-history-heading"
+								className="space-y-3 border-t pt-5"
+							>
+								<div>
+									<h3
+										className="font-medium text-sm"
+										id="share-history-heading"
+									>
+										Portable history
+									</h3>
+									<p className="mt-0.5 text-muted-foreground text-xs">
+										Review the text that can be shared or saved beside this
+										project&apos;s commits.
+									</p>
+								</div>
+								<div className="space-y-2">
+									<label
+										className="font-medium text-xs"
+										htmlFor="history-extra-redactions"
+									>
+										More terms to hide
+									</label>
+									<Textarea
+										id="history-extra-redactions"
+										onChange={(event) => {
+											setCustomInput(event.target.value);
+											setGitSaved(null);
+										}}
+										placeholder="One name, code name, or secret per line"
+										rows={2}
+										value={customInput}
+									/>
+									<div className="flex items-center gap-2">
+										<Button
+											disabled={!customDirty || previewLoading}
+											onClick={() => {
+												setAppliedTerms(draftTerms);
+												void loadPrivacyPreview(draftTerms);
+											}}
+											size="sm"
+											variant="outline"
+										>
+											Apply to preview
+										</Button>
+										{customDirty ? (
+											<span className="text-muted-foreground text-xs">
+												Apply changes before sharing or saving.
+											</span>
+										) : null}
+									</div>
+								</div>
+								{previewLoading ? (
+									<p className="flex items-center gap-2 text-muted-foreground text-xs">
+										<Spinner className="size-3" /> Preparing redacted preview…
+									</p>
+								) : previewError ? (
+									<div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs">
+										<p role="alert">{previewError}</p>
+										<Button
+											className="mt-2"
+											onClick={() => void loadPrivacyPreview(appliedTerms)}
+											size="sm"
+											variant="outline"
+										>
+											Retry preview
+										</Button>
+									</div>
+								) : historyPreview ? (
+									<>
+										<div className="rounded-xl border bg-muted/30 p-3 text-xs">
+											<p
+												className="font-medium"
+												data-testid="history-preview-summary"
+											>
+												{historyPreview.transcript.messages.length} messages ·{" "}
+												{historyPreview.redactions.pii} PII ·{" "}
+												{historyPreview.redactions.secrets} secrets ·{" "}
+												{historyPreview.redactions.custom ?? 0} custom redacted
+											</p>
+											{historyPreview.transcript.omittedStructuredParts > 0 ? (
+												<p className="mt-1 text-muted-foreground">
+													{historyPreview.transcript.omittedStructuredParts}{" "}
+													structured tool and file parts omitted.
+												</p>
+											) : null}
+											<details className="mt-3">
+												<summary className="cursor-pointer font-medium">
+													Review redacted transcript
+												</summary>
+												<div
+													className="mt-2 max-h-56 space-y-2 overflow-auto rounded-lg border bg-background p-3"
+													data-testid="history-redacted-transcript"
+												>
+													{historyPreview.transcript.messages.map((message) => (
+														<div key={message.id}>
+															<p className="font-medium capitalize">
+																{message.role}
+															</p>
+															<p className="whitespace-pre-wrap break-words text-muted-foreground">
+																{message.content}
+															</p>
+														</div>
+													))}
+												</div>
+											</details>
+										</div>
+										<p className="text-muted-foreground text-xs">
+											Detection can miss names and unfamiliar secrets. Review
+											the copy before sharing or pushing Git history.
+										</p>
+										{historyPreview.repoAvailable ? (
+											<div className="flex flex-wrap items-center gap-2">
+												<Button
+													disabled={!canManage || gitSaving || customDirty}
+													onClick={() => void saveToGit()}
+													size="sm"
+													variant="outline"
+												>
+													Save in Git
+												</Button>
+												{gitSaved ? (
+													<>
+														<span className="font-mono text-muted-foreground text-xs">
+															{gitSaved.slice(0, 12)}
+														</span>
+														<Button
+															disabled={!canManage || gitSaving || customDirty}
+															onClick={() => void pushHistory()}
+															size="sm"
+															variant="outline"
+														>
+															Push history to origin
+														</Button>
+													</>
+												) : null}
+											</div>
+										) : (
+											<p className="text-muted-foreground text-xs">
+												{historyPreview.repoError}
+											</p>
+										)}
+									</>
 								) : null}
 							</section>
 
@@ -582,12 +885,15 @@ export function ShareConversationDialog({
 					) : null}
 				</div>
 
-				<DialogFooter className="flex-row items-center justify-between border-t px-6 py-4 sm:justify-between">
+				<DialogFooter
+					className="flex-row items-center justify-between sm:justify-between"
+					purpose="panel-actions"
+				>
 					<div className="flex items-center gap-2">
 						{generalAccess === "public" && access ? (
 							<>
 								<Button
-									disabled={saving || !canManage}
+									disabled={saving || !canManage || customDirty}
 									onClick={() => void copyLink()}
 									variant="outline"
 								>
@@ -596,7 +902,7 @@ export function ShareConversationDialog({
 								</Button>
 								{publicShare ? (
 									<Button
-										disabled={saving || !canManage}
+										disabled={saving || !canManage || customDirty}
 										onClick={() => void refreshPublicCopy()}
 										variant="ghost"
 									>
@@ -615,7 +921,12 @@ export function ShareConversationDialog({
 							Cancel
 						</Button>
 						<Button
-							disabled={loading || saving || !access}
+							disabled={
+								loading ||
+								saving ||
+								!access ||
+								(generalAccess === "public" && (!historyPreview || customDirty))
+							}
 							onClick={() => void save()}
 						>
 							{saving ? (

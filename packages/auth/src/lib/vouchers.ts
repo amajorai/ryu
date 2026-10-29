@@ -36,8 +36,9 @@ export const FIRST_PURCHASE_VOUCHER_BASIS_POINTS = 1000;
  * READ THIS BEFORE WIDENING THE ELIGIBLE SET. Polar's `once` means the first
  * BILLING PERIOD, not the first month: on a yearly product it discounts the
  * whole first year rather than one month's amount. Verified against the API,
- * not inferred — a sandbox checkout for the yearly Pro product went $390.00 →
- * $351.00 when the code was applied.
+ * not inferred — a sandbox checkout for the yearly Pro product, then priced at
+ * $390/year, went $390.00 → $351.00 when the code was applied. The ratio, not
+ * that historical price, is the point: at today's $490/year it would be $441.
  *
  * That single fact is why the eligible set below is MONTHLY ONLY. Restricting
  * the products is what makes "10% off your first month" a true sentence rather
@@ -75,21 +76,20 @@ export const FIRST_PURCHASE_VOUCHER_SLUGS: readonly string[] = ["pro-monthly"];
  * use-it-or-lose-it (the subscription bucket RESETS each period, it does not
  * roll over), so real margin is higher whenever it goes unspent.
  */
-export const FIRST_PURCHASE_VOUCHER_EXCLUSIONS: Readonly<
-	Record<string, string>
-> = {
+export const FIRST_PURCHASE_VOUCHER_EXCLUSIONS = {
 	// EVERY YEARLY PRODUCT IS OUT, for two different reasons that happen to point
 	// the same way.
 	//
 	// The one that would still hold if the money worked: `once` is a BILLING
 	// PERIOD, so on a yearly product the code takes 10% of a whole year. The
 	// offer this voucher advertises is "your first month". Honouring a
-	// first-month promise with a first-year discount is a $39–$200 giveaway
-	// nobody asked for, and describing it accurately on the card would mean
+	// first-month promise with a first-year discount gives away ten times the
+	// advertised amount, and describing it accurately on the card would mean
 	// printing two different offers on one page.
 	//
-	// The current campaign is deliberately Pro-only. Max is a hidden compatibility
-	// offer, and Teams/Business use organization checkout; none are this card's
+	// The current campaign is deliberately Pro-only. Max is a separate public
+	// tier with its own margin, Plus and Teams Lite are private offers, and
+	// Teams/Business use organization checkout; none are this card's
 	// first-month path.
 	"pro-yearly":
 		"`once` covers the whole first year, but the offer promises a first MONTH",
@@ -99,12 +99,20 @@ export const FIRST_PURCHASE_VOUCHER_EXCLUSIONS: Readonly<
 		"`once` covers the whole first year, but the offer promises a first MONTH",
 	"max-yearly":
 		"`once` covers the whole first year, but the offer promises a first MONTH",
+	"plus-yearly":
+		"`once` covers the whole first year, but the offer promises a first MONTH",
+	"teams-lite-yearly":
+		"`once` covers the whole first year, but the offer promises a first MONTH",
 	"marketplace-membership-monthly":
 		"A Major Pass provides Marketplace access only, not the Pro managed plan",
 	"marketplace-membership-yearly":
 		"A Major Pass provides Marketplace access only, not the Pro managed plan",
 	"max-monthly":
-		"Max is a hidden compatibility offer, not this card campaign's path",
+		"Max is a separate tier with its own margin, not this card campaign's Pro path",
+	"plus-monthly":
+		"Plus is a private offer already priced below Pro, not this card campaign's path",
+	"teams-lite-monthly":
+		"Teams Lite is a private organization offer with its own checkout, not Pro",
 	"teams-monthly": "Teams uses a separate organization checkout and is not Pro",
 	"business-monthly":
 		"Business uses a separate organization checkout and is not Pro",
@@ -121,7 +129,7 @@ export const FIRST_PURCHASE_VOUCHER_EXCLUSIONS: Readonly<
 	// Ad-hoc cloud instances are an add-on subscription with a dynamic
 	// per-checkout price, not a plan the voucher advertises.
 	"cloud-instance": "an ad-hoc add-on, not a plan",
-};
+} as const satisfies Readonly<Record<string, string>>;
 
 /** Whether the voucher may be redeemed against `slug`. */
 export const voucherAppliesToSlug = (slug: string): boolean =>

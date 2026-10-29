@@ -1,4 +1,4 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -20,7 +20,7 @@ function ProofSurface() {
 			<div className="mx-auto flex max-w-3xl flex-col gap-6">
 				<div className="flex items-center justify-between gap-4">
 					<div>
-						<p className="font-mono text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
+						<p className="type-compact font-mono text-muted-foreground uppercase tracking-(--tracking-section)">
 							Ryu desktop proof
 						</p>
 						<p className="mt-1 text-muted-foreground text-xs">
@@ -33,7 +33,7 @@ function ProofSurface() {
 						size="sm"
 						variant="outline"
 					>
-						Clone from GitHub
+						Clone from Git
 					</Button>
 				</div>
 				<ConnectionsTab />

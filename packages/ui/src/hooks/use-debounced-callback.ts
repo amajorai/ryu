@@ -5,10 +5,9 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { useCallbackRef } from "@ryu/ui/hooks/use-callback-ref.ts";
 
-export function useDebouncedCallback<T extends (...args: never[]) => unknown>(
-	callback: T,
-	delay: number
-) {
+export function useDebouncedCallback<
+	T extends (...args: Parameters<T>) => ReturnType<T>,
+>(callback: T, delay: number) {
 	const handleCallback = useCallbackRef(callback);
 	const debounceTimerRef = useRef(0);
 	useEffect(() => () => window.clearTimeout(debounceTimerRef.current), []);

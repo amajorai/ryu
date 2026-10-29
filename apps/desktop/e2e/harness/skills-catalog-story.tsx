@@ -1,3 +1,4 @@
+import proofStyles from "./skills-catalog-story.module.css";
 // Standalone browser story for the REAL shared `SkillsCatalogSection` — the one
 // desktop and web both mount — driven by a fake `CatalogHost` whose `select`
 // behaves exactly like a shipping host's: it stores whatever id it is handed.
@@ -17,6 +18,7 @@ import {
 	type CatalogHost,
 	CatalogHostProvider,
 } from "@ryu/marketplace/catalog/host";
+import type { SkillPacksState } from "@ryu/marketplace/catalog/pack-types";
 import SkillsCatalogSection from "@ryu/marketplace/catalog/skills";
 import type {
 	SkillCard,
@@ -123,6 +125,52 @@ function detailFor(id: string): SkillDetail | null {
 
 const NOOP = () => undefined;
 const NOOP_ASYNC = () => Promise.resolve();
+const NOOP_INSTALL = async () => [];
+
+const STORY_SKILL_PACKS: SkillPacksState = {
+	error: null,
+	install: NOOP_INSTALL,
+	installing: null,
+	loading: false,
+	open: NOOP,
+	opened: null,
+	opening: null,
+	packs: [
+		{
+			builtin: true,
+			description:
+				"Interface design, typography, color, layout, accessibility, writing, and review skills.",
+			id: "jakubkrehel/skills",
+			memberCount: 11,
+			name: "Jakubkrehel Skills",
+		},
+		{
+			builtin: true,
+			description:
+				"TDD, code review, debugging, domain modeling, and writing workflows.",
+			id: "mattpocock/skills",
+			memberCount: 8,
+			name: "Mattpocock Skills",
+		},
+		{
+			builtin: true,
+			description:
+				"Official document skills for PDF, PowerPoint, spreadsheets, and Word.",
+			id: "anthropics/skills",
+			memberCount: 4,
+			name: "Anthropic Skills",
+		},
+		{
+			builtin: true,
+			description:
+				"React, Next.js, TypeScript, testing, and performance best practices.",
+			id: "vercel-labs/agent-skills",
+			memberCount: 5,
+			name: "Vercel Agent Skills",
+		},
+	],
+	refresh: NOOP,
+};
 
 /** A host whose `select` stores the raw id — including the empty string the
  *  layout sends on close. Normalising it here would hide the very bug this story
@@ -229,12 +277,12 @@ const host: CatalogHost = {
 		throw new Error("unused");
 	},
 	useSkillsCatalog: useStorySkillsCatalog,
+	useSkillPacks: () => STORY_SKILL_PACKS,
 	useModelCatalog: () => {
 		throw new Error("unused");
 	},
 	useActiveNode: () => ({ url: "", token: null }),
-	usePersistedToggle: (_k: string, d: boolean) =>
-		[d, NOOP] as [boolean, (v: boolean) => void],
+	usePersistedToggle: (_k: string, d: boolean) => [d, NOOP],
 	installSidecar: NOOP_ASYNC,
 	estimateLlmfit: () =>
 		Promise.resolve({
@@ -252,7 +300,7 @@ const host: CatalogHost = {
 
 function Story() {
 	return (
-		<div style={{ height: "100vh" }}>
+		<div className={proofStyles.fixture1}>
 			<CatalogHostProvider host={host}>
 				<SkillsCatalogSection />
 			</CatalogHostProvider>

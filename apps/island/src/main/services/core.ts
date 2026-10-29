@@ -8,7 +8,9 @@
 // id, with abort support via an `AbortController` registry.
 
 import { randomUUID } from "node:crypto";
-import type { AcpConfig } from "../../shared/acp.ts";
+import { parseTranscriptionDetail } from "@ryuhq/core-client/voice";
+import { z } from "zod";
+import { acpConfigSchema } from "../../shared/acp.ts";
 import type {
 	AcpConfigResult,
 	AgentsResult,
@@ -29,16 +31,68 @@ import type {
 	CoreStreamPartEvent,
 	CoreToolCallRequest,
 	CoreToolCallResult,
+	CoreTranscribeOptions,
 	CoreTranscribeResult,
 	EngineModelsResult,
 	SidecarStartResult,
-	SidecarStatus,
 	SidecarStatusResult,
 } from "../../shared/ipc.ts";
 import { coreHeaders, loadConfig } from "./config.ts";
 import { withResponseDeadline } from "./response-deadline.ts";
-import { SseDecoder } from "./sse.ts";
+import { accumulateStreamText, SseDecoder } from "./sse.ts";
 
+const textResponseSchema = z.object({ text: z.string().catch("") });
+const errorResponseSchema = z.object({ error: z.string().optional() });
+const completionsResponseSchema = z.object({
+	choices: z
+		.array(
+			z.object({
+				message: z.object({ content: z.string().optional() }).optional(),
+			})
+		)
+		.optional(),
+});
+const toolResponseSchema = z.object({
+	ok: z.boolean().optional(),
+	output: z.json().optional(),
+	error: z.string().optional(),
+});
+const sidecarsResponseSchema = z.object({
+	sidecars: z
+		.array(z.object({ name: z.string(), running: z.boolean() }))
+		.optional(),
+});
+const sidecarStartSchema = z.object({
+	success: z.boolean().optional(),
+	error: z.string().optional(),
+});
+const agentResponseSchema = z.object({
+	id: z.string(),
+	name: z.string().optional().catch(undefined),
+	description: z.string().nullable().catch(null),
+	engine: z.string().nullable().catch(null),
+	model: z.string().nullable().catch(null),
+	transport: z.string().nullable().catch(null),
+	built_in: z.boolean().catch(false),
+	recommended: z.boolean().catch(false),
+});
+const agentsResponseSchema = z.object({
+	agents: z.array(agentResponseSchema.nullable().catch(null)).optional(),
+});
+const modelCatalogSchema = z.object({
+	models: z
+		.record(z.string(), z.array(z.object({ id: z.string(), name: z.string() })))
+		.optional(),
+});
+const conversationResponseSchema = z.object({
+	id: z.string(),
+	title: z.string().min(1).catch("Untitled"),
+});
+const conversationsResponseSchema = z.object({
+	conversations: z
+		.array(conversationResponseSchema.nullable().catch(null))
+		.optional(),
+});
 /** Short timeout for one-shot probes (health, status, tool calls). */
 const PROBE_TIMEOUT_MS = 5000;
 /** Longer timeout for the non-streaming completion request. */
@@ -54,10 +108,25 @@ export interface StreamSink {
 	part(event: CoreStreamPartEvent): void;
 }
 
-/** In-flight stream controllers keyed by stream id, for abort. */
-const activeStreams = new Map<string, AbortController>();
+/** One in-flight chat stream, keyed by stream id for abort. */
+interface ActiveStream {
+	controller: AbortController;
+	/**
+	 * The persisted conversation the turn runs in, or `undefined` for a turn Core
+	 * does not persist. Core drives a persisted turn independently of this
+	 * request, so aborting it must also cancel the turn there.
+	 */
+	conversationId?: string;
+}
 
-function reasonFromError(error: unknown): string {
+/** In-flight streams keyed by stream id, for abort. */
+const activeStreams = new Map<string, ActiveStream>();
+
+const coreFailureSchema = z
+	.union([z.instanceof(DOMException), z.instanceof(Error)])
+	.catch(new Error("unreachable"));
+
+function reasonFromError(error: z.infer<typeof coreFailureSchema>): string {
 	if (error instanceof DOMException && error.name === "AbortError") {
 		return "timeout";
 	}
@@ -83,7 +152,10 @@ export async function health(): Promise<AvailabilityResult> {
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -98,7 +170,11 @@ export function chatStream(
 ): CoreChatStreamHandle {
 	const streamId = randomUUID();
 	const controller = new AbortController();
-	activeStreams.set(streamId, controller);
+	activeStreams.set(streamId, {
+		controller,
+		conversationId:
+			req.persist === false ? undefined : req.conversation_id || undefined,
+	});
 	// Fire-and-forget: `runChatStream` swallows all errors and signals the
 	// renderer through `sink.end`, so there is nothing to await or catch here.
 	runChatStream(streamId, req, sink, controller).catch(() => {
@@ -139,7 +215,7 @@ async function runChatStream(
 		finishStream(streamId, sink, {
 			streamId,
 			reason: "error",
-			error: reasonFromError(error),
+			error: reasonFromError(coreFailureSchema.parse(error)),
 		});
 	} finally {
 		controller.abort();
@@ -155,24 +231,31 @@ async function pumpStream(
 	const decoder = new TextDecoder();
 	const sse = new SseDecoder();
 	let done = false;
-	while (!done) {
-		const { value, done: streamDone } = await reader.read();
-		if (streamDone) {
-			break;
-		}
-		const chunk = decoder.decode(value, { stream: true });
-		for (const event of sse.push(chunk)) {
-			if (event.kind === "done") {
-				done = true;
+	try {
+		while (!done) {
+			const { value, done: streamDone } = await reader.read();
+			if (streamDone) {
 				break;
 			}
-			sink.part({ streamId, part: event.part });
+			const chunk = decoder.decode(value, { stream: true });
+			// An oversized frame throws here, before any of its parts reach IPC.
+			for (const event of sse.push(chunk)) {
+				if (event.kind === "done") {
+					done = true;
+					break;
+				}
+				sink.part({ streamId, part: event.part });
+			}
 		}
-	}
-	for (const event of sse.flush()) {
-		if (event.kind === "part") {
-			sink.part({ streamId, part: event.part });
+		for (const event of sse.flush()) {
+			if (event.kind === "part") {
+				sink.part({ streamId, part: event.part });
+			}
 		}
+	} finally {
+		sse.flush();
+		await reader.cancel().catch(() => undefined);
+		reader.releaseLock();
 	}
 }
 
@@ -188,12 +271,41 @@ function finishStream(
 	sink.end(event);
 }
 
-/** Abort an in-flight stream by id. No-op when the id is unknown. */
+/**
+ * Stop an in-flight stream by id: cancel its turn on Core (a persisted turn keeps
+ * running there after its request is aborted), then abort the request. No-op
+ * when the id is unknown or the stream already finished.
+ */
 export function abortStream(streamId: string): void {
-	const controller = activeStreams.get(streamId);
-	if (controller) {
-		controller.abort();
+	const stream = activeStreams.get(streamId);
+	if (!stream) {
+		return;
 	}
+	if (stream.conversationId) {
+		cancelChatTurn(stream.conversationId).catch(() => {
+			// Best effort: the request abort below still stops this client.
+		});
+		// Both the stop control and the stream's cancel can land here; cancel once.
+		stream.conversationId = undefined;
+	}
+	stream.controller.abort();
+}
+
+/** Ask Core to stop a conversation's in-flight turn (`POST /api/chat/cancel`). */
+async function cancelChatTurn(conversationId: string): Promise<void> {
+	const { coreBaseUrl } = loadConfig();
+	await withResponseDeadline(
+		`${coreBaseUrl}/api/chat/cancel`,
+		{
+			method: "POST",
+			headers: coreHeaders({ "Content-Type": "application/json" }),
+			body: JSON.stringify({ conversation_id: conversationId }),
+		},
+		PROBE_TIMEOUT_MS,
+		async (resp) => {
+			await resp.body?.cancel();
+		}
+	);
 }
 
 /**
@@ -204,7 +316,7 @@ export async function completions(
 	req: CoreCompletionsRequest
 ): Promise<CoreCompletionsResult> {
 	const { coreBaseUrl } = loadConfig();
-	const body: Record<string, unknown> = { messages: req.messages };
+	const body: CoreCompletionsRequest = { messages: req.messages };
 	if (req.model) {
 		body.model = req.model;
 	}
@@ -221,15 +333,16 @@ export async function completions(
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as {
-					choices?: { message?: { content?: string } }[];
-				};
+				const data = completionsResponseSchema.parse(await resp.json());
 				const text = data.choices?.[0]?.message?.content ?? "";
 				return { available: true, text };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -269,47 +382,14 @@ export async function runAgentText(
 		const text = await accumulateStreamText(resp.body);
 		return { available: true, text };
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	} finally {
 		clearTimeout(timer);
 		controller.abort();
 	}
-}
-
-/** Drain an AI SDK SSE body, concatenating every `text-delta` into one string. */
-async function accumulateStreamText(
-	body: ReadableStream<Uint8Array>
-): Promise<string> {
-	const reader = body.getReader();
-	const decoder = new TextDecoder();
-	const sse = new SseDecoder();
-	let text = "";
-	const append = (part: { type: string; delta?: unknown }): void => {
-		if (part.type === "text-delta" && typeof part.delta === "string") {
-			text += part.delta;
-		}
-	};
-	let done = false;
-	while (!done) {
-		const { value, done: streamDone } = await reader.read();
-		if (streamDone) {
-			break;
-		}
-		const chunk = decoder.decode(value, { stream: true });
-		for (const event of sse.push(chunk)) {
-			if (event.kind === "done") {
-				done = true;
-				break;
-			}
-			append(event.part);
-		}
-	}
-	for (const event of sse.flush()) {
-		if (event.kind === "part") {
-			append(event.part);
-		}
-	}
-	return text;
 }
 
 /**
@@ -342,24 +422,61 @@ export async function speak(req: CoreSpeakRequest): Promise<CoreSpeakResult> {
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
+}
+
+const transcribeOptionsSchema = z
+	.object({
+		detailed: z.boolean().optional().catch(undefined),
+		filename: z
+			.string()
+			.trim()
+			.min(1)
+			.max(255)
+			.regex(/^[^\\/\r\n"]+$/)
+			.optional()
+			.catch(undefined),
+	})
+	.catch(() => ({}));
+
+/** Normalize renderer-supplied transcribe options; unknown or unsafe fields drop. */
+export function transcribeOptions(raw: unknown): CoreTranscribeOptions {
+	const parsed = transcribeOptionsSchema.parse(raw ?? {});
+	const options: CoreTranscribeOptions = {};
+	if (parsed.detailed !== undefined) {
+		options.detailed = parsed.detailed;
+	}
+	if (parsed.filename !== undefined) {
+		options.filename = parsed.filename;
+	}
+	return options;
 }
 
 /**
  * Transcribe captured WAV audio via `POST /api/voice/transcribe?engine=`. The
  * renderer cannot call Core directly (CORS), so it ships the WAV bytes here and
- * the main process builds the multipart upload. Never rejects to the caller.
+ * the main process builds the multipart upload. An empty engine omits `?engine=`
+ * so Core uses its default. `detailed` also returns Core's timed segments.
+ * Never rejects to the caller.
  */
 export async function transcribe(
 	audio: ArrayBuffer,
-	engine: string
+	engine: string,
+	options: CoreTranscribeOptions = {}
 ): Promise<CoreTranscribeResult> {
 	const { coreBaseUrl } = loadConfig();
-	const query = engine ? `?engine=${encodeURIComponent(engine)}` : "";
+	const selectedEngine = engine.trim();
+	const query = selectedEngine
+		? `?engine=${encodeURIComponent(selectedEngine)}`
+		: "";
+	const filename = options.filename ?? "audio.wav";
 	try {
 		const form = new FormData();
-		form.append("file", new Blob([audio], { type: "audio/wav" }), "audio.wav");
+		form.append("file", new Blob([audio], { type: "audio/wav" }), filename);
 		return await withResponseDeadline<CoreTranscribeResult>(
 			`${coreBaseUrl}/api/voice/transcribe${query}`,
 			// No explicit Content-Type: fetch sets the multipart boundary itself.
@@ -367,14 +484,28 @@ export async function transcribe(
 			TRANSCRIBE_TIMEOUT_MS,
 			async (resp) => {
 				if (!resp.ok) {
-					return { available: false, reason: `core responded ${resp.status}` };
+					const data = errorResponseSchema
+						.catch(() => ({}))
+						.parse(await resp.json().catch(() => ({})));
+					return {
+						available: false,
+						reason: data.error ?? `core responded ${resp.status}`,
+					};
 				}
-				const data = (await resp.json()) as { text?: string };
+				const body: unknown = await resp.json();
+				if (options.detailed) {
+					const detail = parseTranscriptionDetail(body);
+					return { available: true, text: detail.text, detail };
+				}
+				const data = textResponseSchema.parse(body);
 				return { available: true, text: data.text ?? "" };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -398,20 +529,23 @@ export async function processSpeechText(
 			SPEECH_PROCESSING_TIMEOUT_MS,
 			async (resp) => {
 				if (!resp.ok) {
-					const data = (await resp.json().catch(() => ({}))) as {
-						error?: string;
-					};
+					const data = errorResponseSchema.parse(
+						await resp.json().catch(() => ({}))
+					);
 					return {
 						available: false,
 						reason: data.error ?? `core responded ${resp.status}`,
 					};
 				}
-				const data = (await resp.json()) as { text?: string };
+				const data = textResponseSchema.parse(await resp.json());
 				return { available: true, text: data.text ?? "" };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -434,11 +568,9 @@ export async function callTool(
 			},
 			PROBE_TIMEOUT_MS,
 			async (resp) => {
-				const data = (await resp.json().catch(() => ({}))) as {
-					ok?: boolean;
-					output?: unknown;
-					error?: string;
-				};
+				const data = toolResponseSchema.parse(
+					await resp.json().catch(() => ({}))
+				);
 				return {
 					available: true,
 					ok: data.ok ?? resp.ok,
@@ -448,7 +580,10 @@ export async function callTool(
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -464,12 +599,15 @@ export async function sidecarStatus(): Promise<SidecarStatusResult> {
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as { sidecars?: SidecarStatus[] };
+				const data = sidecarsResponseSchema.parse(await resp.json());
 				return { available: true, sidecars: data.sidecars ?? [] };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -482,10 +620,9 @@ export async function sidecarStart(name: string): Promise<SidecarStartResult> {
 			{ method: "POST", headers: coreHeaders() },
 			PROBE_TIMEOUT_MS,
 			async (resp) => {
-				const data = (await resp.json().catch(() => ({}))) as {
-					success?: boolean;
-					error?: string;
-				};
+				const data = sidecarStartSchema.parse(
+					await resp.json().catch(() => ({}))
+				);
 				return {
 					available: true,
 					success: data.success ?? resp.ok,
@@ -494,7 +631,10 @@ export async function sidecarStart(name: string): Promise<SidecarStartResult> {
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -510,40 +650,31 @@ export async function agents(): Promise<AgentsResult> {
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as {
-					agents?: {
-						built_in?: unknown;
-						description?: unknown;
-						engine?: unknown;
-						id?: unknown;
-						model?: unknown;
-						name?: unknown;
-						recommended?: unknown;
-						transport?: unknown;
-					}[];
-				};
-				const list: CoreAgentSummary[] = [];
-				for (const a of data.agents ?? []) {
-					if (typeof a.id !== "string") {
-						continue;
-					}
-					list.push({
-						id: a.id,
-						name: typeof a.name === "string" ? a.name : a.id,
-						description:
-							typeof a.description === "string" ? a.description : null,
-						recommended: a.recommended === true,
-						transport: typeof a.transport === "string" ? a.transport : null,
-						engine: typeof a.engine === "string" ? a.engine : null,
-						model: typeof a.model === "string" ? a.model : null,
-						builtIn: a.built_in === true || typeof a.transport === "string",
-					});
-				}
+				const data = agentsResponseSchema.parse(await resp.json());
+				const list: CoreAgentSummary[] = (data.agents ?? []).flatMap((agent) =>
+					agent
+						? [
+								{
+									id: agent.id,
+									name: agent.name ?? agent.id,
+									description: agent.description,
+									recommended: agent.recommended,
+									transport: agent.transport,
+									engine: agent.engine,
+									model: agent.model,
+									builtIn: agent.built_in || agent.transport !== null,
+								},
+							]
+						: []
+				);
 				return { available: true, agents: list };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -559,12 +690,15 @@ export async function acpConfig(agentId: string): Promise<AcpConfigResult> {
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const config = (await resp.json()) as AcpConfig;
+				const config = acpConfigSchema.parse(await resp.json());
 				return { available: true, config };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -580,14 +714,15 @@ export async function engineModels(): Promise<EngineModelsResult> {
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as {
-					models?: Record<string, { id: string; name: string }[]>;
-				};
+				const data = modelCatalogSchema.parse(await resp.json());
 				return { available: true, models: data.models ?? {} };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }
 
@@ -603,26 +738,17 @@ export async function conversations(): Promise<ConversationsResult> {
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as {
-					conversations?: { id?: unknown; title?: unknown }[];
-				};
-				const list: CoreConversationSummary[] = [];
-				for (const c of data.conversations ?? []) {
-					if (typeof c.id !== "string") {
-						continue;
-					}
-					list.push({
-						id: c.id,
-						title:
-							typeof c.title === "string" && c.title.length > 0
-								? c.title
-								: "Untitled",
-					});
-				}
+				const data = conversationsResponseSchema.parse(await resp.json());
+				const list: CoreConversationSummary[] = (
+					data.conversations ?? []
+				).flatMap((conversation) => (conversation ? [conversation] : []));
 				return { available: true, conversations: list };
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(coreFailureSchema.parse(error)),
+		};
 	}
 }

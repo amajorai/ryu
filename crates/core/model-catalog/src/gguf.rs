@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, BufReader, Read, Seek};
 use std::path::Path;
 
 /// GGUF magic — the ASCII bytes `GGUF` in little-endian file order.
@@ -50,6 +50,8 @@ const DIFFUSION_ARCHITECTURES: &[&str] = &[
     "sd3",   // Stable Diffusion 3.x / 3.5
     "mmdit", // Multimodal Diffusion Transformer (SD3 alternate)
     "auraflow",
+    "qwen_image", // Qwen Image / Qwen Image 2.1 GGUFs
+    "qwen_image_2_1",
     "wan", // Wan 2.1 / 2.2 video (calcuis/QuantStack GGUF conversions)
     "ltx", // LTX-Video (open_model_labs GGUF conversions)
     "ltx-video",
@@ -164,7 +166,7 @@ fn scalar_size(value_type: u32) -> Option<u64> {
 /// (which we keep) and `None` for every other type (which is skipped in place).
 fn read_or_skip_value<R: Read + Seek>(r: &mut R, value_type: u32) -> io::Result<Option<String>> {
     if let Some(size) = scalar_size(value_type) {
-        r.seek(SeekFrom::Current(size as i64))?;
+        r.seek_relative(size as i64)?;
         return Ok(None);
     }
     match value_type {
@@ -188,7 +190,7 @@ fn skip_array<R: Read + Seek>(r: &mut R) -> io::Result<()> {
         let total = size
             .checked_mul(count)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "array length overflow"))?;
-        r.seek(SeekFrom::Current(total as i64))?;
+        r.seek_relative(total as i64)?;
         return Ok(());
     }
     if elem_type == val::STRING {
@@ -200,7 +202,7 @@ fn skip_array<R: Read + Seek>(r: &mut R) -> io::Result<()> {
                     "implausible GGUF string length",
                 ));
             }
-            r.seek(SeekFrom::Current(len as i64))?;
+            r.seek_relative(len as i64)?;
         }
         return Ok(());
     }
@@ -300,6 +302,8 @@ mod tests {
             "sd2",
             "mmdit",
             "auraflow",
+            "qwen_image",
+            "qwen_image_2_1",
             "wan",
             "ltx",
             "ltx-video",

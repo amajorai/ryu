@@ -1,7 +1,9 @@
 //! Short-lived, session-bound authority for the managed Pi HTTP tool callback.
 //!
-//! The capability is intentionally accepted only by `/api/acp/tools/call`. It
-//! never authorizes a general Core request and the record stores the caller,
+//! The capability is intentionally accepted only by the dedicated ACP callbacks:
+//! `/api/acp/tools` (the `ryu_call_tool` proxy) and `/api/acp/mcp` (the same
+//! governed MCP bridge other ACP agents receive, served to Pi's native MCP
+//! client). It never authorizes a general Core request and the record stores the caller,
 //! conversation, agent, and profile ceilings that Core resolved before spawn.
 
 use std::{
@@ -16,9 +18,15 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    identity_verify::VerifiedCaller, server::conversations::ConversationStore,
-    sidecar::adapters::ComposioConnectionBinding,
+    identity_verify::VerifiedCaller,
+    server::conversations::ConversationStore,
+    sidecar::adapters::{acp::AcpEvent, ComposioConnectionBinding},
 };
+
+/// The live ACP instance's event channel. Core's MCP bridge emits widget events
+/// and interactive permission prompts on it; the instance relays each event to
+/// whichever turn is currently streaming.
+pub(crate) type AcpInstanceEvents = tokio::sync::mpsc::UnboundedSender<AcpEvent>;
 
 const CAPABILITY_TTL: Duration = Duration::from_secs(15 * 60);
 const MAX_SCOPE_IDS: usize = 128;
@@ -44,6 +52,7 @@ impl AcpToolSessionAuthority {
     /// an unbound personal node and only for an unowned personal conversation.
     pub(crate) async fn authorize_managed_pi_session(
         conversations: &ConversationStore,
+        spawn_cmd: &str,
         agent_id: &str,
         conversation_id: Option<&str>,
         caller: Option<VerifiedCaller>,
@@ -53,7 +62,10 @@ impl AcpToolSessionAuthority {
         profile_composio_connection_scope: Option<Vec<ComposioConnectionBinding>>,
         profile_conversation_scope: Option<Vec<String>>,
     ) -> Option<Self> {
-        if agent_id != "ryu" {
+        // The managed Pi runs as Ryu, as a built-in that borrows its engine
+        // (Jay Jr., Patrol), or as a limited custom agent on the credential-free
+        // limited config; the grant carries that agent's own allowlist either way.
+        if !crate::sidecar::adapters::acp::is_managed_pi_extension(spawn_cmd, agent_id) {
             return None;
         }
         let conversation_id = conversation_id?.to_owned();
@@ -130,9 +142,15 @@ pub(crate) struct AcpToolCallAuthorization {
     pub(crate) agent_id: String,
     pub(crate) caller: Option<VerifiedCaller>,
     pub(crate) mcp_allowlist: Option<Vec<String>>,
+    /// Bare Composio action slugs selected for this agent. Their canonical ids
+    /// are already merged into `mcp_allowlist`; the MCP bridge also offers them
+    /// as shallow tool definitions.
+    pub(crate) composio_actions: Vec<String>,
     pub(crate) identity_profile_ids: Vec<String>,
     pub(crate) profile_composio_connection_scope: Option<Vec<ComposioConnectionBinding>>,
     pub(crate) profile_conversation_scope: Option<Vec<String>>,
+    /// The ACP instance's event channel, once the instance attached it.
+    pub(crate) events: Option<AcpInstanceEvents>,
 }
 
 #[derive(Clone, Default)]
@@ -161,6 +179,7 @@ struct CapabilityRecord {
     node_generation: u64,
     binding_fingerprint: [u8; 32],
     expires_at: Instant,
+    events: Option<AcpInstanceEvents>,
 }
 
 /// The token is deliberately absent from Debug/Serialize and is never logged or
@@ -184,6 +203,13 @@ impl AcpToolSessionGrant {
     pub(crate) fn bind_native_session(&self, native_session_id: &str) -> bool {
         self.broker
             .bind_native_session(self.session_id, native_session_id)
+    }
+
+    /// Attach the ACP instance's event channel, so MCP calls made through this
+    /// capability can render widgets and raise permission prompts in the live
+    /// turn. Returns false once the record was revoked or expired.
+    pub(crate) fn attach_events(&self, events: AcpInstanceEvents) -> bool {
+        self.broker.attach_events(self.session_id, events)
     }
 }
 
@@ -267,6 +293,7 @@ impl AcpToolBroker {
                 node_generation: authority.node_generation,
                 binding_fingerprint: authority.binding_fingerprint,
                 expires_at: now + CAPABILITY_TTL,
+                events: None,
             },
         );
         Some(AcpToolSessionGrant {
@@ -302,6 +329,20 @@ impl AcpToolBroker {
             }
             Some(existing) => existing == native_session_id,
         }
+    }
+
+    fn attach_events(&self, session_id: Uuid, events: AcpInstanceEvents) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let Some(token_hash) = state.sessions.get(&session_id).copied() else {
+            return false;
+        };
+        let Some(record) = state.records.get_mut(&token_hash) else {
+            return false;
+        };
+        record.events = Some(events);
+        true
     }
 
     fn renew_session(
@@ -366,9 +407,11 @@ impl AcpToolBroker {
             agent_id: record.agent_id,
             caller: record.caller,
             mcp_allowlist: effective_allowlist(record.mcp_allowlist, &record.composio_actions),
+            composio_actions: record.composio_actions,
             identity_profile_ids: record.identity_profile_ids,
             profile_composio_connection_scope: record.profile_composio_connection_scope,
             profile_conversation_scope: record.profile_conversation_scope,
+            events: record.events,
         })
     }
 
@@ -515,6 +558,7 @@ mod tests {
         VerifiedCaller {
             user_id: user_id.to_owned(),
             email: None,
+            email_verified: false,
             org_id: Some(org_id.to_owned()),
             role: OrgRole::Member,
             teams: Vec::new(),
@@ -626,6 +670,40 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
+    }
+
+    #[test]
+    fn attached_instance_events_reach_authorized_calls_until_revoked() {
+        let broker = AcpToolBroker::default();
+        let (grant, now) = grant(&broker);
+        let authorize = || {
+            broker.authorize_call(
+                grant.capability(),
+                Some(&grant.session_id().to_string()),
+                Some("pi-session-1"),
+                true,
+                crate::node_token::active_generation(),
+                now,
+            )
+        };
+        let before = authorize().expect("bound capability authorizes");
+        assert!(before.events.is_none());
+        assert_eq!(before.composio_actions, vec!["GITHUB_CREATE_ISSUE"]);
+
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        assert!(grant.attach_events(events));
+        let attached = authorize()
+            .and_then(|authorization| authorization.events)
+            .expect("authorized call carries the instance channel");
+        attached
+            .send(AcpEvent::Text("widget".to_owned()))
+            .expect("instance channel is open");
+        assert!(matches!(received.try_recv(), Ok(AcpEvent::Text(text)) if text == "widget"));
+
+        broker.revoke_session(grant.session_id());
+        let (late, _late_rx) = tokio::sync::mpsc::unbounded_channel();
+        assert!(!grant.attach_events(late));
+        assert!(authorize().is_none());
     }
 
     #[test]

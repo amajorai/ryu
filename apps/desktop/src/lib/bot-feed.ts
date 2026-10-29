@@ -1,4 +1,10 @@
+import { z } from "zod";
 import type { ActivityItem } from "./api/activity.ts";
+import {
+	pluginDocumentSchema,
+	pluginValueSchema,
+} from "./api/plugin-wire-values.ts";
+import { sealedLocalStorage } from "./content-seal.ts";
 
 export const BOT_FEED_PREFERENCES_KEY = "ryu:bot-feed-preferences:v1";
 export const BOT_FEED_ENGAGEMENT_KEY = "ryu:bot-feed-engagement:v1";
@@ -31,18 +37,37 @@ export const DEFAULT_BOT_FEED_ENGAGEMENT: BotFeedEngagement = {
 	liked: [],
 };
 
-const SOURCE_SET = new Set<BotFeedSource>(BOT_FEED_SOURCES);
+const botFeedSourceSchema = z.enum(BOT_FEED_SOURCES);
+const botFeedArraySchema = z.array(z.unknown());
+const botFeedEnvelopeSchema = z.union([
+	z.object({
+		sources: z.unknown().optional(),
+		liked: z.unknown().optional(),
+		comments: z.unknown().optional(),
+	}),
+	// Legacy JSON arrays counted as objects and produced empty stored selections.
+	botFeedArraySchema.transform(() => ({
+		sources: undefined,
+		liked: undefined,
+		comments: undefined,
+	})),
+]);
+const botFeedCommentsSchema = z.union([
+	pluginDocumentSchema,
+	z.array(pluginValueSchema),
+]);
+type BotFeedStoredInput = Parameters<typeof botFeedSourceSchema.parse>[0];
 
 function storage(): Storage | null {
 	try {
-		return typeof localStorage === "undefined" ? null : localStorage;
+		return globalThis.localStorage ?? null;
 	} catch {
 		return null;
 	}
 }
 
-function isSource(value: unknown): value is BotFeedSource {
-	return typeof value === "string" && SOURCE_SET.has(value as BotFeedSource);
+function isSource(value: BotFeedStoredInput): value is BotFeedSource {
+	return botFeedSourceSchema.safeParse(value).success;
 }
 
 export function feedSourceForActivity(
@@ -70,13 +95,13 @@ export function loadBotFeedPreferences(): BotFeedPreferences {
 		if (!raw) {
 			return { sources: [...DEFAULT_BOT_FEED_PREFERENCES.sources] };
 		}
-		const parsed: unknown = JSON.parse(raw);
-		if (!parsed || typeof parsed !== "object") {
+		const parsed = botFeedEnvelopeSchema.safeParse(JSON.parse(raw));
+		if (!parsed.success) {
 			return { sources: [...DEFAULT_BOT_FEED_PREFERENCES.sources] };
 		}
-		const sources = Array.isArray((parsed as { sources?: unknown }).sources)
-			? (parsed as { sources: unknown[] }).sources.filter(isSource)
-			: [];
+		const entries = botFeedArraySchema.safeParse(parsed.data.sources);
+		const sources = entries.success ? entries.data.filter(isSource) : [];
+
 		return { sources: [...new Set(sources)] };
 	} catch {
 		return { sources: [...DEFAULT_BOT_FEED_PREFERENCES.sources] };
@@ -98,38 +123,47 @@ export function saveBotFeedPreferences(preferences: BotFeedPreferences): void {
 
 export function loadBotFeedEngagement(): BotFeedEngagement {
 	try {
-		const raw = storage()?.getItem(BOT_FEED_ENGAGEMENT_KEY);
+		const raw = sealedLocalStorage.getItem(BOT_FEED_ENGAGEMENT_KEY);
 		if (!raw) {
 			return { comments: {}, liked: [] };
 		}
-		const parsed: unknown = JSON.parse(raw);
-		if (!parsed || typeof parsed !== "object") {
+		const parsed = botFeedEnvelopeSchema.safeParse(JSON.parse(raw));
+		if (!parsed.success) {
 			return { comments: {}, liked: [] };
 		}
-		const value = parsed as {
-			comments?: unknown;
-			liked?: unknown;
-		};
-		const liked = Array.isArray(value.liked)
-			? value.liked.filter(
-					(entry): entry is string => typeof entry === "string"
-				)
-			: [];
+		const storedLikes = botFeedArraySchema.safeParse(parsed.data.liked);
+		const liked: string[] = [];
+		if (storedLikes.success) {
+			for (const entry of storedLikes.data) {
+				const text = z.string().safeParse(entry);
+				if (text.success) {
+					liked.push(text.data);
+				}
+			}
+		}
 		const comments: Record<string, string[]> = {};
-		if (value.comments && typeof value.comments === "object") {
-			for (const [id, entries] of Object.entries(value.comments)) {
-				if (!Array.isArray(entries)) {
+		const storedComments = botFeedCommentsSchema.safeParse(
+			parsed.data.comments
+		);
+		if (storedComments.success) {
+			for (const [id, entries] of Object.entries(storedComments.data)) {
+				const storedEntries = botFeedArraySchema.safeParse(entries);
+				if (!storedEntries.success) {
 					continue;
 				}
-				const strings = entries.filter(
-					(entry): entry is string =>
-						typeof entry === "string" && entry.trim().length > 0
-				);
+				const strings: string[] = [];
+				for (const entry of storedEntries.data) {
+					const text = z.string().safeParse(entry);
+					if (text.success && text.data.trim().length > 0) {
+						strings.push(text.data);
+					}
+				}
 				if (strings.length > 0) {
 					comments[id] = strings;
 				}
 			}
 		}
+
 		return { comments, liked: [...new Set(liked)] };
 	} catch {
 		return { comments: {}, liked: [] };
@@ -138,7 +172,10 @@ export function loadBotFeedEngagement(): BotFeedEngagement {
 
 export function saveBotFeedEngagement(engagement: BotFeedEngagement): void {
 	try {
-		storage()?.setItem(BOT_FEED_ENGAGEMENT_KEY, JSON.stringify(engagement));
+		sealedLocalStorage.setItem(
+			BOT_FEED_ENGAGEMENT_KEY,
+			JSON.stringify(engagement)
+		);
 	} catch {
 		// Local presentation preferences are best-effort.
 	}

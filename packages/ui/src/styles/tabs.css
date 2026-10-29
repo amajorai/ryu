@@ -34,3 +34,24 @@
 		transition: none !important;
 	}
 }
+
+/* Finite review density/inset preserve the native Pull Requests declarations. */
+.t-tabs-trigger-review[role="tab"] {
+	min-height: 30px;
+	padding-inline: 12px;
+	font-size: 12px;
+}
+
+.t-tabs-panel-review[role="tabpanel"] {
+	padding: 22px clamp(20px, 3.2vw, 42px) 44px;
+}
+
+@media (max-width: 760px) {
+	.t-tabs-trigger-review[role="tab"] {
+		padding-inline: 8px;
+		font-size: 11px;
+	}
+	.t-tabs-panel-review[role="tabpanel"] {
+		padding-inline: 16px;
+	}
+}

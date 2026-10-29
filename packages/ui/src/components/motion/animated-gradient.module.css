@@ -1,0 +1,4 @@
+.inline1 {
+	background: var(--animated-gradient-1-background);
+	border-radius: var(--animated-gradient-1-border-radius);
+}

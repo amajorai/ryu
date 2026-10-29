@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import {
 	newProject,
 	newSegment,
@@ -30,6 +30,39 @@ function readCompanionHtml(build: string): Promise<string> {
 	return readFile(html, "utf8");
 }
 
+/**
+ * Switches to "Another tab" and resolves once the companion frame has observed
+ * itself hidden. The probe observer is created after the app's own shared
+ * visibility observer, so Chromium delivers the hidden entry to the app first in
+ * the same intersection-observer task; read baselines taken afterwards cannot
+ * race a late pause signal.
+ */
+async function hideCompanion(page: Page): Promise<void> {
+	const companion = await page
+		.locator('iframe[title="Companion workspace"]')
+		.elementHandle();
+	const frame = await companion?.contentFrame();
+	if (!frame) {
+		throw new Error("companion frame is not attached");
+	}
+	await frame.evaluate(() => {
+		const hidden = new Promise<void>((resolve) => {
+			const observer = new IntersectionObserver((entries) => {
+				if (entries.at(-1)?.isIntersecting === false) {
+					observer.disconnect();
+					resolve();
+				}
+			});
+			observer.observe(document.documentElement);
+		});
+		Reflect.set(globalThis, "__ryuProofCompanionHidden", hidden);
+	});
+	await page.getByRole("button", { name: "Another tab", exact: true }).click();
+	await frame.evaluate(() =>
+		Reflect.get(globalThis, "__ryuProofCompanionHidden")
+	);
+}
+
 test("CSS-hidden sandboxed companions pause shared polls and resume without remounting", async ({
 	page,
 }) => {
@@ -46,8 +79,7 @@ test("CSS-hidden sandboxed companions pause shared polls and resume without remo
 	await frame.getByLabel("Ping message").fill("Draft kept across tabs");
 	await page.clock.fastForward(31_000);
 	await expect.poll(reads).toBeGreaterThan(3);
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page
 		.getByRole("button", { name: "Inspect visibility", exact: true })
 		.click();
@@ -66,7 +98,10 @@ test("CSS-hidden sandboxed companions pause shared polls and resume without remo
 	await frame
 		.getByRole("button", { name: "Close panels", exact: true })
 		.click();
-	await page.waitForTimeout(150);
+	// The toggle relabels in the same commit that unmounts the polling panels.
+	await expect(
+		frame.getByRole("button", { name: "Open panels", exact: true })
+	).toBeVisible();
 	const closedReads = await reads();
 	await page.clock.fastForward(61_000);
 	expect(await reads()).toBe(closedReads);
@@ -123,8 +158,7 @@ test("production Warmup bundle retains drafts while hidden polls stop", async ({
 		Number(await page.getByTestId("reads").textContent());
 	await page.clock.fastForward(31_000);
 	await expect.poll(reads).toBeGreaterThan(3);
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	const hiddenReads = await reads();
 	await page.clock.fastForward(61_000);
 	expect(await reads()).toBe(hiddenReads);
@@ -162,8 +196,7 @@ test("production Inbox waits for its refreshed decision list and pauses inactive
 	await expect(approve).toBeVisible();
 	const reads = async () =>
 		Number(await page.getByTestId("reads").textContent());
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	const hiddenReads = await reads();
 	await page.clock.fastForward(61_000);
 	expect(await reads()).toBe(hiddenReads);
@@ -224,8 +257,7 @@ test("production Inbox refreshes notifications without repeating icon downloads"
 		"3"
 	);
 	await expect(frame.locator("body")).toHaveAttribute("data-icon-reads", "2");
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page.clock.fastForward(61_000);
 	await expect(frame.locator("body")).toHaveAttribute(
 		"data-notification-reads",
@@ -291,8 +323,7 @@ test("production Quests pauses list polls and preserves typing ahead of scratchp
 		"data-saved-scratchpad",
 		"Keep my new draft"
 	);
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	const before = await frame.locator("body").getAttribute("data-quest-reads");
 	await page.clock.fastForward(31_000);
 	await expect(frame.locator("body")).toHaveAttribute(
@@ -338,8 +369,7 @@ test("production Broadcast keeps its draft and selection while hidden reads stop
 	await frame
 		.getByRole("textbox", { name: "Broadcast message", exact: true })
 		.fill("Draft only — do not send");
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page.clock.fastForward(31_000);
 	await expect(frame.locator("body")).toHaveAttribute(
 		"data-broadcast-reads",
@@ -425,7 +455,7 @@ test("production Fine-tuning coalesces slow job reads and preserves configuratio
 	const errors: string[] = [];
 	page.on("pageerror", (error) => errors.push(error.message));
 	const html = await readCompanionHtml("finetune");
-	const bridge = `<script>let reads=0;window.ryu={finetune:{capability:async()=>({can_train_local:true,gpu:"Local GPU"}),adapters:async()=>({adapters:[]}),list:async()=>{document.body.dataset.jobReads=String(++reads);if(reads===1)await new Promise(resolve=>{const done=e=>{if(e.data!=="release-jobs")return;removeEventListener("message",done);resolve()};addEventListener("message",done)});return {jobs:[]}},start:async()=>{document.body.dataset.started="true";throw Error("No training starts in this proof")}}};</script>`;
+	const bridge = `<script>let reads=0;const sidecar={"/capability":async()=>({can_train_local:true,gpu:"Local GPU"}),"/adapters":async()=>({adapters:[]}),"/list":async()=>{document.body.dataset.jobReads=String(++reads);if(reads===1)await new Promise(resolve=>{const done=e=>{if(e.data!=="release-jobs")return;removeEventListener("message",done);resolve()};addEventListener("message",done)});return {jobs:[]}},"/start":async()=>{document.body.dataset.started="true";throw Error("No training starts in this proof")}};window.ryu={app:{request:async({path})=>{const route=sidecar[path];if(!route)throw Error("Unexpected finetune sidecar path "+path);return route()}}};</script>`;
 	await page.route("**/embedded-polling-child.html", (route) =>
 		route.fulfill({
 			contentType: "text/html",
@@ -449,8 +479,7 @@ test("production Fine-tuning coalesces slow job reads and preserves configuratio
 			element.contentWindow?.postMessage("release-jobs", "*")
 		);
 	await page.clock.fastForward(1);
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page.clock.fastForward(21_000);
 	await expect(frame.locator("body")).toHaveAttribute("data-job-reads", "1");
 	await page.getByRole("button", { name: "Companion", exact: true }).click();
@@ -474,7 +503,7 @@ test("production Fine-tuning keeps live progress and refreshes once on repeated 
 	const errors: string[] = [];
 	page.on("pageerror", (error) => errors.push(error.message));
 	const html = await readCompanionHtml("finetune");
-	const bridge = `<script>let lists=0,adapters=0;window.ryu={context:{view:"history"},finetune:{capability:async()=>({can_train_local:true,gpu:"Local GPU"}),adapters:async()=>{document.body.dataset.adapterReads=String(++adapters);return {adapters:[]}},list:async()=>{document.body.dataset.jobReads=String(++lists);return {jobs:[{id:"run-a",output_name:"Training preview",state:"running",step:10,max_steps:100}]}},stream:async(_input,hooks)=>{document.body.dataset.streams="1";hooks.signal.addEventListener("abort",()=>{document.body.dataset.streamAborted="true"});addEventListener("message",e=>{if(e.data==="progress")hooks.onFrame(JSON.stringify({step:50}));if(e.data==="terminal"){for(let i=0;i<4;i++)hooks.onFrame(JSON.stringify({state:"succeeded",step:100}))}})}}};</script>`;
+	const bridge = `<script>let lists=0,adapters=0;const sidecar={"/capability":async()=>({can_train_local:true,gpu:"Local GPU"}),"/adapters":async()=>{document.body.dataset.adapterReads=String(++adapters);return {adapters:[]}},"/list":async()=>{document.body.dataset.jobReads=String(++lists);return {jobs:[{id:"run-a",output_name:"Training preview",state:"running",step:10,max_steps:100}]}}};window.ryu={context:{view:"history"},app:{request:async({path})=>{const route=sidecar[path];if(!route)throw Error("Unexpected finetune sidecar path "+path);return route()}},finetune:{stream:async(_input,hooks)=>{document.body.dataset.streams="1";hooks.signal.addEventListener("abort",()=>{document.body.dataset.streamAborted="true"});addEventListener("message",e=>{if(e.data==="progress")hooks.onFrame(JSON.stringify({step:50}));if(e.data==="terminal"){for(let i=0;i<4;i++)hooks.onFrame(JSON.stringify({state:"succeeded",step:100}))}})}}};</script>`;
 	await page.route("**/embedded-polling-child.html", (route) =>
 		route.fulfill({
 			contentType: "text/html",
@@ -486,8 +515,7 @@ test("production Fine-tuning keeps live progress and refreshes once on repeated 
 	const frame = page.frameLocator('iframe[title="Companion workspace"]');
 	await frame.getByRole("button", { name: /Training preview/ }).press("Enter");
 	await expect(frame.locator("body")).toHaveAttribute("data-streams", "1");
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page
 		.locator("iframe")
 		.evaluate((element: HTMLIFrameElement) =>
@@ -578,8 +606,7 @@ test("production Video Studio retains a newly queued export against an old poll 
 	await expect(
 		frame.getByText("Encoding video…", { exact: true })
 	).toBeVisible();
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page.clock.fastForward(10_000);
 	await expect(frame.locator("body")).toHaveAttribute("data-render-reads", "1");
 	await page.getByRole("button", { name: "Companion", exact: true }).click();
@@ -677,8 +704,7 @@ test("production Video Studio resumes source analysis after a completed run with
 	await expect(
 		frame.getByText("Analyzing scenes and audio…", { exact: true })
 	).toBeVisible();
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page.clock.fastForward(10_000);
 	await expect(frame.locator("body")).toHaveAttribute(
 		"data-analysis-reads",
@@ -818,8 +844,7 @@ test("shared display clocks stop while hidden, catch up on return, and preserve 
 	const first = await passive.textContent();
 	await page.clock.fastForward(2000);
 	await expect(passive).not.toHaveText(first!);
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	const hidden = await passive.textContent();
 	await page.clock.fastForward(9000);
 	await expect(passive).toHaveText(hidden!);
@@ -884,8 +909,7 @@ test("production Research retains slow campaign reads and scopes details to the 
 		);
 	await page.clock.fastForward(1);
 	await expect(frame.getByText("Goal A", { exact: true })).toHaveCount(0);
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	const lists = await frame.locator("body").getAttribute("data-campaign-reads");
 	const details = await frame.locator("body").getAttribute("data-detail-reads");
 	await page.clock.fastForward(20_000);
@@ -951,8 +975,7 @@ test("production Workflows prevents late recorder reads from resurrecting a stop
 	await expect(frame.locator("body")).toHaveAttribute("data-record-reads", "1");
 	await page.clock.fastForward(6000);
 	await expect(frame.locator("body")).toHaveAttribute("data-record-reads", "1");
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page
 		.locator("iframe")
 		.evaluate((element: HTMLIFrameElement) =>
@@ -1025,8 +1048,7 @@ test("production Workflows pauses awaiting-input reads while hidden and stops af
 	await expect(frame.locator("body")).toHaveAttribute("data-run-reads", "1");
 	await page.clock.fastForward(9000);
 	await expect(frame.locator("body")).toHaveAttribute("data-run-reads", "1");
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page
 		.locator("iframe")
 		.evaluate((element: HTMLIFrameElement) =>
@@ -1144,8 +1166,7 @@ test("production Video Studio history stays responsive while budget reads wait a
 	);
 	await expect(frame.locator("body")).toHaveAttribute("data-budget-reads", "1");
 	await expect(frame.locator("body")).toHaveAttribute("data-audit-reads", "1");
-	await page.getByRole("button", { name: "Another tab", exact: true }).click();
-	await page.waitForTimeout(150);
+	await hideCompanion(page);
 	await page.clock.fastForward(35_000);
 	await expect(frame.locator("body")).toHaveAttribute(
 		"data-generation-reads",

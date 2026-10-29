@@ -56,23 +56,23 @@ function NewTabMenuProof() {
 	const passed = checks.filter((check) => check.pass).length;
 
 	return (
-		<main className="min-h-screen bg-[#0b0f14] p-6 text-slate-100 sm:p-10">
+		<main className="dark min-h-screen bg-background p-6 text-foreground sm:p-10">
 			<div className="mx-auto flex max-w-4xl flex-col gap-6">
 				<header className="flex flex-col gap-4 border-white/10 border-b pb-6 sm:flex-row sm:items-start sm:justify-between">
 					<div>
-						<p className="font-medium text-slate-400 text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							React verification artifact
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
 							New workspace tab menu
 						</h1>
-						<p className="mt-2 max-w-2xl text-slate-400 text-sm leading-6">
+						<p className="mt-2 max-w-2xl text-muted-foreground text-sm leading-6">
 							The title-bar plus now opens a workspace chooser, with Chat first
 							and Browser, Tree view, and Diff view beside it.
 						</p>
 					</div>
 					<div
-						className="inline-flex w-fit items-center rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 font-semibold text-emerald-200 text-xs"
+						className="inline-flex w-fit items-center rounded-full border border-success/30 bg-success/10 px-3 py-1.5 font-semibold text-success text-xs"
 						data-status={passed === checks.length ? "pass" : "pending"}
 						data-testid="proof-status"
 					>
@@ -91,15 +91,15 @@ function NewTabMenuProof() {
 							key={item.label}
 						>
 							<div className="flex items-center justify-between gap-2">
-								<span className="font-mono text-slate-500 text-xs">
+								<span className="font-mono text-muted-foreground text-xs">
 									0{index + 1}
 								</span>
-								<span className="rounded-full bg-white/10 px-2 py-0.5 font-mono text-[11px] text-slate-300">
+								<span className="type-caption rounded-full bg-white/10 px-2 py-0.5 font-mono text-foreground">
 									{item.route}
 								</span>
 							</div>
 							<h2 className="mt-4 font-semibold text-lg">{item.label}</h2>
-							<p className="mt-1 text-slate-400 text-sm leading-5">
+							<p className="mt-1 text-muted-foreground text-sm leading-5">
 								{item.detail}
 							</p>
 						</article>
@@ -112,7 +112,7 @@ function NewTabMenuProof() {
 				>
 					<div className="border-white/10 border-b px-5 py-4">
 						<h2 className="font-semibold text-lg">Verification checks</h2>
-						<p className="mt-1 text-slate-400 text-sm">
+						<p className="mt-1 text-muted-foreground text-sm">
 							Source and route checks captured for this change.
 						</p>
 					</div>
@@ -125,9 +125,11 @@ function NewTabMenuProof() {
 							>
 								<div>
 									<h3 className="font-medium">{check.label}</h3>
-									<p className="mt-1 text-slate-400 text-sm">{check.detail}</p>
+									<p className="mt-1 text-muted-foreground text-sm">
+										{check.detail}
+									</p>
 								</div>
-								<span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 font-medium text-emerald-200 text-xs">
+								<span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 font-medium text-success text-xs">
 									{check.pass ? "PASS" : "PENDING"}
 								</span>
 							</div>
@@ -138,6 +140,8 @@ function NewTabMenuProof() {
 		</main>
 	);
 }
+
+document.documentElement.classList.add("dark");
 
 const root = document.getElementById("root");
 if (root) {

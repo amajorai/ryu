@@ -24,8 +24,9 @@ than reaching back into the kernel.
 
 ## Swap seam / backends
 
-- **JS** — runs via the deny-all Deno backend (`ryu-tool-exec::run_eval_js`), gated
-  by the `tool-exec-deno` feature forwarded to `ryu-tool-exec`. Default **ON** so
+- **JS** — runs in ryu-tool-exec's deny-all WebAssembly sandbox
+  (`ryu-tool-exec::run_eval_js`), gated by the `js-sandbox` feature forwarded to
+  `ryu-tool-exec`. Default **ON** so
   `cargo test -p ryu-eval-code` exercises the JS path; with it OFF, `run_js`
   returns an honest `executed: false` skip.
 - **Python** — runs via the swappable `ryu-sandbox` backend, or a host fallback.
@@ -33,4 +34,4 @@ than reaching back into the kernel.
 ## Consumed as
 
 Compiled-into-Core library crate (default path dependency); `default =
-["tool-exec-deno"]`.
+["js-sandbox"]`.

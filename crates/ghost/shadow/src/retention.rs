@@ -215,14 +215,19 @@ pub fn load_policy(conn: &rusqlite::Connection) -> Result<RetentionPolicy, Strin
 }
 
 pub fn save_policy(conn: &rusqlite::Connection, policy: &RetentionPolicy) -> Result<(), String> {
-    write_config(conn, "hot_days", &policy.hot_days.to_string())?;
-    write_config(conn, "warm_days", &policy.warm_days.to_string())?;
+    let transaction = conn
+        .unchecked_transaction()
+        .map_err(|error| format!("Begin retention transaction failed: {error}"))?;
+    write_config(&transaction, "hot_days", &policy.hot_days.to_string())?;
+    write_config(&transaction, "warm_days", &policy.warm_days.to_string())?;
     write_config(
-        conn,
+        &transaction,
         "max_storage_bytes",
         &policy.max_storage_bytes.to_string(),
     )?;
-    Ok(())
+    transaction
+        .commit()
+        .map_err(|error| format!("Commit retention transaction failed: {error}"))
 }
 
 fn read_u32_config(conn: &rusqlite::Connection, key: &str) -> Result<Option<u32>, String> {
@@ -416,6 +421,365 @@ pub fn delete_audio_segment(
     );
 
     Ok(size)
+}
+
+// MARK: - History window
+
+const MICROS_PER_DAY: u64 = 86_400 * 1_000_000;
+/// Index checkpoints that store a capture timestamp (not a segment id). The
+/// sweep moves them past the cutoff so an indexer never revisits pruned time.
+const TIMESTAMP_CHECKPOINTS: [&str; 3] = ["search_text", "ocr", "vector"];
+
+/// What one history-window sweep removed. Counts are rows/documents/files.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HistoryPruneReport {
+    /// Everything captured before this instant (Unix microseconds) is pruned.
+    pub cutoff_us: u64,
+    pub events_deleted: u64,
+    pub focus_intervals_deleted: u64,
+    pub ax_snapshots_deleted: u64,
+    pub visual_changes_deleted: u64,
+    pub keyframes_deleted: u64,
+    pub video_segments_deleted: u64,
+    pub audio_segments_deleted: u64,
+    pub segments_deleted: u64,
+    pub capture_sessions_deleted: u64,
+    pub search_docs_deleted: u64,
+    pub vector_entries_deleted: u64,
+    pub files_deleted: u64,
+    pub bytes_freed: u64,
+    /// Non-fatal failures (a file that could not be removed, an index that was
+    /// busy). The next sweep retries them; nothing here leaves a dangling row.
+    pub errors: Vec<String>,
+}
+
+impl HistoryPruneReport {
+    pub fn new(cutoff_us: u64) -> Self {
+        Self {
+            cutoff_us,
+            ..Self::default()
+        }
+    }
+
+    /// Total rows, documents and files removed.
+    pub fn total_removed(&self) -> u64 {
+        self.events_deleted
+            + self.focus_intervals_deleted
+            + self.ax_snapshots_deleted
+            + self.visual_changes_deleted
+            + self.keyframes_deleted
+            + self.video_segments_deleted
+            + self.audio_segments_deleted
+            + self.segments_deleted
+            + self.capture_sessions_deleted
+            + self.search_docs_deleted
+            + self.vector_entries_deleted
+            + self.files_deleted
+    }
+}
+
+/// Start of the history window for `history_days` ending at `now_us`.
+pub fn history_cutoff_us(now_us: u64, history_days: u32) -> u64 {
+    now_us.saturating_sub(u64::from(history_days).saturating_mul(MICROS_PER_DAY))
+}
+
+fn sql_ts(ts: u64) -> i64 {
+    ts.min(i64::MAX as u64) as i64
+}
+
+fn collect_paths(
+    tx: &rusqlite::Transaction<'_>,
+    sql: &str,
+    cutoff: i64,
+    into: &mut Vec<String>,
+) -> Result<(), String> {
+    let mut stmt = tx
+        .prepare(sql)
+        .map_err(|e| format!("Prepare failed: {e}"))?;
+    let rows = stmt
+        .query_map(rusqlite::params![cutoff], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Query failed: {e}"))?;
+    for row in rows {
+        into.push(row.map_err(|e| format!("Read failed: {e}"))?);
+    }
+    Ok(())
+}
+
+fn delete_rows(tx: &rusqlite::Transaction<'_>, sql: &str, cutoff: i64) -> Result<u64, String> {
+    tx.execute(sql, rusqlite::params![cutoff])
+        .map(|n| n as u64)
+        .map_err(|e| format!("Delete failed: {e}"))
+}
+
+/// Last modification time of `path` in Unix microseconds, without following a
+/// symlink. `None` when the file is missing or its time is unreadable.
+pub(crate) fn modified_us(path: &Path) -> Option<u64> {
+    let modified = std::fs::symlink_metadata(path).ok()?.modified().ok()?;
+    let since_epoch = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(u64::try_from(since_epoch.as_micros()).unwrap_or(u64::MAX))
+}
+
+/// Finalize video/audio segments that were left open (`end_ts = 0`) but whose
+/// file has not been written since before `cutoff_us`. Nothing seals the last
+/// segment of a session that ended by quit, crash or kill, so `end_ts = 0`
+/// alone does not mean "still recording". An encoder appends to its file as it
+/// captures, so the file's modification time is when its last byte was
+/// captured (a missing file falls back to the row's start time). Each such row
+/// gets that time as `end_ts`, and its unified `segments` mirror is sealed, so
+/// the rest of the sweep prunes it like any finished segment.
+fn finalize_abandoned_media_segments(
+    tx: &rusqlite::Transaction<'_>,
+    cutoff_us: u64,
+) -> Result<(), String> {
+    let cutoff = sql_ts(cutoff_us);
+    for (table, kind) in [("video_segments", "video"), ("audio_segments", "audio")] {
+        let candidates: Vec<(String, i64)> = {
+            let mut stmt = tx
+                .prepare(&format!(
+                    "SELECT file_path, start_ts FROM {table} WHERE end_ts = 0 AND start_ts < ?1"
+                ))
+                .map_err(|e| format!("Prepare failed: {e}"))?;
+            let rows = stmt
+                .query_map(rusqlite::params![cutoff], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })
+                .map_err(|e| format!("Query failed: {e}"))?;
+            rows.collect::<Result<_, _>>()
+                .map_err(|e| format!("Read failed: {e}"))?
+        };
+        for (file_path, start_ts) in candidates {
+            let start_us = u64::try_from(start_ts).unwrap_or(0);
+            let last_write_us = modified_us(Path::new(&file_path))
+                .unwrap_or(start_us)
+                .max(start_us);
+            if last_write_us >= cutoff_us {
+                continue; // Written inside the window: still recording.
+            }
+            // `end_ts > 0` marks a finished segment, so never store 0.
+            let end_ts = sql_ts(last_write_us.max(1));
+            tx.execute(
+                &format!("UPDATE {table} SET end_ts = ?1 WHERE file_path = ?2 AND end_ts = 0"),
+                rusqlite::params![end_ts, file_path],
+            )
+            .map_err(|e| format!("Finalize abandoned {kind} segment failed: {e}"))?;
+            tx.execute(
+                "UPDATE segments SET end_ts = ?1, status = 'sealed'
+                 WHERE kind = ?2 AND path = ?3 AND status = 'open'",
+                rusqlite::params![end_ts, kind, file_path],
+            )
+            .map_err(|e| format!("Seal abandoned {kind} segment failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Delete every timeline row captured before `cutoff_us` in one transaction and
+/// return the media/event file paths those rows referenced, for the caller to
+/// remove *after* the commit (rows first, then files: a crash in between leaves
+/// only unreferenced files, which the next sweep's directory pass removes).
+///
+/// Open video/audio/event segments (`end_ts = 0` or status `open`) are kept
+/// while they are still being written. A video/audio segment left open whose
+/// file was last written before the cutoff is abandoned (see
+/// [`finalize_abandoned_media_segments`]) and pruned.
+pub fn prune_timeline_before(
+    conn: &rusqlite::Connection,
+    cutoff_us: u64,
+    report: &mut HistoryPruneReport,
+) -> Result<Vec<String>, String> {
+    let cutoff = sql_ts(cutoff_us);
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("Begin retention transaction failed: {e}"))?;
+    finalize_abandoned_media_segments(&tx, cutoff_us)?;
+
+    let mut files = Vec::new();
+    collect_paths(
+        &tx,
+        "SELECT file_path FROM keyframes WHERE ts < ?1",
+        cutoff,
+        &mut files,
+    )?;
+    collect_paths(
+        &tx,
+        "SELECT file_path FROM video_segments WHERE end_ts > 0 AND end_ts < ?1",
+        cutoff,
+        &mut files,
+    )?;
+    collect_paths(
+        &tx,
+        "SELECT file_path FROM audio_segments WHERE end_ts > 0 AND end_ts < ?1",
+        cutoff,
+        &mut files,
+    )?;
+    collect_paths(
+        &tx,
+        "SELECT path FROM segments
+         WHERE status != 'open' AND end_ts > 0 AND end_ts < ?1",
+        cutoff,
+        &mut files,
+    )?;
+    files.sort();
+    files.dedup();
+
+    report.events_deleted += delete_rows(&tx, "DELETE FROM events_index WHERE ts < ?1", cutoff)?;
+    report.focus_intervals_deleted += delete_rows(
+        &tx,
+        "DELETE FROM app_focus_intervals WHERE end_ts > 0 AND end_ts < ?1",
+        cutoff,
+    )?;
+    report.ax_snapshots_deleted += delete_rows(
+        &tx,
+        "DELETE FROM ax_snapshots WHERE timestamp_us < ?1",
+        cutoff,
+    )?;
+    report.visual_changes_deleted += delete_rows(
+        &tx,
+        "DELETE FROM visual_change_log WHERE timestamp_us < ?1",
+        cutoff,
+    )?;
+    report.keyframes_deleted += delete_rows(&tx, "DELETE FROM keyframes WHERE ts < ?1", cutoff)?;
+    report.video_segments_deleted += delete_rows(
+        &tx,
+        "DELETE FROM video_segments WHERE end_ts > 0 AND end_ts < ?1",
+        cutoff,
+    )?;
+    report.audio_segments_deleted += delete_rows(
+        &tx,
+        "DELETE FROM audio_segments WHERE end_ts > 0 AND end_ts < ?1",
+        cutoff,
+    )?;
+    report.segments_deleted += delete_rows(
+        &tx,
+        "DELETE FROM segments WHERE status != 'open' AND end_ts > 0 AND end_ts < ?1",
+        cutoff,
+    )?;
+    report.capture_sessions_deleted += delete_rows(
+        &tx,
+        "DELETE FROM capture_sessions WHERE end_ts > 0 AND end_ts < ?1",
+        cutoff,
+    )?;
+
+    // Timestamp checkpoints move to the cutoff so a lagging indexer starts at
+    // the window instead of revisiting (now empty) pruned time.
+    let checkpoint = sql_ts(cutoff_us.saturating_sub(1));
+    for name in TIMESTAMP_CHECKPOINTS {
+        tx.execute(
+            "INSERT INTO index_checkpoints (index_name, last_ts) VALUES (?1, ?2)
+             ON CONFLICT(index_name) DO UPDATE SET last_ts = MAX(last_ts, excluded.last_ts)",
+            rusqlite::params![name, checkpoint],
+        )
+        .map_err(|e| format!("Advance {name} checkpoint failed: {e}"))?;
+    }
+
+    tx.commit()
+        .map_err(|e| format!("Commit retention transaction failed: {e}"))?;
+    Ok(files)
+}
+
+/// Paths of video/audio segments that are still recording. Call it after
+/// [`prune_timeline_before`], which finalizes abandoned open segments, so only
+/// segments written inside the window remain; the directory pass keeps these.
+pub fn open_media_paths(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT file_path FROM video_segments WHERE end_ts = 0
+             UNION SELECT file_path FROM audio_segments WHERE end_ts = 0",
+        )
+        .map_err(|e| format!("Prepare failed: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Query failed: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Read failed: {e}"))
+}
+
+/// True when `path` is a plain descendant of `root` (no `..` escapes). Rows can
+/// carry arbitrary strings, so the sweep only deletes files inside Shadow's own
+/// data directory.
+fn is_within(root: &Path, path: &Path) -> bool {
+    path.starts_with(root)
+        && !path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+fn remove_one(path: &Path, report: &mut HistoryPruneReport) {
+    let size = std::fs::symlink_metadata(path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    match std::fs::remove_file(path) {
+        Ok(()) => {
+            report.files_deleted += 1;
+            report.bytes_freed += size;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => report
+            .errors
+            .push(format!("Remove {} failed: {e}", path.display())),
+    }
+}
+
+/// Remove the files that pruned rows referenced. Missing files are fine (an
+/// earlier interrupted sweep, or a user who cleaned up by hand).
+pub fn remove_data_files(root: &Path, files: &[String], report: &mut HistoryPruneReport) {
+    for file in files {
+        let path = Path::new(file);
+        if is_within(root, path) {
+            remove_one(path, report);
+        }
+    }
+}
+
+/// Remove every regular file under `dir` last modified before `cutoff_us`,
+/// except those in `keep`, then drop subdirectories left empty. A file's
+/// modification time is when its last byte was captured, so anything older
+/// than the cutoff holds only out-of-window data. This catches media written
+/// without a timeline row (hourly microphone WAVs) and files orphaned by an
+/// interrupted sweep. Symlinks are never followed or removed.
+pub fn sweep_stale_files(
+    dir: &Path,
+    cutoff_us: u64,
+    keep: &std::collections::HashSet<std::path::PathBuf>,
+    report: &mut HistoryPruneReport,
+) {
+    let cutoff = std::time::UNIX_EPOCH + std::time::Duration::from_micros(cutoff_us);
+    sweep_dir(dir, cutoff, keep, report);
+}
+
+fn sweep_dir(
+    dir: &Path,
+    cutoff: std::time::SystemTime,
+    keep: &std::collections::HashSet<std::path::PathBuf>,
+    report: &mut HistoryPruneReport,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        let modified_before_cutoff = || {
+            std::fs::symlink_metadata(&path)
+                .and_then(|m| m.modified())
+                .is_ok_and(|modified| modified < cutoff)
+        };
+        if file_type.is_dir() {
+            // Judge the directory by its mtime before this pass touches it: one
+            // a writer created or wrote into inside the window is kept even if
+            // empty, so the sweep does not race a writer's create_dir_all + open.
+            let stale_dir = modified_before_cutoff();
+            sweep_dir(&path, cutoff, keep, report);
+            if stale_dir {
+                // Only succeeds when empty; a non-empty directory is left alone.
+                let _ = std::fs::remove_dir(&path);
+            }
+        } else if file_type.is_file() && !keep.contains(&path) && modified_before_cutoff() {
+            remove_one(&path, report);
+        }
+    }
 }
 
 #[cfg(test)]

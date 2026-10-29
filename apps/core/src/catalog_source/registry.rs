@@ -8,6 +8,11 @@
 //!   construction** and stored on the registry, so tests inject a temp path
 //!   without touching process env (no cross-test races).
 //! - **Active selection** → `PreferencesStore` key `catalog.active_source.{kind}`.
+//!
+//! Private-marketplace credentials (`auth.bearer` and `auth.headers` values) are
+//! sealed with the master key (`enc:v1:`) in the file. A value that is only a
+//! `${ENV_VAR}` reference names a variable rather than holding a secret, so it
+//! stays readable. Legacy plaintext is accepted on load and sealed in place once.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,6 +21,7 @@ use std::sync::RwLock;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use super::agent_registry::AgentRegistrySource;
 use super::skill_registries::{
     self, BrowseShSource, ClawHubSource, LobeHubSource, WellKnownSource,
 };
@@ -199,20 +205,30 @@ fn source_from_spec(spec: CustomSourceSpec) -> Source {
             }
         }
         CatalogKind::Agent => {
-            // Deliberately a labelled stub even WITH a base_url, unlike the
-            // Skill/Plugin arms. Those read `.claude-plugin/marketplace.json`, and
-            // there is no such standard for a published agent template — pointing a
-            // `MarketplaceSource` at a repo would list that repo's *plugins* as if
-            // they were agents, then fail at install with no template to import.
-            // A stub browses empty and says so, which is the honest degradation.
-            // The built-in primary (`RyuMarketplaceSource`, whose per-kind
-            // `catalog/detail` DOES carry the template) is registered in
-            // [`builtin_sources`]; give a git repo format an arm here once one exists.
-            Source::Stub(StubSource {
-                id: spec.id,
-                display_name: spec.display_name,
-                kind: CatalogKind::Agent,
-            })
+            // A custom Agent source with a base_url is a federated agent
+            // registry speaking the marketplace catalog HTTP shape for the
+            // `agent` kind (`/api/marketplace/catalog[/detail]?kind=agent`). It
+            // is NOT a git `MarketplaceSource` (there is no
+            // `.claude-plugin/marketplace.json` standard for agent templates, so
+            // that would list a repo's plugins as agents) and NOT a
+            // `RyuMarketplaceSource` (which skips the SSRF guard for localhost
+            // dev and forwards the buyer bearer). `AgentRegistrySource` fetches
+            // through the SSRF guard with no credentials and installs only a
+            // signature-verified template. With no base_url it degrades to a
+            // labelled stub. The built-in primary (`RyuMarketplaceSource`) is
+            // registered in [`builtin_sources`].
+            match spec.base_url.filter(|u| !u.trim().is_empty()) {
+                Some(base_url) => Source::AgentRegistry(AgentRegistrySource::new(
+                    spec.id,
+                    spec.display_name,
+                    base_url,
+                )),
+                None => Source::Stub(StubSource {
+                    id: spec.id,
+                    display_name: spec.display_name,
+                    kind: CatalogKind::Agent,
+                }),
+            }
         } // No catch-all arm on purpose: every kind is matched explicitly, so the
           // compiler flags the NEXT one added instead of silently degrading it to a
           // stub the way a trailing `other =>` did.
@@ -231,7 +247,7 @@ fn is_model_index_url(base_url: &str) -> bool {
 }
 
 fn default_sources_file() -> PathBuf {
-    crate::paths::ryu_dir().join("catalog-sources.json")
+    crate::paths::state_path("catalog-sources.json")
 }
 
 /// Holds built-in sources keyed by kind plus user-added custom ones. The
@@ -244,6 +260,100 @@ pub struct CatalogSourceRegistry {
     custom: RwLock<HashMap<CatalogKind, Vec<Source>>>,
     /// Where custom sources persist. Resolved once at construction.
     sources_file: PathBuf,
+    /// Seals and opens credential values in the file (the master key in
+    /// production; a fixed key in tests).
+    cipher: fn() -> Result<ryu_crypto::FieldCipher>,
+}
+
+/// The production cipher: the process master key, failing closed without one.
+fn master_cipher() -> Result<ryu_crypto::FieldCipher> {
+    crate::crypto_host::install();
+    ryu_crypto::global_cipher().context("loading the key that seals marketplace credentials")
+}
+
+/// A value that is exactly one `${ENV_VAR}` reference holds no secret, so it
+/// stays readable (and hand-editable) in the file.
+fn is_env_reference(value: &str) -> bool {
+    let value = value.trim();
+    value
+        .strip_prefix("${")
+        .and_then(|rest| rest.strip_suffix('}'))
+        .is_some_and(|name| {
+            !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+}
+
+/// The on-disk form of one credential value: sealed unless empty, already
+/// sealed, or a bare `${ENV_VAR}` reference. Fails closed without a key.
+fn seal_auth_value(
+    value: &str,
+    cipher: &mut Option<ryu_crypto::FieldCipher>,
+    source: fn() -> Result<ryu_crypto::FieldCipher>,
+) -> Result<String> {
+    if value.is_empty() || ryu_crypto::looks_sealed(value) || is_env_reference(value) {
+        return Ok(value.to_owned());
+    }
+    if cipher.is_none() {
+        *cipher = Some(source()?);
+    }
+    let Some(cipher) = cipher.as_ref() else {
+        bail!("no key to seal a marketplace credential");
+    };
+    cipher.seal(value)
+}
+
+/// Seal every credential value of `auth` for writing.
+fn seal_auth(
+    auth: &SourceAuth,
+    source: fn() -> Result<ryu_crypto::FieldCipher>,
+) -> Result<SourceAuth> {
+    let mut cipher = None;
+    let bearer = auth
+        .bearer
+        .as_deref()
+        .map(|bearer| seal_auth_value(bearer, &mut cipher, source))
+        .transpose()?;
+    let mut headers = std::collections::BTreeMap::new();
+    for (name, value) in &auth.headers {
+        headers.insert(name.clone(), seal_auth_value(value, &mut cipher, source)?);
+    }
+    Ok(SourceAuth { bearer, headers })
+}
+
+/// Open the credential values of `auth` as read from the file. Returns the
+/// opened auth and whether any literal secret was still plaintext on disk.
+/// A sealed value that cannot be opened is kept sealed: the fetch then refuses
+/// to send it (fail closed) and the next save writes it back unchanged rather
+/// than losing it.
+fn open_auth(
+    auth: SourceAuth,
+    source: fn() -> Result<ryu_crypto::FieldCipher>,
+    origin: &str,
+) -> (SourceAuth, bool) {
+    let mut cipher: Option<Result<ryu_crypto::FieldCipher>> = None;
+    let mut needs_reseal = false;
+    let mut open = |value: String| -> String {
+        if !ryu_crypto::looks_sealed(&value) {
+            needs_reseal |= !value.is_empty() && !is_env_reference(&value);
+            return value;
+        }
+        let cipher = cipher.get_or_insert_with(source);
+        let opened = match cipher {
+            Ok(cipher) => ryu_crypto::SecretSealer::open(cipher, &value),
+            Err(error) => Err(anyhow::anyhow!("{error:#}")),
+        };
+        opened.unwrap_or_else(|error| {
+            tracing::warn!(source = %origin, "cannot open a sealed marketplace credential: {error:#}");
+            value
+        })
+    };
+    let bearer = auth.bearer.map(&mut open);
+    let headers = auth
+        .headers
+        .into_iter()
+        .map(|(name, value)| (name, open(value)))
+        .collect();
+    (SourceAuth { bearer, headers }, needs_reseal)
 }
 
 impl CatalogSourceRegistry {
@@ -258,10 +368,19 @@ impl CatalogSourceRegistry {
 
     /// Construct against a specific custom-sources file (the test seam).
     pub fn with_file(sources_file: PathBuf) -> Self {
+        Self::with_file_and_cipher(sources_file, master_cipher)
+    }
+
+    /// [`Self::with_file`] with an explicit credential cipher (the test seam).
+    fn with_file_and_cipher(
+        sources_file: PathBuf,
+        cipher: fn() -> Result<ryu_crypto::FieldCipher>,
+    ) -> Self {
         let registry = Self {
             builtin: builtin_sources(),
             custom: RwLock::new(HashMap::new()),
             sources_file,
+            cipher,
         };
         if let Err(e) = registry.load_custom() {
             tracing::warn!("failed to load custom catalog sources: {e:#}");
@@ -477,14 +596,30 @@ impl CatalogSourceRegistry {
         }
         let specs: Vec<CustomSourceSpec> = serde_json::from_str(&raw)
             .with_context(|| format!("parsing {}", self.sources_file.display()))?;
-        let mut custom = self
-            .custom
-            .write()
-            .map_err(|_| anyhow::anyhow!("custom sources lock poisoned"))?;
-        custom.clear();
-        for spec in specs {
-            let kind = spec.kind;
-            custom.entry(kind).or_default().push(source_from_spec(spec));
+        let mut needs_reseal = false;
+        {
+            let mut custom = self
+                .custom
+                .write()
+                .map_err(|_| anyhow::anyhow!("custom sources lock poisoned"))?;
+            custom.clear();
+            for mut spec in specs {
+                if let Some(auth) = spec.auth.take() {
+                    let (auth, reseal) = open_auth(auth, self.cipher, &spec.id);
+                    needs_reseal |= reseal;
+                    spec.auth = Some(auth);
+                }
+                let kind = spec.kind;
+                custom.entry(kind).or_default().push(source_from_spec(spec));
+            }
+        }
+        // One-time migration: a credential an older build wrote in plaintext is
+        // sealed in place. A failure leaves the file as it was and is retried on
+        // the next load.
+        if needs_reseal {
+            if let Err(error) = self.save_custom() {
+                tracing::warn!("could not seal marketplace credentials in place: {error:#}");
+            }
         }
         Ok(())
     }
@@ -495,8 +630,20 @@ impl CatalogSourceRegistry {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
+        let specs = specs
+            .into_iter()
+            .map(|mut spec| {
+                spec.auth = spec
+                    .auth
+                    .as_ref()
+                    .map(|auth| seal_auth(auth, self.cipher))
+                    .transpose()?;
+                Ok(spec)
+            })
+            .collect::<Result<Vec<_>>>()
+            .context("refusing to write a marketplace credential unsealed")?;
         let json = serde_json::to_string_pretty(&specs)?;
-        std::fs::write(&self.sources_file, json)
+        crate::atomic_file::write_atomic(&self.sources_file, json.as_bytes())
             .with_context(|| format!("writing {}", self.sources_file.display()))?;
         Ok(())
     }
@@ -609,11 +756,6 @@ fn builtin_sources() -> HashMap<CatalogKind, Vec<Source>> {
             // Search API's 10 req/min budget can't take a fan-out per store open.
             // The store reaches it explicitly via `?origin=community`.
             Source::GithubTopic(super::github_topic::GithubTopicSource::builtin()),
-            Source::Stub(StubSource {
-                id: "ryu-apps".to_string(),
-                display_name: "Ryu App Catalog".to_string(),
-                kind: CatalogKind::Plugin,
-            }),
         ],
     );
     // Knowledge (OKF bundles). Primary (default active): the Ryu Marketplace
@@ -888,21 +1030,48 @@ mod tests {
         ));
     }
 
-    /// Agent is the one kind a base_url does NOT upgrade out of a stub, and that
-    /// is deliberate: `MarketplaceSource` parses `.claude-plugin/marketplace.json`,
-    /// so a repo pointed at the Agent kind would advertise its PLUGINS as agents
-    /// and then fail at install with no template to import. Pinned so the arm is
-    /// not "fixed" into a `Marketplace(_)` that reintroduces the mis-listing.
+    /// A custom Agent source with a base_url is a federated agent registry
+    /// (`AgentRegistrySource`, SSRF-guarded + signature-gated install), never a
+    /// git `MarketplaceSource` (which would list a repo's PLUGINS as agents) nor
+    /// an unguarded `RyuMarketplaceSource`. No base_url stays a labelled stub.
     #[test]
-    fn a_custom_agent_source_stays_a_stub_even_with_a_repo_url() {
-        assert!(matches!(
-            source_from_spec(spec(CatalogKind::Agent, "a1", Some("https://git/repo"))),
-            Source::Stub(_)
-        ));
+    fn a_custom_agent_source_with_a_base_url_is_a_federated_agent_registry() {
+        match source_from_spec(spec(
+            CatalogKind::Agent,
+            "a1",
+            Some("https://agents.example.com"),
+        )) {
+            Source::AgentRegistry(source) => {
+                assert_eq!(source.base_url, "https://agents.example.com");
+            }
+            _ => panic!("expected an AgentRegistry source"),
+        }
         assert!(matches!(
             source_from_spec(spec(CatalogKind::Agent, "a2", None)),
             Source::Stub(_)
         ));
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Agent, "a3", Some("  "))),
+            Source::Stub(_)
+        ));
+    }
+
+    #[test]
+    fn a_custom_agent_registry_persists_its_base_url() {
+        let path = temp_path("agent-registry");
+        let reg = CatalogSourceRegistry::with_file(path.clone());
+        reg.add_custom(spec(
+            CatalogKind::Agent,
+            "acme-agents",
+            Some("https://agents.example.com"),
+        ))
+        .unwrap();
+        let reloaded = CatalogSourceRegistry::with_file(path);
+        let source = reloaded
+            .source_by_id(CatalogKind::Agent, "acme-agents")
+            .expect("custom agent source reloads");
+        assert!(matches!(source, Source::AgentRegistry(_)));
+        assert_eq!(source.base_url(), Some("https://agents.example.com"));
     }
 
     #[test]
@@ -1195,5 +1364,113 @@ mod tests {
             reg.active_id(CatalogKind::Model, &prefs).await.as_deref(),
             Some("huggingface")
         );
+    }
+
+    fn test_cipher() -> Result<ryu_crypto::FieldCipher> {
+        Ok(ryu_crypto::FieldCipher::new(&[0x5c; 32]))
+    }
+
+    fn private_spec(id: &str, bearer: &str, header: &str) -> CustomSourceSpec {
+        CustomSourceSpec {
+            kind: CatalogKind::Plugin,
+            id: id.to_owned(),
+            display_name: "Team".to_owned(),
+            base_url: Some("https://plugins.example.test/marketplace.json".to_owned()),
+            auth: Some(SourceAuth {
+                bearer: Some(bearer.to_owned()),
+                headers: [
+                    ("X-Api-Key".to_owned(), header.to_owned()),
+                    ("X-Env".to_owned(), "${TEAM_MARKETPLACE_TOKEN}".to_owned()),
+                ]
+                .into_iter()
+                .collect(),
+            }),
+        }
+    }
+
+    fn opened_auth(reg: &CatalogSourceRegistry, id: &str) -> SourceAuth {
+        reg.find(CatalogKind::Plugin, id)
+            .and_then(|source| source.auth().cloned())
+            .expect("source keeps its auth")
+    }
+
+    #[test]
+    fn marketplace_credentials_are_sealed_on_disk_and_open_on_load() {
+        let file = temp_path("sealed-auth");
+        let reg = CatalogSourceRegistry::with_file_and_cipher(file.clone(), test_cipher);
+        reg.add_custom(private_spec(
+            "team",
+            "bearer-secret-81c2",
+            "header-secret-77d0",
+        ))
+        .unwrap();
+        let raw = std::fs::read_to_string(&file).unwrap();
+        assert!(!raw.contains("bearer-secret-81c2") && !raw.contains("header-secret-77d0"));
+        assert!(raw.contains("enc:v1:"));
+        // A bare env reference holds no secret and stays readable.
+        assert!(raw.contains("${TEAM_MARKETPLACE_TOKEN}"));
+
+        let reloaded = CatalogSourceRegistry::with_file_and_cipher(file, test_cipher);
+        let auth = opened_auth(&reloaded, "team");
+        assert_eq!(auth.bearer.as_deref(), Some("bearer-secret-81c2"));
+        assert_eq!(auth.headers["X-Api-Key"], "header-secret-77d0");
+        assert_eq!(auth.headers["X-Env"], "${TEAM_MARKETPLACE_TOKEN}");
+    }
+
+    #[test]
+    fn legacy_plaintext_marketplace_credentials_are_resealed_on_load() {
+        let file = temp_path("legacy-auth");
+        let legacy = vec![private_spec(
+            "team",
+            "legacy-bearer-19ab",
+            "legacy-header-5e3c",
+        )];
+        std::fs::write(&file, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        let reg = CatalogSourceRegistry::with_file_and_cipher(file.clone(), test_cipher);
+        let auth = opened_auth(&reg, "team");
+        assert_eq!(auth.bearer.as_deref(), Some("legacy-bearer-19ab"));
+        assert_eq!(auth.headers["X-Api-Key"], "legacy-header-5e3c");
+        let raw = std::fs::read_to_string(&file).unwrap();
+        assert!(!raw.contains("legacy-bearer-19ab") && !raw.contains("legacy-header-5e3c"));
+        assert!(raw.contains("enc:v1:"));
+    }
+
+    #[test]
+    fn unopenable_marketplace_credential_is_kept_and_never_sent() {
+        let file = temp_path("wrong-key-auth");
+        let writer = CatalogSourceRegistry::with_file_and_cipher(file.clone(), test_cipher);
+        writer
+            .add_custom(private_spec(
+                "team",
+                "bearer-secret-0d4e",
+                "header-secret-6a91",
+            ))
+            .unwrap();
+        let sealed = std::fs::read_to_string(&file).unwrap();
+        fn other_cipher() -> Result<ryu_crypto::FieldCipher> {
+            Ok(ryu_crypto::FieldCipher::new(&[0x01; 32]))
+        }
+        let reader = CatalogSourceRegistry::with_file_and_cipher(file.clone(), other_cipher);
+        let auth = opened_auth(&reader, "team");
+        assert!(ryu_crypto::looks_sealed(auth.bearer.as_deref().unwrap()));
+        let refusal = auth.resolve_headers().unwrap_err().to_string();
+        assert!(
+            refusal.contains("sealed"),
+            "ciphertext is never sent: {refusal}"
+        );
+        // Rewriting the file keeps the sealed value rather than dropping it.
+        reader.remove_custom(CatalogKind::Plugin, "missing").ok();
+        reader
+            .add_custom(spec(CatalogKind::Plugin, "other", None))
+            .unwrap();
+        let rewritten = std::fs::read_to_string(&file).unwrap();
+        let bearer = sealed
+            .lines()
+            .find(|line| line.contains("\"bearer\""))
+            .unwrap()
+            .trim()
+            .trim_end_matches(',');
+        assert!(rewritten.contains(bearer));
     }
 }

@@ -57,6 +57,10 @@ pub async fn ensure_installed() -> Result<()> {
     // Fast path: already recorded in versions.json.
     if store.versions.contains_key("sglang") {
         tracing::info!("sglang already installed — skipping");
+        if let Ok(python) = python_cmd().await {
+            crate::sidecar::external_runtime::remediate_installed_pip_floor("sglang", &python)
+                .await;
+        }
         return Ok(());
     }
 
@@ -66,8 +70,10 @@ pub async fn ensure_installed() -> Result<()> {
 
     tracing::info!("installing sglang via pip ({python} -m pip install sglang)");
 
+    let pip_args = crate::sidecar::external_runtime::pip_install_package_args(&["sglang"])
+        .context("writing the pip security constraints file")?;
     let status = Command::new(&python)
-        .args(["-m", "pip", "install", "sglang"])
+        .args(&pip_args)
         .no_window()
         .status()
         .await

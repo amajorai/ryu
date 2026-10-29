@@ -1,7 +1,7 @@
-import { Target01Icon } from "@hugeicons/core-free-icons";
+import { CallIcon, Target01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Avatar, AvatarFallback, AvatarImage } from "@ryu/ui/components/avatar";
-import { Bubble, BubbleContent } from "@ryu/ui/components/bubble";
+import { Bubble } from "@ryu/ui/components/bubble";
 import { Button } from "@ryu/ui/components/button";
 import {
 	DitherAvatar,
@@ -10,8 +10,6 @@ import {
 import {
 	Message,
 	MessageAvatar,
-	MessageContent,
-	MessageFooter,
 	MessageHeader,
 } from "@ryu/ui/components/message";
 import {
@@ -20,24 +18,30 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { formatDateTime, formatTime } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type { UIMessage } from "ai";
 import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { CollapsibleText } from "./collapsible-text.tsx";
+import { isImeComposingKeyEvent } from "./composer-send-shortcut.ts";
 import { ImageLightbox } from "./image-lightbox.tsx";
 import { FileAttachment } from "./input/file-attachment.tsx";
 import type { LinkPreviewResolvers } from "./link-preview.tsx";
 import { Markdown } from "./markdown.tsx";
 import { getMessageAttachments } from "./message-attachments.ts";
+import { getAuthor } from "./message-author.ts";
 import {
 	type MessageGroupPosition,
 	messageBubbleRadius,
 } from "./message-bubble.ts";
+import { MessageReactionBadge } from "./message-reaction-badge.tsx";
 import {
 	MessageReadReceipt,
 	type MessageReadReceiptState,
 } from "./message-read-receipt.tsx";
+import { stripQuestionAnswerMarkers } from "./question/async-question.ts";
 import {
 	messageSelectableProps,
 	QuoteBlock,
@@ -50,6 +54,8 @@ import type {
 	MessageActionRuntimeState,
 } from "./types.ts";
 import { getWidgetMessageAttribution } from "./types.ts";
+import styles from "./user-message.module.css";
+import type { NativeSdkValue } from "./utils/native-sdk-observation.ts";
 
 export interface UserMessageProps {
 	/**
@@ -137,10 +143,7 @@ export function GoalMessageAnnotation() {
 type MessagePart = UIMessage["parts"][number];
 
 function isTextPart(part: MessagePart): part is { type: "text"; text: string } {
-	return (
-		part.type === "text" &&
-		typeof (part as { text?: unknown }).text === "string"
-	);
+	return part.type === "text" && isNativeText(part.text);
 }
 
 /**
@@ -149,13 +152,8 @@ function isTextPart(part: MessagePart): part is { type: "text"; text: string } {
  * another human (multi-user collaboration). Absent on the local user's own
  * optimistic messages, so only OTHER people get a name label.
  */
-interface MessageAuthor {
-	/** Avatar URL for the user. */
-	avatar?: string;
-	/** Stable Core user id (`author_user_id`). */
-	id?: string;
-	/** Display name (Core's `author_name`), falling back to the user id/email. */
-	name?: string;
+interface LegacyTimestampObservation {
+	readonly createdAt?: NativeSdkValue;
 }
 
 /**
@@ -183,20 +181,6 @@ export const MESSAGE_TOOLTIP_OPTIONS: Intl.DateTimeFormatOptions = {
 	dateStyle: "medium",
 	timeStyle: "short",
 };
-
-function getAuthor(message: UIMessage): MessageAuthor | null {
-	const metadata = (message as { metadata?: { author?: MessageAuthor } })
-		.metadata;
-	const author = metadata?.author;
-	if (!author) {
-		return null;
-	}
-	const label = author.name || author.id;
-	if (!label) {
-		return null;
-	}
-	return author;
-}
 
 /**
  * Inline editor shown in place of a user bubble while editing. Enter saves
@@ -244,6 +228,7 @@ function UserMessageEditor({
 				data-slot="user-message-editor"
 			>
 				<textarea
+					aria-label="Edit message"
 					className="w-full resize-none bg-transparent text-foreground text-sm leading-5 outline-none"
 					onChange={(event) => {
 						setValue(event.target.value);
@@ -251,6 +236,10 @@ function UserMessageEditor({
 						event.target.style.height = `${event.target.scrollHeight}px`;
 					}}
 					onKeyDown={(event) => {
+						// Leave Enter/Escape to the IME while a CJK composition is open.
+						if (isImeComposingKeyEvent(event.nativeEvent)) {
+							return;
+						}
 						if (event.key === "Enter" && !event.shiftKey) {
 							event.preventDefault();
 							submit();
@@ -266,19 +255,19 @@ function UserMessageEditor({
 			</div>
 			<div className="flex items-center gap-2">
 				<Button
-					className="h-7 rounded-full px-3 text-xs"
 					onClick={onCancel}
-					size="sm"
+					radius="pill"
+					size="compact"
 					type="button"
 					variant="ghost"
 				>
 					Cancel
 				</Button>
 				<Button
-					className="h-7 rounded-full px-3 text-xs"
 					disabled={!value.trim()}
 					onClick={submit}
-					size="sm"
+					radius="pill"
+					size="compact"
 					type="button"
 				>
 					Send
@@ -303,25 +292,33 @@ export const UserMessage = memo(function UserMessage({
 	onOpenMention,
 	onAnnotateImage,
 	mentionItems,
+	messageActionState,
 	previewResolvers,
 	readReceipt,
 }: UserMessageProps) {
 	const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 	const lightboxOriginRef = useRef<HTMLElement | null>(null);
 	const textParts = message.parts?.filter(isTextPart) ?? [];
-	const text = textParts.map((p) => p.text).join("");
+	// Async question answers end with a hidden card marker; never show it.
+	const text = stripQuestionAnswerMarkers(
+		textParts.map((p) => p.text).join("")
+	);
 
 	// A message sent with a quote carries it as a leading markdown blockquote;
 	// peel it back off so it renders as a styled QuoteBlock, not raw `> …` text.
 	const { quote, body } = splitLeadingQuote(text);
 	const attachments = getMessageAttachments(message);
+	const isCallEnded =
+		!quote &&
+		attachments.length === 0 &&
+		/^Call ended · \d{2,}:[0-5]\d$/.test(body);
 	const imageAttachments = attachments.filter(
 		(attachment) => attachment.isImage && attachment.url
 	);
 	const lightboxImages = imageAttachments.map((attachment) => ({
 		filename: attachment.filename,
 		id: attachment.id,
-		url: attachment.url ?? "",
+		url: safeMediaUrl(attachment.url) ?? "",
 	}));
 
 	// `editing` keeps an otherwise-empty message mounted: a turn that is only
@@ -341,15 +338,24 @@ export const UserMessage = memo(function UserMessage({
 		!remoteAuthor ||
 		Boolean(currentUser?.id && remoteAuthor.id === currentUser.id);
 	const author = isOwnMessage ? (currentUser ?? null) : remoteAuthor;
-	const createdAt = (message as { createdAt?: Date | string }).createdAt;
-	const timestamp = createdAt ? new Date(createdAt) : null;
+	// SAFETY: The complete SDK message remains unprojected. This optional legacy
+	// member read keeps its raw receiver and promises no Date/string or presence;
+	// the value is opaque until the native Date operation below consumes it.
+	const createdAt = (message as UIMessage & LegacyTimestampObservation)
+		.createdAt;
+	// SAFETY: This assertion identifies only the immediate native Date input
+	// operation, which owns coercion and rejection. It does not admit the raw
+	// timestamp as a decoded date elsewhere or change the original truthy guard.
+	const timestamp = createdAt
+		? new Date(createdAt as ConstructorParameters<typeof Date>[0])
+		: null;
 
 	const TimestampNode = timestamp ? (
 		<TooltipProvider delay={0}>
 			<Tooltip>
 				<TooltipTrigger
-					className="text-muted-foreground/70 text-xs"
 					data-slot="message-timestamp"
+					render={<button className={styles.timestamp} type="button" />}
 				>
 					{formatTime(timestamp, MESSAGE_TIME_OPTIONS)}
 				</TooltipTrigger>
@@ -360,6 +366,8 @@ export const UserMessage = memo(function UserMessage({
 		</TooltipProvider>
 	) : null;
 
+	const reactionBuckets = messageActionState?.reactionBuckets ?? [];
+
 	const MessageBubble = (
 		<>
 			{attachments.length > 0 && (
@@ -368,6 +376,7 @@ export const UserMessage = memo(function UserMessage({
 						"flex max-w-full flex-wrap items-end gap-2",
 						isOwnMessage ? "justify-end" : "justify-start"
 					)}
+					data-align={isOwnMessage ? "end" : "start"}
 					data-slot="message-attachments"
 				>
 					{attachments.map((attachment) => {
@@ -379,7 +388,7 @@ export const UserMessage = memo(function UserMessage({
 								<button
 									aria-label={`Open ${attachment.filename}`}
 									className={cn(
-										"group/message-image relative size-[104px] shrink-0 overflow-hidden rounded-xl bg-muted/50 p-1 outline-none transition-[filter,transform] hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring",
+										styles.image,
 										enableImagePreview && "cursor-zoom-in"
 									)}
 									data-testid="message-image-attachment"
@@ -396,8 +405,8 @@ export const UserMessage = memo(function UserMessage({
 								>
 									<img
 										alt={attachment.filename}
-										className="block size-full rounded-[10px] object-cover"
-										src={attachment.url}
+										className="block size-full rounded-lg object-cover"
+										src={safeMediaUrl(attachment.url) ?? undefined}
 									/>
 								</button>
 							);
@@ -448,17 +457,20 @@ export const UserMessage = memo(function UserMessage({
 				// foreground on top of it would leave dark text on a saturated fill.
 				<Bubble
 					align={isOwnMessage ? "end" : "start"}
-					className="max-w-full"
+					// Room above the bubble for the reaction badge pinned to its corner.
+					className={cn("max-w-full", reactionBuckets.length > 0 && "mt-3")}
 					variant="default"
 				>
-					<BubbleContent
+					<MessageReactionBadge
+						align={isOwnMessage ? "end" : "start"}
+						buckets={reactionBuckets}
+					/>
+					<div
 						className={cn(
-							messageBubbleRadius(
-								isOwnMessage ? "end" : "start",
-								groupPosition
-							),
-							"px-3.5 py-1.5 text-sm leading-5 transition-colors"
+							"wrap-break-word w-fit min-w-0 max-w-full overflow-hidden rounded-3xl border border-transparent px-3.5 py-1.5 text-sm leading-5 transition-colors group-data-[align=end]/bubble:self-end",
+							messageBubbleRadius(isOwnMessage ? "end" : "start", groupPosition)
 						)}
+						data-slot="bubble-content"
 						data-testid="user-message-bubble"
 					>
 						{quote && <QuoteBlock text={quote} />}
@@ -469,9 +481,27 @@ export const UserMessage = memo(function UserMessage({
 								contentKey={body}
 								fadeToClass="to-primary"
 							>
-								<div {...messageSelectableProps}>
+								<div
+									className={
+										isCallEnded
+											? "flex items-center gap-2 whitespace-nowrap"
+											: undefined
+									}
+									{...messageSelectableProps}
+								>
+									{isCallEnded && (
+										<HugeiconsIcon
+											aria-hidden="true"
+											className="size-4 shrink-0 rotate-[135deg]"
+											data-testid="call-ended-message-icon"
+											icon={CallIcon}
+										/>
+									)}
 									<Markdown
-										className="[&_a]:text-primary-foreground [&_button]:text-primary-foreground [&_p]:text-primary-foreground"
+										className={cn(
+											"[&_a]:text-primary-foreground [&_button]:text-primary-foreground [&_p]:text-primary-foreground",
+											isCallEnded && "[&_p]:whitespace-nowrap"
+										)}
 										content={body}
 										mentionItems={mentionItems}
 										onOpenFile={onOpenFile}
@@ -484,7 +514,7 @@ export const UserMessage = memo(function UserMessage({
 								</div>
 							</CollapsibleText>
 						)}
-					</BubbleContent>
+					</div>
 				</Bubble>
 			)}
 		</>
@@ -504,9 +534,9 @@ export const UserMessage = memo(function UserMessage({
 	);
 
 	const AvatarNode = author ? (
-		<Avatar className="size-8 shrink-0 rounded-full">
+		<Avatar className="size-8 shrink-0">
 			<AvatarImage src={author.avatar} />
-			<AvatarFallback className="overflow-hidden rounded-full bg-transparent p-0">
+			<AvatarFallback appearance="artwork" className="overflow-hidden">
 				<DitherAvatar
 					className="size-full"
 					name={ditherAvatarSeed({ id: author.id, name: author.name })}
@@ -528,10 +558,8 @@ export const UserMessage = memo(function UserMessage({
 			// `self-start`, not the primitive's `self-end`: a turn can be metres
 			// tall (code blocks, tool cards), and a bottom-anchored avatar ends up
 			// far below the message it belongs to. Matches the assistant side.
-			className={cn(
-				"size-8 self-start bg-transparent",
-				showAvatar ? null : "invisible"
-			)}
+			className={cn("size-8 self-start", showAvatar ? null : "invisible")}
+			variant="transparent"
 		>
 			{AvatarNode}
 		</MessageAvatar>
@@ -558,7 +586,7 @@ export const UserMessage = memo(function UserMessage({
 	// Gated as a whole — an empty `MessageHeader` still renders a 16px gapped row.
 	const HeaderNode =
 		showName || showWidgetAttribution ? (
-			<MessageHeader className="h-4 gap-2 px-0">
+			<MessageHeader className="h-4" inset="none" spacing="relaxed">
 				{showName && <span>{author?.name}</span>}
 				{showWidgetAttribution && widgetAttribution ? (
 					<span
@@ -579,6 +607,7 @@ export const UserMessage = memo(function UserMessage({
 		<div
 			className={cn(
 				"flex w-fit min-w-0 max-w-[90%] flex-col gap-1",
+				isCallEnded && "max-w-none",
 				isOwnMessage ? "items-end" : "items-start",
 				// A textarea has no content width to shrink to, so while editing the
 				// column takes the whole row and the 90% cap does the framing — which
@@ -618,13 +647,20 @@ export const UserMessage = memo(function UserMessage({
 			className={cn("items-start", className)}
 		>
 			{AvatarSlot}
-			<MessageContent
-				className={cn("gap-1", isOwnMessage ? "items-end" : "items-start")}
+			<div
+				className={cn(
+					"wrap-break-word flex w-full min-w-0 flex-col gap-1 group-data-[align=end]/message:*:data-slot:self-end",
+					isOwnMessage ? "items-end" : "items-start"
+				)}
+				data-slot="message-content"
 			>
 				{HeaderNode}
 				{MessageRow}
 				{showTimestamp || showReadReceipt ? (
-					<MessageFooter className="min-h-5 gap-2 px-0">
+					<div
+						className="flex min-h-5 min-w-0 max-w-full items-center gap-2 font-medium text-muted-foreground text-xs group-data-[align=end]/message:justify-end"
+						data-slot="message-footer"
+					>
 						{showReadReceipt ? (
 							<MessageReadReceipt
 								delivered={readReceipt?.delivered}
@@ -634,9 +670,9 @@ export const UserMessage = memo(function UserMessage({
 							/>
 						) : null}
 						{showTimestamp ? TimestampNode : null}
-					</MessageFooter>
+					</div>
 				) : null}
-			</MessageContent>
+			</div>
 		</Message>
 	);
 });

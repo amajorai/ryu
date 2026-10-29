@@ -11,7 +11,8 @@
 //   POST /api/announcements/:id/read    -> mark one read
 //   POST /api/announcements/:id/dismiss -> hide one from the feed for good
 
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
+import { announcementFeedSchema } from "./announcement-wire-contracts.ts";
 
 /** One announcement in the caller's feed (mirrors the server UserAnnouncementView). */
 export interface Announcement {
@@ -45,7 +46,7 @@ export interface AnnouncementIconDither {
 /** The Better-Auth session bearer token, or null when signed out / no storage. */
 function authToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		// No storage — treated as signed out.
 		return null;
@@ -57,13 +58,11 @@ export function hasAnnouncementsAuth(): boolean {
 	return Boolean(authToken());
 }
 
-function authHeaders(): Record<string, string> {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-	};
+function authHeaders(): Headers {
+	const headers = new Headers({ "Content-Type": "application/json" });
 	const token = authToken();
 	if (token) {
-		headers.Authorization = `Bearer ${token}`;
+		headers.set("Authorization", `Bearer ${token}`);
 	}
 	return headers;
 }
@@ -76,7 +75,7 @@ export async function fetchAnnouncements(): Promise<Announcement[]> {
 	if (!resp.ok) {
 		throw new Error(`Failed to load announcements: ${resp.status}`);
 	}
-	const json = (await resp.json()) as { announcements: Announcement[] };
+	const json = announcementFeedSchema.parse(await resp.json());
 	return json.announcements ?? [];
 }
 

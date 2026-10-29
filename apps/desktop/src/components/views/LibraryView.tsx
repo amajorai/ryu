@@ -9,9 +9,9 @@ import {
 	LibraryCard,
 	LibraryEmpty,
 	LibraryGrid,
-} from "@ryu/blocks/desktop/library";
-import type { ViewMode } from "@ryu/blocks/desktop/view-toggle";
-import { Icon } from "@ryu/ui/components/icon";
+} from "@ryu/blocks/desktop/library.tsx";
+import type { ViewMode } from "@ryu/blocks/desktop/view-toggle.tsx";
+import { Icon } from "@ryu/ui/components/icon.tsx";
 import {
 	Table,
 	TableBody,
@@ -19,11 +19,16 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
-} from "@ryu/ui/components/table";
-import { cn } from "@ryu/ui/lib/utils";
-import type { ReactNode } from "react";
+} from "@ryu/ui/components/table.tsx";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import { lazy, type ReactNode, Suspense } from "react";
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 import type { PluginSidebarSection } from "@/src/lib/api/plugins.ts";
 import { formatDate } from "@/src/lib/timezone.ts";
+
+// MapLibre is heavy; only load it when a section actually uses the map layout.
+const LibraryMapRenderer = lazy(() => import("./LibraryMapRenderer.tsx"));
 
 interface LibraryViewProps {
 	error: Error | null;
@@ -60,9 +65,14 @@ function RowButton({
 function RowCopy({ item }: { item: ViewItem }) {
 	return (
 		<div className="min-w-0">
-			<div className="truncate font-medium text-sm">{item.title}</div>
+			<div className="truncate font-medium text-sm" title={item.title}>
+				{item.title}
+			</div>
 			{item.subtitle ? (
-				<div className="truncate text-muted-foreground text-xs">
+				<div
+					className="truncate text-muted-foreground text-xs"
+					title={item.subtitle}
+				>
 					{item.subtitle}
 				</div>
 			) : null}
@@ -113,13 +123,14 @@ function ListRenderer({
 						<img
 							alt=""
 							className="size-9 rounded-md object-cover"
-							src={row.item.avatar}
+							src={safeMediaUrl(row.item.avatar) ?? undefined}
 						/>
 					) : (
 						<Icon
-							className="size-4 shrink-0 text-muted-foreground"
+							className="size-4 shrink-0"
 							icon="package-01"
 							size={16}
+							tone="muted"
 						/>
 					)}
 					<RowCopy item={row.item} />
@@ -151,7 +162,18 @@ function TableRenderer({
 				<TableBody>
 					{rows.map((row) => (
 						<TableRow key={row.item.id} onClick={() => onOpen(row)}>
-							<TableCell className="font-medium">{row.item.title}</TableCell>
+							<TableCell presentation="row-header">
+								<button
+									className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+									onClick={(event) => {
+										event.stopPropagation();
+										onOpen(row);
+									}}
+									type="button"
+								>
+									{row.item.title}
+								</button>
+							</TableCell>
 							<TableCell>
 								{row.item.subtitle ?? row.item.detail ?? "—"}
 							</TableCell>
@@ -290,7 +312,7 @@ function FeedRenderer({
 						<img
 							alt=""
 							className="size-10 rounded-full object-cover"
-							src={row.item.avatar}
+							src={safeMediaUrl(row.item.avatar) ?? undefined}
 						/>
 					) : (
 						<HugeiconsIcon
@@ -338,14 +360,15 @@ function GalleryRenderer({
 						<img
 							alt=""
 							className="aspect-[4/3] w-full object-cover"
-							src={row.item.avatar}
+							src={safeMediaUrl(row.item.avatar) ?? undefined}
 						/>
 					) : (
 						<div className="flex aspect-[4/3] items-center justify-center bg-muted">
 							<Icon
-								className="size-6 text-muted-foreground"
+								className="size-6"
 								icon="package-01"
 								size={24}
+								tone="muted"
 							/>
 						</div>
 					)}
@@ -373,9 +396,10 @@ function CardRenderer({
 						icon: Package01Icon,
 						iconNode: section.icon ? (
 							<Icon
-								className="size-4 shrink-0 opacity-70"
+								className="size-4 shrink-0"
 								icon={section.icon}
 								size={16}
+								tone="muted"
 							/>
 						) : undefined,
 						name: row.item.title,
@@ -392,17 +416,34 @@ function CardRenderer({
 	);
 }
 
-function Placeholder({ kind }: { kind: "map" | "custom" }) {
+function Placeholder() {
 	return (
 		<LibraryEmpty
-			description={
-				kind === "custom"
-					? "This view is owned by the companion app."
-					: "Map views are not available in this host yet."
-			}
+			description="This view is owned by the companion app."
 			icon={Package01Icon}
-			title={kind === "custom" ? "Open in companion" : "Map view unavailable"}
+			title="Open in companion"
 		/>
+	);
+}
+
+function MapRenderer({
+	rows,
+	onOpen,
+	section,
+}: Pick<LibraryViewProps, "rows" | "onOpen" | "section">) {
+	return (
+		<Suspense
+			fallback={
+				<div
+					aria-busy="true"
+					className="p-8 text-center text-muted-foreground text-sm"
+				>
+					Loading {section.title} map…
+				</div>
+			}
+		>
+			<LibraryMapRenderer onOpen={onOpen} rows={rows} />
+		</Suspense>
 	);
 }
 
@@ -414,14 +455,14 @@ export default function LibraryView({
 	section,
 	view,
 }: LibraryViewProps) {
-	const definition = libraryViewDefinition(section.spec?.view);
+	const definition = libraryViewDefinition(pluginSidebarSpec(section)?.view);
 	const status = renderEmptyOrStatus({ error, isLoading, section });
 	if (status) {
 		return status;
 	}
 	const renderer = definition?.renderer;
-	if (renderer === "map" || renderer === "custom") {
-		return <Placeholder kind={renderer} />;
+	if (renderer === "custom") {
+		return <Placeholder />;
 	}
 	if (rows.length === 0) {
 		return (
@@ -453,9 +494,9 @@ export default function LibraryView({
 		case "timeline":
 			return <TimelineRenderer onOpen={onOpen} rows={rows} />;
 		case "map":
-			return <Placeholder kind="map" />;
+			return <MapRenderer onOpen={onOpen} rows={rows} section={section} />;
 		case "custom":
-			return <Placeholder kind="custom" />;
+			return <Placeholder />;
 		default:
 			return (
 				<CardRenderer

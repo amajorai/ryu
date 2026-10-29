@@ -6,6 +6,17 @@ use super::*;
 use crate::providers::{LocalProvider, Provider};
 pub(super) use governance::authorize_model;
 use sha2::Digest;
+use std::sync::OnceLock;
+
+fn pool_leg_slots() -> &'static Arc<tokio::sync::Semaphore> {
+    static SLOTS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    SLOTS.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(128)))
+}
+
+#[cfg(test)]
+pub(super) fn pool_leg_slots_for_test() -> Arc<tokio::sync::Semaphore> {
+    Arc::clone(pool_leg_slots())
+}
 
 pub(super) fn scope(state: &AppState, ctx: &RequestContext) -> String {
     let policy = ctx
@@ -35,6 +46,7 @@ pub(super) fn validate_config(
             .any(|rule| rule.description.len() > 4096 || rule.model.len() > 256)
         || config.escalation_recent_message_window > 32
         || config.escalation_message_chars > 8192
+        || !config.pool().within_limits()
     {
         return Err(GatewayError::BadRequest(
             "routing override exceeds routing limits".into(),
@@ -47,14 +59,44 @@ pub(super) struct GovernedInference {
     state: Arc<AppState>,
     parent: RequestContext,
     purpose: &'static str,
+    pool_name: Option<String>,
 }
 impl GovernedInference {
-    pub(super) fn new(state: Arc<AppState>, parent: RequestContext, purpose: &'static str) -> Self {
+    pub(super) fn new(
+        state: Arc<AppState>,
+        mut parent: RequestContext,
+        purpose: &'static str,
+    ) -> Self {
+        super::capture_provider_snapshot(&state, &mut parent);
         Self {
             state,
             parent,
             purpose,
+            pool_name: None,
         }
+    }
+
+    pub(super) fn for_pool(
+        state: Arc<AppState>,
+        parent: RequestContext,
+        pool_name: String,
+    ) -> Self {
+        let mut client = Self::new(state, parent, "provider-pool-leg");
+        client.pool_name = Some(pool_name);
+        client
+    }
+
+    /// Whether this sub-call sends the tenant's own text to the provider: the
+    /// inspector the user turn, smart routing the last user message or the
+    /// recent transcript, the semantic cache the prompt it embeds. A provider
+    /// safety refusal of that text is the same refusal the main request would
+    /// get, so it is settled against the parent request instead of being read
+    /// as "no answer" and failing open into the main dispatch.
+    fn carries_tenant_text(&self) -> bool {
+        matches!(
+            self.purpose,
+            "inspector" | "smart-routing" | "semantic-cache"
+        )
     }
 
     async fn dispatch(
@@ -69,10 +111,116 @@ impl GovernedInference {
         ctx.feature = Some(self.purpose.into());
         let start = Instant::now();
         let result = self
-            .dispatch_inner(&ctx, model, &mut body, embedding, timeout_ms, start)
+            .dispatch_inner(&ctx, model, &mut body, embedding, timeout_ms, start, None)
             .await;
         if let Err(error) = &result {
             audit_failure(&self.state, &ctx, model, error, start);
+        }
+        result
+    }
+
+    /// A concrete, nonrecursive execution leg keeps provider/model identity and
+    /// account affinity from the captured request generation. `leg` is its
+    /// position in the pool plan.
+    pub(super) async fn complete_target(
+        &self,
+        leg: usize,
+        target: &super::pool_execution::PoolTarget,
+        body: Value,
+        timeout_ms: u64,
+    ) -> Result<Option<Value>, GatewayError> {
+        // A panel quorum or client cancellation stops delivery, not the bounded
+        // accepted-work settlement. This owned task holds reservations/load
+        // until its provider resolves or its dispatch timeout is recorded.
+        let client = Self {
+            state: Arc::clone(&self.state),
+            parent: self.parent.clone(),
+            purpose: self.purpose,
+            pool_name: self.pool_name.clone(),
+        };
+        let target = target.clone();
+        let slot = Arc::clone(pool_leg_slots())
+            .try_acquire_owned()
+            .map_err(|_| GatewayError::Overloaded("Pool execution capacity reached".into()))?;
+        // Keep the caller's span and route across the owned task: the leg's provider call
+        // opens its own model-call span (and outbound `traceparent` scope)
+        // inside the task, in `dispatch_inner`, so it stays in the request's
+        // trace.
+        tokio::spawn(tracing::Instrument::in_current_span(
+            crate::traffic::carry_route(async move {
+                let _slot = slot;
+                client
+                    .complete_target_inner(leg, &target, body, timeout_ms)
+                    .await
+            }),
+        ))
+        .await
+        .map_err(|_| {
+            GatewayError::ProviderDeliveryUncertain(
+                "Pool dispatch task ended before settlement".into(),
+            )
+        })?
+    }
+
+    async fn complete_target_inner(
+        &self,
+        leg: usize,
+        target: &super::pool_execution::PoolTarget,
+        mut body: Value,
+        timeout_ms: u64,
+    ) -> Result<Option<Value>, GatewayError> {
+        let mut ctx = self.parent.clone();
+        ctx.request_id = Uuid::new_v4().to_string();
+        ctx.feature = Some(self.purpose.into());
+        let start = Instant::now();
+        let route = self.pool_name.as_ref().and_then(|name| {
+            super::provider_snapshot(&self.state, &ctx)
+                .provider_pools
+                .target_route(name, &target.provider, &target.model)
+        });
+        let _load = route.as_ref().and_then(|route| {
+            super::provider_snapshot(&self.state, &ctx)
+                .provider_pools
+                .acquire(route)
+        });
+        let facts = super::pool_signals::scoped_request_facts(&self.state, &ctx, &body);
+        let result = self
+            .dispatch_inner(
+                &ctx,
+                &target.model,
+                &mut body,
+                false,
+                timeout_ms,
+                start,
+                Some(target),
+            )
+            .await;
+        // A pool leg carries the tenant's own body, so a provider safety
+        // refusal of it is an upstream signal like any direct attempt's. It
+        // is settled against the parent request, the one the caller sees and
+        // the live feed shows, with the leg's position as its attempt so two
+        // refusing legs stay two events. Sub-calls through `dispatch` that
+        // carry the tenant's text settle in `dispatch_inner` instead.
+        let result = result.map_err(|error| {
+            super::upstream_signals::settle(&self.state, &self.parent, leg, error)
+        });
+        if let Some(route) = route {
+            let pools = &super::provider_snapshot(&self.state, &ctx).provider_pools;
+            match &result {
+                Ok(Some(_)) => pools.record_success_facts(
+                    &route,
+                    super::account_affinity(&ctx, &body).as_deref(),
+                    &facts,
+                    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                ),
+                Err(GatewayError::ProviderRateLimited { retry_after, .. }) => {
+                    pools.record_rate_limit(&route, *retry_after)
+                }
+                Err(error) if super::penalizes_provider_circuit(error) => {
+                    pools.record_failure(&route)
+                }
+                _ => {}
+            }
         }
         result
     }
@@ -85,17 +233,19 @@ impl GovernedInference {
         embedding: bool,
         timeout_ms: u64,
         start: Instant,
+        exact_target: Option<&super::pool_execution::PoolTarget>,
     ) -> Result<Option<Value>, GatewayError> {
         let state = &self.state;
         authorize_model(state, ctx, model)?;
-        if !state
-            .rate_limiter
-            .check_request_for_key(&ctx.api_key, ctx.key_config.as_ref())
-            || !state.rate_limiter.check_burst(&ctx.api_key)
-        {
-            return Err(GatewayError::RateLimited);
-        }
-        let mut decision = state.router.route(model);
+        super::admit_request(state, ctx)?;
+        let mut decision = exact_target.map_or_else(
+            || super::provider_snapshot(&state, &ctx).router.route(model),
+            |target| crate::router::RouteDecision {
+                provider: crate::config::ProviderId::from(target.provider.as_str()),
+                model: target.model.clone(),
+            },
+        );
+        super::canonicalize_sdk_decision(state, ctx, &mut decision)?;
         governance::enforce_lifetime_budget(state, ctx, body, &mut decision)?;
         let shape = if embedding {
             InputShape::Embedding
@@ -103,6 +253,24 @@ impl GovernedInference {
             InputShape::Chat
         };
         governance::inspect_input(state, ctx, body, shape)?;
+        if embedding {
+            crate::screening::admit::screen_value(
+                state,
+                ctx,
+                body,
+                crate::screening::admit::Surface::Embeddings,
+            )
+            .await?;
+        } else {
+            crate::screening::admit::screen_chat_as(
+                state,
+                ctx,
+                body,
+                crate::screening::admit::Surface::Chat,
+                &decision.model,
+            )
+            .await?;
+        }
         let estimated_input = governance::input_token_estimate(body, shape);
         // Every auxiliary dispatch consumes token admission before egress; actual excess settles as debt.
         let admitted_tokens = estimated_input.saturating_add(if embedding {
@@ -114,7 +282,8 @@ impl GovernedInference {
             &ctx.api_key,
             admitted_tokens,
             ctx.key_config.as_ref(),
-        ) {
+        ) || !crate::org_limits::check_tokens(state, ctx, admitted_tokens)
+        {
             return Err(GatewayError::RateLimited);
         }
         let local_embedding = embedding && state.config.providers.openai.is_none();
@@ -127,7 +296,7 @@ impl GovernedInference {
             decision: budget,
             reservation: initial_reservation,
             ..
-        } = enforce_budget(
+        } = enforce_sub_call_budget(
             state,
             ctx,
             body,
@@ -139,6 +308,29 @@ impl GovernedInference {
                 OutputCeiling::Clamp
             },
         )?;
+        // Ladder L3 (spec 04.8.1): a routing or pool sub-call of a
+        // restricted request dispatches only a listed chat model, never on
+        // an own-supply vendor slot.
+        if !embedding {
+            crate::enforcement::authorize_route(
+                state,
+                ctx,
+                decision.provider.as_str(),
+                &decision.model,
+            )?;
+        }
+        if exact_target.is_some_and(|target| {
+            decision.model != target.model
+                || super::canonical_sdk_provider(
+                    state,
+                    ctx,
+                    &crate::config::ProviderId::from(target.provider.as_str()),
+                    &target.model,
+                )
+                .is_ok_and(|provider| provider != decision.provider)
+        }) {
+            return Err(GatewayError::BudgetExceeded(None));
+        }
         authorize_model(state, ctx, &decision.model)?;
         governance::authorize_provider_region(state, ctx, &decision.provider)?;
         if !embedding {
@@ -164,33 +356,69 @@ impl GovernedInference {
             governance::reserve_input_credit(state, ctx, &decision, estimated_input)?;
         body["model"] = json!(decision.model);
         let local_provider;
+        let registry_provider;
         let provider: &dyn Provider = if local_embedding {
             local_provider =
                 LocalProvider::new(state.http.clone(), crate::config::local_embed_base_url());
             &local_provider
         } else {
-            let Some(provider) = state.providers.get(decision.provider.as_str()) else {
+            let Some(provider) = super::provider_snapshot(&state, &ctx)
+                .providers
+                .get_owned(decision.provider.as_str())
+            else {
                 return Ok(None);
             };
-            provider
+            registry_provider = provider;
+            registry_provider.as_ref()
         };
-        if state.circuit_breaker.is_open(provider.name()) {
+        if state.circuit_breaker.is_open(&super::provider_circuit_key(
+            &state,
+            &ctx,
+            provider.name(),
+        )) {
             return Ok(None);
         }
+        let mut request_body = body.clone();
+        super::apply_node_openrouter_preferences(
+            state,
+            ctx,
+            provider.name(),
+            &mut request_body,
+            false,
+        );
+        // Pool legs and routing calls reach a provider too, so they carry the
+        // same upstream identity as a direct attempt.
+        super::stamp_upstream_identity(
+            state,
+            ctx,
+            &mut request_body,
+            provider.name(),
+            if embedding {
+                crate::identity::UpstreamSurface::Embedding
+            } else {
+                crate::identity::UpstreamSurface::Chat
+            },
+        );
         let _admission = state
             .admission
-            .acquire(provider.name(), ctx.priority)
+            .acquire_for(provider.name(), ctx.priority, ctx.org_id.as_deref())
             .await
             .map_err(|_| GatewayError::Overloaded("Routing provider is busy".into()))?;
         state.metrics.inc_provider_request(provider.name());
+        // One CLIENT model-call span per auxiliary / pool-leg provider call; a
+        // timeout drops it mid-call, which records it as cancelled.
+        let traced = super::gen_ai_telemetry::TracedProvider::new(state, ctx, provider);
         let call = async {
             if embedding {
-                provider.embed(&decision.model, body).await
+                traced.embed(&decision.model, &request_body).await
             } else {
-                provider.complete(&decision.model, body).await
+                let affinity = super::account_affinity(ctx, &request_body);
+                traced
+                    .complete_for_session(&decision.model, &request_body, affinity.as_deref())
+                    .await
             }
         };
-        let response = match tokio::time::timeout(
+        let mut response = match tokio::time::timeout(
             std::time::Duration::from_millis(timeout_ms.clamp(1, 30_000)),
             call,
         )
@@ -198,12 +426,39 @@ impl GovernedInference {
         {
             Ok(Ok(value)) => value,
             Ok(Err(error)) => {
-                let error = GatewayError::from(error);
+                let mut error = GatewayError::from(error);
+                // An exact pool leg settles in `complete_target_inner`. A
+                // tenant-text sub-call settles here, first, so a refusal on a
+                // Ryu-held key records one event under the parent request and
+                // ends it rather than failing open. Off the fleet `settle`
+                // strips the signal and the sub-call fails open as before.
+                if exact_target.is_none() && self.carries_tenant_text() {
+                    error = super::upstream_signals::settle(
+                        state,
+                        &self.parent,
+                        super::upstream_signals::AUXILIARY_ATTEMPT,
+                        error,
+                    );
+                    if matches!(error, GatewayError::UpstreamSafetyRefused(_)) {
+                        // `dispatch` audits the error it returns.
+                        return Err(error);
+                    }
+                }
                 if penalizes_provider_circuit(&error) {
-                    state.circuit_breaker.record_failure(provider.name());
+                    state
+                        .circuit_breaker
+                        .record_failure(&super::provider_circuit_key(
+                            &state,
+                            &ctx,
+                            provider.name(),
+                        ));
                 }
                 audit_failure(state, ctx, &decision.model, &error, start);
-                return Ok(None);
+                return if exact_target.is_some() {
+                    Err(error)
+                } else {
+                    Ok(None)
+                };
             }
             Err(_) => {
                 audit_failure(
@@ -213,18 +468,26 @@ impl GovernedInference {
                     &GatewayError::ProviderError("Routing provider timed out".into()),
                     start,
                 );
-                return Ok(None);
+                return if exact_target.is_some() {
+                    Err(GatewayError::ProviderDeliveryUncertain(
+                        "Pool execution timed out after dispatch; the leg is not replayed".into(),
+                    ))
+                } else {
+                    Ok(None)
+                };
             }
         };
-        state.circuit_breaker.record_success(provider.name());
-        let exceeded = governance::settle_completion(
+        state
+            .circuit_breaker
+            .record_success(&super::provider_circuit_key(&state, &ctx, provider.name()));
+        let mut exceeded = governance::settle_completion(
             state,
             ctx,
             &response,
             CompletionReceipt {
                 provider: provider.name().into(),
                 model: decision.model.clone(),
-                reason: self.purpose,
+                purpose: Some(self.purpose),
                 audit_provider: provider.name().into(),
                 backend: Some(if embedding {
                     "auxiliary-embedding"
@@ -242,6 +505,18 @@ impl GovernedInference {
                 zero_cost: local_embedding,
             },
         );
+        if exact_target.is_some() {
+            super::apply_outbound_json_dlp(state, ctx, &mut response).map_err(|error| {
+                exceeded.fail(&error);
+                error
+            })?;
+            super::apply_inline_output_evaluators(state, ctx, &mut response)
+                .await
+                .map_err(|error| {
+                    exceeded.fail(&error);
+                    error
+                })?;
+        }
         if exceeded.overrun {
             return Err(GatewayError::RateLimited);
         }
@@ -292,938 +567,50 @@ impl InferenceClient for GovernedInference {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    const MAX_PROVIDER_STREAM_BYTES: usize = 8 * 1024 * 1024;
-
-    use super::*;
-    use crate::{
-        config::{
-            FirewallConfig, FirewallPolicy, GatewayConfig, ProviderId, SmartRoutingConfig,
-            SmartRule,
-        },
-        router::smart::SmartRouter,
-    };
-    use std::{
-        pin::Pin,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Mutex,
-        },
-    };
-
-    #[derive(Default)]
-    struct RecordingProvider {
-        requests: Mutex<Vec<Value>>,
-        response_text: Mutex<Option<String>>,
-    }
-    impl Provider for RecordingProvider {
-        fn name(&self) -> &'static str {
-            "openai"
-        }
-        fn complete<'a>(
-            &'a self,
-            _model: &'a str,
-            body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async move {
-                self.requests.lock().unwrap().push(body.clone());
-                let content = self
-                    .response_text
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .unwrap_or_else(|| {
-                        if body["max_tokens"] == 4 {
-                            "ESCALATE".into()
-                        } else {
-                            "1".into()
-                        }
-                    });
-                Ok(
-                    json!({"choices":[{"message":{"content":content}}],"usage":{"prompt_tokens":20,"completion_tokens":1,"cost":0.001}}),
-                )
-            })
-        }
-        fn complete_stream<'a>(
-            &'a self,
-            _model: &'a str,
-            body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Body, ryu_gw_providers::ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async move {
-                self.requests.lock().unwrap().push(body.clone());
-                let text = self
-                    .response_text
-                    .lock()
-                    .unwrap()
-                    .clone()
-                    .unwrap_or_else(|| "hello".into());
-                let delta = json!({"choices":[{"delta":{"content":text}}]});
-                let usage = json!({"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":10,"cost":0.002}});
-                Ok(Body::from(format!(
-                    "data: {delta}\n\ndata: {usage}\n\ndata: [DONE]\n\n"
-                )))
-            })
-        }
-        fn embed<'a>(
-            &'a self,
-            _model: &'a str,
-            body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async move {
-                self.requests.lock().unwrap().push(body.clone());
-                Ok(
-                    json!({"data":[{"embedding":[1.0,0.0]}],"usage":{"prompt_tokens":20,"cost":0.001}}),
-                )
-            })
-        }
-        fn rerank<'a>(
-            &'a self,
-            model: &'a str,
-            body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            self.embed(model, body)
-        }
-    }
-    fn routing() -> SmartRoutingConfig {
-        SmartRoutingConfig {
-            enabled: true,
-            classifier_model: "test".into(),
-            cache_by_session: false,
-            rules: vec![SmartRule {
-                description: "coding".into(),
-                model: "test".into(),
-                weight: 1.0,
-            }],
-            ..Default::default()
-        }
-    }
-    fn fixture(
-        configure: impl FnOnce(&mut GatewayConfig),
-    ) -> (Arc<AppState>, Arc<RecordingProvider>) {
-        let mut config = GatewayConfig::default();
-        config.routing.default_provider = ProviderId::from("openai");
-        config.routing.fallback_chain = vec![ProviderId::from("openai")];
-        config.routing.smart_routing = routing();
-        config.providers.openai = Some(
-            serde_json::from_value(
-                json!({"api_key":"test-key","base_url":"http://127.0.0.1:1/v1"}),
-            )
-            .unwrap(),
-        );
-        config.firewall = FirewallConfig {
-            enabled: false,
-            ..Default::default()
-        };
-        configure(&mut config);
-        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .unwrap();
-        let mut state = AppState::new_for_test(
-            config,
-            audit,
-            crate::evals::EvalsRunner::new(Default::default()),
-        );
-        if state.config.semantic_cache.enabled {
-            state.semantic_cache = crate::semantic_cache::SemanticCacheRegistry::from_cache(
-                SemanticCache::new(state.config.semantic_cache.clone(), 60),
-            );
-        }
-        let provider = Arc::new(RecordingProvider::default());
-        state.providers.register(provider.clone());
-        (Arc::new(state), provider)
-    }
-    fn ctx() -> RequestContext {
-        super::super::test_support::plain_request_context()
-    }
-    fn prompt() -> Value {
-        json!({"model":"test","messages":[{"role":"user","content":"coding"}]})
+#[async_trait::async_trait]
+impl super::pool_execution::PoolInference for GovernedInference {
+    async fn complete(
+        &self,
+        leg: usize,
+        target: &super::pool_execution::PoolTarget,
+        body: Value,
+        timeout_ms: u64,
+    ) -> Result<Option<Value>, GatewayError> {
+        self.complete_target(leg, target, body, timeout_ms).await
     }
 
-    #[tokio::test]
-    async fn exhausted_wallet_stops_every_routing_strategy_before_dispatch() {
-        for embedding in [false, true] {
-            let (state, provider) = fixture(|_| {});
-            let mut context = ctx();
-            context.managed_inference = true;
-            context.org_id = Some("org".into());
-            context.remaining_budget_micro_usd = Some(0);
-            let client = GovernedInference::new(state, context, "smart-routing");
-            let result = if embedding {
-                client.embed("test", "coding", 100).await.map(|_| ())
-            } else {
-                client.complete("test", prompt(), 100).await.map(|_| ())
-            };
-            assert!(matches!(result, Err(GatewayError::InsufficientCredits)));
-            assert!(provider.requests.lock().unwrap().is_empty());
-        }
+    fn tools_active(&self) -> bool {
+        matches!(
+            super::select_tool_loop(
+                &self.parent,
+                self.state.tools.is_some(),
+                self.state.composio.is_some(),
+                &self.state.config.tools,
+                false,
+            ),
+            super::ToolLoopKind::Unified | super::ToolLoopKind::Composio
+        )
     }
-    #[tokio::test]
-    async fn rate_and_firewall_denials_precede_classifier_calls_on_both_pipelines() {
-        for stream in [false, true] {
-            for firewall in [false, true] {
-                let (state, provider) = fixture(|config| {
-                    if firewall {
-                        config.firewall.enabled = true;
-                        config.firewall.policy = FirewallPolicy::Block;
-                    } else {
-                        config.rate_limit.requests_per_minute = Some(0);
-                    }
-                });
-                let mut body = prompt();
-                if firewall {
-                    body["messages"][0]["content"] =
-                        json!("ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD");
-                }
-                let result = if stream {
-                    run_stream(state, ctx(), body).await.map(|_| ())
-                } else {
-                    run(state, ctx(), body).await.map(|_| ())
-                };
-                assert!(result.is_err());
-                assert!(provider.requests.lock().unwrap().is_empty());
-            }
-        }
-    }
-    #[tokio::test]
-    async fn classifier_escalation_and_embedding_remain_functional_and_metered() {
-        for strategy in 0..3 {
-            let (state, provider) = fixture(|_| {});
-            let mut config = routing();
-            if strategy == 1 {
-                config.router_type = crate::config::ModelRouterType::Escalation;
-                config.escalation_weak_model = "weak".into();
-                config.escalation_strong_model = "strong".into();
-                config.escalation_judge_model = "test".into();
-                config.escalation_confirmations = 1;
-            }
-            if strategy == 2 {
-                config.strategy = crate::config::RouteStrategy::Embedding;
-                config.embedding_model = "test".into();
-            }
-            let router = SmartRouter::new(config);
-            let client = GovernedInference::new(state.clone(), ctx(), "smart-routing");
-            let result = router
-                .resolve(&prompt()["messages"], None, &client)
-                .await
-                .unwrap();
-            assert_eq!(
-                result.as_deref(),
-                Some(if strategy == 1 { "strong" } else { "test" })
-            );
-            assert!(!provider.requests.lock().unwrap().is_empty());
-            assert!(
-                state
-                    .metrics
-                    .total_input_tokens
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    > 0
-            );
-        }
-    }
-    #[tokio::test]
-    async fn auxiliary_dlp_inspects_rule_text_and_sanitizes_embedding_input() {
-        let (state, provider) = fixture(|config| {
-            config.firewall.enabled = true;
-            config.firewall.policy = FirewallPolicy::Sanitize;
-        });
-        let client = GovernedInference::new(state, ctx(), "smart-routing");
-        let secret = "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD";
-        client.embed("test", secret, 100).await.unwrap();
-        let requests = provider.requests.lock().unwrap();
-        assert_eq!(requests.len(), 1);
-        assert!(!requests[0]["input"].as_str().unwrap().contains(secret));
-    }
-    #[test]
-    fn untrusted_overrides_never_enter_the_cache_and_trusted_cache_is_bounded() {
-        let (state, _) = fixture(|_| {});
-        let context = ctx();
-        let mut body = json!({"ryu_smart_route":routing()});
-        assert!(
-            super::super::per_request_smart_router(&state, &context, &mut body)
-                .unwrap()
-                .is_none()
-        );
-        assert!(body.get("ryu_smart_route").is_none());
-        assert_eq!(state.per_agent_routers.len(), 0);
-        let mut trusted = context;
-        trusted.is_master_key = true;
-        for i in 0..100 {
-            let mut config = routing();
-            config.random_seed = Some(i);
-            let mut body = json!({"ryu_smart_route":config});
-            super::super::per_request_smart_router(&state, &trusted, &mut body).unwrap();
-        }
-        assert_eq!(state.per_agent_routers.len(), 64);
-    }
-    #[tokio::test]
-    async fn paid_auxiliary_calls_have_distinct_audit_and_budget_records() {
-        let (state, provider) = fixture(|config| {
-            config.budgets.users.insert(
-                "user".into(),
-                serde_json::from_value(json!({"limit":1500})).unwrap(),
-            );
-        });
-        let mut context = ctx();
-        context.user_id = Some("user".into());
-        context.session_id = Some("session".into());
-        let mut events = state.traffic.subscribe();
-        let client = GovernedInference::new(state.clone(), context, "smart-routing");
-        client.complete("test", prompt(), 100).await.unwrap();
-        client.complete("test", prompt(), 100).await.unwrap();
-        let first = events.try_recv().unwrap();
-        let second = events.try_recv().unwrap();
-        assert_ne!(first["request_id"], second["request_id"]);
-        assert_ne!(first["request_id"], "test-req");
-        assert_eq!(first["session_id"], "session");
-        assert_eq!(first["provider_cost_micro_usd"], 1000);
-        assert_eq!(state.audit.token_usage("sk-test"), 42);
-        assert!(matches!(
-            client.complete("test", prompt(), 100).await,
-            Err(GatewayError::BudgetExceeded(_))
-        ));
-        assert_eq!(provider.requests.lock().unwrap().len(), 2);
-    }
-    #[tokio::test]
-    async fn routing_propagates_denials_and_does_not_poison_cached_probes() {
-        let (state, provider) = fixture(|_| {});
-        let mut context = ctx();
-        context.resolved_policy = Some(crate::policy::EffectivePolicy {
-            approved_models: vec!["allowed".into()],
-            ..Default::default()
-        });
-        let client = GovernedInference::new(state.clone(), context, "smart-routing");
-        let router = SmartRouter::new(routing());
-        assert!(matches!(
-            router.resolve(&prompt()["messages"], None, &client).await,
-            Err(GatewayError::PolicyViolation(_))
-        ));
-        assert!(provider.requests.lock().unwrap().is_empty());
-        let permitted = GovernedInference::new(state, ctx(), "smart-routing");
-        assert_eq!(
-            router
-                .resolve(&prompt()["messages"], None, &permitted)
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("test")
-        );
-    }
-    #[tokio::test]
-    async fn denied_outer_requests_do_not_allocate_override_cache_entries() {
-        let (state, provider) = fixture(|config| config.rate_limit.requests_per_minute = Some(0));
-        let mut context = ctx();
-        context.is_master_key = true;
-        let mut body = prompt();
-        body["ryu_smart_route"] = json!(routing());
-        assert!(matches!(
-            run(state.clone(), context, body).await,
-            Err(GatewayError::RateLimited)
-        ));
-        assert_eq!(state.per_agent_routers.len(), 0);
-        assert!(provider.requests.lock().unwrap().is_empty());
-    }
-    fn embedding_body(operation: EmbeddingOperation, text: &str) -> Value {
-        match operation {
-            EmbeddingOperation::Embed => json!({"model":"test","input":[text]}),
-            EmbeddingOperation::Rerank => {
-                json!({"model":"test","query":text,"documents":[text,"public"]})
-            }
-        }
-    }
-    #[tokio::test]
-    async fn embedding_endpoints_block_secrets_and_unapproved_models_before_dispatch() {
-        for operation in [EmbeddingOperation::Embed, EmbeddingOperation::Rerank] {
-            for locked in [false, true] {
-                let (state, provider) = fixture(|config| {
-                    config.firewall.enabled = !locked;
-                    config.firewall.policy = FirewallPolicy::Block;
-                });
-                let mut context = ctx();
-                if locked {
-                    context.resolved_policy = Some(crate::policy::EffectivePolicy {
-                        locked_guardrails: vec!["secrets".into()],
-                        ..Default::default()
-                    });
-                }
-                let result = run_embedding(
-                    state,
-                    context,
-                    embedding_body(operation, "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD"),
-                    operation,
-                )
-                .await;
-                assert!(matches!(
-                    result,
-                    Err(GatewayError::FirewallBlocked(..) | GatewayError::PolicyViolation(_))
-                ));
-                assert!(provider.requests.lock().unwrap().is_empty());
-            }
-            let (state, provider) = fixture(|_| {});
-            let mut context = ctx();
-            context.resolved_policy = Some(crate::policy::EffectivePolicy {
-                approved_models: vec!["allowed".into()],
-                ..Default::default()
-            });
-            assert!(matches!(
-                run_embedding(state, context, embedding_body(operation, "safe"), operation).await,
-                Err(GatewayError::PolicyViolation(_))
-            ));
-            assert!(provider.requests.lock().unwrap().is_empty());
-        }
-    }
-    #[tokio::test]
-    async fn embedding_endpoints_sanitize_every_input_field_and_preserve_arrays() {
-        for operation in [EmbeddingOperation::Embed, EmbeddingOperation::Rerank] {
-            let (state, provider) = fixture(|config| {
-                config.firewall.enabled = true;
-                config.firewall.policy = FirewallPolicy::Sanitize;
-            });
-            let secret = "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD";
-            run_embedding(state, ctx(), embedding_body(operation, secret), operation)
-                .await
-                .unwrap();
-            let requests = provider.requests.lock().unwrap();
-            assert_eq!(requests.len(), 1);
-            assert!(!requests[0].to_string().contains(secret));
-            match operation {
-                EmbeddingOperation::Embed => assert!(requests[0]["input"].is_array()),
-                EmbeddingOperation::Rerank => {
-                    assert!(requests[0]["query"].is_string());
-                    assert_eq!(requests[0]["documents"].as_array().unwrap().len(), 2);
-                }
-            }
-            assert!(requests[0].get("messages").is_none());
-        }
-    }
-    #[tokio::test]
-    async fn embedding_overrun_is_charged_and_audited_before_429() {
-        for operation in [EmbeddingOperation::Embed, EmbeddingOperation::Rerank] {
-            let (state, provider) = fixture(|config| {
-                config.rate_limit.tokens_per_minute = Some(10);
-                config.budgets.users.insert(
-                    "user".into(),
-                    serde_json::from_value(json!({"limit":500})).unwrap(),
-                );
-            });
-            let mut context = ctx();
-            context.user_id = Some("user".into());
-            let mut events = state.traffic.subscribe();
-            assert!(matches!(
-                run_embedding(
-                    state.clone(),
-                    context.clone(),
-                    embedding_body(operation, "x"),
-                    operation
-                )
-                .await,
-                Err(GatewayError::RateLimited)
-            ));
-            assert_eq!(provider.requests.lock().unwrap().len(), 1);
-            assert_eq!(state.audit.token_usage("sk-test"), 20);
-            assert!(state
-                .with_budget(|budget| budget.evaluate_charge(
-                    Some("user"),
-                    None,
-                    BudgetChargeKind::Model
-                ))
-                .is_some());
-            let event = events.try_recv().unwrap();
-            assert_eq!(event["input_tokens"], 20);
-            assert_eq!(event["provider_cost_micro_usd"], 1000);
-            assert!(event["error"].is_string());
-            assert!(
-                run_embedding(state, context, embedding_body(operation, "x"), operation)
-                    .await
-                    .is_err()
-            );
-            assert_eq!(provider.requests.lock().unwrap().len(), 1);
-        }
-    }
-    #[tokio::test]
-    async fn inspector_uses_sanitized_text_and_accounts_before_main_completion() {
-        let (state, provider) = fixture(|config| {
-            config.routing.smart_routing.enabled = false;
-            config.firewall.enabled = true;
-            config.firewall.policy = FirewallPolicy::Sanitize;
-            config.firewall.inspector.enabled = true;
-            config.firewall.inspector.min_chars = 0;
-            config.firewall.inspector.model = "test".into();
-        });
-        let secret = "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD";
-        let mut body = prompt();
-        body["messages"][0]["content"] = json!(secret);
-        let mut events = state.traffic.subscribe();
-        run(state, ctx(), body).await.unwrap();
-        let requests = provider.requests.lock().unwrap();
-        assert_eq!(requests.len(), 2);
-        assert!(!requests[0].to_string().contains(secret));
-        let first = events.try_recv().unwrap();
-        assert_eq!(first["provider_cost_micro_usd"], 1000);
-        assert_ne!(first["request_id"], "test-req");
-    }
-    #[tokio::test]
-    async fn optional_inspector_and_semantic_cache_obey_empty_wallet_before_dispatch() {
-        for inspector in [false, true] {
-            let (state, provider) = fixture(|config| {
-                config.routing.smart_routing.enabled = false;
-                config.semantic_cache.enabled = !inspector;
-                config.semantic_cache.embedding_model = "test".into();
-                config.firewall.inspector.enabled = inspector;
-                config.firewall.inspector.min_chars = 0;
-                config.firewall.inspector.model = "test".into();
-            });
-            let mut context = ctx();
-            context.managed_inference = true;
-            context.org_id = Some("org".into());
-            context.remaining_budget_micro_usd = Some(0);
-            assert!(matches!(
-                run(state, context, prompt()).await,
-                Err(GatewayError::InsufficientCredits)
-            ));
-            assert!(provider.requests.lock().unwrap().is_empty());
-        }
-    }
-    #[tokio::test]
-    async fn semantic_cache_hit_still_accounts_its_embedding() {
-        let (state, provider) = fixture(|config| {
-            config.routing.smart_routing.enabled = false;
-            config.semantic_cache.enabled = true;
-            config.semantic_cache.embedding_model = "test".into();
-            config.cache.enabled = false;
-        });
-        let mut events = state.traffic.subscribe();
-        run(state.clone(), ctx(), prompt()).await.unwrap();
-        let mut different = prompt();
-        different["messages"][0]["content"] = json!("different wording");
-        let result = run(state.clone(), ctx(), different).await.unwrap();
-        assert!(result.cache_hit);
-        assert_eq!(result.provider_used, "semantic-cache");
-        assert_eq!(provider.requests.lock().unwrap().len(), 3);
-        let mut paid = Vec::new();
-        while let Ok(event) = events.try_recv() {
-            if event["provider_cost_micro_usd"] == 1000 {
-                paid.push(event);
-            }
-        }
-        assert_eq!(paid.len(), 3);
-        assert_eq!(state.audit.token_usage("sk-test"), 61);
-    }
-    #[tokio::test]
-    async fn completed_chat_is_charged_when_output_dlp_or_evaluator_blocks() {
-        for evaluator in [false, true] {
-            let (state, provider) = fixture(|config| {
-                config.routing.smart_routing.enabled = false;
-                config.firewall.enabled = !evaluator;
-                config.firewall.policy = FirewallPolicy::Block;
-                if evaluator {
-                    let mut ev = EvaluatorRegistry::new().get("pii_leakage").unwrap().clone();
-                    ev.target = EvaluatorTarget::Output;
-                    config.custom_evaluators.push(ev);
-                    config
-                        .firewall
-                        .evaluators
-                        .push(crate::evaluators::EvaluatorBinding {
-                            id: "pii_leakage".into(),
-                            enabled: true,
-                            inline_action: Some(FirewallPolicy::Block),
-                            offline: None,
-                            locked: false,
-                        });
-                }
-            });
-            *provider.response_text.lock().unwrap() = Some(if evaluator {
-                "private email: alice@example.com".into()
-            } else {
-                "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD".into()
-            });
-            let mut events = state.traffic.subscribe();
-            assert!(matches!(
-                run(state.clone(), ctx(), prompt()).await,
-                Err(GatewayError::FirewallBlocked(..))
-            ));
-            assert_eq!(state.audit.token_usage("sk-test"), 21);
-            let mut paid = Vec::new();
-            while let Ok(event) = events.try_recv() {
-                if event["provider_cost_micro_usd"] == 1000 {
-                    paid.push(event);
-                }
-            }
-            assert_eq!(paid.len(), 1);
-            assert_eq!(paid[0]["input_tokens"], 20);
-            assert!(paid[0]["error"].is_string());
-            assert_eq!(provider.requests.lock().unwrap().len(), 1);
-        }
-    }
-    #[tokio::test]
-    async fn completed_chat_token_overrun_keeps_accounting() {
-        let (state, provider) = fixture(|config| {
-            config.routing.smart_routing.enabled = false;
-            config.rate_limit.tokens_per_minute = Some(10);
-        });
-        let mut events = state.traffic.subscribe();
-        assert!(matches!(
-            run(state.clone(), ctx(), prompt()).await,
-            Err(GatewayError::RateLimited)
-        ));
-        assert_eq!(state.audit.token_usage("sk-test"), 21);
-        let event = events.try_recv().unwrap();
-        assert_eq!(event["provider_cost_micro_usd"], 1000);
-        assert_eq!(event["output_tokens"], 1);
-        assert!(event["error"].is_string());
-        assert_eq!(provider.requests.lock().unwrap().len(), 1);
-    }
-    #[tokio::test]
-    async fn embedding_reserves_input_cost_before_dispatch() {
-        let (state, provider) = fixture(|config| {
-            config.credits.min_reserve_micro_usd = 1;
-            config.control_plane.cost_per_1k_micro_usd = 1_000_000;
-        });
-        let mut context = ctx();
-        context.managed_inference = true;
-        context.org_id = Some("org".into());
-        context.remaining_budget_micro_usd = Some(50_000);
-        let body = embedding_body(EmbeddingOperation::Embed, &"a".repeat(1000));
-        assert!(matches!(
-            run_embedding(state, context, body, EmbeddingOperation::Embed).await,
-            Err(GatewayError::InsufficientCredits)
-        ));
-        assert!(provider.requests.lock().unwrap().is_empty());
-    }
-    #[tokio::test]
-    async fn streaming_dlp_preserves_actual_usage_when_client_frames_are_replaced() {
-        for policy in [FirewallPolicy::Block, FirewallPolicy::Sanitize] {
-            let (state, provider) = fixture(|config| {
-                config.routing.smart_routing.enabled = false;
-                config.firewall.enabled = true;
-                config.firewall.policy = policy.clone();
-            });
-            let secret = "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD";
-            *provider.response_text.lock().unwrap() = Some(secret.into());
-            let mut events = state.traffic.subscribe();
-            let output = run_stream(state.clone(), ctx(), prompt()).await.unwrap();
-            let bytes = axum::body::to_bytes(output.body, 1024 * 1024)
-                .await
-                .unwrap();
-            assert!(!String::from_utf8_lossy(&bytes).contains(secret));
-            assert_eq!(state.audit.token_usage("sk-test"), 30);
-            let event = events.try_recv().unwrap();
-            assert_eq!(event["input_tokens"], 20);
-            assert_eq!(event["output_tokens"], 10);
-            assert_eq!(event["provider_cost_micro_usd"], 2000);
-            assert!(
-                events.try_recv().is_err(),
-                "EOF plus Drop must not duplicate settlement"
-            );
-        }
-    }
-    #[tokio::test]
-    async fn dropped_stream_settles_received_work_once_and_marks_estimates() {
-        use futures_util::StreamExt;
-        let (state, _) = fixture(|_| {});
-        let mut events = state.traffic.subscribe();
-        let chunk = format!(
-            "data: {}\n\n",
-            json!({"choices":[{"delta":{"content":"received output"}}]})
-        );
-        let chunks = futures_util::stream::once(async move {
-            Ok::<_, std::io::Error>(axum::body::Bytes::from(chunk))
-        })
-        .chain(futures_util::stream::pending());
-        let observed = attach_stream_observer(
-            Body::from_stream(chunks),
-            state.clone(),
-            ctx(),
-            "openai".into(),
-            "test".into(),
-            7,
+
+    /// Screen a panel or stage answer before it joins the next leg's body
+    /// (P0-4). A refusal is audited against the request that opened the pool.
+    fn screen_appended(
+        &self,
+        next: &super::pool_execution::PoolTarget,
+        appended: &Value,
+    ) -> Result<(), GatewayError> {
+        super::edit_rescan::screen_edit_audited(
+            &self.state,
+            &self.parent,
+            super::edit_rescan::EditSite::PoolLeg,
+            appended,
+            &next.model,
             Instant::now(),
-            None,
-        );
-        let mut stream = observed.into_data_stream();
-        assert!(stream.next().await.unwrap().is_ok());
-        drop(stream);
-        let event = events.try_recv().unwrap();
-        assert_eq!(event["input_tokens"], 7);
-        assert!(event["output_tokens"].as_u64().unwrap() > 0);
-        assert!(event["error"].as_str().unwrap().contains("estimated"));
-        assert_eq!(
-            state.audit.token_usage("sk-test"),
-            event["input_tokens"].as_u64().unwrap() + event["output_tokens"].as_u64().unwrap()
-        );
-        assert!(events.try_recv().is_err());
-    }
-    #[tokio::test]
-    async fn never_polled_stream_still_records_dispatched_prompt_on_drop() {
-        let (state, _) = fixture(|_| {});
-        let mut events = state.traffic.subscribe();
-        let body = attach_stream_observer(
-            Body::empty(),
-            state.clone(),
-            ctx(),
-            "openai".into(),
-            "test".into(),
-            9,
-            Instant::now(),
-            None,
-        );
-        drop(body);
-        let event = events.try_recv().unwrap();
-        assert_eq!(event["input_tokens"], 9);
-        assert!(event["error"].is_string());
-        assert!(events.try_recv().is_err());
-    }
-    #[tokio::test]
-    async fn oversized_stream_aborts_without_serving_unscanned_output() {
-        let (state, provider) = fixture(|config| {
-            config.routing.smart_routing.enabled = false;
-            config.firewall.enabled = true;
-            config.firewall.policy = FirewallPolicy::Block;
-        });
-        *provider.response_text.lock().unwrap() = Some("a".repeat(MAX_PROVIDER_STREAM_BYTES + 1));
-        let mut events = state.traffic.subscribe();
-        let output = run_stream(state.clone(), ctx(), prompt()).await.unwrap();
-        let bytes = axum::body::to_bytes(output.body, 4096).await.unwrap();
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("Unable to scan"));
-        assert!(!text.contains(&"a".repeat(1000)));
-        let event = events.try_recv().unwrap();
-        assert!(event["error"].as_str().unwrap().contains("8 MiB"));
-        assert!(state.audit.token_usage("sk-test") > 0);
-    }
-    struct LocalRecording(Arc<RecordingProvider>);
-    impl Provider for LocalRecording {
-        fn name(&self) -> &'static str {
-            "local"
-        }
-        fn complete<'a>(
-            &'a self,
-            model: &'a str,
-            body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            self.0.complete(model, body)
-        }
-        fn complete_stream<'a>(
-            &'a self,
-            model: &'a str,
-            body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Body, ryu_gw_providers::ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            self.0.complete_stream(model, body)
-        }
-    }
-    struct BlockingLocal {
-        calls: Arc<AtomicUsize>,
-        started: Arc<tokio::sync::Notify>,
-        release: tokio::sync::watch::Receiver<bool>,
-    }
-
-    impl Provider for BlockingLocal {
-        fn name(&self) -> &'static str {
-            "local"
-        }
-
-        fn complete<'a>(
-            &'a self,
-            _model: &'a str,
-            _body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async {
-                Ok(json!({
-                    "choices": [{"message": {"content": "judge"}}],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1}
-                }))
-            })
-        }
-
-        fn complete_stream<'a>(
-            &'a self,
-            _model: &'a str,
-            _body: &'a Value,
-        ) -> Pin<
-            Box<
-                dyn std::future::Future<Output = Result<Body, ryu_gw_providers::ProviderError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            self.started.notify_one();
-            let mut release = self.release.clone();
-            Box::pin(async move {
-                let chunk = futures_util::stream::once(async move {
-                    while !*release.borrow() {
-                        if release.changed().await.is_err() {
-                            return Err(std::io::Error::other("release signal dropped"));
-                        }
-                    }
-                    Ok::<_, std::io::Error>(axum::body::Bytes::from(
-                        "data: {\"choices\":[{\"delta\":{\"content\":\"alice@example.com\"}}]}\n\n",
-                    ))
-                });
-                Ok(Body::from_stream(chunk))
-            })
-        }
-    }
-
-    #[tokio::test]
-    async fn deterministic_output_guardrail_keeps_local_stream_admission_bounded() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let started = Arc::new(tokio::sync::Notify::new());
-        let (release_tx, release_rx) = tokio::sync::watch::channel(false);
-        let mut config = GatewayConfig::default();
-        config.routing.default_provider = ProviderId::from("local");
-        config.routing.fallback_chain = vec![ProviderId::from("local")];
-        config.routing.smart_routing.enabled = false;
-        config.concurrency.enabled = true;
-        config.concurrency.local_max_in_flight = 1;
-        config.concurrency.local_max_queued = 0;
-        config.firewall.enabled = false;
-        config
-            .firewall
-            .evaluators
-            .push(crate::evaluators::EvaluatorBinding {
-                id: "pii_leakage".into(),
-                enabled: true,
-                inline_action: Some(FirewallPolicy::Sanitize),
-                offline: None,
-                locked: false,
-            });
-        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
-            enabled: false,
-            db_path: String::new(),
-        })
-        .unwrap();
-        let mut state = AppState::new_for_test(
-            config,
-            audit,
-            crate::evals::EvalsRunner::new(Default::default()),
-        );
-        state.providers.register(Arc::new(BlockingLocal {
-            calls: Arc::clone(&calls),
-            started: Arc::clone(&started),
-            release: release_rx,
-        }));
-        let state = Arc::new(state);
-
-        let first = tokio::spawn(run_stream(Arc::clone(&state), ctx(), prompt()));
-        started.notified().await;
-        assert_eq!(
-            state
-                .admission
-                .snapshots()
-                .into_iter()
-                .find(|snapshot| snapshot.provider == "local")
-                .map(|snapshot| snapshot.in_flight),
-            Some(1)
-        );
-
-        let second = tokio::spawn(run_stream(Arc::clone(&state), ctx(), prompt()));
-        let second_result = tokio::time::timeout(std::time::Duration::from_secs(1), second)
-            .await
-            .expect("the second request should be rejected by the zero-length queue")
-            .expect("the second request task should finish");
-        assert!(matches!(second_result, Err(GatewayError::Overloaded(_))));
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-
-        release_tx.send(true).unwrap();
-        let first_output = first
-            .await
-            .expect("the first request task should finish")
-            .expect("the first request should complete after the upstream releases");
-        axum::body::to_bytes(first_output.body, 1024 * 1024)
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn output_judge_reuses_single_local_engine_slot_after_generation_finishes() {
-        for stream in [false, true] {
-            let (mut state, provider) = fixture(|config| {
-                config.routing.default_provider = ProviderId::from("local");
-                config.routing.fallback_chain = vec![ProviderId::from("local")];
-                config.routing.smart_routing.enabled = false;
-                config.concurrency.enabled = true;
-                config.concurrency.local_max_in_flight = 1;
-                config.concurrency.local_max_queued = 0;
-                config.firewall.inspector.model = "test".into();
-                let mut ev = EvaluatorRegistry::new().get("toxicity").unwrap().clone();
-                ev.target = EvaluatorTarget::Output;
-                config.custom_evaluators.push(ev);
-                config
-                    .firewall
-                    .evaluators
-                    .push(crate::evaluators::EvaluatorBinding {
-                        id: "toxicity".into(),
-                        enabled: true,
-                        inline_action: Some(FirewallPolicy::Block),
-                        offline: None,
-                        locked: false,
-                    });
-            });
-            Arc::get_mut(&mut state)
-                .unwrap()
-                .providers
-                .register(Arc::new(LocalRecording(provider.clone())));
-            let run = async {
-                if stream {
-                    let output = run_stream(state, ctx(), prompt()).await?;
-                    axum::body::to_bytes(output.body, 1024 * 1024)
-                        .await
-                        .unwrap();
-                    Ok(())
-                } else {
-                    super::super::run(state, ctx(), prompt()).await.map(|_| ())
-                }
-            };
-            tokio::time::timeout(std::time::Duration::from_secs(1), run)
-                .await
-                .expect("output judge must not deadlock")
-                .expect("output judge must receive released slot");
-            assert_eq!(provider.requests.lock().unwrap().len(), 2);
-        }
+        )
+        .map(|_| ())
     }
 }
+
+#[cfg(test)]
+#[path = "auxiliary_tests.rs"]
+mod tests;

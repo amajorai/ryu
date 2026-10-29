@@ -80,7 +80,7 @@ export const FloatingDateHeader = memo(function FloatingDateHeader({
 			    it never needs a filled pill to stay legible; the pinned message below
 			    is the only scroll chrome that gets a surface. */}
 			<span
-				className="select-none font-medium text-[11px] text-muted-foreground"
+				className="type-caption select-none font-medium text-muted-foreground"
 				data-slot="chat-date-chip"
 			>
 				{dayLabel(dayKey, startOfToday)}

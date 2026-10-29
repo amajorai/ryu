@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/models-plugins-settings.test-support.ts",
+    "src/components/settings/EntitySettings.coverage.native-http.test.tsx",
+    "src/components/settings/McpSettingsPanel.coverage.native-http.test.tsx",
+    "src/components/settings/OAuthAccountPoolControls.coverage.native-http.test.tsx",
+    "src/components/settings/ResourcePermissions.coverage.native-http.test.tsx",
+    "src/components/settings/dialogs/ProviderLoginDialog.tsx",
+    "src/components/settings/dialogs/ProviderLoginDialog.coverage.native-http.test.tsx"
+  ]
+}

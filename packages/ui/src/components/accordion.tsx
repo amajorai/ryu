@@ -7,11 +7,17 @@ import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { FadeOverflowTextChildren } from "./fade-overflow-text.tsx";
 
-function Accordion({ className, ...props }: AccordionPrimitive.Root.Props) {
+function Accordion({
+	className,
+	appearance = "default",
+	...props
+}: AccordionPrimitive.Root.Props & { appearance?: "default" | "plain" }) {
 	return (
 		<AccordionPrimitive.Root
 			className={cn(
-				"flex w-full flex-col overflow-hidden rounded-2xl border",
+				"corner-squircle flex w-full flex-col overflow-hidden rounded-2xl border",
+				appearance === "plain" &&
+					"overflow-visible rounded-none border-0 bg-transparent shadow-none",
 				className
 			)}
 			data-slot="accordion"
@@ -20,10 +26,19 @@ function Accordion({ className, ...props }: AccordionPrimitive.Root.Props) {
 	);
 }
 
-function AccordionItem({ className, ...props }: AccordionPrimitive.Item.Props) {
+function AccordionItem({
+	className,
+	appearance = "default",
+	...props
+}: AccordionPrimitive.Item.Props & { appearance?: "default" | "plain" }) {
 	return (
 		<AccordionPrimitive.Item
-			className={cn("not-last:border-b data-open:bg-muted/50", className)}
+			className={cn(
+				"not-last:border-b data-open:bg-muted/50",
+				appearance === "plain" &&
+					"border-0 bg-transparent data-open:bg-transparent",
+				className
+			)}
 			data-slot="accordion-item"
 			{...props}
 		/>
@@ -32,15 +47,18 @@ function AccordionItem({ className, ...props }: AccordionPrimitive.Item.Props) {
 
 function AccordionTrigger({
 	className,
+	appearance = "default",
 	children,
 	...props
-}: AccordionPrimitive.Trigger.Props) {
+}: AccordionPrimitive.Trigger.Props & { appearance?: "default" | "plain" }) {
 	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<AccordionPrimitive.Header className="flex">
 			<AccordionPrimitive.Trigger
 				className={cn(
-					"group/accordion-trigger relative flex flex-1 items-start justify-between gap-4 border border-transparent p-4 text-left font-medium text-sm outline-none transition-all aria-disabled:pointer-events-none aria-disabled:opacity-50 **:data-[slot=accordion-trigger-icon]:ml-auto **:data-[slot=accordion-trigger-icon]:size-4 **:data-[slot=accordion-trigger-icon]:text-muted-foreground",
+					"group/accordion-trigger relative flex flex-1 items-start justify-between gap-4 border border-transparent p-4 text-left font-medium text-sm outline-none transition-[color,background-color,border-color,box-shadow] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring aria-disabled:pointer-events-none aria-disabled:opacity-50 **:data-[slot=accordion-trigger-icon]:ml-auto **:data-[slot=accordion-trigger-icon]:size-4 **:data-[slot=accordion-trigger-icon]:text-muted-foreground",
+					appearance === "plain" &&
+						"border-0 bg-transparent shadow-none hover:bg-transparent hover:shadow-none",
 					className
 				)}
 				data-slot="accordion-trigger"
@@ -69,11 +87,13 @@ function AccordionTrigger({
 type AccordionContentProps = AccordionPrimitive.Panel.Props & {
 	/** Override the panel wrapper layout without changing the inner content styles. */
 	panelClassName?: string;
+	spacing?: "default" | "flush";
 };
 
 function AccordionContent({
 	className,
 	panelClassName,
+	spacing = "default",
 	children,
 	...props
 }: AccordionContentProps) {
@@ -81,6 +101,7 @@ function AccordionContent({
 		<AccordionPrimitive.Panel
 			className={cn(
 				"overflow-hidden px-4 text-sm data-closed:animate-accordion-up data-open:animate-accordion-down",
+				spacing === "flush" && "p-0",
 				panelClassName
 			)}
 			data-slot="accordion-content"
@@ -89,6 +110,7 @@ function AccordionContent({
 			<div
 				className={cn(
 					"h-(--accordion-panel-height) pt-0 pb-4 data-ending-style:h-0 data-starting-style:h-0 [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground [&_p:not(:last-child)]:mb-4",
+					spacing === "flush" && "p-0",
 					className
 				)}
 			>

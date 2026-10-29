@@ -1,6 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	type SetStateAction,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import { z } from "zod";
 
-type SetStateFn<T> = (prev: T) => T;
+const stateUpdaterSchema = z.function();
+
+/** React treats every callable state action as an updater; retain the original
+ * callback after validating that branch of its native SetStateAction union. */
+function isStateUpdater<T>(next: SetStateAction<T>): next is (prev: T) => T {
+	return stateUpdaterSchema.safeParse(next).success;
+}
 
 interface UseControllableStateParams<T> {
 	/** Initial value used in uncontrolled mode. */
@@ -22,11 +35,10 @@ export function useControllableState<T>({
 	onChange,
 }: UseControllableStateParams<T>): readonly [
 	T,
-	(next: T | SetStateFn<T>) => void,
+	(next: SetStateAction<T>) => void,
 ] {
 	const [uncontrolled, setUncontrolled] = useState<T>(defaultProp);
-	const isControlled = prop !== undefined;
-	const value = isControlled ? (prop as T) : uncontrolled;
+	const value = prop === undefined ? uncontrolled : prop;
 
 	const onChangeRef = useRef(onChange);
 	useEffect(() => {
@@ -34,12 +46,9 @@ export function useControllableState<T>({
 	});
 
 	const setValue = useCallback(
-		(next: T | SetStateFn<T>) => {
-			if (isControlled) {
-				const resolved =
-					typeof next === "function"
-						? (next as SetStateFn<T>)(prop as T)
-						: next;
+		(next: SetStateAction<T>) => {
+			if (prop !== undefined) {
+				const resolved = isStateUpdater(next) ? next(prop) : next;
 				if (resolved !== prop) {
 					onChangeRef.current?.(resolved);
 				}
@@ -47,15 +56,14 @@ export function useControllableState<T>({
 			}
 
 			setUncontrolled((prev) => {
-				const resolved =
-					typeof next === "function" ? (next as SetStateFn<T>)(prev) : next;
+				const resolved = isStateUpdater(next) ? next(prev) : next;
 				if (resolved !== prev) {
 					onChangeRef.current?.(resolved);
 				}
 				return resolved;
 			});
 		},
-		[isControlled, prop]
+		[prop]
 	);
 
 	return [value, setValue] as const;

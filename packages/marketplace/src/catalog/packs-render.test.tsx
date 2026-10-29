@@ -94,8 +94,7 @@ function makeHost(
 			throw new Error("unused");
 		},
 		useActiveNode: () => ({ url: "", token: null }),
-		usePersistedToggle: (_k: string, d: boolean) =>
-			[d, () => undefined] as [boolean, (v: boolean) => void],
+		usePersistedToggle: (_k: string, d: boolean) => [d, () => undefined],
 		installSidecar: () => Promise.resolve(),
 		estimateLlmfit: () =>
 			Promise.resolve({
@@ -143,7 +142,10 @@ describe("SkillsCatalogSection — packs shelf", () => {
 
 	test("browse shelf lists the pack with its member count", () => {
 		const html = render(makeSkillsState(), makePackState({ packs: [pack] }));
-		expect(html).toContain("Skill packs");
+		expect(html).toContain("Featured skill packs");
+		expect(html).toContain(
+			"Optional onboarding picks stay here to browse or install later."
+		);
 		expect(html).toContain("Mattpocock Skills");
 		expect(html).toContain("3 skills");
 	});
@@ -189,10 +191,10 @@ describe("SkillsCatalogSection — packs shelf", () => {
 
 describe("pack / skill avatar helpers", () => {
 	test("packAvatarUrl uses the repo owner", () => {
-		expect(packAvatarUrl({ id: "mattpocock/skills" } as SkillPackCard)).toBe(
+		expect(packAvatarUrl({ id: "mattpocock/skills" })).toBe(
 			"https://github.com/mattpocock.png"
 		);
-		expect(packAvatarUrl({ id: "no-slash" } as SkillPackCard)).toBeNull();
+		expect(packAvatarUrl({ id: "no-slash" })).toBeNull();
 	});
 
 	test("skillAvatarUrl uses the skill's source owner", () => {

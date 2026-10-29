@@ -250,7 +250,7 @@ export function InsertToolbarButton(
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								key={value}
-								onSelect={() => {
+								onClick={() => {
 									onSelect(editor, value);
 									editor.tf.focus();
 								}}

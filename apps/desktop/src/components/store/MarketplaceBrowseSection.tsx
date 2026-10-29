@@ -18,11 +18,7 @@ export default function MarketplaceBrowseSection({
 	initialQuery?: string;
 	onlyKind?: MarketplaceKind;
 }) {
-	const selectedKind = BROWSE_KINDS.includes(
-		initialItem?.kind as MarketplaceKind
-	)
-		? (initialItem?.kind as MarketplaceKind)
-		: undefined;
+	const selectedKind = BROWSE_KINDS.find((kind) => kind === initialItem?.kind);
 	const kinds = onlyKind
 		? [onlyKind]
 		: selectedKind

@@ -1,5 +1,6 @@
 import { Tick02Icon, TickDouble02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Avatar,
 	AvatarFallback,
@@ -72,45 +73,57 @@ function readerName(reader: MessageReader): string {
 	return reader.name.trim() || "Someone";
 }
 
-function namesLabel(readers: readonly MessageReader[]): string {
+function namesLabel(
+	readers: readonly MessageReader[],
+	tl: LiteralMessage
+): string {
 	const names = readers.map(readerName);
 	if (names.length <= 3) {
 		return names.join(", ");
 	}
-	return `${names.slice(0, 2).join(", ")} and ${names.length - 2} others`;
+	return tl("{names} and {otherCount} others", {
+		names: names.slice(0, 2).join(", "),
+		otherCount: names.length - 2,
+	});
 }
 
 function ReaderAvatar({ reader }: { reader: MessageReader }) {
+	const tl = useLiteralMessages();
 	const name = readerName(reader);
 	const avatar = safeAvatarUrl(reader.avatar);
 	return (
 		<Avatar
-			aria-label={`${name} avatar`}
-			className="size-5 ring-2 ring-background"
+			appearance="message-reader"
+			aria-label={tl("{name} avatar", { name })}
 			size="sm"
 			title={name}
 		>
 			{avatar ? <AvatarImage alt="" src={avatar} /> : null}
-			<AvatarFallback className="text-[8px]">{initials(name)}</AvatarFallback>
+			<AvatarFallback typography="tiny">{initials(name)}</AvatarFallback>
 		</Avatar>
 	);
 }
 
 function SeenByList({ readers }: { readers: readonly MessageReader[] }) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="flex flex-col gap-2">
 			<div>
 				<p className="font-medium text-sm">Seen by</p>
 				<p className="text-muted-foreground text-xs">
-					{readers.length} {readers.length === 1 ? "person has" : "people have"}{" "}
-					read this message.
+					{tl(
+						"{count, plural, one {# person has} other {# people have}} read this message.",
+						{ count: readers.length }
+					)}
 				</p>
 			</div>
 			<ul className="m-0 flex max-h-48 list-none flex-col gap-1 overflow-y-auto p-0">
 				{readers.map((reader) => (
 					<li className="flex items-center gap-2" key={reader.id}>
 						<ReaderAvatar reader={reader} />
-						<span className="truncate text-xs">{readerName(reader)}</span>
+						<span className="truncate text-xs" title={readerName(reader)}>
+							{readerName(reader)}
+						</span>
 					</li>
 				))}
 			</ul>
@@ -134,12 +147,15 @@ export function MessageReadReceipt({
 	messageAuthorId?: string;
 	showSent?: boolean;
 }): ReactNode {
+	const tl = useLiteralMessages();
 	const seenBy = uniqueReaders(readers, messageAuthorId);
 	if (!((showSent && delivered) || seenBy.length > 0)) {
 		return null;
 	}
 	const isRead = seenBy.length > 0;
-	const label = isRead ? `Seen by ${namesLabel(seenBy)}` : "Sent";
+	const label = isRead
+		? tl("Seen by {names}", { names: namesLabel(seenBy, tl) })
+		: "Sent";
 	const tick = (
 		<HugeiconsIcon
 			aria-hidden="true"
@@ -173,18 +189,18 @@ export function MessageReadReceipt({
 		<Popover>
 			<PopoverTrigger
 				aria-label={label}
-				className="inline-flex items-center gap-1 rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
 				data-read-state="read"
 				data-slot="message-read-receipt"
 				title={label}
+				variant="message-read-receipt"
 			>
 				{tick}
-				<AvatarGroup className="-space-x-1">
+				<AvatarGroup spacing="message-readers">
 					{visibleAvatars.map((reader) => (
 						<ReaderAvatar key={reader.id} reader={reader} />
 					))}
 					{hiddenCount > 0 ? (
-						<AvatarGroupCount aria-hidden="true" className="size-5 text-[9px]">
+						<AvatarGroupCount aria-hidden="true" purpose="message-readers">
 							+{hiddenCount}
 						</AvatarGroupCount>
 					) : null}
@@ -193,7 +209,8 @@ export function MessageReadReceipt({
 			</PopoverTrigger>
 			<PopoverContent
 				align="end"
-				className="w-56 gap-3 bg-popover p-3"
+				appearance="message-read-list"
+				className="w-56"
 				side="top"
 				sideOffset={8}
 			>

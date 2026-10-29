@@ -6,13 +6,13 @@
 
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	ContributionsGraph,
 	StatCard,
-} from "@ryu/ui/components/contributions-graph";
-import { EmployeeBadge } from "@ryu/ui/components/employee-badge";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/contributions-graph.tsx";
+import { EmployeeBadge } from "@ryu/ui/components/employee-badge.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { useQuery } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
@@ -83,9 +83,39 @@ export function AgentProfile({ agent, onBack }: AgentProfileProps) {
 		return (
 			<div className="space-y-4">
 				{backButton}
-				<div className="flex items-center justify-center py-8">
-					<Spinner className="size-5" />
+				<SkeletonRows spacing="section" />
+			</div>
+		);
+	}
+
+	// A failed read is not "no usage yet": the control plane answers zeros for
+	// an agent that has none, so rendering zeros here would present an outage
+	// as a level-0 employee. Say so and offer the same Retry the Stats tab uses.
+	if (profileQuery.isError) {
+		return (
+			<div className="space-y-6">
+				{backButton}
+				<div
+					className="flex flex-col items-center gap-3 px-3 py-6 text-center"
+					role="alert"
+				>
+					<p className="text-muted-foreground text-sm">
+						Couldn't load this agent's stats. Check your connection and try
+						again.
+					</p>
+					<Button
+						onClick={() => void profileQuery.refetch()}
+						size="sm"
+						variant="ghost"
+					>
+						Retry
+					</Button>
 				</div>
+				<AgentPassportPanel
+					agent={agent}
+					organizationId={organizationId}
+					target={target}
+				/>
 			</div>
 		);
 	}

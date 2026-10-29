@@ -10,21 +10,24 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use tokio::process::Command;
 
-use crate::sidecar::download_manager::{ryu_dir, VersionStore};
+use ryu_sidecar_runtime::layout::EngineGroup;
+
+use crate::sidecar::download_manager::{engine_dir, VersionStore};
 use crate::win_process::NoWindow;
 
 /// Version-store key shared by the catalog, manager, and install route.
 pub const VERSION_KEY: &str = "mesh-llm";
 
 /// Ryu's optional managed-binary location. The normal path is PATH adoption;
-/// this location lets an operator keep the executable beside Ryu's other tools.
+/// this location (`<data dir>/engines/chat/mesh-llm/`) lets an operator keep
+/// the executable inside Ryu's own engine tree.
 pub fn managed_binary_path() -> PathBuf {
     let name = if cfg!(target_os = "windows") {
         "mesh-llm.exe"
     } else {
         "mesh-llm"
     };
-    ryu_dir().join("bin").join(name)
+    engine_dir(EngineGroup::Chat, "mesh-llm").join(name)
 }
 
 fn candidates() -> Vec<String> {
@@ -109,7 +112,7 @@ pub async fn ensure_installed() -> Result<String> {
     // The upstream project documents this formula for Apple Silicon. Do not run
     // its curl|bash installer from inside Ryu: a package-manager action is visible,
     // reversible, and does not turn a remote script into an implicit Ryu binary.
-    if cfg!(target_os = "macos") && brew_available().await {
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) && brew_available().await {
         tracing::info!("installing Mesh LLM via `brew install Mesh-LLM/tap/mesh-llm`");
         let status = Command::new("brew")
             .args(["install", "Mesh-LLM/tap/mesh-llm"])
@@ -164,7 +167,11 @@ mod tests {
     use super::{managed_binary_path, VERSION_KEY};
 
     #[test]
-    fn managed_path_uses_the_ryu_bin_directory() {
+    fn managed_path_uses_the_chat_engine_directory() {
+        assert!(managed_binary_path()
+            .parent()
+            .unwrap()
+            .ends_with("engines/chat/mesh-llm"));
         assert!(
             managed_binary_path().ends_with(if cfg!(target_os = "windows") {
                 "mesh-llm.exe"

@@ -1,8 +1,61 @@
 import { open, seal } from "@ryu/db/crypto";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
+import { z } from "zod";
+import { AuthTokenAtRest } from "./auth-token-at-rest.ts";
+import {
+	openSessionPii,
+	sealSessionCreate,
+	stripSessionPiiUpdate,
+} from "./session-pii-at-rest.ts";
 
 type BetterAuthAdapterFactory = ReturnType<typeof mongodbAdapter>;
-type BetterAuthAdapter = ReturnType<BetterAuthAdapterFactory>;
+export type BetterAuthAdapter = ReturnType<BetterAuthAdapterFactory>;
+type BetterAuthTransactionAdapter = Omit<BetterAuthAdapter, "transaction">;
+type AdapterWriteData = Parameters<BetterAuthAdapter["update"]>[0]["update"];
+type AdapterCreateInput<T> = Omit<
+	Parameters<BetterAuthAdapter["create"]>[0],
+	"data"
+> & { data: Omit<T, "id"> };
+/** A BSON ObjectId from any `bson` copy (never a secret; passed through). */
+interface ObjectIdLike {
+	toHexString(): string;
+}
+type SsoValue =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| Date
+	| ObjectIdLike
+	| SsoValue[]
+	| { [key: string]: SsoValue };
+const objectIdSchema = z.custom<ObjectIdLike>(
+	(value) =>
+		typeof value === "object" &&
+		value !== null &&
+		"toHexString" in value &&
+		typeof value.toHexString === "function"
+);
+// A provider row written outside Better Auth (an import or a manual repair)
+// can hold an ObjectId in a plain string field such as `organizationId`; the
+// Mongo adapter returns it unchanged. Accept it so such a row still reads.
+const ssoValueSchema: z.ZodType<SsoValue> = z.lazy(() =>
+	z.union([
+		z.string(),
+		z.number(),
+		z.boolean(),
+		z.null(),
+		z.undefined(),
+		z.date(),
+		objectIdSchema,
+		z.array(ssoValueSchema),
+		z.record(z.string(), ssoValueSchema),
+	])
+);
+const ssoRecordSchema = z.record(z.string(), ssoValueSchema);
+type SsoRecord = z.infer<typeof ssoRecordSchema>;
+const objectBoundarySchema = z.object({}).loose();
 
 const SENSITIVE_OIDC_FIELDS = ["clientSecret"] as const;
 const SENSITIVE_SAML_FIELDS = [
@@ -22,19 +75,20 @@ const NESTED_SAML_SECRET_FIELDS = [
 	"encPrivateKeyPass",
 ] as const;
 
-function recordValue(value: unknown): Record<string, unknown> | null {
-	return typeof value === "object" && value !== null
-		? (value as Record<string, unknown>)
+function recordValue<T>(value: T): SsoRecord | null {
+	return objectBoundarySchema.safeParse(value).success
+		? ssoRecordSchema.parse(value)
 		: null;
 }
 
 function transformSensitiveField(
 	field: string,
-	value: unknown,
+	value: SsoValue,
 	transform: (value: string) => string
-): unknown {
-	if (typeof value === "string") {
-		return transform(value);
+): SsoValue {
+	const stringValue = z.string().safeParse(value);
+	if (stringValue.success) {
+		return transform(stringValue.data);
 	}
 	if (field !== "idpMetadata" && field !== "spMetadata") {
 		return value;
@@ -45,26 +99,31 @@ function transformSensitiveField(
 	}
 	const output = { ...record };
 	for (const key of NESTED_SAML_SECRET_FIELDS) {
-		if (typeof output[key] === "string") {
-			output[key] = transform(output[key] as string);
+		const secret = z.string().safeParse(output[key]);
+		if (secret.success) {
+			output[key] = transform(secret.data);
 		}
 	}
 	return output;
 }
 
 function transformJsonField(
-	value: unknown,
+	value: SsoValue,
 	fields: readonly string[],
 	transform: (value: string) => string
-): unknown {
-	if (typeof value === "string") {
+): SsoValue {
+	const serialized = z.string().safeParse(value);
+	if (serialized.success) {
+		let parsed: z.output<ReturnType<typeof z.json>>;
 		try {
-			const parsed = JSON.parse(value) as unknown;
-			const transformed = transformJsonField(parsed, fields, transform);
-			return JSON.stringify(transformed);
+			parsed = z.json().parse(JSON.parse(serialized.data));
 		} catch {
 			return value;
 		}
+		// Parsing legacy/non-JSON values is permissive. Once parsing succeeds, every
+		// cryptographic failure must propagate so plaintext can never reach a write.
+		const transformed = transformJsonField(parsed, fields, transform);
+		return JSON.stringify(transformed);
 	}
 	const record = recordValue(value);
 	if (!record) {
@@ -78,10 +137,10 @@ function transformJsonField(
 	return output;
 }
 
-function transformSsoProviderRecord(
-	value: unknown,
+function transformSsoProviderRecord<T>(
+	value: T,
 	transform: (value: string) => string
-): unknown {
+): T {
 	const record = recordValue(value);
 	if (!record) {
 		return value;
@@ -97,28 +156,61 @@ function transformSsoProviderRecord(
 		SENSITIVE_SAML_FIELDS,
 		transform
 	);
-	if (typeof output.domainVerificationToken === "string") {
-		output.domainVerificationToken = transform(output.domainVerificationToken);
+	const domainToken = z.string().safeParse(output.domainVerificationToken);
+	if (domainToken.success) {
+		output.domainVerificationToken = transform(domainToken.data);
 	}
-	return output;
+	// SAFETY: the provider record was parsed as JSON/date fields. Only known
+	// secret strings change; JSON configs keep their string/object representation,
+	// and all remaining fields retain the adapter's original model contract.
+	return output as T;
 }
 
-function transformSsoPayload(
+function transformSsoPayload<T>(
 	model: string,
-	value: unknown,
+	value: T,
 	transform: (value: string) => string
-): unknown {
+): T {
 	return model === "ssoProvider"
 		? transformSsoProviderRecord(value, transform)
 		: value;
 }
 
-export function sealSsoProviderRecord(value: unknown): unknown {
+export function sealSsoProviderRecord<T>(value: T): T {
 	return transformSsoProviderRecord(value, seal);
 }
 
-export function openSsoProviderRecord(value: unknown): unknown {
+export function openSsoProviderRecord<T>(value: T): T {
 	return transformSsoProviderRecord(value, open);
+}
+
+function transformRead<T>(
+	atRest: AuthTokenAtRest,
+	model: string,
+	value: T,
+	presentedTokens?: string[]
+): T {
+	const read = atRest.read(
+		model,
+		transformSsoPayload(model, value, open),
+		presentedTokens
+	);
+	return model === "session" ? openSessionPii(read) : read;
+}
+
+function transformWrite<T>(
+	atRest: AuthTokenAtRest,
+	model: string,
+	value: T
+): T {
+	const written = atRest.write(model, transformSsoPayload(model, value, seal));
+	return model === "session" ? stripSessionPiiUpdate(written) : written;
+}
+
+function defaultAtRest(): AuthTokenAtRest {
+	return new AuthTokenAtRest(
+		process.env.BETTER_AUTH_SECRET?.trim() || undefined
+	);
 }
 
 /**
@@ -126,71 +218,127 @@ export function openSsoProviderRecord(value: unknown): unknown {
  * has already serialized JSON fields when this wrapper sees writes and has
  * parsed them again when it sees reads, so secrets remain queryable only by
  * their non-sensitive provider metadata.
+ *
+ * Besides SSO provider secrets this seals OAuth account tokens and stores
+ * session tokens and device codes as lookup digests (`auth-token-at-rest.ts`).
  */
-export function wrapSsoProviderAdapter(
-	adapter: BetterAuthAdapter
-): BetterAuthAdapter {
+export function wrapSsoProviderAdapter<
+	T extends BetterAuthAdapter | BetterAuthTransactionAdapter,
+>(adapter: T, atRest: AuthTokenAtRest = defaultAtRest()): T {
 	const wrapped = { ...adapter };
-
 	const originalCreate = adapter.create;
-	wrapped.create = (async (input) => {
-		const result = await originalCreate({
+	wrapped.create = async <V extends AdapterWriteData, R = V>(
+		input: AdapterCreateInput<V>
+	) => {
+		const presented = atRest.presentedTokens(input.model, [
+			...Object.entries(input.data).map(([field, value]) => ({
+				field,
+				value,
+			})),
+		]);
+		const sealed =
+			input.model === "session"
+				? sealSessionCreate(input.data)
+				: { data: input.data, forceAllowId: false };
+		const result = await originalCreate<V, R>({
 			...input,
-			data: transformSsoPayload(
+			...(sealed.forceAllowId ? { forceAllowId: true } : {}),
+			data: atRest.write(
 				input.model,
-				input.data,
-				seal
-			) as typeof input.data,
+				transformSsoPayload(input.model, sealed.data, seal)
+			),
 		});
-		return transformSsoPayload(input.model, result, open);
-	}) as BetterAuthAdapter["create"];
-
+		return transformRead(atRest, input.model, result, presented);
+	};
 	const originalFindOne = adapter.findOne;
-	wrapped.findOne = (async (input) => {
-		const result = await originalFindOne(input);
-		return transformSsoPayload(input.model, result, open);
-	}) as BetterAuthAdapter["findOne"];
-
-	const originalFindMany = adapter.findMany;
-	wrapped.findMany = (async (input) => {
-		const result = await originalFindMany(input);
-		return result.map((item) => transformSsoPayload(input.model, item, open));
-	}) as BetterAuthAdapter["findMany"];
-
-	const originalUpdate = adapter.update;
-	wrapped.update = (async (input) => {
-		const result = await originalUpdate({
+	wrapped.findOne = async <V>(
+		input: Parameters<BetterAuthAdapter["findOne"]>[0]
+	) => {
+		const presented = atRest.presentedTokens(input.model, input.where);
+		const result = await originalFindOne<V>({
 			...input,
-			update: transformSsoPayload(
-				input.model,
-				input.update,
-				seal
-			) as typeof input.update,
+			where: atRest.where(input.model, input.where),
 		});
-		return transformSsoPayload(input.model, result, open);
-	}) as BetterAuthAdapter["update"];
-
+		return transformRead(atRest, input.model, result, presented);
+	};
+	const originalFindMany = adapter.findMany;
+	wrapped.findMany = async <V>(
+		input: Parameters<BetterAuthAdapter["findMany"]>[0]
+	) => {
+		const presented = atRest.presentedTokens(input.model, input.where);
+		const result = await originalFindMany<V>({
+			...input,
+			where: atRest.where(input.model, input.where),
+		});
+		return result.map((item) =>
+			transformRead(atRest, input.model, item, presented)
+		);
+	};
+	const originalCount = adapter.count;
+	wrapped.count = async (input) =>
+		originalCount({ ...input, where: atRest.where(input.model, input.where) });
+	const originalUpdate = adapter.update;
+	wrapped.update = async <V>(
+		input: Parameters<BetterAuthAdapter["update"]>[0]
+	) => {
+		const presented = atRest.presentedTokens(input.model, input.where);
+		const result = await originalUpdate<V>({
+			...input,
+			where: atRest.where(input.model, input.where),
+			update: transformWrite(atRest, input.model, input.update),
+		});
+		return transformRead(atRest, input.model, result, presented);
+	};
 	const originalUpdateMany = adapter.updateMany;
-	wrapped.updateMany = (async (input) =>
+	wrapped.updateMany = async (input) =>
 		originalUpdateMany({
 			...input,
-			update: transformSsoPayload(
-				input.model,
-				input.update,
-				seal
-			) as typeof input.update,
-		})) as BetterAuthAdapter["updateMany"];
-
-	const originalTransaction = adapter.transaction;
-	wrapped.transaction = (async (callback) =>
-		originalTransaction((transactionAdapter) =>
-			callback(
-				wrapSsoProviderAdapter(
-					transactionAdapter as unknown as BetterAuthAdapter
-				) as Parameters<typeof callback>[0]
-			)
-		)) as BetterAuthAdapter["transaction"];
-
+			where: atRest.where(input.model, input.where),
+			update: transformWrite(atRest, input.model, input.update),
+		});
+	const originalDelete = adapter.delete;
+	wrapped.delete = async <V>(
+		input: Parameters<BetterAuthAdapter["delete"]>[0]
+	) =>
+		originalDelete<V>({
+			...input,
+			where: atRest.where(input.model, input.where),
+		});
+	const originalDeleteMany = adapter.deleteMany;
+	wrapped.deleteMany = async (input) =>
+		originalDeleteMany({
+			...input,
+			where: atRest.where(input.model, input.where),
+		});
+	const originalConsumeOne = adapter.consumeOne;
+	wrapped.consumeOne = async <V>(
+		input: Parameters<BetterAuthAdapter["consumeOne"]>[0]
+	) => {
+		const presented = atRest.presentedTokens(input.model, input.where);
+		const result = await originalConsumeOne<V>({
+			...input,
+			where: atRest.where(input.model, input.where),
+		});
+		return transformRead(atRest, input.model, result, presented);
+	};
+	const originalIncrementOne = adapter.incrementOne;
+	wrapped.incrementOne = async <V>(
+		input: Parameters<BetterAuthAdapter["incrementOne"]>[0]
+	) => {
+		const presented = atRest.presentedTokens(input.model, input.where);
+		const result = await originalIncrementOne<V>({
+			...input,
+			where: atRest.where(input.model, input.where),
+		});
+		return transformRead(atRest, input.model, result, presented);
+	};
+	if ("transaction" in adapter && "transaction" in wrapped) {
+		const originalTransaction = adapter.transaction;
+		wrapped.transaction = async (callback) =>
+			originalTransaction((transactionAdapter) =>
+				callback(wrapSsoProviderAdapter(transactionAdapter, atRest))
+			);
+	}
 	return wrapped;
 }
 
@@ -199,8 +347,13 @@ export function encryptedMongoAdapter(
 	config?: Parameters<typeof mongodbAdapter>[1]
 ): ReturnType<typeof mongodbAdapter> {
 	const adapterFactory = mongodbAdapter(database, config);
-	return ((options: Parameters<typeof adapterFactory>[0]) =>
-		wrapSsoProviderAdapter(adapterFactory(options))) as ReturnType<
-		typeof mongodbAdapter
-	>;
+	return (options) =>
+		wrapSsoProviderAdapter(
+			adapterFactory(options),
+			new AuthTokenAtRest(
+				options.secret?.trim() ||
+					process.env.BETTER_AUTH_SECRET?.trim() ||
+					undefined
+			)
+		);
 }

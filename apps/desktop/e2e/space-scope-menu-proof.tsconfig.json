@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "space-scope-menu-proof.playwright.config.ts",
+    "space-scope-menu-proof.spec.ts",
+    "harness/space-scope-menu-proof.bridge.ts",
+    "harness/space-scope-menu-proof.spaces-context.ts",
+    "harness/space-scope-menu-proof.tsx",
+    "harness/vite.space-scope-menu-proof.config.ts"
+  ]
+}

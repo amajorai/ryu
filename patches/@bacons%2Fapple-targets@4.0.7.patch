@@ -1,6 +1,8 @@
+diff --git a/build/with-xcode-changes.js b/build/with-xcode-changes.js
+index 343bcb93acde6926388ad54e309922d4962c2a38..8fbeec6bc5ba96c9b83424b7d509573e8b37c45a 100644
 --- a/build/with-xcode-changes.js
 +++ b/build/with-xcode-changes.js
-@@ -207,20 +207,22 @@
+@@ -207,23 +207,39 @@ async function applyXcodeChanges(config, project, props) {
          }
      }
      if (targetToUpdate) {
@@ -20,11 +22,30 @@
              .getReferrers()
              .forEach((ref) => {
 -            ref.removeReference(targetToUpdate.props.buildConfigurationList.uuid);
--        });
--        targetToUpdate.props.buildConfigurationList.removeFromProject();
 +            ref.removeReference(oldConfigurationList.uuid);
-+        });
+         });
+-        targetToUpdate.props.buildConfigurationList.removeFromProject();
+-        // Create new build phases
+-        targetToUpdate.props.buildConfigurationList =
+-            (0, configuration_list_1.createConfigurationListForType)(project, props);
 +        oldConfigurationList.removeFromProject();
-         // Create new build phases
-         targetToUpdate.props.buildConfigurationList =
-             (0, configuration_list_1.createConfigurationListForType)(project, props);
++        // Create new build phases. Watch apps resolve the main app through
++        // getMainAppTarget(), which reads every app target's configuration list,
++        // so hide this target (whose list was just removed) while building.
++        const targets = project.rootObject.props.targets;
++        const targetIndex = targets.indexOf(targetToUpdate);
++        if (targetIndex !== -1) {
++            targets.splice(targetIndex, 1);
++        }
++        try {
++            targetToUpdate.props.buildConfigurationList =
++                (0, configuration_list_1.createConfigurationListForType)(project, props);
++        }
++        finally {
++            if (targetIndex !== -1) {
++                targets.splice(targetIndex, 0, targetToUpdate);
++            }
++        }
+     }
+     else {
+         const productType = (0, target_1.productTypeForType)(props.type);

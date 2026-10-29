@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 import { AppDisabledError } from "@/src/lib/api/client.ts";
 import type { SpaceDocument } from "@/src/lib/api/spaces.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -21,7 +21,7 @@ const client = new QueryClient({
 let node = { url: "http://node.test", token: "token", userJwt: "one" };
 interface Read {
 	reject: (error: Error) => void;
-	resolve: (value: unknown) => void;
+	resolve: <TValue>(value: TValue) => void;
 	signal: AbortSignal;
 }
 const reads: Read[] = [];
@@ -35,7 +35,12 @@ mock.module("@/src/lib/gating/useEntityCap.ts", () => ({
 	useEntityCap: () => ({ guard: () => true }),
 }));
 mock.module("@/src/lib/api/spaces.ts", () => ({
-	fetchSpaces: (_target: unknown, signal: AbortSignal) =>
+	fetchSpaces: (
+		_target: Parameters<
+			typeof import("@/src/lib/api/spaces.ts").fetchSpaces
+		>[0],
+		signal: AbortSignal
+	) =>
 		new Promise((resolve, reject) => reads.push({ signal, resolve, reject })),
 	createSpace: async () => ({ retrievalMode: "vector" }),
 	createDatabase: async () => "db",

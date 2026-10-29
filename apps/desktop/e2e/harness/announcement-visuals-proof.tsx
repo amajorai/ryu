@@ -1,7 +1,7 @@
 import { Megaphone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { DEFAULT_ANNOUNCEMENT_VISUAL_CODE } from "@ryu/ui/components/announcement-visual.tsx";
-import { NotificationStack } from "@ryu/ui/components/notification-stack";
+import { NotificationStack } from "@ryu/ui/components/notification-stack.tsx";
 import { useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import "../../src/index.css";
@@ -91,26 +91,26 @@ function AnnouncementVisualsProof() {
 
 	return (
 		<main
-			className="min-h-screen bg-[#08090d] px-6 py-8 text-zinc-100"
+			className="min-h-screen bg-background px-6 py-8 text-foreground"
 			data-testid="announcement-visuals-proof"
 		>
 			<div className="mx-auto flex max-w-5xl flex-col gap-6">
 				<header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
 					<div>
-						<p className="font-medium text-[11px] text-cyan-300 uppercase tracking-[0.2em]">
+						<p className="type-caption font-medium text-info uppercase tracking-(--tracking-section)">
 							Ryu desktop verification
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
 							Announcement visual detail
 						</h1>
-						<p className="mt-2 max-w-2xl text-sm text-zinc-400 leading-6">
+						<p className="mt-2 max-w-2xl text-muted-foreground text-sm leading-6">
 							Each banner owns its own admin-authored React scene, image, icon,
 							and warp palette. The compact banner stays quiet until its detail
 							is opened.
 						</p>
 					</div>
 					<div
-						className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1.5 font-medium text-emerald-300 text-xs"
+						className="rounded-full border border-success/25 bg-success/10 px-3 py-1.5 font-medium text-success text-xs"
 						data-testid="proof-status"
 					>
 						{dialog.selected?.title ?? "Detail closed"}
@@ -124,7 +124,9 @@ function AnnouncementVisualsProof() {
 					>
 						<div className="mb-3 flex items-center justify-between">
 							<span className="font-medium text-sm">Announcement banners</span>
-							<span className="text-[10px] text-zinc-500">no artwork here</span>
+							<span className="type-compact text-muted-foreground">
+								no artwork here
+							</span>
 						</div>
 						<NotificationStack
 							className="max-w-none"
@@ -137,35 +139,35 @@ function AnnouncementVisualsProof() {
 
 					<div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.02] p-5">
 						<div className="grid gap-3 sm:grid-cols-3">
-							<div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-3">
+							<div className="rounded-2xl border border-info/20 bg-info/10 p-3">
 								<p className="font-medium text-xs">Latest unread</p>
-								<p className="mt-1 text-[11px] text-zinc-400">
+								<p className="type-caption mt-1 text-muted-foreground">
 									Auto-opened on load
 								</p>
 							</div>
 							<div className="rounded-2xl border border-white/10 bg-white/[0.025] p-3">
 								<p className="font-medium text-xs">Image</p>
-								<p className="mt-1 text-[11px] text-zinc-400">
+								<p className="type-caption mt-1 text-muted-foreground">
 									Dialog-only mount
 								</p>
 							</div>
 							<div className="rounded-2xl border border-white/10 bg-white/[0.025] p-3">
 								<p className="font-medium text-xs">Warp palette</p>
-								<p className="mt-1 text-[11px] text-zinc-400">
+								<p className="type-caption mt-1 text-muted-foreground">
 									Admin-controlled stops
 								</p>
 							</div>
 						</div>
-						<div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-xs text-zinc-400">
-							<div className="flex items-center gap-2 text-zinc-200">
+						<div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-muted-foreground text-xs">
+							<div className="flex items-center gap-2 text-foreground">
 								<HugeiconsIcon
-									className="size-4 text-cyan-300"
+									className="size-4 text-info"
 									icon={Megaphone01Icon}
 								/>
 								<p className="font-medium">React visual scene source</p>
 							</div>
 							<pre
-								className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-5"
+								className="type-caption mt-3 max-h-40 overflow-auto whitespace-pre-wrap leading-5"
 								data-testid="visual-code-source"
 							>
 								{NEWEST.visualCode}
@@ -188,9 +190,10 @@ function AnnouncementVisualsProof() {
 	);
 }
 
-const proofWindow = window as Window & {
-	__announcementVisualsProofRoot?: Root;
-};
+const proofWindow =
+	/* SAFETY: This private optional __announcementVisualsProofRoot holder is authored only by this module, which stores the complete native createRoot result and reuses it on later evaluation. The view preserves the browser Window and does not describe an external payload. */ window as Window & {
+		__announcementVisualsProofRoot?: Root;
+	};
 let proofRoot = proofWindow.__announcementVisualsProofRoot;
 if (!proofRoot) {
 	proofRoot = createRoot(document.getElementById("root")!);

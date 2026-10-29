@@ -140,6 +140,8 @@ export interface CommandSpec {
 	readonly mode: CommandExecutionMode;
 	/** Stable name used in help, completion rows, and dispatch results. */
 	readonly name: CommandName;
+	/** True when {@link usage} accepts an argument; bare no-argument commands run on Enter. */
+	readonly takesArguments: boolean;
 	readonly usage: string;
 }
 
@@ -292,8 +294,8 @@ const queueCommand: CommandHandler = (context) => {
 
 /**
  * The one source of built-in terminal command metadata and pure handlers.
- * Keep canonical command order stable: autocomplete has always exposed the
- * first eight commands in this order when the query is empty.
+ * Keep canonical command order stable: autocomplete lists commands in this
+ * order for an empty query and uses it to break ties within a rank tier.
  */
 export const COMMAND_SPECS = [
 	{
@@ -301,6 +303,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "choose an agent",
 		usage: "/agent",
+		takesArguments: false,
 		completion: "command",
 		mode: "overlay",
 		handler: noArgumentOverlay("agent-picker"),
@@ -310,6 +313,7 @@ export const COMMAND_SPECS = [
 		aliases: ["b"],
 		description: "ask a side question",
 		usage: "/btw <question>",
+		takesArguments: true,
 		completion: "command",
 		mode: "overlay",
 		handler: (context) =>
@@ -325,6 +329,7 @@ export const COMMAND_SPECS = [
 		aliases: ["double-check"],
 		description: "toggle double-check",
 		usage: "/check",
+		takesArguments: false,
 		completion: "command",
 		mode: "local",
 		handler: (context) =>
@@ -338,6 +343,7 @@ export const COMMAND_SPECS = [
 		aliases: ["acp"],
 		description: "choose ACP settings",
 		usage: "/config",
+		takesArguments: false,
 		completion: "command",
 		mode: "overlay",
 		handler: noArgumentOverlay("acp-settings"),
@@ -347,6 +353,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "fork this conversation",
 		usage: "/fork [message-id]",
+		takesArguments: true,
 		completion: "command",
 		mode: "local",
 		handler: (context) =>
@@ -361,6 +368,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "choose or set a model",
 		usage: "/model [id|clear]",
+		takesArguments: true,
 		completion: "command",
 		mode: "overlay",
 		handler: (context) => {
@@ -384,6 +392,7 @@ export const COMMAND_SPECS = [
 		aliases: ["newchat"],
 		description: "start a new chat",
 		usage: "/new",
+		takesArguments: false,
 		completion: "command",
 		mode: "local",
 		handler: (context) =>
@@ -394,6 +403,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "choose ACP settings",
 		usage: "/reasoning",
+		takesArguments: false,
 		completion: "command",
 		mode: "overlay",
 		handler: noArgumentOverlay("acp-settings"),
@@ -403,6 +413,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "resume a conversation",
 		usage: "/resume <conversation-id>",
+		takesArguments: true,
 		completion: "command",
 		mode: "local",
 		handler: (context) =>
@@ -417,6 +428,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "rename this conversation",
 		usage: "/rename <title>",
+		takesArguments: true,
 		completion: "command",
 		mode: "local",
 		handler: (context) =>
@@ -431,6 +443,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "delete a conversation",
 		usage: "/delete [conversation-id]",
+		takesArguments: true,
 		completion: "command",
 		mode: "overlay",
 		handler: (context) =>
@@ -446,6 +459,7 @@ export const COMMAND_SPECS = [
 		aliases: ["session"],
 		description: "list turn sessions",
 		usage: "/sessions",
+		takesArguments: false,
 		completion: "command",
 		mode: "overlay",
 		handler: noArgumentOverlay("session-list"),
@@ -455,6 +469,7 @@ export const COMMAND_SPECS = [
 		aliases: ["team"],
 		description: "route turns to a group",
 		usage: "/group [group-id|clear]",
+		takesArguments: true,
 		completion: "command",
 		mode: "local",
 		handler: (context) =>
@@ -469,6 +484,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "send a goal turn",
 		usage: "/goal <text>",
+		takesArguments: true,
 		completion: "command",
 		mode: "passthrough",
 		handler: requiredPassThrough,
@@ -478,6 +494,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "send a proof turn",
 		usage: "/proof <text>",
+		takesArguments: true,
 		completion: "command",
 		mode: "passthrough",
 		handler: requiredPassThrough,
@@ -487,6 +504,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "send a receipt turn",
 		usage: "/receipt <text>",
+		takesArguments: true,
 		completion: "command",
 		mode: "passthrough",
 		handler: requiredPassThrough,
@@ -496,6 +514,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "pin or unpin this conversation",
 		usage: "/pin [off]",
+		takesArguments: true,
 		completion: "command",
 		mode: "local",
 		handler: (context) =>
@@ -511,6 +530,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "unpin this conversation",
 		usage: "/unpin",
+		takesArguments: false,
 		completion: "command",
 		mode: "local",
 		handler: (context) =>
@@ -525,6 +545,7 @@ export const COMMAND_SPECS = [
 		aliases: ["commands"],
 		description: "show slash command help",
 		usage: "/help [command]",
+		takesArguments: true,
 		completion: "command",
 		mode: "overlay",
 		handler: (context) =>
@@ -540,6 +561,7 @@ export const COMMAND_SPECS = [
 		aliases: ["q"],
 		description: "inspect or change queued prompts",
 		usage: "/queue [list|clear|drop <id>|up <id>|down <id>]",
+		takesArguments: true,
 		completion: "command",
 		mode: "overlay",
 		handler: queueCommand,
@@ -549,6 +571,7 @@ export const COMMAND_SPECS = [
 		aliases: [],
 		description: "choose the terminal theme",
 		usage: "/theme [mode|preset]",
+		takesArguments: true,
 		completion: "command",
 		mode: "overlay",
 		handler: (context) => overlay(context, "theme"),
@@ -572,8 +595,39 @@ export function resolveCommand(name: string): CommandSpec | undefined {
 	return COMMAND_SPECS.find(
 		(spec) =>
 			spec.name === normalized ||
-			(spec.aliases as readonly string[]).includes(normalized)
+			spec.aliases.some((alias) => alias === normalized)
 	);
+}
+
+/** True only for an exact command advertised by an enabled plugin. Built-ins
+ *  keep their local handlers, while arbitrary unknown slash text stays guarded. */
+export function isContributedPluginCommand(
+	value: string,
+	commands: readonly { name: string; plugin: string }[]
+): boolean {
+	const match = /^\s*\/([\w-]+)(?:\s+([\s\S]*?))?\s*$/.exec(value);
+	const invokedAs = match?.[1]?.toLowerCase();
+	if (!invokedAs || resolveCommand(invokedAs)) {
+		return false;
+	}
+	return commands.some(
+		(command) =>
+			command.plugin.length > 0 && command.name.toLowerCase() === invokedAs
+	);
+}
+
+/** True only for a whole command advertised by the active ACP agent. These
+ * commands are sent as chat text; they do not have a local TUI handler. */
+export function isAdvertisedAgentCommand(
+	value: string,
+	commands: readonly { name: string }[]
+): boolean {
+	const match = /^\s*\/([\w-]+)(?:\s+([\s\S]*?))?\s*$/.exec(value);
+	const invokedAs = match?.[1]?.toLowerCase();
+	if (!invokedAs || resolveCommand(invokedAs)) {
+		return false;
+	}
+	return commands.some((command) => command.name.toLowerCase() === invokedAs);
 }
 
 /** Parse a complete slash command, preserving unknown commands for warnings. */
@@ -648,6 +702,92 @@ export function commandCompletions(query: string): CommandSpec[] {
 			(spec.name.startsWith(normalized) ||
 				spec.aliases.some((alias) => alias.startsWith(normalized)))
 	);
+}
+
+/** Rank tiers for {@link rankCommand}; lower is better. */
+export const COMMAND_RANK = {
+	exact: 0,
+	namePrefix: 1,
+	aliasPrefix: 2,
+	fuzzy: 3,
+	description: 4,
+} as const;
+
+/** The best tier that still counts as a typed-prefix hit. */
+export const COMMAND_PREFIX_RANK = COMMAND_RANK.aliasPrefix;
+
+/**
+ * Greedy subsequence match cost: candidate characters skipped before the last
+ * hit (a leading offset counts, so earlier matches win). `null` = no match.
+ */
+function subsequenceGaps(query: string, candidate: string): number | null {
+	let position = -1;
+	for (const character of query) {
+		const next = candidate.indexOf(character, position + 1);
+		if (next === -1) {
+			return null;
+		}
+		position = next;
+	}
+	return position + 1 - query.length;
+}
+
+/**
+ * Score one slash command against a query: exact name or alias, name prefix,
+ * alias prefix, subsequence fuzzy on the name (plus a fractional gap penalty
+ * that stays inside the tier), then a description substring. `null` means no
+ * match. Matching is case-insensitive; an empty query is a prefix of everything.
+ */
+export function rankCommand(
+	query: string,
+	name: string,
+	aliases: readonly string[],
+	description: string
+): number | null {
+	const normalized = query.trim().toLowerCase();
+	const key = name.toLowerCase();
+	const aliasKeys = aliases.map((alias) => alias.toLowerCase());
+	if (
+		normalized.length > 0 &&
+		(key === normalized || aliasKeys.includes(normalized))
+	) {
+		return COMMAND_RANK.exact;
+	}
+	if (key.startsWith(normalized)) {
+		return COMMAND_RANK.namePrefix;
+	}
+	if (aliasKeys.some((alias) => alias.startsWith(normalized))) {
+		return COMMAND_RANK.aliasPrefix;
+	}
+	const gaps = subsequenceGaps(normalized, key);
+	if (gaps !== null) {
+		return COMMAND_RANK.fuzzy + Math.min(gaps, 999) / 1000;
+	}
+	if (description.toLowerCase().includes(normalized)) {
+		return COMMAND_RANK.description;
+	}
+	return null;
+}
+
+export interface RankedCommandSpec {
+	readonly rank: number;
+	readonly spec: CommandSpec;
+}
+
+/**
+ * Completion-eligible specs scored with {@link rankCommand}, in registry order.
+ * Callers combine these with agent and plugin commands before sorting, so the
+ * fuzzy gate can see every candidate; {@link commandCompletions} stays the
+ * plain prefix view used by help and other callers.
+ */
+export function rankedCommandSpecs(query: string): RankedCommandSpec[] {
+	return COMMAND_SPECS.flatMap((spec) => {
+		if (spec.completion !== "command") {
+			return [];
+		}
+		const rank = rankCommand(query, spec.name, spec.aliases, spec.description);
+		return rank === null ? [] : [{ rank, spec }];
+	});
 }
 
 export interface CommandHelpRow {

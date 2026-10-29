@@ -1,6 +1,12 @@
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 
+declare global {
+	interface Window {
+		__reuseProof?: { writes: number };
+	}
+}
+
 const proof = resolve(
 	import.meta.dirname,
 	"../../../artifacts/app-reuse-audit"
@@ -61,11 +67,13 @@ test("host storage errors remain visible without autosaving", async ({
 		await expect(page.locator("body")).toContainText(/storage|denied/i);
 		await page.waitForTimeout(500);
 		expect(
-			await page.evaluate(
-				() =>
-					(window as unknown as { __reuseProof: { writes: number } })
-						.__reuseProof.writes
-			)
+			await page.evaluate(() => {
+				const fixture = window.__reuseProof;
+				if (!fixture) {
+					throw new Error("App reuse fixture was not installed");
+				}
+				return fixture.writes;
+			})
 		).toBe(0);
 		await page.screenshot({ path: `${proof}/${app}-storage-error.png` });
 	}
@@ -167,7 +175,9 @@ test("Clips opens manifest view context with shared upload and no private sideba
 	page,
 }) => {
 	await page.addInitScript(() => {
-		(window as unknown as { ryu: unknown }).ryu = {
+		/* SAFETY: This addInitScript writes the authored Clips view context on its own browser window before navigation. The property remains unknown in this write-only view; no broad app bridge or external JSON contract is claimed. */ (
+			window as Window & { ryu: unknown }
+		).ryu = {
 			context: { view: "create" },
 		};
 	});

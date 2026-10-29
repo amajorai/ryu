@@ -138,11 +138,14 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
+use crate::activity::sealed_store::{core_cipher, StoreSeal};
 use crate::document_parse::{
     self, ParseFailure, ParseFailureReason, ParseOutcome, ParseSubmission,
 };
 use crate::server::spaces::{DocOwner, SpaceStore};
 use crate::server::ServerState;
+use ryu_crypto::content_sqlite::{ColumnPlan, KeyKind};
+use ryu_crypto::ContentContext;
 
 /// How long to wait between polls of a provider parse job.
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
@@ -156,6 +159,28 @@ const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 /// not leave a `pending` row forever — an honest `failed` beats a permanent "still
 /// working on it".
 const POLL_BUDGET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// Back-off between re-submissions of a parse whose provider answered
+/// [`ParseFailureReason::ProviderTimeout`] at SUBMIT time — almost always a lazy
+/// provider sidecar still provisioning its first start (venv + `pip install`, which
+/// the sidecar manager keeps running detached). Bounded: after the last delay the
+/// timeout is recorded as `failed` like any other. The total (~23 min, plus a wake
+/// wait per attempt) sits inside the manager's 30-minute start budget, so a start
+/// that will succeed is waited out and one that will not is not retried forever.
+///
+/// Only the submit is retried. A job that was accepted and then outran
+/// [`POLL_BUDGET`] already cost a quarter hour; running it again is not a retry, it
+/// is a second identical failure.
+const SUBMIT_RETRY_DELAYS: &[std::time::Duration] = &[
+    std::time::Duration::from_secs(15),
+    std::time::Duration::from_secs(30),
+    std::time::Duration::from_secs(60),
+    std::time::Duration::from_secs(120),
+    std::time::Duration::from_secs(240),
+    std::time::Duration::from_secs(300),
+    std::time::Duration::from_secs(300),
+    std::time::Duration::from_secs(300),
+];
 
 /// Head-room added to [`POLL_BUDGET`] before a `pending` row is read as abandoned —
 /// the work a provider parse legitimately does OUTSIDE the poll deadline.
@@ -413,13 +438,46 @@ fn demote_abandoned_pending(record: FileIndexRecord, now_ms: i64) -> FileIndexRe
 /// covers the user-facing path; a document deleted through any other in-process
 /// caller orphans one row. Orphans are inert (ids are uuids, so a recycled id cannot
 /// pick up a stale row) but they do accumulate.
+///
+/// `message` and `warnings` are sealed (`encb:v1:`, content key
+/// `space-file-index.db`, AAD = the column and `doc_id`): provider errors and
+/// parser notes can quote file names or contents. Messages this module writes
+/// never name the file.
 #[derive(Clone)]
 pub struct FileIndexStore {
     conn: Arc<Mutex<Connection>>,
+    seal: StoreSeal,
+}
+
+/// The content store name of `db/space-file-index.db`.
+const FILE_INDEX_STORE: &str = "space-file-index.db";
+const MESSAGE_PURPOSE: &str = "file_index_status.message";
+const WARNINGS_PURPOSE: &str = "file_index_status.warnings";
+
+/// The sealed columns, bound to `doc_id` (the migration's context must equal
+/// the read/write path's: `ContentContext::for_id(<purpose>, doc_id)`).
+fn file_index_plans() -> Result<Vec<ColumnPlan>> {
+    Ok(vec![
+        ColumnPlan::text("file_index_status", "message", "doc_id", KeyKind::Text)?
+            .with_context(&[], |row| {
+                ContentContext::for_id(MESSAGE_PURPOSE, row.key())
+            })?,
+        ColumnPlan::text("file_index_status", "warnings", "doc_id", KeyKind::Text)?
+            .with_context(&[], |row| {
+                ContentContext::for_id(WARNINGS_PURPOSE, row.key())
+            })?,
+    ])
+}
+
+/// One `file_index_status` row as stored (sealed columns not yet opened).
+struct StoredRecord {
+    record: FileIndexRecord,
+    message: Option<String>,
+    warnings: String,
 }
 
 fn default_db_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("space-file-index.db")
+    crate::paths::db_path("space-file-index.db")
 }
 
 impl FileIndexStore {
@@ -434,12 +492,20 @@ impl FileIndexStore {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating space-file-index dir {}", parent.display()))?;
         }
-        let conn = Connection::open(&path)
+        let mut conn = Connection::open(&path)
             .with_context(|| format!("opening space-file-index db {}", path.display()))?;
         Self::init_schema(&conn)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+        // Seals legacy plaintext messages once (secure_delete first) and
+        // scrubs the freed pages.
+        let seal = StoreSeal::prepare(
+            &mut conn,
+            Some(&path),
+            core_cipher(FILE_INDEX_STORE)?,
+            &file_index_plans()?,
+        )?;
+        let conn = Arc::new(Mutex::new(conn));
+        seal.defer_compaction(&conn, Some(&path));
+        Ok(Self { conn, seal })
     }
 
     /// Open an in-memory store. A plain `pub fn` — not `#[cfg(test)]` — so the
@@ -451,16 +517,25 @@ impl FileIndexStore {
     /// re-argue the same point.
     #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory().context("opening in-memory space-file-index db")?;
+        let mut conn =
+            Connection::open_in_memory().context("opening in-memory space-file-index db")?;
         Self::init_schema(&conn)?;
+        let seal = StoreSeal::prepare(
+            &mut conn,
+            None,
+            core_cipher(FILE_INDEX_STORE)?,
+            &file_index_plans()?,
+        )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            seal,
         })
     }
 
     fn init_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
              CREATE TABLE IF NOT EXISTS file_index_status (
                  doc_id          TEXT PRIMARY KEY,
                  state           TEXT NOT NULL,
@@ -481,6 +556,14 @@ impl FileIndexStore {
     /// replaced by the terminal state, never appended to.
     pub async fn put(&self, record: &FileIndexRecord) -> Result<()> {
         let warnings = serde_json::to_string(&record.warnings).unwrap_or_else(|_| "[]".to_owned());
+        let warnings = self.seal.seal(
+            &warnings,
+            &ContentContext::for_id(WARNINGS_PURPOSE, &record.doc_id),
+        )?;
+        let message = self.seal.seal_opt(
+            record.message.as_deref(),
+            &ContentContext::for_id(MESSAGE_PURPOSE, &record.doc_id),
+        )?;
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO file_index_status
@@ -500,7 +583,7 @@ impl FileIndexStore {
                 record.doc_id,
                 record.state.as_str(),
                 record.reason_code,
-                record.message,
+                message,
                 record.backend_id,
                 record.backend_version,
                 record.chunk_count,
@@ -521,19 +604,43 @@ impl FileIndexStore {
     /// disagree about it — the badge saying "indexing…" next to a detail pane saying
     /// "failed", with no way for a user to tell which is lying. Two copies of the
     /// decode is how that drift starts.
-    fn record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileIndexRecord> {
-        let warnings: String = row.get(7)?;
-        let record = FileIndexRecord {
-            doc_id: row.get(0)?,
-            state: IndexState::from_str(&row.get::<_, String>(1)?),
-            reason_code: row.get(2)?,
+    ///
+    /// Split in two: [`Self::stored_from_row`] reads the columns (inside
+    /// rusqlite's row closure), [`Self::record_from_row`] opens the sealed
+    /// `message`/`warnings` and applies the demotion.
+    fn stored_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredRecord> {
+        Ok(StoredRecord {
+            record: FileIndexRecord {
+                doc_id: row.get(0)?,
+                state: IndexState::from_str(&row.get::<_, String>(1)?),
+                reason_code: row.get(2)?,
+                message: None,
+                backend_id: row.get(4)?,
+                backend_version: row.get(5)?,
+                chunk_count: row.get(6)?,
+                warnings: Vec::new(),
+                updated_at: row.get(8)?,
+            },
             message: row.get(3)?,
-            backend_id: row.get(4)?,
-            backend_version: row.get(5)?,
-            chunk_count: row.get(6)?,
-            warnings: serde_json::from_str(&warnings).unwrap_or_default(),
-            updated_at: row.get(8)?,
-        };
+            warnings: row.get(7)?,
+        })
+    }
+
+    fn record_from_row(&self, stored: StoredRecord) -> Result<FileIndexRecord> {
+        let StoredRecord {
+            mut record,
+            message,
+            warnings,
+        } = stored;
+        record.message = self.seal.open_opt(
+            message.as_deref(),
+            &ContentContext::for_id(MESSAGE_PURPOSE, &record.doc_id),
+        )?;
+        let warnings = self.seal.open(
+            &warnings,
+            &ContentContext::for_id(WARNINGS_PURPOSE, &record.doc_id),
+        )?;
+        record.warnings = serde_json::from_str(&warnings).unwrap_or_default();
         Ok(demote_abandoned_pending(record, now_millis()))
     }
 
@@ -551,11 +658,14 @@ impl FileIndexStore {
                         chunk_count, warnings, updated_at
                  FROM file_index_status WHERE doc_id = ?1",
                 params![doc_id],
-                Self::record_from_row,
+                Self::stored_from_row,
             )
             .optional()
             .context("reading file index status")?;
-        Ok(record)
+        drop(conn);
+        record
+            .map(|stored| self.record_from_row(stored))
+            .transpose()
     }
 
     /// Read many documents' statuses in **one pass**, keyed by document id.
@@ -595,6 +705,7 @@ impl FileIndexStore {
             return Ok(out);
         }
         let conn = self.conn.lock().await;
+        let mut skipped = 0u64;
         for chunk in doc_ids.chunks(CHUNK) {
             let placeholders = vec!["?"; chunk.len()].join(",");
             let sql = format!(
@@ -608,14 +719,22 @@ impl FileIndexStore {
             let rows = stmt
                 .query_map(
                     rusqlite::params_from_iter(chunk.iter()),
-                    Self::record_from_row,
+                    Self::stored_from_row,
                 )
                 .context("reading bulk file index status")?;
-            for record in rows {
-                let record = record.context("decoding bulk file index status row")?;
-                out.insert(record.doc_id.clone(), record);
+            for stored in rows {
+                let stored = stored.context("decoding bulk file index status row")?;
+                // A row whose sealed detail does not open is skipped (the
+                // document reads as unattempted) and counted.
+                match self.record_from_row(stored) {
+                    Ok(record) => {
+                        out.insert(record.doc_id.clone(), record);
+                    }
+                    Err(_) => skipped += 1,
+                }
             }
         }
+        self.seal.count_unreadable(skipped);
         Ok(out)
     }
 
@@ -763,7 +882,8 @@ pub async fn record_parse_result(
             doc_id: doc_id.to_owned(),
             state: IndexState::Skipped,
             reason_code: Some(REASON_EMPTY_DOCUMENT.to_owned()),
-            message: Some(format!("{title} contains no extractable text")),
+            // Never the title: this row lives outside spaces.db, which seals it.
+            message: Some("this file contains no extractable text".to_owned()),
             backend_id: Some(outcome.backend_id),
             backend_version: Some(outcome.backend_version),
             chunk_count: 0,
@@ -1088,7 +1208,31 @@ async fn index_via_provider(
         }
     };
 
-    let submission = document_parse::submit_blob(state, &meta.sha256, title, mime, size).await;
+    // A provider still starting answers `provider_timeout` at submit; re-submit with
+    // back-off instead of writing a `failed` row nothing would ever revisit. Each
+    // retry first re-checks that this revision is still current (a replaced or
+    // deleted document ends the loop; the final sha check below then drops it) and
+    // re-writes `pending`, which restarts the clock `STALE_PENDING_AFTER` is
+    // measured on so a long wait for the provider is not read as abandoned.
+    let submission = retry_submit_while_provider_starting(SUBMIT_RETRY_DELAYS, |attempt| {
+        let sha256 = meta.sha256.clone();
+        async move {
+            if attempt > 0 {
+                match state.spaces.get_file_meta(doc_id).await {
+                    Ok(Some(current)) if current.sha256 == expected_sha256 => {}
+                    _ => {
+                        return Err(ParseFailure::new(
+                            ParseFailureReason::ProviderError,
+                            "the file changed while waiting for the document parser",
+                        ))
+                    }
+                }
+                mark_pending(store, doc_id).await;
+            }
+            document_parse::submit_blob(state, &sha256, title, mime, size).await
+        }
+    })
+    .await;
     let result = match submission {
         Err(failure) => Err(failure),
         Ok(ParseSubmission::Done(outcome)) => Ok(*outcome),
@@ -1101,6 +1245,39 @@ async fn index_via_provider(
         _ => return,
     }
     record_parse_result(store, &state.spaces, doc_id, title, mime, result).await;
+}
+
+/// Run `submit` (called with the 0-based attempt number) and, while it fails with
+/// [`ParseFailureReason::ProviderTimeout`], sleep the next of `delays` and run it
+/// again. Any other outcome — success, a different failure, or the delays running
+/// out — is returned as is.
+async fn retry_submit_while_provider_starting<T, F, Fut>(
+    delays: &[std::time::Duration],
+    mut submit: F,
+) -> Result<T, ParseFailure>
+where
+    F: FnMut(usize) -> Fut,
+    Fut: std::future::Future<Output = Result<T, ParseFailure>>,
+{
+    let mut attempt = 0;
+    loop {
+        match submit(attempt).await {
+            Err(failure) if failure.reason == ParseFailureReason::ProviderTimeout => {
+                let Some(delay) = delays.get(attempt) else {
+                    return Err(failure);
+                };
+                tracing::info!(
+                    "document parser not ready (attempt {}): {}; retrying in {}s",
+                    attempt + 1,
+                    failure.message,
+                    delay.as_secs()
+                );
+                tokio::time::sleep(*delay).await;
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Poll a provider job until it terminates or [`POLL_BUDGET`] runs out.
@@ -1123,6 +1300,8 @@ async fn poll_to_completion(
             Err(failure) => return Err(failure),
         }
         if std::time::Instant::now() >= deadline {
+            // Abandoned: delete the decrypted input now.
+            document_parse::release_input(job_id);
             return Err(ParseFailure::new(
                 ParseFailureReason::ProviderTimeout,
                 format!(
@@ -1302,6 +1481,115 @@ mod tests {
     const CONTENTS: &str =
         "Quokkas are small macropods native to Rottnest Island. The colony there \
          subsists largely on native grasses and succulents.";
+
+    fn file_contains(path: &std::path::Path, needle: &str) -> bool {
+        let mut bytes = std::fs::read(path).unwrap_or_default();
+        let mut wal = path.as_os_str().to_owned();
+        wal.push("-wal");
+        bytes.extend(std::fs::read(std::path::PathBuf::from(wal)).unwrap_or_default());
+        bytes
+            .windows(needle.len())
+            .any(|window| window == needle.as_bytes())
+    }
+
+    #[tokio::test]
+    async fn status_detail_is_sealed_on_disk_and_legacy_rows_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("space-file-index.db");
+        // A row an older build wrote in plaintext, title in the message.
+        {
+            let conn = Connection::open(&path).unwrap();
+            FileIndexStore::init_schema(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO file_index_status (doc_id, state, message, warnings, updated_at)
+                 VALUES ('legacy', 'skipped', 'Secret Merger Plan contains no extractable text',
+                         '[\"Secret Merger lossy decode\"]', 1)",
+                [],
+            )
+            .unwrap();
+        }
+        let store = FileIndexStore::open(path.clone()).unwrap();
+        let legacy = store.get("legacy").await.unwrap().unwrap();
+        assert_eq!(
+            legacy.message.as_deref(),
+            Some("Secret Merger Plan contains no extractable text")
+        );
+        assert_eq!(
+            legacy.warnings,
+            vec!["Secret Merger lossy decode".to_owned()]
+        );
+
+        let record = FileIndexRecord {
+            doc_id: "new".to_owned(),
+            state: IndexState::Failed,
+            reason_code: Some("provider_error".to_owned()),
+            message: Some("the provider rejected Quarterly Kumquat.docx".to_owned()),
+            backend_id: None,
+            backend_version: None,
+            chunk_count: 0,
+            warnings: vec!["Kumquat page 3 unreadable".to_owned()],
+            updated_at: now_millis(),
+        };
+        store.put(&record).await.unwrap();
+        let read = store.get("new").await.unwrap().unwrap();
+        assert_eq!(read.message, record.message);
+        assert_eq!(read.warnings, record.warnings);
+
+        {
+            let conn = store.conn.lock().await;
+            conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+                .unwrap();
+        }
+        for secret in ["Secret Merger", "Kumquat"] {
+            assert!(!file_contains(&path, secret), "{secret:?} is on disk");
+        }
+
+        // A sealed value moved to another row does not open: a read by id
+        // fails, a list skips the row.
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "UPDATE file_index_status
+                 SET message = (SELECT message FROM file_index_status WHERE doc_id = 'new')
+                 WHERE doc_id = 'legacy'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(store.get("legacy").await.is_err());
+        let many = store
+            .get_many(&["legacy".to_owned(), "new".to_owned()])
+            .await
+            .unwrap();
+        assert!(many.contains_key("new"));
+        assert!(!many.contains_key("legacy"));
+        drop(store);
+
+        // Reopening runs the migration again and changes nothing.
+        let again = FileIndexStore::open(path).unwrap();
+        assert_eq!(
+            again.get("new").await.unwrap().unwrap().message,
+            record.message
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_extraction_message_does_not_name_the_file() {
+        let spaces = SpaceStore::open_in_memory().unwrap();
+        let store = FileIndexStore::open_in_memory().unwrap();
+        let (_space, doc) = stored_file(&spaces, RetrievalMode::Vector).await;
+        let record = record_parse_result(
+            Some(&store),
+            &spaces,
+            &doc,
+            "Confidential Kumquat Notes",
+            "text/markdown",
+            floor_outcome("   "),
+        )
+        .await;
+        let message = record.message.unwrap_or_default();
+        assert!(!message.contains("Kumquat"), "{message}");
+    }
 
     /// Build a stored `.md` file whose filename shares no term with its contents.
     async fn stored_file(spaces: &SpaceStore, mode: RetrievalMode) -> (String, String) {
@@ -1519,6 +1807,71 @@ mod tests {
         assert_eq!(record.state, IndexState::Skipped);
         assert_eq!(record.reason_code.as_deref(), Some("no_provider"));
         assert_eq!(store.get(&doc).await.unwrap().unwrap().state, record.state);
+    }
+
+    fn timeout() -> ParseFailure {
+        ParseFailure::new(ParseFailureReason::ProviderTimeout, "still starting")
+    }
+
+    /// A provider still starting at submit time is retried with back-off, not
+    /// recorded as a terminal `failed` that nothing ever revisits.
+    #[tokio::test]
+    async fn a_provider_still_starting_at_submit_is_retried_until_it_answers() {
+        let delays = [std::time::Duration::from_millis(1); 5];
+        let calls = std::cell::Cell::new(0);
+        let result = retry_submit_while_provider_starting(&delays, |attempt| {
+            calls.set(calls.get() + 1);
+            async move {
+                if attempt < 2 {
+                    Err(timeout())
+                } else {
+                    Ok("parsed")
+                }
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), "parsed");
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[tokio::test]
+    async fn submit_retries_are_bounded_and_end_as_the_timeout() {
+        let delays = [std::time::Duration::from_millis(1); 3];
+        let calls = std::cell::Cell::new(0);
+        let result: Result<(), ParseFailure> =
+            retry_submit_while_provider_starting(&delays, |_| {
+                calls.set(calls.get() + 1);
+                async { Err(timeout()) }
+            })
+            .await;
+        assert_eq!(
+            result.unwrap_err().reason,
+            ParseFailureReason::ProviderTimeout
+        );
+        assert_eq!(calls.get(), 4, "one attempt plus one per delay");
+    }
+
+    #[tokio::test]
+    async fn a_real_provider_failure_is_not_retried() {
+        let delays = [std::time::Duration::from_millis(1); 3];
+        let calls = std::cell::Cell::new(0);
+        let result: Result<(), ParseFailure> =
+            retry_submit_while_provider_starting(&delays, |_| {
+                calls.set(calls.get() + 1);
+                async { Err(ParseFailure::new(ParseFailureReason::ProviderError, "boom")) }
+            })
+            .await;
+        assert_eq!(
+            result.unwrap_err().reason,
+            ParseFailureReason::ProviderError
+        );
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn submit_retries_fit_inside_the_managers_start_budget() {
+        let total: std::time::Duration = SUBMIT_RETRY_DELAYS.iter().sum();
+        assert!(total < crate::sidecar::manager::WAKE_START_BUDGET);
     }
 
     #[test]

@@ -2,8 +2,18 @@
 
 // beui.dev/components/agents/agent-disclosure
 
-import { EASE_OUT } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import type { MotionStyle } from "motion/react";
+import { isNativeNumber } from "../../lib/native-primitive-observation.ts";
+import css from "./agent-disclosure.module.css";
+
+interface Inline1Style extends MotionStyle {
+	"--agent-disclosure-1-height"?: MotionStyle["height"];
+	"--agent-disclosure-1-pointer-events"?: MotionStyle["pointerEvents"];
+	"--agent-disclosure-1-transform-origin"?: MotionStyle["transformOrigin"];
+}
+
+import { EASE_OUT } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { type HTMLMotionProps, motion, useReducedMotion } from "motion/react";
 import type { CSSProperties } from "react";
 
@@ -36,20 +46,30 @@ export function AgentDisclosure({
 			};
 	const openDuration = open ? 0.22 : 0.14;
 
+	// The collapse owns height, pointer-events, and transform-origin: drop caller
+	// values for them so `open={false}` always collapses via the module class.
+	const inline1Style: Inline1Style = {
+		...style,
+		height: undefined,
+		pointerEvents: undefined,
+		transformOrigin: undefined,
+		"--agent-disclosure-1-height": open
+			? isNativeNumber(openHeight)
+				? `${openHeight}px`
+				: openHeight
+			: "0px",
+		"--agent-disclosure-1-pointer-events": open ? undefined : "none",
+		"--agent-disclosure-1-transform-origin": "top",
+	};
 	return (
 		<motion.div
 			{...props}
 			animate={motionState}
 			aria-hidden={!open}
-			className={cn("overflow-hidden", className)}
+			className={[css.inline1, cn("overflow-hidden", className)].join(" ")}
 			inert={!open}
 			initial={false}
-			style={{
-				...style,
-				height: open ? openHeight : 0,
-				pointerEvents: open ? undefined : "none",
-				transformOrigin: "top",
-			}}
+			style={inline1Style}
 			transition={
 				transition ?? {
 					duration: reduce ? 0 : openDuration,

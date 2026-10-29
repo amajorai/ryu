@@ -4,9 +4,34 @@
  * only after the current stream has settled.
  */
 
+import { z } from "zod";
 import type { ChatStreamOptions } from "./chatStream.ts";
 
 export const MAX_QUEUED_CHAT_MESSAGES = 50;
+const queuedStreamOptionsSchema = z
+	.object({
+		acpConfig: z.record(z.string(), z.string()).optional(),
+		acpMode: z.string().optional(),
+		acpModel: z.string().optional(),
+		agentId: z.string().optional(),
+		conversationId: z.string().optional(),
+		enableLongTerm: z.boolean().optional(),
+		pluginFlags: z.record(z.string(), z.boolean()).optional(),
+		teamId: z.string().optional(),
+		workflowId: z.string().optional(),
+	})
+	.optional();
+const queuedTurnInputSchema = z.object({
+	text: z.string(),
+	createdAt: z.number().optional(),
+	id: z.string().optional(),
+	options: queuedStreamOptionsSchema,
+});
+const queuedTextSchema = z.string();
+const queuedMessageTextSchema = z.union([
+	queuedTextSchema,
+	z.object({ text: queuedTextSchema }).transform((input) => input.text),
+]);
 
 /** The immutable per-turn data needed to submit a queued prompt later. */
 export interface QueuedChatTurn {
@@ -96,16 +121,22 @@ function cloneQueuedChatTurn(turn: QueuedChatTurn): QueuedChatTurn {
 function inputParts(
 	input: string | QueuedChatTurnInput,
 	options?: ChatStreamOptions
-): {
-	createdAt?: number;
-	id?: string;
-	options?: ChatStreamOptions;
-	text: string;
-} {
-	if (typeof input === "string") {
-		return { options, text: input };
+): QueuedChatTurnInput {
+	const text = queuedTextSchema.safeParse(input);
+	return text.success
+		? { text: text.data, options }
+		: queuedTurnInputSchema.parse(input);
+}
+function factoryParts(
+	value: ChatStreamOptions | QueuedChatTurnFactoryOptions | undefined
+): QueuedChatTurnFactoryOptions | undefined {
+	if (!value) {
+		return undefined;
 	}
-	return input;
+	return {
+		now: "now" in value ? value.now : undefined,
+		idFactory: "idFactory" in value ? value.idFactory : undefined,
+	};
 }
 
 /**
@@ -126,20 +157,30 @@ export function createQueuedChatTurn(
 	optionsOrFactory?: ChatStreamOptions | QueuedChatTurnFactoryOptions,
 	factoryOptionsArg?: QueuedChatTurnFactoryOptions
 ): QueuedChatTurn {
-	const isStringInput = typeof input === "string";
-	const options = isStringInput
-		? optionsOrFactory &&
-			("now" in optionsOrFactory || "idFactory" in optionsOrFactory)
-			? undefined
-			: (optionsOrFactory as ChatStreamOptions | undefined)
-		: undefined;
+	return createQueuedTurnFromArguments(
+		input,
+		optionsOrFactory,
+		factoryOptionsArg
+	);
+}
+
+function createQueuedTurnFromArguments(
+	input: string | QueuedChatTurnInput,
+	optionsOrFactory?: ChatStreamOptions | QueuedChatTurnFactoryOptions,
+	factoryOptionsArg?: QueuedChatTurnFactoryOptions
+): QueuedChatTurn {
+	const isStringInput = queuedTextSchema.safeParse(input).success;
+	const factoryArgument =
+		optionsOrFactory &&
+		("now" in optionsOrFactory || "idFactory" in optionsOrFactory);
+	const options =
+		isStringInput && !factoryArgument
+			? queuedStreamOptionsSchema.parse(optionsOrFactory)
+			: undefined;
 	const factoryOptions = isStringInput
 		? (factoryOptionsArg ??
-			(optionsOrFactory &&
-			("now" in optionsOrFactory || "idFactory" in optionsOrFactory)
-				? (optionsOrFactory as QueuedChatTurnFactoryOptions)
-				: undefined))
-		: (optionsOrFactory as QueuedChatTurnFactoryOptions | undefined);
+			(factoryArgument ? factoryParts(optionsOrFactory) : undefined))
+		: factoryParts(optionsOrFactory);
 	const parts = inputParts(input, options);
 	const text = parts.text.trim();
 	const createdAt = parts.createdAt ?? (factoryOptions?.now ?? Date.now)();
@@ -176,7 +217,7 @@ export function enqueueChatTurn(
 	optionsOrFactory?: ChatStreamOptions | QueuedChatTurnFactoryOptions,
 	factoryOptions?: QueuedChatTurnFactoryOptions
 ): EnqueueChatTurnResult {
-	const inputText = typeof input === "string" ? input : input.text;
+	const inputText = queuedMessageTextSchema.parse(input);
 	if (
 		inputText.trim().length === 0 ||
 		queue.length >= MAX_QUEUED_CHAT_MESSAGES
@@ -184,17 +225,11 @@ export function enqueueChatTurn(
 		return { accepted: false, queue: [...queue] };
 	}
 
-	const turn =
-		typeof input === "string"
-			? createQueuedChatTurn(
-					input,
-					optionsOrFactory as ChatStreamOptions | undefined,
-					factoryOptions
-				)
-			: createQueuedChatTurn(
-					input,
-					optionsOrFactory as QueuedChatTurnFactoryOptions | undefined
-				);
+	const turn = createQueuedTurnFromArguments(
+		input,
+		optionsOrFactory,
+		factoryOptions
+	);
 	return { accepted: true, queue: [...queue, turn] };
 }
 
@@ -232,8 +267,12 @@ export function moveQueuedChatTurn(
 	}
 	const next = [...queue];
 	const current = next[index];
-	next[index] = next[nextIndex] as QueuedChatTurn;
-	next[nextIndex] = current as QueuedChatTurn;
+	const adjacent = next[nextIndex];
+	if (!(current && adjacent)) {
+		return next;
+	}
+	next[index] = adjacent;
+	next[nextIndex] = current;
 	return next;
 }
 

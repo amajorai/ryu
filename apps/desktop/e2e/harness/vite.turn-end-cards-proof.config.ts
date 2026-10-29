@@ -40,4 +40,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "turn-end-cards-proof-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

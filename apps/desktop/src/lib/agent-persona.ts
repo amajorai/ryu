@@ -1,12 +1,18 @@
-import { isDitherColor } from "@ryu/ui/components/dither-kit/palette";
+import { isDitherColor } from "@ryu/ui/components/dither-kit/palette.ts";
 import { parseGhostAvatar } from "@ryu/ui/components/ghost-avatar.ts";
-import type { GlyphDitherValue, GlyphValue } from "@ryu/ui/components/glyph.ts";
+import {
+	asGlyphValue,
+	type GlyphDitherValue,
+	type GlyphValue,
+	isGlyphIconColor,
+} from "@ryu/ui/components/glyph.ts";
 import type { AgentPersona } from "@/src/lib/api/agents.ts";
 
 // Persona ⇄ GlyphPicker conversion.
 //
-// An agent's avatar has six mutually-exclusive sources (uploaded image, icon,
-// emoji, dicebear, expressive, dither), with dither additionally allowed as a BACKGROUND
+// An agent's avatar has seven mutually-exclusive sources (uploaded image, icon,
+// emoji, dicebear, expressive, marketplace avatar style, dither), with dither
+// additionally allowed as a BACKGROUND
 // behind an icon or emoji. Getting that exclusivity wrong writes two sources at
 // once and the wrong one wins at render.
 //
@@ -42,18 +48,24 @@ export function personaToGlyphValue(
 				}
 			: undefined;
 	if (persona.emoji) {
+		if (persona.emoji.length > 32) {
+			return null;
+		}
 		return {
 			kind: "emoji",
 			emoji: persona.emoji,
-			...(ditherLayer ? { dither: ditherLayer } : {}),
+			...(ditherLayer ? { dither: ditherLayer } : undefined),
 		};
 	}
 	if (persona.icon) {
+		const color = isGlyphIconColor(persona.icon_color)
+			? persona.icon_color
+			: undefined;
 		return {
 			kind: "icon",
 			id: persona.icon,
-			...(persona.icon_color ? { color: persona.icon_color } : {}),
-			...(ditherLayer ? { dither: ditherLayer } : {}),
+			...(color ? { color } : undefined),
+			...(ditherLayer ? { dither: ditherLayer } : undefined),
 		};
 	}
 	if (persona.dicebear?.style && persona.dicebear.seed) {
@@ -62,6 +74,18 @@ export function personaToGlyphValue(
 			style: persona.dicebear.style,
 			seed: persona.dicebear.seed,
 		};
+	}
+	if (persona.avatar_style?.style && persona.avatar_style.seed) {
+		const styled = asGlyphValue({
+			kind: "avatar_style",
+			style: persona.avatar_style.style,
+			seed: persona.avatar_style.seed,
+			palette: persona.avatar_style.palette ?? undefined,
+			parts: persona.avatar_style.parts ?? undefined,
+		});
+		if (styled?.kind === "avatar_style") {
+			return styled;
+		}
 	}
 	if (ditherLayer) {
 		return { kind: "dither", dither: ditherLayer };
@@ -81,6 +105,7 @@ export function glyphToPersonaFields(
 	| "icon_color"
 	| "dicebear"
 	| "expressive"
+	| "avatar_style"
 	| "dither"
 > {
 	const ditherBg =
@@ -99,6 +124,15 @@ export function glyphToPersonaFields(
 		dicebear:
 			glyph?.kind === "dicebear"
 				? { style: glyph.style, seed: glyph.seed }
+				: null,
+		avatar_style:
+			glyph?.kind === "avatar_style"
+				? {
+						style: glyph.style,
+						seed: glyph.seed,
+						palette: glyph.palette ?? null,
+						parts: glyph.parts ?? null,
+					}
 				: null,
 		dither: ditherBg,
 	};

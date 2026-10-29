@@ -17,7 +17,7 @@ function Story() {
 			<div className="mx-auto flex max-w-2xl flex-col gap-6">
 				<header className="flex flex-col gap-3 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
 					<div>
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							React verification artifact
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
@@ -29,7 +29,7 @@ function Story() {
 						</p>
 					</div>
 					<span
-						className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 font-medium text-emerald-700 text-xs dark:text-emerald-300"
+						className="rounded-full border border-success/30 bg-success/10 px-3 py-1.5 font-medium text-success text-xs"
 						data-testid="proof-status"
 					>
 						LIVE COMPONENT PROOF

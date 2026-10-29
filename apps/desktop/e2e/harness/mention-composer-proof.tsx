@@ -1,8 +1,8 @@
-import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
-import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar";
+import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
+import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import { MentionToken } from "@ryu/blocks/desktop/agent-elements/mention-token.tsx";
 import { Avatar, AvatarFallback } from "@ryu/ui/components/avatar.tsx";
-import { useMemo, useRef, useState } from "react";
+import { type CSSProperties, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Markdown } from "../../components/agent-elements/markdown.tsx";
 import type { MentionItem as TranscriptMentionItem } from "../../components/agent-elements/types.ts";
@@ -24,7 +24,13 @@ import {
 	type SlashCommand,
 	type SlashCommandOptionSelection,
 } from "../../src/lib/slash-commands.ts";
+import proofStyles from "./mention-composer-proof.module.css";
 import "../../src/index.css";
+
+function mentionTokenItem(item: MentionItem): TranscriptMentionItem {
+	const Icon = item.icon;
+	return { ...item, icon: Icon ? <Icon className="size-3.5" /> : undefined };
+}
 
 const CONNECTIONS = [
 	{ active: true, toolkit: "github" },
@@ -40,17 +46,22 @@ const TOOLKITS = [
 	{ description: "Messages and channels", name: "Slack", slug: "slack" },
 ];
 
-const PROOF_APP_ICON = (color: string, label: string) => (
-	<span
-		aria-label={`${label} app icon`}
-		className="size-3.5 shrink-0 rounded-[4px]"
-		style={{ backgroundColor: color }}
-	/>
-);
+const PROOF_APP_ICON = (color: string, label: string) => {
+	const style: CSSProperties & { "--proof-app-color": string } = {
+		"--proof-app-color": color,
+	};
+	return (
+		<span
+			aria-label={`${label} app icon`}
+			className={`size-3.5 shrink-0 ${proofStyles.appIcon}`}
+			style={style}
+		/>
+	);
+};
 
 const HUMAN_AVATAR = (
-	<Avatar aria-label="Ada Lovelace avatar" className="size-3.5 shrink-0">
-		<AvatarFallback className="text-[8px]">AL</AvatarFallback>
+	<Avatar aria-label="Ada Lovelace avatar" size="xs">
+		<AvatarFallback>AL</AvatarFallback>
 	</Avatar>
 );
 
@@ -143,7 +154,7 @@ function TranscriptMentionProof() {
 	return (
 		<section
 			aria-label="Transcript mention link proof"
-			className="mt-6 rounded-3xl border border-indigo-300/20 bg-indigo-300/[0.06] p-5 shadow-2xl"
+			className={`mt-6 rounded-3xl border ${proofStyles.transcriptBorder} ${proofStyles.transcriptSurface} p-5 shadow-2xl`}
 			data-testid="transcript-mention-proof"
 		>
 			<div className="flex flex-wrap items-start justify-between gap-4">
@@ -151,14 +162,14 @@ function TranscriptMentionProof() {
 					<p className="font-semibold text-white text-xl">
 						Transcript destinations
 					</p>
-					<p className="mt-1 max-w-3xl text-slate-400 text-sm">
+					<p className={`mt-1 max-w-3xl ${proofStyles.mutedText} text-sm`}>
 						The same Markdown renderer is mounted in a user bubble and an agent
 						bubble. Every resolved entity mention and website link below must
 						open through its role-specific callback.
 					</p>
 				</div>
 				<div
-					className={`rounded-full px-3 py-1 font-semibold text-xs ${isVerified ? "bg-emerald-400/15 text-emerald-300" : "bg-amber-400/15 text-amber-200"}`}
+					className={`rounded-full px-3 py-1 font-semibold text-xs ${isVerified ? `${proofStyles.verifiedSurface} ${proofStyles.verifiedText}` : `${proofStyles.pendingSurface} ${proofStyles.pendingText}`}`}
 					data-testid="transcript-proof-status"
 				>
 					{isVerified
@@ -168,8 +179,12 @@ function TranscriptMentionProof() {
 			</div>
 
 			<div className="mt-5 grid gap-4 lg:grid-cols-2">
-				<div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-					<p className="mb-2 font-semibold text-indigo-200 text-xs uppercase tracking-[0.16em]">
+				<div
+					className={`rounded-2xl border border-white/10 ${proofStyles.transcriptBubble} p-4`}
+				>
+					<p
+						className={`mb-2 font-semibold ${proofStyles.accentText} text-xs uppercase ${proofStyles.sectionTracking}`}
+					>
 						User message
 					</p>
 					<div data-testid="user-transcript-markdown">
@@ -181,8 +196,12 @@ function TranscriptMentionProof() {
 						/>
 					</div>
 				</div>
-				<div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-					<p className="mb-2 font-semibold text-indigo-200 text-xs uppercase tracking-[0.16em]">
+				<div
+					className={`rounded-2xl border border-white/10 ${proofStyles.transcriptBubble} p-4`}
+				>
+					<p
+						className={`mb-2 font-semibold ${proofStyles.accentText} text-xs uppercase ${proofStyles.sectionTracking}`}
+					>
 						Agent message
 					</p>
 					<div data-testid="agent-transcript-markdown">
@@ -197,7 +216,7 @@ function TranscriptMentionProof() {
 			</div>
 
 			<p
-				className="mt-4 text-slate-500 text-xs"
+				className={`mt-4 ${proofStyles.metadataText} text-xs`}
 				data-testid="transcript-proof-log"
 			>
 				{opened.length > 0
@@ -302,14 +321,14 @@ function MentionState({
 			<div className="mb-4 flex items-start justify-between gap-4">
 				<div>
 					<p className="font-semibold text-white text-xl">{label}</p>
-					<p className="mt-1 text-slate-400 text-sm">
+					<p className={`mt-1 ${proofStyles.mutedText} text-sm`}>
 						{configured
 							? "BYOK or managed subscription/proxy is available"
 							: "No Composio credential is available on this node"}
 					</p>
 					{selected ? (
 						<p
-							className="mt-2 font-medium text-indigo-200 text-sm"
+							className={`mt-2 font-medium ${proofStyles.accentText} text-sm`}
 							data-testid={`${configured ? "configured" : "unconfigured"}-header-selection`}
 						>
 							Selected {selected}
@@ -317,7 +336,7 @@ function MentionState({
 					) : null}
 				</div>
 				<span
-					className={`rounded-full px-3 py-1 font-semibold text-xs ${configured ? "bg-emerald-400/15 text-emerald-300" : "bg-slate-400/10 text-slate-400"}`}
+					className={`rounded-full px-3 py-1 font-semibold text-xs ${configured ? `${proofStyles.verifiedSurface} ${proofStyles.verifiedText}` : `${proofStyles.neutralBadge} ${proofStyles.mutedText}`}`}
 				>
 					{configured ? "CONNECTED" : "HIDDEN"}
 				</span>
@@ -326,7 +345,7 @@ function MentionState({
 			<div className="relative flex-1">
 				<textarea
 					aria-label={`${label} composer`}
-					className="min-h-14 w-full resize-none rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-slate-200 outline-none ring-indigo-300/50 placeholder:text-slate-600 focus:ring-2"
+					className={`min-h-14 w-full resize-none rounded-2xl border border-white/10 ${proofStyles.composerSurface} px-4 py-3 ${proofStyles.primaryText} outline-none ${proofStyles.composerFocus} ${proofStyles.placeholderText} focus:ring-2`}
 					onChange={(event) => {
 						setQuery(event.target.value.replace(/^@/, ""));
 						setMenuOpen(true);
@@ -348,9 +367,11 @@ function MentionState({
 			</div>
 
 			<div className="mt-4 min-h-10 rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-sm">
-				<span className="text-slate-500">Selected mention: </span>
+				<span className={`${proofStyles.metadataText}`}>
+					Selected mention:{" "}
+				</span>
 				<strong
-					className="text-indigo-200"
+					className={`${proofStyles.accentText}`}
 					data-testid={`${configured ? "configured" : "unconfigured"}-selection`}
 				>
 					{selected ?? "none"}
@@ -422,14 +443,14 @@ function SlashCommandProof() {
 					<p className="font-semibold text-white text-xl">
 						Plugin command arguments
 					</p>
-					<p className="mt-1 max-w-3xl text-slate-400 text-sm">
+					<p className={`mt-1 max-w-3xl ${proofStyles.mutedText} text-sm`}>
 						Commands and enabled Skills have separate groups. Choose a command,
 						then one registered option at a time; the second argument includes a
 						custom-value choice.
 					</p>
 				</div>
 				<div
-					className={`rounded-full px-3 py-1 font-semibold text-xs ${verified ? "bg-emerald-400/15 text-emerald-300" : "bg-amber-400/15 text-amber-200"}`}
+					className={`rounded-full px-3 py-1 font-semibold text-xs ${verified ? `${proofStyles.verifiedSurface} ${proofStyles.verifiedText}` : `${proofStyles.pendingSurface} ${proofStyles.pendingText}`}`}
 					data-testid="slash-proof-status"
 				>
 					{verified ? "VERIFIED" : "Choose the registered options"}
@@ -439,7 +460,7 @@ function SlashCommandProof() {
 			<div className="relative mt-5" ref={anchorRef}>
 				<textarea
 					aria-label="Slash command proof composer"
-					className="min-h-14 w-full resize-none rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-slate-200 outline-none ring-indigo-300/50 placeholder:text-slate-600 focus:ring-2"
+					className={`min-h-14 w-full resize-none rounded-2xl border border-white/10 ${proofStyles.composerSurface} px-4 py-3 ${proofStyles.primaryText} outline-none ${proofStyles.composerFocus} ${proofStyles.placeholderText} focus:ring-2`}
 					data-testid="slash-command-input"
 					onChange={(event) => setValue(event.target.value)}
 					value={value}
@@ -465,7 +486,7 @@ function SlashCommandProof() {
 				) : null}
 			</div>
 			<output
-				className="mt-4 block rounded-xl border border-white/10 bg-black/15 px-3 py-2 font-mono text-indigo-200 text-sm"
+				className={`mt-4 block rounded-xl border border-white/10 bg-black/15 px-3 py-2 font-mono ${proofStyles.accentText} text-sm`}
 				data-testid="slash-command-value"
 			>
 				{value}
@@ -539,13 +560,15 @@ function HumanMentionState({
 			<div className="mb-4 flex items-start justify-between gap-4">
 				<div>
 					<p className="font-semibold text-white text-xl">{label}</p>
-					<p className="mt-1 text-slate-400 text-sm">
+					<p className={`mt-1 ${proofStyles.mutedText} text-sm`}>
 						{inboxEnabled
 							? "Users are available from the current org/team roster"
 							: "Install and enable Inbox to show human mentions"}
 					</p>
 				</div>
-				<span className="rounded-full bg-slate-400/10 px-3 py-1 font-semibold text-slate-300 text-xs">
+				<span
+					className={`rounded-full ${proofStyles.neutralBadge} px-3 py-1 font-semibold ${proofStyles.secondaryText} text-xs`}
+				>
 					{inboxEnabled ? "INBOX ON" : "INBOX OFF"}
 				</span>
 			</div>
@@ -553,7 +576,7 @@ function HumanMentionState({
 			<div className="relative">
 				<textarea
 					aria-label={`${label} composer`}
-					className="min-h-14 w-full resize-none rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-slate-200 outline-none ring-indigo-300/50 placeholder:text-slate-600 focus:ring-2"
+					className={`min-h-14 w-full resize-none rounded-2xl border border-white/10 ${proofStyles.composerSurface} px-4 py-3 ${proofStyles.primaryText} outline-none ${proofStyles.composerFocus} ${proofStyles.placeholderText} focus:ring-2`}
 					data-testid="human-mention-input"
 					onChange={(event) => {
 						setValue(event.target.value);
@@ -583,7 +606,7 @@ function HumanMentionState({
 
 			<div className="mt-4 flex flex-wrap items-center gap-3">
 				<button
-					className="rounded-xl bg-indigo-400/15 px-3 py-2 font-medium text-indigo-200 text-sm hover:bg-indigo-400/25"
+					className={`rounded-xl ${proofStyles.actionSurface} px-3 py-2 font-medium ${proofStyles.accentText} text-sm ${proofStyles.actionHover}`}
 					disabled={!selectedHuman}
 					onClick={sendMentionNotification}
 					type="button"
@@ -592,7 +615,7 @@ function HumanMentionState({
 				</button>
 				{selectedHuman ? (
 					<div data-testid="human-composer-token">
-						<MentionToken item={HUMAN_MENTION}>
+						<MentionToken item={mentionTokenItem(HUMAN_MENTION)}>
 							{selectedHuman.label}
 						</MentionToken>
 					</div>
@@ -601,13 +624,17 @@ function HumanMentionState({
 
 			<div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
 				<div className="rounded-xl border border-white/10 bg-black/15 px-3 py-2">
-					<span className="text-slate-500">notification targets: </span>
+					<span className={`${proofStyles.metadataText}`}>
+						notification targets:{" "}
+					</span>
 					<strong data-testid="notification-targets">
 						{notificationTargets.join(", ") || "none"}
 					</strong>
 				</div>
 				<div className="rounded-xl border border-white/10 bg-black/15 px-3 py-2">
-					<span className="text-slate-500">routing callbacks: </span>
+					<span className={`${proofStyles.metadataText}`}>
+						routing callbacks:{" "}
+					</span>
 					<strong data-testid="routing-callbacks">none</strong>
 				</div>
 			</div>
@@ -616,7 +643,10 @@ function HumanMentionState({
 				className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-sm"
 				data-testid="human-transcript"
 			>
-				<Markdown content={value} mentionItems={[HUMAN_MENTION]} />
+				<Markdown
+					content={value}
+					mentionItems={[mentionTokenItem(HUMAN_MENTION)]}
+				/>
 			</div>
 		</section>
 	);
@@ -638,7 +668,7 @@ function ComposerMentionProof() {
 		>
 			<div className="mb-4">
 				<p className="font-semibold text-white text-xl">Composer preview</p>
-				<p className="mt-1 text-slate-400 text-sm">
+				<p className={`mt-1 ${proofStyles.mutedText} text-sm`}>
 					The shared composer renderer keeps the app icon and accent-colored
 					name without a filled chip background.
 				</p>
@@ -654,7 +684,9 @@ function ComposerMentionProof() {
 					value={`@${browser.label}`}
 				/>
 			</ChatDisplayPrefsProvider>
-			<div className="mt-3 flex items-center gap-2 text-slate-500 text-xs">
+			<div
+				className={`mt-3 flex items-center gap-2 ${proofStyles.metadataText} text-xs`}
+			>
 				<span>Inline token:</span>
 				<MentionToken item={browser}>{browser.label}</MentionToken>
 			</div>
@@ -680,17 +712,21 @@ function MentionComposerProof() {
 	const integrationHidden = !unconfiguredLabels.includes("Integrations");
 
 	return (
-		<main className="min-h-screen bg-[#0b1020] px-6 py-10 text-slate-200">
+		<main
+			className={`min-h-screen ${proofStyles.canvas} px-6 py-10 ${proofStyles.primaryText}`}
+		>
 			<div className="mx-auto max-w-6xl">
 				<div className="mb-8 flex flex-wrap items-end justify-between gap-5">
 					<div>
-						<p className="font-medium text-indigo-300 text-sm uppercase tracking-[0.2em]">
+						<p
+							className={`font-medium ${proofStyles.titleAccent} text-sm uppercase ${proofStyles.titleTracking}`}
+						>
 							React verification artifact
 						</p>
 						<h1 className="mt-2 font-semibold text-4xl text-white tracking-tight">
 							Chat command and mention directory
 						</h1>
-						<p className="mt-3 max-w-2xl text-slate-400">
+						<p className={`mt-3 max-w-2xl ${proofStyles.mutedText}`}>
 							The @ picker exposes Agents, Apps, Plugins, Workflows, and
 							Inbox-gated Users. The / picker keeps Commands and enabled Skills
 							in separate groups; human mentions notify Inbox without changing
@@ -698,15 +734,15 @@ function MentionComposerProof() {
 						</p>
 					</div>
 					<div
-						className="rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-5 py-3 text-right"
+						className={`rounded-2xl border ${proofStyles.verifiedBorder} ${proofStyles.verifiedSummary} px-5 py-3 text-right`}
 						data-testid="proof-status"
 					>
-						<p className="font-semibold text-emerald-300 text-lg">
+						<p className={`font-semibold ${proofStyles.verifiedText} text-lg`}>
 							{hasExpectedGroups && integrationHidden
 								? "VERIFIED"
 								: "CHECK FAILED"}
 						</p>
-						<p className="mt-1 text-emerald-200/70 text-xs">
+						<p className={`mt-1 ${proofStyles.verifiedDetail} text-xs`}>
 							{configuredLabels.length} visible groups · gated integration
 						</p>
 					</div>
@@ -730,6 +766,4 @@ function MentionComposerProof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
-	<MentionComposerProof />
-);
+createRoot(document.getElementById("root")!).render(<MentionComposerProof />);

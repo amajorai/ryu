@@ -13,8 +13,8 @@
 //!
 //! Config (nothing hardcoded, all swappable):
 //! - provider: pref `gif-provider` or env `RYU_GIF_PROVIDER` (default `klipy`).
-//! - key: pref `gif-api-key`, else env `RYU_GIF_API_KEY`, else the provider's
-//!   conventional env (`KLIPY_API_KEY` / `GIPHY_API_KEY` / `TENOR_API_KEY`).
+//! - key: pref `gif-api-key`, else the provider's conventional env
+//!   (`KLIPY_API_KEY` / `GIPHY_API_KEY` / `TENOR_API_KEY`).
 //!
 //! With no key configured the endpoint returns `{ "configured": false,
 //! "results": [] }` (HTTP 200) so the picker can prompt the user to add a free
@@ -76,8 +76,8 @@ async fn resolve_provider(state: &super::ServerState) -> String {
         .unwrap_or_else(|| "klipy".to_string())
 }
 
-/// Resolve the provider API key: pref `gif-api-key` → env `RYU_GIF_API_KEY` →
-/// the provider's conventional env var. Returns `None` when nothing is set.
+/// Resolve the provider API key: pref `gif-api-key` → the provider's
+/// conventional env var. Returns `None` when nothing is set.
 async fn resolve_key(state: &super::ServerState, provider: &str) -> Option<String> {
     if let Ok(Some(k)) = state.preferences.get("gif-api-key").await {
         let k = k.trim().to_string();
@@ -90,15 +90,10 @@ async fn resolve_key(state: &super::ServerState, provider: &str) -> Option<Strin
         "giphy" => "GIPHY_API_KEY",
         _ => "KLIPY_API_KEY",
     };
-    for var in ["RYU_GIF_API_KEY", provider_env] {
-        if let Ok(k) = std::env::var(var) {
-            let k = k.trim().to_string();
-            if !k.is_empty() {
-                return Some(k);
-            }
-        }
-    }
-    None
+    std::env::var(provider_env)
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
 }
 
 /// Stable per-node customer id Klipy requires on search/trending (used for its

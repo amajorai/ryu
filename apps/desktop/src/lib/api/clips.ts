@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
 // apps/desktop/src/lib/api/clips.ts
 //
 // Typed client for Core's Ryu Clips endpoints (`/api/clips*`). A Clip is an
@@ -123,17 +125,37 @@ export interface ClipStartOpts {
  * sidecar is unreachable. Detect that shape and raise so callers surface a real
  * error instead of treating the placeholder as a clip.
  */
-function assertAvailable(json: unknown): void {
-	if (
-		json &&
-		typeof json === "object" &&
-		(json as { available?: unknown }).available === false
-	) {
-		const reason = (json as { reason?: unknown }).reason;
-		throw new Error(
-			typeof reason === "string" ? reason : "Clip recording is unavailable"
-		);
+function assertAvailable<TValue>(json: TValue): void {
+	const unavailable = z
+		.object({
+			available: z.literal(false),
+			reason: z.string().optional().catch(undefined),
+		})
+		.safeParse(json);
+	if (unavailable.success) {
+		throw new Error(unavailable.data.reason ?? "Clip recording is unavailable");
 	}
+}
+
+function availableClipReply<S extends z.ZodType>(schema: S) {
+	return z.preprocess((value) => {
+		assertAvailable(value);
+		return value;
+	}, schema);
+}
+
+/** POST to a clip endpoint that answers with the clip's (refreshed) context. */
+async function postForClipContext(
+	target: ApiTarget,
+	path: string,
+	body?: ClipStartOpts | ClipIngestOpts
+): Promise<ClipContext> {
+	return await request(
+		target,
+		path,
+		body === undefined ? { method: "POST" } : { method: "POST", body },
+		availableClipReply(clipContextResponseSchema)
+	);
 }
 
 /** Begin a recording. Returns the initial context (durationMs 0). */
@@ -141,13 +163,7 @@ export async function startClip(
 	target: ApiTarget,
 	opts: ClipStartOpts
 ): Promise<ClipContext> {
-	const json = await request<ClipContext & { available?: boolean }>(
-		target,
-		"/api/clips/start",
-		{ method: "POST", body: opts }
-	);
-	assertAvailable(json);
-	return json;
+	return await postForClipContext(target, "/api/clips/start", opts);
 }
 
 /** Stop a recording and return its finalized context (video + transcript). */
@@ -155,13 +171,7 @@ export async function stopClip(
 	target: ApiTarget,
 	id: string
 ): Promise<ClipContext> {
-	const json = await request<ClipContext & { available?: boolean }>(
-		target,
-		`/api/clips/${id}/stop`,
-		{ method: "POST" }
-	);
-	assertAvailable(json);
-	return json;
+	return await postForClipContext(target, `/api/clips/${id}/stop`);
 }
 
 /** Pause an in-progress recording. The backend excludes the paused span from the
@@ -171,13 +181,7 @@ export async function pauseClip(
 	target: ApiTarget,
 	id: string
 ): Promise<ClipContext> {
-	const json = await request<ClipContext & { available?: boolean }>(
-		target,
-		`/api/clips/${id}/pause`,
-		{ method: "POST" }
-	);
-	assertAvailable(json);
-	return json;
+	return await postForClipContext(target, `/api/clips/${id}/pause`);
 }
 
 /** Resume a paused recording. Returns the refreshed context; its `durationMs`
@@ -186,30 +190,27 @@ export async function resumeClip(
 	target: ApiTarget,
 	id: string
 ): Promise<ClipContext> {
-	const json = await request<ClipContext & { available?: boolean }>(
-		target,
-		`/api/clips/${id}/resume`,
-		{ method: "POST" }
-	);
-	assertAvailable(json);
-	return json;
+	return await postForClipContext(target, `/api/clips/${id}/resume`);
 }
 
 /** Enumerate the displays + windows this node can record, for the source picker. */
 export async function getSources(target: ApiTarget): Promise<ClipSources> {
-	const json = await request<ClipSources & { available?: boolean }>(
+	const json = await request(
 		target,
-		"/api/clips/sources"
+		"/api/clips/sources",
+		undefined,
+		availableClipReply(getSourcesResponseSchema)
 	);
-	// A down sidecar yields `{ available: false }` with no surfaces - treat as empty.
 	return { displays: json.displays ?? [], windows: json.windows ?? [] };
 }
 
 /** List clips on this node, newest first. */
 export async function listClips(target: ApiTarget): Promise<ClipSummary[]> {
-	const json = await request<{ available?: boolean; clips?: ClipSummary[] }>(
+	const json = await request(
 		target,
-		"/api/clips"
+		"/api/clips",
+		undefined,
+		listClipsResponseSchema
 	);
 	// A down sidecar yields `{ available: false }` with no clips - treat as empty.
 	return json.clips ?? [];
@@ -220,12 +221,12 @@ export async function getClipContext(
 	target: ApiTarget,
 	id: string
 ): Promise<ClipContext> {
-	const json = await request<ClipContext & { available?: boolean }>(
+	return await request(
 		target,
-		`/api/clips/${id}/context`
+		`/api/clips/${id}/context`,
+		undefined,
+		availableClipReply(clipContextResponseSchema)
 	);
-	assertAvailable(json);
-	return json;
 }
 
 /**
@@ -242,6 +243,14 @@ export type ClipDetailMode =
 	| "balanced"
 	| "tokenBurner";
 
+/** The {@link ingestClip} payload Core resolves server-side. */
+interface ClipIngestOpts {
+	detail?: ClipDetailMode;
+	end?: number;
+	source: string;
+	start?: number;
+}
+
 /**
  * Ingest an external video into an agent-context clip bundle. `source` is either
  * a URL (downloaded by Core via yt-dlp) or an absolute local file path (passed
@@ -253,20 +262,9 @@ export type ClipDetailMode =
  */
 export async function ingestClip(
 	target: ApiTarget,
-	opts: {
-		detail?: ClipDetailMode;
-		end?: number;
-		source: string;
-		start?: number;
-	}
+	opts: ClipIngestOpts
 ): Promise<ClipContext> {
-	const json = await request<ClipContext & { available?: boolean }>(
-		target,
-		"/api/clips/ingest",
-		{ method: "POST", body: opts }
-	);
-	assertAvailable(json);
-	return json;
+	return await postForClipContext(target, "/api/clips/ingest", opts);
 }
 
 /** Build the raw URL for a single extracted frame (used for `<img>` src). */
@@ -302,7 +300,13 @@ export async function fetchClipFrameDataUrl(
 	return await new Promise<string>((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onerror = () => reject(new Error("Failed to read clip frame"));
-		reader.onload = () => resolve(reader.result as string);
+		reader.onload = () => {
+			if (isNativeText(reader.result)) {
+				resolve(reader.result);
+			} else {
+				reject(new Error("Failed to read clip frame"));
+			}
+		};
 		reader.readAsDataURL(blob);
 	});
 }
@@ -339,10 +343,96 @@ export async function fetchRecentActivity(
 	target: ApiTarget,
 	minutes: number
 ): Promise<RecentActivityBundle> {
-	const json = await request<RecentActivityBundle & { available?: boolean }>(
+	const json = await request(
 		target,
-		`/api/clips/recent-activity?minutes=${minutes}`
+		`/api/clips/recent-activity?minutes=${minutes}`,
+		undefined,
+		availableClipReply(fetchRecentActivityResponseSchema)
 	);
-	assertAvailable(json);
 	return { ...json, frames: json.frames ?? [] };
 }
+
+const clipTabResponseSchema = z
+	.object({
+		title: z.union([z.null(), z.string()]).optional(),
+		url: z.string(),
+	})
+	.passthrough();
+
+const clipCaptureResponseSchema = z
+	.object({
+		mic: z.boolean(),
+		screen: z.boolean(),
+		systemAudio: z.boolean(),
+		tab: z.union([z.null(), clipTabResponseSchema]).optional(),
+	})
+	.passthrough();
+
+const recommendedMomentResponseSchema = z
+	.object({ atMs: z.number(), reason: z.string() })
+	.passthrough();
+
+const clipContextResponseSchema = z
+	.object({
+		capture: clipCaptureResponseSchema,
+		createdAt: z.string(),
+		diagnosticsPath: z.string(),
+		durationMs: z.number(),
+		framesEndpoint: z.string(),
+		id: z.string(),
+		recommendedMoments: z.array(recommendedMomentResponseSchema),
+		scanWarning: z.string().optional(),
+		t0EpochMs: z.number(),
+		title: z.string(),
+		transcriptPath: z.string(),
+		video: z.string(),
+		available: z.boolean().optional(),
+	})
+	.passthrough();
+
+const clipDisplayResponseSchema = z
+	.object({ id: z.number(), label: z.string(), primary: z.boolean() })
+	.passthrough();
+
+const clipWindowResponseSchema = z
+	.object({ id: z.number(), title: z.string() })
+	.passthrough();
+
+const getSourcesResponseSchema = z
+	.object({
+		displays: z.array(clipDisplayResponseSchema),
+		windows: z.array(clipWindowResponseSchema),
+		available: z.boolean().optional(),
+	})
+	.passthrough();
+
+const clipSummaryResponseSchema = z
+	.object({
+		createdAt: z.string(),
+		durationMs: z.number(),
+		id: z.string(),
+		title: z.string(),
+	})
+	.passthrough();
+
+const listClipsResponseSchema = z
+	.object({
+		available: z.boolean().optional(),
+		clips: z.array(clipSummaryResponseSchema).optional(),
+	})
+	.passthrough();
+
+const recentActivityFrameResponseSchema = z
+	.object({ atMs: z.number(), dataUrl: z.string() })
+	.passthrough();
+
+const fetchRecentActivityResponseSchema = z
+	.object({
+		durationMs: z.number(),
+		frames: z.array(recentActivityFrameResponseSchema),
+		summary: z.string(),
+		title: z.string(),
+		transcript: z.string().optional(),
+		available: z.boolean().optional(),
+	})
+	.passthrough();

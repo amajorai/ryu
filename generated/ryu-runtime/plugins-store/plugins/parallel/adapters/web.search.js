@@ -23,6 +23,9 @@
 // The MCP tool requires `objective`; the REST body only requires `search_queries`.
 // Sending both on both paths keeps the two paths returning comparable results,
 // which is the whole point of a fallback nobody notices.
+if (parsePrimitiveText(input?.query) === undefined || input.query.trim().length === 0) {
+	throw new Error("Parallel web.search requires a non-empty string 'query'.");
+}
 const objective = input.query;
 const search_queries = [input.query];
 
@@ -36,10 +39,10 @@ const keyed = await callTool({ objective, search_queries });
 // Guarded for undefined: the canonical arg is optional and slicing at `undefined`
 // would return nothing.
 const cap = (list) =>
-	typeof input.limit === "number" && input.limit > 0
+	parsePrimitiveNumber(input.limit) !== undefined && input.limit > 0
 		? list.slice(0, input.limit)
 		: list;
-const shape = (items, provider) => ({
+const searchResponse = (items, provider) => ({
 	results: cap(items || []).map((r) => ({
 		title: r.title || undefined,
 		url: r.url,
@@ -53,7 +56,7 @@ const shape = (items, provider) => ({
 	via: provider,
 });
 if (keyed && Array.isArray(keyed.results)) {
-	return shape(keyed.results, "api.parallel.ai");
+	return searchResponse(keyed.results, "api.parallel.ai");
 }
 if (!(keyed && keyed.available === false)) {
 	// Not a missing key: a real failure envelope. Pass it through untouched rather
@@ -86,11 +89,11 @@ const free = await callNamed("parallel.free_search", {
 const parse = (text) => {
 	try {
 		return JSON.parse(text);
-	} catch (e) {
+	} catch  {
 		return null;
 	}
 };
-const rpc = typeof free === "string" ? parse(free) : free;
+const rpc = parsePrimitiveText(free) !== undefined ? parse(free) : free;
 const result = rpc ? rpc.result : null;
 if (rpc?.error || result?.isError) {
 	return { raw: free };
@@ -100,11 +103,32 @@ if (rpc?.error || result?.isError) {
 let payload = result ? result.structuredContent : null;
 if (!payload && result && result.content && result.content[0]) {
 	payload =
-		typeof result.content[0].text === "string"
+		parsePrimitiveText(result.content[0].text) !== undefined
 			? parse(result.content[0].text)
 			: null;
 }
 if (!(payload && Array.isArray(payload.results))) {
 	return { raw: free };
 }
-return shape(payload.results, "search.parallel.ai (free tier, no key)");
+return searchResponse(payload.results, "search.parallel.ai (free tier, no key)");
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+// Decode the native Number slot without coercing user-controlled objects.
+function parsePrimitiveNumber(value) {
+	try {
+		const parsed = Number.prototype.valueOf.call(value);
+		return Object.is(parsed, value) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}

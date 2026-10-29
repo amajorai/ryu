@@ -1,0 +1,100 @@
+{
+  "tags": ["web", "extract", "reader"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/jina-reader",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/jina-reader",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/jina-reader",
+  "name": "Jina Reader",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Direct page extraction through Jina Reader. Provides the swappable web.extract layer and works with or without a Jina API key; a key raises the upstream rate limit.",
+  "icon": "book-search",
+  "iconDither": { "from": 190, "to": "transparent", "direction": "down" },
+  "tagline": "Read web pages as clean text for agents",
+  "keywords": ["web", "extract", "reader", "Jina"],
+  "category": "Search",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-jina-reader-fetch",
+      "name": "Jina Reader Fetch",
+      "kind": "tool",
+      "config": {
+        "slug": "jina_reader.fetch",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://r.jina.ai/",
+        "header_params": ["Accept", "X-Respond-With"],
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_PLUGIN__X40_RYU_X2F_JINA_X2D_READER_API_KEY"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Fetch one HTTP or HTTPS page through Jina Reader and return its JSON content. A Jina API key is optional for basic usage.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "HTTP or HTTPS page URL to read."
+            },
+            "Accept": {
+              "type": "string",
+              "description": "Response format header; use application/json for structured output."
+            },
+            "X-Respond-With": {
+              "type": "string",
+              "description": "Reader output format header. Omit for main-content Markdown.",
+              "enum": ["markdown", "html", "text"]
+            }
+          },
+          "required": ["url"]
+        }
+      }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "web.extract",
+      "version": "1.0.0",
+      "title": "Extract",
+      "selectable": true,
+      "tools": {
+        "web.extract": {
+          "tool": "jina_reader.fetch",
+          "adapter": { "code_file": "adapters/web.extract.js" }
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:r.jina.ai", "tool:execute"],
+  "contributes": {
+    "settings_tabs": [
+      {
+        "id": "jina-reader.settings",
+        "title": "Jina Reader",
+        "scope": "node",
+        "fields": [
+          {
+            "type": "secret",
+            "pref_key": "RYU_PLUGIN__X40_RYU_X2F_JINA_X2D_READER_API_KEY",
+            "label": "Jina API key (optional)",
+            "description": "Add a Jina API key for higher Reader limits. Without a key, Reader uses its anonymous free tier. Stored encrypted on this node."
+          }
+        ]
+      }
+    ]
+  }
+}

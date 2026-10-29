@@ -39,7 +39,7 @@ fn is_fresh(fetched_at: u64, now: u64) -> bool {
 }
 
 fn disk_cache_path() -> PathBuf {
-    crate::ryu_dir().join("openrouter-models-cache.json")
+    ryu_sidecar_runtime::layout::cache_path(&crate::ryu_dir(), "openrouter-models-cache.json")
 }
 
 fn read_disk_cache() -> Option<CachedMetas> {
@@ -140,6 +140,12 @@ fn parse_metas(payload: &Value) -> HashMap<String, ModelMeta> {
             max_output,
             cost_input_per_1m: cost_input,
             cost_output_per_1m: cost_output,
+            cost_cache_read_per_1m: pricing
+                .and_then(|p| p.get("input_cache_read"))
+                .and_then(per_token_to_per_1m),
+            cost_cache_write_per_1m: pricing
+                .and_then(|p| p.get("input_cache_write"))
+                .and_then(per_token_to_per_1m),
             modalities_input,
             modalities_output,
             knowledge,
@@ -264,7 +270,9 @@ mod tests {
                 },
                 "pricing": {
                     "prompt": "0.000005",
-                    "completion": "0.000025"
+                    "completion": "0.000025",
+                    "input_cache_read": "0.0000005",
+                    "input_cache_write": "0.00000625"
                 },
                 "top_provider": { "max_completion_tokens": 128000 },
                 "supported_parameters": ["tools", "tool_choice", "reasoning"],
@@ -278,6 +286,8 @@ mod tests {
         assert_eq!(m.max_output, Some(128_000));
         assert!((m.cost_input_per_1m.unwrap() - 5.0).abs() < 1e-9);
         assert!((m.cost_output_per_1m.unwrap() - 25.0).abs() < 1e-9);
+        assert!((m.cost_cache_read_per_1m.unwrap() - 0.5).abs() < 1e-9);
+        assert!((m.cost_cache_write_per_1m.unwrap() - 6.25).abs() < 1e-9);
         assert_eq!(m.modalities_input, vec!["text", "image", "pdf"]);
         assert_eq!(m.reasoning, Some(true));
         assert_eq!(m.tool_call, Some(true));
@@ -290,12 +300,13 @@ mod tests {
         let payload = serde_json::json!({
             "data": [{
                 "id": "openai/gpt-5.6-sol",
-                "pricing": { "prompt": "0", "completion": "0.000015" }
+                "pricing": { "prompt": "0", "completion": "0.000015", "input_cache_read": "0" }
             }]
         });
         let metas = parse_metas(&payload);
         let meta = metas.get("openai/gpt-5.6-sol").expect("qualified");
         assert_eq!(meta.cost_input_per_1m, Some(0.0));
         assert_eq!(meta.cost_output_per_1m, Some(15.0));
+        assert_eq!(meta.cost_cache_read_per_1m, Some(0.0));
     }
 }

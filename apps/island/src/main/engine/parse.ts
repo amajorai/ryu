@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Defensive parsing of the local model's suggestion JSON.
 //
 // We ask Gemma 4 E2B (via Core's `/v1/chat/completions`) for STRICT JSON, but a
@@ -72,22 +73,16 @@ export function extractJsonObject(text: string): string | null {
 	return null;
 }
 
-function clampConfidence(value: unknown): number {
-	if (typeof value !== "number" || Number.isNaN(value)) {
-		return 0;
-	}
-	if (value < 0) {
-		return 0;
-	}
-	if (value > 1) {
-		return 1;
-	}
-	return value;
-}
-
-function normalizeAction(value: unknown): "chat" | "dismiss" {
-	return value === "dismiss" ? "dismiss" : "chat";
-}
+const modelSuggestionSchema = z.object({
+	relevant: z.literal(true),
+	title: z.string().trim().min(1),
+	body: z.string().trim().catch(""),
+	confidence: z
+		.number()
+		.transform((value) => Math.max(0, Math.min(1, value)))
+		.catch(0),
+	action: z.enum(["chat", "dismiss"]).catch("chat"),
+});
 
 /**
  * Parse and validate raw model output into a `ModelSuggestion`, or `null` when
@@ -102,34 +97,13 @@ export function parseModelSuggestion(
 	if (!json) {
 		return null;
 	}
-	let parsed: unknown;
 	try {
-		parsed = JSON.parse(json);
+		const parsed = modelSuggestionSchema.safeParse(JSON.parse(json));
+		if (!parsed.success || parsed.data.confidence < threshold) {
+			return null;
+		}
+		return parsed.data;
 	} catch {
 		return null;
 	}
-	if (typeof parsed !== "object" || parsed === null) {
-		return null;
-	}
-	const obj = parsed as Record<string, unknown>;
-	const relevant = obj.relevant === true;
-	if (!relevant) {
-		return null;
-	}
-	const title = typeof obj.title === "string" ? obj.title.trim() : "";
-	const body = typeof obj.body === "string" ? obj.body.trim() : "";
-	if (title.length === 0) {
-		return null;
-	}
-	const confidence = clampConfidence(obj.confidence);
-	if (confidence < threshold) {
-		return null;
-	}
-	return {
-		relevant: true,
-		title,
-		body,
-		action: normalizeAction(obj.action),
-		confidence,
-	};
 }

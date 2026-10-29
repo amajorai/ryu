@@ -17,11 +17,11 @@ function AgentLifecycleSafetyProof() {
 		<main className="min-h-screen bg-background px-6 py-12 text-foreground sm:px-10">
 			<div className="mx-auto max-w-3xl">
 				<header className="mb-8">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-section">
 						Production component proof
 					</p>
 					<h1 className="mt-2 font-semibold text-4xl tracking-tight">
-						Agent lifecycle & safety
+						Agent lifecycle &amp; safety
 					</h1>
 					<p className="mt-3 max-w-2xl text-muted-foreground">
 						A new agent can be tested safely before it is allowed into
@@ -72,6 +72,6 @@ function AgentLifecycleSafetyProof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<AgentLifecycleSafetyProof />
 );

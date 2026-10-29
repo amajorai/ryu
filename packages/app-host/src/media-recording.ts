@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /** Host-owned microphone capture. The app sees opaque IDs, never device file paths. */
 export type MediaRecordingInput =
 	| { action: "status" }
@@ -21,46 +23,39 @@ export interface MediaRecordingResult {
 	state: "idle" | "recording" | "pending";
 }
 
-export function parseMediaRecordingInput(
-	value: unknown
-): MediaRecordingInput | null {
-	if (!value || typeof value !== "object") {
-		return null;
-	}
-	const input = value as Record<string, unknown>;
-	if (
-		Object.keys(input).some(
-			(key) => key !== "action" && key !== "id" && key !== "seconds"
-		)
-	) {
-		return null;
-	}
-	if (input.action === "status" || input.action === "start") {
-		return input.id === undefined && input.seconds === undefined
-			? { action: input.action }
-			: null;
-	}
-	if (
-		input.action === "rewind" &&
-		typeof input.id === "string" &&
-		/^[a-zA-Z0-9-]{1,80}$/.test(input.id) &&
-		(input.seconds === 15 || input.seconds === 300)
-	) {
-		return { action: "rewind", id: input.id, seconds: input.seconds };
-	}
-	if (
-		(input.action === "ack" ||
-			input.action === "stop" ||
-			input.action === "read" ||
-			input.action === "discard") &&
-		typeof input.id === "string" &&
-		input.seconds === undefined &&
-		/^[a-zA-Z0-9-]{1,80}$/.test(input.id)
-	) {
-		return { action: input.action, id: input.id };
-	}
-	return null;
-}
+const recordingIdSchema = z.string().regex(/^[a-zA-Z0-9-]{1,80}$/);
+
+const mediaRecordingInputSchema = z.union([
+	z
+		.strictObject({
+			action: z.enum(["status", "start"]),
+			id: z.undefined().optional(),
+			seconds: z.undefined().optional(),
+		})
+		.transform(({ action }) => ({ action })),
+	z.strictObject({
+		action: z.literal("rewind"),
+		id: recordingIdSchema,
+		seconds: z.union([z.literal(15), z.literal(300)]),
+	}),
+	z
+		.strictObject({
+			action: z.enum(["ack", "stop", "read", "discard"]),
+			id: recordingIdSchema,
+			seconds: z.undefined().optional(),
+		})
+		.transform(({ action, id }) => ({ action, id })),
+]);
+
+// Keep the bridge's nullable decoding API while the schema owns raw input.
+const mediaRecordingBoundarySchema = z
+	.unknown()
+	.transform((value): MediaRecordingInput | null => {
+		const parsed = mediaRecordingInputSchema.safeParse(value);
+		return parsed.success ? parsed.data : null;
+	});
+
+export const parseMediaRecordingInput = mediaRecordingBoundarySchema.parse;
 
 export type MediaRecordingService = (
 	input: MediaRecordingInput

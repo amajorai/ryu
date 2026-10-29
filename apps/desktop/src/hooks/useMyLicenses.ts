@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
 	fetchLicenses,
 	hasMarketplaceAuth,
-	type MarketplaceError,
+	MarketplaceError,
 	type OwnedLicense,
 } from "@/src/lib/api/marketplace.ts";
 
@@ -50,7 +50,14 @@ export function useMyLicenses(): UseMyLicenses {
 			setLicenses(data);
 			setError(null);
 		} catch (e) {
-			setError(e as MarketplaceError);
+			setError(
+				e instanceof MarketplaceError
+					? e
+					: new MarketplaceError(
+							"unknown",
+							e instanceof Error ? e.message : "Could not load licenses."
+						)
+			);
 		} finally {
 			setLoading(false);
 		}

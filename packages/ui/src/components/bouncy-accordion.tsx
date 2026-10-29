@@ -6,7 +6,7 @@
 // marketing blocks animate identically instead of drifting apart.
 
 import { useIsomorphicLayoutEffect } from "@ryu/ui/hooks/use-isomorphic-layout-effect.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { ChevronDown } from "lucide-react";
 import { motion, type Transition, useReducedMotion } from "motion/react";
 import { type ReactNode, useCallback, useId, useRef, useState } from "react";
@@ -36,6 +36,7 @@ export interface BouncyAccordionClassNames {
 }
 
 export interface BouncyAccordionProps {
+	appearance?: "default" | "faq";
 	className?: string;
 	classNames?: BouncyAccordionClassNames;
 	collapsible?: boolean;
@@ -115,6 +116,7 @@ function BouncyAccordionRow({
 	triggerId,
 	reduce,
 	classNames,
+	appearance,
 	onToggle,
 }: {
 	item: BouncyAccordionItem;
@@ -126,6 +128,7 @@ function BouncyAccordionRow({
 	triggerId: string;
 	reduce: boolean | null;
 	classNames?: BouncyAccordionClassNames;
+	appearance?: "default" | "faq";
 	onToggle: () => void;
 }) {
 	const contentRef = useRef<HTMLDivElement>(null);
@@ -153,6 +156,9 @@ function BouncyAccordionRow({
 		};
 	}, []);
 
+	// FAQ rows sit flat on the page, so they keep square corners instead of
+	// rounding into card groups.
+	const radius = appearance === "faq" ? 0 : 28;
 	const openContentTransition = open
 		? CONTENT_OPEN_TRANSITION
 		: CONTENT_CLOSE_TRANSITION;
@@ -166,14 +172,15 @@ function BouncyAccordionRow({
 		>
 			<motion.div
 				animate={{
-					borderTopLeftRadius: startsGroup ? 28 : 0,
-					borderTopRightRadius: startsGroup ? 28 : 0,
-					borderBottomLeftRadius: endsGroup ? 28 : 0,
-					borderBottomRightRadius: endsGroup ? 28 : 0,
+					borderTopLeftRadius: startsGroup ? radius : 0,
+					borderTopRightRadius: startsGroup ? radius : 0,
+					borderBottomLeftRadius: endsGroup ? radius : 0,
+					borderBottomRightRadius: endsGroup ? radius : 0,
 				}}
 				className={cn(
 					"overflow-hidden bg-card text-card-foreground",
 					item.disabled && "opacity-50",
+					appearance === "faq" && "border-none bg-muted/50",
 					classNames?.item
 				)}
 				data-state={open ? "open" : "closed"}
@@ -186,8 +193,9 @@ function BouncyAccordionRow({
 						aria-expanded={open}
 						className={cn(
 							"flex min-h-[40px] min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left outline-none transition-colors",
-							"focus-visible:bg-muted/25",
+							"focus-visible:bg-muted/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
 							"disabled:pointer-events-none",
+							appearance === "faq" && "px-4 py-3",
 							classNames?.trigger
 						)}
 						disabled={item.disabled}
@@ -212,6 +220,8 @@ function BouncyAccordionRow({
 						<span
 							className={cn(
 								"min-w-0 flex-1 text-foreground text-sm",
+								appearance === "faq" &&
+									"type-comfortable font-medium leading-6",
 								classNames?.title
 							)}
 						>
@@ -261,7 +271,9 @@ function BouncyAccordionRow({
 					>
 						<div
 							className={cn(
-								"text-[15px] text-muted-foreground leading-6",
+								"type-comfortable text-muted-foreground leading-6",
+								appearance === "faq" &&
+									"type-comfortable px-1 text-muted-foreground",
 								classNames?.description
 							)}
 						>
@@ -275,6 +287,7 @@ function BouncyAccordionRow({
 }
 
 export function BouncyAccordion({
+	appearance = "default",
 	items,
 	value,
 	defaultValue = null,
@@ -320,6 +333,7 @@ export function BouncyAccordion({
 
 				return (
 					<BouncyAccordionRow
+						appearance={appearance}
 						classNames={classNames}
 						contentId={contentId}
 						endsGroup={endsGroup}

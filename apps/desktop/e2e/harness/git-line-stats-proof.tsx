@@ -28,7 +28,7 @@ function GitLineStatsProof() {
 		<main className="min-h-screen bg-background p-4 text-foreground">
 			<div className="flex w-[1200px] max-w-none flex-col gap-4">
 				<header className="space-y-1">
-					<p className="font-heading font-semibold text-primary text-xs uppercase tracking-[0.18em]">
+					<p className="font-heading font-semibold text-primary text-xs uppercase tracking-(--tracking-section)">
 						Ryu · React proof
 					</p>
 					<h1 className="font-heading font-semibold text-2xl tracking-tight">
@@ -69,12 +69,12 @@ function GitLineStatsProof() {
 					<div className="flex items-center justify-between gap-4">
 						<div>
 							<p className="font-medium text-sm">Rendered verification</p>
-							<p className="mt-1 text-[11px] text-muted-foreground">
+							<p className="type-caption mt-1 text-muted-foreground">
 								The browser reads the production node after fonts are ready.
 							</p>
 						</div>
 						<output
-							className="rounded-full bg-emerald-500/10 px-3 py-1.5 font-heading font-semibold text-emerald-600 text-xs dark:text-emerald-400"
+							className="rounded-full bg-success/10 px-3 py-1.5 font-heading font-semibold text-success text-xs"
 							data-testid="proof-status"
 						>
 							{hasMonoFont ? "Verified" : "Checking"}

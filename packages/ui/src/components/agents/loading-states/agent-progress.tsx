@@ -2,8 +2,9 @@
 
 // beui.dev/components/agents/loading-states/agent-progress
 
-import { EASE_IN_OUT } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { EASE_IN_OUT } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 
@@ -45,6 +46,7 @@ export function AgentProgress({
 	running = true,
 	className,
 }: AgentProgressProps) {
+	const tl = useLiteralMessages();
 	const reduce = useReducedMotion() ?? false;
 	const [internalSeconds, setInternalSeconds] = useState(initialSeconds);
 
@@ -65,7 +67,7 @@ export function AgentProgress({
 
 	return (
 		<span
-			aria-label={`${label}, in progress`}
+			aria-label={tl("{label}, in progress", { label })}
 			className={cn(
 				"inline-flex items-center gap-3 font-mono text-muted-foreground text-sm",
 				className
@@ -89,7 +91,7 @@ export function AgentProgress({
 						className="rounded-[1px] bg-current"
 						key={id}
 						transition={{
-							duration: 1.55,
+							duration: 0.9,
 							ease: EASE_IN_OUT,
 							repeat: Number.POSITIVE_INFINITY,
 							delay,

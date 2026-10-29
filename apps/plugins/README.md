@@ -61,16 +61,30 @@ codex plugin marketplace add ./.agents/plugins
 codex plugin install ryu
 ```
 
-Toggle it off any time with `enabled = false` under the plugin in `~/.codex/config.toml`. The target node is set by `RYU_CORE_URL` / `RYU_CORE_TOKEN` in [`codex/.mcp.json`](./codex/.mcp.json).
+Toggle it off any time with `enabled = false` under the plugin in `~/.codex/config.toml`.
+
+Codex plugins have no `userConfig` prompt, and Codex starts stdio MCP servers with a minimal allow-listed environment. [`codex/.mcp.json`](./codex/.mcp.json) therefore lists `RYU_CORE_URL`, `RYU_CORE_TOKEN`, `RYU_DIR`, `RYU_PROFILE`, and `RYU_AUTH_URL` under `env_vars`, which forwards each one that is set in the shell Codex was started from. Nothing is hard-coded: unset, the bridge targets the profile's local Core (`http://127.0.0.1:7980` for a release profile) and reads that node's local token itself.
+
+```sh
+export RYU_CORE_URL=https://node.example.com   # only for a non-default node
+export RYU_CORE_TOKEN=...                      # only for a node that is not local
+codex
+```
 
 ## Out of repo
 
-Both plugins launch the local `apps/mcp` bridge, which depends on this monorepo's `@ryuhq/core-client` workspace package. To run the plugins from an arbitrary project, point the launch command at a full path to your ryu checkout:
+Both plugins currently launch the bridge from this checkout: Claude Code through `${CLAUDE_PROJECT_DIR}/apps/mcp/src/index.ts`, Codex through `apps/mcp/src/index.ts` relative to the session's working directory. That keeps the contributor loop build-free (edit `apps/mcp/src`, restart the agent) and works today.
 
-- **Claude Code**: edit `claude-code/.mcp.json` and replace `${CLAUDE_PROJECT_DIR}/apps/mcp/src/index.ts` with an absolute path to `apps/mcp/src/index.ts`.
-- **Codex**: edit `codex/.mcp.json` and replace `apps/mcp/src/index.ts` with the absolute path.
+The bridge is packaged for npm as `@ryuhq/mcp` (bin `ryu-mcp`, `@ryuhq/core-client` bundled into `dist/index.js`, published by `bun run publish:npm`). Once a version is on npm (`npm view @ryuhq/mcp version`), the out-of-repo launch is `bunx @ryuhq/mcp` and neither plugin needs a checkout. Only the `command`/`args` pair of each `.mcp.json` changes:
 
-The clean long-term fix is to publish the bridge as a standalone package (`@ryuhq/mcp`, with `@ryuhq/core-client` bundled) and launch it with `bunx @ryuhq/mcp` - then neither plugin needs the repo on disk. That is the one packaging task tracked as a follow-up; the plugins are structured so only the two `.mcp.json` launch lines change.
+```json
+"command": "bunx",
+"args": ["@ryuhq/mcp"]
+```
+
+Keep the `env` (Claude Code) and `env_vars` (Codex) blocks as they are. `npx -y @ryuhq/mcp` works the same way on hosts without Bun. Until the package is published, point the launch line at an absolute path to your checkout's `apps/mcp/src/index.ts` instead.
+
+When the shipped launch lines switch to `bunx`, a contributor who wants the agent to run their local bridge source edits the `command`/`args` pair in their local copy of the plugin back to `bun` with `["run", "<checkout>/apps/mcp/src/index.ts"]`, or adds a separate MCP server entry with that launch line in their own agent config.
 
 ## Layout
 

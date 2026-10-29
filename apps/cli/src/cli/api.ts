@@ -1,3 +1,4 @@
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 // The real {@link CoreApi} bundle: the typed core-client plugin-lifecycle calls
 // plus the tui's own SSE chat client. Handlers receive this via the CliContext, so
 // nothing here is imported by them directly — that indirection is the test seam
@@ -11,7 +12,12 @@ import {
 	callAction,
 } from "@ryuhq/core-client/actions";
 import type { ApiTarget } from "@ryuhq/core-client/client";
-import { apiUrl, makeHeaders, request } from "@ryuhq/core-client/client";
+import {
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+	request,
+} from "@ryuhq/core-client/client";
 import {
 	disableApp,
 	enableApp,
@@ -23,7 +29,13 @@ import {
 	uninstallApp,
 } from "@ryuhq/core-client/plugins";
 import { streamChat } from "../core/chatStream.ts";
-import type { CoreApi, ScaffoldResult, ScaffoldRunner } from "./types.ts";
+import { LocalizedError, localize } from "./localizedText.ts";
+import type {
+	CoreApi,
+	ProcessRunner,
+	ScaffoldResult,
+	ScaffoldRunner,
+} from "./types.ts";
 
 /** HTTP verbs that carry a request body; the rest encode args in the query. */
 const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
@@ -54,9 +66,9 @@ async function execAppCommand(
 	const path = hasBody
 		? `/api/ext/${pluginId}${cmd.path}`
 		: `/api/ext/${pluginId}${cmd.path}?args=${encodeURIComponent(JSON.stringify(args))}`;
-	const resp = await fetch(apiUrl(target, path), {
+	const resp = await fetchForTarget(target)(apiUrl(target, path), {
 		method,
-		headers: makeHeaders(target.token),
+		headers: makeHeaders(target.token, target.userJwt),
 		body: hasBody ? JSON.stringify({ args }) : undefined,
 	});
 	return { status: resp.status, body: await resp.text() };
@@ -102,9 +114,17 @@ const runScaffold: ScaffoldRunner = async (
 		// different fix from a missing Bun, and a message naming the wrong one sends
 		// them off installing something they already have.
 		const fix = process.env.RYU_CREATE_APP_BIN
-			? "Check RYU_CREATE_APP_BIN."
-			: "Install Bun (https://bun.sh), or set RYU_CREATE_APP_BIN to a local scaffolder.";
-		throw new Error(`could not run '${cmd[0]}': ${String(err)}. ${fix}`);
+			? localize("Check RYU_CREATE_APP_BIN.")
+			: localize(
+					"Install Bun (https://bun.sh), or set RYU_CREATE_APP_BIN to a local scaffolder."
+				);
+		throw new LocalizedError(
+			localize("could not run '{command}': {error}. {fix}", {
+				command: cmd[0],
+				error: String(err),
+				fix,
+			})
+		);
 	}
 	const [stdout, stderr, exitCode] = await Promise.all([
 		new Response(proc.stdout).text(),
@@ -114,6 +134,64 @@ const runScaffold: ScaffoldRunner = async (
 	return { exitCode, stdout, stderr };
 };
 
+/** Run a child with inherited stdio and an explicit environment (`ryu secrets
+ *  run`). The argv is passed without a shell, so values in the environment are
+ *  never interpolated into a command line, and nothing here prints them. */
+export const runProcess: ProcessRunner = async (cmd, env) => {
+	let proc: Bun.Subprocess<"inherit", "inherit", "inherit">;
+	try {
+		proc = Bun.spawn({
+			cmd,
+			env,
+			stdin: "inherit",
+			stdout: "inherit",
+			stderr: "inherit",
+		});
+	} catch (err) {
+		throw new LocalizedError(
+			localize("could not run '{command}': {error}", {
+				command: cmd[0],
+				error: String(err),
+			})
+		);
+	}
+	return await proc.exited;
+};
+
+/** Read piped stdin as text; null when stdin is an interactive terminal. */
+export async function readStdin(): Promise<string | null> {
+	if (process.stdin.isTTY) {
+		return null;
+	}
+	return await Bun.stdin.text();
+}
+
+/**
+ * Ask one question on the terminal; null when stdin or stdout is not an
+ * interactive terminal, or when input ends (Ctrl+D / Ctrl+C), so an
+ * interactive command can stop instead of acting on an answer never given.
+ */
+export async function promptLine(question: string): Promise<string | null> {
+	if (!(process.stdin.isTTY && process.stdout.isTTY)) {
+		return null;
+	}
+	const { createInterface } = await import("node:readline/promises");
+	const readline = createInterface({
+		input: process.stdin,
+		output: process.stdout,
+	});
+	const ended = new Promise<null>((resolve) => {
+		readline.once("close", () => resolve(null));
+	});
+	try {
+		return await Promise.race([readline.question(question), ended]);
+	} catch {
+		return null;
+	} finally {
+		readline.close();
+	}
+}
+
 /** The production CoreApi wired to a live Core node over HTTP. */
 export const realCoreApi: CoreApi = {
 	callAction: (
@@ -121,7 +199,8 @@ export const realCoreApi: CoreApi = {
 		actionId: string,
 		input: ActionCallInput
 	): Promise<ActionCallResult> => callAction(target, actionId, input),
-	call: (target, path, options) => request<unknown>(target, path, options),
+	call: (target, path, options) =>
+		request(target, path, options, appResponseValueSchema),
 	disableApp,
 	enableApp,
 	execAppCommand,

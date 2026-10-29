@@ -1,21 +1,21 @@
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/inter";
-import { SidecarRow } from "@ryu/blocks/extension/services";
-import { SettingsPanelView } from "@ryu/blocks/island/settings-panel";
+import { SidecarRow } from "@ryu/blocks/extension/services.tsx";
+import { SettingsPanelView } from "@ryu/blocks/island/settings-panel.tsx";
 import {
 	ToolApproval,
 	type ToolApprovalStatus,
-} from "@ryu/ui/components/agents/tool-approval";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/agents/tool-approval.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useConfirmDialog } from "@ryu/ui/hooks/use-confirm-dialog.tsx";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import EmailVerifiedPage from "../../../web/src/app/email-verified/page";
-import { MergedThreadPicker } from "../../src/components/chat/MergedThreadPicker";
-import { ViewBar } from "../../src/components/spaces/views/ViewBar";
-import { SubscriptionUsageDashboard } from "../../src/components/usage/SubscriptionUsageDashboard";
-import type { DbView } from "../../src/lib/realtime/yjs-database";
+import EmailVerifiedPage from "../../../web/src/app/email-verified/page.tsx";
+import { MergedThreadPicker } from "../../src/components/chat/MergedThreadPicker.tsx";
+import { ViewBar } from "../../src/components/spaces/views/ViewBar.tsx";
+import { SubscriptionUsageDashboard } from "../../src/components/usage/SubscriptionUsageDashboard.tsx";
+import type { DbView } from "../../src/lib/realtime/yjs-database.ts";
 import "../../src/index.css";
 
 const INITIAL_VIEW: DbView = {

@@ -1,3 +1,5 @@
+declare const window: Window;
+
 import {
 	Sidebar,
 	SidebarContent,
@@ -15,6 +17,7 @@ import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx"
 import { TabsProvider } from "../../src/contexts/TabsContext.tsx";
 import type { Conversation } from "../../types/chat.ts";
 import "../../src/index.css";
+import { IDLE_REORDER_SHIFT } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 
 const PROOF_TARGET = { token: null, url: "http://proof.local" };
 const STORAGE_KEY = "ryu:bot-chat-sections:v1";
@@ -66,6 +69,7 @@ const handlers = {
 	onOpenNewSideChat: noOp,
 	onOpenSideChat: noOp,
 	onRenameConversation: noOp,
+	onMoveToProject: noOp,
 	onRemoveFromProject: noOp,
 	onRequestConversationVisibility: noOp,
 	onSelectConversation: noOp,
@@ -73,10 +77,11 @@ const handlers = {
 	onToggleArchive: noOp,
 	onTogglePin: noOp,
 	pinnedIds: new Set<string>(),
+	projectTargets: [],
 	projectNameForFolder: () => "proof",
 	target: PROOF_TARGET,
 	unreadIds: new Set<string>(),
-} as unknown as ChatRowHandlers;
+} satisfies ChatRowHandlers;
 
 const dnd = {
 	draggingKey: null,
@@ -85,6 +90,7 @@ const dnd = {
 	onDragOver: noOp,
 	onDragStart: noOp,
 	onDrop: noOp,
+	shift: IDLE_REORDER_SHIFT,
 	order: [],
 };
 
@@ -97,9 +103,9 @@ const menu = {
 	onSetSort: noOp,
 };
 
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
 	if (url.includes("/api/plugins/contributions")) {
 		return Promise.resolve(
 			new Response(JSON.stringify({ context_menu_items: [] }), {
@@ -124,8 +130,8 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 			})
 		);
 	}
-	return realFetch(input as RequestInfo, init);
-}) as typeof fetch;
+	return realFetch(input, init);
+};
 
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },

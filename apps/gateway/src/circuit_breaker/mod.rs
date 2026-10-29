@@ -15,11 +15,23 @@ enum CircuitState {
     /// Circuit tripped; all requests are rejected immediately.
     Open { opened_at: Instant },
     /// One probe request allowed through to test if provider has recovered.
-    /// `probe_in_flight` is true while that single probe is outstanding; further
+    /// `probe_started_at` is set while that single probe is outstanding; further
     /// requests are rejected until the probe resolves via record_success (→ Closed)
-    /// or record_failure (→ Open).
-    HalfOpen { probe_in_flight: bool },
+    /// or record_failure (→ Open), or until the probe's lease expires (see
+    /// [`PROBE_LEASE_MIN`]).
+    HalfOpen { probe_started_at: Option<Instant> },
 }
+
+/// Minimum lifetime of a half-open probe lease. `is_open` is also used as a
+/// candidate filter (pool / web-provider selection), and an admitted probe can
+/// be abandoned without ever reaching `record_success` / `record_failure`
+/// (another candidate was chosen, a later admission check rejected the
+/// request, or the client disconnected). Without a lease, such an orphaned
+/// probe would leave the circuit half-open with a probe "in flight" forever,
+/// blackholing the provider until restart. A probe outstanding for longer than
+/// `max(reset_timeout, PROBE_LEASE_MIN)` is treated as lost and a new one is
+/// admitted.
+const PROBE_LEASE_MIN: Duration = Duration::from_secs(60);
 
 /// Public snapshot of a single provider's circuit-breaker state.
 /// Serialised to the `/metrics` response under `provider_health`.
@@ -68,20 +80,18 @@ impl CircuitBreakers {
         match *entry {
             CircuitState::Closed { .. } => false,
             CircuitState::HalfOpen {
-                probe_in_flight: true,
-            } => {
+                probe_started_at: Some(started_at),
+            } if started_at.elapsed() < reset_timeout.max(PROBE_LEASE_MIN) => {
                 // A probe is already outstanding; reject further concurrent
                 // requests until it resolves via record_success/record_failure.
                 true
             }
-            CircuitState::HalfOpen {
-                probe_in_flight: false,
-            } => {
-                // No probe currently in flight (shouldn't normally be observed —
-                // record_success/record_failure always move out of HalfOpen —
-                // but handled for completeness): admit this caller as the probe.
+            CircuitState::HalfOpen { .. } => {
+                // No live probe: either none was admitted, or the admitted one
+                // was abandoned and its lease expired. Admit this caller as the
+                // probe.
                 *entry = CircuitState::HalfOpen {
-                    probe_in_flight: true,
+                    probe_started_at: Some(Instant::now()),
                 };
                 false
             }
@@ -90,7 +100,7 @@ impl CircuitBreakers {
                     // Transition to half-open; allow exactly one probe request
                     // through (this caller), then gate everyone else out.
                     *entry = CircuitState::HalfOpen {
-                        probe_in_flight: true,
+                        probe_started_at: Some(Instant::now()),
                     };
                     info!(
                         provider,
@@ -532,6 +542,32 @@ mod tests {
         assert!(!cb.is_open("openai"));
         assert!(!cb.is_open("openai"));
         assert!(!cb.is_open("openai"));
+    }
+
+    #[test]
+    fn abandoned_probe_lease_expires_and_admits_a_new_probe() {
+        // A probe admitted by `is_open` (e.g. as a candidate filter) that never
+        // reports back must not wedge the circuit half-open forever.
+        let cb = CircuitBreakers::new(config(true, 1, 0));
+        cb.record_failure("openai");
+        assert!(!cb.is_open("openai"), "first caller is the probe");
+        assert!(cb.is_open("openai"), "live probe gates other callers");
+        // Simulate the probe having been outstanding past its lease.
+        let Some(started_at) = Instant::now().checked_sub(PROBE_LEASE_MIN + Duration::from_secs(1))
+        else {
+            return;
+        };
+        cb.states.insert(
+            "openai".to_string(),
+            CircuitState::HalfOpen {
+                probe_started_at: Some(started_at),
+            },
+        );
+        assert!(
+            !cb.is_open("openai"),
+            "an expired probe lease admits a replacement probe"
+        );
+        assert!(cb.is_open("openai"), "the replacement probe gates again");
     }
 
     // ─── CircuitBreakerRegistry swap seam ────────────────────────────────────

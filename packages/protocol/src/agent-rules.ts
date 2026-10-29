@@ -35,10 +35,12 @@ export function composeRules(instructions: string, rules: string[]): string {
  * Split a stored system prompt back into instructions + rules. When no rules
  * block is present, the whole prompt is the instructions and rules is empty.
  */
-export function parseRules(systemPrompt: string): {
+export interface ParsedAgentRules {
 	instructions: string;
 	rules: string[];
-} {
+}
+
+export function parseRules(systemPrompt: string): ParsedAgentRules {
 	const text = systemPrompt ?? "";
 	const start = text.indexOf(RULES_START);
 	const end = text.indexOf(RULES_END);

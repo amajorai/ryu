@@ -1,37 +1,10 @@
 {
   "slug": "insurance",
   "name": "Insurance",
-  "navLabel": "Insurance",
-  "category": "Finance & Risk",
   "icon": "Umbrella",
   "tagline": "Summarize claim documents and compare them with policy terms for an authorized reviewer.",
-  "heroEyebrow": "Ryu for Insurance",
   "heroTitle": "Ryu for insurance",
-  "heroSubtitle": "Summarize claim documents and compare them with policy terms for an authorized reviewer.",
   "visualKey": "GatewayVisual",
-  "intro": "Insurance work runs on personal and medical data that regulators expect you to protect, so it can't be pasted into a public chatbot that trains on it. Ryu runs capable agents locally, redacts sensitive fields on egress when you route to the cloud, and logs every call, so claims and underwriting move faster without putting policyholder data at risk.",
-  "highlights": [
-    {
-      "title": "PII stays protected",
-      "description": "Run a local Gemma 4 on install, or route to a cloud model with PII and DLP redaction on every request.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Grounded in your policies",
-      "description": "Ground agents on your policy wordings and underwriting guidelines with Spaces and RAG, so coverage answers cite the clause.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Auditable by default",
-      "description": "Every step is written down as it happens, so each claim decision has a clear record of what was looked at.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Connects to your systems",
-      "description": "Agents authenticate into your inbox, document stores, and spreadsheets to gather claim files and draft updates for review.",
-      "icon": "Plug"
-    }
-  ],
   "useCases": [
     {
       "title": "Claim intake and triage",
@@ -39,7 +12,7 @@
     },
     {
       "title": "Coverage checking",
-      "description": "Compare a claim against the policy wording, surface relevant clauses and exclusions, and quote the language that applies."
+      "description": "Compare a claim against the policy wording, find relevant clauses and exclusions, and quote the language that applies."
     },
     {
       "title": "Document summarization",
@@ -55,31 +28,21 @@
     },
     {
       "title": "Policyholder correspondence",
-      "description": "Draft clear, compliant claim updates and information requests grounded in the specific policy and claim record."
+      "description": "Draft claim updates and information requests from the policy and claim record."
     }
-  ],
-  "examplePrompts": [
-    "Turn this first notice of loss into a structured claim file and list the documents we still need.",
-    "Check whether this claim is covered under the policy wording, quoting the relevant clauses and exclusions.",
-    "Summarize these medical records into a timeline of the relevant facts with source references.",
-    "Extract the risk factors from this application and compare them to our underwriting appetite.",
-    "Review this claim for inconsistencies or red flags and list each one with where it appears."
   ],
   "faq": [
     {
       "q": "Is policyholder data safe with Ryu?",
-      "a": "Yes. Ryu is local-first: you can run a model entirely on your machine with no telemetry. When you route to a cloud model, the Gateway redacts PII and sensitive data on egress and logs the call, so personal and medical data stays governed end to end."
+      "a": "Yes. With a local model, policyholder data stays on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Can it answer coverage questions accurately?",
-      "a": "Ground agents on your policy wordings and underwriting guidelines with Spaces and RAG. Answers cite the specific clause or exclusion, so a handler can verify the basis before relying on it."
+      "a": "Add your policy wordings and underwriting guidelines to a Space. Answers cite the clause or exclusion, so a handler can verify the basis before relying on it."
     },
     {
       "q": "Does it decide claims on its own?",
-      "a": "No. Ryu drafts triage, coverage notes, and correspondence for a qualified handler or underwriter to decide. The record shows what was looked at, so each decision has a clear paper trail."
+      "a": "No. Ryu drafts triage, coverage notes, and correspondence for a qualified handler or underwriter to decide. Workflow history shows each run, and the audit trail records which model ran and when."
     }
-  ],
-  "ctaTitle": "Give your team an AI adjuster.",
-  "ctaSubtitle": "Triage, assess, and respond faster, with policyholder data kept private and every call on the record.",
-  "ctaNote": "Runs on your machines · Personal details stripped · Every action logged"
+  ]
 }

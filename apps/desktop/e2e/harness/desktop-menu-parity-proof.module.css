@@ -1,0 +1,104 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer utilities {
+	.canvas {
+		--proof-menu-canvas: #0b0f14;
+		background-color: var(--proof-menu-canvas);
+	}
+
+	.accountSurface {
+		--proof-menu-account-surface: color-mix(
+			in oklab,
+			oklch(78.9% 0.154 211.53) 20%,
+			transparent
+		);
+		background-color: var(--proof-menu-account-surface);
+	}
+
+	.accountText {
+		--proof-menu-account-text: oklch(95.6% 0.045 203.388);
+		color: var(--proof-menu-account-text);
+	}
+
+	.panelBorder {
+		--proof-menu-panel-border: color-mix(in oklab, #fff 10%, transparent);
+		border-color: var(--proof-menu-panel-border);
+	}
+
+	.panelSurface {
+		--proof-menu-panel-surface: color-mix(in oklab, #fff 4%, transparent);
+		background-color: var(--proof-menu-panel-surface);
+	}
+
+	.resultSurface {
+		--proof-menu-result-surface: color-mix(in oklab, #000 20%, transparent);
+		background-color: var(--proof-menu-result-surface);
+	}
+
+	.primaryText {
+		--proof-menu-primary-text: oklch(96.8% 0.007 247.896);
+		color: var(--proof-menu-primary-text);
+	}
+
+	.contextText {
+		--proof-menu-context-text: oklch(92.9% 0.013 255.508);
+		color: var(--proof-menu-context-text);
+	}
+
+	.themeText {
+		--proof-menu-theme-text: oklch(86.9% 0.022 252.894);
+		color: var(--proof-menu-theme-text);
+	}
+
+	.mutedText {
+		--proof-menu-muted-text: oklch(70.4% 0.04 256.788);
+		color: var(--proof-menu-muted-text);
+	}
+
+	.statusBorder {
+		--proof-menu-status-border: color-mix(
+			in oklab,
+			oklch(76.5% 0.177 163.223) 30%,
+			transparent
+		);
+		border-color: var(--proof-menu-status-border);
+	}
+
+	.statusSurface {
+		--proof-menu-status-surface: color-mix(
+			in oklab,
+			oklch(76.5% 0.177 163.223) 10%,
+			transparent
+		);
+		background-color: var(--proof-menu-status-surface);
+	}
+
+	.statusText {
+		--proof-menu-status-text: oklch(90.5% 0.093 164.15);
+		color: var(--proof-menu-status-text);
+	}
+
+	.contextBorder {
+		--proof-menu-context-border: color-mix(
+			in oklab,
+			oklch(81.1% 0.111 293.571) 40%,
+			transparent
+		);
+		border-color: var(--proof-menu-context-border);
+	}
+
+	.contextSurface {
+		--proof-menu-context-surface: color-mix(
+			in oklab,
+			oklch(81.1% 0.111 293.571) 10%,
+			transparent
+		);
+		background-color: var(--proof-menu-context-surface);
+	}
+
+	.labelTracking {
+		--proof-menu-label-tracking: 0.18em;
+		letter-spacing: var(--proof-menu-label-tracking);
+	}
+}

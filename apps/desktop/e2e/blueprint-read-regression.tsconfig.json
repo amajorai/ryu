@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "blueprint-read-regression.spec.ts",
+    "blueprint-read-regression.host.ts",
+    "blueprint-read-regression.playwright.config.ts",
+    "harness/blueprint-read-regression.tsx",
+    "harness/blueprint-read-regression.types.ts",
+    "harness/vite.blueprint-read-regression.config.ts"
+  ]
+}

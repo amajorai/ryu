@@ -1,4 +1,8 @@
-import { toast } from "@ryu/ui/components/sileo";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import {
+	type ReorderShift,
+	useReorderShift,
+} from "@ryu/ui/hooks/use-reorder-shift.tsx";
 import {
 	createContext,
 	type DragEvent,
@@ -8,7 +12,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { type Tab, useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { moveTabToWindow } from "@/src/lib/move-tab-window.ts";
 import {
 	canTearOutTab,
@@ -16,18 +20,22 @@ import {
 	TabTransferBlockedError,
 } from "@/src/lib/tab-transfer.ts";
 import { invokeWhenReady, isTauriReady } from "@/src/lib/tauri-ready.ts";
+import { WORKBENCH_ITEM_DRAG_MIME } from "@/src/workbench/workbench-chrome.tsx";
 
 /** Marker dataTransfer type so drop targets can tell a tab drag from an
-    external drag (files, text) without reading the payload mid-drag. */
-export const TAB_DRAG_MIME = "application/x-ryu-tab";
+    external drag (files, text) without reading the payload mid-drag. Workbench
+    strips share it, so every tab surface speaks one drag format. */
+export const TAB_DRAG_MIME = WORKBENCH_ITEM_DRAG_MIME;
 /** A chat tab's durable identity, copied into another chat as an @ reference. */
 export const CHAT_REFERENCE_DRAG_MIME = "application/x-ryu-chat-reference";
 
 // Drag state for a tab chip/row, shared by the title-bar strip, the vertical
 // sidebar list, and the content-area split drop zones. `draggingId` is the tab
 // being dragged; `overId`/`dropBefore` mark which strip tab is hovered and on
-// which side the reorder indicator should draw. `canDrop` gates strip drops to
-// tabs of the same pinned-state (pinned tabs reorder within their block,
+// which side the dragged tab will land. Tabs beside the landing spot slide
+// apart to preview it (`shift`, one per axis); a drop line is only drawn where
+// that preview cannot reach, such as a drop into another bracket. `canDrop`
+// gates strip drops to tabs of the same pinned-state (pinned tabs reorder within their block,
 // unpinned within theirs) since `normalize` would otherwise snap a cross-block
 // drop back anyway.
 export interface TabDnd {
@@ -40,6 +48,7 @@ export interface TabDnd {
 	onOver: (id: string, before: boolean) => void;
 	onStart: (id: string) => void;
 	overId: string | null;
+	shift: Record<"x" | "y", ReorderShift>;
 }
 
 const TabDndContext = createContext<TabDnd | null>(null);
@@ -56,7 +65,7 @@ export function useTabDnd(): TabDnd {
     the strip, the vertical tab list, and the split drop zones all see the same
     drag. */
 export function TabDndProvider({ children }: { children: ReactNode }) {
-	const { tabs, moveTab, removeFromSplit, closeTab } = useTabsContext();
+	const { tabs, moveTab, closeTab } = useTabsContext();
 	const activeDrag = useRef<string | null>(null);
 	const dragRevision = useRef(0);
 	const cancelled = useRef(false);
@@ -66,6 +75,13 @@ export function TabDndProvider({ children }: { children: ReactNode }) {
 	const [draggingId, setDraggingId] = useState<string | null>(null);
 	const [overId, setOverId] = useState<string | null>(null);
 	const [dropBefore, setDropBefore] = useState(true);
+	const reorderTarget = {
+		activeId: draggingId,
+		before: dropBefore,
+		overId: draggingId && canDropOn(draggingId, overId) ? overId : null,
+	};
+	const shiftX = useReorderShift({ ...reorderTarget, axis: "x" });
+	const shiftY = useReorderShift({ ...reorderTarget, axis: "y" });
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -126,11 +142,11 @@ export function TabDndProvider({ children }: { children: ReactNode }) {
 		}
 	};
 
-	const canDrop = (targetId: string): boolean => {
-		if (!draggingId || draggingId === targetId) {
+	function canDropOn(dragId: string, targetId: string | null): boolean {
+		if (!targetId || dragId === targetId) {
 			return false;
 		}
-		const dragged = tabs.find((t) => t.id === draggingId);
+		const dragged = tabs.find((t) => t.id === dragId);
 		const target = tabs.find((t) => t.id === targetId);
 		// Keep pinned tabs reordering within the pinned block and unpinned within
 		// theirs — a cross-block drop would just be snapped back by normalize.
@@ -139,7 +155,10 @@ export function TabDndProvider({ children }: { children: ReactNode }) {
 			!!target &&
 			Boolean(dragged.pinned) === Boolean(target.pinned)
 		);
-	};
+	}
+
+	const canDrop = (targetId: string): boolean =>
+		!!draggingId && canDropOn(draggingId, targetId);
 
 	const reset = () => {
 		activeDrag.current = null;
@@ -203,21 +222,16 @@ export function TabDndProvider({ children }: { children: ReactNode }) {
 			setDropBefore((prev) => (prev === before ? prev : before));
 		},
 		onDrop: (id) => {
-			if (draggingId && canDrop(id)) {
-				const dragged = tabs.find((t) => t.id === draggingId);
-				const target = tabs.find((t) => t.id === id);
-				moveTab(draggingId, id, dropBefore);
-				// Dragging a pane's chip OUT of its split bracket (dropping on a tab
-				// that isn't a sibling) pulls it out of the split — the drag-out-to-
-				// unsplit gesture. Dropping between siblings just reorders the panes'
-				// strip chips.
-				if (dragged?.splitId && dragged.splitId !== target?.splitId) {
-					removeFromSplit(draggingId);
-				}
+			// The dragged tab slides into the gap under the pointer, so a drop on
+			// it lands on the target it is previewing.
+			const targetId = id === draggingId ? overId : id;
+			if (draggingId && targetId && canDrop(targetId)) {
+				moveTab(draggingId, targetId, dropBefore);
 			}
 			reset();
 		},
 		canDrop,
+		shift: { x: shiftX, y: shiftY },
 	};
 
 	return (
@@ -225,19 +239,61 @@ export function TabDndProvider({ children }: { children: ReactNode }) {
 	);
 }
 
+/** Which run of tabs a chip slides within. The strip brackets tab groups and
+    splits, so their members only shift inside the bracket while the bracket
+    itself shifts as one item among the loose tabs (see {@link
+    useTabBracketShift}); the vertical list brackets only splits. */
+function tabShiftGroup(tab: Tab | undefined, axis: "x" | "y"): string {
+	if (tab?.pinned) {
+		return "pinned";
+	}
+	if (tab?.splitId) {
+		return `split:${tab.splitId}`;
+	}
+	if (axis === "x" && tab?.groupId) {
+		return `group:${tab.groupId}`;
+	}
+	return "loose";
+}
+
+/** Ref + style for a bracket (tab group or split) so it slides as one item
+    when a loose tab is dragged past it. */
+export function useTabBracketShift(bracketId: string, axis: "x" | "y" = "x") {
+	const { shift } = useTabDnd();
+	const id = `bracket:${bracketId}`;
+	return {
+		ref: shift[axis].register(id, "loose"),
+		style: shift[axis].styleFor(id),
+	};
+}
+
 /** Shared drag handlers + indicator flags for a single draggable tab chip/row.
     Keeps the dragstart/dragover/drop wiring in one place so the strip chips
     and the vertical rows stay in sync. `axis` picks which midpoint decides the
-    before/after side: "x" for the horizontal strip, "y" for vertical rows. */
+    before/after side: "x" for the horizontal strip, "y" for vertical rows.
+    Spread `shiftProps` on the element that should slide aside during a drag. */
 export function useTabDragProps(tabId: string, axis: "x" | "y" = "x") {
 	const dnd = useTabDnd();
 	const { tabs } = useTabsContext();
+	const shift = dnd.shift[axis];
 	const isDragging = dnd.draggingId === tabId;
 	const isOver = dnd.overId === tabId && dnd.draggingId !== tabId;
+	// Neighbours sliding apart is the indicator; the line is only the fallback.
+	const showLine = isOver && !shift.previewing;
 	return {
 		isDragging,
-		showBefore: isOver && dnd.dropBefore,
-		showAfter: isOver && !dnd.dropBefore,
+		showBefore: showLine && dnd.dropBefore,
+		showAfter: showLine && !dnd.dropBefore,
+		shiftProps: {
+			ref: shift.register(
+				tabId,
+				tabShiftGroup(
+					tabs.find((candidate) => candidate.id === tabId),
+					axis
+				)
+			),
+			style: shift.styleFor(tabId),
+		},
 		dragHandlers: {
 			draggable: true,
 			onDragStart: (e: DragEvent) => {
@@ -255,6 +311,17 @@ export function useTabDragProps(tabId: string, axis: "x" | "y" = "x") {
 			},
 			onDragEnd: (event: DragEvent) => dnd.onEnd(event),
 			onDragOver: (e: DragEvent) => {
+				if (dnd.draggingId === tabId && dnd.overId && shift.previewing) {
+					// The dragged tab has slid into the gap under the pointer: keep
+					// the current target (re-targeting here would close the gap and
+					// flicker) and accept the drop for it. Without a slide preview
+					// (a line into another bracket) the tab has not moved, so a drop
+					// back on itself stays a no-op.
+					e.preventDefault();
+					e.stopPropagation();
+					e.dataTransfer.dropEffect = "move";
+					return;
+				}
 				if (
 					!dnd.draggingId ||
 					dnd.draggingId === tabId ||

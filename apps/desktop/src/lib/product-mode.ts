@@ -12,30 +12,23 @@ export const DEFAULT_STARTUP_REALM: StartupRealm = "last-used";
 export const STARTUP_REALM_OPTIONS = [
 	{ label: "Last used", value: "last-used" },
 	{ label: "Bot", value: "bot" },
-	{ label: "Console", value: "console" },
+	{ label: "Agent", value: "console" },
 	{ label: "OS", value: "os" },
 ] as const satisfies ReadonlyArray<{ label: string; value: StartupRealm }>;
 
-const PRODUCT_MODE_VALUES: readonly ProductMode[] = ["bot", "console", "os"];
-const STARTUP_REALM_VALUES: readonly StartupRealm[] = [
-	"last-used",
-	...PRODUCT_MODE_VALUES,
-];
-
 function storage(): Storage | null {
 	try {
-		return typeof localStorage === "undefined" ? null : localStorage;
+		return globalThis.localStorage ?? null;
 	} catch {
 		return null;
 	}
 }
 
 export function isProductMode(value: string | null): value is ProductMode {
-	return value !== null && PRODUCT_MODE_VALUES.includes(value as ProductMode);
+	return value === "bot" || value === "console" || value === "os";
 }
-
 export function isStartupRealm(value: string | null): value is StartupRealm {
-	return value !== null && STARTUP_REALM_VALUES.includes(value as StartupRealm);
+	return value === "last-used" || isProductMode(value);
 }
 
 /** Resolve the realm to open before the access gate applies. */
@@ -64,15 +57,39 @@ export function readStartupRealm(): StartupRealm {
 	}
 }
 
-export function setStartupRealm(startupRealm: StartupRealm): void {
+export type StartupRealmSaveResult =
+	| { ok: true; realm: StartupRealm }
+	| { ok: false; error: string };
+
+export function setStartupRealm(
+	startupRealm: StartupRealm
+): StartupRealmSaveResult {
 	try {
-		storage()?.setItem(STARTUP_REALM_KEY, startupRealm);
+		const target = storage();
+		if (!target) {
+			return {
+				ok: false,
+				error:
+					"Startup realm could not be saved. Local storage is unavailable.",
+			};
+		}
+		target.setItem(STARTUP_REALM_KEY, startupRealm);
+		if (target.getItem(STARTUP_REALM_KEY) !== startupRealm) {
+			return {
+				ok: false,
+				error: "Startup realm could not be confirmed in local storage.",
+			};
+		}
 	} catch {
-		// A preference that cannot be persisted still keeps its existing value.
+		return {
+			ok: false,
+			error: "Startup realm could not be saved. Allow local storage and retry.",
+		};
 	}
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.dispatchEvent(new Event("storage"));
 	}
+	return { ok: true, realm: startupRealm };
 }
 
 function readRequestedMode(): ProductMode {
@@ -81,8 +98,11 @@ function readRequestedMode(): ProductMode {
 
 interface ProductModeState {
 	consoleAccess: boolean;
+	/** Whether the OS desktop (the workspace tier) is rolled out to this account. */
+	osAccess: boolean;
 	requestedMode: ProductMode;
 	setConsoleAccess: (allowed: boolean) => void;
+	setOsAccess: (allowed: boolean) => void;
 	setRequestedMode: (mode: ProductMode) => void;
 }
 
@@ -95,11 +115,18 @@ interface ProductModeState {
  * Console to a managed-org member while the control-plane role query is still
  * resolving. Local/unbound nodes are explicitly granted access by the access
  * hook because there is no organization boundary to bypass.
+ *
+ * `osAccess` mirrors the `ui.interface_os` rollout flag (synced by the app's
+ * access gate) and also starts false, so Bot and Console are the only surfaces
+ * until the flag says otherwise. A remembered OS choice stays stored and comes
+ * back when the flag turns on.
  */
 export const useProductModeStore = create<ProductModeState>((set) => ({
 	consoleAccess: false,
+	osAccess: false,
 	requestedMode: readRequestedMode(),
 	setConsoleAccess: (allowed) => set({ consoleAccess: allowed }),
+	setOsAccess: (allowed) => set({ osAccess: allowed }),
 	setRequestedMode: (mode) => {
 		try {
 			storage()?.setItem(STORAGE_KEY, mode);
@@ -115,18 +142,29 @@ export function useProductMode(): ProductMode {
 	return useProductModeStore((state) =>
 		isRyuBot()
 			? "bot"
-			: resolveProductMode(state.requestedMode, state.consoleAccess)
+			: resolveProductMode(
+					state.requestedMode,
+					state.consoleAccess,
+					state.osAccess
+				)
 	);
 }
 
-/** Console is the only mode gated by organization authority; OS is a workspace
- * surface and remains available to the same users who can use Bot. */
+/**
+ * Console is the only mode gated by organization authority. OS is a workspace
+ * surface for the same users who can use Bot, but it is held behind its
+ * rollout flag; without it a remembered OS choice opens Bot.
+ */
 export function resolveProductMode(
 	requestedMode: ProductMode,
-	consoleAccess: boolean
+	consoleAccess: boolean,
+	osAccess: boolean
 ): ProductMode {
 	if (requestedMode === "console") {
 		return consoleAccess ? "console" : "bot";
+	}
+	if (requestedMode === "os") {
+		return osAccess ? "os" : "bot";
 	}
 	return requestedMode;
 }
@@ -136,7 +174,11 @@ export function readProductMode(): ProductMode {
 	const state = useProductModeStore.getState();
 	return isRyuBot()
 		? "bot"
-		: resolveProductMode(state.requestedMode, state.consoleAccess);
+		: resolveProductMode(
+				state.requestedMode,
+				state.consoleAccess,
+				state.osAccess
+			);
 }
 
 export function isBotMode(): boolean {

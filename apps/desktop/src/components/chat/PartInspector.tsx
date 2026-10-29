@@ -1,3 +1,9 @@
+import {
+	isNativeBigInt,
+	isNativeFunction,
+	isNativeObjectReceiver,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/components/chat/PartInspector.tsx
 //
 // A LobeChat "portal"-style inspector for a single rendered message part, shown
@@ -19,11 +25,11 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { MorphIconSwap } from "@ryu/ui/components/morph-icon";
+import { MorphIconSwap } from "@ryu/ui/components/morph-icon.tsx";
 import { type ReactNode, useState } from "react";
+import { z } from "zod";
 
-// A rendered part is an opaque AI-SDK shape; we read it defensively.
-export type InspectedPart = unknown;
+// Inspector input stays opaque; each displayed field is observed defensively.
 
 // Cap serialized output so a huge tool result (e.g. a full-file Read) can't lock
 // up the panel; the tail is dropped with a visible marker.
@@ -41,26 +47,44 @@ const META_OWN_KEYS = new Set([
 	"toolName",
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
+const inspectedPartSchema = z.looseObject({
+	type: z.unknown(),
+	toolName: z.unknown(),
+	toolCallId: z.unknown(),
+	state: z.unknown(),
+	input: z.unknown(),
+	output: z.unknown(),
+	result: z.unknown(),
+});
+const primitiveKinds = [
+	[z.string(), "string"],
+	[z.number(), "number"],
+	[z.nan(), "number"],
+	[z.literal(Number.POSITIVE_INFINITY), "number"],
+	[z.literal(Number.NEGATIVE_INFINITY), "number"],
+	[z.boolean(), "boolean"],
+	[z.bigint(), "bigint"],
+	[z.symbol(), "symbol"],
+	[z.function(), "function"],
+	[z.undefined(), "undefined"],
+] as const;
 
 // JSON.stringify with a circular-reference guard, bigint coercion, and a length
 // cap. Never throws — a non-serializable value degrades to a readable message.
-function safeStringify(value: unknown): string {
+function safeStringify<TValue>(value: TValue): string {
 	const seen = new WeakSet<object>();
 	let json: string | undefined;
 	try {
 		json = JSON.stringify(
 			value,
 			(_key, val) => {
-				if (typeof val === "bigint") {
+				if (isNativeBigInt(val)) {
 					return val.toString();
 				}
-				if (typeof val === "function") {
+				if (isNativeFunction(val)) {
 					return "[Function]";
 				}
-				if (isRecord(val)) {
+				if (isNativeObjectReceiver(val)) {
 					if (seen.has(val)) {
 						return "[Circular]";
 					}
@@ -84,30 +108,24 @@ function safeStringify(value: unknown): string {
 	return json;
 }
 
-interface PartFacts {
-	args: unknown;
-	metadata: Record<string, unknown> | null;
-	result: unknown;
-	state?: string;
-	toolCallId?: string;
-	toolName?: string;
-	type: string;
-}
-
-function deriveFacts(part: InspectedPart): PartFacts {
-	if (!isRecord(part)) {
+function deriveFacts<TPart>(value: TPart) {
+	const parsed = inspectedPartSchema.safeParse(value);
+	if (!parsed.success) {
 		return {
-			type: typeof part,
+			type:
+				primitiveKinds.find(
+					([schema]) => schema.safeParse(value).success
+				)?.[1] ?? "object",
 			args: undefined,
 			result: undefined,
 			metadata: null,
 		};
 	}
-	const type = typeof part.type === "string" ? part.type : "unknown";
+	const part = parsed.data;
+	const type = isNativeText(part.type) ? part.type : "unknown";
 	let toolName: string | undefined;
 	if (type === "dynamic-tool") {
-		toolName =
-			typeof part.toolName === "string" ? part.toolName : "dynamic-tool";
+		toolName = isNativeText(part.toolName) ? part.toolName : "dynamic-tool";
 	} else if (type.startsWith(TOOL_PREFIX)) {
 		toolName = type.slice(TOOL_PREFIX.length);
 	}
@@ -121,9 +139,8 @@ function deriveFacts(part: InspectedPart): PartFacts {
 	return {
 		type,
 		toolName,
-		toolCallId:
-			typeof part.toolCallId === "string" ? part.toolCallId : undefined,
-		state: typeof part.state === "string" ? part.state : undefined,
+		toolCallId: isNativeText(part.toolCallId) ? part.toolCallId : undefined,
+		state: isNativeText(part.state) ? part.state : undefined,
 		args: part.input,
 		result: part.output ?? part.result,
 		metadata,
@@ -162,7 +179,7 @@ function CopyJsonButton({ value }: { value: string }) {
 
 function MetaChip({ label, value }: { label: string; value: string }) {
 	return (
-		<span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 font-mono text-[11px]">
+		<span className="type-caption inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 font-mono">
 			<span className="text-muted-foreground">{label}</span>
 			<span className="text-foreground">{value}</span>
 		</span>
@@ -171,7 +188,7 @@ function MetaChip({ label, value }: { label: string; value: string }) {
 
 function JsonBlock({ value }: { value: unknown }) {
 	return (
-		<pre className="max-h-[40vh] overflow-auto rounded-md bg-muted/40 p-2.5 font-mono text-[12px] text-foreground leading-relaxed">
+		<pre className="max-h-[40vh] overflow-auto rounded-md bg-muted/40 p-2.5 font-mono text-foreground text-xs leading-relaxed">
 			{safeStringify(value)}
 		</pre>
 	);
@@ -200,7 +217,7 @@ function Section({
 	);
 }
 
-export function PartInspector({ part }: { part: InspectedPart }) {
+export function PartInspector({ part }: { part: unknown }) {
 	const facts = deriveFacts(part);
 	const title = facts.toolName ?? facts.type;
 	const hasArgs = facts.args !== undefined && facts.args !== null;

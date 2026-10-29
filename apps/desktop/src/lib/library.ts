@@ -9,7 +9,12 @@
 // React subscriptions — mirroring `lib/features.ts`. Nothing here imports a page
 // or hook, so there is no import cycle.
 
+import {
+	type AppRequestValue,
+	appRequestValueSchema,
+} from "@ryuhq/core-client/app-request-json.ts";
 import { useEffect, useState } from "react";
+import { z } from "zod";
 
 /** The kinds of thing the Library can hold a reference to. */
 export type LibraryItemType =
@@ -60,36 +65,84 @@ export function refKey(type: LibraryItemType, id: string): string {
  * last in a descending "most recent" order), which is the deliberate home for
  * agents and any item without a real timestamp.
  */
-export function normalizeTimestamp(value: unknown): number {
-	if (typeof value === "number" && Number.isFinite(value)) {
-		// Heuristic: treat plausibly-seconds epochs as seconds. Anything below this
-		// bound (~1973 in ms) is almost certainly a seconds epoch.
-		return value < 1e11 ? value * 1000 : value;
+export function normalizeTimestamp(
+	value: number | string | null | undefined
+): number {
+	const numeric = z.number().safeParse(value);
+	if (numeric.success) {
+		return numeric.data < 1e11 ? numeric.data * 1000 : numeric.data;
 	}
-	if (typeof value === "string" && value.length > 0) {
-		const parsed = Date.parse(value);
+	const text = z.string().min(1).safeParse(value);
+	if (text.success) {
+		const parsed = Date.parse(text.data);
 		return Number.isNaN(parsed) ? 0 : parsed;
 	}
 	return 0;
+}
+
+const libraryRefFieldsSchema = z.object({
+	id: z.string(),
+	type: z.enum([
+		"agent",
+		"workflow",
+		"chat",
+		"space",
+		"team",
+		"meeting",
+		"channel",
+		"identity",
+	]),
+});
+const recentEntryFieldsSchema = libraryRefFieldsSchema.extend({
+	ts: z.union([
+		z.number(),
+		z.literal(Number.POSITIVE_INFINITY),
+		z.literal(Number.NEGATIVE_INFINITY),
+	]),
+});
+const libraryRefSchema = z.custom<LibraryRef>(
+	(value) => libraryRefFieldsSchema.safeParse(value).success
+);
+const recentEntrySchema = z.custom<RecentEntry>(
+	(value) => recentEntryFieldsSchema.safeParse(value).success
+);
+const libraryRawSnapshotSchema = z.array(appRequestValueSchema);
+const libraryRefIdentitySchema = z.object({ id: z.string(), type: z.string() });
+
+/** Keep the complete stored snapshot for mutations, including future item kinds
+ * and malformed legacy entries. Only reader projections refine current refs. */
+function readLibrarySnapshot(key: string): AppRequestValue[] {
+	try {
+		const stored = localStorage.getItem(key);
+		if (!stored) {
+			return [];
+		}
+		const parsed = libraryRawSnapshotSchema.safeParse(JSON.parse(stored));
+		return parsed.success ? parsed.data : [];
+	} catch {
+		return [];
+	}
+}
+function matchesLibraryRef(
+	value: AppRequestValue,
+	type: LibraryItemType,
+	id: string
+): boolean {
+	const parsed = libraryRefIdentitySchema.safeParse(value);
+	return parsed.success && parsed.data.type === type && parsed.data.id === id;
 }
 
 // --- Favorites ------------------------------------------------------------
 
 /** Read the current favorites list fresh from storage. */
 export function loadFavorites(): LibraryRef[] {
-	try {
-		const stored = localStorage.getItem(FAVORITES_KEY);
-		if (!stored) {
-			return [];
-		}
-		const parsed = JSON.parse(stored) as LibraryRef[];
-		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
-	}
+	return readLibrarySnapshot(FAVORITES_KEY).flatMap((value) => {
+		const parsed = libraryRefSchema.safeParse(value);
+		return parsed.success ? [parsed.data] : [];
+	});
 }
 
-function persistFavorites(refs: LibraryRef[]) {
+function persistFavorites(refs: AppRequestValue[]) {
 	try {
 		localStorage.setItem(FAVORITES_KEY, JSON.stringify(refs));
 	} catch {
@@ -112,10 +165,10 @@ export function isFavorite(
  * concurrent writer can't be clobbered by a stale React snapshot.
  */
 export function toggleFavorite(type: LibraryItemType, id: string) {
-	const favorites = loadFavorites();
-	const exists = favorites.some((f) => f.type === type && f.id === id);
+	const favorites = readLibrarySnapshot(FAVORITES_KEY);
+	const exists = favorites.some((value) => matchesLibraryRef(value, type, id));
 	const next = exists
-		? favorites.filter((f) => !(f.type === type && f.id === id))
+		? favorites.filter((value) => !matchesLibraryRef(value, type, id))
 		: [{ type, id }, ...favorites];
 	persistFavorites(next);
 }
@@ -124,19 +177,13 @@ export function toggleFavorite(type: LibraryItemType, id: string) {
 
 /** Read the current recents list fresh from storage (most-recent first). */
 export function loadRecents(): RecentEntry[] {
-	try {
-		const stored = localStorage.getItem(RECENTS_KEY);
-		if (!stored) {
-			return [];
-		}
-		const parsed = JSON.parse(stored) as RecentEntry[];
-		return Array.isArray(parsed) ? parsed : [];
-	} catch {
-		return [];
-	}
+	return readLibrarySnapshot(RECENTS_KEY).flatMap((value) => {
+		const parsed = recentEntrySchema.safeParse(value);
+		return parsed.success ? [parsed.data] : [];
+	});
 }
 
-function persistRecents(entries: RecentEntry[]) {
+function persistRecents(entries: AppRequestValue[]) {
 	try {
 		localStorage.setItem(RECENTS_KEY, JSON.stringify(entries));
 	} catch {
@@ -156,8 +203,8 @@ export function stampRecent(type: LibraryItemType, id: string) {
 		return;
 	}
 	const now = Date.now();
-	const without = loadRecents().filter(
-		(e) => !(e.type === type && e.id === id)
+	const without = readLibrarySnapshot(RECENTS_KEY).filter(
+		(value) => !matchesLibraryRef(value, type, id)
 	);
 	const next = [{ type, id, ts: now }, ...without].slice(0, RECENTS_LIMIT);
 	persistRecents(next);
@@ -225,10 +272,7 @@ export function stampRecentFromPath(
  * routes through {@link toggleFavorite}. Stays in sync across surfaces via the
  * change event (same tab) and the `storage` event (other windows).
  */
-export function useFavorites(): {
-	favorites: LibraryRef[];
-	toggle: (type: LibraryItemType, id: string) => void;
-} {
+export function useFavorites() {
 	const [favorites, setFavorites] = useState<LibraryRef[]>(loadFavorites);
 
 	useEffect(() => {
@@ -243,7 +287,7 @@ export function useFavorites(): {
 
 	return {
 		favorites,
-		toggle: (type, id) => {
+		toggle: (type: LibraryItemType, id: string) => {
 			toggleFavorite(type, id);
 			// Optimistic local update; the event listener reconciles right after.
 			setFavorites(loadFavorites());

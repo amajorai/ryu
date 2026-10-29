@@ -13,6 +13,20 @@ export interface TDiscussion {
 	userId: string;
 }
 
+interface DiscussionUser {
+	avatarUrl?: string;
+	hue?: number;
+	id: string;
+	name: string;
+}
+
+interface DiscussionOptions {
+	currentUserId: string;
+	discussions: TDiscussion[];
+	onDiscussionsChange?: (discussions: TDiscussion[]) => void;
+	users: Record<string, DiscussionUser>;
+}
+
 const BLOCK_SUGGESTION_SELECTOR = '[data-block-suggestion="true"]';
 
 const getTargetElement = (target: EventTarget | null) => {
@@ -39,7 +53,7 @@ export const getDiscussionClickTarget = ({
 		return null;
 	}
 
-	return element.closest(selector) as HTMLElement | null;
+	return element.closest(selector);
 };
 
 export const getDiscussionBlockClickTarget = ({
@@ -54,23 +68,21 @@ export const getDiscussionBlockClickTarget = ({
 		target,
 	});
 
-export const discussionPlugin = createPlatePlugin({
+export const discussionPlugin = createPlatePlugin<
+	"discussion",
+	DiscussionOptions
+>({
 	key: "discussion",
 	options: {
 		currentUserId: "local-user",
-		discussions: [] as TDiscussion[],
-		onDiscussionsChange: undefined as
-			| ((discussions: TDiscussion[]) => void)
-			| undefined,
+		discussions: [],
+		onDiscussionsChange: undefined,
 		users: {
 			"local-user": {
 				id: "local-user",
 				name: "Local user",
 			},
-		} as Record<
-			string,
-			{ id: string; avatarUrl?: string; name: string; hue?: number }
-		>,
+		},
 	},
 })
 	.configure({

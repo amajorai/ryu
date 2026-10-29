@@ -1,0 +1,50 @@
+/* Stepped paper feed adapted from https://www.dqnamo.com/experiments/receipt-printer. */
+@keyframes ryu-receipt-feed {
+	0% {
+		transform: translateY(calc(-100% + 2px));
+	}
+	7.5%,
+	10.5% {
+		transform: translateY(-91%);
+	}
+	18%,
+	21% {
+		transform: translateY(-81%);
+	}
+	28.5%,
+	31.5% {
+		transform: translateY(-70%);
+	}
+	39%,
+	42% {
+		transform: translateY(-58%);
+	}
+	49.5%,
+	52.5% {
+		transform: translateY(-45%);
+	}
+	60%,
+	63% {
+		transform: translateY(-32%);
+	}
+	70.5%,
+	73.5% {
+		transform: translateY(-20%);
+	}
+	81%,
+	84% {
+		transform: translateY(-10%);
+	}
+	91.5%,
+	94.5% {
+		transform: translateY(-3%);
+	}
+	100% {
+		transform: translateY(0);
+	}
+}
+@keyframes ryu-receipt-spinner {
+	to {
+		transform: rotate(360deg);
+	}
+}

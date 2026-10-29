@@ -34,4 +34,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "store-chrome-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

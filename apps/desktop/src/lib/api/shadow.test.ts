@@ -5,12 +5,22 @@
 // unreachable.
 
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { z } from "zod";
 import type {
 	FeedbackKind,
 	ProactiveSuggestion,
+	ShadowComputerUseResult,
 	ShadowContext,
 } from "./shadow.ts";
-import { getCurrentContext, getProactive, postFeedback } from "./shadow.ts";
+import {
+	getCurrentContext,
+	getProactive,
+	getShadowComputerUseConfig,
+	getTimeline,
+	postFeedback,
+	runShadowComputerUse,
+	setShadowComputerUseConfig,
+} from "./shadow.ts";
 
 // ---------------------------------------------------------------------------
 // Mock fetch
@@ -18,17 +28,19 @@ import { getCurrentContext, getProactive, postFeedback } from "./shadow.ts";
 
 const originalFetch = globalThis.fetch;
 
-function mockFetch(
-	response: unknown,
-	status = 200,
-	ok = true
-): ReturnType<typeof mock> {
-	return mock(async () => ({
-		ok,
-		status,
-		json: async () => response,
-		text: async () => JSON.stringify(response),
-	}));
+const recordedBodySchema = z.json();
+type RecordedBody = z.infer<typeof recordedBodySchema>;
+function mockFetch(response: string, status = 200, _ok = true) {
+	return Object.assign(
+		mock(
+			async () =>
+				new Response(response, {
+					status,
+					headers: { "content-type": "application/json" },
+				})
+		),
+		{ preconnect: originalFetch.preconnect }
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +59,7 @@ describe("getCurrentContext", () => {
 			selected_text: "hello",
 			window_title: "main.ts — ryu",
 		};
-		globalThis.fetch = mockFetch(payload) as unknown as typeof fetch;
+		globalThis.fetch = mockFetch(JSON.stringify(payload));
 
 		const result = await getCurrentContext();
 
@@ -57,16 +69,19 @@ describe("getCurrentContext", () => {
 	});
 
 	test("returns null on non-ok response", async () => {
-		globalThis.fetch = mockFetch({}, 500, false) as unknown as typeof fetch;
+		globalThis.fetch = mockFetch(JSON.stringify({}), 500, false);
 
 		const result = await getCurrentContext();
 		expect(result).toBeNull();
 	});
 
 	test("returns null when fetch throws (Shadow unreachable)", async () => {
-		globalThis.fetch = mock(() => {
-			throw new Error("connection refused");
-		}) as unknown as typeof fetch;
+		globalThis.fetch = Object.assign(
+			mock(() => {
+				throw new Error("connection refused");
+			}),
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		const result = await getCurrentContext();
 		expect(result).toBeNull();
@@ -104,9 +119,11 @@ describe("getProactive", () => {
 			makeSuggestion({ id: "sug-1", disposition: "push_now" }),
 			makeSuggestion({ id: "sug-2", disposition: "inbox_only" }),
 		];
-		globalThis.fetch = mockFetch({
-			suggestions,
-		}) as unknown as typeof fetch;
+		globalThis.fetch = mockFetch(
+			JSON.stringify({
+				suggestions,
+			})
+		);
 
 		const result = await getProactive();
 
@@ -121,32 +138,37 @@ describe("getProactive", () => {
 			makeSuggestion({ disposition: "inbox_only" }),
 			makeSuggestion({ disposition: "drop" }),
 		];
-		globalThis.fetch = mockFetch({ suggestions }) as unknown as typeof fetch;
+		globalThis.fetch = mockFetch(JSON.stringify({ suggestions }));
 
 		const result = await getProactive();
 		expect(result).toBeNull();
 	});
 
 	test("returns null when suggestions array is empty", async () => {
-		globalThis.fetch = mockFetch({
-			suggestions: [],
-		}) as unknown as typeof fetch;
+		globalThis.fetch = mockFetch(
+			JSON.stringify({
+				suggestions: [],
+			})
+		);
 
 		const result = await getProactive();
 		expect(result).toBeNull();
 	});
 
 	test("returns null on non-ok response", async () => {
-		globalThis.fetch = mockFetch({}, 404, false) as unknown as typeof fetch;
+		globalThis.fetch = mockFetch(JSON.stringify({}), 404, false);
 
 		const result = await getProactive();
 		expect(result).toBeNull();
 	});
 
 	test("returns null when fetch throws (Shadow unreachable)", async () => {
-		globalThis.fetch = mock(() => {
-			throw new Error("connection refused");
-		}) as unknown as typeof fetch;
+		globalThis.fetch = Object.assign(
+			mock(() => {
+				throw new Error("connection refused");
+			}),
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		const result = await getProactive();
 		expect(result).toBeNull();
@@ -164,16 +186,17 @@ describe("postFeedback", () => {
 
 	/** Capture the request body that fetch was called with. */
 	function captureFetch(status = 200, ok = true) {
-		let captured: unknown;
-		const fetchMock = mock((_url: unknown, init?: RequestInit) => {
-			captured = init?.body ? JSON.parse(init.body as string) : undefined;
-			return Promise.resolve({
-				ok,
-				status,
-				json: async () => ({ applied: ok }),
-			});
+		let captured: RecordedBody | undefined;
+		const fetchMock = mock((_url: RequestInfo | URL, init?: RequestInit) => {
+			const body = z.string().safeParse(init?.body);
+			captured = body.success
+				? recordedBodySchema.parse(JSON.parse(body.data))
+				: undefined;
+			return Promise.resolve(Response.json({ applied: ok }, { status }));
 		});
-		globalThis.fetch = fetchMock as unknown as typeof fetch;
+		globalThis.fetch = Object.assign(fetchMock, {
+			preconnect: originalFetch.preconnect,
+		});
 		return { getCaptured: () => captured };
 	}
 
@@ -195,9 +218,12 @@ describe("postFeedback", () => {
 	}
 
 	test("returns false when Shadow is unreachable", async () => {
-		globalThis.fetch = mock(() => {
-			throw new Error("connection refused");
-		}) as unknown as typeof fetch;
+		globalThis.fetch = Object.assign(
+			mock(() => {
+				throw new Error("connection refused");
+			}),
+			{ preconnect: originalFetch.preconnect }
+		);
 
 		const ok = await postFeedback({
 			suggestion_type: "action",
@@ -214,6 +240,71 @@ describe("postFeedback", () => {
 			kind: "thumbs_up",
 		});
 		expect(ok).toBe(false);
+	});
+});
+
+describe("Shadow computer-use settings", () => {
+	afterEach(() => {
+		globalThis.fetch = originalFetch;
+	});
+
+	const config = {
+		applied: false,
+		jevApiKeyConfigured: true,
+		jevModel: "jev-latest",
+		jevUrl: "https://api.typesafe.ai/v1/systemone",
+		layaUrl: "http://127.0.0.1:8980/api/ext/@ryu/laya/predict",
+		localPluginId: "@ryu/laya",
+		localModelId: "router",
+		maxSteps: 12,
+		planner: "laya" as const,
+	};
+
+	test("loads saved settings and the applied state", async () => {
+		globalThis.fetch = mockFetch(JSON.stringify(config));
+
+		await expect(getShadowComputerUseConfig()).resolves.toEqual(config);
+	});
+
+	test("saves offline settings without requiring Shadow to be running", async () => {
+		let capturedBody: RecordedBody | undefined;
+		globalThis.fetch = Object.assign(
+			mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+				capturedBody = recordedBodySchema.parse(
+					JSON.parse(z.string().parse(init?.body))
+				);
+				return Response.json(config);
+			}),
+			{ preconnect: originalFetch.preconnect }
+		);
+
+		const saved = await setShadowComputerUseConfig({
+			jevModel: config.jevModel,
+			jevUrl: config.jevUrl,
+			layaUrl: config.layaUrl,
+			localPluginId: config.localPluginId,
+			localModelId: config.localModelId,
+			maxSteps: config.maxSteps,
+			planner: config.planner,
+		});
+
+		expect(saved.applied).toBe(false);
+		expect(capturedBody).toEqual({
+			jevModel: config.jevModel,
+			jevUrl: config.jevUrl,
+			layaUrl: config.layaUrl,
+			localPluginId: config.localPluginId,
+			localModelId: config.localModelId,
+			maxSteps: config.maxSteps,
+			planner: config.planner,
+		});
+	});
+
+	test("rejects config responses missing the applied status", async () => {
+		const { applied: _applied, ...legacyConfig } = config;
+		globalThis.fetch = mockFetch(JSON.stringify(legacyConfig));
+
+		await expect(getShadowComputerUseConfig()).resolves.toBeNull();
 	});
 });
 
@@ -278,5 +369,42 @@ describe("companion pill display logic", () => {
 	test("shows 'ready' when context is null but Shadow has not reported down", () => {
 		const text = buildPillText(null, false);
 		expect(text).toBe("ready");
+	});
+});
+
+describe("Shadow response validation", () => {
+	afterEach(() => {
+		globalThis.fetch = originalFetch;
+	});
+	test("keeps malformed timeline rows away from the activity renderer", async () => {
+		globalThis.fetch = mockFetch(
+			JSON.stringify({
+				entries: [{ ts: "yesterday", event_type: "app_switch" }],
+			})
+		);
+		expect(await getTimeline(10)).toBeNull();
+	});
+	test("retains nullable targets in validated computer-use steps", async () => {
+		const result = {
+			planner: "native",
+			status: "completed",
+			message: "done",
+			steps: [{ operation: "click", outcome: "ok", target: null }],
+		} satisfies ShadowComputerUseResult;
+		globalThis.fetch = mockFetch(JSON.stringify(result));
+		expect(await runShadowComputerUse("Finish the task")).toEqual(result);
+	});
+	test("preserves the specific error for an invalid computer-use target", async () => {
+		globalThis.fetch = mockFetch(
+			JSON.stringify({
+				planner: "native",
+				status: "completed",
+				message: "done",
+				steps: [{ operation: "click", outcome: "ok", target: 12 }],
+			})
+		);
+		await expect(runShadowComputerUse("Finish the task")).rejects.toThrow(
+			"Shadow returned an invalid computer-use target"
+		);
 	});
 });

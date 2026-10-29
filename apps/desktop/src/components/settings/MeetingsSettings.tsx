@@ -8,21 +8,24 @@
 // all of these at runtime and routes the note-gen call through the Gateway —
 // nothing is hardcoded (blank model = system default, blank prompt = built-in).
 
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
+import {
+	useActiveTarget,
+	useActiveTargetGetter,
+} from "@/src/hooks/useActiveNode.ts";
 import {
 	type DetectionConfig,
 	getDetectionConfig,
@@ -32,27 +35,28 @@ import {
 } from "@/src/lib/api/meetings.ts";
 import {
 	getMeetingDiarizationEnabled,
+	getMeetingDiarizationModel,
 	getMeetingNotesConfig,
 	getMeetingNotesPrompt,
 	getMeetingNotesTemplate,
+	isMeetingDiarizationModel,
+	type MeetingDiarizationModel,
 	type SideModelConfig,
 	setMeetingDiarizationEnabled,
+	setMeetingDiarizationModel,
 	setMeetingNotesConfig,
 	setMeetingNotesPrompt,
 	setMeetingNotesTemplate,
 } from "@/src/lib/api/preferences.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { SideModelPicker } from "./shared/SideModelPicker.tsx";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
 const EMPTY_MODEL: SideModelConfig = { provider: "", model: "", effort: "" };
 const EMPTY_DETECTION: DetectionConfig = { enabled: true, apps: [] };
 
-function activeTarget(): ApiTarget {
-	return toTarget(useNodeStore.getState().getActiveNode());
-}
-
 export function MeetingsSettings() {
+	const getTarget = useActiveTargetGetter();
+	const nodeTarget = useActiveTarget();
 	const [cfg, setCfg] = useState<SideModelConfig>(EMPTY_MODEL);
 	const [prompt, setPrompt] = useState("");
 	const [detection, setDetection] = useState<DetectionConfig>(EMPTY_DETECTION);
@@ -60,13 +64,15 @@ export function MeetingsSettings() {
 	const [templates, setTemplates] = useState<MeetingTemplate[]>([]);
 	const [templateId, setTemplateId] = useState("default");
 	const [diarization, setDiarization] = useState(false);
+	const [diarizationModel, setDiarizationModel] =
+		useState<MeetingDiarizationModel>("pyannote");
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(false);
 	const [reloadKey, setReloadKey] = useState(0);
 
 	useEffect(() => {
 		let cancelled = false;
-		const target = activeTarget();
+		const target = getTarget();
 		setLoading(true);
 		setLoadError(false);
 		Promise.all([
@@ -76,6 +82,7 @@ export function MeetingsSettings() {
 			listMeetingTemplates(target),
 			getMeetingNotesTemplate(target),
 			getMeetingDiarizationEnabled(target),
+			getMeetingDiarizationModel(target),
 		])
 			.then(
 				([
@@ -85,6 +92,7 @@ export function MeetingsSettings() {
 					templateList,
 					selectedTemplate,
 					diarizationValue,
+					diarizationModelValue,
 				]) => {
 					if (cancelled) {
 						return;
@@ -96,6 +104,7 @@ export function MeetingsSettings() {
 					setTemplates(templateList);
 					setTemplateId(selectedTemplate || "default");
 					setDiarization(diarizationValue);
+					setDiarizationModel(diarizationModelValue);
 					setLoading(false);
 				}
 			)
@@ -127,7 +136,7 @@ export function MeetingsSettings() {
 			return next;
 		});
 		try {
-			await setMeetingNotesTemplate(activeTarget(), next);
+			await setMeetingNotesTemplate(getTarget(), next);
 		} catch {
 			setTemplateId(previous);
 			toast.error("Couldn't save the notes template");
@@ -137,12 +146,31 @@ export function MeetingsSettings() {
 	const updateDiarization = useCallback(async (next: boolean) => {
 		setDiarization(next);
 		try {
-			await setMeetingDiarizationEnabled(activeTarget(), next);
+			await setMeetingDiarizationEnabled(getTarget(), next);
 		} catch {
 			setDiarization(!next);
 			toast.error("Couldn't save the diarization setting");
 		}
 	}, []);
+
+	const updateDiarizationModel = useCallback(
+		async (next: MeetingDiarizationModel) => {
+			let previous: MeetingDiarizationModel = "pyannote";
+			setDiarizationModel((current) => {
+				previous = current;
+				return next;
+			});
+			try {
+				await setMeetingDiarizationModel(getTarget(), next);
+			} catch {
+				setDiarizationModel(previous);
+				toast.error("Couldn't save the speaker model", {
+					description: "Check your connection and try again.",
+				});
+			}
+		},
+		[]
+	);
 
 	const updateModel = useCallback(async (next: SideModelConfig) => {
 		let previous: SideModelConfig = EMPTY_MODEL;
@@ -151,7 +179,7 @@ export function MeetingsSettings() {
 			return next;
 		});
 		try {
-			await setMeetingNotesConfig(activeTarget(), next);
+			await setMeetingNotesConfig(getTarget(), next);
 		} catch {
 			setCfg(previous);
 			toast.error("Couldn't save the notes model", {
@@ -162,7 +190,7 @@ export function MeetingsSettings() {
 
 	const savePrompt = useCallback(async () => {
 		try {
-			await setMeetingNotesPrompt(activeTarget(), prompt);
+			await setMeetingNotesPrompt(getTarget(), prompt);
 			toast.success("Notes prompt saved");
 		} catch {
 			toast.error("Couldn't save the notes prompt", {
@@ -179,7 +207,7 @@ export function MeetingsSettings() {
 				return { ...prev, ...patch };
 			});
 			try {
-				await setDetectionConfig(activeTarget(), patch);
+				await setDetectionConfig(getTarget(), patch);
 			} catch {
 				setDetection(previous);
 				toast.error("Couldn't save your detection settings", {
@@ -236,7 +264,7 @@ export function MeetingsSettings() {
 				<SettingsCard>
 					<SideModelPicker
 						onChange={updateModel}
-						target={activeTarget()}
+						target={nodeTarget}
 						value={cfg}
 					/>
 				</SettingsCard>
@@ -250,11 +278,13 @@ export function MeetingsSettings() {
 				    border, so the card surface would just double it. */}
 				<SettingsCard bare>
 					<Textarea
-						className="min-h-32 font-mono text-xs"
+						aria-label="Notes prompt"
+						className="min-h-32"
 						onBlur={savePrompt}
 						onChange={(e) => setPrompt(e.target.value)}
 						placeholder="Using the built-in default prompt…"
 						value={prompt}
+						variant="code-caption"
 					/>
 				</SettingsCard>
 			</SettingsSection>
@@ -269,10 +299,7 @@ export function MeetingsSettings() {
 						onValueChange={updateTemplate}
 						value={templateId}
 					>
-						<SelectTrigger
-							aria-label="Notes template"
-							className="h-8 w-56 text-sm"
-						>
+						<SelectTrigger aria-label="Notes template" className="h-8 w-56">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
@@ -287,10 +314,10 @@ export function MeetingsSettings() {
 			</SettingsSection>
 
 			<SettingsSection
-				caption="Label who said what in the transcript. Diarization runs on the recording after a meeting ends, using a local model (the Ryu diarize sidecar, pyannote). It's off by default because the model is large and gated; enable it and install the sidecar to use it. Your microphone side is always labeled “Me”."
+				caption="Label who said what in the transcript after a meeting ends. Choose a local pyannote or NVIDIA Nemotron model; its runtime must be installed. Diarization is off by default. Your microphone side is always labeled “Me”."
 				title="Speaker labels"
 			>
-				<SettingsCard>
+				<SettingsCard className="space-y-4">
 					<div className="flex items-center justify-between gap-4">
 						<div>
 							<p className="font-medium text-sm">Identify speakers</p>
@@ -307,6 +334,33 @@ export function MeetingsSettings() {
 								);
 							}}
 						/>
+					</div>
+					<div className="space-y-2">
+						<Label htmlFor="meeting-diarization-model">Speaker model</Label>
+						<Select
+							onValueChange={(value) => {
+								if (isMeetingDiarizationModel(value)) {
+									void updateDiarizationModel(value);
+								}
+							}}
+							value={diarizationModel}
+						>
+							<SelectTrigger
+								className="w-full"
+								data-testid="meeting-diarization-model"
+								id="meeting-diarization-model"
+							>
+								<SelectValue>
+									{(value) =>
+										value === "nemotron" ? "NVIDIA Nemotron 3" : "pyannote 3.1"
+									}
+								</SelectValue>
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="pyannote">pyannote 3.1</SelectItem>
+								<SelectItem value="nemotron">NVIDIA Nemotron 3</SelectItem>
+							</SelectContent>
+						</Select>
 					</div>
 				</SettingsCard>
 			</SettingsSection>

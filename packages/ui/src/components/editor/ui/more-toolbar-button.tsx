@@ -1,5 +1,4 @@
 "use client";
-
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -7,6 +6,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/editor/ui/dropdown-menu.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	KeyboardIcon,
 	MoreHorizontalIcon,
@@ -16,7 +16,7 @@ import {
 import { KEYS } from "platejs";
 import { useEditorRef } from "platejs/react";
 import { type ComponentProps, useState } from "react";
-
+import { TOOLBAR_CLICK_OUTSIDE_MARKER } from "../interaction-markers.ts";
 import { ToolbarButton } from "./toolbar.tsx";
 
 export function MoreToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
@@ -33,11 +33,14 @@ export function MoreToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 
 			<DropdownMenuContent
 				align="start"
-				className="ignore-click-outside/toolbar flex max-h-[500px] min-w-[180px] flex-col overflow-y-auto"
+				className={cn(
+					TOOLBAR_CLICK_OUTSIDE_MARKER,
+					"flex max-h-[500px] min-w-[180px] flex-col overflow-y-auto"
+				)}
 			>
 				<DropdownMenuGroup>
 					<DropdownMenuItem
-						onSelect={() => {
+						onClick={() => {
 							editor.tf.toggleMark(KEYS.kbd);
 							editor.tf.collapse({ edge: "end" });
 							editor.tf.focus();
@@ -48,7 +51,7 @@ export function MoreToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 					</DropdownMenuItem>
 
 					<DropdownMenuItem
-						onSelect={() => {
+						onClick={() => {
 							editor.tf.toggleMark(KEYS.sup, {
 								remove: KEYS.sub,
 							});
@@ -60,7 +63,7 @@ export function MoreToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 						{/* (⌘+,) */}
 					</DropdownMenuItem>
 					<DropdownMenuItem
-						onSelect={() => {
+						onClick={() => {
 							editor.tf.toggleMark(KEYS.sub, {
 								remove: KEYS.sup,
 							});

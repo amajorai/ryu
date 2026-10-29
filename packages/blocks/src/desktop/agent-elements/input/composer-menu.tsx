@@ -2,6 +2,7 @@
 
 import { PinIcon, PinOffIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type ReactNode,
@@ -66,6 +67,7 @@ export function ComposerMenu({
 	pinnedItemIds = [],
 	query = "",
 }: ComposerMenuProps) {
+	const tl = useLiteralMessages();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const [active, setActive] = useState(0);
 	const normalizedQuery = query.trim().toLowerCase();
@@ -149,6 +151,8 @@ export function ComposerMenu({
 			return;
 		}
 		const handlePointerDown = (event: MouseEvent) => {
+			// SAFETY: this Document pointer listener supplies native DOM-node targets;
+			// contains reads that existing native ancestry without decoding input.
 			const target = event.target as Node;
 			if (
 				!(
@@ -218,7 +222,7 @@ export function ComposerMenu({
 										) : null}
 									</span>
 									{item.badge ? (
-										<span className="shrink-0 text-[11px] text-muted-foreground">
+										<span className="type-caption shrink-0 text-muted-foreground">
 											{item.badge}
 										</span>
 									) : null}
@@ -228,8 +232,8 @@ export function ComposerMenu({
 									<button
 										aria-label={
 											pinnedSet.has(item.id)
-												? `Unpin ${item.label}`
-												: `Pin ${item.label}`
+												? tl("Unpin {label}", { label: item.label })
+												: tl("Pin {label}", { label: item.label })
 										}
 										aria-pressed={pinnedSet.has(item.id)}
 										className={cn(
@@ -245,8 +249,8 @@ export function ComposerMenu({
 										onMouseDown={(event) => event.preventDefault()}
 										title={
 											pinnedSet.has(item.id)
-												? `Unpin ${item.label}`
-												: `Pin ${item.label}`
+												? tl("Unpin {label}", { label: item.label })
+												: tl("Pin {label}", { label: item.label })
 										}
 										type="button"
 									>

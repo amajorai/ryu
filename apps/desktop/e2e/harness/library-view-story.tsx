@@ -36,19 +36,14 @@ const rows: SourceItem[] = [
 	},
 ];
 
-const section = (
-	view: string
-): {
-	icon: string;
-	id: string;
-	plugin: string;
-	spec: SidebarSectionSpec;
-	title: string;
-} => ({
+const section = (view: string) => ({
 	icon: "package-01",
 	id: "library-proof",
 	plugin: "com.ryu.proof",
-	spec: { itemTarget: "/library/{{item.id}}", view },
+	spec: {
+		itemTarget: "/library/{{item.id}}",
+		view,
+	} satisfies SidebarSectionSpec,
 	title: "Project library",
 });
 

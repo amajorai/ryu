@@ -7,6 +7,7 @@ import {
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
+import { pluginLiveSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 import type { PluginLiveActivity } from "@/src/lib/api/plugins.ts";
 import {
 	getPreference,
@@ -26,8 +27,8 @@ function findAudioSpec(
 		`${a.plugin ?? ""}:${a.id}`.localeCompare(`${b.plugin ?? ""}:${b.id}`)
 	);
 	for (const contribution of ordered) {
-		const audio = contribution.spec?.audio;
-		if (typeof audio?.src === "string" && audio.src.trim()) {
+		const audio = pluginLiveSpec(contribution)?.audio;
+		if (audio?.src.trim()) {
 			return audio;
 		}
 	}

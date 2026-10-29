@@ -1,3 +1,4 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/detail/api-reference-panel.tsx
 //
 // The API-reference tab: everything installing a plugin adds to the machine,
@@ -26,6 +27,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import type { ReactNode } from "react";
@@ -79,7 +81,7 @@ function Section({
 					<HugeiconsIcon className="size-4 text-muted-foreground" icon={icon} />
 					{title}
 				</h3>
-				{typeof count === "number" ? (
+				{isNativeNumber(count) ? (
 					<span className="text-muted-foreground text-xs">
 						{formatNumber(count)}
 					</span>
@@ -126,6 +128,7 @@ function ContributionList({ items }: { items: CatalogContribution[] }) {
 }
 
 function McpServerList({ servers }: { servers: CatalogMcpServer[] }) {
+	const tl = useLiteralMessages();
 	return (
 		<ul className="flex flex-col gap-1.5">
 			{servers.map((server) => (
@@ -135,7 +138,7 @@ function McpServerList({ servers }: { servers: CatalogMcpServer[] }) {
 							{server.name}
 						</span>
 						{server.enabled === false ? (
-							<Badge className="shrink-0 text-xs" variant="outline">
+							<Badge className="shrink-0" variant="outline">
 								Disabled
 							</Badge>
 						) : null}
@@ -152,7 +155,9 @@ function McpServerList({ servers }: { servers: CatalogMcpServer[] }) {
 					) : null}
 					{server.envKeys?.length ? (
 						<p className="mt-1 text-muted-foreground text-xs">
-							Reads {server.envKeys.join(", ")} from the environment.
+							{tl("Reads {envKeys} from the environment.", {
+								envKeys: server.envKeys.join(", "),
+							})}
 						</p>
 					) : null}
 				</li>
@@ -169,9 +174,7 @@ function SidecarList({ sidecars }: { sidecars: CatalogSidecar[] }) {
 					<div className="flex flex-wrap items-baseline gap-2">
 						<span className="font-medium text-sm">{sidecar.name}</span>
 						{sidecar.lazy ? (
-							<Badge className="text-xs" variant="secondary">
-								Starts on first use
-							</Badge>
+							<Badge variant="secondary">Starts on first use</Badge>
 						) : null}
 						{sidecar.publicMount ? (
 							<code className="font-mono text-muted-foreground text-xs">
@@ -221,6 +224,7 @@ function SidecarList({ sidecars }: { sidecars: CatalogSidecar[] }) {
 
 /** The API-reference tab. Render only when {@link hasApiSurface} is true. */
 export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
+	const tl = useLiteralMessages();
 	const activationEvents = surface.triggers?.activationEvents ?? [];
 	const turnHooks = surface.triggers?.turnHooks ?? [];
 
@@ -311,11 +315,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 						{activationEvents.length ? (
 							<div className="flex flex-wrap gap-1">
 								{activationEvents.map((event) => (
-									<Badge
-										className="font-mono text-xs"
-										key={event}
-										variant="outline"
-									>
+									<Badge key={event} typography="code" variant="outline">
 										{event}
 									</Badge>
 								))}
@@ -335,9 +335,11 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 									>
 										<div className="flex items-baseline justify-between gap-3">
 											<span className="min-w-0 truncate text-sm">
-												Runs at every {hook.event.replace(/_/g, " ")}
+												{tl("Runs at every {event}", {
+													event: hook.event.replace(/_/g, " "),
+												})}
 											</span>
-											<Badge className="shrink-0 text-xs" variant="secondary">
+											<Badge className="shrink-0" variant="secondary">
 												Chat hook
 											</Badge>
 										</div>
@@ -369,8 +371,10 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 								<span className="min-w-0 truncate text-sm">
 									{view.title ?? view.id}
 								</span>
-								<Badge className="shrink-0 text-xs" variant="secondary">
-									{view.surface ? `${view.surface} view` : "View"}
+								<Badge className="shrink-0" variant="secondary">
+									{view.surface
+										? tl("{surface} view", { surface: view.surface })
+										: "View"}
 								</Badge>
 							</li>
 						))}
@@ -382,7 +386,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 								<span className="min-w-0 truncate text-sm">
 									{tab.title ?? tab.id}
 								</span>
-								<Badge className="shrink-0 text-xs" variant="secondary">
+								<Badge className="shrink-0" variant="secondary">
 									Settings tab
 								</Badge>
 							</li>
@@ -395,8 +399,12 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 								<span className="min-w-0 truncate text-sm">
 									{control.label ?? control.id}
 								</span>
-								<Badge className="shrink-0 text-xs" variant="secondary">
-									Composer {control.type ?? "control"}
+								<Badge className="shrink-0" variant="secondary">
+									{control.type
+										? tl("Composer {controlType}", {
+												controlType: control.type,
+											})
+										: "Composer control"}
 								</Badge>
 							</li>
 						))}
@@ -448,7 +456,7 @@ export function ApiReferencePanel({ surface }: { surface: CatalogApiSurface }) {
 									{runnable.name ?? runnable.id}
 								</span>
 								{runnable.kind ? (
-									<Badge className="shrink-0 text-xs" variant="secondary">
+									<Badge className="shrink-0" variant="secondary">
 										{runnable.kind}
 									</Badge>
 								) : null}

@@ -8,19 +8,23 @@
  * WHICH SUPPLY a granted dollar may be spent against.
  *
  * WHY POOLS EXIST AT ALL (the invariant everything below serves): Ryu is
- * running on donated provider credit — an $8,000 AWS Bedrock allowance for
- * frontier models, a $10,000 Cloudflare Workers AI allowance for open models,
- * and two further donated allowances (Google Cloud Vertex AI and OpenAI) whose
- * real figures are not in yet, so they carry
- * {@link PLACEHOLDER_POOL_CEILING_MICRO_USD}. A dollar of Cloudflare buys
+ * running on provider credit Ryu holds directly — a $10,000 AWS Bedrock
+ * allowance for frontier models, a $10,000 Cloudflare Workers AI allowance for
+ * open models, $2,500 of Google Cloud Vertex AI, $1,000 of OpenAI, and $3,000
+ * on Ryu's own Anthropic account. A dollar of Cloudflare buys
  * roughly 10–20× the tokens a dollar of
  * Bedrock does, each allowance has its OWN ceiling, and each burns down against
  * its OWN donor accounting. A blended ledger therefore cannot answer the one
  * question that matters operationally — "how much Bedrock is left?" — and a
  * blended WALLET would let a $50 Bedrock grant be spent on Cloudflare traffic,
- * silently converting cheap supply into expensive supply. So a grant carries a
- * pool, a debit carries a pool, and grant money for a different pool is
- * unreachable by construction (see `debitWallet` in `@ryu/api/lib/credits`).
+ * silently converting cheap supply into expensive supply. So a grant carries
+ * the pool that issued it and a debit carries the pool that SERVED it.
+ *
+ * What a grant may PAY for is broader than its pool: free credit pays for any
+ * request served from Ryu's own supply ({@link isOwnSupplyPool}), never for the
+ * retail pass-through or BYOK (see `debitWallet` in `@ryu/api/lib/credits`).
+ * Issuance stays capped by the per-pool ceilings AND the combined own-supply
+ * allowance (`reservePoolBudget` in `@ryu/api/lib/campaigns`).
  *
  * USERS NEVER SEE A PROVIDER. The wallet is denominated in one Ryu-native unit
  * ("Ryu Credits"); {@link CreditPool.label} is the only name a user reads, and
@@ -49,6 +53,9 @@ export const CREDIT_POOL_IDS = [
 	// this donated allowance would burn the donation down for spend it never
 	// paid for, so the donated supply gets its own registry slot and its own id.
 	"openai-credits",
+	// Same reasoning as `openai-credits`: `anthropic` is the gateway's BYOK slot,
+	// so Ryu's own first-party Anthropic account gets a suffixed id.
+	"anthropic-credits",
 ] as const;
 export type CreditPoolId = (typeof CREDIT_POOL_IDS)[number];
 
@@ -101,30 +108,17 @@ const usd = (dollars: number): number =>
 	Math.round(dollars * MICRO_USD_PER_USD);
 
 /**
- * PLACEHOLDER — NOT THE REAL DONATED FIGURE. The Vertex and OpenAI allowances
- * were granted before anyone wrote down how large they are, and a ceiling is the
- * only brake on a donated pool (`reservePoolBudget` refuses a grant that would
- * cross it), so the two rows below are seeded deliberately LOW rather than
- * guessed high. `0` would mean UNCAPPED, which is the one value that must never
- * be the guess.
+ * The pool catalog. Ceilings are the provider allowances as granted; they are
+ * documented here so the burn-down number has a denominator in one place.
  *
- * WHO FIXES IT, AND HOW: not by editing this line. `seedPoolBudgets`
+ * THESE ARE DEFAULTS FOR A FRESH DATABASE ONLY. `seedPoolBudgets`
  * (`@ryu/api/lib/campaigns`) writes `ceilingMicroUsd` with `$setOnInsert`,
- * because the STORED ROW is the authority and this catalog is only its default —
- * so on any database that has already seeded, raising this constant and
- * redeploying changes NOTHING. The real figure goes in with one operator write
- * to the `CreditPoolBudget` row, no deploy needed. Leave this at its
- * conservative value; it exists to bound a fresh install, not to be tuned.
+ * because the STORED ROW is the authority — so on any database that has already
+ * seeded, changing a figure here and redeploying changes NOTHING. A live
+ * ceiling is changed with one operator write from the admin Credit pools page
+ * (`PUT /api/campaigns/admin/pools/:pool`), no deploy needed.
  */
-const PLACEHOLDER_POOL_CEILING_MICRO_USD = usd(1000);
-
-/**
- * The pool catalog. Ceilings are the DONATED allowances as granted; they are
- * documented here so the burn-down number has a denominator in one place — with
- * the two {@link PLACEHOLDER_POOL_CEILING_MICRO_USD} rows as the exception that
- * says so out loud.
- */
-export const CREDIT_POOLS: Record<CreditPoolId, CreditPool> = {
+export const CREDIT_POOLS = {
 	cloudflare: {
 		id: "cloudflare",
 		label: "Ryu Fast",
@@ -141,7 +135,7 @@ export const CREDIT_POOLS: Record<CreditPoolId, CreditPool> = {
 		description:
 			"AWS Bedrock — frontier models (Claude, …). The expensive, scarce supply spent deliberately on conversion: the seat-limited campaign ladder (Founding / Early / Launch) grants against this pool and nothing else.",
 		gatewayProviders: ["bedrock"],
-		budgetCeilingMicroUsd: usd(8000),
+		budgetCeilingMicroUsd: usd(10_000),
 		tier: "frontier",
 		visible: true,
 	},
@@ -161,7 +155,7 @@ export const CREDIT_POOLS: Record<CreditPoolId, CreditPool> = {
 		description:
 			"Google Cloud Vertex AI — donated allowance for frontier multimodal models (Gemini, …). A SEPARATE gateway slot from `genai`, which is the AI Studio / Gemini API surface an operator points at their OWN key: same model family, different endpoint, different auth, and — the part that matters here — a different account to burn down.",
 		gatewayProviders: ["vertex"],
-		budgetCeilingMicroUsd: PLACEHOLDER_POOL_CEILING_MICRO_USD,
+		budgetCeilingMicroUsd: usd(2500),
 		tier: "frontier",
 		visible: true,
 	},
@@ -171,11 +165,21 @@ export const CREDIT_POOLS: Record<CreditPoolId, CreditPool> = {
 		description:
 			"OpenAI API — donated allowance for frontier reasoning models. Deliberately NOT the `openai` gateway id: that slot serves whatever key the node operator configured, so pooling it would burn this donation down for spend it never funded.",
 		gatewayProviders: ["openai-credits"],
-		budgetCeilingMicroUsd: PLACEHOLDER_POOL_CEILING_MICRO_USD,
+		budgetCeilingMicroUsd: usd(1000),
 		tier: "frontier",
 		visible: true,
 	},
-};
+	"anthropic-credits": {
+		id: "anthropic-credits",
+		label: "Ryu Code",
+		description:
+			"Anthropic API on Ryu's own first-party account — frontier Claude models served directly, with no OpenRouter funding fee. Deliberately NOT the `anthropic` gateway id: that slot serves the node operator's own key, so pooling it would burn this allowance for spend it never funded.",
+		gatewayProviders: ["anthropic-credits"],
+		budgetCeilingMicroUsd: usd(3000),
+		tier: "frontier",
+		visible: true,
+	},
+} satisfies Record<CreditPoolId, CreditPool>;
 
 /** The catalog as a list, in {@link CREDIT_POOL_IDS} order. */
 export const ALL_CREDIT_POOLS: readonly CreditPool[] = CREDIT_POOL_IDS.map(
@@ -229,3 +233,25 @@ export const poolForGatewayProvider = (
  */
 export const isCreditPoolId = (value: string): value is CreditPoolId =>
 	Object.hasOwn(CREDIT_POOLS, value);
+
+/**
+ * Whether a pool is Ryu's OWN supply — every pool whose tier is not `default`
+ * (i.e. everything but the retail OpenRouter pass-through).
+ *
+ * THE FREE-CREDIT RULE: a user's free credit (active grants of ANY pool) pays
+ * for any request Ryu serves from its own supply, earliest-expiring grant
+ * first, before the plan pool and top-ups. It never pays for OpenRouter-served
+ * traffic and never for BYOK (a BYOK provider has no pool at all). A debit
+ * still records the pool that SERVED it, so per-supplier burn-down stays exact;
+ * the grant's own pool now only says which campaign/allowance issued it.
+ * Mirrored by `is_own_supply_pool` in `apps/gateway/src/credit_pools.rs`.
+ */
+export const isOwnSupplyPool = (pool: string | null | undefined): boolean =>
+	typeof pool === "string" &&
+	isCreditPoolId(pool) &&
+	CREDIT_POOLS[pool].tier !== "default";
+
+/** The own-supply pools, in catalog order. */
+export const OWN_SUPPLY_POOLS: readonly CreditPool[] = ALL_CREDIT_POOLS.filter(
+	(pool) => isOwnSupplyPool(pool.id)
+);

@@ -23,13 +23,14 @@ describe("isFullAccessEquivalent", () => {
 	});
 
 	it("does not classify ordinary ACP modes", () => {
-		for (const [id, name] of [
+		const ordinaryModes: [string, string][] = [
 			["plan", "Plan"],
 			["acceptEdits", "Accept edits"],
 			["auto", "Auto"],
 			["read-only", "Read-only"],
 			["never", "Never"],
-		]) {
+		];
+		for (const [id, name] of ordinaryModes) {
 			expect(isFullAccessEquivalent(item(id, name), "Thinking")).toBe(false);
 		}
 	});

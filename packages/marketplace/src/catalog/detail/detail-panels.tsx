@@ -1,3 +1,4 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/detail/detail-panels.tsx
 //
 // The remaining detail tabs — README, Versions, Dependencies — plus the metadata
@@ -142,18 +143,14 @@ export function DetailMetaStrip({
 					value: `Created ${created}`,
 				}
 			: null,
-		typeof downloads === "number"
+		isNativeNumber(downloads)
 			? {
 					icon: Download01Icon,
 					label: "Downloads",
 					value: `${formatCount(downloads)} downloads`,
 				}
 			: null,
-	].filter(Boolean) as {
-		icon: typeof Tag01Icon;
-		label: string;
-		value: string;
-	}[];
+	].filter((item): item is Exclude<typeof item, null> => Boolean(item));
 
 	if (items.length === 0 && surfaces.length === 0) {
 		return null;
@@ -176,7 +173,7 @@ export function DetailMetaStrip({
 						icon={ComputerIcon}
 					/>
 					{surfaces.map((surface) => (
-						<Badge className="text-xs" key={surface} variant="outline">
+						<Badge key={surface} variant="outline">
 							{surfaceLabel(surface)}
 						</Badge>
 					))}
@@ -294,7 +291,7 @@ function VersionSnapshotRow({
 		snapshot.readme
 			? `README: ${Math.round(snapshot.readme.length / 100) / 10}k chars`
 			: "No README at this tag",
-	].filter(Boolean) as string[];
+	].filter((fact): fact is string => Boolean(fact));
 
 	return (
 		<div className="mt-2 flex flex-col gap-1 rounded-md bg-muted/40 px-2.5 py-2">
@@ -307,7 +304,7 @@ function VersionSnapshotRow({
 			    issues and the archived flag are reported as of NOW and cannot be
 			    reconstructed for a past tag, so this panel must never imply it is
 			    showing a full health grade for that version. */}
-			<p className="text-[11px] text-muted-foreground/70 leading-relaxed">
+			<p className="type-caption text-muted-foreground/70 leading-relaxed">
 				Read from the repository at this tag. Repository stats (stars, issues,
 				activity) always reflect today, not this release.
 			</p>
@@ -426,15 +423,11 @@ export function VersionsPanel({
 							<span className="font-medium font-mono text-sm">
 								{version.version}
 							</span>
-							{index === 0 ? (
-								<Badge className="text-xs" variant="secondary">
-									Current
-								</Badge>
-							) : null}
+							{index === 0 ? <Badge variant="secondary">Current</Badge> : null}
 							{version.prerelease ||
 							version.stability ||
 							version.stabilityKnown !== undefined ? (
-								<Badge className="text-xs" variant="outline">
+								<Badge variant="outline">
 									{versionStabilityLabel(
 										version.stability,
 										version.stabilityKnown === true,
@@ -443,13 +436,10 @@ export function VersionsPanel({
 								</Badge>
 							) : null}
 							{version.tagOnly ? (
-								<Badge className="text-xs" variant="outline">
-									Tag only
-								</Badge>
+								<Badge variant="outline">Tag only</Badge>
 							) : null}
 							<span className="ml-auto flex items-center gap-3 text-muted-foreground text-xs">
-								{typeof version.downloads === "number" &&
-								version.downloads > 0 ? (
+								{isNativeNumber(version.downloads) && version.downloads > 0 ? (
 									<span>{formatCount(version.downloads)} downloads</span>
 								) : null}
 								{published ? <span>{published}</span> : null}

@@ -243,7 +243,7 @@ fn prune(map: &mut HashMap<String, PairingRequest>, now: u64) {
 
 /// Path to the paired-client store.
 pub fn paired_clients_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("paired-clients.json")
+    crate::paths::state_path("paired-clients.json")
 }
 
 fn load_paired_clients_from_disk() -> PairedClients {

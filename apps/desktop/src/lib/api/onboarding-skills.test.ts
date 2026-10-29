@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import {
 	fetchOnboardingSkills,
 	saveOnboardingSkillSelection,
@@ -29,10 +30,13 @@ describe("onboarding skill selection API", () => {
 	test("reads the node-scoped recommendation catalog", async () => {
 		const originalFetch = globalThis.fetch;
 		let requestedUrl = "";
-		globalThis.fetch = (async (input: RequestInfo | URL) => {
-			requestedUrl = String(input);
-			return Response.json(response);
-		}) as unknown as typeof globalThis.fetch;
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			async (input: RequestInfo | URL) => {
+				requestedUrl = String(input);
+				return Response.json(response);
+			}
+		);
 
 		try {
 			await expect(fetchOnboardingSkills(target)).resolves.toEqual(response);
@@ -45,18 +49,18 @@ describe("onboarding skill selection API", () => {
 	test("sends only the selected pack ids", async () => {
 		const originalFetch = globalThis.fetch;
 		let request: RequestInit | undefined;
-		globalThis.fetch = (async (
-			_input: RequestInfo | URL,
-			init?: RequestInit
-		) => {
-			request = init;
-			return Response.json({
-				...response,
-				configured: true,
-				syncComplete: true,
-				selectedPackIds: [],
-			});
-		}) as unknown as typeof globalThis.fetch;
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			async (_input: RequestInfo | URL, init?: RequestInit) => {
+				request = init;
+				return Response.json({
+					...response,
+					configured: true,
+					syncComplete: true,
+					selectedPackIds: [],
+				});
+			}
+		);
 
 		try {
 			const saved = await saveOnboardingSkillSelection(target, []);

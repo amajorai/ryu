@@ -26,9 +26,9 @@
 //! `verify_workflow_webhook_signature` the HTTP handler uses (both go through the
 //! host) — dispatching it unverified would be an auth bypass that fires real side
 //! effects. Current Composio relay deliveries use this same raw path so Core can
-//! verify the project-specific ID/timestamp/body signature. The parsed
-//! `composio.webhook` frame remains only as a wire-compatibility reader for old
-//! in-flight relay frames. The fail-closed ladder stays in this crate; the host
+//! verify the project-specific ID/timestamp/body signature. The legacy parsed
+//! `composio.webhook` frame is dropped: it carried no signature Core could
+//! verify. The fail-closed ladder stays in this crate; the host
 //! only performs the leaf secret lookup + crypto + run.
 //!
 //! Placement (CLAUDE.md §1): choosing which handler runs for an inbound event is
@@ -48,7 +48,7 @@ use super::WEBHOOK_PATH;
 /// (`/api/workflows/<id>/webhook`). Kept in lockstep with the axum route in
 /// `server/mod.rs` so [`workflow_webhook_path`] and [`parse_workflow_webhook_path`]
 /// round-trip.
-const WORKFLOW_WEBHOOK_PREFIX: &str = "/api/workflows/";
+pub(crate) const WORKFLOW_WEBHOOK_PREFIX: &str = "/api/workflows/";
 const WORKFLOW_WEBHOOK_SUFFIX: &str = "/webhook";
 
 /// Replay-staleness window for inbound webhooks that carry a timestamp header
@@ -132,6 +132,38 @@ pub fn forget_http_delivery(id: &str) -> bool {
     guard.remove(id)
 }
 
+// ── Durable Composio delivery reservation ─────────────────────────────────────
+
+/// How long a verified Composio delivery id stays claimed, counted from receipt.
+/// Composio (Svix) re-signs every retry with a fresh `webhook-timestamp` and the
+/// same `webhook-id` over a schedule of about 28 hours, so the claim must outlive
+/// that schedule, not the 300 s signature window.
+pub const COMPOSIO_DELIVERY_RETENTION_SECS: u64 = 72 * 60 * 60;
+
+/// The scope Composio claims use in the host's durable delivery ledger. It
+/// contains `/`, which no workflow id can (see [`parse_workflow_webhook_path`]),
+/// so it never collides with a workflow reservation.
+const COMPOSIO_DELIVERY_SCOPE: &str = WEBHOOK_PATH;
+
+/// Durably claim a verified Composio delivery id, so a sender retry after a
+/// Core restart cannot fire its agent and workflow runs a second time.
+/// `Ok(false)` means this id was already claimed. Call only after the signature
+/// verified, so an unauthenticated id can never poison the ledger.
+pub fn reserve_composio_delivery(delivery_id: &str) -> anyhow::Result<bool> {
+    let delivery_id = delivery_id.trim();
+    anyhow::ensure!(!delivery_id.is_empty(), "composio delivery id is empty");
+    let expires_at = u64::try_from(now_unix())
+        .unwrap_or(0)
+        .saturating_add(COMPOSIO_DELIVERY_RETENTION_SECS);
+    host()?.reserve_workflow_delivery(COMPOSIO_DELIVERY_SCOPE, delivery_id, expires_at)
+}
+
+/// Drop a Composio claim whose delivery never reached the triggers store, so
+/// the sender's retry is dispatched instead of treated as a duplicate.
+pub fn release_composio_delivery(delivery_id: &str) -> anyhow::Result<()> {
+    host()?.release_workflow_delivery(COMPOSIO_DELIVERY_SCOPE, delivery_id.trim())
+}
+
 // ── Replay window (acceptance #5) ─────────────────────────────────────────────
 
 /// Whether an inbound delivery is fresh enough to accept, given the value of a
@@ -192,19 +224,17 @@ pub enum WorkflowWebhookOutcome {
 /// handler and the relay dispatcher both call it, guaranteeing identical
 /// fail-closed semantics.
 ///
-/// `delivery_id` is checked against the process-global HTTP seen-set after the
-/// signature and body validate, but before the run fires. A failed run releases
-/// its reservation so a provider retry can recover. An empty `delivery_id` (no
-/// id header, or a caller such as the relay that already deduped upstream) is
-/// always treated as new, so passing `""` is a safe no-op.
+/// The signed timestamp and delivery id are verified before a durable replay
+/// reservation. A run that could not start releases that reservation for a
+/// legitimate retry; once the run is seeded the reservation is kept, and a
+/// later failure surfaces on the run record instead of re-running side effects.
 ///
 /// On success it records the delivery against [`workflow_webhook_path`] so the
 /// registry reflects relay-delivered firings too.
 pub async fn deliver_workflow_webhook(
     id: &str,
     raw_body: &[u8],
-    signature: Option<&str>,
-    delivery_id: &str,
+    headers: crate::InboundWebhookHeaders<'_>,
 ) -> WorkflowWebhookOutcome {
     let Ok(host) = host() else {
         // No host installed → treat as unresolvable (fail-closed, never fires).
@@ -220,7 +250,7 @@ pub async fn deliver_workflow_webhook(
             None => return WorkflowWebhookOutcome::NoSecret,
         },
     };
-    if !host.verify_workflow_webhook_signature(&secret, raw_body, signature) {
+    if !host.verify_workflow_webhook_signature(id, &secret, raw_body, headers) {
         return WorkflowWebhookOutcome::BadSignature;
     }
     // The raw JSON body becomes the run's trigger payload; validate it parses so
@@ -231,10 +261,17 @@ pub async fn deliver_workflow_webhook(
     if serde_json::from_str::<Value>(body_str).is_err() {
         return WorkflowWebhookOutcome::BadBody("body must be valid JSON".to_owned());
     }
-    // Reserve the id only after the request can run. Release it on a transient
-    // execution failure so the sender's retry can recover the delivery.
-    if !first_http_delivery(delivery_id) {
-        return WorkflowWebhookOutcome::Duplicate;
+    let (Some(delivery_id), Some(timestamp)) = (headers.webhook_id, headers.webhook_timestamp)
+    else {
+        return WorkflowWebhookOutcome::BadSignature;
+    };
+    let Ok(timestamp) = timestamp.parse::<u64>() else {
+        return WorkflowWebhookOutcome::BadSignature;
+    };
+    match host.reserve_workflow_delivery(id, delivery_id, timestamp.saturating_add(300)) {
+        Ok(true) => {}
+        Ok(false) => return WorkflowWebhookOutcome::Duplicate,
+        Err(error) => return WorkflowWebhookOutcome::RunError(error.to_string()),
     }
     match host.run_workflow_for_trigger(id, body_str).await {
         Ok(run_id) => {
@@ -242,7 +279,9 @@ pub async fn deliver_workflow_webhook(
             WorkflowWebhookOutcome::Ran(run_id)
         }
         Err(e) => {
-            let _ = forget_http_delivery(delivery_id);
+            if let Err(error) = host.release_workflow_delivery(id, delivery_id) {
+                tracing::error!(%error, "failed to release workflow webhook retry reservation");
+            }
             WorkflowWebhookOutcome::RunError(e.to_string())
         }
     }
@@ -292,6 +331,31 @@ pub async fn deliver_inbound(
         let Ok(payload) = serde_json::from_slice::<Value>(raw_body) else {
             return InboundOutcome::Rejected("composio webhook: invalid JSON body".to_owned());
         };
+        // A verified signature requires the delivery id.
+        let Some(delivery_id) = headers.webhook_id else {
+            return InboundOutcome::Rejected("composio webhook: missing webhook-id".to_owned());
+        };
+        // Accounting is idempotent by delivery id, so it precedes the claim.
+        if host
+            .record_composio_trigger_delivery(delivery_id)
+            .await
+            .is_err()
+        {
+            return InboundOutcome::Rejected("composio trigger accounting unavailable".to_owned());
+        }
+        match reserve_composio_delivery(delivery_id) {
+            Ok(true) => {}
+            Ok(false) => {
+                return InboundOutcome::Delivered {
+                    detail: "composio webhook duplicate delivery (already fired)".to_owned(),
+                }
+            }
+            Err(error) => {
+                return InboundOutcome::Rejected(format!(
+                    "composio delivery reservation unavailable: {error}"
+                ))
+            }
+        }
         return match host.composio_handle_webhook(&payload).await {
             Some(fired) => {
                 record_delivery(path);
@@ -299,16 +363,17 @@ pub async fn deliver_inbound(
                     detail: format!("composio webhook fired {fired} run(s)"),
                 }
             }
-            None => InboundOutcome::Rejected("composio triggers store unavailable".to_owned()),
+            None => {
+                if let Err(error) = release_composio_delivery(delivery_id) {
+                    tracing::error!(%error, "failed to release composio delivery reservation");
+                }
+                InboundOutcome::Rejected("composio triggers store unavailable".to_owned())
+            }
         };
     }
 
     if let Some(id) = parse_workflow_webhook_path(path) {
-        // "" for `delivery_id`: every `deliver_inbound` caller (the relay's
-        // `Inbound` arm, and Core's real-wiring test) already deduped by the
-        // frame/delivery id upstream — see `ryu_relay.rs`'s `dispatch_frame` —
-        // so a second dedup here would be redundant, and "" keeps it a no-op.
-        return match deliver_workflow_webhook(&id, raw_body, headers.signature, "").await {
+        return match deliver_workflow_webhook(&id, raw_body, headers).await {
             WorkflowWebhookOutcome::Ran(run_id) => InboundOutcome::Delivered {
                 detail: format!("workflow '{id}' run {run_id}"),
             },
@@ -330,11 +395,11 @@ pub async fn deliver_inbound(
             WorkflowWebhookOutcome::RunError(e) => {
                 InboundOutcome::Rejected(format!("workflow '{id}' run failed: {e}"))
             }
-            // "" is always treated as new by `first_http_delivery`, so this arm
-            // is unreachable from this call site — kept exhaustive for the enum.
-            WorkflowWebhookOutcome::Duplicate => {
-                InboundOutcome::Rejected(format!("workflow '{id}': duplicate delivery"))
-            }
+            // The signed id already started a run: acknowledge it so a relay
+            // replay is not retried.
+            WorkflowWebhookOutcome::Duplicate => InboundOutcome::Delivered {
+                detail: format!("workflow '{id}': duplicate delivery (already started)"),
+            },
         };
     }
 
@@ -342,18 +407,76 @@ pub async fn deliver_inbound(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::host::{set_global_host, WebhookIngressHost};
-    use std::sync::Arc;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn mock_deliveries() -> &'static Mutex<HashSet<(String, String)>> {
+        static DELIVERIES: OnceLock<Mutex<HashSet<(String, String)>>> = OnceLock::new();
+        DELIVERIES.get_or_init(|| Mutex::new(HashSet::new()))
+    }
+
+    /// Runs for a workflow id containing `-block` park in the mock's
+    /// `run_workflow_for_trigger` until a test adds a permit here, so a test can
+    /// hold a run in flight.
+    pub(crate) fn block_gate() -> &'static tokio::sync::Semaphore {
+        static GATE: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+        GATE.get_or_init(|| tokio::sync::Semaphore::new(0))
+    }
+
+    /// Notified once per `-block` run as it parks on [`block_gate`].
+    pub(crate) fn block_started() -> &'static tokio::sync::Notify {
+        static STARTED: OnceLock<tokio::sync::Notify> = OnceLock::new();
+        STARTED.get_or_init(tokio::sync::Notify::new)
+    }
+
+    fn secret_lookup_counts() -> &'static Mutex<HashMap<String, usize>> {
+        static LOOKUPS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+        LOOKUPS.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// How many deliveries for `workflow_id` reached the mock host (each one
+    /// starts with the secret lookup).
+    pub(crate) fn secret_lookups(workflow_id: &str) -> usize {
+        secret_lookup_counts()
+            .lock()
+            .expect("secret lookups")
+            .get(workflow_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn composio_fanout_counts() -> &'static Mutex<HashMap<String, usize>> {
+        static FANOUTS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+        FANOUTS.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// How many payloads whose `marker` field is `marker` reached the mock's
+    /// Composio fan-out.
+    pub(crate) fn composio_fanouts(marker: &str) -> usize {
+        composio_fanout_counts()
+            .lock()
+            .expect("composio fan-outs")
+            .get(marker)
+            .copied()
+            .unwrap_or(0)
+    }
 
     /// A single deterministic mock host installed for the crate test process
     /// (`set_global_host` is a `OnceLock` → one host per process, so behaviour is
     /// keyed purely on inputs). Drives the router's branches without any kernel:
     /// - `workflow_webhook_secret`: keyed on an `-notfound` / `-notrigger` /
     ///   `-nosecret` marker in the id, else a real secret.
+    /// - `verify_webhook_signature` (Composio): signature `"good"`, a
+    ///   `msg-good…` id, and the fixed timestamp.
     /// - `verify_workflow_webhook_signature`: true iff the signature is `"good"`.
-    /// - `run_workflow_for_trigger`: succeeds with a synthetic run id.
+    /// - `composio_handle_webhook`: `None` for a `store_unavailable` payload;
+    ///   counts each payload by its `marker` field (see [`composio_fanouts`]).
+    /// - `run_workflow_for_trigger`: succeeds with a synthetic run id; an id
+    ///   with a `-block` marker first parks on [`block_gate`], and an id with a
+    ///   `-startfail` marker fails as if no run could be seeded.
     struct MockHost;
 
     #[async_trait::async_trait]
@@ -370,28 +493,76 @@ mod tests {
             headers: crate::InboundWebhookHeaders<'_>,
         ) -> bool {
             headers.signature == Some("good")
-                && headers.webhook_id == Some("msg-good")
+                && headers
+                    .webhook_id
+                    .is_some_and(|id| id.starts_with("msg-good"))
                 && headers.webhook_timestamp == Some("1735689600")
         }
         fn verify_workflow_webhook_signature(
             &self,
+            workflow_id: &str,
             _secret: &str,
             _raw_body: &[u8],
-            signature: Option<&str>,
+            headers: crate::InboundWebhookHeaders<'_>,
         ) -> bool {
-            signature == Some("good")
+            !workflow_id.is_empty()
+                && headers.signature == Some("good")
+                && headers.webhook_id.is_some()
+                && headers.webhook_timestamp.is_some()
         }
-        async fn composio_handle_webhook(&self, _payload: &Value) -> Option<usize> {
-            Some(1)
+        fn reserve_workflow_delivery(
+            &self,
+            workflow_id: &str,
+            delivery_id: &str,
+            _expires_at: u64,
+        ) -> anyhow::Result<bool> {
+            Ok(mock_deliveries()
+                .lock()
+                .expect("mock deliveries")
+                .insert((workflow_id.to_owned(), delivery_id.to_owned())))
+        }
+        fn release_workflow_delivery(
+            &self,
+            workflow_id: &str,
+            delivery_id: &str,
+        ) -> anyhow::Result<()> {
+            mock_deliveries()
+                .lock()
+                .expect("mock deliveries")
+                .remove(&(workflow_id.to_owned(), delivery_id.to_owned()));
+            Ok(())
+        }
+        async fn composio_handle_webhook(&self, payload: &Value) -> Option<usize> {
+            if let Some(marker) = payload.get("marker").and_then(Value::as_str) {
+                *composio_fanout_counts()
+                    .lock()
+                    .expect("composio fan-outs")
+                    .entry(marker.to_owned())
+                    .or_default() += 1;
+            }
+            // A `store_unavailable` payload stands in for an uninitialised store.
+            payload.get("store_unavailable").is_none().then_some(1)
         }
         async fn run_workflow_for_trigger(
             &self,
             workflow_id: &str,
             _payload_json: &str,
         ) -> anyhow::Result<String> {
+            if workflow_id.contains("-startfail") {
+                anyhow::bail!("mock: workflow '{workflow_id}' could not be seeded");
+            }
+            if workflow_id.contains("-block") {
+                block_started().notify_one();
+                block_gate().acquire().await?.forget();
+            }
             Ok(format!("trigrun_{workflow_id}"))
         }
         fn workflow_webhook_secret(&self, workflow_id: &str) -> WorkflowWebhookSecret {
+            *secret_lookup_counts()
+                .lock()
+                .expect("secret lookups")
+                .entry(workflow_id.to_owned())
+                .or_default() += 1;
             if workflow_id.contains("-notfound") {
                 WorkflowWebhookSecret::NotFound
             } else if workflow_id.contains("-notrigger") {
@@ -418,7 +589,7 @@ mod tests {
 
     /// Install the shared mock host (idempotent). Any host-driven test calls this
     /// first, so install order across the parallel test threads is irrelevant.
-    fn ensure_mock_host() {
+    pub(crate) fn ensure_mock_host() {
         set_global_host(Arc::new(MockHost));
     }
 
@@ -481,9 +652,10 @@ mod tests {
     #[tokio::test]
     async fn composio_path_requires_all_current_signed_headers() {
         ensure_mock_host();
+        let delivery_id = format!("msg-good-{}", uuid::Uuid::new_v4().simple());
         let valid = crate::InboundWebhookHeaders {
             signature: Some("good"),
-            webhook_id: Some("msg-good"),
+            webhook_id: Some(&delivery_id),
             webhook_timestamp: Some("1735689600"),
         };
         let outcome = deliver_inbound(WEBHOOK_PATH, b"{}", valid).await;
@@ -495,6 +667,62 @@ mod tests {
         };
         let outcome = deliver_inbound(WEBHOOK_PATH, b"{}", missing_id).await;
         assert!(matches!(outcome, InboundOutcome::Rejected(_)));
+    }
+
+    /// A Composio retry of an id that already fired is acknowledged without a
+    /// second fan-out, through the durable host ledger rather than process
+    /// memory, so a Core restart cannot re-fire it.
+    #[tokio::test]
+    async fn composio_duplicate_delivery_is_not_refired() {
+        ensure_mock_host();
+        let delivery_id = format!("msg-good-{}", uuid::Uuid::new_v4().simple());
+        let headers = crate::InboundWebhookHeaders {
+            signature: Some("good"),
+            webhook_id: Some(&delivery_id),
+            webhook_timestamp: Some("1735689600"),
+        };
+        match deliver_inbound(WEBHOOK_PATH, b"{}", headers).await {
+            InboundOutcome::Delivered { detail } => assert!(detail.contains("fired"), "{detail}"),
+            other => panic!("expected the first delivery to fire, got {other:?}"),
+        }
+        assert!(mock_deliveries()
+            .lock()
+            .expect("mock deliveries")
+            .contains(&(WEBHOOK_PATH.to_owned(), delivery_id.clone())));
+        match deliver_inbound(WEBHOOK_PATH, b"{}", headers).await {
+            InboundOutcome::Delivered { detail } => {
+                assert!(detail.contains("duplicate"), "{detail}");
+            }
+            other => panic!("expected the retry to be acknowledged as a duplicate, got {other:?}"),
+        }
+    }
+
+    /// A delivery that never reached the triggers store releases its claim, so
+    /// the sender's retry is dispatched rather than swallowed as a duplicate.
+    #[tokio::test]
+    async fn composio_delivery_without_a_store_releases_its_claim() {
+        ensure_mock_host();
+        let delivery_id = format!("msg-good-{}", uuid::Uuid::new_v4().simple());
+        let headers = crate::InboundWebhookHeaders {
+            signature: Some("good"),
+            webhook_id: Some(&delivery_id),
+            webhook_timestamp: Some("1735689600"),
+        };
+        let outcome =
+            deliver_inbound(WEBHOOK_PATH, br#"{"store_unavailable":true}"#, headers).await;
+        assert!(
+            matches!(outcome, InboundOutcome::Rejected(_)),
+            "{outcome:?}"
+        );
+        assert!(!mock_deliveries()
+            .lock()
+            .expect("mock deliveries")
+            .contains(&(WEBHOOK_PATH.to_owned(), delivery_id.clone())));
+        let retried = deliver_inbound(WEBHOOK_PATH, b"{}", headers).await;
+        assert!(
+            matches!(&retried, InboundOutcome::Delivered { detail } if detail.contains("fired")),
+            "{retried:?}"
+        );
     }
 
     #[tokio::test]
@@ -545,7 +773,11 @@ mod tests {
         let outcome = deliver_inbound(
             &path,
             body,
-            crate::InboundWebhookHeaders::signature(Some("good")),
+            crate::InboundWebhookHeaders {
+                signature: Some("good"),
+                webhook_id: Some("relay-workflow-1"),
+                webhook_timestamp: Some("1735689600"),
+            },
         )
         .await;
         match &outcome {
@@ -630,23 +862,78 @@ mod tests {
         let body = br#"{"event":"first"}"#;
 
         // First delivery: valid signature, fresh id → runs.
-        let first = deliver_workflow_webhook(&id, body, Some("good"), &delivery_id).await;
+        let headers = crate::InboundWebhookHeaders {
+            signature: Some("good"),
+            webhook_id: Some(&delivery_id),
+            webhook_timestamp: Some("1735689600"),
+        };
+        let first = deliver_workflow_webhook(&id, body, headers).await;
         assert!(matches!(first, WorkflowWebhookOutcome::Ran(_)));
 
         // Retried delivery: same id → duplicate, no second run.
-        let retried = deliver_workflow_webhook(&id, body, Some("good"), &delivery_id).await;
+        let retried = deliver_workflow_webhook(&id, body, headers).await;
         assert!(matches!(retried, WorkflowWebhookOutcome::Duplicate));
 
         // An unauthenticated forged id never reaches (and so never poisons) the
         // seen-set: a fresh id with a bad signature is rejected, not deduped —
         // and that same id is still usable afterwards for a real delivery.
         let forged_id = format!("dlv-forged-{}", uuid::Uuid::new_v4().simple());
-        let bad = deliver_workflow_webhook(&id, body, Some("bad"), &forged_id).await;
+        let forged_headers = crate::InboundWebhookHeaders {
+            signature: Some("bad"),
+            webhook_id: Some(&forged_id),
+            webhook_timestamp: Some("1735689600"),
+        };
+        let bad = deliver_workflow_webhook(&id, body, forged_headers).await;
         assert!(matches!(bad, WorkflowWebhookOutcome::BadSignature));
-        let now_valid = deliver_workflow_webhook(&id, body, Some("good"), &forged_id).await;
+        let now_valid = deliver_workflow_webhook(
+            &id,
+            body,
+            crate::InboundWebhookHeaders {
+                signature: Some("good"),
+                ..forged_headers
+            },
+        )
+        .await;
         assert!(
             matches!(now_valid, WorkflowWebhookOutcome::Ran(_)),
             "a forged-signature attempt must not poison the seen-set for the real id"
+        );
+    }
+
+    /// A run that could not start (the host's `Err`: no run was seeded) releases
+    /// its durable reservation, so the sender's retry of the same id is reserved
+    /// again rather than acknowledged as a duplicate and lost. The converse, a
+    /// seeded run that later fails keeping its reservation, is covered against
+    /// the real host in `apps/core/src/webhook_ingress.rs`.
+    #[tokio::test]
+    async fn workflow_run_that_cannot_start_releases_its_reservation() {
+        ensure_mock_host();
+
+        let id = format!("wf-startfail-{}", uuid::Uuid::new_v4().simple());
+        let delivery_id = format!("dlv-{}", uuid::Uuid::new_v4().simple());
+        let headers = crate::InboundWebhookHeaders {
+            signature: Some("good"),
+            webhook_id: Some(&delivery_id),
+            webhook_timestamp: Some("1735689600"),
+        };
+        let reserved = || {
+            mock_deliveries()
+                .lock()
+                .expect("mock deliveries")
+                .contains(&(id.clone(), delivery_id.clone()))
+        };
+
+        for attempt in ["first delivery", "sender retry"] {
+            let outcome = deliver_workflow_webhook(&id, br#"{"event":"x"}"#, headers).await;
+            assert!(
+                matches!(&outcome, WorkflowWebhookOutcome::RunError(_)),
+                "{attempt}: expected RunError, got {outcome:?}"
+            );
+            assert!(!reserved(), "{attempt}: the reservation must be released");
+        }
+        assert!(
+            last_delivery(&workflow_webhook_path(&id)).is_none(),
+            "a run that never started is not recorded as delivered"
         );
     }
 }

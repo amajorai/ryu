@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/provider-credits.ts
 //
 // Remaining prepaid API credit on a BYOK provider key ("how many dollars are
@@ -91,7 +93,47 @@ export async function fetchProviderCredits(
 	const wire = await request<WireSnapshot>(
 		target,
 		`/api/providers/${encodeURIComponent(providerId)}/credits`,
-		{ signal }
+		{ signal },
+		wireSnapshotResponseCodec
 	);
 	return toSnapshot(wire);
 }
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const wireValueResponseCodec = z
+	.object({
+		kind: z.union([
+			z.literal("percent"),
+			z.literal("dollars"),
+			z.literal("count"),
+		]),
+		number: z.number(),
+		unit: z.union([z.string(), z.null()]).optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const wireMeterResponseCodec = z
+	.object({
+		expires_at: z.union([z.array(z.string()), z.null()]).optional(),
+		label: z.string(),
+		resets_at: z.union([z.string(), z.null()]).optional(),
+		values: z.array(wireValueResponseCodec),
+	})
+	.catchall(gatewayJsonValueSchema);
+const usageReasonResponseCodec = z.union([
+	z.literal("unsupported"),
+	z.literal("not_logged_in"),
+	z.literal("token_expired"),
+	z.literal("missing_scope"),
+	z.literal("no_plan"),
+	z.literal("rate_limited"),
+	z.literal("error"),
+]);
+const wireSnapshotResponseCodec = z
+	.object({
+		available: z.boolean(),
+		meters: z.union([z.array(wireMeterResponseCodec), z.null()]).optional(),
+		provider_id: z.string(),
+		reason: z.union([usageReasonResponseCodec, z.null()]).optional(),
+		retry_after_seconds: z.union([z.number(), z.null()]).optional(),
+	})
+	.catchall(gatewayJsonValueSchema);

@@ -1,0 +1,86 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+.markdown {
+	composes: an-markdown from global;
+}
+.markdown pre code {
+	counter-reset: none !important;
+}
+
+.markdown pre code > span::before {
+	display: none !important;
+	content: none !important;
+}
+
+.markdown pre code > span {
+	padding-left: 0 !important;
+}
+
+.markdown [data-streamdown="code-block"] {
+	gap: 0;
+	padding: 0;
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.markdown [data-streamdown="code-block-header"] {
+	position: relative;
+	height: auto;
+	height: 28px;
+	padding: 0px 10px 0px 8px;
+	font-size: 12px;
+	background: transparent;
+	background-color: var(--muted);
+	border-bottom: 1px solid var(--border);
+}
+
+.markdown div:has(> [data-streamdown="code-block-actions"]) {
+	position: absolute;
+	top: 0;
+	right: 0;
+	height: auto;
+	height: 28px;
+	padding-right: 8px;
+	margin: 0;
+}
+
+.markdown [data-streamdown="code-block-actions"] {
+	padding: 0;
+	background: transparent;
+	border: none;
+	backdrop-filter: none;
+}
+
+.markdown [data-streamdown="code-block-actions"] button > svg {
+	width: 14px;
+	height: 14px;
+}
+
+.markdown [data-streamdown="code-block-body"] {
+	padding-top: 8px;
+	padding-bottom: 8px;
+	margin: 0;
+	overflow-x: auto;
+	background: transparent;
+	border: transparent;
+}
+
+.markdown [data-streamdown="code-block"] pre,
+.markdown [data-streamdown="code-block"] code {
+	font-size: 12px;
+	background: transparent;
+}
+
+.table {
+	composes: an-md-table from global;
+}
+@layer utilities {
+	:where(.table) {
+		width: 100%;
+		min-width: max-content;
+		font-size: var(--text-sm);
+		line-height: var(--tw-leading, var(--text-sm--line-height));
+	}
+}

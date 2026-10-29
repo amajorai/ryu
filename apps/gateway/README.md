@@ -19,24 +19,56 @@ Ryu Gateway is the control layer: a full LLM gateway that decides *what is allow
 
 ## Run standalone
 
-```bash
-# From this directory
-cargo build --release           # produces the `ryu-gateway` binary in target/release
+Prerequisites: a Rust toolchain, a C compiler, `pkg-config` and the OpenSSL
+headers (`build-essential pkg-config libssl-dev` on Debian/Ubuntu).
 
+```bash
+# From the repository root (the Gateway has path dependencies in crates/ and vendor/)
+cargo build --release --manifest-path apps/gateway/Cargo.toml
 ./target/release/ryu-gateway    # binds 127.0.0.1:7981 by default
 ```
 
-Configuration is loaded from `~/.ryu/gateway.toml` (providers, cache, rate limits, circuit breaker). Point any OpenAI-compatible client at `http://localhost:7981/v1`.
+Inside this monorepo the binary lands in the workspace `target/`; in a checkout
+without the root `Cargo.toml` it lands in `apps/gateway/target/`. The container
+image builds from the repository root: `docker build -f apps/gateway/Dockerfile .`.
 
-The standalone root `GET /` redirects people to the Ryu organization dashboard.
-The OpenAI-compatible and Ryu API paths remain available for programmatic
-callers.
+Configuration (providers, cache, rate limits, circuit breaker) is loaded from
+`$GATEWAY_CONFIG` when set, otherwise from `gateway.toml` in the platform config
+directory: `~/.config/ryu/` on Linux, `~/Library/Application Support/ryu/` on
+macOS, `%APPDATA%\ryu\` on Windows. A non-release `RYU_PROFILE` adds a suffix
+(`ryu-dev`). The startup log names the file it loaded and warns when none exists
+(the Gateway then runs on built-in defaults). Point any OpenAI-compatible client
+at `http://localhost:7981/v1`.
+
+Auth is on by default. With no keys configured, the Gateway writes
+`gateway-admin.key` (administrator key) and `gateway-relay.key` (inference key)
+next to `gateway.toml` on first start. They are sealed when the Gateway has a key
+(`RYU_MASTER_KEY`, or the one Core passes it); print one with
+`ryu-gateway print-key admin|relay`. Without a key they stay plaintext (`0600`). Every key must be at least 24 printable
+characters with no whitespace.
+
+The root `GET /` returns a short JSON description of the Gateway, or redirects
+to `RYU_PRODUCT_DASHBOARD_URL` when that is set. The OpenAI-compatible and Ryu
+API paths remain available for programmatic callers.
 
 Key environment variables:
 
-- `RUST_LOG`: log level (e.g. `ryu_gateway=debug,info`)
+- `GATEWAY_CONFIG`: path to `gateway.toml`
+- `GATEWAY_BIND`: listen address (or pass `--bind=`)
+- `GATEWAY_MASTER_KEY`: a known administrator key instead of the generated one
+- `RYU_PRODUCT_DASHBOARD_URL`, `RYU_CORS_ORIGINS`, `RYU_CORS_ALLOW_HOSTED_WEB`:
+  root redirect and browser origins (see the standalone Gateway docs)
+- `RUST_LOG`: defaults to `info`; set `ryu_gateway=debug,info` for Gateway debug output
 
-Admin and exec endpoints are loopback-gated regardless of bind address.
+Admin routes (`/v1/config`, `/v1/audit*`, `/v1/budget/spend`, `/v1/doctor*`,
+metrics, evals and live traffic) require the administrator key, and that key
+works from any peer. Only when auth is disabled, no master key is set, and mesh
+and fleet mode are off does a loopback peer get credential-less admin access.
+Exec routes (`/v1/exec/tool`, `/v1/exec/scan`, `/v1/exec/audit`,
+`/v1/exec/budget/check`, `/sandbox/tick`, `/sandbox/quote`, `/sandbox/complete`) require a trusted-forwarder or
+administrator key and are not limited by peer address. On a non-loopback bind,
+keep both of those keys away from remote clients and give external callers the
+inference key.
 
 ## What it does
 
@@ -60,12 +92,12 @@ One self-contained native binary: no interpreter, no runtime, no Electron, no Do
 | Metric | Value |
 | --- | --- |
 | Release binary | 18.7 MB |
-| Resolved crates (transitive deps) | 405 |
-| Source | 20,658 lines of Rust across 54 files |
+| Resolved crates (transitive deps) | 548 |
+| Source | 98,280 lines of Rust across 113 files |
 | Idle memory (RSS) | 17.0 MB |
 | Idle CPU | 0.0% |
 
-_Measured on `win32` by `node scripts/benchmark.mjs --build --runtime --write`. Reproduce it yourself._
+_Release binary and idle figures were last measured on `win32`; crate and source counts were refreshed from the tree on `linux`. Reproduce all of them with `node scripts/benchmark.mjs --build --runtime --write`._
 
 <!-- BENCH:END -->
 

@@ -15,8 +15,9 @@
 //
 // It runs on every turn with no `match` pre-gate, because there is no cheap
 // condition to gate on: the inbox is keyed by AGENT and Core's `stateful` match
-// tests a key named after the CONVERSATION. The cost is one KV read per turn on
-// the pre-turn path, which is why the plugin is not in `CORE_PREINSTALLED`.
+// tests a key named after the CONVERSATION. The cost is two KV reads per turn on
+// the pre-turn path (the inbox and this conversation's hop context), which is
+// why the plugin is not in `CORE_PREINSTALLED`.
 
 const MAX_SHOWN = 10;
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -26,9 +27,28 @@ if (!AGENT_ID.test(me)) {
 	return { kind: "none" };
 }
 
+// Hop context is scoped to the user turn that delivered the mail. A turn that
+// injects nothing is the user's own turn, so a send from it must start a fresh
+// chain at hop 1 rather than inherit the depth of mail answered earlier in the
+// same conversation. Clear only the hop key — never the inbox — and read first
+// so the common no-mail turn stays a single extra read, not a write.
+const hopKey = ctx.conversation_id
+	? `hops.conv:${encodeURIComponent(ctx.conversation_id)}`
+	: null;
+async function clearHopContext() {
+	if (hopKey === null) {
+		return;
+	}
+	const prior = await host.storage.get(hopKey);
+	if (prior !== null && prior !== undefined) {
+		await host.storage.delete(hopKey);
+	}
+}
+
 const inboxKey = `inbox:${encodeURIComponent(me)}`;
 let raw = await host.storage.get(inboxKey);
 if (raw === null || raw === undefined || raw === "") {
+	await clearHopContext();
 	return { kind: "none" };
 }
 
@@ -36,31 +56,28 @@ let messages = [];
 try {
 	const parsed = JSON.parse(String(raw));
 	messages = Array.isArray(parsed) ? parsed : [];
-} catch (_e) {
-	// A corrupt value is dropped rather than retried forever.
-	await host.storage.delete(inboxKey);
+} catch  {
+	// Clear only the corrupt snapshot, never a newer concurrent sender's value.
+	await host.storage.compareAndSet(inboxKey, raw, null);
+	await clearHopContext();
 	return { kind: "none" };
 }
 if (messages.length === 0) {
-	await host.storage.delete(inboxKey);
-	return { kind: "none" };
-}
-
-// Delivered exactly once. CAS clears only the snapshot we read; a concurrent
-// sender that appended after it will cause a retry rather than losing mail.
-if (!(await host.storage.compareAndSet(inboxKey, raw, null))) {
+	await host.storage.compareAndSet(inboxKey, raw, null);
+	await clearHopContext();
 	return { kind: "none" };
 }
 
 // Carry the chain depth onto this conversation so a relay the agent sends while
-// answering counts as the next hop rather than restarting at one. Both tools
-// read this key.
+// answering counts as the next hop rather than restarting at one. `agents.send`
+// reads this key. Always write this turn's depth (even 0) so an older, deeper
+// value can never outlive the turn that set it.
 const deepest = messages.reduce((acc, m) => {
 	const h = Number.parseInt(String(m && m.hops), 10);
 	return Number.isFinite(h) && h > acc ? h : acc;
 }, 0);
-if (ctx.conversation_id && deepest > 0) {
-	await host.storage.set(`hops.conv:${encodeURIComponent(ctx.conversation_id)}`, String(deepest));
+if (hopKey !== null) {
+	await host.storage.set(hopKey, String(deepest));
 }
 
 const shown = messages.slice(-MAX_SHOWN);
@@ -89,4 +106,13 @@ const text = [
 	.filter((line) => line !== "")
 	.join("\n");
 
+// Finish all fallible preparation before consuming the inbox. A refused hop
+// write leaves messages queued. CAS clears only the snapshot we read; a newer
+// append stays intact and is delivered on a later turn. A failed CAS injects
+// nothing, so it drops this turn's hop context, and must never restore or
+// overwrite inbox contents.
+if (!(await host.storage.compareAndSet(inboxKey, raw, null))) {
+	await clearHopContext();
+	return { kind: "none" };
+}
 return { kind: "inject", text: text };

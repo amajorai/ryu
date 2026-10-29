@@ -1,0 +1,143 @@
+/* Shared @ryu/blocks landing animations, as a real CSS module.
+   Web block modules compose these classes (`composes: toolFloat from
+   "./animations.module.css"`). A `composes … from` target must be a CSS
+   module: Turbopack (`next build`) and Bun reject a plain stylesheet such as
+   `../styles.css`. The keyframes are scoped with this module, so they never
+   collide with the global copies in `../styles.css` or an app stylesheet.
+   Keep the keyframes and timings in step with `../styles.css`. */
+
+@keyframes tool-float {
+	0% {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	20% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	80% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+	100% {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+}
+@keyframes chunk-appear {
+	0% {
+		opacity: 0;
+		transform: scaleX(0);
+		transform-origin: left;
+	}
+	30% {
+		opacity: 1;
+		transform: scaleX(1);
+	}
+	70% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0.2;
+	}
+}
+@keyframes edge-trace {
+	0% {
+		stroke-dashoffset: 80;
+		opacity: 0;
+	}
+	30% {
+		opacity: 1;
+	}
+	70% {
+		stroke-dashoffset: 0;
+		opacity: 1;
+	}
+	100% {
+		stroke-dashoffset: 0;
+		opacity: 0.15;
+	}
+}
+@keyframes node-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0 oklch(0.5 0 0 / 0%);
+	}
+	50% {
+		box-shadow: 0 0 0 5px oklch(0.5 0 0 / 20%);
+	}
+}
+@keyframes flow-right {
+	0% {
+		transform: translateX(-8px);
+		opacity: 0;
+	}
+	20% {
+		opacity: 1;
+	}
+	80% {
+		opacity: 1;
+	}
+	100% {
+		transform: translateX(8px);
+		opacity: 0;
+	}
+}
+@keyframes flow-left {
+	0% {
+		transform: translateX(8px);
+		opacity: 0;
+	}
+	20% {
+		opacity: 1;
+	}
+	80% {
+		opacity: 1;
+	}
+	100% {
+		transform: translateX(-8px);
+		opacity: 0;
+	}
+}
+@keyframes marquee {
+	from {
+		transform: translateX(0);
+	}
+	to {
+		transform: translateX(-50%);
+	}
+}
+
+.toolFloat {
+	animation: tool-float 2s ease-in-out infinite;
+}
+.chunkAppear {
+	animation: chunk-appear 2s ease-in-out infinite;
+}
+.edgeTrace {
+	animation: edge-trace 3s ease-in-out infinite;
+}
+.nodePulse {
+	animation: node-pulse 2s ease-in-out infinite;
+}
+.flowRight {
+	animation: flow-right 1.2s ease-in-out infinite;
+}
+.flowLeft {
+	animation: flow-left 1.2s ease-in-out infinite;
+}
+.marquee {
+	animation: marquee 36s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.toolFloat,
+	.chunkAppear,
+	.edgeTrace,
+	.nodePulse,
+	.flowRight,
+	.flowLeft,
+	.marquee {
+		animation: none;
+	}
+}

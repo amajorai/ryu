@@ -75,7 +75,7 @@ export function localTimeZone(): string {
  *     occurrence, which is Core's `Ambiguous(first, _)` choice, and is still
  *     genuinely quiet.
  */
-export function nextQuietWindow(now: Date): { at: Date; timeZone: string } {
+export function nextQuietWindow(now: Date) {
 	const earliest = now.getTime() + MIN_LEAD_MINUTES * MINUTE_MS;
 	for (let dayOffset = 0; dayOffset <= 2; dayOffset++) {
 		const candidate = new Date(

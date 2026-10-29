@@ -1,0 +1,6 @@
+# Patched floor for CVE-2026-111497 (HTTP2Shell / Brotli decoder OOB write).
+# Google Brotli C library fixed in 1.0.10 / 1.1.1 / 1.2.1; PyPI wheels track these.
+# Pip applies these only when Brotli or brotlicffi is already on the dependency graph
+# (e.g. requests/httpx/aiohttp/urllib3 optional brotli extras). They do not force-install.
+Brotli>=1.2.1
+brotlicffi>=1.2.1.0

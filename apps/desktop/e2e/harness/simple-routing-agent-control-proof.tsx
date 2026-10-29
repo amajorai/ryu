@@ -91,7 +91,7 @@ function Surface({ level }: { level: InterfaceLevel }) {
 				<div className="flex items-center justify-between gap-3">
 					<p className="font-medium">Request boundary</p>
 					<span
-						className="rounded-full bg-muted px-2 py-1 font-mono text-[11px]"
+						className="type-caption rounded-full bg-muted px-2 py-1 font-mono"
 						data-testid={`${prefix}-routing-fields`}
 					>
 						{JSON.stringify(fields)}
@@ -115,7 +115,7 @@ function Story() {
 		<main className="min-h-screen bg-background px-6 py-10 text-foreground">
 			<div className="mx-auto max-w-5xl space-y-6">
 				<header className="space-y-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Completed feature proof
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">

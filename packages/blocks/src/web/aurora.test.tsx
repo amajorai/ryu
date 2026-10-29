@@ -23,4 +23,14 @@ describe("Aurora", () => {
 			});
 		}
 	});
+
+	it("provides an animated fallback when WebGL 2 is unavailable", async () => {
+		const stylesheet = await Bun.file(
+			new URL("./aurora.module.css", import.meta.url)
+		).text();
+
+		expect(stylesheet).toContain("fallback::before");
+		expect(stylesheet).toContain("footer-aurora-fallback-drift");
+		expect(stylesheet).toContain("prefers-reduced-motion: reduce");
+	});
 });

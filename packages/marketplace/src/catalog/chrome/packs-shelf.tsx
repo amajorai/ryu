@@ -1,3 +1,6 @@
+import type { CSSProperties } from "react";
+import visualStyles from "../../marketplace-visual.module.css";
+
 // packages/marketplace/src/catalog/chrome/packs-shelf.tsx
 //
 // The Packs shelf inside the Skills catalog section. Two states:
@@ -14,6 +17,7 @@
 
 import { ArrowLeft01Icon, PackageIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
@@ -60,6 +64,7 @@ function PacksShelfBody({
 		},
 		[install]
 	);
+	const tl = useLiteralMessages();
 	const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 	const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 	const openButtons = useRef<Array<HTMLButtonElement | null>>([]);
@@ -125,7 +130,9 @@ function PacksShelfBody({
 							Packs
 						</Button>
 						<div className="min-w-0">
-							<h3 className="truncate font-medium text-sm">{opened.name}</h3>
+							<h3 className="truncate font-medium text-sm" title={opened.name}>
+								{opened.name}
+							</h3>
 							<p className="truncate text-muted-foreground text-xs">
 								{opened.description}
 							</p>
@@ -171,7 +178,7 @@ function PacksShelfBody({
 	if (error && packs.length === 0) {
 		return (
 			<section className="border-border/60 border-b pb-4">
-				<Empty className="py-6">
+				<Empty spacing="snug">
 					<EmptyHeader>
 						<EmptyMedia variant="icon">
 							<HugeiconsIcon icon={PackageIcon} />
@@ -199,15 +206,20 @@ function PacksShelfBody({
 				<div className="mb-2 flex items-end justify-between gap-3">
 					<div>
 						<h3 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-							Skill packs
+							Featured skill packs
 						</h3>
 						<p className="mt-1 text-muted-foreground text-xs">
-							Collect a complete agent loadout in one pack.
+							Optional onboarding picks stay here to browse or install later.
 						</p>
 					</div>
 					<span className="shrink-0 text-muted-foreground text-xs">
-						{formatCount(packs.length) ?? "—"} pack
-						{packs.length === 1 ? "" : "s"}
+						{tl(
+							"{count, plural, one {{countLabel} pack} other {{countLabel} packs}}",
+							{
+								count: packs.length,
+								countLabel: formatCount(packs.length) ?? "—",
+							}
+						)}
 					</span>
 				</div>
 				<div
@@ -219,37 +231,44 @@ function PacksShelfBody({
 					)}
 					onPointerLeave={() => setHoveredIndex(null)}
 				>
-					{packs.map((pack, index) => (
-						<PackCatalogCard
-							className={cn(
-								"w-44 shrink-0 origin-bottom transition-[transform,z-index] duration-300 ease-out motion-reduce:transition-none",
-								index > 0 && "-ml-10"
-							)}
-							installable={canInstall}
-							installing={installing === pack.id}
-							key={pack.id}
-							onInstall={() => onInstall(pack.id)}
-							onOpen={() => open(pack.id)}
-							onOpenBlur={() => setFocusedIndex(null)}
-							onOpenFocus={() => setFocusedIndex(index)}
-							onOpenKeyDown={(event) => handlePackKeyDown(index, event)}
-							onPointerEnter={() => setHoveredIndex(index)}
-							openButtonRef={(element) => {
-								openButtons.current[index] = element;
-							}}
-							openTabIndex={0}
-							pack={pack}
-							style={{
-								zIndex:
-									activeIndex === index
-										? packs.length + 1
-										: packs.length - index,
-								transform: `translateX(${isExpanded ? (index - activeIndex) * 3.5 : 0}rem) rotate(${(index - (packs.length - 1) / 2) * 2.5 + (isExpanded ? (index - activeIndex) * 4 : 0)}deg) scale(${activeIndex === index && isExpanded ? 1.03 : 1})`,
-							}}
-						/>
-					))}
+					{packs.map((pack, index) => {
+						const stackStyle: PackStackStyle = {
+							"--marketplace-z-index":
+								activeIndex === index ? packs.length + 1 : packs.length - index,
+							"--marketplace-transform": `translateX(${isExpanded ? (index - activeIndex) * 3.5 : 0}rem) rotate(${(index - (packs.length - 1) / 2) * 2.5 + (isExpanded ? (index - activeIndex) * 4 : 0)}deg) scale(${activeIndex === index && isExpanded ? 1.03 : 1})`,
+						};
+						return (
+							<PackCatalogCard
+								className={cn(
+									"w-44 shrink-0 origin-bottom transition-transform duration-300 ease-out motion-reduce:transition-none",
+									visualStyles.stack,
+									index > 0 && "-ml-10"
+								)}
+								installable={canInstall}
+								installing={installing === pack.id}
+								key={pack.id}
+								onInstall={() => onInstall(pack.id)}
+								onOpen={() => open(pack.id)}
+								onOpenBlur={() => setFocusedIndex(null)}
+								onOpenFocus={() => setFocusedIndex(index)}
+								onOpenKeyDown={(event) => handlePackKeyDown(index, event)}
+								onPointerEnter={() => setHoveredIndex(index)}
+								openButtonRef={(element) => {
+									openButtons.current[index] = element;
+								}}
+								openTabIndex={0}
+								pack={pack}
+								style={stackStyle}
+							/>
+						);
+					})}
 				</div>
 			</div>
 		</section>
 	);
+}
+
+interface PackStackStyle extends CSSProperties {
+	"--marketplace-transform": string;
+	"--marketplace-z-index": number;
 }

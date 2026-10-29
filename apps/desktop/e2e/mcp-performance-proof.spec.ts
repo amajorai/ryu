@@ -15,46 +15,48 @@ test("tools library shares registry reads and fetches only tools on agent filter
 		}
 		const key = url.pathname + url.search;
 		calls[key] = (calls[key] ?? 0) + 1;
-		const payloads: Record<string, unknown> = {
-			"/api/mcp/servers": {
-				servers: [
-					{
-						name: "Workspace",
-						command: "fixture",
-						enabled: true,
-						available: true,
-						description: "Local workspace tools",
-						transport: "stdio",
-					},
-				],
-			},
-			"/api/mcp/tools": {
-				tools: [
-					{
-						id: "Workspace.search",
-						name: "Search files",
-						server: "Workspace",
-						description: "Find workspace documents",
-						input_schema: { type: "object" },
-					},
-				],
-			},
-			"/api/mcp/tools?agent=agent-a": {
-				tools: [
-					{
-						id: "Workspace.search",
-						name: "Search files",
-						server: "Workspace",
-						description: "Allowed for Research agent",
-						input_schema: { type: "object" },
-					},
-				],
-			},
-			"/api/agents": { agents: [{ id: "agent-a", name: "Research agent" }] },
-			"/api/apps": { apps: [] },
-			"/api/identities": { profiles: [] },
-		};
-		await route.fulfill({ json: payloads[key] ?? {} });
+		const payloads = new Map(
+			Object.entries({
+				"/api/mcp/servers": {
+					servers: [
+						{
+							name: "Workspace",
+							command: "fixture",
+							enabled: true,
+							available: true,
+							description: "Local workspace tools",
+							transport: "stdio",
+						},
+					],
+				},
+				"/api/mcp/tools": {
+					tools: [
+						{
+							id: "Workspace.search",
+							name: "Search files",
+							server: "Workspace",
+							description: "Find workspace documents",
+							input_schema: { type: "object" },
+						},
+					],
+				},
+				"/api/mcp/tools?agent=agent-a": {
+					tools: [
+						{
+							id: "Workspace.search",
+							name: "Search files",
+							server: "Workspace",
+							description: "Allowed for Research agent",
+							input_schema: { type: "object" },
+						},
+					],
+				},
+				"/api/agents": { agents: [{ id: "agent-a", name: "Research agent" }] },
+				"/api/apps": { apps: [] },
+				"/api/identities": { profiles: [] },
+			})
+		);
+		await route.fulfill({ json: payloads.get(key) ?? {} });
 	});
 	await page.goto("/mcp-performance-proof.html");
 	await expect(
@@ -121,23 +123,25 @@ test("server details open while tool discovery is pending", async ({
 				},
 			});
 		}
-		const payloads: Record<string, unknown> = {
-			"/api/mcp/servers": {
-				servers: [
-					{
-						name: "Workspace",
-						command: "fixture",
-						enabled: true,
-						available: true,
-						transport: "stdio",
-					},
-				],
-			},
-			"/api/agents": { agents: [] },
-			"/api/apps": { apps: [] },
-			"/api/identities": { profiles: [] },
-		};
-		await route.fulfill({ json: payloads[pathname] ?? {} });
+		const payloads = new Map(
+			Object.entries({
+				"/api/mcp/servers": {
+					servers: [
+						{
+							name: "Workspace",
+							command: "fixture",
+							enabled: true,
+							available: true,
+							transport: "stdio",
+						},
+					],
+				},
+				"/api/agents": { agents: [] },
+				"/api/apps": { apps: [] },
+				"/api/identities": { profiles: [] },
+			})
+		);
+		await route.fulfill({ json: payloads.get(pathname) ?? {} });
 	});
 	try {
 		await page.goto("/mcp-performance-proof.html");
@@ -202,23 +206,25 @@ test("tool discovery failure leaves server controls available and can recover", 
 						}
 			);
 		}
-		const payloads: Record<string, unknown> = {
-			"/api/mcp/servers": {
-				servers: [
-					{
-						name: "Workspace",
-						command: "fixture",
-						enabled: true,
-						available: true,
-						transport: "stdio",
-					},
-				],
-			},
-			"/api/agents": { agents: [] },
-			"/api/apps": { apps: [] },
-			"/api/identities": { profiles: [] },
-		};
-		await route.fulfill({ json: payloads[pathname] ?? {} });
+		const payloads = new Map(
+			Object.entries({
+				"/api/mcp/servers": {
+					servers: [
+						{
+							name: "Workspace",
+							command: "fixture",
+							enabled: true,
+							available: true,
+							transport: "stdio",
+						},
+					],
+				},
+				"/api/agents": { agents: [] },
+				"/api/apps": { apps: [] },
+				"/api/identities": { profiles: [] },
+			})
+		);
+		await route.fulfill({ json: payloads.get(pathname) ?? {} });
 	});
 	await page.goto("/mcp-performance-proof.html");
 	await expect(page.getByRole("alert")).toContainText("Tool discovery failed");
@@ -258,28 +264,30 @@ test("agent edits update the shared Tools picker while engine metadata is pendin
 		if (pathname === "/api/engines") {
 			await pending;
 		}
-		const payloads: Record<string, unknown> = {
-			"/api/mcp/servers": {
-				servers: [
-					{
-						name: "Workspace",
-						command: "fixture",
-						enabled: true,
-						available: true,
-						transport: "stdio",
-					},
-				],
-			},
-			"/api/mcp/tools": { tools: [] },
-			"/api/agents": { agents: [{ id: "agent-a", name: "Research agent" }] },
-			"/api/agents/agent-a": {
-				agent: { id: "agent-a", name: "Updated research agent", tools: [] },
-			},
-			"/api/apps": { apps: [] },
-			"/api/identities": { profiles: [] },
-			"/api/engines": { engines: [] },
-		};
-		await route.fulfill({ json: payloads[pathname] ?? {} });
+		const payloads = new Map(
+			Object.entries({
+				"/api/mcp/servers": {
+					servers: [
+						{
+							name: "Workspace",
+							command: "fixture",
+							enabled: true,
+							available: true,
+							transport: "stdio",
+						},
+					],
+				},
+				"/api/mcp/tools": { tools: [] },
+				"/api/agents": { agents: [{ id: "agent-a", name: "Research agent" }] },
+				"/api/agents/agent-a": {
+					agent: { id: "agent-a", name: "Updated research agent", tools: [] },
+				},
+				"/api/apps": { apps: [] },
+				"/api/identities": { profiles: [] },
+				"/api/engines": { engines: [] },
+			})
+		);
+		await route.fulfill({ json: payloads.get(pathname) ?? {} });
 	});
 	try {
 		await page.goto("/mcp-performance-proof.html?agents");

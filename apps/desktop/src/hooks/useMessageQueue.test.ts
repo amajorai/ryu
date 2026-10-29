@@ -24,8 +24,8 @@ function signal(
 	}> = {}
 ) {
 	return {
-		status: "ready" as ChatStatus,
-		prevStatus: "streaming" as ChatStatus,
+		status: "ready" as const,
+		prevStatus: "streaming" as const,
 		queueLen: 1,
 		prevQueueLen: 1,
 		blocked: false,

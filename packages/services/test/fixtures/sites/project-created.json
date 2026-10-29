@@ -1,0 +1,54 @@
+{
+  "status": 201,
+  "headers": {
+    "content-type": "application/json;charset=utf-8"
+  },
+  "body": {
+    "name": "Launch notes",
+    "slug": "launch-notes",
+    "prompt": "",
+    "template": "website",
+    "id": "411c3ec5-05d8-40c2-bd6f-3aaab0ebff70",
+    "ownerId": "node-owner",
+    "schemaVersion": 1,
+    "createdAt": "2026-10-21T22:16:47.162Z",
+    "updatedAt": "2026-10-21T22:16:47.162Z",
+    "revision": 0,
+    "settings": {
+      "mode": "local",
+      "audience": "private",
+      "workspaceId": null,
+      "viewers": [],
+      "editors": [],
+      "optionalSignIn": false,
+      "agentActions": false,
+      "ai": false,
+      "aiDailyLimit": 100,
+      "aiMode": "grounded",
+      "aiAnonymous": false,
+      "aiSystemPrompt": "",
+      "storage": false,
+      "uploads": false,
+      "spaceId": null,
+      "database": null,
+      "sharedData": {
+        "enabled": false,
+        "write": "signed-in"
+      },
+      "extensions": {
+        "mcp": false,
+        "ui": false,
+        "tools": [],
+        "connections": []
+      },
+      "allowRemix": false
+    },
+    "versions": [],
+    "deploymentId": null,
+    "hasPublished": false,
+    "domains": [],
+    "aliases": [],
+    "connections": [],
+    "access": "owner"
+  }
+}

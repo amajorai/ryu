@@ -56,12 +56,11 @@ export function BudgetChargeInclusionFields({
 	return (
 		<div className="flex flex-col gap-1.5">
 			<Label>Count toward this cap</Label>
-			<div className="grid gap-2 sm:grid-cols-3">
+			{/* Plain checkbox rows, no tiles: this sits inside a settings card or a
+			    dialog form, where a bordered box per option nests a box in a box. */}
+			<div className="flex flex-col gap-2.5 py-1">
 				{options.map((option) => (
-					<label
-						className="flex items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm"
-						key={option.key}
-					>
+					<label className="flex items-start gap-2.5 text-sm" key={option.key}>
 						<Checkbox
 							checked={value[option.key]}
 							disabled={disabled}
@@ -71,7 +70,7 @@ export function BudgetChargeInclusionFields({
 							}
 						/>
 						<span>
-							<span className="block font-medium">{option.label}</span>
+							<span className="block">{option.label}</span>
 							<span className="block text-muted-foreground text-xs">
 								{option.description}
 							</span>
@@ -99,12 +98,12 @@ function AlertTierSelect({
 	disabled?: boolean;
 }) {
 	return (
-		<Select
+		<Select<BudgetFormState["alert"]>
 			disabled={disabled}
 			items={ALERT_TIER_OPTIONS}
-			onValueChange={(next: string | null) => {
+			onValueChange={(next) => {
 				if (next) {
-					onChange(next as BudgetFormState["alert"]);
+					onChange(next);
 				}
 			}}
 			value={value}
@@ -142,6 +141,7 @@ export function BudgetRuleFields({
 	const patch = (next: Partial<BudgetFormState>) =>
 		onChange({ ...form, ...next });
 
+	// SAFETY: The private authored ACTION_LABELS table has exactly the BudgetFormState action keys and string labels. Native Object.entries erases those finite keys to string; repository consumers only read this table.
 	return (
 		<div className="flex flex-col gap-4 py-2">
 			<div className="flex flex-col gap-1.5">
@@ -171,15 +171,15 @@ export function BudgetRuleFields({
 				<Label htmlFor={`${idPrefix}-action`}>
 					Action when spend cap is reached
 				</Label>
-				<Select
+				<Select<BudgetFormState["action"]>
 					disabled={disabled}
 					items={Object.entries(ACTION_LABELS).map(([value, label]) => ({
 						value,
 						label,
 					}))}
-					onValueChange={(next: string | null) => {
+					onValueChange={(next) => {
 						if (next) {
-							patch({ action: next as BudgetFormState["action"] });
+							patch({ action: next });
 						}
 					}}
 					value={form.action}

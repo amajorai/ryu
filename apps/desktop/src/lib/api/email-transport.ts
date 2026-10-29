@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/email-transport.ts
 //
 // Typed client for the Core self-host email + policy-alert delivery API. All
@@ -44,12 +46,26 @@ export interface EmailTransportInput {
  * tagged on `kind`). The delivery card only edits `webhook` targets; `email`
  * recipients ride the separate `emails` array (see {@link AlertDeliveryTargets}),
  * matching Core's `AlertDeliveryBody`.
+ *
+ * Core never returns a stored credential: `GET` answers the webhook `url`, the
+ * Telegram `bot_token` and the Expo `token` with the {@link REDACTED_SECRET}
+ * placeholder plus an opaque `secret_ref` (and, for webhooks, the host as
+ * `preview`). Sending a target back with the placeholder and its `secret_ref`
+ * keeps the stored credential; a new value replaces it.
  */
 export type AlertNotifyTarget =
-	| { kind: "webhook"; url: string }
-	| { kind: "telegram"; bot_token: string; chat_id: string }
-	| { kind: "expo_push"; token: string }
+	| { kind: "webhook"; url: string; preview?: string; secret_ref?: string }
+	| {
+			kind: "telegram";
+			bot_token: string;
+			chat_id: string;
+			secret_ref?: string;
+	  }
+	| { kind: "expo_push"; token: string; secret_ref?: string }
 	| { kind: "email"; to: string };
+
+/** The placeholder Core returns in place of a stored credential. */
+export const REDACTED_SECRET = "••••••";
 
 /**
  * The node's policy-alert delivery config. `targets` are the Fanout-tier
@@ -61,15 +77,68 @@ export interface AlertDeliveryTargets {
 	targets: AlertNotifyTarget[];
 }
 
+const emailTransportResponseCodec: z.ZodType<EmailTransport> = z
+	.object({
+		from: z.string(),
+		host: z.string(),
+		passwordSet: z.boolean(),
+		port: z.number(),
+		starttls: z.boolean(),
+		username: z.string(),
+	})
+	.passthrough();
+const alertDeliveryTargetsResponseCodec: z.ZodType<AlertDeliveryTargets> = z
+	.object({
+		emails: z.array(z.string()),
+		targets: z.array(
+			z.union([
+				z
+					.object({
+						kind: z.literal("webhook"),
+						url: z.string(),
+						preview: z.string().optional(),
+						secret_ref: z.string().optional(),
+					})
+					.passthrough(),
+				z
+					.object({
+						kind: z.literal("telegram"),
+						bot_token: z.string(),
+						chat_id: z.string(),
+						secret_ref: z.string().optional(),
+					})
+					.passthrough(),
+				z
+					.object({
+						kind: z.literal("expo_push"),
+						token: z.string(),
+						secret_ref: z.string().optional(),
+					})
+					.passthrough(),
+				z.object({ kind: z.literal("email"), to: z.string() }).passthrough(),
+			])
+		),
+	})
+	.passthrough();
 export function getEmailTransport(target: ApiTarget): Promise<EmailTransport> {
-	return request<EmailTransport>(target, "/api/email/transport");
+	return request<EmailTransport>(
+		target,
+		"/api/email/transport",
+		{},
+		emailTransportResponseCodec
+	);
 }
 
 export async function putEmailTransport(
 	target: ApiTarget,
 	body: EmailTransportInput
 ): Promise<void> {
-	await request(target, "/api/email/transport", { method: "PUT", body });
+	await request(
+		target,
+		"/api/email/transport",
+		{ method: "PUT", body },
+		gatewayJsonValueSchema.transform(() => undefined)
+	);
 }
 
 /**
@@ -84,19 +153,32 @@ export async function testEmail(
 	return await request<{ messageId?: string; ok: boolean }>(
 		target,
 		"/api/email/test",
-		{ method: "POST", body: { to } }
+		{ method: "POST", body: { to } },
+		z
+			.object({ messageId: z.string().optional(), ok: z.boolean() })
+			.passthrough()
 	);
 }
 
 export function getAlertDelivery(
 	target: ApiTarget
 ): Promise<AlertDeliveryTargets> {
-	return request<AlertDeliveryTargets>(target, "/api/alerts/delivery");
+	return request<AlertDeliveryTargets>(
+		target,
+		"/api/alerts/delivery",
+		{},
+		alertDeliveryTargetsResponseCodec
+	);
 }
 
 export async function putAlertDelivery(
 	target: ApiTarget,
 	body: AlertDeliveryTargets
 ): Promise<void> {
-	await request(target, "/api/alerts/delivery", { method: "PUT", body });
+	await request(
+		target,
+		"/api/alerts/delivery",
+		{ method: "PUT", body },
+		gatewayJsonValueSchema.transform(() => undefined)
+	);
 }

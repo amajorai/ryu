@@ -16,6 +16,7 @@ Better Auth server and client configuration plus plugins: organizations/teams, O
 - **Organizations** (`lib/organizations.ts`): personal-org provisioning and active-org resolution.
 - **Waitlist gate** (`lib/{waitlist.ts,waitlist-queue.ts}`): account-based waitlist + referral admission, grandfathering, and `ADMIN_EMAILS` bypass.
 - **Support access** (`lib/support-access.ts`): user-granted, auto-expiring impersonation (RFC 8693 delegation) for support actors.
+- **Platform admin authority** (`lib/{platform-admin-authority.ts,admin-abuse-context.ts,admin-abuse-guard-plugin.ts}`): the pinned root-admin predicate (`ADMIN_EMAILS` plus `RYU_PLATFORM_ADMIN_USER_IDS`, verified email, 2FA), the two-admin approval rule, and the guard that answers 404 to the admin plugin's ban, role, password, session and user-write endpoints unless the abuse console calls them server side.
 - **Helpers** (`lib/{avatar.ts,constants.ts}`): shared avatar and constant utilities.
 
 ## Role

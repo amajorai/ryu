@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 
 test("plugin probes and invokes keep their deadlines through response consumption", async () => {
 	const root = await mkdtemp(join(tmpdir(), "ryu-island-plugin-"));
@@ -50,9 +58,28 @@ test("plugin probes and invokes keep their deadlines through response consumptio
 		},
 	});
 	try {
-		for (const name of ["plugin-host.ts", "response-deadline.ts", "sse.ts"]) {
+		await symlink(
+			join(import.meta.dirname, "../../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
+		);
+		await copyFile(
+			join(import.meta.dirname, "../../shared/host-json.ts"),
+			join(root, "host-json.ts")
+		);
+		for (const name of [
+			"plugin-host.ts",
+			"plugin-host-contract.ts",
+			"response-deadline.ts",
+			"sse.ts",
+		]) {
 			await copyFile(join(import.meta.dirname, name), join(root, name));
 		}
+		const hostSource = await readFile(join(root, "plugin-host.ts"), "utf8");
+		await writeFile(
+			join(root, "plugin-host.ts"),
+			hostSource.replaceAll("../../shared/host-json.ts", "./host-json.ts")
+		);
 		await writeFile(
 			join(root, "config.ts"),
 			`export const coreHeaders = () => ({}); export const loadConfig = () => ({ coreBaseUrl: ${JSON.stringify(server.url.toString().replace(/\/$/, ""))} });`
@@ -65,11 +92,13 @@ test("plugin probes and invokes keep their deadlines through response consumptio
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const result = (await new Response(child.stdout).json()) as {
-			normal: unknown[];
-			stalled: unknown[];
-			elapsedMs: number;
-		};
+		const result = z
+			.object({
+				normal: z.array(z.json()),
+				stalled: z.array(z.json()),
+				elapsedMs: z.number(),
+			})
+			.parse(await new Response(child.stdout).json());
 		expect(await child.exited).toBe(0);
 		expect(result.normal).toEqual([
 			{ available: true, companions: [], views: [] },

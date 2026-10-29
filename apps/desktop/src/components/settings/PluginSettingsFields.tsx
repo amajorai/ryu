@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/components/settings/PluginSettingsFields.tsx
 //
 // Renders a plugin's declared settings fields as editable controls, each bound
@@ -14,20 +15,20 @@
 // Used by two surfaces: inline on the Store's installed plugin card (the
 // per-plugin "Settings" disclosure) and the App Settings "Plugins" section.
 
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { formatDistanceToNow } from "date-fns";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AgentModelPickerField } from "@/components/agent-elements/input/agent-model-picker-field.tsx";
 import { AgentSelectionField } from "@/components/agent-elements/input/agent-selection-field.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -64,8 +65,7 @@ async function saveField(
 	prefKey: string,
 	value: string
 ): Promise<boolean> {
-	const ok = await setPreference(target, prefKey, value);
-	if (!ok) {
+	const showFailure = () => {
 		// One options object, not (title, options): `toast.error` takes a single
 		// argument (see @ryu/ui/components/sileo), so the two-argument spelling
 		// type-errors and drops the description on the floor.
@@ -73,8 +73,17 @@ async function saveField(
 			title: "Couldn't save this setting",
 			description: "Check your connection and try again.",
 		});
+	};
+	try {
+		const ok = await setPreference(target, prefKey, value);
+		if (!ok) {
+			showFailure();
+		}
+		return ok;
+	} catch {
+		showFailure();
+		return false;
 	}
-	return ok;
 }
 
 // ── Per-type field controls ─────────────────────────────────────────────────
@@ -103,24 +112,15 @@ interface FieldControlProps {
 	 * drops any entry without a plugin id — so this is always populated.
 	 */
 	pluginId: string;
+	storedPreference?: string | null;
 	target: ApiTarget;
 }
 
-function ToggleField({ field, target }: FieldControlProps) {
+function ToggleField({ field, target, storedPreference }: FieldControlProps) {
 	const defaultOn = field.default === true;
-	const [checked, setChecked] = useState(defaultOn);
-
-	useEffect(() => {
-		let cancelled = false;
-		getPreference(target, field.prefKey).then((raw) => {
-			if (!cancelled) {
-				setChecked(prefToBool(raw, defaultOn));
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [target, field.prefKey, defaultOn]);
+	const [checked, setChecked] = useState(
+		prefToBool(storedPreference ?? null, defaultOn)
+	);
 
 	return (
 		<SettingsItem
@@ -142,20 +142,9 @@ function ToggleField({ field, target }: FieldControlProps) {
 	);
 }
 
-function SelectField({ field, target }: FieldControlProps) {
-	const [value, setValue] = useState("");
-
-	useEffect(() => {
-		let cancelled = false;
-		getPreference(target, field.prefKey).then((raw) => {
-			if (!cancelled) {
-				setValue(raw ?? "");
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [target, field.prefKey]);
+function SelectField({ field, target, storedPreference }: FieldControlProps) {
+	const fallback = isNativeText(field.default) ? field.default : "";
+	const [value, setValue] = useState(storedPreference ?? fallback);
 
 	return (
 		<SettingsItem title={field.label}>
@@ -174,12 +163,12 @@ function SelectField({ field, target }: FieldControlProps) {
 				}}
 				value={value}
 			>
-				<SelectTrigger className="h-8 w-full text-sm">
+				<SelectTrigger aria-label={field.label} className="h-8 w-full">
 					<SelectValue placeholder="Select…" />
 				</SelectTrigger>
 				<SelectContent>
 					{field.options.map((opt) => (
-						<SelectItem className="text-sm" key={opt.value} value={opt.value}>
+						<SelectItem key={opt.value} value={opt.value}>
 							{opt.label}
 						</SelectItem>
 					))}
@@ -189,25 +178,19 @@ function SelectField({ field, target }: FieldControlProps) {
 	);
 }
 
-function TextField({ bare, description, field, target }: FieldControlProps) {
+function TextField({
+	bare,
+	description,
+	field,
+	target,
+	storedPreference,
+}: FieldControlProps) {
 	const fallback =
 		field.default === undefined || field.default === null
 			? ""
 			: String(field.default);
-	const [value, setValue] = useState(fallback);
+	const [value, setValue] = useState(storedPreference ?? fallback);
 	const isTextarea = field.type === "textarea";
-
-	useEffect(() => {
-		let cancelled = false;
-		getPreference(target, field.prefKey).then((raw) => {
-			if (!cancelled) {
-				setValue(raw ?? fallback);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [target, field.prefKey, fallback]);
 
 	const save = () => {
 		saveField(target, field.prefKey, value.trim()).catch(() => {
@@ -226,18 +209,21 @@ function TextField({ bare, description, field, target }: FieldControlProps) {
 		<SettingsItem bare={bare} description={description} title={field.label}>
 			{isTextarea ? (
 				<Textarea
-					className="min-h-24 text-sm"
+					aria-label={field.label}
+					className="min-h-24"
 					onBlur={save}
 					onChange={(e) => setValue(e.target.value)}
 					placeholder={field.placeholder}
+					typography="small"
 					value={value}
 				/>
 			) : (
 				<Input
-					className="h-8 text-sm"
+					aria-label={field.label}
 					onBlur={save}
 					onChange={(e) => setValue(e.target.value)}
 					placeholder={field.placeholder}
+					size="settings-search"
 					type="text"
 					value={value}
 				/>
@@ -278,28 +264,15 @@ function validateNumberInput(
 	return { value: trimmed };
 }
 
-function NumberField({ field, target }: FieldControlProps) {
+function NumberField({ field, target, storedPreference }: FieldControlProps) {
 	const fallback =
 		field.default === undefined || field.default === null
 			? ""
 			: String(field.default);
-	const [value, setValue] = useState(fallback);
+	const [value, setValue] = useState(storedPreference ?? fallback);
 	// The last value we actually persisted, so a rejected edit has somewhere to
 	// snap back to instead of leaving invalid text sitting in a saved-looking box.
-	const [committed, setCommitted] = useState(fallback);
-
-	useEffect(() => {
-		let cancelled = false;
-		getPreference(target, field.prefKey).then((raw) => {
-			if (!cancelled) {
-				setValue(raw ?? fallback);
-				setCommitted(raw ?? fallback);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [target, field.prefKey, fallback]);
+	const [committed, setCommitted] = useState(storedPreference ?? fallback);
 
 	// Validate on commit, never mid-keystroke: a bounded field would otherwise
 	// fight anyone typing "10" into a min-of-5 box the moment they press "1".
@@ -366,7 +339,6 @@ function NumberField({ field, target }: FieldControlProps) {
 		<SettingsItem title={field.label}>
 			<Input
 				aria-label={field.label}
-				className="h-8 text-sm"
 				max={field.max}
 				min={field.min}
 				onBlur={async (e) => {
@@ -374,6 +346,7 @@ function NumberField({ field, target }: FieldControlProps) {
 				}}
 				onChange={(e) => setValue(e.target.value)}
 				placeholder={field.placeholder}
+				size="settings-search"
 				step={field.step}
 				type="number"
 				value={value}
@@ -424,14 +397,18 @@ function SecretField({ field, pluginId, target }: FieldControlProps) {
 	const [state, setState] = useState<PluginSecretState | null>(null);
 	const [draft, setDraft] = useState("");
 	const [busy, setBusy] = useState(false);
+	const stateRevision = useRef(0);
 
 	useEffect(() => {
 		let cancelled = false;
+		const revision = stateRevision.current;
 		// Resolves to null rather than throwing on an unreachable node or a Core
 		// too old to have the route — an unreadable store looks exactly like an
 		// unset one here, and the panel must still render either way.
 		getPluginSecretState(target, pluginId, secretKey).then((stored) => {
-			if (!cancelled) {
+			// A user can save while this first read is in flight. Never let its older
+			// snapshot overwrite the write-only status that the mutation just saved.
+			if (!cancelled && revision === stateRevision.current) {
 				setState(stored);
 			}
 		});
@@ -449,9 +426,20 @@ function SecretField({ field, pluginId, target }: FieldControlProps) {
 		}
 		const previous = state;
 		setBusy(true);
-		setState({ key: secretKey, set: true, updated_at: Date.now() });
 		try {
 			await setPluginSecret(target, pluginId, secretKey, value);
+			stateRevision.current += 1;
+			const savedState = {
+				...previous,
+				key: secretKey,
+				set: true,
+				updated_at: Date.now(),
+			};
+			setState(savedState);
+			// A replacement does not change whether this name is readable or
+			// shadowed by the node environment. Refresh metadata, never the value.
+			const refreshed = await getPluginSecretState(target, pluginId, secretKey);
+			setState(refreshed?.set ? refreshed : savedState);
 			// Blank ONLY on success. Clearing optimistically would destroy the one
 			// copy of a secret the user just typed if the write turned out to fail.
 			setDraft("");
@@ -475,9 +463,10 @@ function SecretField({ field, pluginId, target }: FieldControlProps) {
 	const clear = async () => {
 		const previous = state;
 		setBusy(true);
-		setState({ key: secretKey, set: false });
 		try {
 			await clearPluginSecret(target, pluginId, secretKey);
+			stateRevision.current += 1;
+			setState({ key: secretKey, set: false });
 		} catch (e) {
 			setState(previous);
 			toast.error({
@@ -505,12 +494,13 @@ function SecretField({ field, pluginId, target }: FieldControlProps) {
 				<Input
 					aria-label={field.label}
 					autoComplete="off"
-					className="h-8 flex-1 text-sm"
+					className="flex-1"
 					onChange={(e) => setDraft(e.target.value)}
 					placeholder={
 						field.placeholder ??
 						(isSet ? "Stored — enter a new value to replace" : "Paste a key…")
 					}
+					size="settings-search"
 					type="password"
 					value={draft}
 				/>
@@ -538,25 +528,20 @@ function SecretField({ field, pluginId, target }: FieldControlProps) {
 	);
 }
 
-function ModelPickerField({ field, target }: FieldControlProps) {
-	const [value, setValue] = useState("");
-
-	useEffect(() => {
-		let cancelled = false;
-		getPreference(target, field.prefKey).then((raw) => {
-			if (!cancelled) {
-				setValue(raw ?? "");
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [target, field.prefKey]);
+function ModelPickerField({
+	field,
+	target,
+	storedPreference,
+}: FieldControlProps) {
+	const [value, setValue] = useState(storedPreference ?? "");
 
 	const commit = (next: string) => {
+		const previous = value;
 		setValue(next);
-		saveField(target, field.prefKey, next.trim()).catch(() => {
-			// saveField already surfaces failures via toast.
+		void saveField(target, field.prefKey, next.trim()).then((ok) => {
+			if (!ok) {
+				setValue(previous);
+			}
 		});
 	};
 
@@ -566,14 +551,29 @@ function ModelPickerField({ field, target }: FieldControlProps) {
 	// string.
 	return (
 		<SettingsItem title={field.label}>
-			<AgentModelPickerField
-				ariaLabel={field.label}
-				mode="model"
-				onChange={commit}
-				placeholder={field.placeholder ?? "Use default model"}
-				target={target}
-				value={value}
-			/>
+			<div className="flex items-center gap-2">
+				<div className="min-w-0 flex-1">
+					<AgentModelPickerField
+						ariaLabel={field.label}
+						mode="model"
+						onChange={commit}
+						placeholder={field.placeholder ?? "Use default model"}
+						target={target}
+						value={value}
+					/>
+				</div>
+				{value ? (
+					<Button
+						aria-label={`Use default for ${field.label}`}
+						onClick={() => commit("")}
+						size="sm"
+						type="button"
+						variant="ghost"
+					>
+						Use default
+					</Button>
+				) : null}
+			</div>
 		</SettingsItem>
 	);
 }
@@ -612,6 +612,10 @@ function AgentPickerField({ field, target }: FieldControlProps) {
 			})
 			.catch(() => {
 				setValue(previous);
+				toast.error({
+					title: "Couldn't save this setting",
+					description: "Check your connection and try again.",
+				});
 			});
 	};
 
@@ -628,7 +632,7 @@ function AgentPickerField({ field, target }: FieldControlProps) {
 	);
 }
 
-function FieldControl(props: FieldControlProps) {
+function LoadedFieldControl(props: FieldControlProps) {
 	switch (props.field.type) {
 		case "toggle":
 			return <ToggleField {...props} />;
@@ -650,6 +654,79 @@ function FieldControl(props: FieldControlProps) {
 			// text, textarea, and any unrecognized type render as text.
 			return <TextField {...props} />;
 	}
+}
+
+function FieldControl(props: FieldControlProps) {
+	const { field, target } = props;
+	const targetUrl = target.url;
+	const targetToken = target.token;
+	const targetUserJwt = target.userJwt ?? null;
+	const preferenceBacked =
+		field.type !== "secret" && field.type !== "agent_picker";
+	const [loading, setLoading] = useState(preferenceBacked);
+	const [failed, setFailed] = useState(false);
+	const [storedPreference, setStoredPreference] = useState<string | null>(null);
+	const [attempt, setAttempt] = useState(0);
+
+	useEffect(() => {
+		if (!preferenceBacked) {
+			return;
+		}
+		let cancelled = false;
+		setLoading(true);
+		setFailed(false);
+		getPreference(
+			{ url: targetUrl, token: targetToken, userJwt: targetUserJwt },
+			field.prefKey
+		)
+			.then((stored) => {
+				if (!cancelled) {
+					setStoredPreference(stored);
+				}
+			})
+			.catch(() => {
+				if (!cancelled) {
+					setFailed(true);
+				}
+			})
+			.finally(() => {
+				if (!cancelled) {
+					setLoading(false);
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [
+		targetUrl,
+		targetToken,
+		targetUserJwt,
+		field.prefKey,
+		preferenceBacked,
+		attempt,
+	]);
+
+	if (preferenceBacked && (loading || failed)) {
+		return (
+			<SettingsItem title={field.label}>
+				{failed ? (
+					<div className="flex items-center gap-2">
+						<span role="alert">Couldn't load this setting.</span>
+						<Button
+							onClick={() => setAttempt((value) => value + 1)}
+							size="sm"
+							variant="ghost"
+						>
+							Retry
+						</Button>
+					</div>
+				) : (
+					<span role="status">Loading…</span>
+				)}
+			</SettingsItem>
+		);
+	}
+	return <LoadedFieldControl {...props} storedPreference={storedPreference} />;
 }
 
 // ── Tab + panel ─────────────────────────────────────────────────────────────
@@ -689,6 +766,15 @@ export function PluginSettingsFields({
 	tabs,
 	target,
 }: PluginSettingsFieldsProps) {
+	const targetUrl = target.url;
+	const targetToken = target.token;
+	const targetUserJwt = target.userJwt ?? null;
+	// Callers may reconstruct ApiTarget during unrelated parent renders. Keep
+	// reads and write-only metadata tied to its identity, not its object reference.
+	const stableTarget = useMemo(
+		() => ({ url: targetUrl, token: targetToken, userJwt: targetUserJwt }),
+		[targetUrl, targetToken, targetUserJwt]
+	);
 	return (
 		<div className="space-y-4">
 			{tabs.map((tab) => (
@@ -704,9 +790,9 @@ export function PluginSettingsFields({
 									field.description ?? defaultFieldDescription(field.type)
 								}
 								field={field}
-								key={field.prefKey}
+								key={`${target.url}:${tab.plugin}:${field.prefKey}`}
 								pluginId={tab.plugin}
-								target={target}
+								target={stableTarget}
 							/>
 						))}
 					</SettingsGroup>

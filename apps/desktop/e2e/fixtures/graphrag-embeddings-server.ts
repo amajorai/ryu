@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { type ProofJsonValue, parseProofJson } from "../fixture-json.ts";
+
 const DEFAULT_PORT = 18_081;
 const EXPECTED_DIMENSIONS = 8;
 const MAX_BODY_BYTES = 256 * 1024;
@@ -44,18 +47,28 @@ function embeddingFor(text: string, dimensions: number): number[] {
 	return embedding.map((component) => component / magnitude);
 }
 
-function objectValue(value: unknown, key: string): unknown {
-	if (typeof value !== "object" || value === null) {
-		return undefined;
-	}
-	return (value as Record<string, unknown>)[key];
-}
+const embeddingDimensionsSchema = z.object({
+	dimensions: z.literal(EXPECTED_DIMENSIONS),
+});
+const embeddingInputSchema = z.object({
+	input: z.union([
+		z
+			.string()
+			.max(MAX_TEXT_CHARACTERS)
+			.transform((text) => [text]),
+		z.array(z.string().max(MAX_TEXT_CHARACTERS)).min(1).max(MAX_INPUTS),
+	]),
+});
+const embeddingModelSchema = z.object({ model: z.string().min(1).max(128) });
+const rerankDocumentsSchema = z.object({
+	documents: z.array(z.string().max(MAX_TEXT_CHARACTERS)).min(1).max(50),
+});
 
 function jsonError(message: string, status: number): Response {
 	return Response.json({ error: message }, { status });
 }
 
-async function readJsonBody(request: Request): Promise<unknown> {
+async function readJsonBody(request: Request): Promise<ProofJsonValue> {
 	const declaredLength = Number(request.headers.get("content-length") ?? "0");
 	if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
 		throw new Error("request body is too large");
@@ -64,48 +77,31 @@ async function readJsonBody(request: Request): Promise<unknown> {
 	if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
 		throw new Error("request body is too large");
 	}
-	return JSON.parse(text) as unknown;
+	return parseProofJson(text);
 }
 
 async function embeddingsResponse(request: Request): Promise<Response> {
-	let body: unknown;
+	let body: ProofJsonValue;
 	try {
 		body = await readJsonBody(request);
 	} catch {
 		return jsonError("Request body must be valid JSON under 256 KiB", 400);
 	}
-	const dimensionsValue = objectValue(body, "dimensions");
-	const dimensions =
-		typeof dimensionsValue === "number" ? dimensionsValue : Number.NaN;
-	if (dimensions !== EXPECTED_DIMENSIONS) {
+	const dimensionsResult = embeddingDimensionsSchema.safeParse(body);
+	if (!dimensionsResult.success) {
 		return jsonError(`dimensions must equal ${EXPECTED_DIMENSIONS}`, 400);
 	}
-	const inputValue = objectValue(body, "input");
-	const inputs =
-		typeof inputValue === "string"
-			? [inputValue]
-			: Array.isArray(inputValue) &&
-					inputValue.every((item) => typeof item === "string")
-				? inputValue
-				: null;
-	if (
-		!inputs ||
-		inputs.length === 0 ||
-		inputs.length > MAX_INPUTS ||
-		inputs.some((input) => input.length > MAX_TEXT_CHARACTERS)
-	) {
+	const inputResult = embeddingInputSchema.safeParse(body);
+	if (!inputResult.success) {
 		return jsonError(
 			"input must contain 1-64 strings of at most 4096 characters",
 			400
 		);
 	}
-	const modelValue = objectValue(body, "model");
-	const model =
-		typeof modelValue === "string" &&
-		modelValue.length > 0 &&
-		modelValue.length <= 128
-			? modelValue
-			: "graphrag-e2e";
+	const inputs = inputResult.data.input;
+	const dimensions = dimensionsResult.data.dimensions;
+	const modelResult = embeddingModelSchema.safeParse(body);
+	const model = modelResult.success ? modelResult.data.model : "graphrag-e2e";
 	return Response.json({
 		object: "list",
 		model,
@@ -128,29 +124,23 @@ async function embeddingsResponse(request: Request): Promise<Response> {
 }
 
 async function rerankResponse(request: Request): Promise<Response> {
-	let body: unknown;
+	let body: ProofJsonValue;
 	try {
 		body = await readJsonBody(request);
 	} catch {
 		return jsonError("Request body must be valid JSON under 256 KiB", 400);
 	}
-	const documentsValue = objectValue(body, "documents");
-	if (
-		!Array.isArray(documentsValue) ||
-		documentsValue.length === 0 ||
-		documentsValue.length > 50 ||
-		!documentsValue.every(
-			(item) => typeof item === "string" && item.length <= MAX_TEXT_CHARACTERS
-		)
-	) {
+	const documentsResult = rerankDocumentsSchema.safeParse(body);
+	if (!documentsResult.success) {
 		return jsonError("documents must contain 1-50 bounded strings", 400);
 	}
-	const ranked = documentsValue
+	const documents = documentsResult.data.documents;
+	const ranked = documents
 		.map((document, index) => ({
 			index,
 			relevance_score: document.includes("Eiffel Tower")
 				? 10_000
-				: documentsValue.length - index,
+				: documents.length - index,
 		}))
 		.sort((left, right) => right.relevance_score - left.relevance_score);
 	return Response.json({

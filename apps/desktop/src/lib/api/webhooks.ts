@@ -16,59 +16,36 @@
 // while workflow endpoints are `base + path` and are `null` under RyuRelay (the
 // managed relay is not path-addressable). We render the field verbatim — a null
 // `publicUrl` is an honest "no reachable URL yet", not something to recompute.
+//
+// Signing secrets are read and written through Core's app host bridge
+// (`webhooks.secretGet` / `webhooks.secretSet`), where Core checks both the app's
+// grant and the signed-in user's permission. The host-direct routes remain only
+// as the fallback for an older Core that does not know those methods.
 
+import {
+	webhookSecretReadSchema,
+	webhookSecretWriteSchema,
+} from "@ryu/app-host/rpc";
+import type {
+	WebhookEndpoint,
+	WebhookIngressStatus,
+	WebhookRegistry,
+} from "@ryuhq/core-client/webhooks.ts";
+import {
+	webhookIngressResponseSchema,
+	webhookRegistryResponseSchema,
+	webhookSecretResponseSchema,
+} from "@ryuhq/core-client/webhooks.ts";
+import { z } from "zod";
 import { type ApiTarget, request } from "./client.ts";
+import { pluginHostInvoke, withLegacyBridgeFallback } from "./plugins.ts";
 
-/** Kind of receiver behind an endpoint. `composio` is the shared trigger webhook
- *  (N subscriptions, one URL); `workflow` is a per-workflow Webhook trigger. */
-export type WebhookEndpointKind = "composio" | "workflow";
-
-/** One inbound webhook endpoint from the registry. */
-export interface WebhookEndpoint {
-	/** Whether a signing secret is configured for this endpoint. */
-	hasSecret: boolean;
-	/** Stable id: `"composio"` or the workflow id. */
-	id: string;
-	kind: WebhookEndpointKind;
-	/** Human label (e.g. "Composio triggers" or the workflow name). */
-	label: string;
-	/** Unix-seconds timestamp of the last accepted delivery, or `null`. */
-	lastDelivery: number | null;
-	/** The path Core listens on (e.g. `/api/composio/webhook`). */
-	path: string;
-	/** The RESOLVED, reachable public URL to paste into the external service, or
-	 *  `null` when no reachable URL exists yet (ingress not up, or a workflow path
-	 *  under the non-addressable RyuRelay). Never a localhost URL. */
-	publicUrl: string | null;
-	/** composio only: number of trigger subscriptions bound to this webhook. */
-	subscriptionCount: number | null;
-	/** workflow only: the owning workflow's id. */
-	workflowId: string | null;
-	/** workflow only: the owning workflow's name. */
-	workflowName: string | null;
-}
-
-/** The full registry response. */
-export interface WebhookRegistry {
-	endpoints: WebhookEndpoint[];
-	/** The active ingress backend kind (e.g. `ryu-relay`, `cloudflared`). */
-	ingressKind: string;
-	/** The origin base for path-addressable (tunnel) backends, else `null`
-	 *  (RyuRelay), in which case per-workflow URLs are advertised as `null`. */
-	publicBaseUrl: string | null;
-	/** True once any public URL has been resolved (ingress can receive webhooks). */
-	up: boolean;
-}
-
-/** The ingress backend status (header banner source). */
-export interface WebhookIngressStatus {
-	/** The configured backend kind (e.g. `ryu-relay`, `tailscale-funnel`). */
-	kind: string;
-	/** The overall resolved public ingress URL, or `null` when not up. */
-	publicUrl: string | null;
-	/** True once a public URL has been resolved. */
-	up: boolean;
-}
+export type {
+	WebhookEndpoint,
+	WebhookEndpointKind,
+	WebhookIngressStatus,
+	WebhookRegistry,
+} from "@ryuhq/core-client/webhooks.ts";
 
 interface WebhookEndpointWire {
 	has_secret?: boolean;
@@ -83,18 +60,47 @@ interface WebhookEndpointWire {
 	workflow_name?: string | null;
 }
 
-interface WebhookRegistryWire {
-	endpoints?: WebhookEndpointWire[];
+export interface WebhookRegistryWire {
+	endpoints?: WebhookEndpointWire[] | null;
 	ingress_kind?: string;
 	public_base_url?: string | null;
 	up?: boolean;
 }
 
-interface WebhookIngressStatusWire {
+export interface WebhookIngressStatusWire {
 	kind?: string;
 	public_url?: string | null;
 	up?: boolean;
 }
+
+const webhookEndpointWireSchema = z.object({
+	has_secret: z.boolean().optional(),
+	id: z.string(),
+	kind: z.string(),
+	label: z.string(),
+	last_delivery: z.number().nullable().optional(),
+	path: z.string(),
+	public_url: z.string().nullable().optional(),
+	subscription_count: z.number().nullable().optional(),
+	workflow_id: z.string().nullable().optional(),
+	workflow_name: z.string().nullable().optional(),
+});
+
+/** Runtime shape of the `webhooks.list` kernel operation's reply, which reaches
+ *  the host as untyped JSON from the app host bridge. */
+export const webhookRegistryWireSchema = z.object({
+	endpoints: z.array(webhookEndpointWireSchema).optional(),
+	ingress_kind: z.string().optional(),
+	public_base_url: z.string().nullable().optional(),
+	up: z.boolean().optional(),
+});
+
+/** Runtime shape of the `webhooks.ingressStatus` kernel operation's reply. */
+export const webhookIngressStatusWireSchema = z.object({
+	kind: z.string().optional(),
+	public_url: z.string().nullable().optional(),
+	up: z.boolean().optional(),
+});
 
 function toEndpoint(e: WebhookEndpointWire): WebhookEndpoint {
 	return {
@@ -111,11 +117,9 @@ function toEndpoint(e: WebhookEndpointWire): WebhookEndpoint {
 	};
 }
 
-/** GET /api/webhooks — the unified webhook endpoint registry. */
-export async function fetchWebhooks(
-	target: ApiTarget
-): Promise<WebhookRegistry> {
-	const json = await request<WebhookRegistryWire>(target, "/api/webhooks");
+/** Normalize Core's snake_case registry (the `/api/webhooks` route and the
+ *  `webhooks.list` kernel operation answer the same shape). */
+export function toWebhookRegistry(json: WebhookRegistryWire): WebhookRegistry {
 	return {
 		ingressKind: json.ingress_kind ?? "",
 		publicBaseUrl: json.public_base_url ?? null,
@@ -124,14 +128,10 @@ export async function fetchWebhooks(
 	};
 }
 
-/** GET /api/webhook-ingress/status — the resolved public ingress URL + backend. */
-export async function fetchWebhookIngressStatus(
-	target: ApiTarget
-): Promise<WebhookIngressStatus> {
-	const json = await request<WebhookIngressStatusWire>(
-		target,
-		"/api/webhook-ingress/status"
-	);
+/** Normalize Core's snake_case ingress status (route and kernel operation). */
+export function toWebhookIngressStatus(
+	json: WebhookIngressStatusWire
+): WebhookIngressStatus {
 	return {
 		kind: json.kind ?? "",
 		publicUrl: json.public_url ?? null,
@@ -139,42 +139,140 @@ export async function fetchWebhookIngressStatus(
 	};
 }
 
-interface WebhookSecretWire {
-	secret?: string | null;
+/** GET /api/webhooks — the unified webhook endpoint registry. */
+export async function fetchWebhooks(
+	target: ApiTarget
+): Promise<WebhookRegistry> {
+	return toWebhookRegistry(
+		await request(
+			target,
+			"/api/webhooks",
+			undefined,
+			webhookRegistryResponseSchema
+		)
+	);
 }
 
-/** GET /api/webhooks/:id/secret — explicit protected read of one secret. */
-export async function fetchWebhookSecret(
+/** GET /api/webhook-ingress/status — the resolved public ingress URL + backend. */
+export async function fetchWebhookIngressStatus(
+	target: ApiTarget
+): Promise<WebhookIngressStatus> {
+	return toWebhookIngressStatus(
+		await request(
+			target,
+			"/api/webhook-ingress/status",
+			undefined,
+			webhookIngressResponseSchema
+		)
+	);
+}
+
+/** GET /api/webhooks/:id/secret — the host-direct read an older Core without the
+ *  `webhooks.secretGet` bridge method still needs (see {@link readWebhookSecret}). */
+async function legacyFetchWebhookSecret(
 	target: ApiTarget,
 	id: string
 ): Promise<string | null> {
-	const json = await request<WebhookSecretWire>(
+	const json = await request(
 		target,
-		`/api/webhooks/${encodeURIComponent(id)}/secret`
+		`/api/webhooks/${encodeURIComponent(id)}/secret`,
+		undefined,
+		webhookSecretResponseSchema
 	);
 	return json.secret ?? null;
 }
 
-/**
- * POST /api/webhooks/:id/secret — persist a supplied secret, or ask Core to
- * mint one when `secret` is omitted. The returned value is the only secret
- * material this client receives; the registry remains metadata-only.
- */
-export async function setWebhookSecret(
+const setWebhookSecretResponseSchema = z
+	.object({ secret: z.string().optional() })
+	.passthrough();
+
+/** POST /api/webhooks/:id/secret — the host-direct write for an older Core
+ *  (see {@link writeWebhookSecret}). Omitting `secret` asks Core to mint one. */
+async function legacySetWebhookSecret(
 	target: ApiTarget,
 	id: string,
 	secret?: string
 ): Promise<string> {
-	const json = await request<{ secret?: string }>(
+	const json = await request(
 		target,
 		`/api/webhooks/${encodeURIComponent(id)}/secret`,
 		{
 			body: secret === undefined ? {} : { secret },
 			method: "POST",
-		}
+		},
+		setWebhookSecretResponseSchema
 	);
 	if (!json.secret) {
 		throw new Error("webhook secret response was empty");
 	}
 	return json.secret;
+}
+
+/** A `webhooks.secretGet` reply as the Companion receives it. */
+export type WebhookSecretReadRecord = z.output<typeof webhookSecretReadSchema>;
+/** A `webhooks.secretSet` reply as the Companion receives it. */
+export type WebhookSecretWriteRecord = z.output<
+	typeof webhookSecretWriteSchema
+>;
+
+/** Check a `webhooks.secretGet` bridge reply (`{ secret: string | null }`). */
+export function toWebhookSecretRead(value: unknown): WebhookSecretReadRecord {
+	return webhookSecretReadSchema.parse(value);
+}
+
+/** Check a `webhooks.secretSet` bridge reply (`{ secret }`, never empty). */
+export function toWebhookSecretWrite(value: unknown): WebhookSecretWriteRecord {
+	const written = webhookSecretWriteSchema.parse(value);
+	if (written.secret.length === 0) {
+		throw new Error("webhook secret response was empty");
+	}
+	return written;
+}
+
+/**
+ * Read one endpoint's signing secret for the `@ryu/webhooks` Companion through
+ * Core's app host bridge (`webhooks.secretGet`). Core checks the app's approved
+ * `webhooks:crud` grant AND the signed-in user's own permission on that endpoint
+ * (workflow edit, or Gateway configure for Composio). Only an older Core that
+ * lacks the method falls back to the host-direct route.
+ */
+export function readWebhookSecret(
+	target: ApiTarget,
+	pluginId: string,
+	id: string
+): Promise<WebhookSecretReadRecord> {
+	return withLegacyBridgeFallback(
+		"webhooks.secretGet",
+		async () =>
+			toWebhookSecretRead(
+				await pluginHostInvoke(target, pluginId, "webhooks.secretGet", { id })
+			),
+		async () => ({ secret: await legacyFetchWebhookSecret(target, id) })
+	);
+}
+
+/**
+ * Set (or, without `secret`, mint) one workflow endpoint's signing secret
+ * through Core's app host bridge (`webhooks.secretSet`), under the same two
+ * checks as {@link readWebhookSecret} and the same narrow older-Core fallback.
+ */
+export function writeWebhookSecret(
+	target: ApiTarget,
+	pluginId: string,
+	id: string,
+	secret?: string
+): Promise<WebhookSecretWriteRecord> {
+	return withLegacyBridgeFallback(
+		"webhooks.secretSet",
+		async () =>
+			toWebhookSecretWrite(
+				await pluginHostInvoke(
+					target,
+					pluginId,
+					"webhooks.secretSet",
+					secret === undefined ? { id } : { id, secret }
+				)
+			),
+		async () => ({ secret: await legacySetWebhookSecret(target, id, secret) })
+	);
 }

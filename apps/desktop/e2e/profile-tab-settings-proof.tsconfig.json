@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["@playwright/test", "vite/client"],
+    "noEmit": true
+  },
+  "include": [
+    "../src/components/settings/ProfileTab.tsx",
+    "harness/profile-tab-settings-proof.tsx",
+    "harness/profile-tab-settings-proof-auth-client.tsx",
+    "harness/profile-tab-settings-proof-node.ts",
+    "profile-tab-settings-proof.spec.ts"
+  ]
+}

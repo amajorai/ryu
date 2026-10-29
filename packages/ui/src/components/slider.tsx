@@ -8,6 +8,7 @@ function Slider({
 	value,
 	min = 0,
 	max = 100,
+	"aria-label": ariaLabel,
 	...props
 }: SliderPrimitive.Root.Props) {
 	const _values = Array.isArray(value)
@@ -18,6 +19,7 @@ function Slider({
 
 	return (
 		<SliderPrimitive.Root
+			aria-label={ariaLabel}
 			className={cn("data-vertical:h-full data-horizontal:w-full", className)}
 			data-slot="slider"
 			defaultValue={defaultValue}
@@ -39,7 +41,12 @@ function Slider({
 				</SliderPrimitive.Track>
 				{Array.from({ length: _values.length }, (_, index) => (
 					<SliderPrimitive.Thumb
-						className="block h-4 w-6 shrink-0 select-none rounded-full bg-white not-dark:bg-clip-padding shadow-md ring-1 ring-black/10 transition-[color,box-shadow,background-color] hover:ring-4 hover:ring-ring/30 focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50 data-vertical:h-6 data-vertical:w-4"
+						aria-label={
+							ariaLabel && _values.length > 1
+								? `${ariaLabel} ${index + 1}`
+								: ariaLabel
+						}
+						className="block h-4 w-6 shrink-0 select-none rounded-full bg-white not-dark:bg-clip-padding shadow-md ring-1 ring-black/10 transition-[color,box-shadow,background-color] hover:ring-4 hover:ring-ring/30 focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-vertical:h-6 data-vertical:w-4"
 						data-slot="slider-thumb"
 						key={index}
 					/>

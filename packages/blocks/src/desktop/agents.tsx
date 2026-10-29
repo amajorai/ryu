@@ -1,4 +1,5 @@
 "use client";
+import styles from "./agents.module.css";
 
 // Presentational layer of the desktop Agents page. The live app
 // (`apps/desktop/src/pages/AgentsPage.tsx`) is a thin container that loads
@@ -17,6 +18,7 @@ import {
 	Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -111,6 +113,7 @@ export function AgentsView({
 	onDownloadExport,
 	onReload,
 }: AgentsViewProps) {
+	const tl = useLiteralMessages();
 	if (loading) {
 		return (
 			<div className="flex h-full items-center justify-center">
@@ -174,7 +177,7 @@ export function AgentsView({
 
 			{importError ? (
 				<div className="shrink-0 border-b bg-destructive/10 px-4 py-2 text-sm text-status-destructive">
-					Import failed: {importError}
+					{tl("Import failed: {importError}", { importError })}
 				</div>
 			) : null}
 
@@ -202,11 +205,16 @@ export function AgentsView({
 					<div className="mx-auto flex w-full max-w-2xl flex-col gap-0.5">
 						{agents.map((agent) => (
 							<div
-								className="group/row flex h-10 cursor-pointer items-center gap-3 rounded-md px-2 transition-colors hover:bg-muted"
+								className="group/row flex h-10 cursor-pointer items-center gap-3 rounded-md px-2 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
 								key={agent.id}
 								onClick={() => onOpenAgent?.(agent.id)}
 								onKeyDown={(e) => {
-									if (e.key === "Enter") {
+									// Keys pressed on the nested menu trigger bubble here too.
+									if (e.target !== e.currentTarget) {
+										return;
+									}
+									if (e.key === "Enter" || e.key === " ") {
+										e.preventDefault();
 										onOpenAgent?.(agent.id);
 									}
 								}}
@@ -214,8 +222,9 @@ export function AgentsView({
 								tabIndex={0}
 							>
 								<RyuLogo
-									className="shrink-0 text-foreground"
+									className="shrink-0"
 									size="20px"
+									tone="foreground"
 									variant="outline"
 								/>
 								<Tooltip>
@@ -230,20 +239,27 @@ export function AgentsView({
 								</Tooltip>
 								{agent.builtIn ? (
 									<HugeiconsIcon
-										className="size-3.5 shrink-0 text-muted-foreground/70 group-hover/row:hidden"
+										className="size-3.5 shrink-0 text-muted-foreground/70 group-focus-within/row:hidden group-hover/row:hidden"
 										icon={LockedIcon}
 									/>
 								) : null}
 								{agent.engineLabel ? (
-									<span className="shrink-0 text-muted-foreground/70 text-xs group-hover/row:hidden">
+									<span className="shrink-0 text-muted-foreground/70 text-xs group-focus-within/row:hidden group-hover/row:hidden">
 										{agent.engineLabel}
 									</span>
 								) : null}
 								{agent.updateSlot}
 								<DropdownMenu>
 									<DropdownMenuTrigger
-										className="hidden h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-accent group-hover/row:inline-flex"
+										aria-label={tl("Actions for {name}", { name: agent.name })}
+										className="hidden h-6 w-6 shrink-0 items-center justify-center focus-visible:inline-flex group-focus-within/row:inline-flex group-hover/row:inline-flex"
 										onClick={(e) => e.stopPropagation()}
+										render={
+											<button
+												className={styles.agentMenuTrigger}
+												type="button"
+											/>
+										}
 									>
 										{agent.exporting ? (
 											<Spinner className="size-3.5" />
@@ -278,11 +294,11 @@ export function AgentsView({
 										</DropdownMenuItem>
 										{agent.deletable ? (
 											<DropdownMenuItem
-												className="text-status-destructive"
 												onClick={(e) => {
 													e.stopPropagation();
 													onDeleteAgent?.(agent.id);
 												}}
+												variant="destructive"
 											>
 												<HugeiconsIcon
 													className="mr-2 size-3.5"
@@ -306,7 +322,9 @@ export function AgentsView({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>
-							{exportError ? "Export failed" : `Export "${exportName}"`}
+							{exportError
+								? "Export failed"
+								: tl('Export "{exportName}"', { exportName: exportName ?? "" })}
 						</AlertDialogTitle>
 						<AlertDialogDescription>
 							{exportError

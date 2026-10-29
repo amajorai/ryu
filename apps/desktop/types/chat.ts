@@ -1,5 +1,6 @@
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import type { UIMessage } from "ai";
+import type { TemporaryChatMessageInput } from "@/src/lib/api/temporary-chat.ts";
 import type { ResourceVisibility } from "@/src/lib/resource-visibility.ts";
 
 export interface Agent {
@@ -25,6 +26,8 @@ export interface Message {
 	 * "cut off" marker rather than passing a truncated reply off as a whole one.
 	 */
 	interrupted?: boolean;
+	/** Client display metadata persisted by Core; identity comes from author/provenance. */
+	metadata?: TemporaryChatMessageInput["metadata"];
 	originServer?: string;
 	/** The message this one replied to (its parent in the version tree). */
 	parentMessageId?: string;
@@ -32,8 +35,8 @@ export interface Message {
 	 * Structured render parts (AI SDK reduced UIMessage `parts`) rehydrated from
 	 * Core when present — tool / text / file parts captured server-side as the turn
 	 * streamed. Lets a reloaded conversation re-render its tool rows + cowork
-	 * context instead of collapsing to flat `content`. Absent for user turns and
-	 * for messages persisted before parts capture existed (fall back to a text part
+	 * context instead of collapsing to flat `content`. User text/file parts are
+	 * preserved too. Absent for legacy rows (fall back to a text part
 	 * built from `content`).
 	 */
 	parts?: UIMessage["parts"];
@@ -62,9 +65,13 @@ export interface Conversation {
 	archived?: boolean;
 	/** Git branch at run start (M1). */
 	branch?: string;
+	/** Set on the source after an RNP handoff: the thread now continues there. */
+	continuedOn?: { nodeLabel: string; at: number };
 	createdAt: number;
 	/** Active working folder at run start (M1). */
 	folderPath?: string;
+	/** Where the thread sits in the Projects › Bots/Groups › Sessions hierarchy. */
+	hierarchy?: ThreadHierarchy;
 	/** Notion-style glyph from the shared GlyphPicker; null/undefined = title only. */
 	icon?: GlyphValue;
 	id: string;
@@ -77,6 +84,9 @@ export interface Conversation {
 	lastMessageAt?: number;
 	/** Role that wrote it, so a row can prefix "You: ". */
 	lastMessageRole?: string;
+	/** GitHub pull request URLs explicitly linked to this chat. The PR owned by
+	 * `branch` is implicit and is not listed here. */
+	linkedPullRequests?: string[];
 	/** Authoritative message total returned by Core's conversation summary. */
 	messageCount?: number;
 	messages: Message[];
@@ -95,4 +105,26 @@ export interface Conversation {
 	visibility?: ResourceVisibility;
 	/** Per-run worktree path, when a dedicated worktree was created (M1). */
 	worktreePath?: string;
+}
+
+/** Who a main (coordinator) thread belongs to. */
+export type ThreadOwnerKind = "agent" | "group" | "project";
+
+/**
+ * A conversation's place in the Projects › Bots/Groups › Sessions hierarchy.
+ * Users talk to MAIN threads (a project's, a bot's or a group's coordinator
+ * thread); the work happens in SESSIONS those main threads spawn.
+ */
+export interface ThreadHierarchy {
+	/** Coordination strategy of an ad-hoc group's main thread. */
+	coordination?: string;
+	/** Owning project/agent/group id, on a main thread. */
+	ownerId?: string;
+	ownerKind?: ThreadOwnerKind;
+	/** Opaque project id, when the thread is in a project. */
+	projectId?: string;
+	role: "main" | "session";
+	/** The main thread whose turn spawned this session. */
+	spawnedByConversationId?: string;
+	spawnedByMessageId?: string;
 }

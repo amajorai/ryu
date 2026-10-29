@@ -1,0 +1,35 @@
+/* The compact rail (CompactRail.tsx) is fixed to the window's left edge and
+   marks the root with `data-ryu-compact-rail` while it is mounted. Everything
+   here is keyed to that attribute, so a window without the rail is untouched.
+
+   The rail has no background of its own: it sits on whatever the shell paints
+   behind the inset card (theme color, wallpaper, or native transparency), the
+   same surface the collapsed sidebar's gutter shows. */
+:root[data-ryu-compact-rail] {
+	--ryu-compact-rail-width: 4.5rem;
+}
+
+/* The native macOS traffic lights end about 82px in; the rail holds them. */
+:root[data-ryu-compact-rail="traffic-lights"] {
+	--ryu-compact-rail-width: 5.5rem;
+}
+
+/* The content clears the rail instead of sliding under it. Unlayered, so it
+   wins over the inset's own Tailwind margin utilities. */
+:root[data-ryu-compact-rail] [data-slot="sidebar-inset"] {
+	margin-left: var(--ryu-compact-rail-width);
+}
+
+/* The title bar keeps a gap for the floating navigation cluster while the
+   sidebar is collapsed. The rail replaces that cluster, so the gap would only
+   be dead space in an already narrow window. */
+:root[data-ryu-compact-rail] .ryu-nav-cluster-reserve {
+	display: none;
+}
+
+/* Hover-to-peek grows from the left edge, which is now the rail. The rail is
+   the collapsed navigation at this width, so the peek panel stands down. */
+:root[data-ryu-compact-rail]
+	:has(> .ryu-sidebar-surface.absolute[data-sidebar-preview-boundary]) {
+	display: none;
+}

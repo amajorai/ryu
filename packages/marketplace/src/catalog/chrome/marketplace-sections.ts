@@ -9,6 +9,7 @@ import {
 	Settings01Icon,
 	Store01Icon,
 	Tag01Icon,
+	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { REALM_ICONS } from "../realm-icons.ts";
 import type { StoreSectionTab } from "./store-chrome.ts";
@@ -52,11 +53,22 @@ export const MARKETPLACE_SECTION_TABS = [
 		icon: REALM_ICONS.skills,
 		group: "discover",
 	},
-	{ value: "mcp", label: "MCP", icon: REALM_ICONS.mcp, group: "discover" },
+	{
+		value: "mcp",
+		label: "MCP servers",
+		icon: REALM_ICONS.mcp,
+		group: "discover",
+	},
 	{
 		value: "agents",
-		label: "Agents",
+		label: "Coding agents",
 		icon: REALM_ICONS.agents,
+		group: "discover",
+	},
+	{
+		value: "creators",
+		label: "Creators",
+		icon: UserGroupIcon,
 		group: "discover",
 	},
 	{ value: "engines", label: "Engines", icon: LayerIcon, group: "discover" },
@@ -105,6 +117,7 @@ export const MARKETPLACE_BROWSE_KINDS = [
 	{ value: "plugin", label: "Plugins" },
 	{ value: "mcp", label: "MCP" },
 	{ value: "model", label: "Models" },
+	{ value: "knowledge", label: "Knowledge" },
 	{
 		value: "agent",
 		label: "Agent Templates",
@@ -152,10 +165,10 @@ export const MARKETPLACE_HOME_SHELVES = [
 		title: "MCP servers",
 	},
 	{
-		emptyLabel: "No agents found.",
+		emptyLabel: "No coding agents found.",
 		key: "agents",
 		section: "agents",
-		title: "Agents",
+		title: "Coding agents",
 	},
 	{
 		emptyLabel: "No apps found.",
@@ -180,6 +193,8 @@ export type MarketplaceHomeShelfDefinition =
 export function marketplaceHomeShelfDefinition(
 	key: MarketplaceHomeShelfKey
 ): MarketplaceHomeShelfDefinition {
+	// SAFETY: key is the key union derived from this same readonly shelf tuple,
+	// so each admitted key has its complete definition in the searched registry.
 	return MARKETPLACE_HOME_SHELVES.find(
 		(shelf) => shelf.key === key
 	) as MarketplaceHomeShelfDefinition;

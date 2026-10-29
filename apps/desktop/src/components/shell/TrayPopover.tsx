@@ -1,3 +1,5 @@
+import type { CSSProperties as LayoutCSSProperties } from "react";
+import layoutStyles from "./TrayPopover.module.css";
 // apps/desktop/src/components/shell/TrayPopover.tsx
 //
 // Shared chrome for the sidebar-footer tray panels (Inbox, Downloads). Both hang
@@ -46,12 +48,22 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+interface TrayMorphStyle extends CSSProperties {
+	"--morph-open-h": string;
+	"--morph-open-w": string;
+}
+
 export type TrayTone = "default" | "danger" | "success" | "primary";
+export type TrayPlacement = "menubar" | "sidebar";
+
+type TrayAnchor =
+	| { bottom: number; left: number; placement: "sidebar" }
+	| { placement: "menubar"; right: number; top: number };
 
 export interface TrayTriggerRenderProps {
 	"aria-controls": string;
 	"aria-expanded": boolean;
-	"aria-haspopup": true;
+	"aria-haspopup": "dialog";
 	"aria-label": string;
 	onClick: () => void;
 	ref: RefObject<HTMLButtonElement | null>;
@@ -62,10 +74,8 @@ export const trayTriggerClass =
 	"relative flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
 
 /** Row radius, concentric with the panel (20px panel − 6px padding). */
-const ROW_RADIUS = "rounded-[14px]";
+const ROW_RADIUS = "rounded-xl";
 
-/** The morph's open width — the fixed tray width both trays were laid out at. */
-const TRAY_MORPH_OPEN_W = "23rem";
 /**
  * The morph's open height is measured, not declared, so this is only the value
  * shown until the always-mounted panel is measured. The CreateMenu comment that
@@ -75,6 +85,8 @@ const TRAY_MORPH_OPEN_W = "23rem";
  * it and writing the container's height is one-way and settles.
  */
 const TRAY_MORPH_INITIAL_H = 240;
+const TRAY_MORPH_MAX_WIDTH = 368;
+const TRAY_VIEWPORT_GUTTER = 8;
 /**
  * How far the 40px box hangs past the 28px trigger slot on each pinned edge —
  * the `-bottom-1.5 -left-1.5` the box carried while it was an absolutely
@@ -108,7 +120,7 @@ export function TrayBadge({
 		>
 			<span
 				className={cn(
-					"t-badge-dot flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-medium text-[10px] tabular-nums ring-2 ring-sidebar",
+					"t-badge-dot type-compact flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-medium tabular-nums ring-2 ring-sidebar",
 					tone === "danger"
 						? "bg-destructive text-white"
 						: "bg-primary text-primary-foreground"
@@ -121,12 +133,12 @@ export function TrayBadge({
 }
 
 /**
- * The sidebar-footer tray morph (Inbox, Downloads): a 28px icon button that
- * grows into the tray box (`.t-morph` / `.t-morph-menu`) instead of spawning a
- * popover beside itself, like the "+" CreateMenu in the same footer. The panel
- * is always mounted (inert when closed) so its height can be measured while
- * hidden; the box grows to the measured height, so a short list hugs its rows
- * and a long one caps at the scroller's max.
+ * The Inbox and Downloads tray morph: a 28px icon button that grows into the
+ * tray box (`.t-morph` / `.t-morph-menu`). Sidebar trays grow up and right from
+ * the footer; menu-bar trays grow down and left from the top-right controls.
+ * The panel stays mounted (inert while closed) so its height can be measured;
+ * the box grows to that height, so a short list hugs its rows and a long one
+ * caps at the scroller's max.
  *
  * The box is PORTALED out and positioned `fixed` over the trigger's slot,
  * because the tray is 23rem — wider than the sidebar it lives in — and two of
@@ -138,8 +150,8 @@ export function TrayBadge({
  * box has to leave the subtree entirely. (The docked sidebar clips nothing,
  * which is why this only ever looked broken on some setups.)
  *
- * The BUTTON stays in the sidebar DOM (it keeps its tab order, its tooltip, and
- * NavUser's context-menu wrapper for "Hide downloads"); only the box travels.
+ * The BUTTON stays in the host surface DOM so it keeps its tab order and
+ * tooltip; only the box travels.
  * It fades out on open the way `.t-morph-plus` used to, so the panel — which
  * now sits over it rather than around it — hands off cleanly.
  */
@@ -150,6 +162,7 @@ export function TrayMorph({
 	label,
 	onOpenChange,
 	open,
+	placement = "sidebar",
 	renderTrigger,
 }: {
 	badge?: ReactNode;
@@ -159,6 +172,7 @@ export function TrayMorph({
 	label: string;
 	onOpenChange: (open: boolean) => void;
 	open: boolean;
+	placement?: TrayPlacement;
 	renderTrigger?: (props: TrayTriggerRenderProps) => ReactElement;
 }) {
 	const panelId = useId();
@@ -167,9 +181,7 @@ export function TrayMorph({
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
 	const panelRef = useRef<HTMLDivElement | null>(null);
 	const [openH, setOpenH] = useState(TRAY_MORPH_INITIAL_H);
-	const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(
-		null
-	);
+	const [anchor, setAnchor] = useState<TrayAnchor | null>(null);
 	const [portalTarget, setPortalTarget] = useState<Element | null>(null);
 
 	// Close on outside pointerdown or Escape — the morph has no backdrop, and
@@ -181,7 +193,10 @@ export function TrayMorph({
 			return;
 		}
 		const onPointerDown = (e: PointerEvent) => {
-			const target = e.target as Node;
+			const target = e.target;
+			if (!(target instanceof Node)) {
+				return;
+			}
 			const inside =
 				rootRef.current?.contains(target) || boxRef.current?.contains(target);
 			if (!inside) {
@@ -195,6 +210,7 @@ export function TrayMorph({
 		};
 		window.addEventListener("pointerdown", onPointerDown);
 		window.addEventListener("keydown", onKeyDown);
+
 		return () => {
 			window.removeEventListener("pointerdown", onPointerDown);
 			window.removeEventListener("keydown", onKeyDown);
@@ -209,7 +225,7 @@ export function TrayMorph({
 	// guillotines any list taller than it.
 	useEffect(() => {
 		const el = panelRef.current;
-		if (!el || typeof ResizeObserver === "undefined") {
+		if (!(el && "ResizeObserver" in globalThis)) {
 			return;
 		}
 		const measure = () => setOpenH(el.offsetHeight);
@@ -219,11 +235,9 @@ export function TrayMorph({
 		return () => observer.disconnect();
 	}, [portalTarget]);
 
-	// Track where the portaled box sits: bottom-left pinned to the trigger's
-	// slot, offset by the 6px the box used to hang past it (`-bottom-1.5
-	// -left-1.5`). Measured on mount, on every open, and on window resize —
-	// enough for a control that only moves when the window or the sidebar's own
-	// layout changes, and cheaper than tracking it every frame. Layout effect, so
+	// Track the portaled box from the trigger: sidebar trays pin bottom-left and
+	// menu-bar trays pin top-right, both with the 6px slot offset. Measure on mount,
+	// on every open, and on window resize. Layout effect, so
 	// the corrected anchor lands in the same commit as the open: the hover-peek
 	// sidebar mounts this while translated off-screen, so the anchor measured at
 	// mount is stale by the time the panel has slid in, and a passive effect would
@@ -235,9 +249,31 @@ export function TrayMorph({
 		}
 		const measure = () => {
 			const r = el.getBoundingClientRect();
+			if (placement === "menubar") {
+				const menubar = el.closest('[data-tray-anchor="menubar"]');
+				const menubarBottom =
+					menubar?.getBoundingClientRect().bottom ?? r.bottom;
+				const panelWidth = Math.min(
+					TRAY_MORPH_MAX_WIDTH,
+					window.innerWidth - 16
+				);
+				const maximumRight =
+					window.innerWidth - panelWidth - TRAY_VIEWPORT_GUTTER;
+				const triggerRight = window.innerWidth - r.right - MORPH_SLOT_OFFSET;
+				setAnchor({
+					placement,
+					right: Math.min(
+						Math.max(TRAY_VIEWPORT_GUTTER, triggerRight),
+						Math.max(TRAY_VIEWPORT_GUTTER, maximumRight)
+					),
+					top: menubarBottom + MORPH_SLOT_OFFSET,
+				});
+				return;
+			}
 			setAnchor({
 				bottom: window.innerHeight - r.bottom - MORPH_SLOT_OFFSET,
 				left: r.left - MORPH_SLOT_OFFSET,
+				placement,
 			});
 		};
 		measure();
@@ -267,29 +303,64 @@ export function TrayMorph({
 			triggerRef.current?.focus();
 		}
 		wasOpen.current = open;
-	}, [open]);
+	}, [open, placement]);
 
-	const morphVars = {
-		"--morph-open-w": TRAY_MORPH_OPEN_W,
-		"--morph-open-h": `${openH}px`,
-	} as CSSProperties;
+	const morphVars =
+		/* SAFETY: ReactDOM forwards these exact custom properties with style.setProperty; the complete TrayMorphStyle producer checks all standard CSS fields and app slots, which React CSSProperties omits. */ {
+			"--morph-open-w": "min(23rem, calc(100vw - 1rem))",
+			"--morph-open-h": `${openH}px`,
+		} satisfies TrayMorphStyle as CSSProperties;
+	const triggerClassName =
+		placement === "menubar"
+			? "relative flex size-[24px] shrink-0 items-center justify-center rounded-lg text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+			: trayTriggerClass;
 	const triggerProps: TrayTriggerRenderProps = {
 		"aria-controls": panelId,
 		"aria-expanded": open,
-		"aria-haspopup": true,
+		"aria-haspopup": "dialog",
 		"aria-label": label,
 		onClick: () => onOpenChange(!open),
 		ref: triggerRef,
 	};
 
+	const cssVariables1: LayoutCssVariables = {
+		"--desktop-inline3-transform-Origin":
+			placement === "menubar" ? "top right" : "top left",
+	};
+	const anchorVariables: CSSProperties & {
+		"--tray-right"?: string;
+		"--tray-top"?: string;
+		"--tray-bottom"?: string;
+		"--tray-left"?: string;
+	} = {
+		"--tray-right":
+			anchor?.placement === "menubar" ? `${anchor.right}px` : undefined,
+		"--tray-top":
+			anchor?.placement === "menubar" ? `${anchor.top}px` : undefined,
+		"--tray-bottom":
+			anchor?.placement === "menubar" ? undefined : `${anchor?.bottom ?? 0}px`,
+		"--tray-left":
+			anchor?.placement === "menubar"
+				? undefined
+				: `${anchor?.left ?? -9999}px`,
+	};
 	return (
-		<div className="relative size-7 shrink-0" ref={rootRef}>
+		<div
+			className={cn(
+				"relative shrink-0",
+				placement === "menubar" ? "size-[24px]" : "size-7"
+			)}
+			ref={rootRef}
+		>
 			{/* The trigger stays here; the box below is portaled over it. It fades
 			    and lifts on open (what `.t-morph-plus` did while it still wrapped the
 			    button) so the icon hands off to the panel instead of showing through
 			    the panel's translucent corner. */}
 			<div
-				className="transition-[opacity,transform] duration-200 ease-out data-[open=true]:pointer-events-none data-[open=true]:-translate-y-1 data-[open=true]:opacity-0"
+				className={cn(
+					"duration-200 ease-out data-[open=true]:pointer-events-none data-[open=true]:-translate-y-1 data-[open=true]:opacity-0",
+					layoutStyles.authored1
+				)}
 				data-open={open}
 			>
 				<Tooltip>
@@ -301,8 +372,11 @@ export function TrayMorph({
 								<button
 									{...triggerProps}
 									className={cn(
-										trayTriggerClass,
-										open && "bg-muted text-foreground"
+										triggerClassName,
+										open &&
+											(placement === "menubar"
+												? "bg-white/10 text-white"
+												: "bg-muted text-foreground")
 									)}
 									type="button"
 								>
@@ -317,28 +391,24 @@ export function TrayMorph({
 			</div>
 			{portalTarget &&
 				createPortal(
-					// Bottom-left pinned at the trigger's slot, so the box grows UP and to
-					// the RIGHT — over the content pane, not off the window's left edge —
-					// and the rows sit still while it grows past them. `pointer-events` is
+					// Sidebar trays grow up and right; menu-bar trays grow down and left.
+					// `pointer-events` is
 					// off while closed: the 40px closed box covers the trigger it no longer
 					// contains, and would otherwise swallow the click that opens it.
 					<div
 						className={cn(
 							"fixed z-[60]",
+							layoutStyles.anchor,
 							open ? "pointer-events-auto" : "pointer-events-none"
 						)}
+						data-placement={anchor?.placement ?? "sidebar"}
 						// Marks "a panel the sidebar owns is open, outside the sidebar's own
 						// DOM". Layout's hover-peek sidebar reads it so moving the pointer
 						// onto this tray — which now counts as leaving the peek panel —
 						// doesn't slide the sidebar away underneath it.
 						data-sidebar-overlay={open ? "open" : undefined}
 						ref={boxRef}
-						style={{
-							bottom: anchor?.bottom ?? 0,
-							// Parked off-screen for the frame before the first measurement,
-							// so an unpositioned box never flashes in the corner.
-							left: anchor?.left ?? -9999,
-						}}
+						style={anchorVariables}
 					>
 						{/* The lift rides the container, not the panel: `.t-morph` clips its
 					    children, so a shadow on the panel inside would never be painted. */}
@@ -351,11 +421,25 @@ export function TrayMorph({
 						    height is content-sized and always mounted so the closed tray is
 						    measurable. */}
 							<div
-								className="t-morph-menu absolute bottom-0 left-0 flex flex-col rounded-[20px] border border-border/50 bg-popover/70 p-0 backdrop-blur-2xl backdrop-saturate-150"
+								aria-label={label}
+								aria-modal={false}
+								className={cn(
+									cn(
+										cn(
+											"t-morph-menu absolute flex flex-col border border-border/50 bg-popover/70 p-0 backdrop-blur-2xl backdrop-saturate-150",
+											layoutStyles.authored2
+										),
+										placement === "menubar"
+											? "top-0 right-0"
+											: "bottom-0 left-0"
+									),
+									layoutStyles.inline3
+								)}
 								id={panelId}
 								inert={!open}
 								ref={panelRef}
-								style={{ width: "var(--morph-open-w)" }}
+								role="dialog"
+								style={cssVariables1}
 								tabIndex={-1}
 							>
 								{children}
@@ -388,17 +472,17 @@ export function TrayHeader({
 		<div className="flex items-start gap-2 px-2.5 pt-1.5 pb-2">
 			<div className="flex min-w-0 flex-col gap-0.5">
 				<div className="flex items-center gap-1.5">
-					<span className="font-medium text-[13px] tracking-tight">
+					<span className="text-(length:--text-detail) font-medium tracking-tight">
 						{title}
 					</span>
 					{count !== undefined && count > 0 && (
-						<span className="text-[11px] text-muted-foreground/80 tabular-nums">
+						<span className="type-caption text-muted-foreground/80 tabular-nums">
 							{count}
 						</span>
 					)}
 				</div>
 				{status && (
-					<span className="truncate text-[11px] text-muted-foreground tabular-nums leading-4">
+					<span className="type-caption truncate text-muted-foreground tabular-nums leading-4">
 						{status}
 					</span>
 				)}
@@ -427,7 +511,7 @@ export function TrayTextButton({
 	return (
 		<button
 			className={cn(
-				"rounded-lg px-1.5 py-1 font-medium text-[11px] transition-colors disabled:opacity-50",
+				"type-caption rounded-lg px-1.5 py-1 font-medium transition-colors disabled:opacity-50",
 				tone === "primary"
 					? "text-primary hover:bg-primary/10"
 					: "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
@@ -441,6 +525,37 @@ export function TrayTextButton({
 	);
 }
 
+/** How long the tray Refresh reads "Refreshing…" at minimum. */
+const TRAY_MIN_REFRESH_MS = 600;
+
+/**
+ * Visible Refresh for a tray header. The pull gesture in `TrayScroll` has no
+ * keyboard or single-pointer equivalent on its own (WCAG 2.1.1 / 2.5.7), so
+ * every panel that offers pull-to-refresh also shows this control. It reads
+ * "Refreshing…" and stays disabled while the refresh is in flight.
+ */
+export function TrayRefreshButton({ onRefresh }: { onRefresh: () => unknown }) {
+	const [refreshing, setRefreshing] = useState(false);
+	return (
+		<TrayTextButton
+			disabled={refreshing}
+			onClick={() => {
+				setRefreshing(true);
+				// A floor on the feedback (as on the Downloads page), never a delay
+				// on the data: an instant refetch still reads as an action.
+				const floor = new Promise((resolve) => {
+					setTimeout(resolve, TRAY_MIN_REFRESH_MS);
+				});
+				Promise.all([Promise.resolve().then(onRefresh), floor])
+					.catch(() => undefined)
+					.finally(() => setRefreshing(false));
+			}}
+		>
+			{refreshing ? "Refreshing…" : "Refresh"}
+		</TrayTextButton>
+	);
+}
+
 /** Full-bleed hairline that ignores the panel's inset padding. */
 export function TrayDivider({ className }: { className?: string }) {
 	return <div className={cn("my-1 h-px bg-border/50", className)} />;
@@ -451,14 +566,23 @@ export function TrayDivider({ className }: { className?: string }) {
  * marquee band (same treatment the Progress primitive uses for unknown sizes).
  */
 export function TrayProgressLine({ percent }: { percent: number | null }) {
+	const cssVariables2: LayoutCssVariables = {
+		"--desktop-inline4-width": `${percent}%`,
+	};
 	return (
 		<div className="relative mt-0.5 mb-1 h-0.5 overflow-hidden bg-border/50">
 			{percent === null ? (
 				<span className="t-progress-marquee" />
 			) : (
 				<div
-					className="h-full bg-primary/70 transition-[width] duration-500 ease-out"
-					style={{ width: `${percent}%` }}
+					className={cn(
+						cn(
+							"h-full bg-primary/70 duration-500 ease-out",
+							layoutStyles.authored3
+						),
+						layoutStyles.inline4
+					)}
+					style={cssVariables2}
 				/>
 			)}
 		</div>
@@ -480,11 +604,11 @@ export function TraySectionLabel({
 }) {
 	return (
 		<div className="flex h-7 items-center gap-1.5 px-2.5 pt-1">
-			<span className="font-medium text-[11px] text-muted-foreground">
+			<span className="type-caption font-medium text-muted-foreground">
 				{children}
 			</span>
 			{count !== undefined && count > 0 && (
-				<span className="text-[11px] text-muted-foreground/60 tabular-nums">
+				<span className="type-caption text-muted-foreground/60 tabular-nums">
 					{count}
 				</span>
 			)}
@@ -508,7 +632,7 @@ export function TrayRowIcon({
 	return (
 		<span
 			className={cn(
-				"mt-px flex size-7 shrink-0 items-center justify-center rounded-[10px] bg-muted text-muted-foreground",
+				"mt-px flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground",
 				tone === "danger" && "text-status-destructive",
 				tone === "success" && "text-status-success",
 				tone === "primary" && "text-primary",
@@ -539,7 +663,7 @@ export function TrayAction({
 	return (
 		<button
 			className={cn(
-				"flex h-6 shrink-0 items-center gap-1 rounded-lg px-2 font-medium text-[11px] transition-colors disabled:opacity-60",
+				"type-caption flex h-6 shrink-0 items-center gap-1 rounded-lg px-2 font-medium transition-colors disabled:opacity-60",
 				tone === "success"
 					? "bg-success text-white hover:bg-success/80"
 					: "bg-primary text-primary-foreground hover:bg-primary/80"
@@ -636,6 +760,9 @@ export function TrayRow({
 	/** Right-aligned stamp on the title line (kept out of the meta line). */
 	trailing?: ReactNode;
 }) {
+	const cssVariables3: LayoutCssVariables = {
+		"--desktop-inline5-width": `${progress}%`,
+	};
 	return (
 		<div
 			className={cn(
@@ -662,11 +789,11 @@ export function TrayRow({
 				)}
 			>
 				<div className="flex items-baseline gap-2">
-					<span className="min-w-0 flex-1 truncate font-medium text-[13px] leading-5">
+					<span className="text-(length:--text-detail) min-w-0 flex-1 truncate font-medium leading-5">
 						{title}
 					</span>
 					{trailing && (
-						<span className="shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+						<span className="type-compact shrink-0 text-muted-foreground/70 tabular-nums">
 							{trailing}
 						</span>
 					)}
@@ -674,7 +801,7 @@ export function TrayRow({
 				{meta && (
 					<span
 						className={cn(
-							"mt-0.5 truncate text-[11px] tabular-nums leading-4",
+							"type-caption mt-0.5 truncate tabular-nums leading-4",
 							metaTone === "danger"
 								? "text-status-destructive/90"
 								: "text-muted-foreground"
@@ -693,8 +820,14 @@ export function TrayRow({
 							<span className="t-progress-marquee" />
 						) : (
 							<div
-								className="h-full rounded-full bg-primary/80 transition-[width] duration-500 ease-out"
-								style={{ width: `${progress}%` }}
+								className={cn(
+									cn(
+										"h-full rounded-full bg-primary/80 duration-500 ease-out",
+										layoutStyles.authored4
+									),
+									layoutStyles.inline5
+								)}
+								style={cssVariables3}
 							/>
 						)}
 					</div>
@@ -703,7 +836,9 @@ export function TrayRow({
 			<div className="relative flex shrink-0 items-center gap-1">
 				{busy ? (
 					<span className="flex size-6 items-center justify-center">
-						<Spinner className="size-3.5 text-muted-foreground" />
+						<span className={"size-3.5 text-muted-foreground"}>
+							<Spinner />
+						</span>
 					</span>
 				) : (
 					actions
@@ -746,7 +881,7 @@ export function TrayScroll({
 	useEffect(() => {
 		measure();
 		const el = ref.current;
-		if (!el || typeof ResizeObserver === "undefined") {
+		if (!(el && "ResizeObserver" in globalThis)) {
 			return;
 		}
 		const observer = new ResizeObserver(measure);
@@ -768,19 +903,27 @@ export function TrayScroll({
 		mask = "linear-gradient(to bottom, transparent 0, black 1.25rem)";
 	}
 
+	const cssVariables4: LayoutCssVariables = {
+		"--desktop-inline6-mask-Image": mask,
+		"--desktop-inline6--Webkit-Mask-Image": mask,
+	};
 	const content = (
 		<div
 			className={cn(
-				"flex max-h-[20rem] flex-col overscroll-contain [scrollbar-width:thin]",
-				className
+				cn(
+					"flex max-h-[20rem] flex-col overscroll-contain [scrollbar-width:thin]",
+					className
+				),
+				layoutStyles.inline6
 			)}
 			onScroll={measure}
 			ref={ref}
-			style={mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined}
+			style={mask ? cssVariables4 : undefined}
 		>
 			{children}
 		</div>
 	);
+
 	return onRefresh ? (
 		<PullToRefresh
 			ariaLabel="Refresh tray"
@@ -811,8 +954,8 @@ export function TrayEmpty({
 			<span className="flex size-10 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
 				<HugeiconsIcon icon={icon} size={17} />
 			</span>
-			<span className="font-medium text-[13px]">{title}</span>
-			<p className="text-balance text-[11px] text-muted-foreground leading-relaxed">
+			<span className="text-(length:--text-detail) font-medium">{title}</span>
+			<p className="type-caption text-balance text-muted-foreground leading-relaxed">
 				{description}
 			</p>
 		</div>
@@ -830,7 +973,7 @@ export function TrayFooter({
 	return (
 		<button
 			className={cn(
-				"flex w-full items-center gap-1.5 px-2.5 py-2 font-medium text-[12px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+				"flex w-full items-center gap-1.5 px-2.5 py-2 font-medium text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground",
 				ROW_RADIUS
 			)}
 			onClick={onClick}
@@ -844,4 +987,14 @@ export function TrayFooter({
 			/>
 		</button>
 	);
+}
+
+interface LayoutCssVariables extends LayoutCSSProperties {
+	"--desktop-inline1-right"?: string | number;
+	"--desktop-inline1-top"?: string | number;
+	"--desktop-inline3-transform-Origin"?: string | number;
+	"--desktop-inline4-width"?: string | number;
+	"--desktop-inline5-width"?: string | number;
+	"--desktop-inline6--Webkit-Mask-Image"?: string | number;
+	"--desktop-inline6-mask-Image"?: string | number;
 }

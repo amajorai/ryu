@@ -3,7 +3,7 @@
 // production planning row, so the screenshot proves the integration rather than
 // only a standalone icon.
 
-import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
+import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
 import type { UIMessage } from "ai";
 import { createRoot } from "react-dom/client";
 import { MessageList } from "../../components/agent-elements/message-list.tsx";
@@ -20,7 +20,7 @@ const MESSAGES = [
 			},
 		],
 	},
-] as unknown as UIMessage[];
+] satisfies UIMessage[];
 
 function AssistantAvatar() {
 	return (
@@ -39,7 +39,7 @@ function Story() {
 			<main className="min-h-screen bg-background px-6 py-10 text-foreground">
 				<div className="mx-auto max-w-3xl space-y-5">
 					<header className="space-y-1">
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							Live chat state
 						</p>
 						<h1 className="font-semibold text-2xl tracking-tight">

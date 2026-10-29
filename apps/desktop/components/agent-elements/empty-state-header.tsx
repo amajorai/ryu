@@ -1,23 +1,17 @@
 "use client";
 
-import { Button } from "@ryu/ui/components/button.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "@ryu/ui/components/popover.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
 import { type ReactNode, useState } from "react";
 import {
 	ComposerSettingsMenu,
 	type ComposerSettingsSection,
 } from "@/components/agent-elements/input/composer-settings-menu.tsx";
 import { ManageModelsButton } from "@/components/agent-elements/input/manage-models-button.tsx";
-import { ProjectPickerContent } from "@/src/components/chat/ProjectPicker.tsx";
+import { ProjectCommandDialog } from "@/src/components/chat/ProjectPicker.tsx";
 import { AgentLogo } from "@/src/lib/agent-logos.tsx";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import styles from "./empty-state-header.module.css";
 
 const TRAILING_QUESTION = /\?\s*$/;
 const PATH_SEPARATOR = /[\\/]/;
@@ -43,7 +37,8 @@ function EmptyStateMark({
 		return (
 			<GlyphDisplay
 				alt="Agent avatar"
-				className="size-14 rounded-full object-contain"
+				className="size-14 object-contain"
+				corners="circle"
 				size={56}
 				value={logo.glyph}
 			/>
@@ -51,8 +46,8 @@ function EmptyStateMark({
 	}
 	if (logo.kind === "image") {
 		return (
-			// biome-ignore lint/performance/noImgElement: Tauri/Vite app, no next/image; avatar is an inline data URL
-			// biome-ignore lint/correctness/useImageSize: sized via the `size-14` class
+			// Tauri/Vite app, no next/image; avatar is an inline data URL
+			// sized via the `size-14` class
 			<img
 				alt="Agent avatar"
 				className="size-14 rounded-full object-cover"
@@ -82,22 +77,14 @@ function FannedAgentLogos({
 	const shown = engines.slice(0, 5);
 	const center = (shown.length - 1) / 2;
 	return (
-		<div className="relative h-16 w-80">
+		<div className={styles.fan} data-hovered={hovered}>
 			{shown.map((engine, i) => {
 				const offset = i - center;
-				// Spread wider (and tilt a touch more) on hover; never pile up.
-				const spread = hovered ? 60 : 46;
-				const rotate = offset * (hovered ? 12 : 6);
-				const x = offset * spread;
-				const y = -Math.abs(offset) * (hovered ? 6 : 3);
 				return (
 					<span
-						className="absolute top-1/2 left-1/2 transition-transform duration-200 ease-in-out"
+						className={styles.fanMark}
+						data-offset={offset}
 						key={`${engine ?? "ryu"}-${offset}`}
-						style={{
-							transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) rotate(${rotate}deg)`,
-							zIndex: 10 - Math.round(Math.abs(offset)),
-						}}
 					>
 						<AgentLogo className="object-contain" engine={engine} size="44px" />
 					</span>
@@ -157,41 +144,27 @@ export function EmptyStateHeader({
 	return (
 		<div className="flex flex-col items-center">
 			<div className="mb-7 flex flex-wrap items-baseline justify-center text-center">
-				<h1 className="font-heading text-[28px] text-foreground tracking-tight">
+				<h1 className={styles.heading}>
 					{folderName ? `${titleText} in ` : title}
 				</h1>
 				{folderName && (
 					<>
-						<Popover onOpenChange={setFolderOpen} open={folderOpen}>
-							<PopoverTrigger
-								render={
-									<Button
-										aria-label="Select project folder"
-										className={cn(
-											"h-auto gap-0 rounded-none px-0 py-0 font-heading font-normal text-[28px] text-foreground tracking-tight underline decoration-dotted underline-offset-4 hover:bg-transparent hover:text-muted-foreground",
-											folderOpen && "text-muted-foreground"
-										)}
-										size="sm"
-										title={folder ?? undefined}
-										type="button"
-										variant="link"
-									/>
-								}
-							>
-								<span className="max-w-48 truncate">{folderName}</span>
-							</PopoverTrigger>
-							<PopoverContent
-								align="center"
-								className="w-64 rounded-2xl p-1"
-								side="bottom"
-								sideOffset={6}
-							>
-								<ProjectPickerContent onClose={() => setFolderOpen(false)} />
-							</PopoverContent>
-						</Popover>
-						<h1 className="font-heading text-[28px] text-foreground tracking-tight">
-							?
-						</h1>
+						<button
+							aria-haspopup="dialog"
+							aria-label="Select project folder"
+							className={styles.folderTrigger}
+							data-open={folderOpen}
+							onClick={() => setFolderOpen(true)}
+							title={folder ?? undefined}
+							type="button"
+						>
+							<span className="max-w-48 truncate">{folderName}</span>
+						</button>
+						<ProjectCommandDialog
+							onOpenChange={setFolderOpen}
+							open={folderOpen}
+						/>
+						<h1 className={styles.heading}>?</h1>
 					</>
 				)}
 			</div>
@@ -209,7 +182,7 @@ export function EmptyStateHeader({
 					trigger={
 						<button
 							aria-label="Agent, model and mode settings"
-							className="relative top-5 z-0 flex items-center justify-center rounded-2xl p-1 transition-transform hover:scale-[1.03] active:scale-[0.97]"
+							className={styles.logoTrigger}
 							onMouseEnter={() => setHovered(true)}
 							onMouseLeave={() => setHovered(false)}
 							type="button"

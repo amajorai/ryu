@@ -50,8 +50,7 @@ export const SubagentTool = memo(function SubagentTool({
 	const description = part.input?.description || "";
 	const [elapsedMs, setElapsedMs] = useState(0);
 	const startedAt =
-		(part.callProviderMetadata?.custom?.startedAt as number | undefined) ??
-		(part.startedAt as number | undefined);
+		part.callProviderMetadata?.custom?.startedAt ?? part.startedAt;
 	const hasNestedTools = nestedTools.length > 0;
 	const outputDuration =
 		part.output?.totalDurationMs ||
@@ -83,7 +82,7 @@ export const SubagentTool = memo(function SubagentTool({
 			return "";
 		}
 		return description.length > 60
-			? `${description.slice(0, 57)}...`
+			? `${description.slice(0, 57)}…`
 			: description;
 	})();
 	const elapsedTimeDisplay = formatElapsedTime(
@@ -107,7 +106,7 @@ export const SubagentTool = memo(function SubagentTool({
 	}
 
 	return (
-		<div className="an-tool-task">
+		<div>
 			<AgentActivity
 				activeLabel={
 					elapsedTimeDisplay
@@ -121,7 +120,7 @@ export const SubagentTool = memo(function SubagentTool({
 				status={isPending ? "working" : "complete"}
 				summary={
 					description.length > 60
-						? `${description.slice(0, 57)}...`
+						? `${description.slice(0, 57)}…`
 						: description || "Subagent completed"
 				}
 			/>

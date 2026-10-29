@@ -21,14 +21,17 @@ export default defineConfig({
 	// Limit dependency scanning to this proof so an unrelated story cannot make
 	// this settings test fail through the desktop alias.
 	optimizeDeps: {
+		esbuildOptions: { target: "esnext" },
 		entries: ["settings-dialog-shortcuts-proof.html"],
 	},
 	resolve: {
 		alias: { "@": desktopRoot },
 	},
 	server: {
+		// Dialog shortcut proofs use one launched snapshot, not hot reload.
+		watch: null,
 		host: "127.0.0.1",
-		port: 5198,
+		port: 5220,
 		strictPort: true,
 	},
 });

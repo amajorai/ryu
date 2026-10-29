@@ -2,10 +2,21 @@
 
 // beui.dev/components/motion/range-slider
 
+import type { MotionStyle } from "motion/react";
+import type { CSSProperties } from "react";
+import css from "./range-slider-fluid.module.css";
+
+interface Inline1Style extends MotionStyle {
+	"--range-slider-fluid-1-clip-path"?: MotionStyle["clipPath"];
+}
+interface Inline2Style extends CSSProperties {
+	"--range-slider-fluid-2-color"?: CSSProperties["color"];
+}
+
 import { useContrastInk } from "@ryu/ui/hooks/use-contrast-ink.ts";
 import { type SliderOptions, useSlider } from "@ryu/ui/hooks/use-slider.ts";
-import { SPRING_GLIDE, SPRING_PRESS } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { SPRING_GLIDE, SPRING_PRESS } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	motion,
 	useMotionTemplate,
@@ -81,6 +92,12 @@ export function FluidSlider({
 		</>
 	);
 
+	const inline1Style: Inline1Style = {
+		"--range-slider-fluid-1-clip-path": clipPath,
+	};
+	const inline2Style: Inline2Style = {
+		"--range-slider-fluid-2-color": fillInk,
+	};
 	return (
 		<motion.div
 			{...trackProps}
@@ -103,11 +120,17 @@ export function FluidSlider({
 			{/* fill + the same label, both clipped to the value, so the text inverts
 			    as the fill covers it and lines up glyph for glyph with the copy
 			    underneath. The clip's rounded right edge is the liquid cap. */}
-			<motion.div className="absolute inset-0" style={{ clipPath }}>
+			<motion.div
+				className={[css.inline1, "absolute inset-0"].join(" ")}
+				style={inline1Style}
+			>
 				<div className="absolute inset-0 bg-primary" />
 				<div
-					className="pointer-events-none absolute inset-0 flex items-center justify-between px-5 font-medium text-sm"
-					style={{ color: fillInk }}
+					className={[
+						css.inline2,
+						"pointer-events-none absolute inset-0 flex items-center justify-between px-5 font-medium text-sm",
+					].join(" ")}
+					style={inline2Style}
 				>
 					{row}
 				</div>

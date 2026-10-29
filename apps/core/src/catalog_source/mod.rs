@@ -13,8 +13,10 @@
 //! methods (not object-safe), and heterogeneous storage is done via the closed
 //! [`sources::Source`] enum, match-dispatched. See `sources.rs`.
 
+pub(crate) mod agent_registry;
 mod github_enrich;
 mod github_topic;
+pub(crate) mod license;
 pub(crate) mod manifest_surface;
 mod registry;
 pub(crate) mod skill_registries;
@@ -146,11 +148,12 @@ pub async fn github_listing_channels(
 
 pub use registry::{CatalogSourceRegistry, CustomSourceSpec, SourceMeta};
 pub use sources::{
-    integration_brand_slug, integrations_sh_brands, mark_cheapest_options, with_buyer_token,
-    with_install_session, HfSource, IntegrationBrand, IntegrationConnection, IntegrationOption,
-    IntegrationPrice, IntegrationsShSource, MarketplaceSource, ModelIndexSource, OfficialMcpSource,
-    OkfBundleSource, RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource, SmitherySource,
-    Source, SourceAuth, StubSource, RYU_MARKETPLACE_API_ENV, SMITHERY_API_KEY_PREF,
+    integration_brand_slug, integrations_sh_brands, mark_cheapest_options, parse_provider_pins,
+    rank_managed_providers, with_buyer_token, with_install_session, HfSource, IntegrationBrand,
+    IntegrationConnection, IntegrationOption, IntegrationPrice, IntegrationsShSource,
+    MarketplaceSource, ModelIndexSource, OfficialMcpSource, OkfBundleSource, RyuHostedMcpSource,
+    RyuMarketplaceSource, SkillsShSource, SmitherySource, Source, SourceAuth, StubSource,
+    INTEGRATION_PROVIDER_PINS_PREF, RYU_MARKETPLACE_API_ENV, SMITHERY_API_KEY_PREF,
 };
 
 use anyhow::{bail, Result};
@@ -244,6 +247,47 @@ impl CatalogQuery {
     pub fn extra_str(&self, key: &str) -> &str {
         self.extra.get(key).and_then(|v| v.as_str()).unwrap_or("")
     }
+}
+
+/// A search `cursor` the source cannot have issued. Routes answer it with 400
+/// (see `server::catalog_search_error_status`) instead of silently restarting
+/// at the first page, matching the control plane's `/catalog` contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidCatalogCursor;
+
+impl fmt::Display for InvalidCatalogCursor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("`cursor` must come from a previous `next_cursor`")
+    }
+}
+
+impl std::error::Error for InvalidCatalogCursor {}
+
+/// Largest page the Ryu Marketplace `/catalog` serves (`CATALOG_MAX_LIMIT` in
+/// `packages/api/src/lib/marketplace-release.ts`).
+pub const MARKETPLACE_CATALOG_MAX_LIMIT: usize = 100;
+/// Deepest row offset the Marketplace `/catalog` accepts (`CATALOG_MAX_OFFSET`).
+pub const MARKETPLACE_CATALOG_MAX_OFFSET: u64 = 5000;
+
+/// Parse a Ryu Marketplace catalog cursor with the control plane's rules: the
+/// cursor is opaque to clients but is a decimal row offset of at most nine
+/// digits and at most [`MARKETPLACE_CATALOG_MAX_OFFSET`]. Absent or blank means
+/// the first page.
+pub fn parse_marketplace_cursor(
+    raw: Option<&str>,
+) -> std::result::Result<Option<u64>, InvalidCatalogCursor> {
+    let raw = raw.map(str::trim).unwrap_or_default();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    if raw.len() > 9 || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(InvalidCatalogCursor);
+    }
+    let offset: u64 = raw.parse().map_err(|_| InvalidCatalogCursor)?;
+    if offset > MARKETPLACE_CATALOG_MAX_OFFSET {
+        return Err(InvalidCatalogCursor);
+    }
+    Ok(Some(offset))
 }
 
 /// One downloadable artifact a source points Core at. The source supplies the

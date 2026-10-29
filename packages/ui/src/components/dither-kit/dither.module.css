@@ -1,0 +1,11 @@
+.avatarSize {
+ width: var(--dither-avatar-size);
+ height: var(--dither-avatar-size);
+}
+.pixelated { image-rendering: pixelated; }
+.bloom {
+ filter: var(--dither-bloom-filter);
+ opacity: var(--dither-bloom-opacity);
+ mix-blend-mode: plus-lighter;
+ image-rendering: auto;
+}

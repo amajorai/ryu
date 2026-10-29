@@ -32,4 +32,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "credit-usage-charts-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

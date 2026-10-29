@@ -208,7 +208,7 @@ function SidecarActions({
 	if (isFailed) {
 		return (
 			<Button
-				className="h-7 px-2 text-status-warning hover:text-status-warning"
+				appearance="service-retry"
 				disabled={pending !== null}
 				onClick={onInstall}
 				size="sm"
@@ -222,7 +222,7 @@ function SidecarActions({
 	if (!(isInstalled || entry.deprecated)) {
 		return (
 			<Button
-				className="h-7 px-2"
+				appearance="service-action"
 				disabled={pending !== null}
 				onClick={onInstall}
 				size="sm"
@@ -240,7 +240,7 @@ function SidecarActions({
 		<>
 			{hasUpdate ? (
 				<Button
-					className="h-7 px-2 text-status-info hover:text-status-info"
+					appearance="service-update"
 					disabled={pending !== null}
 					onClick={onInstall}
 					size="sm"
@@ -256,7 +256,7 @@ function SidecarActions({
 			{entry.running ? (
 				<>
 					<Button
-						className="h-7 px-2"
+						appearance="service-action"
 						disabled={pending !== null}
 						onClick={onStop}
 						size="sm"
@@ -266,7 +266,7 @@ function SidecarActions({
 						Stop
 					</Button>
 					<Button
-						className="h-7 px-2"
+						appearance="service-action"
 						disabled={pending !== null}
 						onClick={onRestart}
 						size="sm"
@@ -281,7 +281,7 @@ function SidecarActions({
 				</>
 			) : (
 				<Button
-					className="h-7 px-2"
+					appearance="service-action"
 					disabled={pending !== null}
 					onClick={onStart}
 					size="sm"
@@ -326,6 +326,7 @@ function FleetSidecarRow({
 				<div className="flex items-center gap-2">
 					<span
 						className={`truncate font-medium text-sm ${isInstalled ? "" : "text-muted-foreground"}`}
+						title={entry.displayName}
 					>
 						{entry.displayName}
 					</span>
@@ -337,7 +338,10 @@ function FleetSidecarRow({
 					) : null}
 				</div>
 				{entry.description ? (
-					<p className="truncate text-muted-foreground text-xs">
+					<p
+						className="truncate text-muted-foreground text-xs"
+						title={entry.description}
+					>
 						{entry.description}
 					</p>
 				) : null}
@@ -509,7 +513,7 @@ export function FleetView({
 					<div className="flex flex-col gap-3">
 						{nodes.map((node) => (
 							<Card key={node.name}>
-								<CardContent className="p-0">
+								<CardContent inset="none">
 									<div className="flex items-center justify-between gap-4 px-4 py-4">
 										<div className="flex flex-col gap-1">
 											<span className="font-medium text-sm">{node.name}</span>
@@ -529,7 +533,7 @@ export function FleetView({
 					<div className="flex flex-col gap-3">
 						{nodes.map((node) => (
 							<Card key={node.name}>
-								<CardContent className="p-0">
+								<CardContent inset="none">
 									<button
 										className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/40"
 										onClick={() => onToggleExpand?.(node.name, node.online)}

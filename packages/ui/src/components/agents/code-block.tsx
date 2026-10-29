@@ -2,13 +2,20 @@
 
 // beui.dev/components/agents/code-block
 
+import type { CSSProperties } from "react";
+import css from "./code-block.module.css";
+
+interface Inline1Style extends CSSProperties {
+	"--code-block-1-max-height"?: CSSProperties["maxHeight"];
+}
+
 import {
 	type AgentCodeLanguage,
 	AgentCodeLine,
 	useAgentCodeTokens,
-} from "@ryu/ui/components/agents/agent-code";
-import { SPRING_PRESS } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/agents/agent-code.tsx";
+import { SPRING_PRESS } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { Check, Copy, FileCode2, LoaderCircle } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -112,6 +119,10 @@ export function CodeBlock({
 		);
 	}, [code, onCopy]);
 
+	const inline1Style: Inline1Style = {
+		"--code-block-1-max-height":
+			maxHeight === undefined ? undefined : `${maxHeight}px`,
+	};
 	return (
 		<div
 			aria-busy={streaming}
@@ -131,12 +142,12 @@ export function CodeBlock({
 						{filename}
 					</span>
 				) : null}
-				<span className="font-medium text-[10px] text-muted-foreground/55 uppercase tracking-wide">
+				<span className="type-compact font-medium text-muted-foreground/55 uppercase tracking-wide">
 					{language}
 				</span>
 				<span
 					className={cn(
-						"ml-auto inline-flex shrink-0 items-center gap-1 font-medium text-[10px]",
+						"type-compact ml-auto inline-flex shrink-0 items-center gap-1 font-medium",
 						streaming ? "text-status-info" : "text-status-success"
 					)}
 				>
@@ -168,10 +179,13 @@ export function CodeBlock({
 
 			<div
 				aria-live={streaming ? "polite" : undefined}
-				className="scrollbar-hide overflow-auto border-foreground/[0.06] border-t py-2"
+				className={[
+					css.inline1,
+					"scrollbar-hide overflow-auto border-foreground/[0.06] border-t py-2",
+				].join(" ")}
 				ref={viewportRef}
 				role={streaming ? "log" : undefined}
-				style={{ maxHeight }}
+				style={inline1Style}
 			>
 				<pre className="m-0 min-w-max font-mono text-foreground/85 text-xs leading-5">
 					<code>

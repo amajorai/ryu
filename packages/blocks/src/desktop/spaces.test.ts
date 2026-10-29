@@ -1,3 +1,4 @@
+import { requireTestValue } from "./test-required.ts";
 // packages/blocks/src/desktop/spaces.test.ts
 //
 // The Spaces retrieval copy, held to what Core actually does.
@@ -63,7 +64,7 @@ function copyLiteral(name: string): string {
 				"what Core actually reads the column for)."
 		);
 	}
-	return match[1];
+	return requireTestValue(match[1], `copy literal ${name}`);
 }
 
 /**
@@ -96,8 +97,12 @@ function modeBlurb(
 		);
 	}
 	// Blurbs are prettier-wrapped into adjacent string literals; rejoin them.
-	return [...match[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)]
-		.map((m) => m[1])
+	return [
+		...requireTestValue(match[1], "wrapped copy literal").matchAll(
+			/"((?:[^"\\]|\\.)*)"/g
+		),
+	]
+		.map((m) => requireTestValue(m[1], "copy string fragment"))
 		.join("");
 }
 
@@ -190,7 +195,7 @@ describe("the retrieval copy as a whole", () => {
 		// where the choice lands. Anchored to the Retrieval card so the ingest and
 		// search cards' descriptions are not dragged in.
 		const card = RENDERED.slice(
-			RENDERED.indexOf('<CardTitle className="text-sm">Retrieval</CardTitle>'),
+			RENDERED.indexOf('<CardTitle variant="section">Retrieval</CardTitle>'),
 			RENDERED.indexOf("<RetrievalModeChoice")
 		);
 		expect(card).toContain("<CardDescription>");
@@ -315,8 +320,12 @@ function indexNote(state: string): string {
 				"not-indexed one needs a sentence saying what the user can do about it."
 		);
 	}
-	return [...match[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)]
-		.map((m) => m[1])
+	return [
+		...requireTestValue(match[1], "wrapped copy literal").matchAll(
+			/"((?:[^"\\]|\\.)*)"/g
+		),
+	]
+		.map((m) => requireTestValue(m[1], "copy string fragment"))
 		.join("");
 }
 

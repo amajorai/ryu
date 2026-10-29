@@ -1,3 +1,7 @@
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 // packages/core-client/src/acp.test.ts
 //
 // Tests for the ACP session-config client (`flattenConfigOptions` lives in
@@ -29,11 +33,11 @@ interface Captured {
 
 function stub(bodyText: string, status = 200): Captured {
 	const cap: Captured = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		cap.url = url;
 		cap.init = init;
 		return Promise.resolve(new Response(bodyText, { status }));
-	}) as typeof fetch;
+	});
 	return cap;
 }
 
@@ -71,7 +75,7 @@ describe("respondPermission", () => {
 		expect(res).toEqual({ resolved: true });
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/chat/permission");
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			request_id: "req-1",
 			option_id: "allow_once",
 		});
@@ -80,7 +84,7 @@ describe("respondPermission", () => {
 	test("carries a null option_id for a reject/cancel", async () => {
 		const cap = stub(JSON.stringify({ resolved: false }));
 		await respondPermission(target, "req-2", null);
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			request_id: "req-2",
 			option_id: null,
 		});

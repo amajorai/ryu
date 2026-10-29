@@ -1,0 +1,21 @@
+{
+  "xai": {
+    "models": [
+      {
+        "id": "fixture-cache-model",
+        "name": "Fixture",
+        "provider": "xai",
+        "api": "openai-completions",
+        "baseUrl": "https://fixture.example.test/v1",
+        "reasoning": false,
+        "input": ["text"],
+        "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+        "contextWindow": 8192,
+        "maxTokens": 1024,
+        "headers": { "X-Client": "fixture-client" }
+      }
+    ],
+    "checkedAt": 1,
+    "lastModified": 4102444800000
+  }
+}

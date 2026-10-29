@@ -1,8 +1,27 @@
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { z } from "zod";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 import { type ApiTarget, request } from "@/src/lib/api/client.ts";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 
 const CONTROL_PLANE_BASE = `${BACKEND_URL.replace(/\/$/, "")}/api/control-plane`;
-const ENROLLMENT_TOKEN_PATTERN = /^rfe_[0-9a-f]{64}$/;
+const fleetStatusEnvelopeSchema = z.object({
+	enrolled: z.boolean(),
+	managedInferenceReady: z.unknown().optional(),
+	nodeId: z.unknown().optional(),
+	organizationId: z.unknown().optional(),
+	organizationName: z.unknown().optional(),
+});
+const fleetIdentifierSchema = z
+	.string()
+	.refine((value) => value.trim().length > 0);
+const enrollmentCodeSchema = z.object({
+	token: z.string().regex(/^rfe_[0-9a-f]{64}$/),
+});
+const fleetErrorSchema = z.object({
+	message: z.unknown().optional(),
+	error: z.unknown().optional(),
+});
+type FleetResponseInput = Parameters<typeof fleetStatusEnvelopeSchema.parse>[0];
 
 export const FLEET_NODE_NAME_MAX_LENGTH = 128;
 export const FLEET_REQUEST_TIMEOUT_MS = 20_000;
@@ -62,44 +81,44 @@ export class NodeAlreadyBoundError extends Error {
 	}
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function requiredString(
-	value: unknown,
+	value: FleetResponseInput,
 	field: "nodeId" | "organizationId"
 ): string {
-	if (typeof value !== "string" || value.trim().length === 0) {
+	const parsed = fleetIdentifierSchema.safeParse(value);
+	if (!parsed.success) {
 		throw new Error(`Fleet status is missing ${field}. Update Core and retry.`);
 	}
-	return value;
+	return parsed.data;
 }
 
-export function parseFleetBindingStatus(value: unknown): FleetBindingStatus {
-	if (!isRecord(value) || typeof value.enrolled !== "boolean") {
+export function parseFleetBindingStatus(
+	value: FleetResponseInput
+): FleetBindingStatus {
+	const parsed = fleetStatusEnvelopeSchema.safeParse(value);
+	if (!parsed.success) {
 		throw new Error("Core returned an invalid Fleet status response.");
 	}
-	if (!value.enrolled) {
+	const metadata = parsed.data;
+	if (!metadata.enrolled) {
 		return { enrolled: false, state: "unbound" };
 	}
+	const organizationName = fleetIdentifierSchema.safeParse(
+		metadata.organizationName
+	);
 	return {
 		enrolled: true,
-		managedInferenceReady: value.managedInferenceReady === true,
-		nodeId: requiredString(value.nodeId, "nodeId"),
-		organizationId: requiredString(value.organizationId, "organizationId"),
-		organizationName:
-			typeof value.organizationName === "string" &&
-			value.organizationName.trim().length > 0
-				? value.organizationName
-				: null,
+		managedInferenceReady: metadata.managedInferenceReady === true,
+		nodeId: requiredString(metadata.nodeId, "nodeId"),
+		organizationId: requiredString(metadata.organizationId, "organizationId"),
+		organizationName: organizationName.success ? organizationName.data : null,
 		state: "bound",
 	};
 }
 
 function sessionToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		return null;
 	}
@@ -107,15 +126,16 @@ function sessionToken(): string | null {
 
 async function cloudError(response: Response): Promise<string> {
 	const fallback = `Could not create enrollment code (${response.status}).`;
-	const value: unknown = await response.json().catch(() => null);
-	if (!isRecord(value)) {
+	const value: FleetResponseInput = await response.json().catch(() => null);
+	const parsed = fleetErrorSchema.safeParse(value);
+	if (!parsed.success) {
 		return fallback;
 	}
-	if (typeof value.message === "string" && value.message.trim()) {
-		return value.message;
-	}
-	if (typeof value.error === "string" && value.error.trim()) {
-		return value.error;
+	for (const candidate of [parsed.data.message, parsed.data.error]) {
+		const text = fleetIdentifierSchema.safeParse(candidate);
+		if (text.success) {
+			return text.data;
+		}
 	}
 	return fallback;
 }
@@ -146,19 +166,15 @@ async function issueEnrollmentCode(input: {
 			if (!response.ok) {
 				throw new Error(await cloudError(response));
 			}
-			const value: unknown = await response.json();
-			if (
-				!(
-					isRecord(value) &&
-					typeof value.token === "string" &&
-					ENROLLMENT_TOKEN_PATTERN.test(value.token)
-				)
-			) {
+			const value: FleetResponseInput = await response.json();
+			const parsed = enrollmentCodeSchema.safeParse(value);
+			if (!parsed.success) {
 				throw new Error(
 					"The control plane returned an invalid enrollment code."
 				);
 			}
-			return value.token;
+
+			return parsed.data.token;
 		}
 	);
 }
@@ -168,7 +184,12 @@ export async function getFleetBindingStatus(
 ): Promise<FleetBindingStatus> {
 	return withFleetRequestTimeout("Reading Fleet status", async (signal) =>
 		parseFleetBindingStatus(
-			await request<unknown>(target, "/api/fleet/status", { signal })
+			await request(
+				target,
+				"/api/fleet/status",
+				{ signal },
+				gatewayJsonValueSchema
+			)
 		)
 	);
 }
@@ -201,14 +222,19 @@ export async function bindSelfHostedNodeToOrganization(input: {
 		organizationId: input.organizationId,
 	});
 	await withFleetRequestTimeout("Enrolling this node", (signal) =>
-		request<unknown>(input.target, "/api/fleet/enroll", {
-			body: {
-				controlPlaneUrl: BACKEND_URL.replace(/\/$/, ""),
-				token,
+		request(
+			input.target,
+			"/api/fleet/enroll",
+			{
+				body: {
+					controlPlaneUrl: BACKEND_URL.replace(/\/$/, ""),
+					token,
+				},
+				method: "POST",
+				signal,
 			},
-			method: "POST",
-			signal,
-		})
+			gatewayJsonValueSchema
+		)
 	);
 
 	const bound = await getFleetBindingStatus(input.target);

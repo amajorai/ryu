@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/novnc.d.ts",
+    "src/pages/ChatPage.tsx",
+    "src/contexts/TitleBarContext.tsx",
+    "src/contexts/TitleBarContext.tab-label.test.tsx",
+    "src/hooks/useCloudTaskSelection.ts",
+    "src/hooks/useCloudTaskSelection.draft-to-stored.native-http.test.tsx",
+    "src/hooks/useComposerAutoQueue.ts",
+    "src/hooks/useComposerDraftAutosave.ts",
+    "src/hooks/useComposerDraftAutosave.persist-toggle.native-http.test.tsx",
+    "e2e/chat-page-native-http.host.ts",
+    "e2e/chat-page-native-http-background.ts",
+    "e2e/chat-page-native-http-state.ts",
+    "e2e/chat-page-native-http-live-chat.ts",
+    "e2e/chat-page-native-http-live-chat.test.ts",
+    "e2e/chat-page-native-http-task-suggestion.spec.ts",
+    "e2e/harness/chat-page-native-http-dependencies.ts",
+    "e2e/harness/chat-page-native-http-dependencies.test.ts",
+    "../../packages/blocks/src/desktop/agent-elements/markdown.tsx"
+  ]
+}

@@ -1,9 +1,20 @@
 import { expect, test } from "@playwright/test";
+import { z } from "zod";
+import { retrievalModeStatusWireSchema } from "../src/lib/api/spaces-wire-contracts.ts";
+
+const graphProgressSchema = retrievalModeStatusWireSchema
+	.extend({
+		graph_edges: z.number().optional(),
+		graph_nodes: z.number().optional(),
+	})
+	.nullable();
 
 const CORE_URL = "http://127.0.0.1:17980";
 const NODE_TOKEN = "graphrag-e2e-node-token-2026-08-23";
-const PROOF_PATH =
-	"C:/Users/jiawei/.codex/visualizations/2026/08/22/01a029b1-69bb-79a1-a63e-43d0de99431b/graphrag-live-proof.png";
+
+interface GraphProgressCapture {
+	completedStatus: z.output<typeof graphProgressSchema>;
+}
 
 test.describe.configure({ timeout: 900_000 });
 
@@ -12,12 +23,9 @@ test("switches a seeded Space to Graph and finds a multi-hop target", async ({
 }) => {
 	const rebuildStates: string[] = [];
 	const browserErrors: string[] = [];
-	let completedStatus: {
-		graph_edges?: number;
-		graph_nodes?: number;
-		processed_chunks?: number;
-		total_chunks?: number;
-	} | null = null;
+	const progress: GraphProgressCapture = {
+		completedStatus: null,
+	};
 	let spaceId: string | null = null;
 	page.on("pageerror", (error) =>
 		browserErrors.push(`pageerror: ${error.message}`)
@@ -36,17 +44,11 @@ test("switches a seeded Space to Graph and finds a multi-hop target", async ({
 		if (!response.url().includes("/retrieval-mode/status")) {
 			return;
 		}
-		const body = (await response.json()) as {
-			graph_edges?: number;
-			graph_nodes?: number;
-			processed_chunks?: number;
-			state?: string;
-			total_chunks?: number;
-		} | null;
+		const body = graphProgressSchema.parse(await response.json());
 		if (body?.state) {
 			rebuildStates.push(body.state);
 			if (body.state === "completed") {
-				completedStatus = body;
+				progress.completedStatus = body;
 			}
 		}
 	});
@@ -84,6 +86,7 @@ test("switches a seeded Space to Graph and finds a multi-hop target", async ({
 		await expect
 			.poll(() => rebuildStates, { timeout: 30_000 })
 			.toContain("completed");
+		const completedStatus = progress.completedStatus;
 		expect(completedStatus).not.toBeNull();
 		expect(completedStatus?.processed_chunks).toBe(48);
 		expect(completedStatus?.total_chunks).toBe(48);
@@ -98,7 +101,10 @@ test("switches a seeded Space to Graph and finds a multi-hop target", async ({
 		).toBeVisible();
 		await multiHopResult.scrollIntoViewIfNeeded();
 		expect(browserErrors).toEqual([]);
-		await page.screenshot({ path: PROOF_PATH, fullPage: true });
+		await page.screenshot({
+			path: test.info().outputPath("graphrag-live-proof.png"),
+			fullPage: true,
+		});
 	} finally {
 		if (spaceId) {
 			const cleanup = await page.request.delete(

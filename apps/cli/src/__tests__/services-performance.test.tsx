@@ -2,19 +2,22 @@
 import { expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { testRender } from "@opentui/react/test-utils";
+import { KeyEvent } from "@opentui/core";
 import { act, useState } from "react";
 import { ThemeProvider } from "../../components/ui/theme-provider.tsx";
 import { CoreProvider } from "../core/CoreContext.tsx";
 import { loadServices } from "../core/services-snapshot.ts";
 import { ServicesTab } from "../tabs/services.tsx";
 import { ToastProvider } from "../ui/toast.tsx";
+import { testRender } from "./cli-test-render.ts";
 
-const replies: Record<string, unknown> = {
-	"/api/sidecar/status": { sidecars: [{ name: "ollama", running: true }] },
-	"/api/setup/list": { installed: ["ollama"] },
-	"/api/setup/status": { states: {} },
-};
+const replies = new Map(
+	Object.entries({
+		"/api/sidecar/status": { sidecars: [{ name: "ollama", running: true }] },
+		"/api/setup/list": { installed: ["ollama"] },
+		"/api/setup/status": { states: {} },
+	})
+);
 async function until(predicate: () => boolean) {
 	const deadline = Date.now() + 3000;
 	while (!predicate()) {
@@ -30,7 +33,7 @@ test("partial failures retain installed services and aborted loads reject", asyn
 		fetch(req) {
 			const path = new URL(req.url).pathname;
 			return path === "/api/setup/list"
-				? Response.json(replies[path])
+				? Response.json(replies.get(path))
 				: new Response("offline", { status: 503 });
 		},
 	});
@@ -57,7 +60,7 @@ test("Services parallelizes probes, skips busy poll ticks and cancels when inact
 		fetch(req) {
 			requests++;
 			if (!hold) {
-				return Response.json(replies[new URL(req.url).pathname]);
+				return Response.json(replies.get(new URL(req.url).pathname));
 			}
 			return new Response(
 				new ReadableStream({
@@ -145,7 +148,7 @@ test("an action finishing after close does not restart status reads", async () =
 				});
 			}
 			reads++;
-			return Response.json(replies[new URL(req.url).pathname]);
+			return Response.json(replies.get(new URL(req.url).pathname));
 		},
 	});
 	const setup = await testRender(
@@ -166,20 +169,42 @@ test("an action finishing after close does not restart status reads", async () =
 		});
 		await setup.renderOnce();
 		await act(async () => {
-			(
-				setup.renderer as unknown as {
-					keyInput: { emit: (event: string, data: unknown) => void };
-				}
-			).keyInput.emit("keypress", {
-				name: "a",
-				sequence: "A",
-				shift: true,
-				ctrl: false,
-				meta: false,
-				option: false,
-				eventType: "press",
-				repeated: false,
-			});
+			setup.renderer.keyInput.emit(
+				"keypress",
+				new KeyEvent({
+					name: "a",
+					sequence: "A",
+					shift: true,
+					ctrl: false,
+					meta: false,
+					option: false,
+					eventType: "press",
+					repeated: false,
+					number: false,
+					raw: "A",
+					source: "raw",
+				})
+			);
+		});
+		await setup.renderOnce();
+		// Start-all is gated by the confirm prompt; y sends it.
+		await act(async () => {
+			setup.renderer.keyInput.emit(
+				"keypress",
+				new KeyEvent({
+					name: "y",
+					sequence: "y",
+					shift: false,
+					ctrl: false,
+					meta: false,
+					option: false,
+					eventType: "press",
+					repeated: false,
+					number: false,
+					raw: "y",
+					source: "raw",
+				})
+			);
 		});
 		await until(() => writes === 1);
 		await act(async () => {

@@ -3,6 +3,7 @@ import {
 	type IslandBackground,
 	isMaterialAppearance,
 } from "../../shared/appearance.ts";
+import { registerScreenSurfaceIpc } from "../screen-surface.ts";
 import { registerAgentsIpc } from "./agents.ts";
 import { registerAppearanceIpc } from "./appearance.ts";
 import { registerCatalogIpc } from "./catalog.ts";
@@ -31,6 +32,9 @@ import { registerWindowIpc } from "./window.ts";
 // active window so streamed Core parts always reach the live renderer.
 let registered = false;
 let activeWindow: BrowserWindow | null = null;
+// The Background the active window was built with: what the renderer must style
+// for, even when Core now holds a different (or unreadable) value.
+let activeBackground: IslandBackground = "acrylic";
 
 /**
  * Registers IPC handlers for the island window. U1 wires the window-control
@@ -40,9 +44,10 @@ let activeWindow: BrowserWindow | null = null;
  */
 export function registerIpc(
 	win: BrowserWindow,
-	background: IslandBackground = "translucent"
+	background: IslandBackground = "acrylic"
 ): void {
 	activeWindow = win;
+	activeBackground = background;
 	// Window-control handlers are bound to the latest active window. A material
 	// (acrylic/mica) window is content-tracked, so it acts on `win:setContentSize`.
 	registerWinIpc(win, isMaterialAppearance(background));
@@ -50,7 +55,7 @@ export function registerIpc(
 		return;
 	}
 	registered = true;
-	registerAppearanceIpc();
+	registerAppearanceIpc(() => activeBackground);
 	registerCoreIpc(() => activeWindow);
 	registerPluginsIpc(() => activeWindow);
 	registerCatalogIpc();
@@ -58,6 +63,7 @@ export function registerIpc(
 	registerSuggestionsIpc(() => activeWindow);
 	registerMeetingsIpc(() => activeWindow);
 	registerQuestsIpc(() => activeWindow);
+	registerScreenSurfaceIpc(() => activeWindow);
 	registerConsentIpc(() => activeWindow);
 	registerSettingsIpc();
 	registerSystemIpc(() => activeWindow);
@@ -67,7 +73,7 @@ export function registerIpc(
 	registerDictationIpc(() => activeWindow);
 	registerAgentsIpc(() => activeWindow);
 	registerKeybindingsIpc(() => activeWindow);
-	registerLanguagePacksIpc();
+	registerLanguagePacksIpc(() => activeWindow);
 	registerTtsIpc(() => activeWindow);
 	registerWindowIpc();
 }

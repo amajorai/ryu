@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { SubscriptionProvider } from "@ryuhq/core-client/usage.ts";
+import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import {
 	fetchAgentUsage,
 	fetchProviderAccountUsage,
+	fetchProviderUsageReading,
+	fetchSubscriptionsSnapshot,
 	supportsSubscriptionProviderUsage,
 	supportsUsage,
+	usageSnapshotFromReading,
 } from "./usage.ts";
 
 const realFetch = globalThis.fetch;
@@ -13,7 +18,7 @@ afterEach(() => {
 });
 
 describe("subscription provider usage eligibility", () => {
-	test("accepts configured Ryu OAuth providers supported by Core", () => {
+	test("accepts configured Ryu OAuth providers whose accounts Core can read", () => {
 		for (const id of [
 			"openai-codex",
 			"chatgpt",
@@ -22,6 +27,7 @@ describe("subscription provider usage eligibility", () => {
 		]) {
 			expect(
 				supportsSubscriptionProviderUsage({
+					accountUsage: true,
 					authKind: "subscription",
 					configured: true,
 					id,
@@ -31,35 +37,152 @@ describe("subscription provider usage eligibility", () => {
 		}
 	});
 
-	test("keeps pool, api-key, unconfigured, and unknown rows quiet", () => {
+	test("keeps pool, api-key, unconfigured, and unreadable rows quiet", () => {
 		for (const provider of [
 			{
+				accountUsage: true,
 				authKind: "subscription",
 				configured: true,
 				id: "managed-openrouter",
 				managed: true,
 			},
 			{
+				accountUsage: true,
 				authKind: "api-key",
 				configured: true,
 				id: "openai",
 				managed: false,
 			},
 			{
+				accountUsage: true,
 				authKind: "subscription",
 				configured: false,
 				id: "claude-pro-max",
 				managed: false,
 			},
+			// Capability unknown (no snapshot yet): quiet, not guessed from the id.
 			{
 				authKind: "subscription",
 				configured: true,
-				id: "unknown-subscription",
+				id: "claude-pro-max",
 				managed: false,
 			},
+			// Core reports no per-account usage for these providers.
+			...["chatgpt-plan", "kiro", "kimi-coding", "devin", "gemini"].map(
+				(id) => ({
+					accountUsage: false,
+					authKind: "subscription",
+					configured: true,
+					id,
+					managed: false,
+				})
+			),
 		]) {
 			expect(supportsSubscriptionProviderUsage(provider)).toBe(false);
 		}
+	});
+
+	test("reads the capability from a subscriptions snapshot provider", () => {
+		const provider: SubscriptionProvider = {
+			providerId: "claude-pro-max",
+			label: "Claude Pro/Max",
+			kind: "subscription",
+			managed: false,
+			capabilities: {
+				accountUsage: true,
+				accountPing: true,
+				accountPinning: "none",
+				poolStrategies: ["manual"],
+				quotaObservations: true,
+			},
+			policy: null,
+			activeAccountId: "acct_one",
+			accounts: [
+				{
+					accountId: "acct_one",
+					label: "Work",
+					kind: "oauth",
+					active: true,
+					gatewayActive: false,
+					needsReauth: false,
+					updatedAt: 0,
+					poolEnabled: true,
+					poolPriority: null,
+					state: "ok",
+					usage: null,
+				},
+			],
+		};
+		expect(supportsSubscriptionProviderUsage(provider)).toBe(true);
+		expect(
+			supportsSubscriptionProviderUsage({
+				...provider,
+				capabilities: { ...provider.capabilities, accountUsage: false },
+			})
+		).toBe(false);
+		expect(
+			supportsSubscriptionProviderUsage({ ...provider, accounts: [] })
+		).toBe(false);
+		expect(
+			supportsSubscriptionProviderUsage({ ...provider, kind: "agent_login" })
+		).toBe(false);
+	});
+
+	test("subscriptions requests carry the provider, mode and account", async () => {
+		const urls: string[] = [];
+		globalThis.fetch = createFetchFixture(realFetch, async (input) => {
+			urls.push(String(input));
+			return String(input).includes("/reading")
+				? Response.json({
+						providerId: "claude-pro-max",
+						accountId: "acct/one",
+						available: true,
+						windows: [
+							{
+								targetId: "window:Session::18000",
+								label: "Session",
+								scope: "account",
+								usedPercent: 40,
+								remainingPercent: 60,
+								window: "5h",
+								windowSeconds: 18_000,
+							},
+						],
+						meters: [],
+					})
+				: Response.json({ version: 1, generatedAt: "", providers: [] });
+		});
+		const target = {
+			token: "node-token",
+			url: "http://127.0.0.1:8980",
+			userJwt: null,
+		};
+		await fetchSubscriptionsSnapshot(target, {
+			providerId: "claude-pro-max",
+			usage: "force",
+		});
+		const reading = await fetchProviderUsageReading(target, {
+			providerId: "claude-pro-max",
+			accountId: "acct/one",
+		});
+		expect(urls).toEqual([
+			"http://127.0.0.1:8980/api/usage/subscriptions?provider=claude-pro-max&usage=force",
+			"http://127.0.0.1:8980/api/usage/subscriptions/claude-pro-max/reading?account=acct%2Fone",
+		]);
+		expect(usageSnapshotFromReading(reading)).toMatchObject({
+			agentId: "claude-pro-max",
+			accountId: "acct/one",
+			available: true,
+			windows: [
+				{
+					label: "Session",
+					model: null,
+					resetsAt: null,
+					usedPercent: 40,
+					windowSeconds: 18_000,
+				},
+			],
+		});
 	});
 
 	test("uses the same engine hints as ACP usage polling", () => {
@@ -67,12 +190,17 @@ describe("subscription provider usage eligibility", () => {
 		expect(supportsUsage("acp:codex")).toBe(true);
 		expect(supportsUsage("chatgpt")).toBe(true);
 		expect(supportsUsage("acp:copilot")).toBe(true);
+		expect(supportsUsage("acp:devin")).toBe(true);
+		expect(supportsUsage("acp:opencode")).toBe(true);
+		expect(supportsUsage("acp:ollama")).toBe(true);
+		expect(supportsUsage("acp:cursor")).toBe(true);
+		expect(supportsUsage("acp:gemini")).toBe(true);
 		expect(supportsUsage("ryu")).toBe(false);
 	});
 
 	test("fetches one saved account without changing the active account", async () => {
 		const urls: string[] = [];
-		globalThis.fetch = (async (input) => {
+		globalThis.fetch = createFetchFixture(realFetch, async (input) => {
 			urls.push(String(input));
 			return Response.json({
 				agent_id: "claude-pro-max",
@@ -81,7 +209,7 @@ describe("subscription provider usage eligibility", () => {
 				plan: "Max 20x",
 				windows: [],
 			});
-		}) as typeof fetch;
+		});
 
 		const snapshot = await fetchProviderAccountUsage(
 			{ token: "node-token", url: "http://127.0.0.1:8980", userJwt: null },

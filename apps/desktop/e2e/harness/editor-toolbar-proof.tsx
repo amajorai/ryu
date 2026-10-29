@@ -25,20 +25,20 @@ function EditorToolbarProof() {
 			<div className="mx-auto flex max-w-4xl flex-col gap-6">
 				<header className="flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-start sm:justify-between">
 					<div>
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							React verification artifact
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
 							Nested editor toolbar
 						</h1>
 						<p className="mt-2 max-w-2xl text-muted-foreground text-sm leading-6">
-							The production Page and Skill editors mount the same bottom-fixed
-							nested overflow primitive. The active surface is switched below so
-							the browser proof can verify both without overlapping rails.
+							Space pages keep history, basic formatting, and AI in the compact
+							rail. Open it to reveal the full toolset in a two-row grid. The
+							Skill editor keeps its existing nested rail.
 						</p>
 					</div>
 					<div
-						className="inline-flex w-fit items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 font-semibold text-emerald-700 text-xs dark:text-emerald-300"
+						className="inline-flex w-fit items-center rounded-full border border-success/30 bg-success/10 px-3 py-1.5 font-semibold text-success text-xs dark:text-success"
 						data-testid="proof-status"
 					>
 						Shared primitive mounted
@@ -73,7 +73,7 @@ function EditorToolbarProof() {
 							</h2>
 							<p className="mt-1 text-muted-foreground text-sm">
 								{surface === "page"
-									? "PlateJS rich text with the full editor action set."
+									? "PlateJS rich text with a compact rail and two-row expanded tools."
 									: "Plain Markdown with the shared rail and working text transforms."}
 							</p>
 						</div>
@@ -86,6 +86,7 @@ function EditorToolbarProof() {
 							<PageMarkdownEditor
 								initialMarkdown={pageMarkdown}
 								onChangeMarkdown={setPageMarkdown}
+								toolbar="two-row"
 							/>
 						) : (
 							<SkillMarkdownEditor
@@ -98,16 +99,16 @@ function EditorToolbarProof() {
 
 				<div className="grid gap-3 text-sm sm:grid-cols-3">
 					<ProofNote
-						label="Default"
-						value="Compact primary actions + overflow toggle"
+						label="Quick actions"
+						value="Undo, redo, bold, italic, and AI stay visible"
 					/>
 					<ProofNote
-						label="Nested"
-						value="Category replaces the rail contents"
+						label="Expanded"
+						value="The remaining tool groups fit in a two-row grid"
 					/>
 					<ProofNote
-						label="Navigation"
-						value="Back is always the first category button"
+						label="Scope"
+						value="Skill editor keeps its current nested toolbar"
 					/>
 				</div>
 			</div>

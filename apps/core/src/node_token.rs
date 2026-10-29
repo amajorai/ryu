@@ -9,7 +9,7 @@
 //! allowlisted CORS origin.
 //!
 //! This module closes that by minting a strong token on first boot and persisting
-//! it at `<ryu_dir>/core.token` (0600), so a fresh install is authenticated by
+//! it at `<data dir>/secrets/node-auth.token` (0600), so a fresh install is authenticated by
 //! default with no operator action.
 //!
 //! ## Startup export and live rotation
@@ -85,7 +85,7 @@ fn resolved_state() -> &'static RwLock<Option<ResolvedToken>> {
 /// AUTH token into the same path would make `node_init` answer 409
 /// `already_initialized` forever and `ryu node init` refuse without `--force`.
 pub fn token_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("node-auth.token")
+    crate::paths::secret_path("node-auth.token")
 }
 
 /// Resolve the node token and export it to the process environment.
@@ -179,7 +179,7 @@ fn is_valid_minted_token(token: &str) -> bool {
         && token[4..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-/// Atomically write the token 0600, creating `<ryu_dir>` 0700. A crash can leave
+/// Atomically write the token 0600, creating `<data dir>/secrets` 0700. A crash can leave
 /// either the old or the new complete token, never a truncated live credential.
 fn write_token_file(path: &std::path::Path, token: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {

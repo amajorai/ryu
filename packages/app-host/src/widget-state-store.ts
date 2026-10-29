@@ -12,14 +12,23 @@
 // across the render churn a stream produces. `instanceId` is minted per render and
 // is NOT a stable client key.
 
+import { z } from "zod";
 import { create } from "zustand";
+
+// The RPC/initial-state boundary accepts untrusted input, while the mirror owns
+// only the JSON state that can be persisted by Core.
+const widgetStateSchema = z.json().optional();
+const widgetStateUpdateSchema = z.tuple([
+	z.string(),
+	z.unknown().transform((state) => widgetStateSchema.parse(state)),
+]);
 
 /** The widget-state store shape. `byToolCall` is the raw map; `get`/`set` are the
  *  accessors the widget host uses. */
 export interface WidgetStateStore {
-	byToolCall: Record<string, unknown>;
-	get(toolCallId: string): unknown;
-	set(toolCallId: string, state: unknown): void;
+	byToolCall: Record<string, z.infer<typeof widgetStateSchema>>;
+	get(toolCallId: string): z.infer<typeof widgetStateSchema> | undefined;
+	set(...input: z.input<typeof widgetStateUpdateSchema>): void;
 }
 
 /**
@@ -31,9 +40,11 @@ export const useWidgetStateStore = create<WidgetStateStore>(
 	(zustandSet, zustandGet) => ({
 		byToolCall: {},
 		get: (toolCallId) => zustandGet().byToolCall[toolCallId],
-		set: (toolCallId, state) =>
+		set: (...input) => {
+			const [toolCallId, state] = widgetStateUpdateSchema.parse(input);
 			zustandSet((prev) => ({
 				byToolCall: { ...prev.byToolCall, [toolCallId]: state },
-			})),
+			}));
+		},
 	})
 );

@@ -75,7 +75,7 @@ if (!message) {
 let raw;
 try {
 	raw = await host.storage.get("headlines.snapshot");
-} catch (e) {
+} catch  {
 	return { kind: "none" };
 }
 if (!raw) {
@@ -85,7 +85,7 @@ if (!raw) {
 let snap;
 try {
 	snap = JSON.parse(raw);
-} catch (e) {
+} catch  {
 	// A half-written or older-format value is indistinguishable from no news.
 	return { kind: "none" };
 }

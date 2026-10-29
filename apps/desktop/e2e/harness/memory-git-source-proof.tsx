@@ -18,7 +18,7 @@ const memory: Memory = {
 	whenToUse: "When reviewing memory changes",
 };
 
-function json(payload: unknown) {
+function json<FixturePayload>(payload: FixturePayload) {
 	return Response.json(payload);
 }
 

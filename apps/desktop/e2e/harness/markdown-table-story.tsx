@@ -2,7 +2,7 @@
 // intentionally wider than the chat column so the inline overflow and the
 // hover-to-expand affordance are both visible in a real layout.
 
-import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
+import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
 import { createRoot } from "react-dom/client";
 import { Markdown } from "../../components/agent-elements/markdown.tsx";
 import "../../src/index.css";

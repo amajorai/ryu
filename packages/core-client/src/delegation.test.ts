@@ -1,3 +1,7 @@
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 // packages/core-client/src/delegation.test.ts
 //
 // Tests for the sub-agent delegation client. `streamDelegation` is a fetch+
@@ -39,7 +43,7 @@ interface Captured {
 function streamOnce(chunks: string[], init?: ResponseInit): Captured {
 	const cap: Captured = {};
 	const encoder = new TextEncoder();
-	globalThis.fetch = ((url: string, reqInit: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, reqInit: RequestInit) => {
 		cap.url = url;
 		cap.init = reqInit;
 		return Promise.resolve(
@@ -55,7 +59,7 @@ function streamOnce(chunks: string[], init?: ResponseInit): Captured {
 				init
 			)
 		);
-	}) as unknown as typeof fetch;
+	});
 	return cap;
 }
 
@@ -119,7 +123,7 @@ describe("streamDelegation — SSE parsing", () => {
 		);
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/delegate/stream");
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			delegates: [{ id: "d1", preset: "summarise", task: "t" }],
 			depth: 2,
 		});
@@ -137,10 +141,9 @@ describe("streamDelegation — failure paths", () => {
 	});
 
 	test("throws when the response has no body", async () => {
-		globalThis.fetch = (() =>
-			Promise.resolve(
-				new Response(null, { status: 200 })
-			)) as unknown as typeof fetch;
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.resolve(new Response(null, { status: 200 }))
+		);
 		await expect(
 			streamDelegation(target, { delegates: [] }, () => {
 				// no-op

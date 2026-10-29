@@ -1,7 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import {
 	aggregateUsageEvents,
+	cacheReuseRatio,
 	compactUsageTrendPoints,
+	FOREGROUND_PURPOSE_KEY,
+	ledgerProviderLabel,
+	type UsageBucket,
+	type UsageEvent,
+	usageCacheSeries,
+	usageProviderLabel,
+	usagePurposeLabel,
 } from "./usage-analytics.ts";
 
 const RANGE = {
@@ -300,11 +308,16 @@ describe("aggregateUsageEvents", () => {
 			to: new Date(testCase.to),
 		});
 
-		expect(
+		expect<readonly (readonly (string | number)[])[]>(
 			data.buckets
 				.filter((bucket) => bucket.requests > 0)
 				.map((bucket) => [bucket.start, bucket.requests])
-		).toEqual(testCase.expected);
+		).toEqual(
+			testCase.expected.map(([start, requests]): [string, number] => [
+				start,
+				requests,
+			])
+		);
 	});
 });
 
@@ -355,5 +368,172 @@ describe("compactUsageTrendPoints", () => {
 
 		expect(data.totals.requests).toBe(2);
 		expect(data.buckets[0]?.requests).toBe(2);
+	});
+});
+
+describe("usageProviderLabel", () => {
+	it("names every Ryu own-supply slot Ryu Router, never the vendor or a tier", () => {
+		for (const slot of [
+			"cloudflare",
+			"bedrock",
+			"vertex",
+			"openai-credits",
+			"anthropic-credits",
+		]) {
+			expect(usageProviderLabel(slot)).toBe("Ryu Router");
+		}
+		expect(usageProviderLabel("ryu")).toBe("Ryu Router");
+		// BYOK and (possibly BYOK) OpenRouter analytics keep their own names.
+		expect(usageProviderLabel("openai")).toBe("openai");
+		expect(usageProviderLabel("openrouter")).toBe("openrouter");
+	});
+
+	it("names managed ledger traffic Ryu Router, OpenRouter included", () => {
+		expect(ledgerProviderLabel("openrouter")).toBe("Ryu Router");
+		expect(ledgerProviderLabel("bedrock")).toBe("Ryu Router");
+		expect(ledgerProviderLabel("openai")).toBe("openai");
+	});
+});
+
+function aggregateNode(events: UsageEvent[]) {
+	return aggregateUsageEvents({
+		caption: "Node traffic",
+		events,
+		from: RANGE.from,
+		granularity: "hourly",
+		scope: "node",
+		scopeLabel: "This node",
+		to: RANGE.to,
+	});
+}
+
+describe("purpose and prompt-cache attribution", () => {
+	it("breaks requests out by purpose with a sentinel for foreground calls", () => {
+		const data = aggregateNode([
+			{
+				purpose: null,
+				requestCount: 5,
+				timestamp: "2026-08-17T09:00:00.000Z",
+			},
+			{
+				purpose: "compaction",
+				requestCount: 3,
+				timestamp: "2026-08-17T09:15:00.000Z",
+			},
+			{
+				purpose: "plugin:@ryu/foo",
+				requestCount: 2,
+				timestamp: "2026-08-17T10:00:00.000Z",
+			},
+			{
+				purpose: "future_purpose",
+				requestCount: 1,
+				timestamp: "2026-08-17T10:15:00.000Z",
+			},
+			// A host that does not report purpose is not counted as foreground.
+			{ requestCount: 4, timestamp: "2026-08-17T11:00:00.000Z" },
+		]);
+
+		expect(
+			data.byPurpose?.map(({ key, label, requests }) => ({
+				key,
+				label,
+				requests,
+			}))
+		).toEqual([
+			{
+				key: FOREGROUND_PURPOSE_KEY,
+				label: "Chat and agent turns",
+				requests: 5,
+			},
+			{ key: "compaction", label: "Context compaction", requests: 3 },
+			{ key: "plugin:@ryu/foo", label: "Plugin · @ryu/foo", requests: 2 },
+			{ key: "future_purpose", label: "future_purpose", requests: 1 },
+		]);
+	});
+
+	it("keeps a tagged 'foreground' purpose apart from untagged calls", () => {
+		const data = aggregateNode([
+			{ purpose: null, timestamp: "2026-08-17T09:00:00.000Z" },
+			{ purpose: "foreground", timestamp: "2026-08-17T09:00:00.000Z" },
+		]);
+
+		expect(data.byPurpose?.map((row) => row.key).sort()).toEqual(
+			[FOREGROUND_PURPOSE_KEY, "foreground"].sort()
+		);
+	});
+
+	it("omits the purpose breakdown when nothing is tagged", () => {
+		expect(
+			aggregateNode([{ timestamp: "2026-08-17T09:00:00.000Z" }]).byPurpose
+		).toBeUndefined();
+		expect(
+			aggregateNode([{ purpose: null, timestamp: "2026-08-17T09:00:00.000Z" }])
+				.byPurpose
+		).toBeUndefined();
+	});
+
+	it("sums cache reads and writes into buckets and totals", () => {
+		const data = aggregateNode([
+			{
+				cacheReadTokens: 30,
+				cacheWriteTokens: 10,
+				timestamp: "2026-08-17T09:00:00.000Z",
+			},
+			{
+				cacheReadTokens: 20,
+				timestamp: "2026-08-17T09:30:00.000Z",
+			},
+			{ timestamp: "2026-08-17T10:00:00.000Z" },
+		]);
+
+		expect(data.totals).toMatchObject({
+			cacheReadTokens: 50,
+			cacheWriteTokens: 10,
+		});
+		const nineAm = data.buckets.find(
+			(bucket) => bucket.start === "2026-08-17T09:00:00.000Z"
+		);
+		expect(nineAm).toMatchObject({ cacheReadTokens: 50, cacheWriteTokens: 10 });
+	});
+
+	it("labels unknown purposes verbatim", () => {
+		expect(usagePurposeLabel("something_new")).toBe("something_new");
+		expect(usagePurposeLabel("plugin:")).toBe("plugin:");
+		expect(usagePurposeLabel("auto_title")).toBe("Chat titles");
+	});
+
+	it("computes cache reuse as reads over reads plus writes", () => {
+		expect(cacheReuseRatio(0, 0)).toBeNull();
+		expect(cacheReuseRatio(3, 1)).toBe(0.75);
+	});
+
+	it("groups cache series as a ratio of sums", () => {
+		const bucket = (
+			label: string,
+			cacheReadTokens: number,
+			cacheWriteTokens: number
+		): UsageBucket => ({
+			averageLatencyMs: null,
+			cacheReadTokens,
+			cacheWriteTokens,
+			end: "",
+			errors: 0,
+			inputTokens: 0,
+			label,
+			outputTokens: 0,
+			requests: 0,
+			spendMicroUsd: null,
+			start: "",
+		});
+		const points = usageCacheSeries(
+			[bucket("a", 1, 0), bucket("b", 0, 9), bucket("c", 0, 0)],
+			2
+		);
+
+		expect(points).toEqual([
+			{ label: "a – b", ratio: 0.1, read: 1, write: 9 },
+			{ label: "c", ratio: null, read: 0, write: 0 },
+		]);
 	});
 });

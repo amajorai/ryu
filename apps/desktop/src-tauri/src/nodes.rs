@@ -5,7 +5,17 @@ use std::path::PathBuf;
 pub struct Node {
     pub name: String,
     pub url: String,
+    /// The node's bearer. Stored in plaintext in the owner-only (`0600`)
+    /// `nodes.json`, NOT sealed: the Bun CLI/TUI (`apps/cli/src/core/nodes.ts`)
+    /// reads this file directly and has no way to open a desktop-keychain
+    /// envelope. A sealed `enc:v1:` token left by an earlier build is opened on
+    /// load and written back in plaintext so the CLI can use it again.
     pub token: Option<String>,
+    /// A sealed token this process could not open (another device's key, a
+    /// reset keychain). Never sent as a bearer and never sent to the webview,
+    /// but written back unchanged so a save does not destroy it.
+    #[serde(skip)]
+    pub unopened_token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,15 +55,17 @@ const MAX_SWEEP_HOSTS: u8 = 254;
 // Per-host connection/response timeout in milliseconds.
 const PROBE_TIMEOUT_MS: u64 = 800;
 
+/// `<data dir>/state/nodes.json` — shared with Core and the CLI.
 fn nodes_path() -> PathBuf {
-    crate::profile::ryu_home_dir().join("nodes.json")
+    ryu_sidecar_runtime::layout::state_path(&crate::profile::ryu_home_dir(), "nodes.json")
 }
 
 /// The file Core mints its node-admittance token into (`apps/core/src/node_token.rs`).
 /// Profile-aware for the same reason `nodes_path` is: a dev Core writes into
 /// `~/.ryu-dev`, and the dev desktop must read THAT token, not the release one.
+/// Lives at `<data dir>/secrets/node-auth.token`.
 fn node_auth_token_path() -> PathBuf {
-    crate::profile::ryu_home_dir().join("node-auth.token")
+    ryu_sidecar_runtime::layout::secret_path(&crate::profile::ryu_home_dir(), "node-auth.token")
 }
 
 /// Read the local Core's minted auth token, if it has one.
@@ -84,8 +96,18 @@ fn is_local_node_url(url: &str) -> bool {
 }
 
 fn load() -> NodesConfig {
-    let path = nodes_path();
-    if let Ok(content) = std::fs::read_to_string(&path) {
+    let local_token = read_local_node_token();
+    let mut config = load_at(&nodes_path(), local_token.as_deref());
+    fill_local_token_with(&mut config, local_token);
+    config
+}
+
+/// Read `nodes.json` at `path` without the local token injected. Plaintext
+/// tokens are used as-is. A sealed token written by an earlier build is opened
+/// and the file rewritten with it in plaintext once (as is the old port-2049
+/// local URL migration), because the CLI reads this file and cannot open it.
+fn load_at(path: &std::path::Path, local_token: Option<&str>) -> NodesConfig {
+    if let Ok(content) = std::fs::read_to_string(path) {
         if let Ok(mut config) = serde_json::from_str::<NodesConfig>(&content) {
             // Migrate old default local URL (port 2049 → the profile's Core port).
             let mut migrated = false;
@@ -95,24 +117,46 @@ fn load() -> NodesConfig {
                     node.url = local_url.clone();
                     migrated = true;
                 }
+                migrated |= open_node_token(node);
             }
             if migrated {
-                let _ = save(&config);
+                let _ = save_at(path, &config, local_token);
             }
-            fill_local_token(&mut config);
             return config;
         }
     }
-    let mut config = NodesConfig {
+    NodesConfig {
         default: "local".into(),
         nodes: vec![Node {
             name: "local".into(),
             url: crate::profile::core_base_url(),
             token: None,
+            unopened_token: None,
         }],
+    }
+}
+
+/// Open a node's stored token in place. Returns true when a sealed token was
+/// opened (the caller rewrites the file so the CLI can read it again).
+fn open_node_token(node: &mut Node) -> bool {
+    let Some(stored) = node.token.take() else {
+        return false;
     };
-    fill_local_token(&mut config);
-    config
+    if !crate::desktop_seal::is_sealed(&stored) {
+        node.token = Some(stored);
+        return false;
+    }
+    match crate::desktop_seal::open(&stored) {
+        Ok(token) => {
+            node.token = Some(token);
+            true
+        }
+        Err(error) => {
+            tracing::warn!(node = %node.name, "a saved node token could not be opened: {error}");
+            node.unopened_token = Some(stored);
+            false
+        }
+    }
 }
 
 /// True only when `nodes.json` exists AND its default node is this machine's
@@ -146,8 +190,13 @@ pub fn default_node_is_local() -> bool {
 ///  - it stays correct for free after Core rotates the token, with no migration;
 ///  - an explicit token already in `nodes.json` still WINS, so an operator who
 ///    pinned one by hand (or provisioned `RYU_TOKEN`) is never overridden.
+#[cfg(test)]
 fn fill_local_token(config: &mut NodesConfig) {
-    let Some(token) = read_local_node_token() else {
+    fill_local_token_with(config, read_local_node_token());
+}
+
+fn fill_local_token_with(config: &mut NodesConfig, token: Option<String>) {
+    let Some(token) = token else {
         return;
     };
     for node in &mut config.nodes {
@@ -158,28 +207,71 @@ fn fill_local_token(config: &mut NodesConfig) {
 }
 
 fn save(config: &NodesConfig) -> anyhow::Result<()> {
-    let path = nodes_path();
+    save_at(&nodes_path(), config, read_local_node_token().as_deref())
+}
+
+/// Write `config` to `path`. Remote tokens are stored in plaintext because the
+/// Bun CLI reads this file and cannot open a desktop-keychain envelope; the
+/// file is owner-only (`0600`) and its `state/` directory `0700`. See
+/// `docs/encryption-at-rest.md`.
+fn save_at(
+    path: &std::path::Path,
+    config: &NodesConfig,
+    local_token: Option<&str>,
+) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        restrict_mode(parent, 0o700);
     }
     // Undo `fill_local_token` before writing. Every mutating command does
     // load -> mutate -> save, so without this the injected secret would be
-    // round-tripped into `nodes.json` — a file with no restrictive mode that
+    // round-tripped into `nodes.json` — a plaintext file that
     // `data_path` copies between profiles. Only a token that IS the current
     // on-disk one is stripped, so a token an operator pinned by hand survives.
     let mut to_write = NodesConfig {
         default: config.default.clone(),
         nodes: config.nodes.clone(),
     };
-    if let Some(disk_token) = read_local_node_token() {
+    if let Some(disk_token) = local_token {
         for node in &mut to_write.nodes {
-            if node.token.as_deref() == Some(disk_token.as_str()) && is_local_node_url(&node.url) {
+            if node.token.as_deref() == Some(disk_token) && is_local_node_url(&node.url) {
                 node.token = None;
             }
         }
     }
-    std::fs::write(&path, serde_json::to_string_pretty(&to_write)?)?;
+    for node in &mut to_write.nodes {
+        if node.token.is_none() {
+            node.token = node.unopened_token.take();
+        }
+    }
+    // Stage + rename: an interrupted in-place write would leave truncated JSON,
+    // which `load()` silently replaces with the default config — and the next
+    // save would then erase every remote node (and its pinned token).
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("nodes.json has no parent directory"))?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::Write::write_all(
+        &mut staged,
+        serde_json::to_string_pretty(&to_write)?.as_bytes(),
+    )?;
+    staged.as_file().sync_all()?;
+    staged.persist(path).map_err(|error| error.error)?;
+    restrict_mode(path, 0o600);
     Ok(())
+}
+
+/// Best-effort owner-only permissions (no-op off Unix).
+fn restrict_mode(path: &std::path::Path, mode: u32) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)) {
+            tracing::warn!(path = %path.display(), "could not restrict permissions: {error}");
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (path, mode);
 }
 
 #[tauri::command]
@@ -230,7 +322,12 @@ pub fn add_node(name: String, url: String, token: Option<String>) -> Result<(), 
     if config.nodes.iter().any(|n| n.name == name) {
         return Err(format!("node '{}' already exists", name));
     }
-    config.nodes.push(Node { name, url, token });
+    config.nodes.push(Node {
+        name,
+        url,
+        token,
+        unopened_token: None,
+    });
     save(&config).map_err(|e| e.to_string())
 }
 
@@ -239,17 +336,18 @@ pub fn add_node(name: String, url: String, token: Option<String>) -> Result<(), 
 /// stale credential that was captured when the node was first added.
 #[tauri::command]
 pub fn update_node_token(name: String, token: Option<String>) -> Result<(), String> {
-	let mut config = load();
-	let node = config
-		.nodes
-		.iter_mut()
-		.find(|node| node.name == name)
-		.ok_or_else(|| format!("node '{}' not found", name))?;
-	node.token = token.and_then(|value| {
-		let trimmed = value.trim().to_owned();
-		(!trimmed.is_empty()).then_some(trimmed)
-	});
-	save(&config).map_err(|e| e.to_string())
+    let mut config = load();
+    let node = config
+        .nodes
+        .iter_mut()
+        .find(|node| node.name == name)
+        .ok_or_else(|| format!("node '{}' not found", name))?;
+    node.token = token.and_then(|value| {
+        let trimmed = value.trim().to_owned();
+        (!trimmed.is_empty()).then_some(trimmed)
+    });
+    node.unopened_token = None;
+    save(&config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -543,11 +641,13 @@ mod tests {
                     name: "local".into(),
                     url: crate::profile::core_base_url(),
                     token: Some("pinned-by-hand".into()),
+                    unopened_token: None,
                 },
                 Node {
                     name: "remote".into(),
                     url: "http://192.168.1.50:7980".into(),
                     token: None,
+                    unopened_token: None,
                 },
             ],
         };
@@ -556,5 +656,118 @@ mod tests {
         // A REMOTE node never receives this machine's token: it would be a secret
         // sent to a third party, and that peer would reject it anyway.
         assert_eq!(config.nodes[1].token, None);
+    }
+
+    // ── sealed node tokens ───────────────────────────────────────────────────
+
+    const REMOTE_TOKEN: &str = "remote-node-bearer-0123456789";
+
+    fn remote(token: Option<&str>) -> Node {
+        Node {
+            name: "remote".into(),
+            url: "https://node.example".into(),
+            token: token.map(str::to_owned),
+            unopened_token: None,
+        }
+    }
+
+    fn config_with(nodes: Vec<Node>) -> NodesConfig {
+        NodesConfig {
+            default: "remote".into(),
+            nodes,
+        }
+    }
+
+    #[test]
+    fn saved_tokens_stay_readable_by_the_cli_with_owner_only_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let path = state.join("nodes.json");
+        save_at(&path, &config_with(vec![remote(Some(REMOTE_TOKEN))]), None).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        // The Bun CLI reads this field directly, so it must not be an envelope.
+        assert_eq!(raw["nodes"][0]["token"], REMOTE_TOKEN);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode =
+                |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&path), 0o600);
+            assert_eq!(mode(&state), 0o700);
+        }
+        let loaded = load_at(&path, None);
+        assert_eq!(loaded.nodes[0].token.as_deref(), Some(REMOTE_TOKEN));
+    }
+
+    #[test]
+    fn a_plaintext_token_is_never_rewritten_sealed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nodes.json");
+        let pinned = format!(
+            r#"{{"default":"remote","nodes":[{{"name":"remote","url":"https://node.example","token":"{REMOTE_TOKEN}"}}]}}"#
+        );
+        std::fs::write(&path, &pinned).unwrap();
+        let loaded = load_at(&path, None);
+        assert_eq!(loaded.nodes[0].token.as_deref(), Some(REMOTE_TOKEN));
+        // Untouched: no rewrite, and above all no envelope the CLI cannot open.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), pinned);
+    }
+
+    #[test]
+    fn a_token_sealed_by_an_earlier_build_is_opened_and_written_back_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nodes.json");
+        let sealed = crate::desktop_seal::seal(REMOTE_TOKEN).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"default":"remote","nodes":[{{"name":"remote","url":"https://node.example","token":"{sealed}"}}]}}"#
+            ),
+        )
+        .unwrap();
+        let loaded = load_at(&path, None);
+        assert_eq!(loaded.nodes[0].token.as_deref(), Some(REMOTE_TOKEN));
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["nodes"][0]["token"], REMOTE_TOKEN);
+    }
+
+    #[test]
+    fn an_unopenable_token_is_never_used_and_survives_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nodes.json");
+        let foreign = ryu_crypto::FieldCipher::new(&[9; 32])
+            .seal(REMOTE_TOKEN)
+            .unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"default":"remote","nodes":[{{"name":"remote","url":"https://node.example","token":"{foreign}"}}]}}"#
+            ),
+        )
+        .unwrap();
+        let loaded = load_at(&path, None);
+        assert_eq!(loaded.nodes[0].token, None);
+        // Not sent to the webview either.
+        assert!(!serde_json::to_string(&loaded).unwrap().contains("enc:v1:"));
+        save_at(&path, &loaded, None).unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains(&foreign));
+    }
+
+    #[test]
+    fn the_local_minted_token_is_still_stripped_before_saving() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nodes.json");
+        let local = Node {
+            name: "local".into(),
+            url: crate::profile::core_base_url(),
+            token: Some("minted-local".into()),
+            unopened_token: None,
+        };
+        save_at(&path, &config_with(vec![local]), Some("minted-local")).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(raw["nodes"][0]["token"].is_null());
     }
 }

@@ -1,5 +1,5 @@
-import { Button } from "@ryu/ui/components/button";
-import { cn } from "@ryu/ui/lib/utils";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { Maximize2, Plus } from "lucide-react";
 import type { DbColumn, DbRow } from "@/src/lib/realtime/yjs-database.ts";
 import { CellValue } from "./cell-display.tsx";
@@ -23,7 +23,7 @@ export function ListView({
 	rows: DbRow[];
 	readOnly: boolean;
 	onOpenRow: (row: DbRow) => void;
-	createRow: (values?: Record<string, unknown>) => void;
+	createRow: (values?: DbRow) => void;
 }) {
 	const [titleColumn, ...rest] = columns;
 	const chipColumns = rest
@@ -46,7 +46,10 @@ export function ListView({
 							onClick={() => onOpenRow(row)}
 							type="button"
 						>
-							<span className="min-w-0 flex-1 truncate font-medium text-sm">
+							<span
+								className="min-w-0 flex-1 truncate font-medium text-sm"
+								title={title}
+							>
 								{title}
 							</span>
 							<div className="flex shrink-0 items-center gap-2">
@@ -75,10 +78,10 @@ export function ListView({
 			{!readOnly && (
 				<div className="mx-auto mt-2 max-w-3xl">
 					<Button
-						className="justify-start text-muted-foreground"
+						className="justify-start"
 						onClick={() => createRow()}
 						size="sm"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						<Plus className="size-3.5" />
 						New row

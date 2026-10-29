@@ -25,12 +25,43 @@ pub const CLEANUP_STORAGE: &str = "storage";
 pub const CLEANUP_SCHEDULER: &str = "scheduler";
 pub const CLEANUP_OAUTH: &str = "oauth";
 pub const CLEANUP_SPACES: &str = "spaces";
+/// The app's own data folder, `<data dir>/plugin-data/<dir>` (its databases,
+/// preferences, media and caches).
+pub const CLEANUP_FILES: &str = "files";
 const CLEANUP_DATA_PREFIX: &str = "data:";
 
 #[derive(Debug, Default, Deserialize)]
 pub struct UninstallRequest {
     #[serde(default)]
     pub cleanup: Vec<String>,
+    /// Also delete the app's key-value storage. Off by default: storage is kept so
+    /// a reinstall finds the app's saved data again. Equivalent to selecting the
+    /// `storage` cleanup row.
+    #[serde(default, alias = "deleteStorage")]
+    pub delete_storage: bool,
+}
+
+impl UninstallRequest {
+    /// The cleanup rows uninstall actually applies: the user's selection, plus
+    /// the app's saved secrets (always removed: a credential must not outlive
+    /// the app that was trusted with it), plus storage when `delete_storage` is
+    /// set. Deduplicated, selection order first.
+    pub fn effective_cleanup(&self) -> Vec<String> {
+        let mut rows: Vec<String> = Vec::with_capacity(self.cleanup.len() + 2);
+        let mut push = |row: &str| {
+            if !rows.iter().any(|existing| existing == row) {
+                rows.push(row.to_owned());
+            }
+        };
+        for row in &self.cleanup {
+            push(row);
+        }
+        push(CLEANUP_SECRETS);
+        if self.delete_storage {
+            push(CLEANUP_STORAGE);
+        }
+        rows
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -136,7 +167,7 @@ async fn inventory(
         });
     }
 
-    let (preference_count, preference_bytes, secret_count) = settings_usage(state, manifest).await;
+    let (preference_count, preference_bytes) = settings_usage(state, manifest).await;
     if preference_count > 0 {
         items.push(InventoryItem {
             id: CLEANUP_SETTINGS.to_owned(),
@@ -153,21 +184,8 @@ async fn inventory(
             details: None,
         });
     }
-    if secret_count > 0 {
-        items.push(InventoryItem {
-            id: CLEANUP_SECRETS.to_owned(),
-            kind: "secrets",
-            label: "Saved credentials".to_owned(),
-            description: format!(
-                "{} encrypted credential slot{}. Values are never shown here.",
-                secret_count,
-                if secret_count == 1 { "" } else { "s" }
-            ),
-            count: secret_count,
-            bytes: None,
-            details: None,
-        });
-    }
+    // Saved secrets are not an optional row: uninstall always deletes them (see
+    // `UninstallRequest::effective_cleanup`), which `automatic` below states.
 
     if let Some(storage) = crate::plugin_storage::global() {
         if let Ok((count, bytes)) = storage.usage(plugin_id).await {
@@ -284,6 +302,27 @@ async fn inventory(
         }
     }
 
+    let data_dir = plugin_data_dir(plugin_id);
+    let (file_count, file_bytes) = tokio::task::spawn_blocking(move || dir_usage(&data_dir))
+        .await
+        .unwrap_or((0, 0));
+    if file_count > 0 {
+        items.push(InventoryItem {
+            id: CLEANUP_FILES.to_owned(),
+            kind: "files",
+            label: "App files".to_owned(),
+            description: format!(
+                "{} file{} (databases, media and caches) {} keeps on this node.",
+                file_count,
+                if file_count == 1 { "" } else { "s" },
+                manifest.name
+            ),
+            count: file_count,
+            bytes: Some(file_bytes),
+            details: None,
+        });
+    }
+
     if let Some(contributes) = &manifest.contributes {
         for category in &contributes.data_categories {
             let Some(count) =
@@ -312,13 +351,44 @@ async fn inventory(
         "automatic": [
             "The installed package, manifest, runtime contributions, approved permissions, and bundled skills are always removed.",
             "Sidecar binaries owned by this app are always removed.",
+            "Saved secrets (encrypted credentials) for this app are always removed.",
             "Unchecked data stays on the node and can be restored if you install the app again."
         ]
     })
 }
 
-/// Apply exactly the optional cleanup rows the user checked. Errors are returned
-/// as display-safe strings so uninstall itself can still complete.
+/// Purge the app-declared data categories (`data:<category>` rows) the user
+/// checked, through the app's own `data.purge`. Runs BEFORE the uninstall
+/// deactivates the app: the capability broker only reaches an enabled provider,
+/// so purging after teardown is always refused. Errors are display-safe strings;
+/// a failed purge never blocks the uninstall.
+pub async fn purge_app_data(
+    state: &ServerState,
+    manifest: &crate::plugin_manifest::PluginManifest,
+    selected: &[String],
+) -> Vec<String> {
+    let selected: HashSet<&str> = selected.iter().map(String::as_str).collect();
+    let mut errors = Vec::new();
+    if let Some(contributes) = &manifest.contributes {
+        for category in &contributes.data_categories {
+            let selection = format!("{CLEANUP_DATA_PREFIX}{}", category.id);
+            if !selected.contains(selection.as_str()) {
+                continue;
+            }
+            if let Err(error) =
+                crate::server::data_admin::clear_app_category(state, manifest, &category.id).await
+            {
+                errors.push(format!("{}: {error}", category.title));
+            }
+        }
+    }
+    errors
+}
+
+/// Apply the optional Core-held cleanup rows the user checked (everything but
+/// app-declared data categories, which [`purge_app_data`] handles before
+/// teardown). Errors are returned as display-safe strings so uninstall itself
+/// can still complete.
 pub async fn apply_cleanup(
     state: &ServerState,
     manifest: &crate::plugin_manifest::PluginManifest,
@@ -389,21 +459,46 @@ pub async fn apply_cleanup(
         }
     }
 
-    if let Some(contributes) = &manifest.contributes {
-        for category in &contributes.data_categories {
-            let selection = format!("{CLEANUP_DATA_PREFIX}{}", category.id);
-            if !selected.contains(selection.as_str()) {
-                continue;
-            }
-            if let Err(error) =
-                crate::server::data_admin::clear_app_category(state, manifest, &category.id).await
-            {
-                errors.push(format!("{}: {error}", category.title));
-            }
+    if selected.contains(CLEANUP_FILES) {
+        let data_dir = plugin_data_dir(plugin_id);
+        match tokio::fs::remove_dir_all(&data_dir).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => errors.push(format!("App files: {error}")),
         }
     }
 
     errors
+}
+
+/// `<data dir>/plugin-data/<dir>` — the folder Core gives the app's sidecars as
+/// `RYU_PLUGIN_DATA_DIR`.
+fn plugin_data_dir(plugin_id: &str) -> std::path::PathBuf {
+    ryu_sidecar_runtime::layout::plugin_data_dir(&crate::paths::ryu_dir(), plugin_id)
+}
+
+/// Regular-file count and total bytes under `dir` (symlinks are not followed).
+fn dir_usage(dir: &std::path::Path) -> (u64, u64) {
+    let mut count = 0;
+    let mut bytes = 0;
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                count += 1;
+                bytes += entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+            }
+        }
+    }
+    (count, bytes)
 }
 
 fn keybinding_overrides_for(plugin_id: &str, raw: &str) -> Map<String, Value> {
@@ -418,6 +513,8 @@ fn keybinding_overrides_for(plugin_id: &str, raw: &str) -> Map<String, Value> {
 }
 
 async fn clear_keybindings(state: &ServerState, plugin_id: &str) -> anyhow::Result<()> {
+    // Held across the read and the write so a concurrent shortcut edit is kept.
+    let _edit = crate::server::preferences::lock_keybinding_edits().await;
     let Some(raw) = state.preferences.get("keybindings").await? else {
         return Ok(());
     };
@@ -436,8 +533,8 @@ async fn clear_keybindings(state: &ServerState, plugin_id: &str) -> anyhow::Resu
 async fn settings_usage(
     state: &ServerState,
     manifest: &crate::plugin_manifest::PluginManifest,
-) -> (u64, u64, u64) {
-    let (preference_keys, secret_keys) = settings_keys(manifest);
+) -> (u64, u64) {
+    let (preference_keys, _) = settings_keys(manifest);
     let mut preference_count = 0;
     let mut preference_bytes = 0;
     for key in preference_keys {
@@ -446,19 +543,7 @@ async fn settings_usage(
             preference_bytes += value.len() as u64;
         }
     }
-    let secret_count = match crate::plugin_secrets::global() {
-        Some(store) => store
-            .list_keys(&manifest.id)
-            .await
-            .map(|keys| {
-                keys.iter()
-                    .filter(|key| secret_keys.contains(&key.key))
-                    .count() as u64
-            })
-            .unwrap_or(0),
-        None => 0,
-    };
-    (preference_count, preference_bytes, secret_count)
+    (preference_count, preference_bytes)
 }
 
 async fn clear_settings(
@@ -563,7 +648,52 @@ mod tests {
     }
 
     #[test]
+    fn uninstall_always_removes_secrets_and_keeps_storage_unless_asked() {
+        let default: UninstallRequest = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(default.effective_cleanup(), vec![CLEANUP_SECRETS]);
+
+        let with_storage: UninstallRequest =
+            serde_json::from_value(json!({ "delete_storage": true })).unwrap();
+        assert_eq!(
+            with_storage.effective_cleanup(),
+            vec![CLEANUP_SECRETS, CLEANUP_STORAGE]
+        );
+        let camel: UninstallRequest =
+            serde_json::from_value(json!({ "deleteStorage": true })).unwrap();
+        assert!(camel.delete_storage);
+
+        let selected: UninstallRequest = serde_json::from_value(json!({
+            "cleanup": ["settings", "secrets", "data:monitors"]
+        }))
+        .unwrap();
+        assert_eq!(
+            selected.effective_cleanup(),
+            vec!["settings", CLEANUP_SECRETS, "data:monitors"]
+        );
+    }
+
+    #[test]
     fn malformed_keybindings_are_treated_as_empty() {
         assert!(keybinding_overrides_for("com.example.notes", "not json").is_empty());
+    }
+
+    #[test]
+    fn app_files_usage_counts_nested_regular_files() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("app.db"), b"12345").unwrap();
+        std::fs::create_dir_all(root.path().join("media")).unwrap();
+        std::fs::write(root.path().join("media").join("a.pcm"), b"123").unwrap();
+        assert_eq!(dir_usage(root.path()), (2, 8));
+        assert_eq!(dir_usage(&root.path().join("missing")), (0, 0));
+    }
+
+    #[test]
+    fn app_files_live_in_the_plugin_data_dir() {
+        assert_eq!(
+            plugin_data_dir("@ryu/meetings"),
+            crate::paths::ryu_dir()
+                .join("plugin-data")
+                .join("@ryu+meetings")
+        );
     }
 }

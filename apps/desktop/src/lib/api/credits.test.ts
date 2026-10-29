@@ -14,24 +14,106 @@
 // loop simply falls through to the transient branch and the spam is unchanged.
 
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import {
 	CreditsError,
+	type CreditWallet,
 	isTerminalCreditsError,
 	openWalletStream,
+	unrestrictedCreditBalanceMicroUsd,
 } from "./credits.ts";
 
 const realFetch = globalThis.fetch;
 
 /** Point `fetch` at a fixed status, as the control plane would answer. */
 function mockFetchStatus(status: number): void {
-	globalThis.fetch = (() =>
-		Promise.resolve(
-			new Response(null, { status })
-		)) as unknown as typeof globalThis.fetch;
+	globalThis.fetch = Object.assign(
+		() => Promise.resolve(new Response(null, { status })),
+		{ preconnect: realFetch.preconnect }
+	);
 }
 
+function wallet(overrides: Partial<CreditWallet> = {}): CreditWallet {
+	return {
+		balanceMicroUsd: 0,
+		currency: "usd",
+		id: "wallet-1",
+		ownerId: "org-1",
+		ownerType: "organization",
+		subscriptionBalanceMicroUsd: 0,
+		topupBalanceMicroUsd: 0,
+		updatedAt: "2026-09-24T00:00:00.000Z",
+		...overrides,
+	};
+}
+
+describe("unrestrictedCreditBalanceMicroUsd", () => {
+	test("uses the server's authoritative unrestricted balance when present", () => {
+		expect(
+			unrestrictedCreditBalanceMicroUsd(
+				wallet({
+					balanceMicroUsd: 100_000_000,
+					unrestrictedBalanceMicroUsd: 25_000_000,
+				})
+			)
+		).toBe(25_000_000);
+	});
+
+	test("does not count provider-restricted grants toward retail managed usage", () => {
+		expect(
+			unrestrictedCreditBalanceMicroUsd(
+				wallet({
+					balanceBreakdownAvailable: true,
+					balanceMicroUsd: 40_000_000,
+					providerAllocations: [
+						{
+							expiresAt: null,
+							isFreeProvider: true,
+							label: "Ryu Fast",
+							poolId: "fast",
+							remainingMicroUsd: 40_000_000,
+						},
+					],
+				})
+			)
+		).toBe(0);
+	});
+
+	test("uses prepaid and gift buckets when the total is decomposed locally", () => {
+		expect(
+			unrestrictedCreditBalanceMicroUsd(
+				wallet({
+					balanceBreakdownAvailable: true,
+					balanceMicroUsd: 40_000_000,
+					topupBalanceMicroUsd: 20_000_000,
+					giftBalanceMicroUsd: 5_000_000,
+				})
+			)
+		).toBe(25_000_000);
+	});
+
+	test("uses the aggregate balance when the provider does not expose a breakdown", () => {
+		expect(
+			unrestrictedCreditBalanceMicroUsd(
+				wallet({
+					balanceBreakdownAvailable: false,
+					balanceMicroUsd: 12_000_000,
+				})
+			)
+		).toBe(12_000_000);
+	});
+
+	test("clamps negative balances to zero", () => {
+		expect(
+			unrestrictedCreditBalanceMicroUsd(
+				wallet({ unrestrictedBalanceMicroUsd: -1 })
+			)
+		).toBe(0);
+	});
+});
+
 /** Drive the generator to its first `next()` and return whatever it threw. */
-async function connectError(status: number): Promise<unknown> {
+async function connectError(status: number) {
 	mockFetchStatus(status);
 	try {
 		for await (const _message of openWalletStream(
@@ -42,7 +124,7 @@ async function connectError(status: number): Promise<unknown> {
 		}
 		return null;
 	} catch (e) {
-		return e;
+		return z.instanceof(CreditsError).parse(e);
 	} finally {
 		globalThis.fetch = realFetch;
 	}
@@ -52,7 +134,7 @@ describe("openWalletStream connect-failure classification", () => {
 	test("maps a 409 to a terminal no_org CreditsError", async () => {
 		const error = await connectError(409);
 		expect(error).toBeInstanceOf(CreditsError);
-		expect((error as CreditsError).kind).toBe("no_org");
+		expect(error?.kind).toBe("no_org");
 		// The whole point: the reconnect loop must read this as "retrying cannot
 		// help", not as a blip worth another attempt in half a second.
 		expect(isTerminalCreditsError(error)).toBe(true);
@@ -60,7 +142,14 @@ describe("openWalletStream connect-failure classification", () => {
 
 	test("maps a 401 to a terminal auth CreditsError", async () => {
 		const error = await connectError(401);
-		expect((error as CreditsError).kind).toBe("auth");
+		expect(error?.kind).toBe("auth");
+		expect(isTerminalCreditsError(error)).toBe(true);
+	});
+
+	// Not "auth": the session is valid, so "Sign in" copy would be wrong.
+	test("maps a 403 access-policy refusal to a terminal access_policy CreditsError", async () => {
+		const error = await connectError(403);
+		expect(error?.kind).toBe("access_policy");
 		expect(isTerminalCreditsError(error)).toBe(true);
 	});
 
@@ -69,7 +158,7 @@ describe("openWalletStream connect-failure classification", () => {
 	test("leaves a 500 transient", async () => {
 		const error = await connectError(500);
 		expect(error).toBeInstanceOf(CreditsError);
-		expect((error as CreditsError).kind).toBe("unknown");
+		expect(error?.kind).toBe("unknown");
 		expect(isTerminalCreditsError(error)).toBe(false);
 	});
 

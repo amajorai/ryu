@@ -2,8 +2,8 @@
 
 // beui.dev/components/motion/text-animation
 
-import { EASE_IN_OUT, EASE_OUT } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { EASE_IN_OUT, EASE_OUT } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type MotionStyle,
 	motion,
@@ -25,6 +25,10 @@ const TRAIL_HALF_WIDTH = 14;
 const REVEAL_START = `-${TRAIL_HALF_WIDTH}%`;
 const REVEAL_FINISH = `${100 + TRAIL_HALF_WIDTH}%`;
 
+interface ChromaticStyle extends MotionStyle {
+	"--chromatic-gradient": string;
+	"--chromatic-sweep": string;
+}
 export interface ChromaticTextRevealProps {
 	className?: string;
 	/** Colors used along the moving chromatic edge. */
@@ -131,6 +135,11 @@ export function ChromaticTextReveal({
 
 	useEffect(() => clearPendingWord, [clearPendingWord]);
 
+	const chromaticStyle: ChromaticStyle = {
+		"--chromatic-sweep": reduceMotion ? REVEAL_FINISH : REVEAL_START,
+		"--chromatic-gradient": backgroundImage,
+	};
+
 	return (
 		<span className={cn("inline align-baseline", className)} ref={ref}>
 			<span className="whitespace-normal">
@@ -158,7 +167,7 @@ export function ChromaticTextReveal({
 							transform: "translateY(0px)",
 						}}
 						aria-hidden
-						className="absolute start-0 top-0 whitespace-nowrap bg-clip-text text-transparent [background-image:var(--chromatic-gradient)] [contain:paint]"
+						className="absolute start-0 top-0 whitespace-nowrap bg-[size:100%_100%] bg-clip-text bg-no-repeat text-transparent [background-image:var(--chromatic-gradient)] [contain:paint]"
 						initial={
 							reduceMotion
 								? false
@@ -170,16 +179,7 @@ export function ChromaticTextReveal({
 						}
 						key={`${activeWord}-${activeIndex}`}
 						onAnimationComplete={scheduleNextWord}
-						style={
-							{
-								"--chromatic-sweep": reduceMotion
-									? REVEAL_FINISH
-									: REVEAL_START,
-								"--chromatic-gradient": backgroundImage,
-								backgroundSize: "100% 100%",
-								backgroundRepeat: "no-repeat",
-							} as MotionStyle
-						}
+						style={chromaticStyle}
 						transition={{
 							"--chromatic-sweep": reduceMotion
 								? { duration: 0 }

@@ -12,6 +12,13 @@
 // (`{ success: false, error }`), and we want to surface that exact message —
 // the generic helper throws only the status code.
 
+import { z } from "zod";
+import {
+	type AppResponseValue,
+	appJsonValueSchema,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
+
 import {
 	type ApiTarget,
 	apiUrl,
@@ -19,13 +26,143 @@ import {
 	makeHeaders,
 } from "./client.ts";
 
+/** Native decoded JSON retains references and future fields after checking the
+ * published fields. Core remains the owner of DAG authoring validation. */
+function nativeWorkflowJson<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appJsonValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+function nativeWorkflowArray<S extends z.ZodType>(item: S) {
+	return nativeWorkflowJson(z.array(item));
+}
+const wireNode = nativeWorkflowJson(
+	z.object({ id: z.string(), type: z.string() }).catchall(appJsonValueSchema)
+);
+const wireEdge = nativeWorkflowJson(
+	z.object({ from: z.string(), to: z.string(), branch: z.string().nullish() })
+);
+const wireTrigger = nativeWorkflowJson(
+	z.discriminatedUnion("type", [
+		z.object({ type: z.literal("manual") }),
+		z.object({
+			type: z.literal("schedule"),
+			cron: z.string().nullish(),
+			every: z.string().nullish(),
+			require_approval: z.boolean().optional(),
+		}),
+		z.object({ type: z.literal("webhook"), secret: z.string().nullish() }),
+		z.object({
+			type: z.literal("composio"),
+			toolkit: z.string(),
+			trigger_slug: z.string(),
+			connected_account_id: z.string().nullish(),
+		}),
+		z.object({ type: z.literal("event"), event: z.string() }),
+	])
+);
+const wireWorkflow = nativeWorkflowJson(
+	z.object({
+		id: z.string(),
+		name: z.string(),
+		description: z.string().nullish(),
+		nodes: nativeWorkflowArray(wireNode).optional(),
+		edges: nativeWorkflowArray(wireEdge).optional(),
+		triggers: nativeWorkflowArray(wireTrigger).optional(),
+		created_at: z.string().nullish(),
+		updated_at: z.string().nullish(),
+	})
+);
+const stringMap = nativeWorkflowJson(z.record(z.string(), z.string()));
+const nodeState = nativeWorkflowJson(
+	z.object({
+		status: z.enum(["pending", "running", "completed", "failed", "skipped"]),
+		output: z.string().nullish(),
+		error: z.string().nullish(),
+		attempts: z.number().optional(),
+		wake_at: z.string().nullish(),
+	})
+);
+const runStatusSchema = z.enum([
+	"running",
+	"completed",
+	"failed",
+	"awaiting_input",
+	"waiting",
+]);
+const wireRun = nativeWorkflowJson(
+	z.object({
+		run_id: z.string(),
+		workflow_id: z.string(),
+		status: runStatusSchema,
+		resume_at: z.string().nullish(),
+		wait_reason: z.string().nullish(),
+		dryRun: z.boolean().nullish(),
+		dry_run: z.boolean().nullish(),
+		input: stringMap.optional(),
+		output: stringMap.optional(),
+		nodes: nativeWorkflowJson(z.record(z.string(), nodeState)).optional(),
+		state: stringMap.optional(),
+		error: z.string().nullish(),
+		awaiting_node: z.string().nullish(),
+		forked_from: nativeWorkflowJson(
+			z.object({ run_id: z.string(), checkpoint_id: z.string() })
+		).nullish(),
+		created_at: z.string(),
+		updated_at: z.string(),
+	})
+);
+const templateFields = {
+	id: z.string(),
+	name: z.string(),
+	description: z.string().nullish(),
+	category: z.string().nullish(),
+	pattern: z.string(),
+	icon: z.string().nullish(),
+	node_count: z.number().nullish(),
+	tags: nativeWorkflowArray(z.string()).nullish(),
+	source_url: z.string().nullish(),
+};
+const wireTemplate = nativeWorkflowJson(z.object(templateFields));
+const wireTemplateDetail = nativeWorkflowJson(
+	z.object({
+		...templateFields,
+		nodes: nativeWorkflowArray(wireNode).optional(),
+		edges: nativeWorkflowArray(wireEdge).optional(),
+	})
+);
+const versionFields = {
+	id: z.string(),
+	workflow_id: z.string(),
+	name: z.string(),
+	label: z.string().nullish(),
+	created_at: z.number(),
+};
+const wireVersionMeta = nativeWorkflowJson(z.object(versionFields));
+const wireVersion = nativeWorkflowJson(
+	z.object({ ...versionFields, workflow: wireWorkflow.optional() })
+);
+const workflowEnvelope = nativeWorkflowJson(
+	z.object({ workflow: wireWorkflow, success: z.boolean().optional() })
+);
+const runEnvelope = nativeWorkflowJson(
+	z.object({ run: wireRun, success: z.boolean().optional() })
+);
+const workflowsEnvelope = nativeWorkflowJson(
+	z.object({ workflows: nativeWorkflowArray(wireWorkflow).optional() })
+);
+
+type WorkflowNativeJsonInput = Parameters<typeof JSON.stringify>[0];
+
 /** A single node in a workflow definition. `type` selects the node kind and
  * carries its config (Core flattens the kind onto the node). We keep the config
  * open since the JSON editor is the create surface for DA8. */
 export interface WorkflowNode {
 	id: string;
 	type: string;
-	[key: string]: unknown;
+	[key: string]: AppResponseValue;
 }
 
 /** A directed edge between two node ids, optionally gated on a branch label. */
@@ -39,7 +176,12 @@ export interface WorkflowEdge {
  * snake_case). The wire shape is the tagged union directly. */
 export type WorkflowTrigger =
 	| { type: "manual" }
-	| { type: "schedule"; cron?: string | null; every?: string | null }
+	| {
+			type: "schedule";
+			cron?: string | null;
+			every?: string | null;
+			require_approval?: boolean;
+	  }
 	| { type: "webhook"; secret?: string | null }
 	| {
 			type: "composio";
@@ -70,7 +212,7 @@ interface WorkflowWire {
 	edges?: WorkflowEdge[];
 	id: string;
 	name: string;
-	nodes: WorkflowNode[];
+	nodes?: WorkflowNode[];
 	triggers?: WorkflowTrigger[];
 	updated_at?: string | null;
 }
@@ -98,8 +240,17 @@ export type NodeStatus =
 
 /** Overall run status (mirrors Core's `RunStatus`). `awaiting_input` means the
  * run is suspended at a durable Awakeable (human-in-the-loop) gate and can be
- * continued via {@link resumeWorkflow}. */
-export type RunStatus = "running" | "completed" | "failed" | "awaiting_input";
+ * continued via {@link resumeWorkflow}. `waiting` means the run hit a provider
+ * rate, usage, or session limit and Core resumes it at `resumeAt`. */
+export type RunStatus = z.output<typeof runStatusSchema>;
+
+/** Where a forked run came from (see {@link forkRun}). */
+export interface WorkflowRunLineage {
+	/** The history checkpoint of the parent the fork resumed from. */
+	checkpointId: string;
+	/** The run the fork was taken from. */
+	runId: string;
+}
 
 /** Persisted state of a single node within a run. */
 export interface NodeRunState {
@@ -117,12 +268,18 @@ export interface WorkflowRun {
 	/** True when this is a transient read-only dry-run projection. */
 	dryRun: boolean;
 	error?: string | null;
+	/** Set when this run was forked from another run's checkpoint. */
+	forkedFrom?: WorkflowRunLineage;
 	input: Record<string, string>;
 	nodes: Record<string, NodeRunState>;
 	output: Record<string, string>;
+	/** When a `waiting` run is woken (RFC3339, UTC). */
+	resumeAt?: string | null;
 	runId: string;
 	status: RunStatus;
 	updatedAt: string;
+	/** The limit error that parked a `waiting` run. */
+	waitReason?: string | null;
 	workflowId: string;
 }
 
@@ -132,17 +289,20 @@ interface WorkflowRunWire {
 	dry_run?: boolean | null;
 	dryRun?: boolean | null;
 	error?: string | null;
+	forked_from?: { checkpoint_id: string; run_id: string } | null;
 	input?: Record<string, string>;
 	nodes?: Record<string, NodeRunState>;
 	output?: Record<string, string>;
+	resume_at?: string | null;
 	run_id: string;
 	status: RunStatus;
 	updated_at: string;
+	wait_reason?: string | null;
 	workflow_id: string;
 }
 
 function toRun(r: WorkflowRunWire): WorkflowRun {
-	return {
+	const run: WorkflowRun = {
 		runId: r.run_id,
 		workflowId: r.workflow_id,
 		status: r.status,
@@ -152,14 +312,37 @@ function toRun(r: WorkflowRunWire): WorkflowRun {
 		nodes: r.nodes ?? {},
 		error: r.error ?? null,
 		awaitingNode: r.awaiting_node ?? null,
+		// Only limit-parked runs carry these; omit them otherwise so existing
+		// run projections keep their exact shape.
+		...(r.resume_at ? { resumeAt: r.resume_at } : {}),
+		...(r.wait_reason ? { waitReason: r.wait_reason } : {}),
 		createdAt: r.created_at,
 		updatedAt: r.updated_at,
 	};
+	if (r.forked_from) {
+		run.forkedFrom = {
+			runId: r.forked_from.run_id,
+			checkpointId: r.forked_from.checkpoint_id,
+		};
+	}
+	return run;
 }
 
 export interface RunWorkflowOptions {
 	/** Evaluate without durable state or effectful node execution. */
 	dryRun?: boolean;
+	/**
+	 * Run id to create (or resume) instead of a generated one. A caller that
+	 * mints the id can poll {@link getWorkflowRun} while the run call is still
+	 * in flight. Ignored for dry runs.
+	 */
+	runId?: string;
+}
+
+interface WorkflowRunBody {
+	dryRun?: RunWorkflowOptions["dryRun"];
+	input: Parameters<typeof runWorkflow>[2];
+	runId?: RunWorkflowOptions["runId"];
 }
 
 /** Read the Core error message out of a non-2xx JSON body, falling back to the
@@ -168,9 +351,13 @@ export interface RunWorkflowOptions {
 async function errorFromResponse(resp: Response, path: string): Promise<Error> {
 	try {
 		const text = await resp.text();
-		const body = text ? (JSON.parse(text) as { error?: unknown }) : null;
-		if (body && typeof body.error === "string" && body.error.length > 0) {
-			return new Error(body.error);
+		const body = text
+			? nativeWorkflowJson(
+					z.object({ error: z.string().optional() })
+				).safeParse(JSON.parse(text))
+			: null;
+		if (body?.success && body.data.error && body.data.error.length > 0) {
+			return new Error(body.data.error);
 		}
 	} catch {
 		// Non-JSON body — fall through to the status-based message.
@@ -178,11 +365,12 @@ async function errorFromResponse(resp: Response, path: string): Promise<Error> {
 	return new Error(`${path} failed: ${resp.status}`);
 }
 
-async function postJson<T>(
+async function postJson<S extends z.ZodType>(
 	target: ApiTarget,
 	path: string,
-	body: unknown
-): Promise<T> {
+	body: WorkflowNativeJsonInput,
+	schema: S
+): Promise<z.output<S>> {
 	const resp = await fetchForTarget(target)(apiUrl(target, path), {
 		method: "POST",
 		headers: makeHeaders(target.token, target.userJwt),
@@ -192,7 +380,7 @@ async function postJson<T>(
 		throw await errorFromResponse(resp, path);
 	}
 	const text = await resp.text();
-	return (text ? JSON.parse(text) : undefined) as T;
+	return schema.parse(text ? JSON.parse(text) : undefined);
 }
 
 export async function fetchWorkflows(
@@ -206,7 +394,7 @@ export async function fetchWorkflows(
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, "/workflows");
 	}
-	const json = (await resp.json()) as { workflows?: WorkflowWire[] };
+	const json = workflowsEnvelope.parse(await resp.json());
 	return (json.workflows ?? []).map(toWorkflow);
 }
 
@@ -225,7 +413,7 @@ export async function fetchWorkflow(
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, `/workflows/${id}`);
 	}
-	const json = (await resp.json()) as { workflow: WorkflowWire };
+	const json = workflowEnvelope.parse(await resp.json());
 	return toWorkflow(json.workflow);
 }
 
@@ -233,12 +421,13 @@ export async function fetchWorkflow(
  * first and returns a 400 with the validation error when it is invalid. */
 export async function createWorkflow(
 	target: ApiTarget,
-	definition: unknown
+	definition: WorkflowNativeJsonInput
 ): Promise<Workflow> {
-	const json = await postJson<{ workflow: WorkflowWire }>(
+	const json = await postJson(
 		target,
 		"/workflows",
-		definition
+		definition,
+		workflowEnvelope
 	);
 	return toWorkflow(json.workflow);
 }
@@ -268,14 +457,17 @@ export async function runWorkflow(
 	input: Record<string, string>,
 	options: RunWorkflowOptions = {}
 ): Promise<WorkflowRun> {
-	const body: { input: Record<string, string>; dryRun?: boolean } = { input };
+	const body: WorkflowRunBody = { input };
 	if (options.dryRun) {
 		body.dryRun = true;
+	} else if (options.runId) {
+		body.runId = options.runId;
 	}
-	const json = await postJson<{ run: WorkflowRunWire }>(
+	const json = await postJson(
 		target,
 		`/workflows/${id}/run`,
-		body
+		body,
+		runEnvelope
 	);
 	return toRun(json.run);
 }
@@ -296,7 +488,7 @@ export async function getWorkflowRun(
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, `/workflows/runs/${runId}`);
 	}
-	const json = (await resp.json()) as { run: WorkflowRunWire };
+	const json = runEnvelope.parse(await resp.json());
 	return toRun(json.run);
 }
 
@@ -309,10 +501,11 @@ export async function resumeWorkflow(
 	runId: string,
 	payload: string
 ): Promise<WorkflowRun> {
-	const json = await postJson<{ run: WorkflowRunWire }>(
+	const json = await postJson(
 		target,
 		`/workflows/runs/${runId}/resume`,
-		{ payload }
+		{ payload },
+		runEnvelope
 	);
 	return toRun(json.run);
 }
@@ -325,13 +518,6 @@ export type WorkflowTemplateCategory =
 	| "orchestration"
 	| "quality"
 	| "automation";
-
-const TEMPLATE_CATEGORIES: readonly string[] = [
-	"research",
-	"orchestration",
-	"quality",
-	"automation",
-];
 
 /** Summary card for a workflow template (list view). */
 export interface WorkflowTemplateMeta {
@@ -368,17 +554,13 @@ interface WorkflowTemplateMetaWire {
 	tags?: string[] | null;
 }
 
-interface WorkflowTemplateDetailWire extends WorkflowTemplateMetaWire {
-	edges?: WorkflowEdge[];
-	nodes?: WorkflowNode[];
-}
-
 function toTemplateCategory(
 	value: string | null | undefined
 ): WorkflowTemplateCategory {
-	return value && TEMPLATE_CATEGORIES.includes(value)
-		? (value as WorkflowTemplateCategory)
-		: "orchestration";
+	const category = z
+		.enum(["research", "orchestration", "quality", "automation"])
+		.safeParse(value);
+	return category.success ? category.data : "orchestration";
 }
 
 function toTemplateMeta(w: WorkflowTemplateMetaWire): WorkflowTemplateMeta {
@@ -408,9 +590,9 @@ export async function fetchWorkflowTemplates(
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, "/api/workflows/catalog");
 	}
-	const json = (await resp.json()) as {
-		templates?: WorkflowTemplateMetaWire[];
-	};
+	const json = nativeWorkflowJson(
+		z.object({ templates: nativeWorkflowArray(wireTemplate).optional() })
+	).parse(await resp.json());
 	return (json.templates ?? []).map(toTemplateMeta);
 }
 
@@ -426,7 +608,9 @@ export async function fetchWorkflowTemplate(
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, path);
 	}
-	const json = (await resp.json()) as { template: WorkflowTemplateDetailWire };
+	const json = nativeWorkflowJson(
+		z.object({ template: wireTemplateDetail })
+	).parse(await resp.json());
 	const t = json.template;
 	return {
 		...toTemplateMeta(t),
@@ -441,10 +625,13 @@ export async function installWorkflowTemplate(
 	target: ApiTarget,
 	templateId: string
 ): Promise<string> {
-	const json = await postJson<{ workflow_id: string }>(
+	const json = await postJson(
 		target,
 		"/api/workflows/catalog/install",
-		{ template_id: templateId }
+		{ template_id: templateId },
+		nativeWorkflowJson(
+			z.object({ workflow_id: z.string(), success: z.boolean().optional() })
+		)
 	);
 	return json.workflow_id;
 }
@@ -495,7 +682,9 @@ export async function listWorkflowVersions(
 	if (!resp.ok) {
 		throw await errorFromResponse(resp, `/workflows/${id}/versions`);
 	}
-	const json = (await resp.json()) as { versions?: WorkflowVersionMetaWire[] };
+	const json = nativeWorkflowJson(
+		z.object({ versions: nativeWorkflowArray(wireVersionMeta).optional() })
+	).parse(await resp.json());
 	return (json.versions ?? []).map(toWorkflowVersionMeta);
 }
 
@@ -505,7 +694,7 @@ export async function getWorkflowVersionDefinition(
 	target: ApiTarget,
 	id: string,
 	versionId: string
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, AppResponseValue>> {
 	const resp = await fetchForTarget(target)(
 		apiUrl(target, `/workflows/${id}/versions/${versionId}`),
 		{ headers: makeHeaders(target.token, target.userJwt) }
@@ -516,9 +705,9 @@ export async function getWorkflowVersionDefinition(
 			`/workflows/${id}/versions/${versionId}`
 		);
 	}
-	const json = (await resp.json()) as {
-		version?: { workflow?: Record<string, unknown> };
-	};
+	const json = nativeWorkflowJson(
+		z.object({ version: wireVersion.optional() })
+	).parse(await resp.json());
 	return json.version?.workflow ?? {};
 }
 
@@ -526,9 +715,26 @@ export async function getWorkflowVersionDefinition(
 export async function createWorkflowVersion(
 	target: ApiTarget,
 	id: string,
-	label?: string
+	label?: string,
+	expectedRevision?: string
 ): Promise<void> {
-	await postJson(target, `/workflows/${id}/versions`, label ? { label } : {});
+	interface WorkflowVersionBody {
+		expectedRevision?: Parameters<typeof createWorkflowVersion>[3];
+		label?: Parameters<typeof createWorkflowVersion>[2];
+	}
+	const body: WorkflowVersionBody = {};
+	if (label) {
+		body.label = label;
+	}
+	if (expectedRevision !== undefined) {
+		body.expectedRevision = expectedRevision;
+	}
+	await postJson(
+		target,
+		`/workflows/${id}/versions`,
+		body,
+		appResponseValueSchema
+	);
 }
 
 /** Restore a version as the workflow's current definition (undoable server-side).
@@ -538,10 +744,151 @@ export async function restoreWorkflowVersion(
 	id: string,
 	versionId: string
 ): Promise<Workflow> {
-	const json = await postJson<{ workflow: WorkflowWire }>(
+	const json = await postJson(
 		target,
 		`/workflows/${id}/versions/${versionId}/restore`,
-		{}
+		{},
+		workflowEnvelope
 	);
 	return toWorkflow(json.workflow);
 }
+
+// ── Run history and fork (time travel) ─────────────────────────────────────
+
+const checkpointEventSchema = z.enum([
+	"run_started",
+	"forked",
+	"node_completed",
+	"node_failed",
+	"node_suspended",
+	"node_parked",
+	"run_completed",
+	"run_failed",
+]);
+
+/** Why Core recorded a run checkpoint. */
+export type WorkflowCheckpointEvent = z.output<typeof checkpointEventSchema>;
+
+/** One recorded checkpoint of a run: what happened, plus a full snapshot of the
+ * run's state, node statuses, and outputs at that moment. */
+export interface WorkflowRunCheckpoint {
+	/** Pass to {@link forkRun} to replay the run from this point. */
+	checkpointId: string;
+	createdAt: string;
+	event: WorkflowCheckpointEvent;
+	/** How many times the node had run (repeat/while iterations); 0 for a
+	 * run-level event. */
+	iteration: number;
+	nodeId: string | null;
+	nodes: Record<string, NodeRunState>;
+	output: Record<string, string>;
+	runId: string;
+	/** 0-based position in the run's history. */
+	sequence: number;
+	state: Record<string, string>;
+	status: RunStatus;
+}
+
+const wireCheckpoint = nativeWorkflowJson(
+	z.object({
+		checkpoint_id: z.string(),
+		sequence: z.number(),
+		run_id: z.string(),
+		event: checkpointEventSchema,
+		node_id: z.string().nullish(),
+		iteration: z.number(),
+		status: runStatusSchema,
+		created_at: z.string(),
+		state: stringMap.optional(),
+		nodes: nativeWorkflowJson(z.record(z.string(), nodeState)).optional(),
+		output: stringMap.optional(),
+	})
+);
+const historyEnvelope = nativeWorkflowJson(
+	z.object({
+		checkpoints: nativeWorkflowArray(wireCheckpoint).optional(),
+	})
+);
+
+function toCheckpoint(
+	c: z.output<typeof wireCheckpoint>
+): WorkflowRunCheckpoint {
+	return {
+		checkpointId: c.checkpoint_id,
+		sequence: c.sequence,
+		runId: c.run_id,
+		event: c.event,
+		nodeId: c.node_id ?? null,
+		iteration: c.iteration,
+		status: c.status,
+		createdAt: c.created_at,
+		state: c.state ?? {},
+		nodes: c.nodes ?? {},
+		output: c.output ?? {},
+	};
+}
+
+/** List every recorded checkpoint of a run, oldest first
+ * (`GET /workflows/runs/:runId/history`). A run that predates run history
+ * returns an empty list. */
+export async function listRunHistory(
+	target: ApiTarget,
+	runId: string,
+	signal?: AbortSignal
+): Promise<WorkflowRunCheckpoint[]> {
+	const path = `/workflows/runs/${encodeURIComponent(runId)}/history`;
+	const resp = await fetchForTarget(target)(apiUrl(target, path), {
+		headers: makeHeaders(target.token, target.userJwt),
+		signal,
+	});
+	if (!resp.ok) {
+		throw await errorFromResponse(resp, path);
+	}
+	const json = historyEnvelope.parse(await resp.json());
+	return (json.checkpoints ?? []).map(toCheckpoint);
+}
+
+export interface ForkRunOptions {
+	/** Values merged into the checkpoint's state map before the fork resumes.
+	 * Strings are stored verbatim; other JSON values as JSON text. Core rejects
+	 * engine-owned keys (`__workflow_*`, `__repeat_*`, ...). */
+	statePatch?: Record<string, AppResponseValue>;
+}
+
+interface ForkRunBody {
+	checkpoint_id: string;
+	state_patch?: ForkRunOptions["statePatch"];
+}
+
+/** Fork a run from one of its checkpoints into a new run that resumes from that
+ * point (`POST /workflows/runs/:runId/fork`). Nodes completed at the checkpoint
+ * are reused; the rest run again under the fork's own run id. Resolves with the
+ * fork once it settles; its `forkedFrom` names the parent and checkpoint. */
+export async function forkRun(
+	target: ApiTarget,
+	runId: string,
+	checkpointId: string,
+	options: ForkRunOptions = {}
+): Promise<WorkflowRun> {
+	const body: ForkRunBody = { checkpoint_id: checkpointId };
+	if (options.statePatch) {
+		body.state_patch = options.statePatch;
+	}
+	const json = await postJson(
+		target,
+		`/workflows/runs/${encodeURIComponent(runId)}/fork`,
+		body,
+		runEnvelope
+	);
+	return toRun(json.run);
+}
+
+// Shared Core-owned decoding and projection for direct-fetch host adapters.
+export {
+	errorFromResponse as readWorkflowErrorFromResponse,
+	runEnvelope as workflowRunResponseSchema,
+	toRun as projectWorkflowRunWire,
+	toWorkflow as projectWorkflowWire,
+	workflowEnvelope as workflowResponseSchema,
+	workflowsEnvelope as workflowsResponseSchema,
+};

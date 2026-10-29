@@ -71,7 +71,10 @@ export function BlockContextMenu({ children }: { children: ReactNode }) {
 		>
 			<ContextMenuTrigger
 				onContextMenu={(event) => {
-					const dataset = (event.target as HTMLElement).dataset;
+					const dataset =
+						event.target instanceof HTMLElement
+							? event.target.dataset
+							: undefined;
 					const disabled =
 						dataset?.slateEditor === "true" ||
 						readOnly ||

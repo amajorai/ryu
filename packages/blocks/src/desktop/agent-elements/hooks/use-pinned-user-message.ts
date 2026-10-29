@@ -1,3 +1,7 @@
+import {
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { UIMessage } from "ai";
 import {
 	type RefObject,
@@ -7,15 +11,16 @@ import {
 	useRef,
 	useState,
 } from "react";
+import type { RenderedMessage } from "../utils/native-sdk-observation.ts";
 
 function getUserMessageText(message: UIMessage): string {
 	return (message.parts ?? [])
 		.filter(
 			(part): part is { type: "text"; text: string } =>
-				typeof part === "object" &&
+				isNativeObjectLike(part) &&
 				part !== null &&
-				(part as { type?: string }).type === "text" &&
-				typeof (part as { text?: unknown }).text === "string"
+				part.type === "text" &&
+				isNativeText(part.text)
 		)
 		.map((part) => part.text)
 		.join("");
@@ -58,7 +63,7 @@ export function usePinnedUserMessage({
 	pinReleaseSlack = PIN_RELEASE_SLACK,
 }: {
 	enabled: boolean;
-	messages: UIMessage[];
+	messages: RenderedMessage[];
 	scrollerRef: RefObject<HTMLElement | null>;
 	pinThreshold?: number;
 	pinReleaseSlack?: number;
@@ -86,7 +91,10 @@ export function usePinnedUserMessage({
 	);
 
 	const userMessages = useMemo(
-		() => messages.filter((m) => m.role === "user"),
+		() =>
+			messages.filter(
+				(m): m is UIMessage & { role: "user" } => m.role === "user"
+			),
 		[messages]
 	);
 

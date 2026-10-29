@@ -1,12 +1,22 @@
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::{mpsc, Arc, Mutex, PoisonError};
 use std::thread;
+use std::time::Duration;
 
 use dashmap::DashMap;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
+
+pub mod violation;
+pub use violation::{
+    dedupe_key, ActorKind, DetectorKind, DetectorRef, EnforcementAction, EnforcementMode, FailMode,
+    OutboxRow, PolicyLayer, PolicyRef, RecordOutcome, Severity, SpendOwner, ViolationDirection,
+    ViolationEvent, ViolationOutbox, WindowMaintenance, WindowRecord, WindowRow,
+    DEFAULT_MAX_WINDOW_ROWS, USAGE_WINDOW_REPORT_CURSOR,
+};
 
 // ─── Audit config (moved verbatim from gateway `config.rs`) ──────────────────
 //
@@ -19,9 +29,9 @@ use tracing::{error, info, warn};
 pub struct AuditConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Path to the SQLite database file. Defaults to `$RYU_DIR/audit.db` when
-    /// `RYU_DIR` is set, otherwise `$XDG_DATA_HOME/ryu/audit.db` (or
-    /// `~/.local/share/ryu/audit.db`). A runtime `RYU_AUDIT_DB_PATH` override
+    /// Path to the SQLite database file. Defaults to `$RYU_DIR/db/audit.db` when
+    /// `RYU_DIR` is set, otherwise the profile's `$XDG_DATA_HOME/ryu<sfx>/audit.db`
+    /// (or `~/.local/share/ryu<sfx>/audit.db`). A runtime `RYU_AUDIT_DB_PATH` override
     /// may replace an inherited configured path for a profile-isolated child.
     #[serde(default = "default_audit_db_path")]
     pub db_path: String,
@@ -77,16 +87,42 @@ fn default_audit_db_path() -> String {
         .filter(|value| !value.is_empty())
         .map(std::path::PathBuf::from);
     let data_local_dir = dirs::data_local_dir();
-    default_audit_db_path_for(ryu_dir.as_deref(), data_local_dir.as_deref())
+    let profile = std::env::var("RYU_PROFILE").ok();
+    default_audit_db_path_for(
+        ryu_dir.as_deref(),
+        data_local_dir.as_deref(),
+        &profile_dir_suffix(profile.as_deref()),
+    )
 }
 
-/// Resolve the default audit path from the same data-dir override Core passes
-/// to every managed child. Keeping this pure makes the profile boundary easy to
-/// test without mutating process-global environment during parallel tests.
-fn default_audit_db_path_for(ryu_dir: Option<&Path>, data_local_dir: Option<&Path>) -> String {
+/// The data-dir suffix for a `RYU_PROFILE` value: `""` for release (unset,
+/// empty, or `release`), `-<profile>` otherwise. Mirrors the Gateway's
+/// `profile::suffix()` (which also rejects unknown names at startup), so a
+/// standalone dev Gateway keeps its audit log and the `spend.db` budget
+/// counters beside it apart from a release Gateway on the same machine.
+fn profile_dir_suffix(profile: Option<&str>) -> String {
+    let name = profile
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| ryu_sidecar_runtime::RELEASE_PROFILE.to_owned());
+    ryu_sidecar_runtime::profile_suffix_for(&name)
+}
+
+/// Resolve the default audit path. Under Core (`RYU_DIR` set) it is the data
+/// dir's `db/audit.db`; a standalone gateway uses its profile's own
+/// `<data_local>/ryu<sfx>/audit.db`, so a dev gateway never shares the release
+/// audit log. Pure so the profile boundary is testable without mutating
+/// process-global environment during parallel tests.
+fn default_audit_db_path_for(
+    ryu_dir: Option<&Path>,
+    data_local_dir: Option<&Path>,
+    profile_suffix: &str,
+) -> String {
     let path = ryu_dir
-        .map(|dir| dir.join("audit.db"))
-        .or_else(|| data_local_dir.map(|dir| dir.join("ryu").join("audit.db")));
+        .map(|dir| ryu_sidecar_runtime::layout::db_file(dir, "audit.db"))
+        .or_else(|| {
+            data_local_dir.map(|dir| dir.join(format!("ryu{profile_suffix}")).join("audit.db"))
+        });
     path.and_then(|value| value.to_str().map(str::to_owned))
         .unwrap_or_else(|| "audit.db".to_owned())
 }
@@ -126,6 +162,8 @@ pub enum EventType {
     /// An administrative gateway control change (config, policy, key, or
     /// similar control-plane mutation). It carries no model token usage.
     ControlChange,
+    /// Direct Gateway web service work; neither model nor sandbox execution.
+    ServiceCall,
 }
 
 impl EventType {
@@ -136,6 +174,7 @@ impl EventType {
             Self::CredentialRead => "credential_read",
             Self::WidgetFollowUp => "widget_follow_up",
             Self::ControlChange => "control_change",
+            Self::ServiceCall => "service_call",
         }
     }
 }
@@ -144,6 +183,310 @@ impl Default for EventType {
     fn default() -> Self {
         Self::ModelCall
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuditServiceCostSource {
+    ProviderReported,
+    ConfiguredEstimate,
+    Unpriced,
+    Unsettled,
+}
+
+impl AuditServiceCostSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ProviderReported => "provider_reported",
+            Self::ConfiguredEstimate => "configured_estimate",
+            Self::Unpriced => "unpriced",
+            Self::Unsettled => "unsettled",
+        }
+    }
+    fn from_storage(value: &str) -> Option<Self> {
+        match value {
+            "provider_reported" => Some(Self::ProviderReported),
+            "configured_estimate" => Some(Self::ConfiguredEstimate),
+            "unpriced" => Some(Self::Unpriced),
+            "unsettled" => Some(Self::Unsettled),
+            _ => None,
+        }
+    }
+}
+
+/// Safe service units and monetary provenance. Contains no request payload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditServiceUsage {
+    pub requests: u64,
+    pub documents: u64,
+    pub provider_credits: Option<u64>,
+    pub cost_source: AuditServiceCostSource,
+    pub cost_is_estimate: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceAuditError {
+    InvalidOperation,
+    InvalidProvider,
+    InvalidUsage,
+    UnsupportedBackend,
+    QueueUnavailable,
+}
+impl std::fmt::Display for ServiceAuditError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::InvalidOperation => "service audit operation is invalid",
+            Self::InvalidProvider => "service audit provider is invalid",
+            Self::InvalidUsage => "service audit usage is invalid",
+            Self::UnsupportedBackend => "audit backend does not support service usage",
+            Self::QueueUnavailable => "service audit queue is unavailable",
+        })
+    }
+}
+impl std::error::Error for ServiceAuditError {}
+
+/// One row for the writer thread. Only the row travels through the bounded
+/// channel and stays best-effort; its lifetime counter increments are merged
+/// into [`PendingCounters`] before it is queued, so a full queue or a failed
+/// write drops the row but never the counters.
+struct QueuedAudit {
+    record: AuditRecord,
+    service_usage: Option<AuditServiceUsage>,
+}
+
+/// Lifetime counter increments carried by audit rows: the per-key token totals
+/// that back `token_budget_total` (reloaded on start) and the `audit_summary`
+/// figures that shared-budget reconciliation reports as lifetime spend.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct CounterDeltas {
+    /// Tokens per API-key storage key (see [`api_key_storage_key`]).
+    key_tokens: HashMap<String, u64>,
+    request_count: u64,
+    error_count: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    reported_cost_micro_usd: u64,
+    unpriced_input_tokens: u64,
+    unpriced_output_tokens: u64,
+}
+
+impl CounterDeltas {
+    /// The increments one audit row contributes to the lifetime counters.
+    fn from_record(record: &AuditRecord) -> Self {
+        let is_summary_row = !matches!(
+            record.event_type,
+            EventType::ControlChange | EventType::ServiceCall
+        );
+        let is_managed_model_call =
+            record.event_type == EventType::ModelCall && record.managed_inference;
+        let is_unpriced_managed = is_managed_model_call && record.provider_cost_micro_usd.is_none();
+        let row_tokens = record.input_tokens.saturating_add(record.output_tokens);
+        let mut key_tokens = HashMap::new();
+        if row_tokens > 0 {
+            key_tokens.insert(api_key_storage_key(&record.api_key), row_tokens);
+        }
+        let summary_only = |value: u64| if is_summary_row { value } else { 0 };
+        let unpriced_only = |value: u64| if is_unpriced_managed { value } else { 0 };
+        Self {
+            key_tokens,
+            request_count: u64::from(is_summary_row),
+            error_count: u64::from(is_summary_row && record.error.is_some()),
+            input_tokens: summary_only(record.input_tokens),
+            output_tokens: summary_only(record.output_tokens),
+            reported_cost_micro_usd: if is_managed_model_call {
+                record.provider_cost_micro_usd.unwrap_or(0)
+            } else {
+                0
+            },
+            unpriced_input_tokens: unpriced_only(record.input_tokens),
+            unpriced_output_tokens: unpriced_only(record.output_tokens),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    fn merge(&mut self, other: Self) {
+        for (key, tokens) in other.key_tokens {
+            let total = self.key_tokens.entry(key).or_insert(0);
+            *total = total.saturating_add(tokens);
+        }
+        self.request_count = self.request_count.saturating_add(other.request_count);
+        self.error_count = self.error_count.saturating_add(other.error_count);
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.reported_cost_micro_usd = self
+            .reported_cost_micro_usd
+            .saturating_add(other.reported_cost_micro_usd);
+        self.unpriced_input_tokens = self
+            .unpriced_input_tokens
+            .saturating_add(other.unpriced_input_tokens);
+        self.unpriced_output_tokens = self
+            .unpriced_output_tokens
+            .saturating_add(other.unpriced_output_tokens);
+    }
+
+    /// Add these increments to `key_token_totals` and `audit_summary` inside
+    /// the caller's transaction.
+    fn apply(&self, tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
+        let sql = |value: u64| i64::try_from(value).unwrap_or(i64::MAX);
+        {
+            let mut upsert = tx.prepare_cached(
+                "INSERT INTO key_token_totals (api_key, tokens) VALUES (?1, ?2)
+                 ON CONFLICT (api_key) DO UPDATE SET tokens = tokens + excluded.tokens",
+            )?;
+            for (api_key, tokens) in &self.key_tokens {
+                upsert.execute(params![api_key, sql(*tokens)])?;
+            }
+        }
+        tx.execute(
+            "UPDATE audit_summary SET
+                 request_count = request_count + ?1,
+                 error_count = error_count + ?2,
+                 input_tokens = input_tokens + ?3,
+                 output_tokens = output_tokens + ?4,
+                 reported_cost_micro_usd = reported_cost_micro_usd + ?5,
+                 unpriced_input_tokens = unpriced_input_tokens + ?6,
+                 unpriced_output_tokens = unpriced_output_tokens + ?7
+             WHERE singleton = 1",
+            params![
+                sql(self.request_count),
+                sql(self.error_count),
+                sql(self.input_tokens),
+                sql(self.output_tokens),
+                sql(self.reported_cost_micro_usd),
+                sql(self.unpriced_input_tokens),
+                sql(self.unpriced_output_tokens),
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+/// Counter increments not yet written, coalesced across rows. Bounded by the
+/// number of distinct API keys seen between two writes, not by request count.
+type PendingCounters = Arc<Mutex<CounterDeltas>>;
+
+/// Merge `deltas` into the pending set (new rows, or a failed write being
+/// retried).
+fn merge_pending(pending: &PendingCounters, deltas: CounterDeltas) {
+    if deltas.is_empty() {
+        return;
+    }
+    pending
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .merge(deltas);
+}
+
+fn take_pending(pending: &PendingCounters) -> CounterDeltas {
+    std::mem::take(&mut *pending.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// First retry delay after a failed counter write; doubles up to [`RETRY_MAX`].
+const RETRY_MIN: Duration = Duration::from_millis(50);
+const RETRY_MAX: Duration = Duration::from_secs(5);
+
+/// Prepare safe fields before audit or live-traffic projection. The caller key
+/// stays private for canonical storage hashing; never serialize this record.
+pub fn normalize_service_audit_record(
+    mut record: AuditRecord,
+    usage: &AuditServiceUsage,
+) -> Result<AuditRecord, ServiceAuditError> {
+    // Reporter JSON is consumed by JavaScript. Do not persist metadata which
+    // would silently change integer value at that cross-surface boundary.
+    const MAX_SAFE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
+    if !matches!(record.command.as_deref(), Some("web.search" | "web.fetch")) {
+        return Err(ServiceAuditError::InvalidOperation);
+    }
+    let descriptor = ryu_gw_credentials::web::web_provider_by_id(&record.provider)
+        .ok_or(ServiceAuditError::InvalidProvider)?;
+    let operation = if record.command.as_deref() == Some("web.search") {
+        ryu_gw_credentials::web::WebOperation::Search
+    } else {
+        ryu_gw_credentials::web::WebOperation::Fetch
+    };
+    if !descriptor.operations.contains(&operation) {
+        return Err(ServiceAuditError::InvalidOperation);
+    }
+    if [
+        Some(usage.requests),
+        Some(usage.documents),
+        usage.provider_credits,
+        record.provider_cost_micro_usd,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value > MAX_SAFE_JSON_INTEGER)
+    {
+        return Err(ServiceAuditError::InvalidUsage);
+    }
+    if usage.cost_source != AuditServiceCostSource::ProviderReported && !usage.cost_is_estimate {
+        return Err(ServiceAuditError::InvalidUsage);
+    }
+    record.event_type = EventType::ServiceCall;
+    record.model.clear();
+    record.input_tokens = 0;
+    record.output_tokens = 0;
+    record.cache_read_tokens = None;
+    record.cache_write_tokens = None;
+    record.cache_write_1h_tokens = None;
+    record.prompt_cache_outcome = None;
+    record.prompt_cache_read_tokens = None;
+    record.prompt_cache_write_tokens = None;
+    record.cache_hit = false;
+    record.eval_score = None;
+    record.backend = None;
+    record.duration_ms = None;
+    record.exit_code = None;
+    record.widget_instance_id = None;
+    record.skill_ids = None;
+    if usage.cost_source != AuditServiceCostSource::ProviderReported {
+        record.provider_cost_micro_usd = None;
+    }
+    record.error = record.error.map(|error| match error.as_str() {
+        "operation_denied"
+        | "provider_denied"
+        | "region_denied"
+        | "budget_denied"
+        | "rate_limited"
+        | "payment_required"
+        | "credential_rejected"
+        | "transport_unavailable"
+        | "delivery_uncertain"
+        | "invalid_response"
+        | "upstream_unavailable"
+        | "service_unavailable"
+        | "accounting_unavailable"
+        | "unknown_cost" => error,
+        _ => "service_request_failed".to_owned(),
+    });
+    record.feature = record.feature.filter(|feature| {
+        matches!(
+            feature.as_str(),
+            "chat" | "island" | "predict" | "agent" | "web" | "service"
+        )
+    });
+    Ok(record)
+}
+
+/// Longest accepted `x-ryu-purpose` value, in characters.
+pub const MAX_PURPOSE_LEN: usize = 64;
+
+/// Validate an `x-ryu-purpose` value against the shared Core/Gateway contract:
+/// 1..=64 characters drawn from `[a-z0-9_:.@/-]`. The value is a closed
+/// snake_case name (`compaction`, `auto_title`, ...) or `plugin:<plugin id>`,
+/// so anything outside that alphabet is caller noise or an attempt to smuggle
+/// free text into a low-cardinality rollup key; it is dropped, not repaired.
+pub fn valid_purpose(value: &str) -> Option<&str> {
+    let ok = !value.is_empty()
+        && value.len() <= MAX_PURPOSE_LEN
+        && value.bytes().all(|byte| {
+            matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'_' | b':' | b'.' | b'@' | b'/' | b'-')
+        });
+    ok.then_some(value)
 }
 
 /// A single request record persisted in the audit log.
@@ -159,7 +502,21 @@ pub struct AuditRecord {
     pub model: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Provider-reported tokens read from the prompt cache. `None` when the
+    /// upstream response did not include cache usage details.
+    pub cache_read_tokens: Option<u64>,
+    /// Provider-reported tokens written to the prompt cache.
+    pub cache_write_tokens: Option<u64>,
+    /// The part of `cache_write_tokens` written with a one-hour TTL (billed
+    /// above the five-minute rate). `None` when no split was reported.
+    pub cache_write_1h_tokens: Option<u64>,
     pub cache_hit: bool,
+    /// Gateway's provider prompt-cache policy result (`auto`, `injected`, etc.).
+    pub prompt_cache_outcome: Option<String>,
+    /// Provider-reported prompt tokens read from cache; `None` means unreported.
+    pub prompt_cache_read_tokens: Option<u64>,
+    /// Provider-reported prompt tokens written to cache; `None` means unreported.
+    pub prompt_cache_write_tokens: Option<u64>,
     pub latency_ms: u64,
     pub eval_score: Option<f32>,
     pub error: Option<String>,
@@ -193,6 +550,11 @@ pub struct AuditRecord {
     /// (`chat` | `island` | `predict` | `agent`). `None` when untagged. Powers
     /// the per-feature usage breakdown in the daily rollup.
     pub feature: Option<String>,
+    /// Background feature that issued this call, from `x-ryu-purpose`
+    /// (`compaction`, `auto_title`, `plugin:<id>`, ...). Orthogonal to
+    /// `feature`: it names *why* Core spent the tokens, not which surface the
+    /// user was on. Values failing [`valid_purpose`] are stored as NULL.
+    pub purpose: Option<String>,
     /// True when this request was billed through the managed inference wallet.
     /// This stays separate from `provider`: managed and BYOK OpenRouter calls
     /// share the provider name but have different Ryu billing semantics.
@@ -207,6 +569,14 @@ pub struct AuditRecord {
     /// (`WidgetFollowUp`) rows so a governance viewer can trace every
     /// round-trip a single rendered widget made; `None` for all other traffic.
     pub widget_instance_id: Option<String>,
+    /// Control-plane id of the hosted `rgw_` credential that authorized this
+    /// request. Keys the reporter's per-key rollup; `None` for static keys.
+    pub key_id: Option<String>,
+    /// Comma-separated ids of EVERY team the verified caller belongs to in
+    /// `org_id` (`team_id` holds only the first). The gateway charges all of
+    /// them, so the reporter's `teamDaily` rollup attributes the row to each.
+    /// `None` when the caller has no team attribution.
+    pub team_ids: Option<String>,
 }
 
 /// Filters for querying the local audit store. All fields are optional; a
@@ -240,14 +610,19 @@ pub struct AuditQuery {
     /// Filter by the event discriminator (`model_call`, `exec_call`,
     /// `credential_read`, `widget_follow_up`, or `control_change`).
     pub event_type: Option<String>,
+    /// Filter by the verified user id Core forwarded for the call. Core's
+    /// member "my usage" route pins this to the caller so members only ever
+    /// read their own rows.
+    pub user_id: Option<String>,
     /// Only return rows with an id greater than this cursor. Cursor queries are
     /// oldest-first so callers can advance exactly once after a successful
     /// batch delivery; ordinary queries remain newest-first.
     pub id_after: Option<i64>,
 }
 
-/// Rolled-up totals across the whole local audit store. Used by the control-
-/// plane reporter to push a single aggregate snapshot up the hierarchy.
+/// Lifetime rolled-up totals for the local audit store. Retention pruning of
+/// old audit rows never lowers them. Used by the control-plane reporter to push
+/// a single aggregate snapshot (including shared-budget spend) up the hierarchy.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AuditSummary {
     pub request_count: u64,
@@ -270,10 +645,12 @@ pub struct AuditUsageQuery {
     pub timestamp_until: String,
     pub provider: Option<String>,
     pub model: Option<String>,
+    /// Restrict the rollup to one `x-ryu-purpose` value.
+    pub purpose: Option<String>,
 }
 
 /// One canonical 15-minute usage bucket returned to analytics consumers.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditUsageEvent {
     pub timestamp: String,
@@ -282,9 +659,20 @@ pub struct AuditUsageEvent {
     pub member_id: Option<String>,
     pub node_id: Option<String>,
     pub feature: Option<String>,
+    /// Background feature (`x-ryu-purpose`) behind the bucket; `None` for
+    /// foreground and untagged traffic. Defaulted so pre-purpose payloads
+    /// still parse.
+    #[serde(default)]
+    pub purpose: Option<String>,
     pub source: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Provider-reported prompt-cache read and write tokens summed over the
+    /// bucket's model calls; unreported rows count as zero.
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
     pub request_count: u64,
     pub error_count: u64,
     pub latency_total_ms: u64,
@@ -318,7 +706,15 @@ pub struct AuditEntry {
     pub model: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    /// One-hour-TTL part of `cache_write_tokens` (see [`AuditRecord`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_1h_tokens: Option<u64>,
     pub cache_hit: bool,
+    pub prompt_cache_outcome: Option<String>,
+    pub prompt_cache_read_tokens: Option<u64>,
+    pub prompt_cache_write_tokens: Option<u64>,
     pub latency_ms: u64,
     pub eval_score: Option<f32>,
     pub error: Option<String>,
@@ -345,6 +741,20 @@ pub struct AuditEntry {
     pub provider_cost_micro_usd: Option<u64>,
     /// Widget instance id (Ryu Apps, §4.4); `None` for non-widget rows.
     pub widget_instance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_usage: Option<AuditServiceUsage>,
+    /// Hosted `rgw_` credential id; `None` for static keys and older rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+    /// Comma-separated ids of every team the row is attributed to (see
+    /// [`AuditRecord::team_ids`]); `None` for older and team-less rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_ids: Option<String>,
+    /// Background feature behind the row (`x-ryu-purpose`); `null` for
+    /// foreground, untagged and older rows. Always serialized (never omitted),
+    /// so a client can tell a Gateway that records purposes (`null` means
+    /// foreground) from an older one that does not (key absent).
+    pub purpose: Option<String>,
 }
 
 /// Default number of rows returned by a query when no limit is given.
@@ -352,45 +762,12 @@ const DEFAULT_QUERY_LIMIT: u32 = 100;
 /// Hard ceiling on rows returned by a single query, to keep responses bounded.
 const MAX_QUERY_LIMIT: u32 = 1_000;
 
-/// Keep sentinel identities readable because they are not credentials. Every
-/// other API key is represented on disk by a deterministic SHA-256 lookup key;
-/// the raw value remains available only in the request process.
-fn api_key_storage_key(key: &str) -> String {
-    if key == "anonymous" || key == "master" {
-        return key.to_owned();
-    }
-    let mut digest = Sha256::new();
-    digest.update(key.as_bytes());
-    hex::encode(digest.finalize())
-}
+mod migrate;
+mod writer;
 
-/// Correlate operational events without exposing any bearer bytes or prefix.
-pub fn credential_log_id(key: &str) -> String {
-    let mut digest = Sha256::new();
-    digest.update(key.as_bytes());
-    format!("key_{}", hex::encode(digest.finalize()))
-}
-
-/// Migrate pre-hash audit rows in place. The display prefix preserves the UI's
-/// existing redacted view while the original credential is removed from disk.
-fn migrate_api_key_storage(conn: &Connection) -> anyhow::Result<()> {
-    let mut stmt = conn.prepare(
-        "SELECT id, api_key FROM audit_log
-         WHERE api_key_prefix IS NULL OR api_key_prefix = ''",
-    )?;
-    let rows: Vec<(i64, String)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    drop(stmt);
-
-    for (id, raw_key) in rows {
-        conn.execute(
-            "UPDATE audit_log SET api_key = ?1, api_key_prefix = ?2 WHERE id = ?3",
-            params![api_key_storage_key(&raw_key), redact_key(&raw_key), id],
-        )?;
-    }
-    Ok(())
-}
+pub use migrate::credential_log_id;
+use migrate::*;
+use writer::*;
 
 /// SQLite-backed audit logger.
 ///
@@ -399,14 +776,23 @@ fn migrate_api_key_storage(conn: &Connection) -> anyhow::Result<()> {
 /// `token_totals` map is used for real-time budget enforcement without
 /// needing to query SQLite on the hot path.
 pub struct AuditLogger {
-    sender: mpsc::SyncSender<AuditRecord>,
+    sender: mpsc::SyncSender<QueuedAudit>,
     /// Read-only connection for local queries. Separate from the writer thread's
     /// connection; safe under WAL, serialised behind a mutex.
     reader: Option<Mutex<Connection>>,
     /// Per API-key lifetime token totals (input + output).
     token_totals: DashMap<String, u64>,
+    /// Lifetime counter increments the writer has not persisted yet.
+    pending: PendingCounters,
+    /// Fault injection for tests: while non-zero, each writer transaction
+    /// fails (and decrements it) before touching SQLite.
+    #[cfg_attr(not(test), allow(dead_code))]
+    injected_failures: Arc<AtomicU64>,
     enabled: bool,
     db_path: Option<String>,
+    /// State of the one-time raw-key rebuild (`RawKeyScrub` as `u8`).
+    #[cfg_attr(not(test), allow(dead_code))]
+    raw_key_scrub: Arc<AtomicU8>,
 }
 
 impl AuditLogger {
@@ -425,7 +811,11 @@ impl AuditLogger {
             std::fs::create_dir_all(parent)?;
         }
 
+        restrict_db_file(Path::new(&db_path))?;
         let mut conn = Connection::open(&db_path)?;
+        // Zero freed pages so a migrated raw key or a pruned row does not linger
+        // in the file's free list.
+        conn.execute_batch("PRAGMA secure_delete=ON;")?;
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              CREATE TABLE IF NOT EXISTS audit_log (
@@ -442,7 +832,13 @@ impl AuditLogger {
                  model         TEXT    NOT NULL,
                  input_tokens  INTEGER NOT NULL DEFAULT 0,
                  output_tokens INTEGER NOT NULL DEFAULT 0,
+                 cache_read_tokens INTEGER,
+                 cache_write_tokens INTEGER,
+                 cache_write_1h_tokens INTEGER,
                  cache_hit     INTEGER NOT NULL DEFAULT 0,
+                 prompt_cache_outcome TEXT,
+                 prompt_cache_read_tokens INTEGER,
+                 prompt_cache_write_tokens INTEGER,
                  latency_ms    INTEGER NOT NULL DEFAULT 0,
                  eval_score    REAL,
                  error         TEXT
@@ -460,7 +856,7 @@ impl AuditLogger {
         // Add a non-secret display prefix, then replace every legacy value with
         // its SHA-256 lookup key before this logger accepts new records.
         let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN api_key_prefix TEXT;");
-        migrate_api_key_storage(&conn)?;
+        let mut raw_keys_migrated = migrate_api_key_storage(&conn)?;
         let _ = conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_audit_api_key_prefix ON audit_log(api_key_prefix);",
         );
@@ -497,6 +893,8 @@ impl AuditLogger {
              CREATE INDEX IF NOT EXISTS idx_audit_agent_id ON audit_log(agent_id);",
         );
         let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN feature TEXT;");
+        // Background-feature attribution (`x-ryu-purpose`); NULL on older rows.
+        let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN purpose TEXT;");
         // Add managed billing attribution and provider-reported cost. Both are
         // safe for existing audit databases and default old rows to unmanaged
         // with no provider-reported cost.
@@ -505,17 +903,57 @@ impl AuditLogger {
         );
         let _ =
             conn.execute_batch("ALTER TABLE audit_log ADD COLUMN provider_cost_micro_usd INTEGER;");
+        let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN cache_read_tokens INTEGER;");
+        let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN cache_write_tokens INTEGER;");
+        // One-hour-TTL part of the cache writes, so the usage rollup prices
+        // them as the wallet debit did. NULL on rows that predate it.
+        let _ =
+            conn.execute_batch("ALTER TABLE audit_log ADD COLUMN cache_write_1h_tokens INTEGER;");
         // Add the widget instance id column (Ryu Apps, §4.4) for existing tables.
         // Indexed so per-widget governance queries are efficient.
         let _ = conn.execute_batch(
             "ALTER TABLE audit_log ADD COLUMN widget_instance_id TEXT; \
              CREATE INDEX IF NOT EXISTS idx_audit_widget_instance_id ON audit_log(widget_instance_id);",
         );
+        // Provider prompt-cache activity is separate from `cache_hit`, which
+        // records Gateway exact/semantic response-cache hits. NULL preserves
+        // the distinction between no usage report and a reported zero.
+        let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN prompt_cache_outcome TEXT;");
+        // Hosted credential id for per-key rollups; NULL on static-key rows.
+        let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN key_id TEXT;");
+        // Every team of a multi-team caller (teamDaily attribution).
+        let _ = conn.execute_batch("ALTER TABLE audit_log ADD COLUMN team_ids TEXT;");
+        let _ = conn
+            .execute_batch("ALTER TABLE audit_log ADD COLUMN prompt_cache_read_tokens INTEGER;");
+        let _ = conn
+            .execute_batch("ALTER TABLE audit_log ADD COLUMN prompt_cache_write_tokens INTEGER;");
 
-        // Keep the lifetime summary in a singleton row. The INSERT makes the
-        // migration idempotent; the UPDATE backfills databases created by older
-        // versions. New writes update this row in the same transaction as the
-        // append-only audit row, so reads stay O(1) without sacrificing accuracy.
+        // Nullable columns preserve existing rows and do not rewrite AuditRecord.
+        for (name, kind) in [
+            ("service_requests", "INTEGER"),
+            ("service_documents", "INTEGER"),
+            ("service_provider_credits", "INTEGER"),
+            ("service_cost_source", "TEXT"),
+            ("service_cost_is_estimate", "INTEGER"),
+        ] {
+            let present = {
+                let mut statement = conn.prepare("PRAGMA table_info(audit_log)")?;
+                let names = statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                names.iter().any(|column| column == name)
+            };
+            if !present {
+                conn.execute_batch(&format!("ALTER TABLE audit_log ADD COLUMN {name} {kind};"))?;
+            }
+        }
+
+        // Keep the lifetime summary in a singleton row. New writes update this
+        // row in the same transaction as the append-only audit row, so reads stay
+        // O(1) and retention pruning of old rows never lowers it: shared-budget
+        // reconciliation reports this figure as lifetime spend. Backfilled once
+        // from the rows still present when the row is first created (databases
+        // from versions that predate the summary table).
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS audit_summary (
                  singleton                    INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -526,29 +964,59 @@ impl AuditLogger {
                  reported_cost_micro_usd      INTEGER NOT NULL DEFAULT 0,
                  unpriced_input_tokens        INTEGER NOT NULL DEFAULT 0,
                  unpriced_output_tokens       INTEGER NOT NULL DEFAULT 0
-             );
-             INSERT OR IGNORE INTO audit_summary (singleton) VALUES (1);
-             UPDATE audit_summary SET
-                 request_count = (SELECT COUNT(*) FROM audit_log WHERE event_type != 'control_change'),
-                 error_count = (SELECT COALESCE(SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END), 0)
-                                FROM audit_log WHERE event_type != 'control_change'),
-                 input_tokens = (SELECT COALESCE(SUM(input_tokens), 0)
-                                 FROM audit_log WHERE event_type != 'control_change'),
-                 output_tokens = (SELECT COALESCE(SUM(output_tokens), 0)
-                                  FROM audit_log WHERE event_type != 'control_change'),
-                 reported_cost_micro_usd = (SELECT COALESCE(SUM(CASE
-                     WHEN event_type = 'model_call' AND managed_inference != 0
-                          AND provider_cost_micro_usd IS NOT NULL
-                     THEN provider_cost_micro_usd ELSE 0 END), 0) FROM audit_log),
-                 unpriced_input_tokens = (SELECT COALESCE(SUM(CASE
-                     WHEN event_type = 'model_call' AND managed_inference != 0
-                          AND provider_cost_micro_usd IS NULL
-                     THEN input_tokens ELSE 0 END), 0) FROM audit_log),
-                 unpriced_output_tokens = (SELECT COALESCE(SUM(CASE
-                     WHEN event_type = 'model_call' AND managed_inference != 0
-                          AND provider_cost_micro_usd IS NULL
-                     THEN output_tokens ELSE 0 END), 0) FROM audit_log)
-             WHERE singleton = 1;",
+             );",
+        )?;
+        let summary_created = conn.execute(
+            "INSERT OR IGNORE INTO audit_summary (singleton) VALUES (1)",
+            [],
+        )? == 1;
+        if summary_created {
+            conn.execute_batch(BACKFILL_AUDIT_SUMMARY)?;
+        }
+
+        // Per-key lifetime token totals live in their own table, updated in the
+        // same transaction as each audit row, so retention pruning of old rows
+        // never lowers a key's lifetime token budget usage. Backfilled once from
+        // the rows still present when the table is first created.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS key_token_totals (
+                 api_key TEXT PRIMARY KEY,
+                 tokens  INTEGER NOT NULL DEFAULT 0
+             );",
+        )?;
+        let totals_rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM key_token_totals", [], |row| {
+                row.get(0)
+            })?;
+        if totals_rows == 0 {
+            conn.execute_batch(
+                "INSERT INTO key_token_totals (api_key, tokens)
+                 SELECT api_key, SUM(input_tokens + output_tokens)
+                 FROM audit_log GROUP BY api_key;",
+            )?;
+        }
+        raw_keys_migrated += migrate_key_token_totals(&mut conn)?;
+        // Builds before `secure_delete` hashed raw keys with an in-place UPDATE,
+        // so a database they migrated has no raw rows left for the pass above to
+        // count, yet the raw bytes can still sit in freed cell space, free-list
+        // pages or the WAL. Every database is rebuilt once (tracked by a marker
+        // row) and again whenever this open replaced a raw key. The rebuild is a
+        // full VACUUM, so it never runs here: it runs best-effort on the writer
+        // thread after the logger is up (see `run_raw_key_scrub`).
+        if raw_keys_migrated > 0 {
+            clear_raw_key_scrub_marker(&conn)?;
+            info!(
+                rows = raw_keys_migrated,
+                "audit: hashed raw client keys; the store is rebuilt in the background"
+            );
+        }
+
+        // Delivery cursors (the control-plane reporter's last acknowledged row).
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS report_cursors (
+                 name    TEXT PRIMARY KEY,
+                 last_id INTEGER NOT NULL
+             );",
         )?;
 
         let retention = audit_retention_policy();
@@ -563,10 +1031,7 @@ impl AuditLogger {
         // Load existing per-key token totals so budget enforcement survives restarts.
         let token_totals: DashMap<String, u64> = DashMap::new();
         {
-            let mut stmt = conn.prepare(
-                "SELECT api_key, SUM(input_tokens + output_tokens) \
-                 FROM audit_log GROUP BY api_key",
-            )?;
+            let mut stmt = conn.prepare("SELECT api_key, tokens FROM key_token_totals")?;
             let rows = stmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
             })?;
@@ -582,115 +1047,46 @@ impl AuditLogger {
         let reader = Connection::open(&db_path)?;
         reader.execute_batch("PRAGMA query_only=ON;")?;
 
-        let (sender, receiver) = mpsc::sync_channel::<AuditRecord>(1_000);
+        let (sender, receiver) = mpsc::sync_channel::<QueuedAudit>(1_000);
 
+        let pending = PendingCounters::default();
+        let writer_pending = Arc::clone(&pending);
+        let injected_failures = Arc::new(AtomicU64::new(0));
+        let writer_failures = Arc::clone(&injected_failures);
+        let raw_key_scrub = Arc::new(AtomicU8::new(RawKeyScrub::Pending as u8));
+        let writer_scrub = Arc::clone(&raw_key_scrub);
+        let scrub_db_path = db_path.clone();
         thread::spawn(move || {
-            for record in receiver {
-                let is_summary_row = record.event_type != EventType::ControlChange;
-                let is_model_call = record.event_type == EventType::ModelCall;
-                let has_error = record.error.is_some();
-                let reported_cost = record.provider_cost_micro_usd.unwrap_or(0);
-                let is_unpriced_managed = is_model_call
-                    && record.managed_inference
-                    && record.provider_cost_micro_usd.is_none();
-
-                let write_result = (|| -> rusqlite::Result<()> {
-                    let tx = conn.transaction()?;
-                    tx.execute(
-                    "INSERT INTO audit_log (
-                         request_id, api_key, api_key_prefix, user_name, org_id, team_id, project_id,
-                         provider, model, input_tokens, output_tokens,
-                         cache_hit, latency_ms, eval_score, error, skill_ids, session_id,
-                         event_type, backend, command, duration_ms, exit_code,
-                         user_id, agent_id, feature, managed_inference, provider_cost_micro_usd,
-                         widget_instance_id
-                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,
-                               ?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)",
-                    params![
-                        &record.request_id,
-                        api_key_storage_key(&record.api_key),
-                        redact_key(&record.api_key),
-                        record.user_name.as_deref(),
-                        record.org_id.as_deref(),
-                        record.team_id.as_deref(),
-                        record.project_id.as_deref(),
-                        &record.provider,
-                        &record.model,
-                        record.input_tokens as i64,
-                        record.output_tokens as i64,
-                        record.cache_hit as i32,
-                        record.latency_ms as i64,
-                        record.eval_score,
-                        record.error.as_deref(),
-                        record.skill_ids.as_deref(),
-                        record.session_id.as_deref(),
-                        record.event_type.as_str(),
-                        record.backend.as_deref(),
-                        record.command.as_deref(),
-                        record.duration_ms.map(|v| v as i64),
-                        record.exit_code,
-                        record.user_id.as_deref(),
-                        record.agent_id.as_deref(),
-                        record.feature.as_deref(),
-                        record.managed_inference as i32,
-                        record.provider_cost_micro_usd.map(|v| v as i64),
-                        record.widget_instance_id.as_deref(),
-                    ],
-                )?;
-                    tx.execute(
-                        "UPDATE audit_summary SET
-                             request_count = request_count + ?1,
-                             error_count = error_count + ?2,
-                             input_tokens = input_tokens + ?3,
-                             output_tokens = output_tokens + ?4,
-                             reported_cost_micro_usd = reported_cost_micro_usd + ?5,
-                             unpriced_input_tokens = unpriced_input_tokens + ?6,
-                             unpriced_output_tokens = unpriced_output_tokens + ?7
-                         WHERE singleton = 1",
-                        params![
-                            i64::from(is_summary_row),
-                            i64::from(is_summary_row && has_error),
-                            if is_summary_row {
-                                record.input_tokens as i64
-                            } else {
-                                0
-                            },
-                            if is_summary_row {
-                                record.output_tokens as i64
-                            } else {
-                                0
-                            },
-                            if is_model_call && record.managed_inference {
-                                reported_cost as i64
-                            } else {
-                                0
-                            },
-                            if is_unpriced_managed {
-                                record.input_tokens as i64
-                            } else {
-                                0
-                            },
-                            if is_unpriced_managed {
-                                record.output_tokens as i64
-                            } else {
-                                0
-                            },
-                        ],
-                    )?;
-                    tx.commit()
-                })();
-                if let Err(e) = write_result {
-                    error!("audit log write failed: {e}");
-                }
-            }
+            // The one-time rebuild runs on the writer's own connection before it
+            // drains the queue, so it never holds up startup and never contends
+            // with the writer for the write lock. A VACUUM of a large store can
+            // take minutes, longer than the bounded queue absorbs, so a drain
+            // buffers the rows logged meanwhile and they are persisted, in order,
+            // as soon as the rebuild ends. Lifetime counters are persisted
+            // regardless.
+            let mut receiver = receiver;
+            let (outcome, backlog) = buffer_while(&mut receiver, SCRUB_BACKLOG_MAX, || {
+                run_raw_key_scrub(&conn, Path::new(&scrub_db_path), &fs_available_space)
+            });
+            writer_scrub.store(outcome as u8, Ordering::Release);
+            audit_write_loop(
+                &mut conn,
+                &receiver,
+                backlog,
+                &writer_pending,
+                &writer_failures,
+            );
         });
 
         Ok(Self {
             sender,
             reader: Some(Mutex::new(reader)),
             token_totals,
+            pending,
+            injected_failures,
             enabled: true,
             db_path: Some(db_path),
+            raw_key_scrub,
         })
     }
 
@@ -701,19 +1097,65 @@ impl AuditLogger {
             sender,
             reader: None,
             token_totals: DashMap::new(),
+            pending: PendingCounters::default(),
+            injected_failures: Arc::new(AtomicU64::new(0)),
             enabled: false,
             db_path: None,
+            raw_key_scrub: Arc::new(AtomicU8::new(RawKeyScrub::Skipped as u8)),
         }
     }
 
-    /// Enqueue a record for async persistence. Drops silently if disabled or channel full.
+    /// Block until the background raw-key scrub has finished or been deferred.
+    #[cfg(test)]
+    fn wait_for_raw_key_scrub(&self) -> RawKeyScrub {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let state = RawKeyScrub::from_u8(self.raw_key_scrub.load(Ordering::Acquire));
+            if state != RawKeyScrub::Pending || std::time::Instant::now() > deadline {
+                return state;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Enqueue a record for async persistence. Never blocks: when disabled the
+    /// record is ignored, and when the queue is full the row is dropped but its
+    /// lifetime counters (per-key tokens, summary spend) are still persisted.
     pub fn log(&self, record: AuditRecord) {
         if !self.enabled {
             return;
         }
-        if let Err(e) = self.sender.try_send(record) {
-            warn!("audit channel full or closed: {e}");
+        if record.event_type == EventType::ServiceCall {
+            warn!("service audit requires the safe usage logging path");
+            return;
         }
+        // Merge the counters BEFORE queueing the row. When the queue is full,
+        // every row already in it is received after this merge, so the writer
+        // persists these increments with one of them and nothing is stranded.
+        merge_pending(&self.pending, CounterDeltas::from_record(&record));
+        if let Err(error) = self.sender.try_send(QueuedAudit {
+            record,
+            service_usage: None,
+        }) {
+            warn!("audit row dropped ({error}); usage totals are kept");
+        }
+    }
+
+    pub fn log_service(
+        &self,
+        record: AuditRecord,
+        usage: AuditServiceUsage,
+    ) -> Result<(), ServiceAuditError> {
+        let record = normalize_service_audit_record(record, &usage)?;
+        if !self.enabled {
+            return Ok(());
+        }
+        self.sender
+            .try_send(QueuedAudit {
+                record,
+                service_usage: Some(usage),
+            })
+            .map_err(|_| ServiceAuditError::QueueUnavailable)
     }
 
     /// Convenience constructor for an exec-event record.
@@ -733,17 +1175,25 @@ impl AuditLogger {
         error: Option<String>,
     ) -> AuditRecord {
         AuditRecord {
+            key_id: None,
             request_id,
             api_key,
             user_name: None,
             org_id: None,
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "sandbox".to_string(),
             model: backend.clone(),
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            cache_write_1h_tokens: None,
             latency_ms: duration_ms,
             eval_score: None,
             error,
@@ -757,6 +1207,7 @@ impl AuditLogger {
             user_id: None,
             agent_id: None,
             feature: None,
+            purpose: None,
             managed_inference: false,
             provider_cost_micro_usd: None,
             widget_instance_id: None,
@@ -782,17 +1233,25 @@ impl AuditLogger {
         error: Option<String>,
     ) -> AuditRecord {
         AuditRecord {
+            key_id: None,
             request_id,
             api_key,
             user_name: None,
             org_id: None,
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "widget".to_string(),
             model: origin_server.clone(),
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            cache_write_1h_tokens: None,
             latency_ms: duration_ms,
             eval_score: None,
             error,
@@ -806,6 +1265,7 @@ impl AuditLogger {
             user_id: None,
             agent_id,
             feature: Some("widget".to_string()),
+            purpose: None,
             managed_inference: false,
             provider_cost_micro_usd: None,
             widget_instance_id: Some(widget_instance_id),
@@ -832,17 +1292,25 @@ impl AuditLogger {
         error: Option<String>,
     ) -> AuditRecord {
         AuditRecord {
+            key_id: None,
             request_id,
             api_key,
             user_name: None,
             org_id: None,
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "widget".to_string(),
             model: origin_server.clone(),
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            cache_write_1h_tokens: None,
             latency_ms: 0,
             eval_score: None,
             error,
@@ -856,6 +1324,7 @@ impl AuditLogger {
             user_id: None,
             agent_id: None,
             feature: Some("widget".to_string()),
+            purpose: None,
             managed_inference: false,
             provider_cost_micro_usd: None,
             widget_instance_id: Some(widget_instance_id),
@@ -879,17 +1348,25 @@ impl AuditLogger {
         error: Option<String>,
     ) -> AuditRecord {
         AuditRecord {
+            key_id: None,
             request_id,
             api_key,
             user_name: None,
             org_id: None,
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "identity".to_string(),
             model: source.clone(),
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            cache_write_1h_tokens: None,
             latency_ms: 0,
             eval_score: None,
             error,
@@ -903,6 +1380,7 @@ impl AuditLogger {
             user_id: None,
             agent_id: None,
             feature: None,
+            purpose: None,
             managed_inference: false,
             provider_cost_micro_usd: None,
             widget_instance_id: None,
@@ -947,17 +1425,25 @@ impl AuditLogger {
             .map(|value| format!("{action}: {value}"))
             .unwrap_or(action);
         AuditRecord {
+            key_id: None,
             request_id,
             api_key,
             user_name: Some(actor),
             org_id: None,
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "gateway_control".to_string(),
             model: target,
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            cache_write_1h_tokens: None,
             latency_ms: 0,
             eval_score: None,
             error: None,
@@ -971,10 +1457,16 @@ impl AuditLogger {
             user_id: actor_id,
             agent_id,
             feature: Some("control".to_string()),
+            purpose: None,
             managed_inference: false,
             provider_cost_micro_usd: None,
             widget_instance_id: None,
         }
+    }
+
+    /// The SQLite file backing this logger, or `None` when auditing is disabled.
+    pub fn db_path(&self) -> Option<&str> {
+        self.db_path.as_deref()
     }
 
     /// Return the total lifetime tokens used by `api_key`.
@@ -1048,6 +1540,7 @@ impl AuditLogger {
         push("agent_id = ?", &query.agent_id);
         push("widget_instance_id = ?", &query.widget_instance_id);
         push("event_type = ?", &query.event_type);
+        push("user_id = ?", &query.user_id);
         if query.errors_only {
             clauses.push("error IS NOT NULL");
         }
@@ -1077,7 +1570,11 @@ impl AuditLogger {
              project_id, provider, model, input_tokens, output_tokens, cache_hit, \
              latency_ms, eval_score, error, skill_ids, session_id, \
              event_type, backend, command, duration_ms, exit_code, \
-             user_id, agent_id, feature, widget_instance_id, managed_inference, provider_cost_micro_usd \
+             user_id, agent_id, feature, widget_instance_id, managed_inference, provider_cost_micro_usd, \
+             service_requests, service_documents, service_provider_credits, service_cost_source, service_cost_is_estimate, \
+             cache_read_tokens, cache_write_tokens, \
+             prompt_cache_outcome, prompt_cache_read_tokens, prompt_cache_write_tokens, key_id, team_ids, \
+             cache_write_1h_tokens, purpose \
              FROM audit_log {where_sql} {order} LIMIT {limit}"
         );
 
@@ -1102,6 +1599,12 @@ impl AuditLogger {
                 model: row.get(10)?,
                 input_tokens: row.get::<_, i64>(11)? as u64,
                 output_tokens: row.get::<_, i64>(12)? as u64,
+                cache_read_tokens: row.get::<_, Option<i64>>(35)?.map(|value| value as u64),
+                cache_write_tokens: row.get::<_, Option<i64>>(36)?.map(|value| value as u64),
+                cache_write_1h_tokens: row
+                    .get::<_, Option<i64>>(42)
+                    .unwrap_or(None)
+                    .map(|v| v as u64),
                 cache_hit: row.get::<_, i64>(13)? != 0,
                 latency_ms: row.get::<_, i64>(14)? as u64,
                 eval_score: row.get(15)?,
@@ -1123,11 +1626,24 @@ impl AuditLogger {
                 agent_id: row.get(25).unwrap_or(None),
                 feature: row.get(26).unwrap_or(None),
                 widget_instance_id: row.get(27).unwrap_or(None),
+                service_usage: read_service_usage(row)?,
                 managed_inference: row.get::<_, i64>(28).unwrap_or(0) != 0,
                 provider_cost_micro_usd: row
                     .get::<_, Option<i64>>(29)
                     .unwrap_or(None)
                     .map(|v| v as u64),
+                prompt_cache_outcome: row.get(37).unwrap_or(None),
+                prompt_cache_read_tokens: row
+                    .get::<_, Option<i64>>(38)
+                    .unwrap_or(None)
+                    .map(|v| v as u64),
+                prompt_cache_write_tokens: row
+                    .get::<_, Option<i64>>(39)
+                    .unwrap_or(None)
+                    .map(|v| v as u64),
+                key_id: row.get(40).unwrap_or(None),
+                team_ids: row.get(41).unwrap_or(None),
+                purpose: row.get(43).unwrap_or(None),
             })
         })?;
 
@@ -1140,6 +1656,42 @@ impl AuditLogger {
 
     /// Roll up the entire local store into aggregate totals. Returns a zeroed
     /// summary when the store is disabled.
+    /// Last acknowledged row id of the named delivery cursor.
+    pub fn report_cursor(&self, name: &str) -> anyhow::Result<Option<i64>> {
+        let Some(reader) = &self.reader else {
+            return Ok(None);
+        };
+        let conn = reader
+            .lock()
+            .map_err(|_| anyhow::anyhow!("audit reader mutex poisoned"))?;
+        let cursor = conn
+            .query_row(
+                "SELECT last_id FROM report_cursors WHERE name = ?1",
+                params![name],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        Ok(cursor)
+    }
+
+    /// Persist the named delivery cursor. Runs on its own short-lived writer
+    /// connection (once per report interval); WAL lets it coexist with the
+    /// background audit writer, and the busy timeout rides out its commits.
+    /// The cursor never moves backwards.
+    pub fn set_report_cursor(&self, name: &str, last_id: i64) -> anyhow::Result<()> {
+        let Some(db_path) = self.db_path.as_deref() else {
+            return Ok(());
+        };
+        let conn = Connection::open(db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.execute(
+            "INSERT INTO report_cursors (name, last_id) VALUES (?1, ?2)
+             ON CONFLICT(name) DO UPDATE SET last_id = MAX(last_id, excluded.last_id)",
+            params![name, last_id],
+        )?;
+        Ok(())
+    }
+
     pub fn summary(&self) -> anyhow::Result<AuditSummary> {
         let Some(reader) = &self.reader else {
             return Ok(AuditSummary::default());
@@ -1193,6 +1745,10 @@ impl AuditLogger {
             clauses.push("model = ?");
             binds.push(model.clone());
         }
+        if let Some(purpose) = &query.purpose {
+            clauses.push("purpose = ?");
+            binds.push(purpose.clone());
+        }
 
         let sql = format!(
             "SELECT
@@ -1223,10 +1779,15 @@ impl AuditLogger {
                                    THEN input_tokens ELSE 0 END), 0),
                  COALESCE(SUM(CASE WHEN event_type = 'model_call' AND managed_inference != 0
                                         AND provider_cost_micro_usd IS NULL
-                                   THEN output_tokens ELSE 0 END), 0)
+                                   THEN output_tokens ELSE 0 END), 0),
+                 purpose,
+                 COALESCE(SUM(CASE WHEN event_type = 'model_call'
+                                   THEN COALESCE(cache_read_tokens, 0) ELSE 0 END), 0),
+                 COALESCE(SUM(CASE WHEN event_type = 'model_call'
+                                   THEN COALESCE(cache_write_tokens, 0) ELSE 0 END), 0)
              FROM audit_log
              WHERE {}
-             GROUP BY bucket, provider, model, user_id, feature, managed_inference
+             GROUP BY bucket, provider, model, user_id, feature, purpose, managed_inference
              ORDER BY bucket ASC, provider ASC, model ASC",
             clauses.join(" AND ")
         );
@@ -1253,6 +1814,9 @@ impl AuditLogger {
                 cost_micro_usd: row.get::<_, Option<i64>>(13)?.map(|value| value as u64),
                 unpriced_input_tokens: row.get::<_, i64>(14)? as u64,
                 unpriced_output_tokens: row.get::<_, i64>(15)? as u64,
+                purpose: row.get(16)?,
+                cache_read_tokens: row.get::<_, i64>(17)? as u64,
+                cache_write_tokens: row.get::<_, i64>(18)? as u64,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1260,7 +1824,43 @@ impl AuditLogger {
     }
 }
 
+fn read_service_usage(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<AuditServiceUsage>> {
+    let Some(source) = row.get::<_, Option<String>>(33)? else {
+        return Ok(None);
+    };
+    let source =
+        AuditServiceCostSource::from_storage(&source).ok_or(rusqlite::Error::InvalidColumnType(
+            33,
+            "service_cost_source".into(),
+            rusqlite::types::Type::Text,
+        ))?;
+    fn nonnegative(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
+        let value: i64 = row.get(index)?;
+        u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
+    }
+    let credits = row
+        .get::<_, Option<i64>>(32)?
+        .map(|value| {
+            u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(32, value))
+        })
+        .transpose()?;
+    Ok(Some(AuditServiceUsage {
+        requests: nonnegative(row, 30)?,
+        documents: nonnegative(row, 31)?,
+        provider_credits: credits,
+        cost_source: source,
+        cost_is_estimate: row.get::<_, i64>(34)? != 0,
+    }))
+}
+
 fn local_usage_source(provider: &str, managed_inference: bool) -> &'static str {
+    if let Some(descriptor) = ryu_gw_credentials::sdk_provider_by_id(provider) {
+        return if descriptor.auth_kind == ryu_gw_credentials::SdkAuthKind::NoAuth {
+            "self_hosted"
+        } else {
+            "byok"
+        };
+    }
     match provider.split(':').next().unwrap_or(provider) {
         "local" | "ollama" | "llamacpp" | "lmstudio" | "vllm" => "local",
         "openrouter" if managed_inference => "managed",
@@ -1285,6 +1885,32 @@ impl Default for AuditLogger {
     }
 }
 
+/// One-time backfill of the lifetime `audit_summary` row from the rows still
+/// present. Runs only when the singleton row is first created; retention never
+/// recomputes it, because that would shrink lifetime spend to the retained
+/// window and reopen a reached shared-budget hard cap.
+const BACKFILL_AUDIT_SUMMARY: &str = "UPDATE audit_summary SET
+     request_count = (SELECT COUNT(*) FROM audit_log WHERE event_type NOT IN ('control_change', 'service_call')),
+     error_count = (SELECT COALESCE(SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END), 0)
+                    FROM audit_log WHERE event_type NOT IN ('control_change', 'service_call')),
+     input_tokens = (SELECT COALESCE(SUM(input_tokens), 0)
+                     FROM audit_log WHERE event_type NOT IN ('control_change', 'service_call')),
+     output_tokens = (SELECT COALESCE(SUM(output_tokens), 0)
+                      FROM audit_log WHERE event_type NOT IN ('control_change', 'service_call')),
+     reported_cost_micro_usd = (SELECT COALESCE(SUM(CASE
+         WHEN event_type = 'model_call' AND managed_inference != 0
+              AND provider_cost_micro_usd IS NOT NULL
+         THEN provider_cost_micro_usd ELSE 0 END), 0) FROM audit_log),
+     unpriced_input_tokens = (SELECT COALESCE(SUM(CASE
+         WHEN event_type = 'model_call' AND managed_inference != 0
+              AND provider_cost_micro_usd IS NULL
+         THEN input_tokens ELSE 0 END), 0) FROM audit_log),
+     unpriced_output_tokens = (SELECT COALESCE(SUM(CASE
+         WHEN event_type = 'model_call' AND managed_inference != 0
+              AND provider_cost_micro_usd IS NULL
+         THEN output_tokens ELSE 0 END), 0) FROM audit_log)
+ WHERE singleton = 1;";
+
 fn prune_database(
     conn: &Connection,
     policy: AuditRetentionPolicy,
@@ -1305,29 +1931,6 @@ fn prune_database(
             params![max_rows],
         )? as u64);
     }
-    conn.execute_batch(
-        "UPDATE audit_summary SET
-             request_count = (SELECT COUNT(*) FROM audit_log WHERE event_type != 'control_change'),
-             error_count = (SELECT COALESCE(SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END), 0)
-                            FROM audit_log WHERE event_type != 'control_change'),
-             input_tokens = (SELECT COALESCE(SUM(input_tokens), 0) FROM audit_log
-                             WHERE event_type != 'control_change'),
-             output_tokens = (SELECT COALESCE(SUM(output_tokens), 0) FROM audit_log
-                              WHERE event_type != 'control_change'),
-             reported_cost_micro_usd = (SELECT COALESCE(SUM(CASE
-                 WHEN event_type = 'model_call' AND managed_inference != 0
-                      AND provider_cost_micro_usd IS NOT NULL
-                 THEN provider_cost_micro_usd ELSE 0 END), 0) FROM audit_log),
-             unpriced_input_tokens = (SELECT COALESCE(SUM(CASE
-                 WHEN event_type = 'model_call' AND managed_inference != 0
-                      AND provider_cost_micro_usd IS NULL
-                 THEN input_tokens ELSE 0 END), 0) FROM audit_log),
-             unpriced_output_tokens = (SELECT COALESCE(SUM(CASE
-                 WHEN event_type = 'model_call' AND managed_inference != 0
-                      AND provider_cost_micro_usd IS NULL
-                 THEN output_tokens ELSE 0 END), 0) FROM audit_log)
-         WHERE singleton = 1;",
-    )?;
     Ok(AuditPruneSummary {
         deleted_rows,
         retention_days: policy.retention_days,
@@ -1347,6 +1950,13 @@ fn prune_database(
 pub trait AuditBackend: Send + Sync {
     /// Append a record to the audit log.
     fn log(&self, record: AuditRecord);
+    fn log_service(
+        &self,
+        _record: AuditRecord,
+        _usage: AuditServiceUsage,
+    ) -> Result<(), ServiceAuditError> {
+        Err(ServiceAuditError::UnsupportedBackend)
+    }
     /// Whether the store is enabled (persisting and queryable).
     fn is_enabled(&self) -> bool;
     /// Total lifetime tokens used by `api_key`.
@@ -1355,7 +1965,8 @@ pub trait AuditBackend: Send + Sync {
     fn add_tokens(&self, api_key: &str, n: u64);
     /// Query the store, newest-first, api_key redacted.
     fn query(&self, query: &AuditQuery) -> anyhow::Result<Vec<AuditEntry>>;
-    /// Aggregate summary over the whole store.
+    /// Lifetime aggregate summary. Retention pruning must not lower it, because
+    /// shared-budget reconciliation reports it as lifetime spend.
     fn summary(&self) -> anyhow::Result<AuditSummary>;
     /// Canonical 15-minute usage buckets for analytics surfaces.
     fn usage_rollup(&self, query: &AuditUsageQuery) -> anyhow::Result<Vec<AuditUsageEvent>>;
@@ -1364,11 +1975,28 @@ pub trait AuditBackend: Send + Sync {
     fn prune(&self) -> anyhow::Result<AuditPruneSummary> {
         Ok(AuditPruneSummary::default())
     }
+    /// Last acknowledged row id of the named delivery cursor (e.g. the
+    /// control-plane reporter), so a restart resumes instead of replaying.
+    /// Non-persistent backends remember nothing.
+    fn report_cursor(&self, _name: &str) -> anyhow::Result<Option<i64>> {
+        Ok(None)
+    }
+    /// Persist the named delivery cursor after its slice was acknowledged.
+    fn set_report_cursor(&self, _name: &str, _last_id: i64) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 impl AuditBackend for AuditLogger {
     fn log(&self, record: AuditRecord) {
         AuditLogger::log(self, record);
+    }
+    fn log_service(
+        &self,
+        record: AuditRecord,
+        usage: AuditServiceUsage,
+    ) -> Result<(), ServiceAuditError> {
+        AuditLogger::log_service(self, record, usage)
     }
     fn is_enabled(&self) -> bool {
         AuditLogger::is_enabled(self)
@@ -1384,6 +2012,12 @@ impl AuditBackend for AuditLogger {
     }
     fn summary(&self) -> anyhow::Result<AuditSummary> {
         AuditLogger::summary(self)
+    }
+    fn report_cursor(&self, name: &str) -> anyhow::Result<Option<i64>> {
+        AuditLogger::report_cursor(self, name)
+    }
+    fn set_report_cursor(&self, name: &str, last_id: i64) -> anyhow::Result<()> {
+        AuditLogger::set_report_cursor(self, name, last_id)
     }
     fn usage_rollup(&self, query: &AuditUsageQuery) -> anyhow::Result<Vec<AuditUsageEvent>> {
         AuditLogger::usage_rollup(self, query)
@@ -1470,6 +2104,15 @@ impl AuditRegistry {
         self.active.log(record);
     }
 
+    pub fn log_service(
+        &self,
+        record: AuditRecord,
+        usage: AuditServiceUsage,
+    ) -> Result<(), ServiceAuditError> {
+        let record = normalize_service_audit_record(record, &usage)?;
+        self.active.log_service(record, usage)
+    }
+
     /// See [`AuditBackend::is_enabled`].
     pub fn is_enabled(&self) -> bool {
         self.active.is_enabled()
@@ -1504,710 +2147,17 @@ impl AuditRegistry {
     pub fn prune(&self) -> anyhow::Result<AuditPruneSummary> {
         self.active.prune()
     }
+
+    /// See [`AuditBackend::report_cursor`].
+    pub fn report_cursor(&self, name: &str) -> anyhow::Result<Option<i64>> {
+        self.active.report_cursor(name)
+    }
+
+    /// See [`AuditBackend::set_report_cursor`].
+    pub fn set_report_cursor(&self, name: &str, last_id: i64) -> anyhow::Result<()> {
+        self.active.set_report_cursor(name, last_id)
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample_record(request_id: &str, error: Option<&str>) -> AuditRecord {
-        AuditRecord {
-            request_id: request_id.to_string(),
-            api_key: "sk-secret-1234567890".to_string(),
-            user_name: Some("alice".to_string()),
-            org_id: Some("org-1".to_string()),
-            team_id: None,
-            project_id: None,
-            provider: "openai".to_string(),
-            model: "gpt-4o".to_string(),
-            input_tokens: 10,
-            output_tokens: 5,
-            cache_hit: false,
-            latency_ms: 42,
-            eval_score: None,
-            error: error.map(|e| e.to_string()),
-            skill_ids: None,
-            session_id: None,
-            event_type: EventType::ModelCall,
-            backend: None,
-            command: None,
-            duration_ms: None,
-            exit_code: None,
-            user_id: None,
-            agent_id: None,
-            feature: None,
-            managed_inference: false,
-            provider_cost_micro_usd: None,
-            widget_instance_id: None,
-        }
-    }
-
-    /// Block until the async writer thread has persisted at least `expected` rows.
-    fn wait_for_rows(logger: &AuditLogger, query: &AuditQuery, expected: usize) -> Vec<AuditEntry> {
-        for _ in 0..100 {
-            let rows = logger.query(query).expect("query failed");
-            if rows.len() >= expected {
-                return rows;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        panic!("timed out waiting for {expected} audit rows");
-    }
-
-    #[test]
-    fn redacts_api_key_to_prefix() {
-        assert_eq!(redact_key("sk-secret-1234567890"), "sk-sec…");
-        assert_eq!(redact_key("master"), "master");
-        assert_eq!(redact_key("anonymous"), "anonymous");
-    }
-
-    #[test]
-    fn default_audit_path_follows_ryu_dir_before_platform_data_dir() {
-        let isolated = Path::new("/tmp/ryu-dev-profile");
-        let platform_data = Path::new("/Users/test/Library/Application Support");
-
-        assert_eq!(
-            default_audit_db_path_for(Some(isolated), Some(platform_data)),
-            "/tmp/ryu-dev-profile/audit.db"
-        );
-        assert_eq!(
-            default_audit_db_path_for(None, Some(platform_data)),
-            "/Users/test/Library/Application Support/ryu/audit.db"
-        );
-        assert_eq!(default_audit_db_path_for(None, None), "audit.db");
-    }
-
-    #[test]
-    fn runtime_audit_path_override_wins_without_mutating_config() {
-        assert_eq!(
-            audit_db_path_for("/release/audit.db", Some(" /dev/audit.db ")),
-            "/dev/audit.db"
-        );
-        assert_eq!(
-            audit_db_path_for("/release/audit.db", Some("  ")),
-            "/release/audit.db"
-        );
-        assert_eq!(
-            audit_db_path_for("/release/audit.db", None),
-            "/release/audit.db"
-        );
-    }
-
-    #[test]
-    fn an_explicit_audit_path_is_opened_verbatim() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-explicit-{}", unique_suffix()));
-        let explicit = dir.join("operator-audit.db");
-        let logger = AuditLogger::new(&AuditConfig {
-            enabled: true,
-            db_path: explicit.to_string_lossy().into_owned(),
-        })
-        .expect("explicit audit path should open");
-
-        assert!(explicit.is_file());
-        assert_eq!(logger.db_path.as_deref(), explicit.to_str());
-        drop(logger);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn stores_only_api_key_hash_and_supports_raw_key_filtering() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-hash-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let config = AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_owned(),
-        };
-        let logger = AuditLogger::new(&config).expect("logger");
-        let raw_key = "sk-secret-1234567890";
-        logger.log(sample_record("req-hash", None));
-        wait_for_rows(&logger, &AuditQuery::default(), 1);
-
-        let conn = Connection::open(&db_path).unwrap();
-        let (stored_key, prefix): (String, String) = conn
-            .query_row(
-                "SELECT api_key, api_key_prefix FROM audit_log WHERE request_id = 'req-hash'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_ne!(stored_key, raw_key);
-        assert_eq!(stored_key, api_key_storage_key(raw_key));
-        assert_eq!(prefix, "sk-sec…");
-        assert!(!stored_key.contains("secret"));
-
-        let filtered = logger
-            .query(&AuditQuery {
-                api_key: Some(raw_key.to_owned()),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].api_key, "sk-sec…");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn migrates_legacy_raw_api_keys_before_serving_queries() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-migrate-{}", unique_suffix()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let db_path = dir.join("audit.db");
-        let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
-                request_id TEXT NOT NULL,
-                api_key TEXT NOT NULL,
-                user_name TEXT,
-                org_id TEXT,
-                team_id TEXT,
-                project_id TEXT,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                input_tokens INTEGER NOT NULL DEFAULT 0,
-                output_tokens INTEGER NOT NULL DEFAULT 0,
-                cache_hit INTEGER NOT NULL DEFAULT 0,
-                latency_ms INTEGER NOT NULL DEFAULT 0,
-                eval_score REAL,
-                error TEXT
-            );
-            INSERT INTO audit_log (request_id, api_key, provider, model)
-            VALUES ('legacy-req', 'sk-legacy-secret', 'openai', 'gpt-4o');",
-        )
-        .unwrap();
-        drop(conn);
-
-        let logger = AuditLogger::new(&AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_owned(),
-        })
-        .unwrap();
-        let rows = logger
-            .query(&AuditQuery {
-                api_key: Some("sk-legacy-secret".to_owned()),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].api_key, "sk-leg…");
-        let summary = logger.summary().expect("backfilled summary");
-        assert_eq!(summary.request_count, 1);
-
-        let conn = Connection::open(&db_path).unwrap();
-        let stored: String = conn
-            .query_row(
-                "SELECT api_key FROM audit_log WHERE request_id = 'legacy-req'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_ne!(stored, "sk-legacy-secret");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn logs_and_queries_records_with_redaction() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-test-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let config = AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_string(),
-        };
-
-        let logger = AuditLogger::new(&config).expect("logger");
-        logger.log(sample_record("req-1", None));
-        logger.log(sample_record("req-2", Some("provider exploded")));
-
-        let all = wait_for_rows(&logger, &AuditQuery::default(), 2);
-        // Newest-first ordering.
-        assert_eq!(all[0].request_id, "req-2");
-        // Raw key never returned.
-        assert_eq!(all[0].api_key, "sk-sec…");
-        assert!(!all[0].api_key.contains("1234567890"));
-
-        // errors_only filter.
-        let errors = logger
-            .query(&AuditQuery {
-                errors_only: true,
-                ..Default::default()
-            })
-            .expect("query");
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].request_id, "req-2");
-
-        // provider filter.
-        let by_provider = logger
-            .query(&AuditQuery {
-                provider: Some("openai".to_string()),
-                ..Default::default()
-            })
-            .expect("query");
-        assert_eq!(by_provider.len(), 2);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn cursor_queries_are_exclusive_and_oldest_first() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-cursor-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let logger = AuditLogger::new(&AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_owned(),
-        })
-        .unwrap();
-        logger.log(sample_record("req-1", None));
-        logger.log(sample_record("req-2", None));
-        logger.log(sample_record("req-3", None));
-
-        let all = wait_for_rows(&logger, &AuditQuery::default(), 3);
-        let cursor = all.last().expect("oldest row").id;
-        let next = logger
-            .query(&AuditQuery {
-                id_after: Some(cursor),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(
-            next.iter()
-                .map(|entry| entry.request_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["req-2", "req-3"]
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn disabled_logger_returns_empty() {
-        let logger = AuditLogger::disabled();
-        assert!(!logger.is_enabled());
-        assert!(logger.query(&AuditQuery::default()).unwrap().is_empty());
-        let summary = logger.summary().expect("summary");
-        assert_eq!(summary.request_count, 0);
-        assert_eq!(summary.error_count, 0);
-    }
-
-    #[test]
-    fn summary_rolls_up_totals() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-sum-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let config = AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_string(),
-        };
-
-        let logger = AuditLogger::new(&config).expect("logger");
-        logger.log(sample_record("req-1", None));
-        logger.log(sample_record("req-2", Some("boom")));
-        logger.log(AuditLogger::make_control_record(
-            "control-1".to_string(),
-            "master".to_string(),
-            "master-key".to_string(),
-            None,
-            "config.apply".to_string(),
-            "gateway_config".to_string(),
-            Some("firewall".to_string()),
-        ));
-        wait_for_rows(&logger, &AuditQuery::default(), 3);
-
-        let summary = logger.summary().expect("summary");
-        assert_eq!(summary.request_count, 2);
-        assert_eq!(summary.error_count, 1);
-        // Each sample record carries 10 input + 5 output tokens.
-        assert_eq!(summary.input_tokens, 20);
-        assert_eq!(summary.output_tokens, 10);
-
-        let controls = logger
-            .query(&AuditQuery {
-                event_type: Some("control_change".to_string()),
-                ..Default::default()
-            })
-            .expect("control query");
-        assert_eq!(controls.len(), 1);
-        assert_eq!(controls[0].user_name.as_deref(), Some("master-key"));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn usage_rollup_uses_canonical_buckets_and_exact_event_math() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-usage-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let logger = AuditLogger::new(&AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_owned(),
-        })
-        .expect("logger");
-
-        let conn = Connection::open(&db_path).expect("writer connection");
-        conn.execute_batch(
-            "INSERT INTO audit_log (
-                 timestamp, request_id, api_key, provider, model, input_tokens,
-                 output_tokens, latency_ms, error, event_type, user_id, feature,
-                 managed_inference, provider_cost_micro_usd
-             ) VALUES
-                 ('2026-08-22 10:01:00', 'model-1', 'master', 'openrouter', 'gpt-5',
-                  100, 40, 250, NULL, 'model_call', 'member-1', 'chat', 1, 90),
-                 ('2026-08-22 10:14:59', 'model-2', 'master', 'openrouter', 'gpt-5',
-                  20, 10, 750, 'failed', 'model_call', 'member-1', 'chat', 1, NULL),
-                 ('2026-08-22 10:12:00', 'exec-1', 'master', 'openrouter', 'gpt-5',
-                  0, 0, 0, NULL, 'exec_call', 'member-1', 'chat', 1, NULL),
-                 ('2026-08-22 10:15:00', 'model-3', 'master', 'anthropic', 'claude',
-                  9, 3, 100, NULL, 'model_call', NULL, 'agent', 0, NULL);
-             UPDATE audit_log SET duration_ms = 2500 WHERE request_id = 'exec-1';",
-        )
-        .expect("seed usage rows");
-
-        let events = logger
-            .usage_rollup(&AuditUsageQuery {
-                timestamp_from: "2026-08-22T10:00:00Z".to_owned(),
-                timestamp_until: "2026-08-22T10:15:00Z".to_owned(),
-                provider: Some("openrouter".to_owned()),
-                model: Some("gpt-5".to_owned()),
-            })
-            .expect("usage rollup");
-        assert_eq!(events.len(), 1);
-        let event = &events[0];
-        assert_eq!(event.timestamp, "2026-08-22T10:00:00Z");
-        assert_eq!(event.member_id.as_deref(), Some("member-1"));
-        assert_eq!(event.feature.as_deref(), Some("chat"));
-        assert_eq!(event.source, "managed");
-        assert_eq!(event.input_tokens, 120);
-        assert_eq!(event.output_tokens, 50);
-        assert_eq!(event.request_count, 2);
-        assert_eq!(event.error_count, 1);
-        assert_eq!(event.latency_total_ms, 1000);
-        assert_eq!(event.latency_samples, 2);
-        assert_eq!(event.agent_seconds, 2.5);
-        assert_eq!(event.cost_micro_usd, Some(90));
-        assert_eq!(event.unpriced_input_tokens, 20);
-        assert_eq!(event.unpriced_output_tokens, 10);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn persists_managed_provider_cost_and_separates_unpriced_tokens() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-cost-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let logger = AuditLogger::new(&AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_string(),
-        })
-        .expect("logger");
-
-        let mut priced = sample_record("priced", None);
-        priced.managed_inference = true;
-        priced.provider_cost_micro_usd = Some(1_250);
-        logger.log(priced);
-
-        let mut unpriced = sample_record("unpriced", None);
-        unpriced.managed_inference = true;
-        logger.log(unpriced);
-        let rows = wait_for_rows(&logger, &AuditQuery::default(), 2);
-
-        let priced_row = rows
-            .iter()
-            .find(|row| row.request_id == "priced")
-            .expect("priced row");
-        assert!(priced_row.managed_inference);
-        assert_eq!(priced_row.provider_cost_micro_usd, Some(1_250));
-
-        let summary = logger.summary().expect("summary");
-        assert_eq!(summary.reported_cost_micro_usd, 1_250);
-        assert_eq!(summary.unpriced_input_tokens, 10);
-        assert_eq!(summary.unpriced_output_tokens, 5);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn control_record_shape() {
-        let record = AuditLogger::make_control_record(
-            "control-id".to_string(),
-            "master".to_string(),
-            "loopback-admin".to_string(),
-            Some("user-123".to_string()),
-            "firewall.update".to_string(),
-            "firewall_policy".to_string(),
-            Some("enabled, policy".to_string()),
-        );
-        assert_eq!(record.event_type, EventType::ControlChange);
-        assert_eq!(record.event_type.as_str(), "control_change");
-        assert_eq!(record.user_name.as_deref(), Some("loopback-admin"));
-        assert_eq!(record.user_id.as_deref(), Some("user-123"));
-        assert_eq!(record.model, "firewall_policy");
-        assert_eq!(
-            record.command.as_deref(),
-            Some("firewall.update: enabled, policy")
-        );
-        assert_eq!(record.backend.as_deref(), Some("gateway_admin"));
-        assert_eq!(record.input_tokens, 0);
-        assert_eq!(record.output_tokens, 0);
-    }
-
-    #[test]
-    fn agent_control_record_keeps_the_agent_passport_link() {
-        let record = AuditLogger::make_control_record_with_agent(
-            "control-agent-id".to_owned(),
-            "master".to_owned(),
-            "member@example.com".to_owned(),
-            Some("user-123".to_owned()),
-            Some("agent-support".to_owned()),
-            "agent.update".to_owned(),
-            "agent:agent-support".to_owned(),
-            Some("successful Core agent-management mutation".to_owned()),
-        );
-        assert_eq!(record.agent_id.as_deref(), Some("agent-support"));
-        assert_eq!(record.user_id.as_deref(), Some("user-123"));
-        assert_eq!(record.event_type, EventType::ControlChange);
-    }
-
-    /// Log a record with an explicit session_id.
-    fn sample_record_with_session(request_id: &str, session_id: &str) -> AuditRecord {
-        AuditRecord {
-            session_id: Some(session_id.to_string()),
-            ..sample_record(request_id, None)
-        }
-    }
-
-    /// Verifies that logging two different sessions and querying by session_id returns
-    /// only the rows that belong to the requested session (M4 / #176 AC4).
-    #[test]
-    fn session_id_filter_returns_only_matching_session() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-session-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let config = AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_string(),
-        };
-
-        let logger = AuditLogger::new(&config).expect("logger");
-
-        // Two requests belonging to session A.
-        logger.log(sample_record_with_session("req-a1", "session-A"));
-        logger.log(sample_record_with_session("req-a2", "session-A"));
-        // One request belonging to session B.
-        logger.log(sample_record_with_session("req-b1", "session-B"));
-
-        // Wait for all three rows to be persisted.
-        wait_for_rows(&logger, &AuditQuery::default(), 3);
-
-        // Querying by session-A must return exactly two rows.
-        let session_a_rows = logger
-            .query(&AuditQuery {
-                session_id: Some("session-A".to_string()),
-                ..Default::default()
-            })
-            .expect("query by session_id");
-        assert_eq!(session_a_rows.len(), 2, "expected 2 rows for session-A");
-        for entry in &session_a_rows {
-            assert_eq!(entry.session_id.as_deref(), Some("session-A"));
-        }
-
-        // Querying by session-B must return exactly one row.
-        let session_b_rows = logger
-            .query(&AuditQuery {
-                session_id: Some("session-B".to_string()),
-                ..Default::default()
-            })
-            .expect("query by session_id session-B");
-        assert_eq!(session_b_rows.len(), 1, "expected 1 row for session-B");
-        assert_eq!(session_b_rows[0].request_id, "req-b1");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn timestamp_range_accepts_iso_bounds_and_excludes_upper_bound() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-timestamp-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let config = AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_owned(),
-        };
-        let logger = AuditLogger::new(&config).expect("logger");
-        logger.log(sample_record("req-time", None));
-        let rows = wait_for_rows(&logger, &AuditQuery::default(), 1);
-        let iso_timestamp = format!("{}Z", rows[0].timestamp.replace(' ', "T"));
-
-        let in_range = logger
-            .query(&AuditQuery {
-                timestamp_from: Some(iso_timestamp.clone()),
-                timestamp_until: Some("2999-01-01T00:00:00Z".to_string()),
-                ..Default::default()
-            })
-            .expect("query by ISO timestamp range");
-        assert_eq!(in_range.len(), 1);
-
-        let at_upper_bound = logger
-            .query(&AuditQuery {
-                timestamp_until: Some(iso_timestamp),
-                ..Default::default()
-            })
-            .expect("query by exclusive upper bound");
-        assert!(at_upper_bound.is_empty());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// #523: the credential-read constructor produces a distinct, attributable
-    /// record (domain in `command`, source in `backend`/`model`) that is NOT a
-    /// sandbox exec — so identity reads are filterable and never look like execs.
-    #[test]
-    fn credential_read_record_shape() {
-        let rec = AuditLogger::make_credential_read_record(
-            "req-id".to_string(),
-            "sk-core".to_string(),
-            "manual".to_string(),
-            "app.example.com".to_string(),
-            Some("session-X".to_string()),
-            None,
-        );
-        assert_eq!(rec.event_type, EventType::CredentialRead);
-        assert_eq!(rec.event_type.as_str(), "credential_read");
-        assert_eq!(rec.provider, "identity");
-        // Source is attributable via both backend and the model slot.
-        assert_eq!(rec.backend.as_deref(), Some("manual"));
-        assert_eq!(rec.model, "manual");
-        // The domain — never a secret — lands in the command slot.
-        assert_eq!(rec.command.as_deref(), Some("app.example.com"));
-        assert_eq!(rec.session_id.as_deref(), Some("session-X"));
-        // Inert exec-only fields don't masquerade as an execution.
-        assert!(rec.duration_ms.is_none());
-        assert!(rec.exit_code.is_none());
-    }
-
-    /// §4.4: the widget `callTool` constructor produces an attributable
-    /// `ExecCall` tagged `feature="widget"` (backend=origin_server,
-    /// command=tool_id) carrying the per-render instance id — so it drains the
-    /// exec budget like any tool run but is filterable per widget.
-    #[test]
-    fn widget_call_record_shape() {
-        let rec = AuditLogger::make_widget_call_record(
-            "req-id".to_string(),
-            "sk-core".to_string(),
-            "io.ryu.checklist".to_string(),
-            "checklist.toggle".to_string(),
-            Some("agent-1".to_string()),
-            Some("conv-9".to_string()),
-            "wi-abc".to_string(),
-            12,
-            None,
-        );
-        assert_eq!(rec.event_type, EventType::ExecCall);
-        assert_eq!(rec.feature.as_deref(), Some("widget"));
-        assert_eq!(rec.backend.as_deref(), Some("io.ryu.checklist"));
-        assert_eq!(rec.command.as_deref(), Some("checklist.toggle"));
-        assert_eq!(rec.agent_id.as_deref(), Some("agent-1"));
-        assert_eq!(rec.session_id.as_deref(), Some("conv-9"));
-        assert_eq!(rec.widget_instance_id.as_deref(), Some("wi-abc"));
-    }
-
-    /// §4.4: the widget follow-up constructor is its own `WidgetFollowUp`
-    /// discriminator (never an exec) so follow-ups are filterable on their own.
-    #[test]
-    fn widget_followup_record_shape() {
-        let rec = AuditLogger::make_widget_followup_record(
-            "req-id".to_string(),
-            "sk-core".to_string(),
-            "io.ryu.checklist".to_string(),
-            Some("conv-9".to_string()),
-            "wi-abc".to_string(),
-            Some("firewall: prompt_injection".to_string()),
-        );
-        assert_eq!(rec.event_type, EventType::WidgetFollowUp);
-        assert_eq!(rec.event_type.as_str(), "widget_follow_up");
-        assert_eq!(rec.feature.as_deref(), Some("widget"));
-        assert_eq!(rec.command.as_deref(), Some("follow_up"));
-        assert_eq!(rec.session_id.as_deref(), Some("conv-9"));
-        assert_eq!(rec.widget_instance_id.as_deref(), Some("wi-abc"));
-        assert!(rec.duration_ms.is_none());
-    }
-
-    /// §4.4: logging widget rows and querying by `widget_instance_id` returns
-    /// only the rows for that rendered widget.
-    #[test]
-    fn widget_instance_id_filter_returns_only_matching_widget() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-widget-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let config = AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_string(),
-        };
-
-        let logger = AuditLogger::new(&config).expect("logger");
-        logger.log(AuditLogger::make_widget_call_record(
-            "req-w1".to_string(),
-            "sk-core".to_string(),
-            "io.ryu.checklist".to_string(),
-            "checklist.toggle".to_string(),
-            None,
-            Some("conv-9".to_string()),
-            "wi-A".to_string(),
-            5,
-            None,
-        ));
-        logger.log(AuditLogger::make_widget_followup_record(
-            "req-w2".to_string(),
-            "sk-core".to_string(),
-            "io.ryu.checklist".to_string(),
-            Some("conv-9".to_string()),
-            "wi-B".to_string(),
-            None,
-        ));
-        wait_for_rows(&logger, &AuditQuery::default(), 2);
-
-        let wi_a = logger
-            .query(&AuditQuery {
-                widget_instance_id: Some("wi-A".to_string()),
-                ..Default::default()
-            })
-            .expect("query by widget_instance_id");
-        assert_eq!(wi_a.len(), 1);
-        assert_eq!(wi_a[0].request_id, "req-w1");
-        assert_eq!(wi_a[0].widget_instance_id.as_deref(), Some("wi-A"));
-        assert_eq!(wi_a[0].feature.as_deref(), Some("widget"));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn agent_id_filter_returns_only_matching_rows() {
-        let dir = std::env::temp_dir().join(format!("ryu-audit-agent-{}", unique_suffix()));
-        let db_path = dir.join("audit.db");
-        let logger = AuditLogger::new(&AuditConfig {
-            enabled: true,
-            db_path: db_path.to_str().unwrap().to_owned(),
-        })
-        .expect("logger");
-
-        let mut agent_a = sample_record("req-agent-a", None);
-        agent_a.agent_id = Some("agent-a".to_owned());
-        let mut agent_b = sample_record("req-agent-b", None);
-        agent_b.agent_id = Some("agent-b".to_owned());
-        logger.log(agent_a);
-        logger.log(agent_b);
-
-        let rows = wait_for_rows(
-            &logger,
-            &AuditQuery {
-                agent_id: Some("agent-a".to_owned()),
-                ..Default::default()
-            },
-            1,
-        );
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].agent_id.as_deref(), Some("agent-a"));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Cheap unique-ish suffix for temp dirs without pulling extra deps into tests.
-    fn unique_suffix() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    }
-}
+mod tests;

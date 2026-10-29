@@ -71,7 +71,7 @@ fn env_value(key: &str) -> Option<String> {
 }
 
 fn mesh_dir() -> PathBuf {
-    crate::paths::ryu_dir().join("mesh")
+    crate::paths::service_dir("mesh")
 }
 
 /// The local file Tailcat writes through `TAILCAT_ADDR_FILE`.

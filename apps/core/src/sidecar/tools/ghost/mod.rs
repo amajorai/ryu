@@ -8,7 +8,23 @@ pub use process::GhostProcess;
 
 use std::path::PathBuf;
 
-/// Absolute path to the installed Ghost binary (`~/.ryu/bin/ghost[.exe]`).
+/// Ghost's state dir: `<data dir>/services/ghost` (pid file, working dir,
+/// recipes, snapshots). Exported to Ghost as `GHOST_DATA_DIR`.
+pub fn data_dir() -> PathBuf {
+    crate::paths::service_dir("ghost")
+}
+
+/// Ghost's vision models: `<data dir>/models/vision/ghost`. Exported to Ghost as
+/// `GHOST_MODELS_DIR`.
+pub fn models_dir() -> PathBuf {
+    ryu_sidecar_runtime::layout::model_family_dir(
+        &crate::paths::ryu_dir(),
+        ryu_sidecar_runtime::layout::Modality::Vision,
+        "ghost",
+    )
+}
+
+/// Absolute path to the installed Ghost binary (`<data dir>/bin/ghost[.exe]`).
 ///
 /// Single source of truth for where the Ghost binary lives, reused by the
 /// downloader, the lifecycle manager, and the MCP registry built-in (U14) so
@@ -19,7 +35,38 @@ pub fn ghost_bin_path() -> PathBuf {
     } else {
         "ghost"
     };
-    crate::paths::ryu_dir().join("bin").join(name)
+    crate::paths::bin_dir().join(name)
+}
+
+/// Whether `program` (an MCP stdio command after lowering) is the Ghost binary:
+/// the managed `ghost_bin_path()` or the `RYU_GHOST_BIN` override Core seeds.
+fn is_ghost_program(program: &str) -> bool {
+    let program = std::path::Path::new(program.trim());
+    if program == ghost_bin_path() {
+        return true;
+    }
+    std::env::var_os("RYU_GHOST_BIN")
+        .filter(|value| !value.is_empty())
+        .is_some_and(|value| program == std::path::Path::new(&value))
+}
+
+/// Seal env for one MCP stdio spawn: Ghost's component subkey
+/// (`component_child_env(GHOST)`, never the master key) when `program` is the
+/// Ghost binary, nothing for any other server. Core's registry spawns `ghost mcp`
+/// per tool call, so every call needs the key to open the sealed snapshot that
+/// an earlier call wrote. Without a master key Ghost gets nothing and keeps
+/// snapshots in memory only.
+pub fn mcp_seal_env_for(program: &str) -> Vec<(String, String)> {
+    if !is_ghost_program(program) {
+        return Vec::new();
+    }
+    match ryu_crypto::component_child_env(ryu_crypto::components::GHOST) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::warn!("ghost: no seal key for the MCP child ({error})");
+            Vec::new()
+        }
+    }
 }
 
 use std::sync::atomic::Ordering;
@@ -143,13 +190,39 @@ impl Sidecar for GhostManager {
             crate::sidecar::remove_from_version_store("ghost");
 
             if delete_data {
-                if let Some(home) = dirs::home_dir() {
-                    crate::sidecar::remove_dir(&home.join(".ghost")).await;
-                }
+                crate::sidecar::remove_dir(&data_dir()).await;
+                crate::sidecar::remove_dir(&models_dir()).await;
             }
 
             tracing::info!("ghost uninstalled");
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_ghost_binary_gets_the_ghost_subkey() {
+        crate::server::gateway_seal_test_key();
+        let master = std::env::var("RYU_MASTER_KEY").expect("test master key set");
+        let ghost = ghost_bin_path().to_string_lossy().into_owned();
+        let env = mcp_seal_env_for(&ghost);
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "RYU_SEAL_SCOPE" && v == "component:ghost"));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "RYU_SEAL_KEY" && !v.is_empty()));
+        assert!(
+            env.iter().all(|(_, v)| v != &master),
+            "never the master key"
+        );
+
+        for other in ["npx", "/usr/bin/ghostscript", "", "/bin/sh"] {
+            assert!(mcp_seal_env_for(other).is_empty(), "{other:?} got a key");
+        }
     }
 }

@@ -1,9 +1,11 @@
 import { parse, stringify } from "yaml";
+import { z } from "zod";
 import type {
 	Memory,
 	MemoryCategory,
 	MemoryScope,
 } from "@/src/lib/api/memory.ts";
+import { MEMORY_CATEGORIES } from "@/src/lib/api/memory.ts";
 
 /** The folder inside a user-selected repository that Ryu owns for memories. */
 export const MEMORY_GIT_ROOT = "memory";
@@ -29,55 +31,40 @@ export interface ParsedMemoryMarkdown {
 	whenToUse: string | null;
 }
 
-interface MemoryFrontmatter {
-	category?: string;
-	created_at?: number;
-	id?: string;
-	importance?: number;
-	scope?: string;
-	scope_id?: string | null;
-	tags?: string[];
-	type?: string;
-	updated_at?: number;
-	when_to_use?: string | null;
+/** YAML frontmatter is normalized field by field so malformed optional fields
+ * retain the Git format's existing defaults. Only this format's four scopes
+ * are accepted; API-only agent scope remains unsupported here. */
+const memoryFrontmatterSchema = z.object({
+	type: z.literal("memory"),
+	id: z.unknown().optional(),
+	scope: z.unknown().optional(),
+	category: z.unknown().optional(),
+	importance: z.unknown().optional(),
+	scope_id: z.unknown().optional(),
+	when_to_use: z.unknown().optional(),
+	created_at: z.unknown().optional(),
+	updated_at: z.unknown().optional(),
+	tags: z.unknown().optional(),
+});
+const memoryGitScopeSchema = z.enum(["user", "node", "project", "org"]);
+const memoryGitCategorySchema = z.enum(MEMORY_CATEGORIES);
+const memoryIntegerSchema = z.number().refine(Number.isInteger);
+const memoryTagsSchema = z.array(z.unknown());
+type MemoryFrontmatterInput = Parameters<
+	typeof memoryFrontmatterSchema.parse
+>[0];
+
+function ensureInteger(
+	value: MemoryFrontmatterInput,
+	fallback: number
+): number {
+	const parsed = memoryIntegerSchema.safeParse(value);
+	return parsed.success ? parsed.data : fallback;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
-function isMemoryScope(value: string): value is MemoryScope {
-	return (
-		value === "user" ||
-		value === "node" ||
-		value === "project" ||
-		value === "org"
-	);
-}
-
-function isMemoryCategory(value: string): value is MemoryCategory {
-	return (
-		value === "user_fact" ||
-		value === "preference" ||
-		value === "domain_knowledge" ||
-		value === "organization" ||
-		value === "project_context" ||
-		value === "relationship" ||
-		value === "directive" ||
-		value === "procedure" ||
-		value === "event" ||
-		value === "other"
-	);
-}
-
-function ensureInteger(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isInteger(value)
-		? value
-		: fallback;
-}
-
-function normalizeOptionalString(value: unknown): string | null {
-	return typeof value === "string" && value.trim() ? value.trim() : null;
+function normalizeOptionalString(value: MemoryFrontmatterInput): string | null {
+	const parsed = z.string().safeParse(value);
+	return parsed.success && parsed.data.trim() ? parsed.data.trim() : null;
 }
 
 function memoryPath(memory: Memory): string {
@@ -128,7 +115,7 @@ export function exportMemoryGitTree(memories: Memory[]): MemoryGitFile[] {
 	];
 }
 
-function splitFrontmatter(content: string): { body: string; yaml: string } {
+function splitFrontmatter(content: string) {
 	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
 	if (!match) {
 		return { body: "", yaml: "" };
@@ -148,36 +135,44 @@ export function parseMemoryMarkdown(
 	if (!yaml) {
 		return null;
 	}
-	const raw: unknown = parse(yaml);
-	if (!isRecord(raw) || raw.type !== "memory") {
+	const raw: MemoryFrontmatterInput = parse(yaml);
+	const decoded = memoryFrontmatterSchema.safeParse(raw);
+	if (!decoded.success) {
 		return null;
 	}
-	const frontmatter = raw as MemoryFrontmatter;
+	const frontmatter = decoded.data;
 	const id = normalizeOptionalString(frontmatter.id);
 	if (!id || id.includes("/") || id.includes("\\")) {
 		throw new Error(`${path}: memory id is missing or invalid`);
 	}
 	const scopeValue = normalizeOptionalString(frontmatter.scope) ?? "user";
-	if (!isMemoryScope(scopeValue)) {
+	const scope = memoryGitScopeSchema.safeParse(scopeValue);
+	if (!scope.success) {
 		throw new Error(`${path}: unsupported memory scope`);
 	}
 	const categoryValue =
 		normalizeOptionalString(frontmatter.category) ?? "user_fact";
-	if (!isMemoryCategory(categoryValue)) {
+	const category = memoryGitCategorySchema.safeParse(categoryValue);
+	if (!category.success) {
 		throw new Error(`${path}: unsupported memory category`);
 	}
 	const contentText = body.trim();
 	if (!contentText) {
 		throw new Error(`${path}: memory content is empty`);
 	}
-	const tags = Array.isArray(frontmatter.tags)
-		? frontmatter.tags
-				.filter((tag): tag is string => typeof tag === "string")
-				.map((tag) => tag.trim())
-				.filter(Boolean)
-		: [];
+	const decodedTags = memoryTagsSchema.safeParse(frontmatter.tags);
+	const tags: string[] = [];
+	if (decodedTags.success) {
+		for (const tag of decodedTags.data) {
+			const text = normalizeOptionalString(tag);
+			if (text) {
+				tags.push(text);
+			}
+		}
+	}
+
 	return {
-		category: categoryValue,
+		category: category.data,
 		content: contentText,
 		createdAt: ensureInteger(frontmatter.created_at, 0) || undefined,
 		id,
@@ -187,7 +182,7 @@ export function parseMemoryMarkdown(
 		),
 		path,
 		tags,
-		scope: scopeValue,
+		scope: scope.data,
 		scopeId: normalizeOptionalString(frontmatter.scope_id),
 		updatedAt: ensureInteger(frontmatter.updated_at, 0) || undefined,
 		whenToUse: normalizeOptionalString(frontmatter.when_to_use),

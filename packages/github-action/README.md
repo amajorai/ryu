@@ -74,9 +74,80 @@ filesystem, so set `cwd` only when the targeted Core process can access that pat
 Direct calls require an agent because Core uses that agent's configured tool
 allowlist. A denied or failed call fails the action.
 
+## Gate a pull request on evals
+
+`operation: eval` replays a dataset through the node's Gateway eval runner, compares the
+scores with `eval-threshold`, and fails the job on a regression. The dataset is a JSON,
+JSONL, or CSV file in the checked-out repository; each row needs a `prompt` (or `input`,
+`question`, `query`) and may carry an `expected` answer, `context`, `id`, and Gateway
+case fields such as `assertions` and `evaluators`. Extra CSV columns become `{{vars}}`.
+
+```yaml
+- uses: actions/checkout@v4
+- uses: amajorai/ryu@v1
+  id: evals
+  with:
+    node-url: ${{ secrets.RYU_NODE_URL }}
+    node-token: ${{ secrets.RYU_NODE_TOKEN }}
+    operation: eval
+    agent: support-agent
+    eval-dataset: evals/support.jsonl
+    eval-scorers: answer_relevance, toxicity
+    eval-threshold: |
+      0.8
+      overall=0.7
+    eval-junit-file: reports/ryu-eval.xml
+
+- if: always()
+  run: echo '${{ steps.evals.outputs.eval-passed }}'
+```
+
+A bare threshold applies to every listed scorer (or to `overall` when none is listed);
+`scorer=n` sets one. Scorers are offline Gateway catalog evaluators or the built-in
+metrics `overall`, `assertions`, `policy`, `substring`, and `latency`. Negative-signal
+evaluators such as `toxicity` are inverted, so every threshold reads "at least this
+good". A scorer that never executed fails its threshold. The step summary lists each
+threshold check and the failing case ids (or truncated prompts), never response text.
+
+## Export Ryu Vault secrets
+
+List vault values in `secrets` (one per line: `NAME`, `/folder/NAME`, `ENV:NAME`, or
+`ENV:/folder/NAME`). The action logs in with a Ryu Vault machine identity, reads the
+values from `/api/vault/agent/export`, masks each one, and exports it as an
+environment variable named after the secret for later steps. The short-lived vault
+token is revoked when the values have been read.
+
+With GitHub OIDC (no stored credential), create a JWT machine identity whose bound
+claims name your repository, then:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+steps:
+  - uses: amajorai/ryu@v1
+    with:
+      node-url: ${{ secrets.RYU_NODE_URL }}
+      vault-jwt-identity: github-deploy
+      vault-jwt-audience: ryu
+      secrets: |
+        DATABASE_URL
+        prod:/stripe/STRIPE_SECRET_KEY
+
+  - run: ./deploy.sh   # DATABASE_URL and STRIPE_SECRET_KEY are set and masked
+```
+
+With AppRole, pass `vault-role-id` and `vault-secret-id` (store the secret id as a
+GitHub secret) instead of `vault-jwt-identity`. Machine tokens read node-scoped
+values that the identity's policies allow; a listed value the token cannot read
+fails the step before anything is exported. A vault-only `setup` step does not need
+`node-token`. The `vault-secrets` output lists the exported names, never values.
+
 ## Inputs and outputs
 
 The complete input/output contract is declared in the repository-root `action.yml`.
 Tokens are masked before requests run and are never logged by the action. The optional
-`write-summary` report contains only operation/node metadata; response text is exposed
-through `response`, `result-json`, and `response-file`.
+`write-summary` report contains operation/node metadata and, for `eval`, the threshold
+table and failing case names; response text is exposed only through `response`,
+`result-json`, `eval-json`, and `response-file`.

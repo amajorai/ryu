@@ -165,6 +165,7 @@ pub struct SkillDistributionResult {
 
 #[derive(Debug, Clone)]
 pub struct DistributionContext {
+    /// Where the distribution ledger lives (Core: `<data dir>/state`).
     pub data_dir: PathBuf,
     pub home_dir: PathBuf,
     pub environment: HashMap<String, String>,
@@ -174,7 +175,7 @@ impl DistributionContext {
     pub fn current() -> Result<Self> {
         let home_dir = dirs::home_dir().context("home directory is unavailable")?;
         Ok(Self {
-            data_dir: crate::paths::ryu_dir(),
+            data_dir: crate::paths::state_dir(),
             home_dir,
             environment: std::env::vars().collect(),
         })
@@ -533,7 +534,9 @@ pub fn distribute_skill(
                 .get_mut(target_id)
                 .and_then(|skills| skills.get_mut(skill_id))
             {
-                if entry.recovery_path.take().is_some() || entry.recovery_hash.take().is_some() {
+                let cleared_path = entry.recovery_path.take().is_some();
+                let cleared_hash = entry.recovery_hash.take().is_some();
+                if cleared_path || cleared_hash {
                     target_ledger_changed = true;
                 }
             }
@@ -1713,7 +1716,7 @@ mod tests {
     #[test]
     fn agent_targets_put_featured_agents_first_and_resolve_only_registry_paths() {
         let home = TempDir::new().expect("home");
-        fs::create_dir_all(home.path().join(".codex")).expect("config parent");
+        fs::create_dir_all(home.path().join(".agents")).expect("config parent");
 
         let targets = list_agent_targets(home.path(), &HashMap::new()).expect("targets");
         let first_non_featured = targets
@@ -1729,7 +1732,13 @@ mod tests {
             .expect("codex");
         assert_eq!(
             codex.resolved_global_path.as_deref(),
-            Some(home.path().join(".codex/skills").to_string_lossy().as_ref())
+            Some(
+                home.path()
+                    .join(".agents")
+                    .join("skills")
+                    .to_string_lossy()
+                    .as_ref()
+            )
         );
         assert!(codex.detected);
         assert!(codex.selectable);
@@ -1932,6 +1941,11 @@ mod tests {
         );
     }
 
+    // Unix only: the race writes through a handle held across the destination
+    // being moved aside. Windows refuses to move a directory while a file inside
+    // it is open, so there the same setup is covered by
+    // `destination_held_open_fails_without_touching_it` instead.
+    #[cfg(unix)]
     #[test]
     fn edit_after_backup_rehash_is_preserved_in_a_recovery_backup() {
         let fixture = DistributionFixture::new();
@@ -1967,6 +1981,32 @@ mod tests {
         assert!(fixture
             .read_target("codex", "SKILL.md")
             .contains("Updated."));
+    }
+
+    /// Windows twin of `edit_after_backup_rehash_is_preserved_in_a_recovery_backup`:
+    /// while another process (an editor) holds a destination file open, the
+    /// destination cannot be moved aside, so the update must fail cleanly and leave
+    /// the installed copy exactly as it was.
+    #[cfg(windows)]
+    #[test]
+    fn destination_held_open_fails_without_touching_it() {
+        let fixture = DistributionFixture::new();
+        fixture.write_source("SKILL.md", SKILL_MD);
+        fixture.distribute(&["codex"]);
+        fixture.write_source("SKILL.md", "---\nname: Demo\n---\nUpdated.\n");
+        let _open_writer = fs::OpenOptions::new()
+            .write(true)
+            .open(fixture.target_dir("codex").join("SKILL.md"))
+            .expect("open destination writer");
+
+        let result = fixture.distribute(&["codex"]);
+
+        assert_eq!(result.targets[0].status, DistributionStatus::Failed);
+        assert!(result.targets[0]
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("moving existing destination")));
+        assert_eq!(fixture.read_target("codex", "SKILL.md"), SKILL_MD);
     }
 
     #[test]
@@ -2046,6 +2086,32 @@ mod tests {
         assert!(fixture
             .read_target("codex", "SKILL.md")
             .contains("Updated twice."));
+    }
+
+    #[test]
+    fn missing_recovery_clears_both_fields_even_when_destination_conflicts() {
+        let fixture = DistributionFixture::new();
+        let first_update = "---\nname: Demo\n---\nUpdated once.\n";
+        fixture.write_source("SKILL.md", SKILL_MD);
+        fixture.distribute(&["codex"]);
+        fixture.write_source("SKILL.md", first_update);
+        fixture.distribute(&["codex"]);
+        let recovery = fixture.recovery_dirs("codex")[0].clone();
+        fs::remove_dir_all(recovery).expect("resolve fixture recovery");
+        fixture.write_target("codex", "SKILL.md", "external edit\n");
+        fixture.write_source("SKILL.md", "---\nname: Demo\n---\nUpdated twice.\n");
+
+        let conflict = fixture.distribute(&["codex"]);
+        let ledger = fixture.ledger_value();
+        assert_eq!(conflict.targets[0].status, DistributionStatus::Conflict);
+        assert!(ledger["codex"]["demo"]["recoveryPath"].is_null());
+        assert!(ledger["codex"]["demo"]["recoveryHash"].is_null());
+        assert_eq!(fixture.read_target("codex", "SKILL.md"), "external edit\n");
+
+        fixture.write_target("codex", "SKILL.md", first_update);
+        let updated = fixture.distribute(&["codex"]);
+        assert_eq!(updated.targets[0].status, DistributionStatus::Copied);
+        assert_eq!(fixture.recovery_dirs("codex").len(), 1);
     }
 
     #[test]
@@ -2224,9 +2290,10 @@ mod tests {
         fixture.write_source("SKILL.md", SKILL_MD);
         let external = fixture.root.path().join("external-target");
         fs::create_dir_all(&external).expect("external target");
-        let config = fixture.context.home_dir.join(".codex");
-        fs::create_dir_all(&config).expect("codex config");
-        symlink(&external, config.join("skills")).expect("target symlink");
+        let target_root = fixture.target_root("codex");
+        let config = target_root.parent().expect("codex config");
+        fs::create_dir_all(config).expect("codex config");
+        symlink(&external, &target_root).expect("target symlink");
 
         let result = fixture.distribute(&["codex"]);
 
@@ -2339,7 +2406,9 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("skill id"));
-        assert!(!fixture.context.home_dir.join(".codex/escape").exists());
+        let config = fixture.target_root("codex");
+        let config = config.parent().expect("codex config");
+        assert!(!config.join("escape").exists());
     }
 
     #[test]

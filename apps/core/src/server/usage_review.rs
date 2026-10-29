@@ -205,13 +205,22 @@ struct ConversationInput {
     messages: Vec<StoredMessage>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Period {
-    from: i64,
-    to: i64,
+/// A validated half-open `[from, to)` window in Unix epoch milliseconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Period {
+    pub(crate) from: i64,
+    pub(crate) to: i64,
 }
 
 impl Period {
+    /// The window of `length_ms` ending (exclusively) at `to`, clamped at epoch 0.
+    pub(crate) fn ending_at(to: i64, length_ms: i64) -> Self {
+        Self {
+            from: to.saturating_sub(length_ms).max(0),
+            to,
+        }
+    }
+
     fn parse(query: ReviewQuery, now: i64) -> Result<Self, String> {
         let to = query.to.unwrap_or(now);
         let from = query.from.unwrap_or(to.saturating_sub(DEFAULT_PERIOD_MS));
@@ -306,14 +315,7 @@ pub async fn get_review(
 ) -> axum::response::Response {
     let settings = load_settings(&state.preferences).await;
     if !settings.enabled {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "usage_review_disabled",
-                "message": "Enable usage review in /api/usage-review/settings first"
-            })),
-        )
-            .into_response();
+        return disabled_response();
     }
     let now = Utc::now().timestamp_millis();
     let period = match Period::parse(query, now) {
@@ -323,8 +325,38 @@ pub async fn get_review(
         }
     };
 
-    let (user_id, org_id, team_ids_json, node_bound) = super::tenancy_filter_args(&caller);
-    let summaries = match state
+    match collect_review(&state, &caller, settings, period).await {
+        Ok(review) => Json(review).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+/// The `usage_review_disabled` refusal shared by every surface that projects
+/// usage-review data (this route and the Memory Reflect dashboard).
+pub(crate) fn disabled_response() -> axum::response::Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": "usage_review_disabled",
+            "message": "Enable usage review in /api/usage-review/settings first"
+        })),
+    )
+        .into_response()
+}
+
+/// Read the caller-visible conversations and the included activity for
+/// `period`, applying the persisted privacy exclusions, and aggregate them.
+///
+/// This is the single data path for usage reviews: the Memory Reflect dashboard
+/// projects from the same output so the two surfaces can never disagree.
+pub(crate) async fn collect_review(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    settings: UsageReviewSettings,
+    period: Period,
+) -> anyhow::Result<UsageReview> {
+    let (user_id, org_id, team_ids_json, node_bound) = super::tenancy_filter_args(caller);
+    let summaries = state
         .conversations
         .list_conversations_visible_for_teams(
             user_id.as_deref(),
@@ -332,11 +364,7 @@ pub async fn get_review(
             node_bound,
             team_ids_json.as_deref(),
         )
-        .await
-    {
-        Ok(summaries) => summaries,
-        Err(error) => return internal_error(error),
-    };
+        .await?;
     let excluded: HashSet<&str> = settings
         .excluded_conversation_ids
         .iter()
@@ -347,16 +375,13 @@ pub async fn get_review(
         if excluded.contains(summary.id.as_str()) {
             continue;
         }
-        let messages: Vec<StoredMessage> =
-            match state.conversations.get_active_messages(&summary.id).await {
-                Ok(messages) => messages
-                    .into_iter()
-                    .filter(|message| {
-                        message.created_at >= period.from && message.created_at < period.to
-                    })
-                    .collect(),
-                Err(error) => return internal_error(error),
-            };
+        let messages: Vec<StoredMessage> = state
+            .conversations
+            .get_active_messages(&summary.id)
+            .await?
+            .into_iter()
+            .filter(|message| message.created_at >= period.from && message.created_at < period.to)
+            .collect();
         if !messages.is_empty() {
             conversations.push(ConversationInput::from_summary(summary, messages));
         }
@@ -364,20 +389,15 @@ pub async fn get_review(
 
     let activity_start = period.from / 1000;
     let activity_end = period.to.saturating_add(999) / 1000;
-    let activities = match state
+    let activities = state
         .activity
         .list_between(activity_start, activity_end, MAX_ACTIVITY_ITEMS)
-        .await
-    {
-        Ok(items) => items
-            .into_iter()
-            .filter(|item| activity_is_included(item, period, &settings))
-            .collect(),
-        Err(error) => return internal_error(error),
-    };
+        .await?
+        .into_iter()
+        .filter(|item| activity_is_included(item, period, &settings))
+        .collect();
 
-    let review = build_review(period, settings, conversations, activities);
-    Json(review).into_response()
+    Ok(build_review(period, settings, conversations, activities))
 }
 
 fn internal_error(error: anyhow::Error) -> axum::response::Response {
@@ -710,6 +730,7 @@ mod tests {
             widget_instance_id: None,
             origin_server: None,
             parts: None,
+            metadata: None,
             parent_message_id: None,
             interrupted: false,
             sibling_index: 0,

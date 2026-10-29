@@ -24,16 +24,11 @@
 //!     refresh, then denies if still unknown.
 //!   - Any verification failure returns an error (the caller is anonymous,
 //!     never spoofable-as-privileged).
-//!
-//! Staging note: stage 1 only makes this module compile. Wiring into middleware
-//! and handlers happens in stage 3, so several items are intentionally unused
-//! for now.
-#![allow(dead_code)]
 
 pub mod permissions;
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -81,6 +76,16 @@ pub enum OrgRole {
 }
 
 impl OrgRole {
+    /// Lower-case name, as used in `role:<name>` policy subjects.
+    pub fn label(self) -> &'static str {
+        match self {
+            OrgRole::Owner => "owner",
+            OrgRole::Admin => "admin",
+            OrgRole::Member => "member",
+            OrgRole::Viewer => "viewer",
+        }
+    }
+
     /// Privilege rank: owner=3 … viewer=0. Mirrors `ROLE_RANK`.
     pub fn rank(self) -> u8 {
         match self {
@@ -154,12 +159,59 @@ pub struct VerifiedClaims {
     /// Stable Better Auth user id (the JWT `id`/`sub`).
     pub user_id: String,
     pub email: Option<String>,
+    /// Whether the issuer asserted `email_verified: true` for `email`. Anything
+    /// else (an absent claim, `false`, or a non-boolean value) is `false`, so a
+    /// token minted before the claim existed never counts as verified.
+    pub email_verified: bool,
     /// Every org the user belongs to, as embedded by the `definePayload` hook.
     pub orgs: Vec<OrgMembership>,
     /// Every team the user belongs to, across all of their orgs. Empty for
     /// tokens minted before teams were embedded — absence means "no team
     /// memberships", never an error.
     pub teams: Vec<TeamMembership>,
+    /// Rollout flags the control plane evaluated ON for this user when the token
+    /// was minted (the `ryu_flags` claim: the catalog's `coreClaim` flags in
+    /// `packages/auth/src/lib/feature-flags.ts`). Empty for tokens minted
+    /// without it, so absence means "every flag off" — fail closed. Stale for at
+    /// most the token lifetime (Better Auth's JWT default is 15 minutes).
+    pub feature_flags: BTreeSet<String>,
+    /// The organization `feature_flags` was evaluated for (the `ryu_flags_org`
+    /// claim): the session's active org at mint, falling back to the user's
+    /// earliest membership, exactly as `/subscription-status` resolves it.
+    /// `None` when the evaluation had no org context (the user belongs to no
+    /// org, or the token predates the claim), in which case only user-scoped
+    /// audiences could have contributed to `feature_flags`.
+    pub feature_flags_org: Option<String>,
+    /// Plan limits the control plane signed for this user (the `ryu_limits`
+    /// claim), evaluated for [`Self::feature_flags_org`]. `None` when the claim
+    /// is missing or malformed: Core then falls back to the Box service's own
+    /// limits, so a missing claim never refuses work by itself.
+    pub limits: Option<VerifiedLimits>,
+}
+
+/// The signed `ryu_limits` claim: `{ "boxConcurrency": <u32> }`, the running
+/// session-Box cap of the user's plan in the org it was evaluated for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerifiedLimits {
+    /// Most session Boxes the caller may have running at once.
+    pub box_concurrency: u32,
+}
+
+/// [`VerifiedLimits`] of a verified token with the org they were evaluated for
+/// (the same org as its rollout flags, `ryu_flags_org`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedPlanLimits {
+    pub limits: VerifiedLimits,
+    pub org: Option<String>,
+}
+
+/// The rollout flags of a verified token together with the org they were
+/// evaluated for. See [`VerifiedClaims::feature_flags`] and
+/// [`VerifiedClaims::feature_flags_org`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VerifiedFeatureFlags {
+    pub keys: BTreeSet<String>,
+    pub org: Option<String>,
 }
 
 /// A caller's verified identity narrowed to THIS node's org. `org_id`/`role`
@@ -169,13 +221,34 @@ pub struct VerifiedClaims {
 #[derive(Debug, Clone)]
 pub struct VerifiedCaller {
     pub user_id: String,
+    /// The token's `email` claim. Fine for display and audit attribution; use
+    /// [`VerifiedCaller::verified_email`] for anything that grants access by
+    /// address, because an identity provider can sign in an unproven mailbox.
     pub email: Option<String>,
+    /// Whether the issuer proved the caller owns `email` (see
+    /// [`VerifiedClaims::email_verified`]).
+    pub email_verified: bool,
     pub org_id: Option<String>,
     pub role: OrgRole,
     /// The caller's teams, narrowed to `org_id`. Teams owned by any other org are
     /// dropped, so a team id minted in a different org can never satisfy a
     /// team-scoped check on this node. Empty whenever `org_id` is `None`.
     pub teams: Vec<TeamMembership>,
+}
+
+impl VerifiedCaller {
+    /// The caller's email only when the issuer marked it verified. This is the
+    /// address to match against email-addressed grants (named editors, invited
+    /// viewers): an unverified address is a claim, not proof of mailbox ownership.
+    pub fn verified_email(&self) -> Option<&str> {
+        if !self.email_verified {
+            return None;
+        }
+        self.email
+            .as_deref()
+            .map(str::trim)
+            .filter(|email| !email.is_empty())
+    }
 }
 
 /// The access level [`can_access`] resolves for a resource.
@@ -474,6 +547,169 @@ fn cache() -> &'static JwksCache {
     CACHE.get_or_init(JwksCache::new)
 }
 
+/// Pin a verification key in the process-wide JWKS cache, for tests that need a
+/// real signed token to pass the full offline verification path (signature,
+/// `iss`, `aud`, `exp`). Marks the cache freshly fetched so no test ever reaches
+/// the network, and returns the issuer/audience the token must carry.
+#[cfg(test)]
+pub(crate) async fn install_test_verification_key(kid: &str, key: DecodingKey) -> String {
+    let mut inner = cache().inner.write().await;
+    inner.keys.insert(kid.to_owned(), Arc::new(key));
+    inner.fetched_at = Some(Instant::now());
+    inner.last_attempt = Some(Instant::now());
+    base_url()
+}
+
+/// Seconds of validity a cached minted JWT must still have to be reused.
+const MINT_REUSE_MARGIN_SECS: i64 = 60;
+
+/// The most recent JWT minted by [`mint_user_jwt`], keyed by the session it was
+/// exchanged from so a sign-out or account switch never reuses another identity.
+struct MintedJwt {
+    session_token: String,
+    token: String,
+    expires_at: i64,
+    /// When this token was minted (unix seconds).
+    minted_at: i64,
+    /// Whether the token names the session it was minted from (`ryu_sid`).
+    /// The control plane binds a forwarded token to that session, so a token
+    /// minted before it stamped the claim is refused (`user_jwt_invalid`)
+    /// however young it is.
+    session_bound: bool,
+}
+
+fn minted_jwt_cache() -> &'static tokio::sync::Mutex<Option<MintedJwt>> {
+    static CACHE: OnceLock<tokio::sync::Mutex<Option<MintedJwt>>> = OnceLock::new();
+    CACHE.get_or_init(|| tokio::sync::Mutex::new(None))
+}
+
+/// Drop the cached minted JWT so the next [`mint_user_jwt`] asks the control
+/// plane again. The org claims are decided at mint time, so a session that
+/// has just proved a second factor (`ryu secrets confirm`) needs a new token
+/// before an organization that requires two-factor appears in it.
+pub async fn forget_minted_user_jwt() {
+    *minted_jwt_cache().lock().await = None;
+}
+
+/// [`forget_minted_user_jwt`], but only when the cached token is at least
+/// `min_age_secs` old. A refusal the token keeps drawing (an organization
+/// policy that keeps leaving the organization out) then re-mints at most once
+/// per that interval instead of on every request.
+pub async fn forget_minted_user_jwt_older_than(min_age_secs: i64) {
+    forget_minted_user_jwt_when(|entry, now| {
+        minted_long_enough_ago(entry.minted_at, now, min_age_secs)
+    })
+    .await;
+}
+
+/// [`forget_minted_user_jwt_older_than`], and also, whatever its age, a
+/// cached token that names no session (`ryu_sid`). Such a token was minted
+/// before the control plane started binding forwarded tokens to their
+/// session, so it is refused on every request until a re-mint replaces it.
+pub async fn forget_minted_user_jwt_if_unbound_or_older_than(min_age_secs: i64) {
+    forget_minted_user_jwt_when(|entry, now| {
+        unbound_or_old_enough(entry.session_bound, entry.minted_at, now, min_age_secs)
+    })
+    .await;
+}
+
+fn unbound_or_old_enough(session_bound: bool, minted_at: i64, now: i64, min_age_secs: i64) -> bool {
+    !session_bound || minted_long_enough_ago(minted_at, now, min_age_secs)
+}
+
+async fn forget_minted_user_jwt_when(should_drop: impl Fn(&MintedJwt, i64) -> bool) {
+    let mut cached = minted_jwt_cache().lock().await;
+    let now = chrono::Utc::now().timestamp();
+    if cached.as_ref().is_some_and(|entry| should_drop(entry, now)) {
+        *cached = None;
+    }
+}
+
+/// Whether a (verified) token carries a non-empty `ryu_sid` claim. Reads the
+/// payload only; the signature was checked when the token was minted.
+fn token_names_session(token: &str) -> bool {
+    use base64::Engine as _;
+    let Some(payload) = token.split('.').nth(1) else {
+        return false;
+    };
+    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload) else {
+        return false;
+    };
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|claims| {
+            claims
+                .get("ryu_sid")
+                .and_then(|sid| sid.as_str())
+                .map(str::to_owned)
+        })
+        .is_some_and(|sid| !sid.is_empty())
+}
+
+fn minted_long_enough_ago(minted_at: i64, now: i64, min_age_secs: i64) -> bool {
+    now.saturating_sub(minted_at) >= min_age_secs
+}
+
+/// Exchange a Better Auth session token for the short-lived user JWT Core
+/// verifies offline, returning the token and its validated `exp`.
+///
+/// This lets surfaces that hold no cloud session of their own (the CLI, Island,
+/// browser extension and Raycast) prove WHO is calling a shared node: their local
+/// Core already holds the signed-in account's session and brokers the exchange.
+/// The token is verified with the same offline path every request uses before it
+/// is handed out, so a misconfigured issuer fails here rather than as a silent
+/// anonymous downgrade on the target node. The mutex also single-flights
+/// concurrent refreshes.
+pub async fn mint_user_jwt(session_token: &str) -> Result<(String, i64), AuthError> {
+    let mut cached = minted_jwt_cache().lock().await;
+    let now = chrono::Utc::now().timestamp();
+    if let Some(entry) = cached.as_ref() {
+        if entry.session_token == session_token && entry.expires_at - MINT_REUSE_MARGIN_SECS > now {
+            return Ok((entry.token.clone(), entry.expires_at));
+        }
+    }
+
+    let raw_url = format!("{}/api/auth/token", base_url());
+    let url = reqwest::Url::parse(&raw_url)
+        .map_err(|e| AuthError::JwksFetch(format!("invalid base URL: {e}")))?;
+    let host_is_loopback = url.host_str().is_some_and(is_loopback_host);
+    // The session token is a full credential; never send it over plain HTTP to a
+    // routable host.
+    if url.scheme() != "https" && !host_is_loopback {
+        return Err(AuthError::InsecureJwksUrl(raw_url));
+    }
+    let resp = cache()
+        .http
+        .get(url)
+        .bearer_auth(session_token)
+        .send()
+        .await
+        .map_err(|e| AuthError::JwksFetch(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(AuthError::JwksFetch(format!(
+            "token exchange status {}",
+            resp.status()
+        )));
+    }
+    #[derive(Deserialize)]
+    struct TokenResponse {
+        token: String,
+    }
+    let body: TokenResponse = resp
+        .json()
+        .await
+        .map_err(|e| AuthError::JwksParse(e.to_string()))?;
+    let (_, expires_at) = verify_jwt_with_expiry(&body.token).await?;
+    *cached = Some(MintedJwt {
+        session_token: session_token.to_owned(),
+        token: body.token.clone(),
+        expires_at,
+        minted_at: chrono::Utc::now().timestamp(),
+        session_bound: token_names_session(&body.token),
+    });
+    Ok((body.token, expires_at))
+}
+
 /// Extract a JWK's `kid` from its common parameters.
 fn jwk_kid(jwk: &Jwk) -> Option<String> {
     jwk.common.key_id.clone()
@@ -482,8 +718,8 @@ fn jwk_kid(jwk: &Jwk) -> Option<String> {
 // ── JWT verification ─────────────────────────────────────────────────────────
 
 /// Raw JWT payload shape. Better Auth's `definePayload` embeds `id`, `email`,
-/// `orgs: [{ id, role }]` and `teams: [{ id, org, role }]`; `sub` is the standard
-/// subject fallback.
+/// `email_verified`, `orgs: [{ id, role }]` and `teams: [{ id, org, role }]`;
+/// `sub` is the standard subject fallback.
 #[derive(Debug, Deserialize)]
 struct RawClaims {
     #[serde(default)]
@@ -492,14 +728,49 @@ struct RawClaims {
     sub: Option<String>,
     #[serde(default)]
     email: Option<String>,
+    /// OIDC-style mailbox proof for `email`. Only a JSON `true` counts; any other
+    /// value decodes as unverified instead of rejecting the whole token, and an
+    /// absent claim (tokens minted before it existed) is unverified too.
+    #[serde(default, deserialize_with = "deserialize_strict_true")]
+    email_verified: bool,
     #[serde(default)]
     orgs: Vec<RawOrg>,
     /// Defaulted so every token minted before teams were embedded still verifies.
     #[serde(default)]
     teams: Vec<RawTeam>,
+    /// Enabled rollout flags. Lenient: a missing or malformed claim (or any
+    /// non-string entry) contributes nothing instead of rejecting the token, so
+    /// a minter bug can only close a flag, never sign a user out.
+    #[serde(default, rename = "ryu_flags", deserialize_with = "lenient_flag_keys")]
+    ryu_flags: BTreeSet<String>,
+    /// The org `ryu_flags` was evaluated for. Lenient like `ryu_flags`: anything
+    /// but a non-empty string reads as "no org context".
+    #[serde(
+        default,
+        rename = "ryu_flags_org",
+        deserialize_with = "lenient_flag_org"
+    )]
+    ryu_flags_org: Option<String>,
+    /// Plan limits (`{ "boxConcurrency": n }`). Lenient: anything else reads as
+    /// no claim, so a minter bug cannot sign a user out.
+    #[serde(default, rename = "ryu_limits", deserialize_with = "lenient_limits")]
+    ryu_limits: Option<VerifiedLimits>,
     /// Required by the live-session boundary as well as the handshake validator.
     #[serde(default)]
     exp: Option<i64>,
+}
+
+/// Decode a claim as `true` only when it is the JSON boolean `true`. A string
+/// `"true"`, a number, or `null` is unverified (fail-closed) without failing the
+/// token, so a malformed optional claim cannot lock a user out of Core.
+fn deserialize_strict_true<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(matches!(
+        serde_json::Value::deserialize(deserializer)?,
+        serde_json::Value::Bool(true)
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -524,22 +795,62 @@ struct RawTeam {
     role: String,
 }
 
-/// Verify a Better Auth JWT offline and return its claims.
+/// Keep only the non-empty string entries of a flag-claim array; anything else
+/// (an object, a number, `null`) reads as no flags.
+fn lenient_flag_keys<'de, D>(deserializer: D) -> Result<BTreeSet<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::Array(entries) => entries
+            .into_iter()
+            .filter_map(|entry| match entry {
+                serde_json::Value::String(key) if !key.is_empty() && key.len() <= 128 => Some(key),
+                _ => None,
+            })
+            .collect(),
+        _ => BTreeSet::new(),
+    })
+}
+
+/// Keep a non-empty string org id; anything else (`null`, a number, an object,
+/// an empty or oversized string) reads as no org context.
+fn lenient_flag_org<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::String(org) if !org.is_empty() && org.len() <= 128 => Some(org),
+        _ => None,
+    })
+}
+
+/// Keep a `ryu_limits` object whose `boxConcurrency` is a non-negative integer
+/// that fits in `u32`; anything else (absent, `null`, a string, a negative or
+/// fractional number) reads as no claim.
+fn lenient_limits<'de, D>(deserializer: D) -> Result<Option<VerifiedLimits>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .get("boxConcurrency")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|cap| u32::try_from(cap).ok())
+        .map(|box_concurrency| VerifiedLimits { box_concurrency }))
+}
+
+/// Verify a Better Auth JWT offline and return its claims plus its validated
+/// expiration timestamp (for transports that outlive the request that
+/// authenticated them, such as WebSockets).
 ///
 /// Steps (all fail-closed): decode the header and REJECT unless `alg == EdDSA`;
 /// select the JWKS key by `kid` (refresh-on-unknown); then validate the
 /// signature, `exp`, `iss` (== BASE_URL) and `aud` (== BASE_URL). On success the
-/// `orgs` membership array is returned for org narrowing.
-pub async fn verify_jwt(token: &str) -> Result<VerifiedClaims, AuthError> {
-    verify_jwt_with_expiry(token)
-        .await
-        .map(|(claims, _)| claims)
-}
-
-/// Verify a Better Auth JWT and retain its validated expiration timestamp for
-/// transports that outlive the request that authenticated them (WebSockets).
-/// The returned timestamp is taken from the same signature- and claim-validated
-/// decode as [`verify_jwt`], never from an untrusted payload parse.
+/// `orgs` membership array is returned for org narrowing. The timestamp is taken
+/// from the same validated decode, never from an untrusted payload parse.
 pub async fn verify_jwt_with_expiry(token: &str) -> Result<(VerifiedClaims, i64), AuthError> {
     let header = decode_header(token).map_err(|_| AuthError::Malformed)?;
     // Defense in depth: explicit alg check rejects `none`/confusion before we
@@ -596,11 +907,42 @@ pub async fn verify_jwt_with_expiry(token: &str) -> Result<(VerifiedClaims, i64)
         VerifiedClaims {
             user_id,
             email: claims.email,
+            email_verified: claims.email_verified,
             orgs,
             teams,
+            feature_flags: claims.ryu_flags,
+            feature_flags_org: claims.ryu_flags_org,
+            limits: claims.ryu_limits,
         },
         expires_at,
     ))
+}
+
+/// The enabled rollout flags carried by a user JWT, with the org they were
+/// evaluated for, or `None` when the token does not verify (fail closed). Used by gates that hold the request's already
+/// verified raw token (`server::VerifiedUserJwt` / `ResolvedAuthorization`)
+/// rather than widening [`VerifiedCaller`]; verification is offline against the
+/// cached JWKS, so this re-check is cheap and also re-applies `exp`.
+pub async fn verified_feature_flags(token: &str) -> Option<VerifiedFeatureFlags> {
+    verify_jwt_with_expiry(token)
+        .await
+        .ok()
+        .map(|(claims, _)| VerifiedFeatureFlags {
+            keys: claims.feature_flags,
+            org: claims.feature_flags_org,
+        })
+}
+
+/// The signed plan limits carried by a user JWT, with the org they were
+/// evaluated for. `None` when the token does not verify or carries no
+/// `ryu_limits` claim. Offline against the cached JWKS, like
+/// [`verified_feature_flags`].
+pub async fn verified_limits(token: &str) -> Option<VerifiedPlanLimits> {
+    let (claims, _) = verify_jwt_with_expiry(token).await.ok()?;
+    Some(VerifiedPlanLimits {
+        limits: claims.limits?,
+        org: claims.feature_flags_org,
+    })
 }
 
 /// Translate a `jsonwebtoken` error into an [`AuthError`], preserving the
@@ -650,6 +992,7 @@ pub fn to_caller_for_org(claims: &VerifiedClaims, node_org_id: Option<&str>) -> 
     VerifiedCaller {
         user_id: claims.user_id.clone(),
         email: claims.email.clone(),
+        email_verified: claims.email_verified,
         org_id,
         role,
         teams,
@@ -751,6 +1094,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_token_names_its_session_only_with_a_non_empty_ryu_sid() {
+        use base64::Engine as _;
+        let token = |claims: serde_json::Value| {
+            let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+            format!(
+                "{}.{}.sig",
+                engine.encode(br#"{"alg":"EdDSA"}"#),
+                engine.encode(claims.to_string())
+            )
+        };
+        assert!(token_names_session(&token(
+            serde_json::json!({ "sub": "u", "ryu_sid": "s1" })
+        )));
+        assert!(!token_names_session(&token(
+            serde_json::json!({ "sub": "u" })
+        )));
+        assert!(!token_names_session(&token(
+            serde_json::json!({ "ryu_sid": "" })
+        )));
+        assert!(!token_names_session(&token(
+            serde_json::json!({ "ryu_sid": 7 })
+        )));
+        assert!(!token_names_session("not-a-jwt"));
+        assert!(!token_names_session("a.!!!.c"));
+    }
+
+    #[test]
+    fn an_unbound_token_is_dropped_on_a_refusal_whatever_its_age() {
+        // A token minted before the control plane bound tokens to sessions.
+        assert!(unbound_or_old_enough(false, 1_000, 1_001, 60));
+        // A bound token only once it is old enough.
+        assert!(!unbound_or_old_enough(true, 1_000, 1_010, 60));
+        assert!(unbound_or_old_enough(true, 1_000, 1_060, 60));
+    }
+
+    #[test]
+    fn a_refused_token_is_dropped_only_once_it_is_old_enough() {
+        assert!(!minted_long_enough_ago(1_000, 1_010, 60));
+        assert!(minted_long_enough_ago(1_000, 1_060, 60));
+        assert!(minted_long_enough_ago(1_000, 2_000, 60));
+        // A clock that went backwards never counts as old enough.
+        assert!(!minted_long_enough_ago(1_000, 900, 60));
+    }
+
+    #[test]
     fn loopback_host_detection() {
         assert!(is_loopback_host("localhost"));
         assert!(is_loopback_host("LocalHost"));
@@ -790,6 +1178,7 @@ mod tests {
         VerifiedCaller {
             user_id: user.to_owned(),
             email: None,
+            email_verified: false,
             org_id: org.map(str::to_owned),
             role,
             teams: Vec::new(),
@@ -929,6 +1318,7 @@ mod tests {
         let claims = VerifiedClaims {
             user_id: "u1".to_owned(),
             email: Some("a@b.c".to_owned()),
+            email_verified: true,
             orgs: vec![
                 OrgMembership {
                     id: "o1".to_owned(),
@@ -940,10 +1330,15 @@ mod tests {
                 },
             ],
             teams: Vec::new(),
+            feature_flags: BTreeSet::new(),
+            feature_flags_org: None,
+            limits: None,
         };
         let c = to_caller_for_org(&claims, Some("o1"));
         assert_eq!(c.org_id.as_deref(), Some("o1"));
         assert_eq!(c.role, OrgRole::Admin);
+        assert!(c.email_verified, "the verification bit survives narrowing");
+        assert_eq!(c.verified_email(), Some("a@b.c"));
 
         // Not a member of the node's org → no org context, viewer, fail-closed.
         let outsider = to_caller_for_org(&claims, Some("o3"));
@@ -993,6 +1388,98 @@ mod tests {
         assert_eq!(partial.teams[0].org, "");
     }
 
+    /// `ryu_limits` is `{ "boxConcurrency": n }`, minted beside `ryu_flags`
+    /// (`CORE_LIMITS_CLAIM` in `packages/auth/src/lib/plans.ts`). Absence and
+    /// malformed shapes read as no claim without failing the token.
+    #[test]
+    fn identity_verify_limits_claim_parses_and_defaults_to_none() {
+        let raw: RawClaims =
+            serde_json::from_str(r#"{"id":"u1","ryu_limits":{"boxConcurrency":3}}"#)
+                .expect("payload with limits must decode");
+        assert_eq!(raw.ryu_limits, Some(VerifiedLimits { box_concurrency: 3 }));
+        let zero: RawClaims =
+            serde_json::from_str(r#"{"id":"u1","ryu_limits":{"boxConcurrency":0}}"#).unwrap();
+        assert_eq!(zero.ryu_limits, Some(VerifiedLimits { box_concurrency: 0 }));
+        let absent: RawClaims = serde_json::from_str(r#"{"id":"u1"}"#).unwrap();
+        assert_eq!(absent.ryu_limits, None);
+        for malformed in [
+            r#"{"id":"u1","ryu_limits":null}"#,
+            r#"{"id":"u1","ryu_limits":3}"#,
+            r#"{"id":"u1","ryu_limits":{}}"#,
+            r#"{"id":"u1","ryu_limits":{"boxConcurrency":"3"}}"#,
+            r#"{"id":"u1","ryu_limits":{"boxConcurrency":-1}}"#,
+            r#"{"id":"u1","ryu_limits":{"boxConcurrency":1.5}}"#,
+            r#"{"id":"u1","ryu_limits":{"boxConcurrency":4294967296}}"#,
+        ] {
+            let raw: RawClaims =
+                serde_json::from_str(malformed).expect("malformed limits never fail the token");
+            assert_eq!(raw.ryu_limits, None, "{malformed}");
+        }
+    }
+
+    /// The minter (`packages/auth/src/lib/core-flag-claim.ts`) emits
+    /// `ryu_flags: ["key", ...]` only when a flag is on. Absence and malformed
+    /// shapes must read as "no flags" without failing the token.
+    #[test]
+    fn flag_claim_parses_and_defaults_closed() {
+        let raw: RawClaims = serde_json::from_str(
+            r#"{"id":"u1","ryu_flags":["cloud_tasks.box_backend","other.flag"]}"#,
+        )
+        .expect("payload with flags must decode");
+        assert!(raw.ryu_flags.contains("cloud_tasks.box_backend"));
+        assert_eq!(raw.ryu_flags.len(), 2);
+
+        let absent: RawClaims =
+            serde_json::from_str(r#"{"id":"u1"}"#).expect("pre-flag token must decode");
+        assert!(absent.ryu_flags.is_empty());
+
+        for malformed in [
+            r#"{"id":"u1","ryu_flags":null}"#,
+            r#"{"id":"u1","ryu_flags":"cloud_tasks.box_backend"}"#,
+            r#"{"id":"u1","ryu_flags":{"cloud_tasks.box_backend":true}}"#,
+        ] {
+            let raw: RawClaims =
+                serde_json::from_str(malformed).expect("a malformed flag claim must not fail");
+            assert!(raw.ryu_flags.is_empty(), "{malformed}");
+        }
+
+        let mixed: RawClaims =
+            serde_json::from_str(r#"{"id":"u1","ryu_flags":["a.b",1,null,"",{"x":1}]}"#)
+                .expect("mixed entries must decode");
+        assert_eq!(
+            mixed.ryu_flags.into_iter().collect::<Vec<_>>(),
+            vec!["a.b".to_owned()]
+        );
+    }
+
+    /// `ryu_flags_org` names the org the flags were evaluated for. A missing or
+    /// malformed value reads as "no org context" without failing the token.
+    #[test]
+    fn flag_org_claim_parses_and_defaults_to_no_org() {
+        let raw: RawClaims = serde_json::from_str(
+            r#"{"id":"u1","ryu_flags":["cloud_tasks.box_backend"],"ryu_flags_org":"org_a"}"#,
+        )
+        .expect("payload with a flag org must decode");
+        assert_eq!(raw.ryu_flags_org.as_deref(), Some("org_a"));
+
+        let absent: RawClaims =
+            serde_json::from_str(r#"{"id":"u1"}"#).expect("pre-org-claim token must decode");
+        assert_eq!(absent.ryu_flags_org, None);
+
+        let oversized = format!(r#"{{"id":"u1","ryu_flags_org":"{}"}}"#, "o".repeat(129));
+        for malformed in [
+            r#"{"id":"u1","ryu_flags_org":null}"#.to_owned(),
+            r#"{"id":"u1","ryu_flags_org":""}"#.to_owned(),
+            r#"{"id":"u1","ryu_flags_org":7}"#.to_owned(),
+            r#"{"id":"u1","ryu_flags_org":{"id":"org_a"}}"#.to_owned(),
+            oversized,
+        ] {
+            let raw: RawClaims =
+                serde_json::from_str(&malformed).expect("a malformed flag org must not fail");
+            assert_eq!(raw.ryu_flags_org, None, "{malformed}");
+        }
+    }
+
     /// The narrowing is what makes a team claim safe to trust: a team is only
     /// meaningful inside its own org, so anything from another org must be gone
     /// before a team-scoped check ever sees the caller.
@@ -1001,6 +1488,7 @@ mod tests {
         let claims = VerifiedClaims {
             user_id: "u1".to_owned(),
             email: None,
+            email_verified: false,
             orgs: vec![
                 OrgMembership {
                     id: "o1".to_owned(),
@@ -1023,6 +1511,9 @@ mod tests {
                     role: "owner".to_owned(),
                 },
             ],
+            feature_flags: BTreeSet::new(),
+            feature_flags_org: None,
+            limits: None,
         };
 
         let c = to_caller_for_org(&claims, Some("o1"));
@@ -1040,5 +1531,55 @@ mod tests {
         // Node not org-bound: no org to narrow against, so no team context.
         let unbound = to_caller_for_org(&claims, None);
         assert!(unbound.teams.is_empty());
+    }
+
+    /// Pins the `email_verified` wire contract against the TypeScript minter
+    /// (`definePayload` emits `email_verified: user.emailVerified === true`).
+    /// Only a JSON `true` proves mailbox ownership; an absent claim (every token
+    /// minted before it existed), `false`, or a non-boolean is unverified, and a
+    /// malformed value never rejects the token as a whole.
+    #[test]
+    fn claims_decode_email_verified_strictly() {
+        let decode = |payload: &str| -> RawClaims {
+            serde_json::from_str(payload).expect("payload must decode")
+        };
+        assert!(decode(r#"{"id":"u1","email":"a@b.c","email_verified":true}"#).email_verified);
+        for payload in [
+            r#"{"id":"u1","email":"a@b.c"}"#,
+            r#"{"id":"u1","email":"a@b.c","email_verified":false}"#,
+            r#"{"id":"u1","email":"a@b.c","email_verified":"true"}"#,
+            r#"{"id":"u1","email":"a@b.c","email_verified":1}"#,
+            r#"{"id":"u1","email":"a@b.c","email_verified":null}"#,
+        ] {
+            assert!(!decode(payload).email_verified, "{payload}");
+        }
+    }
+
+    /// A caller carrying an unverified address keeps it for display, but it is
+    /// never offered as the address to match email-addressed grants.
+    #[test]
+    fn verified_email_requires_the_verification_bit() {
+        let claims = |email: Option<&str>, email_verified: bool| VerifiedClaims {
+            user_id: "u1".to_owned(),
+            email: email.map(str::to_owned),
+            email_verified,
+            orgs: Vec::new(),
+            teams: Vec::new(),
+            feature_flags: BTreeSet::new(),
+            feature_flags_org: None,
+            limits: None,
+        };
+
+        let unverified = to_caller_for_org(&claims(Some("victim@example.com"), false), None);
+        assert_eq!(unverified.email.as_deref(), Some("victim@example.com"));
+        assert_eq!(unverified.verified_email(), None);
+
+        let verified = to_caller_for_org(&claims(Some(" owner@example.com "), true), None);
+        assert_eq!(verified.verified_email(), Some("owner@example.com"));
+
+        let blank = to_caller_for_org(&claims(Some("  "), true), None);
+        assert_eq!(blank.verified_email(), None);
+        let missing = to_caller_for_org(&claims(None, true), None);
+        assert_eq!(missing.verified_email(), None);
     }
 }

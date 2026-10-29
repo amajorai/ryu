@@ -1,6 +1,7 @@
 import { renderTemplate, type SourceItem } from "@ryu/app-host/views";
 import { parseContributedTarget } from "@/src/contributions/contributed-target.ts";
 import type { OutputStyleSummary } from "@/src/lib/api/output-styles.ts";
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 import type { PluginSidebarSection } from "@/src/lib/api/plugins.ts";
 import type { Space, SpaceDocument } from "@/src/lib/api/spaces.ts";
 import type {
@@ -21,7 +22,7 @@ export function buildContributedMentionSources(
 	const items: MentionSources["appItems"] = [];
 
 	for (const { contribution, rows } of sections) {
-		const itemTarget = contribution.spec?.itemTarget;
+		const itemTarget = pluginSidebarSpec(contribution)?.itemTarget;
 		if (!itemTarget) {
 			continue;
 		}

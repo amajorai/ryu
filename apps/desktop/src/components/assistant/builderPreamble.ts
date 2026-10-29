@@ -79,9 +79,12 @@ export function buildBuilderPreamble(
 			: "";
 	// A custom preamble that never mentioned the snapshot still gets it — the
 	// surface published it for a reason.
-	const snapshotLine = session.preamble?.includes("{{snapshot}}")
-		? ""
-		: `\n\nCurrent state:\n${snapshot}`;
+	// An empty snapshot adds nothing: bridge surfaces and pages that share their
+	// state through removable page context pass "".
+	const snapshotLine =
+		session.preamble?.includes("{{snapshot}}") || !snapshot.trim()
+			? ""
+			: `\n\nCurrent state:\n${snapshot}`;
 	return `${body}${toolLine}${snapshotLine}`;
 }
 

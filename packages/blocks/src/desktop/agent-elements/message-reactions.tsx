@@ -1,4 +1,4 @@
-import { BubbleReactions } from "@ryu/ui/components/bubble";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { EmojiPicker } from "@ryu/ui/components/emoji-picker";
 import {
 	Popover,
@@ -74,6 +74,7 @@ export function MessageReactionButton({
 	className,
 	onToggle,
 }: MessageReactionButtonProps) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
@@ -111,7 +112,7 @@ export function MessageReactionButton({
 					</button>
 				}
 			/>
-			<PopoverContent className="w-auto p-1">
+			<PopoverContent className="w-auto" spacing="small-inset">
 				<div className="flex items-center gap-0.5">
 					{buckets.map((bucket) => (
 						<button
@@ -135,7 +136,7 @@ export function MessageReactionButton({
 						<>
 							{QUICK_REACTIONS.map((emoji) => (
 								<button
-									aria-label={`Add ${emoji} reaction`}
+									aria-label={tl("Add {emoji} reaction", { emoji })}
 									className="rounded-md p-1 text-base leading-none transition-colors hover:bg-foreground/8"
 									key={emoji}
 									onClick={() => handlePick(emoji)}
@@ -184,12 +185,18 @@ export function MessageReactions({
 		return null;
 	}
 	return (
-		<BubbleReactions
-			align={align}
+		<div
 			// See the halo note above: `ring-background` replaces the primitive's
 			// `ring-card`, which haloes wherever card ≠ background.
-			className={cn("ring-background", className)}
-			side={side}
+			className={cn(
+				"absolute z-10 flex w-fit shrink-0 items-center justify-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-sm ring-3 ring-background has-[button]:p-0",
+				side === "top" ? "top-0 -translate-y-3/4" : "bottom-0 translate-y-3/4",
+				align === "start" ? "left-3" : "right-3",
+				className
+			)}
+			data-align={align}
+			data-side={side}
+			data-slot="bubble-reactions"
 		>
 			{buckets.map((bucket) => (
 				<button
@@ -213,11 +220,12 @@ export function MessageReactions({
 				</button>
 			))}
 			{canReact && <ReactionPicker onPick={onToggle} />}
-		</BubbleReactions>
+		</div>
 	);
 }
 
 function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
@@ -248,11 +256,11 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
 					</button>
 				}
 			/>
-			<PopoverContent className="w-auto p-1">
+			<PopoverContent className="w-auto" spacing="small-inset">
 				<div className="flex items-center gap-0.5">
 					{QUICK_REACTIONS.map((emoji) => (
 						<button
-							aria-label={`Add ${emoji} reaction`}
+							aria-label={tl("Add {emoji} reaction", { emoji })}
 							className="rounded-md p-1 text-base leading-none transition-colors hover:bg-foreground/8"
 							key={emoji}
 							onClick={() => handlePick(emoji)}

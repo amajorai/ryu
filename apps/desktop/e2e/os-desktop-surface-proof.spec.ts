@@ -1,14 +1,30 @@
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-app-launcher-proof.png";
-const DOCK_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-dock-icons-proof.png";
-const MENUBAR_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-menubar-proof.png";
+const EVIDENCE_DIR = path.resolve(
+	import.meta.dirname,
+	"../../../docs/proof/test-coverage-sweep-20260924/evidence"
+);
+const PROOF_SCREENSHOT = path.join(
+	EVIDENCE_DIR,
+	"desktop-os-launcher-coverage.png"
+);
+const DOCK_SCREENSHOT = path.join(EVIDENCE_DIR, "desktop-os-dock-coverage.png");
+const MENUBAR_SCREENSHOT = path.join(
+	EVIDENCE_DIR,
+	"desktop-os-menubar-coverage.png"
+);
+const DESKTOP_SCREENSHOT = path.join(
+	EVIDENCE_DIR,
+	"desktop-os-workspace-coverage.png"
+);
+const TOOLS_WINDOW_SCREENSHOT = path.join(
+	EVIDENCE_DIR,
+	"desktop-os-tools-window-coverage.png"
+);
 const OS_DOCK_ICON_COUNT = 8;
 
-test("opens Apps as live windows from the Ryu OS dock and App Launcher", async ({
+test("opens Apps as live windows from the OS dock and App Launcher", async ({
 	page,
 }) => {
 	await page.setViewportSize({ height: 900, width: 1440 });
@@ -53,9 +69,14 @@ test("opens Apps as live windows from the Ryu OS dock and App Launcher", async (
 			)
 		).toBeLessThan(1);
 	}
-	await expect(
-		page.locator('[data-testid^="os-dock-"] [style*="mask-image"]')
-	).toHaveCount(OS_DOCK_ICON_COUNT);
+	await expect(dockItems).toHaveCount(OS_DOCK_ICON_COUNT);
+	for (let index = 0; index < OS_DOCK_ICON_COUNT; index++) {
+		await expect(
+			dockItems
+				.nth(index)
+				.locator('svg, img, [style*="mask-image"], [data-app-icon]')
+		).not.toHaveCount(0);
+	}
 	await expect(page.getByTestId("os-window-window-chat")).toBeVisible();
 	await expect(page.getByTestId("os-window-window-spaces")).toHaveCount(1);
 	const chatWindow = page.getByTestId("os-window-window-chat");
@@ -84,6 +105,12 @@ test("opens Apps as live windows from the Ryu OS dock and App Launcher", async (
 	await page.getByTestId("app-launcher-window-window-chat").click();
 	await expect(chatWindow).toBeVisible();
 	await expect(spacesWindow).toBeHidden();
+	await page.getByTestId("os-dock-spaces").click();
+	await expect(spacesWindow).toBeVisible();
+	await expect(chatWindow).toBeHidden();
+	await page.getByTestId("os-dock-chat").click();
+	await expect(chatWindow).toBeVisible();
+	await expect(spacesWindow).toBeHidden();
 	const appLauncherDockItem = page.getByTestId("os-dock-app-launcher");
 	const initialDockWidth = Number.parseFloat(
 		(await appLauncherDockItem.getAttribute("style"))?.match(
@@ -103,7 +130,7 @@ test("opens Apps as live windows from the Ryu OS dock and App Launcher", async (
 	await page.screenshot({ path: DOCK_SCREENSHOT, fullPage: true });
 	await page.mouse.move(20, 120);
 	await page.screenshot({
-		path: "/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-desktop-proof.png",
+		path: DESKTOP_SCREENSHOT,
 		fullPage: true,
 	});
 	const wallpaper = page.locator("[data-wallpaper-id]");
@@ -117,6 +144,14 @@ test("opens Apps as live windows from the Ryu OS dock and App Launcher", async (
 	await page.getByTestId("os-dock-app-launcher").click();
 	await expect(page.getByText("App Launcher").last()).toBeVisible();
 	await expect(page.getByTestId("app-launcher-app-tools")).toBeVisible();
+	await expect(page.getByTestId("app-launcher-app-chat")).toHaveAttribute(
+		"data-open",
+		"true"
+	);
+	await expect(page.getByTestId("app-launcher-app-tools")).toHaveAttribute(
+		"data-open",
+		"false"
+	);
 	await expect(
 		page.getByTestId("app-launcher-app-mission-control")
 	).toBeVisible();
@@ -139,9 +174,54 @@ test("opens Apps as live windows from the Ryu OS dock and App Launcher", async (
 		page.getByTestId("app-launcher-window-window-spaces")
 	).toBeVisible();
 	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.keyboard.press("Escape");
+	await expect(page.getByRole("dialog")).toBeHidden();
+
+	await page.getByRole("menuitem", { name: "View" }).click();
+	await page.getByRole("menuitemradio", { name: "Quiet places" }).click();
+	await expect(wallpaper).toHaveAttribute(
+		"data-wallpaper-id",
+		/deep-forest|golden-trees/
+	);
+	const selectedQuietWallpaper =
+		(await wallpaper.getAttribute("data-wallpaper-id")) ?? "";
+	await page.getByRole("menuitem", { name: /Shuffle wallpaper/ }).click();
+	await expect(wallpaper).toHaveAttribute(
+		"data-wallpaper-id",
+		/deep-forest|golden-trees/
+	);
+	const menuShuffledWallpaper =
+		(await wallpaper.getAttribute("data-wallpaper-id")) ?? "";
+	expect(menuShuffledWallpaper).not.toBe(selectedQuietWallpaper);
+	await page.getByTestId("os-wallpaper-shuffle").click();
+	await expect(wallpaper).toHaveAttribute(
+		"data-wallpaper-id",
+		/deep-forest|golden-trees/
+	);
+	const toolbarShuffledWallpaper =
+		(await wallpaper.getAttribute("data-wallpaper-id")) ?? "";
+	expect(toolbarShuffledWallpaper).not.toBe(menuShuffledWallpaper);
+
+	await page.getByRole("menuitem", { name: "View" }).click();
+	await page.getByRole("menuitem", { name: "Customize desktop…" }).click();
+	const settingsDialog = page.getByRole("dialog");
+	const clockSwitch = settingsDialog.getByRole("switch", { name: "Clock" });
+	await expect(clockSwitch).toHaveAttribute("aria-checked", "true");
+	await clockSwitch.click();
+	await expect(clockSwitch).toHaveAttribute("aria-checked", "false");
+	expect(
+		await page.evaluate(() => localStorage.getItem("ryu:os-home:clock"))
+	).toBe("false");
+	await page.keyboard.press("Escape");
+	await expect(settingsDialog).toBeHidden();
+	await page.getByRole("button", { name: "Customize desktop" }).click();
+	await expect(
+		page.getByRole("dialog").getByRole("switch", { name: "Clock" })
+	).toHaveAttribute("aria-checked", "false");
+	await page.keyboard.press("Escape");
 
 	await page.keyboard.press("Escape");
-	await page.getByRole("menuitem", { name: "Ryu OS" }).click();
+	await page.getByRole("menuitem", { name: "OS" }).click();
 	await expect(page.getByTestId("app-launcher-menu-item")).toBeVisible();
 	await page.getByTestId("app-launcher-menu-item").click();
 	await expect(page.getByText("App Launcher").last()).toBeVisible();
@@ -150,6 +230,13 @@ test("opens Apps as live windows from the Ryu OS dock and App Launcher", async (
 	await page.getByRole("menuitem", { name: "Window" }).click();
 	await expect(page.getByTestId("app-launcher-trigger")).toBeVisible();
 	await page.screenshot({ path: MENUBAR_SCREENSHOT, fullPage: true });
+	await page
+		.getByRole("menu")
+		.getByRole("menuitem", { name: "Spaces" })
+		.click();
+	await expect(spacesWindow).toBeVisible();
+	await expect(chatWindow).toBeHidden();
+	await page.getByRole("menuitem", { name: "Window" }).click();
 	await page.getByTestId("app-launcher-trigger").click();
 	await expect(page.getByText("App Launcher").last()).toBeVisible();
 	await page.keyboard.press("Escape");
@@ -161,7 +248,7 @@ test("opens Apps as live windows from the Ryu OS dock and App Launcher", async (
 	await expect(page.getByTestId("os-window-window-chat")).toBeHidden();
 
 	await page.screenshot({
-		path: "/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-tools-window-proof.png",
+		path: TOOLS_WINDOW_SCREENSHOT,
 		fullPage: true,
 	});
 	await page.getByTestId("os-window-window-tools-close").click();

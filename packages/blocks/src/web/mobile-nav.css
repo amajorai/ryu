@@ -1,0 +1,24 @@
+/* While the bottom bar is mounted (it is fixed below `md`), lift the floating
+   Ask Ryu launcher from @ryu/assistant-widget above it, so the launcher does not
+   sit on top of the bar's Account tab. */
+@media (width < 48rem) {
+	:root:has([data-mobile-nav]) {
+		--ryu-assistant-launcher-lift: calc(4.5rem + env(safe-area-inset-bottom));
+	}
+}
+
+/* On phones the floating launcher would cover body text; the bottom bar is the
+   navigation there, so the launcher is hidden while the bar is mounted. The lift
+   above still sizes the assistant panel if a page opens it programmatically. */
+@media (width < 48rem) {
+	:root:has([data-mobile-nav])
+		[data-ryu-assistant-widget][data-placement="floating"] {
+		display: none;
+	}
+}
+
+/* An open sheet is modal, so the floating launcher must not sit on top of it. */
+:root:has([data-mobile-nav][data-sheet-open])
+	[data-ryu-assistant-widget][data-placement="floating"] {
+	visibility: hidden;
+}

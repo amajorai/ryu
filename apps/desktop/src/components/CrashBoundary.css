@@ -1,0 +1,3 @@
+[data-crash-window-shell] {
+	border-radius: var(--ryu-window-radius-base, 2rem);
+}

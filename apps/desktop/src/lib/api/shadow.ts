@@ -5,8 +5,9 @@
 // shadow_proxy.rs`). Shadow is a standalone Rust sidecar that captures the
 // active window, selection, and on-screen text via OCR; its own HTTP surface
 // (:3030) is bearer-gated and rejects every browser (Origin-bearing) request
-// outright, so the webview can no longer fetch it directly — Core holds the
-// shared-secret bearer and stamps it on the proxied hop. This module exposes
+// outright, so the webview can no longer fetch it directly — Desktop presents
+// its local node bearer to Core, which stamps Shadow's shared-secret bearer on
+// the proxied hop. This module exposes
 // typed `getCurrentContext()`, `getProactive()`, `getCaptureControl()`, and
 // `setCaptureControl()` that the companion overlay and consent settings use.
 // If Shadow (or the local Core) is not running, calls resolve to `null` so
@@ -15,16 +16,26 @@
 import {
 	fetchSpeechHistory,
 	type SpeechHistoryInput,
-} from "@ryuhq/core-client/shadow";
+} from "@ryuhq/core-client/shadow.ts";
+import { z } from "zod";
 import { DEFAULT_CORE_URL } from "@/lib/core-url.ts";
+import { isLocalNode, useNodeStore } from "@/src/store/useNodeStore.ts";
 
 /** Speech is always from this physical computer, independently of the selected node. */
 export function getSpeechHistory(input: SpeechHistoryInput) {
-	return fetchSpeechHistory({ url: DEFAULT_CORE_URL, token: null }, input);
+	return fetchSpeechHistory(
+		{
+			url: DEFAULT_CORE_URL,
+			token: useNodeStore.getState().nodes.find(isLocalNode)?.token ?? null,
+		},
+		input
+	);
 }
 
 /** The context snapshot Shadow exposes at GET /context/current. */
 export interface ShadowContext {
+	/** Human-readable text exposed by the focused accessibility tree, if any. */
+	accessibility_text?: string | null;
 	/** Name of the focused application window. */
 	active_app: string | null;
 	/** True when capture is globally paused (pause/incognito mode). */
@@ -73,6 +84,180 @@ export interface CaptureControlUpdate {
 	paused?: boolean;
 }
 
+export type ComputerUsePlanner = "native" | "jev" | "laya" | "local";
+
+export interface ShadowComputerUseConfig {
+	applied: boolean;
+	jevApiKeyConfigured: boolean;
+	jevModel: string;
+	jevUrl: string;
+	layaUrl: string;
+	localModelId: string;
+	localPluginId: string;
+	maxSteps: number;
+	planner: ComputerUsePlanner;
+}
+
+export interface ShadowComputerUseConfigUpdate
+	extends Omit<ShadowComputerUseConfig, "applied" | "jevApiKeyConfigured"> {}
+
+export interface ShadowComputerUseStep {
+	operation: string;
+	outcome: string;
+	target: string | null;
+}
+
+export interface ShadowComputerUseResult {
+	message: string;
+	planner: ComputerUsePlanner;
+	status: "completed" | "blocked" | "step_limit";
+	steps: ShadowComputerUseStep[];
+}
+
+const computerUsePlannerSchema = z.enum(["native", "jev", "laya", "local"]);
+const computerUseConfigSchema = z.object({
+	applied: z.boolean(),
+	planner: computerUsePlannerSchema,
+	jevUrl: z.string(),
+	jevModel: z.string(),
+	layaUrl: z.string(),
+	maxSteps: z.number(),
+	jevApiKeyConfigured: z.boolean(),
+	localPluginId: z.string().catch(""),
+	localModelId: z.string().catch(""),
+});
+
+/** Validate a computer-use settings payload; `null` when it is malformed. */
+function parseComputerUseConfig(
+	value: unknown
+): ShadowComputerUseConfig | null {
+	const parsed = computerUseConfigSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
+}
+
+const shadowErrorSchema = z.object({
+	error: z.union([
+		z.string().refine((value) => Boolean(value.trim())),
+		z
+			.object({ message: z.string().refine((value) => Boolean(value.trim())) })
+			.transform((value) => value.message),
+	]),
+});
+const computerUseResultSchema = z.object({
+	planner: computerUsePlannerSchema,
+	status: z.enum(["completed", "blocked", "step_limit"]),
+	message: z.string(),
+	steps: z.array(z.json()),
+});
+const computerUseStepSchema = z.object({
+	operation: z.string(),
+	outcome: z.string(),
+	target: z.json().optional(),
+});
+
+async function shadowError(
+	response: Response,
+	fallback: string
+): Promise<Error> {
+	try {
+		const parsed = shadowErrorSchema.safeParse(await response.json());
+		if (parsed.success) {
+			return new Error(parsed.data.error);
+		}
+	} catch {
+		// Use the HTTP status below when the sidecar returned a non-JSON error.
+	}
+	return new Error(`${fallback} (${response.status})`);
+}
+
+/** Strict settings reader: preserve failure rather than substituting defaults. */
+export async function getShadowComputerUseConfigStrict(): Promise<ShadowComputerUseConfig> {
+	const response = await shadowFetch("/computer-use/config", {
+		headers: { Accept: "application/json" },
+	});
+	if (!response.ok) {
+		throw await shadowError(
+			response,
+			"Could not load Shadow computer-use settings"
+		);
+	}
+	const parsed = computerUseConfigSchema.safeParse(await response.json());
+	if (!parsed.success) {
+		throw new Error("Core returned invalid Shadow computer-use settings");
+	}
+	return parsed.data;
+}
+
+export async function getShadowComputerUseConfig(): Promise<ShadowComputerUseConfig | null> {
+	try {
+		const response = await shadowFetch("/computer-use/config", {
+			headers: { Accept: "application/json" },
+		});
+		if (!response.ok) {
+			return null;
+		}
+		return parseComputerUseConfig(await response.json());
+	} catch {
+		return null;
+	}
+}
+
+export async function setShadowComputerUseConfig(
+	update: ShadowComputerUseConfigUpdate
+): Promise<ShadowComputerUseConfig> {
+	const response = await shadowFetch("/computer-use/config", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Accept: "application/json",
+		},
+		body: JSON.stringify(update),
+	});
+	if (!response.ok) {
+		throw await shadowError(
+			response,
+			"Could not save Shadow computer-use settings"
+		);
+	}
+	const parsed = computerUseConfigSchema.safeParse(await response.json());
+	if (!parsed.success) {
+		throw new Error("Shadow returned invalid computer-use settings");
+	}
+	return parsed.data;
+}
+
+export async function runShadowComputerUse(
+	goal: string
+): Promise<ShadowComputerUseResult> {
+	const response = await shadowFetch("/computer-use/run", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Accept: "application/json",
+		},
+		body: JSON.stringify({ goal }),
+	});
+	if (!response.ok) {
+		throw await shadowError(response, "Shadow computer use failed");
+	}
+	const parsed = computerUseResultSchema.safeParse(await response.json());
+	if (!parsed.success) {
+		throw new Error("Shadow returned an invalid computer-use result");
+	}
+	const steps = parsed.data.steps.map((item) => {
+		const step = computerUseStepSchema.safeParse(item);
+		if (!step.success) {
+			throw new Error("Shadow returned an invalid computer-use step");
+		}
+		const target = z.string().nullable().safeParse(step.data.target);
+		if (!target.success) {
+			throw new Error("Shadow returned an invalid computer-use target");
+		}
+		return { ...step.data, target: target.data };
+	});
+	return { ...parsed.data, steps };
+}
+
 /**
  * Disposition returned by Shadow's policy engine.
  * - `push_now` - surface immediately as a chip
@@ -97,7 +282,7 @@ export interface ProactiveSuggestion {
 	/** Opaque stable identifier. */
 	id: string;
 	/** Arbitrary JSON metadata attached by Shadow. */
-	metadata: Record<string, unknown>;
+	metadata: ShadowMetadata;
 	/** Category label (e.g. "action", "reminder"). */
 	suggestion_type: string;
 	/** Short headline for the suggestion. */
@@ -130,13 +315,25 @@ export interface FeedbackRequest {
  * run the desktop on that box.
  *
  * The base is the LOCAL Core's `/api/shadow` proxy (never the per-tab node):
- * `DEFAULT_CORE_URL` is the profile-aware local sidecar URL (the PreflightPage
- * precedent for pinned-local Core calls). No bearer is attached here — the
- * local loopback Core runs without a node token (`require_auth` allows when
- * none is configured), and Core stamps Shadow's own shared-secret bearer on
- * the upstream hop.
+ * `DEFAULT_CORE_URL` is the profile-aware local sidecar URL. Requests use the
+ * local node bearer from `useNodeStore`, and Core stamps Shadow's own shared
+ * secret on the upstream hop.
  */
 const SHADOW_BASE = `${DEFAULT_CORE_URL}/api/shadow`;
+
+/**
+ * Shadow is pinned to this desktop's local Core, never the tab's active node.
+ * Core requires the local node bearer even on loopback; keep it on this local
+ * hop and never pass it to Jev or a model endpoint.
+ */
+function shadowFetch(path: string, init: RequestInit = {}): Promise<Response> {
+	const headers = new Headers(init.headers);
+	const token = useNodeStore.getState().nodes.find(isLocalNode)?.token;
+	if (token) {
+		headers.set("Authorization", `Bearer ${token}`);
+	}
+	return fetch(`${SHADOW_BASE}${path}`, { ...init, headers });
+}
 
 /** A single timeline event from GET /timeline. */
 export interface TimelineEvent {
@@ -263,6 +460,161 @@ export interface ShadowSearchResult {
 	window_title: string | null;
 }
 
+const shadowMetadataSchema = z.record(z.string(), z.json());
+type ShadowMetadata = z.infer<typeof shadowMetadataSchema>;
+const shadowActivityEventSchema = z
+	.object({ type: z.string() })
+	.catchall(z.json());
+export type ShadowActivityEvent = z.infer<typeof shadowActivityEventSchema>;
+const timelineEventSchema = z
+	.object({
+		app_name: z.string().nullable(),
+		app_path: z.string().nullable(),
+		bundle_id: z.string().nullable(),
+		event_type: z.string(),
+		track: z.number(),
+		ts: z.number(),
+		url: z.string().nullable(),
+		window_title: z.string().nullable(),
+	})
+	.passthrough();
+const journalStatSchema = z
+	.object({ event_count: z.number(), minutes: z.number(), name: z.string() })
+	.passthrough();
+const focusStatsSchema = z
+	.object({
+		communication_minutes: z.number(),
+		deep_work_minutes: z.number(),
+		distraction_minutes: z.number(),
+		focus_minutes: z.number(),
+		focus_ratio: z.number(),
+		longest_focus_streak_minutes: z.number(),
+		total_minutes: z.number(),
+	})
+	.passthrough();
+const journalCardSchema = z
+	.object({
+		apps: z
+			.array(
+				z
+					.object({
+						app_path: z.string().nullable(),
+						bundle_id: z.string().nullable(),
+						name: z.string(),
+					})
+					.passthrough()
+			)
+			.optional(),
+		category: z.string(),
+		detailed_summary: z.string(),
+		distraction: z.boolean(),
+		distractions: z.array(
+			z
+				.object({
+					end_ts: z.number(),
+					start_ts: z.number(),
+					summary: z.string(),
+					title: z.string(),
+				})
+				.passthrough()
+		),
+		end_ts: z.number(),
+		event_count: z.number(),
+		id: z.string(),
+		primary_app: z.string(),
+		start_ts: z.number(),
+		summary: z.string(),
+		title: z.string(),
+	})
+	.passthrough();
+const journalSnapshotSchema = z
+	.object({
+		apps: z.array(journalStatSchema),
+		cards: z.array(journalCardSchema),
+		categories: z.array(journalStatSchema),
+		end_ts: z.number(),
+		focus: focusStatsSchema,
+		standup: z
+			.object({
+				blockers: z.array(z.string()),
+				highlights: z.array(z.string()),
+				tasks: z.array(z.string()),
+			})
+			.passthrough(),
+		start_ts: z.number(),
+	})
+	.passthrough();
+const weeklyReviewSchema = z
+	.object({
+		apps: z.array(journalStatSchema),
+		categories: z.array(journalStatSchema),
+		days: z.array(
+			z
+				.object({
+					card_count: z.number(),
+					day: z.string(),
+					distraction_minutes: z.number(),
+					focus_minutes: z.number(),
+					focus_ratio: z.number(),
+					start_ts: z.number(),
+					top_category: z.string(),
+				})
+				.passthrough()
+		),
+		end_ts: z.number(),
+		focus: focusStatsSchema,
+		highlights: z.array(z.string()),
+		start_ts: z.number(),
+	})
+	.passthrough();
+const shadowSearchResultSchema = z
+	.object({
+		app_name: z.string().nullable(),
+		event_type: z.string(),
+		match_reason: z.string().nullable(),
+		snippet: z.string().nullable(),
+		source_kind: z.string().nullable(),
+		track: z.number(),
+		ts: z.number(),
+		url: z.string().nullable(),
+		window_title: z.string().nullable(),
+	})
+	.passthrough();
+const shadowContextSchema = z
+	.object({
+		accessibility_text: z.string().nullable().optional(),
+		active_app: z.string().nullable(),
+		paused: z.boolean().optional(),
+		screen_text: z.string().nullable(),
+		selected_text: z.string().nullable(),
+		window_title: z.string().nullable(),
+	})
+	.passthrough();
+const proactiveSuggestionSchema = z
+	.object({
+		body: z.string().nullable(),
+		confidence: z.number(),
+		created_at: z.number(),
+		disposition: z.enum(["push_now", "inbox_only", "drop"]),
+		id: z.string(),
+		metadata: shadowMetadataSchema,
+		suggestion_type: z.string(),
+		title: z.string(),
+	})
+	.passthrough();
+const captureControlSchema = z
+	.object({
+		app_allowlist: z.array(z.string()),
+		frames: z.boolean(),
+		history_retention_days: z.number(),
+		paused: z.boolean(),
+	})
+	.passthrough();
+interface JournalOptions {
+	narrate?: boolean;
+	signal?: AbortSignal;
+}
+
 /**
  * Fetch timeline events in the window [now - rangeMinutes, now]. Returns `null`
  * when Shadow is unreachable so callers degrade gracefully.
@@ -274,17 +626,16 @@ export async function getTimeline(
 	const now = Date.now() * 1000; // ms → µs
 	const start = now - rangeMinutes * 60 * 1_000_000;
 	try {
-		const resp = await fetch(
-			`${SHADOW_BASE}/timeline?start=${start}&end=${now}`,
-			{
-				signal,
-				headers: { Accept: "application/json" },
-			}
-		);
+		const resp = await shadowFetch(`/timeline?start=${start}&end=${now}`, {
+			signal,
+			headers: { Accept: "application/json" },
+		});
 		if (!resp.ok) {
 			return null;
 		}
-		const data = (await resp.json()) as { entries?: TimelineEvent[] };
+		const data = z
+			.object({ entries: z.array(timelineEventSchema).nullish() })
+			.parse(await resp.json());
 		return data.entries ?? [];
 	} catch {
 		return null;
@@ -297,14 +648,14 @@ export async function getTimeline(
  */
 export async function getJournal(
 	rangeMinutes: number,
-	options?: { narrate?: boolean; signal?: AbortSignal }
+	options?: JournalOptions
 ): Promise<JournalSnapshot | null> {
 	const now = Date.now() * 1000;
 	const start = now - rangeMinutes * 60 * 1_000_000;
 	const narrate = options?.narrate ? "&narrate=true" : "";
 	try {
-		const resp = await fetch(
-			`${SHADOW_BASE}/journal?start=${start}&end=${now}${narrate}`,
+		const resp = await shadowFetch(
+			`/journal?start=${start}&end=${now}${narrate}`,
 			{
 				signal: options?.signal,
 				headers: { Accept: "application/json" },
@@ -313,7 +664,9 @@ export async function getJournal(
 		if (!resp.ok) {
 			return null;
 		}
-		const data = (await resp.json()) as { journal?: JournalSnapshot };
+		const data = z
+			.object({ journal: journalSnapshotSchema.nullish() })
+			.parse(await resp.json());
 		return data.journal ?? null;
 	} catch {
 		return null;
@@ -331,14 +684,16 @@ export async function getWeeklyReview(
 ): Promise<WeeklyReview | null> {
 	const now = Date.now() * 1000;
 	try {
-		const resp = await fetch(
-			`${SHADOW_BASE}/journal/weekly?end=${now}&days=${days}`,
-			{ signal, headers: { Accept: "application/json" } }
-		);
+		const resp = await shadowFetch(`/journal/weekly?end=${now}&days=${days}`, {
+			signal,
+			headers: { Accept: "application/json" },
+		});
 		if (!resp.ok) {
 			return null;
 		}
-		const data = (await resp.json()) as { review?: WeeklyReview };
+		const data = z
+			.object({ review: weeklyReviewSchema.nullish() })
+			.parse(await resp.json());
 		return data.review ?? null;
 	} catch {
 		return null;
@@ -365,12 +720,12 @@ export interface ActivityChatMessage {
 export async function streamActivityChat(
 	message: string,
 	history: ActivityChatMessage[],
-	onEvent: (event: Record<string, unknown>) => void,
+	onEvent: (event: ShadowActivityEvent) => void,
 	signal?: AbortSignal
 ): Promise<void> {
 	let resp: Response;
 	try {
-		resp = await fetch(`${SHADOW_BASE}/agent`, {
+		resp = await shadowFetch("/agent", {
 			method: "POST",
 			signal,
 			headers: {
@@ -421,7 +776,7 @@ export async function streamActivityChat(
 						continue;
 					}
 					try {
-						onEvent(JSON.parse(payload) as Record<string, unknown>);
+						onEvent(shadowActivityEventSchema.parse(JSON.parse(payload)));
 					} catch {
 						// Non-JSON keepalive or partial; ignore.
 					}
@@ -443,12 +798,24 @@ export async function streamActivityChat(
  * requests 404 only when frame capture is toggled off, capture is paused, or
  * none was recorded near that moment yet.
  */
-export function frameUrl(tsMicros: number, display?: number): string {
+export async function getShadowFrame(
+	tsMicros: number,
+	display?: number,
+	signal?: AbortSignal
+): Promise<Blob | null> {
 	const params = new URLSearchParams({ ts: String(Math.round(tsMicros)) });
 	if (display !== undefined) {
 		params.set("display", String(display));
 	}
-	return `${SHADOW_BASE}/frame?${params.toString()}`;
+	try {
+		const response = await shadowFetch(`/frame?${params.toString()}`, {
+			signal,
+			headers: { Accept: "image/*" },
+		});
+		return response.ok ? await response.blob() : null;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -464,14 +831,16 @@ export async function searchShadow(
 		return [];
 	}
 	try {
-		const resp = await fetch(
-			`${SHADOW_BASE}/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+		const resp = await shadowFetch(
+			`/search?q=${encodeURIComponent(query)}&limit=${limit}`,
 			{ signal, headers: { Accept: "application/json" } }
 		);
 		if (!resp.ok) {
 			return null;
 		}
-		const data = (await resp.json()) as { results?: ShadowSearchResult[] };
+		const data = z
+			.object({ results: z.array(shadowSearchResultSchema).nullish() })
+			.parse(await resp.json());
 		return data.results ?? [];
 	} catch {
 		return null;
@@ -488,14 +857,14 @@ export async function getCurrentContext(
 	signal?: AbortSignal
 ): Promise<ShadowContext | null> {
 	try {
-		const resp = await fetch(`${SHADOW_BASE}/context/current`, {
+		const resp = await shadowFetch("/context/current", {
 			signal,
 			headers: { Accept: "application/json" },
 		});
 		if (!resp.ok) {
 			return null;
 		}
-		return (await resp.json()) as ShadowContext;
+		return shadowContextSchema.parse(await resp.json());
 	} catch {
 		return null;
 	}
@@ -514,14 +883,16 @@ export async function getProactive(
 	signal?: AbortSignal
 ): Promise<ProactiveSuggestion | null> {
 	try {
-		const resp = await fetch(`${SHADOW_BASE}/proactive`, {
+		const resp = await shadowFetch("/proactive", {
 			signal,
 			headers: { Accept: "application/json" },
 		});
 		if (!resp.ok) {
 			return null;
 		}
-		const data = (await resp.json()) as { suggestions?: ProactiveSuggestion[] };
+		const data = z
+			.object({ suggestions: z.array(proactiveSuggestionSchema).nullish() })
+			.parse(await resp.json());
 		const list = data.suggestions ?? [];
 		return list.find((s) => s.disposition === "push_now") ?? null;
 	} catch {
@@ -539,14 +910,16 @@ export async function getProactiveInbox(
 	signal?: AbortSignal
 ): Promise<ProactiveSuggestion[]> {
 	try {
-		const resp = await fetch(`${SHADOW_BASE}/proactive`, {
+		const resp = await shadowFetch("/proactive", {
 			signal,
 			headers: { Accept: "application/json" },
 		});
 		if (!resp.ok) {
 			return [];
 		}
-		const data = (await resp.json()) as { suggestions?: ProactiveSuggestion[] };
+		const data = z
+			.object({ suggestions: z.array(proactiveSuggestionSchema).nullish() })
+			.parse(await resp.json());
 		return (data.suggestions ?? []).filter((s) => s.disposition !== "drop");
 	} catch {
 		return [];
@@ -565,7 +938,7 @@ export async function postFeedback(
 	signal?: AbortSignal
 ): Promise<boolean> {
 	try {
-		const resp = await fetch(`${SHADOW_BASE}/api/feedback`, {
+		const resp = await shadowFetch("/api/feedback", {
 			method: "POST",
 			signal,
 			headers: {
@@ -589,14 +962,14 @@ export async function getCaptureControl(
 	signal?: AbortSignal
 ): Promise<CaptureControl | null> {
 	try {
-		const resp = await fetch(`${SHADOW_BASE}/capture/control`, {
+		const resp = await shadowFetch("/capture/control", {
 			signal,
 			headers: { Accept: "application/json" },
 		});
 		if (!resp.ok) {
 			return null;
 		}
-		return (await resp.json()) as CaptureControl;
+		return captureControlSchema.parse(await resp.json());
 	} catch {
 		return null;
 	}
@@ -613,7 +986,7 @@ export async function setCaptureControl(
 	signal?: AbortSignal
 ): Promise<CaptureControl | null> {
 	try {
-		const resp = await fetch(`${SHADOW_BASE}/capture/control`, {
+		const resp = await shadowFetch("/capture/control", {
 			method: "POST",
 			signal,
 			headers: {
@@ -625,7 +998,7 @@ export async function setCaptureControl(
 		if (!resp.ok) {
 			return null;
 		}
-		return (await resp.json()) as CaptureControl;
+		return captureControlSchema.parse(await resp.json());
 	} catch {
 		return null;
 	}

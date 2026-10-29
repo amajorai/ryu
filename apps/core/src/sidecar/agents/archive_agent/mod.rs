@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 
 use crate::sidecar::download_manager::{
     build_http_client, compute_sha256, extract_from_tar_gz, extract_from_zip, retry_download,
-    ryu_dir, VersionStore,
+    VersionStore,
 };
 
 /// The host platform target triple used in release asset names. Matches the
@@ -111,7 +111,7 @@ impl ArchiveAgentSpec {
 
     /// Absolute path where the managed binary is installed (`~/.ryu/bin/<bin>`).
     pub fn binary_path(&self) -> PathBuf {
-        ryu_dir().join("bin").join(self.binary_file_name())
+        crate::paths::bin_dir().join(self.binary_file_name())
     }
 }
 
@@ -145,41 +145,32 @@ pub async fn ensure_installed(
         }
     }
 
-    // Resolve the release tag: pinned, or GitHub releases/latest.
-    let tag = match spec.pinned_tag {
-        Some(t) => t.to_owned(),
-        None => {
-            let client = build_http_client();
-            let repo = spec.repo.to_owned();
-            let id = spec.id;
-            let release: serde_json::Value = retry_download(id, 3, || {
-                let client = client.clone();
-                let repo = repo.clone();
-                async move {
-                    client
-                        .get(format!(
-                            "https://api.github.com/repos/{repo}/releases/latest"
-                        ))
-                        .header("Accept", "application/vnd.github+json")
-                        .send()
-                        .await
-                        .context("GET github releases/latest")?
-                        .error_for_status()
-                        .context("HTTP error fetching release")?
-                        .json::<serde_json::Value>()
-                        .await
-                        .context("parsing release JSON")
-                }
-            })
+    // Resolve the release: pinned, or GitHub releases/latest. Fetched even for
+    // a pinned tag, because the release is also where the asset's published
+    // SHA-256 lives — an agent binary is executed, so DownloadCenter refuses it
+    // unverified.
+    let client = build_http_client();
+    let repo = spec.repo.to_owned();
+    let pinned = spec.pinned_tag.map(str::to_owned);
+    let release: serde_json::Value = retry_download(spec.id, 3, || {
+        let client = client.clone();
+        let repo = repo.clone();
+        let pinned = pinned.clone();
+        async move {
+            crate::sidecar::download_manager::fetch_github_release(
+                &client,
+                &repo,
+                pinned.as_deref(),
+            )
             .await
-            .with_context(|| format!("fetching {} latest release from GitHub", spec.id))?;
-
-            release["tag_name"]
-                .as_str()
-                .context("missing tag_name in release response")?
-                .to_string()
         }
-    };
+    })
+    .await
+    .with_context(|| format!("fetching {} release from GitHub", spec.id))?;
+    let tag = release["tag_name"]
+        .as_str()
+        .context("missing tag_name in release response")?
+        .to_string();
 
     // Construct the direct asset URL.
     let is_windows = cfg!(target_os = "windows");
@@ -187,12 +178,15 @@ pub async fn ensure_installed(
     let ext = archive_ext_for(is_windows);
     let url = build_asset_url(spec.repo, spec.asset_template, &tag, platform, ext);
     tracing::info!("downloading {} {tag} from {url}", spec.id);
+    let asset = url.rsplit('/').next().unwrap_or_default().to_owned();
+    let archive_sha256 =
+        crate::sidecar::download_manager::require_release_asset_sha256(&client, &release, &asset)
+            .await?;
 
     // Download the archive through the center to a deterministic temp dest
     // (so its own `.part`/resume works), then read it back to extract.
-    let archive_dest = ryu_dir()
-        .join("tmp")
-        .join(format!("{}-{tag}.{ext}", spec.id));
+    let archive_dest =
+        crate::sidecar::download_manager::tmp_dir().join(format!("{}-{tag}.{ext}", spec.id));
     let archive_path = downloads
         .download_blocking(crate::downloads::DownloadSpec {
             kind: crate::downloads::DownloadKind::Agent,
@@ -200,7 +194,7 @@ pub async fn ensure_installed(
             label: spec.label.to_string(),
             url,
             dest: archive_dest,
-            sha256: None,
+            sha256: Some(archive_sha256),
             version_record: None,
         })
         .await

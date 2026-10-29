@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import type { BrowserWindow } from "electron";
+
 import { IPC } from "../shared/ipc.ts";
 import {
 	focusForCommand,
 	hideWindow,
 	isVisible,
 	onVisibilityChanged,
+	setAppActivator,
 	setVisibilityTarget,
 	showWindow,
 	toggleWindow,
@@ -15,7 +16,7 @@ import {
 // the visibility controller makes so we can assert the show/hide/focus paths
 // without a real Electron window.
 interface SentMessage {
-	arg: unknown;
+	arg: boolean;
 	channel: string;
 }
 
@@ -34,6 +35,9 @@ function makeFakeWindow(initialVisible = false) {
 		show: () => {
 			state.visible = true;
 		},
+		showInactive: () => {
+			state.visible = true;
+		},
 		hide: () => {
 			state.visible = false;
 		},
@@ -47,13 +51,13 @@ function makeFakeWindow(initialVisible = false) {
 			state.focused += 1;
 		},
 		webContents: {
-			send: (channel: string, arg: unknown) => {
+			send: (channel: string, arg: boolean) => {
 				sent.push({ channel, arg });
 			},
 		},
 	};
 	return {
-		win: win as unknown as BrowserWindow,
+		win,
 		state,
 		sent,
 	};
@@ -62,6 +66,7 @@ function makeFakeWindow(initialVisible = false) {
 afterEach(() => {
 	// Detach so no test leaks its window into the next one.
 	setVisibilityTarget(null);
+	setAppActivator(() => undefined);
 });
 
 describe("isVisible", () => {
@@ -157,13 +162,27 @@ describe("focusForCommand", () => {
 		const { win, state } = makeFakeWindow(false);
 		setVisibilityTarget(win);
 
+		let activations = 0;
+		setAppActivator(() => {
+			activations += 1;
+		});
+
 		focusForCommand();
 
 		expect(state.visible).toBe(true);
 		// Click-through OFF so the command palette accepts typing.
 		expect(state.ignoreMouse).toBe(false);
-		expect(state.movedTop).toBe(1);
-		expect(state.focused).toBe(1);
+		if (process.platform === "darwin") {
+			// macOS: never makeKeyAndOrderFront/moveTop (white plate); the app
+			// activation makes the ordered-in island key instead.
+			expect(state.movedTop).toBe(0);
+			expect(state.focused).toBe(0);
+			expect(activations).toBe(1);
+		} else {
+			expect(state.movedTop).toBe(1);
+			expect(state.focused).toBe(1);
+			expect(activations).toBe(0);
+		}
 	});
 
 	it("is a no-op when the target is destroyed", () => {

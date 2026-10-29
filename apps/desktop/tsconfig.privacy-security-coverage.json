@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/PrivacySettings.tsx",
+    "src/components/settings/EncryptionSettings.tsx",
+    "src/components/settings/EmailAlertsSettings.tsx",
+    "src/components/settings/SettingsSyncTab.tsx",
+    "src/components/settings/privacy-security.test-support.ts",
+    "src/components/settings/PrivacySettings.coverage.native-http.test.tsx",
+    "src/components/settings/PrivacySettings.content-mode.native-http.test.tsx",
+    "src/components/settings/EncryptionSettings.coverage.native-http.test.tsx",
+    "src/components/settings/EmailAlertsSettings.coverage.native-http.test.tsx",
+    "src/components/settings/SettingsSyncTab.coverage.native-http.test.tsx"
+  ]
+}

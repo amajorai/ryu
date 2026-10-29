@@ -1,17 +1,25 @@
 [package]
 name = "ryu-gw-audit"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
 description = "Ryu Gateway audit stage: the SQLite-backed append-only request log + lifetime token totals + query/summary, exposed as a swappable AuditBackend trait + id-keyed AuditRegistry with the built-in AuditLogger active by default. An extracted gateway stage crate (mirrors ryu-gw-budget / ryu-gw-evals)."
 
 [dependencies]
+ryu-gw-credentials = { path = "../credentials" }
+# The data-dir layout (`layout::db_file`) and profile suffix shared with Core.
+ryu-sidecar-runtime = { path = "../../core/sidecar-runtime", version = "0.5.0" }
 serde = { version = "1", features = ["derive"] }
 dashmap = "6"
 rusqlite = { version = "0.40.0", features = ["bundled"] }
 tracing = "0.1"
 anyhow = "1"
+# Free-space probe before the one-time raw-key rebuild (VACUUM).
+fs4 = "0.8.4"
 dirs = "5"
 hex = "0.4"
 sha2 = "0.10"
+serde_json = "1"
+# Seals violation evidence excerpts at rest in the outbox (`violation`).
+aes-gcm = "0.10"

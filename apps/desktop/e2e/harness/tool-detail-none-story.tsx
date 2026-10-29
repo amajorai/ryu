@@ -24,10 +24,11 @@
 // the settings UI that writes the pref (see tool-detail-ladder.test.ts for the
 // ladder arithmetic).
 
-import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
-import type { UIMessage } from "ai";
+import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
+import type { ToolUIPart, UIMessage } from "ai";
 import { createRoot } from "react-dom/client";
 import { MessageList } from "../../components/agent-elements/message-list.tsx";
+import proofStyles from "./tool-detail-none-story.module.css";
 import "../../src/index.css";
 
 /**
@@ -43,20 +44,19 @@ const MARKERS = {
 	userQuestion: "Does the build pass",
 } as const;
 
-const toolPart = (
-	id: string,
-	file: string,
-	extra: Record<string, unknown> = {}
-) => ({
+const toolPart = (id: string, file: string): ToolUIPart => ({
 	type: "tool-Read",
 	toolCallId: id,
 	state: "output-available",
 	input: { file_path: file },
 	output: { content: `contents of ${file}` },
-	...extra,
 });
 
-const MESSAGES: UIMessage[] = [
+interface InterruptedProofMessage extends UIMessage {
+	_interrupted?: boolean;
+}
+
+const MESSAGES: InterruptedProofMessage[] = [
 	// 0 — a head turn with no user message at all, made only of tool calls.
 	{
 		id: "a-opening",
@@ -65,13 +65,13 @@ const MESSAGES: UIMessage[] = [
 			{ type: "step-start" },
 			toolPart("call-open", MARKERS.openingToolOnly),
 		],
-	} as unknown as UIMessage,
+	},
 	// 1 — prose plus a tool call.
 	{
 		id: "u-1",
 		role: "user",
 		parts: [{ type: "text", text: `${MARKERS.userQuestion}?` }],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "a-1",
 		role: "assistant",
@@ -79,13 +79,13 @@ const MESSAGES: UIMessage[] = [
 			toolPart("call-1", "build.ts"),
 			{ type: "text", text: MARKERS.prose },
 		],
-	} as unknown as UIMessage,
+	},
 	// 2 — a reply that is nothing but tool work.
 	{
 		id: "u-2",
 		role: "user",
 		parts: [{ type: "text", text: "Clean that up please" }],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "a-2",
 		role: "assistant",
@@ -93,13 +93,13 @@ const MESSAGES: UIMessage[] = [
 			toolPart("call-2a", MARKERS.silentToolOnly),
 			toolPart("call-2b", "silent-refactor.test.ts"),
 		],
-	} as unknown as UIMessage,
+	},
 	// 3 — a reply whose only content is a FAILED call.
 	{
 		id: "u-3",
 		role: "user",
 		parts: [{ type: "text", text: "Ship it" }],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "a-3",
 		role: "assistant",
@@ -112,7 +112,7 @@ const MESSAGES: UIMessage[] = [
 				errorText: "exit 1: permission denied",
 			},
 		],
-	} as unknown as UIMessage,
+	},
 	// 4 — a turn cut off mid-stream, carrying NOTHING but hidden tool work. The
 	// marker rides on the message as `_interrupted` metadata, not as a part, so
 	// this is the case that proves turn STATUS is not treated as tool detail: get
@@ -121,13 +121,13 @@ const MESSAGES: UIMessage[] = [
 		id: "u-4",
 		role: "user",
 		parts: [{ type: "text", text: "Carry on" }],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "a-4",
 		role: "assistant",
 		_interrupted: true,
 		parts: [toolPart("call-4", "carry-on.ts")],
-	} as unknown as UIMessage,
+	},
 ];
 
 function Variant({
@@ -140,7 +140,7 @@ function Variant({
 	return (
 		<ChatDisplayPrefsProvider value={{ hideToolDetail }}>
 			<div
-				className="flex h-[560px] w-[440px] flex-col border border-border"
+				className={`${proofStyles.transcriptPane} flex flex-col border border-border`}
 				data-testid={testId}
 			>
 				<MessageList messages={MESSAGES} status="ready" />

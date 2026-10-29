@@ -1,11 +1,5 @@
 {
-  "tags": [
-    "agents",
-    "messaging",
-    "delegation",
-    "inbox",
-    "multi-agent"
-  ],
+  "tags": ["agents", "messaging", "delegation", "inbox", "multi-agent"],
   "author": {
     "name": "Ryu",
     "url": "https://ryuhq.com"
@@ -16,17 +10,11 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/agent-comms",
   "name": "Switchboard",
-  "version": "0.1.15",
+  "version": "0.1.17",
   "stability": "experimental",
   "description": "Lets the agents on this node talk to each other. Any agent can look up who else is here, leave one of them a message, and inspect the pair's bounded message history. A message is delivered at the start of the recipient's next turn, so delegation stays asynchronous and scoped to the calling agent. Works with every agent Ryu can run — the flagship agent, Claude Code, Codex, and any custom agent you have added — because it ships as ordinary tools rather than one agent's private feature.",
   "tagline": "Your agents can message each other",
-  "keywords": [
-    "agents",
-    "messaging",
-    "delegation",
-    "inbox",
-    "multi-agent"
-  ],
+  "keywords": ["agents", "messaging", "delegation", "inbox", "multi-agent"],
   "category": "Automation",
   "icon": "message-multiple-01",
   "iconDither": {
@@ -66,12 +54,9 @@
   "permission_grants": [
     "tool:execute",
     "storage:kv",
-    "conversation:reactions",
     "tool:http-egress:127.0.0.1"
   ],
-  "activation_events": [
-    "*"
-  ],
+  "activation_events": ["*"],
   "runnables": [
     {
       "id": "tool-agents-directory",
@@ -101,14 +86,11 @@
       "kind": "tool",
       "config": {
         "slug": "agents.send",
-        "backend": "inline_deno",
+        "backend": "inline_js",
         "description": "Leave a message in another agent's inbox and carry on — nothing waits. The recipient reads it at the start of its next turn. Use this to hand something over (\"the deploy is done, your turn\"), or to reply to a message you received. The sender is taken from the calling agent, not from anything you write. Returns `{ok, id, from, to, hops, delivery}`, or `{ok:false, refused:\"hop_limit\"}` when the relay chain is already at its limit.",
         "input_schema": {
           "type": "object",
-          "required": [
-            "to",
-            "text"
-          ],
+          "required": ["to", "text"],
           "properties": {
             "to": {
               "type": "string",
@@ -131,7 +113,7 @@
           },
           "additionalProperties": false
         },
-        "code": "// Tool body for `agents.send`, run in Core's Deno sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// (`build_inline_tool_program` in crates/core/tool-exec/src/lib.rs) with `input`\n// (the call arguments), `caller` (the DISPATCHING agent, host-derived) and `host`\n// (the capability bridge) already bound, and the body `return`s the tool result.\n// A top-level `return` is therefore correct here and `export` is not. The\n// manifest's `runnables[].config.code` is sealed from this file — edit here, then\n// reseal (see plugin.test.mjs, which fails on drift).\n//\n// `send` is the ASYNCHRONOUS half of the mailbox: it drops a message in another\n// agent's inbox and returns immediately. The recipient reads it at the start of\n// its next turn, injected by the `agent-comms.deliver` hook. Nothing wakes an\n// idle agent; callers that need a response should use an ordinary user turn.\n\nconst MAX_TEXT = 4000;\nconst MAX_INBOX = 20;\nconst MAX_THREAD = 12;\n// Hop 1 is a user-initiated message. Hop 2 is the one relay it may cause. A\n// third would be an agent chain nobody asked for, and every hop is a real agent\n// run on the user's budget — so the chain stops here, deterministically, rather\n// than relying on the models involved to lose interest.\nconst MAX_HOPS = 2;\nconst AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;\nconst MAX_CAS_RETRIES = 8;\n\nfunction validateAgentId(value, label) {\n\tconst id = String(value ?? \"\").trim();\n\tif (!AGENT_ID.test(id)) {\n\t\tthrow new Error(\n\t\t\t`agents.send: '${label}' must be a bounded agent id from agents.directory`\n\t\t);\n\t}\n\treturn id;\n}\n\nfunction keyPart(value) {\n\treturn encodeURIComponent(value);\n}\n\n/** Read a JSON value from plugin KV, or `fallback` when absent/corrupt. */\nasync function readJson(key, fallback) {\n\tconst raw = await host.storage.get(key);\n\tif (raw === null || raw === undefined || raw === \"\") {\n\t\treturn fallback;\n\t}\n\ttry {\n\t\tconst parsed = JSON.parse(String(raw));\n\t\treturn parsed === null ? fallback : parsed;\n\t} catch (_e) {\n\t\t// A half-written value must not brick the mailbox: treat it as empty.\n\t\treturn fallback;\n\t}\n}\n\n/** Read a small non-negative integer from plugin KV; 0 when absent/unparseable. */\nasync function readInt(key) {\n\tconst raw = await host.storage.get(key);\n\tconst n = Number.parseInt(String(raw ?? \"0\"), 10);\n\treturn Number.isFinite(n) && n > 0 ? n : 0;\n}\n\n// Message ids come from a stored counter, not a clock: the sandbox denies\n// `Date.now()` (and a tool that reads one is not replayable), so the sequence IS\n// the ordering. It is monotonic across every message this node relays.\nasync function nextSeq() {\n\tfor (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt += 1) {\n\t\tconst raw = await host.storage.get(\"seq\");\n\t\tconst current = Number.parseInt(String(raw ?? \"0\"), 10);\n\t\tconst next = (Number.isFinite(current) && current > 0 ? current : 0) + 1;\n\t\tif (await host.storage.compareAndSet(\"seq\", raw, String(next))) {\n\t\t\treturn next;\n\t\t}\n\t}\n\tthrow new Error(\"agents.send: sequence is busy; retry the message\");\n}\n\n/** The canonical, order-independent key for a pair's message history. */\nfunction threadKey(a, b) {\n\tconst pair = [a, b].sort().map(keyPart);\n\treturn `thread:${pair[0]}|${pair[1]}`;\n}\n\nasync function appendJson(key, item, limit) {\n\tfor (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt += 1) {\n\t\tconst raw = await host.storage.get(key);\n\t\tconst current = await readJson(key, []);\n\t\tconst next = (Array.isArray(current) ? current : [])\n\t\t\t.concat([item])\n\t\t\t.slice(-limit);\n\t\tif (await host.storage.compareAndSet(key, raw, JSON.stringify(next))) {\n\t\t\treturn next.length;\n\t\t}\n\t}\n\tthrow new Error(`agents.send: '${key}' is busy; retry the message`);\n}\n\nconst to = validateAgentId(input.to, \"to\");\nconst text = String(input.text ?? \"\").trim();\nif (text === \"\") {\n\tthrow new Error(\"agents.send: 'text' is required (the message to send)\");\n}\n\n// WHO IS SENDING IS NOT THE MODEL'S TO SAY. Agent-less workflows have no\n// verified principal, so they fail closed rather than accepting a model-supplied\n// `from` identity.\nconst from = String(caller.agent_id ?? \"\").trim();\nif (from === \"\") {\n\tthrow new Error(\"agents.send: the calling agent could not be identified\");\n}\nvalidateAgentId(from, \"from\");\nif (from === to) {\n\tthrow new Error(\n\t\t`agents.send: '${to}' is the calling agent — a message to yourself is a note, not a message`\n\t);\n}\n\n// How deep this agent already is in a relayed chain: from the conversation it is\n// answering in (set by the delivery hook) or, when it is itself running as a\n// delegated sub-agent with no conversation, from its agent-scoped marker.\n\tconst arrivedByConversation = caller.conversation_id\n\t? await readInt(`hops.conv:${keyPart(caller.conversation_id)}`)\n\t: 0;\n\tconst arrivedByAgent = await readInt(`hops.agent:${keyPart(from)}`);\nconst hops = Math.max(arrivedByConversation, arrivedByAgent) + 1;\nif (hops > MAX_HOPS) {\n\treturn {\n\t\tok: false,\n\t\trefused: \"hop_limit\",\n\t\thops: hops,\n\t\tmax_hops: MAX_HOPS,\n\t\terror: `agents.send: this message would be hop ${hops} of an agent-to-agent chain and the limit is ${MAX_HOPS}. Answer the user directly instead of relaying further.`,\n\t};\n}\n\nconst seq = await nextSeq();\nconst id = `m${seq}`;\nconst message = {\n\tid: id,\n\tseq: seq,\n\tfrom: from,\n\tfrom_conversation: caller.conversation_id ?? null,\n\tto: to,\n\ttext: text.slice(0, MAX_TEXT),\n\thops: hops,\n\treply_to: input.reply_to ? String(input.reply_to) : null,\n};\n\n// The inbox is per-AGENT, not per-conversation: a message addressed to an agent\n// is delivered in whichever of its conversations runs next. Capped, oldest\n// dropped — an undelivered backlog is not worth an unbounded KV value.\nconst inboxKey = `inbox:${keyPart(to)}`;\nconst queued = await appendJson(inboxKey, message, MAX_INBOX);\n\n// The pair's history, so `agents.thread` can show what was said.\nconst tKey = threadKey(from, to);\nawait appendJson(\n\ttKey,\n\t{ seq: seq, from: from, to: to, text: message.text },\n\tMAX_THREAD\n);\n\nreturn {\n\tok: true,\n\tid: id,\n\tfrom: from,\n\tto: to,\n\thops: hops,\n\tqueued: queued,\n\tdelivery:\n\t\t\"queued — it is injected at the start of the recipient's next turn. Nothing wakes an idle agent; continue in your own turn when you need a response.\",\n};\n"
+        "code": "// Tool body for `agents.send`, run in Core's JS sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// (`build_inline_tool_program` in crates/core/tool-exec/src/lib.rs) with `input`\n// (the call arguments), `caller` (the DISPATCHING agent, host-derived) and `host`\n// (the capability bridge) already bound, and the body `return`s the tool result.\n// A top-level `return` is therefore correct here and `export` is not. The\n// manifest's `runnables[].config.code` is sealed from this file — edit here, then\n// reseal (see plugin.test.mjs, which fails on drift).\n//\n// `send` is the ASYNCHRONOUS half of the mailbox: it drops a message in another\n// agent's inbox and returns immediately. The recipient reads it at the start of\n// its next turn, injected by the `agent-comms.deliver` hook. Nothing wakes an\n// idle agent; callers that need a response should use an ordinary user turn.\n\nconst MAX_TEXT = 4000;\nconst MAX_INBOX = 20;\nconst MAX_THREAD = 12;\n// Hop 1 is a user-initiated message. Hop 2 is the one relay it may cause. A\n// third would be an agent chain nobody asked for, and every hop is a real agent\n// run on the user's budget — so the chain stops here, deterministically, rather\n// than relying on the models involved to lose interest.\nconst MAX_HOPS = 2;\nconst AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;\nconst MAX_CAS_RETRIES = 8;\n\nfunction validateAgentId(value, label) {\n\tconst id = String(value ?? \"\").trim();\n\tif (!AGENT_ID.test(id)) {\n\t\tthrow new Error(\n\t\t\t`agents.send: '${label}' must be a bounded agent id from agents.directory`\n\t\t);\n\t}\n\treturn id;\n}\n\nfunction keyPart(value) {\n\treturn encodeURIComponent(value);\n}\n\n/** Read a JSON value from plugin KV, or `fallback` when absent/corrupt. */\nasync function readJson(key, fallback) {\n\tconst raw = await host.storage.get(key);\n\tif (raw === null || raw === undefined || raw === \"\") {\n\t\treturn fallback;\n\t}\n\ttry {\n\t\tconst parsed = JSON.parse(String(raw));\n\t\treturn parsed === null ? fallback : parsed;\n\t} catch {\n\t\t// A half-written value must not brick the mailbox: treat it as empty.\n\t\treturn fallback;\n\t}\n}\n\n/** Read a small non-negative integer from plugin KV; 0 when absent/unparseable. */\nasync function readInt(key) {\n\tconst raw = await host.storage.get(key);\n\tconst n = Number.parseInt(String(raw ?? \"0\"), 10);\n\treturn Number.isFinite(n) && n > 0 ? n : 0;\n}\n\n// Message ids come from a stored counter, not a clock: the sandbox denies\n// `Date.now()` (and a tool that reads one is not replayable), so the sequence IS\n// the ordering. It is monotonic across every message this node relays.\nasync function nextSeq() {\n\tfor (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt += 1) {\n\t\tconst raw = await host.storage.get(\"seq\");\n\t\tconst current = Number.parseInt(String(raw ?? \"0\"), 10);\n\t\tconst next = (Number.isFinite(current) && current > 0 ? current : 0) + 1;\n\t\tif (await host.storage.compareAndSet(\"seq\", raw, String(next))) {\n\t\t\treturn next;\n\t\t}\n\t}\n\tthrow new Error(\"agents.send: sequence is busy; retry the message\");\n}\n\n/** The canonical, order-independent key for a pair's message history. */\nfunction threadKey(a, b) {\n\tconst pair = [a, b].sort().map(keyPart);\n\treturn `thread:${pair[0]}|${pair[1]}`;\n}\n\nasync function appendJson(key, item, limit) {\n\tfor (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt += 1) {\n\t\tconst raw = await host.storage.get(key);\n\t\tconst current = await readJson(key, []);\n\t\tconst next = (Array.isArray(current) ? current : [])\n\t\t\t.concat([item])\n\t\t\t.slice(-limit);\n\t\tif (await host.storage.compareAndSet(key, raw, JSON.stringify(next))) {\n\t\t\treturn next.length;\n\t\t}\n\t}\n\tthrow new Error(`agents.send: '${key}' is busy; retry the message`);\n}\n\nconst to = validateAgentId(input.to, \"to\");\nconst text = String(input.text ?? \"\").trim();\nif (text === \"\") {\n\tthrow new Error(\"agents.send: 'text' is required (the message to send)\");\n}\n\n// WHO IS SENDING IS NOT THE MODEL'S TO SAY. Agent-less workflows have no\n// verified principal, so they fail closed rather than accepting a model-supplied\n// `from` identity.\nconst from = String(caller.agent_id ?? \"\").trim();\nif (from === \"\") {\n\tthrow new Error(\"agents.send: the calling agent could not be identified\");\n}\nvalidateAgentId(from, \"from\");\nif (from === to) {\n\tthrow new Error(\n\t\t`agents.send: '${to}' is the calling agent — a message to yourself is a note, not a message`\n\t);\n}\n\n// How deep this agent already is in a relayed chain: the depth of the mail the\n// delivery hook injected into this conversation's current user turn. The hook\n// clears it on any turn that delivers nothing, so a user-started send is hop 1.\nconst arrivedByConversation = caller.conversation_id\n\t? await readInt(`hops.conv:${keyPart(caller.conversation_id)}`)\n\t: 0;\nconst hops = arrivedByConversation + 1;\nif (hops > MAX_HOPS) {\n\treturn {\n\t\tok: false,\n\t\trefused: \"hop_limit\",\n\t\thops: hops,\n\t\tmax_hops: MAX_HOPS,\n\t\terror: `agents.send: this message would be hop ${hops} of an agent-to-agent chain and the limit is ${MAX_HOPS}. Answer the user directly instead of relaying further.`,\n\t};\n}\n\nconst seq = await nextSeq();\nconst id = `m${seq}`;\nconst message = {\n\tid: id,\n\tseq: seq,\n\tfrom: from,\n\tfrom_conversation: caller.conversation_id ?? null,\n\tto: to,\n\ttext: text.slice(0, MAX_TEXT),\n\thops: hops,\n\treply_to: input.reply_to ? String(input.reply_to) : null,\n};\n\n// The inbox is per-AGENT, not per-conversation: a message addressed to an agent\n// is delivered in whichever of its conversations runs next. Capped, oldest\n// dropped — an undelivered backlog is not worth an unbounded KV value.\nconst inboxKey = `inbox:${keyPart(to)}`;\nconst queued = await appendJson(inboxKey, message, MAX_INBOX);\n\n// The pair's history, so `agents.thread` can show what was said.\nconst tKey = threadKey(from, to);\nawait appendJson(\n\ttKey,\n\t{ seq: seq, from: from, to: to, text: message.text },\n\tMAX_THREAD\n);\n\nreturn {\n\tok: true,\n\tid: id,\n\tfrom: from,\n\tto: to,\n\thops: hops,\n\tqueued: queued,\n\tdelivery:\n\t\t\"queued — it is injected at the start of the recipient's next turn. Nothing wakes an idle agent; continue in your own turn when you need a response.\",\n};\n"
       }
     },
     {
@@ -140,7 +122,7 @@
       "kind": "tool",
       "config": {
         "slug": "agents.thread",
-        "backend": "inline_deno",
+        "backend": "inline_js",
         "description": "Read what you and another agent have already said to each other, or — with no arguments — list the agents you have exchanged messages with. Use it before asking again, so you do not re-ask something that was answered. Scoped to the calling agent: it can only ever show threads this agent is part of. Returns `{ok, agent, with, messages:[{seq, from, to, text}]}`, or `{ok, agent, peers}` when no peer is named.",
         "input_schema": {
           "type": "object",
@@ -154,40 +136,7 @@
           },
           "additionalProperties": false
         },
-        "code": "// Tool body for `agents.thread`, run in Core's Deno sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// (`build_inline_tool_program` in crates/core/tool-exec/src/lib.rs) with `input`,\n// `caller` and `host` bound, and the body `return`s the tool result. The\n// manifest's `runnables[].config.code` is sealed from this file — edit here, then\n// reseal (plugin.test.mjs fails on drift).\n//\n// Reading is scoped to the CALLING agent's own threads, and that is the whole\n// security posture of this tool: `caller.agent_id` is host-derived, so a `with`\n// the model writes can only ever name the OTHER end of one of its own\n// conversations. There is deliberately no \"read agent X's mailbox\" argument.\n\nconst MAX_MESSAGES = 12;\nconst AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;\n\nasync function readJson(key, fallback) {\n\tconst raw = await host.storage.get(key);\n\tif (raw === null || raw === undefined || raw === \"\") {\n\t\treturn fallback;\n\t}\n\ttry {\n\t\tconst parsed = JSON.parse(String(raw));\n\t\treturn parsed === null ? fallback : parsed;\n\t} catch (_e) {\n\t\treturn fallback;\n\t}\n}\n\nfunction threadKey(a, b) {\n\tconst pair = [a, b].sort().map((value) => encodeURIComponent(value));\n\treturn `thread:${pair[0]}|${pair[1]}`;\n}\n\nconst me = String(caller.agent_id ?? \"\").trim();\nif (!AGENT_ID.test(me)) {\n\tthrow new Error(\"agents.thread: the calling agent could not be identified\");\n}\n\nconst peer = String(input.with ?? \"\").trim();\nif (peer !== \"\" && !AGENT_ID.test(peer)) {\n\tthrow new Error(\"agents.thread: 'with' must be a bounded agent id\");\n}\n\n// No peer named → which agents has this one talked to at all. Derived from the\n// key set, so it lists real history rather than the node's whole roster (that is\n// what agents.directory is for).\nif (peer === \"\") {\n\tconst keys = await host.storage.keys();\n\tconst peers = [];\n\tfor (const key of Array.isArray(keys) ? keys : []) {\n\t\tconst k = String(key);\n\t\tif (!k.startsWith(\"thread:\")) {\n\t\t\tcontinue;\n\t\t}\n\t\tconst pair = k.slice(\"thread:\".length).split(\"|\");\n\t\tif (pair.length !== 2) {\n\t\t\tcontinue;\n\t\t}\n\t\tconst decoded = pair.map((value) => decodeURIComponent(value));\n\t\tif (decoded[0] === me && !peers.includes(decoded[1])) {\n\t\t\tpeers.push(decoded[1]);\n\t\t} else if (decoded[1] === me && !peers.includes(decoded[0])) {\n\t\t\tpeers.push(decoded[0]);\n\t\t}\n\t}\n\treturn {\n\t\tok: true,\n\t\tagent: me,\n\t\tpeers: peers,\n\t\thint:\n\t\t\tpeers.length === 0\n\t\t\t\t? \"No agent-to-agent history yet. agents.directory lists who is on this node.\"\n\t\t\t\t: \"Call agents.thread again with `with: \\\"<agent id>\\\"` to read one of these.\",\n\t};\n}\n\nconst messages = await readJson(threadKey(me, peer), []);\nconst rows = (Array.isArray(messages) ? messages : []).slice(-MAX_MESSAGES);\n\nreturn {\n\tok: true,\n\tagent: me,\n\twith: peer,\n\tmessages: rows.map((m) => ({\n\t\tseq: m.seq ?? null,\n\t\tfrom: m.from ?? null,\n\t\tto: m.to ?? null,\n\t\ttext: String(m.text ?? \"\"),\n\t})),\n\tcount: rows.length,\n};\n"
-      }
-    },
-    {
-      "id": "tool-agents-react",
-      "name": "React to a Message",
-      "kind": "tool",
-      "config": {
-        "slug": "agents.react",
-        "backend": "inline_deno",
-        "description": "Set an emoji reaction on an exact persisted message in the calling agent's current conversation. Use the message_id from the conversation or from search_conversations.search; the target may be a user message or a message authored by any other agent in the same conversation. Repeating the same reaction is idempotent. The actor and conversation are resolved by Core from the calling agent and cannot be supplied by the model.",
-        "input_schema": {
-          "type": "object",
-          "required": [
-            "message_id",
-            "emoji"
-          ],
-          "properties": {
-            "message_id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200,
-              "description": "The exact persisted Core message id to react to. Streaming/client-generated ids and ids from another conversation are rejected; messages authored by other agents are allowed."
-            },
-            "emoji": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64,
-              "description": "The emoji or bounded emoji sequence to add, such as ✅ or 👀."
-            }
-          },
-          "additionalProperties": false
-        },
-        "code": "// Tool body for `agents.react`, run in Core's Deno sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// (`build_inline_tool_program` in crates/core/tool-exec/src/lib.rs) with `input`\n// (the call arguments), `caller` (the DISPATCHING agent, host-derived) and `host`\n// (the capability bridge) already bound, and the body `return`s the tool result.\n// A top-level `return` is therefore correct here and `export` is not. The\n// manifest's `runnables[].config.code` is sealed from this file — edit here, then\n// reseal (see plugin.test.mjs, which fails on drift).\n//\n// Reactions are scoped to the agent's current host conversation. The Core bridge\n// supplies that conversation and the agent actor from the dispatch context, so a\n// model cannot redirect the reaction to another chat or react as another agent.\n\nconst MAX_MESSAGE_ID_BYTES = 200;\nconst MAX_EMOJI_BYTES = 64;\nconst AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;\nconst byteLength = (value) => new TextEncoder().encode(value).length;\n\nconst messageId = String(input.message_id ?? \"\").trim();\nif (messageId === \"\") {\n\tthrow new Error(\"agents.react: 'message_id' is required\");\n}\nif (byteLength(messageId) > MAX_MESSAGE_ID_BYTES) {\n\tthrow new Error(\n\t\t`agents.react: 'message_id' must be at most ${MAX_MESSAGE_ID_BYTES} bytes`\n\t);\n}\n\nconst emoji = String(input.emoji ?? \"\").trim();\nif (emoji === \"\") {\n\tthrow new Error(\"agents.react: 'emoji' is required\");\n}\nif (byteLength(emoji) > MAX_EMOJI_BYTES) {\n\tthrow new Error(\n\t\t`agents.react: 'emoji' must be at most ${MAX_EMOJI_BYTES} bytes`\n\t);\n}\n\nconst agentId = String(caller.agent_id ?? \"\").trim();\nif (!AGENT_ID.test(agentId)) {\n\tthrow new Error(\"agents.react: the calling agent could not be identified\");\n}\nif (!String(caller.conversation_id ?? \"\").trim()) {\n\tthrow new Error(\n\t\t\"agents.react: a current conversation is required to set a reaction\"\n\t);\n}\n\n// Core derives the conversation and actor from the dispatch context. Only the\n// exact persisted message id and the normalized emoji cross the sandbox boundary.\nreturn await host.reactions.add({ message_id: messageId, emoji });\n"
+        "code": "// Tool body for `agents.thread`, run in Core's JS sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// (`build_inline_tool_program` in crates/core/tool-exec/src/lib.rs) with `input`,\n// `caller` and `host` bound, and the body `return`s the tool result. The\n// manifest's `runnables[].config.code` is sealed from this file — edit here, then\n// reseal (plugin.test.mjs fails on drift).\n//\n// Reading is scoped to the CALLING agent's own threads, and that is the whole\n// security posture of this tool: `caller.agent_id` is host-derived, so a `with`\n// the model writes can only ever name the OTHER end of one of its own\n// conversations. There is deliberately no \"read agent X's mailbox\" argument.\n\nconst MAX_MESSAGES = 12;\nconst AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;\n\nasync function readJson(key, fallback) {\n\tconst raw = await host.storage.get(key);\n\tif (raw === null || raw === undefined || raw === \"\") {\n\t\treturn fallback;\n\t}\n\ttry {\n\t\tconst parsed = JSON.parse(String(raw));\n\t\treturn parsed === null ? fallback : parsed;\n\t} catch {\n\t\treturn fallback;\n\t}\n}\n\nfunction threadKey(a, b) {\n\tconst pair = [a, b].sort().map((value) => encodeURIComponent(value));\n\treturn `thread:${pair[0]}|${pair[1]}`;\n}\n\nconst me = String(caller.agent_id ?? \"\").trim();\nif (!AGENT_ID.test(me)) {\n\tthrow new Error(\"agents.thread: the calling agent could not be identified\");\n}\n\nconst peer = String(input.with ?? \"\").trim();\nif (peer !== \"\" && !AGENT_ID.test(peer)) {\n\tthrow new Error(\"agents.thread: 'with' must be a bounded agent id\");\n}\n\n// No peer named → which agents has this one talked to at all. Derived from the\n// key set, so it lists real history rather than the node's whole roster (that is\n// what agents.directory is for).\nif (peer === \"\") {\n\tconst keys = await host.storage.keys();\n\tconst peers = [];\n\tfor (const key of Array.isArray(keys) ? keys : []) {\n\t\tconst k = String(key);\n\t\tif (!k.startsWith(\"thread:\")) {\n\t\t\tcontinue;\n\t\t}\n\t\tconst pair = k.slice(\"thread:\".length).split(\"|\");\n\t\tif (pair.length !== 2) {\n\t\t\tcontinue;\n\t\t}\n\t\tconst decoded = pair.map((value) => decodeURIComponent(value));\n\t\tif (decoded[0] === me && !peers.includes(decoded[1])) {\n\t\t\tpeers.push(decoded[1]);\n\t\t} else if (decoded[1] === me && !peers.includes(decoded[0])) {\n\t\t\tpeers.push(decoded[0]);\n\t\t}\n\t}\n\treturn {\n\t\tok: true,\n\t\tagent: me,\n\t\tpeers: peers,\n\t\thint:\n\t\t\tpeers.length === 0\n\t\t\t\t? \"No agent-to-agent history yet. agents.directory lists who is on this node.\"\n\t\t\t\t: \"Call agents.thread again with `with: \\\"<agent id>\\\"` to read one of these.\",\n\t};\n}\n\nconst messages = await readJson(threadKey(me, peer), []);\nconst rows = (Array.isArray(messages) ? messages : []).slice(-MAX_MESSAGES);\n\nreturn {\n\tok: true,\n\tagent: me,\n\twith: peer,\n\tmessages: rows.map((m) => ({\n\t\tseq: m.seq ?? null,\n\t\tfrom: m.from ?? null,\n\t\tto: m.to ?? null,\n\t\ttext: String(m.text ?? \"\"),\n\t})),\n\tcount: rows.length,\n};\n"
       }
     }
   ],
@@ -202,9 +151,7 @@
         "id": "agent-comms.directory",
         "on": "tool_result",
         "match": {
-          "tools": [
-            "agents.directory"
-          ]
+          "tools": ["agents.directory"]
         },
         "code_file": "hooks/directory.js"
       }

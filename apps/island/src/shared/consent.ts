@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Shared island-consent preference: the cross-surface contract persisted in Core
 // under the `island-consent` key. The desktop app reads/writes the SAME key from
 // its Settings → Island tab, so the island companion (a separate Electron
@@ -28,23 +29,19 @@ export const DEFAULT_ISLAND_CONSENT: ConsentState = {
 	proactive: null,
 };
 
-/** Coerce arbitrary persisted JSON into a strict tri-state value. */
-function coerceTriState(value: unknown): boolean | null {
-	if (value === true || value === false) {
-		return value;
-	}
-	return null;
-}
+const consentSchema = z
+	.object({
+		chat: z.boolean().catch(true),
+		contextRead: z.boolean().nullable().catch(null),
+		proactive: z.boolean().nullable().catch(null),
+	})
+	.catch(DEFAULT_ISLAND_CONSENT);
 
 /** Normalize a partial/untrusted consent object to the canonical shape. */
 export function normalizeConsentBlob(
-	partial: Partial<ConsentState>
+	partial: Parameters<typeof consentSchema.parse>[0]
 ): ConsentState {
-	return {
-		chat: partial.chat === false ? false : DEFAULT_ISLAND_CONSENT.chat,
-		contextRead: coerceTriState(partial.contextRead),
-		proactive: coerceTriState(partial.proactive),
-	};
+	return consentSchema.parse(partial);
 }
 
 /**
@@ -57,7 +54,7 @@ export function parseConsent(raw: string | null): ConsentState {
 		return DEFAULT_ISLAND_CONSENT;
 	}
 	try {
-		return normalizeConsentBlob(JSON.parse(raw) as Partial<ConsentState>);
+		return normalizeConsentBlob(JSON.parse(raw));
 	} catch {
 		return DEFAULT_ISLAND_CONSENT;
 	}

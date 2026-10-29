@@ -1,6 +1,6 @@
 [package]
 name = "ryu-sidecar-runtime"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Shared Ryu sidecar process-boundary helpers"
@@ -10,3 +10,26 @@ repository = "https://github.com/amajorai/ryu"
 dirs = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Loopback peer proof (`peer_proof`): the HMAC-SHA256 challenge-response a
+# client runs before it hands a shared bearer to a loopback listener. Optional
+# so the many sidecars that never verify a peer keep this crate dependency-light.
+hmac = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+reqwest = { version = "0.12", default-features = false, optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+# MCP-to-sidecar loopback handoff (`handoff`): the per-run token file and the
+# dependency-free HTTP/1.1 client a keyless stdio MCP server uses to reach its
+# running sidecar.
+anyhow = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
+rand = { version = "0.8", optional = true }
+tokio = { version = "1", features = ["io-util", "macros", "net", "signal", "time"], optional = true }
+
+[features]
+# The proof primitives only (what a server needs to answer a challenge).
+peer-proof = ["dep:hmac", "dep:sha2"]
+# The proof primitives plus the async health-route probe and proof cache (what a
+# client needs before it sends the bearer).
+peer-probe = ["peer-proof", "dep:reqwest", "dep:uuid"]
+# The sidecar handoff file, its route gate, and the loopback client.
+handoff = ["dep:anyhow", "dep:base64", "dep:rand", "dep:tokio"]

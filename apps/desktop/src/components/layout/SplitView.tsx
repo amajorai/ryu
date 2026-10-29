@@ -1,5 +1,15 @@
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { useCallback, useMemo, useRef } from "react";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type {
+	WorkbenchGroup,
+	WorkbenchItem,
+	WorkbenchSplitNode,
+} from "@ryu/workbench/model";
+import type {
+	CSSProperties,
+	ReactNode,
+	PointerEvent as ReactPointerEvent,
+} from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Split } from "@/src/contexts/TabsContext.tsx";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import type {
@@ -7,6 +17,11 @@ import type {
 	SplitNode,
 	SplitOrientation,
 } from "@/src/lib/splitTree.ts";
+import { useDesktopWorkbench } from "@/src/workbench/DesktopWorkbenchContext.tsx";
+import { EmptyCenterGroup } from "@/src/workbench/WorkbenchRegion.tsx";
+import { WorkbenchTabStrip } from "@/src/workbench/WorkbenchTabStrip.tsx";
+import { useWorkbenchSlots } from "@/src/workbench/workbench-slots.tsx";
+import splitStyles from "./SplitView.module.css";
 
 // Width/height of the draggable gutter between two panes, in pixels.
 export const SPLIT_GUTTER_PX = 6;
@@ -64,7 +79,7 @@ export const FULL_PANE_RECT: PaneRect = {
 	height: { frac: 1, px: 0 },
 };
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one recursive walk keeps both axes' math side by side
+// one recursive walk keeps both axes' math side by side
 function walkNode(
 	node: SplitNode,
 	rect: PaneRect,
@@ -175,7 +190,7 @@ export function paneRectStyle(rect: PaneRect): CSSProperties {
 export function paneRectPx(
 	rect: PaneRect,
 	container: { height: number; width: number }
-): { height: number; left: number; top: number; width: number } {
+) {
 	return {
 		left: rect.left.frac * container.width + rect.left.px,
 		top: rect.top.frac * container.height + rect.top.px,
@@ -192,14 +207,13 @@ export function paneNeedsTopClearance(rect: PaneRect): boolean {
 
 // A gutter that reaches the top edge starts below the titlebar so it never
 // sits on top of the tab strip.
-function gutterStyle(spec: GutterSpec): CSSProperties {
+function gutterStyle(spec: GutterSpec) {
 	const clearance = paneNeedsTopClearance(spec.rect) ? TITLEBAR_PX : 0;
 	return {
-		position: "absolute",
-		left: axisCalc(spec.rect.left),
-		top: axisCalc(spec.rect.top, clearance),
-		width: axisCalc(spec.rect.width),
-		height: axisCalc(spec.rect.height, -clearance),
+		"--pane-left": axisCalc(spec.rect.left),
+		"--pane-top": axisCalc(spec.rect.top, clearance),
+		"--pane-width": axisCalc(spec.rect.width),
+		"--pane-height": axisCalc(spec.rect.height, -clearance),
 	};
 }
 
@@ -311,31 +325,463 @@ export function SplitGutters({
 
 	return (
 		<>
-			{layout.gutters.map((spec) => (
-				<button
-					aria-label="Resize split"
-					className={
-						spec.orientation === "columns"
-							? "group/gutter z-20 flex cursor-col-resize items-center justify-center hover:bg-primary/20"
-							: "group/gutter z-20 flex cursor-row-resize items-center justify-center hover:bg-primary/20"
-					}
-					key={`${spec.path.join(".")}:${spec.boundary}`}
-					onPointerDown={(e) => beginDrag(spec, e)}
-					// Without `touch-action: none` the browser claims the drag for
-					// scrolling and a touch never resizes the split at all.
-					style={{ ...gutterStyle(spec), touchAction: "none" }}
-					type="button"
-				>
-					<span
-						aria-hidden
-						className={
+			{layout.gutters.map((spec) => {
+				const geometry = gutterStyle(spec);
+				const gutterVariables: PaneCssVariables = {
+					"--pane-left": geometry["--pane-left"],
+					"--pane-top": geometry["--pane-top"],
+					"--pane-width": geometry["--pane-width"],
+					"--pane-height": geometry["--pane-height"],
+				};
+				return (
+					<button
+						aria-label="Resize split"
+						className={cn(
+							splitStyles.gutter,
 							spec.orientation === "columns"
-								? "h-8 w-0.5 rounded-full bg-border transition-colors group-hover/gutter:bg-primary"
-								: "h-0.5 w-8 rounded-full bg-border transition-colors group-hover/gutter:bg-primary"
-						}
-					/>
-				</button>
-			))}
+								? "group/gutter z-20 flex cursor-col-resize items-center justify-center hover:bg-primary/20"
+								: "group/gutter z-20 flex cursor-row-resize items-center justify-center hover:bg-primary/20"
+						)}
+						key={`${spec.path.join(".")}:${spec.boundary}`}
+						onPointerDown={(e) => beginDrag(spec, e)}
+						// Without `touch-action: none` the browser claims the drag for
+						// scrolling and a touch never resizes the split at all.
+						style={gutterVariables}
+						type="button"
+					>
+						<span
+							aria-hidden
+							className={
+								spec.orientation === "columns"
+									? "h-8 w-0.5 rounded-full bg-border transition-colors group-hover/gutter:bg-primary"
+									: "h-0.5 w-8 rounded-full bg-border transition-colors group-hover/gutter:bg-primary"
+							}
+						/>
+					</button>
+				);
+			})}
 		</>
 	);
+}
+
+function workbenchTreeAsSplitNode(tree: WorkbenchSplitNode): SplitNode {
+	if (tree.type === "leaf") {
+		return { type: "leaf", tabId: tree.groupId };
+	}
+	return {
+		type: "branch",
+		children: tree.children.map(workbenchTreeAsSplitNode),
+		orientation: tree.orientation,
+		sizes: tree.sizes,
+	};
+}
+
+export function computeCenterGroupLayout(
+	tree: WorkbenchSplitNode
+): SplitLayout {
+	const splitNode = workbenchTreeAsSplitNode(tree);
+	if (splitNode.type === "leaf") {
+		return {
+			gutters: [],
+			panes: new Map([[splitNode.tabId, FULL_PANE_RECT]]),
+		};
+	}
+	return computeSplitLayout(splitNode);
+}
+
+function WorkbenchItemSlot({
+	children,
+	groupId,
+	itemId,
+}: {
+	children?: ReactNode;
+	groupId: string;
+	itemId: string;
+}) {
+	const { registerSlot, unregisterSlot } = useWorkbenchSlots();
+	const elementRef = useRef<HTMLDivElement | null>(null);
+	const setSlotRef = useCallback(
+		(element: HTMLDivElement | null) => {
+			const previous = elementRef.current;
+			if (previous) {
+				unregisterSlot(groupId, itemId, previous);
+			}
+			elementRef.current = element;
+			if (element) {
+				registerSlot(groupId, itemId, element);
+			}
+		},
+		[groupId, itemId, registerSlot, unregisterSlot]
+	);
+	return (
+		<div
+			className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+			data-workbench-item={itemId}
+			data-workbench-slot={`${groupId}:${itemId}`}
+			ref={setSlotRef}
+		>
+			{children}
+		</div>
+	);
+}
+
+function CenterGroupView({
+	compatibilityContent,
+	focused,
+	group,
+	hideTabStrip,
+	items,
+	onCloseItem,
+	overlay,
+	showOverlay,
+	style,
+}: {
+	compatibilityContent?: ReactNode;
+	focused: boolean;
+	group: WorkbenchGroup;
+	hideTabStrip: boolean;
+	items: WorkbenchItem[];
+	onCloseItem?: (item: WorkbenchItem) => void;
+	overlay?: ReactNode;
+	showOverlay: boolean;
+	style: CSSProperties;
+}) {
+	const { dispatch } = useDesktopWorkbench();
+	const activeItem = items.find((item) => item.id === group.activeItemId);
+	return (
+		<div
+			className={cn(
+				"absolute flex min-h-0 min-w-0 flex-col overflow-hidden bg-background",
+				splitStyles.pane
+			)}
+			data-focused={focused}
+			data-group-id={group.id}
+			onMouseDownCapture={() =>
+				dispatch({ type: "group/focus", groupId: group.id })
+			}
+			style={style}
+		>
+			{hideTabStrip ? null : (
+				<WorkbenchTabStrip
+					focused={focused}
+					group={group}
+					items={items}
+					onCloseItem={onCloseItem}
+				/>
+			)}
+			{activeItem ? (
+				<WorkbenchItemSlot groupId={group.id} itemId={activeItem.id}>
+					{compatibilityContent}
+				</WorkbenchItemSlot>
+			) : compatibilityContent ? (
+				<div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+					{compatibilityContent}
+				</div>
+			) : (
+				<EmptyCenterGroup group={group} />
+			)}
+			{showOverlay && overlay ? (
+				<div
+					className="pointer-events-none absolute inset-0 z-30 [&>*]:pointer-events-auto"
+					data-workbench-center-overlay=""
+				>
+					{overlay}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function WorkbenchCenterGutters({
+	containerRef,
+	layout,
+}: {
+	containerRef: React.RefObject<HTMLElement | null>;
+	layout: SplitLayout;
+}) {
+	const { dispatch } = useDesktopWorkbench();
+	const activeRef = useRef<{
+		boundary: HTMLButtonElement;
+		pointerId: number;
+		previousCursor: string;
+		previousUserSelect: string;
+		spec: GutterSpec;
+	} | null>(null);
+	const startSizesRef = useRef<number[]>([]);
+	const startPosRef = useRef(0);
+
+	const onPointerMove = useCallback(
+		(event: PointerEvent) => {
+			const element = containerRef.current;
+			const session = activeRef.current;
+			if (!(element && session)) {
+				return;
+			}
+			const { spec } = session;
+			const box = element.getBoundingClientRect();
+			const containerMain =
+				spec.orientation === "columns" ? box.width : box.height;
+			const total = spec.mainAxis.frac * containerMain + spec.mainAxis.px;
+			if (total <= 0) {
+				return;
+			}
+			const position =
+				spec.orientation === "columns" ? event.clientX : event.clientY;
+			const deltaFraction = (position - startPosRef.current) / total;
+			const boundary = spec.boundary;
+			const base = startSizesRef.current;
+			const pair = (base[boundary] ?? 0) + (base[boundary + 1] ?? 0);
+			const first = Math.max(
+				MIN_PANE_FRACTION,
+				Math.min(
+					pair - MIN_PANE_FRACTION,
+					(base[boundary] ?? 0) + deltaFraction
+				)
+			);
+			const sizes = [...base];
+			sizes[boundary] = first;
+			sizes[boundary + 1] = pair - first;
+			dispatch({ type: "center/resize-branch", path: spec.path, sizes });
+		},
+		[containerRef, dispatch]
+	);
+	const finishDragRef = useRef<() => void>(() => undefined);
+	const onWindowKeyDown = useCallback((event: KeyboardEvent) => {
+		if (event.key === "Escape") {
+			finishDragRef.current();
+		}
+	}, []);
+
+	const finishDrag = useCallback(() => {
+		const session = activeRef.current;
+		if (!session) {
+			return;
+		}
+		activeRef.current = null;
+		window.removeEventListener("pointermove", onPointerMove);
+		window.removeEventListener("pointerup", finishDrag);
+		window.removeEventListener("pointercancel", finishDrag);
+		window.removeEventListener("blur", finishDrag);
+		window.removeEventListener("keydown", onWindowKeyDown);
+		session.boundary.removeEventListener("lostpointercapture", finishDrag);
+		if (
+			session.boundary.isConnected &&
+			session.boundary.hasPointerCapture?.(session.pointerId)
+		) {
+			session.boundary.releasePointerCapture?.(session.pointerId);
+		}
+		document.body.style.cursor = session.previousCursor;
+		document.body.style.userSelect = session.previousUserSelect;
+	}, [onPointerMove, onWindowKeyDown]);
+	finishDragRef.current = finishDrag;
+
+	useEffect(() => finishDrag, [finishDrag]);
+
+	const resizePair = useCallback(
+		(spec: GutterSpec, delta: number) => {
+			const boundary = spec.boundary;
+			const sizes = [...spec.sizes];
+			const pair = (sizes[boundary] ?? 0) + (sizes[boundary + 1] ?? 0);
+			const first = Math.max(
+				MIN_PANE_FRACTION,
+				Math.min(pair - MIN_PANE_FRACTION, (sizes[boundary] ?? 0) + delta)
+			);
+			sizes[boundary] = first;
+			sizes[boundary + 1] = pair - first;
+			dispatch({ type: "center/resize-branch", path: spec.path, sizes });
+		},
+		[dispatch]
+	);
+
+	const beginDrag = useCallback(
+		(spec: GutterSpec, event: ReactPointerEvent<HTMLButtonElement>) => {
+			event.preventDefault();
+			finishDrag();
+			const boundary = event.currentTarget;
+			activeRef.current = {
+				boundary,
+				pointerId: event.pointerId,
+				previousCursor: document.body.style.cursor,
+				previousUserSelect: document.body.style.userSelect,
+				spec,
+			};
+			startSizesRef.current = [...spec.sizes];
+			startPosRef.current =
+				spec.orientation === "columns" ? event.clientX : event.clientY;
+			document.body.style.cursor =
+				spec.orientation === "columns" ? "col-resize" : "row-resize";
+			document.body.style.userSelect = "none";
+			window.addEventListener("pointermove", onPointerMove);
+			window.addEventListener("pointerup", finishDrag);
+			window.addEventListener("pointercancel", finishDrag);
+			window.addEventListener("blur", finishDrag);
+			window.addEventListener("keydown", onWindowKeyDown);
+			boundary.addEventListener("lostpointercapture", finishDrag);
+			try {
+				boundary.setPointerCapture?.(event.pointerId);
+			} catch {
+				// Window-level lifecycle listeners still settle synthetic/webview drags.
+			}
+		},
+		[finishDrag, onPointerMove, onWindowKeyDown]
+	);
+
+	return layout.gutters.map((spec) => {
+		const geometry = gutterStyle(spec);
+		const gutterVariables: PaneCssVariables = {
+			"--pane-left": geometry["--pane-left"],
+			"--pane-top": geometry["--pane-top"],
+			"--pane-width": geometry["--pane-width"],
+			"--pane-height": geometry["--pane-height"],
+		};
+		const pair =
+			(spec.sizes[spec.boundary] ?? 0) + (spec.sizes[spec.boundary + 1] ?? 0);
+		return (
+			<button
+				aria-label="Resize Center split"
+				aria-orientation={
+					spec.orientation === "columns" ? "vertical" : "horizontal"
+				}
+				aria-valuemax={Math.round((pair - MIN_PANE_FRACTION) * 100)}
+				aria-valuemin={Math.round(MIN_PANE_FRACTION * 100)}
+				aria-valuenow={Math.round((spec.sizes[spec.boundary] ?? 0) * 100)}
+				className={cn(
+					splitStyles.gutter,
+					spec.orientation === "columns"
+						? "group/gutter absolute z-20 flex cursor-col-resize items-center justify-center hover:bg-primary/20"
+						: "group/gutter absolute z-20 flex cursor-row-resize items-center justify-center hover:bg-primary/20"
+				)}
+				key={`${spec.path.join(".")}:${spec.boundary}`}
+				onDoubleClick={() =>
+					resizePair(spec, pair / 2 - (spec.sizes[spec.boundary] ?? pair / 2))
+				}
+				onKeyDown={(event) => {
+					const negativeKey =
+						spec.orientation === "columns" ? "ArrowLeft" : "ArrowUp";
+					const positiveKey =
+						spec.orientation === "columns" ? "ArrowRight" : "ArrowDown";
+					if (event.key === "Escape") {
+						finishDrag();
+					} else if (event.key === negativeKey) {
+						event.preventDefault();
+						resizePair(spec, -0.05);
+					} else if (event.key === positiveKey) {
+						event.preventDefault();
+						resizePair(spec, 0.05);
+					}
+				}}
+				onPointerDown={(event) => beginDrag(spec, event)}
+				role="separator"
+				style={gutterVariables}
+				tabIndex={0}
+				type="button"
+			/>
+		);
+	});
+}
+
+export function DesktopCenterSplitView({
+	collapseToFocused = false,
+	compatibilityContent,
+	globalOverlay,
+	onCloseItem,
+	overlay,
+	style,
+	suppressFocusedTabStrip = false,
+}: {
+	/** Narrow windows show only the focused Center pane; the tree is kept. */
+	collapseToFocused?: boolean;
+	compatibilityContent?: ReactNode;
+	globalOverlay?: ReactNode;
+	onCloseItem?: (item: WorkbenchItem) => void;
+	overlay?: ReactNode;
+	style?: CSSProperties;
+	suppressFocusedTabStrip?: boolean;
+}) {
+	const { state } = useDesktopWorkbench();
+	const containerRef = useRef<HTMLElement | null>(null);
+	const centerGroups = state.groups.filter(
+		(group) => group.region === "center"
+	);
+	const collapsedGroupId =
+		collapseToFocused && state.centerTree.type === "branch"
+			? (centerGroups.find((group) => group.id === state.focusedGroupId)?.id ??
+				centerGroups.find((group) => group.activeItemId !== null)?.id ??
+				centerGroups[0]?.id)
+			: undefined;
+	const layout = useMemo(
+		() =>
+			computeCenterGroupLayout(
+				collapsedGroupId
+					? { type: "leaf", groupId: collapsedGroupId }
+					: state.centerTree
+			),
+		[collapsedGroupId, state.centerTree]
+	);
+	const firstGroupId = layout.panes.keys().next().value;
+	const focusedCenterGroupId = centerGroups.some(
+		(group) => group.id === state.focusedGroupId && group.activeItemId !== null
+	)
+		? state.focusedGroupId
+		: undefined;
+	const overlayGroupId =
+		focusedCenterGroupId ??
+		centerGroups.find((group) => group.activeItemId !== null)?.id ??
+		firstGroupId;
+	return (
+		<section
+			aria-label="Center"
+			className="relative min-h-0 min-w-0 overflow-hidden bg-background"
+			data-focused={centerGroups.some(
+				(group) => group.id === state.focusedGroupId
+			)}
+			data-region="center"
+			ref={containerRef}
+			style={style}
+		>
+			{centerGroups.flatMap((group) => {
+				const rect = layout.panes.get(group.id);
+				if (!rect) {
+					return [];
+				}
+				const items = group.itemIds.flatMap((itemId) => {
+					const item = state.items.find((candidate) => candidate.id === itemId);
+					return item ? [item] : [];
+				});
+				const paneVariables: PaneCssVariables = {
+					"--pane-left": axisCalc(rect.left),
+					"--pane-top": axisCalc(rect.top),
+					"--pane-width": axisCalc(rect.width),
+					"--pane-height": axisCalc(rect.height),
+				};
+				const focused = group.id === state.focusedGroupId;
+				const showOverlay = group.id === overlayGroupId;
+				return [
+					<CenterGroupView
+						compatibilityContent={
+							group.id === firstGroupId ? compatibilityContent : undefined
+						}
+						focused={focused}
+						group={group}
+						hideTabStrip={showOverlay && (suppressFocusedTabStrip || !!overlay)}
+						items={items}
+						key={group.id}
+						onCloseItem={onCloseItem}
+						overlay={showOverlay ? overlay : undefined}
+						showOverlay={showOverlay}
+						style={paneVariables}
+					/>,
+				];
+			})}
+			<WorkbenchCenterGutters containerRef={containerRef} layout={layout} />
+			{globalOverlay}
+		</section>
+	);
+}
+
+export interface PaneCssVariables extends CSSProperties {
+	"--pane-height"?: string;
+	"--pane-left"?: string;
+	"--pane-top"?: string;
+	"--pane-width"?: string;
 }

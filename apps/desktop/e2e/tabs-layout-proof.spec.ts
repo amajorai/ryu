@@ -119,7 +119,22 @@ test("verifies overflow, menu controls, context reuse, and persisted layout", as
 		targetBox.y + targetBox.height / 2,
 		{ steps: 8 }
 	);
-	await expect(page.locator("[data-tabs-drop-indicator]")).toBeVisible();
+	// The hovered tab slides aside to open the gap; no drop line is drawn.
+	await expect
+		.poll(() =>
+			secondVisibleTrigger.evaluate(
+				(element) =>
+					new DOMMatrixReadOnly(getComputedStyle(element).transform).m41
+			)
+		)
+		.toBeGreaterThan(0);
+	await expect(page.locator("[data-tabs-drop-indicator]")).toHaveCount(0);
+	// A real drag keeps firing dragover while the pointer rests; Playwright's
+	// emulated one does not, so nudge once to re-target the slid-in tab.
+	await page.mouse.move(
+		targetBox.x + targetBox.width * 0.25 + 1,
+		targetBox.y + targetBox.height / 2
+	);
 	await page.mouse.up();
 	await expect
 		.poll(() => page.getByTestId("stored-order").innerText())
@@ -170,7 +185,7 @@ test("verifies overflow, menu controls, context reuse, and persisted layout", as
 	);
 });
 
-test("verifies component-level scrolling controls when layout management is disabled", async ({
+test("verifies component-level edge arrows when layout management is disabled", async ({
 	page,
 }, testInfo) => {
 	await page.goto(STORY_URL);
@@ -181,24 +196,45 @@ test("verifies component-level scrolling controls when layout management is disa
 	await expect(list).toHaveCSS("overflow-y", "hidden");
 	await expect(list.locator('[role="tab"]')).toHaveCount(7);
 
-	const trigger = proof.getByRole("button", {
-		name: "Open tab scroll controls",
-	});
-	await expect(trigger).toHaveCount(1);
-	await expect(trigger).toHaveCSS("opacity", "0");
-	await list.hover();
-
 	const controls = page.locator('[data-slot="tabs-overflow-controls"]');
 	await expect(controls).toBeVisible();
 	const backward = controls.getByRole("button", { name: "Scroll tabs left" });
 	const forward = controls.getByRole("button", { name: "Scroll tabs right" });
 	await expect(backward).toBeDisabled();
 	await expect(forward).toBeEnabled();
-	await expect(controls).toHaveClass(/rounded-full/);
-	await expect(backward).toHaveClass(/rounded-full/);
-	await expect(forward).toHaveClass(/rounded-full/);
-	await page.screenshot({
-		path: testInfo.outputPath("tabs-layout-overflow-proof.png"),
+	await expect(backward).toHaveClass(/rounded-l-full/);
+	await expect(forward).toHaveClass(/rounded-r-full/);
+	const listId = await list.getAttribute("id");
+	expect(listId).toBeTruthy();
+	expect(await forward.getAttribute("aria-controls")).toBe(listId);
+	expect(
+		await backward.evaluate((element) => getComputedStyle(element).opacity)
+	).toBe("0");
+
+	const team = list.getByRole("tab", { name: "Team" });
+	await team.evaluate((element) => {
+		if (!(element instanceof HTMLElement)) {
+			throw new Error("Fixture tab must be a native HTML element");
+		}
+		element.click();
+	});
+	await expect(team).toHaveAttribute("aria-selected", "true");
+	await expect(list).toHaveAttribute("data-edges", "both");
+	await expect(backward).toBeEnabled();
+	await expect(forward).toBeEnabled();
+	const indicator = list.locator('[data-slot="tabs-indicator"]');
+	await expect
+		.poll(async () => {
+			const [indicatorLeft, teamLeft] = await Promise.all([
+				indicator.evaluate((element) => element.getBoundingClientRect().left),
+				team.evaluate((element) => element.getBoundingClientRect().left),
+			]);
+			return Math.abs(indicatorLeft - teamLeft);
+		})
+		.toBeLessThan(1);
+
+	await proof.screenshot({
+		path: testInfo.outputPath("tabs-layout-overflow-arrows-proof.png"),
 	});
 
 	const before = await list.evaluate((element) => element.scrollLeft);
@@ -208,5 +244,49 @@ test("verifies component-level scrolling controls when layout management is disa
 			timeout: 10_000,
 		})
 		.toBeGreaterThan(before);
-	await expect(list).toHaveAttribute("data-edges", "both");
+	await expect(backward).toBeEnabled();
+});
+
+test("reveals selected and focused tabs that start outside the strip", async ({
+	page,
+}) => {
+	await page.goto(STORY_URL);
+	const list = page.getByTestId("overflow-tabs-list");
+	const reports = list.getByRole("tab", { name: "Reports" });
+	const initialScrollLeft = await list.evaluate(
+		(element) => element.scrollLeft
+	);
+
+	await reports.evaluate((element) => {
+		if (!(element instanceof HTMLElement)) {
+			throw new Error("Fixture tab must be a native HTML element");
+		}
+		element.click();
+	});
+	await expect(reports).toHaveAttribute("aria-selected", "true");
+	await expect
+		.poll(() => list.evaluate((element) => element.scrollLeft), {
+			timeout: 10_000,
+		})
+		.toBeGreaterThan(initialScrollLeft);
+	const selectedBounds = await Promise.all([
+		list.evaluate((element) => element.getBoundingClientRect().left),
+		reports.evaluate((element) => element.getBoundingClientRect().left),
+	]);
+	expect(selectedBounds[1]).toBeGreaterThanOrEqual(selectedBounds[0] + 30);
+
+	const overview = list.getByRole("tab", { name: "Overview" });
+	const reportScrollLeft = await list.evaluate((element) => element.scrollLeft);
+	await overview.evaluate((element) => {
+		if (!(element instanceof HTMLElement)) {
+			throw new Error("Overview tab must be a native HTML element");
+		}
+		element.focus({ preventScroll: true });
+	});
+	await expect
+		.poll(() => list.evaluate((element) => element.scrollLeft), {
+			timeout: 10_000,
+		})
+		.toBeLessThan(reportScrollLeft);
+	await expect(list).toHaveAttribute("data-edges", "end");
 });

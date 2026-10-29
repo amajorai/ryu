@@ -1,4 +1,5 @@
 "use client";
+import layout from "./chat-layout.module.css";
 
 // apps/desktop/src/components/chat/NodeFolderBrowser.tsx
 //
@@ -16,7 +17,7 @@
 
 import { ArrowRight01Icon, Folder03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Command,
 	CommandDialog,
@@ -26,10 +27,21 @@ import {
 	CommandItem,
 	CommandList,
 	CommandSeparator,
-} from "@ryu/ui/components/command";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { cn } from "@ryu/ui/lib/utils";
-import { useCallback, useEffect, useRef, useState } from "react";
+} from "@ryu/ui/components/command.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import {
+	type CSSProperties,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+
+interface FolderIndentStyle extends CSSProperties {
+	"--folder-indent": string;
+}
+
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type DirectoryEntry, listDirectory } from "@/src/lib/api/workspace.ts";
@@ -54,6 +66,8 @@ function FolderRow({
 	expanded,
 	childrenByPath,
 	loadingPaths,
+	childErrors,
+	onRetry,
 	selected,
 	onToggle,
 	onSelect,
@@ -63,10 +77,18 @@ function FolderRow({
 	expanded: ReadonlySet<string>;
 	childrenByPath: ReadonlyMap<string, DirectoryEntry[]>;
 	loadingPaths: ReadonlySet<string>;
+	childErrors: ReadonlyMap<string, string>;
+	onRetry: (path: string) => void;
 	selected: string | null;
 	onToggle: (path: string) => void;
 	onSelect: (path: string) => void;
 }) {
+	const rowIndent: FolderIndentStyle = {
+		"--folder-indent": `${depth * 16 + 8}px`,
+	};
+	const noteIndent: FolderIndentStyle = {
+		"--folder-indent": `${(depth + 1) * 16 + 24}px`,
+	};
 	const isOpen = expanded.has(node.path);
 	const isSelected = node.path === selected;
 	const children = childrenByPath.get(node.path);
@@ -75,15 +97,14 @@ function FolderRow({
 	return (
 		<>
 			<CommandItem
-				className={cn("pr-2", isSelected && "bg-accent text-foreground")}
 				data-checked={isSelected}
 				onSelect={() => {
 					onSelect(node.path);
 					onToggle(node.path);
 				}}
-				style={{ paddingLeft: `${depth * 16 + 8}px` }}
 				value={node.path}
 			>
+				<span className="w-(--folder-indent) shrink-0" style={rowIndent} />
 				<HugeiconsIcon
 					className={cn(
 						"size-3.5 shrink-0 text-foreground/40 transition-transform",
@@ -95,7 +116,10 @@ function FolderRow({
 					className="size-4 shrink-0 text-foreground/40"
 					icon={Folder03Icon}
 				/>
-				<span className="min-w-0 flex-1 truncate text-foreground/80">
+				<span
+					className="min-w-0 flex-1 truncate text-foreground/80"
+					title={node.name}
+				>
 					{node.name}
 				</span>
 			</CommandItem>
@@ -104,28 +128,51 @@ function FolderRow({
 				<>
 					{isLoading && (
 						<p
-							className="py-1 text-[11px] text-muted-foreground"
-							style={{ paddingLeft: `${(depth + 1) * 16 + 24}px` }}
+							className={cn(
+								layout.folderNote,
+								"type-caption py-1 text-muted-foreground"
+							)}
+							style={noteIndent}
 						>
 							Loading…
 						</p>
 					)}
+					{!isLoading && childErrors.has(node.path) && (
+						<div
+							className="px-3 py-1 text-status-destructive text-xs"
+							role="alert"
+						>
+							{childErrors.get(node.path)}
+							<Button
+								onClick={() => onRetry(node.path)}
+								size="sm"
+								variant="ghost"
+							>
+								Retry folder
+							</Button>
+						</div>
+					)}
 					{!isLoading && children?.length === 0 && (
 						<p
-							className="py-1 text-[11px] text-muted-foreground"
-							style={{ paddingLeft: `${(depth + 1) * 16 + 24}px` }}
+							className={cn(
+								layout.folderNote,
+								"type-caption py-1 text-muted-foreground"
+							)}
+							style={noteIndent}
 						>
 							No sub-folders.
 						</p>
 					)}
 					{children?.map((child) => (
 						<FolderRow
+							childErrors={childErrors}
 							childrenByPath={childrenByPath}
 							depth={depth + 1}
 							expanded={expanded}
 							key={child.path}
 							loadingPaths={loadingPaths}
 							node={child}
+							onRetry={onRetry}
 							onSelect={onSelect}
 							onToggle={onToggle}
 							selected={selected}
@@ -169,26 +216,46 @@ export function NodeFolderBrowser({
 	// Monotonic id so out-of-order list responses (debounced typing, node
 	// switches) can't clobber a newer one. Any list bumps it and bails if stale.
 	const listReqId = useRef(0);
+	const browserSession = useRef(0);
+	const [childErrors, setChildErrors] = useState<ReadonlyMap<string, string>>(
+		new Map()
+	);
 
 	// Load a folder's children once, caching them so re-expanding is instant.
 	const loadChildren = useCallback(
 		async (path: string) => {
+			const session = browserSession.current;
+			setChildErrors((previous) => {
+				const next = new Map(previous);
+				next.delete(path);
+				return next;
+			});
 			setLoadingPaths((prev) => new Set(prev).add(path));
 			try {
 				const listing = await listDirectory(
 					{ url: nodeUrl, token: nodeToken, userJwt: nodeUserJwt },
 					path
 				);
-				setChildrenByPath((prev) => new Map(prev).set(path, listing.entries));
-			} catch {
-				// Unreadable folder: cache an empty listing so it shows "No sub-folders".
-				setChildrenByPath((prev) => new Map(prev).set(path, []));
+				if (session === browserSession.current) {
+					setChildrenByPath((prev) => new Map(prev).set(path, listing.entries));
+				}
+			} catch (cause) {
+				if (session === browserSession.current) {
+					setChildErrors((previous) =>
+						new Map(previous).set(
+							path,
+							cause instanceof Error ? cause.message : "Could not read folder"
+						)
+					);
+				}
 			} finally {
-				setLoadingPaths((prev) => {
-					const next = new Set(prev);
-					next.delete(path);
-					return next;
-				});
+				if (session === browserSession.current) {
+					setLoadingPaths((prev) => {
+						const next = new Set(prev);
+						next.delete(path);
+						return next;
+					});
+				}
 			}
 		},
 		[nodeUrl, nodeToken, nodeUserJwt]
@@ -217,6 +284,8 @@ export function NodeFolderBrowser({
 	// Used on open, on node change, and when the path input is cleared.
 	const buildDefaultRoots = useCallback(async () => {
 		const reqId = ++listReqId.current;
+		browserSession.current += 1;
+		setChildErrors(new Map());
 		const target: ApiTarget = {
 			url: nodeUrl,
 			token: nodeToken,
@@ -247,7 +316,7 @@ export function NodeFolderBrowser({
 				nextRoots.map((r) =>
 					listDirectory(target, r.path)
 						.then((l) => [r.path, l.entries] as const)
-						.catch(() => [r.path, [] as DirectoryEntry[]] as const)
+						.catch((): readonly [string, DirectoryEntry[]] => [r.path, []])
 				)
 			);
 
@@ -323,7 +392,9 @@ export function NodeFolderBrowser({
 	// into the input (handleTreeSelect) never re-triggers a list.
 	const handlePathInputChange = useCallback(
 		(value: string) => {
+			listReqId.current += 1;
 			setPathInput(value);
+			setSelected(null);
 			setPathInvalid(false);
 			if (debounceRef.current) {
 				clearTimeout(debounceRef.current);
@@ -336,6 +407,10 @@ export function NodeFolderBrowser({
 	// Mirror a tree click into the input for coherence. A programmatic setState
 	// here does NOT fire the input's onChange, so the tree won't collapse.
 	const handleTreeSelect = useCallback((path: string) => {
+		if (debounceRef.current) {
+			clearTimeout(debounceRef.current);
+		}
+		listReqId.current += 1;
 		setSelected(path);
 		setPathInput(path);
 		setPathInvalid(false);
@@ -349,6 +424,8 @@ export function NodeFolderBrowser({
 		setPathInput("");
 		buildDefaultRoots();
 		return () => {
+			listReqId.current += 1;
+			browserSession.current += 1;
 			if (debounceRef.current) {
 				clearTimeout(debounceRef.current);
 			}
@@ -356,11 +433,11 @@ export function NodeFolderBrowser({
 	}, [open, buildDefaultRoots]);
 
 	const handleConfirm = useCallback(() => {
-		if (selected) {
+		if (selected && !pathInvalid) {
 			onSelect(selected);
 			onOpenChange(false);
 		}
-	}, [selected, onSelect, onOpenChange]);
+	}, [selected, pathInvalid, onSelect, onOpenChange]);
 
 	const locationLabel =
 		activeNode.name === "local"
@@ -381,7 +458,6 @@ export function NodeFolderBrowser({
 					aria-invalid={pathInvalid || undefined}
 					autoCapitalize="off"
 					autoCorrect="off"
-					className="font-mono text-[12px]"
 					onKeyDown={(e) => {
 						if (e.key === "Enter") {
 							e.preventDefault();
@@ -398,15 +474,9 @@ export function NodeFolderBrowser({
 				/>
 
 				<CommandList className="h-72 max-h-72">
-					{loading && (
-						<div className="flex h-full items-center justify-center">
-							<Spinner />
-						</div>
-					)}
+					{loading && <SkeletonRows rows={6} spacing="library" />}
 					{!loading && error && (
-						<p className="px-3 py-2 text-[12px] text-status-destructive">
-							{error}
-						</p>
+						<p className="px-3 py-2 text-status-destructive text-xs">{error}</p>
 					)}
 					{!(loading || error) && roots.length === 0 && (
 						<CommandEmpty>No folders found.</CommandEmpty>
@@ -415,12 +485,14 @@ export function NodeFolderBrowser({
 						<CommandGroup heading={`Folders on ${locationLabel}`}>
 							{roots.map((root) => (
 								<FolderRow
+									childErrors={childErrors}
 									childrenByPath={childrenByPath}
 									depth={0}
 									expanded={expanded}
 									key={root.path}
 									loadingPaths={loadingPaths}
 									node={root}
+									onRetry={loadChildren}
 									onSelect={handleTreeSelect}
 									onToggle={handleToggle}
 									selected={selected}
@@ -435,7 +507,11 @@ export function NodeFolderBrowser({
 					<Button onClick={() => onOpenChange(false)} variant="ghost">
 						Cancel
 					</Button>
-					<Button disabled={!selected} onClick={handleConfirm} type="button">
+					<Button
+						disabled={!selected || pathInvalid}
+						onClick={handleConfirm}
+						type="button"
+					>
 						Add folder to Ryu
 					</Button>
 				</div>

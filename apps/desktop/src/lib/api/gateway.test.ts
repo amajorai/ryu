@@ -30,6 +30,9 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type RyuJsonValue, rpcJsonResponseSchema } from "@ryu/app-host/rpc";
+import { z } from "zod";
+import type { GatewayConfigPatchInput, InspectorConfig } from "./gateway.ts";
 import {
 	ALERT_TIERS,
 	buildBudgetRule,
@@ -39,6 +42,7 @@ import {
 	CLASSIFY_TIER_COPY,
 	classifyTierCannotServeModel,
 	classifyTierServable,
+	configureGatewayProviderAccount,
 	DEFAULT_GATEWAY_ACP,
 	DEFAULT_GATEWAY_COMPUTER_USE,
 	DEFAULT_INSPECTOR,
@@ -46,15 +50,26 @@ import {
 	DEFAULT_SMART_ROUTING,
 	deriveClassifyTierState,
 	fetchGatewayConfig,
+	formatPoolList,
 	type GatewayConfigPatch,
 	type GatewayRoutingConfig,
+	isOpenRoutePool,
 	MODALITIES,
+	parsePoolList,
 	routingViewIncludesModalityMap,
 	routingViewIncludesSmartRouting,
+	runGatewayEvals,
+	runGatewayRedTeam,
+	SmartRoutingUnavailableError,
+	sameGuardrailSections,
+	saveAgentRouteOverride,
+	saveAgentRoutePool,
+	scoreGatewayOutput,
 	updateGatewayConfig,
 	withAgentBudget,
 	withModalityMapping,
 	withResolvedInspectorModels,
+	withRoutingDraftEdits,
 } from "./gateway.ts";
 
 // src/lib/api → src/lib → src → apps/desktop → apps → repo root.
@@ -252,7 +267,7 @@ function rustStructFieldType(
  * `impl Default for InspectorConfig`'s field initialisers, as `field → the Rust
  * expression it is set to`. Comment lines are skipped; nothing else is.
  */
-function parseInspectorDefaultImpl(): Record<string, string> {
+function parseInspectorDefaultImpl() {
 	const block = rustBlock(
 		gatewayConfigRs,
 		GATEWAY_CONFIG_RS,
@@ -325,7 +340,7 @@ function resolveRustDefault(expr: string): boolean | number | string {
 }
 
 /** `impl Default for InspectorConfig`, resolved to plain JSON values. */
-function rustInspectorDefault(): Record<string, boolean | number | string> {
+function rustInspectorDefault() {
 	const out: Record<string, boolean | number | string> = {};
 	for (const [field, expr] of Object.entries(parseInspectorDefaultImpl())) {
 		out[field] = resolveRustDefault(expr);
@@ -336,8 +351,8 @@ function rustInspectorDefault(): Record<string, boolean | number | string> {
 /** The `("<prefix>", "<provider>")` rows of `builtin_prefixes()`, in order. */
 function routerBuiltinPrefixes(): [string, string][] {
 	const block = rustBlock(routerRs, ROUTER_RS, "pub fn builtin_prefixes(");
-	const rows = [...block.matchAll(/\("([^"]+)",\s*"([^"]+)"\)/g)].map(
-		(m) => [m[1] as string, m[2] as string] as [string, string]
+	const rows = [...block.matchAll(/\("([^"]+)",\s*"([^"]+)"\)/g)].map((m) =>
+		z.tuple([z.string(), z.string()]).parse([m[1], m[2]])
 	);
 	if (rows.length === 0) {
 		throw new Error(
@@ -354,10 +369,12 @@ describe("DEFAULT_INSPECTOR mirrors the Rust default", () => {
 		// record because the Rust side is parsed text: it has no idea `mode` is a
 		// three-value union, and pinning it to `InspectorConfig` would only assert
 		// that the parser's OUTPUT type matches — not that the values do.
-		const mirrored: Record<string, boolean | number | string> = {
+		const mirrored = {
 			...DEFAULT_INSPECTOR,
-		};
-		expect(mirrored).toEqual(rustInspectorDefault());
+		} satisfies Record<string, boolean | number | string>;
+		expect(Object.entries(mirrored)).toEqual(
+			Object.entries(rustInspectorDefault())
+		);
 	});
 
 	it("covers exactly the fields the Rust struct initialises", () => {
@@ -574,19 +591,23 @@ describe("withResolvedInspectorModels", () => {
 	// selection, and a test pinned to its current blank-rejection branch would go
 	// red for the wrong reason. The dependency is documented in prose on the
 	// function instead.
-	const firewall = (inspector: unknown): GatewayConfigPatch =>
-		({
+	const firewall = <T extends Partial<InspectorConfig> | undefined>(
+		inspector: T
+	) => {
+		const patch = {
 			firewall: {
 				enabled: true,
 				log_detections: true,
-				policy: "block",
+				policy: "block" as const,
 				redact_pii: false,
 				redact_secrets: false,
 				scan_inbound: true,
 				scan_outbound: false,
 				inspector,
 			},
-		}) as GatewayConfigPatch;
+		};
+		return patch satisfies GatewayConfigPatchInput;
+	};
 
 	it("writes the classify id when the model is blank", () => {
 		const patch = firewall({ ...DEFAULT_INSPECTOR, enabled: true, model: "" });
@@ -627,9 +648,11 @@ describe("withResolvedInspectorModels", () => {
 		// `model` is typed `string`, but this runs on a transport path fed by whatever
 		// the gateway serialized — a throw here would break the save handler.
 		const patch = firewall({ enabled: true });
-		expect(withResolvedInspectorModels(patch).firewall?.inspector?.model).toBe(
-			CLASSIFY_MODEL_ID
-		);
+		expect(
+			z
+				.object({ model: z.string() })
+				.parse(withResolvedInspectorModels(patch).firewall?.inspector).model
+		).toBe(CLASSIFY_MODEL_ID);
 	});
 
 	it("never mutates the input patch", () => {
@@ -709,15 +732,13 @@ describe("withResolvedInspectorModels", () => {
 		// success path, so a lazy recorder could leave `sentBody` as "" and let the
 		// assertion below pass green for the wrong reason.
 		let sentBody: string | null = null;
-		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
-			sentBody = String(init?.body ?? "");
-			return {
-				ok: true,
-				status: 200,
-				headers: new Headers({ "content-type": "application/json" }),
-				text: async () => JSON.stringify({ ok: true }),
-			};
-		}) as unknown as typeof fetch;
+		globalThis.fetch = Object.assign(
+			async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+				sentBody = String(init?.body ?? "");
+				return Response.json({ ok: true });
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
 		try {
 			await updateGatewayConfig(
 				{ url: "http://127.0.0.1:7980", token: null, userJwt: null },
@@ -1128,8 +1149,10 @@ describe("the firewall alert tier is lockable on both sides", () => {
 	// justified by the resolver having no `alert` arm; the arm landed in the same
 	// batch, which is exactly the cross-file assumption this test pins down.)
 	const resolveRs = rustSource("apps/gateway/src/firewall/resolve.rs");
+	// The editor rows moved out of GatewayDialog.tsx into the shared guardrails
+	// block, which the dialog renders; the toggle now lives with the alert row.
 	const dialog = rustSource(
-		"apps/desktop/src/components/gateway/GatewayDialog.tsx"
+		"packages/blocks/src/desktop/guardrails/firewall-rows.tsx"
 	);
 
 	it("offers the node-scope toggle in the dialog", () => {
@@ -1238,6 +1261,9 @@ const gatewayProvidersRs = rustSource(GATEWAY_PROVIDERS_RS);
 const gatewayDialogTsx = rustSource(
 	"apps/desktop/src/components/gateway/GatewayDialog.tsx"
 );
+const providerPoolsEditorTsx = rustSource(
+	"apps/desktop/src/components/gateway/ProviderPoolsEditor.tsx"
+);
 
 describe("the gateway serves the routing fields this editor round-trips", () => {
 	it("declares modality_map and eval_routing on RoutingView", () => {
@@ -1264,6 +1290,53 @@ describe("the gateway serves the routing fields this editor round-trips", () => 
 		).toBe(true);
 	});
 
+	it("sends the edited routing section with unrelated routes and policy intact", async () => {
+		const routing: GatewayRoutingConfig = {
+			...SERVED_ROUTING_BASE,
+			model_map: {
+				"saved-model": { provider: "anthropic", provider_model: "claude" },
+			},
+			fallback_chain: ["anthropic"],
+			smart_routing: { ...DEFAULT_SMART_ROUTING, enabled: true },
+			modality_map: { image: { provider: "fal", model: "saved-image-model" } },
+		};
+		const edited = withModalityMapping(routing, "tts", {
+			provider: "elevenlabs",
+			model: "voice-model",
+		});
+		const originalFetch = globalThis.fetch;
+		let sentBody = "";
+		// SAFETY: the stub returns the same Response contract as fetch; only network I/O is replaced.
+		globalThis.fetch = (async (_input, init) => {
+			sentBody = String(init?.body);
+			return Response.json({ ok: true });
+		}) as typeof fetch;
+		try {
+			expect(
+				await updateGatewayConfig(
+					{ url: "http://127.0.0.1:7980", token: null, userJwt: null },
+					{ routing: edited }
+				)
+			).toEqual({ ok: true });
+			expect(JSON.parse(sentBody)).toEqual({
+				routing: {
+					...routing,
+					model_map: {
+						"saved-model": { provider: "anthropic", provider_model: "claude" },
+					},
+					fallback_chain: ["anthropic"],
+					smart_routing: { ...DEFAULT_SMART_ROUTING, enabled: true },
+					modality_map: {
+						image: { provider: "fal", model: "saved-image-model" },
+						tts: { provider: "elevenlabs", model: "voice-model" },
+					},
+				},
+			});
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	it("still assigns the routing section wholesale, which is why omission erases", () => {
 		// This is the premise behind `routingViewIncludesModalityMap` and behind the
 		// spread in `withModalityMapping`. If a clobber guard is ever added to
@@ -1271,7 +1344,14 @@ describe("the gateway serves the routing fields this editor round-trips", () => 
 		// change surfaces, and the desktop's "omission == erasure" reasoning — plus
 		// the warning the dialog shows an older gateway — would need revisiting.
 		expect(
-			/updated_config\.routing = routing\.clone\(\)/.test(gatewayApiConfigRs)
+			/section!\("routing", &patch\.routing\);/.test(gatewayApiConfigRs) &&
+				/\.insert\(name\.to_owned\(\), value\)/.test(
+					rustBlock(
+						gatewayApiConfigRs,
+						GATEWAY_API_CONFIG_RS,
+						"fn commit_authored_config("
+					)
+				)
 		).toBe(true);
 		const routingConfig = rustBlock(
 			gatewayConfigRs,
@@ -1291,7 +1371,7 @@ describe("MODALITIES mirrors the Rust Modality enum", () => {
 		// These strings are the KEYS of `routing.modality_map`. A key Rust does not
 		// know deserializes to nothing: the PUT succeeds and the mapping is ignored,
 		// which is indistinguishable from "the provider is broken". Order is pinned
-		// too because it is the order the five rows render in.
+		// too because it is the order the six rows render in.
 		const modalities: string[] = [...MODALITIES];
 		expect(modalities).toEqual(
 			rustEnumWireVariants(
@@ -1427,7 +1507,7 @@ describe("withModalityMapping", () => {
 	 * failure this whole family of tests is about is a save that drops what the
 	 * client could not name.
 	 */
-	function fullRouting(): GatewayRoutingConfig & Record<string, unknown> {
+	function fullRouting() {
 		return {
 			default_provider: "openai",
 			model_map: { "gpt-4o": { provider: "openai", provider_model: "gpt-4o" } },
@@ -1442,7 +1522,7 @@ describe("withModalityMapping", () => {
 			modality_map: { image: { provider: "fal", model: "flux/dev" } },
 			// Not in `GatewayRoutingConfig` on purpose.
 			some_future_field: { kept: true },
-		};
+		} satisfies GatewayRoutingConfig & { some_future_field: { kept: boolean } };
 	}
 
 	/**
@@ -1451,8 +1531,8 @@ describe("withModalityMapping", () => {
 	 * `as Record<string, unknown>` is rejected as a non-overlapping conversion —
 	 * the double step is the only honest spelling.
 	 */
-	const field = (routing: GatewayRoutingConfig, key: string): unknown =>
-		(routing as unknown as Record<string, unknown>)[key];
+	const field = (routing: GatewayRoutingConfig, key: string) =>
+		z.record(z.string(), rpcJsonResponseSchema).parse(routing)[key];
 
 	it("preserves every other routing field, including one TS cannot name", () => {
 		const before = fullRouting();
@@ -1556,6 +1636,124 @@ describe("withModalityMapping", () => {
 	});
 });
 
+describe("withRoutingDraftEdits", () => {
+	/** A fresh `GET` after another card saved Smart Routing, eval routing and tiers. */
+	function freshRouting() {
+		return {
+			default_provider: "openai",
+			model_map: { "gpt-4o": { provider: "openai", provider_model: "gpt-4o" } },
+			fallback_chain: ["anthropic", "mistral"],
+			provider_tiers: { anthropic: 2, mistral: 1 },
+			eval_routing: {
+				enabled: true,
+				candidates: ["openai"],
+				explore_ratio: 0.2,
+			},
+			smart_routing: {
+				...DEFAULT_SMART_ROUTING,
+				enabled: true,
+				rules: [{ description: "code questions", model: "claude-code" }],
+			},
+			modality_map: { image: { provider: "fal", model: "flux/dev" } },
+			provider_pools: {},
+			// Not in `GatewayRoutingConfig` on purpose.
+			some_future_field: { kept: true },
+		} satisfies GatewayRoutingConfig & { some_future_field: { kept: boolean } };
+	}
+
+	/** The copy the routing card loaded before any of those saves. */
+	function staleBase(): GatewayRoutingConfig {
+		return {
+			default_provider: "openai",
+			model_map: {},
+			fallback_chain: ["anthropic", "mistral"],
+			provider_tiers: { anthropic: 0, mistral: 1 },
+			smart_routing: { ...DEFAULT_SMART_ROUTING, enabled: false },
+		};
+	}
+
+	const field = (routing: GatewayRoutingConfig, key: string) =>
+		z.record(z.string(), rpcJsonResponseSchema).parse(routing)[key];
+
+	it("applies only the draft's own edits over a fresh read", () => {
+		const fresh = freshRouting();
+		const base = staleBase();
+		const draft: GatewayRoutingConfig = {
+			...base,
+			default_provider: "anthropic",
+			fallback_chain: ["mistral", "anthropic"],
+			provider_tiers: { ...base.provider_tiers, mistral: 2 },
+		};
+		const freshBefore = structuredClone(fresh);
+		const draftBefore = structuredClone(draft);
+
+		const next = withRoutingDraftEdits(fresh, base, draft);
+
+		expect(next.default_provider).toBe("anthropic");
+		expect(next.fallback_chain).toEqual(["mistral", "anthropic"]);
+		expect(next.fallback_chain).not.toBe(draft.fallback_chain);
+		// The draft's mistral edit lands; anthropic keeps the tier saved elsewhere.
+		expect(next.provider_tiers).toEqual({ anthropic: 2, mistral: 2 });
+		expect(next.smart_routing).toEqual(fresh.smart_routing);
+		expect(next.eval_routing).toEqual(fresh.eval_routing);
+		expect(next.modality_map).toEqual(fresh.modality_map);
+		expect(next.model_map).toEqual(fresh.model_map);
+		expect(next.provider_pools).toEqual(fresh.provider_pools);
+		expect(field(next, "some_future_field")).toEqual({ kept: true });
+		expect(fresh).toEqual(freshBefore);
+		expect(draft).toEqual(draftBefore);
+	});
+
+	it("keeps fields the draft never touched as the fresh read has them", () => {
+		const fresh: GatewayRoutingConfig = {
+			...freshRouting(),
+			default_provider: "mistral",
+			fallback_chain: ["openai"],
+		};
+		const base = staleBase();
+		const next = withRoutingDraftEdits(fresh, base, { ...base });
+		expect(next).toEqual(fresh);
+	});
+});
+
+/**
+ * The dialog's provider label tables, each sliced to its own declaration:
+ * `PROVIDER_LABELS` ends at `} satisfies …` and `MODALITY_PROVIDER_LABELS` (a
+ * `new Map(Object.entries({…}))`) at `);`, the first column-0 `}` or `)` after
+ * the name.
+ */
+function dialogProviderLabelTables(): string {
+	const labelled = (name: string): string => {
+		const start = gatewayDialogTsx.indexOf(`const ${name} `);
+		if (start < 0) {
+			throw new Error(`wiring test could not find \`${name}\` in the dialog`);
+		}
+		const end = gatewayDialogTsx.slice(start).search(/\n[})]/);
+		if (end < 0) {
+			throw new Error(`wiring test found \`${name}\` but not its end`);
+		}
+		return gatewayDialogTsx.slice(start, start + end);
+	};
+	return labelled("MODALITY_PROVIDER_LABELS") + labelled("PROVIDER_LABELS");
+}
+
+/** The Provider pools editor's own `[id, label]` table, as written. */
+function poolsEditorLabelEntries(): [string, string][] {
+	const start = providerPoolsEditorTsx.indexOf("const PROVIDER_LABELS ");
+	if (start < 0) {
+		throw new Error("wiring test could not find PROVIDER_LABELS in the editor");
+	}
+	const end = providerPoolsEditorTsx.slice(start).search(/\n\]\);/);
+	if (end < 0) {
+		throw new Error("wiring test found PROVIDER_LABELS but not its end");
+	}
+	return [
+		...providerPoolsEditorTsx
+			.slice(start, start + end)
+			.matchAll(/^\t\["([\w-]+)", "([^"]+)"\],$/gm),
+	].map((m) => [m[1] ?? "", m[2] ?? ""]);
+}
+
 describe("the modality editor is wired into the routing card", () => {
 	it("saves through withModalityMapping rather than its own literal", () => {
 		expect(gatewayDialogTsx).toContain("withModalityMapping(cfg.routing,");
@@ -1606,32 +1804,61 @@ describe("the modality editor is wired into the routing card", () => {
 			GATEWAY_PROVIDERS_RS,
 			"    fn every_configured_builtin_registers_in_deterministic_order"
 		);
-		const ids = [...registryOrder.matchAll(/^\s{16}"(\w+)",$/gm)].map(
+		// Ids may carry a hyphen (`openai-credits`), so the pattern must not stop
+		// at `\w`: a hyphenated id the registry reports still needs a label.
+		const ids = [...registryOrder.matchAll(/^\s{16}"([\w-]+)",$/gm)].map(
 			(m) => m[1]
 		);
 		expect(ids).toContain("fal");
 		expect(ids).toContain("replicate");
 		expect(ids).toContain("modal");
+		expect(ids).toContain("kiro");
+		expect(ids).toContain("openai-credits");
 		// `MODALITY_PROVIDER_LABELS` spreads `PROVIDER_LABELS` in, so the six
 		// `ProviderKind` ids are covered by that spread and the literal only has to
-		// name the rest. Search the union of both literals.
-		const labelled = (name: string): string => {
-			const start = gatewayDialogTsx.indexOf(`const ${name}`);
-			if (start < 0) {
-				throw new Error(`wiring test could not find \`${name}\` in the dialog`);
-			}
-			return gatewayDialogTsx.slice(
-				start,
-				gatewayDialogTsx.indexOf("\n};", start)
-			);
-		};
-		const labels =
-			labelled("MODALITY_PROVIDER_LABELS") + labelled("PROVIDER_LABELS");
+		// name the rest: search the union of both literals.
+		const labels = dialogProviderLabelTables();
 		for (const id of ids) {
 			expect({
 				id,
-				labelled: new RegExp(`^\\t${id}:`, "m").test(labels),
+				labelled: new RegExp(`^\\t+(?:${id}|"${id}"): "[^"]+",$`, "m").test(
+					labels
+				),
 			}).toEqual({ id, labelled: true });
+		}
+		// Scope: this reads the builtin ids of the registration-order test only.
+		// SDK-route ids (`genai-openai`, `genai-groq`, ...) are registered at
+		// runtime from the `genai.accounts` map, so there is no closed list here to
+		// check; the editors show them under their raw id (recorded as an open item
+		// in docs/test-coverage-cloud-results/ultracode/gateway-donated-credits.md).
+	});
+
+	it("names the donated OpenAI credits provider apart from OpenAI, in the same words in both editors", () => {
+		// `openai-credits` is a second OpenAI id with its own spend. A label that is
+		// merely present would still pass if it were the raw id or a bare "OpenAI",
+		// which erases the distinction the label exists to draw, so pin the text.
+		const donated = "OpenAI (donated credits)";
+		const modality = gatewayDialogTsx.match(
+			/^\t+"openai-credits": "([^"]+)",$/m
+		)?.[1];
+		const pools = poolsEditorLabelEntries().find(
+			([id]) => id === "openai-credits"
+		)?.[1];
+		expect({ modality, pools }).toEqual({ modality: donated, pools: donated });
+	});
+
+	it("keeps every provider label the Provider pools editor names identical to the dialog's", () => {
+		// The pools editor keeps its own short table, so a label changed in the
+		// dialog (or added to one table only) would drift apart silently.
+		const dialogLabels = dialogProviderLabelTables();
+		const entries = poolsEditorLabelEntries();
+		expect(entries.length).toBeGreaterThan(0);
+		for (const [id, label] of entries) {
+			const dialog = new RegExp(
+				`^\\t+(?:${id}|"${id}"): "([^"]+)",$`,
+				"m"
+			).exec(dialogLabels)?.[1];
+			expect({ id, dialog }).toEqual({ id, dialog: label });
 		}
 	});
 });
@@ -1659,15 +1886,27 @@ describe("the modality editor is wired into the routing card", () => {
  * out would test a transport that does not exist.
  */
 async function fetchWithBody(
-	body: Record<string, unknown>
+	body: Parameters<typeof Response.json>[0]
 ): Promise<Awaited<ReturnType<typeof fetchGatewayConfig>>> {
 	const originalFetch = globalThis.fetch;
-	globalThis.fetch = (async () => ({
-		ok: true,
-		status: 200,
-		headers: new Headers({ "content-type": "application/json" }),
-		text: async () => JSON.stringify(body),
-	})) as unknown as typeof fetch;
+	globalThis.fetch = Object.assign(
+		async () =>
+			Response.json({
+				auth: { api_keys: [], require_auth: false },
+				providers: {
+					anthropic: null,
+					core: null,
+					genai: null,
+					local: null,
+					openai: null,
+					openrouter: null,
+				},
+				...z.record(z.string(), rpcJsonResponseSchema).parse(body),
+			}),
+		{
+			preconnect: originalFetch.preconnect,
+		}
+	);
 	try {
 		return await fetchGatewayConfig({
 			url: "http://127.0.0.1:7980",
@@ -1793,7 +2032,7 @@ describe("fetchGatewayConfig preserves what the gateway did and did not serve", 
 	});
 
 	it("preserves the Gateway computer-use policy when it is served", async () => {
-		const computerUse = { locked_use: true };
+		const computerUse = { locked_use: true, security_key: true };
 		const cfg = await fetchWithBody({ computer_use: computerUse });
 		expect(cfg.computer_use).toEqual(computerUse);
 	});
@@ -1844,5 +2083,514 @@ describe("fetchGatewayConfig preserves what the gateway did and did not serve", 
 		const cfg = await fetchWithBody({});
 		expect(cfg.firewall.alert).toBe("silent");
 		expect(cfg.budgets.session).toEqual(DEFAULT_SESSION_BUDGET);
+	});
+});
+
+describe("provider account contract", () => {
+	it("keeps the desktop account fields aligned with the Gateway view", () => {
+		const canonical = rustSource("apps/gateway/src/api/config.rs").match(
+			/struct ProviderAccountView \{([\s\S]*?)\n\}/
+		)?.[1];
+		const desktop = readFileSync(
+			join(import.meta.dir, "gateway.ts"),
+			"utf8"
+		).match(/interface GatewayProviderAccount \{([\s\S]*?)\n\}/)?.[1];
+		expect(canonical).toBeDefined();
+		expect(desktop).toBeDefined();
+		const fields = (body: string) =>
+			[...body.matchAll(/^\s*(\w+)\??:/gm)].map((match) => match[1]).sort();
+		const viewFields = fields(canonical ?? "")
+			.map((field) =>
+				field === "drain_threshold_percent" ? "drainThresholdPercent" : field
+			)
+			.sort();
+		expect(canonical).toContain('rename = "drainThresholdPercent"');
+		expect(fields(desktop ?? "")).toEqual(viewFields);
+		// The struct's own attribute lines are kept with its body: a `rename_all`
+		// there would rename every wire key just as a field-level `rename` would.
+		const policyDeclaration = rustSource(
+			"crates/gateway/credentials/src/lib.rs"
+		).match(
+			/((?:#\[[^\n]*\]\n)*)pub struct ProviderAccountPolicy \{([\s\S]*?)\n\}/
+		);
+		const policy = policyDeclaration?.[2];
+		expect(policy).toBeDefined();
+		expect(policyDeclaration?.[1]).toContain("deny_unknown_fields");
+		// The policy is what Core deserializes from the desktop's `accountPolicy`
+		// (`SetProviderBody` in `apps/core/src/server/mod.rs`), and it denies
+		// unknown fields. It carries no serde rename, so its wire keys ARE its Rust
+		// field names, snake_case `drain_threshold_percent` included; only the
+		// read-side view renames that field to `drainThresholdPercent`. Compare Rust
+		// names to Rust names, and pin that the policy stays un-renamed, because
+		// the desktop sends `drain_threshold_percent` (see "live provider account
+		// save").
+		expect(`${policyDeclaration?.[1]}${policy}`).not.toContain("rename");
+		expect(
+			[...(policy ?? "").matchAll(/^\s*pub (\w+):/gm)]
+				.map((match) => match[1])
+				.sort()
+		).toEqual(
+			fields(canonical ?? "").filter(
+				(field) => field !== "id" && field !== "source"
+			)
+		);
+	});
+});
+
+describe("live provider account save", () => {
+	it("accepts a live application without requiring a restart", async () => {
+		const original = globalThis.fetch;
+		let sent: RyuJsonValue | undefined;
+		globalThis.fetch = Object.assign(
+			async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+				sent = rpcJsonResponseSchema.parse(JSON.parse(String(init?.body)));
+				return new Response(
+					JSON.stringify({
+						success: true,
+						accountsApplied: true,
+						gateway_restarted: false,
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } }
+				);
+			},
+			{ preconnect: original.preconnect }
+		);
+		try {
+			const account = {
+				id: "a".repeat(64),
+				name: "Primary",
+				enabled: true,
+				priority: 10,
+			};
+			await configureGatewayProviderAccount(
+				{ url: "http://127.0.0.1:7980", token: null, userJwt: null },
+				"fal",
+				account
+			);
+			expect(sent).toEqual({
+				provider: "fal",
+				account_action: "configure",
+				accountId: account.id,
+				accountPolicy: {
+					name: "Primary",
+					enabled: true,
+					priority: 10,
+					drain_threshold_percent: null,
+				},
+			});
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+});
+
+describe("gateway response/request codecs accept every valid wire value", () => {
+	it("accepts open ProviderId routing targets, not only ProviderKind", async () => {
+		// Gateway `RoutingView` serializes `default_provider` / `fallback_chain` as
+		// plain `ProviderId` strings; media and custom providers are valid.
+		const cfg = await fetchWithBody({
+			routing: {
+				...SERVED_ROUTING_BASE,
+				default_provider: "modal",
+				fallback_chain: ["replicate", "fal", "my-custom-provider"],
+			},
+		});
+		expect(cfg.routing.default_provider).toBe("modal");
+		expect(cfg.routing.fallback_chain).toEqual([
+			"replicate",
+			"fal",
+			"my-custom-provider",
+		]);
+	});
+
+	it("sends eval, score and red-team bodies whose optional fields are undefined", async () => {
+		// PromptStudio spreads optional fields as explicit `undefined`; the
+		// request codec must tolerate what JSON.stringify omits instead of
+		// failing locally before any request is made.
+		const target = { url: "http://127.0.0.1:7980", token: null, userJwt: null };
+		const sent: string[] = [];
+		const transportStop = new Error("transport stub");
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			(_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+				sent.push(String(init?.body));
+				return Promise.reject(transportStop);
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
+		try {
+			await expect(
+				runGatewayEvals(target, {
+					models: undefined,
+					system_messages: undefined,
+					judge_model: undefined,
+				})
+			).rejects.toThrow();
+			await expect(
+				scoreGatewayOutput(target, {
+					response: "ok",
+					model: undefined,
+					expected: undefined,
+				})
+			).rejects.toThrow();
+			await expect(
+				runGatewayRedTeam(target, {
+					agent_id: "agent-1",
+					model: undefined,
+					strategies: undefined,
+				})
+			).rejects.toThrow();
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+		expect(sent.map((body) => JSON.parse(body))).toEqual([
+			{},
+			{ response: "ok" },
+			{ agent_id: "agent-1" },
+		]);
+	});
+});
+
+// ─── Routing pools ──────────────────────────────────────────────────────────
+
+describe("routing pool list fields", () => {
+	it("splits on commas and newlines, trims, drops blanks, and dedupes", () => {
+		expect(parsePoolList(" *claude*, gpt-*,\n,gpt-* ,  ")).toEqual([
+			"*claude*",
+			"gpt-*",
+		]);
+		expect(parsePoolList("")).toEqual([]);
+	});
+
+	it("round-trips through the editable form", () => {
+		const entries = ["*claude*", "gpt-*"];
+		expect(parsePoolList(formatPoolList(entries))).toEqual(entries);
+		expect(formatPoolList(undefined)).toBe("");
+	});
+
+	it("treats a pool with both lists empty as open", () => {
+		expect(isOpenRoutePool({ allowed_models: [], allowed_providers: [] })).toBe(
+			true
+		);
+		expect(
+			isOpenRoutePool({ allowed_models: [], allowed_providers: ["core"] })
+		).toBe(false);
+	});
+});
+
+describe("saveAgentRoutePool", () => {
+	const target = { url: "http://127.0.0.1:7980", token: null, userJwt: null };
+
+	async function saveWith(
+		served: Record<string, unknown>,
+		save: () => Promise<void>
+	): Promise<Record<string, unknown>[]> {
+		const puts: Record<string, unknown>[] = [];
+		const original = globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async (_input: RequestInfo | URL, init?: RequestInit) => {
+				if (init?.method === "PUT") {
+					puts.push(JSON.parse(String(init.body)));
+					return Response.json({ ok: true });
+				}
+				// A gateway always serves `auth` and `providers` beside routing.
+				return Response.json({
+					auth: { api_keys: [], require_auth: false },
+					providers: {
+						anthropic: null,
+						core: null,
+						genai: null,
+						local: null,
+						openai: null,
+						openrouter: null,
+					},
+					...served,
+				});
+			},
+			{ preconnect: original.preconnect }
+		);
+		try {
+			await save();
+		} finally {
+			globalThis.fetch = original;
+		}
+		return puts;
+	}
+
+	it("changes only this agent's entry and keeps the rest of routing", async () => {
+		const served = {
+			routing: {
+				...SERVED_ROUTING_BASE,
+				default_provider: "anthropic",
+				smart_routing: {
+					...DEFAULT_SMART_ROUTING,
+					enabled: true,
+					allowed_models: ["*claude*", "gpt-*"],
+					agent_pools: {
+						other: { allowed_models: ["gpt-*"], allowed_providers: [] },
+						stale: { allowed_models: ["x"], allowed_providers: [] },
+					},
+				},
+			},
+		};
+		const [put] = await saveWith(served, () =>
+			saveAgentRoutePool(target, "bot", {
+				allowed_models: ["*claude*"],
+				allowed_providers: [],
+			})
+		);
+		const routing = put?.routing as GatewayRoutingConfig;
+		expect(routing.default_provider).toBe("anthropic");
+		expect(routing.smart_routing?.enabled).toBe(true);
+		expect(routing.smart_routing?.allowed_models).toEqual([
+			"*claude*",
+			"gpt-*",
+		]);
+		expect(routing.smart_routing?.agent_pools).toEqual({
+			bot: { allowed_models: ["*claude*"], allowed_providers: [] },
+			other: { allowed_models: ["gpt-*"], allowed_providers: [] },
+			stale: { allowed_models: ["x"], allowed_providers: [] },
+		});
+
+		const [cleared] = await saveWith(served, () =>
+			saveAgentRoutePool(target, "stale", {
+				allowed_models: [],
+				allowed_providers: [],
+			})
+		);
+		const clearedRouting = cleared?.routing as GatewayRoutingConfig;
+		expect(
+			Object.keys(clearedRouting.smart_routing?.agent_pools ?? {})
+		).toEqual(["other"]);
+	});
+
+	it("refuses to write when the gateway does not serve smart_routing", async () => {
+		const puts = await saveWith(
+			{ routing: { ...SERVED_ROUTING_BASE } },
+			async () => {
+				await expect(
+					saveAgentRoutePool(target, "bot", {
+						allowed_models: ["gpt-*"],
+						allowed_providers: [],
+					})
+				).rejects.toBeInstanceOf(SmartRoutingUnavailableError);
+			}
+		);
+		expect(puts).toEqual([]);
+	});
+});
+
+describe("concurrent smart-routing saves", () => {
+	const target = { url: "http://127.0.0.1:7981", token: null, userJwt: null };
+
+	interface ConfigServer {
+		/** Revisions sent with each PUT, in arrival order. */
+		expectedRevisions: unknown[];
+		/** Applied after the next read, as if another window saved meanwhile. */
+		interleave?: (routing: GatewayRoutingConfig) => GatewayRoutingConfig;
+		routing: GatewayRoutingConfig;
+		staleWrites: number;
+	}
+
+	/**
+	 * A gateway that keeps its routing between calls, bumps a revision on every
+	 * write, and answers 409 to a write carrying a stale revision, like
+	 * `PUT /v1/config`. Reads and writes yield, so overlapping saves interleave.
+	 */
+	async function withConfigServer(
+		server: ConfigServer,
+		run: () => Promise<void>
+	): Promise<void> {
+		let revision = 1;
+		const revisionId = () => String(revision).padStart(64, "0");
+		const original = globalThis.fetch;
+		globalThis.fetch = Object.assign(
+			async (_input: RequestInfo | URL, init?: RequestInit) => {
+				await new Promise((resolve) => setTimeout(resolve, 1));
+				if (init?.method === "PUT") {
+					const body = JSON.parse(String(init.body)) as {
+						expectedRevision?: unknown;
+						routing: GatewayRoutingConfig;
+					};
+					server.expectedRevisions.push(body.expectedRevision);
+					// An unrevisioned write is accepted, as the real gateway does.
+					const stale =
+						body.expectedRevision !== undefined &&
+						body.expectedRevision !== revisionId();
+					if (stale) {
+						server.staleWrites += 1;
+						return Response.json(
+							{ error: "configuration changed" },
+							{ status: 409 }
+						);
+					}
+					server.routing = body.routing;
+					revision += 1;
+					return Response.json({ ok: true, configRevision: revisionId() });
+				}
+				const served = {
+					auth: { api_keys: [], require_auth: false },
+					configRevision: revisionId(),
+					providers: {
+						anthropic: null,
+						core: null,
+						genai: null,
+						local: null,
+						openai: null,
+						openrouter: null,
+					},
+					routing: server.routing,
+				};
+				if (server.interleave) {
+					server.routing = server.interleave(server.routing);
+					server.interleave = undefined;
+					revision += 1;
+				}
+				return Response.json(served);
+			},
+			{ preconnect: original.preconnect }
+		);
+		try {
+			await run();
+		} finally {
+			globalThis.fetch = original;
+		}
+	}
+
+	const servedRouting = (): GatewayRoutingConfig => ({
+		...SERVED_ROUTING_BASE,
+		smart_routing: { ...DEFAULT_SMART_ROUTING, agent_pools: {} },
+	});
+
+	it("keeps both an agent's pool and its override when saved together", async () => {
+		const server: ConfigServer = {
+			expectedRevisions: [],
+			routing: servedRouting(),
+			staleWrites: 0,
+		};
+		await withConfigServer(server, async () => {
+			await Promise.all([
+				saveAgentRoutePool(target, "bot", {
+					allowed_models: ["*claude*"],
+					allowed_providers: [],
+				}),
+				saveAgentRouteOverride(target, "bot", {
+					...DEFAULT_SMART_ROUTING,
+					enabled: true,
+				}),
+				saveAgentRoutePool(target, "other", {
+					allowed_models: ["gpt-*"],
+					allowed_providers: [],
+				}),
+			]);
+		});
+		const smart = server.routing.smart_routing;
+		expect(smart?.agent_pools).toEqual({
+			bot: { allowed_models: ["*claude*"], allowed_providers: [] },
+			other: { allowed_models: ["gpt-*"], allowed_providers: [] },
+		});
+		expect(smart?.agent_routes?.bot?.enabled).toBe(true);
+		expect(server.staleWrites).toBe(0);
+		expect(server.expectedRevisions.every((r) => typeof r === "string")).toBe(
+			true
+		);
+	});
+
+	it("re-applies its change on top of a save made elsewhere meanwhile", async () => {
+		const server: ConfigServer = {
+			expectedRevisions: [],
+			interleave: (routing) => ({
+				...routing,
+				default_provider: "anthropic",
+				smart_routing: {
+					...DEFAULT_SMART_ROUTING,
+					...routing.smart_routing,
+					agent_pools: {
+						elsewhere: { allowed_models: ["x"], allowed_providers: [] },
+					},
+				},
+			}),
+			routing: servedRouting(),
+			staleWrites: 0,
+		};
+		await withConfigServer(server, () =>
+			saveAgentRoutePool(target, "bot", {
+				allowed_models: ["*claude*"],
+				allowed_providers: [],
+			})
+		);
+		expect(server.staleWrites).toBe(1);
+		expect(server.routing.default_provider).toBe("anthropic");
+		expect(server.routing.smart_routing?.agent_pools).toEqual({
+			bot: { allowed_models: ["*claude*"], allowed_providers: [] },
+			elsewhere: { allowed_models: ["x"], allowed_providers: [] },
+		});
+	});
+});
+
+describe("sameGuardrailSections", () => {
+	const firewall = {
+		enabled: true,
+		locked_fields: ["mode"],
+		mode: "block",
+	};
+
+	it("ignores other sections, the revision and map key order", async () => {
+		const base = await fetchWithBody({
+			configRevision: "a".repeat(64),
+			firewall,
+			firewall_agent_overlays: {},
+			firewall_org_overlays: {
+				"org-a": { mode: "warn" },
+				"org-b": { mode: "block" },
+			},
+			routing: { ...SERVED_ROUTING_BASE },
+		});
+		// A provider-key or routing save elsewhere moved the revision only.
+		const fresh = await fetchWithBody({
+			configRevision: "b".repeat(64),
+			firewall: { mode: "block", locked_fields: ["mode"], enabled: true },
+			firewall_agent_overlays: {},
+			firewall_org_overlays: {
+				"org-b": { mode: "block" },
+				"org-a": { mode: "warn" },
+			},
+			routing: { ...SERVED_ROUTING_BASE, default_provider: "anthropic" },
+		});
+		expect(sameGuardrailSections(base, fresh)).toBe(true);
+	});
+
+	it("flags a firewall or overlay change saved elsewhere", async () => {
+		const base = await fetchWithBody({
+			firewall,
+			firewall_agent_overlays: {},
+			firewall_org_overlays: {},
+		});
+		const postureChanged = await fetchWithBody({
+			firewall: { ...firewall, mode: "warn" },
+			firewall_agent_overlays: {},
+			firewall_org_overlays: {},
+		});
+		const overlayAdded = await fetchWithBody({
+			firewall,
+			firewall_agent_overlays: { "agent-1": { mode: "warn" } },
+			firewall_org_overlays: {},
+		});
+		expect(sameGuardrailSections(base, postureChanged)).toBe(false);
+		expect(sameGuardrailSections(base, overlayAdded)).toBe(false);
+	});
+});
+
+describe("the guardrails save is wired to a fresh read", () => {
+	it("compares the guardrail sections before writing with the read's revision", () => {
+		expect(gatewayDialogTsx).toContain(
+			"sameGuardrailSections(config, current)"
+		);
+		expect(gatewayDialogTsx).toContain(
+			"expectedRevision: current.configRevision ?? undefined"
+		);
+		expect(gatewayDialogTsx).toContain(
+			"withRoutingDraftEdits(cfg.routing, config, draft)"
+		);
 	});
 });

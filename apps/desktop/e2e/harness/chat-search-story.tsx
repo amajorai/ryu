@@ -32,7 +32,7 @@ const MESSAGES = [
 		role: "assistant",
 		parts: [{ type: "text", text: "README explains the local setup." }],
 	},
-] as unknown as UIMessage[];
+] satisfies UIMessage[];
 
 const FILES = ["README.md", "src/chat-search.ts", "src/components/chat.tsx"];
 

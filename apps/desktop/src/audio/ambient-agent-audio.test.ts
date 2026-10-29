@@ -1,52 +1,17 @@
 import { describe, expect, it } from "bun:test";
+import { createControlledAmbientAudio } from "./ambient-agent-audio.fixture.ts";
 import {
 	AmbientAudioController,
 	clampAmbientVolume,
 } from "./ambient-agent-audio.ts";
 
-interface FakeAudio {
-	currentTime: number;
-	load: () => void;
-	loop: boolean;
-	pause: () => void;
-	pauseCount: number;
-	paused: boolean;
-	play: () => Promise<void>;
-	playCount: number;
-	preload: string;
-	src: string;
-	volume: number;
-}
-
-function makeFakeAudio(source: string): FakeAudio {
-	return {
-		currentTime: 0,
-		load: () => undefined,
-		loop: false,
-		pause() {
-			this.pauseCount += 1;
-			this.paused = true;
-		},
-		pauseCount: 0,
-		paused: true,
-		async play() {
-			this.playCount += 1;
-			this.paused = false;
-		},
-		playCount: 0,
-		preload: "",
-		src: source,
-		volume: 0,
-	};
-}
-
 describe("AmbientAudioController", () => {
 	it("reuses one player across syncs and stops cleanly", () => {
-		const created: FakeAudio[] = [];
+		const created: ReturnType<typeof createControlledAmbientAudio>[] = [];
 		const controller = new AmbientAudioController((source) => {
-			const audio = makeFakeAudio(source);
+			const audio = createControlledAmbientAudio(source);
 			created.push(audio);
-			return audio as unknown as HTMLAudioElement;
+			return audio;
 		});
 
 		controller.sync({

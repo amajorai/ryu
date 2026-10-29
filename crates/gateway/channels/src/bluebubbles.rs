@@ -413,6 +413,8 @@ impl Channel for BlueBubblesChannel {
             streaming: false,
             threads: false,
             command_menu: false,
+            reply_keyboards: false,
+            inline_buttons: false,
         }
     }
 
@@ -803,7 +805,6 @@ async fn dispatch(
     {
         debug!(
             channel = "bluebubbles",
-            chat_id = %message.chat_id,
             "group message not addressed to the bot; staying quiet"
         );
         return ChannelTurnOutcome::Completed;
@@ -812,13 +813,21 @@ async fn dispatch(
     // iMessage has no native command menu, so `/help` is answered here rather
     // than being registered with the platform.
     if let Some(reply) = local_command_reply(&channel.runtime.commands().await, &message.text) {
-        return match channel.send_message(&message.chat_id, &reply).await {
-            Ok(()) => ChannelTurnOutcome::Completed,
-            Err(err) => {
-                warn!(channel = "bluebubbles", %err, "failed to deliver command list");
-                ChannelTurnOutcome::Failed
-            }
-        };
+        if channel
+            .runtime
+            .already_admitted(channel.name(), &message)
+            .await
+        {
+            return match channel.send_message(&message.chat_id, &reply).await {
+                Ok(()) => ChannelTurnOutcome::Completed,
+                Err(err) => {
+                    warn!(channel = "bluebubbles", %err, "failed to deliver command list");
+                    ChannelTurnOutcome::Failed
+                }
+            };
+        }
+        // Let the shared turn gate make the authoritative decision. Denied
+        // callers stay silent and pairing callers receive only its challenge.
     }
 
     handle_turn_with_delivery(channel, host, message, Some(delivery_id)).await
@@ -904,6 +913,7 @@ fn parse_inbound(payload: &Value) -> Option<InboundMessage> {
         message_id: data["guid"].as_str().map(str::to_string),
         is_group: chat["style"].as_i64() == Some(CHAT_STYLE_GROUP),
         attachments,
+        channel_action: None,
     })
 }
 
@@ -1459,6 +1469,207 @@ mod tests {
         assert!(local_command_reply(&cmds, "/proof").is_none());
         assert!(local_command_reply(&cmds, "just talking").is_none());
         assert!(local_command_reply(&[], "/help").is_some());
+    }
+
+    /// A BlueBubbles Server stand-in that records every `message/text` it is
+    /// asked to send, so a test can see exactly what reached the iMessage user.
+    async fn recording_bluebubbles_server() -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&sent);
+        let app = Router::new().route(
+            "/api/v1/message/text",
+            post(move |axum::Json(body): axum::Json<Value>| {
+                let recorder = Arc::clone(&recorder);
+                async move {
+                    recorder
+                        .lock()
+                        .expect("recorder")
+                        .push(body["message"].as_str().unwrap_or_default().to_owned());
+                    axum::Json(json!({ "status": 200, "message": "Success" }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{addr}"), sent)
+    }
+
+    /// Counts model turns; none of the denied cases may reach one.
+    struct CountingHost(std::sync::atomic::AtomicUsize);
+
+    #[async_trait]
+    impl ChannelHost for CountingHost {
+        async fn run_pipeline(&self, _channel_name: &str, _body: Value) -> anyhow::Result<Value> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            anyhow::bail!("this test never expects a model turn")
+        }
+    }
+
+    /// Dispatch one `/help` from `+15551234567` (in a group when `is_group`)
+    /// under `access`, returning every text sent back and the model-turn count.
+    async fn dispatch_help(
+        access: crate::pairing::AccessPolicy,
+        is_group: bool,
+    ) -> (Vec<String>, usize) {
+        dispatch_help_with_store(access, is_group, PairingStore::ephemeral()).await
+    }
+
+    /// [`dispatch_help`] against a pairing store the caller has pre-seeded
+    /// (for example with a blocked or pending sender).
+    async fn dispatch_help_with_store(
+        access: crate::pairing::AccessPolicy,
+        is_group: bool,
+        pairing: PairingStore,
+    ) -> (Vec<String>, usize) {
+        let (server_url, sent) = recording_bluebubbles_server().await;
+        let mut cfg = sample_config();
+        cfg.server_url = server_url;
+        cfg.common.access = access;
+        let http = reqwest::Client::builder().no_proxy().build().unwrap();
+        let channel = Arc::new(BlueBubblesChannel::new(cfg, http, pairing).unwrap());
+        let host = Arc::new(CountingHost(std::sync::atomic::AtomicUsize::new(0)));
+        let style = if is_group { CHAT_STYLE_GROUP } else { 45 };
+        let message = parse_inbound(&new_message("/help", false, style)).expect("parses");
+        dispatch(channel, host.clone(), message, "message:msg-guid-1").await;
+        let texts = sent.lock().expect("recorder").clone();
+        (texts, host.0.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    #[tokio::test]
+    async fn local_help_is_silent_for_denied_senders_and_rooms() {
+        use crate::pairing::{AccessPolicy, DmPolicy, GroupPolicy};
+        let denied = [
+            (
+                AccessPolicy {
+                    dm: DmPolicy::Disabled,
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                AccessPolicy {
+                    dm: DmPolicy::Allowlist,
+                    dm_allowlist: vec!["+15550000000".into()],
+                    ..Default::default()
+                },
+                false,
+            ),
+            (
+                AccessPolicy {
+                    group: GroupPolicy::Disabled,
+                    dm: DmPolicy::Open,
+                    ..Default::default()
+                },
+                true,
+            ),
+            (
+                AccessPolicy {
+                    group: GroupPolicy::Allowlist,
+                    group_allowlist: vec!["iMessage;+;other-room".into()],
+                    ..Default::default()
+                },
+                true,
+            ),
+            // An unlisted room where only a different sender has a per-sender
+            // override: the override must not admit this sender.
+            (
+                AccessPolicy {
+                    group: GroupPolicy::Allowlist,
+                    group_allowlist: vec!["iMessage;+;other-room".into()],
+                    group_sender_allowlist: vec!["+15550000000".into()],
+                    ..Default::default()
+                },
+                true,
+            ),
+        ];
+        for (access, is_group) in denied {
+            let label = format!("{access:?} group={is_group}");
+            let (sent, turns) = dispatch_help(access, is_group).await;
+            assert!(
+                sent.is_empty(),
+                "a denied caller must get no reply, not the command list: {label}: {sent:?}"
+            );
+            assert_eq!(turns, 0, "{label}");
+        }
+    }
+
+    #[tokio::test]
+    async fn local_help_gives_an_unpaired_sender_only_the_pairing_prompt() {
+        let (sent, turns) = dispatch_help(
+            crate::pairing::AccessPolicy {
+                dm: crate::pairing::DmPolicy::Pairing,
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(sent[0].contains("pairing code"), "{sent:?}");
+        assert!(!sent[0].contains("commands"), "{sent:?}");
+        assert_eq!(turns, 0);
+    }
+
+    #[tokio::test]
+    async fn local_help_is_silent_for_a_blocked_pairing_sender() {
+        let pairing = PairingStore::ephemeral();
+        pairing.block("bluebubbles", "+15551234567").await;
+        let (sent, turns) = dispatch_help_with_store(
+            crate::pairing::AccessPolicy {
+                dm: crate::pairing::DmPolicy::Pairing,
+                ..Default::default()
+            },
+            false,
+            pairing,
+        )
+        .await;
+        assert!(sent.is_empty(), "a blocked sender gets nothing: {sent:?}");
+        assert_eq!(turns, 0);
+    }
+
+    #[tokio::test]
+    async fn local_help_gives_a_pending_pairing_sender_only_the_pairing_prompt() {
+        let pairing = PairingStore::ephemeral();
+        let crate::pairing::Decision::Challenge(code) =
+            pairing.challenge("bluebubbles", "+15551234567").await
+        else {
+            panic!("an unknown sender is challenged");
+        };
+        let (sent, turns) = dispatch_help_with_store(
+            crate::pairing::AccessPolicy {
+                dm: crate::pairing::DmPolicy::Pairing,
+                ..Default::default()
+            },
+            false,
+            pairing,
+        )
+        .await;
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(
+            sent[0].contains(&code),
+            "the same live code is repeated: {sent:?}"
+        );
+        assert!(!sent[0].contains("commands"), "{sent:?}");
+        assert_eq!(turns, 0);
+    }
+
+    #[tokio::test]
+    async fn local_help_still_answers_an_admitted_sender_locally() {
+        let (sent, turns) = dispatch_help(
+            crate::pairing::AccessPolicy {
+                dm: crate::pairing::DmPolicy::Open,
+                ..Default::default()
+            },
+            false,
+        )
+        .await;
+        assert_eq!(
+            sent,
+            vec!["No commands are available right now.".to_owned()]
+        );
+        assert_eq!(turns, 0, "the local answer never reaches the model");
     }
 
     #[test]

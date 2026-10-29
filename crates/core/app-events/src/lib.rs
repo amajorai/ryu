@@ -71,6 +71,12 @@ const ENV_CORE_BIND: &str = "RYU_BIND";
 const ENV_EXT_TOKEN: &str = "RYU_EXT_TOKEN";
 /// The header Core's `authenticate_sidecar` reads to identify the caller.
 const HDR_PLUGIN_ID: &str = "x-ryu-plugin-id";
+/// The Core-signed grant naming the agent a forwarded request ran for. Core
+/// stamps it on an app request an agent made; the app keeps it with any work it
+/// defers and hands it back on [`ProviderRouter::call_with_agent_grant`], so
+/// Core applies that agent's account access to the provider call. Opaque to
+/// the app: it cannot be read for identity or minted outside Core.
+pub const HDR_AGENT_GRANT: &str = "x-ryu-caller-agent-grant";
 /// The kernel capability this crate invokes.
 const CAP_EVENTS_EMIT: &str = "events.emit";
 /// The kernel capability that broadcasts a bounded named event into an app room.
@@ -647,6 +653,65 @@ impl NotifyHint {
     }
 }
 
+/// An optional **activity-feed row** to record alongside an emitted event.
+///
+/// When present, Core records it on the node's unified activity feed, attributed to
+/// this app (the row's `source` is derived from the authenticated caller, never sent
+/// from here). This is how an out-of-process app puts its lifecycle moments ("Meeting
+/// started", "Quest completed") in the feed without Core keeping a per-app loop.
+/// Best-effort on Core's side: a refused hint never fails the emit.
+#[derive(Debug, Clone, Serialize)]
+pub struct ActivityHint {
+    /// The row's class (`meeting`, `quest`, …): `[a-z0-9_.-]{1,64}`.
+    pub kind: String,
+    /// The row's headline (at most 512 bytes).
+    pub title: String,
+    /// Optional body text (at most 4 KiB).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// One of `info` | `success` | `warning` (defaults to `info`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    /// A small JSON object of ids the feed can deep-link with (at most 4 KiB).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+impl ActivityHint {
+    /// Build an `info` row with a kind and a title.
+    #[must_use]
+    pub fn new(kind: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            title: title.into(),
+            body: None,
+            level: None,
+            metadata: None,
+        }
+    }
+
+    /// Set the body text.
+    #[must_use]
+    pub fn with_body(mut self, body: Option<String>) -> Self {
+        self.body = body;
+        self
+    }
+
+    /// Set the level (`info` | `success` | `warning`).
+    #[must_use]
+    pub fn with_level(mut self, level: impl Into<String>) -> Self {
+        self.level = Some(level.into());
+        self
+    }
+
+    /// Set the metadata object.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+}
+
 /// Why an emit did not reach Core. Callers that use [`EventEmitter::emit`] never see
 /// these; they exist for [`EventEmitter::try_emit`].
 #[derive(Debug)]
@@ -821,6 +886,27 @@ fn endpoint_for_port(port: u16, capability: &str) -> String {
     format!("http://127.0.0.1:{port}/api/host/capability/{capability}")
 }
 
+/// The `events.emit` request body.
+fn emit_body(
+    event: &str,
+    payload: serde_json::Value,
+    conversation_id: Option<&str>,
+    notify: Option<NotifyHint>,
+    activity: Option<ActivityHint>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({ "event": event, "payload": payload });
+    if let Some(cid) = conversation_id {
+        body["conversation_id"] = serde_json::Value::String(cid.to_owned());
+    }
+    if let Some(notify) = notify {
+        body["notify"] = serde_json::to_value(notify).expect("NotifyHint serializes");
+    }
+    if let Some(activity) = activity {
+        body["activity"] = serde_json::to_value(activity).expect("ActivityHint serializes");
+    }
+    body
+}
+
 /// Emits app events on behalf of ONE plugin.
 ///
 /// Cheap to clone (it holds a `reqwest::Client`, which is itself an `Arc`), so the
@@ -894,8 +980,32 @@ impl EventEmitter {
         payload: serde_json::Value,
         notify: Option<NotifyHint>,
     ) {
+        self.emit_with_hints(event, payload, notify, None).await;
+    }
+
+    /// Emit `event` with `payload`, recording `activity` on the node's activity feed
+    /// alongside the fan-out. Best-effort exactly like [`Self::emit`].
+    pub async fn emit_with_activity(
+        &self,
+        event: &str,
+        payload: serde_json::Value,
+        activity: ActivityHint,
+    ) {
+        self.emit_with_hints(event, payload, None, Some(activity))
+            .await;
+    }
+
+    /// Emit with any combination of a [`NotifyHint`] and an [`ActivityHint`].
+    /// Best-effort exactly like [`Self::emit`].
+    pub async fn emit_with_hints(
+        &self,
+        event: &str,
+        payload: serde_json::Value,
+        notify: Option<NotifyHint>,
+        activity: Option<ActivityHint>,
+    ) {
         match self
-            .try_emit_with_notify(event, payload, None, notify)
+            .try_emit_with_hints(event, payload, None, notify, activity)
             .await
         {
             Ok(outcome) => {
@@ -941,18 +1051,24 @@ impl EventEmitter {
         conversation_id: Option<&str>,
         notify: Option<NotifyHint>,
     ) -> Result<EmitOutcome, EmitError> {
+        self.try_emit_with_hints(event, payload, conversation_id, notify, None)
+            .await
+    }
+
+    /// [`Self::try_emit`] with optional [`NotifyHint`] and [`ActivityHint`].
+    pub async fn try_emit_with_hints(
+        &self,
+        event: &str,
+        payload: serde_json::Value,
+        conversation_id: Option<&str>,
+        notify: Option<NotifyHint>,
+        activity: Option<ActivityHint>,
+    ) -> Result<EmitOutcome, EmitError> {
         let (Some(endpoint), Some(token)) = (self.endpoint.as_deref(), self.token.as_deref())
         else {
             return Err(EmitError::NotHosted);
         };
-
-        let mut body = serde_json::json!({ "event": event, "payload": payload });
-        if let Some(cid) = conversation_id {
-            body["conversation_id"] = serde_json::Value::String(cid.to_owned());
-        }
-        if let Some(notify) = notify {
-            body["notify"] = serde_json::to_value(notify).expect("NotifyHint serializes");
-        }
+        let body = emit_body(event, payload, conversation_id, notify, activity);
 
         let resp = self
             .http
@@ -1075,6 +1191,10 @@ impl UsageReporter {
     }
 }
 
+/// The [`ManagedProviderCall::provider`] value that leaves the choice of
+/// provider to Gateway's per-call routing.
+pub const BUILTIN_PROVIDER: &str = "builtin";
+
 /// A provider call requested by an out-of-process Ryu app.
 ///
 /// The app supplies only the provider-neutral operation facts. Core authenticates
@@ -1084,6 +1204,10 @@ impl UsageReporter {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagedProviderCall {
+    /// The connection provider (`"treg"`, `"composio"`), or [`BUILTIN_PROVIDER`]
+    /// to let Gateway pick per call (Treg when it can serve the call, else
+    /// Composio). Either way Core forwards the user's per-brand provider pin,
+    /// so a brand pinned to Composio never runs on Treg.
     pub provider: String,
     pub tool_id: String,
     #[serde(default)]
@@ -1102,9 +1226,28 @@ pub struct ManagedProviderCall {
     pub fallback_cost_micro_usd: Option<u64>,
     #[serde(default)]
     pub task_label: Option<String>,
+    /// How long the upstream provider operation may run, end to end, when it is
+    /// known to take longer than an ordinary call (for example a tool that pulls
+    /// a staged multi-gigabyte file). `None` keeps every hop's default timeout.
+    /// Gateway clamps the value to its own ceiling; [`ProviderRouter::call`]
+    /// waits a little longer than this so Gateway's answer, not the app's own
+    /// client, decides the outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    /// The most this call may cost, in micro-USD: the caller's ceiling. Core
+    /// forwards it to Gateway as `x-ryu-max-cost-micro-usd` (never in the body),
+    /// and Gateway refuses a call whose price exceeds it with a typed 402
+    /// `max_cost_exceeded`. `None` sets no ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost_micro_usd: Option<u64>,
 }
 
 impl ManagedProviderCall {
+    /// The longest `timeout_ms` an app may request.
+    pub const MAX_TIMEOUT_MS: u64 = 60 * 60 * 1000;
+    /// Extra time the app-side client waits beyond `timeout_ms`, covering the
+    /// Core and Gateway hops around the upstream operation.
+    pub const TIMEOUT_MARGIN_MS: u64 = 30_000;
     const MAX_PROVIDER_BYTES: usize = 64;
     const MAX_TOOL_ID_BYTES: usize = 256;
     const MAX_METHOD_BYTES: usize = 16;
@@ -1148,6 +1291,14 @@ impl ManagedProviderCall {
         {
             return Err(ProviderRouterError::Invalid(
                 "task_label is too long".to_owned(),
+            ));
+        }
+        if self
+            .timeout_ms
+            .is_some_and(|value| value == 0 || value > Self::MAX_TIMEOUT_MS)
+        {
+            return Err(ProviderRouterError::Invalid(
+                "timeout_ms must be between 1 and 3600000".to_owned(),
             ));
         }
         Ok(())
@@ -1204,6 +1355,7 @@ pub struct ProviderRouter {
     http: reqwest::Client,
     call_endpoint: Option<String>,
     status_endpoint: Option<String>,
+    authorize_endpoint: Option<String>,
     token: Option<String>,
 }
 
@@ -1223,6 +1375,7 @@ impl ProviderRouter {
             http,
             call_endpoint: core_endpoint_for("providers.call"),
             status_endpoint: core_endpoint_for("providers.status"),
+            authorize_endpoint: core_endpoint_for("providers.authorize"),
             token,
         }
     }
@@ -1247,11 +1400,97 @@ impl ProviderRouter {
             http,
             call_endpoint: Some(call_endpoint.into()),
             status_endpoint: Some(status_endpoint.into()),
+            authorize_endpoint: None,
             token: Some("test-provider-router".to_owned()),
         }
     }
 
+    /// [`Self::for_test`] that also answers [`Self::authorize_agent`] from a
+    /// test server. Without it, that call fails as not hosted.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_authorize_endpoint_for_test(mut self, endpoint: impl Into<String>) -> Self {
+        self.authorize_endpoint = Some(endpoint.into());
+        self
+    }
+
+    /// Ask Core whether the agent `agent_grant` names may use `provider`
+    /// (and, for a provider with connected accounts, `account_id`), before an
+    /// app uses credentials it holds itself for that agent. Core applies the
+    /// same account-access rules as [`Self::call_with_agent_grant`] and calls
+    /// nothing. `Ok` only when Core allows it; every failure, including not
+    /// running under Core, is an error, so a caller that refuses on error
+    /// fails closed.
+    pub async fn authorize_agent(
+        &self,
+        provider: &str,
+        account_id: Option<&str>,
+        agent_grant: &str,
+    ) -> Result<(), ProviderRouterError> {
+        let grant = agent_grant.trim();
+        if grant.is_empty() {
+            return Err(ProviderRouterError::Invalid(
+                "an agent grant is required".to_owned(),
+            ));
+        }
+        let (Some(endpoint), Some(token)) =
+            (self.authorize_endpoint.as_deref(), self.token.as_deref())
+        else {
+            return Err(ProviderRouterError::NotHosted);
+        };
+        let response = self
+            .http
+            .post(endpoint)
+            .header(HDR_PLUGIN_ID, &self.plugin_id)
+            .header(HDR_AGENT_GRANT, grant)
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "provider": provider, "accountId": account_id }))
+            .send()
+            .await
+            .map_err(ProviderRouterError::Transport)?;
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(ProviderRouterError::Rejected {
+                status,
+                body: response.text().await.unwrap_or_default(),
+            });
+        }
+        let allowed = response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(ProviderRouterError::Transport)?
+            .get("allowed")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
+        if allowed {
+            Ok(())
+        } else {
+            Err(ProviderRouterError::Rejected {
+                status,
+                body: "Core did not allow the provider for this agent".to_owned(),
+            })
+        }
+    }
+
     pub async fn status(&self, provider: &str) -> Result<bool, ProviderRouterError> {
+        self.status_body(serde_json::json!({ "provider": provider }))
+            .await
+    }
+
+    /// Whether `provider` may serve `tool_id` for this user: configured, and
+    /// not ruled out by the user's provider pin for the tool's brand (a Treg
+    /// endpoint whose brand is pinned to Composio reads `false`). Lets an app
+    /// pick its Composio path before it calls.
+    pub async fn status_for_tool(
+        &self,
+        provider: &str,
+        tool_id: &str,
+    ) -> Result<bool, ProviderRouterError> {
+        self.status_body(serde_json::json!({ "provider": provider, "toolId": tool_id }))
+            .await
+    }
+
+    async fn status_body(&self, body: serde_json::Value) -> Result<bool, ProviderRouterError> {
         let (Some(endpoint), Some(token)) =
             (self.status_endpoint.as_deref(), self.token.as_deref())
         else {
@@ -1262,7 +1501,7 @@ impl ProviderRouter {
             .post(endpoint)
             .header(HDR_PLUGIN_ID, &self.plugin_id)
             .bearer_auth(token)
-            .json(&serde_json::json!({ "provider": provider }))
+            .json(&body)
             .send()
             .await
             .map_err(ProviderRouterError::Transport)?;
@@ -1284,17 +1523,41 @@ impl ProviderRouter {
         &self,
         request: ManagedProviderCall,
     ) -> Result<ManagedProviderResponse, ProviderRouterError> {
+        self.call_with_agent_grant(request, None).await
+    }
+
+    /// [`Self::call`] on behalf of the agent a [`HDR_AGENT_GRANT`] names. The
+    /// grant travels as a header to Core only, never in the JSON body, so it
+    /// never reaches Gateway. Core refuses the call when that agent's account
+    /// access does not allow it.
+    pub async fn call_with_agent_grant(
+        &self,
+        request: ManagedProviderCall,
+        agent_grant: Option<&str>,
+    ) -> Result<ManagedProviderResponse, ProviderRouterError> {
         request.validate()?;
         let (Some(endpoint), Some(token)) = (self.call_endpoint.as_deref(), self.token.as_deref())
         else {
             return Err(ProviderRouterError::NotHosted);
         };
-        let response = self
+        let mut builder = self
             .http
             .post(endpoint)
             .header(HDR_PLUGIN_ID, &self.plugin_id)
             .bearer_auth(token)
-            .json(&request)
+            .json(&request);
+        if let Some(timeout_ms) = request.timeout_ms {
+            // A per-request timeout replaces the client's own bound, so a
+            // long-running upstream operation is not cut off by an app client
+            // sized for ordinary calls.
+            builder = builder.timeout(std::time::Duration::from_millis(
+                timeout_ms.saturating_add(ManagedProviderCall::TIMEOUT_MARGIN_MS),
+            ));
+        }
+        if let Some(grant) = agent_grant.map(str::trim).filter(|grant| !grant.is_empty()) {
+            builder = builder.header(HDR_AGENT_GRANT, grant);
+        }
+        let response = builder
             .send()
             .await
             .map_err(ProviderRouterError::Transport)?;
@@ -1339,6 +1602,28 @@ mod tests {
         emitter
             .emit("com.acme.app/thing.done", serde_json::json!({}))
             .await;
+    }
+
+    #[test]
+    fn emit_body_carries_the_activity_hint_only_when_set() {
+        let plain = emit_body("a#b", serde_json::json!({ "x": 1 }), None, None, None);
+        assert!(plain.get("activity").is_none() && plain.get("notify").is_none());
+        let hinted = emit_body(
+            "a#b",
+            serde_json::json!({}),
+            Some("conv"),
+            None,
+            Some(
+                ActivityHint::new("quest", "Quest completed: x")
+                    .with_level("success")
+                    .with_metadata(serde_json::json!({ "quest_id": "q1" })),
+            ),
+        );
+        assert_eq!(hinted["activity"]["kind"], "quest");
+        assert_eq!(hinted["activity"]["level"], "success");
+        assert_eq!(hinted["activity"]["metadata"]["quest_id"], "q1");
+        assert!(hinted["activity"].get("body").is_none());
+        assert_eq!(hinted["conversation_id"], "conv");
     }
 
     /// The endpoint must come from the port Core actually injects, and a `RYU_BIND`
@@ -1432,12 +1717,37 @@ mod tests {
             request_id: "social:post-segment".to_owned(),
             fallback_cost_micro_usd: Some(15_000),
             task_label: Some("Outpost social publish".to_owned()),
+            timeout_ms: None,
+            max_cost_micro_usd: None,
         };
         assert!(call.validate().is_ok());
         let wire = serde_json::to_value(&call).expect("call serializes");
         assert_eq!(wire["provider"], "treg");
         assert_eq!(wire["toolId"], "x.x.post.create");
         assert!(wire.get("token").is_none());
+        assert!(wire.get("timeoutMs").is_none());
+
+        let mut long = call.clone();
+        long.timeout_ms = Some(ManagedProviderCall::MAX_TIMEOUT_MS);
+        assert!(long.validate().is_ok());
+        assert_eq!(
+            serde_json::to_value(&long).expect("call serializes")["timeoutMs"],
+            serde_json::json!(ManagedProviderCall::MAX_TIMEOUT_MS)
+        );
+        for bad in [0, ManagedProviderCall::MAX_TIMEOUT_MS + 1] {
+            long.timeout_ms = Some(bad);
+            assert!(matches!(
+                long.validate(),
+                Err(ProviderRouterError::Invalid(message)) if message.contains("timeout_ms")
+            ));
+        }
+
+        let mut builtin = call.clone();
+        builtin.provider = BUILTIN_PROVIDER.to_owned();
+        assert!(
+            builtin.validate().is_ok(),
+            "an app may leave routing to Gateway"
+        );
 
         let mut invalid = call;
         invalid.request_id.clear();
@@ -1615,5 +1925,167 @@ mod tests {
             parse_model_stream_frame(b"data: not-json", "req_1"),
             Err(ModelStreamError::Protocol(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn provider_call_sends_the_agent_grant_as_a_header_only() {
+        use std::sync::{Arc, Mutex};
+        let seen: Arc<Mutex<Vec<(Option<String>, Value)>>> = Arc::default();
+        let captured = seen.clone();
+        let app = axum::Router::new().route(
+            "/providers/call",
+            axum::routing::post(
+                move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<Value>| {
+                    let captured = captured.clone();
+                    async move {
+                        captured.lock().expect("lock").push((
+                            headers
+                                .get(HDR_AGENT_GRANT)
+                                .and_then(|value| value.to_str().ok())
+                                .map(str::to_owned),
+                            body,
+                        ));
+                        axum::Json(serde_json::json!({ "ok": true, "status": 200, "body": {} }))
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let router = ProviderRouter::for_test(
+            "@ryu/social",
+            reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .expect("client"),
+            format!("http://{address}/providers/call"),
+            format!("http://{address}/providers/status"),
+        );
+        let call = || ManagedProviderCall {
+            provider: "treg".to_owned(),
+            tool_id: "x.x.post.create".to_owned(),
+            operation: Some("execute".to_owned()),
+            account_id: None,
+            method: "POST".to_owned(),
+            query: Vec::new(),
+            body: Some(serde_json::json!({ "text": "hi" })),
+            idempotency_key: None,
+            request_id: "req_1".to_owned(),
+            fallback_cost_micro_usd: None,
+            task_label: None,
+            timeout_ms: None,
+            max_cost_micro_usd: None,
+        };
+        router
+            .call_with_agent_grant(call(), Some("grant.sig"))
+            .await
+            .expect("granted call");
+        router.call(call()).await.expect("plain call");
+        server.abort();
+
+        let seen = seen.lock().expect("lock");
+        assert_eq!(seen[0].0.as_deref(), Some("grant.sig"));
+        assert_eq!(seen[1].0, None);
+        for (_, body) in seen.iter() {
+            assert!(
+                !body.to_string().contains("grant"),
+                "the grant never enters the body Gateway receives: {body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn authorize_agent_is_allowed_only_on_cores_explicit_yes() {
+        use std::sync::{Arc, Mutex};
+        let seen: Arc<Mutex<Vec<(Option<String>, Value)>>> = Arc::default();
+        let captured = seen.clone();
+        let app = axum::Router::new().route(
+            "/providers/authorize",
+            axum::routing::post(
+                move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<Value>| {
+                    let captured = captured.clone();
+                    async move {
+                        let grant = headers
+                            .get(HDR_AGENT_GRANT)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned);
+                        captured.lock().expect("lock").push((grant.clone(), body));
+                        match grant.as_deref() {
+                            Some("allowed.sig") => (
+                                axum::http::StatusCode::OK,
+                                axum::Json(serde_json::json!({ "allowed": true })),
+                            ),
+                            Some("silent.sig") => (
+                                axum::http::StatusCode::OK,
+                                axum::Json(serde_json::json!({})),
+                            ),
+                            _ => (
+                                axum::http::StatusCode::FORBIDDEN,
+                                axum::Json(serde_json::json!({ "error": "limited" })),
+                            ),
+                        }
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("client");
+        let unhosted = ProviderRouter::for_test(
+            "@ryu/social",
+            client.clone(),
+            format!("http://{address}/providers/call"),
+            format!("http://{address}/providers/status"),
+        );
+        assert!(matches!(
+            unhosted
+                .authorize_agent("bluesky", None, "allowed.sig")
+                .await,
+            Err(ProviderRouterError::NotHosted)
+        ));
+        let router = unhosted
+            .with_authorize_endpoint_for_test(format!("http://{address}/providers/authorize"));
+        router
+            .authorize_agent("bluesky", None, "allowed.sig")
+            .await
+            .expect("allowed");
+        assert!(matches!(
+            router.authorize_agent("bluesky", None, "limited.sig").await,
+            Err(ProviderRouterError::Rejected { status: 403, .. })
+        ));
+        assert!(
+            router
+                .authorize_agent("bluesky", None, "silent.sig")
+                .await
+                .is_err(),
+            "a success without an explicit yes is not an authorization"
+        );
+        assert!(matches!(
+            router.authorize_agent("bluesky", None, "  ").await,
+            Err(ProviderRouterError::Invalid(_))
+        ));
+        server.abort();
+
+        let seen = seen.lock().expect("lock");
+        assert_eq!(seen.len(), 3, "an empty grant never reaches Core");
+        assert_eq!(seen[0].0.as_deref(), Some("allowed.sig"));
+        assert_eq!(seen[0].1["provider"], "bluesky");
+        assert!(
+            !seen[0].1.to_string().contains("sig"),
+            "the grant stays in the header"
+        );
     }
 }

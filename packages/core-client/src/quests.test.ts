@@ -1,3 +1,7 @@
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 // packages/core-client/src/quests.test.ts
 //
 // Tests for the quests (auto-detecting todo) client. Every write endpoint follows
@@ -39,11 +43,11 @@ interface Captured {
 
 function stub(bodyText: string, status = 200): Captured {
 	const cap: Captured = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		cap.url = url;
 		cap.init = init;
 		return Promise.resolve(new Response(bodyText, { status }));
-	}) as typeof fetch;
+	});
 	return cap;
 }
 
@@ -77,7 +81,7 @@ describe("createQuest / updateQuest", () => {
 		});
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/quests");
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			title: "Ship",
 			completion_condition: "merged",
 		});
@@ -110,7 +114,7 @@ describe("createQuest / updateQuest", () => {
 
 describe("deleteQuest", () => {
 	test("issues a DELETE against the id path", async () => {
-		const cap = stub("");
+		const cap = stub(JSON.stringify({ ok: true }));
 		await deleteQuest(target, "q1");
 		expect(cap.init?.method).toBe("DELETE");
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/quests/q1");
@@ -118,7 +122,10 @@ describe("deleteQuest", () => {
 });
 
 describe("mutateQuest-backed actions", () => {
-	const cases: [(t: ApiTarget, id: string) => Promise<unknown>, string][] = [
+	const cases: [
+		(t: ApiTarget, id: string) => ReturnType<typeof completeQuest>,
+		string,
+	][] = [
 		[completeQuest, "complete"],
 		[dismissQuest, "dismiss"],
 		[acceptSuggestion, "suggestion/accept"],
@@ -160,7 +167,98 @@ describe("judgeQuest", () => {
 	});
 
 	test("passes a skipped verdict through unchanged", async () => {
-		stub(JSON.stringify({ skipped: true }));
-		expect(await judgeQuest(target, "q1")).toEqual({ skipped: true });
+		stub(
+			JSON.stringify({
+				skipped: true,
+				reason: "not open, snoozed, detection off, or no context available",
+			})
+		);
+		expect(await judgeQuest(target, "q1")).toEqual({
+			skipped: true,
+			reason: "not open, snoozed, detection off, or no context available",
+		});
 	});
 });
+
+describe("manual judge evidence", () => {
+	test("reads authenticated capture evidence and posts bounded actual context", async () => {
+		const requests: Array<{ url: string; init: RequestInit }> = [];
+		globalThis.fetch = createFetchFixture((url, init) => {
+			requests.push({ url, init });
+			if (url.endsWith("/api/quests/q1")) {
+				return Promise.resolve(Response.json({ quest }));
+			}
+			if (url.includes("/context/recent?")) {
+				return Promise.resolve(
+					Response.json({ entries: [{ text: "PR was merged" }] })
+				);
+			}
+			if (url.includes("/search/semantic?")) {
+				return Promise.resolve(
+					Response.json({ results: [{ text: "x".repeat(30_000) }] })
+				);
+			}
+			return Promise.resolve(
+				Response.json({ met: true, confidence: 90, reason: "merged" })
+			);
+		});
+		await judgeQuest(target, "q1");
+		expect(requests.map((read) => read.url)).toContain(
+			"http://127.0.0.1:7980/api/shadow/search/semantic?q=merged&limit=5"
+		);
+		const post = requests.find((read) => read.init.method === "POST");
+		const body = parseJsonRequestBody(post?.init.body);
+		expect(body).toHaveProperty("context");
+		expect(JSON.stringify(body)).toContain("PR was merged");
+		expect(JSON.stringify(body).length).toBeLessThan(16_100);
+		for (const read of requests) {
+			expect(new Headers(read.init.headers).get("Authorization")).toBe(
+				"Bearer t"
+			);
+		}
+	});
+
+	test("denied and empty Shadow reads never become invented evidence", async () => {
+		let posted: ReturnType<typeof parseJsonRequestBody> | undefined;
+		globalThis.fetch = createFetchFixture((url, init) => {
+			if (url.endsWith("/api/quests/q1")) {
+				return Promise.resolve(Response.json({ quest }));
+			}
+			if (url.includes("/context/recent?")) {
+				return Promise.resolve(
+					Response.json({ error: "denied" }, { status: 403 })
+				);
+			}
+			if (url.includes("/search/semantic?")) {
+				return Promise.resolve(Response.json({ results: [] }));
+			}
+			posted = parseJsonRequestBody(init.body);
+			return Promise.resolve(
+				Response.json({ skipped: true, reason: "no context available" })
+			);
+		});
+		expect(await judgeQuest(target, "q1")).toEqual({
+			skipped: true,
+			reason: "no context available",
+		});
+		expect(posted).toEqual({});
+	});
+});
+
+test("manual judge aborts a hung quest read at the evidence deadline", async () => {
+	let posted = false;
+	globalThis.fetch = createFetchFixture((_url, init) => {
+		posted = init.method === "POST";
+		return new Promise<Response>((_resolve, reject) => {
+			init.signal?.addEventListener(
+				"abort",
+				() => reject(new DOMException("Quest read timed out", "AbortError")),
+				{ once: true }
+			);
+		});
+	});
+	await expect(judgeQuest(target, "q1")).rejects.toThrow(
+		"Quest read timed out"
+	);
+	expect(posted).toBe(false);
+}, 15_000);

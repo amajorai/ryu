@@ -1,0 +1,26 @@
+[package]
+name = "ryu-js-guest"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "The WebAssembly guest ryu-tool-exec runs its JavaScript sandbox in: QuickJS (via the Bytecode Alliance's Javy) compiled to wasm32-wasip1. Built by tools/build-js-guest.sh; the committed ../assets/ryu_js_guest.wasm is what the host embeds."
+
+# Built for wasm32-wasip1 only, by tools/build-js-guest.sh. A standalone
+# workspace so the root workspace never tries to build it for the host target.
+[workspace]
+
+[dependencies]
+javy = "8.1"
+# WHATWG URL parsing for the sandbox's `URL` / `URLSearchParams` (url::quirks
+# implements the spec's getters and setters exactly).
+url = "2.5"
+
+[profile.release]
+# 3, not "s": QuickJS's JSON and regex paths run ~6-7% faster; the guest grows
+# ~0.3 MB, and Core caches the compiled guest (see warm_up in js_backend.rs).
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

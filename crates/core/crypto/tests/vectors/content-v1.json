@@ -1,0 +1,129 @@
+{
+ "root_key_b64": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+ "store": "test.db",
+ "content_key_b64": "uohrhy+6LOfoZkSmF61qmX2SMandCE/NbhV86jDUMpk=",
+ "aad_hex": "00000000000000137279752d636f6e74656e742d7365616c2d7631000000000000000573746f72650000000000000007746573742e64620000000000000007707572706f7365000000000000000a6974656d732e626f64790000000000000002696400000000000000023432",
+ "text": {
+  "purpose": "items.body",
+  "fields": [
+   [
+    "id",
+    "42"
+   ]
+  ],
+  "nonce_hex": "000102030405060708090a0b",
+  "plaintext": "hello content",
+  "sealed": "encb:v1:AAECAwQFBgcICQoLBXOl0WW1sdUf3MckFj6NQj8AVK2wBYGKpCjYGb0="
+ },
+ "bytes": {
+  "plaintext_hex": "00010203",
+  "sealed_hex": "5259552d43423031000102030405060708090a0b6d17cbbe7741804920ac6b02343980a5d64c55ac"
+ },
+ "blind_index": {
+  "field": "users.email",
+  "normalized": "alice@example.com",
+  "token": "bi1:d015bb1ec79929531622a0a7584931c5"
+ },
+ "fts_term": {
+  "field": "fts",
+  "term": "grüße",
+  "token": "abdb24d7043d9ab43e5fd4d1871981f3"
+ },
+ "sealed_file": {
+  "chunk_log2": 10,
+  "salt_hex": "6465666768696a6b6c6d6e6f7071727374757677",
+  "plaintext": "bytes((i*31+7)%256 for i in range(2500))",
+  "context": {
+   "purpose": "blob",
+   "fields": [
+    [
+     "id",
+     "<sha256 hex of plaintext>"
+    ]
+   ]
+  },
+  "file_len": 2580,
+  "file_sha256": "e3421992a74eeb9335704e952f7140ef1db37c00a0ed8d3f826b1c795c99a83a",
+  "header_hex": "5259552d534630310a0000006465666768696a6b6c6d6e6f7071727374757677"
+ },
+ "tokenizer": {
+  "store": "test.db",
+  "field": "terms",
+  "cases": [
+   {
+    "text": "The Grüße, GRÜSSE and naïve café 42 x",
+    "terms": [
+     "42",
+     "café",
+     "grüsse",
+     "grüße",
+     "naïve"
+    ],
+    "tokens": [
+     "9527eabc4665c397988475ec27b0caaf",
+     "e17aeb37e9b7b37228f69a77ff295aca",
+     "8aa70108bdd6a4f1b06fe01d02fb5d6c",
+     "6ecc7fd6ff54489b386c1b05fef77066",
+     "f93efdc42565d76b758a476f34654cac"
+    ]
+   },
+   {
+    "text": "हिन्दी भाषा में खोज, café ﬁle ２０２６ ℌello",
+    "terms": [
+     "2026",
+     "café",
+     "file",
+     "hello",
+     "खोज",
+     "भाषा",
+     "में",
+     "हिन्दी"
+    ],
+    "tokens": [
+     "37f5454fb350317a7915dd24b65eefb2",
+     "e17aeb37e9b7b37228f69a77ff295aca",
+     "6b5687e357ac16d791b3df05c2931769",
+     "f9920495dd4807935e2d91789a33d90a",
+     "8c5a5847a7520f56088987bb2b530398",
+     "54f0d4ffcdc3d8fa7637235d93095e72",
+     "172a707bfbff791a8b9131a9b91ea190",
+     "018c56e067e2481204e1e53355c4d808"
+    ]
+   }
+  ]
+ },
+ "sealed_log": {
+  "salt_hex": "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadb",
+  "context": {
+   "purpose": "log",
+   "fields": [
+    [
+     "id",
+     "meeting-1"
+    ]
+   ]
+  },
+  "records_utf8": [
+   "first record",
+   "",
+   "third"
+  ],
+  "record_nonces": "record i uses nonce bytes([i+1])*12",
+  "header_hex": "5259552d534c303101000000c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadb",
+  "file_len": 145,
+  "file_hex": "5259552d534c303101000000c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadb000000280101010101010101010101010a90b590acb729b0f368f0cbe300449d8b48101a4fa5973b3203355a0000001c020202020202020202020202ed0988323b2f52b4b7bf41a29425b70100000021030303030303030303030303195886500fb46cfd57f2d37d1ace9a8472fe178455"
+ },
+ "subkey": {
+  "label": "events/2026-10-19/09",
+  "key_b64": "cXAMSFQm4WEsDuhTnsaw4SIVmvYn71XBPIfJBgMvzdA="
+ },
+ "kcv": {
+  "root": "root_key_b64",
+  "kcv_hex": "dd366fcd1beeced74c2b5b5cca3a137e"
+ },
+ "webview_key": {
+  "app_key": "root_key_b64",
+  "store": "ryu-collaboration",
+  "key_b64": "+e+R1KapAkFSmbzJeGQr5lVD3/IFiX3gNxzhbUs4nUc="
+ }
+}

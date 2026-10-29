@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // Browser proof for the real managed-node wallet row in the desktop sidebar.
 // The control-plane and Core responses are deterministic so the product surface
 // can be inspected without credentials, a running node, or a live checkout.
@@ -23,14 +24,17 @@ const PROOF_NODE = {
 	url: "http://cloud-proof.local:7980",
 };
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse<FixturePayload>(body: FixturePayload): Response {
 	return new Response(JSON.stringify(body), {
 		headers: { "Content-Type": "application/json" },
 		status: 200,
 	});
 }
 
-function streamResponse(event: string, body: unknown): Response {
+function streamResponse<FixturePayload>(
+	event: string,
+	body: FixturePayload
+): Response {
 	const encoder = new TextEncoder();
 	const frame = encoder.encode(
 		`event: ${event}\ndata: ${JSON.stringify(body)}\n\n`
@@ -49,12 +53,11 @@ function streamResponse(event: string, body: unknown): Response {
 window.localStorage.setItem("ryu_session_token", "proof-session-token");
 
 window.fetch = async (input) => {
-	const rawUrl =
-		typeof input === "string"
-			? input
-			: input instanceof Request
-				? input.url
-				: input.toString();
+	const rawUrl = isNativeText(input)
+		? input
+		: input instanceof Request
+			? input.url
+			: input.toString();
 	const path = new URL(rawUrl, window.location.origin).pathname;
 
 	if (path.endsWith("/api/credits/wallet/stream")) {

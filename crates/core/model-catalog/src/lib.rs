@@ -34,6 +34,7 @@ pub mod installed;
 pub mod llmfit;
 pub mod models_dev;
 pub mod openrouter_meta;
+pub mod ryu_free_models;
 pub(crate) mod win_process;
 
 use std::path::PathBuf;
@@ -42,8 +43,9 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use device::{estimate_fit, human_bytes, DeviceInfo};
+use device::{estimate_fit, estimate_install_fit, human_bytes, DeviceInfo, FitVerdict};
 use ryu_model_format::ModelFormat;
+use ryu_sidecar_runtime::layout::{self, Modality};
 
 /// The bundled default chat/embed/Speech Processing model repos, as `(id, weight_url)`.
 /// Used only to derive a Hugging Face repo fallback for origin-less pre-existing
@@ -67,9 +69,10 @@ pub trait ModelCatalogHost: Send + Sync {
 
     /// Attach the user's Hugging Face bearer token (preferences-first, env
     /// fallback) to an outgoing Hub request and return the (possibly modified)
-    /// builder. Pass-through when no token is configured; the token never leaves
-    /// the host.
-    fn authorize_hf(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder;
+    /// builder. Implementations must check `url` themselves; pass-through for
+    /// non-Hub hosts or when no token is configured. The token never leaves the
+    /// host.
+    fn authorize_hf(&self, url: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder;
 
     /// Whether the named local engine (llama.cpp, vllm, sglang, mlx, …) is
     /// runnable on this Core node (platform + install gate). Drives the per-node
@@ -109,6 +112,12 @@ fn ryu_dir() -> PathBuf {
     host().ryu_dir()
 }
 
+/// The active Ryu data dir when a host is installed, else `None`. For probes
+/// that must stay infallible (hardware detection) in a process with no host.
+fn try_ryu_dir() -> Option<PathBuf> {
+    host_slot().get().map(|host| host.ryu_dir())
+}
+
 /// Test-only host backed by a process-wide temp data dir, installed on first use
 /// (idempotent — `set_global_host` is first-wins). Tests that touch a data-dir
 /// path (`installed`, `capabilities`, `aa`, `models_dev` caches) call this first
@@ -135,7 +144,11 @@ pub(crate) fn ensure_test_host() {
         fn ryu_dir(&self) -> PathBuf {
             self.dir.clone()
         }
-        fn authorize_hf(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        fn authorize_hf(
+            &self,
+            _url: &str,
+            req: reqwest::RequestBuilder,
+        ) -> reqwest::RequestBuilder {
             req
         }
         fn supported_on_node(&self, _engine: &str) -> bool {
@@ -424,7 +437,12 @@ pub struct GgufFile {
     /// Direct download URL.
     pub url: String,
     pub installed: bool,
-    /// Machine-readable fit verdict (`great`/`ok`/`tight`/`too_big`/`unknown`).
+    /// Machine-readable fit verdict, one of [`FitVerdict::as_str`]: `great`/`ok`
+    /// (fully on the GPU), `partial`/`cpu` (runs, may be slow), `too_big` (does
+    /// not fit memory) or `no_space` (not enough free disk to download), or
+    /// `unknown`. `too_big` and `no_space` are refused by the install route. A
+    /// file not yet installed is checked against free disk as well as memory; a
+    /// vision repo's fit counts the companion projector the install adds.
     pub fit: String,
     /// Plain-language fit sentence for non-technical users.
     pub fit_label: String,
@@ -451,8 +469,9 @@ pub struct ModelDetail {
     /// Total on-disk size of a snapshot repo's weights (summed shards). `None`
     /// for GGUF (use per-file sizes) or when the tree fetch failed.
     pub repo_size_bytes: Option<u64>,
-    /// Machine-readable coarse fit verdict for a snapshot repo (`great`/`ok`/
-    /// `unknown`/`too_big`). Empty for GGUF.
+    /// Machine-readable fit verdict for a snapshot repo, the same vocabulary as
+    /// GGUF files (`great`/`ok`/`partial`/`cpu`/`too_big`/`no_space`/`unknown`).
+    /// `too_big` and `no_space` block the install. Empty for GGUF.
     pub repo_fit: String,
     /// Plain-language, **conservative** fit sentence for a snapshot repo — never
     /// reuses the optimistic GGUF "partial offload" copy, because vLLM/MLX want
@@ -481,7 +500,7 @@ fn hf_get(client: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
     {
         // Optional token (preferences-first, env fallback) raises rate limits
         // and unlocks gated repos on the first-party Hub only.
-        host().authorize_hf(req)
+        host().authorize_hf(url, req)
     } else {
         req
     }
@@ -599,15 +618,52 @@ fn parse_quant(filename: &str) -> Option<String> {
     best.map(|(s, l)| upper[s..s + l].to_string())
 }
 
-/// Local file stem used to store a downloaded GGUF (`~/.ryu/models/<stem>.gguf`).
+/// Local file stem used to store a downloaded GGUF (`models/chat/<stem>.gguf`).
+/// A Hub path in a repo subfolder (`LowNoise/x.gguf`) is stored under its
+/// basename, so the models directory stays flat.
 fn local_stem(filename: &str) -> String {
-    filename.trim_end_matches(".gguf").to_string()
+    hub_basename(filename).trim_end_matches(".gguf").to_string()
+}
+
+/// The local stem a catalog install of Hub path `path` is stored under
+/// (`models/<modality>/<stem>.gguf`), after the same validation the install runs.
+pub fn installed_stem_for_hub_path(path: &str) -> Result<String> {
+    validate_hub_gguf_path(path)?;
+    Ok(local_stem(path))
+}
+
+/// The last `/`-separated component of a Hub repo path.
+fn hub_basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// Validate a GGUF path as the Hub lists it in a repo (`rfilename`), which may
+/// sit in subfolders (`HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf`). The
+/// full path only reaches the download URL; the file is stored under its
+/// basename, which must pass [`validate_gguf_filename`]. Every folder segment
+/// must be a plain name (`[A-Za-z0-9._-]`, no leading `.`), so `..`, empty
+/// segments, absolute paths, backslashes and drive prefixes stay rejected.
+pub fn validate_hub_gguf_path(path: &str) -> Result<()> {
+    let basename = hub_basename(path);
+    validate_gguf_filename(basename)?;
+    let folders = &path[..path.len() - basename.len()];
+    for segment in folders.split_terminator('/') {
+        let plain = !segment.is_empty()
+            && !segment.starts_with('.')
+            && segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        if !plain {
+            anyhow::bail!("unsafe filename: {path}");
+        }
+    }
+    Ok(())
 }
 
 /// Reject anything that isn't a single, safe GGUF filename. The name must be one
 /// normal path component — no `/`, `\`, `..`, or leading `.` — ending in
 /// `.gguf`. This is security-critical: `filename` becomes the on-disk stem
-/// (`~/.ryu/models/<stem>.gguf` via [`LocalModelEntry::weight_path`]), so an
+/// (`models/<modality>/<stem>.gguf`, see [`gguf_download_spec`]), so an
 /// unchecked `..`, path separator, or absolute path from the install endpoint
 /// would let a caller write the downloaded bytes anywhere on disk (path
 /// traversal / arbitrary file write).
@@ -643,9 +699,9 @@ pub struct UninstallPlan {
 }
 
 pub fn plan_uninstall_file(repo_id: &str, filename: &str) -> Result<UninstallPlan> {
-    validate_gguf_filename(filename)?;
+    validate_hub_gguf_path(filename)?;
     let stem = local_stem(filename);
-    let model_path = ryu_dir().join("models").join(format!("{stem}.gguf"));
+    let model_path = installed::model_file_path(&stem);
     let adapter_path = installed::mmproj_file_path(&stem);
     Ok(UninstallPlan {
         repo_id: repo_id.to_owned(),
@@ -924,8 +980,9 @@ fn parse_next_cursor(link: Option<&reqwest::header::HeaderValue>) -> Option<Stri
     None
 }
 
-/// Build cards for the offline installed view by scanning the on-disk models
-/// directory (`~/.ryu/models/*.gguf`) — the same source of truth the per-model
+/// Build cards for the offline installed view by scanning the catalog's model
+/// directories (`models/{chat,embedding,rerank}/*.gguf`, see
+/// [`installed::CATALOG_GGUF_MODALITIES`]) — the same source of truth the per-model
 /// `installed` badge uses — and resolving each file's origin repo from the
 /// provenance store, falling back to the bundled-default registry entry. Files
 /// with no known origin still appear as local entries so nothing the user has
@@ -1130,10 +1187,11 @@ pub fn record_default_download(
 /// the file (or record) was already gone. `repo_id` is used only to scope cache
 /// invalidation, so it need not be a valid Hub id.
 pub fn uninstall_file(repo_id: &str, filename: &str) -> Result<()> {
-    // The filename becomes the on-disk stem; reject traversal before touching FS.
-    validate_gguf_filename(filename)?;
+    // The filename's basename becomes the on-disk stem; reject traversal
+    // before touching FS.
+    validate_hub_gguf_path(filename)?;
     let stem = local_stem(filename);
-    let path = ryu_dir().join("models").join(format!("{stem}.gguf"));
+    let path = installed::model_file_path(&stem);
     if path.exists() {
         std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
     }
@@ -1166,25 +1224,34 @@ pub fn repo_from_hf_url(url: &str) -> Option<String> {
     }
 }
 
-/// Stems of every runnable model `*.gguf` file currently in `~/.ryu/models/`.
-/// Excludes vision adapters and importance matrices: both are companions or
-/// quantization inputs, not selectable/activatable models, so they must never
-/// surface as their own catalog card (or be served as `--model`).
+/// Stems of every runnable model `*.gguf` file currently in the catalog's model
+/// directories ([`installed::catalog_gguf_dirs`]: `models/chat`, plus the bundled
+/// embedding/reranker folders). Other modalities' folders (speech, image, video,
+/// …) are never scanned, so a TTS vocoder or diffusion text encoder can never
+/// surface as a chat card. Excludes vision adapters and importance matrices:
+/// both are companions or quantization inputs, not selectable/activatable
+/// models, so they must never surface as their own catalog card (or be served
+/// as `--model`).
 fn on_disk_gguf_stems() -> Vec<String> {
-    let dir = ryu_dir().join("models");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    entries
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            if is_mmproj_filename(&name) || is_imatrix_filename(&name) {
-                return None;
+    let mut stems = Vec::new();
+    for dir in installed::catalog_gguf_dirs() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            if !entry.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
             }
-            name.strip_suffix(".gguf").map(str::to_string)
-        })
-        .collect()
+            let name = entry.file_name().to_string_lossy().to_string();
+            if is_mmproj_filename(&name) || is_imatrix_filename(&name) {
+                continue;
+            }
+            if let Some(stem) = name.strip_suffix(".gguf") {
+                stems.push(stem.to_string());
+            }
+        }
+    }
+    stems
 }
 
 // ── Detail ─────────────────────────────────────────────────────────────────
@@ -1284,6 +1351,14 @@ pub async fn model_detail(
             s.rfilename.to_lowercase().ends_with(".gguf") && is_mmproj_filename(&s.rfilename)
         });
 
+    // The projector the install adds beside whichever quant is picked: it needs
+    // disk and memory too, so a vision quant's fit counts both.
+    let mmproj_bytes = if vision {
+        pick_mmproj(&sizes).and_then(|(_, size, _)| size)
+    } else {
+        None
+    };
+
     let mut files: Vec<GgufFile> = if format == ModelFormat::Gguf {
         info.siblings
             .iter()
@@ -1296,7 +1371,13 @@ pub async fn model_detail(
                 let (size_bytes, sha256) = sizes.get(&s.rfilename).cloned().unwrap_or((None, None));
                 let stem = local_stem(&s.rfilename);
                 let installed = models_dir_has(&stem);
-                let fit = estimate_fit(size_bytes, &device);
+                let fit_bytes = size_bytes.map(|b| b.saturating_add(mmproj_bytes.unwrap_or(0)));
+                // On disk already: only memory matters. Not yet: free disk too.
+                let fit = if installed {
+                    estimate_fit(fit_bytes, &device)
+                } else {
+                    estimate_install_fit(fit_bytes, &device)
+                };
                 GgufFile {
                     quant: parse_quant(&s.rfilename),
                     size_human: size_bytes.map(human_bytes).unwrap_or_default(),
@@ -1331,7 +1412,7 @@ pub async fn model_detail(
     } else {
         let total: u64 = sizes.values().filter_map(|(s, _)| *s).sum();
         let total = (total > 0).then_some(total);
-        let (fit, label) = snapshot_fit(total, &device);
+        let (fit, label) = snapshot_fit(total, &device, installed_set.contains(&info.id));
         (total, fit, label)
     };
 
@@ -1385,29 +1466,59 @@ pub async fn model_detail(
     })
 }
 
-/// Conservative repo-level fit verdict for a snapshot model. Unlike GGUF, vLLM/
-/// MLX load the whole repo into memory, so anything short of a clean GPU fit is
-/// reported as "may not fit" rather than the optimistic "partial offload" copy.
-fn snapshot_fit(total: Option<u64>, device: &DeviceInfo) -> (String, String) {
+/// Repo-level fit verdict for a snapshot model. Unlike GGUF, vLLM/MLX load the
+/// whole repo into memory, so anything short of a clean GPU fit gets an explicit
+/// "may be slow" sentence rather than the optimistic "partial offload" copy, and
+/// only a repo that overflows system memory reads `too_big` (blocked, matching
+/// the install refusal in [`install_preflight`]).
+/// A repo not yet `installed` that cannot be stored reads `no_space` (with the
+/// numbers) ahead of any memory verdict.
+fn snapshot_fit(total: Option<u64>, device: &DeviceInfo, installed: bool) -> (String, String) {
     let Some(bytes) = total else {
         return (
             "unknown".to_string(),
             "Size unknown — check the model card before installing.".to_string(),
         );
     };
-    let verdict = estimate_fit(Some(bytes), device);
+    let verdict = if installed {
+        estimate_fit(Some(bytes), device)
+    } else {
+        estimate_install_fit(Some(bytes), device)
+    };
     match verdict {
-        device::FitVerdict::Great | device::FitVerdict::Ok => {
+        FitVerdict::Great | FitVerdict::Ok => {
             (verdict.as_str().to_string(), verdict.label().to_string())
         }
-        device::FitVerdict::Unknown => (
+        FitVerdict::NoSpace => (
+            verdict.as_str().to_string(),
+            format!(
+                "Not enough free disk space — this {} model needs {} free, only {} is free.",
+                human_bytes(bytes),
+                human_bytes(bytes.saturating_add(device::DISK_HEADROOM_BYTES)),
+                device.disk_free_human
+            ),
+        ),
+        FitVerdict::Unknown => (
             "unknown".to_string(),
             "Can't check your device — verify the model fits before installing.".to_string(),
         ),
-        _ => (
-            "too_big".to_string(),
+        FitVerdict::TooBig => (
+            verdict.as_str().to_string(),
             format!(
-                "This {} model may not fit — these engines load the whole repo into memory.",
+                "This {} model won't fit — these engines load the whole repo into memory, and \
+                 that needs about {} on this {} device.",
+                human_bytes(bytes),
+                human_bytes(device::system_ram_need_bytes(bytes)),
+                device.ram_human
+            ),
+        ),
+        // Partial / Cpu: it fits in system memory, so it is allowed, but these
+        // engines want the whole repo on the GPU — warn that it may be slow.
+        FitVerdict::Partial | FitVerdict::Cpu => (
+            verdict.as_str().to_string(),
+            format!(
+                "This {} model doesn't fully fit your GPU — it may be slow, since these engines \
+                 load the whole repo into memory.",
                 human_bytes(bytes)
             ),
         ),
@@ -1563,6 +1674,25 @@ pub struct InstallResult {
     pub path: String,
 }
 
+/// The `models/<modality>` folder a single-file GGUF of `role` is stored in:
+/// embedding/reranker/classifier weights get their own folders, every other
+/// llama.cpp GGUF (chat, Speech Processing, draft heads) is a chat-engine model
+/// in `models/chat`.
+pub fn gguf_modality_for_role(role: ryu_downloads::DownloadRole) -> Modality {
+    use ryu_downloads::DownloadRole;
+    match role {
+        DownloadRole::EmbeddingModel => Modality::Embedding,
+        DownloadRole::RerankerModel => Modality::Rerank,
+        DownloadRole::ClassifierModel => Modality::Classifier,
+        _ => Modality::Chat,
+    }
+}
+
+/// `<data dir>/models/<modality>` for [`gguf_modality_for_role`].
+pub fn gguf_dir_for_role(role: ryu_downloads::DownloadRole) -> PathBuf {
+    layout::models_dir(&ryu_dir(), gguf_modality_for_role(role))
+}
+
 /// Download + verify a specific GGUF file from a repo, reusing the shared
 /// [`GgufDownloader`] (checksum-verified, atomic, retrying). Records provenance
 /// so the catalog can show it as installed.
@@ -1581,10 +1711,10 @@ pub fn gguf_download_spec(
         role,
         label: label.to_string(),
         url: weight_url.to_string(),
-        // `~/.ryu/models/<id>.gguf` — matches the local model registry's
-        // `LocalModelEntry::weight_path()` so the version-store key + fast-path
-        // checksum-skip stay identical to the pre-extraction path.
-        dest: ryu_dir().join("models").join(format!("{id}.gguf")),
+        // `models/<modality>/<id>.gguf`, the modality picked from `role` —
+        // matches the local model registry's `LocalModelEntry::weight_path()`
+        // so the file the downloader writes is the file the engine serves.
+        dest: gguf_dir_for_role(role).join(format!("{id}.gguf")),
         sha256: (!sha256.is_empty()).then(|| sha256.to_string()),
         version_record: Some(ryu_downloads::VersionRecord {
             store_key: format!("gguf:{id}"),
@@ -1668,7 +1798,7 @@ fn pick_mmproj(
 }
 
 /// Download the multimodal projector `filename` from `repo_id` and store it as
-/// the vision adapter bound to `model_stem` (`~/.ryu/models/<stem>.mmproj.gguf`),
+/// the vision adapter bound to `model_stem` (`models/chat/<stem>.mmproj.gguf`),
 /// through the shared verified [`ryu_downloads::DownloadCenter`]. The dest
 /// name is built from the already-validated `model_stem`, so the (HF-supplied)
 /// projector filename only reaches the download URL, never the on-disk path.
@@ -1696,6 +1826,103 @@ async fn download_mmproj(
         .download_blocking(spec)
         .await
         .with_context(|| format!("downloading vision adapter {filename} from {repo_id}"))
+}
+
+/// Why Core refuses an install before downloading anything: the model would not
+/// fit this node's memory (loading it could freeze or crash the machine) or its
+/// free disk. Serialized as the body of the install route's HTTP 422.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallBlock {
+    /// Stable machine code: `model_too_large` or `insufficient_disk`.
+    pub code: &'static str,
+    /// The [`FitVerdict`] wire string: `too_big` or `no_space`.
+    pub verdict: &'static str,
+    /// One human sentence with the real numbers.
+    pub message: String,
+    /// Bytes the install would download (weights plus any vision projector).
+    pub size_bytes: u64,
+}
+
+/// Bytes an install of `file` (GGUF) or of the whole repo (snapshot) downloads,
+/// from the same tree map [`model_detail`] sizes its picker from. A GGUF counts
+/// the projector [`install_file`] adds beside it. `None` when the size is not
+/// known, which never refuses an install.
+fn planned_install_bytes(
+    sizes: &std::collections::HashMap<String, (Option<u64>, Option<String>)>,
+    file: &str,
+    format: ModelFormat,
+) -> Option<u64> {
+    if !format.is_single_file() {
+        let total: u64 = sizes.values().filter_map(|(size, _)| *size).sum();
+        return (total > 0).then_some(total);
+    }
+    let weight = sizes.get(file).and_then(|(size, _)| *size)?;
+    let projector = match pick_mmproj(sizes) {
+        Some((name, size, _)) if name != file => size.unwrap_or(0),
+        _ => 0,
+    };
+    Some(weight.saturating_add(projector))
+}
+
+/// The refusal for installing `bytes` on `device`, or `None` when it may go
+/// ahead (including an unknown size or unknown hardware). An `installed` model
+/// is judged on memory alone, like its row in [`model_detail`].
+fn install_block_for(
+    bytes: Option<u64>,
+    device: &DeviceInfo,
+    installed: bool,
+) -> Option<InstallBlock> {
+    let memory_only;
+    let device = if installed {
+        memory_only = DeviceInfo {
+            disk_free_bytes: None,
+            ..device.clone()
+        };
+        &memory_only
+    } else {
+        device
+    };
+    let message = device::install_block_reason(bytes, device)?;
+    let size_bytes = bytes.unwrap_or(0);
+    let verdict = estimate_install_fit(bytes, device);
+    let code = match verdict {
+        FitVerdict::NoSpace => "insufficient_disk",
+        _ => "model_too_large",
+    };
+    Some(InstallBlock {
+        code,
+        verdict: verdict.as_str(),
+        message,
+        size_bytes,
+    })
+}
+
+/// Pre-download check for the install route: sizes `file` (or the snapshot of
+/// `repo_id`) from the Hub tree and tests it against this node's memory and
+/// free disk. Best-effort by design: a failed tree lookup, an unlisted file, or
+/// undetectable hardware returns `None` and the install proceeds.
+pub async fn install_preflight(
+    client: &reqwest::Client,
+    endpoint: &HfEndpoint,
+    repo_id: &str,
+    file: &str,
+    format: ModelFormat,
+) -> Option<InstallBlock> {
+    validate_repo_id(repo_id).ok()?;
+    let sizes = fetch_tree_sizes(client, endpoint, repo_id, format)
+        .await
+        .ok()?;
+    let bytes = planned_install_bytes(&sizes, file, format)?;
+    // Already on disk (a re-install or an update): only memory is judged, as in
+    // `model_detail`. A matching file is skipped by the download center, and an
+    // update's new bytes meet the center's own free-space check.
+    let installed = if format.is_single_file() {
+        validate_hub_gguf_path(file).is_ok() && models_dir_has(&local_stem(file))
+    } else {
+        installed::installed_repo_ids().contains(repo_id)
+    };
+    install_block_for(Some(bytes), &DeviceInfo::detect(), installed)
 }
 
 /// Detect and install the multimodal projector ("vision adapter") for a GGUF
@@ -1728,8 +1955,10 @@ pub async fn install_file(
 ) -> Result<InstallResult> {
     // Security: both come straight from the install endpoint's JSON body. Reject
     // path-traversal filenames (the stem becomes an on-disk path) and malformed
-    // repo ids (interpolated into Hub URLs) before any download or write.
-    validate_gguf_filename(filename)?;
+    // repo ids (interpolated into Hub URLs) before any download or write. A
+    // subfoldered Hub path is downloaded from its full path and stored under
+    // its basename.
+    validate_hub_gguf_path(filename)?;
     if is_imatrix_filename(filename) {
         anyhow::bail!("importance matrix files are not runnable model weights: {filename}");
     }
@@ -1740,9 +1969,29 @@ pub async fn install_file(
 
     // Pull the expected sha256 (and size) from the tree so the download is
     // checksum-verified; empty sha falls back to no verification.
-    let sizes = fetch_tree_sizes(client, endpoint, repo_id, ModelFormat::Gguf)
-        .await
-        .unwrap_or_default();
+    //
+    // A FAILED tree lookup during an UPDATE is an error, not "no checksum".
+    // Defaulting it let an update with a rate-limited Hub skip the download (the
+    // old file matched its own recorded checksum), report success, and record no
+    // size — which then hid the model from `/api/models/updates` for good.
+    //
+    // A FIRST install keeps the old posture (download unverified, as before):
+    // a gated repo, a Hub 429 or a mirror without the tree API must not make a
+    // model uninstallable. Only an update of a file already on disk needs the
+    // listing, because without it there is nothing to tell the old file apart.
+    let sizes = match fetch_tree_sizes(client, endpoint, repo_id, ModelFormat::Gguf).await {
+        Ok(sizes) => sizes,
+        Err(error) if !installed::model_file_path(&stem).exists() => {
+            tracing::warn!(
+                "listing files in {repo_id} failed; installing {filename} unverified: {error:#}"
+            );
+            Default::default()
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("listing files in {repo_id} to update {filename}"))
+        }
+    };
     let (size_bytes, sha) = sizes.get(filename).cloned().unwrap_or((None, None));
 
     // Route through the global DownloadCenter: streams to a `.part` file with
@@ -1913,7 +2162,7 @@ fn validate_snapshot_path(rel: &str, format: ModelFormat) -> Result<()> {
 /// repo's weight + config files via the format-aware tree endpoint, validates
 /// each repo-relative path, and downloads each through the shared
 /// [`ryu_downloads::DownloadCenter`] (per-file resume + checksum), mirroring
-/// the tree under `~/.ryu/models/<slug>/`. Records one provenance entry.
+/// the tree under `models/chat/snapshots/<slug>/`. Records one provenance entry.
 ///
 /// Only the default HF path uses this (it has repo-relative paths). Seam sources
 /// stay single-file/GGUF.
@@ -1999,10 +2248,7 @@ pub async fn install_snapshot(
 // ── Misc ─────────────────────────────────────────────────────────────────
 
 fn models_dir_has(stem: &str) -> bool {
-    ryu_dir()
-        .join("models")
-        .join(format!("{stem}.gguf"))
-        .exists()
+    installed::model_file_path(stem).exists()
 }
 
 #[cfg(test)]
@@ -2143,6 +2389,45 @@ mod tests {
         // Wrong extension is rejected regardless of shape.
         assert!(validate_gguf_filename("model.bin").is_err());
         assert!(validate_gguf_filename("..").is_err());
+    }
+
+    #[test]
+    fn subfoldered_hub_paths_install_under_their_basename() {
+        // The published QuantStack/Wan2.2-I2V-A14B-GGUF layout keeps each half
+        // of the transformer pair in its own folder.
+        for path in [
+            "HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf",
+            "LowNoise/Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf",
+        ] {
+            assert!(validate_hub_gguf_path(path).is_ok(), "{path}");
+        }
+        assert_eq!(
+            local_stem("LowNoise/Wan2.2-I2V-A14B-LowNoise-Q4_K_M.gguf"),
+            "Wan2.2-I2V-A14B-LowNoise-Q4_K_M"
+        );
+        assert_eq!(local_stem("a/b/c-Q8_0.gguf"), "c-Q8_0");
+        assert!(validate_hub_gguf_path("plain-Q4_K_M.gguf").is_ok());
+    }
+
+    #[test]
+    fn subfoldered_hub_paths_keep_traversal_blocked() {
+        for path in [
+            "../evil.gguf",
+            "LowNoise/../../evil.gguf",
+            "../LowNoise/evil.gguf",
+            "./LowNoise/evil.gguf",
+            ".hidden/evil.gguf",
+            "/etc/evil.gguf",
+            "LowNoise//evil.gguf",
+            "LowNoise/",
+            "Low Noise/evil.gguf",
+            "LowNoise\\evil.gguf",
+            "C:/evil.gguf",
+            "LowNoise/.evil.gguf",
+            "LowNoise/evil.bin",
+        ] {
+            assert!(validate_hub_gguf_path(path).is_err(), "{path}");
+        }
     }
 
     #[test]
@@ -2290,6 +2575,8 @@ mod tests {
             gpu_vendor: None,
             unified_memory: false,
             os: "test".into(),
+            disk_free_bytes: None,
+            disk_free_human: String::new(),
         }
     }
 
@@ -2299,22 +2586,146 @@ mod tests {
         let big = dev(Some(64 * gib), Some(48 * gib));
 
         // Unknown total → "size unknown".
-        let (fit, label) = snapshot_fit(None, &big);
+        let (fit, label) = snapshot_fit(None, &big, false);
         assert_eq!(fit, "unknown");
         assert!(label.to_lowercase().contains("unknown"));
 
         // A tiny repo fits comfortably → great/ok passes through verbatim.
-        let (fit, _) = snapshot_fit(Some(gib), &big);
+        let (fit, _) = snapshot_fit(Some(gib), &big, false);
         assert!(fit == "great" || fit == "ok");
 
-        // A repo far larger than any memory → conservative too_big copy.
-        let (fit, label) = snapshot_fit(Some(500 * gib), &big);
+        // A repo far larger than any memory → blocked too_big with numbers.
+        let (fit, label) = snapshot_fit(Some(500 * gib), &big, false);
         assert_eq!(fit, "too_big");
-        assert!(label.contains("may not fit"));
+        assert!(label.contains("won't fit"), "{label}");
+
+        // Spills past VRAM but fits RAM → slow, not blocked.
+        let (fit, label) = snapshot_fit(Some(50 * gib), &big, false);
+        assert_eq!(fit, "partial");
+        assert!(label.contains("may be slow"), "{label}");
 
         // No device memory at all → estimate is Unknown → conservative unknown.
-        let (fit, _) = snapshot_fit(Some(gib), &dev(None, None));
+        let (fit, _) = snapshot_fit(Some(gib), &dev(None, None), false);
         assert_eq!(fit, "unknown");
+    }
+
+    fn with_disk(mut device: device::DeviceInfo, free: u64) -> device::DeviceInfo {
+        device.disk_free_bytes = Some(free);
+        device.disk_free_human = human_bytes(free);
+        device
+    }
+
+    #[test]
+    fn snapshot_fit_reports_no_space_with_numbers_unless_installed() {
+        let gib = 1024u64 * 1024 * 1024;
+        let tight_disk = with_disk(dev(Some(64 * gib), Some(48 * gib)), 3 * gib);
+
+        let (fit, label) = snapshot_fit(Some(4 * gib), &tight_disk, false);
+        assert_eq!(fit, "no_space");
+        assert_eq!(
+            label,
+            "Not enough free disk space — this 4.0 GB model needs 6.0 GB free, only 3.0 GB is free."
+        );
+
+        // Already on disk: only memory matters, so the same repo fits.
+        let (fit, _) = snapshot_fit(Some(4 * gib), &tight_disk, true);
+        assert!(fit == "great" || fit == "ok", "{fit}");
+    }
+
+    fn tree(
+        entries: &[(&str, Option<u64>)],
+    ) -> std::collections::HashMap<String, (Option<u64>, Option<String>)> {
+        entries
+            .iter()
+            .map(|(path, size)| ((*path).to_string(), (*size, None)))
+            .collect()
+    }
+
+    #[test]
+    fn planned_install_bytes_counts_the_projector_and_whole_snapshots() {
+        let vision = tree(&[
+            ("model-Q4_K_M.gguf", Some(4000)),
+            ("mmproj-f16.gguf", Some(500)),
+            ("mmproj-q8_0.gguf", Some(400)),
+        ]);
+        // The f16 projector install_file picks is added to the quant.
+        assert_eq!(
+            planned_install_bytes(&vision, "model-Q4_K_M.gguf", ModelFormat::Gguf),
+            Some(4500)
+        );
+        // An unlisted file, or one without a size, is unknown — never a refusal.
+        assert_eq!(
+            planned_install_bytes(&vision, "other.gguf", ModelFormat::Gguf),
+            None
+        );
+        let no_size = tree(&[("model-Q4_K_M.gguf", None)]);
+        assert_eq!(
+            planned_install_bytes(&no_size, "model-Q4_K_M.gguf", ModelFormat::Gguf),
+            None
+        );
+        let text_only = tree(&[("model-Q4_K_M.gguf", Some(4000))]);
+        assert_eq!(
+            planned_install_bytes(&text_only, "model-Q4_K_M.gguf", ModelFormat::Gguf),
+            Some(4000)
+        );
+
+        let snapshot = tree(&[
+            ("model-00001-of-00002.safetensors", Some(3000)),
+            ("model-00002-of-00002.safetensors", Some(2000)),
+            ("config.json", None),
+        ]);
+        assert_eq!(
+            planned_install_bytes(&snapshot, "", ModelFormat::Safetensors),
+            Some(5000)
+        );
+        assert_eq!(
+            planned_install_bytes(&tree(&[]), "", ModelFormat::Safetensors),
+            None
+        );
+    }
+
+    #[test]
+    fn install_block_codes_memory_and_disk_refusals_and_never_unknowns() {
+        let gib = 1024u64 * 1024 * 1024;
+        // 8 GB of RAM, no GPU, plenty of disk: a 20 GB model cannot load.
+        let small = with_disk(dev(Some(8 * gib), None), 500 * gib);
+        let block = install_block_for(Some(20 * gib), &small, false).expect("too big");
+        assert_eq!(block.code, "model_too_large");
+        assert_eq!(block.verdict, "too_big");
+        assert_eq!(block.size_bytes, 20 * gib);
+        assert!(block.message.starts_with("Too large for this device"));
+
+        // Fits memory but not the disk: refused as a disk problem first.
+        let full = with_disk(dev(Some(64 * gib), Some(48 * gib)), 3 * gib);
+        let block = install_block_for(Some(4 * gib), &full, false).expect("no space");
+        assert_eq!(block.code, "insufficient_disk");
+        assert_eq!(block.verdict, "no_space");
+        assert_eq!(
+            serde_json::to_value(&block).unwrap(),
+            serde_json::json!({
+                "code": "insufficient_disk",
+                "verdict": "no_space",
+                "message": block.message,
+                "sizeBytes": 4 * gib,
+            })
+        );
+
+        // Already installed: the disk no longer matters (a re-install is
+        // skipped), but memory still does.
+        assert_eq!(install_block_for(Some(4 * gib), &full, true), None);
+        assert_eq!(
+            install_block_for(Some(20 * gib), &small, true).map(|block| block.code),
+            Some("model_too_large")
+        );
+
+        // Runs (slowly, on the CPU) and fits the disk: allowed.
+        assert_eq!(install_block_for(Some(2 * gib), &small, false), None);
+        // Unknown size or unknown hardware never refuses.
+        assert_eq!(install_block_for(None, &small, false), None);
+        assert_eq!(
+            install_block_for(Some(500 * gib), &dev(None, None), false),
+            None
+        );
     }
 
     #[test]
@@ -2362,7 +2773,22 @@ mod tests {
         assert_eq!(spec.sha256.as_deref(), Some("deadbeef"));
         assert!(spec
             .dest
-            .ends_with(std::path::Path::new("models/my-stem.gguf")));
+            .ends_with(std::path::Path::new("models/chat/my-stem.gguf")));
+        // Registry defaults of other roles land in their own modality folders.
+        for (role, dir) in [
+            (ryu_downloads::DownloadRole::EmbeddingModel, "embedding"),
+            (ryu_downloads::DownloadRole::RerankerModel, "rerank"),
+            (ryu_downloads::DownloadRole::ClassifierModel, "classifier"),
+            (ryu_downloads::DownloadRole::SpeechModel, "chat"),
+        ] {
+            let spec = gguf_download_spec("r", "u", "", "l", role);
+            assert!(
+                spec.dest
+                    .ends_with(std::path::Path::new("models").join(dir).join("r.gguf")),
+                "{role:?} → {}",
+                spec.dest.display()
+            );
+        }
         assert_eq!(
             spec.version_record.as_ref().unwrap().store_key,
             "gguf:my-stem"
@@ -2378,7 +2804,7 @@ mod tests {
     fn on_disk_stems_exclude_mmproj_and_models_dir_has() {
         ensure_test_host();
         let stem = "ondisk-unique-f1";
-        let models = ryu_dir().join("models");
+        let models = installed::chat_models_dir();
         std::fs::create_dir_all(&models).unwrap();
         std::fs::write(models.join(format!("{stem}.gguf")), b"x").unwrap();
         std::fs::write(models.join(format!("{stem}.mmproj.gguf")), b"p").unwrap();
@@ -2404,10 +2830,51 @@ mod tests {
     }
 
     #[test]
+    fn on_disk_stems_ignore_other_modalities() {
+        ensure_test_host();
+        let root = ryu_dir();
+        // A TTS GGUF (e.g. OuteTTS / WavTokenizer) lives in its own modality
+        // folder and must never surface as an installed chat card.
+        let tts = layout::models_dir(&root, Modality::TextToSpeech).join("outetts");
+        std::fs::create_dir_all(&tts).unwrap();
+        let tts_stem = "tts-scan-unique-h1";
+        std::fs::write(tts.join(format!("{tts_stem}.gguf")), b"x").unwrap();
+        let tts_flat = layout::models_dir(&root, Modality::TextToSpeech);
+        let tts_flat_stem = "tts-scan-flat-unique-h1";
+        std::fs::write(tts_flat.join(format!("{tts_flat_stem}.gguf")), b"x").unwrap();
+        // Image weights (the diffusion text encoder) likewise.
+        let image = layout::models_dir(&root, Modality::Image);
+        std::fs::create_dir_all(&image).unwrap();
+        let image_stem = "image-scan-unique-h1";
+        std::fs::write(image.join(format!("{image_stem}.gguf")), b"x").unwrap();
+        // The bundled embedding default is intentionally listed.
+        let embedding = layout::models_dir(&root, Modality::Embedding);
+        std::fs::create_dir_all(&embedding).unwrap();
+        let embed_stem = "embed-scan-unique-h1";
+        std::fs::write(embedding.join(format!("{embed_stem}.gguf")), b"x").unwrap();
+
+        let stems = on_disk_gguf_stems();
+        assert!(!stems.contains(&tts_stem.to_string()));
+        assert!(!stems.contains(&tts_flat_stem.to_string()));
+        assert!(!stems.contains(&image_stem.to_string()));
+        assert!(!models_dir_has(tts_flat_stem));
+        assert!(stems.contains(&embed_stem.to_string()));
+        assert_eq!(
+            installed::model_file_path(embed_stem),
+            embedding.join(format!("{embed_stem}.gguf"))
+        );
+
+        let _ = std::fs::remove_file(tts.join(format!("{tts_stem}.gguf")));
+        let _ = std::fs::remove_file(tts_flat.join(format!("{tts_flat_stem}.gguf")));
+        let _ = std::fs::remove_file(image.join(format!("{image_stem}.gguf")));
+        let _ = std::fs::remove_file(embedding.join(format!("{embed_stem}.gguf")));
+    }
+
+    #[test]
     fn record_default_download_derives_repo_and_filename() {
         ensure_test_host();
         let stem = "default-dl-unique-d1";
-        let models = ryu_dir().join("models");
+        let models = installed::chat_models_dir();
         std::fs::create_dir_all(&models).unwrap();
         std::fs::write(models.join(format!("{stem}.gguf")), b"x").unwrap();
         record_default_download(
@@ -2431,7 +2898,7 @@ mod tests {
     async fn installed_only_search_lists_local_cards_offline() {
         ensure_test_host();
         let stem = "installed-only-unique-g1";
-        let models = ryu_dir().join("models");
+        let models = installed::chat_models_dir();
         std::fs::create_dir_all(&models).unwrap();
         std::fs::write(models.join(format!("{stem}.gguf")), b"x").unwrap();
         installed::record(installed::InstalledModel {
@@ -2483,7 +2950,7 @@ mod tests {
         ensure_test_host();
         let stem = "uninstall-unique-e1";
         let filename = "uninstall-unique-e1.gguf";
-        let models = ryu_dir().join("models");
+        let models = installed::chat_models_dir();
         std::fs::create_dir_all(&models).unwrap();
         let path = models.join(format!("{stem}.gguf"));
         std::fs::write(&path, b"x").unwrap();
@@ -2816,7 +3283,7 @@ mod tests {
             }
         });
         let dc = ryu_downloads::DownloadCenter::with_default_client();
-        std::fs::create_dir_all(ryu_dir().join("models")).unwrap();
+        std::fs::create_dir_all(installed::chat_models_dir()).unwrap();
         let stem = "install-desc-unique-c1";
         let url = format!("http://{addr}/acme/desc-repo/resolve/main/{stem}.gguf");
         let matrix_error =
@@ -2855,7 +3322,7 @@ mod tests {
             host: format!("http://{addr}"),
         };
         let dc = ryu_downloads::DownloadCenter::with_default_client();
-        std::fs::create_dir_all(ryu_dir().join("models")).unwrap();
+        std::fs::create_dir_all(installed::chat_models_dir()).unwrap();
         let stem = "install-file-unique-c2";
         let err = install_file(
             &test_client(),

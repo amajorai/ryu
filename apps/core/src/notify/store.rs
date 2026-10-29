@@ -17,144 +17,277 @@
 //!   - `push_tokens` — Expo push tokens registered by mobile devices, so a
 //!     triggered alert / user notification can fan out to them.
 //!
+//! Credentials are sealed at rest with the master key (`enc:v1:`): the whole
+//! `alert_delivery` JSON (Telegram bot tokens, Slack/Discord incoming-webhook
+//! URLs, Expo tokens, email recipients), and every `push_tokens.token`. A push
+//! token is looked up by `token_hash` (SHA-256 of the high-entropy token), so the
+//! sealed value can use a fresh nonce. Reads accept legacy plaintext; opening the
+//! store seals what is still plaintext once, under `secure_delete`, and records
+//! the scrub debt (`vacuum_pending`, store [`NOTIFY_STORE`]) in the same
+//! transaction. The freed pages are then scrubbed and the file vacuumed by the
+//! shared gated flow (`finish_store`, a size-gated `VACUUM` on the boot path and
+//! a deferred compaction for a large file). A scrub that fails is logged and
+//! stays owed; it never stops the store from opening. Writes fail closed when
+//! the master key is unavailable.
+//!
 //! Placement (Core vs Gateway): this stores *what was delivered to whom* — it
 //! opens delivery sockets, it does not decide policy — so it is Core kernel.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use ryu_crypto::{looks_sealed, FieldCipher, SecretSealer};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use ryu_notify::AlertDeliveryTargets;
 
+/// The name `notify.db`'s seal and scrub record is kept under in
+/// `ryu_content_seal`.
+pub(crate) const NOTIFY_STORE: &str = "notify.db";
+
+/// How long a statement waits for another connection. The driver default,
+/// stated here so the scrub's checkpoint wait is explicit; short under test so
+/// a blocked checkpoint is observable without a long wait.
+const BUSY_TIMEOUT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(50)
+} else {
+    std::time::Duration::from_secs(5)
+};
+
 fn default_db_path() -> PathBuf {
-    crate::paths::ryu_dir().join("notify.db")
+    crate::paths::db_path("notify.db")
 }
 
 /// SQLite-backed notification-delivery store. Cheap to clone (wraps an `Arc`).
 #[derive(Clone)]
 pub struct NotifyStore {
     conn: Arc<Mutex<Connection>>,
+    /// The master-key cipher, or `None` when the key could not be resolved at
+    /// open. The inbox keeps working without it; storing a credential fails
+    /// closed and a sealed credential cannot be read.
+    cipher: Option<FieldCipher>,
+}
+
+/// The lookup key of a push token: SHA-256 of the token. Expo tokens are
+/// high-entropy bearer identifiers, so the digest does not reveal them.
+fn push_token_hash(token: &str) -> String {
+    ryu_crypto::sha256_hex(token.as_bytes())
 }
 
 impl NotifyStore {
-    /// Open (or create) the store at the default path (`~/.ryu/notify.db`).
+    /// Open (or create) the store at the default path (`<data dir>/db/notify.db`).
     pub fn open_default() -> Result<Self> {
         Self::open(default_db_path())
     }
 
     /// Open (or create) the store at a specific path and run migrations.
     pub fn open(path: PathBuf) -> Result<Self> {
+        // Idempotent; lets tests and embedders open the store without Core's boot.
+        crate::crypto_host::install();
+        let cipher = match ryu_crypto::global_cipher() {
+            Ok(cipher) => Some(cipher),
+            Err(error) => {
+                tracing::warn!(
+                    "notify store: master key unavailable ({error:#}); alert delivery targets and push tokens cannot be stored"
+                );
+                None
+            }
+        };
+        Self::open_with_cipher(path, cipher)
+    }
+
+    fn open_with_cipher(path: PathBuf, cipher: Option<FieldCipher>) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating db dir {}", parent.display()))?;
         }
         let conn = Connection::open(&path)
             .with_context(|| format!("opening notify db {}", path.display()))?;
+        conn.busy_timeout(BUSY_TIMEOUT)
+            .context("setting the notify db busy timeout")?;
+        // Every rewritten or deleted cell is zeroed, so a resealed credential
+        // does not stay readable in the page it replaced.
+        ryu_crypto::content_sqlite::enable_secure_delete(&conn)?;
         Self::init_schema(&conn)?;
-        // One-time, best-effort import of the shared delivery state from the
-        // pre-decomposition `monitors.db` sibling (see `migrate_from_monitors`).
-        let monitors_db = path.parent().map(|p| p.join("monitors.db"));
-        Self::migrate_from_monitors(&conn, monitors_db.as_deref());
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
-    }
-
-    /// One-time, best-effort import of the shared notification-delivery state
-    /// (`alert_delivery` + `push_tokens`) from the pre-decomposition
-    /// `monitors.db`, where those rows lived before this store was extracted to
-    /// the kernel. Without it, an upgraded node silently drops its configured
-    /// policy-alert recipients (webhook / Telegram / email) and registered mobile
-    /// push tokens, because the old rows still sit in `monitors.db` but are no
-    /// longer read.
-    ///
-    /// Idempotent and never boot-fatal: it runs only when this store holds NO such
-    /// rows yet AND a sibling `monitors.db` exists, and every step is wrapped so a
-    /// missing, locked, or old-schema `monitors.db` is logged-and-skipped, never
-    /// propagated.
-    fn migrate_from_monitors(conn: &Connection, monitors_db: Option<&std::path::Path>) {
-        if let Err(e) = Self::try_migrate_from_monitors(conn, monitors_db) {
-            tracing::debug!("notify: monitors.db delivery-state migration skipped: {e}");
-        }
-    }
-
-    fn try_migrate_from_monitors(
-        conn: &Connection,
-        monitors_db: Option<&std::path::Path>,
-    ) -> Result<()> {
-        let Some(monitors_db) = monitors_db else {
-            return Ok(());
+        let resealed = match &cipher {
+            Some(cipher) => Self::reseal_plaintext_credentials(&conn, cipher)?,
+            None => 0,
         };
-        if !monitors_db.exists() {
-            return Ok(());
+        Self::scrub_after_reseal(&conn, &path, resealed);
+        let compaction_owed =
+            ryu_crypto::content_sqlite::compaction_owed(&conn, NOTIFY_STORE).unwrap_or(false);
+        let conn = Arc::new(Mutex::new(conn));
+        if compaction_owed {
+            // Too large to compact while Core boots: the background worker
+            // runs it later under this store's connection lock.
+            ryu_crypto::content_sqlite::defer_compaction_with(
+                NOTIFY_STORE,
+                &path,
+                &conn,
+                |owner, run| run(&*owner.blocking_lock()),
+            );
         }
+        Ok(Self { conn, cipher })
+    }
 
-        // Idempotency: only seed a store with NO delivery rows yet, so a later user
-        // edit (or a prior migration) is never clobbered or double-applied. Once
-        // `alert_delivery` OR `push_tokens` holds anything, this is a no-op forever.
-        let have_delivery: i64 = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM alert_delivery WHERE id = 1)",
-            [],
-            |r| r.get(0),
-        )?;
-        let have_tokens: i64 =
-            conn.query_row("SELECT EXISTS(SELECT 1 FROM push_tokens)", [], |r| r.get(0))?;
-        if have_delivery != 0 || have_tokens != 0 {
-            return Ok(());
+    /// Scrub the pages a reseal freed, or the debt an earlier start left. A
+    /// failure (low disk for the `VACUUM`, a reader blocking the checkpoint) is
+    /// logged and the debt stays recorded for the next start: the credentials
+    /// are already sealed, so the store must still open.
+    fn scrub_after_reseal(conn: &Connection, path: &std::path::Path, resealed: usize) {
+        if resealed > 0 {
+            if let Err(error) = ryu_crypto::content_sqlite::finish_store(conn, path, NOTIFY_STORE) {
+                tracing::warn!(%error, "notify store: credential page scrub deferred");
+            }
+        } else if ryu_crypto::content_sqlite::compaction_owed(conn, NOTIFY_STORE).unwrap_or(false) {
+            // Core's boot path: a file over `VACUUM_NOW_MAX_BYTES` only gets its
+            // freelist scrub here; its `VACUUM` is deferred by the caller.
+            if let Err(error) =
+                ryu_crypto::content_sqlite::run_pending_vacuum_gated(conn, path, NOTIFY_STORE)
+            {
+                tracing::warn!(%error, "notify store: credential page scrub deferred");
+            }
         }
+    }
 
-        // Open the legacy db read-write (the monitors sidecar has not spawned yet at
-        // Core boot, so there is no contention; read-write also sidesteps the WAL
-        // read-only "unable to open" failure that would skip a valid migration).
-        let old = Connection::open(monitors_db)
-            .with_context(|| format!("opening legacy monitors db {}", monitors_db.display()))?;
+    fn cipher(&self) -> Result<&FieldCipher> {
+        self.cipher
+            .as_ref()
+            .ok_or_else(|| anyhow!("refusing to store a notification credential unsealed: the at-rest master key is unavailable"))
+    }
 
-        // `alert_delivery` is a single JSON row (id = 1). The type is byte-identical
-        // across the extraction, so the raw JSON round-trips.
-        if let Some(json) = old
-            .query_row("SELECT json FROM alert_delivery WHERE id = 1", [], |r| {
-                r.get::<_, String>(0)
+    /// Open a stored credential: legacy plaintext passes through; a sealed value
+    /// needs the key and must open.
+    fn open_value(&self, stored: &str) -> Result<String> {
+        if !looks_sealed(stored) {
+            return Ok(stored.to_owned());
+        }
+        let cipher = self
+            .cipher
+            .as_ref()
+            .ok_or_else(|| anyhow!("the at-rest master key is unavailable"))?;
+        SecretSealer::open(cipher, stored)
+    }
+
+    /// Open every token of a push-token query; a token that cannot be opened is
+    /// skipped (logged), never returned as an empty or placeholder token.
+    fn open_tokens(&self, stored: Vec<String>) -> Vec<String> {
+        stored
+            .into_iter()
+            .filter_map(|value| match self.open_value(&value) {
+                Ok(token) => Some(token),
+                Err(error) => {
+                    tracing::warn!(
+                        "notify store: skipping a push token that cannot be opened: {error:#}"
+                    );
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Record that `notify.db` owes a freelist scrub and vacuum, before any
+    /// cell is rewritten: the state row commits with the rewrite, so a crash
+    /// after the commit still leaves the debt for the next start. Keeps an
+    /// existing `vacuum_pending` row as it is.
+    fn mark_scrub_owed(conn: &Connection) -> Result<()> {
+        use ryu_crypto::content_sqlite::{ensure_state_table, states, STATE_TABLE, STORE_ITEM};
+        ensure_state_table(conn)?;
+        conn.execute(
+            &format!(
+                "INSERT INTO {STATE_TABLE} (store, item, state, cursor, updated_at)
+                 VALUES (?1, ?2, ?3, NULL, strftime('%s', 'now'))
+                 ON CONFLICT(store, item) DO UPDATE SET state = excluded.state,
+                    cursor = NULL, updated_at = excluded.updated_at
+                 WHERE {STATE_TABLE}.state != excluded.state"
+            ),
+            params![NOTIFY_STORE, STORE_ITEM, states::VACUUM_PENDING],
+        )
+        .context("recording the notify credential scrub")?;
+        Ok(())
+    }
+
+    /// Seal, once, the alert-delivery JSON and every push token still stored as
+    /// legacy plaintext, in one transaction that first records the scrub debt.
+    /// Returns how many values it rewrote; the caller scrubs the freed pages.
+    fn reseal_plaintext_credentials(conn: &Connection, cipher: &FieldCipher) -> Result<usize> {
+        let delivery: Option<String> = conn
+            .query_row("SELECT json FROM alert_delivery WHERE id = 1", [], |row| {
+                row.get(0)
             })
             .optional()
-            .context("reading legacy alert_delivery")?
+            .context("reading alert delivery targets for reseal")?;
+        let sealed_delivery = match delivery
+            .as_deref()
+            .map(|json| cipher.reseal_if_plaintext(json))
+            .transpose()
         {
-            conn.execute(
-                "INSERT OR IGNORE INTO alert_delivery (id, json) VALUES (1, ?1)",
-                params![json],
-            )
-            .context("seeding alert_delivery")?;
+            Ok(Some(Some(sealed))) => Some(sealed),
+            Ok(_) => None,
+            // Leave the row as it is; reads report the error instead of
+            // pretending there are no targets.
+            Err(error) => {
+                tracing::warn!("notify store: alert delivery targets not resealed: {error:#}");
+                None
+            }
+        };
+        let legacy_tokens = {
+            let mut stmt = conn
+                .prepare("SELECT token FROM push_tokens WHERE token_hash IS NULL")
+                .context("listing push tokens for reseal")?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))
+                .context("listing push tokens for reseal")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("listing push tokens for reseal")?;
+            rows
+        };
+        let mut sealed_tokens = Vec::new();
+        for stored in legacy_tokens {
+            let token = match SecretSealer::open(cipher, &stored) {
+                Ok(token) => token,
+                Err(error) => {
+                    tracing::warn!("notify store: push token not resealed: {error:#}");
+                    continue;
+                }
+            };
+            let sealed = if cipher.is_sealed(&stored) {
+                stored.clone()
+            } else {
+                cipher.seal(&token).context("sealing a push token")?
+            };
+            sealed_tokens.push((sealed, push_token_hash(&token), stored));
         }
-
-        // `push_tokens` is column-based; copy every row verbatim.
-        let mut stmt = old
-            .prepare("SELECT token, platform, user_id, created_at FROM push_tokens")
-            .context("preparing legacy push_tokens read")?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, Option<String>>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, String>(3)?,
-                ))
-            })
-            .context("reading legacy push_tokens")?;
-        let mut copied = 0usize;
-        for row in rows {
-            let (token, platform, user_id, created_at) =
-                row.context("row from legacy push_tokens")?;
-            conn.execute(
-                "INSERT OR IGNORE INTO push_tokens (token, platform, user_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![token, platform, user_id, created_at],
-            )
-            .context("seeding push_token")?;
-            copied += 1;
+        let resealed = usize::from(sealed_delivery.is_some()) + sealed_tokens.len();
+        if resealed == 0 {
+            return Ok(0);
         }
-        tracing::info!("notify: migrated delivery state from monitors.db ({copied} push tokens)");
-        Ok(())
+        let tx =
+            rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+                .context("starting the notify credential reseal")?;
+        Self::mark_scrub_owed(&tx)?;
+        if let Some(sealed) = sealed_delivery {
+            tx.execute(
+                "UPDATE alert_delivery SET json = ?1 WHERE id = 1",
+                params![sealed],
+            )
+            .context("resealing alert delivery targets")?;
+        }
+        for (sealed, hash, stored) in sealed_tokens {
+            tx.execute(
+                "UPDATE push_tokens SET token = ?1, token_hash = ?2 WHERE token = ?3",
+                params![sealed, hash, stored],
+            )
+            .context("resealing a push token")?;
+        }
+        tx.commit()
+            .context("committing the notify credential reseal")?;
+        tracing::info!(
+            count = resealed,
+            "notify store: sealed legacy plaintext credentials"
+        );
+        Ok(resealed)
     }
 
     fn init_schema(conn: &Connection) -> Result<()> {
@@ -221,6 +354,42 @@ impl NotifyStore {
                     .with_context(|| format!("adding notifications.{column}"))?;
             }
         }
+        // A device opts in to "agent finished" pushes when it registers (the
+        // mobile Finished alerts setting). Older rows and older app builds stay
+        // opted out, so they keep relying on their own local alert.
+        let has_run_finished: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('push_tokens') WHERE name = 'run_finished'",
+                [],
+                |r| r.get(0),
+            )
+            .context("reading push_tokens columns")?;
+        if has_run_finished == 0 {
+            conn.execute(
+                "ALTER TABLE push_tokens ADD COLUMN run_finished INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .context("adding push_tokens.run_finished")?;
+        }
+        // Push tokens are sealed with a fresh nonce, so lookups go through a
+        // deterministic digest column. Legacy rows get theirs when the store
+        // reseals them on open.
+        let has_token_hash: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('push_tokens') WHERE name = 'token_hash'",
+                [],
+                |r| r.get(0),
+            )
+            .context("reading push_tokens columns")?;
+        if has_token_hash == 0 {
+            conn.execute("ALTER TABLE push_tokens ADD COLUMN token_hash TEXT", [])
+                .context("adding push_tokens.token_hash")?;
+        }
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_push_tokens_hash ON push_tokens(token_hash)",
+            [],
+        )
+        .context("indexing push_tokens.token_hash")?;
         Ok(())
     }
 
@@ -261,6 +430,8 @@ impl NotifyStore {
     }
 
     /// Read the node-level alert delivery targets (empty default when unset).
+    /// A sealed row that cannot be opened, or JSON that does not parse, is an
+    /// error: answering "no targets" would let the next save silently drop them.
     pub async fn get_alert_delivery(&self) -> Result<AlertDeliveryTargets> {
         let conn = self.conn.lock().await;
         let json: Option<String> = conn
@@ -269,15 +440,26 @@ impl NotifyStore {
             })
             .optional()
             .context("reading alert delivery targets")?;
+        drop(conn);
         match json {
-            Some(j) => Ok(serde_json::from_str(&j).unwrap_or_default()),
+            Some(stored) => {
+                let json = self
+                    .open_value(&stored)
+                    .context("opening the sealed alert delivery targets")?;
+                serde_json::from_str(&json).context("parsing alert delivery targets")
+            }
             None => Ok(AlertDeliveryTargets::default()),
         }
     }
 
-    /// Persist the node-level alert delivery targets (single-row upsert).
+    /// Persist the node-level alert delivery targets (single-row upsert), sealed
+    /// with the master key. Fails closed without the key.
     pub async fn set_alert_delivery(&self, cfg: &AlertDeliveryTargets) -> Result<()> {
         let json = serde_json::to_string(cfg).context("serializing alert delivery targets")?;
+        let json = self
+            .cipher()?
+            .seal(&json)
+            .context("sealing alert delivery targets")?;
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO alert_delivery (id, json) VALUES (1, ?1)
@@ -303,21 +485,59 @@ impl NotifyStore {
         user_id: Option<&str>,
     ) -> Result<bool> {
         let now = chrono::Utc::now().to_rfc3339();
+        let sealed = self.cipher()?.seal(token).context("sealing push token")?;
         let conn = self.conn.lock().await;
-        let changed = conn.execute(
-            "INSERT INTO push_tokens (token, platform, user_id, created_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(token) DO UPDATE SET platform = ?2, created_at = ?4
+        let changed = conn
+            .execute(
+                "INSERT INTO push_tokens (token, token_hash, platform, user_id, created_at)
+             VALUES (?1, ?5, ?2, ?3, ?4)
+             ON CONFLICT(token_hash) DO UPDATE SET platform = ?2, created_at = ?4
              WHERE push_tokens.user_id IS ?3",
-            params![token, platform, user_id, now],
-        )
-        .context("registering push token")?;
+                params![sealed, platform, user_id, now, push_token_hash(token)],
+            )
+            .context("registering push token")?;
         Ok(changed > 0)
+    }
+
+    /// Record whether a device wants "agent finished" pushes. Scoped to the
+    /// token's owner (`None` for an anonymous single-user node) so one member
+    /// cannot change another member's device. Returns whether a row changed.
+    pub async fn set_push_token_run_finished(
+        &self,
+        token: &str,
+        user_id: Option<&str>,
+        enabled: bool,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let n = conn.execute(
+            "UPDATE push_tokens SET run_finished = ?1
+             WHERE (token_hash = ?4 OR (token_hash IS NULL AND token = ?2)) AND user_id IS ?3",
+            params![enabled, token, user_id, push_token_hash(token)],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Tokens of the devices that opted in to "agent finished" pushes for a
+    /// conversation owner. `None` is the owner of an anonymous single-user node,
+    /// whose devices register without a member id.
+    pub async fn run_finished_push_tokens(&self, owner: Option<&str>) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        let mut stmt =
+            conn.prepare("SELECT token FROM push_tokens WHERE run_finished = 1 AND user_id IS ?1")?;
+        let rows = stmt.query_map(params![owner], |row| row.get::<_, String>(0))?;
+        let stored = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        drop(conn);
+        Ok(self.open_tokens(stored))
     }
 
     /// Remove a push token (device opted out / token rotated).
     pub async fn remove_push_token(&self, token: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
-        let n = conn.execute("DELETE FROM push_tokens WHERE token = ?1", params![token])?;
+        let n = conn.execute(
+            "DELETE FROM push_tokens WHERE token_hash = ?2 OR (token_hash IS NULL AND token = ?1)",
+            params![token, push_token_hash(token)],
+        )?;
         Ok(n > 0)
     }
 
@@ -329,8 +549,9 @@ impl NotifyStore {
     pub async fn remove_push_token_for_user(&self, token: &str, user_id: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
         let n = conn.execute(
-            "DELETE FROM push_tokens WHERE token = ?1 AND user_id = ?2",
-            params![token, user_id],
+            "DELETE FROM push_tokens
+             WHERE (token_hash = ?3 OR (token_hash IS NULL AND token = ?1)) AND user_id = ?2",
+            params![token, user_id, push_token_hash(token)],
         )?;
         Ok(n > 0)
     }
@@ -340,11 +561,38 @@ impl NotifyStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare("SELECT token FROM push_tokens")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        let stored = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        drop(conn);
+        Ok(self.open_tokens(stored))
+    }
+
+    /// Every registered Expo push token with the member who registered it
+    /// (`None` for an anonymous single-user registration). For a fan-out whose
+    /// content depends on what each owner may see.
+    pub async fn push_tokens_with_owners(&self) -> Result<Vec<(String, Option<String>)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare("SELECT token, user_id FROM push_tokens")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        let stored = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        drop(conn);
+        // Tokens are sealed at rest; one that cannot be opened is skipped, as
+        // `push_tokens` does, never returned as ciphertext.
+        Ok(stored
+            .into_iter()
+            .filter_map(|(value, owner)| match self.open_value(&value) {
+                Ok(token) => Some((token, owner)),
+                Err(error) => {
+                    tracing::warn!(
+                        "notify store: skipping a push token that cannot be opened: {error:#}"
+                    );
+                    None
+                }
+            })
+            .collect())
     }
 
     /// Expo push tokens registered by a specific member. Used to push a
@@ -354,11 +602,10 @@ impl NotifyStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare("SELECT token FROM push_tokens WHERE user_id = ?1")?;
         let rows = stmt.query_map(params![user_id], |row| row.get::<_, String>(0))?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        let stored = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        drop(conn);
+        Ok(self.open_tokens(stored))
     }
 
     // ---- notifications (app inbox) ----------------------------------------
@@ -547,9 +794,7 @@ mod tests {
     use super::*;
     use ryu_notify::NotifyTarget;
 
-    /// A NotifyStore in a fresh, unique temp DIRECTORY. The directory matters: the
-    /// one-time migration reads a `monitors.db` sibling of the store path, so an
-    /// isolated dir guarantees no stray legacy db leaks into these tests.
+    /// A NotifyStore in a fresh, unique temp directory.
     fn temp_dir() -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("ryu-notify-test-{}", uuid::Uuid::new_v4().simple()));
@@ -568,6 +813,55 @@ mod tests {
         assert!(!store.claim_policy_alert("k1", 300).await.unwrap());
         assert!(store.claim_policy_alert("k2", 300).await.unwrap());
         assert!(store.claim_policy_alert("k1", 0).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn run_finished_pushes_are_opt_in_per_owned_device() {
+        let store = temp_store();
+        store
+            .register_push_token("tok-alice", Some("ios"), Some("alice"))
+            .await
+            .unwrap();
+        store
+            .register_push_token("tok-solo", Some("android"), None)
+            .await
+            .unwrap();
+        // Registered devices start opted out.
+        assert!(store
+            .run_finished_push_tokens(Some("alice"))
+            .await
+            .unwrap()
+            .is_empty());
+        // Another member cannot opt alice's device in.
+        assert!(!store
+            .set_push_token_run_finished("tok-alice", Some("bob"), true)
+            .await
+            .unwrap());
+        assert!(store
+            .set_push_token_run_finished("tok-alice", Some("alice"), true)
+            .await
+            .unwrap());
+        assert!(store
+            .set_push_token_run_finished("tok-solo", None, true)
+            .await
+            .unwrap());
+        assert_eq!(
+            store.run_finished_push_tokens(Some("alice")).await.unwrap(),
+            vec!["tok-alice"]
+        );
+        assert_eq!(
+            store.run_finished_push_tokens(None).await.unwrap(),
+            vec!["tok-solo"]
+        );
+        assert!(store
+            .set_push_token_run_finished("tok-alice", Some("alice"), false)
+            .await
+            .unwrap());
+        assert!(store
+            .run_finished_push_tokens(Some("alice"))
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -622,6 +916,215 @@ mod tests {
         let read = store.get_alert_delivery().await.unwrap();
         assert_eq!(read.emails, vec!["ops@example.test".to_string()]);
         assert_eq!(read.targets.len(), 1);
+    }
+
+    fn file_bytes(path: &std::path::Path) -> String {
+        let mut text = String::new();
+        for suffix in ["", "-wal", "-journal"] {
+            let candidate = PathBuf::from(format!("{}{suffix}", path.display()));
+            if let Ok(bytes) = std::fs::read(candidate) {
+                text.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        }
+        text
+    }
+
+    fn test_cipher() -> FieldCipher {
+        FieldCipher::new(&[0x33; 32])
+    }
+
+    #[tokio::test]
+    async fn alert_delivery_is_sealed_on_disk_and_round_trips() {
+        let path = temp_dir().join("notify.db");
+        let store = NotifyStore::open_with_cipher(path.clone(), Some(test_cipher())).unwrap();
+        let cfg = AlertDeliveryTargets {
+            targets: vec![
+                NotifyTarget::Telegram {
+                    bot_token: "123456:sealed-bot-token".into(),
+                    chat_id: "42".into(),
+                },
+                NotifyTarget::Webhook {
+                    url: "https://hooks.slack.test/services/T/B/sealed-hook".into(),
+                },
+            ],
+            emails: vec![],
+        };
+        store.set_alert_delivery(&cfg).await.unwrap();
+        let read = store.get_alert_delivery().await.unwrap();
+        assert_eq!(read.targets, cfg.targets);
+        let stored: String = store
+            .conn
+            .lock()
+            .await
+            .query_row("SELECT json FROM alert_delivery WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(FieldCipher::is_sealed(&stored));
+        drop(store);
+        let bytes = file_bytes(&path);
+        assert!(!bytes.contains("sealed-bot-token"));
+        assert!(!bytes.contains("sealed-hook"));
+    }
+
+    #[tokio::test]
+    async fn credential_writes_fail_closed_without_a_key() {
+        let store = NotifyStore::open_with_cipher(temp_dir().join("notify.db"), None).unwrap();
+        assert!(store
+            .set_alert_delivery(&AlertDeliveryTargets::default())
+            .await
+            .is_err());
+        assert!(store
+            .register_push_token("ExponentPushToken[x]", None, None)
+            .await
+            .is_err());
+        // The inbox itself still works.
+        assert!(store.claim_policy_alert("k", 60).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn legacy_plaintext_is_read_then_resealed_on_open() {
+        let path = temp_dir().join("notify.db");
+        {
+            // A store written by an older build: plaintext JSON and tokens.
+            let legacy = NotifyStore::open_with_cipher(path.clone(), None).unwrap();
+            let conn = legacy.conn.lock().await;
+            conn.execute(
+                "INSERT INTO alert_delivery (id, json) VALUES (1, ?1)",
+                params![r#"{"targets":[{"kind":"telegram","bot_token":"999:legacy-bot-token","chat_id":"7"}],"emails":["ops@example.test"]}"#],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO push_tokens (token, platform, user_id, created_at, run_finished)
+                 VALUES ('ExponentPushToken[legacy-device]', 'ios', 'alice', 'now', 1)",
+                [],
+            )
+            .unwrap();
+            drop(conn);
+            // Legacy plaintext reads without a key.
+            assert_eq!(
+                legacy.get_alert_delivery().await.unwrap().emails,
+                vec!["ops@example.test".to_string()]
+            );
+            assert_eq!(
+                legacy.push_tokens().await.unwrap(),
+                vec!["ExponentPushToken[legacy-device]"]
+            );
+        }
+        let store = NotifyStore::open_with_cipher(path.clone(), Some(test_cipher())).unwrap();
+        // Readers still see the same values.
+        let cfg = store.get_alert_delivery().await.unwrap();
+        assert!(matches!(
+            &cfg.targets[0],
+            NotifyTarget::Telegram { bot_token, .. } if bot_token == "999:legacy-bot-token"
+        ));
+        assert_eq!(
+            store.run_finished_push_tokens(Some("alice")).await.unwrap(),
+            vec!["ExponentPushToken[legacy-device]"]
+        );
+        // Lookups by the plaintext token still find the migrated row.
+        assert!(store
+            .set_push_token_run_finished("ExponentPushToken[legacy-device]", Some("alice"), false)
+            .await
+            .unwrap());
+        drop(store);
+        let bytes = file_bytes(&path);
+        assert!(!bytes.contains("legacy-bot-token"));
+        assert!(!bytes.contains("legacy-device"));
+    }
+
+    /// Write the plaintext rows an older build left, then close the store.
+    async fn write_legacy_plaintext(path: &std::path::Path) {
+        let legacy = NotifyStore::open_with_cipher(path.to_owned(), None).unwrap();
+        let conn = legacy.conn.lock().await;
+        conn.execute(
+            "INSERT INTO alert_delivery (id, json) VALUES (1, ?1)",
+            params![r#"{"targets":[{"kind":"telegram","bot_token":"999:debt-bot-token","chat_id":"7"}],"emails":[]}"#],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO push_tokens (token, platform, user_id, created_at, run_finished)
+             VALUES ('ExponentPushToken[debt-device]', 'ios', 'alice', 'now', 1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_reseal_that_scrubs_cleanly_leaves_no_debt() {
+        let path = temp_dir().join("notify.db");
+        write_legacy_plaintext(&path).await;
+        let store = NotifyStore::open_with_cipher(path.clone(), Some(test_cipher())).unwrap();
+        let conn = store.conn.lock().await;
+        assert!(!ryu_crypto::content_sqlite::compaction_owed(&conn, NOTIFY_STORE).unwrap());
+        let secure_delete: i64 = conn
+            .query_row("PRAGMA secure_delete", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(secure_delete, 1);
+    }
+
+    #[tokio::test]
+    async fn a_scrub_that_fails_still_opens_the_store_and_stays_owed() {
+        let path = temp_dir().join("notify.db");
+        write_legacy_plaintext(&path).await;
+        // A reader holding an old snapshot blocks the WAL checkpoint the scrub
+        // needs, so `finish_store` fails after the credentials are sealed.
+        let reader = Connection::open(&path).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        let _: i64 = reader
+            .query_row("SELECT count(*) FROM push_tokens", [], |row| row.get(0))
+            .unwrap();
+        let store = NotifyStore::open_with_cipher(path.clone(), Some(test_cipher()))
+            .expect("a failed scrub must not stop the store from opening");
+        let conn = store.conn.lock().await;
+        let stored: String = conn
+            .query_row("SELECT json FROM alert_delivery WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(FieldCipher::is_sealed(&stored));
+        let token: String = conn
+            .query_row("SELECT token FROM push_tokens", [], |r| r.get(0))
+            .unwrap();
+        assert!(FieldCipher::is_sealed(&token));
+        assert!(
+            ryu_crypto::content_sqlite::compaction_owed(&conn, NOTIFY_STORE).unwrap(),
+            "the scrub debt stays recorded for the next start"
+        );
+    }
+
+    #[tokio::test]
+    async fn push_tokens_are_sealed_and_found_by_digest() {
+        let path = temp_dir().join("notify.db");
+        let store = NotifyStore::open_with_cipher(path.clone(), Some(test_cipher())).unwrap();
+        assert!(store
+            .register_push_token("ExponentPushToken[sealed-device]", Some("ios"), Some("bob"))
+            .await
+            .unwrap());
+        // Re-registering the same token updates the row instead of adding one.
+        assert!(store
+            .register_push_token(
+                "ExponentPushToken[sealed-device]",
+                Some("android"),
+                Some("bob")
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            store.push_tokens_for_user("bob").await.unwrap(),
+            vec!["ExponentPushToken[sealed-device]"]
+        );
+        assert!(store
+            .remove_push_token("ExponentPushToken[sealed-device]")
+            .await
+            .unwrap());
+        assert!(store.push_tokens().await.unwrap().is_empty());
+        store
+            .register_push_token("ExponentPushToken[kept-device]", None, None)
+            .await
+            .unwrap();
+        drop(store);
+        assert!(!file_bytes(&path).contains("kept-device"));
     }
 
     #[tokio::test]
@@ -686,64 +1189,25 @@ mod tests {
         );
     }
 
-    /// Seed a legacy `monitors.db` with the two pre-decomposition tables + rows.
-    fn seed_legacy_monitors_db(dir: &std::path::Path) {
-        let old = Connection::open(dir.join("monitors.db")).expect("open legacy db");
-        old.execute_batch(
-            "CREATE TABLE alert_delivery (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
-             CREATE TABLE push_tokens (
-                 token TEXT PRIMARY KEY, platform TEXT, user_id TEXT, created_at TEXT NOT NULL);",
-        )
-        .expect("create legacy tables");
-        old.execute(
-            "INSERT INTO alert_delivery (id, json) VALUES (1, ?1)",
-            params![r#"{"targets":[{"kind":"webhook","url":"https://x.test/h"}],"emails":["ops@x.test"]}"#],
-        )
-        .unwrap();
-        old.execute(
-            "INSERT INTO push_tokens (token, platform, user_id, created_at)
-             VALUES ('tok1', 'ios', 'u1', 't')",
-            [],
-        )
-        .unwrap();
-    }
-
     #[tokio::test]
-    async fn migrates_delivery_state_from_legacy_monitors_db() {
-        let dir = temp_dir();
-        seed_legacy_monitors_db(&dir);
-
-        // First open of a fresh, empty notify.db sibling → migration fires.
-        let store = NotifyStore::open(dir.join("notify.db")).unwrap();
-        let cfg = store.get_alert_delivery().await.unwrap();
-        assert_eq!(cfg.emails, vec!["ops@x.test".to_string()]);
-        assert_eq!(cfg.targets.len(), 1);
-        assert_eq!(store.push_tokens().await.unwrap(), vec!["tok1".to_string()]);
-
-        // Idempotent: a NEW token appears in the legacy db, but reopening notify.db
-        // must NOT re-import (the delivery row is already present).
-        {
-            let old = Connection::open(dir.join("monitors.db")).unwrap();
-            old.execute(
-                "INSERT INTO push_tokens (token, platform, user_id, created_at)
-                 VALUES ('tok2', 'ios', 'u1', 't')",
-                [],
-            )
-            .unwrap();
-        }
-        let store2 = NotifyStore::open(dir.join("notify.db")).unwrap();
-        assert_eq!(
-            store2.push_tokens().await.unwrap(),
-            vec!["tok1".to_string()]
-        );
-    }
-
-    #[tokio::test]
-    async fn migration_is_a_noop_without_a_legacy_db() {
-        // No sibling monitors.db → the migration is a clean no-op, store stays empty.
+    async fn push_tokens_with_owners_reports_each_registering_member() {
         let store = temp_store();
-        let cfg = store.get_alert_delivery().await.unwrap();
-        assert!(cfg.emails.is_empty() && cfg.targets.is_empty());
-        assert!(store.push_tokens().await.unwrap().is_empty());
+        store
+            .register_push_token("tok-alice", Some("ios"), Some("alice"))
+            .await
+            .unwrap();
+        store
+            .register_push_token("tok-solo", Some("android"), None)
+            .await
+            .unwrap();
+        let mut owners = store.push_tokens_with_owners().await.unwrap();
+        owners.sort();
+        assert_eq!(
+            owners,
+            vec![
+                ("tok-alice".to_owned(), Some("alice".to_owned())),
+                ("tok-solo".to_owned(), None),
+            ]
+        );
     }
 }

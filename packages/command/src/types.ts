@@ -34,6 +34,12 @@ export interface CommandAction {
 	/** Invoked when the row is chosen. The consumer owns the side effect. */
 	onSelect: () => void;
 	/**
+	 * The route this row opens, when it opens one. Rendered as
+	 * `data-prefetch-path` and passed to `onHighlight`, so a host can start
+	 * loading the destination while the row is hovered or keyboard-highlighted.
+	 */
+	prefetchPath?: string;
+	/**
 	 * Optional result-type filter. Actions without a type remain available from
 	 * the `All` tab, while a typed tab only shows actions carrying its id.
 	 */
@@ -61,6 +67,9 @@ export interface CommandPaletteTab {
 	/** Human-readable filter label. */
 	label: string;
 }
+
+/** Primary view shown by a command palette that also exposes message composition. */
+export type CommandPaletteMode = "search" | "compose";
 
 // ── Chat transport (injected) ────────────────────────────────────────────────
 

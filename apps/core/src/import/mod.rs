@@ -26,6 +26,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::sidecar::mcp::McpServerConfig;
 
+pub mod chat_exports;
+pub mod frameworks;
+
 /// `skip_serializing_if` predicate: omit a field when it is `false`.
 fn is_false(v: &bool) -> bool {
     !*v
@@ -65,11 +68,17 @@ pub mod kind {
     pub const MEMORY: &str = "memory";
     pub const AGENT: &str = "agent";
     pub const SLASH_COMMAND: &str = "slash_command";
+    /// A group of conversations from a ChatGPT or Claude data export (one per
+    /// project, plus one for chats outside a project).
+    pub const CONVERSATIONS: &str = "conversations";
 }
 
 /// One importable item found by a scan.
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanItem {
+    /// SHA-256 of bounded instruction source bytes; absent on other item kinds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_revision: Option<String>,
     /// `instructions | skill | mcp_server | plugin | memory` (see [`kind`]).
     pub kind: &'static str,
     /// Opaque, root-relative locator. Round-trips back to a file/dir on disk in
@@ -93,6 +102,11 @@ pub struct ScanResult {
     pub items: Vec<ScanItem>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Detected source (`openclaw`, `hermes`, `muse`, `mastra`, `langchain`,
+    /// `persona`, or a `chatgpt` / `claude-ai` data export), when the folder is
+    /// one. See [`frameworks`] and [`chat_exports`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<&'static str>,
 }
 
 /// One item the client asks to import, as selected in the scan preview.
@@ -105,6 +119,9 @@ pub struct ImportSelection {
 /// Per-item outcome of an import run.
 #[derive(Debug, Clone, Serialize)]
 pub struct ImportOutcome {
+    /// Revision of the exact instruction bytes acknowledged by the destination write.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_revision: Option<String>,
     pub kind: String,
     pub id: String,
     pub title: String,
@@ -122,6 +139,7 @@ pub struct ImportOutcome {
 impl ImportOutcome {
     pub fn ok(kind: &str, id: &str, title: &str) -> Self {
         Self {
+            content_revision: None,
             kind: kind.to_string(),
             id: id.to_string(),
             title: title.to_string(),
@@ -134,6 +152,7 @@ impl ImportOutcome {
 
     pub fn skipped(kind: &str, id: &str, title: &str, reason: &str) -> Self {
         Self {
+            content_revision: None,
             kind: kind.to_string(),
             id: id.to_string(),
             title: title.to_string(),
@@ -146,6 +165,7 @@ impl ImportOutcome {
 
     pub fn failed(kind: &str, id: &str, title: &str, err: &str) -> Self {
         Self {
+            content_revision: None,
             kind: kind.to_string(),
             id: id.to_string(),
             title: title.to_string(),
@@ -158,6 +178,7 @@ impl ImportOutcome {
 
     pub fn already(kind: &str, id: &str, title: &str) -> Self {
         Self {
+            content_revision: None,
             kind: kind.to_string(),
             id: id.to_string(),
             title: title.to_string(),
@@ -243,6 +264,7 @@ pub fn scan_source(root: &Path) -> Result<ScanResult> {
         memories: Vec::new(),
         agents: Vec::new(),
         slash_commands: Vec::new(),
+        conversations: Vec::new(),
         mcp_names_present: existing_mcp_names(),
     };
 
@@ -255,6 +277,15 @@ pub fn scan_source(root: &Path) -> Result<ScanResult> {
     // Bounded walk for skills / plugins / memory stores.
     walk(root, root, 0, &mut collector);
 
+    // Framework homes and projects (OpenClaw, Hermes, Muse, Mastra, LangChain):
+    // personas, Markdown memory, and code-defined agents, as existing kinds.
+    // A ChatGPT / Claude data export is a source of its own; otherwise try the
+    // framework detectors.
+    let source = match chat_exports::collect(root, &mut collector) {
+        Some(export) => Some(export.id()),
+        None => frameworks::collect(root, &mut collector).map(frameworks::Framework::id),
+    };
+
     let mut items = Vec::new();
     items.extend(collector.instructions.into_iter());
     items.extend(collector.skills.into_iter());
@@ -263,12 +294,16 @@ pub fn scan_source(root: &Path) -> Result<ScanResult> {
     items.extend(collector.memories.into_iter());
     items.extend(collector.agents.into_iter());
     items.extend(collector.slash_commands.into_iter());
+    items.extend(collector.conversations.into_iter());
+    let mut seen_ids = std::collections::HashSet::new();
+    items.retain(|item| seen_ids.insert(format!("{}:{}", item.kind, item.id)));
     items.truncate(MAX_SCAN_ENTRIES);
 
     Ok(ScanResult {
         root: root.to_string_lossy().to_string(),
         items,
         warnings: collector.warnings,
+        source,
     })
 }
 
@@ -285,6 +320,7 @@ struct Collector {
     memories: Vec<ScanItem>,
     agents: Vec<ScanItem>,
     slash_commands: Vec<ScanItem>,
+    conversations: Vec<ScanItem>,
     /// Names already present in `~/.ryu/mcp.json` (used for the cheap hint).
     mcp_names_present: std::collections::HashSet<String>,
 }
@@ -306,6 +342,10 @@ const MCP_CONFIG_TOKENS: &[(&str, &str)] = &[
     ("cursor-json", ".cursor/mcp.json"),
     ("toml", "config.toml"),
     ("claude", ".claude.json"),
+    ("openclaw", "openclaw.json"),
+    ("clawdbot", "clawdbot.json"),
+    ("moltbot", "moltbot.json"),
+    ("hermes", "config.yaml"),
 ];
 
 /// Names of the `.claude.json` / `mcp.json` MCP map key (the shared dialect).
@@ -366,6 +406,7 @@ fn collect_root_files(root: &Path, c: &mut Collector) {
             continue;
         }
         c.instructions.push(ScanItem {
+            content_revision: instruction_content_revision(root, n),
             kind: kind::INSTRUCTIONS,
             id: format!("{}/{}", kind::INSTRUCTIONS, n),
             title: format!("Project instructions ({n})"),
@@ -378,6 +419,32 @@ fn collect_root_files(root: &Path, c: &mut Collector) {
     collect_mcp_config(root, "json", "mcp.json", c);
     collect_mcp_config(root, "toml", "config.toml", c);
     collect_mcp_config(root, "claude", ".claude.json", c);
+    // Framework homes keep MCP servers in their own config dialects; only read
+    // them when the folder IS that home, so an unrelated project's
+    // `config.yaml` is never parsed as Hermes config.
+    match frameworks::detect(root) {
+        Some(frameworks::Framework::OpenClaw) => {
+            for (token, rel) in [
+                ("openclaw", "openclaw.json"),
+                ("clawdbot", "clawdbot.json"),
+                ("moltbot", "moltbot.json"),
+            ] {
+                collect_mcp_config(root, token, rel, c);
+            }
+        }
+        Some(frameworks::Framework::Hermes) => collect_mcp_config(root, "hermes", "config.yaml", c),
+        _ => {}
+    }
+}
+
+/// Parse an MCP config file in the dialect its config token names.
+fn parse_mcp_file(rel: &str, path: &Path) -> Result<Vec<(String, McpServerConfig)>> {
+    match rel {
+        "openclaw.json" | "clawdbot.json" | "moltbot.json" => frameworks::parse_openclaw_mcp(path),
+        "config.yaml" => frameworks::parse_hermes_mcp(path),
+        _ if is_toml_mcp(rel) => parse_mcp_toml(path),
+        _ => parse_mcp_json(path),
+    }
 }
 
 /// Parse one MCP config file at `root` and emit an item per server.
@@ -399,12 +466,7 @@ fn collect_mcp_config(root: &Path, token: &str, rel: &str, c: &mut Collector) {
         ));
         return;
     }
-    let servers = if is_toml_mcp(rel) {
-        parse_mcp_toml(&path)
-    } else {
-        parse_mcp_json(&path)
-    };
-    let servers = match servers {
+    let servers = match parse_mcp_file(rel, &path) {
         Ok(s) => s,
         Err(e) => {
             c.warnings
@@ -417,6 +479,7 @@ fn collect_mcp_config(root: &Path, token: &str, rel: &str, c: &mut Collector) {
             break;
         }
         c.mcp.push(ScanItem {
+            content_revision: None,
             kind: kind::MCP_SERVER,
             id: format!("{}/mcp/{}/{}", kind::MCP_SERVER, token, name),
             title: format!("MCP server '{name}'"),
@@ -445,6 +508,7 @@ fn walk(root: &Path, dir: &Path, depth: usize, c: &mut Collector) {
             if let Some(id) = plugin_id_from_file(&dir.join(manifest_name)) {
                 let rel = rel_path(&c.root, dir);
                 c.plugins.push(ScanItem {
+                    content_revision: None,
                     kind: kind::PLUGIN,
                     id: format!("{}/{rel}", kind::PLUGIN),
                     title: format!("Plugin '{id}'"),
@@ -463,6 +527,7 @@ fn walk(root: &Path, dir: &Path, depth: usize, c: &mut Collector) {
             let name = skill_install_name(dir);
             let rel = rel_path(&c.root, dir);
             c.skills.push(ScanItem {
+                content_revision: None,
                 kind: kind::SKILL,
                 id: format!("{}/{rel}", kind::SKILL),
                 title: format!("Skill '{name}'"),
@@ -579,6 +644,7 @@ fn collect_memory_files(root: &Path, dir: &Path, c: &mut Collector) {
         }
         let rel = rel_path(root, &path);
         c.memories.push(ScanItem {
+            content_revision: None,
             kind: kind::MEMORY,
             id: format!("{}/{rel}", kind::MEMORY),
             title: format!("Memory {stem}"),
@@ -615,6 +681,7 @@ fn collect_codex_subagents(root: &Path, dir: &Path, c: &mut Collector) {
         }
         let rel = rel_path(root, &path);
         c.agents.push(ScanItem {
+            content_revision: None,
             kind: kind::AGENT,
             id: format!("{}/{rel}", kind::AGENT),
             title: format!(
@@ -659,6 +726,7 @@ fn collect_codex_prompts(root: &Path, dir: &Path, c: &mut Collector) {
         }
         let rel = rel_path(root, &path);
         c.slash_commands.push(ScanItem {
+            content_revision: None,
             kind: kind::SLASH_COMMAND,
             id: format!("{}/{rel}", kind::SLASH_COMMAND),
             title: format!("Slash command '/{stem}'"),
@@ -689,10 +757,17 @@ pub fn resolve_item_path(root: &Path, id: &str) -> Result<PathBuf> {
         .or_else(|| {
             id.strip_prefix(kind::MEMORY)
                 .and_then(|rest| rest.strip_prefix('/'))
+                .map(|rest| split_fragment(rest).0)
         })
         .or_else(|| {
             id.strip_prefix(kind::AGENT)
                 .and_then(|rest| rest.strip_prefix('/'))
+                .map(|rest| split_agent_index(rest).0)
+        })
+        .or_else(|| {
+            id.strip_prefix(kind::CONVERSATIONS)
+                .and_then(|rest| rest.strip_prefix('/'))
+                .map(|rest| split_fragment(rest).0)
         })
         .or_else(|| {
             id.strip_prefix(kind::SLASH_COMMAND)
@@ -718,6 +793,79 @@ pub fn resolve_item_path(root: &Path, id: &str) -> Result<PathBuf> {
         bail!("item id escapes scan root");
     }
     Ok(canonical)
+}
+
+/// Split a code-agent locator (`src/agents.ts#2`) into its file part and the
+/// index of the agent within that file. Other agent ids have no index.
+fn split_agent_index(rel: &str) -> (&str, Option<usize>) {
+    match rel.rsplit_once('#') {
+        Some((file, index)) if !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit()) => {
+            (file, index.parse().ok())
+        }
+        _ => (rel, None),
+    }
+}
+
+/// Split an item locator into its file part and an optional `#fragment`
+/// (a group or record inside that file). Fragments use only id-safe
+/// characters, so a real file name containing `#` is left alone.
+pub fn split_fragment(rel: &str) -> (&str, Option<&str>) {
+    match rel.rsplit_once('#') {
+        Some((file, fragment)) if chat_exports::is_fragment_safe(fragment) => {
+            (file, Some(fragment))
+        }
+        _ => (rel, None),
+    }
+}
+
+/// Resolve an `agent` item id to its file and, for a code-defined agent, the
+/// agent's index within that file.
+pub fn resolve_agent_item(root: &Path, id: &str) -> Result<(PathBuf, Option<usize>)> {
+    let index = id
+        .strip_prefix(kind::AGENT)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .and_then(|rest| split_agent_index(rest).1);
+    Ok((resolve_item_path(root, id)?, index))
+}
+
+/// Parse the agent an `agent` item names: a Codex subagent file, a persona
+/// workspace (OpenClaw / Hermes / Muse `SOUL.md`), or a Mastra / LangChain
+/// agent at `index` within a source file.
+pub fn parse_agent_item(root: &Path, path: &Path, index: Option<usize>) -> Option<CodexSubagent> {
+    if let Some(index) = index {
+        let agent = frameworks::parse_code_agent(root, path, index)?;
+        return Some(CodexSubagent {
+            name: agent.name,
+            description: agent.description,
+            system_prompt: agent.instructions,
+            tools: Vec::new(),
+            model: agent.model,
+        });
+    }
+    if let Some(sub) = parse_codex_subagent(path) {
+        return Some(sub);
+    }
+    let name = path.file_name()?.to_str()?;
+    if name.eq_ignore_ascii_case("SOUL.md") || name.eq_ignore_ascii_case("IDENTITY.md") {
+        return frameworks::parse_persona(root, path);
+    }
+    None
+}
+
+/// Match the import reader's UTF-8 content contract without reading an unbounded file.
+fn instruction_content_revision(root: &Path, name: &str) -> Option<String> {
+    use std::io::Read;
+    let path = resolve_item_path(root, &format!("instructions/{name}")).ok()?;
+    let mut content = String::new();
+    fs::File::open(path)
+        .ok()?
+        .take(MAX_INSTRUCTIONS_BYTES + 1)
+        .read_to_string(&mut content)
+        .ok()?;
+    if content.len() as u64 > MAX_INSTRUCTIONS_BYTES {
+        return None;
+    }
+    Some(content_sha256(&content))
 }
 
 /// Recover the config token + server name from an `mcp_server` item id
@@ -752,11 +900,7 @@ pub fn read_mcp_entry(root: &Path, token: &str, name: &str) -> Result<McpServerC
     if !path.is_file() {
         bail!("MCP config {} not found", path.to_string_lossy());
     }
-    let servers = if is_toml_mcp(rel) {
-        parse_mcp_toml(&path)?
-    } else {
-        parse_mcp_json(&path)?
-    };
+    let servers = parse_mcp_file(rel, &path)?;
     servers
         .into_iter()
         .find(|(n, _)| *n == name)
@@ -856,6 +1000,7 @@ pub fn parse_mcp_toml(path: &Path) -> Result<Vec<(String, McpServerConfig)>> {
                     auth: None,
                     owner_plugin_id: None,
                     owner_server_name: None,
+                    cwd: None,
                     args: get_strs(t, "args"),
                     env: get_str_map(t, "env"),
                     description: get_str(t, "description"),
@@ -1020,7 +1165,7 @@ pub fn parse_codex_subagent(path: &Path) -> Option<CodexSubagent> {
     if front.trim().is_empty() {
         return None;
     }
-    let fm: Fm = serde_yml::from_str(&front).ok()?;
+    let fm: Fm = noyalib::compat::serde_yaml::from_str(&front).ok()?;
     let name = fm.name?;
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -1065,7 +1210,7 @@ pub fn parse_codex_prompt(path: &Path) -> Option<CodexPrompt> {
     let description = if front.trim().is_empty() {
         None
     } else {
-        serde_yml::from_str::<Fm>(&front)
+        noyalib::compat::serde_yaml::from_str::<Fm>(&front)
             .ok()
             .and_then(|f| f.description)
             .map(|d| d.trim().to_string())
@@ -1611,5 +1756,56 @@ command = "mcp-git"
         );
         assert!(content.contains("truncated"), "missing truncation note");
         let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn instruction_revision_tracks_equal_length_edits_and_reverts_without_timestamps() {
+        let root = temp_tree();
+        write(&root, "AGENTS.md", "alpha");
+        let first = scan_source(&root)
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|item| item.kind == kind::INSTRUCTIONS)
+            .unwrap();
+        assert_eq!(
+            first.content_revision.as_deref(),
+            Some("8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8")
+        );
+        write(&root, "AGENTS.md", "bravo");
+        let second = scan_source(&root)
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|item| item.kind == kind::INSTRUCTIONS)
+            .unwrap();
+        assert_eq!(second.id, first.id);
+        assert_ne!(second.content_revision, first.content_revision);
+        write(&root, "AGENTS.md", "alpha");
+        let restored = scan_source(&root)
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|item| item.kind == kind::INSTRUCTIONS)
+            .unwrap();
+        assert_eq!(restored.content_revision, first.content_revision);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn instruction_revision_never_reads_a_symlink_outside_the_scan_root() {
+        let root = temp_tree();
+        let outside = temp_tree();
+        write(&outside, "private.md", "private instructions");
+        std::os::unix::fs::symlink(outside.join("private.md"), root.join("AGENTS.md")).unwrap();
+        let item = scan_source(&root)
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|item| item.kind == kind::INSTRUCTIONS)
+            .unwrap();
+        assert!(item.content_revision.is_none());
+        assert!(resolve_item_path(&root, &item.id).is_err());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }

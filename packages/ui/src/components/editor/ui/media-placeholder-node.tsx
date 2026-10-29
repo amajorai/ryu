@@ -22,35 +22,48 @@ import {
 } from "react";
 import { useFilePicker } from "use-file-picker";
 
-const CONTENT: Record<
-	string,
-	{
-		accept: string[];
-		content: ReactNode;
-		icon: ReactNode;
-	}
-> = {
-	[KEYS.audio]: {
-		accept: ["audio/*"],
-		content: "Add an audio file",
-		icon: <AudioLines />,
-	},
-	[KEYS.file]: {
-		accept: ["*"],
-		content: "Add a file",
-		icon: <FileUp />,
-	},
-	[KEYS.img]: {
-		accept: ["image/*"],
-		content: "Add an image",
-		icon: <ImageIcon />,
-	},
-	[KEYS.video]: {
-		accept: ["video/*"],
-		content: "Add a video",
-		icon: <Film />,
-	},
-};
+interface PlaceholderContent {
+	accept: string[];
+	content: ReactNode;
+	icon: ReactNode;
+}
+
+// Native media keys own these controls. Unsupported names use the file entry,
+// including Object.prototype names which are not authored placeholder types.
+const CONTENT = new Map<TPlaceholderElement["mediaType"], PlaceholderContent>([
+	[
+		KEYS.audio,
+		{
+			accept: ["audio/*"],
+			content: "Add an audio file",
+			icon: <AudioLines />,
+		},
+	],
+	[
+		KEYS.file,
+		{
+			accept: ["*"],
+			content: "Add a file",
+			icon: <FileUp />,
+		},
+	],
+	[
+		KEYS.img,
+		{
+			accept: ["image/*"],
+			content: "Add an image",
+			icon: <ImageIcon />,
+		},
+	],
+	[
+		KEYS.video,
+		{
+			accept: ["video/*"],
+			content: "Add a video",
+			icon: <Film />,
+		},
+	],
+]);
 
 export const PlaceholderElement = withHOC(
 	PlaceholderProvider,
@@ -64,7 +77,8 @@ export const PlaceholderElement = withHOC(
 
 		const loading = isUploading && uploadingFile;
 
-		const currentContent = CONTENT[element.mediaType] ?? CONTENT[KEYS.file]!;
+		const currentContent =
+			CONTENT.get(element.mediaType) ?? CONTENT.get(KEYS.file)!;
 
 		const isImage = element.mediaType === KEYS.img;
 
@@ -88,6 +102,9 @@ export const PlaceholderElement = withHOC(
 		const replaceCurrentPlaceholder = useCallback(
 			(file: File) => {
 				uploadFile(file).catch(() => undefined);
+				// SAFETY: Native addUploadingFile uses the original id as a computed
+				// object key; it applies native property-key coercion, not a string
+				// parser. This bridge retains that behavior and proves no id brand.
 				api.placeholder.addUploadingFile(element.id as string, file);
 			},
 			[api.placeholder, element.id, uploadFile]
@@ -103,6 +120,9 @@ export const PlaceholderElement = withHOC(
 			editor.tf.withoutSaving(() => {
 				editor.tf.removeNodes({ at: path });
 
+				// SAFETY: Native updateUploadHistory matches operation.node.id to
+				// placeholderId with strict equality. Preserve this exact raw identity;
+				// its declared string slot does not establish string membership.
 				const node = {
 					children: [{ text: "" }],
 					initialHeight: imageRef.current?.height,
@@ -119,6 +139,8 @@ export const PlaceholderElement = withHOC(
 				updateUploadHistory(editor, node);
 			});
 
+			// SAFETY: Native removeUploadingFile deletes uploadingFiles[id] using
+			// the same original key/coercion as addUploadingFile; no id parsing.
 			api.placeholder.removeUploadingFile(element.id as string);
 			// eslint-disable-next-line react-hooks/exhaustive-deps
 		}, [
@@ -143,6 +165,8 @@ export const PlaceholderElement = withHOC(
 			}
 
 			isReplaced.current = true;
+			// SAFETY: Native getUploadingFile reads uploadingFiles[id] with the
+			// original property key. Its string type does not change key coercion.
 			const currentFiles = api.placeholder.getUploadingFile(
 				element.id as string
 			);
@@ -164,11 +188,23 @@ export const PlaceholderElement = withHOC(
 			<PlateElement className="my-1" {...props}>
 				{!(loading && isImage) && (
 					<div
+						aria-disabled={Boolean(loading) || undefined}
 						className={cn(
-							"flex cursor-pointer select-none items-center rounded-sm bg-muted p-3 pe-9 hover:bg-primary/10"
+							"flex cursor-pointer select-none items-center rounded-sm bg-muted p-3 pe-9 outline-none hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-ring"
 						)}
 						contentEditable={false}
 						onClick={() => !loading && openFilePicker()}
+						onKeyDown={(event) => {
+							if (event.key !== "Enter" && event.key !== " ") {
+								return;
+							}
+							event.preventDefault();
+							if (!loading) {
+								openFilePicker();
+							}
+						}}
+						role="button"
+						tabIndex={0}
 					>
 						<div className="relative me-3 flex text-muted-foreground/80 [&_svg]:size-6">
 							{currentContent.icon}
@@ -182,7 +218,7 @@ export const PlaceholderElement = withHOC(
 								<div className="mt-1 flex items-center gap-1.5">
 									<div>{formatBytes(uploadingFile?.size ?? 0)}</div>
 									<div>–</div>
-									<div className="flex items-center">
+									<div className="flex items-center tabular-nums">
 										<Loader2Icon className="me-1 size-3.5 animate-spin text-muted-foreground" />
 										{progress ?? 0}%
 									</div>

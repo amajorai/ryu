@@ -1,6 +1,6 @@
 //! Suppress the console window Windows attaches to spawned child processes.
 //!
-//! The sandbox backends spawn `deno` / `bun` children; on Windows a `CONSOLE`
+//! `childProcess.run` starts host-approved programs; on Windows a `CONSOLE`
 //! subsystem child would otherwise pop its own black command-prompt window.
 //! `CREATE_NO_WINDOW` suppresses it; on non-Windows it is a no-op.
 //!

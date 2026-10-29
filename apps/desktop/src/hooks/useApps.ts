@@ -5,9 +5,10 @@
 // state immediately (optimistic) then confirm with the server response so the
 // UI reflects changes without a full refetch.
 
-import { toast } from "@ryu/ui/components/sileo";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type AppInfo,
@@ -17,11 +18,11 @@ import {
 	enableApp as apiEnableApp,
 	installApp as apiInstallApp,
 	uninstallApp as apiUninstallApp,
-	type DependencyError,
 	describeDependencyError,
 	fetchApps,
 } from "@/src/lib/api/plugins.ts";
 import { triggerGlobalRefresh } from "@/src/lib/core-refresh.ts";
+import { dependencyErrorOf } from "@/src/lib/plugin-dependency-errors.ts";
 import { queryClient } from "@/src/lib/query-client.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
@@ -33,14 +34,23 @@ export interface UseAppsResult {
 	install: (id: string) => Promise<AppRecord>;
 	loading: boolean;
 	reload: () => Promise<void>;
-	toggle: (id: string, enable: boolean) => Promise<void>;
+	toggle: (id: string, enable: boolean) => Promise<AppToggleOutcome>;
 	toggleError: string | null;
 	/** Uninstall an installed plugin (disable + remove its record). A 409 refusal
 	 *  (built-in, or enabled dependents) surfaces through `toggleError` in the SAME
 	 *  banner the disable-refusal uses. Pass `{ cascade: true }` to also disable the
-	 *  dependent chain. Refreshes the list on success. */
-	uninstall: (id: string, options?: { cascade?: boolean }) => Promise<void>;
+	 *  dependent chain, and `{ deleteStorage: true }` to also delete the app's
+	 *  saved key-value data (its saved secrets are always removed). Refreshes the
+	 *  list on success. */
+	uninstall: (
+		id: string,
+		options?: { cascade?: boolean; deleteStorage?: boolean }
+	) => Promise<void>;
 }
+
+export type AppToggleOutcome =
+	| { success: true }
+	| { error: string; success: false };
 
 /** Surface Core's "the toggle did not reach the gateway" notice (a gateway-policy
  *  plugin toggled against a remote/unmanaged gateway) rather than implying the
@@ -57,21 +67,15 @@ function surfaceExternallyManaged(result: {
 	}
 }
 
-/** Recover the typed {@link DependencyError} the lifecycle client attaches to a
- *  rejected enable/disable (`Object.assign(new Error(msg), { dependencyError })`).
- *  Returns null for every other failure. */
-function dependencyErrorOf(e: unknown): DependencyError | null {
-	if (!(e instanceof Error)) {
-		return null;
+/** Core acknowledged a lifecycle request with another app's record. Nothing about
+ *  the requested app is confirmed, so callers must not report success. */
+class WrongAppCompletionError extends Error {
+	constructor(acknowledgedId: string) {
+		super(
+			`Core confirmed a different app (${acknowledgedId}); the app list was reloaded.`
+		);
+		this.name = "WrongAppCompletionError";
 	}
-	const candidate = (e as Error & { dependencyError?: unknown })
-		.dependencyError;
-	if (typeof candidate !== "object" || candidate === null) {
-		return null;
-	}
-	return typeof (candidate as { code?: unknown }).code === "string"
-		? (candidate as DependencyError)
-		: null;
 }
 
 const EMPTY_APPS: AppInfo[] = [];
@@ -123,7 +127,30 @@ export function useApps(): UseAppsResult {
 		},
 		[queryKey]
 	);
-	const [toggleError, setToggleError] = useState<string | null>(null);
+	// Mutations keep updating their captured node's cache after navigation, but
+	// their error banner belongs only to the authority that started them.
+	const activeErrorScope = useRef(queryKey);
+	activeErrorScope.current = queryKey;
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
+	const [scopedToggleError, setScopedToggleError] = useState<{
+		scope: typeof queryKey;
+		message: string;
+	} | null>(null);
+	const setToggleError = useCallback(
+		(message: string | null) => {
+			if (activeErrorScope.current !== queryKey) {
+				return;
+			}
+			setScopedToggleError(
+				message === null ? null : { scope: queryKey, message }
+			);
+		},
+		[queryKey]
+	);
+	const toggleError =
+		scopedToggleError?.scope === queryKey ? scopedToggleError.message : null;
 
 	const reload = useCallback(async () => {
 		await queryClient.refetchQueries(
@@ -150,6 +177,9 @@ export function useApps(): UseAppsResult {
 				const record: AppToggleResult = enable
 					? await apiEnableApp(node, id)
 					: await apiDisableApp(node, id);
+				if (record.id !== id) {
+					throw new WrongAppCompletionError(record.id);
+				}
 
 				// Confirm with the server's authoritative enabled state.
 				setApps((prev) =>
@@ -166,6 +196,7 @@ export function useApps(): UseAppsResult {
 				// `["plugin-contributions"]` query and dispatches CORE_REFRESH_EVENT for
 				// the manual-reload hooks (usePluginSettingsTabs, this list itself).
 				triggerGlobalRefresh();
+				return { success: true } as const;
 			} catch (e) {
 				// Roll back the optimistic update on failure.
 				setApps((prev) =>
@@ -175,6 +206,14 @@ export function useApps(): UseAppsResult {
 							: a
 					)
 				);
+
+				// A completion for another app may still have changed this one: the
+				// rollback above is provisional, Core's re-read roster is authoritative.
+				if (e instanceof WrongAppCompletionError) {
+					await reload();
+					setToggleError(e.message);
+					return { error: e.message, success: false } as const;
+				}
 
 				// A dependency refusal (409) is not a generic failure — Core names the
 				// exact plugins involved. Re-render the typed error with DISPLAY NAMES
@@ -187,22 +226,29 @@ export function useApps(): UseAppsResult {
 						queryClient
 							.getQueryData<AppInfo[]>(queryKey)
 							?.find((a) => a.id === pluginId)?.name ?? pluginId;
-					setToggleError(describeDependencyError(depError, nameOf));
-					return;
+					const message = describeDependencyError(depError, nameOf);
+					setToggleError(message);
+					return { error: message, success: false } as const;
 				}
 
-				setToggleError(
+				const message =
 					e instanceof Error
 						? e.message
-						: `Failed to ${enable ? "enable" : "disable"} extension`
-				);
+						: enable
+							? tlRef.current("Failed to enable extension")
+							: tlRef.current("Failed to disable extension");
+				setToggleError(message);
+				return { error: message, success: false } as const;
 			}
 		},
-		[url, token, userJwt, setApps, queryKey]
+		[url, token, userJwt, setApps, queryKey, setToggleError, reload]
 	);
 
 	const uninstall = useCallback(
-		async (id: string, options?: { cascade?: boolean }) => {
+		async (
+			id: string,
+			options?: { cascade?: boolean; deleteStorage?: boolean }
+		) => {
 			setToggleError(null);
 			const node: ApiTarget = { url, token, userJwt };
 			try {
@@ -232,15 +278,22 @@ export function useApps(): UseAppsResult {
 				);
 			}
 		},
-		[url, token, userJwt, reload, queryKey]
+		[url, token, userJwt, reload, queryKey, setToggleError]
 	);
 
-	const clearToggleError = useCallback(() => setToggleError(null), []);
+	const clearToggleError = useCallback(
+		() => setToggleError(null),
+		[setToggleError]
+	);
 
 	const install = useCallback(
 		async (id: string) => {
 			const node: ApiTarget = { url, token, userJwt };
 			const record = await apiInstallApp(node, id);
+			if (record.id !== id) {
+				await reload();
+				throw new WrongAppCompletionError(record.id);
+			}
 			// Mark app as installed (disabled) in local state.
 			setApps((prev) =>
 				prev.map((a) =>
@@ -251,7 +304,7 @@ export function useApps(): UseAppsResult {
 			);
 			return record;
 		},
-		[url, token, userJwt, setApps, queryKey]
+		[url, token, userJwt, setApps, queryKey, reload]
 	);
 
 	return {

@@ -17,6 +17,7 @@
 //    panel, built from the strategy catalog (the real surface is the
 //    `TeamDialog` modal; there is no full-page strategy screen).
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import type { ChatStatus, UIMessage } from "ai";
@@ -80,9 +81,11 @@ export function MentionList({
 						type="button"
 					>
 						<span className="font-medium text-primary">@</span>
-						<span className="min-w-0 flex-1 truncate">{item.name}</span>
+						<span className="min-w-0 flex-1 truncate" title={item.name}>
+							{item.name}
+						</span>
 						{item.isTeam ? (
-							<span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
+							<span className="type-compact shrink-0 rounded bg-muted px-1 text-muted-foreground">
 								team
 							</span>
 						) : null}
@@ -167,12 +170,11 @@ const councilText = (
 	id: string,
 	role: "user" | "assistant",
 	text: string
-): UIMessage =>
-	({
-		id,
-		role,
-		parts: [{ type: "text", text }],
-	}) as unknown as UIMessage;
+): UIMessage => ({
+	id,
+	role,
+	parts: [{ type: "text", text }],
+});
 
 const COUNCIL_USER_PROMPT =
 	"What is the best on-device model for coding right now?";
@@ -227,12 +229,15 @@ export function TeamStrategyView({
 	strategies,
 	activeStrategy,
 }: TeamStrategyViewProps) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex items-center gap-2 border-border border-b px-4 py-3">
 				<h2 className="font-medium">{teamName}</h2>
 				<Badge variant="outline">
-					{formatCount(memberNames.length) ?? "—"} members
+					{tl("{memberCount} members", {
+						memberCount: formatCount(memberNames.length) ?? "—",
+					})}
 				</Badge>
 			</header>
 			<div className="mx-auto w-full max-w-xl space-y-6 p-6">

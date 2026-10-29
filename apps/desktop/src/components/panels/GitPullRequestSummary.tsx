@@ -1,3 +1,5 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	IconBrandGithub,
@@ -98,11 +100,7 @@ function checkLabel(check: PullRequestCheck): string {
 	return check.name ?? check.workflowName ?? "Unnamed check";
 }
 
-function checkSummary(pullRequest: GitPullRequest): {
-	failed: PullRequestCheck[];
-	passed: number;
-	pending: number;
-} {
+function checkSummary(pullRequest: GitPullRequest) {
 	let passed = 0;
 	let pending = 0;
 	for (const check of pullRequest.statusCheckRollup) {
@@ -135,16 +133,26 @@ export function GitPullRequestSummary({
 	pullRequest: GitPullRequest;
 	showStatusIcon?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const { failed, passed, pending } = checkSummary(pullRequest);
 	const checkCount = pullRequest.statusCheckRollup.length;
 	const hasMergeConflicts = pullRequestHasMergeConflicts(pullRequest);
 	const ciLabel =
 		failed.length > 0
-			? `${failed.length} failing check${failed.length === 1 ? "" : "s"}`
+			? tl(
+					"{failedCount, plural, one {# failing check} other {# failing checks}}",
+					{ failedCount: failed.length }
+				)
 			: pending > 0
-				? `${pending} check${pending === 1 ? "" : "s"} running`
+				? tl(
+						"{pendingCount, plural, one {# check running} other {# checks running}}",
+						{ pendingCount: pending }
+					)
 				: checkCount > 0
-					? `${passed} check${passed === 1 ? "" : "s"} passed`
+					? tl(
+							"{passedCount, plural, one {# check passed} other {# checks passed}}",
+							{ passedCount: passed }
+						)
 					: "No checks yet";
 	const ciTone =
 		failed.length > 0
@@ -161,9 +169,11 @@ export function GitPullRequestSummary({
 			data-testid={`pull-request-summary-${pullRequest.number}`}
 		>
 			<a
-				aria-label={`Open pull request: ${pullRequest.title}`}
+				aria-label={tl("Open pull request: {title}", {
+					title: pullRequest.title,
+				})}
 				className="flex min-w-0 items-center gap-1.5 text-foreground transition-colors hover:text-primary"
-				href={pullRequest.url}
+				href={safeHttpUrl(pullRequest.url) ?? undefined}
 				rel="noopener noreferrer"
 				target="_blank"
 			>
@@ -172,7 +182,10 @@ export function GitPullRequestSummary({
 				) : (
 					<IconBrandGithub aria-hidden className="size-4 shrink-0" />
 				)}
-				<span className="min-w-0 truncate font-medium">
+				<span
+					className="min-w-0 truncate font-medium"
+					title={pullRequest.title}
+				>
 					{pullRequest.title}
 				</span>
 				<span className="shrink-0 text-muted-foreground text-xs">
@@ -181,7 +194,9 @@ export function GitPullRequestSummary({
 			</a>
 			<div className="flex min-w-0 items-center gap-1.5 text-xs">
 				<span className="shrink-0 text-muted-foreground">CI</span>
-				<span className={cn("min-w-0 truncate", ciTone)}>{ciLabel}</span>
+				<span className={cn("min-w-0 truncate", ciTone)} title={ciLabel}>
+					{ciLabel}
+				</span>
 				{onFix && failed.length > 0 ? (
 					<button
 						className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -210,7 +225,9 @@ export function GitPullRequestSummary({
 					</span>
 					{onFixMergeConflicts ? (
 						<button
-							aria-label={`Fix merge conflicts in pull request #${pullRequest.number}`}
+							aria-label={tl("Fix merge conflicts in pull request #{number}", {
+								number: String(pullRequest.number),
+							})}
 							className="ml-auto shrink-0 rounded-md px-1.5 py-0.5 font-medium text-status-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onClick={(event) => {
 								event.preventDefault();
@@ -226,16 +243,23 @@ export function GitPullRequestSummary({
 			) : null}
 			{pullRequest.commentsCount === null ? null : (
 				<a
-					aria-label={`Open ${pullRequest.commentsCount} comments on pull request`}
+					aria-label={tl("Open {commentsCount} comments on pull request", {
+						commentsCount: String(pullRequest.commentsCount),
+					})}
 					className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
-					href={pullRequest.url}
+					href={safeHttpUrl(pullRequest.url) ?? undefined}
 					rel="noopener noreferrer"
 					target="_blank"
 				>
 					<IconMessageCircle aria-hidden className="size-3.5 shrink-0" />
 					<span>
-						{pullRequest.commentsCount} comment
-						{pullRequest.commentsCount === 1 ? "" : "s"}
+						{tl(
+							"{commentsCount, plural, one {{commentsLabel} comment} other {{commentsLabel} comments}}",
+							{
+								commentsCount: pullRequest.commentsCount,
+								commentsLabel: String(pullRequest.commentsCount),
+							}
+						)}
 					</span>
 				</a>
 			)}
@@ -243,18 +267,23 @@ export function GitPullRequestSummary({
 				<div className="flex flex-col gap-1 border-border/60 border-t pt-1.5">
 					{pullRequest.statusCheckRollup.slice(0, 6).map((check, index) => (
 						<div
-							className="flex min-w-0 items-center gap-1.5 text-[11px]"
+							className="type-caption flex min-w-0 items-center gap-1.5"
 							key={`${checkLabel(check)}-${index}`}
 						>
 							<CheckIcon check={check} />
-							<span className="min-w-0 truncate text-muted-foreground">
+							<span
+								className="min-w-0 truncate text-muted-foreground"
+								title={checkLabel(check)}
+							>
 								{checkLabel(check)}
 							</span>
 						</div>
 					))}
 					{checkCount > 6 ? (
-						<span className="text-[10px] text-muted-foreground">
-							+{checkCount - 6} more checks
+						<span className="type-compact text-muted-foreground">
+							{tl("+{extraCount} more checks", {
+								extraCount: String(checkCount - 6),
+							})}
 						</span>
 					) : null}
 				</div>

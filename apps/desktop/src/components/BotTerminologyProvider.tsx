@@ -1,9 +1,14 @@
-import {
-	replaceAgentTerms,
-	useBotTerminology,
-} from "@ryu/ui/hooks/use-bot-terminology.ts";
-import { type ReactNode, useLayoutEffect } from "react";
+import { useOptionalI18n } from "@ryu/i18n/react";
+import { useBotTerminology } from "@ryu/ui/hooks/use-bot-terminology.ts";
+import { type ReactNode, useLayoutEffect, useMemo } from "react";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
+import {
+	createBotTerminologyRenderer,
+	rendersEnglishOutput,
+} from "./bot-terminology-render.ts";
+import { NativeCopyLocalizer } from "./NativeCopyLocalizer.tsx";
+
+type Render = (source: string) => string;
 
 const TEXT_ATTRIBUTES = [
 	"alt",
@@ -26,6 +31,8 @@ const TEXT_IGNORE_SELECTOR = [
 	"code",
 	'[contenteditable="true"]',
 	'[data-ryu-bot-terminology="ignore"]',
+	// User data (entity names, titles) the DOM localizer also skips.
+	'[data-ryu-i18n="off"]',
 	'[data-slot="message-content"]',
 	'[data-slot="user-message-editor"]',
 ].join(",");
@@ -41,6 +48,8 @@ const ATTRIBUTE_IGNORE_SELECTOR = [
 	"pre",
 	"code",
 	'[data-ryu-bot-terminology="ignore"]',
+	// User data (entity names, titles) the DOM localizer also skips.
+	'[data-ryu-i18n="off"]',
 	'[data-slot="message-content"]',
 ].join(",");
 
@@ -58,11 +67,12 @@ function isTextNode(value: Node): value is Text {
 
 function restoreTextNodes(
 	textNodes: Set<Text>,
-	originals: WeakMap<Text, string>
+	originals: WeakMap<Text, string>,
+	render: Render
 ): void {
 	for (const node of textNodes) {
 		const original = originals.get(node);
-		if (original !== undefined && node.data === replaceAgentTerms(original)) {
+		if (original !== undefined && node.data === render(original)) {
 			node.data = original;
 		}
 	}
@@ -70,7 +80,8 @@ function restoreTextNodes(
 
 function restoreAttributes(
 	elements: Set<Element>,
-	originals: WeakMap<Element, Map<string, string>>
+	originals: WeakMap<Element, Map<string, string>>,
+	render: Render
 ): void {
 	for (const element of elements) {
 		const original = originals.get(element);
@@ -78,16 +89,22 @@ function restoreAttributes(
 			continue;
 		}
 		for (const [attribute, value] of original) {
-			if (element.getAttribute(attribute) === replaceAgentTerms(value)) {
+			if (element.getAttribute(attribute) === render(value)) {
 				element.setAttribute(attribute, value);
 			}
 		}
 	}
 }
 
-function BotTerminologyDomSync({ enabled }: { enabled: boolean }) {
+function BotTerminologyDomSync({
+	enabled,
+	render,
+}: {
+	enabled: boolean;
+	render: Render;
+}) {
 	useLayoutEffect(() => {
-		if (!enabled || typeof document === "undefined" || !document.body) {
+		if (!enabled || globalThis.document === undefined || !document.body) {
 			return;
 		}
 
@@ -101,10 +118,10 @@ function BotTerminologyDomSync({ enabled }: { enabled: boolean }) {
 				return;
 			}
 			const previous = textOriginals.get(node);
-			const previousRendered = previous ? replaceAgentTerms(previous) : null;
+			const previousRendered = previous ? render(previous) : null;
 			const source =
 				previous && node.data === previousRendered ? previous : node.data;
-			const rendered = replaceAgentTerms(source);
+			const rendered = render(source);
 			if (rendered === source) {
 				return;
 			}
@@ -125,10 +142,10 @@ function BotTerminologyDomSync({ enabled }: { enabled: boolean }) {
 			}
 			const original = attributeOriginals.get(element);
 			const previous = original?.get(attribute);
-			const previousRendered = previous ? replaceAgentTerms(previous) : null;
+			const previousRendered = previous ? render(previous) : null;
 			const source =
 				previous && current === previousRendered ? previous : current;
-			const rendered = replaceAgentTerms(source);
+			const rendered = render(source);
 			if (rendered === source) {
 				return;
 			}
@@ -198,24 +215,39 @@ function BotTerminologyDomSync({ enabled }: { enabled: boolean }) {
 
 		return () => {
 			observer.disconnect();
-			restoreTextNodes(touchedTextNodes, textOriginals);
-			restoreAttributes(touchedElements, attributeOriginals);
+			restoreTextNodes(touchedTextNodes, textOriginals, render);
+			restoreAttributes(touchedElements, attributeOriginals, render);
 		};
-	}, [enabled]);
+	}, [enabled, render]);
 
 	return null;
 }
 
-/** Applies the selected vocabulary to the rendered desktop UI. */
+/**
+ * Applies the selected vocabulary to the rendered desktop UI. Translation
+ * comes first: the swap runs only on English output (see
+ * `rendersEnglishOutput`), and English flavor-pack copy is resolved before
+ * the swap so the "agent" source stays the lookup key.
+ */
 export function BotTerminologyProvider({ children }: { children: ReactNode }) {
 	const interfaceLevel = useInterfaceLevel();
 	const [botTerminology] = useBotTerminology();
+	const i18n = useOptionalI18n();
+	const locale = i18n?.locale ?? "en";
+	const selectedPack = i18n?.selectedPack ?? null;
 	const forcedBySimple = interfaceLevel === "simple";
-	const enabled = forcedBySimple || botTerminology;
+	const englishOutput = rendersEnglishOutput(locale, selectedPack !== null);
+	const enabled = (forcedBySimple || botTerminology) && englishOutput;
+	const packMessages = selectedPack?.messages ?? null;
+	const render = useMemo(
+		() => createBotTerminologyRenderer(packMessages),
+		[packMessages]
+	);
 
 	return (
 		<>
-			<BotTerminologyDomSync enabled={enabled} />
+			<BotTerminologyDomSync enabled={enabled} render={render} />
+			<NativeCopyLocalizer botTerminology={enabled} />
 			{children}
 		</>
 	);

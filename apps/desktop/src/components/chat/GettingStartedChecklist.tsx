@@ -1,5 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { memo, useMemo } from "react";
 import {
 	CheckIcon,
@@ -18,7 +18,7 @@ function StatusIcon({ quest }: { quest: ResolvedQuest }) {
 	if (quest.status === "completed") {
 		return (
 			<div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-success-foreground shadow-sm">
-				<CheckIcon className="size-2.5 drop-shadow-[0_1px_1px_rgba(0,0,0,0.18)]" />
+				<CheckIcon className="size-2.5 drop-shadow-sm" />
 			</div>
 		);
 	}
@@ -73,7 +73,7 @@ export const GettingStartedChecklist = memo(function GettingStartedChecklist({
 						<div className="flex flex-col items-start gap-3">
 							<p>{quest.description}</p>
 							<button
-								className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 font-medium text-[13px] text-background outline-none transition-opacity hover:opacity-90 focus-visible:opacity-90"
+								className="text-(length:--text-detail) inline-flex items-center gap-1.5 rounded-full bg-foreground px-3.5 py-1.5 font-medium text-background outline-none transition-opacity hover:opacity-90 focus-visible:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 								onClick={() => onRun(quest.id)}
 								type="button"
 							>

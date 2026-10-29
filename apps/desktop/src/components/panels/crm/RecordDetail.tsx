@@ -1,3 +1,4 @@
+import type { ValueBag } from "@/src/lib/api/crm.ts";
 // The record page: fields, related records, and the unified activity timeline.
 //
 // The timeline is the reason a CRM is worth having, and the reason it is ONE list
@@ -19,15 +20,15 @@ import {
 	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { Separator } from "@ryu/ui/components/separator";
-import { Skeleton } from "@ryu/ui/components/skeleton";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { cn } from "@ryu/ui/lib/utils";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { Separator } from "@ryu/ui/components/separator.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	FieldEditor,
@@ -73,7 +74,7 @@ export function RecordDetail({
 	/** Used to name a related record's object without another round-trip. */
 	objectsBySlug: Map<string, ObjectWithFields>;
 	onBack: () => void;
-	onOpenRecord: (recordId: string) => void;
+	onOpenRecord: (recordId: string, objectSlug?: string) => void;
 	recordId: string;
 	subject: ObjectWithFields;
 }) {
@@ -83,6 +84,10 @@ export function RecordDetail({
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [editingField, setEditingField] = useState<string | null>(null);
+	const [failedFieldDraft, setFailedFieldDraft] = useState<{
+		fieldId: string;
+		value: unknown;
+	} | null>(null);
 
 	const [composerKind, setComposerKind] = useState<ActivityKind>("note");
 	const [composerTitle, setComposerTitle] = useState("");
@@ -145,8 +150,9 @@ export function RecordDetail({
 		return () => controller.abort();
 	}, [load]);
 
-	const commitField = async (field: Field, next: unknown) => {
+	const commitField = async (field: Field, next: ValueBag[string]) => {
 		setEditingField(null);
+		setFailedFieldDraft(null);
 		if (!record) {
 			return;
 		}
@@ -160,14 +166,24 @@ export function RecordDetail({
 				[field.slug]: next,
 			});
 			setRecord(updated);
+			setFailedFieldDraft(null);
 			// A field write produces an audit entry, so the timeline is now stale.
-			const refreshed = await client.getTimeline(record.id, TIMELINE_LIMIT);
-			setTimeline(refreshed.items);
+			try {
+				const refreshed = await client.getTimeline(record.id, TIMELINE_LIMIT);
+				setTimeline(refreshed.items);
+				setError(null);
+			} catch (cause) {
+				// The record write is already authoritative. A failed audit refresh must
+				// not paint the old value back over a successful server mutation.
+				setError(cause instanceof Error ? cause.message : String(cause));
+			}
 		} catch (cause) {
 			setRecord({
 				...record,
 				values: { ...record.values, [field.slug]: previous },
 			});
+			setFailedFieldDraft({ fieldId: field.id, value: next });
+			setEditingField(field.id);
 			setError(cause instanceof Error ? cause.message : String(cause));
 		}
 	};
@@ -193,6 +209,7 @@ export function RecordDetail({
 			setComposerDue("");
 			const refreshed = await client.getTimeline(recordId, TIMELINE_LIMIT);
 			setTimeline(refreshed.items);
+			setError(null);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
 		} finally {
@@ -216,6 +233,7 @@ export function RecordDetail({
 				: client.unlink(recordId, group.field_id, [targetId]));
 			const refreshed = await client.getRelated(recordId);
 			setRelated(refreshed.groups);
+			setError(null);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
 		} finally {
@@ -237,6 +255,7 @@ export function RecordDetail({
 		);
 		try {
 			await client.completeActivity(activity.id, completed);
+			setError(null);
 		} catch (cause) {
 			setTimeline((current) =>
 				current.map((entry) =>
@@ -279,7 +298,10 @@ export function RecordDetail({
 						← Back
 					</Button>
 					<div className="min-w-0">
-						<h2 className="truncate font-medium text-base">
+						<h2
+							className="truncate font-medium text-base"
+							title={recordTitle(record.title, record.values, titleField)}
+						>
 							{recordTitle(record.title, record.values, titleField)}
 						</h2>
 						<p className="text-muted-foreground text-xs">
@@ -294,7 +316,7 @@ export function RecordDetail({
 							void client
 								.restoreRecord(record.id)
 								.then(() => load())
-								.catch((cause: unknown) =>
+								.catch((cause) =>
 									setError(
 										cause instanceof Error ? cause.message : String(cause)
 									)
@@ -333,9 +355,17 @@ export function RecordDetail({
 											<FieldEditor
 												autoFocus
 												field={field}
-												onCancel={() => setEditingField(null)}
+												onCancel={() => {
+													setEditingField(null);
+													setFailedFieldDraft(null);
+													setError(null);
+												}}
 												onCommit={(next) => void commitField(field, next)}
-												value={record.values?.[field.slug]}
+												value={
+													failedFieldDraft?.fieldId === field.id
+														? failedFieldDraft.value
+														: record.values?.[field.slug]
+												}
 											/>
 										) : (
 											<button
@@ -366,7 +396,7 @@ export function RecordDetail({
 										<div className="mb-1 flex items-center gap-1.5 text-muted-foreground text-xs">
 											<HugeiconsIcon icon={UserGroupIcon} size={12} />
 											{group.field_name}
-											<Badge className="font-normal" variant="secondary">
+											<Badge typography="normal" variant="secondary">
 												{group.records.length}
 											</Badge>
 										</div>
@@ -375,7 +405,9 @@ export function RecordDetail({
 												<li className="flex items-center gap-1" key={linked.id}>
 													<button
 														className="min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-sm hover:bg-muted"
-														onClick={() => onOpenRecord(linked.id)}
+														onClick={() =>
+															onOpenRecord(linked.id, group.object_slug)
+														}
 														type="button"
 													>
 														{recordTitle(
@@ -474,7 +506,7 @@ export function RecordDetail({
 							</div>
 							{composerKind === "task" && (
 								<div className="flex items-center gap-2">
-									<Label className="text-xs" htmlFor="crm-activity-due">
+									<Label htmlFor="crm-activity-due" size="compact">
 										Due
 									</Label>
 									<Input
@@ -510,12 +542,13 @@ export function RecordDetail({
 								onDelete={() => {
 									void client
 										.deleteActivity(entry.id)
-										.then(() =>
+										.then(() => {
 											setTimeline((current) =>
 												current.filter((row) => row.id !== entry.id)
-											)
-										)
-										.catch((cause: unknown) =>
+											);
+											setError(null);
+										})
+										.catch((cause) =>
 											setError(
 												cause instanceof Error ? cause.message : String(cause)
 											)
@@ -604,7 +637,7 @@ function TimelineEntry({
 							</p>
 						)}
 						<div className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-							<Badge className="font-normal" variant="secondary">
+							<Badge typography="normal" variant="secondary">
 								{activity.kind}
 							</Badge>
 							<span className="tabular-nums">{stamp}</span>
@@ -697,6 +730,7 @@ function RelationPicker({
 									setQuery("");
 									setHits([]);
 								}}
+								title={recordTitle(hit.title, hit.values, titleField)}
 								type="button"
 							>
 								{recordTitle(hit.title, hit.values, titleField)}

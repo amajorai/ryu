@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod provider_environment;
+pub(crate) use provider_environment::ProviderEnvironment;
+mod screening;
+pub use screening::{ScreeningBackendConfig, ScreeningBackendKind, ScreeningConfig};
+
 pub use crate::security_contact::PublicContactConfig;
 
 // The budget config value-types moved to the extracted `ryu-gw-budget` stage
@@ -32,7 +37,7 @@ pub use ryu_gw_audit::AuditConfig;
 // Re-exported here so every `crate::config::{CacheConfig, SemanticCacheConfig}`
 // path — and `GatewayConfig`'s `cache` / `semantic_cache` fields below — stays
 // byte-unchanged.
-pub use ryu_gw_cache::{CacheConfig, SemanticCacheConfig};
+pub use ryu_gw_cache::{CacheConfig, EmbeddingCacheConfig, RedisCacheConfig, SemanticCacheConfig};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GatewayConfig {
@@ -44,6 +49,19 @@ pub struct GatewayConfig {
 
     #[serde(default)]
     pub providers: ProvidersConfig,
+
+    /// Explicit process inputs; never authored, serialized or printed as material.
+    #[serde(skip)]
+    pub(crate) provider_environment: Option<ProviderEnvironment>,
+    #[serde(skip)]
+    pub(crate) provider_vault_source:
+        Option<std::sync::Arc<crate::provider_vault::VaultSourceSnapshot>>,
+
+    /// Explicit transport pools for direct OpenAI-compatible upstreams. Proxy
+    /// credentials are referenced by environment variable name, never stored
+    /// in this config or returned in a URL.
+    #[serde(default, skip_serializing_if = "EgressConfig::is_empty")]
+    pub egress: EgressConfig,
 
     #[serde(default)]
     pub routing: RoutingConfig,
@@ -189,6 +207,16 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub semantic_cache: SemanticCacheConfig,
 
+    /// Redis/Valkey settings shared by the `"redis"` exact/semantic cache
+    /// backends and the Redis embedding store. The connection URL is a secret
+    /// and is read only from `RYU_GATEWAY_REDIS_URL`, never from this file.
+    #[serde(default)]
+    pub redis_cache: RedisCacheConfig,
+
+    /// `/v1/embeddings` cache (off by default).
+    #[serde(default)]
+    pub embedding_cache: EmbeddingCacheConfig,
+
     #[serde(default)]
     pub budgets: BudgetConfig,
 
@@ -228,6 +256,13 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub tools: ToolsConfig,
 
+    /// Hazard screener endpoints (`[screening]`, screener addendum 5.2).
+    /// Policy comes from the platform floor on the fleet; a self-hosted node
+    /// opts in with `node_classifiers`. Skipped when untouched so an existing
+    /// `gateway.toml` stays byte-identical.
+    #[serde(default, skip_serializing_if = "ScreeningConfig::is_default")]
+    pub screening: ScreeningConfig,
+
     #[serde(default)]
     pub widget: WidgetConfig,
 
@@ -259,6 +294,11 @@ pub struct GatewayConfig {
     /// "loopback" no longer implies "local operator". Off by default (loopback
     /// trust preserved for local dev); set via `RYU_GATEWAY_FLEET`. Nothing
     /// hardcoded.
+    ///
+    /// This is exposure hardening only, and a self-hosted stack behind its own
+    /// proxy sets it too. It never decides custody: Ryu's floor, identity
+    /// secrets and hosted route gates follow [`crate::custody::GatewayCustody`],
+    /// which only the provider-vault signals make Fleet.
     #[serde(default)]
     pub fleet: bool,
 }
@@ -267,12 +307,12 @@ pub struct GatewayConfig {
 /// [`ryu_gw_providers::PromptCacheOptions`], which holds the actual injection
 /// logic and documents the wire formats and precedence.
 ///
-/// Every field defaults to today's behaviour (`mode = "off"`, inject nothing),
-/// so an existing `gateway.toml` with no `[prompt_cache]` table is unchanged.
+/// The default mode (`auto`) adds cache markers only for supported model families
+/// that need them. An operator can set `mode = "off"` to restore unmarked requests.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PromptCacheConfig {
-    /// `"off"` (default) | `"auto"` | `"explicit"`. `auto` hands breakpoint
-    /// placement to the provider; `explicit` places them here.
+    /// `"auto"` (default) | `"off"` | `"explicit"`. `auto` chooses a compatible
+    /// marker for supported model families; `explicit` places multiple breakpoints.
     #[serde(default = "prompt_cache_mode")]
     pub mode: String,
     /// `cache_control.ttl`, e.g. `"1h"`. Empty ⇒ the provider default (5 min).
@@ -389,7 +429,8 @@ impl PromptCacheConfig {
     pub fn options(&self) -> ryu_gw_providers::PromptCacheOptions {
         let ttl = self.ttl.trim().to_ascii_lowercase();
         ryu_gw_providers::PromptCacheOptions {
-            mode: ryu_gw_providers::PromptCacheMode::parse(&self.mode).unwrap_or_default(),
+            mode: ryu_gw_providers::PromptCacheMode::parse(&self.mode)
+                .unwrap_or(ryu_gw_providers::PromptCacheMode::Off),
             ttl: ryu_gw_providers::prompt_cache::is_supported_ttl(&ttl).then_some(ttl),
             min_prefix_tokens: self.min_prefix_tokens,
             breakpoints: self.breakpoints,
@@ -399,7 +440,7 @@ impl PromptCacheConfig {
 }
 
 fn prompt_cache_mode() -> String {
-    "off".to_string()
+    "auto".to_string()
 }
 fn prompt_cache_min_prefix_tokens() -> u64 {
     1024
@@ -446,12 +487,82 @@ pub struct StageBackendsConfig {
     pub rate_limit: String,
     #[serde(default = "default_stage_backend")]
     pub firewall: String,
+    /// The routing layer: `"builtin"` (Ryu's own model-map + prefix routing), or
+    /// an upstream router — `"openrouter"`, `"litellm"`, `"local"` — that takes
+    /// `router/<model>` ids and every model the built-in table would hand to
+    /// `default_provider`. Applied live by `PUT /v1/config { backends }`.
     #[serde(default = "default_stage_backend")]
     pub router: String,
     #[serde(default = "default_stage_backend")]
     pub smart_router: String,
     #[serde(default = "default_stage_backend")]
     pub passthrough: String,
+    /// The connections layer: which managed connection provider (`"composio"`,
+    /// `"treg"`) answers `/v1/providers/*` calls that do not name one.
+    /// `"builtin"` resolves to the only configured provider, else none — so a
+    /// caller that names its provider is unaffected. Applied live.
+    #[serde(default = "default_stage_backend")]
+    pub connections: String,
+}
+
+/// A partial `[backends]` update, as `PUT /v1/config { backends }` accepts it.
+///
+/// Every field is optional and an omitted field keeps the persisted selection,
+/// so changing one layer (`router`, `connections`) never resets another stage.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct StageBackendsPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_cache: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evals: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circuit_breaker: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firewall: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub router: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smart_router: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passthrough: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connections: Option<String>,
+}
+
+impl StageBackendsPatch {
+    /// The full selection after applying this patch to `base`.
+    pub fn apply_to(&self, mut base: StageBackendsConfig) -> StageBackendsConfig {
+        macro_rules! merge {
+            ($($field:ident),*) => {
+                $(if let Some(value) = &self.$field {
+                    base.$field.clone_from(value);
+                })*
+            };
+        }
+        merge!(
+            budget,
+            cache,
+            semantic_cache,
+            audit,
+            evals,
+            circuit_breaker,
+            rate_limit,
+            firewall,
+            router,
+            smart_router,
+            passthrough,
+            connections
+        );
+        base
+    }
 }
 
 impl Default for StageBackendsConfig {
@@ -468,6 +579,7 @@ impl Default for StageBackendsConfig {
             router: default_stage_backend(),
             smart_router: default_stage_backend(),
             passthrough: default_stage_backend(),
+            connections: default_stage_backend(),
         }
     }
 }
@@ -526,20 +638,19 @@ pub struct CreditsConfig {
     /// enabled before its first request reaches this gateway.
     #[serde(default)]
     pub provider_billing: HashMap<ProviderId, ProviderBillingPolicy>,
+    #[serde(default)]
+    pub web_service_prices: crate::web_config::WebServicePrices,
     /// Per-tool-call cost in micro-USD for billable (Composio) tool executions.
     ///
     /// AT COST, and that is the whole pricing position: Composio charges per
-    /// action execution at $0.30/1k on the standard rate, so this defaults to
-    /// 300 micro-USD per call and the customer is billed exactly what the
+    /// managed-app execution at $0.50/1k, so this defaults to
+    /// 500 micro-USD per call and the customer is billed exactly what the
     /// provider bills us. Margin lives in the deposit fee, never in a per-unit
     /// markup (`markup_bps` is 0) — see `docs/pricing-remaining-work.md` item 6.
     ///
-    /// ONE FLAT CLASS, deliberately. Composio's premium tools bill at 3x, but
-    /// nothing in an execution response says which class a tool is, so telling
-    /// them apart would mean a hand-maintained list of toolkit slugs that
-    /// silently under-bills whatever it omits and has to be re-checked whenever
-    /// Composio moves a tool. A single at-cost rate is honest, needs no
-    /// maintenance, and cannot restrict which toolkits work.
+    /// Legacy count-only fallback. New execution reports carry the actual auth
+    /// source, usage kind, add-ons, and exact Instant charge. Never use this
+    /// fallback for delivered triggers or a known premium transaction.
     ///
     /// Overridable per deployment with
     /// `GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD` for a different Composio
@@ -649,6 +760,11 @@ pub struct CreditsConfig {
     /// stops until accounting recovers.
     #[serde(default = "default_true")]
     pub fail_closed: bool,
+    /// Where a caller refused for credit tops up, returned as `top_up_url` on a
+    /// managed tool call's typed `402`. Empty omits the link.
+    /// `GATEWAY_CREDITS_TOP_UP_URL`. Default: the hosted billing page.
+    #[serde(default = "default_credits_top_up_url")]
+    pub top_up_url: String,
 
     // ─── Sandbox per-resource rates (Daytona), nano-USD per unit-second ───────
     // Rates are stored in NANO-USD (not micro) because the Daytona storage rate
@@ -714,6 +830,121 @@ pub struct CreditsConfig {
     /// sandbox carries its own margin. Default: 3000 (× 1.30).
     #[serde(default = "default_sandbox_markup_bps")]
     pub sandbox_markup_bps: u64,
+    /// Per-size Box rates (`GATEWAY_CREDITS_SANDBOX_SIZE_RATES`). **Default:
+    /// the shared Box rates** ([`default_sandbox_size_rates`], small $0.025,
+    /// default $0.04, large $0.07 per hour). A tick that names its Box `size`
+    /// is priced at that size's hourly rate with no `sandbox_markup_bps` (the
+    /// size rate is the customer price), billed in whole minutes with a
+    /// five-minute minimum per start ([`box_billable_seconds`]); a tick without
+    /// a size keeps the per-resource math. `"off"` (env or TOML) turns size
+    /// pricing off, so Box ticks fall back to the per-resource math.
+    #[serde(
+        default = "default_sandbox_size_rates",
+        deserialize_with = "deserialize_sandbox_size_rates"
+    )]
+    pub sandbox_size_rates: Option<SizeRates>,
+    /// The Box service's Ed25519 public key for minimum waivers
+    /// (`GATEWAY_BOX_MINIMUM_WAIVER_PUBLIC_KEY`: the 32-byte key in base64,
+    /// as the Box service logs it from `RYU_BOX_MINIMUM_WAIVER_KEY`). A Box
+    /// tick is priced without its five-minute minimum only when it carries a
+    /// `minimum_waiver` this key verifies for the same Box, org and start.
+    /// **Default: none**, so every start pays the minimum.
+    #[serde(default)]
+    pub box_minimum_waiver_public_key: Option<String>,
+}
+
+/// A Box size as Core's sandbox tick names it (`small` | `default` | `large`,
+/// the Box service's `BoxSize`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum SandboxSize {
+    #[serde(rename = "small")]
+    Small,
+    #[serde(rename = "default")]
+    Default,
+    #[serde(rename = "large")]
+    Large,
+}
+
+impl SandboxSize {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Default => "default",
+            Self::Large => "large",
+        }
+    }
+}
+
+/// Customer price per Box size, in micro-USD per hour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub struct SizeRates {
+    pub small: u64,
+    pub default: u64,
+    pub large: u64,
+}
+
+impl SizeRates {
+    /// The hourly rate for `size`, in micro-USD.
+    pub fn micro_usd_per_hour(&self, size: SandboxSize) -> u64 {
+        match size {
+            SandboxSize::Small => self.small,
+            SandboxSize::Default => self.default,
+            SandboxSize::Large => self.large,
+        }
+    }
+
+    /// Parse `GATEWAY_CREDITS_SANDBOX_SIZE_RATES`: either
+    /// `small=25000,default=40000,large=70000` or the same as a JSON object.
+    /// Every size must be present, positive, and named once.
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        let raw = raw.trim();
+        if raw.starts_with('{') {
+            let rates: Self = serde_json::from_str(raw)
+                .map_err(|_| "expected {\"small\":N,\"default\":N,\"large\":N}".to_owned())?;
+            return rates.validated();
+        }
+        let (mut small, mut default, mut large) = (None, None, None);
+        for pair in raw
+            .split(',')
+            .map(str::trim)
+            .filter(|pair| !pair.is_empty())
+        {
+            let (name, value) = pair
+                .split_once('=')
+                .ok_or_else(|| format!("{pair:?} is not size=micro_usd_per_hour"))?;
+            let value: u64 = value
+                .trim()
+                .parse()
+                .map_err(|_| format!("{pair:?} does not carry a whole micro-USD rate"))?;
+            let slot = match name.trim().to_ascii_lowercase().as_str() {
+                "small" => &mut small,
+                "default" => &mut default,
+                "large" => &mut large,
+                other => return Err(format!("unknown Box size {other:?}")),
+            };
+            if slot.replace(value).is_some() {
+                return Err(format!("Box size {} is named twice", name.trim()));
+            }
+        }
+        Self {
+            small: small.ok_or("missing the small rate")?,
+            default: default.ok_or("missing the default rate")?,
+            large: large.ok_or("missing the large rate")?,
+        }
+        .validated()
+    }
+
+    /// Whether `raw` switches size pricing off (`off` or `none`).
+    pub fn is_off(raw: &str) -> bool {
+        matches!(raw.trim().to_ascii_lowercase().as_str(), "off" | "none")
+    }
+
+    fn validated(self) -> Result<Self, String> {
+        if self.small == 0 || self.default == 0 || self.large == 0 {
+            return Err("every Box size rate must be positive".to_owned());
+        }
+        Ok(self)
+    }
 }
 
 /// GPU tier for a sandbox workspace. Canonical definition (Core mirrors it).
@@ -760,6 +991,11 @@ fn default_credits_timeout_ms() -> u64 {
     3000
 }
 
+/// The hosted billing page, the same link the control plane's credit alerts use.
+fn default_credits_top_up_url() -> String {
+    "https://ryuhq.com/organizations/billing".to_owned()
+}
+
 /// $0.01. See [`CreditsConfig::min_reserve_micro_usd`] for why the floor rather
 /// than the estimate is the number that bounds a burst.
 fn default_min_reserve_micro_usd() -> u64 {
@@ -772,6 +1008,63 @@ fn default_sandbox_markup_bps() -> u64 {
 
 fn default_sandbox_free_storage_gib() -> u64 {
     5
+}
+
+/// The customer price of each Box size, micro-USD per hour (founder sign-off
+/// 2026-10-20). It must equal `crates/gateway/contracts/fixtures/box-rates.json`,
+/// which `SERVICE_RATES.box`, the control plane's settlement and
+/// reconciliation, Core and the Box service also read (each side's tests fail
+/// on drift).
+fn default_sandbox_size_rates() -> Option<SizeRates> {
+    Some(SizeRates {
+        small: 25_000,
+        default: 40_000,
+        large: 70_000,
+    })
+}
+
+/// Every Box start is billed for at least this many seconds.
+pub const BOX_MINIMUM_SECONDS_PER_START: u64 = 300;
+/// A Box run is billed in whole minutes, rounded up.
+pub const BOX_BILLING_ROUNDING_SECONDS: u64 = 60;
+
+/// Billable seconds of a Box run that has been metered for `elapsed` seconds:
+/// rounded up to whole minutes and, when the run's first tick was seen
+/// (`minimum`), never less than the per-start minimum. A run first seen
+/// mid-way (a Gateway restart) already paid its minimum before the restart.
+pub fn box_billable_seconds(elapsed: u64, minimum: bool) -> u64 {
+    let rounded = elapsed
+        .div_ceil(BOX_BILLING_ROUNDING_SECONDS)
+        .saturating_mul(BOX_BILLING_ROUNDING_SECONDS);
+    if minimum {
+        rounded.max(BOX_MINIMUM_SECONDS_PER_START)
+    } else {
+        rounded
+    }
+}
+
+/// `sandbox_size_rates` from TOML: a `{small, default, large}` table, or the
+/// string `"off"` (or `"none"`) for per-resource pricing.
+fn deserialize_sandbox_size_rates<'de, D>(deserializer: D) -> Result<Option<SizeRates>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        Table(SizeRates),
+        Text(String),
+    }
+    match Raw::deserialize(deserializer)? {
+        Raw::Table(rates) => rates
+            .validated()
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        Raw::Text(text) if SizeRates::is_off(&text) => Ok(None),
+        Raw::Text(text) => SizeRates::parse(&text)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
 }
 
 // ─── Sandbox rate defaults (nano-USD per unit-second) ────────────────────────
@@ -825,6 +1118,7 @@ impl Default for CreditsConfig {
             internal_secret: None,
             markup_bps: 0,
             provider_billing: HashMap::new(),
+            web_service_prices: std::collections::BTreeMap::new(),
             cost_per_tool_call_micro_usd: default_cost_per_tool_call_micro_usd(),
             cost_per_gpu_second_micro_usd: default_cost_per_gpu_second_micro_usd(),
             cost_per_image_micro_usd: default_cost_per_image_micro_usd(),
@@ -838,6 +1132,7 @@ impl Default for CreditsConfig {
             min_reserve_micro_usd: default_min_reserve_micro_usd(),
             timeout_ms: default_credits_timeout_ms(),
             fail_closed: true,
+            top_up_url: default_credits_top_up_url(),
             // Delegated, not repeated: these must equal the serde `default = "…"`
             // fns on the same fields or an absent `[credits]` table and a present
             // one that omits the rates would bill differently.
@@ -853,6 +1148,8 @@ impl Default for CreditsConfig {
             cost_per_sandbox_windows_vcpu_second_nano_usd: default_sandbox_windows_vcpu_rate(),
             sandbox_free_storage_gib: default_sandbox_free_storage_gib(),
             sandbox_markup_bps: default_sandbox_markup_bps(),
+            sandbox_size_rates: default_sandbox_size_rates(),
+            box_minimum_waiver_public_key: None,
         }
     }
 }
@@ -992,7 +1289,7 @@ impl CreditsConfig {
             anyhow::bail!(
                 "credits are ENABLED but GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD is 0, \
 so every Composio tool call bills the customer nothing while Composio still charges us. \
-Unset it to take the at-cost default (300 = $0.30/1k), or set \
+Unset it to take the at-cost default (500 = $0.50/1k, Composio's managed-app rate), or set \
 GATEWAY_CREDITS_ALLOW_FREE_MODALITIES=1 to give tool calls away on purpose."
             );
         }
@@ -1085,13 +1382,16 @@ GATEWAY_CREDITS_ALLOW_FREE_MODALITIES=1 to give videos away on purpose."
                 return (micro.max(0.0) as u64, false);
             }
         }
-        // Audio and Voice Recognition have no provider-reported cost or compute-
-        // time path, so their configured per-call rate is the actual price rather
-        // than an estimate. Image and video are the modalities where this flat
-        // amount is a fallback.
+        // Speech synthesis and voice recognition have no provider-reported cost
+        // or compute-time path, so their configured per-call rate is the actual
+        // price rather than an estimate. Image, video and generated audio are the
+        // modalities where this flat amount is a fallback.
         (
             self.media_cost_micro_usd(modality),
-            matches!(modality, Modality::Image | Modality::Video),
+            matches!(
+                modality,
+                Modality::Image | Modality::Video | Modality::Audio
+            ),
         )
     }
 
@@ -1116,7 +1416,11 @@ GATEWAY_CREDITS_ALLOW_FREE_MODALITIES=1 to give videos away on purpose."
     fn media_cost_micro_usd(&self, modality: &Modality) -> u64 {
         match modality {
             Modality::Image => self.cost_per_image_micro_usd,
-            Modality::Video => self.cost_per_video_micro_usd,
+            // Generated audio is a queued cloud job priced like video: from the
+            // provider's reported compute time first, with the video flat rate as
+            // the marked fallback. Reusing that rate keeps the startup gate's
+            // non-zero guarantee instead of adding an unguarded new knob.
+            Modality::Video | Modality::Audio => self.cost_per_video_micro_usd,
             Modality::Tts => self.cost_per_tts_micro_usd,
             Modality::Stt => self.cost_per_stt_micro_usd,
             Modality::Chat => 0,
@@ -1200,6 +1504,41 @@ GATEWAY_CREDITS_ALLOW_FREE_MODALITIES=1 to give videos away on purpose."
             .saturating_add(BPS_DENOM / 2)
             / BPS_DENOM
     }
+
+    /// The size-rate debit (micro-USD) for `seconds` of a Box of `size`, or
+    /// `None` when no size rates are configured. Round-half-up, saturating,
+    /// with no sandbox markup: the size rate is the customer price.
+    pub fn sandbox_size_debit_micro(&self, size: SandboxSize, seconds: u64) -> Option<u64> {
+        const SECONDS_PER_HOUR: u64 = 3600;
+        let rate = self.sandbox_size_rates?.micro_usd_per_hour(size);
+        Some(
+            rate.saturating_mul(seconds)
+                .saturating_add(SECONDS_PER_HOUR / 2)
+                / SECONDS_PER_HOUR,
+        )
+    }
+}
+
+/// `GATEWAY_CREDITS_SANDBOX_SIZE_RATES` over the configured table: blank keeps
+/// it, `off`/`none` switches size pricing off, and a table replaces it. A
+/// malformed table keeps the configured one (it never turns billing off).
+fn sandbox_size_rates_from_env(raw: &str, configured: Option<SizeRates>) -> Option<SizeRates> {
+    if raw.trim().is_empty() {
+        return configured;
+    }
+    if SizeRates::is_off(raw) {
+        return None;
+    }
+    match SizeRates::parse(raw) {
+        Ok(rates) => Some(rates),
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                "GATEWAY_CREDITS_SANDBOX_SIZE_RATES is invalid; keeping the configured Box size rates"
+            );
+            configured
+        }
+    }
 }
 
 /// Unified search-based tool loop (#475, P2). The gateway injects a `tool_search`
@@ -1225,6 +1564,14 @@ pub struct ToolsConfig {
     /// How many top search hits to describe + inject per `tool_search`. Default: 5.
     #[serde(default = "default_describe_top_n")]
     pub describe_top_n: usize,
+    /// How many contiguous read-only tool calls of one model step the unified
+    /// loop runs at once. Only tools Core describes as read-only (an MCP
+    /// `readOnlyHint: true` without `destructiveHint: true`) qualify; every other
+    /// call, `tool_search`, and denied calls run one at a time. Results are
+    /// always appended in call order. Default: 4. `1` (or `0`) disables
+    /// concurrency; values above 8 are clamped to 8.
+    #[serde(default = "default_tools_parallel_reads")]
+    pub parallel_reads: usize,
     /// Named tool-policy profiles (presets) layered ABOVE the per-request
     /// `x-ryu-tools` allowlist, modeled on OpenClaw's profile layering
     /// (profile → allow/deny → sandbox, checked in that order). A request
@@ -1265,6 +1612,9 @@ fn default_tools_max_rounds() -> u8 {
 fn default_describe_top_n() -> usize {
     5
 }
+fn default_tools_parallel_reads() -> usize {
+    4
+}
 
 impl Default for ToolsConfig {
     fn default() -> Self {
@@ -1273,6 +1623,7 @@ impl Default for ToolsConfig {
             always_on: Vec::new(),
             max_rounds: default_tools_max_rounds(),
             describe_top_n: default_describe_top_n(),
+            parallel_reads: default_tools_parallel_reads(),
             profiles: HashMap::new(),
         }
     }
@@ -1420,12 +1771,9 @@ impl ControlPlaneConfig {
     }
 }
 
-/// Composio's current standard rate, $0.30 per 1000 executions, in micro-USD
-/// per call. Billed straight through at cost. Managed-app and premium-tool
-/// contracts can override this deployment value when their provider invoice
-/// is higher.
+/// Managed-app base rate. Direct execution and other add-ons are separate.
 fn default_cost_per_tool_call_micro_usd() -> u64 {
-    300
+    500
 }
 
 /// Replicate's published Nvidia L40S rate, $0.000975/sec, in micro-USD.
@@ -1511,7 +1859,210 @@ fn default_bind() -> String {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct EgressConfig {
+    /// Pool name to proxy endpoints. Pool names are local operator config.
+    #[serde(default)]
+    pub pools: HashMap<String, EgressProxyPoolConfig>,
+    /// Provider registry ID to pool name. Only assigned providers use a pool;
+    /// other providers retain their current direct/ambient-proxy behavior.
+    #[serde(default)]
+    pub assignments: HashMap<String, String>,
+}
+
+impl EgressConfig {
+    fn is_empty(&self) -> bool {
+        self.pools.is_empty() && self.assignments.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EgressProxyPoolConfig {
+    /// An explicit direct client participating in rotation, with environment
+    /// proxies disabled. Opt-in: otherwise the pool uses proxy endpoints only.
+    #[serde(default)]
+    pub include_direct: bool,
+    #[serde(default)]
+    pub direct_fallback_only: bool,
+    pub endpoints: Vec<EgressProxyEndpointConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EgressProxyEndpointConfig {
+    pub id: String,
+    pub url: String,
+    #[serde(default = "default_egress_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub priority: u16,
+    /// Environment variables containing proxy Basic credentials. Both names
+    /// must be present together. Values never enter serialized Gateway config.
+    pub username_env: Option<String>,
+    pub password_env: Option<String>,
+}
+
+fn default_egress_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct EdgeTtsConfig {
+    #[serde(default)]
+    pub anonymous_consumer_opt_in: bool,
+}
+
+/// Anonymous consumer Google Translate speech is a separate explicit opt-in.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct GoogleTranslateTtsConfig {
+    #[serde(default)]
+    pub anonymous_consumer_opt_in: bool,
+}
+
+/// Explicit, currently valid Google Cloud TTS bearer tokens and quota projects.
+/// A supplied token is never presented as an OAuth login or refresh source.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoogleTtsProviderConfig {
+    pub accounts: Vec<GoogleTtsAccountConfig>,
+}
+
+impl std::fmt::Debug for GoogleTtsProviderConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GoogleTtsProviderConfig")
+            .field("account_count", &self.accounts.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoogleTtsAccountConfig {
+    pub access_token: String,
+    pub quota_project: String,
+    #[serde(default)]
+    pub expires_at_unix_secs: Option<u64>,
+}
+
+impl std::fmt::Debug for GoogleTtsAccountConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GoogleTtsAccountConfig")
+            .field("access_token", &"[REDACTED]")
+            .field("quota_project", &self.quota_project)
+            .field("expires_at_unix_secs", &self.expires_at_unix_secs)
+            .finish()
+    }
+}
+
+/// Explicit AWS credentials for native Polly synthesis, sharing one region.
+/// Ambient AWS credential chains are deliberately excluded.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PollyProviderConfig {
+    pub region: String,
+    pub accounts: Vec<PollyAccountConfig>,
+}
+
+impl std::fmt::Debug for PollyProviderConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PollyProviderConfig")
+            .field("region", &self.region)
+            .field("account_count", &self.accounts.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PollyAccountConfig {
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    #[serde(default)]
+    pub session_token: Option<String>,
+    #[serde(default)]
+    pub expires_at_unix_secs: Option<u64>,
+}
+
+impl std::fmt::Debug for PollyAccountConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PollyAccountConfig")
+            .field("access_key_id", &"[REDACTED]")
+            .field("secret_access_key", &"[REDACTED]")
+            .field("session_token", &"[REDACTED]")
+            .field("expires_at_unix_secs", &self.expires_at_unix_secs)
+            .finish()
+    }
+}
+
+fn deserialize_account_drain_thresholds<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let thresholds = HashMap::<String, u8>::deserialize(deserializer)?;
+    for (provider, percent) in &thresholds {
+        if !ryu_gw_credentials::supports_chat_account_routing(provider) {
+            return Err(D::Error::custom(format!(
+                "account drain threshold is not supported for {provider}"
+            )));
+        }
+        if !(1..=100).contains(percent) {
+            return Err(D::Error::custom(format!(
+                "account drain threshold for {provider} must be 1–100"
+            )));
+        }
+    }
+    Ok(thresholds)
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ProvidersConfig {
+    /// Explicit opt-in to the unofficial anonymous Edge consumer speech service.
+    #[serde(default)]
+    pub edge_tts: Option<EdgeTtsConfig>,
+    pub google_translate_tts: Option<GoogleTranslateTtsConfig>,
+    /// Direct Google Cloud Text-to-Speech with supplied, scoped OAuth tokens.
+    #[serde(default)]
+    pub google_tts: Option<GoogleTtsProviderConfig>,
+    /// Direct Amazon Polly with explicitly supplied SigV4 credentials.
+    #[serde(default)]
+    pub polly: Option<PollyProviderConfig>,
+    /// Authored direct web accounts; never sourced from ambient/plugin credentials.
+    #[serde(
+        default,
+        deserialize_with = "crate::web_config::deserialize_web_providers"
+    )]
+    pub web: crate::web_config::WebProviderConfigs,
+    /// Explicit native source choice. Missing entries preserve legacy imports.
+    /// A false entry also prevents environment resurrection after an authored clear.
+    #[serde(
+        default,
+        rename = "environmentImports",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub environment_imports: HashMap<String, bool>,
+    /// Non-secret settings keyed by provider and stable credential identity.
+    #[serde(default, rename = "accountPolicies")]
+    pub account_policies:
+        HashMap<String, HashMap<String, ryu_gw_credentials::ProviderAccountPolicy>>,
+    /// New-session account selection for providers with measured quota domains.
+    #[serde(
+        default,
+        rename = "accountStrategies",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub account_strategies: HashMap<String, ryu_gw_providers::AccountSelectionStrategy>,
+    /// Per-provider fill-first drain point (used quota percent). Omitted means 80%.
+    #[serde(
+        default,
+        rename = "accountDrainThresholds",
+        skip_serializing_if = "HashMap::is_empty",
+        deserialize_with = "deserialize_account_drain_thresholds"
+    )]
+    pub account_drain_thresholds: HashMap<String, u8>,
     pub openai: Option<OpenAiProviderConfig>,
     pub anthropic: Option<AnthropicProviderConfig>,
     pub local: Option<LocalProviderConfig>,
@@ -1542,6 +2093,13 @@ pub struct ProvidersConfig {
     /// branch names the provider in its warning.
     pub classify: Option<ClassifyProviderConfig>,
     pub openrouter: Option<OpenRouterProviderConfig>,
+    /// LiteLLM proxy (https://docs.litellm.ai/docs/simple_proxy) — an
+    /// operator-run OpenAI-compatible router. Registered as the `litellm`
+    /// provider and selectable as the routing layer (`backends.router =
+    /// "litellm"`). Opt-in: present only when configured or when
+    /// `LITELLM_API_KEY` is set.
+    #[serde(default)]
+    pub litellm: Option<LiteLlmProviderConfig>,
     pub core: Option<CoreProviderConfig>,
     pub modal: Option<ModalProviderConfig>,
     pub genai: Option<GenAiProviderConfig>,
@@ -1552,6 +2110,12 @@ pub struct ProvidersConfig {
     /// Fal (https://fal.ai) — cloud image/video/audio generation via a queued
     /// request API (submit → poll status → result). Opt-in.
     pub fal: Option<FalProviderConfig>,
+    pub recraft: Option<RecraftProviderConfig>,
+    pub stability: Option<StabilityProviderConfig>,
+    pub bfl: Option<BflProviderConfig>,
+    pub minimax: Option<MiniMaxProviderConfig>,
+    pub runway: Option<RunwayProviderConfig>,
+    pub topaz: Option<TopazProviderConfig>,
     /// Cloudflare Workers AI — the cheap open-model supply behind the
     /// `cloudflare` credit pool (see [`crate::credit_pools`]). OpenAI-compatible
     /// dialect, so it needs no impl of its own; see the registration in
@@ -1583,6 +2147,439 @@ pub struct ProvidersConfig {
     /// start burning donated credit that the user is already paying for
     /// themselves.
     pub openai_credits: Option<OpenAiProviderConfig>,
+    /// Ryu's OWN first-party Anthropic account behind the `anthropic-credits`
+    /// credit pool — a second slot beside [`Self::anthropic`] for the same
+    /// reason `openai_credits` sits beside `openai`. The `anthropic` slot carries
+    /// a caller's own key and stays untagged; this slot carries Ryu's key, so
+    /// every request it serves debits a pool-restricted grant and burns down
+    /// Ryu's own allowance instead of OpenRouter credit bought at retail.
+    #[serde(default)]
+    pub anthropic_credits: Option<AnthropicProviderConfig>,
+    /// Direct OpenAI-compatible upstreams whose endpoint and credential are
+    /// explicitly configured. These are distinct provider IDs for routing,
+    /// quota, audit, and cache isolation; no third-party router is involved.
+    #[serde(default)]
+    pub compatible: HashMap<String, CompatibleProviderConfig>,
+    /// Vercel AI Gateway, the Ryu-held aggregator lane (managed guardrails
+    /// spec 08). Registered only when `resale_permission` records written
+    /// approval (`approved:<reference>`); see
+    /// [`ryu_gw_providers::vercel`]. Absent by default, and no environment
+    /// variable creates it.
+    #[serde(default)]
+    pub vercel: Option<VercelProviderConfig>,
+    pub cohere: Option<CohereProviderConfig>,
+    pub deepgram: Option<DeepgramProviderConfig>,
+    pub assemblyai: Option<AssemblyAiProviderConfig>,
+    pub elevenlabs: Option<ElevenLabsProviderConfig>,
+    pub inworld: Option<InworldProviderConfig>,
+}
+
+impl ProvidersConfig {
+    pub fn account_keys(&self, provider: &str) -> Vec<String> {
+        match provider {
+            "openai" => self
+                .openai
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "anthropic" => self
+                .anthropic
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "openrouter" => self
+                .openrouter
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "modal" => self
+                .modal
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "cohere" => self
+                .cohere
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "deepgram" => self
+                .deepgram
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "assemblyai" => self
+                .assemblyai
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "elevenlabs" => self
+                .elevenlabs
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "inworld" => self
+                .inworld
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "replicate" => self
+                .replicate
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "bfl" => self.bfl.as_ref().map(|c| c.all_keys()).unwrap_or_default(),
+            "runway" => self
+                .runway
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "topaz" => self
+                .topaz
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "minimax" => self
+                .minimax
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "stability" => self
+                .stability
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "recraft" => self
+                .recraft
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "fal" => self.fal.as_ref().map(|c| c.all_keys()).unwrap_or_default(),
+            "litellm" => self
+                .litellm
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "cloudflare" => self
+                .cloudflare
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "bedrock" => self
+                .bedrock
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "vertex" => self
+                .vertex
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "openai-credits" => self
+                .openai_credits
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "anthropic-credits" => self
+                .anthropic_credits
+                .as_ref()
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+            "gemini" => self
+                .genai
+                .as_ref()
+                .and_then(|c| c.accounts.get("gemini"))
+                .map(GenAiAccountConfig::all_keys)
+                .unwrap_or_default(),
+            id if ryu_gw_credentials::sdk_provider_by_id(id).is_some() => self
+                .genai
+                .as_ref()
+                .and_then(|config| {
+                    ryu_gw_credentials::sdk_provider_by_id(id)
+                        .and_then(|descriptor| config.accounts.get(descriptor.kind))
+                })
+                .map(GenAiAccountConfig::all_keys)
+                .unwrap_or_default(),
+            id => self
+                .compatible
+                .get(id)
+                .map(|c| c.all_keys())
+                .unwrap_or_default(),
+        }
+    }
+
+    pub fn policies_for(&self, provider: &str) -> Vec<ryu_gw_credentials::ProviderAccountPolicy> {
+        self.account_keys(provider)
+            .iter()
+            .map(|key| {
+                self.account_policies
+                    .get(provider)
+                    .and_then(|settings| {
+                        settings.get(&ryu_gw_credentials::provider_account_id(provider, key))
+                    })
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RunwayProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "runway_base_url")]
+    pub base_url: String,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TopazProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "topaz_base_url")]
+    pub base_url: String,
+}
+impl TopazProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+fn topaz_base_url() -> String {
+    "https://api.topazlabs.com".to_owned()
+}
+impl RunwayProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+fn runway_base_url() -> String {
+    "https://api.dev.runwayml.com/v1".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MiniMaxProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "minimax_base_url")]
+    pub base_url: String,
+}
+impl MiniMaxProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+fn minimax_base_url() -> String {
+    "https://api.minimax.io/v1".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RecraftProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "recraft_base_url")]
+    pub base_url: String,
+}
+impl RecraftProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+fn recraft_base_url() -> String {
+    "https://external.api.recraft.ai/v1".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct BflProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "bfl_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_bfl_poll_interval")]
+    pub poll_interval_ms: u64,
+    #[serde(default = "default_bfl_poll_timeout")]
+    pub poll_timeout_secs: u64,
+}
+impl BflProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+fn bfl_base_url() -> String {
+    "https://api.bfl.ai/v1".into()
+}
+fn default_bfl_poll_interval() -> u64 {
+    500
+}
+fn default_bfl_poll_timeout() -> u64 {
+    180
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct StabilityProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "stability_base_url")]
+    pub base_url: String,
+}
+impl StabilityProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+fn stability_base_url() -> String {
+    "https://api.stability.ai/v2beta".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AssemblyAiProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "assemblyai_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_assemblyai_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    #[serde(default = "default_assemblyai_poll_timeout_secs")]
+    pub poll_timeout_secs: u64,
+}
+
+impl AssemblyAiProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+
+fn assemblyai_base_url() -> String {
+    "https://api.assemblyai.com".to_owned()
+}
+
+fn default_assemblyai_poll_interval_ms() -> u64 {
+    1500
+}
+
+fn default_assemblyai_poll_timeout_secs() -> u64 {
+    180
+}
+
+#[cfg(test)]
+mod assemblyai_config_tests {
+    use super::*;
+
+    #[test]
+    fn core_key_write_parses_with_safe_inworld_defaults_and_multiple_keys() {
+        let providers: ProvidersConfig = toml::from_str(
+            "[inworld]\napi_key = \"primary\"\napi_keys = [\"primary\", \"extra\"]\n",
+        )
+        .unwrap();
+        let config = providers.inworld.unwrap();
+        assert_eq!(config.base_url, "https://api.inworld.ai");
+        assert_eq!(config.all_keys(), vec!["primary", "extra"]);
+    }
+
+    #[test]
+    fn core_key_write_parses_with_safe_assemblyai_defaults() {
+        let providers: ProvidersConfig =
+            toml::from_str("[assemblyai]\napi_key = \"test-key\"\n").unwrap();
+        let config = providers.assemblyai.unwrap();
+        assert_eq!(config.base_url, "https://api.assemblyai.com");
+        assert_eq!(config.poll_interval_ms, 1500);
+        assert_eq!(config.poll_timeout_secs, 180);
+        assert_eq!(config.all_keys(), vec!["test-key"]);
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ElevenLabsProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "elevenlabs_base_url")]
+    pub base_url: String,
+}
+
+impl ElevenLabsProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+
+fn elevenlabs_base_url() -> String {
+    "https://api.elevenlabs.io".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct InworldProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "inworld_base_url")]
+    pub base_url: String,
+}
+
+impl InworldProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+
+fn inworld_base_url() -> String {
+    "https://api.inworld.ai".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DeepgramProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "deepgram_base_url")]
+    pub base_url: String,
+}
+
+impl DeepgramProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+
+fn deepgram_base_url() -> String {
+    "https://api.deepgram.com".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CohereProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "cohere_base_url")]
+    pub base_url: String,
+}
+
+impl CohereProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+
+fn cohere_base_url() -> String {
+    "https://api.cohere.com".to_owned()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompatibleProviderConfig {
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    pub base_url: String,
+}
+
+impl CompatibleProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1727,6 +2724,25 @@ fn all_provider_keys(primary: &str, extra: &[String]) -> Vec<String> {
 pub struct LocalProviderConfig {
     #[serde(default = "local_base_url")]
     pub base_url: String,
+    /// Requested model name → name the local engine actually serves. Core
+    /// publishes these in `RYU_LOCAL_MODEL_ROUTES` when it bakes per-model launch
+    /// settings into a derived Ollama model. Derived runtime state, never read
+    /// from or written to `gateway.toml`.
+    #[serde(skip)]
+    pub model_routes: HashMap<String, String>,
+}
+
+/// Parse `RYU_LOCAL_MODEL_ROUTES` (a JSON object of string → string). Malformed
+/// input yields no routes, so a bad value degrades to serving the base model.
+pub fn parse_local_model_routes(raw: &str) -> HashMap<String, String> {
+    serde_json::from_str::<HashMap<String, String>>(raw)
+        .map(|routes| {
+            routes
+                .into_iter()
+                .filter(|(from, to)| !from.trim().is_empty() && !to.trim().is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn local_base_url() -> String {
@@ -1900,6 +2916,11 @@ pub(crate) const VERTEX_PROVIDER_ID: &str = "vertex";
 /// on every BYOK request would silently debit the donated grant.
 pub(crate) const OPENAI_CREDITS_PROVIDER_ID: &str = "openai-credits";
 
+/// Registry id of Ryu's own first-party Anthropic supply. Suffixed for the same
+/// reason as [`OPENAI_CREDITS_PROVIDER_ID`]: `"anthropic"` is the untagged BYOK
+/// slot and must never draw a pool-restricted grant.
+pub(crate) const ANTHROPIC_CREDITS_PROVIDER_ID: &str = "anthropic-credits";
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenRouterProviderConfig {
     pub api_key: String,
@@ -1913,15 +2934,11 @@ pub struct OpenRouterProviderConfig {
     pub site_url: String,
     #[serde(default = "openrouter_site_name")]
     pub site_name: String,
-    /// `provider.data_collection` policy sent on every request: "deny" uses only
-    /// providers that do not retain/train on prompts, "allow" permits them.
-    /// Empty (the default) omits the field entirely, leaving OpenRouter's own
-    /// default and — crucially — NOT overriding a BYOK caller's own routing
-    /// intent. Managed Ryu Cloud nodes set this to "deny" for privacy-by-default
-    /// (via `OPENROUTER_DATA_COLLECTION`, wired in Core's gateway spawn env).
+    /// Legacy configuration input. The OpenRouter adapter always sends "deny"
+    /// for every plan, regardless of saved caller or operator opt-outs.
     #[serde(default = "openrouter_data_collection")]
     pub data_collection: String,
-    /// Require zero-data-retention endpoints (`provider.zdr`). Default off.
+    /// Legacy configuration input. The OpenRouter adapter always requires ZDR.
     #[serde(default)]
     pub zdr: bool,
     /// Provider sort preference: "price" | "throughput" | "latency". Empty → omit.
@@ -1954,12 +2971,47 @@ impl OpenRouterProviderConfig {
 fn openrouter_base_url() -> String {
     "https://openrouter.ai/api/v1".to_string()
 }
+
+/// An operator-run LiteLLM proxy. The endpoint is deployment configuration
+/// (file or `LITELLM_BASE_URL`), never a caller-chosen URL; the virtual or
+/// master key is the provider credential.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LiteLlmProviderConfig {
+    pub api_key: String,
+    /// Additional virtual keys for round-robin rotation. See
+    /// [`OpenAiProviderConfig::api_keys`].
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    #[serde(default = "litellm_base_url")]
+    pub base_url: String,
+}
+
+impl LiteLlmProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+
+/// LiteLLM's documented default proxy address.
+pub(crate) fn litellm_base_url() -> String {
+    "http://127.0.0.1:4000/v1".to_string()
+}
 fn openrouter_site_url() -> String {
-    "https://github.com/ryuhq/ryu".to_string()
+    "https://ryuhq.com".to_string()
 }
 fn openrouter_site_name() -> String {
-    "ryu-gateway".to_string()
+    "Ryu".to_string()
 }
+
+#[cfg(test)]
+mod openrouter_attribution_tests {
+    #[test]
+    fn default_site_identity_names_the_ryu_app() {
+        assert_eq!(super::openrouter_site_url(), "https://ryuhq.com");
+        assert_eq!(super::openrouter_site_name(), "Ryu");
+    }
+}
+
 fn openrouter_data_collection() -> String {
     // Empty → the `provider.data_collection` field is omitted, so out-of-the-box
     // behaviour is unchanged and a BYOK caller's own routing is never overridden.
@@ -1990,26 +3042,65 @@ fn core_base_url() -> String {
 pub struct ModalProviderConfig {
     /// The Modal proxy-auth token (sent as a bearer). Modal apps gate access
     /// with a token; never hardcoded.
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
     /// The deployed Modal app's OpenAI-compatible base URL (its `*.modal.run`
     /// `/v1` endpoint). Required — no sensible default exists.
     pub base_url: String,
 }
 
-/// `genai` multi-provider backend. Covers the *native-format* providers the
-/// gateway does not implement by hand (primarily Gemini), so they can be added
-/// by config rather than by writing a bespoke translator per provider. The
-/// OpenAI-compatible ecosystem is still served by the byte-passthrough
-/// providers (OpenAI, OpenRouter); this is for the native-protocol long tail.
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct GenAiProviderConfig {
-    /// API keys keyed by the lowercase `genai` adapter kind, e.g. `"gemini"`,
-    /// `"groq"`, `"xai"`, `"deepseek"`, `"cohere"`. Looked up per request by the
-    /// resolved provider. If a kind has no key here, `genai` falls back to its
-    /// own default (env-var) auth for that provider.
-    #[serde(default)]
-    pub keys: std::collections::HashMap<String, String>,
+impl ModalProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+            .into_iter()
+            .filter(|key| !key.is_empty())
+            .collect()
+    }
 }
+
+/// The Vercel AI Gateway lane. Every attempt spends Ryu's Vercel credit, so
+/// the slot needs a recorded written resale permission before the registry
+/// builds it (spec 08.2 and 08.4). The default decision is none: the lane is off.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct VercelProviderConfig {
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+    /// OpenAI-compatible Chat Completions base URL.
+    #[serde(default = "vercel_chat_base_url")]
+    pub base_url: String,
+    /// Anthropic-compatible Messages base URL, used for `anthropic/*` models.
+    #[serde(default = "vercel_messages_base_url")]
+    pub messages_base_url: String,
+    /// The recorded resale decision. Only `approved:<written reference>`
+    /// registers the lane; anything else, absent included, keeps it off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resale_permission: Option<String>,
+}
+
+impl VercelProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+            .into_iter()
+            .filter(|key| !key.trim().is_empty())
+            .collect()
+    }
+}
+
+fn vercel_chat_base_url() -> String {
+    ryu_gw_providers::vercel::VERCEL_CHAT_BASE_URL.to_owned()
+}
+
+fn vercel_messages_base_url() -> String {
+    ryu_gw_providers::vercel::VERCEL_MESSAGES_BASE_URL.to_owned()
+}
+
+pub use ryu_gw_credentials::{
+    GenAiAccountConfig, GenAiProviderConfig, ResolvedSdkKey, SdkKeySource,
+};
 
 /// Replicate (https://replicate.com) — cloud generative media over an async
 /// prediction API. A request creates a prediction (`POST /predictions` with a
@@ -2021,6 +3112,8 @@ pub struct GenAiProviderConfig {
 pub struct ReplicateProviderConfig {
     /// Replicate API token (sent as `Authorization: Bearer <token>`).
     pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
     #[serde(default = "replicate_base_url")]
     pub base_url: String,
     /// Poll interval in milliseconds while a prediction is running. Default: 1500.
@@ -2036,6 +3129,12 @@ fn replicate_base_url() -> String {
     "https://api.replicate.com/v1".to_string()
 }
 
+impl ReplicateProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
+}
+
 /// Fal (https://fal.ai) — cloud generative media over a queued request API. A
 /// request submits to `https://queue.fal.run/{model}` and receives a
 /// `request_id` + status/response URLs; the gateway polls the status URL until
@@ -2045,6 +3144,8 @@ fn replicate_base_url() -> String {
 pub struct FalProviderConfig {
     /// Fal API key (sent as `Authorization: Key <key>`).
     pub api_key: String,
+    #[serde(default)]
+    pub api_keys: Vec<String>,
     /// Queue base URL (model id is appended per request). Default:
     /// `https://queue.fal.run`.
     #[serde(default = "fal_base_url")]
@@ -2059,6 +3160,12 @@ pub struct FalProviderConfig {
 
 fn fal_base_url() -> String {
     "https://queue.fal.run".to_string()
+}
+
+impl FalProviderConfig {
+    pub fn all_keys(&self) -> Vec<String> {
+        all_provider_keys(&self.api_key, &self.api_keys)
+    }
 }
 
 fn default_media_poll_interval_ms() -> u64 {
@@ -2086,6 +3193,11 @@ pub enum Modality {
     /// Video generation. Unlike the other modalities this is job-based: a submit
     /// creates a job the client polls, because cloud video runs for minutes.
     Video,
+    /// Audio generation: music and sound effects from a prompt (plus optional
+    /// reference media). Job-based like video, because cloud music models run
+    /// for tens of seconds to minutes. Distinct from `Tts`, which synthesizes
+    /// speech from text through a synchronous call.
+    Audio,
 }
 
 impl Modality {
@@ -2096,12 +3208,17 @@ impl Modality {
             Modality::Tts => "tts",
             Modality::Stt => "stt",
             Modality::Video => "video",
+            Modality::Audio => "audio",
         }
     }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct RoutingConfig {
+    #[serde(default)]
+    pub web: crate::web_config::WebRoutingConfig,
+    #[serde(default)]
+    pub web_pools: std::collections::BTreeMap<String, crate::web_config::WebPoolConfig>,
     #[serde(default)]
     pub default_provider: ProviderId,
 
@@ -2122,6 +3239,13 @@ pub struct RoutingConfig {
     #[serde(default)]
     pub provider_tiers: HashMap<ProviderId, u8>,
 
+    /// Named direct-provider chat pools. A route points to `pool:<name>`; each
+    /// member carries the exact model accepted by that upstream. Pool selection
+    /// happens before budgeting and cache lookup, so those stages see a real
+    /// provider/model pair rather than the alias.
+    #[serde(default)]
+    pub provider_pools: HashMap<String, ProviderPoolConfig>,
+
     /// Eval-driven (A/B) routing. When enabled, requests are split across a set
     /// of candidate providers and the winner is biased toward whichever candidate
     /// has the better rolling eval score (see `apps/gateway/src/evals`).
@@ -2141,6 +3265,108 @@ pub struct RoutingConfig {
     /// Off by default; fully swappable.
     #[serde(default)]
     pub smart_routing: SmartRoutingConfig,
+}
+
+pub use ryu_gw_router::pool::PoolStrategy as ProviderPoolStrategy;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProviderPoolConfig {
+    #[serde(default)]
+    pub strategy: ProviderPoolStrategy,
+    /// Number of new round-robin session assignments before advancing.
+    #[serde(default = "default_pool_sticky_limit")]
+    pub sticky_limit: u8,
+    /// Maximum delay for observed member cooldowns before selection fails.
+    #[serde(default)]
+    pub wait_for_cooldown_ms: u64,
+    /// Bounds for multi-target inference. Every target still uses normal Gateway admission.
+    #[serde(default)]
+    pub execution: PoolExecutionConfig,
+    /// Concrete synthesis target required by fusion; it cannot point to a pool.
+    #[serde(default)]
+    pub judge: Option<PoolJudgeConfig>,
+    #[serde(default)]
+    pub auto_weights: Option<ryu_gw_router::pool::AutoScoringWeights>,
+    pub members: Vec<ProviderPoolMemberConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoolExecutionConfig {
+    #[serde(default = "default_pool_leg_timeout_ms")]
+    pub leg_timeout_ms: u64,
+    #[serde(default = "default_pool_total_timeout_ms")]
+    pub total_timeout_ms: u64,
+    #[serde(default = "default_pool_max_output_bytes")]
+    pub max_output_bytes: usize,
+    #[serde(default = "default_pool_quorum")]
+    pub quorum: usize,
+    #[serde(default = "default_pool_grace_ms")]
+    pub grace_ms: u64,
+}
+
+impl Default for PoolExecutionConfig {
+    fn default() -> Self {
+        Self {
+            leg_timeout_ms: default_pool_leg_timeout_ms(),
+            total_timeout_ms: default_pool_total_timeout_ms(),
+            max_output_bytes: default_pool_max_output_bytes(),
+            quorum: default_pool_quorum(),
+            grace_ms: default_pool_grace_ms(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoolJudgeConfig {
+    pub provider: ProviderId,
+    pub model: String,
+}
+
+fn default_pool_leg_timeout_ms() -> u64 {
+    30_000
+}
+fn default_pool_total_timeout_ms() -> u64 {
+    120_000
+}
+fn default_pool_max_output_bytes() -> usize {
+    262_144
+}
+fn default_pool_quorum() -> usize {
+    2
+}
+fn default_pool_grace_ms() -> u64 {
+    250
+}
+
+fn default_pool_sticky_limit() -> u8 {
+    1
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProviderPoolMemberConfig {
+    pub provider: ProviderId,
+    pub model: String,
+    #[serde(default)]
+    pub priority: u8,
+    #[serde(default = "default_pool_weight")]
+    pub weight: u16,
+    #[serde(default = "default_pool_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub last_resort: bool,
+    /// Verified or operator-authored model capacity. Unknown remains absent.
+    #[serde(default)]
+    pub context_tokens: Option<u64>,
+}
+
+fn default_pool_weight() -> u16 {
+    1
+}
+
+fn default_pool_enabled() -> bool {
+    true
 }
 
 /// How a routing decision is reached. Shared vocabulary across both routing
@@ -2326,6 +3552,38 @@ pub struct SmartRoutingConfig {
     /// its original model. Default: 4000.
     #[serde(default = "default_smart_routing_timeout_ms")]
     pub timeout_ms: u64,
+
+    /// The auto-routing **model pool**: case-insensitive glob patterns (`*`
+    /// matches any run of characters) that a routed target model must match,
+    /// e.g. `["*claude*", "gpt-*"]`. Empty ⇒ any model. See [`RoutePool`].
+    #[serde(default)]
+    pub allowed_models: Vec<String>,
+
+    /// The auto-routing **provider pool**: provider ids (as resolved by the model
+    /// router — `anthropic`, `openrouter`, a `[providers.compatible.<id>]`
+    /// endpoint, `core` for Core-hosted agents, …) a routed target may resolve
+    /// to. Empty ⇒ any provider. See [`RoutePool`].
+    #[serde(default)]
+    pub allowed_providers: Vec<String>,
+
+    /// Per-agent pools, keyed by agent id: each narrows this node's pool for
+    /// requests attributed to that agent (`x-ryu-agent-id` from a trusted
+    /// forwarder, or a Core-proven `/v1/agents/<id>` route), so it covers ACP
+    /// agents routed through the gateway as well as OpenAI-compatible ones.
+    /// Read from the global config only; an agent's `ryu_smart_route` override
+    /// cannot carry pools for other agents. An agent without an entry routes
+    /// inside the global pool.
+    #[serde(default)]
+    pub agent_pools: std::collections::BTreeMap<String, RoutePool>,
+
+    /// Per-agent routing overrides, keyed by agent id: a whole config that
+    /// replaces this one for requests attributed to that agent (same identity
+    /// as [`Self::agent_pools`]), so it reaches ACP agents routed through the
+    /// gateway as well as OpenAI-compatible ones. Core's request-scoped
+    /// `ryu_smart_route` field, when present, still wins. Read from the global
+    /// config only; an override's own `agent_pools` / `agent_routes` are ignored.
+    #[serde(default)]
+    pub agent_routes: std::collections::BTreeMap<String, SmartRoutingConfig>,
 }
 
 fn default_smart_routing_timeout_ms() -> u64 {
@@ -2409,11 +3667,247 @@ impl Default for SmartRoutingConfig {
             default_model: None,
             cache_by_session: true,
             timeout_ms: default_smart_routing_timeout_ms(),
+            allowed_models: Vec::new(),
+            allowed_providers: Vec::new(),
+            agent_pools: std::collections::BTreeMap::new(),
+            agent_routes: std::collections::BTreeMap::new(),
         }
     }
 }
 
+/// Which targets automatic model routing may choose: a model-pattern list and a
+/// provider-id list, both of which a target must satisfy. An empty list does not
+/// constrain its dimension, so the default pool allows everything.
+///
+/// The pool narrows *routing decisions only*. A model the caller requested
+/// explicitly — and the original model a fail-open router keeps — is governed
+/// by the ordinary model allowlists, not by this pool.
+///
+/// Pools compose by intersection: the global `routing.smart_routing` pool is the
+/// ceiling, and a per-agent pool (`routing.smart_routing.agent_pools`) can only
+/// narrow it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RoutePool {
+    /// Case-insensitive model-id globs; `*` matches any run of characters.
+    #[serde(default)]
+    pub allowed_models: Vec<String>,
+    /// Case-insensitive provider ids.
+    #[serde(default)]
+    pub allowed_providers: Vec<String>,
+}
+
+impl RoutePool {
+    /// Maximum entries per list accepted from a request-scoped override.
+    pub const MAX_ENTRIES: usize = 64;
+    /// Maximum length of one entry accepted from a request-scoped override.
+    pub const MAX_ENTRY_LEN: usize = 256;
+
+    fn entries(list: &[String]) -> impl Iterator<Item = &str> {
+        list.iter()
+            .map(|entry| entry.trim())
+            .filter(|entry| !entry.is_empty())
+    }
+
+    /// Whether this pool constrains nothing (every list is empty or blank).
+    pub fn is_unrestricted(&self) -> bool {
+        Self::entries(&self.allowed_models).next().is_none()
+            && Self::entries(&self.allowed_providers).next().is_none()
+    }
+
+    /// Whether a target `model`, resolved to `provider`, is inside the pool.
+    pub fn allows(&self, model: &str, provider: &str) -> bool {
+        let mut models = Self::entries(&self.allowed_models).peekable();
+        let model_ok =
+            models.peek().is_none() || models.any(|pattern| glob_matches(pattern, model));
+        let mut providers = Self::entries(&self.allowed_providers).peekable();
+        let provider_ok = providers.peek().is_none()
+            || providers.any(|id| id.eq_ignore_ascii_case(provider.trim()));
+        model_ok && provider_ok
+    }
+
+    /// Whether the pool fits the request-scoped override size limits.
+    pub fn within_limits(&self) -> bool {
+        [&self.allowed_models, &self.allowed_providers]
+            .iter()
+            .all(|list| {
+                list.len() <= Self::MAX_ENTRIES
+                    && list.iter().all(|entry| entry.len() <= Self::MAX_ENTRY_LEN)
+            })
+    }
+}
+
+/// Case-insensitive glob match where `*` matches any (possibly empty) run of
+/// characters and every other character matches itself. Linear-time two-pointer
+/// matcher, so a hostile pattern cannot trigger backtracking blowups.
+fn glob_matches(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().flat_map(char::to_lowercase).collect();
+    let text: Vec<char> = text.trim().chars().flat_map(char::to_lowercase).collect();
+    let (mut p, mut t) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while t < text.len() {
+        if p < pattern.len() && pattern[p] == '*' {
+            star = Some((p, t));
+            p += 1;
+        } else if p < pattern.len() && pattern[p] == text[t] {
+            p += 1;
+            t += 1;
+        } else if let Some((star_p, star_t)) = star {
+            p = star_p + 1;
+            t = star_t + 1;
+            star = Some((star_p, star_t + 1));
+        } else {
+            return false;
+        }
+    }
+    pattern[p..].iter().all(|c| *c == '*')
+}
+
+#[cfg(test)]
+mod route_pool_tests {
+    use super::*;
+
+    #[test]
+    fn glob_matching_is_case_insensitive_and_anchored() {
+        assert!(glob_matches("claude-*", "Claude-Sonnet-4-5"));
+        assert!(glob_matches(
+            "*claude*",
+            "openrouter/anthropic/claude-opus-4"
+        ));
+        assert!(glob_matches("gpt-4o", "gpt-4o"));
+        assert!(!glob_matches("gpt-4o", "gpt-4o-mini"));
+        assert!(glob_matches("gpt-*-mini", "gpt-4o-mini"));
+        assert!(!glob_matches("claude-*", "openrouter/claude-x"));
+        assert!(glob_matches("*", "anything"));
+        assert!(glob_matches("a*b*c", "aXXbYYc"));
+        assert!(!glob_matches("a*b*c", "aXXbYY"));
+    }
+
+    #[test]
+    fn pool_lists_combine_and_blank_lists_do_not_constrain() {
+        let open = RoutePool {
+            allowed_models: vec![" ".into()],
+            allowed_providers: Vec::new(),
+        };
+        assert!(open.is_unrestricted());
+        assert!(open.allows("anything", "any"));
+        let pool = RoutePool {
+            allowed_models: vec!["*claude*".into(), "gpt-*".into()],
+            allowed_providers: vec!["OpenRouter".into(), "anthropic".into()],
+        };
+        assert!(pool.allows("claude-sonnet-4-5", "anthropic"));
+        assert!(pool.allows("openrouter/anthropic/claude-opus-4", "openrouter"));
+        assert!(
+            !pool.allows("gpt-4o", "openai"),
+            "provider outside the pool"
+        );
+        assert!(
+            !pool.allows("gemini-2.5-pro", "openrouter"),
+            "model outside the pool"
+        );
+    }
+
+    #[test]
+    fn restriction_drops_rules_and_collapses_tiers() {
+        let config = SmartRoutingConfig {
+            rules: vec![
+                SmartRule {
+                    description: "a".into(),
+                    model: "claude-x".into(),
+                    weight: 1.0,
+                },
+                SmartRule {
+                    description: "b".into(),
+                    model: "gpt-x".into(),
+                    weight: 1.0,
+                },
+            ],
+            default_model: Some("gemini-x".into()),
+            stage_capable_model: "claude-x".into(),
+            stage_efficient_model: "gemini-x".into(),
+            escalation_weak_model: "gemini-x".into(),
+            escalation_strong_model: "llama-x".into(),
+            escalation_judge_model: "judge-x".into(),
+            ..Default::default()
+        };
+        let restricted =
+            config.restricted_to(|model| model.starts_with("claude") || model.starts_with("gpt"));
+        assert_eq!(
+            restricted
+                .rules
+                .iter()
+                .map(|rule| rule.model.as_str())
+                .collect::<Vec<_>>(),
+            ["claude-x", "gpt-x"]
+        );
+        assert_eq!(restricted.default_model, None);
+        assert_eq!(restricted.stage_capable_model, "claude-x");
+        assert_eq!(restricted.stage_efficient_model, "claude-x");
+        assert!(restricted.escalation_weak_model.is_empty());
+        assert!(restricted.escalation_strong_model.is_empty());
+        assert_eq!(
+            restricted.escalation_judge_model, "judge-x",
+            "the judge is not a target"
+        );
+
+        // A router missing a tier does not become active through restriction.
+        let half = SmartRoutingConfig {
+            enabled: true,
+            router_type: ModelRouterType::StageRouter,
+            stage_capable_model: "claude-x".into(),
+            ..Default::default()
+        };
+        assert!(!half.restricted_to(|_| true).is_active());
+    }
+}
+
 impl SmartRoutingConfig {
+    /// This config's own model/provider pool.
+    pub fn pool(&self) -> RoutePool {
+        RoutePool {
+            allowed_models: self.allowed_models.clone(),
+            allowed_providers: self.allowed_providers.clone(),
+        }
+    }
+
+    /// A copy of this config whose routing targets are limited to those `allows`
+    /// accepts, so a router built from it can only choose inside the pool.
+    ///
+    /// - Classifier and weighted-random rules outside the pool are dropped, so
+    ///   the classifier never sees them and the weights renormalize.
+    /// - A `default_model` outside the pool is cleared (keep the requested model).
+    /// - A two-tier router (`stage_router`, `escalation`) with one tier outside
+    ///   the pool collapses onto the allowed tier; with both outside it has no
+    ///   targets and goes inactive. The escalation *judge* and the classifier are
+    ///   auxiliary calls, not routing targets, so the pool leaves them alone.
+    ///
+    /// A router left with too few targets simply reports inactive, which keeps
+    /// the requested model — the module's usual fail-open outcome.
+    pub fn restricted_to(&self, allows: impl Fn(&str) -> bool) -> Self {
+        let mut next = self.clone();
+        // Already applied by the caller; dropping them keeps the restricted
+        // router's cache key independent of other agents' pools.
+        next.agent_pools.clear();
+        next.agent_routes.clear();
+        next.rules.retain(|rule| allows(rule.model.trim()));
+        if next
+            .default_model
+            .as_deref()
+            .is_some_and(|model| !model.trim().is_empty() && !allows(model.trim()))
+        {
+            next.default_model = None;
+        }
+        restrict_tiers(
+            &mut next.stage_capable_model,
+            &mut next.stage_efficient_model,
+            &allows,
+        );
+        restrict_tiers(
+            &mut next.escalation_strong_model,
+            &mut next.escalation_weak_model,
+            &allows,
+        );
+        next
+    }
     /// Whether smart routing should actually run: enabled, with at least one rule
     /// and whatever the chosen strategy needs to reach a decision. Anything short
     /// of this is a no-op (fail-open).
@@ -2460,6 +3954,31 @@ impl SmartRoutingConfig {
                     && !self.escalation_strong_model.trim().is_empty()
                     && !self.escalation_judge_model.trim().is_empty()
             }
+        }
+    }
+}
+
+/// Collapse a two-tier pair onto whichever tier the pool allows: a tier outside
+/// the pool takes the other tier's model when that one is configured and
+/// allowed, and is cleared otherwise. A blank tier stays blank, so a router that
+/// was missing a tier does not become active by restriction.
+fn restrict_tiers(first: &mut String, second: &mut String, allows: &impl Fn(&str) -> bool) {
+    let usable = |model: &str| !model.trim().is_empty() && allows(model.trim());
+    let outside = |model: &str| !model.trim().is_empty() && !allows(model.trim());
+    let (first_outside, second_outside) = (outside(first), outside(second));
+    let (first_usable, second_usable) = (usable(first), usable(second));
+    if first_outside {
+        if second_usable {
+            first.clone_from(second);
+        } else {
+            first.clear();
+        }
+    }
+    if second_outside {
+        if first_usable {
+            second.clone_from(first);
+        } else {
+            second.clear();
         }
     }
 }
@@ -2795,7 +4314,7 @@ pub struct FirewallOverlay {
     /// An earlier revision of this doc said flatly that "the pipeline reads
     /// `state.resolved_scanner(ctx).config()` before calling `firewall_policy_alert`",
     /// which is true of most sites but not all. Enumerated from the call sites in
-    /// `pipeline/mod.rs` rather than inferred from one of them:
+    /// the `pipeline/` module rather than inferred from one of them:
     ///
     /// * **Scope-aware** (`state.resolved_scanner(ctx)`) — `pre_process` (inbound text),
     ///   `apply_inline_input_evaluators`, and `apply_inline_output_evaluators`.
@@ -2808,7 +4327,7 @@ pub struct FirewallOverlay {
     /// output-target inline evaluator, and it *does not* govern the image and video
     /// handlers' inbound scans. Those three sites fire the node-base tier instead.
     /// Widening them means routing `with_firewall` through `resolved_scanner`, which is
-    /// a `pipeline/mod.rs` change, not a config one.
+    /// a `pipeline/` change, not a config one.
     ///
     /// Lock semantics are the shared ones: with `alert` in a broader scope's
     /// `locked_fields`, a narrower scope may only raise the tier — the `alert` arm of
@@ -2962,7 +4481,7 @@ fn default_inspector_model() -> String {
 /// clones deserialized overlays wholesale into the resolved config. Normalizing
 /// here means every consumer that reads the plain `model` field — the inspector
 /// (`firewall/inspector.rs`) *and* the `EvaluatorImpl::LlmJudge` arm in
-/// `pipeline/mod.rs`, which reads `scanner.config().inspector.model` regardless
+/// `pipeline/inline_flags.rs`, which reads `scanner.config().inspector.model` regardless
 /// of `inspector.enabled` — gets a working id without either of them needing a
 /// resolution call of its own.
 fn de_inspector_model<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -3109,6 +4628,79 @@ impl FirewallPolicy {
     }
 }
 
+/// Apply the env overrides that decide whether this node meters credits:
+/// `GATEWAY_CREDITS_URL`, `RYU_CREDITS_INTERNAL_SECRET`, then
+/// `GATEWAY_CREDITS_ENABLED` or the managed-node auto-enable.
+///
+/// The secret is read BEFORE the auto-enable is evaluated. A managed node
+/// whose secret is injected only through the environment (the normal fleet
+/// shape) must bill exactly like one whose secret is in `gateway.toml`.
+fn apply_credits_activation_env(credits: &mut CreditsConfig, var: impl Fn(&str) -> Option<String>) {
+    if let Some(url) = var("GATEWAY_CREDITS_URL") {
+        if !url.trim().is_empty() {
+            credits.base_url = url;
+        }
+    }
+    if let Some(secret) = var("RYU_CREDITS_INTERNAL_SECRET") {
+        if !secret.trim().is_empty() {
+            credits.internal_secret = Some(secret);
+        }
+    }
+    if let Some(raw) = var("GATEWAY_CREDITS_ENABLED") {
+        if let Some(enabled) = parse_bool_env(&raw) {
+            credits.enabled = enabled;
+        }
+    } else if credits.internal_secret.is_some() {
+        // MANAGED NODES BILL BY DEFAULT; self-hosted ones never do.
+        //
+        // `enabled` defaults to false, which is right for a self-hoster and
+        // catastrophic for us: a managed node that simply forgot
+        // GATEWAY_CREDITS_ENABLED serves every request — tokens, tools,
+        // media, sandbox — and debits NOTHING. That is a bigger hole than any
+        // unset per-call rate, and it fails silently in the same way.
+        //
+        // The internal secret is the discriminator, and it is the right one
+        // because it is not a preference: it is the service-to-service
+        // credential the control plane issues so this gateway may debit an
+        // ARBITRARY org's wallet. Only a Ryu-provisioned node is given one. A
+        // self-hoster has no secret, so this branch never fires for them and
+        // their gateway stays free exactly as before.
+        //
+        // An explicit GATEWAY_CREDITS_ENABLED still wins in both directions,
+        // so a managed node can be deliberately un-metered when needed.
+        credits.enabled = true;
+    }
+}
+
+/// OpenRouter `provider.data_collection` value used on Ryu-managed nodes.
+const MANAGED_OPENROUTER_DATA_COLLECTION: &str = "deny";
+
+/// Record the managed OpenRouter privacy posture (`data_collection = "deny"`) in
+/// the configuration of Ryu-managed gateways.
+///
+/// Per-request chat and embedding traffic already forces `deny` and ZDR in the
+/// OpenRouter provider. The configured value still matters for paths that
+/// cannot carry that per-request policy: the batch API refuses OpenRouter
+/// batches when it is set, instead of submitting work without the guarantee.
+/// Core sets the same default on the gateway sidecars it launches; this covers
+/// standalone hosted gateways, which previously left it empty.
+///
+/// A managed node is identified the same way as for metering: it holds the
+/// control-plane credits secret, which only Ryu-provisioned nodes receive. A
+/// self-hosted gateway keeps its own setting, and an explicit
+/// `OPENROUTER_DATA_COLLECTION` (even empty) or a non-empty `gateway.toml`
+/// value always wins.
+fn apply_managed_openrouter_privacy_default(config: &mut GatewayConfig, explicit_env: bool) {
+    if explicit_env || config.credits.internal_secret.is_none() {
+        return;
+    }
+    if let Some(openrouter) = config.providers.openrouter.as_mut() {
+        if openrouter.data_collection.trim().is_empty() {
+            openrouter.data_collection = MANAGED_OPENROUTER_DATA_COLLECTION.to_owned();
+        }
+    }
+}
+
 /// Parse a boolean-ish environment-variable value. Returns `None` for an
 /// unrecognised value so the caller can keep the existing config.
 fn parse_bool_env(raw: &str) -> Option<bool> {
@@ -3251,6 +4843,7 @@ impl AuthConfig {
         }
         self.api_keys.push(ApiKeyConfig {
             key,
+            allowed_operations: default_api_key_operations(),
             name: name.to_owned(),
             org_id: None,
             team_id: None,
@@ -3267,7 +4860,23 @@ impl AuthConfig {
 
     /// Bootstrap only at service startup, never during config serialization.
     /// Existing explicit credentials are validated rather than silently replaced.
+    /// Create or load the generated admin (`gateway-admin.key`) and inference
+    /// (`gateway-relay.key`) keys beside `gateway.toml`, sealed with the
+    /// Gateway's sealing key when this process holds one.
     pub fn bootstrap(&mut self, directory: &std::path::Path) -> anyhow::Result<()> {
+        let sealer = ryu_gw_credentials::sealed_config::config_sealer().ok();
+        self.bootstrap_with(directory, sealer.as_deref())
+    }
+
+    /// [`Self::bootstrap`] with an explicit sealer. `None` (a standalone Gateway
+    /// started with no `RYU_MASTER_KEY` and no delivered key) keeps the
+    /// pre-sealing behavior: an owner-only plaintext file, with a warning, and a
+    /// sealed file it cannot open is an error rather than a new key.
+    pub fn bootstrap_with(
+        &mut self,
+        directory: &std::path::Path,
+        sealer: Option<&dyn ryu_crypto::SecretSealer>,
+    ) -> anyhow::Result<()> {
         if let Some(key) = &self.master_key {
             ryu_gw_credentials::validate(key)?;
         }
@@ -3278,16 +4887,15 @@ impl AuthConfig {
             return Ok(());
         }
         if self.master_key.is_none() {
-            self.master_key = Some(ryu_gw_credentials::load_or_create(
-                &directory.join("gateway-admin.key"),
+            self.master_key = Some(load_generated_credential(
+                &directory.join(ADMIN_KEY_FILE),
                 "gwadm_",
+                sealer,
             )?);
         }
-        if self.api_keys.is_empty() {
-            let relay = ryu_gw_credentials::load_or_create(
-                &directory.join("gateway-relay.key"),
-                "gwrelay_",
-            )?;
+        let relay_file = directory.join(RELAY_KEY_FILE);
+        if self.api_keys.is_empty() || relay_file.exists() {
+            let relay = load_generated_credential(&relay_file, "gwrelay_", sealer)?;
             self.add_relay(relay, "local-inference", false)?;
         }
         anyhow::ensure!(
@@ -3300,10 +4908,38 @@ impl AuthConfig {
     }
 }
 
+/// File name of the generated administrator key beside `gateway.toml`.
+pub const ADMIN_KEY_FILE: &str = "gateway-admin.key";
+/// File name of the generated inference key beside `gateway.toml`.
+pub const RELAY_KEY_FILE: &str = "gateway-relay.key";
+
+/// Load or mint one generated Gateway key file. Sealed (`encc:v1:`) when a
+/// sealer is available; a legacy plaintext file is resealed in place.
+fn load_generated_credential(
+    path: &std::path::Path,
+    prefix: &str,
+    sealer: Option<&dyn ryu_crypto::SecretSealer>,
+) -> anyhow::Result<String> {
+    match sealer {
+        Some(sealer) => ryu_gw_credentials::load_or_create_sealed(path, prefix, sealer),
+        None => {
+            tracing::warn!(
+                path = %path.display(),
+                "no Gateway sealing key: this generated key file stays plaintext (owner-only). \
+                 Start the Gateway with RYU_MASTER_KEY (or the RYU_SEAL_KEY/RYU_SEAL_SCOPE \
+                 printed by `ryu-core gateway-seal-env`) to seal it"
+            );
+            ryu_gw_credentials::load_or_create(path, prefix)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiKeyConfig {
     pub key: String,
     pub name: String,
+    #[serde(default = "default_api_key_operations")]
+    pub allowed_operations: Vec<ApiKeyOperation>,
     #[serde(default)]
     pub org_id: Option<String>,
     #[serde(default)]
@@ -3345,21 +4981,48 @@ pub enum ApiKeyPurpose {
     InferenceRelay,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ApiKeyOperation {
     Inference,
+    WebSearch,
+    WebFetch,
+}
+
+fn default_api_key_operations() -> Vec<ApiKeyOperation> {
+    vec![ApiKeyOperation::Inference]
 }
 
 impl ApiKeyConfig {
+    pub fn is_system_relay(&self) -> bool {
+        matches!(self.name.as_str(), "local-core" | "local-inference")
+    }
+
     pub const fn purpose(&self) -> ApiKeyPurpose {
         ApiKeyPurpose::InferenceRelay
     }
 
-    pub const fn allows_operation(&self, operation: ApiKeyOperation) -> bool {
-        matches!(
-            (self.purpose(), operation),
-            (ApiKeyPurpose::InferenceRelay, ApiKeyOperation::Inference)
-        )
+    pub fn allows_operation(&self, operation: ApiKeyOperation) -> bool {
+        self.allowed_operations.contains(&operation)
+            && (!self.is_system_relay() || operation == ApiKeyOperation::Inference)
+    }
+
+    pub fn validate_operations(&self) -> Result<(), &'static str> {
+        if self.allowed_operations.is_empty() || self.allowed_operations.len() > 3 {
+            return Err("API key needs one to three explicit operations");
+        }
+        let mut seen = std::collections::HashSet::new();
+        if self
+            .allowed_operations
+            .iter()
+            .any(|operation| !seen.insert(*operation))
+        {
+            return Err("API key operations must be unique");
+        }
+        if self.is_system_relay() && self.allowed_operations != [ApiKeyOperation::Inference] {
+            return Err("system relays remain inference-only");
+        }
+        Ok(())
     }
 }
 
@@ -3369,6 +5032,7 @@ mod api_key_purpose_tests {
 
     fn relay_key() -> ApiKeyConfig {
         ApiKeyConfig {
+            allowed_operations: vec![crate::config::ApiKeyOperation::Inference],
             key: "sk-relay".to_owned(),
             name: "relay".to_owned(),
             org_id: None,
@@ -3388,6 +5052,35 @@ mod api_key_purpose_tests {
         let key = relay_key();
         assert_eq!(key.purpose(), ApiKeyPurpose::InferenceRelay);
         assert!(key.allows_operation(ApiKeyOperation::Inference));
+    }
+
+    #[test]
+    fn legacy_keys_do_not_implicitly_gain_web_permissions() {
+        let key: ApiKeyConfig = serde_json::from_value(
+            serde_json::json!({"key":"synthetic-client-key","name":"legacy"}),
+        )
+        .unwrap();
+        assert!(key.allows_operation(ApiKeyOperation::Inference));
+        assert!(!key.allows_operation(ApiKeyOperation::WebSearch));
+        assert!(!key.allows_operation(ApiKeyOperation::WebFetch));
+        let mut web = key;
+        web.allowed_operations = vec![ApiKeyOperation::WebSearch];
+        assert!(web.validate_operations().is_ok());
+        assert!(web.allows_operation(ApiKeyOperation::WebSearch));
+        assert!(!web.allows_operation(ApiKeyOperation::Inference));
+        web.name = "local-core".to_owned();
+        assert!(web.validate_operations().is_err());
+        assert!(!web.allows_operation(ApiKeyOperation::WebSearch));
+    }
+
+    #[test]
+    fn operation_lists_reject_duplicates_empty_and_unknown_grants() {
+        let mut key = relay_key();
+        key.allowed_operations.clear();
+        assert!(key.validate_operations().is_err());
+        key.allowed_operations = vec![ApiKeyOperation::WebFetch, ApiKeyOperation::WebFetch];
+        assert!(key.validate_operations().is_err());
+        assert!(serde_json::from_value::<ApiKeyConfig>(serde_json::json!({"key":"synthetic-client-key","name":"bad","allowed_operations":["admin"]})).is_err());
     }
 }
 
@@ -3467,7 +5160,39 @@ impl GatewayConfig {
     /// one backend-owned source of truth. Base URLs and non-secret provider
     /// options remain deployment configuration.
     pub fn apply_provider_vault_keys(&mut self, keys: &HashMap<String, String>) -> Vec<String> {
+        let environment = ProviderEnvironment::capture(&self.egress);
+        self.apply_provider_vault_keys_with_environment(keys, &environment)
+    }
+
+    pub(crate) fn apply_provider_vault_keys_with_environment(
+        &mut self,
+        keys: &HashMap<String, String>,
+        environment: &ProviderEnvironment,
+    ) -> Vec<String> {
         let mut applied = Vec::new();
+
+        for descriptor in ryu_gw_credentials::SDK_PROVIDERS {
+            if descriptor.auth_kind == ryu_gw_credentials::SdkAuthKind::NoAuth {
+                continue;
+            }
+            if let Some(key) = non_empty_provider_key(keys, descriptor.account_scope) {
+                let config = self.providers.genai.get_or_insert_with(Default::default);
+                let account = config
+                    .accounts
+                    .entry(descriptor.kind.to_owned())
+                    .or_default();
+                let previous = account.clone();
+                account.api_key = key.to_owned();
+                account.api_keys.clear();
+                account.allow_env = false;
+                if account.validate(descriptor.kind).is_err() {
+                    *account = previous;
+                    continue;
+                }
+                config.mark_fleet_kind(descriptor.kind);
+                applied.push(descriptor.account_scope.to_owned());
+            }
+        }
 
         if let Some(key) = non_empty_provider_key(keys, "openai") {
             let mut provider = self
@@ -3522,6 +5247,14 @@ impl GatewayConfig {
             provider.api_key = key.to_owned();
             provider.api_keys.clear();
             provider.org_api_keys.clear();
+            // A vault key is Ryu's own managed credential, so the managed privacy
+            // default applies unless the operator pinned a policy explicitly.
+            if provider.data_collection.trim().is_empty()
+                && environment.var("OPENROUTER_DATA_COLLECTION").is_err()
+                && std::env::var_os("OPENROUTER_DATA_COLLECTION").is_none()
+            {
+                provider.data_collection = MANAGED_OPENROUTER_DATA_COLLECTION.to_owned();
+            }
             self.providers.openrouter = Some(provider);
             applied.push("openrouter".to_string());
         }
@@ -3533,23 +5266,111 @@ impl GatewayConfig {
                 .take()
                 .unwrap_or(ReplicateProviderConfig {
                     api_key: String::new(),
+                    api_keys: Vec::new(),
                     base_url: replicate_base_url(),
                     poll_interval_ms: default_media_poll_interval_ms(),
                     poll_timeout_secs: default_media_poll_timeout_secs(),
                 });
             provider.api_key = key.to_owned();
+            provider.api_keys.clear();
             self.providers.replicate = Some(provider);
             applied.push("replicate".to_string());
         }
 
+        if let Some(key) = non_empty_provider_key(keys, "bfl") {
+            let mut provider = self.providers.bfl.take().unwrap_or(BflProviderConfig {
+                api_key: String::new(),
+                api_keys: Vec::new(),
+                base_url: bfl_base_url(),
+                poll_interval_ms: default_bfl_poll_interval(),
+                poll_timeout_secs: default_bfl_poll_timeout(),
+            });
+            provider.api_key = key.to_owned();
+            provider.api_keys.clear();
+            self.providers.bfl = Some(provider);
+            applied.push("bfl".into());
+        }
+        if let Some(key) = non_empty_provider_key(keys, "stability") {
+            let mut provider = self
+                .providers
+                .stability
+                .take()
+                .unwrap_or(StabilityProviderConfig {
+                    api_key: String::new(),
+                    api_keys: Vec::new(),
+                    base_url: stability_base_url(),
+                });
+            provider.api_key = key.to_owned();
+            provider.api_keys.clear();
+            self.providers.stability = Some(provider);
+            applied.push("stability".to_owned());
+        }
+        if let Some(key) = non_empty_provider_key(keys, "runway") {
+            let mut provider = self
+                .providers
+                .runway
+                .take()
+                .unwrap_or(RunwayProviderConfig {
+                    api_key: String::new(),
+                    api_keys: Vec::new(),
+                    base_url: runway_base_url(),
+                });
+            provider.api_key = key.to_owned();
+            provider.api_keys.clear();
+            self.providers.runway = Some(provider);
+            applied.push("runway".to_owned());
+        }
+        if let Some(key) = non_empty_provider_key(keys, "topaz") {
+            let mut provider = self.providers.topaz.take().unwrap_or(TopazProviderConfig {
+                api_key: String::new(),
+                api_keys: Vec::new(),
+                base_url: topaz_base_url(),
+            });
+            provider.api_key = key.to_owned();
+            provider.api_keys.clear();
+            self.providers.topaz = Some(provider);
+            applied.push("topaz".to_owned());
+        }
+        if let Some(key) = non_empty_provider_key(keys, "minimax") {
+            let mut provider = self
+                .providers
+                .minimax
+                .take()
+                .unwrap_or(MiniMaxProviderConfig {
+                    api_key: String::new(),
+                    api_keys: Vec::new(),
+                    base_url: minimax_base_url(),
+                });
+            provider.api_key = key.to_owned();
+            provider.api_keys.clear();
+            self.providers.minimax = Some(provider);
+            applied.push("minimax".to_owned());
+        }
+        if let Some(key) = non_empty_provider_key(keys, "recraft") {
+            let mut provider = self
+                .providers
+                .recraft
+                .take()
+                .unwrap_or(RecraftProviderConfig {
+                    api_key: String::new(),
+                    api_keys: Vec::new(),
+                    base_url: recraft_base_url(),
+                });
+            provider.api_key = key.to_owned();
+            provider.api_keys.clear();
+            self.providers.recraft = Some(provider);
+            applied.push("recraft".to_owned());
+        }
         if let Some(key) = non_empty_provider_key(keys, "fal") {
             let mut provider = self.providers.fal.take().unwrap_or(FalProviderConfig {
+                api_keys: Vec::new(),
                 api_key: String::new(),
                 base_url: fal_base_url(),
                 poll_interval_ms: default_media_poll_interval_ms(),
                 poll_timeout_secs: default_media_poll_timeout_secs(),
             });
             provider.api_key = key.to_owned();
+            provider.api_keys.clear();
             self.providers.fal = Some(provider);
             applied.push("fal".to_string());
         }
@@ -3562,12 +5383,14 @@ impl GatewayConfig {
                 .map(|provider| provider.base_url.clone())
                 .filter(|value| !value.trim().is_empty())
                 .or_else(|| {
-                    std::env::var("CLOUDFLARE_BASE_URL")
+                    environment
+                        .var("CLOUDFLARE_BASE_URL")
                         .ok()
                         .filter(|value| !value.trim().is_empty())
                 })
                 .or_else(|| {
-                    std::env::var("CLOUDFLARE_ACCOUNT_ID")
+                    environment
+                        .var("CLOUDFLARE_ACCOUNT_ID")
                         .ok()
                         .filter(|value| !value.trim().is_empty())
                         .map(|account_id| {
@@ -3606,12 +5429,14 @@ impl GatewayConfig {
                 .map(|provider| provider.base_url.clone())
                 .filter(|value| !value.trim().is_empty())
                 .or_else(|| {
-                    std::env::var("BEDROCK_BASE_URL")
+                    environment
+                        .var("BEDROCK_BASE_URL")
                         .ok()
                         .filter(|value| !value.trim().is_empty())
                 })
                 .or_else(|| {
-                    std::env::var("AWS_REGION")
+                    environment
+                        .var("AWS_REGION")
                         .ok()
                         .filter(|value| !value.trim().is_empty())
                         .map(|region| {
@@ -3647,13 +5472,13 @@ impl GatewayConfig {
                 .map(|provider| provider.base_url.clone())
                 .filter(|value| !value.trim().is_empty())
                 .or_else(|| {
-                    std::env::var("VERTEX_BASE_URL")
+                    environment.var("VERTEX_BASE_URL")
                         .ok()
                         .filter(|value| !value.trim().is_empty())
                 })
                 .or_else(|| {
-                    let project = std::env::var("VERTEX_PROJECT_ID").ok()?;
-                    let location = std::env::var("VERTEX_LOCATION").ok()?;
+                    let project = environment.var("VERTEX_PROJECT_ID").ok()?;
+                    let location = environment.var("VERTEX_LOCATION").ok()?;
                     if project.trim().is_empty() || location.trim().is_empty() {
                         return None;
                     }
@@ -3701,6 +5526,22 @@ impl GatewayConfig {
             applied.push("openai_credits".to_string());
         }
 
+        if let Some(key) = non_empty_provider_key(keys, "anthropic_credits") {
+            let mut provider =
+                self.providers
+                    .anthropic_credits
+                    .take()
+                    .unwrap_or(AnthropicProviderConfig {
+                        api_key: String::new(),
+                        api_keys: Vec::new(),
+                        base_url: anthropic_base_url(),
+                    });
+            provider.api_key = key.to_owned();
+            provider.api_keys.clear();
+            self.providers.anthropic_credits = Some(provider);
+            applied.push("anthropic_credits".to_string());
+        }
+
         if let Some(key) = non_empty_provider_key(keys, "composio") {
             self.composio.api_key = Some(key.to_owned());
             self.composio.enabled = true;
@@ -3713,6 +5554,16 @@ impl GatewayConfig {
             applied.push("treg".to_string());
         }
 
+        // A vault key only fills an authored Vercel lane. It never creates the
+        // slot, because the lane also needs its recorded resale permission.
+        if let Some(key) = non_empty_provider_key(keys, "vercel") {
+            if let Some(provider) = self.providers.vercel.as_mut() {
+                provider.api_key = key.to_owned();
+                provider.api_keys.clear();
+                applied.push("vercel".to_string());
+            }
+        }
+
         if let Some(key) = non_empty_provider_key(keys, "modal") {
             let base_url = self
                 .providers
@@ -3720,13 +5571,15 @@ impl GatewayConfig {
                 .as_ref()
                 .map(|provider| provider.base_url.clone())
                 .or_else(|| {
-                    std::env::var("MODAL_BASE_URL")
+                    environment
+                        .var("MODAL_BASE_URL")
                         .ok()
                         .filter(|value| !value.trim().is_empty())
                 });
             if let Some(base_url) = base_url {
                 self.providers.modal = Some(ModalProviderConfig {
                     api_key: key.to_owned(),
+                    api_keys: Vec::new(),
                     base_url,
                 });
                 applied.push("modal".to_string());
@@ -3745,6 +5598,23 @@ impl GatewayConfig {
     /// overlay so a stale gateway.toml/env key cannot survive merely because
     /// its provider was omitted from MongoDB.
     pub fn replace_provider_vault_keys(&mut self, keys: &HashMap<String, String>) -> Vec<String> {
+        let environment = ProviderEnvironment::capture(&self.egress);
+        self.replace_provider_vault_keys_with_environment(keys, &environment)
+    }
+
+    pub(crate) fn replace_provider_vault_keys_with_environment(
+        &mut self,
+        keys: &HashMap<String, String>,
+        environment: &ProviderEnvironment,
+    ) -> Vec<String> {
+        if let Some(config) = self.providers.genai.as_mut() {
+            for account in config.accounts.values_mut() {
+                account.api_key.clear();
+                account.api_keys.clear();
+                account.allow_env = false;
+            }
+            config.clear_fleet_markers();
+        }
         if let Some(provider) = self.providers.openai.as_mut() {
             provider.api_key.clear();
             provider.api_keys.clear();
@@ -3760,12 +5630,15 @@ impl GatewayConfig {
         }
         if let Some(provider) = self.providers.replicate.as_mut() {
             provider.api_key.clear();
+            provider.api_keys.clear();
         }
         if let Some(provider) = self.providers.fal.as_mut() {
             provider.api_key.clear();
+            provider.api_keys.clear();
         }
         if let Some(provider) = self.providers.modal.as_mut() {
             provider.api_key.clear();
+            provider.api_keys.clear();
         }
         if let Some(provider) = self.providers.cloudflare.as_mut() {
             provider.api_key.clear();
@@ -3783,11 +5656,19 @@ impl GatewayConfig {
             provider.api_key.clear();
             provider.api_keys.clear();
         }
+        if let Some(provider) = self.providers.anthropic_credits.as_mut() {
+            provider.api_key.clear();
+            provider.api_keys.clear();
+        }
+        if let Some(provider) = self.providers.vercel.as_mut() {
+            provider.api_key.clear();
+            provider.api_keys.clear();
+        }
         self.composio.api_key = None;
         self.composio.enabled = false;
         self.treg.token = None;
         self.treg.enabled = false;
-        let applied = self.apply_provider_vault_keys(keys);
+        let applied = self.apply_provider_vault_keys_with_environment(keys, environment);
 
         if non_empty_provider_key(keys, "openai").is_none() {
             self.providers.openai = None;
@@ -3818,6 +5699,12 @@ impl GatewayConfig {
         }
         if non_empty_provider_key(keys, "openai_credits").is_none() {
             self.providers.openai_credits = None;
+        }
+        if non_empty_provider_key(keys, "anthropic_credits").is_none() {
+            self.providers.anthropic_credits = None;
+        }
+        if non_empty_provider_key(keys, "vercel").is_none() {
+            self.providers.vercel = None;
         }
 
         applied
@@ -3924,45 +5811,47 @@ impl GatewayConfig {
         clean
     }
 
-    /// Atomically persist `self` to `gateway.toml`, creating the parent directory
-    /// if needed. Writes to a `.tmp` file in the same directory, then renames over
-    /// the target so a crash mid-write never leaves a corrupt file.
-    ///
-    /// Persists [`Self::without_derived_values`], never `self` verbatim: `load()`
-    /// seeds a `routing.model_map` row for the classify tier and may overwrite
-    /// `providers.classify` from Core's env, and writing either back would turn a
-    /// derived value into a permanent, operator-authored-looking file entry — an
-    /// undeletable "Model mappings" row in the first case; in the second, a computed
-    /// profile-scoped loopback port frozen into the file (and, where the operator had
-    /// authored a table of their own, that table silently replaced).
+    /// Guarded fixture/bootstrap persistence. Production writers patch authored
+    /// snapshots through the shared transaction instead of saving runtime config.
+    #[cfg(test)]
     pub fn save(&self) -> anyhow::Result<()> {
         let path = Self::config_path()
             .ok_or_else(|| anyhow::anyhow!("Cannot determine gateway config path"))?;
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let toml_str = toml::to_string_pretty(&self.without_derived_values())
-            .map_err(|e| anyhow::anyhow!("Failed to serialize config: {e}"))?;
-
-        let tmp_path = path.with_extension("toml.tmp");
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        // A unique temporary path avoids following a stale or malicious .tmp symlink.
-        let tmp_path = tmp_path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
-        let mut file = options.open(&tmp_path)?;
-        use std::io::Write;
-        file.write_all(toml_str.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&tmp_path, &path)?;
-
+        test_config_path::ensure_test_seal_key();
+        let mut transaction = ryu_gw_credentials::ConfigFileTransaction::acquire(&path)?;
+        let expected = transaction.snapshot().revision().clone();
+        let bytes = toml::to_string_pretty(&self.without_derived_values())?;
+        transaction.commit(&expected, bytes.as_bytes())?;
         Ok(())
+    }
+
+    /// A startup warning for a metering node with no per-model price table.
+    ///
+    /// Only providers that report `usage.cost` (OpenRouter) are billed their
+    /// actual cost. Every other route is priced from `control_plane
+    /// .model_pricing`, and an unpriced model falls back to the flat
+    /// `cost_per_1k_micro_usd` for input and output alike, which under-charges
+    /// frontier models and over-charges cheap ones. The ledger row marks such a
+    /// charge `estimated`, but an operator should know the table is empty.
+    pub fn flat_rate_metering_warning(&self) -> Option<String> {
+        if !self.credits.is_active() || !self.control_plane.model_pricing.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "credits are metering but [control_plane.model_pricing] is empty: every route \
+whose provider does not report usage.cost (all except OpenRouter) is billed at the flat \
+estimate of {} micro-USD per 1k tokens, input and output alike",
+            self.control_plane.cost_per_1k_micro_usd
+        ))
+    }
+
+    /// Parse authored `gateway.toml` text, opening every sealed secret leaf
+    /// first (`encc:v1:`, the Gateway's component subkey). Legacy plaintext
+    /// parses without a key; a sealed leaf without the key is an error, never an
+    /// empty credential. No environment or fleet overlays are applied.
+    pub fn from_authored_str(text: &str) -> anyhow::Result<Self> {
+        let opened = ryu_gw_credentials::sealed_config::open_text(text)?;
+        Ok(toml::from_str(&opened)?)
     }
 
     pub fn load() -> anyhow::Result<Self> {
@@ -3971,7 +5860,7 @@ impl GatewayConfig {
         let mut config: GatewayConfig = if let Some(path) = config_path {
             if path.exists() {
                 let content = std::fs::read_to_string(&path)?;
-                toml::from_str(&content)?
+                Self::from_authored_str(&content)?
             } else {
                 GatewayConfig::default()
             }
@@ -3984,105 +5873,11 @@ impl GatewayConfig {
             config.bind = bind;
         }
 
-        // OpenAI
-        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-            let base_url = std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| openai_base_url());
-            config.providers.openai = Some(OpenAiProviderConfig {
-                api_key: key,
-                api_keys: env_keys("OPENAI_API_KEYS"),
-                base_url,
-            });
-        }
-
-        // Anthropic
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            let base_url =
-                std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| anthropic_base_url());
-            config.providers.anthropic = Some(AnthropicProviderConfig {
-                api_key: key,
-                api_keys: env_keys("ANTHROPIC_API_KEYS"),
-                base_url,
-            });
-        }
-
-        // Local LLM
-        if let Ok(url) = std::env::var("LOCAL_LLM_URL") {
-            config.providers.local = Some(LocalProviderConfig { base_url: url });
-        }
-
-        // Classify-tier LLM. Core publishes `RYU_CLASSIFY_LLM_URL` into the gateway
-        // spawn env pointing at its lazy llama.cpp classify sidecar (profile-offset
-        // [`DEFAULT_CLASSIFY_PORT`]) — unconditionally, so on a Core-spawned gateway
-        // this slot is always `Some`. Absent (a STANDALONE gateway) ⇒ the slot stays
-        // `None` and the `classify` provider is never registered, which the
-        // inspector/judge handle by failing open — see
-        // [`crate::providers::ProviderRegistry::new`].
-        //
-        // THE ENV WINS over the file here, exactly like `local`/`LOCAL_LLM_URL` above.
-        // A previous round inverted this (file-wins) so that a `[providers.classify]
-        // base_url` in `gateway.toml` would stop being inert on a Core-spawned node.
-        // That is a real improvement in isolation and it is deliberately given up,
-        // because the precedence is not a local decision — it is half of a
-        // cross-process contract, and file-wins made the other half unsatisfiable:
-        //
-        //   Core lazily starts a ~300-400 MB `llamacpp-classify` sidecar whenever a
-        //   config push selects the classify tier (`apps/core/src/sidecar/gateway.rs`
-        //   ::`maybe_start_classify_tier`). Read, not assumed: its only locality check
-        //   is `url_targets_this_machine(gateway_url())` — "is the gateway on this
-        //   box" — and there is nothing else it *could* check under file-wins, because
-        //   the deciding value then lives in a file in the gateway's own config
-        //   directory, which Core neither reads nor is notified about. So on a node
-        //   whose operator pointed `[providers.classify]` at an external small model,
-        //   every selecting push started a local sidecar nothing ever dialed. Idle-stop
-        //   is off unless `RYU_SIDECAR_IDLE`, so that RAM stayed resident for the life
-        //   of the process.
-        //
-        // Under env-wins the URL the gateway will dial for `classify` on a Core-spawned
-        // node is EXACTLY the value Core published, i.e. `classify_gateway_url()` — a
-        // fact Core can evaluate from its own process with no file access and no new
-        // channel. That is what lets the lazy start be gated on the classify *target's*
-        // locality (it now is), which removes the wasted-RAM class instead of trading
-        // it for an inert setting.
-        //
-        // Consequence, stated plainly rather than left implicit: `[providers.classify]`
-        // is the **standalone-gateway** setting. On a gateway Core spawned it is
-        // overwritten on every load and therefore has no effect; repointing the tier
-        // there takes `RYU_CLASSIFY_LLM_URL` (plus `RYU_LOCAL_CLASSIFIER_MODEL_ID` for
-        // the id) in *Core's* environment. This matches `local`/`LOCAL_LLM_URL`, the
-        // established precedent for a Core-published provider URL, so there is one rule
-        // for both slots instead of two.
-        //
-        // A blank env value reads as "not published" (Core never sends one, but a shell
-        // could): the file table — or `None` — survives, so the tier fails open rather
-        // than registering an unusable "" URL.
-        //
-        // The slot the env fills is DERIVED and is stripped again before anything is
-        // written ([`GatewayConfig::without_derived_values`]). It must be: every
-        // provider slot serializes back out on `save()`, and Core's URL is a computed,
-        // profile-scoped loopback address — persisting it would record a value that is
-        // wrong on the next profile/port change and that goes live the moment Core is
-        // not the spawner. The operator's own table is CAPTURED here
-        // ([`Self::file_classify_provider`]) so the strip restores it instead of
-        // deleting it from their file.
-        if let Some(url) = std::env::var("RYU_CLASSIFY_LLM_URL")
-            .ok()
-            .filter(|url| !url.trim().is_empty())
-        {
-            config.file_classify_provider = config.providers.classify.take();
-            config.providers.classify = Some(ClassifyProviderConfig { base_url: url });
-            config.env_injected_classify_provider = true;
-        }
-        // …and make the classifier id ROUTABLE, not just readable. The built-in
-        // `"gemma-3-270m"` prefix cannot follow a registry override (it is a
-        // compile-time table), and `route`'s two user-`model_map` steps run BEFORE
-        // it — so both an overridden id and a stray user `gemma` prefix mapping
-        // would send the guardrail classifier somewhere other than the classify
-        // tier. Seeding an exact entry fixes both at once because exact-match is
-        // step 1. The seeded key is remembered so the row can be stripped again from
-        // everything that leaves the process — it is derived, not operator config.
-        // See [`seed_classify_route`] and [`GatewayConfig::without_derived_values`].
-        config.seeded_classify_model =
-            seed_classify_route(&mut config.routing, &classify_model_id());
+        let provider_environment = ProviderEnvironment::capture(&config.egress);
+        provider_environment
+            .apply(&mut config)
+            .map_err(anyhow::Error::msg)?;
+        config.provider_environment = Some(provider_environment);
 
         // Auth master key
         if let Ok(key) = std::env::var("GATEWAY_MASTER_KEY") {
@@ -4105,6 +5900,30 @@ impl GatewayConfig {
                 config.auth.add_relay(key, name, trusted)?;
                 // A managed child never inherits an old anonymous local setting.
                 config.auth.require_auth = true;
+            }
+        }
+        if let Ok(proof_key) = std::env::var("GATEWAY_CORE_PROOF_KEY") {
+            ryu_gw_credentials::validate(&proof_key)?;
+            if config.auth.master_key.as_deref() == Some(proof_key.as_str())
+                || config
+                    .auth
+                    .api_keys
+                    .iter()
+                    .any(|entry| entry.key == proof_key)
+            {
+                anyhow::bail!(
+                    "GATEWAY_CORE_PROOF_KEY must differ from every Gateway bearer credential"
+                );
+            }
+        }
+        if let Ok(master) = std::env::var("GATEWAY_CORE_PROOF_MASTER_KEY") {
+            ryu_gw_credentials::validate(&master)?;
+            if config.auth.master_key.as_deref() == Some(master.as_str())
+                || config.auth.api_keys.iter().any(|entry| entry.key == master)
+            {
+                anyhow::bail!(
+                    "GATEWAY_CORE_PROOF_MASTER_KEY must differ from every Gateway bearer credential"
+                );
             }
         }
 
@@ -4165,197 +5984,11 @@ impl GatewayConfig {
         if let Some(base_url) = first_non_empty_env(&["RYU_TREG_URL", "TREG_URL"]) {
             config.treg.base_url = base_url;
         }
-
-        // OpenRouter
-        if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
-            let base_url =
-                std::env::var("OPENROUTER_BASE_URL").unwrap_or_else(|_| openrouter_base_url());
-            let site_url =
-                std::env::var("OPENROUTER_SITE_URL").unwrap_or_else(|_| openrouter_site_url());
-            let site_name =
-                std::env::var("OPENROUTER_SITE_NAME").unwrap_or_else(|_| openrouter_site_name());
-            let data_collection = std::env::var("OPENROUTER_DATA_COLLECTION")
-                .unwrap_or_else(|_| openrouter_data_collection());
-            let zdr = env_bool("OPENROUTER_ZDR", false);
-            let sort = std::env::var("OPENROUTER_SORT").unwrap_or_default();
-            let response_healing = env_bool("OPENROUTER_RESPONSE_HEALING", false);
-            let usage_accounting = env_bool("OPENROUTER_USAGE_ACCOUNTING", true);
-            config.providers.openrouter = Some(OpenRouterProviderConfig {
-                api_key: key,
-                api_keys: env_keys("OPENROUTER_API_KEYS"),
-                base_url,
-                site_url,
-                site_name,
-                data_collection,
-                zdr,
-                sort,
-                response_healing,
-                usage_accounting,
-                org_api_keys: std::collections::HashMap::new(),
-            });
-        }
-
-        // Replicate (cloud image/video). Key presence alone activates the
-        // provider — mirrors the OpenRouter block. base_url overridable for
-        // proxies / self-host.
-        if let Ok(key) = std::env::var("REPLICATE_API_KEY") {
-            if !key.trim().is_empty() {
-                let base_url = std::env::var("REPLICATE_BASE_URL")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or_else(replicate_base_url);
-                config.providers.replicate = Some(ReplicateProviderConfig {
-                    api_key: key,
-                    base_url,
-                    poll_interval_ms: default_media_poll_interval_ms(),
-                    poll_timeout_secs: default_media_poll_timeout_secs(),
-                });
-            }
-        }
-
-        // Fal (cloud image/video/audio). Key presence alone activates it.
-        if let Ok(key) = std::env::var("FAL_API_KEY") {
-            if !key.trim().is_empty() {
-                let base_url = std::env::var("FAL_BASE_URL")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or_else(fal_base_url);
-                config.providers.fal = Some(FalProviderConfig {
-                    api_key: key,
-                    base_url,
-                    poll_interval_ms: default_media_poll_interval_ms(),
-                    poll_timeout_secs: default_media_poll_timeout_secs(),
-                });
-            }
-        }
-
-        // Core sidecar manager
-        if let Ok(url) = std::env::var("CORE_URL") {
-            let token = std::env::var("CORE_TOKEN").ok();
-            config.providers.core = Some(CoreProviderConfig {
-                base_url: url,
-                token,
-            });
-        }
-
-        // Modal serverless GPU (opt-in). A Ryu Cloud GPU node sets both vars to
-        // its deployed Modal inference app; absent either, the provider stays
-        // off (nothing hardcoded, no default URL).
-        if let (Ok(base_url), Ok(api_key)) = (
-            std::env::var("MODAL_BASE_URL"),
-            std::env::var("MODAL_API_KEY"),
-        ) {
-            if !base_url.trim().is_empty() && !api_key.trim().is_empty() {
-                config.providers.modal = Some(ModalProviderConfig { api_key, base_url });
-            }
-        }
-
-        // Cloudflare Workers AI — the `cloudflare` credit pool's supply. Both the
-        // account id and the token are required because the endpoint embeds the
-        // account (`…/accounts/{id}/ai/v1`); absent either, the provider stays off
-        // and the id is simply missing from the registry (nothing hardcoded, no
-        // default URL, no boot failure). `CLOUDFLARE_BASE_URL` overrides the
-        // interpolation wholesale for gateways fronted by a proxy.
-        if let Ok(token) = std::env::var("CLOUDFLARE_API_TOKEN") {
-            let account_id = std::env::var("CLOUDFLARE_ACCOUNT_ID").unwrap_or_default();
-            let base_url = std::env::var("CLOUDFLARE_BASE_URL")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .or_else(|| {
-                    (!account_id.trim().is_empty()).then(|| {
-                        format!(
-                            "https://api.cloudflare.com/client/v4/accounts/{}/ai/v1",
-                            account_id.trim()
-                        )
-                    })
-                });
-            if let Some(base_url) = base_url {
-                if !token.trim().is_empty() {
-                    config.providers.cloudflare = Some(CloudflareProviderConfig {
-                        api_key: token,
-                        api_keys: env_keys("CLOUDFLARE_API_TOKENS"),
-                        base_url,
-                    });
-                }
-            }
-        }
-
-        // AWS Bedrock — the `bedrock` credit pool's supply. `AWS_BEARER_TOKEN_BEDROCK`
-        // is Bedrock's own long-lived API key (not SigV4 credentials), which is what
-        // lets the Anthropic-Messages impl talk to it unmodified. Region-scoped, so
-        // the URL is interpolated from `AWS_REGION` unless `BEDROCK_BASE_URL` pins it.
-        if let Ok(token) = std::env::var("AWS_BEARER_TOKEN_BEDROCK") {
-            let region = std::env::var("AWS_REGION").unwrap_or_default();
-            let base_url = std::env::var("BEDROCK_BASE_URL")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .or_else(|| {
-                    (!region.trim().is_empty()).then(|| {
-                        format!("https://bedrock-mantle.{}.api.aws/anthropic", region.trim())
-                    })
-                });
-            if let Some(base_url) = base_url {
-                if !token.trim().is_empty() {
-                    config.providers.bedrock = Some(BedrockProviderConfig {
-                        api_key: token,
-                        api_keys: env_keys("AWS_BEARER_TOKENS_BEDROCK"),
-                        base_url,
-                    });
-                }
-            }
-        }
-
-        // Google Cloud Vertex AI — the `vertex` credit pool's supply, on Vertex's
-        // OpenAI-compatible surface. Project AND location are both required because
-        // the endpoint embeds both; absent either, the provider stays off and the id
-        // is simply missing from the registry. `VERTEX_BASE_URL` overrides the
-        // interpolation wholesale (global endpoint, a proxy, or a pinned API version).
-        //
-        // The interpolated form deliberately stops at `/endpoints/openapi` — the
-        // OpenAI impl appends `/chat/completions` itself.
-        if let Ok(token) = std::env::var("VERTEX_API_KEY") {
-            let project = std::env::var("VERTEX_PROJECT_ID").unwrap_or_default();
-            let location = std::env::var("VERTEX_LOCATION").unwrap_or_default();
-            let base_url = std::env::var("VERTEX_BASE_URL")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .or_else(|| {
-                    (!project.trim().is_empty() && !location.trim().is_empty()).then(|| {
-                        format!(
-                            "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/endpoints/openapi",
-                            location.trim(),
-                            project.trim(),
-                            location.trim()
-                        )
-                    })
-                });
-            if let Some(base_url) = base_url {
-                if !token.trim().is_empty() {
-                    config.providers.vertex = Some(VertexProviderConfig {
-                        api_key: token,
-                        api_keys: env_keys("VERTEX_API_KEYS"),
-                        base_url,
-                    });
-                }
-            }
-        }
-
-        // The donated OpenAI allowance — a SEPARATE env var from `OPENAI_API_KEY`
-        // on purpose. Reading the same var would tag a BYOK deploy's own key as
-        // donated supply, which is the whole failure this slot exists to avoid.
-        // Unlike the other three pools the endpoint is not account/region-scoped,
-        // so `base_url` keeps its ordinary default and only the key gates the slot.
-        if let Ok(key) = std::env::var("OPENAI_CREDITS_API_KEY") {
-            if !key.trim().is_empty() {
-                config.providers.openai_credits = Some(OpenAiProviderConfig {
-                    api_key: key,
-                    api_keys: env_keys("OPENAI_CREDITS_API_KEYS"),
-                    base_url: std::env::var("OPENAI_CREDITS_BASE_URL")
-                        .ok()
-                        .filter(|s| !s.trim().is_empty())
-                        .unwrap_or_else(openai_base_url),
-                });
-            }
+        if let Some(limit) = first_non_empty_env(&["RYU_TREG_MAX_RESPONSE_BYTES"])
+            .and_then(|raw| raw.trim().parse::<usize>().ok())
+            .filter(|limit| *limit > 0)
+        {
+            config.treg.max_response_bytes = limit;
         }
 
         // Firewall (data-plane, per-machine) — env overrides following the
@@ -4650,40 +6283,11 @@ impl GatewayConfig {
         if config.credits.base_url == default_control_plane_url() {
             config.credits.base_url = config.control_plane.base_url.clone();
         }
-        if let Ok(raw) = std::env::var("GATEWAY_CREDITS_ENABLED") {
-            if let Some(enabled) = parse_bool_env(&raw) {
-                config.credits.enabled = enabled;
-            }
-        } else if config.credits.internal_secret.is_some() {
-            // MANAGED NODES BILL BY DEFAULT; self-hosted ones never do.
-            //
-            // `enabled` defaults to false, which is right for a self-hoster and
-            // catastrophic for us: a managed node that simply forgot
-            // GATEWAY_CREDITS_ENABLED serves every request — tokens, tools,
-            // media, sandbox — and debits NOTHING. That is a bigger hole than any
-            // unset per-call rate, and it fails silently in the same way.
-            //
-            // The internal secret is the discriminator, and it is the right one
-            // because it is not a preference: it is the service-to-service
-            // credential the control plane issues so this gateway may debit an
-            // ARBITRARY org's wallet. Only a Ryu-provisioned node is given one. A
-            // self-hoster has no secret, so this branch never fires for them and
-            // their gateway stays free exactly as before.
-            //
-            // An explicit GATEWAY_CREDITS_ENABLED still wins in both directions,
-            // so a managed node can be deliberately un-metered when needed.
-            config.credits.enabled = true;
-        }
-        if let Ok(url) = std::env::var("GATEWAY_CREDITS_URL") {
-            if !url.trim().is_empty() {
-                config.credits.base_url = url;
-            }
-        }
-        if let Ok(secret) = std::env::var("RYU_CREDITS_INTERNAL_SECRET") {
-            if !secret.trim().is_empty() {
-                config.credits.internal_secret = Some(secret);
-            }
-        }
+        apply_credits_activation_env(&mut config.credits, |name| std::env::var(name).ok());
+        apply_managed_openrouter_privacy_default(
+            &mut config,
+            std::env::var_os("OPENROUTER_DATA_COLLECTION").is_some(),
+        );
         if let Ok(raw) = std::env::var("GATEWAY_CREDITS_MARKUP_BPS") {
             if let Ok(bps) = raw.trim().parse::<u64>() {
                 config.credits.markup_bps = bps;
@@ -4745,6 +6349,15 @@ impl GatewayConfig {
             if let Ok(bps) = raw.trim().parse::<u64>() {
                 config.credits.sandbox_markup_bps = bps;
             }
+        }
+        if let Ok(raw) = std::env::var("GATEWAY_CREDITS_SANDBOX_SIZE_RATES") {
+            config.credits.sandbox_size_rates =
+                sandbox_size_rates_from_env(&raw, config.credits.sandbox_size_rates);
+        }
+        if let Ok(raw) = std::env::var("GATEWAY_BOX_MINIMUM_WAIVER_PUBLIC_KEY") {
+            let raw = raw.trim();
+            config.credits.box_minimum_waiver_public_key =
+                (!raw.is_empty()).then(|| raw.to_owned());
         }
         if let Ok(raw) = std::env::var("GATEWAY_CREDITS_SANDBOX_FREE_STORAGE_GIB") {
             if let Ok(gib) = raw.trim().parse::<u64>() {
@@ -4824,11 +6437,16 @@ impl GatewayConfig {
                 config.credits.min_reserve_micro_usd = value;
             }
         }
+        if let Ok(raw) = std::env::var("GATEWAY_CREDITS_TOP_UP_URL") {
+            config.credits.top_up_url = raw.trim().to_owned();
+        }
 
-        // Fleet mode (managed-cloud WS2). A publicly-exposed multi-tenant replica
-        // sets this so the admin gate stops trusting loopback peers (an external
-        // caller through the co-located LB looks like 127.0.0.1). Config-file
-        // (`fleet = true`) is primary; this env override flips it per deployment.
+        // Fleet mode (managed-cloud WS2). Any replica behind a co-located load
+        // balancer or reverse proxy, hosted or self-hosted, sets this so the
+        // admin gate stops trusting loopback peers (an external caller through
+        // the proxy looks like 127.0.0.1). It hardens exposure only and is not a
+        // custody signal. Config-file (`fleet = true`) is primary; this env
+        // override flips it per deployment.
         if let Ok(raw) = std::env::var("RYU_GATEWAY_FLEET") {
             if let Some(enabled) = parse_bool_env(&raw) {
                 config.fleet = enabled;
@@ -4850,6 +6468,8 @@ impl GatewayConfig {
         // starts and silently gives away metered surfaces is the failure mode
         // this whole check exists to prevent.
         config.credits.validate_metered_rates()?;
+        crate::web_config::validate_web_prices(&config.credits.web_service_prices, &config.credits)
+            .map_err(anyhow::Error::msg)?;
 
         Ok(config)
     }
@@ -4883,6 +6503,317 @@ pub struct ChannelsConfig {
     /// + `password` (or the `BLUEBUBBLES_*` env vars) to enable.
     #[serde(default)]
     pub bluebubbles: Option<BlueBubblesChannelConfig>,
+
+    /// PSTN phone-assistant lines. Twilio credentials stay in the Gateway
+    /// deployment secret boundary; this section contains line policy, the
+    /// line's own numbers, and the callers and hand-off number (sealed on disk).
+    #[serde(default, skip_serializing_if = "PhoneCallsConfig::is_empty")]
+    pub phone_calls: PhoneCallsConfig,
+}
+
+/// Operator-owned phone-assistant policy. A line binds a Twilio-routed number
+/// to the user's verified caller ID, Core agent, and handoff destination.
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
+pub struct PhoneCallsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub lines: Vec<PhoneCallLineConfig>,
+}
+
+impl PhoneCallsConfig {
+    fn is_empty(&self) -> bool {
+        !self.enabled && self.lines.is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.lines.len() > 10 {
+            return Err("phone assistant supports at most 10 lines".to_owned());
+        }
+        if self.enabled && self.lines.is_empty() {
+            return Err("phone assistant requires at least one configured line".to_owned());
+        }
+        let mut ids = std::collections::HashSet::with_capacity(self.lines.len());
+        let mut twilio_numbers = std::collections::HashSet::with_capacity(self.lines.len());
+        for line in &self.lines {
+            if !valid_phone_line_id(&line.id) || !ids.insert(line.id.as_str()) {
+                return Err(
+                    "phone line ids must be unique, non-empty, and use letters, digits, '-' or '_'"
+                        .to_owned(),
+                );
+            }
+            if line.label.trim().is_empty() || line.label.chars().count() > 64 {
+                return Err(format!(
+                    "phone line '{}' needs a label of 1 to 64 characters",
+                    line.id
+                ));
+            }
+            if !valid_e164(&line.twilio_number)
+                || !twilio_numbers.insert(line.twilio_number.as_str())
+            {
+                return Err(format!(
+                    "phone line '{}' needs a unique Twilio number in E.164 format",
+                    line.id
+                ));
+            }
+            if !line.caller_id.is_empty() && !valid_e164(&line.caller_id) {
+                return Err(format!(
+                    "phone line '{}' caller ID must be empty or an E.164 phone number",
+                    line.id
+                ));
+            }
+            if line
+                .transfer_to
+                .as_deref()
+                .is_some_and(|value| !valid_e164(value))
+            {
+                return Err(format!(
+                    "phone line '{}' transfer number must use E.164 format",
+                    line.id
+                ));
+            }
+            if line.agent_id.as_deref().is_some_and(|value| {
+                value.is_empty()
+                    || value.len() > 128
+                    || !value.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':')
+                    })
+            }) {
+                return Err(format!("phone line '{}' has an invalid agent id", line.id));
+            }
+            if line
+                .tts_engine
+                .as_deref()
+                .is_some_and(|value| value.len() > 128)
+                || line
+                    .tts_voice
+                    .as_deref()
+                    .is_some_and(|value| value.len() > 256)
+            {
+                return Err(format!(
+                    "phone line '{}' voice selection is too long",
+                    line.id
+                ));
+            }
+            if line.greeting.chars().count() > 1_000 || line.greeting.contains('\0') {
+                return Err(format!(
+                    "phone line '{}' greeting is too long or invalid",
+                    line.id
+                ));
+            }
+            if line.allowed_callers.len() > MAX_PHONE_LINE_ALLOWED_CALLERS
+                || line
+                    .allowed_callers
+                    .iter()
+                    .any(|caller| !valid_e164(caller))
+            {
+                return Err(format!(
+                    "phone line '{}' allowed callers must be at most {MAX_PHONE_LINE_ALLOWED_CALLERS} E.164 phone numbers",
+                    line.id
+                ));
+            }
+            if line
+                .max_concurrent_calls
+                .is_some_and(|limit| !(1..=MAX_PHONE_LINE_CONCURRENT_CALLS).contains(&limit))
+            {
+                return Err(format!(
+                    "phone line '{}' concurrent-call limit must be between 1 and {MAX_PHONE_LINE_CONCURRENT_CALLS}",
+                    line.id
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Configuration for one PSTN line. `twilio_number` receives forwarded calls;
+/// `caller_id` is the user's verified number for outbound calls. Incoming and
+/// outbound phone numbers are deliberately separate. `allowed_callers` and
+/// `transfer_to` are other people's phone numbers: `gateway.toml` stores them
+/// as `encc:v1:` leaves (see `ryu_gw_credentials::sealed_config`), opened
+/// before this struct is parsed, so every reader here sees plaintext.
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
+pub struct PhoneCallLineConfig {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub twilio_number: String,
+    #[serde(default)]
+    pub caller_id: String,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub tts_engine: Option<String>,
+    #[serde(default)]
+    pub tts_voice: Option<String>,
+    #[serde(default)]
+    pub transfer_to: Option<String>,
+    #[serde(default)]
+    pub greeting: String,
+    /// Inbound callers (E.164) allowed to reach the assistant on this line.
+    /// Empty accepts any caller. A listed caller is trusted; anyone else is an
+    /// unverified outside caller, whose Core voice session is opened with
+    /// `caller_trusted: false` so Core restricts that call's tools.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_callers: Vec<String>,
+    /// Maximum simultaneous calls (inbound and outbound) on this line. `None`
+    /// uses [`DEFAULT_PHONE_LINE_MAX_CONCURRENT_CALLS`]. Further inbound calls
+    /// are rejected as busy before any speech, model or voice work starts, and
+    /// further outbound calls are refused before Twilio is asked to place them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_calls: Option<u32>,
+}
+
+/// Simultaneous-call cap for a phone line that does not set one.
+pub const DEFAULT_PHONE_LINE_MAX_CONCURRENT_CALLS: u32 = 2;
+
+/// Upper bound for a configured per-line simultaneous-call cap.
+const MAX_PHONE_LINE_CONCURRENT_CALLS: u32 = 20;
+
+/// Upper bound on a line's inbound caller allowlist.
+const MAX_PHONE_LINE_ALLOWED_CALLERS: usize = 100;
+
+impl PhoneCallLineConfig {
+    /// The simultaneous-call cap in effect for this line.
+    pub fn concurrent_call_limit(&self) -> usize {
+        self.max_concurrent_calls
+            .unwrap_or(DEFAULT_PHONE_LINE_MAX_CONCURRENT_CALLS) as usize
+    }
+
+    /// Whether an inbound caller may reach the assistant on this line.
+    pub fn accepts_caller(&self, caller: &str) -> bool {
+        self.allowed_callers.is_empty() || self.lists_caller(caller)
+    }
+
+    /// Whether the caller is explicitly listed (and so trusted) on this line.
+    pub fn lists_caller(&self, caller: &str) -> bool {
+        self.allowed_callers.iter().any(|allowed| allowed == caller)
+    }
+}
+
+fn valid_phone_line_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn valid_e164(value: &str) -> bool {
+    let Some(digits) = value.strip_prefix('+') else {
+        return false;
+    };
+    (8..=15).contains(&digits.len())
+        && digits.bytes().all(|byte| byte.is_ascii_digit())
+        && !digits.starts_with('0')
+}
+
+#[cfg(test)]
+mod phone_calls_config_tests {
+    use super::{ChannelsConfig, PhoneCallLineConfig, PhoneCallsConfig};
+
+    fn line(id: &str, number: &str) -> PhoneCallLineConfig {
+        PhoneCallLineConfig {
+            id: id.to_owned(),
+            label: "Personal".to_owned(),
+            twilio_number: number.to_owned(),
+            caller_id: "+14155550100".to_owned(),
+            agent_id: Some("assistant.main".to_owned()),
+            tts_engine: None,
+            tts_voice: None,
+            transfer_to: Some("+14155550101".to_owned()),
+            greeting: "Keep it concise".to_owned(),
+            allowed_callers: Vec::new(),
+            max_concurrent_calls: None,
+        }
+    }
+
+    #[test]
+    fn phone_lines_validate_caller_allowlist_and_concurrency_cap() {
+        let mut guarded = line("personal", "+14155550123");
+        guarded.allowed_callers = vec!["+14155550199".to_owned()];
+        guarded.max_concurrent_calls = Some(1);
+        let config = PhoneCallsConfig {
+            enabled: true,
+            lines: vec![guarded.clone()],
+        };
+        assert!(config.validate().is_ok());
+        assert!(guarded.accepts_caller("+14155550199"));
+        assert!(!guarded.accepts_caller("+14155550100"));
+        assert_eq!(guarded.concurrent_call_limit(), 1);
+
+        let open = line("open", "+14155550124");
+        assert!(open.accepts_caller("+14155550100"));
+        assert!(!open.lists_caller("+14155550100"));
+        assert_eq!(
+            open.concurrent_call_limit(),
+            super::DEFAULT_PHONE_LINE_MAX_CONCURRENT_CALLS as usize
+        );
+
+        for bad in [
+            {
+                let mut bad = guarded.clone();
+                bad.allowed_callers = vec!["4155550199".to_owned()];
+                bad
+            },
+            {
+                let mut bad = guarded.clone();
+                bad.max_concurrent_calls = Some(0);
+                bad
+            },
+            {
+                let mut bad = guarded.clone();
+                bad.max_concurrent_calls = Some(21);
+                bad
+            },
+        ] {
+            let config = PhoneCallsConfig {
+                enabled: true,
+                lines: vec![bad],
+            };
+            assert!(config.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn disabled_empty_phone_policy_keeps_existing_gateway_toml_compact() {
+        let channels = toml::to_string(&ChannelsConfig::default()).unwrap();
+        assert!(!channels.contains("phone_calls"));
+    }
+
+    #[test]
+    fn phone_lines_validate_ids_numbers_and_bounds() {
+        let valid = PhoneCallsConfig {
+            enabled: true,
+            lines: vec![line("personal", "+14155550123")],
+        };
+        assert!(valid.validate().is_ok());
+
+        let duplicate_numbers = PhoneCallsConfig {
+            enabled: true,
+            lines: vec![line("one", "+14155550123"), line("two", "+14155550123")],
+        };
+        assert!(duplicate_numbers.validate().is_err());
+
+        let invalid_number = PhoneCallsConfig {
+            enabled: true,
+            lines: vec![line("personal", "4155550123")],
+        };
+        assert!(invalid_number.validate().is_err());
+    }
+
+    #[test]
+    fn inbound_only_line_can_omit_a_verified_caller_id() {
+        let mut inbound_only = line("personal", "+14155550123");
+        inbound_only.caller_id.clear();
+        let config = PhoneCallsConfig {
+            enabled: true,
+            lines: vec![inbound_only],
+        };
+        assert!(config.validate().is_ok());
+    }
 }
 
 // `GroupReplyMode`, `DmPolicy` and `GroupPolicy` are shared channel-domain types
@@ -5008,7 +6939,8 @@ pub struct CommonChannelFileConfig {
     /// edits.
     #[serde(default)]
     pub streaming: bool,
-    /// Add 👀/✅/❌ lifecycle reactions where the platform supports them.
+    /// Show 👀 while a turn runs and ❌ when it fails, where the platform supports
+    /// reactions. The agent's own `agents.react` reaction is mirrored either way.
     #[serde(default = "default_true")]
     pub lifecycle_reactions: bool,
     /// When to answer with synthesized speech alongside the text reply.
@@ -5519,20 +7451,20 @@ pub struct ComposioConfig {
     /// Allowlist of Composio action names the gateway may execute.
     #[serde(default)]
     pub actions: Vec<String>,
+    /// Usage-based upstream add-ons, with no Ryu Enterprise-plan gate. Enabling
+    /// ZDR here asserts it is already enabled on the executing Composio project.
+    #[serde(default)]
+    pub billing: ryu_gw_contracts::composio_billing::ComposioBillingPolicy,
     /// Maximum agentic loop rounds before returning the last response. Default: 3.
     #[serde(default = "default_composio_max_rounds")]
     pub max_rounds: u8,
-    /// Per-user entity ID that scopes connected accounts in Composio.
+    /// Fallback Composio user ID for an orgless, standalone Gateway.
     ///
-    /// Composio's entity model: each call to `/actions/{name}/execute` must
-    /// carry an `entityId` that identifies the connected-account owner. The
-    /// default value `"default"` is Composio's built-in fallback entity and
-    /// works for single-user / test setups. In multi-user deployments, the
-    /// gateway receives the caller identity in the `x-ryu-user-id` header
-    /// (forwarded by Core) and passes it here so each user's OAuth-connected
-    /// account is selected correctly. Override the startup default via the
-    /// `COMPOSIO_ENTITY_ID` env var; at runtime the pipeline will prefer
-    /// `RequestContext::user_id` when present (see pipeline/mod.rs).
+    /// Org-bound requests use an identity derived from the authenticated org
+    /// and, when available, a Gateway-verified user. A dynamic `rgw_` token
+    /// never accepts its caller-supplied `x-ryu-user-id` as Composio authority.
+    /// The default `"default"` remains for single-user/test setups; the
+    /// `COMPOSIO_ENTITY_ID` env var overrides only that standalone fallback.
     #[serde(default = "default_composio_entity_id")]
     pub entity_id: String,
 }
@@ -5551,6 +7483,7 @@ impl Default for ComposioConfig {
             enabled: false,
             api_key: None,
             actions: Vec::new(),
+            billing: Default::default(),
             max_rounds: default_composio_max_rounds(),
             entity_id: default_composio_entity_id(),
         }
@@ -5566,10 +7499,39 @@ pub struct TregConfig {
     /// Runtime-only secret, supplied by the environment or provider vault.
     #[serde(skip)]
     pub token: Option<String>,
+    /// Largest Treg response body, in bytes, the Gateway reads for one call or
+    /// catalog lookup. A larger call body fails with
+    /// `provider_response_too_large`; Treg already ran and metered the call, so
+    /// it is still charged, and only the body is withheld. Default: 2 MiB.
+    /// `RYU_TREG_MAX_RESPONSE_BYTES`.
+    #[serde(default = "default_treg_max_response_bytes")]
+    pub max_response_bytes: usize,
+    /// Operator-held per-call prices, in raw micro-USD before markup, keyed by
+    /// Treg endpoint id. A row here wins over Treg's catalog estimate when a
+    /// wallet-billed call is priced before it runs. An endpoint with neither a
+    /// row nor a catalog price is refused on the managed tier, never served free.
+    #[serde(default)]
+    pub prices: std::collections::BTreeMap<String, u64>,
+    /// Seconds a catalog price estimate is reused before it is fetched again.
+    /// Default: 600.
+    #[serde(default = "default_treg_price_cache_secs")]
+    pub price_cache_secs: u64,
 }
 
 fn default_treg_base_url() -> String {
     "https://treg.to".to_owned()
+}
+
+/// 2 MiB: well above any JSON tool response a metered call should return, and
+/// small enough that a misbehaving upstream cannot exhaust Gateway memory.
+pub const DEFAULT_TREG_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+
+fn default_treg_max_response_bytes() -> usize {
+    DEFAULT_TREG_MAX_RESPONSE_BYTES
+}
+
+fn default_treg_price_cache_secs() -> u64 {
+    600
 }
 
 impl Default for TregConfig {
@@ -5578,6 +7540,9 @@ impl Default for TregConfig {
             enabled: false,
             base_url: default_treg_base_url(),
             token: None,
+            max_response_bytes: default_treg_max_response_bytes(),
+            prices: std::collections::BTreeMap::new(),
+            price_cache_secs: default_treg_price_cache_secs(),
         }
     }
 }
@@ -5587,6 +7552,9 @@ impl std::fmt::Debug for TregConfig {
         f.debug_struct("TregConfig")
             .field("enabled", &self.enabled)
             .field("base_url", &self.base_url)
+            .field("max_response_bytes", &self.max_response_bytes)
+            .field("prices", &self.prices)
+            .field("price_cache_secs", &self.price_cache_secs)
             .field(
                 "token",
                 &self.token.as_ref().map(|_| "<set>").unwrap_or("<unset>"),
@@ -5654,6 +7622,22 @@ pub struct ConcurrencyConfig {
     /// `engine_overloaded` (503). Bounds memory/latency under a flood. Default 64.
     #[serde(default = "default_local_max_queued")]
     pub local_max_queued: u32,
+    /// Max requests one org may have in flight plus queued for the local
+    /// provider, so one org on a shared node cannot take every slot and queue
+    /// position. Unset = `local_max_in_flight + local_max_queued / 4`; `0`
+    /// disables the cap. Requests without an org are never capped by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_max_pending_per_org: Option<u32>,
+}
+
+impl ConcurrencyConfig {
+    /// The per-org cap after applying the unset default.
+    pub fn effective_local_max_pending_per_org(&self) -> u32 {
+        self.local_max_pending_per_org.unwrap_or_else(|| {
+            self.local_max_in_flight
+                .saturating_add(self.local_max_queued / 4)
+        })
+    }
 }
 
 impl Default for ConcurrencyConfig {
@@ -5662,6 +7646,7 @@ impl Default for ConcurrencyConfig {
             enabled: true,
             local_max_in_flight: default_local_max_in_flight(),
             local_max_queued: default_local_max_queued(),
+            local_max_pending_per_org: None,
         }
     }
 }
@@ -5732,7 +7717,7 @@ pub const ACP_MAX_PARALLEL_MIN: u32 = 1;
 pub const ACP_MAX_PARALLEL_MAX: u32 = 32;
 
 fn default_acp_idle_timeout_minutes() -> u32 {
-    10
+    5
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -5757,15 +7742,24 @@ pub struct MarketplaceRecommendationsConfig {
 /// `locked_use` is deliberately opt-in. A true value grants the node's
 /// computer-use provider permission to request a locked-session execution path;
 /// it does not itself unlock the operating system or bypass its safety prompts.
+///
+/// `security_key` is also opt-in: a stored permission for features that use a
+/// hardware security key (FIDO2/WebAuthn) connected to this node. No current
+/// feature reads it, and a key always requires its own touch or PIN.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ComputerUseConfig {
     #[serde(default)]
     pub locked_use: bool,
+    #[serde(default)]
+    pub security_key: bool,
 }
 
 impl Default for ComputerUseConfig {
     fn default() -> Self {
-        Self { locked_use: false }
+        Self {
+            locked_use: false,
+            security_key: false,
+        }
     }
 }
 
@@ -5799,6 +7793,9 @@ impl Default for GatewayConfig {
             public_contact: PublicContactConfig::default(),
             bind: default_bind(),
             providers: ProvidersConfig::default(),
+            provider_environment: None,
+            provider_vault_source: None,
+            egress: EgressConfig::default(),
             routing: RoutingConfig::default(),
             // Nothing derived until `load()` runs: a default config is the "we could
             // not read the file" fallback, and it has no env overlay applied yet.
@@ -5825,6 +7822,8 @@ impl Default for GatewayConfig {
             composio: ComposioConfig::default(),
             treg: TregConfig::default(),
             semantic_cache: SemanticCacheConfig::default(),
+            redis_cache: RedisCacheConfig::default(),
+            embedding_cache: EmbeddingCacheConfig::default(),
             budgets: BudgetConfig::default(),
             channels: ChannelsConfig::default(),
             control_plane: ControlPlaneConfig::default(),
@@ -5833,6 +7832,7 @@ impl Default for GatewayConfig {
             backends: StageBackendsConfig::default(),
             pipeline: crate::pipeline::stages::PipelineOrderConfig::default(),
             tools: ToolsConfig::default(),
+            screening: ScreeningConfig::default(),
             widget: WidgetConfig::default(),
             credits: CreditsConfig::default(),
             fleet: false,
@@ -5853,6 +7853,20 @@ impl Default for GatewayConfig {
 /// this one variable if each rolled its own window. One lock, one owner at a time.
 #[cfg(test)]
 pub(crate) mod test_config_path {
+    /// Give the test binary a fixed master key so authored writes can seal
+    /// `gateway.toml` secrets (production gets its key from Core or
+    /// `RYU_MASTER_KEY`). Same constant across tests, so every sealed fixture opens.
+    pub(crate) fn ensure_test_seal_key() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            // base64 of [7u8; 32]
+            std::env::set_var(
+                "RYU_MASTER_KEY",
+                "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+            );
+        });
+    }
+
     /// RAII window in which `GATEWAY_CONFIG` points at a private temp file.
     ///
     /// Restores the prior value and deletes the temp directory on drop, so a panicking
@@ -5878,6 +7892,7 @@ pub(crate) mod test_config_path {
             // A poisoned lock means an earlier guarded test panicked; the env was
             // still restored by its `Drop`, so the window is safe to re-enter.
             let lock = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            ensure_test_seal_key();
             let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let dir =
                 std::env::temp_dir().join(format!("ryu-gwcfg-{tag}-{}-{seq}", std::process::id()));
@@ -5913,2666 +7928,77 @@ pub(crate) mod test_config_path {
 }
 
 #[cfg(test)]
-mod marketplace_recommendations_config_tests {
-    use super::{GatewayConfig, MarketplaceRecommendationsCadence};
-
-    #[test]
-    fn defaults_and_toml_round_trip_preserve_weekly_policy() {
-        let mut config = GatewayConfig::default();
-        assert!(config.marketplace_recommendations.enabled);
-        assert_eq!(
-            config.marketplace_recommendations.cadence,
-            MarketplaceRecommendationsCadence::Weekly
-        );
-
-        config.marketplace_recommendations.cadence = MarketplaceRecommendationsCadence::Monthly;
-        let encoded = toml::to_string(&config).expect("serialize gateway config");
-        let decoded: GatewayConfig = toml::from_str(&encoded).expect("deserialize gateway config");
-        assert_eq!(
-            decoded.marketplace_recommendations,
-            config.marketplace_recommendations
-        );
-    }
-
-    #[test]
-    fn cadence_accepts_only_daily_weekly_or_monthly() {
-        for cadence in ["daily", "weekly", "monthly"] {
-            let value = format!("cadence = \"{cadence}\"");
-            toml::from_str::<super::MarketplaceRecommendationsConfig>(&value)
-                .expect("supported cadence");
-        }
-        assert!(
-            toml::from_str::<super::MarketplaceRecommendationsConfig>("cadence = \"hourly\"")
-                .is_err()
-        );
-    }
-}
+#[path = "config/tests/sealed_secret_tests.rs"]
+mod sealed_secret_tests;
 
 #[cfg(test)]
-mod computer_use_config_tests {
-    use super::{ComputerUseConfig, GatewayConfig};
-
-    #[test]
-    fn locked_use_defaults_off_and_round_trips() {
-        let mut config = GatewayConfig::default();
-        assert!(!config.computer_use.locked_use);
-
-        config.computer_use = ComputerUseConfig { locked_use: true };
-        let encoded = toml::to_string(&config).expect("serialize gateway config");
-        let decoded: GatewayConfig = toml::from_str(&encoded).expect("deserialize gateway config");
-        assert!(decoded.computer_use.locked_use);
-    }
-
-    #[test]
-    fn missing_computer_use_section_keeps_locked_use_disabled() {
-        let decoded: GatewayConfig = toml::from_str("[auth]\nrequire_auth = false\n")
-            .expect("partial gateway config parses");
-        assert!(!decoded.computer_use.locked_use);
-    }
-}
+#[path = "config/tests/marketplace_recommendations_config_tests.rs"]
+mod marketplace_recommendations_config_tests;
 
 #[cfg(test)]
-mod local_embed_endpoint_tests {
-    use super::{local_embed_base_url, DEFAULT_EMBED_PORT};
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    struct EnvVar {
-        name: &'static str,
-        prior: Option<std::ffi::OsString>,
-        _lock: std::sync::MutexGuard<'static, ()>,
-    }
-
-    impl EnvVar {
-        fn set(name: &'static str, value: &str) -> Self {
-            let lock = ENV_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let prior = std::env::var_os(name);
-            std::env::set_var(name, value);
-            Self {
-                name,
-                prior,
-                _lock: lock,
-            }
-        }
-        fn cleared(name: &'static str) -> Self {
-            let lock = ENV_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let prior = std::env::var_os(name);
-            std::env::remove_var(name);
-            Self {
-                name,
-                prior,
-                _lock: lock,
-            }
-        }
-    }
-    impl Drop for EnvVar {
-        fn drop(&mut self) {
-            match self.prior.take() {
-                Some(prior) => std::env::set_var(self.name, prior),
-                None => std::env::remove_var(self.name),
-            }
-        }
-    }
-
-    /// The default must be the PROFILE-ADJUSTED embed port, not a bare 8081. A dev
-    /// gateway that dials the release sidecar embeds against whatever model the
-    /// other profile happens to be serving, which is a silently wrong vector rather
-    /// than an error.
-    #[test]
-    fn defaults_to_the_profile_adjusted_embed_port() {
-        let _env = EnvVar::cleared("RYU_EMBED_LLM_URL");
-        let expected = format!(
-            "http://127.0.0.1:{}/v1",
-            crate::profile::port(DEFAULT_EMBED_PORT)
-        );
-        assert_eq!(local_embed_base_url(), expected);
-    }
-
-    /// `RYU_EMBED_LLM_URL` wins, mirroring `RYU_CLASSIFY_LLM_URL` for the classify
-    /// tier — that is how a Core-spawned gateway is repointed.
-    #[test]
-    fn env_override_wins() {
-        let _env = EnvVar::set("RYU_EMBED_LLM_URL", "http://10.0.0.4:9999/v1");
-        assert_eq!(local_embed_base_url(), "http://10.0.0.4:9999/v1");
-    }
-
-    /// A blank or whitespace-only override is not an endpoint. Treating it as one
-    /// would send every embed call to the empty string and fail every request,
-    /// where falling back to the local sidecar still works.
-    #[test]
-    fn blank_override_falls_back_to_the_local_sidecar() {
-        let _env = EnvVar::set("RYU_EMBED_LLM_URL", "   ");
-        let expected = format!(
-            "http://127.0.0.1:{}/v1",
-            crate::profile::port(DEFAULT_EMBED_PORT)
-        );
-        assert_eq!(local_embed_base_url(), expected);
-    }
-}
+#[path = "config/tests/computer_use_config_tests.rs"]
+mod computer_use_config_tests;
 
 #[cfg(test)]
-mod admin_key_env_tests {
-    use super::test_config_path::ConfigPathGuard;
-    use super::GatewayConfig;
-
-    /// Restore one env var on drop, so a panicking test cannot leak it into the
-    /// rest of the binary. The `ConfigPathGuard` the caller also holds serializes
-    /// these windows against each other.
-    struct EnvVar(&'static str, Option<std::ffi::OsString>);
-    impl EnvVar {
-        fn set(name: &'static str, value: &str) -> Self {
-            let prior = std::env::var_os(name);
-            std::env::set_var(name, value);
-            Self(name, prior)
-        }
-        fn cleared(name: &'static str) -> Self {
-            let prior = std::env::var_os(name);
-            std::env::remove_var(name);
-            Self(name, prior)
-        }
-    }
-    impl Drop for EnvVar {
-        fn drop(&mut self) {
-            match self.1.take() {
-                Some(prior) => std::env::set_var(self.0, prior),
-                None => std::env::remove_var(self.0),
-            }
-        }
-    }
-
-    /// Provisioning an administrator retains the authenticated default.
-    #[test]
-    fn admin_key_preserves_authenticated_default() {
-        let _path = ConfigPathGuard::isolated("admin-key");
-        let _master = EnvVar::cleared("GATEWAY_MASTER_KEY");
-        let _admin = EnvVar::set(
-            "GATEWAY_ADMIN_KEY",
-            "gwadm_0123456789abcdef0123456789abcdef",
-        );
-
-        let cfg = GatewayConfig::load().expect("gateway config loads");
-        assert_eq!(
-            cfg.auth.master_key.as_deref(),
-            Some("gwadm_0123456789abcdef0123456789abcdef")
-        );
-        assert!(
-            cfg.auth.require_auth,
-            "authentication must be enabled by default"
-        );
-    }
-
-    /// An operator's explicit master key outranks the one Core mints for itself —
-    /// and keeps its `require_auth` semantics.
-    #[test]
-    fn explicit_master_key_outranks_admin_key() {
-        let _path = ConfigPathGuard::isolated("admin-key-precedence");
-        let _master = EnvVar::set(
-            "GATEWAY_MASTER_KEY",
-            "operator_0123456789abcdef0123456789abcdef",
-        );
-        let _admin = EnvVar::set(
-            "GATEWAY_ADMIN_KEY",
-            "gwadm_0123456789abcdef0123456789abcdef",
-        );
-
-        let cfg = GatewayConfig::load().expect("gateway config loads");
-        assert_eq!(
-            cfg.auth.master_key.as_deref(),
-            Some("operator_0123456789abcdef0123456789abcdef")
-        );
-        assert!(cfg.auth.require_auth);
-    }
-
-    /// An explicitly blank credential is a startup error, never an auth opt-out.
-    #[test]
-    fn blank_admin_key_is_rejected() {
-        let _path = ConfigPathGuard::isolated("admin-key-blank");
-        let _master = EnvVar::cleared("GATEWAY_MASTER_KEY");
-        let _admin = EnvVar::set("GATEWAY_ADMIN_KEY", "   ");
-        assert!(GatewayConfig::load().is_err());
-    }
-}
+#[path = "config/tests/local_embed_endpoint_tests.rs"]
+mod local_embed_endpoint_tests;
 
 #[cfg(test)]
-mod prompt_cache_config_tests {
-    use super::{GatewayConfig, PromptCacheConfig};
-    use ryu_gw_providers::PromptCacheMode;
-
-    #[test]
-    fn default_is_off_so_an_existing_config_bills_the_same() {
-        let cfg = PromptCacheConfig::default();
-        assert_eq!(cfg.mode, "off");
-        assert_eq!(cfg.options().mode, PromptCacheMode::Off);
-        assert!(!cfg.session_affinity);
-        assert!(cfg.allow_request_override);
-        // A gateway.toml with no [prompt_cache] table deserializes to the same.
-        assert_eq!(GatewayConfig::default().prompt_cache, cfg);
-    }
-
-    #[test]
-    fn a_missing_table_deserializes_to_the_off_default() {
-        let cfg: PromptCacheConfig =
-            serde_json::from_value(serde_json::json!({})).expect("all fields default");
-        assert_eq!(cfg, PromptCacheConfig::default());
-    }
-
-    #[test]
-    fn options_map_every_knob_through() {
-        let cfg = PromptCacheConfig {
-            mode: "explicit".into(),
-            ttl: " 1h ".into(),
-            min_prefix_tokens: 4096,
-            breakpoints: 4,
-            session_affinity: true,
-            allow_request_override: false,
-        };
-        let o = cfg.options();
-        assert_eq!(o.mode, PromptCacheMode::Explicit);
-        assert_eq!(o.ttl.as_deref(), Some("1h"), "ttl is trimmed");
-        assert_eq!(o.min_prefix_tokens, 4096);
-        assert_eq!(o.breakpoints, 4);
-        assert!(o.session_affinity);
-    }
-
-    #[test]
-    fn an_unparseable_mode_falls_back_to_off_not_on() {
-        // A typo must never silently start billing cache writes.
-        let cfg = PromptCacheConfig {
-            mode: "atuo".into(),
-            ..Default::default()
-        };
-        assert_eq!(cfg.options().mode, PromptCacheMode::Off);
-    }
-
-    #[test]
-    fn an_empty_ttl_means_the_provider_default() {
-        let cfg = PromptCacheConfig {
-            mode: "auto".into(),
-            ttl: "   ".into(),
-            ..Default::default()
-        };
-        assert_eq!(cfg.options().ttl, None);
-    }
-
-    #[test]
-    fn an_unsupported_ttl_degrades_instead_of_being_forwarded() {
-        // `10m` is not a documented value: forwarding it would be rejected
-        // upstream mid-request, and on the Anthropic path it would also trigger
-        // the extended-TTL beta header. Degrade to the provider default.
-        for bad in ["10m", "forever", "3600"] {
-            let cfg = PromptCacheConfig {
-                mode: "auto".into(),
-                ttl: bad.into(),
-                ..Default::default()
-            };
-            assert_eq!(cfg.options().ttl, None, "{bad}");
-        }
-        // Case-insensitive on the values that ARE supported.
-        let cfg = PromptCacheConfig {
-            mode: "auto".into(),
-            ttl: " 1H ".into(),
-            ..Default::default()
-        };
-        assert_eq!(cfg.options().ttl.as_deref(), Some("1h"));
-    }
-}
+#[path = "config/tests/admin_key_env_tests.rs"]
+mod admin_key_env_tests;
 
 #[cfg(test)]
-mod provider_id_tests {
-    use super::{ProviderId, ProviderKind, RoutingConfig};
-
-    /// Provider routing is keyed by open registry-id strings: an existing config
-    /// naming one of the nine legacy providers deserializes byte-identically, AND
-    /// a brand-new id (`"acme"`) that no enum variant covers survives round-trip
-    /// through every routing field — including the `provider_tiers` map KEY, the
-    /// one spot where a non-transparent newtype Deserialize would silently drop it.
-    #[test]
-    fn legacy_and_novel_provider_ids_roundtrip_via_serde() {
-        let json = serde_json::json!({
-            "default_provider": "acme",
-            "fallback_chain": ["openai", "acme"],
-            "provider_tiers": { "openai": 0, "acme": 2 },
-            "model_map": { "my-model": { "provider": "acme" } }
-        });
-
-        let routing: RoutingConfig = serde_json::from_value(json)
-            .expect("routing config with a novel provider id must parse");
-
-        // Legacy name lowers to the same string it always was (back-compat).
-        assert_eq!(routing.default_provider, ProviderId::from("acme"));
-        assert_eq!(routing.fallback_chain[0], ProviderKind::OpenAi); // "openai" legacy id
-        assert_eq!(routing.fallback_chain[1], ProviderId::from("acme"));
-
-        // The map KEY is the serde trap — both legacy and novel keys must survive.
-        assert_eq!(
-            routing.provider_tiers.get(&ProviderId::from("openai")),
-            Some(&0)
-        );
-        assert_eq!(
-            routing.provider_tiers.get(&ProviderId::from("acme")),
-            Some(&2)
-        );
-
-        assert_eq!(
-            routing.model_map.get("my-model").unwrap().provider,
-            ProviderId::from("acme")
-        );
-
-        // And it serializes back out as a bare string (no enum-shaped wrapper),
-        // so the wire stays identical to the pre-open-id format.
-        let back = serde_json::to_value(&routing).expect("serialize");
-        assert_eq!(back["default_provider"], "acme");
-        assert_eq!(back["fallback_chain"][0], "openai");
-    }
-
-    /// The empty/zero-config case keeps `default_provider = "openai"`, exactly as
-    /// the former `ProviderKind::default() == OpenAi` produced.
-    #[test]
-    fn default_provider_id_is_openai() {
-        assert_eq!(ProviderId::default(), ProviderKind::OpenAi);
-        assert_eq!(
-            RoutingConfig::default().default_provider,
-            ProviderKind::OpenAi
-        );
-    }
-}
+#[path = "config/tests/prompt_cache_config_tests.rs"]
+mod prompt_cache_config_tests;
 
 #[cfg(test)]
-mod capacity_config_tests {
-    use super::{ControlPlaneConfig, ModelPrice, OpenAiProviderConfig};
-    use std::collections::HashMap;
-
-    #[test]
-    fn all_keys_falls_back_to_single_key() {
-        let c = OpenAiProviderConfig {
-            api_key: "sk-primary".into(),
-            api_keys: vec![],
-            base_url: super::openai_base_url(),
-        };
-        assert_eq!(c.all_keys(), vec!["sk-primary".to_string()]);
-    }
-
-    #[test]
-    fn all_keys_merges_and_dedupes() {
-        let c = OpenAiProviderConfig {
-            api_key: "sk-a".into(),
-            api_keys: vec!["sk-b".into(), "sk-a".into(), "".into()],
-            base_url: super::openai_base_url(),
-        };
-        // Primary first, extras appended, dupes + blanks dropped.
-        assert_eq!(c.all_keys(), vec!["sk-a".to_string(), "sk-b".to_string()]);
-    }
-
-    #[test]
-    fn cost_for_uses_flat_rate_without_a_price_table() {
-        let cp = ControlPlaneConfig::default(); // 2000 micro-USD / 1k combined
-                                                // 500 in + 500 out = 1000 tokens ⇒ 2000 micro-USD.
-        assert_eq!(cp.cost_for("gpt-4o", 500, 500), 2000);
-    }
-
-    #[test]
-    fn cost_for_prefers_per_model_prefix_pricing() {
-        let mut pricing = HashMap::new();
-        pricing.insert(
-            "claude-sonnet".to_string(),
-            ModelPrice {
-                input_per_1k_micro_usd: 3000,
-                output_per_1k_micro_usd: 15000,
-            },
-        );
-        let cp = ControlPlaneConfig {
-            model_pricing: pricing,
-            ..Default::default()
-        };
-        // Longest-prefix match on the versioned id: 1k in (3000) + 1k out (15000).
-        assert_eq!(cp.cost_for("claude-sonnet-4-5-20250929", 1000, 1000), 18000);
-        // An unpriced model falls back to the flat 2000/1k rate.
-        assert_eq!(cp.cost_for("gpt-4o", 1000, 0), 2000);
-    }
-}
+#[path = "config/tests/provider_id_tests.rs"]
+mod provider_id_tests;
 
 #[cfg(test)]
-mod credits_config_tests {
-    use super::{
-        CreditsConfig, GpuKind, Modality, OsKind, ProviderBillingPolicy, ProviderId,
-        WalletEmptyAction,
-    };
-
-    #[test]
-    fn debit_amount_passthrough_at_zero_bps() {
-        let c = CreditsConfig::default();
-        assert_eq!(c.markup_bps, 0);
-        // bps=0 ⇒ identity.
-        assert_eq!(c.debit_amount(0), 0);
-        assert_eq!(c.debit_amount(1), 1);
-        assert_eq!(c.debit_amount(1_000_000), 1_000_000);
-    }
-
-    #[test]
-    fn debit_amount_applies_markup_round_half_up() {
-        let c = CreditsConfig {
-            markup_bps: 2000, // +20%
-            ..Default::default()
-        };
-        // 1000 * 12000 / 10000 = 1200 exactly.
-        assert_eq!(c.debit_amount(1000), 1200);
-        // 1 * 12000 / 10000 = 1.2 → round-half-up → 1.
-        assert_eq!(c.debit_amount(1), 1);
-        // 5 * 12000 = 60000, +5000 = 65000, /10000 = 6 (was 6.0).
-        assert_eq!(c.debit_amount(5), 6);
-    }
-
-    #[test]
-    fn debit_amount_rounds_half_up_at_boundary() {
-        // 50 bps markup: 100 * 10050 = 1_005_000, +5000 = 1_010_000, /10000 = 101.
-        let c = CreditsConfig {
-            markup_bps: 50,
-            ..Default::default()
-        };
-        assert_eq!(c.debit_amount(100), 101);
-    }
-
-    #[test]
-    fn undo_debit_amount_inverts_the_markup_without_overshooting() {
-        // Sizes a spend ceiling, so it must never return a raw cost whose DEBIT
-        // exceeds the budget it was derived from — that would hand out a ceiling
-        // the charge then breaks through, which is the overdraft it exists to
-        // prevent. Round DOWN, and verify the round trip stays inside.
-        let c = CreditsConfig {
-            markup_bps: 10_000, // +100%: charged = 2x raw
-            ..Default::default()
-        };
-        assert_eq!(c.undo_debit_amount(50_000), 25_000);
-        assert!(c.debit_amount(c.undo_debit_amount(50_000)) <= 50_000);
-
-        // Pass-through at zero bps.
-        let free = CreditsConfig::default();
-        assert_eq!(free.markup_bps, 0);
-        assert_eq!(free.undo_debit_amount(1_234), 1_234);
-
-        // Odd rates must still not overshoot after the round trip.
-        let odd = CreditsConfig {
-            markup_bps: 333,
-            ..Default::default()
-        };
-        for budget in [1_u64, 7, 99, 1000, 999_999] {
-            assert!(
-                odd.debit_amount(odd.undo_debit_amount(budget)) <= budget,
-                "round trip overshot the budget at {budget}"
-            );
-        }
-    }
-
-    #[test]
-    fn is_active_requires_enabled_url_and_secret() {
-        let base = CreditsConfig {
-            enabled: true,
-            internal_secret: Some("s".to_string()),
-            ..Default::default()
-        };
-        assert!(base.is_active());
-
-        let no_secret = CreditsConfig {
-            internal_secret: None,
-            ..base.clone()
-        };
-        assert!(!no_secret.is_active());
-
-        let blank_secret = CreditsConfig {
-            internal_secret: Some("  ".to_string()),
-            ..base.clone()
-        };
-        assert!(!blank_secret.is_active());
-
-        let disabled = CreditsConfig {
-            enabled: false,
-            ..base.clone()
-        };
-        assert!(!disabled.is_active());
-
-        let no_url = CreditsConfig {
-            base_url: "  ".to_string(),
-            ..base
-        };
-        assert!(!no_url.is_active());
-    }
-
-    #[test]
-    fn wallet_empty_action_defaults_to_stop() {
-        assert_eq!(WalletEmptyAction::default(), WalletEmptyAction::Stop);
-    }
-
-    #[test]
-    fn reservation_defaults_survive_a_partial_credits_table() {
-        // THE DRIFT THIS CATCHES: `Default for CreditsConfig` and the serde
-        // `default = "…"` fns are two separate declarations of the same number.
-        // If they disagree, an ABSENT `[credits]` table and a PRESENT one that
-        // omits these keys behave differently — and for `reserve_enabled` that
-        // difference is "concurrent requests are bounded" vs "they are not".
-        let absent: crate::GatewayConfig = toml::from_str("").expect("empty config parses");
-        assert!(absent.credits.reserve_enabled);
-        assert_eq!(absent.credits.min_reserve_micro_usd, 10_000);
-
-        let partial: crate::GatewayConfig = toml::from_str(
-            r#"
-[credits]
-enabled = true
-"#,
-        )
-        .expect("partial credits table parses");
-        assert!(
-            partial.credits.reserve_enabled,
-            "omitting the key must not silently disable the reservation"
-        );
-        assert_eq!(partial.credits.min_reserve_micro_usd, 10_000);
-        assert_eq!(
-            partial.credits.reserve_enabled,
-            CreditsConfig::default().reserve_enabled
-        );
-        assert!(
-            partial.credits.fail_closed,
-            "omitting fail_closed must not silently re-enable unbilled managed spend"
-        );
-        assert_eq!(
-            partial.credits.fail_closed,
-            CreditsConfig::default().fail_closed
-        );
-        assert_eq!(
-            partial.credits.min_reserve_micro_usd,
-            CreditsConfig::default().min_reserve_micro_usd
-        );
-    }
-
-    #[test]
-    fn provider_billing_policy_round_trips_from_gateway_config() {
-        let config: crate::GatewayConfig = toml::from_str(
-            r#"
-[credits]
-[credits.provider_billing.whatsapp]
-mode = "pass_through"
-
-[credits.provider_billing.openrouter]
-mode = "pass_through"
-"#,
-        )
-        .expect("provider pass-through config parses");
-
-        let encoded = serde_json::to_value(config.credits).expect("credits serialize");
-        assert_eq!(
-            encoded["provider_billing"]["whatsapp"]["mode"],
-            "pass_through"
-        );
-        assert_eq!(
-            encoded["provider_billing"]["openrouter"]["mode"],
-            "pass_through"
-        );
-    }
-
-    #[test]
-    fn provider_pass_through_bypasses_global_markup_only_for_that_provider() {
-        let config = CreditsConfig {
-            markup_bps: 2000,
-            provider_billing: [(
-                ProviderId::from("WhatsApp"),
-                ProviderBillingPolicy {
-                    mode: super::ProviderBillingMode::PassThrough,
-                },
-            )]
-            .into_iter()
-            .collect(),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            config.debit_amount_for_provider(Some("whatsapp"), 1000),
-            1000
-        );
-        assert_eq!(
-            config.debit_amount_for_provider(Some("openrouter"), 1000),
-            1200
-        );
-        assert_eq!(config.debit_amount_for_provider(None, 1000), 1200);
-        assert_eq!(
-            config.undo_debit_amount_for_provider(Some("WHATSAPP"), 1000),
-            1000
-        );
-        assert_eq!(
-            config.undo_debit_amount_for_provider(Some("openrouter"), 1200),
-            1000
-        );
-    }
-
-    #[test]
-    fn the_tool_call_rate_defaults_to_composios_cost() {
-        // AT COST. Composio's standard rate is $0.30/1k executions, so the
-        // default is 300 micro-USD per call and the customer pays exactly what we pay.
-        // Margin is the deposit fee, never a per-unit markup.
-        assert_eq!(CreditsConfig::default().cost_per_tool_call_micro_usd, 300);
-        assert_eq!(CreditsConfig::default().markup_bps, 0);
-    }
-
-    #[test]
-    fn the_boot_gate_passes_on_the_default_rates() {
-        // The boot failure the gate was cut back to avoid — a node refusing to
-        // start until someone invented numbers — cannot happen now that every
-        // gated rate carries a real default. Nothing set, credits on, boots.
-        let c = CreditsConfig {
-            enabled: true,
-            ..Default::default()
-        };
-        assert!(c.validate_metered_rates().is_ok());
-    }
-
-    #[test]
-    fn zeroing_tts_or_stt_fails_the_boot_gate() {
-        // TTS and STT are served synchronously and have NO second cost source, so
-        // a flat rate of 0 there is not an unreached fallback — it is the only
-        // number the debit will ever see, and `if cost > 0` then skips it. An
-        // explicit 0 is a deliberate give-away and must be stated as one via
-        // GATEWAY_CREDITS_ALLOW_FREE_MODALITIES, not left in a blank.
-        let tts = CreditsConfig {
-            enabled: true,
-            cost_per_tts_micro_usd: 0,
-            ..Default::default()
-        };
-        assert!(tts.validate_metered_rates().is_err());
-
-        let stt = CreditsConfig {
-            enabled: true,
-            cost_per_stt_micro_usd: 0,
-            ..Default::default()
-        };
-        assert!(stt.validate_metered_rates().is_err());
-    }
-
-    #[test]
-    fn zeroing_any_media_fallback_fails_the_boot_gate() {
-        for (name, field) in [
-            ("image", Modality::Image),
-            ("video", Modality::Video),
-            ("tts", Modality::Tts),
-            ("stt", Modality::Stt),
-        ] {
-            let mut c = CreditsConfig {
-                enabled: true,
-                ..Default::default()
-            };
-            match field {
-                Modality::Image => c.cost_per_image_micro_usd = 0,
-                Modality::Video => c.cost_per_video_micro_usd = 0,
-                Modality::Tts => c.cost_per_tts_micro_usd = 0,
-                Modality::Stt => c.cost_per_stt_micro_usd = 0,
-                Modality::Chat => unreachable!("chat has no media fallback"),
-            }
-            assert!(
-                c.validate_metered_rates().is_err(),
-                "zero {name} fallback must fail the billing startup gate"
-            );
-        }
-    }
-
-    #[test]
-    fn zeroing_the_tool_rate_still_fails_the_boot_gate() {
-        let c = CreditsConfig {
-            enabled: true,
-            cost_per_tool_call_micro_usd: 0,
-            ..Default::default()
-        };
-        assert!(c.validate_metered_rates().is_err());
-    }
-
-    #[test]
-    fn tool_call_cost_is_flat_per_call_and_saturates() {
-        let c = CreditsConfig {
-            cost_per_tool_call_micro_usd: 500,
-            ..Default::default()
-        };
-        assert_eq!(c.tool_call_cost_micro_usd(0), 0);
-        assert_eq!(c.tool_call_cost_micro_usd(3), 1500);
-        // Saturating on overflow rather than wrapping.
-        assert_eq!(c.tool_call_cost_micro_usd(u64::MAX), u64::MAX);
-    }
-
-    #[test]
-    fn media_is_priced_from_the_compute_time_the_provider_reported() {
-        // THE POINT OF THE WHOLE CHANGE. A flat per-call rate charges a 2s image
-        // and a 60s video the same; this bills what the transaction actually
-        // consumed.
-        let c = CreditsConfig {
-            cost_per_gpu_second_micro_usd: 1000,
-            cost_per_image_micro_usd: 40_000,
-            ..Default::default()
-        };
-        let response = serde_json::json!({ "usage": { "compute_seconds": 2.5 } });
-        let (cost, estimated) = c.media_cost_from_response(&Modality::Image, &response);
-        assert_eq!(cost, 2500);
-        assert!(!estimated);
-    }
-
-    #[test]
-    fn media_prefers_provider_reported_cost_including_openrouter_raw_payload() {
-        let c = CreditsConfig {
-            cost_per_gpu_second_micro_usd: 1000,
-            cost_per_image_micro_usd: 40_000,
-            ..Default::default()
-        };
-        let response = serde_json::json!({
-            "data": [{ "url": "data:image/png;base64,AAA" }],
-            "raw": { "usage": { "cost": 0.012345 }, "choices": [] }
-        });
-        let (cost, estimated) = c.media_cost_from_response(&Modality::Image, &response);
-        assert_eq!(cost, 12_345);
-        assert!(!estimated);
-    }
-
-    #[test]
-    fn a_partial_gpu_second_rounds_up_rather_than_leaking() {
-        let c = CreditsConfig {
-            cost_per_gpu_second_micro_usd: 1000,
-            ..Default::default()
-        };
-        let response = serde_json::json!({ "usage": { "compute_seconds": 0.0011 } });
-        let (cost, _) = c.media_cost_from_response(&Modality::Image, &response);
-        assert_eq!(cost, 2);
-    }
-
-    #[test]
-    fn a_response_with_no_usage_falls_back_and_is_marked_estimated() {
-        // The flag is what lets a later reconciliation tell a guess from a
-        // measurement; without it the two rows are identical.
-        let c = CreditsConfig {
-            cost_per_gpu_second_micro_usd: 1000,
-            cost_per_video_micro_usd: 90_000,
-            ..Default::default()
-        };
-        let (cost, estimated) =
-            c.media_cost_from_response(&Modality::Video, &serde_json::json!({ "data": [] }));
-        assert_eq!(cost, 90_000);
-        assert!(estimated);
-    }
-
-    #[test]
-    fn tts_and_stt_flat_rates_are_not_marked_as_estimated() {
-        let c = CreditsConfig::default();
-        for modality in [Modality::Tts, Modality::Stt] {
-            let (cost, estimated) = c.media_cost_from_response(&modality, &serde_json::json!({}));
-            assert!(cost > 0);
-            assert!(!estimated, "{modality:?} flat rate is its configured price");
-        }
-    }
-
-    #[test]
-    fn an_async_video_job_bills_from_the_provider_payload_not_the_flat_rate() {
-        // REGRESSION. The async video-job debit (submit + poll, in
-        // `pipeline::mod`) called the flat `media_cost_micro_usd` directly and
-        // then guarded on `if cost > 0`. `cost_per_video_micro_usd` defaults to
-        // 0, so under a default config every completed async video job billed
-        // NOTHING — while the startup gate had stopped guarding the video rate
-        // precisely because video was believed to be metered from provider cost.
-        // That belief was true of the synchronous path only.
-        //
-        // The payload shape here is the one those call sites now pass:
-        // `MediaJob::to_response()` flattens the provider's output, so
-        // `usage.compute_seconds` sits at the top level next to `data`.
-        let c = CreditsConfig {
-            cost_per_gpu_second_micro_usd: 975,
-            // Explicitly zeroed — the shape that was silent back when 0 was also
-            // the default for this field.
-            cost_per_video_micro_usd: 0,
-            ..Default::default()
-        };
-        let flattened_job_response = serde_json::json!({
-            "id": "vid_1",
-            "status": "succeeded",
-            "data": [{ "url": "https://example.invalid/v.mp4" }],
-            "usage": { "compute_seconds": 12.0 },
-        });
-        let (cost, estimated) =
-            c.media_cost_from_response(&Modality::Video, &flattened_job_response);
-        assert_eq!(cost, 11_700, "12s x $0.000975/s");
-        assert!(!estimated);
-        // And the property that actually failed: a real charge, not zero.
-        assert!(cost > 0, "an async video job must never bill nothing");
-    }
-
-    #[test]
-    fn the_gpu_second_rate_defaults_to_replicates_published_l40s_price() {
-        // $0.000975/sec. A real published figure, not an invented one.
-        assert_eq!(CreditsConfig::default().cost_per_gpu_second_micro_usd, 975);
-    }
-
-    #[test]
-    fn media_cost_is_per_modality_and_chat_is_never_metered() {
-        let c = CreditsConfig {
-            cost_per_image_micro_usd: 10,
-            cost_per_video_micro_usd: 20,
-            cost_per_tts_micro_usd: 3,
-            cost_per_stt_micro_usd: 4,
-            ..Default::default()
-        };
-        assert_eq!(c.media_cost_micro_usd(&Modality::Image), 10);
-        assert_eq!(c.media_cost_micro_usd(&Modality::Video), 20);
-        assert_eq!(c.media_cost_micro_usd(&Modality::Tts), 3);
-        assert_eq!(c.media_cost_micro_usd(&Modality::Stt), 4);
-        // Chat is billed on real token usage, never on a flat media rate.
-        assert_eq!(c.media_cost_micro_usd(&Modality::Chat), 0);
-    }
-
-    #[test]
-    fn gpu_rate_nano_maps_each_tier_and_none_is_free() {
-        let c = CreditsConfig::default();
-        assert_eq!(c.gpu_rate_nano(GpuKind::None), 0);
-        assert_eq!(c.gpu_rate_nano(GpuKind::H200), 1_261_000);
-        assert_eq!(c.gpu_rate_nano(GpuKind::H100), 1_097_000);
-        assert_eq!(c.gpu_rate_nano(GpuKind::RtxPro6000), 842_000);
-        assert_eq!(c.gpu_rate_nano(GpuKind::Rtx5090), 358_000);
-        assert_eq!(c.gpu_rate_nano(GpuKind::Rtx4090), 275_000);
-    }
-
-    #[test]
-    fn sandbox_tick_sums_cpu_mem_storage_above_free_tier() {
-        let c = CreditsConfig::default();
-        // 2 vcpu (14000) + 4 GiB mem (4500) + (10-5)=5 billable storage GiB (30),
-        // Linux, no GPU, 1 second:
-        //   2*14000 + 4*4500 + 5*30 = 28000 + 18000 + 150 = 46150 nano/sec.
-        //   (46150 + 500) / 1000 = 46 micro (round-half-up).
-        assert_eq!(
-            c.sandbox_tick_cost_raw_micro(2, 4, 10, GpuKind::None, 0, OsKind::Linux, 1),
-            46
-        );
-    }
-
-    #[test]
-    fn sandbox_tick_bills_no_storage_within_the_free_tier() {
-        let c = CreditsConfig::default();
-        // 5 GiB storage == the free tier ⇒ zero storage cost. Only 1 vcpu counts.
-        //   1*14000 = 14000 nano ⇒ (14000+500)/1000 = 14 micro.
-        assert_eq!(
-            c.sandbox_tick_cost_raw_micro(1, 0, 5, GpuKind::None, 0, OsKind::Linux, 1),
-            14
-        );
-    }
-
-    #[test]
-    fn sandbox_tick_bills_a_zero_count_gpu_as_one() {
-        let c = CreditsConfig::default();
-        // A non-None GPU tier with gpu_count=0 still bills as 1 GPU (the invariant
-        // in the doc comment): 1 vcpu (14000) + 1 * H200 (1_261_000) = 1_275_000 nano
-        //   ⇒ (1_275_000 + 500)/1000 = 1275 micro.
-        assert_eq!(
-            c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::H200, 0, OsKind::Linux, 1),
-            1275
-        );
-    }
-
-    #[test]
-    fn sandbox_tick_adds_windows_vcpu_surcharge() {
-        let c = CreditsConfig::default();
-        // Windows adds a per-vcpu surcharge (23800 nano/vcpu-sec) on top of the base
-        // vcpu rate: 1*14000 + 1*23800 = 37800 ⇒ (37800+500)/1000 = 38 micro.
-        assert_eq!(
-            c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Windows, 1),
-            38
-        );
-        // Linux has no such surcharge — same shape costs less.
-        assert_eq!(
-            c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Linux, 1),
-            14
-        );
-    }
-
-    #[test]
-    fn sandbox_tick_scales_with_seconds() {
-        let c = CreditsConfig::default();
-        let one = c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Linux, 1);
-        let ten = c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Linux, 10);
-        // 10 seconds ⇒ 10x the per-second nano before the single micro conversion:
-        //   14000*10 = 140000 ⇒ (140000+500)/1000 = 140 micro (== 10 * 14).
-        assert_eq!(one, 14);
-        assert_eq!(ten, 140);
-    }
-
-    #[test]
-    fn sandbox_debit_applies_its_own_markup_not_the_global_one() {
-        // sandbox_markup_bps defaults to 3000 (× 1.30), distinct from markup_bps (0).
-        let c = CreditsConfig::default();
-        assert_eq!(c.sandbox_markup_bps, 3000);
-        // 100 * 13000 = 1_300_000, +5000 = 1_305_000, /10000 = 130.
-        assert_eq!(c.sandbox_debit_amount(100), 130);
-        // The at-cost path (debit_amount, markup_bps=0) leaves 100 untouched — proof
-        // the two ledgers use different markups.
-        assert_eq!(c.debit_amount(100), 100);
-    }
-}
+#[path = "config/tests/capacity_config_tests.rs"]
+mod capacity_config_tests;
 
 #[cfg(test)]
-mod alert_tier_backcompat_tests {
-    use super::{AlertTier, BudgetRule, FirewallConfig, SessionBudgetConfig};
-
-    /// An old gateway.toml with no `alert` field must still parse, defaulting the
-    /// tier to `Silent` (so no policy alert fires until an operator opts in).
-    #[test]
-    fn budget_rule_without_alert_parses_to_silent() {
-        let rule: BudgetRule =
-            toml::from_str("limit = 1000\naction = \"stop\"\n").expect("legacy rule must parse");
-        assert_eq!(rule.alert, AlertTier::Silent);
-    }
-
-    #[test]
-    fn session_budget_without_alert_parses_to_silent() {
-        let cfg: SessionBudgetConfig =
-            toml::from_str("limit = 500\n").expect("legacy session budget must parse");
-        assert_eq!(cfg.alert, AlertTier::Silent);
-    }
-
-    #[test]
-    fn firewall_without_alert_parses_to_silent() {
-        let cfg: FirewallConfig = toml::from_str("enabled = true\npolicy = \"block\"\n")
-            .expect("legacy firewall must parse");
-        assert_eq!(cfg.alert, AlertTier::Silent);
-    }
-
-    /// The tier ordering is load-bearing (Core takes the max), so pin it.
-    #[test]
-    fn alert_tier_orders_ascending() {
-        assert!(AlertTier::Silent < AlertTier::Warn);
-        assert!(AlertTier::Warn < AlertTier::Fanout);
-        assert!(AlertTier::Fanout < AlertTier::Email);
-    }
-
-    /// The tier serde renames to lowercase (the wire value on the debit payload
-    /// and the PolicyAlert JSON).
-    #[test]
-    fn alert_tier_serializes_lowercase() {
-        assert_eq!(
-            serde_json::to_string(&AlertTier::Fanout).unwrap(),
-            "\"fanout\""
-        );
-    }
-}
+#[path = "config/tests/local_model_routes_tests.rs"]
+mod local_model_routes_tests;
 
 #[cfg(test)]
-mod pure_helper_tests {
-    use super::{
-        parse_bool_env, FirewallPolicy, Modality, ModelRouterType, ProviderId, ProviderKind,
-        RouteStrategy, SmartRoutingConfig, SmartRule, StagePicker,
-    };
-    use std::str::FromStr;
-
-    #[test]
-    fn provider_kind_as_str_covers_every_variant() {
-        assert_eq!(ProviderKind::OpenAi.as_str(), "openai");
-        assert_eq!(ProviderKind::Anthropic.as_str(), "anthropic");
-        assert_eq!(ProviderKind::Local.as_str(), "local");
-        assert_eq!(ProviderKind::OpenRouter.as_str(), "openrouter");
-        assert_eq!(ProviderKind::Core.as_str(), "core");
-        assert_eq!(ProviderKind::Modal.as_str(), "modal");
-        assert_eq!(ProviderKind::GenAi.as_str(), "genai");
-        assert_eq!(ProviderKind::Replicate.as_str(), "replicate");
-        assert_eq!(ProviderKind::Fal.as_str(), "fal");
-    }
-
-    #[test]
-    fn provider_kind_from_str_roundtrips_and_is_case_insensitive() {
-        for kind in [
-            ProviderKind::OpenAi,
-            ProviderKind::Anthropic,
-            ProviderKind::Local,
-            ProviderKind::OpenRouter,
-            ProviderKind::Core,
-            ProviderKind::Modal,
-            ProviderKind::GenAi,
-            ProviderKind::Replicate,
-            ProviderKind::Fal,
-        ] {
-            assert_eq!(ProviderKind::from_str(kind.as_str()).unwrap(), kind);
-        }
-        // Case-insensitive.
-        assert_eq!(
-            ProviderKind::from_str("OpenAI").unwrap(),
-            ProviderKind::OpenAi
-        );
-        // Unknown ids are a typed error naming the bad value.
-        let err = ProviderKind::from_str("acme").unwrap_err();
-        assert!(err.contains("acme"));
-    }
-
-    #[test]
-    fn provider_id_display_default_and_as_str() {
-        assert_eq!(ProviderId::default().as_str(), "openai");
-        let id = ProviderId::from("acme");
-        assert_eq!(id.as_str(), "acme");
-        assert_eq!(id.to_string(), "acme");
-    }
-
-    #[test]
-    fn modality_as_str_covers_every_variant() {
-        assert_eq!(Modality::Chat.as_str(), "chat");
-        assert_eq!(Modality::Image.as_str(), "image");
-        assert_eq!(Modality::Tts.as_str(), "tts");
-        assert_eq!(Modality::Stt.as_str(), "stt");
-        assert_eq!(Modality::Video.as_str(), "video");
-    }
-
-    #[test]
-    fn smart_routing_is_active_gates_on_enabled_rules_and_strategy() {
-        let rule = SmartRule {
-            description: "code".to_string(),
-            model: "claude".to_string(),
-            weight: 1.0,
-        };
-
-        // Disabled ⇒ inert regardless of rules.
-        let mut cfg = SmartRoutingConfig {
-            enabled: false,
-            rules: vec![rule.clone()],
-            classifier_model: "gemma".to_string(),
-            ..Default::default()
-        };
-        assert!(!cfg.is_active());
-
-        // Enabled but no rules ⇒ inert.
-        cfg.enabled = true;
-        cfg.rules = vec![];
-        assert!(!cfg.is_active());
-
-        // Llm strategy needs a non-empty classifier model.
-        cfg.rules = vec![rule.clone()];
-        cfg.strategy = RouteStrategy::Llm;
-        cfg.classifier_model = "  ".to_string();
-        assert!(!cfg.is_active(), "blank classifier ⇒ Llm inert");
-        cfg.classifier_model = "gemma".to_string();
-        assert!(cfg.is_active());
-
-        // Keyword / Embedding only need rules (no classifier).
-        cfg.classifier_model = String::new();
-        cfg.strategy = RouteStrategy::Keyword;
-        assert!(cfg.is_active());
-        cfg.strategy = RouteStrategy::Embedding;
-        assert!(cfg.is_active());
-    }
-
-    #[test]
-    fn switchyard_router_types_are_active_only_with_their_required_targets() {
-        let mut cfg = SmartRoutingConfig {
-            enabled: true,
-            router_type: ModelRouterType::Random,
-            rules: vec![
-                SmartRule {
-                    description: String::new(),
-                    model: "strong".into(),
-                    weight: 1.0,
-                },
-                SmartRule {
-                    description: String::new(),
-                    model: "weak".into(),
-                    weight: 3.0,
-                },
-            ],
-            ..Default::default()
-        };
-        assert!(cfg.is_active());
-
-        cfg.rules.pop();
-        assert!(!cfg.is_active());
-        cfg.rules.push(SmartRule {
-            description: String::new(),
-            model: "weak".into(),
-            weight: 3.0,
-        });
-        assert!(cfg.is_active());
-
-        cfg.router_type = ModelRouterType::Passthrough;
-        assert!(cfg.is_active());
-
-        cfg.router_type = ModelRouterType::StageRouter;
-        cfg.stage_capable_model = "strong".into();
-        cfg.stage_efficient_model = "weak".into();
-        cfg.stage_picker = StagePicker::EfficientFirst;
-        assert!(cfg.is_active());
-
-        cfg.router_type = ModelRouterType::Escalation;
-        cfg.escalation_weak_model = "weak".into();
-        cfg.escalation_strong_model = "strong".into();
-        cfg.escalation_judge_model = "judge".into();
-        assert!(cfg.is_active());
-
-        cfg.escalation_judge_model.clear();
-        assert!(!cfg.is_active());
-    }
-
-    #[test]
-    fn old_smart_routing_json_defaults_to_llm_classifier_and_unit_weights() {
-        let cfg: SmartRoutingConfig = serde_json::from_value(serde_json::json!({
-            "enabled": true,
-            "strategy": "keyword",
-            "rules": [{"description": "code", "model": "strong"}]
-        }))
-        .expect("legacy smart routing JSON must parse");
-        assert_eq!(cfg.router_type, ModelRouterType::LlmClassifier);
-        assert_eq!(cfg.rules[0].weight, 1.0);
-        assert_eq!(cfg.stage_picker, StagePicker::CapableFirst);
-    }
-
-    /// REGRESSION: a per-agent smart-routing override saved with the classifier
-    /// box left empty used to save as "on" and be inert — and worse than inert,
-    /// because `pipeline::apply_smart_routing` treats a per-agent override as
-    /// present the moment the agent has one, takes its early return, and skips
-    /// the GLOBAL smart router that would otherwise have run. Turning the feature
-    /// on actively DISABLED routing.
-    ///
-    /// This must go through serde, not field assignment. The sibling test above
-    /// sets `classifier_model` in Rust, which bypasses `de_classifier_model`
-    /// entirely — it would keep passing after the fix while proving nothing about
-    /// any wire path, the same structural blindness the credits round-trip test
-    /// has. The desktop editor and `PUT /v1/config` both send an explicit `""`.
-    #[test]
-    fn smart_routing_saved_with_a_blank_classifier_deserializes_to_a_working_one() {
-        // The wire shape an operator produces by clearing the model box.
-        let from_wire: SmartRoutingConfig = serde_json::from_value(serde_json::json!({
-            "enabled": true,
-            "strategy": "llm",
-            "classifier_model": "",
-            "rules": [{ "description": "code", "model": "claude" }],
-        }))
-        .expect("an explicit empty classifier must still parse");
-        assert!(
-            !from_wire.classifier_model.trim().is_empty(),
-            "a blank classifier must resolve to the classify tier, not stay blank"
-        );
-        assert_eq!(from_wire.classifier_model, super::classify_model_id());
-        assert!(
-            from_wire.is_active(),
-            "enabled + rules must mean routing actually runs"
-        );
-
-        // An ABSENT key takes the same value — the `default = \"fn\"` half of the
-        // pair. One without the other leaves half the hole open.
-        let absent: SmartRoutingConfig = serde_json::from_value(serde_json::json!({
-            "enabled": true,
-            "rules": [{ "description": "code", "model": "claude" }],
-        }))
-        .expect("an absent classifier must parse");
-        assert_eq!(absent.classifier_model, from_wire.classifier_model);
-
-        // And `Default` agrees, so a config built in Rust cannot drift from one
-        // read off the wire.
-        assert_eq!(
-            SmartRoutingConfig::default().classifier_model,
-            from_wire.classifier_model
-        );
-
-        // An operator's own pick is still honored untouched.
-        let explicit: SmartRoutingConfig = serde_json::from_value(serde_json::json!({
-            "enabled": true,
-            "classifier_model": "openrouter/google/gemini-2.5-flash",
-            "rules": [{ "description": "code", "model": "claude" }],
-        }))
-        .expect("parses");
-        assert_eq!(
-            explicit.classifier_model,
-            "openrouter/google/gemini-2.5-flash"
-        );
-    }
-
-    #[test]
-    fn firewall_policy_from_env_accepts_aliases_and_rejects_junk() {
-        assert_eq!(
-            FirewallPolicy::from_env("block"),
-            Some(FirewallPolicy::Block)
-        );
-        assert_eq!(
-            FirewallPolicy::from_env(" WARN "),
-            Some(FirewallPolicy::WarnAndContinue)
-        );
-        assert_eq!(
-            FirewallPolicy::from_env("warn-and-continue"),
-            Some(FirewallPolicy::WarnAndContinue)
-        );
-        assert_eq!(
-            FirewallPolicy::from_env("redact"),
-            Some(FirewallPolicy::Sanitize)
-        );
-        assert_eq!(FirewallPolicy::from_env("nonsense"), None);
-    }
-
-    #[test]
-    fn parse_bool_env_accepts_truthy_falsey_and_rejects_junk() {
-        for t in ["1", "true", "YES", "on"] {
-            assert_eq!(parse_bool_env(t), Some(true), "{t}");
-        }
-        for f in ["0", "false", "No", "off"] {
-            assert_eq!(parse_bool_env(f), Some(false), "{f}");
-        }
-        assert_eq!(parse_bool_env("maybe"), None);
-    }
-}
+#[path = "config/tests/credits_config_tests.rs"]
+mod credits_config_tests;
 
 #[cfg(test)]
-mod reaction_learning_config_tests {
-    use super::{CommonChannelFileConfig, TelegramChannelConfig, TelegramChannelOptionsFileConfig};
-
-    #[test]
-    fn telegram_channel_toml_round_trip_preserves_reaction_learning() {
-        let mut common = CommonChannelFileConfig::default();
-        common.reaction_learning.enabled = true;
-        common.reaction_learning.positive_emojis = vec!["👍".to_owned(), "❤️".to_owned()];
-        common.reaction_learning.negative_emojis = vec!["👎".to_owned(), "💀".to_owned()];
-        common.reaction_learning.allow_group = true;
-
-        let authored = TelegramChannelConfig {
-            token: "[REDACTED_SECRET]".to_owned(),
-            common,
-            options: TelegramChannelOptionsFileConfig::default(),
-        };
-        let text = toml::to_string(&authored).expect("reaction config should serialize");
-        let parsed: TelegramChannelConfig =
-            toml::from_str(&text).expect("reaction config should parse after serialization");
-
-        assert!(parsed.common.reaction_learning.enabled);
-        assert_eq!(
-            parsed.common.reaction_learning.positive_emojis,
-            vec!["👍", "❤️"]
-        );
-        assert_eq!(
-            parsed.common.reaction_learning.negative_emojis,
-            vec!["👎", "💀"]
-        );
-        assert!(parsed.common.reaction_learning.allow_group);
-    }
-
-    #[test]
-    fn telegram_channel_toml_accepts_issue_style_reaction_keys() {
-        let parsed: TelegramChannelConfig = toml::from_str(
-            r#"
-token = "[REDACTED_SECRET]"
-
-[reaction_learning]
-enabled = true
-positive_emoji = ["👍", "🎉"]
-negative_emoji = ["👎", "😴"]
-allow_group = false
-"#,
-        )
-        .expect("issue-style reaction settings should parse");
-
-        assert!(parsed.common.reaction_learning.enabled);
-        assert_eq!(
-            parsed.common.reaction_learning.positive_emojis,
-            vec!["👍", "🎉"]
-        );
-        assert_eq!(
-            parsed.common.reaction_learning.negative_emojis,
-            vec!["👎", "😴"]
-        );
-        assert!(!parsed.common.reaction_learning.allow_group);
-    }
-}
+#[path = "config/tests/alert_tier_backcompat_tests.rs"]
+mod alert_tier_backcompat_tests;
 
 #[cfg(test)]
-mod channel_config_tests {
-    use super::*;
-
-    /// The shared knobs are `#[serde(flatten)]`-ed, so an EXISTING `gateway.toml`
-    /// — which spells `model`/`agent_id`/`core_url` directly under the channel
-    /// table — must still parse, and every key it does not mention must land on
-    /// the documented default. This is the whole backwards-compatibility contract
-    /// for the config file.
-    #[test]
-    fn legacy_channel_table_still_parses_with_defaults() {
-        let cfg: TelegramChannelConfig = toml::from_str(
-            r#"
-            token = "123:ABC"
-            model = "gpt-4o-mini"
-            agent_id = "acp:pi"
-            core_url = "http://127.0.0.1:9999"
-            group_reply_mode = "all"
-            "#,
-        )
-        .expect("a pre-existing telegram table must still parse");
-
-        assert_eq!(cfg.token, "123:ABC");
-        assert_eq!(cfg.common.model, "gpt-4o-mini");
-        assert_eq!(cfg.common.agent_id.as_deref(), Some("acp:pi"));
-        assert_eq!(cfg.common.core_url, "http://127.0.0.1:9999");
-        assert_eq!(cfg.common.group_reply_mode, GroupReplyMode::All);
-
-        // Unmentioned knobs default: nothing is silently switched off, and the
-        // access policy stays unset so the legacy env allowlist keeps deciding.
-        assert!(cfg.common.typing_indicator);
-        assert!(cfg.common.publish_commands);
-        assert!(cfg.common.rich_text);
-        assert!(!cfg.common.streaming);
-        assert_eq!(cfg.common.voice_reply, VoiceReplyMode::Never);
-        assert!(cfg.common.dm_policy.is_none());
-        assert!(cfg.common.group_policy.is_none());
-        assert!(cfg.common.dm_allowlist.is_empty());
-        assert!(cfg.common.profile_name.is_none());
-    }
-
-    /// The new knobs are read from the same flat namespace as the old ones.
-    #[test]
-    fn new_channel_knobs_parse_from_the_channel_table() {
-        let cfg: DiscordChannelConfig = toml::from_str(
-            r#"
-            token = "bot-token"
-            channel_ids = ["c1", "c2"]
-            thread_replies = true
-            dm_policy = "open"
-            group_policy = "disabled"
-            dm_allowlist = ["u1"]
-            typing_indicator = false
-            publish_commands = false
-            rich_text = false
-            streaming = true
-            voice_reply = "always"
-            profile_name = "Ryu"
-            profile_short_bio = "your agent"
-            "#,
-        )
-        .expect("the new knobs must parse");
-
-        assert!(cfg.thread_replies);
-        assert_eq!(cfg.common.dm_policy, Some(DmPolicy::Open));
-        assert_eq!(cfg.common.group_policy, Some(GroupPolicy::Disabled));
-        assert_eq!(cfg.common.dm_allowlist, vec!["u1".to_string()]);
-        assert!(!cfg.common.typing_indicator);
-        assert!(!cfg.common.publish_commands);
-        assert!(!cfg.common.rich_text);
-        assert!(cfg.common.streaming);
-        assert_eq!(cfg.common.voice_reply, VoiceReplyMode::Always);
-        assert_eq!(cfg.common.profile_name.as_deref(), Some("Ryu"));
-    }
-
-    /// BlueBubbles needs only the bridge's URL + password; the rest defaults, and
-    /// the Private-API-only verbs stay off until the operator says the helper is
-    /// installed.
-    #[test]
-    fn bluebubbles_defaults_are_conservative() {
-        let cfg: BlueBubblesChannelConfig = toml::from_str(
-            r#"
-            server_url = "http://192.168.1.10:1234"
-            password = "hunter2"
-            "#,
-        )
-        .expect("minimal bluebubbles table must parse");
-
-        assert_eq!(cfg.webhook_bind, default_bluebubbles_bind());
-        assert_eq!(cfg.webhook_path, "/webhooks/bluebubbles");
-        assert!(!cfg.private_api);
-        assert!(!cfg.send_read_receipts);
-        assert_eq!(cfg.common.model, default_channel_model());
-    }
-
-    /// WhatsApp's own read receipts default ON — the bot is about to reply, so
-    /// withholding the blue tick only makes it look unresponsive.
-    #[test]
-    fn whatsapp_read_receipts_default_on() {
-        let cfg: WhatsAppChannelConfig = toml::from_str(
-            r#"
-            access_token = "tok"
-            phone_number_id = "123"
-            verify_token = "verify"
-            "#,
-        )
-        .expect("minimal whatsapp table must parse");
-        assert!(cfg.send_read_receipts);
-        assert_eq!(cfg.graph_version, default_whatsapp_graph_version());
-    }
-
-    /// A populated channel table must survive `save()` → `load()`. Flattened
-    /// structs are the shape TOML is fussiest about (a nested table after a
-    /// value is a hard error), so this is the guard that the flatten is safe.
-    #[test]
-    fn populated_channels_survive_a_toml_roundtrip() {
-        let mut cfg = GatewayConfig::default();
-        cfg.channels.telegram = Some(TelegramChannelConfig {
-            token: "123:ABC".to_string(),
-            common: CommonChannelFileConfig {
-                agent_id: Some("acp:pi".to_string()),
-                system_prompt: Some("be terse".to_string()),
-                dm_policy: Some(DmPolicy::Allowlist),
-                dm_allowlist: vec!["u1".to_string()],
-                streaming: true,
-                voice_reply: VoiceReplyMode::Mirror,
-                profile_name: Some("Ryu".to_string()),
-                ..CommonChannelFileConfig::default()
-            },
-            options: TelegramChannelOptionsFileConfig::default(),
-        });
-        cfg.channels.bluebubbles = Some(BlueBubblesChannelConfig {
-            server_url: "http://mac:1234".to_string(),
-            password: "pw".to_string(),
-            webhook_bind: default_bluebubbles_bind(),
-            webhook_path: default_bluebubbles_path(),
-            private_api: true,
-            send_read_receipts: true,
-            mention_patterns: Vec::new(),
-            home_channel: None,
-            common: CommonChannelFileConfig::default(),
-        });
-
-        let text = toml::to_string_pretty(&cfg).expect("serialize channels");
-        let back: GatewayConfig = toml::from_str(&text).expect("re-parse channels");
-
-        let telegram = back.channels.telegram.expect("telegram survives");
-        assert_eq!(telegram.token, "123:ABC");
-        assert_eq!(telegram.common.agent_id.as_deref(), Some("acp:pi"));
-        assert_eq!(telegram.common.dm_policy, Some(DmPolicy::Allowlist));
-        assert_eq!(telegram.common.dm_allowlist, vec!["u1".to_string()]);
-        assert!(telegram.common.streaming);
-        assert_eq!(telegram.common.voice_reply, VoiceReplyMode::Mirror);
-        assert_eq!(telegram.common.profile_name.as_deref(), Some("Ryu"));
-
-        let bb = back.channels.bluebubbles.expect("bluebubbles survives");
-        assert_eq!(bb.server_url, "http://mac:1234");
-        assert!(bb.private_api);
-    }
-
-    /// Env parsing of the new knobs. One sequential test because it mutates
-    /// process-global env; parallel sub-tests would race.
-    #[test]
-    fn channel_env_reads_the_new_knobs() {
-        for key in [
-            "TESTCHAN_DM_POLICY",
-            "TESTCHAN_GROUP_POLICY",
-            "TESTCHAN_VOICE_REPLY",
-            "TESTCHAN_TYPING_INDICATOR",
-            "TESTCHAN_STREAMING",
-            "TESTCHAN_DM_ALLOWLIST",
-            "TESTCHAN_BOT_NAME",
-            "TESTCHAN_MODEL",
-            "TESTCHAN_PROACTIVE_OPENING",
-            "TESTCHAN_PROACTIVE_TARGET",
-        ] {
-            std::env::remove_var(key);
-        }
-
-        // Nothing set ⇒ the config-file values (here, the defaults) survive.
-        let bare = common_channel_from_env("TESTCHAN", None);
-        assert_eq!(bare.model, default_channel_model());
-        assert!(bare.dm_policy.is_none());
-        assert!(bare.typing_indicator);
-        assert_eq!(bare.voice_reply, VoiceReplyMode::Never);
-
-        std::env::set_var("TESTCHAN_DM_POLICY", "OPEN");
-        std::env::set_var("TESTCHAN_GROUP_POLICY", "open");
-        std::env::set_var("TESTCHAN_VOICE_REPLY", "mirror");
-        std::env::set_var("TESTCHAN_TYPING_INDICATOR", "false");
-        std::env::set_var("TESTCHAN_STREAMING", "1");
-        std::env::set_var("TESTCHAN_DM_ALLOWLIST", "u1, u2 ,");
-        std::env::set_var("TESTCHAN_BOT_NAME", "Ryu");
-        std::env::set_var("TESTCHAN_PROACTIVE_OPENING", "true");
-        std::env::set_var("TESTCHAN_PROACTIVE_TARGET", "chat-1");
-        // Blank is treated as unset, not as an empty model.
-        std::env::set_var("TESTCHAN_MODEL", "   ");
-
-        let loaded = common_channel_from_env("TESTCHAN", None);
-        assert_eq!(loaded.dm_policy, Some(DmPolicy::Open));
-        assert_eq!(loaded.group_policy, Some(GroupPolicy::Open));
-        assert_eq!(loaded.voice_reply, VoiceReplyMode::Mirror);
-        assert!(!loaded.typing_indicator);
-        assert!(loaded.streaming);
-        assert_eq!(
-            loaded.dm_allowlist,
-            vec!["u1".to_string(), "u2".to_string()]
-        );
-        assert_eq!(loaded.profile_name.as_deref(), Some("Ryu"));
-        assert_eq!(loaded.model, default_channel_model());
-        assert!(loaded.proactive_opening);
-        assert_eq!(loaded.proactive_target.as_deref(), Some("chat-1"));
-
-        // An unrecognised value is ignored rather than guessed at, so the
-        // config-file value keeps winning.
-        std::env::set_var("TESTCHAN_DM_POLICY", "sometimes");
-        let existing = CommonChannelFileConfig {
-            dm_policy: Some(DmPolicy::Disabled),
-            ..CommonChannelFileConfig::default()
-        };
-        let layered = common_channel_from_env("TESTCHAN", Some(&existing));
-        assert_eq!(layered.dm_policy, Some(DmPolicy::Disabled));
-
-        for key in [
-            "TESTCHAN_DM_POLICY",
-            "TESTCHAN_GROUP_POLICY",
-            "TESTCHAN_VOICE_REPLY",
-            "TESTCHAN_TYPING_INDICATOR",
-            "TESTCHAN_STREAMING",
-            "TESTCHAN_DM_ALLOWLIST",
-            "TESTCHAN_BOT_NAME",
-            "TESTCHAN_MODEL",
-            "TESTCHAN_PROACTIVE_OPENING",
-            "TESTCHAN_PROACTIVE_TARGET",
-        ] {
-            std::env::remove_var(key);
-        }
-    }
-}
+#[path = "config/tests/pure_helper_tests.rs"]
+mod pure_helper_tests;
 
 #[cfg(test)]
-mod toml_roundtrip_tests {
-    use super::*;
-
-    /// The default config must survive a TOML serialize → deserialize round-trip
-    /// unchanged. This is the exact `save()` → `load()` path (minus disk) and
-    /// exercises the Serialize/Deserialize derives across every nested config
-    /// struct, guarding against a `#[serde(default)]`/rename drift that would make
-    /// a written config fail to re-parse.
-    #[test]
-    fn default_config_survives_toml_roundtrip() {
-        let cfg = GatewayConfig::default();
-        let text = toml::to_string_pretty(&cfg).expect("serialize default config");
-        let back: GatewayConfig = toml::from_str(&text).expect("re-parse default config");
-        // Spot-check load-bearing fields across several sub-configs.
-        assert_eq!(back.bind, cfg.bind);
-        assert_eq!(back.routing.default_provider, cfg.routing.default_provider);
-        assert_eq!(back.firewall.policy, cfg.firewall.policy);
-        assert_eq!(back.cache.enabled, cfg.cache.enabled);
-        assert_eq!(
-            back.circuit_breaker.failure_threshold,
-            cfg.circuit_breaker.failure_threshold
-        );
-        assert_eq!(
-            back.control_plane.cost_per_1k_micro_usd,
-            cfg.control_plane.cost_per_1k_micro_usd
-        );
-        assert_eq!(
-            back.credits.sandbox_markup_bps,
-            cfg.credits.sandbox_markup_bps
-        );
-        assert_eq!(back.fleet, cfg.fleet);
-    }
-
-    /// The `[credits]` table the PUBLISHED self-host doc hands operators
-    /// (`apps/fumadocs/content/docs/gateway/configuration.mdx`, "## Credits") must
-    /// deserialize the nine sandbox rates to their documented non-zero defaults.
-    ///
-    /// ## Why the round-trip test above cannot catch this
-    ///
-    /// [`default_config_survives_toml_roundtrip`] serializes
-    /// `GatewayConfig::default()` first, and `toml::to_string_pretty` EMITS every
-    /// non-skipped field — including all nine rates, already at their default
-    /// values. The re-parse therefore reads a `[credits]` table in which each key
-    /// is *present*, so serde never runs the absent-key branch. A round-trip test
-    /// is structurally blind to a wrong `#[serde(default)]`: it can only prove
-    /// that a value serde WROTE survives being read back. Only a hand-authored
-    /// TOML that OMITS the keys exercises the default path, which is why the
-    /// fixture below is pasted from the docs verbatim rather than generated.
-    ///
-    /// ## Why a zero here is not "free"
-    ///
-    /// Zeroed rates do not make sandboxes cheap, they turn sandbox billing off and
-    /// remove a safety stop: `sandbox_tick_cost_raw_micro` → 0 ⇒
-    /// `sandbox_debit_amount` → 0 ⇒ `debit_sandbox_sync` short-circuits on
-    /// `billed_micro == 0` and returns `None` ⇒ `compute_verdict` (api/sandbox.rs)
-    /// sees `balance: None`, so `KillBalance` is unreachable and `accrued` never
-    /// grows past a `per_run_budget`, so `KillBudget` is unreachable too.
-    ///
-    /// An ABSENT `[credits]` table was never affected (it takes
-    /// `impl Default for CreditsConfig` wholesale) — which is exactly why this
-    /// needs its own fixture with the table present.
-    #[test]
-    fn published_credits_doc_toml_keeps_the_documented_sandbox_rates() {
-        // Verbatim from docs/gateway/configuration.mdx ("## Credits"). A present
-        // `[credits]` table that names no sandbox rate.
-        let doc_toml = r#"
-[credits]
-enabled = false
-base_url = "http://127.0.0.1:3000/api"  # defaults to control_plane.base_url
-internal_secret = "..."                 # also RYU_CREDITS_INTERNAL_SECRET
-markup_bps = 0                          # platform markup in basis points (0 = pass-through)
-wallet_empty_action = "stop"            # "stop" | "downgrade"
-wallet_empty_downgrade_to = ""
-reserve_enabled = true                  # hold an estimate against the balance while a request runs
-min_reserve_micro_usd = 10000           # $0.01 floor per request; bounds concurrent burst
-timeout_ms = 3000
-"#;
-
-        let parsed: GatewayConfig =
-            toml::from_str(doc_toml).expect("the documented [credits] table parses");
-        let credits = &parsed.credits;
-        let want = CreditsConfig::default();
-
-        // The keys the doc DOES set are honored (proves the table was really read
-        // and the assertions below are not passing on an ignored fragment).
-        assert!(!credits.enabled);
-        assert_eq!(credits.timeout_ms, 3000);
-
-        // The nine rates the doc does NOT set fall back to the documented values,
-        // not to 0.
-        assert_eq!(
-            credits.cost_per_sandbox_vcpu_second_nano_usd,
-            want.cost_per_sandbox_vcpu_second_nano_usd
-        );
-        assert_eq!(
-            credits.cost_per_sandbox_mem_gib_second_nano_usd,
-            want.cost_per_sandbox_mem_gib_second_nano_usd
-        );
-        assert_eq!(
-            credits.cost_per_sandbox_storage_gib_second_nano_usd,
-            want.cost_per_sandbox_storage_gib_second_nano_usd
-        );
-        assert_eq!(
-            credits.cost_per_sandbox_gpu_h200_second_nano_usd,
-            want.cost_per_sandbox_gpu_h200_second_nano_usd
-        );
-        assert_eq!(
-            credits.cost_per_sandbox_gpu_h100_second_nano_usd,
-            want.cost_per_sandbox_gpu_h100_second_nano_usd
-        );
-        assert_eq!(
-            credits.cost_per_sandbox_gpu_rtx_pro_6000_second_nano_usd,
-            want.cost_per_sandbox_gpu_rtx_pro_6000_second_nano_usd
-        );
-        assert_eq!(
-            credits.cost_per_sandbox_gpu_rtx_5090_second_nano_usd,
-            want.cost_per_sandbox_gpu_rtx_5090_second_nano_usd
-        );
-        assert_eq!(
-            credits.cost_per_sandbox_gpu_rtx_4090_second_nano_usd,
-            want.cost_per_sandbox_gpu_rtx_4090_second_nano_usd
-        );
-        assert_eq!(
-            credits.cost_per_sandbox_windows_vcpu_second_nano_usd,
-            want.cost_per_sandbox_windows_vcpu_second_nano_usd
-        );
-        // The two siblings that already had `default = "fn"` — asserted here so
-        // the fixture covers the whole rate block, not just the repaired nine.
-        assert_eq!(
-            credits.sandbox_free_storage_gib,
-            want.sandbox_free_storage_gib
-        );
-        assert_eq!(credits.sandbox_markup_bps, want.sandbox_markup_bps);
-
-        // The rates the doc omits are non-zero, so a tick costs something and the
-        // wallet path stays reachable. Pinned against the documented values rather
-        // than only `!= 0` so a future "default" of 1 nano-USD is caught too.
-        assert_eq!(credits.cost_per_sandbox_vcpu_second_nano_usd, 14_000);
-        assert_eq!(credits.cost_per_sandbox_gpu_h200_second_nano_usd, 1_261_000);
-    }
-
-    /// The same fixture, for the four MEDIA rates — the second half of the bug
-    /// the sandbox test above covers, and the one that already reached production.
-    ///
-    /// `cost_per_image/video/tts/stt_micro_usd` were bare `#[serde(default)]`, so
-    /// the published `[credits]` table below — present, partial, naming none of
-    /// them — deserialized all four to 0. The media debit is guarded by
-    /// `if cost > 0`, so a 0 rate does not bill a little, it SKIPS THE DEBIT, and
-    /// the provider invoices us anyway. That exact shape shipped once already as
-    /// the async video job (see
-    /// `an_async_video_job_bills_from_the_provider_payload_not_the_flat_rate`).
-    ///
-    /// ## Why the round-trip test cannot catch this
-    ///
-    /// Same structural reason spelled out on
-    /// [`published_credits_doc_toml_keeps_the_documented_sandbox_rates`]:
-    /// `default_config_survives_toml_roundtrip` serializes a fully-populated
-    /// `GatewayConfig::default()` first, and `toml::to_string_pretty` EMITS every
-    /// non-skipped field — so the re-parse reads all four keys as *present* and
-    /// serde never runs the absent-key branch. A round-trip can only prove that a
-    /// value serde wrote survives being read back; it is blind to a wrong
-    /// `#[serde(default)]` by construction. Only a hand-authored TOML that OMITS
-    /// the keys exercises the default path, which is why this fixture is pasted
-    /// from the docs verbatim rather than generated.
-    #[test]
-    fn published_credits_doc_toml_keeps_nonzero_media_rates() {
-        // Verbatim from docs/gateway/configuration.mdx ("## Credits"), the block
-        // an operator self-hosting a metered gateway copies.
-        let doc_toml = r#"
-[credits]
-enabled = false
-base_url = "http://127.0.0.1:3000/api"  # defaults to control_plane.base_url
-internal_secret = "..."                 # also RYU_CREDITS_INTERNAL_SECRET
-markup_bps = 0                          # platform markup in basis points (0 = pass-through)
-wallet_empty_action = "stop"            # "stop" | "downgrade"
-wallet_empty_downgrade_to = ""
-timeout_ms = 3000
-"#;
-
-        let credits = toml::from_str::<GatewayConfig>(doc_toml)
-            .expect("the documented [credits] table parses")
-            .credits;
-        let want = CreditsConfig::default();
-
-        // The keys the doc DOES set are honored, so the assertions below are not
-        // passing on a fragment serde quietly ignored.
-        assert!(!credits.enabled);
-        assert_eq!(credits.timeout_ms, 3000);
-
-        // Both halves, deliberately: `want` alone would still pass if the serde
-        // attribute and `impl Default` were BOTH left at 0, and the literal alone
-        // would not catch the two drifting apart.
-        assert_eq!(
-            credits.cost_per_image_micro_usd,
-            want.cost_per_image_micro_usd
-        );
-        assert_eq!(
-            credits.cost_per_video_micro_usd,
-            want.cost_per_video_micro_usd
-        );
-        assert_eq!(credits.cost_per_tts_micro_usd, want.cost_per_tts_micro_usd);
-        assert_eq!(credits.cost_per_stt_micro_usd, want.cost_per_stt_micro_usd);
-
-        // Pinned against the derivation written on the accessor fns — each is a
-        // nominal job duration times Replicate's published L40S GPU-second
-        // ($0.000975/sec) — so a future "default" of 1 micro-USD is caught too.
-        assert_eq!(credits.cost_per_image_micro_usd, 1_950, "2s x $0.000975/s");
-        assert_eq!(
-            credits.cost_per_video_micro_usd, 58_500,
-            "60s x $0.000975/s"
-        );
-        assert_eq!(credits.cost_per_tts_micro_usd, 975, "1s x $0.000975/s");
-        assert_eq!(credits.cost_per_stt_micro_usd, 975, "1s x $0.000975/s");
-
-        // THE PROPERTY THAT ACTUALLY FAILED. Stated on its own so it survives any
-        // later re-derivation of the numbers above: none of these may be 0, or
-        // the `if cost > 0` debit guard silently gives the modality away.
-        for (name, rate) in [
-            ("image", credits.cost_per_image_micro_usd),
-            ("video", credits.cost_per_video_micro_usd),
-            ("tts", credits.cost_per_tts_micro_usd),
-            ("stt", credits.cost_per_stt_micro_usd),
-        ] {
-            assert!(rate > 0, "{name} must never fall back to a rate of 0");
-        }
-    }
-
-    /// The two neighbouring shapes the fixture above does not cover: an ABSENT
-    /// `[credits]` table (which takes `impl Default for CreditsConfig` wholesale,
-    /// the other half of the "same number by construction" invariant), and the
-    /// minimal present-but-partial table. A fix applied to only one of the serde
-    /// attribute or the `Default` impl passes one of these and fails the other.
-    #[test]
-    fn credits_media_rates_are_nonzero_whether_the_table_is_absent_or_partial() {
-        let absent = CreditsConfig::default();
-        assert!(absent.cost_per_image_micro_usd > 0);
-        assert!(absent.cost_per_video_micro_usd > 0);
-        assert!(absent.cost_per_tts_micro_usd > 0);
-        assert!(absent.cost_per_stt_micro_usd > 0);
-
-        // A present `[credits]` table naming no media rate at all.
-        let partial = toml::from_str::<GatewayConfig>(
-            r#"
-[credits]
-enabled = false
-timeout_ms = 3000
-"#,
-        )
-        .expect("parses")
-        .credits;
-        assert_eq!(
-            partial.cost_per_image_micro_usd,
-            absent.cost_per_image_micro_usd
-        );
-        assert_eq!(
-            partial.cost_per_video_micro_usd,
-            absent.cost_per_video_micro_usd
-        );
-        assert_eq!(
-            partial.cost_per_tts_micro_usd,
-            absent.cost_per_tts_micro_usd
-        );
-        assert_eq!(
-            partial.cost_per_stt_micro_usd,
-            absent.cost_per_stt_micro_usd
-        );
-    }
-
-    /// A non-zero sandbox rate is what makes the wallet kill-switch reachable at
-    /// all: with a present `[credits]` table that names no rate, a tick must still
-    /// bill a non-zero `billed_micro`, so `debit_sandbox_sync` does not take its
-    /// `billed_micro == 0` early return. The test above pins the parsed numbers;
-    /// this one pins what those numbers DO.
-    ///
-    /// Each resource is priced in ISOLATION (one dimension non-zero at a time,
-    /// with a long enough window that the nano→micro round-half-up cannot swallow
-    /// the result). Pricing a mixed workspace instead would let one healthy rate
-    /// mask eight zeroed ones — the assertion would pass while eight of the nine
-    /// fields were still broken.
-    #[test]
-    fn each_documented_sandbox_rate_bills_a_nonzero_tick_on_its_own() {
-        // A present `[credits]` table naming no sandbox rate at all — the shape
-        // the published doc produces.
-        let doc_toml = r#"
-[credits]
-enabled = false
-timeout_ms = 3000
-"#;
-        let credits = toml::from_str::<GatewayConfig>(doc_toml)
-            .expect("parses")
-            .credits;
-        // 1000s so even the smallest rate (storage, 30 nano/GiB/s) clears the
-        // nano→micro rounding floor rather than testing the rounding.
-        const SECS: u64 = 1_000;
-
-        let mut cases: Vec<(&str, u64)> = vec![
-            (
-                "vcpu",
-                credits.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Linux, SECS),
-            ),
-            (
-                "mem",
-                credits.sandbox_tick_cost_raw_micro(0, 1, 0, GpuKind::None, 0, OsKind::Linux, SECS),
-            ),
-            (
-                // Over the free-storage tier, so the storage rate is the only
-                // term that can contribute.
-                "storage",
-                credits.sandbox_tick_cost_raw_micro(
-                    0,
-                    0,
-                    u32::try_from(credits.sandbox_free_storage_gib)
-                        .expect("the default free-storage tier fits in u32")
-                        + 1,
-                    GpuKind::None,
-                    0,
-                    OsKind::Linux,
-                    SECS,
-                ),
-            ),
-        ];
-        for (label, gpu) in [
-            ("gpu_h200", GpuKind::H200),
-            ("gpu_h100", GpuKind::H100),
-            ("gpu_rtx_pro_6000", GpuKind::RtxPro6000),
-            ("gpu_rtx_5090", GpuKind::Rtx5090),
-            ("gpu_rtx_4090", GpuKind::Rtx4090),
-        ] {
-            cases.push((
-                label,
-                credits.sandbox_tick_cost_raw_micro(0, 0, 0, gpu, 1, OsKind::Linux, SECS),
-            ));
-        }
-        // Windows surcharge in isolation: the same 1-vCPU tick must cost strictly
-        // MORE on Windows than on Linux, which is only true if the surcharge rate
-        // is non-zero (a bare `windows` tick also carries the base vCPU rate, so
-        // an absolute `> 0` here would pass with the surcharge zeroed).
-        let linux_vcpu =
-            credits.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Linux, SECS);
-        let windows_vcpu =
-            credits.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Windows, SECS);
-        assert!(
-            windows_vcpu > linux_vcpu,
-            "the Windows vCPU surcharge is not being applied ({windows_vcpu} vs {linux_vcpu})"
-        );
-
-        for (label, raw) in cases {
-            assert!(
-                raw > 0,
-                "the {label} rate bills nothing; a 0 here means debit_sandbox_sync \
-                 returns None on that workload, so compute_verdict never sees a \
-                 balance and KillBalance is unreachable"
-            );
-            assert!(
-                credits.sandbox_debit_amount(raw) > 0,
-                "the {label} rate survives the markup as a zero debit"
-            );
-        }
-    }
-
-    /// A richly-populated config (providers with multi-account keys, routing with a
-    /// tiered fallback chain, a non-default firewall policy, control-plane pricing)
-    /// round-trips through TOML with every value preserved.
-    #[test]
-    fn populated_config_roundtrips_every_value() {
-        let mut cfg = GatewayConfig::default();
-        cfg.providers.openai = Some(OpenAiProviderConfig {
-            api_key: "sk-primary".to_string(),
-            api_keys: vec!["sk-a".to_string(), "sk-b".to_string()],
-            base_url: "https://proxy.example/v1".to_string(),
-        });
-        cfg.routing.default_provider = ProviderId::from("primary");
-        cfg.routing.fallback_chain =
-            vec![ProviderId::from("primary"), ProviderId::from("secondary")];
-        cfg.routing
-            .provider_tiers
-            .insert(ProviderId::from("secondary"), 2);
-        cfg.firewall.policy = FirewallPolicy::Sanitize;
-        cfg.control_plane.enabled = true;
-        cfg.control_plane.gateway_key = Some("gw-key".to_string());
-        cfg.control_plane.cost_per_1k_micro_usd = 4321;
-        cfg.control_plane.model_pricing.insert(
-            "claude-sonnet".to_string(),
-            ModelPrice {
-                input_per_1k_micro_usd: 3000,
-                output_per_1k_micro_usd: 15000,
-            },
-        );
-        cfg.credits.markup_bps = 700;
-
-        let text = toml::to_string_pretty(&cfg).expect("serialize populated config");
-        let back: GatewayConfig = toml::from_str(&text).expect("re-parse populated config");
-
-        let openai = back.providers.openai.expect("openai survives");
-        assert_eq!(openai.all_keys(), vec!["sk-primary", "sk-a", "sk-b"]);
-        assert_eq!(openai.base_url, "https://proxy.example/v1");
-        assert_eq!(back.routing.default_provider, ProviderId::from("primary"));
-        assert_eq!(back.routing.fallback_chain.len(), 2);
-        assert_eq!(
-            back.routing
-                .provider_tiers
-                .get(&ProviderId::from("secondary")),
-            Some(&2)
-        );
-        assert_eq!(back.firewall.policy, FirewallPolicy::Sanitize);
-        assert!(back.control_plane.enabled);
-        assert_eq!(back.control_plane.gateway_key.as_deref(), Some("gw-key"));
-        assert_eq!(back.control_plane.cost_per_1k_micro_usd, 4321);
-        // The per-model price table survived and still resolves via longest-prefix.
-        assert_eq!(
-            back.control_plane.cost_for("claude-sonnet-4-5", 1000, 1000),
-            18000
-        );
-        assert_eq!(back.credits.markup_bps, 700);
-    }
-}
+#[path = "config/tests/managed_openrouter_privacy_tests.rs"]
+mod managed_openrouter_privacy_tests;
 
 #[cfg(test)]
-mod classify_tier_tests {
-    use super::{
-        resolve_classify_model_id, seed_classify_route, ClassifyProviderConfig, FirewallOverlay,
-        InspectorConfig, ModelMapping, ProviderId, ProvidersConfig, RoutingConfig,
-        DEFAULT_CLASSIFY_PORT, DEFAULT_INSPECTOR_MODEL, ENV_CLASSIFY_MODEL_ID,
-    };
-
-    /// Serializes the tests that read the inspector-model **default**, because
-    /// `default_inspector_model` now consults [`ENV_CLASSIFY_MODEL_ID`] and one test
-    /// below sets it. `apps/gateway` has no crate-wide env test lock, so this is the
-    /// lock for this one variable; every test whose expectation depends on it takes
-    /// this guard. (Tests that pass an explicit model, or that exercise the pure
-    /// [`resolve_classify_model_id`], do not need it.)
-    fn lock_classify_model_env() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// The profile-aware port a standalone gateway resolves the classify slot to.
-    fn expected_port() -> u16 {
-        crate::profile::port(DEFAULT_CLASSIFY_PORT)
-    }
-
-    /// Resolve `routing` into the REAL router tables (`ModelRouter::new` does the
-    /// same lowering) so the seed assertions close the loop through
-    /// `RoutingTables::route` instead of only inspecting the map. `default_provider`
-    /// is a hosted one on purpose: that is the fall-through that used to leak the
-    /// classifier id upstream.
-    fn tables_for(routing: &RoutingConfig) -> ryu_gw_router::RoutingTables {
-        ryu_gw_router::RoutingTables {
-            model_map: routing
-                .model_map
-                .iter()
-                .map(|(model, mapping)| {
-                    (
-                        model.clone(),
-                        (
-                            mapping.provider.as_str().to_owned(),
-                            mapping.provider_model.clone(),
-                        ),
-                    )
-                })
-                .collect(),
-            builtin_prefixes: ryu_gw_router::builtin_prefixes(),
-            default_provider: "openai".to_owned(),
-            modality_map: std::collections::HashMap::new(),
-            fallback_chain: Vec::new(),
-            provider_tiers: std::collections::HashMap::new(),
-            eval_candidates: Vec::new(),
-            explore_ratio: 0.0,
-        }
-    }
-
-    #[test]
-    fn classify_slot_is_absent_by_default() {
-        // A STANDALONE gateway's state — with no `RYU_CLASSIFY_LLM_URL` published we
-        // must not materialize a slot pointing at a dead port. (On a Core-spawned
-        // gateway the slot is always `Some`: Core publishes the URL unconditionally.)
-        assert!(ProvidersConfig::default().classify.is_none());
-    }
-
-    #[test]
-    fn classify_slot_parses_from_gateway_toml_and_keeps_its_url() {
-        let cfg: ProvidersConfig =
-            toml::from_str("[classify]\nbase_url = \"http://127.0.0.1:9083/v1\"\n")
-                .expect("classify table must parse");
-        assert_eq!(
-            cfg.classify.expect("slot present").base_url,
-            "http://127.0.0.1:9083/v1"
-        );
-    }
-
-    #[test]
-    fn bare_classify_table_defaults_to_the_classify_port_not_ollama() {
-        // Regression guard for the reason `ClassifyProviderConfig` is its own type:
-        // reusing `LocalProviderConfig` would default this to the chat engine's
-        // :11434 and silently run the guardrail classifier against the chat model.
-        let cfg: ProvidersConfig = toml::from_str("[classify]\n").expect("bare table must parse");
-        let base_url = cfg.classify.expect("slot present").base_url;
-        assert_eq!(base_url, format!("http://127.0.0.1:{}/v1", expected_port()));
-        assert!(!base_url.contains("11434"));
-    }
-
-    #[test]
-    fn classify_config_default_url_is_profile_aware() {
-        let c: ClassifyProviderConfig =
-            serde_json::from_value(serde_json::json!({})).expect("empty object parses");
-        assert!(c.base_url.ends_with(&format!("{}/v1", expected_port())));
-    }
-
-    #[test]
-    fn inspector_model_defaults_to_the_classify_tier_classifier() {
-        let _lock = lock_classify_model_env();
-        // "enabled" must mean "working": an empty default made the guardrail
-        // fail open forever while `action` still read Block.
-        assert_eq!(InspectorConfig::default().model, DEFAULT_INSPECTOR_MODEL);
-        let from_wire: InspectorConfig =
-            serde_json::from_value(serde_json::json!({ "enabled": true }))
-                .expect("absent model parses");
-        assert_eq!(from_wire.model, DEFAULT_INSPECTOR_MODEL);
-    }
-
-    #[test]
-    fn blank_inspector_model_resolves_to_the_default() {
-        let _lock = lock_classify_model_env();
-        // The UI / `PUT /v1/config` send an explicit "" when an operator clears the
-        // box — the case `#[serde(default)]` alone does NOT cover.
-        for blank in ["", "   "] {
-            let cfg: InspectorConfig =
-                serde_json::from_value(serde_json::json!({ "enabled": true, "model": blank }))
-                    .expect("blank model parses");
-            assert_eq!(
-                cfg.model, DEFAULT_INSPECTOR_MODEL,
-                "blank {blank:?} must resolve to the default"
-            );
-        }
-    }
-
-    #[test]
-    fn explicit_inspector_model_is_never_overridden() {
-        let cfg: InspectorConfig =
-            serde_json::from_value(serde_json::json!({ "model": "openrouter/auto" }))
-                .expect("explicit model parses");
-        assert_eq!(cfg.model, "openrouter/auto");
-    }
-
-    #[test]
-    fn firewall_overlay_inspector_inherits_the_resolved_model() {
-        let _lock = lock_classify_model_env();
-        // Overlays are cloned wholesale into the resolved config by
-        // `firewall/resolve.rs`, so the normalization has to hold on this path too
-        // — otherwise an org/agent overlay reintroduces the empty model.
-        let ov: FirewallOverlay = serde_json::from_value(serde_json::json!({
-            "inspector": { "enabled": true, "model": "" }
-        }))
-        .expect("overlay parses");
-        assert_eq!(
-            ov.inspector.expect("inspector present").model,
-            DEFAULT_INSPECTOR_MODEL
-        );
-    }
-
-    /// Anchors Core's lazy-start predicate from the crate that owns the default.
-    ///
-    /// `apps/core/src/sidecar/gateway.rs::patch_selects_classify_tier` decides
-    /// whether to spawn a 241 MB llama-server from the SERIALIZED firewall section,
-    /// and it must decline on a fresh node. Two properties of `FirewallConfig`'s
-    /// default make that safe, and both would be invisible to Core if they changed:
-    /// the inspector is off, and there is not one enabled evaluator binding (an
-    /// enabled binding is Core's third arm, because `EvaluatorImpl::LlmJudge` borrows
-    /// `inspector.model` regardless of `inspector.enabled`). Core's own negative test
-    /// hand-builds this shape; this is the assertion that keeps the shape honest.
-    #[test]
-    fn default_firewall_section_selects_nothing_for_cores_lazy_start() {
-        // The model assertion below reads the published-id env var.
-        let _lock = lock_classify_model_env();
-        let wire = serde_json::to_value(super::FirewallConfig::default())
-            .expect("firewall config serializes");
-        assert_eq!(
-            wire["inspector"]["enabled"],
-            serde_json::json!(false),
-            "the inspector must default OFF, or every firewall push spawns the tier"
-        );
-        assert_eq!(
-            wire["evaluators"],
-            serde_json::json!([]),
-            "no evaluator binding may ship enabled — one would arm Core's judge arm on \
-             every firewall push"
-        );
-        // …and the model IS the classify id, which is precisely why the enablement
-        // flags above are the only thing standing between a checkbox save and a
-        // resident llama-server.
-        assert_eq!(
-            wire["inspector"]["model"],
-            serde_json::json!(super::classify_model_id())
-        );
-    }
-
-    // ── Registry-swappable classifier id (the published-id seam) ─────────────
-
-    #[test]
-    fn published_classify_id_wins_and_blank_falls_back() {
-        // Core pushes `RYU_CLASSIFY_MODEL_ID` unconditionally, so a blank value has
-        // to read as "not published" — never as an empty model id, which is the very
-        // failure `de_inspector_model` exists to prevent.
-        assert_eq!(
-            resolve_classify_model_id(Some("my-tiny-classifier")),
-            "my-tiny-classifier"
-        );
-        assert_eq!(
-            resolve_classify_model_id(Some("  my-tiny-classifier  ")),
-            "my-tiny-classifier"
-        );
-        for absent in [None, Some(""), Some("   ")] {
-            assert_eq!(
-                resolve_classify_model_id(absent),
-                DEFAULT_INSPECTOR_MODEL,
-                "{absent:?} must fall back to the compile-time default"
-            );
-        }
-    }
-
-    #[test]
-    fn published_classify_id_becomes_the_inspector_default() {
-        // The WIRING assertion: `default_inspector_model` must actually consult the
-        // published id, not just have a resolver available next to it.
-        let _lock = lock_classify_model_env();
-        let prev = std::env::var(ENV_CLASSIFY_MODEL_ID).ok();
-        std::env::set_var(ENV_CLASSIFY_MODEL_ID, "my-tiny-classifier");
-        let default_model = InspectorConfig::default().model;
-        let blanked: InspectorConfig =
-            serde_json::from_value(serde_json::json!({ "enabled": true, "model": "" }))
-                .expect("blank model parses");
-        match prev {
-            Some(v) => std::env::set_var(ENV_CLASSIFY_MODEL_ID, v),
-            None => std::env::remove_var(ENV_CLASSIFY_MODEL_ID),
-        }
-        assert_eq!(default_model, "my-tiny-classifier");
-        assert_eq!(blanked.model, "my-tiny-classifier");
-    }
-
-    /// The end-to-end assertion the original seam was missing: an overridden
-    /// classifier id must be **routable**, not merely readable. Before the seed,
-    /// `route("my-tiny-classifier")` matched no map and no builtin prefix and fell
-    /// through to `default_provider` — so the guardrail classifier id was shipped to
-    /// a hosted provider, 400'd, and the inspector failed open in silence.
-    #[test]
-    fn seeded_classify_route_makes_an_overridden_id_routable() {
-        let mut routing = RoutingConfig::default();
-        seed_classify_route(&mut routing, "my-tiny-classifier");
-        assert_eq!(
-            routing.model_map["my-tiny-classifier"].provider.as_str(),
-            "classify"
-        );
-        // Close the loop through the real router tables.
-        assert_eq!(
-            tables_for(&routing).route("my-tiny-classifier").0,
-            "classify"
-        );
-    }
-
-    #[test]
-    fn seeded_classify_route_defends_the_default_id_from_a_user_gemma_prefix() {
-        // `route` runs the user `model_map` (exact, then longest prefix) BEFORE the
-        // builtin table, so `gemma` → `openrouter` used to capture the default
-        // classifier and bill the guardrail to a paid provider. The exact seed wins
-        // step 1, ahead of that prefix scan.
-        let mut routing = RoutingConfig::default();
-        routing.model_map.insert(
-            "gemma".to_owned(),
-            ModelMapping {
-                provider: ProviderId::from("openrouter"),
-                provider_model: None,
-            },
-        );
-        seed_classify_route(&mut routing, DEFAULT_INSPECTOR_MODEL);
-        let tables = tables_for(&routing);
-        assert_eq!(tables.route(DEFAULT_INSPECTOR_MODEL).0, "classify");
-        // A normal gemma chat model still follows the operator's mapping.
-        assert_eq!(tables.route("gemma-3-12b-it").0, "openrouter");
-    }
-
-    #[test]
-    fn seeded_classify_route_never_overwrites_an_explicit_operator_entry() {
-        let mut routing = RoutingConfig::default();
-        routing.model_map.insert(
-            DEFAULT_INSPECTOR_MODEL.to_owned(),
-            ModelMapping {
-                provider: ProviderId::from("local"),
-                provider_model: None,
-            },
-        );
-        let marked = seed_classify_route(&mut routing, DEFAULT_INSPECTOR_MODEL);
-        assert_eq!(
-            routing.model_map[DEFAULT_INSPECTOR_MODEL].provider.as_str(),
-            "local",
-            "an explicit exact mapping is a deliberate operator choice"
-        );
-        assert!(
-            marked.is_none(),
-            "a row we did not insert must never be reported as ours to strip"
-        );
-        // A blank id is a no-op, never a `"" → classify` row.
-        let before = routing.model_map.len();
-        assert!(seed_classify_route(&mut routing, "   ").is_none());
-        assert_eq!(routing.model_map.len(), before);
-    }
-
-    // ── The seeded row is DERIVED: routable in memory, absent from the file ──────
-    //
-    // `GET /v1/config` renders `routing.model_map` as the desktop's hand-authored
-    // "Model mappings" list with per-row delete buttons, so a seeded row read as an
-    // entry the operator never wrote AND could not delete (the delete PUT dropped it
-    // from the file; the next `load()` seeded it straight back). These close the loop
-    // from the config layer; `api::config`'s tests cover the served view and the PUT.
-
-    /// How many `model_map` rows point at the classify provider. Asserted instead of
-    /// looking up `classify_model_id()` on purpose: another test in this binary
-    /// temporarily sets `RYU_CLASSIFY_MODEL_ID`, so *which* id got seeded is not
-    /// stable across a parallel run — but "a row pointing at `classify` exists" is,
-    /// and it is the stronger claim anyway.
-    fn classify_rows(routing: &RoutingConfig) -> Vec<&String> {
-        let mut rows: Vec<&String> = routing
-            .model_map
-            .iter()
-            .filter(|(_, mapping)| mapping.provider.as_str() == "classify")
-            .map(|(model, _)| model)
-            .collect();
-        rows.sort();
-        rows
-    }
-
-    #[test]
-    fn load_seeds_a_routable_classify_row_that_save_never_persists() {
-        let guard = super::test_config_path::ConfigPathGuard::isolated("seed-not-persisted");
-        // An operator's own mapping, so the assertions also prove the strip is
-        // surgical rather than a `model_map` wipe.
-        std::fs::write(
-            guard.path(),
-            "[routing.model_map.\"claude-3-5-sonnet\"]\nprovider = \"anthropic\"\n",
-        )
-        .expect("seed gateway.toml");
-
-        let loaded = super::GatewayConfig::load().expect("load the seeded file");
-
-        // In memory: exactly one classify row, it is marked as ours, and it ROUTES.
-        // The id is read from the marker rather than recomputed, so a parallel test
-        // flipping `RYU_CLASSIFY_MODEL_ID` cannot make this assert the wrong key.
-        let seeded_id = loaded
-            .seeded_classify_model
-            .clone()
-            .expect("load must mark the row it seeded");
-        assert_eq!(classify_rows(&loaded.routing), vec![&seeded_id]);
-        assert_eq!(
-            tables_for(&loaded.routing).route(&seeded_id).0,
-            "classify",
-            "the seed's whole purpose is that the classifier id resolves to the tier"
-        );
-
-        loaded.save().expect("persist the loaded config");
-
-        // On disk: the operator's row, and no classify row at all.
-        let text = std::fs::read_to_string(guard.path()).expect("gateway.toml written");
-        let on_disk: super::GatewayConfig = toml::from_str(&text).expect("re-parse");
-        assert_eq!(
-            on_disk.routing.model_map["claude-3-5-sonnet"]
-                .provider
-                .as_str(),
-            "anthropic",
-            "the operator's own mapping must survive"
-        );
-        assert!(
-            classify_rows(&on_disk.routing).is_empty(),
-            "a derived row must never reach the file: there it looks operator-authored \
-             forever and outlives the id it was seeded for — got {:?}",
-            classify_rows(&on_disk.routing)
-        );
-
-        // …and the next load re-seeds, so nothing was lost by not persisting it.
-        let reloaded = super::GatewayConfig::load().expect("reload");
-        assert_eq!(classify_rows(&reloaded.routing).len(), 1);
-    }
-
-    #[test]
-    fn a_classify_row_already_in_the_file_is_treated_as_the_operators_and_kept() {
-        // The migration case a marker-based strip must not get wrong: a node whose
-        // `gateway.toml` ALREADY carries `<classify id> → classify`, either because a
-        // pre-fix gateway persisted the seed or because the operator wrote it. `load`'s
-        // `or_insert` finds it, marks nothing, and `save` must leave it alone —
-        // otherwise the fix silently edits hand-authored files. Such a row is
-        // deletable by the ordinary read-modify-write PUT (nothing re-adds it under
-        // that exact id unless it IS the current classify id, in which case the row is
-        // simply re-seeded in memory and stripped from the view again).
-        let guard = super::test_config_path::ConfigPathGuard::isolated("preexisting-row");
-        std::fs::write(
-            guard.path(),
-            "[routing.model_map.\"my-own-classifier\"]\nprovider = \"classify\"\n",
-        )
-        .expect("seed gateway.toml");
-
-        let loaded = super::GatewayConfig::load().expect("load");
-        assert!(
-            loaded.routing.model_map.contains_key("my-own-classifier"),
-            "the operator's classify row must be loaded"
-        );
-        assert_ne!(
-            loaded.seeded_classify_model.as_deref(),
-            Some("my-own-classifier"),
-            "a row that came from the file is never claimed by the seed"
-        );
-        loaded.save().expect("save");
-
-        let text = std::fs::read_to_string(guard.path()).expect("written");
-        let on_disk: super::GatewayConfig = toml::from_str(&text).expect("re-parse");
-        assert_eq!(
-            on_disk.routing.model_map["my-own-classifier"]
-                .provider
-                .as_str(),
-            "classify",
-            "a classify row that came from the FILE is the operator's, not ours to strip"
-        );
-    }
-
-    #[test]
-    fn strip_leaves_a_seeded_row_that_was_since_replaced() {
-        // The marker says "we inserted this key"; it does not license deleting whatever
-        // value happens to live there later. If something re-pointed the mapping after
-        // the seed ran, that value is somebody's choice.
-        let mut cfg = super::GatewayConfig::default();
-        cfg.seeded_classify_model = seed_classify_route(&mut cfg.routing, DEFAULT_INSPECTOR_MODEL);
-        assert_eq!(
-            cfg.seeded_classify_model.as_deref(),
-            Some(DEFAULT_INSPECTOR_MODEL)
-        );
-        cfg.routing.model_map.insert(
-            DEFAULT_INSPECTOR_MODEL.to_owned(),
-            ModelMapping {
-                provider: ProviderId::from("local"),
-                provider_model: None,
-            },
-        );
-
-        let clean = cfg.without_derived_values();
-
-        assert_eq!(
-            clean.routing.model_map[DEFAULT_INSPECTOR_MODEL]
-                .provider
-                .as_str(),
-            "local"
-        );
-        assert!(
-            clean.seeded_classify_model.is_none(),
-            "the marker is consumed, so a second strip cannot delete a later row"
-        );
-    }
-
-    #[test]
-    fn seeded_classify_marker_never_crosses_the_wire() {
-        // The marker is provenance, not config: it must not appear in `gateway.toml`,
-        // must not be settable by a `PUT /v1/config` body, and must not survive a
-        // round-trip (else a client could ask us to delete one of its own rows).
-        let mut cfg = super::GatewayConfig::default();
-        cfg.seeded_classify_model = seed_classify_route(&mut cfg.routing, DEFAULT_INSPECTOR_MODEL);
-
-        let toml_text = toml::to_string_pretty(&cfg).expect("serialize config");
-        assert!(!toml_text.contains("seeded_classify_model"), "{toml_text}");
-        let json = serde_json::to_value(&cfg).expect("serialize config as json");
-        assert!(json.get("seeded_classify_model").is_none());
-
-        let injected: super::GatewayConfig = serde_json::from_value(serde_json::json!({
-            "seeded_classify_model": DEFAULT_INSPECTOR_MODEL,
-            "routing": { "model_map": { DEFAULT_INSPECTOR_MODEL: { "provider": "classify" } } }
-        }))
-        .expect("config patch parses");
-        assert!(
-            injected.seeded_classify_model.is_none(),
-            "a PUT body must not be able to mark an operator row as strippable"
-        );
-    }
-
-    // ── `[providers.classify]` is the STANDALONE setting; Core's env wins the slot ──
-
-    #[test]
-    fn cores_published_classify_url_wins_the_file_table() {
-        // The precedence half of the cross-process contract (see the env overlay in
-        // `load`): Core publishes `RYU_CLASSIFY_LLM_URL` on every spawn, so on a
-        // Core-spawned node the URL the gateway dials for `classify` is always the one
-        // Core computed — which is what lets Core gate its 300-400 MB lazy sidecar
-        // start on that URL's locality without reading this file.
-        //
-        // This test mutates `RYU_CLASSIFY_LLM_URL`, which is process-global. The
-        // config-path guard is what makes that safe: the only reader is
-        // `GatewayConfig::load`, and every test that reaches `load` holds this same
-        // lock, so no other test can be observing the variable while it is swapped.
-        let guard = super::test_config_path::ConfigPathGuard::isolated("classify-url");
-        let authored = "[providers.classify]\nbase_url = \"http://small-model.internal:9999/v1\"\n";
-        std::fs::write(guard.path(), authored).expect("seed gateway.toml");
-        let prior = std::env::var_os("RYU_CLASSIFY_LLM_URL");
-        std::env::set_var("RYU_CLASSIFY_LLM_URL", "http://127.0.0.1:8083/v1");
-
-        // 1. File table + env ⇒ the env wins the LIVE slot, and the file's value is
-        //    captured for the strip (asserted in the persistence test below).
-        let with_file = super::GatewayConfig::load().expect("load");
-
-        // 2. No table + env ⇒ the env registers the tier, as it always did.
-        std::fs::write(guard.path(), "bind = \"127.0.0.1:7981\"\n").expect("rewrite gateway.toml");
-        let without_table = super::GatewayConfig::load().map(|c| c.providers.classify);
-
-        // 3. No table + BLANK env ⇒ "not published": the slot stays empty and the tier
-        //    fails open, rather than registering an unusable "" URL.
-        std::env::set_var("RYU_CLASSIFY_LLM_URL", "   ");
-        let blank_env_no_table = super::GatewayConfig::load().map(|c| c.providers.classify);
-
-        // 4. File table + BLANK env ⇒ the standalone case the field exists for. Nothing
-        //    overwrites it, including a bare table, which keeps this type's own
-        //    profile-aware default (never Ollama's `:11434`).
-        std::fs::write(guard.path(), authored).expect("rewrite gateway.toml");
-        let blank_env_with_table = super::GatewayConfig::load().expect("load");
-        std::fs::write(guard.path(), "[providers.classify]\n").expect("rewrite gateway.toml");
-        let blank_env_bare_table = super::GatewayConfig::load().map(|c| c.providers.classify);
-
-        match prior {
-            Some(v) => std::env::set_var("RYU_CLASSIFY_LLM_URL", v),
-            None => std::env::remove_var("RYU_CLASSIFY_LLM_URL"),
-        }
-
-        assert_eq!(
-            with_file
-                .providers
-                .classify
-                .as_ref()
-                .expect("slot present")
-                .base_url,
-            "http://127.0.0.1:8083/v1",
-            "Core's published URL must win the live slot — the gateway has to dial the \
-             tier Core decided on, because that is the only URL Core can gate its lazy \
-             start against"
-        );
-        assert!(
-            with_file.env_injected_classify_provider,
-            "the overwritten slot must be marked derived"
-        );
-        assert_eq!(
-            with_file
-                .file_classify_provider
-                .as_ref()
-                .expect("the file's table is captured, not discarded")
-                .base_url,
-            "http://small-model.internal:9999/v1",
-        );
-        assert_eq!(
-            without_table.expect("load").expect("slot present").base_url,
-            "http://127.0.0.1:8083/v1",
-            "with no table, Core's published URL is what registers the tier"
-        );
-        assert!(
-            blank_env_no_table.expect("load").is_none(),
-            "a blank env must leave the tier unregistered (fail open), not register \"\""
-        );
-        assert_eq!(
-            blank_env_with_table
-                .providers
-                .classify
-                .as_ref()
-                .expect("slot present")
-                .base_url,
-            "http://small-model.internal:9999/v1",
-            "on a STANDALONE gateway (no published URL) the file setting is what takes \
-             effect — that is the scope this field has"
-        );
-        assert!(
-            !blank_env_with_table.env_injected_classify_provider,
-            "a file-authored table with no env is not derived"
-        );
-        assert_eq!(
-            blank_env_bare_table
-                .expect("load")
-                .expect("slot present")
-                .base_url,
-            format!("http://127.0.0.1:{}/v1", expected_port()),
-            "a bare table keeps the classify default, not Ollama's port"
-        );
-    }
-
-    #[test]
-    fn an_env_injected_classify_slot_is_never_written_back_and_never_eats_the_file() {
-        // Two failure modes at once, both on the `save()` path, because env-wins makes
-        // them the SAME code path:
-        //
-        // 1. No file table: every provider slot serializes out on `save()`, so the first
-        //    save on a Core-spawned node would freeze Core's computed, profile-scoped
-        //    loopback URL (`:8083` release, `:9083` dev) into `gateway.toml` as an
-        //    operator-authored-looking table — stale on the next profile/port change,
-        //    and live the moment something other than Core starts the gateway.
-        // 2. WITH a file table: the strip used to blank the slot, which was safe only
-        //    while the file BEAT the env (a file table then never set the marker).
-        //    Under env-wins the live value is Core's, so a blanking strip would delete
-        //    the operator's own `[providers.classify]` from their file on the next
-        //    `PUT`-triggered save. It must RESTORE, not clear.
-        let guard = super::test_config_path::ConfigPathGuard::isolated("classify-env-save");
-        std::fs::write(guard.path(), "bind = \"127.0.0.1:7981\"\n").expect("seed gateway.toml");
-        let prior = std::env::var_os("RYU_CLASSIFY_LLM_URL");
-        std::env::set_var("RYU_CLASSIFY_LLM_URL", "http://127.0.0.1:8083/v1");
-
-        let loaded = super::GatewayConfig::load().expect("load");
-        // In memory the tier IS registered — the strip must not cost the running
-        // process its classify provider.
-        assert_eq!(
-            loaded
-                .providers
-                .classify
-                .as_ref()
-                .expect("env fills the slot")
-                .base_url,
-            "http://127.0.0.1:8083/v1"
-        );
-        assert!(loaded.env_injected_classify_provider);
-        loaded.save().expect("save");
-
-        let text = std::fs::read_to_string(guard.path()).expect("gateway.toml written");
-        let on_disk: super::GatewayConfig = toml::from_str(&text).expect("re-parse");
-        // …and the next load still registers the tier from the env.
-        let after_save = super::GatewayConfig::load().expect("reload");
-
-        // Now the operator's own table, which the env overwrites in memory and which a
-        // save must nevertheless leave on disk untouched.
-        std::fs::write(
-            guard.path(),
-            "[providers.classify]\nbase_url = \"http://small-model.internal:9999/v1\"\n",
-        )
-        .expect("rewrite gateway.toml");
-        let authored = super::GatewayConfig::load().expect("load authored");
-        assert!(
-            authored.env_injected_classify_provider,
-            "under env-wins the marker is set even when the file HAD a table — which is \
-             exactly why the strip has to restore rather than clear"
-        );
-        // The strip is idempotent: `api::config::persisted_config` runs it, then the
-        // resulting config is what `save()` strips again. Model both hops.
-        let via_persisted_read = authored.without_derived_values();
-        via_persisted_read.save().expect("save authored");
-        let authored_text = std::fs::read_to_string(guard.path()).expect("written");
-        let authored_on_disk: super::GatewayConfig =
-            toml::from_str(&authored_text).expect("re-parse authored");
-
-        match prior {
-            Some(v) => std::env::set_var("RYU_CLASSIFY_LLM_URL", v),
-            None => std::env::remove_var("RYU_CLASSIFY_LLM_URL"),
-        }
-
-        assert!(
-            on_disk.providers.classify.is_none(),
-            "a derived provider slot must not be persisted as a file setting: {text}"
-        );
-        assert!(
-            !text.contains("[providers.classify]"),
-            "not even as a bare table: {text}"
-        );
-        assert_eq!(
-            after_save
-                .providers
-                .classify
-                .expect("env still fills the slot")
-                .base_url,
-            "http://127.0.0.1:8083/v1",
-            "saving must leave Core's published URL in charge of the slot"
-        );
-        assert_eq!(
-            via_persisted_read
-                .providers
-                .classify
-                .as_ref()
-                .expect("the file's table is restored, not dropped")
-                .base_url,
-            "http://small-model.internal:9999/v1",
-            "the strip restores what the file said — a `None` here is the data-loss bug"
-        );
-        assert_eq!(
-            authored_on_disk
-                .providers
-                .classify
-                .expect("authored table survives")
-                .base_url,
-            "http://small-model.internal:9999/v1",
-            "the operator's own table must survive a save, even though the env \
-             overwrote it in memory"
-        );
-    }
-}
+#[path = "config/tests/reaction_learning_config_tests.rs"]
+mod reaction_learning_config_tests;
 
 #[cfg(test)]
-mod authenticated_bootstrap_tests {
-    use super::*;
-    #[test]
-    fn default_auth_bootstraps_distinct_persistent_roles() {
-        let directory =
-            std::env::temp_dir().join(format!("gateway-bootstrap-{}", uuid::Uuid::new_v4()));
-        let mut first = AuthConfig::default();
-        assert!(first.require_auth);
-        first.bootstrap(&directory).unwrap();
-        assert!(first.master_key.is_some());
-        assert_eq!(first.api_keys.len(), 1);
-        assert!(!first.api_keys[0].trusted_forwarder);
-        assert_ne!(
-            first.master_key.as_deref(),
-            Some(first.api_keys[0].key.as_str())
-        );
-        let mut second = AuthConfig::default();
-        second.bootstrap(&directory).unwrap();
-        assert_eq!(first.master_key, second.master_key);
-        assert_eq!(first.api_keys[0].key, second.api_keys[0].key);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-    #[test]
-    fn rejects_shared_admin_relay_and_invalid_explicit_master() {
-        let mut config = AuthConfig::default();
-        config.master_key = Some("gwadm_0123456789abcdef0123456789abcdef".into());
-        assert!(config
-            .add_relay(config.master_key.clone().unwrap(), "relay", false)
-            .is_err());
-        config.master_key = Some("".into());
-        assert!(config.bootstrap(std::path::Path::new("/unused")).is_err());
-    }
-}
+#[path = "config/tests/channel_config_tests.rs"]
+mod channel_config_tests;
+
+#[cfg(test)]
+#[path = "config/tests/toml_roundtrip_tests.rs"]
+mod toml_roundtrip_tests;
+
+#[cfg(test)]
+#[path = "config/tests/classify_tier_tests.rs"]
+mod classify_tier_tests;
+
+#[cfg(test)]
+#[path = "config/tests/authenticated_bootstrap_tests.rs"]
+mod authenticated_bootstrap_tests;
+
+#[cfg(test)]
+#[path = "config/tests/provider_environment_tests.rs"]
+mod provider_environment_tests;

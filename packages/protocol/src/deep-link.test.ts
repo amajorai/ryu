@@ -2,10 +2,33 @@ import { describe, expect, it } from "bun:test";
 import {
 	buildRyuDeepLink,
 	type DeepLinkIntent,
+	isRyuDeepLinkProfile,
 	parseRyuDeepLink,
+	RYU_DEEP_LINK_SCHEMES,
+	ryuDeepLinkProfile,
 } from "./deep-link.ts";
 
 describe("parseRyuDeepLink", () => {
+	it("keeps the grammar intact for each isolated profile scheme", () => {
+		for (const [profile, scheme] of Object.entries(RYU_DEEP_LINK_SCHEMES)) {
+			if (!isRyuDeepLinkProfile(profile)) {
+				throw new Error("Canonical scheme table contains an unknown profile");
+			}
+			const raw = `${scheme}://chat/new?prompt=hello&agent=a`;
+			expect(ryuDeepLinkProfile(raw)).toBe(profile);
+			expect(parseRyuDeepLink(raw)).toEqual(
+				parseRyuDeepLink("ryu://chat/new?prompt=hello&agent=a")
+			);
+		}
+		expect(ryuDeepLinkProfile("ryu-dev-other://open/settings")).toBeNull();
+		expect(parseRyuDeepLink("ryu-dev-other://open/settings")).toBeNull();
+		expect(buildRyuDeepLink({ kind: "page", page: "settings" }, "dev")).toBe(
+			"ryu-dev://open/settings"
+		);
+		expect(buildRyuDeepLink({ kind: "page", page: "settings" })).toBe(
+			"ryu://open/settings"
+		);
+	});
 	it("parses a Hugging Face model link, keeping the -GGUF suffix and case", () => {
 		expect(
 			parseRyuDeepLink(

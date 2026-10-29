@@ -4,7 +4,7 @@ if (!id) return { kind: "none" };
 const enabled = String(await host.getPreference({ key: "effort-escalator-enabled" }) ?? "false") === "true";
 if (!enabled) return { kind: "none" };
 let rules;
-try { rules = JSON.parse(String(await host.getPreference({ key: "effort-escalator-rules" }) ?? "{}")); } catch (_error) { return { kind: "none" }; }
+try { rules = JSON.parse(String(await host.getPreference({ key: "effort-escalator-rules" }) ?? "{}")); } catch  { return { kind: "none" }; }
 const rule = rules?.agents?.[ctx.agent_id] ?? rules?.global;
 if (!rule?.ladder?.length) return { kind: "none" };
 function boundedNumber(value, fallback, minimum, maximum) {
@@ -17,7 +17,8 @@ function boundedInteger(value, fallback, minimum, maximum) {
 }
 const key = `effort-escalator:${id}`;
 let state = {};
-try { state = JSON.parse((await host.storage.get(key)) ?? "{}"); } catch (_error) {}
+try { state = JSON.parse((await host.storage.get(key)) ?? "{}"); } catch  {}
+if (!state || Object(state) !== state || Array.isArray(state)) state = {};
 const now = Date.now();
 const afterMinutes = boundedNumber(rule.after_minutes, 30, 1, 24 * 60);
 const afterMs = afterMinutes * 60 * 1000;

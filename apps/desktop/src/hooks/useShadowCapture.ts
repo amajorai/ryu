@@ -10,8 +10,12 @@
 // mount. That makes a desktop-side toggle survive a Shadow restart. No telemetry;
 // purely local storage.
 
-import { useCallback, useEffect, useState } from "react";
-import { setCaptureControl } from "@/src/lib/api/shadow.ts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	type CaptureControlUpdate,
+	getCaptureControl,
+	setCaptureControl,
+} from "@/src/lib/api/shadow.ts";
 
 const STORE_FILE = "companion.bin";
 const STORE_KEY_PAUSED = "companion_paused";
@@ -26,47 +30,66 @@ let storePromise: Promise<import("@tauri-apps/plugin-store").Store> | null =
 
 function getStore(): Promise<import("@tauri-apps/plugin-store").Store> {
 	if (!storePromise) {
-		storePromise = import("@tauri-apps/plugin-store").then(({ load }) =>
+		const pending = import("@tauri-apps/plugin-store").then(({ load }) =>
 			load(STORE_FILE)
 		);
+		storePromise = pending;
+		// Retry a failed load, while retaining the valid Store after a key read refusal.
+		void pending.catch(() => {
+			if (storePromise === pending) {
+				storePromise = null;
+			}
+		});
 	}
 	return storePromise;
 }
 
 async function readBool(key: string, fallback: boolean): Promise<boolean> {
-	try {
-		const store = await getStore();
-		return (await store.get<boolean>(key)) ?? fallback;
-	} catch {
+	const store = await getStore();
+	const value = await store.get<unknown>(key);
+	if (value === undefined) {
 		return fallback;
 	}
+	if (typeof value !== "boolean") {
+		throw new Error(`Invalid saved capture preference: ${key}`);
+	}
+	return value;
 }
-
 async function readList(key: string): Promise<string[]> {
-	try {
-		const store = await getStore();
-		return (await store.get<string[]>(key)) ?? [];
-	} catch {
+	const store = await getStore();
+	const value = await store.get<unknown>(key);
+	if (value === undefined) {
 		return [];
 	}
+	if (
+		!(Array.isArray(value) && value.every((item) => typeof item === "string"))
+	) {
+		throw new Error(`Invalid saved capture preference: ${key}`);
+	}
+	return value;
 }
-
 async function readNumber(key: string, fallback: number): Promise<number> {
-	try {
-		const store = await getStore();
-		return (await store.get<number>(key)) ?? fallback;
-	} catch {
+	const store = await getStore();
+	const value = await store.get<unknown>(key);
+	if (value === undefined) {
 		return fallback;
 	}
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error(`Invalid saved capture preference: ${key}`);
+	}
+	return value;
 }
 
-async function writeValue(key: string, value: unknown): Promise<void> {
+async function writeValues(values: Record<string, unknown>): Promise<boolean> {
 	try {
 		const store = await getStore();
-		await store.set(key, value);
+		for (const [key, value] of Object.entries(values)) {
+			await store.set(key, value);
+		}
 		await store.save();
+		return true;
 	} catch {
-		// Non-fatal: settings are best-effort.
+		return false;
 	}
 }
 
@@ -80,14 +103,21 @@ function normalizeRetentionDays(days: number): number {
 export interface ShadowCaptureState {
 	/** Per-app allowlist. Empty = allow all. */
 	allowlist: string[];
+	captureApplying: boolean;
+	captureError: boolean;
+	captureReadError: boolean;
 	/** Frame (keyframe) recording enabled. */
 	frames: boolean;
 	/** Total days Shadow keeps captured Timeline/search history. */
 	historyRetentionDays: number;
 	/** Global pause/incognito. */
 	paused: boolean;
+	persistenceError: boolean;
 	/** False until persisted settings are loaded and pushed to Shadow. */
 	ready: boolean;
+	/** Probe the local Shadow sidecar and refresh the reachability state. */
+	refreshShadow: () => Promise<boolean>;
+	retryCaptureSettings: () => Promise<void>;
 	setAllowlist: (list: string[]) => Promise<void>;
 	setFrames: (enabled: boolean) => Promise<void>;
 	setHistoryRetentionDays: (days: number) => Promise<void>;
@@ -110,88 +140,179 @@ export function useShadowCapture(): ShadowCaptureState {
 	const [allowlist, setAllowlistState] = useState<string[]>([]);
 	const [ready, setReady] = useState(false);
 	const [shadowReachable, setShadowReachable] = useState<boolean | null>(null);
+	const [captureApplying, setCaptureApplying] = useState(false);
+	const [captureError, setCaptureError] = useState(false);
+	const [captureReadError, setCaptureReadError] = useState(false);
+	const [persistenceError, setPersistenceError] = useState(false);
+	const applying = useRef(false);
+	const mounted = useRef(false);
+	const loadedPreferences = useRef(false);
+	const operation = useRef(0);
+	const desired = useRef({
+		frames: true,
+		paused: false,
+		app_allowlist: [] as string[],
+		history_retention_days: DEFAULT_HISTORY_RETENTION_DAYS,
+	});
+
+	const loadCaptureSettings = useCallback(async () => {
+		if (applying.current || !mounted.current) {
+			return;
+		}
+		applying.current = true;
+		const currentOperation = ++operation.current;
+		setCaptureApplying(true);
+		try {
+			const [savedFrames, savedPaused, savedList, savedRetentionDays] =
+				await Promise.all([
+					readBool(STORE_KEY_FRAMES, true),
+					readBool(STORE_KEY_PAUSED, false),
+					readList(STORE_KEY_ALLOWLIST),
+					readNumber(
+						STORE_KEY_HISTORY_RETENTION_DAYS,
+						DEFAULT_HISTORY_RETENTION_DAYS
+					),
+				]);
+			if (!mounted.current || currentOperation !== operation.current) {
+				return;
+			}
+			desired.current = {
+				frames: savedFrames,
+				paused: savedPaused,
+				app_allowlist: savedList,
+				history_retention_days: normalizeRetentionDays(savedRetentionDays),
+			};
+			loadedPreferences.current = true;
+			setFramesState(savedFrames);
+			setPausedState(savedPaused);
+			setAllowlistState(savedList);
+			setHistoryRetentionDaysState(normalizeRetentionDays(savedRetentionDays));
+			setCaptureReadError(false);
+			const ctrl = await setCaptureControl({ ...desired.current });
+			if (!mounted.current || currentOperation !== operation.current) {
+				return;
+			}
+			setShadowReachable(ctrl !== null);
+			setCaptureError(ctrl === null);
+			if (ctrl) {
+				setHistoryRetentionDaysState(
+					normalizeRetentionDays(ctrl.history_retention_days)
+				);
+			}
+			setReady(true);
+		} catch {
+			if (mounted.current && currentOperation === operation.current) {
+				// Unknown saved state must never be replaced by a default unpause.
+				loadedPreferences.current = false;
+				setCaptureReadError(true);
+				setReady(false);
+			}
+		} finally {
+			if (mounted.current && currentOperation === operation.current) {
+				applying.current = false;
+				setCaptureApplying(false);
+			}
+		}
+	}, []);
 
 	useEffect(() => {
-		let cancelled = false;
-		Promise.all([
-			readBool(STORE_KEY_FRAMES, true),
-			readBool(STORE_KEY_PAUSED, false),
-			readList(STORE_KEY_ALLOWLIST),
-			readNumber(
-				STORE_KEY_HISTORY_RETENTION_DAYS,
-				DEFAULT_HISTORY_RETENTION_DAYS
-			),
-		]).then(
-			async ([savedFrames, savedPaused, savedList, savedRetentionDays]) => {
-				if (cancelled) {
-					return;
-				}
-				setFramesState(savedFrames);
-				setPausedState(savedPaused);
-				setAllowlistState(savedList);
-				setHistoryRetentionDaysState(
-					normalizeRetentionDays(savedRetentionDays)
-				);
-				// Push persisted state to Shadow (may have restarted since last run).
-				const ctrl = await setCaptureControl({
-					frames: savedFrames,
-					paused: savedPaused,
-					app_allowlist: savedList,
-					history_retention_days: normalizeRetentionDays(savedRetentionDays),
-				});
-				if (!cancelled) {
-					setShadowReachable(ctrl !== null);
-					if (ctrl) {
-						setHistoryRetentionDaysState(
-							normalizeRetentionDays(ctrl.history_retention_days)
-						);
-					}
-					setReady(true);
-				}
-			}
-		);
+		mounted.current = true;
+		void loadCaptureSettings();
 		return () => {
-			cancelled = true;
+			mounted.current = false;
+			operation.current += 1;
+			applying.current = false;
 		};
-	}, []);
+	}, [loadCaptureSettings]);
 
-	const setFrames = useCallback(async (enabled: boolean) => {
-		setFramesState(enabled);
-		await writeValue(STORE_KEY_FRAMES, enabled);
-		const ctrl = await setCaptureControl({ frames: enabled });
-		setShadowReachable(ctrl !== null);
-	}, []);
-
-	const setHistoryRetentionDays = useCallback(async (days: number) => {
-		const normalizedDays = normalizeRetentionDays(days);
-		setHistoryRetentionDaysState(normalizedDays);
-		await writeValue(STORE_KEY_HISTORY_RETENTION_DAYS, normalizedDays);
-		const ctrl = await setCaptureControl({
-			history_retention_days: normalizedDays,
-		});
+	const applyCapture = useCallback(async (update: CaptureControlUpdate) => {
+		// Blur/Enter or a second click must not overlap an outstanding capture write.
+		if (applying.current || !mounted.current || !loadedPreferences.current) {
+			return;
+		}
+		applying.current = true;
+		const currentOperation = ++operation.current;
+		setCaptureApplying(true);
+		desired.current = { ...desired.current, ...update };
+		const values: Record<string, unknown> = {};
+		if (update.frames !== undefined) {
+			values[STORE_KEY_FRAMES] = update.frames;
+			setFramesState(update.frames);
+		}
+		if (update.paused !== undefined) {
+			values[STORE_KEY_PAUSED] = update.paused;
+			setPausedState(update.paused);
+		}
+		if (update.app_allowlist !== undefined) {
+			values[STORE_KEY_ALLOWLIST] = update.app_allowlist;
+			setAllowlistState(update.app_allowlist);
+		}
+		if (update.history_retention_days !== undefined) {
+			values[STORE_KEY_HISTORY_RETENTION_DAYS] = update.history_retention_days;
+			setHistoryRetentionDaysState(update.history_retention_days);
+		}
+		// A local disk refusal must not prevent an accepted privacy pause.
+		const persisted = await writeValues(values);
+		const ctrl = await setCaptureControl(update);
+		if (!mounted.current || currentOperation !== operation.current) {
+			return;
+		}
+		const fullPreferences = Object.keys(values).length === 4;
+		// A successful unrelated sparse write cannot repair an earlier failed preference.
+		setPersistenceError(
+			(current) => !persisted || (current && !fullPreferences)
+		);
+		setCaptureError(
+			(current) => ctrl === null || (current && !fullPreferences)
+		);
 		setShadowReachable(ctrl !== null);
 		if (ctrl) {
 			setHistoryRetentionDaysState(
 				normalizeRetentionDays(ctrl.history_retention_days)
 			);
 		}
+		applying.current = false;
+		setCaptureApplying(false);
 	}, []);
 
-	const setPaused = useCallback(async (next: boolean) => {
-		setPausedState(next);
-		await writeValue(STORE_KEY_PAUSED, next);
-		const ctrl = await setCaptureControl({ paused: next });
-		setShadowReachable(ctrl !== null);
-	}, []);
+	const setFrames = useCallback(
+		(enabled: boolean) => applyCapture({ frames: enabled }),
+		[applyCapture]
+	);
+	const setPaused = useCallback(
+		(next: boolean) => applyCapture({ paused: next }),
+		[applyCapture]
+	);
+	const setAllowlist = useCallback(
+		(list: string[]) => applyCapture({ app_allowlist: list }),
+		[applyCapture]
+	);
+	const setHistoryRetentionDays = useCallback(
+		(days: number) =>
+			applyCapture({ history_retention_days: normalizeRetentionDays(days) }),
+		[applyCapture]
+	);
+	const retryCaptureSettings = useCallback(
+		() =>
+			loadedPreferences.current
+				? applyCapture({ ...desired.current })
+				: loadCaptureSettings(),
+		[applyCapture, loadCaptureSettings]
+	);
 
-	const setAllowlist = useCallback(async (list: string[]) => {
-		setAllowlistState(list);
-		await writeValue(STORE_KEY_ALLOWLIST, list);
-		const ctrl = await setCaptureControl({ app_allowlist: list });
-		setShadowReachable(ctrl !== null);
+	const refreshShadow = useCallback(async () => {
+		const ctrl = await getCaptureControl();
+		const reachable = ctrl !== null;
+		setShadowReachable(reachable);
+		return reachable;
 	}, []);
 
 	return {
+		captureApplying,
+		captureError,
+		captureReadError,
+		persistenceError,
+		retryCaptureSettings,
 		allowlist,
 		frames,
 		historyRetentionDays,
@@ -201,6 +322,7 @@ export function useShadowCapture(): ShadowCaptureState {
 		setFrames,
 		setHistoryRetentionDays,
 		setPaused,
+		refreshShadow,
 		shadowReachable,
 	};
 }

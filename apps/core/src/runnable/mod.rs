@@ -22,6 +22,7 @@
 //! (M3 / issue #171).
 
 pub mod agent_builder;
+pub(crate) mod agent_configuration_policy;
 pub mod dashboard_builder;
 pub mod self_build;
 pub mod tool_build;
@@ -349,6 +350,8 @@ mod tests {
             system_prompt: None,
             tools: vec![],
             approval_tools: vec![],
+            identity_mode: crate::agents::AgentIdentityMode::Managed,
+            account_access: None,
             composio_actions: vec![],
             skills: vec![],
             identity_profile_ids: vec![],
@@ -381,6 +384,7 @@ mod tests {
             nodes: vec![],
             edges: vec![],
             triggers: Vec::new(),
+            max_concurrency: None,
             created_at: None,
             updated_at: None,
         }

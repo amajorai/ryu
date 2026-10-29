@@ -19,7 +19,7 @@ test("the hero product hierarchy keeps the platform and surface distinctions tog
 		"Core = Run",
 		"Gateway = Secure",
 		"Bot = Chat",
-		"Console = Configure",
+		"Agent = Configure",
 		"Apps = Use",
 	]);
 	expect(

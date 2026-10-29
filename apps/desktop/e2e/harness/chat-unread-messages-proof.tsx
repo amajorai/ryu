@@ -3,7 +3,7 @@
 // arriving, a streamed reply growing in place, and the reader reaching the
 // unread boundary.
 
-import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
+import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
 import type { ChatStatus, UIMessage } from "ai";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -17,7 +17,7 @@ function userMessage(id: string, text: string): UIMessage {
 		id,
 		role: "user",
 		parts: [{ type: "text", text }],
-	} as UIMessage;
+	};
 }
 
 function assistantMessage(id: string, text: string): UIMessage {
@@ -25,7 +25,7 @@ function assistantMessage(id: string, text: string): UIMessage {
 		id,
 		role: "assistant",
 		parts: [{ type: "text", text }],
-	} as UIMessage;
+	};
 }
 
 function buildHistory(): UIMessage[] {
@@ -128,7 +128,7 @@ function Story() {
 			<main className="flex h-screen flex-col bg-background text-foreground">
 				<header className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-2 px-5 py-4">
 					<div className="mr-auto min-w-0">
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							Message list proof
 						</p>
 						<h1 className="font-semibold text-lg tracking-tight">

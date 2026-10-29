@@ -8,9 +8,13 @@
 //!   - [`Workflow`] — the persisted definition (nodes + edges).
 //!   - [`NodeKind`] — the typed node kinds. Data/logic (Input, Output, Prompt,
 //!     Condition, Transform, SetState, Delay, Note, While, Guardrails, Webhook),
-//!     orchestration (SubWorkflow, AgentDelegate, Awakeable), desktop automation
-//!     (Recipe, GhostAction), and the **Runnable** nodes that run any executable
-//!     Ryu object as a step: Agent, Skill, Mcp, and Plugin.
+//!     orchestration (SubWorkflow, ForEach, Parallel, AgentDelegate, Awakeable),
+//!     desktop automation
+//!     (Recipe, GhostAction), the **Runnable** nodes that run any executable
+//!     Ryu object as a step: Agent, Skill, Mcp, and Plugin, and Code, which
+//!     runs or checks a Lean, Bend, or BAML program.
+//!   - [`RetryPolicy`] / [`RepeatPolicy`] — per-node policies that re-run one
+//!     step on failure, or loop it on its own output.
 //!   - [`WorkflowGraph`] — a validated petgraph DAG built from a [`Workflow`].
 //!
 //! Per the Core-vs-Gateway rule this is **Core**: it decides *what runs*
@@ -23,17 +27,26 @@
 //! restart and resumes from the last completed node. See [`durable`] for the
 //! engine seam and [`executor`] for the loop/HITL semantics.
 
+pub mod auto_resume;
 pub mod channel_send;
+#[cfg(test)]
+mod concurrency_tests;
 pub mod delegation;
 pub mod durable;
 pub mod executor;
+pub mod history;
+pub mod limits;
 pub mod notify_user;
+pub mod script;
+pub mod secrets;
 pub mod store;
 pub mod template;
 pub mod templates;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod triggers;
 
-pub use executor::{dry_run_workflow, fail_run, rerun_run, resume_run};
+pub use executor::{dry_run_workflow, fail_run, fork_run, rerun_run, resume_run};
 
 use std::collections::{HashMap, HashSet};
 
@@ -151,8 +164,9 @@ pub enum NodeKind {
     ///
     /// **At-least-once, not exactly-once:** a side-effecting body node
     /// (Tool/Webhook/GhostAction/Prompt) interrupted mid-call re-runs on resume.
-    /// An `Awakeable` gate inside a loop body is rejected in v1 (the node fails with
-    /// a clear error); propagating a mid-loop suspend is future work.
+    /// An `Awakeable` or acknowledgement gate inside a body suspends the enclosing
+    /// run. A decision resumes the same iteration without advancing its carry
+    /// prematurely, and then continues enclosing workflows from their checkpoints.
     ///
     /// **2. One-shot branch gate (`body_workflow_id` absent — back-compat).** With
     /// no body the node behaves as a `Condition`-style gate: it evaluates `expr`
@@ -190,6 +204,44 @@ pub enum NodeKind {
     },
     /// Runs another persisted workflow by id and forwards its output.
     SubWorkflow { workflow_id: String },
+    /// Maps a body workflow over a JSON array (Mastra `foreach` / LangGraph
+    /// `Send` parity). `items` is a template resolved against the run context
+    /// (default `{{input}}`, e.g. `{{state.urls}}`) that must produce a JSON
+    /// array. Every element runs the body workflow as its own durable child run
+    /// with the run input `input` (string elements verbatim, other JSON as text)
+    /// and `index`. Up to `max_concurrency` items run at once (default
+    /// [`executor::DEFAULT_FANOUT_CONCURRENCY`], capped at
+    /// [`executor::MAX_FANOUT_CONCURRENCY`]).
+    ///
+    /// The node output is a JSON array of the item results **in input order**
+    /// regardless of completion order. A result that is itself a JSON object or
+    /// array is embedded as JSON; anything else is embedded as a string. Each
+    /// finished item is checkpointed into the run state, so a resumed run (after
+    /// a restart, an approval gate inside an item, or a provider limit) skips
+    /// finished items and re-enters only the unfinished ones. A failed item
+    /// fails the node once the items already in flight have settled.
+    ForEach {
+        /// The workflow run once per item.
+        body_workflow_id: String,
+        /// Template producing the JSON array to map over. Absent = `{{input}}`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        items: Option<String>,
+        /// How many items run at once. Absent = the engine default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_concurrency: Option<u32>,
+    },
+    /// Explicit fan-out of N different sub-workflows that all receive the node
+    /// input (or their own `input` template), joined into one JSON object keyed
+    /// by branch id. Branches run as durable child runs, up to `max_concurrency`
+    /// at once, and finished branches are checkpointed exactly like
+    /// [`NodeKind::ForEach`] items. A failed branch fails the node.
+    Parallel {
+        /// The branches to run. Ids must be unique and match `[A-Za-z0-9_-]+`.
+        branches: Vec<ParallelBranch>,
+        /// How many branches run at once. Absent = the engine default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_concurrency: Option<u32>,
+    },
     /// Delegates work to one or more sub-agents that run with a clean context
     /// (no parent history), under a permission preset and depth/concurrency/
     /// token/wall-time caps. Same-depth delegates run concurrently. The node's
@@ -203,6 +255,28 @@ pub enum NodeKind {
         /// Optional caps override (concurrency clamped to the hard max).
         #[serde(default)]
         caps: Option<delegation::DelegationCaps>,
+    },
+    /// Workflows as code: a JavaScript body that orchestrates sub-agents with
+    /// `agent()`, `parallel()`, `pipeline()`, and `phase()`, reading the node
+    /// input as `args` and returning the node output. Runs in the Deno sandbox;
+    /// every finished `agent()` result is checkpointed, so a resumed run replays
+    /// them and only runs what never finished. See [`script`].
+    Script {
+        /// The script body (an async function body; `return` sets the output).
+        code: String,
+        /// Agent every `agent()` call runs as. When set, calls cannot pick another.
+        #[serde(default)]
+        agent_id: Option<String>,
+        /// Preset for `agent()` calls that do not name one (default `research`).
+        #[serde(default)]
+        preset: Option<delegation::PermissionPreset>,
+        /// Whether `agent()` calls may use a mutating preset (`code_write`).
+        /// Ad-hoc script runs record the starting plugin's
+        /// `hook:run-agent:write` grant here, so a resumed run keeps the same
+        /// limit. Absent: authored workflows allow it, while ad-hoc (`script-`)
+        /// workflows saved before this field existed do not.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allow_mutation: Option<bool>,
     },
     /// Runs a single configured **agent** on a task, routing through the agent
     /// runner (the agent's full engine / gateway / tool / persona path). The
@@ -391,6 +465,54 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         webhook_url: Option<String>,
     },
+    /// Run or check a program written in Lean 4, Bend 2, or BAML. The language
+    /// runners live in [`ryu_code_runner`]; this node decides *what runs* → Core.
+    ///
+    /// - `run` (default): Lean and Bend run `main` with the step input as their
+    ///   single command-line argument and emit stdout. BAML calls `function` with
+    ///   `args` through the Ryu gateway and emits the result (raw text for a
+    ///   string, JSON otherwise).
+    /// - `check`: the node fails unless the language's checker accepts the
+    ///   source (Lean without `sorry`, Bend's `ALL PROOFS CHECK`, `baml-cli
+    ///   check`), and emits a JSON receipt otherwise.
+    ///
+    /// `source` is never template-resolved, so step data cannot rewrite the
+    /// program; `input` and `args` are templates (`{{input}}`, `{{nodes.<id>}}`,
+    /// `{{state.<key>}}`, `{{trigger.*}}`).
+    Code {
+        /// Source language.
+        language: ryu_code_runner::CodeLanguage,
+        /// Run the program or only check it.
+        #[serde(default)]
+        mode: ryu_code_runner::CodeMode,
+        /// Program source.
+        source: String,
+        /// Lean/Bend: the program argument template. Defaults to `{{input}}`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<String>,
+        /// BAML: the function to call in `run` mode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        function: Option<String>,
+        /// BAML: the function's named arguments (string values are templates).
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        args: serde_json::Value,
+        /// BAML: the model the gateway-routed `Ryu` client requests. Defaults to
+        /// the workflow default model.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
+}
+
+/// One branch of a [`NodeKind::Parallel`] node.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParallelBranch {
+    /// Branch id: the key of this branch's result in the node output.
+    pub id: String,
+    /// The workflow this branch runs.
+    pub workflow_id: String,
+    /// Optional input template for this branch. Absent = the node input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
 }
 
 /// The channel transport a [`NodeKind::ChannelSend`] node delivers through.
@@ -497,6 +619,196 @@ impl Default for RetryPolicy {
     }
 }
 
+/// What a repeated step emits once its [`RepeatPolicy`] loop ends.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RepeatCollect {
+    /// The final iteration's output (default).
+    #[default]
+    Last,
+    /// A JSON array of every iteration's output, in order.
+    All,
+}
+
+/// Re-run a single step on its own output: a fixed number of times, while or
+/// until a condition holds against the latest output, or until the output stops
+/// changing. Optional and opt-in like [`RetryPolicy`]: a node without one runs
+/// once, and a bare `"repeat": {}` is inert (one iteration).
+///
+/// Each iteration is a complete node execution, so `retry` and `timeout_ms`
+/// apply per iteration (the retry budget resets when an iteration succeeds). The
+/// loop never adds a graph cycle: the outer DAG sees one node that produces one
+/// value. Progress (iterations done, the carried value, collected outputs) is
+/// checkpointed after every iteration, so a run resumes mid-loop after a Core
+/// restart. Side-effecting steps get a distinct idempotency key per iteration.
+///
+/// Inside the step, `{{loop.iteration}}` (1-based), `{{loop.previous}}` (the
+/// prior iteration's output, empty on the first), and `{{loop.original}}` (the
+/// value the step first received) are available as template tokens.
+///
+/// Exit conditions are checked after every iteration, in order: the iteration
+/// cap, `until` holding, `while` failing, then `stop_when_unchanged`. Conditions
+/// use the same grammar as [`NodeKind::Condition`], where the `input` keyword is
+/// the iteration's output (e.g. `input contains "DONE"`, `input >= 10`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RepeatPolicy {
+    /// Maximum iterations. Absent = 1 when no exit condition is set, otherwise
+    /// the engine cap [`executor::MAX_REPEAT_ITERATIONS`]. Always clamped to that
+    /// cap so a step can never loop without bound.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_iterations: Option<u64>,
+    /// Stop as soon as this condition holds against the latest output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    /// Keep going only while this condition holds against the latest output.
+    #[serde(rename = "while", skip_serializing_if = "Option::is_none")]
+    pub while_expr: Option<String>,
+    /// Feed each iteration's output in as the next iteration's input (default
+    /// true). When false every iteration receives the step's original input,
+    /// which suits polling (`until`) and sampling (`collect: all`).
+    pub feed_output: bool,
+    /// Stop once an iteration returns exactly the previous iteration's output.
+    pub stop_when_unchanged: bool,
+    /// What the step emits when the loop ends: the last output or all of them.
+    pub collect: RepeatCollect,
+    /// Pause between iterations, in milliseconds (default 0). Useful for polling.
+    /// Durable across a Core restart and capped at
+    /// [`executor::MAX_REPEAT_INTERVAL_MS`]; a larger value fails validation.
+    pub interval_ms: u64,
+}
+
+impl Default for RepeatPolicy {
+    fn default() -> Self {
+        Self {
+            max_iterations: None,
+            until: None,
+            while_expr: None,
+            feed_output: true,
+            stop_when_unchanged: false,
+            collect: RepeatCollect::Last,
+            interval_ms: 0,
+        }
+    }
+}
+
+fn non_blank(value: Option<&String>) -> Option<&str> {
+    value.map(|v| v.trim()).filter(|v| !v.is_empty())
+}
+
+impl RepeatPolicy {
+    /// The `until` expression, when one is set.
+    pub fn until_expr(&self) -> Option<&str> {
+        non_blank(self.until.as_ref())
+    }
+
+    /// The `while` expression, when one is set.
+    pub fn while_condition(&self) -> Option<&str> {
+        non_blank(self.while_expr.as_ref())
+    }
+
+    /// Whether anything other than the iteration cap can end the loop.
+    pub fn has_exit_condition(&self) -> bool {
+        self.until_expr().is_some() || self.while_condition().is_some() || self.stop_when_unchanged
+    }
+
+    /// The effective iteration cap: `max_iterations` clamped to
+    /// [`executor::MAX_REPEAT_ITERATIONS`]. When unset (or zero) a policy with an
+    /// exit condition gets the engine cap and one without runs once.
+    pub fn effective_max_iterations(&self) -> u64 {
+        match self.max_iterations {
+            Some(n) if n > 0 => n.min(executor::MAX_REPEAT_ITERATIONS),
+            _ if self.has_exit_condition() => executor::MAX_REPEAT_ITERATIONS,
+            _ => 1,
+        }
+    }
+}
+
+/// Reject a `repeat` policy on node kinds where re-running the step cannot work:
+/// gates that suspend for a human (their resume completes the node directly),
+/// branchers whose output is a `true`/`false` label, and `While`, which is
+/// already a loop.
+fn validate_repeat(node: &WorkflowNode) -> Result<(), GraphError> {
+    if node.repeat.is_none() {
+        return Ok(());
+    }
+    let reason = match &node.kind {
+        NodeKind::Awakeable { .. } => "awakeable gates suspend for a human",
+        NodeKind::NotifyUser { ack_mode, .. } if *ack_mode != AckMode::None => {
+            "acknowledgement gates suspend for a human"
+        }
+        NodeKind::Condition { .. } => "condition nodes branch instead of producing a value",
+        NodeKind::While { .. } => "while nodes are already loops",
+        _ if node
+            .repeat
+            .as_ref()
+            .is_some_and(|p| p.interval_ms > executor::MAX_REPEAT_INTERVAL_MS) =>
+        {
+            "interval_ms exceeds the 1 hour (3600000 ms) cap"
+        }
+        _ => return Ok(()),
+    };
+    Err(GraphError::InvalidRepeat(node.id.clone(), reason))
+}
+
+/// Whether `id` is usable inside a derived child run id (`[A-Za-z0-9_-]+`).
+fn is_child_id_segment(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Validate the static shape of a `ForEach` / `Parallel` fan-out node.
+fn validate_fanout(node: &WorkflowNode, workflow_id: &str) -> Result<(), GraphError> {
+    let invalid = |reason: String| Err(GraphError::InvalidNode(node.id.clone(), reason));
+    match &node.kind {
+        NodeKind::ForEach {
+            body_workflow_id, ..
+        } => {
+            if body_workflow_id.trim().is_empty() {
+                return invalid("for_each needs a body_workflow_id".to_owned());
+            }
+            if !workflow_id.is_empty() && body_workflow_id == workflow_id {
+                return invalid("for_each body is the workflow itself".to_owned());
+            }
+            Ok(())
+        }
+        NodeKind::Parallel { branches, .. } => {
+            if branches.is_empty() {
+                return invalid("parallel needs at least one branch".to_owned());
+            }
+            if branches.len() > executor::MAX_FANOUT_ITEMS {
+                return invalid(format!(
+                    "parallel has more than {} branches",
+                    executor::MAX_FANOUT_ITEMS
+                ));
+            }
+            let mut seen = HashSet::new();
+            for branch in branches {
+                if !is_child_id_segment(&branch.id) {
+                    return invalid(format!(
+                        "branch id '{}' must match [A-Za-z0-9_-]+ (1..=64 chars)",
+                        branch.id
+                    ));
+                }
+                if !seen.insert(branch.id.as_str()) {
+                    return invalid(format!("duplicate branch id '{}'", branch.id));
+                }
+                if branch.workflow_id.trim().is_empty() {
+                    return invalid(format!("branch '{}' needs a workflow_id", branch.id));
+                }
+                if !workflow_id.is_empty() && branch.workflow_id == workflow_id {
+                    return invalid(format!("branch '{}' runs the workflow itself", branch.id));
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// A single node in a workflow definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowNode {
@@ -514,6 +826,10 @@ pub struct WorkflowNode {
     /// so it composes with `retry`. Absent = unbounded (back-compat).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// Optional loop policy that re-runs this one step on its own output. Absent
+    /// = run once (back-compat). See [`RepeatPolicy`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<RepeatPolicy>,
 }
 
 /// A directed edge between two nodes, optionally gated on a branch label.
@@ -625,6 +941,12 @@ pub struct Workflow {
     /// How this workflow is fired. Empty/absent means manual-only (back-compat).
     #[serde(default)]
     pub triggers: Vec<WorkflowTrigger>,
+    /// How many independent nodes of one run may execute at the same time.
+    /// Absent = [`executor::DEFAULT_NODE_CONCURRENCY`]; clamped to
+    /// `1..=`[`executor::MAX_NODE_CONCURRENCY`]. `1` restores strictly
+    /// one-node-at-a-time execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrency: Option<u32>,
     #[serde(default)]
     pub created_at: Option<String>,
     #[serde(default)]
@@ -640,6 +962,10 @@ pub enum GraphError {
     Cyclic,
     /// Two nodes share the same id.
     DuplicateNode(String),
+    /// A node carries a `repeat` policy its kind cannot honour.
+    InvalidRepeat(String, &'static str),
+    /// A node's configuration is invalid (e.g. an empty fan-out).
+    InvalidNode(String, String),
 }
 
 /// A validated DAG built from a [`Workflow`]. Wraps a petgraph [`DiGraph`] and
@@ -669,6 +995,8 @@ impl WorkflowGraph {
             if index_by_id.contains_key(&node.id) {
                 return Err(GraphError::DuplicateNode(node.id.clone()));
             }
+            validate_repeat(node)?;
+            validate_fanout(node, &workflow.id)?;
             let idx = graph.add_node(node.clone());
             index_by_id.insert(node.id.clone(), idx);
         }
@@ -716,6 +1044,10 @@ impl std::fmt::Display for GraphError {
             Self::UnknownNode(id) => write!(f, "edge references unknown node id: {id}"),
             Self::Cyclic => write!(f, "workflow contains a cycle; a DAG must be acyclic"),
             Self::DuplicateNode(id) => write!(f, "duplicate node id: {id}"),
+            Self::InvalidRepeat(id, reason) => {
+                write!(f, "node '{id}' cannot repeat: {reason}")
+            }
+            Self::InvalidNode(id, reason) => write!(f, "node '{id}' is invalid: {reason}"),
         }
     }
 }
@@ -754,6 +1086,7 @@ pub fn referenced_agent_ids(workflow: &Workflow) -> Vec<String> {
             NodeKind::Prompt { agent_id, .. } => agent_id.as_deref(),
             NodeKind::Agent { agent_id, .. } => Some(agent_id.as_str()),
             NodeKind::Skill { agent_id, .. } => agent_id.as_deref(),
+            NodeKind::Script { agent_id, .. } => agent_id.as_deref(),
             NodeKind::AgentDelegate { delegates, .. } => {
                 for delegate in delegates {
                     if let Some(agent_id) = delegate.agent_id.as_deref() {
@@ -812,18 +1145,7 @@ fn collect_referenced_agents(
     }
     agent_ids.extend(referenced_agent_ids(workflow));
 
-    for node in &workflow.nodes {
-        let nested_id = match &node.kind {
-            NodeKind::SubWorkflow { workflow_id } => Some(workflow_id.as_str()),
-            NodeKind::While {
-                body_workflow_id: Some(workflow_id),
-                ..
-            } => Some(workflow_id.as_str()),
-            _ => None,
-        };
-        let Some(nested_id) = nested_id else {
-            continue;
-        };
+    for nested_id in workflow.nodes.iter().flat_map(nested_workflow_ids) {
         let nested = store::load_workflow(nested_id).map_err(|error| {
             format!(
                 "workflow '{}' references nested workflow '{}': {error}",
@@ -833,6 +1155,26 @@ fn collect_referenced_agents(
         collect_referenced_agents(&nested, visited_workflows, agent_ids)?;
     }
     Ok(())
+}
+
+/// Every workflow id a node runs as a nested child workflow.
+pub fn nested_workflow_ids(node: &WorkflowNode) -> Vec<&str> {
+    match &node.kind {
+        NodeKind::SubWorkflow { workflow_id } => vec![workflow_id.as_str()],
+        NodeKind::While {
+            body_workflow_id: Some(workflow_id),
+            ..
+        }
+        | NodeKind::ForEach {
+            body_workflow_id: workflow_id,
+            ..
+        } => vec![workflow_id.as_str()],
+        NodeKind::Parallel { branches, .. } => branches
+            .iter()
+            .map(|branch| branch.workflow_id.as_str())
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Validate, stamp, persist, and reconcile a workflow definition — the single
@@ -850,6 +1192,8 @@ pub fn has_unscoped_managed_nodes(workflow: &Workflow) -> bool {
         matches!(
             &node.kind,
             NodeKind::SubWorkflow { .. }
+                | NodeKind::ForEach { .. }
+                | NodeKind::Parallel { .. }
                 | NodeKind::Tool { .. }
                 | NodeKind::Mcp { .. }
                 | NodeKind::Agent { .. }
@@ -861,18 +1205,59 @@ pub fn has_unscoped_managed_nodes(workflow: &Workflow) -> bool {
     })
 }
 
-pub async fn persist_workflow(mut workflow: Workflow) -> Result<Workflow, String> {
+/// Whether `incoming` was edited from the revision currently stored.
+///
+/// A client that re-saves a workflow it loaded sends back the `updated_at` it
+/// loaded. When another member of a shared node has saved since, that value no
+/// longer matches and the save must be refused rather than silently overwriting
+/// their work. A save without `updated_at`, or of a workflow that does not exist
+/// yet, is not guarded. Returns the stored revision on conflict.
+pub fn stale_revision(stored: Option<&Workflow>, incoming: &Workflow) -> Option<Option<String>> {
+    let expected = incoming.updated_at.as_deref()?;
+    let stored = stored?;
+    (stored.updated_at.as_deref() != Some(expected)).then(|| stored.updated_at.clone())
+}
+
+pub async fn persist_workflow(workflow: Workflow) -> Result<Workflow, String> {
+    persist_workflow_with_revision(workflow, None)
+        .await
+        .map_err(|error| match error {
+            WorkflowPersistError::Invalid(message) => message,
+            WorkflowPersistError::RevisionConflict(_) => {
+                "workflow revision conflict: it was changed since it was loaded".to_owned()
+            }
+        })
+}
+
+pub enum WorkflowPersistError {
+    Invalid(String),
+    RevisionConflict(Option<String>),
+}
+
+pub async fn persist_workflow_guarded(
+    workflow: Workflow,
+) -> Result<Workflow, WorkflowPersistError> {
+    let expected_revision = workflow.updated_at.clone();
+    persist_workflow_with_revision(workflow, expected_revision).await
+}
+
+async fn persist_workflow_with_revision(
+    mut workflow: Workflow,
+    expected_revision: Option<String>,
+) -> Result<Workflow, WorkflowPersistError> {
     // Validate the DAG before persisting so callers never store a broken graph.
-    WorkflowGraph::build(&workflow).map_err(|e| e.to_string())?;
+    WorkflowGraph::build(&workflow).map_err(|e| WorkflowPersistError::Invalid(e.to_string()))?;
     if crate::sidecar::control_plane::registered_org().is_some()
         && has_unscoped_managed_nodes(&workflow)
     {
-        return Err(
+        return Err(WorkflowPersistError::Invalid(
             "workflow agent and nested-workflow references are disabled on organization-bound nodes until resource ACL propagation is available"
                 .to_owned(),
-        );
+        ));
     }
-    ensure_agents_active(&workflow).await?;
+    ensure_agents_active(&workflow)
+        .await
+        .map_err(WorkflowPersistError::Invalid)?;
 
     if workflow.id.is_empty() {
         workflow.id = format!("wf_{}", uuid::Uuid::new_v4().simple());
@@ -883,9 +1268,27 @@ pub async fn persist_workflow(mut workflow: Workflow) -> Result<Workflow, String
     }
     workflow.updated_at = Some(now);
 
+    // A client edits the redacted view (`secrets::redact_for_client`): swap any
+    // echoed placeholder back for the stored credential of the same node.
+    let stored = if workflow.id.is_empty() {
+        None
+    } else {
+        store::load_workflow(&workflow.id).ok()
+    };
+    secrets::restore_redacted(&mut workflow, stored.as_ref())
+        .map_err(WorkflowPersistError::Invalid)?;
     backfill_webhook_secrets(&mut workflow);
 
-    store::save_workflow(&workflow).map_err(|e| e.to_string())?;
+    store::save_workflow_if_revision(&workflow, expected_revision.as_deref()).map_err(|error| {
+        match error {
+            store::WorkflowCheckpointError::RevisionConflict(revision) => {
+                WorkflowPersistError::RevisionConflict(revision)
+            }
+            store::WorkflowCheckpointError::Store(error) => {
+                WorkflowPersistError::Invalid(error.to_string())
+            }
+        }
+    })?;
     reconcile_triggers(&workflow).await;
     Ok(workflow)
 }
@@ -1036,45 +1439,71 @@ pub async fn reconcile_triggers(workflow: &Workflow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workflow::test_support::{edge, node, workflow};
+
+    fn revision(updated_at: Option<&str>) -> Workflow {
+        serde_json::from_value(serde_json::json!({
+            "id": "wf_shared",
+            "name": "shared",
+            "nodes": [],
+            "updated_at": updated_at,
+        }))
+        .expect("minimal workflow deserializes")
+    }
+
+    #[test]
+    fn stale_revision_refuses_saves_based_on_an_older_revision() {
+        let stored = revision(Some("2026-09-29T10:00:01Z"));
+        // Saved from the current revision: allowed.
+        assert_eq!(
+            stale_revision(Some(&stored), &revision(Some("2026-09-29T10:00:01Z"))),
+            None
+        );
+        // Another member saved after this client loaded: conflict, and the caller
+        // learns the revision it must reload.
+        assert_eq!(
+            stale_revision(Some(&stored), &revision(Some("2026-09-29T09:59:00Z"))),
+            Some(Some("2026-09-29T10:00:01Z".to_owned()))
+        );
+        // Unguarded saves and first saves keep the historic behavior.
+        assert_eq!(stale_revision(Some(&stored), &revision(None)), None);
+        assert_eq!(
+            stale_revision(None, &revision(Some("2026-09-29T09:59:00Z"))),
+            None
+        );
+    }
 
     #[test]
     fn referenced_agent_ids_covers_explicit_agent_nodes() {
-        let workflow = Workflow {
-            id: "wf_agents".into(),
-            name: "agents".into(),
-            description: None,
-            nodes: vec![
-                WorkflowNode {
-                    id: "prompt".into(),
-                    kind: NodeKind::Prompt {
+        let workflow = workflow(
+            "wf_agents",
+            "agents",
+            vec![
+                node(
+                    "prompt",
+                    NodeKind::Prompt {
                         prompt: "one".into(),
                         agent_id: Some("agent_prompt".into()),
                     },
-                    retry: None,
-                    timeout_ms: None,
-                },
-                WorkflowNode {
-                    id: "agent".into(),
-                    kind: NodeKind::Agent {
+                ),
+                node(
+                    "agent",
+                    NodeKind::Agent {
                         agent_id: "agent_direct".into(),
                         task: None,
                     },
-                    retry: None,
-                    timeout_ms: None,
-                },
-                WorkflowNode {
-                    id: "skill".into(),
-                    kind: NodeKind::Skill {
+                ),
+                node(
+                    "skill",
+                    NodeKind::Skill {
                         skill: "research".into(),
                         agent_id: Some("agent_skill".into()),
                         task: None,
                     },
-                    retry: None,
-                    timeout_ms: None,
-                },
-                WorkflowNode {
-                    id: "delegation".into(),
-                    kind: NodeKind::AgentDelegate {
+                ),
+                node(
+                    "delegation",
+                    NodeKind::AgentDelegate {
                         delegates: vec![delegation::DelegateSpec {
                             id: "delegate".into(),
                             task: "work".into(),
@@ -1084,15 +1513,10 @@ mod tests {
                         }],
                         caps: None,
                     },
-                    retry: None,
-                    timeout_ms: None,
-                },
+                ),
             ],
-            edges: Vec::new(),
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
+            Vec::new(),
+        );
 
         assert_eq!(
             referenced_agent_ids(&workflow),
@@ -1115,6 +1539,7 @@ mod tests {
             triggers: vec![WorkflowTrigger::Webhook {
                 secret: secret.map(str::to_owned),
             }],
+            max_concurrency: None,
             created_at: None,
             updated_at: None,
         }
@@ -1158,34 +1583,18 @@ mod tests {
     #[test]
     fn backfill_is_noop_without_webhook_trigger() {
         let mut wf = Workflow {
-            id: String::new(),
-            name: "n".into(),
-            description: None,
-            nodes: Vec::new(),
-            edges: Vec::new(),
             triggers: vec![WorkflowTrigger::Manual],
-            created_at: None,
-            updated_at: None,
+            ..workflow(String::new(), "n", Vec::new(), Vec::new())
         };
         backfill_webhook_secrets(&mut wf);
         assert!(matches!(wf.triggers[0], WorkflowTrigger::Manual));
     }
 
-    fn node(id: &str, kind: NodeKind) -> WorkflowNode {
-        WorkflowNode {
-            id: id.to_string(),
-            retry: None,
-            timeout_ms: None,
-            kind,
-        }
-    }
-
     fn linear_workflow() -> Workflow {
-        Workflow {
-            id: "wf1".into(),
-            name: "linear".into(),
-            description: None,
-            nodes: vec![
+        workflow(
+            "wf1",
+            "linear",
+            vec![
                 node("in", NodeKind::Input { key: None }),
                 node(
                     "up",
@@ -1196,22 +1605,8 @@ mod tests {
                 ),
                 node("out", NodeKind::Output { key: None }),
             ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "up".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "up".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        }
+            vec![edge("in", "up"), edge("up", "out")],
+        )
     }
 
     #[test]
@@ -1226,11 +1621,7 @@ mod tests {
     #[test]
     fn rejects_cycle() {
         let mut wf = linear_workflow();
-        wf.edges.push(WorkflowEdge {
-            from: "out".into(),
-            to: "in".into(),
-            branch: None,
-        });
+        wf.edges.push(edge("out", "in"));
         let err = WorkflowGraph::build(&wf).expect_err("cycle must be rejected");
         assert!(matches!(err, GraphError::Cyclic));
     }
@@ -1238,11 +1629,7 @@ mod tests {
     #[test]
     fn rejects_unknown_edge() {
         let mut wf = linear_workflow();
-        wf.edges.push(WorkflowEdge {
-            from: "in".into(),
-            to: "ghost".into(),
-            branch: None,
-        });
+        wf.edges.push(edge("in", "ghost"));
         let err = WorkflowGraph::build(&wf).expect_err("unknown node must be rejected");
         assert!(matches!(err, GraphError::UnknownNode(_)));
     }
@@ -1267,11 +1654,10 @@ mod tests {
     fn rejects_chat_input_without_a_root_input_node() {
         // The Input node is fed by a root Transform, so it is not an entry
         // point — a message sent here would never be read by the run.
-        let wf = Workflow {
-            id: "wf2".into(),
-            name: "no-entry".into(),
-            description: None,
-            nodes: vec![
+        let wf = workflow(
+            "wf2",
+            "no-entry",
+            vec![
                 node(
                     "src",
                     NodeKind::Transform {
@@ -1282,22 +1668,8 @@ mod tests {
                 node("in", NodeKind::Input { key: None }),
                 node("out", NodeKind::Output { key: None }),
             ],
-            edges: vec![
-                WorkflowEdge {
-                    from: "src".into(),
-                    to: "in".into(),
-                    branch: None,
-                },
-                WorkflowEdge {
-                    from: "in".into(),
-                    to: "out".into(),
-                    branch: None,
-                },
-            ],
-            triggers: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
+            vec![edge("src", "in"), edge("in", "out")],
+        );
         assert!(
             !accepts_chat_input(&wf),
             "an Input node that is not a root does not make a workflow chat-triggerable"
@@ -1307,11 +1679,7 @@ mod tests {
     #[test]
     fn rejects_chat_input_for_broken_graph() {
         let mut wf = linear_workflow();
-        wf.edges.push(WorkflowEdge {
-            from: "out".into(),
-            to: "in".into(),
-            branch: None,
-        });
+        wf.edges.push(edge("out", "in"));
         assert!(
             !accepts_chat_input(&wf),
             "a cyclic workflow is not chat-triggerable"

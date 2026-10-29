@@ -29,7 +29,6 @@ export function MessageList({
 		messages.length
 	);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: scrollSignal is the intended trigger
 	useEffect(() => {
 		endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
 	}, [scrollSignal]);

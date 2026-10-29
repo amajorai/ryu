@@ -1,0 +1,167 @@
+/* CSS backdrop declarations stay outside utility layers to preserve inline-style precedence. */
+.ryu-backdrop-grid-root {
+	background: var(--ryu-backdrop-grid-root-background);
+}
+
+.ryu-backdrop-grid {
+	background-image: var(--ryu-backdrop-grid-background-image);
+	background-size: var(--ryu-backdrop-grid-background-size);
+}
+
+.ryu-backdrop-dots-root {
+	background: var(--ryu-backdrop-dots-root-background);
+}
+
+.ryu-backdrop-dots {
+	background-image: var(--ryu-backdrop-dots-background-image);
+	background-size: var(--ryu-backdrop-dots-background-size);
+}
+
+.ryu-backdrop-radial {
+	background: var(--ryu-backdrop-radial-background);
+}
+
+.ryu-backdrop-blobs-root {
+	overflow: hidden;
+	background: var(--ryu-backdrop-blobs-root-background);
+}
+
+.ryu-backdrop-blob {
+	top: var(--ryu-backdrop-blob-top);
+	left: var(--ryu-backdrop-blob-left);
+	width: 60%;
+	height: 60%;
+	background: var(--ryu-backdrop-blob-background);
+	opacity: 0.7;
+	filter: var(--ryu-backdrop-blob-filter);
+	animation: var(--ryu-backdrop-blob-animation);
+	animation-play-state: var(--ryu-backdrop-blob-animation-play-state);
+}
+
+.ryu-backdrop-pills-root {
+	overflow: hidden;
+	background: var(--ryu-backdrop-pills-root-background);
+}
+
+.ryu-backdrop-pill {
+	top: var(--ryu-backdrop-pill-top);
+	left: var(--ryu-backdrop-pill-left);
+	width: var(--ryu-backdrop-pill-width);
+	height: var(--ryu-backdrop-pill-height);
+	background: var(--ryu-backdrop-pill-background);
+	box-shadow: var(--ryu-backdrop-pill-box-shadow);
+	transform: var(--ryu-backdrop-pill-transform);
+	animation: var(--ryu-backdrop-pill-animation);
+	animation-play-state: var(--ryu-backdrop-pill-animation-play-state);
+}
+
+.ryu-backdrop-pill-glow {
+	background: var(--ryu-backdrop-pill-glow-background);
+}
+
+.ryu-backdrop-retro-root {
+	overflow: hidden;
+	background: var(--ryu-backdrop-retro-root-background);
+	perspective: 200px;
+}
+
+.ryu-backdrop-retro-plane {
+	transform: var(--ryu-backdrop-retro-plane-transform);
+}
+
+.ryu-backdrop-retro-grid {
+	position: absolute;
+	inset: 0% 0px;
+	width: 600vw;
+	height: 300vh;
+	margin-left: -200%;
+	background-image: var(--ryu-backdrop-retro-grid-background-image);
+	background-repeat: repeat;
+	background-size: var(--ryu-backdrop-retro-grid-background-size);
+	animation: var(--ryu-backdrop-retro-grid-animation);
+	animation-play-state: var(--ryu-backdrop-retro-grid-animation-play-state);
+}
+
+.ryu-backdrop-retro-fade {
+	background: var(--ryu-backdrop-retro-fade-background);
+}
+
+.ryu-backdrop-ripple-root {
+	overflow: hidden;
+	background: var(--ryu-backdrop-ripple-root-background);
+}
+
+.ryu-backdrop-ring {
+	top: 50%;
+	left: 50%;
+	width: var(--ryu-backdrop-ring-width);
+	height: var(--ryu-backdrop-ring-height);
+	background: var(--ryu-backdrop-ring-background);
+	border-color: var(--ryu-backdrop-ring-border-color);
+	transform: translate(-50%, -50%);
+	animation: var(--ryu-backdrop-ring-animation);
+	animation-play-state: var(--ryu-backdrop-ring-animation-play-state);
+}
+
+.ryu-backdrop-stripes {
+	background: var(--ryu-backdrop-stripes-background);
+}
+
+@keyframes ryu-backdrop-drift {
+	0% {
+		transform: translate(0, 0) scale(1);
+	}
+	33% {
+		transform: translate(18%, -12%) scale(1.15);
+	}
+	66% {
+		transform: translate(-14%, 14%) scale(0.9);
+	}
+	100% {
+		transform: translate(0, 0) scale(1);
+	}
+}
+@keyframes ryu-backdrop-float {
+	0%,
+	100% {
+		transform: translateY(0) rotate(var(--ryu-rot));
+	}
+	50% {
+		transform: translateY(-18px) rotate(var(--ryu-rot));
+	}
+}
+
+@keyframes ryu-backdrop-retro {
+	from {
+		transform: translateY(-50%);
+	}
+	to {
+		transform: translateY(0);
+	}
+}
+@keyframes ryu-backdrop-ripple {
+	0%,
+	100% {
+		transform: translate(-50%, -50%) scale(1);
+	}
+	50% {
+		transform: translate(-50%, -50%) scale(0.92);
+	}
+}
+
+.ryu-backdrop-grid-faded,
+.ryu-backdrop-dots-faded {
+	mask-image: radial-gradient(
+		ellipse 80% 70% at 50% 40%,
+		#000 55%,
+		transparent 100%
+	);
+}
+
+.ryu-backdrop-swatch {
+	background: var(--ryu-backdrop-swatch-background);
+}
+
+.ryu-backdrop-paint {
+	background: var(--ryu-backdrop-paint);
+}

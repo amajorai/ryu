@@ -14,10 +14,15 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { ChevronDown, Search } from "lucide-react";
 import * as React from "react";
+import { z } from "zod";
+
+const selectFilterTextSchema = z.string();
+
 import {
 	FadeOverflowText,
 	FadeOverflowTextChildren,
 } from "./fade-overflow-text.tsx";
+import { usePortalContainer } from "./portal-container.tsx";
 
 type SelectProps<Value extends string = string> = Omit<
 	SelectPrimitive.Root.Props<Value, false>,
@@ -73,13 +78,21 @@ function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
 
 function SelectTrigger({
 	className,
+	appearance = "default",
 	variant = "ghost",
 	size = "default",
 	children,
 	...props
 }: SelectPrimitive.Trigger.Props & {
 	variant?: "default" | "ghost";
-	size?: "sm" | "default";
+	appearance?:
+		| "default"
+		| "filter"
+		| "muted"
+		| "gateway-action"
+		| "editor-row"
+		| "glass-panel";
+	size?: "sm" | "default" | "compact";
 }) {
 	const localizedChildren = useLocalizedText(children, { literal: true });
 	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
@@ -87,10 +100,17 @@ function SelectTrigger({
 	return (
 		<SelectPrimitive.Trigger
 			className={cn(
-				"flex w-fit items-center justify-between gap-1.5 whitespace-nowrap rounded-3xl border border-transparent px-3 py-2 text-sm outline-none transition-[color,box-shadow,background-color] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-[size=default]:h-9 data-[size=sm]:h-8 data-placeholder:text-muted-foreground *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+				"corner-squircle flex w-fit items-center justify-between gap-1.5 whitespace-nowrap rounded-3xl border border-transparent px-3 py-2 text-sm outline-none transition-[color,box-shadow,background-color] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-[size=default]:h-9 data-[size=sm]:h-8 data-placeholder:text-muted-foreground *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 				variant === "ghost"
 					? "bg-transparent duration-150 ease-out hover:bg-muted aria-expanded:bg-muted"
 					: "bg-input/50",
+				size === "compact" && "h-7 text-xs",
+				appearance === "filter" && "border-border/50 bg-muted/50",
+				appearance === "muted" && "border-0 bg-muted shadow-none",
+				appearance === "gateway-action" && "h-8 text-xs",
+				appearance === "editor-row" && "h-8",
+				appearance === "glass-panel" &&
+					"border border-border/70 bg-background/70",
 				className
 			)}
 			data-cuelume-toggle=""
@@ -122,12 +142,15 @@ function SelectContent({
 	alignItemWithTrigger = true,
 	searchable = false,
 	searchPlaceholder = "Search…",
+	positionerClassName,
 	...props
 }: SelectPrimitive.Popup.Props &
 	Pick<
 		SelectPrimitive.Positioner.Props,
 		"align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
 	> & {
+		/** Layer override for popups nested inside another host overlay. */
+		positionerClassName?: string;
 		/** Render a sticky filter box atop the list. Off by default. */
 		searchable?: boolean;
 		searchPlaceholder?: string;
@@ -135,7 +158,7 @@ function SelectContent({
 	const [query, setQuery] = React.useState("");
 	const direction = useDirection();
 	return (
-		<SelectPrimitive.Portal>
+		<SelectPrimitive.Portal container={usePortalContainer()}>
 			<SelectPrimitive.Backdrop
 				className="ryu-popup-overlay"
 				data-slot="select-overlay"
@@ -146,13 +169,13 @@ function SelectContent({
 				// (which anchors the active item to the trigger) is dropped when searchable.
 				alignItemWithTrigger={searchable ? false : alignItemWithTrigger}
 				alignOffset={alignOffset}
-				className="isolate z-50"
+				className={cn("isolate z-50", positionerClassName)}
 				side={side}
 				sideOffset={sideOffset}
 			>
 				<SelectPrimitive.Popup
 					className={cn(
-						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 relative isolate z-50 max-h-[min(24rem,var(--available-height))] w-(--anchor-width) min-w-36 origin-(--transform-origin) animate-none! overflow-y-auto overflow-x-hidden rounded-3xl border border-border/50 bg-muted/90 text-popover-foreground backdrop-blur-2xl backdrop-saturate-150 duration-100 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] data-[align-trigger=true]:animate-none data-closed:animate-out data-open:animate-in **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[variant=destructive]:focus:bg-foreground/10!",
+						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 corner-squircle before:corner-squircle relative isolate z-50 max-h-[min(24rem,var(--available-height))] w-(--anchor-width) min-w-36 origin-(--transform-origin) animate-none! overflow-y-auto overflow-x-hidden rounded-3xl border border-border/50 bg-muted/90 text-popover-foreground backdrop-blur-2xl backdrop-saturate-150 duration-100 before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] data-[align-trigger=true]:animate-none data-closed:animate-out data-open:animate-in **:data-[slot$=-item]:data-highlighted:bg-foreground/10 **:data-[slot$=-separator]:bg-foreground/5 **:data-[variant=destructive]:**:text-accent-foreground! **:data-[variant=destructive]:text-accent-foreground! **:data-[slot$=-trigger]:aria-expanded:bg-foreground/10! **:data-[slot$=-item]:focus:bg-foreground/10 **:data-[slot$=-trigger]:focus:bg-foreground/10 **:data-[variant=destructive]:focus:bg-foreground/10!",
 						className
 					)}
 					data-align-trigger={searchable ? false : alignItemWithTrigger}
@@ -205,7 +228,7 @@ function SelectSearch({
 			<div className="relative">
 				<Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
 				<Input
-					className="h-8 rounded-2xl border-transparent bg-transparent ps-8 text-sm"
+					className="corner-squircle h-8 rounded-2xl border-transparent bg-transparent ps-8 text-sm"
 					onChange={(e) => onQueryChange(e.target.value)}
 					// Keep letters/typing out of the Select's built-in typeahead, but let
 					// Escape close and the arrow keys move focus into the list.
@@ -260,8 +283,8 @@ function SelectItem({
 	// items with non-string children and no textValue stay visible (unfilterable).
 	const haystack = [
 		textValue,
-		typeof children === "string" ? children : undefined,
-		typeof localizedChildren === "string" ? localizedChildren : undefined,
+		selectFilterTextSchema.safeParse(children).data,
+		selectFilterTextSchema.safeParse(localizedChildren).data,
 	]
 		.filter((value): value is string => Boolean(value))
 		.join("\n")
@@ -272,7 +295,7 @@ function SelectItem({
 	return (
 		<SelectPrimitive.Item
 			className={cn(
-				"relative flex w-full cursor-default select-none items-center gap-1.5 rounded-2xl py-1 ps-1.5 pe-8 font-medium text-sm outline-hidden focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+				"corner-squircle relative flex w-full cursor-default select-none items-center gap-1.5 rounded-2xl py-1 ps-1.5 pe-8 font-medium text-sm outline-hidden focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
 				hidden && "hidden",
 				className
 			)}

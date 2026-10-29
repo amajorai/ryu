@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
 import {
 	fetchGatewayGovernance,
 	type GovernanceLayer,
+	isGovernanceFieldLocked,
 	parseGatewayGovernanceSnapshot,
 	resolveGovernanceField,
 	updateGatewayGovernance,
@@ -67,6 +69,34 @@ describe("parseGatewayGovernanceSnapshot", () => {
 		);
 	});
 
+	it("parses organization locks and reports locked fields", () => {
+		const parsed = parseGatewayGovernanceSnapshot({
+			schemaVersion: 1,
+			layers: [
+				{
+					lockedFields: ["git.branchPrefix"],
+					revision: 2,
+					scope: "organization",
+					values: { git: { branchPrefix: "org/" } },
+					writable: false,
+				},
+				{
+					lockedFields: "not-a-list",
+					revision: 2,
+					scope: "user",
+					values: {},
+					writable: true,
+				},
+			],
+		});
+
+		expect(parsed.layers[0]?.lockedFields).toEqual(["git.branchPrefix"]);
+		expect(parsed.layers[1]?.lockedFields).toBeUndefined();
+		expect(isGovernanceFieldLocked(parsed, "git.branchPrefix")).toBe(true);
+		expect(isGovernanceFieldLocked(parsed, "git.mergeMethod")).toBe(false);
+		expect(isGovernanceFieldLocked(undefined, "git.branchPrefix")).toBe(false);
+	});
+
 	it("rejects a scope outside the closed hierarchy", () => {
 		expect(() =>
 			parseGatewayGovernanceSnapshot({
@@ -127,7 +157,7 @@ describe("governance transport", () => {
 			async (...args: Parameters<typeof fetch>) => {
 				requestUrl = String(args[0]);
 				const init = args[1];
-				requestBody = typeof init?.body === "string" ? init.body : "";
+				requestBody = z.string().catch("").parse(init?.body);
 				return new Response(JSON.stringify({ schemaVersion: 1, layers: [] }), {
 					headers: { "content-type": "application/json" },
 					status: 200,
@@ -152,5 +182,68 @@ describe("governance transport", () => {
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
+	});
+});
+
+describe("governance wire normalization", () => {
+	it("keeps null-prototype hook dictionaries and explicit false overrides", () => {
+		const input = JSON.parse(
+			'{"schemaVersion":1,"layers":[{"revision":0,"scope":"node","writable":true,"values":{"hooks":{"__proto__":{"enabled":false},"future":{"trusted":false,"enabled":"invalid"},"ignored":[]}}}]}'
+		);
+		const hooks = parseGatewayGovernanceSnapshot(input).layers[0]?.values.hooks;
+		expect(Object.getPrototypeOf(hooks)).toBeNull();
+		expect(Object.getOwnPropertyDescriptor(hooks, "__proto__")?.value).toEqual({
+			enabled: false,
+		});
+		expect(hooks?.future).toEqual({ trusted: false });
+		expect(Object.hasOwn(hooks ?? {}, "ignored")).toBe(false);
+	});
+	it("keeps per-field invalid fallbacks and declared optional git keys", () => {
+		const values = parseGatewayGovernanceSnapshot({
+			schemaVersion: 1,
+			layers: [
+				{
+					revision: -1,
+					scope: "node",
+					writable: false,
+					values: {
+						git: {
+							mergeMethod: "future",
+							reviewDelivery: "future",
+							alwaysForcePush: false,
+						},
+						worktrees: { autoDeleteLimit: 0.5, autoDelete: false },
+					},
+				},
+			],
+		}).layers[0]?.values;
+		expect(values?.git?.mergeMethod).toBeUndefined();
+		expect(values?.git?.alwaysForcePush).toBe(false);
+		expect(Object.hasOwn(values?.git ?? {}, "branchPrefix")).toBe(true);
+		expect(values?.worktrees?.autoDelete).toBe(false);
+		expect(values?.worktrees?.autoDeleteLimit).toBeUndefined();
+	});
+	it("preserves validation errors and their order", () => {
+		const input = {
+			schemaVersion: 1,
+			layers: [
+				{ revision: 0.5, writable: "invalid", scope: "future", values: {} },
+			],
+		};
+		expect(() => parseGatewayGovernanceSnapshot(input)).toThrow(
+			"invalid governance revision"
+		);
+		expect(() =>
+			parseGatewayGovernanceSnapshot({
+				...input,
+				layers: [{ ...input.layers[0], revision: 0 }],
+			})
+		).toThrow("invalid governance writable state");
+		expect(() =>
+			parseGatewayGovernanceSnapshot({
+				...input,
+				layers: [{ ...input.layers[0], revision: 0, writable: false }],
+			})
+		).toThrow("invalid governance scope");
 	});
 });

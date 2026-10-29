@@ -17,7 +17,7 @@ function installStorage(impl?: Partial<Storage>): void {
 			return values.size;
 		},
 		...impl,
-	} as Storage;
+	} satisfies Storage;
 	Object.defineProperty(globalThis, "localStorage", {
 		configurable: true,
 		value: storage,

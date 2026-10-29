@@ -1,14 +1,19 @@
-import { Badge } from "@ryu/ui/components/badge";
-import { getOptionColorClass } from "@ryu/ui/lib/data-grid";
-import { cn } from "@ryu/ui/lib/utils";
-import type { CellOpts, CellSelectOption } from "@ryu/ui/types/data-grid";
+import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
+import { DataGridOptionBadge } from "@ryu/ui/components/data-grid/data-grid-option-badge.tsx";
+import { isFormulaError } from "@ryu/ui/lib/data-grid-formula.ts";
+import {
+	isNativeBoolean,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { CellOpts, CellSelectOption } from "@ryu/ui/types/data-grid.ts";
 import { Check, ExternalLink } from "lucide-react";
 import type { DbColumn } from "@/src/lib/realtime/yjs-database.ts";
 
 /** Resolve a select option (by value) to its label + color for display. */
-function findOption(
+function findOption<TValue>(
 	options: CellSelectOption[],
-	value: unknown
+	value: TValue
 ): CellSelectOption | undefined {
 	return options.find((option) => option.value === value);
 }
@@ -16,15 +21,9 @@ function findOption(
 /** A single colored select/multi-select tag. */
 function OptionTag({ option }: { option: CellSelectOption }) {
 	return (
-		<Badge
-			className={cn(
-				"border-transparent font-normal",
-				getOptionColorClass(option.color)
-			)}
-			variant="secondary"
-		>
+		<DataGridOptionBadge color={option.color}>
 			{option.label}
-		</Badge>
+		</DataGridOptionBadge>
 	);
 }
 
@@ -73,7 +72,7 @@ export function CellValue({
 	}
 
 	if (cell.variant === "url") {
-		const href = typeof value === "string" ? value : "";
+		const href = safeHttpUrl(isNativeText(value) ? value : null);
 		if (!href) {
 			return null;
 		}
@@ -86,16 +85,34 @@ export function CellValue({
 				target="_blank"
 			>
 				<ExternalLink className="size-3" />
-				<span className="truncate">{href}</span>
+				<span className="truncate" title={href}>
+					{href}
+				</span>
 			</a>
 		);
 	}
 
-	const text = value == null ? "" : String(value);
+	const text =
+		value == null
+			? ""
+			: isNativeBoolean(value)
+				? String(value).toUpperCase()
+				: String(value);
 	if (!text) {
 		return null;
 	}
-	return <span className="text-foreground/80 text-sm">{text}</span>;
+	return (
+		<span
+			className={cn(
+				"text-foreground/80 text-sm",
+				cell.variant === "formula" &&
+					isFormulaError(value) &&
+					"text-destructive"
+			)}
+		>
+			{text}
+		</span>
+	);
 }
 
 /** A labelled property row (label + value) for cards and list items. */
@@ -108,7 +125,10 @@ export function PropertyLine({
 }) {
 	return (
 		<div className="flex items-start gap-2 text-sm">
-			<span className="w-20 shrink-0 truncate text-muted-foreground text-xs">
+			<span
+				className="w-20 shrink-0 truncate text-muted-foreground text-xs"
+				title={column.label}
+			>
 				{column.label}
 			</span>
 			<div className="min-w-0 flex-1">

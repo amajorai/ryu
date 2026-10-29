@@ -8,13 +8,13 @@ import {
 export type HostedAgentCostRegion = "eu" | "sin";
 
 /** Rounded cash-flow guard for one included node, before support labour. */
-export const HOSTED_AGENT_NODE_RESERVE_USD: Readonly<
-	Record<HostedAgentPlanId, Readonly<Record<HostedAgentCostRegion, number>>>
-> = {
+export const HOSTED_AGENT_NODE_RESERVE_USD = {
 	teams: { eu: 12, sin: 44 },
 	pro: { eu: 12, sin: 44 },
 	max: { eu: 80, sin: 88 },
-};
+} satisfies Readonly<
+	Record<HostedAgentPlanId, Readonly<Record<HostedAgentCostRegion, number>>>
+>;
 
 /** External cost assumptions used by the internal contribution model. */
 export const HOSTED_AGENT_ECONOMIC_ASSUMPTIONS = {

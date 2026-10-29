@@ -5,32 +5,38 @@ import {
 	DESKTOP_TRIAL_LABEL,
 } from "@ryu/auth/lib/plans";
 import { settingsApi, useSubscription } from "@ryu/settings";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import type { PlanTier } from "@ryu/ui/components/plan-badge";
-import { PlanBadge } from "@ryu/ui/components/plan-badge";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import type { PlanTier } from "@ryu/ui/components/plan-badge.tsx";
+import { PlanBadge, planTierLabel } from "@ryu/ui/components/plan-badge.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { formatMinorCurrency } from "@ryu/ui/lib/number-format.ts";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { sileo } from "sileo";
+import { useSession } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
-import { OrgBillingContext } from "@/src/components/billing/OrgBillingContext.tsx";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
 import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
 import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
-import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	type AutoTopupSettings,
 	type CreditAlertRecipients,
@@ -56,8 +62,39 @@ import {
 	SettingsSection,
 } from "./shared/settings-items.tsx";
 
-function activeTarget(): ApiTarget {
-	return toTarget(useNodeStore.getState().getActiveNode());
+/** A dollar amount field for a row's `actions`: the `$` prefix plus its input. */
+function DollarField({ children }: { children: ReactNode }) {
+	return (
+		<span className="flex items-center gap-2">
+			<span className="text-muted-foreground text-sm">$</span>
+			{children}
+		</span>
+	);
+}
+
+/**
+ * The organization this tab bills, as one grouped row. Not the bordered
+ * `OrgBillingContext` banner: inside the Settings pane that read as a box above
+ * the cards instead of one of them. The plan itself is the next section's row.
+ */
+function BillingOrganizationSection() {
+	const { organization } = useOrgBillingStatus();
+	return (
+		<SettingsSection
+			caption="The plan and shared credits below belong to this organization."
+			title="Billing organization"
+		>
+			<SettingsGroup>
+				<SettingsItem
+					// The name is user-controlled text: a node, not a string, so the
+					// settings formatter never reads its braces as placeholders.
+					title={
+						<span>{organization?.name ?? "No organization selected"}</span>
+					}
+				/>
+			</SettingsGroup>
+		</SettingsSection>
+	);
 }
 
 /** Micro-USD per US dollar (the wallet + budget base unit). */
@@ -78,7 +115,7 @@ const dollarTextToMicro = (text: string): number => {
 	return Number.isFinite(value) ? Math.round(value * MICRO_USD_PER_DOLLAR) : 0;
 };
 
-const errorText = (e: unknown): string =>
+const errorText = <TError,>(e: TError): string =>
 	e instanceof Error ? e.message : "Something went wrong. Please try again.";
 
 const ALERT_RECIPIENT_OPTIONS: {
@@ -97,7 +134,8 @@ const ALERT_RECIPIENT_OPTIONS: {
  * land somewhere the first paint never does.
  */
 const ALERT_DEFAULTS = {
-	recipients: "none" as CreditAlertRecipients,
+	recipients:
+		/* SAFETY: The locally authored none literal is an explicit member of CreditAlertRecipients and the ALERT_RECIPIENT_OPTIONS table above. */ "none" as CreditAlertRecipients,
 	thresholdText: "5",
 };
 
@@ -227,22 +265,16 @@ function LowBalanceAlertCard() {
 			caption="Email your org's owners or admins when the managed balance runs low, so a top-up happens before runs stall. Only an org admin can change this."
 			title="Low balance alert"
 		>
-			<SettingsCard className="space-y-4">
-				<div className="grid gap-4 sm:grid-cols-2">
-					<div className="space-y-1.5">
-						<Label htmlFor="credit-alert-recipients">Email</Label>
+			<SettingsGroup>
+				<SettingsItem
+					actions={
 						<Select
 							disabled={fieldsDisabled}
 							items={ALERT_RECIPIENT_OPTIONS}
-							onValueChange={(v) =>
-								handleRecipientsChange(v as CreditAlertRecipients)
-							}
+							onValueChange={(v) => handleRecipientsChange(v)}
 							value={recipients}
 						>
-							<SelectTrigger
-								className="h-8 w-full text-sm"
-								id="credit-alert-recipients"
-							>
+							<SelectTrigger className="h-8 w-40" id="credit-alert-recipients">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -253,15 +285,18 @@ function LowBalanceAlertCard() {
 								))}
 							</SelectContent>
 						</Select>
-					</div>
-					<div className="space-y-1.5">
-						<Label htmlFor="credit-alert-threshold">
-							When balance falls below
+					}
+					title={
+						<Label className="font-normal" htmlFor="credit-alert-recipients">
+							Email
 						</Label>
-						<div className="flex items-center gap-2">
-							<span className="text-muted-foreground text-sm">$</span>
+					}
+				/>
+				<SettingsItem
+					actions={
+						<DollarField>
 							<Input
-								className="h-8"
+								className="h-8 w-28"
 								disabled={fieldsDisabled || off}
 								id="credit-alert-threshold"
 								min={0}
@@ -271,15 +306,22 @@ function LowBalanceAlertCard() {
 								type="number"
 								value={thresholdText}
 							/>
-						</div>
-					</div>
-				</div>
-				{lastError ? (
-					<p className="text-status-destructive text-xs">
-						Last alert email failed: {lastError}
-					</p>
-				) : null}
-			</SettingsCard>
+						</DollarField>
+					}
+					description={
+						lastError ? (
+							<span className="text-status-destructive">
+								Last alert email failed: {lastError}
+							</span>
+						) : undefined
+					}
+					title={
+						<Label className="font-normal" htmlFor="credit-alert-threshold">
+							When balance falls below
+						</Label>
+					}
+				/>
+			</SettingsGroup>
 		</SettingsSection>
 	);
 }
@@ -296,13 +338,13 @@ function DesktopAccessSection() {
 		return (
 			<SettingsSection title="Desktop access">
 				<SettingsCard>
-					<Spinner className="size-4" />
+					<SkeletonRows />
 				</SettingsCard>
 			</SettingsSection>
 		);
 	}
 
-	const reasonLabel: Record<typeof verdict.reason, string> = {
+	const reasonLabel = {
 		subscription: "Active subscription",
 		license: "Licensed",
 		beta: "Free during beta",
@@ -314,7 +356,7 @@ function DesktopAccessSection() {
 		"offline-grace": "Active (offline)",
 		"trial-expired": `${DESKTOP_TRIAL_LABEL} ended`,
 		locked: "Free (local only)",
-	};
+	} satisfies Record<typeof verdict.reason, string>;
 
 	return (
 		<SettingsSection title="Desktop access">
@@ -333,16 +375,10 @@ function DesktopAccessSection() {
 							: verdict.reason === "trial"
 								? DESKTOP_TRIAL_INCLUDES
 								: verdict.reason === "beta"
-									? "Ryu is free for everyone during the beta. Enjoy full Pro features."
+									? "Ryu desktop is free and unlimited during the beta. Managed inference, credits and cloud nodes are billed separately."
 									: "Pro features are unlocked."
 					}
-					title={
-						<span className="flex items-center gap-2">
-							<span className="font-normal text-muted-foreground text-xs">
-								{reasonLabel[verdict.reason]}
-							</span>
-						</span>
-					}
+					title={reasonLabel[verdict.reason]}
 				/>
 			</SettingsGroup>
 		</SettingsSection>
@@ -394,6 +430,14 @@ function SpendControlsSection() {
 	const stepUp = useStepUp();
 
 	const [budgetText, setBudgetText] = useState("0");
+	const [budgetDirty, setBudgetDirty] = useState(false);
+	// The run budget is a preference of the selected node, so it is read from
+	// and written to whichever node is selected now, not the one at mount.
+	const budgetNode = useNodeStore((s) => s.getActiveNode());
+	// Bumped by every edit and node switch. A save clears `budgetDirty` only if
+	// nothing changed while it was in flight, so a late completion for node A
+	// (or for an earlier value) never marks B's newer edit as saved.
+	const budgetEdit = useRef(0);
 
 	// Load the org's auto-recharge settings (control plane). A non-authed user has
 	// no wallet to recharge, so skip the fetch and leave the defaults in place.
@@ -465,20 +509,27 @@ function SpendControlsSection() {
 		refreshWallet().catch(() => undefined);
 	}, [activeOrgId, refreshWallet]);
 
-	// Load the per-run default sandbox budget (Core node preference).
+	// Load the per-run default sandbox budget (Core node preference). CLEAR
+	// FIRST, THEN LOAD on every node change: an unsaved edit belongs to the node
+	// it was typed for, and a failed read must not leave another node's budget
+	// on screen to be saved onto this one.
 	useEffect(() => {
 		let cancelled = false;
-		getSandboxDefaultRunBudgetMicroUsd(activeTarget())
+		budgetEdit.current += 1;
+		setBudgetText("0");
+		setBudgetDirty(false);
+		getSandboxDefaultRunBudgetMicroUsd(toTarget(budgetNode))
 			.then((micro) => {
 				if (!cancelled) {
 					setBudgetText(microToDollarText(micro));
+					setBudgetDirty(false);
 				}
 			})
 			.catch(() => undefined);
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [budgetNode]);
 
 	// Persist the auto-recharge settings. Enabling validates the amounts (mirroring
 	// the server's $5–$1000 bounds) before the call so bad input never reaches
@@ -576,13 +627,28 @@ function SpendControlsSection() {
 	}, [stepUp]);
 
 	const saveBudget = useCallback(async () => {
+		if (!budgetDirty) {
+			return;
+		}
 		const micro = Math.max(0, dollarTextToMicro(budgetText));
 		setBudgetText(microToDollarText(micro));
-		const ok = await setSandboxDefaultRunBudgetMicroUsd(activeTarget(), micro);
-		if (!ok) {
+		const edit = budgetEdit.current;
+		try {
+			const ok = await setSandboxDefaultRunBudgetMicroUsd(
+				toTarget(budgetNode),
+				micro
+			);
+			if (ok) {
+				if (budgetEdit.current === edit) {
+					setBudgetDirty(false);
+				}
+			} else {
+				toast.error("Couldn't save the sandbox run budget.");
+			}
+		} catch {
 			toast.error("Couldn't save the sandbox run budget.");
 		}
-	}, [budgetText]);
+	}, [budgetDirty, budgetText, budgetNode]);
 
 	// WHOSE money is on screen — answered by the wallet the server handed back,
 	// not by a local "the re-pull finished" marker. `/api/credits/wallet` always
@@ -618,6 +684,23 @@ function SpendControlsSection() {
 		balanceLabel = formatMicroUsd(wallet.balanceMicroUsd, wallet.currency);
 	}
 
+	// Open credit holds (in-flight Messaging sends) count against the balance, so a
+	// send can be refused while the full balance is on screen. Say so while any
+	// are open, and only for the wallet that belongs to the active org.
+	const heldMicroUsd =
+		authed && wallet && !walletIsOtherOrg ? (wallet.heldMicroUsd ?? 0) : 0;
+	const heldLabel =
+		wallet && heldMicroUsd > 0
+			? formatMicroUsd(heldMicroUsd, wallet.currency)
+			: null;
+	const availableLabel =
+		wallet && heldLabel
+			? formatMicroUsd(
+					wallet.availableMicroUsd ?? wallet.balanceMicroUsd - heldMicroUsd,
+					wallet.currency
+				)
+			: null;
+
 	// Locked while this org's record is in flight as well as while saving: the
 	// fields are showing defaults then, and a save from them would write those
 	// defaults — and an `enabled: true` — onto whichever org is now active.
@@ -629,43 +712,51 @@ function SpendControlsSection() {
 				caption="Ryu tops up your balance automatically so managed runs never stall for lack of credit. Recharges are charged to your saved card via Polar and only an org admin can change these."
 				title="Automatic recharge"
 			>
-				<SettingsCard className="space-y-4">
-					<div className="flex items-center justify-between gap-4">
-						<div>
-							<p className="font-medium text-sm">Current balance</p>
-							<p className="text-muted-foreground text-xs">
-								Your org's spendable credit.
-							</p>
-						</div>
-						<span className="font-medium font-mono text-sm tabular-nums">
-							{balanceLabel}
-						</span>
-					</div>
-
-					<div className="flex items-center justify-between gap-4">
-						<div>
-							<p className="font-medium text-sm">Automatic recharge</p>
-							<p className="text-muted-foreground text-xs">
-								Top up automatically when your balance runs low.
-							</p>
-						</div>
-						<Switch
-							aria-label="Automatic recharge"
-							checked={enabled}
-							disabled={fieldsDisabled}
-							onCheckedChange={(v) => handleToggle(Boolean(v))}
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<span className="font-medium font-mono text-sm tabular-nums">
+								{balanceLabel}
+							</span>
+						}
+						title="Current balance"
+					/>
+					{heldLabel ? (
+						<SettingsItem
+							actions={
+								<span className="font-medium font-mono text-sm tabular-nums">
+									{heldLabel}
+								</span>
+							}
+							title="Held for in-flight Messaging"
 						/>
-					</div>
-
-					<div className="grid gap-4 sm:grid-cols-3">
-						<div className="space-y-1.5">
-							<Label htmlFor="autotopup-threshold">
-								When balance falls below
-							</Label>
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground text-sm">$</span>
+					) : null}
+					{availableLabel ? (
+						<SettingsItem
+							actions={
+								<span className="font-medium font-mono text-sm tabular-nums">
+									{availableLabel}
+								</span>
+							}
+							title="Available to spend"
+						/>
+					) : null}
+					<SettingsItem
+						actions={
+							<Switch
+								aria-label="Automatic recharge"
+								checked={enabled}
+								disabled={fieldsDisabled}
+								onCheckedChange={(v) => handleToggle(Boolean(v))}
+							/>
+						}
+						title="Automatic recharge"
+					/>
+					<SettingsItem
+						actions={
+							<DollarField>
 								<Input
-									className="h-8"
+									className="h-8 w-28"
 									disabled={fieldsDisabled}
 									id="autotopup-threshold"
 									min={0}
@@ -675,14 +766,19 @@ function SpendControlsSection() {
 									type="number"
 									value={thresholdText}
 								/>
-							</div>
-						</div>
-						<div className="space-y-1.5">
-							<Label htmlFor="autotopup-amount">Automatically add</Label>
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground text-sm">$</span>
+							</DollarField>
+						}
+						title={
+							<Label className="font-normal" htmlFor="autotopup-threshold">
+								When balance falls below
+							</Label>
+						}
+					/>
+					<SettingsItem
+						actions={
+							<DollarField>
 								<Input
-									className="h-8"
+									className="h-8 w-28"
 									disabled={fieldsDisabled}
 									id="autotopup-amount"
 									max={MAX_TOPUP_DOLLARS}
@@ -693,14 +789,19 @@ function SpendControlsSection() {
 									type="number"
 									value={topupText}
 								/>
-							</div>
-						</div>
-						<div className="space-y-1.5">
-							<Label htmlFor="autotopup-cap">Monthly recharge limit</Label>
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground text-sm">$</span>
+							</DollarField>
+						}
+						title={
+							<Label className="font-normal" htmlFor="autotopup-amount">
+								Automatically add
+							</Label>
+						}
+					/>
+					<SettingsItem
+						actions={
+							<DollarField>
 								<Input
-									className="h-8"
+									className="h-8 w-28"
 									disabled={fieldsDisabled}
 									id="autotopup-cap"
 									min={0}
@@ -711,31 +812,32 @@ function SpendControlsSection() {
 									type="number"
 									value={capText}
 								/>
-							</div>
-						</div>
-					</div>
-
-					<div className="flex items-center justify-between gap-4 border-border/50 border-t pt-3">
-						<div>
-							<p className="font-medium text-sm">Payment method</p>
-							<p className="text-muted-foreground text-xs">
-								Recharges use your saved card. If you have no card yet, make one
-								manual top-up first.
-							</p>
-						</div>
-						<Button
-							loading={portalPending}
-							onClick={handleManagePayment}
-							size="sm"
-							variant="ghost"
-						>
-							{!portalPending && (
-								<HugeiconsIcon className="mr-2 size-3.5" icon={Share08Icon} />
-							)}
-							Manage
-						</Button>
-					</div>
-				</SettingsCard>
+							</DollarField>
+						}
+						title={
+							<Label className="font-normal" htmlFor="autotopup-cap">
+								Monthly recharge limit
+							</Label>
+						}
+					/>
+					<SettingsItem
+						actions={
+							<Button
+								loading={portalPending}
+								onClick={handleManagePayment}
+								size="sm"
+								variant="ghost"
+							>
+								{!portalPending && (
+									<HugeiconsIcon className="mr-2 size-3.5" icon={Share08Icon} />
+								)}
+								Manage
+							</Button>
+						}
+						description="Recharges use your saved card. If you have no card yet, make one manual top-up first."
+						title="Payment method"
+					/>
+				</SettingsGroup>
 			</SettingsSection>
 
 			<LowBalanceAlertCard />
@@ -744,30 +846,30 @@ function SpendControlsSection() {
 				caption="The most a single sandboxed run may cost before Ryu stops it and tears the workspace down. Applies to sandboxed runs on this node. Set $0 for no per-run limit."
 				title="Sandbox spending"
 			>
-				<SettingsCard>
-					<div className="flex items-center justify-between gap-4">
-						<div>
-							<p className="font-medium text-sm">Default run budget</p>
-							<p className="text-muted-foreground text-xs">
-								Per-run execution cap for sandboxed agent runs.
-							</p>
-						</div>
-						<div className="flex items-center gap-2">
-							<span className="text-muted-foreground text-sm">$</span>
-							<Input
-								aria-label="Default sandbox run budget"
-								className="h-8 w-28"
-								min={0}
-								onBlur={saveBudget}
-								onChange={(e) => setBudgetText(e.target.value)}
-								placeholder="0"
-								step="0.01"
-								type="number"
-								value={budgetText}
-							/>
-						</div>
-					</div>
-				</SettingsCard>
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<DollarField>
+								<Input
+									aria-label="Default sandbox run budget"
+									className="h-8 w-28"
+									min={0}
+									onBlur={saveBudget}
+									onChange={(e) => {
+										budgetEdit.current += 1;
+										setBudgetText(e.target.value);
+										setBudgetDirty(true);
+									}}
+									placeholder="0"
+									step="0.01"
+									type="number"
+									value={budgetText}
+								/>
+							</DollarField>
+						}
+						title="Default run budget"
+					/>
+				</SettingsGroup>
 			</SettingsSection>
 			{stepUp.dialog}
 		</>
@@ -775,6 +877,8 @@ function SpendControlsSection() {
 }
 
 export function BillingTab() {
+	const { data: session, isPending: sessionPending } = useSession();
+	const activeOrgId = useActiveOrgId();
 	const {
 		hasProSubscription,
 		isTrialing,
@@ -783,10 +887,12 @@ export function BillingTab() {
 		lifetime,
 		planInterval,
 		isLoading: subLoading,
-	} = useSubscription();
+	} = useSubscription({
+		accountId: session?.user?.id ?? null,
+		organizationId: activeOrgId,
+		enabled: !sessionPending,
+	});
 	const { plan: organizationPlan } = useOrgBillingStatus();
-
-	const activeOrgId = useActiveOrgId();
 	const stepUp = useStepUp();
 
 	const [pendingAction, setPendingAction] = useState<
@@ -844,14 +950,45 @@ export function BillingTab() {
 
 	const lifetimePending = pendingAction === "lifetime";
 
+	// The plan row's footer: interval or trial status, under the card rather
+	// than stacked inside the row.
+	let planDescription: ReactNode;
+	if (isTrialing) {
+		planDescription = (
+			<>
+				You&apos;re on a free trial.{" "}
+				{planInterval ? `Billed ${planInterval}ly after trial ends.` : ""}
+				{daysLeftInTrial > 0 ? (
+					<span className="mt-1 block font-medium text-status-destructive">
+						Trial ends in {daysLeftInTrial} day
+						{daysLeftInTrial === 1 ? "" : "s"}
+					</span>
+				) : null}
+			</>
+		);
+	} else if (hasProSubscription && !isLifetime) {
+		planDescription =
+			planInterval === "month" ? "Monthly subscription" : "Annual subscription";
+	}
+
+	// A null plan only means the organization status named none (still loading,
+	// user-scoped, or a membership plan), not that nothing is paid: fall back to
+	// the subscription state rather than claiming "No paid plan".
+	let currentPlanLabel = "No paid plan";
+	if (plan) {
+		currentPlanLabel = planTierLabel(plan);
+	} else if (hasProSubscription || isLifetime) {
+		currentPlanLabel = "Paid plan";
+	}
+
 	return (
 		<div className="space-y-6">
-			<OrgBillingContext description="The plan and shared credits below belong to this organization." />
+			<BillingOrganizationSection />
 			<DesktopAccessSection />
 			<SettingsSection title="Current plan">
 				{subLoading ? (
 					<SettingsCard>
-						<Spinner className="size-4" />
+						<SkeletonRows />
 					</SettingsCard>
 				) : (
 					<SettingsGroup>
@@ -874,30 +1011,11 @@ export function BillingTab() {
 									</Button>
 								) : undefined
 							}
+							description={planDescription}
 							title={
-								<span className="flex flex-col gap-1.5">
+								<span className="flex items-center gap-2">
+									{currentPlanLabel}
 									<PlanBadge plan={plan} />
-									{hasProSubscription && !isLifetime && !isTrialing && (
-										<span className="font-normal text-muted-foreground text-xs">
-											{planInterval === "month"
-												? "Monthly subscription"
-												: "Annual subscription"}
-										</span>
-									)}
-									{isTrialing && (
-										<span className="font-normal text-muted-foreground text-xs">
-											You&apos;re on a free trial.{" "}
-											{planInterval
-												? `Billed ${planInterval}ly after trial ends.`
-												: ""}
-										</span>
-									)}
-									{isTrialing && daysLeftInTrial > 0 && (
-										<span className="font-medium text-status-destructive text-xs">
-											Trial ends in {daysLeftInTrial} day
-											{daysLeftInTrial === 1 ? "" : "s"}
-										</span>
-									)}
 								</span>
 							}
 						/>
@@ -910,7 +1028,7 @@ export function BillingTab() {
 			<SettingsSection title="Lifetime access">
 				{subLoading ? (
 					<SettingsCard>
-						<Spinner className="size-4" />
+						<SkeletonRows />
 					</SettingsCard>
 				) : (
 					<SettingsGroup>
@@ -965,7 +1083,7 @@ export function BillingTab() {
 			<SettingsSection title="Invoice history">
 				{invoicesLoading ? (
 					<SettingsCard>
-						<Spinner className="size-4" />
+						<SkeletonRows />
 					</SettingsCard>
 				) : invoicesData?.invoices?.length ? (
 					<SettingsGroup>
@@ -976,20 +1094,27 @@ export function BillingTab() {
 										{formatMinorCurrency(invoice.amount, invoice.currency)}
 									</span>
 								}
-								description={
-									<span className="capitalize">{invoice.status}</span>
-								}
 								key={invoice.id}
 								title={formatDate(invoice.createdAt, {
 									year: "numeric",
 									month: "short",
 									day: "numeric",
 								})}
-							/>
+							>
+								{/* Inline, not a `description`: a description would close
+								    the card after every invoice. */}
+								<p className="text-muted-foreground text-xs capitalize">
+									{invoice.status}
+								</p>
+							</SettingsItem>
 						))}
 					</SettingsGroup>
 				) : (
-					<p className="px-3 text-muted-foreground text-sm">No invoices yet.</p>
+					<SettingsCard>
+						<p className="text-center text-muted-foreground text-sm">
+							No invoices yet.
+						</p>
+					</SettingsCard>
 				)}
 			</SettingsSection>
 			{stepUp.dialog}

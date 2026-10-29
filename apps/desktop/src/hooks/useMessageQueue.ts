@@ -12,6 +12,7 @@
 // ordinary multi-turn chat, just automated — the same approach Zed takes over
 // ACP. The queue is purely a desktop-side turn scheduler.
 
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import type { ChatStatus } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
@@ -163,6 +164,7 @@ export function useMessageQueue({
 	// effect would fire repeatedly; the prev-status guard makes it fire exactly
 	// once per completed turn and is also tolerant of StrictMode's double-invoke.
 	const prevStatusRef = useRef<ChatStatus>(status);
+	const prevBlockedRef = useRef(blocked);
 	const prevQueueLenRef = useRef(0);
 
 	const enqueue = useCallback(
@@ -214,51 +216,73 @@ export function useMessageQueue({
 		});
 	}, []);
 
-	// Drain one "turn" from the queue, honoring the drain-order preference:
-	//  - oldest-first: send the head (FIFO), the classic one-per-turn drain.
-	//  - latest-first: send the tail (LIFO), so a late correction goes next.
-	//  - send-all / auto: collapse every queued message into a single combined turn.
+	// The callback contract is synchronous. Keep records until it returns; this
+	// does not acknowledge the downstream AI SDK/Core request.
+	const dispatchItems = useCallback(
+		(items: QueuedMessage[]) => {
+			try {
+				send({
+					role: "user",
+					content: combine(items),
+					attachments: combineAttachments(items),
+				});
+			} catch (error) {
+				toast.error("Couldn't send queued messages", {
+					description: error instanceof Error ? error.message : String(error),
+				});
+				return false;
+			}
+			const acceptedIds = new Set(items.map(({ id }) => id));
+			setQueue((previous) => previous.filter(({ id }) => !acceptedIds.has(id)));
+			return true;
+		},
+		[send]
+	);
+
+	const interrupt = useCallback(() => {
+		try {
+			stop();
+			return true;
+		} catch (error) {
+			toast.error("Couldn't interrupt the current run", {
+				description: error instanceof Error ? error.message : String(error),
+			});
+			return false;
+		}
+	}, [stop]);
+
 	const dispatchFront = useCallback(() => {
 		const items = queueRef.current;
 		if (items.length === 0) {
 			return;
 		}
-		// A force-sent message (see sendNow) always goes next, whatever the mode.
 		const forcedId = forcedNextRef.current;
 		if (forcedId) {
-			forcedNextRef.current = null;
-			const forced = items.find((m) => m.id === forcedId);
+			const forced = items.find((message) => message.id === forcedId);
 			if (forced) {
-				setQueue((prev) => prev.filter((m) => m.id !== forced.id));
-				send({
-					role: "user",
-					content: forced.content,
-					attachments: forced.attachments,
-				});
+				if (dispatchItems([forced])) {
+					forcedNextRef.current = null;
+				}
 				return;
 			}
+			forcedNextRef.current = null;
 		}
 		const mode = drainModeRef.current;
 		if (mode === "send-all" || mode === "auto") {
-			setQueue([]);
-			send({ role: "user", content: combine(items) });
+			dispatchItems(items);
 			return;
 		}
 		const next = mode === "latest-first" ? items.at(-1) : items[0];
-		if (!next) {
-			return;
+		if (next) {
+			dispatchItems([next]);
 		}
-		setQueue((prev) => prev.filter((m) => m.id !== next.id));
-		send({
-			role: "user",
-			content: next.content,
-			attachments: next.attachments,
-		});
-	}, [send]);
+	}, [dispatchItems]);
 
 	useEffect(() => {
 		const prevStatus = prevStatusRef.current;
 		const prevQueueLen = prevQueueLenRef.current;
+		const wasBlocked = prevBlockedRef.current;
+		prevBlockedRef.current = blocked;
 		prevStatusRef.current = status;
 		prevQueueLenRef.current = queue.length;
 		if (
@@ -268,7 +292,11 @@ export function useMessageQueue({
 				queueLen: queue.length,
 				prevQueueLen,
 				blocked,
-			})
+			}) ||
+			(wasBlocked &&
+				!blocked &&
+				queue.length > 0 &&
+				isTerminalChatStatus(status))
 		) {
 			dispatchFront();
 		}
@@ -276,32 +304,26 @@ export function useMessageQueue({
 
 	const sendNow = useCallback(
 		(id: string) => {
-			const item = queueRef.current.find((m) => m.id === id);
+			const item = queueRef.current.find((message) => message.id === id);
 			if (!item) {
 				return;
 			}
 			if (isTerminalChatStatus(status) && !blocked) {
-				// Settled — idle, or a turn that already errored: send immediately,
-				// dropping it from the queue. The errored case is why this is not a
-				// bare `=== "ready"`: `stop()` has nothing to interrupt there, so the
-				// button below would do nothing at all.
-				setQueue((prev) => prev.filter((m) => m.id !== id));
-				send({
-					role: "user",
-					content: item.content,
-					attachments: item.attachments,
-				});
+				if (dispatchItems([item]) && forcedNextRef.current === id) {
+					forcedNextRef.current = null;
+				}
 				return;
 			}
-			// Busy: mark it as the forced next dispatch and move it to the front,
-			// then interrupt the run. The drain effect sends exactly this item when
-			// the status settles — ready OR error, so an interrupted run that dies
-			// still releases it — regardless of the drain-order preference.
+			if (!interrupt()) {
+				return;
+			}
 			forcedNextRef.current = id;
-			setQueue((prev) => [item, ...prev.filter((m) => m.id !== id)]);
-			stop();
+			setQueue((previous) => [
+				item,
+				...previous.filter((message) => message.id !== id),
+			]);
 		},
-		[status, blocked, send, stop]
+		[status, blocked, dispatchItems, interrupt]
 	);
 
 	const sendAll = useCallback(() => {
@@ -309,18 +331,27 @@ export function useMessageQueue({
 		if (items.length === 0) {
 			return;
 		}
-		const merged = combine(items);
-		const attachments = combineAttachments(items);
 		if (isTerminalChatStatus(status) && !blocked) {
-			setQueue([]);
-			send({ role: "user", content: merged, attachments });
+			if (dispatchItems(items)) {
+				forcedNextRef.current = null;
+			}
 			return;
 		}
-		// Busy: collapse the queue to a single combined turn at the front, then
-		// interrupt so the drain effect sends it next.
-		setQueue([{ id: makeId(), content: merged, attachments }]);
-		stop();
-	}, [status, blocked, send, stop]);
+		if (!interrupt()) {
+			return;
+		}
+		const merged = {
+			id: makeId(),
+			content: combine(items),
+			attachments: combineAttachments(items),
+		};
+		const mergedIds = new Set(items.map(({ id }) => id));
+		forcedNextRef.current = merged.id;
+		setQueue((previous) => [
+			merged,
+			...previous.filter(({ id }) => !mergedIds.has(id)),
+		]);
+	}, [status, blocked, dispatchItems, interrupt]);
 
 	return { queue, enqueue, edit, remove, reorder, clear, sendNow, sendAll };
 }

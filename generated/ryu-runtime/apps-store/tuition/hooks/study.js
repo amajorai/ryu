@@ -138,7 +138,7 @@ return {
 async function preference(key) {
 	try {
 		return await host.getPreference({ key });
-	} catch (e) {
+	} catch  {
 		return null;
 	}
 }
@@ -180,7 +180,7 @@ function parseCandidates(reply) {
 	let parsed;
 	try {
 		parsed = JSON.parse(text.slice(start, end + 1));
-	} catch (e) {
+	} catch  {
 		return [];
 	}
 	if (!Array.isArray(parsed)) {
@@ -188,7 +188,7 @@ function parseCandidates(reply) {
 	}
 	const out = [];
 	for (const entry of parsed) {
-		if (!entry || typeof entry !== "object") {
+		if (!entry || Object(entry) !== entry || Array.isArray(entry)) {
 			continue;
 		}
 		const prompt = clamp(entry.prompt, MAX_PROMPT_CHARS);

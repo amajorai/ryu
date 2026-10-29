@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // PATH-B COMPANION CERTIFICATE — the handshake every shipped app depends on,
 // run under the SHELL CSP the desktop actually ships.
 //
@@ -42,6 +43,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import { htmlCompanionSrcdoc } from "@ryu/app-host/third-party-plugin";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.resolve(HERE, "../../core/src/plugin_manifest/fixtures");
@@ -51,11 +53,9 @@ const TAURI_CONF = path.resolve(HERE, "../src-tauri/tauri.conf.json");
  *  by policy-container inheritance, to every `srcdoc` app frame inside it. Read
  *  from the config so this certificate tracks what ships, never a copy of it. */
 function shippedShellCsp(): string {
-	const conf = JSON.parse(readFileSync(TAURI_CONF, "utf8")) as {
-		app?: { security?: { csp?: string | null } };
-	};
+	const conf = JSON.parse(readFileSync(TAURI_CONF, "utf8"));
 	const csp = conf.app?.security?.csp;
-	if (typeof csp !== "string" || csp.length === 0) {
+	if (!isNativeText(csp) || csp.length === 0) {
 		throw new Error(
 			"apps/desktop/src-tauri/tauri.conf.json has no app.security.csp — if the " +
 				"shell genuinely ships without a CSP, delete this certificate; do not " +
@@ -118,6 +118,33 @@ async function mountInHarness(
 		pluginId: app.id,
 	});
 	return await page.evaluate(() => window.__ryuCompanion.srcdoc());
+}
+
+async function mountRawCompanion(page: Page, srcdoc: string): Promise<string> {
+	return page.evaluate(
+		(frameHtml) =>
+			new Promise<string>((resolve) => {
+				const timeout = window.setTimeout(() => finish("timeout"), 5000);
+				const finish = (result: string) => {
+					window.clearTimeout(timeout);
+					window.removeEventListener("message", onMessage);
+					resolve(result);
+				};
+				const onMessage = (event: MessageEvent<unknown>) => {
+					if (event.data === "csp-fetch-allowed") {
+						finish("allowed");
+					} else if (event.data === "csp-fetch-blocked") {
+						finish("blocked");
+					}
+				};
+				window.addEventListener("message", onMessage);
+				const frame = document.createElement("iframe");
+				frame.setAttribute("sandbox", "allow-scripts");
+				frame.srcdoc = frameHtml;
+				document.body.appendChild(frame);
+			}),
+		srcdoc
+	);
 }
 
 for (const app of APPS) {
@@ -184,9 +211,8 @@ test("a companion frame still announces under the shipped shell CSP", async ({
 	const announced = await page.evaluate(async (frameHtml: string) => {
 		const seen: string[] = [];
 		window.addEventListener("message", (event: MessageEvent) => {
-			const kind = (event.data as { kind?: unknown } | null)?.kind;
-			if (typeof kind === "string") {
-				seen.push(kind);
+			if (event.data?.kind === "ryu-plugin-ready") {
+				seen.push("ryu-plugin-ready");
 			}
 		});
 		const frame = document.createElement("iframe");
@@ -204,6 +230,48 @@ test("a companion frame still announces under the shipped shell CSP", async ({
 			"'unsafe-inline' silently kills the bridge in every companion, widget and " +
 			"artifact frame. Restore it in apps/desktop/src-tauri/tauri.conf.json."
 	).toContain("ryu-plugin-ready");
+});
+
+test("the custom-app CSP setting controls direct network access in the sandbox", async ({
+	page,
+}) => {
+	let networkRequests = 0;
+	await page.route("https://csp-test.invalid/**", async (route) => {
+		networkRequests += 1;
+		await route.fulfill({ status: 204 });
+	});
+	const shellCsp = shippedShellCsp();
+	await page.setContent(
+		`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${shellCsp.replaceAll('"', "&quot;")}"></head><body></body></html>`
+	);
+	const appHtml = `<!doctype html><html><head></head><body><script>fetch("https://csp-test.invalid/ping", { mode: "no-cors" }).then(() => parent.postMessage("csp-fetch-allowed", "*"), () => parent.postMessage("csp-fetch-blocked", "*"));</script></body></html>`;
+	const enforced = htmlCompanionSrcdoc(
+		"nonce-default-csp",
+		appHtml,
+		"@test/custom-app"
+	);
+
+	expect(await mountRawCompanion(page, enforced)).toBe("blocked");
+	expect(networkRequests).toBe(0);
+
+	await page.evaluate(() => {
+		for (const frame of document.querySelectorAll("iframe")) {
+			frame.remove();
+		}
+	});
+	const disabled = htmlCompanionSrcdoc(
+		"nonce-csp-disabled",
+		appHtml,
+		"@test/custom-app",
+		undefined,
+		undefined,
+		undefined,
+		false,
+		{ enforceDefaultCsp: false }
+	);
+
+	expect(await mountRawCompanion(page, disabled)).toBe("allowed");
+	expect(networkRequests).toBeGreaterThan(0);
 });
 
 test("the shipped shell CSP keeps its narrowing while permitting the bootstraps", () => {
@@ -287,7 +355,7 @@ test("a sandboxed app can call the grant-gated toast bridge", async ({
 	await expect(page.getByText("Sandbox toast updated")).toBeVisible();
 	await page.waitForTimeout(1200);
 	await page.screenshot({
-		path: "C:/Users/jiawei/.codex/visualizations/2026/08/22/01a029b3-4e42-76f1-a620-3303d8545b50/plugin-toast-bridge-proof.png",
+		path: test.info().outputPath("plugin-toast-bridge-proof.png"),
 		fullPage: true,
 	});
 });
@@ -393,7 +461,7 @@ test("a mounted Companion follows live palette and appearance changes", async ({
 		});
 
 	await page.screenshot({
-		path: "/Users/jiawei/.codex/visualizations/2026/09/10/01a08b79-8639-7523-b7d9-851de1081c44/companion-appearance-proof.png",
+		path: "test-results/companion-appearance-proof.png",
 		fullPage: true,
 	});
 });

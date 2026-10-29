@@ -159,19 +159,19 @@ export function useSlider({
 			if (disabled) {
 				return;
 			}
-			const map: Record<string, number> = {
-				ArrowRight: current + stride,
-				ArrowUp: current + stride,
-				ArrowLeft: current - stride,
-				ArrowDown: current - stride,
-				PageUp: current + stride * PAGE_STRIDE,
-				PageDown: current - stride * PAGE_STRIDE,
-				Home: lo,
-				End: hi,
-			};
-			if (event.key in map) {
+			const map = new Map([
+				["ArrowRight", current + stride],
+				["ArrowUp", current + stride],
+				["ArrowLeft", current - stride],
+				["ArrowDown", current - stride],
+				["PageUp", current + stride * PAGE_STRIDE],
+				["PageDown", current - stride * PAGE_STRIDE],
+				["Home", lo],
+				["End", hi],
+			]);
+			if (map.has(event.key)) {
 				event.preventDefault();
-				const next = map[event.key];
+				const next = map.get(event.key);
 				if (next !== undefined) {
 					commit(next);
 				}

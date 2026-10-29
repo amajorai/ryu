@@ -75,15 +75,10 @@ pub fn detect_drift(
         ));
     }
 
-    // R2: Composio tool execution is on with an empty action allowlist, so every
-    // Composio action is permitted (wildcard).
-    if composio.enabled && composio.actions.is_empty() {
-        warnings.push(DriftWarning::new(
-            "composio_wildcard_allowlist",
-            "high",
-            "Composio tool execution is enabled with an empty action allowlist: every Composio action is permitted.",
-        ));
-    }
+    // (R2 retired.) An empty Composio action allowlist is NOT a wildcard: the
+    // execution path fails closed (`legacy_composio_allowlist` returns the empty
+    // configured list, `composio::inject_tools` offers nothing, and execution
+    // requires an allowlisted name), so it permits no action and is no drift.
 
     // R3: external Composio tools can execute while the firewall is advisory-only
     // (detections are logged but never blocked or sanitized).
@@ -175,7 +170,9 @@ mod tests {
     }
 
     #[test]
-    fn r2_composio_wildcard_allowlist() {
+    fn empty_composio_allowlist_is_not_reported_as_a_wildcard() {
+        // An empty allowlist fails closed (no Composio action is offered or
+        // executed), so it must not raise a "every action is permitted" warning.
         let composio = ComposioConfig {
             enabled: true,
             actions: Vec::new(),
@@ -188,20 +185,11 @@ mod tests {
             &FirewallConfig::default(),
             &EffectivePolicy::default(),
         );
-        assert!(codes(&warnings).contains(&"composio_wildcard_allowlist"));
-
-        // A non-empty allowlist does NOT trip the wildcard rule.
-        let scoped = ComposioConfig {
-            enabled: true,
-            actions: vec!["GITHUB_CREATE_ISSUE".to_string()],
-            ..Default::default()
-        };
-        let warnings = detect_drift(
-            &ToolsConfig::default(),
-            &scoped,
-            &ExecBudgetConfig::default(),
-            &FirewallConfig::default(),
-            &EffectivePolicy::default(),
+        assert!(
+            warnings
+                .iter()
+                .all(|w| !w.message.contains("every Composio action")),
+            "{warnings:?}"
         );
         assert!(!codes(&warnings).contains(&"composio_wildcard_allowlist"));
     }

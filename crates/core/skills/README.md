@@ -39,4 +39,4 @@ is the seam.**
 
 Compiled-into-Core crate; router merged into Core's axum app.
 
-Deps: axum, serde/serde_json, serde_yml, dirs, chrono, uuid, utoipa. Dev: tempfile.
+Deps: axum, serde/serde_json, noyalib, dirs, chrono, uuid, utoipa. Dev: tempfile.

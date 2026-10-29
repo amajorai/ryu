@@ -3,13 +3,9 @@ import {
 	SuggestionLeafStatic,
 	VoidRemoveSuggestionOverlayStatic,
 } from "@ryu/ui/components/editor/ui/suggestion-node-static.tsx";
-import type {
-	TElement,
-	TInlineSuggestionData,
-	TSuggestionData,
-	TSuggestionText,
-} from "platejs";
+import type { SlateEditor, TElement, TSuggestionText } from "platejs";
 import { KEYS, TextApi } from "platejs";
+import { isNativeFunction } from "../../../lib/native-primitive-observation.ts";
 
 const INLINE_SUGGESTION_TARGET_PLUGINS = [
 	KEYS.date,
@@ -18,17 +14,14 @@ const INLINE_SUGGESTION_TARGET_PLUGINS = [
 	KEYS.mention,
 ];
 
-function getInlineSuggestionData(editor: any, element: TElement) {
+function getInlineSuggestionData(editor: SlateEditor, element: TElement) {
 	const suggestionApi = editor.getApi(BaseSuggestionPlugin).suggestion;
-	const data = suggestionApi.suggestionData(element) as
-		| TSuggestionData
-		| TInlineSuggestionData
-		| undefined;
+	const data = suggestionApi.suggestionData(element);
 
 	if (data) {
 		return data;
 	}
-	if (typeof suggestionApi.dataList !== "function") {
+	if (!isNativeFunction(suggestionApi.dataList)) {
 		return;
 	}
 
@@ -37,6 +30,7 @@ function getInlineSuggestionData(editor: any, element: TElement) {
 			continue;
 		}
 
+		// SAFETY: Plate dataList declares the marked TSuggestionText, but its native implementation only enumerates suggestion_* keys of the complete text object. The existing TextApi guard supplies that entire object; its marks, getters and method receiver are forwarded unchanged.
 		const childData = suggestionApi.dataList(child as TSuggestionText).at(-1);
 
 		if (childData) {
@@ -68,13 +62,14 @@ export const BaseSuggestionKit = [
 						"data-inline-suggestion": suggestionData.type,
 					};
 				},
+				// SAFETY: Plate declares CSSStyleDeclaration here, while its native injection implementation forwards this result as a plain React style object (and defaults to a plain object). This complete empty object clears injected styles; no DOM declaration methods or fields are used.
 				transformStyle: () => ({}) as CSSStyleDeclaration,
 			},
 			targetPlugins: INLINE_SUGGESTION_TARGET_PLUGINS,
 		},
 		render: {
-			belowRootNodes: VoidRemoveSuggestionOverlayStatic as any,
-			node: SuggestionLeafStatic as any,
+			belowRootNodes: VoidRemoveSuggestionOverlayStatic,
+			node: SuggestionLeafStatic,
 		},
 	}),
 ];

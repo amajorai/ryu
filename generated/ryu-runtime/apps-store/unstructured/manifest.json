@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/unstructured",
   "name": "Unstructured",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "Document parsing via the Apache-2.0 Unstructured library — the broadest-coverage `document.parse` backend, reading roughly sixty formats (PDF, the whole Office family including the legacy binary .doc/.ppt/.xls, email, EPUB, HTML, spreadsheets, and OCR over scanned images). Its distinguishing output is element-level: every fragment comes back typed (Title, NarrativeText, ListItem, Table, CodeSnippet, PageBreak), so the sidecar can emit markdown that preserves document structure instead of a flat text dump — headings stay headings and tables stay tables through chunking. The cost is install weight: `unstructured[all-docs]` is a 1-2 GB Python install, and the native tools it shells out to (poppler, tesseract, libreoffice, pandoc) are NOT pip-installable and must be present on the host. The sidecar detects each missing tool and reports it by name through the job's `error`/`missing_dependencies` fields rather than failing as an empty document. Parses run as jobs: submit returns 202 + a job_id, the caller polls.",
   "icon": "layers-01",
@@ -58,10 +58,8 @@
           "format": "tar.gz"
         },
         "env": {
-          "RYU_UNSTRUCTURED_HOST": "127.0.0.1",
           "RYU_UNSTRUCTURED_ROOTS": "${RYU_DIR}",
-          "RYU_UNSTRUCTURED_WORKDIR": "${RYU_DIR}/cache/unstructured",
-          "NLTK_DATA": "${RYU_DIR}/cache/unstructured/nltk",
+          "NLTK_DATA": "${RYU_PLUGIN_DATA_DIR}/cache/nltk",
           "HF_HOME": "${RYU_DIR}/models/hf",
           "UNSTRUCTURED_ANALYTICS_ENABLED": "false",
           "SCARF_NO_ANALYTICS": "true"
@@ -77,20 +75,5 @@
         ]
       }
     }
-  ],
-  "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "unstructured.chat",
-        "title": "Unstructured widget",
-        "description": "Unstructured chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["unstructured widget"],
-        "examples": ["Show me a unstructured widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ]
-  }
+  ]
 }

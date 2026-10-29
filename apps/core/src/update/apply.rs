@@ -19,11 +19,10 @@ use std::path::{Path, PathBuf};
 
 use super::ReleaseAsset;
 use crate::downloads::{DownloadCenter, DownloadKind, DownloadRole, DownloadSpec};
-use crate::sidecar::download_manager::ryu_dir;
 
 /// Where downloaded update artifacts are staged before install.
 fn staging_dir() -> PathBuf {
-    ryu_dir().join("updates")
+    crate::paths::cache_path("updates")
 }
 
 /// Outcome of an apply attempt, returned to the client.
@@ -38,6 +37,11 @@ pub struct ApplyResult {
     pub staged_path: String,
     /// Human-readable next step.
     pub message: String,
+    /// Core was swapped but the Gateway it launches could not be. Restarting
+    /// now would pair the new Core with the old Gateway, so an unattended
+    /// restart must not happen. In-process only.
+    #[serde(skip)]
+    pub gateway_left_behind: bool,
 }
 
 /// The caller selects an official asset; it cannot select a filesystem path or
@@ -116,6 +120,13 @@ fn release_digest(asset: &ReleaseAsset, tag: &str, release: &serde_json::Value) 
 
 async fn verified_digest(asset: &ReleaseAsset) -> Result<String> {
     let tag = release_tag(asset)?;
+    let release = fetch_release_metadata(&tag).await?;
+    release_digest(asset, &tag, &release)
+}
+
+/// The published release `tag`, from the releases API (bounded, https only, no
+/// redirects).
+async fn fetch_release_metadata(tag: &str) -> Result<serde_json::Value> {
     let client = reqwest::Client::builder()
         .https_only(true)
         .redirect(reqwest::redirect::Policy::none())
@@ -138,7 +149,80 @@ async fn verified_digest(asset: &ReleaseAsset) -> Result<String> {
         );
         body.extend_from_slice(&chunk);
     }
-    release_digest(asset, &tag, &serde_json::from_slice(&body)?)
+    Ok(serde_json::from_slice(&body)?)
+}
+
+/// The release asset named `name` in `release`, in [`ReleaseAsset`] form.
+fn release_asset_named(release: &serde_json::Value, name: &str) -> Option<ReleaseAsset> {
+    let entry = release
+        .get("assets")?
+        .as_array()?
+        .iter()
+        .find(|entry| entry.get("name").and_then(serde_json::Value::as_str) == Some(name))?;
+    Some(ReleaseAsset {
+        name: name.to_owned(),
+        url: entry.get("browser_download_url")?.as_str()?.to_owned(),
+        kind: "exe".to_owned(),
+        size: entry.get("size")?.as_u64()?,
+    })
+}
+
+/// The Gateway binary the running Core launches: `RYU_GATEWAY_BIN`, else
+/// `ryu-gateway` on `PATH` — the same resolution `sidecar::gateway` spawns with.
+fn managed_gateway_path() -> Option<PathBuf> {
+    let configured = std::env::var("RYU_GATEWAY_BIN")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let path = match configured {
+        Some(path) => PathBuf::from(path),
+        None => crate::sidecar::manifest_sidecar::which_on_path("ryu-gateway")?,
+    };
+    let path = std::fs::canonicalize(&path).unwrap_or(path);
+    (path.is_file() && !path.to_string_lossy().contains(".app/Contents/")).then_some(path)
+}
+
+/// Replace the Gateway alongside a Core self-update.
+///
+/// Core and the Gateway ship on ONE release train and Core refuses a Gateway
+/// whose version disagrees, so swapping Core alone left a remote node with a
+/// stale Gateway after every update. The Gateway asset comes from the SAME
+/// release as the Core asset just installed and is verified the same way.
+/// Best-effort: the Core swap already succeeded, so a Gateway failure is
+/// reported in the message rather than undoing it.
+async fn update_gateway_alongside(
+    downloads: &DownloadCenter,
+    core_asset: &ReleaseAsset,
+) -> std::result::Result<Option<PathBuf>, String> {
+    let Some(gateway) = managed_gateway_path() else {
+        return Ok(None);
+    };
+    let tag = release_tag(core_asset).map_err(|e| e.to_string())?;
+    let release = fetch_release_metadata(&tag)
+        .await
+        .map_err(|e| format!("reading release {tag}: {e}"))?;
+    let name = format!(
+        "ryu-gateway-{}{}",
+        super::platform_tag(),
+        std::env::consts::EXE_SUFFIX
+    );
+    let asset = release_asset_named(&release, &name)
+        .ok_or_else(|| format!("release {tag} publishes no {name}"))?;
+    let digest = release_digest(&asset, &tag, &release).map_err(|e| e.to_string())?;
+    let staged = downloads
+        .download_blocking(DownloadSpec {
+            kind: DownloadKind::Other,
+            role: DownloadRole::Other,
+            label: format!("Ryu update ({name})"),
+            url: asset.url.clone(),
+            dest: staging_dir().join(&name),
+            sha256: Some(digest),
+            version_record: None,
+        })
+        .await
+        .map_err(|e| format!("downloading {name}: {e:#}"))?;
+    replace_exe_at(&gateway, &staged).map_err(|e| format!("{e:#}"))?;
+    let _ = std::fs::remove_file(&staged);
+    Ok(Some(gateway))
 }
 
 /// Download `asset` into the staging dir. Returns the staged file path.
@@ -171,32 +255,71 @@ async fn download_asset(downloads: &DownloadCenter, asset: &ReleaseAsset) -> Res
         .context("downloading update asset")
 }
 
-/// Windows-safe in-place replace of the currently running executable.
+/// In-place replace of the currently running executable.
 ///
-/// Renames the live binary to `<exe>.old` (allowed even while running) and moves
-/// the freshly downloaded binary into the original path. The caller must restart
-/// the process for the new binary to take effect.
+/// The new binary is first copied NEXT TO the live one (`<exe>.new`), so the
+/// final step is a same-directory rename even when the staging dir is on another
+/// volume. The live binary is then renamed aside to `<exe>.old` (allowed while
+/// running, on Windows too) and `<exe>.new` moved into its slot. If that last
+/// move fails, the backup is renamed back: a failed update must never leave the
+/// node with no Core binary at its own path. The caller must restart the process
+/// for the new binary to take effect.
 fn replace_current_exe(new_binary: &Path) -> Result<()> {
     let current = std::env::current_exe().context("resolving current exe")?;
-    let backup = current.with_extension("old");
-    // Best-effort: remove a stale backup from a prior update.
-    let _ = std::fs::remove_file(&backup);
-    std::fs::rename(&current, &backup)
-        .with_context(|| format!("renaming live exe aside to {}", backup.display()))?;
-    // Move the new binary into the original slot. Copy+remove rather than rename
-    // so it works across volumes (the staging dir may be on a different drive).
-    std::fs::copy(new_binary, &current)
-        .with_context(|| format!("installing new exe at {}", current.display()))?;
-    let _ = std::fs::remove_file(new_binary);
+    replace_exe_at(&current, new_binary)
+}
 
+/// Swap `new_binary` into `current`, never leaving `current` missing.
+///
+/// The new binary is first copied next to the live one (`<exe>.new`, same
+/// volume, so the final step is a rename), and only then is the live binary
+/// moved aside. If copying fails (disk full, AV lock) the live exe is untouched;
+/// if the final rename fails the original is moved back.
+fn replace_exe_at(current: &Path, new_binary: &Path) -> Result<()> {
+    let backup = current.with_extension("old");
+    let incoming = current.with_extension("new");
+    let _ = std::fs::remove_file(&incoming);
+    // Copy rather than rename so it works across volumes (the staging dir may be
+    // on a different drive).
+    std::fs::copy(new_binary, &incoming)
+        .with_context(|| format!("staging new exe at {}", incoming.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&current)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&current, perms)?;
+        std::fs::set_permissions(&incoming, std::fs::Permissions::from_mode(0o755))
+            .with_context(|| format!("marking {} executable", incoming.display()))?;
     }
+    // Opened for writing: on Windows `FlushFileBuffers` refuses a read-only handle.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&incoming)
+        .and_then(|file| file.sync_all())
+        .with_context(|| format!("flushing {}", incoming.display()))?;
+
+    // Best-effort: remove a stale backup from a prior update.
+    let _ = std::fs::remove_file(&backup);
+    if let Err(error) = std::fs::rename(current, &backup) {
+        let _ = std::fs::remove_file(&incoming);
+        return Err(error)
+            .with_context(|| format!("renaming live exe aside to {}", backup.display()));
+    }
+    if let Err(error) = std::fs::rename(&incoming, current) {
+        // Put the original back so the node still has a binary to start.
+        let _ = std::fs::rename(&backup, current);
+        let _ = std::fs::remove_file(&incoming);
+        return Err(error).with_context(|| format!("installing new exe at {}", current.display()));
+    }
+    let _ = std::fs::remove_file(new_binary);
     Ok(())
+}
+
+/// Whether the running Core lives inside a macOS `.app` bundle (the desktop's
+/// bundled sidecar). Swapping a file inside a signed bundle breaks its code
+/// signature, and the bundle is the native updater's to replace.
+fn running_inside_app_bundle() -> bool {
+    std::env::current_exe()
+        .map(|exe| exe.to_string_lossy().contains(".app/Contents/"))
+        .unwrap_or(false)
 }
 
 /// Clean up the `<exe>.old` backup left by a previous self-update. Called once
@@ -222,16 +345,34 @@ pub async fn apply_update(downloads: &DownloadCenter, asset: &ReleaseAsset) -> R
     let staged_str = staged.display().to_string();
 
     match asset.kind.as_str() {
-        // A bare binary we can swap directly. (Archive handling — unpacking then
-        // locating the inner binary — is intentionally deferred until real
-        // release artifacts exist to validate the layout against.)
-        "exe" if cfg!(windows) => {
+        // This platform's standalone Core binary — the asset `/api/update/check`
+        // offers — is swapped directly on every OS. Any other `exe` (an installer,
+        // another release binary) is only staged: swapping it in as Core would
+        // replace this process with a different program.
+        "exe" if asset.name == super::core_asset_name() && !running_inside_app_bundle() => {
             replace_current_exe(&staged)?;
+            let gateway = update_gateway_alongside(downloads, asset).await;
+            let gateway_left_behind = gateway.is_err();
+            let message = match gateway {
+                Ok(Some(_)) => {
+                    "Update installed for Ryu Core and the Gateway. Restart Ryu Core to run the new version."
+                        .to_string()
+                }
+                Ok(None) => "Update installed. Restart Ryu Core to run the new version.".to_string(),
+                Err(error) => {
+                    tracing::warn!("update: Core updated but the Gateway was not: {error}");
+                    format!(
+                        "Ryu Core updated, but the Gateway could not be: {error}. Update the Gateway \
+                         binary to the same version before restarting."
+                    )
+                }
+            };
             Ok(ApplyResult {
                 applied: true,
                 restart_required: true,
                 staged_path: staged_str,
-                message: "Update installed. Restart Ryu Core to run the new version.".to_string(),
+                message,
+                gateway_left_behind,
             })
         }
         "msi" | "dmg" | "deb" | "appimage" => Ok(ApplyResult {
@@ -242,6 +383,7 @@ pub async fn apply_update(downloads: &DownloadCenter, asset: &ReleaseAsset) -> R
                 "Update downloaded. Run the {} installer to complete the update.",
                 asset.kind
             ),
+            gateway_left_behind: false,
         }),
         "archive" | "exe" => Ok(ApplyResult {
             applied: false,
@@ -249,6 +391,7 @@ pub async fn apply_update(downloads: &DownloadCenter, asset: &ReleaseAsset) -> R
             staged_path: staged_str,
             message: "Update downloaded. Extract and replace the binary to complete the update."
                 .to_string(),
+            gateway_left_behind: false,
         }),
         other => Err(anyhow!("unsupported update asset kind: {other}")),
     }
@@ -258,6 +401,33 @@ pub async fn apply_update(downloads: &DownloadCenter, asset: &ReleaseAsset) -> R
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn exe_swap_installs_new_binary_and_keeps_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("ryu-core.exe");
+        let staged = dir.path().join("staged.bin");
+        std::fs::write(&current, b"old binary").unwrap();
+        std::fs::write(&staged, b"new binary").unwrap();
+        replace_exe_at(&current, &staged).unwrap();
+        assert_eq!(std::fs::read(&current).unwrap(), b"new binary");
+        assert_eq!(
+            std::fs::read(current.with_extension("old")).unwrap(),
+            b"old binary"
+        );
+        assert!(!current.with_extension("new").exists());
+        assert!(!staged.exists());
+    }
+
+    #[test]
+    fn exe_swap_failure_leaves_live_binary_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("ryu-core.exe");
+        std::fs::write(&current, b"old binary").unwrap();
+        let missing = dir.path().join("does-not-exist.bin");
+        assert!(replace_exe_at(&current, &missing).is_err());
+        assert_eq!(std::fs::read(&current).unwrap(), b"old binary");
+    }
 
     fn asset() -> ReleaseAsset {
         ReleaseAsset {
@@ -273,7 +443,7 @@ mod tests {
 
     #[test]
     fn update_mutations_require_node_management_before_side_effects() {
-        let source = include_str!("../server/mod.rs");
+        let source = include_str!("../server/mod.rs").replace("\r\n", "\n");
         for (handler, mutation) in [
             (
                 "async fn update_apply(",
@@ -326,6 +496,58 @@ mod tests {
             value.url = url.into();
             assert!(release_tag(&value).is_err());
         }
+    }
+
+    #[test]
+    fn replace_exe_swaps_in_the_new_binary_and_keeps_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("ryu-core");
+        let staged = dir.path().join("staged");
+        std::fs::write(&live, b"old").unwrap();
+        std::fs::write(&staged, b"new").unwrap();
+
+        replace_exe_at(&live, &staged).unwrap();
+
+        assert_eq!(std::fs::read(&live).unwrap(), b"new");
+        assert_eq!(std::fs::read(live.with_extension("old")).unwrap(), b"old");
+        assert!(!live.with_extension("new").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&live).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o755);
+        }
+    }
+
+    #[test]
+    fn replace_exe_leaves_the_live_binary_when_the_new_one_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("ryu-core");
+        std::fs::write(&live, b"old").unwrap();
+
+        assert!(replace_exe_at(&live, &dir.path().join("missing")).is_err());
+
+        assert_eq!(std::fs::read(&live).unwrap(), b"old");
+        assert!(!live.with_extension("new").exists());
+    }
+
+    #[test]
+    fn gateway_asset_is_read_from_the_same_release_and_verified_alike() {
+        let hex = "cd".repeat(32);
+        let name = "ryu-gateway-linux-x86_64";
+        let url = format!(
+            "https://github.com/{}/releases/download/v0.3.0/{name}",
+            super::super::RYU_REPO
+        );
+        let release = json!({"tag_name":"v0.3.0","draft":false,"assets":[
+            {"name":"ryu-core-linux-x86_64","browser_download_url":"x","size":1},
+            {"name":name,"browser_download_url":url,"size":42,"digest":format!("sha256:{hex}")}
+        ]});
+        let asset = release_asset_named(&release, name).expect("gateway asset listed");
+        assert_eq!(asset.url, url);
+        assert_eq!(asset.size, 42);
+        assert_eq!(release_digest(&asset, "v0.3.0", &release).unwrap(), hex);
+        assert!(release_asset_named(&release, "ryu-gateway-windows-x86_64.exe").is_none());
     }
 
     #[test]

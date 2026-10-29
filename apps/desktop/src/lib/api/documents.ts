@@ -16,14 +16,12 @@
 //
 // # Which routes here are real
 //
-// Exactly one of the three parse routes is registered in Core today:
-// `GET /api/documents/parse/capability`. {@link submitParse} / {@link fetchParseJob}
-// (and so {@link parseDocument}) address handlers that COMPILE but are deliberately
-// not in Core's route table, because their only consumer — `stageComposerFiles` in
-// `lib/composer/attachments.ts` — is itself imported by no surface yet. They are
-// kept, not deleted: they are the client half of a contract Core already implements,
-// and the change that mounts the composer seam mounts both ends at once. Until then,
-// calling them 404s. See `apps/core/src/document_parse.rs`'s module doc.
+// All three parse routes are registered in Core: `GET /api/documents/parse/capability`,
+// and the submit/poll pair {@link submitParse} / {@link fetchParseJob} (and so
+// {@link parseDocument}) address — `POST /api/documents/parse` and
+// `GET /api/documents/parse/jobs/:job_id`. The pair's first client is the TypeScript
+// SDK's document loaders; `stageComposerFiles` in `lib/composer/attachments.ts` is
+// the desktop consumer. See `apps/core/src/document_parse.rs`'s module doc.
 //
 // There is no `/api/document-parse/*` pair, and there never was. This module used to
 // document and fetch `GET /api/document-parse/backends` + `POST /api/document-parse/backend`
@@ -36,6 +34,7 @@
 // and writes, and which is what the removed doc comment already claimed these routes
 // were "a thin view of".
 
+import { z } from "zod";
 import {
 	CapabilityBindingConflictError,
 	type CapabilityLayer,
@@ -51,6 +50,12 @@ import {
 	authenticatedFetch,
 	identityHeaders,
 } from "./client.ts";
+import {
+	type DocumentJobWire,
+	documentCapabilityWireSchema,
+	documentErrorWireSchema,
+	documentJobWireSchema,
+} from "./document-wire-contracts.ts";
 
 /** What this node can extract text from, right now. */
 export interface ParseCapability {
@@ -74,32 +79,13 @@ export interface ParseResult {
 	jobId?: string;
 	markdown?: string;
 	missingDependencies?: string[];
-	status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+	/** Core preserves future provider status strings. */
+	status: string;
 	truncated?: boolean;
 }
 
-interface CapabilityWire {
-	available?: boolean;
-	builtin_extensions?: string[];
-	extensions?: string[];
-	max_input_bytes?: number;
-	missing_dependencies?: string[];
-	provider?: string | null;
-	provider_name?: string | null;
-}
-
-interface JobWire {
-	error?: string | null;
-	job_id?: string | null;
-	markdown?: string | null;
-	missing_dependencies?: string[];
-	status?: string;
-	truncated?: boolean;
-	via?: string;
-}
-
-function headersFor(target: ApiTarget): Record<string, string> {
-	const headers: Record<string, string> = { ...identityHeaders() };
+function headersFor(target: ApiTarget) {
+	const headers = { ...identityHeaders() };
 	if (target.token) {
 		headers.authorization = `Bearer ${target.token}`;
 	}
@@ -109,7 +95,7 @@ function headersFor(target: ApiTarget): Record<string, string> {
 /** Read `error` out of a non-OK response body, falling back to the status. */
 async function errorOf(res: Response): Promise<string> {
 	try {
-		const body = (await res.json()) as { error?: string };
+		const body = documentErrorWireSchema.parse(await res.json());
 		if (body.error) {
 			return body.error;
 		}
@@ -121,8 +107,8 @@ async function errorOf(res: Response): Promise<string> {
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
-function normalizeJob(wire: JobWire): ParseResult {
-	const status = (wire.status ?? "running") as ParseResult["status"];
+function normalizeJob(wire: DocumentJobWire): ParseResult {
+	const status = wire.status ?? "running";
 	return {
 		status,
 		jobId: wire.job_id ?? undefined,
@@ -149,7 +135,7 @@ export async function fetchParseCapability(
 	if (!res.ok) {
 		throw new Error(await errorOf(res));
 	}
-	const wire = (await res.json()) as CapabilityWire;
+	const wire = documentCapabilityWireSchema.parse(await res.json());
 	return {
 		available: wire.available ?? true,
 		builtinExtensions: wire.builtin_extensions ?? [],
@@ -186,7 +172,7 @@ export async function submitParse(
 	if (!res.ok) {
 		throw new Error(await errorOf(res));
 	}
-	return normalizeJob((await res.json()) as JobWire);
+	return normalizeJob(documentJobWireSchema.parse(await res.json()));
 }
 
 /** `GET /api/documents/parse/jobs/:id` — one poll. */
@@ -203,7 +189,7 @@ export async function fetchParseJob(
 	if (!res.ok) {
 		throw new Error(await errorOf(res));
 	}
-	return normalizeJob((await res.json()) as JobWire);
+	return normalizeJob(documentJobWireSchema.parse(await res.json()));
 }
 
 /** Poll interval. Short enough to feel live, long enough not to spin the sidecar. */
@@ -413,14 +399,19 @@ export async function setParseBackend(
  * The opaque-failure class this whole feature exists to end is exactly what a
  * bare `String(error)` would reproduce in the feature's own error path.
  */
-export function describeApiRefusal(error: unknown): string | undefined {
+const nativeErrorSchema = z.instanceof(Error);
+
+export function describeApiRefusal(
+	error: Parameters<typeof nativeErrorSchema.parse>[0]
+): string | undefined {
 	if (error instanceof CapabilityBindingConflictError) {
 		return describeBindingFailure(error, "this parser");
 	}
 	if (error instanceof ApiError) {
 		return error.serverMessage ?? error.message;
 	}
-	return error instanceof Error ? error.message : undefined;
+	const nativeError = nativeErrorSchema.safeParse(error);
+	return nativeError.success ? nativeError.data.message : undefined;
 }
 
 /**
@@ -464,7 +455,7 @@ export function describeParseFailure(raw: string | null | undefined): string {
 export function isPythonMissingFailure(
 	raw: string | null | undefined
 ): boolean {
-	return typeof raw === "string" && raw.startsWith("python_missing:");
+	return raw?.startsWith("python_missing:") ?? false;
 }
 
 /** Display label for a `parse_backend_id`. `"builtin"` is Core's own text floor,

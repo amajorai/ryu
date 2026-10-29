@@ -1,3 +1,4 @@
+use crate::timeline::open_event_column;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
@@ -100,7 +101,7 @@ pub fn search_behavioral_context(
     let mut event_stmt = conn
         .prepare(
             "SELECT ts, event_type, ax_role, ax_title, ax_identifier,
-                    click_x, click_y, window_title
+                    click_x, click_y, window_title, id
              FROM events_index
              WHERE track = 2
                AND ts >= ?1 AND ts <= ?2
@@ -116,13 +117,14 @@ pub fn search_behavioral_context(
                 params![*interval_start as i64, *interval_end as i64],
                 |row| {
                     let ts: i64 = row.get(0)?;
+                    let id: i64 = row.get(8)?;
                     let action_type: String = row.get(1)?;
                     let ax_role: Option<String> = row.get(2)?;
-                    let ax_title: Option<String> = row.get(3)?;
+                    let ax_title = open_event_column(id, "ax_title", row.get(3)?);
                     let ax_identifier: Option<String> = row.get(4)?;
                     let click_x: Option<i32> = row.get(5)?;
                     let click_y: Option<i32> = row.get(6)?;
-                    let window_title: Option<String> = row.get(7)?;
+                    let window_title = open_event_column(id, "window_title", row.get(7)?);
                     Ok((
                         BehavioralAction {
                             ts: ts as u64,
@@ -286,30 +288,41 @@ pub fn top_interactions(
     app_name: &str,
     limit: u32,
 ) -> Result<Vec<(String, String, u64)>, String> {
+    // ax_title is sealed per row, so the grouping runs here after opening.
     let mut stmt = conn
         .prepare(
-            "SELECT ax_role, ax_title, COUNT(*) as cnt
+            "SELECT id, ax_role, ax_title
              FROM events_index
              WHERE track = 2
                AND event_type = 'mouse_down'
                AND ax_role IS NOT NULL
-               AND app_name LIKE ?1
-             GROUP BY ax_role, ax_title
-             ORDER BY cnt DESC
-             LIMIT ?2",
+               AND app_name LIKE ?1",
         )
         .map_err(|e| format!("Failed to prepare top interactions query: {e}"))?;
 
-    let results: Vec<(String, String, u64)> = stmt
-        .query_map(params![format!("%{}%", app_name), limit], |row| {
-            let role: String = row.get(0)?;
-            let title: String = row.get::<_, Option<String>>(1)?.unwrap_or_default();
-            let count: i64 = row.get(2)?;
-            Ok((role, title, count as u64))
+    let mut counts: std::collections::HashMap<(String, String), u64> =
+        std::collections::HashMap::new();
+    let rows = stmt
+        .query_map(params![format!("%{}%", app_name)], |row| {
+            let id: i64 = row.get(0)?;
+            let role: String = row.get(1)?;
+            let title = open_event_column(id, "ax_title", row.get(2)?).unwrap_or_default();
+            Ok((role, title))
         })
-        .map_err(|e| format!("Top interactions query failed: {e}"))?
-        .filter_map(|r| r.ok())
+        .map_err(|e| format!("Top interactions query failed: {e}"))?;
+    for (role, title) in rows.filter_map(|r| r.ok()) {
+        *counts.entry((role, title)).or_insert(0) += 1;
+    }
+    let mut results: Vec<(String, String, u64)> = counts
+        .into_iter()
+        .map(|((role, title), count)| (role, title, count))
         .collect();
+    results.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then_with(|| a.0.cmp(&b.0))
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    results.truncate(limit as usize);
 
     Ok(results)
 }
@@ -323,6 +336,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE events_index (
+                id INTEGER PRIMARY KEY,
                 ts INTEGER NOT NULL,
                 track INTEGER NOT NULL,
                 event_type TEXT NOT NULL DEFAULT '',

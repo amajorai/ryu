@@ -1,3 +1,5 @@
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
+import { pluginValueSchema } from "@/src/lib/api/plugin-wire-values.ts";
 // Shared data seam for app-registered sidebar sections.
 //
 // The sidebar and Library intentionally read the same contribution, query key,
@@ -27,7 +29,7 @@ export function sectionSourceRequest(
 	if (!(section.approved_grants ?? []).includes(DECLARATIVE_HTTP_GRANT)) {
 		return null;
 	}
-	return contributionSourceRequest(section, section.spec?.source);
+	return contributionSourceRequest(section, pluginSidebarSpec(section)?.source);
 }
 
 export interface SidebarSectionSourceData {
@@ -42,7 +44,7 @@ export function sidebarSectionQueryOptions(
 	section: PluginSidebarSection,
 	target: ReturnType<typeof toTarget>
 ) {
-	const source = section.spec?.source;
+	const source = pluginSidebarSpec(section)?.source;
 	const sourceRequest = sectionSourceRequest(section);
 	const refreshMs = normalizeViewRefreshMs(source?.refreshMs);
 	const refetchInterval: number | false = refreshMs ?? false;
@@ -66,7 +68,10 @@ export function sidebarSectionQueryOptions(
 				signal,
 				headers: await requestHeaders(target),
 			});
-			return response.ok ? ((await response.json()) as unknown) : null;
+			if (!response.ok) {
+				throw new Error(`Collection could not be loaded (${response.status}).`);
+			}
+			return pluginValueSchema.parse(await response.json());
 		},
 		refetchInterval,
 	};
@@ -88,7 +93,7 @@ export function useSidebarSectionSources(
 	return useMemo(
 		() =>
 			sections.map((section, index) => {
-				const source = section.spec?.source;
+				const source = pluginSidebarSpec(section)?.source;
 				const result = results[index];
 				const payload = result?.data;
 				return {

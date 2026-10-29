@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ToolResult,
 	ToolResultOutput,
@@ -39,6 +40,7 @@ export function BashToolTerminalCard({
 	approval,
 	expandOutput = false,
 }: BashToolTerminalCardProps) {
+	const tl = useLiteralMessages();
 	useToolComplete(state === "animating", step.duration, onComplete);
 	const isPending = state === "animating";
 	const command = step.bashCommand ?? step.toolDetail;
@@ -46,13 +48,17 @@ export function BashToolTerminalCard({
 	const hasOutput = Boolean(step.bashOutput?.trim());
 
 	return (
-		<div className="an-tool-bash">
+		<div>
 			<ToolResult
 				collapseOnComplete={!expandOutput}
 				defaultOpen={isPending || hasOutput}
 				kind="terminal"
 				status={isPending ? "running" : "success"}
-				title={isPending ? `Running ${summary}` : `Ran ${summary}`}
+				title={
+					isPending
+						? tl("Running {summary}", { summary })
+						: tl("Ran {summary}", { summary })
+				}
 				tool="Bash"
 			>
 				<div className="flex flex-col gap-1.5">
@@ -79,9 +85,7 @@ export const BashTool = memo(function BashTool({
 	part,
 	expandOutput = false,
 }: BashToolProps) {
-	const approval = (part.input?.approval ?? part.args?.approval) as
-		| ToolApproval
-		| undefined;
+	const approval = part.input?.approval ?? part.args?.approval;
 	const step = mapToolInvocationToStep(part.toolCallId ?? part.id ?? "bash", {
 		toolName: "Bash",
 		args: part.input ?? part.args ?? {},

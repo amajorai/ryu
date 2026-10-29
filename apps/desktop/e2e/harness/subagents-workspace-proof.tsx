@@ -64,7 +64,7 @@ const messages = [
 
 function WorkspaceTab() {
 	return (
-		<div className="flex h-12 shrink-0 items-center border-white/10 border-b bg-[#111] px-2 text-white">
+		<div className="flex h-12 shrink-0 items-center border-white/10 border-b bg-background px-2 text-white">
 			<div className="flex h-9 items-center gap-2 rounded-lg bg-white/[0.06] px-2.5 text-white">
 				<HugeiconsIcon aria-hidden className="size-4" icon={Robot01Icon} />
 				<span className="font-medium text-sm" data-testid="workspace-tab-label">

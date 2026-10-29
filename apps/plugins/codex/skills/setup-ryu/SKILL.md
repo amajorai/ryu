@@ -21,11 +21,11 @@ The desktop app boots both. A headless user can run just Core.
 - Desktop: have the user install and open the Ryu desktop app. It starts Core and Gateway automatically.
 - Headless from the repo: Core is a Rust binary under `apps/core`; run it with the project's standard run command. It binds `:7980`.
 
-The bridge reads its target from `RYU_CORE_URL` (default `http://127.0.0.1:7980`) in the plugin's `.mcp.json`. Set `RYU_CORE_TOKEN` there if the node requires auth.
+The bridge reads its target from `RYU_CORE_URL` (default `http://127.0.0.1:7980`). Codex forwards `RYU_CORE_URL` and `RYU_CORE_TOKEN` from the environment Codex was started in (the plugin's `.mcp.json` lists them under `env_vars`), so set them in that shell, then restart Codex. Leave `RYU_CORE_TOKEN` unset for a local loopback node: the bridge reads that node's local token itself. A remote node needs its own token.
 
 ## Step 2 - verify health (do not skip)
 
-Call the `ryu_health` tool. A healthy node returns `{"status":"ok"}`. If it errors, Core is not reachable: recheck Step 1 and confirm `RYU_CORE_URL` matches where Core is actually listening. Then call `ryu_system_status` for engine and sidecar state.
+Call the `ryu_health` tool. A healthy node returns `{"status":"ok"}`. If it errors, Core is not reachable: recheck Step 1 and confirm `RYU_CORE_URL` in the environment Codex was started from matches where Core is actually listening. Then call `ryu_system_status` for engine and sidecar state.
 
 ## Step 3 - activate a local model
 

@@ -23,6 +23,7 @@ test("Spaces retains rows during refresh and restores a recently used node", asy
 		}
 		const match = p.match(/^\/(alpha|beta)\/api\/spaces$/);
 		if (match) {
+			// SAFETY: the successful native RegExp match immediately above restricts capture 1 to the literal alternatives alpha or beta.
 			const node = match[1] as "alpha" | "beta";
 			calls[node]++;
 			if (held && node === "alpha") {
@@ -110,6 +111,7 @@ test("folder preview content is never reused across nodes with identical documen
 		const path = new URL(route.request().url()).pathname;
 		const match = path.match(/^\/(alpha|beta)\/api\/spaces(.*)$/);
 		if (match) {
+			// SAFETY: the successful native RegExp match immediately above restricts capture 1 to the literal alternatives alpha or beta.
 			const node = match[1] as "alpha" | "beta";
 			const tail = match[2];
 			const document = {
@@ -331,6 +333,7 @@ test("offscreen folders defer document reads until approached", async ({
 		const path = new URL(route.request().url()).pathname;
 		const match = path.match(/^\/(alpha|beta)\/api\/spaces(.*)$/);
 		if (match) {
+			// SAFETY: the successful native RegExp match immediately above restricts capture 1 to the literal alternatives alpha or beta.
 			const node = match[1] as "alpha" | "beta";
 			const tail = match[2];
 			const document = {
@@ -437,6 +440,7 @@ test("folder and chat mentions share an in-flight document list", async ({
 		const path = new URL(route.request().url()).pathname;
 		const match = path.match(/^\/(alpha|beta)\/api\/spaces(.*)$/);
 		if (match) {
+			// SAFETY: the successful native RegExp match immediately above restricts capture 1 to the literal alternatives alpha or beta.
 			const node = match[1] as "alpha" | "beta";
 			const tail = match[2];
 			const document = {

@@ -34,7 +34,7 @@ if (!page || res.isError) {
 // in shared kernel code every provider flows through.
 const chunks = Array.isArray(page.content) ? page.content : [page.content];
 const content = chunks
-	.filter((chunk) => typeof chunk === "string" && chunk.length > 0)
+	.filter((chunk) => parsePrimitiveText(chunk) !== undefined && chunk.length > 0)
 	.join("\n\n");
 // `url` is the RESOLVED url (redirects already followed), which is what a canonical
 // record should report. No `title` is mapped: ResponseModel has no such field, and
@@ -42,3 +42,14 @@ const content = chunks
 // field this provider cannot supply. `status` is kept under `raw` for the same
 // reason the declarative mapper keeps the provider's original item there.
 return { results: [{ url: page.url || input.url, content, raw: page }] };
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}

@@ -37,4 +37,6 @@ export default defineConfig({
 		strictPort: true,
 		watch: { ignored: ["**/dist/**", "**/.next/**"] },
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

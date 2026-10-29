@@ -23,16 +23,17 @@
 // the raw-logo one, which is the case that needed it most.
 
 import { cn } from "@ryu/ui/lib/utils.ts";
+import { type ReactNode, useState } from "react";
 
 /** How much room a logo asks for inside the icon square. */
 export type IconPadding = "lg" | "md" | "none" | "sm";
 
-const PAD: Record<IconPadding, string> = {
+const PAD = {
 	none: "",
 	sm: "p-0.5",
 	md: "p-1.5",
 	lg: "p-2.5",
-};
+} satisfies Record<IconPadding, string>;
 
 /**
  * Validate a manifest-supplied padding value.
@@ -51,16 +52,48 @@ export function normalizeIconPadding(
 		: null;
 }
 
+function ImageSource({
+	source,
+	className,
+	fallback,
+}: {
+	source: string;
+	className: string;
+	fallback?: ReactNode;
+}) {
+	const [failedSource, setFailedSource] = useState<string | null>(null);
+	if (failedSource === source) {
+		return (
+			<span className={className}>
+				<span className="flex size-full items-center justify-center">
+					{fallback}
+				</span>
+			</span>
+		);
+	}
+	return (
+		<img
+			alt=""
+			className={className}
+			loading="lazy"
+			onError={() => setFailedSource(source)}
+			src={source}
+		/>
+	);
+}
+
 export default function BrandOrCoverImage({
 	light,
 	dark = null,
 	brand = false,
 	padding = null,
 	className,
+	fallback,
 }: {
 	/** True when this is a brand mark (contain + inset) rather than cover art. */
 	brand?: boolean;
 	className?: string;
+	fallback?: ReactNode;
 	/** Dark-theme variant, when the brand ships one. */
 	dark?: string | null;
 	/** Default (light-theme) image. */
@@ -81,27 +114,24 @@ export default function BrandOrCoverImage({
 			: `object-contain ${PAD[pad]}`;
 	if (!dark) {
 		return (
-			<img
-				alt=""
+			<ImageSource
 				className={cn("size-full", fit, className)}
-				loading="lazy"
-				src={light}
+				fallback={fallback}
+				source={light}
 			/>
 		);
 	}
 	return (
 		<>
-			<img
-				alt=""
+			<ImageSource
 				className={cn("size-full dark:hidden", fit, className)}
-				loading="lazy"
-				src={light}
+				fallback={fallback}
+				source={light}
 			/>
-			<img
-				alt=""
+			<ImageSource
 				className={cn("hidden size-full dark:block", fit, className)}
-				loading="lazy"
-				src={dark}
+				fallback={fallback}
+				source={dark}
 			/>
 		</>
 	);

@@ -1,37 +1,10 @@
 {
   "slug": "devops",
   "name": "DevOps",
-  "navLabel": "DevOps",
-  "category": "Engineering & Product",
   "icon": "Server",
-  "tagline": "Investigate alerts and pipeline failures. Review proposed code and configuration changes before applying them.",
-  "heroEyebrow": "Ryu for DevOps",
-  "heroTitle": "Ryu for devops",
-  "heroSubtitle": "Investigate alerts and pipeline failures. Review proposed code and configuration changes before applying them.",
+  "tagline": "Investigate alerts and failed pipelines, and review each proposed change before it applies.",
+  "heroTitle": "Ryu for DevOps",
   "visualKey": "CliVisual",
-  "intro": "DevOps work happens at the terminal and under pressure: a pipeline is red, an alert is firing, a config drifted. Ryu brings agents to the CLI and command bar where you already live, connects them to your tooling through MCP, and routes every call through the Gateway so automation stays bounded, logged, and reversible.",
-  "highlights": [
-    {
-      "title": "Terminal-native",
-      "description": "Drive agents from the CLI and a global command bar, so you stay in the shell instead of switching to a chat window.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Infra changes as diffs",
-      "description": "Edits to Terraform, manifests, and CI config land on a git branch, so you review the plan before anything applies.",
-      "icon": "Plug"
-    },
-    {
-      "title": "Governed automation",
-      "description": "The Gateway logs every tool call and enforces budgets and policy, so an agent's actions stay bounded and auditable.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Wired to your tools",
-      "description": "Connect GitHub, your cloud, observability, and chat through MCP, so an agent can read logs and act in one loop.",
-      "icon": "Plug"
-    }
-  ],
   "useCases": [
     {
       "title": "Incident triage",
@@ -58,28 +31,18 @@
       "description": "Assemble a timeline from logs and chat into a first-pass incident report with impact, cause, and action items."
     }
   ],
-  "examplePrompts": [
-    "The deploy pipeline is red on the build step, read the run logs and patch the workflow on a branch.",
-    "Investigate the latency alert on the checkout service, pull the last hour of metrics and logs and tell me the likely cause.",
-    "Draft a Terraform change to add a read replica to the orders database and show me the plan.",
-    "Compare the live ingress config against the repo and flag any drift.",
-    "Build a workflow that rotates the staging secrets every Sunday and posts a confirmation to ops."
-  ],
   "faq": [
     {
       "q": "Will an agent run commands against production on its own?",
-      "a": "Only within the limits you set. Infra changes land as a reviewable git diff, and the Gateway logs every tool call and enforces policy and budgets, so automated actions stay bounded and auditable."
+      "a": "Only within the limits you set. Infra changes land as a reviewable git diff, and the Gateway logs routed model calls and sandbox runs and enforces budgets, so automated actions stay bounded and reviewable."
     },
     {
       "q": "Does it work from the terminal?",
-      "a": "Yes. Ryu drives agents from the CLI and a global command bar, so you can triage and act without leaving the shell, alongside the desktop app when you want a fuller view."
+      "a": "Yes. Run agents from the CLI or the global command bar, so you can triage and act without leaving the shell. Open the desktop app for a bigger view."
     },
     {
       "q": "Can it read my logs and metrics?",
-      "a": "Yes. Connect your observability stack, cloud, and GitHub through MCP, so an agent can pull live logs and metrics and act in the same loop, with every call recorded."
+      "a": "Yes. Connect your observability stack, cloud, and GitHub through MCP, so an agent can pull live logs and metrics and act in the same loop, with calls routed through the Gateway recorded."
     }
-  ],
-  "ctaTitle": "Put an agent on the pager with you.",
-  "ctaSubtitle": "Triage, fix, and automate from the terminal, with every action governed and logged.",
-  "ctaNote": "CLI-native · Infra as diffs · Bounded automation"
+  ]
 }

@@ -10,6 +10,8 @@
 // BROWSER-SAFE. Deliberately free of `node:*` imports so the webapp and the
 // extension can both use it; `./node-token.ts` is the Node-only counterpart.
 
+import { z } from "zod";
+
 /** What `POST /api/pair/code` returns. */
 export interface PairingStart {
 	/** The client's polling secret. Never show this to the user. */
@@ -56,35 +58,16 @@ export type PairingPoll =
 
 const JSON_HEADERS = { "content-type": "application/json" };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parsePairingStart(value: unknown): PairingStart {
-	if (
-		!isRecord(value) ||
-		typeof value.device_code !== "string" ||
-		!/^pdc_[A-Za-z0-9_-]{16,}$/.test(value.device_code) ||
-		typeof value.user_code !== "string" ||
-		!/^[A-Z2-9]{3}-[A-Z2-9]{3}$/.test(value.user_code) ||
-		typeof value.expires_in !== "number" ||
-		!Number.isInteger(value.expires_in) ||
-		value.expires_in <= 0 ||
-		value.expires_in > 3600 ||
-		typeof value.interval !== "number" ||
-		!Number.isInteger(value.interval) ||
-		value.interval <= 0 ||
-		value.interval > 60
-	) {
-		throw new Error("Core returned an invalid pairing response");
-	}
-	return {
-		device_code: value.device_code,
-		expires_in: value.expires_in,
-		interval: value.interval,
-		user_code: value.user_code,
-	};
-}
+const pairingStartSchema = z.object({
+	device_code: z.string().regex(/^pdc_[A-Za-z0-9_-]{16,}$/),
+	user_code: z.string().regex(/^[A-Z2-9]{3}-[A-Z2-9]{3}$/),
+	expires_in: z.number().int().positive().max(3600),
+	interval: z.number().int().positive().max(60),
+});
+const pairingPollSchema = z.object({
+	token: z.string().catch(""),
+	error: z.string().catch(""),
+});
 
 /** Strip a trailing slash so `${base}${path}` never doubles up. */
 function normalizeBase(coreUrl: string): string {
@@ -117,8 +100,11 @@ export async function startPairing(
 			`Could not start pairing with ${coreUrl} (HTTP ${resp.status}). Is Ryu running?`
 		);
 	}
-	const body: unknown = await resp.json();
-	return parsePairingStart(body);
+	const body = pairingStartSchema.safeParse(await resp.json());
+	if (!body.success) {
+		throw new Error("Core returned an invalid pairing response");
+	}
+	return body.data;
 }
 
 /**
@@ -142,14 +128,14 @@ export async function pollPairing(
 	if (!resp.ok) {
 		throw new Error(`Pairing poll failed (HTTP ${resp.status})`);
 	}
-	const body: unknown = await resp.json();
-	if (!isRecord(body)) {
+	const parsed = pairingPollSchema.safeParse(await resp.json());
+	if (!parsed.success) {
 		throw new Error("Core returned an invalid pairing poll response");
 	}
-	if (typeof body.token === "string" && body.token.length > 0) {
-		return { status: "approved", token: body.token };
+	if (parsed.data.token.length > 0) {
+		return { status: "approved", token: parsed.data.token };
 	}
-	switch (body.error) {
+	switch (parsed.data.error) {
 		case "access_denied":
 			return { status: "denied" };
 		case "expired_token":

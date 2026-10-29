@@ -14,72 +14,40 @@
 // cookie auth (`credentials: "include"`, what packages/settings api-client uses)
 // and let the server decide.
 
-import { openSse, type SseMessage } from "@ryuhq/protocol/sse";
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import {
+	fetchWaitlistMe as fetchWaitlistMeAtTarget,
+	openWaitlistStream as openWaitlistStreamAtTarget,
+	type WaitlistClientTarget,
+	type WaitlistMe,
+	type WaitlistStatusEvent,
+} from "@ryuhq/core-client/waitlist.ts";
+import type { SseMessage } from "@ryuhq/protocol/sse";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 
-export interface WaitlistMe {
-	applicationStatus: "submitted" | "approved" | "rejected" | null;
-	// Casing the user typed when reserving; falls back to `username`.
-	displayUsername: string | null;
-	// Rough wait estimate derived from position ("~3 weeks"), null when approved.
-	eta: string | null;
-	hasApplied: boolean;
-	isAdmin: boolean;
-	// Sign-up time (ISO). The "member since" date on the membership pass.
-	joinedAt: string | null;
-	position: number | null;
-	referralCode: string | null;
-	referralCount: number;
-	referralUrl: string | null;
-	status: "pending" | "approved";
-	totalWaiting: number;
-	// Reserved handle (normalized, no leading "@"), or null if unclaimed.
-	username: string | null;
-}
-
-/** The only live waitlist transition currently pushed by the control plane. */
-export interface WaitlistStatusEvent {
-	status: "approved";
-}
+export type { WaitlistMe, WaitlistStatusEvent };
 
 function authToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		return null;
 	}
+}
+
+function target(): WaitlistClientTarget {
+	return { token: authToken(), url: BACKEND_URL };
 }
 
 /** Open the caller's approval stream with bearer and cookie auth support. */
 export function openWaitlistStream(
 	signal: AbortSignal
 ): AsyncGenerator<SseMessage<WaitlistStatusEvent>> {
-	return openSse<WaitlistStatusEvent>(`${BACKEND_URL}/api/waitlist/stream`, {
-		credentials: "include",
-		signal,
-		token: authToken(),
-	});
+	return openWaitlistStreamAtTarget(target(), signal);
 }
 
 /** The signed-in user's own waitlist state, or null when it can't be resolved. */
 export async function fetchWaitlistMe(): Promise<WaitlistMe | null> {
-	const token = localStorage.getItem(TOKEN_KEY);
-	let resp: Response;
-	try {
-		resp = await fetch(`${BACKEND_URL}/api/waitlist/me`, {
-			credentials: "include",
-			headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-		});
-	} catch {
-		throw new Error("network");
-	}
-	if (resp.status === 401 || resp.status === 403) {
-		return null;
-	}
-	if (!resp.ok) {
-		throw new Error(`http-${resp.status}`);
-	}
-	return (await resp.json()) as WaitlistMe;
+	return fetchWaitlistMeAtTarget(target());
 }
 
 /**
@@ -89,7 +57,7 @@ export async function fetchWaitlistMe(): Promise<WaitlistMe | null> {
  * offering to overwrite.
  */
 export async function releaseWaitlistUsername(): Promise<void> {
-	const token = localStorage.getItem(TOKEN_KEY);
+	const token = getActiveToken();
 	const resp = await fetch(`${BACKEND_URL}/api/waitlist/username/release`, {
 		method: "POST",
 		credentials: "include",

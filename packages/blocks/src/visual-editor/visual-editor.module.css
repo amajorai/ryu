@@ -1,0 +1,6 @@
+.layer {
+	padding-inline-start: var(--visual-layer-indent);
+}
+.canvas {
+	max-width: var(--visual-canvas-width);
+}

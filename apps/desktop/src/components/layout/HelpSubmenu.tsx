@@ -2,6 +2,7 @@
 // recent posts/releases (public feed, same source as the marketing site), then
 // the running build's version and when it shipped.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	DropdownMenuGroup,
 	DropdownMenuItem,
@@ -10,8 +11,8 @@ import {
 	DropdownMenuSub,
 	DropdownMenuSubContent,
 	DropdownMenuSubTrigger,
-} from "@ryu/ui/components/dropdown-menu";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/dropdown-menu.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useQuery } from "@tanstack/react-query";
 import {
 	AppWindow,
@@ -41,12 +42,15 @@ const APP_VERSION_KEY = ["app", "version"] as const;
 
 const SUPPORT_EMAIL = "support@ryuhq.com";
 
+// The feed's `date` is the site's calendar day (`2026-10-01`) or, rarely, a
+// timestamp. Hand `formatDate` the original string, not a parsed `Date`: it
+// prints a bare day as written and keeps an instant in the display zone, but a
+// `Date` of UTC midnight shows the previous day west of UTC.
 function formatItemDate(date: string): string {
-	const parsed = new Date(date);
-	if (Number.isNaN(parsed.getTime())) {
+	if (Number.isNaN(new Date(date).getTime())) {
 		return "";
 	}
-	return formatDate(parsed, {
+	return formatDate(date, {
 		month: "short",
 		day: "numeric",
 		year: "numeric",
@@ -81,6 +85,7 @@ function openUpdate(item: RecentUpdateItem, frontendBase: string) {
 
 /** Account-menu submenu: help & support, then the "What's new?" feed. */
 export function HelpSubmenu() {
+	const tl = useLiteralMessages();
 	const { items, loading } = useRecentUpdates(8);
 	const { data: appVersion } = useQuery({
 		queryKey: APP_VERSION_KEY,
@@ -115,7 +120,7 @@ export function HelpSubmenu() {
 	const releasedAtMs = releasedAt ? Date.parse(releasedAt) : Number.NaN;
 	const updatedLabel = Number.isNaN(releasedAtMs)
 		? null
-		: `Updated ${compactAge(releasedAtMs)} ago`;
+		: tl("Updated {age} ago", { age: compactAge(releasedAtMs) });
 
 	return (
 		<DropdownMenuSub>
@@ -132,21 +137,19 @@ export function HelpSubmenu() {
 					<Mail className="mr-2 size-4" />
 					<span className="flex min-w-0 flex-1 flex-col">
 						<span>Get support</span>
-						<span className="font-normal text-[11px] text-muted-foreground">
+						<span className="type-caption font-normal text-muted-foreground">
 							{SUPPORT_EMAIL}
 						</span>
 					</span>
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuGroup>
-					<DropdownMenuLabel className="flex items-center gap-1.5">
+					<DropdownMenuLabel layout="icon">
 						<Sparkles className="size-3.5" />
 						What&rsquo;s new?
 					</DropdownMenuLabel>
 					{loading ? (
-						<div className="flex items-center justify-center px-3 py-6">
-							<Spinner className="size-4" />
-						</div>
+						<SkeletonRows inset="panel-horizontal" spacing="generous" />
 					) : whatsNew.length === 0 ? (
 						<div className="px-3 py-4 text-muted-foreground text-sm">
 							No recent updates
@@ -173,7 +176,7 @@ export function HelpSubmenu() {
 											text={item.title}
 										/>
 										<OverflowTooltip
-											className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[11px] text-muted-foreground"
+											className="type-caption min-w-0 flex-1 overflow-hidden whitespace-nowrap text-muted-foreground"
 											fade
 											text={itemMeta(item)}
 										/>
@@ -189,12 +192,12 @@ export function HelpSubmenu() {
 					View all releases
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
-				<DropdownMenuItem className="py-1.5" disabled>
+				<DropdownMenuItem disabled purpose="app-version">
 					<AppWindow className="mr-2 size-4" />
 					<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 						<span className="text-sm">App Version</span>
 						{updatedLabel ? (
-							<span className="text-[11px] text-muted-foreground">
+							<span className="type-caption text-muted-foreground">
 								{updatedLabel}
 							</span>
 						) : null}

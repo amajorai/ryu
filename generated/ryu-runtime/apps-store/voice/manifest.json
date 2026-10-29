@@ -6,13 +6,21 @@
   "privacyPolicyUrl": "https://ryuhq.com/privacy",
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/voice",
-  "name": "Voice",
-  "version": "0.1.14",
+  "name": "Voice Studio",
+  "version": "0.2.0",
   "stability": "experimental",
   "category": "Media & Voice",
-  "description": "Voice data path: speech-to-text transcription (whisper.cpp) and text-to-speech (OuteTTS + the universal Ryu TTS sidecar), plus the installable TTS model catalog. Governance shell over the in-crate voice module.",
-  "tagline": "Speech in, speech out",
-  "keywords": ["voice", "tts", "stt", "speech", "transcription"],
+  "description": "A private voice library and speech studio. Record or upload consented voice samples, write scripts and multi-voice stories, shape takes with speed, seed, effects, and loudness, and generate speech with the TTS models available on your Ryu node.",
+  "tagline": "Build voices and bring scripts to life",
+  "keywords": [
+    "voice",
+    "tts",
+    "speech",
+    "voice cloning",
+    "studio",
+    "stories",
+    "audio effects"
+  ],
   "icon": "audio-wave-01",
   "iconDither": { "from": 221, "to": "transparent", "direction": "down" },
   "surfaces": {
@@ -28,27 +36,75 @@
   "engines": {
     "ryu": ">=0.1.0"
   },
-  "runnables": [],
-  "permission_grants": [],
+  "runnables": [
+    {
+      "id": "voice-companion",
+      "name": "Voice Studio",
+      "kind": "companion",
+      "config": {
+        "label": "Voice Studio",
+        "ui_entry": "./dist/index.html",
+        "ui_format": "html"
+      }
+    }
+  ],
+  "permission_grants": [
+    "files:download",
+    "media:generate",
+    "media:record",
+    "media:transcribe",
+    "storage:kv",
+    "voice:models:manage"
+  ],
   "permission_levels": [
     {
       "id": "voice.models.manage",
       "label": "Can manage voices",
-      "description": "Install and remove text-to-speech voice models, each of which downloads to this node and occupies disk."
+      "description": "Install optional speech engines and models on this node. Engine setup downloads runtime dependencies and model weights use local disk."
+    },
+    {
+      "id": "voice.studio.generate",
+      "label": "Can generate speech",
+      "description": "Use an available speech model to generate audio from the script and optional voice sample you provide."
     }
   ],
+  "companion": {
+    "label": "Voice Studio",
+    "icon": "audio-wave-01"
+  },
   "contributes": {
-    "chat_widget_templates": [
+    "sidebar_buttons": [
       {
-        "id": "voice.chat",
-        "title": "Voice widget",
-        "description": "Voice chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["voice widget"],
-        "examples": ["Show me a voice widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
+        "id": "voice-studio",
+        "title": "Studio",
+        "icon": "mic-01",
+        "target": "/plugin/app__voice-companion",
+        "context": { "view": "studio" },
+        "order": 10
+      },
+      {
+        "id": "voice-library",
+        "title": "Voice Library",
+        "icon": "user-voice-01",
+        "target": "/plugin/app__voice-companion",
+        "context": { "view": "voices" },
+        "order": 11
+      },
+      {
+        "id": "voice-history",
+        "title": "History",
+        "icon": "clock-01",
+        "target": "/plugin/app__voice-companion",
+        "context": { "view": "history" },
+        "order": 12
+      },
+      {
+        "id": "voice-stories",
+        "title": "Stories",
+        "icon": "book-open-01",
+        "target": "/plugin/app__voice-companion",
+        "context": { "view": "stories" },
+        "order": 13
       }
     ]
   }

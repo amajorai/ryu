@@ -1,3 +1,5 @@
+declare const window: Window;
+
 import { AgentMessageTool } from "@ryu/blocks/desktop/agent-elements/tools/agent-message-tool.tsx";
 import type { AgentMessageContext } from "@ryu/blocks/desktop/agent-elements/types.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,10 +12,12 @@ import {
 	MessagingAgentRowBody,
 	SidebarConversationList,
 } from "../../src/components/layout/AppSidebar.tsx";
+import type { ChatRowHandlers } from "../../src/components/layout/sidebar-conversation-rows.tsx";
 import { TabsContext } from "../../src/contexts/TabsContext.tsx";
 import { groupDirectAgentThreads } from "../../src/lib/agent-conversation-groups.ts";
 import type { AgentSummary } from "../../src/lib/api/agents.ts";
-import type { Conversation } from "../../src/types/chat.ts";
+import type { Conversation } from "../../types/chat.ts";
+import { createTabsProofContext } from "./tabs-proof-context.ts";
 import "../../src/index.css";
 
 const PROOF_TARGET = { token: null, url: "http://proof.local" };
@@ -123,9 +127,9 @@ const CONTRIBUTIONS = {
 	context_menu_items: [],
 };
 
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
 	if (url.includes("/api/plugins/contributions")) {
 		return Promise.resolve(
 			new Response(JSON.stringify(CONTRIBUTIONS), {
@@ -151,7 +155,7 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 		);
 	}
 	return realFetch(input, init);
-}) as typeof fetch;
+};
 
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
@@ -166,27 +170,39 @@ const opened = (label: string) => {
 	}
 };
 
+const noOp = () => undefined;
+
 const handlers = {
 	activeConversationId: null,
 	agents: AGENTS,
 	archivedIds: new Set<string>(),
+	canMakePrivate: false,
 	loadMessages: () => Promise.resolve([]),
-	onDeleteConversation: () => undefined,
-	onJumpToMessage: () => undefined,
-	onMarkRead: () => undefined,
-	onMarkUnread: () => undefined,
+	onAddScheduledTask: noOp,
+	onDeleteConversation: noOp,
+	onForkConversation: noOp,
+	onJumpToMessage: noOp,
+	onMarkRead: noOp,
+	onMarkUnread: noOp,
+	onMoveToProject: noOp,
 	onOpenQuickReply: (id: string) => opened(`Quick reply ${id}`),
-	onOpenInNewTab: () => undefined,
-	onOpenSideChat: () => undefined,
-	onRenameConversation: () => undefined,
+	onOpenInNewTab: noOp,
+	onOpenInNewWindow: noOp,
+	onOpenNewSideChat: noOp,
+	onOpenSideChat: noOp,
+	onRemoveFromProject: noOp,
+	onRenameConversation: noOp,
+	onRequestConversationVisibility: noOp,
 	onSelectConversation: (id: string) => opened(`Selected ${id}`),
-	onSetConversationIcon: () => undefined,
-	onToggleArchive: () => undefined,
-	onTogglePin: () => undefined,
+	onSetConversationIcon: noOp,
+	onToggleArchive: noOp,
+	onTogglePin: noOp,
 	pinnedIds: new Set<string>(),
+	projectNameForFolder: () => "proof",
+	projectTargets: [],
 	target: PROOF_TARGET,
 	unreadIds: new Set<string>(),
-};
+} satisfies ChatRowHandlers;
 
 const messageContext: AgentMessageContext = {
 	current: { id: "builder", name: "Builder" },
@@ -207,7 +223,9 @@ function Story() {
 			forcedTheme="dark"
 		>
 			<QueryClientProvider client={queryClient}>
-				<TabsContext.Provider value={{ openTab: () => "proof-chat" } as never}>
+				<TabsContext.Provider
+					value={createTabsProofContext({ openTab: () => "proof-chat" })}
+				>
 					<main className="min-h-screen bg-background p-8 text-foreground">
 						<div className="mx-auto grid max-w-[1180px] gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
 							<section
@@ -222,7 +240,7 @@ function Story() {
 								</header>
 								<div className="space-y-4 p-3">
 									<div>
-										<div className="mb-1 px-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+										<div className="type-caption mb-1 px-2 font-medium text-muted-foreground uppercase tracking-wide">
 											Agents
 										</div>
 										<div className="rounded-md bg-background/30">
@@ -263,7 +281,7 @@ function Story() {
 										) : null}
 									</div>
 									<div>
-										<div className="mb-1 px-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+										<div className="type-caption mb-1 px-2 font-medium text-muted-foreground uppercase tracking-wide">
 											Other chats
 										</div>
 										<SidebarConversationList

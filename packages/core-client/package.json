@@ -1,11 +1,17 @@
 {
   "name": "@ryuhq/core-client",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
-    "./*": "./src/*.ts"
+    "./*": "./src/*.ts",
+    "./*.ts": "./src/*.ts",
+    "./native-accounts": "./src/native-accounts.ts",
+    "./agents": "./src/agents.ts",
+    "./quest-events": "./src/quest-events.ts",
+    "./quests": "./src/quests.ts",
+    "./events": "./src/events.ts"
   },
   "scripts": {
     "test": "bun test",
@@ -13,7 +19,8 @@
   },
   "dependencies": {
     "@ryu/i18n": "workspace:*",
-    "@ryuhq/protocol": "workspace:*"
+    "@ryuhq/protocol": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@ryu/config": "workspace:*",

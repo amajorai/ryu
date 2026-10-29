@@ -1,10 +1,26 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { registerSetting } from "@/src/lib/settings-registry.ts";
+import { invokeWhenReady } from "@/src/lib/tauri-ready.ts";
 
 /** Folder used as the working directory for new chats without a project. */
 export const PROJECTLESS_TASK_FOLDER_KEY = "ryu:projectless-task-folder";
 
 const listeners = new Set<() => void>();
+const DEFAULT_PROJECTLESS_TASK_FOLDER_COMMAND =
+	"get_default_projectless_task_folder";
+
+interface ProjectlessTaskFolderSnapshot {
+	customFolder: string | null;
+	folder: string | null;
+}
+
+const EMPTY_FOLDER_SNAPSHOT: ProjectlessTaskFolderSnapshot = {
+	customFolder: null,
+	folder: null,
+};
+
+let defaultFolder: string | null = null;
+let defaultFolderPromise: Promise<string | null> | null = null;
 
 function readFolder(): string | null {
 	try {
@@ -16,13 +32,44 @@ function readFolder(): string | null {
 }
 
 let cachedFolder = readFolder();
+let snapshot: ProjectlessTaskFolderSnapshot = {
+	customFolder: cachedFolder,
+	folder: cachedFolder,
+};
+
+function publishSnapshot(): void {
+	snapshot = {
+		customFolder: cachedFolder,
+		folder: cachedFolder ?? defaultFolder,
+	};
+	for (const callback of listeners) {
+		callback();
+	}
+}
+
+/** Resolve the native Documents location and create Documents/Ryu/Projects. */
+export function initializeProjectlessTaskFolder(): Promise<string | null> {
+	if (!defaultFolderPromise) {
+		defaultFolderPromise = invokeWhenReady<string>(
+			DEFAULT_PROJECTLESS_TASK_FOLDER_COMMAND
+		)
+			.then((folder) => folder.trim() || null)
+			.catch(() => null)
+			.then((folder) => {
+				defaultFolder = folder;
+				publishSnapshot();
+				return folder;
+			});
+	}
+	return defaultFolderPromise;
+}
 
 function subscribe(callback: () => void): () => void {
 	listeners.add(callback);
 	const onStorage = (event: StorageEvent) => {
 		if (event.key === PROJECTLESS_TASK_FOLDER_KEY) {
 			cachedFolder = readFolder();
-			callback();
+			publishSnapshot();
 		}
 	};
 	window.addEventListener("storage", onStorage);
@@ -43,25 +90,28 @@ export function setProjectlessTaskFolder(folder: string | null): void {
 	} catch {
 		// Persistence is best effort; the current session still uses the new value.
 	}
-	for (const callback of listeners) {
-		callback();
-	}
+	publishSnapshot();
 }
 
 export function useProjectlessTaskFolder(): [
 	string | null,
 	(folder: string | null) => void,
+	boolean,
 ] {
-	const folder = useSyncExternalStore(
+	const folderSnapshot = useSyncExternalStore(
 		subscribe,
-		() => cachedFolder,
-		() => null
+		() => snapshot,
+		() => EMPTY_FOLDER_SNAPSHOT
 	);
 	const setFolder = useCallback(
 		(next: string | null) => setProjectlessTaskFolder(next),
 		[]
 	);
-	return [folder, setFolder];
+	return [
+		folderSnapshot.folder,
+		setFolder,
+		folderSnapshot.customFolder !== null,
+	];
 }
 
 registerSetting({

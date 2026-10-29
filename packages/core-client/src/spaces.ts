@@ -8,7 +8,100 @@
 // mirror the Core handlers in `apps/core/src/server/{mod,spaces}.rs`
 // (snake_case on the wire).
 
+import { z } from "zod";
+import {
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+
+const spaceString = z.string();
+const spaceNumber = z.number();
+const spaceBoolean = z.boolean();
+export const spaceRowFields = z.looseObject({
+	created_at: spaceNumber,
+	description: spaceString.nullable().optional(),
+	// Preserve the legacy missing-count response: the UI intentionally omits its badge.
+	document_count: spaceNumber.optional(),
+	icon: appResponseValueSchema.optional(),
+	id: spaceString,
+	name: spaceString,
+	retrieval_mode: spaceString.optional(),
+	updated_at: spaceNumber,
+	system: spaceBoolean.optional(),
+	visibility: spaceString.optional(),
+	team_id: spaceString.nullable().optional(),
+});
+const spaceRows = z.array(spaceRowFields);
+
+const spaceJsonObject = z.record(
+	z.string(),
+	appResponseValueSchema.nonoptional()
+);
+
+// Parse the native fields and retain forward-compatible metadata. Optional legacy
+// fields continue to use the existing defaults in the public projections.
+const spaceDocumentFields = z.looseObject({
+	id: spaceString,
+	space_id: spaceString,
+	title: spaceString,
+	created_at: spaceNumber,
+	updated_at: spaceNumber.optional(),
+	chunk_count: spaceNumber,
+	kind: spaceString.optional(),
+	parent_id: spaceString.nullish(),
+	mime: spaceString.nullish(),
+	byte_size: spaceNumber.nullish(),
+	icon: appResponseValueSchema.optional(),
+	index: appResponseValueSchema.optional(),
+});
+const spaceDocumentsResponse = z.looseObject({
+	space_id: spaceString.optional(),
+	documents: z.array(spaceDocumentFields).nullish(),
+});
+const spaceDocumentContentResponse = z.looseObject({
+	id: spaceString,
+	space_id: spaceString,
+	title: spaceString,
+	source: spaceString,
+	created_at: spaceNumber,
+	updated_at: spaceNumber,
+	revision: spaceNumber.optional(),
+	chunk_count: spaceNumber,
+	kind: spaceString.optional(),
+	parent_id: spaceString.nullish(),
+	icon: appResponseValueSchema.optional(),
+});
+const spaceDeletedResponse = z
+	.object({ success: spaceBoolean.optional(), removed: spaceBoolean.nullish() })
+	.nullish();
+const spaceIngestResponse = z.looseObject({ document_id: spaceString });
+const spacePageResponse = z.looseObject({ id: spaceString });
+const spaceReindexResponse = z.looseObject({
+	current_model: spaceString,
+	current_dims: spaceNumber,
+	total_chunks: spaceNumber,
+	pending_chunks: spaceNumber,
+	running: spaceBoolean,
+	errored: spaceString.nullish(),
+});
+// The current native publisher has model_id and dims. base_url is retained
+// only when supplied by an older/custom response; no URL is synthesized.
+const spaceEmbeddingResponse = z.looseObject({
+	model_id: spaceString,
+	dims: spaceNumber,
+	base_url: spaceString.optional(),
+});
+const spaceMatchFields = z.looseObject({
+	chunk_id: spaceString,
+	document_id: spaceString,
+	content: spaceString,
+	distance: spaceNumber.nullable(),
+});
+export const spaceSearchResponse = z.looseObject({
+	space_id: spaceString.optional(),
+	matches: z.array(spaceMatchFields).nullish(),
+});
 
 /** The retrieval algorithm Core uses for a Space. */
 export type RetrievalMode = "graph" | "vector";
@@ -18,7 +111,7 @@ export interface Space {
 	/** Unix milliseconds. */
 	createdAt: number;
 	description: string | null;
-	documentCount: number;
+	documentCount: number | undefined;
 	/** Notion-style glyph JSON (GlyphValue), when set. */
 	icon: unknown | null;
 	id: string;
@@ -60,15 +153,16 @@ export interface SpaceMatch {
 	 * reranker re-orders the survivors **without rewriting `distance`**, so array
 	 * order — not this number — is the ranking. Sorting by `distance` un-does the
 	 * rerank; averaging or thresholding it mixes a metric with two constants.
+	 * Native JSON serialization emits null for a non-finite Rust distance.
 	 */
-	distance: number;
+	distance: number | null;
 	documentId: string;
 }
 
 interface SpaceWire {
 	created_at: number;
 	description?: string | null;
-	document_count: number;
+	document_count?: number;
 	icon?: unknown | null;
 	id: string;
 	name: string;
@@ -76,22 +170,9 @@ interface SpaceWire {
 	updated_at: number;
 }
 
-interface DocumentWire {
-	chunk_count: number;
-	created_at: number;
-	icon?: unknown | null;
-	id: string;
-	space_id: string;
-	title: string;
-	updated_at?: number;
-}
+type DocumentWire = z.output<typeof spaceDocumentFields>;
 
-interface MatchWire {
-	chunk_id: string;
-	content: string;
-	distance: number;
-	document_id: string;
-}
+type MatchWire = z.output<typeof spaceMatchFields>;
 
 export interface RetrievalModeChange {
 	changed: boolean;
@@ -182,8 +263,10 @@ function toMatch(m: MatchWire): SpaceMatch {
 	};
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+function isRecord(
+	value: AppResponseValue
+): value is z.output<typeof spaceJsonObject> {
+	return spaceJsonObject.safeParse(value).success;
 }
 
 function invalidResponse(endpoint: string): Error {
@@ -191,9 +274,9 @@ function invalidResponse(endpoint: string): Error {
 }
 
 function requireRecord(
-	value: unknown,
+	value: AppResponseValue,
 	endpoint: string
-): Record<string, unknown> {
+): Record<string, AppResponseValue> {
 	if (!isRecord(value)) {
 		throw invalidResponse(endpoint);
 	}
@@ -201,49 +284,58 @@ function requireRecord(
 }
 
 function requireString(
-	record: Record<string, unknown>,
+	record: Record<string, AppResponseValue>,
 	key: string,
 	endpoint: string
 ): string {
 	const value = record[key];
-	if (typeof value !== "string" || value.trim() === "") {
+	const parsed = spaceString.safeParse(value);
+	if (!parsed.success || parsed.data.trim() === "") {
 		throw invalidResponse(endpoint);
 	}
-	return value;
+	return parsed.data;
 }
 
 function requireCount(
-	record: Record<string, unknown>,
+	record: Record<string, AppResponseValue>,
 	key: string,
 	endpoint: string
 ): number {
 	const value = record[key];
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+	const parsed = spaceNumber.safeParse(value);
+	if (
+		!(parsed.success && Number.isSafeInteger(parsed.data)) ||
+		parsed.data < 0
+	) {
 		throw invalidResponse(endpoint);
 	}
-	return value;
+	return parsed.data;
 }
 
 function requireBoolean(
-	record: Record<string, unknown>,
+	record: Record<string, AppResponseValue>,
 	key: string,
 	endpoint: string
 ): boolean {
 	const value = record[key];
-	if (typeof value !== "boolean") {
+	const parsed = spaceBoolean.safeParse(value);
+	if (!parsed.success) {
 		throw invalidResponse(endpoint);
 	}
-	return value;
+	return parsed.data;
 }
 
-function parseRetrievalMode(value: unknown, endpoint: string): RetrievalMode {
+function parseRetrievalMode(
+	value: AppResponseValue,
+	endpoint: string
+): RetrievalMode {
 	if (value === "graph" || value === "vector") {
 		return value;
 	}
 	throw invalidResponse(endpoint);
 }
 
-function toRetrievalMode(value: unknown): RetrievalMode {
+function toRetrievalMode(value: AppResponseValue): RetrievalMode {
 	if (value === undefined) {
 		return "vector";
 	}
@@ -251,7 +343,7 @@ function toRetrievalMode(value: unknown): RetrievalMode {
 }
 
 function parseNullableMode(
-	value: unknown,
+	value: AppResponseValue,
 	endpoint: string
 ): RetrievalMode | null {
 	if (value === null) {
@@ -261,7 +353,7 @@ function parseNullableMode(
 }
 
 function parseRetrievalModeChange(
-	value: unknown,
+	value: AppResponseValue,
 	endpoint: string
 ): RetrievalModeChange {
 	const record = requireRecord(value, endpoint);
@@ -276,7 +368,7 @@ function parseRetrievalModeChange(
 	};
 }
 
-function parseRetrievalModeJob(value: unknown): RetrievalModeJob {
+function parseRetrievalModeJob(value: AppResponseValue): RetrievalModeJob {
 	const endpoint = "retrieval-mode job";
 	const record = requireRecord(value, endpoint);
 	if (record.success !== true) {
@@ -291,7 +383,9 @@ function parseRetrievalModeJob(value: unknown): RetrievalModeJob {
 	};
 }
 
-function parseRetrievalModeStatus(value: unknown): RetrievalModeStatus {
+function parseRetrievalModeStatus(
+	value: AppResponseValue
+): RetrievalModeStatus {
 	const endpoint = "retrieval-mode status";
 	const record = requireRecord(value, endpoint);
 	const base: RetrievalModeStatusBase = {
@@ -352,18 +446,23 @@ function parseRetrievalModeStatus(value: unknown): RetrievalModeStatus {
 	if (state === "failed") {
 		if (
 			record.change !== null ||
-			typeof record.error !== "string" ||
-			record.error.trim() === ""
+			!spaceString.safeParse(record.error).success ||
+			spaceString.parse(record.error).trim() === ""
 		) {
 			throw invalidResponse(endpoint);
 		}
-		return { ...base, state, change: null, error: record.error };
+		return {
+			...base,
+			state,
+			change: null,
+			error: spaceString.parse(record.error),
+		};
 	}
 	throw invalidResponse(endpoint);
 }
 
 function parseRetrievalModeCancellation(
-	value: unknown
+	value: AppResponseValue
 ): RetrievalModeCancellation {
 	const endpoint = "retrieval-mode cancellation";
 	const record = requireRecord(value, endpoint);
@@ -373,13 +472,29 @@ function parseRetrievalModeCancellation(
 /** List all Spaces, most-recently-updated first. */
 export async function fetchSpaces(target: ApiTarget): Promise<Space[]> {
 	const json = requireRecord(
-		await request<unknown>(target, "/api/spaces"),
+		await request(target, "/api/spaces", {}, appResponseValueSchema),
 		"spaces list"
 	);
 	if (!Array.isArray(json.spaces)) {
 		throw invalidResponse("spaces list");
 	}
-	return (json.spaces as SpaceWire[]).map(toSpace);
+	return spaceRows.parse(json.spaces).map(toSpace);
+}
+
+interface CreateSpaceBody {
+	description: Parameters<typeof createSpace>[2];
+	name: Parameters<typeof createSpace>[1];
+	retrieval_mode?: Parameters<typeof createSpace>[3];
+}
+interface EmbeddingModelBody {
+	base_url?: Parameters<typeof setEmbeddingModel>[2];
+	dims?: Parameters<typeof setEmbeddingModel>[3];
+	model_id: Parameters<typeof setEmbeddingModel>[1];
+	provider?: Parameters<typeof setEmbeddingModel>[4];
+}
+interface SearchSpaceBody {
+	limit?: Parameters<typeof searchSpace>[3];
+	query: Parameters<typeof searchSpace>[2];
 }
 
 /** Create a new Space and return its id. */
@@ -389,15 +504,20 @@ export async function createSpace(
 	description: string | null,
 	retrievalMode?: RetrievalMode
 ): Promise<string> {
-	const body: Record<string, unknown> = { name, description };
+	const body: CreateSpaceBody = { name, description };
 	if (retrievalMode !== undefined) {
 		body.retrieval_mode = retrievalMode;
 	}
 	const json = requireRecord(
-		await request<unknown>(target, "/api/spaces", {
-			method: "POST",
-			body,
-		}),
+		await request(
+			target,
+			"/api/spaces",
+			{
+				method: "POST",
+				body,
+			},
+			appResponseValueSchema
+		),
 		"create-space"
 	);
 	return requireString(json, "id", "create-space");
@@ -409,10 +529,11 @@ export async function startSpaceRetrievalModeChange(
 	id: string,
 	mode: RetrievalMode
 ): Promise<RetrievalModeJob> {
-	const json = await request<unknown>(
+	const json = await request(
 		target,
 		`/api/spaces/${encodeURIComponent(id)}/retrieval-mode`,
-		{ method: "POST", body: { retrieval_mode: mode } }
+		{ method: "POST", body: { retrieval_mode: mode } },
+		appResponseValueSchema
 	);
 	const job = parseRetrievalModeJob(json);
 	const encodedId = encodeURIComponent(id);
@@ -432,9 +553,11 @@ export async function fetchSpaceRetrievalModeStatus(
 	id: string,
 	jobId: string
 ): Promise<RetrievalModeStatus> {
-	const json = await request<unknown>(
+	const json = await request(
 		target,
-		`/api/spaces/${encodeURIComponent(id)}/retrieval-mode/status?job_id=${encodeURIComponent(jobId)}`
+		`/api/spaces/${encodeURIComponent(id)}/retrieval-mode/status?job_id=${encodeURIComponent(jobId)}`,
+		{},
+		appResponseValueSchema
 	);
 	const status = parseRetrievalModeStatus(json);
 	if (status.spaceId !== id || status.jobId !== jobId) {
@@ -449,10 +572,11 @@ export async function cancelSpaceRetrievalModeChange(
 	id: string,
 	jobId: string
 ): Promise<RetrievalModeCancellation> {
-	const json = await request<unknown>(
+	const json = await request(
 		target,
 		`/api/spaces/${encodeURIComponent(id)}/retrieval-mode/cancel`,
-		{ method: "POST", body: { job_id: jobId } }
+		{ method: "POST", body: { job_id: jobId } },
+		appResponseValueSchema
 	);
 	return parseRetrievalModeCancellation(json);
 }
@@ -462,12 +586,13 @@ export async function deleteSpace(
 	target: ApiTarget,
 	id: string
 ): Promise<boolean> {
-	const json = await request<{ removed?: boolean }>(
+	const json = await request(
 		target,
 		`/api/spaces/${id}`,
 		{
 			method: "DELETE",
-		}
+		},
+		spaceDeletedResponse
 	);
 	return json?.removed ?? false;
 }
@@ -478,10 +603,15 @@ export async function setSpaceIcon(
 	id: string,
 	icon: unknown | null
 ): Promise<void> {
-	await request(target, `/api/spaces/${id}/icon`, {
-		method: "POST",
-		body: { icon },
-	});
+	await request(
+		target,
+		`/api/spaces/${id}/icon`,
+		{
+			method: "POST",
+			body: { icon },
+		},
+		appResponseValueSchema
+	);
 }
 
 /** Set or clear a document glyph without re-embedding. */
@@ -491,10 +621,15 @@ export async function setDocumentIcon(
 	documentId: string,
 	icon: unknown | null
 ): Promise<void> {
-	await request(target, `/api/spaces/${spaceId}/documents/${documentId}/icon`, {
-		method: "POST",
-		body: { icon },
-	});
+	await request(
+		target,
+		`/api/spaces/${spaceId}/documents/${documentId}/icon`,
+		{
+			method: "POST",
+			body: { icon },
+		},
+		appResponseValueSchema
+	);
 }
 
 /** List the documents in a Space. */
@@ -502,9 +637,11 @@ export async function fetchDocuments(
 	target: ApiTarget,
 	spaceId: string
 ): Promise<SpaceDocument[]> {
-	const json = await request<{ documents?: DocumentWire[] }>(
+	const json = await request(
 		target,
-		`/api/spaces/${spaceId}/documents`
+		`/api/spaces/${spaceId}/documents`,
+		{},
+		spaceDocumentsResponse
 	);
 	return (json.documents ?? []).map(toDocument);
 }
@@ -516,13 +653,14 @@ export async function ingestDocument(
 	title: string,
 	content: string
 ): Promise<string> {
-	const json = await request<{ document_id: string }>(
+	const json = await request(
 		target,
 		`/api/spaces/${spaceId}/documents`,
 		{
 			method: "POST",
 			body: { title, content },
-		}
+		},
+		spaceIngestResponse
 	);
 	return json.document_id;
 }
@@ -543,16 +681,7 @@ export interface SpaceDocumentContent {
 	updatedAt: number;
 }
 
-interface DocumentContentWire {
-	chunk_count: number;
-	created_at: number;
-	icon?: unknown | null;
-	id: string;
-	source: string;
-	space_id: string;
-	title: string;
-	updated_at: number;
-}
+type DocumentContentWire = z.output<typeof spaceDocumentContentResponse>;
 
 function toDocumentContent(d: DocumentContentWire): SpaceDocumentContent {
 	return {
@@ -573,10 +702,11 @@ export async function createPage(
 	spaceId: string,
 	title: string
 ): Promise<string> {
-	const json = await request<{ id: string }>(
+	const json = await request(
 		target,
 		`/api/spaces/${spaceId}/pages`,
-		{ method: "POST", body: { title } }
+		{ method: "POST", body: { title } },
+		spacePageResponse
 	);
 	return json.id;
 }
@@ -587,9 +717,11 @@ export async function fetchDocument(
 	spaceId: string,
 	documentId: string
 ): Promise<SpaceDocumentContent> {
-	const json = await request<DocumentContentWire>(
+	const json = await request(
 		target,
-		`/api/spaces/${spaceId}/documents/${documentId}`
+		`/api/spaces/${spaceId}/documents/${documentId}`,
+		{},
+		spaceDocumentContentResponse
 	);
 	return toDocumentContent(json);
 }
@@ -605,10 +737,15 @@ export async function updateDocument(
 	title: string,
 	source: string
 ): Promise<void> {
-	await request(target, `/api/spaces/${spaceId}/documents/${documentId}`, {
-		method: "PUT",
-		body: { title, source },
-	});
+	await request(
+		target,
+		`/api/spaces/${spaceId}/documents/${documentId}`,
+		{
+			method: "PUT",
+			body: { title, source },
+		},
+		appResponseValueSchema
+	);
 }
 
 /** Delete a single document (page) and its chunks/vectors. */
@@ -617,10 +754,11 @@ export async function deleteDocument(
 	spaceId: string,
 	documentId: string
 ): Promise<boolean> {
-	const json = await request<{ removed?: boolean }>(
+	const json = await request(
 		target,
 		`/api/spaces/${spaceId}/documents/${documentId}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		spaceDeletedResponse
 	);
 	return json?.removed ?? false;
 }
@@ -634,21 +772,15 @@ export interface ReindexStatus {
 	totalChunks: number;
 }
 
-interface ReindexStatusWire {
-	current_dims: number;
-	current_model: string;
-	pending_chunks: number;
-	running: boolean;
-	total_chunks: number;
-}
-
 /** Get the current embedding-reindex status (how many chunks are stale). */
 export async function fetchReindexStatus(
 	target: ApiTarget
 ): Promise<ReindexStatus> {
-	const json = await request<ReindexStatusWire>(
+	const json = await request(
 		target,
-		"/api/embeddings/reindex/status"
+		"/api/embeddings/reindex/status",
+		{},
+		spaceReindexResponse
 	);
 	return {
 		currentModel: json.current_model,
@@ -661,29 +793,30 @@ export async function fetchReindexStatus(
 
 /** Kick off a background reindex of all stale chunks. Returns immediately. */
 export async function triggerReindex(target: ApiTarget): Promise<void> {
-	await request(target, "/api/embeddings/reindex", { method: "POST" });
+	await request(
+		target,
+		"/api/embeddings/reindex",
+		{ method: "POST" },
+		appResponseValueSchema
+	);
 }
 
 /** The embedding model Spaces currently uses. */
 export interface EmbeddingModel {
-	baseUrl: string;
+	baseUrl: string | undefined;
 	dims: number;
 	modelId: string;
-}
-
-interface EmbeddingModelWire {
-	base_url: string;
-	dims: number;
-	model_id: string;
 }
 
 /** Read the active embedding model. */
 export async function fetchEmbeddingModel(
 	target: ApiTarget
 ): Promise<EmbeddingModel> {
-	const json = await request<EmbeddingModelWire>(
+	const json = await request(
 		target,
-		"/api/embeddings/model"
+		"/api/embeddings/model",
+		{},
+		spaceEmbeddingResponse
 	);
 	return { modelId: json.model_id, baseUrl: json.base_url, dims: json.dims };
 }
@@ -700,7 +833,7 @@ export async function setEmbeddingModel(
 	dims?: number,
 	provider?: string
 ): Promise<void> {
-	const body: Record<string, unknown> = { model_id: modelId };
+	const body: EmbeddingModelBody = { model_id: modelId };
 	if (baseUrl !== undefined) {
 		body.base_url = baseUrl;
 	}
@@ -710,7 +843,12 @@ export async function setEmbeddingModel(
 	if (provider !== undefined) {
 		body.provider = provider;
 	}
-	await request(target, "/api/embeddings/model", { method: "POST", body });
+	await request(
+		target,
+		"/api/embeddings/model",
+		{ method: "POST", body },
+		appResponseValueSchema
+	);
 }
 
 /**
@@ -746,14 +884,15 @@ export async function searchSpace(
 	query: string,
 	limit?: number
 ): Promise<SpaceMatch[]> {
-	const body: Record<string, unknown> = { query };
+	const body: SearchSpaceBody = { query };
 	if (limit !== undefined) {
 		body.limit = limit;
 	}
-	const json = await request<{ matches?: MatchWire[] }>(
+	const json = await request(
 		target,
 		`/api/spaces/${spaceId}/search`,
-		{ method: "POST", body }
+		{ method: "POST", body },
+		spaceSearchResponse
 	);
 	return (json.matches ?? []).map(toMatch);
 }

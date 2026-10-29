@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 
 use crate::sidecar::download_manager::{
     bin_dir, build_http_client, compute_sha256, extract_binary_with_libs, fetch_sibling_sha256,
-    ryu_dir, VersionStore,
+    VersionStore,
 };
 
 /// Tailcat release consumed by this Ryu build.
@@ -201,7 +201,14 @@ impl TailcatDownloader {
         // The checksum is recorded for the extracted/raw executable, not the
         // upstream archive. This keeps the fast path valid across both artifact
         // forms and detects a damaged managed binary before it is spawned.
-        if destination.is_file() {
+        // The recorded checksum is the INSTALLED binary's, so it alone always matches;
+        // only skip when the recorded version is also the pinned target, or a
+        // bumped pin never upgrades an existing install.
+        let recorded_is_target = store
+            .versions
+            .get(VERSION_KEY)
+            .is_some_and(|version| version == TAILCAT_TARGET_VERSION);
+        if destination.is_file() && recorded_is_target {
             if let Some(recorded) = store.installed_checksum(VERSION_KEY) {
                 if compute_sha256(&destination).await? == recorded {
                     tracing::info!("Tailcat {TAILCAT_TARGET_VERSION} already installed — skipping");
@@ -211,7 +218,28 @@ impl TailcatDownloader {
             }
         }
 
-        let checksum = match artifact.checksum.clone() {
+        // The Ryu-hosted asset is named for Tailcat's version, and each Ryu
+        // release publishes only its own pin, so `releases/latest` stops serving
+        // this Core's pin once a later release bumps it. Prefer the running
+        // Core's own release; keep `latest` as the fallback for a build whose
+        // release does not exist (a locally built version).
+        let mut artifact = artifact;
+        let mut own_release_checksum = None;
+        if artifact.checksum.is_none()
+            && artifact.url.starts_with(DEFAULT_RYU_RELEASE_BASE)
+            && env_value(RELEASE_BASE_ENV).is_none()
+        {
+            let pinned = artifact.url.replacen(
+                DEFAULT_RYU_RELEASE_BASE,
+                &crate::update::own_release_download_base(),
+                1,
+            );
+            if let Some(checksum) = fetch_sibling_sha256(&self.client, &pinned).await {
+                artifact.url = pinned;
+                own_release_checksum = Some(checksum);
+            }
+        }
+        let checksum = match artifact.checksum.clone().or(own_release_checksum) {
             Some(checksum) => Some(checksum),
             None => fetch_sibling_sha256(&self.client, &artifact.url).await,
         };
@@ -230,10 +258,11 @@ impl TailcatDownloader {
         let installed = match artifact.kind {
             ArtifactKind::Archive { is_zip } => {
                 let extension = if is_zip { "zip" } else { "tar.gz" };
-                let archive_destination = ryu_dir().join("tmp").join(format!(
-                    "tailcat-{TAILCAT_TARGET_VERSION}-{}.{}",
-                    artifact.platform, extension
-                ));
+                let archive_destination =
+                    crate::sidecar::download_manager::tmp_dir().join(format!(
+                        "tailcat-{TAILCAT_TARGET_VERSION}-{}.{}",
+                        artifact.platform, extension
+                    ));
                 let archive_path = downloads
                     .download_blocking(crate::downloads::DownloadSpec {
                         kind: crate::downloads::DownloadKind::Tool,
@@ -265,7 +294,7 @@ impl TailcatDownloader {
                 extracted
             }
             ArtifactKind::Raw => {
-                let temporary = ryu_dir().join("tmp").join(format!(
+                let temporary = crate::sidecar::download_manager::tmp_dir().join(format!(
                     "tailcat-{TAILCAT_TARGET_VERSION}-{}.download",
                     artifact.platform
                 ));

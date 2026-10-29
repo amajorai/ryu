@@ -1,0 +1,17 @@
+.clippedText {
+	-webkit-mask-image: linear-gradient(
+		to right,
+		var(--foreground) calc(100% - 2.5rem),
+		transparent
+	);
+	mask-image: linear-gradient(
+		to right,
+		var(--foreground) calc(100% - 2.5rem),
+		transparent
+	);
+}
+
+.surface {
+	width: var(--toast-width, fit-content);
+	pointer-events: var(--toast-pointer-events);
+}

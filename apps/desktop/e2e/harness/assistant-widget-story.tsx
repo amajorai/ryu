@@ -3,7 +3,7 @@ import {
 	RyuAssistantMorph,
 	type RyuAssistantRecentChat,
 } from "@ryu/assistant-widget";
-import { Logo } from "@ryu/ui/components/logo";
+import { Logo } from "@ryu/ui/components/logo.tsx";
 import type { UIMessage } from "ai";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -25,19 +25,17 @@ function Story() {
 	return (
 		<main className="flex min-h-svh items-center justify-center bg-background p-8 text-foreground">
 			<div
-				className="relative h-[620px] w-[400px]"
+				className="dark relative h-[620px] w-[400px]"
 				data-testid="assistant-widget-proof"
 			>
 				<RyuAssistantMorph
-					bgClassName="bg-gradient-to-b from-neutral-950/95 via-neutral-950/90 to-neutral-900/85 text-neutral-100"
+					bgClassName="bg-gradient-to-b from-background/95 via-background/90 to-card/85 text-foreground"
 					chromeClassName="ring-1 ring-white/10 shadow-2xl"
 					contentHeight={620}
 					contentWidth={400}
 					isOpen={open}
 					onOpenChange={setOpen}
-					trigger={
-						<Logo className="text-neutral-100" size="34px" variant="eyes" />
-					}
+					trigger={<Logo size="34px" variant="eyes" />}
 					triggerLabel="Ask Ryu"
 				>
 					<RyuAssistantChat

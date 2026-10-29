@@ -5,7 +5,10 @@
 //! private internal route once at boot, applies them only in memory, and never
 //! writes them to gateway.toml, logs, or child-process environment.
 
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fmt;
+use std::sync::Arc;
 
 use anyhow::{bail, Context};
 use serde::Deserialize;
@@ -20,10 +23,72 @@ pub fn required_from_env() -> bool {
     env_bool(ENV_REQUIRED)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct VaultResponse {
     #[serde(default)]
     keys: HashMap<String, String>,
+}
+
+/// Successful startup custody, retained only in memory for live rebuilds.
+#[derive(Clone)]
+pub(crate) struct VaultSourceSnapshot {
+    keys: HashMap<String, String>,
+    required: bool,
+    identity: [u8; 32],
+    applied_scopes: Vec<String>,
+}
+
+impl fmt::Debug for VaultSourceSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("VaultSourceSnapshot")
+            .field("key_count", &self.keys.len())
+            .field("required", &self.required)
+            .finish_non_exhaustive()
+    }
+}
+
+impl VaultSourceSnapshot {
+    fn new(keys: HashMap<String, String>, required: bool, applied_scopes: Vec<String>) -> Self {
+        let mut hash = Sha256::new();
+        hash.update([u8::from(required)]);
+        let ordered: std::collections::BTreeMap<_, _> = keys.iter().collect();
+        for (name, value) in ordered {
+            hash.update(name.len().to_be_bytes());
+            hash.update(name.as_bytes());
+            hash.update(value.len().to_be_bytes());
+            hash.update(value.as_bytes());
+        }
+        Self {
+            keys,
+            required,
+            identity: hash.finalize().into(),
+            applied_scopes,
+        }
+    }
+
+    pub(crate) fn identity(&self) -> [u8; 32] {
+        self.identity
+    }
+    pub(crate) fn applied_scopes(&self) -> &[String] {
+        &self.applied_scopes
+    }
+
+    pub(crate) fn apply(
+        &self,
+        config: &mut GatewayConfig,
+        environment: &crate::config::ProviderEnvironment,
+    ) -> anyhow::Result<Vec<String>> {
+        let applied = if self.required {
+            config.replace_provider_vault_keys_with_environment(&self.keys, environment)
+        } else {
+            config.apply_provider_vault_keys_with_environment(&self.keys, environment)
+        };
+        if self.required && (applied.is_empty() || applied.len() < self.keys.len()) {
+            bail!("Captured required provider vault cannot activate its configured entries");
+        }
+        Ok(applied)
+    }
 }
 
 /// Fetch and apply the fleet provider vault when configured.
@@ -118,6 +183,11 @@ pub async fn apply_from_env(
             "provider vault returned keys that this gateway does not use"
         );
     }
+    config.provider_vault_source = Some(Arc::new(VaultSourceSnapshot::new(
+        keys,
+        required,
+        applied.clone(),
+    )));
     Ok(applied)
 }
 
@@ -139,6 +209,13 @@ fn env_bool(name: &str) -> bool {
 /// URL too. Remote HTTP is rejected so the internal secret cannot cross an
 /// unencrypted link; loopback HTTP remains useful for local development.
 fn vault_endpoint(base: &str) -> anyhow::Result<reqwest::Url> {
+    control_plane_endpoint(base, "key-vault/keys")
+}
+
+/// A fixed internal control-plane route (`/api/<api_path>`) under the
+/// operator-supplied origin, with the same scheme/userinfo/HTTPS rules as the
+/// vault: every such route carries the fleet internal secret.
+pub(crate) fn control_plane_endpoint(base: &str, api_path: &str) -> anyhow::Result<reqwest::Url> {
     let mut url = reqwest::Url::parse(base).context("CONTROL_PLANE_URL is not a valid URL")?;
     if !matches!(url.scheme(), "http" | "https") {
         bail!("CONTROL_PLANE_URL must use http or https");
@@ -152,17 +229,17 @@ fn vault_endpoint(base: &str) -> anyhow::Result<reqwest::Url> {
     if url.scheme() == "http" {
         let host = url.host_str().unwrap_or_default();
         if !matches!(host, "127.0.0.1" | "localhost" | "::1") {
-            bail!("provider vault requires HTTPS for a non-loopback control plane");
+            bail!("the fleet control plane requires HTTPS for a non-loopback host");
         }
     }
 
     let path = url.path().trim_end_matches('/');
     let endpoint_path = if path == "/api" || path.ends_with("/api") {
-        format!("{path}/key-vault/keys")
+        format!("{path}/{api_path}")
     } else if path.is_empty() {
-        "/api/key-vault/keys".to_string()
+        format!("/api/{api_path}")
     } else {
-        format!("{path}/api/key-vault/keys")
+        format!("{path}/api/{api_path}")
     };
     url.set_path(&endpoint_path);
     Ok(url)
@@ -173,7 +250,8 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::config::{
-        ComposioConfig, GatewayConfig, OpenRouterProviderConfig, ReplicateProviderConfig,
+        ComposioConfig, FalProviderConfig, GatewayConfig, ModalProviderConfig,
+        OpenRouterProviderConfig, ReplicateProviderConfig,
     };
 
     use super::vault_endpoint;
@@ -224,6 +302,7 @@ mod tests {
             org_api_keys: HashMap::from([(String::from("org"), String::from("raw-org"))]),
         });
         config.providers.replicate = Some(ReplicateProviderConfig {
+            api_keys: Vec::new(),
             api_key: "raw-replicate".to_owned(),
             base_url: "https://replicate.example/v1".to_owned(),
             poll_interval_ms: 1,
@@ -256,5 +335,106 @@ mod tests {
         assert_eq!(config.composio.api_key.as_deref(), Some("vault-composio"));
         assert_eq!(config.treg.token.as_deref(), Some("vault-treg"));
         assert!(config.treg.enabled);
+    }
+
+    fn raw_media_providers(config: &mut GatewayConfig) {
+        config.providers.fal = Some(FalProviderConfig {
+            api_key: "raw-fal".to_owned(),
+            api_keys: vec!["raw-fal-2".to_owned(), "raw-fal-3".to_owned()],
+            base_url: "https://fal.example".to_owned(),
+            poll_interval_ms: 1,
+            poll_timeout_secs: 1,
+        });
+        config.providers.replicate = Some(ReplicateProviderConfig {
+            api_key: "raw-replicate".to_owned(),
+            api_keys: vec!["raw-replicate-2".to_owned()],
+            base_url: "https://replicate.example/v1".to_owned(),
+            poll_interval_ms: 1,
+            poll_timeout_secs: 1,
+        });
+        config.providers.modal = Some(ModalProviderConfig {
+            api_key: "raw-modal".to_owned(),
+            api_keys: vec!["raw-modal-2".to_owned()],
+            base_url: "https://modal.example/v1".to_owned(),
+        });
+    }
+
+    fn vault_media_keys() -> HashMap<String, String> {
+        HashMap::from([
+            (String::from("fal"), String::from("vault-fal")),
+            (String::from("replicate"), String::from("vault-replicate")),
+            (String::from("modal"), String::from("vault-modal")),
+        ])
+    }
+
+    fn assert_only_vault_media_keys(config: &GatewayConfig) {
+        let providers = &config.providers;
+        assert_eq!(providers.fal.as_ref().unwrap().all_keys(), ["vault-fal"]);
+        assert_eq!(
+            providers.replicate.as_ref().unwrap().all_keys(),
+            ["vault-replicate"]
+        );
+        assert_eq!(
+            providers.modal.as_ref().unwrap().all_keys(),
+            ["vault-modal"]
+        );
+    }
+
+    fn vercel_lane(key: &str, permission: Option<&str>) -> crate::config::VercelProviderConfig {
+        serde_json::from_value(serde_json::json!({
+            "api_key": key,
+            "resale_permission": permission,
+        }))
+        .expect("vercel lane config parses")
+    }
+
+    #[test]
+    fn a_vault_vercel_key_never_creates_the_lane_without_an_authored_entry() {
+        let vault = HashMap::from([(String::from("vercel"), String::from("vault-vercel"))]);
+        let mut config = GatewayConfig::default();
+        let applied = config.replace_provider_vault_keys(&vault);
+        assert!(!applied.iter().any(|provider| provider == "vercel"));
+        assert!(config.providers.vercel.is_none());
+
+        // An authored lane keeps its recorded decision and takes the vault key.
+        config.providers.vercel = Some(vercel_lane(
+            "raw-vercel",
+            Some("approved:VERCEL-RESALE-FIXTURE-1"),
+        ));
+        let applied = config.replace_provider_vault_keys(&vault);
+        assert!(applied.iter().any(|provider| provider == "vercel"));
+        let lane = config.providers.vercel.as_ref().expect("lane kept");
+        assert_eq!(lane.all_keys(), vec!["vault-vercel".to_owned()]);
+        assert_eq!(
+            lane.resale_permission.as_deref(),
+            Some("approved:VERCEL-RESALE-FIXTURE-1")
+        );
+    }
+
+    #[test]
+    fn required_fleet_vault_drops_raw_extra_keys_from_media_rotation() {
+        let mut config = GatewayConfig::default();
+        raw_media_providers(&mut config);
+        config.replace_provider_vault_keys(&vault_media_keys());
+        assert_only_vault_media_keys(&config);
+    }
+
+    #[test]
+    fn vault_overlay_clears_multi_account_media_material() {
+        let mut config = GatewayConfig::default();
+        raw_media_providers(&mut config);
+        config.apply_provider_vault_keys(&vault_media_keys());
+        assert_only_vault_media_keys(&config);
+    }
+
+    #[test]
+    fn a_required_vault_without_a_vercel_key_drops_a_raw_lane_key() {
+        let mut config = GatewayConfig::default();
+        config.providers.vercel = Some(vercel_lane(
+            "raw-vercel",
+            Some("approved:VERCEL-RESALE-FIXTURE-1"),
+        ));
+        config.replace_provider_vault_keys(&HashMap::new());
+        assert!(config.providers.vercel.is_none());
     }
 }

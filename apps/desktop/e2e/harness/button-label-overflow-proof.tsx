@@ -96,7 +96,7 @@ function Story() {
 
 				<TriggerCard label="Button with an icon" testId="button-icon">
 					<Button
-						className="w-52 justify-start gap-1.5"
+						className="w-52 justify-start"
 						data-testid="button-icon-trigger"
 						type="button"
 						variant="ghost"
@@ -149,7 +149,7 @@ function Story() {
 
 				<TriggerCard label="Short label stays crisp" testId="short">
 					<Button
-						className="w-52 justify-start gap-1.5"
+						className="w-52 justify-start"
 						data-testid="short-trigger"
 						type="button"
 						variant="ghost"

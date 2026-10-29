@@ -44,6 +44,8 @@ const BUILTIN_SERVERS: &[&str] = &[
     super::sandbox::SERVER_NAME,
     super::notify_tool::SERVER_NAME,
     super::artifact_tool::SERVER_NAME,
+    super::consent_tool::SERVER_NAME,
+    super::tasks_tool::SERVER_NAME,
     super::channel_tool::SERVER_NAME,
     super::search_conversations::SERVER_NAME,
     super::threads::SERVER_NAME,
@@ -51,6 +53,9 @@ const BUILTIN_SERVERS: &[&str] = &[
     super::skills_tool::SERVER_NAME,
     super::ui_tool::SERVER_NAME,
     super::usage_tool::SERVER_NAME,
+    super::treg_tool::SERVER_NAME,
+    super::challenges_tool::SERVER_NAME,
+    super::marketplace_tool::SERVER_NAME,
 ];
 
 /// Classify a fully-qualified tool id (`<server>.<tool>`) into a [`ToolKind`].
@@ -75,7 +80,7 @@ pub fn classify_kind(id: &str, server: &str) -> ToolKind {
 
 /// Resolve a registry row's [`ToolKind`], honoring its `app_backend` tag: a
 /// `command`-tagged app tool surfaces as [`ToolKind::Command`] (so `?kind=command`
-/// selects it); every other row — including http/inline_deno/alias app tools —
+/// selects it); every other row — including http/inline_js/alias app tools —
 /// falls back to inventory-based [`classify_kind`]. This is the ONE place the
 /// deliberate command-vs-App asymmetry lives; `classify_kind`'s signature (and its
 /// tests) are untouched.
@@ -84,6 +89,43 @@ fn kind_for(tool: &RegistryTool) -> ToolKind {
         return ToolKind::Command;
     }
     classify_kind(&tool.id, &tool.server)
+}
+
+/// Whether a registry row's MCP annotations explicitly declare it free of side
+/// effects: `readOnlyHint: true` and not `destructiveHint: true`. This is the only
+/// source of [`DescribedTool::read_only`], which lets the Gateway run the call
+/// concurrently with neighbouring read-only calls.
+///
+/// Explicit annotation only, never the name heuristic in
+/// `agent_execution::classify_tool`: a third-party `get_and_archive` must not run
+/// in parallel. The hint is self-reported by the MCP server (untrusted under the
+/// MCP spec), the same hint `filter_read_only_tools` already trusts; a mislabelled
+/// write can at worst overlap a neighbouring read, and the destructive guard keeps
+/// a tool that contradicts itself sequential.
+/// Whether the target an app alias resolves to is read-only: a registered tool
+/// whose own annotations say so. A Composio action, a Core self-API operation, a
+/// derived app route or a skill is never counted read-only here, and neither is a
+/// target no registered tool names.
+fn alias_target_is_read_only(target_id: &str, tools: &[RegistryTool]) -> bool {
+    if target_id.starts_with("composio.")
+        || crate::self_api::is_core_api(target_id)
+        || crate::ext_api::is_ext_api(target_id)
+        || super::skills_tool::slug_from_catalog_id(target_id).is_some()
+    {
+        return false;
+    }
+    tools
+        .iter()
+        .find(|tool| tool.id == target_id)
+        .is_some_and(|tool| annotations_mark_read_only(tool.annotations.as_ref()))
+}
+
+fn annotations_mark_read_only(annotations: Option<&Value>) -> bool {
+    let Some(annotations) = annotations else {
+        return false;
+    };
+    annotations.get("readOnlyHint").and_then(Value::as_bool) == Some(true)
+        && annotations.get("destructiveHint").and_then(Value::as_bool) != Some(true)
 }
 
 /// Build a descriptor from a registry tool (`Option<String>` → `String`). The
@@ -124,8 +166,8 @@ impl McpRegistry {
     ///
     /// Gathers kernel state (registry rows + live Composio + enabled skills) and
     /// delegates the filter/merge/rank to [`ryu_tool_registry::run_search`]. Ranking
-    /// uses the pref-selected [`ToolRanker`] (Needle 2 default); the Semantic
-    /// ranker's embedder and Needle 2 selector are built lazily.
+    /// uses the pref-selected [`ToolRanker`] (Needle 3 default); the Semantic
+    /// ranker's embedder and Needle selector are built lazily.
     ///
     /// ## `skills_allowlist` — where every plane gets its value
     ///
@@ -302,7 +344,11 @@ impl McpRegistry {
         let ranker = self.resolve_ranker().await;
         let embedder = matches!(ranker, ToolRanker::Semantic)
             .then(crate::tool_registry_host::CoreToolEmbedder::from_registry);
-        let selector = matches!(ranker, ToolRanker::Needle2).then(crate::needle2::selector);
+        let selector: Option<std::sync::Arc<dyn ryu_tool_registry::ToolSelector>> = match ranker {
+            ToolRanker::Needle3 => Some(crate::needle3::selector()),
+            ToolRanker::Needle2 => Some(crate::needle2::selector()),
+            _ => None,
+        };
         ryu_tool_registry::run_search_with_selector(
             query,
             builtins,
@@ -500,14 +546,26 @@ impl McpRegistry {
             Some(identity) => self.tools_for_discovery_identity(identity).await,
             None => self.list_all_tools().await,
         };
-        if let Some(tool) = tools.into_iter().find(|t| t.id == id) {
-            return Some(ryu_tool_registry::describe_from_parts(
+        if let Some(tool) = tools.iter().find(|t| t.id == id) {
+            let mut described = ryu_tool_registry::describe_from_parts(
                 &tool.id,
                 &tool.name,
                 tool.description.as_deref().unwrap_or_default(),
-                kind_for(&tool),
+                kind_for(tool),
                 tool.input_schema.as_ref(),
-            ));
+            );
+            described.read_only = annotations_mark_read_only(tool.annotations.as_ref());
+            if described.read_only {
+                // An app alias takes its annotations from the wrapper manifest,
+                // which can claim a write is a read. What runs is the target, so
+                // the call may join a concurrent batch only when the target is
+                // read-only too, as the approval gate already judges it.
+                let (gate_id, _) = self.approval_target_for_tool(&tool.id).await;
+                if gate_id != tool.id {
+                    described.read_only = alias_target_is_read_only(&gate_id, &tools);
+                }
+            }
+            return Some(described);
         }
 
         // Skills: merged into search, absent from `list_all_tools` — so this is the
@@ -584,10 +642,11 @@ impl McpRegistry {
             // about. There are no arguments, because there is no call.
             shallow: false,
             parameters: None,
+            read_only: false,
         })
     }
 
-    /// Resolve the active ranker from preferences (Needle 2 default).
+    /// Resolve the active ranker from preferences (Needle 3 default).
     async fn resolve_ranker(&self) -> ToolRanker {
         let pref = match crate::server::preferences::PreferencesStore::open_default() {
             Ok(p) => p.get(RANKER_PREF_KEY).await.ok().flatten(),
@@ -667,7 +726,90 @@ mod tests {
             .filter(|tool| tool.server == super::super::usage_tool::SERVER_NAME)
             .map(|tool| tool.id.as_str())
             .collect();
-        assert_eq!(ids, vec!["usage.current", "usage.query"]);
+        assert_eq!(ids, vec!["usage.current", "usage.query", "usage.providers"]);
+    }
+
+    #[tokio::test]
+    async fn list_all_tools_includes_challenges_tools_as_builtins() {
+        let registry = McpRegistry::empty();
+        let tools = registry.list_all_tools().await;
+        let ids: Vec<&str> = tools
+            .iter()
+            .filter(|tool| tool.server == super::super::challenges_tool::SERVER_NAME)
+            .map(|tool| tool.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["challenges.list", "challenges.get", "challenges.submit"]
+        );
+        assert_eq!(
+            classify_kind(
+                "challenges.submit",
+                super::super::challenges_tool::SERVER_NAME
+            ),
+            ToolKind::Builtin
+        );
+    }
+
+    /// `read_only` reaches the wire only from an explicit `readOnlyHint: true`
+    /// that is not contradicted by `destructiveHint: true`; anything else omits
+    /// the field so the describe bytes for writes and unknowns are unchanged.
+    #[tokio::test]
+    async fn describe_marks_only_explicitly_read_only_tools() {
+        let registry = McpRegistry::empty();
+
+        let list = registry
+            .describe(super::super::challenges_tool::LIST_TOOL_ID)
+            .await
+            .expect("challenges.list describes");
+        assert!(
+            list.read_only,
+            "readOnlyHint=true must describe as read_only"
+        );
+        assert_eq!(
+            serde_json::to_value(&list).unwrap()["read_only"],
+            serde_json::json!(true)
+        );
+
+        let submit = registry
+            .describe("challenges.submit")
+            .await
+            .expect("challenges.submit describes");
+        assert!(!submit.read_only, "readOnlyHint=false is a write");
+        assert!(serde_json::to_value(&submit)
+            .unwrap()
+            .get("read_only")
+            .is_none());
+
+        assert!(annotations_mark_read_only(Some(
+            &serde_json::json!({ "readOnlyHint": true })
+        )));
+        assert!(!annotations_mark_read_only(Some(
+            &serde_json::json!({ "readOnlyHint": true, "destructiveHint": true })
+        )));
+        assert!(!annotations_mark_read_only(Some(
+            &serde_json::json!({ "destructiveHint": false })
+        )));
+        assert!(!annotations_mark_read_only(None));
+    }
+
+    /// An app alias counts as read-only only when its resolved target is a
+    /// registered tool that says so; a Composio action never is.
+    #[test]
+    fn an_alias_target_must_itself_be_read_only() {
+        let mut read = RegistryTool::candidate("notes.list", "notes", "list");
+        read.annotations = Some(serde_json::json!({ "readOnlyHint": true }));
+        let mut write = RegistryTool::candidate("notes.send", "notes", "send");
+        write.annotations = Some(serde_json::json!({ "readOnlyHint": false }));
+        let tools = [read, write];
+        assert!(alias_target_is_read_only("notes.list", &tools));
+        assert!(!alias_target_is_read_only("notes.send", &tools));
+        assert!(!alias_target_is_read_only("notes.unknown", &tools));
+        assert!(!alias_target_is_read_only(
+            "composio.GMAIL_SEND_EMAIL",
+            &tools
+        ));
+        assert!(!alias_target_is_read_only("skills.pdf", &tools));
     }
 
     #[tokio::test]

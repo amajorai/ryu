@@ -1,0 +1,23 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	.card {
+		position: relative;
+		z-index: var(--queue-card-z-index);
+		height: 36px;
+		transform-origin: top center;
+	}
+	.fade {
+		-webkit-mask-image: linear-gradient(
+			to right,
+			var(--foreground) calc(100% - 2rem),
+			transparent
+		);
+		mask-image: linear-gradient(
+			to right,
+			var(--foreground) calc(100% - 2rem),
+			transparent
+		);
+	}
+}

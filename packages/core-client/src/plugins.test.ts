@@ -107,7 +107,10 @@ test("lifecycle routes encode a scoped plugin id exactly once", async () => {
 });
 
 test("catalog install forwards the plugin id without a purchase gate", async () => {
-	const request: { current: { body: string; url: string } | null } = {
+	interface CapturedPluginInstall {
+		current: { body: string; url: string } | null;
+	}
+	const request: CapturedPluginInstall = {
 		current: null,
 	};
 	globalThis.fetch = Object.assign(

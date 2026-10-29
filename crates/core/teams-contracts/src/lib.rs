@@ -1,5 +1,5 @@
-//! Wire contract for Ryu agent **teams** — the payloads that cross the loopback
-//! boundary between Core and the out-of-process `ryu-teams` sidecar.
+//! Wire contract for Ryu agent **teams** — the payloads that cross the boundary
+//! between Core and the out-of-process `ryu-teams` sidecar.
 //!
 //! A team is a persisted, ordered collection of agents addressed as one unit
 //! (`@team` in chat) plus a **coordination strategy** deciding how the members
@@ -10,8 +10,9 @@
 //!   `public_mount`;
 //! - **Core** owns the orchestration that *interprets* the strategy
 //!   (`sidecar::adapters::route_team_chat_stream` / `run_team_reply_text`) and the
-//!   `agent_builder.create_agent_team` roster minter, reaching the store over
-//!   loopback HTTP (`crate::teams_client::TeamsClient`).
+//!   `agent_builder.create_agent_team` roster minter, reaching the store through
+//!   the `teams.resolve` / `teams.create` capabilities the app `provides`
+//!   (Core's `agent_teams` module over its generic capability consumer).
 //!
 //! Both halves need the same three shapes, and neither may link the other. This
 //! crate is that shared middle: `serde`-only, no `apps/core` dependency, no
@@ -135,7 +136,7 @@ pub struct TeamRecord {
 /// Fields a client may supply when creating a team. `id` is server-assigned.
 ///
 /// `Serialize` is part of the contract, not a convenience: Core's
-/// `TeamsClient::create` posts this struct directly, so a field added here reaches
+/// `teams.create` capability call posts this struct directly, so a field added here reaches
 /// the sidecar without anyone remembering to widen a hand-built `json!` body.
 /// Deliberately carries no `skip_serializing_if` — the emitted body must stay the
 /// full five keys the sidecar's handler expects.
@@ -221,7 +222,7 @@ mod tests {
         assert!(err.to_string().contains("swarm"), "{err}");
     }
 
-    /// `TeamsClient::create` posts this struct verbatim; the sidecar's handler
+    /// The `teams.create` capability call posts this struct verbatim; the sidecar's handler
     /// reads exactly these five keys.
     #[test]
     fn create_team_serializes_the_full_five_keys() {

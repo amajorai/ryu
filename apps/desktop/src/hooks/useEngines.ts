@@ -25,6 +25,7 @@ import {
 	type CatalogItem,
 	fetchCatalog,
 	installSidecar,
+	restartSidecar,
 	uninstallSidecar,
 } from "@/src/lib/services-api.ts";
 import { useActiveNode } from "./useActiveNode.ts";
@@ -44,8 +45,12 @@ export interface EngineEntry {
 	name: string;
 	/** OS families this engine runs on (e.g. ["macos"]). Empty = every platform. */
 	platforms: string[];
+	/** True when this engine's process is currently the live resident server. */
+	running: boolean;
 	/** Whether the Core node can run this engine (false → disable install/swap). */
 	supported: boolean;
+	/** Core's reason the node can't run it; null when supported / older Core. */
+	unsupportedReason: string | null;
 	/** The node's verdict that a reinstall would deliver a newer build. */
 	updateAvailable: boolean;
 }
@@ -60,6 +65,7 @@ export interface UseEnginesResult {
 	install: (name: string, force?: boolean) => Promise<void>;
 	loading: boolean;
 	reload: () => Promise<void>;
+	restart: (name: string) => Promise<void>;
 	uninstall: (name: string) => Promise<void>;
 }
 
@@ -100,8 +106,10 @@ export function useEngines(): UseEnginesResult {
 					latestVersion: item.latestVersion,
 					deprecated: item.deprecated,
 					active: item.name === activeName,
+					running: item.name === activeName && active?.running === true,
 					platforms: item.platforms,
 					supported: item.supported,
+					unsupportedReason: item.unsupportedReason,
 					updateAvailable: item.updateAvailable,
 				}))
 			);
@@ -149,12 +157,21 @@ export function useEngines(): UseEnginesResult {
 		[url, token, userJwt, reload, queryClient]
 	);
 
+	const restart = useCallback(
+		async (name: string) => {
+			await restartSidecar(url, token, name, userJwt);
+			await reload();
+		},
+		[url, token, userJwt, reload]
+	);
+
 	return {
 		engines,
 		activeEngine,
 		loading,
 		error,
 		reload,
+		restart,
 		install,
 		uninstall,
 		activate,

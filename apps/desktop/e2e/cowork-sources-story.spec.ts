@@ -203,7 +203,9 @@ test("MCP, app, and Composio calls appear in both source surfaces", async ({
 
 	await page.screenshot({
 		fullPage: true,
-		path: "/Users/jiawei/.codex/visualizations/2026/08/31/01a05665-d52a-72a0-8ad4-c4e4d69d2277/cowork-sources-mcp-app-integrations-proof.png",
+		path: test
+			.info()
+			.outputPath("cowork-sources-mcp-app-integrations-proof.png"),
 	});
 });
 

@@ -1,5 +1,7 @@
+import { z } from "zod";
 import { coreHeaders, loadConfig } from "./config.ts";
 import { waitForReconnect } from "./reconnect-delay.ts";
+import { readSseFrames, sseDataLines } from "./sse-reader.ts";
 
 interface Listener {
 	key: string;
@@ -15,23 +17,15 @@ function target() {
 	return { url, headers, identity: JSON.stringify([url, headers]) };
 }
 
+const preferenceEventSchema = z.object({ key: z.string(), value: z.string() });
 function dispatch(payload: string, signal: AbortSignal): void {
-	let event: unknown;
+	let event: z.infer<typeof preferenceEventSchema>;
 	try {
-		event = JSON.parse(payload);
+		event = preferenceEventSchema.parse(JSON.parse(payload));
 	} catch {
 		return;
 	}
-	if (
-		!event ||
-		typeof event !== "object" ||
-		!("key" in event) ||
-		!("value" in event) ||
-		typeof event.value !== "string"
-	) {
-		return;
-	}
-	for (const listener of [...listeners]) {
+	for (const listener of Array.from(listeners)) {
 		if (signal.aborted) {
 			return;
 		}
@@ -50,30 +44,18 @@ async function consume(
 	body: ReadableStream<Uint8Array>,
 	signal: AbortSignal
 ): Promise<void> {
-	const reader = body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-	try {
-		while (!signal.aborted) {
-			const { done, value } = await reader.read();
-			if (done) {
-				return;
-			}
-			buffer += decoder.decode(value, { stream: true });
-			let newline = buffer.indexOf("\n");
-			while (newline !== -1 && !signal.aborted) {
-				const line = buffer.slice(0, newline).trimEnd();
-				buffer = buffer.slice(newline + 1);
-				if (line.startsWith("data:")) {
-					dispatch(line.slice(5), signal);
+	await readSseFrames(
+		body,
+		(frame) => {
+			for (const payload of sseDataLines(frame)) {
+				if (signal.aborted) {
+					return;
 				}
-				newline = buffer.indexOf("\n");
+				dispatch(payload, signal);
 			}
-		}
-	} finally {
-		await reader.cancel().catch(() => undefined);
-		reader.releaseLock();
-	}
+		},
+		signal
+	);
 }
 
 async function run(controller: AbortController): Promise<void> {

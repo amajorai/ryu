@@ -2,6 +2,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils.ts";
 import { invokeWhenReady, isTauriReady } from "@/src/lib/tauri-ready.ts";
+import layoutStyles from "./PageWrapper.module.css";
 
 interface PageWrapperProps {
 	children: React.ReactNode;
@@ -123,7 +124,10 @@ export function PageWrapper({ children }: PageWrapperProps) {
 				// the border rides with the rounded corners.
 				edgeToEdge
 					? "rounded-none"
-					: "rounded-[var(--ryu-window-radius-base,2rem)] border border-border/30"
+					: cn(
+							"corner-squircle border border-border/30",
+							layoutStyles.authored1
+						)
 			)}
 			data-ryu-window-root="true"
 			ref={rootRef}

@@ -7,10 +7,10 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/projects",
   "name": "Projects",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "stability": "experimental",
   "category": "Productivity",
-  "description": "A durable coordinator workspace for turning long-running work into owned tasks, shared context, delegated workers, and recurring signals without replacing Ryu's CRM, Calendar, or Workflows.",
+  "description": "Projects are where long-running work lives: each project has a coordinator main thread, the bots and Groups working on it (each with its own main thread), shared context, model defaults, and the sessions they spawn.",
   "tagline": "Keep the work moving",
   "keywords": ["projects", "tasks", "planning", "delivery", "operations"],
   "icon": "task-01",
@@ -65,6 +65,8 @@
     "app:http",
     "tool:http-egress:127.0.0.1",
     "chat.sendFollowUp",
+    "chat:project-guidance",
+    "crypto:seal",
     "shell:integrate",
     "spaces:docs",
     "storage:kv",
@@ -87,30 +89,145 @@
         "public_mount": "/api/projects",
         "max_body_bytes": 524288,
         "routes": [
-          { "path": "/bootstrap", "method": "GET", "permission": "projects.view" },
-          { "path": "/tools/run", "method": "POST", "permission": "projects.edit" },
-          { "path": "/projects", "method": "GET", "permission": "projects.view" },
-          { "path": "/projects", "method": "POST", "permission": "projects.edit" },
-          { "path": "/projects/import", "method": "POST", "permission": "projects.edit" },
-          { "path": "/projects/:id", "method": "GET", "permission": "projects.view" },
-          { "path": "/projects/:id", "method": "PATCH", "permission": "projects.edit" },
-          { "path": "/projects/:id", "method": "DELETE", "permission": "projects.edit" },
-          { "path": "/projects/:id/run", "method": "POST", "permission": "projects.edit" },
-          { "path": "/projects/:id/context", "method": "GET", "permission": "projects.view" },
-          { "path": "/projects/:id/context", "method": "POST", "permission": "projects.edit" },
-          { "path": "/projects/:id/context/:context_id", "method": "PATCH", "permission": "projects.edit" },
-          { "path": "/projects/:id/context/:context_id", "method": "DELETE", "permission": "projects.edit" },
-          { "path": "/projects/:id/workers", "method": "GET", "permission": "projects.view" },
-          { "path": "/projects/:id/workers", "method": "POST", "permission": "projects.edit" },
-          { "path": "/projects/:id/subscriptions", "method": "GET", "permission": "projects.view" },
-          { "path": "/projects/:id/subscriptions", "method": "POST", "permission": "projects.edit" },
-          { "path": "/projects/:id/subscriptions/:subscription_id", "method": "PATCH", "permission": "projects.edit" },
-          { "path": "/projects/:id/subscriptions/:subscription_id", "method": "DELETE", "permission": "projects.edit" },
-          { "path": "/events/:source", "method": "POST", "permission": "projects.edit" }
+          {
+            "path": "/bootstrap",
+            "method": "GET",
+            "permission": "projects.view"
+          },
+          {
+            "path": "/tools/run",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects",
+            "method": "GET",
+            "permission": "projects.view"
+          },
+          {
+            "path": "/projects",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/import",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id",
+            "method": "GET",
+            "permission": "projects.view"
+          },
+          {
+            "path": "/projects/:id",
+            "method": "PATCH",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id",
+            "method": "DELETE",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/run",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/main-thread",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/members",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/members/:kind/:member_id",
+            "method": "DELETE",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/defaults",
+            "method": "PUT",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/guidance",
+            "method": "PUT",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/members/agent/:member_id/goal",
+            "method": "PUT",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/sidebar",
+            "method": "GET",
+            "permission": "projects.view"
+          },
+          {
+            "path": "/projects/:id/context",
+            "method": "GET",
+            "permission": "projects.view"
+          },
+          {
+            "path": "/projects/:id/context",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/context/:context_id",
+            "method": "PATCH",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/context/:context_id",
+            "method": "DELETE",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/workers",
+            "method": "GET",
+            "permission": "projects.view"
+          },
+          {
+            "path": "/projects/:id/workers",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/subscriptions",
+            "method": "GET",
+            "permission": "projects.view"
+          },
+          {
+            "path": "/projects/:id/subscriptions",
+            "method": "POST",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/subscriptions/:subscription_id",
+            "method": "PATCH",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/projects/:id/subscriptions/:subscription_id",
+            "method": "DELETE",
+            "permission": "projects.edit"
+          },
+          {
+            "path": "/events/:source",
+            "method": "POST",
+            "permission": "projects.edit"
+          }
         ]
       },
       "host_api": {
-        "grants": ["chat.sendFollowUp"]
+        "grants": ["chat.sendFollowUp", "chat:project-guidance", "crypto:seal"]
       }
     }
   ],
@@ -127,5 +244,34 @@
       "implies": ["projects.view"]
     }
   ],
+  "contributes": {
+    "sidebar_sections": [
+      {
+        "id": "projects",
+        "title": "Projects",
+        "icon": "task-01",
+        "order": 5,
+        "spec": {
+          "rowStyle": "messaging",
+          "source": {
+            "http": { "method": "GET", "path": "/api/projects/sidebar" },
+            "items": "projects",
+            "limit": 50,
+            "refreshMs": 60000,
+            "map": {
+              "id": "id",
+              "title": "name",
+              "titleFallback": "Project",
+              "subtitle": "summary",
+              "accessory": "updatedAt",
+              "avatar": "icon"
+            }
+          },
+          "dateKey": "updatedAt",
+          "itemTarget": "/chat?conversationId={{item.mainThreadId}}"
+        }
+      }
+    ]
+  },
   "companion": { "label": "Projects", "icon": "task-01" }
 }

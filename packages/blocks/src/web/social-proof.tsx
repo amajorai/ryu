@@ -1,8 +1,8 @@
 const stats = [
-	{ value: "250+", label: "MCP Tools" },
-	{ value: "300+", label: "Models via OpenRouter" },
+	{ value: "Configurable", label: "MCP Tools" },
+	{ value: "Provider-dependent", label: "Model availability" },
 	{ value: "Self-hostable", label: "Ryu Gateway" },
-	{ value: "Jul 14", label: "Early access" },
+	{ value: "Check availability", label: "Early access" },
 ];
 
 export default function SocialProof() {

@@ -17,8 +17,8 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -26,21 +26,21 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
+} from "@ryu/ui/components/native-select.tsx";
 import {
 	RunStatusTimeline,
 	RunStatusTimelineLegend,
-} from "@ryu/ui/components/run-status-timeline";
-import { toast } from "@ryu/ui/components/sileo";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/run-status-timeline.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { formatDistanceToNow } from "date-fns";
 import { useMemo, useState } from "react";
 import {
@@ -63,10 +63,7 @@ import {
 
 type RoutineStatus = "failed" | "none" | "operational" | "paused" | "scheduled";
 
-const STATUS_META: Record<
-	RoutineStatus,
-	{ className: string; dotClassName: string; label: string }
-> = {
+const STATUS_META = {
 	failed: {
 		className: "text-status-destructive",
 		dotClassName: "bg-destructive",
@@ -92,7 +89,10 @@ const STATUS_META: Record<
 		dotClassName: "bg-warning",
 		label: "Scheduled",
 	},
-};
+} satisfies Record<
+	RoutineStatus,
+	{ className: string; dotClassName: string; label: string }
+>;
 
 interface RoutineDraft {
 	conversationId: string;
@@ -261,7 +261,9 @@ function RoutineEditor({
 								id="agent-routine-frequency"
 								onChange={(event) =>
 									onChange({
-										scheduleKind: event.target.value as "cron" | "every",
+										scheduleKind:
+											/* SAFETY: This authored NativeSelect offers only the cron and every schedule kinds. This is a native UI selection, not a decoder for arbitrary synthetic events. */ event
+												.target.value as "cron" | "every",
 									})
 								}
 								value={draft.scheduleKind}
@@ -279,7 +281,6 @@ function RoutineEditor({
 								{draft.scheduleKind === "cron" ? "Cron" : "Interval"}
 							</Label>
 							<Input
-								className="font-mono"
 								disabled={disabled || saving}
 								id="agent-routine-schedule-value"
 								onChange={(event) =>
@@ -289,6 +290,7 @@ function RoutineEditor({
 									draft.scheduleKind === "cron" ? "0 9 * * 1-5" : "1h"
 								}
 								value={draft.scheduleValue}
+								variant="code"
 							/>
 						</div>
 					</div>
@@ -328,7 +330,9 @@ function RoutineEditor({
 							id="agent-routine-destination"
 							onChange={(event) =>
 								onChange({
-									destination: event.target.value as "new" | "existing",
+									destination:
+										/* SAFETY: This authored NativeSelect offers only new and existing transcript destinations. This is a native UI selection, not a decoder for arbitrary synthetic events. */ event
+											.target.value as "new" | "existing",
 								})
 							}
 							value={draft.destination}
@@ -364,14 +368,19 @@ function RoutineEditor({
 										No agent chats yet
 									</NativeSelectOption>
 								) : (
-									conversations.map((conversation) => (
-										<NativeSelectOption
-											key={conversation.id}
-											value={conversation.id}
-										>
-											{conversation.title || "Untitled chat"}
+									<>
+										<NativeSelectOption value="">
+											Choose a chat
 										</NativeSelectOption>
-									))
+										{conversations.map((conversation) => (
+											<NativeSelectOption
+												key={conversation.id}
+												value={conversation.id}
+											>
+												{conversation.title || "Untitled chat"}
+											</NativeSelectOption>
+										))}
+									</>
 								)}
 							</NativeSelect>
 						</div>
@@ -708,7 +717,10 @@ export function AgentRoutinesPanel({
 											<div className="flex flex-wrap items-start gap-3">
 												<div className="min-w-0 flex-1">
 													<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-														<p className="truncate font-medium text-sm">
+														<p
+															className="truncate font-medium text-sm"
+															title={job.name}
+														>
 															{job.name}
 														</p>
 														<StatusPill status={status} />

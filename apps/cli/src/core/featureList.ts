@@ -5,7 +5,13 @@
 // it returns ListRow[]. Tabs with richer needs should instead use the typed
 // @ryuhq/core-client subpath modules and map to ListRow themselves.
 
-import { type ApiTarget, apiUrl, makeHeaders } from "@ryuhq/core-client/client";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "@ryuhq/core-client/client";
+import { z } from "zod";
 
 /** One row in a list tab. Mirrors apps/cli's `ListRow`. */
 export interface ListRow {
@@ -31,40 +37,43 @@ export interface FeatureListConfig {
 	titleKeys: string[];
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-	typeof v === "object" && v !== null && !Array.isArray(v);
+const featurePayloadSchema = z.json();
+type FeaturePayload = z.infer<typeof featurePayloadSchema>;
+const featureRecordSchema = z.record(z.string(), featurePayloadSchema);
+type FeatureRecord = z.infer<typeof featureRecordSchema>;
+const featureArraySchema = z.array(featurePayloadSchema);
+const displayFieldSchema = z.union([
+	z.string().min(1),
+	z.union([z.number(), z.boolean()]).transform((value) => String(value)),
+	featureArraySchema.transform((value) => String(value.length)),
+]);
 
-// Port of apps/cli's `pick_field`: first non-empty string/number/bool value, or
-// the length of an array value, coerced to a display string.
-const pickField = (row: Record<string, unknown>, keys: string[]): string => {
+// Port of pick_field: first nonempty scalar or array length, in configured order.
+const pickField = (row: FeatureRecord, keys: string[]): string => {
 	for (const key of keys) {
-		const value = row[key];
-		if (typeof value === "string" && value.length > 0) {
-			return value;
-		}
-		if (typeof value === "number" || typeof value === "boolean") {
-			return String(value);
-		}
-		if (Array.isArray(value)) {
-			return String(value.length);
+		const parsed = displayFieldSchema.safeParse(row[key]);
+		if (parsed.success) {
+			return parsed.data;
 		}
 	}
 	return "";
 };
 
-const findArray = (json: unknown, containerKeys: string[]): unknown[] => {
-	if (isRecord(json)) {
+const findArray = (
+	json: FeaturePayload,
+	containerKeys: string[]
+): FeaturePayload[] => {
+	const record = featureRecordSchema.safeParse(json);
+	if (record.success) {
 		for (const key of containerKeys) {
-			const candidate = json[key];
-			if (Array.isArray(candidate)) {
-				return candidate;
+			const candidate = featureArraySchema.safeParse(record.data[key]);
+			if (candidate.success) {
+				return candidate.data;
 			}
 		}
 	}
-	if (Array.isArray(json)) {
-		return json;
-	}
-	return [];
+	const array = featureArraySchema.safeParse(json);
+	return array.success ? array.data : [];
 };
 
 /** Fetch a Core list endpoint and map it to ListRow[]. Throws on a non-2xx
@@ -74,32 +83,34 @@ export async function fetchFeatureList(
 	config: FeatureListConfig,
 	signal?: AbortSignal
 ): Promise<ListRow[]> {
-	const resp = await fetch(apiUrl(target, config.path), {
-		headers: makeHeaders(target.token),
+	const resp = await fetchForTarget(target)(apiUrl(target, config.path), {
+		headers: makeHeaders(target.token, target.userJwt),
 		signal,
 	});
 	if (!resp.ok) {
 		throw new Error(`${config.path} failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as unknown;
+	const json = featurePayloadSchema.parse(await resp.json());
 	const arr = findArray(json, config.containerKeys ?? []);
 
 	return arr.map((element): ListRow => {
-		if (typeof element === "string") {
-			return { id: element, title: element };
+		const text = z.string().safeParse(element);
+		if (text.success) {
+			return { id: text.data, title: text.data };
 		}
-		if (!isRecord(element)) {
+		const record = featureRecordSchema.safeParse(element);
+		if (!record.success) {
 			return { id: "", title: "—" };
 		}
-		const title = pickField(element, config.titleKeys) || "—";
+		const title = pickField(record.data, config.titleKeys) || "—";
 		return {
 			title,
-			id: pickField(element, config.idKeys),
+			id: pickField(record.data, config.idKeys),
 			subtitle: config.subtitleKeys
-				? pickField(element, config.subtitleKeys) || undefined
+				? pickField(record.data, config.subtitleKeys) || undefined
 				: undefined,
 			badge: config.badgeKeys
-				? pickField(element, config.badgeKeys) || undefined
+				? pickField(record.data, config.badgeKeys) || undefined
 				: undefined,
 		};
 	});

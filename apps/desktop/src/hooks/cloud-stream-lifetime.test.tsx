@@ -3,13 +3,13 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 interface Feed {
 	returned: boolean;
-	send: (value: unknown) => void;
+	send: <TValue>(value: TValue) => void;
 	signal: AbortSignal;
 }
 const wallet: Feed[] = [];
@@ -45,7 +45,7 @@ mock.module("@/src/lib/api/teams-billing.ts", () => ({
 }));
 const toasts: unknown[] = [];
 mock.module("@ryu/ui/components/sileo", () => ({
-	toast: { warning: (value: unknown) => toasts.push(value) },
+	toast: { warning: <TValue,>(value: TValue) => toasts.push(value) },
 }));
 const { useWalletStream } = await import("./useWalletStream.ts");
 const { useBillingStatusStream } = await import("./useBillingStatusStream.ts");

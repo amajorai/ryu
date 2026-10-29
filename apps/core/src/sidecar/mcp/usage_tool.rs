@@ -6,15 +6,26 @@
 //! requested provider/model through the normal Core MCP registry, so the Gateway
 //! can apply its usual allowlist, budget, and audit controls.
 //!
-//! Credentials stay inside Core. Subscription credentials come from the active
-//! account in the sealed account store, and BYOK keys are handed to the existing
-//! credit reader for one request only. Neither credential is placed in tool
-//! arguments, logs, or the returned usage projection.
+//! Readings go through [`crate::subscriptions`], the same revision-keyed,
+//! cache-first primitive the owner UI and the plugin bridge use, so every
+//! surface derives identical window and meter `targetId`s. Credentials stay
+//! inside Core: subscription credentials come from the sealed account store
+//! (the active account, or exactly the requested `account_id`), and BYOK keys
+//! are handed to the credit reader for one request only. Neither credential is
+//! placed in tool arguments, logs, or the returned usage projection.
+//!
+//! This surface is agent-visible, so it never returns account labels (often
+//! email addresses): accounts are identified by their opaque ids only.
 
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
 use super::RegistryTool;
+use crate::subscriptions::{
+    self,
+    reading::{self, ReadOptions},
+    AccountSel, ProviderKind, ProviderUsageReading, SnapshotQuery, UsageMode,
+};
 
 /// Reserved registry server for read-only provider usage.
 pub const SERVER_NAME: &str = "usage";
@@ -24,6 +35,9 @@ pub const CURRENT_TOOL_ID: &str = "usage.current";
 
 /// Read usage for an explicitly selected provider and optional model.
 pub const QUERY_TOOL_ID: &str = "usage.query";
+
+/// List providers for which Core has a normalized usage reader.
+pub const PROVIDERS_TOOL_ID: &str = "usage.providers";
 
 const MAX_IDENTIFIER_CHARS: usize = 256;
 
@@ -51,10 +65,25 @@ fn query_schema() -> Value {
                 "description": "Optional model id. Account-wide windows are always returned; model-scoped windows are included when they match this model.",
                 "minLength": 1,
                 "maxLength": MAX_IDENTIFIER_CHARS
+            },
+            "account_id": {
+                "type": "string",
+                "description": "Optional saved account id from usage.providers. Reads exactly that account and never falls back to the active one; omit it to read the provider's active account.",
+                "minLength": 1,
+                "maxLength": MAX_IDENTIFIER_CHARS
             }
         },
         "required": ["provider"],
         "additionalProperties": false
+    })
+}
+
+fn providers_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "No arguments. Lists providers with a supported subscription-usage or API-credit reader, and each provider's saved accounts by id."
     })
 }
 
@@ -85,10 +114,21 @@ pub fn tools() -> Vec<RegistryTool> {
             server: SERVER_NAME.to_owned(),
             name: "query".to_owned(),
             description: Some(
-                "Read live usage for a specified provider and optional model. Returns account-wide and matching model-scoped windows with remaining percent, used percent, window length, and reset timestamps, plus provider credit meters when that provider exposes a balance endpoint.".to_owned(),
+                "Read live usage for a specified provider, optional model, and optional saved account. Returns account-wide and matching model-scoped windows with remaining percent, used percent, window length, and reset timestamps, plus provider credit meters when that provider exposes a balance endpoint. Without account_id the provider's active account is read.".to_owned(),
             ),
             input_schema: Some(query_schema()),
             annotations: Some(annotations),
+            ..Default::default()
+        },
+        RegistryTool {
+            id: PROVIDERS_TOOL_ID.to_owned(),
+            server: SERVER_NAME.to_owned(),
+            name: "providers".to_owned(),
+            description: Some(
+                "List provider IDs supported by Core's normalized usage readers, including subscription windows and readable API-credit balances, with each provider's saved account ids. Use these IDs with usage.query; account names and credentials remain inside Core.".to_owned(),
+            ),
+            input_schema: Some(providers_schema()),
+            annotations: Some(read_only_annotations()),
             ..Default::default()
         },
     ]
@@ -100,8 +140,111 @@ pub async fn dispatch(tool: &str, arguments: Value) -> Result<Value> {
     match tool {
         "current" => dispatch_current(arguments).await,
         "query" => dispatch_query(arguments).await,
+        "providers" => {
+            let object = object_arguments(&arguments)?;
+            reject_unknown_keys(object, &[])?;
+            Ok(provider_catalog().await)
+        }
         other => Err(anyhow::anyhow!("unknown usage tool '{other}'")),
     }
+}
+
+/// The label-free provider → accounts catalog.
+///
+/// Rows come from the shared subscription snapshot with labels off and no
+/// vendor I/O, so the agent sees which saved accounts exist (by opaque id) but
+/// never their display names, which are often email addresses. Readers that
+/// have no saved accounts yet (an API-credit key from the environment, or an
+/// OAuth-capable BYOK login) are appended so they stay discoverable.
+async fn provider_catalog() -> Value {
+    let snapshot = subscriptions::snapshot(SnapshotQuery {
+        usage: UsageMode::None,
+        include_labels: false,
+        ..SnapshotQuery::default()
+    })
+    .await;
+    let mut seen = std::collections::HashSet::new();
+    let mut providers = Vec::new();
+    for provider in &snapshot.providers {
+        seen.insert(provider.provider_id.clone());
+        providers.push(json!({
+            "providerId": provider.provider_id,
+            "label": provider.label,
+            "kind": catalog_kind(provider.kind),
+            "capabilities": { "accountUsage": provider.capabilities.account_usage },
+            "accounts": provider
+                .accounts
+                .iter()
+                .map(|account| {
+                    catalog_account(
+                        &account.account_id,
+                        account.active,
+                        &account.kind,
+                        account.needs_reauth,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        }));
+    }
+
+    let supplementary = crate::pi_config::PROVIDERS
+        .iter()
+        .filter(|provider| {
+            crate::pi_config::oauth_login::oauth_provider_id(provider.id).is_some()
+                || ryu_usage::supports_provider_credits(provider.id)
+        })
+        .map(|provider| (provider.id, provider.label))
+        .chain(
+            ryu_usage::PROVIDERS_WITH_CREDITS
+                .iter()
+                .map(|provider| (*provider, *provider)),
+        );
+    for (provider_id, label) in supplementary {
+        if !seen.insert(provider_id.to_owned()) {
+            continue;
+        }
+        let kind = if ryu_usage::supports_provider_credits(provider_id) {
+            "api_credits"
+        } else {
+            "subscription"
+        };
+        let account_usage = subscriptions::provider_capabilities(provider_id)
+            .is_some_and(|capabilities| capabilities.account_usage);
+        let accounts = crate::pi_config::list_provider_accounts(provider_id)
+            .iter()
+            .map(|info| {
+                catalog_account(&info.account_id, info.active, &info.kind, info.needs_reauth)
+            })
+            .collect::<Vec<_>>();
+        providers.push(json!({
+            "providerId": provider_id,
+            "label": label,
+            "kind": kind,
+            "capabilities": { "accountUsage": account_usage },
+            "accounts": accounts,
+        }));
+    }
+
+    json!({ "providers": providers })
+}
+
+/// The tool's published provider kinds. ACP CLI logins have always been listed
+/// as `subscription` here, and existing clients validate this closed set.
+fn catalog_kind(kind: ProviderKind) -> &'static str {
+    match kind {
+        ProviderKind::ApiCredits => "api_credits",
+        ProviderKind::Subscription | ProviderKind::AgentLogin => "subscription",
+    }
+}
+
+/// One label-free account row. Deliberately has no `label` field.
+fn catalog_account(account_id: &str, active: bool, kind: &str, needs_reauth: bool) -> Value {
+    json!({
+        "accountId": account_id,
+        "active": active,
+        "kind": kind,
+        "needsReauth": needs_reauth,
+    })
 }
 
 async fn dispatch_current(arguments: Value) -> Result<Value> {
@@ -115,16 +258,24 @@ async fn dispatch_current(arguments: Value) -> Result<Value> {
         .as_deref()
         .map(|value| bounded_identifier(value, "active model"))
         .transpose()?;
-    query_usage(&provider, model.as_deref(), &active, true).await
+    query_usage(&provider, model.as_deref(), None, &active, true).await
 }
 
 async fn dispatch_query(arguments: Value) -> Result<Value> {
     let object = object_arguments(&arguments)?;
-    reject_unknown_keys(object, &["provider", "model"])?;
+    reject_unknown_keys(object, &["provider", "model", "account_id"])?;
     let provider = required_identifier(object, "provider")?;
     let model = optional_identifier(object, "model")?;
+    let account_id = optional_identifier(object, "account_id")?;
     let active = crate::pi_config::current();
-    query_usage(&provider, model.as_deref(), &active, false).await
+    query_usage(
+        &provider,
+        model.as_deref(),
+        account_id.as_deref(),
+        &active,
+        false,
+    )
+    .await
 }
 
 fn object_arguments(arguments: &Value) -> Result<&Map<String, Value>> {
@@ -175,11 +326,13 @@ fn bounded_identifier(value: &str, label: &str) -> Result<String> {
 async fn query_usage(
     provider: &str,
     model: Option<&str>,
+    account_id: Option<&str>,
     active: &crate::pi_config::PiConfigView,
     is_current: bool,
 ) -> Result<Value> {
-    let (snapshot, source) = fetch_provider_snapshot(provider).await?;
-    let usage = project_snapshot(provider, &snapshot, model);
+    let (reading, source) = read_provider_usage(provider, model, account_id).await;
+    let usage = serde_json::to_value(reading.without_label())
+        .context("could not serialize provider usage reading")?;
     Ok(json!({
         "ok": true,
         "current": is_current,
@@ -191,222 +344,89 @@ async fn query_usage(
         "requested": {
             "provider": provider,
             "model": model,
+            "account_id": account_id,
         },
         "source": source,
         "usage": usage,
     }))
 }
 
-/// Select the credential source without letting a model choose a secret.
-///
-/// ACP ids read the CLI credential that belongs to that agent. Ryu-managed
-/// subscription provider ids use the active account from Core's sealed vault.
-/// Providers with a supported prepaid-balance endpoint use the existing BYOK
-/// key resolver. Everything else still returns the normalized unsupported result
-/// from `ryu_usage`.
-async fn fetch_provider_snapshot(provider: &str) -> Result<(Value, &'static str)> {
-    if provider.trim().to_ascii_lowercase().starts_with("acp:") {
-        let snapshot = ryu_usage::fetch_usage(provider).await;
-        let source = if snapshot.engine.is_empty() {
-            "unavailable"
-        } else {
-            "subscription"
-        };
-        return serialized_snapshot(snapshot, source);
-    }
+/// How a query reaches its reader.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReadRoute<'a> {
+    /// The shared subscription reading for one account selection.
+    Shared(AccountSel<'a>),
+    /// A provider the subscription module does not model (for example an
+    /// OAuth-capable BYOK login): the provider-wide reader, as before.
+    ProviderWide,
+}
 
-    if ryu_usage::supports_provider_credits(provider) {
-        let key = crate::pi_config::provider_api_key(provider).unwrap_or_default();
-        let snapshot = ryu_usage::fetch_provider_credits(provider, &key).await;
-        return serialized_snapshot(snapshot, "api_credits");
+/// Select the reader without letting a model choose a secret. An explicit
+/// `account_id` always takes the shared `Exact` path, which reads that saved
+/// account's own credential or reports `account_not_found`/`unsupported`; it
+/// never touches the active credential.
+fn read_route(kind: Option<ProviderKind>, account_id: Option<&str>) -> ReadRoute<'_> {
+    match (account_id, kind) {
+        (Some(account_id), _) => ReadRoute::Shared(AccountSel::Exact(account_id)),
+        (None, Some(_)) => ReadRoute::Shared(AccountSel::Active),
+        (None, None) => ReadRoute::ProviderWide,
     }
+}
 
+async fn read_provider_usage(
+    provider: &str,
+    model: Option<&str>,
+    account_id: Option<&str>,
+) -> (ProviderUsageReading, &'static str) {
+    let kind = subscriptions::provider_kind(provider);
+    match read_route(kind, account_id) {
+        ReadRoute::Shared(selection) => {
+            let reading = reading::read_with(
+                provider,
+                selection,
+                ReadOptions {
+                    mode: UsageMode::Refresh,
+                    max_age: subscriptions::DEFAULT_MAX_AGE,
+                    model,
+                    include_label: false,
+                },
+            )
+            .await;
+            let source = match kind {
+                Some(ProviderKind::ApiCredits) => "api_credits",
+                Some(ProviderKind::Subscription) => "subscription",
+                _ if reading.engine.is_empty() => "unavailable",
+                _ => "subscription",
+            };
+            (reading, source)
+        }
+        ReadRoute::ProviderWide => {
+            let (snapshot, source) = provider_wide_snapshot(provider).await;
+            (
+                reading::reading_from_snapshot(provider, None, &snapshot, model),
+                source,
+            )
+        }
+    }
+}
+
+/// Providers outside the subscription module keep their provider-wide reader.
+/// A vault read failure is the same structured `not_logged_in` snapshot as the
+/// HTTP usage route; it never returns the credential or an internal error.
+async fn provider_wide_snapshot(provider: &str) -> (ryu_usage::UsageSnapshot, &'static str) {
     if crate::pi_config::oauth_login::oauth_provider_id(provider).is_some() {
-        // A vault read failure is represented by the same structured
-        // `not_logged_in` snapshot as the existing HTTP usage route. It never
-        // falls back to returning the credential or an internal vault error.
         let credential = crate::pi_config::subscription_active_credential(provider).unwrap_or(None);
         let snapshot =
             ryu_usage::fetch_ryu_provider_usage_for_credential(provider, credential).await;
-        return serialized_snapshot(snapshot, "subscription");
+        return (snapshot, "subscription");
     }
-
     let snapshot = ryu_usage::fetch_ryu_provider_usage(provider).await;
     let source = if snapshot.engine.is_empty() {
         "unavailable"
     } else {
         "subscription"
     };
-    serialized_snapshot(snapshot, source)
-}
-
-fn serialized_snapshot<T: serde::Serialize>(
-    snapshot: T,
-    source: &'static str,
-) -> Result<(Value, &'static str)> {
-    serde_json::to_value(snapshot)
-        .context("could not serialize provider usage snapshot")
-        .map(|value| (value, source))
-}
-
-fn project_snapshot(provider: &str, snapshot: &Value, model: Option<&str>) -> Value {
-    let (windows, model_matched) = project_windows(snapshot, model);
-    json!({
-        "providerId": provider,
-        "agentId": snapshot.get("agent_id").cloned().unwrap_or(Value::Null),
-        "engine": snapshot.get("engine").cloned().unwrap_or(Value::Null),
-        "available": snapshot.get("available").and_then(Value::as_bool).unwrap_or(false),
-        "plan": snapshot.get("plan").cloned().unwrap_or(Value::Null),
-        "reason": snapshot.get("reason").cloned().unwrap_or(Value::Null),
-        "modelMatched": model_matched,
-        "windows": windows,
-        "meters": project_meters(snapshot.get("meters")),
-        "extraUsageUsd": snapshot.get("extra_usage_usd").cloned().unwrap_or(Value::Null),
-        "retryAfterSeconds": snapshot.get("retry_after_seconds").cloned().unwrap_or(Value::Null),
-    })
-}
-
-fn project_windows(snapshot: &Value, model: Option<&str>) -> (Vec<Value>, Option<bool>) {
-    let rows = snapshot
-        .get("windows")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    let model_matched = model.map(|requested| {
-        rows.iter().any(|row| {
-            row.get("model")
-                .and_then(Value::as_str)
-                .is_some_and(|candidate| models_match(candidate, requested))
-        })
-    });
-
-    let projected = rows
-        .iter()
-        .filter(|row| {
-            let Some(requested) = model else {
-                return true;
-            };
-            row.get("model")
-                .and_then(Value::as_str)
-                .is_none_or(|candidate| models_match(candidate, requested))
-        })
-        .filter_map(project_window)
-        .collect();
-    (projected, model_matched)
-}
-
-fn project_window(row: &Value) -> Option<Value> {
-    let used = row
-        .get("used_percent")
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite())?
-        .clamp(0.0, 100.0);
-    let label = row
-        .get("label")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim();
-    let model = row
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let window_seconds = row.get("window_seconds").and_then(Value::as_i64);
-    let resets_at = row
-        .get("resets_at")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
-    Some(json!({
-        "label": label,
-        "window": short_window_label(window_seconds, label),
-        "windowSeconds": window_seconds,
-        "scope": if model.is_some() { "model" } else { "account" },
-        "model": model,
-        "usedPercent": used,
-        "remainingPercent": (100.0 - used).clamp(0.0, 100.0),
-        "resetsAt": resets_at,
-    }))
-}
-
-fn project_meters(value: Option<&Value>) -> Vec<Value> {
-    value
-        .and_then(Value::as_array)
-        .map(|meters| {
-            meters
-                .iter()
-                .filter_map(|meter| {
-                    let values = meter
-                        .get("values")
-                        .and_then(Value::as_array)
-                        .map(|values| {
-                            values
-                                .iter()
-                                .filter_map(|value| {
-                                    let number = value
-                                        .get("number")
-                                        .and_then(Value::as_f64)
-                                        .filter(|number| number.is_finite())?;
-                                    Some(json!({
-                                        "number": number,
-                                        "kind": value.get("kind").cloned().unwrap_or(Value::Null),
-                                        "unit": value.get("unit").cloned().unwrap_or(Value::Null),
-                                    }))
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
-                    let label = meter
-                        .get("label")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    Some(json!({
-                        "label": label,
-                        "values": values,
-                        "expiresAt": meter.get("expires_at").cloned().unwrap_or_else(|| json!([])),
-                        "resetsAt": meter.get("resets_at").cloned().unwrap_or(Value::Null),
-                    }))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn short_window_label(seconds: Option<i64>, fallback: &str) -> String {
-    let Some(seconds) = seconds.filter(|seconds| *seconds > 0) else {
-        return fallback.to_owned();
-    };
-    const HOUR: i64 = 60 * 60;
-    const DAY: i64 = 24 * HOUR;
-    if seconds % DAY == 0 {
-        return format!("{}d", seconds / DAY);
-    }
-    if seconds % HOUR == 0 {
-        return format!("{}h", seconds / HOUR);
-    }
-    if seconds % 60 == 0 {
-        return format!("{}m", seconds / 60);
-    }
-    format!("{seconds}s")
-}
-
-fn models_match(candidate: &str, requested: &str) -> bool {
-    let candidate = normalized_model(candidate);
-    let requested = normalized_model(requested);
-    !candidate.is_empty()
-        && !requested.is_empty()
-        && (candidate == requested
-            || candidate.contains(&requested)
-            || requested.contains(&candidate))
-}
-
-fn normalized_model(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
+    (snapshot, source)
 }
 
 #[cfg(test)]
@@ -414,103 +434,155 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lists_current_and_query_tools_with_read_only_annotations() {
+    fn lists_usage_tools_with_read_only_annotations() {
         let tools = tools();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
         assert_eq!(tools[0].id, CURRENT_TOOL_ID);
         assert_eq!(tools[1].id, QUERY_TOOL_ID);
         assert_eq!(tools[0].annotations, Some(read_only_annotations()));
+        assert_eq!(tools[2].id, PROVIDERS_TOOL_ID);
+        assert_eq!(tools[2].annotations, Some(read_only_annotations()));
+        let query = tools[1].input_schema.as_ref().expect("query schema");
+        assert_eq!(query["required"], json!(["provider"]));
+        assert_eq!(query["additionalProperties"], false);
+        assert_eq!(query["properties"]["account_id"]["minLength"], 1);
         assert_eq!(
-            tools[1]
-                .input_schema
-                .as_ref()
-                .and_then(|schema| schema.get("required").and_then(Value::as_array).cloned()),
-            Some(vec![json!("provider")])
+            query["properties"]["account_id"]["maxLength"],
+            MAX_IDENTIFIER_CHARS
         );
     }
 
     #[test]
-    fn projects_remaining_percent_and_reset_time_for_account_and_model_windows() {
-        let raw = json!({
-            "agent_id": "acp:claude",
-            "engine": "claude",
-            "available": true,
-            "plan": "Max 20x",
-            "windows": [
-                {
-                    "label": "Session",
-                    "used_percent": 42.5,
-                    "window_seconds": 18_000,
-                    "resets_at": "2026-09-17T05:00:00Z",
-                    "model": null
-                },
-                {
-                    "label": "Sonnet",
-                    "used_percent": 80.0,
-                    "window_seconds": 604_800,
-                    "resets_at": "2026-09-20T05:00:00Z",
-                    "model": "Sonnet"
-                },
-                {
-                    "label": "Opus",
-                    "used_percent": 90.0,
-                    "window_seconds": 604_800,
-                    "resets_at": "2026-09-20T05:00:00Z",
-                    "model": "Opus"
-                }
-            ]
-        });
-        let projected = project_snapshot("claude-pro-max", &raw, Some("claude-sonnet-4"));
-        assert_eq!(projected["available"], true);
-        assert_eq!(projected["modelMatched"], true);
-        assert_eq!(projected["windows"].as_array().unwrap().len(), 2);
-        assert_eq!(projected["windows"][0]["window"], "5h");
-        assert_eq!(projected["windows"][0]["remainingPercent"], 57.5);
-        assert_eq!(projected["windows"][0]["scope"], "account");
-        assert_eq!(projected["windows"][0]["resetsAt"], "2026-09-17T05:00:00Z");
-        assert_eq!(projected["windows"][1]["window"], "7d");
-        assert_eq!(projected["windows"][1]["remainingPercent"], 20.0);
-        assert_eq!(projected["windows"][1]["model"], "Sonnet");
-    }
-
-    #[test]
-    fn model_query_does_not_return_an_unrelated_model_window() {
+    fn projection_is_shared_with_the_subscription_module() {
+        // The projection moved to `subscriptions::projection`; persisted monitor
+        // baselines depend on these ids staying byte-identical through the tool.
         let raw = json!({
             "available": true,
-            "windows": [
-                { "label": "Weekly", "used_percent": 10.0, "model": null },
-                { "label": "Opus", "used_percent": 80.0, "model": "Opus" }
-            ]
-        });
-        let projected = project_snapshot("claude-pro-max", &raw, Some("sonnet"));
-        assert_eq!(projected["modelMatched"], false);
-        assert_eq!(projected["windows"].as_array().unwrap().len(), 1);
-        assert_eq!(projected["windows"][0]["scope"], "account");
-    }
-
-    #[test]
-    fn projects_prepaid_meter_values_and_their_reset_metadata() {
-        let raw = json!({
-            "available": true,
+            "windows": [{ "label": "Session", "used_percent": 42.5, "window_seconds": 18_000 }],
             "meters": [{
                 "label": "API credit",
                 "values": [{ "number": 12.34, "kind": "dollars", "unit": null }],
-                "expires_at": [],
-                "resets_at": "2026-10-01T00:00:00Z"
+                "expires_at": []
             }]
         });
-        let projected = project_snapshot("openrouter", &raw, None);
-        assert_eq!(projected["meters"][0]["label"], "API credit");
-        assert_eq!(projected["meters"][0]["values"][0]["number"], 12.34);
-        assert_eq!(projected["meters"][0]["values"][0]["kind"], "dollars");
-        assert_eq!(projected["meters"][0]["resetsAt"], "2026-10-01T00:00:00Z");
+        let projected = subscriptions::projection::project_snapshot("claude-pro-max", &raw, None);
+        assert_eq!(projected["windows"][0]["targetId"], "window:Session::18000");
+        assert_eq!(
+            projected["meters"][0]["values"][0]["targetId"],
+            "meter:API credit:dollars:"
+        );
     }
 
     #[test]
-    fn model_matching_accepts_provider_model_ids_and_display_names() {
-        assert!(models_match("GPT-5.3-Codex-Spark", "gpt-5.3-codex-spark"));
-        assert!(models_match("Sonnet", "claude-sonnet-4"));
-        assert!(!models_match("Opus", "claude-sonnet-4"));
+    fn account_scoped_reads_never_use_the_active_credential_route() {
+        // An explicit account always takes the shared `Exact` path, which reads
+        // only that account's own credential; only an unscoped query on a
+        // provider the subscription module does not model reaches the
+        // provider-wide reader (the one that resolves the active credential).
+        for kind in [
+            None,
+            Some(ProviderKind::Subscription),
+            Some(ProviderKind::ApiCredits),
+            Some(ProviderKind::AgentLogin),
+        ] {
+            assert_eq!(
+                read_route(kind, Some("acct_x")),
+                ReadRoute::Shared(AccountSel::Exact("acct_x"))
+            );
+        }
+        assert_eq!(
+            read_route(Some(ProviderKind::Subscription), None),
+            ReadRoute::Shared(AccountSel::Active)
+        );
+        assert_eq!(read_route(None, None), ReadRoute::ProviderWide);
+    }
+
+    #[tokio::test]
+    async fn unknown_account_reads_account_not_found_without_falling_back() {
+        let result = dispatch(
+            "query",
+            json!({ "provider": "claude-pro-max", "account_id": "acct_does-not-exist" }),
+        )
+        .await
+        .expect("an unknown account is a structured usage result");
+        assert_eq!(result["requested"]["account_id"], "acct_does-not-exist");
+        assert_eq!(result["usage"]["available"], false);
+        assert_eq!(result["usage"]["reason"], "account_not_found");
+        assert_eq!(result["usage"]["accountId"], Value::Null);
+        assert_eq!(result["usage"]["accountLabel"], Value::Null);
+        assert_eq!(result["usage"]["windows"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn agent_login_with_an_account_is_unsupported() {
+        let result = dispatch(
+            "query",
+            json!({ "provider": "acp:claude", "account_id": "acct_any" }),
+        )
+        .await
+        .expect("structured usage result");
+        assert_eq!(result["usage"]["available"], false);
+        assert_eq!(result["usage"]["reason"], "unsupported");
+        assert_eq!(result["usage"]["accountId"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn providers_catalog_lists_accounts_without_labels() {
+        let catalog = dispatch("providers", json!({}))
+            .await
+            .expect("provider catalog");
+        let providers = catalog["providers"].as_array().expect("provider list");
+        let ids = providers
+            .iter()
+            .filter_map(|provider| provider.get("providerId").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        for expected in [
+            "acp:claude",
+            "acp:codex",
+            "acp:copilot",
+            "acp:grok",
+            "acp:glm",
+            "openai-codex",
+            "chatgpt",
+            "claude-pro-max",
+            "github-copilot",
+            "openrouter",
+            "deepseek",
+            "moonshot",
+        ] {
+            assert!(ids.contains(&expected), "missing {expected}");
+        }
+        assert!(!ids.contains(&"anthropic"));
+        assert!(!ids.contains(&"openai"));
+        for provider in providers {
+            let kind = provider["kind"].as_str().expect("kind");
+            assert!(matches!(kind, "subscription" | "api_credits"), "{kind}");
+            assert!(provider["capabilities"]["accountUsage"].is_boolean());
+            for account in provider["accounts"].as_array().expect("accounts") {
+                let keys = account.as_object().expect("account row");
+                assert!(!keys.contains_key("label"), "account label leaked");
+                assert!(!keys.contains_key("accountLabel"), "account label leaked");
+            }
+        }
+        let claude = providers
+            .iter()
+            .find(|provider| provider["providerId"] == "claude-pro-max")
+            .expect("claude-pro-max");
+        assert_eq!(claude["capabilities"]["accountUsage"], true);
+    }
+
+    #[test]
+    fn catalog_account_rows_have_no_label_field() {
+        let row = catalog_account("acct_1", true, "oauth", false);
+        assert_eq!(
+            row,
+            json!({
+                "accountId": "acct_1",
+                "active": true,
+                "kind": "oauth",
+                "needsReauth": false,
+            })
+        );
     }
 
     #[tokio::test]
@@ -520,7 +592,32 @@ mod tests {
         assert!(dispatch("query", json!({ "provider": "x", "extra": true }))
             .await
             .is_err());
+        assert!(dispatch(
+            "query",
+            json!({ "provider": "x", "account_id": "a", "accountId": "a" })
+        )
+        .await
+        .is_err());
+        assert!(
+            dispatch("query", json!({ "provider": "x", "account_id": "" }))
+                .await
+                .is_err()
+        );
+        assert!(
+            dispatch("query", json!({ "provider": "x", "account_id": 7 }))
+                .await
+                .is_err()
+        );
+        assert!(dispatch(
+            "query",
+            json!({ "provider": "x", "account_id": "a".repeat(MAX_IDENTIFIER_CHARS + 1) })
+        )
+        .await
+        .is_err());
         assert!(dispatch("current", json!({ "provider": "x" }))
+            .await
+            .is_err());
+        assert!(dispatch("current", json!({ "account_id": "a" }))
             .await
             .is_err());
     }
@@ -537,6 +634,8 @@ mod tests {
         assert_eq!(result["usage"]["available"], false);
         assert_eq!(result["usage"]["reason"], "unsupported");
         assert_eq!(result["usage"]["windows"], json!([]));
+        assert_eq!(result["usage"]["accountLabel"], Value::Null);
         assert_eq!(result["requested"]["model"], "anything");
+        assert_eq!(result["requested"]["account_id"], Value::Null);
     }
 }

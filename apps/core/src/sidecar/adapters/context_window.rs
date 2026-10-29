@@ -16,11 +16,20 @@
 //!
 //! * **trim** — a token-budgeted sliding window: keep the newest turns that fit
 //!   the input budget, always keeping at least the last user turn and every
-//!   `system` message. Older turns are dropped.
+//!   `system` message. Older turns are dropped. The cut snaps to stable
+//!   checkpoints (see [`stable_drop_count`]) so the replayed prefix stays
+//!   byte-identical across turns and provider prompt caches keep hitting.
 //! * **compact** (`auto_compact`) — instead of dropping the older turns, send
 //!   them to a side model for a concise summary, injected as a leading system
-//!   block. Adds one blocking summarization round-trip per over-budget turn
-//!   (cached by the dropped-message set so an unchanged tail is not re-summarized).
+//!   block. The stable cut keeps the dropped set unchanged for many turns, so the
+//!   summary memo (keyed by that set) hits and a new summarization round-trip is
+//!   paid only when the cut moves, about once per half-budget of new history.
+//!
+//! With `compact_on_cache_expire` the compact mode also re-cuts deeper on the
+//! turn after the thread's provider prompt cache expired
+//! (`prompt_cache_warmth`): a cold cache re-sends the whole prefix at full price
+//! anyway, so moving the cut then costs no cache hits, and the smaller prefix is
+//! what the next warm stretch caches.
 //!
 //! Both modes are observable and steerable by plugins: whenever turns are about to
 //! leave the window the `session_before_compact` phase fires (detached), and a
@@ -43,11 +52,12 @@ use tokio::sync::Mutex;
 use super::{document_context_block, message_image_parts, UiMessage};
 use crate::plugin_host::{self, HookContext, HookDirective, HookMessage};
 use crate::server::conversations::ConversationStore;
+use crate::sidecar::gateway::{log_side_usage, with_side_call_headers, SidePurpose};
 
 /// Conservative chars-per-token divisor (Jan uses the same 3.5).
 const CHARS_PER_TOKEN: f32 = 3.5;
 /// Per-message overhead for the role/formatting wrapper (Jan adds 4).
-const PER_MESSAGE_OVERHEAD: usize = 4;
+pub(crate) const PER_MESSAGE_OVERHEAD: usize = 4;
 /// Flat token cost charged per inline image, instead of measuring its base64
 /// payload (which would dwarf the real budget). Roughly a tiled vision frame.
 const IMAGE_TOKEN_COST: usize = 768;
@@ -62,6 +72,42 @@ const MAX_SHORT_TERM_FETCH: usize = 400;
 
 /// System prompt for the side-model summarizer (mirrors Jan's COMPACT prompt).
 const COMPACT_SYSTEM_PROMPT: &str = "You are a conversation summarizer. Produce a concise summary that preserves key facts, decisions, code snippets, and action items. Use bullet points. Keep the summary under 500 words.";
+
+/// System prompt for a model-change handoff: the summary is all the next model
+/// will see of the earlier conversation, so it also carries open threads.
+const HANDOFF_SYSTEM_PROMPT: &str = "You are handing an in-progress conversation over to another assistant model that will not see the original messages. Write a briefing that preserves the user's goals, key facts, decisions, constraints, code snippets, file names, open questions, and what was about to happen next. Use bullet points. Keep it under 700 words.";
+
+/// What a summary is for, which picks its prompt, label and output length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SummaryKind {
+    /// Turns that fell out of the configured context budget.
+    Compact,
+    /// The history before a model change (see `context_handoff`).
+    Handoff,
+}
+
+impl SummaryKind {
+    fn system_prompt(self) -> &'static str {
+        match self {
+            Self::Compact => COMPACT_SYSTEM_PROMPT,
+            Self::Handoff => HANDOFF_SYSTEM_PROMPT,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Compact => "[Earlier conversation summary]",
+            Self::Handoff => "[Handoff summary of the conversation before the model change]",
+        }
+    }
+
+    fn max_output_tokens(self) -> u32 {
+        match self {
+            Self::Compact => 512,
+            Self::Handoff => 1024,
+        }
+    }
+}
 
 /// Resolved, ready-to-apply context-window settings. Built by
 /// `server::resolve_context_window` from preferences; `None` upstream means the
@@ -79,16 +125,36 @@ pub struct ContextWindowConfig {
     pub compact_model: String,
     /// Reasoning effort forwarded to the summarizer (may be empty).
     pub compact_effort: String,
+    /// Compact harder on the turn after a thread's provider prompt cache expired
+    /// (`context.compact-on-cache-expire`; needs `auto_compact`). See
+    /// [`budgeted_short_term_replay`].
+    pub compact_on_cache_expire: bool,
 }
 
 impl ContextWindowConfig {
     /// The input-token budget left for conversation history after reserving
     /// space for the reply, the system block, and downstream skill injection.
-    fn input_budget(&self, system_tokens: usize) -> usize {
+    pub(crate) fn input_budget(&self, system_tokens: usize) -> usize {
         self.max_tokens
             .saturating_sub(self.reserve_output)
             .saturating_sub(system_tokens)
             .saturating_sub(SKILLS_RESERVE)
+    }
+
+    /// Spacing of the stable cut checkpoints (see [`stable_drop_count`]).
+    ///
+    /// Derived from settings only, never from the per-turn system block: that
+    /// block carries recall and memory text whose size changes every turn, and a
+    /// step that moved with it would move every checkpoint, which is exactly the
+    /// churn the checkpoints exist to prevent. A quarter of the window keeps the
+    /// cut moving rarely while leaving room when the system block is large.
+    fn checkpoint_step(&self) -> usize {
+        (self
+            .max_tokens
+            .saturating_sub(self.reserve_output)
+            .saturating_sub(SKILLS_RESERVE)
+            / 4)
+        .max(1)
     }
 }
 
@@ -159,7 +225,7 @@ fn ui_message_text(msg: &UiMessage) -> String {
 /// Given per-message token estimates (chronological), return how many of the
 /// **newest** messages fit within `budget`. Always keeps at least one (the last
 /// turn must be sent even if it alone exceeds the budget).
-fn window_count(estimates: &[usize], budget: usize) -> usize {
+pub(crate) fn window_count(estimates: &[usize], budget: usize) -> usize {
     let mut total = 0usize;
     let mut kept = 0usize;
     for &tokens in estimates.iter().rev() {
@@ -170,6 +236,121 @@ fn window_count(estimates: &[usize], budget: usize) -> usize {
         kept += 1;
     }
     kept.clamp(1, estimates.len().max(1)).min(estimates.len())
+}
+
+/// How many of the **oldest** messages to drop so the rest fit `budget`, with the
+/// cut snapped forward to a stable checkpoint.
+///
+/// A plain sliding window ([`window_count`]) moves the cut by one turn on every
+/// over-budget turn, so the replayed history starts somewhere new each request.
+/// That defeats provider prompt caching (the cached prefix never matches again),
+/// and with `auto_compact` it changes the dropped set every turn, so the
+/// summary memo misses and a side-model round-trip is paid per turn.
+///
+/// Checkpoints are the positions where the running token total, counted from the
+/// OLDEST message, crosses a multiple of `step`. Appending new turns never
+/// changes an earlier prefix sum, and `step` comes from settings rather than the
+/// per-turn budget ([`ContextWindowConfig::checkpoint_step`]), so every checkpoint
+/// stays where it is as the conversation grows. The cut is the first checkpoint
+/// at or after the minimal drop: it stays put while new turns fill the freed
+/// space, and only jumps (by about one step) once that space is used up. The kept
+/// history still fits `budget`, because the cut is never earlier than the
+/// minimal drop.
+fn stable_drop_count(estimates: &[usize], budget: usize, step: usize) -> usize {
+    let minimal = estimates.len() - window_count(estimates, budget);
+    if minimal == 0 {
+        return 0;
+    }
+    let step = step.max(1);
+    let mut before = 0usize;
+    // Never drop the newest message: the last turn must always be sent.
+    for (index, &tokens) in estimates.iter().enumerate().take(estimates.len() - 1) {
+        let after = before + tokens;
+        let checkpoint = index + 1;
+        if checkpoint >= minimal && after / step > before / step {
+            return checkpoint;
+        }
+        before = after;
+    }
+    minimal
+}
+
+/// Most conversations whose last cut [`hold_cut`] remembers. Past this the memo
+/// is cleared: forgetting a cut costs one cache miss, never correctness.
+const MAX_HELD_CUTS: usize = 1024;
+
+/// A remembered cut: where it was, a fingerprint of the messages it dropped, and
+/// the checkpoint step (settings) it was taken under.
+#[derive(Clone, Copy)]
+struct HeldCut {
+    cut: usize,
+    dropped: u64,
+    step: usize,
+}
+
+/// Last cut per conversation, so a cut never moves backwards.
+fn held_cuts() -> &'static std::sync::Mutex<HashMap<u64, HeldCut>> {
+    static CUTS: OnceLock<std::sync::Mutex<HashMap<u64, HeldCut>>> = OnceLock::new();
+    CUTS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Keep the cut for `conversation` at or after where it was last turn.
+///
+/// Checkpoints alone are stable only while the budget is. The budget is what is
+/// left after the system block, and that block carries recall and memory text
+/// whose size changes each turn; a budget that grows lowers the minimal drop,
+/// which can pull the cut back to an earlier checkpoint (or to nothing at all,
+/// when the history hovers at the budget) and then forward again on the next
+/// turn. Each flip is a full cache miss. Dropping at least as much as last turn
+/// still fits the budget (the cut only ever grows past the minimal drop), so
+/// holding the previous cut is always safe.
+///
+/// `len` is the number of windowable messages, and `fingerprint(n)` hashes the
+/// oldest `n` of them. A remembered cut applies only when it still leaves the
+/// newest message, the messages it dropped are the same ones as before, and the
+/// settings (`step`) have not changed. So a branched or edited conversation, a
+/// different one that hashed to the same `conversation` key, or a newly raised
+/// context budget all start fresh.
+fn hold_cut(
+    conversation: u64,
+    len: usize,
+    cut: usize,
+    step: usize,
+    fingerprint: impl Fn(usize) -> u64,
+) -> usize {
+    let Ok(mut cuts) = held_cuts().lock() else {
+        return cut;
+    };
+    let previous = cuts.get(&conversation).copied().filter(|held| {
+        held.step == step && held.cut < len && fingerprint(held.cut) == held.dropped
+    });
+    let held = previous.map_or(cut, |held| cut.max(held.cut));
+    if held == 0 {
+        // Nothing to remember; keeps short conversations out of the memo.
+        cuts.remove(&conversation);
+        return 0;
+    }
+    if cuts.len() >= MAX_HELD_CUTS && !cuts.contains_key(&conversation) {
+        cuts.clear();
+    }
+    cuts.insert(
+        conversation,
+        HeldCut {
+            cut: held,
+            dropped: fingerprint(held),
+            step,
+        },
+    );
+    held
+}
+
+/// Hash `items` in order, for [`hold_cut`] keys and fingerprints.
+fn hash_all<'a>(items: impl IntoIterator<Item = &'a str>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for item in items {
+        item.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 // ── Plugin compaction hooks (`session_before_compact` / `session_compact`) ────
@@ -341,8 +522,10 @@ pub async fn apply_openai(
     let budget = cfg.input_budget(system_tokens + in_msg_system);
 
     let estimates: Vec<usize> = turns.iter().map(estimate_ui_message_tokens).collect();
-    let keep = window_count(&estimates, budget);
-    let drop_count = turns.len().saturating_sub(keep);
+    let cut = stable_drop_count(&estimates, budget, cfg.checkpoint_step());
+    // A bare message array has no verified conversation identity. Remembering
+    // cuts by message content would let unrelated callers affect one another.
+    let drop_count = cut;
     let dropped: Vec<UiMessage> = turns.drain(0..drop_count).collect();
 
     // Reassemble: system block first, then the kept newest turns.
@@ -388,6 +571,46 @@ pub async fn budgeted_short_term(
     system_tokens: usize,
     cfg: &ContextWindowConfig,
 ) -> Option<String> {
+    budgeted_short_term_replay(store, conversation_id, system_tokens, cfg, false)
+        .await
+        .map(|replay| replay.block)
+}
+
+/// Share of the input budget the replay keeps verbatim on a cold-cache
+/// compaction; the rest is summarized. Half leaves the next stretch of warm
+/// turns room to grow before the cut has to move again.
+const COLD_CACHE_KEEP_DIVISOR: usize = 2;
+
+/// A budgeted ACP short-term replay.
+#[derive(Debug)]
+pub struct ShortTermReplay {
+    /// The `Conversation so far:` block to fold into the prompt.
+    pub block: String,
+    /// This turn compacted because the provider cache had expired, and a summary
+    /// was produced. The caller should start the agent on this replay instead of
+    /// resuming its native session, which still holds the uncompacted history.
+    pub compacted_on_cache_expiry: bool,
+}
+
+/// [`budgeted_short_term`], told whether the prompt cache this conversation's
+/// agent would hit has expired (`prompt_cache_warmth::expired_for_agent`).
+///
+/// A held cut (see [`hold_cut`]) keeps the replayed prefix byte-identical so a
+/// warm cache keeps hitting. Once the cache is cold that protection buys
+/// nothing: the next request re-writes the whole prefix at full price whatever
+/// it contains. With `compact_on_cache_expire` (and `auto_compact`) on, a cold
+/// turn therefore windows to a fraction of the budget and summarizes the rest,
+/// and the held cut then keeps that smaller prefix stable while the new cache
+/// is warm. The cost is one summarizer call per expiry, paid only when the
+/// history is long enough to drop anything.
+pub async fn budgeted_short_term_replay(
+    store: &ConversationStore,
+    conversation_id: &str,
+    system_tokens: usize,
+    cfg: &ContextWindowConfig,
+    cache_expired: bool,
+) -> Option<ShortTermReplay> {
+    let cold = cache_expired && cfg.auto_compact && cfg.compact_on_cache_expire;
     let recent = match store
         .get_recent_messages(conversation_id, MAX_SHORT_TERM_FETCH)
         .await
@@ -410,11 +633,30 @@ pub async fn budgeted_short_term(
         .map(|m| estimate_tokens(&m.content) + PER_MESSAGE_OVERHEAD)
         .collect();
     let budget = cfg.input_budget(system_tokens);
-    let keep = window_count(&estimates, budget);
-    let drop_count = prefix.len().saturating_sub(keep);
+    let step = cfg.checkpoint_step();
+    let mut cut = stable_drop_count(&estimates, budget, step);
+    if cold {
+        let cold_cut = stable_drop_count(&estimates, budget / COLD_CACHE_KEEP_DIVISOR, step);
+        // Commit the deeper cut only once its summary exists: a failed summarizer
+        // must not drop turns the normal budget would have kept. The summary is
+        // memoized, so the compaction below reuses it instead of a second call.
+        if cold_cut > cut {
+            let convo: Vec<(String, String)> = prefix[..cold_cut]
+                .iter()
+                .map(|m| (m.role.clone(), m.content.clone()))
+                .collect();
+            if summarize(&convo, cfg).await.is_some() {
+                cut = cold_cut;
+            }
+        }
+    }
+    let drop_count = hold_cut(hash_all([conversation_id]), prefix.len(), cut, step, |n| {
+        hash_all(prefix[..n].iter().map(|m| m.content.as_str()))
+    });
     let (dropped, kept) = prefix.split_at(drop_count);
 
     let mut block = String::from("Conversation so far:\n");
+    let mut summarized = false;
     if !dropped.is_empty() {
         let convo: Vec<(String, String)> = dropped
             .iter()
@@ -433,6 +675,7 @@ pub async fn budgeted_short_term(
                     apply_compact_hooks(Some(conversation_id.to_string()), &convo, summary).await;
                 block.push_str(summary.trim());
                 block.push('\n');
+                summarized = true;
             }
         }
     }
@@ -442,7 +685,26 @@ pub async fn budgeted_short_term(
         block.push_str(msg.content.trim());
         block.push('\n');
     }
-    Some(block)
+    Some(ShortTermReplay {
+        block,
+        compacted_on_cache_expiry: cold && summarized,
+    })
+}
+
+/// Summarize the history before a model change for a context handoff.
+///
+/// Uses the handoff prompt and label but the same memo, excerpt cap and plugin
+/// hooks as compaction: `session_before_compact` observes the handed-off turns
+/// and `session_compact` may rewrite the briefing, so one plugin governs both.
+/// `cfg.max_tokens` caps the excerpt and should be the summarizer's own window.
+pub(crate) async fn summarize_handoff(
+    conversation_id: &str,
+    convo: &[(String, String)],
+    cfg: &ContextWindowConfig,
+) -> Option<String> {
+    fire_before_compact_hooks(Some(conversation_id.to_owned()), convo);
+    let summary = summarize_as(SummaryKind::Handoff, convo, cfg).await?;
+    Some(apply_compact_hooks(Some(conversation_id.to_owned()), convo, summary).await)
 }
 
 /// Cache of summaries keyed by `(model, dropped-turn content)` so an unchanged
@@ -462,11 +724,20 @@ fn http() -> &'static reqwest::Client {
 /// labelled summary block, or `None` on any failure (caller falls back to a
 /// plain drop). Memoized by the dropped-set hash.
 async fn summarize(convo: &[(String, String)], cfg: &ContextWindowConfig) -> Option<String> {
+    summarize_as(SummaryKind::Compact, convo, cfg).await
+}
+
+async fn summarize_as(
+    kind: SummaryKind,
+    convo: &[(String, String)],
+    cfg: &ContextWindowConfig,
+) -> Option<String> {
     if convo.is_empty() {
         return None;
     }
     let key = {
         let mut hasher = DefaultHasher::new();
+        kind.hash(&mut hasher);
         cfg.compact_model.hash(&mut hasher);
         for (role, text) in convo {
             role.hash(&mut hasher);
@@ -495,15 +766,16 @@ async fn summarize(convo: &[(String, String)], cfg: &ContextWindowConfig) -> Opt
         excerpt = excerpt[start..].to_string();
     }
 
-    let summary = match gateway_summarize(&cfg.compact_model, &cfg.compact_effort, &excerpt).await {
-        Ok(s) if !s.trim().is_empty() => s,
-        Ok(_) => return None,
-        Err(e) => {
-            tracing::warn!("context compaction summarize failed, dropping turns instead: {e}");
-            return None;
-        }
-    };
-    let block = format!("[Earlier conversation summary]\n{}", summary.trim());
+    let summary =
+        match gateway_summarize(kind, &cfg.compact_model, &cfg.compact_effort, &excerpt).await {
+            Ok(s) if !s.trim().is_empty() => s,
+            Ok(_) => return None,
+            Err(e) => {
+                tracing::warn!("context compaction summarize failed, dropping turns instead: {e}");
+                return None;
+            }
+        };
+    let block = format!("{}\n{}", kind.label(), summary.trim());
     summary_cache().lock().await.insert(key, block.clone());
     Some(block)
 }
@@ -511,15 +783,20 @@ async fn summarize(convo: &[(String, String)], cfg: &ContextWindowConfig) -> Opt
 /// One non-streaming gateway completion used only for summarization. Mirrors the
 /// request shape of `server::call_side_model` but lives here so the adapters
 /// layer needs no `ServerState` handle.
-async fn gateway_summarize(model: &str, effort: &str, excerpt: &str) -> Result<String, String> {
+async fn gateway_summarize(
+    kind: SummaryKind,
+    model: &str,
+    effort: &str,
+    excerpt: &str,
+) -> Result<String, String> {
     let base = crate::sidecar::gateway::gateway_url();
     let base = base.trim_end_matches('/');
     let mut payload = json!({
         "model": model,
         "stream": false,
-        "max_tokens": 512,
+        "max_tokens": kind.max_output_tokens(),
         "messages": [
-            { "role": "system", "content": COMPACT_SYSTEM_PROMPT },
+            { "role": "system", "content": kind.system_prompt() },
             { "role": "user", "content": format!("Summarize this conversation excerpt:\n\n{excerpt}") },
         ],
     });
@@ -527,10 +804,15 @@ async fn gateway_summarize(model: &str, effort: &str, excerpt: &str) -> Result<S
     if !effort.is_empty() {
         payload["reasoning_effort"] = json!(effort);
     }
-    let mut req = http()
+    let purpose = match kind {
+        SummaryKind::Compact => SidePurpose::Compaction,
+        SummaryKind::Handoff => SidePurpose::Handoff,
+    };
+    let request = http()
         .post(format!("{base}/v1/chat/completions"))
         .timeout(std::time::Duration::from_secs(60))
         .json(&payload);
+    let mut req = with_side_call_headers(request, &purpose);
     if let Some(t) = crate::sidecar::gateway::gateway_token() {
         req = req.bearer_auth(t);
     }
@@ -545,6 +827,7 @@ async fn gateway_summarize(model: &str, effort: &str, excerpt: &str) -> Result<S
         .json()
         .await
         .map_err(|e| format!("response was not valid JSON: {e}"))?;
+    log_side_usage(&purpose, model, &body);
     let text = body
         .get("choices")
         .and_then(|c| c.get(0))
@@ -562,6 +845,7 @@ mod tests {
 
     fn user(text: &str) -> UiMessage {
         UiMessage {
+            metadata: None,
             role: "user".to_owned(),
             content: UiContent::Text(text.to_owned()),
             parts: vec![],
@@ -569,6 +853,7 @@ mod tests {
     }
     fn system(text: &str) -> UiMessage {
         UiMessage {
+            metadata: None,
             role: "system".to_owned(),
             content: UiContent::Text(text.to_owned()),
             parts: vec![],
@@ -580,6 +865,7 @@ mod tests {
             max_tokens: max,
             reserve_output: reserve,
             auto_compact: false,
+            compact_on_cache_expire: false,
             compact_model: "m".to_owned(),
             compact_effort: String::new(),
         }
@@ -605,6 +891,115 @@ mod tests {
     #[test]
     fn window_empty_is_zero() {
         assert_eq!(window_count(&[], 100), 0);
+    }
+
+    #[test]
+    fn stable_drop_is_zero_when_everything_fits() {
+        assert_eq!(stable_drop_count(&[], 100, 50), 0);
+        assert_eq!(stable_drop_count(&[10, 10, 10], 100, 50), 0);
+    }
+
+    #[test]
+    fn stable_drop_still_fits_the_budget_and_keeps_the_last_turn() {
+        let est = vec![10; 20];
+        for (budget, step) in [(0, 1), (5, 1), (25, 10), (50, 25), (99, 40), (150, 500)] {
+            let drop = stable_drop_count(&est, budget, step);
+            assert!(drop < est.len(), "budget {budget} dropped the last turn");
+            let minimal = est.len() - window_count(&est, budget);
+            assert!(drop >= minimal, "budget {budget} kept more than fits");
+        }
+    }
+
+    #[test]
+    fn stable_drop_holds_the_cut_while_history_grows() {
+        // Grow a conversation one 10-token turn at a time against a 100-token
+        // budget. A plain sliding window moves the cut on every over-budget turn;
+        // the stable cut must move far less often, and never backwards.
+        let budget = 100;
+        let mut est = Vec::new();
+        let mut previous = 0;
+        let mut moves = 0;
+        let mut sliding_moves = 0;
+        let mut previous_sliding = 0;
+        for _ in 0..60 {
+            est.push(10);
+            let drop = stable_drop_count(&est, budget, 50);
+            assert!(drop >= previous, "cut moved backwards");
+            if drop != previous {
+                moves += 1;
+            }
+            previous = drop;
+            let sliding = est.len() - window_count(&est, budget);
+            if sliding != previous_sliding {
+                sliding_moves += 1;
+            }
+            previous_sliding = sliding;
+        }
+        assert_eq!(sliding_moves, 50);
+        assert!(moves <= 10, "stable cut moved {moves} times");
+    }
+
+    #[test]
+    fn stable_drop_resists_a_budget_that_jitters_every_turn() {
+        // Real turns re-estimate the system block (recall, memory) each time, so
+        // the history budget wobbles. The checkpoint step comes from settings and
+        // must not wobble with it, and the held cut must never move backwards.
+        let step = 250;
+        let key = hash_all(["jitter-test"]);
+        let mut est = Vec::new();
+        let mut previous = 0;
+        let mut moves = 0;
+        let mut sliding_moves = 0;
+        let mut previous_sliding = 0;
+        for turn in 0..600usize {
+            est.push(10);
+            let budget = 850 + (turn * 97) % 301; // 850..=1150, changes every turn
+            let cut = stable_drop_count(&est, budget, step);
+            let drop = hold_cut(key, est.len(), cut, step, |n| n as u64);
+            let minimal = est.len() - window_count(&est, budget);
+            assert!(drop >= minimal, "turn {turn} kept more than fits");
+            assert!(drop >= previous, "turn {turn} moved the cut backwards");
+            if drop != previous {
+                moves += 1;
+            }
+            previous = drop;
+            if minimal != previous_sliding {
+                sliding_moves += 1;
+            }
+            previous_sliding = minimal;
+        }
+        assert!(
+            moves * 5 < sliding_moves,
+            "stable cut moved {moves} times, sliding window {sliding_moves}"
+        );
+    }
+
+    #[test]
+    fn hold_cut_holds_until_history_or_settings_change() {
+        let key = hash_all(["hold-cut-test"]);
+        assert_eq!(hold_cut(key, 20, 8, 50, |n| n as u64), 8);
+        // Same history, smaller cut this turn (or none at all): the cut holds.
+        assert_eq!(hold_cut(key, 21, 5, 50, |n| n as u64), 8);
+        assert_eq!(hold_cut(key, 21, 0, 50, |n| n as u64), 8);
+        // Different dropped messages under the same key: start fresh.
+        assert_eq!(hold_cut(key, 21, 5, 50, |n| n as u64 + 1), 5);
+        // Settings changed (a new step): start fresh.
+        assert_eq!(hold_cut(key, 21, 2, 80, |n| n as u64 + 1), 2);
+        // A remembered cut that would drop the newest message is ignored.
+        assert_eq!(hold_cut(key, 2, 1, 80, |n| n as u64 + 1), 1);
+        // Nothing dropped and nothing held: the memo forgets the conversation.
+        assert_eq!(hold_cut(key, 30, 0, 90, |n| n as u64), 0);
+        assert_eq!(hold_cut(key, 30, 0, 90, |n| n as u64), 0);
+    }
+
+    #[test]
+    fn checkpoint_step_ignores_the_per_turn_system_block() {
+        let config = cfg(10_000, 1_000);
+        assert_eq!(
+            config.checkpoint_step(),
+            (10_000 - 1_000 - SKILLS_RESERVE) / 4
+        );
+        assert_eq!(cfg(0, 0).checkpoint_step(), 1);
     }
 
     #[tokio::test]
@@ -643,12 +1038,30 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn bare_message_arrays_cannot_inherit_another_callers_context_cut() {
+        let opening = "Review the attached report.";
+        let config = cfg(8192, 1024);
+        let mut attacker = vec![
+            system(&"x".repeat(24_000)),
+            user(opening),
+            user("attacker latest"),
+        ];
+        apply_openai(&mut attacker, 0, &config).await;
+        assert_eq!(attacker.len(), 2);
+        let mut victim = vec![user(opening), user("private follow-up")];
+        apply_openai(&mut victim, 0, &config).await;
+        assert_eq!(victim.len(), 2);
+        assert_eq!(ui_message_text(&victim[0]), opening);
+    }
+
     #[test]
     fn images_counted_flat_not_by_payload() {
         // A message whose only content is a giant base64 image part must not be
         // estimated as a huge token count.
         let huge_b64 = "A".repeat(200_000);
         let msg = UiMessage {
+            metadata: None,
             role: "user".to_owned(),
             content: UiContent::Empty,
             parts: vec![json!({
@@ -677,6 +1090,7 @@ mod tests {
     fn ui_message_text_joins_text_parts_when_content_empty() {
         // With empty content, the text is reconstructed from the `text` parts.
         let msg = UiMessage {
+            metadata: None,
             role: "user".to_owned(),
             content: UiContent::Empty,
             parts: vec![
@@ -691,6 +1105,7 @@ mod tests {
     #[test]
     fn ui_message_text_prefers_content_over_parts() {
         let msg = UiMessage {
+            metadata: None,
             role: "user".to_owned(),
             content: UiContent::Text("primary".to_owned()),
             parts: vec![json!({ "type": "text", "text": "ignored" })],
@@ -767,6 +1182,92 @@ mod tests {
             "over-budget prefix keeps only the newest turn"
         );
         assert!(!block.contains("current"), "current turn excluded");
+    }
+
+    #[tokio::test]
+    async fn cold_cache_recut_keeps_the_warm_cut_when_no_summary_exists() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        let turn = "y".repeat(350); // ~100 tokens each
+        for _ in 0..6 {
+            store
+                .append_message("cold", "user", &turn, None, None, None)
+                .await
+                .unwrap();
+        }
+        store
+            .append_message("cold", "user", "current", None, None, None)
+            .await
+            .unwrap();
+        let mut config = cfg(1_200, 0);
+        config.auto_compact = true;
+        config.compact_on_cache_expire = true;
+        // Warm turn: the whole prefix fits the budget, nothing is cut.
+        let warm = budgeted_short_term_replay(&store, "cold", 0, &config, false)
+            .await
+            .expect("prior context");
+        assert_eq!(warm.block.matches(&turn).count(), 6);
+        assert!(!warm.compacted_on_cache_expiry);
+        // Cold turn with no reachable summarizer: the deeper cut is not committed,
+        // so no turn is lost and the agent keeps its session.
+        let cold = budgeted_short_term_replay(&store, "cold", 0, &config, true)
+            .await
+            .expect("prior context");
+        assert_eq!(cold.block.matches(&turn).count(), 6);
+        assert!(!cold.compacted_on_cache_expiry);
+    }
+
+    #[tokio::test]
+    async fn cold_cache_recut_uses_the_memoized_summary() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        let turns: Vec<String> = (0..6)
+            .map(|index| format!("turn {index} {}", "z".repeat(340)))
+            .collect();
+        for turn in &turns {
+            store
+                .append_message("cold-memo", "user", turn, None, None, None)
+                .await
+                .unwrap();
+        }
+        store
+            .append_message("cold-memo", "user", "current", None, None, None)
+            .await
+            .unwrap();
+        let mut config = cfg(1_200, 0);
+        config.auto_compact = true;
+        config.compact_on_cache_expire = true;
+        config.compact_model = "cold-cache-test-model".to_owned();
+        // Seed the summary memo for every possible deeper cut so no gateway is
+        // needed; only the cut the replay actually takes is read back.
+        for cut in 1..turns.len() {
+            let mut hasher = DefaultHasher::new();
+            SummaryKind::Compact.hash(&mut hasher);
+            config.compact_model.hash(&mut hasher);
+            for turn in &turns[..cut] {
+                "user".hash(&mut hasher);
+                turn.hash(&mut hasher);
+            }
+            summary_cache().lock().await.insert(
+                hasher.finish(),
+                format!("[Earlier conversation summary]\n- first {cut} turns"),
+            );
+        }
+        let cold = budgeted_short_term_replay(&store, "cold-memo", 0, &config, true)
+            .await
+            .expect("prior context");
+        assert!(cold.compacted_on_cache_expiry);
+        assert!(cold.block.contains("[Earlier conversation summary]"));
+        let kept = turns
+            .iter()
+            .filter(|turn| cold.block.contains(*turn))
+            .count();
+        assert!(kept < turns.len(), "older turns were summarized");
+        assert!(cold.block.contains(&turns[5]), "newest turn kept verbatim");
+        // The next, warm turn holds the deeper cut instead of re-growing the prefix.
+        let warm = budgeted_short_term_replay(&store, "cold-memo", 0, &config, false)
+            .await
+            .expect("prior context");
+        assert_eq!(warm.block, cold.block);
+        assert!(!warm.compacted_on_cache_expiry);
     }
 
     // ── Compaction hooks ──────────────────────────────────────────────────────

@@ -14,17 +14,17 @@ import type { ApiTarget } from "@ryuhq/core-client/client";
 import { resolveLocalNodeToken } from "@ryuhq/core-client/node-token";
 
 const ryuProfile = (process.env.RYU_PROFILE ?? "").trim().toLowerCase();
-const PROFILE_PORT_OFFSETS: Record<string, number> = {
-	beta: 4000,
-	canary: 2000,
-	dev: 1000,
-	nightly: 3000,
-	release: 0,
-};
+const PROFILE_PORT_OFFSETS = new Map([
+	["beta", 4000],
+	["canary", 2000],
+	["dev", 1000],
+	["nightly", 3000],
+	["release", 0],
+]);
 
 export function coreUrlForProfile(profile: string): string {
 	const normalized = profile.trim().toLowerCase();
-	const offset = PROFILE_PORT_OFFSETS[normalized] ?? 0;
+	const offset = PROFILE_PORT_OFFSETS.get(normalized) ?? 0;
 	return `http://127.0.0.1:${7980 + offset}`;
 }
 

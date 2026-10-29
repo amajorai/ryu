@@ -7,9 +7,11 @@
 //! desktop editor, updating an existing one, and an undoable source history.
 //!
 //! **Version snapshots** are checkpoints in Ryu's managed local Git repository
-//! under `source-history/skills/<id>/SKILL.md`. The old
-//! `~/.ryu/skill-versions/` JSON files remain readable as a migration fallback,
-//! but new history is the same source Git model used by workflows and pages.
+//! under `files/source-history/skills/<id>/SKILL.md`, the sealed store shared
+//! with workflows, agents and pages. Earlier builds kept plaintext JSON
+//! snapshots under `state/skill-versions/<id>/<vid>.json`;
+//! [`import_legacy_skill_versions`] (run at Core startup) moves them into the
+//! sealed history, verifies each one, and deletes the plaintext folder.
 //!
 //! Core-vs-Gateway: this is squarely Core (it decides *what a skill is*); the
 //! Gateway still governs whether the skill's instructions are *allowed* to be
@@ -25,11 +27,14 @@ use super::SkillRegistry;
 // ── Path helpers ────────────────────────────────────────────────────────────
 
 fn versions_root() -> PathBuf {
-    crate::ryu_data_dir().join("skill-versions")
+    ryu_sidecar_runtime::layout::state_path(&crate::ryu_data_dir(), "skill-versions")
 }
 
 fn source_history() -> SourceHistory {
-    SourceHistory::new(crate::ryu_data_dir().join("source-history"))
+    SourceHistory::new(ryu_sidecar_runtime::layout::files_path(
+        &crate::ryu_data_dir(),
+        "source-history",
+    ))
 }
 
 fn source_history_path(skill_id: &str) -> String {
@@ -140,7 +145,7 @@ pub fn read_skill_source(id: &str) -> std::io::Result<Option<String>> {
 /// keys are preserved; a cleared optional (empty description, empty tool list)
 /// removes that key. `existing` is `None` for a brand-new skill.
 pub fn build_skill_md(existing: Option<&str>, draft: &SkillDraft) -> Result<String, String> {
-    use serde_yml::{Mapping, Value};
+    use noyalib::compat::serde_yaml::{Mapping, Value};
 
     // Start from the existing front-matter mapping so unknown keys survive.
     let mut map: Mapping = match existing {
@@ -149,7 +154,7 @@ pub fn build_skill_md(existing: Option<&str>, draft: &SkillDraft) -> Result<Stri
             if front_raw.trim().is_empty() {
                 Mapping::new()
             } else {
-                serde_yml::from_str(&front_raw).unwrap_or_default()
+                noyalib::compat::serde_yaml::from_str(&front_raw).unwrap_or_default()
             }
         }
         None => Mapping::new(),
@@ -159,14 +164,14 @@ pub fn build_skill_md(existing: Option<&str>, draft: &SkillDraft) -> Result<Stri
     if name.is_empty() {
         return Err("skill name is required".to_owned());
     }
-    map.insert(Value::from("name"), Value::from(name));
+    map.insert("name".to_owned(), Value::from(name));
 
     match draft.description.as_deref().map(str::trim) {
         Some(d) if !d.is_empty() => {
-            map.insert(Value::from("description"), Value::from(d));
+            map.insert("description".to_owned(), Value::from(d));
         }
         _ => {
-            map.remove(Value::from("description"));
+            map.remove("description");
         }
     }
 
@@ -178,19 +183,23 @@ pub fn build_skill_md(existing: Option<&str>, draft: &SkillDraft) -> Result<Stri
         .map(Value::from)
         .collect();
     if tools.is_empty() {
-        map.remove(Value::from("allowed-tools"));
+        map.remove("allowed-tools");
     } else {
-        map.insert(Value::from("allowed-tools"), Value::Sequence(tools));
+        map.insert("allowed-tools".to_owned(), Value::Sequence(tools));
     }
 
     if draft.always_on {
-        map.insert(Value::from("always-on"), Value::from(true));
+        map.insert("always-on".to_owned(), Value::from(true));
     } else {
-        map.remove(Value::from("always-on"));
+        map.remove("always-on");
     }
 
-    let yaml = serde_yml::to_string(&Value::Mapping(map))
+    let mut yaml = noyalib::compat::serde_yaml::to_string(&Value::Mapping(map))
         .map_err(|e| format!("failed to render front-matter: {e}"))?;
+    // noyalib's serde_yaml shim omits the trailing newline the closing `---` fence needs.
+    if !yaml.ends_with('\n') {
+        yaml.push('\n');
+    }
 
     Ok(format!(
         "---\n{yaml}---\n\n{body}\n",
@@ -242,8 +251,12 @@ pub fn create_skill(draft: &SkillDraft) -> Result<WriteResult, CreateError> {
         CreateError::Invalid(format!("could not derive an id from '{}'", draft.name))
     })?;
 
+    // The id is taken when it resolves anywhere in the skills namespace (the
+    // legacy flat `<slug>.md`, `~/.agents/skills/<slug>/`), not only when the
+    // write root has `<slug>/`: writing there would silently shadow that skill.
+    // A bare `<slug>/` without SKILL.md is still refused rather than written into.
     let skill_dir = SkillRegistry::skills_dir().join(&slug);
-    if skill_dir.exists() {
+    if super::resolve_skill_md(&slug).is_some() || skill_dir.exists() {
         return Err(CreateError::Conflict(slug));
     }
 
@@ -349,27 +362,12 @@ pub fn save_skill_version(
     })
 }
 
-/// Read every version file for a skill (full, unsorted). Corrupt files are skipped
-/// rather than failing the whole read.
-fn read_skill_versions(skill_id: &str) -> std::io::Result<Vec<SkillVersion>> {
-    let dir = skill_versions_dir(skill_id)?;
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Ok(Vec::new());
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        if let Ok(bytes) = std::fs::read(&path) {
-            if let Ok(v) = serde_json::from_slice::<SkillVersion>(&bytes) {
-                out.push(v);
-            }
-        }
-    }
-    Ok(out)
-}
+#[path = "store_legacy.rs"]
+mod legacy;
+
+#[cfg(test)]
+use legacy::import_legacy_skill_versions_in;
+pub use legacy::{LegacyImportReport, import_legacy_skill_versions, legacy_skill_versions_pending};
 
 /// List a skill's saved versions, newest first (metadata only).
 pub fn list_skill_versions(skill_id: &str) -> std::io::Result<Vec<SkillVersionMeta>> {
@@ -392,17 +390,6 @@ pub fn list_skill_versions(skill_id: &str) -> std::io::Result<Vec<SkillVersionMe
             created_at: version.created_at,
         });
     }
-    versions.extend(
-        read_skill_versions(skill_id)?
-            .into_iter()
-            .map(|version| SkillVersionMeta {
-                id: version.id,
-                skill_id: version.skill_id,
-                name: version.name,
-                label: version.label,
-                created_at: version.created_at,
-            }),
-    );
     versions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(versions)
 }
@@ -413,6 +400,10 @@ pub fn load_skill_version(
     version_id: &str,
 ) -> std::io::Result<Option<SkillVersion>> {
     validate_id(skill_id)?;
+    // Imported legacy snapshots keep their UUID as 32 hex digits, so an id the
+    // UI cached in its hyphenated form still resolves.
+    let version_id = version_id.replace('-', "").to_ascii_lowercase();
+    let version_id = version_id.as_str();
     if is_git_version_id(version_id) {
         let path = source_history_path(skill_id);
         let history = source_history();
@@ -436,15 +427,7 @@ pub fn load_skill_version(
             }));
         }
     }
-    validate_id(version_id)?;
-    let path = skill_versions_dir(skill_id)?.join(format!("{version_id}.json"));
-    match std::fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
+    Ok(None)
 }
 
 fn is_git_version_id(version_id: &str) -> bool {
@@ -487,78 +470,9 @@ pub fn delete_skill_versions(skill_id: &str) -> std::io::Result<bool> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "store_editor_tests.rs"]
+mod editor_tests;
 
-    #[test]
-    fn build_preserves_unknown_front_matter_keys() {
-        let existing = "---\nname: Old\nlicense: MIT\nenabled: false\n---\nold body";
-        let draft = SkillDraft {
-            name: "New Name".to_owned(),
-            description: Some("desc".to_owned()),
-            allowed_tools: vec!["spider".to_owned()],
-            always_on: true,
-            body: "new body".to_owned(),
-        };
-        let out = build_skill_md(Some(existing), &draft).expect("build");
-        // Editor-managed keys are patched.
-        assert!(out.contains("name: New Name"));
-        assert!(out.contains("description: desc"));
-        assert!(out.contains("allowed-tools:"));
-        assert!(out.contains("always-on: true"));
-        // Unknown / unmanaged keys survive.
-        assert!(out.contains("license: MIT"));
-        assert!(out.contains("enabled: false"));
-        assert!(out.trim_end().ends_with("new body"));
-        // And it round-trips through the loader.
-        let rec = super::super::parse_skill_md("x", &out).expect("round-trip");
-        assert_eq!(rec.name, "New Name");
-        assert_eq!(rec.instructions, "new body");
-        assert!(rec.always_on);
-    }
-
-    #[test]
-    fn build_clears_optional_keys_when_emptied() {
-        let existing = "---\nname: X\ndescription: had one\nalways-on: true\n---\nbody";
-        let draft = SkillDraft {
-            name: "X".to_owned(),
-            description: None,
-            allowed_tools: vec![],
-            always_on: false,
-            body: "body".to_owned(),
-        };
-        let out = build_skill_md(Some(existing), &draft).expect("build");
-        assert!(!out.contains("description:"));
-        assert!(!out.contains("always-on"));
-    }
-
-    #[test]
-    fn version_roundtrip_isolated_by_uuid_id() {
-        // Use a unique id against the real ryu_dir(), then self-clean (the
-        // ryu_dir() OnceLock can't be redirected once resolved).
-        let skill_id = format!("test-skill-{}", uuid::Uuid::new_v4().simple());
-        let src = "---\nname: T\n---\nhello";
-        let meta = save_skill_version(&skill_id, "T", src, Some("v1")).expect("save");
-        assert_eq!(meta.skill_id, skill_id);
-
-        let list = list_skill_versions(&skill_id).expect("list");
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].label.as_deref(), Some("v1"));
-
-        let full = load_skill_version(&skill_id, &meta.id)
-            .expect("load")
-            .expect("some");
-        assert_eq!(full.source, src);
-
-        // Git history is immutable; only legacy JSON snapshots are removable.
-        assert!(!delete_skill_versions(&skill_id).expect("delete legacy history"));
-    }
-
-    #[test]
-    fn rejects_unsafe_ids() {
-        assert!(validate_id("../escape").is_err());
-        assert!(validate_id("a/b").is_err());
-        assert!(validate_id("").is_err());
-        assert!(validate_id("ok-id").is_ok());
-    }
-}
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod tests;

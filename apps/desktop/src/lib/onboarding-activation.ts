@@ -32,38 +32,56 @@ interface ToolkitTaskTemplate {
 	title: string;
 }
 
-const TASK_TEMPLATES: Readonly<Record<string, ToolkitTaskTemplate>> = {
-	gmail: {
-		prompt:
-			"Review my recent email and turn the work waiting for me into a prioritized follow-up list. Include the sender, the next action, and the reason it matters. Do not send or change anything without asking.",
-		title: "Turn recent email into a follow-up list",
-	},
-	hubspot: {
-		prompt:
-			"Review my highest-priority HubSpot opportunities and draft the next follow-up task for each one. Keep the tasks actionable and ask before changing CRM records.",
-		title: "Prepare the next CRM follow-ups",
-	},
-	linear: {
-		prompt:
-			"Review my Linear issues and propose the three tasks that should move next. Explain the order and ask before changing issue state.",
-		title: "Find the next three issues to move",
-	},
-	notion: {
-		prompt:
-			"Review the Notion workspaces I connected and find the most useful next task for me. Return a concise task brief with links and ask before editing anything.",
-		title: "Find the next task in Notion",
-	},
-	slack: {
-		prompt:
-			"Review the recent Slack work I connected and summarize the tasks that need an owner or a follow-up. Ask before sending messages or changing anything.",
-		title: "Turn Slack follow-ups into tasks",
-	},
-	outlook: {
-		prompt:
-			"Review my recent Outlook email and turn the work waiting for me into a prioritized follow-up list. Include the sender, the next action, and the reason it matters. Do not send or change anything without asking.",
-		title: "Turn Outlook email into a follow-up list",
-	},
-};
+const TASK_TEMPLATES = new Map<string, ToolkitTaskTemplate>([
+	[
+		"gmail",
+		{
+			prompt:
+				"Review my recent email and turn the work waiting for me into a prioritized follow-up list. Include the sender, the next action, and the reason it matters. Do not send or change anything without asking.",
+			title: "Turn recent email into a follow-up list",
+		},
+	],
+	[
+		"hubspot",
+		{
+			prompt:
+				"Review my highest-priority HubSpot opportunities and draft the next follow-up task for each one. Keep the tasks actionable and ask before changing CRM records.",
+			title: "Prepare the next CRM follow-ups",
+		},
+	],
+	[
+		"linear",
+		{
+			prompt:
+				"Review my Linear issues and propose the three tasks that should move next. Explain the order and ask before changing issue state.",
+			title: "Find the next three issues to move",
+		},
+	],
+	[
+		"notion",
+		{
+			prompt:
+				"Review the Notion workspaces I connected and find the most useful next task for me. Return a concise task brief with links and ask before editing anything.",
+			title: "Find the next task in Notion",
+		},
+	],
+	[
+		"slack",
+		{
+			prompt:
+				"Review the recent Slack work I connected and summarize the tasks that need an owner or a follow-up. Ask before sending messages or changing anything.",
+			title: "Turn Slack follow-ups into tasks",
+		},
+	],
+	[
+		"outlook",
+		{
+			prompt:
+				"Review my recent Outlook email and turn the work waiting for me into a prioritized follow-up list. Include the sender, the next action, and the reason it matters. Do not send or change anything without asking.",
+			title: "Turn Outlook email into a follow-up list",
+		},
+	],
+]);
 
 export interface ActivationTaskDraft {
 	appName: string | null;
@@ -123,7 +141,7 @@ function hasActiveEmailConnection(
 
 function templateFor(slug: string): ToolkitTaskTemplate {
 	return (
-		TASK_TEMPLATES[slug] ?? {
+		TASK_TEMPLATES.get(slug) ?? {
 			prompt: `Review my recent ${slug} work and suggest the next task I can delegate. Keep it concise, cite the relevant source, and ask before changing anything.`,
 			title: `Find the next task in ${slug}`,
 		}
@@ -253,4 +271,21 @@ export function deriveActivationEligibility(input: {
 		rewardAllowed: true,
 		taskAllowed: true,
 	};
+}
+
+/** Preview and checkout never create work. The live entitlement is rechecked before execution. */
+export function activationStartAction(input: {
+	task: ActivationTaskDraft;
+	recommendations: readonly ActivationRecommendation[];
+	managedInference: boolean;
+}): "connect" | "checkout" | "execute" {
+	if (
+		input.task.appSlug &&
+		!input.recommendations.some(
+			(item) => item.appSlug === input.task.appSlug && item.active
+		)
+	) {
+		return "connect";
+	}
+	return input.managedInference ? "execute" : "checkout";
 }

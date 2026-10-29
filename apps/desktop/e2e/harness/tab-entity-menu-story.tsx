@@ -1,3 +1,6 @@
+declare const window: Window;
+
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // Standalone browser story for the REAL `TabEntityMenuSection` — the entity half
 // of a tab's right-click menu, rendered inside a real `ContextMenu` exactly the
 // way `TitleBar`'s tab pills and the sidebar's vertical tab rows render it.
@@ -97,10 +100,10 @@ function recordDispatch(pluginId: string, body: string) {
 
 // Stand in for Core: serve the contributions payload, accept a host dispatch,
 // and answer the conversation list `ChatHistoryProvider` asks for on mount.
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
-	const json = (value: unknown) =>
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
+	const json = <FixturePayload,>(value: FixturePayload) =>
 		new Response(JSON.stringify(value), {
 			status: 200,
 			headers: { "content-type": "application/json" },
@@ -112,15 +115,15 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 	if (host) {
 		recordDispatch(
 			decodeURIComponent(host[1]),
-			typeof init?.body === "string" ? init.body : ""
+			isNativeText(init?.body) ? init.body : ""
 		);
 		return json({ ok: true });
 	}
 	if (url.includes("/api/conversations")) {
 		return json({ conversations: [] });
 	}
-	return realFetch(input as RequestInfo, init);
-}) as typeof fetch;
+	return realFetch(input, init);
+};
 
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
@@ -178,6 +181,6 @@ if (container) {
 	import.meta.hot?.dispose(() => {
 		root.unmount();
 		queryClient.clear();
-		globalThis.fetch = realFetch;
+		window.fetch = realFetch;
 	});
 }

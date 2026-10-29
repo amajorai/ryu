@@ -1,3 +1,4 @@
+import { z } from "zod";
 export const STALE_ACCOUNT_DAYS = 90;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -42,10 +43,9 @@ export function formatLoginTime(value: Date): string {
 }
 
 /** Bound request-derived device/IP text before it reaches an email. */
-export function boundedLoginDetail(value: unknown): string | undefined {
-	if (typeof value !== "string") {
-		return;
-	}
-	const trimmed = value.trim();
-	return trimmed.length > 0 ? trimmed.slice(0, 200) : undefined;
-}
+export const boundedLoginDetail = z
+	.string()
+	.trim()
+	.transform((value) => (value.length > 0 ? value.slice(0, 200) : undefined))
+	.optional()
+	.catch(undefined).parse;

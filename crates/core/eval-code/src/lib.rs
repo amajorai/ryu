@@ -4,10 +4,9 @@
 //! `(input, output, expected, vars) -> {score: 0..1, pass?: bool, detail?: string}`
 //! that scores one eval case. It runs in one of two isolated runtimes:
 //!
-//! - **JS** — the same deny-all **Deno** subprocess the PTC tool-exec path uses
-//!   (zero `--allow-*` → no net/FS/env, `env_clear`, `kill_on_drop`,
-//!   deadline-bounded), but with **no tool bridge**: the payload is embedded and
-//!   the return value is read back over a tagged stdout line
+//! - **JS** — the same deny-all WebAssembly sandbox the PTC tool-exec path uses
+//!   (QuickJS in Wasmtime: no net/FS/env, deadline-bounded), but with **no tool
+//!   bridge**: the payload is embedded and the return value is reported back
 //!   ([`ryu_tool_exec::run_eval_js`]). We do NOT weaken the tool-exec sandbox.
 //! - **Python** — routed through the swappable [`ryu_sandbox`] crate's
 //!   command-backend abstraction (deny-all caps, stdin = payload JSON) when a
@@ -30,7 +29,7 @@
 //! the tree already draws that line the same way
 //! (`plugins::lifecycle::stub_may_approve` refuses arbitrary-code-execution
 //! grants in release builds even when the stub seam is on). The JS arm has always
-//! behaved this way — no Deno ⇒ `skipped`, never a host fallback — so this makes
+//! behaved this way — no sandbox ⇒ `skipped`, never a host fallback — so this makes
 //! the two languages agree.
 //!
 //! **Core-vs-Gateway placement:** code execution is a *Core* capability, so the
@@ -84,7 +83,9 @@ impl CodeEvalLang {
     /// an unrecognised language so the caller can report it honestly.
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
-            "js" | "javascript" | "deno" | "ts" | "typescript" => Some(Self::Js),
+            // JavaScript only: the sandbox runs no TypeScript transpiler, so a
+            // `ts` tag is unrecognised rather than failing on its first annotation.
+            "js" | "javascript" => Some(Self::Js),
             "py" | "python" | "python3" => Some(Self::Python),
             _ => None,
         }
@@ -282,7 +283,7 @@ pub async fn run_code_evaluator(
 
 // ── JS ───────────────────────────────────────────────────────────────────────
 
-#[cfg(feature = "tool-exec-deno")]
+#[cfg(feature = "js-sandbox")]
 async fn run_js(source: &str, payload: &Value, timeout: Duration) -> CodeEvalOutcome {
     match ryu_tool_exec::run_eval_js(source, payload, timeout).await {
         ryu_tool_exec::EvalJsOutcome::Value(v) => CodeEvalOutcome::from_return(&v),
@@ -290,10 +291,10 @@ async fn run_js(source: &str, payload: &Value, timeout: Duration) -> CodeEvalOut
     }
 }
 
-#[cfg(not(feature = "tool-exec-deno"))]
+#[cfg(not(feature = "js-sandbox"))]
 async fn run_js(_source: &str, _payload: &Value, _timeout: Duration) -> CodeEvalOutcome {
     CodeEvalOutcome::skipped(
-        "JS code evaluators require the tool-exec-deno backend, which is not built",
+        "JS code evaluators require the js-sandbox backend, which is not built",
     )
 }
 
@@ -465,7 +466,7 @@ async fn run_python_subprocess(script: &str, payload: &[u8], timeout: Duration) 
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
 
-    // Scrub secrets from the inherited env (mirrors the Deno spawn) but keep the
+    // Scrub secrets from the inherited env (mirrors the sandbox's child spawn) but keep the
     // non-secret vars python needs (PATH so the interpreter resolves, etc.).
     let scrubbed = crate::env_scrub::scrub_child_env(std::env::vars(), &[]);
     let mut child = match tokio::process::Command::new(bootstrap_python())

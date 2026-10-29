@@ -38,7 +38,7 @@ describe("cross-type recency sort", () => {
 	// regardless of the raw shapes.
 	it("orders newest-first and sinks timeless items (agents) to the end", () => {
 		const items = [
-			{ id: "agent", raw: null as unknown }, // no updatedAt
+			{ id: "agent", raw: null }, // no updatedAt
 			{ id: "chat", raw: 1_700_000_500_000 }, // newest, epoch ms
 			{ id: "workflow", raw: "2023-11-14T22:13:20.000Z" }, // older, ISO
 		];

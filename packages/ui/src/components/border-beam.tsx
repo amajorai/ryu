@@ -3,6 +3,7 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { BorderBeam as BorderBeamPrimitive } from "border-beam";
 import type { ComponentProps, ReactNode } from "react";
+import { usePrefersReducedMotion } from "./reduced-motion.ts";
 
 export {
 	BorderBeam,
@@ -26,6 +27,9 @@ interface NavBeamCtaProps {
 /**
  * Border-beam wrapper tuned for dropdown menu CTAs. Pulse breathes inside the
  * item border; rotate sends a traveling beam around it (sm = button-sized).
+ * Under reduced motion the library already hides the pulse (it drops every
+ * animation, fade-in included) but keeps the rotating beam spinning, so both
+ * stay inactive for those visitors, as the landing download beam does.
  */
 export function NavBeamCta({
 	children,
@@ -33,8 +37,10 @@ export function NavBeamCta({
 	theme = "dark",
 	className,
 }: NavBeamCtaProps) {
+	const reduceMotion = usePrefersReducedMotion();
 	return (
 		<BorderBeamPrimitive
+			active={!reduceMotion}
 			borderRadius={16}
 			className={cn("w-full", className)}
 			colorVariant="colorful"

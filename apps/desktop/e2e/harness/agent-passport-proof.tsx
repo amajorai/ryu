@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { AgentPassportPanel } from "../../src/components/agents/AgentPassportPanel.tsx";
@@ -122,12 +123,11 @@ const auditEntries: AuditEntry[] = [
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
-	const url =
-		typeof input === "string"
-			? input
-			: input instanceof Request
-				? input.url
-				: input.url;
+	const url = isNativeText(input)
+		? input
+		: input instanceof Request
+			? input.url
+			: input.url;
 	if (url.includes("/api/gateway/audit")) {
 		return new Response(
 			JSON.stringify({
@@ -145,12 +145,12 @@ const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<QueryClientProvider client={queryClient}>
 		<main className="min-h-screen bg-background px-5 py-8 text-foreground sm:px-10">
 			<div className="mx-auto max-w-5xl">
 				<div className="mb-6 border-b pb-5">
-					<p className="font-mono text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-mono text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Ryu governance proof · agent level
 					</p>
 					<h1 className="mt-2 font-semibold text-2xl tracking-tight">

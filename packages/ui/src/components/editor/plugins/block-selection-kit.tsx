@@ -37,7 +37,7 @@ export const BlockSelectionKit = [
 					return null;
 				}
 
-				return <BlockSelection {...(props as any)} />;
+				return <BlockSelection {...props} />;
 			},
 		},
 	})),

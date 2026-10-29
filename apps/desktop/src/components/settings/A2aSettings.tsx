@@ -2,14 +2,18 @@ import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
+import { SensitiveValue } from "@ryu/ui/components/sensitive-value.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
+import { z } from "zod";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import {
+	type A2aCardSignature,
 	type A2aPeer,
 	type A2aPeerCredential,
 	type A2aPrincipal,
@@ -43,6 +47,27 @@ const ALL_SCOPES: A2aScope[] = [
 	"push_config",
 	"extended_card",
 ];
+
+const CARD_SIGNATURE_LABELS: Record<A2aCardSignature["status"], string> = {
+	invalid: "signature invalid",
+	unsigned: "unsigned card",
+	unverifiable: "signature unchecked",
+	verified: "signed card",
+};
+
+function cardSignatureDetail(signature: A2aCardSignature): string {
+	switch (signature.status) {
+		case "verified":
+			return `Agent Card signature verified with key ${signature.kid}`;
+		case "unsigned":
+			return "The peer's Agent Card carries no signature";
+		case "unverifiable":
+		case "invalid":
+			return signature.reason;
+		default:
+			return "";
+	}
+}
 
 type PeerCredentialDraft =
 	| { kind: "none" }
@@ -103,13 +128,15 @@ function credentialFromDraft(
 		case "none":
 			return undefined;
 		case "bearer":
-			return draft.token ? draft : undefined;
+			return draft.token.trim() ? draft : undefined;
 		case "api_key":
-			return draft.header && draft.value ? draft : undefined;
+			return draft.header.trim() && draft.value.trim() ? draft : undefined;
 		case "basic":
-			return draft.username && draft.password ? draft : undefined;
+			return draft.username.trim() && draft.password.trim() ? draft : undefined;
 		case "oauth2_client_credentials":
-			return draft.tokenUrl && draft.clientId && draft.clientSecret
+			return draft.tokenUrl.trim() &&
+				draft.clientId.trim() &&
+				draft.clientSecret.trim()
 				? {
 						clientId: draft.clientId,
 						clientSecret: draft.clientSecret,
@@ -128,12 +155,12 @@ function credentialFromDraft(
 	}
 }
 
-function errorMessage(error: unknown): string {
-	if (error && typeof error === "object" && "serverMessage" in error) {
-		const message = error.serverMessage;
-		if (typeof message === "string" && message) {
-			return message;
-		}
+function errorMessage<TError>(error: TError): string {
+	const parsed = z
+		.object({ serverMessage: z.string().min(1) })
+		.safeParse(error);
+	if (parsed.success) {
+		return parsed.data.serverMessage;
 	}
 	return error instanceof Error ? error.message : "The A2A request failed";
 }
@@ -147,17 +174,20 @@ function artifactSummaries(
 	}
 	const summaries: { id: string; name: string }[] = [];
 	for (const artifact of artifacts) {
-		if (!artifact || typeof artifact !== "object") {
+		const parsed = z
+			.object({
+				artifactId: z.string(),
+				name: z.string().optional().catch(undefined),
+			})
+			.safeParse(artifact);
+		if (!parsed.success) {
 			continue;
 		}
-		const id = "artifactId" in artifact ? artifact.artifactId : undefined;
-		if (typeof id !== "string") {
-			continue;
-		}
-		const rawName = "name" in artifact ? artifact.name : undefined;
+		const id = parsed.data.artifactId;
+		const rawName = parsed.data.name;
 		summaries.push({
 			id,
-			name: typeof rawName === "string" && rawName ? rawName : "Artifact",
+			name: isNativeText(rawName) && rawName ? rawName : "Artifact",
 		});
 	}
 	return summaries;
@@ -242,11 +272,7 @@ export function A2aSettingsView({
 		tasks.error;
 
 	if (settings.isLoading && !settings.data) {
-		return (
-			<div className="flex justify-center rounded-lg bg-muted/40 p-8">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows inset="catalog" />;
 	}
 	if (!settings.data) {
 		return (
@@ -269,8 +295,11 @@ export function A2aSettingsView({
 	return (
 		<div className="space-y-4">
 			{firstError ? (
-				<div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-status-destructive text-xs">
-					{errorMessage(firstError)}
+				<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-status-destructive text-xs">
+					<span>{errorMessage(firstError)}</span>
+					<Button onClick={() => void reload()} size="sm" variant="ghost">
+						Retry A2A data
+					</Button>
 				</div>
 			) : null}
 			<ServerConfigForm
@@ -428,6 +457,21 @@ function ServerConfigForm({
 					}
 				/>
 			</div>
+			<div className="flex items-center justify-between gap-4">
+				<div>
+					<p className="font-medium text-sm">Require signed peer cards</p>
+					<p className="text-muted-foreground text-xs">
+						Only discover peers whose Agent Card signature verifies.
+					</p>
+				</div>
+				<Switch
+					aria-label="Require verified Agent Card signatures from peers"
+					checked={draft.requireSignedPeerCards ?? false}
+					onCheckedChange={(requireSignedPeerCards) =>
+						setDraft({ ...draft, requireSignedPeerCards })
+					}
+				/>
+			</div>
 			<div className="rounded-md border bg-background/60 px-3 py-2">
 				<p className="text-muted-foreground text-xs">Agent Card</p>
 				<code className="break-all text-xs">{cardUrl}</code>
@@ -544,7 +588,9 @@ function PublishedAgentsPanel({
 				{published.map((agent) => (
 					<div className="flex items-center gap-3 px-3 py-2.5" key={agent.id}>
 						<div className="min-w-0 flex-1">
-							<p className="truncate font-medium text-sm">{agent.name}</p>
+							<p className="truncate font-medium text-sm" title={agent.name}>
+								{agent.name}
+							</p>
 							<p className="truncate text-muted-foreground text-xs">
 								{agent.agentId} · {agent.skills.length} skill
 								{agent.skills.length === 1 ? "" : "s"}
@@ -557,6 +603,7 @@ function PublishedAgentsPanel({
 							onCheckedChange={() => update.mutate(agent)}
 						/>
 						<Button
+							aria-label={`Remove published agent ${agent.name}`}
 							disabled={remove.isPending}
 							onClick={() => remove.mutate(agent.id)}
 							size="sm"
@@ -589,6 +636,8 @@ function PeersPanel({
 	const [credential, setCredential] = useState<PeerCredentialDraft>(
 		emptyCredentialDraft("bearer")
 	);
+	const credentialReady =
+		credential.kind === "none" || credentialFromDraft(credential) !== undefined;
 	const discover = useMutation({
 		mutationFn: () =>
 			discoverA2aPeer(target, {
@@ -621,6 +670,11 @@ function PeersPanel({
 			createAgent({
 				description: `Remote A2A peer at ${peer.agentCardUrl}`,
 				engine: `a2a:${peer.id}`,
+				// Identity mode does not apply to a remote peer: it runs on its own
+				// node under that node's accounts, and the editor shows a note
+				// instead of the choice. The record keeps the default, and Core
+				// lets only an unrestricted agent hand it work.
+				identityMode: "managed",
 				model: null,
 				name: peer.name,
 				systemPrompt: null,
@@ -633,7 +687,7 @@ function PeersPanel({
 
 	return (
 		<SectionCard
-			description="Discover an Agent Card first. Outbound calls remain blocked until you explicitly trust the peer. Credentials are write-only."
+			description="Discover an Agent Card first. Outbound calls remain blocked until you explicitly trust the peer. Credentials are write-only. A peer added to Agents works with the accounts on its own node, so it has no identity to choose here, and only an agent that acts as you with no account limit can hand it work."
 			title="Peer agents"
 		>
 			<div className="grid gap-2 sm:grid-cols-2">
@@ -795,7 +849,7 @@ function PeersPanel({
 				) : null}
 			</div>
 			<Button
-				disabled={!url.trim()}
+				disabled={!(url.trim() && credentialReady)}
 				loading={discover.isPending}
 				onClick={() => discover.mutate()}
 				size="sm"
@@ -812,8 +866,18 @@ function PeersPanel({
 					<div className="flex items-center gap-2 px-3 py-2.5" key={peer.id}>
 						<div className="min-w-0 flex-1">
 							<div className="flex items-center gap-2">
-								<p className="truncate font-medium text-sm">{peer.name}</p>
+								<p className="truncate font-medium text-sm" title={peer.name}>
+									{peer.name}
+								</p>
 								<Badge variant="outline">{peer.trust}</Badge>
+								{peer.cardSignature ? (
+									<Badge
+										title={cardSignatureDetail(peer.cardSignature)}
+										variant="outline"
+									>
+										{CARD_SIGNATURE_LABELS[peer.cardSignature.status]}
+									</Badge>
+								) : null}
 							</div>
 							<p className="truncate text-muted-foreground text-xs">
 								{peer.agentCardUrl} · {peer.credentialKind.replaceAll("_", " ")}
@@ -821,6 +885,7 @@ function PeersPanel({
 							</p>
 						</div>
 						<Button
+							aria-label={`Add ${peer.name} to Agents`}
 							disabled={
 								peer.trust !== "trusted" ||
 								agents.some((agent) => agent.engine === `a2a:${peer.id}`) ||
@@ -835,6 +900,7 @@ function PeersPanel({
 								: "Add to Agents"}
 						</Button>
 						<Button
+							aria-label={`${peer.trust === "trusted" ? "Revoke trust from" : "Trust"} ${peer.name}`}
 							disabled={trust.isPending}
 							onClick={() =>
 								trust.mutate({
@@ -848,6 +914,7 @@ function PeersPanel({
 							{peer.trust === "trusted" ? "Revoke" : "Trust"}
 						</Button>
 						<Button
+							aria-label={`Remove peer ${peer.name}`}
 							disabled={remove.isPending}
 							onClick={() => remove.mutate(peer.id)}
 							size="sm"
@@ -946,13 +1013,20 @@ function AccessPanel({
 						token is issued.
 					</p>
 					<code className="block select-all break-all rounded bg-background p-2 text-xs">
-						{issuedToken}
+						<SensitiveValue label="A2A token" value={issuedToken} />
 					</code>
 					<Button
+						aria-label="Copy A2A token"
 						className="mt-2"
-						onClick={() => {
-							void navigator.clipboard.writeText(issuedToken);
-							toast.success("A2A token copied");
+						onClick={async () => {
+							try {
+								await navigator.clipboard.writeText(issuedToken);
+								toast.success("A2A token copied");
+							} catch {
+								toast.error(
+									"Couldn't copy the A2A token. Reveal and copy it while this panel is open."
+								);
+							}
 						}}
 						size="sm"
 						variant="ghost"
@@ -973,8 +1047,16 @@ function AccessPanel({
 						key={principal.id}
 					>
 						<div className="min-w-0 flex-1">
-							<p className="truncate font-medium text-sm">{principal.name}</p>
-							<p className="truncate text-muted-foreground text-xs">
+							<p
+								className="truncate font-medium text-sm"
+								title={principal.name}
+							>
+								{principal.name}
+							</p>
+							<p
+								className="truncate text-muted-foreground text-xs"
+								title={principal.scopes.join(", ")}
+							>
 								{principal.scopes.join(", ")}
 							</p>
 						</div>
@@ -982,6 +1064,7 @@ function AccessPanel({
 							<Badge variant="outline">revoked</Badge>
 						) : null}
 						<Button
+							aria-label={`Revoke token for ${principal.name}`}
 							disabled={Boolean(principal.revokedAt) || revoke.isPending}
 							onClick={() => revoke.mutate(principal.id)}
 							size="sm"
@@ -1022,17 +1105,21 @@ function TasksPanel({
 					</p>
 				) : null}
 				{tasks.map((task) => {
-					const protocolTaskId =
-						typeof task.protocolTask.id === "string"
-							? task.protocolTask.id
-							: task.id;
+					const protocolTaskId = isNativeText(task.protocolTask.id)
+						? task.protocolTask.id
+						: task.id;
 					const artifacts = artifactSummaries(task);
 					const canCancel = ["submitted", "working"].includes(task.state);
 					return (
 						<div className="flex items-center gap-3 px-3 py-2.5" key={task.id}>
 							<div className="min-w-0 flex-1">
 								<div className="flex items-center gap-2">
-									<p className="truncate font-mono text-xs">{protocolTaskId}</p>
+									<p
+										className="truncate font-mono text-xs"
+										title={protocolTaskId}
+									>
+										{protocolTaskId}
+									</p>
 									<Badge variant="outline">{task.state}</Badge>
 								</div>
 								<p className="text-muted-foreground text-xs">
@@ -1041,7 +1128,10 @@ function TasksPanel({
 								</p>
 								{artifacts.length > 0 ? (
 									<details className="mt-1 text-xs">
-										<summary className="cursor-pointer text-muted-foreground">
+										<summary
+											aria-label={`View artifacts for A2A task ${protocolTaskId}`}
+											className="cursor-pointer text-muted-foreground"
+										>
 											View artifacts
 										</summary>
 										<ul className="mt-1 space-y-0.5 pl-4">
@@ -1055,6 +1145,7 @@ function TasksPanel({
 								) : null}
 							</div>
 							<Button
+								aria-label={`Cancel A2A task ${protocolTaskId}`}
 								disabled={!canCancel || cancel.isPending}
 								onClick={() => cancel.mutate(task.id)}
 								size="sm"

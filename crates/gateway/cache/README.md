@@ -13,6 +13,22 @@ Two response caches, each a swappable capability with an in-memory built-in:
   `SemanticCacheBackend`, `SemanticCacheRegistry`, `SemanticCacheConfig`, plus the shared
   `embed_text` / `cosine_similarity` helpers (also used by the Gateway smart router).
 
+- **`redis`** — `RedisExactCache` (`SET … PX` / `GET`) and `RedisSemanticCache` (per-scope sorted-set
+  index capped at `max_entries`; brute-force cosine over the newest entries, or RediSearch
+  `FT.SEARCH … KNN 1` over a per-dimension `FLAT COSINE` index). Registered by the Gateway under the
+  `"redis"` id when `RYU_GATEWAY_REDIS_URL` is set; settings in `RedisCacheConfig` (`[redis_cache]`).
+- **`embedding`** — `EmbeddingCache` for `/v1/embeddings`, keyed by provider scope, `dimensions`,
+  `encoding_format`, and a hash of each normalized input; memory LRU store (entry + byte caps) or
+  Redis store. Config: `EmbeddingCacheConfig` (`[embedding_cache]`).
+- **`stats`** — `CacheStats` counters surfaced under `cache_backends` in Gateway metrics.
+
+Both trait families carry async verbs (`get_async`/`insert_async`, `lookup_async`/`insert_async`)
+with sync defaults so in-process backends are unchanged and network backends never block a worker.
+Redis failures are counted and served as misses. Redis transport is `ryu-redis-wire`.
+
+Tests: `cargo test -p ryu-gw-cache` (Redis paths run over an in-process RESP server). Set
+`RYU_TEST_REDIS_URL` / `RYU_TEST_REDISEARCH_URL` to also run `tests/redis_live.rs` against real servers.
+
 ## Role in the decomposition
 
 An **extracted gateway stage crate**. The swap seam is a **backend trait + id-keyed registry** per

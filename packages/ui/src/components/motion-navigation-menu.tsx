@@ -8,6 +8,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type { CSSProperties } from "react";
 import {
 	type ComponentPropsWithRef,
 	cloneElement,
@@ -22,8 +23,15 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { isNativeFunction } from "../lib/native-primitive-observation.ts";
+import drawingStyles from "./motion-navigation-menu.drawing.module.css";
 
-// biome-ignore lint/performance/noNamespaceImport: motion namespace API
+interface OverlayLayerStyle extends CSSProperties {
+	"--motion-navigation-menu-1-z-index"?: CSSProperties["zIndex"];
+}
+interface BackdropLayerStyle extends CSSProperties {
+	"--motion-navigation-menu-2-z-index"?: CSSProperties["zIndex"];
+}
 
 interface Spring {
 	bounce: number;
@@ -73,6 +81,7 @@ type MotionNavigationMenuProps = Omit<
 > & {
 	viewport?: boolean;
 	viewportClassName?: string;
+	viewportAppearance?: "default" | "marketing";
 	springBounce?: number;
 	springStiffness?: number;
 	springDamping?: number;
@@ -85,6 +94,7 @@ function MotionNavigationMenu({
 	children,
 	viewport = true,
 	viewportClassName,
+	viewportAppearance = "default",
 	springBounce = 0,
 	springStiffness = 350,
 	springDamping = 32,
@@ -138,7 +148,6 @@ function MotionNavigationMenu({
 			cancelAnimationFrame(frameRef.current);
 		}
 
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
 		frameRef.current = requestAnimationFrame(() => {
 			const root = rootRef.current;
 
@@ -209,7 +218,7 @@ function MotionNavigationMenu({
 		(node: HTMLElement | null) => {
 			rootRef.current = node;
 
-			if (typeof ref === "function") {
+			if (isNativeFunction(ref)) {
 				ref(node);
 			} else if (ref) {
 				ref.current = node;
@@ -307,13 +316,12 @@ function MotionNavigationMenu({
 		// trigger out of the DOM rather than closing over `activeValue`, so its
 		// identity does not change when the menu does and this would otherwise run
 		// only once. The work is rAF-debounced, so an extra call is harmless.
-		// biome-ignore lint/correctness/useExhaustiveDependencies: reposition whenever the active menu changes
 	}, [updateViewportPosition, activeValue]);
 
 	useLayoutEffect(() => {
 		const root = rootRef.current;
 
-		if (!root || typeof ResizeObserver === "undefined") {
+		if (!root || globalThis.ResizeObserver === undefined) {
 			return () => {
 				if (frameRef.current !== null) {
 					cancelAnimationFrame(frameRef.current);
@@ -375,8 +383,8 @@ function MotionNavigationMenu({
 
 	return (
 		<MotionNavigationMenuContext.Provider value={contextValue}>
-			{/* biome-ignore lint/a11y/useSemanticElements: nav is the semantic element here */}
-			{/* biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/noNoninteractiveElementInteractions: custom drag/resize interaction */}
+			{}
+			{}
 			<nav
 				className={cn(
 					"group/navigation-menu relative flex max-w-max flex-1 items-center justify-center",
@@ -401,6 +409,7 @@ function MotionNavigationMenu({
 				{children}
 				{viewport && (
 					<MotionNavigationMenuViewport
+						appearance={viewportAppearance}
 						className={viewportClassName}
 						contentByValue={contentByValue}
 					/>
@@ -417,17 +426,20 @@ function MotionNavigationMenuList({
 }: ComponentPropsWithRef<"ul"> & {
 	highlightClassName?: string;
 }) {
+	const overlayLayerStyle: OverlayLayerStyle = {
+		"--motion-navigation-menu-1-z-index": -1,
+	};
 	return (
 		<Highlight
 			className={cn(
-				"pointer-events-none rounded-full bg-accent",
-				highlightClassName
+				cn("pointer-events-none rounded-full bg-accent", highlightClassName),
+				drawingStyles.overlayLayer
 			)}
 			containerClassName="relative"
 			controlledItems
 			hover
 			mode="parent"
-			style={{ zIndex: -1 }}
+			style={overlayLayerStyle}
 		>
 			<ul
 				className={cn(
@@ -463,17 +475,18 @@ function MotionNavigationMenuItem({
 }
 
 const motionNavigationMenuTriggerStyle = cva(
-	"group inline-flex h-9 w-max items-center justify-center rounded-full bg-transparent px-3 py-2 font-medium text-sm outline-none transition-colors hover:text-accent-foreground focus:text-accent-foreground focus-visible:outline-1 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:text-accent-foreground"
+	"group inline-flex h-9 w-max items-center justify-center rounded-full bg-transparent px-3 py-2 font-medium text-sm outline-none transition-colors hover:text-accent-foreground focus:text-accent-foreground focus-visible:outline-1 focus-visible:ring-3 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[state=open]:text-accent-foreground"
 );
 
 function MotionNavigationMenuTrigger({
 	className,
+	tone,
 	children,
 	onPointerEnter,
 	onFocus,
 	onClick,
 	...props
-}: ComponentPropsWithRef<"button">) {
+}: ComponentPropsWithRef<"button"> & { tone?: "muted" | "accent" }) {
 	const context = useContext(MotionNavigationMenuContext);
 	const itemContext = useContext(MotionNavigationMenuItemContext);
 	const value = itemContext?.value;
@@ -483,7 +496,13 @@ function MotionNavigationMenuTrigger({
 		<HighlightItem asChild>
 			<button
 				aria-expanded={isOpen}
-				className={cn(motionNavigationMenuTriggerStyle(), "group", className)}
+				className={cn(
+					motionNavigationMenuTriggerStyle(),
+					"group",
+					tone === "muted" && "bg-muted",
+					tone === "accent" && "text-accent-foreground",
+					className
+				)}
 				data-cuelume-hover="tick"
 				data-cuelume-toggle=""
 				data-slot="navigation-menu-trigger"
@@ -601,17 +620,20 @@ function MotionNavigationMenuContentInner({
 	innerClassName?: string;
 	children: ReactNode;
 }) {
+	const backdropLayerStyle: BackdropLayerStyle = {
+		"--motion-navigation-menu-2-z-index": -1,
+	};
 	return (
 		<Highlight
 			className={cn(
-				"pointer-events-none rounded-sm bg-accent",
-				highlightClassName
+				cn("pointer-events-none rounded-sm bg-accent", highlightClassName),
+				drawingStyles.backdropLayer
 			)}
 			containerClassName="relative"
 			controlledItems
 			hover
 			mode="parent"
-			style={{ zIndex: -1 }}
+			style={backdropLayerStyle}
 		>
 			<div className={cn("relative z-10", innerClassName)}>{children}</div>
 		</Highlight>
@@ -620,9 +642,11 @@ function MotionNavigationMenuContentInner({
 
 function MotionNavigationMenuViewport({
 	className,
+	appearance = "default",
 	contentByValue,
 }: ComponentPropsWithRef<"div"> & {
 	contentByValue?: Record<string, ContentRecord>;
+	appearance?: "default" | "marketing";
 }) {
 	const context = useContext(MotionNavigationMenuContext);
 	const measureRef = useRef<HTMLDivElement | null>(null);
@@ -658,7 +682,7 @@ function MotionNavigationMenuViewport({
 
 		updateSize();
 
-		if (typeof ResizeObserver === "undefined") {
+		if (globalThis.ResizeObserver === undefined) {
 			return;
 		}
 
@@ -702,6 +726,8 @@ function MotionNavigationMenuViewport({
 						// Backdrop blur needs a translucent surface so the page behind the
 						// mega-menu can contribute pixels to the filter.
 						"rounded-2xl border border-border/50 bg-muted/70 text-popover-foreground shadow-lg backdrop-blur-2xl backdrop-saturate-150",
+						appearance === "marketing" &&
+							"bg-background shadow-none backdrop-blur-none backdrop-saturate-100",
 						className
 					)}
 					data-slot="navigation-menu-viewport"
@@ -762,26 +788,34 @@ function MotionNavigationMenuViewport({
 	);
 }
 
+type MotionNavigationMenuLinkCloneProps = ComponentPropsWithRef<"a"> & {
+	"data-slot"?: "navigation-menu-link";
+};
+
 function MotionNavigationMenuLink({
 	className,
+	spacing,
 	render,
 	...props
 }: ComponentPropsWithRef<"a"> & {
 	/** Base-UI-style escape hatch: render this element (e.g. a Next.js `<Link>`)
 	 * instead of a bare `<a>`, preserving client-side navigation. */
 	render?: ReactElement<{ className?: string }>;
+	spacing?: "compact" | "horizontal";
 }) {
 	const linkClassName = cn(
-		"flex flex-col gap-1 rounded-sm p-2 text-sm outline-none transition-colors hover:text-accent-foreground focus:text-accent-foreground focus-visible:outline-1 focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[active=true]:text-accent-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+		"flex flex-col gap-1 rounded-sm p-2 text-sm outline-none transition-colors hover:text-accent-foreground focus:text-accent-foreground focus-visible:outline-1 focus-visible:ring-3 focus-visible:ring-ring data-[active=true]:text-accent-foreground [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+		spacing === "compact" && "px-3 py-1",
+		spacing === "horizontal" && "px-3",
 		className
 	);
 
 	const child = render ? (
-		cloneElement(render, {
+		cloneElement<MotionNavigationMenuLinkCloneProps>(render, {
 			...props,
 			className: cn(linkClassName, render.props.className),
 			"data-slot": "navigation-menu-link",
-		} as Record<string, unknown>)
+		})
 	) : (
 		<a className={linkClassName} data-slot="navigation-menu-link" {...props} />
 	);

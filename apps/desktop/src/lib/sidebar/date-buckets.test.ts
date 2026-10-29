@@ -63,7 +63,7 @@ describe("bucketByDate", () => {
 				item("last-week", START - 3 * DAY_MS),
 			],
 			stampOf,
-			START
+			START,
 		);
 		expect(buckets.map((b) => b.key)).toEqual(["today", "last-week", "older"]);
 		expect(buckets.map((b) => b.label)).toEqual([
@@ -81,7 +81,7 @@ describe("bucketByDate", () => {
 				item("noon", START + 5000),
 			],
 			stampOf,
-			START
+			START,
 		);
 		expect(buckets).toHaveLength(1);
 		expect(buckets[0]?.items.map((i) => i.id)).toEqual([
@@ -95,7 +95,7 @@ describe("bucketByDate", () => {
 		const buckets = bucketByDate(
 			[item("a", null), item("b", START + 1), item("c", null)],
 			stampOf,
-			START
+			START,
 		);
 		expect(buckets.map((b) => b.key)).toEqual(["today", UNDATED_BUCKET_KEY]);
 		// Incoming order preserved — there is no stamp to sort by.
@@ -124,7 +124,7 @@ describe("bucketByDate", () => {
 				item("u", null),
 			],
 			stampOf,
-			START
+			START,
 		);
 		expect(buckets).toHaveLength(7);
 		for (const bucket of buckets) {
@@ -136,7 +136,7 @@ describe("bucketByDate", () => {
 describe("rowStamp", () => {
 	it("prefers the spec's declared key", () => {
 		expect(rowStamp({ startedAt: START, updatedAt: 1 }, "startedAt")).toBe(
-			START
+			START,
 		);
 	});
 
@@ -144,7 +144,7 @@ describe("rowStamp", () => {
 		// An app that named a field is taken at its word: silently reading a
 		// different one would group by something the manifest did not choose.
 		expect(
-			rowStamp({ startedAt: null, updatedAt: START }, "startedAt")
+			rowStamp({ startedAt: null, updatedAt: START }, "startedAt"),
 		).toBeNull();
 	});
 
@@ -168,7 +168,88 @@ describe("rowStamp", () => {
 
 	it("probes updated before created", () => {
 		expect(CONTRIBUTED_DATE_KEYS.indexOf("updatedAt")).toBeLessThan(
-			CONTRIBUTED_DATE_KEYS.indexOf("createdAt")
+			CONTRIBUTED_DATE_KEYS.indexOf("createdAt"),
 		);
 	});
+});
+
+// Independently authored New York civil boundaries isolate Sidebar's 24h bug.
+// The optional argument can be passed to the original primitive (ignored there)
+// so these exact tests also demonstrate the original-authority failure.
+interface CivilStartsForTest {
+	yesterday: number;
+	lastWeek: number;
+	lastMonth: number;
+	lastYear: number;
+}
+const civilDateBucketKey = dateBucketKey as (
+	ts: number,
+	today: number,
+	starts: CivilStartsForTest,
+) => ReturnType<typeof dateBucketKey>;
+const civilBucketRows = bucketByDate as (
+	rows: readonly { id: string; at: number }[],
+	stamp: (row: { id: string; at: number }) => number,
+	today: number,
+	starts: CivilStartsForTest,
+) => { key: string; items: { id: string; at: number }[] }[];
+
+it("keeps March 7 late evening out of Yesterday after the short New York day", () => {
+	const today = Date.parse("2026-03-09T04:00Z");
+	const starts = {
+		yesterday: Date.parse("2026-03-08T05:00Z"),
+		lastWeek: Date.parse("2026-03-02T05:00Z"),
+		lastMonth: Date.parse("2026-02-07T05:00Z"),
+		lastYear: Date.parse("2025-03-09T05:00Z"),
+	};
+	const probe = Date.parse("2026-03-08T04:30Z");
+	expect(civilDateBucketKey(probe, today, starts)).toBe("last-week");
+	for (const [boundary, included, preceding] of [
+		[starts.yesterday, "yesterday", "last-week"],
+		[starts.lastWeek, "last-week", "last-month"],
+		[starts.lastMonth, "last-month", "last-year"],
+		[starts.lastYear, "last-year", "older"],
+	] as const) {
+		expect(civilDateBucketKey(boundary, today, starts)).toBe(included);
+		expect(civilDateBucketKey(boundary - 1, today, starts)).toBe(preceding);
+	}
+	const rows = [
+		{ id: "today", at: today },
+		{ id: "probe", at: probe },
+	];
+	const grouped = civilBucketRows(rows, (row) => row.at, today, starts);
+	expect(grouped.map((bucket) => bucket.key)).toEqual(["today", "last-week"]);
+	expect(
+		grouped.flatMap((bucket) => bucket.items.map((row) => row.id)),
+	).toEqual(["today", "probe"]);
+});
+
+it("keeps November 1 early morning in Yesterday after the long New York day", () => {
+	const today = Date.parse("2026-11-02T05:00Z");
+	const starts = {
+		yesterday: Date.parse("2026-11-01T04:00Z"),
+		lastWeek: Date.parse("2026-10-26T04:00Z"),
+		lastMonth: Date.parse("2026-10-03T04:00Z"),
+		lastYear: Date.parse("2025-11-02T04:00Z"),
+	};
+	const probe = Date.parse("2026-11-01T04:30Z");
+	expect(civilDateBucketKey(probe, today, starts)).toBe("yesterday");
+	for (const [boundary, included, preceding] of [
+		[starts.yesterday, "yesterday", "last-week"],
+		[starts.lastWeek, "last-week", "last-month"],
+		[starts.lastMonth, "last-month", "last-year"],
+		[starts.lastYear, "last-year", "older"],
+	] as const) {
+		expect(civilDateBucketKey(boundary, today, starts)).toBe(included);
+		expect(civilDateBucketKey(boundary - 1, today, starts)).toBe(preceding);
+	}
+	const rows = [
+		{ id: "today", at: today },
+		{ id: "probe", at: probe },
+	];
+	const grouped = civilBucketRows(rows, (row) => row.at, today, starts);
+	expect(grouped.map((bucket) => bucket.key)).toEqual(["today", "yesterday"]);
+	expect(
+		grouped.flatMap((bucket) => bucket.items.map((row) => row.id)),
+	).toEqual(["today", "probe"]);
 });

@@ -1,6 +1,7 @@
-import { toast } from "@ryu/ui/components/sileo";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	listMeetings,
@@ -47,6 +48,9 @@ export function useMeetingStream(): void {
 	const qc = useQueryClient();
 	const enabledApps = useEnabledApps();
 	const meetingsEnabled = enabledApps?.has(MEETINGS_APP_ID) ?? false;
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 
 	useEffect(() => {
 		// Gate INSIDE the effect: `if (x) useMeetingStream()` at the call site would
@@ -83,7 +87,10 @@ export function useMeetingStream(): void {
 				case "detected":
 					toast.info({
 						title: "Meeting detected",
-						description: `${event.title} — open Meetings to start notes.`,
+						description: tlRef.current(
+							"{title} — open Meetings to start notes.",
+							{ title: event.title }
+						),
 					});
 					break;
 				case "segment":

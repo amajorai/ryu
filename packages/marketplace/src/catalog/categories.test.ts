@@ -96,6 +96,15 @@ describe("groupByCategory", () => {
 		).toHaveLength(2);
 	});
 
+	test("Interfaces is a known shelf right after Themes", () => {
+		// Both ride in on ordinary plugins rather than a catalog kind, so the shelf
+		// is how an interface plugin is findable; it must not sort as "unknown".
+		expect(normalizeCategory("interfaces")).toBe("Interfaces");
+		expect(
+			labelsOf(group(["Media & Voice", "Interfaces", "Themes", "Robotics"]))
+		).toEqual(["Themes", "Interfaces", "Media & Voice", "Robotics"]);
+	});
+
 	test("no items means no shelves (the caller renders its own empty state)", () => {
 		expect(groupByCategory([], () => "Search")).toEqual([]);
 	});

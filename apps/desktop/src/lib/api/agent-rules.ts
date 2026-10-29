@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { ApiTarget } from "./client.ts";
 import { request } from "./client.ts";
 import { getPreference, setPreference } from "./preferences.ts";
@@ -32,23 +34,37 @@ export interface DiscoveredProjectRule {
 	scope?: string;
 }
 
-interface DiscoveredProjectRuleWire {
-	apply_mode?: unknown;
-	content?: unknown;
-	description?: unknown;
-	enabled?: unknown;
-	globs?: unknown;
-	id?: unknown;
-	mode?: unknown;
-	name?: unknown;
-	path?: unknown;
-	provider?: unknown;
-	scope?: unknown;
+const optionalRuleStringSchema = z.string().optional().catch(undefined);
+const discoveredProjectRuleSchema = z.object({
+	apply_mode: optionalRuleStringSchema,
+	content: optionalRuleStringSchema,
+	description: optionalRuleStringSchema,
+	enabled: z.boolean().optional().catch(undefined),
+	globs: z
+		.array(z.string().optional().catch(undefined))
+		.optional()
+		.catch(undefined),
+	id: optionalRuleStringSchema,
+	mode: optionalRuleStringSchema,
+	name: optionalRuleStringSchema,
+	path: z.string(),
+	provider: z.string().min(1).catch("project"),
+	scope: optionalRuleStringSchema,
+});
+const discoverySchema = z.object({
+	cwd: z.string().nullable().catch(null),
+	rules: z
+		.array(discoveredProjectRuleSchema.optional().catch(undefined))
+		.catch([]),
+});
+type DiscoveryWire = z.input<typeof discoverySchema>;
+interface DiscoveredProjectRules {
+	cwd: string | null;
+	rules: DiscoveredProjectRule[];
 }
-
-interface DiscoveryWire {
-	cwd?: unknown;
-	rules?: DiscoveredProjectRuleWire[];
+interface LoadedAgentRules {
+	config: AgentRulesConfig;
+	migrated: boolean;
 }
 
 export const DEFAULT_AGENT_RULES_CONFIG: AgentRulesConfig = {
@@ -59,31 +75,23 @@ export const DEFAULT_AGENT_RULES_CONFIG: AgentRulesConfig = {
 	turnsPerPlan: 0,
 };
 
-const RULE_MODES: RuleApplyMode[] = ["auto", "always", "manual"];
-
-function applyMode(value: unknown, fallback: RuleApplyMode): RuleApplyMode {
-	return typeof value === "string" &&
-		RULE_MODES.includes(value as RuleApplyMode)
-		? (value as RuleApplyMode)
-		: fallback;
-}
-
-function ruleText(value: unknown): string {
-	if (typeof value === "string") {
-		return value;
-	}
-	if (typeof value !== "object" || value === null) {
-		return "";
-	}
-	const record = value as Record<string, unknown>;
-	return typeof record.text === "string"
-		? record.text
-		: typeof record.content === "string"
-			? record.content
-			: typeof record.rule === "string"
-				? record.rule
-				: "";
-}
+const ruleModeSchema = z.enum(["auto", "always", "manual"]).catch("auto");
+const ruleRecordSchema = z.object({
+	text: optionalRuleStringSchema,
+	content: optionalRuleStringSchema,
+	rule: optionalRuleStringSchema,
+	enabled: z.boolean().catch(true),
+	id: z.string().min(1).optional().catch(undefined),
+	mode: ruleModeSchema,
+});
+const storedRuleSchema = z.union([z.string(), ruleRecordSchema]).catch("");
+const agentRulesConfigSchema = z.object({
+	applyMode: ruleModeSchema,
+	autoInject: z.boolean().catch(true),
+	enabled: z.boolean().catch(true),
+	rules: z.array(storedRuleSchema).catch([]),
+	turnsPerPlan: z.number().catch(0),
+});
 
 /** Convert the old positional string list to the durable rule records. */
 export function legacyRulesToConfig(legacyRules: string[]): AgentRulesConfig {
@@ -109,36 +117,31 @@ export function parseAgentRulesConfig(
 		return legacyRulesToConfig(legacyRules);
 	}
 	try {
-		const parsed = JSON.parse(raw) as Record<string, unknown>;
-		const rawRules = Array.isArray(parsed.rules) ? parsed.rules : [];
-		const rules = rawRules
+		const parsed = agentRulesConfigSchema.parse(JSON.parse(raw));
+		const rules = parsed.rules
 			.map((value, index) => {
-				const text = ruleText(value).trim();
-				const record =
-					typeof value === "object" && value !== null
-						? (value as Record<string, unknown>)
-						: {};
+				const stringValue = z.string().safeParse(value);
+				if (stringValue.success) {
+					return {
+						enabled: true,
+						id: `rule-${index}`,
+						mode: "auto" as const,
+						text: stringValue.data.trim(),
+					};
+				}
+				const record = ruleRecordSchema.parse(value);
 				return {
-					enabled: record.enabled !== false,
-					id:
-						typeof record.id === "string" && record.id.length > 0
-							? record.id
-							: `rule-${index}`,
-					mode: applyMode(record.mode, "auto"),
-					text,
+					enabled: record.enabled,
+					id: record.id ?? `rule-${index}`,
+					mode: record.mode,
+					text: (record.text ?? record.content ?? record.rule ?? "").trim(),
 				};
 			})
 			.filter((rule) => rule.text.length > 0);
 		return {
-			applyMode: applyMode(parsed.applyMode, "auto"),
-			autoInject: parsed.autoInject !== false,
-			enabled: parsed.enabled !== false,
+			...parsed,
 			rules,
-			turnsPerPlan:
-				typeof parsed.turnsPerPlan === "number" &&
-				Number.isFinite(parsed.turnsPerPlan)
-					? Math.max(0, Math.floor(parsed.turnsPerPlan))
-					: 0,
+			turnsPerPlan: Math.max(0, Math.floor(parsed.turnsPerPlan)),
 		};
 	} catch {
 		return legacyRulesToConfig(legacyRules);
@@ -148,41 +151,31 @@ export function parseAgentRulesConfig(
 export async function fetchDiscoveredProjectRules(
 	target: ApiTarget,
 	cwd?: string | null
-): Promise<{ cwd: string | null; rules: DiscoveredProjectRule[] }> {
+): Promise<DiscoveredProjectRules> {
 	try {
 		const query = cwd?.trim() ? `?cwd=${encodeURIComponent(cwd)}` : "";
 		const data = await request<DiscoveryWire>(
 			target,
-			`/api/rules/discover${query}`
+			`/api/rules/discover${query}`,
+			undefined,
+			discoverySchema
 		);
+		const parsed = discoverySchema.parse(data);
 		return {
-			cwd: typeof data.cwd === "string" ? data.cwd : null,
-			rules: (data.rules ?? [])
-				.filter((rule) => typeof rule.path === "string")
+			cwd: parsed.cwd,
+			rules: parsed.rules
+				.filter((rule) => rule !== undefined)
 				.map((rule) => ({
-					content: typeof rule.content === "string" ? rule.content : undefined,
-					applyMode:
-						typeof rule.apply_mode === "string"
-							? rule.apply_mode
-							: typeof rule.mode === "string"
-								? rule.mode
-								: undefined,
-					description:
-						typeof rule.description === "string" ? rule.description : undefined,
-					enabled: typeof rule.enabled === "boolean" ? rule.enabled : undefined,
-					globs: Array.isArray(rule.globs)
-						? rule.globs.filter(
-								(glob): glob is string => typeof glob === "string"
-							)
-						: undefined,
-					id: typeof rule.id === "string" ? rule.id : undefined,
-					name: typeof rule.name === "string" ? rule.name : undefined,
-					path: rule.path as string,
-					provider:
-						typeof rule.provider === "string" && rule.provider.length > 0
-							? rule.provider
-							: "project",
-					scope: typeof rule.scope === "string" ? rule.scope : undefined,
+					content: rule.content,
+					applyMode: rule.apply_mode ?? rule.mode,
+					description: rule.description,
+					enabled: rule.enabled,
+					globs: rule.globs?.filter((glob) => glob !== undefined),
+					id: rule.id,
+					name: rule.name,
+					path: rule.path,
+					provider: rule.provider,
+					scope: rule.scope,
 				})),
 		};
 	} catch {
@@ -194,7 +187,7 @@ export async function loadAgentRulesConfig(
 	target: ApiTarget,
 	prefKey: string,
 	legacyRules: string[]
-): Promise<{ config: AgentRulesConfig; migrated: boolean }> {
+): Promise<LoadedAgentRules> {
 	const raw = await getPreference(target, prefKey);
 	return {
 		config: parseAgentRulesConfig(raw, legacyRules),

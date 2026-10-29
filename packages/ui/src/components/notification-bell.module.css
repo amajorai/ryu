@@ -1,0 +1,23 @@
+/* Finite notification drawing roles. Motion retains native rotate/y and
+   projection/layout transitions; these declarations own static geometry and
+   live values delivered through its supported CSS custom-property channel. */
+.digitWindow {
+	width: 1ch;
+	height: 1em;
+	-webkit-mask-image: var(--notification-digit-mask, none);
+	mask-image: var(--notification-digit-mask, none);
+}
+.digitTile {
+	top: var(--notification-digit-top);
+}
+.badge {
+	top: var(--notification-badge-inset);
+	right: var(--notification-badge-inset);
+	min-width: var(--notification-badge-side);
+	height: var(--notification-badge-side);
+	padding-inline: var(--notification-badge-padding);
+	font-size: var(--notification-badge-font);
+}
+.badgeDigits {
+	font-variant-numeric: tabular-nums;
+}

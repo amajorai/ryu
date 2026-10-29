@@ -6,7 +6,35 @@
 // call (routed through the Gateway); the continuation loop is driven here on the
 // client. See apps/core/src/server/mod.rs (goal handlers) and conversations.rs.
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+
+// Complete native persisted GoalState. Optional fields are omitted by serde
+// when there is no goal; readback canonicalizes persisted status to three values.
+const goalStateFieldsSchema = z.object({
+	achieved_at: z.number().optional(),
+	goal: z.string().optional(),
+	last_reason: z.string().optional(),
+	started_at: z.number().optional(),
+	status: z.enum(["active", "paused", "achieved"]).optional(),
+	turns: z.number(),
+});
+export const goalStateResponseSchema = z.custom<
+	z.output<typeof goalStateFieldsSchema>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		goalStateFieldsSchema.safeParse(value).success
+);
+const goalClearFieldsSchema = z.object({ success: z.boolean() });
+const goalClearResponseSchema = z.custom<
+	z.output<typeof goalClearFieldsSchema>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		goalClearFieldsSchema.safeParse(value).success
+);
 
 /** Goal state for a conversation, mirroring Core's `GoalState`. */
 export interface GoalState {
@@ -24,30 +52,16 @@ export interface GoalState {
 	turns: number;
 }
 
-/** One judge evaluation result. */
-export interface GoalVerdict {
-	/** Whether the judge decided the condition is met. */
-	met: boolean;
-	/** The judge's short reason for its decision. */
-	reason: string;
-	/**
-	 * Whether the loop must halt regardless of `met` — true when met, or when the
-	 * judge was unreachable / its verdict was unparseable (fail-safe is to stop,
-	 * never keep looping on garbage).
-	 */
-	stop: boolean;
-	/** Turns evaluated so far (post-increment). */
-	turns: number;
-}
-
 /** Read the current goal state for a conversation. */
 export function getGoal(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<GoalState> {
-	return request<GoalState>(
+	return request(
 		target,
-		`/api/conversations/${conversationId}/goal`
+		`/api/conversations/${conversationId}/goal`,
+		{},
+		goalStateResponseSchema
 	);
 }
 
@@ -57,10 +71,11 @@ export function setGoal(
 	conversationId: string,
 	goal: string
 ): Promise<GoalState> {
-	return request<GoalState>(
+	return request(
 		target,
 		`/api/conversations/${conversationId}/goal`,
-		{ method: "PUT", body: { goal } }
+		{ method: "PUT", body: { goal } },
+		goalStateResponseSchema
 	);
 }
 
@@ -69,9 +84,14 @@ export async function clearGoal(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<void> {
-	await request(target, `/api/conversations/${conversationId}/goal`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/api/conversations/${conversationId}/goal`,
+		{
+			method: "DELETE",
+		},
+		goalClearResponseSchema
+	);
 }
 
 /** Persistently pause the goal loop without creating a chat turn. */
@@ -79,10 +99,11 @@ export function pauseGoal(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<GoalState> {
-	return request<GoalState>(
+	return request(
 		target,
 		`/api/conversations/${conversationId}/goal/pause`,
-		{ method: "POST" }
+		{ method: "POST" },
+		goalStateResponseSchema
 	);
 }
 
@@ -91,22 +112,10 @@ export function resumeGoal(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<GoalState> {
-	return request<GoalState>(
+	return request(
 		target,
 		`/api/conversations/${conversationId}/goal/resume`,
-		{ method: "POST" }
-	);
-}
-
-/** Run one judge evaluation against the conversation transcript so far. */
-export function judgeGoal(
-	target: ApiTarget,
-	conversationId: string,
-	signal?: AbortSignal
-): Promise<GoalVerdict> {
-	return request<GoalVerdict>(
-		target,
-		`/api/conversations/${conversationId}/goal/judge`,
-		{ method: "POST", signal }
+		{ method: "POST" },
+		goalStateResponseSchema
 	);
 }

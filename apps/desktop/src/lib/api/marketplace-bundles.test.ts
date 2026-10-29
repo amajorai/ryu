@@ -4,20 +4,41 @@ import type { ApiTarget } from "./client.ts";
 
 const calls: string[] = [];
 let installMarketplaceBundle: typeof import("./marketplace-bundles.ts").installMarketplaceBundle;
+let describeBundleManualSteps: typeof import("./marketplace-bundles.ts").describeBundleManualSteps;
 
 const member = (
 	kind: MarketplaceBundleMember["kind"],
 	id: string,
-	required = true
+	required = true,
+	source: string | null = null
 ): MarketplaceBundleMember => ({
 	id,
 	kind,
 	name: id,
 	required,
-	source: null,
+	source,
 });
 
 beforeAll(async () => {
+	mock.module("./client.ts", () => ({
+		request: async (
+			_target: ApiTarget,
+			path: string,
+			init?: { body?: { id?: string } }
+		) => {
+			if (path === "/api/knowledge/catalog/install") {
+				calls.push(`knowledge:${init?.body?.id ?? ""}`);
+				return { success: true };
+			}
+			return undefined;
+		},
+	}));
+	mock.module("./models.ts", () => ({
+		installModelFile: async (_target: ApiTarget, id: string, file: string) => {
+			calls.push(`model:${id}:${file}`);
+			return { filename: file, path: file, repoId: id };
+		},
+	}));
 	mock.module("./agents.ts", () => ({
 		installPublishedAgent: async (_target: ApiTarget, id: string) => {
 			calls.push(`agent:${id}`);
@@ -66,7 +87,9 @@ beforeAll(async () => {
 			return id;
 		},
 	}));
-	({ installMarketplaceBundle } = await import("./marketplace-bundles.ts"));
+	({ installMarketplaceBundle, describeBundleManualSteps } = await import(
+		"./marketplace-bundles.ts"
+	));
 });
 
 afterAll(() => {
@@ -102,5 +125,39 @@ describe("Marketplace bundle orchestration", () => {
 		expect(result.failures.map(({ member: item }) => item.id)).toEqual([
 			"@ryu/optional-failure",
 		]);
+		expect(result.manual).toEqual([]);
+	});
+
+	test("installs model files and knowledge, and reports unpicked models as manual steps", async () => {
+		calls.length = 0;
+		const result = await installMarketplaceBundle(
+			{ token: null, url: "http://localhost:7980" },
+			"ryu/bundle/models",
+			[
+				member("model", "acme/tiny-GGUF", true, "tiny-Q4_K_M.gguf"),
+				member("model", "acme/pick-me", true),
+				member("model", "acme/escape", true, "../evil.gguf"),
+				member("knowledge", "acme/handbook"),
+			]
+		);
+
+		expect(calls).toEqual([
+			"model:acme/tiny-GGUF:tiny-Q4_K_M.gguf",
+			"knowledge:acme/handbook",
+			"usage:ryu/bundle/models",
+		]);
+		expect(result.completed.map((item) => item.id)).toEqual([
+			"acme/tiny-GGUF",
+			"acme/handbook",
+		]);
+		expect(result.failures).toEqual([]);
+		expect(result.manual.map(({ member: item }) => item.id)).toEqual([
+			"acme/pick-me",
+			"acme/escape",
+		]);
+		expect(describeBundleManualSteps(result.manual)).toContain(
+			"2 need manual setup"
+		);
+		expect(describeBundleManualSteps([])).toBeNull();
 	});
 });

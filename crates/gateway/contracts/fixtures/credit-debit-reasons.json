@@ -1,0 +1,10 @@
+{
+  "description": "Every ledger reason the Gateway may send to the control plane's POST /api/credits/debit. The control plane rejects any other reason with 400, so this list must stay a subset of its debit reason enum. What a charge was for (embedding, rerank, smart routing, inspector, ...) belongs in taskLabel, never in reason.",
+  "gatewayDebitReasons": [
+    "gateway_usage",
+    "composio",
+    "treg",
+    "sandbox",
+    "web_search"
+  ]
+}

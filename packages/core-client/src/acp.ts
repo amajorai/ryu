@@ -13,7 +13,149 @@
 // permission prompt (when an agent in a gating mode asks to run a tool) is
 // resolved via `respondPermission`.
 
+import { z } from "zod";
+import {
+	appJsonValueSchema,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+
+// Native probe envelopes plus the ACP schema 0.12.0 serde models enabled in Core.
+function acpResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+const acpMetaFields = z.record(z.string(), appJsonValueSchema);
+const acpMetaSchema = z.custom<z.output<typeof acpMetaFields>>(
+	(value) =>
+		acpMetaFields.safeParse(value).success &&
+		Object.entries(Object.call(undefined, value)).every(
+			([, entry]) => appJsonValueSchema.safeParse(entry).success
+		)
+);
+const acpDescription = z.string().nullable().optional();
+const acpMeta = acpMetaSchema.nullable().optional();
+const acpModeSchema = acpResponse(
+	z.object({
+		id: z.string(),
+		name: z.string(),
+		description: acpDescription,
+		_meta: acpMeta,
+	})
+);
+const acpModeStateSchema = acpResponse(
+	z.object({
+		currentModeId: z.string(),
+		availableModes: z.array(acpModeSchema),
+		_meta: acpMeta,
+	})
+);
+const acpModelSchema = acpResponse(
+	z.object({
+		modelId: z.string(),
+		name: z.string(),
+		description: acpDescription,
+		_meta: acpMeta,
+	})
+);
+const acpModelStateSchema = acpResponse(
+	z.object({
+		currentModelId: z.string(),
+		availableModels: z.array(acpModelSchema),
+		_meta: acpMeta,
+	})
+);
+const acpSelectOptionSchema = acpResponse(
+	z.object({
+		value: z.string(),
+		name: z.string(),
+		description: acpDescription,
+		_meta: acpMeta,
+	})
+);
+const acpSelectGroupSchema = acpResponse(
+	z.object({
+		group: z.string(),
+		name: z.string(),
+		options: z.array(acpSelectOptionSchema),
+		_meta: acpMeta,
+	})
+);
+const acpOptionBase = {
+	id: z.string(),
+	name: z.string(),
+	description: acpDescription,
+	category: z.string().nullable().optional(),
+	_meta: acpMeta,
+};
+const acpConfigOptionSchema = acpResponse(
+	z.discriminatedUnion("type", [
+		z.object({
+			...acpOptionBase,
+			type: z.literal("select"),
+			currentValue: z.string(),
+			options: z.union([
+				z.array(acpSelectOptionSchema),
+				z.array(acpSelectGroupSchema),
+			]),
+		}),
+		z.object({
+			...acpOptionBase,
+			type: z.literal("boolean"),
+			currentValue: z.boolean(),
+		}),
+	])
+);
+const acpAuthMethodSchema = acpResponse(
+	z.object({
+		id: z.string(),
+		name: z.string(),
+		description: acpDescription,
+		type: z.string().optional(),
+		_meta: acpMeta,
+	})
+);
+// Optional capability fields preserve the client's documented older partial advertisement.
+// Every capability known to Core's agent_caps_json is validated when present.
+const acpCapabilitiesSchema = acpResponse(
+	z.object({
+		loadSession: z.boolean().optional(),
+		promptCapabilities: acpResponse(
+			z.object({
+				image: z.boolean().optional(),
+				audio: z.boolean().optional(),
+				embeddedContext: z.boolean().optional(),
+			})
+		).optional(),
+		mcpCapabilities: acpResponse(
+			z.object({ http: z.boolean().optional(), sse: z.boolean().optional() })
+		).optional(),
+		sessionCapabilities: acpResponse(
+			z.object({
+				list: z.boolean().optional(),
+				resume: z.boolean().optional(),
+				close: z.boolean().optional(),
+			})
+		).optional(),
+	})
+);
+export const acpConfigResponseSchema = acpResponse(
+	z.object({
+		modes: acpModeStateSchema.nullable(),
+		models: acpModelStateSchema.nullable(),
+		configOptions: z.array(acpConfigOptionSchema).nullable(),
+		authMethods: z.array(acpAuthMethodSchema).nullable().optional(),
+		agentCapabilities: acpCapabilitiesSchema.nullable().optional(),
+		authenticationRequired: z.boolean().optional(),
+		ryuToolAccess: z.string().optional(),
+	})
+);
+export const acpPermissionResponseSchema = acpResponse(
+	z.object({ resolved: z.boolean() })
+);
 
 /** A single permission/session mode the agent supports. */
 export interface AcpSessionMode {
@@ -55,7 +197,7 @@ export interface AcpConfigSelectOption {
  */
 export interface AcpConfigOption {
 	category?: string | null;
-	currentValue?: string;
+	currentValue?: string | boolean;
 	description?: string | null;
 	id: string;
 	name: string;
@@ -64,8 +206,45 @@ export interface AcpConfigOption {
 	type?: string;
 }
 
-/** The full agent-reported session config (each field null when unsupported). */
+/** A login method advertised by the agent during initialize. */
+export interface AcpAuthMethod {
+	description?: string | null;
+	id: string;
+	name: string;
+	type?: string;
+}
+
+/** Normalized capabilities advertised by the agent. Missing fields are unknown. */
+export interface AcpAgentCapabilities {
+	loadSession?: boolean;
+	mcpCapabilities?: { http?: boolean; sse?: boolean };
+	promptCapabilities?: {
+		audio?: boolean;
+		embeddedContext?: boolean;
+		image?: boolean;
+	};
+	sessionCapabilities?: { close?: boolean; list?: boolean; resume?: boolean };
+}
+
+/**
+ * Which agent-specific launch settings Core maps for this agent (see Core's
+ * `acp_agent_settings`), from `GET /api/agents/:id/acp-settings`. Generic
+ * command/args/env/session defaults always apply.
+ */
+export interface AcpAgentSettingsSupport {
+	autoCompactToggle: boolean;
+	autoCompactTokens: boolean;
+	cliPath: boolean;
+	configDir: boolean;
+	/** The agent has a config dir, but Ryu manages it (Codex's safety home). */
+	configDirManaged: boolean;
+}
+
+/** Session controls and initialized login metadata, including signed-out agents. */
 export interface AcpConfig {
+	agentCapabilities?: AcpAgentCapabilities | null;
+	authenticationRequired?: boolean;
+	authMethods?: AcpAuthMethod[] | null;
 	configOptions: AcpConfigOption[] | null;
 	models: AcpSessionModelState | null;
 	modes: AcpSessionModeState | null;
@@ -118,9 +297,11 @@ export async function fetchAcpConfig(
 	agentId: string,
 	selections?: Record<string, string> | null
 ): Promise<AcpConfig> {
-	return await request<AcpConfig>(
+	return await request(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/acp-config${acpSelectionsParam(selections)}`
+		`/api/agents/${encodeURIComponent(agentId)}/acp-config${acpSelectionsParam(selections)}`,
+		{},
+		acpConfigResponseSchema
 	);
 }
 
@@ -134,10 +315,15 @@ export async function respondPermission(
 	requestId: string,
 	optionId: string | null
 ): Promise<{ resolved: boolean }> {
-	return await request<{ resolved: boolean }>(target, "/api/chat/permission", {
-		method: "POST",
-		body: { request_id: requestId, option_id: optionId },
-	});
+	return await request(
+		target,
+		"/api/chat/permission",
+		{
+			method: "POST",
+			body: { request_id: requestId, option_id: optionId },
+		},
+		acpPermissionResponseSchema
+	);
 }
 
 /** Flatten a select option's `options` (ungrouped or grouped) to a flat list. */
@@ -151,9 +337,16 @@ export function flattenConfigOptions(
 	}
 	// Grouped form: `[{ options: [...] }, ...]`.
 	if ("options" in first) {
+		// SAFETY: Core serializes ACP schema 0.12.0 SessionConfigSelectOptions,
+		// a uniform Ungrouped/Grouped array union. Only the Grouped variant
+		// publishes `options` on each entry; TypeScript cannot narrow the whole
+		// array from its first entry. This preserves the native option references.
 		return (raw as { options: AcpConfigSelectOption[] }[]).flatMap(
 			(g) => g.options
 		);
 	}
+	// SAFETY: The same native uniform-array union above is nonempty here.
+	// Its Ungrouped entries have value/name/description/_meta, no `options`.
+	// Return the original array rather than reconstructing its SDK values.
 	return raw as AcpConfigSelectOption[];
 }

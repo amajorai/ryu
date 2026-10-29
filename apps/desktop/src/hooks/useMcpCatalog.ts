@@ -12,6 +12,8 @@
 
 import {
 	keepPreviousData,
+	skipToken,
+	type UseQueryOptions,
 	useInfiniteQuery,
 	useMutation,
 	useQuery,
@@ -51,6 +53,7 @@ export interface UseMcpCatalogResult {
 	/** Whether the next page is currently loading. */
 	loadingMore: boolean;
 	query: string;
+	retryList: () => Promise<void>;
 	select: (id: string) => void;
 	selectedId: string | null;
 	/** Whether a source switch is in flight. */
@@ -101,6 +104,7 @@ export function mcpListQuery(
 				limit: PAGE_LIMIT,
 				cursor: pageParam,
 			}),
+		// SAFETY: The initial cursor is the authored undefined literal, already a member of this query's string | undefined pageParam port. This widening seeds the same complete cursor type used by queryFn/getNextPageParam; it makes no claim about decoded HTTP data.
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (last: { nextCursor?: string | null }) =>
 			last.nextCursor ?? undefined,
@@ -181,11 +185,17 @@ export function useMcpCatalog(initialQuery = ""): UseMcpCatalogResult {
 
 	const detailQuery = useQuery(
 		useMemo(
-			() => ({
-				queryKey: ["mcp", "detail", url, selectedId],
-				queryFn: () => fetchMcpCatalogDetail(target, selectedId as string),
-				enabled: selectedId !== null,
-			}),
+			() =>
+				({
+					queryKey: ["mcp", "detail", url, selectedId],
+					queryFn:
+						selectedId === null || selectedId === undefined
+							? skipToken
+							: () => fetchMcpCatalogDetail(target, selectedId),
+					enabled: selectedId !== null,
+				}) satisfies UseQueryOptions<
+					Awaited<ReturnType<typeof fetchMcpCatalogDetail>>
+				>,
 			[target, url, selectedId]
 		)
 	);
@@ -203,8 +213,12 @@ export function useMcpCatalog(initialQuery = ""): UseMcpCatalogResult {
 	}, [detailQuery.data, installedNames]);
 
 	const installMutation = useMutation({
-		mutationFn: () =>
-			installMcpServer({ url, token, userJwt }, selectedId as string),
+		mutationFn: () => {
+			if (selectedId === null || selectedId === undefined) {
+				throw new Error("Select an MCP server before installing it.");
+			}
+			return installMcpServer({ url, token, userJwt }, selectedId);
+		},
 		onSettled: () => {
 			// Installed-state is derived from the registered servers list, so the
 			// authoritative refresh is re-fetching that — the list/detail then
@@ -218,6 +232,9 @@ export function useMcpCatalog(initialQuery = ""): UseMcpCatalogResult {
 	// `select("")` is how the layout closes the preview — normalise it to null so
 	// the detail query stays disabled instead of fetching an empty id.
 	const select = useCallback((id: string) => setSelectedId(id || null), []);
+	const retryList = useCallback(async () => {
+		await listQuery.refetch();
+	}, [listQuery.refetch]);
 
 	const install = useCallback(async () => {
 		if (!selectedId) {
@@ -235,6 +252,7 @@ export function useMcpCatalog(initialQuery = ""): UseMcpCatalogResult {
 		loadingMore: listQuery.isFetchingNextPage,
 		query,
 		setQuery,
+		retryList,
 		selectedId,
 		select,
 		detail,

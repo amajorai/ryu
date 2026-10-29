@@ -1,0 +1,7 @@
+.grip {
+	top: var(--grip-top);
+	left: var(--grip-left);
+	touch-action: none;
+	transform: var(--grip-transform);
+	transition: var(--grip-transition);
+}

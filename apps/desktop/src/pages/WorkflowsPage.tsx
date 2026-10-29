@@ -19,15 +19,15 @@
 
 import { WorkflowCircle06Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/empty.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useTitleBar } from "@/src/contexts/TitleBarContext.tsx";
@@ -172,11 +172,7 @@ export default function WorkflowsPage({
 	useTitleBar(titleBarTitle, null);
 
 	if (loading && initialWorkflowId && !selected) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	if (error) {
@@ -227,10 +223,11 @@ export default function WorkflowsPage({
 				</div>
 				<div className="scroll-fade min-h-0 flex-1 overflow-y-auto px-2 pb-2">
 					{loading ? (
-						<div className="flex items-center gap-2 px-2 py-3 text-muted-foreground text-xs">
-							<Spinner className="size-3" />
-							Loading…
-						</div>
+						<SkeletonRows
+							inset="workflow-row"
+							label="Loading…"
+							spacing="compact-stack"
+						/>
 					) : workflows.length === 0 ? (
 						<p className="px-2 py-3 text-muted-foreground text-xs">
 							No workflows yet. Describe one to Ryu on the right to build your
@@ -241,7 +238,7 @@ export default function WorkflowsPage({
 							{workflows.map((w) => (
 								<li key={w.id}>
 									<Button
-										className="w-full justify-start truncate"
+										className="w-full justify-start"
 										onClick={() => setSelected(w)}
 										size="sm"
 										variant={selected?.id === w.id ? "secondary" : "ghost"}

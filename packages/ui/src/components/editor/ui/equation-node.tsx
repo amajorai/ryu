@@ -27,15 +27,13 @@ import TextareaAutosize, {
 	type TextareaAutosizeProps,
 } from "react-textarea-autosize";
 
-export function EquationElement(props: PlateElementProps<TEquationElement>) {
+export function EquationElement(
+	props: PlateElementProps<TEquationElement> & { lineBreakBadge?: ReactNode }
+) {
 	const selected = useSelected();
 	const [open, setOpen] = useState(selected);
 	const katexRef = useRef<HTMLDivElement | null>(null);
-	const lineBreakBadge = (
-		props as PlateElementProps<TEquationElement> & {
-			lineBreakBadge?: ReactNode;
-		}
-	).lineBreakBadge;
+	const lineBreakBadge = props.lineBreakBadge;
 
 	useEquationElement({
 		element: props.element,
@@ -135,9 +133,9 @@ export function InlineEquationElement(
 	return (
 		<PlateElement
 			{...props}
-			className={cn(
+			className={
 				"mx-1 inline-block select-none rounded-sm [&_.katex-display]:my-0!"
-			)}
+			}
 		>
 			<Popover modal={false} onOpenChange={setOpen} open={open}>
 				<PopoverTrigger
@@ -148,9 +146,9 @@ export function InlineEquationElement(
 								"h-6",
 								inlineSuggestionVariants(),
 								((element.texExpression.length > 0 && open) || selected) &&
-									"after:bg-brand/15",
+									"after:bg-primary/15",
 								element.texExpression.length === 0 &&
-									"text-muted-foreground after:bg-neutral-500/10"
+									"text-muted-foreground after:bg-muted-foreground/10"
 							)}
 							contentEditable={false}
 						/>
@@ -220,6 +218,9 @@ const EquationPopoverContent = ({
 		if (isInline) {
 			editor.tf.select(element, { focus: true, next: true });
 		} else {
+			// SAFETY: Native blockSelection.set normalizes an array to its entries
+			// and a scalar to a one-entry Set. Keep that existing behavior without
+			// claiming the raw node identity satisfies its narrower string type.
 			editor
 				.getApi(BlockSelectionPlugin)
 				.blockSelection.set(element.id as string);

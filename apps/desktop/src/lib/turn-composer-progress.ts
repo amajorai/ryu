@@ -23,15 +23,11 @@ export interface TurnComposerProgress {
 	todos?: TurnTodoProgress;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
 function partsWithInspectableInFlightEdits(
 	parts: MissionStreamPart[]
 ): unknown[] {
 	return parts.map((part) => {
-		if (!isRecord(part)) {
+		if (!(part && "state" in part)) {
 			return part;
 		}
 		const state = part.state;

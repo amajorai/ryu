@@ -1,0 +1,21 @@
+{
+  "status": 409,
+  "headers": {
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_46e90c9c780b441fbf360f93841587ca"
+  },
+  "body": {
+    "code": "idempotency_conflict",
+    "error": {
+      "code": "idempotency_conflict",
+      "message": "Idempotency-Key was used with a different request body.",
+      "requestId": "req_46e90c9c780b441fbf360f93841587ca",
+      "status": 409
+    },
+    "message": "Idempotency-Key was used with a different request body.",
+    "ok": false,
+    "requestId": "req_46e90c9c780b441fbf360f93841587ca",
+    "status": 409,
+    "type": "notify.error"
+  }
+}

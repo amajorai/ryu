@@ -1,3 +1,5 @@
+import type { RyuJsonValue } from "@ryu/app-host/json-values";
+import type { AttachedImage } from "@/components/agent-elements/input-bar.tsx";
 // The desktop contribution registry — the seam the plugin extension host (#446)
 // plugs into. It replaces the hardcoded `TabContent` if-else chain in
 // `Layout.tsx` and the static command list in `CommandPalette.tsx` with a lookup.
@@ -16,6 +18,7 @@
 // routes have disjoint prefixes, so exact-first + ordered-pattern reproduces it.
 
 import type { ReactNode } from "react";
+import type { lazyRoute } from "./lazy-route.ts";
 
 /** The minimal tab shape a route render-fn receives. Kept local (not imported
  *  from TabsContext) so this module has no desktop-context coupling and stays
@@ -25,10 +28,8 @@ export interface RouteTab {
 	initialAgent?: string;
 	/** Open the seeded chat in temporary mode (the launchpad composer's pick). */
 	initialGhost?: boolean;
-	/** Seeded chat attachments. Kept as `unknown[]` so the registry has no
-	 *  coupling to the desktop's `AttachedImage` type; the `/chat` built-in casts
-	 *  it back at the call site (see `builtins.ts`). */
-	initialImages?: unknown[];
+	/** Seeded chat attachments owned by the desktop composer. */
+	initialImages?: AttachedImage[];
 	/** One-shot model selection carried into a newly opened focused reply thread. */
 	initialModel?: string;
 	/** One-shot composer flags carried from the new-chat launchpad. */
@@ -50,7 +51,7 @@ export interface RouteTab {
 	/** One-shot team target carried from the new-chat launchpad. */
 	initialTeamId?: string;
 	/** Context supplied by a Ryu-owned sidebar row to the owning Companion. */
-	mountContext?: Record<string, unknown> | null;
+	mountContext?: Record<string, RyuJsonValue> | null;
 	path: string;
 	/** Per-tab run-mode override for a fork chosen in a new worktree. */
 	worktreeMode?: boolean;
@@ -68,14 +69,22 @@ export interface RouteContext {
 	onClose: () => void;
 }
 
+/** Warms a lazy route's code (and, optionally, its first query) before the user
+ *  commits to it. Called on link hover/focus; must be idempotent and cheap. */
+export type RoutePreload = () =>
+	| Promise<Awaited<ReturnType<ReturnType<typeof lazyRoute>["preload"]>>>
+	| Promise<void>;
+
 export interface ExactRoute {
 	kind: "exact";
 	path: string;
+	preload?: RoutePreload;
 	render: RouteRender;
 }
 
 export interface PatternRoute {
 	kind: "pattern";
+	preload?: RoutePreload;
 	render: RouteRender;
 	/** RegExp source matched against the full path, or a `startsWith` prefix. */
 	test: RegExp | { startsWith: string };
@@ -121,9 +130,24 @@ export class ContributionRegistry {
 	/** Resolve a path to its render-fn, or `null` if nothing matches. Exact map
 	 *  first, then ordered patterns — first-match-wins, mirroring the old chain. */
 	resolve(path: string): RouteRender | null {
+		return this.match(path)?.render ?? null;
+	}
+
+	/** Start loading whatever the route for `path` needs, without rendering it.
+	 *  A no-op for eager routes and unknown paths; failures are swallowed so a
+	 *  hover never surfaces an error (the real navigation reports it). */
+	preload(path: string): void {
+		const preload = this.match(path)?.preload;
+		if (!preload) {
+			return;
+		}
+		preload().catch(() => undefined);
+	}
+
+	private match(path: string): RouteEntry | null {
 		const exact = this.exact.get(path);
 		if (exact) {
-			return exact.render;
+			return exact;
 		}
 		for (const p of this.patterns) {
 			const hit =
@@ -131,7 +155,7 @@ export class ContributionRegistry {
 					? p.test.test(path)
 					: path.startsWith(p.test.startsWith);
 			if (hit) {
-				return p.render;
+				return p;
 			}
 		}
 		return null;

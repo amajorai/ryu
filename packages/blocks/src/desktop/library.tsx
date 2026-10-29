@@ -151,7 +151,8 @@ export function LibraryToolbar({
 						icon={Search01Icon}
 					/>
 					<Input
-						className="pl-8"
+						aria-label={searchPlaceholder}
+						leadingAdornment="compact"
 						onChange={(e) => onQueryChange(e.target.value)}
 						placeholder={searchPlaceholder}
 						value={query}
@@ -364,12 +365,17 @@ export function LibraryCard({
 				)}
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<div className="flex items-center gap-2">
-						<span className="truncate font-medium text-sm">{item.name}</span>
+						<span className="truncate font-medium text-sm" title={item.name}>
+							{item.name}
+						</span>
 						{item.statusIcon}
 						{item.badge ? <Badge variant="outline">{item.badge}</Badge> : null}
 					</div>
 					{item.subtitle ? (
-						<p className="truncate text-muted-foreground text-xs">
+						<p
+							className="truncate text-muted-foreground text-xs"
+							title={item.subtitle}
+						>
 							{item.subtitle}
 						</p>
 					) : null}
@@ -381,13 +387,14 @@ export function LibraryCard({
 
 	return withMenu(
 		<Card
-			className="group cursor-pointer gap-0 py-0 transition-colors hover:bg-muted/40"
+			appearance="library"
+			className="group cursor-pointer"
 			onClick={onOpen}
 			onKeyDown={onKeyDown}
 			role="button"
 			tabIndex={0}
 		>
-			<CardHeader className="flex flex-row items-center justify-between gap-2 px-4 py-3">
+			<CardHeader layout="library-row" spacing="metric">
 				<span className="flex min-w-0 items-center gap-2">
 					{item.iconNode ?? (
 						<HugeiconsIcon
@@ -395,7 +402,9 @@ export function LibraryCard({
 							icon={item.icon}
 						/>
 					)}
-					<span className="truncate font-medium text-sm">{item.name}</span>
+					<span className="truncate font-medium text-sm" title={item.name}>
+						{item.name}
+					</span>
 				</span>
 				<span className="flex shrink-0 items-center gap-1">
 					{item.statusIcon}
@@ -404,7 +413,7 @@ export function LibraryCard({
 				</span>
 			</CardHeader>
 			{item.subtitle || item.preview ? (
-				<CardContent className="flex flex-col gap-2 px-4 pb-3">
+				<CardContent layout="library-body">
 					{item.subtitle ? (
 						<p className="line-clamp-2 text-muted-foreground text-sm">
 							{item.subtitle}
@@ -439,7 +448,7 @@ export function LibraryEmpty({
 	action?: ReactNode;
 }) {
 	return (
-		<Empty className="py-12">
+		<Empty>
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
 					<HugeiconsIcon icon={icon} />

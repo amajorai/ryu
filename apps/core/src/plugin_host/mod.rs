@@ -4,7 +4,7 @@
 //! goal **real installable plugins** rather than hardcoded Core endpoints. A
 //! plugin declares a `post_assistant_turn` hook (`contributes.turn_hooks` in its
 //! `manifest.json`); the hook is plugin-authored JS run in the **same deny-by-default
-//! Deno sandbox** the PTC tool-exec uses ([`crate::tool_exec`]). The hook reaches
+//! JS sandbox** the PTC tool-exec uses ([`crate::tool_exec`]). The hook reaches
 //! Core only through capability-gated host functions:
 //!
 //! - `host.sideModel({ prompt, system?, model?, model_pref_key?, effort? })` →
@@ -40,12 +40,14 @@
 //! model call it makes still routes through the Gateway. The sandbox grants
 //! capabilities; the Gateway governs every model call.
 //!
-//! Availability: the sandbox needs the Deno binary on PATH. When it is absent the
+//! Availability: the sandbox is built in (`js-sandbox`). In a build without it the
 //! runtime no-ops (logged), so chat is never blocked — same graceful-degrade
 //! posture as the Python `external_runtime` plugins.
 
 pub mod action_stream;
+pub mod breaker;
 mod bridge;
+pub(crate) use bridge::node_owner_or_admin;
 
 pub use action_stream::ActionFrameProbe;
 pub use bridge::{dispatch_path_for, PluginHookBridge};
@@ -118,6 +120,10 @@ pub struct HookContext {
     /// which read the already-persisted `transcript` instead.
     #[serde(default)]
     pub input: Option<String>,
+    /// A typed channel button action on this inbound turn. The action payload is
+    /// user-controlled input; hooks must still apply their normal authorization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_action: Option<ryu_channel_contracts::ChannelActionEvent>,
     /// The normalized streamed action for an [`ON_ACTION`] hook. This is
     /// intentionally separate from `tool_name`/`tool_input`: action hooks also
     /// observe thinking boundaries and may run before a tool result exists.
@@ -203,15 +209,21 @@ pub enum HookDirective {
     /// Inject `text` as a follow-up user turn and run another assistant turn
     /// (the goal-loop primitive). Capped server-side by the chat path.
     Continue { text: String },
+    /// Attach native, channel-neutral buttons to the reply for channel surfaces
+    /// that support them. The normal reply text remains the message body.
+    InteractiveMessage {
+        markup: ryu_channel_contracts::InteractiveMarkup,
+    },
     /// Replace the pending outgoing user message with `text` **before** it reaches
     /// the model (a `pre_user_turn` directive; ignored on the post-turn path). The
     /// rewritten text is what gets sent and persisted — the auto-expand plugin uses
     /// this to swap a raw prompt for its improved form.
     Replace {
         text: String,
-        /// On the ACP `context` phase, discard the pooled session and send the
-        /// rewritten full prompt through a fresh session for this turn. The field
-        /// defaults false so existing hook payloads retain pooled-session behavior.
+        /// Deprecated and ignored. It once let an ACP `context` hook discard the
+        /// pooled session every turn, which threw away the agent's prompt cache;
+        /// Core now keeps the session and sends only the appended text with the
+        /// latest turn. Still parsed so older hook payloads deserialize.
         #[serde(default)]
         fresh_session: bool,
     },
@@ -241,8 +253,11 @@ pub enum HookDirective {
     /// output, not the original: the rewrite is a security boundary, so the raw
     /// value must not be handed to every other installed plugin after it.
     Transform { output: serde_json::Value },
-    /// Replace the ENTIRE outbound message array before it reaches the model (an
+    /// Replace the outbound message array before it reaches the model (an
     /// [`ON_CONTEXT`] directive on the message-array plane; ignored elsewhere).
+    /// Every row before the newest user message must be returned unchanged —
+    /// that prefix is what provider prompt caches reuse — or the rewrite is
+    /// ignored; see [`ON_CONTEXT`].
     ///
     /// Carried as raw JSON rather than [`HookMessage`] on purpose: the outbound
     /// array holds multimodal content (`image_url` parts) and tool rows that a
@@ -269,7 +284,12 @@ pub enum HookDirective {
     ///
     /// [`Replace`]: HookDirective::Replace
     /// [`Inject`]: HookDirective::Inject
-    Handled { text: String },
+    Handled {
+        text: String,
+        /// Optional buttons for channel turns answered without a model call.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        interactive_markup: Option<ryu_channel_contracts::InteractiveMarkup>,
+    },
     /// Select a different model for the current turn before an ACP session or
     /// gateway request is created. Only honoured during `pre_model_select`; the
     /// first non-empty selection wins, so independently installed policy plugins
@@ -312,10 +332,10 @@ pub struct HookPlugin {
     pub priority: i32,
     /// The JS hook body.
     pub code: String,
-    /// The capabilities the plugin was granted (its manifest `permission_grants`).
+    /// The installed plugin's current operator-approved capabilities.
     pub grants: HashSet<String>,
     /// Optional cheap pre-gate (from the manifest). Evaluated in Rust before the
-    /// sandbox spawn so an idle hook never pays for a Deno process.
+    /// sandbox run so an idle hook never pays for an instance.
     pub run_when: Option<crate::plugin_manifest::HookMatch>,
 }
 
@@ -421,6 +441,12 @@ pub const ON_DELEGATION_LIFECYCLE: &str = "delegation_lifecycle";
 ///
 /// A hook that only understands one plane must check which field is set rather
 /// than assume; returning the wrong directive for the plane is ignored.
+///
+/// On both planes a hook may change only the LATEST message. The system prompt
+/// and earlier turns are the provider prompt-cache prefix, so a `Rewrite` must
+/// keep every row before the newest user message byte-identical and an ACP
+/// `Replace` must keep the built prompt as its exact prefix (append-only); a
+/// directive that edits the frozen prefix is ignored and the original is sent.
 pub const ON_CONTEXT: &str = "context";
 
 /// Fires when an assistant message is finalized, **before** it is persisted, and
@@ -478,7 +504,9 @@ pub const ON_SESSION_TREE: &str = "session_tree";
 pub const ON_WORKFLOW_RUN_STARTED: &str = "workflow_run_started";
 
 /// Fires when a workflow run **completes successfully**. Observation-only. Payload:
-/// `{run_id, workflow_id, workflow_name, status, error, output}`.
+/// `{run_id, workflow_id, workflow_name, status, error, output}`. For an ad-hoc
+/// script run (`sr-…`) `error` and `output` are omitted: only the plugin scope
+/// that started it may read its result (`host.workflowRunStatus`).
 ///
 /// A run suspended at an approval gate does NOT fire this — it has not finished, it
 /// is waiting on a human, and will fire when it resumes and terminates.
@@ -494,6 +522,91 @@ pub const ON_WORKFLOW_RUN_FINISHED: &str = "workflow_run_finished";
 /// successful run.
 pub const ON_WORKFLOW_RUN_FAILED: &str = "workflow_run_failed";
 
+/// Fires when a user activates an app-backed action on one of the plugin's
+/// declarative views (a `ViewAction` with no declarative `http` handler). The
+/// shell relays the intent through `view.action` on the host bridge and Core runs
+/// **only the owning plugin's** `view_action` hooks — never another plugin's.
+///
+/// The intent rides in [`HookContext::event`]:
+/// `{source: "view_action", view_id, action_id, intent, payload, values, item}`.
+/// Like an app event there is no turn in flight, so only [`HookDirective::None`]
+/// and [`HookDirective::Note`] are meaningful; a `Note` is the hook's success
+/// message and `None` means the hook declined the intent (see
+/// [`dispatch_view_action`]).
+pub const ON_VIEW_ACTION: &str = "view_action";
+
+/// Fires after a plugin's version changes — a successful update or a rollback —
+/// so the plugin can migrate its own storage. It runs **only the updated
+/// plugin's own** hooks, from the NEW manifest, awaited, with the grants the
+/// plugin already holds (typically `storage:kv` for `host.storage`). Payload in
+/// [`HookContext::event`]: `{source: "plugin_update", plugin_id, from_version,
+/// to_version, reason}` where `reason` is `"update"` or `"rollback"`.
+///
+/// A plugin that is disabled when its version changes has no active hooks, so
+/// this phase does not fire for it; a migration must therefore tolerate data
+/// written by any earlier version (compare a stored schema marker rather than
+/// trusting `from_version` alone). Only `None`/`Note` are meaningful here.
+pub const ON_PLUGIN_UPDATE: &str = "plugin_update";
+
+/// Build the `ctx.event` payload for a [`ON_PLUGIN_UPDATE`] hook. Every field is
+/// set by Core, so a hook can trust it.
+pub fn plugin_update_event(
+    plugin_id: &str,
+    from_version: &str,
+    to_version: &str,
+    reason: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "source": ON_PLUGIN_UPDATE,
+        "plugin_id": plugin_id,
+        "from_version": from_version,
+        "to_version": to_version,
+        "reason": reason,
+    })
+}
+
+/// The `plugin_update` hooks `plugin_id` owns, in dispatch order. Pure so the
+/// own-plugin-only guarantee is unit-testable.
+pub fn plugin_update_hooks_for(hooks: Vec<HookPlugin>, plugin_id: &str) -> Vec<HookPlugin> {
+    hooks
+        .into_iter()
+        .filter(|hook| hook.plugin_id == plugin_id && phase_matches(&hook.on, ON_PLUGIN_UPDATE))
+        .collect()
+}
+
+/// Run `plugin_id`'s own [`ON_PLUGIN_UPDATE`] hooks after its version changed.
+/// Fail-open (a failing migration hook is logged, never undoes the update) and
+/// filtered to the app-event directive policy. Returns the surviving directives.
+pub async fn dispatch_plugin_update(
+    state: &ServerState,
+    plugin_id: &str,
+    from_version: &str,
+    to_version: &str,
+    reason: &str,
+) -> Vec<HookDirective> {
+    if !tool_exec::is_available() || !any_manifest_declares(state, ON_PLUGIN_UPDATE).await {
+        return Vec::new();
+    }
+    let hooks = plugin_update_hooks_for(collect_enabled_hooks(state).await, plugin_id);
+    if hooks.is_empty() {
+        return Vec::new();
+    }
+    let ctx = HookContext {
+        event: Some(plugin_update_event(
+            plugin_id,
+            from_version,
+            to_version,
+            reason,
+        )),
+        ..Default::default()
+    };
+    run_hooks(state, &ctx, &hooks, ON_PLUGIN_UPDATE)
+        .await
+        .into_iter()
+        .filter(app_event_directive_allowed)
+        .collect()
+}
+
 /// Fire a workflow-run lifecycle hook DETACHED, with `payload` in
 /// [`HookContext::event`].
 ///
@@ -503,13 +616,39 @@ pub const ON_WORKFLOW_RUN_FAILED: &str = "workflow_run_failed";
 /// awaiting), which is what lets it be called from the executor without
 /// restructuring it.
 pub fn fire_workflow_run_event(phase: &'static str, payload: serde_json::Value) {
-    tokio::spawn(async move {
-        let ctx = HookContext {
-            event: Some(payload),
-            ..Default::default()
-        };
-        let _ = dispatch_global(phase, ctx).await;
-    });
+    let payload = redact_script_run_event(payload);
+    // A hook's tool calls are sub-turns of the run's turn: carry its streak
+    // attribution across the spawn.
+    let attribution = crate::profile_activity::current_attribution();
+    tokio::spawn(crate::profile_activity::with_attribution(
+        attribution,
+        async move {
+            let ctx = HookContext {
+                event: Some(payload),
+                ..Default::default()
+            };
+            let _ = dispatch_global(phase, ctx).await;
+        },
+    ));
+}
+
+/// Strip the result and error text from a lifecycle payload for an ad-hoc
+/// script run (`sr-…`). Those runs belong to the plugin + agent + conversation
+/// that started them and are read back only through a scoped
+/// `host.workflowRunStatus`; a global observer hook still learns that the run
+/// started and ended, but not what it produced.
+fn redact_script_run_event(mut payload: serde_json::Value) -> serde_json::Value {
+    let is_script_run = payload
+        .get("run_id")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|id| id.starts_with(crate::workflow::script::SCRIPT_RUN_PREFIX));
+    if is_script_run {
+        if let Some(fields) = payload.as_object_mut() {
+            fields.remove("output");
+            fields.remove("error");
+        }
+    }
+    payload
 }
 
 // ── App events (plugin-declared phases) ──────────────────────────────────────
@@ -557,7 +696,7 @@ fn app_event_directive_allowed(directive: &HookDirective) -> bool {
 ///
 /// The payload is forwarded verbatim into every consumer's sandbox, so an
 /// unbounded one is an amplification channel: a single emit would be copied into N
-/// Deno processes. 64 KiB is far above any real event and far below anything that
+/// sandbox runs. 64 KiB is far above any real event and far below anything that
 /// makes fan-out expensive.
 pub const MAX_EVENT_PAYLOAD_BYTES: usize = 64 * 1024;
 
@@ -601,8 +740,12 @@ pub async fn dispatch_app_event(
 ///
 /// Deliberately NOT the notification fan-out: that reaches configured channels
 /// (Telegram, email, push), and a hook firing on every `x.updated` event would turn
-/// into a pager. An app-event hook that genuinely warrants pushing to a human has
-/// the `notify.fanout` capability for it.
+/// into a pager. An app-event hook that genuinely warrants telling a human uses
+/// `host.notify` (the `notifications:send` grant: one bounded notification for the
+/// active user); an app's sidecar uses the `notify.deliver` kernel capability, which
+/// needs `notifications:send-to-user` to reach anyone but the active user. The
+/// external-channel `notify.fanout` capability is NOT available to hooks or other
+/// apps: it stays pinned to `@ryu/monitors`.
 ///
 /// Best-effort — a feed write failure is logged, never propagated to the emitter.
 pub async fn notify_app_event_note(state: &ServerState, event: &str, text: &str) {
@@ -612,6 +755,116 @@ pub async fn notify_app_event_note(state: &ServerState, event: &str, text: &str)
         .with_metadata(serde_json::json!({ "event": event }));
     if let Err(e) = state.activity.record(item).await {
         tracing::warn!("plugin_host: failed to record app-event note on activity feed: {e:#}");
+    }
+}
+
+/// An activity-feed row an app attaches to an `events.emit` call (the body's
+/// `activity` field). The app owns the wording; Core owns attribution: `source` is
+/// derived from the authenticated caller, never read from here.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AppEventActivity {
+    /// The row's class (`meeting`, `quest`, …), `[a-z0-9_.-]{1,64}`.
+    pub kind: String,
+    /// The row's headline.
+    pub title: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    /// `info` | `success` | `warning` (default `info`).
+    #[serde(default)]
+    pub level: Option<String>,
+    /// A small JSON object of ids the desktop can deep-link with.
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
+}
+
+const MAX_ACTIVITY_TITLE_BYTES: usize = 512;
+const MAX_ACTIVITY_BODY_BYTES: usize = 4 * 1024;
+const MAX_ACTIVITY_METADATA_BYTES: usize = 4 * 1024;
+
+/// The activity source an app's rows are attributed to: the name half of a scoped
+/// id (`@ryu/meetings` → `meetings`), or a flat id verbatim. Derived from the
+/// authenticated caller so it matches the per-app source the feed already filters on.
+#[must_use]
+pub fn activity_source_for(plugin_id: &str) -> &str {
+    plugin_id.rsplit('/').next().unwrap_or(plugin_id)
+}
+
+/// Build the [`ryu_activity::ActivityItem`] for an app's `events.emit` activity hint,
+/// or explain why the hint is refused. Pure, so the bounds and the attribution rule
+/// are unit-testable.
+///
+/// # Errors
+/// A malformed kind, an empty/oversized title, an oversized body, an unknown level,
+/// or metadata that is not a small JSON object.
+pub fn app_event_activity_item(
+    plugin_id: &str,
+    event: &str,
+    hint: &AppEventActivity,
+) -> Result<ryu_activity::ActivityItem, String> {
+    let kind_ok = !hint.kind.is_empty()
+        && hint.kind.len() <= 64
+        && hint
+            .kind
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '-'));
+    if !kind_ok {
+        return Err("activity.kind must match [a-z0-9_.-]{1,64}".to_owned());
+    }
+    let title = hint.title.trim();
+    if title.is_empty() || title.len() > MAX_ACTIVITY_TITLE_BYTES {
+        return Err("activity.title must be 1..=512 bytes".to_owned());
+    }
+    if hint
+        .body
+        .as_ref()
+        .is_some_and(|b| b.len() > MAX_ACTIVITY_BODY_BYTES)
+    {
+        return Err("activity.body exceeds 4 KiB".to_owned());
+    }
+    let level = match hint.level.as_deref().unwrap_or("info") {
+        "info" => ryu_activity::ActivityLevel::Info,
+        "success" => ryu_activity::ActivityLevel::Success,
+        "warning" => ryu_activity::ActivityLevel::Warning,
+        other => return Err(format!("activity.level '{other}' is not supported")),
+    };
+    let mut metadata = match &hint.metadata {
+        None => serde_json::json!({}),
+        Some(v @ serde_json::Value::Object(_)) => {
+            if serde_json::to_vec(v).map_or(usize::MAX, |b| b.len()) > MAX_ACTIVITY_METADATA_BYTES {
+                return Err("activity.metadata exceeds 4 KiB".to_owned());
+            }
+            v.clone()
+        }
+        Some(_) => return Err("activity.metadata must be a JSON object".to_owned()),
+    };
+    metadata["event"] = serde_json::Value::String(event.to_owned());
+    Ok(ryu_activity::ActivityItem::new(
+        hint.kind.clone(),
+        activity_source_for(plugin_id),
+        title.to_owned(),
+    )
+    .with_body(hint.body.clone())
+    .with_level(level)
+    .with_metadata(metadata))
+}
+
+/// Record an app's `events.emit` activity hint on the unified activity feed.
+/// Best-effort: a refused hint or a failed write is logged, never propagated.
+pub async fn record_app_event_activity(
+    state: &ServerState,
+    plugin_id: &str,
+    event: &str,
+    hint: &AppEventActivity,
+) {
+    match app_event_activity_item(plugin_id, event, hint) {
+        Ok(item) => {
+            if let Err(e) = state.activity.record(item).await {
+                tracing::warn!(plugin = %plugin_id, event, "activity: failed to record app event: {e:#}");
+            }
+        }
+        Err(reason) => {
+            tracing::warn!(plugin = %plugin_id, event, "events.emit: activity hint refused: {reason}");
+        }
     }
 }
 
@@ -664,7 +917,9 @@ pub async fn may_emit_event(state: &ServerState, plugin_id: &str, event: &str) -
     let Some((owner, _)) = crate::plugin_manifest::split_hook_event_id(event) else {
         return false;
     };
-    if owner != plugin_id {
+    // Kernel events (`core#…`) are Core-originated only. The loader already makes
+    // them undeclarable (and the owner id unclaimable); this is the runtime belt.
+    if owner == crate::plugin_manifest::KERNEL_EVENT_OWNER || owner != plugin_id {
         return false;
     }
     let manifests = state.app_manifests.read().await;
@@ -673,6 +928,112 @@ pub async fn may_emit_event(state: &ServerState, plugin_id: &str, event: &str) -
         .find(|m| m.id == plugin_id)
         .and_then(|m| m.contributes.as_ref())
         .is_some_and(|c| c.hook_events.iter().any(|e| e.id == event))
+}
+
+// ── View actions (the `view_action` phase) ──────────────────────────────────
+
+/// What relaying one `view.action` intent to the owning plugin produced.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ViewActionOutcome {
+    /// The plugin declares no enabled `view_action` hook.
+    NoHandler,
+    /// The sandbox backend that runs hooks is not available on this node.
+    Unavailable,
+    /// Every matching hook ran and returned [`HookDirective::None`].
+    Declined { hook_ids: Vec<String> },
+    /// At least one hook acted; `messages` are its `Note` texts (possibly empty).
+    Handled {
+        hook_ids: Vec<String>,
+        messages: Vec<String>,
+    },
+}
+
+/// The `view_action` hooks `plugin_id` owns, in dispatch order. Pure so the
+/// own-plugin-only guarantee is unit-testable: another plugin's hook on the same
+/// phase is never selected.
+pub fn view_action_hooks_for(hooks: Vec<HookPlugin>, plugin_id: &str) -> Vec<HookPlugin> {
+    hooks
+        .into_iter()
+        .filter(|hook| hook.plugin_id == plugin_id && phase_matches(&hook.on, ON_VIEW_ACTION))
+        .collect()
+}
+
+/// Build the `ctx.event` payload for a `view_action` hook from the relayed
+/// `view.action` args. Only the documented fields are forwarded, and `source` is
+/// always set by Core so a hook can trust it.
+pub fn view_action_event(args: &serde_json::Value) -> serde_json::Value {
+    let field = |key: &str| args.get(key).cloned().unwrap_or(serde_json::Value::Null);
+    serde_json::json!({
+        "source": ON_VIEW_ACTION,
+        "view_id": field("view_id"),
+        "action_id": field("action_id"),
+        "intent": field("intent"),
+        "payload": field("payload"),
+        "values": field("values"),
+        "item": field("item"),
+    })
+}
+
+/// Fold the directives returned by `view_action` hooks into an outcome. Only
+/// `None`/`Note` are meaningful off the chat path (the app-event policy); any
+/// other directive still counts as "acted" but contributes no message.
+pub fn view_action_outcome(
+    hook_ids: Vec<String>,
+    directives: &[HookDirective],
+) -> ViewActionOutcome {
+    if hook_ids.is_empty() {
+        return ViewActionOutcome::NoHandler;
+    }
+    let acted: Vec<&HookDirective> = directives
+        .iter()
+        .filter(|directive| !matches!(directive, HookDirective::None))
+        .collect();
+    if acted.is_empty() {
+        return ViewActionOutcome::Declined { hook_ids };
+    }
+    let messages = acted
+        .into_iter()
+        .filter_map(|directive| match directive {
+            HookDirective::Note { text } if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    ViewActionOutcome::Handled { hook_ids, messages }
+}
+
+/// Relay a `view.action` intent to `plugin_id`'s own `view_action` hooks.
+///
+/// * **Own hooks only** — `plugin_id` comes from the HTTP path, never the body.
+/// * **No privilege gain** — each hook runs with the intersection of its manifest
+///   grants and the Gateway-approved grants the caller already validated.
+/// * The verified caller is carried so the hook's storage/notifications stay
+///   tenant-scoped exactly as on the chat path.
+pub async fn dispatch_view_action(
+    state: &ServerState,
+    plugin_id: &str,
+    approved_grants: &HashSet<String>,
+    caller: Option<crate::identity_verify::VerifiedCaller>,
+    args: &serde_json::Value,
+) -> ViewActionOutcome {
+    let mut hooks = view_action_hooks_for(collect_enabled_hooks(state).await, plugin_id);
+    if hooks.is_empty() {
+        return ViewActionOutcome::NoHandler;
+    }
+    if !tool_exec::is_available() {
+        return ViewActionOutcome::Unavailable;
+    }
+    for hook in &mut hooks {
+        hook.grants.retain(|grant| approved_grants.contains(grant));
+    }
+    let ctx = HookContext {
+        caller_user_id: caller.as_ref().map(|c| c.user_id.clone()),
+        verified_caller: caller,
+        event: Some(view_action_event(args)),
+        ..Default::default()
+    };
+    let hook_ids = hooks.iter().map(|hook| hook.hook_id.clone()).collect();
+    let directives = run_hooks(state, &ctx, &hooks, ON_VIEW_ACTION).await;
+    view_action_outcome(hook_ids, &directives)
 }
 
 /// Whether a hook declared for `hook_on` should run in `phase`. Exact match,
@@ -701,21 +1062,39 @@ pub(crate) fn hook_policy_allows(
     enabled && trusted
 }
 
-/// Collect every hook from currently **enabled** plugins. Read live (cheap, once
-/// per assistant turn) so an enable/disable takes effect immediately without a
-/// refresh dance. Returns an empty vec when no plugins contribute hooks.
+/// A saved approval cannot outlive the app's current declaration ceiling.
+pub(crate) async fn current_approved_grants(
+    state: &ServerState,
+    plugin_id: &str,
+    approved: &[String],
+) -> HashSet<String> {
+    let manifests = state.app_manifests.read().await;
+    manifests
+        .iter()
+        .find(|manifest| manifest.id == plugin_id)
+        .map(|manifest| {
+            manifest
+                .approved_permission_grants(approved)
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Collect hooks with live approvals intersected with their current declarations.
 pub async fn collect_enabled_hooks(state: &ServerState) -> Vec<HookPlugin> {
-    let enabled_ids: HashSet<String> = match state.app_store.list().await {
-        Ok(records) => records
-            .into_iter()
-            .filter(|r| r.enabled)
-            .map(|r| r.id)
-            .collect(),
-        Err(e) => {
-            tracing::warn!("plugin_host: could not list plugins: {e}");
-            return Vec::new();
-        }
-    };
+    let enabled_ids: std::collections::HashMap<String, Vec<String>> =
+        match state.app_store.list().await {
+            Ok(records) => records
+                .into_iter()
+                .filter(|r| r.enabled)
+                .map(|r| (r.id, r.approved_grants))
+                .collect(),
+            Err(e) => {
+                tracing::warn!("plugin_host: could not list plugins: {e}");
+                return Vec::new();
+            }
+        };
     if enabled_ids.is_empty() {
         return Vec::new();
     }
@@ -729,22 +1108,32 @@ pub async fn collect_enabled_hooks(state: &ServerState) -> Vec<HookPlugin> {
 
     // Read from the already-loaded, hot-updated manifest set (no disk re-read).
     let manifests = state.app_manifests.read().await;
+    collect_hooks_from_manifests(&manifests, &enabled_ids, &hook_overrides)
+}
+
+fn collect_hooks_from_manifests(
+    manifests: &[crate::plugin_manifest::PluginManifest],
+    enabled_ids: &std::collections::HashMap<String, Vec<String>>,
+    hook_overrides: &std::collections::BTreeMap<String, crate::governance::HookPolicyOverride>,
+) -> Vec<HookPlugin> {
     let mut hooks = Vec::new();
     for manifest in manifests.iter() {
-        if !enabled_ids.contains(&manifest.id) {
+        let Some(approved_grants) = enabled_ids.get(&manifest.id) else {
             continue;
-        }
+        };
         let Some(contributes) = &manifest.contributes else {
             continue;
         };
         if contributes.turn_hooks.is_empty() {
             continue;
         }
-        let grants: HashSet<String> = manifest.permission_grants.iter().cloned().collect();
+        let grants: HashSet<String> = manifest
+            .approved_permission_grants(approved_grants)
+            .into_iter()
+            .collect();
         for hook in &contributes.turn_hooks {
             let hook_key = format!("{}::{}", manifest.id, hook.id);
-            let trusted_by_default =
-                crate::plugins::builtins::is_compiled_in_manifest(&manifest.id);
+            let trusted_by_default = crate::plugins::builtins::is_exact_compiled_manifest(manifest);
             if !hook_policy_allows(hook_overrides.get(&hook_key), trusted_by_default) {
                 continue;
             }
@@ -1034,6 +1423,27 @@ fn run_middleware_at(
     })
 }
 
+fn restrict_hook_grants(declared: &HashSet<String>, approved: &[String]) -> HashSet<String> {
+    declared
+        .iter()
+        .filter(|grant| approved.contains(grant))
+        .cloned()
+        .collect()
+}
+
+async fn current_hook_grants(state: &ServerState, hook: &HookPlugin) -> Option<HashSet<String>> {
+    match state.app_store.get_record(&hook.plugin_id).await {
+        Ok(Some(record)) if record.enabled => {
+            Some(restrict_hook_grants(&hook.grants, &record.approved_grants))
+        }
+        Ok(_) => None,
+        Err(error) => {
+            tracing::warn!(plugin = %hook.plugin_id, %error, "plugin_host: could not verify current hook grants");
+            None
+        }
+    }
+}
+
 async fn run_middleware_hook(
     state: &ServerState,
     hook: &HookPlugin,
@@ -1043,11 +1453,17 @@ async fn run_middleware_hook(
     let Some(_runtime_lease) = state.plugin_runtime.acquire(&hook.plugin_id).await else {
         return MiddlewareRun::Failed;
     };
+    let Some(grants) = current_hook_grants(state, hook).await else {
+        return MiddlewareRun::Failed;
+    };
+    let Some(breaker_permit) = breaker::allow(&hook.plugin_id, &hook.hook_id) else {
+        return MiddlewareRun::Failed;
+    };
     let program = build_middleware_hook_program(ctx, &hook.code);
     let bridge = Arc::new(
         PluginHookBridge::new_for_request(
             hook.plugin_id.clone(),
-            hook.grants.clone(),
+            grants,
             state.clone(),
             ctx.verified_caller.clone(),
             ctx.conversation_id.clone(),
@@ -1061,22 +1477,27 @@ async fn run_middleware_hook(
         .clone()
         .unwrap_or_else(|| "plugin-host".to_string());
 
-    match tool_exec::run_sandboxed(program, invoker, &agent_id).await {
+    match tool_exec::run_sandboxed_warm(program, invoker, &agent_id, &hook.plugin_id).await {
         ExecOutcome::Completed {
             result: _,
+            logs,
             is_error,
             error,
-            ..
         } if is_error => {
+            emit_hook_logs(hook, &logs);
+            let error = error.unwrap_or_default();
             tracing::warn!(
                 "plugin_host: middleware hook {}::{} errored: {}",
                 hook.plugin_id,
                 hook.hook_id,
-                error.unwrap_or_default()
+                error
             );
+            breaker_permit.record_failure(&error);
             MiddlewareRun::Failed
         }
-        ExecOutcome::Completed { result, .. } => {
+        ExecOutcome::Completed { result, logs, .. } => {
+            emit_hook_logs(hook, &logs);
+            breaker_permit.record_success();
             MiddlewareRun::Returned(parse_directive(result.as_ref()))
         }
         ExecOutcome::Paused { .. } => {
@@ -1085,6 +1506,7 @@ async fn run_middleware_hook(
                 hook.plugin_id,
                 hook.hook_id
             );
+            breaker_permit.record_failure("paused (unsupported)");
             MiddlewareRun::Failed
         }
     }
@@ -1106,22 +1528,32 @@ pub async fn run_hooks(
     if !matches!(middleware, HookDirective::None) {
         directives.push(middleware);
     }
-    for hook in hooks {
-        if hook.mode != crate::plugin_manifest::HookMode::Directive
-            || !phase_matches(&hook.on, phase)
-        {
-            continue;
-        }
-        // Cheap pre-gate: skip the sandbox spawn when the hook provably can't act
-        // this turn. This is what makes pre-installed hooks free on the hot path.
-        if !hook_should_run(state, hook, ctx).await {
-            continue;
-        }
-        let directive = run_hook(state, hook, ctx).await;
-        if !matches!(directive, HookDirective::None) {
-            directives.push(directive);
-        }
-    }
+    // Directive hooks of one phase are independent plugins, and each run is a
+    // separate sandbox process, so they run concurrently: the turn waits for the
+    // slowest hook instead of the sum of all of them. `join_all` keeps hook order,
+    // so the directives come back exactly as a sequential loop would return them.
+    let runs = hooks
+        .iter()
+        .filter(|hook| {
+            hook.mode == crate::plugin_manifest::HookMode::Directive
+                && phase_matches(&hook.on, phase)
+        })
+        .map(|hook| async move {
+            // Cheap pre-gate: skip the sandbox spawn when the hook provably can't
+            // act this turn. This is what makes pre-installed hooks free on the
+            // hot path.
+            if hook_should_run(state, hook, ctx).await {
+                run_hook(state, hook, ctx).await
+            } else {
+                HookDirective::None
+            }
+        });
+    directives.extend(
+        futures_util::future::join_all(runs)
+            .await
+            .into_iter()
+            .filter(|directive| !matches!(directive, HookDirective::None)),
+    );
     directives
 }
 
@@ -1131,7 +1563,7 @@ pub async fn run_hooks(
 /// prefix on the last user turn, or existing per-conversation plugin state each
 /// wake the hook. Fail-open: any lookup error resolves to "run" so a gate glitch
 /// never silently disables a feature.
-async fn hook_should_run(_state: &ServerState, hook: &HookPlugin, ctx: &HookContext) -> bool {
+async fn hook_should_run(state: &ServerState, hook: &HookPlugin, ctx: &HookContext) -> bool {
     let Some(m) = &hook.run_when else {
         return true;
     };
@@ -1140,6 +1572,14 @@ async fn hook_should_run(_state: &ServerState, hook: &HookPlugin, ctx: &HookCont
         GateVerdict::Run => true,
         GateVerdict::Skip => false,
         GateVerdict::CheckStateful => {
+            if let Some(cadence) = &m.reply_cadence {
+                if reply_cadence_due(&state.preferences, cadence, ctx, &hook.grants).await {
+                    return true;
+                }
+            }
+            if !m.stateful {
+                return false;
+            }
             let Some(conv) = ctx.conversation_id.as_deref().filter(|c| !c.is_empty()) else {
                 return false;
             };
@@ -1165,7 +1605,8 @@ enum GateVerdict {
     Run,
     /// Conditions were declared, none matched, and no stateful check applies: skip.
     Skip,
-    /// Nothing matched yet but the hook is stateful — the caller must read the KV.
+    /// Nothing matched yet but a condition needs a read — the plugin's KV state
+    /// or the preferences behind a reply cadence — so the caller decides.
     CheckStateful,
 }
 
@@ -1198,7 +1639,7 @@ fn gate_without_storage(m: &crate::plugin_manifest::HookMatch, ctx: &HookContext
         }
     }
 
-    if m.stateful {
+    if m.stateful || m.reply_cadence.is_some() {
         return GateVerdict::CheckStateful;
     }
 
@@ -1208,6 +1649,97 @@ fn gate_without_storage(m: &crate::plugin_manifest::HookMatch, ctx: &HookContext
     } else {
         GateVerdict::Run
     }
+}
+
+/// Read the preferences behind a [`ReplyCadence`] and decide whether this turn
+/// is due. A preference that cannot be read counts as unset; a credential key is
+/// never read and makes the gate run the hook (fail-open, like the KV gate).
+async fn reply_cadence_due(
+    preferences: &crate::server::preferences::PreferencesStore,
+    cadence: &crate::plugin_manifest::ReplyCadence,
+    ctx: &HookContext,
+    grants: &HashSet<String>,
+) -> bool {
+    // Match the bridge's preference capability before observing node state.
+    if !grants.contains("preferences:read") {
+        return reply_cadence_matches(
+            cadence,
+            ctx.transcript
+                .iter()
+                .filter(|m| m.role == "assistant")
+                .count(),
+            None,
+            None,
+            None,
+        );
+    }
+    async fn read(
+        preferences: &crate::server::preferences::PreferencesStore,
+        key: Option<&str>,
+    ) -> Result<Option<String>, ()> {
+        let Some(key) = key.filter(|key| !key.is_empty()) else {
+            return Ok(None);
+        };
+        if crate::server::preferences::is_secret_preference_key(key) {
+            return Err(());
+        }
+        Ok(preferences.get(key).await.ok().flatten())
+    }
+    let (Ok(enabled), Ok(every), Ok(first)) = (
+        read(preferences, cadence.enabled_pref.as_deref()).await,
+        read(preferences, cadence.every_pref.as_deref()).await,
+        read(preferences, cadence.first_pref.as_deref()).await,
+    ) else {
+        return true;
+    };
+    let replies = ctx
+        .transcript
+        .iter()
+        .filter(|message| message.role == "assistant")
+        .count();
+    reply_cadence_matches(
+        cadence,
+        replies,
+        enabled.as_deref(),
+        every.as_deref(),
+        first.as_deref(),
+    )
+}
+
+/// The pure cadence rule, written to agree with a hook body that reads the same
+/// preferences with JavaScript's `parseInt`: leading integer, below 1 or
+/// unreadable falls back to the default, above 100 clamps to 100.
+fn reply_cadence_matches(
+    cadence: &crate::plugin_manifest::ReplyCadence,
+    replies: usize,
+    enabled: Option<&str>,
+    every: Option<&str>,
+    first: Option<&str>,
+) -> bool {
+    if enabled == Some("false") || replies == 0 {
+        return false;
+    }
+    let fallback = cadence.every_default.clamp(1, 100) as usize;
+    let every = every
+        .filter(|value| !value.is_empty())
+        .and_then(leading_integer)
+        .filter(|n| *n >= 1)
+        .map_or(fallback, |n| n.min(100) as usize);
+    let first_on = cadence.first_reply && first != Some("false");
+    (replies == 1 && first_on) || replies % every == 0
+}
+
+/// `parseInt`-style: optional whitespace and sign, then the leading digits.
+fn leading_integer(value: &str) -> Option<i64> {
+    let trimmed = value.trim_start();
+    let (sign, digits) = match trimmed.strip_prefix('-') {
+        Some(rest) => (-1, rest),
+        None => (1, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    };
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    digits[..end].parse::<i64>().ok().map(|n| sign * n)
 }
 
 /// A minimal glob for tool-name gates: supports a single leading and/or trailing
@@ -1228,8 +1760,8 @@ fn glob_match(pattern: &str, name: &str) -> bool {
     }
 }
 
-/// Run one hook in the sandbox and parse its directive. Any failure (Deno
-/// missing, hook threw, unparseable result, a Pause we don't support) degrades to
+/// Run one hook in the sandbox and parse its directive. Any failure (sandbox
+/// unavailable, hook threw, unparseable result, a Pause we don't support) degrades to
 /// [`HookDirective::None`].
 pub async fn run_hook(state: &ServerState, hook: &HookPlugin, ctx: &HookContext) -> HookDirective {
     if hook.mode == crate::plugin_manifest::HookMode::Middleware {
@@ -1247,11 +1779,17 @@ pub async fn run_hook(state: &ServerState, hook: &HookPlugin, ctx: &HookContext)
     let Some(_runtime_lease) = state.plugin_runtime.acquire(&hook.plugin_id).await else {
         return HookDirective::None;
     };
+    let Some(grants) = current_hook_grants(state, hook).await else {
+        return HookDirective::None;
+    };
+    let Some(breaker_permit) = breaker::allow(&hook.plugin_id, &hook.hook_id) else {
+        return HookDirective::None;
+    };
     let program = build_hook_program(ctx, &hook.code);
     let bridge = Arc::new(
         PluginHookBridge::new_for_request(
             hook.plugin_id.clone(),
-            hook.grants.clone(),
+            grants,
             state.clone(),
             ctx.verified_caller.clone(),
             ctx.conversation_id.clone(),
@@ -1264,22 +1802,26 @@ pub async fn run_hook(state: &ServerState, hook: &HookPlugin, ctx: &HookContext)
         .clone()
         .unwrap_or_else(|| "plugin-host".to_string());
 
-    match tool_exec::run_sandboxed(program, invoker, &agent_id).await {
+    match tool_exec::run_sandboxed_warm(program, invoker, &agent_id, &hook.plugin_id).await {
         ExecOutcome::Completed {
             result,
+            logs,
             is_error,
             error,
-            ..
         } => {
+            emit_hook_logs(hook, &logs);
             if is_error {
+                let error = error.unwrap_or_default();
                 tracing::warn!(
                     "plugin_host: hook {}::{} errored: {}",
                     hook.plugin_id,
                     hook.hook_id,
-                    error.unwrap_or_default()
+                    error
                 );
+                breaker_permit.record_failure(&error);
                 return HookDirective::None;
             }
+            breaker_permit.record_success();
             parse_directive(result.as_ref())
         }
         ExecOutcome::Paused { .. } => {
@@ -1288,8 +1830,63 @@ pub async fn run_hook(state: &ServerState, hook: &HookPlugin, ctx: &HookContext)
                 hook.plugin_id,
                 hook.hook_id
             );
+            breaker_permit.record_failure("paused (unsupported)");
             HookDirective::None
         }
+    }
+}
+
+/// Most `host.log` lines surfaced per hook run.
+const MAX_HOOK_LOG_LINES: usize = 20;
+/// Longest `host.log` line surfaced (in chars); longer lines are truncated.
+const MAX_HOOK_LOG_LINE_CHARS: usize = 1024;
+
+/// Bounded view of a hook run's captured `host.log` output: at most
+/// [`MAX_HOOK_LOG_LINES`] lines of at most [`MAX_HOOK_LOG_LINE_CHARS`] chars,
+/// control characters (other than tab) stripped so a hook cannot forge log
+/// lines. Returns the kept lines and how many were dropped.
+fn bounded_hook_logs(logs: &[String]) -> (Vec<String>, usize) {
+    let kept = logs
+        .iter()
+        .take(MAX_HOOK_LOG_LINES)
+        .map(|line| {
+            let mut out: String = line
+                .chars()
+                .filter(|c| *c == '\t' || !c.is_control())
+                .take(MAX_HOOK_LOG_LINE_CHARS)
+                .collect();
+            if line.chars().count() > MAX_HOOK_LOG_LINE_CHARS {
+                out.push('…');
+            }
+            out
+        })
+        .collect();
+    (kept, logs.len().saturating_sub(MAX_HOOK_LOG_LINES))
+}
+
+/// Surface a hook's captured `host.log` lines through tracing, tagged with the
+/// plugin and hook id, so hook authors can debug from the Core log.
+fn emit_hook_logs(hook: &HookPlugin, logs: &[String]) {
+    if logs.is_empty() {
+        return;
+    }
+    let (lines, dropped) = bounded_hook_logs(logs);
+    for line in lines {
+        tracing::info!(
+            target: "ryu_core::plugin_hook_log",
+            plugin = %hook.plugin_id,
+            hook = %hook.hook_id,
+            "{line}"
+        );
+    }
+    if dropped > 0 {
+        tracing::info!(
+            target: "ryu_core::plugin_hook_log",
+            plugin = %hook.plugin_id,
+            hook = %hook.hook_id,
+            dropped,
+            "host.log output truncated"
+        );
     }
 }
 
@@ -1351,6 +1948,10 @@ const host = {{
     stop: (a) => tools.host.background_stop(a ?? {{}}),
   }},
   usage: (a) => tools.host.usageSnapshot(a ?? {{}}),
+  subscriptions: {{
+    list: (a) => tools.host.subscriptions_list(a ?? {{}}),
+    usage: (a) => tools.host.subscriptions_usage(a ?? {{}}),
+  }},
   storage: {{
     get: (k, ns) => tools.host.storage_get({{ key: String(k), namespace: ns }}),
     set: (k, v, ns) => tools.host.storage_set({{ key: String(k), value: typeof v === "string" ? v : JSON.stringify(v), namespace: ns }}),
@@ -1365,6 +1966,12 @@ const host = {{
     updateDoc: (a) => tools.host.spaces_update_doc(a ?? {{}}),
     listDocs: (a) => tools.host.spaces_list_docs(a ?? {{}}),
     deleteDoc: (a) => tools.host.spaces_delete_doc(a ?? {{}}),
+    createDatabase: (a) => tools.host.spaces_create_database(a ?? {{}}),
+    listDatabases: (a) => tools.host.spaces_list_databases(a ?? {{}}),
+    getDatabase: (a) => tools.host.spaces_get_database(a ?? {{}}),
+    updateDatabase: (a) => tools.host.spaces_update_database(a ?? {{}}),
+    queryDatabase: (a) => tools.host.spaces_query_database(a ?? {{}}),
+    deleteDatabase: (a) => tools.host.spaces_delete_database(a ?? {{}}),
   }},
   crypto: {{
     seal: (v) => tools.host.crypto_seal({{ value: typeof v === "string" ? v : JSON.stringify(v) }}),
@@ -1381,8 +1988,239 @@ const host = {{
 }
 
 #[cfg(test)]
+mod hooks_runtime_tests;
+
+#[cfg(test)]
+mod agent_comms_delivery_runtime_test;
+
+#[cfg(test)]
+mod agent_comms_storage_bridge_test;
+
+#[cfg(test)]
+mod chat_title_runtime_test;
+
+#[cfg(test)]
+mod agent_react_runtime_test;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn script_run_lifecycle_events_carry_no_result_or_error() {
+        let script_run = serde_json::json!({
+            "run_id": "sr-0123", "workflow_id": "script-abc", "status": "completed",
+            "error": "agent said: secret", "output": { "result": "secret" },
+        });
+        let redacted = redact_script_run_event(script_run);
+        assert_eq!(
+            redacted,
+            serde_json::json!({
+                "run_id": "sr-0123", "workflow_id": "script-abc", "status": "completed",
+            })
+        );
+
+        // User workflow runs keep their full payload.
+        let workflow_run = serde_json::json!({
+            "run_id": "run-1", "status": "failed", "error": "boom", "output": { "k": "v" },
+        });
+        assert_eq!(redact_script_run_event(workflow_run.clone()), workflow_run);
+    }
+
+    #[test]
+    fn hook_logs_are_bounded_and_sanitized() {
+        let mut logs: Vec<String> = (0..MAX_HOOK_LOG_LINES + 5)
+            .map(|i| format!("line {i}"))
+            .collect();
+        logs[0] = format!(
+            "forged\nINFO other\u{1b}[31m{}",
+            "x".repeat(MAX_HOOK_LOG_LINE_CHARS * 2)
+        );
+        let (kept, dropped) = bounded_hook_logs(&logs);
+        assert_eq!(kept.len(), MAX_HOOK_LOG_LINES);
+        assert_eq!(dropped, 5);
+        assert!(!kept[0].contains('\n') && !kept[0].contains('\u{1b}'));
+        assert!(kept[0].ends_with('…'));
+        assert_eq!(kept[0].chars().count(), MAX_HOOK_LOG_LINE_CHARS + 1);
+        assert_eq!(kept[1], "line 1");
+    }
+
+    fn view_hook(plugin_id: &str, hook_id: &str, on: &str) -> HookPlugin {
+        HookPlugin {
+            plugin_id: plugin_id.to_owned(),
+            hook_id: hook_id.to_owned(),
+            on: on.to_owned(),
+            mode: crate::plugin_manifest::HookMode::default(),
+            priority: 0,
+            code: "return null;".to_owned(),
+            grants: HashSet::new(),
+            run_when: None,
+        }
+    }
+
+    #[test]
+    fn plugin_update_selects_only_the_updated_plugins_hooks() {
+        let hooks = vec![
+            view_hook("@acme/tasks", "migrate", ON_PLUGIN_UPDATE),
+            view_hook("@acme/tasks", "title", ON_POST_ASSISTANT_TURN),
+            view_hook("@other/app", "spy", ON_PLUGIN_UPDATE),
+        ];
+        let ids: Vec<String> = plugin_update_hooks_for(hooks, "@acme/tasks")
+            .into_iter()
+            .map(|hook| hook.hook_id)
+            .collect();
+        assert_eq!(ids, vec!["migrate"]);
+        let event = plugin_update_event("@acme/tasks", "1.0.0", "2.0.0", "rollback");
+        assert_eq!(event["source"], ON_PLUGIN_UPDATE);
+        assert_eq!(event["from_version"], "1.0.0");
+        assert_eq!(event["to_version"], "2.0.0");
+        assert_eq!(event["reason"], "rollback");
+    }
+
+    #[test]
+    fn view_action_selects_only_the_owning_plugins_view_hooks() {
+        let hooks = vec![
+            view_hook("@acme/tasks", "on-view", ON_VIEW_ACTION),
+            view_hook("@acme/tasks", "title", ON_POST_ASSISTANT_TURN),
+            view_hook("@other/app", "steal", ON_VIEW_ACTION),
+        ];
+        let selected = view_action_hooks_for(hooks, "@acme/tasks");
+        let ids: Vec<&str> = selected.iter().map(|h| h.hook_id.as_str()).collect();
+        assert_eq!(ids, vec!["on-view"]);
+        assert!(view_action_hooks_for(
+            vec![view_hook("@other/app", "steal", ON_VIEW_ACTION)],
+            "@acme/tasks"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn view_action_event_forwards_only_documented_fields() {
+        let event = view_action_event(&serde_json::json!({
+            "view_id": "board",
+            "action_id": "archive",
+            "intent": "archive",
+            "payload": { "id": 7 },
+            "item": { "id": "7" },
+            "source": "spoofed",
+            "extra": true,
+        }));
+        assert_eq!(event["source"], ON_VIEW_ACTION);
+        assert_eq!(event["view_id"], "board");
+        assert_eq!(event["action_id"], "archive");
+        assert_eq!(event["payload"]["id"], 7);
+        assert_eq!(event["values"], serde_json::Value::Null);
+        assert!(event.get("extra").is_none());
+    }
+
+    #[test]
+    fn view_action_outcome_distinguishes_missing_declined_and_handled() {
+        assert_eq!(
+            view_action_outcome(vec![], &[]),
+            ViewActionOutcome::NoHandler
+        );
+        assert_eq!(
+            view_action_outcome(vec!["h".to_owned()], &[]),
+            ViewActionOutcome::Declined {
+                hook_ids: vec!["h".to_owned()]
+            }
+        );
+        assert_eq!(
+            view_action_outcome(
+                vec!["h".to_owned()],
+                &[
+                    HookDirective::Note {
+                        text: "Archived".to_owned()
+                    },
+                    HookDirective::Note {
+                        text: "  ".to_owned()
+                    },
+                ]
+            ),
+            ViewActionOutcome::Handled {
+                hook_ids: vec!["h".to_owned()],
+                messages: vec!["Archived".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn hook_grants_never_use_unapproved_declared_capabilities() {
+        let declared = HashSet::from(["storage:kv".to_string(), "preferences:read".to_string()]);
+        assert_eq!(
+            restrict_hook_grants(
+                &declared,
+                &[
+                    "preferences:read".to_string(),
+                    "hook:side-model".to_string()
+                ]
+            ),
+            HashSet::from(["preferences:read".to_string()])
+        );
+        assert!(restrict_hook_grants(&declared, &[]).is_empty());
+        assert_eq!(
+            restrict_hook_grants(&declared, &["storage:kv".to_string()]),
+            HashSet::from(["storage:kv".to_string()])
+        );
+    }
+    #[test]
+    fn hook_collection_uses_current_approved_grants_and_exact_compiled_trust() {
+        let original = crate::plugin_manifest::PluginManifestLoader::load_install_catalog()
+            .into_iter()
+            .find(|m| {
+                m.contributes
+                    .as_ref()
+                    .is_some_and(|c| !c.turn_hooks.is_empty())
+            })
+            .expect("compiled hook manifest");
+        let mut enabled = std::collections::HashMap::from([(
+            original.id.clone(),
+            vec![original
+                .permission_grants
+                .first()
+                .expect("declared hook grant")
+                .clone()],
+        )]);
+        let overrides = std::collections::BTreeMap::new();
+        let trusted =
+            collect_hooks_from_manifests(std::slice::from_ref(&original), &enabled, &overrides);
+        assert!(!trusted.is_empty());
+        assert!(trusted
+            .iter()
+            .all(|h| h.grants == HashSet::from([original.permission_grants[0].clone()])));
+        enabled.insert(original.id.clone(), Vec::new());
+        let revoked =
+            collect_hooks_from_manifests(std::slice::from_ref(&original), &enabled, &overrides);
+        assert!(revoked.iter().all(|h| h.grants.is_empty()));
+        let mut changed = original.clone();
+        changed.permission_grants.push("hook:run-agent".to_owned());
+        assert!(
+            collect_hooks_from_manifests(std::slice::from_ref(&changed), &enabled, &overrides)
+                .is_empty()
+        );
+        let overrides = changed
+            .contributes
+            .as_ref()
+            .unwrap()
+            .turn_hooks
+            .iter()
+            .map(|h| {
+                (
+                    format!("{}::{}", changed.id, h.id),
+                    crate::governance::HookPolicyOverride {
+                        enabled: Some(true),
+                        trusted: Some(true),
+                    },
+                )
+            })
+            .collect();
+        let explicitly_trusted =
+            collect_hooks_from_manifests(std::slice::from_ref(&changed), &enabled, &overrides);
+        assert!(!explicitly_trusted.is_empty());
+        assert!(explicitly_trusted.iter().all(|h| h.grants.is_empty()));
+        enabled.clear();
+        assert!(collect_hooks_from_manifests(&[changed], &enabled, &overrides).is_empty());
+    }
 
     #[test]
     fn hook_policy_requires_explicit_trust_for_third_party_hooks() {
@@ -1420,6 +2258,56 @@ mod tests {
     /// something off the chat path survive. Getting this wrong would let a hook
     /// reacting to "a meeting ended" silently inject text into whatever chat happened
     /// to be open.
+    fn hint(kind: &str, title: &str) -> AppEventActivity {
+        AppEventActivity {
+            kind: kind.to_owned(),
+            title: title.to_owned(),
+            body: None,
+            level: None,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn app_event_activity_is_attributed_to_the_authenticated_caller() {
+        let mut h = hint("meeting", "Meeting started: Standup");
+        h.level = Some("success".to_owned());
+        h.metadata = Some(serde_json::json!({ "meeting_id": "mtg_1" }));
+        let item =
+            app_event_activity_item("@ryu/meetings", "@ryu/meetings#meeting.started", &h).unwrap();
+        assert_eq!(item.source, "meetings");
+        assert_eq!(item.kind, "meeting");
+        assert_eq!(item.title, "Meeting started: Standup");
+        assert_eq!(item.level, ryu_activity::ActivityLevel::Success);
+        assert_eq!(item.metadata["meeting_id"], "mtg_1");
+        assert_eq!(item.metadata["event"], "@ryu/meetings#meeting.started");
+        assert_eq!(activity_source_for("com.acme.flat"), "com.acme.flat");
+    }
+
+    #[test]
+    fn app_event_activity_hint_is_bounded() {
+        for bad in [
+            hint("Meeting", "t"),
+            hint("", "t"),
+            hint("meeting", "   "),
+            hint("meeting", &"x".repeat(513)),
+            AppEventActivity {
+                body: Some("x".repeat(5000)),
+                ..hint("meeting", "t")
+            },
+            AppEventActivity {
+                level: Some("panic".to_owned()),
+                ..hint("meeting", "t")
+            },
+            AppEventActivity {
+                metadata: Some(serde_json::json!(["not", "an", "object"])),
+                ..hint("meeting", "t")
+            },
+        ] {
+            assert!(app_event_activity_item("@ryu/meetings", "e#x", &bad).is_err());
+        }
+    }
+
     #[test]
     fn app_event_hooks_may_only_observe_or_note() {
         assert!(app_event_directive_allowed(&HookDirective::None));
@@ -1571,6 +2459,62 @@ mod tests {
     }
 
     #[test]
+    fn channel_actions_and_interactive_directives_cross_the_hook_boundary() {
+        let action = ryu_channel_contracts::ChannelActionEvent {
+            action_id: "review.approve".into(),
+            label: "Approve".into(),
+            payload: json!({ "requestId": "req-42" }),
+        };
+        let context = HookContext {
+            channel_action: Some(action),
+            ..Default::default()
+        };
+        let context_json = serde_json::to_value(context).unwrap();
+        assert_eq!(context_json["channel_action"]["actionId"], "review.approve");
+        assert_eq!(
+            context_json["channel_action"]["payload"]["requestId"],
+            "req-42"
+        );
+
+        let markup = json!({
+            "layout": "inline",
+            "rows": [[{
+                "label": "Approve",
+                "action": {
+                    "type": "callback",
+                    "actionId": "review.approve",
+                    "payload": { "requestId": "req-42" }
+                }
+            }]]
+        });
+        assert_eq!(
+            parse_directive(Some(
+                &json!({ "kind": "interactive_message", "markup": markup })
+            )),
+            HookDirective::InteractiveMessage {
+                markup: serde_json::from_value(markup).unwrap(),
+            }
+        );
+        assert!(matches!(
+            parse_directive(Some(&json!({
+                "kind": "handled",
+                "text": "Approval recorded.",
+                "interactive_markup": {
+                    "layout": "reply_keyboard",
+                    "rows": [[{
+                        "label": "View status",
+                        "action": { "type": "reply" }
+                    }]]
+                }
+            }))),
+            HookDirective::Handled {
+                interactive_markup: Some(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn tool_result_is_a_distinct_phase_from_post_tool_use() {
         // The split is what keeps observation detached (zero latency) while rewrite
         // is awaited. If these ever aliased, every `post_tool_use` observer would
@@ -1693,6 +2637,93 @@ mod tests {
         );
     }
 
+    fn cadence(first_reply: bool) -> crate::plugin_manifest::ReplyCadence {
+        crate::plugin_manifest::ReplyCadence {
+            every_pref: Some("auto-title-every-n".into()),
+            every_default: 5,
+            first_reply,
+            first_pref: Some("auto-title-on-first-turn".into()),
+            enabled_pref: Some("auto-title-enabled".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn cadence_requires_approved_preference_read_before_observing_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let preferences = crate::server::preferences::PreferencesStore::open(
+            directory.path().join("preferences.db"),
+        )
+        .unwrap();
+        let cadence = cadence(true);
+        let context = ctx_with(Some("fixture"), &[]);
+        let unapproved = HashSet::new();
+        preferences
+            .set("auto-title-enabled", "false")
+            .await
+            .unwrap();
+        assert!(reply_cadence_due(&preferences, &cadence, &context, &unapproved).await);
+        let approved = HashSet::from(["preferences:read".to_owned()]);
+        assert!(!reply_cadence_due(&preferences, &cadence, &context, &approved).await);
+        preferences.set("auto-title-enabled", "true").await.unwrap();
+        assert!(reply_cadence_due(&preferences, &cadence, &context, &unapproved).await);
+        assert!(reply_cadence_due(&preferences, &cadence, &context, &approved).await);
+    }
+
+    /// Mirrors `chat-title`'s `rename.js`: the gate may only skip a turn the hook
+    /// itself would have returned `none` for.
+    #[test]
+    fn reply_cadence_agrees_with_the_chat_title_hook() {
+        let c = cadence(true);
+        // No completed reply yet, or turned off: never.
+        assert!(!reply_cadence_matches(&c, 0, None, None, None));
+        assert!(!reply_cadence_matches(&c, 5, Some("false"), None, None));
+        // First reply, then every 5th by default.
+        assert!(reply_cadence_matches(&c, 1, None, None, None));
+        assert!(!reply_cadence_matches(&c, 2, None, None, None));
+        assert!(reply_cadence_matches(&c, 5, None, None, None));
+        assert!(reply_cadence_matches(&c, 10, Some("true"), None, None));
+        // First-reply trigger switched off.
+        assert!(!reply_cadence_matches(&c, 1, None, None, Some("false")));
+        // parseInt semantics for N.
+        assert!(reply_cadence_matches(&c, 3, None, Some("3"), None));
+        assert!(reply_cadence_matches(&c, 7, None, Some("7 turns"), None));
+        assert!(
+            reply_cadence_matches(&c, 5, None, Some("0"), None),
+            "below 1 -> default"
+        );
+        assert!(
+            reply_cadence_matches(&c, 5, None, Some("abc"), None),
+            "NaN -> default"
+        );
+        assert!(
+            reply_cadence_matches(&c, 5, None, Some(""), None),
+            "empty -> default"
+        );
+        assert!(
+            reply_cadence_matches(&c, 100, None, Some("250"), None),
+            "clamped to 100"
+        );
+        assert!(!reply_cadence_matches(&c, 250, None, Some("250"), None));
+        assert!(
+            reply_cadence_matches(&c, 4, None, Some("1"), None),
+            "every turn"
+        );
+        // A hook that never runs on the first reply.
+        assert!(!reply_cadence_matches(&cadence(false), 1, None, None, None));
+    }
+
+    #[test]
+    fn a_reply_cadence_defers_to_the_stored_gate() {
+        let m = HookMatch {
+            reply_cadence: Some(cadence(true)),
+            ..Default::default()
+        };
+        assert_eq!(
+            gate_without_storage(&m, &ctx_with(None, &[])),
+            GateVerdict::CheckStateful
+        );
+    }
+
     #[test]
     fn gate_flag_on_runs_off_skips() {
         let m = HookMatch {
@@ -1703,7 +2734,7 @@ mod tests {
             gate_without_storage(&m, &ctx_with(None, &[("io.ryu.double-check", true)])),
             GateVerdict::Run
         );
-        // Off / absent flag → skip (double-check must not spawn Deno every turn).
+        // Off / absent flag → skip (double-check must not run a sandbox every turn).
         assert_eq!(
             gate_without_storage(&m, &ctx_with(None, &[("io.ryu.double-check", false)])),
             GateVerdict::Skip
@@ -1811,10 +2842,10 @@ mod tests {
         );
     }
 
-    // ── Live sandbox tests (run only when the Deno binary is on PATH) ──────────
+    // ── Live sandbox tests (run whenever the JS sandbox is built) ──────────────
     //
     // These execute the ACTUAL shipped fixture hook JS in the real deny-by-default
-    // Deno sandbox, with a test bridge standing in for the host capabilities. They
+    // JS sandbox, with a test bridge standing in for the host capabilities. They
     // prove the whole runtime end-to-end: program build (shim + ctx + entry) →
     // sandbox exec → capability calls round-trip the bridge → directive parsed.
 
@@ -1988,7 +3019,7 @@ mod tests {
     #[tokio::test]
     async fn live_double_check_fixture_returns_note() {
         if !tool_exec::is_available() {
-            eprintln!("skipping live deno test: deno not on PATH");
+            eprintln!("skipping live sandbox test: the JS sandbox is unavailable");
             return;
         }
         let ctx = HookContext {
@@ -2024,7 +3055,7 @@ mod tests {
     #[tokio::test]
     async fn live_function_hook_can_inspect_the_downstream_directive() {
         if !tool_exec::is_available() {
-            eprintln!("skipping live deno test: deno not on PATH");
+            eprintln!("skipping live sandbox test: the JS sandbox is unavailable");
             return;
         }
         let directive = run_middleware_code(
@@ -2185,7 +3216,8 @@ mod tests {
         assert_eq!(
             directive,
             HookDirective::Handled {
-                text: "Security Scanner state cleared for this conversation.".into()
+                text: "Security Scanner state cleared for this conversation.".into(),
+                interactive_markup: None,
             }
         );
     }

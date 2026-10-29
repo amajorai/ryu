@@ -28,6 +28,10 @@
   <a href="./LICENSING.md"><img src="https://shieldcn.dev/badge/License-Open--core-73DC8C.svg?logo=opensourceinitiative&logoColor=white" alt="Open core" /></a>
 </p>
 
+<p align="center">
+  <a href="https://codespaces.new/amajorai/ryu?quickstart=1"><img src="https://github.com/codespaces/badge.svg" alt="Open in GitHub Codespaces" /></a>
+</p>
+
 ## How the pieces connect
 
 The same contracts connect the runtime, integration seams, surfaces, and deployment choices.
@@ -106,6 +110,9 @@ ryu-cli
 The installer starts Core and Gateway with bundled local defaults. See the
 [self-hosting guide](https://docs.ryuhq.com/docs/start-here/getting-started/self-host)
 for providers, deployment, and configuration.
+
+**Try it without installing**: [open a GitHub Codespace](https://codespaces.new/amajorai/ryu?quickstart=1).
+It installs the release binaries, starts Core, and opens the Ryu web app in a browser tab, on your own Codespaces quota. No Ryu account is needed.
 
 ## Licensing
 

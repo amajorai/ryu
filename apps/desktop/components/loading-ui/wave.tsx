@@ -2,4 +2,4 @@
 // companion shares the exact same waveform for voice input). Kept as a local
 // path so existing desktop imports (`@/components/loading-ui/wave`) keep working.
 
-export { Wave } from "@ryu/ui/components/wave";
+export { Wave } from "@ryu/ui/components/wave.tsx";

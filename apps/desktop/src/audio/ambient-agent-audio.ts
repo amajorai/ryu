@@ -23,7 +23,7 @@ export function clampAmbientVolume(value: number): number {
 }
 
 function resolveSource(source: string): string {
-	if (typeof document === "undefined") {
+	if (!globalThis.document) {
 		return source;
 	}
 	try {
@@ -34,7 +34,7 @@ function resolveSource(source: string): string {
 }
 
 function browserAudioFactory(source: string): HTMLAudioElement | null {
-	if (typeof Audio === "undefined") {
+	if (!globalThis.Audio) {
 		return null;
 	}
 	return new Audio(source);

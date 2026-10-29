@@ -1,12 +1,12 @@
-/* eslint-disable react/no-unknown-property */
 "use client";
+
 import {
 	Environment,
 	Lightformer,
 	useGLTF,
 	useTexture,
 } from "@react-three/drei";
-import { Canvas, extend, useFrame } from "@react-three/fiber";
+import { Canvas, extend, type ThreeEvent, useFrame } from "@react-three/fiber";
 import {
 	BallCollider,
 	CuboidCollider,
@@ -16,11 +16,7 @@ import {
 	useRopeJoint,
 	useSphericalJoint,
 } from "@react-three/rapier";
-import {
-	MeshLineGeometry,
-	MeshLineMaterial,
-	type MeshLineMaterialParameters,
-} from "meshline";
+import { MeshLineGeometry, MeshLineMaterial } from "meshline";
 import {
 	type CSSProperties,
 	type RefObject,
@@ -30,6 +26,7 @@ import {
 	useState,
 } from "react";
 import * as THREE from "three";
+import { isNativeText } from "../../lib/native-primitive-observation.ts";
 // Replace with your own imports, see the usage snippet for details.
 import cardGLB from "./card.glb";
 import "./Lanyard.css";
@@ -56,10 +53,10 @@ interface UvRect {
 	y: number;
 }
 
-/** Shape of the card model once loaded — only the meshes/materials we touch. */
-interface CardGLTF {
+/** Complete native GLTF result plus the bundled asset's named SDK objects. */
+type CardGLTF = ReturnType<typeof useGLTF<string>> & {
 	materials: {
-		base: THREE.MeshPhysicalMaterial;
+		base: THREE.MeshStandardMaterial;
 		metal: THREE.MeshStandardMaterial;
 	};
 	nodes: {
@@ -67,7 +64,20 @@ interface CardGLTF {
 		clip: THREE.Mesh;
 		clamp: THREE.Mesh;
 	};
-}
+};
+
+type NativeCaptureTarget = Pick<
+	Element,
+	"hasPointerCapture" | "setPointerCapture" | "releasePointerCapture"
+>;
+type NativeFiberEventFields = Omit<
+	ThreeEvent<PointerEvent>,
+	"target" | "currentTarget"
+>;
+type NativeFiberPointerEvent = NativeFiberEventFields & {
+	target: NativeCaptureTarget;
+	currentTarget: NativeCaptureTarget;
+};
 
 export interface LanyardProps {
 	/** Custom image URL for the card's back face. */
@@ -104,7 +114,7 @@ export default function Lanyard({
 	style,
 }: LanyardProps) {
 	const [isMobile, setIsMobile] = useState(
-		() => typeof window !== "undefined" && window.innerWidth < 768
+		() => globalThis.window !== undefined && window.innerWidth < 768
 	);
 
 	useEffect(() => {
@@ -193,7 +203,7 @@ function Band({
 	lanyardImage = null,
 	lanyardWidth = 1,
 }: BandProps) {
-	const band = useRef<THREE.Mesh>(null);
+	const band = useRef<THREE.Mesh<MeshLineGeometry, MeshLineMaterial>>(null);
 	const fixed = useRef<RapierRigidBody>(null);
 	const j1 = useRef<RapierRigidBody>(null);
 	const j2 = useRef<RapierRigidBody>(null);
@@ -214,18 +224,21 @@ function Band({
 		angularDamping: 4,
 		linearDamping: 4,
 	} as const;
-	const { nodes, materials } = useGLTF(cardGLB) as unknown as CardGLTF;
+	// SAFETY: The bundled card.glb has three named single-triangle-primitive meshes
+	// (card/clip/clamp) and unextended base/metal materials, which native GLTFLoader
+	// constructs as Mesh/MeshStandardMaterial. The intersection retains the complete SDK result.
+	const { nodes, materials } = useGLTF(cardGLB) as CardGLTF;
 	// Next's image declaration exposes the bundled fallback as StaticImageData,
 	// while Vite and the package-local asset declaration expose its URL string.
 	// Normalize both forms before handing the source to drei so the texture stays
 	// a single Three texture in every host.
-	const lanyardAsset = lanyard as unknown as string | { src?: string };
+	// SAFETY: The imported native asset is either the package URL string or
+	// Next StaticImageData with its src string; both overlap this source union.
+	const lanyardAsset = lanyard as string | { src?: string };
 	const lanyardSource =
 		lanyardImage ??
-		(typeof lanyardAsset === "string"
-			? lanyardAsset
-			: (lanyardAsset.src ?? ""));
-	const texture = useTexture(lanyardSource) as THREE.Texture;
+		(isNativeText(lanyardAsset) ? lanyardAsset : (lanyardAsset.src ?? ""));
+	const texture = useTexture(lanyardSource);
 	// useTexture must be called unconditionally; use a blank pixel when an image
 	// isn't supplied for a given face, then skip compositing it below.
 	const frontTex = useTexture(frontImage || BLANK_PIXEL);
@@ -245,8 +258,8 @@ function Band({
 		// baked atlas is small, so compositing at its native size and then blowing
 		// the card up on screen is what made it look soft. UVs are normalized, so
 		// scaling the whole canvas uniformly keeps the mapping exact.
-		const srcW = baseImg.width as number;
-		const srcH = baseImg.height as number;
+		const srcW = baseImg.width;
+		const srcH = baseImg.height;
 		const TARGET_ATLAS = 2048;
 		const superScale = Math.max(
 			1,
@@ -264,11 +277,11 @@ function Band({
 		ctx.imageSmoothingEnabled = true;
 		ctx.imageSmoothingQuality = "high";
 		// Keep the original baked atlas for the card edges and any untouched face.
-		ctx.drawImage(baseImg as CanvasImageSource, 0, 0, W, H);
+		ctx.drawImage(baseImg, 0, 0, W, H);
 
-		const drawFitted = (img: CanvasImageSource, rect: UvRect) => {
-			const imgW = (img as HTMLImageElement).width;
-			const imgH = (img as HTMLImageElement).height;
+		const drawFitted = (img: THREE.Texture["image"], rect: UvRect) => {
+			const imgW = img.width;
+			const imgH = img.height;
 			const rx = rect.x * W;
 			const ry = rect.y * H;
 			const rw = rect.w * W;
@@ -288,10 +301,10 @@ function Band({
 		};
 
 		if (frontImage && frontTex.image) {
-			drawFitted(frontTex.image as CanvasImageSource, FRONT_UV_RECT);
+			drawFitted(frontTex.image, FRONT_UV_RECT);
 		}
 		if (backImage && backTex.image) {
-			drawFitted(backTex.image as CanvasImageSource, BACK_UV_RECT);
+			drawFitted(backTex.image, BACK_UV_RECT);
 		}
 
 		const composite = new THREE.CanvasTexture(canvas);
@@ -314,10 +327,11 @@ function Band({
 	const [dragged, drag] = useState<false | THREE.Vector3>(false);
 	const [hovered, hover] = useState(false);
 
-	// rapier's joint hooks type their body refs as non-null RefObject; our refs
-	// start null at runtime, so narrow the type for the hook call sites only.
+	// SAFETY: Rapier declares non-null body refs, but its native useImpulseJoint
+	// effect tests both current slots immediately before createImpulseJoint reads them.
+	// The render-stage null slots are forwarded unchanged; joint cleanup reads no body slot.
 	const asBody = (r: RefObject<RapierRigidBody | null>) =>
-		r as RefObject<RapierRigidBody>;
+		r as Parameters<typeof useRopeJoint>[0];
 	useRopeJoint(asBody(fixed), asBody(j1), [[0, 0, 0], [0, 0, 0], 1]);
 	useRopeJoint(asBody(j1), asBody(j2), [[0, 0, 0], [0, 0, 0], 1]);
 	useRopeJoint(asBody(j2), asBody(j3), [[0, 0, 0], [0, 0, 0], 1]);
@@ -383,9 +397,7 @@ function Band({
 				const ft = fixed.current.translation();
 				p3.set(ft.x, ft.y, ft.z);
 				if (band.current) {
-					(band.current.geometry as MeshLineGeometry).setPoints(
-						curve.getPoints(isMobile ? 16 : 32)
-					);
+					band.current.geometry.setPoints(curve.getPoints(isMobile ? 16 : 32));
 				}
 				const av = c.angvel();
 				const cr = c.rotation();
@@ -422,7 +434,9 @@ function Band({
 					<CuboidCollider args={[0.8, 1.125, 0.01]} />
 					<group
 						onPointerDown={(e) => {
-							const el = e.target as Element;
+							const nativeEvent: NativeFiberEventFields = e;
+							// SAFETY: R3F constructs target/currentTarget with the complete has/set/releasePointerCapture protocol before dispatch. Only those two incorrect DOM-declared slots are erased; every other native ThreeEvent field and the original target/getter/receiver are retained.
+							const el = (nativeEvent as NativeFiberPointerEvent).target;
 							el.setPointerCapture(e.pointerId);
 							const t = card.current?.translation();
 							if (!t) {
@@ -435,7 +449,11 @@ function Band({
 						onPointerOut={() => hover(false)}
 						onPointerOver={() => hover(true)}
 						onPointerUp={(e) => {
-							(e.target as Element).releasePointerCapture(e.pointerId);
+							const nativeEvent: NativeFiberEventFields = e;
+							// SAFETY: R3F constructs the same full three-method target/currentTarget protocol before pointer-up dispatch. Erasing only the incorrect DOM-declared slots retains the entire remaining event and the original target/getter/receiver.
+							(
+								nativeEvent as NativeFiberPointerEvent
+							).target.releasePointerCapture(e.pointerId);
 							drag(false);
 						}}
 						position={[0, -1.2, -0.05]}
@@ -466,9 +484,8 @@ function Band({
 					args={[
 						{
 							resolution: new THREE.Vector2(1000, 1000),
-						} as MeshLineMaterialParameters,
+						},
 					]}
-					color="white"
 					depthTest={false}
 					lineWidth={lanyardWidth}
 					map={texture}

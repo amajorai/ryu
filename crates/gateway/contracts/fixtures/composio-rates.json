@@ -1,0 +1,20 @@
+{
+  "description": "Composio usage rates in integer micro-USD, verified against composio.dev/pricing on 2026-10-02. composio_billing.rs prices with these numbers (tests/composio_rates_fixture.rs) and the control plane's Connect settlement reads this file, so the two cannot drift.",
+  "verifiedOn": "2026-10-02",
+  "base": {
+    "toolCall": { "ownApp": 300, "managedApp": 500, "instant": 300 },
+    "triggerEvent": { "ownApp": 3000, "managedApp": 5000, "instant": 3000 },
+    "meta": { "ownApp": 0, "managedApp": 0, "instant": 0 }
+  },
+  "toolCallAddons": {
+    "directExecution": 100,
+    "proxyExecution": 200,
+    "sharedConnection": 300,
+    "sandboxExecution": 100
+  },
+  "policyAddons": {
+    "zeroDataRetention": 100,
+    "baa": 300,
+    "ipAllowlist": 100
+  }
+}

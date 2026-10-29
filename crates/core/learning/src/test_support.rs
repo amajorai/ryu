@@ -39,6 +39,9 @@ pub struct MockHost {
     pub queue_bail: bool,
     /// `Some` -> `dispatch_finetune` returns Ok with this; `None` -> Err.
     pub finetune: Option<Value>,
+    /// The last body `dispatch_finetune` received (shared, so a test can keep a
+    /// handle after the host moves into the context).
+    pub dispatched: std::sync::Arc<Mutex<Option<Value>>>,
     /// `Some` -> `merge_finetune` returns Ok with this; `None` -> Err.
     pub merged: Option<Value>,
     /// Count of `reload_skills` calls — the tell that a skill was activated.
@@ -61,6 +64,7 @@ impl MockHost {
             queue: QueuedApproval::Queued,
             queue_bail: false,
             finetune: None,
+            dispatched: std::sync::Arc::new(Mutex::new(None)),
             merged: None,
             reloaded: AtomicUsize::new(0),
             default_prm: "default-prm-model".to_string(),
@@ -213,7 +217,10 @@ impl LearningHost for MockHost {
         self.reloaded.fetch_add(1, Ordering::SeqCst);
     }
 
-    async fn dispatch_finetune(&self, _body: Value) -> Result<Value, String> {
+    async fn dispatch_finetune(&self, body: Value) -> Result<Value, String> {
+        if let Ok(mut slot) = self.dispatched.lock() {
+            *slot = Some(body);
+        }
         match &self.finetune {
             Some(v) => Ok(v.clone()),
             None => Err("finetune dispatch failed".to_string()),

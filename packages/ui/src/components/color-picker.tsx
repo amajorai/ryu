@@ -1,6 +1,7 @@
 "use client";
 
 import { useDirection } from "@base-ui/react/direction-provider";
+import type { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { useRender } from "@base-ui/react/use-render";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -22,6 +23,7 @@ import { useAsRef } from "@ryu/ui/hooks/use-as-ref.ts";
 import { useIsomorphicLayoutEffect } from "@ryu/ui/hooks/use-isomorphic-layout-effect.ts";
 import { useLazyRef } from "@ryu/ui/hooks/use-lazy-ref.ts";
 import { useComposedRefs } from "@ryu/ui/lib/compose-refs.ts";
+import { isNativeFunction } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
 import { PipetteIcon } from "lucide-react";
@@ -31,10 +33,10 @@ import {
 	type ComponentRef,
 	type CSSProperties,
 	createContext,
-	type JSX,
+	isValidElement,
 	type KeyboardEvent,
 	type PointerEvent,
-	type ReactNode,
+	type ReactElement,
 	useCallback,
 	useContext,
 	useEffect,
@@ -43,6 +45,22 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import { z } from "zod";
+import styles from "./color-picker.module.css";
+
+interface ColorPickerPaintStyle extends CSSProperties {
+	"--color-picker-alpha-b"?: number;
+	"--color-picker-alpha-g"?: number;
+	"--color-picker-alpha-r"?: number;
+	"--color-picker-area-b"?: number;
+	"--color-picker-area-g"?: number;
+	"--color-picker-area-left"?: string;
+	"--color-picker-area-r"?: number;
+	"--color-picker-area-top"?: string;
+	"--color-picker-paint"?: string;
+	"--color-picker-trigger-fill"?: string | undefined;
+	"--color-picker-trigger-foreground"?: string | undefined;
+}
 
 // Base UI has no Radix-style `<Slot>`; `useRender` is its composition primitive.
 // This helper preserves the `asChild` API by rendering the single child element
@@ -50,18 +68,20 @@ import {
 // default tag. It is a hook (calls `useRender`), so call it once, unconditionally.
 function useSlotRender(
 	asChild: boolean | undefined,
-	props: Record<string, unknown> & { children?: ReactNode },
-	defaultTag: keyof JSX.IntrinsicElements = "div"
-) {
+	props: useRender.ElementProps<"div"> & { "data-slot"?: string }
+): ReactElement {
 	const { children, ...rest } = props;
+	if (asChild && children && !isValidElement(children)) {
+		throw new Error("ColorPicker asChild requires a single React element");
+	}
 	return useRender({
-		defaultTagName: defaultTag,
+		defaultTagName: "div",
 		// When not composing (`asChild` false), leave `render` undefined so Base UI
 		// renders `defaultTag` with the full props (children included). When
 		// composing, render the provided child element and drop `children` from
 		// props so they don't double up.
-		render: asChild ? (children as useRender.RenderProp) : undefined,
-		props: asChild ? rest : props,
+		render: asChild && isValidElement(children) ? children : undefined,
+		props: asChild ? { ...rest } : { ...props },
 	});
 }
 
@@ -78,6 +98,12 @@ const FORMAT_SELECT_NAME = "ColorPickerFormatSelect";
 const INPUT_NAME = "ColorPickerInput";
 
 const colorFormats = ["hex", "rgb", "hsl", "oklch"] as const;
+const colorFormatSchema = z.enum(colorFormats);
+const swatchStringSchema = z.string();
+const recentColorStringsSchema = z.array(z.string().catch(""));
+const derivedHexSchema = z
+	.string()
+	.regex(/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
 
 // Base UI's <SelectValue /> renders the raw value unless the Root is given an
 // `items` map of value -> label, so provide one to keep the uppercase labels.
@@ -90,9 +116,9 @@ interface DivProps extends ComponentProps<"div"> {
 	asChild?: boolean;
 }
 
-type RootElement = ComponentRef<typeof ColorPicker>;
-type AreaElement = ComponentRef<typeof ColorPickerArea>;
-type InputElement = ComponentRef<typeof ColorPickerInput>;
+type RootElement = ComponentRef<"div">;
+type AreaElement = ComponentRef<"div">;
+type InputElement = ComponentRef<"input">;
 
 type ColorFormat = (typeof colorFormats)[number];
 
@@ -504,7 +530,55 @@ function hslToRgb(
 	};
 }
 
+function functionalColorChannels(
+	value: string,
+	names: string[]
+): string[] | null {
+	const opening = value.indexOf("(");
+	if (
+		!(
+			names.includes(value.slice(0, opening).toLowerCase()) &&
+			value.endsWith(")")
+		)
+	) {
+		return null;
+	}
+	const body = value.slice(opening + 1, -1).trim();
+	const sections = body.split("/");
+	if (sections.length > 2) {
+		return null;
+	}
+	const channels = body.includes(",")
+		? body.split(",").map((channel) => channel.trim())
+		: (sections[0] ?? "").trim().split(/\s+/);
+	if (body.includes(",") && sections.length > 1) {
+		return null;
+	}
+	if (!body.includes(",") && sections.length === 2) {
+		channels.push((sections[1] ?? "").trim());
+	}
+	if (channels.length !== 3 && channels.length !== 4) {
+		return null;
+	}
+	return channels;
+}
+
+function validColorNumber(value: string, unit: "" | "%" | "deg" = ""): boolean {
+	const numeric =
+		unit && value.toLowerCase().endsWith(unit)
+			? value.slice(0, -unit.length)
+			: value;
+	return (
+		/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(numeric) &&
+		Number.isFinite(Number(numeric))
+	);
+}
+
 function parseColorString(value: string): ColorValue | null {
+	// Collaborative document marks are untrusted. Bound work before trimming or parsing.
+	if (value.length > 128) {
+		return null;
+	}
 	const trimmed = value.trim();
 
 	// Parse hex colors
@@ -518,46 +592,55 @@ function parseColorString(value: string): ColorValue | null {
 	}
 
 	// Parse legacy comma-separated and modern space-separated rgb/rgba colors.
-	const rgbMatch = trimmed.match(
-		/^rgba?\(\s*([\d.]+%?)\s*(?:,|\s)\s*([\d.]+%?)\s*(?:,|\s)\s*([\d.]+%?)(?:\s*(?:,|\/)\s*([\d.]+%?))?\s*\)$/i
-	);
-	if (rgbMatch) {
+	const rgbMatch = functionalColorChannels(trimmed, ["rgb", "rgba"]);
+	if (rgbMatch?.every((channel) => validColorNumber(channel, "%"))) {
 		return {
-			r: channelValue(rgbMatch[1]),
-			g: channelValue(rgbMatch[2]),
-			b: channelValue(rgbMatch[3]),
-			a: parseAlpha(rgbMatch[4]),
+			r: channelValue(rgbMatch[0]),
+			g: channelValue(rgbMatch[1]),
+			b: channelValue(rgbMatch[2]),
+			a: parseAlpha(rgbMatch[3]),
 		};
 	}
 
 	// Parse legacy comma-separated and modern space-separated hsl/hsla colors.
-	const hslMatch = trimmed.match(
-		/^hsla?\(\s*([\d.]+)(?:deg)?\s*(?:,|\s)\s*([\d.]+)%\s*(?:,|\s)\s*([\d.]+)%(?:\s*(?:,|\/)\s*([\d.]+%?))?\s*\)$/i
-	);
-	if (hslMatch) {
+	const hslMatch = functionalColorChannels(trimmed, ["hsl", "hsla"]);
+	if (
+		hslMatch &&
+		validColorNumber(hslMatch[0] ?? "", "deg") &&
+		hslMatch
+			.slice(1, 3)
+			.every(
+				(channel) => channel.endsWith("%") && validColorNumber(channel, "%")
+			) &&
+		(hslMatch[3] === undefined || validColorNumber(hslMatch[3], "%"))
+	) {
 		return hslToRgb(
 			{
-				h: Number(hslMatch[1] ?? 0),
-				l: Number(hslMatch[3] ?? 0),
-				s: Number(hslMatch[2] ?? 0),
+				h: Number.parseFloat(hslMatch[0] ?? "0"),
+				l: Number.parseFloat(hslMatch[2] ?? "0"),
+				s: Number.parseFloat(hslMatch[1] ?? "0"),
 			},
-			parseAlpha(hslMatch[4])
+			parseAlpha(hslMatch[3])
 		);
 	}
 
 	// Parse OKLCH colors. Lightness accepts either a percentage or a 0–1 value;
 	// alpha accepts either a percentage or a 0–1 value.
-	const oklchMatch = trimmed.match(
-		/^oklch\(\s*([\d.]+%?)\s+([\d.]+)\s+([\d.]+)(?:deg)?(?:\s*(?:\/|,)\s*([\d.]+%?))?\s*\)$/i
-	);
-	if (oklchMatch) {
-		const lightness = Number.parseFloat(oklchMatch[1] ?? "0");
+	const oklchMatch = functionalColorChannels(trimmed, ["oklch"]);
+	if (
+		oklchMatch &&
+		validColorNumber(oklchMatch[0] ?? "", "%") &&
+		validColorNumber(oklchMatch[1] ?? "") &&
+		validColorNumber(oklchMatch[2] ?? "", "deg") &&
+		(oklchMatch[3] === undefined || validColorNumber(oklchMatch[3], "%"))
+	) {
+		const lightness = Number.parseFloat(oklchMatch[0] ?? "0");
 		return oklchToRgb({
-			a: parseAlpha(oklchMatch[4]),
-			c: Math.max(0, Number.parseFloat(oklchMatch[2] ?? "0")),
-			h: ((Number.parseFloat(oklchMatch[3] ?? "0") % 360) + 360) % 360,
+			a: parseAlpha(oklchMatch[3]),
+			c: Math.max(0, Number.parseFloat(oklchMatch[1] ?? "0")),
+			h: ((Number.parseFloat(oklchMatch[2] ?? "0") % 360) + 360) % 360,
 			l: clamp(
-				oklchMatch[1]?.endsWith("%") ? lightness / 100 : lightness,
+				oklchMatch[0]?.endsWith("%") ? lightness / 100 : lightness,
 				0,
 				1
 			),
@@ -576,6 +659,34 @@ function serializeColor(color: ColorValue): string {
 	return color.a < 1
 		? colorToString(color, "rgb")
 		: rgbToHex(color).toUpperCase();
+}
+
+function collectColorSwatches(
+	values: readonly string[],
+	limit: number
+): Array<{ color: ColorValue; value: string }> {
+	const entries: Array<{ color: ColorValue; value: string }> = [];
+	const seen = new Set<string>();
+	for (const value of values) {
+		const input = swatchStringSchema.safeParse(value);
+		if (!input.success) {
+			continue;
+		}
+		const color = parseColorString(input.data);
+		if (!color) {
+			continue;
+		}
+		const serialized = serializeColor(color);
+		if (seen.has(serialized)) {
+			continue;
+		}
+		seen.add(serialized);
+		entries.push({ color, value: serialized });
+		if (entries.length === limit) {
+			break;
+		}
+	}
+	return entries;
 }
 
 function toParsedColor(color: ColorValue): ParsedColor {
@@ -598,25 +709,17 @@ let recentColorsLoaded = false;
 const recentColorsListeners = new Set<() => void>();
 
 function loadRecentColors(): void {
-	if (recentColorsLoaded || typeof window === "undefined") {
+	if (recentColorsLoaded || globalThis.window === undefined) {
 		return;
 	}
 	recentColorsLoaded = true;
 	try {
-		const stored = JSON.parse(
-			window.localStorage.getItem(RECENT_COLORS_STORAGE_KEY) ?? "[]"
+		const stored = recentColorStringsSchema.parse(
+			JSON.parse(window.localStorage.getItem(RECENT_COLORS_STORAGE_KEY) ?? "[]")
 		);
-		if (!Array.isArray(stored)) {
-			return;
-		}
-		const parsed = stored
-			.map((value) =>
-				typeof value === "string" ? parseColorString(value) : null
-			)
-			.filter((value): value is ColorValue => value !== null)
-			.map(serializeColor)
-			.filter((value, index, values) => values.indexOf(value) === index)
-			.slice(0, MAX_RECENT_COLORS);
+		const parsed = collectColorSwatches(stored, MAX_RECENT_COLORS).map(
+			(entry) => entry.value
+		);
 		recentColorsState = parsed;
 	} catch {
 		// Recent colors are a convenience. A blocked or malformed browser store
@@ -625,7 +728,7 @@ function loadRecentColors(): void {
 }
 
 function writeRecentColors(): void {
-	if (typeof window === "undefined") {
+	if (globalThis.window === undefined) {
 		return;
 	}
 	try {
@@ -1084,22 +1187,99 @@ function ColorPickerImpl(props: ColorPickerImplProps) {
 	);
 }
 
-function ColorPickerTrigger(props: ComponentProps<typeof PopoverTrigger>) {
-	const { disabled, render, ...triggerProps } = props;
+interface ColorPickerTriggerProps
+	extends ComponentProps<typeof PopoverTrigger> {
+	/** Existing compact theme controls, with native default behavior otherwise. */
+	appearance?:
+		| "default"
+		| "theme-field"
+		| "theme-swatch"
+		| "hex-field"
+		| "hex-control";
+	/** Already-derived display colors; the picker never recomputes their contrast. */
+	palette?: { fillHex: string; foregroundHex?: string };
+	selected?: boolean;
+	spectrum?: boolean;
+}
 
+function mergeHexTriggerClasses(
+	className: ColorPickerTriggerProps["className"],
+	recipe: string
+): ColorPickerTriggerProps["className"] {
+	if (isNativeFunction(className)) {
+		return (state) => {
+			const custom = className(state);
+			return custom ? `${recipe} ${custom}` : recipe;
+		};
+	}
+	return className ? `${recipe} ${className}` : recipe;
+}
+
+function ColorPickerTrigger(props: ColorPickerTriggerProps) {
+	const {
+		disabled,
+		render,
+		appearance = "default",
+		palette,
+		selected = false,
+		spectrum = false,
+		...triggerProps
+	} = props;
+	const framedTriggerProps =
+		appearance === "hex-field" || appearance === "hex-control"
+			? {
+					...triggerProps,
+					className: mergeHexTriggerClasses(
+						triggerProps.className,
+						appearance === "hex-field"
+							? "type-caption flex h-7 cursor-pointer items-center justify-center rounded border border-border px-2 font-mono uppercase transition-opacity hover:opacity-90"
+							: "flex h-8 cursor-pointer items-center justify-center rounded-md border border-border px-2 font-mono text-xs transition-opacity hover:opacity-90"
+					),
+				}
+			: triggerProps;
 	const context = useColorPickerContext(TRIGGER_NAME);
-
 	const isDisabled = disabled || context.disabled || context.readOnly;
-
-	// Base UI composes via the `render` prop (there is no Radix `asChild`). Default
-	// to rendering the styled Button; callers can still override via `render`. The
-	// trigger's children/className/style flow through `triggerProps`.
+	const fill = derivedHexSchema.safeParse(palette?.fillHex);
+	const foreground = derivedHexSchema.safeParse(palette?.foregroundHex);
+	const paintStyle: ColorPickerPaintStyle = {
+		"--color-picker-trigger-fill": fill.success ? fill.data : undefined,
+		"--color-picker-trigger-foreground": foreground.success
+			? foreground.data
+			: undefined,
+	};
+	const buttonAppearance =
+		appearance === "theme-field"
+			? "theme-field"
+			: appearance === "theme-swatch"
+				? selected
+					? "theme-swatch-selected"
+					: "theme-swatch"
+				: "default";
+	// Invalid legacy display hex leaves the native button's background intact.
+	// Spectrum owns the original background shorthand, including its resets.
+	const paintClass = cn(
+		appearance === "theme-swatch" && spectrum
+			? styles.spectrumFill
+			: fill.success &&
+					(appearance === "theme-swatch"
+						? styles.swatchFill
+						: styles.fieldFill),
+		foreground.success && styles.triggerForeground
+	);
 	return (
 		<PopoverTrigger
 			data-slot="color-picker-trigger"
 			disabled={isDisabled}
-			render={render ?? <Button />}
-			{...triggerProps}
+			render={
+				render ?? (
+					<Button
+						appearance={buttonAppearance}
+						className={paintClass}
+						style={paintStyle}
+					/>
+				)
+			}
+			{...framedTriggerProps}
 		/>
 	);
 }
@@ -1140,7 +1320,7 @@ function ColorPickerContent(
 	);
 }
 
-function ColorPickerArea(props: DivProps) {
+function ColorPickerArea(props: DivProps): ReactElement {
 	const {
 		asChild,
 		onPointerDown: onPointerDownProp,
@@ -1268,12 +1448,21 @@ function ColorPickerArea(props: DivProps) {
 
 	const hue = hsv?.h ?? 0;
 	const backgroundHue = hsvToRgb({ h: hue, s: 100, v: 100, a: 1 });
+	const areaColorStyle: ColorPickerPaintStyle = {
+		"--color-picker-area-r": backgroundHue.r,
+		"--color-picker-area-g": backgroundHue.g,
+		"--color-picker-area-b": backgroundHue.b,
+	};
+	const areaHandleStyle: ColorPickerPaintStyle = {
+		"--color-picker-area-left": `${hsv?.s ?? 0}%`,
+		"--color-picker-area-top": `${100 - (hsv?.v ?? 0)}%`,
+	};
 
 	return useSlotRender(asChild, {
 		...areaProps,
 		"data-slot": "color-picker-area",
 		className: cn(
-			"relative h-40 w-full cursor-crosshair touch-none rounded-sm border",
+			"corner-squircle relative h-40 w-full cursor-crosshair touch-none rounded-sm border",
 			(context.disabled || context.readOnly) &&
 				"pointer-events-none opacity-50",
 			className
@@ -1288,32 +1477,20 @@ function ColorPickerArea(props: DivProps) {
 		ref: composedRef,
 		children: (
 			<>
-				<div className="absolute inset-0 overflow-hidden rounded-sm">
+				<div className="corner-squircle absolute inset-0 overflow-hidden rounded-sm">
 					<div
-						className="absolute inset-0"
-						style={{
-							backgroundColor: `rgb(${backgroundHue.r}, ${backgroundHue.g}, ${backgroundHue.b})`,
-						}}
+						className={cn("absolute inset-0", styles.areaHue)}
+						style={areaColorStyle}
 					/>
-					<div
-						className="absolute inset-0"
-						style={{
-							background: "linear-gradient(to right, #fff, transparent)",
-						}}
-					/>
-					<div
-						className="absolute inset-0"
-						style={{
-							background: "linear-gradient(to bottom, transparent, #000)",
-						}}
-					/>
+					<div className={cn("absolute inset-0", styles.areaWhite)} />
+					<div className={cn("absolute inset-0", styles.areaBlack)} />
 				</div>
 				<div
-					className="absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-sm"
-					style={{
-						left: `${hsv?.s ?? 0}%`,
-						top: `${100 - (hsv?.v ?? 0)}%`,
-					}}
+					className={cn(
+						"absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-sm",
+						styles.areaHandle
+					)}
+					style={areaHandleStyle}
 				/>
 			</>
 		),
@@ -1332,7 +1509,7 @@ function ColorPickerHueSlider(
 
 	const onValueChange = useCallback(
 		(value: number | readonly number[]) => {
-			const nextHue = Array.isArray(value) ? value[0] : (value as number);
+			const [nextHue] = [value].flat();
 			const newHsv: HSVColorValue = {
 				h: nextHue ?? 0,
 				s: hsv?.s ?? 0,
@@ -1383,7 +1560,7 @@ function ColorPickerAlphaSlider(
 
 	const onValueChange = useCallback(
 		(value: number | readonly number[]) => {
-			const raw = Array.isArray(value) ? value[0] : (value as number);
+			const [raw] = [value].flat();
 			const alpha = (raw ?? 0) / 100;
 			const newColor = { ...color, a: alpha };
 			const newHsv = { ...hsv, a: alpha };
@@ -1392,7 +1569,11 @@ function ColorPickerAlphaSlider(
 		[color, hsv, store]
 	);
 
-	const gradientColor = `rgb(${color?.r ?? 0}, ${color?.g ?? 0}, ${color?.b ?? 0})`;
+	const alphaStyle: ColorPickerPaintStyle = {
+		"--color-picker-alpha-r": color?.r ?? 0,
+		"--color-picker-alpha-g": color?.g ?? 0,
+		"--color-picker-alpha-b": color?.b ?? 0,
+	};
 
 	return (
 		<SliderPrimitive.Root
@@ -1412,19 +1593,14 @@ function ColorPickerAlphaSlider(
 				)}
 			>
 				<SliderPrimitive.Track
-					className="relative h-3 w-full grow overflow-hidden rounded-full"
-					style={{
-						background:
-							"linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)",
-						backgroundSize: "8px 8px",
-						backgroundPosition: "0 0, 0 4px, 4px -4px, -4px 0px",
-					}}
+					className={cn(
+						"relative h-3 w-full grow overflow-hidden rounded-full",
+						styles.alphaChecker
+					)}
 				>
 					<div
-						className="absolute inset-0 rounded-full"
-						style={{
-							background: `linear-gradient(to right, transparent, ${gradientColor})`,
-						}}
+						className={cn("absolute inset-0 rounded-full", styles.alphaColor)}
+						style={alphaStyle}
 					/>
 					<SliderPrimitive.Indicator className="absolute h-full" />
 				</SliderPrimitive.Track>
@@ -1442,27 +1618,25 @@ function ColorPickerSwatch(props: DivProps) {
 	const color = useStore((state) => state.color);
 	const format = useStore((state) => state.format);
 
-	const backgroundStyle = useMemo(() => {
+	const backgroundPaint = useMemo(() => {
 		if (!color) {
-			return {
-				background:
-					"linear-gradient(to bottom right, transparent calc(50% - 1px), hsl(var(--destructive)) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) no-repeat",
-			};
+			return { className: styles.emptyPaint, value: "" };
 		}
-
 		const colorString = `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a})`;
-
-		if (color.a < 1) {
-			return {
-				background: `linear-gradient(${colorString}, ${colorString}), repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0% 50% / 8px 8px`,
-			};
+		if (!hasFiniteColor(color)) {
+			return { className: "", value: colorString };
 		}
-
-		return {
-			backgroundColor: colorString,
-		};
+		return color.a < 1
+			? {
+					className: styles.translucentPaint,
+					value: `linear-gradient(${colorString}, ${colorString}), repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0% 50% / 8px 8px`,
+				}
+			: { className: styles.opaquePaint, value: colorString };
 	}, [color]);
 
+	const paintStyle: ColorPickerPaintStyle = {
+		"--color-picker-paint": backgroundPaint.value,
+	};
 	const ariaLabel = color
 		? `Current color: ${colorToString(color, format)}`
 		: "No color selected";
@@ -1473,25 +1647,33 @@ function ColorPickerSwatch(props: DivProps) {
 		"data-slot": "color-picker-swatch",
 		role: "img",
 		className: cn(
-			"box-border size-8 rounded-sm border shadow-sm",
+			"corner-squircle box-border size-8 rounded-sm border shadow-sm",
+			styles.forcedColorsNone,
+			backgroundPaint.className,
 			context.disabled && "opacity-50",
 			className
 		),
-		style: {
-			...backgroundStyle,
-			forcedColorAdjust: "none",
-		},
+		style: paintStyle,
 	});
 }
 
-function colorSwatchStyle(color: ColorValue): CSSProperties {
+function hasFiniteColor(color: ColorValue): boolean {
+	return [color.r, color.g, color.b, color.a].every(Number.isFinite);
+}
+
+function colorSwatchPaint(color: ColorValue): string {
 	const colorString = `rgba(${Math.round(color.r)}, ${Math.round(color.g)}, ${Math.round(color.b)}, ${roundAlpha(color.a)})`;
-	if (color.a < 1) {
-		return {
-			background: `linear-gradient(${colorString}, ${colorString}), repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0% 50% / 8px 8px`,
-		};
-	}
-	return { backgroundColor: colorString };
+	return color.a < 1
+		? `linear-gradient(${colorString}, ${colorString}), repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0% 50% / 8px 8px`
+		: colorString;
+}
+
+function colorSwatchPaintClass(color: ColorValue): string {
+	return hasFiniteColor(color)
+		? color.a < 1
+			? styles.translucentPaint
+			: styles.opaquePaint
+		: "";
 }
 
 interface ColorPickerSwatchesProps extends ComponentProps<"div"> {
@@ -1513,43 +1695,11 @@ function ColorPickerSwatches({
 	const swatches = colorsProp ?? context.swatches;
 
 	const parsedRecentColors = useMemo(
-		() =>
-			recentColors
-				.map((value) => {
-					const color = parseColorString(value);
-					return color ? { color, value: serializeColor(color) } : null;
-				})
-				.filter(
-					(entry): entry is { color: ColorValue; value: string } =>
-						entry !== null
-				)
-				.filter(
-					(entry, index, entries) =>
-						entries.findIndex(
-							(candidate) => candidate.value === entry.value
-						) === index
-				)
-				.slice(0, MAX_RECENT_COLORS),
+		() => collectColorSwatches(recentColors, MAX_RECENT_COLORS),
 		[recentColors]
 	);
 	const parsedSwatches = useMemo(
-		() =>
-			swatches
-				.map((value) => {
-					const color = parseColorString(value);
-					return color ? { color, value: serializeColor(color) } : null;
-				})
-				.filter(
-					(entry): entry is { color: ColorValue; value: string } =>
-						entry !== null
-				)
-				.filter(
-					(entry, index, entries) =>
-						entries.findIndex(
-							(candidate) => candidate.value === entry.value
-						) === index
-				)
-				.slice(0, 12),
+		() => collectColorSwatches(swatches, 12),
 		[swatches]
 	);
 
@@ -1576,12 +1726,16 @@ function ColorPickerSwatches({
 					<div className="flex flex-wrap gap-1.5">
 						{entries.map((entry) => {
 							const selected = entry.value === currentValue;
+							const paintStyle: ColorPickerPaintStyle = {
+								"--color-picker-paint": colorSwatchPaint(entry.color),
+							};
 							return (
 								<Button
 									aria-label={`Select ${label.toLowerCase()} ${entry.value}`}
 									aria-pressed={selected}
 									className={cn(
-										"size-7 rounded-md border border-border p-0 shadow-none transition-[transform,border-color,box-shadow] hover:scale-105 hover:border-ring focus-visible:ring-2 focus-visible:ring-ring",
+										"corner-squircle size-7 rounded-md border border-border p-0 shadow-none transition-[transform,border-color,box-shadow] hover:scale-105 hover:border-ring focus-visible:ring-2 focus-visible:ring-ring",
+										colorSwatchPaintClass(entry.color),
 										selected &&
 											"border-ring ring-2 ring-ring ring-offset-1 ring-offset-popover"
 									)}
@@ -1590,7 +1744,7 @@ function ColorPickerSwatches({
 									disabled={context.disabled || context.readOnly}
 									key={entry.value}
 									onClick={() => selectColor(entry.color)}
-									style={colorSwatchStyle(entry.color)}
+									style={paintStyle}
 									title={entry.value}
 									type="button"
 									variant="ghost"
@@ -1666,6 +1820,23 @@ interface ColorPickerPopoverProps extends Omit<ColorPickerProps, "children"> {
 	triggerStyle?: CSSProperties;
 }
 
+/** Map convenience names to native trigger props, retaining the public SDK style contract. */
+function popoverTriggerPresentation(
+	presentation: Pick<
+		ColorPickerPopoverProps,
+		"triggerAriaLabel" | "triggerClassName" | "triggerStyle"
+	>
+): Pick<PopoverPrimitive.Trigger.Props, "aria-label" | "className" | "style"> {
+	return {
+		"aria-label": presentation.triggerAriaLabel,
+		className: cn(
+			"corner-squircle inline-flex h-8 min-w-12 items-center justify-center gap-2 rounded-md border border-border bg-background px-2 text-foreground hover:bg-muted dark:bg-transparent dark:hover:bg-muted/50",
+			presentation.triggerClassName
+		),
+		style: presentation.triggerStyle,
+	};
+}
+
 function ColorPickerPopoverTrigger({
 	triggerAriaLabel = "Choose color",
 	triggerClassName,
@@ -1677,20 +1848,33 @@ function ColorPickerPopoverTrigger({
 >) {
 	const color = useStore((state) => state.color);
 	const displayValue = serializeColor(color);
+	const paintStyle: ColorPickerPaintStyle = {
+		"--color-picker-paint": colorSwatchPaint(color),
+	};
+	// Preserve the native public triggerStyle contract through SDK prop forwarding.
+	const triggerProps = popoverTriggerPresentation({
+		triggerAriaLabel,
+		triggerClassName,
+		triggerStyle,
+	});
 
 	return (
 		<ColorPickerTrigger
 			aria-label={triggerAriaLabel}
 			className={cn(
-				"inline-flex h-8 min-w-12 items-center justify-center gap-2 rounded-md border border-border bg-background px-2 text-foreground hover:bg-muted dark:bg-transparent dark:hover:bg-muted/50",
+				"corner-squircle inline-flex h-8 min-w-12 items-center justify-center gap-2 rounded-md border border-border bg-background px-2 text-foreground hover:bg-muted dark:bg-transparent dark:hover:bg-muted/50",
 				triggerClassName
 			)}
-			style={triggerStyle}
+			{...triggerProps}
 		>
 			<span
 				aria-hidden="true"
-				className="size-5 shrink-0 rounded-sm border border-foreground/15"
-				style={{ ...colorSwatchStyle(color), forcedColorAdjust: "none" }}
+				className={cn(
+					"corner-squircle size-5 shrink-0 rounded-sm border border-foreground/15",
+					styles.forcedColorsNone,
+					colorSwatchPaintClass(color)
+				)}
+				style={paintStyle}
 			/>
 			{triggerShowValue && (
 				<span className="font-mono text-xs uppercase">{displayValue}</span>
@@ -1753,7 +1937,7 @@ function ColorPickerEyeDropper(props: ComponentProps<typeof Button>) {
 		}
 	}, [color, store]);
 
-	const hasEyeDropper = typeof window !== "undefined" && !!window.EyeDropper;
+	const hasEyeDropper = globalThis.window !== undefined && !!window.EyeDropper;
 
 	if (!hasEyeDropper) {
 		return null;
@@ -1789,11 +1973,13 @@ function ColorPickerFormatSelect(props: ColorPickerFormatSelectProps) {
 
 	const format = useStore((state) => state.format);
 
-	const onFormatChange = useCallback(
-		// Base UI's Select infers the value as `unknown`; narrow back to ColorFormat.
-		(value: unknown) => {
-			if (value) {
-				store.setFormat(value as ColorFormat);
+	const onFormatChange: NonNullable<
+		ComponentProps<typeof Select>["onValueChange"]
+	> = useCallback(
+		(value) => {
+			const formatInput = colorFormatSchema.safeParse(value);
+			if (formatInput.success) {
+				store.setFormat(formatInput.data);
 			}
 		},
 		[store]
@@ -2339,5 +2525,6 @@ export {
 	ColorPickerSwatches,
 	type ColorPickerSwatchesProps,
 	ColorPickerTrigger,
+	type ColorPickerTriggerProps,
 	useStore as useColorPicker,
 };

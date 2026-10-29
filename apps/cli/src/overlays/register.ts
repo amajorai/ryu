@@ -4,8 +4,11 @@
 // App.tsx imports this module for its side effect so the swap happens at boot.
 
 import { gatewayOverlay } from "./gateway/index.tsx";
+import { keymapOverlay } from "./keymap/index.tsx";
+import "./product-mode/index.tsx";
 import { registerOverlay } from "./registry.ts";
 import { settingsOverlay } from "./settings/index.tsx";
 
 registerOverlay(settingsOverlay);
 registerOverlay(gatewayOverlay);
+registerOverlay(keymapOverlay);

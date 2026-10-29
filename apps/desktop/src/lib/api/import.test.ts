@@ -1,19 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { groupScanItems, type ImportItemKind, kindLabel } from "./import.ts";
-
-const kinds: ImportItemKind[] = [
-	"instructions",
-	"skill",
-	"mcp_server",
-	"plugin",
-	"memory",
-	"agent",
-	"slash_command",
-];
+import { groupScanItems, IMPORT_ITEM_KINDS, kindLabel } from "./import.ts";
 
 describe("import item kinds", () => {
 	test("labels every backend item kind for the setup picker", () => {
-		expect(kinds.map(kindLabel)).toEqual([
+		expect(IMPORT_ITEM_KINDS.map(kindLabel)).toEqual([
 			"Instructions",
 			"Skills",
 			"MCP servers",
@@ -21,6 +11,7 @@ describe("import item kinds", () => {
 			"Memories",
 			"Agents",
 			"Slash commands",
+			"Chats and projects",
 		]);
 	});
 

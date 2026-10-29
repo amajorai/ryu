@@ -319,7 +319,7 @@ impl GithubTapSource {
         }
     }
 
-    fn api_base(&self) -> String {
+    pub(crate) fn api_base(&self) -> String {
         self.api_base
             .clone()
             .filter(|s| !s.trim().is_empty())
@@ -502,6 +502,7 @@ impl GithubTapSource {
             return None;
         }
         Some(InstallResult {
+            artifact_fingerprint: None,
             slug,
             path: path.to_string_lossy().into_owned(),
         })
@@ -817,7 +818,7 @@ impl BrowseShSource {
         }
     }
 
-    fn api_base(&self) -> String {
+    pub(crate) fn api_base(&self) -> String {
         self.api_base
             .clone()
             .or_else(|| std::env::var("BROWSE_SH_API_URL").ok())
@@ -1019,7 +1020,7 @@ impl ClawHubSource {
         }
     }
 
-    fn api_base(&self) -> String {
+    pub(crate) fn api_base(&self) -> String {
         self.api_base
             .clone()
             .or_else(|| std::env::var("CLAWHUB_API_URL").ok())
@@ -1219,7 +1220,7 @@ impl LobeHubSource {
         }
     }
 
-    fn api_base(&self) -> String {
+    pub(crate) fn api_base(&self) -> String {
         self.api_base
             .clone()
             .or_else(|| std::env::var("LOBEHUB_AGENTS_URL").ok())
@@ -1719,8 +1720,11 @@ mod tests {
     #[tokio::test]
     #[ignore = "network"]
     async fn live_well_known_reads_a_published_index() {
-        // Mintlify publishes the discovery protocol at its docs base.
-        let source = WellKnownSource::new("wk-mintlify", "Mintlify", "https://mintlify.com/docs");
+        // Mintlify publishes the discovery protocol at its docs base. The guarded
+        // fetch follows no redirects, so this is the canonical host (the bare
+        // `mintlify.com` answers 307 to `www.mintlify.com`).
+        let source =
+            WellKnownSource::new("wk-mintlify", "Mintlify", "https://www.mintlify.com/docs");
         let client = client();
         let value = source
             .search(&client, &query("", 25))

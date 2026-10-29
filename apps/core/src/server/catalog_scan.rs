@@ -262,6 +262,7 @@ pub async fn scan(
     headers: axum::http::HeaderMap,
     caller: axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     user_jwt: axum::Extension<super::VerifiedUserJwt>,
+    authorization: Option<axum::Extension<super::ResolvedAuthorization>>,
     Json(request): Json<CatalogScanRequest>,
 ) -> Response {
     if !matches!(
@@ -275,7 +276,7 @@ pub async fn scan(
     }
 
     if matches!(request.execution, AuditExecution::Agent) {
-        return run_agent_audit(state, headers, caller, user_jwt, request).await;
+        return run_agent_audit(state, headers, caller, user_jwt, authorization, request).await;
     }
 
     let selection = crate::agent_selection::load_local(&state.preferences).await;
@@ -303,7 +304,7 @@ pub async fn scan(
             return error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Could not load the auditing agent",
-            )
+            );
         }
     };
     // Snapshot audits expose no executable tools. Never pretend an ACP agent was
@@ -328,8 +329,10 @@ pub async fn scan(
             })
     };
     let Some(model) = model else {
-        return error_response(StatusCode::UNPROCESSABLE_ENTITY,
-            "This agent has no Gateway model for a snapshot audit. Select a default agent with a Gateway model, or use the ryu-health-audit skill in its conversation.");
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "This agent has no Gateway model for a snapshot audit. Select a default agent with a Gateway model, or use the ryu-health-audit skill in its conversation.",
+        );
     };
     let task = build_task(&request, &agent_id);
     let delegates = vec![DelegateSpec {
@@ -396,6 +399,7 @@ async fn run_agent_audit(
     headers: axum::http::HeaderMap,
     caller: axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     user_jwt: axum::Extension<super::VerifiedUserJwt>,
+    authorization: Option<axum::Extension<super::ResolvedAuthorization>>,
     request: CatalogScanRequest,
 ) -> Response {
     let selection = crate::agent_selection::load_lane(
@@ -443,14 +447,21 @@ async fn run_agent_audit(
                 return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Could not prepare audit: {error}"),
-                )
+                );
             }
         };
     // A default model pin must not rewrite the shared runtime configuration.
     turn.lane_default = true;
     turn.fresh_session = true;
-    let response =
-        super::chat_stream(State(state.clone()), headers, caller, user_jwt, Json(turn)).await;
+    let response = super::chat_stream(
+        State(state.clone()),
+        headers,
+        caller,
+        user_jwt,
+        authorization,
+        Json(turn),
+    )
+    .await;
     if !response.status().is_success() {
         return response;
     }
@@ -470,8 +481,9 @@ async fn run_agent_audit(
             "The agent could not complete its audit: {error}. Continue in the audit conversation."
         ),
         Err(_) => {
-            crate::sidecar::adapters::acp::request_cancel(&conversation_id);
-            crate::a2a::request_cancel(&conversation_id);
+            // The audit turn is durable: dropping its response no longer stops it,
+            // so stop the agent and the detached driver explicitly.
+            super::cancel_conversation_turn(&conversation_id);
             "The audit reached its time limit. Continue in the audit conversation to review any pending questions or approvals.".to_owned()
         }
     };

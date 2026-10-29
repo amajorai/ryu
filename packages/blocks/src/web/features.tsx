@@ -14,7 +14,7 @@ const rows = [
 	{
 		feature: "Tool / MCP Access",
 		bare: "Weeks of setup",
-		ryu: "250+ registry",
+		ryu: "Installed and granted tools",
 	},
 	{ feature: "Long-term Memory", bare: "None", ryu: "Automatic" },
 	{ feature: "Email / Inboxes", bare: "Wire up SMTP", ryu: "Agent inboxes" },
@@ -75,7 +75,7 @@ export default function Features() {
 						</span>
 						<span className="flex items-center gap-1.5 font-medium text-xs uppercase tracking-wider">
 							<span className="text-foreground">Agent + Ryu</span>
-							<span className="inline-flex size-4 items-center justify-center rounded-full bg-foreground font-medium text-[10px] text-background">
+							<span className="type-compact inline-flex size-4 items-center justify-center rounded-full bg-foreground font-medium text-background">
 								✓
 							</span>
 						</span>

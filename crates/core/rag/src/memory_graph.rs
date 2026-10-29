@@ -9,6 +9,8 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::embed::fnv1a;
+
 const DEFAULT_MEMORY_SCOPES: [&str; 4] = ["agent", "user", "node", "project"];
 const MAX_TERMS_PER_MEMORY: usize = 24;
 const MAX_QUERY_TERMS: usize = 12;
@@ -682,17 +684,6 @@ fn tokenize(value: &str, limit: usize) -> Vec<String> {
         }
     }
     output
-}
-
-fn fnv1a(value: &str) -> u64 {
-    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = OFFSET;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(PRIME);
-    }
-    hash
 }
 
 #[cfg(test)]

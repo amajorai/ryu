@@ -52,7 +52,12 @@ export function SkillListRow({
 				</span>
 				{renderInstalledMark(skill)}
 			</div>
-			<p className="truncate text-muted-foreground text-xs">{skill.source}</p>
+			<p
+				className="truncate text-muted-foreground text-xs"
+				title={skill.source}
+			>
+				{skill.source}
+			</p>
 			{skill.installsLabel ? (
 				<div className="mt-1 flex items-center gap-1 text-muted-foreground text-xs">
 					<HugeiconsIcon className="size-3" icon={Download01Icon} />

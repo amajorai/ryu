@@ -1,0 +1,5 @@
+.inline1 {
+	height: var(--agent-disclosure-1-height);
+	pointer-events: var(--agent-disclosure-1-pointer-events);
+	transform-origin: var(--agent-disclosure-1-transform-origin);
+}

@@ -1,4 +1,4 @@
-import { installHorizontalWheelScrolling } from "@ryu/ui/lib/horizontal-wheel-scroll";
+import { installHorizontalWheelScrolling } from "@ryu/ui/lib/horizontal-wheel-scroll.ts";
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
@@ -10,9 +10,9 @@ const ROWS = [
 		label: "Agents",
 		note: "Choose the right runtime",
 	},
-	{ accent: "bg-amber-500/15", label: "Spaces", note: "Search your context" },
+	{ accent: "bg-warning/15", label: "Spaces", note: "Search your context" },
 	{
-		accent: "bg-emerald-500/15",
+		accent: "bg-success/15",
 		label: "Workflows",
 		note: "Automate the handoff",
 	},
@@ -26,7 +26,7 @@ const ROWS = [
 		label: "Calendar",
 		note: "Keep the schedule close",
 	},
-	{ accent: "bg-orange-500/15", label: "Approvals", note: "Stay in control" },
+	{ accent: "bg-warning/15", label: "Approvals", note: "Stay in control" },
 	{
 		accent: "bg-indigo-500/15",
 		label: "Analytics",
@@ -59,7 +59,7 @@ function HorizontalWheelScrollProof() {
 		<main className="min-h-screen bg-background px-6 py-10 text-foreground sm:px-10">
 			<section className="mx-auto flex max-w-4xl flex-col gap-8">
 				<header className="max-w-2xl">
-					<p className="mb-3 font-mono text-muted-foreground text-xs uppercase tracking-[0.24em]">
+					<p className="mb-3 font-mono text-muted-foreground text-xs uppercase tracking-widest">
 						Interaction proof
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight sm:text-4xl">
@@ -89,7 +89,7 @@ function HorizontalWheelScrollProof() {
 										{row.note}
 									</p>
 								</div>
-								<span className="font-mono text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
+								<span className="type-compact font-mono text-muted-foreground uppercase tracking-(--tracking-section)">
 									Ryu surface
 								</span>
 							</article>
@@ -99,7 +99,7 @@ function HorizontalWheelScrollProof() {
 						<span data-testid="horizontal-wheel-position">
 							Scroll position: {position.left}px / {position.max}px
 						</span>
-						<span className="font-mono uppercase tracking-[0.16em]">
+						<span className="font-mono uppercase tracking-(--tracking-section)">
 							Wheel → horizontal
 						</span>
 					</div>

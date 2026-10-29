@@ -1,6 +1,8 @@
-import { EASE_OUT, SPRING_LAYOUT } from "@ryu/ui/lib/ease";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { EASE_OUT, SPRING_LAYOUT } from "@ryu/ui/lib/ease.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { safeHttpUrl } from "@ryu/ui/lib/safe-url.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Check,
 	Circle,
@@ -15,6 +17,7 @@ import {
 	Wrench,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { isNativeNumber } from "../../../lib/native-primitive-observation.ts";
 import type {
 	AgentActivityItem,
 	AgentActivitySearch,
@@ -23,7 +26,7 @@ import type {
 	AgentActivityTool,
 	AgentActivityTrace,
 	AgentSearchResult,
-} from "./types";
+} from "./types.ts";
 
 function StepRow({ item }: { item: AgentActivityStep }) {
 	const state = item.status ?? "complete";
@@ -77,6 +80,7 @@ function TextRow({ item }: { item: AgentActivityText }) {
 }
 
 function SearchResultRow({ result }: { result: AgentSearchResult }) {
+	const safeUrl = safeHttpUrl(result.url);
 	const content = (
 		<>
 			<span
@@ -97,11 +101,16 @@ function SearchResultRow({ result }: { result: AgentSearchResult }) {
 	);
 	const className = cn(
 		"flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors",
-		result.url && "focus-visible:ring-2 focus-visible:ring-ring"
+		safeUrl && "focus-visible:ring-2 focus-visible:ring-ring"
 	);
 
-	return result.url ? (
-		<a className={className} href={result.url}>
+	return safeUrl ? (
+		<a
+			className={className}
+			href={safeUrl}
+			rel="noopener noreferrer"
+			target="_blank"
+		>
 			{content}
 		</a>
 	) : (
@@ -110,6 +119,7 @@ function SearchResultRow({ result }: { result: AgentSearchResult }) {
 }
 
 function SearchRow({ item }: { item: AgentActivitySearch }) {
+	const tl = useLiteralMessages();
 	const reduce = useReducedMotion() ?? false;
 	const enter = reduce ? { opacity: 1 } : { opacity: 0, y: 6 };
 	const visible = { opacity: 1, y: 0 };
@@ -160,7 +170,7 @@ function SearchRow({ item }: { item: AgentActivitySearch }) {
 						key="more-results"
 						transition={transition}
 					>
-						+{item.moreCount} more
+						{tl("+{moreCount} more", { moreCount: String(item.moreCount) })}
 					</motion.div>
 				) : null}
 			</AnimatePresence>
@@ -196,15 +206,14 @@ function ToolRow({ item }: { item: AgentActivityTool }) {
 			<span className="min-w-0 flex-1 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-muted-foreground/70 text-xs">
 				{item.target}
 			</span>
-			{typeof item.additions === "number" ||
-			typeof item.deletions === "number" ? (
+			{isNativeNumber(item.additions) || isNativeNumber(item.deletions) ? (
 				<span className="flex shrink-0 items-center gap-2 font-mono tabular-nums">
-					{typeof item.additions === "number" ? (
+					{isNativeNumber(item.additions) ? (
 						<span className="text-status-success">
 							+{formatCount(item.additions) ?? "—"}
 						</span>
 					) : null}
-					{typeof item.deletions === "number" ? (
+					{isNativeNumber(item.deletions) ? (
 						<span className="text-status-destructive">
 							−{formatCount(item.deletions) ?? "—"}
 						</span>

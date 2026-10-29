@@ -153,9 +153,10 @@ function EmptyStateCtaProof() {
 
 const root = document.getElementById("root");
 if (root) {
-	const proofWindow = window as Window & {
-		__emptyStateCtaProofRoot?: ReturnType<typeof createRoot>;
-	};
+	const proofWindow =
+		/* SAFETY: This private optional __emptyStateCtaProofRoot holder is authored only by this module, which stores the complete native createRoot result and reuses it on later evaluation. The view preserves the browser Window and does not describe an external payload. */ window as Window & {
+			__emptyStateCtaProofRoot?: ReturnType<typeof createRoot>;
+		};
 	const appRoot = proofWindow.__emptyStateCtaProofRoot ?? createRoot(root);
 	proofWindow.__emptyStateCtaProofRoot = appRoot;
 	appRoot.render(<EmptyStateCtaProof />);

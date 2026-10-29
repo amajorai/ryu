@@ -2,10 +2,10 @@
 // code_file and runs with only ctx and the grant-gated host facade.
 
 const event = ctx?.event;
-if (!event || typeof event !== "object") return { kind: "none" };
+if (!event) return { kind: "none" };
 
-const runId = typeof event.run_id === "string" ? event.run_id.trim() : "";
-const agentId = typeof event.agent_id === "string" ? event.agent_id.trim() : "";
+const runId = parsePrimitiveText(event.run_id) !== undefined ? event.run_id.trim() : "";
+const agentId = parsePrimitiveText(event.agent_id) !== undefined ? event.agent_id.trim() : "";
 const activeCount = event.active_count;
 const runActiveCount = event.run_active_count;
 const transitionId = event.transition_id;
@@ -29,7 +29,7 @@ const key = `tokenmaxxing:${encodeURIComponent(runId)}`;
 let previous = null;
 try {
 	const stored = await host.storage.get(key);
-	if (typeof stored === "string" && stored.length > 0) previous = JSON.parse(stored);
+	if (parsePrimitiveText(stored) !== undefined && stored.length > 0) previous = JSON.parse(stored);
 } catch {
 	return { kind: "none" };
 }
@@ -51,7 +51,19 @@ try {
 	return { kind: "none" };
 }
 
-if (previous?.run_active_count !== 1 || runActiveCount !== 0) return { kind: "none" };
+// run_active_count counts every delegate the fan-out queued, including those
+// still waiting for a concurrency permit, so it reaches 0 only when the run's
+// last delegate finishes. Notify on any drop to zero, not only 1-to-0: Core
+// dispatches transitions on separate tasks, so the final 0 can be processed
+// before the 1 it followed and that 1 is then dropped as stale above.
+if (
+	!previous ||
+	!Number.isInteger(previous.run_active_count) ||
+	previous.run_active_count < 1 ||
+	runActiveCount !== 0
+) {
+	return { kind: "none" };
+}
 
 try {
 	await host.notify({
@@ -59,6 +71,23 @@ try {
 		body: `All delegated agents finished (${agentId}).`,
 	});
 } catch {
-	// Notification is best effort; a missing active user/store must fail closed.
+	// Restore the prior state so an identical lifecycle delivery can retry once
+	// notification permission or the active notification store is available.
+	try {
+		if (previous) await host.storage.set(key, JSON.stringify(previous));
+	} catch {
+		// Both effects are best effort; never fail the delegation lifecycle.
+	}
 }
 return { kind: "none" };
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}

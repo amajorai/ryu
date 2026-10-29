@@ -36,4 +36,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "welcome-step-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

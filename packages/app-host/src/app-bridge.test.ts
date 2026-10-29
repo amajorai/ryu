@@ -1,3 +1,4 @@
+import type { RouteClaim } from "./rpc.ts";
 // Tests for the app host-bridge methods (model.complete / agent.run / storage.*)
 // added to the capability-gated RPC dispatch. These are the full-page Companion
 // app capabilities that reach the Core `PluginHookBridge` over one governed fetch.
@@ -39,7 +40,8 @@ describe("spaces documents capability", () => {
 	function spacesServices(): HostServices {
 		return {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			spacesCreateDoc: () => Promise.resolve("doc-1"),
 			spacesGetDoc: () =>
 				Promise.resolve({
@@ -81,7 +83,7 @@ describe("spaces documents capability", () => {
 			spacesServices()
 		).catch((e) => e);
 		expect(err).toBeInstanceOf(CodedRpcError);
-		expect((err as CodedRpcError).code).toBe("denied");
+		expect(err).toMatchObject({ code: "denied" });
 	});
 
 	it("REJECTS bad spaces args with invalid_args (missing source / space_id / doc_id)", async () => {
@@ -92,13 +94,72 @@ describe("spaces documents capability", () => {
 		] as const) {
 			const err = await dispatchRpc(
 				method,
-				args as unknown as unknown[],
+				[...args],
 				SP,
 				spacesServices()
 			).catch((e) => e);
 			expect(err).toBeInstanceOf(CodedRpcError);
-			expect((err as CodedRpcError).code).toBe("invalid_args");
+			expect(err).toMatchObject({ code: "invalid_args" });
 		}
+	});
+});
+
+describe("native Spaces database capability", () => {
+	const DATABASES = new Set<Capability>(["spaces.database"]);
+	const result = {
+		columns: ["owner"],
+		rows: [["owner-1"]],
+		schema: [{ id: "owner", label: "Owner", name: "owner" }],
+		truncated: false,
+	};
+	const services: HostServices = {
+		listAgents: () => Promise.resolve([]),
+		registerRoute: (claim: RouteClaim) => Promise.resolve({ path: claim.path }),
+		spacesQueryDatabase: () => Promise.resolve(result),
+	};
+
+	it("dispatches a bounded SQL query with the dedicated grant", async () => {
+		await expect(
+			dispatchRpc(
+				"spaces.queryDatabase",
+				[
+					{
+						space_id: "space-1",
+						database_id: "db-1",
+						query: "SELECT owner FROM data WHERE owner = ?",
+						parameters: ["owner-1"],
+					},
+				],
+				DATABASES,
+				services
+			)
+		).resolves.toEqual(result);
+	});
+
+	it("denies and rejects malformed database queries", async () => {
+		await expect(
+			dispatchRpc(
+				"spaces.queryDatabase",
+				[{ space_id: "space-1", database_id: "db-1", query: "SELECT 1" }],
+				NONE,
+				services
+			)
+		).rejects.toMatchObject({ code: "denied" });
+		await expect(
+			dispatchRpc(
+				"spaces.queryDatabase",
+				[
+					{
+						space_id: "space-1",
+						database_id: "db-1",
+						query: "SELECT 1",
+						parameters: [() => 1],
+					},
+				],
+				DATABASES,
+				services
+			)
+		).rejects.toMatchObject({ code: "invalid_args" });
 	});
 });
 
@@ -124,7 +185,7 @@ describe("streaming agent.run grant gate", () => {
 				thrown = e;
 			}
 			expect(thrown).toBeInstanceOf(CodedRpcError);
-			expect((thrown as CodedRpcError).code).toBe("denied");
+			expect(thrown).toMatchObject({ code: "denied" });
 		}
 	});
 });
@@ -132,7 +193,7 @@ describe("streaming agent.run grant gate", () => {
 function services(overrides: Partial<HostServices> = {}): HostServices {
 	return {
 		listAgents: () => Promise.resolve([]),
-		registerRoute: () => Promise.resolve(null),
+		registerRoute: (claim: RouteClaim) => Promise.resolve({ path: claim.path }),
 		modelComplete: () => Promise.resolve("draft"),
 		runAgent: () => Promise.resolve("agent-result"),
 		storageGet: () => Promise.resolve("stored"),
@@ -147,6 +208,56 @@ function services(overrides: Partial<HostServices> = {}): HostServices {
 }
 
 describe("app host-bridge dispatch", () => {
+	it("lists TTS engines through the speech-generation capability", async () => {
+		const engines = [{ id: "pocket", supports_cloning: true }];
+		await expect(
+			dispatchRpc(
+				"media.ttsEngines",
+				[],
+				new Set<Capability>(["media.generate"]),
+				services({ listTtsEngines: () => Promise.resolve(engines) })
+			)
+		).resolves.toEqual(engines);
+
+		await expect(
+			dispatchRpc("media.ttsEngines", [], NONE, services())
+		).rejects.toMatchObject({ code: "denied" });
+	});
+
+	it("installs a registered TTS engine only with the model-management capability", async () => {
+		const installed = {
+			already_installed: false,
+			engine: "pocket",
+			installed: true,
+		} satisfies Awaited<
+			ReturnType<NonNullable<HostServices["installTtsEngine"]>>
+		>;
+		await expect(
+			dispatchRpc(
+				"media.ttsEngineInstall",
+				[{ engine: "pocket" }],
+				new Set<Capability>(["voice.models.manage"]),
+				services({ installTtsEngine: () => Promise.resolve(installed) })
+			)
+		).resolves.toEqual(installed);
+		await expect(
+			dispatchRpc(
+				"media.ttsEngineInstall",
+				[{ engine: "../pip" }],
+				new Set<Capability>(["voice.models.manage"]),
+				services()
+			)
+		).rejects.toMatchObject({ code: "invalid_args" });
+		await expect(
+			dispatchRpc(
+				"media.ttsEngineInstall",
+				[{ engine: "pocket" }],
+				NONE,
+				services()
+			)
+		).rejects.toMatchObject({ code: "denied" });
+	});
+
 	it("dispatches model.complete to its service when granted", async () => {
 		const out = await dispatchRpc(
 			"model.complete",
@@ -210,7 +321,7 @@ describe("app host-bridge dispatch", () => {
 			spy
 		).catch((e) => e);
 		expect(err).toBeInstanceOf(CodedRpcError);
-		expect((err as CodedRpcError).code).toBe("denied");
+		expect(err).toMatchObject({ code: "denied" });
 		expect(called).toBe(false);
 	});
 
@@ -221,14 +332,11 @@ describe("app host-bridge dispatch", () => {
 			["storage.get", [{ key: "" }]],
 			["notifications.send", [{ title: "missing target" }]],
 		] as const) {
-			const err = await dispatchRpc(
-				method,
-				args as unknown as unknown[],
-				ALL,
-				services()
-			).catch((e) => e);
+			const err = await dispatchRpc(method, [...args], ALL, services()).catch(
+				(e) => e
+			);
 			expect(err).toBeInstanceOf(CodedRpcError);
-			expect((err as CodedRpcError).code).toBe("invalid_args");
+			expect(err).toMatchObject({ code: "invalid_args" });
 		}
 	});
 
@@ -240,7 +348,7 @@ describe("app host-bridge dispatch", () => {
 			services()
 		).catch((e) => e);
 		expect(err).toBeInstanceOf(CodedRpcError);
-		expect((err as CodedRpcError).code).toBe("invalid_args");
+		expect(err).toMatchObject({ code: "invalid_args" });
 	});
 
 	it("narrows compareAndSet values to strings or null", () => {
@@ -315,7 +423,8 @@ describe("fine-tune runs capability", () => {
 	function ftServices(): HostServices {
 		return {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve({}),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			finetuneCapability: () => Promise.resolve({ can_train_local: true }),
 			finetuneList: () => Promise.resolve({ jobs: [] }),
 			finetuneAdapters: () => Promise.resolve({ adapters: [] }),
@@ -359,7 +468,7 @@ describe("fine-tune runs capability", () => {
 			thrown = e;
 		}
 		expect(thrown).toBeInstanceOf(CodedRpcError);
-		expect((thrown as CodedRpcError).code).toBe("denied");
+		expect(thrown).toMatchObject({ code: "denied" });
 	});
 
 	it("finetune.stream is a streaming method sharing the finetune.runs grant", () => {

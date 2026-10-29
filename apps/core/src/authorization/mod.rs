@@ -31,6 +31,8 @@ pub enum Capability {
     MemoryRead,
     MemoryWrite,
     GatewayRoute,
+    NodeSandboxRead,
+    VaultWrite,
     FilesRead,
     FilesWrite,
 }
@@ -50,6 +52,8 @@ impl Capability {
             Self::MemoryRead => "memory:read",
             Self::MemoryWrite => "memory:write",
             Self::GatewayRoute => "gateway:route",
+            Self::NodeSandboxRead => "node:sandboxes:read",
+            Self::VaultWrite => "vault:write",
             Self::FilesRead => "files:read",
             Self::FilesWrite => "files:write",
         }
@@ -79,6 +83,8 @@ impl FromStr for Capability {
             "memory:read" => Ok(Self::MemoryRead),
             "memory:write" => Ok(Self::MemoryWrite),
             "gateway:route" => Ok(Self::GatewayRoute),
+            "node:sandboxes:read" => Ok(Self::NodeSandboxRead),
+            "vault:write" => Ok(Self::VaultWrite),
             "files:read" => Ok(Self::FilesRead),
             "files:write" => Ok(Self::FilesWrite),
             _ => Err(UnknownCapability(value.to_owned())),
@@ -442,6 +448,56 @@ mod tests {
         assert_eq!(
             context.authorize(
                 &RoutePolicy::requires([Capability::ToolsExec]),
+                &RequestBindings::default(),
+                20,
+            ),
+            AuthorizationDecision::Deny(DenialReason::MissingCapability)
+        );
+    }
+
+    #[test]
+    fn gateway_routing_cannot_mutate_vault_secrets() {
+        let routing = paired_context(CapabilitySet::new([Capability::GatewayRoute]));
+        assert_eq!(
+            routing.authorize(
+                &RoutePolicy::requires([Capability::VaultWrite]),
+                &RequestBindings::default(),
+                20,
+            ),
+            AuthorizationDecision::Deny(DenialReason::MissingCapability)
+        );
+        let writer = paired_context(CapabilitySet::new([Capability::VaultWrite]));
+        assert!(writer
+            .authorize(
+                &RoutePolicy::requires([Capability::VaultWrite]),
+                &RequestBindings::default(),
+                20,
+            )
+            .is_allowed());
+        assert_eq!(
+            "vault:write".parse::<Capability>(),
+            Ok(Capability::VaultWrite)
+        );
+    }
+
+    #[test]
+    fn node_sandbox_status_has_its_own_narrow_capability() {
+        assert_eq!(
+            "node:sandboxes:read".parse::<Capability>(),
+            Ok(Capability::NodeSandboxRead)
+        );
+        let status = paired_context(CapabilitySet::new([Capability::NodeSandboxRead]));
+        assert!(status
+            .authorize(
+                &RoutePolicy::requires([Capability::NodeSandboxRead]),
+                &RequestBindings::default(),
+                20,
+            )
+            .is_allowed());
+        let route_only = paired_context(CapabilitySet::new([Capability::GatewayRoute]));
+        assert_eq!(
+            route_only.authorize(
+                &RoutePolicy::requires([Capability::NodeSandboxRead]),
                 &RequestBindings::default(),
                 20,
             ),

@@ -1,4 +1,6 @@
 "use client";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import styles from "./app-ui.module.css";
 
 /**
  * The fixed Ryu App UI vocabulary for Companion surfaces.
@@ -12,6 +14,11 @@
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/inter";
+import type {
+	RyuCompanionI18n,
+	RyuCompanionWindowApi,
+} from "@ryu/app-host/companion-contracts";
+import type { MessageOverlays } from "@ryu/i18n/core";
 import {
 	I18nProvider,
 	useI18n,
@@ -19,6 +26,7 @@ import {
 	useLocalizedText,
 } from "@ryu/i18n/react";
 import { I18nDirectionProvider } from "@ryu/ui/components/direction.tsx";
+import { TooltipProvider } from "@ryu/ui/components/tooltip.tsx";
 import { useTimezoneRevision } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ComponentProps, ReactNode } from "react";
@@ -58,39 +66,23 @@ interface RyuAppShellProps extends ComponentProps<"div"> {
 	density?: "compact" | "comfortable";
 	/** Optional host locale for standalone companion previews and tests. */
 	initialLocale?: string | null;
+	/**
+	 * The app's own message catalogs (locale → English literal → text),
+	 * layered under the host's language pack so the app's copy follows the
+	 * host language too.
+	 */
+	messageOverlays?: MessageOverlays;
 	surface?: RyuAppSurface;
 }
 
-interface CompanionI18nBridge {
-	get(): Promise<{
-		direction: "ltr" | "rtl";
-		locale: string;
-		packId: string | null;
-		packName: string | null;
-		packVersion: string | null;
-	}>;
-	subscribe(options: {
-		onChange(snapshot: {
-			direction: "ltr" | "rtl";
-			locale: string;
-			packId: string | null;
-			packName: string | null;
-			packVersion: string | null;
-		}): void;
-	}): { dispose(): void };
-}
+/** The Companion iframe publishes this complete protocol in its own realm. */
+declare const window: Omit<Window, "ryu"> & { ryu?: RyuCompanionWindowApi };
 
-interface WindowWithCompanionBridge {
-	ryu?: {
-		i18n?: CompanionI18nBridge;
-	};
-}
-
-function companionI18nBridge(): CompanionI18nBridge | null {
-	if (typeof window === "undefined") {
+function companionI18nBridge(): RyuCompanionI18n | null {
+	if (globalThis.window === undefined) {
 		return null;
 	}
-	return (window as WindowWithCompanionBridge).ryu?.i18n ?? null;
+	return window.ryu?.i18n ?? null;
 }
 
 /** Mirror the host's selected pack into standalone Companion shells. */
@@ -163,6 +155,7 @@ export function RyuAppShell({
 	className,
 	density = "compact",
 	initialLocale,
+	messageOverlays,
 	surface = "standard",
 	...props
 }: RyuAppShellProps) {
@@ -174,20 +167,23 @@ export function RyuAppShell({
 		<I18nProvider
 			initialLocale={
 				initialLocale ??
-				(typeof navigator === "undefined" ? null : navigator.language)
+				(globalThis.navigator === undefined ? null : navigator.language)
 			}
+			{...(messageOverlays ? { overlays: messageOverlays } : {})}
 		>
 			<CompanionI18nSync>
 				<I18nDirectionProvider>
-					<div
-						{...props}
-						className={cn("ryu-app-shell", className)}
-						data-density={density}
-						data-ryu-app-ui={RYU_APP_UI_VERSION}
-						data-ryu-surface={surface}
-					>
-						{children}
-					</div>
+					<TooltipProvider>
+						<div
+							{...props}
+							className={cn(styles.shell, className)}
+							data-density={density}
+							data-ryu-app-ui={RYU_APP_UI_VERSION}
+							data-ryu-surface={surface}
+						>
+							{children}
+						</div>
+					</TooltipProvider>
 				</I18nDirectionProvider>
 			</CompanionI18nSync>
 		</I18nProvider>
@@ -208,20 +204,16 @@ export function RyuAppToolbar({
 }: RyuAppToolbarProps) {
 	const localizedTitle = useLocalizedText(title, { literal: true });
 	return (
-		<header {...props} className={cn("ryu-app-toolbar", className)}>
-			{title ? (
-				<h1 className="ryu-app-toolbar__title">{localizedTitle}</h1>
-			) : null}
+		<header {...props} className={cn(styles.toolbar, className)}>
+			{title ? <h1 className={styles.toolbarTitle}>{localizedTitle}</h1> : null}
 			{children}
-			{actions ? (
-				<div className="ryu-app-toolbar__actions">{actions}</div>
-			) : null}
+			{actions ? <div className={styles.toolbarActions}>{actions}</div> : null}
 		</header>
 	);
 }
 
 export function RyuAppMain({ className, ...props }: ComponentProps<"main">) {
-	return <main {...props} className={cn("ryu-app-main", className)} />;
+	return <main {...props} className={cn(styles.main, className)} />;
 }
 
 interface RyuAppSectionProps extends Omit<ComponentProps<"section">, "title"> {
@@ -236,9 +228,9 @@ export function RyuAppSection({
 }: RyuAppSectionProps) {
 	const localizedTitle = useLocalizedText(title, { literal: true });
 	return (
-		<section {...props} className={cn("ryu-app-section", className)}>
+		<section {...props} className={cn(styles.section, className)}>
 			{title ? (
-				<h2 className="ryu-app-section__heading">{localizedTitle}</h2>
+				<h2 className={styles.sectionHeading}>{localizedTitle}</h2>
 			) : null}
 			{children}
 		</section>
@@ -251,13 +243,13 @@ export function RyuAppList({
 	...props
 }: ComponentProps<"div">) {
 	const localizedAriaLabel = useLocalizedString(
-		typeof ariaLabel === "string" ? ariaLabel : undefined
+		isNativeText(ariaLabel) ? ariaLabel : undefined
 	);
 	return (
 		<div
 			{...props}
 			aria-label={localizedAriaLabel}
-			className={cn("ryu-app-list", className)}
+			className={cn(styles.list, className)}
 			role="listbox"
 		/>
 	);
@@ -276,9 +268,9 @@ export function RyuAppListSection({
 }: RyuAppListSectionProps) {
 	const localizedTitle = useLocalizedText(title, { literal: true });
 	return (
-		<section {...props} className={cn("ryu-app-list__section", className)}>
+		<section {...props} className={cn(styles.listSection, className)}>
 			{title ? (
-				<h2 className="ryu-app-list__section-title">{localizedTitle}</h2>
+				<h2 className={styles.listSectionTitle}>{localizedTitle}</h2>
 			) : null}
 			{children}
 		</section>
@@ -309,33 +301,31 @@ export function RyuAppListItem({
 		<button
 			{...props}
 			aria-selected={selected}
-			className={cn("ryu-app-list__item", className)}
+			className={cn(styles.listItem, className)}
 			data-selected={selected ? "true" : "false"}
 			role="option"
 			type="button"
 		>
-			{icon ? <span className="ryu-app-list__item-icon">{icon}</span> : null}
-			<span className="ryu-app-list__item-content">
-				<span className="ryu-app-list__item-title">{localizedTitle}</span>
+			{icon ? <span className={styles.listItemIcon}>{icon}</span> : null}
+			<span className={styles.listItemContent}>
+				<span className={styles.listItemTitle}>{localizedTitle}</span>
 				{subtitle ? (
-					<span className="ryu-app-list__item-subtitle">
-						{localizedSubtitle}
-					</span>
+					<span className={styles.listItemSubtitle}>{localizedSubtitle}</span>
 				) : null}
 			</span>
 			{accessories ? (
-				<span className="ryu-app-list__item-accessories">{accessories}</span>
+				<span className={styles.listItemAccessories}>{accessories}</span>
 			) : null}
 		</button>
 	);
 }
 
 export function RyuAppDetail({ className, ...props }: ComponentProps<"aside">) {
-	return <aside {...props} className={cn("ryu-app-detail", className)} />;
+	return <aside {...props} className={cn(styles.detail, className)} />;
 }
 
 export function RyuAppForm({ className, ...props }: ComponentProps<"form">) {
-	return <form {...props} className={cn("ryu-app-form", className)} />;
+	return <form {...props} className={cn(styles.form, className)} />;
 }
 
 interface RyuAppFieldProps extends ComponentProps<"div"> {
@@ -353,13 +343,11 @@ export function RyuAppField({
 	const localizedLabel = useLocalizedText(label, { literal: true });
 	const localizedDescription = useLocalizedText(description, { literal: true });
 	return (
-		<div {...props} className={cn("ryu-app-field", className)}>
-			<span className="ryu-app-field__label">{localizedLabel}</span>
+		<div {...props} className={cn(styles.field, className)}>
+			<span className={styles.fieldLabel}>{localizedLabel}</span>
 			{children}
 			{description ? (
-				<span className="ryu-app-field__description">
-					{localizedDescription}
-				</span>
+				<span className={styles.fieldDescription}>{localizedDescription}</span>
 			) : null}
 		</div>
 	);
@@ -382,17 +370,17 @@ export function RyuAppEmpty({
 	const localizedTitle = useLocalizedText(title, { literal: true });
 	const localizedDescription = useLocalizedText(description, { literal: true });
 	return (
-		<div {...props} className={cn("ryu-app-empty", className)}>
-			<h2 className="ryu-app-empty__title">{localizedTitle}</h2>
+		<div {...props} className={cn(styles.empty, className)}>
+			<h2 className={styles.emptyTitle}>{localizedTitle}</h2>
 			{description ? (
-				<p className="ryu-app-empty__description">{localizedDescription}</p>
+				<p className={styles.emptyDescription}>{localizedDescription}</p>
 			) : null}
 			{children}
-			{actions ? <div className="ryu-app-empty__actions">{actions}</div> : null}
+			{actions ? <div className={styles.emptyActions}>{actions}</div> : null}
 		</div>
 	);
 }
 
 export function RyuAppActions({ className, ...props }: ComponentProps<"div">) {
-	return <div {...props} className={cn("ryu-app-actions", className)} />;
+	return <div {...props} className={cn(styles.actions, className)} />;
 }

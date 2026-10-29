@@ -1,21 +1,27 @@
 [package]
 name = "ryu-gw-providers"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
 description = "Ryu Gateway concrete backend providers: the OpenAI/Anthropic/local/core/OpenRouter/Modal/GenAI/Replicate/Fal HTTP implementations behind the `Provider` trait, the shared provider HTTP helpers (retry, rate-limit header parsing, media-output normalization, model discovery), the per-provider quota sink, and the video-job value types. The `ProviderRegistry` + config-driven registration + key custody stay in apps/gateway ('engine moves, wiring stays'); the trait returns a crate-local `ProviderError` that the gateway maps to its `GatewayError` at the pipeline boundary, so a new provider is a drop-in."
 
 [dependencies]
+aws-sigv4 = { version = "=1.5.1", default-features = false, features = ["sign-http", "http1"] }
+aws-credential-types = "=1.3.0"
+ryu-gw-credentials = { path = "../credentials" }
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 axum = { version = "0.7" }
 reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+reqwest_sdk = { package = "reqwest", version = "0.13", default-features = false, features = ["json", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 tracing = "0.1"
 futures-util = "0.3"
 bytes = "1"
-genai = "0.6.5"
+genai = { path = "../../../vendor/genai", version = "0.6.5" }
 dashmap = "6"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }

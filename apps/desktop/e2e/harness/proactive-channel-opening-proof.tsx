@@ -2,7 +2,7 @@ import {
 	type ChannelConfigView,
 	ChannelsView,
 	defaultBehaviorSettings,
-} from "@ryu/blocks/desktop/channels";
+} from "@ryu/blocks/desktop/channels.tsx";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 
@@ -21,7 +21,7 @@ const channel: ChannelConfigView = {
 	teamId: null,
 };
 
-createRoot(document.querySelector("#root") as HTMLElement).render(
+createRoot(document.querySelector<HTMLElement>("#root")!).render(
 	<ChannelsView
 		agents={[{ id: "ryu", name: "Ryu" }]}
 		channels={[channel]}

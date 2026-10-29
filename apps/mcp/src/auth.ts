@@ -9,11 +9,37 @@
 // `RYU_CORE_TOKEN` or a local node token.
 
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import {
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
+import {
+	ryuHomeDir,
+	ryuProfile,
+	secretPath,
+} from "@ryuhq/core-client/data-dir";
+import {
+	type StoredCredentialTokenObservation,
+	storedCredentialTokenObservationSchema,
+} from "./credential-token-observation.ts";
+import {
+	deviceCodeClientProjectionSchema,
+	deviceTokenClientProjectionSchema,
+} from "./device-response-contracts.ts";
+import {
+	type LegacyRawAuthProfileObservation,
+	legacyRawAuthProfileObservationSchema,
+} from "./session-response-contracts.ts";
 
-const DEFAULT_AUTH_BACKEND = "http://localhost:3000";
+/** The hosted Ryu control plane, the same origin release Desktop signs in to. */
+const PRODUCTION_AUTH_BACKEND = "https://api.ryuhq.com";
+/** The local `apps/server` control plane a `RYU_PROFILE=dev` checkout runs. */
+const DEV_AUTH_BACKEND = "http://localhost:3000";
+const DEV_PROFILE = "dev";
 const DEVICE_CLIENT_ID = "ryu-mcp";
 const OAUTH_SCOPES = "openid profile email";
 const DEFAULT_INTERVAL_SECONDS = 5;
@@ -23,14 +49,16 @@ const MAX_EXPIRES_SECONDS = 3600;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const SECRET_DIR_MODE = 0o700;
 const SECRET_FILE_MODE = 0o600;
+/**
+ * Deadline for one control-plane auth request. Without it a hung connection
+ * pins the device-grant poll loop past its own expiry deadline forever.
+ */
+const AUTH_REQUEST_TIMEOUT_MS = 15_000;
 
-/** Persisted control-plane session for this MCP bridge only. */
-export interface AuthData {
-	backendUrl?: string;
-	email?: string | null;
-	name?: string | null;
-	token: string;
-}
+/** This bridge historically validates only the stored token. Profile/backend
+ * metadata and future fields remain raw native JSON observations. This is not
+ * the full BetterAuth session/user publisher contract. */
+export type AuthData = StoredCredentialTokenObservation;
 
 export interface DeviceAuthStart {
 	backendUrl: string;
@@ -42,15 +70,23 @@ export interface DeviceAuthStart {
 	verificationUriComplete: string;
 }
 
-const ryuDir = (): string =>
-	process.env.RYU_HOME?.trim() || join(homedir(), ".ryu");
+/** `<data dir>/secrets/mcp-auth.json`, with the data dir resolved like Core
+ * (`RYU_DIR` > Storage pointer > `~/.ryu<sfx>`), unless `RYU_MCP_AUTH_FILE`
+ * names the file explicitly. */
 const authFilePath = (): string =>
-	process.env.RYU_MCP_AUTH_FILE?.trim() || join(ryuDir(), "mcp-auth.json");
+	process.env.RYU_MCP_AUTH_FILE?.trim() ||
+	secretPath(ryuHomeDir(), "mcp-auth.json");
 
 /** Control-plane (Better Auth) base URL. */
 /** Allow plaintext only for a local control plane; remote auth must use HTTPS. */
-export const safeAuthBackendUrl = (value: string): string => {
-	const parsed = new URL(value);
+export const safeAuthBackendUrl = <BackendValue>(
+	value: BackendValue
+): string => {
+	// SAFETY: the actual native URL constructor owns WebIDL USVString conversion.
+	// This immediate SDK argument view permits coercible raw values and may throw;
+	// it does not assert that the stored value is already a primitive string.
+	// Keep the original native conversion/getter/error stage before protocol checks.
+	const parsed = new URL(value as ConstructorParameters<typeof URL>[0]);
 	const isLoopback =
 		parsed.protocol === "http:" && LOOPBACK_HOSTS.has(parsed.hostname);
 	if (parsed.protocol !== "https:" && !isLoopback) {
@@ -59,39 +95,66 @@ export const safeAuthBackendUrl = (value: string): string => {
 	return parsed.href.replace(/\/$/, "");
 };
 
+/** The control plane used when `RYU_AUTH_URL` is unset: the local dev server
+ * under `RYU_PROFILE=dev`, the hosted Ryu control plane for every other
+ * profile, so an installed `ryu-mcp login` works without configuration. */
+export const defaultAuthBackendUrl = (): string =>
+	ryuProfile() === DEV_PROFILE ? DEV_AUTH_BACKEND : PRODUCTION_AUTH_BACKEND;
+
+/** `RYU_AUTH_URL` when set, else {@link defaultAuthBackendUrl}. */
 export const authBackendUrl = (): string =>
-	safeAuthBackendUrl(process.env.RYU_AUTH_URL?.trim() || DEFAULT_AUTH_BACKEND);
+	safeAuthBackendUrl(
+		process.env.RYU_AUTH_URL?.trim() || defaultAuthBackendUrl()
+	);
 
 const boundedPositiveSeconds = (
-	value: unknown,
+	value: Parameters<typeof Number.isFinite>[0],
 	fallback: number,
 	maximum: number
 ): number => {
-	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+	if (!Number.isFinite(value)) {
 		return fallback;
 	}
-	return Math.min(value, maximum);
+	// SAFETY: The genuine native Number.isFinite accepts its complete input
+	// domain without coercion and returns true only for primitive finite numbers.
+	// This immediate checked value retains the original positive bound/fallback.
+	const seconds = value as number;
+	if (seconds <= 0) {
+		return fallback;
+	}
+	return Math.min(seconds, maximum);
 };
 
 /** Read this bridge's local credential, or null when absent/malformed. */
 export const loadToken = (): AuthData | null => {
 	try {
-		const data = JSON.parse(readFileSync(authFilePath(), "utf8")) as AuthData;
-		return typeof data.token === "string" && data.token ? data : null;
+		const data = JSON.parse(readFileSync(authFilePath(), "utf8"));
+		const observed = storedCredentialTokenObservationSchema.safeParse(data);
+		return observed.success ? observed.data : null;
 	} catch {
 		return null;
 	}
 };
 
-/** Write the credential 0600 under ~/.ryu (0700). Mode is ignored on Windows. */
+/** Write the credential 0600 under `<data dir>/secrets` (0700). Mode is ignored on Windows. */
 const saveToken = (data: AuthData): void => {
 	mkdirSync(dirname(authFilePath()), {
 		recursive: true,
 		mode: SECRET_DIR_MODE,
 	});
-	writeFileSync(authFilePath(), JSON.stringify(data, null, 2), {
+	// Write-then-rename so a crash mid-write can't leave a truncated credential
+	// file that silently reads back as "signed out".
+	const target = authFilePath();
+	const temporary = `${target}.${process.pid}.tmp`;
+	writeFileSync(temporary, JSON.stringify(data, null, 2), {
 		mode: SECRET_FILE_MODE,
 	});
+	try {
+		renameSync(temporary, target);
+	} catch (error) {
+		rmSync(temporary, { force: true });
+		throw error;
+	}
 };
 
 export const clearToken = (): void => {
@@ -153,38 +216,40 @@ export const requestDeviceCode = async (
 			client_id: DEVICE_CLIENT_ID,
 			scope: OAUTH_SCOPES,
 		}),
+		signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
 	});
-	const data = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
+	const data = await resp.json().catch(() => ({}));
 	if (!resp.ok) {
 		throw new Error(
 			`Device code request failed (${resp.status}): ${String(data.error ?? "unknown error")}`
 		);
 	}
-	const deviceCode =
-		typeof data.device_code === "string" ? data.device_code : "";
-	const userCode = typeof data.user_code === "string" ? data.user_code : "";
-	if (!(deviceCode && userCode)) {
+	const decodedDeviceCode = deviceCodeClientProjectionSchema.safeParse(data);
+	if (!decodedDeviceCode.success) {
 		throw new Error("Better Auth returned an invalid device code response");
 	}
+	const payload = decodedDeviceCode.data;
+	const deviceCode = payload.device_code;
+	const userCode = payload.user_code;
 	const configuredVerificationUri =
-		typeof data.verification_uri === "string"
-			? safeBrowserUrl(data.verification_uri)
-			: null;
+		payload.verification_uri === undefined
+			? null
+			: safeBrowserUrl(payload.verification_uri);
 	const verificationUri = configuredVerificationUri ?? `${base}/device`;
 	const verificationUriComplete =
-		typeof data.verification_uri_complete === "string"
-			? safeBrowserUrl(data.verification_uri_complete)
-			: null;
+		payload.verification_uri_complete === undefined
+			? null
+			: safeBrowserUrl(payload.verification_uri_complete);
 	return {
 		backendUrl: base,
 		deviceCode,
 		expiresIn: boundedPositiveSeconds(
-			data.expires_in,
+			payload.expires_in,
 			DEFAULT_EXPIRES_SECONDS,
 			MAX_EXPIRES_SECONDS
 		),
 		interval: boundedPositiveSeconds(
-			data.interval,
+			payload.interval,
 			DEFAULT_INTERVAL_SECONDS,
 			MAX_INTERVAL_SECONDS
 		),
@@ -225,14 +290,12 @@ export const pollDeviceToken = async (
 					device_code: deviceCode,
 					grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 				}),
+				signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
 			});
-			const data = (await resp.json().catch(() => ({}))) as Record<
-				string,
-				unknown
-			>;
-			const token = data.access_token;
-			if (typeof token === "string" && token) {
-				return token;
+			const data = await resp.json().catch(() => ({}));
+			const decodedToken = deviceTokenClientProjectionSchema.safeParse(data);
+			if (decodedToken.success) {
+				return decodedToken.data.access_token;
 			}
 			switch (data.error) {
 				case "access_denied":
@@ -302,8 +365,8 @@ export const runLogin = async (): Promise<void> => {
 	saveToken({
 		backendUrl: start.backendUrl,
 		token,
-		email: (user?.email as string | undefined) ?? null,
-		name: (user?.name as string | undefined) ?? null,
+		email: user?.email ?? null,
+		name: user?.name ?? null,
 	});
 
 	process.stdout.write("Signed in.\n");
@@ -322,22 +385,29 @@ export const runLogout = (): void => {
 };
 
 /** Fetch the control-plane user for the stored session. */
-export const fetchSession = async (
+export const fetchSession = async <BackendValue>(
 	token: string,
-	backendUrl?: string
-): Promise<Record<string, unknown> | null> => {
+	backendUrl?: BackendValue
+): Promise<LegacyRawAuthProfileObservation | null> => {
 	try {
 		const resp = await fetch(
 			`${safeAuthBackendUrl(backendUrl ?? authBackendUrl())}/api/auth/get-session`,
 			{
 				headers: { Authorization: `Bearer ${token}` },
+				signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
 			}
 		);
 		if (!resp.ok) {
 			return null;
 		}
-		const json = (await resp.json()) as { user?: Record<string, unknown> };
-		return json.user ?? null;
+		const json = await resp.json();
+		const user = json.user ?? null;
+		if (user === null) {
+			return null;
+		}
+		const observedProfile =
+			legacyRawAuthProfileObservationSchema.safeParse(user);
+		return observedProfile.success ? observedProfile.data : null;
 	} catch {
 		return null;
 	}

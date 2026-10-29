@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "reachable": true,
+  "up": true,
+  "backend": "cloudflared",
+  "backend_state": "Running",
+  "control_server": null,
+  "magic_dns_name": null,
+  "tailscale_ips": [],
+  "tailcat_address": null,
+  "cloudflaredUrl": "https://warm-tree.trycloudflare.com",
+  "publicUrl": "https://warm-tree.trycloudflare.com",
+  "tunnelProvider": null,
+  "backendError": null,
+  "peers": [],
+  "webhook_ingress_mode": null
+}

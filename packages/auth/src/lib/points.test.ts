@@ -1,8 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import {
+	computeDailyActivityAwards,
 	computeDailyRollupAwards,
 	dailyActiveAward,
 	levelForXp,
+	METERED_SPEND_MICRO_USD_PER_TOKEN_POINT,
+	meteredTokenAwards,
+	meteredTokenBlocks,
+	meteredTokenRefId,
 	POINTS_DAILY_ACTIVE,
 	POINTS_PER_STREAK_DAY,
 	POINTS_PER_TOKEN_BLOCK,
@@ -131,8 +136,8 @@ describe("computeDailyRollupAwards", () => {
 			streak: 0,
 		});
 		expect(awards).toHaveLength(1);
-		expect(awards[0].reason).toBe("usage_daily");
-		expect(awards[0].delta).toBe(POINTS_DAILY_ACTIVE);
+		expect(awards[0]?.reason).toBe("usage_daily");
+		expect(awards[0]?.delta).toBe(POINTS_DAILY_ACTIVE);
 	});
 
 	it("omits zero-value token and streak awards", () => {
@@ -188,5 +193,120 @@ describe("totalAwardDelta", () => {
 
 	it("returns zero for an empty list", () => {
 		expect(totalAwardDelta([])).toBe(0);
+	});
+});
+
+/** Spend that backs exactly `blocks` token blocks. */
+const spendFor = (blocks: number): number =>
+	blocks * POINTS_PER_TOKEN_BLOCK * METERED_SPEND_MICRO_USD_PER_TOKEN_POINT;
+
+describe("computeDailyActivityAwards", () => {
+	it("pays daily-active and streak, and never a token award", () => {
+		const awards = computeDailyActivityAwards({
+			userId: "u1",
+			day: "2026-07-22",
+			streak: 3,
+		});
+		expect(awards.map((a) => a.refId)).toEqual([
+			"u1:2026-07-22",
+			"u1:2026-07-22",
+		]);
+		expect(totalAwardDelta(awards)).toBe(
+			POINTS_DAILY_ACTIVE + POINTS_PER_STREAK_DAY * 3
+		);
+	});
+});
+
+describe("meteredTokenBlocks", () => {
+	it("needs both the tokens and the charged spend for each block", () => {
+		// Plenty of tokens, no charge: a reporter-inflated count earns nothing.
+		expect(
+			meteredTokenBlocks({
+				tokens: TOKENS_PER_POINT_BLOCK * 50,
+				spendMicroUsd: 0,
+			})
+		).toBe(0);
+		// A tiny charge does not unlock a huge token claim.
+		expect(
+			meteredTokenBlocks({
+				tokens: TOKENS_PER_POINT_BLOCK * 50,
+				spendMicroUsd: spendFor(2),
+			})
+		).toBe(2);
+		// Spend without tokens earns nothing either.
+		expect(meteredTokenBlocks({ tokens: 0, spendMicroUsd: spendFor(10) })).toBe(
+			0
+		);
+		expect(
+			meteredTokenBlocks({
+				tokens: TOKENS_PER_POINT_BLOCK * 3,
+				spendMicroUsd: spendFor(3) - 1,
+			})
+		).toBe(2);
+	});
+
+	it("is capped at the daily token cap", () => {
+		expect(
+			meteredTokenBlocks({
+				tokens: TOKENS_PER_POINT_BLOCK * 10_000,
+				spendMicroUsd: spendFor(10_000),
+			}) * POINTS_PER_TOKEN_BLOCK
+		).toBe(POINTS_TOKEN_DAILY_CAP);
+	});
+
+	it("treats negative and non-finite inputs as nothing", () => {
+		expect(meteredTokenBlocks({ tokens: -1, spendMicroUsd: -1 })).toBe(0);
+		expect(
+			meteredTokenBlocks({
+				tokens: Number.POSITIVE_INFINITY,
+				spendMicroUsd: Number.NaN,
+			})
+		).toBe(0);
+	});
+
+	it("keeps the payout below a quarter of the spend at the best store rate", () => {
+		// The store's best credit rate is $25 for 2,200 points.
+		const microUsdPerPoint = 25_000_000 / 2200;
+		const blocks = meteredTokenBlocks({
+			tokens: TOKENS_PER_POINT_BLOCK * 20,
+			spendMicroUsd: spendFor(20),
+		});
+		const payout = blocks * POINTS_PER_TOKEN_BLOCK * microUsdPerPoint;
+		expect(payout / spendFor(20)).toBeLessThan(0.25);
+	});
+});
+
+describe("meteredTokenAwards", () => {
+	it("emits one award per block under stable, distinct refIds", () => {
+		const usage = {
+			tokens: TOKENS_PER_POINT_BLOCK * 3,
+			spendMicroUsd: spendFor(3),
+		};
+		const awards = meteredTokenAwards("u1", "2026-07-22", usage);
+		expect(awards.map((a) => a.refId)).toEqual([
+			meteredTokenRefId("u1", "2026-07-22", 1),
+			meteredTokenRefId("u1", "2026-07-22", 2),
+			meteredTokenRefId("u1", "2026-07-22", 3),
+		]);
+		expect(awards.every((a) => a.reason === "usage_daily")).toBe(true);
+		expect(totalAwardDelta(awards)).toBe(POINTS_PER_TOKEN_BLOCK * 3);
+		// Never collides with the legacy reported-token award or daily-active.
+		expect(awards.map((a) => a.refId)).not.toContain("u1:2026-07-22:tokens");
+		expect(awards.map((a) => a.refId)).not.toContain("u1:2026-07-22");
+	});
+
+	it("re-evaluating a grown day only adds the new blocks' refIds", () => {
+		const early = meteredTokenAwards("u1", "d", {
+			tokens: TOKENS_PER_POINT_BLOCK,
+			spendMicroUsd: spendFor(1),
+		});
+		const later = meteredTokenAwards("u1", "d", {
+			tokens: TOKENS_PER_POINT_BLOCK * 2,
+			spendMicroUsd: spendFor(2),
+		});
+		expect(later.slice(0, early.length).map((a) => a.refId)).toEqual(
+			early.map((a) => a.refId)
+		);
+		expect(later).toHaveLength(2);
 	});
 });

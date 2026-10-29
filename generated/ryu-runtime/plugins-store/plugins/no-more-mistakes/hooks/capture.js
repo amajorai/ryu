@@ -115,7 +115,7 @@ const existingRules = existing
 	.map((d) => String(d.title || "").trim())
 	.filter(Boolean);
 
-const raw = await host.sideModel({
+const raw = await requestRule({
 	system:
 		"You extract a durable rule from a moment where a user corrected an AI agent. " +
 		"You are not answering the user and not continuing the work.\n\n" +
@@ -182,21 +182,41 @@ async function pref(key) {
 	try {
 		const v = await host.getPreference({ key: key });
 		return v == null ? "" : String(v).trim();
+	} catch  {
+		return "";
+	}
+}
+
+/** Best-effort rule extraction; model outages must not block the user turn. */
+async function requestRule(args) {
+	try {
+		return await host.sideModel(args);
 	} catch (e) {
+		host.log("no-more-mistakes: extracting the rule failed", e);
 		return "";
 	}
 }
 
 /** Whether `/mistakes off` muted learning in this conversation. */
 async function isMuted() {
+	let raw;
 	try {
-		const raw = await host.storage.get(convId);
-		if (!raw) {
-			return false;
-		}
+		raw = await host.storage.get(convId);
+	} catch (e) {
+		// If the plugin cannot read the opt-out state, do not collect a correction
+		// anyway. A temporary storage outage should not silently override `/mistakes off`.
+		host.log("no-more-mistakes: reading the conversation mute failed", e);
+		return true;
+	}
+	if (!raw) {
+		return false;
+	}
+	try {
 		return JSON.parse(raw).muted === true;
 	} catch (e) {
-		return false;
+		// An unreadable state is unknown, so treat it as muted until storage is repaired.
+		host.log("no-more-mistakes: parsing the conversation mute failed", e);
+		return true;
 	}
 }
 
@@ -239,8 +259,8 @@ function parseVerdict(value) {
 	}
 	try {
 		const parsed = JSON.parse(text.slice(start, end + 1));
-		return parsed && typeof parsed === "object" ? parsed : null;
-	} catch (e) {
+		return parsed && Object(parsed) === parsed ? parsed : null;
+	} catch  {
 		return null;
 	}
 }

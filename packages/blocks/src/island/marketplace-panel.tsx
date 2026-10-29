@@ -1,4 +1,5 @@
 "use client";
+import styles from "./marketplace-panel.module.css";
 
 // The marketplace view inside the expanded island: browse + install skills and
 // MCP servers from Core's catalog, with per-kind source switching. Kept compact
@@ -98,11 +99,10 @@ export function MarketplacePanelView({
 			<div className="flex items-center gap-1 rounded-full bg-card p-1">
 				{(["skill", "mcp"] as const).map((k) => (
 					<Button
-						className={
-							kind === k
-								? "flex-1 bg-secondary text-foreground hover:bg-secondary"
-								: "flex-1 text-muted-foreground hover:text-foreground"
+						appearance={
+							kind === k ? "island-kind-active" : "island-kind-inactive"
 						}
+						className="flex-1"
 						key={k}
 						onClick={() => onSelectKind(k)}
 						size="xs"
@@ -115,7 +115,8 @@ export function MarketplacePanelView({
 
 			<div className="flex items-center gap-2">
 				<Input
-					className="h-7 min-w-0 flex-1 rounded-lg bg-input/50 px-2 py-1 text-foreground text-xs md:text-xs"
+					aria-label={kind === "skill" ? "Search skills" : "Search MCP servers"}
+					className="min-w-0 flex-1"
 					onChange={(e) => onChangeQuery(e.target.value)}
 					onKeyDown={(e) => {
 						if (e.key === "Enter") {
@@ -125,21 +126,24 @@ export function MarketplacePanelView({
 					placeholder={kind === "skill" ? "Search skills…" : "Search MCP…"}
 					type="text"
 					value={query}
+					variant="island-settings"
 				/>
 				{sources.length > 0 ? (
-					<NativeSelect
-						className="max-w-[8rem] [&>select]:h-7 [&>select]:bg-input/50 [&>select]:text-foreground [&>select]:text-xs"
-						disabled={loading}
-						onChange={(e) => onSelectSource(e.target.value)}
-						size="sm"
-						value={activeSource}
-					>
-						{sources.map((s) => (
-							<NativeSelectOption key={s.id} value={s.id}>
-								{s.displayName}
-							</NativeSelectOption>
-						))}
-					</NativeSelect>
+					<div className={styles.sourcePicker}>
+						<NativeSelect
+							className="max-w-[8rem] [&>select]:h-7"
+							disabled={loading}
+							onChange={(e) => onSelectSource(e.target.value)}
+							size="sm"
+							value={activeSource}
+						>
+							{sources.map((s) => (
+								<NativeSelectOption key={s.id} value={s.id}>
+									{s.displayName}
+								</NativeSelectOption>
+							))}
+						</NativeSelect>
+					</div>
 				) : null}
 			</div>
 
@@ -171,23 +175,23 @@ export function MarketplacePanelView({
 											{item.name}
 										</p>
 										{item.description ? (
-											<p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+											<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground">
 												{item.description}
 											</p>
 										) : null}
 										{item.subtitle ? (
-											<p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+											<p className="type-compact mt-0.5 truncate text-muted-foreground">
 												{item.subtitle}
 											</p>
 										) : null}
 									</div>
 									{item.installed ? (
-										<span className="shrink-0 rounded-md bg-success/20 px-2 py-1 font-medium text-[10px] text-status-success">
+										<span className="type-compact shrink-0 rounded-md bg-success/20 px-2 py-1 font-medium text-status-success">
 											Installed
 										</span>
 									) : (
 										<Button
-											className="shrink-0 bg-muted text-foreground hover:bg-accent"
+											appearance="island-panel"
 											disabled={installing.has(item.id)}
 											onClick={() => onInstall(item.id)}
 											size="xs"

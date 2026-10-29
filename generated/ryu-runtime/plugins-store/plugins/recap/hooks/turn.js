@@ -56,22 +56,28 @@ if (turnText.length < (await minChars())) {
 }
 
 const detail = await detailLevel();
-const raw = await host.sideModel({
-	system:
-		"You write the recap that goes at the end of a coding agent's turn. You are " +
-		"summarizing work that has already happened — never continue it, never give " +
-		"advice, never answer the user's question yourself.\n\n" +
-		"Rules:\n" +
-		"- Report only what the text below actually says was done. If it says it tried " +
-		"and failed, the recap says it failed. Do not upgrade an attempt into a result.\n" +
-		"- Name the concrete things: files, commands, endpoints, tests, numbers.\n" +
-		"- No preamble, no 'In this turn', no restating the user's request.\n" +
-		"- Write in the same language as the turn.\n\n" +
-		"Shape:\n" +
-		shapeFor(detail),
-	prompt: turnText,
-	model_pref_key: "recap-model",
-});
+let raw;
+try {
+	raw = await host.sideModel({
+		system:
+			"You write the recap that goes at the end of a coding agent's turn. You are " +
+			"summarizing work that has already happened — never continue it, never give " +
+			"advice, never answer the user's question yourself.\n\n" +
+			"Rules:\n" +
+			"- Report only what the text below actually says was done. If it says it tried " +
+			"and failed, the recap says it failed. Do not upgrade an attempt into a result.\n" +
+			"- Name the concrete things: files, commands, endpoints, tests, numbers.\n" +
+			"- No preamble, no 'In this turn', no restating the user's request.\n" +
+			"- Write in the same language as the turn.\n\n" +
+			"Shape:\n" +
+			recapFormatFor(detail),
+		prompt: turnText,
+		model_pref_key: "recap-model",
+	});
+} catch (e) {
+	host.log("recap: generating the turn recap failed", e);
+	return { kind: "none" };
+}
 
 const recap = String(raw || "").trim();
 if (!recap) {
@@ -102,7 +108,7 @@ async function readState() {
 	let raw = null;
 	try {
 		raw = await host.storage.get(convId);
-	} catch (e) {
+	} catch  {
 		return { entries: [], muted: false };
 	}
 	if (!raw) {
@@ -114,7 +120,7 @@ async function readState() {
 			entries: Array.isArray(parsed.entries) ? parsed.entries : [],
 			muted: parsed.muted === true,
 		};
-	} catch (e) {
+	} catch  {
 		return { entries: [], muted: false };
 	}
 }
@@ -124,7 +130,7 @@ async function minChars() {
 	let pref = null;
 	try {
 		pref = await host.getPreference({ key: "recap-min-chars" });
-	} catch (e) {
+	} catch  {
 		pref = null;
 	}
 	const n = Number.parseInt(String(pref == null ? "" : pref), 10);
@@ -139,7 +145,7 @@ async function detailLevel() {
 	let pref = null;
 	try {
 		pref = await host.getPreference({ key: "recap-detail" });
-	} catch (e) {
+	} catch  {
 		pref = null;
 	}
 	const v = String(pref || "").trim().toLowerCase();
@@ -150,7 +156,7 @@ async function detailLevel() {
 }
 
 /** The output shape asked of the side model, per detail level. */
-function shapeFor(level) {
+function recapFormatFor(level) {
 	if (level === "brief") {
 		return "ONE sentence, under 25 words, saying what the turn accomplished. Nothing else.";
 	}

@@ -11,7 +11,7 @@
 // (bearer + ChatGPT-Account-ID) still authenticates the call. The gateway
 // forwards both upstream unchanged, applying request-side DLP + audit.
 
-import { CodexGatewayConfigView } from "@ryu/blocks/desktop/agent-edit";
+import { CodexGatewayConfigView } from "@ryu/blocks/desktop/agent-edit.tsx";
 import { useEffect, useState } from "react";
 import { sileo } from "sileo";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -21,7 +21,12 @@ import {
 } from "@/src/lib/api/preferences.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
-export function CodexGatewayConfig() {
+export function CodexGatewayConfig({
+	limitedNotice = null,
+}: {
+	/** Shown when the agent's account access is limited. */
+	limitedNotice?: string | null;
+} = {}) {
 	const [enabled, setEnabled] = useState(true);
 	const [loaded, setLoaded] = useState(false);
 
@@ -61,6 +66,7 @@ export function CodexGatewayConfig() {
 	return (
 		<CodexGatewayConfigView
 			enabled={enabled}
+			limitedNotice={limitedNotice}
 			loaded={loaded}
 			onToggle={handleToggle}
 		/>

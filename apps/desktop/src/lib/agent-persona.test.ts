@@ -25,6 +25,7 @@ describe("agent expressive avatar persona mapping", () => {
 				kind: "expressive",
 			})
 		).toEqual({
+			avatar_style: null,
 			avatar_url: null,
 			dicebear: null,
 			dither: null,
@@ -55,4 +56,26 @@ test("configured conversation ghost round-trips through agent persona fields", (
 	).toEqual(glyph);
 	expect(fields.avatar_url).toBeNull();
 	expect(fields.icon).toBeNull();
+});
+
+test("marketplace avatar styles round-trip with their region picks", () => {
+	const glyph = {
+		kind: "avatar_style" as const,
+		style: "@acme/robots:robot",
+		seed: "aria",
+		palette: "rust",
+		parts: { antenna: "@acme/hats:spring", eyes: "visor" },
+	};
+	const fields = glyphToPersonaFields(glyph);
+	expect(fields.avatar_style).toEqual({
+		style: glyph.style,
+		seed: glyph.seed,
+		palette: glyph.palette,
+		parts: glyph.parts,
+	});
+	expect(fields.dicebear).toBeNull();
+	expect(fields.dither).toBeNull();
+	expect(
+		personaToGlyphValue({ display_name: null, tone: null, ...fields })
+	).toEqual(glyph);
 });

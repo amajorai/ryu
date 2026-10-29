@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "mail-companion-proof.playwright.config.ts",
+    "mail-companion-proof.spec.ts",
+    "mail-companion-proof.host.ts",
+    "harness/mail-companion-proof.tsx",
+    "harness/mail-companion-proof.types.ts",
+    "harness/vite.mail-companion-proof.config.ts"
+  ]
+}

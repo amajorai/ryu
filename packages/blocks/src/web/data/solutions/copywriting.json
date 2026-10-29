@@ -1,37 +1,10 @@
 {
   "slug": "copywriting",
   "name": "Copywriting",
-  "navLabel": "Copywriting",
-  "category": "Language & Content",
   "icon": "Pencil",
   "visualKey": "SkillsVisual",
   "tagline": "Draft headlines, ads, and landing-page copy using your brand guidelines.",
-  "heroEyebrow": "Ryu for Copywriting",
   "heroTitle": "Ryu for copywriting",
-  "heroSubtitle": "Draft headlines, ads, and landing-page copy using your brand guidelines.",
-  "intro": "Copy lives and dies on voice, angle, and volume: you need many sharp variations fast, all true to the brand and the offer. Ryu grounds short-form copy on your voice guidelines and product facts, generates angles to test, and keeps pre-launch campaigns on a local model so nothing leaks. A copywriter picks and polishes the winner.",
-  "highlights": [
-    {
-      "title": "Many angles, fast",
-      "description": "Generate a batch of headline, hook, and CTA variations from one offer so you have real options to test, not a single guess.",
-      "icon": "Zap"
-    },
-    {
-      "title": "On-brand every time",
-      "description": "Ground copy on your voice guidelines and product facts with Spaces and RAG so variations stay consistent and never misstate the offer.",
-      "icon": "Sparkles"
-    },
-    {
-      "title": "Pick the best model",
-      "description": "Swap between a punchy model for hooks and a careful one for compliance-heavy copy, choosing per task without lock-in.",
-      "icon": "Cpu"
-    },
-    {
-      "title": "Pre-launch privacy",
-      "description": "Keep unannounced product names, prices, and campaigns on a local model with no telemetry until you are ready to go live.",
-      "icon": "Shield"
-    }
-  ],
   "useCases": [
     {
       "title": "Ad variation sets",
@@ -39,11 +12,11 @@
     },
     {
       "title": "Landing page copy",
-      "description": "Draft a hero, benefit bullets, and CTA for a landing page grounded on your offer and voice, structured section by section."
+      "description": "Draft a landing page's headline, benefits, and call to action from your offer and voice."
     },
     {
       "title": "Email subject lines",
-      "description": "Spin up many subject line and preview text options for a campaign, each tuned to a different hook or audience."
+      "description": "Write subject lines and preview text for a campaign, each with a different hook."
     },
     {
       "title": "Product and feature naming",
@@ -55,31 +28,21 @@
     },
     {
       "title": "Campaign copy in one workflow",
-      "description": "Run a workflow that drafts ad, email, and landing copy for a single campaign, then drops it into your marketing tool via a connected app."
+      "description": "One workflow drafts the ad, email, and landing copy, then saves it to your marketing tool."
     }
-  ],
-  "examplePrompts": [
-    "Write ten ad headlines for our new plan in our brand voice, each on a different angle.",
-    "Draft hero copy, three benefit bullets, and a CTA for this landing page using our offer details.",
-    "Give me eight email subject lines for the launch, with preview text for each.",
-    "Brainstorm five name and tagline pairs for this feature, with a one-line rationale per pair.",
-    "Rewrite this CTA in three shorter, bolder versions that fit under 40 characters."
   ],
   "faq": [
     {
       "q": "Will the copy stay on brand?",
-      "a": "Yes. Put your voice guidelines and product facts in a Space and Ryu grounds every variation on them with RAG, so the tone is consistent and the offer is stated correctly."
+      "a": "Yes. Add your voice guidelines and product facts to a Space, and Ryu drafts every variation from them, so the tone is consistent and the offer is stated correctly."
     },
     {
       "q": "Can I keep an unannounced campaign private?",
-      "a": "Yes. Ryu runs a local model by default with no telemetry, so unreleased product names, prices, and campaign copy stay on your device until launch."
+      "a": "Yes. Use a local model and drafts stay on your machine; check which connected tools see the work. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Does Ryu replace a copywriter?",
-      "a": "No. Ryu generates the volume of variations and angles fast, but a copywriter selects, sharpens, and approves the lines that actually ship."
+      "a": "No. Ryu drafts many variations quickly; a copywriter picks, edits, and approves what ships."
     }
-  ],
-  "ctaTitle": "More angles, less staring at a blank page.",
-  "ctaSubtitle": "Generate on-brand headlines, ads, and landing copy in seconds, then pick the winner.",
-  "ctaNote": "On-brand · Many variations · Pre-launch private"
+  ]
 }

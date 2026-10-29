@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	DropdownMenu,
@@ -13,6 +14,7 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	IconArrowUp,
@@ -26,13 +28,11 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { CSSProperties } from "react";
 import { useRef, useState } from "react";
 
-/** Fades the trailing edge of overflowing text into transparency. */
-const FADE_GRADIENT =
-	"linear-gradient(to right, #000 calc(100% - 2rem), transparent)";
-const FADE_STYLE: CSSProperties = {
-	maskImage: FADE_GRADIENT,
-	WebkitMaskImage: FADE_GRADIENT,
-};
+import styles from "./queue-bar.module.css";
+
+interface QueueCardStyle extends CSSProperties {
+	"--queue-card-z-index": number;
+}
 
 // Deck geometry. Collapsed, each card past the front one peeks by PEEK px from
 // under the card above it (a fanned stack of cards). Expanded (on hover /
@@ -108,6 +108,7 @@ function QueueItem({
 	onEdit: (id: string, content: string) => void;
 	onReorder: (id: string, toIndex: number) => void;
 }) {
+	const tl = useLiteralMessages();
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState(item.content);
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -151,7 +152,7 @@ function QueueItem({
 	return (
 		<motion.div
 			animate={reduceMotion ? { opacity: target.opacity } : target}
-			className="relative"
+			className={styles.card}
 			exit={
 				reduceMotion
 					? { opacity: 0 }
@@ -165,11 +166,11 @@ function QueueItem({
 			layout
 			// Front card sits on top so its overhang and actions win; deeper cards
 			// stack beneath in order. Hovering any card lifts the whole deck open.
-			style={{
-				height: CARD_HEIGHT,
-				zIndex: total - index,
-				transformOrigin: "top center",
-			}}
+			style={
+				{
+					"--queue-card-z-index": total - index,
+				} satisfies QueueCardStyle as QueueCardStyle
+			}
 			transition={
 				reduceMotion
 					? { duration: 0 }
@@ -184,7 +185,9 @@ function QueueItem({
 				onDoubleClick={editing ? undefined : startEdit}
 			>
 				<button
-					aria-label={`Reorder queued message ${index + 1}`}
+					aria-label={tl("Reorder queued message {position}", {
+						position: index + 1,
+					})}
 					className="cursor-grab touch-none text-muted-foreground/60 hover:text-foreground active:cursor-grabbing"
 					draggable
 					onDragStart={(event) => {
@@ -204,12 +207,15 @@ function QueueItem({
 				>
 					<IconGripVertical className="h-3.5 w-3.5" />
 				</button>
-				<span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md bg-muted px-1 text-center font-medium text-[10px] text-muted-foreground tabular-nums">
+				<span className="type-compact flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md bg-muted px-1 text-center font-medium text-muted-foreground tabular-nums">
 					{index + 1}
 				</span>
 				{editing ? (
 					<>
 						<input
+							aria-label={tl("Edit queued message {position}", {
+								position: index + 1,
+							})}
 							className="min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 py-0.5 text-foreground text-xs outline-none focus:border-ring"
 							onBlur={commitEdit}
 							onChange={(e) => setDraft(e.target.value)}
@@ -224,8 +230,8 @@ function QueueItem({
 							value={draft}
 						/>
 						<Button
+							appearance="queued-message-action"
 							aria-label="Save edit"
-							className="size-5 shrink-0 rounded-sm text-muted-foreground/70 hover:text-foreground"
 							onClick={commitEdit}
 							size="icon"
 							type="button"
@@ -234,8 +240,8 @@ function QueueItem({
 							<IconCheck className="h-3.5 w-3.5" />
 						</Button>
 						<Button
+							appearance="queued-message-action"
 							aria-label="Cancel edit"
-							className="size-5 shrink-0 rounded-sm text-muted-foreground/70 hover:text-foreground"
 							onClick={cancelEdit}
 							size="icon"
 							type="button"
@@ -251,15 +257,17 @@ function QueueItem({
 							<TooltipTrigger
 								render={
 									<span
-										className="min-w-0 flex-1 cursor-default overflow-hidden whitespace-nowrap"
-										style={FADE_STYLE}
+										className={cn(
+											"min-w-0 flex-1 cursor-default overflow-hidden whitespace-nowrap",
+											styles.fade
+										)}
 									>
 										{item.content}
 									</span>
 								}
 							/>
 							<TooltipContent
-								className="max-w-[360px] whitespace-pre-wrap break-words text-xs"
+								className="max-w-[360px] whitespace-pre-wrap break-words"
 								side="top"
 							>
 								{item.content}
@@ -272,16 +280,19 @@ function QueueItem({
 									.map((attachment) => attachment.filename)
 									.join(", ")}
 							>
-								{item.attachments.slice(0, 3).map((attachment) => (
-									<img
-										alt=""
-										className="size-5 rounded object-cover"
-										key={attachment.id}
-										src={attachment.url}
-									/>
-								))}
+								{item.attachments.slice(0, 3).map((attachment) => {
+									const safeUrl = safeMediaUrl(attachment.url);
+									return safeUrl ? (
+										<img
+											alt=""
+											className="size-5 rounded object-cover"
+											key={attachment.id}
+											src={safeUrl}
+										/>
+									) : null;
+								})}
 								{item.attachments.length > 3 ? (
-									<span className="text-[10px]">
+									<span className="type-compact">
 										+{item.attachments.length - 3}
 									</span>
 								) : (
@@ -291,8 +302,8 @@ function QueueItem({
 						)}
 						<div className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/qcard:opacity-100">
 							<Button
+								appearance="queued-message-action"
 								aria-label="Send now"
-								className="size-5 shrink-0 rounded-sm text-muted-foreground/70 hover:text-foreground"
 								onClick={() => onSendNow(item.id)}
 								size="icon"
 								title="Send now"
@@ -304,8 +315,8 @@ function QueueItem({
 							<DropdownMenu>
 								<DropdownMenuTrigger
 									aria-label="Message options"
-									className="size-5 rounded-sm text-base text-muted-foreground/70 hover:bg-muted hover:text-foreground"
 									type="button"
+									variant="queue-message-options"
 								>
 									⋯
 								</DropdownMenuTrigger>
@@ -370,12 +381,12 @@ export function QueueBar({
 				<div className="inline-flex items-center gap-1">
 					{count > 1 && (
 						<Button
-							className="h-5 rounded-sm px-1.5 text-muted-foreground hover:text-foreground"
+							appearance="queue-send-all"
 							onClick={onSendAll}
 							size="sm"
 							title="Combine all queued messages into one and send now"
 							type="button"
-							variant="ghost"
+							variant="ghost-muted"
 						>
 							Send all
 						</Button>
@@ -383,8 +394,8 @@ export function QueueBar({
 					<DropdownMenu>
 						<DropdownMenuTrigger
 							aria-label="Queue options"
-							className="size-6 rounded-sm text-lg text-muted-foreground hover:bg-muted hover:text-foreground"
 							type="button"
+							variant="queue-options"
 						>
 							⋯
 						</DropdownMenuTrigger>
@@ -407,6 +418,7 @@ export function QueueBar({
 				className="scroll-fade max-h-[220px] overflow-y-auto px-2 py-2"
 				layout
 				onBlur={(e) => {
+					// SAFETY: A browser focus event exposes the next focused DOM element or null as relatedTarget; both are accepted by the native contains call.
 					if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
 						setExpanded(false);
 					}

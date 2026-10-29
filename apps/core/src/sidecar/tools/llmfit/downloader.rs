@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::sidecar::download_manager::{ryu_dir, ProgressCallback, ProgressEvent, VersionStore};
+use crate::sidecar::download_manager::{ProgressCallback, ProgressEvent, VersionStore};
 use crate::win_process::NoWindow;
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
@@ -15,7 +15,7 @@ fn bin_path() -> PathBuf {
     } else {
         "llmfit"
     };
-    ryu_dir().join("bin").join(name)
+    crate::paths::bin_dir().join(name)
 }
 
 // ── LlmFitDownloader ──────────────────────────────────────────────────────────

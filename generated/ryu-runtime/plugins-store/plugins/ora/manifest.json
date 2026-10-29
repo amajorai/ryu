@@ -1,0 +1,211 @@
+{
+  "tags": ["agent-readiness", "web", "audit"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/ora",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/ora",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/ora",
+  "name": "ora",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Agent-readiness scoring from ora (https://ora.ai): look up or run a 0-100 score and A-F grade for a domain or MCP server, re-run selected checks after a fix, browse the check catalog, discover agent-ready products by intent, and draft a domain's agent discovery files. Read-only and keyless.",
+  "icon": "dashboard-speed-01",
+  "iconDither": { "from": 270, "to": "transparent", "direction": "down" },
+  "tagline": "Agent-readiness scores and fixes from ora.ai",
+  "keywords": ["agent readiness", "agentic web", "audit", "ora", "MCP"],
+  "category": "Developer Tools",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-ora-score",
+      "name": "ora Score",
+      "kind": "tool",
+      "config": {
+        "slug": "ora.score",
+        "backend": "http",
+        "method": "GET",
+        "url": "https://ora.ai/api/score/{domain}",
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Get ora's cached agent-readiness score for a domain: `score` (0-100), `grade` (A-F), `analysisStatus`, and a layer-by-layer breakdown where each check has a status, details and recommendation. Always try this before `ora.scan`. A domain ora has never scanned answers 404 with `code: DOMAIN_NOT_SCANNED`; run `ora.scan` then. Pass `format: audit` for the documented, versioned audit shape.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string",
+              "description": "Domain to look up, e.g. stripe.com."
+            },
+            "format": {
+              "type": "string",
+              "description": "`audit` returns the versioned, allowlisted audit shape with internal fields dropped.",
+              "enum": ["audit"]
+            },
+            "include": {
+              "type": "string",
+              "description": "Comma-separated opt-in expansions, e.g. `essentials` or `siteType`."
+            },
+            "siteType": {
+              "type": "string",
+              "description": "Score the cached scan against this site type instead of the detected one.",
+              "enum": ["content", "business", "app", "store"]
+            },
+            "competitors": {
+              "type": "string",
+              "description": "`1` adds the domain's category leaders and leaderboard neighbours.",
+              "enum": ["1"]
+            }
+          },
+          "required": ["domain"]
+        }
+      }
+    },
+    {
+      "id": "tool-ora-scan",
+      "name": "ora Scan",
+      "kind": "tool",
+      "config": {
+        "slug": "ora.scan",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://ora.ai/api/scan",
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Run a fresh ora agent-readiness scan of a public domain, MCP server URL or MCP App URL (ora documents about 30 seconds, which is also Core's HTTP tool timeout, so a slow scan can come back unavailable: check `ora.score` before retrying). Use only when `ora.score` has no cached result or the user asks for a rescan. Deep checks can finish later: while `analysisStatus` is not `complete`, poll `ora.score` for the same domain.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Domain, MCP server URL or MCP App URL to scan, e.g. stripe.com."
+            },
+            "mcpUrl": {
+              "type": "string",
+              "description": "Optional explicit MCP server URL for the target."
+            }
+          },
+          "required": ["url"]
+        }
+      }
+    },
+    {
+      "id": "tool-ora-run-checks",
+      "name": "ora Run Checks",
+      "kind": "tool",
+      "config": {
+        "slug": "ora.run_checks",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://ora.ai/api/scan/checks",
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Re-run selected ora checks against a URL and get per-check results without an aggregate score: the re-verify step after shipping a fix. Check ids come from `ora.checks` or a score's layer breakdown.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Website, MCP server or API URL to check. A bare domain is accepted."
+            },
+            "checkIds": {
+              "type": "array",
+              "description": "Check ids to run, e.g. [\"llms-txt-exists\", \"ard-catalog\"].",
+              "items": { "type": "string" },
+              "minItems": 1
+            },
+            "mcpUrl": {
+              "type": "string",
+              "description": "Optional explicit MCP server URL for the target."
+            }
+          },
+          "required": ["url", "checkIds"]
+        }
+      }
+    },
+    {
+      "id": "tool-ora-checks",
+      "name": "ora Check Catalog",
+      "kind": "tool",
+      "config": {
+        "slug": "ora.checks",
+        "backend": "http",
+        "method": "GET",
+        "url": "https://ora.ai/api/checks",
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "List ora's full check catalog: every check id with its layer, applicability, maturity and maximum score.",
+        "input_schema": { "type": "object", "properties": {} }
+      }
+    },
+    {
+      "id": "tool-ora-discover",
+      "name": "ora Discover",
+      "kind": "tool",
+      "config": {
+        "slug": "ora.discover",
+        "backend": "http",
+        "method": "GET",
+        "url": "https://ora.ai/api/discover",
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Find agent-ready products that match a need, e.g. `send transactional email`. Each match carries its ora score, grade, category and tags.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "intent": {
+              "type": "string",
+              "description": "What the product should do, in plain language."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of products to return.",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          "required": ["intent"]
+        }
+      }
+    },
+    {
+      "id": "tool-ora-agent-files",
+      "name": "ora Agent Files",
+      "kind": "tool",
+      "config": {
+        "slug": "ora.agent_files",
+        "backend": "http",
+        "method": "GET",
+        "url": "https://ora.ai/api/agent-files/{domain}",
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Draft a domain's own agent discovery files (ard.json, ai-catalog.json, poppy.json) from what ora observed. Pass `include: all` to also draft llms.txt, a robots.txt edit, an API catalog and MCP server cards. Drafts only: review them before publishing.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string",
+              "description": "Domain to draft files for, e.g. example.com."
+            },
+            "include": {
+              "type": "string",
+              "description": "`all` adds llms.txt, a robots.txt edit, an API catalog and MCP server cards.",
+              "enum": ["all"]
+            }
+          },
+          "required": ["domain"]
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:ora.ai"]
+}

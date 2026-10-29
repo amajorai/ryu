@@ -1,0 +1,33 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer base {
+	/* Download split controls keep a pill silhouette on both outer ends. */
+	.group[data-slot="button-group"] > [data-slot] {
+		corner-shape: round !important;
+	}
+
+	.group[data-slot="button-group"] > [data-slot]:first-child {
+		border-top-left-radius: calc(infinity * 1px) !important;
+		border-bottom-left-radius: calc(infinity * 1px) !important;
+	}
+
+	.group[data-slot="button-group"] > [data-slot]:not(:has(~ [data-slot])) {
+		border-top-right-radius: calc(infinity * 1px) !important;
+		border-bottom-right-radius: calc(infinity * 1px) !important;
+	}
+
+	/* The nav hides its primary download action below the sm breakpoint. */
+	@media (width < 40rem) {
+		.group[data-slot="button-group"]:has(> a[class~="hidden"])
+			> [data-slot="dropdown-menu-trigger"] {
+			border-top-left-radius: calc(infinity * 1px) !important;
+			border-bottom-left-radius: calc(infinity * 1px) !important;
+		}
+	}
+}
+
+.group[data-transparent] > [data-slot="button"],
+.group[data-transparent] > [data-slot="dropdown-menu-trigger"] {
+	border-color: color-mix(in oklab, currentColor 15%, transparent);
+}

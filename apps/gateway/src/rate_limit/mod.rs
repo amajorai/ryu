@@ -6,6 +6,7 @@ use dashmap::DashMap;
 use tracing::warn;
 
 use crate::config::{ApiKeyConfig, RateLimitConfig};
+use crate::error::InboundRateLimit;
 
 struct Bucket {
     tokens: f64,
@@ -32,6 +33,38 @@ impl Bucket {
         } else {
             false
         }
+    }
+
+    /// Like [`Self::try_consume`], except that a `cost` larger than the whole
+    /// `capacity` is admitted once the bucket is full, and the excess is
+    /// carried as debt (the balance goes negative) that delays later
+    /// admissions until the refill covers it. A bucket never holds more than
+    /// `capacity`, so without this a request bigger than the per-minute
+    /// ceiling could never be admitted and the ceiling would silently become a
+    /// hard per-request size limit (a large-context prompt answered with a
+    /// retryable 429 that never clears). Throughput stays bounded: the debt is
+    /// repaid at the refill rate before anything else is admitted.
+    fn try_admit(&mut self, cost: f64, capacity: f64, refill_rate: f64) -> bool {
+        if cost <= capacity {
+            return self.try_consume(cost, capacity, refill_rate);
+        }
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        self.tokens = (self.tokens + elapsed * refill_rate).min(capacity);
+        self.last_refill = now;
+        if self.tokens >= capacity {
+            self.tokens -= cost;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Return `cost` previously taken by [`Self::try_consume`] (an
+    /// all-or-nothing admission that a later bucket denied), capped at
+    /// `capacity`.
+    fn refund(&mut self, cost: f64, capacity: f64) {
+        self.tokens = (self.tokens + cost).min(capacity);
     }
 
     /// Refill, then deduct `cost` unconditionally. Unlike [`Self::try_consume`]
@@ -159,6 +192,23 @@ impl RateLimiter {
         bucket.force_consume(token_count as f64, capacity, refill_rate);
     }
 
+    /// [`Self::record_tokens_for_key`] for tokens counted for accounting
+    /// rather than admission (a tool loop's earlier provider rounds). At most
+    /// one window's capacity is charged, so one request can put the bucket no
+    /// more than a minute into debt.
+    pub fn record_tokens_within_window_for_key(
+        &self,
+        key: &str,
+        token_count: u64,
+        key_cfg: Option<&ApiKeyConfig>,
+    ) {
+        let tpm = key_cfg
+            .and_then(|k| k.tokens_per_minute)
+            .or(self.config.tokens_per_minute);
+        let Some(tpm) = tpm else { return };
+        self.record_tokens_for_key(key, token_count.min(tpm), key_cfg);
+    }
+
     /// Evict stale buckets older than `max_idle` to prevent unbounded memory growth.
     pub fn evict_stale(&self, max_idle: Duration) {
         let now = Instant::now();
@@ -167,6 +217,106 @@ impl RateLimiter {
         self.token_buckets
             .retain(|_, b| now.duration_since(b.last_refill) < max_idle);
         self.burst_buckets
+            .retain(|_, b| now.duration_since(b.last_refill) < max_idle);
+    }
+}
+
+// ─── Scoped limits from the control plane ────────────────────────────────────
+
+/// Token buckets for limits that arrive with each request rather than from
+/// gateway config: the control plane's per-org / per-member / per-team /
+/// per-key RPM and TPM (contract C1). The caller supplies the bucket key and
+/// the ceiling, so one gateway can serve many tenants with independent
+/// buckets. Always enforced — `[rate_limit].enabled` governs only the
+/// gateway's own configured limits.
+#[derive(Default)]
+pub struct ScopedRateLimiter {
+    request_buckets: DashMap<String, Bucket>,
+    token_buckets: DashMap<String, Bucket>,
+}
+
+impl ScopedRateLimiter {
+    /// Admit one request against a `rpm` ceiling for `key`.
+    pub fn check_request(&self, key: &str, rpm: u64) -> bool {
+        let capacity = rpm as f64;
+        let mut bucket = self
+            .request_buckets
+            .entry(key.to_owned())
+            .or_insert_with(|| Bucket::new(capacity));
+        bucket.try_consume(1.0, capacity, capacity / 60.0)
+    }
+
+    /// Admit `tokens` against a `tpm` ceiling for `key`.
+    pub fn check_tokens(&self, key: &str, tokens: u64, tpm: u64) -> bool {
+        let capacity = tpm as f64;
+        let mut bucket = self
+            .token_buckets
+            .entry(key.to_owned())
+            .or_insert_with(|| Bucket::new(capacity));
+        bucket.try_consume(tokens as f64, capacity, capacity / 60.0)
+    }
+
+    /// Admit one request against EVERY `(key, rpm)` ceiling, all-or-nothing:
+    /// a request denied by any bucket debits none of them. Buckets are
+    /// consumed one at a time (never holding two `DashMap` shard locks at
+    /// once, which could self-deadlock when keys share a shard) and the ones
+    /// already debited are refunded when a later bucket denies.
+    pub fn check_requests_all(&self, ceilings: &[(String, u64)]) -> bool {
+        Self::consume_all(&self.request_buckets, ceilings, 1.0)
+    }
+
+    /// Admit `tokens` against EVERY `(key, tpm)` ceiling, all-or-nothing (see
+    /// [`Self::check_requests_all`]).
+    pub fn check_tokens_all(&self, ceilings: &[(String, u64)], tokens: u64) -> bool {
+        Self::consume_all(&self.token_buckets, ceilings, tokens as f64)
+    }
+
+    /// A cost above a ceiling is admitted against a full bucket and carried as
+    /// debt ([`Bucket::try_admit`]); a later denial refunds it back to full.
+    fn consume_all(
+        buckets: &DashMap<String, Bucket>,
+        ceilings: &[(String, u64)],
+        cost: f64,
+    ) -> bool {
+        for (index, (key, ceiling)) in ceilings.iter().enumerate() {
+            let capacity = *ceiling as f64;
+            let allowed = buckets
+                .entry(key.clone())
+                .or_insert_with(|| Bucket::new(capacity))
+                .try_admit(cost, capacity, capacity / 60.0);
+            if !allowed {
+                for (debited_key, debited_ceiling) in &ceilings[..index] {
+                    if let Some(mut bucket) = buckets.get_mut(debited_key) {
+                        bucket.refund(cost, *debited_ceiling as f64);
+                    }
+                }
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Charge already-served tokens, carrying any overage as debt. Returns
+    /// `true` when the bucket could not cover them (the ceiling was exceeded).
+    pub fn settle_tokens(&self, key: &str, tokens: u64, tpm: u64) -> bool {
+        let capacity = tpm as f64;
+        let mut bucket = self
+            .token_buckets
+            .entry(key.to_owned())
+            .or_insert_with(|| Bucket::new(capacity));
+        if bucket.try_consume(tokens as f64, capacity, capacity / 60.0) {
+            return false;
+        }
+        bucket.force_consume(tokens as f64, capacity, capacity / 60.0);
+        true
+    }
+
+    /// Evict buckets idle longer than `max_idle`.
+    pub fn evict_stale(&self, max_idle: Duration) {
+        let now = Instant::now();
+        self.request_buckets
+            .retain(|_, b| now.duration_since(b.last_refill) < max_idle);
+        self.token_buckets
             .retain(|_, b| now.duration_since(b.last_refill) < max_idle);
     }
 }
@@ -193,6 +343,14 @@ pub trait RateLimiterBackend: Send + Sync {
     ) -> bool;
     /// Charge already-served tokens (streaming settlement; may carry debt).
     fn record_tokens_for_key(&self, key: &str, token_count: u64, key_cfg: Option<&ApiKeyConfig>);
+    /// Charge tokens counted for accounting rather than admission, at most
+    /// one window's capacity (no more than a minute of debt per request).
+    fn record_tokens_within_window_for_key(
+        &self,
+        key: &str,
+        token_count: u64,
+        key_cfg: Option<&ApiKeyConfig>,
+    );
     /// Evict idle buckets older than `max_idle` (background sweep).
     fn evict_stale(&self, max_idle: Duration);
 }
@@ -215,6 +373,14 @@ impl RateLimiterBackend for RateLimiter {
     fn record_tokens_for_key(&self, key: &str, token_count: u64, key_cfg: Option<&ApiKeyConfig>) {
         RateLimiter::record_tokens_for_key(self, key, token_count, key_cfg);
     }
+    fn record_tokens_within_window_for_key(
+        &self,
+        key: &str,
+        token_count: u64,
+        key_cfg: Option<&ApiKeyConfig>,
+    ) {
+        RateLimiter::record_tokens_within_window_for_key(self, key, token_count, key_cfg);
+    }
     fn evict_stale(&self, max_idle: Duration) {
         RateLimiter::evict_stale(self, max_idle);
     }
@@ -230,6 +396,8 @@ pub struct RateLimiterRegistry {
     order: Vec<String>,
     active_id: String,
     active: Arc<dyn RateLimiterBackend>,
+    /// The built-in limiter's configuration, so a refusal can name its policy.
+    builtin_config: RateLimitConfig,
 }
 
 impl RateLimiterRegistry {
@@ -239,12 +407,14 @@ impl RateLimiterRegistry {
     /// Build the registry from config, registering the built-in [`RateLimiter`]
     /// as the default active backend.
     pub fn new(config: RateLimitConfig) -> Self {
+        let builtin_config = config.clone();
         let builtin: Arc<dyn RateLimiterBackend> = Arc::new(RateLimiter::new(config));
         let mut registry = Self {
             backends: HashMap::new(),
             order: Vec::new(),
             active_id: Self::BUILTIN.to_string(),
             active: Arc::clone(&builtin),
+            builtin_config,
         };
         registry.register(Self::BUILTIN, builtin);
         registry
@@ -290,6 +460,28 @@ impl RateLimiterRegistry {
         self.order.clone()
     }
 
+    /// The policy behind a [`Self::check_request_for_key`] refusal, for the
+    /// 429's `Retry-After` and RateLimit headers. `None` when a pluggable
+    /// backend is active (its policy is its own) or no ceiling applies.
+    pub fn request_limit_policy(&self, key_cfg: Option<&ApiKeyConfig>) -> Option<InboundRateLimit> {
+        if self.active_id != Self::BUILTIN {
+            return None;
+        }
+        key_cfg
+            .and_then(|k| k.requests_per_minute)
+            .or(self.builtin_config.requests_per_minute)
+            .and_then(InboundRateLimit::requests_per_minute)
+    }
+
+    /// The policy behind a [`Self::check_burst`] refusal (see
+    /// [`Self::request_limit_policy`]).
+    pub fn burst_limit_policy(&self) -> Option<InboundRateLimit> {
+        if self.active_id != Self::BUILTIN {
+            return None;
+        }
+        InboundRateLimit::burst_per_second(u64::from(self.builtin_config.max_burst_per_second))
+    }
+
     // ─── Delegating hot-path verbs (byte-identical call sites) ───────────────
 
     /// See [`RateLimiterBackend::check_burst`].
@@ -322,6 +514,17 @@ impl RateLimiterRegistry {
         self.active.record_tokens_for_key(key, token_count, key_cfg);
     }
 
+    /// See [`RateLimiterBackend::record_tokens_within_window_for_key`].
+    pub fn record_tokens_within_window_for_key(
+        &self,
+        key: &str,
+        token_count: u64,
+        key_cfg: Option<&ApiKeyConfig>,
+    ) {
+        self.active
+            .record_tokens_within_window_for_key(key, token_count, key_cfg);
+    }
+
     /// See [`RateLimiterBackend::evict_stale`].
     pub fn evict_stale(&self, max_idle: Duration) {
         self.active.evict_stale(max_idle);
@@ -343,6 +546,7 @@ mod tests {
 
     fn key_cfg(name: &str, rpm: Option<u64>, tpm: Option<u64>) -> ApiKeyConfig {
         ApiKeyConfig {
+            allowed_operations: vec![crate::config::ApiKeyOperation::Inference],
             key: format!("sk-{name}"),
             name: name.to_string(),
             org_id: None,
@@ -355,6 +559,79 @@ mod tests {
             downgrade_to: None,
             trusted_forwarder: false,
         }
+    }
+
+    #[test]
+    fn accounting_tokens_put_a_bucket_at_most_one_window_into_debt() {
+        let rl = RateLimiter::new(cfg(true, None, Some(1_000), 10));
+        // 5_000 tokens of earlier tool rounds charge one window, not five.
+        rl.record_tokens_within_window_for_key("k", 5_000, None);
+        let tokens = rl.token_buckets.get("k").unwrap().tokens;
+        assert!((-1.0..=0.5).contains(&tokens), "{tokens}");
+        // The per-key override sets the window.
+        let small = key_cfg("small", None, Some(100));
+        rl.record_tokens_within_window_for_key("s", 5_000, Some(&small));
+        let tokens = rl.token_buckets.get("s").unwrap().tokens;
+        assert!((-1.0..=0.5).contains(&tokens), "{tokens}");
+        // No token limit configured: nothing to charge.
+        let unlimited = RateLimiter::new(cfg(true, None, None, 10));
+        unlimited.record_tokens_within_window_for_key("k", 5_000, None);
+        assert!(unlimited.token_buckets.get("k").is_none());
+    }
+
+    // ─── scoped (control-plane) limits ───────────────────────────────────────
+
+    #[test]
+    fn scoped_buckets_are_independent_per_key() {
+        let rl = ScopedRateLimiter::default();
+        assert!(rl.check_request("member:o:u1", 1));
+        assert!(!rl.check_request("member:o:u1", 1));
+        // A different member keeps its own bucket.
+        assert!(rl.check_request("member:o:u2", 1));
+        assert!(rl.check_tokens("key:k", 60, 100));
+        assert!(!rl.check_tokens("key:k", 60, 100));
+    }
+
+    #[test]
+    fn scoped_admission_takes_one_oversized_request_from_a_full_bucket_then_waits() {
+        // A prompt bigger than the whole per-minute share is admitted once,
+        // not refused forever, and its excess is debt that blocks what follows.
+        let rl = ScopedRateLimiter::default();
+        let ceiling = [("org:o".to_owned(), 30_000)];
+        assert!(rl.check_tokens_all(&ceiling, 100_000), "admitted once");
+        assert!(
+            !rl.check_tokens_all(&ceiling, 1),
+            "the debt throttles the next admission"
+        );
+        assert!(
+            !rl.check_tokens_all(&ceiling, 100_000),
+            "a second oversized request waits for a full bucket"
+        );
+
+        // All-or-nothing still holds: a denying bucket refunds the oversized
+        // debit, leaving the first bucket full.
+        let rl = ScopedRateLimiter::default();
+        assert!(rl.check_tokens_all(&[("member:o:u".to_owned(), 100)], 100));
+        let both = [("org:o".to_owned(), 30_000), ("member:o:u".to_owned(), 100)];
+        assert!(
+            !rl.check_tokens_all(&both, 50_000),
+            "member bucket is empty"
+        );
+        assert!(
+            rl.check_tokens_all(&[("org:o".to_owned(), 30_000)], 50_000),
+            "the org bucket was refunded to full"
+        );
+    }
+
+    #[test]
+    fn scoped_settlement_reports_overrun_and_carries_debt() {
+        let rl = ScopedRateLimiter::default();
+        assert!(!rl.settle_tokens("org:o", 50, 100), "within the ceiling");
+        assert!(rl.settle_tokens("org:o", 120, 100), "over the ceiling");
+        assert!(
+            !rl.check_tokens("org:o", 1, 100),
+            "debt blocks the next admission"
+        );
     }
 
     // ─── disabled / bypass edges ─────────────────────────────────────────────
@@ -604,6 +881,39 @@ mod tests {
         assert!(reg.check_request_for_key("k", None));
         assert!(!reg.check_request_for_key("k", None));
     }
+    #[test]
+    fn registry_names_the_builtin_policy_behind_a_refusal() {
+        let mut reg = RateLimiterRegistry::new(cfg(true, Some(30), None, 4));
+        let request = reg.request_limit_policy(None).expect("global rpm");
+        assert_eq!(
+            (request.policy, request.quota, request.window_secs),
+            ("requests", 30, 60)
+        );
+        assert_eq!(request.retry_after_secs, 2);
+        // A per-key override is the ceiling that refused the request.
+        let key = key_cfg("k", Some(120), None);
+        assert_eq!(reg.request_limit_policy(Some(&key)).unwrap().quota, 120);
+        let burst = reg.burst_limit_policy().expect("burst enabled");
+        assert_eq!(
+            (burst.policy, burst.quota, burst.window_secs),
+            ("burst", 4, 1)
+        );
+
+        // No ceiling, or a disabled burst bucket, names no policy.
+        let open = RateLimiterRegistry::new(cfg(true, None, None, 0));
+        assert!(open.request_limit_policy(None).is_none());
+        assert!(open.burst_limit_policy().is_none());
+
+        // A pluggable backend owns its policy; the registry does not guess it.
+        reg.register(
+            "fleet",
+            Arc::new(RateLimiter::new(cfg(true, Some(1), None, 1))) as Arc<dyn RateLimiterBackend>,
+        );
+        assert!(reg.set_active("fleet"));
+        assert!(reg.request_limit_policy(None).is_none());
+        assert!(reg.burst_limit_policy().is_none());
+    }
+
     #[test]
     fn burst_rejection_logs_no_bearer_bytes() {
         use std::io::Write;

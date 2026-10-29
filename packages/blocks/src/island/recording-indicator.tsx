@@ -11,7 +11,7 @@ export function RecordingIndicator({
 }) {
 	if (recording) {
 		return (
-			<span className="flex items-center gap-1.5 text-[11px] text-status-destructive">
+			<span className="type-caption flex items-center gap-1.5 text-status-destructive">
 				<span className="size-2 animate-pulse rounded-full bg-destructive" />
 				Recording
 			</span>
@@ -19,14 +19,14 @@ export function RecordingIndicator({
 	}
 	if (paused) {
 		return (
-			<span className="flex items-center gap-1.5 text-[11px] text-status-warning">
+			<span className="type-caption flex items-center gap-1.5 text-status-warning">
 				<span className="size-2 rounded-full bg-warning" />
 				Paused
 			</span>
 		);
 	}
 	return (
-		<span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+		<span className="type-caption flex items-center gap-1.5 text-muted-foreground">
 			<span className="size-2 rounded-full bg-muted-foreground" />
 			Idle
 		</span>

@@ -154,7 +154,7 @@ describe("seedDefaultHiddenSections", () => {
 		// Only the newly-introduced "engines" gets freshly hidden.
 		expect(loadHiddenSections().has("engines")).toBe(true);
 		// The already-seeded ones were NOT re-added (hidden set still lacks them).
-		expect(loadHiddenSections().has("meetings" as never)).toBe(false);
+		expect(loadHiddenSections().has("meetings")).toBe(false);
 	});
 
 	test("is a no-op when the ledger already covers every default", () => {
@@ -179,5 +179,42 @@ describe("hidden-chrome set (parallel store)", () => {
 	test("corrupt chrome JSON falls back to an empty set", () => {
 		localStorage.setItem(CHROME_HIDDEN_KEY, "@@@");
 		expect(loadHiddenChrome().size).toBe(0);
+	});
+});
+
+describe("hidden-key storage admission", () => {
+	test("keeps every string key, including unknown names and duplicates", () => {
+		const keys = [
+			"",
+			"future.section",
+			"constructor",
+			"__proto__",
+			"équipe",
+			"future.section",
+		];
+		for (const key of [SECTION_HIDDEN_KEY, CHROME_HIDDEN_KEY]) {
+			localStorage.setItem(key, JSON.stringify(keys));
+		}
+		expect([...loadHiddenSections()]).toEqual([...new Set(keys)]);
+		expect([...loadHiddenChrome()]).toEqual([...new Set(keys)]);
+	});
+
+	test("rejects scalar and mixed-cell preferences without throwing or rewriting storage", () => {
+		for (const raw of ['"skills"', '["skills", 7]', "[null]", "{}"]) {
+			localStorage.setItem(SECTION_HIDDEN_KEY, raw);
+			localStorage.setItem(CHROME_HIDDEN_KEY, raw);
+			expect([...loadHiddenSections()]).toEqual([]);
+			expect([...loadHiddenChrome()]).toEqual([]);
+			expect(localStorage.getItem(SECTION_HIDDEN_KEY)).toBe(raw);
+			expect(localStorage.getItem(CHROME_HIDDEN_KEY)).toBe(raw);
+		}
+	});
+
+	test("does not write defaults when the seeded ledger has invalid cells", () => {
+		const raw = '["skills", 7]';
+		localStorage.setItem(HIDDEN_SEEDED_KEY, raw);
+		seedDefaultHiddenSections();
+		expect(localStorage.getItem(HIDDEN_SEEDED_KEY)).toBe(raw);
+		expect(localStorage.getItem(SECTION_HIDDEN_KEY)).toBeNull();
 	});
 });

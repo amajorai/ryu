@@ -1,18 +1,24 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
+declare global {
+	interface Window {
+		keepAwakeCommands: boolean[];
+	}
+}
+
 test("keep-awake reads are serialized, scoped and native recovery checks are preserved", async ({
 	page,
 }) => {
 	const reads: string[] = [];
 	const failures: string[] = [];
 	await page.addInitScript(() => {
-		Reflect.set(window, "keepAwakeCommands", []);
+		window.keepAwakeCommands = [];
 		Reflect.set(window, "__TAURI_INTERNALS__", {
 			transformCallback: () => 0,
 			invoke: (command: string, args: { enabled: boolean }) => {
 				if (command === "set_keep_awake") {
-					Reflect.get(window, "keepAwakeCommands").push(args.enabled);
+					window.keepAwakeCommands.push(args.enabled);
 				}
 				return Promise.resolve();
 			},
@@ -44,8 +50,7 @@ test("keep-awake reads are serialized, scoped and native recovery checks are pre
 		await route.fulfill({ json: config });
 	});
 	await page.goto("/keep-awake-proof.html");
-	const commands = () =>
-		page.evaluate(() => Reflect.get(window, "keepAwakeCommands") as boolean[]);
+	const commands = () => page.evaluate(() => window.keepAwakeCommands);
 	await expect.poll(commands).toEqual([true]);
 	expect(reads).toHaveLength(1);
 	await page.getByRole("button", { name: "Rename node", exact: true }).click();

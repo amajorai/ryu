@@ -1,0 +1,52 @@
+diff --git a/android/src/main/java/expo/modules/notifications/notifications/model/NotificationContent.java b/android/src/main/java/expo/modules/notifications/notifications/model/NotificationContent.java
+index 191b64e101c03eeec37920c2d6582bfd50d8b902..50a7b15887822b7ca28545b999578f9191b3bb51 100644
+--- a/android/src/main/java/expo/modules/notifications/notifications/model/NotificationContent.java
++++ b/android/src/main/java/expo/modules/notifications/notifications/model/NotificationContent.java
+@@ -103,6 +103,10 @@ public class NotificationContent implements Parcelable, Serializable, INotificat
+   @Nullable
+   @Override
+   public Object getImage(@NonNull Context context, @NonNull Continuation<? super Bitmap> $completion) {
++    Bitmap senderAvatar = decodeSenderAvatar(context);
++    if (senderAvatar != null) {
++      return senderAvatar;
++    }
+     try {
+       ApplicationInfo ai = context.getPackageManager().getApplicationInfo(context.getPackageName(), PackageManager.GET_META_DATA);
+       if (ai.metaData.containsKey(META_DATA_LARGE_ICON_KEY)) {
+@@ -115,6 +119,36 @@ public class NotificationContent implements Parcelable, Serializable, INotificat
+     return null;
+   }
+ 
++  /**
++   * Ryu: a local notification may name a PNG of the sending agent's avatar in
++   * {@code data.ryuLargeIconPath}; it becomes the large icon, like chat apps.
++   * Only files inside the app's own cache directory are read.
++   */
++  @Nullable
++  private Bitmap decodeSenderAvatar(@NonNull Context context) {
++    if (mBody == null) {
++      return null;
++    }
++    String path = mBody.optString("ryuLargeIconPath", "");
++    if (path.startsWith("file://")) {
++      path = Uri.parse(path).getPath();
++    }
++    if (path == null || path.isEmpty()) {
++      return null;
++    }
++    try {
++      java.io.File file = new java.io.File(path).getCanonicalFile();
++      String cacheDir = context.getCacheDir().getCanonicalPath() + java.io.File.separator;
++      if (!file.getPath().startsWith(cacheDir) || !file.isFile()) {
++        return null;
++      }
++      return BitmapFactory.decodeFile(file.getPath());
++    } catch (IOException | SecurityException e) {
++      Log.w("expo-notifications", "Could not read the sender avatar.", e);
++      return null;
++    }
++  }
++
+   @Override
+   public boolean containsImage() {
+     return true;

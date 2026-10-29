@@ -15,15 +15,12 @@ export const LOGIN_APPROVAL_CLIENTS = {
 
 export type LoginApprovalSurface = keyof typeof LOGIN_APPROVAL_CLIENTS;
 
-export const LOGIN_APPROVAL_SURFACE_LABELS: Record<
-	LoginApprovalSurface,
-	string
-> = {
+export const LOGIN_APPROVAL_SURFACE_LABELS = {
 	desktop: "Ryu Desktop",
 	extension: "Ryu Browser Extension",
 	mobile: "Ryu Mobile",
 	web: "Ryu Website",
-};
+} satisfies Record<LoginApprovalSurface, string>;
 
 export const LOGIN_APPROVAL_SCOPE = "openid profile email";
 export const LOGIN_APPROVAL_EXPIRES_IN_SECONDS = 5 * 60;
@@ -102,19 +99,19 @@ export function parseLoginApprovalQr(
 	return { userCode, verificationUri: url.toString() };
 }
 
-export function clientIdForLoginApprovalSurface(
-	surface: LoginApprovalSurface
-): string {
-	return LOGIN_APPROVAL_CLIENTS[surface];
-}
-
 export function loginApprovalSurfaceForClientId(
 	clientId: string
 ): LoginApprovalSurface | null {
-	for (const [surface, candidate] of Object.entries(LOGIN_APPROVAL_CLIENTS)) {
-		if (candidate === clientId) {
-			return surface as LoginApprovalSurface;
-		}
+	switch (clientId) {
+		case LOGIN_APPROVAL_CLIENTS.desktop:
+			return "desktop";
+		case LOGIN_APPROVAL_CLIENTS.extension:
+			return "extension";
+		case LOGIN_APPROVAL_CLIENTS.mobile:
+			return "mobile";
+		case LOGIN_APPROVAL_CLIENTS.web:
+			return "web";
+		default:
+			return null;
 	}
-	return null;
 }

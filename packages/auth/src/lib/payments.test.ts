@@ -7,7 +7,7 @@ let customers: {
 	metadata: Record<string, string>;
 }[] = [];
 const create = mock(async () => ({}));
-let updateFailure: unknown = null;
+let updateFailure: Error | null = null;
 const update = mock(async () => {
 	if (updateFailure) {
 		throw updateFailure;
@@ -18,6 +18,7 @@ type BeforeRequestHook = (
 	request: Request
 ) => Request | undefined | Promise<Request | undefined>;
 let polarHttpClient: { beforeRequest?: BeforeRequestHook } | undefined;
+let polarTimeoutMs: number | undefined;
 
 class MockHTTPClient {
 	beforeRequest: BeforeRequestHook | undefined;
@@ -32,8 +33,9 @@ mock.module("@ryu/env/server", () => ({ env: {} }));
 mock.module("@polar-sh/sdk", () => ({
 	HTTPClient: MockHTTPClient,
 	Polar: class {
-		constructor(options: { httpClient?: MockHTTPClient }) {
+		constructor(options: { httpClient?: MockHTTPClient; timeoutMs?: number }) {
 			polarHttpClient = options.httpClient;
+			polarTimeoutMs = options.timeoutMs;
 		}
 
 		customers = {
@@ -78,6 +80,9 @@ describe("personal customer provisioning", () => {
 		const request = new Request("https://api.polar.sh/v1/customers");
 		await polarHttpClient?.beforeRequest?.(request);
 		expect(request.headers.get("Polar-Version")).toBe(POLAR_API_VERSION);
+	});
+	it("bounds every SDK request with a client timeout", () => {
+		expect(polarTimeoutMs).toBe(15_000);
 	});
 	it("treats a missing personal customer as an expected lazy-sync state", async () => {
 		updateFailure = Object.assign(new Error("customer missing"), {

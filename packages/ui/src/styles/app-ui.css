@@ -158,7 +158,7 @@ body {
 		summary,
 		[tabindex]
 	):focus-visible {
-	outline: 2px solid color-mix(in oklch, var(--ring) 75%, transparent);
+	outline: 2px solid var(--ring);
 	outline-offset: 2px;
 }
 

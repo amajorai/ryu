@@ -6,14 +6,15 @@
 //! the gateway's own exact/semantic **response** cache, which answers before a
 //! provider is ever called.
 //!
-//! # Why injection is opt-in
+//! # Default policy
 //!
-//! A cache *write* is billed **above** the normal input rate. Turning injection
-//! on therefore moves a caller's bill, so it follows the same house rule as the
-//! other cost-affecting options in [`crate::OpenRouterOptions`]
-//! (`response_healing`, `usage_accounting`): additive, default off, and a
-//! caller's own markers always win. Only the privacy fields there are
-//! authoritative-over-the-caller, and caching is not a privacy field.
+//! The default [`PromptCacheMode::Auto`] adds a provider-compatible marker only
+//! for model families that need one. Cache writes may cost more than ordinary
+//! input tokens, so callers can disable injection with `mode = "off"`; a
+//! caller's own markers always win. Provider-side automatic caching can still
+//! apply when ryu adds no marker.
+//! Automatic markers use the provider's short default TTL; longer TTLs remain
+//! an explicit cost choice.
 //!
 //! # Precedence
 //!
@@ -24,7 +25,7 @@
 //! 2. **Per-request override** — the `x-ryu-prompt-cache` header, resolved by
 //!    the pipeline into [`PromptCacheRequest::override_mode`].
 //! 3. **Node config** — `[prompt_cache]` in `gateway.toml` / `RYU_PROMPT_CACHE_*`.
-//! 4. **Off** — the default.
+//! 4. **Auto** — the default.
 //!
 //! # Wire formats
 //!
@@ -32,13 +33,14 @@
 //! derived from the model id ([`PromptCacheDialect::for_model`]) rather than
 //! hardcoded per model:
 //!
-//! - **Anthropic-style** (Claude, Qwen, Gemini): `cache_control` breakpoints on
-//!   content blocks, max 4. OpenRouter also accepts one top-level `cache_control`
-//!   that it applies to the last cacheable block itself — that is [`Auto`].
+//! - **Anthropic-style**: Claude supports top-level automatic caching; supported
+//!   Qwen/DeepSeek and older Gemini routes need a per-message `cache_control`
+//!   breakpoint. Explicit placement supports up to 4 breakpoints.
 //! - **OpenAI-style**: caches automatically with no marker; explicit control is
 //!   `prompt_cache_breakpoint` on a text block plus `prompt_cache_options` at the
 //!   root. Sticky routing uses `prompt_cache_key`.
-//! - **Automatic** (DeepSeek, Grok, Groq, Moonshot, Z.AI): nothing to inject.
+//! - **Automatic**: no marker is added; this includes OpenAI, Gemini 2.5+,
+//!   DeepSeek models other than V3.2, Grok, Groq, Moonshot, and Z.AI.
 //!
 //! [`Auto`]: PromptCacheMode::Auto
 
@@ -66,15 +68,14 @@ pub fn is_supported_ttl(ttl: &str) -> bool {
 /// How much ryu does on the caller's behalf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PromptCacheMode {
-    /// Inject nothing. Caller-supplied markers still pass through untouched, and
-    /// providers that cache automatically still do. The default.
+    /// Hand marker placement to the provider when supported. Uses top-level
+    /// automatic caching for Claude and one content-block breakpoint for model
+    /// families that require explicit markers. The default.
     #[default]
-    Off,
-    /// Hand the placement decision to the provider: one top-level
-    /// `cache_control` (OpenRouter applies it to the last cacheable block) or,
-    /// on the OpenAI dialect, just the sticky `prompt_cache_key`. Cheap and
-    /// low-risk — it never rewrites the caller's messages.
     Auto,
+    /// Inject nothing. Caller-supplied markers and provider-side implicit
+    /// caching still work.
+    Off,
     /// Place breakpoints ourselves: on the system prompt and the trailing
     /// conversation turns, up to [`PromptCacheOptions::breakpoints`].
     Explicit,
@@ -114,24 +115,82 @@ pub enum PromptCacheDialect {
 }
 
 impl PromptCacheDialect {
-    /// Derive the dialect from a model id. Family-derived, never a per-model
-    /// table, so a future `claude-*` / `gpt-*` id inherits the right behaviour.
-    /// Mirrors the same family split Core uses for Pi's `compat.cacheControlFormat`.
+    /// Derive the dialect from a model id. The explicit-cache Qwen set is kept
+    /// aligned with OpenRouter's published support; unknown snapshots are not
+    /// opted into explicit caching by a broad `qwen` match.
     pub fn for_model(model: &str) -> Self {
         let id = model.to_ascii_lowercase();
-        if id.contains("claude") || id.contains("anthropic") || id.contains("qwen") {
+        if id.contains("claude") || id.contains("anthropic") {
             return Self::Anthropic;
         }
-        // Gemini 2.5 caches implicitly; earlier Gemini needs explicit markers and
-        // accepts the Anthropic-style breakpoint through OpenRouter.
-        if id.contains("gemini") && !id.contains("2.5") {
+        if has_explicit_qwen_cache(&id) || id.contains("deepseek-v3.2") {
             return Self::Anthropic;
+        }
+        if id.contains("gemini") {
+            return if gemini_implicit_cache(&id) {
+                Self::Automatic
+            } else {
+                Self::Anthropic
+            };
         }
         if id.contains("gpt") || id.contains("o1") || id.contains("o3") || id.contains("o4") {
             return Self::OpenAi;
         }
         Self::Automatic
     }
+}
+
+/// GPT-5.6 and later accept `prompt_cache_options` / `prompt_cache_breakpoint`;
+/// earlier models only cache implicitly.
+fn openai_explicit_cache(model: &str) -> bool {
+    let id = model.to_ascii_lowercase();
+    let Some(start) = id.find("gpt-") else {
+        return false;
+    };
+    let digits = |text: &str| -> (Option<u32>, usize) {
+        let len = text.chars().take_while(char::is_ascii_digit).count();
+        (text[..len].parse().ok(), len)
+    };
+    let version = &id[start + 4..];
+    let (Some(major), len) = digits(version) else {
+        return false;
+    };
+    let minor = version[len..]
+        .strip_prefix('.')
+        .and_then(|rest| digits(rest).0)
+        .unwrap_or(0);
+    major > 5 || (major == 5 && minor >= 6)
+}
+
+fn has_explicit_qwen_cache(id: &str) -> bool {
+    [
+        "qwen3-max",
+        "qwen-plus",
+        "qwen3.6-plus",
+        "qwen3-coder-plus",
+        "qwen3-coder-flash",
+    ]
+    .iter()
+    .any(|model| id.contains(model))
+}
+
+fn gemini_implicit_cache(id: &str) -> bool {
+    let Some(version) = id
+        .split("gemini-")
+        .nth(1)
+        .and_then(|tail| tail.split('-').next())
+    else {
+        return false;
+    };
+    let mut parts = version.split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u32>().ok()) else {
+        return false;
+    };
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(0);
+    major > 2 || (major == 2 && minor >= 5)
 }
 
 /// Node-level prompt-cache policy. Held in gateway config; resolved per request
@@ -168,7 +227,7 @@ pub struct PromptCacheOptions {
 impl Default for PromptCacheOptions {
     fn default() -> Self {
         Self {
-            mode: PromptCacheMode::Off,
+            mode: PromptCacheMode::Auto,
             ttl: None,
             min_prefix_tokens: 1024,
             breakpoints: 2,
@@ -252,7 +311,7 @@ impl PromptCacheOptions {
         let Some(obj) = payload.as_object_mut() else {
             return PromptCacheOutcome::Disabled;
         };
-        if has_root_markers(obj) {
+        if has_root_markers(obj, PromptCacheDialect::for_model(req.model)) {
             return PromptCacheOutcome::CallerSupplied;
         }
         if has_message_markers(obj) {
@@ -285,17 +344,17 @@ impl PromptCacheOptions {
 
         match (dialect, mode) {
             // OpenAI caches automatically; the only useful knob is the sticky
-            // key, and `prompt_cache_options` for explicit-mode control.
+            // key, and `prompt_cache_options` for explicit-mode control. Explicit
+            // breakpoints exist only on GPT-5.6 and later; older models reject the
+            // fields, so they keep implicit caching. No `ttl` is sent: OpenAI accepts
+            // only "30m" (its default), and the configured "5m"/"1h" lifetimes are
+            // Anthropic values that would fail the request.
             (PromptCacheDialect::OpenAi, _) => {
                 if let Some(sid) = session_key(req.session_id) {
                     obj.insert("prompt_cache_key".into(), Value::String(sid));
                 }
-                if mode == PromptCacheMode::Explicit {
-                    let mut opts = json!({ "mode": "explicit" });
-                    if let Some(ttl) = &ttl {
-                        opts["ttl"] = Value::String(ttl.clone());
-                    }
-                    obj.insert("prompt_cache_options".into(), opts);
+                if mode == PromptCacheMode::Explicit && openai_explicit_cache(req.model) {
+                    obj.insert("prompt_cache_options".into(), json!({ "mode": "explicit" }));
                     let placed = place_openai_breakpoints(obj, self.effective_breakpoints());
                     return PromptCacheOutcome::Injected {
                         breakpoints: placed,
@@ -308,8 +367,17 @@ impl PromptCacheOptions {
             }
             // One top-level marker; OpenRouter picks the last cacheable block.
             (PromptCacheDialect::Anthropic, PromptCacheMode::Auto) => {
-                obj.insert("cache_control".into(), ephemeral(ttl.as_deref()));
-                PromptCacheOutcome::Injected { breakpoints: 0 }
+                if req.model.to_ascii_lowercase().contains("claude")
+                    || req.model.to_ascii_lowercase().contains("anthropic")
+                {
+                    obj.insert("cache_control".into(), ephemeral(ttl.as_deref()));
+                    PromptCacheOutcome::Injected { breakpoints: 0 }
+                } else {
+                    let placed = place_anthropic_breakpoints(obj, 1, ttl.as_deref());
+                    PromptCacheOutcome::Injected {
+                        breakpoints: placed,
+                    }
+                }
             }
             (PromptCacheDialect::Anthropic, PromptCacheMode::Explicit) => {
                 let placed =
@@ -358,7 +426,15 @@ fn ephemeral(ttl: Option<&str>) -> Value {
 /// `session_id` is deliberately NOT one of these: it is a routing-affinity key,
 /// not a cache marker, and a caller that sets one should still get the node's
 /// configured breakpoints. It is instead never overwritten.
-fn has_root_markers(obj: &serde_json::Map<String, Value>) -> bool {
+///
+/// `prompt_cache_key` / `prompt_cache_options` are OpenAI knobs: an
+/// Anthropic-dialect provider ignores them, so they must not stand in for a
+/// breakpoint there. A Responses request forwarding its `prompt_cache_key` to a
+/// Claude model otherwise suppressed injection and got no caching at all.
+fn has_root_markers(obj: &serde_json::Map<String, Value>, dialect: PromptCacheDialect) -> bool {
+    if dialect == PromptCacheDialect::Anthropic {
+        return obj.contains_key("cache_control");
+    }
     const ROOT_KEYS: [&str; 3] = ["cache_control", "prompt_cache_key", "prompt_cache_options"];
     ROOT_KEYS.iter().any(|k| obj.contains_key(*k))
 }
@@ -497,12 +573,24 @@ mod tests {
     }
 
     #[test]
-    fn default_is_off_and_injects_nothing() {
-        let mut b = body();
-        let before = b.clone();
-        let out = PromptCacheOptions::default().apply(&mut b, &req("anthropic/claude-sonnet-4"));
+    fn default_auto_uses_the_supported_model_marker() {
+        let mut claude = body();
+        let out =
+            PromptCacheOptions::default().apply(&mut claude, &req("anthropic/claude-sonnet-4"));
+        assert_eq!(out, PromptCacheOutcome::Injected { breakpoints: 0 });
+        assert_eq!(claude["cache_control"], json!({ "type": "ephemeral" }));
+
+        let mut qwen = body();
+        let out = PromptCacheOptions::default().apply(&mut qwen, &req("qwen/qwen3-max"));
+        assert_eq!(out, PromptCacheOutcome::Injected { breakpoints: 1 });
+        assert_eq!(count_breakpoints(&qwen), 1);
+        assert!(qwen.get("cache_control").is_none());
+
+        let mut off = body();
+        let before = off.clone();
+        let out = opts(PromptCacheMode::Off).apply(&mut off, &req("qwen/qwen3-max"));
         assert_eq!(out, PromptCacheOutcome::Disabled);
-        assert_eq!(b, before, "off mode must not touch the payload");
+        assert_eq!(off, before, "off mode must not touch the payload");
     }
 
     #[test]
@@ -513,6 +601,36 @@ mod tests {
         assert_eq!(b["cache_control"], json!({ "type": "ephemeral" }));
         // Messages are untouched in auto mode.
         assert_eq!(b["messages"][0]["content"], json!("big stable prefix"));
+    }
+
+    #[test]
+    fn auto_uses_one_block_breakpoint_for_supported_qwen_and_deepseek() {
+        for model in ["qwen/qwen3-coder-plus", "deepseek/deepseek-v3.2"] {
+            let mut b = body();
+            let out = opts(PromptCacheMode::Auto).apply(&mut b, &req(model));
+            assert_eq!(
+                out,
+                PromptCacheOutcome::Injected { breakpoints: 1 },
+                "{model}"
+            );
+            assert_eq!(count_breakpoints(&b), 1, "{model}");
+            assert!(b.get("cache_control").is_none(), "{model}");
+        }
+    }
+
+    #[test]
+    fn unsupported_qwen_snapshots_are_not_marked() {
+        for model in [
+            "qwen/qwen3.5-plus-02-15",
+            "qwen/qwen3.5-flash-02-23",
+            "qwen/qwen3-coder",
+        ] {
+            let mut b = body();
+            let before = b.clone();
+            let out = opts(PromptCacheMode::Auto).apply(&mut b, &req(model));
+            assert_eq!(out, PromptCacheOutcome::AutomaticProvider, "{model}");
+            assert_eq!(b, before, "{model}");
+        }
     }
 
     #[test]
@@ -591,6 +709,17 @@ mod tests {
     }
 
     #[test]
+    fn openai_cache_key_does_not_suppress_claude_breakpoints() {
+        // A Responses request forwards its `prompt_cache_key`; Anthropic ignores
+        // it, so it must not count as the caller driving caching.
+        let mut b = body();
+        b["prompt_cache_key"] = json!("conv-1");
+        let out = opts(PromptCacheMode::Auto).apply(&mut b, &req("claude-sonnet-4-5"));
+        assert_eq!(out, PromptCacheOutcome::Injected { breakpoints: 0 });
+        assert_eq!(b["cache_control"]["type"], json!("ephemeral"));
+    }
+
+    #[test]
     fn root_and_message_markers_are_reported_as_different_outcomes() {
         // Root marker ⇒ the caller is driving caching itself.
         let mut root = body();
@@ -666,12 +795,19 @@ mod tests {
             PromptCacheDialect::for_model("anthropic/claude-opus-4"),
             Anthropic
         );
-        assert_eq!(PromptCacheDialect::for_model("qwen/qwen3-coder"), Anthropic);
+        assert_eq!(
+            PromptCacheDialect::for_model("qwen/qwen3-coder-plus"),
+            Anthropic
+        );
         assert_eq!(PromptCacheDialect::for_model("openai/gpt-4o"), OpenAi);
         assert_eq!(PromptCacheDialect::for_model("o3-mini"), OpenAi);
         // Gemini 2.5 caches implicitly; older Gemini needs a breakpoint.
         assert_eq!(
             PromptCacheDialect::for_model("google/gemini-2.5-pro"),
+            Automatic
+        );
+        assert_eq!(
+            PromptCacheDialect::for_model("google/gemini-3.0-flash"),
             Automatic
         );
         assert_eq!(
@@ -681,6 +817,10 @@ mod tests {
         assert_eq!(
             PromptCacheDialect::for_model("deepseek/deepseek-chat"),
             Automatic
+        );
+        assert_eq!(
+            PromptCacheDialect::for_model("deepseek/deepseek-v3.2"),
+            Anthropic
         );
     }
 
@@ -703,19 +843,57 @@ mod tests {
     #[test]
     fn openai_explicit_mode_sets_options_and_breakpoints() {
         let mut b = body();
-        let o = PromptCacheOptions {
-            mode: PromptCacheMode::Explicit,
-            ttl: Some("1h".into()),
-            ..Default::default()
-        };
-        let out = o.apply(&mut b, &req("openai/gpt-4o"));
+        let out = opts(PromptCacheMode::Explicit).apply(&mut b, &req("openai/gpt-5.6"));
         assert_eq!(out, PromptCacheOutcome::Injected { breakpoints: 2 });
-        assert_eq!(b["prompt_cache_options"]["mode"], json!("explicit"));
-        assert_eq!(b["prompt_cache_options"]["ttl"], json!("1h"));
+        assert_eq!(b["prompt_cache_options"], json!({ "mode": "explicit" }));
         assert_eq!(
             b["messages"][0]["content"][0]["prompt_cache_breakpoint"]["mode"],
             json!("explicit")
         );
+    }
+
+    #[test]
+    fn openai_explicit_mode_never_sends_fields_the_model_rejects() {
+        // An Anthropic-style TTL is not an OpenAI value: the option is sent
+        // without it rather than failing the request.
+        let explicit = |ttl: &str| PromptCacheOptions {
+            mode: PromptCacheMode::Explicit,
+            ttl: Some(ttl.into()),
+            ..Default::default()
+        };
+        let mut b = body();
+        explicit("1h").apply(&mut b, &req("gpt-5.6-terra"));
+        assert_eq!(b["prompt_cache_options"], json!({ "mode": "explicit" }));
+
+        // Before GPT-5.6 explicit breakpoints do not exist: implicit caching.
+        let mut old = body();
+        let out = explicit("1h").apply(&mut old, &req("openai/gpt-4o"));
+        assert_eq!(out, PromptCacheOutcome::AutomaticProvider);
+        assert!(old.get("prompt_cache_options").is_none());
+        assert!(!old.to_string().contains("prompt_cache_breakpoint"));
+    }
+
+    #[test]
+    fn openai_explicit_cache_starts_at_gpt_5_6() {
+        for model in [
+            "gpt-5.6",
+            "openai/gpt-5.6-terra",
+            "gpt-5.10",
+            "gpt-6",
+            "gpt-6.1-mini",
+        ] {
+            assert!(openai_explicit_cache(model), "{model}");
+        }
+        for model in [
+            "gpt-4o",
+            "gpt-5",
+            "gpt-5.5-pro",
+            "openai/gpt-5.1",
+            "o4-mini",
+            "gpt-oss-120b",
+        ] {
+            assert!(!openai_explicit_cache(model), "{model}");
+        }
     }
 
     #[test]

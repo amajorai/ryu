@@ -9,7 +9,9 @@
 //!
 //! - `gateway_bearer` / `gateway_url` — the Gateway `sandbox/tick` metering debit.
 //! - `ryu_dir` — the persisted default-backend selection file
-//!   (`~/.ryu/sandbox-backend.json`).
+//!   (`<data dir>/state/sandbox-backend.json`) and the persistent-sandbox restart
+//!   records (`<data dir>/state/sandbox-persistent-runs.json` plus per-process
+//!   leases in `<data dir>/state/sandbox-persistent-leases/`).
 //! - `registered_org_id` — the org attributed on a metered run.
 //! - `default_run_budget_micro_usd` — the preferences-backed default per-run
 //!   budget cap (async: reads Core's preferences store).
@@ -44,8 +46,16 @@ static HOST: OnceLock<SandboxHost> = OnceLock::new();
 
 /// Install the Core-provided couplings. Idempotent (first write wins); called
 /// once from Core startup. Safe to omit in crate-unit tests (safe fallbacks).
+///
+/// The first install, when made inside a Tokio runtime, also starts
+/// [`crate::session::reap_orphaned_sandboxes`] in the background: the ryu dir
+/// is known from here on, and persistent workspaces left running by a previous
+/// Core process are no longer metered. A host installed outside a runtime must
+/// call that function itself.
 pub fn install_host(host: SandboxHost) {
-    let _ = HOST.set(host);
+    if HOST.set(host).is_ok() {
+        crate::session::spawn_orphan_reaper();
+    }
 }
 
 /// Gateway bearer for the metering debit. `Err` fallback when Core has not
@@ -66,12 +76,14 @@ pub(crate) fn gateway_url() -> String {
     }
 }
 
-/// Ryu data directory, parent of `sandbox-backend.json`. Temp-dir fallback when
-/// Core has not installed its host (crate-unit tests never persist a real one).
+/// Ryu data directory (`state/sandbox-backend.json` lives under it). Falls back
+/// to the resolved Ryu data dir when Core has not installed its host, and to a
+/// temp dir in this crate's own unit tests (which never persist a real one).
 pub(crate) fn ryu_dir() -> PathBuf {
     match HOST.get() {
         Some(h) => (h.ryu_dir)(),
-        None => std::env::temp_dir().join("ryu"),
+        None if cfg!(test) => std::env::temp_dir().join("ryu"),
+        None => ryu_sidecar_runtime::ryu_dir(),
     }
 }
 

@@ -103,6 +103,11 @@ pub async fn get_policy(State(state): State<ServerState>) -> impl IntoResponse {
 /// fresh threshold would be judged against numbers fetched under the old
 /// configuration — the user would change "$5" to "$50", send a message, and see
 /// nothing happen for up to five minutes.
+///
+/// A provider-scoped subscription rule is validated before it is stored: it must
+/// name a subscription provider, and an `account_id` must be one of that
+/// provider's saved accounts. Such a rule would only abstain at evaluation, but
+/// rejecting it here tells the user the rule can never fire.
 #[utoipa::path(
     put,
     path = "/api/routing/policy",
@@ -111,6 +116,7 @@ pub async fn get_policy(State(state): State<ServerState>) -> impl IntoResponse {
     request_body = serde_json::Value,
     responses(
         (status = 200, description = "Saved", body = serde_json::Value),
+        (status = 400, description = "A rule is invalid"),
         (status = 500, description = "Could not persist")
     )
 )]
@@ -118,6 +124,25 @@ pub async fn put_policy(
     State(state): State<ServerState>,
     Json(policy): Json<RoutingPolicy>,
 ) -> impl IntoResponse {
+    // Validation reads the saved-account vault, which is blocking I/O.
+    let stored = routing_policy::load(&state.preferences).await;
+    let candidate = policy.clone();
+    match tokio::task::spawn_blocking(move || candidate.validate(&stored)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": error })),
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "routing policy validation task failed");
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "could not validate policy" })),
+            );
+        }
+    }
     if let Err(e) = state
         .preferences
         .set(ROUTING_POLICY_PREF, &policy.to_pref_value())

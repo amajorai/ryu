@@ -1,5 +1,12 @@
 import { ownAppRequest } from "./app-request.ts";
 import type { ApiTarget } from "./client.ts";
+import {
+	gitHubRepositoryResponseSchema,
+	gitHubRepositoryWireSchema,
+	gitPullRequestWireSchema,
+	pullRequestFeedbackSchema,
+	pullRequestResponseSchema,
+} from "./pull-request-wire-contracts.ts";
 
 export const PULL_REQUESTS_APP_ID = "@ryu/pull-requests";
 export type GitPullRequestLookupState = "all" | "open";
@@ -44,6 +51,86 @@ export interface GitPullRequest {
 
 export type GitPullRequestStatus = "closed" | "draft" | "merged" | "open";
 
+/** One conversation comment, review, or open inline review comment left on a
+ * pull request. */
+export interface PullRequestFeedback {
+	author: string | null;
+	/** GitHub's author association, upper-cased (`OWNER`, `MEMBER`,
+	 * `COLLABORATOR`, `CONTRIBUTOR`, `NONE`, …). */
+	authorAssociation: string | null;
+	/** A GitHub App or other bot account. */
+	authorIsBot: boolean;
+	body: string;
+	createdAt: string | null;
+	id: string;
+	/** Hidden on GitHub as spam, off-topic, outdated, or similar. */
+	isMinimized: boolean;
+	kind: "comment" | "review" | "review_comment";
+	/** File line of an inline review comment. */
+	line: number | null;
+	/** File path of an inline review comment. */
+	path: string | null;
+	/** Review state (`CHANGES_REQUESTED`, `COMMENTED`, …); null for comments. */
+	state: string | null;
+	url: string | null;
+	/** Written by the GitHub account the node's `gh` CLI is signed in as. */
+	viewerDidAuthor: boolean;
+}
+
+export interface PullRequestReference {
+	number: number;
+	owner: string;
+	repo: string;
+	/** Canonical `https://github.com/<owner>/<repo>/pull/<n>` form. */
+	url: string;
+}
+
+const GITHUB_PREFIX = "https://github.com/";
+const GITHUB_NAME_RE = /^[A-Za-z0-9_.-]{1,100}$/;
+const PULL_NUMBER_RE = /^\+?\d+$/;
+
+const isGitHubName = (segment: string | undefined): segment is string =>
+	segment !== undefined &&
+	GITHUB_NAME_RE.test(segment) &&
+	segment !== "." &&
+	segment !== "..";
+
+/** Parse a GitHub pull request link into its canonical form. Mirrors Core's
+ * `normalize_pull_request_url` step for step (split on `/`, `?`, `#`; owner,
+ * repo, `pull`/`pulls`, then a positive number), so a link the desktop accepts
+ * is one Core stores. The one deliberate difference: numbers above
+ * `Number.MAX_SAFE_INTEGER` are rejected here, where Core allows any `u64`. */
+export function parsePullRequestUrl(raw: string): PullRequestReference | null {
+	const trimmed = raw.trim();
+	if (!trimmed.startsWith(GITHUB_PREFIX)) {
+		return null;
+	}
+	const [owner, repo, kind, digits] = trimmed
+		.slice(GITHUB_PREFIX.length)
+		.split(/[/?#]/);
+	if (
+		!(
+			isGitHubName(owner) &&
+			isGitHubName(repo) &&
+			(kind === "pull" || kind === "pulls") &&
+			digits &&
+			PULL_NUMBER_RE.test(digits)
+		)
+	) {
+		return null;
+	}
+	const number = Number(digits);
+	if (!Number.isSafeInteger(number) || number <= 0) {
+		return null;
+	}
+	return {
+		number,
+		owner,
+		repo,
+		url: `${GITHUB_PREFIX}${owner}/${repo}/pull/${number}`,
+	};
+}
+
 export function gitPullRequestStatus(
 	pullRequest: Pick<GitPullRequest, "isDraft" | "mergedAt" | "state">
 ): GitPullRequestStatus {
@@ -68,118 +155,17 @@ export function gitPullRequestStatusLabel(
 
 const MAX_REPORT_CHARS = 12_000;
 
-function text(value: unknown): string | null {
-	return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
 export function normalizeGitHubRepository(
-	value: unknown
+	value: Parameters<typeof gitHubRepositoryWireSchema.parse>[0]
 ): GitHubRepository | null {
-	if (typeof value !== "object" || value === null) {
-		return null;
-	}
-	const record = value as Record<string, unknown>;
-	const nameWithOwner = text(record.nameWithOwner);
-	const url = text(record.url);
-	if (!(nameWithOwner && url)) {
-		return null;
-	}
-	const defaultBranchRecord = record.defaultBranchRef;
-	const defaultBranch =
-		text(record.defaultBranch) ??
-		(typeof defaultBranchRecord === "object" && defaultBranchRecord !== null
-			? text((defaultBranchRecord as Record<string, unknown>).name)
-			: text(defaultBranchRecord));
-	return { defaultBranch, nameWithOwner, url };
+	return gitHubRepositoryWireSchema.parse(value);
 }
 
-function number(value: unknown): number | null {
-	return typeof value === "number" && Number.isSafeInteger(value) && value > 0
-		? value
-		: null;
-}
-
-function count(value: unknown): number | null {
-	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-		? value
-		: null;
-}
-
-function repositoryName(value: unknown): string | null {
-	if (typeof value === "string") {
-		return text(value);
-	}
-	if (typeof value !== "object" || value === null) {
-		return null;
-	}
-	const record = value as Record<string, unknown>;
-	return text(record.nameWithOwner) ?? text(record.name);
-}
-
-function normalizeCheck(value: unknown): PullRequestCheck | null {
-	if (typeof value !== "object" || value === null) {
-		return null;
-	}
-	const record = value as Record<string, unknown>;
-	return {
-		bucket: text(record.bucket),
-		conclusion: text(record.conclusion),
-		description: text(record.description),
-		detailsUrl: text(record.detailsUrl) ?? text(record.link),
-		name: text(record.name),
-		state: text(record.state),
-		status: text(record.status),
-		workflowName: text(record.workflowName) ?? text(record.workflow),
-	};
-}
-
-/** Normalize the Pull Requests app response and Core's creation response into
- * one desktop contract. Keeping this at the boundary lets the sidebar, pinned
- * summary, and future surfaces consume the app-owned check rollup identically. */
-export function normalizeGitPullRequest(value: unknown): GitPullRequest | null {
-	if (typeof value !== "object" || value === null) {
-		return null;
-	}
-	const record = value as Record<string, unknown>;
-	const url = text(record.url) ?? text(record.pr_url);
-	const urlNumber = url?.match(/\/pulls?\/(\d+)(?:\/|$)/)?.[1];
-	const rawNumber =
-		number(record.number) ?? (urlNumber ? number(Number(urlNumber)) : null);
-	const title = text(record.title);
-	const commentsCount =
-		count(record.commentsCount) ??
-		count(record.comments_count) ??
-		(Array.isArray(record.comments) ? record.comments.length : null);
-	if (rawNumber === null || !url || !title) {
-		return null;
-	}
-	const rawChecks = Array.isArray(record.statusCheckRollup)
-		? record.statusCheckRollup
-		: Array.isArray(record.status_check_rollup)
-			? record.status_check_rollup
-			: [];
-	return {
-		baseRefName: text(record.baseRefName) ?? text(record.base),
-		branch: text(record.branch) ?? text(record.headRefName),
-		commentsCount,
-		headRefName: text(record.headRefName) ?? text(record.branch),
-		headRefOid: text(record.headRefOid) ?? text(record.head_sha),
-		isDraft: record.isDraft === true || record.is_draft === true,
-		mergeStateStatus:
-			text(record.mergeStateStatus) ?? text(record.merge_state_status),
-		mergeable: text(record.mergeable),
-		mergedAt: text(record.mergedAt) ?? text(record.merged_at),
-		number: rawNumber,
-		repository: repositoryName(record.repository) ?? text(record.repository),
-		state: text(record.state),
-		statusCheckRollup: rawChecks.flatMap((check) => {
-			const normalized = normalizeCheck(check);
-			return normalized ? [normalized] : [];
-		}),
-		title,
-		updatedAt: text(record.updatedAt) ?? text(record.updated_at),
-		url,
-	};
+/** Normalize the app and Core creation responses into the desktop contract. */
+export function normalizeGitPullRequest(
+	value: Parameters<typeof gitPullRequestWireSchema.parse>[0]
+): GitPullRequest | null {
+	return gitPullRequestWireSchema.parse(value);
 }
 
 /** GitHub reports merge conflicts as `CONFLICTING`/`DIRTY`; other blocked or
@@ -308,10 +294,57 @@ export async function fetchPullRequestForBranch(
 		path: `/pulls/branch?${params.toString()}`,
 		signal,
 	});
-	if (typeof response !== "object" || response === null) {
+	return pullRequestResponseSchema.parse(response).pull;
+}
+
+function pullRequestPath(reference: PullRequestReference): string {
+	return `/pulls/${encodeURIComponent(reference.owner)}/${encodeURIComponent(reference.repo)}/${reference.number}`;
+}
+
+/** Read one pull request's full detail (checks, mergeability) by URL. */
+export async function fetchPullRequestByUrl(
+	target: ApiTarget,
+	url: string,
+	signal?: AbortSignal
+): Promise<GitPullRequest | null> {
+	const reference = parsePullRequestUrl(url);
+	if (!reference) {
 		return null;
 	}
-	return normalizeGitPullRequest((response as { pull?: unknown }).pull);
+	const response = await ownAppRequest(target, PULL_REQUESTS_APP_ID, {
+		path: pullRequestPath(reference),
+		signal,
+	});
+	return gitPullRequestWireSchema.parse(response);
+}
+
+export interface PullRequestFeedbackSnapshot {
+	feedback: PullRequestFeedback[];
+	pullRequest: GitPullRequest | null;
+}
+
+/** Read one pull request's status and recent feedback through the app's light
+ * feedback route: a single GitHub GraphQL call, without the files, commits,
+ * checks, stack, and sub-issue lookups of the detail route. Throws when the
+ * app or GitHub cannot be reached, so callers can tell a failed lookup from
+ * an answer. */
+export async function fetchPullRequestFeedback(
+	target: ApiTarget,
+	url: string,
+	signal?: AbortSignal
+): Promise<PullRequestFeedbackSnapshot> {
+	const reference = parsePullRequestUrl(url);
+	if (!reference) {
+		return { feedback: [], pullRequest: null };
+	}
+	const response = await ownAppRequest(target, PULL_REQUESTS_APP_ID, {
+		path: `${pullRequestPath(reference)}/feedback`,
+		signal,
+	});
+	return {
+		feedback: pullRequestFeedbackSchema.parse(response),
+		pullRequest: gitPullRequestWireSchema.parse(response),
+	};
 }
 
 export async function fetchGitHubRepository(
@@ -324,12 +357,7 @@ export async function fetchGitHubRepository(
 		path: `/repository?${params.toString()}`,
 		signal,
 	});
-	if (typeof response !== "object" || response === null) {
-		return null;
-	}
-	return normalizeGitHubRepository(
-		(response as { repository?: unknown }).repository
-	);
+	return gitHubRepositoryResponseSchema.parse(response).repository;
 }
 
 export async function createGitHubRepository(
@@ -347,12 +375,7 @@ export async function createGitHubRepository(
 		path: "/repository/create",
 		signal,
 	});
-	const repository =
-		typeof response === "object" && response !== null
-			? normalizeGitHubRepository(
-					(response as { repository?: unknown }).repository
-				)
-			: null;
+	const repository = gitHubRepositoryResponseSchema.parse(response).repository;
 	if (!repository) {
 		throw new Error("GitHub did not return the created repository");
 	}

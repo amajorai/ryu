@@ -5,11 +5,11 @@ import { cn } from "./utils.ts";
 
 describe("cn", () => {
 	test("joins plain class names", () => {
-		expect(cn("a", "b")).toBe("a b");
+		expect(cn("flex", "underline")).toBe("flex underline");
 	});
 
 	test("drops falsy conditional entries", () => {
-		expect(cn("a", false, null, undefined, "c")).toBe("a c");
+		expect(cn("flex", false, null, undefined, "italic")).toBe("flex italic");
 	});
 
 	test("later Tailwind utility wins on a conflict", () => {
@@ -18,7 +18,9 @@ describe("cn", () => {
 	});
 
 	test("flattens arrays and object maps", () => {
-		expect(cn(["a", "b"], { c: true, d: false })).toBe("a b c");
+		expect(cn(["flex", "underline"], { italic: true, border: false })).toBe(
+			"flex underline italic"
+		);
 	});
 
 	test("no inputs yields an empty string", () => {

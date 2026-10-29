@@ -2,14 +2,16 @@
 // Injected globals: `ctx` (the outbound context) and `host` (the capability
 // bridge). This file is a fragment, not an ES module; a top-level `return` is
 // intentionally part of the sandbox contract.
+//
+// Only the latest user message is changed. The system prompt (which keeps its
+// AGENTS.md head) and earlier turns are left byte-identical so the provider's
+// prompt cache prefix stays warm; Core drops any `context` rewrite that edits them.
 
-const REMOVE_HEAD_PREF = "agents-md-tail-remove-head";
 const TAIL_OPEN = "<ryu-agents-md-tail>";
 const TAIL_CLOSE = "</ryu-agents-md-tail>";
-const TAIL_BLOCK = /\n*<ryu-agents-md-tail>\n[\s\S]*?\n<\/ryu-agents-md-tail>/g;
 
 const instructions =
-	typeof ctx?.project_instructions === "string"
+	parsePrimitiveText(ctx?.project_instructions) !== undefined
 		? ctx.project_instructions
 		: "";
 
@@ -17,67 +19,16 @@ if (!instructions.trim()) {
 	return { kind: "none" };
 }
 
-let removeHead = false;
-try {
-	const raw = await host.getPreference({ key: REMOVE_HEAD_PREF });
-	removeHead = raw === true || String(raw).trim().toLowerCase() === "true";
-} catch {
-	// Preferences are advisory. A read failure keeps the safe default: retain
-	// the system/head injection and still refresh the hidden tail.
-}
-
 const tail = `\n\n${TAIL_OPEN}\n${instructions}\n${TAIL_CLOSE}`;
 
-function stripTails(text) {
-	return text.replace(TAIL_BLOCK, "");
-}
-
-function removeHeadBlock(text) {
-	const index = text.indexOf(instructions);
-	if (index < 0) {
-		return text;
-	}
-	const before = text.slice(0, index);
-	let after = text.slice(index + instructions.length);
-	if (before.endsWith("\r\n") && after.startsWith("\r\n")) {
-		after = after.slice(2);
-	} else if (before.endsWith("\n") && after.startsWith("\n")) {
-		after = after.slice(1);
-	}
-	return `${before}${after}`;
-}
-
-function cleanSystemMessage(message) {
-	if (!removeHead || message?.role !== "system") {
-		return message;
-	}
-	if (typeof message.content !== "string") {
-		return message;
-	}
-	return { ...message, content: removeHeadBlock(message.content) };
-}
-
-function cleanStringContent(content) {
-	return stripTails(content);
-}
-
-function cleanMultimodalContent(content) {
-	return content.map((part) => {
-		if (part && part.type === "text" && typeof part.text === "string") {
-			return { ...part, text: stripTails(part.text) };
-		}
-		return part;
-	});
-}
-
 function appendToUserMessage(message) {
-	if (typeof message.content === "string") {
-		return { ...message, content: `${cleanStringContent(message.content)}${tail}` };
+	if (parsePrimitiveText(message.content) !== undefined) {
+		return { ...message, content: `${message.content}${tail}` };
 	}
 	if (Array.isArray(message.content)) {
 		return {
 			...message,
-			content: [...cleanMultimodalContent(message.content), { type: "text", text: tail }],
+			content: [...message.content, { type: "text", text: tail }],
 		};
 	}
 	if (message.content === undefined || message.content === null) {
@@ -90,32 +41,16 @@ function appendToUserMessage(message) {
 }
 
 // ACP has no message array. `ctx.input` is the complete flattened prompt for
-// this turn. The host uses `fresh_session` to prevent an old hidden tail from
-// surviving inside the ACP agent's private transcript.
+// this turn; Core accepts only text appended to it and forwards that suffix to
+// the warm pooled session as part of the latest turn.
 if (!Array.isArray(ctx?.messages)) {
-	if (typeof ctx?.input !== "string" || !ctx.input.trim()) {
+	if (parsePrimitiveText(ctx?.input) === undefined || !ctx.input.trim()) {
 		return { kind: "none" };
 	}
-	let prompt = stripTails(ctx.input);
-	if (removeHead) {
-		prompt = removeHeadBlock(prompt);
-	}
-	return { kind: "replace", text: `${prompt}${tail}`, fresh_session: true };
+	return { kind: "replace", text: `${ctx.input}${tail}` };
 }
 
-const messages = ctx.messages.map((message) => {
-	if (!message || message.role !== "user") {
-		return cleanSystemMessage(message);
-	}
-	if (typeof message.content === "string") {
-		return { ...message, content: cleanStringContent(message.content) };
-	}
-	if (Array.isArray(message.content)) {
-		return { ...message, content: cleanMultimodalContent(message.content) };
-	}
-	return message;
-});
-
+const messages = [...ctx.messages];
 let lastUserIndex = -1;
 for (let index = messages.length - 1; index >= 0; index -= 1) {
 	if (messages[index]?.role === "user") {
@@ -130,3 +65,14 @@ if (lastUserIndex < 0) {
 
 messages[lastUserIndex] = appendToUserMessage(messages[lastUserIndex]);
 return { kind: "rewrite", messages };
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}

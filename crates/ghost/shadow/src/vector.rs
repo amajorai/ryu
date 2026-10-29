@@ -104,6 +104,9 @@ impl VectorIndex {
 
         let conn = Connection::open(&db_path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // Rebuildable capture index: a power cut may drop the last moments of
+        // writes but never corrupts the file, and each commit skips an fsync.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS vector_embeddings (
@@ -350,6 +353,16 @@ impl VectorIndex {
     /// Callers should reset the vector checkpoint when this is true.
     pub fn was_rebuilt(&self) -> bool {
         self.rebuilt
+    }
+
+    /// Delete embeddings for frames captured before `cutoff_us` (Unix
+    /// microseconds). Used by the history retention sweep. Returns rows deleted.
+    pub fn delete_before(&mut self, cutoff_us: u64) -> Result<u64, VectorError> {
+        let deleted = self.conn.execute(
+            "DELETE FROM vector_embeddings WHERE ts_wall_us < ?1",
+            params![cutoff_us.min(i64::MAX as u64) as i64],
+        )?;
+        Ok(deleted as u64)
     }
 
     /// Clear all embeddings from the index. Used for rebuild scenarios.

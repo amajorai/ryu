@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { recordQuestEvent } from "./quest-events.ts";
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -9,15 +13,16 @@ afterEach(() => {
 
 describe("recordQuestEvent", () => {
 	it("sends the typed event and calling surface with the control-plane bearer", async () => {
-		let captured: {
-			body?: string;
+		interface CapturedQuestRequest {
+			body?: RequestInit["body"];
 			headers?: HeadersInit;
 			method?: string;
 			url?: string;
-		} = {};
-		globalThis.fetch = (async (input, init) => {
+		}
+		let captured: CapturedQuestRequest = {};
+		globalThis.fetch = createFetchFixture(async (input, init) => {
 			captured = {
-				body: init?.body as string | undefined,
+				body: init?.body,
 				headers: init?.headers,
 				method: init?.method,
 				url: String(input),
@@ -29,7 +34,7 @@ describe("recordQuestEvent", () => {
 				referralStatus: "reconciled",
 				surface: "mobile",
 			});
-		}) as typeof fetch;
+		});
 
 		const result = await recordQuestEvent(
 			{
@@ -47,7 +52,7 @@ describe("recordQuestEvent", () => {
 			Authorization: "Bearer better-auth-token",
 			"Content-Type": "application/json",
 		});
-		expect(JSON.parse(captured.body ?? "{}")).toEqual({
+		expect(parseJsonRequestBody(captured.body)).toEqual({
 			event: "referral_sync",
 			surface: "mobile",
 		});

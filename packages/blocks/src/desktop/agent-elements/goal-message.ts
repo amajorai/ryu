@@ -1,4 +1,10 @@
+import {
+	isNativeNumber,
+	isNativeObjectLike,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { UIMessage } from "ai";
+import { z } from "zod";
+import { nativeSdkSchemaAdmits } from "./utils/native-sdk-admission.ts";
 
 /** The durable completion data shown beside the assistant's final turn. */
 export interface GoalCompletion {
@@ -34,24 +40,34 @@ export function getGoalElapsedMs(
 	now = Date.now()
 ): number | null {
 	if (
-		typeof completion.startedAt !== "number" ||
-		!Number.isFinite(completion.startedAt)
+		!(
+			isNativeNumber(completion.startedAt) &&
+			Number.isFinite(completion.startedAt)
+		)
 	) {
 		return null;
 	}
 	const end =
-		typeof completion.achievedAt === "number" &&
+		isNativeNumber(completion.achievedAt) &&
 		Number.isFinite(completion.achievedAt)
 			? completion.achievedAt
 			: now;
 	return Math.max(0, end - completion.startedAt);
 }
 
+/** Consumed metadata flag, not a full SDK metadata DTO. The native SDK owns
+ * opaque values; the existing business comparison admits only literal true. */
+interface GoalMetadataObservation {
+	goal?: UIMessage["metadata"];
+}
+const goalMetadataObservationSchema =
+	z.custom<GoalMetadataObservation>(isNativeObjectLike);
+
 /** True when a user message represents a goal-setting action. */
 export function isGoalMessage(message: UIMessage): boolean {
-	const metadata = (message as { metadata?: unknown }).metadata;
-	if (typeof metadata !== "object" || metadata === null) {
+	const metadata = message.metadata;
+	if (!nativeSdkSchemaAdmits(goalMetadataObservationSchema, metadata)) {
 		return false;
 	}
-	return (metadata as GoalMessageMetadata).goal === true;
+	return metadata.goal === true;
 }

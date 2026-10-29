@@ -1,5 +1,8 @@
-export * from "./adapters/nextjs.ts";
-export * from "./adapters/react-router.ts";
+// The navigation adapters are framework bound (`next/navigation`,
+// `react-router-dom`), so they stay out of this barrel: a desktop or extension
+// bundle that imports settings must never pull Next's router. Import one from
+// its own path, `@ryu/settings/adapters/nextjs` or
+// `@ryu/settings/adapters/react-router`.
 export * from "./adapters/types.ts";
 export * from "./components/AuthorizedAppsTab.tsx";
 export * from "./components/ReferralsTab.tsx";

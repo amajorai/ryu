@@ -8,10 +8,11 @@ import { defineConfig } from "vite";
 const root = import.meta.dirname;
 export default defineConfig({
 	root,
+	cacheDir: path.resolve(root, "node_modules/.vite-tab-tearout-proof"),
 	optimizeDeps: {
 		entries: ["tab-tearout-proof.html"],
 		include: ["@tauri-apps/api/window"],
-		esbuildOptions: { target: "chrome105" },
+		esbuildOptions: { target: "esnext" },
 	},
 	assetsInclude: ["**/*.glb"],
 	plugins: [

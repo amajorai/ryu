@@ -1,0 +1,69 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer utilities {
+	:where(.mention) {
+		font-size: 0.9em;
+	}
+
+	.mentionAccent:hover {
+		color: var(--mention-accent);
+	}
+	.mentionAccent em,
+	.mentionAccent strong {
+		color: var(--mention-ink) !important;
+	}
+
+	:where(.filterTransition) {
+		transition-property: filter;
+	}
+	.collapse {
+		transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+		transition-property: max-height;
+	}
+}
+
+.width {
+	width: var(--agent-width);
+}
+.widthTransition {
+	width: var(--agent-width);
+	transition-property: width;
+}
+.cursor {
+	left: var(--agent-cursor);
+}
+.height {
+	height: var(--agent-height);
+}
+.square {
+	width: var(--agent-size);
+	height: var(--agent-size);
+}
+.anchor {
+	top: var(--agent-top);
+	left: var(--agent-left);
+}
+.full {
+	width: 100%;
+	height: 100%;
+}
+@layer utilities {
+	.previewPopup::before {
+		border-radius: inherit;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.collapse {
+			transition-property: none;
+		}
+	}
+}
+
+.mentionAccent {
+	--mention-ink: color-mix(
+		in srgb,
+		var(--mention-accent) 68%,
+		var(--foreground) 32%
+	);
+	color: var(--mention-ink);
+}

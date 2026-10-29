@@ -1,0 +1,17 @@
+@import "@ryu/ui/globals.css";
+@import "sileo/styles.css";
+
+@source "./column-editor-proof.tsx";
+@source "../../src/pages/SpaceDatabaseEditorPage.tsx";
+@source "../../src/components/spaces";
+@source "../../../../packages/ui/src";
+
+html,
+body,
+#root {
+	height: 100%;
+	margin: 0;
+}
+body {
+	font-family: Inter, sans-serif;
+}

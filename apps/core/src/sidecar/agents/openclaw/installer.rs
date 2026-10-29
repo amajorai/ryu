@@ -1,11 +1,11 @@
-//! OpenClaw installer — installs openclaw@latest into `~/.ryu` via npm,
-//! placing the binary at `~/.ryu/bin/openclaw` without running onboarding.
+//! OpenClaw installer — resolves the openclaw binary at `<data dir>/bin/openclaw`
+//! without running onboarding.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::sidecar::download_manager::{ryu_dir, VersionStore};
+use crate::sidecar::download_manager::VersionStore;
 
 fn bin_path() -> PathBuf {
     // npm creates a `.cmd` wrapper on Windows, a plain script on Unix.
@@ -14,10 +14,10 @@ fn bin_path() -> PathBuf {
     } else {
         "openclaw"
     };
-    ryu_dir().join("bin").join(name)
+    crate::paths::bin_dir().join(name)
 }
 
-/// Returns the path to the openclaw binary under `~/.ryu/bin`.
+/// Returns the path to the openclaw binary under `<data dir>/bin`.
 pub fn binary_path() -> PathBuf {
     bin_path()
 }
@@ -27,7 +27,7 @@ pub fn binary_path() -> PathBuf {
 /// (`POST /api/setup/openclaw/install`) — and both register the SAME download-center
 /// id, which shares the row but does NOT dedup the work: `register_indeterminate`
 /// cannot hand a second caller the first one's result, so both futures run. Two
-/// simultaneous `npm install --prefix ~/.ryu openclaw@latest` into one prefix is a
+/// simultaneous `npm install --prefix <npm prefix> openclaw@latest` into one prefix is a
 /// corrupt `node_modules`, not a wasted download. Holding this lock makes the
 /// second caller wait and then take the fast path below.
 static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

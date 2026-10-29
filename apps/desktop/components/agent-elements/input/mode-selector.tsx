@@ -6,21 +6,19 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/popover.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ComponentType, ReactNode } from "react";
 import { memo, useCallback, useMemo, useState } from "react";
-import {
-	COMPOSER_SELECT_ITEM,
-	COMPOSER_SELECT_POPOVER,
-	COMPOSER_SELECT_TRIGGER,
-} from "@/components/agent-elements/input/composer-select.ts";
+import { COMPOSER_SELECT_TRIGGER } from "@/components/agent-elements/input/composer-select.ts";
+import styles from "./mode-selector.module.css";
 
 // Below this many options the picker stays a plain list; at or above it a sticky
 // filter box appears so long agent/team rosters stay navigable.
@@ -61,6 +59,7 @@ export function ModeMenuContent({
 	searchable?: boolean;
 }) {
 	const [query, setQuery] = useState("");
+	const tl = useLiteralMessages();
 	const normalizedQuery = query.trim().toLowerCase();
 	const showSearch = searchable && modes.length >= SEARCH_THRESHOLD;
 
@@ -95,11 +94,7 @@ export function ModeMenuContent({
 		const Icon = mode.icon;
 		return (
 			<Button
-				className={cn(
-					COMPOSER_SELECT_ITEM,
-					"items-start",
-					isActive && "bg-accent"
-				)}
+				appearance={isActive ? "composer-mode-active" : "composer-mode"}
 				key={mode.id}
 				onClick={() => onSelect(mode.id)}
 				type="button"
@@ -130,14 +125,14 @@ export function ModeMenuContent({
 	if (filtered.length === 0) {
 		body = (
 			<p className="px-3 py-4 text-center text-muted-foreground text-xs">
-				No matches for &ldquo;{query.trim()}&rdquo;
+				{tl("No matches for “{query}”", { query: query.trim() })}
 			</p>
 		);
 	} else if (hasGroups) {
 		body = groups.map((group) => (
 			<div key={group.label ?? "__ungrouped__"}>
 				{group.label && (
-					<div className="px-3 pt-2 pb-1 font-medium text-[11px] text-muted-foreground">
+					<div className="type-caption px-3 pt-2 pb-1 font-medium text-muted-foreground">
 						{group.label}
 					</div>
 				)}
@@ -149,11 +144,17 @@ export function ModeMenuContent({
 	}
 
 	if (!showSearch) {
-		return <div className="scroll-fade max-h-80 overflow-y-auto">{body}</div>;
+		return (
+			<div
+				className={cn(styles.menuBody, "scroll-fade max-h-80 overflow-y-auto")}
+			>
+				{body}
+			</div>
+		);
 	}
 
 	return (
-		<div className="flex max-h-80 flex-col">
+		<div className={cn(styles.menuBody, "flex max-h-80 flex-col")}>
 			<div className="sticky top-0 z-10 mb-1">
 				<div className="relative">
 					<HugeiconsIcon
@@ -162,10 +163,10 @@ export function ModeMenuContent({
 					/>
 					<Input
 						aria-label="Filter agents"
-						className="h-7 border-0 bg-transparent pl-7 text-[12px]"
 						onChange={(e) => setQuery(e.target.value)}
 						onKeyDown={(e) => e.stopPropagation()}
 						placeholder="Search"
+						purpose="picker-filter"
 						spellCheck={false}
 						value={query}
 					/>
@@ -239,8 +240,9 @@ export const ModeSelector = memo(function ModeSelector({
 			<PopoverTrigger
 				render={
 					<Button
+						appearance="composer-settings"
 						aria-label="Select mode"
-						className={cn(COMPOSER_SELECT_TRIGGER, className)}
+						className={className}
 						size="sm"
 						type="button"
 						variant="ghost"
@@ -253,9 +255,10 @@ export const ModeSelector = memo(function ModeSelector({
 				align="start"
 				// `ModeMenuContent` owns its own capped scroller, so the popup must not
 				// add a second one (see `COMPOSER_SELECT_POPOVER`).
-				className={cn(COMPOSER_SELECT_POPOVER, "overflow-hidden")}
+				className="max-h-80 w-auto min-w-[200px] max-w-[280px] overflow-hidden"
 				side="top"
 				sideOffset={6}
+				spacing="small-inset"
 			>
 				<ModeMenuContent
 					activeId={activeMode?.id}

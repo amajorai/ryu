@@ -58,7 +58,7 @@ function buildTranscript(): UIMessage[] {
 				},
 			],
 			role: "user",
-		} as unknown as UIMessage);
+		});
 		messages.push({
 			id: `assistant-${index}`,
 			parts: [
@@ -68,7 +68,7 @@ function buildTranscript(): UIMessage[] {
 				},
 			],
 			role: "assistant",
-		} as unknown as UIMessage);
+		});
 	}
 	return messages;
 }
@@ -79,6 +79,18 @@ const queryClient = new QueryClient();
 function Story() {
 	const [summaryOpen, setSummaryOpen] = useState(true);
 	const inset = summaryOpen ? `${PINNED_COLUMN_WIDTH}px` : "0px";
+
+	const surfaceStyle: CSSProperties & {
+		"--workspace-content-inset": string;
+		"--proof-message-list-width": string;
+		"--proof-dock-ease": string;
+		"--proof-column-width": string;
+	} = {
+		"--workspace-content-inset": inset,
+		"--proof-message-list-width": "calc(100% + var(--workspace-content-inset))",
+		"--proof-dock-ease": DOCK_EASE,
+		"--proof-column-width": `${PINNED_COLUMN_WIDTH}px`,
+	};
 
 	return (
 		<div className="flex h-screen flex-col bg-background text-foreground">
@@ -104,27 +116,23 @@ function Story() {
 			<div
 				className="relative flex min-h-0 flex-1 overflow-hidden"
 				data-testid="workspace"
+				style={surfaceStyle}
 			>
 				<div
 					className={`relative flex min-w-0 flex-1 flex-col ${summaryOpen ? "overflow-visible" : "overflow-hidden"}`}
 					data-testid="chat-surface"
-					style={{ "--workspace-content-inset": inset } as CSSProperties}
+					style={surfaceStyle}
 				>
 					<div
-						className={`min-h-0 flex-1 ${summaryOpen ? "overflow-visible" : "overflow-hidden"}`}
+						className={`[&_[data-slot=message-scroller]]:overflow-visible! min-h-0 flex-1 [&_[data-slot=message-scroller-viewport]]:w-full! [&_[data-slot=message-scroller-viewport]]:pe-(--workspace-content-inset)! [&_[data-slot=message-scroller]]:w-(--proof-message-list-width)! [&_[data-slot=message-scroller]]:pt-8 ${summaryOpen ? "overflow-visible" : "overflow-hidden"}`}
 					>
 						<AgentChat
-							classNames={{
-								messageList:
-									"pt-8 !w-[calc(100%+var(--workspace-content-inset))] !overflow-visible",
-								messageListViewport:
-									"!w-full !pe-[var(--workspace-content-inset)]",
-							}}
 							currentUser={{ id: "user", name: "You" }}
 							messages={TRANSCRIPT}
 							onSend={() => {
 								// The proof is read-only; the real composer remains mounted.
 							}}
+							onStop={() => undefined}
 							status="ready"
 						/>
 					</div>
@@ -132,20 +140,15 @@ function Story() {
 
 				<div
 					aria-hidden="true"
-					className="shrink-0"
+					className="w-(--workspace-content-inset) shrink-0 transition-all duration-300 ease-(--proof-dock-ease)"
 					data-testid="sidebar-spacer"
-					style={{
-						transition: `width 300ms ${DOCK_EASE}`,
-						width: summaryOpen ? PINNED_COLUMN_WIDTH : 0,
-					}}
 				/>
 
 				{summaryOpen ? (
 					<aside
 						aria-label="Pinned summary"
-						className="slide-in-from-right-4 fade-in absolute inset-y-0 right-0 z-10 flex animate-in flex-col duration-300"
+						className="slide-in-from-right-4 fade-in absolute inset-y-0 right-0 z-10 flex w-(--proof-column-width) animate-in flex-col duration-300"
 						data-testid="pinned-summary"
-						style={{ width: PINNED_COLUMN_WIDTH }}
 					>
 						<div className="h-full overflow-y-auto py-2 pr-2 pl-1">
 							<div className="w-72" data-testid="summary-card">

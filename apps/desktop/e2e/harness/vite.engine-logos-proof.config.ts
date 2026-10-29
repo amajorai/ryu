@@ -1,6 +1,6 @@
 import { defineConfig, mergeConfig } from "vite";
-import desktopConfig from "../../vite.config";
-import catalog from "./engine-logos-catalog.json";
+import desktopConfig from "../../vite.config.ts";
+import catalog from "./engine-logos-catalog.json" with { type: "json" };
 
 export default mergeConfig(
 	desktopConfig,
@@ -16,28 +16,30 @@ export default mergeConfig(
 							return next();
 						}
 						res.setHeader("Content-Type", "application/json");
-						const responses: Record<string, unknown> = {
-							"/api/catalog": catalog,
-							"/api/engine/active": {
-								active: "lemonade",
-								running: true,
-								available: catalog.sidecars.map((e) => e.name),
-							},
-							"/api/sidecar/status": {},
-							"/api/sandbox/backend": {
-								active: "wasmtime",
-								available: catalog.sidecars
-									.filter((e) => e.category === "sandbox")
-									.map((e) => ({
-										...e,
-										available: true,
-										display_name: e.display_name,
-									})),
-							},
-							"/api/apps": { apps: [] },
-							"/api/plugins": { plugins: [] },
-						};
-						res.end(JSON.stringify(responses[req.url.split("?")[0]] ?? {}));
+						const responses = new Map(
+							Object.entries({
+								"/api/catalog": catalog,
+								"/api/engine/active": {
+									active: "lemonade",
+									running: true,
+									available: catalog.sidecars.map((e) => e.name),
+								},
+								"/api/sidecar/status": {},
+								"/api/sandbox/backend": {
+									active: "wasmtime",
+									available: catalog.sidecars
+										.filter((e) => e.category === "sandbox")
+										.map((e) => ({
+											...e,
+											available: true,
+											display_name: e.display_name,
+										})),
+								},
+								"/api/apps": { apps: [] },
+								"/api/plugins": { plugins: [] },
+							})
+						);
+						res.end(JSON.stringify(responses.get(req.url.split("?")[0]) ?? {}));
 					});
 				},
 			},

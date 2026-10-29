@@ -2,13 +2,14 @@
 
 import { Copy01Icon, MessageQuestionIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { AgentChat } from "@ryu/blocks/desktop/agent-elements/agent-chat";
+import { AgentChat } from "@ryu/blocks/desktop/agent-elements/agent-chat.tsx";
 import type {
 	ComposerMenuGroup,
 	ComposerMenuItem,
-} from "@ryu/blocks/desktop/agent-elements/input/composer-menu";
-import type { MentionItem } from "@ryu/blocks/desktop/agent-elements/types";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/blocks/desktop/agent-elements/input/composer-menu.tsx";
+import type { MentionItem } from "@ryu/blocks/desktop/agent-elements/types.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -16,7 +17,7 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
+} from "@ryu/ui/components/dialog.tsx";
 import type { UIMessage } from "ai";
 import { useCallback, useMemo } from "react";
 import { sileo } from "sileo";
@@ -44,6 +45,8 @@ export interface BtwOverlayProps {
 	/** Dismiss the overlay (the answer is discarded — never enters history). */
 	onClose: () => void;
 	onComposerMenuSelect?: (item: ComposerMenuItem) => void;
+	/** Stop the client request while keeping the question available for retry. */
+	onStop: () => void;
 	/** The current side question, or null when the overlay is closed. */
 	state: BtwState | null;
 }
@@ -59,10 +62,12 @@ export function BtwOverlay({
 	state,
 	onClose,
 	onAsk,
+	onStop,
 	composerMenuGroups,
 	mentionItems,
 	onComposerMenuSelect,
 }: BtwOverlayProps) {
+	const tl = useLiteralMessages();
 	const open = state !== null;
 	const messages = useMemo<UIMessage[]>(() => {
 		if (!state?.question) {
@@ -103,7 +108,7 @@ export function BtwOverlay({
 		<Dialog onOpenChange={(o) => (o ? undefined : onClose())} open={open}>
 			<DialogContent className="max-w-2xl">
 				<DialogHeader>
-					<DialogTitle className="flex items-center gap-2">
+					<DialogTitle layout="inline">
 						<HugeiconsIcon
 							className="size-4 text-muted-foreground"
 							icon={MessageQuestionIcon}
@@ -126,16 +131,16 @@ export function BtwOverlay({
 						messages={messages}
 						onComposerMenuSelect={onComposerMenuSelect}
 						onSend={handleSend}
-						onStop={() => undefined}
+						onStop={onStop}
 						status={state?.loading ? "streaming" : "ready"}
 					/>
 				</div>
 
-				<DialogFooter className="items-center justify-between gap-2 sm:justify-between">
+				<DialogFooter className="items-center justify-between sm:justify-between">
 					<span className="text-muted-foreground text-xs">
 						{state?.model
-							? `${state.model} · not saved to history`
-							: "Not saved to history"}
+							? tl("{model} · outside main transcript", { model: state.model })
+							: "Outside main transcript"}
 					</span>
 					<div className="flex items-center gap-2">
 						{state?.answer && (

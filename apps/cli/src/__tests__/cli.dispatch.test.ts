@@ -4,18 +4,61 @@
 // The HTTP layer is mocked via an injected CoreApi, so nothing hits a Core node.
 
 import { expect, test } from "bun:test";
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import type {
 	AppInfo,
 	AppRecord,
-	AppUninstallResult,
 	CatalogEntry,
 } from "@ryuhq/core-client/plugins";
+import { z } from "zod";
 import { isInteractive, parseArgs, runCli } from "../cli/dispatch.ts";
 import type { CliIO, CoreApi } from "../cli/types.ts";
 
+// These are test observations, not full publisher DTOs. Each admits the
+// entire native JSON tree and preserves the raw root/future fields before
+// checking the exact fields asserted below.
+const auditOutputFields = z.looseObject({ reachable: z.boolean() });
+const appListOutputFields = z.array(z.looseObject({ id: z.string() }));
+const errorOutputFields = z.looseObject({ error: z.string() });
+const chatOutputFields = z.looseObject({ text: z.string() });
+const auditOutputObservation = z.custom<z.infer<typeof auditOutputFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		auditOutputFields.safeParse(value).success
+);
+const appListOutputObservation = z.custom<z.infer<typeof appListOutputFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		appListOutputFields.safeParse(value).success
+);
+const errorOutputObservation = z.custom<z.infer<typeof errorOutputFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		errorOutputFields.safeParse(value).success
+);
+const chatOutputObservation = z.custom<z.infer<typeof chatOutputFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		chatOutputFields.safeParse(value).success
+);
+type CoreCall = NonNullable<CoreApi["call"]>;
+interface CapturedResourceCall {
+	body?: NonNullable<Parameters<CoreCall>[2]>["body"];
+	method?: NonNullable<Parameters<CoreCall>[2]>["method"];
+	path?: Parameters<CoreCall>[1];
+}
+type PreviewCall = NonNullable<CoreApi["previewAppLifecycle"]>;
+interface PreviewCallCapture {
+	value: CapturedPreviewCall | null;
+}
+interface CapturedPreviewCall {
+	action: Parameters<PreviewCall>[2];
+	id: Parameters<PreviewCall>[1];
+}
+
 // ── Fixtures + fakes ──────────────────────────────────────────────────────────
 
-function makeIo(): { io: CliIO; out: () => string; err: () => string } {
+function makeIo() {
 	let outBuf = "";
 	let errBuf = "";
 	return {
@@ -26,7 +69,7 @@ function makeIo(): { io: CliIO; out: () => string; err: () => string } {
 			err: (s) => {
 				errBuf += s;
 			},
-		},
+		} satisfies CliIO,
 		out: () => outBuf,
 		err: () => errBuf,
 	};
@@ -125,6 +168,18 @@ test("parseArgs: --node consumes its value and positional args survive", () => {
 test("parseArgs: --node=<url> inline form", () => {
 	const parsed = parseArgs(["list", "--node=http://y:7980"]);
 	expect(parsed.flags.node).toBe("http://y:7980");
+});
+
+test("parseArgs: -f and --file consume Gateway config paths without positional args", () => {
+	const short = parseArgs(["apply", "-f", "gateway.toml", "--dry-run"]);
+	expect(short.command).toBe("apply");
+	expect(short.args).toEqual([]);
+	expect(short.flags.file).toBe("gateway.toml");
+	expect(short.flags.dryRun).toBe(true);
+
+	const long = parseArgs(["diff", "--file=gateway.toml"]);
+	expect(long.command).toBe("diff");
+	expect(long.flags.file).toBe("gateway.toml");
 });
 
 test("parseArgs: --force and --cascade set their flags", () => {
@@ -280,7 +335,7 @@ test("observability audit: filters the shared Gateway audit endpoint", async () 
 	expect(code).toBe(0);
 	expect(capturedPath).toBe("/api/gateway/audit?limit=100&agent_id=agent-1");
 	expect(capturedMethod).toBe("GET");
-	const parsed = JSON.parse(cap.out()) as { reachable: boolean };
+	const parsed = auditOutputObservation.parse(JSON.parse(cap.out()));
 	expect(parsed.reachable).toBe(true);
 });
 
@@ -471,7 +526,7 @@ test("list --json: emits a parseable array (not the table)", async () => {
 		api: stubApi({ fetchApps: () => Promise.resolve([sampleApp]) }),
 	});
 	expect(code).toBe(0);
-	const parsed = JSON.parse(cap.out()) as AppInfo[];
+	const parsed = appListOutputObservation.parse(JSON.parse(cap.out()));
 	expect(parsed[0]?.id).toBe("whiteboard");
 	expect(cap.out()).not.toContain("ENABLED");
 });
@@ -497,12 +552,12 @@ test("add <id>: routes to installApp with the id and exits 0", async () => {
 
 test("add --dry-run previews without calling the live install route", async () => {
 	const cap = makeIo();
-	let captured: { action: string; id: string } | null = null;
+	const previewCapture: PreviewCallCapture = { value: null };
 	const code = await runCli(["add", "whiteboard", "--dry-run", "--json"], {
 		io: cap.io,
 		api: stubApi({
 			previewAppLifecycle: (_target, id, action) => {
-				captured = { action, id };
+				previewCapture.value = { action, id };
 				return Promise.resolve({
 					action,
 					dryRun: true,
@@ -513,7 +568,7 @@ test("add --dry-run previews without calling the live install route", async () =
 		}),
 	});
 	expect(code).toBe(0);
-	const observed = captured as { action: string; id: string } | null;
+	const observed = previewCapture.value;
 	expect(observed?.action ?? "").toBe("install");
 	expect(observed?.id ?? "").toBe("whiteboard");
 	expect(JSON.parse(cap.out()).dryRun).toBe(true);
@@ -623,14 +678,14 @@ test("--help lists commands and exits 0", async () => {
 	const code = await runCli(["--help"], { io: cap.io, api: stubApi() });
 	expect(code).toBe(0);
 	expect(cap.out()).toContain("Usage:");
-	expect(cap.out()).toContain("ryu add <id>");
+	expect(cap.out()).toContain("ryu-cli add <id>");
 });
 
 test("--version prints the version and exits 0", async () => {
 	const cap = makeIo();
 	const code = await runCli(["--version"], { io: cap.io, api: stubApi() });
 	expect(code).toBe(0);
-	expect(cap.out()).toMatch(/ryu \d+\.\d+\.\d+/);
+	expect(cap.out()).toMatch(/ryu-cli \d+\.\d+\.\d+/);
 });
 
 // ── typed lifecycle (409) error rendering ─────────────────────────────────────
@@ -655,8 +710,7 @@ test("uninstall renders a typed 409 as a clear message + exit 1 (not a raw dump)
 	const code = await runCli(["uninstall", "whiteboard"], {
 		io: cap.io,
 		api: stubApi({
-			uninstallApp: () =>
-				Promise.reject(lifecycleError) as Promise<AppUninstallResult>,
+			uninstallApp: () => Promise.reject(lifecycleError),
 		}),
 	});
 	expect(code).toBe(1);
@@ -674,7 +728,7 @@ test("--json error output is machine-readable on stderr", async () => {
 		}),
 	});
 	expect(code).toBe(1);
-	const parsed = JSON.parse(cap.err()) as { error: string };
+	const parsed = errorOutputObservation.parse(JSON.parse(cap.err()));
 	expect(parsed.error).toBe("boom");
 });
 
@@ -712,8 +766,28 @@ test("chat --json collects the full reply into a JSON envelope", async () => {
 		}),
 	});
 	expect(code).toBe(0);
-	const parsed = JSON.parse(cap.out()) as { text: string };
+	const parsed = chatOutputObservation.parse(JSON.parse(cap.out()));
 	expect(parsed.text).toBe("full reply");
+});
+
+test("chat opens a continuation turn on a new paragraph", async () => {
+	const cap = makeIo();
+	const code = await runCli(["chat", "hi", "--json"], {
+		io: cap.io,
+		api: stubApi({
+			streamChat: (_t, _turns, _o, handlers) => {
+				handlers.onTextDelta("Done step A.");
+				handlers.onTurnBoundary?.();
+				handlers.onTextDelta("Now step B");
+				handlers.onTextDelta(".");
+				handlers.onDone();
+				return Promise.resolve();
+			},
+		}),
+	});
+	expect(code).toBe(0);
+	const parsed = chatOutputObservation.parse(JSON.parse(cap.out()));
+	expect(parsed.text).toBe("Done step A.\n\nNow step B.");
 });
 
 test("chat surfaces a stream error as exit 1", async () => {
@@ -797,7 +871,7 @@ test("`ryu <app>` with no subcommand lists the app's commands", async () => {
 	expect(code).toBe(0);
 	expect(cap.out()).toContain("status");
 	expect(cap.out()).toContain("Show inbox status");
-	expect(cap.out()).toContain("ryu mail-contributor send");
+	expect(cap.out()).toContain("ryu-cli mail-contributor send");
 });
 
 test("unknown subcommand for a known app is a usage error listing options", async () => {
@@ -848,7 +922,7 @@ test("a non-2xx status from the sidecar maps to exit 1 with the body on stderr",
 
 test("built-in mail sends resource requests with JSON bodies", async () => {
 	const cap = makeIo();
-	let called: { body?: unknown; method?: string; path?: string } = {};
+	let called: CapturedResourceCall = {};
 	const code = await runCli(
 		[
 			"mail",

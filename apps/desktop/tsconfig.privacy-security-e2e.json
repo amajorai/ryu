@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/privacy-security-coverage.playwright.config.ts",
+    "e2e/settings-sync-proof.spec.ts",
+    "e2e/email-alerts-settings-proof.spec.ts",
+    "e2e/gateway-encryption-settings-proof.spec.ts",
+    "e2e/harness/gateway-encryption-settings-proof.mock.ts",
+    "e2e/harness/gateway-encryption-settings-proof.tsx"
+  ]
+}

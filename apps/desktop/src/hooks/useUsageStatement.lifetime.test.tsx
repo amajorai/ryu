@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { UsageFilters } from "@/src/lib/api/credits.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -13,11 +13,14 @@ mock.module("@/src/lib/api/orgs.ts", () => ({ useActiveOrgId: () => org }));
 const reads: {
 	filters: UsageFilters;
 	signal?: AbortSignal;
-	resolve: (value: unknown) => void;
+	resolve: <TValue>(value: TValue) => void;
 }[] = [];
 mock.module("@/src/lib/api/credits.ts", () => ({
 	fetchUsage: (filters: UsageFilters, signal?: AbortSignal) =>
 		new Promise((resolve) => reads.push({ filters, signal, resolve })),
+	// The hook wraps foreign failures in the client's error type; every read
+	// here resolves, so a bare subclass suffices.
+	CreditsError: class CreditsError extends Error {},
 }));
 const { useUsageStatement } = await import("./useUsageStatement.ts");
 

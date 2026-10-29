@@ -61,6 +61,8 @@ Node object shape: { \"id\": \"unique_id\", \"type\": \"<kind>\", ...fields }. K
 - while { expr: string, body_workflow_id?: string }  (loop while expr holds when body set; else one-shot gate)\n\
 - guardrails { checks: string[] }  (checks = pii|jailbreak|moderation; routed through the Gateway firewall)\n\
 - sub_workflow { workflow_id: string }  (runs another saved workflow)\n\
+- for_each { body_workflow_id: string, items?: string, max_concurrency?: number }  (maps the body workflow over a JSON array; items is a template, default {{input}}, e.g. {{state.urls}}; each item runs with input = the item and index; output = JSON array of results in order)\n\
+- parallel { branches: [{ id: string, workflow_id: string, input?: string }], max_concurrency?: number }  (runs several saved workflows at once on the node input or their own input template; output = JSON object keyed by branch id)\n\
 - agent_delegate { delegates: [{ id: string, task: string, agent_id?: string }], caps?: object }  (parallel sub-agent fan-out)\n\
 - awakeable { prompt?: string }  (human-in-the-loop pause; resumes via the resume endpoint)\n\
 - recipe { recipe: string, params?: object }  (replays a recorded ghost desktop automation)\n\
@@ -72,6 +74,14 @@ Node object shape: { \"id\": \"unique_id\", \"type\": \"<kind>\", ...fields }. K
 - notify_user { target: object, title?: string, body?: string, ack_mode?: object, ack_timeout_ms?: number }  \
 (pings org/team/members; target = { kind: \"org\" } | { kind: \"team\", team_id } | { kind: \"members\", user_ids: string[] }; \
 ack_mode = { mode: \"none\" } (default, fire-and-forget) | { mode: \"first\" } | { mode: \"all\" } | { mode: \"quorum\", n } | { mode: \"percentage\", percent }; title/body are templates)\n\
+- code { language: \"lean\"|\"bend\"|\"baml\", source: string, mode?: \"run\"|\"check\", input?: string, function?: string, args?: object, model?: string }  \
+(run: Lean/Bend run main with input (default {{input}}) as their one argument and emit stdout; BAML calls `function` with `args` and must use `client Ryu`. \
+check: fails unless Lean (no sorry) / Bend (ALL PROOFS CHECK) / baml-cli accepts the source. source is literal, not a template)\n\
+Any node except awakeable/condition/while (and notify_user with an ack_mode) may add \"repeat\": \
+{ max_iterations?: number (<=100), until?: string, while?: string, stop_when_unchanged?: bool, feed_output?: bool (default true), \
+collect?: \"last\"|\"all\", interval_ms?: number } to re-run that one step on its own output: N times, until/while a condition \
+holds on the latest output (condition grammar, input = latest output), or until the output stops changing. \
+Inside a repeating step use {{loop.iteration}}, {{loop.previous}}, {{loop.original}}.\n\
 Edge object shape: { \"from\": \"node_id\", \"to\": \"node_id\", \"branch\": null|\"true\"|\"false\" }.\n\
 Trigger object shape (the `triggers` array; omit for manual-only). One of:\n\
 - { \"type\": \"manual\" }  (runs only on explicit Run / the run endpoint)\n\
@@ -186,7 +196,8 @@ fn create_workflow_schema() -> Value {
             "description": { "type": "string", "description": "Short one-line description." },
             "nodes": node_array_schema(),
             "edges": edge_array_schema(),
-            "triggers": { "type": "array", "items": { "type": "object" }, "description": "Trigger objects (see the trigger shapes in the description; omit for manual-only)." }
+            "triggers": { "type": "array", "items": { "type": "object" }, "description": "Trigger objects (see the trigger shapes in the description; omit for manual-only)." },
+            "max_concurrency": { "type": "integer", "minimum": 1, "maximum": 16, "description": "How many independent nodes may run at once (default 4)." }
         },
         "required": ["name"]
     })
@@ -295,7 +306,11 @@ fn str_array(args: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn workflow_for_model(mut workflow: Workflow) -> Workflow {
+fn workflow_for_model(workflow: Workflow) -> Workflow {
+    // ChannelSend bot tokens and webhook URLs get the same placeholder the HTTP
+    // routes use; an echoed placeholder is swapped back for the stored value by
+    // `persist_workflow` (matched by node id), so edits never need the secret.
+    let mut workflow = crate::workflow::secrets::redact_for_client(workflow);
     for trigger in &mut workflow.triggers {
         if let WorkflowTrigger::Webhook { secret } = trigger {
             // The signing key authenticates external callers and must never be
@@ -353,6 +368,9 @@ async fn create_workflow(args: Value) -> Result<Value> {
         nodes,
         edges,
         triggers,
+        max_concurrency: args["max_concurrency"]
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok()),
         created_at: None,
         updated_at: None,
     };
@@ -544,16 +562,35 @@ mod tests {
             id: "wf_test".to_owned(),
             name: "Test".to_owned(),
             description: None,
-            nodes: Vec::new(),
+            nodes: vec![WorkflowNode {
+                id: "send".to_owned(),
+                kind: crate::workflow::NodeKind::ChannelSend {
+                    platform: crate::workflow::ChannelPlatform::Telegram,
+                    recipient: "@ops".to_owned(),
+                    text: "hi".to_owned(),
+                    bot_token: Some("123456:telegram-bot-token-secret".to_owned()),
+                    webhook_url: Some("https://hooks.slack.test/services/T0/B0/xyz".to_owned()),
+                },
+                retry: None,
+                timeout_ms: None,
+                repeat: None,
+            }],
             edges: Vec::new(),
             triggers: vec![WorkflowTrigger::Webhook {
                 secret: Some("secret-value".to_owned()),
             }],
+            max_concurrency: None,
             created_at: None,
             updated_at: None,
         };
         let projected = serde_json::to_value(workflow_for_model(workflow)).unwrap();
         assert_eq!(projected["triggers"][0]["secret"], Value::Null);
+        let send = &projected["nodes"][0];
+        assert_eq!(send["bot_token"], "••••••", "{send}");
+        assert_eq!(send["webhook_url"], "••••••", "{send}");
+        let text = projected.to_string();
+        assert!(!text.contains("telegram-bot-token-secret"));
+        assert!(!text.contains("hooks.slack.test"));
     }
 
     #[test]

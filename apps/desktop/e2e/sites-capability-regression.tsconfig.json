@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "sites-capability-regression.spec.ts",
+    "sites-capability-regression.host.ts",
+    "harness/sites-capability-regression.tsx",
+    "harness/vite.sites-capability-regression.config.ts",
+    "sites-capability-regression.playwright.config.ts",
+    "harness/sites-capability-regression.types.ts"
+  ]
+}

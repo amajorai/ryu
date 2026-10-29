@@ -1,7 +1,5 @@
 "use client";
 
-import { ViewIcon, ViewOffSlashIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	Accordion,
 	AccordionContent,
@@ -15,48 +13,19 @@ import {
 	FieldError,
 	FieldGroup,
 	FieldLabel,
-	FieldSeparator,
 } from "@ryu/ui/components/field";
+import { GoogleBrandMark } from "@ryu/ui/components/google-brand-mark.tsx";
 import { Input } from "@ryu/ui/components/input";
 import { Label } from "@ryu/ui/components/label";
 import PageHeader from "@ryu/ui/components/page-header";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
 import { Switch } from "@ryu/ui/components/switch";
 import { Fingerprint, Smartphone } from "lucide-react";
-import type { ReactNode, SVGProps } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import PasswordField from "./password-field.tsx";
 
-/** Google brand mark, inlined so the block has no app-local SVG dependency. */
-function Google(props: SVGProps<SVGSVGElement>) {
-	return (
-		<svg {...props} fill="none" viewBox="0 0 24 24">
-			<title>Google</title>
-			<path
-				d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-				fill="#4285F4"
-			/>
-			<path
-				d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-				fill="#34A853"
-			/>
-			<path
-				d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-				fill="#FBBC05"
-			/>
-			<path
-				d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-				fill="#EA4335"
-			/>
-		</svg>
-	);
-}
-
-export type SignInLastUsedMethod =
-	| "email"
-	| "magic-link"
-	| "google"
-	| "passkey"
-	| null;
+export type SignInLastUsedMethod = string | null;
 
 export interface SignInValues {
 	email: string;
@@ -111,6 +80,24 @@ const noop = () => {
 	// presentational default; the live app injects real handlers
 };
 
+const CALLBACK_PARAMS = ["callback", "callbackURL", "callbackUrl", "next"];
+
+/**
+ * Whether the sign-in was opened from a certification exam link. Read after
+ * mount from the URL so the presentational block needs no router context.
+ */
+function useExamCallback(): boolean {
+	const [isExam, setIsExam] = useState(false);
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const callback = CALLBACK_PARAMS.map((name) => params.get(name)).find(
+			(value) => value !== null
+		);
+		setIsExam(callback?.startsWith("/certifications/") ?? false);
+	}, []);
+	return isExam;
+}
+
 /**
  * The real web sign-in form, presentational. The live login page passes
  * authClient-backed handlers and a Turnstile captcha node via props; the
@@ -140,7 +127,6 @@ export default function SignInForm({
 }: SignInFormProps) {
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
-	const [showPassword, setShowPassword] = useState(false);
 	const [rememberDevice, setRememberDevice] = useState(false);
 	// A field that has been edited since its error arrived is back in its
 	// default state — the error described the *previous* value, and leaving it
@@ -152,6 +138,7 @@ export default function SignInForm({
 	useEffect(() => setPasswordEdited(false), [passwordError]);
 	const visibleEmailError = emailEdited ? undefined : emailError;
 	const visiblePasswordError = passwordEdited ? undefined : passwordError;
+	const examSignIn = useExamCallback();
 	const submitting =
 		loading ||
 		sendingMagicLink ||
@@ -179,7 +166,9 @@ export default function SignInForm({
 							? "Enter your email to receive a sign in link"
 							: "Please sign in to continue"
 					}
-					title="Welcome back"
+					subtitleClassName="font-normal text-sm"
+					title={examSignIn ? "Sign in to take the exam" : "Sign in to Ryu"}
+					titleClassName="text-2xl tracking-tight"
 				/>
 
 				<form
@@ -203,7 +192,7 @@ export default function SignInForm({
 								aria-describedby={visibleEmailError ? "email-error" : undefined}
 								aria-invalid={Boolean(visibleEmailError)}
 								autoComplete="username webauthn"
-								className="h-16 border-0 bg-muted shadow-none"
+								className="h-16"
 								id="email"
 								inputMode="email"
 								name="email"
@@ -214,6 +203,7 @@ export default function SignInForm({
 								placeholder="Email Address"
 								type="email"
 								value={email}
+								variant="muted"
 							/>
 							{visibleEmailError ? (
 								<FieldError
@@ -224,70 +214,43 @@ export default function SignInForm({
 						</Field>
 
 						{useMagicLink ? null : (
-							<Field data-invalid={Boolean(visiblePasswordError)}>
-								<FieldLabel className="sr-only" htmlFor="password">
-									Password
-								</FieldLabel>
-								<div className="relative w-full">
-									<Input
-										aria-describedby={
-											visiblePasswordError ? "password-error" : undefined
-										}
-										aria-invalid={Boolean(visiblePasswordError)}
-										autoComplete="current-password"
-										className="h-16 border-0 bg-muted pr-14 shadow-none"
-										id="password"
-										name="password"
-										onChange={(e) => {
-											setPassword(e.target.value);
-											setPasswordEdited(true);
-										}}
-										placeholder="Password"
-										type={showPassword ? "text" : "password"}
-										value={password}
-									/>
-									<Button
-										aria-label={
-											showPassword ? "Hide password" : "Show password"
-										}
-										aria-pressed={showPassword}
-										className="absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground"
-										onClick={() => setShowPassword((v) => !v)}
-										size="icon-sm"
-										type="button"
-										variant="ghost"
-									>
-										<HugeiconsIcon
-											icon={showPassword ? ViewOffSlashIcon : ViewIcon}
-											strokeWidth={2}
-										/>
-									</Button>
-								</div>
-								{visiblePasswordError ? (
-									<FieldError
-										errors={[{ message: visiblePasswordError }]}
-										id="password-error"
-									/>
-								) : null}
-							</Field>
+							<PasswordField
+								autoComplete="current-password"
+								error={visiblePasswordError}
+								errorId="password-error"
+								id="password"
+								label="Password"
+								name="password"
+								onChange={(value) => {
+									setPassword(value);
+									setPasswordEdited(true);
+								}}
+								placeholder="Password"
+								value={password}
+							/>
 						)}
 					</FieldGroup>
 
 					{captcha}
 
-					{useMagicLink ? null : (
-						<div className="mb-6 flex items-center gap-2">
-							<Switch
-								checked={rememberDevice}
-								disabled={submitting}
-								id="remember-device"
-								onCheckedChange={setRememberDevice}
-							/>
-							<Label className="text-sm" htmlFor="remember-device">
+					<div className="mb-6 flex items-start gap-2">
+						<Switch
+							checked={rememberDevice}
+							disabled={submitting}
+							id="remember-device"
+							onCheckedChange={setRememberDevice}
+						/>
+						<div className="grid gap-1">
+							<Label htmlFor="remember-device" variant="choice">
 								Remember this device for 30 days
 							</Label>
+							{useMagicLink ? (
+								<p className="text-muted-foreground text-xs">
+									Open the email link in this browser to remember it.
+								</p>
+							) : null}
 						</div>
-					)}
+					</div>
 
 					<div className="relative">
 						<Button
@@ -295,18 +258,20 @@ export default function SignInForm({
 							disabled={submitting}
 							size="lg"
 							type="submit"
+							variant="mono"
 						>
 							{submitting
 								? useMagicLink
-									? "Sending..."
-									: "Signing in..."
+									? "Sending…"
+									: "Signing in…"
 								: useMagicLink
 									? "Send me a link"
 									: "Sign in"}
 						</Button>
 						{lastUsedMethod === "email" && !useMagicLink ? (
 							<Badge
-								className="absolute -top-2 -right-2 text-[10px]"
+								className="absolute -top-2 -right-2"
+								size="compact"
 								variant="secondary"
 							>
 								Last used
@@ -314,7 +279,8 @@ export default function SignInForm({
 						) : null}
 						{lastUsedMethod === "magic-link" && useMagicLink ? (
 							<Badge
-								className="absolute -top-2 -right-2 text-[10px]"
+								className="absolute -top-2 -right-2"
+								size="compact"
 								variant="secondary"
 							>
 								Last used
@@ -326,18 +292,20 @@ export default function SignInForm({
 				<div className="flex flex-col gap-4 text-center">
 					<div className="relative">
 						<Button
-							className="w-full gap-3"
+							className="w-full"
 							disabled={googleLoading}
 							onClick={onGoogle}
 							size="lg"
+							spacing="comfortable"
 							variant="secondary"
 						>
-							<Google className="h-5 w-5" />
-							{googleLoading ? "Signing in..." : "Continue with Google"}
+							<GoogleBrandMark className="h-5 w-5" />
+							{googleLoading ? "Signing in…" : "Continue with Google"}
 						</Button>
 						{lastUsedMethod === "google" ? (
 							<Badge
-								className="absolute -top-2 -right-2 text-[10px]"
+								className="absolute -top-2 -right-2"
+								size="compact"
 								variant="secondary"
 							>
 								Last used
@@ -345,31 +313,26 @@ export default function SignInForm({
 						) : null}
 					</div>
 
-					<Accordion
-						className="overflow-visible rounded-none border-0 bg-transparent shadow-none"
-						defaultValue={[]}
-					>
-						<AccordionItem
-							className="border-0 bg-transparent data-open:bg-transparent"
-							value="more-options"
-						>
-							<AccordionTrigger className="border-0 bg-transparent shadow-none hover:bg-transparent hover:shadow-none">
+					<Accordion appearance="plain" defaultValue={[]}>
+						<AccordionItem appearance="plain" value="more-options">
+							<AccordionTrigger appearance="plain">
 								More options
 							</AccordionTrigger>
-							<AccordionContent className="p-0" panelClassName="p-0">
+							<AccordionContent spacing="flush">
 								<div className="flex flex-col gap-4">
 									{onDeviceApproval ? (
 										<Button
-											className="w-full gap-3"
+											className="w-full"
 											disabled={submitting}
 											onClick={() => onDeviceApproval(email)}
 											size="lg"
+											spacing="comfortable"
 											type="button"
 											variant="secondary"
 										>
 											<Smartphone className="h-5 w-5" />
 											{deviceApprovalLoading
-												? "Waiting for another device..."
+												? "Waiting for another device…"
 												: "Approve on another device"}
 										</Button>
 									) : null}
@@ -377,20 +340,20 @@ export default function SignInForm({
 									{onPasskey ? (
 										<div className="relative">
 											<Button
-												className="w-full gap-3"
+												className="w-full"
 												disabled={submitting}
 												onClick={() => onPasskey(rememberDevice)}
 												size="lg"
+												spacing="comfortable"
 												variant="secondary"
 											>
 												<Fingerprint className="h-5 w-5" />
-												{passkeyLoading
-													? "Checking passkey..."
-													: "Use a passkey"}
+												{passkeyLoading ? "Checking passkey…" : "Use a passkey"}
 											</Button>
 											{lastUsedMethod === "passkey" ? (
 												<Badge
-													className="absolute -top-2 -right-2 text-[10px]"
+													className="absolute -top-2 -right-2"
+													size="compact"
 													variant="secondary"
 												>
 													Last used
@@ -401,14 +364,15 @@ export default function SignInForm({
 
 									{onSSO ? (
 										<Button
-											className="w-full gap-3"
+											className="w-full"
 											disabled={submitting}
 											onClick={() => onSSO(email)}
 											size="lg"
+											spacing="comfortable"
 											variant="secondary"
 										>
 											{ssoLoading
-												? "Redirecting to your identity provider..."
+												? "Redirecting to your identity provider…"
 												: "Continue with SSO"}
 										</Button>
 									) : null}
@@ -426,28 +390,21 @@ export default function SignInForm({
 						</AccordionItem>
 					</Accordion>
 
-					<Button
-						className="mx-auto text-muted-foreground"
-						onClick={onSwitchToSignUp}
-						variant="ghost"
-					>
-						Don&apos;t have an account? Create one
-					</Button>
-
-					{!useMagicLink && showForgotPassword ? (
-						<>
-							<FieldSeparator className="*:data-[slot=field-separator-content]:bg-background">
-								Or
-							</FieldSeparator>
+					{/* Two quiet links, no "Or" divider: they are unrelated actions. */}
+					<div className="flex flex-col items-center">
+						{!useMagicLink && showForgotPassword ? (
 							<Button
-								className="mx-auto text-muted-foreground"
 								onClick={onForgotPassword}
-								variant="ghost"
+								size="sm"
+								variant="ghost-muted"
 							>
 								Forgot your password?
 							</Button>
-						</>
-					) : null}
+						) : null}
+						<Button onClick={onSwitchToSignUp} size="sm" variant="ghost-muted">
+							Don&apos;t have an account? Create one
+						</Button>
+					</div>
 				</div>
 
 				<div className="text-center text-muted-foreground text-sm">

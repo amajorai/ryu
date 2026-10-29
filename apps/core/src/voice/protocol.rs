@@ -62,12 +62,27 @@ pub enum VoiceClientMsg {
         /// TTS voice id (engine-specific).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tts_voice: Option<String>,
+        /// Whether the person speaking is the owner or someone the owner
+        /// trusts. Only `Some(false)` changes anything: every turn of the
+        /// session then runs under Core's untrusted-caller tool profile. Absent
+        /// (the desktop and mobile voice UI) or `true` keeps the owner's normal
+        /// session, so a client can use this field only to restrict itself.
+        /// The Gateway sends `false` for each inbound phone caller that the
+        /// line does not list as trusted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caller_trusted: Option<bool>,
     },
     /// Typed text input (fallback path); runs a turn without STT.
     Text { content: String },
+    /// Internal post-call summarization turn. Uses the default Core agent with
+    /// audio synthesis disabled so a disconnected caller cannot receive another
+    /// response and agent-specific call tools are not re-entered.
+    Summary,
     /// Manual barge-in / stop button: abort the in-flight turn + TTS now. (VAD-based
     /// barge-in is automatic and server-side; this is the explicit user action.)
     Abort,
+    /// End the call and receive its persisted summary before disconnecting.
+    End,
     /// Liveness probe.
     Ping,
 }
@@ -102,6 +117,16 @@ pub enum VoiceServerMsg {
     ChatDelta { text: String },
     /// End of the streamed assistant turn.
     ChatEnd { conversation_id: String },
+    /// A user-side history entry, acknowledged only after persistence succeeds.
+    CallEnded {
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "messageId")]
+        message_id: String,
+        #[serde(rename = "durationSeconds")]
+        duration_seconds: u64,
+        content: String,
+    },
     /// Barge-in: the client must drop any queued/playing TTS audio immediately.
     StopPlayback,
     /// TTS audio is about to stream as BINARY WAV frames.
@@ -117,6 +142,27 @@ pub enum VoiceServerMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn call_end_wire_contract_matches_typescript() {
+        assert_eq!(
+            serde_json::from_str::<VoiceClientMsg>(r#"{"type":"end"}"#).unwrap(),
+            VoiceClientMsg::End
+        );
+        let frame = VoiceServerMsg::CallEnded {
+            conversation_id: "conversation-1".into(),
+            message_id: "message-1".into(),
+            duration_seconds: 84,
+            content: "Call ended · 01:24".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(frame).unwrap(),
+            serde_json::json!({
+                "type": "call_ended", "conversationId": "conversation-1", "messageId": "message-1",
+                "durationSeconds": 84, "content": "Call ended · 01:24"
+            })
+        );
+    }
 
     #[test]
     fn state_wire_strings() {
@@ -147,6 +193,37 @@ mod tests {
             }
             _ => panic!("expected start"),
         }
+    }
+
+    /// Existing clients omit `caller_trusted`; the Gateway's phone path sends an
+    /// explicit `false`. Both parse, and the field round-trips by its wire name.
+    #[test]
+    fn client_start_caller_trust_is_optional_and_explicit() {
+        let owner: VoiceClientMsg =
+            serde_json::from_str(r#"{"type":"start","sample_rate":16000}"#).unwrap();
+        assert!(matches!(
+            owner,
+            VoiceClientMsg::Start {
+                caller_trusted: None,
+                ..
+            }
+        ));
+        let caller: VoiceClientMsg =
+            serde_json::from_str(r#"{"type":"start","sample_rate":8000,"caller_trusted":false}"#)
+                .unwrap();
+        assert!(matches!(
+            caller,
+            VoiceClientMsg::Start {
+                caller_trusted: Some(false),
+                ..
+            }
+        ));
+        let wire = serde_json::to_value(&caller).unwrap();
+        assert_eq!(wire["caller_trusted"], false);
+        assert!(serde_json::to_value(&owner)
+            .unwrap()
+            .get("caller_trusted")
+            .is_none());
     }
 
     #[test]
@@ -180,5 +257,11 @@ mod tests {
     fn client_abort_parses() {
         let msg: VoiceClientMsg = serde_json::from_str(r#"{"type":"abort"}"#).unwrap();
         assert_eq!(msg, VoiceClientMsg::Abort);
+    }
+
+    #[test]
+    fn internal_call_summary_control_has_no_user_payload() {
+        let msg: VoiceClientMsg = serde_json::from_str(r#"{"type":"summary"}"#).unwrap();
+        assert_eq!(msg, VoiceClientMsg::Summary);
     }
 }

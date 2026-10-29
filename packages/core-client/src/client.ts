@@ -13,6 +13,9 @@
 // buyer-token / presence headers, the mobile secure-store token) are layered on
 // top by each app, not here.
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
+
 /** The subset of a node the api layer needs: base URL + scoped credentials. */
 export type RyuFetch = (
 	input: RequestInfo | URL,
@@ -68,6 +71,12 @@ export function setSurfaceProvider(fn: () => string | null): void {
 	surfaceProvider = fn;
 }
 
+/** String-valued node authentication and caller identity headers. */
+export interface CoreRequestHeaders {
+	"Content-Type": string;
+	[header: string]: string;
+}
+
 /**
  * Build request headers. A node bearer wins; an org-bound managed node may use
  * its short-lived user JWT as the admission bearer when no node bearer exists.
@@ -76,8 +85,8 @@ export function setSurfaceProvider(fn: () => string | null): void {
 export function makeHeaders(
 	token: string | null,
 	userJwt?: string | null
-): Record<string, string> {
-	const headers: Record<string, string> = {
+): CoreRequestHeaders {
+	const headers: CoreRequestHeaders = {
 		"Content-Type": "application/json",
 	};
 	const identityJwt = userJwt ?? userJwtProvider();
@@ -111,7 +120,7 @@ export interface RequestOptions {
 	/** Extra headers merged over the defaults (e.g. the marketplace buyer token). */
 	headers?: Record<string, string>;
 	method?: string;
-	signal?: AbortSignal;
+	signal?: AbortSignal | undefined;
 }
 
 /** Binding requested when exchanging HTTP authentication for a WS ticket. */
@@ -120,22 +129,47 @@ export interface WebSocketTicketRequest {
 	kind?: "conversation" | "document" | "application";
 	path?: string;
 	roomId?: string;
-	route: "realtime" | "voice" | "ext";
+	route: "realtime" | "voice" | "ext" | "session-box";
 }
+
+const webSocketTicketSchema = z.object({
+	ticket: z.string().refine((ticket) => ticket.trim().length > 0),
+});
+/** Core answers `{ error: "text" }`, the structured
+ * `{ error: { code, message } }` contract, or (passing a control-plane
+ * refusal through) `{ code, error: "text" }`. */
+const serverErrorSchema = z.object({
+	code: z.string().optional().catch(undefined),
+	error: z
+		.union([
+			z.string(),
+			z.object({
+				code: z.string().optional().catch(undefined),
+				message: z.string().optional().catch(undefined),
+			}),
+		])
+		.optional(),
+});
 
 /** Exchange normal HTTP credentials for a short-lived, one-use WS ticket. */
 export async function requestWebSocketTicket(
 	target: ApiTarget,
 	binding: WebSocketTicketRequest
 ): Promise<string> {
-	const response = await request<{ ticket?: unknown }>(target, "/api/ws/ticket", {
-		method: "POST",
-		body: binding,
-	});
-	if (typeof response.ticket !== "string" || response.ticket.trim() === "") {
+	const response = await request(
+		target,
+		"/api/ws/ticket",
+		{
+			method: "POST",
+			body: binding,
+		},
+		appResponseValueSchema
+	);
+	const parsed = webSocketTicketSchema.safeParse(response);
+	if (!parsed.success) {
 		throw new Error("Core returned an invalid WebSocket ticket");
 	}
-	return response.ticket;
+	return parsed.data.ticket;
 }
 
 /** Add an opaque ticket to a WS URL without ever adding bearer credentials. */
@@ -152,26 +186,55 @@ export function appendWebSocketTicket(url: string, ticket: string): string {
  * historical status-only shape while typed callers inspect the status/body. */
 export class ApiError extends Error {
 	readonly status: number;
-	readonly serverMessage?: string;
+	readonly serverMessage?: string | undefined;
+	/** The machine code of a structured `{ error: { code, message } }` reply. */
+	readonly code?: string | undefined;
 
-	constructor(path: string, status: number, serverMessage?: string) {
+	constructor(
+		path: string,
+		status: number,
+		serverMessage?: string,
+		code?: string
+	) {
 		super(`${path} failed: ${status}`);
 		this.name = "ApiError";
 		this.status = status;
 		this.serverMessage = serverMessage;
+		this.code = code;
 	}
 }
 
-function serverErrorFromBody(text: string): string | undefined {
+/** Read Core's error text (and code, when structured) from a failed reply. */
+function serverErrorFromBody(text: string): {
+	code?: string | undefined;
+	message?: string | undefined;
+} {
 	if (!text) {
-		return undefined;
+		return {};
 	}
 	try {
-		const parsed = JSON.parse(text) as { error?: unknown };
-		return typeof parsed.error === "string" ? parsed.error : undefined;
+		const parsed = serverErrorSchema.safeParse(JSON.parse(text));
+		if (!parsed.success) {
+			return {};
+		}
+		const { code, error } = parsed.data;
+		if (typeof error === "string" || error === undefined) {
+			return { code, message: error };
+		}
+		return { code: error.code ?? code, message: error.message };
 	} catch {
-		return undefined;
+		return {};
 	}
+}
+
+/** The {@link ApiError} for a non-2xx reply whose body text is `text`. */
+export function apiErrorFromBody(
+	path: string,
+	status: number,
+	text: string
+): ApiError {
+	const { code, message } = serverErrorFromBody(text);
+	return new ApiError(path, status, message, code);
 }
 
 /**
@@ -247,7 +310,7 @@ export function buyerTokenHeader(
 export async function request<T>(
 	target: ApiTarget,
 	path: string,
-	options: RequestOptions = {}
+	...[options = {}, responseCodec]: [RequestOptions | undefined, z.ZodType<T>]
 ): Promise<T> {
 	const fetchImpl = fetchForTarget(target);
 	const resp = await fetchImpl(apiUrl(target, path), {
@@ -256,13 +319,16 @@ export async function request<T>(
 			...makeHeaders(target.token, target.userJwt),
 			...options.headers,
 		},
-		body: options.body === undefined ? undefined : JSON.stringify(options.body),
-		signal: options.signal,
+		...(options.body === undefined
+			? {}
+			: { body: JSON.stringify(options.body) }),
+		...(options.signal === undefined ? {} : { signal: options.signal }),
 	});
 	const text = await resp.text();
 	if (!resp.ok) {
-		throw new ApiError(path, resp.status, serverErrorFromBody(text));
+		throw apiErrorFromBody(path, resp.status, text);
 	}
 	// Some endpoints (DELETE, no-content) return an empty body.
-	return (text ? JSON.parse(text) : undefined) as T;
+	const decoded = text ? JSON.parse(text) : undefined;
+	return responseCodec.parse(decoded);
 }

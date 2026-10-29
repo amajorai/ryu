@@ -9,10 +9,10 @@
 
 import { Clock01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { useCallback, useEffect, useState } from "react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTime } from "@/src/lib/timezone.ts";
 
 /** Metadata for one saved version (no diffable body — fetched lazily). */
@@ -64,7 +64,7 @@ export function buildVersionDiff(
 	}
 
 	const lcs = Array.from({ length: beforeLines.length + 1 }, () =>
-		new Array<number>(afterLines.length + 1).fill(0)
+		Array.from({ length: afterLines.length + 1 }, () => 0)
 	);
 	for (
 		let beforeIndex = beforeLines.length - 1;
@@ -148,18 +148,23 @@ export function groupVersionsByDate(
 }
 
 /** The data operations a concrete feature wires up for its versions. */
-export interface VersionSource {
+export interface VersionSource<
+	TRestoreResult = Awaited<ReturnType<typeof Promise.resolve>>,
+	TSnapshotResult = Awaited<ReturnType<typeof Promise.resolve>>,
+> {
 	/** Fetch the diffable text of one version (markdown / pretty JSON). */
 	getValue: (versionId: string) => Promise<string>;
 	/** List versions, newest first. */
 	list: () => Promise<VersionMeta[]>;
 	/** Restore a version as the current content. */
-	restore: (versionId: string) => Promise<unknown>;
+	restore: (versionId: string) => Promise<TRestoreResult>;
+	/** Stable opaque resource/authority identity; draft and callback edits retain it. */
+	scope?: object;
 	/** Snapshot the current content as a new version. */
-	snapshot: (label?: string) => Promise<unknown>;
+	snapshot: (label?: string) => Promise<TSnapshotResult>;
 }
 
-interface VersionHistoryProps {
+interface VersionHistoryProps<TRestoreResult, TSnapshotResult> {
 	/** Current diffable text, compared against a version in the diff view. */
 	currentValue: string;
 	/** When true, snapshot/restore are hidden (read-only). */
@@ -167,7 +172,7 @@ interface VersionHistoryProps {
 	/** Called after a successful restore so the parent can reload its content. */
 	onRestored?: () => void;
 	/** The feature-specific data operations. */
-	source: VersionSource;
+	source: VersionSource<TRestoreResult, TSnapshotResult>;
 }
 
 /** A per-line diff between a saved version and the current draft. */
@@ -194,7 +199,7 @@ function VersionDiff({
 					: ` ${row.text}`,
 	}));
 	return (
-		<pre className="max-h-48 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed">
+		<pre className="type-caption max-h-48 overflow-auto rounded bg-muted/40 p-2 font-mono leading-relaxed">
 			{rows.map((r) => (
 				<div className={r.tone} key={r.id}>
 					{r.text}
@@ -204,12 +209,25 @@ function VersionDiff({
 	);
 }
 
-export function VersionHistory({
+export function VersionHistory<TRestoreResult, TSnapshotResult>({
 	currentValue,
 	source,
 	disabled = false,
 	onRestored,
-}: VersionHistoryProps) {
+}: VersionHistoryProps<TRestoreResult, TSnapshotResult>) {
+	const semanticScope = source.scope ?? source;
+	const sourceScope = useMemo(() => ({}), [semanticScope]);
+	const latestSource = useRef(source);
+	latestSource.current = source;
+	const historyMounted = useRef(true);
+	useEffect(() => {
+		historyMounted.current = true;
+		return () => {
+			historyMounted.current = false;
+		};
+	}, []);
+	const activeSourceScope = useRef(sourceScope);
+	activeSourceScope.current = sourceScope;
 	const [open, setOpen] = useState(false);
 	const [versions, setVersions] = useState<VersionMeta[]>([]);
 	const [loading, setLoading] = useState(false);
@@ -219,17 +237,41 @@ export function VersionHistory({
 	const [diffId, setDiffId] = useState<string | null>(null);
 	const [diffValue, setDiffValue] = useState<string | null>(null);
 
+	useEffect(() => {
+		setBusy(false);
+		setLoading(false);
+		setError(null);
+		setVersions([]);
+		setDiffId(null);
+		setDiffValue(null);
+	}, [sourceScope]);
+
 	const reload = useCallback(async () => {
 		setLoading(true);
 		setError(null);
 		try {
-			setVersions(await source.list());
+			const next = await latestSource.current.list();
+			if (
+				!historyMounted.current ||
+				activeSourceScope.current !== sourceScope
+			) {
+				return;
+			}
+			setVersions(next);
 		} catch (e) {
+			if (
+				!historyMounted.current ||
+				activeSourceScope.current !== sourceScope
+			) {
+				return;
+			}
 			setError(e instanceof Error ? e.message : "Failed to load versions");
 		} finally {
-			setLoading(false);
+			if (historyMounted.current && activeSourceScope.current === sourceScope) {
+				setLoading(false);
+			}
 		}
-	}, [source]);
+	}, [sourceScope]);
 
 	// Load the list whenever the panel opens.
 	useEffect(() => {
@@ -243,13 +285,27 @@ export function VersionHistory({
 		setError(null);
 		try {
 			await source.snapshot();
+			if (
+				!historyMounted.current ||
+				activeSourceScope.current !== sourceScope
+			) {
+				return;
+			}
 			await reload();
 		} catch (e) {
+			if (
+				!historyMounted.current ||
+				activeSourceScope.current !== sourceScope
+			) {
+				return;
+			}
 			setError(e instanceof Error ? e.message : "Failed to save version");
 		} finally {
-			setBusy(false);
+			if (historyMounted.current && activeSourceScope.current === sourceScope) {
+				setBusy(false);
+			}
 		}
-	}, [source, reload]);
+	}, [source, reload, sourceScope]);
 
 	const handleToggleDiff = useCallback(
 		async (versionId: string) => {
@@ -261,12 +317,25 @@ export function VersionHistory({
 			setDiffId(versionId);
 			setDiffValue(null);
 			try {
-				setDiffValue(await source.getValue(versionId));
+				const next = await source.getValue(versionId);
+				if (
+					!historyMounted.current ||
+					activeSourceScope.current !== sourceScope
+				) {
+					return;
+				}
+				setDiffValue(next);
 			} catch (e) {
+				if (
+					!historyMounted.current ||
+					activeSourceScope.current !== sourceScope
+				) {
+					return;
+				}
 				setError(e instanceof Error ? e.message : "Failed to load version");
 			}
 		},
-		[diffId, source]
+		[diffId, source, sourceScope]
 	);
 
 	const handleRestore = useCallback(
@@ -275,17 +344,34 @@ export function VersionHistory({
 			setError(null);
 			try {
 				await source.restore(versionId);
+				if (
+					!historyMounted.current ||
+					activeSourceScope.current !== sourceScope
+				) {
+					return;
+				}
 				setOpen(false);
 				setDiffId(null);
 				setDiffValue(null);
 				onRestored?.();
 			} catch (e) {
+				if (
+					!historyMounted.current ||
+					activeSourceScope.current !== sourceScope
+				) {
+					return;
+				}
 				setError(e instanceof Error ? e.message : "Failed to restore version");
 			} finally {
-				setBusy(false);
+				if (
+					historyMounted.current &&
+					activeSourceScope.current === sourceScope
+				) {
+					setBusy(false);
+				}
 			}
 		},
-		[source, onRestored]
+		[source, onRestored, sourceScope]
 	);
 
 	return (
@@ -293,25 +379,25 @@ export function VersionHistory({
 			<div className="flex items-center gap-1">
 				{disabled ? null : (
 					<Button
-						className="text-xs"
 						loading={busy}
 						onClick={handleSnapshot}
 						size="sm"
+						typography="compact"
 						variant="ghost"
 					>
 						Save version
 					</Button>
 				)}
 				<Button
-					className="text-xs"
 					onClick={() => setOpen((p) => !p)}
 					size="sm"
+					typography="compact"
 					variant="ghost"
 				>
 					<HugeiconsIcon className="size-3" icon={Clock01Icon} />
 					History
 					{versions.length > 0 ? (
-						<Badge className="ml-1 text-[10px]" variant="secondary">
+						<Badge className="ml-1" size="compact" variant="secondary">
 							{versions.length}
 						</Badge>
 					) : null}
@@ -324,10 +410,7 @@ export function VersionHistory({
 						<p className="p-2 text-status-destructive text-xs">{error}</p>
 					) : null}
 					{loading ? (
-						<div className="flex items-center gap-2 p-2 text-muted-foreground text-xs">
-							<Spinner className="size-3" />
-							Loading versions…
-						</div>
+						<SkeletonRows inset="comfortable" label="Loading versions…" />
 					) : versions.length === 0 ? (
 						<p className="p-2 text-muted-foreground text-xs">
 							No versions yet. Save one to keep a history you can restore.
@@ -351,7 +434,7 @@ export function VersionHistory({
 											) : null}
 											<div className="flex flex-wrap items-center gap-2">
 												{v.label ? (
-													<Badge className="text-[10px]" variant="secondary">
+													<Badge size="compact" variant="secondary">
 														{v.label}
 													</Badge>
 												) : null}
@@ -362,19 +445,19 @@ export function VersionHistory({
 										</div>
 										<div className="flex shrink-0 items-center gap-1">
 											<Button
-												className="text-[11px]"
 												onClick={() => handleToggleDiff(v.id)}
 												size="sm"
+												typography="caption"
 												variant="ghost"
 											>
 												Diff
 											</Button>
 											{disabled ? null : (
 												<Button
-													className="text-[11px]"
 													disabled={busy}
 													onClick={() => handleRestore(v.id)}
 													size="sm"
+													typography="caption"
 													variant="ghost"
 												>
 													Restore
@@ -384,9 +467,8 @@ export function VersionHistory({
 									</div>
 									{diffId === v.id ? (
 										diffValue === null ? (
-											<div className="flex items-center gap-2 p-1 text-[11px] text-muted-foreground">
-												<Spinner className="size-3" />
-												Loading diff…
+											<div className="p-1">
+												<SkeletonRows label="Loading diff…" />
 											</div>
 										) : (
 											<VersionDiff

@@ -97,7 +97,7 @@ fn canonical_provider_tool_id(id: &str) -> String {
 ///
 /// A sibling of [`CODE_FILE_DIRS`] rather than a member of it, because the two
 /// carry different things and must not be interchangeable: a `code_file` is
-/// sandboxed JS Core splices into a Deno IIFE, whereas a file under here is
+/// sandboxed JS Core splices into a JS-sandbox IIFE, whereas a file under here is
 /// TypeScript loaded by the managed Pi process with full host privilege. Same
 /// flatness requirement for the same reason — `tools/mirror-public.sh` vendors
 /// these with a literal `plugins-store/*/*/pi-extensions/*.ts` glob, and a nested
@@ -170,6 +170,100 @@ pub const OUTPUT_STYLE_DIR: &str = "output-styles";
 /// downstream of that, into the system prompt of every turn. 64 KB is already an
 /// order of magnitude more prose than any sane style (the built-ins are 1–3 KB).
 pub const MAX_OUTPUT_STYLE_BYTES: usize = 64 * 1024;
+
+/// Maximum number of data-only backdrop variants one plugin may publish.
+pub const MAX_BACKGROUND_CONTRIBUTIONS: usize = 32;
+
+/// Backdrop parameters are small renderer overrides, not an asset transport.
+pub const MAX_BACKGROUND_PARAMS_BYTES: usize = 4 * 1024;
+
+/// Most settings one interface may show (the same cap as its params).
+pub const MAX_INTERFACE_SETTINGS: usize = 16;
+
+/// Maximum number of interfaces one plugin may publish.
+pub const MAX_INTERFACE_CONTRIBUTIONS: usize = 16;
+
+/// Interface params are a few renderer knobs, not an asset transport.
+pub const MAX_INTERFACE_PARAMS_BYTES: usize = 4 * 1024;
+
+/// Namespace of the interfaces that ship with Ryu (`ryu:<renderer>`). No plugin
+/// may contribute interfaces under it. Mirrors `BUILTIN_INTERFACE_NAMESPACE` in
+/// `@ryuhq/protocol/interfaces`.
+pub const BUILTIN_INTERFACE_NAMESPACE: &str = "ryu";
+
+/// Host-owned renderers a Marketplace interface may select. Bot (managed) and
+/// Console (admin) are product tiers, not presentation choices, so they are
+/// host-only. Mirrors `CONTRIBUTABLE_INTERFACE_RENDERERS` in
+/// `@ryuhq/protocol/interfaces`.
+pub const CONTRIBUTABLE_INTERFACE_RENDERERS: [&str; 67] = [
+    "os",
+    "channels",
+    "feed",
+    "world-2d",
+    "world-3d",
+    "board",
+    "inbox",
+    "graph",
+    "timeline",
+    "messenger",
+    "terminal",
+    "arena",
+    "desk",
+    "card-table",
+    "sheet",
+    "canvas",
+    "calendar",
+    "notebook",
+    "mission-control",
+    "ticker",
+    "focus",
+    "aquarium",
+    "planets",
+    "stream",
+    "forum",
+    "live",
+    "posts",
+    "community",
+    "wiki",
+    "dashboard",
+    "mindmap",
+    "gallery",
+    "newspaper",
+    "qa",
+    "cinema",
+    "noticeboard",
+    "mail",
+    "status",
+    "records",
+    "path",
+    "glance",
+    "hub",
+    "library",
+    "tickets",
+    "persona",
+    "panels",
+    "departures",
+    "tracking",
+    "flow",
+    "moments",
+    "kitchen",
+    "market",
+    "workers",
+    "arcade",
+    "farm",
+    "town",
+    "rides",
+    "journal",
+    "passport",
+    "lobby",
+    "seasonal",
+    "bank",
+    "quiz",
+    "jobs",
+    "knowledge",
+    "hologram",
+    "warehouse",
+];
 
 /// Validate an `output_styles[].file` path: exactly `output-styles/<name>.md`.
 ///
@@ -329,8 +423,17 @@ fn hydrate_one_output_style(
 /// - characters limited to ASCII `[a-zA-Z0-9.-_]`
 /// - no `..` sequence, no leading/trailing `.`, no leading `-`
 ///
+/// One flat id is reserved: [`KERNEL_EVENT_OWNER`] (`core`, any case). It is the
+/// owner half of every kernel event id (`core#<name>`), so an app with that id could
+/// otherwise declare and emit events that impersonate Core.
+///
 /// Returns `Ok(())` when the id is safe, else a descriptive `Err(String)`.
 pub fn validate_plugin_id(id: &str) -> Result<(), String> {
+    if id.eq_ignore_ascii_case(KERNEL_EVENT_OWNER) {
+        return Err(format!(
+            "app id '{id}' is reserved for Core-originated kernel events"
+        ));
+    }
     // Scoped form: `@scope/name`. Exactly one `/`, `@` only as the first byte.
     if let Some(rest) = id.strip_prefix('@') {
         if id.len() > MAX_PLUGIN_ID_LEN {
@@ -587,6 +690,11 @@ pub struct PluginManifest {
     #[serde(default)]
     pub permission_grants: Vec<String>,
 
+    /// Host grants available only after explicit per-app approval. They never
+    /// enter the default install/enable grant set and do not block ordinary enable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional_permission_grants: Vec<String>,
+
     /// **The user-facing permission vocabulary this app declares** — the set of
     /// levels ("read", "edit", …) an administrator can later grant to a person or a
     /// team *inside* this app. Absent/empty = the app declares no vocabulary, which
@@ -623,8 +731,8 @@ pub struct PluginManifest {
 
     /// **Unified, deny-by-default runtime permission set** — the single typed
     /// grammar (`{fs, child_process, run, network, tool}`) Core lowers to every sandbox
-    /// backend (wasmtime WASI preopens, Docker `--mount`/`--network` flags, Deno
-    /// `--allow-*` flags). Absent = **deny-all** (the default for every manifest
+    /// backend (wasmtime WASI preopens, Docker `--mount`/`--network` flags, the JS
+    /// sandbox's `childProcess.run` allow-list). Absent = **deny-all** (the default for every manifest
     /// predating this field), so an app that declares nothing keeps today's exact
     /// zero-permission sandbox posture.
     ///
@@ -647,7 +755,7 @@ pub struct PluginManifest {
     ///
     /// Declared at the manifest root because **both** current enforcement sites
     /// resolve their config from the owning manifest, not from a sub-entry: an
-    /// `inline_deno` tool's backend is resolved from the manifest by
+    /// `inline_js` tool's backend is resolved from the manifest by
     /// `McpRegistry::resolve_app_tool_backend`, and a managed sidecar is spawned
     /// from the manifest by `ManifestSidecar`. A per-[`crate::schema::ToolConfig`] /
     /// per-[`crate::schema::SidecarSpec`] override is a clean future extension (the
@@ -732,6 +840,21 @@ pub struct PluginManifest {
     /// `sidecar`/`route` exists (like `contributes`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provides: Vec<ProvidesEntry>,
+
+    /// **Events this plugin's sidecars receive** — the sidecar counterpart of a
+    /// `contributes.turn_hooks[].on` subscription, and the mirror image of
+    /// [`Self::provides`]: each entry binds an event id to one of this manifest's
+    /// declared `sidecars` + a declared POST route. When the event is raised, Core
+    /// POSTs `{ event, payload, emitted_at }` to that route through the ext-proxy hop
+    /// with the sidecar's own minted token — best-effort, off the emitter's path.
+    ///
+    /// The event must be either one of this plugin's OWN declared
+    /// `contributes.hook_events`, or an allowlisted kernel event (`core#<name>`,
+    /// [`KERNEL_EVENTS`]); a kernel event that carries user data also requires its
+    /// grant in [`Self::permission_grants`]. Subscribing never lets a plugin emit a
+    /// kernel event. Absent/empty for the common case.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subscribes: Vec<EventSubscription>,
 
     /// Optional declarative **external runtime** the plugin needs (e.g. a Python
     /// venv + pip deps + assets, like the TTS sidecar). The provisioner lives in
@@ -932,6 +1055,24 @@ pub struct PluginManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stability: Option<String>,
 
+    /// Mark this listing as deprecated: it still installs, enables and runs for
+    /// anyone who has it, but the Store badges it and the detail page explains why
+    /// and what to use instead.
+    ///
+    /// Three accepted shapes, npm-style, so the common case stays one token:
+    ///
+    /// - `true` — deprecated, no explanation;
+    /// - `"Use @ryu/foo instead."` — deprecated with a message;
+    /// - `{ "message": "…", "replacement": "@ryu/foo" }` — message plus the id of
+    ///   the listing that supersedes this one.
+    ///
+    /// `false`/absent means current. Like `stability` this is a *catalog* signal,
+    /// not a lifecycle gate, and it is safe to self-assert: it can only make a
+    /// listing look worse, never grant it anything. Read it through
+    /// [`PluginManifest::deprecation`], which normalises the three shapes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<Deprecation>,
+
     /// This plugin is REQUIRED FOR CORE: the UI must never offer to disable or
     /// uninstall it, and the lifecycle refuses both — with no `force` escape, which
     /// is what separates it from the softer
@@ -955,6 +1096,23 @@ pub struct PluginManifest {
     /// SPDX license identifier (Claude `license`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+
+    /// Whether other people may remix this listing: copy it into an editable
+    /// item of their own and publish that copy with a `remixedFrom` credit
+    /// (Ryu extension: `allowRemix`). Absent means allowed, so every listing is
+    /// remixable unless its author opts out with `false`.
+    ///
+    /// Like `license`, this is a catalog declaration rather than a runtime
+    /// grant. The marketplace enforces it when serving a remix and when a remix
+    /// is published; it never changes what an installed copy may do. Read it
+    /// through [`PluginManifest::remix_allowed`].
+    #[serde(
+        default,
+        rename = "allowRemix",
+        alias = "allow_remix",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub allow_remix: Option<bool>,
 
     /// Search keywords / tags (Claude `keywords`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1014,6 +1172,22 @@ pub struct PluginManifest {
 }
 
 impl PluginManifest {
+    /// The live declaration ceiling, shared by update and runtime host lanes.
+    pub fn declares_permission_grant(&self, grant: &str) -> bool {
+        self.permission_grants
+            .iter()
+            .chain(&self.optional_permission_grants)
+            .any(|declared| declared == grant)
+    }
+
+    pub fn approved_permission_grants(&self, approved: &[String]) -> Vec<String> {
+        approved
+            .iter()
+            .filter(|grant| self.declares_permission_grant(grant))
+            .cloned()
+            .collect()
+    }
+
     /// The `developer` display string for the detail contract, extracted from the
     /// Claude `author` field: a bare string is used directly, an object's `name`
     /// field is read, any other shape yields `None`.
@@ -1028,6 +1202,18 @@ impl PluginManifest {
                 .map(str::to_string),
             _ => None,
         }
+    }
+
+    /// The normalised deprecation notice, or `None` when the listing is current
+    /// (`deprecated` absent or `false`). See [`Deprecation::notice`].
+    pub fn deprecation(&self) -> Option<DeprecationNotice> {
+        self.deprecated.as_ref()?.notice()
+    }
+
+    /// Whether the author allows remixes. Absent means allowed; only an explicit
+    /// `"allowRemix": false` opts out.
+    pub fn remix_allowed(&self) -> bool {
+        self.allow_remix.unwrap_or(true)
     }
 
     /// Resolve the `capabilities` label list for the detail contract: declared
@@ -1393,6 +1579,7 @@ impl PluginManifest {
             schema::validate_runnable(entry).map_err(|e| format!("plugin '{}': {e}", self.id))?;
         }
         self.validate_capabilities()?;
+        self.validate_event_subscriptions(KERNEL_EVENTS)?;
         self.validate_surface_commands()?;
         self.validate_mcp_oauth()?;
         self.validate_code_sources()?;
@@ -1401,6 +1588,7 @@ impl PluginManifest {
         // contract: safe Core-relative paths and GET-only automatic sources.
         self.validate_declarative_http_policy(true)?;
         if let Some(contributes) = &self.contributes {
+            contributes.validate_companion_references(&self.runnables)?;
             contributes
                 .validate_settings_contributions()
                 .map_err(|e| format!("plugin '{}': {e}", self.id))?;
@@ -1413,10 +1601,21 @@ impl PluginManifest {
             contributes
                 .validate_output_styles()
                 .map_err(|e| format!("plugin '{}': {e}", self.id))?;
+            contributes
+                .validate_backgrounds(&self.id)
+                .map_err(|e| format!("plugin '{}': {e}", self.id))?;
+            contributes
+                .validate_avatar_contributions(&self.id)
+                .map_err(|e| format!("plugin '{}': {e}", self.id))?;
+            contributes
+                .validate_interfaces(&self.id)
+                .map_err(|e| format!("plugin '{}': {e}", self.id))?;
             if let Some(templates) = &contributes.chat_widget_templates {
                 validate_chat_widget_templates(templates)
                     .map_err(|e| format!("plugin '{}': {e}", self.id))?;
             }
+            validate_computer_use_planners(&contributes.computer_use_planners)
+                .map_err(|e| format!("plugin '{}': {e}", self.id))?;
         }
         if let Some(permissions) = &self.permissions {
             permissions
@@ -1626,6 +1825,30 @@ impl PluginManifest {
         })
     }
 
+    /// Validate every [`Self::subscribes`] entry (see
+    /// [`validate_event_subscription`]) and reject duplicates, resolving kernel
+    /// events against `kernel_events`.
+    ///
+    /// # Errors
+    /// Returns the first invalid or duplicate subscription.
+    pub fn validate_event_subscriptions(
+        &self,
+        kernel_events: &[KernelEventSpec],
+    ) -> Result<(), String> {
+        let mut seen: BTreeSet<(&str, &str, &str)> = BTreeSet::new();
+        for sub in &self.subscribes {
+            validate_event_subscription(self, sub, kernel_events)
+                .map_err(|e| format!("plugin '{}': {e}", self.id))?;
+            if !seen.insert((sub.event.as_str(), sub.sidecar.as_str(), sub.route.as_str())) {
+                return Err(format!(
+                    "plugin '{}': duplicate subscription '{}' -> '{}{}'",
+                    self.id, sub.event, sub.sidecar, sub.route
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Cross-validate the capability edges (`requires.capabilities` + `provides`):
     /// version floors/strings parse, every provided capability's referenced
     /// `sidecar`/`route` exists on this manifest, and each bound tool belongs to
@@ -1660,6 +1883,33 @@ impl PluginManifest {
                 return Err(format!(
                     "plugin '{}': provided capability '{}' has invalid version '{}'",
                     self.id, prov.capability, prov.version
+                ));
+            }
+            if matches!(prov.layer_kind, Some(ProvidesLayerKind::DecisionModel)) && !prov.selectable
+            {
+                return Err(format!(
+                    "plugin '{}': decision-model capability '{}' must be selectable",
+                    self.id, prov.capability
+                ));
+            }
+            let declares_tunnel_layer = matches!(prov.layer_kind, Some(ProvidesLayerKind::Tunnel));
+            if declares_tunnel_layer != (prov.capability == TUNNEL_CAPABILITY) {
+                return Err(format!(
+                    "plugin '{}': capability '{}' and layerKind \"tunnel\" go together: a \
+                     tunnel adapter provides '{TUNNEL_CAPABILITY}' with layerKind \"tunnel\"",
+                    self.id, prov.capability
+                ));
+            }
+            if declares_tunnel_layer
+                && (!prov.selectable
+                    || prov.sidecar.is_none()
+                    || prov.route.is_none()
+                    || !prov.tools.is_empty())
+            {
+                return Err(format!(
+                    "plugin '{}': a '{TUNNEL_CAPABILITY}' provider must be selectable and served \
+                     by a sidecar route (declare `sidecar` and `route`, no `tools`)",
+                    self.id
                 ));
             }
             for (verb, binding) in &prov.tools {
@@ -1708,6 +1958,295 @@ impl PluginManifest {
                     ));
                 }
                 (None, None) => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Contributes {
+    /// Validate avatar accessory and style declarations at the manifest boundary.
+    pub fn validate_avatar_contributions(&self, plugin_id: &str) -> Result<(), String> {
+        crate::avatar::validate_avatar_contributions(
+            plugin_id,
+            &self.avatar_accessories,
+            &self.avatar_styles,
+        )
+    }
+
+    /// Validate interface declarations at the manifest boundary. Interfaces are
+    /// data-only references to host-owned renderers; this bounds what can reach
+    /// the interface switcher and keeps host-only tiers out of plugin reach.
+    pub fn validate_interfaces(&self, plugin_id: &str) -> Result<(), String> {
+        if self.interfaces.len() > MAX_INTERFACE_CONTRIBUTIONS {
+            return Err(format!(
+                "interfaces has {} entries (max {MAX_INTERFACE_CONTRIBUTIONS})",
+                self.interfaces.len()
+            ));
+        }
+        // `ryu:` is the built-in interfaces' namespace. A plugin whose flat id is
+        // `ryu` would otherwise pass the prefix check below with `ryu:*` ids.
+        if !self.interfaces.is_empty() && plugin_id == BUILTIN_INTERFACE_NAMESPACE {
+            return Err(format!(
+                "plugin id '{BUILTIN_INTERFACE_NAMESPACE}' is reserved for built-in interfaces"
+            ));
+        }
+        let prefix = format!("{plugin_id}:");
+        // Text limits count UTF-8 bytes, the tighter of the two encodings, so
+        // anything accepted here also fits the client's UTF-16 length checks.
+        let text_ok = |value: &str, max: usize| {
+            !value.trim().is_empty() && value.len() <= max && !value.chars().any(char::is_control)
+        };
+        let key_ok = |key: &str| {
+            !key.is_empty()
+                && key.len() <= 64
+                && key.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+                && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && !matches!(key, "constructor" | "prototype")
+        };
+        let scalar_ok = |value: &serde_json::Value| match value {
+            serde_json::Value::Bool(_) => true,
+            serde_json::Value::Number(number) => number.as_f64().is_some_and(f64::is_finite),
+            serde_json::Value::String(value) => {
+                value.len() <= 128 && !value.chars().any(char::is_control)
+            }
+            _ => false,
+        };
+        let mut seen = BTreeSet::new();
+        for interface in &self.interfaces {
+            let local_id = interface.id.strip_prefix(&prefix).unwrap_or("");
+            if local_id.is_empty()
+                || local_id.len() > 96
+                || !local_id
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                || !local_id.chars().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-')
+                })
+                || !seen.insert(interface.id.as_str())
+            {
+                return Err(format!(
+                    "interface '{}' must have a unique id prefixed by '{prefix}' and a safe lowercase suffix",
+                    interface.id
+                ));
+            }
+            if !text_ok(&interface.label, 64) {
+                return Err(format!("interface '{}' has an invalid label", interface.id));
+            }
+            if interface
+                .description
+                .as_deref()
+                .is_some_and(|description| !text_ok(description, 160))
+            {
+                return Err(format!(
+                    "interface '{}' has an invalid description",
+                    interface.id
+                ));
+            }
+            if interface
+                .attribution
+                .as_deref()
+                .is_some_and(|attribution| !text_ok(attribution, 64))
+            {
+                return Err(format!(
+                    "interface '{}' has an invalid attribution",
+                    interface.id
+                ));
+            }
+            if !CONTRIBUTABLE_INTERFACE_RENDERERS.contains(&interface.renderer.as_str()) {
+                return Err(format!(
+                    "interface '{}' renderer '{}' is not one of {}",
+                    interface.id,
+                    interface.renderer,
+                    CONTRIBUTABLE_INTERFACE_RENDERERS.join(", ")
+                ));
+            }
+            let params_bytes = serde_json::to_vec(&interface.params)
+                .map_err(|e| format!("interface '{}' params are invalid: {e}", interface.id))?;
+            if interface.params.len() > 16 || params_bytes.len() > MAX_INTERFACE_PARAMS_BYTES {
+                return Err(format!(
+                    "interface '{}' has too many or oversized renderer params",
+                    interface.id
+                ));
+            }
+            for (key, value) in &interface.params {
+                if !(key_ok(key) && scalar_ok(value)) {
+                    return Err(format!(
+                        "interface '{}' param '{key}' must be a safe key with a boolean, finite number, or short string value",
+                        interface.id
+                    ));
+                }
+            }
+            if interface.settings.len() > MAX_INTERFACE_SETTINGS {
+                return Err(format!(
+                    "interface '{}' has {} settings (max {MAX_INTERFACE_SETTINGS})",
+                    interface.id,
+                    interface.settings.len()
+                ));
+            }
+            let mut keys = BTreeSet::new();
+            for setting in &interface.settings {
+                let valid = key_ok(&setting.key)
+                    && keys.insert(setting.key.as_str())
+                    && text_ok(&setting.label, 64)
+                    && setting
+                        .description
+                        .as_deref()
+                        .is_none_or(|description| text_ok(description, 160))
+                    && setting.default.as_ref().is_none_or(scalar_ok)
+                    && setting.options.len() <= MAX_INTERFACE_SETTINGS
+                    && setting.options.iter().all(|option| {
+                        text_ok(&option.label, 64)
+                            && !option.value.is_empty()
+                            && option.value.len() <= 128
+                            && !option.value.chars().any(char::is_control)
+                    });
+                if !valid {
+                    return Err(format!(
+                        "interface '{}' setting '{}' must name a param once, with a short label, description and choices",
+                        interface.id, setting.key
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate marketplace wallpaper declarations at the manifest boundary.
+    /// Backgrounds are data-only references to host-owned renderer presets; this
+    /// gate bounds the data and provenance that can reach every desktop shell.
+    pub fn validate_backgrounds(&self, plugin_id: &str) -> Result<(), String> {
+        if self.backgrounds.len() > MAX_BACKGROUND_CONTRIBUTIONS {
+            return Err(format!(
+                "backgrounds has {} entries (max {MAX_BACKGROUND_CONTRIBUTIONS})",
+                self.backgrounds.len()
+            ));
+        }
+
+        let prefix = format!("{plugin_id}:");
+        let mut seen = BTreeSet::new();
+        for background in &self.backgrounds {
+            let local_id = background.id.strip_prefix(&prefix).unwrap_or("");
+            if local_id.is_empty()
+                || local_id.len() > 96
+                || !local_id
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                || !local_id.chars().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-')
+                })
+                || !seen.insert(background.id.as_str())
+            {
+                return Err(format!(
+                    "background '{}' must have a unique id prefixed by '{prefix}' and a safe lowercase suffix",
+                    background.id
+                ));
+            }
+
+            if background.label.trim().is_empty()
+                || background.label.len() > 128
+                || background.label.chars().any(char::is_control)
+            {
+                return Err(format!(
+                    "background '{}' has an invalid label",
+                    background.id
+                ));
+            }
+            if background.description.as_ref().is_some_and(|description| {
+                description.len() > 512 || description.chars().any(char::is_control)
+            }) {
+                return Err(format!(
+                    "background '{}' has an invalid description",
+                    background.id
+                ));
+            }
+            if background.backdrop_id.is_empty()
+                || background.backdrop_id.len() > 128
+                || !background
+                    .backdrop_id
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                || !background.backdrop_id.chars().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-')
+                })
+            {
+                return Err(format!(
+                    "background '{}' has an invalid backdropId",
+                    background.id
+                ));
+            }
+            if background.attribution.trim().is_empty()
+                || background.attribution.len() > 128
+                || background.attribution.chars().any(char::is_control)
+            {
+                return Err(format!(
+                    "background '{}' has an invalid attribution",
+                    background.id
+                ));
+            }
+            let source_url = url::Url::parse(&background.attribution_url).ok();
+            if background.attribution_url.len() > 2048
+                || background.attribution_url.chars().any(char::is_control)
+                || source_url.as_ref().is_none_or(|url| {
+                    url.scheme() != "https"
+                        || url.host_str().is_none_or(str::is_empty)
+                        || !url.username().is_empty()
+                        || url.password().is_some()
+                })
+            {
+                return Err(format!(
+                    "background '{}' attributionUrl must be an HTTPS URL without credentials",
+                    background.id
+                ));
+            }
+            let params_bytes = serde_json::to_vec(&background.params)
+                .map_err(|e| format!("background '{}' params are invalid: {e}", background.id))?;
+            if background.params.len() > 64 || params_bytes.len() > MAX_BACKGROUND_PARAMS_BYTES {
+                return Err(format!(
+                    "background '{}' has too many or oversized renderer params",
+                    background.id
+                ));
+            }
+            for (key, value) in &background.params {
+                let valid_key = !key.is_empty()
+                    && key.len() <= 64
+                    && key.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+                    && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && !matches!(key.as_str(), "constructor" | "prototype");
+                if !valid_key {
+                    return Err(format!(
+                        "background '{}' has an invalid renderer param key",
+                        background.id
+                    ));
+                }
+                let valid_value = match value {
+                    serde_json::Value::Null => false,
+                    serde_json::Value::Bool(_) => true,
+                    serde_json::Value::Number(number) => {
+                        number.as_f64().is_some_and(|number| number.is_finite())
+                    }
+                    serde_json::Value::String(value) => {
+                        value.len() <= 128 && !value.chars().any(char::is_control)
+                    }
+                    serde_json::Value::Array(values) => {
+                        values.len() <= 16
+                            && values.iter().all(|value| {
+                                value.as_str().is_some_and(|value| {
+                                    value.len() <= 128 && !value.chars().any(char::is_control)
+                                })
+                            })
+                    }
+                    serde_json::Value::Object(_) => false,
+                };
+                if !valid_value {
+                    return Err(format!(
+                        "background '{}' has an unsupported renderer param value",
+                        background.id
+                    ));
+                }
             }
         }
         Ok(())
@@ -2021,6 +2560,12 @@ pub struct Contributes {
     #[serde(default)]
     pub chat_features: Vec<serde_json::Value>,
 
+    /// Local model adapters that implement Shadow's normalized computer-use
+    /// planner contract. Core stamps the owning plugin id when serving these rows,
+    /// so Shadow discovers providers without a provider list in its own code.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub computer_use_planners: Vec<ComputerUsePlannerContribution>,
+
     /// Declarative settings tabs the plugin contributes (model pickers, text
     /// fields bound to preference keys). Served + rendered the same way.
     ///
@@ -2142,6 +2687,38 @@ pub struct Contributes {
     #[serde(default)]
     pub themes: Vec<ThemeContribution>,
 
+    /// Data-only wallpaper variants for the shared desktop backdrop registry.
+    /// Each entry names a host-owned renderer preset and bounded parameter
+    /// overrides; plugins never send executable rendering code to the shell.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backgrounds: Vec<BackgroundContribution>,
+
+    /// Data-only **avatar accessories**: parts that dress one region of the Ryu
+    /// ghost (`target: "ghost"`) or of an avatar style. Drawn from the closed shape
+    /// vocabulary in [`crate::avatar`], never from markup, so like themes they need
+    /// zero grants. Self-contained, so they stay out of
+    /// [`Contributes::referenced_ids`]. Served on `GET /api/plugins/contributions`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub avatar_accessories: Vec<crate::avatar::AvatarAccessoryContribution>,
+
+    /// Data-only **avatar styles**: whole avatar looks (a peer of DiceBear styles)
+    /// with their own palettes and regions, which accessories may also dress.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub avatar_styles: Vec<crate::avatar::AvatarStyleContribution>,
+
+    /// **Interfaces**: alternative presentations of the same agents, threads and
+    /// messages (Slack-style channels, a social feed, a 2D or 3D world).
+    ///
+    /// Data-only, exactly like [`Contributes::backgrounds`]: each entry names a
+    /// host-owned renderer from [`CONTRIBUTABLE_INTERFACE_RENDERERS`] plus bounded
+    /// params. An interface never ships rendering code and never gets its own chat
+    /// path; the host renders it over the one chat engine, so a hostile interface
+    /// can at worst look wrong. Not a catalog kind, for the argument
+    /// [`Contributes::themes`] makes: it inherits install, signing, the Store and
+    /// the trust scorecard from the plugin. See [`InterfaceContribution`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interfaces: Vec<InterfaceContribution>,
+
     /// **Output styles** the plugin ships — Markdown files that change *how* an agent
     /// answers (role, tone, default response shape) by editing the system prompt for
     /// the turn. See `docs/output-styles.md`.
@@ -2213,6 +2790,16 @@ pub struct Contributes {
     /// `plugin` id at `GET /api/plugins/contributions`.
     #[serde(default)]
     pub dock_panels: Vec<DockPanelContribution>,
+
+    /// File extensions opened by an enabled plugin's sandboxed companion. The host
+    /// grants access to the selected file only; this declaration is not a filesystem grant.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        rename = "fileHandlers",
+        alias = "file_handlers"
+    )]
+    pub file_handlers: Vec<FileHandlerContribution>,
 
     /// **Live activities** the plugin contributes — small, always-live status cards
     /// the desktop shell's "Dynamic Island" dock (empty-shell launchpad + sidebar)
@@ -2302,6 +2889,16 @@ pub struct Contributes {
     /// from [`Contributes::referenced_ids`].
     #[serde(default)]
     pub agent_edit_panels: Vec<serde_json::Value>,
+
+    /// Tabs an app adds to the agent profile panel (the right-dock profile a
+    /// chat opens for its selected agent). Each tab embeds one of the plugin's
+    /// own sandboxed companions, mounted with
+    /// `{ "surface": "agent-profile", "agentId": … }` as `window.ryu.context`,
+    /// so the app scopes itself to that agent. This lets an app such as
+    /// `@ryu/calendar` own the profile's schedule tab: the tab appears and
+    /// disappears with the app instead of being hardcoded into the shell.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_profile_tabs: Vec<AgentProfileTabContribution>,
 
     /// **Deletable data categories** the app owns — one "Delete all X" row in
     /// Settings → Danger Zone (see [`DataCategoryContribution`]).
@@ -2400,7 +2997,7 @@ pub struct Contributes {
     ///
     /// # This is UNSANDBOXED code, and the tier gate is not optional
     ///
-    /// A [`Contributes::turn_hooks`] body runs in the deny-by-default Deno sandbox
+    /// A [`Contributes::turn_hooks`] body runs in the deny-by-default JS sandbox
     /// behind capability-gated `host.*` calls. A file named here runs **inside the Pi
     /// process** with full host privilege: the first-party ones spawn children and
     /// POST to Core. That is the same arbitrary-code-execution class as
@@ -2512,12 +3109,14 @@ pub struct ViewContribution {
     pub spec: Option<serde_json::Value>,
 }
 
-/// Which of the desktop shell's workspace docks a [`DockPanelContribution`] opens in.
+/// Which desktop workbench region a [`DockPanelContribution`] prefers when opened.
 ///
-/// Unlike the `panel` discriminant this is a CLOSED enum on purpose: the docks are
-/// shell geometry, not app vocabulary — there are exactly two of them (the bottom
-/// drawer and the right rail), and an app cannot conjure a third. Adding a dock is a
-/// shell change, so it is correct for it to also be a contract change here.
+/// Unlike the `panel` discriminant this is a CLOSED enum on purpose: the regions are
+/// shell geometry, not app vocabulary — there are exactly four of them (left rail,
+/// center canvas, bottom drawer and right rail), and an app cannot conjure a fifth.
+/// This is only the preferred opening region; it never restricts where the user can
+/// move the tab. Adding a region is a shell change, so it is correct for it to also
+/// be a contract change here.
 ///
 /// Closed does NOT mean "fails the load", though: see
 /// [`deserialize_dock_panel_placement`]. The set of valid values being fixed and the
@@ -2531,27 +3130,33 @@ pub enum DockPanelPlacement {
     Bottom,
     /// The right rail (Files / Changes sit here).
     Right,
-    /// Offered in BOTH docks — the user picks where to open it. This is what the
-    /// Browser and Simulator tabs do today.
+    /// The left rail.
+    Left,
+    /// The center canvas.
+    Center,
+    /// Offered in BOTH legacy docks — bottom and right. This deliberately retains
+    /// the pre-workbench fan-out rather than expanding to all four regions.
     Both,
 }
 
 impl DockPanelPlacement {
-    /// The concrete docks this placement offers the panel in. `Both` fans out to the
-    /// two real docks so a renderer never has to special-case the fan-out itself.
+    /// The concrete regions this placement offers the panel in. `Both` fans out to
+    /// the legacy bottom/right pair so a renderer never has to special-case it.
     pub fn docks(self) -> &'static [DockPanelPlacement] {
         match self {
             Self::Bottom => &[Self::Bottom],
             Self::Right => &[Self::Right],
+            Self::Left => &[Self::Left],
+            Self::Center => &[Self::Center],
             Self::Both => &[Self::Bottom, Self::Right],
         }
     }
 }
 
 /// Coerce a raw `placement` value to a known [`DockPanelPlacement`]: anything that is
-/// not `"right"` or `"both"` — including a null, a number, or a dock name from a
-/// future shell — resolves to [`DockPanelPlacement::Bottom`], the same value a missing
-/// key gets.
+/// not one of the four regions or legacy `"both"` — including a null, a number, or a
+/// region name from a future shell — resolves to [`DockPanelPlacement::Bottom`], the
+/// same value a missing key gets.
 ///
 /// Same reasoning as [`deserialize_settings_scope`], and it is what keeps the closed
 /// enum honest. `placement` is closed because the docks are shell geometry, but that
@@ -2575,13 +3180,15 @@ where
     let raw = serde_json::Value::deserialize(deserializer)?;
     Ok(match raw.as_str() {
         Some("right") => DockPanelPlacement::Right,
+        Some("left") => DockPanelPlacement::Left,
+        Some("center") => DockPanelPlacement::Center,
         Some("both") => DockPanelPlacement::Both,
         _ => DockPanelPlacement::Bottom,
     })
 }
 
-/// One app-registered **workspace dock panel** — a tab in the desktop's bottom or
-/// right dock (see [`Contributes::dock_panels`]).
+/// One app-registered **workspace workbench tab** and its preferred opening region
+/// (see [`Contributes::dock_panels`]).
 ///
 /// The dock sibling of [`ViewContribution`] / [`SidebarSectionContribution`]: a typed
 /// envelope (`id` / `title` / `icon` / `placement`) around an OPAQUE description of
@@ -2626,9 +3233,10 @@ pub struct DockPanelContribution {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
 
-    /// Which dock the panel opens in. Defaults to [`DockPanelPlacement::Bottom`], the
-    /// drawer a terminal-shaped panel belongs in — and falls back to it for an
-    /// unrecognised dock too, rather than failing the whole manifest
+    /// Which workbench region the tab prefers when it opens. Defaults to
+    /// [`DockPanelPlacement::Bottom`], the drawer a terminal-shaped panel belongs in,
+    /// and falls back to it for an unrecognised region too rather than failing the
+    /// whole manifest. This preference does not constrain later tab movement
     /// (see [`deserialize_dock_panel_placement`]).
     #[serde(default, deserialize_with = "deserialize_dock_panel_placement")]
     pub placement: DockPanelPlacement,
@@ -2646,6 +3254,171 @@ pub struct DockPanelContribution {
     /// it per `panel`. Absent = the mode needs no payload (the `"native"` case).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FileHandlerContribution {
+    pub id: String,
+    pub title: String,
+    /// Lowercase extensions without a leading dot, for example `stl` or `txt`.
+    pub extensions: Vec<String>,
+    /// A companion runnable belonging to the same plugin.
+    pub companion: String,
+    #[serde(default)]
+    pub editable: bool,
+}
+
+/// One tab in the agent profile panel (see [`Contributes::agent_profile_tabs`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentProfileTabContribution {
+    /// Stable id within the plugin; the shell namespaces it by plugin id.
+    pub id: String,
+    /// Accessible tab label (the profile renders icon-only triggers).
+    pub title: String,
+    /// Optional glyph id resolved by the shell's Icon primitive (Iconify/Hugeicons).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// A companion runnable belonging to the same plugin.
+    pub companion: String,
+    /// Optional ordering hint among contributed tabs (lower = earlier).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<i64>,
+}
+
+pub fn validate_agent_profile_tabs(tabs: &[AgentProfileTabContribution]) -> Result<(), String> {
+    let mut ids = BTreeSet::new();
+    for tab in tabs {
+        if tab.id.trim().is_empty() || !ids.insert(&tab.id) {
+            return Err("agent profile tab has an empty or duplicate id".to_owned());
+        }
+        if tab.title.trim().is_empty() || tab.companion.trim().is_empty() {
+            return Err(format!(
+                "agent profile tab '{}' needs a title and companion",
+                tab.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_file_handlers(handlers: &[FileHandlerContribution]) -> Result<(), String> {
+    let mut ids = BTreeSet::new();
+    for handler in handlers {
+        if handler.id.trim().is_empty() || !ids.insert(&handler.id) {
+            return Err("file handler has an empty or duplicate id".to_owned());
+        }
+        if handler.title.trim().is_empty() || handler.companion.trim().is_empty() {
+            return Err(format!(
+                "file handler '{}' needs a title and companion",
+                handler.id
+            ));
+        }
+        if handler.extensions.is_empty() || handler.extensions.len() > 64 {
+            return Err(format!(
+                "file handler '{}' needs 1 to 64 extensions",
+                handler.id
+            ));
+        }
+        let mut extensions = BTreeSet::new();
+        for extension in &handler.extensions {
+            if extension.is_empty()
+                || extension.len() > 32
+                || extension.starts_with('.')
+                || extension.contains("..")
+                || !extension.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'.' | b'_' | b'+' | b'-')
+                })
+                || !extensions.insert(extension)
+            {
+                return Err(format!(
+                    "file handler '{}' has an invalid or duplicate extension",
+                    handler.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod file_handler_tests {
+    use super::*;
+
+    #[test]
+    fn file_handler_extensions_are_bounded_safe_and_unique() {
+        let mut handler = FileHandlerContribution {
+            id: "editor".into(),
+            title: "Editor".into(),
+            companion: "editor".into(),
+            extensions: vec!["txt".into()],
+            editable: true,
+        };
+        assert!(validate_file_handlers(&[handler.clone()]).is_ok());
+        handler.extensions = vec!["../txt".into()];
+        assert!(validate_file_handlers(&[handler.clone()]).is_err());
+        handler.extensions = vec!["txt".into(), "txt".into()];
+        assert!(validate_file_handlers(&[handler]).is_err());
+    }
+
+    #[test]
+    fn file_and_settings_companions_must_belong_to_the_manifest() {
+        let contributes = Contributes {
+            file_handlers: vec![FileHandlerContribution {
+                id: "editor".into(),
+                title: "Editor".into(),
+                companion: "editor".into(),
+                extensions: vec!["txt".into()],
+                editable: true,
+            }],
+            settings_tabs: vec![serde_json::json!({"id":"settings","companion":"editor"})],
+            ..Default::default()
+        };
+        assert!(contributes.validate_companion_references(&[]).is_err());
+        let runnable: schema::RunnableEntry = serde_json::from_value(serde_json::json!({
+            "id":"editor", "name":"Editor", "kind":"companion"
+        }))
+        .unwrap();
+        assert!(contributes
+            .validate_companion_references(&[runnable])
+            .is_ok());
+    }
+
+    #[test]
+    fn agent_profile_tabs_validate_ids_and_own_companion() {
+        let tab = AgentProfileTabContribution {
+            id: "calendar".into(),
+            title: "Calendar".into(),
+            icon: Some("calendar-04".into()),
+            companion: "calendar-companion".into(),
+            order: None,
+        };
+        assert!(validate_agent_profile_tabs(&[tab.clone()]).is_ok());
+        assert!(validate_agent_profile_tabs(&[tab.clone(), tab.clone()]).is_err());
+        let contributes = Contributes {
+            agent_profile_tabs: vec![tab],
+            ..Default::default()
+        };
+        assert!(contributes.validate_companion_references(&[]).is_err());
+        let runnable: schema::RunnableEntry = serde_json::from_value(serde_json::json!({
+            "id":"calendar-companion", "name":"Calendar", "kind":"companion"
+        }))
+        .unwrap();
+        assert!(contributes
+            .validate_companion_references(&[runnable])
+            .is_ok());
+    }
+
+    #[test]
+    fn file_handlers_emit_camel_case_and_accept_the_authoring_alias() {
+        let contributes: Contributes = serde_json::from_value(serde_json::json!({
+            "file_handlers": [{"id":"editor","title":"Editor","extensions":["txt"],"companion":"editor"}]
+        })).unwrap();
+        let wire = serde_json::to_value(contributes).unwrap();
+        assert!(wire.get("fileHandlers").is_some());
+        assert!(wire.get("file_handlers").is_none());
+    }
 }
 
 /// One **language server** a plugin declares (see [`Contributes::lsp_servers`]).
@@ -3176,6 +3949,101 @@ pub struct ThemePreview {
     pub text: String,
 }
 
+/// A marketplace background is a data-only variant of a renderer shipped by
+/// `@ryu/ui`. `backdropId` is resolved through that host registry; the manifest
+/// cannot provide CSS, HTML, shader source, or executable rendering code.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundContribution {
+    /// Stable id in the form `<owning-plugin-id>:<local-id>`.
+    pub id: String,
+    /// Human-readable name shown in wallpaper settings.
+    pub label: String,
+    /// Optional description shown with the preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// A host-owned preset id from the `@ryu/ui` backdrop registry.
+    pub backdrop_id: String,
+    /// Bounded renderer overrides. Unknown keys and values are ignored by the host.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub params: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Name to show for the background's source or creator.
+    pub attribution: String,
+    /// HTTPS page for the visible attribution link. Core never fetches this URL.
+    pub attribution_url: String,
+}
+
+/// One interface a plugin contributes (`contributes.interfaces`).
+///
+/// The wire shape matches `InterfaceDescriptor` in `@ryuhq/protocol/interfaces`
+/// minus the host-added `origin` and `plugin` tags.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InterfaceContribution {
+    /// Stable id in the form `<owning-plugin-id>:<local-id>`; persisted as the
+    /// user's interface selection.
+    pub id: String,
+    /// Name shown in the interface switcher.
+    pub label: String,
+    /// One line shown under the label in the switcher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// A host-owned renderer id from [`CONTRIBUTABLE_INTERFACE_RENDERERS`].
+    pub renderer: String,
+    /// Bounded renderer knobs. Unknown keys and invalid values fall back to the
+    /// renderer's defaults on the host.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub params: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Optional creator credit shown with the interface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<String>,
+    /// The settings the interface shows (Settings → Appearance → Interfaces):
+    /// a relabelled subset of its renderer's, each naming one of its params.
+    /// The host checks each key, type and option against the renderer and
+    /// falls back to the renderer's own settings when any is invalid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<InterfaceSettingField>,
+}
+
+/// One setting a Marketplace interface shows. Mirrors the contribution form
+/// of `InterfaceSettingField` in `@ryuhq/protocol/interfaces` (the host adds
+/// its type from the renderer).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InterfaceSettingField {
+    /// The param this setting edits.
+    pub key: String,
+    /// Shown as the setting's name.
+    pub label: String,
+    /// One line under the label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The value when the user has chosen none (a boolean, finite number or short string).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "interface_setting_default_schema")]
+    pub default: Option<serde_json::Value>,
+    /// For a choice: which of the renderer's options to offer, relabelled.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<InterfaceSettingOption>,
+}
+
+/// Schema for [`InterfaceSettingField::default`]. The runtime type stays
+/// `serde_json::Value` so validation can enforce finiteness and the length cap,
+/// but the published schema (and the SDK types generated from it) advertise the
+/// scalars the validator actually accepts instead of an object.
+fn interface_setting_default_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": ["boolean", "number", "string", "null"] })
+}
+
+/// One choice of an [`InterfaceSettingField`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InterfaceSettingOption {
+    /// Shown for the choice.
+    pub label: String,
+    /// The param value it stands for.
+    pub value: String,
+}
+
 /// One app-widget contribution (Ryu Apps). Binds the tool that renders the widget
 /// to its HTML template. `ui_entry` is the source entry the SDK `ryu pack` builds
 /// into the self-contained HTML for third-party apps; built-in apps serve HTML
@@ -3222,6 +4090,21 @@ pub struct ChatWidgetTemplateContribution {
     /// for forward compatibility and are not offered by older shells.
     #[serde(default = "default_chat_widget_availability")]
     pub availability: String,
+}
+
+/// A plugin-owned local model adapter for Shadow's computer-use decision loop.
+/// The host supplies the plugin id and sends `model_id` to the plugin's fixed
+/// `/computer-use` extension route; model ids are data, never URLs or code.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ComputerUsePlannerContribution {
+    /// Stable id scoped to the owning plugin.
+    pub id: String,
+    /// Human-readable option shown in Shadow settings.
+    pub label: String,
+    /// Opaque identifier understood by the owning plugin's adapter.
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
@@ -3303,8 +4186,65 @@ pub fn validate_chat_widget_templates(
                 && template.backing.tool_id.is_none()
                 && template.backing.view_id.is_none();
             if !unavailable_without_binding {
-                return Err(format!("chat widget template '{}' must declare exactly one valid backing tool_id or view_id", template.id));
+                return Err(format!(
+                    "chat widget template '{}' must declare exactly one valid backing tool_id or view_id",
+                    template.id
+                ));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Validate the small, user-visible catalog of local computer-use planners.
+/// Adapter-specific model identifiers stay open; the plugin that owns the
+/// adapter validates them again at its inference boundary.
+pub fn validate_computer_use_planners(
+    planners: &[ComputerUsePlannerContribution],
+) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    for planner in planners {
+        let safe_id = !planner.id.is_empty()
+            && planner.id.len() <= 128
+            && planner
+                .id
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && planner.id.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-' | ':')
+            });
+        if !safe_id || !seen.insert(&planner.id) {
+            return Err(format!(
+                "computer-use planner '{}' has an invalid or duplicate id",
+                planner.id
+            ));
+        }
+        if planner.label.trim().is_empty()
+            || planner.label.len() > 128
+            || planner.label.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "computer-use planner '{}' has an invalid label",
+                planner.id
+            ));
+        }
+        if planner.model_id.trim().is_empty()
+            || planner.model_id.len() > 256
+            || planner.model_id.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "computer-use planner '{}' has an invalid model id",
+                planner.id
+            ));
+        }
+        if planner.description.as_ref().is_some_and(|description| {
+            description.len() > 512 || description.chars().any(char::is_control)
+        }) {
+            return Err(format!(
+                "computer-use planner '{}' has an invalid description",
+                planner.id
+            ));
         }
     }
     Ok(())
@@ -3380,7 +4320,7 @@ pub struct TurnHookContribution {
     /// Optional cheap pre-gate. When present, Core's `plugin_host` evaluates it
     /// in Rust **before** spawning the sandbox, so an idle hook (e.g. double-check
     /// with its toggle off, or goal with no active condition) costs a flag/prefix
-    /// check or one KV read instead of a Deno process. This is what makes it safe
+    /// check or one KV read instead of a sandbox run. This is what makes it safe
     /// to ship these hooks **enabled by default** on every surface. Absent (or all
     /// fields empty) → the hook always runs, preserving prior behaviour.
     #[serde(default, rename = "match")]
@@ -3413,6 +4353,43 @@ pub struct HookMatch {
     /// spawning the sandbox on every unrelated tool call.
     #[serde(default)]
     pub tools: Vec<String>,
+    /// Run on a completed-reply cadence read from preferences, for post-turn hooks
+    /// that act only every N replies (auto titling, periodic summaries) and would
+    /// otherwise spawn a sandbox on every turn just to return nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_cadence: Option<ReplyCadence>,
+}
+
+/// [`HookMatch::reply_cadence`]: when a post-turn hook's automatic run is due,
+/// counted in completed assistant replies in the transcript. Preference values
+/// are read the way a hook body reads them with `host.getPreference`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ReplyCadence {
+    /// Run on every N-th reply, N read from this preference. A missing,
+    /// non-numeric or below-1 value falls back to [`Self::every_default`];
+    /// values above 100 are treated as 100.
+    #[serde(default)]
+    pub every_pref: Option<String>,
+    /// N when [`Self::every_pref`] is absent or unusable.
+    #[serde(default = "default_reply_cadence_every")]
+    pub every_default: u32,
+    /// Also run on the very first reply.
+    #[serde(default = "default_true")]
+    pub first_reply: bool,
+    /// Preference that, when exactly `"false"`, turns the first-reply run off.
+    #[serde(default)]
+    pub first_pref: Option<String>,
+    /// Preference that, when exactly `"false"`, turns automatic runs off.
+    #[serde(default)]
+    pub enabled_pref: Option<String>,
+}
+
+fn default_reply_cadence_every() -> u32 {
+    5
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// One **app event** a plugin declares it emits (a [`Contributes::hook_events`]
@@ -3489,6 +4466,86 @@ pub fn is_app_event(on: &str) -> bool {
     split_hook_event_id(on).is_some()
 }
 
+/// The reserved owner half of a **kernel event** id: `core#<name>`.
+///
+/// Kernel events are the Core-originated counterpart of app events. They reuse the
+/// app-event grammar ([`split_hook_event_id`]) so every parser, picker and consumer
+/// that already understands `<owner>#<name>` understands them too, and the owner is a
+/// flat id [`validate_plugin_id`] refuses, so no installed app can ever own (declare,
+/// and therefore emit) one.
+pub const KERNEL_EVENT_OWNER: &str = "core";
+
+/// One reviewed **kernel event**: an event Core itself raises and an app may
+/// subscribe to (see [`PluginManifest::subscribes`]) but never emit.
+///
+/// The set is closed and lives in [`KERNEL_EVENTS`]. Adding a row is a reviewed
+/// change because the payload crosses the plugin boundary: an event that carries
+/// user data must name the existing reviewed grant a subscriber has to hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KernelEventSpec {
+    /// The event name (the half after `core#`), `[a-z0-9][a-z0-9._-]*`.
+    pub name: &'static str,
+    /// Human-readable title for pickers and docs.
+    pub title: &'static str,
+    /// When the event fires and what its payload carries.
+    pub description: &'static str,
+    /// The grant a subscriber must hold (declared in `permission_grants` and
+    /// approved by the Gateway) to receive the event. `None` only for an event whose
+    /// payload carries no user data.
+    pub grant: Option<&'static str>,
+}
+
+/// The reviewed kernel-event allowlist.
+///
+/// - `core#run.failed` (the Healing extraction, plan step 4) carries the failed
+///   run's instruction and failure text, which is user data, so a subscriber must
+///   hold the reviewed `runs:failures` grant (Gateway allowlist; the `runs`
+///   namespace is reserved there, so no app can owner-scope its way into it).
+///
+/// Reviewed and held back: `core#activity.recorded` is not needed, because the
+/// Meetings and Quests activity loops flow app → Core, not Core → app.
+///
+/// Adding an event is one reviewed row here plus, when its payload carries user
+/// data, a reviewed Gateway grant.
+pub const KERNEL_EVENTS: &[KernelEventSpec] = &[KernelEventSpec {
+    name: "run.failed",
+    title: "Run failed",
+    description: "An agent run (chat or scheduled agent job) or a workflow run failed. \
+                  Payload: `source_id` (conversation id, `job:<id>`, or workflow run id), \
+                  `kind` (`agent` | `workflow`), `agent_id` (agent runs; may be null), and \
+                  the run's `instruction` and `failure` text, each truncated to the shared \
+                  healing context limit. Best-effort: a missed delivery only means the run \
+                  is not acted on.",
+    grant: Some(RUNS_FAILURES_GRANT),
+}];
+
+/// The reviewed grant a subscriber must hold to receive `core#run.failed`.
+pub const RUNS_FAILURES_GRANT: &str = "runs:failures";
+
+/// Whether `id` is shaped like a kernel event (`core#<name>`), whether or not that
+/// name is on the allowlist.
+#[must_use]
+pub fn is_kernel_event_id(id: &str) -> bool {
+    split_hook_event_id(id).is_some_and(|(owner, _)| owner == KERNEL_EVENT_OWNER)
+}
+
+/// The allowlisted kernel event `id` names, looked up in `table` (normally
+/// [`KERNEL_EVENTS`]). `None` when `id` is not a kernel event or is not allowlisted.
+#[must_use]
+pub fn kernel_event_in<'a>(table: &'a [KernelEventSpec], id: &str) -> Option<&'a KernelEventSpec> {
+    let (owner, name) = split_hook_event_id(id)?;
+    if owner != KERNEL_EVENT_OWNER {
+        return None;
+    }
+    table.iter().find(|spec| spec.name == name)
+}
+
+/// [`kernel_event_in`] over the reviewed [`KERNEL_EVENTS`] table.
+#[must_use]
+pub fn kernel_event(id: &str) -> Option<&'static KernelEventSpec> {
+    kernel_event_in(KERNEL_EVENTS, id)
+}
+
 /// Validate one [`HookEventContribution`] against the manifest that declares it.
 /// Returns a diagnostic string on rejection.
 ///
@@ -3506,6 +4563,12 @@ pub fn validate_hook_event(event: &HookEventContribution, plugin_id: &str) -> Re
             event.id
         ));
     };
+    if owner == KERNEL_EVENT_OWNER {
+        return Err(format!(
+            "hook_events[{}]: `{KERNEL_EVENT_OWNER}#…` is the reserved kernel-event namespace — only Core emits these; subscribe to one with `subscribes`",
+            event.id
+        ));
+    }
     if owner != plugin_id {
         return Err(format!(
             "hook_events[{}]: namespaced to `{owner}` but declared by `{plugin_id}` — a plugin may only declare events in its own namespace",
@@ -3808,8 +4871,13 @@ pub struct SettingsTabContribution {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
 
+    /// An owned companion UI rendered in the settings dialog. The host supplies
+    /// `surface: "settings"` and `settingsTabId` as mount context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub companion: Option<String>,
+
     /// The declarative fields this tab renders. Empty is only legal alongside a
-    /// `view`.
+    /// `view` or `companion`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<SettingsFieldContribution>,
 }
@@ -4015,9 +5083,10 @@ pub fn validate_settings_tab(tab: &SettingsTabContribution) -> Result<(), String
     }
 
     let has_view = tab.view.as_ref().is_some_and(|v| !v.trim().is_empty());
-    if tab.fields.is_empty() && !has_view {
+    let has_companion = tab.companion.as_ref().is_some_and(|v| !v.trim().is_empty());
+    if tab.fields.is_empty() && !has_view && !has_companion {
         return Err(format!(
-            "settings tab '{}' declares neither 'fields' nor a 'view' and would render as an empty section",
+            "settings tab '{}' declares no fields, view, or companion and would render as an empty section",
             tab.id
         ));
     }
@@ -4520,7 +5589,9 @@ fn validate_settings_field_default(
         return Ok(());
     };
     let mismatch = |expected: &str| {
-        format!("settings tab '{tab_id}' field '{key}' is type '{expected}' but its default is {default}")
+        format!(
+            "settings tab '{tab_id}' field '{key}' is type '{expected}' but its default is {default}"
+        )
     };
 
     match field.field_type {
@@ -4622,7 +5693,46 @@ impl Contributes {
     /// this function skips the whole manifest, but an invalid language server must
     /// cost only itself — see [`LspServerContribution::validate`], which the spawn
     /// site calls per server instead.
+    pub fn validate_companion_references(
+        &self,
+        runnables: &[schema::RunnableEntry],
+    ) -> Result<(), String> {
+        let owned_companion = |id: &str| {
+            runnables.iter().any(|entry| {
+                entry.id == id && entry.kind == crate::runnable::RunnableKind::Companion
+            })
+        };
+        for handler in &self.file_handlers {
+            if !owned_companion(&handler.companion) {
+                return Err(format!(
+                    "file handler '{}' must name this plugin's companion runnable",
+                    handler.id
+                ));
+            }
+        }
+        for tab in &self.agent_profile_tabs {
+            if !owned_companion(&tab.companion) {
+                return Err(format!(
+                    "agent profile tab '{}' must name this plugin's companion runnable",
+                    tab.id
+                ));
+            }
+        }
+        for raw in &self.settings_tabs {
+            if let Some(companion) = raw.get("companion").and_then(serde_json::Value::as_str) {
+                if !owned_companion(companion) {
+                    return Err(
+                        "settings companion must name this plugin's companion runnable".to_owned(),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate_settings_contributions(&self) -> Result<(), String> {
+        validate_file_handlers(&self.file_handlers)?;
+        validate_agent_profile_tabs(&self.agent_profile_tabs)?;
         let mut seen_tab_ids: BTreeSet<&str> = BTreeSet::new();
         let mut tabs: Vec<SettingsTabContribution> = Vec::with_capacity(self.settings_tabs.len());
         for (index, raw) in self.settings_tabs.iter().enumerate() {
@@ -4862,6 +5972,72 @@ pub struct ContributionId {
     pub title: Option<String>,
 }
 
+/// Upper bound on a deprecation message, in characters. The notice renders as one
+/// short paragraph on the detail page; anything longer belongs in the README.
+pub const MAX_DEPRECATION_MESSAGE_CHARS: usize = 280;
+
+/// The manifest's `deprecated` declaration, in any of its three authoring shapes.
+/// See [`PluginManifest::deprecated`].
+///
+/// Untagged so the author writes the natural JSON (`true`, a string, or an
+/// object) rather than a tagged envelope. Read through [`Deprecation::notice`],
+/// never by matching the variants, so every consumer agrees on what "deprecated"
+/// means.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Deprecation {
+    /// `true` = deprecated without explanation; `false` = current.
+    Flag(bool),
+    /// Deprecated, with this message.
+    Message(String),
+    /// Deprecated, with an optional message and replacement listing id.
+    Detail(DeprecationNotice),
+}
+
+/// A normalised deprecation notice — the shape Core projects onto catalog cards
+/// and detail payloads under the single-word key `deprecated` (so it reads the
+/// same on the snake_case card and the camelCase detail).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct DeprecationNotice {
+    /// Why the listing is deprecated, shown on its detail page. Trimmed and
+    /// capped at [`MAX_DEPRECATION_MESSAGE_CHARS`] when projected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// Id of the listing that supersedes this one (e.g. `"@ryu/foo"`). Display
+    /// only: nothing is installed or migrated automatically. Dropped when longer
+    /// than [`MAX_PLUGIN_ID_LEN`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement: Option<String>,
+}
+
+impl Deprecation {
+    /// Normalise to a notice, or `None` when the declaration means "current"
+    /// (`false`). Blank strings collapse to absent, and the message is capped so a
+    /// listing cannot turn its notice into a wall of text.
+    pub fn notice(&self) -> Option<DeprecationNotice> {
+        let (message, replacement) = match self {
+            Self::Flag(false) => return None,
+            Self::Flag(true) => (None, None),
+            Self::Message(message) => (Some(message.as_str()), None),
+            Self::Detail(detail) => (detail.message.as_deref(), detail.replacement.as_deref()),
+        };
+        let clean = |s: &str| {
+            let trimmed = s.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_owned())
+        };
+        Some(DeprecationNotice {
+            message: message
+                .and_then(clean)
+                .map(|m| m.chars().take(MAX_DEPRECATION_MESSAGE_CHARS).collect()),
+            // An id is never truncated: a clipped id names a different listing.
+            // One longer than any valid id is dropped instead.
+            replacement: replacement
+                .and_then(clean)
+                .filter(|id| id.len() <= MAX_PLUGIN_ID_LEN),
+        })
+    }
+}
+
 /// `engines` block — the **host** version floors, mirroring VS-Code's
 /// `engines.vscode`. Every value is a semver **requirement** string.
 ///
@@ -4932,6 +6108,19 @@ pub struct EnginesReq {
     /// Floor for the **web** surface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web: Option<String>,
+
+    /// Semver requirement on the **plugin host API** the running Core serves
+    /// ([`crate::host_api::HOST_API_VERSION`], e.g. `">=1.17.0"` or `"^1.17"`).
+    ///
+    /// Unlike the per-surface floors above this is a contract version, not a
+    /// product version: it moves only when host methods/grants/hook fields are
+    /// added (minor) or broken (major), so it is the precise floor for a plugin
+    /// that calls a host method introduced in a given host API minor. Core always
+    /// knows its own host API version, so an unsatisfied requirement is BLOCKING
+    /// (see [`UnmetRequirement::HostApiTooOld`]) and an unparseable one is
+    /// rejected like any other invalid floor. Absent = any host API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_api: Option<String>,
 }
 
 impl EnginesReq {
@@ -5011,6 +6200,18 @@ pub enum UnmetRequirement {
         required: String,
         reason: String,
     },
+
+    /// `engines.host_api` is not satisfied by the plugin host API this Core
+    /// serves. **Blocking.** Reported against [`Surface::Core`] (the host API is
+    /// served by Core) but kept distinct from [`TooOld`](UnmetRequirement::TooOld)
+    /// because `required`/`present` are host-API versions, not Core versions.
+    HostApiTooOld {
+        surface: Surface,
+        /// The `engines.host_api` requirement as written.
+        required: String,
+        /// The host API version this Core serves.
+        present: String,
+    },
 }
 
 impl UnmetRequirement {
@@ -5019,7 +6220,8 @@ impl UnmetRequirement {
         match self {
             UnmetRequirement::TooOld { surface, .. }
             | UnmetRequirement::Unknown { surface, .. }
-            | UnmetRequirement::InvalidRequirement { surface, .. } => *surface,
+            | UnmetRequirement::InvalidRequirement { surface, .. }
+            | UnmetRequirement::HostApiTooOld { surface, .. } => *surface,
         }
     }
 
@@ -5028,7 +6230,9 @@ impl UnmetRequirement {
     pub const fn is_blocking(&self) -> bool {
         matches!(
             self,
-            UnmetRequirement::TooOld { .. } | UnmetRequirement::InvalidRequirement { .. }
+            UnmetRequirement::TooOld { .. }
+                | UnmetRequirement::InvalidRequirement { .. }
+                | UnmetRequirement::HostApiTooOld { .. }
         )
     }
 }
@@ -5140,11 +6344,45 @@ impl HostVersions {
             }
         }
 
+        if let Some(required) = engines.host_api.as_deref() {
+            if let Some(entry) = host_api_unmet(required, crate::host_api::HOST_API_VERSION) {
+                unmet.push(entry);
+            }
+        }
+
         CompatibilityVerdict {
             compatible: !unmet.iter().any(UnmetRequirement::is_blocking),
             unmet,
         }
     }
+}
+
+/// Check an `engines.host_api` requirement against the host API version `present`.
+/// `None` when satisfied. An unparseable requirement is an
+/// [`UnmetRequirement::InvalidRequirement`] whose `reason` names `engines.host_api`.
+/// Compared on the release triple, like the surface floors.
+pub fn host_api_unmet(required: &str, present: &str) -> Option<UnmetRequirement> {
+    let req = match semver::VersionReq::parse(required) {
+        Ok(req) => req,
+        Err(e) => {
+            return Some(UnmetRequirement::InvalidRequirement {
+                surface: Surface::Core,
+                required: required.to_owned(),
+                reason: format!("engines.host_api: {e}"),
+            });
+        }
+    };
+    let Ok(version) = semver::Version::parse(present) else {
+        // The host's own constant; a malformed one is a build bug, not the
+        // plugin's fault — never block on it.
+        return None;
+    };
+    let release_only = semver::Version::new(version.major, version.minor, version.patch);
+    (!req.matches(&release_only)).then(|| UnmetRequirement::HostApiTooOld {
+        surface: Surface::Core,
+        required: required.to_owned(),
+        present: present.to_owned(),
+    })
 }
 
 /// `requires` block — the plugin's **plugin-to-plugin** dependencies.
@@ -5205,6 +6443,112 @@ pub struct CapabilityReq {
     pub min_version: Option<String>,
 }
 
+/// One **sidecar event subscription** (in [`PluginManifest::subscribes`]).
+///
+/// Shaped like [`ProvidesEntry`]'s serving half on purpose: a local `sidecar` name
+/// plus a `route` declared on that sidecar's [`crate::schema::HttpProxySpec`]. The
+/// loader cross-validates both, the event's ownership, and the route's method.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct EventSubscription {
+    /// The fully-qualified event id: one of this plugin's own
+    /// `contributes.hook_events` ids (`<plugin id>#<name>`), or an allowlisted
+    /// kernel event (`core#<name>`).
+    pub event: String,
+
+    /// The local `name` of one of this manifest's declared `sidecars` that receives
+    /// the event.
+    pub sidecar: String,
+
+    /// The proxied sub-path on that sidecar Core POSTs each delivery to (e.g.
+    /// `"/events/meeting-ended"`). Must be a declared route with method `POST` (or no
+    /// method), and a fixed path (no `:param` / `*rest`).
+    pub route: String,
+}
+
+/// Validate one [`EventSubscription`] against the manifest that declares it,
+/// resolving kernel events against `kernel_events` (normally [`KERNEL_EVENTS`]).
+///
+/// # Errors
+/// Returns `Err` when the event is neither the plugin's own declared event nor an
+/// allowlisted kernel event, when a kernel event's grant is not declared, or when
+/// the sidecar/route is undeclared, not POST, or a pattern.
+pub fn validate_event_subscription(
+    manifest: &PluginManifest,
+    subscription: &EventSubscription,
+    kernel_events: &[KernelEventSpec],
+) -> Result<(), String> {
+    let label = format!(
+        "subscribes[{} -> {}{}]",
+        subscription.event, subscription.sidecar, subscription.route
+    );
+    let Some((owner, _)) = split_hook_event_id(&subscription.event) else {
+        return Err(format!(
+            "{label}: event must be `<plugin id>#<event name>` or `{KERNEL_EVENT_OWNER}#<event name>`"
+        ));
+    };
+    if owner == KERNEL_EVENT_OWNER {
+        let Some(spec) = kernel_event_in(kernel_events, &subscription.event) else {
+            return Err(format!(
+                "{label}: unknown kernel event (not on the reviewed kernel-event allowlist)"
+            ));
+        };
+        if let Some(grant) = spec.grant {
+            if !manifest.permission_grants.iter().any(|g| g == grant) {
+                return Err(format!(
+                    "{label}: kernel event carries user data; declare the '{grant}' grant in permission_grants"
+                ));
+            }
+        }
+    } else if owner != manifest.id {
+        return Err(format!(
+            "{label}: a sidecar may subscribe only to its own app's events or to kernel events"
+        ));
+    } else {
+        let declared = manifest
+            .contributes
+            .as_ref()
+            .is_some_and(|c| c.hook_events.iter().any(|e| e.id == subscription.event));
+        if !declared {
+            return Err(format!(
+                "{label}: the event is not declared in this plugin's contributes.hook_events"
+            ));
+        }
+    }
+    let Some(sidecar) = manifest
+        .sidecars
+        .iter()
+        .find(|s| s.name == subscription.sidecar)
+    else {
+        return Err(format!(
+            "{label}: sidecar '{}' is not declared",
+            subscription.sidecar
+        ));
+    };
+    if !subscription.route.starts_with('/')
+        || subscription.route.contains(':')
+        || subscription.route.contains('*')
+    {
+        return Err(format!(
+            "{label}: route must be a fixed path starting with '/' (no :param or *rest)"
+        ));
+    }
+    let accepts_post = sidecar.http.as_ref().is_some_and(|h| {
+        h.routes.iter().any(|r| {
+            r.path == subscription.route
+                && r.method
+                    .as_deref()
+                    .is_none_or(|m| m.eq_ignore_ascii_case("POST"))
+        })
+    });
+    if !accepts_post {
+        return Err(format!(
+            "{label}: route '{}' is not declared as a POST route on sidecar '{}'",
+            subscription.route, subscription.sidecar
+        ));
+    }
+    Ok(())
+}
+
 /// One **provided capability** entry (in [`PluginManifest::provides`]).
 ///
 /// Binds an abstract capability name to a concrete serving surface on THIS
@@ -5261,6 +6605,15 @@ pub struct ProvidesEntry {
     /// the id — that route reads `news.crud` as "News Crud".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+
+    /// The product layer that owns this swappable capability. Most providers omit
+    /// this and Core classifies them with its facade/multi-provider toolkit rules.
+    /// Model providers declare `"decision-model"` so their picker stays separate
+    /// from tool selection while using the same provider binding contract.
+    /// Tunnel adapters declare `"tunnel"`: they provide `network.tunnel` and
+    /// appear in the node's VPN layer instead of Toolkits.
+    #[serde(default, rename = "layerKind", skip_serializing_if = "Option::is_none")]
+    pub layer_kind: Option<ProvidesLayerKind>,
 
     /// Opt in to the **selectable** flavour: many providers of this capability may
     /// be enabled at once and the user *picks* one, exactly like a local engine.
@@ -5320,6 +6673,26 @@ pub struct ProvidesEntry {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tools: BTreeMap<String, CapabilityToolBinding>,
 }
+
+/// A named product layer for a provided capability.
+///
+/// Absence preserves the existing toolkit classification. Explicit kinds let Core
+/// present a capability in another layer picker without treating it as a tool
+/// selection capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProvidesLayerKind {
+    /// Typed choice, score, and boolean decision models.
+    DecisionModel,
+    /// Public tunnel adapters for the node's VPN layer. Only valid on a
+    /// selectable [`TUNNEL_CAPABILITY`] entry served by a sidecar route.
+    Tunnel,
+}
+
+/// The capability a [`ProvidesLayerKind::Tunnel`] provider serves. Core calls
+/// the declared sidecar route with `POST` (expose a port), `GET` (report state)
+/// and `DELETE` (tear down).
+pub const TUNNEL_CAPABILITY: &str = "network.tunnel";
 
 /// What a capability provider acts on — see [`ProvidesEntry::target`].
 ///
@@ -5422,7 +6795,7 @@ pub struct CapabilityToolBinding {
 
 /// Provider-shipped JavaScript that maps one capability verb onto one provider tool.
 ///
-/// Runs in the SAME Deno sandbox as an `inline_deno` plugin tool, under the same
+/// Runs in the SAME JS sandbox as an `inline_js` plugin tool, under the same
 /// [`crate`-level] grant model: the providing plugin must hold `tool:execute`, so
 /// shipping code is a visible, approvable act rather than a silent one.
 ///
@@ -5990,10 +7363,12 @@ impl PluginTier {
 ///
 /// This is the one grammar that replaces three historically-disjoint ones:
 /// the wasmtime/Docker [`crate`]-external `SandboxCapabilities` (typed but
-/// unreachable from a manifest), the Deno PTC's hardcoded zero-allow-flag spawn,
-/// and the opaque grant strings. A manifest declares ONE `permissions` block and
-/// Core lowers it to WASI preopens, Docker mount/network flags, or Deno
-/// `--allow-*` flags as appropriate.
+/// unreachable from a manifest), the JS sandbox's fixed deny-all posture, and the
+/// opaque grant strings. A manifest declares ONE `permissions` block and Core
+/// lowers it to WASI preopens, Docker mount/network flags, or the JS sandbox's
+/// `childProcess.run` allow-list as appropriate. The JS sandbox (hooks, adapters,
+/// `inline_js` tools, code mode) has no filesystem or network at all, so a set
+/// that grants either is refused there rather than silently run deny-all.
 ///
 /// **Every field defaults to empty/false — the zero value is deny-all.** A missing
 /// `permissions` block (or an explicit `{}`) is byte-for-byte the same posture as
@@ -6006,21 +7381,22 @@ pub struct PermissionSet {
     pub fs: FsPermissions,
 
     /// Whether the sandboxed code may spawn child processes. `false` (default) =
-    /// no subprocess execution. Lowers to Deno's `--allow-run`; the wasmtime/Docker
+    /// no subprocess execution. Enables the JS sandbox's `childProcess.run` for the
+    /// names in [`Self::run`] (plus host capability shims); the wasmtime/Docker
     /// lowering has no subprocess channel to open, so this is a no-op there (a WASI
     /// module cannot fork, and the Docker exec is a single fixed argv).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub child_process: bool,
 
     /// Executable names sandboxed code may spawn when [`Self::child_process`] is
-    /// true. Core lowers this to Deno's scoped `--allow-run=<name,...>` list in
-    /// addition to declared capability shims. Empty grants no arbitrary binary.
+    /// true: bare names `childProcess.run` may start (never paths), in addition to
+    /// declared capability shims. Empty grants no arbitrary binary.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub run: Vec<String>,
 
     /// Outbound network permission. `false`/absent (default) = no network; `true` =
-    /// all hosts; a list of `host[:port]` entries = only those hosts (the shape
-    /// Deno's `--allow-net` supports). See [`NetworkPermission`].
+    /// all hosts; a list of `host[:port]` entries = only those hosts. The JS sandbox
+    /// has no network and refuses a set that grants it. See [`NetworkPermission`].
     #[serde(default, skip_serializing_if = "NetworkPermission::is_deny")]
     pub network: NetworkPermission,
 
@@ -6105,7 +7481,7 @@ impl FsPermissions {
     }
 }
 
-/// Outbound network permission, in the shape Deno's `--allow-net` supports: a bare
+/// Outbound network permission: a bare
 /// boolean (`false` = deny all, `true` = allow all) or an explicit `host[:port]`
 /// allowlist.
 ///
@@ -6141,7 +7517,7 @@ impl NetworkPermission {
 
     /// Whether **any** outbound network is permitted (the inverse of
     /// [`Self::is_deny`]). Used by the wasmtime/Docker lowering, whose network knob
-    /// is a single boolean (host-scoping only lowers to Deno's `--allow-net=…`).
+    /// is a single boolean (it cannot scope by host).
     pub fn is_allowed(&self) -> bool {
         !self.is_deny()
     }
@@ -6265,7 +7641,7 @@ pub fn validate_permission_levels(levels: &[PermissionLevel]) -> Result<(), Stri
                     return Err(format!(
                         "permission level '{}' implies '{}', which closes an implication cycle",
                         levels[node].id, levels[child].id
-                    ))
+                    ));
                 }
                 Visit::Done => {}
                 Visit::Unseen => {
@@ -6438,6 +7814,14 @@ pub fn validate_route_permissions(
 
     for sidecar in sidecars {
         let Some(http) = &sidecar.http else { continue };
+        if let Some(scope) = http.caller_resource_scope.as_deref() {
+            if scope != "conversation" {
+                return Err(format!(
+                    "sidecar '{}' declares unsupported caller_resource_scope '{scope}'",
+                    sidecar.name
+                ));
+            }
+        }
         for route in &http.routes {
             if let Some(method) = route.method.as_deref() {
                 const SUPPORTED_METHODS: &[&str] =
@@ -6675,6 +8059,108 @@ mod tests {
         assert!(error.contains("other.lookup"), "{error}");
     }
 
+    #[test]
+    fn decision_model_layer_kind_is_camel_case_and_requires_selectability() {
+        let mut raw: serde_json::Value = serde_json::from_str(&provider_manifest(
+            "provider.search",
+            "http",
+            "provider.search",
+            &[],
+            false,
+        ))
+        .unwrap();
+        raw["provides"][0]["layerKind"] = serde_json::json!("decision-model");
+        raw["provides"][0]["selectable"] = serde_json::json!(true);
+        let serialized = serde_json::to_string(&raw).unwrap();
+        let manifest = PluginManifest::parse_and_validate(&serialized).unwrap();
+        assert_eq!(
+            manifest.provides[0].layer_kind,
+            Some(ProvidesLayerKind::DecisionModel)
+        );
+        assert_eq!(
+            serde_json::to_value(manifest).unwrap()["provides"][0]["layerKind"],
+            "decision-model"
+        );
+
+        raw["provides"][0]["selectable"] = serde_json::json!(false);
+        let error = PluginManifest::parse_and_validate(&serde_json::to_string(&raw).unwrap())
+            .expect_err("a layer kind must be user-selectable");
+        assert!(error.contains("must be selectable"), "{error}");
+    }
+
+    fn tunnel_manifest() -> serde_json::Value {
+        serde_json::json!({
+            "id": "com.example.tunnel",
+            "name": "Example Tunnel",
+            "version": "0.1.0",
+            "runnables": [],
+            "provides": [{
+                "capability": "network.tunnel",
+                "version": "1.0.0",
+                "title": "Tunnel",
+                "layerKind": "tunnel",
+                "selectable": true,
+                "sidecar": "tunnel",
+                "route": "/tunnel"
+            }],
+            "sidecars": [{
+                "name": "tunnel",
+                "port": 8199,
+                "health_path": "/health",
+                "process": { "kind": "node", "entry": "index.js" },
+                "http": { "routes": [{ "path": "/health" }, { "path": "/tunnel" }] }
+            }]
+        })
+    }
+
+    #[test]
+    fn tunnel_layer_kind_accepts_a_route_backed_network_tunnel_provider() {
+        let raw = tunnel_manifest();
+        let manifest = PluginManifest::parse_and_validate(&raw.to_string())
+            .unwrap_or_else(|e| panic!("a well-formed tunnel adapter validates: {e}"));
+        assert_eq!(
+            manifest.provides[0].layer_kind,
+            Some(ProvidesLayerKind::Tunnel)
+        );
+        assert_eq!(
+            serde_json::to_value(manifest).unwrap()["provides"][0]["layerKind"],
+            "tunnel"
+        );
+    }
+
+    #[test]
+    fn tunnel_layer_kind_and_capability_must_agree_and_be_route_backed() {
+        let mut wrong_cap = tunnel_manifest();
+        wrong_cap["provides"][0]["capability"] = serde_json::json!("web.search");
+        let error = PluginManifest::parse_and_validate(&wrong_cap.to_string())
+            .expect_err("layerKind tunnel is only for network.tunnel");
+        assert!(error.contains("go together"), "{error}");
+
+        let mut no_kind = tunnel_manifest();
+        no_kind["provides"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("layerKind");
+        let error = PluginManifest::parse_and_validate(&no_kind.to_string())
+            .expect_err("network.tunnel must declare the tunnel layer");
+        assert!(error.contains("go together"), "{error}");
+
+        let mut not_selectable = tunnel_manifest();
+        not_selectable["provides"][0]["selectable"] = serde_json::json!(false);
+        let error = PluginManifest::parse_and_validate(&not_selectable.to_string())
+            .expect_err("a tunnel adapter is picked by the user");
+        assert!(error.contains("sidecar route"), "{error}");
+
+        let mut no_route = tunnel_manifest();
+        no_route["provides"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("route");
+        let error = PluginManifest::parse_and_validate(&no_route.to_string())
+            .expect_err("a tunnel adapter is served by a sidecar route");
+        assert!(error.contains("sidecar route"), "{error}");
+    }
+
     // ── host version floors (engines) ──────────────────────────────────────────
 
     fn engines(ryu: &str) -> EnginesReq {
@@ -6827,6 +8313,58 @@ mod tests {
                 (Surface::Mobile, ">=1.0.0"),
             ]
         );
+    }
+
+    #[test]
+    fn host_api_floor_is_evaluated_against_the_served_host_api() {
+        let hosts = HostVersions::default().with(Surface::Core, "0.1.12");
+        let current = crate::host_api::HOST_API_VERSION;
+        let satisfied = EnginesReq {
+            ryu: ">=0.0.1".to_owned(),
+            host_api: Some(format!(">={current}")),
+            ..Default::default()
+        };
+        assert!(hosts.evaluate(Some(&satisfied)).compatible);
+
+        let too_new = EnginesReq {
+            host_api: Some(">=999.0.0".to_owned()),
+            ..satisfied.clone()
+        };
+        let v = hosts.evaluate(Some(&too_new));
+        assert!(!v.compatible, "the host API is always known, so it blocks");
+        assert_eq!(
+            v.unmet,
+            vec![UnmetRequirement::HostApiTooOld {
+                surface: Surface::Core,
+                required: ">=999.0.0".to_owned(),
+                present: current.to_owned(),
+            }]
+        );
+
+        let invalid = EnginesReq {
+            host_api: Some("not-a-range".to_owned()),
+            ..satisfied
+        };
+        let v = hosts.evaluate(Some(&invalid));
+        assert!(!v.compatible);
+        assert!(matches!(
+            &v.unmet[0],
+            UnmetRequirement::InvalidRequirement { reason, .. } if reason.starts_with("engines.host_api")
+        ));
+    }
+
+    #[test]
+    fn host_api_unmet_compares_release_triples() {
+        assert!(host_api_unmet("^1.17", "1.17.0").is_none());
+        assert!(host_api_unmet(">=1.17.0", "1.18.0-rc.1").is_none());
+        assert!(matches!(
+            host_api_unmet("^1.18", "1.17.0"),
+            Some(UnmetRequirement::HostApiTooOld { .. })
+        ));
+        assert!(matches!(
+            host_api_unmet("^2", "1.17.0"),
+            Some(UnmetRequirement::HostApiTooOld { .. })
+        ));
     }
 
     /// Back-compat: a manifest carrying only `{"ryu": …}` must still deserialize,
@@ -7094,6 +8632,245 @@ mod tests {
             availability: "coming-soon".to_owned(),
         };
         assert!(validate_chat_widget_templates(&[template]).is_ok());
+    }
+
+    #[test]
+    fn computer_use_planner_catalog_requires_safe_unique_entries() {
+        let valid = ComputerUsePlannerContribution {
+            id: "needle3.base".to_owned(),
+            label: "Needle 3".to_owned(),
+            model_id: "needle3".to_owned(),
+            description: Some("Pinned local tool-calling model".to_owned()),
+        };
+        assert!(validate_computer_use_planners(std::slice::from_ref(&valid)).is_ok());
+        assert!(validate_computer_use_planners(&[valid.clone(), valid.clone()]).is_err());
+
+        let mut invalid = valid;
+        invalid.model_id = "  ".to_owned();
+        assert!(validate_computer_use_planners(&[invalid]).is_err());
+    }
+
+    #[test]
+    fn computer_use_planner_contributions_round_trip_in_the_manifest_contract() {
+        let contributes = Contributes {
+            computer_use_planners: vec![ComputerUsePlannerContribution {
+                id: "needle3.base".to_owned(),
+                label: "Needle 3".to_owned(),
+                model_id: "needle3".to_owned(),
+                description: Some("Pinned local tool-calling model".to_owned()),
+            }],
+            ..Contributes::default()
+        };
+
+        let encoded = serde_json::to_value(&contributes).unwrap();
+        assert_eq!(encoded["computer_use_planners"][0]["id"], "needle3.base");
+        let decoded: Contributes = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, contributes);
+    }
+
+    fn sample_background() -> BackgroundContribution {
+        BackgroundContribution {
+            id: "@example/wallpapers:aurora".to_owned(),
+            label: "Aurora".to_owned(),
+            description: Some("Slow northern-lights colours.".to_owned()),
+            backdrop_id: "aurora-flow".to_owned(),
+            params: BTreeMap::from([
+                ("speed".to_owned(), serde_json::json!(0.7)),
+                (
+                    "colors".to_owned(),
+                    serde_json::json!(["#22c55e", "#8b5cf6"]),
+                ),
+            ]),
+            attribution: "PatternCraft".to_owned(),
+            attribution_url: "https://example.com/patterncraft/aurora".to_owned(),
+        }
+    }
+
+    #[test]
+    fn background_contributions_are_bounded_and_namespaced() {
+        let background = sample_background();
+        let contributes = Contributes {
+            backgrounds: vec![background.clone()],
+            ..Default::default()
+        };
+        assert!(contributes
+            .validate_backgrounds("@example/wallpapers")
+            .is_ok());
+
+        let wire = serde_json::to_value(&background).expect("background serializes");
+        assert_eq!(wire["backdropId"], "aurora-flow");
+        assert_eq!(
+            wire["attributionUrl"],
+            "https://example.com/patterncraft/aurora"
+        );
+        assert!(wire.get("backdrop_id").is_none());
+
+        let duplicate = Contributes {
+            backgrounds: vec![background.clone(), background],
+            ..Default::default()
+        };
+        assert!(duplicate
+            .validate_backgrounds("@example/wallpapers")
+            .is_err());
+    }
+
+    #[test]
+    fn background_contributions_reject_untrusted_links_and_params() {
+        let mut background = sample_background();
+        background.attribution_url = "http://example.com/aurora".to_owned();
+        assert!(Contributes {
+            backgrounds: vec![background.clone()],
+            ..Default::default()
+        }
+        .validate_backgrounds("@example/wallpapers")
+        .is_err());
+
+        background = sample_background();
+        background.params.insert(
+            "colors".to_owned(),
+            serde_json::json!({ "__proto__": { "polluted": true } }),
+        );
+        assert!(Contributes {
+            backgrounds: vec![background],
+            ..Default::default()
+        }
+        .validate_backgrounds("@example/wallpapers")
+        .is_err());
+
+        let mut background = sample_background();
+        background.id = "@example/other:aurora".to_owned();
+        assert!(Contributes {
+            backgrounds: vec![background],
+            ..Default::default()
+        }
+        .validate_backgrounds("@example/wallpapers")
+        .is_err());
+    }
+
+    fn sample_interface() -> InterfaceContribution {
+        InterfaceContribution {
+            id: "@example/pixel-town:town".to_owned(),
+            label: "Pixel Town".to_owned(),
+            description: Some("Walk up to your agents.".to_owned()),
+            renderer: "world-2d".to_owned(),
+            params: BTreeMap::from([("theme".to_owned(), serde_json::json!("night"))]),
+            attribution: None,
+            settings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn interface_settings_are_bounded_param_keys() {
+        let setting = |key: &str| InterfaceSettingField {
+            key: key.to_owned(),
+            label: "Theme".to_owned(),
+            description: Some("How the town looks.".to_owned()),
+            default: Some(serde_json::json!("night")),
+            options: vec![InterfaceSettingOption {
+                label: "Night".to_owned(),
+                value: "night".to_owned(),
+            }],
+        };
+        let with = |settings: Vec<InterfaceSettingField>| InterfaceContribution {
+            settings,
+            ..sample_interface()
+        };
+        assert!(validate_one_interface(with(vec![setting("theme")])).is_ok());
+        let wire = serde_json::to_value(with(vec![setting("theme")])).expect("serializes");
+        assert_eq!(wire["settings"][0]["key"], "theme");
+        assert_eq!(wire["settings"][0]["options"][0]["value"], "night");
+        assert!(serde_json::to_value(sample_interface())
+            .expect("serializes")
+            .get("settings")
+            .is_none());
+
+        // Unsafe or repeated keys, empty labels, nested defaults and too many fields fail.
+        assert!(validate_one_interface(with(vec![setting("constructor")])).is_err());
+        assert!(validate_one_interface(with(vec![setting("theme"), setting("theme")])).is_err());
+        let mut blank = setting("theme");
+        blank.label = " ".to_owned();
+        assert!(validate_one_interface(with(vec![blank])).is_err());
+        let mut nested = setting("theme");
+        nested.default = Some(serde_json::json!({ "a": 1 }));
+        assert!(validate_one_interface(with(vec![nested])).is_err());
+        let many = (0..=MAX_INTERFACE_SETTINGS)
+            .map(|index| setting(&format!("k{index}")))
+            .collect();
+        assert!(validate_one_interface(with(many)).is_err());
+    }
+
+    fn validate_one_interface(interface: InterfaceContribution) -> Result<(), String> {
+        Contributes {
+            interfaces: vec![interface],
+            ..Default::default()
+        }
+        .validate_interfaces("@example/pixel-town")
+    }
+
+    #[test]
+    fn interface_contributions_are_bounded_and_namespaced() {
+        let interface = sample_interface();
+        assert!(validate_one_interface(interface.clone()).is_ok());
+
+        let wire = serde_json::to_value(&interface).expect("interface serializes");
+        assert_eq!(wire["renderer"], "world-2d");
+        assert_eq!(wire["params"]["theme"], "night");
+        assert!(wire.get("attribution").is_none());
+
+        let duplicate = Contributes {
+            interfaces: vec![interface.clone(), interface],
+            ..Default::default()
+        };
+        assert!(duplicate
+            .validate_interfaces("@example/pixel-town")
+            .is_err());
+
+        let mut foreign = sample_interface();
+        foreign.id = "ryu:channels".to_owned();
+        assert!(validate_one_interface(foreign).is_err());
+
+        let mut reserved = sample_interface();
+        reserved.id = "ryu:feed".to_owned();
+        let reserved_plugin = Contributes {
+            interfaces: vec![reserved],
+            ..Default::default()
+        };
+        assert!(reserved_plugin.validate_interfaces("ryu").is_err());
+        // A `ryu` plugin without interfaces is unaffected.
+        assert!(Contributes::default().validate_interfaces("ryu").is_ok());
+    }
+
+    #[test]
+    fn interface_contributions_cannot_select_host_only_tiers_or_code() {
+        for renderer in ["console", "bot", "html", ""] {
+            let mut interface = sample_interface();
+            interface.renderer = renderer.to_owned();
+            assert!(validate_one_interface(interface).is_err(), "{renderer}");
+        }
+        // Every workspace renderer is selectable, the newest ones included,
+        // matching the TS contributable list.
+        for renderer in ["planets", "mail", "quiz", "bank", "warehouse"] {
+            let mut interface = sample_interface();
+            interface.renderer = renderer.to_owned();
+            interface.params.clear();
+            assert!(validate_one_interface(interface).is_ok(), "{renderer}");
+        }
+
+        let mut nested = sample_interface();
+        nested
+            .params
+            .insert("theme".to_owned(), serde_json::json!({ "__proto__": {} }));
+        assert!(validate_one_interface(nested).is_err());
+
+        let mut oversized = sample_interface();
+        oversized
+            .params
+            .insert("blob".to_owned(), serde_json::json!("x".repeat(129)));
+        assert!(validate_one_interface(oversized).is_err());
+
+        let mut blank = sample_interface();
+        blank.label = "  ".to_owned();
+        assert!(validate_one_interface(blank).is_err());
     }
 
     /// A consumer may subscribe to an event nothing declares — that is how a
@@ -8100,6 +9877,188 @@ mod tests {
         );
     }
 
+    // ── kernel events + sidecar subscriptions ──────────────────────────────────
+
+    /// A fixture kernel-event table, so the subscribe rules are tested independently
+    /// of which rows the reviewed [`KERNEL_EVENTS`] allowlist currently holds.
+    const FIXTURE_KERNEL_EVENTS: &[KernelEventSpec] = &[
+        KernelEventSpec {
+            name: "node.ready",
+            title: "Node ready",
+            description: "fixture: no user data",
+            grant: None,
+        },
+        KernelEventSpec {
+            name: "thing.failed",
+            title: "Thing failed",
+            description: "fixture: carries user data",
+            grant: Some("fixture:read"),
+        },
+    ];
+
+    fn subscriber(subscribes: serde_json::Value, grants: &[&str]) -> PluginManifest {
+        serde_json::from_value(serde_json::json!({
+            "id": "@acme/meet",
+            "name": "Meet",
+            "version": "1.0.0",
+            "runnables": [],
+            "permission_grants": grants,
+            "contributes": {
+                "hook_events": [{ "id": "@acme/meet#meeting.ended", "title": "Ended" }]
+            },
+            "sidecars": [{
+                "name": "engine",
+                "process": { "kind": "binary", "url": "https://example.com/e", "version": "1.0.0" },
+                "port": 9098,
+                "http": { "routes": [
+                    { "path": "/events/ended", "method": "POST" },
+                    { "path": "/events/any" },
+                    { "path": "/status", "method": "GET" },
+                    { "path": "/items/:id", "method": "POST" }
+                ] }
+            }],
+            "subscribes": subscribes
+        }))
+        .expect("fixture parses")
+    }
+
+    #[test]
+    fn plugin_id_core_is_reserved_for_kernel_events() {
+        assert!(validate_plugin_id(KERNEL_EVENT_OWNER).is_err());
+        assert!(validate_plugin_id("Core").is_err());
+        assert!(validate_plugin_id("@core/thing").is_ok());
+        assert!(validate_plugin_id("core-tools").is_ok());
+    }
+
+    #[test]
+    fn a_plugin_can_never_declare_a_kernel_event() {
+        let e = HookEventContribution {
+            id: "core#run.failed".to_owned(),
+            title: "Run failed".to_owned(),
+            description: None,
+            payload_example: None,
+        };
+        let err = validate_hook_event(&e, "@acme/meet").unwrap_err();
+        assert!(err.contains("reserved kernel-event namespace"), "{err}");
+        // Not even an app that somehow carries the reserved id.
+        assert!(validate_hook_event(&e, KERNEL_EVENT_OWNER).is_err());
+    }
+
+    #[test]
+    fn kernel_event_lookup_is_owner_and_allowlist_exact() {
+        assert!(is_kernel_event_id("core#node.ready"));
+        assert!(!is_kernel_event_id("@acme/meet#meeting.ended"));
+        assert!(!is_kernel_event_id("post_assistant_turn"));
+        assert_eq!(
+            kernel_event_in(FIXTURE_KERNEL_EVENTS, "core#node.ready").map(|k| k.name),
+            Some("node.ready")
+        );
+        assert!(kernel_event_in(FIXTURE_KERNEL_EVENTS, "core#nope").is_none());
+        assert!(kernel_event_in(FIXTURE_KERNEL_EVENTS, "@acme/meet#node.ready").is_none());
+        // Every reviewed row is well-formed and grant-documented.
+        for spec in KERNEL_EVENTS {
+            assert!(kernel_event(&format!("{KERNEL_EVENT_OWNER}#{}", spec.name)).is_some());
+            assert!(!spec.title.is_empty() && !spec.description.is_empty());
+        }
+    }
+
+    #[test]
+    fn sidecar_may_subscribe_to_its_own_declared_event() {
+        let m = subscriber(
+            serde_json::json!([
+                { "event": "@acme/meet#meeting.ended", "sidecar": "engine", "route": "/events/ended" },
+                { "event": "@acme/meet#meeting.ended", "sidecar": "engine", "route": "/events/any" }
+            ]),
+            &[],
+        );
+        m.validate_event_subscriptions(FIXTURE_KERNEL_EVENTS)
+            .expect("own declared event on declared POST routes");
+        m.validate().expect("the whole manifest validates");
+        // Round-trips under its wire name.
+        let wire = serde_json::to_value(&m).unwrap();
+        assert_eq!(wire["subscribes"][0]["route"], "/events/ended");
+    }
+
+    #[test]
+    fn sidecar_subscription_rejects_foreign_undeclared_and_unknown_events() {
+        for (event, needle) in [
+            ("@other/app#meeting.ended", "own app's events"),
+            ("@acme/meet#meeting.started", "not declared"),
+            ("core#nope", "unknown kernel event"),
+            ("meeting.ended", "must be"),
+        ] {
+            let m = subscriber(
+                serde_json::json!([{ "event": event, "sidecar": "engine", "route": "/events/ended" }]),
+                &[],
+            );
+            let err = m
+                .validate_event_subscriptions(FIXTURE_KERNEL_EVENTS)
+                .unwrap_err();
+            assert!(err.contains(needle), "{event}: {err}");
+        }
+    }
+
+    #[test]
+    fn kernel_event_subscription_requires_its_declared_grant() {
+        let ok = subscriber(
+            serde_json::json!([{ "event": "core#node.ready", "sidecar": "engine", "route": "/events/ended" }]),
+            &[],
+        );
+        ok.validate_event_subscriptions(FIXTURE_KERNEL_EVENTS)
+            .expect("a no-user-data kernel event needs no grant");
+
+        let sub = serde_json::json!([{ "event": "core#thing.failed", "sidecar": "engine", "route": "/events/ended" }]);
+        let missing = subscriber(sub.clone(), &[]);
+        let err = missing
+            .validate_event_subscriptions(FIXTURE_KERNEL_EVENTS)
+            .unwrap_err();
+        assert!(err.contains("fixture:read"), "{err}");
+        subscriber(sub, &["fixture:read"])
+            .validate_event_subscriptions(FIXTURE_KERNEL_EVENTS)
+            .expect("declared grant satisfies the load-time check");
+
+        // Against the reviewed (production) table an unlisted kernel event fails the
+        // full manifest validation.
+        let unlisted = subscriber(
+            serde_json::json!([{ "event": "core#node.ready", "sidecar": "engine", "route": "/events/ended" }]),
+            &[],
+        );
+        if kernel_event("core#node.ready").is_none() {
+            assert!(unlisted.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn sidecar_subscription_route_must_be_a_declared_fixed_post_route() {
+        for (sidecar, route, needle) in [
+            ("missing", "/events/ended", "not declared"),
+            ("engine", "/undeclared", "not declared as a POST route"),
+            ("engine", "/status", "not declared as a POST route"),
+            ("engine", "/items/:id", "fixed path"),
+            ("engine", "events/ended", "fixed path"),
+        ] {
+            let m = subscriber(
+                serde_json::json!([{ "event": "@acme/meet#meeting.ended", "sidecar": sidecar, "route": route }]),
+                &[],
+            );
+            let err = m
+                .validate_event_subscriptions(FIXTURE_KERNEL_EVENTS)
+                .unwrap_err();
+            assert!(err.contains(needle), "{sidecar}{route}: {err}");
+        }
+        let dup = subscriber(
+            serde_json::json!([
+                { "event": "@acme/meet#meeting.ended", "sidecar": "engine", "route": "/events/ended" },
+                { "event": "@acme/meet#meeting.ended", "sidecar": "engine", "route": "/events/ended" }
+            ]),
+            &[],
+        );
+        assert!(dup
+            .validate_event_subscriptions(FIXTURE_KERNEL_EVENTS)
+            .unwrap_err()
+            .contains("duplicate"));
+    }
+
     // ── provides / requires.capabilities validation ─────────────────────────────
 
     #[test]
@@ -8313,7 +10272,15 @@ mod tests {
         assert!(value.get("order").is_none(), "absent order omitted");
         assert!(value.get("spec").is_none(), "absent spec omitted");
         assert_eq!(value["placement"], serde_json::json!("bottom"));
-        // `Both` fans out to the two REAL docks, never to itself.
+        assert_eq!(
+            DockPanelPlacement::Left.docks(),
+            &[DockPanelPlacement::Left]
+        );
+        assert_eq!(
+            DockPanelPlacement::Center.docks(),
+            &[DockPanelPlacement::Center]
+        );
+        // `Both` fans out to the two LEGACY docks, never to itself or all regions.
         assert_eq!(
             DockPanelPlacement::Both.docks(),
             &[DockPanelPlacement::Bottom, DockPanelPlacement::Right]
@@ -8322,6 +10289,22 @@ mod tests {
             DockPanelPlacement::Right.docks(),
             &[DockPanelPlacement::Right]
         );
+    }
+
+    #[test]
+    fn dock_panel_left_and_center_parse_and_round_trip() {
+        for (placement, expected) in [
+            ("left", DockPanelPlacement::Left),
+            ("center", DockPanelPlacement::Center),
+        ] {
+            let raw =
+                format!(r#"{{"id":"p","title":"P","placement":"{placement}","panel":"native"}}"#);
+            let panel: DockPanelContribution = serde_json::from_str(&raw).unwrap();
+            assert_eq!(panel.placement, expected);
+
+            let value = serde_json::to_value(&panel).unwrap();
+            assert_eq!(value["placement"], serde_json::json!(placement));
+        }
     }
 
     #[test]
@@ -8336,7 +10319,7 @@ mod tests {
             "runnables": [],
             "contributes": {
                 "dock_panels": [
-                    { "id": "p", "title": "P", "placement": "left", "panel": "native" }
+                    { "id": "p", "title": "P", "placement": "top", "panel": "native" }
                 ]
             }
         }"#;
@@ -9588,5 +11571,109 @@ mod tests {
                 "got: {grants}"
             );
         }
+    }
+
+    fn deprecation_of(value: serde_json::Value) -> Option<DeprecationNotice> {
+        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
+            "id": "@acme/old",
+            "name": "Old",
+            "version": "1.0.0",
+            "runnables": [],
+            "deprecated": value,
+        }))
+        .expect("manifest parses");
+        manifest.deprecation()
+    }
+
+    #[test]
+    fn deprecated_accepts_bool_string_and_object_shapes() {
+        assert_eq!(deprecation_of(serde_json::json!(false)), None);
+        assert_eq!(
+            deprecation_of(serde_json::json!(true)),
+            Some(DeprecationNotice::default())
+        );
+        assert_eq!(
+            deprecation_of(serde_json::json!("  Use @acme/new instead.  ")),
+            Some(DeprecationNotice {
+                message: Some("Use @acme/new instead.".to_owned()),
+                replacement: None,
+            })
+        );
+        assert_eq!(
+            deprecation_of(serde_json::json!({
+                "message": "Superseded.",
+                "replacement": " @acme/new "
+            })),
+            Some(DeprecationNotice {
+                message: Some("Superseded.".to_owned()),
+                replacement: Some("@acme/new".to_owned()),
+            })
+        );
+        // An empty object still means deprecated; blank strings collapse to absent.
+        assert_eq!(
+            deprecation_of(serde_json::json!({ "message": "   " })),
+            Some(DeprecationNotice::default())
+        );
+    }
+
+    #[test]
+    fn deprecated_absent_means_current_and_does_not_serialize() {
+        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
+            "id": "@acme/current",
+            "name": "Current",
+            "version": "1.0.0",
+            "runnables": [],
+        }))
+        .expect("manifest parses");
+        assert_eq!(manifest.deprecation(), None);
+        let out = serde_json::to_value(&manifest).expect("serializes");
+        assert!(out.get("deprecated").is_none());
+    }
+
+    #[test]
+    fn allow_remix_defaults_to_allowed_and_round_trips_an_opt_out() {
+        let parse = |extra: serde_json::Value| -> PluginManifest {
+            let mut value = serde_json::json!({
+                "id": "@acme/remix",
+                "name": "Remix",
+                "version": "1.0.0",
+                "runnables": [],
+            });
+            if let (Some(base), Some(extra)) = (value.as_object_mut(), extra.as_object()) {
+                base.extend(extra.clone());
+            }
+            serde_json::from_value(value).expect("manifest parses")
+        };
+
+        let absent = parse(serde_json::json!({}));
+        assert!(absent.remix_allowed());
+        let out = serde_json::to_value(&absent).expect("serializes");
+        assert!(out.get("allowRemix").is_none());
+
+        assert!(parse(serde_json::json!({ "allowRemix": true })).remix_allowed());
+        let opted_out = parse(serde_json::json!({ "allowRemix": false }));
+        assert!(!opted_out.remix_allowed());
+        let out = serde_json::to_value(&opted_out).expect("serializes");
+        assert_eq!(out.get("allowRemix"), Some(&serde_json::json!(false)));
+        assert!(!parse(serde_json::json!({ "allow_remix": false })).remix_allowed());
+    }
+
+    #[test]
+    fn deprecation_notice_is_bounded() {
+        let long_message = "x".repeat(MAX_DEPRECATION_MESSAGE_CHARS + 50);
+        let long_id = "y".repeat(MAX_PLUGIN_ID_LEN + 1);
+        let notice = deprecation_of(serde_json::json!({
+            "message": long_message,
+            "replacement": long_id,
+        }))
+        .expect("deprecated");
+        assert_eq!(
+            notice.message.map(|m| m.chars().count()),
+            Some(MAX_DEPRECATION_MESSAGE_CHARS)
+        );
+        assert_eq!(
+            notice.replacement, None,
+            "an over-long id is dropped, not clipped"
+        );
     }
 }

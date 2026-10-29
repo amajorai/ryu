@@ -49,6 +49,16 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
     // reasoning
     (
         "@ryu/reasoning",
+        "adapters/verify.claim.js",
+        include_str!("../../../../generated/ryu-runtime/apps-store/reasoning/adapters/verify.claim.js"),
+    ),
+    (
+        "@ryu/reasoning",
+        "adapters/verify.scopes.js",
+        include_str!("../../../../generated/ryu-runtime/apps-store/reasoning/adapters/verify.scopes.js"),
+    ),
+    (
+        "@ryu/reasoning",
         "hooks/check.js",
         include_str!("../../../../generated/ryu-runtime/apps-store/reasoning/hooks/check.js"),
     ),
@@ -143,6 +153,27 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         "adapters/browser.type.js",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/agentbrowser/adapters/browser.type.js"),
     ),
+    // codex-computer-use
+    (
+        "@ryu/codex-computer-use",
+        "adapters/computer.capture.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/codex-computer-use/adapters/computer.capture.js"),
+    ),
+    (
+        "@ryu/codex-computer-use",
+        "adapters/computer.click.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/codex-computer-use/adapters/computer.click.js"),
+    ),
+    (
+        "@ryu/codex-computer-use",
+        "adapters/computer.key.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/codex-computer-use/adapters/computer.key.js"),
+    ),
+    (
+        "@ryu/codex-computer-use",
+        "adapters/computer.type.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/codex-computer-use/adapters/computer.type.js"),
+    ),
     // ego-browser
     (
         "@ryu/ego-browser",
@@ -179,6 +210,12 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         "adapters/browser.type.js",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.type.js"),
     ),
+    // bytebot
+    (
+        "@ryu/bytebot",
+        "adapters/computer.scroll.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/bytebot/adapters/computer.scroll.js"),
+    ),
     // cloudflare-browser-run (external provider)
     (
         "@ryu/cloudflare-browser-run",
@@ -200,6 +237,130 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         include_str!(
             "../../../../generated/ryu-runtime/plugins-store/external_plugins/cloudflare-browser-run/adapters/browser.snapshot.js"
         ),
+    ),
+    // steel (external provider)
+    (
+        "@ryu/steel",
+        "adapters/browser.click.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/external_plugins/steel/adapters/browser.click.js"),
+    ),
+    (
+        "@ryu/steel",
+        "adapters/browser.hover.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/external_plugins/steel/adapters/browser.hover.js"),
+    ),
+    (
+        "@ryu/steel",
+        "adapters/browser.navigate.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/external_plugins/steel/adapters/browser.navigate.js"
+        ),
+    ),
+    (
+        "@ryu/steel",
+        "adapters/browser.screenshot.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/external_plugins/steel/adapters/browser.screenshot.js"
+        ),
+    ),
+    (
+        "@ryu/steel",
+        "adapters/browser.scroll.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/external_plugins/steel/adapters/browser.scroll.js"),
+    ),
+    (
+        "@ryu/steel",
+        "adapters/browser.snapshot.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/external_plugins/steel/adapters/browser.snapshot.js"
+        ),
+    ),
+    (
+        "@ryu/steel",
+        "adapters/browser.type.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/external_plugins/steel/adapters/browser.type.js"),
+    ),
+    // kernel (external provider)
+    (
+        "@ryu/kernel",
+        "adapters/browser.click_at.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/external_plugins/kernel/adapters/browser.click_at.js"
+        ),
+    ),
+    (
+        "@ryu/kernel",
+        "adapters/browser.drag.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/external_plugins/kernel/adapters/browser.drag.js"),
+    ),
+    (
+        "@ryu/kernel",
+        "adapters/browser.key.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/external_plugins/kernel/adapters/browser.key.js"),
+    ),
+    (
+        "@ryu/kernel",
+        "adapters/browser.navigate.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/external_plugins/kernel/adapters/browser.navigate.js"
+        ),
+    ),
+    (
+        "@ryu/kernel",
+        "adapters/browser.screenshot.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/external_plugins/kernel/adapters/browser.screenshot.js"
+        ),
+    ),
+    (
+        "@ryu/kernel",
+        "adapters/browser.scroll.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/external_plugins/kernel/adapters/browser.scroll.js"
+        ),
+    ),
+    (
+        "@ryu/kernel",
+        "adapters/browser.tabs.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/external_plugins/kernel/adapters/browser.tabs.js"),
+    ),
+    // browser-use
+    (
+        "@ryu/browser-use",
+        "adapters/browser.click.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/browser-use/adapters/browser.click.js"),
+    ),
+    (
+        "@ryu/browser-use",
+        "adapters/browser.navigate.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/browser-use/adapters/browser.navigate.js"),
+    ),
+    (
+        "@ryu/browser-use",
+        "adapters/browser.screenshot.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/plugins/browser-use/adapters/browser.screenshot.js"
+        ),
+    ),
+    (
+        "@ryu/browser-use",
+        "adapters/browser.scroll.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/browser-use/adapters/browser.scroll.js"),
+    ),
+    (
+        "@ryu/browser-use",
+        "adapters/browser.snapshot.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/browser-use/adapters/browser.snapshot.js"),
+    ),
+    (
+        "@ryu/browser-use",
+        "adapters/browser.tabs.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/browser-use/adapters/browser.tabs.js"),
+    ),
+    (
+        "@ryu/browser-use",
+        "adapters/browser.type.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/browser-use/adapters/browser.type.js"),
     ),
     // chat-title
     (
@@ -229,6 +390,12 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         "@ryu/firecrawl",
         "adapters/web.extract.js",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/firecrawl/adapters/web.extract.js"),
+    ),
+    // jina-reader
+    (
+        "@ryu/jina-reader",
+        "adapters/web.extract.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/jina-reader/adapters/web.extract.js"),
     ),
     // goal
     (
@@ -301,6 +468,12 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         "hooks/command.js",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/no-more-mistakes/hooks/command.js"),
     ),
+    // polite-prompts
+    (
+        "@ryu/polite-prompts",
+        "hooks/rewrite.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/polite-prompts/hooks/rewrite.js"),
+    ),
     // parallel
     (
         "@ryu/parallel",
@@ -365,6 +538,12 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         "hooks/command.js",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/security-scanner/hooks/command.js"),
     ),
+    // tavily
+    (
+        "@ryu/tavily",
+        "adapters/web.extract.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/tavily/adapters/web.extract.js"),
+    ),
     // tool-firewall
     (
         "@ryu/tool-firewall",
@@ -376,8 +555,39 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         "hooks/pre.js",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/tool-firewall/hooks/pre.js"),
     ),
+    // action-summary
+    (
+        "@ryu/action-summary",
+        "hooks/action.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/action-summary/hooks/action.js"),
+    ),
+    // observer-agents
+    (
+        "@ryu/observer-agents",
+        "hooks/review.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/observer-agents/hooks/review.js"),
+    ),
+    // tokenmaxxing
+    (
+        "@ryu/tokenmaxxing",
+        "hooks/delegation-complete.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/tokenmaxxing/hooks/delegation-complete.js"),
+    ),
+    // auto-translate
+    (
+        "@ryu/auto-translate",
+        "hooks/reply.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/auto-translate/hooks/reply.js"),
+    ),
 ];
 
+/// Production subset of the table above: only bodies whose manifests are compiled
+/// into the production runtime set (`CORE_RUNTIME_BUILTIN_MANIFESTS` /
+/// `CORE_INSTALLABLE_BUILTIN_MANIFESTS` in [`super`]), the
+/// only manifests hydrated with `code_base: None`. A Core-tier package installed
+/// from the Marketplace (e.g. `@ryu/ego-browser`, which earns Core tier as a
+/// digest-verified official package) hydrates its `code_file`s from its on-disk
+/// package directory, so a row here for it would be dead embedded code.
 #[cfg(not(test))]
 pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
     // apps-store satellites promoted into the production standalone registry
@@ -385,6 +595,16 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         "@ryu/news",
         "hooks/ground.js",
         include_str!("../../../../generated/ryu-runtime/apps-store/news/hooks/ground.js"),
+    ),
+    (
+        "@ryu/reasoning",
+        "adapters/verify.claim.js",
+        include_str!("../../../../generated/ryu-runtime/apps-store/reasoning/adapters/verify.claim.js"),
+    ),
+    (
+        "@ryu/reasoning",
+        "adapters/verify.scopes.js",
+        include_str!("../../../../generated/ryu-runtime/apps-store/reasoning/adapters/verify.scopes.js"),
     ),
     (
         "@ryu/reasoning",
@@ -470,41 +690,32 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/rules/hooks/inject.js"),
     ),
     (
-        "@ryu/ego-browser",
-        "adapters/browser.click.js",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.click.js"),
-    ),
-    (
-        "@ryu/ego-browser",
-        "adapters/browser.navigate.js",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.navigate.js"),
-    ),
-    (
-        "@ryu/ego-browser",
-        "adapters/browser.screenshot.js",
+        "@ryu/codex-computer-use",
+        "adapters/computer.capture.js",
         include_str!(
-            "../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.screenshot.js"
+            "../../../../generated/ryu-runtime/plugins-store/plugins/codex-computer-use/adapters/computer.capture.js"
         ),
     ),
     (
-        "@ryu/ego-browser",
-        "adapters/browser.scroll.js",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.scroll.js"),
+        "@ryu/codex-computer-use",
+        "adapters/computer.click.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/plugins/codex-computer-use/adapters/computer.click.js"
+        ),
     ),
     (
-        "@ryu/ego-browser",
-        "adapters/browser.snapshot.js",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.snapshot.js"),
+        "@ryu/codex-computer-use",
+        "adapters/computer.key.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/plugins/codex-computer-use/adapters/computer.key.js"
+        ),
     ),
     (
-        "@ryu/ego-browser",
-        "adapters/browser.tabs.js",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.tabs.js"),
-    ),
-    (
-        "@ryu/ego-browser",
-        "adapters/browser.type.js",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.type.js"),
+        "@ryu/codex-computer-use",
+        "adapters/computer.type.js",
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/plugins/codex-computer-use/adapters/computer.type.js"
+        ),
     ),
 ];
 
@@ -526,8 +737,8 @@ pub(crate) fn lookup(plugin_id: &str, rel: &str) -> Option<&'static str> {
 ///
 /// Same embedding problem, different privilege — and the separation is the point:
 ///
-/// - A `code_file` is **sandboxed** JS. Core splices it into a deny-by-default Deno
-///   IIFE where every side effect goes through a capability-gated `host.*` call.
+/// - A `code_file` is **sandboxed** JS. Core splices it into a deny-by-default JS
+///   sandbox IIFE where every side effect goes through a capability-gated `host.*` call.
 /// - A `pi_extensions[].file` is **unsandboxed** TypeScript loaded by the managed Pi
 ///   process itself, with that process's full privilege. It is gated like a manifest
 ///   `mcp_servers` entry (`pi_config::app_extensions::may_ship_pi_extensions`), not
@@ -559,6 +770,12 @@ pub(crate) const BUILTIN_PI_EXTENSIONS: &[(&str, &str, &str)] = &[
         "pi-extensions/ryu-monitor.ts",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-monitor/pi-extensions/ryu-monitor.ts"),
     ),
+    // pi-copy
+    (
+        "@ryu/pi-copy",
+        "pi-extensions/ryu-copy.ts",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-copy/pi-extensions/ryu-copy.ts"),
+    ),
 ];
 
 #[cfg(not(test))]
@@ -578,7 +795,19 @@ pub(crate) const BUILTIN_PI_EXTENSIONS: &[(&str, &str, &str)] = &[
         "pi-extensions/ryu-monitor.ts",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-monitor/pi-extensions/ryu-monitor.ts"),
     ),
+    (
+        "@ryu/pi-copy",
+        "pi-extensions/ryu-copy.ts",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-copy/pi-extensions/ryu-copy.ts"),
+    ),
 ];
+
+/// Every embedded built-in plugin Pi extension as `(relative path, source)`.
+pub(crate) fn builtin_pi_extension_sources() -> impl Iterator<Item = (&'static str, &'static str)> {
+    BUILTIN_PI_EXTENSIONS
+        .iter()
+        .map(|(_, path, source)| (*path, *source))
+}
 
 /// The embedded contents of `rel` for built-in plugin `plugin_id`, or `None` when
 /// nothing in [`BUILTIN_PI_EXTENSIONS`] matches.
@@ -607,7 +836,7 @@ pub(crate) fn lookup_pi_extension(plugin_id: &str, rel: &str) -> Option<&'static
 /// the OPPOSITE end of the privilege scale from the other two tables, and that is
 /// exactly why they stay apart:
 ///
-/// - A `code_file` is **sandboxed** JS, spliced into a deny-by-default Deno IIFE.
+/// - A `code_file` is **sandboxed** JS, spliced into a deny-by-default JS sandbox IIFE.
 /// - A `pi_extensions[].file` is **unsandboxed** TypeScript with the managed Pi
 ///   process's full privilege.
 /// - An `output_styles[].file` is **inert prose**. Nothing in the pipeline evaluates

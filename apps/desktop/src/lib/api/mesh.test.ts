@@ -10,16 +10,26 @@
 // covered at all.
 
 import { describe, expect, test } from "bun:test";
+import cloudflaredStatusFixture from "../../../../../crates/core/mesh/fixtures/mesh-status-cloudflared.json" with {
+	type: "json",
+};
 import {
 	INGRESS_KIND_OWN_RELAY,
 	INGRESS_LABELS,
 	INGRESS_URL_PREF,
 	ingressLabel,
 	isOwnRelayKind,
+	isPublicTunnelBackend,
+	MESH_BACKEND_CLOUDFLARED,
 	MESH_BACKEND_HEADSCALE,
+	MESH_BACKEND_OPENTUNNEL,
+	MESH_BACKEND_PLUGIN,
 	MESH_BACKEND_TAILCAT,
+	MESH_BACKEND_TAILSCALE,
+	meshInstallKey,
 	normalizeMeshStatus,
 	parseMeshBackend,
+	type RawMeshStatus,
 } from "./mesh.ts";
 
 describe("ingressLabel", () => {
@@ -120,6 +130,67 @@ describe("Tailcat backend", () => {
 		).toMatchObject({
 			backend: MESH_BACKEND_TAILCAT,
 			tailcatAddress: "tcExampleToken",
+		});
+	});
+});
+
+describe("Cloudflare Quick Tunnel backend", () => {
+	test("normalizes the stored Cloudflared backend", () => {
+		expect(parseMeshBackend(" cloudflared ")).toBe(MESH_BACKEND_CLOUDFLARED);
+	});
+
+	test("normalizes the public URL from Core status", () => {
+		expect(
+			normalizeMeshStatus(cloudflaredStatusFixture satisfies RawMeshStatus)
+		).toMatchObject({
+			backend: MESH_BACKEND_CLOUDFLARED,
+			cloudflaredUrl: "https://warm-tree.trycloudflare.com",
+			publicUrl: "https://warm-tree.trycloudflare.com",
+		});
+	});
+
+	test("an older Core without publicUrl still yields the Cloudflare URL", () => {
+		expect(
+			normalizeMeshStatus({ cloudflaredUrl: "https://old.trycloudflare.com" })
+				.publicUrl
+		).toBe("https://old.trycloudflare.com");
+	});
+});
+
+describe("OpenTunnel and plugin tunnel backends", () => {
+	test("normalizes both stored backend values, mirroring Core's parse_backend", () => {
+		expect(parseMeshBackend(" OpenTunnel ")).toBe(MESH_BACKEND_OPENTUNNEL);
+		expect(parseMeshBackend("plugin")).toBe(MESH_BACKEND_PLUGIN);
+	});
+
+	test("public tunnels are distinguished from private networks", () => {
+		expect(isPublicTunnelBackend(MESH_BACKEND_CLOUDFLARED)).toBe(true);
+		expect(isPublicTunnelBackend(MESH_BACKEND_OPENTUNNEL)).toBe(true);
+		expect(isPublicTunnelBackend(MESH_BACKEND_PLUGIN)).toBe(true);
+		expect(isPublicTunnelBackend(MESH_BACKEND_TAILCAT)).toBe(false);
+		expect(isPublicTunnelBackend(MESH_BACKEND_TAILSCALE)).toBe(false);
+	});
+
+	test("install status keys match Core's sidecar names", () => {
+		expect(meshInstallKey(MESH_BACKEND_OPENTUNNEL)).toBe("opentunnel");
+		expect(meshInstallKey(MESH_BACKEND_PLUGIN)).toBe("tunnel-plugin");
+		expect(meshInstallKey(MESH_BACKEND_CLOUDFLARED)).toBe("cloudflared");
+		expect(meshInstallKey(MESH_BACKEND_HEADSCALE)).toBe("tailscale");
+	});
+
+	test("normalizes the plugin provider, public URL and backend error", () => {
+		const status = normalizeMeshStatus({
+			backend: "plugin",
+			backend_state: "Failed",
+			backendError: "quota exceeded",
+			publicUrl: null,
+			tunnelProvider: { id: "com.acme.tunnel", name: "Acme Tunnel" },
+		});
+		expect(status).toMatchObject({
+			backend: MESH_BACKEND_PLUGIN,
+			backendError: "quota exceeded",
+			publicUrl: null,
+			tunnelProvider: { id: "com.acme.tunnel", name: "Acme Tunnel" },
 		});
 	});
 });

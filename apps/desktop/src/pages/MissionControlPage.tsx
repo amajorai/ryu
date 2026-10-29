@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import styles from "./MissionControlPage.module.css";
 // apps/desktop/src/pages/MissionControlPage.tsx
 //
 // Mission Control: the project-level view over many chats.
@@ -27,23 +29,23 @@ import {
 	SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -113,9 +115,9 @@ function Stat({
 			>
 				{formatCount(value)}
 			</div>
-			<div className="text-[11px] text-muted-foreground">{label}</div>
+			<div className="type-caption text-muted-foreground">{label}</div>
 			{hint && (
-				<div className="text-[10px] text-muted-foreground/70">{hint}</div>
+				<div className="type-compact text-muted-foreground/70">{hint}</div>
 			)}
 		</div>
 	);
@@ -132,32 +134,41 @@ function ActivityStrip({ days }: { days: MissionDayBucket[] }) {
 		<section>
 			<h2 className="mb-2 font-medium text-sm">Activity</h2>
 			<div className="flex items-end gap-1.5 overflow-x-auto rounded-lg border bg-card/40 p-3">
-				{days.map((day) => (
-					<Tooltip key={day.date}>
-						<TooltipTrigger
-							className="flex w-8 shrink-0 flex-col items-center gap-1"
-							render={<div />}
-						>
-							<span
-								className={cn(
-									"w-full rounded-t bg-primary/70",
-									day.failures > 0 && "bg-destructive/60"
-								)}
-								style={{
-									height: `${Math.max(2, (day.turns / busiest) * BAR_MAX_PX)}px`,
-								}}
-							/>
-							<span className="text-[10px] text-muted-foreground">
-								{weekdayLabel(day.date)}
-							</span>
-						</TooltipTrigger>
-						<TooltipContent className="text-xs">
-							{day.date} · {formatCount(day.conversations)} chats,{" "}
-							{formatCount(day.turns)} turns, {formatCount(day.writes)} files
-							{day.failures > 0 ? `, ${formatCount(day.failures)} errors` : ""}
-						</TooltipContent>
-					</Tooltip>
-				))}
+				{days.map((day) => {
+					const activityStyle: CSSProperties & {
+						"--mission-bar-height": string;
+					} = {
+						"--mission-bar-height": `${Math.max(2, (day.turns / busiest) * BAR_MAX_PX)}px`,
+					};
+					return (
+						<Tooltip key={day.date}>
+							<TooltipTrigger
+								render={
+									<div className="flex w-8 shrink-0 flex-col items-center gap-1" />
+								}
+							>
+								<span
+									className={cn(
+										"w-full rounded-t bg-primary/70",
+										styles.bar,
+										day.failures > 0 && "bg-destructive/60"
+									)}
+									style={activityStyle}
+								/>
+								<span className="type-compact text-muted-foreground">
+									{weekdayLabel(day.date)}
+								</span>
+							</TooltipTrigger>
+							<TooltipContent>
+								{day.date} · {formatCount(day.conversations)} chats,{" "}
+								{formatCount(day.turns)} turns, {formatCount(day.writes)} files
+								{day.failures > 0
+									? `, ${formatCount(day.failures)} errors`
+									: ""}
+							</TooltipContent>
+						</Tooltip>
+					);
+				})}
 			</div>
 		</section>
 	);
@@ -191,7 +202,7 @@ function OpenWorkSection({ items }: { items: MissionOpenItem[] }) {
 							/>
 							<div className="min-w-0 flex-1">
 								<div className="text-sm">{item.content}</div>
-								<div className="truncate text-[11px] text-muted-foreground">
+								<div className="type-caption truncate text-muted-foreground">
 									{item.conversation_title ?? "Untitled chat"} ·{" "}
 									{compactAge(item.source_updated_at)}
 								</div>
@@ -228,7 +239,7 @@ function HotFilesSection({ files }: { files: MissionHotFile[] }) {
 							/>
 							<TooltipContent>{file.path}</TooltipContent>
 						</Tooltip>
-						<span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
 							{file.conversations > 1
 								? `${formatCount(file.conversations)} chats`
 								: `${formatCount(file.touches)}×`}
@@ -265,11 +276,11 @@ function SessionRow({
 						<span className="min-w-0 flex-1 truncate font-medium text-sm">
 							{digest.title ?? "Untitled chat"}
 						</span>
-						<span className="shrink-0 text-[11px] text-muted-foreground">
+						<span className="type-caption shrink-0 text-muted-foreground">
 							{compactAge(digest.source_updated_at)}
 						</span>
 					</div>
-					<div className="text-[11px] text-muted-foreground">
+					<div className="type-caption text-muted-foreground">
 						{digest.headline ?? "No work recorded"} ·{" "}
 						{formatCount(digest.totals.turns)} turns ·{" "}
 						{formatCount(digest.totals.writes)} files
@@ -283,10 +294,11 @@ function SessionRow({
 						</p>
 					) : (
 						<Button
-							className="mt-1 h-6 px-2 text-[11px]"
+							className="mt-1"
 							loading={summarizing}
 							onClick={() => onSummarize(digest.conversation_id)}
-							size="sm"
+							size="tiny"
+							typography="caption"
 							variant="ghost"
 						>
 							{!summarizing && (
@@ -517,9 +529,7 @@ export default function MissionControlPage() {
 
 			<div className="scroll-fade min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
 				{loading && (
-					<div className="flex items-center gap-2 text-muted-foreground text-sm">
-						<Spinner className="size-4" /> Reading your chats…
-					</div>
+					<SkeletonRows label="Reading your chats…" spacing="comfortable" />
 				)}
 				{overview.isError && (
 					<p className="rounded-lg border border-destructive/40 p-3 text-status-destructive text-xs">

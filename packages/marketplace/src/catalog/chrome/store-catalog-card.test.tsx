@@ -141,6 +141,27 @@ describe("StoreCatalogCard", () => {
 		expect(html).toContain("Browser toolkit");
 	});
 
+	test("distinguishes community apps from apps reviewed by Ryu", () => {
+		const community = render(
+			<StoreCatalogCard communityApp name="Trail Log" reviewed={false} />
+		);
+		const reviewed = render(<StoreCatalogCard name="Field Notes" reviewed />);
+
+		expect(community).toContain("Community app");
+		expect(community).not.toContain("Verified by Ryu");
+		expect(reviewed).toContain("Verified by Ryu");
+		expect(reviewed).not.toContain("Community app");
+	});
+
+	test("badges deprecated listings and leaves current ones bare", () => {
+		const deprecated = render(<StoreCatalogCard deprecated name="Old Tool" />);
+		const current = render(<StoreCatalogCard name="New Tool" />);
+
+		expect(deprecated).toContain('data-testid="deprecated-badge"');
+		expect(deprecated).toContain("Deprecated");
+		expect(current).not.toContain('data-testid="deprecated-badge"');
+	});
+
 	test("shows the A Major Pass ticket only for eligible listings", () => {
 		const eligible = render(
 			<StoreCatalogCard

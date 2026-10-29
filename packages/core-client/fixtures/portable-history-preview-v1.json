@@ -1,0 +1,33 @@
+{
+  "checkpointId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "transcript": {
+    "format": "ryu-portable-conversation",
+    "version": 1,
+    "sourceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "title": "[REDACTED:EMAIL] planning",
+    "agentId": null,
+    "createdAt": "2026-09-30T00:00:00.000Z",
+    "updatedAt": "2026-09-30T00:01:00.000Z",
+    "codeCommit": "cccccccccccccccccccccccccccccccccccccccc",
+    "branch": "main",
+    "messages": [
+      {
+        "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "role": "user",
+        "content": "Discuss [REDACTED:CUSTOM] with [REDACTED:EMAIL]",
+        "agentId": null,
+        "createdAt": "2026-09-30T00:00:00.000Z"
+      }
+    ],
+    "omittedStructuredParts": 0,
+    "redactionPolicy": "locked-sensitive-v1"
+  },
+  "redactions": {
+    "pii": 1,
+    "secrets": 0,
+    "custom": 1
+  },
+  "repoAvailable": true,
+  "repoRoot": "/tmp/ryu-proof-repo",
+  "repoError": null
+}

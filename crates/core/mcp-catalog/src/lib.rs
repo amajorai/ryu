@@ -19,10 +19,11 @@
 //!   must be SSRF-guarded at fetch time, not just at add time.
 //! - A registry-supplied package spec becomes a launch **command** the moment
 //!   the server is enabled and started. We therefore treat it as untrusted:
-//!   install validates/normalizes the package identifier + version (no shell
-//!   metacharacters, no path traversal), and the entry is written **disabled**
-//!   so install never auto-launches anything. The user surfaces and enables it
-//!   through the existing explicit start path.
+//!   install requires an exact version, verifies npm/PyPI ownership metadata or
+//!   an immutable OCI digest, validates the identifier (no shell metacharacters
+//!   or path traversal), and writes the entry **disabled**. Install never
+//!   downloads or launches a package. The user surfaces and enables it through
+//!   the existing explicit start path.
 //!
 //! ## The official `server.json` shape we parse
 //!
@@ -52,8 +53,8 @@
 //! ```
 //!
 //! - `packages[]` describes a runnable package (npm/pypi/oci) with a transport
-//!   (`stdio` or `http`/`streamable-http`/`sse`). A stdio package maps to a
-//!   launch command (`npx`/`uvx`/`docker`).
+//!   (`stdio` or `http`/`streamable-http`/`sse`). A verified stdio package maps
+//!   to a launch command (`npx`/`uvx`/`docker`).
 //! - `remotes[]` describes an already-hosted endpoint (a URL); installing one
 //!   writes a remote URL entry, no local command.
 
@@ -106,6 +107,8 @@ fn host() -> Arc<dyn McpCatalogHost> {
 /// the source stays unhardcoded ("nothing hardcoded"); a custom Mcp source can
 /// also carry its own `base_url`.
 const DEFAULT_REGISTRY_BASE: &str = "https://registry.modelcontextprotocol.io";
+const NPM_REGISTRY_BASE: &str = "https://registry.npmjs.org";
+const PYPI_REGISTRY_BASE: &str = "https://pypi.org";
 
 /// The list endpoint path on the registry (the `v0.1` API surface).
 const SERVERS_PATH: &str = "/v0.1/servers";
@@ -194,6 +197,11 @@ pub struct ServerJson {
     pub(crate) packages: Vec<PackageJson>,
     #[serde(default)]
     pub(crate) remotes: Vec<RemoteJson>,
+    /// Set only after the caller has independently verified the package's
+    /// registry metadata. A parsed catalog document is untrusted data and must
+    /// never become a launch command without this explicit provenance bit.
+    #[serde(skip)]
+    package_provenance_verified: bool,
 }
 
 /// One runnable package for a server (npm/pypi/oci + transport).
@@ -201,13 +209,20 @@ pub struct ServerJson {
 struct PackageJson {
     /// Package ecosystem: `npm`, `pypi`, `oci` (`registry_name` is the older
     /// field name; accept both).
-    #[serde(default, alias = "registry_name")]
+    #[serde(default, alias = "registry_name", alias = "registryType")]
     registry_type: Option<String>,
+    /// Package registry base URL from the current camelCase server.json schema.
+    #[serde(default, alias = "registry_base_url", alias = "registryBaseUrl")]
+    registry_base_url: Option<String>,
     /// Package identifier (npm name, pypi name, oci image ref).
     #[serde(default, alias = "name")]
     identifier: Option<String>,
     #[serde(default)]
     version: Option<String>,
+    /// Optional package-file digest from the server.json schema. It is surfaced
+    /// for review, but execution still requires registry provenance below.
+    #[serde(default, alias = "file_sha256", alias = "fileSha256")]
+    file_sha256: Option<String>,
     /// Transport descriptor. May be a `{ "type": "stdio" }` object (newer) or a
     /// bare `transport_type` string sibling (older); both are normalized.
     #[serde(default)]
@@ -253,6 +268,7 @@ impl ServerJson {
                 transport_type: Some("streamable-http".to_string()),
                 url: Some(url.into()),
             }],
+            package_provenance_verified: false,
         }
     }
 
@@ -271,8 +287,10 @@ impl ServerJson {
             version: version.clone(),
             packages: vec![PackageJson {
                 registry_type: Some("npm".to_string()),
+                registry_base_url: Some(NPM_REGISTRY_BASE.to_string()),
                 identifier: Some(identifier.into()),
                 version,
+                file_sha256: None,
                 transport: Some(TransportJson {
                     transport_type: Some("stdio".to_string()),
                     url: None,
@@ -280,7 +298,15 @@ impl ServerJson {
                 transport_type: None,
             }],
             remotes: Vec::new(),
+            package_provenance_verified: false,
         }
+    }
+
+    /// Mark package metadata as verified by a trusted source. Callers must only
+    /// use this after checking the package registry's exact name/version and
+    /// ownership marker, not merely because a catalog document parsed.
+    pub fn mark_package_provenance_verified(&mut self) {
+        self.package_provenance_verified = true;
     }
 }
 
@@ -379,8 +405,10 @@ pub fn server_to_detail(s: &ServerJson) -> Value {
         .map(|p| {
             json!({
                 "registry_type": p.registry_type,
+                "registry_base_url": p.registry_base_url,
                 "identifier": p.identifier,
                 "version": p.version,
+                "file_sha256": p.file_sha256,
                 "transport": p.transport_str(),
             })
         })
@@ -436,16 +464,59 @@ async fn fetch_servers(
     Ok((envelope.servers, envelope.metadata.next_cursor))
 }
 
+/// Pages a registry walk may follow. Bounds a broken or looping cursor.
+const MAX_REGISTRY_PAGES: usize = 50;
+
+/// Whether `candidate` is a newer registry version than `current`. Semver when
+/// both parse; otherwise the later listing wins, which matches a registry that
+/// lists versions oldest-first.
+fn registry_version_is_newer(current: Option<&str>, candidate: Option<&str>) -> bool {
+    let parse = |v: &str| semver::Version::parse(v.trim().trim_start_matches(['v', 'V'])).ok();
+    match (current, candidate) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(a), Some(b)) => match (parse(a), parse(b)) {
+            (Some(a), Some(b)) => b > a,
+            _ => true,
+        },
+    }
+}
+
+/// Fold one more registry entry into a `name → newest entry` choice.
+fn keep_newest(best: &mut Option<ServerJson>, candidate: ServerJson) {
+    let replace = match best {
+        None => true,
+        Some(current) => {
+            registry_version_is_newer(current.version.as_deref(), candidate.version.as_deref())
+        }
+    };
+    if replace {
+        *best = Some(candidate);
+    }
+}
+
 /// Find a server by its registry `name` (the catalog id). The official list
 /// endpoint has no per-name lookup yet, so we page through and match.
+///
+/// Walks EVERY page and keeps the newest version listed under the name: the
+/// update check already reads the whole registry, so stopping at the first page
+/// offered updates for servers beyond it that then failed with "not found", and
+/// taking the first match could install an older version than the one the check
+/// reported — a row that never cleared.
 async fn find_server(base_url: Option<&str>, id: &str) -> Result<ServerJson> {
-    // A single generous page covers the current registry size; cursor follow-up
-    // can be added when it grows past one page.
-    let (servers, _next) = fetch_servers(base_url, 200, None).await?;
-    servers
-        .into_iter()
-        .find(|s| s.name == id)
-        .ok_or_else(|| anyhow!("MCP server `{id}` not found in registry"))
+    let mut best: Option<ServerJson> = None;
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_REGISTRY_PAGES {
+        let (servers, next) = fetch_servers(base_url, 200, cursor.as_deref()).await?;
+        for server in servers.into_iter().filter(|s| s.name == id) {
+            keep_newest(&mut best, server);
+        }
+        match next {
+            Some(c) if !c.is_empty() => cursor = Some(c),
+            _ => break,
+        }
+    }
+    best.ok_or_else(|| anyhow!("MCP server `{id}` not found in registry"))
 }
 
 /// Parse a registry list document, returning just the servers. Accepts the
@@ -531,16 +602,21 @@ pub async fn latest_versions(base_url: Option<&str>) -> std::collections::HashMa
     // Page through the whole registry (following `next_cursor`) so a server that
     // sits beyond the first page can still report an update. Bounded by a page
     // cap so a broken/looping cursor can never spin forever.
-    const MAX_PAGES: usize = 50;
-    let mut map = std::collections::HashMap::new();
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut cursor: Option<String> = None;
-    for _ in 0..MAX_PAGES {
+    for _ in 0..MAX_REGISTRY_PAGES {
         let (servers, next) = match fetch_servers(base_url, 200, cursor.as_deref()).await {
             Ok(page) => page,
             Err(_) => break,
         };
         for s in servers {
-            if let Some(v) = s.version {
+            let Some(v) = s.version else {
+                continue;
+            };
+            // The registry can list one entry per published version; keep the
+            // newest rather than whichever happened to come last.
+            let newer = registry_version_is_newer(map.get(&s.name).map(String::as_str), Some(&v));
+            if newer {
                 map.insert(s.name, v);
             }
         }
@@ -552,14 +628,35 @@ pub async fn latest_versions(base_url: Option<&str>) -> std::collections::HashMa
     map
 }
 
-/// Resolve a registry server `id` into a validated [`InstallPlan`]. Prefers a
+/// Resolve a registry server `id` into a verified [`InstallPlan`]. Prefers a
 /// stdio package (the local launch path) and falls back to the first remote URL.
-/// The package identifier/version are validated to reject shell metacharacters
-/// and path traversal before they are baked into a launch command. **This never
-/// launches anything** — it only builds the descriptor.
+/// Executable packages must prove exact registry ownership before they are baked
+/// into a launch command. **This never launches or downloads anything** — it only
+/// builds the descriptor.
 pub async fn plan_install(base_url: Option<&str>, id: &str) -> Result<InstallPlan> {
     let server = find_server(base_url, id).await?;
-    plan_from_server(&server)
+    if has_stdio_package(&server) && registry_base(base_url) != DEFAULT_REGISTRY_BASE {
+        bail!(
+            "refusing executable MCP packages from a non-official registry mirror; use a hosted remote or the official MCP registry"
+        );
+    }
+    verify_and_plan(&server).await
+}
+
+/// Verify the package registry metadata before turning a parsed server into a
+/// launch command. Remote-only servers do not need package verification.
+///
+/// This is the boundary that prevents a public instruction/catalog file from
+/// becoming `npx`, `uvx`, or `docker` execution. The package manager still owns
+/// its normal artifact-integrity checks, but Ryu first requires an exact package
+/// name/version and the ownership marker used by the upstream MCP registries.
+pub async fn verify_and_plan(server: &ServerJson) -> Result<InstallPlan> {
+    let mut verified = server.clone();
+    if let Some(package) = server.packages.iter().find(|package| package.is_stdio()) {
+        verify_package_metadata(server, package).await?;
+        verified.mark_package_provenance_verified();
+    }
+    plan_from_server(&verified)
 }
 
 /// Build an [`InstallPlan`] from a parsed server (shared by [`plan_install`] and
@@ -578,6 +675,12 @@ pub fn plan_from_server(server: &ServerJson) -> Result<InstallPlan> {
 
     // Prefer a stdio package (a local launch). Fall back to a remote URL.
     if let Some(pkg) = server.packages.iter().find(|p| p.is_stdio()) {
+        if !server.package_provenance_verified {
+            bail!(
+                "refusing to install executable MCP package `{}` without verified registry provenance",
+                pkg.identifier.as_deref().unwrap_or("<unknown>")
+            );
+        }
         let entry = stdio_entry_for_package(pkg)?;
         return Ok(InstallPlan {
             server_name,
@@ -625,7 +728,7 @@ pub fn plan_from_server(server: &ServerJson) -> Result<InstallPlan> {
 
 /// Build a stdio launch entry for a package: pick the runner for its ecosystem
 /// (`npx` for npm, `uvx` for pypi, `docker run` for oci) and append the validated
-/// `identifier@version`. The identifier + version are validated first.
+/// exact version or digest. Provenance is checked by [`verify_and_plan`] first.
 fn stdio_entry_for_package(pkg: &PackageJson) -> Result<McpEntryPlan> {
     let identifier = pkg
         .identifier
@@ -645,7 +748,7 @@ fn stdio_entry_for_package(pkg: &PackageJson) -> Result<McpEntryPlan> {
             validate_version(v)?;
             Some(v.to_string())
         }
-        None => None,
+        None => bail!("executable package `{identifier}` must declare an immutable version"),
     };
 
     let registry = pkg
@@ -660,7 +763,10 @@ fn stdio_entry_for_package(pkg: &PackageJson) -> Result<McpEntryPlan> {
                 Some(v) => format!("{identifier}@{v}"),
                 None => identifier.to_string(),
             };
-            ("npx".to_string(), vec!["-y".to_string(), spec])
+            (
+                "npx".to_string(),
+                vec!["--ignore-scripts".to_string(), "-y".to_string(), spec],
+            )
         }
         "pypi" => {
             // uvx runs a python tool; pin the version with `package==x.y.z`.
@@ -671,11 +777,10 @@ fn stdio_entry_for_package(pkg: &PackageJson) -> Result<McpEntryPlan> {
             ("uvx".to_string(), vec![spec])
         }
         "oci" | "docker" => {
-            // OCI images launch via `docker run -i --rm <image>[:tag]`.
-            let spec = match &version {
-                Some(v) => format!("{identifier}:{v}"),
-                None => identifier.to_string(),
-            };
+            // OCI tags are mutable. Only an image digest is launchable from a
+            // catalog; the package version is metadata, not an OCI tag.
+            validate_oci_digest(identifier)?;
+            let spec = identifier.to_string();
             (
                 "docker".to_string(),
                 vec![
@@ -747,6 +852,14 @@ fn validate_version(version: &str) -> Result<()> {
     if version.starts_with('-') {
         bail!("package version `{version}` may not start with `-`");
     }
+    let lowered = version.to_ascii_lowercase();
+    if matches!(
+        lowered.as_str(),
+        "latest" | "stable" | "next" | "dev" | "canary" | "*"
+    ) || !version.chars().any(|c| c.is_ascii_digit())
+    {
+        bail!("package version `{version}` is not an immutable version");
+    }
     let ok = version
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_'));
@@ -754,6 +867,171 @@ fn validate_version(version: &str) -> Result<()> {
         bail!("package version `{version}` contains disallowed characters");
     }
     Ok(())
+}
+
+fn has_stdio_package(server: &ServerJson) -> bool {
+    server.packages.iter().any(PackageJson::is_stdio)
+}
+
+fn validate_oci_digest(identifier: &str) -> Result<()> {
+    let Some((_, digest)) = identifier.rsplit_once("@sha256:") else {
+        bail!("OCI package `{identifier}` must use an immutable @sha256 digest instead of a tag");
+    };
+    if digest.len() != 64 || !digest.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("OCI package `{identifier}` has an invalid sha256 digest");
+    }
+    Ok(())
+}
+
+fn validate_registry_base(package: &PackageJson, expected: &str) -> Result<()> {
+    if let Some(base) = package
+        .registry_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|base| !base.is_empty())
+    {
+        let normalized = base.trim_end_matches('/');
+        if normalized != expected {
+            bail!("package registry `{normalized}` is not the verified `{expected}` registry");
+        }
+    }
+    Ok(())
+}
+
+fn validate_optional_file_sha256(package: &PackageJson) -> Result<()> {
+    let Some(digest) = package.file_sha256.as_deref() else {
+        return Ok(());
+    };
+    if digest.len() != 64
+        || !digest
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+    {
+        bail!("package file_sha256 must be 64 lowercase hexadecimal characters");
+    }
+    Ok(())
+}
+
+async fn verify_package_metadata(server: &ServerJson, package: &PackageJson) -> Result<()> {
+    let identifier = package
+        .identifier
+        .as_deref()
+        .map(str::trim)
+        .filter(|identifier| !identifier.is_empty())
+        .ok_or_else(|| anyhow!("package has no identifier"))?;
+    validate_package_identifier(identifier)?;
+    let version = package
+        .version
+        .as_deref()
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .ok_or_else(|| anyhow!("package `{identifier}` has no immutable version"))?;
+    validate_version(version)?;
+    validate_optional_file_sha256(package)?;
+
+    let registry = package
+        .registry_type
+        .as_deref()
+        .unwrap_or("npm")
+        .to_ascii_lowercase();
+    match registry.as_str() {
+        "npm" => {
+            validate_registry_base(package, NPM_REGISTRY_BASE)?;
+            let url = format!(
+                "{NPM_REGISTRY_BASE}/{}/{}",
+                urlencode(identifier),
+                urlencode(version)
+            );
+            let body = host()
+                .guarded_get_bytes(&url)
+                .await
+                .with_context(|| format!("verifying npm package `{identifier}@{version}`"))?;
+            let metadata: Value = serde_json::from_slice(&body)
+                .with_context(|| format!("parsing npm metadata for `{identifier}@{version}`"))?;
+            let actual_name = metadata.get("name").and_then(Value::as_str);
+            let actual_version = metadata.get("version").and_then(Value::as_str);
+            let mcp_name = metadata.get("mcpName").and_then(Value::as_str);
+            if actual_name != Some(identifier)
+                || actual_version != Some(version)
+                || mcp_name != Some(server.name.as_str())
+            {
+                bail!(
+                    "npm package `{identifier}@{version}` does not prove ownership of MCP server `{}`",
+                    server.name
+                );
+            }
+        }
+        "pypi" => {
+            validate_registry_base(package, PYPI_REGISTRY_BASE)?;
+            let url = format!(
+                "{PYPI_REGISTRY_BASE}/pypi/{}/{}/json",
+                urlencode(identifier),
+                urlencode(version)
+            );
+            let body = host()
+                .guarded_get_bytes(&url)
+                .await
+                .with_context(|| format!("verifying PyPI package `{identifier}=={version}`"))?;
+            let metadata: Value = serde_json::from_slice(&body)
+                .with_context(|| format!("parsing PyPI metadata for `{identifier}=={version}`"))?;
+            let info = metadata
+                .get("info")
+                .ok_or_else(|| anyhow!("PyPI metadata has no `info` object"))?;
+            let actual_name = info.get("name").and_then(Value::as_str);
+            let actual_version = info.get("version").and_then(Value::as_str);
+            let description = info
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if actual_name
+                .is_none_or(|name| normalize_python_name(name) != normalize_python_name(identifier))
+                || actual_version != Some(version)
+                || !has_mcp_name_marker(description, &server.name)
+            {
+                bail!(
+                    "PyPI package `{identifier}=={version}` does not prove ownership of MCP server `{}`",
+                    server.name
+                );
+            }
+        }
+        "oci" | "docker" => {
+            validate_oci_digest(identifier)?;
+        }
+        other => bail!("unsupported package registry_type `{other}`"),
+    }
+    Ok(())
+}
+
+fn normalize_python_name(name: &str) -> String {
+    name.chars()
+        .map(|character| match character {
+            '_' | '.' => '-',
+            other => other.to_ascii_lowercase(),
+        })
+        .collect()
+}
+
+fn has_mcp_name_marker(description: &str, server_name: &str) -> bool {
+    let marker = format!("mcp-name: {server_name}");
+    let mut offset = 0;
+    while let Some(relative) = description[offset..].find(&marker) {
+        let start = offset + relative;
+        let before_ok = start == 0
+            || description[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|character| character.is_whitespace() || character == '<');
+        let end = start + marker.len();
+        let after_ok = description[end..]
+            .chars()
+            .next()
+            .is_none_or(|character| character.is_whitespace() || character == '<');
+        if before_ok && after_ok {
+            return true;
+        }
+        offset = end;
+    }
+    false
 }
 
 /// Validate a remote URL: it must be a well-formed `https`/`http` URL. (We allow
@@ -810,6 +1088,12 @@ mod tests {
             .into_iter()
             .find(|s| s.name == name)
             .expect("server present")
+    }
+
+    fn verified_server_named(name: &str) -> ServerJson {
+        let mut server = server_named(name);
+        server.mark_package_provenance_verified();
+        server
     }
 
     #[test]
@@ -888,21 +1172,54 @@ mod tests {
     }
 
     #[test]
+    fn accepts_current_camel_case_package_fields() {
+        let json = br#"{
+            "servers": [{
+                "name": "io.github.acme/files",
+                "packages": [{
+                    "registryType": "npm",
+                    "registryBaseUrl": "https://registry.npmjs.org",
+                    "identifier": "@acme/mcp-files",
+                    "version": "1.4.0",
+                    "fileSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    "transport": { "type": "stdio" }
+                }]
+            }]
+        }"#;
+        let servers = parse_server_list(json).expect("camelCase package fields parse");
+        let detail = server_to_detail(&servers[0]);
+        assert_eq!(detail["packages"][0]["registry_type"], "npm");
+        assert_eq!(
+            detail["packages"][0]["registry_base_url"],
+            "https://registry.npmjs.org"
+        );
+        assert_eq!(
+            detail["packages"][0]["file_sha256"].as_str().map(str::len),
+            Some(64)
+        );
+    }
+
+    #[test]
     fn stdio_npm_package_builds_npx_entry() {
-        let plan = plan_from_server(&server_named("io.github.acme/files")).expect("plan");
+        let plan = plan_from_server(&verified_server_named("io.github.acme/files")).expect("plan");
         assert_eq!(plan.server_name, "io.github.acme/files");
         assert_eq!(
             plan.entry,
             McpEntryPlan::Stdio {
                 command: "npx".to_string(),
-                args: vec!["-y".to_string(), "@acme/mcp-files@1.4.0".to_string()],
+                args: vec![
+                    "--ignore-scripts".to_string(),
+                    "-y".to_string(),
+                    "@acme/mcp-files@1.4.0".to_string(),
+                ],
             }
         );
     }
 
     #[test]
     fn stdio_pypi_package_builds_uvx_entry() {
-        let plan = plan_from_server(&server_named("io.github.acme/py-tool")).expect("plan");
+        let plan =
+            plan_from_server(&verified_server_named("io.github.acme/py-tool")).expect("plan");
         assert_eq!(
             plan.entry,
             McpEntryPlan::Stdio {
@@ -924,6 +1241,15 @@ mod tests {
     }
 
     #[test]
+    fn registry_versions_keep_the_newest_by_semver() {
+        assert!(registry_version_is_newer(Some("1.2.0"), Some("1.10.0")));
+        assert!(!registry_version_is_newer(Some("1.10.0"), Some("1.2.0")));
+        assert!(!registry_version_is_newer(Some("1.2.0"), None));
+        assert!(registry_version_is_newer(None, Some("0.1.0")));
+        assert!(!registry_version_is_newer(Some("v2.0.0"), Some("2.0.0")));
+    }
+
+    #[test]
     fn rejects_shell_metacharacters_in_identifier() {
         // A malicious package identifier carrying a shell injection is rejected
         // before it can become a launch command.
@@ -939,10 +1265,19 @@ mod tests {
     }
 
     #[test]
+    fn executable_packages_require_verified_provenance() {
+        let error = plan_from_server(&server_named("io.github.acme/files"))
+            .expect_err("unverified package must not become a launch command");
+        assert!(error.to_string().contains("verified registry provenance"));
+    }
+
+    #[test]
     fn rejects_bad_version_and_name() {
         assert!(validate_version("1.2.3").is_ok());
         assert!(validate_version("1.2.3-rc.1").is_ok());
-        assert!(validate_version("latest").is_ok());
+        assert!(validate_version("latest").is_err());
+        assert!(validate_version("next").is_err());
+        assert!(validate_version("main").is_err());
         assert!(validate_version("1.2.3; rm").is_err());
 
         assert!(sanitize_server_name("io.github.acme/files").is_ok());
@@ -950,6 +1285,32 @@ mod tests {
         assert!(sanitize_server_name("bad__name").is_err());
         assert!(sanitize_server_name("has space").is_err());
         assert!(sanitize_server_name("   ").is_err());
+    }
+
+    #[test]
+    fn rejects_floating_or_unpinned_oci_packages() {
+        let mut server = ServerJson::npm_stdio(
+            "io.github.acme/container",
+            None,
+            "ghcr.io/acme/mcp",
+            Some("1.0.0".to_string()),
+        );
+        server.packages[0].registry_type = Some("oci".to_string());
+        server.mark_package_provenance_verified();
+        let error = plan_from_server(&server).expect_err("OCI tags are mutable");
+        assert!(error.to_string().contains("@sha256"));
+    }
+
+    #[test]
+    fn package_ownership_markers_are_boundary_aware() {
+        assert!(has_mcp_name_marker(
+            "<!-- mcp-name: io.acme/weather -->",
+            "io.acme/weather"
+        ));
+        assert!(!has_mcp_name_marker(
+            "mcp-name: io.acme/weather.evil",
+            "io.acme/weather"
+        ));
     }
 
     #[test]

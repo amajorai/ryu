@@ -52,7 +52,9 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip";
+import { useDisplayDayRevision } from "@ryu/ui/lib/display-day.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import {
 	formatDateTime,
 	formatTime,
@@ -111,9 +113,17 @@ import {
 } from "./message-action-types.ts";
 import {
 	type MessageGroupPosition,
-	messageBubbleRadius,
 	messageGroupPositionFor,
 } from "./message-bubble.ts";
+import {
+	MessageContextMenu,
+	type MessageContextMenuReactions,
+} from "./message-context-menu.tsx";
+import styles from "./message-list.module.css";
+import {
+	type BubbleEntranceState,
+	reconcileBubbleEntranceState,
+} from "./message-list-entrance.ts";
 import {
 	clearUnreadMessageState,
 	getIncomingMessageIds,
@@ -121,6 +131,7 @@ import {
 	reconcileUnreadMessageState,
 	type UnreadMessageState,
 } from "./message-list-unread.ts";
+import { isServerAssignedMessageId } from "./message-reaction-id.ts";
 import type { MessageReadReceiptState } from "./message-read-receipt.tsx";
 import { AcpUsageStats, MessageStats } from "./message-stats.tsx";
 import { PinnedUserMessageBar } from "./pinned-user-message-bar.tsx";
@@ -132,6 +143,8 @@ import {
 	hasVisibleContentAtNoDetail,
 	isHiddenAtNoDetail,
 } from "./tool-detail-visibility.ts";
+import { isAgentMessageToolPart } from "./tools/agent-message-tool-logic.ts";
+import { AgentMessagesMarker } from "./tools/agent-messages-marker.tsx";
 import { ToolGroup } from "./tools/tool-group.tsx";
 import { isToolActivityGroupCandidate } from "./tools/tool-grouping.ts";
 import { ToolRenderer as DefaultToolRenderer } from "./tools/tool-renderer.tsx";
@@ -165,24 +178,51 @@ import {
 	UserMessage,
 } from "./user-message.tsx";
 import { extractCitations } from "./utils/citations.ts";
-import { normalizeAssistantToolParts } from "./utils/tool-part-normalizer.ts";
-import { WorkflowRunProgressCard } from "./workflow-run-part.tsx";
-
-function messageIsPersisted(message: UIMessage): boolean {
-	const candidate = message as UIMessage & {
-		metadata?: unknown;
-		persisted?: unknown;
-	};
-	if (candidate.persisted === true) {
-		return true;
-	}
-	if (typeof candidate.metadata !== "object" || candidate.metadata === null) {
-		return false;
-	}
-	return (
-		(candidate.metadata as { ryuPersisted?: unknown }).ryuPersisted === true
-	);
-}
+import {
+	getAssistantFileMeta,
+	getAssistantVideoUrl,
+	nativeSdkNumber,
+} from "./utils/live-file-media.ts";
+import {
+	getAssistantImageMeta,
+	getImageGenerationPart,
+	getVideoGenerationPart,
+	isErrorPart,
+	isTextPart,
+	nativeOptionalSdkText,
+} from "./utils/live-media-observations.ts";
+import {
+	getFailoverNote,
+	isWorkflowRunPart,
+} from "./utils/live-message-flags.ts";
+import {
+	isInterruptedMessage,
+	messageIsEphemeral,
+	messageIsPersisted,
+	normalizeMessages,
+} from "./utils/live-message-observations.ts";
+import { nativeSdkCallable } from "./utils/native-dom-observations.ts";
+import {
+	nativeCreatedAtLookup,
+	nativeMessageDate,
+} from "./utils/native-message-date-abi.ts";
+import type {
+	NativeSdkValue,
+	RenderedMessage,
+} from "./utils/native-sdk-observation.ts";
+import {
+	isV5SdkToolPart as isV5ToolPart,
+	isSdkWidgetAvailablePart as isWidgetAvailablePart,
+	nativeWidgetToolCallId,
+	type RenderedSdkPart,
+	type SdkToolPart,
+} from "./utils/sdk-tool-observations.ts";
+import { normalizeUiMessageToolParts as normalizeAssistantToolParts } from "./utils/tool-part-normalizer.ts";
+import type { TranscriptScrollEvent } from "./utils/transcript-scroll-event.ts";
+import {
+	type WorkflowResumeHandler,
+	WorkflowRunProgressCard,
+} from "./workflow-run-part.tsx";
 
 export interface MessageListProps {
 	/** Agent identities used when an agent-comms tool becomes a transcript activity. */
@@ -211,6 +251,7 @@ export interface MessageListProps {
 	assistantTitle?: string;
 	className?: string;
 	classNames?: {
+		messageList?: string;
 		userMessage?: string;
 	};
 	/**
@@ -286,7 +327,7 @@ export interface MessageListProps {
 	messageActions?: ContributedMessageAction[];
 	/** Durable read markers grouped by message id for the transcript footer. */
 	messageReadReceipts?: ReadonlyMap<string, MessageReadReceiptState>;
-	messages: UIMessage[];
+	messages: RenderedMessage[];
 	onAgentUiSubmit?: AgentUiSubmit;
 	onAnnotateImage?: (image: {
 		filename?: string;
@@ -328,11 +369,12 @@ export interface MessageListProps {
 	onOpenMention?: (item: MentionItem) => void;
 	/**
 	 * Quote a text selection made inside a message. When provided, selecting text
-	 * in any message surfaces a floating "Quote" button; clicking it calls this
-	 * with the selected plain text (the surface stashes it as a pending composer
-	 * quote). When omitted, no selection toolbar is shown.
+	 * in any message surfaces a floating annotate box; its "Quote" action calls
+	 * this with the selected plain text and the typed note, if any (the surface
+	 * stashes the text as a pending composer quote). When omitted, the box only
+	 * offers contributed selection actions, and nothing when there are none.
 	 */
-	onQuote?: (text: string) => void;
+	onQuote?: (text: string, note?: string) => void;
 	/**
 	 * Regenerate an assistant reply as a new version. When provided, a refresh
 	 * button appears in each assistant turn's hover toolbar; clicking it calls this
@@ -360,6 +402,11 @@ export interface MessageListProps {
 	) => void;
 	onReviewFileEdits?: (paths: string[]) => void;
 	/**
+	 * Rewind code and/or conversation to just before a user message. When
+	 * provided, the user message's overflow menu offers "Rewind to here".
+	 */
+	onRewindMessage?: (messageId: string, text: string) => void;
+	/**
 	 * Switch the active version at a branch point. When a message has more than one
 	 * version (see `versions`), a `< n / m >` pager renders; stepping it calls this
 	 * with the target version's message id.
@@ -372,7 +419,7 @@ export interface MessageListProps {
 	 */
 	onSpeak?: (text: string) => void;
 	onUndoFileEdits?: (plan: FileEditUndoPlan) => Promise<void>;
-	onWorkflowResume?: (runId: string, payload: string) => Promise<unknown>;
+	onWorkflowResume?: WorkflowResumeHandler;
 	previewResolvers?: LinkPreviewResolvers;
 	/** Message id currently selected by the host's chat-local search. */
 	searchActiveMessageId?: string;
@@ -406,7 +453,10 @@ export interface MessageListProps {
 	statsModelName?: string;
 	/** Enabled-plugin gate for the session stats footer. */
 	statsPluginEnabled?: boolean;
-	/** Normalized subscription usage passed by the desktop host. */
+	/**
+	 * Normalized subscription usage passed by the desktop host. `accountLabel`
+	 * names the saved subscription account the usage belongs to, when known.
+	 */
 	statsUsage?: import("./stats-model.ts").StatsUsageSnapshot | null;
 	status: ChatStatus;
 	suppressQuestionTool?: boolean;
@@ -420,9 +470,9 @@ export interface MessageListProps {
 }
 
 interface ToolPartBase {
-	input?: unknown;
-	output?: unknown;
-	result?: unknown;
+	input?: NativeSdkValue;
+	output?: NativeSdkValue;
+	result?: NativeSdkValue;
 	state?: string;
 	toolCallId?: string;
 	type: string;
@@ -437,26 +487,6 @@ interface ToolRendererProps {
 	toolRenderers?: Record<string, React.ComponentType<CustomToolRendererProps>>;
 }
 
-function normalizeMessages(messages: UIMessage[]): UIMessage[] {
-	let changed = false;
-	const normalized = messages.map((message) => {
-		if (Array.isArray(message.parts) && message.parts.length > 0) {
-			return message;
-		}
-		const raw = message as { content?: string; text?: string };
-		const content = raw.content ?? raw.text;
-		if (typeof content !== "string" || !content) {
-			return message;
-		}
-		changed = true;
-		return {
-			...message,
-			parts: [{ type: "text", text: content }],
-		} as UIMessage;
-	});
-	return changed ? normalized : messages;
-}
-
 // `hideToolDetail` is not a cosmetic argument here. At Detail level "None" a
 // turn made only of tool calls renders NOTHING, so asking "does the last
 // assistant message have content" against the raw parts would answer yes, drop
@@ -464,7 +494,7 @@ function normalizeMessages(messages: UIMessage[]): UIMessage[] {
 // time the agent is actually working. The question has to be asked at the same
 // detail level the transcript is drawing at.
 function getLastAssistantHasContent(
-	messages: UIMessage[],
+	messages: RenderedMessage[],
 	hideToolDetail: boolean
 ) {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -489,11 +519,11 @@ function getLastAssistantHasContent(
 /** What the live status row says the agent is doing right now. */
 type PlanningActivity = "thinking" | "working" | "typing";
 
-const PLANNING_LABELS: Record<PlanningActivity, string> = {
+const PLANNING_LABELS = {
 	thinking: "Assistant is thinking",
 	working: "Assistant is working",
 	typing: "Assistant is typing",
-};
+} satisfies Record<PlanningActivity, string>;
 
 /**
  * Read the current activity off the last assistant message.
@@ -507,7 +537,7 @@ const PLANNING_LABELS: Record<PlanningActivity, string> = {
  * nothing else still reads as work in progress, since the turn has not settled —
  * the row only exists while `isStreaming`.
  */
-function getPlanningActivity(messages: UIMessage[]): PlanningActivity {
+function getPlanningActivity(messages: RenderedMessage[]): PlanningActivity {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const msg = messages[i];
 		if (msg?.role !== "assistant") {
@@ -518,7 +548,7 @@ function getPlanningActivity(messages: UIMessage[]): PlanningActivity {
 			// `unknown`, deliberately: `isV5ToolPart` narrows the union so far that
 			// the following `isTextPart` sees `never` and its guard stops compiling.
 			// Both predicates already validate the shape they claim.
-			const part: unknown = parts[p];
+			const part = parts[p];
 			if (isV5ToolPart(part)) {
 				return "working";
 			}
@@ -531,11 +561,16 @@ function getPlanningActivity(messages: UIMessage[]): PlanningActivity {
 	return "thinking";
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+/** `https://www.example.com/x` → `example.com`, for a citation's domain line. */
+/** A Switchboard send/ask call; MCP parts carry the name in their type, the
+ * AI SDK's dynamic-tool form in `toolName`. */
+function isAgentMessageSdkPart(part: SdkToolPart): boolean {
+	return isAgentMessageToolPart(
+		part.type,
+		part.type === "dynamic-tool" ? part.toolName : undefined
+	);
 }
 
-/** `https://www.example.com/x` → `example.com`, for a citation's domain line. */
 function hostnameOfCitation(url: string): string {
 	try {
 		return new URL(url).hostname.replace(/^www\./, "");
@@ -544,82 +579,8 @@ function hostnameOfCitation(url: string): string {
 	}
 }
 
-function isTextPart(part: unknown): part is { type: "text"; text: string } {
-	return (
-		isRecord(part) && part.type === "text" && typeof part.text === "string"
-	);
-}
-
-function isErrorPart(
-	part: unknown
-): part is { type: "error"; title?: string; message: string } {
-	return (
-		isRecord(part) && part.type === "error" && typeof part.message === "string"
-	);
-}
-
-/** An assistant image part, including the filename used by the lightbox. */
-function getAssistantImageMeta(
-	part: unknown
-): { filename?: string; url: string } | null {
-	if (!isRecord(part)) {
-		return null;
-	}
-	const type = part.type;
-	const media =
-		typeof part.mediaType === "string"
-			? part.mediaType
-			: typeof part.mimeType === "string"
-				? part.mimeType
-				: undefined;
-	const filename =
-		typeof part.filename === "string"
-			? part.filename
-			: typeof part.fileName === "string"
-				? part.fileName
-				: typeof part.name === "string"
-					? part.name
-					: undefined;
-
-	const rawUrl =
-		type === "image"
-			? typeof part.url === "string"
-				? part.url
-				: typeof part.image === "string"
-					? part.image
-					: undefined
-			: type === "data-image" && isRecord(part.data)
-				? typeof part.data.url === "string"
-					? part.data.url
-					: undefined
-				: typeof part.url === "string"
-					? part.url
-					: undefined;
-	const rawData =
-		type === "file" && typeof part.data === "string" ? part.data : undefined;
-	const url =
-		rawUrl ?? (rawData && media ? `data:${media};base64,${rawData}` : null);
-	if (
-		!(
-			url &&
-			(type === "image" || type === "data-image" || media?.startsWith("image/"))
-		)
-	) {
-		return null;
-	}
-	return { filename, url };
-}
-
 /** Longest edge, in px, a generated image occupies in the transcript. */
 const MAX_IMAGE_EDGE = 360;
-
-const IMAGE_GENERATION_STATUSES = new Set<ImageGenerationStatus>([
-	"queued",
-	"generating",
-	"refining",
-	"complete",
-	"error",
-]);
 
 export interface ImageGenerationPartData {
 	/** The prompt that produced it, shown under the frame. */
@@ -632,33 +593,6 @@ export interface ImageGenerationPartData {
 	statusText?: string;
 	/** The finished image, once there is one. */
 	url?: string;
-}
-
-/**
- * A client-only image-generation part — the *in-flight* half of an inline
- * `/api/images/generate` turn. The producer (ChatPage / AssistantPanel) appends
- * this the moment generation starts and rewrites the same message in place when
- * the engine answers, so the frame is reserved up front and the finished image
- * fades in with no layout shift. Producer and consumer agree on this exact
- * shape, same as the `file`-part contract above.
- */
-function getImageGenerationPart(part: unknown): ImageGenerationPartData | null {
-	if (!isRecord(part) || part.type !== "data-image-generation") {
-		return null;
-	}
-	const data = isRecord(part.data) ? part.data : {};
-	const status =
-		typeof data.status === "string" &&
-		IMAGE_GENERATION_STATUSES.has(data.status as ImageGenerationStatus)
-			? (data.status as ImageGenerationStatus)
-			: "generating";
-	return {
-		prompt: typeof data.prompt === "string" ? data.prompt : undefined,
-		status,
-		statusText:
-			typeof data.statusText === "string" ? data.statusText : undefined,
-		url: typeof data.url === "string" ? data.url : undefined,
-	};
 }
 
 /**
@@ -708,8 +642,15 @@ function AssistantGeneratedImage({
 			? Math.round(MAX_IMAGE_EDGE * (size.width / size.height))
 			: MAX_IMAGE_EDGE;
 
+	const frameStyle: NativeMessageMediaFrameStyle = {
+		"--message-media-max-width": `${maxWidth}px`,
+	};
+
 	return (
-		<div className="w-full" style={{ maxWidth }}>
+		<div
+			className="w-full max-w-(--message-media-max-width)"
+			style={frameStyle}
+		>
 			<ImageGeneration
 				aspectRatio={size ? `${size.width} / ${size.height}` : "1 / 1"}
 				mediaClassName="[&>*]:object-contain [&_img]:object-contain"
@@ -738,14 +679,6 @@ function AssistantGeneratedImage({
 	);
 }
 
-const VIDEO_GENERATION_STATUSES = new Set<VideoGenerationStatus>([
-	"queued",
-	"generating",
-	"rendering",
-	"complete",
-	"error",
-]);
-
 export interface VideoGenerationPartData {
 	/** A still to hold the frame while the clip buffers, when the engine gave one. */
 	poster?: string;
@@ -759,32 +692,6 @@ export interface VideoGenerationPartData {
 	statusText?: string;
 	/** The finished clip, once there is one. */
 	url?: string;
-}
-
-/**
- * A client-only video-generation part — the video twin of
- * {@link getImageGenerationPart}, produced by ChatPage's handleGenerateVideo in
- * this exact shape. Same contract, same in-place rewrite when the engine
- * answers.
- */
-function getVideoGenerationPart(part: unknown): VideoGenerationPartData | null {
-	if (!isRecord(part) || part.type !== "data-video-generation") {
-		return null;
-	}
-	const data = isRecord(part.data) ? part.data : {};
-	const status =
-		typeof data.status === "string" &&
-		VIDEO_GENERATION_STATUSES.has(data.status as VideoGenerationStatus)
-			? (data.status as VideoGenerationStatus)
-			: "generating";
-	return {
-		poster: typeof data.poster === "string" ? data.poster : undefined,
-		prompt: typeof data.prompt === "string" ? data.prompt : undefined,
-		status,
-		statusText:
-			typeof data.statusText === "string" ? data.statusText : undefined,
-		url: typeof data.url === "string" ? data.url : undefined,
-	};
 }
 
 const SECONDS_PER_MINUTE = 60;
@@ -819,6 +726,8 @@ function AssistantGeneratedVideo({
 	onRetry?: () => void;
 	showStatus: boolean;
 }) {
+	const safeUrl = safeMediaUrl(url);
+	const safePoster = safeMediaUrl(poster);
 	const [meta, setMeta] = useState<{
 		duration: number;
 		height: number;
@@ -846,8 +755,15 @@ function AssistantGeneratedVideo({
 			? Math.round(MAX_IMAGE_EDGE * (meta.width / meta.height))
 			: MAX_IMAGE_EDGE;
 
+	const frameStyle: NativeMessageMediaFrameStyle = {
+		"--message-media-max-width": `${maxWidth}px`,
+	};
+
 	return (
-		<div className="w-full" style={{ maxWidth }}>
+		<div
+			className="w-full max-w-(--message-media-max-width)"
+			style={frameStyle}
+		>
 			<VideoGeneration
 				aspectRatio={meta ? `${meta.width} / ${meta.height}` : "16 / 9"}
 				duration={
@@ -857,25 +773,24 @@ function AssistantGeneratedVideo({
 				}
 				mediaClassName="[&>*]:object-contain [&_video]:object-contain"
 				onRetry={onRetry}
-				poster={poster}
+				poster={safePoster ?? undefined}
 				prompt={prompt}
 				showStatus={showStatus}
 				size="fluid"
 				status={status}
 				statusText={statusText}
 			>
-				{url ? (
-					// biome-ignore lint/a11y/useMediaCaption: a generated clip has no caption track
+				{safeUrl ? (
 					<video
 						aria-label={prompt ?? "Generated video"}
 						controls
 						onLoadedMetadata={handleLoadedMetadata}
 						playsInline
-						poster={poster}
+						poster={safePoster ?? undefined}
 						preload="metadata"
-						src={url}
+						src={safeUrl}
 					>
-						<a href={url}>Download video</a>
+						<a href={safeUrl}>Download video</a>
 					</video>
 				) : null}
 			</VideoGeneration>
@@ -883,101 +798,7 @@ function AssistantGeneratedVideo({
 	);
 }
 
-/**
- * An assistant video part — the `file`-part twin of {@link getAssistantImageUrl},
- * so a clip that merely arrives (streamed by Core, or the extra clips of a
- * multi-clip generation) gets the same reserved frame and a real player instead
- * of a download link.
- */
-function getAssistantVideoUrl(part: unknown): string | null {
-	if (!isRecord(part) || part.type !== "file") {
-		return null;
-	}
-	const filePart = part as {
-		mediaType?: string;
-		mimeType?: string;
-		url?: string;
-		data?: string;
-	};
-	const media = filePart.mediaType ?? filePart.mimeType;
-	if (!media?.startsWith("video/")) {
-		return null;
-	}
-	if (filePart.url) {
-		return filePart.url;
-	}
-	if (filePart.data) {
-		return `data:${media};base64,${filePart.data}`;
-	}
-	return null;
-}
-
-/**
- * A NON-image, NON-video assistant `file` part (audio, or any other mime),
- * resolved to a playable/downloadable url + its media type. Images and videos
- * are handled separately by {@link getAssistantImageMeta} and
- * {@link getAssistantVideoUrl}; this covers the rest so inline audio (and other
- * attachments Core streams) isn't silently dropped.
- */
-function getAssistantFileMeta(
-	part: unknown
-): { filename: string; media: string; size?: number; url: string } | null {
-	if (!isRecord(part) || part.type !== "file") {
-		return null;
-	}
-	const filePart = part as {
-		data?: string;
-		fileName?: string;
-		filename?: string;
-		mediaType?: string;
-		mimeType?: string;
-		name?: string;
-		size?: number;
-		url?: string;
-	};
-	const media = filePart.mediaType ?? filePart.mimeType;
-	if (!media || media.startsWith("image/") || media.startsWith("video/")) {
-		return null;
-	}
-	const url =
-		filePart.url ??
-		(filePart.data ? `data:${media};base64,${filePart.data}` : undefined);
-	if (url) {
-		return {
-			filename:
-				filePart.filename ?? filePart.fileName ?? filePart.name ?? "Attachment",
-			media,
-			size: typeof filePart.size === "number" ? filePart.size : undefined,
-			url,
-		};
-	}
-	return null;
-}
-
-function isV5ToolPart(part: unknown): part is ToolPartBase {
-	if (!isRecord(part)) {
-		return false;
-	}
-	const partType = part.type;
-	return (
-		partType === "dynamic-tool" ||
-		(typeof partType === "string" && partType.startsWith("tool-"))
-	);
-}
-
-/**
- * A `data-tool-widget-available` stream part — the live app widget Core mints for
- * a completed tool call. Not a v5 tool part; its payload is nested under `.data`
- * (D6) and carries the shared `toolCallId` that ties it to its tool row.
- */
-function isWidgetAvailablePart(part: unknown): part is {
-	type: "data-tool-widget-available";
-	data: { toolCallId?: string };
-} {
-	return isRecord(part) && part.type === "data-tool-widget-available";
-}
-
-function getTextFromParts(parts: unknown[], joiner: string): string {
+function getTextFromParts(parts: RenderedSdkPart[], joiner: string): string {
 	return parts
 		.filter(isTextPart)
 		.map((part) => part.text)
@@ -1006,6 +827,12 @@ const MAX_PREVIEW_FILES = 4;
  * to the beUI PreviewRail keeps every fact, just in a beUI surface.
  */
 function ChatRailPreview({ item }: { item: PreviewRailItem }) {
+	// SAFETY: This callback is bound only to this surface's railItems, whose
+	// fully typed ChatTocItem[] producer maps each row as data: item. The native
+	// non-generic PreviewRail/MessageScroller forwards that same item unchanged;
+	// its arbitrary payload slot loses the owned type, not the runtime identity.
+	// This erased view retains opaque React avatar fields and the single data
+	// getter read; it neither parses JSON nor infers a DTO from partial fields.
 	const toc = item.data as ChatTocItem | undefined;
 	if (!toc) {
 		return (
@@ -1042,13 +869,13 @@ function ChatRailPreview({ item }: { item: PreviewRailItem }) {
 						</span>
 					) : null}
 					{toc.agentName ? (
-						<p className="mb-0.5 text-[10px] text-muted-foreground leading-3">
+						<p className="type-compact mb-0.5 text-muted-foreground leading-3">
 							{toc.agentName}
 						</p>
 					) : null}
 					{toc.description ? (
 						<p
-							className="line-clamp-2 text-[11px] text-muted-foreground leading-4"
+							className="type-caption line-clamp-2 text-muted-foreground leading-4"
 							data-slot="preview-rail-description"
 						>
 							{toc.description}
@@ -1064,12 +891,12 @@ function ChatRailPreview({ item }: { item: PreviewRailItem }) {
 								className="flex min-w-0 items-baseline justify-between gap-2"
 								key={file.name}
 							>
-								<span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-[10px] leading-3">
+								<span className="type-compact flex min-w-0 items-center gap-1.5 truncate font-mono leading-3">
 									<FileTypeIcon className="size-3.5" path={file.name} />
 									{file.name}
 								</span>
 								{file.stats ? (
-									<span className="shrink-0 text-[9px] text-muted-foreground tabular-nums">
+									<span className="type-micro shrink-0 text-muted-foreground tabular-nums">
 										{file.stats}
 									</span>
 								) : null}
@@ -1077,7 +904,7 @@ function ChatRailPreview({ item }: { item: PreviewRailItem }) {
 						))}
 					</ul>
 					{extraFiles > 0 ? (
-						<p className="mt-0.5 text-[9px] text-muted-foreground">
+						<p className="type-micro mt-0.5 text-muted-foreground">
 							+{extraFiles} more
 						</p>
 					) : null}
@@ -1111,8 +938,8 @@ function CopyButton({
 	};
 	return (
 		<Button
+			appearance="transcript-copy"
 			aria-label={copied ? "Message copied" : "Copy message"}
-			className={cn("size-6 rounded-md opacity-50 hover:opacity-100")}
 			onClick={handleCopy}
 			onMouseDown={(event) => event.stopPropagation()}
 			onPointerDown={(event) => {
@@ -1126,13 +953,15 @@ function CopyButton({
 			<div className="relative h-3.5 w-3.5">
 				<IconCopy
 					className={cn(
-						"absolute inset-0 h-3.5 w-3.5 text-muted-foreground transition-[opacity,transform] duration-150 ease-out",
+						"absolute inset-0 h-3.5 w-3.5 text-muted-foreground duration-150 ease-out",
+						styles.copyTransition,
 						copied ? "scale-50 opacity-0" : "scale-100 opacity-100"
 					)}
 				/>
 				<IconCheck
 					className={cn(
-						"absolute inset-0 h-3.5 w-3.5 text-muted-foreground transition-[opacity,transform] duration-150 ease-out",
+						"absolute inset-0 h-3.5 w-3.5 text-muted-foreground duration-150 ease-out",
+						styles.copyTransition,
 						copied ? "scale-100 opacity-100" : "scale-50 opacity-0"
 					)}
 				/>
@@ -1144,8 +973,8 @@ function CopyButton({
 function ReplyButton({ onReply }: { onReply: () => void }) {
 	return (
 		<Button
+			appearance="transcript-copy"
 			aria-label="Reply to message"
-			className={cn("size-6 rounded-md opacity-50 hover:opacity-100")}
 			onClick={onReply}
 			onMouseDown={(event) => event.stopPropagation()}
 			onPointerDown={(event) => {
@@ -1193,8 +1022,8 @@ function VersionPager({
 			onPointerDown={(event) => event.stopPropagation()}
 		>
 			<Button
+				appearance="transcript-version"
 				aria-label="Previous version"
-				className="size-5 rounded-md opacity-60 hover:opacity-100 disabled:opacity-25"
 				disabled={index <= 0}
 				onClick={() => go(-1)}
 				size="icon"
@@ -1208,8 +1037,8 @@ function VersionPager({
 				{index + 1}/{count}
 			</span>
 			<Button
+				appearance="transcript-version"
 				aria-label="Next version"
-				className="size-5 rounded-md opacity-60 hover:opacity-100 disabled:opacity-25"
 				disabled={index >= count - 1}
 				onClick={() => go(1)}
 				size="icon"
@@ -1251,7 +1080,8 @@ function MemoryCitationsMenuItem({
 			/>
 			<PopoverContent
 				align="start"
-				className="w-80 max-w-[min(20rem,calc(100vw-2rem))] items-start p-3"
+				className="w-80 max-w-[min(20rem,calc(100vw-2rem))] items-start"
+				spacing="rail"
 			>
 				<div className="min-w-0">
 					<p className="font-medium text-foreground">Memories cited</p>
@@ -1274,6 +1104,7 @@ function MessageOverflowMenu({
 	onContributedAction,
 	onEdit,
 	onRegenerate,
+	onRewind,
 	onSpeak,
 }: {
 	actionState?: MessageActionRuntimeState;
@@ -1286,11 +1117,17 @@ function MessageOverflowMenu({
 	) => void;
 	onEdit?: () => void;
 	onRegenerate?: () => void;
+	onRewind?: () => void;
 	onSpeak?: () => void;
 }) {
 	const [speaking, setSpeaking] = useState(false);
 	const hasOverflow = Boolean(
-		onBranch || onEdit || onRegenerate || onSpeak || contributedActions?.length
+		onBranch ||
+			onEdit ||
+			onRegenerate ||
+			onRewind ||
+			onSpeak ||
+			contributedActions?.length
 	);
 	if (!hasOverflow) {
 		return null;
@@ -1313,8 +1150,8 @@ function MessageOverflowMenu({
 			<DropdownMenuTrigger
 				render={
 					<Button
+						appearance="transcript-more"
 						aria-label="More message actions"
-						className="size-6 rounded-md opacity-60 hover:opacity-100"
 						onMouseDown={(event) => event.stopPropagation()}
 						onPointerDown={(event) => event.stopPropagation()}
 						size="icon"
@@ -1363,6 +1200,16 @@ function MessageOverflowMenu({
 							icon="lucide:git-branch"
 						/>
 						Fork chat from here
+					</DropdownMenuItem>
+				) : null}
+				{onRewind ? (
+					<DropdownMenuItem onClick={onRewind}>
+						<Icon
+							aria-hidden="true"
+							className="size-3.5"
+							icon="lucide:history"
+						/>
+						Rewind to here
 					</DropdownMenuItem>
 				) : null}
 				{onSpeak ? (
@@ -1447,6 +1294,25 @@ function MessageOverflowMenu({
 	);
 }
 
+/** Reaction strip input for a message's right-click menu, when reactions are on. */
+function contextMenuReactionsFor(
+	reactionAction: ContributedMessageAction | undefined,
+	messageId: string,
+	actionState: MessageActionRuntimeState | undefined,
+	onContributedAction:
+		| ((action: ContributedMessageAction, value?: string) => void)
+		| undefined
+): MessageContextMenuReactions | undefined {
+	if (!(reactionAction && onContributedAction)) {
+		return;
+	}
+	return {
+		buckets: actionState?.reactionBuckets ?? [],
+		canReact: isServerAssignedMessageId(messageId),
+		onToggle: (emoji) => onContributedAction(reactionAction, emoji),
+	};
+}
+
 function MessageToolbar({
 	actionState,
 	alignClass,
@@ -1461,6 +1327,7 @@ function MessageToolbar({
 	onEdit,
 	onRegenerate,
 	onReply,
+	onRewind,
 	onSpeak,
 	onContributedAction,
 	reactionAction,
@@ -1480,6 +1347,7 @@ function MessageToolbar({
 	onEdit?: () => void;
 	onRegenerate?: () => void;
 	onReply?: () => void;
+	onRewind?: () => void;
 	onSpeak?: () => void;
 	onContributedAction?: (
 		action: ContributedMessageAction,
@@ -1524,6 +1392,7 @@ function MessageToolbar({
 				onContributedAction={onContributedAction}
 				onEdit={onEdit}
 				onRegenerate={onRegenerate}
+				onRewind={onRewind}
 				onSpeak={onSpeak}
 			/>
 			{goalCompletion ? goalCompletion : null}
@@ -1533,7 +1402,7 @@ function MessageToolbar({
 
 /** One user message plus every assistant message that answered it. */
 interface AssistantTurn {
-	assistantMsgs: UIMessage[];
+	assistantMsgs: RenderedMessage[];
 	userMsg?: UIMessage;
 }
 
@@ -1544,52 +1413,8 @@ interface AssistantTurn {
  */
 const EMPTY_TURN_SET: ReadonlySet<AssistantTurn> = new Set<AssistantTurn>();
 
-/**
- * The human sentence off a `data-ryu-failover` part, or `null` for anything
- * else.
- *
- * Emitted by Core's reactive-failover wrapper
- * (`apps/core/src/sidecar/adapters/mod.rs`) when a turn fails because a
- * subscription window is spent: which plan had room, what was done about it, and
- * when the window reopens. The `kind: "stand"` verdict — "the failure was not a
- * cap" — is never sent, so a part that arrives always carries a note.
- */
-function getFailoverNote(part: unknown): string | null {
-	if (!isRecord(part) || part.type !== "data-ryu-failover") {
-		return null;
-	}
-	const data = part.data;
-	if (!isRecord(data)) {
-		return null;
-	}
-	const note = data.note;
-	return typeof note === "string" && note.trim().length > 0
-		? note.trim()
-		: null;
-}
-
-/** True for a `data-ryu-workflow` part — the live checklist Core streams while
- *  a `workflow_id` chat turn runs. */
-function isWorkflowRunPart(part: unknown): boolean {
-	return isRecord(part) && part.type === "data-ryu-workflow";
-}
-
-/**
- * Was this turn cut off before it finished?
- *
- * `_interrupted` is stamped by the history mapper
- * (`apps/desktop/src/lib/chat-history-hydrate.ts`) off Core's server-side
- * `messages.interrupted` column, which is reconciled at boot. It rides on the
- * message object rather than in `parts`, which is the whole point: the marker is
- * metadata about the run, so it can never be copied out with the reply, replayed
- * to the model, or mistaken for something the agent said.
- */
-function isInterruptedMessage(msg: UIMessage): boolean {
-	return (msg as { _interrupted?: boolean })._interrupted === true;
-}
-
 /** Group flat messages into turns (user message + following assistant messages) */
-function groupMessagesIntoTurns(messages: UIMessage[]): AssistantTurn[] {
+function groupMessagesIntoTurns(messages: RenderedMessage[]): AssistantTurn[] {
 	const turns: AssistantTurn[] = [];
 	let current: AssistantTurn | null = null;
 
@@ -1680,7 +1505,7 @@ function OpenAtBottom({
 			if (container.clientHeight === 0) {
 				return;
 			}
-			if (typeof viewport.scrollTo === "function") {
+			if (nativeSdkCallable(viewport.scrollTo)) {
 				viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
 			} else {
 				viewport.scrollTop = viewport.scrollHeight;
@@ -1691,7 +1516,7 @@ function OpenAtBottom({
 		jump();
 		if (
 			settledKeyRef.current === conversationKey ||
-			typeof ResizeObserver === "undefined"
+			globalThis.ResizeObserver === undefined
 		) {
 			return;
 		}
@@ -1713,6 +1538,7 @@ export const MessageList = memo(function MessageList({
 	onBranch,
 	onAgentUiSubmit,
 	onEditMessage,
+	onRewindMessage,
 	onRegenerateMessage,
 	onRetryError,
 	onRetryGeneration,
@@ -1761,6 +1587,25 @@ export const MessageList = memo(function MessageList({
 	statsModelName,
 	onLoadOlderMessages,
 }: MessageListProps) {
+	// This shared composite exposes its actual native root ref, but no render
+	// slot. Its open classNames producer contract belongs to this root, not an
+	// outer wrapper or a viewport. Apply the inspected canonical root recipe at
+	// that native boundary so caller overrides retain the original cn order.
+	// A new callback on either carrier change updates the same mounted root;
+	// internal scroller rerenders keep their static class recipe unchanged.
+	const ownScrollerRootClasses = useCallback(
+		(node: HTMLDivElement | null) => {
+			if (node) {
+				node.className = cn(
+					"relative min-h-0 flex-1",
+					classNames?.messageList,
+					className
+				);
+			}
+		},
+		[classNames?.messageList, className]
+	);
+
 	const [activeCopyId, setActiveCopyId] = useState<string | null>(null);
 	// Which user message is currently in inline-edit mode (null = none).
 	const [editingId, setEditingId] = useState<string | null>(null);
@@ -1775,6 +1620,7 @@ export const MessageList = memo(function MessageList({
 	// read scroll position without owning the scroller.
 	const viewportRef = useRef<HTMLElement | null>(null);
 	const {
+		animationsEnabled,
 		density,
 		hideToolDetail,
 		inferenceStats,
@@ -1901,6 +1747,25 @@ export const MessageList = memo(function MessageList({
 	);
 	const conversationStateKey =
 		conversationKey ?? normalizedMessages[0]?.id ?? null;
+
+	// Bubbles that arrive while the list is on screen pop in; loaded history
+	// never does. Derived from the last COMMITTED state so a render React
+	// discards cannot advance it; see `message-list-entrance.ts`.
+	const bubbleEntranceRef = useRef<BubbleEntranceState | null>(null);
+	const bubbleEntrance = useMemo(
+		() =>
+			reconcileBubbleEntranceState(
+				bubbleEntranceRef.current,
+				conversationKey ?? null,
+				normalizedMessages.map((message) => message.id)
+			),
+		[conversationKey, normalizedMessages]
+	);
+	useEffect(() => {
+		bubbleEntranceRef.current = bubbleEntrance;
+	}, [bubbleEntrance]);
+	const isBubbleEntering = (id: string | undefined): boolean =>
+		animationsEnabled && id !== undefined && bubbleEntrance.freshIds.has(id);
 	useEffect(() => {
 		const nextState = reconcileUnreadMessageState(
 			unreadStateRef.current,
@@ -1972,7 +1837,7 @@ export const MessageList = memo(function MessageList({
 		};
 
 		const observer =
-			typeof IntersectionObserver === "undefined"
+			globalThis.IntersectionObserver === undefined
 				? null
 				: new IntersectionObserver(
 						(entries) => {
@@ -2007,11 +1872,7 @@ export const MessageList = memo(function MessageList({
 		planningMarks.length > 0 ? (
 			<span className="flex shrink-0 items-center -space-x-1">
 				{planningMarks.map((mark, index) => (
-					<span
-						className="flex size-4 items-center justify-center"
-						// biome-ignore lint/suspicious/noArrayIndexKey: avatars are opaque nodes with no id of their own; the list is a fixed-order snapshot of the active agents
-						key={index}
-					>
+					<span className="flex size-4 items-center justify-center" key={index}>
 						{mark}
 					</span>
 				))}
@@ -2102,7 +1963,16 @@ export const MessageList = memo(function MessageList({
 		() => separatorKeyByTurnIndex(dayGroups),
 		[dayGroups]
 	);
-	const startOfToday = useMemo(() => startOfTodayMs(), [tzRevision]);
+	// "Today"/"Yesterday" are relative to the current civil day, so the zone
+	// revision alone leaves a mounted transcript saying "Today" after midnight.
+	// The shared display-day store owns one bounded timer plus focus/visibility
+	// wakes for every mounted consumer, and its revision changes at each
+	// display-zone midnight (23- and 25-hour DST days included).
+	const dayRevision = useDisplayDayRevision();
+	const startOfToday = useMemo(
+		() => startOfTodayMs(),
+		[tzRevision, dayRevision]
+	);
 	// Anchor id → flat turn index, so the floating header can map the scroller's
 	// `currentAnchorId` back onto a group. Normal turns use the user message id;
 	// assistant-only turns (for example a page-tool result) use their first
@@ -2143,7 +2013,7 @@ export const MessageList = memo(function MessageList({
 	// here because this is the shared transcript's one stable message-row DOM
 	// boundary; callers only receive the durable message id.
 	useEffect(() => {
-		if (!onMessageVisible || typeof IntersectionObserver === "undefined") {
+		if (!onMessageVisible || globalThis.IntersectionObserver === undefined) {
 			return;
 		}
 		const container = scrollerRef.current;
@@ -2156,7 +2026,7 @@ export const MessageList = memo(function MessageList({
 					if (!entry.isIntersecting) {
 						continue;
 					}
-					const messageId = (entry.target as HTMLElement).dataset.messageId;
+					const messageId = entry.target.getAttribute("data-message-id");
 					if (messageId) {
 						onMessageVisible(messageId);
 					}
@@ -2273,9 +2143,8 @@ export const MessageList = memo(function MessageList({
 	// messages hydrate. The beUI rail has no event surface of its own, so the
 	// listener lives here next to the scroll target it drives.
 	useEffect(() => {
-		const onJump = (event: Event) => {
-			const messageId = (event as CustomEvent<{ messageId?: string }>).detail
-				?.messageId;
+		const onJump = (event: TranscriptScrollEvent) => {
+			const messageId = event.detail?.messageId;
 			if (messageId) {
 				scrollToMessage(messageId);
 			}
@@ -2308,17 +2177,22 @@ export const MessageList = memo(function MessageList({
 			    it to the bottom (chat-scroll-story.spec.ts asserts this). */}
 			<BeuiMessageScroller
 				busy={isStreaming}
-				className={cn("an-message-list flex-1", className)}
+				className="flex-1"
 				contentClassName={cn(
-					"w-full gap-0",
-					isCompact ? "px-0.5 py-1" : "mx-auto max-w-[904px] px-3 py-6"
+					"w-full",
+					isCompact
+						? undefined
+						: "mx-auto max-w-[calc(var(--an-max-width,880px)_+_var(--spacing)*6)]"
 				)}
+				contentInset={isCompact ? "compact" : "transcript"}
 				contentProps={{ "data-slot": "message-scroller-content" }}
+				contentSpacing="flush"
 				followOutput={followOutput}
 				label="Conversation"
 				navigation="rail"
 				onFollowChange={handleFollowChange}
 				railItems={railItems}
+				ref={ownScrollerRootClasses}
 				renderPreview={(item) => <ChatRailPreview item={item} />}
 				showScrollToLatest={false}
 				showUnreadMessages={false}
@@ -2340,7 +2214,7 @@ export const MessageList = memo(function MessageList({
 					<div
 						aria-busy={loadingOlderMessages}
 						aria-live="polite"
-						className="mx-auto w-full max-w-[904px] px-3 py-2 text-center text-muted-foreground text-xs"
+						className="mx-auto w-full max-w-[calc(var(--an-max-width,880px)_+_var(--spacing)*6)] px-3 py-2 text-center text-muted-foreground text-xs"
 						data-older-messages-loader
 					>
 						{loadingOlderMessages
@@ -2367,7 +2241,7 @@ export const MessageList = memo(function MessageList({
 						className="sticky top-9 z-20 -mb-1"
 						data-slot="pinned-user-message-bar"
 					>
-						<div className="mx-auto w-full max-w-[904px] px-3 pt-2 pb-1">
+						<div className="mx-auto w-full max-w-[calc(var(--an-max-width,880px)_+_var(--spacing)*6)] px-3 pt-2 pb-1">
 							<PinnedUserMessageBar
 								message={pinnedMessage}
 								onScrollTo={scrollToPinned}
@@ -2375,12 +2249,9 @@ export const MessageList = memo(function MessageList({
 						</div>
 					</div>
 				) : null}
-				{/* 904 = the composer's own 880px column PLUS its `px-3` gutter
-				    (input-bar.tsx wraps `mx-auto max-w-[880px]` in `px-3`).
-				    Matching both numbers — not just the 880 — is what keeps a
-				    message's content edges aligned with the wider composer at every
-				    width. The shared envelope prevents the transcript from looking
-				    stranded inside a narrower card on wide desktop windows. */}
+				{/* The selected width describes content, excluding the transcript's
+                    two px-3 gutters. The fallback preserves hosts that do not
+                    bootstrap desktop appearance preferences. */}
 				{/* `gap-0`, NOT the `gap-2` this used to carry. A uniform gap can
 				    only express one vertical rhythm, and messaging grouping needs
 				    two: ~2px between consecutive messages from the same speaker
@@ -2409,6 +2280,9 @@ export const MessageList = memo(function MessageList({
 						groupPosition === "middle" || groupPosition === "last";
 					const hasUnreadMessage = turn.assistantMsgs.some(
 						(msg) => msg.id === firstUnreadMessageId
+					);
+					const hasAssistantText = turn.assistantMsgs.some(
+						(msg) => getTextFromParts(msg.parts ?? [], "\n\n").trim().length > 0
 					);
 					const isSearchActive =
 						searchActiveMessageId === turn.userMsg?.id ||
@@ -2459,10 +2333,13 @@ export const MessageList = memo(function MessageList({
 										const userCopyKey = `user-${turn.userMsg.id}`;
 										const userCopyVisible = activeCopyId === userCopyKey;
 										const userMsgId = turn.userMsg.id;
+										// Client-only rows (live voice-call turns) have no
+										// persisted id: offer only client-side actions.
+										const userIsEphemeral = messageIsEphemeral(turn.userMsg);
 										const onReplyUser =
 											text && (onReply || onQuote)
 												? () => {
-														if (onReply) {
+														if (onReply && !userIsEphemeral) {
 															onReply({
 																chainLength: turns.length - turnIndex,
 																messageId: userMsgId,
@@ -2477,9 +2354,11 @@ export const MessageList = memo(function MessageList({
 											<GoalMessageAnnotation />
 										) : null;
 										const userActionState = messageActionStates?.get(userMsgId);
-										const userActions = messageActions?.filter(
-											(a) => a.target === "user" || a.target === "any"
-										);
+										const userActions = userIsEphemeral
+											? undefined
+											: messageActions?.filter(
+													(a) => a.target === "user" || a.target === "any"
+												);
 										const reactionAction = userActions?.find(
 											isMessageReactionAction
 										);
@@ -2500,18 +2379,22 @@ export const MessageList = memo(function MessageList({
 												Boolean(onReplyUser) ||
 												Boolean(reactionAction) ||
 												Boolean(userToolbarActions?.length));
-										const onContributedActionUser = onContributedMessageAction
-											? (action: ContributedMessageAction, value?: string) =>
-													onContributedMessageAction(action, {
-														messageId: userMsgId,
-														value,
-													})
-											: undefined;
+										const onContributedActionUser =
+											onContributedMessageAction && !userIsEphemeral
+												? (action: ContributedMessageAction, value?: string) =>
+														onContributedMessageAction(action, {
+															messageId: userMsgId,
+															value,
+														})
+												: undefined;
 										const userVersion = versions?.[userMsgId];
 										const isEditingThis = editingId === userMsgId;
 										return (
 											<div
 												className="group/user-message"
+												data-bubble-enter={
+													isBubbleEntering(userMsgId) ? "" : undefined
+												}
 												ref={(el) => {
 													// `userMsgId` above is the same id, already narrowed
 													// to a definite string; `turn.userMsg?.id` was
@@ -2520,79 +2403,115 @@ export const MessageList = memo(function MessageList({
 													registerTranscriptAnchor(userMsgId, el);
 												}}
 											>
-												<CustomUserMessage
-													// Handed to UserMessage so it can sit on the outside
-													// edge of the shrink-to-fit bubble row. A local user's
-													// actions land left of the bubble; a remote sender's
-													// actions land right.
-													actions={
-														!isEditingThis &&
-														(showUserToolbar || goalAnnotation) ? (
-															<div className="flex items-center gap-2">
-																{showUserToolbar && (
-																	<MessageToolbar
-																		actionState={userActionState}
-																		alignClass="justify-start"
-																		contributedActions={userToolbarActions}
-																		heightClass="h-[28px]"
-																		hoverClass="group-hover/user-message:opacity-100 group-hover/user-message:pointer-events-auto"
-																		isVisible={userCopyVisible}
-																		menuAlign="start"
-																		onBranch={
-																			onBranch
-																				? () => onBranch(userMsgId)
-																				: undefined
-																		}
-																		onContributedAction={
-																			onContributedActionUser
-																		}
-																		onCopied={() => markCopied(userCopyKey)}
-																		onEdit={
-																			onEditMessage && text
-																				? () => setEditingId(userMsgId)
-																				: undefined
-																		}
-																		onReply={onReplyUser}
-																		reactionAction={reactionAction}
-																		reactionMessageId={userMsgId}
-																		text={showCopyToolbar ? text : ""}
-																	/>
-																)}
-																{goalAnnotation}
-															</div>
-														) : null
+												<MessageContextMenu
+													actionState={userActionState}
+													contributedActions={userToolbarActions}
+													disabled={isEditingThis}
+													onBranch={
+														onBranch && !userIsEphemeral
+															? () => onBranch(userMsgId)
+															: undefined
 													}
-													className={classNames?.userMessage}
-													currentUser={currentUser}
-													editing={isEditingThis}
-													enableImagePreview={enableImagePreview}
-													groupPosition={groupPosition}
-													mentionItems={mentionItems}
-													message={turn.userMsg}
-													messageActionState={messageActionStates?.get(
-														userMsgId
+													onContributedAction={onContributedActionUser}
+													onCopied={() => markCopied(userCopyKey)}
+													onEdit={
+														onEditMessage && text && !userIsEphemeral
+															? () => setEditingId(userMsgId)
+															: undefined
+													}
+													onReply={onReplyUser}
+													reactions={contextMenuReactionsFor(
+														reactionAction,
+														userMsgId,
+														userActionState,
+														onContributedActionUser
 													)}
-													messageActions={userActions}
-													onAnnotateImage={onAnnotateImage}
-													onContributedMessageAction={
-														onContributedMessageAction
-													}
-													onEditCancel={() => setEditingId(null)}
-													onEditSubmit={(next: string) => {
-														setEditingId(null);
-														onEditMessage?.(userMsgId, next);
-													}}
-													onOpenFile={onOpenFile}
-													onOpenLink={onOpenLink}
-													onOpenMention={onOpenMention}
-													previewResolvers={previewResolvers}
-													readReceipt={
-														messageReadReceipts?.get(userMsgId) ??
-														(messageIsPersisted(turn.userMsg)
-															? { delivered: true, readers: [] }
-															: undefined)
-													}
-												/>
+													text={showCopyToolbar ? text : ""}
+												>
+													<CustomUserMessage
+														// Handed to UserMessage so it can sit on the outside
+														// edge of the shrink-to-fit bubble row. A local user's
+														// actions land left of the bubble; a remote sender's
+														// actions land right.
+														actions={
+															!isEditingThis &&
+															(showUserToolbar || goalAnnotation) ? (
+																<div className="flex items-center gap-2">
+																	{showUserToolbar && (
+																		<MessageToolbar
+																			actionState={userActionState}
+																			alignClass="justify-start"
+																			contributedActions={userToolbarActions}
+																			heightClass="h-[28px]"
+																			hoverClass="group-hover/user-message:opacity-100 group-hover/user-message:pointer-events-auto"
+																			isVisible={userCopyVisible}
+																			menuAlign="start"
+																			onBranch={
+																				onBranch && !userIsEphemeral
+																					? () => onBranch(userMsgId)
+																					: undefined
+																			}
+																			onContributedAction={
+																				onContributedActionUser
+																			}
+																			onCopied={() => markCopied(userCopyKey)}
+																			onEdit={
+																				onEditMessage &&
+																				text &&
+																				!userIsEphemeral
+																					? () => setEditingId(userMsgId)
+																					: undefined
+																			}
+																			onReply={onReplyUser}
+																			onRewind={
+																				onRewindMessage
+																					? () =>
+																							onRewindMessage(userMsgId, text)
+																					: undefined
+																			}
+																			reactionAction={reactionAction}
+																			reactionMessageId={userMsgId}
+																			text={showCopyToolbar ? text : ""}
+																		/>
+																	)}
+																	{goalAnnotation}
+																</div>
+															) : null
+														}
+														className={classNames?.userMessage}
+														currentUser={currentUser}
+														editing={isEditingThis}
+														enableImagePreview={enableImagePreview}
+														groupPosition={groupPosition}
+														mentionItems={mentionItems}
+														message={turn.userMsg}
+														messageActionState={messageActionStates?.get(
+															userMsgId
+														)}
+														messageActions={userActions}
+														onAnnotateImage={onAnnotateImage}
+														onContributedMessageAction={
+															userIsEphemeral
+																? undefined
+																: onContributedMessageAction
+														}
+														onEditCancel={() => setEditingId(null)}
+														onEditSubmit={(next: string) => {
+															setEditingId(null);
+															onEditMessage?.(userMsgId, next);
+														}}
+														onOpenFile={onOpenFile}
+														onOpenLink={onOpenLink}
+														onOpenMention={onOpenMention}
+														previewResolvers={previewResolvers}
+														readReceipt={
+															messageReadReceipts?.get(userMsgId) ??
+															(messageIsPersisted(turn.userMsg)
+																? { delivered: true, readers: [] }
+																: undefined)
+														}
+													/>
+												</MessageContextMenu>
 												{!isEditingThis &&
 													userVersion &&
 													userVersion.count > 1 &&
@@ -2616,7 +2535,14 @@ export const MessageList = memo(function MessageList({
 									// own message (or the planning row) — see the
 									// filter above.
 									!assistantHiddenTurns.has(turn) &&
-									!(isLastTurn && showPlanning && !hasUnreadMessage) &&
+									// Keep the thinking-only row compact until output starts, then
+									// render arriving prose alongside the live status indicator.
+									!(
+										isLastTurn &&
+										showPlanning &&
+										!hasUnreadMessage &&
+										!hasAssistantText
+									) &&
 									(() => {
 										const assistantParts = turn.assistantMsgs.flatMap(
 											(msg) => msg.parts ?? []
@@ -2633,14 +2559,12 @@ export const MessageList = memo(function MessageList({
 										// The reply's send time comes from the last
 										// assistant message (the turn's final part);
 										// mirrors the user row.
-										const assistantCreatedAt = (
-											turn.assistantMsgs.at(-1) as {
-												createdAt?: Date | string;
-											}
+										const assistantCreatedAt = nativeCreatedAtLookup(
+											turn.assistantMsgs.at(-1)
 										)?.createdAt;
 										const assistantTimestamp =
 											isMounted && assistantCreatedAt
-												? new Date(assistantCreatedAt)
+												? nativeMessageDate(assistantCreatedAt)
 												: null;
 										const branchMsgId = turn.assistantMsgs.at(-1)?.id;
 										const isGoalCompletionTurn =
@@ -2650,7 +2574,7 @@ export const MessageList = memo(function MessageList({
 												? goalCompletion.messageId === branchMsgId
 												: isLastTurn);
 										const completionEndMs =
-											typeof goalCompletion?.achievedAt === "number" &&
+											nativeSdkNumber(goalCompletion?.achievedAt) &&
 											Number.isFinite(goalCompletion.achievedAt)
 												? goalCompletion.achievedAt
 												: assistantTimestamp?.getTime();
@@ -2685,13 +2609,16 @@ export const MessageList = memo(function MessageList({
 										return (
 											<Message align="start" className="group/assistant-turn">
 												{assistantAvatar ? (
-													<MessageAvatar className="self-start bg-transparent group-has-data-[slot=message-footer]/message:translate-y-0">
+													<MessageAvatar
+														className="self-start group-has-data-[slot=message-footer]/message:translate-y-0"
+														variant="transparent"
+													>
 														{assistantAvatar}
 													</MessageAvatar>
 												) : null}
-												<MessageContent className="gap-1.5">
+												<MessageContent spacing="compact">
 													{assistantName || assistantTimestamp ? (
-														<MessageHeader className="gap-2 px-0">
+														<MessageHeader inset="none" spacing="relaxed">
 															{assistantName ? (
 																<span>{assistantName}</span>
 															) : null}
@@ -2752,20 +2679,26 @@ export const MessageList = memo(function MessageList({
 															const messageCopyKey = `assistant-${msg.id}`;
 															const messageActionState =
 																messageActionStates?.get(msg.id);
-															const assistantActions = messageActions?.filter(
-																(a) =>
-																	(a.target === "assistant" ||
-																		a.target === "any") &&
-																	!isMessageReactionAction(a) &&
-																	(!isMemoryCitationsAction(a) ||
-																		Boolean(
-																			messageActionState?.memoryCitations
-																				?.length
-																		))
-															);
-															const onBranchMessage = onBranch
-																? () => onBranch(msg.id)
-																: undefined;
+															// Client-only rows (live voice-call turns) have
+															// no persisted id: offer only client-side actions.
+															const msgIsEphemeral = messageIsEphemeral(msg);
+															const assistantActions = msgIsEphemeral
+																? undefined
+																: messageActions?.filter(
+																		(a) =>
+																			(a.target === "assistant" ||
+																				a.target === "any") &&
+																			!isMessageReactionAction(a) &&
+																			(!isMemoryCitationsAction(a) ||
+																				Boolean(
+																					messageActionState?.memoryCitations
+																						?.length
+																				))
+																	);
+															const onBranchMessage =
+																onBranch && !msgIsEphemeral
+																	? () => onBranch(msg.id)
+																	: undefined;
 															const onSpeakMessage =
 																onSpeak && hasMessageText
 																	? () => onSpeak(messageText)
@@ -2773,7 +2706,7 @@ export const MessageList = memo(function MessageList({
 															const onReplyMessage =
 																hasMessageText && (onReply || onQuote)
 																	? () => {
-																			if (onReply) {
+																			if (onReply && !msgIsEphemeral) {
 																				onReply({
 																					chainLength: turns.length - turnIndex,
 																					messageId: msg.id,
@@ -2785,11 +2718,11 @@ export const MessageList = memo(function MessageList({
 																		}
 																	: undefined;
 															const onRegenerateMessageForMessage =
-																onRegenerateMessage
+																onRegenerateMessage && !msgIsEphemeral
 																	? () => onRegenerateMessage(msg.id)
 																	: undefined;
 															const onContributedActionMessage =
-																onContributedMessageAction
+																onContributedMessageAction && !msgIsEphemeral
 																	? (
 																			action: ContributedMessageAction,
 																			value?: string
@@ -2825,8 +2758,9 @@ export const MessageList = memo(function MessageList({
 																		>
 																			<Marker
 																				aria-label={unreadMessageLabel}
-																				className="my-1 text-primary before:bg-primary/30 after:bg-primary/30"
+																				className="my-1"
 																				role="status"
+																				tone="primary"
 																				variant="separator"
 																			>
 																				<MarkerIcon>
@@ -2838,34 +2772,72 @@ export const MessageList = memo(function MessageList({
 																			</Marker>
 																		</div>
 																	) : null}
-																	<div className="group/assistant-message flex w-fit max-w-full items-center gap-2">
-																		<AssistantParts
-																			agentMessageContext={agentMessageContext}
-																			deferTurnEndCards={!isTurnStreaming}
-																			groupPosition={assistantGroupPosition}
-																			isLast={isLastMsg}
-																			isStreaming={isStreaming}
-																			mentionItems={mentionItems}
-																			msg={msg}
-																			onAgentUiSubmit={onAgentUiSubmit}
-																			onAnnotateImage={onAnnotateImage}
-																			onOpenFile={onOpenFile}
-																			onOpenLink={onOpenLink}
-																			onOpenMention={onOpenMention}
-																			onRetryError={
-																				msg.id === "agent-chat-error"
-																					? onRetryError
-																					: onRegenerateMessageForMessage
+																	<div
+																		className="group/assistant-message flex w-fit max-w-full items-center gap-2"
+																		data-bubble-enter={
+																			isBubbleEntering(msg.id) ? "" : undefined
+																		}
+																	>
+																		<MessageContextMenu
+																			actionState={messageActionState}
+																			contributedActions={assistantActions}
+																			disabled={isTurnStreaming}
+																			onBranch={onBranchMessage}
+																			onContributedAction={
+																				onContributedActionMessage
 																			}
-																			onRetryGeneration={onRetryGeneration}
-																			onWorkflowResume={onWorkflowResume}
-																			previewResolvers={previewResolvers}
-																			suppressQuestionTool={
-																				suppressQuestionTool
+																			onCopied={() =>
+																				markCopied(messageCopyKey)
 																			}
-																			ToolRendererComponent={CustomToolRenderer}
-																			toolRenderers={toolRenderers}
-																		/>
+																			onRegenerate={
+																				onRegenerateMessageForMessage
+																			}
+																			onReply={onReplyMessage}
+																			onSpeak={onSpeakMessage}
+																			reactions={contextMenuReactionsFor(
+																				reactionAction,
+																				msg.id,
+																				messageActionState,
+																				onContributedActionMessage
+																			)}
+																			text={
+																				showCopyToolbar && hasMessageText
+																					? messageText
+																					: ""
+																			}
+																		>
+																			<AssistantParts
+																				agentMessageContext={
+																					agentMessageContext
+																				}
+																				deferTurnEndCards={!isTurnStreaming}
+																				groupPosition={assistantGroupPosition}
+																				isLast={isLastMsg}
+																				isStreaming={isStreaming}
+																				mentionItems={mentionItems}
+																				msg={msg}
+																				onAgentUiSubmit={onAgentUiSubmit}
+																				onAnnotateImage={onAnnotateImage}
+																				onOpenFile={onOpenFile}
+																				onOpenLink={onOpenLink}
+																				onOpenMention={onOpenMention}
+																				onRetryError={
+																					msg.id === "agent-chat-error"
+																						? onRetryError
+																						: onRegenerateMessageForMessage
+																				}
+																				onRetryGeneration={onRetryGeneration}
+																				onWorkflowResume={onWorkflowResume}
+																				previewResolvers={previewResolvers}
+																				suppressQuestionTool={
+																					suppressQuestionTool
+																				}
+																				ToolRendererComponent={
+																					CustomToolRenderer
+																				}
+																				toolRenderers={toolRenderers}
+																			/>
+																		</MessageContextMenu>
 																		{shouldRenderToolbar ? (
 																			<MessageToolbar
 																				actionState={messageActionState}
@@ -2891,7 +2863,11 @@ export const MessageList = memo(function MessageList({
 																				}
 																				onReply={onReplyMessage}
 																				onSpeak={onSpeakMessage}
-																				reactionAction={reactionAction}
+																				reactionAction={
+																					msgIsEphemeral
+																						? undefined
+																						: reactionAction
+																				}
 																				reactionMessageId={msg.id}
 																				text={
 																					showCopyToolbar ? messageText : ""
@@ -2921,7 +2897,8 @@ export const MessageList = memo(function MessageList({
 														// from something the agent wrote, came along when you copied the
 														// reply, and had to be pattern-matched back out on resume.
 														<Marker
-															className="pt-0.5 text-status-destructive"
+															spacing="interrupted"
+															tone="destructive"
 															variant="separator"
 														>
 															<MarkerIcon>
@@ -2946,15 +2923,25 @@ export const MessageList = memo(function MessageList({
 														}
 														const lastAssistantMsg = turn.assistantMsgs.at(-1);
 														return lastAssistantMsg ? (
-															<MessageFooter className="gap-3">
+															<MessageFooter spacing="relaxed">
 																{statsPluginEnabled && isLastTurn ? (
-																	<StatsFooter
-																		contextSize={contextSize}
-																		conversationMessages={messages}
-																		isMainChainActive={isTurnStreaming}
-																		modelName={statsModelName}
-																		usage={statsUsage}
-																	/>
+																	<>
+																		<StatsFooter
+																			contextSize={contextSize}
+																			conversationMessages={messages}
+																			isMainChainActive={isTurnStreaming}
+																			modelName={statsModelName}
+																			usage={statsUsage}
+																		/>
+																		{statsUsage?.accountLabel ? (
+																			<span
+																				className="type-caption truncate text-muted-foreground"
+																				title={`Usage for ${statsUsage.accountLabel}`}
+																			>
+																				{statsUsage.accountLabel}
+																			</span>
+																		) : null}
+																	</>
 																) : (
 																	<>
 																		{/* Local-engine (llama.cpp) finalized stats. */}
@@ -2996,7 +2983,10 @@ export const MessageList = memo(function MessageList({
 									})()}
 
 								{isLastTurn && showPlanning && (
-									<div className="flex items-center gap-2 py-0.5">
+									<div
+										className="flex items-center gap-2 py-0.5"
+										data-bubble-enter={animationsEnabled ? "" : undefined}
+									>
 										{planningLeading}
 										<TypingIndicator label={planningLabel} />
 									</div>
@@ -3022,8 +3012,9 @@ export const MessageList = memo(function MessageList({
 					// scroll target and steal the jump from the user's next question —
 					// the same rule the date separators follow.
 					<Marker
-						className="mt-2 shrink-0 py-1"
+						className="mt-2 shrink-0"
 						key={notice.id}
+						spacing="turn"
 						variant="separator"
 					>
 						<MarkerIcon>
@@ -3052,12 +3043,11 @@ export const MessageList = memo(function MessageList({
 			    and returns to the newest message. `onFollowChange` drives it. */}
 			{isCompact || following ? null : (
 				<Button
+					appearance="transcript-follow"
 					aria-label={`Scroll to latest${unreadMessageCount > 0 ? `, ${unreadMessageLabel}` : ""}`}
 					className={cn(
-						"absolute bottom-3 left-1/2 z-30 flex h-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background/85 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:text-foreground",
-						unreadMessageCount > 0
-							? "max-w-[calc(100%-1.5rem)] gap-1.5 px-3"
-							: "w-8"
+						"absolute bottom-3 left-1/2 z-30 flex h-8 -translate-x-1/2 items-center justify-center",
+						unreadMessageCount > 0 ? "max-w-[calc(100%-1.5rem)]" : undefined
 					)}
 					onClick={() => {
 						preserveUnreadBoundaryRef.current = false;
@@ -3066,7 +3056,7 @@ export const MessageList = memo(function MessageList({
 						if (!viewport) {
 							return;
 						}
-						if (typeof viewport.scrollTo === "function") {
+						if (nativeSdkCallable(viewport.scrollTo)) {
 							viewport.scrollTo({
 								top: viewport.scrollHeight,
 								behavior: "smooth",
@@ -3075,7 +3065,11 @@ export const MessageList = memo(function MessageList({
 							viewport.scrollTop = viewport.scrollHeight;
 						}
 					}}
-					size={unreadMessageCount > 0 ? "sm" : "icon"}
+					size={
+						unreadMessageCount > 0
+							? "transcript-follow-unread"
+							: "transcript-follow-icon"
+					}
 					type="button"
 					variant="ghost"
 				>
@@ -3159,7 +3153,7 @@ function AssistantParts({
 }: {
 	agentMessageContext?: AgentMessageContext;
 	groupPosition: MessageGroupPosition;
-	msg: UIMessage;
+	msg: RenderedMessage;
 	isLast: boolean;
 	isStreaming: boolean;
 	suppressQuestionTool: boolean;
@@ -3179,11 +3173,20 @@ function AssistantParts({
 }) {
 	const { expandCommands, expandFileEdits, groupToolUses, hideToolDetail } =
 		useChatDisplayPrefs();
-	const parts = useMemo(
-		() => normalizeAssistantToolParts(msg.parts ?? []) as unknown[],
+	const parts = useMemo<RenderedSdkPart[]>(
+		() => normalizeAssistantToolParts(msg.parts ?? []),
 		[msg.parts]
 	);
 	const editedFiles = useMemo(() => deriveEditedFiles(parts), [parts]);
+	const createdAt = nativeCreatedAtLookup(msg)?.createdAt;
+	const sentAtMs = createdAt ? nativeMessageDate(createdAt).getTime() : null;
+	const sentAt = useMemo(
+		() =>
+			sentAtMs !== null && Number.isFinite(sentAtMs)
+				? new Date(sentAtMs)
+				: undefined,
+		[sentAtMs]
+	);
 
 	const { elements } = useMemo(() => {
 		// Each part is tagged as prose or not, because only the PROSE runs get a
@@ -3204,12 +3207,12 @@ function AssistantParts({
 		const taskPartIds = new Set(
 			parts
 				.filter(
-					(p): p is ToolPartBase =>
+					(p): p is SdkToolPart =>
 						isV5ToolPart(p) &&
 						(p.type === "tool-Task" || p.type === "tool-Agent") &&
-						typeof p.toolCallId === "string"
+						nativeOptionalSdkText(p.toolCallId) !== undefined
 				)
-				.map((p) => p.toolCallId!)
+				.map((p) => p.toolCallId)
 		);
 		const nestedToolsMap = new Map<string, ToolPartBase[]>();
 		const nestedToolIds = new Set<string>();
@@ -3250,7 +3253,7 @@ function AssistantParts({
 					continue;
 				}
 				const parentId = part.toolCallId.split(":")[0];
-				if (!taskPartIds.has(parentId)) {
+				if (!(parentId && taskPartIds.has(parentId))) {
 					continue;
 				}
 				if (!nestedToolsMap.has(parentId)) {
@@ -3263,7 +3266,7 @@ function AssistantParts({
 
 		let i = 0;
 		while (i < parts.length) {
-			const part = parts[i]!;
+			const part = parts[i];
 
 			if (
 				deferTurnEndCards &&
@@ -3286,7 +3289,7 @@ function AssistantParts({
 			const failoverNote = getFailoverNote(part);
 			if (failoverNote) {
 				pushPart(
-					<Marker className="py-1" key={`${msg.id}-failover-${i}`}>
+					<Marker key={`${msg.id}-failover-${i}`} spacing="turn">
 						<MarkerIcon>
 							<HugeiconsIcon
 								icon={ArrowDataTransferHorizontalIcon}
@@ -3329,17 +3332,25 @@ function AssistantParts({
 						// prose parts below. `w-fit` on the primitive is what makes a
 						// one-line reply a small pill and a long one fill the column.
 						<BubbleContent
-							className={cn(
-								"group/assistant-text overflow-visible text-[14px]",
-								messageBubbleRadius("start", groupPosition)
-							)}
+							className="group/assistant-text"
+							corner={
+								groupPosition === "single"
+									? "single"
+									: groupPosition === "first"
+										? "start-first"
+										: groupPosition === "last"
+											? "start-last"
+											: "start-middle"
+							}
 							key={`${msg.id}-text-${i}`}
+							surface="transcript"
 							{...messageSelectableProps}
 						>
 							<Markdown
 								citations={citations.length > 0 ? citations : undefined}
 								className="leading-relaxed [&_p]:leading-relaxed"
 								content={text}
+								isStreaming={isLast && isStreaming}
 								mentionItems={mentionItems}
 								onOpenFile={onOpenFile}
 								onOpenLink={onOpenLink}
@@ -3438,7 +3449,6 @@ function AssistantParts({
 			if (fileMeta) {
 				pushPart(
 					fileMeta.media.startsWith("audio/") ? (
-						// biome-ignore lint/a11y/useMediaCaption: generated audio has no caption track
 						<audio
 							className="max-w-[360px]"
 							controls
@@ -3467,7 +3477,7 @@ function AssistantParts({
 						key={`${msg.id}-error-${i}`}
 						message={part.message}
 						onRetry={onRetryError}
-						title={part.title}
+						title={nativeOptionalSdkText(part.title)}
 					/>
 				);
 				i++;
@@ -3493,6 +3503,39 @@ function AssistantParts({
 
 				const chatStreamingStatus =
 					isLast && isStreaming ? "streaming" : undefined;
+				// Agent-to-agent sends fold into ONE "Messaged N agents" marker per
+				// run, so a fan-out to seven peers reads as one line, not seven
+				// bubbles; each exchange opens from the marker. A host-supplied
+				// renderer still sees every call on its own.
+				if (
+					ToolRendererComponent === DefaultToolRenderer &&
+					isAgentMessageSdkPart(part)
+				) {
+					const run: SdkToolPart[] = [part];
+					let nextIndex = i + 1;
+					while (nextIndex < parts.length) {
+						const nextPart = parts[nextIndex];
+						if (
+							!(isV5ToolPart(nextPart) && isAgentMessageSdkPart(nextPart)) ||
+							(hideToolDetail && isHiddenAtNoDetail(nextPart))
+						) {
+							break;
+						}
+						run.push(nextPart);
+						nextIndex += 1;
+					}
+					pushPart(
+						<AgentMessagesMarker
+							chatStatus={chatStreamingStatus}
+							context={agentMessageContext}
+							key={part.toolCallId ?? `${msg.id}-agent-messages-${i}`}
+							parts={run}
+							sentAt={sentAt}
+						/>
+					);
+					i = nextIndex;
+					continue;
+				}
 				const groupOptions = { expandCommands, expandFileEdits };
 				if (
 					groupToolUses &&
@@ -3557,7 +3600,7 @@ function AssistantParts({
 					i++;
 					continue;
 				}
-				const widgetToolCallId = part.data?.toolCallId;
+				const widgetToolCallId = nativeWidgetToolCallId(part.data);
 				const chatStreamingStatus =
 					isLast && isStreaming ? "streaming" : undefined;
 				pushPart(
@@ -3570,7 +3613,7 @@ function AssistantParts({
 								: `${msg.id}-widget-${i}`
 						}
 						onAgentUiSubmit={onAgentUiSubmit}
-						part={part as ToolPartBase}
+						part={part}
 						toolRenderers={toolRenderers}
 					/>
 				);
@@ -3593,8 +3636,9 @@ function AssistantParts({
 			pushPart(
 				<CitationList
 					citations={citationItems}
-					className="mt-2 rounded-xl bg-muted/60 p-2"
+					className="mt-2"
 					key={`${msg.id}-citations`}
+					surface="transcript"
 				/>
 			);
 		}
@@ -3693,4 +3737,10 @@ function AssistantParts({
 			{elements}
 		</div>
 	);
+}
+
+/** Measured native image/video geometry supplies only the CSS custom property;
+ * the frame class owns max-width. Keep the original rounded pixel calculation. */
+interface NativeMessageMediaFrameStyle extends React.CSSProperties {
+	"--message-media-max-width": string;
 }

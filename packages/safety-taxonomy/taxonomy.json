@@ -1,0 +1,383 @@
+{
+  "version": 1,
+  "codes": [
+    {
+      "id": "hazard.S1",
+      "short": "S1",
+      "label": "Violent crimes",
+      "branch": "hazard",
+      "strikeWeight": 8,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S2",
+      "short": "S2",
+      "label": "Non-violent crimes",
+      "branch": "hazard",
+      "strikeWeight": 4,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S3",
+      "short": "S3",
+      "label": "Sex-related crimes",
+      "branch": "hazard",
+      "strikeWeight": 10,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S4",
+      "short": "S4",
+      "label": "Child sexual exploitation",
+      "branch": "hazard",
+      "strikeWeight": 100,
+      "decay": "permanent",
+      "hardBlock": true,
+      "tenantConfigurable": false,
+      "evidence": "hash_only"
+    },
+    {
+      "id": "hazard.S5",
+      "short": "S5",
+      "label": "Defamation",
+      "branch": "hazard",
+      "strikeWeight": 1,
+      "decay": "fast",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S6",
+      "short": "S6",
+      "label": "Specialized advice",
+      "branch": "hazard",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S7",
+      "short": "S7",
+      "label": "Privacy",
+      "branch": "hazard",
+      "strikeWeight": 2,
+      "decay": "fast",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S8",
+      "short": "S8",
+      "label": "Intellectual property",
+      "branch": "hazard",
+      "strikeWeight": 1,
+      "decay": "fast",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S9",
+      "short": "S9",
+      "label": "Indiscriminate weapons (CBRN)",
+      "branch": "hazard",
+      "strikeWeight": 25,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S10",
+      "short": "S10",
+      "label": "Hate",
+      "branch": "hazard",
+      "strikeWeight": 3,
+      "decay": "fast",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S11",
+      "short": "S11",
+      "label": "Suicide and self-harm",
+      "branch": "hazard",
+      "strikeWeight": 0.5,
+      "decay": "fast",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S12",
+      "short": "S12",
+      "label": "Sexual content",
+      "branch": "hazard",
+      "strikeWeight": 2,
+      "decay": "fast",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S13",
+      "short": "S13",
+      "label": "Elections",
+      "branch": "hazard",
+      "strikeWeight": 2,
+      "decay": "fast",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "hazard.S14",
+      "short": "S14",
+      "label": "Code interpreter abuse",
+      "branch": "hazard",
+      "strikeWeight": 5,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "security.prompt_injection",
+      "label": "Prompt attack",
+      "branch": "security",
+      "strikeWeight": 3,
+      "decay": "fast",
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "security.secret",
+      "label": "Secret or credential",
+      "branch": "security",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "security.pii",
+      "label": "Personal data",
+      "branch": "security",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "security.code_injection",
+      "label": "Code injection",
+      "branch": "security",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "content.toxicity",
+      "label": "Toxicity",
+      "branch": "content",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "content.bias",
+      "label": "Bias",
+      "branch": "content",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "content.sensitive_image",
+      "label": "Sensitive image",
+      "branch": "content",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "content.custom_pattern",
+      "label": "Custom pattern",
+      "branch": "content",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "content.custom_policy",
+      "label": "Custom policy",
+      "branch": "content",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": true,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "abuse.platform",
+      "label": "Platform abuse",
+      "branch": "abuse",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "abuse.velocity",
+      "label": "Unusual request velocity",
+      "branch": "abuse",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "abuse.upstream_identifier_blocked",
+      "label": "Blocked by a model provider",
+      "branch": "abuse",
+      "strikeWeight": 15,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "abuse.upstream_content_refused",
+      "label": "Refused by a model provider",
+      "branch": "abuse",
+      "strikeWeight": 15,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "abuse.upstream_account_warning",
+      "label": "Model provider account warning",
+      "branch": "abuse",
+      "strikeWeight": 15,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "abuse.ban_evasion",
+      "label": "Ban evasion",
+      "branch": "abuse",
+      "strikeWeight": 30,
+      "decay": "slow",
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "abuse.local_upstream_block",
+      "label": "Refused for an upstream block",
+      "branch": "abuse",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    },
+    {
+      "id": "abuse.identifier_cardinality",
+      "label": "End-user identifier cap reached",
+      "branch": "abuse",
+      "strikeWeight": 0,
+      "decay": null,
+      "hardBlock": false,
+      "tenantConfigurable": false,
+      "evidence": "redacted_excerpt"
+    }
+  ],
+  "vendorMappings": {
+    "llama_guard": {
+      "S1": ["hazard.S1"],
+      "S2": ["hazard.S2"],
+      "S3": ["hazard.S3"],
+      "S4": ["hazard.S4"],
+      "S5": ["hazard.S5"],
+      "S6": ["hazard.S6"],
+      "S7": ["hazard.S7"],
+      "S8": ["hazard.S8"],
+      "S9": ["hazard.S9"],
+      "S10": ["hazard.S10"],
+      "S11": ["hazard.S11"],
+      "S12": ["hazard.S12"],
+      "S13": ["hazard.S13"],
+      "S14": ["hazard.S14"]
+    },
+    "qwen3guard": {
+      "Violent": ["hazard.S1"],
+      "Non-violent Illegal Acts": ["hazard.S2"],
+      "Sexual Content or Sexual Acts": ["hazard.S12"],
+      "PII": ["hazard.S7", "security.pii"],
+      "Suicide & Self-Harm": ["hazard.S11"],
+      "Unethical Acts": ["content.toxicity"],
+      "Politically Sensitive Topics": ["hazard.S13"],
+      "Copyright Violation": ["hazard.S8"],
+      "Jailbreak": ["security.prompt_injection"]
+    },
+    "shieldgemma": {
+      "sexually_explicit": ["hazard.S12"],
+      "dangerous_content": ["hazard.S9"],
+      "violence_gore": ["hazard.S1"]
+    },
+    "openai_moderation": {
+      "sexual/minors": ["hazard.S4"],
+      "sexual": ["hazard.S12"],
+      "hate": ["hazard.S10"],
+      "hate/threatening": ["hazard.S10", "hazard.S1"],
+      "harassment": ["content.toxicity"],
+      "harassment/threatening": ["content.toxicity", "hazard.S1"],
+      "self-harm": ["hazard.S11"],
+      "self-harm/intent": ["hazard.S11"],
+      "self-harm/instructions": ["hazard.S11"],
+      "violence": ["hazard.S1"],
+      "violence/graphic": ["hazard.S1"],
+      "illicit": ["hazard.S2"],
+      "illicit/violent": ["hazard.S1", "hazard.S9"]
+    },
+    "inspector": {
+      "injection": ["security.prompt_injection"],
+      "pii": ["security.pii"],
+      "secret": ["security.secret"]
+    }
+  }
+}

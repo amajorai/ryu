@@ -1,5 +1,6 @@
 import { HTTPClient, Polar } from "@polar-sh/sdk";
 import { env } from "@ryu/env/server";
+import { z } from "zod";
 import {
 	PolarWebhookVerificationError,
 	validatePolarEvent,
@@ -11,10 +12,21 @@ polarHttpClient.addHook("beforeRequest", (request) => {
 	request.headers.set("Polar-Version", POLAR_API_VERSION);
 });
 
+/**
+ * Upper bound for every Polar SDK request. The SDK default is no timeout at all,
+ * so a Polar brownout would leave billing, credits, and gift requests (and their
+ * sockets and follow-up writes) pending forever while users retry. This matches
+ * `POLAR_READ_TIMEOUT_MS` in auto-topup. A call that passes its own `signal` or
+ * `timeoutMs` keeps it. Retries stay off on purpose: a timed-out checkout or
+ * subscription update must never be re-sent silently.
+ */
+const POLAR_REQUEST_TIMEOUT_MS = 15_000;
+
 export const polarClient = new Polar({
 	accessToken: env.POLAR_ACCESS_TOKEN,
 	httpClient: polarHttpClient,
 	server: env.POLAR_SERVER,
+	timeoutMs: POLAR_REQUEST_TIMEOUT_MS,
 });
 
 /**
@@ -53,7 +65,7 @@ export const ensurePolarCustomer = async ({
 				(customer) =>
 					customer.externalId === id &&
 					customer.metadata.scope !== "org" &&
-					typeof customer.metadata.orgId !== "string"
+					!z.object({ orgId: z.string() }).safeParse(customer.metadata).success
 			);
 		}
 
@@ -93,11 +105,15 @@ export const syncPolarCustomer = async ({
 		});
 		return true;
 	} catch (error) {
-		const status =
-			typeof error === "object" && error !== null
-				? ((error as { statusCode?: unknown }).statusCode ??
-					(error as { status?: unknown }).status)
-				: undefined;
+		const status = z
+			.object({
+				statusCode: z.number().nullish().catch(Number.NaN),
+				status: z.number().nullish().catch(Number.NaN),
+			})
+			.transform((value) => value.statusCode ?? value.status)
+			.optional()
+			.catch(undefined)
+			.parse(error);
 		// Personal customers are created lazily at checkout so an account update
 		// before the first purchase has no provider row to synchronize yet.
 		if (status === 404) {

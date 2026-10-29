@@ -38,6 +38,20 @@ describe("agent engine mapping", () => {
 		expect(agentEngineOptionId(agent())).toBe("acp:pi");
 	});
 
+	test("maps Jay Jr. to the Ryu engine it runs on", () => {
+		const jay = agent({ id: "jay-jr", name: "Jay Jr.", recommended: false });
+		expect(agentEngineOptionId(jay)).toBe("acp:pi");
+		expect(engineForAgentSelection(jay)).toBe("acp:pi");
+		expect(agentIdForEngine("acp:pi", [agent(), jay])).toBe("ryu");
+	});
+
+	test("maps Patrol to the Ryu engine it runs on", () => {
+		const patrol = agent({ id: "patrol", name: "Patrol", recommended: false });
+		expect(agentEngineOptionId(patrol)).toBe("acp:pi");
+		expect(engineForAgentSelection(patrol)).toBe("acp:pi");
+		expect(agentIdForEngine("acp:pi", [agent(), patrol])).toBe("ryu");
+	});
+
 	test("round-trips engine selections to agent ids", () => {
 		const agents = [
 			agent(),

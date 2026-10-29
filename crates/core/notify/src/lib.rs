@@ -46,6 +46,20 @@ async fn guarded_webhook_post(url: &str, body: Vec<u8>) -> Result<u16, String> {
     Ok(response.status)
 }
 
+/// The part of a webhook URL that is safe to log: scheme and host. A Slack or
+/// Discord incoming-webhook URL carries its credential in the path, so the path
+/// and query are never logged.
+pub fn url_for_log(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(parsed) => format!(
+            "{}://{}/…",
+            parsed.scheme(),
+            parsed.host_str().unwrap_or("<no host>")
+        ),
+        Err(_) => "<invalid url>".to_owned(),
+    }
+}
+
 /// A notification destination (per-monitor or node-level policy-alert channel).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -100,6 +114,10 @@ pub async fn send_webhook_text(
 
 /// Send a plain-text message via the Telegram Bot API (`sendMessage`). Returns
 /// `Ok(())` only on a 2xx so a workflow node can surface a failed send.
+///
+/// The Bot API URL carries the bot token in its path, so transport errors are
+/// stripped of their URL (`without_url`) before formatting: the returned string
+/// becomes a workflow node error and a Gateway exec-audit row.
 pub async fn send_telegram_text(
     http: &reqwest::Client,
     bot_token: &str,
@@ -113,7 +131,8 @@ pub async fn send_telegram_text(
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
-        .map_err(|e| format!("telegram send failed: {e}"))?;
+        // `without_url`: the request URL embeds the bot token.
+        .map_err(|e| format!("telegram send failed: {}", e.without_url()))?;
     let status = resp.status();
     if status.is_success() {
         Ok(())
@@ -139,11 +158,25 @@ pub async fn send_webhook_alert(
         "content": format!("{title}\n{message}"),
         "alert": alert,
     });
+    // An incoming-webhook URL is itself a bearer credential; log its origin only.
+    let target = webhook_log_origin(url);
     match guarded_webhook_post(url, serde_json::to_vec(&body).unwrap_or_default()).await {
         Ok(status) if (200..300).contains(&status) => {}
-        Ok(status) => tracing::warn!("notify: webhook to {url} returned HTTP {status}"),
-        Err(error) => tracing::warn!("notify: webhook to {url} failed: {error}"),
+        Ok(status) => tracing::warn!("notify: webhook to {target} returned HTTP {status}"),
+        Err(error) => tracing::warn!("notify: webhook to {target} failed: {error}"),
     }
+}
+
+/// `scheme://host` of a webhook URL, safe to log without its secret path.
+fn webhook_log_origin(url: &str) -> String {
+    reqwest::Url::parse(url.trim())
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .host_str()
+                .map(|host| format!("{}://{host}", parsed.scheme()))
+        })
+        .unwrap_or_else(|| "<invalid url>".to_owned())
 }
 
 /// Best-effort Telegram alert send (with a bell emoji prefix).
@@ -163,7 +196,79 @@ pub async fn send_telegram_alert(
         .send()
         .await;
     if let Err(e) = result {
-        tracing::warn!("notify: telegram alert failed: {e}");
+        // `without_url`: the request URL carries the bot token.
+        tracing::warn!("notify: telegram alert failed: {}", e.without_url());
+    }
+}
+
+/// Presentation extras for [`push_expo_rich_message`].
+#[derive(Debug, Clone, Default)]
+pub struct ExpoRichContent<'a> {
+    /// Android notification channel the device created for this kind of alert.
+    pub channel_id: Option<&'a str>,
+    /// Picture for the notification: Android shows it as the large icon; iOS
+    /// needs the app's notification service extension, which is why
+    /// `mutableContent` is set whenever an image is present.
+    pub image_url: Option<&'a str>,
+    /// Groups related notifications (iOS `threadId`, Android tag grouping).
+    pub thread_id: Option<&'a str>,
+}
+
+/// Build one Expo push message. Split out so the wire shape is unit-tested.
+pub fn expo_rich_message(
+    token: &str,
+    title: &str,
+    body: &str,
+    data: &serde_json::Value,
+    rich: &ExpoRichContent<'_>,
+) -> serde_json::Value {
+    let mut message = json!({
+        "to": token,
+        "title": title,
+        "body": body,
+        "sound": "default",
+        "data": data,
+    });
+    if let Some(object) = message.as_object_mut() {
+        if let Some(channel_id) = rich.channel_id {
+            object.insert("channelId".into(), json!(channel_id));
+        }
+        if let Some(thread_id) = rich.thread_id {
+            object.insert("threadId".into(), json!(thread_id));
+        }
+        if let Some(image_url) = rich.image_url {
+            object.insert("richContent".into(), json!({ "image": image_url }));
+            object.insert("mutableContent".into(), json!(true));
+        }
+    }
+    message
+}
+
+/// Like [`push_expo_message`], with an image, channel and thread. Best-effort:
+/// a failure is logged, never propagated.
+pub async fn push_expo_rich_message(
+    http: &reqwest::Client,
+    tokens: &[String],
+    title: &str,
+    body: &str,
+    data: serde_json::Value,
+    rich: ExpoRichContent<'_>,
+) {
+    if tokens.is_empty() {
+        return;
+    }
+    let messages: Vec<_> = tokens
+        .iter()
+        .map(|token| expo_rich_message(token, title, body, &data, &rich))
+        .collect();
+    let result = http
+        .post(EXPO_PUSH_URL)
+        .json(&messages)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await;
+    if let Err(e) = result {
+        tracing::warn!("notify: expo push message failed: {e}");
     }
 }
 
@@ -208,6 +313,29 @@ mod tests {
     use axum::{body::Bytes, extract::State, http::StatusCode, http::Uri, Router};
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn webhook_urls_are_logged_without_their_credential_path() {
+        assert_eq!(
+            url_for_log("https://hooks.slack.com/services/T000/B000/secret-part?x=1"),
+            "https://hooks.slack.com/…"
+        );
+        assert_eq!(url_for_log("not a url"), "<invalid url>");
+    }
+
+    #[tokio::test]
+    async fn telegram_send_errors_never_carry_the_bot_token() {
+        // An unroutable proxy forces a transport error whose Display would
+        // otherwise include the request URL (and so the token).
+        let http = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all("http://127.0.0.1:9").unwrap())
+            .build()
+            .unwrap();
+        let error = send_telegram_text(&http, "123456:token-must-not-leak", "1", "hi")
+            .await
+            .unwrap_err();
+        assert!(!error.contains("token-must-not-leak"), "{error}");
+    }
 
     // ---- serde: wire shape of the target enum -----------------------------
 
@@ -402,19 +530,60 @@ mod tests {
 
     #[tokio::test]
     async fn telegram_text_err_on_connection_refused() {
-        // `.resolve` pins api.telegram.org to a dead local port: no DNS, no
-        // network, connection-refused before TLS. (The 2xx/else status branch
+        // Disable ambient proxies so the DNS override actually keeps this
+        // request on loopback instead of reaching a proxy's Telegram upstream.
+        // (The 2xx/else status branch
         // needs a real TLS response — see the crate-level test notes.)
         let http = reqwest::Client::builder()
+            .no_proxy()
             .resolve("api.telegram.org", dead_addr())
             .build()
             .unwrap();
-        let err = send_telegram_text(&http, "BOT", "CHAT", "hi")
+        let err = send_telegram_text(&http, "SECRETBOTTOKEN", "CHAT", "hi")
             .await
             .unwrap_err();
         assert!(
             err.contains("telegram send failed"),
             "unexpected error: {err}"
+        );
+        assert!(
+            !err.contains("SECRETBOTTOKEN"),
+            "bot token leaked into error: {err}"
+        );
+    }
+
+    #[test]
+    fn webhook_log_origin_drops_the_secret_path() {
+        assert_eq!(
+            webhook_log_origin("https://hooks.slack.com/services/T000/B000/SECRET"),
+            "https://hooks.slack.com"
+        );
+        assert_eq!(webhook_log_origin("not a url"), "<invalid url>");
+    }
+
+    #[tokio::test]
+    async fn telegram_text_error_does_not_leak_bot_token() {
+        // The bot token rides in the Bot API URL path, and reqwest's transport
+        // errors print "for url (...)". The returned string becomes a workflow
+        // node error and a Gateway exec-audit row, so it must not carry the
+        // token or the token-bearing URL.
+        let http = reqwest::Client::builder()
+            .no_proxy()
+            .resolve("api.telegram.org", dead_addr())
+            .build()
+            .unwrap();
+        let token = "123456:AAsecret-bot-token";
+        let err = send_telegram_text(&http, token, "CHAT", "hi")
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("telegram send failed"),
+            "unexpected error: {err}"
+        );
+        assert!(!err.contains(token), "bot token leaked into error: {err}");
+        assert!(
+            !err.contains("api.telegram.org/bot"),
+            "token-bearing URL leaked into error: {err}"
         );
     }
 
@@ -456,11 +625,38 @@ mod tests {
     #[tokio::test]
     async fn telegram_alert_is_best_effort_on_failure() {
         let http = reqwest::Client::builder()
+            .no_proxy()
             .resolve("api.telegram.org", dead_addr())
             .build()
             .unwrap();
         // Must not panic even though the send fails.
         send_telegram_alert(&http, "BOT", "CHAT", "Title", "body").await;
+    }
+
+    // ---- expo_rich_message: wire shape ---------------------------------------
+    #[test]
+    fn rich_message_adds_image_channel_and_mutable_content() {
+        let message = expo_rich_message(
+            "tok",
+            "Nova",
+            "Finished",
+            &json!({ "kind": "agent-done" }),
+            &ExpoRichContent {
+                channel_id: Some("agent-done"),
+                image_url: Some("https://example.com/a.png"),
+                thread_id: Some("conv-1"),
+            },
+        );
+        assert_eq!(message["richContent"]["image"], "https://example.com/a.png");
+        assert_eq!(message["mutableContent"], true);
+        assert_eq!(message["channelId"], "agent-done");
+        assert_eq!(message["threadId"], "conv-1");
+        assert_eq!(message["data"]["kind"], "agent-done");
+
+        let plain = expo_rich_message("tok", "t", "b", &json!({}), &ExpoRichContent::default());
+        assert!(plain.get("richContent").is_none());
+        assert!(plain.get("mutableContent").is_none());
+        assert!(plain.get("channelId").is_none());
     }
 
     // ---- push_expo_message: empty short-circuit + failure path -------------
@@ -471,6 +667,7 @@ mod tests {
         // Pin exp.host at the recording server so a stray request WOULD be
         // recorded; the empty-token early return means it never is.
         let http = reqwest::Client::builder()
+            .no_proxy()
             .resolve("exp.host", addr)
             .build()
             .unwrap();
@@ -484,6 +681,7 @@ mod tests {
     #[tokio::test]
     async fn expo_push_non_empty_is_best_effort_on_failure() {
         let http = reqwest::Client::builder()
+            .no_proxy()
             .resolve("exp.host", dead_addr())
             .build()
             .unwrap();

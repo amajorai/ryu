@@ -1,0 +1,3 @@
+.progress {
+	transform: scaleX(var(--blocks-progress, 0));
+}

@@ -131,7 +131,7 @@ export function HardwareView({
 					value={
 						<div className="flex items-center gap-2">
 							<Progress className="h-1.5 w-20" value={usage.cpu} />
-							<span>{usage.cpu.toFixed(1)}%</span>
+							<span className="tabular-nums">{usage.cpu.toFixed(1)}%</span>
 						</div>
 					}
 				/>
@@ -148,7 +148,7 @@ export function HardwareView({
 					value={
 						<div className="flex items-center gap-2">
 							<Progress className="h-1.5 w-20" value={memUsedPct} />
-							<span>{memUsedPct.toFixed(1)}%</span>
+							<span className="tabular-nums">{memUsedPct.toFixed(1)}%</span>
 						</div>
 					}
 				/>
@@ -157,7 +157,6 @@ export function HardwareView({
 			{hardware.gpus.length > 0 ? (
 				<Section title="GPU">
 					{hardware.gpus.map((gpu, i) => (
-						// biome-ignore lint/suspicious/noArrayIndexKey: static hardware list
 						<div key={i}>
 							<InfoRow label="Model" value={gpu.name} />
 							<InfoRow label="Vendor" value={gpu.vendor} />

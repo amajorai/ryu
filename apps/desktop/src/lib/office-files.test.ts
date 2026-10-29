@@ -30,6 +30,18 @@ describe("workspaceFileKind", () => {
 	});
 });
 
+describe("workspaceFileKind prototype-like metadata", () => {
+	it("uses the filename fallback for unrecognized MIME names", () => {
+		expect(workspaceFileKind("report.docx", "constructor")).toBe("document");
+		expect(workspaceFileKind("report.xlsx", "__proto__")).toBe("spreadsheet");
+	});
+
+	it("keeps unrecognized extensions unsupported", () => {
+		expect(workspaceFileKind("report.constructor", null)).toBe("unsupported");
+		expect(workspaceFileKind("report.__proto__", "")).toBe("unsupported");
+	});
+});
+
 describe("spreadsheet helpers", () => {
 	it("labels columns beyond Z", () => {
 		expect(spreadsheetColumnLabel(1)).toBe("A");

@@ -52,15 +52,15 @@ impl Capability {
 }
 
 /// Whether the current OS gates this capability behind a user-grantable
-/// permission at all. When false, `granted` is always true and the UI should
-/// show "no setup needed" instead of a Grant button.
+/// permission at all. This classifies the permission mechanism, not device or
+/// session availability; callers must still check `granted` and try the operation.
 pub fn required(cap: Capability) -> bool {
     platform::required(cap)
 }
 
 /// Whether the capability is currently granted to this process. Never prompts —
-/// safe to poll (e.g. on a settings screen). Returns true on platforms that do
-/// not gate the capability.
+/// safe to poll (e.g. on a settings screen). Linux also checks that the required
+/// session and input-device access exist. A clear gate does not prove capture.
 pub fn granted(cap: Capability) -> bool {
     platform::granted(cap)
 }
@@ -133,17 +133,6 @@ mod api_tests {
                 assert_ne!(a, b);
             }
         }
-    }
-
-    #[test]
-    fn capability_derives_are_wired() {
-        // Copy + Eq + Debug are relied on by callers (iterated, compared, logged).
-        let a = Capability::Accessibility;
-        let b = a; // Copy, not move.
-        assert_eq!(a, b);
-        assert_ne!(Capability::Accessibility, Capability::ScreenRecording);
-        let dbg = format!("{:?}", Capability::InputMonitoring);
-        assert_eq!(dbg, "InputMonitoring");
     }
 
     #[test]
@@ -450,32 +439,86 @@ mod platform {
 // ── Linux ─────────────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
-mod platform {
+use linux as platform;
+
+#[cfg(any(target_os = "linux", test))]
+mod linux {
     use super::Capability;
 
-    /// True when running under a Wayland session, where global screen capture and
-    /// input go through compositor portals the X11 backend cannot use.
     fn is_wayland() -> bool {
-        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-            return true;
-        }
-        std::env::var("XDG_SESSION_TYPE")
-            .map(|t| t.eq_ignore_ascii_case("wayland"))
-            .unwrap_or(false)
+        std::env::var("WAYLAND_DISPLAY").is_ok_and(|value| !value.trim().is_empty())
+            || std::env::var("XDG_SESSION_TYPE")
+                .is_ok_and(|value| value.eq_ignore_ascii_case("wayland"))
     }
 
-    // X11 needs no grant; Wayland mediates these through the compositor, which the
-    // X11-based backend cannot satisfy — surface that as required-but-not-granted.
-    pub fn required(_cap: Capability) -> bool {
-        is_wayland()
+    fn has_display() -> bool {
+        std::env::var("DISPLAY").is_ok_and(|value| !value.trim().is_empty())
     }
-    pub fn granted(_cap: Capability) -> bool {
-        !is_wayland()
+
+    fn input_devices_readable() -> bool {
+        std::fs::read_dir("/dev/input").is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                entry.file_name().to_string_lossy().starts_with("event")
+                    && std::fs::File::open(entry.path()).is_ok()
+            })
+        })
     }
+
+    pub fn required(cap: Capability) -> bool {
+        is_wayland() || cap == Capability::InputMonitoring
+    }
+
+    fn granted_with(cap: Capability, wayland: bool, display: bool, readable_input: bool) -> bool {
+        if wayland || !display {
+            return false;
+        }
+        cap != Capability::InputMonitoring || readable_input
+    }
+
+    pub fn granted(cap: Capability) -> bool {
+        granted_with(
+            cap,
+            is_wayland(),
+            has_display(),
+            cap != Capability::InputMonitoring || input_devices_readable(),
+        )
+    }
+
     pub fn request(cap: Capability) -> bool {
-        // No universal programmatic portal trigger here; report current state so
-        // callers can guide the user to their compositor's screen-sharing UI.
+        // A compositor portal or device-access change requires the user. Never
+        // claim that asking this function has granted native capture access.
         granted(cap)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn headless_and_wayland_sessions_are_not_reported_ready() {
+            for cap in super::super::ALL {
+                assert!(!granted_with(cap, true, true, true));
+                assert!(!granted_with(cap, false, false, true));
+            }
+        }
+
+        #[test]
+        fn x11_input_observation_requires_readable_devices() {
+            assert!(granted_with(
+                Capability::ScreenRecording,
+                false,
+                true,
+                false
+            ));
+            assert!(granted_with(Capability::Accessibility, false, true, false));
+            assert!(!granted_with(
+                Capability::InputMonitoring,
+                false,
+                true,
+                false
+            ));
+            assert!(granted_with(Capability::InputMonitoring, false, true, true));
+        }
     }
 }
 

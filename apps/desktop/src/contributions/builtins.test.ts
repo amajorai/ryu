@@ -21,6 +21,7 @@ const companion = (
 	name = label
 ): PluginCompanion => ({
 	approvedGrants: [],
+	defaultCspEnforced: true,
 	hasUi: true,
 	id,
 	label,
@@ -56,6 +57,24 @@ const feed = (
 ) => ({ companions, sidebar_buttons: buttons });
 
 describe("resolveCompanionAlias", () => {
+	it("a declared global path selects the launchable companion while contextual routes remain usable", () => {
+		const editor = {
+			...companion("app__editor-companion", "@ryu/calendar", "Editor"),
+			navigationVisible: false,
+		};
+		const buttons: PluginSidebarButton[] = [
+			{
+				id: "calendar",
+				plugin: "@ryu/calendar",
+				target: "/calendar",
+				title: "Calendar",
+			},
+		];
+		const enabled = feed([editor, CALENDAR], buttons);
+		expect(resolveCompanionAlias(enabled, "/calendar")).toBe(CALENDAR.id);
+		expect(resolveCompanionAlias(enabled, "/editor")).toBe(editor.id);
+	});
+
 	it("derives a short path from the companion id (`app__<slug>-companion`)", () => {
 		const enabled = feed([CALENDAR, TIMELINE]);
 		expect(resolveCompanionAlias(enabled, "/calendar")).toBe(CALENDAR.id);

@@ -11,6 +11,7 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "@ryu/blocks/desktop/settings-items";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Switch } from "@ryu/ui/components/switch";
 
@@ -66,14 +67,18 @@ export interface UpdatesViewProps {
 /** "Ryu (Nightly) — current version: v0.1.4-nightly.20260806.12." */
 function versionCaption(
 	version: string | null | undefined,
-	productName: string | null | undefined
+	productName: string | null | undefined,
+	tl: LiteralMessage
 ): string | undefined {
 	if (!version) {
 		return productName ?? undefined;
 	}
 	return productName
-		? `${productName} — current version: v${version}.`
-		: `Current version: v${version}.`;
+		? tl("{productName} — current version: v{version}.", {
+				productName,
+				version,
+			})
+		: tl("Current version: v{version}.", { version });
 }
 
 export function UpdatesView({
@@ -96,10 +101,11 @@ export function UpdatesView({
 	preparedUpdateNotice,
 	updatesWindowNotice,
 }: UpdatesViewProps) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="space-y-6">
 			<SettingsSection
-				caption={versionCaption(version, productName)}
+				caption={versionCaption(version, productName, tl)}
 				title="Software updates"
 			>
 				<SettingsGroup>

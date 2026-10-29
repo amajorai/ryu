@@ -1,14 +1,42 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { settingsApi } from "../utils/api-client.ts";
 
-export function useSubscription() {
-	const { data, isLoading, error, refetch } = useQuery({
-		queryKey: ["subscription-status"],
+export interface SubscriptionAuthority {
+	accountId: string | null;
+	enabled: boolean;
+	organizationId: string | null;
+}
+
+/** Hosts supply their authenticated account/organization without shared host imports. */
+export function useSubscription(authority: SubscriptionAuthority) {
+	const enabled = authority.enabled && Boolean(authority.accountId);
+	const identity = JSON.stringify([
+		authority.accountId,
+		authority.organizationId,
+	]);
+	const currentAuthority = useRef({ identity, enabled });
+	const mounted = useRef(true);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, []);
+	currentAuthority.current = { identity, enabled };
+	const query = useQuery({
+		queryKey: [
+			"subscription-status",
+			authority.accountId,
+			authority.organizationId,
+		],
+		enabled,
 		queryFn: settingsApi.billing.getSubscriptionStatus,
 	});
 
-	const subscription = data?.subscription;
-	const lifetime = data?.lifetime;
+	const { data, isLoading, error, refetch } = query;
+	const subscription = enabled ? data?.subscription : undefined;
+	const lifetime = enabled ? data?.lifetime : undefined;
 	const subscriptionStatus = (subscription?.status || "").toLowerCase();
 	const isTrialing = subscriptionStatus === "trialing";
 
@@ -30,7 +58,13 @@ export function useSubscription() {
 		isLifetime: lifetime !== null && lifetime !== undefined,
 		lifetime,
 		isLoading,
-		error,
-		refetch,
+		error: enabled ? error : null,
+		refetch: (...args: Parameters<typeof refetch>) =>
+			mounted.current &&
+			enabled &&
+			currentAuthority.current.enabled &&
+			currentAuthority.current.identity === identity
+				? refetch(...args)
+				: Promise.resolve(query),
 	};
 }

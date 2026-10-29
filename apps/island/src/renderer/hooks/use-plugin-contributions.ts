@@ -23,22 +23,30 @@ export function usePluginContributions(): PluginContributions {
 
 	useEffect(() => {
 		let cancelled = false;
-		window.island.plugins
-			.contributions()
-			.then((result) => {
-				if (cancelled || !result.available) {
-					return;
-				}
-				setContributions({
-					companions: result.companions,
-					views: result.views,
+		let request = 0;
+		const reload = () => {
+			const current = ++request;
+			setContributions(EMPTY);
+			window.island.plugins
+				.contributions()
+				.then((result) => {
+					if (cancelled || current !== request || !result.available) {
+						return;
+					}
+					setContributions({
+						companions: result.companions,
+						views: result.views,
+					});
+				})
+				.catch(() => {
+					// Best-effort surface: keep the stable empty payload on any failure.
 				});
-			})
-			.catch(() => {
-				// Best-effort surface: keep the stable empty payload on any failure.
-			});
+		};
+		reload();
+		const unsubscribe = window.island.plugins.onSourceChanged(reload);
 		return () => {
 			cancelled = true;
+			unsubscribe();
 		};
 	}, []);
 

@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/clips-quick-attach-settings-proof.spec.ts",
+    "e2e/clips-quick-attach-destination-proof.spec.ts",
+    "e2e/quests-settings-proof.spec.ts",
+    "e2e/meetings-settings-proof.spec.ts",
+    "e2e/meetings-diarization-proof.spec.ts",
+    "e2e/capture-meetings-coverage.playwright.config.ts",
+    "e2e/harness/vite.capture-meetings-coverage.config.ts"
+  ]
+}

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useIslandState } from "../store/island-state.ts";
 
 /** Window-control API as exposed by the preload bridge. */
@@ -11,7 +11,10 @@ function winApi() {
  *
  * 1. Click-through capture: the BrowserWindow is oversized and click-through by
  *    default, so we tell main to capture the mouse on `pointerenter` and release
- *    it on `pointerleave` (clicks outside the island shape pass through).
+ *    it on `pointerleave` (clicks outside the island contour pass through). On
+ *    Linux a click-through window receives no mouse moves, so those events never
+ *    fire there; instead the polled cursor is hit-tested against the element
+ *    attached to `hoverTarget` and drives the same two handlers.
  * 2. Manual drag: a pointer drag on the pill region moves the window via IPC
  *    deltas, then clamps + persists on release.
  * 3. Tap detection: a press-and-release that never moved fires the handle's tap
@@ -28,6 +31,9 @@ export function useWindowDrag() {
 	// snap-zone overlay or repositions the island.
 	const moved = useRef(false);
 	const state = useIslandState((store) => store.state);
+	// Linux only: whether the last polled cursor sample was over the Island (see
+	// the hit-test below).
+	const cursorInside = useRef(false);
 
 	const onPointerEnter = useCallback(() => {
 		winApi()?.setMouseCapture(true);
@@ -35,13 +41,16 @@ export function useWindowDrag() {
 
 	const onPointerLeave = useCallback(() => {
 		// Keep capture while a drag is mid-flight even if the pointer briefly
-		// leaves the shape; otherwise release so clicks fall through. Also keep it
+		// leaves the contour; otherwise release so clicks fall through. Also keep it
 		// while expanded: the panel / command palette is an interactive surface that
 		// can be hotkey-summoned with the pointer nowhere near it, so releasing on
 		// leave would make it click-through and unusable. Capture is restored to
 		// click-through when the island collapses (see Island.tsx).
 		if (!dragging.current && state !== "expanded") {
 			winApi()?.setMouseCapture(false);
+			// Click-through again, so on Linux the next cursor sample over the
+			// Island must take the pointer back, even if no sample saw it leave.
+			cursorInside.current = false;
 		}
 	}, [state]);
 
@@ -63,20 +72,12 @@ export function useWindowDrag() {
 		const dx = event.screenX - last.current.x;
 		const dy = event.screenY - last.current.y;
 		if (dx !== 0 || dy !== 0) {
-			// First movement of this gesture: show the snap-zone overlay, telling
-			// main where the *visible* island shape sits inside the oversized
-			// window so the snap aligns the pill (not the window) to a zone. The
-			// drag handle is a child of the shape, so its parent is that element.
+			// First movement of this gesture: show the snap-zone overlay. Main
+			// already knows the island footprint, so snapping aligns the whole
+			// island (not the oversized window or just the grabbed shape).
 			if (!moved.current) {
 				moved.current = true;
-				const shape = event.currentTarget.parentElement;
-				const rect = shape?.getBoundingClientRect();
-				winApi()?.dragStart({
-					x: rect?.left ?? 0,
-					y: rect?.top ?? 0,
-					width: rect?.width ?? event.currentTarget.clientWidth,
-					height: rect?.height ?? event.currentTarget.clientHeight,
-				});
+				winApi()?.dragStart();
 			}
 			winApi()?.moveBy(dx, dy);
 			last.current = { x: event.screenX, y: event.screenY };
@@ -127,7 +128,41 @@ export function useWindowDrag() {
 		winApi()?.dragEnd();
 	}, []);
 
+	// Linux hover: hit-test the main process's polled cursor (window coordinates,
+	// the same as the DOM's client coordinates) against the Island wrapper and
+	// replay enter/leave on each crossing. `onPointerLeave` keeps its own rules
+	// (no release mid-drag or while expanded).
+	const hoverTarget = useRef<HTMLDivElement | null>(null);
+	useEffect(() => {
+		if (winApi()?.forwardsMouseMoves !== false) {
+			return;
+		}
+		// This re-subscribes on every Island state change (`onPointerLeave` depends
+		// on it), and a summon or collapse may have taken or released capture
+		// elsewhere: let the next cursor sample decide afresh.
+		cursorInside.current = false;
+		return window.island.window.onCursorMove(({ x, y }) => {
+			const rect = hoverTarget.current?.getBoundingClientRect();
+			const inside =
+				rect !== undefined &&
+				x >= rect.left &&
+				x < rect.right &&
+				y >= rect.top &&
+				y < rect.bottom;
+			if (inside === cursorInside.current) {
+				return;
+			}
+			cursorInside.current = inside;
+			if (inside) {
+				onPointerEnter();
+			} else {
+				onPointerLeave();
+			}
+		});
+	}, [onPointerEnter, onPointerLeave]);
+
 	return {
+		hoverTarget,
 		onPointerEnter,
 		onPointerLeave,
 		onDragPointerDown,

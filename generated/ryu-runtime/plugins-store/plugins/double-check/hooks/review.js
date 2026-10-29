@@ -10,12 +10,16 @@
 if (!(ctx.flags && ctx.flags["io.ryu.double-check"])) {
 	return { kind: "none" };
 }
-const rev = ctx.transcript.slice().reverse();
-const lastAssistant = rev.find((m) => m.role === "assistant");
-if (!lastAssistant) {
+const assistantIndex = ctx.transcript.findLastIndex(
+	(message) => message.role === "assistant"
+);
+if (assistantIndex < 0) {
 	return { kind: "none" };
 }
-const lastUser = rev.find((m) => m.role === "user");
+const lastAssistant = ctx.transcript[assistantIndex];
+const lastUser = ctx.transcript
+	.slice(0, assistantIndex)
+	.findLast((message) => message.role === "user");
 const review = await host.sideModel({
 	system:
 		"You are a meticulous reviewer. Check the assistant's last answer for factual errors, unsupported claims, or missing steps. If it is correct and complete, reply with exactly: Looks correct. Otherwise give a brief, specific correction.",

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ApiTarget } from "./client.ts";
 import { request } from "./client.ts";
 
@@ -26,24 +27,6 @@ export interface SpacePackageImport {
 	rowCount: number;
 	spaceId: string;
 	spaceName: string;
-}
-
-interface SpacePackageExportWire {
-	archive_base64?: string;
-	content_type?: string;
-	filename?: string;
-	package?: Partial<SpacePackageSummary>;
-}
-
-interface SpacePackageImportWire {
-	space?: {
-		database_count?: number;
-		needs_reindex?: boolean;
-		page_count?: number;
-		row_count?: number;
-		space_id?: string;
-		space_name?: string;
-	};
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -86,10 +69,11 @@ export async function exportSpacePackage(
 	target: ApiTarget,
 	spaceId: string
 ): Promise<SpacePackageExport> {
-	const result = await request<SpacePackageExportWire>(
+	const result = await request(
 		target,
 		"/api/spaces/".concat(encodeURIComponent(spaceId), "/export"),
-		{ body: {}, method: "POST" }
+		{ body: {}, method: "POST" },
+		spacePackageExportWireResponseSchema
 	);
 	const filename = result.filename?.trim() || "space.ryupack";
 	const archiveBase64 = result.archive_base64?.trim();
@@ -109,16 +93,17 @@ export async function importSpacePackage(
 	archive: Uint8Array,
 	name?: string
 ): Promise<SpacePackageImport> {
-	const result = await request<SpacePackageImportWire>(
+	const result = await request(
 		target,
 		"/api/spaces/import",
 		{
 			body: {
 				archive_base64: bytesToBase64(archive),
-				...(name?.trim() ? { name: name.trim() } : {}),
+				...(name?.trim() ? { name: name.trim() } : undefined),
 			},
 			method: "POST",
-		}
+		},
+		spacePackageImportWireResponseSchema
 	);
 	const space = result.space;
 	if (!(space?.space_id && space.space_name)) {
@@ -155,3 +140,40 @@ export function downloadSpacePackage(
 	link.remove();
 	window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+
+const partialResponseSchema = z
+	.object({
+		databases: z.number().optional(),
+		embeddings: z.boolean().optional(),
+		excluded: z.number().optional(),
+		files: z.array(z.string()).optional(),
+		name: z.string().optional(),
+		pages: z.number().optional(),
+		rows: z.number().optional(),
+		version: z.string().optional(),
+	})
+	.passthrough();
+
+const spacePackageExportWireResponseSchema = z
+	.object({
+		archive_base64: z.string().optional(),
+		content_type: z.string().optional(),
+		filename: z.string().optional(),
+		package: partialResponseSchema.optional(),
+	})
+	.passthrough();
+
+const response2SpaceSchema = z
+	.object({
+		database_count: z.number().optional(),
+		needs_reindex: z.boolean().optional(),
+		page_count: z.number().optional(),
+		row_count: z.number().optional(),
+		space_id: z.string().optional(),
+		space_name: z.string().optional(),
+	})
+	.passthrough();
+
+const spacePackageImportWireResponseSchema = z
+	.object({ space: response2SpaceSchema.optional() })
+	.passthrough();

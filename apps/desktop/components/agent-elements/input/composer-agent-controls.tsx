@@ -27,8 +27,8 @@
 
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ComposerModelSection } from "@ryu/blocks/composer/composer-acp-sections";
-import { acpHarnessSuffix } from "@ryu/blocks/composer/composer-trigger-summary";
+import type { ComposerModelSection } from "@ryu/blocks/composer/composer-acp-sections.ts";
+import { acpHarnessSuffix } from "@ryu/blocks/composer/composer-trigger-summary.ts";
 import { IconCpu, IconGitBranch } from "@tabler/icons-react";
 import { type ReactNode, useMemo } from "react";
 import { CapabilityBadges } from "@/components/agent-elements/input/capability-badges.tsx";
@@ -206,6 +206,12 @@ export interface ComposerAgentControlsConfig {
 	onCreateAgent?: () => void;
 	/** Persist a model pick for the active agent (used when `modelSection` omitted). */
 	onModelChange: (modelId: string) => void;
+	/** Observe provider/model picks without replacing the normal provider action. */
+	onProviderModelSelection?: (selection: {
+		modelId: string | null;
+		providerId: string;
+		providerLabel: string;
+	}) => void;
 	/** Pick an agent as the driving target (real agent id only; sentinels handled here). */
 	onSelectAgent: (agentId: string) => void;
 	/** Optional setup-surface override for a concrete provider/model pick. */
@@ -239,7 +245,7 @@ export interface ComposerAgentControlsConfig {
  * from `agentId`, so every surface that names an agent gets them for free.
  * `rightActions` is `null`: model selection lives in the settings menu.
  */
-export function useComposerAgentControls(config: ComposerAgentControlsConfig): {
+export interface ComposerAgentControls {
 	/**
 	 * The threshold-fallback notice for the turn about to be sent, ready to spread
 	 * into `InputBar`'s `infoBar` prop — "Ryu credit is at $3.10 (under your $5.00
@@ -260,7 +266,6 @@ export function useComposerAgentControls(config: ComposerAgentControlsConfig): {
 	 * a turn, so the bar reflects the headroom that turn just consumed.
 	 */
 	refreshRoutingAdvice: () => void;
-	rightActions: ReactNode;
 	/**
 	 * The universal picker body (Ryu (providers nested) · External Agents),
 	 * exposed alongside `sections` so a surface with its own trigger (the
@@ -268,6 +273,7 @@ export function useComposerAgentControls(config: ComposerAgentControlsConfig): {
 	 * `ComposerSettingsMenu`'s `trigger` + `renderBody` props.
 	 */
 	renderBody: (close: () => void) => ReactNode;
+	rightActions: ReactNode;
 	/**
 	 * The composed Agent · Model · Approval/Thinking sections, exposed so the
 	 * trigger summary (`Ryu · Sonnet · Plan`) stays glanceable on a surface with
@@ -279,7 +285,11 @@ export function useComposerAgentControls(config: ComposerAgentControlsConfig): {
 	sections: ComposerSettingsSection[];
 	/** The sections shown in the trigger summary, excluding plugin-only rows. */
 	triggerSections: ComposerSettingsSection[];
-} {
+}
+
+export function useComposerAgentControls(
+	config: ComposerAgentControlsConfig
+): ComposerAgentControls {
 	const {
 		agents,
 		atConversationStart = false,
@@ -290,6 +300,7 @@ export function useComposerAgentControls(config: ComposerAgentControlsConfig): {
 		onSelectTeam,
 		onCreateAgent,
 		onUseProvider,
+		onProviderModelSelection,
 		onSelectProviderModel,
 		onSelectProviderThinking,
 		modelOptions,
@@ -530,6 +541,7 @@ export function useComposerAgentControls(config: ComposerAgentControlsConfig): {
 		onSelectTeam,
 		onCreateAgent,
 		onUseProvider,
+		onProviderModelSelection,
 		onSelectProviderModel,
 		onSelectProviderThinking,
 		activeModelSection: showModelSection ? modelSectionResolved : null,
@@ -551,7 +563,7 @@ export function useComposerAgentControls(config: ComposerAgentControlsConfig): {
 	if (activeAgent?.avatarGlyph) {
 		leading = (
 			<AgentAvatar
-				className="size-4 shrink-0 rounded-full object-contain"
+				className="size-4 shrink-0 object-contain"
 				engine={engineForAgent(activeAgent)}
 				glyph={activeAgent.avatarGlyph}
 				size="16px"

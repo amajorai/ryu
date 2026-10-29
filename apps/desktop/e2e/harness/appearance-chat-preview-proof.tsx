@@ -44,10 +44,8 @@ function StatusChips() {
 			</span>
 			<span className="inline-flex h-7 items-center gap-1.5 rounded-full px-1.5">
 				<span>3 files changed</span>
-				<span className="font-medium text-emerald-600 dark:text-emerald-400">
-					+42
-				</span>
-				<span className="font-medium text-red-600 dark:text-red-400">-9</span>
+				<span className="font-medium text-success">+42</span>
+				<span className="font-medium text-destructive">-9</span>
 			</span>
 		</div>
 	);
@@ -80,7 +78,7 @@ function ChatRow({
 					testId={botMode ? "bot-mode-preview" : "chat-preview"}
 				/>
 			</div>
-			<span className="shrink-0 text-[10px] text-muted-foreground/60">
+			<span className="type-compact shrink-0 text-muted-foreground/60">
 				{active ? "now" : "2m"}
 			</span>
 		</div>
@@ -115,7 +113,7 @@ function Proof() {
 				<div className="mx-auto max-w-6xl space-y-5">
 					<header className="flex items-end justify-between gap-6">
 						<div>
-							<p className="font-medium text-primary text-xs uppercase tracking-[0.16em]">
+							<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 								Appearance
 							</p>
 							<h1 className="mt-1 font-heading font-semibold text-2xl tracking-tight">
@@ -182,7 +180,7 @@ function Proof() {
 										onCheckedChange={setShowChatPreview}
 									/>
 								</div>
-								<p className="mt-2 px-2 text-[11px] text-muted-foreground leading-4">
+								<p className="type-caption mt-2 px-2 text-muted-foreground leading-4">
 									The Agents view keeps its two-line rows even when this native
 									chat setting is off.
 								</p>

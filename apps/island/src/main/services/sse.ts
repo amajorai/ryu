@@ -6,13 +6,14 @@
 // pure incremental parser with NO Electron or network dependency so it is unit
 // testable against a fixture string.
 
+import { SseFrameDecoder } from "@ryuhq/protocol/sse";
+import { z } from "zod";
 import type { CoreStreamPart } from "../../shared/ipc.ts";
+
+const coreStreamPartSchema = z.object({ type: z.string() }).catchall(z.json());
 
 /** The sentinel `data:` payload Core sends to close the stream. */
 export const DONE_SENTINEL = "[DONE]";
-
-/** Trailing carriage return left by CRLF line endings. */
-const TRAILING_CR = /\r$/;
 
 /** One decoded event from the stream. */
 export type SseEvent =
@@ -34,13 +35,9 @@ export function parseSsePart(dataPayload: string): SseEvent | null {
 		return { kind: "done" };
 	}
 	try {
-		const value = JSON.parse(trimmed) as unknown;
-		if (
-			value &&
-			typeof value === "object" &&
-			typeof (value as { type?: unknown }).type === "string"
-		) {
-			return { kind: "part", part: value as CoreStreamPart };
+		const parsed = coreStreamPartSchema.safeParse(JSON.parse(trimmed));
+		if (parsed.success) {
+			return { kind: "part", part: parsed.data };
 		}
 		return null;
 	} catch {
@@ -55,27 +52,24 @@ export function parseSsePart(dataPayload: string): SseEvent | null {
  * but pure enough to drive from a test by feeding the whole fixture at once.
  */
 export class SseDecoder {
-	private buffer = "";
+	private readonly decoder = new SseFrameDecoder();
+	private readonly encoder = new TextEncoder();
 
 	/**
-	 * Push a chunk and return every event that completed within it. Lines are
-	 * split on `\n`; only `data:` lines are interpreted, matching SSE framing.
+	 * Push a chunk and return every event that completed within it.
 	 */
 	push(chunk: string): SseEvent[] {
-		this.buffer += chunk;
 		const events: SseEvent[] = [];
-		let newlineIndex = this.buffer.indexOf("\n");
-		while (newlineIndex !== -1) {
-			const rawLine = this.buffer.slice(0, newlineIndex);
-			this.buffer = this.buffer.slice(newlineIndex + 1);
-			const line = rawLine.replace(TRAILING_CR, "");
-			if (line.startsWith("data:")) {
-				const event = parseSsePart(line.slice("data:".length));
-				if (event) {
-					events.push(event);
-				}
+		for (const frame of this.decoder.push(this.encoder.encode(chunk))) {
+			const data = frame
+				.split("\n")
+				.filter((line) => line.startsWith("data:"))
+				.map((line) => line.slice("data:".length).trimStart())
+				.join("\n");
+			const event = parseSsePart(data);
+			if (event) {
+				events.push(event);
 			}
-			newlineIndex = this.buffer.indexOf("\n");
 		}
 		return events;
 	}
@@ -85,12 +79,65 @@ export class SseDecoder {
 	 * newline). Call once after the body ends.
 	 */
 	flush(): SseEvent[] {
-		const remaining = this.buffer;
-		this.buffer = "";
-		if (!remaining.startsWith("data:")) {
-			return [];
+		this.decoder.finish();
+		return [];
+	}
+}
+
+const textDeltaSchema = z.object({
+	type: z.literal("text-delta"),
+	delta: z.string(),
+});
+
+/** Ceiling on one accumulated completion; frames are bounded separately. */
+export const MAX_COMPLETION_TEXT_CHARS = 1_000_000;
+
+/**
+ * Drain an AI SDK SSE body, concatenating every `text-delta` into one string.
+ * Throws once the answer would pass `maxChars` (or a frame its byte bound),
+ * and always cancels and releases the body reader before settling.
+ */
+export async function accumulateStreamText(
+	body: ReadableStream<Uint8Array>,
+	maxChars = MAX_COMPLETION_TEXT_CHARS
+): Promise<string> {
+	const reader = body.getReader();
+	const decoder = new TextDecoder();
+	const sse = new SseDecoder();
+	let text = "";
+	const append = (event: SseEvent): void => {
+		if (event.kind !== "part") {
+			return;
 		}
-		const event = parseSsePart(remaining.slice("data:".length));
-		return event ? [event] : [];
+		const parsed = textDeltaSchema.safeParse(event.part);
+		if (!parsed.success) {
+			return;
+		}
+		if (text.length + parsed.data.delta.length > maxChars) {
+			throw new Error(`completion exceeded ${maxChars} characters`);
+		}
+		text += parsed.data.delta;
+	};
+	try {
+		for (;;) {
+			const { value, done } = await reader.read();
+			if (done) {
+				break;
+			}
+			for (const event of sse.push(decoder.decode(value, { stream: true }))) {
+				if (event.kind === "done") {
+					return text;
+				}
+				append(event);
+			}
+		}
+		for (const event of sse.flush()) {
+			append(event);
+		}
+		return text;
+	} finally {
+		sse.flush();
+		await reader.cancel().catch(() => undefined);
+		reader.releaseLock();
 	}
 }

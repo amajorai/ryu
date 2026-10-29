@@ -1,0 +1,23 @@
+{
+  "log": {
+    "id": "log_golden",
+    "metadata": {
+      "auth_config_id": "ac_golden",
+      "connected_account_id": "ca_golden",
+      "instant_charge": null
+    }
+  },
+  "authConfig": { "id": "ac_golden", "is_composio_managed": true },
+  "receipt": {
+    "authConfigId": "ac_golden",
+    "connectedAccountId": "ca_golden",
+    "transactionId": "log_golden",
+    "usage": {
+      "kind": "toolCall",
+      "authSource": "managedApp",
+      "directExecution": true,
+      "premiumChargeMicroUsd": null
+    }
+  },
+  "withZdrCostMicroUsd": 700
+}

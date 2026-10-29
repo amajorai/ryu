@@ -19,12 +19,12 @@ interface SileoToastOptions {
 }
 
 interface SileoPresenter {
-	dismiss(id: string): unknown;
-	error(options: SileoToastOptions): unknown;
-	info(options: SileoToastOptions): unknown;
-	show(options: SileoToastOptions): unknown;
-	success(options: SileoToastOptions): unknown;
-	warning(options: SileoToastOptions): unknown;
+	dismiss(id: string): void;
+	error(options: SileoToastOptions): void;
+	info(options: SileoToastOptions): void;
+	show(options: SileoToastOptions): void;
+	success(options: SileoToastOptions): void;
+	warning(options: SileoToastOptions): void;
 }
 
 /** Adapt the shared Ryu toast vocabulary to Sileo while keeping renderer slot
@@ -100,7 +100,7 @@ function shortHash(value: string): string {
 }
 
 function defaultRandomId(): string {
-	if (typeof globalThis.crypto?.randomUUID === "function") {
+	if (globalThis.crypto?.randomUUID !== undefined) {
 		return globalThis.crypto.randomUUID();
 	}
 	return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -191,7 +191,7 @@ export function createScopedToastHost(options: ScopedToastHostOptions) {
 			}
 			state = "disposing";
 			try {
-				for (const [localId, entry] of [...entries]) {
+				for (const [localId, entry] of entries) {
 					try {
 						dismissEntry(localId, entry);
 					} catch {
@@ -227,15 +227,19 @@ export function createScopedToastHost(options: ScopedToastHostOptions) {
 			if (!entry) {
 				return;
 			}
-			const next: ToastShowInput = {
-				...entry.input,
-				...(input.title === undefined ? {} : { title: input.title }),
-				...(input.description === undefined
-					? {}
-					: { description: input.description }),
-				...(input.variant === undefined ? {} : { variant: input.variant }),
-				...(input.duration === undefined ? {} : { duration: input.duration }),
-			};
+			const next: ToastShowInput = { ...entry.input };
+			if (input.title !== undefined) {
+				next.title = input.title;
+			}
+			if (input.description !== undefined) {
+				next.description = input.description;
+			}
+			if (input.variant !== undefined) {
+				next.variant = input.variant;
+			}
+			if (input.duration !== undefined) {
+				next.duration = input.duration;
+			}
 			const previous = entry.input;
 			entry.input = next;
 			try {

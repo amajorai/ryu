@@ -24,26 +24,26 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Skeleton, SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { BarChart3, Network, Sparkles } from "lucide-react";
 import {
 	type ChangeEvent,
@@ -162,8 +162,8 @@ function MemoryRow({
 						<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
 					</Button>
 					<Button
+						appearance="dictation-recording"
 						aria-label="Delete memory"
-						className="text-status-destructive hover:text-status-destructive"
 						onClick={() => onDelete(memory)}
 						size="icon"
 						variant="ghost"
@@ -185,7 +185,9 @@ function MemoryRow({
 				<Badge variant="outline">{categoryLabels[memory.category]}</Badge>
 				<Badge variant="outline">Importance {memory.importance}</Badge>
 				{memory.sensitiveTopics.length > 0 ? (
-					<Badge variant="destructive">Sensitive topic</Badge>
+					<Badge tint="amber" variant="secondary">
+						Sensitive topic
+					</Badge>
 				) : null}
 				{memory.tags.map((tag) => (
 					<Badge key={tag} variant="secondary">
@@ -395,9 +397,11 @@ export function MemoryLibrary({
 						{view === "graph" ? (
 							<div className="h-[min(70vh,680px)] min-h-[460px] overflow-hidden rounded-lg border border-border/60 bg-muted/15">
 								{graphLoading || !graph ? (
-									<div className="flex h-full items-center justify-center">
-										<Spinner />
-									</div>
+									<Skeleton
+										aria-label="Loading graph"
+										className="size-full"
+										role="status"
+									/>
 								) : (
 									<MemoryGraph graph={graph} />
 								)}
@@ -445,7 +449,7 @@ export function MemoryLibrary({
 							/>
 							<Input
 								aria-label="Search memories"
-								className="pl-9"
+								leadingAdornment="default"
 								onChange={(e: ChangeEvent<HTMLInputElement>) =>
 									setQuery(e.target.value)
 								}
@@ -453,11 +457,9 @@ export function MemoryLibrary({
 								value={query}
 							/>
 						</div>
-						<Select
+						<Select<MemoryScope | typeof ALL>
 							items={scopeFilterItems(scopeLabels)}
-							onValueChange={(v) =>
-								setScopeFilter(v as MemoryScope | typeof ALL)
-							}
+							onValueChange={(v) => setScopeFilter(v)}
 							value={scopeFilter}
 						>
 							<SelectTrigger aria-label="Filter by scope">
@@ -472,11 +474,9 @@ export function MemoryLibrary({
 								))}
 							</SelectContent>
 						</Select>
-						<Select
+						<Select<MemoryCategory | typeof ALL>
 							items={categoryFilterItems(categoryLabels)}
-							onValueChange={(v) =>
-								setCategoryFilter(v as MemoryCategory | typeof ALL)
-							}
+							onValueChange={(v) => setCategoryFilter(v)}
 							value={categoryFilter}
 						>
 							<SelectTrigger aria-label="Filter by category">
@@ -494,7 +494,7 @@ export function MemoryLibrary({
 						{presentTags.length > 0 ? (
 							<Select
 								items={tagFilterItems}
-								onValueChange={(v) => setTagFilter(v as string)}
+								onValueChange={(v) => setTagFilter(v)}
 								value={tagFilter}
 							>
 								<SelectTrigger aria-label="Filter by tag">
@@ -514,11 +514,9 @@ export function MemoryLibrary({
 
 					{/* Body */}
 					{loading ? (
-						<div className="flex justify-center py-16">
-							<Spinner />
-						</div>
+						<SkeletonRows spacing="review" />
 					) : loadError ? (
-						<Empty className="py-12">
+						<Empty>
 							<EmptyHeader>
 								<EmptyMedia variant="icon">
 									<HugeiconsIcon icon={AiBrain01Icon} />
@@ -531,7 +529,7 @@ export function MemoryLibrary({
 							</Button>
 						</Empty>
 					) : visible.length === 0 ? (
-						<Empty className="py-12">
+						<Empty>
 							<EmptyHeader>
 								<EmptyMedia variant="icon">
 									<HugeiconsIcon icon={AiBrain01Icon} />

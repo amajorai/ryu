@@ -31,7 +31,7 @@ import { pageLabel, pageRoute } from "@/src/lib/page-routes.ts";
 /** A queued request to show a page in the right dock. */
 export interface SidePanelRouteRequest {
 	/** The `route:<path>` dock tab kind to open (or re-focus). */
-	kind: string;
+	kind: ReturnType<typeof routeTabKind>;
 	/** Tab label. */
 	label: string;
 	/** Bumped per request so a repeat of the same page still re-focuses. */

@@ -8,8 +8,8 @@ import type {
 	CatalogEntry,
 	PluginCatalogDetail,
 } from "../../../../packages/marketplace/src/catalog/types.ts";
-import { Badge } from "../../../../packages/ui/src/components/badge";
-import { Button } from "../../../../packages/ui/src/components/button";
+import { Badge } from "../../../../packages/ui/src/components/badge.tsx";
+import { Button } from "../../../../packages/ui/src/components/button.tsx";
 import "../../src/index.css";
 
 const entry: CatalogEntry = {
@@ -85,7 +85,7 @@ function Story() {
 	return (
 		<main className="min-h-svh bg-background p-8 text-foreground">
 			<div className="mx-auto max-w-3xl">
-				<p className="text-muted-foreground text-xs uppercase tracking-[0.2em]">
+				<p className="text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 					Ryu · Marketplace React proof
 				</p>
 				<h1 className="mt-2 font-semibold text-3xl">Health + Plugin Doctor</h1>
@@ -132,10 +132,7 @@ function Story() {
 						scorecard={scorecard}
 					/>
 				</section>
-				<p
-					className="mt-4 font-medium text-emerald-600"
-					data-testid="proof-status"
-				>
+				<p className="mt-4 font-medium text-success" data-testid="proof-status">
 					VERIFIED
 				</p>
 			</div>

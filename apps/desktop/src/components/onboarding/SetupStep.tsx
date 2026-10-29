@@ -6,7 +6,7 @@ import {
 	WifiOff01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils.ts";
 import {
@@ -52,11 +52,11 @@ interface DepCategoryState {
 }
 
 const CATEGORIES = ["agent", "tool", "provider"] as const;
-const CATEGORY_LABELS: Record<(typeof CATEGORIES)[number], string> = {
+const CATEGORY_LABELS = {
 	agent: "Agents",
 	tool: "Tools",
 	provider: "Providers",
-};
+} satisfies Record<(typeof CATEGORIES)[number], string>;
 
 export function SetupStep({ nodeUrl, token, onInstall }: SetupStepProps) {
 	const online = useOnlineStatus();
@@ -328,7 +328,10 @@ export function SetupStep({ nodeUrl, token, onInstall }: SetupStepProps) {
 							<div className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-primary" />
 							<span className="font-medium">{item.displayName}</span>
 							{item.description && (
-								<span className="truncate text-muted-foreground">
+								<span
+									className="truncate text-muted-foreground"
+									title={item.description}
+								>
 									{item.description}
 								</span>
 							)}
@@ -468,7 +471,10 @@ export function SetupStep({ nodeUrl, token, onInstall }: SetupStepProps) {
 												{item.displayName}
 											</span>
 											{item.description && (
-												<span className="truncate text-muted-foreground text-xs">
+												<span
+													className="truncate text-muted-foreground text-xs"
+													title={item.description}
+												>
 													{item.description}
 												</span>
 											)}

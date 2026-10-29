@@ -43,7 +43,7 @@ use super::packs::{self, PackSource};
 
 /// The origin registry file (`~/.ryu/skills-origin.json`).
 fn origin_path() -> PathBuf {
-    crate::paths::ryu_dir().join("skills-origin.json")
+    crate::paths::state_path("skills-origin.json")
 }
 
 /// Who owns an installed skill. `System` = managed by Ryu's bundled catalog

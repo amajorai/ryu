@@ -2,6 +2,19 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FileTypeIcon } from "./file-type-icon.tsx";
 
+test.each([
+	"constructor",
+	"__proto__",
+	"toString",
+	"hasOwnProperty",
+])("treats inherited icon key %s as an ordinary unknown extension", (extension) => {
+	const markup = renderToStaticMarkup(
+		<FileTypeIcon path={`note.${extension}`} />
+	);
+	expect(markup).toContain("<svg");
+	expect(markup).not.toContain("undefined");
+});
+
 test("renders the matching complete icon symbol without the full sprite sheet", () => {
 	const markup = renderToStaticMarkup(
 		<FileTypeIcon className="size-4" path="src/App.tsx" />

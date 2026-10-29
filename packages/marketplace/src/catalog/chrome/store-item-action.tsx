@@ -1,3 +1,4 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/chrome/store-item-action.tsx
 //
 // The one Store action control every catalog card + detail header uses, so the
@@ -202,7 +203,7 @@ export function PublisherInstallDisclosure({
 							}}
 							variant="destructive"
 						>
-							I understand the risk — install
+							I understand the risk, install
 						</Button>
 					)}
 				</DialogFooter>
@@ -373,7 +374,7 @@ export default function StoreItemAction({
 
 	if (!installed) {
 		const hasDownloadCount =
-			typeof downloadCount === "number" &&
+			isNativeNumber(downloadCount) &&
 			Number.isFinite(downloadCount) &&
 			downloadCount > 0;
 		const idleLabel = hasDownloadCount

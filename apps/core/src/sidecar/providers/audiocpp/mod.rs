@@ -15,14 +15,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use ryu_sidecar_runtime::layout::{EngineGroup, Modality};
+
+use crate::sidecar::download_manager::{engine_dir, model_family_dir};
 use crate::sidecar::{BoxFuture, HealthStatus, ProcessHandle, Sidecar};
 
 /// Canonical release port for the audio.cpp server. The concrete port also
 /// honors Ryu's profile offset so development and release stacks never adopt
-/// each other's runtime.
-pub const AUDIOCPP_PORT_BASE: u16 = 8086;
+/// each other's runtime. 8091 is the first free slot after whisper.cpp (8090);
+/// it was 8086, which MLX already binds (see
+/// `providers::tests::local_engine_default_ports_are_unique_per_profile`).
+pub const AUDIOCPP_PORT_BASE: u16 = 8091;
 
 /// Fixed model id used by the Ryu-generated audio.cpp config for STT.
 pub const DEFAULT_STT_MODEL_ID: &str = "ryu-audiocpp-stt";
@@ -34,6 +40,17 @@ pub const DEFAULT_TTS_VOICE: &str = "alba";
 const DEFAULT_STT_MODEL_FILE: &str = "parakeet-tdt-0.6b-v3-q8_0.gguf";
 const DEFAULT_TTS_MODEL_FILE: &str = "pocket-tts-english-q8_0.gguf";
 const DEFAULT_TTS_VOICE_FILE: &str = "alba.safetensors";
+const RUNTIME_SETTINGS_PREFERENCE: &str = "engine.audiocpp.runtime";
+
+/// User-tunable audio.cpp server settings persisted per node.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AudioCppRuntimeSettings {
+    pub backend: Option<String>,
+    pub device: Option<u64>,
+    pub threads: Option<u64>,
+    pub max_loaded_models: Option<u64>,
+}
 
 /// Profile-aware port used by the manager and every request adapter.
 pub fn port() -> u16 {
@@ -48,36 +65,59 @@ pub fn base_url() -> String {
     format!("http://127.0.0.1:{}", port())
 }
 
-/// Ryu-owned model root. Custom model paths can be supplied per capability
-/// with `RYU_AUDIOCPP_STT_MODEL`, `RYU_AUDIOCPP_TTS_MODEL`, and
-/// `RYU_AUDIOCPP_TTS_VOICE_FILE`.
-pub fn model_dir() -> PathBuf {
+/// Operator override for the audio.cpp model root (`RYU_AUDIOCPP_MODEL_DIR`),
+/// which keeps its own `stt/` and `tts/` subfolders.
+fn model_dir_override() -> Option<PathBuf> {
     std::env::var("RYU_AUDIOCPP_MODEL_DIR")
         .ok()
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| crate::paths::ryu_dir().join("models").join("audio-cpp"))
+}
+
+/// Speech-recognition package dir: `models/speech-to-text/audio-cpp`, or
+/// `$RYU_AUDIOCPP_MODEL_DIR/stt`. Custom model paths can also be supplied per
+/// capability with `RYU_AUDIOCPP_STT_MODEL`, `RYU_AUDIOCPP_TTS_MODEL`, and
+/// `RYU_AUDIOCPP_TTS_VOICE_FILE`.
+pub fn stt_model_dir() -> PathBuf {
+    model_dir_override().map_or_else(
+        || model_family_dir(Modality::SpeechToText, "audio-cpp"),
+        |dir| dir.join("stt"),
+    )
+}
+
+/// Speech-synthesis package dir: `models/text-to-speech/audio-cpp`, or
+/// `$RYU_AUDIOCPP_MODEL_DIR/tts`.
+pub fn tts_model_dir() -> PathBuf {
+    model_dir_override().map_or_else(
+        || model_family_dir(Modality::TextToSpeech, "audio-cpp"),
+        |dir| dir.join("tts"),
+    )
+}
+
+/// `<data dir>/engines/audio/audiocpp` — the runtime archive (server binary and
+/// its shared libraries) plus the generated `server.json`.
+pub fn engine_install_dir() -> PathBuf {
+    engine_dir(EngineGroup::Audio, "audiocpp")
 }
 
 pub fn stt_model_path() -> PathBuf {
     configured_path(
         "RYU_AUDIOCPP_STT_MODEL",
-        model_dir().join("stt").join(DEFAULT_STT_MODEL_FILE),
+        stt_model_dir().join(DEFAULT_STT_MODEL_FILE),
     )
 }
 
 pub fn tts_model_path() -> PathBuf {
     configured_path(
         "RYU_AUDIOCPP_TTS_MODEL",
-        model_dir().join("tts").join(DEFAULT_TTS_MODEL_FILE),
+        tts_model_dir().join(DEFAULT_TTS_MODEL_FILE),
     )
 }
 
 pub fn tts_voice_path() -> PathBuf {
     configured_path(
         "RYU_AUDIOCPP_TTS_VOICE_FILE",
-        model_dir()
-            .join("tts")
+        tts_model_dir()
             .join("embeddings")
             .join(DEFAULT_TTS_VOICE_FILE),
     )
@@ -159,31 +199,30 @@ fn binary_path() -> PathBuf {
     } else {
         "audiocpp_server"
     };
-    crate::paths::ryu_dir()
-        .join("bin")
-        .join("audiocpp")
-        .join(name)
+    engine_install_dir().join(name)
 }
 
 fn binary_dir() -> PathBuf {
     binary_path()
         .parent()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| crate::paths::ryu_dir().join("bin").join("audiocpp"))
+        .map_or_else(engine_install_dir, PathBuf::from)
 }
 
+/// The generated server config, kept with the engine it configures.
 pub fn config_path() -> PathBuf {
-    crate::paths::ryu_dir()
-        .join("audio-cpp")
-        .join("server.json")
+    engine_install_dir().join("server.json")
 }
 
-fn backend_name() -> String {
+fn backend_name(preference: Option<&str>) -> String {
     let configured = std::env::var("RYU_AUDIOCPP_BACKEND")
         .ok()
         .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty());
-    if let Some(backend) = configured {
+        .filter(|value| !value.is_empty() && value != "auto");
+    let preferred = preference
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .filter(|value| !value.is_empty() && value != "auto");
+    if let Some(backend) = configured.or(preferred) {
         if matches!(backend.as_str(), "cpu" | "cuda" | "vulkan" | "metal") {
             return backend;
         }
@@ -196,11 +235,20 @@ fn backend_name() -> String {
     }
 }
 
-fn positive_env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key)
+fn nonnegative_setting(env_key: &str, preference: Option<u64>, default: u64) -> u64 {
+    std::env::var(env_key)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .or(preference)
+        .unwrap_or(default)
+}
+
+fn positive_setting(env_key: &str, preference: Option<u64>, default: u64) -> u64 {
+    std::env::var(env_key)
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
+        .or(preference.filter(|value| *value > 0))
         .unwrap_or(default)
 }
 
@@ -213,7 +261,7 @@ fn model_entries() -> Vec<Value> {
             "path": model_config_path(
                 "RYU_AUDIOCPP_STT_MODEL",
                 &stt_model_path(),
-                model_dir().join("stt"),
+                stt_model_dir(),
             ),
             "task": "asr",
             "mode": "offline",
@@ -228,7 +276,7 @@ fn model_entries() -> Vec<Value> {
             "path": model_config_path(
                 "RYU_AUDIOCPP_TTS_MODEL",
                 &tts_model_path(),
-                model_dir().join("tts"),
+                tts_model_dir(),
             ),
             "task": "tts",
             "mode": "offline",
@@ -256,18 +304,37 @@ async fn write_config() -> Result<PathBuf> {
             .await
             .with_context(|| format!("creating audio.cpp config directory {}", parent.display()))?;
     }
-    let device = positive_env_u64("RYU_AUDIOCPP_DEVICE", 0);
-    let threads = positive_env_u64("RYU_AUDIOCPP_THREADS", 4);
+    let settings = match crate::server::preferences::PreferencesStore::open_default() {
+        Ok(preferences) => match preferences.get(RUNTIME_SETTINGS_PREFERENCE).await {
+            Ok(Some(value)) => serde_json::from_str(&value).unwrap_or_default(),
+            Ok(None) => AudioCppRuntimeSettings::default(),
+            Err(error) => {
+                tracing::warn!(%error, "could not read audio.cpp runtime settings");
+                AudioCppRuntimeSettings::default()
+            }
+        },
+        Err(error) => {
+            tracing::warn!(%error, "could not open preferences for audio.cpp runtime settings");
+            AudioCppRuntimeSettings::default()
+        }
+    };
+    let device = nonnegative_setting("RYU_AUDIOCPP_DEVICE", settings.device, 0);
+    let threads = positive_setting("RYU_AUDIOCPP_THREADS", settings.threads, 4);
+    let max_loaded_models = positive_setting(
+        "RYU_AUDIOCPP_MAX_LOADED_MODELS",
+        settings.max_loaded_models,
+        2,
+    );
     let config = json!({
         "host": "127.0.0.1",
         "port": port(),
-        "backend": backend_name(),
+        "backend": backend_name(settings.backend.as_deref()),
         "device": device,
         "threads": threads,
         "lazy_load": true,
         "log_request_body": false,
         "max_request_body_bytes": 2147483648u64,
-        "max_loaded_models": 2,
+        "max_loaded_models": max_loaded_models,
         "busy_timeout_ms": 120000,
         "ui": false,
         "models": models,
@@ -415,14 +482,14 @@ impl Sidecar for AudioCppManager {
             }
 
             let config = write_config().await?;
-            let args = vec![
-                "--config".to_string(),
-                config.to_string_lossy().to_string(),
-                "--no-ui".to_string(),
-            ];
+            // Saved engine launch settings: native options, then raw args minus
+            // the flags Core owns. Only a Ryu-started server receives them.
+            let launch = super::engine_launch_config("audiocpp").await;
+            let args = launch_args(&config, &launch);
+            let env = super::native_env_for_spawn("audiocpp", &launch, &[]);
             let program = binary.to_string_lossy().to_string();
             process
-                .start_path_with_args(&program, &args)
+                .start_path_with_env(&program, &args, &env)
                 .await
                 .context("spawning audiocpp_server")?;
 
@@ -506,12 +573,13 @@ impl Sidecar for AudioCppManager {
             crate::sidecar::remove_from_version_store("audiocpp");
             let config = config_path();
             let _ = tokio::fs::remove_file(&config).await;
-            if delete_data && std::env::var("RYU_AUDIOCPP_MODEL_DIR").is_err() {
-                let dir = model_dir();
-                if dir.exists() {
-                    tokio::fs::remove_dir_all(&dir).await.with_context(|| {
-                        format!("removing audio.cpp models at {}", dir.display())
-                    })?;
+            if delete_data && model_dir_override().is_none() {
+                for dir in [stt_model_dir(), tts_model_dir()] {
+                    if dir.exists() {
+                        tokio::fs::remove_dir_all(&dir).await.with_context(|| {
+                            format!("removing audio.cpp models at {}", dir.display())
+                        })?;
+                    }
                 }
             }
             tracing::info!("audio.cpp uninstalled");
@@ -520,9 +588,100 @@ impl Sidecar for AudioCppManager {
     }
 }
 
+/// Flags Core owns that take a value. audio.cpp lets CLI flags override
+/// `server.json`, so a raw `--threads` or `--backend` would silently beat the
+/// audio.cpp runtime settings and Core's busy timeout and model specs.
+const MANAGED_VALUE_FLAGS: &[&str] = &[
+    "--config",
+    "--host",
+    "--port",
+    "--cors-origins",
+    "--backend",
+    "--device",
+    "--threads",
+    "--max-loaded-models",
+    "--busy-timeout-ms",
+    "--model-spec-override",
+];
+/// Bare flags Core owns: the web UI switches, and help/device listing, which
+/// make the binary exit instead of serving.
+const MANAGED_BARE_FLAGS: &[&str] = &[
+    "--ui",
+    "--no-ui",
+    "--ui-management",
+    "--list-devices",
+    "--help",
+    "-h",
+];
+
+/// `audiocpp_server` arguments: Core's config file and headless mode, then
+/// native options, then raw args. audio.cpp reads the first occurrence of a
+/// flag, so a native option wins over the same flag in the raw args.
+fn launch_args(config: &std::path::Path, launch: &crate::inference::LaunchConfig) -> Vec<String> {
+    let mut args = vec![
+        "--config".to_string(),
+        config.to_string_lossy().to_string(),
+        "--no-ui".to_string(),
+    ];
+    args.extend(crate::inference::native_args("audiocpp", &launch.native));
+    args.extend(super::strip_managed_flags(
+        &launch.extra_args,
+        MANAGED_VALUE_FLAGS,
+        MANAGED_BARE_FLAGS,
+    ));
+    args
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_args_keep_core_flags_first_and_strip_managed_raw_args() {
+        let launch = crate::inference::LaunchConfig {
+            native: serde_json::json!({ "audiocpp_idle_unload_ms": 60000, "audiocpp_log": true })
+                .as_object()
+                .cloned()
+                .unwrap(),
+            extra_args: [
+                "--threads",
+                "2",
+                "--ui",
+                "--voice-dir",
+                "/voices",
+                "--port=1",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            ..Default::default()
+        };
+        assert_eq!(
+            launch_args(std::path::Path::new("/cfg/server.json"), &launch),
+            vec![
+                "--config",
+                "/cfg/server.json",
+                "--no-ui",
+                "--idle-unload-ms",
+                "60000",
+                "--log",
+                "--voice-dir",
+                "/voices"
+            ]
+        );
+    }
+
+    #[test]
+    fn default_layout_splits_models_by_modality_and_keeps_config_with_the_engine() {
+        if std::env::var_os("RYU_AUDIOCPP_MODEL_DIR").is_some()
+            || std::env::var_os("RYU_AUDIOCPP_BIN").is_some()
+        {
+            return;
+        }
+        assert!(stt_model_dir().ends_with("models/speech-to-text/audio-cpp"));
+        assert!(tts_model_dir().ends_with("models/text-to-speech/audio-cpp"));
+        assert!(config_path().ends_with("engines/audio/audiocpp/server.json"));
+        assert!(binary_dir().ends_with("engines/audio/audiocpp"));
+    }
 
     #[test]
     fn rows_expose_the_alternate_runtime_and_curated_model() {
@@ -537,9 +696,11 @@ mod tests {
 
     #[test]
     fn default_runtime_paths_are_capability_specific() {
-        assert!(stt_model_path().ends_with("stt/parakeet-tdt-0.6b-v3-q8_0.gguf"));
-        assert!(tts_model_path().ends_with("tts/pocket-tts-english-q8_0.gguf"));
-        assert!(tts_voice_path().ends_with("tts/embeddings/alba.safetensors"));
+        assert!(
+            stt_model_path().ends_with("speech-to-text/audio-cpp/parakeet-tdt-0.6b-v3-q8_0.gguf")
+        );
+        assert!(tts_model_path().ends_with("text-to-speech/audio-cpp/pocket-tts-english-q8_0.gguf"));
+        assert!(tts_voice_path().ends_with("text-to-speech/audio-cpp/embeddings/alba.safetensors"));
     }
 
     #[test]

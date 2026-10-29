@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/btw.ts
 //
 // Typed client for Core's `/btw` side-question endpoint. A `/btw` question
@@ -55,16 +57,21 @@ export function askBtw(
 	signal?: AbortSignal,
 	model?: string
 ): Promise<BtwResult> {
-	return request<BtwResult>(target, "/api/btw", {
-		method: "POST",
-		body: {
-			question,
-			conversation_id: conversationId,
-			...(messages.length > 0 ? { messages } : {}),
-			...(model?.trim() ? { model: model.trim() } : {}),
+	return request<BtwResult>(
+		target,
+		"/api/btw",
+		{
+			method: "POST",
+			body: {
+				question,
+				conversation_id: conversationId,
+				...(messages.length > 0 ? { messages } : undefined),
+				...(model?.trim() ? { model: model.trim() } : undefined),
+			},
+			signal,
 		},
-		signal,
-	});
+		btwResultResponseCodec
+	);
 }
 
 /** List a conversation's persisted side chats, newest first. */
@@ -76,7 +83,8 @@ export function listBtw(
 	return request<BtwEntry[]>(
 		target,
 		`/api/conversations/${encodeURIComponent(conversationId)}/btw`,
-		{ signal }
+		{ signal },
+		responseCodec1
 	);
 }
 
@@ -86,8 +94,40 @@ export function deleteBtw(
 	id: string,
 	signal?: AbortSignal
 ): Promise<void> {
-	return request<void>(target, `/api/btw/${encodeURIComponent(id)}`, {
-		method: "DELETE",
-		signal,
-	});
+	return request<void>(
+		target,
+		`/api/btw/${encodeURIComponent(id)}`,
+		{
+			method: "DELETE",
+			signal,
+		},
+		responseCodec2
+	);
 }
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const btwResultResponseCodec = z
+	.object({
+		answer: z.string(),
+		id: z.union([z.string(), z.null()]).optional(),
+		model: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const btwEntryResponseCodec = z
+	.object({
+		agent_id: z.union([z.string(), z.null()]).optional(),
+		answer: z.string(),
+		child_conversation_id: z.union([z.string(), z.null()]).optional(),
+		conversation_id: z.string(),
+		created_at: z.number(),
+		id: z.string(),
+		kind: z.string().optional(),
+		model: z.union([z.string(), z.null()]).optional(),
+		preset: z.union([z.string(), z.null()]).optional(),
+		question: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec1 = z.array(btwEntryResponseCodec);
+const responseCodec2 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);

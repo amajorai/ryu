@@ -21,15 +21,14 @@ import { useLayoutEffect, useState } from "react";
 import type { FileTreePrefs } from "@/src/hooks/useFileTreePrefs.ts";
 import { TREE_THEME_INHERIT } from "@/src/lib/pierre-themes.ts";
 
-// `themeToTreeStyles` returns custom properties (`--trees-theme-*`), which
-// aren't in React's CSSProperties keys — the cast is the standard escape.
-function toStyle(styles: Record<string, string>): CSSProperties {
-	return styles as CSSProperties;
+// Preserve the complete native tree-theme operation and its raw style map.
+function toStyle(styles: ReturnType<typeof themeToTreeStyles>): CSSProperties {
+	return styles;
 }
 
 /**
- * Inline styles for the `<FileTree>` host, or `undefined` when the tree should
- * inherit the app's own surface colors.
+ * Inline styles for the `<FileTree>` host. Inherit uses the app's color scheme
+ * so the library's light-dark colors follow the selected app mode.
  */
 export function useFileTreeThemeStyles(
 	prefs: FileTreePrefs
@@ -38,10 +37,11 @@ export function useFileTreeThemeStyles(
 	const themeName =
 		resolvedTheme === "dark" ? prefs.darkTheme : prefs.lightTheme;
 	const [styles, setStyles] = useState<CSSProperties | undefined>(undefined);
+	const appColorScheme = resolvedTheme === "dark" ? "dark" : "light";
 
 	useLayoutEffect(() => {
 		if (themeName === TREE_THEME_INHERIT) {
-			setStyles(undefined);
+			setStyles({ colorScheme: appColorScheme });
 			return;
 		}
 		const resolved = getResolvedOrResolveTheme(themeName);
@@ -68,7 +68,7 @@ export function useFileTreeThemeStyles(
 		return () => {
 			cancelled = true;
 		};
-	}, [themeName]);
+	}, [themeName, appColorScheme]);
 
 	return styles;
 }

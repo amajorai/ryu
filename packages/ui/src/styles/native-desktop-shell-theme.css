@@ -1,0 +1,18 @@
+/* Exact native Desktop shell values, exposed as semantic owner tokens. */
+@theme inline {
+	--color-os-desktop: #121126;
+	--color-os-launcher-glass: rgb(255 255 255 / 0.12);
+	--shadow-os-launcher-glass:
+		inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 10px 30px rgba(0, 0, 0, 0.25);
+	--backdrop-saturate-os-launcher: 1.8;
+	--text-shadow-os-preview: 0 1px 8px rgba(0, 0, 0, 0.4);
+	--text-shadow-os-label: 0 1px 8px rgba(0, 0, 0, 0.45);
+	--radius-inbox-app-icon: 10px;
+	--radius-inbox-status: 18px;
+	--tracking-exchange-kicker: 0.18em;
+	--radius-os-window: 1.4rem;
+	--radius-os-icon-preview: 0.9rem;
+	--radius-os-icon-launcher: 1.35rem;
+	--radius-os-icon-dock: 0.7rem;
+	--shadow-os-icon-launcher: 0 10px 24px rgba(0, 0, 0, 0.35);
+}

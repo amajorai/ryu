@@ -5,12 +5,11 @@
 // injected `ChatStreamFn`. The desktop wires AI SDK; the command bar wires its
 // `window.command.core.chatStream` IPC; raycast wires its own fetch.
 
-import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
-import { cn } from "@ryu/ui/lib/utils";
+import { useLocalizedText } from "@ryu/i18n/react";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type KeyboardEvent,
+	type ReactNode,
 	useCallback,
 	useEffect,
 	useRef,
@@ -35,8 +34,22 @@ export interface ChatViewProps {
 	onExit?: () => void;
 	/** Placeholder for the composer. */
 	placeholder?: string;
+	/** Host-owned composer renderer. Use the same composer as the host chat surface. */
+	renderComposer: (props: ChatViewComposerProps) => ReactNode;
 	/** Injected streaming transport. Required — the view owns no network. */
 	stream: ChatStreamFn;
+}
+
+/** Draft and stream controls passed to the host's shared composer. */
+export interface ChatViewComposerProps {
+	autoFocus: boolean;
+	onChange: (value: string) => void;
+	onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+	onSend: (content: string) => void;
+	onStop: () => void;
+	placeholder: string;
+	status: "ready" | "streaming";
+	value: string;
 }
 
 let idCounter = 0;
@@ -59,6 +72,7 @@ export function ChatView({
 	onExit,
 	autoFocus = true,
 	className,
+	renderComposer,
 }: ChatViewProps) {
 	const [messages, setMessages] = useState<ChatMessage[]>(
 		initialMessages ?? []
@@ -67,10 +81,6 @@ export function ChatView({
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const localizedGreeting = useLocalizedText(greeting);
-	const localizedPlaceholder = useLocalizedString(
-		placeholder ?? "Ask Ryu anything..."
-	);
-	const localizedSendLabel = useLocalizedString(sending ? "Stop" : "Send");
 	const handleRef = useRef<ChatStreamHandle | null>(null);
 	const listRef = useRef<HTMLDivElement | null>(null);
 	const seededRef = useRef(false);
@@ -144,7 +154,7 @@ export function ChatView({
 	useEffect(() => () => handleRef.current?.abort(), []);
 
 	// Keep the latest turn in view as it streams.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: scroll on message growth
+	// scroll on message growth
 	useEffect(() => {
 		const el = listRef.current;
 		if (el) {
@@ -152,12 +162,7 @@ export function ChatView({
 		}
 	}, [messages]);
 
-	const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-		if (event.key === "Enter" && !event.shiftKey) {
-			event.preventDefault();
-			send(input);
-			return;
-		}
+	const handleComposerKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
 		if (event.key === "Escape" && input.length === 0) {
 			onExit?.();
 		}
@@ -204,28 +209,17 @@ export function ChatView({
 				) : null}
 			</div>
 
-			<div className="flex items-end gap-2 border-border/50 border-t p-2">
-				<textarea
-					autoFocus={autoFocus}
-					className="max-h-32 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
-					onChange={(event) => setInput(event.target.value)}
-					onKeyDown={onKeyDown}
-					placeholder={localizedPlaceholder}
-					rows={1}
-					value={input}
-				/>
-				<button
-					aria-label={localizedSendLabel}
-					className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40"
-					disabled={!sending && input.trim().length === 0}
-					onClick={() => (sending ? stop() : send(input))}
-					type="button"
-				>
-					<HugeiconsIcon
-						className="size-4"
-						icon={sending ? StopIcon : ArrowUp01Icon}
-					/>
-				</button>
+			<div className="shrink-0 p-2">
+				{renderComposer({
+					autoFocus,
+					onChange: setInput,
+					onKeyDown: handleComposerKeyDown,
+					onSend: send,
+					onStop: stop,
+					placeholder: placeholder ?? "Ask Ryu anything…",
+					status: sending ? "streaming" : "ready",
+					value: input,
+				})}
 			</div>
 		</div>
 	);

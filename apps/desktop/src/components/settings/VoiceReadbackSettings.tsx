@@ -2,55 +2,63 @@
 // finishes. Separate from island-tts (island companion) and from the realtime
 // voice-mode WebSocket session (which always speaks via Core while active).
 
-import { Switch } from "@ryu/ui/components/switch";
-import { useCallback, useEffect, useState } from "react";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	DEFAULT_VOICE_MODE_READBACK_PREFS,
 	getVoiceModeReadbackPrefs,
 	setVoiceModeReadbackPrefs,
-	type VoiceModeReadbackPrefs,
 } from "@/src/lib/api/preferences.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import {
+	useVoicePreferenceScope,
+	useVoicePreference,
+	VoicePreferenceStatus,
+	type VoicePreferenceAuthority,
+} from "./voice-preference-state.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
-} from "./shared/settings-items.tsx";
+} from "@/src/components/settings/shared/settings-items.tsx";
 
 export function VoiceReadbackSettings() {
-	const [prefs, setPrefs] = useState<VoiceModeReadbackPrefs>(
-		DEFAULT_VOICE_MODE_READBACK_PREFS
+	const scope = useVoicePreferenceScope();
+	return (
+		<VoiceReadbackSettingsForTarget
+			key={scope.id}
+			target={scope.target}
+			resource={scope.resource}
+		/>
 	);
+}
 
-	useEffect(() => {
-		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		getVoiceModeReadbackPrefs(target).then((saved) => {
-			if (!cancelled) {
-				setPrefs(saved);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
-	const persist = useCallback((next: VoiceModeReadbackPrefs) => {
-		setPrefs(next);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		setVoiceModeReadbackPrefs(target, next).catch(() => undefined);
-	}, []);
+function VoiceReadbackSettingsForTarget({
+	target,
+	resource,
+}: {
+	target: ApiTarget;
+	resource: VoicePreferenceAuthority;
+}) {
+	const { prefs, persist, disabled, error, retry, pending } =
+		useVoicePreference(
+			target,
+			DEFAULT_VOICE_MODE_READBACK_PREFS,
+			getVoiceModeReadbackPrefs,
+			setVoiceModeReadbackPrefs,
+			resource
+		);
 
 	return (
 		<SettingsSection
 			caption="Applies to desktop chat. Read-back is automatically disabled while a meeting is recording, even when this toggle is on. Engine and voice come from the Audio section below."
 			title="Read back responses"
 		>
+			<VoicePreferenceStatus error={error} retry={retry} pending={pending} />
 			<SettingsGroup>
 				<SettingsItem
 					actions={
 						<Switch
+							disabled={disabled}
 							checked={prefs.enabled}
 							onCheckedChange={(enabled) => persist({ ...prefs, enabled })}
 						/>

@@ -6,6 +6,8 @@
 // All orchestration logic lives in Core; this client only does CRUD + member
 // management (the drag-an-agent-into-a-team gesture posts to the members route).
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
 
 /** How a team's members respond when the team is called. Mirrors Core's enum. */
@@ -16,11 +18,12 @@ export type Coordination =
 	| "router";
 
 /** User-facing labels + one-line descriptions for the coordination picker. */
-export const COORDINATION_OPTIONS: ReadonlyArray<{
-	value: Coordination;
-	label: string;
+interface CoordinationOption {
 	description: string;
-}> = [
+	label: string;
+	value: Coordination;
+}
+export const COORDINATION_OPTIONS: readonly CoordinationOption[] = [
 	{
 		value: "broadcast",
 		label: "Broadcast",
@@ -76,16 +79,52 @@ export interface UpdateTeamInput {
 	name?: string;
 }
 
-interface TeamWire {
-	coordination?: string | null;
-	created_at?: string | null;
-	description?: string | null;
-	id: string;
+// Full native TeamRecord; preserve existing older-node optional fields and
+// lenient future coordination fallback before the unchanged UI normalization.
+const teamFieldsSchema = z.object({
+	coordination: z.string().nullish(),
+	created_at: z.string().nullish(),
+	description: z.string().nullish(),
+	id: z.string(),
+	lead_agent_id: z.string().nullish(),
+	members: z.array(z.string()).nullish(),
+	name: z.string(),
+	updated_at: z.string().nullish(),
+});
+export const teamResponseSchema = z.custom<z.output<typeof teamFieldsSchema>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		teamFieldsSchema.safeParse(value).success
+);
+type TeamWire = z.output<typeof teamResponseSchema>;
+const teamListFieldsSchema = z.object({
+	teams: z.array(teamResponseSchema).nullish(),
+});
+const teamListResponseSchema = z.custom<z.output<typeof teamListFieldsSchema>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		teamListFieldsSchema.safeParse(value).success
+);
+const teamEnvelopeFieldsSchema = z.object({ team: teamResponseSchema });
+const teamEnvelopeResponseSchema = z.custom<
+	z.output<typeof teamEnvelopeFieldsSchema>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		teamEnvelopeFieldsSchema.safeParse(value).success
+);
+const teamDeleteFieldsSchema = z.object({ success: z.boolean() });
+const teamDeleteResponseSchema = z.custom<
+	z.output<typeof teamDeleteFieldsSchema>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		teamDeleteFieldsSchema.safeParse(value).success
+);
+
+type TeamPatchWire = Omit<UpdateTeamInput, "leadAgentId"> & {
 	lead_agent_id?: string | null;
-	members?: string[];
-	name: string;
-	updated_at?: string | null;
-}
+};
 
 function toCoordination(raw: string | null | undefined): Coordination {
 	switch (raw) {
@@ -114,12 +153,17 @@ function toTeam(t: TeamWire): Team {
 }
 
 export async function fetchTeams(target: ApiTarget): Promise<Team[]> {
-	const json = await request<{ teams?: TeamWire[] }>(target, "/api/teams");
+	const json = await request(target, "/api/teams", {}, teamListResponseSchema);
 	return (json.teams ?? []).map(toTeam);
 }
 
 export async function fetchTeam(target: ApiTarget, id: string): Promise<Team> {
-	const json = await request<{ team: TeamWire }>(target, `/api/teams/${id}`);
+	const json = await request(
+		target,
+		`/api/teams/${id}`,
+		{},
+		teamEnvelopeResponseSchema
+	);
 	return toTeam(json.team);
 }
 
@@ -127,16 +171,21 @@ export async function createTeam(
 	target: ApiTarget,
 	input: CreateTeamInput
 ): Promise<Team> {
-	const json = await request<{ team: TeamWire }>(target, "/api/teams", {
-		method: "POST",
-		body: {
-			name: input.name,
-			description: input.description ?? null,
-			members: input.members ?? [],
-			coordination: input.coordination ?? "broadcast",
-			lead_agent_id: input.leadAgentId ?? null,
+	const json = await request(
+		target,
+		"/api/teams",
+		{
+			method: "POST",
+			body: {
+				name: input.name,
+				description: input.description ?? null,
+				members: input.members ?? [],
+				coordination: input.coordination ?? "broadcast",
+				lead_agent_id: input.leadAgentId ?? null,
+			},
 		},
-	});
+		teamEnvelopeResponseSchema
+	);
 	return toTeam(json.team);
 }
 
@@ -145,7 +194,7 @@ export async function updateTeam(
 	id: string,
 	input: UpdateTeamInput
 ): Promise<Team> {
-	const body: Record<string, unknown> = {};
+	const body: TeamPatchWire = {};
 	if (input.name !== undefined) {
 		body.name = input.name;
 	}
@@ -161,15 +210,25 @@ export async function updateTeam(
 	if (input.leadAgentId !== undefined) {
 		body.lead_agent_id = input.leadAgentId;
 	}
-	const json = await request<{ team: TeamWire }>(target, `/api/teams/${id}`, {
-		method: "PATCH",
-		body,
-	});
+	const json = await request(
+		target,
+		`/api/teams/${id}`,
+		{
+			method: "PATCH",
+			body,
+		},
+		teamEnvelopeResponseSchema
+	);
 	return toTeam(json.team);
 }
 
 export async function deleteTeam(target: ApiTarget, id: string): Promise<void> {
-	await request<void>(target, `/api/teams/${id}`, { method: "DELETE" });
+	await request(
+		target,
+		`/api/teams/${id}`,
+		{ method: "DELETE" },
+		teamDeleteResponseSchema
+	);
 }
 
 /** Add one agent to a team (the drag-an-agent-into-a-team gesture). */
@@ -178,10 +237,11 @@ export async function addTeamMember(
 	teamId: string,
 	agentId: string
 ): Promise<Team> {
-	const json = await request<{ team: TeamWire }>(
+	const json = await request(
 		target,
 		`/api/teams/${teamId}/members`,
-		{ method: "POST", body: { agent_id: agentId } }
+		{ method: "POST", body: { agent_id: agentId } },
+		teamEnvelopeResponseSchema
 	);
 	return toTeam(json.team);
 }
@@ -192,10 +252,11 @@ export async function removeTeamMember(
 	teamId: string,
 	agentId: string
 ): Promise<Team> {
-	const json = await request<{ team: TeamWire }>(
+	const json = await request(
 		target,
 		`/api/teams/${teamId}/members/${agentId}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		teamEnvelopeResponseSchema
 	);
 	return toTeam(json.team);
 }

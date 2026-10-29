@@ -1,3 +1,4 @@
+import proofStyles from "./effort-slider-story.module.css";
 // Standalone browser story for the REAL `EffortSliderRow` — the composer picker's
 // reasoning-effort control — mounted INSIDE a real `DropdownMenuContent`.
 //
@@ -20,7 +21,7 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ComposerSettingsSection } from "../../components/agent-elements/input/composer-settings-menu.tsx";
@@ -72,7 +73,7 @@ function Scale({
 
 function Story() {
 	return (
-		<div style={{ padding: 40 }}>
+		<div className={proofStyles.fixture1}>
 			<DropdownMenu>
 				<DropdownMenuTrigger>Agent</DropdownMenuTrigger>
 				<DropdownMenuContent className="w-72">

@@ -361,25 +361,42 @@ fn screencapture_display_index(display_id: u32) -> Option<u32> {
 }
 
 #[cfg(target_os = "macos")]
-fn capture_via_screencapture(display_id: u32) -> Result<Frame> {
-    use std::process::Command;
-    let tmp = std::env::temp_dir().join(format!("ghost-capture-{display_id}-{}.png", now_us()));
-    let mut cmd = Command::new("/usr/sbin/screencapture");
+fn run_screencapture(display_index: Option<u32>, target: &std::path::Path) -> Result<()> {
+    let mut cmd = std::process::Command::new("/usr/sbin/screencapture");
+    // Never forward a sealing key to a helper program (same names as
+    // `ryu_crypto::SEAL_ENV_VARS`).
+    for name in [
+        "RYU_SEAL_KEY",
+        "RYU_SEAL_SCOPE",
+        "RYU_SEAL_RETIRED_KEYS",
+        "RYU_MASTER_KEY",
+    ] {
+        cmd.env_remove(name);
+    }
     // -x: no capture sound; -t png: PNG output.
     cmd.arg("-x").arg("-t").arg("png");
-    if let Some(idx) = screencapture_display_index(display_id) {
+    if let Some(idx) = display_index {
         cmd.arg("-D").arg(idx.to_string());
     }
-    cmd.arg(&tmp);
+    cmd.arg(target);
     let status = cmd
         .status()
         .map_err(|e| anyhow::anyhow!("failed to spawn /usr/sbin/screencapture: {e}"))?;
     if !status.success() {
         return Err(anyhow::anyhow!("screencapture exited with status {status}"));
     }
-    let bytes = std::fs::read(&tmp)
-        .map_err(|e| anyhow::anyhow!("failed to read screencapture output: {e}"))?;
-    let _ = std::fs::remove_file(&tmp);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn capture_via_screencapture(display_id: u32) -> Result<Frame> {
+    // The frame is a plaintext screenshot: it goes to the host's owner-only scratch
+    // dir under its data dir (never the system temp dir), pre-created 0600, and the
+    // guard deletes it on every exit path (see `capture_scratch`).
+    let index = screencapture_display_index(display_id);
+    let bytes = crate::capture_scratch::capture_through_file(&display_id.to_string(), |tmp| {
+        run_screencapture(index, tmp)
+    })?;
     if bytes.is_empty() {
         return Err(anyhow::anyhow!(
             "screencapture produced an empty image (Screen Recording may be denied for the \

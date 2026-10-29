@@ -45,10 +45,23 @@ export function useGettingStarted(): GettingStarted {
 		}
 	}, [hasChats]);
 
+	// Any thread placed in a project means the user has a project.
+	const hasProject = conversations.some(
+		(conversation) => conversation.hierarchy?.projectId
+	);
+	useEffect(() => {
+		if (hasProject) {
+			markQuestComplete("project");
+		}
+	}, [hasProject]);
+
 	const quests = useMemo<ResolvedQuest[]>(() => {
 		const done = new Set(completedIds);
 		if (hasChats) {
 			done.add("chat");
+		}
+		if (hasProject) {
+			done.add("project");
 		}
 		let markedNext = false;
 		return GETTING_STARTED_QUESTS.map((quest) => {
@@ -61,7 +74,7 @@ export function useGettingStarted(): GettingStarted {
 			}
 			return { ...quest, status: "pending" as const };
 		});
-	}, [completedIds, hasChats]);
+	}, [completedIds, hasChats, hasProject]);
 
 	const completedCount = quests.filter(
 		(quest) => quest.status === "completed"

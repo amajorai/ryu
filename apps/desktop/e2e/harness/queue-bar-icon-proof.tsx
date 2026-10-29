@@ -1,4 +1,4 @@
-import { QueueBar } from "@ryu/blocks/desktop/agent-elements/queue/queue-bar";
+import { QueueBar } from "@ryu/blocks/desktop/agent-elements/queue/queue-bar.tsx";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 
@@ -9,7 +9,7 @@ function Story() {
 		<main className="min-h-screen bg-muted/30 px-6 py-10 text-foreground">
 			<div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
 				<div className="space-y-2">
-					<p className="font-medium text-muted-foreground text-sm uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-sm uppercase tracking-(--tracking-section)">
 						Desktop chat queue
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">

@@ -2,16 +2,16 @@
 
 // beui.dev/components/agents/loading-states/reasoning-text
 
-import { Loader } from "@ryu/ui/components/motion/loader";
-import { TextScramble } from "@ryu/ui/components/motion/text-scramble";
-import { TextMorph } from "@ryu/ui/components/text-morph";
-import { EASE_OUT, EASE_OUT_CSS, SPRING_SWAP } from "@ryu/ui/lib/ease";
+import { Loader } from "@ryu/ui/components/motion/loader.tsx";
+import { TextScramble } from "@ryu/ui/components/motion/text-scramble.tsx";
+import { TextMorph } from "@ryu/ui/components/text-morph.tsx";
+import { EASE_OUT, EASE_OUT_CSS, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
 import {
 	TEXT_SHIMMER_CLASS_NAME,
-	TEXT_SHIMMER_KEYFRAMES,
+	type TextShimmerStyle,
 	textShimmerStyle,
-} from "@ryu/ui/lib/text-shimmer";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/lib/text-shimmer.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
@@ -47,6 +47,10 @@ interface PhraseProps {
 }
 
 function CascadePhrase({ phrase, reduce, shimmerDuration }: PhraseProps) {
+	const shimmerStyle: TextShimmerStyle = {
+		"--text-shimmer-duration":
+			textShimmerStyle(shimmerDuration)["--text-shimmer-duration"],
+	};
 	const text = `${phrase}…`;
 
 	if (reduce) {
@@ -56,7 +60,7 @@ function CascadePhrase({ phrase, reduce, shimmerDuration }: PhraseProps) {
 					"col-start-1 row-start-1 inline-block justify-self-start whitespace-pre",
 					TEXT_SHIMMER_CLASS_NAME
 				)}
-				style={textShimmerStyle(shimmerDuration)}
+				style={shimmerStyle}
 			>
 				{text}
 			</span>
@@ -80,7 +84,7 @@ function CascadePhrase({ phrase, reduce, shimmerDuration }: PhraseProps) {
 						)}
 						custom={characterIndex * CASCADE_STAGGER}
 						key={characterIndex}
-						style={textShimmerStyle(shimmerDuration)}
+						style={shimmerStyle}
 						variants={{
 							initial: { opacity: 0, y: "100%" },
 							animate: (delay: number) => ({
@@ -108,6 +112,10 @@ function CascadePhrase({ phrase, reduce, shimmerDuration }: PhraseProps) {
 }
 
 function SwapPhrase({ phrase, reduce, shimmerDuration }: PhraseProps) {
+	const shimmerStyle: TextShimmerStyle = {
+		"--text-shimmer-duration":
+			textShimmerStyle(shimmerDuration)["--text-shimmer-duration"],
+	};
 	return (
 		<TextMorph
 			className={cn(
@@ -118,7 +126,7 @@ function SwapPhrase({ phrase, reduce, shimmerDuration }: PhraseProps) {
 			duration={320}
 			ease={EASE_OUT_CSS}
 			numbers={false}
-			style={textShimmerStyle(shimmerDuration)}
+			style={shimmerStyle}
 		>
 			{phrase}…
 		</TextMorph>
@@ -126,6 +134,10 @@ function SwapPhrase({ phrase, reduce, shimmerDuration }: PhraseProps) {
 }
 
 function ScramblePhrase({ phrase, shimmerDuration }: PhraseProps) {
+	const shimmerStyle: TextShimmerStyle = {
+		"--text-shimmer-duration":
+			textShimmerStyle(shimmerDuration)["--text-shimmer-duration"],
+	};
 	const target = `${phrase}…`;
 
 	return (
@@ -134,7 +146,7 @@ function ScramblePhrase({ phrase, shimmerDuration }: PhraseProps) {
 				"col-start-1 row-start-1 justify-self-start tabular-nums",
 				TEXT_SHIMMER_CLASS_NAME
 			)}
-			style={textShimmerStyle(shimmerDuration)}
+			style={shimmerStyle}
 			text={target}
 		/>
 	);
@@ -144,7 +156,7 @@ export function ReasoningText({
 	phrases = DEFAULT_PHRASES,
 	variant = "cascade",
 	interval = 1800,
-	shimmerDuration = 2.2,
+	shimmerDuration = 0.9,
 	indicator,
 	className,
 }: ReasoningTextProps) {
@@ -176,48 +188,45 @@ export function ReasoningText({
 	}, [interval, safePhrases.length]);
 
 	return (
-		<>
-			<style>{TEXT_SHIMMER_KEYFRAMES}</style>
+		<span
+			aria-labelledby={statusId}
+			aria-live="polite"
+			className={cn(
+				"inline-flex items-center gap-2 font-medium text-muted-foreground text-sm",
+				className
+			)}
+			role="status"
+		>
 			<span
-				aria-labelledby={statusId}
-				aria-live="polite"
-				className={cn(
-					"inline-flex items-center gap-2 font-medium text-muted-foreground text-sm",
-					className
-				)}
-				role="status"
+				aria-hidden="true"
+				className="inline-flex size-3 shrink-0 items-center justify-center"
 			>
-				<span
-					aria-hidden="true"
-					className="inline-flex size-3 shrink-0 items-center justify-center"
-				>
-					{indicator ?? (
-						<Loader
-							label="Reasoning"
-							size={14}
-							speed={0.8}
-							variant="ascii-line"
-						/>
-					)}
-				</span>
-
-				<span aria-hidden="true" className="grid overflow-hidden text-left">
-					<span className="invisible col-start-1 row-start-1 whitespace-nowrap">
-						{longestPhrase}…
-					</span>
-					{variant === "cascade" ? (
-						<CascadePhrase {...phraseProps} />
-					) : variant === "scramble" ? (
-						<ScramblePhrase {...phraseProps} />
-					) : (
-						<SwapPhrase {...phraseProps} />
-					)}
-				</span>
-
-				<span className="sr-only" id={statusId}>
-					{phrase}
-				</span>
+				{indicator ?? (
+					<Loader
+						label="Reasoning"
+						size={14}
+						speed={0.8}
+						variant="ascii-line"
+					/>
+				)}
 			</span>
-		</>
+
+			<span aria-hidden="true" className="grid overflow-hidden text-left">
+				<span className="invisible col-start-1 row-start-1 whitespace-nowrap">
+					{longestPhrase}…
+				</span>
+				{variant === "cascade" ? (
+					<CascadePhrase {...phraseProps} />
+				) : variant === "scramble" ? (
+					<ScramblePhrase {...phraseProps} />
+				) : (
+					<SwapPhrase {...phraseProps} />
+				)}
+			</span>
+
+			<span className="sr-only" id={statusId}>
+				{phrase}
+			</span>
+		</span>
 	);
 }

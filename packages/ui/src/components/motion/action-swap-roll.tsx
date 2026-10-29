@@ -7,13 +7,13 @@ import {
 	type ActionSwapIconProps,
 	ActionSwapText,
 	type ActionSwapTextProps,
-} from "./action-swap";
+} from "./action-swap.tsx";
 
 export type {
 	ActionSwapButtonSize,
 	ActionSwapButtonVariant,
 	ActionSwapItem,
-} from "./action-swap";
+} from "./action-swap.tsx";
 
 export type ActionSwapRollButtonProps = Omit<
 	ActionSwapButtonProps,

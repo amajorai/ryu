@@ -109,3 +109,23 @@ describe("deriveTodoProgress", () => {
 		).toBeUndefined();
 	});
 });
+
+it("keeps live optional metadata and future JSON without widening todo statuses", () => {
+	const future = JSON.parse('{"__proto__":{"owner":"future"},"revision":2}');
+	const item = {
+		content: " Validate ",
+		status: "pending",
+		optional: undefined,
+		future,
+	};
+	const input = {
+		todos: [null, item, { content: "Unknown", status: "future_status" }],
+		optional: undefined,
+	};
+	const part = { type: "dynamic-tool", toolName: "TodoWrite", input, future };
+	const result = deriveTodoProgress([{ parts: [part] }]);
+	expect(result?.items).toEqual([{ label: "Validate", status: "pending" }]);
+	expect(result?.percentage).toBe(0);
+	expect(part.input).toBe(input);
+	expect(item.future).toBe(future);
+});

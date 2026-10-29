@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import AppIconArtwork, { composerIconFor } from "./app-icon-artwork";
+import AppIconArtwork, { composerIconFor } from "./app-icon-artwork.tsx";
 
 test("manifest and public catalog IDs render identical native artwork on the server", () => {
 	const native = renderToStaticMarkup(

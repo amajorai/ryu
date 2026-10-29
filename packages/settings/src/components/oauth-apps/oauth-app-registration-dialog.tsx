@@ -1,4 +1,4 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -6,10 +6,11 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { SensitiveValue } from "@ryu/ui/components/sensitive-value.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { useState } from "react";
@@ -145,7 +146,10 @@ export function OAuthAppRegistrationDialog({
 								<Label>Client secret</Label>
 								<div className="flex items-center gap-2 rounded-md border bg-muted p-3">
 									<code className="flex-1 break-all font-mono text-xs">
-										{createdApp.clientSecret}
+										<SensitiveValue
+											label="client secret"
+											value={createdApp.clientSecret}
+										/>
 									</code>
 									<Button
 										aria-label="Copy client secret"

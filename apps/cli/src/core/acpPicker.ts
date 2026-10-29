@@ -1,4 +1,5 @@
 import { type AcpConfig, flattenConfigOptions } from "@ryuhq/core-client/acp";
+import type { ChatStreamOptions } from "./chatStream.ts";
 
 export type AcpPickerChoice =
 	| { kind: "mode"; id: string; label: string; description?: string | null }
@@ -29,10 +30,15 @@ export function acpPickerChoices(config: AcpConfig): AcpPickerChoice[] {
 	return [...modes, ...options];
 }
 
+export interface AcpPickerSelection {
+	config: NonNullable<ChatStreamOptions["acpConfig"]>;
+	mode: string | null;
+}
+
 export function applyAcpPickerChoice(
 	choice: AcpPickerChoice,
-	current: { mode: string | null; config: Record<string, string> }
-): { mode: string | null; config: Record<string, string> } {
+	current: AcpPickerSelection
+): AcpPickerSelection {
 	if (choice.kind === "mode") {
 		return { ...current, mode: choice.id };
 	}

@@ -1,41 +1,14 @@
 {
   "slug": "data-science",
   "name": "Data Science",
-  "navLabel": "Data Science",
-  "category": "Engineering & Product",
   "icon": "Brain",
   "tagline": "Profile datasets, prepare analysis code, and document experiment results.",
-  "heroEyebrow": "Ryu for Data Science",
   "heroTitle": "Ryu for data science",
-  "heroSubtitle": "Profile datasets, prepare analysis code, and document experiment results.",
   "visualKey": "CoreVisual",
-  "intro": "Data science is mostly the unglamorous middle: cleaning, profiling, feature engineering, and writing up results. Ryu runs agents that handle that grind on your machine, so proprietary datasets never leave, and grounds them on your past notebooks and methods so suggestions match how your team actually works.",
-  "highlights": [
-    {
-      "title": "Data stays on device",
-      "description": "Run a local model with no telemetry, so training sets and proprietary features never leave your machine.",
-      "icon": "Shield"
-    },
-    {
-      "title": "From data to draft",
-      "description": "Profile a dataset and get cleaning steps, feature ideas, and a starter pipeline you can run and refine.",
-      "icon": "Blocks"
-    },
-    {
-      "title": "Grounded in your work",
-      "description": "Index past notebooks and methods with Spaces and RAG, so an agent reuses your conventions instead of generic boilerplate.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Pick the right brain",
-      "description": "Swap a strong reasoning model for hard derivations and a local model for routine cleanup, per task, with no lock-in.",
-      "icon": "Shield"
-    }
-  ],
   "useCases": [
     {
       "title": "Exploratory analysis",
-      "description": "Profile a new dataset for distributions, missingness, and correlations, and surface the variables worth modeling."
+      "description": "Profile a new dataset for distributions, missingness, and correlations, and point out the variables worth modeling."
     },
     {
       "title": "Feature engineering",
@@ -51,35 +24,25 @@
     },
     {
       "title": "Literature grounding",
-      "description": "Ask questions across papers and internal docs in a Space, with answers citing the exact source for each claim."
+      "description": "Ask questions across papers and internal docs in a Space, with answers citing the source for each claim."
     },
     {
       "title": "Reproducibility checks",
       "description": "Audit a notebook for hidden state, unseeded randomness, and leakage between train and test splits before you publish."
     }
   ],
-  "examplePrompts": [
-    "Profile this customer churn dataset and tell me which features look predictive and which are leaking the label.",
-    "Draft a feature pipeline that encodes the categoricals and handles the missing values in the income column.",
-    "Compare these two model runs by precision, recall, and calibration, and explain which one I should ship.",
-    "Write up this experiment as a report with the setup, results, and three follow-up experiments.",
-    "Check this notebook for data leakage and any randomness that isn't seeded."
-  ],
   "faq": [
     {
       "q": "Is my training data safe?",
-      "a": "Yes. Ryu is local-first, so you can run a model entirely on your machine with no telemetry and keep proprietary datasets and features off the network entirely."
+      "a": "Yes. With a local model, proprietary datasets and features stay on your machine. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Can it learn how my team works?",
-      "a": "Yes. Index your past notebooks, methods, and docs in a Space, and agents ground their suggestions in your conventions and cite the source, instead of returning generic code."
+      "a": "Yes. Add your past notebooks, methods, and docs to a Space, and agents follow your conventions and cite the source."
     },
     {
       "q": "Can I use a stronger model for hard problems?",
-      "a": "Yes. Ryu lets you swap engines per task, so you can route a derivation or proof to a strong reasoning model and keep routine cleanup on a fast local one, with no lock-in."
+      "a": "Yes. Send a derivation or proof to a strong reasoning model and keep routine cleanup on a fast local one."
     }
-  ],
-  "ctaTitle": "Automate the grind, keep the science.",
-  "ctaSubtitle": "Profile, engineer, and document experiments with agents that respect your data.",
-  "ctaNote": "Local-first data · Grounded in your notebooks · Any model"
+  ]
 }

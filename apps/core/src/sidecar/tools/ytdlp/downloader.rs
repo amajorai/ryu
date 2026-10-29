@@ -15,8 +15,8 @@ use crate::sidecar::download_manager::{compute_sha256, VersionStore};
 use crate::win_process::NoWindow;
 
 /// Pinned default yt-dlp release. A date-based tag that exists on GitHub; update
-/// here to move the bundled default, or override per-install with
-/// `RYU_YTDLP_VERSION` / `RYU_YTDLP_URL` (nothing hardcoded).
+/// here to move the bundled default, or override per-install with node-config
+/// `settings.ytdlp.{version,url}` (`RYU_YTDLP_VERSION` / `RYU_YTDLP_URL`).
 const TARGET_VERSION: &str = "2024.12.13";
 
 const YTDLP_VERSION_ENV: &str = "RYU_YTDLP_VERSION";
@@ -87,9 +87,15 @@ impl YtDlpDownloader {
     ) -> Result<()> {
         let dest = bin_path();
 
-        // Fast path: present with a matching recorded checksum.
+        // Fast path: the TARGET version is present with a matching recorded
+        // checksum. The recorded checksum is the installed binary's, so it alone
+        // always matches — without the version term a bumped pin never upgrades.
         let store = VersionStore::load();
-        if dest.exists() {
+        let recorded_is_target = store
+            .versions
+            .get(STORE_KEY)
+            .is_some_and(|recorded| *recorded == target_version());
+        if dest.exists() && recorded_is_target {
             if let Some(stored) = store.installed_checksum(STORE_KEY) {
                 let actual = compute_sha256(&dest).await?;
                 if actual == stored {
@@ -106,6 +112,30 @@ impl YtDlpDownloader {
         let version = target_version();
         tracing::info!("downloading yt-dlp {version} from {url}");
 
+        // A tool is executed, so DownloadCenter refuses it without a checksum.
+        // The official release publishes one; an operator `RYU_YTDLP_URL` may
+        // carry a sibling `<url>.sha256` instead.
+        let client = crate::sidecar::download_manager::build_http_client();
+        let sha256 = if std::env::var(YTDLP_URL_ENV).is_ok_and(|v| !v.trim().is_empty()) {
+            crate::sidecar::download_manager::fetch_sibling_sha256(&client, &url).await
+        } else {
+            let release = crate::sidecar::download_manager::fetch_github_release(
+                &client,
+                "yt-dlp/yt-dlp",
+                Some(&version),
+            )
+            .await
+            .context("fetching the yt-dlp release")?;
+            Some(
+                crate::sidecar::download_manager::require_release_asset_sha256(
+                    &client,
+                    &release,
+                    artifact_name(),
+                )
+                .await?,
+            )
+        };
+
         // Single-file binary: stream straight to `dest` (no archive extraction).
         // `version_record` MUST be set so the center records the checksum in
         // versions.json — otherwise the fast-path above never triggers again.
@@ -116,7 +146,7 @@ impl YtDlpDownloader {
                 label: "yt-dlp".to_string(),
                 url,
                 dest: dest.clone(),
-                sha256: None,
+                sha256,
                 version_record: Some(VersionRecord {
                     store_key: STORE_KEY.to_string(),
                     version: version.clone(),

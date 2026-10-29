@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { CSSProperties } from "react";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { InboxLink } from "@/components/inbox-link.tsx";
@@ -8,7 +10,7 @@ let serverUnreadCount = 4;
 const originalFetch = window.fetch.bind(window);
 
 window.fetch = async (input, init) => {
-	const url = typeof input === "string" ? input : input.url;
+	const url = isNativeText(input) ? input : input.url;
 	if (url.endsWith("/api/inbox/unread-count")) {
 		return new Response(
 			JSON.stringify({
@@ -85,7 +87,7 @@ function OrganizationDashboardProof() {
 				>
 					<div className="flex flex-wrap items-end justify-between gap-4">
 						<div>
-							<p className="font-mono text-muted-foreground text-xs uppercase tracking-[0.16em]">
+							<p className="font-mono text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 								Atlas organization
 							</p>
 							<h1
@@ -99,7 +101,7 @@ function OrganizationDashboardProof() {
 								into this organization.
 							</p>
 						</div>
-						<div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 font-medium text-emerald-700 text-xs dark:text-emerald-300">
+						<div className="rounded-full border border-success/20 bg-success/10 px-3 py-1.5 font-medium text-success text-xs dark:text-success">
 							Dashboard live
 						</div>
 					</div>
@@ -132,9 +134,13 @@ function OrganizationDashboardProof() {
 								{[42, 57, 48, 76, 64, 83, 72, 92, 80, 96].map(
 									(height, index) => (
 										<div
-											className="flex-1 rounded-t-md bg-primary/70"
+											className="h-(--bar-height) flex-1 rounded-t-md bg-primary/70"
 											key={`${height}-${index}`}
-											style={{ height: `${height}%` }}
+											style={
+												{
+													"--bar-height": `${height}%`,
+												} satisfies CSSProperties & { "--bar-height": string }
+											}
 										/>
 									)
 								)}
@@ -157,8 +163,14 @@ function OrganizationDashboardProof() {
 										</div>
 										<div className="h-2 overflow-hidden rounded-full bg-secondary">
 											<div
-												className="h-full rounded-full bg-primary"
-												style={{ width }}
+												className="h-full w-(--budget-width) rounded-full bg-primary"
+												style={
+													{
+														"--budget-width": width,
+													} satisfies CSSProperties & {
+														"--budget-width": string | undefined;
+													}
+												}
 											/>
 										</div>
 									</div>

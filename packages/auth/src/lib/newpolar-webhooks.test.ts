@@ -26,11 +26,7 @@ function eventBody(): string {
 	});
 }
 
-function signedHeaders(
-	secret: string,
-	body: string,
-	timestamp = new Date()
-): Record<string, string> {
+function signedHeaders(secret: string, body: string, timestamp = new Date()) {
 	const standardSecret = secret.startsWith("whsec_")
 		? secret
 		: Buffer.from(secret, "utf8").toString("base64");
@@ -49,7 +45,10 @@ describe("Polar webhook verification", () => {
 			body,
 			signedHeaders(modernSecret, body),
 			modernSecret
-		) as { type: string; data: { customerId?: string } };
+		);
+		if (parsed.type !== "customer_seat.assigned") {
+			throw new Error("Expected assigned seat event");
+		}
 
 		expect(parsed.type).toBe("customer_seat.assigned");
 		expect(parsed.data.customerId).toBe("customer-test");
@@ -97,7 +96,10 @@ describe("Polar webhook verification", () => {
 			body,
 			signedHeaders(legacySecret, body),
 			legacySecret
-		) as { type: string; data: { customerId?: string } };
+		);
+		if (parsed.type !== "customer_seat.assigned") {
+			throw new Error("Expected assigned seat event");
+		}
 
 		expect(parsed.type).toBe("customer_seat.assigned");
 		expect(parsed.data.customerId).toBe("customer-test");

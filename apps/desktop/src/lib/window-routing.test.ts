@@ -41,3 +41,21 @@ describe("window entity keys", () => {
 		});
 	});
 });
+
+describe("node-qualified entity keys", () => {
+	test("a tab bound to another computer gets a distinct key", () => {
+		expect(conversationEntityKey("c-1", "studio")).toBe(
+			"conversation:studio:c-1"
+		);
+		expect(tabEntityKey({ conversationId: "c-1", node: "studio" })).not.toBe(
+			tabEntityKey({ conversationId: "c-1" })
+		);
+	});
+
+	test("no node keeps the legacy key", () => {
+		expect(conversationEntityKey("c-1", null)).toBe("conversation:c-1");
+		expect(tabEntityKey({ conversationId: "c-1", node: undefined })).toBe(
+			"conversation:c-1"
+		);
+	});
+});

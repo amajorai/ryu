@@ -2,14 +2,14 @@ import type {
 	ContributedMessageAction,
 	MessageActionRuntimeState,
 } from "@ryu/blocks/desktop/agent-elements/types.ts";
-import { MarketplacePassPlanCard } from "@ryu/blocks/web/pricing";
+import { MarketplacePassPlanCard } from "@ryu/blocks/web/pricing.tsx";
 import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
 import {
 	Card,
 	CardContent,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
+} from "@ryu/ui/components/card.tsx";
 import type { UIMessage } from "ai";
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -87,7 +87,7 @@ const MESSAGES: UIMessage[] = [
 		],
 		role: "assistant",
 	},
-] as unknown as UIMessage[];
+];
 
 function AssistantAvatar() {
 	return (
@@ -148,7 +148,7 @@ function MessagePassProof() {
 		<main className="min-h-screen bg-background px-5 py-8 text-foreground sm:px-8 sm:py-12">
 			<div className="mx-auto max-w-6xl space-y-6">
 				<header className="max-w-3xl space-y-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						CHAT + MARKETPLACE
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight sm:text-4xl">
@@ -162,14 +162,14 @@ function MessagePassProof() {
 
 				<div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(19rem,0.8fr)]">
 					<Card className="min-w-0 overflow-hidden" data-testid="chat-proof">
-						<CardHeader className="border-border/60 border-b py-4">
-							<CardTitle className="text-base">Message actions</CardTitle>
+						<CardHeader appearance="message-review">
+							<CardTitle>Message actions</CardTitle>
 							<p className="text-muted-foreground text-xs">
 								Three user messages and three agent replies form compact sender
 								runs.
 							</p>
 						</CardHeader>
-						<CardContent className="h-[530px] min-h-0 p-0">
+						<CardContent className="h-[530px] min-h-0" inset="none">
 							<ChatDisplayPrefs>
 								<MessageList
 									assistantAvatar={<AssistantAvatar />}
@@ -208,16 +208,16 @@ function MessagePassProof() {
 						</div>
 						<Card data-testid="marketplace-proof">
 							<CardHeader>
-								<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
+								<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 									MARKETPLACE ACCESS
 								</p>
-								<CardTitle className="text-xl">A Major Pass</CardTitle>
+								<CardTitle variant="plan">A Major Pass</CardTitle>
 								<p className="text-muted-foreground text-sm">
 									All supported paid Marketplace apps and publishers for
 									<strong className="text-foreground"> $20/user/month</strong>.
 								</p>
 							</CardHeader>
-							<CardContent className="space-y-4">
+							<CardContent spacing="relaxed">
 								<div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-muted-foreground text-xs">
 									The ticket marks listings covered by the pass. Select it to
 									see the access explanation.

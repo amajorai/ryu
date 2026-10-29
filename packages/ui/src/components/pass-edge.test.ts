@@ -37,9 +37,10 @@ describe("edge metal ramp", () => {
 		// two had two peaks with a trough between them.
 		let peaks = 0;
 		for (let i = 1; i < luminance.length - 1; i++) {
-			const previous = luminance[i - 1] as number;
-			const current = luminance[i] as number;
-			const next = luminance[i + 1] as number;
+			// The loop bounds keep all three indices inside the dense producer map.
+			const previous = luminance[i - 1]!;
+			const current = luminance[i]!;
+			const next = luminance[i + 1]!;
 			if (current > previous && current >= next) {
 				peaks++;
 			}
@@ -60,8 +61,8 @@ describe("edge metal ramp", () => {
 		expect(EDGE_METAL_STOPS.at(0)?.at).toBe(0);
 		expect(EDGE_METAL_STOPS.at(-1)?.at).toBe(100);
 		for (let i = 1; i < EDGE_METAL_STOPS.length; i++) {
-			expect((EDGE_METAL_STOPS[i] as { at: number }).at).toBeGreaterThan(
-				(EDGE_METAL_STOPS[i - 1] as { at: number }).at
+			expect(EDGE_METAL_STOPS[i]!.at).toBeGreaterThan(
+				EDGE_METAL_STOPS[i - 1]!.at
 			);
 		}
 	});

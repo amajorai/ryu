@@ -1,6 +1,7 @@
-import { Logo as RyuLogo } from "@ryu/ui/components/logo";
+import { GlassScrimCard } from "@ryu/ui/components/glasscn/glass-scrim-card.tsx";
+import { Logo as RyuLogo } from "@ryu/ui/components/logo.tsx";
 import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useEffect } from "react";
+import { type CSSProperties, type ReactNode, useEffect } from "react";
 import {
 	IslandComposerProvider,
 	useIslandComposerContext,
@@ -13,8 +14,11 @@ import { useDevStateSwitcher } from "../hooks/use-dev-state-switcher.ts";
 import { useDictation } from "../hooks/use-dictation.ts";
 import { useEyeCursor } from "../hooks/use-eye-cursor.ts";
 import { useIslandAppearance } from "../hooks/use-island-appearance.ts";
+import { useIslandMaterialMask } from "../hooks/use-island-material-mask.ts";
+import { useIslandPlacement } from "../hooks/use-island-placement.ts";
 import { useIslandTheme } from "../hooks/use-island-theme.ts";
 import { useMeetingDetect } from "../hooks/use-meeting-detect.ts";
+import { useNotch } from "../hooks/use-notch.ts";
 import { useQuestDetect } from "../hooks/use-quest-detect.ts";
 import { useSuggestionQueue } from "../hooks/use-suggestion-queue.ts";
 import { useVoiceAgent } from "../hooks/use-voice-agent.ts";
@@ -38,33 +42,51 @@ import {
 	EXPANDED_COMPACT_WIDTH,
 	ISLAND_SPRING,
 	type IslandSize,
+	islandMaterialContours,
 	LOGO_CIRCLE,
 	pillHeight,
 	pillOverflows,
+	placementAlignClass,
 	SPLIT_GAP,
 	SUGGESTION_STACK_GAP,
+	TRANSLUCENT_INSET_STYLE,
 } from "./island-config.ts";
 
-// Shape styling is split into a layout base + a per-appearance "skin".
-//   - translucent: a semi-transparent popover fill with an in-page blur. CSS
-//     `backdrop-filter` cannot reach the desktop behind a transparent window, so
-//     this is a tinted-glass look (blurs only layered island content), not a
-//     true desktop blur — that is what the acrylic appearance is for.
-//   - acrylic: a near-transparent fill so the window's native OS material
-//     (Windows 11 acrylic / macOS vibrancy) shows through as real frosted glass.
-const SHAPE_BASE =
-	"island-siri-border relative shrink-0 overflow-hidden shadow-2xl";
-// The "Golden Gate" Siri look: a semantic vertical gradient that fades toward
-// transparent, with the active theme's foreground text, over the in-island blur.
-// (Translucent CSS blur can't reach the desktop, so this is tinted theme glass.)
-const TRANSLUCENT_SKIN =
-	"bg-gradient-to-b from-background/85 via-background/65 to-card/35 text-foreground backdrop-blur-2xl";
-// Acrylic = REAL desktop blur from the native OS material (Win11 acrylic / macOS
-// vibrancy). A semantic, translucent gradient tints that blur without negating
-// the active light/dark palette — keep these alphas well under 1 so the frosted
-// desktop still reads through (a heavy/opaque fill would kill the material).
-const ACRYLIC_SKIN =
-	"bg-gradient-to-b from-background/55 via-background/40 to-card/20 text-foreground";
+// Keep one Island surface and add the top scrim as an overlay inside its shape.
+// Translucent mode keeps its CSS glass blur; acrylic/mica keep the OS material
+// supplied by the existing window underneath the same surface.
+interface IslandGeometryStyle extends CSSProperties {
+	"--island-gap"?: string;
+	"--island-row-offset"?: string;
+	"--island-stack-offset"?: string;
+	"--island-surface-height"?: string;
+	"--island-surface-radius"?: string;
+	"--island-surface-width"?: string;
+}
+const actionRowGeometryStyle: IslandGeometryStyle = {
+	"--island-gap": `${SPLIT_GAP}px`,
+	"--island-row-offset": `${LOGO_CIRCLE.width + SPLIT_GAP}px`,
+	"--island-stack-offset": `${SUGGESTION_STACK_GAP}px`,
+};
+const actionPillGeometryStyle: IslandGeometryStyle = {
+	"--island-surface-height": `${ACTION_PILL_HEIGHT}px`,
+};
+const groupGeometryStyle: IslandGeometryStyle = {
+	"--island-gap": `${SPLIT_GAP}px`,
+};
+const notchSurfaceGeometryStyle: IslandGeometryStyle = {
+	"--island-surface-radius": "0 0 24px 24px",
+};
+const circleGeometryStyle: IslandGeometryStyle = {
+	"--island-surface-width": `${LOGO_CIRCLE.width}px`,
+	"--island-surface-height": `${LOGO_CIRCLE.height}px`,
+	"--island-surface-radius": `${LOGO_CIRCLE.radius}px`,
+};
+
+const SURFACE_BASE =
+	"island-siri-border relative isolate shrink-0 overflow-hidden";
+const TRANSLUCENT_SKIN = "text-foreground shadow-2xl backdrop-blur-2xl";
+const ACRYLIC_SKIN = "text-foreground";
 
 /**
  * The visible footprint (bounding box) of the island group for a given state.
@@ -78,7 +100,7 @@ function islandFootprint(
 	detail: IslandSize | null,
 	state: IslandState,
 	dockWidth: number
-): { height: number; width: number } {
+) {
 	const circleWidth = showCircle ? LOGO_CIRCLE.width : 0;
 	const detailWidth = detail ? detail.width : 0;
 	const gap = showCircle && detail ? SPLIT_GAP : 0;
@@ -114,7 +136,11 @@ function detailHandleClassFor(
 		// No strip, so the chip stays fully clickable; the user drags via the logo.
 		return null;
 	}
-	// Expanded: a top grab strip drags; the panel body stays interactive.
+	if (state === "expanded") {
+		// Keep the expanded grab strip above the page header, not over its controls.
+		return EXPANDED_HANDLE;
+	}
+	// Compact non-text surfaces keep the wider strip as their drag handle.
 	return STRIP_HANDLE;
 }
 
@@ -132,7 +158,7 @@ function detailContentClassFor(
 	scrolls: boolean
 ): string {
 	if (isExpanded) {
-		return "flex h-full w-full items-stretch px-3 py-2";
+		return "flex h-full w-full items-stretch px-3 pt-4 pb-2";
 	}
 	const scroll = scrolls
 		? "items-start overflow-y-auto"
@@ -157,6 +183,8 @@ const COVER_HANDLE =
 	"absolute inset-0 z-10 cursor-grab bg-transparent active:cursor-grabbing";
 const STRIP_HANDLE =
 	"absolute inset-x-0 top-0 z-10 h-9 w-full cursor-grab bg-transparent active:cursor-grabbing";
+const EXPANDED_HANDLE =
+	"absolute inset-x-0 top-0 z-10 h-3 w-full cursor-grab bg-transparent active:cursor-grabbing";
 
 /**
  * Content holder for the detail island. On the pill surfaces it is the *measured*
@@ -211,11 +239,13 @@ function SuggestionActionPills({
 	onAccept,
 	onSnooze,
 	onDismiss,
+	onMaterialUpdate,
 }: {
 	state: IslandState;
 	onAccept: () => void;
 	onSnooze: () => void;
 	onDismiss: () => void;
+	onMaterialUpdate: () => void;
 }) {
 	// Rendered only while a suggestion is up, so other states keep their tight
 	// footprint (nothing mounts below the group otherwise).
@@ -229,21 +259,20 @@ function SuggestionActionPills({
 	];
 	return (
 		<div
-			className="flex"
-			style={{
-				gap: SPLIT_GAP,
-				marginLeft: LOGO_CIRCLE.width + SPLIT_GAP,
-				marginTop: SUGGESTION_STACK_GAP,
-			}}
+			className="island-gap island-row-offset island-stack-offset flex"
+			style={actionRowGeometryStyle}
 		>
 			{actions.map((action, index) => (
 				<motion.button
 					animate={{ width: ACTION_PILL_WIDTH, opacity: 1 }}
-					className={`${ACTION_PILL_BASE} ${action.primary ? ACTION_PILL_PRIMARY : ACTION_PILL_DEFAULT}`}
+					className={`${ACTION_PILL_BASE} island-surface-height ${action.primary ? ACTION_PILL_PRIMARY : ACTION_PILL_DEFAULT}`}
+					data-island-material-shape=""
 					initial={{ width: 0, opacity: 0 }}
 					key={action.key}
+					onAnimationComplete={onMaterialUpdate}
 					onClick={action.onClick}
-					style={{ height: ACTION_PILL_HEIGHT }}
+					onUpdate={onMaterialUpdate}
+					style={actionPillGeometryStyle}
 					transition={{ ...ISLAND_SPRING, delay: index * 0.05 }}
 					type="button"
 				>
@@ -304,11 +333,15 @@ function IslandShell() {
 	// Mirror the desktop's theme (preset + light/dark + radius), synced via Core.
 	useIslandTheme();
 	// Background treatment, synced via Core from the desktop's settings.
+	const notch = useNotch();
 	const background = useIslandAppearance();
 	// `acrylic` and `mica` are both content-tracked native-material modes; only
 	// `translucent` keeps the oversized transparent window + floating split shape.
-	const material = background === "acrylic" || background === "mica";
-	const shapeClass = `${SHAPE_BASE} ${material ? ACRYLIC_SKIN : TRANSLUCENT_SKIN}`;
+	const material =
+		notch === null && (background === "acrylic" || background === "mica");
+	const surfaceClass = `${SURFACE_BASE} ${material ? ACRYLIC_SKIN : TRANSLUCENT_SKIN}`;
+	const scheduleMaterialMask = useIslandMaterialMask(material);
+	const placement = useIslandPlacement();
 
 	const context = useActiveContext();
 	const { active: suggestion, accept, dismiss, snooze } = useSuggestionQueue();
@@ -418,21 +451,65 @@ function IslandShell() {
 	// shortcuts; separate action islands are reserved for compact suggestions.
 	const dockWidth = 0;
 
-	const { width: footprintWidth, height: footprintHeight } = islandFootprint(
+	const floatingFootprint = islandFootprint(
 		showCircle,
 		detail,
 		state,
 		dockWidth
 	);
+	const footprintWidth = notch
+		? Math.max(notch.width + 80, floatingFootprint.width)
+		: floatingFootprint.width;
+	const footprintHeight = notch
+		? notch.height +
+			(isCollapsed
+				? 36
+				: isExpanded
+					? Math.max(220, floatingFootprint.height)
+					: floatingFootprint.height)
+		: floatingFootprint.height;
+	const detailWidth = detail?.width ?? 0;
+	const detailHeight = detail?.height ?? 0;
+	const detailRadius = detail?.radius ?? 0;
 	useEffect(() => {
+		// Report nothing until both window facts are known: an early report would
+		// size or mask the window for the wrong Background.
+		if (notch === undefined || background === null) {
+			return;
+		}
 		if (footprintWidth > 0 && footprintHeight > 0) {
+			const detailContour =
+				detailWidth > 0 && detailHeight > 0
+					? {
+							width: detailWidth,
+							height: detailHeight,
+							radius: detailRadius,
+						}
+					: null;
 			window.island.win.setContentSize(
 				footprintWidth,
 				footprintHeight,
-				isExpanded
+				isExpanded,
+				notch ? [] : islandMaterialContours(showCircle, detailContour, state)
 			);
+			if (material) {
+				scheduleMaterialMask();
+			}
 		}
-	}, [footprintWidth, footprintHeight, isExpanded]);
+	}, [
+		notch,
+		background,
+		footprintWidth,
+		footprintHeight,
+		isExpanded,
+		showCircle,
+		detailWidth,
+		detailHeight,
+		detailRadius,
+		state,
+		material,
+		scheduleMaterialMask,
+	]);
 
 	// Detail-island drag handle + inner layout vary by surface (see helpers).
 	const detailHandleClass = detailHandleClassFor(
@@ -451,15 +528,86 @@ function IslandShell() {
 	// logo circle still folds the pill back down. Other surfaces own their taps.
 	const detailTap = isTextPill ? openPanel : undefined;
 
+	if (notch === undefined || background === null) {
+		return null;
+	}
+	if (notch) {
+		const notchGeometryStyle: IslandGeometryStyle = {
+			"--island-surface-height": `${notch.height}px`,
+		};
+		return (
+			<div className="flex h-full w-full justify-center">
+				<motion.div
+					animate={{ width: footprintWidth, height: footprintHeight }}
+					className="dark island-surface-radius flex flex-col overflow-hidden bg-black text-white"
+					data-island-notch=""
+					initial={false}
+					onPointerEnter={drag.onPointerEnter}
+					onPointerLeave={drag.onPointerLeave}
+					style={notchSurfaceGeometryStyle}
+					transition={ISLAND_SPRING}
+				>
+					<div
+						aria-hidden="true"
+						className="island-surface-height shrink-0"
+						style={notchGeometryStyle}
+					/>
+					{isCollapsed || isTextPill ? (
+						<button
+							aria-label="Open Island"
+							className="flex min-h-9 w-full flex-1 items-center justify-center gap-2 px-4 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+							onClick={openPanel}
+							type="button"
+						>
+							<RyuLogo size="24px" variant="eyes" />
+							{isCollapsed ? "" : (context.appName ?? "Ryu")}
+						</button>
+					) : (
+						<div className="flex min-h-0 flex-1 flex-col px-3 pb-2">
+							<PillBody
+								isExpanded={isExpanded}
+								measureRef={pillContent.ref}
+								state={state}
+							>
+								<IslandContent
+									composerControls={leftActions}
+									context={context}
+									onVoiceClose={handleVoiceClose}
+									state={state}
+									suggestion={activeSuggestion}
+									voice={voiceMode}
+									voiceAgentName={voiceAgentName}
+									voiceCanCycle={voiceCanCycle}
+									voiceError={voiceError}
+									voiceLevels={voiceLevels}
+									wrap={!isExpanded}
+								/>
+							</PillBody>
+							<SuggestionActionPills
+								onAccept={onAccept}
+								onDismiss={onDismiss}
+								onMaterialUpdate={scheduleMaterialMask}
+								onSnooze={onSnooze}
+								state={state}
+							/>
+						</div>
+					)}
+				</motion.div>
+			</div>
+		);
+	}
+
 	return (
-		// The outer container fills the window; the island group is centered
-		// horizontally and pinned to the top. `items-start` keeps the group's
-		// bounding box tight so the mouse-capture region (set on the inner wrapper)
-		// does not blanket the whole click-through window. In the acrylic
-		// appearance the window is content-tracked, so drop the top inset and let
-		// the group sit flush against the (tightly wrapped) window.
+		// The outer container fills the window; the island group is aligned to the
+		// placement's anchor corner/edge (bottom-right docked -> bottom-right of the
+		// window), so morphs grow away from the dock instead of from the center.
+		// The flex alignment keeps the group's bounding box tight so the
+		// mouse-capture region (set on the inner wrapper) does not blanket the
+		// whole click-through window. In the acrylic appearance the window is
+		// content-tracked, so the group sits flush with no inset.
 		<div
-			className={`flex h-full w-full items-start justify-center ${material ? "" : "pt-2"}`}
+			className={`flex h-full w-full ${placementAlignClass(placement)}`}
+			style={material ? undefined : TRANSLUCENT_INSET_STYLE}
 		>
 			{/* Island column: the two-shape group on top + the action-pill row
 			    beneath it (suggestion only). Pointer enter/leave lives on this
@@ -472,39 +620,43 @@ function IslandShell() {
 				className="flex flex-col items-start"
 				onPointerEnter={drag.onPointerEnter}
 				onPointerLeave={drag.onPointerLeave}
+				ref={drag.hoverTarget}
 			>
-				<div className="flex items-start" style={{ gap: SPLIT_GAP }}>
+				<div className="island-gap flex items-start" style={groupGeometryStyle}>
 					<AnimatePresence initial={false}>
 						{showCircle ? (
 							<motion.div
 								animate={{ scale: 1, opacity: 1 }}
-								className={shapeClass}
+								className={`${surfaceClass} island-surface-width island-surface-height island-surface-radius`}
+								data-island-material-shape=""
 								exit={{ scale: 0.6, opacity: 0 }}
 								initial={{ scale: 0.6, opacity: 0 }}
 								key="logo"
-								style={{
-									width: LOGO_CIRCLE.width,
-									height: LOGO_CIRCLE.height,
-									borderRadius: LOGO_CIRCLE.radius,
-								}}
+								onAnimationComplete={scheduleMaterialMask}
+								onUpdate={scheduleMaterialMask}
+								style={circleGeometryStyle}
 								transition={ISLAND_SPRING}
 							>
-								<button
-									aria-label={circleLabel}
-									className={COVER_HANDLE}
-									onPointerCancel={drag.onDragPointerCancel}
-									onPointerDown={drag.onDragPointerDown}
-									onPointerMove={drag.onDragPointerMove}
-									onPointerUp={drag.makePointerUp(toggleCollapse)}
-									type="button"
-								/>
-								<div className="flex h-full w-full items-center justify-center">
-									<RyuLogo
-										className="text-current"
-										size="34px"
-										variant="eyes"
+								<GlassScrimCard
+									appearance="island"
+									className="h-full w-full"
+									contour="round"
+									material={material ? "native" : "glass"}
+									surfaceClassName="h-full w-full"
+								>
+									<button
+										aria-label={circleLabel}
+										className={COVER_HANDLE}
+										onPointerCancel={drag.onDragPointerCancel}
+										onPointerDown={drag.onDragPointerDown}
+										onPointerMove={drag.onDragPointerMove}
+										onPointerUp={drag.makePointerUp(toggleCollapse)}
+										type="button"
 									/>
-								</div>
+									<div className="relative z-[2] flex h-full w-full items-center justify-center">
+										<RyuLogo size="34px" tone="inherit" variant="eyes" />
+									</div>
+								</GlassScrimCard>
 							</motion.div>
 						) : null}
 					</AnimatePresence>
@@ -518,55 +670,66 @@ function IslandShell() {
 									borderRadius: detail.radius,
 									opacity: 1,
 								}}
-								className={shapeClass}
+								className={`${surfaceClass} corner-squircle`}
+								data-island-material-shape=""
 								exit={{ width: 0, opacity: 0 }}
 								initial={{ width: 0, opacity: 0 }}
 								key="detail"
+								onAnimationComplete={scheduleMaterialMask}
+								onUpdate={scheduleMaterialMask}
 								transition={ISLAND_SPRING}
 							>
-								{/* Drag/grab region for the detail island (omitted for the
-							    suggestion chip so the chip stays fully clickable). */}
-								{detailHandleClass ? (
-									<button
-										aria-label={detailLabel}
-										className={detailHandleClass}
-										onPointerCancel={drag.onDragPointerCancel}
-										onPointerDown={drag.onDragPointerDown}
-										onPointerMove={drag.onDragPointerMove}
-										onPointerUp={drag.makePointerUp(detailTap)}
-										type="button"
-									/>
-								) : null}
-								<AnimatePresence initial={false} mode="wait">
-									<motion.div
-										animate={{ opacity: 1, scale: 1, y: 0 }}
-										className={detailContentClass}
-										exit={{ opacity: 0, scale: 0.92, y: -6 }}
-										initial={{ opacity: 0, scale: 0.92, y: 6 }}
-										key={state}
-										transition={CONTENT_SPRING}
-									>
-										<PillBody
-											isExpanded={isExpanded}
-											measureRef={pillContent.ref}
-											state={state}
+								<GlassScrimCard
+									appearance="island"
+									className="h-full w-full"
+									contour="squircle"
+									material={material ? "native" : "glass"}
+									surfaceClassName="h-full w-full"
+								>
+									{/* Drag/grab region for the detail island (omitted for the
+									    suggestion chip so the chip stays fully clickable). */}
+									{detailHandleClass ? (
+										<button
+											aria-label={detailLabel}
+											className={detailHandleClass}
+											onPointerCancel={drag.onDragPointerCancel}
+											onPointerDown={drag.onDragPointerDown}
+											onPointerMove={drag.onDragPointerMove}
+											onPointerUp={drag.makePointerUp(detailTap)}
+											type="button"
+										/>
+									) : null}
+									<AnimatePresence initial={false} mode="wait">
+										<motion.div
+											animate={{ opacity: 1, scale: 1, y: 0 }}
+											className={detailContentClass}
+											exit={{ opacity: 0, scale: 0.92, y: -6 }}
+											initial={{ opacity: 0, scale: 0.92, y: 6 }}
+											key={state}
+											transition={CONTENT_SPRING}
 										>
-											<IslandContent
-												composerControls={leftActions}
-												context={context}
-												onVoiceClose={handleVoiceClose}
+											<PillBody
+												isExpanded={isExpanded}
+												measureRef={pillContent.ref}
 												state={state}
-												suggestion={activeSuggestion}
-												voice={voiceMode}
-												voiceAgentName={voiceAgentName}
-												voiceCanCycle={voiceCanCycle}
-												voiceError={voiceError}
-												voiceLevels={voiceLevels}
-												wrap={!isExpanded}
-											/>
-										</PillBody>
-									</motion.div>
-								</AnimatePresence>
+											>
+												<IslandContent
+													composerControls={leftActions}
+													context={context}
+													onVoiceClose={handleVoiceClose}
+													state={state}
+													suggestion={activeSuggestion}
+													voice={voiceMode}
+													voiceAgentName={voiceAgentName}
+													voiceCanCycle={voiceCanCycle}
+													voiceError={voiceError}
+													voiceLevels={voiceLevels}
+													wrap={!isExpanded}
+												/>
+											</PillBody>
+										</motion.div>
+									</AnimatePresence>
+								</GlassScrimCard>
 							</motion.div>
 						) : null}
 					</AnimatePresence>
@@ -577,6 +740,7 @@ function IslandShell() {
 				<SuggestionActionPills
 					onAccept={onAccept}
 					onDismiss={onDismiss}
+					onMaterialUpdate={scheduleMaterialMask}
 					onSnooze={onSnooze}
 					state={state}
 				/>

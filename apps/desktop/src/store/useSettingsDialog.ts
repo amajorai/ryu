@@ -17,6 +17,8 @@ import { create } from "zustand";
 export type SettingsSectionValue =
 	| "general"
 	| "account"
+	| "profile"
+	| "stats"
 	| "appearance"
 	| "keyboard"
 	| "sync"

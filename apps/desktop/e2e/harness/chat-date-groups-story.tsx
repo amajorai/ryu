@@ -29,7 +29,12 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
+import type { createMessageDecorator } from "../../src/lib/chat-message-decoration.ts";
 import "../../src/index.css";
+
+type DatedFixtureMessage = ReturnType<
+	ReturnType<typeof createMessageDecorator<UIMessage>>
+>[number];
 
 const params = new URLSearchParams(window.location.search);
 const pinOff = params.get("pin") === "off";
@@ -65,8 +70,8 @@ function stampFor(daysAgo: number, turn: number): Date {
 	return new Date(noon + turn * 60_000);
 }
 
-function buildHistory(): UIMessage[] {
-	const messages: UIMessage[] = [];
+function buildHistory(): DatedFixtureMessage[] {
+	const messages: DatedFixtureMessage[] = [];
 	for (const daysAgo of DAY_OFFSETS) {
 		for (let i = 0; i < TURNS_PER_DAY; i += 1) {
 			const at = stampFor(daysAgo, i);
@@ -75,7 +80,7 @@ function buildHistory(): UIMessage[] {
 				role: "user",
 				parts: [{ type: "text", text: `Question ${i} on day -${daysAgo}` }],
 				createdAt: at,
-			} as unknown as UIMessage);
+			});
 			messages.push({
 				id: `d${daysAgo}-assistant-${i}`,
 				role: "assistant",
@@ -88,7 +93,7 @@ function buildHistory(): UIMessage[] {
 					},
 				],
 				createdAt: new Date(at.getTime() + 30_000),
-			} as unknown as UIMessage);
+			});
 		}
 	}
 	return messages;

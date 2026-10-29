@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Desktop background customization: per-surface (sidebar + page) gradient and
 // image backgrounds, layered on TOP of the theme's solid `--sidebar` /
 // `--background` colors via `background-image`. Off by default — purely a
@@ -71,15 +72,15 @@ export function buildGradientCss(stops: GradientStop[], angle: number): string {
 	return `linear-gradient(${angle}deg, ${parts.join(", ")})`;
 }
 
-const STORAGE_KEYS: Record<BackgroundSurface, string> = {
+const STORAGE_KEYS = {
 	sidebar: "ryu:bg:sidebar",
 	page: "ryu:bg:page",
-};
+} satisfies Record<BackgroundSurface, string>;
 
-const CSS_VAR_PREFIX: Record<BackgroundSurface, string> = {
+const CSS_VAR_PREFIX = {
 	sidebar: "--ryu-sidebar-bg",
 	page: "--ryu-page-bg",
-};
+} satisfies Record<BackgroundSurface, string>;
 
 // Cross-window/tab change signal. The browser `storage` event only fires in
 // OTHER windows, so we also dispatch this locally to update hooks in the window
@@ -112,7 +113,8 @@ async function idbGetImage(surface: BackgroundSurface): Promise<Blob | null> {
 		return await new Promise<Blob | null>((resolve, reject) => {
 			const tx = db.transaction(IMAGE_STORE, "readonly");
 			const req = tx.objectStore(IMAGE_STORE).get(surface);
-			req.onsuccess = () => resolve((req.result as Blob | undefined) ?? null);
+			req.onsuccess = () =>
+				resolve(req.result instanceof Blob ? req.result : null);
 			req.onerror = () => reject(req.error ?? new Error("read failed"));
 		});
 	} catch {
@@ -172,32 +174,41 @@ function setObjectUrl(surface: BackgroundSurface, blob: Blob | null): string {
 
 // --- Config (localStorage) -------------------------------------------------
 
-function isGradientStop(value: unknown): value is GradientStop {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		typeof (value as GradientStop).color === "string" &&
-		typeof (value as GradientStop).position === "number"
-	);
-}
-
-// Legacy persisted shape — pre-stop gradients stored `gradientFrom` /
-// `gradientTo` as top-level fields. `value` is typed as the current shape, so
-// read the legacy keys through an untyped view.
-interface LegacyGradient {
-	gradientFrom?: string;
-	gradientTo?: string;
-}
+const gradientStop = z.object({ color: z.string(), position: z.number() });
+const storedBackground = z
+	.object({
+		backdropBlur: z.number(),
+		gradientAngle: z.number(),
+		gradientEnabled: z.boolean(),
+		gradientStops: z
+			.array(gradientStop.nullable().catch(null))
+			.optional()
+			.catch(undefined),
+		imageEnabled: z.boolean(),
+		imageFit: z.enum(["cover", "contain", "fill", "center", "tile"]),
+		imageScale: z.number(),
+		imageSrc: z.string(),
+		overlayColor: z.string(),
+		overlayOpacity: z.number(),
+		transparency: z.number(),
+		gradientFrom: z.string(),
+		gradientTo: z.string(),
+	})
+	.partial();
 
 function normalize(
-	value: Partial<SurfaceBackground> | null
+	value: z.output<typeof storedBackground> | null
 ): SurfaceBackground {
 	const base = { ...DEFAULT_SURFACE_BACKGROUND };
 	if (!value) {
 		return base;
 	}
-	const merged: SurfaceBackground = { ...base, ...value };
-	const legacy = value as Partial<SurfaceBackground> & LegacyGradient;
+	const merged: SurfaceBackground = {
+		...base,
+		...value,
+		gradientStops: base.gradientStops,
+	};
+	const legacy = value;
 	// Migrate the legacy two-stop shape (gradientFrom/gradientTo) and drop any
 	// malformed stop arrays left in storage. Check `value.gradientStops` — NOT
 	// `merged.gradientStops`, which falls back to the default two-stop array
@@ -218,7 +229,7 @@ function normalize(
 		];
 	} else {
 		merged.gradientStops = storedStops
-			.filter(isGradientStop)
+			.filter((stop) => stop !== null)
 			.map((s) => ({ color: s.color, position: s.position }));
 		if (merged.gradientStops.length < 2) {
 			merged.gradientStops = [...base.gradientStops];
@@ -238,7 +249,7 @@ export function loadSurfaceBackground(
 	try {
 		const raw = localStorage.getItem(STORAGE_KEYS[surface]);
 		config = raw
-			? normalize(JSON.parse(raw) as Partial<SurfaceBackground>)
+			? normalize(storedBackground.parse(JSON.parse(raw)))
 			: { ...DEFAULT_SURFACE_BACKGROUND };
 	} catch {
 		config = { ...DEFAULT_SURFACE_BACKGROUND };

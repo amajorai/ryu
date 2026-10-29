@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import "../../src/index.css";
 
 type LifecyclePermission =
 	| "app.install"
@@ -66,7 +67,7 @@ const node: RegisteredNode = {
 	ownerUserId: null,
 };
 
-const subjects: Record<string, Subject> = {
+const subjects = {
 	admin: {
 		id: "owner-1",
 		label: "Org admin",
@@ -95,7 +96,7 @@ const subjects: Record<string, Subject> = {
 		role: "viewer",
 		teamIds: [],
 	},
-};
+} satisfies Record<string, Subject>;
 
 const rules: AccessRule[] = [
 	...(
@@ -105,7 +106,7 @@ const rules: AccessRule[] = [
 			"app.enable",
 			"app.disable",
 			"app.uninstall",
-		] as LifecyclePermission[]
+		] satisfies LifecyclePermission[]
 	).map((permission) => ({
 		effect: "allow" as const,
 		permission,
@@ -124,7 +125,7 @@ const permissionFor = (action: Action): LifecyclePermission => {
 	if (action === "download") {
 		return "app.install";
 	}
-	return `app.${action}` as LifecyclePermission;
+	return `app.${action}`;
 };
 
 const nodeScopeLabel = (registeredNode: RegisteredNode): string => {
@@ -299,246 +300,238 @@ const githubBridge = {
 	webhookCheck: "active · secret configured",
 };
 
-const styles = `
-:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #090d14; color: #f4f7fb; }
-* { box-sizing: border-box; }
-body { margin: 0; min-width: 1060px; background: radial-gradient(circle at 10% 0%, #172a42 0, #090d14 44%); }
-button { font: inherit; }
-.shell { max-width: 1420px; margin: 0 auto; padding: 42px 48px 64px; }
-.eyebrow { color: #77d3ff; font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
-h1 { font-size: 36px; line-height: 1.05; letter-spacing: -.04em; margin: 10px 0 12px; }
-.lede { max-width: 820px; color: #aab8c9; font-size: 16px; line-height: 1.6; margin: 0; }
-.toolbar { display: flex; align-items: center; gap: 16px; margin: 28px 0 22px; }
-.status { display: inline-flex; align-items: center; gap: 8px; color: #a7f3c0; background: #123522; border: 1px solid #286b47; border-radius: 999px; padding: 8px 13px; font-size: 13px; font-weight: 750; }
-.status-dot { width: 8px; height: 8px; border-radius: 999px; background: #60e39a; box-shadow: 0 0 12px #60e39a; }
-.rerun { margin-left: auto; cursor: pointer; color: #07111a; background: #8bdcff; border: 0; border-radius: 9px; padding: 10px 15px; font-weight: 800; }
-.grid { display: grid; grid-template-columns: 1fr 1.3fr; gap: 18px; }
-.card { background: rgba(16, 24, 36, .92); border: 1px solid #26364b; border-radius: 16px; padding: 22px; box-shadow: 0 16px 46px rgba(0,0,0,.2); }
-.card h2 { font-size: 15px; margin: 0 0 16px; letter-spacing: .01em; }
-.node-id { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #253348; }
-.node-id strong { font-size: 21px; letter-spacing: -.02em; }
-.badge { border: 1px solid #3a6884; border-radius: 999px; color: #9bddf8; padding: 5px 9px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
-.facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
-.fact { background: #0b121d; border-radius: 10px; padding: 12px; }
-.fact span { display: block; color: #8092a8; font-size: 11px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .08em; }
-.fact strong { font-size: 13px; color: #e4edf7; }
-.permissions { display: flex; flex-wrap: wrap; gap: 8px; }
-.permission { background: #13273a; border: 1px solid #2e617b; color: #bcecff; border-radius: 8px; padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
-.matrix { grid-column: 1 / -1; padding: 0; overflow: hidden; }
-.matrix-head { padding: 22px 22px 14px; }
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th { color: #8195ab; font-size: 11px; letter-spacing: .08em; text-align: left; text-transform: uppercase; background: #0b121d; }
-th, td { padding: 13px 16px; border-top: 1px solid #233247; vertical-align: middle; }
-td:first-child { color: #edf4fb; font-weight: 720; }
-.actor { color: #aebed0; font-size: 12px; }
-.result { display: inline-flex; border-radius: 999px; padding: 5px 9px; font-size: 11px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
-.allowed { color: #a7f3c0; background: #143a28; border: 1px solid #2b7850; }
-.denied { color: #ffb8b8; background: #401b25; border: 1px solid #8e394b; }
-.reason { color: #aebed0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; }
-.logs { grid-column: 1 / -1; }
-.bridge { grid-column: 1 / -1; }
-.bridge-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid #253348; }
-.bridge-top strong { font-size: 21px; letter-spacing: -.02em; }
-.bridge-checks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
-.bridge-check { background: #0b121d; border: 1px solid #26364b; border-radius: 10px; padding: 12px; }
-.bridge-check span { display: block; color: #8092a8; font-size: 11px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .08em; }
-.bridge-check strong { color: #a7f3c0; font-size: 13px; }
-.bridge-check.pending strong { color: #ffd18a; }
-.bridge-detail { color: #b9c9db; font-size: 12px; line-height: 1.55; margin: 16px 0 0; }
-.log { color: #8fe5ff; background: #080d14; border-left: 2px solid #2b83aa; border-radius: 6px; padding: 9px 11px; margin: 7px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; }
-.note { color: #8699ae; font-size: 12px; line-height: 1.55; margin: 14px 0 0; }
-`;
-
 const App = () => {
 	const [run, setRun] = useState(1);
 	const results = useMemo(() => scenarios.map(runScenario), [run]);
 	const passed = results.every((result) => result.actual === result.expected);
 
 	return (
-		<>
-			<style>{styles}</style>
-			<main className="shell">
-				<div className="eyebrow">Ryu marketplace bridge · browser proof</div>
-				<h1>GitHub packages with node-scoped lifecycle authorization</h1>
-				<p className="lede">
-					The seller brings a GitHub repository, while Ryu keeps the billing,
-					signed-package, proxy, and ACL decisions. The desktop receives a
-					stable node identity and asks the server for lifecycle capabilities
-					before any package filesystem mutation.
-				</p>
-				<div className="toolbar">
-					<div className="status" data-testid="proof-status">
-						<span className="status-dot" />
-						{passed
-							? "8/8 contract decisions verified"
-							: "Contract proof failed"}
+		<main className="dark mx-auto min-h-screen max-w-355 bg-background px-12 pt-10 pb-16 font-sans text-foreground">
+			<div className="font-extrabold text-primary text-xs uppercase tracking-(--tracking-section)">
+				Ryu marketplace bridge · browser proof
+			</div>
+			<h1 className="mt-2.5 mb-3 font-semibold text-4xl tracking-tight">
+				GitHub packages with node-scoped lifecycle authorization
+			</h1>
+			<p className="max-w-205 text-base text-muted-foreground leading-relaxed">
+				The seller brings a GitHub repository, while Ryu keeps the billing,
+				signed-package, proxy, and ACL decisions. The desktop receives a stable
+				node identity and asks the server for lifecycle capabilities before any
+				package filesystem mutation.
+			</p>
+			<div className="mt-7 mb-5 flex items-center gap-4">
+				<div
+					className="inline-flex items-center gap-2 rounded-full border border-success/40 bg-success/15 px-3 py-2 font-bold text-sm text-success"
+					data-testid="proof-status"
+				>
+					<span className="size-2 rounded-full bg-success" />
+					{passed ? "8/8 contract decisions verified" : "Contract proof failed"}
+				</div>
+				<span className="text-muted-foreground text-xs">
+					Run {run} · captured gateway responses
+				</span>
+				<button
+					className="ml-auto cursor-pointer rounded-lg bg-primary px-4 py-2.5 font-extrabold text-primary-foreground"
+					onClick={() => setRun((value) => value + 1)}
+					type="button"
+				>
+					Re-run matrix
+				</button>
+			</div>
+
+			<div className="grid grid-cols-2 gap-4">
+				<section
+					className="col-span-full rounded-2xl border border-border bg-card p-5 shadow-lg [&_h2]:mb-4 [&_h2]:font-semibold [&_h2]:text-sm"
+					data-testid="github-bridge-card"
+				>
+					<h2>GitHub Marketplace bridge</h2>
+					<div className="flex items-center justify-between gap-3 border-border border-b pb-4 [&_strong]:text-xl">
+						<strong>{githubBridge.appName}</strong>
+						<span className="rounded-full border border-primary/40 px-2 py-1 font-extrabold text-primary text-xs uppercase tracking-wider">
+							App {githubBridge.appId}
+						</span>
 					</div>
-					<span className="actor">Run {run} · captured gateway responses</span>
-					<button
-						className="rerun"
-						onClick={() => setRun((value) => value + 1)}
-						type="button"
-					>
-						Re-run matrix
-					</button>
-				</div>
+					<div className="mt-4 grid grid-cols-3 gap-3">
+						<div className="rounded-lg bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm">
+							<span>App slug</span>
+							<strong>{githubBridge.slug}</strong>
+						</div>
+						<div className="rounded-lg bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm">
+							<span>Permissions</span>
+							<strong>{githubBridge.permissions}</strong>
+						</div>
+						<div className="rounded-lg bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm">
+							<span>Events</span>
+							<strong>{githubBridge.events}</strong>
+						</div>
+					</div>
+					<div className="mt-4 grid grid-cols-3 gap-2.5">
+						<div className="rounded-lg border border-border bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm [&_strong]:text-success">
+							<span>Private key</span>
+							<strong>{githubBridge.privateKeyCheck}</strong>
+						</div>
+						<div className="rounded-lg border border-border bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm [&_strong]:text-success">
+							<span>Server environment</span>
+							<strong>{githubBridge.serverEnvCheck}</strong>
+						</div>
+						<div
+							className="rounded-lg border border-border bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm [&_strong]:text-success"
+							data-testid="webhook-check"
+						>
+							<span>Webhook</span>
+							<strong>{githubBridge.webhookCheck}</strong>
+						</div>
+					</div>
+					<p className="mt-4 text-muted-foreground text-xs leading-relaxed">
+						{githubBridge.packageSource}. {githubBridge.sellerFlow}. Buyers do
+						not need GitHub credentials; private release bytes are proxied
+						through Ryu. The GitHub app webhook is active, with its secret
+						configured server-side; no credential is exposed to the buyer.
+					</p>
+				</section>
 
-				<div className="grid">
-					<section className="card bridge" data-testid="github-bridge-card">
-						<h2>GitHub Marketplace bridge</h2>
-						<div className="bridge-top">
-							<strong>{githubBridge.appName}</strong>
-							<span className="badge">App {githubBridge.appId}</span>
+				<section
+					className="rounded-2xl border border-border bg-card p-5 shadow-lg [&_h2]:mb-4 [&_h2]:font-semibold [&_h2]:text-sm"
+					data-testid="node-scope-card"
+				>
+					<h2>Registered node</h2>
+					<div className="flex items-center justify-between gap-3 border-border border-b pb-4 [&_strong]:text-xl">
+						<strong>{node.id}</strong>
+						<span className="rounded-full border border-primary/40 px-2 py-1 font-extrabold text-primary text-xs uppercase tracking-wider">
+							team node
+						</span>
+					</div>
+					<div className="mt-4 grid grid-cols-3 gap-3">
+						<div className="rounded-lg bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm">
+							<span>Organization</span>
+							<strong>{node.orgId}</strong>
 						</div>
-						<div className="facts">
-							<div className="fact">
-								<span>App slug</span>
-								<strong>{githubBridge.slug}</strong>
-							</div>
-							<div className="fact">
-								<span>Permissions</span>
-								<strong>{githubBridge.permissions}</strong>
-							</div>
-							<div className="fact">
-								<span>Events</span>
-								<strong>{githubBridge.events}</strong>
-							</div>
+						<div className="rounded-lg bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm">
+							<span>Team</span>
+							<strong>{node.teamId}</strong>
 						</div>
-						<div className="bridge-checks">
-							<div className="bridge-check">
-								<span>Private key</span>
-								<strong>{githubBridge.privateKeyCheck}</strong>
-							</div>
-							<div className="bridge-check">
-								<span>Server environment</span>
-								<strong>{githubBridge.serverEnvCheck}</strong>
-							</div>
-							<div className="bridge-check" data-testid="webhook-check">
-								<span>Webhook</span>
-								<strong>{githubBridge.webhookCheck}</strong>
-							</div>
+						<div className="rounded-lg bg-background p-3 [&_span]:mb-1 [&_span]:block [&_span]:text-muted-foreground [&_span]:text-xs [&_span]:uppercase [&_strong]:text-sm">
+							<span>Node scope</span>
+							<strong>{nodeScopeLabel(node)}</strong>
 						</div>
-						<p className="bridge-detail">
-							{githubBridge.packageSource}. {githubBridge.sellerFlow}. Buyers do
-							not need GitHub credentials; private release bytes are proxied
-							through Ryu. The GitHub app webhook is active, with its secret
-							configured server-side; no credential is exposed to the buyer.
-						</p>
-					</section>
+					</div>
+					<p className="mt-3.5 text-muted-foreground text-xs leading-relaxed">
+						Org admins can govern this team node without joining team-7.
+						Personal-node ownership would remain private.
+					</p>
+				</section>
 
-					<section className="card" data-testid="node-scope-card">
-						<h2>Registered node</h2>
-						<div className="node-id">
-							<strong>{node.id}</strong>
-							<span className="badge">team node</span>
-						</div>
-						<div className="facts">
-							<div className="fact">
-								<span>Organization</span>
-								<strong>{node.orgId}</strong>
-							</div>
-							<div className="fact">
-								<span>Team</span>
-								<strong>{node.teamId}</strong>
-							</div>
-							<div className="fact">
-								<span>Node scope</span>
-								<strong>{nodeScopeLabel(node)}</strong>
-							</div>
-						</div>
-						<p className="note">
-							Org admins can govern this team node without joining team-7.
-							Personal-node ownership would remain private.
-						</p>
-					</section>
-
-					<section className="card" data-testid="permission-card">
-						<h2>Independent lifecycle permissions</h2>
-						<div className="permissions">
-							{(
-								[
-									"app.install",
-									"app.update",
-									"app.enable",
-									"app.disable",
-									"app.uninstall",
-								] as LifecyclePermission[]
-							).map((permission) => (
-								<span className="permission" key={permission}>
-									{permission}
-								</span>
-							))}
-						</div>
-						<p className="note">
-							A grant for install never implies update, enable, disable, or
-							uninstall. Team allow is checked after node scope; a member deny
-							wins over the team grant.
-						</p>
-					</section>
-
-					<section className="card matrix" data-testid="decision-matrix">
-						<div className="matrix-head">
-							<h2>Org / team / member decision matrix</h2>
-							<p className="note">
-								Free and paid packages use the same node ACL. Listing price and
-								optional checkout do not change install, update, or download
-								access.
-							</p>
-						</div>
-						<table>
-							<thead>
-								<tr>
-									<th>Scenario</th>
-									<th>Actor</th>
-									<th>Action</th>
-									<th>Package</th>
-									<th>Result</th>
-									<th>Reason</th>
-								</tr>
-							</thead>
-							<tbody>
-								{results.map((result) => (
-									<tr data-testid={`decision-${result.id}`} key={result.id}>
-										<td>{result.label}</td>
-										<td className="actor">{result.actor.label}</td>
-										<td>
-											<code>{result.requiredPermission}</code>
-										</td>
-										<td>
-											<code>{result.packageLabel}</code>
-										</td>
-										<td>
-											<span
-												className={`result ${result.actual}`}
-												data-testid={`result-${result.id}`}
-											>
-												{result.actual}
-											</span>
-										</td>
-										<td className="reason">{result.reason}</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</section>
-
-					<section className="card logs" data-testid="captured-logs">
-						<h2>Captured structured logs</h2>
-						{results.map((result) => (
-							<div className="log" key={result.id}>
-								{result.log}
-							</div>
+				<section
+					className="rounded-2xl border border-border bg-card p-5 shadow-lg [&_h2]:mb-4 [&_h2]:font-semibold [&_h2]:text-sm"
+					data-testid="permission-card"
+				>
+					<h2>Independent lifecycle permissions</h2>
+					<div className="flex flex-wrap gap-2">
+						{(
+							[
+								"app.install",
+								"app.update",
+								"app.enable",
+								"app.disable",
+								"app.uninstall",
+							] satisfies LifecyclePermission[]
+						).map((permission) => (
+							<span
+								className="rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-2 font-mono text-primary text-xs"
+								key={permission}
+							>
+								{permission}
+							</span>
 						))}
-						<p className="note">
-							Denied rows carry the required permission and stable node scope in
-							the 403-shaped payload. Prices are recorded separately from the
-							lifecycle ACL and never turn a valid package into a paywall.
+					</div>
+					<p className="mt-3.5 text-muted-foreground text-xs leading-relaxed">
+						A grant for install never implies update, enable, disable, or
+						uninstall. Team allow is checked after node scope; a member deny
+						wins over the team grant.
+					</p>
+				</section>
+
+				<section
+					className="col-span-full overflow-hidden rounded-2xl border border-border bg-card p-0 p-5 shadow-lg [&_h2]:mb-4 [&_h2]:font-semibold [&_h2]:text-sm"
+					data-testid="decision-matrix"
+				>
+					<div className="px-5 pt-5 pb-3">
+						<h2>Org / team / member decision matrix</h2>
+						<p className="mt-3.5 text-muted-foreground text-xs leading-relaxed">
+							Free and paid packages use the same node ACL. Listing price and
+							optional checkout do not change install, update, or download
+							access.
 						</p>
-					</section>
-				</div>
-			</main>
-		</>
+					</div>
+					<table className="w-full border-collapse text-sm [&_td]:border-border [&_td]:border-t [&_td]:px-4 [&_td]:py-3 [&_th]:bg-background [&_th]:px-4 [&_th]:py-3 [&_th]:text-left [&_th]:text-muted-foreground [&_th]:text-xs [&_th]:uppercase">
+						<thead>
+							<tr>
+								<th>Scenario</th>
+								<th>Actor</th>
+								<th>Action</th>
+								<th>Package</th>
+								<th>Result</th>
+								<th>Reason</th>
+							</tr>
+						</thead>
+						<tbody>
+							{results.map((result) => (
+								<tr data-testid={`decision-${result.id}`} key={result.id}>
+									<td>{result.label}</td>
+									<td className="text-muted-foreground text-xs">
+										{result.actor.label}
+									</td>
+									<td>
+										<code>{result.requiredPermission}</code>
+									</td>
+									<td>
+										<code>{result.packageLabel}</code>
+									</td>
+									<td>
+										<span
+											className={
+												result.actual === "allowed"
+													? "inline-flex rounded-full border border-success/40 bg-success/15 px-2 py-1 font-extrabold text-success text-xs uppercase"
+													: "inline-flex rounded-full border border-destructive/40 bg-destructive/15 px-2 py-1 font-extrabold text-destructive text-xs uppercase"
+											}
+											data-testid={`result-${result.id}`}
+										>
+											{result.actual}
+										</span>
+									</td>
+									<td className="font-mono text-muted-foreground text-xs">
+										{result.reason}
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</section>
+
+				<section
+					className="col-span-full rounded-2xl border border-border bg-card p-5 shadow-lg [&_h2]:mb-4 [&_h2]:font-semibold [&_h2]:text-sm"
+					data-testid="captured-logs"
+				>
+					<h2>Captured structured logs</h2>
+					{results.map((result) => (
+						<div
+							className="my-2 truncate rounded-md border-primary border-l-2 bg-background px-3 py-2 font-mono text-primary text-xs"
+							key={result.id}
+						>
+							{result.log}
+						</div>
+					))}
+					<p className="mt-3.5 text-muted-foreground text-xs leading-relaxed">
+						Denied rows carry the required permission and stable node scope in
+						the 403-shaped payload. Prices are recorded separately from the
+						lifecycle ACL and never turn a valid package into a paywall.
+					</p>
+				</section>
+			</div>
+		</main>
 	);
 };
 
-createRoot(document.getElementById("root") as HTMLElement).render(<App />);
+document.documentElement.classList.add("dark");
+document.body.classList.add("bg-background");
+createRoot(document.getElementById("root")!).render(<App />);

@@ -1,3 +1,4 @@
+import proofStyles from "./node-layer-story.module.css";
 // Standalone browser story for the REAL `NodeLayerMenu` — the submenu shell every
 // layer of the node selector renders through (services, Chat, the
 // run-alongside engines, Audio + its nested voice picker, Voice Recognition,
@@ -18,7 +19,7 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import { createRoot, type Root } from "react-dom/client";
 import {
 	type LayerOption,
@@ -83,7 +84,7 @@ const SPEECH_PROCESSING_STYLES: LayerOption[] = [
 
 function Story() {
 	return (
-		<div style={{ padding: 40 }}>
+		<div className={proofStyles.fixture1}>
 			<DropdownMenu>
 				<DropdownMenuTrigger>Node</DropdownMenuTrigger>
 				{/* Same width the node selector uses, so the story's trigger rows are
@@ -184,9 +185,14 @@ function Story() {
 	);
 }
 
+declare global {
+	interface Window {
+		__ryuNodeLayerStoryRoot?: Root;
+	}
+}
 const root = document.getElementById("root");
 if (root) {
-	const storyWindow = window as Window & { __ryuNodeLayerStoryRoot?: Root };
+	const storyWindow = window;
 	const appRoot = storyWindow.__ryuNodeLayerStoryRoot ?? createRoot(root);
 	storyWindow.__ryuNodeLayerStoryRoot = appRoot;
 	appRoot.render(<Story />);

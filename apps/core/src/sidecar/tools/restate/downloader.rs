@@ -7,10 +7,11 @@ use anyhow::{Context, Result};
 
 use crate::sidecar::download_manager::{
     build_http_client, compute_sha256, download_to_memory, extract_from_tar_gz, extract_from_zip,
-    retry_download, ryu_dir, ProgressCallback, VersionStore,
+    retry_download, ProgressCallback, VersionStore,
 };
 
-/// Pinned Restate release version. Update here to upgrade the bundled default.
+/// Pinned Restate release version. Update here to upgrade the bundled release;
+/// there is no runtime override, so every node installs the same tested build.
 const RESTATE_VERSION: &str = "1.2.0";
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
@@ -21,20 +22,17 @@ pub fn bin_path() -> PathBuf {
     } else {
         "restate-server"
     };
-    ryu_dir().join("bin").join(name)
+    crate::paths::bin_dir().join(name)
 }
 
 // ── Release URL ────────────────────────────────────────────────────────────────
 
 /// Returns the GitHub release download URL for the current platform/arch.
 fn archive_url() -> String {
-    let version = std::env::var("RYU_RESTATE_VERSION")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| RESTATE_VERSION.to_owned());
-
     let (platform, ext) = archive_platform();
-    format!("https://github.com/restatedev/restate/releases/download/v{version}/{platform}.{ext}")
+    format!(
+        "https://github.com/restatedev/restate/releases/download/v{RESTATE_VERSION}/{platform}.{ext}"
+    )
 }
 
 /// Returns `(platform-arch-os, archive-extension)` for the current target.
@@ -83,9 +81,15 @@ impl RestateDownloader {
     pub async fn ensure_installed(&self) -> Result<()> {
         let dest = bin_path();
 
-        // Fast path: already installed with a matching checksum.
+        // Fast path: the target version is installed with a matching checksum.
+        // The version term matters: the recorded checksum is the installed
+        // binary's, so it alone would skip a bumped pin.
         let store = VersionStore::load();
-        if dest.exists() {
+        let recorded_is_target = store
+            .versions
+            .get("restate")
+            .is_some_and(|version| version == RESTATE_VERSION);
+        if dest.exists() && recorded_is_target {
             if let Some(stored) = store.installed_checksum("restate") {
                 let actual = compute_sha256(&dest).await?;
                 if actual == stored {
@@ -158,11 +162,7 @@ impl RestateDownloader {
             hasher.update(&extracted);
             hex::encode(hasher.finalize())
         };
-        let version = std::env::var("RYU_RESTATE_VERSION")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| RESTATE_VERSION.to_owned());
-        VersionStore::record_persisted("restate", &version, &checksum)
+        VersionStore::record_persisted("restate", RESTATE_VERSION, &checksum)
             .context("writing versions.json")?;
 
         // Ensure PATH includes ~/.ryu/bin
@@ -184,35 +184,6 @@ impl Default for RestateDownloader {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    static RESTATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        RESTATE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    struct EnvGuard {
-        prev: Option<String>,
-    }
-    impl EnvGuard {
-        fn set(val: &str) -> Self {
-            let prev = std::env::var("RYU_RESTATE_VERSION").ok();
-            std::env::set_var("RYU_RESTATE_VERSION", val);
-            Self { prev }
-        }
-        fn clear() -> Self {
-            let prev = std::env::var("RYU_RESTATE_VERSION").ok();
-            std::env::remove_var("RYU_RESTATE_VERSION");
-            Self { prev }
-        }
-    }
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match &self.prev {
-                Some(v) => std::env::set_var("RYU_RESTATE_VERSION", v),
-                None => std::env::remove_var("RYU_RESTATE_VERSION"),
-            }
-        }
-    }
 
     #[test]
     fn bin_path_lands_in_ryu_bin() {
@@ -238,32 +209,11 @@ mod tests {
     }
 
     #[test]
-    fn archive_url_uses_pinned_version_by_default() {
-        let _lock = lock_env();
-        let _g = EnvGuard::clear();
+    fn archive_url_uses_pinned_version() {
         let url = archive_url();
         assert!(url.starts_with("https://github.com/restatedev/restate/releases/download/v"));
         assert!(url.contains(RESTATE_VERSION));
         let (platform, ext) = archive_platform();
         assert!(url.ends_with(&format!("{platform}.{ext}")));
-    }
-
-    #[test]
-    fn archive_url_honours_version_env_override() {
-        let _lock = lock_env();
-        let _g = EnvGuard::set("9.9.9");
-        let url = archive_url();
-        assert!(url.contains("/download/v9.9.9/"), "got: {url}");
-    }
-
-    #[test]
-    fn archive_url_blank_version_env_uses_default() {
-        let _lock = lock_env();
-        let _g = EnvGuard::set("");
-        let url = archive_url();
-        assert!(
-            url.contains(&format!("/download/v{RESTATE_VERSION}/")),
-            "got: {url}"
-        );
     }
 }

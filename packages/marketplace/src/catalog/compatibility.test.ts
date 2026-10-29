@@ -181,6 +181,44 @@ describe("evaluateCompatibility", () => {
 	});
 });
 
+describe("host API floor", () => {
+	test("Core's host_api_too_old verdict survives the client re-evaluation and blocks", () => {
+		const v = evaluateCompatibility(
+			{ ryu: ">=0.1.0" },
+			{},
+			{
+				compatible: false,
+				unmet: [
+					{
+						code: "host_api_too_old",
+						present: "1.17.0",
+						required: "^1.18",
+						surface: "core",
+					},
+				],
+			}
+		);
+		expect(v.compatible).toBe(false);
+		expect(v.unmet).toHaveLength(2);
+		expect(v.unmet?.[0]).toEqual({
+			code: "unknown",
+			required: ">=0.1.0",
+			surface: "core",
+		});
+		expect(blockingUnmet(v)).toEqual([
+			{
+				code: "host_api_too_old",
+				present: "1.17.0",
+				required: "^1.18",
+				surface: "core",
+			},
+		]);
+		expect(describeIncompatibility(v)).toBe(
+			"Requires Ryu plugin host API ^1.18 (you have 1.17.0)"
+		);
+	});
+});
+
 describe("blockingUnmet", () => {
 	test("advisory unknown is never blocking", () => {
 		expect(

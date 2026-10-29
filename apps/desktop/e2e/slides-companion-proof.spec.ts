@@ -28,7 +28,12 @@ test("Slides fixture mounts in the real Path-B Companion host", async ({
 	await page.waitForSelector("body[data-harness-ready='1']");
 	await page.evaluate((options) => window.__ryuCompanion.mount(options), {
 		appHtml: readFileSync(FIXTURE, "utf8"),
-		grants: ["storage:kv", "media:generate", "hook:side-model"],
+		grants: [
+			"storage:kv",
+			"media:generate",
+			"hook:side-model",
+			"files:download",
+		],
 		pluginId: "@ryu/slides",
 	});
 

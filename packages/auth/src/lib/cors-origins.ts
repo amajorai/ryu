@@ -19,10 +19,17 @@ const DEFAULT_BROWSER_AND_APP_ORIGINS = [
 	"http://localhost:5173",
 	"http://localhost:5175",
 	"http://127.0.0.1:3001",
-	"mybettertapp://",
-	"exp://",
 	"ryu://",
 ] as const;
+
+/**
+ * Expo Go's scheme. Better Auth matches a bare custom-scheme origin against
+ * every URL with that scheme, so `exp://` would accept any
+ * `exp://<host>/...` callbackURL, and the expo() plugin forwards the session
+ * cookie on redirects to trusted non-http origins. Shipped native builds use
+ * `ryu://`, so Expo Go is trusted in development only.
+ */
+const EXPO_GO_DEVELOPMENT_ORIGIN = "exp://";
 
 function urlOrigin(value: string | undefined): string | undefined {
 	if (!value) {
@@ -40,6 +47,7 @@ export function resolveRyuCorsOrigins(input: {
 	corsOrigin?: string;
 	extensionOrigin?: string;
 	frontendUrl?: string;
+	nodeEnv?: string;
 	webappUrl?: string;
 }): string[] {
 	const configured = (input.corsOrigin ?? "")
@@ -49,8 +57,7 @@ export function resolveRyuCorsOrigins(input: {
 	const extensionOrigin =
 		input.extensionOrigin?.trim() || DEFAULT_EXTENSION_ORIGIN;
 	const alwaysTrusted = [
-		"mybettertapp://",
-		"exp://",
+		input.nodeEnv === "development" ? EXPO_GO_DEVELOPMENT_ORIGIN : undefined,
 		"ryu://",
 		...TAURI_DESKTOP_ORIGINS,
 		extensionOrigin,

@@ -10,12 +10,23 @@ import {
 	subscribeChannelStatus,
 } from "@/src/lib/api/channelStatus.ts";
 
-export function useChannelStatus(): Map<string, ChannelLiveState> {
+/**
+ * `enabled` lets a caller hold the socket closed until it has something to paint
+ * (e.g. no channels exist yet), so an idle surface never opens the stream.
+ */
+export function useChannelStatus(
+	enabled = true
+): Map<string, ChannelLiveState> {
 	const [statuses, setStatuses] = useState<Map<string, ChannelLiveState>>(
 		() => new Map()
 	);
 
-	useEffect(() => subscribeChannelStatus(setStatuses), []);
+	useEffect(() => {
+		if (!enabled) {
+			return;
+		}
+		return subscribeChannelStatus(setStatuses);
+	}, [enabled]);
 
 	return statuses;
 }

@@ -39,7 +39,7 @@ export default function CtaSection({
 				</StaggerLines>
 				<div className="mt-8 flex flex-wrap items-center gap-3">
 					<a
-						className={cn(buttonVariants({ variant: "default" }))}
+						className={cn(buttonVariants({ variant: "mono" }))}
 						href={primaryHref}
 						rel={
 							primaryHref.startsWith("http") ? "noopener noreferrer" : undefined

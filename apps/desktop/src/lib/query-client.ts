@@ -16,7 +16,7 @@ import { observeQueryFocus } from "./query-focus.ts";
 // false transition, every interval continues polling in the background and
 // returning to a stale query cannot reliably trigger a fresh focus event.
 focusManager.setEventListener((handleFocus) => {
-	if (typeof window === "undefined") {
+	if (globalThis.window === undefined) {
 		return;
 	}
 	return observeQueryFocus(handleFocus);

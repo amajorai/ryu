@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/capabilities.ts
 //
 // Typed client for Core's per-agent capability endpoints. Capabilities (tool
@@ -50,27 +51,50 @@ export interface CapabilityReport {
  * undefined" and crash the whole agent-edit page. Defaulting here (rather than
  * guarding at every deref) keeps the boundary the single source of truth.
  */
-function toReport(raw: CapabilityReport): CapabilityReport {
-	const r = (raw ?? {}) as Partial<CapabilityReport>;
-	const detected = (r.detected ?? {}) as Partial<DetectedCaps>;
-	const overrides = (r.overrides ?? {}) as CapabilityOverrides;
-	return {
-		detected: {
-			reasoning: detected.reasoning ?? false,
-			tools: detected.tools ?? false,
-			vision: detected.vision ?? false,
-		},
-		overrides: {
-			reasoning: overrides.reasoning ?? null,
-			tools: overrides.tools ?? null,
-			vision: overrides.vision ?? null,
-		},
-		reasoning: r.reasoning ?? false,
-		source: r.source ?? "default",
-		tools: r.tools ?? false,
-		vision: r.vision ?? false,
-	};
-}
+const detectedCapsSchema = z.object({
+	reasoning: z
+		.boolean()
+		.nullish()
+		.transform((value) => value ?? false),
+	tools: z
+		.boolean()
+		.nullish()
+		.transform((value) => value ?? false),
+	vision: z
+		.boolean()
+		.nullish()
+		.transform((value) => value ?? false),
+});
+const capabilityOverridesSchema = z.object({
+	reasoning: z
+		.boolean()
+		.nullish()
+		.transform((value) => value ?? null),
+	tools: z
+		.boolean()
+		.nullish()
+		.transform((value) => value ?? null),
+	vision: z
+		.boolean()
+		.nullish()
+		.transform((value) => value ?? null),
+});
+const capabilityReportSchema = detectedCapsSchema.extend({
+	detected: detectedCapsSchema
+		.nullish()
+		.transform((value) => value ?? detectedCapsSchema.parse({})),
+	overrides: capabilityOverridesSchema
+		.nullish()
+		.transform((value) => value ?? capabilityOverridesSchema.parse({})),
+	source: z
+		.string()
+		.nullish()
+		.transform((value) => value ?? "default"),
+});
+const toReport = z.preprocess(
+	(value) => value ?? {},
+	capabilityReportSchema
+).parse;
 
 /**
  * Fetch an agent's effective capabilities. Cheap to call on agent selection —
@@ -106,7 +130,9 @@ export async function fetchAgentCapabilities(
 	return toReport(
 		await request<CapabilityReport>(
 			target,
-			`/api/agents/${encodeURIComponent(agentId)}/capabilities${query}`
+			`/api/agents/${encodeURIComponent(agentId)}/capabilities${query}`,
+			undefined,
+			capabilityReportSchema
 		)
 	);
 }
@@ -124,7 +150,8 @@ export async function setAgentCapabilities(
 		await request<CapabilityReport>(
 			target,
 			`/api/agents/${encodeURIComponent(agentId)}/capabilities`,
-			{ method: "PUT", body: overrides }
+			{ method: "PUT", body: overrides },
+			capabilityReportSchema
 		)
 	);
 }

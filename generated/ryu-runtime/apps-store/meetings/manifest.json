@@ -88,6 +88,26 @@
             "permission": "meetings.record"
           },
           { "path": "/import", "permission": "meetings.record" },
+          {
+            "path": "/resolve",
+            "method": "POST",
+            "permission": "meetings.view"
+          },
+          {
+            "path": "/ambient/chunk",
+            "method": "POST",
+            "permission": "meetings.record"
+          },
+          {
+            "path": "/data/count",
+            "method": "POST",
+            "permission": "meetings.view"
+          },
+          {
+            "path": "/data/purge",
+            "method": "POST",
+            "permission": "meetings.record"
+          },
           { "path": "/", "method": "GET", "permission": "meetings.view" },
           { "path": "/", "method": "POST", "permission": "meetings.record" },
           { "path": "/:id", "method": "GET", "permission": "meetings.view" },
@@ -108,8 +128,61 @@
         ]
       },
       "host_api": {
-        "grants": ["spaces:docs"]
+        "grants": ["spaces:docs", "crypto:seal"]
       }
+    },
+    {
+      "name": "ryu-diarize",
+      "process": {
+        "kind": "local",
+        "command": "ryu-diarize",
+        "command_env": "RYU_DIARIZE_BIN",
+        "port_env": "RYU_DIARIZE_PORT"
+      },
+      "port": 8020,
+      "health_path": "/health"
+    }
+  ],
+  "provides": [
+    {
+      "capability": "meetings.get",
+      "version": "1.0.0",
+      "title": "Meeting lookup",
+      "sidecar": "ryu-meetings",
+      "route": "/resolve",
+      "grant": "meetings:ambient"
+    },
+    {
+      "capability": "meetings.start",
+      "version": "1.0.0",
+      "title": "Meeting start",
+      "sidecar": "ryu-meetings",
+      "route": "/",
+      "grant": "meetings:ambient"
+    },
+    {
+      "capability": "meetings.appendAudio",
+      "version": "1.0.0",
+      "title": "Meeting audio ingest",
+      "sidecar": "ryu-meetings",
+      "route": "/ambient/chunk",
+      "grant": "meetings:ambient"
+    },
+    {
+      "capability": "data.count",
+      "version": "1.0.0",
+      "title": "App data count",
+      "sidecar": "ryu-meetings",
+      "route": "/data/count",
+      "grant": "meetings:data"
+    },
+    {
+      "capability": "data.purge",
+      "version": "1.0.0",
+      "title": "App data purge",
+      "sidecar": "ryu-meetings",
+      "route": "/data/purge",
+      "grant": "meetings:data"
     }
   ],
   "requires": {
@@ -168,6 +241,16 @@
       }
     ],
     "hook_events": [
+      {
+        "id": "@ryu/meetings#meeting.detected",
+        "title": "Meeting detected",
+        "description": "A meeting app started using the microphone. Debounced: the same app does not re-fire within two minutes, so one call raises it once. No meeting record exists yet - it fires before the user (or auto-record) starts one.",
+        "payload_example": {
+          "app": "zoom",
+          "title": "Zoom call",
+          "detected_at": "2026-08-01T14:01:55Z"
+        }
+      },
       {
         "id": "@ryu/meetings#meeting.started",
         "title": "Meeting started",

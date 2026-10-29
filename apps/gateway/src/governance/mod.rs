@@ -83,8 +83,8 @@ pub use ryu_gw_governance::{GrantDecision, SIGNING_ALGORITHM};
 const ENV_SIGNING_KEY: &str = "RYU_MARKETPLACE_SIGNING_KEY";
 
 /// Optional override for the on-disk dev-persisted signing key path. When unset
-/// the key lives at `$XDG_DATA_HOME/ryu/marketplace-signing-key` (mirrors the
-/// audit db location in `config.rs`). Only consulted when `ENV_SIGNING_KEY` is
+/// the key lives in the gateway's `secrets/` slot (see `signing_key_path`).
+/// Only consulted when `ENV_SIGNING_KEY` is
 /// unset. No secret is ever in code.
 const ENV_SIGNING_KEY_PATH: &str = "RYU_MARKETPLACE_SIGNING_KEY_PATH";
 
@@ -139,10 +139,13 @@ fn reserved_namespaces() -> Vec<String> {
         "self_build",
         // Model / data / egress primitives the Gateway governs.
         "model",
+        // Usage is a host primitive; administrative audit access is operator-only.
+        "usage",
         "memory",
         "spaces",
         "files",
         "identity",
+        "authorization",
         "network",
         // Core-owned DNS-pinned HTTP for app protocols. The app may still own
         // origin/payment semantics, but it cannot self-approve the network seam.
@@ -152,6 +155,8 @@ fn reserved_namespaces() -> Vec<String> {
         // owner-scoped; `tools.*` / `mcp:*` / `mcp.*` are the MCP tool plane.
         "tool",
         "tools",
+        // Installing a bundle is a host effect, never an owner-scoped self-grant.
+        "plugins",
         "mcp",
         // `pi:extension` ships a .ts file into the managed Pi agent's extension
         // directory, where Pi loads it IN-PROCESS with full host privilege — the
@@ -168,10 +173,21 @@ fn reserved_namespaces() -> Vec<String> {
         // The warmup bridge is a Core-owned host capability. Keep the namespace
         // reserved so an app such as `com.evil.warmup` cannot self-approve it.
         "warmup",
+        // Subscription accounts are a Core-owned host capability (saved logins
+        // whose labels may be email addresses). Reserved so an app such as
+        // `com.evil.subscriptions` cannot self-approve `subscriptions:*`; only
+        // the reviewed `subscriptions:read` is allowlisted below, and the future
+        // `subscriptions:pin` name stays unapprovable until it is designed.
+        "subscriptions",
+        // The vault is a Core-owned host primitive. `vault:fill` lets a sidecar
+        // receive one agent-account field to type into a page; reserved so an
+        // app such as `com.evil.vault` cannot self-approve it.
+        "vault",
         // Turn-hook phases, host-shell integration, the app KV store, the
         // follow-up-message verb, sandboxed widget promotion, media engines,
         // native-desktop capture/replay, and Core's own listing verbs.
         "hook",
+        "execution",
         // Native effects are a host primitive rather than an app-owned
         // namespace. The exact actions are reviewed below; reserving the
         // namespace prevents an app named `native` from self-approving them.
@@ -212,6 +228,17 @@ fn reserved_namespaces() -> Vec<String> {
         // own namespace.
         "skills",
         "quests",
+        // Core's run plane: failed agent / scheduled-job / workflow runs
+        // (`runs:failures`, the `core#run.failed` kernel event) and the agent
+        // re-run kernel capability (`runs:rerun-agent`). No app owns runs, so the
+        // namespace is reserved: otherwise an app named `com.evil.runs` would
+        // owner-scope its way into every failed run's instruction and error.
+        "runs",
+        // The generic Companion → sidecar HTTP and realtime host bridges
+        // (`app:http`, `app:realtime`, and per-target `app:http:<app id>`). Reserved
+        // so an app whose id ends in `app` (`com.evil.app`) cannot owner-scope
+        // its way into another app's sidecar.
+        "app",
     ]
     .iter()
     .map(|s| (*s).to_string())
@@ -244,6 +271,7 @@ fn default_grant_allowlist() -> Vec<String> {
         "mcp.tools",
         "tools.read",
         "tools.invoke",
+        "plugins:install",
         // The UI host primitives are reserved as a namespace, but these two
         // reviewed frame capabilities are intentionally shared by shipped apps.
         "ui:toast",
@@ -300,6 +328,8 @@ fn default_grant_allowlist() -> Vec<String> {
         "tool:http-egress:api.firecrawl.dev",
         "tool:http-egress:google.serper.dev",
         "tool:http-egress:scrape.serper.dev",
+        // DeepSeek serves search and fetch from one host, so one exact entry.
+        "tool:http-egress:api.deepseek.com",
         // `parallel` serves `web.search` from two hosts, not one: the keyed Search
         // API (`api.parallel.ai`) and the keyless free endpoint its binding falls
         // back to when RYU_PARALLEL_API_KEY is unset (`search.parallel.ai`). Two
@@ -324,15 +354,16 @@ fn default_grant_allowlist() -> Vec<String> {
         // Platform), carrying `/v3/workspaces/{ws}/peers/{peer}/chat` and
         // `/v3/workspaces/{ws}/peers/{peer}/search`.
         "tool:http-egress:api.honcho.dev",
-        // `spider`, `rtk`, and `ripgrep` were decoupled from Core into declarative
-        // `command` tool plugins, so each declares a `tool:command:<bin>` grant
-        // instead of an in-Core provider. Same re-enable rationale as the scopes
-        // above.
+        // `spider`, `rtk`, `ripgrep` and `just-bash` were decoupled from Core into
+        // declarative `command` tool plugins, so each declares a `tool:command:<bin>`
+        // grant instead of an in-Core provider. Same re-enable rationale as the
+        // scopes above.
         "tool:command:spider",
         "tool:command:rtk",
         "tool:command:rg",
+        "tool:command:just-bash",
         "tool:command:bws",
-        // Ship-code-in-a-manifest, for BOTH an `inline_deno` tool and a capability
+        // Ship-code-in-a-manifest, for BOTH an `inline_js` tool and a capability
         // ADAPTER (the JS a layer provider ships when its shape — an async job API,
         // a token vocabulary — is beyond what the declarative binding fields can
         // express). Deliberately allowlisted rather than owner-scoped: an adapter is
@@ -369,22 +400,36 @@ fn default_grant_allowlist() -> Vec<String> {
         "mcp:docs",
         "mcp:expect",
         "mcp:zvec_grep",
+        // The opt-in local computer.control engine `@ryu/codex-computer-use` owns
+        // this stdio server.
+        "mcp:codex_cu",
         // Same rule, same reason: `@ryu/reasoning` declares `mcp:reasoning` and shipped
         // without this row, so `every_builtin_fixture_grant_is_allowlisted` has been red
         // and a disable→re-enable of that app fails with GrantsDenied. Every sidecar app
         // with an `mcp_servers` block needs a line here — the owner-scoped rule will
         // never approve a reserved namespace, however well the names match.
         "mcp:reasoning",
-        // Expenses and Research own MCP servers; the reserved `mcp` namespace
-        // means their runtime re-enable path needs reviewed server grants here.
+        // Expenses, Family, Places, and Research own MCP servers; the reserved
+        // `mcp` namespace means their runtime re-enable path needs reviewed
+        // server grants here.
         "mcp:expenses",
+        "mcp:family",
+        "mcp:places",
         "mcp:research",
+        // Sites' own `sites.*` agent tools (`apps-store/sites/manifest.json`);
+        // same reserved-namespace rule as the rows above.
+        "mcp:sites",
         // data scopes
         "memory.read",
         "memory.write",
         "spaces.read",
         "spaces.write",
         "files.read",
+        // A sandboxed companion may trigger a user-requested download from its
+        // own rendered export; the host adds only the browser download permission
+        // and still blocks filesystem reads/writes. A manifest must declare the
+        // grant and the user must install/enable that app before it is approved.
+        "files:download",
         // Core's `/api/skills` CRUD, driven from a sandboxed companion frame via
         // the `skills.crud` bridge family. A **cross-app** hold: the declaring
         // app is `@ryu/skill-editor`, whose namespace is `skill-editor`, not
@@ -406,6 +451,16 @@ fn default_grant_allowlist() -> Vec<String> {
         // transport surfaces. `app` is reserved, so the owner-scoped rule cannot
         // approve either grant even when the manifest id is `@ryu/<app>`.
         "app:realtime",
+        // Cross-app Companion requests (`app.request({ app })`, Host API 1.18):
+        // `app:http:<target app id>` lets a Companion call ONE other app's sidecar
+        // through the host's ext-proxy forwarder, confined to that app's mount and
+        // declared routes. Each target is reviewed on its own row; the form is
+        // checked in `validate_grants_for` (concrete scoped id, no wildcard) and a
+        // well-formed target grant is approved ONLY by exact membership here, never
+        // by the owner-scoped rule. The Workflows Companion lists recorded recipes
+        // from the Recipes app's list route (it used to reach that route through the
+        // per-app `ghost.recipes` host verb).
+        "app:http:@ryu/recipes",
         // Outreach uses the Mail app's reviewed host bridge to list inboxes and
         // send an explicitly selected, human-reviewed message. This is a
         // cross-app grant, so owner-scoping cannot approve it; keep the exact
@@ -416,10 +471,15 @@ fn default_grant_allowlist() -> Vec<String> {
         // Keep its explicit grant reviewed so the reserved `warmup` namespace
         // cannot be self-approved by a lookalike app.
         "warmup:crud",
+        // Owner-tier subscription accounts and cached usage. Core still requires
+        // a verified node owner/admin caller. `subscriptions:pin` is reserved
+        // and deliberately NOT allowlisted.
+        "subscriptions:read",
         "preferences:write",
         "usage:read",
         // Only the verified current caller projection, never credentials or a user roster.
         "identity:read",
+        "authorization:defer",
         // Read-only scan of caller-supplied text through the existing firewall.
         "security:check",
         // Widget-render consent: a plugin (built-in Ryu App or third-party MCP
@@ -438,6 +498,7 @@ fn default_grant_allowlist() -> Vec<String> {
         // disable→re-enable path re-runs `/v1/grants/validate`, so a missing entry
         // shows up as GrantsDenied on re-enable. Swappable via the env override.
         "spaces:docs",
+        "spaces:database",
         // Feedback Board invokes the shared Workflows and Blueprint host planes;
         // these are cross-app capabilities, not owner-scoped `@ryu/workflows`
         // capabilities.
@@ -507,6 +568,9 @@ fn default_grant_allowlist() -> Vec<String> {
         // owner-scoped name match — is what allows it; `com.evil.chat` gets nothing
         // from being called that.
         "chat.sendFollowUp",
+        // Read-only sub-agents only: Core's bridge refuses a mutating preset
+        // (`code_write`) unless the app ALSO holds `hook:run-agent:write`, which is
+        // deliberately absent from this list (see `RUN_AGENT_WRITE_OWNERS`).
         "hook:run-agent",
         "hook:side-model",
         // `host.runHook` is restricted to the seeded `@ryu/chat-title` plugin;
@@ -530,6 +594,29 @@ fn default_grant_allowlist() -> Vec<String> {
         // `quests:crud` for the inbox's task check-off and deliberately does NOT
         // hold this.
         "quests:capture",
+        // Run recovery, the Self-Healing extraction (`@ryu/healing`). Three
+        // cross-app holds, each reviewed on its own because the reach differs:
+        //
+        // `runs:failures` receives the `core#run.failed` kernel event: the
+        // instruction and error text of every failed chat, scheduled-agent and
+        // workflow run. That is user data from runs the app did not start, so it
+        // is a reserved-namespace entry here rather than an owner-scoped match.
+        "runs:failures",
+        // `approvals:request` queues a proposed fix into the Approvals inbox
+        // through the `approvals.request` kernel capability. Distinct from the
+        // owner-scoped `approvals:crud` (list/approve/reject the inbox): a holder
+        // can only ASK, a human still decides, and Core builds the request (kind,
+        // deferred action) from a closed set, never from free-form input. The
+        // `approvals` namespace is protected, so only this exact entry allows it
+        // for any app other than `@ryu/approvals`.
+        "approvals:request",
+        // `runs:rerun-agent` re-runs a failed agent run (`runs.rerunAgent`
+        // kernel capability; an approved fix is executed by Core's own
+        // approval engine instead). Core mints the
+        // never-heal-a-heal run id itself, so a holder cannot choose or collide
+        // with a conversation. Workflow re-runs need no new word: they reuse the
+        // reviewed `workflows:runstate` above (the same power as `workflows.run`).
+        "runs:rerun-agent",
         // Shell integration: a companion app that contributes a sidebar section /
         // navigation entry to the host shell declares this. Reaching into the host
         // shell is by definition outside the app's own namespace, so it stays a
@@ -651,6 +738,19 @@ fn protected_owner_id_list() -> &'static Vec<String> {
             "crm",
             "workflows",
             "safe-actions",
+            // First-party capability providers (`provides[].grant` in
+            // `apps-store/<name>/manifest.json`). Core's capability broker gates a
+            // provided capability only on the caller holding the grant, so an
+            // unprotected namespace would let `@evil/teams` self-grant
+            // `teams:manage`. `every_first_party_provided_grant_namespace_is_protected`
+            // fails when a new provider is not listed here.
+            "teams",
+            "dashboards",
+            "news",
+            "reasoning",
+            "rlm",
+            "tuition",
+            "blueprint",
         ]
         .into_iter()
         .flat_map(|name| [format!("@ryu/{name}"), format!("com.ryu.{name}")])
@@ -701,47 +801,204 @@ fn grant_policy() -> GrantPolicy<'static> {
 /// `app_id` is `None` when the caller did not identify itself, which disables
 /// owner-scoping for the request — fail-closed to the pre-grammar behavior.
 pub fn validate_grants_for(app_id: Option<&str>, grants: &[String]) -> GrantDecision {
-    if app_id.is_some_and(|id| {
-        id.trim().eq_ignore_ascii_case("@ryu/chat-title")
-            || id.trim().eq_ignore_ascii_case("com.ryu.chat-title")
-    }) {
-        let mut allowlist = grant_allowlist().clone();
-        allowlist.push("hook:run-self".to_string());
-        let policy = GrantPolicy {
-            allowlist: &allowlist,
-            reserved_namespaces: reserved_namespace_list(),
-            owner_scoped: owner_scoped_grants_enabled(),
-            protected_owner_ids: protected_owner_id_list(),
+    let decision = validate_general_grants_for(app_id, grants);
+    // Per-target cross-app grants (`app:http:<target>`) are decided here, not by
+    // the general grammar: a malformed target (wildcard, unscoped id, anything
+    // but one concrete `@scope/name`) is denied even if an operator allowlist
+    // names it, and a well-formed one is approved only by exact membership in the
+    // reviewed allowlist.
+    let mut approved = Vec::new();
+    let mut denied = Vec::new();
+    for grant in grants {
+        let scope = grant.trim();
+        if scope.is_empty() {
+            continue;
+        }
+        let allowed = if is_app_http_target_grant(scope) {
+            app_http_target_grant_well_formed(scope)
+                && grant_allowlist().iter().any(|entry| entry.trim() == scope)
+        } else {
+            decision.approved.iter().any(|a| a == scope)
         };
-        return ryu_gw_governance::validate_grants_for(app_id, grants, &policy);
+        if allowed {
+            approved.push(scope.to_owned());
+        } else {
+            denied.push(scope.to_owned());
+        }
     }
-    // Life Recorder is the only shipped app that requests the sensitive
-    // microphone/speech host primitives. Keep these grants out of the global
-    // allowlist (so a marketplace app cannot self-request them), but permit the
-    // exact first-party owner on the same re-enable path as the seeded manifest.
-    if app_id.is_some_and(|id| {
-        id.trim().eq_ignore_ascii_case("@ryu/life-recorder")
-            || id.trim().eq_ignore_ascii_case("com.ryu.life-recorder")
-    }) {
-        let mut allowlist = grant_allowlist().clone();
-        allowlist.extend(["timeline:speech".to_owned(), "media:record".to_owned()]);
-        let policy = GrantPolicy {
-            allowlist: &allowlist,
-            reserved_namespaces: reserved_namespace_list(),
-            owner_scoped: owner_scoped_grants_enabled(),
-            protected_owner_ids: protected_owner_id_list(),
-        };
-        return ryu_gw_governance::validate_grants_for(app_id, grants, &policy);
-    }
-    ryu_gw_governance::validate_grants_for(app_id, grants, &grant_policy())
+    GrantDecision { approved, denied }
 }
+
+/// Prefix of a per-target cross-app request grant.
+const APP_HTTP_TARGET_PREFIX: &str = "app:http:";
+
+/// Whether `scope` is shaped as a per-target cross-app grant at all (any case),
+/// so it is routed to [`app_http_target_grant_well_formed`] and never to the
+/// general grammar.
+fn is_app_http_target_grant(scope: &str) -> bool {
+    scope
+        .get(..APP_HTTP_TARGET_PREFIX.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(APP_HTTP_TARGET_PREFIX))
+}
+
+/// The accepted form of a per-target grant: `app:http:@scope/name`, lowercase,
+/// one concrete scoped app id (`[a-z0-9][a-z0-9-]*` scope, `[a-z0-9][a-z0-9._-]*`
+/// name). No wildcard, no flat or dotted legacy id, no extra segment.
+fn app_http_target_grant_well_formed(scope: &str) -> bool {
+    let Some(target) = scope.strip_prefix(APP_HTTP_TARGET_PREFIX) else {
+        return false;
+    };
+    let Some((owner, name)) = target
+        .strip_prefix('@')
+        .and_then(|rest| rest.split_once('/'))
+    else {
+        return false;
+    };
+    let segment = |s: &str, extra: &[char]| {
+        s.len() <= 214
+            && s.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && s.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || extra.contains(&c)
+            })
+    };
+    segment(owner, &[]) && segment(name, &['.', '_'])
+}
+
+/// The general capability grammar (allowlist + owner-scoped + owner-exclusive).
+fn validate_general_grants_for(app_id: Option<&str>, grants: &[String]) -> GrantDecision {
+    let extra = app_id.map(owner_exclusive_grants).unwrap_or_default();
+    if extra.is_empty() {
+        return ryu_gw_governance::validate_grants_for(app_id, grants, &grant_policy());
+    }
+    let mut allowlist = grant_allowlist().clone();
+    allowlist.extend(extra.iter().map(|grant| (*grant).to_owned()));
+    let policy = GrantPolicy {
+        allowlist: &allowlist,
+        reserved_namespaces: reserved_namespace_list(),
+        owner_scoped: owner_scoped_grants_enabled(),
+        protected_owner_ids: protected_owner_id_list(),
+    };
+    ryu_gw_governance::validate_grants_for(app_id, grants, &policy)
+}
+
+/// One reviewed owner-exclusive grant row: the exact first-party owner ids
+/// (current scoped id plus its legacy flat alias) and the sensitive grants only
+/// that owner may request.
+struct OwnerExclusiveGrant {
+    owner_ids: &'static [&'static str],
+    grants: &'static [&'static str],
+}
+
+/// Reviewed grants that are deliberately kept OFF the global allowlist (so no
+/// marketplace app can self-request them) but are approved for one exact
+/// first-party owner. This is data, not per-app code: adding a row is a security
+/// review decision, and the policy itself stays app-agnostic. It cannot be driven
+/// by the requesting manifest, because the manifest is the untrusted party here.
+///
+/// - `execution:control` — the kill switch's stop-all-executions primitive.
+/// - `hook:run-self` — `host.runHook`, restricted to the seeded chat-title plugin.
+/// - `timeline:speech` — Shadow speech history, only Life Recorder requests it.
+/// - `media:record` — host-owned microphone windows, requested by Life Recorder,
+///   Teleprompter, Voice, and Video Studio (short windows only; no Shadow speech
+///   history).
+/// - `hook:run-agent:write` — mutating sub-agent presets (autopilot, sites).
+/// - `vault:fill` — an agent's own website login or TOTP code, released in
+///   plaintext to the Browser sidecar that types it into the page.
+/// - `chat:project-guidance` — a project's standing goal and instructions, which
+///   Core puts in the system prompt of every turn in that project.
+const OWNER_EXCLUSIVE_GRANTS: &[OwnerExclusiveGrant] = &[
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/kill-switch", "com.ryu.kill-switch"],
+        grants: &["execution:control"],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/chat-title", "com.ryu.chat-title"],
+        grants: &["hook:run-self"],
+    },
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/life-recorder", "com.ryu.life-recorder"],
+        grants: &["timeline:speech", "media:record"],
+    },
+    // Short host-owned microphone windows only; no Shadow speech history.
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/teleprompter", "com.ryu.teleprompter"],
+        grants: &["media:record"],
+    },
+    // Voice Studio records consented voice samples through the same short
+    // host-owned microphone window; no Shadow speech history.
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/voice", "com.ryu.voice"],
+        grants: &["media:record"],
+    },
+    // Video Studio's voiceover and screen/camera recorder (an optional grant the
+    // viewer still approves); no Shadow speech history.
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/video-studio", "com.ryu.video-studio"],
+        grants: &["media:record"],
+    },
+    // Write-capable sub-agents stay off the global allowlist so an app holding
+    // plain `hook:run-agent` cannot escalate to `preset: "code_write"`; only the
+    // reviewed first-party owners whose shipped flows launch a write delegate.
+    OwnerExclusiveGrant {
+        owner_ids: RUN_AGENT_WRITE_OWNERS,
+        grants: &[RUN_AGENT_WRITE_GRANT],
+    },
+    // Agent accounts: `vault.credentialFill` returns the stored password or the
+    // current TOTP code to the calling sidecar, and Core cannot see the page it
+    // claims to fill. Only the reviewed Browser app may hold it; on the global
+    // allowlist any installed app's sidecar could read every agent's logins.
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/browser", "com.ryu.browser"],
+        grants: &["vault:fill"],
+    },
+    // Project guidance: `scopeGuidance.set` writes text that every turn in the
+    // project carries in its system prompt, user-started turns included. Only
+    // the reviewed Projects app, which owns project settings, may hold it;
+    // `chat.sendFollowUp` alone would hand it to every app that posts turns.
+    OwnerExclusiveGrant {
+        owner_ids: &["@ryu/projects", "com.ryu.projects"],
+        grants: &["chat:project-guidance"],
+    },
+];
+
+/// The owner-exclusive grants reviewed for `app_id` (exact, case-insensitive id
+/// match after trimming; empty for every other caller). Rows are unioned, so one
+/// grant shared by several owners can be its own row and an owner may appear in
+/// more than one row.
+fn owner_exclusive_grants(app_id: &str) -> Vec<&'static str> {
+    let app_id = app_id.trim();
+    OWNER_EXCLUSIVE_GRANTS
+        .iter()
+        .filter(|row| {
+            row.owner_ids
+                .iter()
+                .any(|id| id.eq_ignore_ascii_case(app_id))
+        })
+        .flat_map(|row| row.grants.iter().copied())
+        .collect()
+}
+
+/// The explicit grant that lets `host.runAgent` / `host.runFanout` launch a
+/// mutating (`code_write`) preset. Not on [`default_grant_allowlist`].
+const RUN_AGENT_WRITE_GRANT: &str = "hook:run-agent:write";
+
+/// Reviewed first-party apps whose shipped flows run a write-capable sub-agent
+/// (Autopilot's strategy cycle and Sites' provider reset action).
+const RUN_AGENT_WRITE_OWNERS: &[&str] = &[
+    "@ryu/autopilot",
+    "com.ryu.autopilot",
+    "@ryu/sites",
+    "com.ryu.sites",
+];
 
 // ── Signing ─────────────────────────────────────────────────────────────────
 
 /// Resolve the process signing key, in priority order:
 ///   1. `RYU_MARKETPLACE_SIGNING_KEY` env (base64 32-byte seed) — the production
 ///      source of truth. Stable across restarts and across replicas.
-///   2. A dev-persisted key file (`$XDG_DATA_HOME/ryu/marketplace-signing-key`,
+///   2. A dev-persisted key file (`<data dir>/secrets/marketplace-signing-key`,
 ///      or `RYU_MARKETPLACE_SIGNING_KEY_PATH`): read it if present, else
 ///      generate a fresh key AND write it there so it is stable across local
 ///      restarts. This is what closes the "signatures die on every bounce" gap
@@ -770,18 +1027,49 @@ fn signing_key() -> &'static SigningKey {
         }
 
         // 2. Dev-persisted key on disk (read existing, else generate + persist).
+        //    The seed is sealed (`encc:v1:`) with the Gateway's sealing key; a
+        //    legacy plaintext seed is read and resealed in place.
         if let Some(path) = signing_key_path() {
-            if let Some(key) = read_persisted_signing_key(&path) {
+            let sealer = signing_key_sealer();
+            match read_persisted_signing_key(&path, sealer.as_deref()) {
+                Ok(Some(key)) => {
+                    tracing::info!(
+                        path = %path.display(),
+                        public_key = %B64.encode(key.verifying_key().to_bytes()),
+                        "governance: loaded dev-persisted marketplace signing key (set {ENV_SIGNING_KEY} for production)"
+                    );
+                    return key;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    // Never mint a replacement over a key we cannot open: that
+                    // would silently rotate the marketplace trust root.
+                    tracing::error!(
+                        path = %path.display(),
+                        "governance: the persisted marketplace signing key could not be opened ({error}); using an EPHEMERAL key and leaving the file untouched (start the Gateway with its sealing key, or set {ENV_SIGNING_KEY})"
+                    );
+                    let mut csprng = rand::rngs::OsRng;
+                    return SigningKey::generate(&mut csprng);
+                }
+            }
+            // Before keys were profile-scoped every profile shared one file. Adopt
+            // that key on first start of a non-release profile so signatures it
+            // already issued keep verifying; fresh installs stay isolated. The
+            // shared file is the release profile's own key, sealed (if at all)
+            // under the release key, so it is only read here, never rewritten.
+            if let Some(key) = legacy_signing_key_path(&path)
+                .and_then(|legacy| adopt_legacy_signing_key(&legacy, &path, sealer.as_deref()))
+            {
                 tracing::info!(
                     path = %path.display(),
                     public_key = %B64.encode(key.verifying_key().to_bytes()),
-                    "governance: loaded dev-persisted marketplace signing key (set {ENV_SIGNING_KEY} for production)"
+                    "governance: adopted the pre-profile marketplace signing key for this profile"
                 );
                 return key;
             }
             let mut csprng = rand::rngs::OsRng;
             let key = SigningKey::generate(&mut csprng);
-            if persist_signing_key(&path, &key) {
+            if persist_signing_key(&path, &key, sealer.as_deref()) {
                 tracing::warn!(
                     path = %path.display(),
                     public_key = %B64.encode(key.verifying_key().to_bytes()),
@@ -807,34 +1095,149 @@ fn signing_key() -> &'static SigningKey {
 
 /// Resolve the on-disk path for the dev-persisted signing key: the
 /// `RYU_MARKETPLACE_SIGNING_KEY_PATH` override, else
-/// `$XDG_DATA_HOME/ryu/marketplace-signing-key` (mirrors the audit db location).
+/// `<RYU_DIR>/secrets/marketplace-signing-key` under Core, else the standalone
+/// profile's `$XDG_DATA_HOME/ryu{suffix}/marketplace-signing-key` (mirrors the
+/// audit db location, profile-scoped so a dev Gateway never signs with the
+/// release key).
 /// `None` when no data dir can be resolved.
 fn signing_key_path() -> Option<std::path::PathBuf> {
-    if let Ok(raw) = std::env::var(ENV_SIGNING_KEY_PATH) {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            return Some(std::path::PathBuf::from(trimmed));
+    let ryu_dir = std::env::var_os("RYU_DIR")
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from);
+    signing_key_path_for(
+        std::env::var(ENV_SIGNING_KEY_PATH).ok().as_deref(),
+        ryu_dir.as_deref(),
+        dirs::data_local_dir().as_deref(),
+        &crate::profile::suffix(),
+    )
+}
+
+/// Pure half of [`signing_key_path`], testable without process-global env.
+fn signing_key_path_for(
+    override_path: Option<&str>,
+    ryu_dir: Option<&std::path::Path>,
+    data_local_dir: Option<&std::path::Path>,
+    profile_suffix: &str,
+) -> Option<std::path::PathBuf> {
+    if let Some(trimmed) = override_path.map(str::trim).filter(|raw| !raw.is_empty()) {
+        return Some(std::path::PathBuf::from(trimmed));
+    }
+    if let Some(root) = ryu_dir {
+        return Some(ryu_sidecar_runtime::layout::secret_path(
+            root,
+            "marketplace-signing-key",
+        ));
+    }
+    data_local_dir.map(|dir| {
+        dir.join(format!("ryu{profile_suffix}"))
+            .join("marketplace-signing-key")
+    })
+}
+
+/// The shared pre-profile key file (`$XDG_DATA_HOME/ryu/marketplace-signing-key`)
+/// for a profile-scoped default path (`ryu-<profile>/marketplace-signing-key`).
+/// `None` for the release profile, an explicit override, or any other shape.
+fn legacy_signing_key_path(profile_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if std::env::var(ENV_SIGNING_KEY_PATH).is_ok_and(|raw| !raw.trim().is_empty()) {
+        return None;
+    }
+    legacy_signing_key_path_for(profile_path)
+}
+
+/// Pure half of [`legacy_signing_key_path`].
+fn legacy_signing_key_path_for(profile_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let profile_dir = profile_path.parent()?;
+    let dir_name = profile_dir.file_name()?.to_str()?;
+    if !dir_name.starts_with("ryu-") || profile_path.file_name()? != "marketplace-signing-key" {
+        return None;
+    }
+    Some(
+        profile_dir
+            .parent()?
+            .join("ryu")
+            .join("marketplace-signing-key"),
+    )
+}
+
+/// Adopt the shared pre-profile seed at `legacy` into this profile's own `path`.
+///
+/// The legacy file is the release profile's live key, so it is read strictly
+/// read-only: with no sealer, so [`read_persisted_signing_key`] never reseals it
+/// under this profile's key (which would leave the release Gateway unable to
+/// open it and rotate its trust root on the next restart). A plaintext seed is
+/// adopted; a sealed one cannot be opened without the release key, so it is
+/// skipped and the profile mints its own. The seed is then persisted only to
+/// `path`, sealed under this profile's sealer.
+fn adopt_legacy_signing_key(
+    legacy: &std::path::Path,
+    path: &std::path::Path,
+    sealer: Option<&dyn ryu_crypto::SecretSealer>,
+) -> Option<SigningKey> {
+    read_persisted_signing_key(legacy, None)
+        .ok()
+        .flatten()
+        .filter(|key| persist_signing_key(path, key, sealer))
+}
+
+/// The Gateway's sealing key for the persisted seed: the subkey Core delivered,
+/// or the one a standalone Gateway derived from `RYU_MASTER_KEY`. `None` when
+/// this process has no key.
+fn signing_key_sealer() -> Option<std::sync::Arc<dyn ryu_crypto::SecretSealer>> {
+    <ryu_crypto::GatewayScope as ryu_crypto::SealScope>::sealer().ok()
+}
+
+/// Read the persisted base64 32-byte seed from `path`.
+///
+/// * `Ok(None)`: no file.
+/// * `Ok(Some(key))`: a sealed or legacy plaintext seed; a plaintext seed is
+///   resealed in place when `sealer` is available (best effort).
+/// * `Err`: the file exists but cannot be opened (sealed without a usable key)
+///   or does not hold a valid seed. The caller must not overwrite it.
+fn read_persisted_signing_key(
+    path: &std::path::Path,
+    sealer: Option<&dyn ryu_crypto::SecretSealer>,
+) -> anyhow::Result<Option<SigningKey>> {
+    let Some(opened) = ryu_crypto::read_secret_file(path, sealer)? else {
+        return Ok(None);
+    };
+    let key = signing_key_from_seed(opened.value.trim())
+        .ok_or_else(|| anyhow::anyhow!("not a base64 32-byte ed25519 seed"))?;
+    if opened.needs_reseal {
+        if let Some(sealer) = sealer {
+            match ryu_crypto::write_secret_file(path, &opened.value, sealer) {
+                Ok(()) => tracing::info!(
+                    path = %path.display(),
+                    "governance: sealed the plaintext marketplace signing key in place"
+                ),
+                Err(error) => tracing::warn!(
+                    path = %path.display(),
+                    "governance: could not seal the plaintext marketplace signing key: {error}"
+                ),
+            }
         }
     }
-    dirs::data_local_dir().map(|d| d.join("ryu").join("marketplace-signing-key"))
+    Ok(Some(key))
 }
 
-/// Read a base64 32-byte seed from the persisted key file, if it exists and
-/// parses. Any read/parse error returns `None` (the caller then regenerates).
-fn read_persisted_signing_key(path: &std::path::Path) -> Option<SigningKey> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    signing_key_from_seed(raw.trim())
-}
-
-/// Persist a signing key's 32-byte seed (base64) to `path`, creating parent
-/// directories. Returns `true` on success. Never panics.
+/// Persist a signing key's 32-byte seed (base64) to `path`, sealed with the
+/// Gateway's sealing key. Returns `true` on success. Never panics.
 ///
-/// On Unix the file is created **atomically at mode `0600`** via an owner-only
-/// `open` (not written-then-chmod'd), so the private seed is never observable at
-/// a permissive umask, and the parent directory is tightened to `0700`. Closing
-/// the write-then-chmod TOCTOU window matters because this is an ed25519 signing
-/// key — a brief world-readable moment is a real disclosure.
-fn persist_signing_key(path: &std::path::Path, key: &SigningKey) -> bool {
+/// Fails closed: without a sealer nothing is written (the caller then runs on
+/// an ephemeral key and says so). The write is atomic (owner-only temporary
+/// file, fsync, rename), so a crash never truncates the seed and silently
+/// rotates the trust root, and the parent directory is tightened to `0700`.
+fn persist_signing_key(
+    path: &std::path::Path,
+    key: &SigningKey,
+    sealer: Option<&dyn ryu_crypto::SecretSealer>,
+) -> bool {
+    let Some(sealer) = sealer else {
+        tracing::warn!(
+            path = %path.display(),
+            "governance: no Gateway sealing key, so the marketplace signing key is not persisted (start the Gateway with RYU_MASTER_KEY, or set {ENV_SIGNING_KEY})"
+        );
+        return false;
+    };
     if let Some(parent) = path.parent() {
         if std::fs::create_dir_all(parent).is_err() {
             return false;
@@ -842,34 +1245,18 @@ fn persist_signing_key(path: &std::path::Path, key: &SigningKey) -> bool {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            // Best-effort: the file itself is created 0600 below regardless, so a
-            // failure to tighten the dir is not fatal — but do it so the key is
-            // not readable via a permissive parent.
+            // Best-effort: the file itself is written 0600 regardless.
             let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
         }
     }
     let seed_b64 = B64.encode(key.to_bytes());
-
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut file = match opts.open(path) {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "governance: could not create persisted signing key file");
-            return false;
+    match ryu_crypto::write_secret_file(path, &seed_b64, sealer) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(path = %path.display(), "governance: could not persist the sealed signing key: {error}");
+            false
         }
-    };
-    use std::io::Write;
-    if let Err(e) = file.write_all(seed_b64.as_bytes()) {
-        tracing::warn!(path = %path.display(), error = %e, "governance: could not write persisted signing key");
-        return false;
     }
-    true
 }
 
 /// The base64-encoded public verifying key, exposed so clients can pin it.
@@ -903,694 +1290,4 @@ pub fn verify_manifest(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use ed25519_dalek::Signer;
-    use serde_json::json;
-
-    /// Shorthand for the common `&[&str] -> Vec<String>` in these tests.
-    fn scopes(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| (*s).to_string()).collect()
-    }
-
-    #[test]
-    fn default_allowlist_approves_known_grant() {
-        let d = validate_grants_for(None, &scopes(&["mcp.tools", "memory.read"]));
-        assert!(d.all_approved());
-        assert_eq!(d.approved.len(), 2);
-        assert!(d.denied.is_empty());
-    }
-
-    #[test]
-    fn shared_egress_grant_is_reviewed() {
-        let d = validate_grants_for(Some("@ryu/mpp"), &scopes(&["egress:http"]));
-        assert!(d.all_approved());
-        assert_eq!(d.approved, vec!["egress:http".to_owned()]);
-    }
-
-    #[test]
-    fn conversation_reactions_grant_is_reviewed() {
-        let d = validate_grants_for(
-            Some("@ryu/agent-comms"),
-            &scopes(&["conversation:reactions"]),
-        );
-        assert!(d.all_approved(), "denied: {:?}", d.denied);
-        assert_eq!(d.approved, vec!["conversation:reactions".to_owned()]);
-    }
-
-    #[test]
-    fn life_recorder_sensitive_grants_are_exact_owner_scoped() {
-        let grants = scopes(&["timeline:speech", "media:record"]);
-        assert!(validate_grants_for(Some("@ryu/life-recorder"), &grants).all_approved());
-        assert!(!validate_grants_for(Some("com.evil.life-recorder"), &grants).all_approved());
-        assert!(
-            !validate_grants_for(Some("com.evil.media"), &scopes(&["media:record"])).all_approved()
-        );
-    }
-
-    #[test]
-    fn native_host_grants_are_reviewed_and_approved() {
-        let d = validate_grants_for(
-            Some("@ryu/tokenmaxxing"),
-            &scopes(&[
-                "native:haptics",
-                "native:notifications",
-                "native:live_activities",
-                "notifications:send",
-                "storage:kv",
-            ]),
-        );
-        assert!(d.all_approved());
-        assert_eq!(d.approved.len(), 5);
-        assert!(d.denied.is_empty());
-    }
-
-    #[test]
-    fn unknown_grant_is_denied_and_blocks() {
-        // Neither allowlisted nor owner-scoped (`filesystem` ≠ `canvas`).
-        let d = validate_grants_for(
-            Some("@ryu/canvas"),
-            &scopes(&["mcp.tools", "filesystem.write_all"]),
-        );
-        assert!(!d.all_approved());
-        assert_eq!(d.denied, vec!["filesystem.write_all".to_string()]);
-        assert_eq!(d.approved, vec!["mcp.tools".to_string()]);
-    }
-
-    #[test]
-    fn empty_grants_approve() {
-        let d = validate_grants_for(Some("@ryu/monitors"), &[]);
-        assert!(d.all_approved());
-    }
-
-    #[test]
-    fn protected_first_party_namespace_rejects_owner_squat() {
-        let owned = validate_grants_for(Some("@ryu/monitors"), &scopes(&["monitors:crud"]));
-        assert!(owned.all_approved(), "denied: {:?}", owned.denied);
-
-        let impostor = validate_grants_for(Some("com.evil.monitors"), &scopes(&["monitors:crud"]));
-        assert_eq!(impostor.denied, vec!["monitors:crud".to_string()]);
-    }
-
-    #[test]
-    fn safe_actions_namespace_rejects_owner_squat() {
-        for id in ["@ryu/safe-actions", "com.ryu.safe-actions"] {
-            let owned = validate_grants_for(Some(id), &scopes(&["safe-actions:manage"]));
-            assert!(owned.all_approved(), "{id} denied: {:?}", owned.denied);
-        }
-
-        for id in [
-            "com.evil.safe-actions",
-            "@evil/safe-actions",
-            "safe-actions",
-        ] {
-            let impostor = validate_grants_for(Some(id), &scopes(&["safe-actions:manage"]));
-            assert_eq!(
-                impostor.denied,
-                vec!["safe-actions:manage".to_string()],
-                "{id} must not squat on Safe Actions' namespace"
-            );
-        }
-    }
-
-    #[test]
-    fn manual_hook_grant_is_restricted_to_seeded_chat_title() {
-        let seeded = validate_grants_for(Some("@ryu/chat-title"), &scopes(&["hook:run-self"]));
-        assert!(seeded.all_approved());
-
-        let third_party =
-            validate_grants_for(Some("com.acme/chat-title"), &scopes(&["hook:run-self"]));
-        assert_eq!(third_party.denied, vec!["hook:run-self".to_string()]);
-    }
-
-    #[test]
-    fn identity_vault_scopes_are_approved() {
-        // #523: the identity-vault grant scopes must be on the built-in allowlist
-        // so a credential-read/connect flow is governed, not denied. Both are in
-        // RESERVED namespaces (`browser`, `identity`), so the reviewed entry is
-        // the only thing approving them — no app can name its way into them.
-        let d = validate_grants_for(
-            Some("@ryu/browser"),
-            &scopes(&["browser.connect", "identity.read"]),
-        );
-        assert!(d.all_approved());
-        assert_eq!(d.approved.len(), 2);
-        assert!(d.denied.is_empty());
-    }
-
-    #[test]
-    fn workflows_companion_grants_are_approved() {
-        // Crux #2: the Workflows companion's four bridge grants must all survive a
-        // runtime disable→re-enable (which re-runs `/v1/grants/validate`) instead
-        // of being dropped with GrantsDenied — which would leave the canvas unable
-        // to call anything. Post-grammar the three `workflows:*` scopes are
-        // owner-scoped (`@ryu/workflows` ⇒ namespace `workflows`) and
-        // `ghost:record` is a reviewed host primitive; the app must not notice.
-        let d = validate_grants_for(
-            Some("@ryu/workflows"),
-            &scopes(&[
-                "workflows:crud",
-                "workflows:runstate",
-                "workflows:catalogs",
-                "ghost:record",
-            ]),
-        );
-        assert!(d.all_approved(), "denied: {:?}", d.denied);
-        assert_eq!(d.approved.len(), 4);
-    }
-
-    #[test]
-    fn blueprint_app_grants_are_approved() {
-        // The two halves of `@ryu/blueprint`'s declared set travel through DIFFERENT
-        // rules, and asserting them together is the point: `blueprint:review` is a
-        // reviewed cross-app host capability consumed by Blueprint and Feedback Board,
-        // while `mcp:blueprint` is in the reserved `mcp` namespace and can only ever be
-        // approved by its explicit entry. A change that cleans up either one breaks
-        // enable, because `enable_app` demands `all_approved` and fails the whole app
-        // on a single denial — the app installs, and then has no sidecar or MCP tools.
-        let d = validate_grants_for(
-            Some("@ryu/blueprint"),
-            &scopes(&["blueprint:review", "mcp:blueprint"]),
-        );
-        assert!(d.all_approved(), "denied: {:?}", d.denied);
-        assert_eq!(d.approved.len(), 2);
-
-        // The capability is deliberately reusable by another first-party consumer.
-        let consumer =
-            validate_grants_for(Some("@ryu/feedback-board"), &scopes(&["blueprint:review"]));
-        assert!(consumer.all_approved(), "denied: {:?}", consumer.denied);
-    }
-
-    // ── capability grammar, against the REAL gateway policy ──────────────────
-
-    /// **Requirement-5 regression proof.** Every capability string that used to
-    /// be hand-listed in `default_grant_allowlist()` — including the 14 per-app
-    /// companion scopes the grammar retired — paired with the manifest id that
-    /// actually declares it. Each must still validate, whether it now passes via
-    /// the owner-scoped rule or the retained host-primitive vocabulary.
-    ///
-    /// This is a **frozen historical table**, deliberately restated rather than
-    /// derived: removing entries from the built-in list is the goal, and a
-    /// derived table would shrink alongside it and stop proving anything. The
-    /// fixture-driven `every_builtin_fixture_grant_is_allowlisted` below is the
-    /// forward-looking half (it catches a NEW fixture with an ungranted scope);
-    /// this one is the backward-looking half.
-    #[test]
-    fn every_pre_grammar_allowlist_entry_still_validates() {
-        // (owning manifest id, capability scope) — the id is the one that really
-        // declares the scope in `apps/core/src/plugin_manifest/fixtures/`, or a
-        // representative holder for the scopes no fixture declares.
-        let table: &[(&str, &str)] = &[
-            // tool / MCP capability scopes (host vocabulary, no declarer)
-            ("@ryu/canvas", "mcp.tools"),
-            ("@ryu/canvas", "tools.read"),
-            ("@ryu/canvas", "tools.invoke"),
-            // per-server MCP tool grants from the seeded system MCP-tool plugins
-            ("spider", "mcp:spider"),
-            ("agentbrowser", "mcp:agentbrowser"),
-            ("ghost", "mcp:ghost"),
-            ("shadow", "mcp:shadow"),
-            // declarative `http` / `command` tool plugins
-            ("exa", "tool:http-egress:api.exa.ai"),
-            ("@ryu/advisor", "tool:http-egress:127.0.0.1"),
-            ("spider", "tool:command:spider"),
-            ("rtk", "tool:command:rtk"),
-            // data scopes
-            ("@ryu/canvas", "memory.read"),
-            ("@ryu/canvas", "memory.write"),
-            ("@ryu/canvas", "spaces.read"),
-            ("@ryu/canvas", "spaces.write"),
-            ("@ryu/canvas", "files.read"),
-            // companion bridge capabilities (the 14 the grammar retired)
-            ("@ryu/monitors", "monitors:crud"),
-            ("@ryu/mail", "mail:crud"),
-            ("@ryu/finetune", "finetune:runs"),
-            ("@ryu/workflows", "workflows:crud"),
-            ("@ryu/workflows", "workflows:runstate"),
-            ("@ryu/workflows", "workflows:catalogs"),
-            ("@ryu/simulator", "simulator:control"),
-            ("@ryu/webhooks", "webhooks:crud"),
-            ("@ryu/activity", "activity:read"),
-            ("@ryu/timeline", "timeline:read"),
-            ("@ryu/calendar", "calendar:crud"),
-            ("@ryu/learning", "learning:crud"),
-            ("@ryu/approvals", "approvals:crud"),
-            ("@ryu/meetings", "meetings:crud"),
-            // cross-app / reserved-namespace holds that stay on the list
-            ("@ryu/skill-editor", "skills:crud"),
-            ("@ryu/quests", "quests:crud"),
-            ("@ryu/quests", "quests:capture"),
-            ("@ryu/approvals", "quests:crud"),
-            ("@ryu/browser", "browser:control"),
-            // model / network scopes
-            ("@ryu/canvas", "model.chat"),
-            ("@ryu/canvas", "model.embed"),
-            ("@ryu/canvas", "network.fetch"),
-            // identity-vault scopes (#523)
-            ("@ryu/browser", "browser.connect"),
-            ("@ryu/browser", "identity.read"),
-            // widget consent + companion host primitives
-            ("sample-widget", "widget:render"),
-            ("@ryu/canvas", "spaces:docs"),
-            ("@ryu/canvas", "core:list_agents"),
-            ("@ryu/canvas", "media:generate"),
-            ("@ryu/canvas", "media:transcribe"),
-            ("proof", "hook:run-agent"),
-            ("double-check", "hook:side-model"),
-            ("@ryu/workflows", "ghost:record"),
-            ("@ryu/activity", "shell:integrate"),
-            ("goal", "storage:kv"),
-            ("checklist", "chat.sendFollowUp"),
-        ];
-
-        let mut failures: Vec<String> = Vec::new();
-        for (app_id, scope) in table {
-            let d = validate_grants_for(Some(app_id), &scopes(&[scope]));
-            if !d.all_approved() {
-                failures.push(format!("{app_id} → '{scope}'"));
-            }
-        }
-        assert!(
-            failures.is_empty(),
-            "first-party capability regression: these validated before the capability \
-             grammar and must still validate (add the scope to default_grant_allowlist() \
-             if it is a host primitive, or check that the app id's last segment matches \
-             the capability namespace): {}",
-            failures.join(", ")
-        );
-    }
-
-    #[test]
-    fn third_party_app_self_grants_its_own_namespace() {
-        // The whole point: an app nobody hardcoded, declaring capabilities in its
-        // own namespace, validates — so it can actually be ENABLED (Core aborts
-        // enable with GrantsDenied on any denial) with no Gateway edit.
-        let d = validate_grants_for(
-            Some("com.acme.invoices"),
-            &scopes(&["invoices:crud", "invoices:export", "invoices.read"]),
-        );
-        assert!(d.all_approved(), "denied: {:?}", d.denied);
-        assert_eq!(d.approved.len(), 3);
-    }
-
-    #[test]
-    fn spoofed_app_id_cannot_claim_another_apps_namespace() {
-        // The named spoofing case: `com.ryu.evil` must not self-approve the
-        // Monitors app's capability. Its owner namespace is `evil`, `monitors` is
-        // not on the reviewed list any more, so it is denied outright.
-        let d = validate_grants_for(Some("com.ryu.evil"), &scopes(&["monitors:crud"]));
-        assert_eq!(d.denied, vec!["monitors:crud".to_string()]);
-        assert!(d.approved.is_empty());
-
-        // Nor by dressing the id up as a prefix/suffix of the real owner.
-        for id in [
-            "monitors.evil",
-            "@ryu/monitors.evil",
-            "com.ryu.evil-monitors",
-            "com.ryu.monitorz",
-        ] {
-            let d = validate_grants_for(Some(id), &scopes(&["monitors:crud"]));
-            assert_eq!(
-                d.denied,
-                vec!["monitors:crud".to_string()],
-                "'{id}' must not reach the monitors namespace"
-            );
-        }
-    }
-
-    #[test]
-    fn sidecar_process_is_never_approved_by_any_caller() {
-        // Handoff §8 + requirement 3: running an unsandboxed managed process from
-        // a manifest is arbitrary code execution. It is on no default allowlist,
-        // and `sidecar` is reserved so no manifest id can name its way into it.
-        for id in [
-            "@ryu/monitors",
-            "com.evil.sidecar",
-            "sidecar",
-            "com.ryu.sidecar",
-        ] {
-            let d = validate_grants_for(Some(id), &scopes(&["sidecar:process"]));
-            assert_eq!(
-                d.denied,
-                vec!["sidecar:process".to_string()],
-                "'{id}' must not self-approve sidecar:process"
-            );
-        }
-    }
-
-    #[test]
-    fn reserved_host_namespaces_are_not_self_grantable() {
-        // A privileged scope that is NOT on the reviewed list stays denied even
-        // for an app that named itself after the namespace — the fence that keeps
-        // the grammar from loosening the host-primitive set.
-        let cases: &[(&str, &str)] = &[
-            ("com.evil.memory", "memory.purge"),
-            ("com.evil.model", "model.finetune"),
-            ("com.evil.files", "files.write"),
-            ("com.evil.network", "network.listen"),
-            ("com.evil.tool", "tool:command:rm"),
-            ("com.evil.tool", "tool:http-egress:evil.example"),
-            ("com.evil.mcp", "mcp:evil"),
-            ("com.evil.identity", "identity.write"),
-            ("com.evil.core", "core:shutdown"),
-            ("com.evil.hook", "hook:pre-turn"),
-            ("com.evil.widget", "widget:inject"),
-            ("com.evil.shell", "shell:exec"),
-            ("com.evil.storage", "storage:global"),
-            ("com.evil.chat", "chat.readAll"),
-            ("com.evil.media", "media:record"),
-            ("com.evil.ghost", "ghost:replay"),
-            ("com.evil.browser", "browser:hijack"),
-            ("com.evil.spaces", "spaces:purge"),
-            ("com.evil.skills", "skills:write"),
-            ("com.evil.quests", "quests:purge"),
-            ("com.evil.self_build", "self_build:write"),
-            // The three namespaces an adversarial pass caught missing: each names
-            // a host verb that Core gates on `approved_grants`, so a miss here is
-            // not cosmetic — it is a capability the grammar hands out that the
-            // pre-grammar allowlist denied to everyone.
-            //
-            // `runtime:external` is the sharp one: it is what
-            // `external_runtime::may_provision` checks before a Community-tier
-            // plugin runs `pip install` from its own manifest.
-            ("com.evil.runtime", "runtime:external"),
-            ("runtime", "runtime:external"),
-            // `ui:send_message` posts a chat turn as the user; `ui:render`
-            // promotes a frame; `views:actions` relays a shell view intent.
-            ("com.evil.ui", "ui:send_message"),
-            ("com.evil.ui", "ui:render"),
-            ("com.evil.views", "views:actions"),
-        ];
-        let mut approved: Vec<String> = Vec::new();
-        for (app_id, scope) in cases {
-            if validate_grants_for(Some(app_id), &scopes(&[scope])).all_approved() {
-                approved.push(format!("{app_id} → '{scope}'"));
-            }
-        }
-        assert!(
-            approved.is_empty(),
-            "reserved host-primitive namespaces must never be owner-scoped: {}",
-            approved.join(", ")
-        );
-    }
-
-    #[test]
-    fn env_override_parses_and_replaces_the_default_list() {
-        // The operator override keeps working as an override/extension. Parsed
-        // through the same helper the process cache uses; the cache itself is a
-        // `OnceLock`, so we exercise the policy with the parsed value directly
-        // rather than mutating process env from a parallel test.
-        assert_eq!(
-            parse_grant_allowlist_env(""),
-            None,
-            "blank ⇒ built-in default"
-        );
-        assert_eq!(parse_grant_allowlist_env("   \n"), None);
-        let parsed = parse_grant_allowlist_env("sidecar:process, mcp.tools\nmemory.read")
-            .expect("non-blank value parses");
-        assert_eq!(
-            parsed,
-            scopes(&["sidecar:process", "mcp.tools", "memory.read"])
-        );
-
-        // An override CAN approve a reserved scope the built-in default refuses —
-        // that is the point of an operator escape hatch, and it stays explicit
-        // (an exact scope, not an un-reserved family).
-        let reserved = reserved_namespaces();
-        let policy = GrantPolicy {
-            allowlist: &parsed,
-            reserved_namespaces: &reserved,
-            owner_scoped: true,
-            protected_owner_ids: &[],
-        };
-        let d = ryu_gw_governance::validate_grants_for(
-            Some("@ryu/browser"),
-            &scopes(&["sidecar:process"]),
-            &policy,
-        );
-        assert!(d.all_approved(), "an explicit override entry approves");
-
-        // …and a narrowed override still denies what it left out.
-        let d = ryu_gw_governance::validate_grants_for(
-            Some("@ryu/browser"),
-            &scopes(&["browser:control"]),
-            &policy,
-        );
-        assert_eq!(d.denied, vec!["browser:control".to_string()]);
-    }
-
-    #[test]
-    fn owner_scoped_env_toggle_parses_off_words_only() {
-        for off in ["0", "false", "no", "off", " OFF ", "False"] {
-            assert!(!parse_owner_scoped_env(off), "'{off}' must disable");
-        }
-        for on in ["1", "true", "yes", "", "banana"] {
-            assert!(parse_owner_scoped_env(on), "'{on}' must leave it on");
-        }
-
-        // With the rule off, the gateway is back to a pure allowlist: an app's
-        // own namespace is no longer enough.
-        let allow = default_grant_allowlist();
-        let reserved = reserved_namespaces();
-        let strict = GrantPolicy {
-            allowlist: &allow,
-            reserved_namespaces: &reserved,
-            owner_scoped: false,
-            protected_owner_ids: &[],
-        };
-        let d = ryu_gw_governance::validate_grants_for(
-            Some("@ryu/monitors"),
-            &scopes(&["monitors:crud"]),
-            &strict,
-        );
-        assert_eq!(d.denied, vec!["monitors:crud".to_string()]);
-    }
-
-    #[test]
-    fn default_allowlist_holds_no_retired_per_app_scope() {
-        // Tripwire against re-growing the list one app at a time. If a first-party
-        // capability is denied, fix the id/namespace match or classify it as a host
-        // primitive — do not paste the string back in.
-        let allow = default_grant_allowlist();
-        let retired = [
-            "monitors:crud",
-            "finetune:runs",
-            "simulator:control",
-            "webhooks:crud",
-            "activity:read",
-            "timeline:read",
-            "calendar:crud",
-            "learning:crud",
-            "approvals:crud",
-            "meetings:crud",
-        ];
-        let regrown: Vec<&str> = retired
-            .iter()
-            .copied()
-            .filter(|scope| allow.iter().any(|a| a.eq_ignore_ascii_case(scope)))
-            .collect();
-        assert!(
-            regrown.is_empty(),
-            "these are owner-scoped and must NOT be hardcoded again: {regrown:?}"
-        );
-    }
-
-    /// Drift tripwire: every grant a **seeded built-in** fixture declares must
-    /// validate *for that fixture's own id*. Core's enable path
-    /// (`plugins/lifecycle.rs`) sends an app's full `permission_grants` set —
-    /// with its manifest id as `app_id` — through `/v1/grants/validate` on every
-    /// enable, including a runtime disable→re-enable, so a declared grant that
-    /// neither the allowlist nor the owner-scoped rule approves is denied with
-    /// GrantsDenied and the app cannot re-enable.
-    ///
-    /// Feeding the fixture's real `id` (not `None`) is what makes this the
-    /// forward-looking half of the requirement-5 proof: a new app whose
-    /// capability namespace does not match its id fails HERE, at the same place
-    /// an unlisted host primitive does.
-    ///
-    /// Rather than restate the grant set (which would silently pass when a NEW
-    /// fixture adds an unlisted grant — the exact drift this guards), the test
-    /// READS the fixtures Core compiles in (`apps/core/src/plugin_manifest/
-    /// fixtures/*.manifest.json`) and asserts `validate_grants` approves each
-    /// declared grant. This also enforces handoff §8 automatically: a fixture that
-    /// declared `sidecar:process` (or any other unlisted scope) would fail here.
-    ///
-    /// `sample.manifest.json` is excluded: it is a test-only demo, not in
-    /// `SEED_MANIFESTS`, so it is never enabled at runtime and its file-read/
-    /// web-search scopes must NOT loosen the marketplace-publish allowlist.
-    ///
-    /// Read at runtime (not `include_str!`, which can't cross crates cleanly) and
-    /// skipped when the fixtures dir is absent, so a separately-vendored gateway
-    /// (no sibling `apps/core`) still tests green — mirrors the core companion-pair
-    /// test's skip-if-absent posture.
-    #[test]
-    fn every_builtin_fixture_grant_is_allowlisted() {
-        // Built-in manifests live in TWO homes and BOTH must be scanned. The packaged
-        // ones moved to `apps-store/<x>/manifest.json` /
-        // `plugins-store/{plugins,lsp,external_plugins}/<x>/manifest.json`
-        // (Core `include_str!`s them directly; the duplicate fixture copies are gone),
-        // leaving only the ~13 Core-only manifests in `fixtures/`.
-        //
-        // Scanning `fixtures/` alone would still PASS — on 13 files instead of 71 —
-        // because every remaining orphan happens to carry an allowlisted grant block.
-        // That is a silent 58-manifest hole in a grant check, which is precisely what
-        // the `checked_files > 0` guard below cannot catch. Hence both roots.
-        let gateway = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let mut manifest_paths: Vec<std::path::PathBuf> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(gateway.join("../core/src/plugin_manifest/fixtures"))
-        {
-            manifest_paths.extend(entries.flatten().map(|e| e.path()).filter(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.ends_with(".manifest.json"))
-            }));
-        }
-        for root in ["apps-store", "plugins-store"] {
-            if let Ok(entries) = std::fs::read_dir(gateway.join("../..").join("generated/ryu-runtime").join(root)) {
-                manifest_paths.extend(
-                    entries
-                        .flatten()
-                        .map(|e| e.path().join("manifest.json"))
-                        .filter(|p| p.is_file()),
-                );
-            }
-        }
-        if manifest_paths.is_empty() {
-            // Vendored gateway without sibling `apps/core` or package roots.
-            return;
-        }
-        manifest_paths.sort();
-
-        let mut checked_files = 0;
-        let mut checked_grants = 0;
-        let mut failures: Vec<String> = Vec::new();
-
-        for path in manifest_paths {
-            // Name the OWNING package (`plugins-store/plugins/exa/manifest.json` -> `exa`), not
-            // the bare `manifest.json`, so a failure message still identifies the app.
-            let name = if path.file_name().and_then(|n| n.to_str()) == Some("manifest.json") {
-                path.parent()
-                    .and_then(|p| p.file_name())
-                    .map(|n| format!("{}.manifest.json", n.to_string_lossy()))
-                    .unwrap_or_else(|| path.display().to_string())
-            } else {
-                path.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string())
-            };
-            if name == "sample.manifest.json" {
-                continue; // test-only demo, not seeded (see doc comment)
-            }
-            let raw = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("fixture {} unreadable: {e}", path.display()));
-            let manifest: Value = serde_json::from_str(&raw)
-                .unwrap_or_else(|e| panic!("fixture {name} is not valid JSON: {e}"));
-            let Some(grants) = manifest.get("permission_grants").and_then(Value::as_array) else {
-                continue; // no declared grants
-            };
-            // The id is load-bearing here: it is the subject of the owner-scoped
-            // rule. A fixture without one cannot owner-scope anything.
-            let app_id = manifest
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or_else(|| panic!("fixture {name} declares grants but has no `id`"));
-            checked_files += 1;
-            let declared: Vec<String> = grants
-                .iter()
-                .filter_map(|g| g.as_str().map(str::to_string))
-                .collect();
-            let decision = validate_grants_for(Some(app_id), &declared);
-            for denied in decision.denied {
-                // Community managed-sidecar, MCP-server, Scrapling, and Pi-extension
-                // packages intentionally declare operator-only grants. They must
-                // stay absent from the default allowlist; the dedicated
-                // reserved-namespace tests below pin that fail-closed policy.
-                // This fixture audit covers the safe host vocabulary, not operator
-                // opt-ins. Core-tier packages may still use the host gate directly.
-                if matches!(
-                    denied.as_str(),
-                    "sidecar:process" | "mcp:server" | "mcp:scrapling" | "pi:extension"
-                ) {
-                    continue;
-                }
-                failures.push(format!("{name} ({app_id}): '{denied}'"));
-            }
-            checked_grants += declared.len();
-        }
-
-        assert!(
-            failures.is_empty(),
-            "seeded built-in fixtures declare grants that neither default_grant_allowlist() nor \
-             the owner-scoped rule approves (a runtime disable→re-enable would fail with \
-             GrantsDenied). Either the capability namespace does not match the last segment of \
-             the app's id, or the scope is a host primitive that must be added to the allowlist \
-             (and, for `sidecar:process`, removed from the fixture per handoff §8): {}",
-            failures.join(", ")
-        );
-        // Guard against a vacuous pass: the dir existed, so we must have parsed at
-        // least a few grant-bearing fixtures.
-        assert!(
-            checked_files > 0 && checked_grants > 0,
-            "fixtures dir resolved but no grant-bearing fixtures were read \
-             (checked_files={checked_files}, checked_grants={checked_grants})"
-        );
-    }
-
-    #[test]
-    fn sign_then_verify_roundtrips() {
-        let manifest = json!({"id": "acme/widget", "version": "1.0.0", "grants": ["mcp.tools"]});
-        let sig = sign_manifest(&manifest);
-        assert!(verify_manifest(&manifest, &sig, None));
-    }
-
-    #[test]
-    fn explicit_public_key_verifies() {
-        let manifest = json!({"id": "x"});
-        let sig = sign_manifest(&manifest);
-        let pk = public_key_b64();
-        assert!(verify_manifest(&manifest, &sig, Some(&pk)));
-    }
-
-    #[test]
-    fn malformed_pinned_public_key_fails_verify() {
-        // The gateway wrapper resolves a caller-pinned public key; a malformed one
-        // must return false (unverifiable), not fall through to the process key.
-        let manifest = json!({"id": "x"});
-        let sig = sign_manifest(&manifest);
-        assert!(!verify_manifest(&manifest, &sig, Some("not-base64!!!")));
-    }
-
-    #[test]
-    fn persist_then_read_signing_key_roundtrips() {
-        // A generated key persisted to disk must read back as the SAME key, so a
-        // signature made before a restart still verifies after (the dev-persist
-        // path that closes the "ephemeral key dies on bounce" gap). We exercise
-        // the helpers directly since `signing_key()` is a process-wide OnceLock.
-        let mut csprng = rand::rngs::OsRng;
-        let key = SigningKey::generate(&mut csprng);
-        let dir = std::env::temp_dir().join(format!("ryu-govtest-{}", std::process::id()));
-        let path = dir.join("marketplace-signing-key");
-
-        assert!(persist_signing_key(&path, &key), "persist should succeed");
-        let loaded = read_persisted_signing_key(&path).expect("read back the key");
-
-        // Same public key ⇒ same verifying identity across a simulated restart.
-        assert_eq!(
-            loaded.verifying_key().to_bytes(),
-            key.verifying_key().to_bytes()
-        );
-        // A signature made with the original verifies against the reloaded key.
-        let manifest = json!({"id": "acme/widget", "version": "1.0.0"});
-        let sig = B64.encode(
-            key.sign(&ryu_gw_governance::canonical_bytes(&manifest))
-                .to_bytes(),
-        );
-        assert!(verify_manifest(
-            &manifest,
-            &sig,
-            Some(&B64.encode(loaded.verifying_key().to_bytes()))
-        ));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
+mod tests;

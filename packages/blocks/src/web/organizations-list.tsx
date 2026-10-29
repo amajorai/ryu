@@ -46,7 +46,7 @@ function DefaultOrgActions() {
 		{ label: "Policies", icon: <ShieldCheck className="h-4 w-4" /> },
 		{ label: "Gateway keys", icon: <KeyRound className="h-4 w-4" /> },
 		{ label: "Config", icon: null },
-		{ label: "Dashboard", icon: null },
+		{ label: "Console", icon: null },
 	];
 	return (
 		<>
@@ -114,38 +114,40 @@ export default function OrganizationsList({
 						const isActive = activeOrganizationId === org.id;
 						return (
 							<Card key={org.id}>
-								<CardContent className="flex items-center justify-between gap-4 py-4">
-									<div className="flex items-center gap-3">
-										<span className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
-											<Building2 className="h-5 w-5" />
-										</span>
-										<div>
-											<p className="font-medium">{org.name}</p>
-											<p className="text-muted-foreground text-xs">
-												{org.slug}
-											</p>
-										</div>
-									</div>
-									<div className="flex items-center gap-2">
-										{isActive ? (
-											<span className="flex items-center gap-1 text-muted-foreground text-sm">
-												<Check className="h-4 w-4" />
-												Active
+								<CardContent inset="none">
+									<div className="flex items-center justify-between gap-4 px-(--card-spacing) py-4">
+										<div className="flex items-center gap-3">
+											<span className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+												<Building2 className="h-5 w-5" />
 											</span>
-										) : (
-											<Button
-												onClick={() => onSetActive(org.id)}
-												size="sm"
-												variant="outline"
-											>
-												Set active
-											</Button>
-										)}
-										{renderOrgActions ? (
-											renderOrgActions(org)
-										) : (
-											<DefaultOrgActions />
-										)}
+											<div>
+												<p className="font-medium">{org.name}</p>
+												<p className="text-muted-foreground text-xs">
+													{org.slug}
+												</p>
+											</div>
+										</div>
+										<div className="flex items-center gap-2">
+											{isActive ? (
+												<span className="flex items-center gap-1 text-muted-foreground text-sm">
+													<Check className="h-4 w-4" />
+													Active
+												</span>
+											) : (
+												<Button
+													onClick={() => onSetActive(org.id)}
+													size="sm"
+													variant="outline"
+												>
+													Set active
+												</Button>
+											)}
+											{renderOrgActions ? (
+												renderOrgActions(org)
+											) : (
+												<DefaultOrgActions />
+											)}
+										</div>
 									</div>
 								</CardContent>
 							</Card>

@@ -1,9 +1,9 @@
 // Unit tests for the launch update-check reader (core/update.ts). It issues one
 // GET /api/update/check and maps the snake_case wire shape to a trimmed
 // UpdateNotice, resolving null on ANY failure (non-2xx, thrown fetch, timeout) so a
-// startup notice can never block or crash the shell. Global fetch is stubbed and
-// restored per test — the same seam cli.api.test.ts uses — so nothing touches the
-// network.
+// startup notice can never block or crash the shell. Global fetch forwards to an
+// ephemeral loopback HTTP provider and is restored per test; no external node is
+// contacted.
 
 import { afterEach, expect, test } from "bun:test";
 import type { ApiTarget } from "@ryuhq/core-client/client";
@@ -12,16 +12,45 @@ import { fetchUpdateCheck } from "../core/update.ts";
 const target: ApiTarget = { url: "http://node:7980", token: "node-secret" };
 const realFetch = globalThis.fetch;
 
+type UpdateHttpHandler = (request: Request) => Promise<Response> | Response;
+
+function startUpdateNode(impl: UpdateHttpHandler) {
+	return Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch: impl,
+	});
+}
+
+const servers: ReturnType<typeof startUpdateNode>[] = [];
+
 afterEach(() => {
 	globalThis.fetch = realFetch;
+	for (const server of servers.splice(0)) {
+		server.stop(true);
+	}
 });
 
-function stubFetch(impl: () => Promise<Response> | Response): string[] {
+function stubFetch(impl: UpdateHttpHandler): string[] {
 	const calls: string[] = [];
-	globalThis.fetch = ((input: RequestInfo | URL) => {
-		calls.push(String(input));
-		return Promise.resolve(impl());
-	}) as typeof fetch;
+	const server = startUpdateNode(impl);
+	servers.push(server);
+	const providerUrl = server.url;
+	globalThis.fetch = Object.assign(
+		(...args: Parameters<typeof realFetch>) => {
+			calls.push(String(args[0]));
+			const request = new Request(...args);
+			const url = new URL(request.url);
+			return realFetch.call(
+				globalThis,
+				new Request(
+					new URL(`${url.pathname}${url.search}`, providerUrl),
+					request
+				)
+			);
+		},
+		{ preconnect: realFetch.preconnect }
+	);
 	return calls;
 }
 
@@ -72,8 +101,8 @@ test("returns null on a non-2xx response (never throws)", async () => {
 });
 
 test("returns null when fetch itself rejects (Core down / no network)", async () => {
-	globalThis.fetch = (() =>
-		Promise.reject(new Error("connection refused"))) as unknown as typeof fetch;
+	stubFetch(() => new Response("{}", { status: 200 }));
+	servers[0]?.stop(true);
 	expect(await fetchUpdateCheck(target)).toBeNull();
 });
 
@@ -84,11 +113,10 @@ test("returns null when the body is not valid JSON", async () => {
 
 test("sends the bearer token when the target carries one", async () => {
 	const seenAuth: (string | null)[] = [];
-	globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
-		const headers = new Headers(init?.headers);
-		seenAuth.push(headers.get("authorization"));
-		return Promise.resolve(new Response("{}", { status: 200 }));
-	}) as unknown as typeof fetch;
+	stubFetch((request) => {
+		seenAuth.push(request.headers.get("authorization"));
+		return new Response("{}", { status: 200 });
+	});
 	await fetchUpdateCheck(target);
 	expect(seenAuth[0]).toBe("Bearer node-secret");
 });

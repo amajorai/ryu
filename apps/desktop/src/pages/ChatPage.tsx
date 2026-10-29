@@ -1,30 +1,45 @@
+import "./ChatPage.css";
 import { useChat } from "@ai-sdk/react";
 import { ClipboardIcon, Share08Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { jsonResponseDocumentSchema } from "@ryu/app-host/json-values";
+import {
+	modelContextParts,
+	useModelContextStore,
+} from "@ryu/app-host/model-context";
+import { CLOUD_TASKS_BOX_BACKEND_FLAG } from "@ryu/auth/lib/feature-flags";
 import type {
 	AcpConfigOption,
 	StreamedAcpConfig,
 	StreamedAcpControl,
 } from "@ryu/blocks/composer/composer-acp-sections.ts";
 import { createComposerDirectory } from "@ryu/blocks/composer/composer-directory.ts";
+import { AgentUiStateHostContext } from "@ryu/blocks/desktop/agent-elements/agent-ui/state-host-context.tsx";
 import { answerNowDelayMs } from "@ryu/blocks/desktop/agent-elements/answer-now.ts";
 import {
 	ArtifactHostContext,
 	type ArtifactHostValue,
-	type HostArtifact,
+	type NativeArtifactObservation,
 } from "@ryu/blocks/desktop/agent-elements/artifact-host-context.tsx";
-import { deriveContextUsage } from "@ryu/blocks/desktop/agent-elements/context-usage.tsx";
+import {
+	type ContextUsage,
+	deriveContextUsage,
+} from "@ryu/blocks/desktop/agent-elements/context-usage.tsx";
 import type { GoalCompletion } from "@ryu/blocks/desktop/agent-elements/goal-message.ts";
 import { extractMemoryCitations } from "@ryu/blocks/desktop/agent-elements/memory-citations.ts";
 import { isMessageReactionAction } from "@ryu/blocks/desktop/agent-elements/message-action-types.ts";
 import type { MessageReadReceiptState } from "@ryu/blocks/desktop/agent-elements/message-read-receipt.tsx";
+import { ModelContextAttachments } from "@ryu/blocks/desktop/agent-elements/model-context-attachments.tsx";
+import { modelSwitchCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import { formatAsyncQuestionAnswer } from "@ryu/blocks/desktop/agent-elements/question/async-question.ts";
 import {
 	replyThreadDescription,
 	shouldSuggestReplyThread,
 } from "@ryu/blocks/desktop/agent-elements/reply-thread.ts";
-import { mergeResumedReplyMessage } from "@ryu/blocks/desktop/agent-elements/resume-merge.ts";
-import type { FileEditUndoPlan } from "@ryu/blocks/desktop/agent-elements/turn-end-cards";
+import { mergeResumedTurnMessage } from "@ryu/blocks/desktop/agent-elements/resume-merge.ts";
+import type { FileEditUndoPlan } from "@ryu/blocks/desktop/agent-elements/turn-end-cards.ts";
 import type {
+	AgentChatProps,
 	MentionItem as AgentElementMentionItem,
 	AgentMessageContext,
 	AgentMessageIdentity,
@@ -36,6 +51,7 @@ import type {
 	MessageReply,
 	SelectionActionContext,
 } from "@ryu/blocks/desktop/agent-elements/types.ts";
+import { nativeSdkSchemaAdmits } from "@ryu/blocks/desktop/agent-elements/utils/native-sdk-admission.ts";
 import {
 	WidgetHostContext,
 	type WidgetHostServices,
@@ -48,7 +64,13 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
+import {
+	isNativeNumber,
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { observeConversationMessageEvent } from "@ryuhq/core-client/conversation-message-event.ts";
 import {
 	clearGoal,
 	type GoalState,
@@ -56,11 +78,13 @@ import {
 	pauseGoal,
 	resumeGoal,
 	setGoal,
-} from "@ryuhq/core-client/goals";
+} from "@ryuhq/core-client/goals.ts";
 import {
 	createRealtimeClientId,
 	type JoinAck,
-} from "@ryuhq/core-client/realtime";
+	type RealtimeHandlers,
+} from "@ryuhq/core-client/realtime.ts";
+import { useQueryClient } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { DefaultChatTransport } from "ai";
 import {
@@ -73,6 +97,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { z } from "zod";
 import { AgentChat } from "@/components/agent-elements/agent-chat.tsx";
 import {
 	EmptyStateHeader,
@@ -94,6 +119,10 @@ import type {
 import type { QueueBarProps } from "@/components/agent-elements/queue/queue-bar.tsx";
 import { formatQuotePrefix } from "@/components/agent-elements/quote.tsx";
 import { openExternal, previewLinkMetadata } from "@/lib/tauri-bridge.ts";
+import {
+	AgentActivityPanel,
+	AgentActivityTrigger,
+} from "@/src/components/agents/AgentActivityPanel.tsx";
 import { AppLaunchpad } from "@/src/components/chat/AppLaunchpad.tsx";
 import { BotChatHeader } from "@/src/components/chat/BotChatHeader.tsx";
 import {
@@ -115,9 +144,25 @@ import {
 	ForkDialog,
 } from "@/src/components/chat/ForkDialog.tsx";
 import { InlineArtifact } from "@/src/components/chat/InlineArtifact.tsx";
+import {
+	McpFormOwnerProvider,
+	McpForms,
+} from "@/src/components/chat/McpForms.tsx";
 import { MergedThreadPicker } from "@/src/components/chat/MergedThreadPicker.tsx";
+import {
+	chatParameterModel,
+	useModelParametersComposer,
+} from "@/src/components/chat/ModelParametersComposer.tsx";
 import type { ActivePermission } from "@/src/components/chat/PermissionPrompt.tsx";
+import {
+	RewindDialog,
+	type RewindPreselect,
+} from "@/src/components/chat/RewindDialog.tsx";
+import { RunTracePanel } from "@/src/components/chat/RunTracePanel.tsx";
+import { SessionsPopover } from "@/src/components/chat/SessionsPopover.tsx";
 import { ShareConversationDialog } from "@/src/components/chat/ShareConversationDialog.tsx";
+import { SUBSCRIPTION_RUN_QUERY_KEY } from "@/src/components/chat/SubscriptionRunPanel.tsx";
+import { ThreadHierarchyBar } from "@/src/components/chat/ThreadHierarchyBar.tsx";
 import { WorkspaceBar } from "@/src/components/chat/WorkspaceBar.tsx";
 import { WorkspaceRequiredDialog } from "@/src/components/chat/WorkspaceRequiredDialog.tsx";
 import { PluginComposerBarControls } from "@/src/components/composer/PluginComposerBarControls.tsx";
@@ -130,6 +175,11 @@ import {
 import { patchForFile } from "@/src/components/diffs/RichPatchDiff.tsx";
 import { CHAT_REFERENCE_DRAG_MIME } from "@/src/components/layout/tabDnd.tsx";
 import {
+	type ImageEditorAsset,
+	ImageEditorDialog,
+} from "@/src/components/media/ImageEditorDialog.tsx";
+import { fetchEditableImage } from "@/src/components/media/image-editor-utils.ts";
+import {
 	extractSubagents,
 	SubagentActivityChips,
 	type SubagentSummary,
@@ -140,23 +190,28 @@ import {
 	PanelToggleButtons,
 	WorkspacePanels,
 } from "@/src/components/panels/WorkspacePanels.tsx";
-import { VoiceModeSurface } from "@/src/components/voice/VoiceModeSurface.tsx";
+import { useVoiceLiveCall } from "@/src/components/voice/VoiceCallComposer.tsx";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useSystemStatusContext } from "@/src/contexts/SystemStatusContext.tsx";
+import { useTabBoundNode } from "@/src/contexts/TabNodeChatHistory.tsx";
 import {
 	useCurrentTabId,
 	useIsActiveTab,
 	useTabSelector,
 } from "@/src/contexts/TabsContext.tsx";
 import { useTitleBar } from "@/src/contexts/TitleBarContext.tsx";
+import { useAppShellPath } from "@/src/contributions/app-shell-routes.ts";
 import { AppWidget } from "@/src/contributions/host/AppWidget.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
+import { useAgentUiStateHost } from "@/src/hooks/useAgentUiStateHost.ts";
 import { useAgentUsage } from "@/src/hooks/useAgentUsage.ts";
 import { useApps } from "@/src/hooks/useApps.ts";
 import { useChatPickerPlacement } from "@/src/hooks/useChatPickerPlacement.ts";
 import { useChatSearch } from "@/src/hooks/useChatSearch.ts";
+import { CLOUD_TASK_QUERY_KEY } from "@/src/hooks/useCloudTask.ts";
+import { useCloudTaskSelection } from "@/src/hooks/useCloudTaskSelection.ts";
 import { useComposerAutoQueue } from "@/src/hooks/useComposerAutoQueue.ts";
 import {
 	useComposerDraftAutosave,
@@ -173,6 +228,7 @@ import {
 	useComposioToolkits,
 } from "@/src/hooks/useComposioCatalog.ts";
 import { useEngineModels } from "@/src/hooks/useEngineModels.ts";
+import { useFeatureFlag } from "@/src/hooks/useFeatureFlag.ts";
 import {
 	invalidateGitStatus,
 	invalidateWorktreeDiff,
@@ -198,6 +254,10 @@ import {
 } from "@/src/hooks/usePluginContributions.ts";
 import { useProjectlessTaskFolder } from "@/src/hooks/useProjectlessTaskFolder.ts";
 import {
+	useConversationProviderAccount,
+	useProviderAccountUsage,
+} from "@/src/hooks/useProviderAccountUsage.ts";
+import {
 	setQueueDrainMode,
 	useQueueDrainMode,
 } from "@/src/hooks/useQueueDrainMode.ts";
@@ -207,18 +267,21 @@ import { useSpeechPlayback } from "@/src/hooks/useSpeechPlayback.ts";
 import { useTeams } from "@/src/hooks/useTeams.ts";
 import { useVoiceMode } from "@/src/hooks/useVoiceMode.ts";
 import { useWorkflows } from "@/src/hooks/useWorkflows.ts";
+import { toastActionError } from "@/src/lib/action-error.ts";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
 import {
+	acpAuthAwaitsVerification,
 	authenticateAgent,
 	fetchAcpConfig,
 	respondPermission,
+	respondQuestion,
 } from "@/src/lib/api/acp.ts";
 import type {
 	AgentSummary,
 	ConversationParticipant,
 } from "@/src/lib/api/agents.ts";
 import { fetchAgent, fetchParticipants } from "@/src/lib/api/agents.ts";
-import type { BtwEntry, BtwMessage } from "@/src/lib/api/btw.ts";
+import type { BtwEntry } from "@/src/lib/api/btw.ts";
 import { askBtw } from "@/src/lib/api/btw.ts";
 import {
 	answerNowChat,
@@ -226,14 +289,45 @@ import {
 	chatHeaders,
 	chatStreamResumeUrl,
 	chatStreamUrl,
+	fetchComposerPrediction,
 	fetchNextPromptSuggestions,
 	startProactiveOpening,
 } from "@/src/lib/api/chat.ts";
+import type {
+	CheckpointRestoreMode,
+	CheckpointRestoreResult,
+} from "@/src/lib/api/chat-checkpoints.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import { apiUrl, makeHeaders } from "@/src/lib/api/client.ts";
-import { deleteDraft, listDrafts, saveDraft } from "@/src/lib/api/drafts.ts";
+import {
+	ApiError,
+	accountJwtForTarget,
+	apiUrl,
+	makeHeaders,
+} from "@/src/lib/api/client.ts";
+import { startCloudTaskPrompt } from "@/src/lib/api/cloud-tasks.ts";
+import {
+	type ConversationContextHandoff,
+	type ConversationModelChange,
+	getConversationModelSelection,
+	parseConversationContextHandoff,
+	parseConversationContextHandoffFrame,
+	parseConversationModelSelectionFrame,
+	type RecordConversationModelSelectionInput,
+	recordConversationModelSelection,
+} from "@/src/lib/api/conversation-model-selection.ts";
+import {
+	DRAFTS_BUTTON_ID,
+	DRAFTS_PLUGIN_ID,
+	deleteDraft,
+	listDrafts,
+	saveDraft,
+} from "@/src/lib/api/drafts.ts";
 import { reverseGitEdits } from "@/src/lib/api/git.ts";
-import { generateImage } from "@/src/lib/api/images.ts";
+import {
+	generateImage,
+	generateImageResize,
+	type ImageResizeRequest,
+} from "@/src/lib/api/images.ts";
 import {
 	getModelContextWindow,
 	getModelLaunchConfig,
@@ -245,11 +339,14 @@ import {
 	pluginHostInvoke,
 } from "@/src/lib/api/plugins.ts";
 import {
+	getDesktopTtsEngineOptions,
 	getDesktopTtsPrefs,
 	getVoiceInputPrefs,
 	getVoiceModeReadbackPrefs,
 	subscribePreferenceChanges,
+	trustWorkspaces,
 	VOICE_PREF_KEY,
+	WORKSPACE_TRUST_WARNING_FIELD,
 } from "@/src/lib/api/preferences.ts";
 import {
 	fetchDocument,
@@ -261,7 +358,8 @@ import {
 	saveTemporaryChat,
 	TEMPORARY_CONTEXT_FLAG,
 } from "@/src/lib/api/temporary-chat.ts";
-import { fileToDataUrl, stageImageUpload } from "@/src/lib/api/uploads.ts";
+import { fileToDataUrl } from "@/src/lib/api/uploads.ts";
+import { usageSnapshotFromReading } from "@/src/lib/api/usage.ts";
 import { generateVideo } from "@/src/lib/api/video.ts";
 import { speakText, transcribeAudio } from "@/src/lib/api/voice.ts";
 import {
@@ -269,9 +367,8 @@ import {
 	widgetCallTool,
 	widgetSetState,
 } from "@/src/lib/api/widgets.ts";
-import type { Artifact } from "@/src/lib/artifacts.ts";
-import { artifactFromPayload } from "@/src/lib/artifacts.ts";
 import { hydrateHistoryMessage } from "@/src/lib/chat-history-hydrate.ts";
+import { createMessageDecorator } from "@/src/lib/chat-message-decoration.ts";
 import {
 	buildVersions,
 	extractAssistantText,
@@ -279,11 +376,34 @@ import {
 } from "@/src/lib/chat-message-selectors.ts";
 import { readDraggedChatReference } from "@/src/lib/chat-reference-drag.ts";
 import {
+	type ResumedTurnSnapshot,
+	readResumedTurn,
+	readResumeReplayHeader,
+} from "@/src/lib/chat-resume-stream.ts";
+import {
 	modelRoutingFieldsForInterface,
 	responseModeForInterface,
 } from "@/src/lib/chat-routing.ts";
 import { getChatTabBusySpeed } from "@/src/lib/chat-tab-busy-speed.ts";
-import { textToDataUrl } from "@/src/lib/composer/attachments.ts";
+import {
+	CLIPS_QUICK_ATTACH_EVENT,
+	parseClipsQuickAttachRequest,
+} from "@/src/lib/clips-quick-attach.ts";
+import {
+	backendPromptFields,
+	useCloudTaskBackendChoices,
+} from "@/src/lib/cloud-task-backend-choice.ts";
+import {
+	cloudTaskBlockReason,
+	cloudTaskRequestFields,
+	managedCloudExecutor,
+	useCloudTaskSelections,
+} from "@/src/lib/cloud-task-selection.ts";
+import {
+	IMAGE_AND_TEXT_ACCEPT,
+	stageImageAndTextFiles,
+	textToDataUrl,
+} from "@/src/lib/composer/attachments.ts";
 import {
 	conversationTargetDecision,
 	readLastUsedAgentId,
@@ -302,18 +422,33 @@ import {
 	useBrowserProviderSnapshot,
 } from "@/src/lib/extension-host.ts";
 import { basename, readProjectFile } from "@/src/lib/files.ts";
+import {
+	answeredPermissionParts,
+	permissionPartKey,
+	useAnsweredPermissionPrune,
+	useLiveTabPublish,
+} from "@/src/lib/interface-live-tab.ts";
+import {
+	type ArtifactView,
+	artifactFromSdkObservation,
+} from "@/src/lib/live-artifacts.ts";
 import { appMentionVisual } from "@/src/lib/mentions/app-visuals.tsx";
 import {
 	buildComposioMentionSources,
 	buildMentionGroups,
 } from "@/src/lib/mentions/candidates.ts";
 import type { SelectedHumanMention } from "@/src/lib/mentions/human-notification.ts";
+import {
+	mentionedMcpResources,
+	mentionSearchQuery,
+} from "@/src/lib/mentions/mcp-resources.ts";
 import type { MentionSources } from "@/src/lib/mentions/types.ts";
 import {
 	getAgentModel,
 	modelsForAgent,
 	setAgentModel,
 } from "@/src/lib/models.ts";
+import type { NativeArtifactContentFetchOperation } from "@/src/lib/native-artifact-io-abi.ts";
 import {
 	extractPlans,
 	type PlanSnapshot,
@@ -336,10 +471,15 @@ import {
 	STATS_PLUGIN_ID,
 } from "@/src/lib/plugin-chat-features.ts";
 import { useProductMode } from "@/src/lib/product-mode.ts";
-import { getRealtimeJwt, getRealtimeUserId } from "@/src/lib/realtime/jwt.ts";
+import { observeChatPresence } from "@/src/lib/realtime/chat-presence-observation.ts";
+import { getRealtimeUserId } from "@/src/lib/realtime/jwt.ts";
 import { isRealtimeMessageEcho } from "@/src/lib/realtime/message-origin.ts";
 import { useRealtimeRoom } from "@/src/lib/realtime/use-realtime-room.ts";
-import { CHAT_RETRY_STARTED_EVENT } from "@/src/lib/reconnect-retry.ts";
+import {
+	CHAT_RECOVERY_STOP_EVENT,
+	CHAT_RETRY_STARTED_EVENT,
+	CHAT_TURN_STARTED_EVENT,
+} from "@/src/lib/reconnect-retry.ts";
 import {
 	mergeComposerCommands,
 	parseSlashCommandContribution,
@@ -349,6 +489,7 @@ import {
 	registerTabSnapshot,
 	TabTransferBlockedError,
 } from "@/src/lib/tab-transfer.ts";
+import { reportTemplateUse } from "@/src/lib/template-rewards.ts";
 import { deriveTurnComposerProgress } from "@/src/lib/turn-composer-progress.ts";
 import { messageNeedsWorkspace } from "@/src/lib/workspace-intent.ts";
 import { resolveWorkspaceFilePath } from "@/src/lib/workspace-links.ts";
@@ -359,6 +500,11 @@ import { useChatHotkeyTargets } from "@/src/store/useChatHotkeyTargets.ts";
 import { useCreateAgentDialog } from "@/src/store/useCreateAgentDialog.ts";
 import { useDockPanelRequestStore } from "@/src/store/useDockPanelRequestStore.ts";
 import { useFileTreeSearchStore } from "@/src/store/useFileTreeSearchStore.ts";
+import {
+	answeredPermissionKey,
+	isPermissionAnswered,
+	useInterfaceDetailStore,
+} from "@/src/store/useInterfaceDetailStore.ts";
 import { useMeetingRecordingStore } from "@/src/store/useMeetingRecordingStore.ts";
 import { isLocalNode } from "@/src/store/useNodeStore.ts";
 import { useQuickReplyStore } from "@/src/store/useQuickReplyStore.ts";
@@ -367,6 +513,13 @@ import {
 	sidebarTodoProgressKey,
 } from "@/src/store/useSidebarTodoProgressStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import type { WorkbenchToolOption } from "@/src/workbench/workbench-chrome.tsx";
+import { useWorkbenchDockBridge } from "@/src/workbench/workbench-dock-bridge.tsx";
+import {
+	useChatTranscriptOwner,
+	useOwnedChatMessages,
+	useStopReplacedChat,
+} from "../lib/use-chat-transcript-owner.ts";
 
 interface ChatSearchState {
 	mode: ChatSearchMode;
@@ -379,6 +532,8 @@ interface ChatSearchState {
 // believes it is idle. The endpoint 404s in-memory when nothing is running, so
 // this is deliberately cheap; the interval only has to be short enough that Stop
 // appears promptly for a turn this tab did not start.
+const realtimeEventInputSchema = z.record(z.string(), z.json());
+
 const RESUME_POLL_MS = 15_000;
 
 // How long after an explicit Stop the resume probe stays quiet, so a turn Core
@@ -388,6 +543,12 @@ const RESUME_STOP_GRACE_MS = 5000;
 // Cool-down after a resumed reader detaches, so the "stream ended" → "ready"
 // transition cannot re-probe in a tight loop.
 const RESUME_REATTACH_GRACE_MS = 1500;
+
+// Stream render cadence. The focused pane stays smooth. Unfocused panes can
+// still be on screen in a split or on the canvas, so they update a few times a
+// second instead of per chunk rather than dropping to a crawl.
+const ACTIVE_TAB_STREAM_THROTTLE_MS = 50;
+const BACKGROUND_TAB_STREAM_THROTTLE_MS = 250;
 
 // Idle gap after the last keystroke before we broadcast `typing:false` to the
 // conversation room (multi-user presence).
@@ -425,6 +586,12 @@ const LOCAL_SLASH_COMMANDS: SlashCommand[] = [
 		hint: "condition to watch for",
 		source: "local",
 	},
+	{
+		args: [],
+		name: "rewind",
+		description: "Restore code and/or conversation to before a message",
+		source: "local",
+	},
 ];
 
 // ---------------------------------------------------------------------------
@@ -454,7 +621,7 @@ export function buildPluginFlags(
 	return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
+// legacy component
 /** Fetch a created artifact's blob as text through the node API (best-effort:
  *  a failed fetch yields null, and the surface falls back to the download/open
  *  affordance rather than an error state). */
@@ -475,17 +642,88 @@ async function fetchArtifactContent(
 	}
 }
 
+/** Opaque optional native slots only; no complete author or metadata DTO claim.
+ * Lodash's installed object-like classifier owns the exact non-null `typeof
+ * object` brand, including arrays and revoked Proxy receivers. Raw parser
+ * observation never finalizes rejected inputs through a user error map. */
+interface NativeAuthorMetadataLookup {
+	readonly author?: UIMessage["metadata"];
+}
+interface NativeAuthorIdLookup {
+	readonly id?: UIMessage["metadata"];
+}
+const authorMetadataSchema =
+	z.custom<NativeAuthorMetadataLookup>(isNativeObjectLike);
+const authorIdSchema = z.custom<NativeAuthorIdLookup>(isNativeObjectLike);
+function isNativeAuthorMetadata(
+	value: UIMessage["metadata"]
+): value is NativeAuthorMetadataLookup {
+	return nativeSdkSchemaAdmits(authorMetadataSchema, value);
+}
+function isNativeAuthorIdCarrier(
+	value: UIMessage["metadata"]
+): value is NativeAuthorIdLookup {
+	return nativeSdkSchemaAdmits(authorIdSchema, value);
+}
 function messageAuthorId(message: UIMessage): string | null {
-	const metadata = (message as { metadata?: unknown }).metadata;
-	if (typeof metadata !== "object" || metadata === null) {
+	const metadata = message.metadata;
+	if (!isNativeAuthorMetadata(metadata)) {
 		return null;
 	}
-	const author = (metadata as { author?: unknown }).author;
-	if (typeof author !== "object" || author === null) {
+	const author = metadata.author;
+	if (!isNativeAuthorIdCarrier(author)) {
 		return null;
 	}
-	const id = (author as { id?: unknown }).id;
-	return typeof id === "string" && id.trim() ? id.trim() : null;
+	const id = author.id;
+	return isNativeText(id) && id.trim() ? id.trim() : null;
+}
+
+function mergeContextHandoffs(
+	current: ConversationContextHandoff[],
+	incoming: ConversationContextHandoff[]
+): ConversationContextHandoff[] {
+	// One marker per model change: an edit before the switch hands the new
+	// branch off separately, and the latest one Core sends is the thread's.
+	const byChange = new Map(
+		current.map((handoff) => [handoff.modelChangeId, handoff])
+	);
+	for (const handoff of incoming) {
+		byChange.set(handoff.modelChangeId, handoff);
+	}
+	return [...byChange.values()].sort(
+		(left, right) => left.createdAt - right.createdAt
+	);
+}
+
+/** "1M", "256K", "8K": a context window as people say it. */
+function formatContextWindow(tokens: number): string {
+	if (tokens >= 1_000_000) {
+		return `${Number((tokens / 1_000_000).toFixed(1))}M`;
+	}
+	return `${Math.round(tokens / 1000)}K`;
+}
+
+function describeContextHandoff(handoff: ConversationContextHandoff): string {
+	const messages = `${handoff.summarizedCount} earlier ${handoff.summarizedCount === 1 ? "message" : "messages"} summarized`;
+	const target = handoff.toModel ? ` for ${handoff.toModel}` : "";
+	const windows =
+		handoff.fromContext !== null && handoff.toContext !== null
+			? ` · ${formatContextWindow(handoff.fromContext)} → ${formatContextWindow(handoff.toContext)} context`
+			: "";
+	return `${messages}${target}${windows}`;
+}
+
+function mergeConversationModelChanges(
+	current: ConversationModelChange[],
+	incoming: ConversationModelChange[]
+): ConversationModelChange[] {
+	const byId = new Map(current.map((change) => [change.id, change]));
+	for (const change of incoming) {
+		byId.set(change.id, change);
+	}
+	return [...byId.values()].sort(
+		(left, right) => left.sequence - right.sequence
+	);
 }
 
 export default function ChatPage({
@@ -503,6 +741,7 @@ export default function ChatPage({
 	initialProject,
 	mergedAgentId,
 	tabWorktreeMode,
+	mcpAppHost = false,
 }: {
 	tabConversationId?: string;
 	/**
@@ -543,6 +782,8 @@ export default function ChatPage({
 	initialProject?: string;
 	/** Per-tab isolation requested by a fork destination or workspace handoff. */
 	tabWorktreeMode?: boolean;
+	/** A permanent MCP App supplies the owning conversation and hosts its composer. */
+	mcpAppHost?: boolean;
 }) {
 	const botProduct = useProductMode() === "bot";
 	// Read gateway/core reachability from the shared provider so this page and
@@ -655,7 +896,47 @@ export default function ChatPage({
 			setBottomPanelOpen(false);
 		}
 	}, [showBottomPanelToggle]);
+	// With the workbench frame mounted, the panel buttons and shortcuts show
+	// and hide the shared Right/Bottom panes; an empty Right pane opens this
+	// chat's Context when no project tool fits. Read through refs so the
+	// toggles stay stable while the workbench changes.
+	const dockBridge = useWorkbenchDockBridge();
+	const dockBridgeRef = useRef(dockBridge);
+	dockBridgeRef.current = dockBridge;
+	const chatContextPanelRef = useRef<WorkbenchToolOption | null>(null);
+	const toggleBottomPanel = useCallback(() => {
+		if (dockBridgeRef.current) {
+			dockBridgeRef.current.toggleRegion("bottom");
+		} else {
+			setBottomPanelOpen((open) => !open);
+		}
+	}, []);
+	const toggleRightPanel = useCallback(() => {
+		if (dockBridgeRef.current) {
+			const contextPanel = chatContextPanelRef.current;
+			dockBridgeRef.current.toggleRegion(
+				"right",
+				contextPanel ? [contextPanel] : []
+			);
+		} else {
+			setRightPanelOpen((open) => !open);
+		}
+	}, []);
+	const bottomPanelShown = dockBridge
+		? dockBridge.isRegionShown("bottom")
+		: bottomPanelOpen;
+	const rightPanelShown = dockBridge
+		? dockBridge.isRegionShown("right")
+		: rightPanelOpen;
 	const [shareDialogOpen, setShareDialogOpen] = useState(false);
+	const [rewindDialogOpen, setRewindDialogOpen] = useState(false);
+	const [rewindPreselect, setRewindPreselect] =
+		useState<RewindPreselect | null>(null);
+	// After rewinding past the FIRST turn the version tree cannot point at an
+	// empty thread, so the next prompt is sent as an edit of that turn.
+	const pendingRewindEditRef = useRef<string | null>(null);
+	const [imageEditorAsset, setImageEditorAsset] =
+		useState<ImageEditorAsset | null>(null);
 	const [drawesomeDialogOpen, setDrawesomeDialogOpen] = useState(false);
 	const [drawesomeSourceImage, setDrawesomeSourceImage] = useState<{
 		filename: string;
@@ -693,10 +974,61 @@ export default function ChatPage({
 	const [selectedModel, setSelectedModel] = useState<string | null>(
 		() => initialModel ?? getAgentModel(agentId)
 	);
+	const [providerModelSelection, setProviderModelSelection] = useState<Pick<
+		ConversationModelChange,
+		"modelId" | "providerId" | "providerLabel"
+	> | null>(null);
+	const [conversationModelChanges, setConversationModelChanges] = useState<
+		ConversationModelChange[]
+	>([]);
+	const providerModelSelectionRef = useRef(providerModelSelection);
+	providerModelSelectionRef.current = providerModelSelection;
+	const conversationModelChangesRef = useRef(conversationModelChanges);
+	conversationModelChangesRef.current = conversationModelChanges;
+	const [contextHandoffs, setContextHandoffs] = useState<
+		ConversationContextHandoff[]
+	>([]);
+	const contextHandoffsRef = useRef(contextHandoffs);
+	contextHandoffsRef.current = contextHandoffs;
+	// A new opaque owner is created for every semantic authority transition,
+	// including A → B → A. Credentials never become a React key.
+	const modelSelectionScope = useMemo(
+		() => ({
+			target: {
+				url: activeNode.url,
+				token: activeNode.token ?? null,
+				userJwt: activeNode.userJwt ?? null,
+			} satisfies ApiTarget,
+		}),
+		[activeNode.url, activeNode.token, activeNode.userJwt]
+	);
+	const modelSelectionScopeRef = useRef(modelSelectionScope);
+	modelSelectionScopeRef.current = modelSelectionScope;
+	const modelSelectionMountedRef = useRef(true);
+	useEffect(() => {
+		modelSelectionMountedRef.current = true;
+		return () => {
+			modelSelectionMountedRef.current = false;
+		};
+	}, []);
+	const [modelHistoryReady, setModelHistoryReady] = useState<{
+		conversationId: string;
+		scope: typeof modelSelectionScope;
+	} | null>(null);
+	const modelSelectionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+	const pendingModelSelectionRef = useRef<
+		| (RecordConversationModelSelectionInput & {
+				conversationId: string | null;
+				draftConversationId: string;
+				scope: typeof modelSelectionScope;
+		  })
+		| null
+	>(null);
 	// A streamed control can explicitly clear the model. Keep that distinction
 	// from an unset picker value so the fallback model is not reintroduced.
 	const [modelSelectionCleared, setModelSelectionCleared] = useState(false);
 	const selectedModelRef = useRef(selectedModel);
+	const ghostChatActiveRef = useRef(false);
 
 	// Image attachments — managed here so handleSend can include them in the
 	// AI SDK message and clear them after send. Seeded once from `initialImages`
@@ -720,6 +1052,11 @@ export default function ChatPage({
 				size: img.size,
 			})) ?? []
 	);
+	const clipsDraftInsertionSequence = useRef(0);
+	const [clipsDraftInsertion, setClipsDraftInsertion] = useState<{
+		id: number;
+		text: string;
+	} | null>(null);
 	const [isDragOver, setIsDragOver] = useState(false);
 	const attachmentRef = useRef({ attachedImages, isDragOver });
 	attachmentRef.current = { attachedImages, isDragOver };
@@ -814,7 +1151,15 @@ export default function ChatPage({
 			),
 		[pluginContributions.sidebar_sections]
 	);
-	const mentionableResources = useMentionableResources(contributedSections);
+	const [remoteMentionQuery, setRemoteMentionQuery] = useState<string | null>(
+		null
+	);
+	const mentionableResources = useMentionableResources(contributedSections, {
+		agentId: agentId ?? undefined,
+		query: remoteMentionQuery,
+	});
+	const remoteMentionItemsRef = useRef(mentionableResources.appItems);
+	remoteMentionItemsRef.current = mentionableResources.appItems;
 	const { installedSkills } = useSkillsCatalog();
 	const { servers: mcpServers } = useMcp();
 	const recentFolders = useWorkspaceStore((s) => s.recentFolders);
@@ -832,7 +1177,7 @@ export default function ChatPage({
 	// Announcements section (see useSystemAnnouncements) rather than as an
 	// inline overlay banner, so the composer just quietly disables here.
 
-	const composerBlocked = chatDisabled || gatewayRequiredForAgent;
+	const baseComposerBlocked = chatDisabled || gatewayRequiredForAgent;
 
 	// Long-term (cross-session) memory is opt-in per the privacy-by-default
 	// principle. Persisted locally so the choice survives restarts.
@@ -855,22 +1200,60 @@ export default function ChatPage({
 		(state) => state.clearScrollToMessage
 	);
 	const currentTabId = useCurrentTabId();
+	// The computer this tab is bound to when it is not the default one. Its
+	// chat history (and so `forkConversation`) is pinned to that computer, so a
+	// thread this tab creates or opens from its own list must open there too.
+	const tabBoundNodeName = useTabBoundNode(currentTabId)?.name;
+	const handleDraftInsertionConsumed = useCallback((id: number) => {
+		setClipsDraftInsertion((pending) => (pending?.id === id ? null : pending));
+	}, []);
+	useEffect(() => {
+		const onClipsQuickAttach = (event: Event) => {
+			if (!(event instanceof CustomEvent)) {
+				return;
+			}
+			const request = parseClipsQuickAttachRequest(event.detail);
+			if (!request || request.tabId !== currentTabId) {
+				return;
+			}
+			if (request.images.length > 0) {
+				setAttachedImages((current) => [
+					...current,
+					...request.images.map((image) => ({
+						...image,
+						mimeType: image.mimeType ?? "image/png",
+					})),
+				]);
+			}
+			if (request.prompt?.trim()) {
+				clipsDraftInsertionSequence.current += 1;
+				setClipsDraftInsertion({
+					id: clipsDraftInsertionSequence.current,
+					text: request.prompt,
+				});
+			}
+		};
+		window.addEventListener(CLIPS_QUICK_ATTACH_EVENT, onClipsQuickAttach);
+		return () => {
+			window.removeEventListener(CLIPS_QUICK_ATTACH_EVENT, onClipsQuickAttach);
+		};
+	}, [currentTabId]);
 	const scrollToMessageId = useTabSelector(
 		(state) =>
 			state.tabs.find((tab) => tab.id === currentTabId)?.scrollToMessageId
 	);
 
-	// Model options follow the active agent's engine binding. The effective
-	// value prefers the explicit in-session pick, then the persisted per-agent
-	// choice, then the engine's first option — so the picker always shows what
-	// will actually be sent.
+	// Model options follow the active agent's engine binding. Provider-specific
+	// picks stay explicit even when they are absent from that engine's catalog.
+	// Otherwise the effective value follows the per-agent choice and catalog.
 	const modelOptions = useMemo(
 		() => modelsForAgent(agentId, agents, engineModels),
 		[agentId, agents, engineModels]
 	);
 	const effectiveModel = modelSelectionCleared
 		? null
-		: ([selectedModel, getAgentModel(agentId)].find(
+		: (providerModelSelection?.modelId ??
+			[selectedModel, getAgentModel(agentId)].find(
 				(id) => id && modelOptions.some((m) => m.id === id)
 			) ??
 			modelOptions[0]?.id ??
@@ -925,15 +1308,18 @@ export default function ChatPage({
 					size="sm"
 				>
 					<AgentAvatar
-						className="size-full rounded-full object-contain"
+						className="size-full object-contain"
 						engine={engineForAgent(agent)}
+						fit="contain"
 						glyph={agent.avatarGlyph}
+						presentation="portrait"
 						size="16px"
 					/>
 				</Avatar>
 			),
 		};
 	}, [agentId, teamId, agents, teams]);
+	const selectedAgent = agents.find((agent) => agent.id === agentId) ?? null;
 	const botHeaderAgent = useMemo(
 		() => (botProduct ? agents.find((agent) => agent.id === "ryu") : null),
 		[agents, botProduct]
@@ -948,9 +1334,11 @@ export default function ChatPage({
 		): AgentMessageIdentity => ({
 			avatar: (
 				<AgentAvatar
-					className="size-full rounded-full object-contain"
+					className="size-full object-contain"
 					engine={engineForAgent(agent)}
+					fit="contain"
 					glyph={agent.avatarGlyph}
+					presentation="portrait"
 					size="16px"
 				/>
 			),
@@ -992,10 +1380,11 @@ export default function ChatPage({
 		// the same shape the sidebar's ChatRow draws its agent mark with.
 		const mark = (agent: (typeof agents)[number]) => (
 			<AgentAvatar
-				className="size-4 shrink-0 rounded-[3px] object-contain"
+				className="size-4 shrink-0 object-contain"
 				engine={engineForAgent(agent)}
 				glyph={agent.avatarGlyph}
 				key={agent.id}
+				presentation="compact"
 				size="16px"
 				thinking
 			/>
@@ -1018,6 +1407,28 @@ export default function ChatPage({
 	// this ref right after that hook), and reading it live would be a TDZ error.
 	const turnInFlightRef = useRef(false);
 	const [composerSelectionApplyMode] = useComposerSelectionApplyMode();
+	// The latest turn's usage, read by the model-switch warning. Assigned where
+	// `contextUsage` is derived further below (it depends on the processed list).
+	const contextUsageRef = useRef<ContextUsage | null>(null);
+	// Provider prompt caches are keyed by model, so a mid-chat switch re-sends the
+	// whole context uncached. Console only: Bot mode has no model picker.
+	const warnModelSwitchCacheReset = useCallback(
+		(nextModel: string) => {
+			if (botProduct) {
+				return;
+			}
+			const warning = modelSwitchCacheWarning(
+				contextUsageRef.current,
+				nextModel,
+				Date.now()
+			);
+			if (warning) {
+				toast.warning({ id: "ryu-model-switch-cache", ...warning });
+			}
+		},
+		[botProduct]
+	);
+
 	const announceComposerSelection = useCallback(
 		(setting: string, value: string) => {
 			// An idle picker already makes the next message's target obvious. The
@@ -1037,16 +1448,165 @@ export default function ChatPage({
 		[composerSelectionApplyMode]
 	);
 
+	const persistModelSelection = useCallback(
+		(
+			conversationId: string,
+			selection: RecordConversationModelSelectionInput,
+			scope = modelSelectionScopeRef.current
+		) => {
+			// Capture both transport and UI ownership before entering the serial queue.
+			// Pending draft selections also carry bookkeeping; send only the API DTO.
+			const { changeId, kind, modelId, modelLabel, providerId, providerLabel } =
+				selection;
+			const input = {
+				changeId,
+				kind,
+				modelId,
+				modelLabel,
+				providerId,
+				providerLabel,
+			};
+			const write = modelSelectionWriteQueueRef.current.then(async () => {
+				const result = await recordConversationModelSelection(
+					scope.target,
+					conversationId,
+					input
+				);
+				const ownsCurrentRoom =
+					modelSelectionMountedRef.current &&
+					modelSelectionScopeRef.current === scope &&
+					convIdRef.current === conversationId;
+				if (ownsCurrentRoom) {
+					const merged = mergeConversationModelChanges(
+						conversationModelChangesRef.current,
+						[result.change]
+					);
+					conversationModelChangesRef.current = merged;
+					setConversationModelChanges(merged);
+				}
+				if (
+					ownsCurrentRoom &&
+					pendingModelSelectionRef.current?.changeId === selection.changeId
+				) {
+					pendingModelSelectionRef.current = null;
+				}
+				return result;
+			});
+			modelSelectionWriteQueueRef.current = write.then(
+				() => undefined,
+				() => undefined
+			);
+			return write;
+		},
+		[]
+	);
+
+	const queueModelSelectionChange = useCallback(
+		(input: RecordConversationModelSelectionInput) => {
+			if (ghostChatActiveRef.current) {
+				pendingModelSelectionRef.current = null;
+				return;
+			}
+			const conversationId = convIdRef.current;
+			const scope = modelSelectionScopeRef.current;
+			const pending = {
+				...input,
+				scope,
+				conversationId,
+				draftConversationId: draftConvId.current,
+			};
+			pendingModelSelectionRef.current = pending;
+			if (conversationId) {
+				void persistModelSelection(conversationId, input, scope).catch(
+					(error: unknown) => {
+						if (
+							!modelSelectionMountedRef.current ||
+							modelSelectionScopeRef.current !== scope ||
+							convIdRef.current !== conversationId
+						) {
+							return;
+						}
+						toast.error(
+							error instanceof Error
+								? error.message
+								: "Could not share this model choice."
+						);
+					}
+				);
+			}
+		},
+		[persistModelSelection]
+	);
+
 	const handleModelChange = useCallback(
 		(modelId: string) => {
+			const option = modelOptions.find((candidate) => candidate.id === modelId);
+			if (modelId !== selectedModelRef.current) {
+				warnModelSwitchCacheReset(option?.name ?? modelId);
+			}
 			setModelSelectionCleared(false);
 			setSelectedModel(modelId);
+			setProviderModelSelection(null);
 			if (agentId) {
 				setAgentModel(agentId, modelId);
 			}
+			queueModelSelectionChange({
+				changeId: crypto.randomUUID(),
+				kind: "change",
+				modelId,
+				modelLabel: option?.name ?? modelId,
+				providerId: null,
+				providerLabel: null,
+			});
 			announceComposerSelection("Model", modelId);
 		},
-		[agentId, announceComposerSelection]
+		[
+			agentId,
+			announceComposerSelection,
+			modelOptions,
+			queueModelSelectionChange,
+			warnModelSwitchCacheReset,
+		]
+	);
+
+	const handleProviderModelSelection = useCallback(
+		(selection: {
+			modelId: string | null;
+			providerId: string;
+			providerLabel: string;
+		}) => {
+			if (selection.modelId && selection.modelId !== selectedModelRef.current) {
+				warnModelSwitchCacheReset(
+					`${selection.providerLabel} · ${selection.modelId}`
+				);
+			}
+			setProviderModelSelection({
+				modelId: selection.modelId,
+				providerId: selection.providerId,
+				providerLabel: selection.providerLabel,
+			});
+			setSelectedModel(selection.modelId);
+			setModelSelectionCleared(selection.modelId === null);
+			queueModelSelectionChange({
+				changeId: crypto.randomUUID(),
+				kind: "change",
+				modelId: selection.modelId,
+				modelLabel: selection.modelId,
+				providerId: selection.providerId,
+				providerLabel: selection.providerLabel,
+			});
+			announceComposerSelection(
+				"Provider",
+				selection.modelId
+					? `${selection.providerLabel} · ${selection.modelId}`
+					: selection.providerLabel
+			);
+		},
+		[
+			announceComposerSelection,
+			queueModelSelectionChange,
+			warnModelSwitchCacheReset,
+		]
 	);
 
 	// ── ACP session controls (Zed-style, data-driven per active agent) ──
@@ -1061,6 +1621,11 @@ export default function ChatPage({
 	// back into the composer hook so the Approval picker reflects a mode the
 	// agent changed on its own — not only the user's clicks.
 	const [streamedAcpMode, setStreamedAcpMode] = useState<string | null>(null);
+	// The emission's `messageId:partIndex`, so the composer adopts a new
+	// emission of the same mode (another agent switching to it) as a change.
+	const [streamedAcpModeKey, setStreamedAcpModeKey] = useState<string | null>(
+		null
+	);
 	// The same shape one level up: session CONFIG values the agent asked the client
 	// to update (Core's `data-ryu-acp-config` part). Derived from `messages` below
 	// and fed back into the composer hook, which adopts and persists them — so a
@@ -1093,9 +1658,13 @@ export default function ChatPage({
 	// stacking a toast per detent.
 	const handleAcpSelectionApplied = useCallback(
 		(setting: string, value: string) => {
+			// The shared ACP picker only notifies "Model" for a real change.
+			if (setting === "Model") {
+				warnModelSwitchCacheReset(value);
+			}
 			announceComposerSelection(setting, value);
 		},
-		[announceComposerSelection]
+		[announceComposerSelection, warnModelSwitchCacheReset]
 	);
 
 	const acp = useComposerAcpSections({
@@ -1107,6 +1676,7 @@ export default function ChatPage({
 		onSelectionApplied: handleAcpSelectionApplied,
 		preferSimpleApprovalDefaults: interfaceLevel === "simple",
 		streamedMode: streamedAcpMode,
+		streamedModeKey: streamedAcpModeKey,
 		streamedConfig: streamedAcpConfig,
 		streamedConfigOptions: streamedAcpConfigOptions,
 		streamedControl: streamedAcpControl,
@@ -1199,6 +1769,10 @@ export default function ChatPage({
 	const [convId, setConvId] = useState<string | null>(
 		tabConversationId ?? null
 	);
+	const modelSelectionLoading =
+		convId !== null &&
+		(modelHistoryReady?.conversationId !== convId ||
+			modelHistoryReady.scope !== modelSelectionScope);
 	const [chatSearch, setChatSearch] = useState<ChatSearchState>({
 		mode: "chat",
 		nonce: 0,
@@ -1243,6 +1817,9 @@ export default function ChatPage({
 		: (folder ?? localProjectlessTaskFolder);
 	const chatFolderRef = useRef<string | null>(chatFolder);
 	chatFolderRef.current = chatFolder;
+	// Every folder the last agent turn ran in (a project may span several);
+	// "Trust folder" on a workspace-trust warning trusts exactly these.
+	const lastAgentFoldersRef = useRef<string[]>([]);
 
 	// Restore state for THIS tab's thread. Seeded `true` whenever the tab is
 	// restored onto an existing conversation: the first paint happens before the
@@ -1304,7 +1881,46 @@ export default function ChatPage({
 	// the local `convId`, not this shared mirror, so background tabs never fight
 	// over it (e.g. tab-strip switching shows each tab's own thread).
 	const isActiveTab = useIsActiveTab();
-	const statsUsage = useAgentUsage(agentId, isActiveTab && statsPluginEnabled);
+	// Stats strip usage. When Core knows which Ryu subscription account this
+	// conversation runs on, show that account's reading; otherwise the agent's.
+	// `source` says how sure Core is: `active` is the account the next turn would
+	// start on, not one the conversation is bound to.
+	const statsActive = isActiveTab && statsPluginEnabled;
+	const conversationAccount = useConversationProviderAccount(
+		convId ?? null,
+		statsActive
+	);
+	const statsAccountProviderId =
+		conversationAccount?.accountId && conversationAccount.source !== "unknown"
+			? conversationAccount.providerId
+			: null;
+	const statsAccountReading = useProviderAccountUsage(
+		statsAccountProviderId,
+		conversationAccount?.accountId ?? null,
+		statsActive && statsAccountProviderId !== null
+	);
+	const agentStatsUsage = useAgentUsage(
+		agentId,
+		statsActive && statsAccountProviderId === null
+	);
+	const statsUsage = useMemo(() => {
+		if (!(statsAccountProviderId && statsAccountReading)) {
+			return agentStatsUsage;
+		}
+		const label = statsAccountReading.accountLabel ?? null;
+		return {
+			...usageSnapshotFromReading(statsAccountReading),
+			accountLabel:
+				label && conversationAccount?.source === "active"
+					? `${label} (active account)`
+					: label,
+		};
+	}, [
+		agentStatsUsage,
+		conversationAccount?.source,
+		statsAccountProviderId,
+		statsAccountReading,
+	]);
 	const isActiveTabRef = useRef(isActiveTab);
 	isActiveTabRef.current = isActiveTab;
 	useEffect(() => {
@@ -1313,16 +1929,41 @@ export default function ChatPage({
 		}
 	}, [isActiveTab, convId, setActiveConversationId]);
 
+	// Stable draft ID shared by task selection and the first chat send.
+	const draftConvId = useRef(`conv-${Date.now()}`);
+	const queryClient = useQueryClient();
 	const chatTarget: ApiTarget = useMemo(
 		() => ({
 			url: activeNode.url,
 			token: activeNode.token,
 			userJwt: activeNode.userJwt ?? null,
 		}),
-		[activeNode.url, activeNode.token]
+		[activeNode.url, activeNode.token, activeNode.userJwt]
 	);
+	const {
+		scope: cloudScope,
+		selection: cloudSelection,
+		retry: retryCloudSelection,
+	} = useCloudTaskSelection(
+		chatTarget,
+		convId ?? draftConvId.current,
+		Boolean(convId)
+	);
+	const cloudSelectionRef = useRef(cloudSelection);
+	cloudSelectionRef.current = cloudSelection;
+	const cloudScopeRef = useRef(cloudScope);
+	cloudScopeRef.current = cloudScope;
+	// Rollout gate for the Fresh cloud box backend: UI-only (Core has no per-user
+	// flag source); the node's Box configuration remains the hard server gate.
+	const boxBackendEnabled = useFeatureFlag(CLOUD_TASKS_BOX_BACKEND_FLAG);
+	const boxBackendEnabledRef = useRef(boxBackendEnabled);
+	boxBackendEnabledRef.current = boxBackendEnabled;
+	const cloudBlockReason = cloudTaskBlockReason(cloudSelection, agentId, {
+		boxBackendEnabled,
+	});
+	const composerBlocked = baseComposerBlocked || Boolean(cloudBlockReason);
 	const [projectDrafts, setProjectDrafts] = useState<
-		import("@ryu/blocks/desktop/agent-elements/input-bar").ComposerDraftItem[]
+		import("@ryu/blocks/desktop/agent-elements/input-bar.tsx").ComposerDraftItem[]
 	>([]);
 	const refreshProjectDrafts = useCallback(async () => {
 		try {
@@ -1350,15 +1991,19 @@ export default function ChatPage({
 		() => ({
 			items: projectDrafts,
 			onDelete: (id: string) => {
-				void deleteDraft(chatTarget, id).then(refreshProjectDrafts);
+				void deleteDraft(chatTarget, id)
+					.then(refreshProjectDrafts)
+					.catch(() =>
+						toast.error("Could not delete draft. Please try again.")
+					);
 			},
-			onInsert: () => {},
-			onSave: (text: string) => {
-				void saveDraft(chatTarget, {
+			onSave: async (text: string) => {
+				await saveDraft(chatTarget, {
 					text,
 					folder_path: chatFolder ?? undefined,
 					source: "manual",
-				}).then(refreshProjectDrafts);
+				});
+				await refreshProjectDrafts();
 			},
 		}),
 		[chatFolder, chatTarget, projectDrafts, refreshProjectDrafts]
@@ -1368,6 +2013,26 @@ export default function ChatPage({
 	// passed into the composer's mic button. Stable identity keeps the memoized
 	// InputBar slot from remounting and dropping textarea focus.
 	const chatTargetRef = useRef(chatTarget);
+
+	// Projects › Bots/Groups › Sessions: the thread in view, when it sits in the
+	// hierarchy (in a project, a main thread, or a spawned session). The bar
+	// itself decides whether there is anything to show.
+	const hierarchyConversation = useMemo(() => {
+		if (!convId) {
+			return null;
+		}
+		const current = conversations.find((item) => item.id === convId);
+		return current?.hierarchy ? current : null;
+	}, [conversations, convId]);
+	const agentNameForId = useCallback(
+		(id: string) => agents.find((agent) => agent.id === id)?.name,
+		[agents]
+	);
+	const openHierarchyConversation = useCallback(
+		(conversationId: string, title?: string) =>
+			openTab("/chat", { conversationId, title, node: tabBoundNodeName }),
+		[openTab, tabBoundNodeName]
+	);
 	chatTargetRef.current = chatTarget;
 	const composerBlockedRef = useRef(false);
 	composerBlockedRef.current = composerBlocked;
@@ -1377,16 +2042,23 @@ export default function ChatPage({
 	// Resolved from the model's launch config; `undefined` (auto / unknown) ⇒
 	// no ring, mirroring Jan's "hide when n_ctx unknown". Keyed on the primitive
 	// model id (not the `chatTarget` object) to avoid a deps-driven render loop.
+	//
+	// An ACP agent runs its own model, not the engine catalog's, so its window
+	// (and its prompt-cache lifetime) is looked up from the agent's selected model.
+	// That matters for agents that never report a window themselves (gemini-cli).
+	const cacheModelHint = acpAgent
+		? (acp.acpModel ?? effectiveModel)
+		: effectiveModel;
 	const [contextSize, setContextSize] = useState<number | undefined>(undefined);
 	useEffect(() => {
-		if (!effectiveModel) {
+		if (!cacheModelHint) {
 			setContextSize(undefined);
 			return;
 		}
 		let cancelled = false;
 		(async () => {
 			const target = chatTargetRef.current;
-			const cfg = await getModelLaunchConfig(target, effectiveModel);
+			const cfg = await getModelLaunchConfig(target, cacheModelHint);
 			if (cancelled) {
 				return;
 			}
@@ -1396,7 +2068,7 @@ export default function ChatPage({
 			}
 			// ACP / cloud models: local launch config has no ctx_size — resolve
 			// from models.dev so the composer's context ring has a denominator.
-			const fromCatalog = await getModelContextWindow(target, effectiveModel);
+			const fromCatalog = await getModelContextWindow(target, cacheModelHint);
 			if (!cancelled) {
 				setContextSize(
 					fromCatalog && fromCatalog > 0 ? fromCatalog : undefined
@@ -1406,7 +2078,7 @@ export default function ChatPage({
 		return () => {
 			cancelled = true;
 		};
-	}, [effectiveModel]);
+	}, [cacheModelHint]);
 	const [voiceInputEngine, setVoiceInputEngine] = useState<
 		string | undefined
 	>();
@@ -1470,13 +2142,108 @@ export default function ChatPage({
 		localStorage.setItem("ryu_long_term_memory", String(longTermMemory));
 	}, [longTermMemory]);
 
-	// Stable draft ID so useChat keeps the same id on first send (state update is async)
-	const draftConvId = useRef(`conv-${Date.now()}`);
 	const chatId = convId ?? draftConvId.current;
+	const { sdkId: transcriptId, isCurrent: isTranscriptCurrent } =
+		useChatTranscriptOwner(chatTarget, chatId);
 	const realtimeClientIdRef = useRef(createRealtimeClientId());
 	// Latest convId reachable from the once-created transport body closure below.
 	const convIdRef = useRef<string | null>(convId);
 	convIdRef.current = convId;
+	const modelHistoryConversationRef = useRef(convId);
+	const modelHistoryScopeRef = useRef(modelSelectionScope);
+	useEffect(() => {
+		const scopeChanged = modelHistoryScopeRef.current !== modelSelectionScope;
+		modelHistoryScopeRef.current = modelSelectionScope;
+		if (
+			scopeChanged &&
+			pendingModelSelectionRef.current?.scope !== modelSelectionScope
+		) {
+			pendingModelSelectionRef.current = null;
+		}
+		const previousConversationId = modelHistoryConversationRef.current;
+		modelHistoryConversationRef.current = convId;
+		const isDraftPromotion = convId !== null && convId === draftConvId.current;
+		if (!convId) {
+			conversationModelChangesRef.current = [];
+			setConversationModelChanges([]);
+			contextHandoffsRef.current = [];
+			setContextHandoffs([]);
+			setProviderModelSelection(null);
+			if (previousConversationId !== null) {
+				setSelectedModel(initialModel ?? getAgentModel(agentId));
+				setModelSelectionCleared(false);
+			}
+			return;
+		}
+
+		if (
+			scopeChanged ||
+			(previousConversationId !== convId && !isDraftPromotion)
+		) {
+			conversationModelChangesRef.current = [];
+			setConversationModelChanges([]);
+			contextHandoffsRef.current = [];
+			setContextHandoffs([]);
+			setProviderModelSelection(null);
+			setSelectedModel(initialModel ?? getAgentModel(agentId));
+			setModelSelectionCleared(false);
+		}
+
+		let cancelled = false;
+		getConversationModelSelection(chatTarget, convId)
+			.then((selection) => {
+				if (
+					cancelled ||
+					modelSelectionScopeRef.current !== modelSelectionScope
+				) {
+					return;
+				}
+				const merged = mergeConversationModelChanges(
+					conversationModelChangesRef.current,
+					selection.changes
+				);
+				conversationModelChangesRef.current = merged;
+				setConversationModelChanges(merged);
+				const handoffs = mergeContextHandoffs(
+					contextHandoffsRef.current,
+					selection.handoffs
+				);
+				contextHandoffsRef.current = handoffs;
+				setContextHandoffs(handoffs);
+				if (!selection.current) {
+					return;
+				}
+				setProviderModelSelection(
+					selection.current.providerId
+						? {
+								modelId: selection.current.modelId,
+								providerId: selection.current.providerId,
+								providerLabel: selection.current.providerLabel,
+							}
+						: null
+				);
+				setSelectedModel(selection.current.modelId);
+				setModelSelectionCleared(selection.current.modelId === null);
+			})
+			.catch(() => {
+				// A newly-created conversation may not exist until its first turn lands.
+			})
+			.finally(() => {
+				if (
+					!cancelled &&
+					modelSelectionMountedRef.current &&
+					modelSelectionScopeRef.current === modelSelectionScope
+				) {
+					setModelHistoryReady({
+						conversationId: convId,
+						scope: modelSelectionScope,
+					});
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [agentId, chatTarget, convId, initialModel, modelSelectionScope]);
 
 	// #403: Tracks user messages that were blocked so they still appear in the
 	// thread even when the send is prevented.
@@ -1559,6 +2326,7 @@ export default function ChatPage({
 		ghostMode &&
 		(ghostChatsPluginEnabled ||
 			(Boolean(initialGhost) && !pluginContributionsSettled));
+	ghostChatActiveRef.current = ghostChatActive;
 	const ghostModeRef = useRef(false);
 	ghostModeRef.current = ghostChatActive;
 	useEffect(() => {
@@ -1605,15 +2373,59 @@ export default function ChatPage({
 	const {
 		messages,
 		sendMessage,
-		setMessages,
+		setMessages: setSdkMessages,
 		regenerate,
 		stop,
 		status,
 		error,
 		clearError,
 	} = useChat({
-		id: chatId,
+		id: transcriptId,
+		// Coalesce stream chunks into at most one message-list render per window.
+		// Unthrottled, every SSE chunk re-renders (and re-parses markdown for) the
+		// whole transcript, in every busy tab; background tabs stay mounted while
+		// streaming, so parallel threads multiply that cost.
+		throttle: isActiveTab
+			? ACTIVE_TAB_STREAM_THROTTLE_MS
+			: BACKGROUND_TAB_STREAM_THROTTLE_MS,
 		transport: new DefaultChatTransport({
+			prepareSendMessagesRequest: ({ messages: outgoing, body }) => {
+				const context = modelContextParts(
+					`${chatTarget.url}:${convIdRef.current ?? draftConvId.current}`
+				);
+				let latestUser = -1;
+				for (const [index, message] of outgoing.entries()) {
+					if (message.role === "user") {
+						latestUser = index;
+					}
+				}
+				const last = outgoing[latestUser];
+				const text =
+					last?.parts
+						.filter((part) => part.type === "text")
+						.map((part) => part.text)
+						.join("\n") ?? "";
+				const resources = mentionedMcpResources(
+					text,
+					remoteMentionItemsRef.current
+				);
+				if (resources.length > 0) {
+					context.push({
+						type: "text",
+						text: `<app-resources>\n${resources.join("\n")}\n</app-resources>`,
+					});
+				}
+				return {
+					body: {
+						...body,
+						messages: outgoing.map((message, index) =>
+							index === latestUser && context.length > 0
+								? { ...message, parts: [...message.parts, ...context] }
+								: message
+						),
+					},
+				};
+			},
 			api: chatStreamUrl(chatTarget),
 			// Developer-mode turn timing (time-to-first-token, stream duration,
 			// bytes). A plain `fetch` when metrics are off — see lib/dev-metrics.ts.
@@ -1621,11 +2433,13 @@ export default function ChatPage({
 			// Forward the user-identity JWT alongside the node token so Core can
 			// verify WHO sent this turn and stamp `author_user_id` on the persisted
 			// message — the value the realtime fan-out uses to attribute it to a
-			// human for other viewers. `null` when signed out: no header, anonymous
-			// turn (author stays NULL), single-user flow unchanged.
-			headers: async (): Promise<Record<string, string>> => {
+			// human for other viewers. `null` when signed out, when the node has
+			// no token or managed delegation, or when it is reached over plain
+			// HTTP on another host: no header, anonymous turn (author stays NULL),
+			// single-user flow unchanged.
+			headers: async () => {
 				const base = chatHeaders(chatTarget);
-				const jwt = await getRealtimeJwt();
+				const jwt = await accountJwtForTarget(chatTarget);
 				const identityHeaders = realtimeClientIdRef.current
 					? { ...base, "X-Ryu-Client-Id": realtimeClientIdRef.current }
 					: base;
@@ -1634,6 +2448,23 @@ export default function ChatPage({
 					: identityHeaders;
 			},
 			body: () => {
+				const cloudFields = cloudTaskRequestFields(
+					cloudSelectionRef.current,
+					agentId,
+					{ boxBackendEnabled: boxBackendEnabledRef.current }
+				);
+				const cloudTask = Boolean(cloudFields.cloudEnvironmentId);
+				if (
+					cloudTask &&
+					(teamIdRef.current ||
+						composerTeamIdRef.current ||
+						workflowIdRef.current ||
+						targetAgentIdRef.current)
+				) {
+					throw new Error(
+						"Cloud tasks currently support the Ryu native agent only, without teams, workflows, or custom agent targets."
+					);
+				}
 				const ws = useWorkspaceStore.getState();
 				const selectedFolder = chatFolderRef.current;
 				const project = selectedFolder
@@ -1641,6 +2472,7 @@ export default function ChatPage({
 					: undefined;
 				const cwd = project?.folders[0] ?? selectedFolder ?? undefined;
 				const sourceFolders = project?.folders ?? (cwd ? [cwd] : []);
+				lastAgentFoldersRef.current = sourceFolders;
 				const environmentId = cwd
 					? ws.activeProjectEnvironments[cwd]
 					: undefined;
@@ -1661,6 +2493,18 @@ export default function ChatPage({
 				pendingActionFlagsRef.current = {};
 				const referencedConversationIds = referencedConversationIdsRef.current;
 				referencedConversationIdsRef.current = [];
+				const outgoingConversationId = convIdRef.current ?? draftConvId.current;
+				const pendingModelSelection = pendingModelSelectionRef.current;
+				if (
+					pendingModelSelection?.scope === modelSelectionScopeRef.current &&
+					pendingModelSelection.conversationId === null &&
+					pendingModelSelection.draftConversationId === outgoingConversationId
+				) {
+					pendingModelSelectionRef.current = {
+						...pendingModelSelection,
+						conversationId: outgoingConversationId,
+					};
+				}
 				// Persistent-session worktree: opt-in via the workspace bar's run
 				// mode (not auto-on per folder). When enabled, Core creates an
 				// isolated worktree on the first message and reuses it across turns,
@@ -1674,10 +2518,47 @@ export default function ChatPage({
 					acpModel: acpModelRef.current,
 					simpleApprovalDefaults: simpleApprovalDefaultsRef.current,
 				});
+				const pendingForConversation = pendingModelSelectionRef.current;
+				const hasPendingSelectionForConversation =
+					pendingForConversation?.scope === modelSelectionScopeRef.current &&
+					(pendingForConversation.conversationId === outgoingConversationId ||
+						pendingForConversation.draftConversationId ===
+							outgoingConversationId);
+				if (
+					!(ghostModeRef.current || hasPendingSelectionForConversation) &&
+					conversationModelChangesRef.current.length === 0
+				) {
+					const modelId =
+						routingFields.model ?? routingFields.acp_model ?? null;
+					const providerSelection = providerModelSelectionRef.current;
+					const modelOption = modelId
+						? modelOptions.find((option) => option.id === modelId)
+						: undefined;
+					const initialSelection: RecordConversationModelSelectionInput = {
+						changeId: crypto.randomUUID(),
+						kind: "initial",
+						modelId,
+						modelLabel: modelOption?.name ?? modelId,
+						providerId: providerSelection?.providerId ?? null,
+						providerLabel: providerSelection?.providerLabel ?? null,
+					};
+					pendingModelSelectionRef.current = {
+						...initialSelection,
+						scope: modelSelectionScopeRef.current,
+						conversationId: outgoingConversationId,
+						draftConversationId: outgoingConversationId,
+					};
+				}
+				// Template Rewards pilot: a temporary chat leaves no usage trace, and
+				// a workflow turn is not a use of the agent template itself.
+				if (!(ghostModeRef.current || workflowIdRef.current)) {
+					reportTemplateUse(agentId);
+				}
 				return {
+					...cloudFields,
 					agent_id: agentId,
 					response_mode: responseModeForInterface(interfaceLevel),
-					conversation_id: convIdRef.current ?? draftConvId.current,
+					conversation_id: outgoingConversationId,
 					referenced_conversation_ids:
 						referencedConversationIds.length > 0
 							? referencedConversationIds
@@ -1688,24 +2569,26 @@ export default function ChatPage({
 					enable_long_term: ghostModeRef.current
 						? false
 						: longTermMemoryRef.current,
-					cwd,
+					cwd: cloudTask ? undefined : cwd,
 					workspace_folders:
-						sourceFolders.length > 1 ? sourceFolders : undefined,
-					worktree_isolation: useWorktree,
+						!cloudTask && sourceFolders.length > 1 ? sourceFolders : undefined,
+					worktree_isolation: cloudTask ? false : useWorktree,
 					// Desired branch for the worktree Core creates on the first turn
 					// (sanitized server-side; ignored when reusing an existing one).
-					worktree_branch: useWorktree ? ws.worktreeBranch : undefined,
-					project_environment: projectEnvironment
-						? {
-								name: projectEnvironment.name,
-								variables: projectEnvironment.variables.map(
-									({ key, value }) => ({
-										key,
-										value,
-									})
-								),
-							}
-						: undefined,
+					worktree_branch:
+						!cloudTask && useWorktree ? ws.worktreeBranch : undefined,
+					project_environment:
+						projectEnvironment && !cloudTask
+							? {
+									name: projectEnvironment.name,
+									variables: projectEnvironment.variables.map(
+										({ key, value }) => ({
+											key,
+											value,
+										})
+									),
+								}
+							: undefined,
 					// #415: Pass the @mention target agent id when the user directed the
 					// message at a specific conversation participant.
 					target_agent_id: targetAgentIdRef.current ?? undefined,
@@ -1739,7 +2622,30 @@ export default function ChatPage({
 				};
 			},
 		}),
+		// Core announces the handoff a turn runs on as a transient data part, so
+		// the transcript marker shows as the turn starts, realtime or not.
+		onData: (part) => {
+			if (part.type !== "data-ryu-context-handoff") {
+				return;
+			}
+			const handoff = parseConversationContextHandoff(part.data);
+			if (!handoff) {
+				return;
+			}
+			const handoffs = mergeContextHandoffs(contextHandoffsRef.current, [
+				handoff,
+			]);
+			contextHandoffsRef.current = handoffs;
+			setContextHandoffs(handoffs);
+		},
 	});
+
+	useStopReplacedChat(stop);
+
+	// SDK setMessages is stable and writes through its current Chat ref. Bind
+	// every async producer to the owner that started it so an old history/tool
+	// result cannot write into a replacement authority's transcript.
+	const setMessages = useOwnedChatMessages(isTranscriptCurrent, setSdkMessages);
 
 	// The AI SDK adds a normal user message optimistically before Core has
 	// acknowledged the turn. Mark only the message that belongs to a settled,
@@ -1751,8 +2657,36 @@ export default function ChatPage({
 		previousChatStatusRef.current = status;
 		const wasBusy =
 			previousStatus === "streaming" || previousStatus === "submitted";
-		const settled = status === "ready";
-		if (!(wasBusy && settled) || ghostModeRef.current) {
+		const settled = status === "ready" || status === "error";
+		if (ghostModeRef.current) {
+			return;
+		}
+		const pendingModelSelection = pendingModelSelectionRef.current;
+		if (
+			pendingModelSelection?.scope === modelSelectionScopeRef.current &&
+			pendingModelSelection.conversationId &&
+			(status === "streaming" || (wasBusy && settled))
+		) {
+			void persistModelSelection(
+				pendingModelSelection.conversationId,
+				pendingModelSelection,
+				pendingModelSelection.scope
+			).catch((writeError: unknown) => {
+				if (
+					!modelSelectionMountedRef.current ||
+					modelSelectionScopeRef.current !== pendingModelSelection.scope ||
+					convIdRef.current !== pendingModelSelection.conversationId
+				) {
+					return;
+				}
+				toast.error(
+					writeError instanceof Error
+						? writeError.message
+						: "Could not share this model choice."
+				);
+			});
+		}
+		if (!(wasBusy && settled)) {
 			return;
 		}
 		setMessages((current) => {
@@ -1761,28 +2695,31 @@ export default function ChatPage({
 				if (message?.role !== "user") {
 					continue;
 				}
-				const candidate = message as UIMessage & {
-					metadata?: unknown;
-					persisted?: unknown;
-				};
-				const metadata =
-					typeof candidate.metadata === "object" && candidate.metadata !== null
-						? (candidate.metadata as Record<string, unknown>)
-						: {};
+				const candidate =
+					/* SAFETY: The message is already a UIMessage; this read-only view admits only the two optional local persistence marker slots. */ message as UIMessage & {
+						metadata?: unknown;
+						persisted?: unknown;
+					};
+				// SAFETY: The preceding check admits a non-null object; its marker slot stays unknown and is compared only with true.
+				const decodedMetadata = jsonResponseDocumentSchema.safeParse(
+					candidate.metadata
+				);
+				const metadata = decodedMetadata.success ? decodedMetadata.data : {};
 				if (candidate.persisted === true || metadata.ryuPersisted === true) {
 					return current;
 				}
 				const next = [...current];
-				next[index] = {
-					...message,
-					metadata: { ...metadata, ryuPersisted: true },
-					persisted: true,
-				} as (typeof current)[number];
+				next[index] =
+					/* SAFETY: This spreads the original UIMessage unchanged and adds only the local ryuPersisted metadata and persisted markers. */ {
+						...message,
+						metadata: { ...metadata, ryuPersisted: true },
+						persisted: true,
+					} as (typeof current)[number];
 				return next;
 			}
 			return current;
 		});
-	}, [setMessages, status]);
+	}, [persistModelSelection, setMessages, status]);
 
 	// A failed model call already persisted the user turn. Clear the AI SDK's
 	// terminal error, mark this as a re-run (so Core does not append that user row
@@ -1816,18 +2753,11 @@ export default function ChatPage({
 						setGoalCompletionMessageId(null);
 					}
 				})
+				// Background refresh after a turn; the goal chip keeps its last state.
 				.catch(() => undefined);
 		}
 		goalWasStreamingRef.current = streaming;
 	}, [chatTarget, messages, status]);
-
-	// Side chats receive the transcript currently visible in this tab, rather than
-	// relying only on Core's persisted copy. That keeps a `/btw` asked during an
-	// in-flight reply aware of the latest assistant text as well as older turns.
-	const sideChatMessages = useMemo<BtwMessage[]>(
-		() => buildSideChatContext(messages),
-		[messages]
-	);
 
 	// Goal-setting is a UI action rather than a model turn, but it still belongs in
 	// the transcript as a user-authored message. Metadata keeps the annotation out
@@ -1845,7 +2775,7 @@ export default function ChatPage({
 					metadata: { goal: true },
 					parts: [{ text, type: "text" as const }],
 					role: "user" as const,
-				} as (typeof prev)[number],
+				} satisfies UIMessage,
 			]);
 		},
 		[setMessages]
@@ -1867,7 +2797,9 @@ export default function ChatPage({
 					setGoalDraftOpen(false);
 					appendGoalMessage(text);
 				})
-				.catch(() => undefined);
+				.catch((error: unknown) => {
+					toastActionError("Couldn't set goal", error);
+				});
 		},
 		[appendGoalMessage, chatTarget, convId]
 	);
@@ -1878,11 +2810,15 @@ export default function ChatPage({
 			setGoalDraftOpen(false);
 			return;
 		}
-		void clearGoal(chatTarget, convId).then(() => {
-			setGoalState(null);
-			setGoalCompletionMessageId(null);
-			setGoalDraftOpen(false);
-		});
+		void clearGoal(chatTarget, convId)
+			.then(() => {
+				setGoalState(null);
+				setGoalCompletionMessageId(null);
+				setGoalDraftOpen(false);
+			})
+			.catch((error: unknown) => {
+				toastActionError("Couldn't clear goal", error);
+			});
 	}, [chatTarget, convId]);
 	const handleGoalPause = useCallback(() => {
 		if (!convId) {
@@ -1893,7 +2829,9 @@ export default function ChatPage({
 				setGoalState(next);
 				setGoalCompletionMessageId(null);
 			})
-			.catch(() => undefined);
+			.catch((error: unknown) => {
+				toastActionError("Couldn't pause goal", error);
+			});
 	}, [chatTarget, convId]);
 	const handleGoalResume = useCallback(() => {
 		if (!convId) {
@@ -1904,7 +2842,9 @@ export default function ChatPage({
 				setGoalState(next);
 				setGoalCompletionMessageId(null);
 			})
-			.catch(() => undefined);
+			.catch((error: unknown) => {
+				toastActionError("Couldn't resume goal", error);
+			});
 	}, [chatTarget, convId]);
 
 	// Ryu Apps widget host (U7). The desktop is the TRUSTED side: it holds the Core
@@ -1914,6 +2854,23 @@ export default function ChatPage({
 	// conversation and agent context.
 	const widgetHostValue = useMemo<WidgetHostValue>(() => {
 		const services: WidgetHostServices = {
+			clearModelContext: (owner) =>
+				useModelContextStore.getState().clear(owner),
+			updateModelContext: async ({ owner, input }) =>
+				useModelContextStore
+					.getState()
+					.update(
+						`${chatTarget.url}:${convIdRef.current ?? draftConvId.current}`,
+						owner,
+						input
+					),
+			getModelContext: (owner) =>
+				useModelContextStore
+					.getState()
+					.get(
+						`${chatTarget.url}:${convIdRef.current ?? draftConvId.current}`,
+						owner
+					),
 			callTool: (input) => widgetCallTool(chatTarget, input),
 			sendFollowUpMessage: (input) =>
 				submitWidgetFollowUp(chatTarget, input, (message, options) =>
@@ -1932,6 +2889,13 @@ export default function ChatPage({
 			services,
 		};
 	}, [chatTarget, sendMessage]);
+	const hasAppContext = useModelContextStore((store) =>
+		Object.values(store.entries).some(
+			(entry) =>
+				entry.scope === `${chatTarget.url}:${convId ?? draftConvId.current}` &&
+				(entry.state.content?.length || entry.state.structuredContent)
+		)
+	);
 
 	// Feeds the session-control pick notice above, which is defined before this
 	// hook (it is passed into the composer's ACP sections) and so cannot read
@@ -1956,11 +2920,9 @@ export default function ChatPage({
 	// from `generating` to `complete`/`error` — no fabricated intermediate steps.
 	const runImageGeneration = useCallback(
 		async (assistantId: string, prompt: string) => {
-			const settle = (parts: unknown[]) => {
+			const settle = (parts: UIMessage["parts"]) => {
 				setMessages((prev) =>
-					prev.map((m) =>
-						m.id === assistantId ? ({ ...m, parts } as typeof m) : m
-					)
+					prev.map((m) => (m.id === assistantId ? { ...m, parts } : m))
 				);
 			};
 			// Back to the in-flight frame first: on a retry the message still holds
@@ -1994,7 +2956,7 @@ export default function ChatPage({
 						type: "data-image-generation",
 						data: { status: "complete", prompt, url: first },
 					},
-					...rest.map((url) => ({
+					...rest.map<UIMessage["parts"][number]>((url) => ({
 						type: "file",
 						mediaType: "image/png",
 						url,
@@ -2031,7 +2993,7 @@ export default function ChatPage({
 					id: userId,
 					role: "user",
 					parts: [{ type: "text", text: prompt }],
-				} as (typeof prev)[number],
+				} satisfies UIMessage,
 				{
 					id: assistantId,
 					role: "assistant",
@@ -2041,7 +3003,7 @@ export default function ChatPage({
 							data: { status: "generating", prompt },
 						},
 					],
-				} as unknown as (typeof prev)[number],
+				} satisfies UIMessage,
 			]);
 			await runImageGeneration(assistantId, prompt);
 		},
@@ -2054,11 +3016,9 @@ export default function ChatPage({
 	// says which model to load, rather than dropping a bare error card.
 	const runVideoGeneration = useCallback(
 		async (assistantId: string, prompt: string) => {
-			const settle = (parts: unknown[]) => {
+			const settle = (parts: UIMessage["parts"]) => {
 				setMessages((prev) =>
-					prev.map((m) =>
-						m.id === assistantId ? ({ ...m, parts } as typeof m) : m
-					)
+					prev.map((m) => (m.id === assistantId ? { ...m, parts } : m))
 				);
 			};
 			settle([
@@ -2091,7 +3051,7 @@ export default function ChatPage({
 						type: "data-video-generation",
 						data: { status: "complete", prompt, url: first.url },
 					},
-					...rest.map((clip) => ({
+					...rest.map<UIMessage["parts"][number]>((clip) => ({
 						type: "file",
 						mediaType: clip.mediaType,
 						url: clip.url,
@@ -2126,7 +3086,7 @@ export default function ChatPage({
 					id: userId,
 					role: "user",
 					parts: [{ type: "text", text: prompt }],
-				} as (typeof prev)[number],
+				} satisfies UIMessage,
 				{
 					id: assistantId,
 					role: "assistant",
@@ -2136,7 +3096,7 @@ export default function ChatPage({
 							data: { status: "generating", prompt },
 						},
 					],
-				} as unknown as (typeof prev)[number],
+				} satisfies UIMessage,
 			]);
 			await runVideoGeneration(assistantId, prompt);
 		},
@@ -2167,9 +3127,13 @@ export default function ChatPage({
 			}
 			await playSpeech(trimmed, () => {
 				const prefs = getDesktopTtsPrefs();
+				const engineOptions = getDesktopTtsEngineOptions(prefs.engine);
 				return speakText(chatTargetRef.current, trimmed, {
 					engine: prefs.engine,
-					voice: prefs.voice || undefined,
+					language: engineOptions.language,
+					referenceAudio: engineOptions.referenceAudio,
+					speed: engineOptions.speed,
+					voice: engineOptions.voice || prefs.voice || undefined,
 				});
 			});
 		},
@@ -2182,27 +3146,83 @@ export default function ChatPage({
 	// composer mic above stays as push-to-talk voice INPUT). All realtime logic
 	// (VAD, endpointing, barge-in) lives in Core; this reflects it into the overlay.
 	const voiceMode = useVoiceMode(chatTarget, {
-		conversationId: activeConversationId ?? undefined,
+		conversationId: convId ?? draftConvId.current,
+		onCallEnded: (summary) => {
+			if (
+				(convIdRef.current ?? draftConvId.current) !== summary.conversationId
+			) {
+				return;
+			}
+			if (!convIdRef.current) {
+				setActiveConversationId(summary.conversationId);
+			}
+			setMessages((current) =>
+				current.some((message) => message.id === summary.messageId)
+					? current
+					: [
+							...current,
+							{
+								id: summary.messageId,
+								role: "user",
+								parts: [{ type: "text", text: summary.content }],
+							},
+						]
+			);
+			refresh();
+			// The call's turns render as synthetic `voice-call-*` messages only
+			// while the call is live; Core persisted the real rows as it went.
+			// Reload the newest page so the spoken exchange stays on screen (with
+			// persisted ids) once the live turns unmount, instead of vanishing
+			// until the next reload.
+			void loadMessagesPageResult(summary.conversationId).then((page) => {
+				if (
+					page.status === "error" ||
+					page.messages.length === 0 ||
+					!isTranscriptCurrent() ||
+					(convIdRef.current ?? draftConvId.current) !== summary.conversationId
+				) {
+					return;
+				}
+				const nextCursor = page.olderMessagesCursor ?? null;
+				olderMessagesCursorRef.current = nextCursor;
+				setHasOlderMessages(
+					page.hasOlderMessages === true && nextCursor !== null
+				);
+				for (const persisted of page.messages) {
+					if (isNativeNumber(persisted.timestamp)) {
+						messageSentAtRef.current.set(persisted.id, persisted.timestamp);
+					}
+				}
+				setVersions(buildVersions(page.messages));
+				const now = Date.now();
+				setMessages(page.messages.map((m) => hydrateHistoryMessage(m, now)));
+			});
+		},
 		sttEngine: voiceInputEngine,
 		ttsEngine: desktopTts.engine,
 		ttsVoice: desktopTts.voice || undefined,
 	});
-	const voiceModeSlot: ChatVoiceMode = voiceMode.active
-		? {
-				active: true,
-				render: (composer: ReactNode) => (
-					<VoiceModeSurface composer={composer} voice={voiceMode} />
-				),
-			}
-		: { active: false };
+	const voiceModeSlot: ChatVoiceMode = useVoiceLiveCall(voiceMode);
 
 	// Interactive ACP tool-permission prompts. When an agent in a gating mode
 	// asks to run a tool, Core streams a `data-ryu-permission` part; we surface
 	// the latest unresolved one in the shared composer surface and POST the user's choice
-	// back (`/api/chat/permission`) to unblock the awaiting turn. Resolved request
-	// ids are tracked so the prompt clears once answered.
+	// back (`/api/chat/permission`) to unblock the awaiting turn. Resolved
+	// requests are tracked so the prompt clears once answered, keyed by node,
+	// conversation and request id (`answeredPermissionKey`): Core mints
+	// `perm-<seq>` from a per-process counter, so the ids repeat across nodes
+	// and Core restarts. Both sets are pruned when the turn ends; the prompts
+	// answered in that turn stay hidden by where they sit (`permissionPartKey`),
+	// so a later turn that reuses an id still shows its own prompt.
 	const [resolvedPermissions, setResolvedPermissions] = useState<Set<string>>(
 		() => new Set()
+	);
+	const [spentPermissions, setSpentPermissions] = useState<Set<string>>(
+		() => new Set()
+	);
+	const permissionNodeUrl = activeNode.url;
+	const answeredPermissions = useInterfaceDetailStore(
+		(state) => state.answeredPermissions
 	);
 	const activePermission = useMemo<ActivePermission | null>(() => {
 		for (let i = messages.length - 1; i >= 0; i--) {
@@ -2211,32 +3231,66 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = m.parts.length - 1; j >= 0; j--) {
-				const part = m.parts[j] as { type?: string; data?: unknown };
+				const part = m.parts[j];
 				if (part?.type !== "data-ryu-permission") {
 					continue;
 				}
-				const data = part.data as ActivePermission | undefined;
-				if (data?.requestId && !resolvedPermissions.has(data.requestId)) {
+				const data =
+					/* SAFETY: The permission discriminator selects Core ACP PermissionRequest serialization: requestId, toolCall and options are emitted together. */ part.data as
+						| ActivePermission
+						| undefined;
+				if (
+					!data?.requestId ||
+					spentPermissions.has(permissionPartKey(m.id, data.requestId))
+				) {
+					continue;
+				}
+				const scope = {
+					nodeUrl: permissionNodeUrl,
+					requestId: data.requestId,
+					threadId: chatId,
+				};
+				if (
+					!(
+						resolvedPermissions.has(answeredPermissionKey(scope)) ||
+						isPermissionAnswered(answeredPermissions, scope)
+					)
+				) {
 					return data;
 				}
 			}
 		}
 		return null;
-	}, [messages, resolvedPermissions]);
+	}, [
+		messages,
+		resolvedPermissions,
+		spentPermissions,
+		answeredPermissions,
+		permissionNodeUrl,
+		chatId,
+	]);
 
 	// Deliver a decision for one permission request. Keeping the request id in
 	// this callback makes the composer card answer the exact gate that is on
 	// screen, even if another stream update arrives while it is open.
 	const respondToPermission = useCallback(
 		(requestId: string, optionId: string | null) => {
+			const scope = {
+				nodeUrl: chatTargetRef.current.url,
+				requestId,
+				threadId: convIdRef.current ?? draftConvId.current,
+			};
+			const key = answeredPermissionKey(scope);
 			setResolvedPermissions((prev) => {
-				if (prev.has(requestId)) {
+				if (prev.has(key)) {
 					return prev;
 				}
 				const next = new Set(prev);
-				next.add(requestId);
+				next.add(key);
 				return next;
 			});
+			// Every tab on this thread, and the interfaces, drop the prompt too.
+			useInterfaceDetailStore.getState().markPermissionAnswered(scope);
 			respondPermission(chatTargetRef.current, requestId, optionId).catch(
 				() => {
 					// Optimistically cleared already; a failed POST just means the
@@ -2246,11 +3300,6 @@ export default function ChatPage({
 		},
 		[]
 	);
-
-	// Every unresolved permission is presented in the same composer surface as
-	// structured questions. The transcript keeps the tool row as history, while
-	// this active card owns the one decision that can unblock the turn.
-	const composerPermission = activePermission;
 
 	// Slash commands contributed by enabled Core plugins (e.g. `/proof` from the
 	// proof-of-work turn-hook plugin). Core tags each with its owning `plugin` id
@@ -2451,10 +3500,11 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = m.parts.length - 1; j >= 0; j--) {
-				const part = m.parts[j] as { type?: string; data?: unknown };
+				const part = m.parts[j];
 				if (part?.type !== "data-ryu-acp-commands") {
 					continue;
 				}
+				// SAFETY: Core maps typed ACP AvailableCommand entries to an explicit Value::Array with string names and descriptions; nullable hints are retained by the nullish fallback below.
 				const data = part.data as
 					| {
 							commands?: {
@@ -2484,31 +3534,40 @@ export default function ChatPage({
 	// `data-ryu-acp-mode` part (`{ currentModeId }`); we take the most recent one
 	// and push it into ChatPage's `streamedAcpMode` state, which the composer hook
 	// adopts as the Approval picker's selection (and persists for the agent).
-	const latestStreamedAcpMode = useMemo<string | null>(() => {
+	const latestStreamedAcpMode = useMemo<{
+		key: string;
+		mode: string;
+	} | null>(() => {
 		for (let i = messages.length - 1; i >= 0; i--) {
 			const m = messages[i];
 			if (m.role !== "assistant" || !m.parts) {
 				continue;
 			}
 			for (let j = m.parts.length - 1; j >= 0; j--) {
-				const part = m.parts[j] as { type?: string; data?: unknown };
+				const part = m.parts[j];
 				if (part?.type !== "data-ryu-acp-mode") {
 					continue;
 				}
-				const data = part.data as { currentModeId?: string } | undefined;
+				const data =
+					/* SAFETY: The mode discriminator selects Core ModeChanged(String), serialized as the currentModeId string field. */ part.data as
+						| { currentModeId?: string }
+						| undefined;
 				const modeId = data?.currentModeId?.trim();
 				if (modeId) {
-					return modeId;
+					return { key: `${m.id}:${j}`, mode: modeId };
 				}
 			}
 		}
 		return null;
 	}, [messages]);
+	const latestStreamedAcpModeId = latestStreamedAcpMode?.mode ?? null;
+	const latestStreamedAcpModeKey = latestStreamedAcpMode?.key ?? null;
 	useEffect(() => {
-		if (latestStreamedAcpMode) {
-			setStreamedAcpMode(latestStreamedAcpMode);
+		if (latestStreamedAcpModeId) {
+			setStreamedAcpMode(latestStreamedAcpModeId);
+			setStreamedAcpModeKey(latestStreamedAcpModeKey);
 		}
-	}, [latestStreamedAcpMode]);
+	}, [latestStreamedAcpModeId, latestStreamedAcpModeKey]);
 
 	// The agent refused a turn because its login lapsed (Core's
 	// `data-ryu-acp-auth-required`, raised from JSON-RPC -32000). Core deliberately
@@ -2532,13 +3591,14 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = m.parts.length - 1; j >= 0; j--) {
-				const part = m.parts[j] as { type?: string; data?: unknown };
+				const part = m.parts[j];
 				if (part?.type !== "data-ryu-acp-auth-required") {
 					continue;
 				}
-				const data = part.data as
-					| { agentId?: string; message?: string }
-					| undefined;
+				const data =
+					/* SAFETY: The auth discriminator selects Core AuthNeeded with Rust String agent_id and message fields, serialized under these names. */ part.data as
+						| { agentId?: string; message?: string }
+						| undefined;
 				if (data?.agentId) {
 					return {
 						agentId: data.agentId,
@@ -2590,8 +3650,19 @@ export default function ChatPage({
 								.then((res) => {
 									if (res.authenticated) {
 										toast.success({ title: "Logged back in" });
+									} else if (acpAuthAwaitsVerification(res)) {
+										// Accepted but unverifiable: the vendor login may still
+										// be running in a browser or terminal. Not a failure.
+										toast.info({
+											title: "Finish the login, then re-send",
+											description:
+												"The agent accepted the login. Complete it in the browser or terminal it opened, then re-send your message.",
+										});
 									} else {
-										toast.error({ title: "Login did not complete" });
+										toast.error({
+											title: "Login did not complete",
+											description: res.error,
+										});
 									}
 								})
 								.catch(() => {
@@ -2628,10 +3699,11 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = m.parts.length - 1; j >= 0; j--) {
-				const part = m.parts[j] as { type?: string; data?: unknown };
+				const part = m.parts[j];
 				if (part?.type !== "data-ryu-acp-config-options") {
 					continue;
 				}
+				// SAFETY: Every Core ConfigOptions producer serializes the typed ACP response or update config_options list; Array.isArray below admits the list before it reaches the picker.
 				const data = part.data as
 					| { configOptions?: AcpConfigOption[] }
 					| undefined;
@@ -2666,21 +3738,22 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = message.parts.length - 1; j >= 0; j--) {
-				const part = message.parts[j] as { data?: unknown; type?: string };
+				const part = message.parts[j];
 				if (part.type !== "data-ryu-agent-control") {
 					continue;
 				}
-				const data = part.data as
-					| {
-							effective_agent_id?: unknown;
-							effective_effort?: unknown;
-							effective_model?: unknown;
-							effort_cleared?: unknown;
-							model_cleared?: unknown;
-							requested_effort?: unknown;
-							requested_model?: unknown;
-					  }
-					| undefined;
+				const data =
+					/* SAFETY: Core serializes this agent-control object; all projected fields remain unknown until the following native brand or literal checks. */ part.data as
+						| {
+								effective_agent_id?: unknown;
+								effective_effort?: unknown;
+								effective_model?: unknown;
+								effort_cleared?: unknown;
+								model_cleared?: unknown;
+								requested_effort?: unknown;
+								requested_model?: unknown;
+						  }
+						| undefined;
 				return { data: data ?? {}, key: `${message.id}:${j}` };
 			}
 		}
@@ -2698,16 +3771,17 @@ export default function ChatPage({
 			return;
 		}
 		lastAgentControlRef.current = latestAgentControl.key;
-		const targetAgentId =
-			typeof latestAgentControl.data.effective_agent_id === "string"
-				? latestAgentControl.data.effective_agent_id.trim()
-				: "";
+		const targetAgentId = isNativeText(
+			latestAgentControl.data.effective_agent_id
+		)
+			? latestAgentControl.data.effective_agent_id.trim()
+			: "";
 		const modelWasControlled =
 			latestAgentControl.data.model_cleared === true ||
-			typeof latestAgentControl.data.requested_model === "string";
+			isNativeText(latestAgentControl.data.requested_model);
 		const effortWasControlled =
 			latestAgentControl.data.effort_cleared === true ||
-			typeof latestAgentControl.data.requested_effort === "string";
+			isNativeText(latestAgentControl.data.requested_effort);
 		const streamedControl: StreamedAcpControl = {
 			agentId: targetAgentId || null,
 			key: latestAgentControl.key,
@@ -2716,7 +3790,7 @@ export default function ChatPage({
 			streamedControl.model =
 				latestAgentControl.data.model_cleared === true
 					? null
-					: typeof latestAgentControl.data.effective_model === "string"
+					: isNativeText(latestAgentControl.data.effective_model)
 						? latestAgentControl.data.effective_model.trim() || null
 						: null;
 		}
@@ -2724,7 +3798,7 @@ export default function ChatPage({
 			streamedControl.effort =
 				latestAgentControl.data.effort_cleared === true
 					? null
-					: typeof latestAgentControl.data.effective_effort === "string"
+					: isNativeText(latestAgentControl.data.effective_effort)
 						? latestAgentControl.data.effective_effort.trim() || null
 						: null;
 		}
@@ -2769,29 +3843,29 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = message.parts.length - 1; j >= 0; j--) {
-				const part = message.parts[j] as { data?: unknown; type?: string };
+				const part = message.parts[j];
 				if (part.type !== "data-ryu-turn-control") {
 					continue;
 				}
-				const data = part.data as
-					| {
-							effort?: unknown;
-							phase?: unknown;
-							startedAtMs?: unknown;
-							strategy?: unknown;
-							turnId?: unknown;
-					  }
-					| undefined;
+				const data =
+					/* SAFETY: This turn-control view keeps every slot unknown; turnId, startedAtMs, phase and strategy are checked before use. */ part.data as
+						| {
+								effort?: unknown;
+								phase?: unknown;
+								startedAtMs?: unknown;
+								strategy?: unknown;
+								turnId?: unknown;
+						  }
+						| undefined;
 				if (
-					typeof data?.turnId !== "string" ||
-					typeof data.startedAtMs !== "number" ||
+					!(isNativeText(data?.turnId) && isNativeNumber(data.startedAtMs)) ||
 					(data.phase !== "reasoning" && data.phase !== "answering") ||
 					data.strategy !== "native"
 				) {
 					continue;
 				}
 				return {
-					effort: typeof data.effort === "string" ? data.effort : undefined,
+					effort: isNativeText(data.effort) ? data.effort : undefined,
 					phase: data.phase,
 					startedAtMs: data.startedAtMs,
 					strategy: "native",
@@ -2816,27 +3890,25 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = message.parts.length - 1; j >= 0; j--) {
-				const part = message.parts[j] as { data?: unknown; type?: string };
+				const part = message.parts[j];
 				if (part.type === "data-ryu-agent-control") {
-					const data = part.data as
-						| {
-								effective_agent_id?: unknown;
-								effective_effort?: unknown;
-								effective_model?: unknown;
-						  }
-						| undefined;
-					const effectiveAgent =
-						typeof data?.effective_agent_id === "string"
-							? data.effective_agent_id.trim()
-							: "";
-					const effectiveModel =
-						typeof data?.effective_model === "string"
-							? data.effective_model.trim()
-							: "";
-					const effectiveEffort =
-						typeof data?.effective_effort === "string"
-							? data.effective_effort.trim()
-							: "";
+					const data =
+						/* SAFETY: The matching agent-control tag selects the optional slots; each displayed field is admitted by isNativeText before trimming. */ part.data as
+							| {
+									effective_agent_id?: unknown;
+									effective_effort?: unknown;
+									effective_model?: unknown;
+							  }
+							| undefined;
+					const effectiveAgent = isNativeText(data?.effective_agent_id)
+						? data.effective_agent_id.trim()
+						: "";
+					const effectiveModel = isNativeText(data?.effective_model)
+						? data.effective_model.trim()
+						: "";
+					const effectiveEffort = isNativeText(data?.effective_effort)
+						? data.effective_effort.trim()
+						: "";
 					const details = [
 						effectiveAgent ? `agent: ${effectiveAgent}` : null,
 						effectiveModel ? `model: ${effectiveModel}` : null,
@@ -2849,24 +3921,28 @@ export default function ChatPage({
 					};
 				}
 				if (part.type === "data-ryu-acp-compaction") {
-					const data = part.data as { summary?: unknown } | undefined;
+					const data =
+						/* SAFETY: Only the optional summary slot is observed, and isNativeText admits it before display. */ part.data as
+							| { summary?: unknown }
+							| undefined;
 					return {
-						description:
-							typeof data?.summary === "string" ? data.summary : undefined,
+						description: isNativeText(data?.summary) ? data.summary : undefined,
 						id: `${message.id}:${j}`,
 						title: "Earlier context was compacted",
 					};
 				}
 				if (part.type === "data-ryu-acp-session-info") {
-					const data = part.data as
-						| { title?: unknown; updatedAt?: unknown }
-						| undefined;
+					const data =
+						/* SAFETY: The session-info tag selects optional unknown slots; native text checks admit title and updatedAt before use. */ part.data as
+							| { title?: unknown; updatedAt?: unknown }
+							| undefined;
 					const title =
-						typeof data?.title === "string" && data.title.trim()
+						isNativeText(data?.title) && data.title.trim()
 							? `Agent session: ${data.title.trim()}`
 							: "Agent session updated";
-					const updatedAt =
-						typeof data?.updatedAt === "string" ? data.updatedAt : undefined;
+					const updatedAt = isNativeText(data?.updatedAt)
+						? data.updatedAt
+						: undefined;
 					if (title || updatedAt) {
 						return {
 							description: updatedAt,
@@ -2888,7 +3964,7 @@ export default function ChatPage({
 	// thread) must drop it, or the new agent's pickers would keep rendering the
 	// previous agent's options — the memo above only ever SETS, so a stale value
 	// would otherwise survive until something else published.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: agentId/convId are the reset triggers, not read in the body.
+	// agentId/convId are the reset triggers, not read in the body.
 	useEffect(() => {
 		setStreamedAcpConfigOptions(null);
 	}, [agentId, convId]);
@@ -2914,13 +3990,14 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = m.parts.length - 1; j >= 0; j--) {
-				const part = m.parts[j] as { type?: string; data?: unknown };
+				const part = m.parts[j];
 				if (part?.type !== "data-ryu-acp-config") {
 					continue;
 				}
-				const data = part.data as
-					| { config?: Record<string, string> }
-					| undefined;
+				const data =
+					/* SAFETY: Core ConfigUpdate is BTreeMap<String, String>; the matching acp-config envelope exposes that string-to-string map. */ part.data as
+						| { config?: Record<string, string> }
+						| undefined;
 				const config = data?.config;
 				if (config && Object.keys(config).length > 0) {
 					return { key: `${m.id}:${j}`, config };
@@ -2948,6 +4025,7 @@ export default function ChatPage({
 	// re-toast the same one.
 	const lastConfigWarningRef = useRef<string | null>(null);
 	const latestConfigWarning = useMemo<{
+		field: string;
 		key: string;
 		message: string;
 	} | null>(() => {
@@ -2957,16 +4035,17 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = m.parts.length - 1; j >= 0; j--) {
-				const part = m.parts[j] as { type?: string; data?: unknown };
+				const part = m.parts[j];
 				if (part?.type !== "data-ryu-acp-config-warning") {
 					continue;
 				}
-				const data = part.data as
-					| { field?: string; message?: string; requested?: string }
-					| undefined;
+				const data =
+					/* SAFETY: Core ConfigWarning owns Rust String fields for field, requested and message; the matching tag selects its serialized payload. */ part.data as
+						| { field?: string; message?: string; requested?: string }
+						| undefined;
 				const message = data?.message?.trim();
 				if (message) {
-					return { key: `${m.id}:${j}`, message };
+					return { field: data?.field ?? "", key: `${m.id}:${j}`, message };
 				}
 			}
 		}
@@ -2978,17 +4057,49 @@ export default function ChatPage({
 			latestConfigWarning.key !== lastConfigWarningRef.current
 		) {
 			lastConfigWarningRef.current = latestConfigWarning.key;
+			const folders = lastAgentFoldersRef.current;
+			if (
+				latestConfigWarning.field === WORKSPACE_TRUST_WARNING_FIELD &&
+				folders.length > 0
+			) {
+				toast.warning({
+					title: "This folder isn't trusted",
+					description: latestConfigWarning.message,
+					duration: null,
+					button: {
+						title: "Trust folder",
+						onClick: () => {
+							trustWorkspaces(chatTarget, folders)
+								.then((saved) => {
+									if (!saved) {
+										toast.error({ title: "Could not trust the folder" });
+										return;
+									}
+									toast.success({
+										title: "Folder trusted",
+										description:
+											"The agent restarts without these limits on your next message.",
+									});
+								})
+								.catch(() => {
+									toast.error({ title: "Could not trust the folder" });
+								});
+						},
+					},
+				});
+				return;
+			}
 			toast.warning({
 				title: "Agent didn't apply a setting",
 				description: latestConfigWarning.message,
 			});
 		}
-	}, [latestConfigWarning]);
+	}, [chatTarget, latestConfigWarning]);
 
 	// The latest plugin note (e.g. the double-check review) streamed as a
 	// `data-plugin_note` part and not yet dismissed. Surfaced in a dismissible
 	// banner above the composer; it never enters chat history.
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
+	// legacy component
 	const activePluginNote = useMemo<{
 		id: string;
 		question: string | null;
@@ -3000,13 +4111,14 @@ export default function ChatPage({
 				continue;
 			}
 			for (let j = m.parts.length - 1; j >= 0; j--) {
-				const part = m.parts[j] as { type?: string; data?: unknown };
+				const part = m.parts[j];
 				if (part?.type !== "data-plugin_note") {
 					continue;
 				}
-				const data = part.data as
-					| { question?: string; text?: string }
-					| undefined;
+				const data =
+					/* SAFETY: Core plugin_note_frame_with_question serializes text from &str and an optional nonempty &str question under these keys. */ part.data as
+						| { question?: string; text?: string }
+						| undefined;
 				const text = data?.text?.trim();
 				if (!text) {
 					continue;
@@ -3036,10 +4148,6 @@ export default function ChatPage({
 		permission: ActivePermission | null;
 		onRespond: (permission: ActivePermission, optionId: string | null) => void;
 	}>({ permission: null, onRespond: handleRespondPermission });
-	permissionRef.current = {
-		permission: composerPermission,
-		onRespond: handleRespondPermission,
-	};
 
 	// Slash-command list held in a ref so the memoized InputBar slot stays stable
 	// (same pattern as permission/agents above — avoids textarea focus loss).
@@ -3074,12 +4182,16 @@ export default function ChatPage({
 		setLoadingOlderMessages(true);
 		try {
 			const result = await loadMessagesPageResult(conversationId, before);
-			if (convIdRef.current !== conversationId || result.status === "error") {
+			if (
+				!isTranscriptCurrent() ||
+				convIdRef.current !== conversationId ||
+				result.status === "error"
+			) {
 				return;
 			}
 			const now = Date.now();
 			for (const message of result.messages) {
-				if (typeof message.timestamp === "number") {
+				if (isNativeNumber(message.timestamp)) {
 					messageSentAtRef.current.set(message.id, message.timestamp);
 				}
 			}
@@ -3106,10 +4218,12 @@ export default function ChatPage({
 				result.hasOlderMessages === true && nextCursor !== null
 			);
 		} finally {
-			olderMessagesRequestRef.current = false;
-			setLoadingOlderMessages(false);
+			if (isTranscriptCurrent()) {
+				olderMessagesRequestRef.current = false;
+				setLoadingOlderMessages(false);
+			}
 		}
-	}, [loadMessagesPageResult, setMessages]);
+	}, [isTranscriptCurrent, loadMessagesPageResult, setMessages]);
 
 	const retryHistoryLoad = useCallback(() => {
 		setHistoryFailed(false);
@@ -3138,7 +4252,8 @@ export default function ChatPage({
 
 	// Hydrate the visible thread from Core's server-side store when switching
 	// conversations, so history survives restarts and is shared across clients.
-	// Switching `activeConversationId` changes `chatId`, which makes useChat
+	// Changing the conversation or authenticated authority changes the SDK id,
+	// which makes useChat
 	// recreate its Chat with an empty message list (a fresh new/deleted/selected
 	// thread starts blank). We then overlay any persisted history on top.
 	//
@@ -3150,6 +4265,7 @@ export default function ChatPage({
 	// server-side history.
 	useEffect(() => {
 		olderMessagesCursorRef.current = null;
+		olderMessagesRequestRef.current = false;
 		setHasOlderMessages(false);
 		setLoadingOlderMessages(false);
 		if (!convId) {
@@ -3172,7 +4288,7 @@ export default function ChatPage({
 				hasOlderMessages: pageHasOlderMessages,
 				olderMessagesCursor,
 			}) => {
-				if (cancelled) {
+				if (cancelled || !isTranscriptCurrent()) {
 					return;
 				}
 				setHistoryLoading(false);
@@ -3202,7 +4318,7 @@ export default function ChatPage({
 				// the toolbar can render "when it was sent" on reload. Live turns fall back
 				// to a client stamp in `processedMessages`.
 				for (const h of history) {
-					if (typeof h.timestamp === "number") {
+					if (isNativeNumber(h.timestamp)) {
 						messageSentAtRef.current.set(h.id, h.timestamp);
 					}
 				}
@@ -3213,7 +4329,13 @@ export default function ChatPage({
 		return () => {
 			cancelled = true;
 		};
-	}, [convId, loadMessagesPageResult, setMessages, historyReloadKey]);
+	}, [
+		convId,
+		isTranscriptCurrent,
+		loadMessagesPageResult,
+		setMessages,
+		historyReloadKey,
+	]);
 
 	// Re-hydrate messages when the user switches back to this tab. If the ACP
 	// agent is still running, reconnect to Core's live stream resume endpoint so
@@ -3284,10 +4406,10 @@ export default function ChatPage({
 	 * live). `probe` touches nothing unless the probe actually attaches.
 	 */
 	const tryResume = useCallback(
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one SSE reader, kept whole
+		// one SSE reader, kept whole
 		async (mode: "restore" | "probe", options?: { hydrate?: boolean }) => {
 			const conv = convIdRef.current;
-			if (!conv || resumeInFlight.current) {
+			if (!(conv && isTranscriptCurrent()) || resumeInFlight.current) {
 				return;
 			}
 			// An explicit Stop cancels the turn server-side, but Core takes a moment
@@ -3309,7 +4431,7 @@ export default function ChatPage({
 				if (mode === "restore") {
 					const page = await loadMessagesPageResult(conv);
 					history = page.messages;
-					if (controller.signal.aborted) {
+					if (controller.signal.aborted || !isTranscriptCurrent()) {
 						return;
 					}
 					if (page.status === "ok" && hydrate) {
@@ -3342,7 +4464,11 @@ export default function ChatPage({
 					headers,
 					signal: controller.signal,
 				});
-				if (!(resp.ok && resp.body)) {
+				if (
+					controller.signal.aborted ||
+					!isTranscriptCurrent() ||
+					!(resp.ok && resp.body)
+				) {
 					return; // 404 = no running turn
 				}
 				// A live turn IS attached — the composer must show Stop.
@@ -3353,86 +4479,89 @@ export default function ChatPage({
 					// a conversation read on every tick.
 					const page = await loadMessagesPageResult(conv);
 					history = page.messages;
-					if (controller.signal.aborted) {
+					if (controller.signal.aborted || !isTranscriptCurrent()) {
 						return;
 					}
 				}
-				const reader = resp.body.getReader();
-				const decoder = new TextDecoder();
-				let buffer = "";
-				// Find the last assistant message id to append deltas to it,
-				// or create a new one if none exists yet.
-				const lastAssistant = history
-					.slice()
-					.reverse()
-					.find((m) => m.role === "assistant");
-				const targetMsgId = lastAssistant?.id ?? `resume-${Date.now()}`;
-				// Start with the persisted text and append new deltas.
-				let replyText = lastAssistant?.content ?? "";
-				for (;;) {
-					const { done, value } = await reader.read();
-					if (done) {
-						break;
+				// Core replays the running turn from its first chunk, so the reply
+				// belongs to the in-progress assistant row when one is already
+				// persisted (the newest message), otherwise to a new message after
+				// the user's turn — never to the PREVIOUS turn's assistant reply.
+				const newest = history.at(-1);
+				const continued = newest?.role === "assistant" ? newest : undefined;
+				const targetMsgId = continued?.id ?? `resume-${Date.now()}`;
+				// Core states whether the replay is the whole turn; see readResumedTurn.
+				const replay = readResumeReplayHeader(resp.headers);
+				// The reader yields a fresh message snapshot per chunk. Rendering each
+				// one re-renders the whole transcript per token, so coalesce them to
+				// the same window `useChat` throttles the live turn to.
+				let pending: ResumedTurnSnapshot | null = null;
+				let flushTimer: number | undefined;
+				// The row as it was before this reader touched it. Every snapshot is
+				// the whole resumed message so far, so it is merged into this base —
+				// merging into the already-merged row would append a partial
+				// replay's parts again on every flush.
+				let baseRow: UIMessage | undefined;
+				const flushResumed = () => {
+					flushTimer = undefined;
+					const snapshot = pending;
+					pending = null;
+					if (
+						!snapshot ||
+						controller.signal.aborted ||
+						!isTranscriptCurrent()
+					) {
+						return;
 					}
-					buffer += decoder.decode(value, { stream: true });
-					// Parse SSE frames (double-newline separated).
-					let sep = buffer.indexOf("\n\n");
-					while (sep !== -1) {
-						const frame = buffer.slice(0, sep);
-						buffer = buffer.slice(sep + 2);
-						for (const line of frame.split("\n")) {
-							if (!line.startsWith("data: ")) {
-								continue;
-							}
-							const raw = line.slice(6).trim();
-							if (raw === "[DONE]") {
-								continue;
-							}
-							try {
-								const parsed = JSON.parse(raw);
-								if (parsed.type === "text-delta" && parsed.delta) {
-									replyText += parsed.delta;
-									setMessages((prev) => {
-										const idx = prev.findIndex((m) => m.id === targetMsgId);
-										if (idx !== -1) {
-											const next = prev.slice();
-											// Merge, never replace: the reader understands only
-											// text-delta, so overwriting `parts` deleted the tool
-											// rows, Thinking traces and stats part of a turn it
-											// had merely reconnected to. The whole-message form
-											// also clears `_interrupted`, which a delta disproves
-											// — see mergeResumedReplyMessage.
-											next[idx] = mergeResumedReplyMessage(
-												next[idx],
-												replyText
-											);
-											return next;
-										}
-										return [
-											...prev,
-											{
-												id: targetMsgId,
-												role: "assistant" as const,
-												parts: [
-													{
-														type: "text" as const,
-														text: replyText,
-													},
-												],
-											},
-										];
-									});
-								}
-							} catch {
-								// Ignore malformed frames.
-							}
+					const { message: resumed, replayed } = snapshot;
+					setMessages((prev) => {
+						const idx = prev.findIndex((m) => m.id === targetMsgId);
+						if (idx !== -1) {
+							const next = prev.slice();
+							baseRow ??= next[idx];
+							// The whole-message form keeps the row's id and server
+							// metadata and clears `_interrupted`, which a live
+							// reattach disproves — see mergeResumedTurnMessage.
+							next[idx] = mergeResumedTurnMessage(
+								baseRow,
+								resumed.parts,
+								replayed
+							);
+							return next;
 						}
-						sep = buffer.indexOf("\n\n");
+						return [
+							...prev,
+							{ id: targetMsgId, parts: resumed.parts, role: "assistant" },
+						];
+					});
+				};
+				try {
+					for await (const snapshot of readResumedTurn(resp.body, {
+						replay,
+					})) {
+						if (controller.signal.aborted || !isTranscriptCurrent()) {
+							break;
+						}
+						pending = snapshot;
+						flushTimer ??= window.setTimeout(
+							flushResumed,
+							isActiveTabRef.current
+								? ACTIVE_TAB_STREAM_THROTTLE_MS
+								: BACKGROUND_TAB_STREAM_THROTTLE_MS
+						);
+					}
+				} finally {
+					if (flushTimer !== undefined) {
+						window.clearTimeout(flushTimer);
+						flushResumed();
 					}
 				}
 				// Stream ended — re-fetch the final persisted state.
-				if (!controller.signal.aborted) {
+				if (!controller.signal.aborted && isTranscriptCurrent()) {
 					const finalPage = await loadMessagesPageResult(conv);
+					if (controller.signal.aborted || !isTranscriptCurrent()) {
+						return;
+					}
 					if (finalPage.status === "ok" && finalPage.messages.length > 0) {
 						const nextCursor = finalPage.olderMessagesCursor ?? null;
 						olderMessagesCursorRef.current = nextCursor;
@@ -3450,18 +4579,27 @@ export default function ChatPage({
 				// Resume failed (no live turn / network error) — persisted history is
 				// already loaded above, nothing more to do.
 			} finally {
-				resumeInFlight.current = false;
-				setResumeStreaming(false);
-				if (attached) {
-					// Detaching flips `effectiveStatus` back to "ready", which re-arms
-					// arm 2. Bound that cycle: if Core ever hands back a stream that
-					// closes immediately, this makes it a slow retry rather than a
-					// request storm.
-					resumeSuppressedUntil.current = Date.now() + RESUME_REATTACH_GRACE_MS;
+				if (isTranscriptCurrent()) {
+					resumeInFlight.current = false;
+					setResumeStreaming(false);
+					if (attached) {
+						// Detaching flips `effectiveStatus` back to "ready", which re-arms
+						// arm 2. Bound that cycle: if Core ever hands back a stream that
+						// closes immediately, this makes it a slow retry rather than a
+						// request storm.
+						resumeSuppressedUntil.current =
+							Date.now() + RESUME_REATTACH_GRACE_MS;
+					}
 				}
 			}
 		},
-		[loadMessagesPageResult, setMessages, refresh, clearError]
+		[
+			isTranscriptCurrent,
+			loadMessagesPageResult,
+			setMessages,
+			refresh,
+			clearError,
+		]
 	);
 
 	// Reconnect Retry starts hidden/background turns through Core. If this tab owns
@@ -3471,8 +4609,10 @@ export default function ChatPage({
 	useEffect(() => {
 		const timers = new Set<number>();
 		const onRetryStarted = (event: Event) => {
-			const detail = (event as CustomEvent<{ conversationId?: unknown }>)
-				.detail;
+			const detail =
+				/* SAFETY: The CHAT_RETRY_STARTED_EVENT producer in useReconnectRetryRecovery.ts dispatches a native CustomEvent with the full conversationId/source detail; this listener reads only that native detail slot. */ (
+					event as CustomEvent<{ conversationId?: unknown }>
+				).detail;
 			if (detail?.conversationId !== convId) {
 				return;
 			}
@@ -3518,7 +4658,7 @@ export default function ChatPage({
 			resumeInFlight.current = false;
 			setResumeStreaming(false);
 		},
-		[convId]
+		[convId, isTranscriptCurrent]
 	);
 
 	// The turn state everything user-facing keys off. `status` alone reports
@@ -3529,24 +4669,123 @@ export default function ChatPage({
 	// `status` stays the raw useChat value for the stream plumbing itself.
 	const effectiveStatus: typeof status =
 		resumeStreaming && status === "ready" ? "streaming" : status;
-	const [answerNowClock, setAnswerNowClock] = useState(() => Date.now());
+	const previousRecoveryStatus = useRef(status);
+	useEffect(() => {
+		const started =
+			status === "streaming" && previousRecoveryStatus.current !== "streaming";
+		previousRecoveryStatus.current = status;
+		const conversationId = convId ?? draftConvId.current;
+		if (started && conversationId) {
+			// Only SDK streaming confirms a fresh send/retry. Reattached readers
+			// change resumeStreaming while the SDK status remains ready.
+			window.dispatchEvent(
+				new CustomEvent(CHAT_TURN_STARTED_EVENT, {
+					detail: { conversationId, nodeUrl: activeNode.url },
+				})
+			);
+		}
+	}, [activeNode.url, convId, status]);
+	const [answerNowReadyTurnId, setAnswerNowReadyTurnId] = useState<
+		string | null
+	>(null);
 	const [answerNowPendingTurnId, setAnswerNowPendingTurnId] = useState<
 		string | null
 	>(null);
 	const turnIsBusy =
 		effectiveStatus === "streaming" || effectiveStatus === "submitted";
 
-	// Keep the effort-aware grace period ticking only while the native provider is
-	// still in its reasoning phase. Unsupported routes never publish this part,
-	// so they pay no timer or render cost.
+	// Workspace interfaces see what only this tab can: the open permission
+	// prompt (answered through respondToPermission, so this card and the
+	// interface's ask clear together), the exact turn start, the live step,
+	// stream errors, a login lapse and the failover verdict. In memory only.
+	// The agent is the thread's own, never the composer's next pick, so a
+	// limit verdict for another agent can never read as this thread's reset.
+	useLiveTabPublish({
+		activePermission,
+		agentId: (convId ? getConversation(convId)?.agentId : undefined) ?? null,
+		error,
+		messages,
+		nodeUrl: permissionNodeUrl,
+		respondToPermission,
+		running: turnIsBusy,
+		startedAtMs: latestTurnControl?.startedAtMs ?? null,
+		threadId: convId,
+	});
+
+	// Every unresolved permission is presented in the same composer surface as
+	// structured questions, while the turn that asked runs: Core's waiter goes
+	// with the turn. The transcript keeps the tool row as history, while this
+	// active card owns the one decision that can unblock the turn.
+	const composerPermission = turnIsBusy ? activePermission : null;
+	permissionRef.current = {
+		permission: composerPermission,
+		onRespond: handleRespondPermission,
+	};
+
+	// A later turn (or a restarted Core) can mint the same `perm-<seq>` again:
+	// answers recorded for this conversation are forgotten when the turn ends.
+	useAnsweredPermissionPrune({
+		nodeUrl: permissionNodeUrl,
+		onTurnEnd: () => {
+			const answered = useInterfaceDetailStore.getState().answeredPermissions;
+			const spent = answeredPermissionParts(messages, (requestId) => {
+				const scope = {
+					nodeUrl: permissionNodeUrl,
+					requestId,
+					threadId: chatId,
+				};
+				return (
+					resolvedPermissions.has(answeredPermissionKey(scope)) ||
+					isPermissionAnswered(answered, scope)
+				);
+			});
+			if (spent.length > 0) {
+				setSpentPermissions((prev) => new Set([...prev, ...spent]));
+			}
+			setResolvedPermissions((prev) => (prev.size === 0 ? prev : new Set()));
+		},
+		running: turnIsBusy,
+		threadId: chatId,
+	});
+
+	// Arm one timeout for the effort-aware grace period while the native provider
+	// is still in its reasoning phase. A single deadline instead of a ticking
+	// clock: the whole chat page re-renders once when the button appears, not
+	// four times a second for the length of the reasoning phase. Unsupported
+	// routes never publish this part, so they pay no timer or render cost.
+	const answerNowTurnId = latestTurnControl?.turnId;
+	const answerNowStartedAtMs = latestTurnControl?.startedAtMs;
+	const answerNowEffort = latestTurnControl?.effort;
+	const answerNowReasoning = latestTurnControl?.phase === "reasoning";
 	useEffect(() => {
-		if (!(turnIsBusy && latestTurnControl?.phase === "reasoning")) {
+		if (
+			!(
+				turnIsBusy &&
+				answerNowReasoning &&
+				answerNowTurnId &&
+				answerNowStartedAtMs !== undefined
+			)
+		) {
 			return;
 		}
-		setAnswerNowClock(Date.now());
-		const timer = window.setInterval(() => setAnswerNowClock(Date.now()), 250);
-		return () => window.clearInterval(timer);
-	}, [latestTurnControl?.phase, latestTurnControl?.turnId, turnIsBusy]);
+		const remainingMs =
+			answerNowStartedAtMs + answerNowDelayMs(answerNowEffort) - Date.now();
+		if (remainingMs <= 0) {
+			setAnswerNowReadyTurnId(answerNowTurnId);
+			return;
+		}
+		const timer = window.setTimeout(
+			() => setAnswerNowReadyTurnId(answerNowTurnId),
+			remainingMs
+		);
+		return () => window.clearTimeout(timer);
+	}, [
+		answerNowEffort,
+		answerNowReasoning,
+		answerNowStartedAtMs,
+		answerNowTurnId,
+		turnIsBusy,
+	]);
 
 	useEffect(() => {
 		if (
@@ -3584,8 +4823,7 @@ export default function ChatPage({
 			!(
 				turnIsBusy &&
 				latestTurnControl?.phase === "reasoning" &&
-				answerNowClock - latestTurnControl.startedAtMs >=
-					answerNowDelayMs(latestTurnControl.effort)
+				answerNowReadyTurnId === latestTurnControl.turnId
 			)
 		) {
 			return undefined;
@@ -3595,8 +4833,8 @@ export default function ChatPage({
 			pending: answerNowPendingTurnId === latestTurnControl.turnId,
 		};
 	}, [
-		answerNowClock,
 		answerNowPendingTurnId,
+		answerNowReadyTurnId,
 		handleAnswerNow,
 		latestTurnControl,
 		turnIsBusy,
@@ -3697,15 +4935,16 @@ export default function ChatPage({
 		ghostChatActive || !reactionsPluginEnabled ? null : convId
 	);
 
+	// Saved state of generative-UI widgets (checklists, forms, calculators), so
+	// they reopen as the user left them. A temporary chat keeps state in memory.
+	const agentUiStateHost = useAgentUiStateHost(ghostChatActive ? null : convId);
+
 	const memoryCitationsByMessage = useMemo(() => {
 		const citationsByMessage = new Map<
 			string,
 			ReturnType<typeof extractMemoryCitations>
 		>();
-		const transcriptMessages = [
-			...(merged.messages as unknown as UIMessage[]),
-			...messages,
-		];
+		const transcriptMessages = [...merged.messages, ...messages];
 		for (const message of transcriptMessages) {
 			const citations = extractMemoryCitations(message.parts);
 			if (citations.length > 0) {
@@ -3727,9 +4966,11 @@ export default function ChatPage({
 			const rating = feedback[messageId];
 			const memoryCitations = memoryCitationsByMessage.get(messageId);
 			states.set(messageId, {
-				...(buckets ? { reactionBuckets: buckets } : {}),
-				...(memoryCitations ? { memoryCitations } : {}),
-				...(rating ? { toggleValues: { "learning.feedback": rating } } : {}),
+				...(buckets ? { reactionBuckets: buckets } : undefined),
+				...(memoryCitations ? { memoryCitations } : undefined),
+				...(rating
+					? { toggleValues: { "learning.feedback": rating } }
+					: undefined),
 			});
 		}
 		return states;
@@ -3775,7 +5016,7 @@ export default function ChatPage({
 					return next;
 				});
 				void pluginHostInvoke(chatTarget, action.plugin, action.capability, {
-					...(action.args ?? {}),
+					...action.args,
 					conversation_id: conversationId,
 					message_id: context.messageId,
 					rating,
@@ -3799,9 +5040,9 @@ export default function ChatPage({
 				return;
 			}
 			const args = {
-				...(action.args ?? {}),
+				...action.args,
 				message_id: context.messageId,
-				...(context.value === undefined ? {} : { value: context.value }),
+				...(context.value === undefined ? undefined : { value: context.value }),
 			};
 			void pluginHostInvoke(chatTarget, action.plugin, action.capability, args);
 		},
@@ -3811,10 +5052,10 @@ export default function ChatPage({
 	// Remote members' latest presence (name + typing), keyed by member id. Our own
 	// member is excluded. Reset when the conversation changes.
 	const [remotePresence, setRemotePresence] = useState<
-		Record<string, { name?: string; typing?: boolean }>
+		Record<string, { name?: string | null; typing?: boolean }>
 	>({});
 	// Presence belongs to the room we are leaving, so wipe it when convId changes.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: convId is the reset trigger, not read in the body.
+	// convId is the reset trigger, not read in the body.
 	useEffect(() => {
 		setRemotePresence({});
 		myMemberIdRef.current = null;
@@ -3827,11 +5068,49 @@ export default function ChatPage({
 	// frame being delivered twice. Appended last = created_at order for live
 	// arrival; the server timestamp is kept in metadata for later reconstruction.
 	const handleRealtimeEvent = useCallback(
-		(data: unknown) => {
-			if (typeof data !== "object" || data === null) {
+		(raw: Parameters<typeof realtimeEventInputSchema.safeParse>[0]) => {
+			const parsed = realtimeEventInputSchema.safeParse(raw);
+			if (!parsed.success) {
 				return;
 			}
-			const frame = data as { type?: string; message?: unknown };
+			const data = parsed.data;
+			const handoffFrame = parseConversationContextHandoffFrame(data);
+			if (handoffFrame) {
+				if (handoffFrame.conversationId === convIdRef.current) {
+					const handoffs = mergeContextHandoffs(contextHandoffsRef.current, [
+						handoffFrame.handoff,
+					]);
+					contextHandoffsRef.current = handoffs;
+					setContextHandoffs(handoffs);
+				}
+				return;
+			}
+			const modelSelectionFrame = parseConversationModelSelectionFrame(data);
+			if (modelSelectionFrame) {
+				if (modelSelectionFrame.conversationId !== convIdRef.current) {
+					return;
+				}
+				const { change } = modelSelectionFrame;
+				const merged = mergeConversationModelChanges(
+					conversationModelChangesRef.current,
+					[change]
+				);
+				conversationModelChangesRef.current = merged;
+				setConversationModelChanges(merged);
+				setProviderModelSelection(
+					change.providerId
+						? {
+								modelId: change.modelId,
+								providerId: change.providerId,
+								providerLabel: change.providerLabel,
+							}
+						: null
+				);
+				setSelectedModel(change.modelId);
+				setModelSelectionCleared(change.modelId === null);
+				return;
+			}
+			const frame = data;
 			if (frame.type === "readReceipt" || frame.type === "read_receipt") {
 				applyReadReceiptFrame(data);
 				return;
@@ -3842,20 +5121,14 @@ export default function ChatPage({
 				applyReactionFrame(data, myUserIdRef.current);
 				return;
 			}
-			if (frame.type !== "message" || typeof frame.message !== "object") {
+			if (frame.type !== "message") {
 				return;
 			}
-			const msg = frame.message as {
-				id?: string;
-				content?: string;
-				author_user_id?: string | null;
-				author_name?: string | null;
-				created_at?: number;
-				source?: string | null;
-				widget_instance_id?: string | null;
-				origin_server?: string | null;
-				client_id?: string | null;
-			};
+			const observed = observeConversationMessageEvent(data);
+			if (!observed) {
+				return;
+			}
+			const msg = observed.event.message;
 			const authorId = msg.author_user_id ?? null;
 			// Suppress only the exact client that submitted the optimistic message.
 			// Another tab or device owned by the same user must still receive it.
@@ -3863,12 +5136,7 @@ export default function ChatPage({
 				msg.client_id,
 				realtimeClientIdRef.current
 			);
-			if (
-				!msg.id ||
-				typeof msg.content !== "string" ||
-				!authorId ||
-				isOwnMessage
-			) {
+			if (!(msg.id && isNativeText(msg.content) && authorId) || isOwnMessage) {
 				return;
 			}
 			const inserted = {
@@ -3883,65 +5151,67 @@ export default function ChatPage({
 					source: msg.source ?? undefined,
 					widget_instance_id: msg.widget_instance_id ?? undefined,
 				},
-			};
+			} satisfies UIMessage;
 			setMessages((prev) => {
 				if (prev.some((m) => m.id === msg.id)) {
 					return prev;
 				}
-				return [...prev, inserted as unknown as (typeof prev)[number]];
+				return [...prev, inserted];
 			});
 		},
-		[setMessages, applyReactionFrame, applyReadReceiptFrame]
+		[
+			applyReactionFrame,
+			applyReadReceiptFrame,
+			setConversationModelChanges,
+			setMessages,
+			setModelSelectionCleared,
+			setProviderModelSelection,
+			setSelectedModel,
+		]
 	);
 
 	// Apply a presence delta from another member: upsert their name/typing, or
 	// drop them on a `presence_leave`. Our own echo (same member id) is ignored.
-	const handleRealtimePresence = useCallback((data: unknown) => {
-		if (typeof data !== "object" || data === null) {
-			return;
-		}
-		const frame = data as {
-			type?: string;
-			member_id?: string;
-			name?: string;
-			typing?: boolean;
-		};
-		const memberId = frame.member_id;
-		if (!memberId || memberId === myMemberIdRef.current) {
-			return;
-		}
-		if (frame.type === "presence_leave") {
-			setRemotePresence((prev) => {
-				if (!(memberId in prev)) {
-					return prev;
-				}
-				const next = { ...prev };
-				delete next[memberId];
-				return next;
-			});
-			return;
-		}
-		setRemotePresence((prev) => ({
-			...prev,
-			[memberId]: { name: frame.name, typing: Boolean(frame.typing) },
-		}));
-	}, []);
+	const handleRealtimePresence = useCallback(
+		(data: Parameters<NonNullable<RealtimeHandlers["onPresence"]>>[0]) => {
+			const frame = observeChatPresence(data, "delta");
+			if (!frame) {
+				return;
+			}
+			const memberId = frame.memberId;
+			if (!memberId || memberId === myMemberIdRef.current) {
+				return;
+			}
+			if (frame.kind === "leave") {
+				setRemotePresence((prev) => {
+					if (!(memberId in prev)) {
+						return prev;
+					}
+					const next = { ...prev };
+					delete next[memberId];
+					return next;
+				});
+				return;
+			}
+			setRemotePresence((prev) => ({
+				...prev,
+				[memberId]: { name: frame.name, typing: Boolean(frame.typing) },
+			}));
+		},
+		[]
+	);
 
 	const handleRealtimeJoinAck = useCallback((ack: JoinAck) => {
 		myMemberIdRef.current = ack.memberId;
 		setRemotePresence((prev) => {
 			const next = { ...prev };
 			for (const entry of ack.presence) {
-				if (typeof entry !== "object" || entry === null) {
+				const frame = observeChatPresence(entry, "roster");
+				if (frame?.kind !== "upsert") {
 					continue;
 				}
-				const frame = entry as {
-					member_id?: string;
-					name?: string;
-					typing?: boolean;
-				};
-				if (frame.member_id && frame.member_id !== ack.memberId) {
-					next[frame.member_id] = {
+				if (frame.memberId && frame.memberId !== ack.memberId) {
+					next[frame.memberId] = {
 						name: frame.name,
 						typing: Boolean(frame.typing),
 					};
@@ -3976,7 +5246,7 @@ export default function ChatPage({
 	// stable typing publisher always sends the current value.
 	const myPresenceNameRef = useRef("Someone");
 	myPresenceNameRef.current = oidcUser?.name ?? oidcUser?.email ?? "Someone";
-	const publishRoomPresenceRef = useRef<(data: unknown) => void>(() => {});
+	const publishRoomPresenceRef = useRef<typeof publishRoomPresence>(() => {});
 	publishRoomPresenceRef.current = publishRoomPresence;
 
 	// Debounced typing presence: publish `typing:true` on activity, then
@@ -4037,6 +5307,11 @@ export default function ChatPage({
 	// ChatGPT-style next-prompt suggestions: fetched from Core once a turn
 	// settles, cleared the moment the next turn starts (or the thread switches).
 	const [followUps, setFollowUps] = useState<string[]>([]);
+	// Composer prediction (Composer Predictions plugin): the user's likely next
+	// message, shown as Tab-to-accept ghost text. Shares the chips' lifecycle.
+	const [composerPrediction, setComposerPrediction] = useState<string | null>(
+		null
+	);
 	const followUpAbort = useRef<AbortController | null>(null);
 
 	// After a streamed reply completes, re-sync the sidebar list from Core and
@@ -4056,6 +5331,7 @@ export default function ChatPage({
 		// A new turn is in flight — drop stale chips and cancel any pending fetch.
 		if (status === "streaming" || status === "submitted") {
 			setFollowUps([]);
+			setComposerPrediction(null);
 			followUpAbort.current?.abort();
 			followUpAbort.current = null;
 		}
@@ -4070,10 +5346,13 @@ export default function ChatPage({
 			// tree changed — re-read git now rather than waiting for the safety-net
 			// poll. Cheap: once per turn, not once per chunk.
 			invalidateGitStatus();
-			if (activeConversationId) {
-				invalidateWorktreeStatus(activeConversationId);
-				invalidateWorktreeDiff(activeConversationId);
-				setDiffConvId(activeConversationId);
+			// The run belongs to THIS TAB's conversation. Never the shared
+			// focused-tab `activeConversationId`: a run that finishes while another
+			// tab is focused would read that tab's diff and follow-ups.
+			if (convId) {
+				invalidateWorktreeStatus(convId);
+				invalidateWorktreeDiff(convId);
+				setDiffConvId(convId);
 			}
 			// Auto read-back when enabled (Voice settings), unless a meeting is recording.
 			getVoiceModeReadbackPrefs(chatTargetRef.current).then((prefs) => {
@@ -4100,17 +5379,26 @@ export default function ChatPage({
 			prevStatus.current = status;
 			// Ask Core for follow-up prompts for the turn that just finished.
 			// Best-effort: an empty list simply shows no chips.
-			const convId = activeConversationId ?? draftConvId.current;
-			if (convId) {
+			const followUpConversationId = convId ?? draftConvId.current;
+			if (followUpConversationId) {
 				const controller = new AbortController();
 				followUpAbort.current = controller;
 				fetchNextPromptSuggestions(
 					chatTargetRef.current,
-					convId,
+					followUpConversationId,
 					controller.signal
 				).then((items) => {
 					if (!controller.signal.aborted) {
 						setFollowUps(items);
+					}
+				});
+				fetchComposerPrediction(
+					chatTargetRef.current,
+					followUpConversationId,
+					controller.signal
+				).then((prediction) => {
+					if (!controller.signal.aborted) {
+						setComposerPrediction(prediction);
 					}
 				});
 			}
@@ -4120,7 +5408,7 @@ export default function ChatPage({
 	}, [
 		status,
 		refresh,
-		activeConversationId,
+		convId,
 		messages,
 		currentTabId,
 		acp.acpMode,
@@ -4154,37 +5442,35 @@ export default function ChatPage({
 		return () => window.clearTimeout(timer);
 	}, [scrollToMessageId, currentTabId, messages.length, clearScrollToMessage]);
 
-	// Switching threads must not carry chips across conversations.
-	// `activeConversationId` is load-bearing: it is the only thing that changes on
-	// a thread switch, so without it this never runs again after mount and the
-	// chips leak into the next conversation.
+	// Switching THIS TAB's thread must not carry chips across conversations.
+	// The tab-local `convId` is load-bearing: it changes on every in-tab thread
+	// switch, so without it this never runs again after mount and the chips leak
+	// into the next conversation. Never key this on the shared focused-tab
+	// `activeConversationId`: every chat tab stays mounted, so focusing another
+	// tab would clear this background tab's chips and abort its in-flight
+	// suggestions request.
 	useEffect(() => {
 		setFollowUps([]);
+		setComposerPrediction(null);
 		followUpAbort.current?.abort();
 		followUpAbort.current = null;
-	}, [activeConversationId]);
+	}, [convId]);
 
 	/** Keep very large pastes out of the prompt body and make them inspectable files. */
 	const LONG_PASTE_THRESHOLD = 10_000;
 
 	const addImages = useCallback(
 		(files: File[]) => {
-			const imageFiles = files.filter((f) => f.type.startsWith("image/"));
-			if (imageFiles.length === 0) {
-				return;
-			}
-			for (const file of imageFiles) {
-				void stageImageUpload(chatTarget, file).then(({ dataUrl, upload }) => {
-					setAttachedImages((prev) => [
-						...prev,
-						{
-							id: upload?.id ?? `img-${Date.now()}-${Math.random()}`,
-							filename: file.name,
-							url: dataUrl,
-							mimeType: file.type,
-							size: file.size,
-						},
-					]);
+			const unsupported = stageImageAndTextFiles(
+				chatTarget,
+				files,
+				(item) => setAttachedImages((prev) => [...prev, item]),
+				(message) =>
+					toast.error("Could not attach file", { description: message })
+			);
+			if (unsupported.length > 0) {
+				toast.error("Can't attach these files yet", {
+					description: `${unsupported.join(", ")} — images and text files are supported.`,
 				});
 			}
 		},
@@ -4194,7 +5480,7 @@ export default function ChatPage({
 	const handleAttach = useCallback(() => {
 		const input = document.createElement("input");
 		input.type = "file";
-		input.accept = "image/*";
+		input.accept = IMAGE_AND_TEXT_ACCEPT;
 		input.multiple = true;
 		input.onchange = () => {
 			if (input.files) {
@@ -4206,6 +5492,15 @@ export default function ChatPage({
 
 	const handleRemoveImage = useCallback((id: string) => {
 		setAttachedImages((prev) => prev.filter((img) => img.id !== id));
+	}, []);
+
+	const handleOpenImageEditor = useCallback((image: ImageEditorAsset) => {
+		setImageEditorAsset(image);
+	}, []);
+
+	const handleAiResize = useCallback(async (request: ImageResizeRequest) => {
+		const resultUrl = await generateImageResize(chatTargetRef.current, request);
+		return fetchEditableImage(resultUrl, request.signal);
 	}, []);
 
 	const handleOpenDrawesome = useCallback(() => {
@@ -4224,7 +5519,9 @@ export default function ChatPage({
 			try {
 				let dataUrl = image.url;
 				if (!dataUrl.startsWith("data:")) {
-					const response = await fetch(dataUrl, { credentials: "include" });
+					const response = await fetch(dataUrl, {
+						credentials: "same-origin",
+					});
 					if (!response.ok) {
 						throw new Error(`Image request failed (${response.status})`);
 					}
@@ -4305,7 +5602,11 @@ export default function ChatPage({
 	}, []);
 
 	const handleDragLeave = useCallback((e: React.DragEvent) => {
-		if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+		if (
+			!e.currentTarget.contains(
+				/* SAFETY: React dispatches the native DOM dragleave event here; its relatedTarget is the previous DOM node or null, which contains accepts. */ e.relatedTarget as Node
+			)
+		) {
 			setIsDragOver(false);
 		}
 	}, []);
@@ -4337,7 +5638,10 @@ export default function ChatPage({
 			if (!isActiveTabRef.current) {
 				return;
 			}
-			const { runId } = (e as CustomEvent<{ runId: string }>).detail;
+			const { runId } =
+				/* SAFETY: run-store.ts notification onclick dispatches this exact native CustomEvent with detail { runId: run.id }; the run owner supplies its complete string id. */ (
+					e as CustomEvent<{ runId: string }>
+				).detail;
 			if (runId) {
 				setConvId(runId);
 				setActiveConversationId(runId);
@@ -4358,6 +5662,34 @@ export default function ChatPage({
 			// #403: Always surface the user's message even when blocked, so it's never
 			// silently dropped. If chat is blocked, record it in blockedMessages so the
 			// UI can render it with an error state.
+			const cloudGate = { boxBackendEnabled };
+			const cloudReason = cloudTaskBlockReason(
+				cloudSelectionRef.current,
+				agentId,
+				cloudGate
+			);
+			if (cloudReason) {
+				toast.error(cloudReason);
+				return;
+			}
+			// A managed CLI agent (Claude Code, Codex, ...) runs in a fresh cloud box
+			// through Core's prompt route, not the chat stream; it takes text only.
+			const managedExecutor = managedCloudExecutor(
+				cloudSelectionRef.current,
+				cloudGate
+			);
+			if (managedExecutor) {
+				const pendingImages =
+					message.attachments ?? attachmentRef.current.attachedImages;
+				if (pendingImages.length > 0) {
+					toast.error("Managed cloud agents take a text prompt only.");
+					return;
+				}
+				if (ghostChatActive) {
+					toast.error("Temporary chats cannot run in the cloud.");
+					return;
+				}
+			}
 			if (composerBlocked) {
 				setBlockedMessages((prev) => [
 					...prev,
@@ -4369,7 +5701,11 @@ export default function ChatPage({
 				]);
 				return;
 			}
-			if (!chatFolderRef.current && messageNeedsWorkspace(message.content)) {
+			if (
+				cloudSelectionRef.current.mode !== "cloud" &&
+				!chatFolderRef.current &&
+				messageNeedsWorkspace(message.content)
+			) {
 				// Keep the submitted message intact while a non-technical user chooses a
 				// project. This avoids the old upfront folder gate without allowing a local
 				// edit request to run in Core's arbitrary process directory.
@@ -4383,6 +5719,7 @@ export default function ChatPage({
 				(model) => model.id === browserModelId
 			);
 			const browserLocalActive =
+				cloudSelectionRef.current.mode !== "cloud" &&
 				!forceCoreNextRef.current &&
 				browserSnapshot?.activeSurface === "dashboard" &&
 				browserSnapshot.activeAgentId === agentId &&
@@ -4474,7 +5811,7 @@ export default function ChatPage({
 							]);
 						}
 					})
-					.catch((error: unknown) => {
+					.catch((error) => {
 						if (controller.signal.aborted) {
 							return;
 						}
@@ -4501,7 +5838,16 @@ export default function ChatPage({
 			// The folder this turn is about to run in — read from the store, exactly
 			// as the transport body does a moment later, so the row the sidebar shows
 			// and the `cwd` Core stamps onto the conversation are the same value.
-			const sendFolder = chatFolderRef.current ?? undefined;
+			const sendFolder =
+				cloudSelectionRef.current.mode === "cloud"
+					? undefined
+					: (chatFolderRef.current ?? undefined);
+			if (cloudScopeRef.current && "locked" in cloudSelectionRef.current) {
+				useCloudTaskSelections.getState().setSelection(cloudScopeRef.current, {
+					...cloudSelectionRef.current,
+					locked: true,
+				});
+			}
 			if (!convId) {
 				const newId = draftConvId.current;
 				// A temporary chat is never registered in the sidebar history:
@@ -4541,6 +5887,63 @@ export default function ChatPage({
 				if (titleTargetId) {
 					seedTitleFromFirstMessage(titleTargetId, message.content);
 				}
+			}
+
+			const managedSelection = cloudSelectionRef.current;
+			if (
+				boxBackendEnabled &&
+				managedExecutor &&
+				managedSelection.mode === "cloud" &&
+				managedSelection.environmentId
+			) {
+				const cloudConversationId = convIdRef.current ?? draftConvId.current;
+				const optimisticId = `cloud-user-${Date.now()}`;
+				setMessages((previous) => [
+					...previous,
+					{
+						id: optimisticId,
+						parts: [{ text: message.content, type: "text" }],
+						role: "user",
+					},
+				]);
+				const backendChoice = cloudScopeRef.current
+					? useCloudTaskBackendChoices.getState().choices[cloudScopeRef.current]
+					: undefined;
+				startCloudTaskPrompt(chatTarget, cloudConversationId, {
+					agentId: targetAgentIdRef.current ?? participants[0]?.agentId,
+					environmentId: managedSelection.environmentId,
+					text: message.content,
+					...backendPromptFields(backendChoice),
+				})
+					.then((accepted) => {
+						// A preferred plan was skipped (usage limit, signed out): say so,
+						// because the task now runs on a Ryu Box and uses Ryu credits.
+						for (const notice of accepted.notices) {
+							toast.info(notice.message);
+						}
+						return Promise.all([
+							queryClient.invalidateQueries({
+								queryKey: [CLOUD_TASK_QUERY_KEY, chatTarget.url],
+							}),
+							queryClient.invalidateQueries({
+								queryKey: [SUBSCRIPTION_RUN_QUERY_KEY, chatTarget.url],
+							}),
+						]);
+					})
+					.catch((error: unknown) => {
+						setMessages((previous) =>
+							previous.filter((item) => item.id !== optimisticId)
+						);
+						let reason = "Could not start the cloud agent.";
+						if (error instanceof ApiError) {
+							reason = error.serverMessage ?? error.message;
+						} else if (error instanceof Error) {
+							reason = error.message;
+						}
+						toast.error(reason);
+					});
+				stopTyping();
+				return;
 			}
 
 			// #415: Record the targeted agent for this upcoming assistant turn so we
@@ -4587,6 +5990,7 @@ export default function ChatPage({
 			composerBlocked,
 			convId,
 			agentId,
+			boxBackendEnabled,
 			agents,
 			participants,
 			messages,
@@ -4599,6 +6003,8 @@ export default function ChatPage({
 			stopTyping,
 			browserSnapshot,
 			setMessages,
+			chatTarget,
+			queryClient,
 		]
 	);
 	handleSendRef.current = handleSend;
@@ -4666,9 +6072,14 @@ export default function ChatPage({
 			if (message.role !== "user" && message.role !== "assistant") {
 				return [];
 			}
+			// SAFETY: The branch admits a non-null, non-array object; copied metadata slots remain unknown and are preserved without interpreting them.
 			return [
 				{
 					content: extractAssistantText(message),
+					metadata: jsonResponseDocumentSchema.safeParse(message.metadata)
+						.success
+						? jsonResponseDocumentSchema.parse(message.metadata)
+						: undefined,
 					parts: Array.isArray(message.parts) ? [...message.parts] : undefined,
 					role: message.role,
 				},
@@ -4707,7 +6118,7 @@ export default function ChatPage({
 			if (saved.status === "ok" && saved.messages.length > 0) {
 				const now = Date.now();
 				for (const message of saved.messages) {
-					if (typeof message.timestamp === "number") {
+					if (isNativeNumber(message.timestamp)) {
 						messageSentAtRef.current.set(message.id, message.timestamp);
 					}
 				}
@@ -4748,19 +6159,87 @@ export default function ChatPage({
 		status,
 	]);
 
+	// A managed cloud agent's reply (and a finish summary) is appended by Core,
+	// not streamed; the cloud task panel calls this when a run or finish settles
+	// so the transcript shows Core's persisted messages.
+	const reloadCloudTaskMessages = useCallback(async () => {
+		const conversationId = convIdRef.current;
+		if (!conversationId) {
+			return;
+		}
+		let saved: Awaited<ReturnType<typeof loadMessagesResult>>;
+		try {
+			saved = await loadMessagesResult(conversationId);
+		} catch {
+			// Keep the current transcript; the next settle or reopen reloads it.
+			return;
+		}
+		if (saved.status !== "ok" || convIdRef.current !== conversationId) {
+			return;
+		}
+		const now = Date.now();
+		for (const message of saved.messages) {
+			if (isNativeNumber(message.timestamp)) {
+				messageSentAtRef.current.set(message.id, message.timestamp);
+			}
+		}
+		setVersions(buildVersions(saved.messages));
+		setMessages(
+			saved.messages.map((message) => hydrateHistoryMessage(message, now))
+		);
+	}, [loadMessagesResult, setMessages]);
+
 	// `/btw` side question: an ephemeral question about the current conversation
 	// shown in a dismissible overlay and never added to the chat history (modeled
 	// on Claude Code's interactive `/btw`). The side model sees the conversation
 	// context but has no tools. `null` = overlay closed.
 	const [btwState, setBtwState] = useState<BtwState | null>(null);
 	const btwRequestRef = useRef(0);
+	const btwAbortRef = useRef<AbortController | null>(null);
+	const btwScope = JSON.stringify([
+		activeConversationId,
+		chatTarget.url,
+		chatTarget.token,
+		chatTarget.userJwt ?? null,
+		sideChatsPluginEnabled,
+		isActiveTab,
+	]);
+	const btwScopeRef = useRef(btwScope);
+	btwScopeRef.current = btwScope;
+	const invalidateSideChatRequest = useCallback(() => {
+		btwRequestRef.current += 1;
+		btwAbortRef.current?.abort();
+		btwAbortRef.current = null;
+	}, []);
+	const dismissSideChat = useCallback(() => {
+		invalidateSideChatRequest();
+		setBtwState(null);
+	}, [invalidateSideChatRequest]);
+	const stopSideChat = useCallback(() => {
+		invalidateSideChatRequest();
+		setBtwState((state) =>
+			state
+				? {
+						...state,
+						loading: false,
+						error: "Side question stopped. Ask again to retry.",
+					}
+				: null
+		);
+	}, [invalidateSideChatRequest]);
+	useEffect(() => {
+		// A result belongs only to the conversation, node and credentials that
+		// started it. Scope changes also discard a previously displayed answer.
+		dismissSideChat();
+		return invalidateSideChatRequest;
+	}, [btwScope, dismissSideChat, invalidateSideChatRequest]);
 	// Bumped after each `/btw` resolves so the Context rail's Side-chats list
 	// refetches the now-persisted aside without a full reload.
 	const [sideChatsRefreshKey, setSideChatsRefreshKey] = useState(0);
 
 	/** Run one side question from either `/btw` or a selection-toolbar action. */
 	const askSideChatQuestion = useCallback(
-		(question: string) => {
+		(question: string, includeConversationContext = true) => {
 			const convId = activeConversationId;
 			if (!convId) {
 				setBtwState({
@@ -4772,8 +6251,11 @@ export default function ChatPage({
 				});
 				return;
 			}
-			const requestId = btwRequestRef.current + 1;
-			btwRequestRef.current = requestId;
+			invalidateSideChatRequest();
+			const requestId = btwRequestRef.current;
+			const scope = btwScopeRef.current;
+			const controller = new AbortController();
+			btwAbortRef.current = controller;
 			setBtwState({
 				question,
 				loading: true,
@@ -4785,12 +6267,16 @@ export default function ChatPage({
 				chatTargetRef.current,
 				convId,
 				question,
-				sideChatMessages,
-				undefined,
+				// Read the latest visible transcript only when a side question is sent.
+				includeConversationContext ? buildSideChatContext(messages) : [],
+				controller.signal,
 				effectiveModel ?? undefined
 			)
 				.then((result) => {
-					if (btwRequestRef.current !== requestId) {
+					if (
+						btwRequestRef.current !== requestId ||
+						btwScopeRef.current !== scope
+					) {
 						return;
 					}
 					setBtwState({
@@ -4800,36 +6286,49 @@ export default function ChatPage({
 						model: result.model,
 						error: null,
 					});
+					btwAbortRef.current = null;
 					setSideChatsRefreshKey((key) => key + 1);
 				})
-				.catch((error: unknown) => {
-					if (btwRequestRef.current !== requestId) {
+				.catch((error) => {
+					if (
+						btwRequestRef.current !== requestId ||
+						btwScopeRef.current !== scope
+					) {
 						return;
 					}
+					btwAbortRef.current = null;
 					setBtwState({
 						question,
 						loading: false,
 						answer: null,
 						model: null,
 						error:
-							error instanceof Error ? error.message : "Side question failed",
+							error instanceof ApiError
+								? (error.serverMessage ?? error.message)
+								: error instanceof Error
+									? error.message
+									: "Side question failed",
 					});
 				});
 		},
-		[activeConversationId, effectiveModel, sideChatMessages]
+		[activeConversationId, effectiveModel, messages, invalidateSideChatRequest]
 	);
 
 	// Reopen a persisted side chat (from the Context rail or the sidebar) in the
 	// btw overlay.
-	const handleOpenSideChat = useCallback((entry: BtwEntry) => {
-		setBtwState({
-			question: entry.question,
-			loading: false,
-			answer: entry.answer,
-			model: entry.model ?? null,
-			error: null,
-		});
-	}, []);
+	const handleOpenSideChat = useCallback(
+		(entry: BtwEntry) => {
+			invalidateSideChatRequest();
+			setBtwState({
+				question: entry.question,
+				loading: false,
+				answer: entry.answer,
+				model: entry.model ?? null,
+				error: null,
+			});
+		},
+		[invalidateSideChatRequest]
+	);
 	const handleOpenSideChatRequest = useCallback(
 		(entry?: BtwEntry) => {
 			if (entry) {
@@ -4864,6 +6363,16 @@ export default function ChatPage({
 		setRightPanelOpen(true);
 	}, []);
 
+	const [agentActivityReq, setAgentActivityReq] = useState<{
+		nonce: number;
+	} | null>(null);
+	const agentActivityNonce = useRef(0);
+	const handleOpenAgentActivity = useCallback(() => {
+		agentActivityNonce.current += 1;
+		setAgentActivityReq({ nonce: agentActivityNonce.current });
+		setRightPanelOpen(true);
+	}, []);
+
 	// Capped pinned-summary sections open their complete live collections in
 	// reusable workspace tabs. One nonce stream is enough because the request also
 	// carries the collection kind.
@@ -4891,11 +6400,11 @@ export default function ChatPage({
 	// one-at-a-time limit), so clicking a second artifact stacks it alongside the
 	// first rather than replacing it.
 	const [artifactReq, setArtifactReq] = useState<{
-		artifact: Artifact;
+		artifact: ArtifactView;
 		nonce: number;
 	} | null>(null);
 	const artifactNonce = useRef(0);
-	const handleOpenArtifact = useCallback((artifact: Artifact) => {
+	const handleOpenArtifact = useCallback((artifact: ArtifactView) => {
 		artifactNonce.current += 1;
 		setArtifactReq({ artifact, nonce: artifactNonce.current });
 		setRightPanelOpen(true);
@@ -4921,12 +6430,37 @@ export default function ChatPage({
 		setFileReviewRequest({ nonce: fileReviewNonce.current, paths });
 		setRightPanelOpen(true);
 	}, []);
+	// A completed HTTP mutation still belongs to the workspace/connection that
+	// started it. A → B → A must not re-adopt the first A's acknowledgement.
+	const fileUndoOwner = useMemo(
+		() => ({ folder, conversationId: convId, isTranscriptCurrent }),
+		[folder, convId, isTranscriptCurrent]
+	);
+	const fileUndoOwnerRef = useRef(fileUndoOwner);
+	fileUndoOwnerRef.current = fileUndoOwner;
 	const handleUndoFileEdits = useCallback(
 		async (plan: FileEditUndoPlan) => {
 			if (!folder) {
 				throw new Error("Open the project folder before undoing this turn.");
 			}
-			const result = await reverseGitEdits(chatTarget, folder, plan);
+			const ownsResult = () =>
+				fileUndoOwnerRef.current === fileUndoOwner &&
+				fileUndoOwner.isTranscriptCurrent();
+			if (!ownsResult()) {
+				return;
+			}
+			let result: Awaited<ReturnType<typeof reverseGitEdits>>;
+			try {
+				result = await reverseGitEdits(chatTarget, folder, plan);
+			} catch (error) {
+				if (!ownsResult()) {
+					return;
+				}
+				throw error;
+			}
+			if (!ownsResult()) {
+				return;
+			}
 			if (result.kind === "conflict") {
 				const reason =
 					result.reason === "staged_changes"
@@ -4937,9 +6471,9 @@ export default function ChatPage({
 				throw new Error(reason);
 			}
 			invalidateGitStatus();
-			if (activeConversationId) {
-				invalidateWorktreeStatus(activeConversationId);
-				invalidateWorktreeDiff(activeConversationId);
+			if (fileUndoOwner.conversationId) {
+				invalidateWorktreeStatus(fileUndoOwner.conversationId);
+				invalidateWorktreeDiff(fileUndoOwner.conversationId);
 			}
 			toast.success(
 				result.paths.length === 1
@@ -4947,11 +6481,15 @@ export default function ChatPage({
 					: `${result.paths.length} turn edits undone`
 			);
 		},
-		[activeConversationId, chatTarget, folder]
+		[chatTarget, fileUndoOwner, folder]
 	);
+	// Close the review pane when THIS tab's conversation (or the workspace)
+	// changes. Never key this on the shared focused-tab `activeConversationId`:
+	// every chat tab stays mounted, so focusing another tab would close the open
+	// review pane of every background tab.
 	useEffect(() => {
 		setFileReviewRequest(null);
-	}, [activeConversationId, folder]);
+	}, [convId, folder]);
 
 	// Sidebar → side chat: the sidebar selects the thread then dispatches this
 	// event. Only the tab whose conversation matches opens the overlay; if the
@@ -4963,9 +6501,10 @@ export default function ChatPage({
 	} | null>(null);
 	useEffect(() => {
 		const handler = (e: Event) => {
-			const detail = (
-				e as CustomEvent<{ conversationId: string; entry?: BtwEntry }>
-			).detail;
+			const detail =
+				/* SAFETY: Both AppSidebar.tsx ryu:open-side-chat publishers construct native CustomEvent detail with a string conversationId and the optional complete BtwEntry argument; this listener retains that full payload. */ (
+					e as CustomEvent<{ conversationId: string; entry?: BtwEntry }>
+				).detail;
 			if (!detail?.conversationId) {
 				return;
 			}
@@ -5005,6 +6544,11 @@ export default function ChatPage({
 		setResumeStreaming(false);
 		resumeSuppressedUntil.current = Date.now() + RESUME_STOP_GRACE_MS;
 		const conversationId = convIdRef.current ?? draftConvId.current;
+		window.dispatchEvent(
+			new CustomEvent(CHAT_RECOVERY_STOP_EVENT, {
+				detail: { conversationId, nodeUrl: chatTargetRef.current.url },
+			})
+		);
 		cancelChat(chatTargetRef.current, conversationId).catch(() => {
 			// No live turn (or Core unreachable) — the SSE abort above still stands.
 		});
@@ -5053,10 +6597,8 @@ export default function ChatPage({
 				effectiveStatus === "streaming" || effectiveStatus === "submitted",
 			stop: handleStop,
 			startVoiceMode: voiceMode.start,
-			toggleBottomPanel: showBottomPanelToggle
-				? () => setBottomPanelOpen((v) => !v)
-				: null,
-			toggleRightPanel: () => setRightPanelOpen((v) => !v),
+			toggleBottomPanel: showBottomPanelToggle ? toggleBottomPanel : null,
+			toggleRightPanel,
 			toggleSearch: toggleChatSearch,
 		});
 		publishFileTreeSearch(hotkeyOwner, fileSearchRequest);
@@ -5075,6 +6617,8 @@ export default function ChatPage({
 		voiceMode.start,
 		toggleChatSearch,
 		showBottomPanelToggle,
+		toggleBottomPanel,
+		toggleRightPanel,
 		publishHotkeyTargets,
 		publishFileTreeSearch,
 		clearHotkeyTargets,
@@ -5123,6 +6667,7 @@ export default function ChatPage({
 					openTab("/chat", {
 						conversationId: newId,
 						forceNew: true,
+						node: tabBoundNodeName,
 						worktreeMode: destination === "worktree",
 					});
 				})
@@ -5130,7 +6675,7 @@ export default function ChatPage({
 					toast.error("Could not fork this chat.");
 				});
 		},
-		[forkConversation, forkRequest, openTab]
+		[forkConversation, forkRequest, openTab, tabBoundNodeName]
 	);
 
 	const handleHandOffToWorktree = useCallback(
@@ -5153,25 +6698,27 @@ export default function ChatPage({
 		[currentTabId, updateTabWorktreeMode]
 	);
 
-	// Load the persisted thumbs state when the active conversation changes, so a
+	// Load the persisted thumbs state when THIS tab's conversation changes, so a
 	// reloaded transcript restores its lit thumbs. Best-effort (empty on failure).
+	// Keyed on the tab-local `convId`, never the shared focused-tab
+	// `activeConversationId`: every chat tab stays mounted, so focusing another
+	// tab would make each background tab clear its thumbs or load the focused
+	// conversation's instead of its own.
 	useEffect(() => {
-		if (!activeConversationId) {
+		if (!convId) {
 			setFeedback({});
 			return;
 		}
 		let cancelled = false;
-		getConversationFeedback(chatTargetRef.current, activeConversationId).then(
-			(map) => {
-				if (!cancelled) {
-					setFeedback(map);
-				}
+		getConversationFeedback(chatTargetRef.current, convId).then((map) => {
+			if (!cancelled) {
+				setFeedback(map);
 			}
-		);
+		});
 		return () => {
 			cancelled = true;
 		};
-	}, [activeConversationId]);
+	}, [convId]);
 
 	// After an edit/regenerate stream settles, re-read the active path so the
 	// version pager counts (and any server-side title/ordering) reflect the new
@@ -5288,6 +6835,19 @@ export default function ChatPage({
 			setVersions(buildVersions(history));
 			const now = Date.now();
 			setMessages(history.map((m) => hydrateHistoryMessage(m, now)));
+			// Handoff markers follow the branch: Core returns the ones recorded
+			// for the thread now selected, so replace rather than merge.
+			getConversationModelSelection(chatTargetRef.current, conv)
+				.then((selection) => {
+					if (convIdRef.current !== conv) {
+						return;
+					}
+					contextHandoffsRef.current = selection.handoffs;
+					setContextHandoffs(selection.handoffs);
+				})
+				.catch(() => {
+					// Display-only: the markers refresh on the next load instead.
+				});
 		},
 		[activeConversationId, selectVersion, loadMessages, setMessages]
 	);
@@ -5297,7 +6857,7 @@ export default function ChatPage({
 	// plugin notes (e.g. double-check reviews) are per-thread too. Keyed on
 	// `convId` so switching threads within the same tab clears a leftover answer
 	// or dismissed note instead of carrying it across conversations.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: convId is the reset trigger, not read in the body.
+	// convId is the reset trigger, not read in the body.
 	useEffect(() => {
 		btwRequestRef.current += 1;
 		setBtwState(null);
@@ -5366,9 +6926,14 @@ export default function ChatPage({
 				dispatch === SIDE_CHAT_SELECTION_DISPATCH
 			) {
 				const intent: SideChatSelectionIntent =
-					action.args?.intent === "explain" ? "explain" : "ask";
+					action.args?.intent === "explain"
+						? "explain"
+						: action.args?.intent === "proofread"
+							? "proofread"
+							: "ask";
 				askSideChatQuestion(
-					buildSideChatSelectionQuestion(intent, context.text)
+					buildSideChatSelectionQuestion(intent, context.text, context.note),
+					intent !== "proofread"
 				);
 				return;
 			}
@@ -5379,10 +6944,11 @@ export default function ChatPage({
 			}
 			const conversationId = convIdRef.current ?? activeConversationId;
 			void pluginHostInvoke(chatTarget, action.plugin, capability, {
-				...(action.args ?? {}),
+				...action.args,
 				selection_text: context.text,
-				...(conversationId ? { conversation_id: conversationId } : {}),
-				...(effectiveModel ? { model: effectiveModel } : {}),
+				...(context.note ? { selection_note: context.note } : undefined),
+				...(conversationId ? { conversation_id: conversationId } : undefined),
+				...(effectiveModel ? { model: effectiveModel } : undefined),
 			});
 		},
 		[activeConversationId, askSideChatQuestion, chatTarget, effectiveModel]
@@ -5408,9 +6974,18 @@ export default function ChatPage({
 		setReplyContext(null);
 	}, [convId]);
 
-	const handleQuote = useCallback((text: string) => {
+	const handleQuote = useCallback((text: string, note?: string) => {
 		setQuote(text);
 		setReplyContext(null);
+		// A note typed into the selection's annotate box becomes the reply draft,
+		// through the same composer insertion seam Clips quick-attach uses.
+		if (note?.trim()) {
+			clipsDraftInsertionSequence.current += 1;
+			setClipsDraftInsertion({
+				id: clipsDraftInsertionSequence.current,
+				text: note,
+			});
+		}
 	}, []);
 	const handleReply = useCallback(
 		(reply: MessageReply) => {
@@ -5447,11 +7022,60 @@ export default function ChatPage({
 		[convId, agentId, effectiveModel, chatFolder, ghostChatActive]
 	);
 	const autosaveDraft = useComposerDraftAutosave(draftContext);
+
+	// Suggested next task (`tasks.suggest`): Start opens the agent's proposed task
+	// as a NEW chat in this chat's project and agent, never this thread, so the
+	// follow-up does not widen the current conversation. Save to Drafts is offered
+	// only when the Drafts app is on and this chat is not temporary.
+	const draftsAvailable =
+		useAppShellPath(DRAFTS_PLUGIN_ID, DRAFTS_BUTTON_ID) !== null;
+	const taskSuggestionActions = useMemo<AgentChatProps["taskSuggestions"]>(
+		() => ({
+			canStartInWorktree: Boolean(chatFolder),
+			onSaveDraft:
+				draftsAvailable && !ghostChatActive
+					? async (task) => {
+							await saveDraft(chatTarget, {
+								agent_id: agentId ?? undefined,
+								folder_path: chatFolder ?? undefined,
+								source: "manual",
+								text: task.prompt,
+							});
+							await refreshProjectDrafts();
+							toast.success("Saved to Drafts");
+						}
+					: undefined,
+			onStart: (task, mode) => {
+				openTab("/chat", {
+					forceNew: true,
+					initialAgent: agentId ?? undefined,
+					initialProject: chatFolder ?? undefined,
+					initialPrompt: task.prompt,
+					// The user clicked Start on a card that shows the full prompt.
+					initialSubmit: true,
+					node: tabBoundNodeName,
+					title: task.title,
+					worktreeMode: mode === "worktree" ? true : undefined,
+				});
+			},
+		}),
+		[
+			agentId,
+			chatFolder,
+			chatTarget,
+			draftsAvailable,
+			ghostChatActive,
+			openTab,
+			refreshProjectDrafts,
+			tabBoundNodeName,
+		]
+	);
 	const restoredDraft = useComposerDraftRestore(draftContext);
 	const maybeAutoQueue = useComposerAutoQueue(draftContext);
 	const composerDraftRef = useRef("");
 	const handleDraftChange = useCallback(
 		(draft: string) => {
+			setRemoteMentionQuery(mentionSearchQuery(draft));
 			composerDraftRef.current = draft;
 			autosaveDraft(draft);
 		},
@@ -5518,6 +7142,7 @@ export default function ChatPage({
 				initialModel: effectiveModel ?? undefined,
 				initialPrompt: draft || undefined,
 				initialQuote: pending.text,
+				node: tabBoundNodeName,
 				title: "Focused thread",
 			});
 			clearReply();
@@ -5534,10 +7159,102 @@ export default function ChatPage({
 		effectiveModel,
 		openTab,
 		replyContext,
+		tabBoundNodeName,
 	]);
+
+	const openRewind = useCallback((preselect: RewindPreselect | null) => {
+		setRewindPreselect(preselect);
+		setRewindDialogOpen(true);
+	}, []);
+	const handleRewindMessage = useCallback(
+		(messageId: string, text: string) => {
+			openRewind({ messageId, text });
+		},
+		[openRewind]
+	);
+	// `/rewind` is a client-side command: it opens the checkpoint picker.
+	const maybeHandleRewindCommand = useCallback(
+		(raw: string) => {
+			if (raw.trim() !== "/rewind") {
+				return false;
+			}
+			openRewind(null);
+			return true;
+		},
+		[openRewind]
+	);
+	useEffect(() => {
+		pendingRewindEditRef.current = null;
+	}, [convId]);
+	const handleRewindRestored = useCallback(
+		async (result: CheckpointRestoreResult, mode: CheckpointRestoreMode) => {
+			const conv = convIdRef.current ?? activeConversationId;
+			if (result.files) {
+				invalidateGitStatus();
+				if (conv) {
+					invalidateWorktreeStatus(conv);
+					invalidateWorktreeDiff(conv);
+				}
+			}
+			const rewound = result.conversation;
+			if (rewound && conv) {
+				const history = await loadMessages(conv);
+				const now = Date.now();
+				if (rewound.resendAsEdit) {
+					pendingRewindEditRef.current = rewound.rewoundMessageId;
+					setMessages([]);
+				} else {
+					pendingRewindEditRef.current = null;
+					setMessages(history.map((m) => hydrateHistoryMessage(m, now)));
+				}
+				setVersions(buildVersions(history));
+				if (rewound.rewoundText.trim()) {
+					clipsDraftInsertionSequence.current += 1;
+					setClipsDraftInsertion({
+						id: clipsDraftInsertionSequence.current,
+						text: rewound.rewoundText,
+					});
+				}
+			}
+			const skippedCount = result.files?.skipped.length ?? 0;
+			if (skippedCount > 0) {
+				// The dialog stays open and lists each protected file.
+				toast.warning(
+					`Rewind left ${skippedCount} ${skippedCount === 1 ? "file" : "files"} unchanged to protect unsaved work`
+				);
+				return;
+			}
+			const fileCount =
+				(result.files?.restored.length ?? 0) +
+				(result.files?.removed.length ?? 0);
+			const filesNote =
+				fileCount === 1 ? "1 file restored" : `${fileCount} files restored`;
+			toast.success(
+				mode === "conversation"
+					? "Conversation rewound"
+					: mode === "code"
+						? `Code rewound · ${filesNote}`
+						: `Code and conversation rewound · ${filesNote}`
+			);
+		},
+		[activeConversationId, loadMessages, setMessages]
+	);
 
 	const submitNow = useCallback(
 		(message: { role: "user"; content: string }) => {
+			if (maybeHandleRewindCommand(message.content)) {
+				return;
+			}
+			const rewindEditId = pendingRewindEditRef.current;
+			if (
+				rewindEditId &&
+				message.content.trim() &&
+				(effectiveStatus === "ready" || effectiveStatus === "error")
+			) {
+				pendingRewindEditRef.current = null;
+				void handleEditMessage(rewindEditId, message.content);
+				return;
+			}
 			// `/btw …` is a client-side command. `/goal …` is now handled
 			// server-side by the io.ryu.goal plugin, so it is sent as a normal
 			// message (the plugin parses it from the turn).
@@ -5583,7 +7300,9 @@ export default function ChatPage({
 			clearError,
 			handleSend,
 			enqueueMessage,
+			handleEditMessage,
 			maybeHandleBtwCommand,
+			maybeHandleRewindCommand,
 			quote,
 		]
 	);
@@ -5621,28 +7340,67 @@ export default function ChatPage({
 		});
 	}, [chatTarget.url, convId, registerQuickReplyHandler]);
 
+	// Question cards. A blocking card answers the tool call that is waiting on
+	// it. An async card, or one whose turn stopped waiting (timed out, or the
+	// user went away), is answered with a normal user message instead, which
+	// carries a hidden marker so the card stays closed after a reload.
+	const questionTool = useMemo<NonNullable<AgentChatProps["questionTool"]>>(
+		() => ({
+			onAnswers: ({ answers, async: isAsync, questions, toolCallId }) => {
+				const sendAsMessage = () => {
+					handleComposerSubmit({
+						role: "user",
+						content: formatAsyncQuestionAnswer(
+							toolCallId ?? "question",
+							questions,
+							answers
+						),
+					});
+				};
+				if (isAsync || !toolCallId) {
+					sendAsMessage();
+					return;
+				}
+				respondQuestion(
+					chatTargetRef.current,
+					convIdRef.current ?? draftConvId.current,
+					toolCallId,
+					answers
+				)
+					.then((result) => {
+						if (!result.resolved) {
+							sendAsMessage();
+						}
+					})
+					.catch(sendAsMessage);
+			},
+		}),
+		[handleComposerSubmit]
+	);
+
 	const handleAgentUiSubmit = useCallback(
-		(value: unknown) => {
-			const content =
-				typeof value === "string"
-					? value
-					: (JSON.stringify(value) ?? String(value));
+		(value: Parameters<NonNullable<AgentChatProps["onAgentUiSubmit"]>>[0]) => {
+			const content = isNativeText(value)
+				? value
+				: (JSON.stringify(value) ?? String(value));
 			return handleComposerSubmit({ role: "user", content });
 		},
 		[handleComposerSubmit]
 	);
 
 	// Queued messages belong to the conversation they were typed in. Switching
-	// conversations resets useChat (status → "ready"), which would otherwise drain
-	// stale items into the new thread — clear on every switch (mirrors the
-	// blockedMessages reset below).
-	// `activeConversationId` is load-bearing. `clearQueue` is
+	// THIS TAB's conversation resets its useChat (status → "ready"), which would
+	// otherwise drain stale items into the new thread — clear on every switch
+	// (mirrors the blockedMessages reset below).
+	// The tab-local `convId` is load-bearing. `clearQueue` is
 	// `useCallback(() => setQueue([]), [])` — a permanently stable identity — so
-	// on its own this effect runs once at mount and NEVER on a thread switch,
-	// which is exactly the stale-drain the comment above says it prevents.
+	// on its own this effect runs once at mount and NEVER on a thread switch.
+	// Never key this on the shared focused-tab `activeConversationId`: every chat
+	// tab stays mounted, so focusing another tab would discard this background
+	// tab's queued messages while its run is still streaming.
 	useEffect(() => {
 		clearQueue();
-	}, [clearQueue, activeConversationId]);
+	}, [clearQueue, convId]);
 
 	// Clear blocked messages when a new conversation starts or services recover.
 	useEffect(() => {
@@ -5651,12 +7409,20 @@ export default function ChatPage({
 		}
 	}, [composerBlocked]);
 
+	// A new thread in THIS TAB starts without the previous thread's blocked
+	// messages. Keyed on the tab-local `convId`, never on the shared focused-tab
+	// `activeConversationId`: that id is null whenever a new-chat tab is focused,
+	// so keying on it discarded every background tab's blocked messages.
+	// A null conversation is normal on mount. `useChat` captures
+	// `draftConvId.current` as its instance id before this effect runs, so rotating
+	// the ref here would make the request body target a different conversation than
+	// the Chat instance receiving the stream. `startFreshThread` rotates it
+	// synchronously before setting the local conversation state.
 	useEffect(() => {
-		if (!activeConversationId) {
-			draftConvId.current = `conv-${Date.now()}`;
+		if (!convId) {
 			setBlockedMessages([]);
 		}
-	}, [activeConversationId]);
+	}, [convId]);
 
 	// Launchpad auto-send: when this tab was opened from the home composer with a
 	// user-typed prompt (`initialSubmit`), send it as soon as the composer would
@@ -5667,6 +7433,7 @@ export default function ChatPage({
 	// is never dropped into a down gateway/Core. Deep-link/Inbox seeds leave
 	// `initialSubmit` unset and stay pre-fill-only (attacker-/system-controllable).
 	const autoSubmitFired = useRef(false);
+	const cloudSelectionLoading = cloudSelection.mode === "loading";
 	useEffect(() => {
 		if (autoSubmitFired.current || !initialSubmit) {
 			return;
@@ -5675,6 +7442,14 @@ export default function ChatPage({
 		const hasImages = (initialImages?.length ?? 0) > 0;
 		if (!(content || hasImages)) {
 			autoSubmitFired.current = true;
+			return;
+		}
+		// A new tab starts with its cloud binding unresolved: the scope is hashed
+		// asynchronously, so the first commit always reads "loading". `handleSend`
+		// answers that with a toast and returns, which would drop a Start prompt
+		// (or a launchpad message) on every single launch. Wait for the binding to
+		// settle; an error binding still reaches `handleSend` and says so.
+		if (cloudSelectionLoading) {
 			return;
 		}
 		autoSubmitFired.current = true;
@@ -5689,7 +7464,13 @@ export default function ChatPage({
 		// silently vanish after the redirect from the empty-tabs shell — the user
 		// landed on an empty new chat with nothing sent.
 		submitNow({ role: "user", content });
-	}, [initialSubmit, initialPrompt, initialImages, submitNow]);
+	}, [
+		initialSubmit,
+		initialPrompt,
+		initialImages,
+		submitNow,
+		cloudSelectionLoading,
+	]);
 
 	// The first Ryu conversation is opened by Core as an assistant-only turn. No
 	// synthetic user message is handed to useChat, and a not-ready local model is
@@ -5764,7 +7545,7 @@ export default function ChatPage({
 							id: `proactive-opening-${conversationId}`,
 							role: "assistant",
 							parts: [{ type: "text", text: result.reply }],
-						} as unknown as UIMessage,
+						} satisfies UIMessage,
 					]);
 				}
 				seedTitleFromFirstMessage(conversationId, "Getting started with Ryu");
@@ -5873,71 +7654,24 @@ export default function ChatPage({
 		return [...messages, ...blocked];
 	}, [messages, blockedMessages]);
 
-	// Inject a per-agent label prefix into the first text part of each
-	// assistant message when we have a participant label for that turn.
-	const processedMessages = useMemo(() => {
-		let assistantIdx = 0;
-		// Resolve a message's send time: the persisted server stamp (seeded on
-		// history load) if known, otherwise a client stamp captured the first time
-		// this id is seen. Attached as `createdAt` so the message toolbar can render
-		// it beside the action buttons for both user and assistant turns.
-		const resolveCreatedAt = (id: string): Date => {
-			const seen = messageSentAtRef.current;
-			let stamp = seen.get(id);
-			if (stamp === undefined) {
-				stamp = Date.now();
-				seen.set(id, stamp);
-			}
-			return new Date(stamp);
-		};
-		return visibleMessages.map((m) => {
-			const createdAt = resolveCreatedAt(m.id);
-			if (m.role !== "assistant" || !m.parts) {
-				return { ...m, createdAt };
-			}
-
-			const myIdx = assistantIdx;
-			assistantIdx += 1;
-
-			// Codex-style: plain replies in a normal chat. Labels only appear in
-			// council (multi-agent) conversations, resolved from the label map or
-			// the participant list.
-			const agentLabel = (() => {
-				if (participants.length <= 1) {
-					return null;
-				}
-				const mapped = agentLabelMapRef.current[String(myIdx)];
-				if (mapped) {
-					return mapped;
-				}
-				if (agentId) {
-					const a = agents.find((ag) => ag.id === agentId);
-					if (a) {
-						return a.name;
-					}
-				}
-				return null;
-			})();
-
-			const parts = m.parts.map((part) => {
-				const p = part as { type?: string; text?: string };
-				// Prepend the agent label line for council conversations.
-				if (
-					p.type === "text" &&
-					agentLabel &&
-					p.text !== undefined &&
-					!p.text.startsWith(`**${agentLabel}**`)
-				) {
-					return {
-						...part,
-						text: `**${agentLabel}**\n\n${p.text}`,
-					};
-				}
-				return part;
-			});
-			return { ...m, parts, createdAt };
-		});
-	}, [visibleMessages, participants, agentId, agents]);
+	const decorateMessages = useMemo(
+		() => createMessageDecorator<(typeof visibleMessages)[number]>(),
+		[]
+	);
+	// Reuse settled message/parts identities while the final reply streams.
+	const processedMessages = useMemo(
+		() =>
+			decorateMessages(visibleMessages, {
+				sentAt: messageSentAtRef.current,
+				labels: agentLabelMapRef.current,
+				council: participants.length > 1,
+				fallbackLabel:
+					participants.length > 1 && agentId
+						? (agents.find((agent) => agent.id === agentId)?.name ?? null)
+						: null,
+			}),
+		[visibleMessages, participants, agentId, agents, decorateMessages]
+	);
 
 	// What the transcript actually renders. In the merged agent view the older
 	// threads sit above the live one; everything else in this page — the context
@@ -5947,10 +7681,7 @@ export default function ChatPage({
 	const renderedMessages = useMemo(
 		() =>
 			merged.messages.length > 0
-				? [
-						...(merged.messages as unknown as typeof processedMessages),
-						...processedMessages,
-					]
+				? [...merged.messages, ...processedMessages]
 				: processedMessages,
 		[merged.messages, processedMessages]
 	);
@@ -6003,6 +7734,38 @@ export default function ChatPage({
 		readReceiptUsers,
 		renderedMessages,
 	]);
+	const conversationModelNotices = useMemo(() => {
+		const modelNotices = conversationModelChanges.map((change) => {
+			const provider = change.providerLabel ?? change.providerId;
+			const model = change.modelLabel ?? change.modelId;
+			return {
+				at: change.createdAt,
+				description:
+					provider && model
+						? `${provider} · ${model}`
+						: provider
+							? `${provider} · Provider default`
+							: (model ?? "Automatic model selection"),
+				id: `model-change-${change.id}`,
+				title:
+					change.kind === "initial"
+						? "Model used for this conversation"
+						: provider
+							? "Provider and model changed"
+							: "Model changed",
+			};
+		});
+		// Each handoff marker lands right after the change that caused it.
+		const handoffNotices = contextHandoffs.map((handoff) => ({
+			at: handoff.createdAt,
+			description: describeContextHandoff(handoff),
+			id: `context-handoff-${handoff.id}`,
+			title: "Context handed off",
+		}));
+		return [...modelNotices, ...handoffNotices]
+			.sort((left, right) => left.at - right.at)
+			.map(({ description, id, title }) => ({ description, id, title }));
+	}, [contextHandoffs, conversationModelChanges]);
 	const handleMessageVisible = useCallback(
 		(messageId: string) => {
 			const message = renderedMessages.find(
@@ -6225,6 +7988,7 @@ export default function ChatPage({
 					id: item.id,
 					kind: item.kind,
 					label: item.label,
+					ownerId: item.ownerId,
 					target: item.target,
 					visualIcon: item.visualIcon,
 				})),
@@ -6311,10 +8075,17 @@ export default function ChatPage({
 	// The SAME usage the composer ring shows, derived here too so the Context
 	// panel and the ring can never report different numbers (the ring derives it
 	// internally from the identical inputs — see `deriveContextUsage`).
+	// The model/agent hints key the prompt-cache TTL when a part omits them; the
+	// SAME hints reach AgentChat so the ring and this panel agree.
 	const contextUsage = useMemo(
-		() => deriveContextUsage(processedMessages, contextSize),
-		[processedMessages, contextSize]
+		() =>
+			deriveContextUsage(processedMessages, contextSize, {
+				model: cacheModelHint,
+				provider: agentId,
+			}),
+		[processedMessages, contextSize, cacheModelHint, agentId]
 	);
+	contextUsageRef.current = contextUsage;
 
 	const composerCompact = processedMessages.length > 0;
 	const composerCompactRef = useRef(composerCompact);
@@ -6386,11 +8157,31 @@ export default function ChatPage({
 		]
 	);
 
+	// Per-model sampling presets + editor for the model this chat sends to. Absent
+	// for teams and external agents, which apply their own settings.
+	const parameterModel = useMemo(() => {
+		if (teamId) {
+			return null;
+		}
+		const agent = agents.find((candidate) => candidate.id === agentId);
+		return chatParameterModel({
+			engine: agent ? engineForAgent(agent) : null,
+			modelId: effectiveModel,
+			providerId: providerModelSelection?.providerId,
+		});
+	}, [teamId, agents, agentId, effectiveModel, providerModelSelection]);
+	const { dialog: modelParametersDialog, section: modelParametersSection } =
+		useModelParametersComposer(parameterModel, chatTarget);
+
 	// The factory's extra sections: ChatPage's own ACP approval/config pickers plus
 	// whatever the enabled apps contributed.
 	const composerExtraSections = useMemo(
-		() => [...acp.extraSections, ...pluginComposerSelectSections],
-		[acp.extraSections, pluginComposerSelectSections]
+		() => [
+			...acp.extraSections,
+			...pluginComposerSelectSections,
+			...(modelParametersSection ? [modelParametersSection] : []),
+		],
+		[acp.extraSections, pluginComposerSelectSections, modelParametersSection]
 	);
 
 	const {
@@ -6432,12 +8223,14 @@ export default function ChatPage({
 			rememberLastUsedAgent(id);
 			setModelSelectionCleared(false);
 			setSelectedModel(getAgentModel(id));
+			setProviderModelSelection(null);
 			const selectedAgent = agents.find((candidate) => candidate.id === id);
 			announceComposerSelection("Agent", selectedAgent?.name ?? id);
 		},
 		modelOptions,
 		model: effectiveModel,
 		onModelChange: handleModelChange,
+		onProviderModelSelection: handleProviderModelSelection,
 		modelSection: acp.modelSection,
 		extraSections: composerExtraSections,
 		managedProduct: botProduct,
@@ -6467,13 +8260,47 @@ export default function ChatPage({
 	// firing at keystroke time. Cache-backed in Core, so this is not a vendor
 	// round-trip per message.
 	const wasStreamingRef = useRef(false);
+	// Model changes whose handoff outcome was already fetched after a turn, so a
+	// change that needed no handoff is asked about once rather than every turn.
+	const handoffCheckedRef = useRef(new Set<string>());
+	const refreshContextHandoffs = useCallback(() => {
+		const conversationId = convIdRef.current;
+		const latest = conversationModelChangesRef.current.at(-1);
+		if (
+			!conversationId ||
+			latest?.kind !== "change" ||
+			handoffCheckedRef.current.has(latest.id) ||
+			contextHandoffsRef.current.some(
+				(handoff) => handoff.modelChangeId === latest.id
+			)
+		) {
+			return;
+		}
+		handoffCheckedRef.current.add(latest.id);
+		getConversationModelSelection(chatTargetRef.current, conversationId)
+			.then((selection) => {
+				if (convIdRef.current !== conversationId) {
+					return;
+				}
+				const handoffs = mergeContextHandoffs(
+					contextHandoffsRef.current,
+					selection.handoffs
+				);
+				contextHandoffsRef.current = handoffs;
+				setContextHandoffs(handoffs);
+			})
+			.catch(() => {
+				// Display-only: the marker appears on the next load instead.
+			});
+	}, []);
 	useEffect(() => {
 		const streaming = status !== "ready";
 		if (wasStreamingRef.current && !streaming) {
 			refreshRoutingAdvice();
+			refreshContextHandoffs();
 		}
 		wasStreamingRef.current = streaming;
-	}, [status, refreshRoutingAdvice]);
+	}, [status, refreshContextHandoffs, refreshRoutingAdvice]);
 
 	const composerControlsRef = useRef<{
 		infoBar: InputBarInfoBar | undefined;
@@ -6500,6 +8327,12 @@ export default function ChatPage({
 					title: "Long reply chain",
 				}
 			: undefined;
+	// Runs on this conversation plus its cost/latency rollup. Advanced surface:
+	// hidden in the simple interface and in the managed bot product.
+	const sessionsControl =
+		botProduct || interfaceLevel === "simple" ? null : (
+			<SessionsPopover conversationId={convId} target={chatTarget} />
+		);
 	composerControlsRef.current = {
 		// The threshold-fallback notice ("running this turn on X because Y is
 		// low"). Rides the same ref as the other composer controls so the memoized
@@ -6517,9 +8350,13 @@ export default function ChatPage({
 					threads={merged.threads}
 				/>
 				{composerLeft}
+				{sessionsControl}
 			</>
 		) : (
-			composerLeft
+			<>
+				{composerLeft}
+				{sessionsControl}
+			</>
 		),
 		// Contributed bar controls sit after the shell's own right-hand controls,
 		// in the one slot the memoized InputBar reads from this ref.
@@ -6588,10 +8425,17 @@ export default function ChatPage({
 	// project first.
 	const workspaceBarRef = useRef<ReactNode>(null);
 	workspaceBarRef.current =
-		interfaceLevel === "simple" || processedMessages.length > 0 ? null : (
+		cloudSelection.mode === "local" &&
+		(interfaceLevel === "simple" || processedMessages.length > 0) ? null : (
 			<WorkspaceBar
+				cloudBlockReason={cloudBlockReason}
+				cloudScope={cloudScope}
+				cloudSelection={cloudSelection}
+				cloudTaskConversationId={convId ?? null}
 				conversationId={activeConversationId ?? draftConvId.current}
 				folderOverride={chatFolder}
+				onCloudRetry={retryCloudSelection}
+				onCloudRunSettled={reloadCloudTaskMessages}
 				onWorktreeModeChange={handleWorktreeModeChange}
 				target={chatTarget}
 				worktreeModeOverride={tabWorktreeMode}
@@ -6794,14 +8638,14 @@ export default function ChatPage({
 	const planPersistenceRef = useRef<{
 		contents: Map<string, string>;
 		documents: Map<string, SavedPlanDocument>;
-		targetKey: string;
+		targetKey: typeof modelSelectionScope | null;
 	}>({
 		contents: new Map(),
 		documents: new Map(),
-		targetKey: "",
+		targetKey: null,
 	});
 	const planSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
-	const planTargetKey = `${chatTarget.url}|${chatTarget.token ?? ""}`;
+	const planTargetKey = modelSelectionScope;
 
 	useEffect(() => {
 		const cache = planPersistenceRef.current;
@@ -7006,9 +8850,12 @@ export default function ChatPage({
 	// resolves a created artifact's blob BEFORE the tab opens so the window-tab
 	// page (which has no host) renders content rather than an empty view.
 	const artifactHostValue = useMemo<ArtifactHostValue>(() => {
-		const openArtifactTab = (payload: HostArtifact, id: string) => {
-			const artifact = artifactFromPayload(payload, id, "tool");
-			const openTabNow = (resolved: Artifact) => {
+		const openArtifactTab = (
+			payload: NativeArtifactObservation,
+			id: string
+		) => {
+			const artifact = artifactFromSdkObservation(payload, id, "tool");
+			const openTabNow = (resolved: ArtifactView) => {
 				useArtifactStore.getState().put(resolved);
 				openTab(`/artifact/${id}`, {
 					title: resolved.title,
@@ -7016,7 +8863,15 @@ export default function ChatPage({
 				});
 			};
 			if (!artifact.content && artifact.url) {
-				Promise.resolve(fetchArtifactContent(chatTarget, artifact.url))
+				// SAFETY: the actual private I/O function receives the raw SDK slot through
+				// its native argument ABI; URL coercion/errors remain inside its unchanged
+				// catch. Function resolution precedes the original raw argument read.
+				Promise.resolve(
+					(fetchArtifactContent as NativeArtifactContentFetchOperation)(
+						chatTarget,
+						artifact.url
+					)
+				)
 					.then((content) =>
 						openTabNow(content ? { ...artifact, content } : artifact)
 					)
@@ -7027,11 +8882,15 @@ export default function ChatPage({
 		};
 		return {
 			openInPanel: (payload, id) =>
-				handleOpenArtifact(artifactFromPayload(payload, id, "tool")),
+				handleOpenArtifact(artifactFromSdkObservation(payload, id, "tool")),
 			openInTab: openArtifactTab,
 			fetchContent: (payload) =>
 				payload.url
-					? fetchArtifactContent(chatTarget, payload.url)
+					? // SAFETY: same actual I/O function/raw argument ABI; no URL/string DTO
+						// claim or early parsing changes its own native catch/error phase.
+						/* SAFETY: same actual I/O function forwarding ABI; raw argument reaches its unchanged native catch. */ (
+							fetchArtifactContent as NativeArtifactContentFetchOperation
+						)(chatTarget, payload.url)
 					: Promise.resolve(null),
 			submitFollowUp: (text) => {
 				Promise.resolve(
@@ -7044,19 +8903,35 @@ export default function ChatPage({
 
 	// A ghost thread has no store-backed title (it's never persisted), so label it
 	// "Temporary chat" to reinforce that this conversation won't be saved.
-	const persistedTitle = activeConversationId
-		? getConversation(activeConversationId)?.title
-		: undefined;
+	// THIS TAB's conversation names it: on a new chat tab's first render the
+	// shared focused-tab `activeConversationId` still holds the previously focused
+	// conversation, and the tab strip kept that conversation's title.
+	const persistedTitle = convId ? getConversation(convId)?.title : undefined;
 	const conversationTitle = ghostChatActive
 		? "Temporary chat"
 		: (persistedTitle ?? "New chat");
+	chatContextPanelRef.current = {
+		conversation: {
+			id: activeConversationId ?? draftConvId.current,
+			title: conversationTitle,
+		},
+		id: "context",
+		label: "Context",
+		region: "right",
+	};
 
 	// Push the conversation title and contextual actions into the shared titlebar.
 	// Actions are memoized so the effect only re-fires when the relevant state changes.
 	const titlebarActions = useMemo(() => {
-		// The agent info icon, branch, council participants, and sessions moved
-		// into the composer toolbar (see composerControlsRef.left). Only the tool
-		// count, copy transcript, and the panel toggles remain in the titlebar.
+		// Agent selection remains in the composer. This separate profile action
+		// opens the selected agent's own activity and identity in the right dock.
+		const agentActivityAction =
+			selectedAgent && !teamId ? (
+				<AgentActivityTrigger
+					agentName={selectedAgent.name}
+					onOpen={handleOpenAgentActivity}
+				/>
+			) : null;
 		const threadActions =
 			hasThread && agentTools.length > 0 ? (
 				<Tooltip>
@@ -7081,7 +8956,7 @@ export default function ChatPage({
 							className="flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 							onClick={() => {
 								void copyChatTranscript(
-									processedMessages as unknown as TranscriptMessage[],
+									/* SAFETY: The SDK messages already have string roles and native parts; copyChatTranscript validates text parts with its own Zod projection. */ processedMessages as TranscriptMessage[],
 									{
 										defaultUserName: oidcUser?.name || oidcUser?.email,
 									}
@@ -7137,19 +9012,20 @@ export default function ChatPage({
 		return (
 			<>
 				{pickerAction}
+				{agentActivityAction}
 				{threadActions}
 				{copyTranscriptAction}
 				{shareAction}
 				<PanelToggleButtons
-					bottomOpen={bottomPanelOpen}
+					bottomOpen={bottomPanelShown}
 					folder={chatFolder}
-					onBottomToggle={() => setBottomPanelOpen((v) => !v)}
+					onBottomToggle={toggleBottomPanel}
 					onPinnedSummaryToggle={
 						hasMessages ? () => setPinnedSummaryOpen((v) => !v) : undefined
 					}
-					onRightToggle={() => setRightPanelOpen((v) => !v)}
+					onRightToggle={toggleRightPanel}
 					pinnedSummaryOpen={pinnedSummaryOpen}
-					rightOpen={rightPanelOpen}
+					rightOpen={rightPanelShown}
 					showBottomPanelToggle={showBottomPanelToggle}
 				/>
 			</>
@@ -7159,13 +9035,18 @@ export default function ChatPage({
 		hasMessages,
 		activeConversationId,
 		ghostChatActive,
+		handleOpenAgentActivity,
+		selectedAgent,
+		teamId,
 		agentTools,
 		processedMessages,
 		composerPicker,
 		chatPickerPlacement,
-		bottomPanelOpen,
+		bottomPanelShown,
 		showBottomPanelToggle,
-		rightPanelOpen,
+		rightPanelShown,
+		toggleBottomPanel,
+		toggleRightPanel,
 		chatFolder,
 		pinnedSummaryOpen,
 	]);
@@ -7189,343 +9070,446 @@ export default function ChatPage({
 						title: "Waiting for node",
 					};
 
-	useTitleBar(hasThread ? conversationTitle : null, titlebarActions);
+	// The tab's label is the one thing a new chat tab may already have been given:
+	// Start on a suggested task opens it named for the task. `hasThread` is true on
+	// that tab's first render (the focused-tab conversation id still points at the
+	// thread it was started from), so the "New chat" placeholder would overwrite
+	// the label at once. The label follows this tab's own thread only: once it has
+	// a conversation, a message, or is temporary.
+	const ownsThread =
+		Boolean(convId) || processedMessages.length > 0 || ghostChatActive;
+	useTitleBar(hasThread ? conversationTitle : null, titlebarActions, {
+		syncTabLabel: ownsThread,
+	});
 
 	return (
-		<ArtifactHostContext.Provider value={artifactHostValue}>
-			<ForkDialog
-				onOpenChange={(open) => {
-					if (!open) {
-						setForkRequest(null);
-					}
-				}}
-				onSelect={handleForkDestination}
-				open={forkRequest !== null}
-			/>
-			{activeConversationId && !ghostChatActive ? (
-				<ShareConversationDialog
-					conversationId={activeConversationId}
-					onOpenChange={setShareDialogOpen}
-					open={shareDialogOpen}
-					target={chatTarget}
-					title={conversationTitle}
+		<McpFormOwnerProvider conversationId={convId} target={chatTarget}>
+			<ArtifactHostContext.Provider value={artifactHostValue}>
+				<ForkDialog
+					onOpenChange={(open) => {
+						if (!open) {
+							setForkRequest(null);
+						}
+					}}
+					onSelect={handleForkDestination}
+					open={forkRequest !== null}
 				/>
-			) : null}
-			<DrawesomeSketchDialog
-				companion={drawesomeCompanion}
-				onAttach={handleAttachSketch}
-				onOpenChange={handleDrawesomeDialogOpenChange}
-				open={drawesomeDialogOpen}
-				sourceImage={drawesomeSourceImage ?? undefined}
-			/>
-			<WorkspaceRequiredDialog
-				onFolderSelected={handleWorkspaceFolderSelected}
-				onOpenChange={(open) => {
-					if (!open) {
-						setPendingWorkspaceMessage(null);
-					}
-				}}
-				open={pendingWorkspaceMessage !== null}
-			/>
-			<WorkspacePanels
-				artifactRequest={artifactReq}
-				bottomOpen={bottomPanelOpen}
-				collectionRequest={collectionReq}
-				contextRequest={contextReq}
-				contextView={{
-					conversationId: activeConversationId ?? draftConvId.current,
-					target: chatTarget,
-					usage: contextUsage,
-				}}
-				cowork={coworkData}
-				fileReviewRequest={fileReviewRequest}
-				fileSearchRequest={fileSearchRequest}
-				folder={chatFolder}
-				onBottomOpenChange={setBottomPanelOpen}
-				onRightOpenChange={setRightPanelOpen}
-				renderPinnedSummary={
-					pinnedSummaryVisible
-						? ({ floating }) => (
-								<PinnedSummaryPanel
-									conversationId={convId ?? draftConvId.current}
-									cowork={coworkData}
-									folder={pinnedSummaryFolder}
-									onAttachTextFile={handleAttachTextFile}
-									onDismiss={floating ? dismissPinnedSummary : undefined}
-									onHandOffToWorktree={handleHandOffToWorktree}
-									onInterruptChat={handleStop}
-									onWorktreeModeChange={handleWorktreeModeChange}
-									pullRequestsEnabled={pullRequestsEnabled}
-									showLineStats={interfaceLevel !== "simple"}
-									target={chatTarget}
-									worktreeModeOverride={tabWorktreeMode}
-								/>
-							)
-						: null
-				}
-				rightOpen={rightPanelOpen}
-				subagentRequest={subagentReq}
-			>
-				<div className="flex h-full flex-col overflow-hidden">
-					<SubagentActivityChips
-						onOpen={handleOpenSubagent}
-						subagents={subagentSummaries}
+				{modelParametersDialog}
+				{activeConversationId && !ghostChatActive ? (
+					<ShareConversationDialog
+						conversationId={activeConversationId}
+						onOpenChange={setShareDialogOpen}
+						open={shareDialogOpen}
+						target={chatTarget}
+						title={conversationTitle}
 					/>
-					{/* biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/noNoninteractiveElementInteractions: custom drag/resize interaction */}
-					<div
-						className="relative flex-1 overflow-hidden"
-						onDragLeave={handleDragLeave}
-						onDragOver={handleDragOver}
-						onDrop={handleDrop}
-					>
-						{chatSearch.open && (
-							<ChatSearchBar
-								activeMatchIndex={activeChatSearchMatchIndex}
-								folderAvailable={Boolean(chatFolder)}
-								matches={chatSearchMatches}
-								mode={chatSearch.mode}
-								onClose={closeChatSearch}
-								onModeChange={changeChatSearchMode}
-								onNextMatch={nextChatSearchMatch}
-								onPreviousMatch={previousChatSearchMatch}
-								onQueryChange={changeChatSearchQuery}
-								query={chatSearch.query}
+				) : null}
+				<DrawesomeSketchDialog
+					companion={drawesomeCompanion}
+					onAttach={handleAttachSketch}
+					onOpenChange={handleDrawesomeDialogOpenChange}
+					open={drawesomeDialogOpen}
+					sourceImage={drawesomeSourceImage ?? undefined}
+				/>
+				<ImageEditorDialog
+					image={imageEditorAsset}
+					onAiResize={handleAiResize}
+					onClose={() => setImageEditorAsset(null)}
+					onOpenDrawesome={drawesomeCompanion ? handleAnnotateImage : undefined}
+					onUseInChat={(file) => addImages([file])}
+					open={imageEditorAsset !== null}
+				/>
+				<WorkspaceRequiredDialog
+					onFolderSelected={handleWorkspaceFolderSelected}
+					onOpenChange={(open) => {
+						if (!open) {
+							setPendingWorkspaceMessage(null);
+						}
+					}}
+					open={pendingWorkspaceMessage !== null}
+				/>
+				<WorkspacePanels
+					agentActivityAvailable={Boolean(selectedAgent && !teamId)}
+					agentActivityPanel={
+						selectedAgent && !teamId ? (
+							<AgentActivityPanel
+								agent={selectedAgent}
+								connectionPhase={connectionPhase}
+								organizationId={activeNode.orgId ?? null}
+								target={chatTarget}
 							/>
-						)}
-						<WidgetHostContext.Provider value={widgetHostValue}>
-							<AgentChat
-								agentMessageContext={agentMessageContext}
-								answerNow={answerNowControl}
-								assistantAvatar={assistantIdentity.avatar}
-								assistantName={assistantIdentity.name}
-								assistantPlanningAvatars={assistantPlanningAvatars}
-								assistantTitle={assistantIdentity.title}
-								attachments={{
-									images: attachedImages,
-									onAttach: handleAttach,
-									onSketch: drawesomeCompanion
-										? handleOpenDrawesome
-										: undefined,
-									onAnnotateImage: drawesomeCompanion
-										? handleAnnotateImage
-										: undefined,
-									onRemoveImage: handleRemoveImage,
-									onPaste: handlePaste,
-									isDragOver,
-								}}
-								// Pad the message list down by the titlebar height so the
-								// conversation rests below the frosted bar yet scrolls under it.
-								classNames={{
-									messageList: botProduct
-										? ""
-										: "pt-[var(--ryu-titlebar-inset,3rem)]",
-								}}
-								contextSize={contextSize}
-								conversationHeader={
-									botProduct ? (
-										<BotChatHeader agent={botHeaderAgent} />
-									) : undefined
-								}
-								// Opening this thread jumps the transcript to the newest
-								// message; the id is what makes that fire once per
-								// conversation rather than on every history rewrite.
-								conversationKey={convId ?? undefined}
-								currentUser={{
-									avatar: oidcUser?.picture,
-									id: myUserId ?? undefined,
-									name: oidcUser?.name || oidcUser?.email,
-								}}
-								draftControls={draftControls}
-								// Launchpad: every openable app as a grid of icon tiles under
-								// the composer, on the start page only. Renders nothing when no
-								// enabled app contributes a UI surface.
-								emptyStateFooter={botProduct ? null : <AppLaunchpad />}
-								emptyStateHeader={
-									<EmptyStateHeader
-										interactiveLogo={!botProduct}
-										logo={emptyStateLogo}
-										// The full Agent · Model · Thinking dropdown from the shared
-										// composer factory — the logo opens the identical menu the
-										// composer's settings trigger does, not just an agent list.
-										renderBody={composerRenderBody}
-										// The narrowed list: this logo IS a settings trigger, so it
-										// summarises exactly what the composer's own trigger does.
-										sections={composerTriggerSections}
-										showProjectPicker={!botProduct}
-										// Temporary chat: the empty-state greeting whispers
-										// "secretly" so it's obvious this thread won't be saved.
-										title={
-											ghostChatActive
-												? "What are we secretly doing?"
+						) : null
+					}
+					agentActivityRequest={agentActivityReq}
+					artifactRequest={artifactReq}
+					bottomOpen={bottomPanelOpen}
+					collectionRequest={collectionReq}
+					contextRequest={contextReq}
+					contextView={{
+						conversationId: activeConversationId ?? draftConvId.current,
+						target: chatTarget,
+						usage: contextUsage,
+					}}
+					cowork={coworkData}
+					fileReviewRequest={fileReviewRequest}
+					fileSearchRequest={fileSearchRequest}
+					folder={chatFolder}
+					onBottomOpenChange={setBottomPanelOpen}
+					onRightOpenChange={setRightPanelOpen}
+					renderPinnedSummary={
+						pinnedSummaryVisible
+							? ({ floating }) => (
+									<PinnedSummaryPanel
+										conversationId={convId ?? draftConvId.current}
+										cowork={coworkData}
+										folder={pinnedSummaryFolder}
+										onAttachTextFile={handleAttachTextFile}
+										onDismiss={floating ? dismissPinnedSummary : undefined}
+										onHandOffToWorktree={handleHandOffToWorktree}
+										onInterruptChat={handleStop}
+										onWorktreeModeChange={handleWorktreeModeChange}
+										pullRequestsEnabled={pullRequestsEnabled}
+										showLineStats={interfaceLevel !== "simple"}
+										target={chatTarget}
+										worktreeModeOverride={tabWorktreeMode}
+									/>
+								)
+							: null
+					}
+					rightOpen={rightPanelOpen}
+					subagentRequest={subagentReq}
+				>
+					<div className="flex h-full flex-col overflow-hidden">
+						<SubagentActivityChips
+							onOpen={handleOpenSubagent}
+							subagents={subagentSummaries}
+						/>
+						{/* custom drag/resize interaction */}
+						<div
+							className={`relative flex-1 overflow-hidden ${botProduct ? "" : "chat-page-titlebar-owner"}`}
+							data-testid="chat-file-drop-zone"
+							onDragLeave={handleDragLeave}
+							onDragOver={handleDragOver}
+							onDrop={handleDrop}
+						>
+							{chatSearch.open && (
+								<ChatSearchBar
+									activeMatchIndex={activeChatSearchMatchIndex}
+									folderAvailable={Boolean(chatFolder)}
+									matches={chatSearchMatches}
+									mode={chatSearch.mode}
+									onClose={closeChatSearch}
+									onModeChange={changeChatSearchMode}
+									onNextMatch={nextChatSearchMatch}
+									onPreviousMatch={previousChatSearchMatch}
+									onQueryChange={changeChatSearchQuery}
+									query={chatSearch.query}
+								/>
+							)}
+							<WidgetHostContext.Provider value={widgetHostValue}>
+								<AgentUiStateHostContext.Provider value={agentUiStateHost}>
+									<AgentChat
+										agentMessageContext={agentMessageContext}
+										answerNow={answerNowControl}
+										assistantAvatar={assistantIdentity.avatar}
+										assistantName={assistantIdentity.name}
+										assistantPlanningAvatars={assistantPlanningAvatars}
+										assistantTitle={assistantIdentity.title}
+										attachments={{
+											images: attachedImages,
+											onAttach: handleAttach,
+											onSketch: drawesomeCompanion
+												? handleOpenDrawesome
+												: undefined,
+											onAnnotateImage: handleOpenImageEditor,
+											onRemoveImage: handleRemoveImage,
+											onPaste: handlePaste,
+											isDragOver,
+										}}
+										// Pad the message list down by the titlebar height so the
+										// conversation rests below the frosted bar yet scrolls under it.
+										classNames={{
+											messageList: botProduct
+												? ""
+												: "pt-[var(--ryu-titlebar-inset,3rem)]",
+										}}
+										composerDisabled={composerBlocked || modelSelectionLoading}
+										composerHeader={
+											hasAppContext || mentionableResources.error ? (
+												<>
+													<ModelContextAttachments
+														scope={`${chatTarget.url}:${convId ?? draftConvId.current}`}
+													/>
+													{mentionableResources.error ? (
+														<p
+															className="px-3 text-sm text-status-destructive"
+															role="status"
+														>
+															{mentionableResources.error}
+														</p>
+													) : null}
+												</>
+											) : undefined
+										}
+										composerPrediction={composerPrediction ?? undefined}
+										contextSize={contextSize}
+										conversationHeader={
+											botProduct || hierarchyConversation ? (
+												<>
+													{botProduct ? (
+														<BotChatHeader agent={botHeaderAgent} />
+													) : null}
+													{hierarchyConversation ? (
+														<ThreadHierarchyBar
+															agentName={agentNameForId}
+															conversation={hierarchyConversation}
+															conversations={conversations}
+															onOpenConversation={openHierarchyConversation}
+															target={chatTarget}
+														/>
+													) : null}
+												</>
+											) : undefined
+										}
+										// Opening this thread jumps the transcript to the newest
+										// message; the id is what makes that fire once per
+										// conversation rather than on every history rewrite.
+										conversationKey={convId ?? undefined}
+										currentUser={{
+											avatar: oidcUser?.picture,
+											id: myUserId ?? undefined,
+											name: oidcUser?.name || oidcUser?.email,
+										}}
+										draftControls={draftControls}
+										draftInsertion={clipsDraftInsertion ?? undefined}
+										// Launchpad: every openable app as a grid of icon tiles under
+										// the composer, on the start page only. Renders nothing when no
+										// enabled app contributes a UI surface.
+										emptyStateFooter={botProduct ? null : <AppLaunchpad />}
+										emptyStateHeader={
+											<EmptyStateHeader
+												interactiveLogo={!botProduct}
+												logo={emptyStateLogo}
+												// The full Agent · Model · Thinking dropdown from the shared
+												// composer factory — the logo opens the identical menu the
+												// composer's settings trigger does, not just an agent list.
+												renderBody={composerRenderBody}
+												// The narrowed list: this logo IS a settings trigger, so it
+												// summarises exactly what the composer's own trigger does.
+												sections={composerTriggerSections}
+												showProjectPicker={!botProduct}
+												// Temporary chat: the empty-state greeting whispers
+												// "secretly" so it's obvious this thread won't be saved.
+												title={
+													ghostChatActive
+														? "What are we secretly doing?"
+														: undefined
+												}
+											/>
+										}
+										emptyStatePosition="center"
+										error={error ?? undefined}
+										followUps={{
+											items: followUps.map((text, i) => ({
+												id: `followup-${i}`,
+												label: text,
+												value: text,
+											})),
+											// One click runs the suggested next prompt straight away.
+											onSelect: (item) => {
+												setFollowUps([]);
+												handleComposerSubmit({
+													role: "user",
+													content: item.value ?? item.label,
+												});
+											},
+										}}
+										goalCompletion={
+											!botProduct && goalState?.status === "achieved"
+												? ({
+														achievedAt: goalState.achieved_at,
+														messageId: goalCompletionMessageId ?? undefined,
+														startedAt: goalState.started_at,
+													} satisfies GoalCompletion)
 												: undefined
 										}
+										hasOlderMessages={hasOlderMessages}
+										// A restored tab must say "loading this conversation", never
+										// paint the new-chat greeting — that is what reads as "all my
+										// chats are gone" at boot. Both flags are false for a genuinely
+										// new chat (no conversation id), so the greeting is untouched
+										// there.
+										historyError={
+											historyFailed
+												? {
+														...historyErrorCopy,
+														onRetry: retryHistoryLoad,
+													}
+												: undefined
+										}
+										historyLoading={historyLoading}
+										historyNotice={latestAcpTranscriptNotice ?? undefined}
+										historyNotices={conversationModelNotices}
+										key={chatId}
+										loadingOlderMessages={loadingOlderMessages}
+										mentionItems={resolvedMentionItems}
+										messageActionStates={messageActionStates}
+										messageActions={contributedMessageActions}
+										messageReadReceipts={messageReadReceiptStates}
+										messages={renderedMessages}
+										onAgentUiSubmit={handleAgentUiSubmit}
+										onBranch={activeConversationId ? handleBranch : undefined}
+										onClearQuote={clearReply}
+										onContributedMessageAction={
+											activeConversationId
+												? handleContributedMessageAction
+												: undefined
+										}
+										onContributedSelectionAction={
+											handleContributedSelectionAction
+										}
+										onDraftChange={handleDraftChange}
+										onDraftInsertionConsumed={handleDraftInsertionConsumed}
+										onEditMessage={
+											activeConversationId ? handleEditMessage : undefined
+										}
+										onLoadOlderMessages={loadOlderMessages}
+										onMessageVisible={handleMessageVisible}
+										onOpenContext={handleOpenContext}
+										onOpenFile={handleOpenFileLink}
+										onOpenLink={handleOpenWebsiteLink}
+										onOpenMention={handleOpenMention}
+										onQuote={handleQuote}
+										onRegenerateMessage={
+											activeConversationId ? handleRegenerateMessage : undefined
+										}
+										onReply={handleReply}
+										onRetryError={handleRetryError}
+										// Unconditional: a generation part is client-only, so retrying
+										// one needs no persisted conversation (unlike regenerate above).
+										onRetryGeneration={handleRetryGeneration}
+										onReviewFileEdits={handleReviewFileEdits}
+										onRewindMessage={
+											activeConversationId ? handleRewindMessage : undefined
+										}
+										onSelectVersion={
+											activeConversationId ? handleSelectVersion : undefined
+										}
+										onSend={handleComposerSubmit}
+										onSpeak={handleSpeak}
+										onStop={handleStop}
+										onUndoFileEdits={handleUndoFileEdits}
+										onWorkflowResume={handleWorkflowResume}
+										previewResolvers={linkPreviewResolvers}
+										questionTool={questionTool}
+										quote={quote}
+										searchActiveMessageId={
+											chatSearch.open && chatSearch.mode === "chat"
+												? activeChatSearchMatch?.messageId
+												: undefined
+										}
+										seedDraft={composerSeed}
+										selectionActions={contributedSelectionActions}
+										showCopyToolbar
+										slots={{ InputBar: councilInputBar }}
+										statsModelName={cacheModelHint ?? undefined}
+										statsPluginEnabled={statsPluginEnabled}
+										statsProviderHint={agentId ?? undefined}
+										statsUsage={statsUsage}
+										status={effectiveStatus}
+										taskSuggestions={
+											botProduct ? undefined : taskSuggestionActions
+										}
+										toolRenderers={EMPTY_TOOL_RENDERERS}
+										versions={versions}
+										voiceMode={voiceModeSlot}
 									/>
-								}
-								emptyStatePosition="center"
-								error={error ?? undefined}
-								followUps={{
-									items: followUps.map((text, i) => ({
-										id: `followup-${i}`,
-										label: text,
-										value: text,
-									})),
-									// One click runs the suggested next prompt straight away.
-									onSelect: (item) => {
-										setFollowUps([]);
-										handleComposerSubmit({
-											role: "user",
-											content: item.value ?? item.label,
-										});
-									},
-								}}
-								goalCompletion={
-									!botProduct && goalState?.status === "achieved"
-										? ({
-												achievedAt: goalState.achieved_at,
-												messageId: goalCompletionMessageId ?? undefined,
-												startedAt: goalState.started_at,
-											} satisfies GoalCompletion)
-										: undefined
-								}
-								hasOlderMessages={hasOlderMessages}
-								// A restored tab must say "loading this conversation", never
-								// paint the new-chat greeting — that is what reads as "all my
-								// chats are gone" at boot. Both flags are false for a genuinely
-								// new chat (no conversation id), so the greeting is untouched
-								// there.
-								historyError={
-									historyFailed
-										? {
-												...historyErrorCopy,
-												onRetry: retryHistoryLoad,
-											}
-										: undefined
-								}
-								historyLoading={historyLoading}
-								historyNotice={latestAcpTranscriptNotice ?? undefined}
-								key={`${activeNode.url}-${chatId}`}
-								loadingOlderMessages={loadingOlderMessages}
-								mentionItems={resolvedMentionItems}
-								messageActionStates={messageActionStates}
-								messageActions={contributedMessageActions}
-								messageReadReceipts={messageReadReceiptStates}
-								messages={renderedMessages}
-								onAgentUiSubmit={handleAgentUiSubmit}
-								onBranch={activeConversationId ? handleBranch : undefined}
-								onClearQuote={clearReply}
-								onContributedMessageAction={
-									activeConversationId
-										? handleContributedMessageAction
-										: undefined
-								}
-								onContributedSelectionAction={handleContributedSelectionAction}
-								onDraftChange={handleDraftChange}
-								onEditMessage={
-									activeConversationId ? handleEditMessage : undefined
-								}
-								onLoadOlderMessages={loadOlderMessages}
-								onMessageVisible={handleMessageVisible}
-								onOpenContext={handleOpenContext}
-								onOpenFile={handleOpenFileLink}
-								onOpenLink={handleOpenWebsiteLink}
-								onOpenMention={handleOpenMention}
-								onQuote={handleQuote}
-								onRegenerateMessage={
-									activeConversationId ? handleRegenerateMessage : undefined
-								}
-								onReply={handleReply}
-								onRetryError={handleRetryError}
-								// Unconditional: a generation part is client-only, so retrying
-								// one needs no persisted conversation (unlike regenerate above).
-								onRetryGeneration={handleRetryGeneration}
-								onReviewFileEdits={handleReviewFileEdits}
-								onSelectVersion={
-									activeConversationId ? handleSelectVersion : undefined
-								}
-								onSend={handleComposerSubmit}
-								onSpeak={handleSpeak}
-								onStop={handleStop}
-								onUndoFileEdits={handleUndoFileEdits}
-								onWorkflowResume={handleWorkflowResume}
-								previewResolvers={linkPreviewResolvers}
-								quote={quote}
-								searchActiveMessageId={
-									chatSearch.open && chatSearch.mode === "chat"
-										? activeChatSearchMatch?.messageId
-										: undefined
-								}
-								seedDraft={composerSeed}
-								selectionActions={contributedSelectionActions}
-								showCopyToolbar
-								slots={{ InputBar: councilInputBar }}
-								statsModelName={effectiveModel ?? undefined}
-								statsPluginEnabled={statsPluginEnabled}
-								statsUsage={statsUsage}
-								status={effectiveStatus}
-								toolRenderers={EMPTY_TOOL_RENDERERS}
-								versions={versions}
-								voiceMode={voiceModeSlot}
-							/>
-						</WidgetHostContext.Provider>
-						{/* The Pinned summary sidebar (project ▸ branch ▸ worktree + git
+								</AgentUiStateHostContext.Provider>
+							</WidgetHostContext.Provider>
+							{/* The Pinned summary sidebar (project ▸ branch ▸ worktree + git
 					    changes + commit & push) is rendered by WorkspacePanels via
 					    renderPinnedSummary — docked column stacked with the right panel,
 					    auto-demoted to a floating overlay when the chat gets narrow. */}
-						{/* Multi-user presence: who else is in this conversation, and whether
+							{/* Multi-user presence: who else is in this conversation, and whether
 					    they are typing. Hidden when alone (single-user flow unchanged). */}
-						{presenceLabel && (
-							<div
-								aria-live="polite"
-								className="absolute top-14 left-1/2 z-10 -translate-x-1/2 rounded-full bg-popover/90 px-3 py-1 text-muted-foreground text-xs shadow-sm backdrop-blur"
-							>
-								{presenceLabel}
+							{presenceLabel && (
+								<div
+									aria-live="polite"
+									className="absolute top-14 left-1/2 z-10 -translate-x-1/2 rounded-full bg-popover/90 px-3 py-1 text-muted-foreground text-xs shadow-sm backdrop-blur"
+								>
+									{presenceLabel}
+								</div>
+							)}
+						</div>
+						{diffConvId && (
+							<div className="shrink-0 px-4 pb-3">
+								<DiffReviewPane runId={diffConvId} target={chatTarget} />
+								{interfaceLevel !== "simple" && !botProduct && (
+									<div className="mt-2">
+										<RunTracePanel runId={diffConvId} target={chatTarget} />
+									</div>
+								)}
 							</div>
 						)}
 					</div>
-					{diffConvId && (
-						<div className="shrink-0 px-4 pb-3">
-							<DiffReviewPane runId={diffConvId} target={chatTarget} />
+					<McpForms
+						conversationId={convId}
+						enabled={Boolean(convId) && (isActiveTab || mcpAppHost)}
+						target={chatTarget}
+					/>
+					<RewindDialog
+						conversationId={activeConversationId ?? null}
+						disabled={
+							effectiveStatus === "streaming" || effectiveStatus === "submitted"
+						}
+						onOpenChange={setRewindDialogOpen}
+						onRestored={handleRewindRestored}
+						open={rewindDialogOpen}
+						preselect={rewindPreselect}
+						target={chatTarget}
+					/>
+					{sideChatsPluginEnabled && (
+						<BtwOverlay
+							composerMenuGroups={sideChatComposerDirectory.groups}
+							mentionItems={resolvedMentionItems}
+							onAsk={(question) => {
+								maybeHandleBtwCommand(`/btw ${question}`);
+							}}
+							onClose={dismissSideChat}
+							onStop={stopSideChat}
+							state={btwState}
+						/>
+					)}
+					{activePluginNote && (
+						<div className="fixed bottom-28 left-1/2 z-50 w-[min(40rem,90vw)] -translate-x-1/2 rounded-lg bg-popover p-3 text-popover-foreground text-sm shadow-lg">
+							<div className="mb-1 flex items-center justify-between">
+								<span className="font-medium text-muted-foreground text-xs">
+									{activePluginNote.question
+										? "Action summary"
+										: "Double-check"}
+								</span>
+								<button
+									className="text-muted-foreground text-xs hover:text-foreground"
+									onClick={() =>
+										setDismissedPluginNotes((prev) => {
+											const next = new Set(prev);
+											next.add(activePluginNote.id);
+											return next;
+										})
+									}
+									type="button"
+								>
+									Dismiss
+								</button>
+							</div>
+							{activePluginNote.question && (
+								<p className="mb-1 font-medium">{activePluginNote.question}</p>
+							)}
+							<p className="whitespace-pre-wrap">{activePluginNote.text}</p>
 						</div>
 					)}
-				</div>
-				{sideChatsPluginEnabled && (
-					<BtwOverlay
-						composerMenuGroups={sideChatComposerDirectory.groups}
-						mentionItems={resolvedMentionItems}
-						onAsk={(question) => {
-							maybeHandleBtwCommand(`/btw ${question}`);
-						}}
-						onClose={() => setBtwState(null)}
-						state={btwState}
-					/>
-				)}
-				{activePluginNote && (
-					<div className="fixed bottom-28 left-1/2 z-50 w-[min(40rem,90vw)] -translate-x-1/2 rounded-lg bg-popover p-3 text-popover-foreground text-sm shadow-lg">
-						<div className="mb-1 flex items-center justify-between">
-							<span className="font-medium text-muted-foreground text-xs">
-								{activePluginNote.question ? "Action summary" : "Double-check"}
-							</span>
-							<button
-								className="text-muted-foreground text-xs hover:text-foreground"
-								onClick={() =>
-									setDismissedPluginNotes((prev) => {
-										const next = new Set(prev);
-										next.add(activePluginNote.id);
-										return next;
-									})
-								}
-								type="button"
-							>
-								Dismiss
-							</button>
-						</div>
-						{activePluginNote.question && (
-							<p className="mb-1 font-medium">{activePluginNote.question}</p>
-						)}
-						<p className="whitespace-pre-wrap">{activePluginNote.text}</p>
-					</div>
-				)}
-			</WorkspacePanels>
-		</ArtifactHostContext.Provider>
+				</WorkspacePanels>
+			</ArtifactHostContext.Provider>
+		</McpFormOwnerProvider>
 	);
 }

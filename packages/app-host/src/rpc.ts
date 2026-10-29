@@ -1,14 +1,329 @@
 import {
+	type WorkflowAgentsRecords,
+	type WorkflowAppsRecords,
+	type WorkflowComposioKind,
+	type WorkflowComposioResponse,
+	type WorkflowHookEventsRecords,
+	type WorkflowMcpRecord,
+	type WorkflowNotifyTargetsRecords,
+	type WorkflowSchedulesRecords,
+	type WorkflowSkillsRecords,
+	workflowAgentsRecordsSchema,
+	workflowAppsRecordsSchema,
+	workflowComposioKindSchema,
+	workflowComposioResponseSchema,
+	workflowHookEventsRecordsSchema,
+	workflowMcpRecordSchema,
+	workflowNotifyTargetsRecordsSchema,
+	workflowSchedulesRecordsSchema,
+	workflowSkillsRecordsSchema,
+} from "./workflow-picker-records.ts";
+
+export {
+	type WorkflowAgentsRecords,
+	type WorkflowAppsRecords,
+	type WorkflowComposioKind,
+	type WorkflowComposioResponse,
+	type WorkflowHookEventsRecords,
+	type WorkflowMcpRecord,
+	type WorkflowNotifyTargetsRecords,
+	type WorkflowSchedulesRecords,
+	type WorkflowSkillsRecords,
+	workflowAgentsRecordsSchema,
+	workflowAppsRecordsSchema,
+	workflowComposioKindSchema,
+	workflowComposioResponseSchema,
+	workflowHookEventsRecordsSchema,
+	workflowMcpRecordSchema,
+	workflowNotifyTargetsRecordsSchema,
+	workflowSchedulesRecordsSchema,
+	workflowSkillsRecordsSchema,
+} from "./workflow-picker-records.ts";
+
+import {
+	type ActivityTraceImportRecord,
+	activityTraceImportRecordSchema,
+} from "./activity-trace-import.ts";
+import {
+	type AppBundleInstallResult,
+	appBundleInstallResultSchema,
+} from "./app-bundle.ts";
+
+export {
+	type ActivityTraceImportRecord,
+	activityTraceImportRecordSchema,
+} from "./activity-trace-import.ts";
+
+import {
+	type ActivityAuditResponse,
+	type ActivityEvalResponse,
+	type ActivityPruneResponse,
+	type ActivityRedteamResponse,
+	type ActivityScoreResponse,
+	type ActivityTraceResponse,
+	activityAuditResponseSchema,
+	activityEvalResponseSchema,
+	activityPruneResponseSchema,
+	activityRedteamResponseSchema,
+	activityScoreResponseSchema,
+	activityTraceResponseSchema,
+} from "./activity-operation-records.ts";
+import {
+	type AppBackupMethod,
+	appBackupResponseSchema,
+} from "./backup-records.ts";
+import {
+	type QuestJudgeResult,
+	questJudgeResultSchema,
+} from "./quest-judge-records.ts";
+import {
+	type SpaceDocumentWriteResult,
+	spaceDocumentWriteResultSchema,
+} from "./space-document-write.ts";
+import {
+	type VoiceEngineInstallRecord,
+	voiceEngineInstallRecordSchema,
+} from "./voice-install-records.ts";
+import {
+	type WorkflowConnectBindingRecord,
+	type WorkflowWebhookRecord,
+	workflowConnectBindingRecordSchema,
+	workflowConnectBindingRecordsSchema,
+	workflowWebhookRecordSchema,
+} from "./workflow-binding-records.ts";
+
+export {
+	type ActivityAuditResponse,
+	type ActivityEvalCaseScore,
+	type ActivityEvalResponse,
+	type ActivityPruneResponse,
+	type ActivityRedteamResponse,
+	type ActivityScoreResponse,
+	type ActivityTraceResponse,
+	activityAuditResponseSchema,
+	activityEvalCaseScoreSchema,
+	activityEvalResponseSchema,
+	activityPruneResponseSchema,
+	activityRedteamResponseSchema,
+	activityScoreResponseSchema,
+	activityTraceResponseSchema,
+} from "./activity-operation-records.ts";
+export {
+	type AppBackupMethod,
+	appBackupMethodSchema,
+	appBackupResponseSchema,
+} from "./backup-records.ts";
+export {
+	type QuestJudgeResult,
+	questJudgeResultSchema,
+} from "./quest-judge-records.ts";
+export {
+	type SpaceDocumentWriteResult,
+	spaceDocumentWriteResultSchema,
+} from "./space-document-write.ts";
+export {
+	type VoiceEngineInstallRecord,
+	voiceEngineInstallRecordSchema,
+} from "./voice-install-records.ts";
+export {
+	type WorkflowConnectBindingRecord,
+	type WorkflowWebhookRecord,
+	workflowConnectBindingRecordSchema,
+	workflowConnectBindingRecordsSchema,
+	workflowWebhookRecordSchema,
+} from "./workflow-binding-records.ts";
+
+import type { ShellStreamInput } from "./shell-stream-input.ts";
+
+export {
+	type ShellStreamInput,
+	shellStreamInputSchema,
+} from "./shell-stream-input.ts";
+
+import {
+	type TimelineJournalRecord,
+	timelineJournalRecordSchema,
+} from "./timeline-records.ts";
+import {
+	type WorkflowDefinitionInput,
+	type WorkflowRecord,
+	type WorkflowRunRecord,
+	type WorkflowTemplateDetailRecord,
+	type WorkflowTemplateRecord,
+	type WorkflowVersionRecord,
+	workflowDefinitionInputSchema,
+	workflowRecordSchema,
+	workflowRecordsSchema,
+	workflowRunRecordSchema,
+	workflowTemplateDetailRecordSchema,
+	workflowTemplateRecordsSchema,
+	workflowVersionRecordsSchema,
+} from "./workflow-records.ts";
+
+export {
+	timelineJournalAppRecordSchema,
+	timelineJournalRecordSchema,
+} from "./timeline-records.ts";
+export {
+	type WorkflowDefinitionInput,
+	type WorkflowNodeRecord,
+	type WorkflowRecord,
+	type WorkflowRunRecord,
+	type WorkflowTemplateDetailRecord,
+	type WorkflowTemplateRecord,
+	type WorkflowVersionRecord,
+	workflowDefinitionInputSchema,
+	workflowEdgeRecordSchema,
+	workflowNodeRecordSchema,
+	workflowRecordSchema,
+	workflowRecordsSchema,
+	workflowRunRecordSchema,
+	workflowTemplateDetailRecordSchema,
+	workflowTemplateRecordSchema,
+	workflowTemplateRecordsSchema,
+	workflowTriggerRecordSchema,
+	workflowVersionRecordSchema,
+	workflowVersionRecordsSchema,
+} from "./workflow-records.ts";
+
+import {
+	type WebhookIngressStatusRecord,
+	type WebhookRegistryRecord,
+	type WebhookSecretReadRecord,
+	type WebhookSecretWriteRecord,
+	webhookIngressStatusRecordSchema,
+	webhookRegistryRecordSchema,
+	webhookSecretReadSchema,
+	webhookSecretWriteSchema,
+} from "./webhook-records.ts";
+
+export {
+	webhookEndpointRecordSchema,
+	webhookIngressStatusRecordSchema,
+	webhookRegistryRecordSchema,
+	webhookSecretReadSchema,
+	webhookSecretWriteSchema,
+} from "./webhook-records.ts";
+
+import {
+	type SkillSourceRecord,
+	type SkillVersionRecord,
+	type SkillWriteRecord,
+	skillSourceRecordSchema,
+	skillVersionRecordsSchema,
+	skillWriteRecordSchema,
+} from "./skill-records.ts";
+
+export {
+	type SkillSourceRecord,
+	type SkillVersionRecord,
+	type SkillWriteRecord,
+	skillSourceRecordSchema,
+	skillVersionRecordSchema,
+	skillVersionRecordsSchema,
+	skillWriteRecordSchema,
+} from "./skill-records.ts";
+
+import {
+	type LearningConfigRecord,
+	type LearningExperienceRecord,
+	type LearningHealingRecord,
+	learningConfigSchema,
+	learningExperienceListSchema,
+	learningHealingStatusSchema,
+} from "./learning-records.ts";
+
+export {
+	type LearningConfigRecord,
+	type LearningExperience,
+	type LearningExperienceRecord,
+	type LearningHealAttempt,
+	type LearningHealingRecord,
+	learningConfigSchema,
+	learningExperienceListSchema,
+	learningExperienceSchema,
+	learningHealAttemptSchema,
+	learningHealingStatusSchema,
+} from "./learning-records.ts";
+
+import {
+	jsonResponseValueSchema as databaseResponseJsonSchema,
+	jsonResponseDocumentSchema,
+	type RyuJsonValue,
+} from "./json-values.ts";
+
+export type { RyuJsonValue } from "./json-values.ts";
+
+import {
+	type MailCreatePayload,
+	type MailRequestPayload,
+	type MailSendPayload,
+	mailCreateInputSchema,
+	mailRequestInputSchema,
+	mailSendInputSchema,
+} from "./mail-inputs.ts";
+
+export type {
+	MailCreatePayload,
+	MailRequestPayload,
+	MailSendPayload,
+} from "./mail-inputs.ts";
+export {
+	mailAttachmentInputSchema,
+	mailCreateInputSchema,
+	mailRequestInputSchema,
+	mailSendInputSchema,
+} from "./mail-inputs.ts";
+
+import type { RecipeSummary, RecordingState } from "@ryuhq/core-client/recipes";
+import type { SpaceMatch } from "@ryuhq/core-client/spaces";
+import {
+	type GhostRecordingStop,
+	ghostRecipeSummariesSchema,
+	ghostRecordingStateSchema,
+	ghostRecordingStopSchema,
+} from "./ghost-recording.ts";
+
+export {
+	ghostRecipeSummariesSchema,
+	ghostRecordingStateSchema,
+	ghostRecordingStopSchema,
+} from "./ghost-recording.ts";
+
+import { throwIfAppRequestAborted } from "@ryuhq/core-client/app-request";
+import type { Transcript } from "@ryuhq/core-client/meetings";
+import {
 	parseSpeechHistoryInput,
 	type SpeechHistory,
 	type SpeechHistoryInput,
 } from "@ryuhq/core-client/shadow";
-import type { TranscriptionDetail } from "@ryuhq/core-client/voice";
+import {
+	SPEAK_EFFECT_TYPES,
+	SPEAK_FORMATS,
+	SPEAK_INSTRUCT_MAX_CHARS,
+	SPEAK_MAX_EFFECTS,
+	SPEAK_NORMALIZE_MODES,
+	SPEAK_REFERENCE_TEXT_MAX_CHARS,
+	SPEAK_SEED_MAX,
+	SPEAK_TEXT_MAX_CHARS,
+	type SpeakEffect,
+	type SpeakFormat,
+	type SpeakNormalize,
+	type TranscriptionDetail,
+} from "@ryuhq/core-client/voice";
+import { z } from "zod";
+import { isBoundedActivityJson } from "./activity-score-input.ts";
+import { appHttpGrantTarget, isScopedAppId } from "./app-request-target.ts";
 import {
 	type MediaRecordingService,
 	parseMediaRecordingInput,
 } from "./media-recording.ts";
-import type { RouteClaim } from "./rpc-routes.ts";
+import {
+	type RouteClaim,
+	type RouteRegistrationRecord,
+	routeClaimSchema,
+	routeRegistrationRecordSchema,
+} from "./rpc-routes.ts";
 
 export {
 	isShellSafeRoute,
@@ -56,6 +371,10 @@ import type {
 	RyuCatalogModels,
 	RyuCatalogSnapshot,
 	RyuNodeShareOrigin,
+	RyuProviderUsageReading,
+	RyuSubscriptions,
+	RyuSubscriptionsListArgs,
+	RyuSubscriptionUsageArgs,
 } from "./app-bridge.ts";
 
 import {
@@ -70,6 +389,7 @@ export {
 	type RpcErrorPayload,
 	toRpcError,
 	type WidgetRpcErrorCode,
+	widgetRpcErrorCodeSchema,
 } from "./rpc-errors.ts";
 
 /** A request envelope a plugin sends over the bridge. `id` correlates the reply. */
@@ -111,6 +431,7 @@ export interface HostPush {
 /** The partial global set a {@link HostPush} carries (spec §1.2/§1.3). Every key is
  *  optional; only present keys are applied. */
 export interface WidgetGlobalsPatch {
+	deepLink?: { url: string };
 	displayMode?: "inline" | "fullscreen" | "pip";
 	/** The host's app-wide "Friendly names" preference (Settings → Appearance):
 	 *  `true` when the shell is showing plain language ("Connected search") rather
@@ -123,6 +444,13 @@ export interface WidgetGlobalsPatch {
 	friendly?: boolean;
 	locale?: string;
 	maxHeight?: number | null;
+	modelContext?: import("./model-context.ts").ModelContextState | null;
+	openedFile?: {
+		uri: string;
+		name: string;
+		editable: boolean;
+		revision: string;
+	};
 	safeArea?: { bottom: number; left: number; right: number; top: number };
 	theme?: "light" | "dark";
 	/** Complete resolved Ryu appearance tokens for the widget document. */
@@ -144,50 +472,52 @@ export interface WidgetGlobalsPatch {
  *  is absent from {@link METHOD_CAPABILITY}, so it is an UNKNOWN method and is
  *  rejected by default-deny (proven by the `unknown_method_blocked` +
  *  `secret_reach_blocked` adversarial tests). */
-export type Capability =
-	| "host.capabilities"
-	| "i18n"
-	| "node.shareOrigins"
-	| "native.haptics"
-	| "native.notifications"
-	| "native.liveActivities"
-	| "core.listAgents"
+export const capabilitySchema = z.enum([
+	"host.capabilities",
+	"i18n",
+	"node.shareOrigins",
+	"native.haptics",
+	"native.notifications",
+	"native.liveActivities",
+	"core.listAgents",
 	// Cross-chat broadcast (grant `chat.sendFollowUp`) — the companion receives
 	// only redacted, caller-visible conversation summaries and can post an
 	// explicitly confirmed message into selected existing chats.
-	| "chat.broadcast"
-	| "ui.render"
-	| "app.http"
-	| "app.realtime"
+	"chat.broadcast",
+	"ui.render",
+	"app.http",
+	"app.realtime",
 	// Widget host capabilities (Ryu Apps). `tool.call`/`ui.sendMessage` are
 	// Gateway-sourced (they map from approved grants below); `widget.state` and
 	// `ui.displayMode` are LOCAL host caps always granted to a mounted widget and
 	// never derived from a manifest grant (decisions doc D5, spec R8).
-	| "tool.call"
-	| "ui.sendMessage"
-	| "ui.toast"
-	| "widget.state"
-	| "ui.displayMode"
+	"tool.call",
+	"ui.sendMessage",
+	"ui.toast",
+	"widget.state",
+	"file.access",
+	"ui.displayMode",
 	// Assistant bridge (grant `assistant:context`) — the app describes ITS page to
 	// the one global "Ask Ryu" surface: what the user is looking at, optionally its
 	// own instructions + starter prompts while that page is open, and opening the
 	// panel. Write-only in one direction: an app can steer the assistant about
 	// itself, and can never read the conversation back.
-	| "assistant.context"
+	"assistant.context",
 	// App host-bridge capabilities (full-page Companion apps). Gateway-sourced from
 	// the SAME grant strings the Core `PluginHookBridge` gates on (`hook:side-model`,
 	// `hook:run-agent`, `storage:kv`). Each unlocks a family of `/api/plugins/:id/host`
 	// methods; `storage.kv` gates all four storage methods (one grant, one cap).
-	| "model.complete"
-	| "agent.run"
-	| "storage.kv"
-	| "crypto.seal"
-	| "backups.app"
+	"model.complete",
+	"agent.run",
+	"storage.kv",
+	"crypto.seal",
+	"backups.app",
 	// Spaces documents (grant `spaces:docs`) — an app owns Space documents of kind
 	// `app:<plugin_id>`: persisted, search-embedded, backlinked, versioned,
 	// Space-routed. This is the integration that lets a feature (e.g. whiteboard) be
 	// ported to an app WITHOUT losing its Spaces membership.
-	| "spaces.docs"
+	"spaces.docs",
+	"spaces.database",
 	// Media generation (grant `media:generate`) — image / video / speech synthesis.
 	// Each runs a Core media data-path call (`/api/images/generate`,
 	// `/api/video/generate`, `/api/voice/speak`) which routes through the Gateway.
@@ -195,24 +525,26 @@ export type Capability =
 	// remote-URL result to a `data:` URL before returning, so the CSP-locked frame
 	// (img/media-src data: blob: only) can render it. This is the integration that
 	// lets a generation app (e.g. the canvas) reach media engines from the sandbox.
-	| "media.generate"
+	"media.generate",
+	// Optional local TTS runtime installation (grant `voice:models:manage`).
+	"voice.models.manage",
 	// Speech-to-text (grant `media:transcribe`) — the frame hands the host an audio
 	// `data:` URL; the host posts it to `/api/voice/transcribe` and returns the text.
 	// Split from `media.generate` so a transcribe-only app need not also unlock
 	// generation (least privilege).
-	| "media.transcribe"
-	| "media.recording"
-	// Fine-tune runs (grant `finetune:runs`) — the `@ryu/finetune` app drives
-	// training runs against Core's orchestration + durable job store. One capability
+	"media.transcribe",
+	"media.recording",
+	// Fine-tune runs (grant `finetune:runs`) — the `@ryu/finetune` app's legacy
+	// verbs, served by hosts from its own sidecar through the ext-proxy. One capability
 	// gates the whole `finetune.*` family (unary calls + the live progress stream).
-	| "finetune.runs"
+	"finetune.runs",
 	// Website monitors (grant `monitors:crud`) — the `@ryu/monitors` app drives
 	// Core's `/api/monitors/*` orchestration (list/create/update/delete/run +
 	// snapshots/alerts). One capability gates the whole `monitors.*` family. Unlike
 	// the bridge-backed families, the host services call the existing Core monitors
 	// API directly (the media pattern) since `/api/monitors/*` is already gated on
 	// the same `@ryu/monitors` enabled bit — no new Core bridge verb is needed.
-	| "monitors.crud"
+	"monitors.crud",
 	// Workflows (grants `workflows:crud` / `workflows:runstate` / `workflows:catalogs`)
 	// — the `@ryu/workflows` app drives Core's DAG workflow engine from its
 	// sandboxed companion frame. Like monitors these are host-DIRECT families (the
@@ -222,22 +554,22 @@ export type Capability =
 	// versions + templates + webhook URL), `runstate` (run + poll + resume), and
 	// `catalogs` (the read-only node-config pickers: agents/apps/mcp/skills/schedules/
 	// composio — under CSP `connect-src 'none'` the canvas is useless without them).
-	| "workflows.crud"
-	| "workflows.runstate"
-	| "workflows.catalogs"
+	"workflows.crud",
+	"workflows.runstate",
+	"workflows.catalogs",
 	// Ghost record→replay (grant `ghost:record`) — the RecordToWorkflow flow records a
 	// native-desktop action sequence into a recipe (start/status/stop) and lists the
 	// saved recipes (the recipe-node picker reads the same list). Host-direct over
 	// Core's `/api/recipes/*`. Split from `workflows.*` so a workflow app that does not
 	// use ghost capture need not hold it (least privilege).
-	| "ghost.record"
+	"ghost.record",
 	// Inbound webhook registry and protected secret management (grant
 	// `webhooks:crud`) — the `@ryu/webhooks` app renders Core's registry and
 	// explicit secret routes from its sandboxed companion frame. The host holds the
 	// node token; secret values cross this bridge only through explicit get/set calls,
 	// never through the metadata registry response. One capability gates the whole
 	// `webhooks.*` family.
-	| "webhooks.crud"
+	"webhooks.crud",
 	// Quests (grant `quests:crud`) — the `@ryu/quests` app drives Core's
 	// `/api/quests/*` auto-detecting-todo orchestration (list/create/update/delete +
 	// complete/dismiss + suggestion accept/dismiss + judge) from its sandboxed companion
@@ -245,24 +577,29 @@ export type Capability =
 	// the existing `/api/quests/*` API. One capability gates the whole `quests.*` family,
 	// including the `quests.openDetectionSettings` shell-navigation verb that opens the
 	// Settings dialog at the Quests (detection) tab.
-	| "quests.crud"
+	"quests.crud",
 	// Keeping a selection from another app (grant `quests:capture`). Split from
 	// `quests.crud` because it is a wider reach than editing the board: an app
 	// that only renders quests holds `quests:crud` and cannot capture.
-	| "quests.capture"
+	"quests.capture",
 	// Activity feed (grant `activity:read`) — the `@ryu/activity` app renders Core's
 	// read-only unified feed (`GET /api/activity`) from its sandboxed companion frame.
 	// Host-direct (the monitors pattern): the host holds the node token and calls the
 	// existing `/api/activity` read. One capability gates the whole (read-only)
 	// `activity.*` family, including the `activity.openSession` shell-navigation verb
 	// that opens the chat tab for an item's session id.
-	| "activity.read"
+	"activity.read",
 	// Agent observability actions (grant `activity:run`). Read-side trace capture is
 	// still `activity:read`; running a provider-backed security sweep and importing a
 	// trace into Quality tests are kept behind a separate reviewed grant.
-	| "activity.run"
-	| "background.control"
-	| "warmup.crud"
+	"activity.run",
+	"background.control",
+	"warmup.crud",
+	// Subscription accounts (grant `subscriptions:read`) — a Core-bridge family
+	// (`subscriptions.list` / `subscriptions.usage`) that reads each provider's
+	// saved logins and their usage. Labels are often email addresses, so Core also
+	// requires a verified node owner/admin caller; credentials never cross.
+	"subscriptions.read",
 	// Timeline (grant `timeline:read`) — the `@ryu/timeline` app renders the
 	// CapCut-style activity replay scrubber (Shadow's captured lanes + keyframe
 	// preview + Dayflow work journal) from its sandboxed companion frame. Host-direct
@@ -272,8 +609,8 @@ export type Capability =
 	// capability gates the whole (read-only) `timeline.*` family, including the
 	// `timeline.frame` keyframe→data-URL verb (CSP `img-src data: blob:`) and the
 	// `timeline.openReview`/`openSettings` shell-navigation verbs.
-	| "timeline.read"
-	| "timeline.speech"
+	"timeline.read",
+	"timeline.speech",
 	// Agent Inboxes (grant `mail:crud`) — the `@ryu/mail` app drives Core's
 	// `/api/mail/*` orchestration (inbox CRUD, message list/send, inbound-secret
 	// rotation) from its sandboxed companion frame. Host-direct (the monitors
@@ -282,7 +619,7 @@ export type Capability =
 	// `@ryu/mail` enabled bit). One capability gates the whole `mail.*` family,
 	// including the `mail.inboundUrl` verb the host resolves from the node URL (the
 	// frame has none) — the `workflows.webhook` precedent.
-	| "mail.crud"
+	"mail.crud",
 	// Calendar (grant `calendar:crud`) — the `@ryu/calendar` app renders the
 	// scheduled-runs calendar (every agent/workflow scheduled job projected onto
 	// Month/Week/Day/Agenda) from its sandboxed companion frame, and schedules an
@@ -291,7 +628,7 @@ export type Capability =
 	// `/workflows` (names), and `/api/agents` (picker) reads, plus the idempotent
 	// `createScheduledAgentWorkflow` routine composite. One capability gates the whole
 	// `calendar.*` family.
-	| "calendar.crud"
+	"calendar.crud",
 	// Learning (grant `learning:crud`) — the `@ryu/learning` app renders the
 	// read-only continual-learning surface (the two opt-in levels + the models in
 	// use, the experience buffer's captured/scored/trainable counts, and the
@@ -301,20 +638,20 @@ export type Capability =
 	// `/api/healing/status` (heal history) reads. READ-ONLY — the actions (skill
 	// approvals + the heal inbox) stay in the Inbox, the opt-ins in Privacy settings.
 	// One capability gates the whole `learning.*` family.
-	| "learning.crud"
+	"learning.crud",
 	// Inbox / Approvals (grant `approvals:crud`) — the `@ryu/approvals` app renders
 	// the unified inbox from its sandboxed companion frame: pending HITL approvals
-	// (approve/reject), the per-user notification feed (read + the workflow-resume ack
-	// gate), and Shadow's proactive suggestions (list + feedback + open-in-chat). Host-
+	// (approve/reject), the per-user notification feed (read, sender icons, archive/restore,
+	// and the workflow-resume ack gate), and Shadow's proactive suggestions (list + feedback + open-in-chat). Host-
 	// direct (the monitors pattern): the host holds the node token and calls the existing
 	// `/api/approvals/*`, `/api/notifications/*` (host-resolved user id), and Shadow's
 	// `/proactive` + `/api/feedback` — plus the `suggestions.openInChat` shell-navigation
 	// verb. One capability gates that whole family; the inbox's quest task check-off reuses
 	// the separate `quests.crud` capability (the app declares BOTH grants).
-	| "approvals.crud"
+	"approvals.crud",
 	// Targeted Inbox notifications (grant `notifications:send-to-user`). Core
 	// re-checks the recipient against the node's organization/team roster.
-	| "notifications.send"
+	"notifications.send",
 	// Meetings (grant `meetings:crud`) — the `@ryu/meetings` app renders the
 	// record → live-transcript → AI-notes surface from its sandboxed companion frame.
 	// Host-direct (the monitors pattern): the host holds the node token and calls the
@@ -323,7 +660,7 @@ export type Capability =
 	// host-owned `meetings.import` audio-upload verb (the frame carries no file picker +
 	// cannot POST multipart under the CSP) and the `meetings.open`/`openNotes`/`openList`
 	// shell-navigation verbs (mirroring the desktop page's `openTab`).
-	| "meetings.crud"
+	"meetings.crud",
 	// Outpost (grant `social:crud`) — the `@ryu/social` app renders the compose →
 	// calendar → queue → inbox surface from its sandboxed companion frame. Host-direct
 	// (the monitors pattern), but with ONE generic forwarder rather than a verb per
@@ -334,7 +671,7 @@ export type Capability =
 	// ext-proxy route allowlist (an undeclared sub-path is a hard 404). The same
 	// capability covers the two `social.open`/`openList` shell-navigation verbs, which
 	// cannot be forwarded because opening a tab is the one thing the frame cannot do.
-	| "social.crud"
+	"social.crud",
 	// Subtitles (grant `subtitles:crud`) — the `@ryu/subtitles` app picks a video,
 	// queues a local transcription + translation, and reads the resulting cue list from
 	// its sandboxed companion frame. Host-direct (the monitors pattern) with ONE generic
@@ -345,7 +682,7 @@ export type Capability =
 	// ext-proxy route allowlist. There is no navigation verb: the companion is the whole
 	// surface. Note that the frame never carries the VIDEO — a job names a path and the
 	// sidecar opens it, so a 4 GB film never crosses this boundary.
-	| "subtitles.crud"
+	"subtitles.crud",
 	// Skill authoring (grant `skills:crud`) — the `@ryu/skill-editor` app authors a
 	// user-owned Agent Skill (`SKILL.md`): front-matter form fields + a markdown body +
 	// server-backed version history. Host-direct (the monitors pattern): the host holds
@@ -354,7 +691,14 @@ export type Capability =
 	// capability gates the whole `skills.*` family, including the `skills.setTitle`
 	// shell-navigation verb that renames the owning tab (the desktop page's
 	// `updateTabTitle`).
-	| "skills.crud"
+	"skills.crud",
+	// App installation (grant `plugins:install`) — `apps.installBundle` lets a
+	// builder app such as `@ryu/app-studio` install the companion-only app it made.
+	// Host-direct: the desktop host validates the bundle with `app-bundle.ts`
+	// (companion runnable only, `com.local.<caller>.*` id, reviewed grants) and posts
+	// it to Core's generic install-bundle sink, which leaves the app disabled until
+	// the user enables it and the Gateway approves its grants.
+	"plugins.install",
 	// Automated Reasoning (grant `reasoning:check`) — the `@ryu/reasoning` app authors
 	// formal policies and runs the solver playground from its sandboxed companion
 	// frame. Host-direct (the monitors pattern) with ONE generic forwarder (the Outpost
@@ -364,8 +708,8 @@ export type Capability =
 	// forwarder widens nothing; the gates are this capability and Core's ext-proxy route
 	// allowlist, where an undeclared sub-path is a hard 404. No navigation verb: the
 	// companion is the whole surface and never opens a shell tab.
-	| "reasoning.check"
-	| "safe-actions.manage"
+	"reasoning.check",
+	"safe-actions.manage",
 	// Deep Read (grant `rlm:query`) — the `@ryu/rlm` app loads a corpus, browses its
 	// outline, asks questions of it and reads run traces from its sandboxed companion
 	// frame. Host-direct with ONE generic forwarder, the same shape as
@@ -375,7 +719,7 @@ export type Capability =
 	// gates are this capability and Core's ext-proxy route allowlist, where an
 	// undeclared sub-path is a hard 404. No navigation verb: the companion is the whole
 	// surface.
-	| "rlm.query"
+	"rlm.query",
 	// Tuition (grant `tuition:crud`) and Wire (grant `news:crud`) — the `@ryu/tuition`
 	// and `@ryu/news` companions. Host-direct with ONE generic forwarder each, the same
 	// shape as `reasoning.request` directly above: `<app>.request` carries
@@ -384,8 +728,8 @@ export type Capability =
 	// Neither widens anything — the mount already answers any client holding the node
 	// token, which is what the host holds — and the gates stay the capability plus
 	// Core's ext-proxy route allowlist, where an undeclared sub-path is a hard 404.
-	| "tuition.crud"
-	| "news.crud"
+	"tuition.crud",
+	"news.crud",
 	// Visual plan review (grant `blueprint:review`) — the `@ryu/blueprint` app renders a
 	// plan an agent published (markdown blocks, the dependency graph derived from the
 	// steps, the annotation rail) and records the human's verdict. Host-direct with ONE
@@ -395,7 +739,7 @@ export type Capability =
 	// holding the node token — so the forwarder widens nothing. The gates are this
 	// capability and Core's ext-proxy route allowlist, where an undeclared sub-path is a
 	// hard 404. No navigation verb: the review surface IS the companion.
-	| "blueprint.review"
+	"blueprint.review",
 	// Shell primitives (grant `shell:integrate`) — the generic `window.ryu.shell.*`
 	// lane giving a DECOUPLED companion the shell-integration privileges a compiled-in
 	// first-party panel has: `shell.openTab` (unary, route-allowlisted navigation with
@@ -406,13 +750,19 @@ export type Capability =
 	// tabs/theme/palette/event seams, so the verbs resolve entirely in the trusted webview
 	// (no Core bridge fetch — like the existing per-app nav verbs). See
 	// `docs/renderer-host-slice-1.md`.
-	| "shell.integrate";
+	"shell.integrate",
+]);
+export type Capability = z.output<typeof capabilitySchema>;
 
 /** A route a plugin claims for its own surface. Sent by the plugin over
  *  `ui.registerRoute`; the host validates it with {@link validatePluginRoute}
  *  before accepting. Kept minimal (path + title) — the anti-phishing enforcement
  *  point (#6). */
-export type { RouteClaim } from "./rpc-routes.ts";
+export {
+	type RouteClaim,
+	type RouteRegistrationRecord,
+	routeRegistrationRecordSchema,
+} from "./rpc-routes.ts";
 // --- Monitor payload shapes (grant `monitors:crud`). These aliases point at the
 // canonical Core Client wire model so the RPC boundary, Desktop, and Companion all
 // carry the same required fields and notification variants. ---
@@ -454,36 +804,55 @@ export const TOAST_LIMITS = Object.freeze({
 	titleChars: 120,
 });
 
-// --- Quest payload shapes (grant `quests:crud`). Minimal INLINE aliases so rpc.ts
-// stays dependency-free; they mirror Core's `/api/quests/*` serde JSON (snake_case)
+/** Validate the host-owned projection while forwarding Core's original object.
+ * Unselected metadata is owned by the app and must not be cloned or stripped. */
+function preserveHostResponse<S extends z.ZodType>(schema: S) {
+	return z.custom<z.output<S>>((value) => schema.safeParse(value).success);
+}
+
+/** Core's generic HTTP forwarders return JSON, or undefined for an empty body.
+ * Endpoint-specific fields remain owned by the companion that serves the route. */
+export const rpcJsonResponseSchema = preserveHostResponse(
+	databaseResponseJsonSchema
+).optional();
+export type RpcJsonResponse = z.output<typeof rpcJsonResponseSchema>;
+
+/** Core forwards these worker-owned objects verbatim, including future fields. */
+export const finetuneJobSpecSchema = preserveHostResponse(
+	jsonResponseDocumentSchema
+);
+export type FinetuneJobSpec = z.output<typeof finetuneJobSpecSchema>;
+
+function asFinetuneJobSpecArg(
+	data: Parameters<typeof finetuneJobSpecSchema.safeParse>[0]
+): FinetuneJobSpec | null {
+	const parsed = finetuneJobSpecSchema.safeParse(data);
+	return parsed.success ? parsed.data : null;
+}
+
+// --- Quest payload shapes (grant `quests:crud`). Minimal INLINE aliases that mirror Core's `/api/quests/*` serde JSON (snake_case)
 // verbatim. The host forwards these through unchanged; the app owns the richer typed
 // copies in `@ryu/quests-app/types`. ---
 
-/** A quest as Core returns it (opaque status/suggestion fields kept loose so rpc.ts
- *  carries no schema — Core validates server-side). */
-export interface QuestRecord {
-	id: string;
-	title: string;
-	[key: string]: unknown;
-}
+/** Core quest identity; status and suggestion metadata are forwarded unchanged. */
+export const questRecordSchema = preserveHostResponse(
+	z.object({ id: z.string(), title: z.string() })
+);
+export type QuestRecord = z.output<typeof questRecordSchema>;
 
 /** The create/update payload for a quest (forwarded verbatim to Core). */
 export interface QuestInputPayload {
 	completion_condition: string;
 	title: string;
-	[key: string]: unknown;
 }
-
-/** A judge result (loose — Core owns the shape: `{ met?, confidence?, reason?, skipped? }`). */
-export type QuestJudgeResult = Record<string, unknown>;
 
 /** One activity-feed record as Core returns it (grant `activity:read`). Loose beyond
- *  the id — rpc.ts carries no schema; the app owns the richer typed copy in
+ *  the id — the app owns the richer typed copy in
  *  `@ryu/activity-app/types`. Forwarded verbatim (snake_case) by the host. */
-export interface ActivityRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const activityRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type ActivityRecord = z.output<typeof activityRecordSchema>;
 
 /** Bounded Gateway audit filters accepted by the Activity observability view. */
 export interface ActivityAuditInput {
@@ -499,47 +868,38 @@ export interface ActivityAuditInput {
 }
 
 /** Completed production output submitted to the shared online scorer. */
-export interface ActivityScoreInput {
-	agent_id?: string;
-	assertions?: unknown[];
-	context?: unknown;
-	cost_micro_usd?: number;
-	description?: string;
-	evaluators?: string[];
-	expected?: string;
-	id?: string;
-	latency_ms?: number;
-	metadata?: Record<string, unknown>;
-	model?: string;
-	prompt?: string;
-	response: unknown;
-	threshold?: number;
-	vars?: Record<string, unknown>;
-}
+export type ActivityScoreInput = z.output<typeof activityScoreInputSchema>;
 
 /** A redacted conversation summary for the Chat Broadcast companion. The host
  * never forwards message bodies through this list; the send service loads the
  * transcript privately and returns only an accepted/failed result. */
-export interface ChatConversationSummary {
-	agent_id: string | null;
-	archived?: boolean;
-	created_at: number;
-	id: string;
-	last_message?: string;
-	last_message_at?: number;
-	last_message_role?: string;
-	message_count: number;
-	run_status: string | null;
-	title: string | null;
-	updated_at: number;
-	[key: string]: unknown;
-}
+export const chatConversationSummarySchema = preserveHostResponse(
+	z.object({
+		agent_id: z.string().nullable(),
+		archived: z.boolean().optional(),
+		created_at: z.number(),
+		id: z.string(),
+		last_message: z.string().optional(),
+		last_message_at: z.number().optional(),
+		last_message_role: z.string().optional(),
+		message_count: z.number(),
+		run_status: z.string().nullable(),
+		title: z.string().nullable(),
+		updated_at: z.number(),
+	})
+);
+export type ChatConversationSummary = z.output<
+	typeof chatConversationSummarySchema
+>;
 
 /** Result returned after the host has detached an accepted chat stream. */
-export interface ChatSendResult {
-	conversation_id: string;
-	status: "accepted";
-}
+export const chatSendResultSchema = preserveHostResponse(
+	z.object({
+		conversation_id: z.string(),
+		status: z.literal("accepted"),
+	})
+);
+export type ChatSendResult = z.output<typeof chatSendResultSchema>;
 
 /** A Core-visible background process. The process owner handles the stop request;
  * the host never receives or signals an operating-system PID directly. */
@@ -560,114 +920,129 @@ export interface BackgroundProcess {
 	started_at: number;
 }
 
+/** Decode the Core process projection at native/IPC response boundaries. */
+export const backgroundProcessSchema = z.looseObject({
+	command: z.string(),
+	cwd: z.string(),
+	description: z.string().nullable().optional(),
+	elapsed_ms: z.number(),
+	exit_code: z.number().nullable().optional(),
+	exit_signal: z.string().nullable().optional(),
+	kind: z.string(),
+	label: z.string().nullable().optional(),
+	pid: z.number().nullable().optional(),
+	process_id: z.string(),
+	producer: z.string(),
+	running: z.boolean(),
+	shell_id: z.string().nullable().optional(),
+	started_at: z.number(),
+}) satisfies z.ZodType<BackgroundProcess>;
+
 /** One Shadow timeline event as the device-local `/timeline` returns it (grant
  *  `timeline:read`). Opaque — rpc.ts carries no schema; the app owns the richer typed
  *  copy in `@ryu/timeline-app/types`. Forwarded verbatim (snake_case) by the host.
  *  `null` when Shadow (:3030) is unreachable (recording off). */
-export type TimelineEventRecord = Record<string, unknown>;
+export const timelineEventRecordSchema = preserveHostResponse(
+	z.object({
+		app_name: z.string().nullable(),
+		event_type: z.string(),
+		track: z.number(),
+		ts: z.number(),
+		url: z.string().nullable(),
+		window_title: z.string().nullable(),
+	})
+).refine(
+	(value) => !("app_path" in value || "bundle_id" in value),
+	"Device-local locators must be removed before forwarding timeline events"
+);
+export type TimelineEventRecord = z.output<typeof timelineEventRecordSchema>;
 
 /** Shadow's derived work-journal snapshot as `/journal` returns it (grant
  *  `timeline:read`). Opaque — the app owns the typed copy. `null` when unreachable. */
-export type TimelineJournalRecord = Record<string, unknown>;
+export type { TimelineJournalRecord } from "./timeline-records.ts";
 
-// --- Mail payload shapes (grant `mail:crud`). Minimal INLINE aliases so rpc.ts
-// stays dependency-free; they mirror Core's `/api/mail/*` serde JSON verbatim. The
+// --- Mail payload shapes (grant `mail:crud`). Minimal INLINE aliases that mirror Core's `/api/mail/*` serde JSON verbatim. The
 // host forwards these through unchanged; the app owns the richer typed copies in
 // `@ryu/mail-app/types`. ---
 
 /** An inbox as Core returns it (opaque beyond the id — Core owns the shape). */
-export interface MailInbox {
-	id: string;
-	[key: string]: unknown;
-}
+export const mailInboxSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type MailInbox = z.output<typeof mailInboxSchema>;
 
 /** A stored email message as Core returns it (opaque beyond the id). */
-export interface MailMessage {
-	id: string;
-	[key: string]: unknown;
-}
+export const mailMessageSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type MailMessage = z.output<typeof mailMessageSchema>;
 
-/** The create-inbox payload (forwarded verbatim to Core). */
-export interface MailCreatePayload {
-	address: string;
-	clientId?: string;
-	metadata?: Record<string, unknown>;
-	name: string;
-	podId?: string;
-	provider?: string;
-}
-
-/** The send payload (forwarded verbatim to Core). */
-export interface MailSendPayload {
-	attachments?: unknown;
-	bcc?: string[];
-	cc?: string[];
-	clientId?: string;
-	headers?: Record<string, string>;
-	html?: string;
-	inboxId: string;
-	inReplyTo?: string;
-	labels?: string[];
-	references?: string | string[];
-	replyTo?: string[];
-	subject: string;
-	text?: string;
-	to: string[];
-	trackOpens?: boolean;
-}
-
-/** A relative, manifest-scoped mail route request. The host owns auth and rejects
- * public inbound/tracking paths before this reaches the node client. */
-export interface MailRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "PATCH" | "POST";
-	path: string;
-}
-
-// --- Calendar payload shapes (grant `calendar:crud`). Minimal INLINE aliases so
-// rpc.ts stays dependency-free; the host forwards Core's shapes verbatim. The app
+// --- Calendar payload shapes (grant `calendar:crud`). Minimal INLINE aliases and
+// the host forwards Core's shapes verbatim. The app
 // owns the richer typed copies in `@ryu/calendar-app/types`. ---
 
 /** A scheduled job as the host forwards it (the camelCase `fetchJobs` shape; opaque
  *  beyond the id — the app owns the full type). */
-export interface CalendarJobRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const calendarJobRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type CalendarJobRecord = z.output<typeof calendarJobRecordSchema>;
 
 /** A workflow as the host forwards it (the calendar reads only id+name; opaque
  *  beyond the id). */
-export interface CalendarWorkflowRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const calendarWorkflowRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type CalendarWorkflowRecord = z.output<
+	typeof calendarWorkflowRecordSchema
+>;
 
 /** An agent summary as the host forwards it (the picker reads id+name; opaque
  *  beyond the id). */
-export interface CalendarAgentRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const calendarAgentRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type CalendarAgentRecord = z.output<typeof calendarAgentRecordSchema>;
 
 // --- Warmup (grant `warmup:crud`). The `@ryu/warmup` app schedules a keep-alive
 // ping to each subscription agent so its rolling usage window is already open. As
-// with calendar, rpc.ts stays dependency-free and the host forwards Core's shapes
+// with calendar, the host forwards Core's shapes
 // verbatim; the app owns the richer typed copies in `@ryu/warmup-app/types`. ---
 
 /** One agent the host detected, with its usage windows + advertised models. */
-export interface WarmupAgentRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const warmupAgentRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type WarmupAgentRecord = z.output<typeof warmupAgentRecordSchema>;
 
 /** What `warmup.detect` reports: the agents plus the node's IANA zone. */
-export interface WarmupDetectionRecord {
-	agents: WarmupAgentRecord[];
-	tz: string;
-}
+export const warmupDetectionSchema = preserveHostResponse(
+	z.object({
+		agents: z.array(warmupAgentRecordSchema),
+		tz: z.string(),
+	})
+);
+export type WarmupDetectionRecord = z.output<typeof warmupDetectionSchema>;
+
+const questRecordsSchema = preserveHostResponse(z.array(questRecordSchema));
+const activityRecordsSchema = preserveHostResponse(
+	z.array(activityRecordSchema)
+);
+const mailInboxesSchema = preserveHostResponse(z.array(mailInboxSchema));
+const mailMessagesSchema = preserveHostResponse(z.array(mailMessageSchema));
+const calendarJobsSchema = preserveHostResponse(
+	z.array(calendarJobRecordSchema)
+);
+const calendarWorkflowsSchema = preserveHostResponse(
+	z.array(calendarWorkflowRecordSchema)
+);
+const calendarAgentsSchema = preserveHostResponse(
+	z.array(calendarAgentRecordSchema)
+);
 
 /** One job to schedule. Deliberately narrower than Core's `CreateJobBody`: this
- *  capability schedules agent pings, so a workflow/monitor target is not
+ *  capability schedules agent pings and single-account provider pings, so a
+ *  workflow/monitor target is not
  *  expressible and the owning app is pinned host-side rather than claimed by the
  *  frame (see {@link asWarmupJobsArg}). */
 export interface WarmupJobInput {
@@ -675,12 +1050,20 @@ export interface WarmupJobInput {
 	schedule:
 		| { kind: "cron"; expr: string; tz?: string }
 		| { kind: "every"; interval: string };
-	target: {
-		type: "agent";
-		agentId: string;
-		prompt: string;
-		model?: string | null;
-	};
+	target:
+		| {
+				type: "agent";
+				agentId: string;
+				prompt: string;
+				model?: string | null;
+		  }
+		| {
+				type: "provider_account";
+				providerId: string;
+				accountId: string;
+				prompt: string;
+				model: string;
+		  };
 }
 
 /** The one-off ping payload for `warmup.runNow`: a job the app already owns. */
@@ -701,28 +1084,6 @@ export interface CalendarCreateAutomationPayload {
 		| { kind: "every"; interval: string };
 }
 
-// --- Learning payload shapes (grant `learning:crud`). Minimal INLINE aliases so
-// rpc.ts stays dependency-free; the host forwards Core's snake_case shapes verbatim.
-// The app owns the richer typed copies in `@ryu/learning-app/types`. All READ-ONLY. ---
-
-/** The resolved learning config as the host forwards it (`GET /api/learn/config`,
- *  the `getLearningConfig` shape; opaque here — the app owns the full type). */
-export interface LearningConfigRecord {
-	[key: string]: unknown;
-}
-
-/** The experience buffer + counts as the host forwards it (`GET /api/experience/list`,
- *  the `listExperience` shape; opaque here — the app owns the full type). */
-export interface LearningExperienceRecord {
-	[key: string]: unknown;
-}
-
-/** The per-source heal-attempt map as the host forwards it (`GET /api/healing/status`,
- *  the `getHealingStatus` shape; opaque here — the app owns the full type). */
-export interface LearningHealingRecord {
-	[key: string]: unknown;
-}
-
 // --- Inbox / Approvals payload shapes (grant `approvals:crud`). Minimal INLINE
 // aliases so rpc.ts stays dependency-free; the host forwards Core's / Shadow's
 // snake_case shapes verbatim. The app owns the richer typed copies in
@@ -730,17 +1091,17 @@ export interface LearningHealingRecord {
 
 /** An approval request as the host forwards it (`GET /api/approvals`, the
  *  `listApprovals`/decide shape; opaque here — the app owns the full type). */
-export interface ApprovalRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const approvalRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type ApprovalRecord = z.output<typeof approvalRecordSchema>;
 
 /** A stored inbox notification row as the host forwards it (`GET /api/notifications`,
  *  the `listNotifications` shape; opaque here — the app owns the full type). */
-export interface NotificationRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const notificationRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type NotificationRecord = z.output<typeof notificationRecordSchema>;
 
 /** An app's resolved notification icon tile, inlined by the host for the CSP-
  *  locked frame: `glyph` is a `data:` URL (empty when the app has no art), and
@@ -753,10 +1114,12 @@ export interface AppIconTile {
 
 /** A Shadow proactive suggestion as the host forwards it (`GET /proactive`, the
  *  `getProactiveInbox` shape; opaque here — the app owns the full type). */
-export interface ProactiveSuggestionRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const proactiveSuggestionRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type ProactiveSuggestionRecord = z.output<
+	typeof proactiveSuggestionRecordSchema
+>;
 
 /** The approve/reject decision payload (`{ id, note? }`, forwarded to Core). */
 export interface ApprovalDecidePayload {
@@ -770,22 +1133,35 @@ export interface SuggestionFeedbackPayload {
 	suggestion_type: string;
 }
 
-// --- Meetings payload shapes (grant `meetings:crud`). Minimal INLINE aliases so
-// rpc.ts stays dependency-free; the host forwards Core's `/api/meetings/*` snake_case
+// --- Meetings payload shapes (grant `meetings:crud`). Minimal INLINE aliases and
+// the host forwards Core's `/api/meetings/*` snake_case
 // shapes verbatim. The app owns the richer typed copies in `@ryu/meetings-app/types`. ---
 
 /** A meeting as the host forwards it (`GET /api/meetings`, the `listMeetings`/
  *  `startMeeting`/… shape; opaque here — the app owns the full type). */
-export interface MeetingRecord {
-	id: string;
-	[key: string]: unknown;
-}
+export const meetingRecordSchema = preserveHostResponse(
+	z.object({ id: z.string() })
+);
+export type MeetingRecord = z.output<typeof meetingRecordSchema>;
 
 /** A meeting's transcript as the host forwards it (`GET /api/meetings/:id/transcript`,
  *  the `getTranscript` shape; opaque here — the app owns the full type). */
-export interface MeetingTranscriptRecord {
-	[key: string]: unknown;
-}
+export const meetingTranscriptSchema = preserveHostResponse(
+	z.object({
+		segments: z.array(
+			z.object({
+				created_at: z.string(),
+				id: z.number(),
+				meeting_id: z.string(),
+				speaker: z.string().nullable().optional(),
+				t_offset_ms: z.number(),
+				text: z.string(),
+			})
+		),
+		text: z.string(),
+	})
+) satisfies z.ZodType<Transcript>;
+export type MeetingTranscriptRecord = z.output<typeof meetingTranscriptSchema>;
 
 /** The start-meeting input the frame supplies (`POST /api/meetings`). */
 export interface MeetingStartPayload {
@@ -799,6 +1175,17 @@ export interface MeetingStartPayload {
 // shapes verbatim. The app owns the richer typed copies in
 // `@ryu/social-app/types`. ---
 
+/** Shared HTTP payload fields; each forwarder retains its actual method policy. */
+function httpRequestPayloadSchema<Method extends string>(
+	method: z.ZodType<Method>
+) {
+	return z.object({
+		body: preserveHostResponse(databaseResponseJsonSchema).optional(),
+		method: method.optional(),
+		path: z.string(),
+	});
+}
+
 /** One forwarded call onto the sidecar's `/api/social` public mount.
  *
  *  `path` is RELATIVE to that mount, leading slash included, query string and all
@@ -806,19 +1193,20 @@ export interface MeetingStartPayload {
  *  absolute URL, a path not starting with `/`, and any `..` segment — so the frame
  *  chooses the sub-path and nothing else. It can never name a host, and it can never
  *  climb out of the mount onto another Core API. */
-export interface SocialRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "PATCH" | "POST";
-	path: string;
-}
+export const socialRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "PATCH", "POST"])
+);
+export type SocialRequestPayload = z.output<typeof socialRequestPayloadSchema>;
 
-/** One forwarded call onto the calling companion's OWN manifest sidecar. The host
- * derives the plugin id; the frame controls only a normalized relative path. */
-export interface AppRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
-	path: string;
-}
+/** One forwarded call onto a manifest sidecar: the calling companion's OWN by
+ * default, or another app's when `app` names it (Host API 1.18, additive). The host
+ * owns the plugin ids and enforces `app:http` (own) or the reviewed per-target
+ * `app:http:<app>` grant (other); the frame controls only a normalized relative
+ * path, confined to the target's mount. */
+export const appRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "PATCH", "POST", "PUT"])
+).extend({ app: z.string().optional() });
+export type AppRequestPayload = z.output<typeof appRequestPayloadSchema>;
 
 /** Wire payload for opening an owning application's generic realtime room. */
 export interface RealtimeConnectPayload {
@@ -855,56 +1243,58 @@ export interface RealtimePresencePayload extends RealtimeConnectionPayload {
  *  mount. Same contract as {@link SocialRequestPayload} — `path` is relative to the
  *  mount and validated by the same resolver — with `PUT` in place of `PATCH`, because
  *  that is the verb the sidecar's policy route actually serves. */
-export interface ReasoningRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "POST" | "PUT";
-	path: string;
-}
+export const reasoningRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "POST", "PUT"])
+);
+export type ReasoningRequestPayload = z.output<
+	typeof reasoningRequestPayloadSchema
+>;
 
 /** One forwarded call onto Core's `/api/tools/plans` protected mount. */
-export interface SafeActionsRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "POST" | "PUT";
-	path: string;
-}
+export const safeActionsRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "POST", "PUT"])
+);
+export type SafeActionsRequestPayload = z.output<
+	typeof safeActionsRequestPayloadSchema
+>;
 
 /** One forwarded call onto the `ryu-rlm` sidecar's `/api/rlm` public mount. Same
  *  contract and the same method union as {@link ReasoningRequestPayload} — `path` is
  *  relative to the mount and validated by the same resolver. */
-export interface RlmRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "POST" | "PUT";
-	path: string;
-}
+export const rlmRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "POST", "PUT"])
+);
+export type RlmRequestPayload = z.output<typeof rlmRequestPayloadSchema>;
 
 /** One forwarded call onto the `ryu-tuition` sidecar's `/api/tuition` public mount.
  *  Same contract as {@link SocialRequestPayload} — `path` is relative to the mount and
  *  validated by the same resolver. The method union carries PATCH as well as PUT: the
  *  subject, skill and item routes patch in place, while settings are replaced whole. */
-export interface TuitionRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
-	path: string;
-}
+export const tuitionRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "PATCH", "POST", "PUT"])
+);
+export type TuitionRequestPayload = z.output<
+	typeof tuitionRequestPayloadSchema
+>;
 
 /** One forwarded call onto the `ryu-news` sidecar's `/api/news` public mount. Same
  *  contract and the same method union as {@link TuitionRequestPayload}. */
-export interface NewsRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
-	path: string;
-}
+export const newsRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "PATCH", "POST", "PUT"])
+);
+export type NewsRequestPayload = z.output<typeof newsRequestPayloadSchema>;
 
 /** One forwarded call onto the `ryu-subtitles` sidecar's `/api/subtitles` public
  *  mount. Same contract as {@link SocialRequestPayload} — `path` is relative to the
  *  mount and validated by the same resolver. The method union carries PUT (settings
  *  are replaced whole) but no PATCH: nothing in this app edits a field in place, and
  *  advertising a verb the sidecar answers with 405 helps nobody. */
-export interface SubtitlesRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "POST" | "PUT";
-	path: string;
-}
+export const subtitlesRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "POST", "PUT"])
+);
+export type SubtitlesRequestPayload = z.output<
+	typeof subtitlesRequestPayloadSchema
+>;
 
 /** One forwarded call onto the `ryu-blueprint` sidecar's `/api/blueprint` public
  *  mount. Same contract as {@link SocialRequestPayload} — `path` is relative to the
@@ -916,16 +1306,15 @@ export interface SubtitlesRequestPayload {
  *  new revision, which is what makes an annotation's `(revision, block_id)` anchor
  *  mean something. Widening this union to match a sibling's would advertise verbs the
  *  sidecar answers with 405, so leave it at three unless a route really appears. */
-export interface BlueprintRequestPayload {
-	body?: unknown;
-	method?: "DELETE" | "GET" | "POST";
-	path: string;
-}
+export const blueprintRequestPayloadSchema = httpRequestPayloadSchema(
+	z.enum(["DELETE", "GET", "POST"])
+);
+export type BlueprintRequestPayload = z.output<
+	typeof blueprintRequestPayloadSchema
+>;
 
-// --- Skill authoring payload shapes (grant `skills:crud`). Minimal INLINE aliases so
-// rpc.ts stays dependency-free; the host forwards the desktop `skills.ts` client's
-// camelCase shapes verbatim (that client normalizes Core's `/api/skills` snake_case
-// wire). The app owns the richer typed copies in `@ryu/skill-editor-app/types`. ---
+// --- Skill authoring (grant `skills:crud`). The desktop skill client normalizes
+// Core's snake_case records to the camelCase contracts in skill-records.ts. ---
 
 /** The editable fields the editor sends on create/update (camelCase, matching the
  *  desktop `SkillDraft`). Forwarded verbatim to the host's `skills.ts` client. */
@@ -936,17 +1325,6 @@ export interface SkillDraftPayload {
 	description?: string | null;
 	name: string;
 }
-
-/** A skill's editable source as the host forwards it (`GET /api/skills/:id/source`,
- *  the `SkillSource` shape; opaque here — the app owns the full type). */
-export type SkillSourceRecord = Record<string, unknown>;
-
-/** The `{ id, source }` a create/update returns (the `SkillWriteResult` shape). */
-export type SkillWriteRecord = Record<string, unknown>;
-
-/** One saved skill-version's metadata as the host forwards it (`SkillVersionMeta`;
- *  opaque here — the app owns the full type). */
-export type SkillVersionRecord = Record<string, unknown>;
 
 /** One file returned by {@link HostServices.uploadFile} — persisted in Uploads. */
 export interface UploadFileResult {
@@ -961,12 +1339,43 @@ export interface UploadFileResult {
 	url: string;
 }
 
+export const uploadFileResultSchema = preserveHostResponse(
+	z.object({
+		data_url: z.string(),
+		id: z.string(),
+		mime_type: z.string(),
+		name: z.string(),
+		size: z.number(),
+		space_id: z.string(),
+		url: z.string(),
+	})
+) satisfies z.ZodType<UploadFileResult>;
+
+/** Generation-bridge features an app can feature-detect before offering a UI.
+ *  Each is `true` only when this host forwards that input to Core, so an app
+ *  can hide a control instead of sending a request the host would drop. */
+export interface HostBridgeFeatures {
+	/** `media.audio` music and sound-effect generation is wired. */
+	"media.audio": boolean;
+	/** `media.video` forwards `input_images`, `input_video`, `input_audio`,
+	 *  `duration_s` and `provider_input` to Core. */
+	"media.video.inputs": boolean;
+	/** `model.complete` forwards `images` to a vision-capable model. */
+	"model.vision": boolean;
+}
+/** Bridge features a host declares it forwards (see {@link HostBridgeFeatures}).
+ *  `media.audio` is implied by implementing `generateAudio`. */
+export type DeclaredHostBridgeFeature = "media.video.inputs" | "model.vision";
+
 /** Sanitized, read-only feature inventory exposed to sandboxed plugins. Values
  * are deliberately booleans or small public metadata; tokens, permission
  * objects, native module instances, and device identifiers never cross this
  * boundary. */
 export interface HostCapabilityDescriptor {
 	androidOngoingNotifications: boolean;
+	/** Generation-bridge feature flags, filled in by the dispatcher from the
+	 *  services this host implements. */
+	bridge?: HostBridgeFeatures;
 	browserNotifications: boolean;
 	dynamicIsland: boolean;
 	haptics: boolean;
@@ -1010,6 +1419,17 @@ export interface NativeLiveActivityResult {
 	updated: true;
 }
 
+/** Acknowledgements produced by the native host implementations. */
+export const nativeHapticsResultSchema = preserveHostResponse(
+	z.object({ signaled: z.literal(true) })
+) satisfies z.ZodType<NativeHapticsResult>;
+export const nativeNotificationResultSchema = preserveHostResponse(
+	z.object({ id: z.string(), scheduled: z.literal(true) })
+) satisfies z.ZodType<NativeNotificationResult>;
+export const nativeLiveActivityResultSchema = preserveHostResponse(
+	z.object({ updated: z.literal(true) })
+) satisfies z.ZodType<NativeLiveActivityResult>;
+
 /** Limits applied before any native implementation sees plugin input. */
 export const NATIVE_ACTION_LIMITS = {
 	conversationIdChars: 200,
@@ -1019,106 +1439,145 @@ export const NATIVE_ACTION_LIMITS = {
 	titleChars: 120,
 } as const;
 
-function boundedNativeText(raw: unknown, maxChars: number): string | undefined {
-	if (typeof raw !== "string") {
-		return undefined;
-	}
-	const value = raw.trim();
-	return value.length > 0 && value.length <= maxChars ? value : undefined;
+function nullableRpcParser<S extends z.ZodType>(schema: S) {
+	return z.unknown().transform((value): z.output<S> | null => {
+		const parsed = schema.safeParse(value);
+		return parsed.success ? parsed.data : null;
+	}).parse;
 }
 
-export function asNativeHapticsInput(
-	raw: unknown
-): NativeHapticsInput | undefined {
-	if (!raw || typeof raw !== "object") {
-		return undefined;
-	}
-	const style = (raw as Record<string, unknown>).style;
-	return style === "light" ||
-		style === "success" ||
-		style === "warning" ||
-		style === "error"
-		? { style }
-		: undefined;
+function optionalNativeParser<S extends z.ZodType>(schema: S) {
+	return z.unknown().transform((value): z.output<S> | undefined => {
+		const parsed = schema.safeParse(value);
+		return parsed.success ? parsed.data : undefined;
+	}).parse;
 }
 
-export function asNativeNotificationInput(
-	raw: unknown
-): NativeNotificationInput | undefined {
-	if (!raw || typeof raw !== "object") {
-		return undefined;
-	}
-	const input = raw as Record<string, unknown>;
-	const title = boundedNativeText(
-		input.title,
-		NATIVE_ACTION_LIMITS.notificationTitleChars
-	);
-	const body = boundedNativeText(
-		input.body,
-		NATIVE_ACTION_LIMITS.notificationBodyChars
-	);
-	return title && body ? { body, title } : undefined;
-}
+export const nativeHapticsInputSchema = z.object({
+	style: z.enum(["light", "success", "warning", "error"]),
+});
+export const nativeNotificationInputSchema = z.object({
+	body: z
+		.string()
+		.trim()
+		.min(1)
+		.max(NATIVE_ACTION_LIMITS.notificationBodyChars),
+	title: z
+		.string()
+		.trim()
+		.min(1)
+		.max(NATIVE_ACTION_LIMITS.notificationTitleChars),
+});
+export const nativeLiveActivityInputSchema = z.object({
+	conversationId: z
+		.string()
+		.trim()
+		.min(1)
+		.max(NATIVE_ACTION_LIMITS.conversationIdChars),
+	detail: z.string().trim().min(1).max(NATIVE_ACTION_LIMITS.detailChars),
+	status: z.enum(["running", "waiting", "review", "done", "error"]),
+	title: z.string().trim().min(1).max(NATIVE_ACTION_LIMITS.titleChars),
+});
 
-export function asNativeLiveActivityUpdateInput(
-	raw: unknown
-): NativeLiveActivityUpdateInput | undefined {
-	if (!raw || typeof raw !== "object") {
-		return undefined;
-	}
-	const input = raw as Record<string, unknown>;
-	const conversationId = boundedNativeText(
-		input.conversationId,
-		NATIVE_ACTION_LIMITS.conversationIdChars
-	);
-	const title = boundedNativeText(input.title, NATIVE_ACTION_LIMITS.titleChars);
-	const detail = boundedNativeText(
-		input.detail,
-		NATIVE_ACTION_LIMITS.detailChars
-	);
-	const status = input.status;
-	if (
-		!(conversationId && title && detail) ||
-		(status !== "running" &&
-			status !== "waiting" &&
-			status !== "review" &&
-			status !== "done" &&
-			status !== "error")
-	) {
-		return undefined;
-	}
-	return { conversationId, detail, status, title };
-}
+export const asNativeHapticsInput = optionalNativeParser(
+	nativeHapticsInputSchema
+);
+export const asNativeNotificationInput = optionalNativeParser(
+	nativeNotificationInputSchema
+);
+export const asNativeLiveActivityUpdateInput = optionalNativeParser(
+	nativeLiveActivityInputSchema
+);
+
+const openedFileUriSchema = z.object({ uri: z.string() });
+const openedFileRevisionSchema = openedFileUriSchema.extend({
+	expectedRevision: z.string(),
+});
+const openedFileRepresentationsSchema = openedFileRevisionSchema.extend({
+	text: z.unknown().optional(),
+	blob: z.unknown().optional(),
+});
+const openedFileTextWriteSchema = openedFileRepresentationsSchema
+	.refine((value) => !("blob" in value))
+	.pipe(openedFileRevisionSchema.extend({ text: z.string() }));
+const openedFileBlobWriteSchema = openedFileRepresentationsSchema
+	.refine((value) => !("text" in value))
+	.pipe(openedFileRevisionSchema.extend({ blob: z.string() }));
+
+const rpcToolNameSchema = z.string().min(1);
+const rpcHeightSchema = z.number().nonnegative();
+const rpcModalArgSchema = z
+	.object({ template: z.unknown().optional() })
+	.catch(() => ({}));
+const rpcNotificationAppIconsSchema = z
+	.object({
+		appIds: z
+			.array(z.string().min(1).optional().catch(undefined))
+			.transform((ids) => ids.filter((id): id is string => id !== undefined))
+			.catch(() => []),
+	})
+	.catch(() => ({ appIds: [] }));
+
+const browserVibrationSchema = z.custom<Navigator["vibrate"]>(
+	(value) => z.function().safeParse(value).success
+);
+const browserNotificationConstructorSchema = z.custom<typeof Notification>(
+	(value) => z.function().safeParse(value).success
+);
+const browserUuidSchema = z.custom<Crypto["randomUUID"]>(
+	(value) => z.function().safeParse(value).success
+);
 
 function browserPlatform(): HostCapabilityDescriptor["platform"] {
-	return typeof navigator === "undefined" ? "unknown" : "browser";
+	return globalThis.navigator === undefined ? "unknown" : "browser";
+}
+
+/** Which generation-bridge inputs this host forwards. A feature counts only
+ *  when its service exists AND the host declares it forwards the new fields,
+ *  so an older host that implements `generateVideo` but drops reference inputs
+ *  never advertises them. */
+export function hostBridgeFeatures(
+	services: Pick<
+		HostServices,
+		"bridgeFeatures" | "generateAudio" | "generateVideo" | "modelComplete"
+	>
+): HostBridgeFeatures {
+	const declared = new Set(services.bridgeFeatures ?? []);
+	return {
+		"media.audio": services.generateAudio !== undefined,
+		"media.video.inputs":
+			services.generateVideo !== undefined &&
+			declared.has("media.video.inputs"),
+		"model.vision":
+			services.modelComplete !== undefined && declared.has("model.vision"),
+	};
 }
 
 /** Detect browser-only host features without requesting permission or returning
  * browser objects. Native hosts replace this with their platform detector. */
 export function detectBrowserHostCapabilities(): HostCapabilityDescriptor {
 	const browser = browserPlatform() === "browser";
-	const notification = browser && typeof Notification !== "undefined";
+	const notification = browser && globalThis.Notification !== undefined;
 	const audio =
 		browser &&
-		(typeof AudioContext !== "undefined" || typeof Audio !== "undefined");
+		(globalThis.AudioContext !== undefined || globalThis.Audio !== undefined);
 	return {
 		androidOngoingNotifications: false,
 		browserNotifications: notification,
 		dynamicIsland: false,
 		hardwareBleRelay:
-			browser && typeof navigator !== "undefined" && "bluetooth" in navigator,
+			browser && globalThis.navigator !== undefined && "bluetooth" in navigator,
 		haptics:
 			browser &&
-			typeof navigator !== "undefined" &&
-			typeof navigator.vibrate === "function",
+			globalThis.navigator !== undefined &&
+			browserVibrationSchema.safeParse(navigator.vibrate).success,
 		localNotifications: notification,
 		liveActivities: false,
 		platform: browserPlatform(),
 		pushRegistration:
 			browser &&
-			typeof PushManager !== "undefined" &&
-			typeof ServiceWorkerContainer !== "undefined",
+			globalThis.PushManager !== undefined &&
+			globalThis.ServiceWorkerContainer !== undefined,
 		quickActions: false,
 		sounds: audio,
 	};
@@ -1130,13 +1589,16 @@ export function detectBrowserHostCapabilities(): HostCapabilityDescriptor {
  *  prompt on its own. Mobile hosts inject their platform implementations.
  */
 function browserNativeHaptics(input: NativeHapticsInput): NativeHapticsResult {
-	const vibrate = globalThis.navigator?.vibrate;
-	if (typeof vibrate !== "function") {
+	const vibration = browserVibrationSchema.safeParse(
+		globalThis.navigator?.vibrate
+	);
+	if (!vibration.success) {
 		throw new CodedRpcError(
 			"server_error",
 			"native.haptics is unavailable on this host"
 		);
 	}
+	const vibrate = vibration.data;
 	const duration =
 		input.style === "light"
 			? 12
@@ -1157,23 +1619,24 @@ function browserNativeHaptics(input: NativeHapticsInput): NativeHapticsResult {
 async function browserNativeNotification(
 	input: NativeNotificationInput
 ): Promise<NativeNotificationResult> {
-	const NotificationConstructor = globalThis.Notification;
+	const notificationConstructor =
+		browserNotificationConstructorSchema.safeParse(globalThis.Notification);
 	if (
-		typeof NotificationConstructor !== "function" ||
-		NotificationConstructor.permission !== "granted"
+		!notificationConstructor.success ||
+		notificationConstructor.data.permission !== "granted"
 	) {
 		throw new CodedRpcError(
 			"server_error",
 			"native.notifications.create requires notification permission granted by the host"
 		);
 	}
+	const NotificationConstructor = notificationConstructor.data;
 	const notification = new NotificationConstructor(input.title, {
 		body: input.body,
 	});
-	const id =
-		typeof globalThis.crypto?.randomUUID === "function"
-			? globalThis.crypto.randomUUID()
-			: `browser-notification-${Date.now()}`;
+	const id = browserUuidSchema.safeParse(globalThis.crypto?.randomUUID).success
+		? globalThis.crypto.randomUUID()
+		: `browser-notification-${Date.now()}`;
 	notification.onclick = () => notification.close();
 	return { id, scheduled: true };
 }
@@ -1188,22 +1651,66 @@ async function browserNativeNotification(
  *  frame by construction). */
 // HostServices stays grouped by surface so its comments mirror the contribution
 // docs; it is intentionally not alphabetized across those semantic sections.
-// biome-ignore assist/source/useSortedInterfaceMembers: preserve host-surface grouping
+
+export interface SpaceDatabaseQueryResult {
+	columns: string[];
+	rows: RyuJsonValue[][];
+	schema: { id: string; label: string; name: string }[];
+	truncated: boolean;
+}
+
+export const spaceDatabaseQueryResultSchema = preserveHostResponse(
+	z.object({
+		columns: z.array(z.string()),
+		rows: z.array(z.array(databaseResponseJsonSchema)),
+		schema: z.array(
+			z.object({ id: z.string(), label: z.string(), name: z.string() })
+		),
+		truncated: z.boolean(),
+	})
+) satisfies z.ZodType<SpaceDatabaseQueryResult>;
+
+const timelineEventRecordsSchema = preserveHostResponse(
+	z.array(timelineEventRecordSchema)
+).nullable();
+const chatConversationSummariesSchema = preserveHostResponse(
+	z.array(chatConversationSummarySchema)
+);
+const approvalRecordsSchema = preserveHostResponse(
+	z.array(approvalRecordSchema)
+);
+const notificationRecordsSchema = preserveHostResponse(
+	z.array(notificationRecordSchema)
+);
+const proactiveSuggestionRecordsSchema = preserveHostResponse(
+	z.array(proactiveSuggestionRecordSchema)
+);
+const meetingRecordsSchema = preserveHostResponse(z.array(meetingRecordSchema));
+const uploadedFilesSchema = preserveHostResponse(
+	z.union([uploadFileResultSchema, z.array(uploadFileResultSchema), z.null()])
+);
+
+/** The explicit secret-free projection exposed by core.listAgents. */
+export const hostAgentSummarySchema = z.object({
+	id: z.string(),
+	name: z.string(),
+});
+export type HostAgentSummary = z.output<typeof hostAgentSummarySchema>;
+
 export interface HostServices {
-	/** Return secret-free active-node and mesh origins for share links. */
-	nodeShareOrigins?(): Promise<RyuNodeShareOrigin[]>;
-	/** Mobile-only native actions. Desktop, web, and extension hosts deliberately
-	 * leave these callbacks undefined, so a granted call fails closed as
-	 * unavailable instead of falling back to browser or raw native APIs. */
-	nativeHaptics?(
-		input: NativeHapticsInput
-	): Promise<NativeHapticsResult> | NativeHapticsResult;
-	nativeLiveActivitiesUpdate?(
-		input: NativeLiveActivityUpdateInput
-	): Promise<NativeLiveActivityResult>;
-	nativeNotificationsCreate?(
-		input: NativeNotificationInput
-	): Promise<NativeNotificationResult>;
+	/** Read Gateway audit rows for the node's observability explorer. */
+	activityAudit?(input: ActivityAuditInput): Promise<ActivityAuditResponse>;
+	/** Run the shared Promptfoo-compatible quality evaluator for one agent. */
+	activityEval?(input: {
+		agent_id: string;
+		model?: string;
+	}): Promise<ActivityEvalResponse>;
+	/** Import a run's last user/assistant pair into the agent's first Quality suite. */
+	activityImportTrace?(input: {
+		agent_id?: string;
+		run_id: string;
+		suite_id?: string;
+	}): Promise<ActivityTraceImportRecord>;
 
 	// --- Activity feed (grant `activity:read`). The `@ryu/activity` app renders
 	// Core's read-only unified feed. Host-direct (the monitors pattern): the host holds
@@ -1213,73 +1720,26 @@ export interface HostServices {
 
 	/** List the unified activity feed (`GET /api/activity`), capped, newest-first. */
 	activityList?(input: { limit?: number }): Promise<ActivityRecord[]>;
-	/** Read Gateway audit rows for the node's observability explorer. */
-	activityAudit?(input: ActivityAuditInput): Promise<Record<string, unknown>>;
-	/** Apply the local Gateway audit retention policy. */
-	activityPrune?(): Promise<Record<string, unknown>>;
-	/** Score a completed output without replaying its provider request. */
-	activityScore?(input: ActivityScoreInput): Promise<Record<string, unknown>>;
-	/** Read Core spans for one conversation/run. */
-	activityTrace?(input: { run_id: string }): Promise<Record<string, unknown>>;
-	/** Run the server-owned bounded security probe campaign for one agent. */
-	activityRedteam?(input: {
-		agent_id: string;
-		model?: string;
-	}): Promise<Record<string, unknown>>;
-	/** Run the shared Promptfoo-compatible quality evaluator for one agent. */
-	activityEval?(input: {
-		agent_id: string;
-		model?: string;
-	}): Promise<Record<string, unknown>>;
-	/** Import a run's last user/assistant pair into the agent's first Quality suite. */
-	activityImportTrace?(input: {
-		agent_id?: string;
-		run_id: string;
-		suite_id?: string;
-	}): Promise<Record<string, unknown>>;
 	/** Open the chat tab for an item's session id. A pure shell-navigation verb (no
 	 *  Core call); fire-and-forget from the frame's view (mirrors the desktop page's
 	 *  clickable row). */
 	activityOpenSession?(input: { session_id: string }): void;
-	// --- Chat Broadcast (grant `chat.sendFollowUp`). The companion can list only
-	// conversations visible to the current verified caller. `chatSend` loads the
-	// transcript in the trusted host, posts one real user turn, and returns after
-	// Core accepts the detached stream; the sandbox never receives a node token or
-	// transcript contents. --
-	/** List visible conversation summaries, including idle chats. */
-	chatListConversations?(): Promise<ChatConversationSummary[]>;
-	/** Post one message into an existing conversation. */
-	chatSend?(input: {
-		conversationId: string;
-		text: string;
-	}): Promise<ChatSendResult>;
-	/** List Core-visible background processes, running by default. */
-	backgroundList?(input: {
-		producer?: string;
-		running_only?: boolean;
-	}): Promise<BackgroundProcess[]>;
-	/** Request a process owner to stop one of its live processes. */
-	backgroundStop?(input: {
-		process_id: string;
-	}): Promise<{ ok: boolean; requested: boolean; process_id: string }>;
+	/** Apply the local Gateway audit retention policy. */
+	activityPrune?(): Promise<ActivityPruneResponse>;
+	/** Run the server-owned bounded security probe campaign for one agent. */
+	activityRedteam?(input: {
+		agent_id: string;
+		model?: string;
+	}): Promise<ActivityRedteamResponse>;
+	/** Score a completed output without replaying its provider request. */
+	activityScore?(input: ActivityScoreInput): Promise<ActivityScoreResponse>;
+	/** Read Core spans for one conversation/run. */
+	activityTrace?(input: { run_id: string }): Promise<ActivityTraceResponse>;
 	/** Forward a call to `/api/ext/<owning-plugin-id><path>`. */
-	appRequest?(input: AppRequestPayload, signal?: AbortSignal): Promise<unknown>;
-	/** Open a host-owned application-room realtime connection. */
-	realtimeConnect?(
-		input: RealtimeConnectPayload
-	): Promise<RealtimeConnectionInfo>;
-	/** Publish a named event through a host-owned application-room connection. */
-	realtimePublish?(input: RealtimePublishPayload): Promise<void>;
-	/** Publish presence through a host-owned application-room connection. */
-	realtimePresence?(input: RealtimePresencePayload): Promise<void>;
-	/** Subscribe to events from a host-owned application-room connection. */
-	realtimeSubscribe?(
-		input: RealtimeConnectionPayload,
-		emit: (delta: string) => void,
-		signal: AbortSignal
-	): Promise<void>;
-	/** Close a host-owned application-room connection. */
-	realtimeClose?(input: RealtimeConnectionPayload): Promise<void>;
+	appRequest?(
+		input: AppRequestPayload,
+		signal?: AbortSignal
+	): Promise<RpcJsonResponse>;
 	/** Approve a pending request (`POST /api/approvals/:id/approve`). */
 	approvalsApprove?(input: ApprovalDecidePayload): Promise<ApprovalRecord>;
 
@@ -1294,6 +1754,10 @@ export interface HostServices {
 	approvalsList?(): Promise<ApprovalRecord[]>;
 	/** Reject a pending request (`POST /api/approvals/:id/reject`). */
 	approvalsReject?(input: ApprovalDecidePayload): Promise<ApprovalRecord>;
+	/** Install or update a companion-only app the calling app built (grant
+	 *  `plugins:install`). The host validates the frame-supplied bundle against the
+	 *  caller's own id with `checkAppBundle` before posting it to Core. */
+	appsInstallBundle?(bundle: unknown): Promise<AppBundleInstallResult>;
 	/** Drop this app's whole context slice from the assistant (page closed/blurred). */
 	assistantClearContext?(): Promise<void>;
 	/** Hand the assistant back to the generic "Ask Ryu" chat. */
@@ -1315,18 +1779,41 @@ export interface HostServices {
 		label: string;
 		preamble?: string;
 		prompts?: string[];
+		/** What the conversation is about (e.g. one pull request). A new value
+		 *  starts a separate thread; returning to an earlier one resumes it. */
+		thread?: string;
 		tools?: string[];
 	}): Promise<void>;
-	/** Show an ephemeral host-rendered notification. The returned id is opaque and
-	 * caller-local: implementations must not reveal the renderer's global id and
-	 * must namespace it to the owning plugin before rendering. */
-	uiToastShow?(input: ToastShowInput): Promise<string> | string;
-	/** Update one toast previously returned to this caller. Unknown ids are a no-op
-	 * at the renderer boundary; they must never reach another plugin's toast. */
-	uiToastUpdate?(input: ToastUpdateInput): Promise<void> | void;
-	/** Dismiss one toast previously returned to this caller. There is deliberately
-	 * no global clear operation. */
-	uiToastDismiss?(input: ToastDismissInput): Promise<void> | void;
+	/** List Core-visible background processes, running by default. */
+	backgroundList?(input: {
+		producer?: string;
+		running_only?: boolean;
+	}): Promise<BackgroundProcess[]>;
+	/** Request a process owner to stop one of its live processes. */
+	backgroundStop?(input: {
+		process_id: string;
+	}): Promise<{ ok: boolean; requested: boolean; process_id: string }>;
+	/** App-scoped backups; Core derives identity and keeps credentials sealed. */
+	backupsRequest?(
+		method: AppBackupMethod,
+		input: RyuJsonValue
+	): Promise<RyuJsonValue>;
+
+	// --- Visual plan review (grant `blueprint:review`). The `@ryu/blueprint` app
+	// renders a published plan and records the reviewer's annotations and verdict.
+	// Host-direct through ONE forwarder, the same shape as Reasoning above: eleven
+	// sidecar routes need no per-route service, and the round-two routes (revision
+	// diff view, artifact review) will need no host change at all. Optional, so a host
+	// without the app is unaffected. ---
+
+	/** Forward one call to `/api/blueprint<path>`. Resolves with the parsed JSON body
+	 *  and REJECTS on any non-2xx, so the frame uses try/catch rather than a status
+	 *  check. The host validates `path` (see {@link BlueprintRequestPayload}) before
+	 *  building the URL; it never accepts a host or an absolute URL from the frame. */
+	blueprintRequest?(input: BlueprintRequestPayload): Promise<RpcJsonResponse>;
+	/** Generation-bridge inputs this host forwards to Core, reported to apps
+	 *  through `host.capabilities().bridge` (see {@link hostBridgeFeatures}). */
+	bridgeFeatures?: readonly DeclaredHostBridgeFeature[];
 	/** List agents (`GET /api/agents`) for the New-automation picker (id+name). */
 	calendarAgents?(): Promise<CalendarAgentRecord[]>;
 	/** Create (or update) the scheduled workflow that runs an agent on a schedule,
@@ -1354,38 +1841,75 @@ export interface HostServices {
 
 	/** Governed tool call: `POST /api/widgets/tools/call` (Gateway chain). The host
 	 *  pins `serverId`/`instanceId`/`toolCallId`; the frame supplies only name+args. */
-	callTool?(name: string, args: unknown): Promise<unknown>;
-	/** The installed trained adapters with provenance (`host.finetune_adapters`). */
-	finetuneAdapters?(): Promise<unknown>;
-	/** Cooperatively cancel a running job (`host.finetune_cancel`). */
-	finetuneCancel?(input: { id: string }): Promise<unknown>;
+	callTool?(name: string, args: RpcJsonResponse): Promise<RpcJsonResponse>;
+	/** Discover models for one provider; Core resolves credentials server-side. */
+	catalogModels?(input: { providerId: string }): Promise<RyuCatalogModels>;
+	/** Read the shared, secret-free provider/model/agent/app/hook catalog. */
+	catalogSnapshot?(): Promise<RyuCatalogSnapshot>;
+	// --- Chat Broadcast (grant `chat.sendFollowUp`). The companion can list only
+	// conversations visible to the current verified caller. `chatSend` loads the
+	// transcript in the trusted host, posts one real user turn, and returns after
+	// Core accepts the detached stream; the sandbox never receives a node token or
+	// transcript contents. --
+	/** List visible conversation summaries, including idle chats. */
+	chatListConversations?(): Promise<ChatConversationSummary[]>;
+	/** Post one message into an existing conversation. */
+	chatSend?(input: {
+		conversationId: string;
+		text: string;
+	}): Promise<ChatSendResult>;
+	/** Open a value this app sealed (`host.crypto_open`). Rejects another app's
+	 *  ciphertext (different key, AEAD tag failure) and passes through values that
+	 *  were never sealed, so a store can be migrated in place. */
+	cryptoOpen?(input: { value: string }): Promise<string>;
+	/** Seal a string under this app's own key (`host.crypto_seal`, grant
+	 *  `crypto:seal`). Returns an opaque envelope to hand to `storageSet` or any
+	 *  other sink. The key is derived by Core per app and never reaches the frame,
+	 *  so this is the ONLY way an app gets encryption — there is no key accessor. */
+	cryptoSeal?(input: { value: string }): Promise<string>;
+	/** Which key custody is live (`host.crypto_status`) — keychain vs a key file
+	 *  next to the data. Carries no key material; let an app tell the user what
+	 *  its sealed data is actually worth before storing anything sensitive. */
+	cryptoStatus?(): Promise<CryptoStatus>;
+	/** The installed trained adapters with provenance (sidecar `GET /adapters`). */
+	finetuneAdapters?(): Promise<RpcJsonResponse>;
+	/** Cooperatively cancel a running job (sidecar `DELETE /:id`). */
+	finetuneCancel?(input: { id: string }): Promise<RpcJsonResponse>;
 
-	// --- Fine-tune runs (grant `finetune:runs`). The `@ryu/finetune` app drives
-	// training runs; Core owns the orchestration + durable job store + adapter→GGUF
-	// merge, reached through the governed bridge (`/api/plugins/:id/host`). Each is
-	// ONE privileged fetch; live progress streams over `finetuneStream`. All optional
-	// so a host that does not implement them is unaffected. ---
+	// --- Fine-tune runs (grant `finetune:runs`). Legacy host-API verbs kept for
+	// compatibility (host API 1.x is additive-only). Core no longer bridges them:
+	// hosts serve each from the companion's OWN `ryu-finetune` sidecar through the
+	// generic ext-proxy (`finetune-compat.ts`), and current companions call
+	// `app.request` directly. Live progress streams over `finetuneStream`. All
+	// optional so a host that does not implement them is unaffected. ---
 
-	/** Probe what this node can train (`host.finetune_capability`): GPU, VRAM,
+	/** Probe what this node can train (sidecar `GET /capability`): GPU, VRAM,
 	 *  local-train gate + reason, and the sidecar's health. Takes no input. */
-	finetuneCapability?(): Promise<unknown>;
-	/** One job's live snapshot — step/loss/state (`host.finetune_get`). */
-	finetuneGet?(input: { id: string }): Promise<unknown>;
-	/** The durable job list, live-synced from the sidecar (`host.finetune_list`). */
-	finetuneList?(): Promise<unknown>;
+	finetuneCapability?(): Promise<RpcJsonResponse>;
+	/** One job's live snapshot — step/loss/state (sidecar `GET /:id`). */
+	finetuneGet?(input: { id: string }): Promise<RpcJsonResponse>;
+	/** The durable job list, live-synced from the sidecar (`GET /list`). */
+	finetuneList?(): Promise<RpcJsonResponse>;
 	/** Merge a trained adapter into a servable GGUF + register it as an installed
-	 *  model (`host.finetune_merge`). `input` forwarded verbatim to Core. */
-	finetuneMerge?(input: Record<string, unknown>): Promise<unknown>;
-	/** Start a fine-tune job (`host.finetune_start`). `input` is the job spec
-	 *  forwarded verbatim to Core (base model, dataset, hyperparams, target). */
-	finetuneStart?(input: Record<string, unknown>): Promise<unknown>;
-	/** Subscribe to a run's live SSE progress (`finetune.stream`). Each raw SSE
+	 *  model (sidecar `POST /merge`). `input` forwarded verbatim. */
+	finetuneMerge?(input: FinetuneJobSpec): Promise<RpcJsonResponse>;
+	/** Start a fine-tune job (sidecar `POST /start`). `input` is the job spec
+	 *  forwarded verbatim (base model, dataset, hyperparams, target). */
+	finetuneStart?(input: FinetuneJobSpec): Promise<RpcJsonResponse>;
+	/** Subscribe to a run's live SSE progress (`finetune.stream`; the sidecar's
+	 *  `GET /:id/stream` read through the ext-proxy). Each raw SSE
 	 *  frame is delivered to `emit`; resolves when the stream ends; `signal` aborts. */
 	finetuneStream?(
 		input: { id: string },
 		emit: (delta: string) => void,
 		signal: AbortSignal
 	): Promise<void>;
+	/** Generate music or a sound effect (`/api/audio/generate`, polling the
+	 *  cloud job internally). There is no local audio engine, so `provider` and
+	 *  `model` are required. Returns `{ url, mediaType }[]` with `data:` URLs. */
+	generateAudio?(
+		input: MediaAudioInput
+	): Promise<{ url: string; mediaType: string }[]>;
 
 	// --- Media generation (grant `media:generate`) + speech-to-text
 	// (`media:transcribe`). Each is ONE privileged, Gateway-governed fetch to a Core
@@ -1402,37 +1926,48 @@ export interface HostServices {
 		provider?: string;
 		model?: string;
 		input_images?: string[];
+		/** Model-specific fields Core merges into a cloud provider body. */
+		provider_input?: Record<string, RyuJsonValue>;
 		request_id?: string;
 	}): Promise<string[]>;
-	/** Generate video clip(s) from a prompt (`/api/video/generate`, polling cloud
-	 *  jobs internally). Returns `{ url, mediaType }[]` with `url` a `data:` URL. */
+	/** Generate video clip(s) (`/api/video/generate`, polling cloud jobs
+	 *  internally) from a prompt plus optional reference inputs: `[first, last?]`
+	 *  frames, a source clip, an audio track and model-specific `provider_input`.
+	 *  Core maps each input for the selected target or refuses the request.
+	 *  Returns `{ url, mediaType }[]` with `url` a `data:` URL. */
 	generateVideo?(input: {
 		prompt: string;
 		provider?: string;
 		model?: string;
 		request_id?: string;
+		input_images?: string[];
+		input_video?: string;
+		input_audio?: string;
+		duration_s?: number;
+		provider_input?: Record<string, RyuJsonValue>;
 	}): Promise<{ url: string; mediaType: string }[]>;
 	/** Return the host's current global snapshot for this widget so the frame can
 	 *  refresh after the bridge connects (spec §1.3 `widget.getGlobals`). */
-	getGlobals?(): Promise<unknown>;
+	getGlobals?(): Promise<WidgetGlobalsPatch | null>;
+	getModelContext?(): import("./model-context.ts").ModelContextState | null;
 
 	// --- Workflows (grants `workflows:crud`/`runstate`/`catalogs`) + ghost record
 	// (`ghost:record`). Host-direct families (the monitors pattern): the host holds the
 	// node token and calls the existing `/workflows*` + `/api/workflows/catalog*` +
 	// `/api/recipes/*` API, already gated on the `@ryu/workflows` enabled bit. All
-	// return the plain JSON the existing desktop client returns (kept `unknown` so
-	// rpc.ts carries no workflow schema — the app owns the richer typed copies). All
+	// return the existing desktop client JSON; recording replies follow the shared
+	// Core client owner contracts. All
 	// optional so a non-workflows host is unaffected. ---
 
 	/** Ghost recipe list (`GET /api/recipes`) — the recipe-node picker + record flow. */
-	ghostRecipes?(): Promise<unknown>;
+	ghostRecipes?(): Promise<RecipeSummary[]>;
 	/** Begin a native-desktop recording (`POST /api/recipes/record/start`). */
-	ghostRecordStart?(input: { task: string }): Promise<unknown>;
+	ghostRecordStart?(input: { task: string }): Promise<RecordingState>;
 	/** Poll the live recording status (`GET /api/recipes/record/status`). */
-	ghostRecordStatus?(): Promise<unknown>;
+	ghostRecordStatus?(): Promise<RecordingState>;
 	/** Stop recording; returns the captured AX action sequence + recipe draft
 	 *  (`POST /api/recipes/record/stop`). */
-	ghostRecordStop?(): Promise<unknown>;
+	ghostRecordStop?(): Promise<GhostRecordingStop>;
 	/** Return a sanitized host feature inventory. This is a local capability and
 	 * does not require a plugin grant. */
 	hostCapabilities?():
@@ -1441,14 +1976,18 @@ export interface HostServices {
 	/** Return the current locale/pack metadata. This is a local, read-only
 	 * primitive and never returns the pack's message catalog or user data. */
 	i18nSnapshot?(): Promise<I18nHostSnapshot> | I18nHostSnapshot;
-	/** Translate an app/plugin-owned message with the active shell pack. */
-	i18nTranslate?(input: I18nHostTranslateInput): Promise<string> | string;
 	/** Stream the current locale/pack snapshot and later changes as JSON. */
 	i18nSubscribe?(
-		input: Record<string, unknown>,
+		input: ShellStreamInput,
 		emit: (delta: string) => void,
 		signal: AbortSignal
 	): Promise<void>;
+	/** Translate an app/plugin-owned message with the active shell pack. */
+	i18nTranslate?(input: I18nHostTranslateInput): Promise<string> | string;
+	/** Install one registered TTS engine's managed runtime dependencies. */
+	installTtsEngine?(input: {
+		engine: string;
+	}): Promise<VoiceEngineInstallRecord>;
 
 	// --- Learning (grant `learning:crud`). The `@ryu/learning` app renders the
 	// read-only continual-learning surface. Host-direct (the monitors pattern): the
@@ -1467,11 +2006,7 @@ export interface HostServices {
 	learningHealing?(): Promise<LearningHealingRecord>;
 	/** List the agents on the active node, PROJECTED to `{id,name}` only.
 	 *  Privileged: the host holds the token; the projection never leaks it. */
-	listAgents(): Promise<unknown>;
-	/** Read the shared, secret-free provider/model/agent/app/hook catalog. */
-	catalogSnapshot?(): Promise<RyuCatalogSnapshot>;
-	/** Discover models for one provider; Core resolves credentials server-side. */
-	catalogModels?(input: { providerId: string }): Promise<RyuCatalogModels>;
+	listAgents(): Promise<HostAgentSummary[]>;
 	/** List agents with the fields a per-agent model picker needs (id/name/engine/
 	 *  model/recommended) — a richer, still-secret-free projection than listAgents. */
 	listAgentsFull?(): Promise<
@@ -1506,13 +2041,14 @@ export interface HostServices {
 	mailList?(): Promise<MailInbox[]>;
 	/** List the selected inbox's messages (`GET /api/mail/inboxes/:id/messages`). */
 	mailMessages?(input: { inboxId: string }): Promise<MailMessage[]>;
+	/** Call one of the app's authenticated `/api/mail/*` JSON routes. */
+	mailRequest?(input: MailRequestPayload): Promise<RpcJsonResponse>;
 	/** Rotate the inbound HMAC secret (`POST /api/mail/inboxes/:id/rotate-secret`).
 	 *  Returns the new secret string. */
 	mailRotateSecret?(input: { id: string }): Promise<string>;
 	/** Send a message (`POST /api/mail/inboxes/:id/send`). Returns the stored record. */
 	mailSend?(input: MailSendPayload): Promise<MailMessage>;
-	/** Call one of the app's authenticated `/api/mail/*` JSON routes. */
-	mailRequest?(input: MailRequestPayload): Promise<unknown>;
+	mediaRecording?: MediaRecordingService;
 	/** Delete a meeting + its history (`DELETE /api/meetings/:id`). */
 	meetingsDelete?(input: { id: string }): Promise<void>;
 	/** Stop + summarize (`POST /api/meetings/:id/finalize`). Returns the updated record. */
@@ -1568,6 +2104,8 @@ export interface HostServices {
 		provider?: string;
 		model_pref_key?: string;
 		effort?: string;
+		/** Inline `data:image/{png,jpeg,webp}` URIs for a vision model. */
+		images?: string[];
 	}): Promise<string>;
 
 	// --- Website monitors (grant `monitors:crud`). The `@ryu/monitors` app drives
@@ -1601,6 +2139,23 @@ export interface HostServices {
 		id: string;
 		input: MonitorInputPayload;
 	}): Promise<MonitorRecord>;
+	/** Mobile-only native actions. Desktop, web, and extension hosts deliberately
+	 * leave these callbacks undefined, so a granted call fails closed as
+	 * unavailable instead of falling back to browser or raw native APIs. */
+	nativeHaptics?(
+		input: NativeHapticsInput
+	): Promise<NativeHapticsResult> | NativeHapticsResult;
+	nativeLiveActivitiesUpdate?(
+		input: NativeLiveActivityUpdateInput
+	): Promise<NativeLiveActivityResult>;
+	nativeNotificationsCreate?(
+		input: NativeNotificationInput
+	): Promise<NativeNotificationResult>;
+
+	/** Forward one call to `/api/news<path>`. Same contract as {@link tuitionRequest}. */
+	newsRequest?(input: NewsRequestPayload): Promise<RpcJsonResponse>;
+	/** Return secret-free active-node and mesh origins for share links. */
+	nodeShareOrigins?(): Promise<RyuNodeShareOrigin[]>;
 	/** Acknowledge a HITL notify gate (`POST /api/notifications/:id/ack`); resolves to
 	 *  whether the ack resumed the suspended workflow run. */
 	notificationsAck?(input: { id: string }): Promise<boolean>;
@@ -1684,10 +2239,41 @@ export interface HostServices {
 	/** Record that an item was copied back out, optionally checking it off
 	 *  (`POST /api/quests/:id/use`). */
 	questsUse?(input: { id: string; complete?: boolean }): Promise<QuestRecord>;
+	readOpenedFile?(input: {
+		uri: string;
+	}): Promise<import("./opened-file.ts").OpenedFileSnapshot>;
+	/** Close a host-owned application-room connection. */
+	realtimeClose?(input: RealtimeConnectionPayload): Promise<void>;
+	/** Open a host-owned application-room realtime connection. */
+	realtimeConnect?(
+		input: RealtimeConnectPayload
+	): Promise<RealtimeConnectionInfo>;
+	/** Publish presence through a host-owned application-room connection. */
+	realtimePresence?(input: RealtimePresencePayload): Promise<void>;
+	/** Publish a named event through a host-owned application-room connection. */
+	realtimePublish?(input: RealtimePublishPayload): Promise<void>;
+	/** Subscribe to events from a host-owned application-room connection. */
+	realtimeSubscribe?(
+		input: RealtimeConnectionPayload,
+		emit: (delta: string) => void,
+		signal: AbortSignal
+	): Promise<void>;
+
+	// --- Automated Reasoning (grant `reasoning:check`). The `@ryu/reasoning` app
+	// authors formal policies and runs the solver playground. Host-direct through ONE
+	// forwarder, the Outpost shape: the sidecar's seven routes need no per-route
+	// service, and a route added to the manifest later needs no host change at all.
+	// Optional, so a host without the app is unaffected. ---
+
+	/** Forward one call to `/api/reasoning<path>`. Resolves with the parsed JSON body
+	 *  and REJECTS on any non-2xx, so the frame uses try/catch rather than a status
+	 *  check. The host validates `path` (see {@link ReasoningRequestPayload}) before
+	 *  building the URL; it never accepts a host or an absolute URL from the frame. */
+	reasoningRequest?(input: ReasoningRequestPayload): Promise<RpcJsonResponse>;
 	/** Accept (or reject) the plugin's claim to render its own route. The concrete
 	 *  implementation is pluginId-scoped (see {@link validatePluginRoute}); it must
 	 *  reject any path that is not this plugin's own `/plugin/<id>` surface. */
-	registerRoute(claim: RouteClaim): Promise<unknown>;
+	registerRoute(claim: RouteClaim): Promise<RouteRegistrationRecord>;
 	/** Dismiss/close this widget instance (host unmounts or hides the frame). Governed
 	 *  `window.openai.requestClose` impl. */
 	requestClose?(): Promise<void>;
@@ -1698,6 +2284,18 @@ export interface HostServices {
 	 *  maps this to fullscreen — but the requested `template` IS threaded through
 	 *  here (not dropped at arg-narrowing) so the host can record/act on it. */
 	requestModal?(input: { template?: unknown }): Promise<{ mode: string }>;
+
+	// --- Deep Read (grant `rlm:query`). The `@ryu/rlm` app loads a corpus, browses
+	// its outline and asks questions of it. Host-direct through ONE forwarder, the
+	// same shape as Reasoning above: the sidecar's ten routes need no per-route
+	// service, and a route added to the manifest later needs no host change at all.
+	// Optional, so a host without the app is unaffected. ---
+
+	/** Forward one call to `/api/rlm<path>`. Resolves with the parsed JSON body and
+	 *  REJECTS on any non-2xx, so the frame uses try/catch rather than a status check.
+	 *  The host validates `path` (see {@link RlmRequestPayload}) before building the
+	 *  URL; it never accepts a host or an absolute URL from the frame. */
+	rlmRequest?(input: RlmRequestPayload): Promise<RpcJsonResponse>;
 	/** Spawn ONE full tool-using sub-agent with a clean context and return its final
 	 *  text (`host.runAgent`, via the delegation engine). Non-streaming in v1. */
 	runAgent?(input: {
@@ -1721,6 +2319,10 @@ export interface HostServices {
 		emit: (delta: string) => void,
 		signal: AbortSignal
 	): Promise<void>;
+	/** Forward one capability-gated call to Core's fixed Safe Actions mount. */
+	safeActionsRequest?(
+		input: SafeActionsRequestPayload
+	): Promise<RpcJsonResponse>;
 	/** Search GIFs (Core `/api/gifs/search`). Host inlines preview + full clip to
 	 *  `data:` URLs so the frame can render/insert them under the CSP. */
 	searchGifs?(input: { query: string }): Promise<{
@@ -1761,12 +2363,12 @@ export interface HostServices {
 	sendFollowUpMessage?(input: { prompt: string }): Promise<void>;
 	/** Persist widget state (client Zustand + best-effort `POST /api/widgets/state`,
 	 *  D4). Keyed by `toolCallId` inside the host. */
-	setWidgetState?(state: unknown): Promise<void>;
+	setWidgetState?(state: RpcJsonResponse): Promise<void>;
 	/** Subscribe to the node event stream, filtered to `input.channels` (a subset of the
 	 *  host's known channels). Each event emits a JSON `{ channel, data }`; resolves when
 	 *  `signal` aborts. */
 	shellEventsSubscribe?(
-		input: Record<string, unknown>,
+		input: ShellStreamInput,
 		emit: (delta: string) => void,
 		signal: AbortSignal
 	): Promise<void>;
@@ -1803,7 +2405,7 @@ export interface HostServices {
 	 *  older plugin ignores, instead of another verb through the contract, the
 	 *  capability table, the dispatch switch and the frame bridge. */
 	shellPrefsSubscribe?(
-		input: Record<string, unknown>,
+		input: ShellStreamInput,
 		emit: (delta: string) => void,
 		signal: AbortSignal
 	): Promise<void>;
@@ -1811,7 +2413,7 @@ export interface HostServices {
 	 *  keywords? }[]`; each invocation emits the invoked command id (a JSON string) back
 	 *  to the frame. The commands are removed from the palette when `signal` aborts. */
 	shellRegisterCommand?(
-		input: Record<string, unknown>,
+		input: ShellStreamInput,
 		emit: (delta: string) => void,
 		signal: AbortSignal
 	): Promise<void>;
@@ -1820,7 +2422,7 @@ export interface HostServices {
 	 *  (same vocabulary as companion / sidebar contribution icons). Rules are removed
 	 *  when `signal` aborts (frame unmount). */
 	shellRegisterTabIcon?(
-		input: Record<string, unknown>,
+		input: ShellStreamInput,
 		emit: (delta: string) => void,
 		signal: AbortSignal
 	): Promise<void>;
@@ -1828,13 +2430,15 @@ export interface HostServices {
 	 *  now and again on every theme change (each `emit` is a JSON `Record<string,string>`);
 	 *  resolves when `signal` aborts (frame unmount / dispose). */
 	shellThemeSubscribe?(
-		input: Record<string, unknown>,
+		input: ShellStreamInput,
 		emit: (delta: string) => void,
 		signal: AbortSignal
 	): Promise<void>;
 	/** Create a user-authored skill (`POST /api/skills`). Rejects (409) on a name
 	 *  collision. Returns `{ id, source }`. */
 	skillsCreate?(input: SkillDraftPayload): Promise<SkillWriteRecord>;
+	/** Open the shared agent-target distribution flow for an installed skill. */
+	skillsDistribute?(input: { id: string }): Promise<void>;
 
 	// --- Skill authoring (grant `skills:crud`). The `@ryu/skill-editor` app authors a
 	// user-owned Agent Skill (`SKILL.md`). Host-direct (the monitors pattern): the host
@@ -1849,8 +2453,6 @@ export interface HostServices {
 	skillsListVersions?(input: { id: string }): Promise<SkillVersionRecord[]>;
 	/** Restore a version as the current SKILL.md (`POST …/versions/:vid/restore`). */
 	skillsRestore?(input: { id: string; versionId: string }): Promise<void>;
-	/** Open the shared agent-target distribution flow for an installed skill. */
-	skillsDistribute?(input: { id: string }): Promise<void>;
 	/** Rename the owning tab (the desktop page's `updateTabTitle`) — shell-navigation. */
 	skillsSetTitle?(input: { title: string }): void;
 	/** Snapshot the current SKILL.md as a new version (`POST /api/skills/:id/versions`). */
@@ -1881,7 +2483,128 @@ export interface HostServices {
 	 *  REJECTS on any non-2xx, so the frame uses try/catch rather than a status check.
 	 *  The host validates `path` (see {@link SocialRequestPayload}) before building the
 	 *  URL; it never accepts a host or an absolute URL from the frame. */
-	socialRequest?(input: SocialRequestPayload): Promise<unknown>;
+	socialRequest?(input: SocialRequestPayload): Promise<RpcJsonResponse>;
+	/** Create a native Space database document (grant `spaces:database`). */
+	spacesCreateDatabase?(input: {
+		space_id: string;
+		title: string;
+	}): Promise<string>;
+
+	/** Create an empty app-owned document in `space_id`; returns its doc id. */
+	spacesCreateDoc?(input: { space_id: string; title: string }): Promise<string>;
+	/** Delete a native database document, preserving the containing Space. */
+	spacesDeleteDatabase?(input: {
+		database_id: string;
+		space_id: string;
+	}): Promise<void>;
+	/** Delete an app-owned document (and its links/versions). */
+	spacesDeleteDoc?(input: { doc_id: string }): Promise<void>;
+
+	// --- Spaces documents (grant `spaces:docs`). An app owns documents of kind
+	// `app:<plugin_id>` — persisted in the Space, search-embedded, backlinked. `source`
+	// is a string (JSON.stringify structured content yourself, e.g. a scene). ---
+
+	/** Resolve or create a user-owned Space by name. */
+	spacesEnsureSpace?(input: {
+		name: string;
+		description?: string | null;
+	}): Promise<string>;
+	/** Read a native Space database document. */
+	spacesGetDatabase?(input: {
+		space_id: string;
+		database_id: string;
+	}): Promise<{
+		id: string;
+		kind: "database";
+		revision: number;
+		space_id: string;
+		source: string;
+		title: string;
+	} | null>;
+	/** Read an app-owned document (null if missing / not this app's). */
+	spacesGetDoc?(input: { doc_id: string }): Promise<{
+		id: string;
+		title: string;
+		source: string;
+		kind: string;
+	} | null>;
+	/** List native databases in one Space (newest first). */
+	spacesListDatabases?(input: {
+		space_id: string;
+	}): Promise<{ id: string; title: string; updated_at: number }[]>;
+	/** List this app's documents in a space (newest first). */
+	spacesListDocs?(input: {
+		space_id: string;
+	}): Promise<{ id: string; title: string; updated_at: number }[]>;
+	/** Run one bounded read-only SQL query against a native Space database. */
+	spacesQueryDatabase?(input: {
+		database_id: string;
+		parameters?: RyuJsonValue[];
+		query: string;
+		space_id: string;
+	}): Promise<SpaceDatabaseQueryResult>;
+	/** Search a Space through Core's semantic retrieval endpoint. */
+	spacesSearch?(input: {
+		space_id: string;
+		query: string;
+		limit?: number;
+	}): Promise<
+		{
+			chunk_id: string;
+			content: string;
+			distance: SpaceMatch["distance"];
+			document_id: string;
+		}[]
+	>;
+	/** Revision-aware save for a native database document. */
+	spacesUpdateDatabase?(input: {
+		expected_revision: number;
+		database_id: string;
+		space_id: string;
+		title?: string;
+		source: string;
+	}): Promise<SpaceDocumentWriteResult>;
+	/** Persist an app-owned document's `source` (+ optional `title`); triggers
+	 *  search re-embedding and backlink re-resolution. */
+	spacesUpdateDoc?(input: {
+		doc_id: string;
+		title?: string;
+		source: string;
+	}): Promise<void>;
+	/** Atomically replace or delete a value when it still equals `expected`. */
+	storageCompareAndSet?(input: {
+		namespace?: string;
+		key: string;
+		expected?: string | null;
+		value?: string | null;
+	}): Promise<boolean>;
+	/** Delete a durable KV value (`host.storage_delete`). */
+	storageDelete?(input: { namespace?: string; key: string }): Promise<void>;
+	/** Read the app's own durable KV value (`host.storage_get`). `null` when unset. */
+	storageGet?(input: {
+		namespace?: string;
+		key: string;
+	}): Promise<string | null>;
+	/** List the keys the app has set in a namespace, newest first (`host.storage_keys`). */
+	storageKeys?(input: { namespace?: string }): Promise<string[]>;
+	/** Upsert a durable KV value (`host.storage_set`). `value` MUST be a string. */
+	storageSet?(input: {
+		namespace?: string;
+		key: string;
+		value: string;
+	}): Promise<void>;
+	// --- Subscription accounts (grant `subscriptions:read`). Core-bridge verbs
+	// (`subscriptions.list` / `subscriptions.usage` → `host.subscriptions_*`): the
+	// host forwards the validated args to the plugin's Core host endpoint, which
+	// also requires a verified node owner/admin caller. Labels may be emails. ---
+	/** Every subscription provider with its saved accounts and cached usage. */
+	subscriptionsList?(
+		input: RyuSubscriptionsListArgs
+	): Promise<RyuSubscriptions>;
+	/** One account's usage reading (the active account when `accountId` is omitted). */
+	subscriptionsUsage?(
+		input: RyuSubscriptionUsageArgs
+	): Promise<RyuProviderUsageReading>;
 
 	// --- Subtitles (grant `subtitles:crud`). The `@ryu/subtitles` app picks a video and
 	// watches a local transcription + translation job. Host-direct through ONE
@@ -1894,144 +2617,7 @@ export interface HostServices {
 	 *  status check. The host validates `path` (see {@link SubtitlesRequestPayload})
 	 *  before building the URL; it never accepts a host or an absolute URL from the
 	 *  frame. */
-	subtitlesRequest?(input: SubtitlesRequestPayload): Promise<unknown>;
-
-	// --- Automated Reasoning (grant `reasoning:check`). The `@ryu/reasoning` app
-	// authors formal policies and runs the solver playground. Host-direct through ONE
-	// forwarder, the Outpost shape: the sidecar's seven routes need no per-route
-	// service, and a route added to the manifest later needs no host change at all.
-	// Optional, so a host without the app is unaffected. ---
-
-	/** Forward one call to `/api/reasoning<path>`. Resolves with the parsed JSON body
-	 *  and REJECTS on any non-2xx, so the frame uses try/catch rather than a status
-	 *  check. The host validates `path` (see {@link ReasoningRequestPayload}) before
-	 *  building the URL; it never accepts a host or an absolute URL from the frame. */
-	reasoningRequest?(input: ReasoningRequestPayload): Promise<unknown>;
-	/** Forward one capability-gated call to Core's fixed Safe Actions mount. */
-	safeActionsRequest?(input: SafeActionsRequestPayload): Promise<unknown>;
-
-	// --- Deep Read (grant `rlm:query`). The `@ryu/rlm` app loads a corpus, browses
-	// its outline and asks questions of it. Host-direct through ONE forwarder, the
-	// same shape as Reasoning above: the sidecar's ten routes need no per-route
-	// service, and a route added to the manifest later needs no host change at all.
-	// Optional, so a host without the app is unaffected. ---
-
-	/** Forward one call to `/api/rlm<path>`. Resolves with the parsed JSON body and
-	 *  REJECTS on any non-2xx, so the frame uses try/catch rather than a status check.
-	 *  The host validates `path` (see {@link RlmRequestPayload}) before building the
-	 *  URL; it never accepts a host or an absolute URL from the frame. */
-	rlmRequest?(input: RlmRequestPayload): Promise<unknown>;
-
-	// --- Tuition (grant `tuition:crud`) and Wire (grant `news:crud`). Both are
-	// host-direct through ONE forwarder, the same shape as Reasoning above: the
-	// sidecars' twenty-four and nineteen routes need no per-route service, and a route
-	// added to either manifest later needs no host change at all. Optional, so a host
-	// without the app is unaffected. ---
-
-	/** Forward one call to `/api/tuition<path>`. Resolves with the parsed JSON body and
-	 *  REJECTS on any non-2xx, so the frame uses try/catch rather than a status check.
-	 *  The host validates `path` (see {@link TuitionRequestPayload}) before building the
-	 *  URL; it never accepts a host or an absolute URL from the frame. */
-	tuitionRequest?(input: TuitionRequestPayload): Promise<unknown>;
-
-	/** Forward one call to `/api/news<path>`. Same contract as {@link tuitionRequest}. */
-	newsRequest?(input: NewsRequestPayload): Promise<unknown>;
-
-	// --- Visual plan review (grant `blueprint:review`). The `@ryu/blueprint` app
-	// renders a published plan and records the reviewer's annotations and verdict.
-	// Host-direct through ONE forwarder, the same shape as Reasoning above: eleven
-	// sidecar routes need no per-route service, and the round-two routes (revision
-	// diff view, artifact review) will need no host change at all. Optional, so a host
-	// without the app is unaffected. ---
-
-	/** Forward one call to `/api/blueprint<path>`. Resolves with the parsed JSON body
-	 *  and REJECTS on any non-2xx, so the frame uses try/catch rather than a status
-	 *  check. The host validates `path` (see {@link BlueprintRequestPayload}) before
-	 *  building the URL; it never accepts a host or an absolute URL from the frame. */
-	blueprintRequest?(input: BlueprintRequestPayload): Promise<unknown>;
-
-	// --- Spaces documents (grant `spaces:docs`). An app owns documents of kind
-	// `app:<plugin_id>` — persisted in the Space, search-embedded, backlinked. `source`
-	// is a string (JSON.stringify structured content yourself, e.g. a scene). ---
-
-	/** Resolve or create a user-owned Space by name. */
-	spacesEnsureSpace?(input: {
-		name: string;
-		description?: string | null;
-	}): Promise<string>;
-	/** Search a Space through Core's semantic retrieval endpoint. */
-	spacesSearch?(input: {
-		space_id: string;
-		query: string;
-		limit?: number;
-	}): Promise<
-		{
-			chunk_id: string;
-			content: string;
-			distance: number;
-			document_id: string;
-		}[]
-	>;
-
-	/** Create an empty app-owned document in `space_id`; returns its doc id. */
-	spacesCreateDoc?(input: { space_id: string; title: string }): Promise<string>;
-	/** Delete an app-owned document (and its links/versions). */
-	spacesDeleteDoc?(input: { doc_id: string }): Promise<void>;
-	/** Read an app-owned document (null if missing / not this app's). */
-	spacesGetDoc?(input: { doc_id: string }): Promise<{
-		id: string;
-		title: string;
-		source: string;
-		kind: string;
-	} | null>;
-	/** List this app's documents in a space (newest first). */
-	spacesListDocs?(input: {
-		space_id: string;
-	}): Promise<{ id: string; title: string; updated_at: number }[]>;
-	/** Persist an app-owned document's `source` (+ optional `title`); triggers
-	 *  search re-embedding and backlink re-resolution. */
-	spacesUpdateDoc?(input: {
-		doc_id: string;
-		title?: string;
-		source: string;
-	}): Promise<void>;
-	/** Seal a string under this app's own key (`host.crypto_seal`, grant
-	 *  `crypto:seal`). Returns an opaque envelope to hand to `storageSet` or any
-	 *  other sink. The key is derived by Core per app and never reaches the frame,
-	 *  so this is the ONLY way an app gets encryption — there is no key accessor. */
-	cryptoSeal?(input: { value: string }): Promise<string>;
-	/** Open a value this app sealed (`host.crypto_open`). Rejects another app's
-	 *  ciphertext (different key, AEAD tag failure) and passes through values that
-	 *  were never sealed, so a store can be migrated in place. */
-	cryptoOpen?(input: { value: string }): Promise<string>;
-	/** Which key custody is live (`host.crypto_status`) — keychain vs a key file
-	 *  next to the data. Carries no key material; let an app tell the user what
-	 *  its sealed data is actually worth before storing anything sensitive. */
-	cryptoStatus?(): Promise<CryptoStatus>;
-	/** App-scoped backups; Core derives identity and keeps credentials sealed. */
-	backupsRequest?(method: string, input: unknown): Promise<unknown>;
-	/** Delete a durable KV value (`host.storage_delete`). */
-	storageDelete?(input: { namespace?: string; key: string }): Promise<void>;
-	/** Read the app's own durable KV value (`host.storage_get`). `null` when unset. */
-	storageGet?(input: {
-		namespace?: string;
-		key: string;
-	}): Promise<string | null>;
-	/** List the keys the app has set in a namespace, newest first (`host.storage_keys`). */
-	storageKeys?(input: { namespace?: string }): Promise<string[]>;
-	/** Atomically replace or delete a value when it still equals `expected`. */
-	storageCompareAndSet?(input: {
-		namespace?: string;
-		key: string;
-		expected?: string | null;
-		value?: string | null;
-	}): Promise<boolean>;
-	/** Upsert a durable KV value (`host.storage_set`). `value` MUST be a string. */
-	storageSet?(input: {
-		namespace?: string;
-		key: string;
-		value: string;
-	}): Promise<void>;
+	subtitlesRequest?(input: SubtitlesRequestPayload): Promise<RpcJsonResponse>;
 	/** Post thumbs/dismiss feedback for a suggestion type (`POST /api/feedback`). */
 	suggestionsFeedback?(input: SuggestionFeedbackPayload): Promise<boolean>;
 	/** List Shadow's proactive suggestion inbox (`GET /proactive`; drops filtered). */
@@ -2060,21 +2646,24 @@ export interface HostServices {
 	timelineList?(input: {
 		rangeMinutes: number;
 	}): Promise<TimelineEventRecord[] | null>;
-	timelineTranscripts?(input: SpeechHistoryInput): Promise<SpeechHistory>;
 	/** Open the Weekly Review tab — a shell-navigation verb (the desktop page's
 	 *  `navigate("/review")`); fire-and-forget from the frame's view. */
 	timelineOpenReview?(): void;
 	/** Open Settings — a shell-navigation verb (the recording-off empty state's
 	 *  `navigate("/settings")`); fire-and-forget from the frame's view. */
 	timelineOpenSettings?(): void;
+	timelineTranscripts?(input: SpeechHistoryInput): Promise<SpeechHistory>;
 	/** Transcribe audio. Detailed callers can retain engine segment timestamps. */
 	transcribeAudio?(input: {
 		audio: string;
 		filename?: string;
 		detailed?: boolean;
+		/** BCP-47 language hint (`auto` = detect); engines may ignore it. */
+		language?: string;
 	}): Promise<string | TranscriptionDetail>;
-	mediaRecording?: MediaRecordingService;
-	/** Synthesize speech (`/api/voice/speak`). Returns a `data:` audio URL. */
+	/** Synthesize speech (`/api/voice/speak`). Returns a `data:` audio URL whose
+	 *  MIME is the container Core served (`audio/wav` unless `format` selected
+	 *  another one the engine could encode). */
 	ttsSpeak?(input: {
 		text: string;
 		engine?: string;
@@ -2082,7 +2671,39 @@ export interface HostServices {
 		speed?: number;
 		language?: string;
 		request_id?: string;
+		reference_audio_data_url?: string;
+		seed?: number;
+		instruct?: string;
+		reference_text?: string;
+		effects?: SpeakEffect[];
+		normalize?: SpeakNormalize;
+		format?: SpeakFormat;
 	}): Promise<string>;
+
+	// --- Tuition (grant `tuition:crud`) and Wire (grant `news:crud`). Both are
+	// host-direct through ONE forwarder, the same shape as Reasoning above: the
+	// sidecars' twenty-four and nineteen routes need no per-route service, and a route
+	// added to either manifest later needs no host change at all. Optional, so a host
+	// without the app is unaffected. ---
+
+	/** Forward one call to `/api/tuition<path>`. Resolves with the parsed JSON body and
+	 *  REJECTS on any non-2xx, so the frame uses try/catch rather than a status check.
+	 *  The host validates `path` (see {@link TuitionRequestPayload}) before building the
+	 *  URL; it never accepts a host or an absolute URL from the frame. */
+	tuitionRequest?(input: TuitionRequestPayload): Promise<RpcJsonResponse>;
+	/** Dismiss one toast previously returned to this caller. There is deliberately
+	 * no global clear operation. */
+	uiToastDismiss?(input: ToastDismissInput): Promise<void> | void;
+	/** Show an ephemeral host-rendered notification. The returned id is opaque and
+	 * caller-local: implementations must not reveal the renderer's global id and
+	 * must namespace it to the owning plugin before rendering. */
+	uiToastShow?(input: ToastShowInput): Promise<string> | string;
+	/** Update one toast previously returned to this caller. Unknown ids are a no-op
+	 * at the renderer boundary; they must never reach another plugin's toast. */
+	uiToastUpdate?(input: ToastUpdateInput): Promise<void> | void;
+	updateModelContext?(
+		input: import("./model-context.ts").ModelContextInput
+	): Promise<import("./model-context.ts").ModelContextState>;
 	/**
 	 * Open a native file picker, upload selected file(s) into the Uploads system
 	 * space, and return metadata + a `data:` URL (CSP-safe for sandboxed frames).
@@ -2118,88 +2739,120 @@ export interface HostServices {
 	// metadata registry response. All optional so a non-webhooks host is unaffected. ---
 
 	/** The resolved ingress backend + public URL (`GET /api/webhook-ingress/status`). */
-	webhooksIngressStatus?(): Promise<unknown>;
+	webhooksIngressStatus?(): Promise<WebhookIngressStatusRecord>;
 	/** The unified webhook endpoint registry (`GET /api/webhooks`). */
-	webhooksList?(): Promise<unknown>;
+	webhooksList?(): Promise<WebhookRegistryRecord>;
 	/** Read one secret through the explicit protected route (`GET /api/webhooks/:id/secret`). */
-	webhooksSecretGet?(input: { id: string }): Promise<unknown>;
+	webhooksSecretGet?(input: { id: string }): Promise<WebhookSecretReadRecord>;
 	/** Set or generate one secret (`POST /api/webhooks/:id/secret`). */
-	webhooksSecretSet?(input: { id: string; secret?: string }): Promise<unknown>;
+	webhooksSecretSet?(input: {
+		id: string;
+		secret?: string;
+	}): Promise<WebhookSecretWriteRecord>;
 	/** Node-config picker: agents on the node (`GET /api/agents`). */
-	workflowsAgents?(): Promise<unknown>;
+	workflowsAgents?(): Promise<WorkflowAgentsRecords>;
 	/** Node-config picker: installed apps + their runnables (`GET /api/plugins`). */
-	workflowsApps?(): Promise<unknown>;
+	workflowsApps?(): Promise<WorkflowAppsRecords>;
+	workflowsBindConnectTrigger?(input: {
+		id: string;
+		connectTriggerId: string;
+	}): Promise<WorkflowConnectBindingRecord>;
 	/** Composio catalog for the trigger picker (`GET /api/composio/*`). One method,
 	 *  keyed by `kind`, so one bridge verb covers status/toolkits/triggers/connections. */
 	workflowsComposio?(input: {
-		kind: "status" | "toolkits" | "triggers" | "connections";
+		kind: WorkflowComposioKind;
 		toolkit?: string;
-	}): Promise<unknown>;
-	workflowsConnectBindings?(input: { id: string }): Promise<unknown>;
-	workflowsBindConnectTrigger?(input: { id: string; connectTriggerId: string }): Promise<unknown>;
-	workflowsRemoveConnectBinding?(input: { id: string; bindingId: string }): Promise<void>;
+	}): Promise<WorkflowComposioResponse>;
+	workflowsConnectBindings?(input: {
+		id: string;
+	}): Promise<WorkflowConnectBindingRecord[]>;
 	/** Delete a workflow (`DELETE /workflows/:id`). */
 	workflowsDelete?(input: { id: string }): Promise<void>;
 	/** Read one workflow definition (`GET /workflows/:id`). */
-	workflowsGet?(input: { id: string }): Promise<unknown>;
+	workflowsGet?(input: { id: string }): Promise<WorkflowRecord>;
 	/** Node-config picker: every app event an enabled app declares in its manifest
 	 *  `contributes.hook_events` (`GET /api/plugins/contributions` → `hook_events`).
 	 *  Backs the `event` trigger's picker, so a user chooses a real event instead of
 	 *  typing a fully-qualified id from memory. */
-	workflowsHookEvents?(): Promise<unknown>;
+	workflowsHookEvents?(): Promise<WorkflowHookEventsRecords>;
 	/** List all workflows (`GET /workflows`). */
-	workflowsList?(): Promise<unknown>;
+	workflowsList?(): Promise<WorkflowRecord[]>;
 	/** Node-config picker: MCP servers + their tools (`GET /api/mcp/*`). */
-	workflowsMcp?(): Promise<unknown>;
+	workflowsMcp?(): Promise<WorkflowMcpRecord>;
+	/** Node-config picker: verified organization members for NotifyUser steps
+	 *  (`GET /api/notifications/mention-targets`). */
+	workflowsNotifyTargets?(): Promise<WorkflowNotifyTargetsRecords>;
+	workflowsRemoveConnectBinding?(input: {
+		id: string;
+		bindingId: string;
+	}): Promise<void>;
 	/** Resume a run suspended at an Awakeable gate (`POST /workflows/runs/:runId/resume`). */
-	workflowsResume?(input: { runId: string; payload: string }): Promise<unknown>;
+	workflowsResume?(input: {
+		runId: string;
+		payload: string;
+	}): Promise<WorkflowRunRecord>;
 	/** Run or dry-run a workflow (`POST /workflows/:id/run`). Returns the run
 	 * record; dry runs are transient and read-only. */
 	workflowsRun?(input: {
 		dryRun?: boolean;
 		id: string;
 		input?: Record<string, string>;
-	}): Promise<unknown>;
+	}): Promise<WorkflowRunRecord>;
 	/** Poll a run's current state (`GET /workflows/runs/:runId`). */
-	workflowsRunGet?(input: { runId: string }): Promise<unknown>;
+	workflowsRunGet?(input: { runId: string }): Promise<WorkflowRunRecord>;
 	/** Upsert a workflow definition (`POST /workflows`). Core validates the DAG. */
-	workflowsSave?(input: Record<string, unknown>): Promise<unknown>;
+	workflowsSave?(input: WorkflowDefinitionInput): Promise<WorkflowRecord>;
 	/** Node-config picker: schedules/jobs (`GET /api/schedules/jobs`). */
-	workflowsSchedules?(): Promise<unknown>;
-	/** Node-config picker: verified organization members for NotifyUser steps
-	 *  (`GET /api/notifications/mention-targets`). */
-	workflowsNotifyTargets?(): Promise<unknown>;
+	workflowsSchedules?(): Promise<WorkflowSchedulesRecords>;
 	/** Node-config picker: installed skills (`GET /api/skills`). */
-	workflowsSkills?(): Promise<unknown>;
+	workflowsSkills?(): Promise<WorkflowSkillsRecords>;
 	/** Fetch one workflow template's detail (`GET /api/workflows/catalog/:id`). */
-	workflowsTemplateGet?(input: { id: string }): Promise<unknown>;
+	workflowsTemplateGet?(input: {
+		id: string;
+	}): Promise<WorkflowTemplateDetailRecord>;
 	/** Install a workflow template (`POST /api/workflows/catalog/install`). Returns
 	 *  the minted primary workflow id. */
 	workflowsTemplateInstall?(input: { templateId: string }): Promise<string>;
 	/** Browse the workflow-template catalog (`GET /api/workflows/catalog`). */
-	workflowsTemplatesList?(): Promise<unknown>;
+	workflowsTemplatesList?(): Promise<WorkflowTemplateRecord[]>;
 	/** Snapshot the workflow as a new version (`POST /workflows/:id/versions`). */
-	workflowsVersionCreate?(input: { id: string; label?: string }): Promise<void>;
+	workflowsVersionCreate?(input: {
+		id: string;
+		label?: string;
+		expectedRevision?: string;
+	}): Promise<void>;
 	/** Read one version's captured definition (`GET /workflows/:id/versions/:vid`). */
 	workflowsVersionGet?(input: {
 		id: string;
 		versionId: string;
-	}): Promise<unknown>;
+	}): Promise<WorkflowDefinitionInput>;
 	/** Restore a version as the current definition (`POST …/versions/:vid/restore`). */
 	workflowsVersionRestore?(input: {
 		id: string;
 		versionId: string;
-	}): Promise<unknown>;
+	}): Promise<WorkflowRecord>;
 	/** List a workflow's saved versions (`GET /workflows/:id/versions`). */
-	workflowsVersionsList?(input: { id: string }): Promise<unknown>;
+	workflowsVersionsList?(input: {
+		id: string;
+	}): Promise<WorkflowVersionRecord[]>;
 	/** The workflow's inbound webhook URL for display (`GET /api/workflows/:id/webhook`). */
-	workflowsWebhook?(input: { id: string }): Promise<unknown>;
+	workflowsWebhook?(input: { id: string }): Promise<WorkflowWebhookRecord>;
+	writeOpenedFile?(
+		input: { uri: string; expectedRevision: string } & (
+			| { text: string; blob?: never }
+			| { blob: string; text?: never }
+		)
+	): Promise<import("./opened-file.ts").OpenedFileSnapshot>;
 }
 
 export interface I18nHostRuntime {
 	getSnapshot(): I18nHostSnapshot;
 	subscribe(listener: () => void): () => void;
-	t(id: string, values?: Record<string, unknown>, fallback?: string): string;
+	t(
+		id: string,
+		values?: I18nHostTranslateInput["values"],
+		fallback?: string
+	): string;
 }
 
 /** Build the shared i18n host callbacks for every trusted shell surface. */
@@ -2246,13 +2899,24 @@ export function createI18nHostServices(
  * `tsHost === false` (e.g. `view.action`, a Rust-bridge-only relay) are NOT
  * dispatched by this host, so they are skipped.
  */
-interface HostApiMethodEntry {
-	readonly capability: string;
-	readonly grant: string | null;
-	readonly method: string;
-	readonly streaming: boolean;
-	readonly tsHost: boolean;
-}
+const hostApiMethodFieldsSchema = z.object({
+	grant: z.string().nullable(),
+	method: z.string(),
+	streaming: z.boolean(),
+});
+/** Rust-only methods retain their own vocabulary; dispatched rows use host caps. */
+const hostApiMethodsSchema = z.array(
+	z.discriminatedUnion("tsHost", [
+		hostApiMethodFieldsSchema.extend({
+			tsHost: z.literal(false),
+			capability: z.string(),
+		}),
+		hostApiMethodFieldsSchema.extend({
+			tsHost: z.literal(true),
+			capability: capabilitySchema,
+		}),
+	])
+);
 
 /** The host-API contract version, echoed in the `ryu-plugin-ready` handshake as
  *  `hostApiVersion` (see {@link ExtensionHost}). */
@@ -2297,8 +2961,7 @@ export function handshakeAnnounceScript(): string {
     setTimeout(function () { clearInterval(ryuReadyTimer); }, ${HANDSHAKE_RETRY_WINDOW_MS});`;
 }
 
-const HOST_API_METHODS =
-	hostApiContract.methods as readonly HostApiMethodEntry[];
+const HOST_API_METHODS = hostApiMethodsSchema.parse(hostApiContract.methods);
 
 const methodCapability: Record<string, Capability> = {};
 const grantCapability: Record<string, Capability> = {};
@@ -2309,7 +2972,7 @@ for (const entry of HOST_API_METHODS) {
 	if (!entry.tsHost) {
 		continue;
 	}
-	const capability = entry.capability as Capability;
+	const capability = entry.capability;
 	methodCapability[entry.method] = capability;
 	if (entry.streaming) {
 		streamingMethods.add(entry.method);
@@ -2324,7 +2987,7 @@ for (const entry of HOST_API_METHODS) {
 /** The capability each callable method requires. A method absent from this map is
  *  UNKNOWN and always rejected (never default-allow). Derived from the blessed
  *  host-API table (see above). */
-export const METHOD_CAPABILITY: Record<string, Capability> = methodCapability;
+export const METHOD_CAPABILITY = methodCapability;
 
 /** Methods handled by the streaming dispatch path (emit many chunks, then one
  *  terminal result) rather than the unary {@link dispatchRpc}. Derived from the
@@ -2337,7 +3000,7 @@ export const STREAMING_METHODS: ReadonlySet<string> = streamingMethods;
  *  this table maps to nothing and is dropped (default-deny). Derived from the
  *  blessed host-API table — the EXACT grant strings the Core `PluginHookBridge`
  *  gates on, one vocabulary across the desktop gate and the server gate. */
-export const GRANT_CAPABILITY: Record<string, Capability> = grantCapability;
+export const GRANT_CAPABILITY = grantCapability;
 
 /** Local host capabilities are intentionally available only through their
  * explicit contract rows; they are never inferred from plugin grants. */
@@ -2345,6 +3008,7 @@ const LOCAL_HOST_CAPABILITIES: ReadonlySet<Capability> = new Set([
 	"host.capabilities",
 	"i18n",
 	"node.shareOrigins",
+	"ui.displayMode",
 ]);
 
 /** Capabilities whose ungranted call throws a STRUCTURED {@link CodedRpcError}
@@ -2361,7 +3025,9 @@ const CODED_ERROR_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>([
 	"agent.run",
 	"storage.kv",
 	"spaces.docs",
+	"spaces.database",
 	"media.generate",
+	"voice.models.manage",
 	"media.transcribe",
 	"finetune.runs",
 	"monitors.crud",
@@ -2386,12 +3052,14 @@ const CODED_ERROR_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>([
 	"social.crud",
 	"subtitles.crud",
 	"skills.crud",
+	"plugins.install",
 	"reasoning.check",
 	"safe-actions.manage",
 	"rlm.query",
 	"blueprint.review",
 	"tuition.crud",
 	"news.crud",
+	"subscriptions.read",
 ]);
 
 /**
@@ -2412,6 +3080,11 @@ export function capabilitiesFromGrants(
 		const cap = GRANT_CAPABILITY[grant];
 		if (cap) {
 			caps.add(cap);
+		} else if (appHttpGrantTarget(grant) !== null) {
+			// A reviewed per-target grant (`app:http:@scope/name`) unlocks the
+			// `app.request` verb; the host's service then admits only that target
+			// (and the caller's own sidecar only with plain `app:http`).
+			caps.add("app.http");
 		}
 	}
 	return caps;
@@ -2455,21 +3128,26 @@ export function assertGranted(
 	}
 }
 
+export type RpcDispatchResult = Awaited<ReturnType<typeof dispatchRpc>>;
+
 export async function dispatchRpc(
 	method: string,
 	args: unknown[],
 	granted: ReadonlySet<Capability>,
 	services: HostServices,
 	signal?: AbortSignal
-): Promise<unknown> {
+) {
 	assertGranted(method, granted);
 	switch (method) {
 		case "host.capabilities":
 			if (args.length !== 0) {
 				throw new CapabilityError("host.capabilities takes no arguments");
 			}
-			return await (services.hostCapabilities?.() ??
-				detectBrowserHostCapabilities());
+			return {
+				...(await (services.hostCapabilities?.() ??
+					detectBrowserHostCapabilities())),
+				bridge: hostBridgeFeatures(services),
+			};
 		case "i18n.get":
 			if (args.length !== 0) {
 				throw new CapabilityError("i18n.get takes no arguments");
@@ -2576,6 +3254,38 @@ export async function dispatchRpc(
 			}
 			return await services.catalogModels(input);
 		}
+		case "subscriptions.list": {
+			const input = args.length === 0 ? {} : asSubscriptionsListArg(args[0]);
+			if (!input || args.length > 1) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"subscriptions.list takes an optional { providerId?: string, usage?: 'none'|'cached'|'refresh' }"
+				);
+			}
+			if (!services.subscriptionsList) {
+				throw new CodedRpcError(
+					"server_error",
+					"subscriptions.list is not available"
+				);
+			}
+			return await services.subscriptionsList(input);
+		}
+		case "subscriptions.usage": {
+			const input = asSubscriptionUsageArg(args[0]);
+			if (!input || args.length !== 1) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"subscriptions.usage requires a { providerId: string, accountId?: string }"
+				);
+			}
+			if (!services.subscriptionsUsage) {
+				throw new CodedRpcError(
+					"server_error",
+					"subscriptions.usage is not available"
+				);
+			}
+			return await services.subscriptionsUsage(input);
+		}
 		case "chat.list":
 			if (args.length !== 0) {
 				throw new CodedRpcError("invalid_args", "chat.list takes no arguments");
@@ -2583,7 +3293,9 @@ export async function dispatchRpc(
 			if (!services.chatListConversations) {
 				throw new CodedRpcError("server_error", "chat.list is not available");
 			}
-			return await services.chatListConversations();
+			return chatConversationSummariesSchema.parse(
+				await services.chatListConversations()
+			);
 		case "chat.send": {
 			const input = asChatSendArg(args[0]);
 			if (!input || args.length !== 1) {
@@ -2595,7 +3307,7 @@ export async function dispatchRpc(
 			if (!services.chatSend) {
 				throw new CodedRpcError("server_error", "chat.send is not available");
 			}
-			return await services.chatSend(input);
+			return chatSendResultSchema.parse(await services.chatSend(input));
 		}
 		case "ui.registerRoute": {
 			// `args[0]` is the route claim `{path,title}`. The host service is
@@ -2609,13 +3321,16 @@ export async function dispatchRpc(
 			if (!services.registerRoute) {
 				throw new CapabilityError("ui.registerRoute is not available");
 			}
-			return await services.registerRoute(claim);
+			return routeRegistrationRecordSchema.parse(
+				await services.registerRoute(claim)
+			);
 		}
 		case "tool.call": {
 			// args = [toolName, toolArgs]. The host pins the origin server; the frame
 			// supplies only the name + arguments. Bad shape → invalid_args (D6).
-			const [name, toolArgs] = args;
-			if (typeof name !== "string" || name.length === 0) {
+			const [rawName, toolArgs] = args;
+			const name = rpcToolNameSchema.safeParse(rawName);
+			if (!name.success) {
 				throw new CodedRpcError(
 					"invalid_args",
 					"tool.call requires a tool name string"
@@ -2624,7 +3339,16 @@ export async function dispatchRpc(
 			if (!services.callTool) {
 				throw new CodedRpcError("server_error", "tool.call is not available");
 			}
-			return await services.callTool(name, toolArgs);
+			const parsedArgs = rpcJsonResponseSchema.safeParse(toolArgs);
+			if (!parsedArgs.success) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"tool.call requires JSON arguments"
+				);
+			}
+			return rpcJsonResponseSchema.parse(
+				await services.callTool(name.data, parsedArgs.data)
+			);
 		}
 		case "ui.sendMessage": {
 			const input = asPromptArg(args[0]);
@@ -2699,6 +3423,20 @@ export async function dispatchRpc(
 			await services.uiToastDismiss(input);
 			return null;
 		}
+		case "ui.updateModelContext": {
+			if (!services.updateModelContext) {
+				throw new CodedRpcError("server_error", "Model context is unavailable");
+			}
+			const { parseModelContext } = await import("./model-context.ts");
+			try {
+				return await services.updateModelContext(parseModelContext(args[0]));
+			} catch (error) {
+				throw new CodedRpcError(
+					"invalid_args",
+					error instanceof Error ? error.message : "Invalid model context"
+				);
+			}
+		}
 		case "assistant.publishContext": {
 			const input = asAssistantContextArg(args[0]);
 			if (!input) {
@@ -2770,6 +3508,44 @@ export async function dispatchRpc(
 			await services.assistantOpen(input);
 			return null;
 		}
+		case "files.read":
+		case "files.write": {
+			const input = openedFileUriSchema.safeParse(args[0]);
+			if (args.length !== 1 || !input.success) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"File requests require a resource URI"
+				);
+			}
+			if (method === "files.read") {
+				if (!services.readOpenedFile) {
+					throw new CodedRpcError("denied", "No file is open in this panel");
+				}
+				return await services.readOpenedFile({ uri: input.data.uri });
+			}
+			const revision = openedFileRevisionSchema.safeParse(args[0]);
+			if (!revision.success) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"Saving requires text and the revision read by this editor"
+				);
+			}
+			if (!services.writeOpenedFile) {
+				throw new CodedRpcError("denied", "This file is read-only");
+			}
+			const text = openedFileTextWriteSchema.safeParse(args[0]);
+			if (text.success) {
+				return await services.writeOpenedFile(text.data);
+			}
+			const blob = openedFileBlobWriteSchema.safeParse(args[0]);
+			if (blob.success) {
+				return await services.writeOpenedFile(blob.data);
+			}
+			throw new CodedRpcError(
+				"invalid_args",
+				"Saving requires exactly one text or blob representation"
+			);
+		}
 		case "widget.setState": {
 			if (args.length !== 1) {
 				throw new CodedRpcError(
@@ -2783,7 +3559,14 @@ export async function dispatchRpc(
 					"widget.setState is not available"
 				);
 			}
-			return await services.setWidgetState(args[0]);
+			const state = rpcJsonResponseSchema.safeParse(args[0]);
+			if (!state.success) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"widget.setState requires JSON state"
+				);
+			}
+			return await services.setWidgetState(state.data);
 		}
 		case "widget.getGlobals":
 			if (!services.getGlobals) {
@@ -2819,22 +3602,18 @@ export async function dispatchRpc(
 			// Thread the requested {template} through to the host (it is honored/
 			// recorded there); unlike requestDisplayMode this does NOT collapse to a
 			// bare mode string, so the template is not dropped.
-			const raw = args[0];
-			const template =
-				raw && typeof raw === "object"
-					? (raw as Record<string, unknown>).template
-					: undefined;
+			const { template } = rpcModalArgSchema.parse(args[0]);
 			return await services.requestModal({ template });
 		}
 		case "ui.notifyHeight": {
-			const px = args[0];
-			if (typeof px !== "number" || !Number.isFinite(px) || px < 0) {
+			const px = rpcHeightSchema.safeParse(args[0]);
+			if (!px.success) {
 				throw new CodedRpcError(
 					"invalid_args",
 					"ui.notifyHeight requires a non-negative number"
 				);
 			}
-			services.notifyHeight?.(px);
+			services.notifyHeight?.(px.data);
 			return null;
 		}
 		case "ui.requestClose": {
@@ -2872,7 +3651,7 @@ export async function dispatchRpc(
 					"ui.uploadFile is not available"
 				);
 			}
-			return await services.uploadFile(input);
+			return uploadedFilesSchema.parse(await services.uploadFile(input));
 		}
 		// Remaining file methods: KNOWN so they reject with a clean structured error,
 		// never the unknown-method deny (which reads like a bug). Wire later.
@@ -2888,7 +3667,7 @@ export async function dispatchRpc(
 			if (!input) {
 				throw new CodedRpcError(
 					"invalid_args",
-					"model.complete requires a { prompt: string }"
+					"model.complete requires a { prompt: string } and at most 8 data:image/{png,jpeg,webp} images totalling 1.5 MiB"
 				);
 			}
 			if (!services.modelComplete) {
@@ -2923,7 +3702,18 @@ export async function dispatchRpc(
 					"Backups are not available on this host"
 				);
 			}
-			return await services.backupsRequest(method, args[0] ?? {});
+			const input = preserveHostResponse(databaseResponseJsonSchema).safeParse(
+				args[0] ?? {}
+			);
+			if (!input.success) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"Backups require JSON snapshot arguments"
+				);
+			}
+			return appBackupResponseSchema(method).parse(
+				await services.backupsRequest(method, input.data)
+			);
 		}
 		case "storage.get": {
 			const input = asStorageKeyArg(args[0]);
@@ -3140,6 +3930,106 @@ export async function dispatchRpc(
 			}
 			return await services.spacesDeleteDoc(input);
 		}
+		case "spaces.createDatabase": {
+			const input = asSpacesCreateArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"spaces.createDatabase requires { space_id: string, title: string }"
+				);
+			}
+			if (!services.spacesCreateDatabase) {
+				throw new CodedRpcError(
+					"server_error",
+					"spaces.createDatabase is not available"
+				);
+			}
+			return await services.spacesCreateDatabase(input);
+		}
+		case "spaces.listDatabases": {
+			const input = asSpacesListArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"spaces.listDatabases requires { space_id: string }"
+				);
+			}
+			if (!services.spacesListDatabases) {
+				throw new CodedRpcError(
+					"server_error",
+					"spaces.listDatabases is not available"
+				);
+			}
+			return await services.spacesListDatabases(input);
+		}
+		case "spaces.getDatabase": {
+			const input = asSpacesDatabaseArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"spaces.getDatabase requires { space_id: string, database_id: string }"
+				);
+			}
+			if (!services.spacesGetDatabase) {
+				throw new CodedRpcError(
+					"server_error",
+					"spaces.getDatabase is not available"
+				);
+			}
+			return await services.spacesGetDatabase(input);
+		}
+		case "spaces.updateDatabase": {
+			const input = asSpacesUpdateDatabaseArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"spaces.updateDatabase requires a database id, source, and expected revision"
+				);
+			}
+			if (!services.spacesUpdateDatabase) {
+				throw new CodedRpcError(
+					"server_error",
+					"spaces.updateDatabase is not available"
+				);
+			}
+			return spaceDocumentWriteResultSchema.parse(
+				await services.spacesUpdateDatabase(input)
+			);
+		}
+		case "spaces.queryDatabase": {
+			const input = asSpacesQueryDatabaseArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"spaces.queryDatabase requires a database id and one read-only SQL query"
+				);
+			}
+			if (!services.spacesQueryDatabase) {
+				throw new CodedRpcError(
+					"server_error",
+					"spaces.queryDatabase is not available"
+				);
+			}
+			return spaceDatabaseQueryResultSchema.parse(
+				await services.spacesQueryDatabase(input)
+			);
+		}
+		case "spaces.deleteDatabase": {
+			const input = asSpacesDatabaseArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"spaces.deleteDatabase requires { space_id: string, database_id: string }"
+				);
+			}
+			if (!services.spacesDeleteDatabase) {
+				throw new CodedRpcError(
+					"server_error",
+					"spaces.deleteDatabase is not available"
+				);
+			}
+			return await services.spacesDeleteDatabase(input);
+		}
 		case "media.image": {
 			const input = asMediaImageArg(args[0]);
 			if (!input) {
@@ -3158,13 +4048,26 @@ export async function dispatchRpc(
 			if (!input) {
 				throw new CodedRpcError(
 					"invalid_args",
-					"media.video requires { prompt: string }"
+					"media.video requires { prompt: string } with at most two data:image frames, data:video/data:audio inputs, and provider_input without routing keys, 40 MiB in total"
 				);
 			}
 			if (!services.generateVideo) {
 				throw new CodedRpcError("server_error", "media.video is not available");
 			}
 			return await services.generateVideo(input);
+		}
+		case "media.audio": {
+			const input = asMediaAudioArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					'media.audio requires { prompt, kind: "music" | "sfx", provider, model } with bounded optional duration_s and provider_input'
+				);
+			}
+			if (!services.generateAudio) {
+				throw new CodedRpcError("server_error", "media.audio is not available");
+			}
+			return await services.generateAudio(input);
 		}
 		case "media.tts": {
 			const input = asMediaTtsArg(args[0]);
@@ -3178,6 +4081,33 @@ export async function dispatchRpc(
 				throw new CodedRpcError("server_error", "media.tts is not available");
 			}
 			return await services.ttsSpeak(input);
+		}
+		case "media.ttsEngines": {
+			if (!services.listTtsEngines) {
+				throw new CodedRpcError(
+					"server_error",
+					"media.ttsEngines is not available"
+				);
+			}
+			return await services.listTtsEngines();
+		}
+		case "media.ttsEngineInstall": {
+			const input = asMediaTtsEngineInstallArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"media.ttsEngineInstall requires an { engine } id"
+				);
+			}
+			if (!services.installTtsEngine) {
+				throw new CodedRpcError(
+					"server_error",
+					"media.ttsEngineInstall is not available"
+				);
+			}
+			return voiceEngineInstallRecordSchema.parse(
+				await services.installTtsEngine(input)
+			);
 		}
 		case "media.transcribe": {
 			const input = asMediaTranscribeArg(args[0]);
@@ -3202,7 +4132,7 @@ export async function dispatchRpc(
 					"finetune.capability is not available"
 				);
 			}
-			return await services.finetuneCapability();
+			return rpcJsonResponseSchema.parse(await services.finetuneCapability());
 		case "finetune.list":
 			if (!services.finetuneList) {
 				throw new CodedRpcError(
@@ -3210,7 +4140,7 @@ export async function dispatchRpc(
 					"finetune.list is not available"
 				);
 			}
-			return await services.finetuneList();
+			return rpcJsonResponseSchema.parse(await services.finetuneList());
 		case "finetune.adapters":
 			if (!services.finetuneAdapters) {
 				throw new CodedRpcError(
@@ -3218,9 +4148,9 @@ export async function dispatchRpc(
 					"finetune.adapters is not available"
 				);
 			}
-			return await services.finetuneAdapters();
+			return rpcJsonResponseSchema.parse(await services.finetuneAdapters());
 		case "finetune.start": {
-			const input = asRecordArg(args[0]);
+			const input = asFinetuneJobSpecArg(args[0]);
 			if (!input) {
 				throw new CodedRpcError(
 					"invalid_args",
@@ -3233,10 +4163,10 @@ export async function dispatchRpc(
 					"finetune.start is not available"
 				);
 			}
-			return await services.finetuneStart(input);
+			return rpcJsonResponseSchema.parse(await services.finetuneStart(input));
 		}
 		case "finetune.merge": {
-			const input = asRecordArg(args[0]);
+			const input = asFinetuneJobSpecArg(args[0]);
 			if (!input) {
 				throw new CodedRpcError(
 					"invalid_args",
@@ -3249,7 +4179,7 @@ export async function dispatchRpc(
 					"finetune.merge is not available"
 				);
 			}
-			return await services.finetuneMerge(input);
+			return rpcJsonResponseSchema.parse(await services.finetuneMerge(input));
 		}
 		case "finetune.get": {
 			const input = asFinetuneIdArg(args[0]);
@@ -3265,7 +4195,7 @@ export async function dispatchRpc(
 					"finetune.get is not available"
 				);
 			}
-			return await services.finetuneGet(input);
+			return rpcJsonResponseSchema.parse(await services.finetuneGet(input));
 		}
 		case "finetune.cancel": {
 			const input = asFinetuneIdArg(args[0]);
@@ -3281,7 +4211,7 @@ export async function dispatchRpc(
 					"finetune.cancel is not available"
 				);
 			}
-			return await services.finetuneCancel(input);
+			return rpcJsonResponseSchema.parse(await services.finetuneCancel(input));
 		}
 		case "registry.engineModels":
 			if (!services.listEngineModels) {
@@ -3451,7 +4381,7 @@ export async function dispatchRpc(
 					"workflows.list is not available"
 				);
 			}
-			return await services.workflowsList();
+			return workflowRecordsSchema.parse(await services.workflowsList());
 		case "workflows.get": {
 			const input = asWorkflowIdArg(args[0]);
 			if (!input) {
@@ -3466,7 +4396,7 @@ export async function dispatchRpc(
 					"workflows.get is not available"
 				);
 			}
-			return await services.workflowsGet(input);
+			return workflowRecordSchema.parse(await services.workflowsGet(input));
 		}
 		case "workflows.save": {
 			const input = asRecordArg(args[0]);
@@ -3482,7 +4412,7 @@ export async function dispatchRpc(
 					"workflows.save is not available"
 				);
 			}
-			return await services.workflowsSave(input);
+			return workflowRecordSchema.parse(await services.workflowsSave(input));
 		}
 		case "workflows.delete": {
 			const input = asWorkflowIdArg(args[0]);
@@ -3514,7 +4444,9 @@ export async function dispatchRpc(
 					"workflows.versionsList is not available"
 				);
 			}
-			return await services.workflowsVersionsList(input);
+			return workflowVersionRecordsSchema.parse(
+				await services.workflowsVersionsList(input)
+			);
 		}
 		case "workflows.versionGet": {
 			const input = asWorkflowVersionGetArg(args[0]);
@@ -3530,14 +4462,16 @@ export async function dispatchRpc(
 					"workflows.versionGet is not available"
 				);
 			}
-			return await services.workflowsVersionGet(input);
+			return workflowDefinitionInputSchema.parse(
+				await services.workflowsVersionGet(input)
+			);
 		}
 		case "workflows.versionCreate": {
 			const input = asWorkflowVersionCreateArg(args[0]);
 			if (!input) {
 				throw new CodedRpcError(
 					"invalid_args",
-					"workflows.versionCreate requires a { id: string, label?: string }"
+					"workflows.versionCreate requires a { id: string, label?: string, expectedRevision?: string }"
 				);
 			}
 			if (!services.workflowsVersionCreate) {
@@ -3562,7 +4496,9 @@ export async function dispatchRpc(
 					"workflows.versionRestore is not available"
 				);
 			}
-			return await services.workflowsVersionRestore(input);
+			return workflowRecordSchema.parse(
+				await services.workflowsVersionRestore(input)
+			);
 		}
 		case "workflows.templatesList":
 			if (!services.workflowsTemplatesList) {
@@ -3571,7 +4507,9 @@ export async function dispatchRpc(
 					"workflows.templatesList is not available"
 				);
 			}
-			return await services.workflowsTemplatesList();
+			return workflowTemplateRecordsSchema.parse(
+				await services.workflowsTemplatesList()
+			);
 		case "workflows.templateGet": {
 			const input = asWorkflowIdArg(args[0]);
 			if (!input) {
@@ -3586,7 +4524,9 @@ export async function dispatchRpc(
 					"workflows.templateGet is not available"
 				);
 			}
-			return await services.workflowsTemplateGet(input);
+			return workflowTemplateDetailRecordSchema.parse(
+				await services.workflowsTemplateGet(input)
+			);
 		}
 		case "workflows.templateInstall": {
 			const input = asTemplateInstallArg(args[0]);
@@ -3618,7 +4558,9 @@ export async function dispatchRpc(
 					"workflows.webhook is not available"
 				);
 			}
-			return await services.workflowsWebhook(input);
+			return workflowWebhookRecordSchema.parse(
+				await services.workflowsWebhook(input)
+			);
 		}
 		case "workflows.run": {
 			const input = asWorkflowRunArg(args[0]);
@@ -3634,7 +4576,7 @@ export async function dispatchRpc(
 					"workflows.run is not available"
 				);
 			}
-			return await services.workflowsRun(input);
+			return workflowRunRecordSchema.parse(await services.workflowsRun(input));
 		}
 		case "workflows.runGet": {
 			const input = asWorkflowRunIdArg(args[0]);
@@ -3650,7 +4592,9 @@ export async function dispatchRpc(
 					"workflows.runGet is not available"
 				);
 			}
-			return await services.workflowsRunGet(input);
+			return workflowRunRecordSchema.parse(
+				await services.workflowsRunGet(input)
+			);
 		}
 		case "workflows.resume": {
 			const input = asWorkflowResumeArg(args[0]);
@@ -3666,7 +4610,9 @@ export async function dispatchRpc(
 					"workflows.resume is not available"
 				);
 			}
-			return await services.workflowsResume(input);
+			return workflowRunRecordSchema.parse(
+				await services.workflowsResume(input)
+			);
 		}
 		case "workflows.agents":
 			if (!services.workflowsAgents) {
@@ -3675,7 +4621,9 @@ export async function dispatchRpc(
 					"workflows.agents is not available"
 				);
 			}
-			return await services.workflowsAgents();
+			return workflowAgentsRecordsSchema.parse(
+				await services.workflowsAgents()
+			);
 		case "workflows.apps":
 			if (!services.workflowsApps) {
 				throw new CodedRpcError(
@@ -3683,7 +4631,7 @@ export async function dispatchRpc(
 					"workflows.apps is not available"
 				);
 			}
-			return await services.workflowsApps();
+			return workflowAppsRecordsSchema.parse(await services.workflowsApps());
 		case "workflows.mcp":
 			if (!services.workflowsMcp) {
 				throw new CodedRpcError(
@@ -3691,7 +4639,7 @@ export async function dispatchRpc(
 					"workflows.mcp is not available"
 				);
 			}
-			return await services.workflowsMcp();
+			return workflowMcpRecordSchema.parse(await services.workflowsMcp());
 		case "workflows.skills":
 			if (!services.workflowsSkills) {
 				throw new CodedRpcError(
@@ -3699,7 +4647,9 @@ export async function dispatchRpc(
 					"workflows.skills is not available"
 				);
 			}
-			return await services.workflowsSkills();
+			return workflowSkillsRecordsSchema.parse(
+				await services.workflowsSkills()
+			);
 		case "workflows.schedules":
 			if (!services.workflowsSchedules) {
 				throw new CodedRpcError(
@@ -3707,7 +4657,9 @@ export async function dispatchRpc(
 					"workflows.schedules is not available"
 				);
 			}
-			return await services.workflowsSchedules();
+			return workflowSchedulesRecordsSchema.parse(
+				await services.workflowsSchedules()
+			);
 		case "workflows.notifyTargets":
 			if (!services.workflowsNotifyTargets) {
 				throw new CodedRpcError(
@@ -3715,7 +4667,9 @@ export async function dispatchRpc(
 					"workflows.notifyTargets is not available"
 				);
 			}
-			return await services.workflowsNotifyTargets();
+			return workflowNotifyTargetsRecordsSchema.parse(
+				await services.workflowsNotifyTargets()
+			);
 		case "workflows.hookEvents":
 			if (!services.workflowsHookEvents) {
 				throw new CodedRpcError(
@@ -3723,24 +4677,66 @@ export async function dispatchRpc(
 					"workflows.hookEvents is not available"
 				);
 			}
-			return await services.workflowsHookEvents();
+			return workflowHookEventsRecordsSchema.parse(
+				await services.workflowsHookEvents()
+			);
 		case "workflows.connectBindings": {
 			const input = asConnectWorkflowIdArg(args[0]);
-			if (!input) throw new CodedRpcError("invalid_args", "A saved workflow id is required");
-			if (!services.workflowsConnectBindings) throw new CodedRpcError("server_error", "Connect workflow bindings are not available");
-			return await services.workflowsConnectBindings(input);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"A saved workflow id is required"
+				);
+			}
+			if (!services.workflowsConnectBindings) {
+				throw new CodedRpcError(
+					"server_error",
+					"Connect workflow bindings are not available"
+				);
+			}
+			return workflowConnectBindingRecordsSchema.parse(
+				await services.workflowsConnectBindings(input)
+			);
 		}
 		case "workflows.bindConnectTrigger": {
 			const input = asWorkflowBindingArg(args[0], "connectTriggerId");
-			if (!input) throw new CodedRpcError("invalid_args", "A workflow id and Connect trigger id are required");
-			if (!services.workflowsBindConnectTrigger) throw new CodedRpcError("server_error", "Connect workflow binding is not available");
-			return await services.workflowsBindConnectTrigger({id:input.id,connectTriggerId:input.value});
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"A workflow id and Connect trigger id are required"
+				);
+			}
+			if (!services.workflowsBindConnectTrigger) {
+				throw new CodedRpcError(
+					"server_error",
+					"Connect workflow binding is not available"
+				);
+			}
+			return workflowConnectBindingRecordSchema.parse(
+				await services.workflowsBindConnectTrigger({
+					id: input.id,
+					connectTriggerId: input.value,
+				})
+			);
 		}
 		case "workflows.removeConnectBinding": {
 			const input = asWorkflowBindingArg(args[0], "bindingId");
-			if (!input) throw new CodedRpcError("invalid_args", "A workflow id and binding id are required");
-			if (!services.workflowsRemoveConnectBinding) throw new CodedRpcError("server_error", "Connect workflow binding removal is not available");
-			return await services.workflowsRemoveConnectBinding({id:input.id,bindingId:input.value});
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"A workflow id and binding id are required"
+				);
+			}
+			if (!services.workflowsRemoveConnectBinding) {
+				throw new CodedRpcError(
+					"server_error",
+					"Connect workflow binding removal is not available"
+				);
+			}
+			return await services.workflowsRemoveConnectBinding({
+				id: input.id,
+				bindingId: input.value,
+			});
 		}
 		case "workflows.composio": {
 			const input = asComposioArg(args[0]);
@@ -3756,7 +4752,9 @@ export async function dispatchRpc(
 					"workflows.composio is not available"
 				);
 			}
-			return await services.workflowsComposio(input);
+			return workflowComposioResponseSchema(input.kind).parse(
+				await services.workflowsComposio(input)
+			);
 		}
 		case "ghost.recipes":
 			if (!services.ghostRecipes) {
@@ -3765,7 +4763,7 @@ export async function dispatchRpc(
 					"ghost.recipes is not available"
 				);
 			}
-			return await services.ghostRecipes();
+			return ghostRecipeSummariesSchema.parse(await services.ghostRecipes());
 		case "ghost.recordStart": {
 			const input = asRecordStartArg(args[0]);
 			if (!input) {
@@ -3780,7 +4778,9 @@ export async function dispatchRpc(
 					"ghost.recordStart is not available"
 				);
 			}
-			return await services.ghostRecordStart(input);
+			return ghostRecordingStateSchema.parse(
+				await services.ghostRecordStart(input)
+			);
 		}
 		case "ghost.recordStatus":
 			if (!services.ghostRecordStatus) {
@@ -3789,7 +4789,9 @@ export async function dispatchRpc(
 					"ghost.recordStatus is not available"
 				);
 			}
-			return await services.ghostRecordStatus();
+			return ghostRecordingStateSchema.parse(
+				await services.ghostRecordStatus()
+			);
 		case "ghost.recordStop":
 			if (!services.ghostRecordStop) {
 				throw new CodedRpcError(
@@ -3797,7 +4799,7 @@ export async function dispatchRpc(
 					"ghost.recordStop is not available"
 				);
 			}
-			return await services.ghostRecordStop();
+			return ghostRecordingStopSchema.parse(await services.ghostRecordStop());
 		case "webhooks.list":
 			if (!services.webhooksList) {
 				throw new CodedRpcError(
@@ -3805,7 +4807,7 @@ export async function dispatchRpc(
 					"webhooks.list is not available"
 				);
 			}
-			return await services.webhooksList();
+			return webhookRegistryRecordSchema.parse(await services.webhooksList());
 		case "webhooks.ingressStatus":
 			if (!services.webhooksIngressStatus) {
 				throw new CodedRpcError(
@@ -3813,7 +4815,9 @@ export async function dispatchRpc(
 					"webhooks.ingressStatus is not available"
 				);
 			}
-			return await services.webhooksIngressStatus();
+			return webhookIngressStatusRecordSchema.parse(
+				await services.webhooksIngressStatus()
+			);
 		case "webhooks.secretGet": {
 			const input = asWebhookSecretIdArg(args[0]);
 			if (!input) {
@@ -3828,7 +4832,9 @@ export async function dispatchRpc(
 					"webhooks.secretGet is not available"
 				);
 			}
-			return await services.webhooksSecretGet(input);
+			return webhookSecretReadSchema.parse(
+				await services.webhooksSecretGet(input)
+			);
 		}
 		case "webhooks.secretSet": {
 			const input = asWebhookSecretSetArg(args[0]);
@@ -3844,13 +4850,17 @@ export async function dispatchRpc(
 					"webhooks.secretSet is not available"
 				);
 			}
-			return await services.webhooksSecretSet(input);
+			return webhookSecretWriteSchema.parse(
+				await services.webhooksSecretSet(input)
+			);
 		}
 		case "quests.list":
 			if (!services.questsList) {
 				throw new CodedRpcError("server_error", "quests.list is not available");
 			}
-			return await services.questsList(asQuestListArg(args[0]));
+			return questRecordsSchema.parse(
+				await services.questsList(asQuestListArg(args[0]))
+			);
 		case "quests.capture": {
 			const input = asQuestCaptureArg(args[0]);
 			if (!input) {
@@ -3865,7 +4875,7 @@ export async function dispatchRpc(
 					"quests.capture is not available"
 				);
 			}
-			return await services.questsCapture(input);
+			return questRecordSchema.parse(await services.questsCapture(input));
 		}
 		case "quests.use": {
 			const input = asQuestIdArg(args[0]);
@@ -3878,10 +4888,12 @@ export async function dispatchRpc(
 			if (!services.questsUse) {
 				throw new CodedRpcError("server_error", "quests.use is not available");
 			}
-			return await services.questsUse({
-				...input,
-				complete: asOptionalBoolean(args[0], "complete"),
-			});
+			return questRecordSchema.parse(
+				await services.questsUse({
+					...input,
+					complete: asOptionalComplete(args[0]),
+				})
+			);
 		}
 		case "quests.pin": {
 			const input = asQuestIdArg(args[0]);
@@ -3894,10 +4906,12 @@ export async function dispatchRpc(
 			if (!services.questsPin) {
 				throw new CodedRpcError("server_error", "quests.pin is not available");
 			}
-			return await services.questsPin({
-				...input,
-				pinned: asOptionalBoolean(args[0], "pinned"),
-			});
+			return questRecordSchema.parse(
+				await services.questsPin({
+					...input,
+					pinned: asOptionalPinned(args[0]),
+				})
+			);
 		}
 		case "quests.scratchpad":
 			if (!services.questsScratchpad) {
@@ -3938,7 +4952,7 @@ export async function dispatchRpc(
 					"quests.create is not available"
 				);
 			}
-			return await services.questsCreate(input);
+			return questRecordSchema.parse(await services.questsCreate(input));
 		}
 		case "quests.update": {
 			const input = asQuestUpdateArg(args[0]);
@@ -3954,7 +4968,7 @@ export async function dispatchRpc(
 					"quests.update is not available"
 				);
 			}
-			return await services.questsUpdate(input);
+			return questRecordSchema.parse(await services.questsUpdate(input));
 		}
 		case "quests.delete": {
 			const input = asQuestIdArg(args[0]);
@@ -3986,7 +5000,7 @@ export async function dispatchRpc(
 					"quests.complete is not available"
 				);
 			}
-			return await services.questsComplete(input);
+			return questRecordSchema.parse(await services.questsComplete(input));
 		}
 		case "quests.dismiss": {
 			const input = asQuestIdArg(args[0]);
@@ -4002,7 +5016,7 @@ export async function dispatchRpc(
 					"quests.dismiss is not available"
 				);
 			}
-			return await services.questsDismiss(input);
+			return questRecordSchema.parse(await services.questsDismiss(input));
 		}
 		case "quests.acceptSuggestion": {
 			const input = asQuestIdArg(args[0]);
@@ -4018,7 +5032,9 @@ export async function dispatchRpc(
 					"quests.acceptSuggestion is not available"
 				);
 			}
-			return await services.questsAcceptSuggestion(input);
+			return questRecordSchema.parse(
+				await services.questsAcceptSuggestion(input)
+			);
 		}
 		case "quests.dismissSuggestion": {
 			const input = asQuestIdArg(args[0]);
@@ -4034,7 +5050,9 @@ export async function dispatchRpc(
 					"quests.dismissSuggestion is not available"
 				);
 			}
-			return await services.questsDismissSuggestion(input);
+			return questRecordSchema.parse(
+				await services.questsDismissSuggestion(input)
+			);
 		}
 		case "quests.judge": {
 			const input = asQuestIdArg(args[0]);
@@ -4050,7 +5068,7 @@ export async function dispatchRpc(
 					"quests.judge is not available"
 				);
 			}
-			return await services.questsJudge(input);
+			return questJudgeResultSchema.parse(await services.questsJudge(input));
 		}
 		case "quests.openDetectionSettings":
 			if (!services.questsOpenDetectionSettings) {
@@ -4069,7 +5087,7 @@ export async function dispatchRpc(
 					"activity.list is not available"
 				);
 			}
-			return await services.activityList(input);
+			return activityRecordsSchema.parse(await services.activityList(input));
 		}
 		case "activity.audit": {
 			const input = asActivityAuditArg(args[0]);
@@ -4079,7 +5097,9 @@ export async function dispatchRpc(
 					"activity.audit is not available"
 				);
 			}
-			return await services.activityAudit(input);
+			return activityAuditResponseSchema.parse(
+				await services.activityAudit(input)
+			);
 		}
 		case "activity.prune":
 			if (!services.activityPrune) {
@@ -4088,7 +5108,7 @@ export async function dispatchRpc(
 					"activity.prune is not available"
 				);
 			}
-			return await services.activityPrune();
+			return activityPruneResponseSchema.parse(await services.activityPrune());
 		case "activity.score": {
 			const input = asActivityScoreArg(args[0]);
 			if (!input) {
@@ -4103,7 +5123,9 @@ export async function dispatchRpc(
 					"activity.score is not available"
 				);
 			}
-			return await services.activityScore(input);
+			return activityScoreResponseSchema.parse(
+				await services.activityScore(input)
+			);
 		}
 		case "activity.trace": {
 			const input = asActivityTraceArg(args[0]);
@@ -4119,7 +5141,9 @@ export async function dispatchRpc(
 					"activity.trace is not available"
 				);
 			}
-			return await services.activityTrace(input);
+			return activityTraceResponseSchema.parse(
+				await services.activityTrace(input)
+			);
 		}
 		case "activity.redteam": {
 			const input = asActivityRedteamArg(args[0]);
@@ -4135,7 +5159,9 @@ export async function dispatchRpc(
 					"activity.redteam is not available"
 				);
 			}
-			return await services.activityRedteam(input);
+			return activityRedteamResponseSchema.parse(
+				await services.activityRedteam(input)
+			);
 		}
 		case "activity.eval": {
 			const input = asActivityRedteamArg(args[0]);
@@ -4151,7 +5177,9 @@ export async function dispatchRpc(
 					"activity.eval is not available"
 				);
 			}
-			return await services.activityEval(input);
+			return activityEvalResponseSchema.parse(
+				await services.activityEval(input)
+			);
 		}
 		case "activity.importTrace": {
 			const input = asActivityImportTraceArg(args[0]);
@@ -4167,7 +5195,9 @@ export async function dispatchRpc(
 					"activity.importTrace is not available"
 				);
 			}
-			return await services.activityImportTrace(input);
+			return activityTraceImportRecordSchema.parse(
+				await services.activityImportTrace(input)
+			);
 		}
 		case "background.list": {
 			const input = asBackgroundListArg(args[0]);
@@ -4258,7 +5288,9 @@ export async function dispatchRpc(
 					"timeline.list is not available"
 				);
 			}
-			return await services.timelineList(input);
+			return timelineEventRecordsSchema.parse(
+				await services.timelineList(input)
+			);
 		}
 		case "timeline.journal": {
 			const input = asTimelineJournalArg(args[0]);
@@ -4274,7 +5306,9 @@ export async function dispatchRpc(
 					"timeline.journal is not available"
 				);
 			}
-			return await services.timelineJournal(input);
+			return timelineJournalRecordSchema
+				.nullable()
+				.parse(await services.timelineJournal(input));
 		}
 		case "timeline.frame": {
 			const input = asTimelineFrameArg(args[0]);
@@ -4314,7 +5348,7 @@ export async function dispatchRpc(
 			if (!services.mailList) {
 				throw new CodedRpcError("server_error", "mail.list is not available");
 			}
-			return await services.mailList();
+			return mailInboxesSchema.parse(await services.mailList());
 		case "mail.messages": {
 			const input = asMailInboxRefArg(args[0]);
 			if (!input) {
@@ -4329,7 +5363,7 @@ export async function dispatchRpc(
 					"mail.messages is not available"
 				);
 			}
-			return await services.mailMessages(input);
+			return mailMessagesSchema.parse(await services.mailMessages(input));
 		}
 		case "mail.create": {
 			const input = asMailCreateArg(args[0]);
@@ -4342,7 +5376,7 @@ export async function dispatchRpc(
 			if (!services.mailCreate) {
 				throw new CodedRpcError("server_error", "mail.create is not available");
 			}
-			return await services.mailCreate(input);
+			return mailInboxSchema.parse(await services.mailCreate(input));
 		}
 		case "mail.delete": {
 			const input = asMailIdArg(args[0]);
@@ -4384,7 +5418,7 @@ export async function dispatchRpc(
 			if (!services.mailSend) {
 				throw new CodedRpcError("server_error", "mail.send is not available");
 			}
-			return await services.mailSend(input);
+			return mailMessageSchema.parse(await services.mailSend(input));
 		}
 		case "mail.inboundUrl": {
 			const input = asMailInboxRefArg(args[0]);
@@ -4416,7 +5450,7 @@ export async function dispatchRpc(
 					"mail.request is not available"
 				);
 			}
-			return await services.mailRequest(input);
+			return rpcJsonResponseSchema.parse(await services.mailRequest(input));
 		}
 		case "calendar.jobs":
 			if (!services.calendarJobs) {
@@ -4425,7 +5459,7 @@ export async function dispatchRpc(
 					"calendar.jobs is not available"
 				);
 			}
-			return await services.calendarJobs();
+			return calendarJobsSchema.parse(await services.calendarJobs());
 		case "calendar.workflows":
 			if (!services.calendarWorkflows) {
 				throw new CodedRpcError(
@@ -4433,7 +5467,7 @@ export async function dispatchRpc(
 					"calendar.workflows is not available"
 				);
 			}
-			return await services.calendarWorkflows();
+			return calendarWorkflowsSchema.parse(await services.calendarWorkflows());
 		case "calendar.agents":
 			if (!services.calendarAgents) {
 				throw new CodedRpcError(
@@ -4441,7 +5475,7 @@ export async function dispatchRpc(
 					"calendar.agents is not available"
 				);
 			}
-			return await services.calendarAgents();
+			return calendarAgentsSchema.parse(await services.calendarAgents());
 		case "warmup.detect":
 			if (!services.warmupDetect) {
 				throw new CodedRpcError(
@@ -4449,18 +5483,18 @@ export async function dispatchRpc(
 					"warmup.detect is not available"
 				);
 			}
-			return await services.warmupDetect();
+			return warmupDetectionSchema.parse(await services.warmupDetect());
 		case "warmup.list":
 			if (!services.warmupList) {
 				throw new CodedRpcError("server_error", "warmup.list is not available");
 			}
-			return await services.warmupList();
+			return calendarJobsSchema.parse(await services.warmupList());
 		case "warmup.apply": {
 			const jobs = asWarmupJobsArg(args[0]);
 			if (!jobs) {
 				throw new CodedRpcError(
 					"invalid_args",
-					"warmup.apply expects an array of { name, schedule, target:{type:'agent',…} }"
+					"warmup.apply expects an array of { name, schedule, target:{type:'agent'|'provider_account',…} }"
 				);
 			}
 			if (!services.warmupApply) {
@@ -4513,7 +5547,7 @@ export async function dispatchRpc(
 					"learning.config is not available"
 				);
 			}
-			return await services.learningConfig();
+			return learningConfigSchema.parse(await services.learningConfig());
 		case "learning.experience":
 			if (!services.learningExperience) {
 				throw new CodedRpcError(
@@ -4521,7 +5555,9 @@ export async function dispatchRpc(
 					"learning.experience is not available"
 				);
 			}
-			return await services.learningExperience();
+			return learningExperienceListSchema.parse(
+				await services.learningExperience()
+			);
 		case "learning.healing":
 			if (!services.learningHealing) {
 				throw new CodedRpcError(
@@ -4529,7 +5565,9 @@ export async function dispatchRpc(
 					"learning.healing is not available"
 				);
 			}
-			return await services.learningHealing();
+			return learningHealingStatusSchema.parse(
+				await services.learningHealing()
+			);
 		case "approvals.list":
 			if (!services.approvalsList) {
 				throw new CodedRpcError(
@@ -4537,7 +5575,7 @@ export async function dispatchRpc(
 					"approvals.list is not available"
 				);
 			}
-			return await services.approvalsList();
+			return approvalRecordsSchema.parse(await services.approvalsList());
 		case "approvals.approve": {
 			const input = asApprovalDecideArg(args[0]);
 			if (!input) {
@@ -4552,7 +5590,7 @@ export async function dispatchRpc(
 					"approvals.approve is not available"
 				);
 			}
-			return await services.approvalsApprove(input);
+			return approvalRecordSchema.parse(await services.approvalsApprove(input));
 		}
 		case "approvals.reject": {
 			const input = asApprovalDecideArg(args[0]);
@@ -4568,18 +5606,26 @@ export async function dispatchRpc(
 					"approvals.reject is not available"
 				);
 			}
-			return await services.approvalsReject(input);
+			return approvalRecordSchema.parse(await services.approvalsReject(input));
 		}
-		case "notifications.list":
+		case "notifications.list": {
+			const input = asNotificationListArg(args[0]);
+			if (input === null) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"notifications.list requires an optional boolean archived filter"
+				);
+			}
 			if (!services.notificationsList) {
 				throw new CodedRpcError(
 					"server_error",
 					"notifications.list is not available"
 				);
 			}
-			return await services.notificationsList(
-				args[0] as { archived?: boolean }
+			return notificationRecordsSchema.parse(
+				await services.notificationsList(input)
 			);
+		}
 		case "notifications.send": {
 			const input = asNotificationSendArg(args[0]);
 			if (!input) {
@@ -4614,12 +5660,7 @@ export async function dispatchRpc(
 			return null;
 		}
 		case "notifications.appIcons": {
-			const input = args[0] as { appIds?: unknown };
-			const appIds = Array.isArray(input?.appIds)
-				? input.appIds.filter(
-						(id): id is string => typeof id === "string" && id.length > 0
-					)
-				: [];
+			const { appIds } = rpcNotificationAppIconsSchema.parse(args[0]);
 			if (!services.notificationsAppIcons) {
 				throw new CodedRpcError(
 					"server_error",
@@ -4685,7 +5726,9 @@ export async function dispatchRpc(
 					"suggestions.list is not available"
 				);
 			}
-			return await services.suggestionsList();
+			return proactiveSuggestionRecordsSchema.parse(
+				await services.suggestionsList()
+			);
 		case "suggestions.feedback": {
 			const input = asSuggestionFeedbackArg(args[0]);
 			if (!input) {
@@ -4726,7 +5769,7 @@ export async function dispatchRpc(
 					"meetings.list is not available"
 				);
 			}
-			return await services.meetingsList();
+			return meetingRecordsSchema.parse(await services.meetingsList());
 		case "meetings.transcript": {
 			const input = asMeetingIdArg(args[0]);
 			if (!input) {
@@ -4741,7 +5784,9 @@ export async function dispatchRpc(
 					"meetings.transcript is not available"
 				);
 			}
-			return await services.meetingsTranscript(input);
+			return meetingTranscriptSchema.parse(
+				await services.meetingsTranscript(input)
+			);
 		}
 		case "meetings.start": {
 			const input = asMeetingStartArg(args[0]);
@@ -4751,7 +5796,7 @@ export async function dispatchRpc(
 					"meetings.start is not available"
 				);
 			}
-			return await services.meetingsStart(input);
+			return meetingRecordSchema.parse(await services.meetingsStart(input));
 		}
 		case "meetings.finalize": {
 			const input = asMeetingIdArg(args[0]);
@@ -4767,7 +5812,7 @@ export async function dispatchRpc(
 					"meetings.finalize is not available"
 				);
 			}
-			return await services.meetingsFinalize(input);
+			return meetingRecordSchema.parse(await services.meetingsFinalize(input));
 		}
 		case "meetings.delete": {
 			const input = asMeetingIdArg(args[0]);
@@ -4800,7 +5845,7 @@ export async function dispatchRpc(
 					"meetings.rename is not available"
 				);
 			}
-			return await services.meetingsRename(input);
+			return meetingRecordSchema.parse(await services.meetingsRename(input));
 		}
 		case "meetings.setIcon": {
 			const input = asMeetingSetIconArg(args[0]);
@@ -4816,7 +5861,7 @@ export async function dispatchRpc(
 					"meetings.setIcon is not available"
 				);
 			}
-			return await services.meetingsSetIcon(input);
+			return meetingRecordSchema.parse(await services.meetingsSetIcon(input));
 		}
 		case "meetings.import":
 			if (!services.meetingsImport) {
@@ -4825,7 +5870,9 @@ export async function dispatchRpc(
 					"meetings.import is not available"
 				);
 			}
-			return await services.meetingsImport();
+			return meetingRecordSchema
+				.nullable()
+				.parse(await services.meetingsImport());
 		case "meetings.open": {
 			const input = asMeetingOpenArg(args[0]);
 			if (!input) {
@@ -4883,22 +5930,24 @@ export async function dispatchRpc(
 					"social.request is not available"
 				);
 			}
-			return await services.socialRequest(input);
+			return rpcJsonResponseSchema.parse(await services.socialRequest(input));
 		}
 		case "app.request": {
 			const input = asAppRequestArg(args[0]);
 			if (!input) {
 				throw new CodedRpcError(
 					"invalid_args",
-					"app.request requires a relative { path, method?, body? } request"
+					"app.request requires a relative { path, method?, body?, app? } request"
 				);
 			}
 			if (!services.appRequest) {
 				throw new CodedRpcError("server_error", "app.request is not available");
 			}
 			const readSignal = input.method === "GET" ? signal : undefined;
-			readSignal?.throwIfAborted();
-			return await services.appRequest(input, readSignal);
+			throwIfAppRequestAborted(readSignal);
+			return rpcJsonResponseSchema.parse(
+				await services.appRequest(input, readSignal)
+			);
 		}
 		case "realtime.connect": {
 			const input = asRealtimeConnectArg(args[0]);
@@ -4989,7 +6038,9 @@ export async function dispatchRpc(
 					"subtitles.request is not available"
 				);
 			}
-			return await services.subtitlesRequest(input);
+			return rpcJsonResponseSchema.parse(
+				await services.subtitlesRequest(input)
+			);
 		}
 		case "reasoning.request": {
 			const input = asReasoningRequestArg(args[0]);
@@ -5005,7 +6056,9 @@ export async function dispatchRpc(
 					"reasoning.request is not available"
 				);
 			}
-			return await services.reasoningRequest(input);
+			return rpcJsonResponseSchema.parse(
+				await services.reasoningRequest(input)
+			);
 		}
 		case "safeActions.request": {
 			const input = asSafeActionsRequestArg(args[0]);
@@ -5021,7 +6074,9 @@ export async function dispatchRpc(
 					"safeActions.request is not available"
 				);
 			}
-			return await services.safeActionsRequest(input);
+			return rpcJsonResponseSchema.parse(
+				await services.safeActionsRequest(input)
+			);
 		}
 		case "rlm.request": {
 			const input = asRlmRequestArg(args[0]);
@@ -5034,7 +6089,7 @@ export async function dispatchRpc(
 			if (!services.rlmRequest) {
 				throw new CodedRpcError("server_error", "rlm.request is not available");
 			}
-			return await services.rlmRequest(input);
+			return rpcJsonResponseSchema.parse(await services.rlmRequest(input));
 		}
 		case "tuition.request": {
 			const input = asTuitionRequestArg(args[0]);
@@ -5050,7 +6105,7 @@ export async function dispatchRpc(
 					"tuition.request is not available"
 				);
 			}
-			return await services.tuitionRequest(input);
+			return rpcJsonResponseSchema.parse(await services.tuitionRequest(input));
 		}
 		case "news.request": {
 			const input = asNewsRequestArg(args[0]);
@@ -5066,7 +6121,7 @@ export async function dispatchRpc(
 					"news.request is not available"
 				);
 			}
-			return await services.newsRequest(input);
+			return rpcJsonResponseSchema.parse(await services.newsRequest(input));
 		}
 		case "blueprint.request": {
 			const input = asBlueprintRequestArg(args[0]);
@@ -5082,7 +6137,9 @@ export async function dispatchRpc(
 					"blueprint.request is not available"
 				);
 			}
-			return await services.blueprintRequest(input);
+			return rpcJsonResponseSchema.parse(
+				await services.blueprintRequest(input)
+			);
 		}
 		case "social.openList":
 			if (!services.socialOpenList) {
@@ -5093,6 +6150,23 @@ export async function dispatchRpc(
 			}
 			services.socialOpenList();
 			return null;
+		case "apps.installBundle": {
+			if (args.length !== 1) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"apps.installBundle requires one app bundle"
+				);
+			}
+			if (!services.appsInstallBundle) {
+				throw new CodedRpcError(
+					"server_error",
+					"apps.installBundle is not available"
+				);
+			}
+			return appBundleInstallResultSchema.parse(
+				await services.appsInstallBundle(args[0])
+			);
+		}
 		case "skills.getSource": {
 			const input = asSkillIdArg(args[0]);
 			if (!input) {
@@ -5107,7 +6181,9 @@ export async function dispatchRpc(
 					"skills.getSource is not available"
 				);
 			}
-			return await services.skillsGetSource(input);
+			return skillSourceRecordSchema.parse(
+				await services.skillsGetSource(input)
+			);
 		}
 		case "skills.create": {
 			const input = asSkillDraftArg(args[0]);
@@ -5123,7 +6199,7 @@ export async function dispatchRpc(
 					"skills.create is not available"
 				);
 			}
-			return await services.skillsCreate(input);
+			return skillWriteRecordSchema.parse(await services.skillsCreate(input));
 		}
 		case "skills.update": {
 			const input = asSkillUpdateArg(args[0]);
@@ -5139,7 +6215,7 @@ export async function dispatchRpc(
 					"skills.update is not available"
 				);
 			}
-			return await services.skillsUpdate(input);
+			return skillWriteRecordSchema.parse(await services.skillsUpdate(input));
 		}
 		case "skills.listVersions": {
 			const input = asSkillIdArg(args[0]);
@@ -5155,7 +6231,9 @@ export async function dispatchRpc(
 					"skills.listVersions is not available"
 				);
 			}
-			return await services.skillsListVersions(input);
+			return skillVersionRecordsSchema.parse(
+				await services.skillsListVersions(input)
+			);
 		}
 		case "skills.versionSource": {
 			const input = asSkillVersionRefArg(args[0]);
@@ -5266,7 +6344,14 @@ export async function dispatchRpc(
 	}
 }
 
-const TOAST_VARIANTS: ReadonlySet<ToastVariant> = new Set([
+const toastIdSchema = z.string().min(1).max(TOAST_LIMITS.idChars);
+const toastTitleSchema = z
+	.string()
+	.min(1)
+	.max(TOAST_LIMITS.titleChars)
+	.refine((value) => value.trim().length > 0);
+const toastDescriptionSchema = z.string().max(TOAST_LIMITS.descriptionChars);
+const toastVariantSchema = z.enum([
 	"default",
 	"success",
 	"info",
@@ -5274,227 +6359,104 @@ const TOAST_VARIANTS: ReadonlySet<ToastVariant> = new Set([
 	"error",
 	"loading",
 ]);
-const TOAST_SHOW_KEYS: ReadonlySet<string> = new Set([
-	"title",
+const toastDurationSchema = z
+	.number()
+	.int()
+	.min(TOAST_LIMITS.durationMinMs)
+	.max(TOAST_LIMITS.durationMaxMs);
+const toastFieldsSchema = {
+	description: toastDescriptionSchema.optional(),
+	duration: toastDurationSchema.optional(),
+	variant: toastVariantSchema.optional(),
+};
+const toastMutableFields = [
 	"description",
-	"variant",
 	"duration",
-]);
-const TOAST_UPDATE_KEYS: ReadonlySet<string> = new Set([
-	"id",
-	...TOAST_SHOW_KEYS,
-]);
-const TOAST_DISMISS_KEYS: ReadonlySet<string> = new Set(["id"]);
-
-function isToastDuration(value: unknown): value is number {
-	return (
-		typeof value === "number" &&
-		Number.isInteger(value) &&
-		value >= TOAST_LIMITS.durationMinMs &&
-		value <= TOAST_LIMITS.durationMaxMs
+	"title",
+	"variant",
+] as const;
+const toastShowSchema = z
+	.strictObject({
+		...toastFieldsSchema,
+		title: toastTitleSchema,
+	})
+	.transform((input): ToastShowInput => {
+		const output: ToastShowInput = { title: input.title };
+		if (input.description !== undefined) {
+			output.description = input.description;
+		}
+		if (input.duration !== undefined) {
+			output.duration = input.duration;
+		}
+		if (input.variant !== undefined) {
+			output.variant = input.variant;
+		}
+		return output;
+	});
+const toastUpdateSchema = z
+	.strictObject({
+		...toastFieldsSchema,
+		id: toastIdSchema,
+		title: toastTitleSchema.optional(),
+	})
+	.refine(
+		(input) =>
+			toastMutableFields.some((key) => input[key] !== undefined) &&
+			toastMutableFields.every(
+				(key) => !Object.hasOwn(input, key) || input[key] !== undefined
+			)
 	);
-}
+const toastDismissSchema = z.strictObject({ id: toastIdSchema });
 
-function isToastVariant(value: unknown): value is ToastVariant {
-	return typeof value === "string" && TOAST_VARIANTS.has(value as ToastVariant);
-}
-
-function hasOnlyKeys(
-	candidate: Record<string, unknown>,
-	allowed: ReadonlySet<string>
-): boolean {
-	return Object.keys(candidate).every((key) => allowed.has(key));
-}
-
-/** Validate a caller-local opaque toast id. It is bounded but otherwise has no
- * public structure: apps must only pass back an id returned by `show`. */
-export function asToastId(value: unknown): string | null {
-	return typeof value === "string" &&
-		value.length > 0 &&
-		value.length <= TOAST_LIMITS.idChars
-		? value
-		: null;
-}
-
-/** Strictly validate `ui.toast.show`. Unknown fields are rejected so actions,
- * renderer styles and placement cannot accidentally become an unofficial API. */
-export function asToastShowArg(data: unknown): ToastShowInput | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const candidate = data as Record<string, unknown>;
-	if (
-		!hasOnlyKeys(candidate, TOAST_SHOW_KEYS) ||
-		typeof candidate.title !== "string" ||
-		candidate.title.trim().length === 0 ||
-		candidate.title.length > TOAST_LIMITS.titleChars
-	) {
-		return null;
-	}
-	if (
-		candidate.description !== undefined &&
-		(typeof candidate.description !== "string" ||
-			candidate.description.length > TOAST_LIMITS.descriptionChars)
-	) {
-		return null;
-	}
-	if (candidate.variant !== undefined && !isToastVariant(candidate.variant)) {
-		return null;
-	}
-	if (
-		candidate.duration !== undefined &&
-		!isToastDuration(candidate.duration)
-	) {
-		return null;
-	}
-	const output: ToastShowInput = { title: candidate.title };
-	if (typeof candidate.description === "string") {
-		output.description = candidate.description;
-	}
-	if (isToastVariant(candidate.variant)) {
-		output.variant = candidate.variant;
-	}
-	if (isToastDuration(candidate.duration)) {
-		output.duration = candidate.duration;
-	}
-	return output;
-}
-
-/** Strictly validate `ui.toast.update`. At least one mutable field is required;
- * an empty description is valid and clears the existing description. */
-export function asToastUpdateArg(data: unknown): ToastUpdateInput | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const candidate = data as Record<string, unknown>;
-	const id = asToastId(candidate.id);
-	if (!(hasOnlyKeys(candidate, TOAST_UPDATE_KEYS) && id)) {
-		return null;
-	}
-	const hasTitle = Object.hasOwn(candidate, "title");
-	const hasDescription = Object.hasOwn(candidate, "description");
-	const hasVariant = Object.hasOwn(candidate, "variant");
-	const hasDuration = Object.hasOwn(candidate, "duration");
-	if (!(hasTitle || hasDescription || hasVariant || hasDuration)) {
-		return null;
-	}
-	if (
-		hasTitle &&
-		(typeof candidate.title !== "string" ||
-			candidate.title.trim().length === 0 ||
-			candidate.title.length > TOAST_LIMITS.titleChars)
-	) {
-		return null;
-	}
-	if (
-		hasDescription &&
-		(typeof candidate.description !== "string" ||
-			candidate.description.length > TOAST_LIMITS.descriptionChars)
-	) {
-		return null;
-	}
-	if (hasVariant && !isToastVariant(candidate.variant)) {
-		return null;
-	}
-	if (hasDuration && !isToastDuration(candidate.duration)) {
-		return null;
-	}
-	const output: ToastUpdateInput = { id };
-	if (hasTitle) {
-		output.title = candidate.title as string;
-	}
-	if (hasDescription) {
-		output.description = candidate.description as string;
-	}
-	if (hasVariant) {
-		output.variant = candidate.variant as ToastVariant;
-	}
-	if (hasDuration) {
-		output.duration = candidate.duration as number;
-	}
-	return output;
-}
-
-/** Strictly validate `ui.toast.dismiss`; only one caller-local id is accepted. */
-export function asToastDismissArg(data: unknown): ToastDismissInput | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const candidate = data as Record<string, unknown>;
-	const id = asToastId(candidate.id);
-	return id && hasOnlyKeys(candidate, TOAST_DISMISS_KEYS) ? { id } : null;
-}
+/** Validate a caller-local opaque id bounded by the toast contract. */
+export const asToastId = nullableRpcParser(toastIdSchema);
+/** Strictly validate show; reject styling fields outside the public contract. */
+export const asToastShowArg = nullableRpcParser(toastShowSchema);
+/** Require a mutable field; an empty description clears the existing description. */
+export const asToastUpdateArg = nullableRpcParser(toastUpdateSchema);
+/** Only one caller-local toast id may be dismissed. */
+export const asToastDismissArg = nullableRpcParser(toastDismissSchema);
 
 /** Narrow an RPC argument to a `{ prompt: string }`. Returns null for any other
  *  shape so a malformed follow-up never reaches the governed route. */
-export function asPromptArg(data: unknown): { prompt: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const candidate = data as Record<string, unknown>;
-	if (typeof candidate.prompt !== "string" || candidate.prompt.length === 0) {
-		return null;
-	}
-	return { prompt: candidate.prompt };
-}
+const promptArgSchema = z.object({ prompt: z.string().min(1) });
+export const asPromptArg = nullableRpcParser(promptArgSchema);
 
-/** Narrow an i18n translation request before it reaches the active runtime.
- *  Values are deliberately primitive-only: translation arguments are labels and
- *  counts, not a covert data channel across the app boundary. */
-export function asI18nTranslateArg(
-	data: unknown
-): I18nHostTranslateInput | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const candidate = data as Record<string, unknown>;
-	if (
-		typeof candidate.id !== "string" ||
-		candidate.id.trim().length === 0 ||
-		candidate.id.length > 200 ||
-		typeof candidate.defaultMessage !== "string" ||
-		candidate.defaultMessage.trim().length === 0 ||
-		candidate.defaultMessage.length > 32_000
-	) {
-		return null;
-	}
-	if (candidate.values === undefined) {
-		return {
-			defaultMessage: candidate.defaultMessage,
-			id: candidate.id,
+/** Validate primitive translation arguments and bound the projected entry count. */
+const i18nValuesSchema = z
+	.record(z.string(), z.unknown())
+	.transform((values) =>
+		Object.fromEntries(Object.entries(values).slice(0, 32))
+	)
+	.pipe(
+		z.record(
+			z.string().min(1).max(80),
+			z.union([z.string().max(2000), z.number(), z.boolean(), z.null()])
+		)
+	);
+const i18nTranslateArgSchema = z
+	.object({
+		defaultMessage: z
+			.string()
+			.max(32_000)
+			.refine((value) => value.trim().length > 0),
+		id: z
+			.string()
+			.max(200)
+			.refine((value) => value.trim().length > 0),
+		values: i18nValuesSchema.optional(),
+	})
+	.transform((input): I18nHostTranslateInput => {
+		const output: I18nHostTranslateInput = {
+			defaultMessage: input.defaultMessage,
+			id: input.id,
 		};
-	}
-	if (
-		typeof candidate.values !== "object" ||
-		candidate.values === null ||
-		Array.isArray(candidate.values)
-	) {
-		return null;
-	}
-	const values: Record<string, string | number | boolean | null> = {};
-	for (const [key, value] of Object.entries(
-		candidate.values as Record<string, unknown>
-	).slice(0, 32)) {
-		if (
-			key.length === 0 ||
-			key.length > 80 ||
-			(typeof value !== "string" &&
-				typeof value !== "number" &&
-				typeof value !== "boolean" &&
-				value !== null) ||
-			(typeof value === "string" && value.length > 2000) ||
-			(typeof value === "number" && !Number.isFinite(value))
-		) {
-			return null;
+		if (input.values !== undefined) {
+			output.values = input.values;
 		}
-		values[key] = value;
-	}
-	return {
-		defaultMessage: candidate.defaultMessage,
-		id: candidate.id,
-		values,
-	};
-}
+		return output;
+	});
+export const asI18nTranslateArg = nullableRpcParser(i18nTranslateArgSchema);
 
 // ── Assistant bridge argument validators ─────────────────────────────────────
 //
@@ -5516,463 +6478,434 @@ const MAX_PREAMBLE = 4000;
 /** Max advisory tool names / starter prompts a surface may declare. */
 const MAX_LIST_ENTRIES = 12;
 
-function clamp(value: string, max: number): string {
-	return value.length > max ? value.slice(0, max) : value;
+const assistantContextItemSchema = z.object({
+	id: z
+		.string()
+		.min(1)
+		.transform((value) => value.slice(0, MAX_LABEL)),
+	text: z
+		.string()
+		.transform((value) => value.slice(0, MAX_CONTEXT_TEXT))
+		.catch(""),
+	title: z
+		.string()
+		.min(1)
+		.transform((value) => value.slice(0, MAX_LABEL)),
+});
+const assistantContextArgSchema = z.object({
+	items: z.custom<unknown[]>(Array.isArray).transform((items) =>
+		items.slice(0, MAX_CONTEXT_ITEMS).flatMap((item) => {
+			const parsed = assistantContextItemSchema.safeParse(item);
+			return parsed.success ? [parsed.data] : [];
+		})
+	),
+});
+/** Drop malformed items and clamp context before it can enter a prompt. */
+export const asAssistantContextArg = nullableRpcParser(
+	assistantContextArgSchema
+);
+
+/** 32-bit FNV-1a, hex — keeps a clamped id distinct from its siblings. */
+function shortHash(value: string): string {
+	let hash = 0x81_1c_9d_c5;
+	for (let index = 0; index < value.length; index += 1) {
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 0x01_00_01_93);
+	}
+	return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/** Narrow `assistant.publishContext`'s argument to `{ items }`, dropping any
- *  malformed item and clamping the rest. Returns null only when the envelope
- *  itself is wrong (not an object / no `items` array). */
-export function asAssistantContextArg(data: unknown): {
-	items: { id: string; text: string; title: string }[];
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
+/** Clamp an identifier to the label cap without merging distinct values: an
+ *  over-long id keeps a prefix plus a hash of the whole value. */
+function clampIdentifier(value: string): string {
+	if (value.length <= MAX_LABEL) {
+		return value;
 	}
-	const raw = (data as Record<string, unknown>).items;
-	if (!Array.isArray(raw)) {
-		return null;
-	}
-	const items: { id: string; text: string; title: string }[] = [];
-	for (const entry of raw.slice(0, MAX_CONTEXT_ITEMS)) {
-		if (typeof entry !== "object" || entry === null) {
-			continue;
-		}
-		const c = entry as Record<string, unknown>;
-		if (typeof c.id !== "string" || c.id.length === 0) {
-			continue;
-		}
-		if (typeof c.title !== "string" || c.title.length === 0) {
-			continue;
-		}
-		items.push({
-			id: clamp(c.id, MAX_LABEL),
-			title: clamp(c.title, MAX_LABEL),
-			text: typeof c.text === "string" ? clamp(c.text, MAX_CONTEXT_TEXT) : "",
-		});
-	}
-	return { items };
+	const hash = shortHash(value);
+	return `${value.slice(0, MAX_LABEL - hash.length - 1)}#${hash}`;
 }
 
-/** Narrow a string array argument, dropping non-strings and empties. */
-function asStringList(raw: unknown): string[] | undefined {
-	if (!Array.isArray(raw)) {
-		return undefined;
-	}
-	const out = raw
-		.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
-		.slice(0, MAX_LIST_ENTRIES)
-		.map((v) => clamp(v, MAX_LABEL));
-	return out.length > 0 ? out : undefined;
-}
+const assistantStringListSchema = z
+	.custom<unknown[]>(Array.isArray)
+	.transform((items) => {
+		const labelSchema = z.string().refine((value) => value.trim().length > 0);
+		const labels = items
+			.flatMap((item) => {
+				const parsed = labelSchema.safeParse(item);
+				return parsed.success ? [parsed.data] : [];
+			})
+			.slice(0, MAX_LIST_ENTRIES)
+			.map((value) => value.slice(0, MAX_LABEL));
+		return labels.length > 0 ? labels : undefined;
+	})
+	.optional()
+	.catch(undefined);
 
-/** Narrow `assistant.registerSurface`'s argument. `label` is REQUIRED — an
- *  unlabelled takeover would leave the user staring at a chat that has silently
- *  changed whose instructions it is following. */
-export function asAssistantSurfaceArg(data: unknown): {
+interface AssistantSurfaceInput {
 	description?: string;
 	label: string;
 	preamble?: string;
 	prompts?: string[];
+	thread?: string;
 	tools?: string[];
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const c = data as Record<string, unknown>;
-	if (typeof c.label !== "string" || c.label.trim().length === 0) {
-		return null;
-	}
-	const out: {
-		description?: string;
-		label: string;
-		preamble?: string;
-		prompts?: string[];
-		tools?: string[];
-	} = { label: clamp(c.label, MAX_LABEL) };
-	if (typeof c.description === "string" && c.description.length > 0) {
-		out.description = clamp(c.description, MAX_CONTEXT_TEXT);
-	}
-	if (typeof c.preamble === "string" && c.preamble.length > 0) {
-		out.preamble = clamp(c.preamble, MAX_PREAMBLE);
-	}
-	const tools = asStringList(c.tools);
-	if (tools) {
-		out.tools = tools;
-	}
-	const prompts = asStringList(c.prompts);
-	if (prompts) {
-		out.prompts = prompts;
-	}
-	return out;
 }
+const assistantSurfaceArgSchema = z
+	.object({
+		description: z
+			.string()
+			.min(1)
+			.transform((value) => value.slice(0, MAX_CONTEXT_TEXT))
+			.optional()
+			.catch(undefined),
+		label: z
+			.string()
+			.refine((value) => value.trim().length > 0)
+			.transform((value) => value.slice(0, MAX_LABEL)),
+		preamble: z
+			.string()
+			.min(1)
+			.transform((value) => value.slice(0, MAX_PREAMBLE))
+			.optional()
+			.catch(undefined),
+		prompts: assistantStringListSchema,
+		thread: z
+			.string()
+			.refine((value) => value.trim().length > 0)
+			.transform(clampIdentifier)
+			.optional()
+			.catch(undefined),
+		tools: assistantStringListSchema,
+	})
+	.transform((input): AssistantSurfaceInput => {
+		const output: AssistantSurfaceInput = { label: input.label };
+		for (const key of ["description", "preamble", "thread"] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
+		}
+		for (const key of ["prompts", "tools"] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
+		}
+		return output;
+	});
+/** A labelled surface keeps ownership visible when an app opens the assistant. */
+export const asAssistantSurfaceArg = nullableRpcParser(
+	assistantSurfaceArgSchema
+);
 
-/** Narrow `assistant.open`'s argument. Everything is optional (a bare
- *  `assistant.open()` just shows the panel), so only a wrong TYPE fails. */
-export function asAssistantOpenArg(data: unknown): {
+interface AssistantOpenInput {
 	mode?: "floating" | "sidebar";
 	prompt?: string;
-} | null {
-	if (data === undefined || data === null) {
-		return {};
-	}
-	if (typeof data !== "object") {
-		return null;
-	}
-	const c = data as Record<string, unknown>;
-	const out: { mode?: "floating" | "sidebar"; prompt?: string } = {};
-	if (c.mode === "floating" || c.mode === "sidebar") {
-		out.mode = c.mode;
-	}
-	if (typeof c.prompt === "string" && c.prompt.trim().length > 0) {
-		out.prompt = clamp(c.prompt, MAX_CONTEXT_TEXT);
-	}
-	return out;
 }
+const assistantOpenArgSchema = z
+	.preprocess(
+		(value) =>
+			value == null
+				? {}
+				: Array.isArray(value)
+					? Object.fromEntries(Object.entries(value))
+					: value,
+		z.object({
+			mode: z.enum(["floating", "sidebar"]).optional().catch(undefined),
+			prompt: z
+				.string()
+				.refine((value) => value.trim().length > 0)
+				.transform((value) => value.slice(0, MAX_CONTEXT_TEXT))
+				.optional()
+				.catch(undefined),
+		})
+	)
+	.transform((input): AssistantOpenInput => {
+		const output: AssistantOpenInput = {};
+		if (input.mode !== undefined) {
+			output.mode = input.mode;
+		}
+		if (input.prompt !== undefined) {
+			output.prompt = input.prompt;
+		}
+		return output;
+	});
+export const asAssistantOpenArg = nullableRpcParser(assistantOpenArgSchema);
 
-/** Narrow a `shell.openTab` argument to `{ path, … }`. `path` must be a non-empty
- *  string; the optional `openTab` options are copied through only when well-typed.
- *  Returns null for any other shape. The host service (not this validator) enforces
- *  the route ALLOWLIST — this only guarantees the shape is safe to forward. */
-export function asShellOpenTabArg(data: unknown): {
-	path: string;
-	title?: string;
+interface ShellOpenTabInput {
 	conversationId?: string;
 	forceNew?: boolean;
-	initialPrompt?: string;
 	icon?: unknown;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const c = data as Record<string, unknown>;
-	if (typeof c.path !== "string" || c.path.length === 0) {
-		return null;
-	}
-	const out: {
-		path: string;
-		title?: string;
-		conversationId?: string;
-		forceNew?: boolean;
-		initialPrompt?: string;
-		icon?: unknown;
-	} = { path: c.path };
-	if (typeof c.title === "string") {
-		out.title = c.title;
-	}
-	if (typeof c.conversationId === "string") {
-		out.conversationId = c.conversationId;
-	}
-	if (typeof c.forceNew === "boolean") {
-		out.forceNew = c.forceNew;
-	}
-	if (typeof c.initialPrompt === "string") {
-		out.initialPrompt = c.initialPrompt;
-	}
-	if ("icon" in c) {
-		out.icon = c.icon ?? null;
-	}
-	return out;
+	initialPrompt?: string;
+	path: string;
+	title?: string;
 }
+const shellOpenTabArgSchema = z
+	.object({
+		conversationId: z.string().optional().catch(undefined),
+		forceNew: z.boolean().optional().catch(undefined),
+		icon: z.unknown().optional(),
+		initialPrompt: z.string().optional().catch(undefined),
+		path: z.string().min(1),
+		title: z.string().optional().catch(undefined),
+	})
+	.transform((input): ShellOpenTabInput => {
+		const output: ShellOpenTabInput = { path: input.path };
+		for (const key of ["conversationId", "initialPrompt", "title"] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
+		}
+		if (input.forceNew !== undefined) {
+			output.forceNew = input.forceNew;
+		}
+		if (Object.hasOwn(input, "icon")) {
+			output.icon = input.icon ?? null;
+		}
+		return output;
+	});
+/** The host service enforces routes after this parser validates tab options. */
+export const asShellOpenTabArg = nullableRpcParser(shellOpenTabArgSchema);
 
-/** Narrow an RPC argument to a valid display mode string (R6). Accepts either a
- *  bare string or a `{ mode }` object; returns null for anything else. */
-export function asDisplayModeArg(
-	data: unknown
-): "inline" | "fullscreen" | "pip" | null {
-	const raw =
-		typeof data === "string"
-			? data
-			: typeof data === "object" && data !== null
-				? (data as Record<string, unknown>).mode
-				: undefined;
-	if (raw === "inline" || raw === "fullscreen" || raw === "pip") {
-		return raw;
-	}
-	return null;
-}
+const displayModeSchema = z.enum(["inline", "fullscreen", "pip"]);
+const displayModeArgSchema = z.union([
+	displayModeSchema,
+	z.object({ mode: displayModeSchema }).transform((input) => input.mode),
+]);
+export const asDisplayModeArg = nullableRpcParser(displayModeArgSchema);
 
-/** Narrow an `ui.openExternal` argument to `{ href }` with an http(s) URL. Accepts a
- *  bare string, `{ href }`, or `{ url }`. Returns null for any other shape or a
- *  non-http(s) scheme, so the host never opens `javascript:`/`file:`/`data:` URLs. */
-export function asOpenExternalArg(data: unknown): { href: string } | null {
-	const raw =
-		typeof data === "string"
-			? data
-			: typeof data === "object" && data !== null
-				? ((data as Record<string, unknown>).href ??
-					(data as Record<string, unknown>).url)
-				: undefined;
-	if (typeof raw !== "string" || raw.length === 0) {
-		return null;
-	}
-	let parsed: URL;
-	try {
-		parsed = new URL(raw);
-	} catch {
-		return null;
-	}
-	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-		return null;
-	}
-	return { href: parsed.href };
-}
+const openExternalArgSchema = z
+	.union([
+		z.string(),
+		z
+			.object({ href: z.unknown().optional(), url: z.unknown().optional() })
+			.transform((input) => input.href ?? input.url),
+	])
+	.pipe(z.url({ protocol: /^https?$/ }))
+	.transform((href) => ({ href: new URL(href).href }));
+/** Only validated HTTP(S) links may reach the privileged external opener. */
+export const asOpenExternalArg = nullableRpcParser(openExternalArgSchema);
 
 /** Narrow to optional `{ accept?, multiple? }` for `ui.uploadFile`. */
-export function asUploadFileArg(data: unknown): {
-	accept?: string;
-	multiple?: boolean;
-} {
-	if (!data || typeof data !== "object") {
-		return {};
-	}
-	const obj = data as { accept?: unknown; multiple?: unknown };
-	const out: { accept?: string; multiple?: boolean } = {};
-	if (typeof obj.accept === "string" && obj.accept.trim()) {
-		out.accept = obj.accept.trim();
-	}
-	if (typeof obj.multiple === "boolean") {
-		out.multiple = obj.multiple;
-	}
-	return out;
-}
-
-/** Read an optional string field, returning `undefined` for absent and `null` for a
- *  present-but-non-string value (so the caller can reject the whole arg). */
-function optionalString(
-	obj: Record<string, unknown>,
-	field: string
-): string | null | undefined {
-	if (!(field in obj) || obj[field] === undefined) {
-		return undefined;
-	}
-	return typeof obj[field] === "string" ? (obj[field] as string) : null;
-}
-
-/** Read an optional finite non-negative number, `undefined` for absent, `null` for
- *  a present-but-invalid value. */
-function optionalNonNegNumber(
-	obj: Record<string, unknown>,
-	field: string
-): number | null | undefined {
-	if (!(field in obj) || obj[field] === undefined) {
-		return undefined;
-	}
-	const v = obj[field];
-	return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
-}
+type UploadFileInput = NonNullable<
+	Parameters<NonNullable<HostServices["uploadFile"]>>[0]
+>;
+const uploadFileArgSchema = z
+	.object({
+		accept: z.string().trim().min(1).optional().catch(undefined),
+		multiple: z.boolean().optional().catch(undefined),
+	})
+	.transform((value) => {
+		const output: UploadFileInput = {};
+		if (value.accept !== undefined) {
+			output.accept = value.accept;
+		}
+		if (value.multiple !== undefined) {
+			output.multiple = value.multiple;
+		}
+		return output;
+	})
+	.catch(() => ({}));
+export const asUploadFileArg = uploadFileArgSchema.parse;
 
 /** Narrow an arg to `model.complete` input: `prompt` required non-empty; optional
  *  string fields must be strings if present. Returns null on any bad shape. */
-export function asModelCompleteArg(data: unknown): {
-	prompt: string;
-	system?: string;
-	model?: string;
-	provider?: string;
-	model_pref_key?: string;
-	effort?: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.prompt !== "string" || o.prompt.length === 0) {
-		return null;
-	}
-	const out: {
-		prompt: string;
-		system?: string;
-		model?: string;
-		provider?: string;
-		model_pref_key?: string;
-		effort?: string;
-	} = { prompt: o.prompt };
-	for (const f of [
-		"system",
-		"model",
-		"provider",
-		"model_pref_key",
-		"effort",
-	] as const) {
-		const v = optionalString(o, f);
-		if (v === null) {
-			return null;
+/** A canonical base64 payload, as Core and the Gateway decode it. */
+const BASE64_BODY = "[A-Za-z0-9+/]+={0,2}";
+/** Images one `model.complete` call may carry, and their combined size. Core's
+ *  `host.sideModel` enforces the same bounds so the Gateway chat request stays
+ *  under its body limit. */
+export const MAX_MODEL_COMPLETE_IMAGES = 8;
+export const MAX_MODEL_COMPLETE_IMAGE_CHARS = 1536 * 1024;
+const visionImageUriSchema = z
+	.string()
+	.max(MAX_MODEL_COMPLETE_IMAGE_CHARS)
+	.regex(
+		new RegExp(`^data:image/(?:png|jpeg|webp);base64,${BASE64_BODY}$`, "u")
+	);
+const modelCompleteFieldsSchema = z.object({
+	effort: z.string().optional(),
+	// Inline raster images for a vision-capable model (OpenAI image_url parts).
+	images: z
+		.unknown()
+		.refine(
+			(value) =>
+				Array.isArray(value) && value.length <= MAX_MODEL_COMPLETE_IMAGES
+		)
+		.pipe(
+			z
+				.array(visionImageUriSchema)
+				.refine(
+					(images) =>
+						images.reduce((total, image) => total + image.length, 0) <=
+						MAX_MODEL_COMPLETE_IMAGE_CHARS,
+					{ message: "model.complete images exceed the 1.5 MiB total limit" }
+				)
+		)
+		.optional(),
+	model: z.string().optional(),
+	model_pref_key: z.string().optional(),
+	prompt: z.string().min(1),
+	provider: z.string().optional(),
+	system: z.string().optional(),
+});
+type ModelCompleteInput = z.infer<typeof modelCompleteFieldsSchema>;
+const modelCompleteArgSchema = modelCompleteFieldsSchema.transform(
+	(input): ModelCompleteInput => {
+		const output: ModelCompleteInput = { prompt: input.prompt };
+		for (const key of [
+			"effort",
+			"model",
+			"model_pref_key",
+			"provider",
+			"system",
+		] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
 		}
-		if (v !== undefined) {
-			out[f] = v;
+		if (input.images !== undefined && input.images.length > 0) {
+			output.images = input.images;
 		}
+		return output;
 	}
-	return out;
+);
+export const asModelCompleteArg = nullableRpcParser(modelCompleteArgSchema);
+
+/** Catalog discovery uses the canonical trimmed provider id. */
+const catalogModelsArgSchema = z.object({
+	providerId: z.string().trim().min(1),
+});
+export const asCatalogModelsArg = nullableRpcParser(catalogModelsArgSchema);
+
+/** A provider/account id as Core's subscriptions bridge accepts it: 1..=256
+ *  characters and not blank. Core re-validates; this rejects early. */
+const subscriptionIdSchema = z
+	.string()
+	.refine(
+		(value) => value.trim().length > 0 && [...value].length <= 256,
+		"must be 1..=256 non-blank characters"
+	);
+
+/** Drop `undefined`-valued keys (a frame may send `{ accountId: undefined }`)
+ *  so the args forwarded to Core stay plain JSON. */
+function withoutUndefinedKeys<T extends Record<string, unknown>>(value: T): T {
+	return Object.fromEntries(
+		Object.entries(value).filter(([, entry]) => entry !== undefined)
+	) as T;
 }
 
-/** Narrow a shared catalog discovery request to one non-empty provider id. */
-export function asCatalogModelsArg(data: unknown): {
-	providerId: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const providerId = (data as Record<string, unknown>).providerId;
-	return typeof providerId === "string" && providerId.trim().length > 0
-		? { providerId: providerId.trim() }
-		: null;
-}
+/** `subscriptions.list` args. Strict: Core denies unknown fields, and `force`
+ *  is owner-HTTP only, so it is never accepted here. */
+const subscriptionsListArgSchema = z
+	.strictObject({
+		providerId: subscriptionIdSchema.optional(),
+		usage: z.enum(["none", "cached", "refresh"]).optional(),
+	})
+	.transform(withoutUndefinedKeys);
+export const asSubscriptionsListArg = nullableRpcParser(
+	subscriptionsListArgSchema
+);
 
-/** Narrow a Chat Broadcast send to one existing conversation id and a bounded,
- * non-empty user message. The host performs the ACL check again on Core; this
- * validator only keeps malformed or oversized frame input off the transport. */
-export function asChatSendArg(data: unknown): {
-	conversationId: string;
-	text: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const input = data as Record<string, unknown>;
-	const conversationId = input.conversationId;
-	const text = input.text;
-	if (
-		typeof conversationId !== "string" ||
-		conversationId.trim().length === 0 ||
-		conversationId.length > 200 ||
-		typeof text !== "string" ||
-		text.trim().length === 0 ||
-		text.length > 8000
-	) {
-		return null;
-	}
-	return { conversationId: conversationId.trim(), text };
-}
+/** `subscriptions.usage` args. Omitting `accountId` reads the active account. */
+const subscriptionUsageArgSchema = z
+	.strictObject({
+		providerId: subscriptionIdSchema,
+		accountId: subscriptionIdSchema.optional(),
+	})
+	.transform(withoutUndefinedKeys);
+export const asSubscriptionUsageArg = nullableRpcParser(
+	subscriptionUsageArgSchema
+);
 
-/** Narrow an arg to `agent.run` input: `task` required non-empty; `agent_id`/`preset`
- *  optional strings; `wall_time_secs`/`max_tokens` optional finite non-negative. */
-export function asAgentRunArg(data: unknown): {
-	task: string;
-	agent_id?: string;
-	preset?: string;
-	wall_time_secs?: number;
-	max_tokens?: number;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.task !== "string" || o.task.length === 0) {
-		return null;
-	}
-	const out: {
-		task: string;
-		agent_id?: string;
-		preset?: string;
-		wall_time_secs?: number;
-		max_tokens?: number;
-	} = { task: o.task };
-	for (const f of ["agent_id", "preset"] as const) {
-		const v = optionalString(o, f);
-		if (v === null) {
-			return null;
+/** Keep oversized frame input off the conversation transport before ACL checks. */
+const chatSendArgSchema = z.object({
+	conversationId: z.string().max(200).trim().min(1),
+	text: z
+		.string()
+		.max(8000)
+		.refine((value) => value.trim().length > 0),
+});
+export const asChatSendArg = nullableRpcParser(chatSendArgSchema);
+
+/** Agent budgets must be finite and non-negative before dispatch. */
+const agentRunFieldsSchema = z.object({
+	agent_id: z.string().optional(),
+	max_tokens: z.number().nonnegative().optional(),
+	preset: z.string().optional(),
+	task: z.string().min(1),
+	wall_time_secs: z.number().nonnegative().optional(),
+});
+type AgentRunInput = z.infer<typeof agentRunFieldsSchema>;
+export const agentRunArgSchema = agentRunFieldsSchema.transform(
+	(input): AgentRunInput => {
+		const output: AgentRunInput = { task: input.task };
+		for (const key of ["agent_id", "preset"] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
 		}
-		if (v !== undefined) {
-			out[f] = v;
+		for (const key of ["max_tokens", "wall_time_secs"] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
 		}
+		return output;
 	}
-	for (const f of ["wall_time_secs", "max_tokens"] as const) {
-		const v = optionalNonNegNumber(o, f);
-		if (v === null) {
-			return null;
+);
+export const asAgentRunArg = nullableRpcParser(agentRunArgSchema);
+
+const storageKeyFieldsSchema = z.object({
+	key: z.string().min(1),
+	namespace: z.string().optional(),
+});
+const storageKeyArgSchema = storageKeyFieldsSchema.transform((input) =>
+	input.namespace === undefined
+		? { key: input.key }
+		: { key: input.key, namespace: input.namespace }
+);
+export const asStorageKeyArg = nullableRpcParser(storageKeyArgSchema);
+
+/** Storage values are strings because Core reads them with as_str. */
+const storageSetArgSchema = storageKeyFieldsSchema
+	.extend({ value: z.string() })
+	.transform((input) =>
+		input.namespace === undefined
+			? { key: input.key, value: input.value }
+			: { key: input.key, namespace: input.namespace, value: input.value }
+	);
+export const asStorageSetArg = nullableRpcParser(storageSetArgSchema);
+
+const storageKeysArgSchema = z
+	.object({ namespace: z.string().optional().catch(undefined) })
+	.transform((input) =>
+		input.namespace === undefined ? {} : { namespace: input.namespace }
+	)
+	.catch(() => ({}));
+export const asStorageKeysArg = storageKeysArgSchema.parse;
+
+const storageCompareAndSetFieldsSchema = storageKeyFieldsSchema.extend({
+	expected: z.string().nullable().optional(),
+	value: z.string().nullable().optional(),
+});
+type StorageCompareAndSetInput = z.infer<
+	typeof storageCompareAndSetFieldsSchema
+>;
+const storageCompareAndSetArgSchema =
+	storageCompareAndSetFieldsSchema.transform(
+		(input): StorageCompareAndSetInput => {
+			const output: StorageCompareAndSetInput = { key: input.key };
+			if (input.namespace !== undefined) {
+				output.namespace = input.namespace;
+			}
+			for (const key of ["expected", "value"] as const) {
+				if (input[key] !== undefined) {
+					output[key] = input[key];
+				}
+			}
+			return output;
 		}
-		if (v !== undefined) {
-			out[f] = v;
-		}
-	}
-	return out;
-}
-
-/** Narrow an arg to `{ namespace?: string, key: string }` (storage get/delete). */
-export function asStorageKeyArg(
-	data: unknown
-): { namespace?: string; key: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.key !== "string" || o.key.length === 0) {
-		return null;
-	}
-	const ns = optionalString(o, "namespace");
-	if (ns === null) {
-		return null;
-	}
-	return ns === undefined ? { key: o.key } : { key: o.key, namespace: ns };
-}
-
-/** Narrow an arg to `storage.set` input. `value` MUST be a string — the bridge reads
- *  it via `as_str` and silently drops a non-string (data loss), so reject it here. */
-export function asStorageSetArg(
-	data: unknown
-): { namespace?: string; key: string; value: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.key !== "string" || o.key.length === 0) {
-		return null;
-	}
-	if (typeof o.value !== "string") {
-		return null;
-	}
-	const ns = optionalString(o, "namespace");
-	if (ns === null) {
-		return null;
-	}
-	return ns === undefined
-		? { key: o.key, value: o.value }
-		: { key: o.key, value: o.value, namespace: ns };
-}
-
-/** Narrow an arg to `{ namespace?: string }` (storage.keys). Absent arg is valid. */
-export function asStorageKeysArg(data: unknown): { namespace?: string } {
-	if (typeof data !== "object" || data === null) {
-		return {};
-	}
-	const o = data as Record<string, unknown>;
-	const ns = optionalString(o, "namespace");
-	return typeof ns === "string" ? { namespace: ns } : {};
-}
-
-/** Narrow an atomic KV update. `null` means absent for either comparison side. */
-export function asStorageCompareAndSetArg(data: unknown): {
-	namespace?: string;
-	key: string;
-	expected?: string | null;
-	value?: string | null;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.key !== "string" || o.key.length === 0) {
-		return null;
-	}
-	const ns = optionalString(o, "namespace");
-	if (ns === null) {
-		return null;
-	}
-	for (const field of ["expected", "value"] as const) {
-		const value = o[field];
-		if (value !== undefined && value !== null && typeof value !== "string") {
-			return null;
-		}
-	}
-	return {
-		...(ns === undefined ? {} : { namespace: ns }),
-		key: o.key,
-		...(o.expected === undefined
-			? {}
-			: { expected: o.expected as string | null }),
-		...(o.value === undefined ? {} : { value: o.value as string | null }),
-	};
-}
+	);
+export const asStorageCompareAndSetArg = nullableRpcParser(
+	storageCompareAndSetArgSchema
+);
 
 /** How the node holds the key its apps seal under (`host.crypto_status`).
  *  Carries no key material — only which custody rung is live. `key_beside_data`
@@ -5986,1117 +6919,1089 @@ export interface CryptoStatus {
 	source: string;
 }
 
-/** Narrow to `{ value: string }` (crypto.seal / crypto.open). Both take a single
- *  string: seal takes plaintext, open takes a value produced by seal. */
-export function asCryptoValueArg(data: unknown): { value: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const value = (data as Record<string, unknown>).value;
-	return typeof value === "string" ? { value } : null;
-}
+/** Custody metadata contains no plaintext or key material. */
+export const cryptoStatusSchema = z.looseObject({
+	key_beside_data: z.boolean(),
+	key_file: z.string().nullable().optional(),
+	keychain_account: z.string().nullable().optional(),
+	keychain_service: z.string().nullable().optional(),
+	source: z.string(),
+}) satisfies z.ZodType<CryptoStatus>;
 
-/** Narrow to `{ space_id: string, title: string }` (spaces.createDoc). */
-export function asSpacesCreateArg(
-	data: unknown
-): { space_id: string; title: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		typeof o.space_id !== "string" ||
-		o.space_id.length === 0 ||
-		typeof o.title !== "string"
-	) {
-		return null;
-	}
-	return { space_id: o.space_id, title: o.title };
-}
+/** Sealing takes plaintext; opening takes the serialized sealed value. */
+const cryptoValueArgSchema = z.object({ value: z.string() });
+export const asCryptoValueArg = nullableRpcParser(cryptoValueArgSchema);
 
-/** Narrow to `{ name: string, description?: string | null }` (spaces.ensureSpace). */
-export function asSpacesEnsureArg(data: unknown): {
-	name: string;
-	description?: string | null;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.name !== "string" || o.name.trim().length === 0) {
-		return null;
-	}
-	const description = o.description;
-	if (
-		description !== undefined &&
-		description !== null &&
-		typeof description !== "string"
-	) {
-		return null;
-	}
-	return {
-		name: o.name.trim(),
-		...(description === undefined ? {} : { description }),
-	};
-}
+const spacesCreateArgSchema = z.object({
+	space_id: z.string().min(1),
+	title: z.string(),
+});
+export const asSpacesCreateArg = nullableRpcParser(spacesCreateArgSchema);
 
-/** Narrow to a bounded semantic Space query. */
-export function asSpacesSearchArg(data: unknown): {
-	space_id: string;
-	query: string;
-	limit?: number;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		typeof o.space_id !== "string" ||
-		o.space_id.trim().length === 0 ||
-		typeof o.query !== "string" ||
-		o.query.trim().length === 0
-	) {
-		return null;
-	}
-	const limit = o.limit;
-	if (
-		limit !== undefined &&
-		(typeof limit !== "number" || !Number.isFinite(limit) || limit < 1)
-	) {
-		return null;
-	}
-	return {
-		space_id: o.space_id.trim(),
-		query: o.query.trim(),
-		...(limit === undefined ? {} : { limit: Math.min(50, Math.floor(limit)) }),
-	};
-}
+const spacesEnsureArgSchema = z
+	.object({
+		name: z.string().trim().min(1),
+		description: z.string().nullable().optional(),
+	})
+	.transform((input) =>
+		input.description === undefined
+			? { name: input.name }
+			: { name: input.name, description: input.description }
+	);
+export const asSpacesEnsureArg = nullableRpcParser(spacesEnsureArgSchema);
 
-/** Narrow to `{ doc_id: string }` (spaces.getDoc / deleteDoc). */
-export function asSpacesDocIdArg(data: unknown): { doc_id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.doc_id !== "string" || o.doc_id.length === 0) {
-		return null;
-	}
-	return { doc_id: o.doc_id };
-}
+const spacesSearchArgSchema = z
+	.object({
+		limit: z
+			.number()
+			.min(1)
+			.transform((value) => Math.min(50, Math.floor(value)))
+			.optional(),
+		query: z.string().trim().min(1),
+		space_id: z.string().trim().min(1),
+	})
+	.transform((input) =>
+		input.limit === undefined
+			? { query: input.query, space_id: input.space_id }
+			: { limit: input.limit, query: input.query, space_id: input.space_id }
+	);
+export const asSpacesSearchArg = nullableRpcParser(spacesSearchArgSchema);
 
-/** Narrow to `{ doc_id, title?, source }` (spaces.updateDoc). `source` MUST be a
- *  string (JSON-stringify structured content yourself, like storage values). */
-export function asSpacesUpdateArg(
-	data: unknown
-): { doc_id: string; title?: string; source: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		typeof o.doc_id !== "string" ||
-		o.doc_id.length === 0 ||
-		typeof o.source !== "string"
-	) {
-		return null;
-	}
-	const title = optionalString(o, "title");
-	if (title === null) {
-		return null;
-	}
-	return title === undefined
-		? { doc_id: o.doc_id, source: o.source }
-		: { doc_id: o.doc_id, title, source: o.source };
-}
+const spacesDocIdArgSchema = z.object({ doc_id: z.string().min(1) });
+export const asSpacesDocIdArg = nullableRpcParser(spacesDocIdArgSchema);
 
-/** Narrow to `{ space_id: string }` (spaces.listDocs). */
-export function asSpacesListArg(data: unknown): { space_id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.space_id !== "string" || o.space_id.length === 0) {
-		return null;
-	}
-	return { space_id: o.space_id };
-}
+const spacesUpdateArgSchema = z
+	.object({
+		doc_id: z.string().min(1),
+		source: z.string(),
+		title: z.string().optional(),
+	})
+	.transform((input) =>
+		input.title === undefined
+			? { doc_id: input.doc_id, source: input.source }
+			: { doc_id: input.doc_id, source: input.source, title: input.title }
+	);
+export const asSpacesUpdateArg = nullableRpcParser(spacesUpdateArgSchema);
 
-/** Narrow to `media.image` input: `prompt` required non-empty; `count` optional
- * finite non-negative; `size`/`provider`/`model`/`request_id` optional strings. */
-export function asMediaImageArg(data: unknown): {
-	prompt: string;
-	count?: number;
-	size?: string;
-	provider?: string;
-	model?: string;
-	input_images?: string[];
-	request_id?: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.prompt !== "string" || o.prompt.length === 0) {
-		return null;
-	}
-	const out: {
-		prompt: string;
-		count?: number;
-		size?: string;
-		provider?: string;
-		model?: string;
-		input_images?: string[];
-		request_id?: string;
-	} = { prompt: o.prompt };
-	const count = optionalNonNegNumber(o, "count");
-	if (count === null) {
-		return null;
-	}
-	if (count !== undefined) {
-		out.count = count;
-	}
-	for (const f of ["size", "provider", "model", "request_id"] as const) {
-		const v = optionalString(o, f);
-		if (v === null) {
-			return null;
+const spacesListArgSchema = z.object({ space_id: z.string().min(1) });
+export const asSpacesListArg = nullableRpcParser(spacesListArgSchema);
+
+const spacesDatabaseArgSchema = z.object({
+	database_id: z.string().max(100).trim().min(1),
+	space_id: z.string().max(100).trim().min(1),
+});
+export const asSpacesDatabaseArg = nullableRpcParser(spacesDatabaseArgSchema);
+
+const spacesUpdateDatabaseFieldsSchema = spacesDatabaseArgSchema.extend({
+	expected_revision: z.number().int().nonnegative(),
+	source: z.string().max(1_500_000),
+	title: z.string().max(100).trim().min(1).optional(),
+});
+type SpacesUpdateDatabaseInput = z.infer<
+	typeof spacesUpdateDatabaseFieldsSchema
+>;
+const spacesUpdateDatabaseArgSchema =
+	spacesUpdateDatabaseFieldsSchema.transform(
+		(input): SpacesUpdateDatabaseInput => {
+			const output: SpacesUpdateDatabaseInput = {
+				database_id: input.database_id,
+				expected_revision: input.expected_revision,
+				source: input.source,
+				space_id: input.space_id,
+			};
+			if (input.title !== undefined) {
+				output.title = input.title;
+			}
+			return output;
 		}
-		if (v !== undefined) {
-			out[f] = v;
-		}
+	);
+export const asSpacesUpdateDatabaseArg = nullableRpcParser(
+	spacesUpdateDatabaseArgSchema
+);
+
+/** Match the native database's JSON limits, including depth before descending. */
+function boundedRyuJsonSchema(depth = 0): z.ZodType<RyuJsonValue> {
+	const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+	if (depth >= 16) {
+		return scalar;
 	}
-	if ("input_images" in o && o.input_images !== undefined) {
-		if (
-			!Array.isArray(o.input_images) ||
-			o.input_images.length > 16 ||
-			o.input_images.some(
-				(value) =>
-					typeof value !== "string" ||
-					value.length === 0 ||
-					value.length > 16 * 1024 * 1024
+	const child = boundedRyuJsonSchema(depth + 1);
+	return z.union([
+		scalar,
+		z
+			.unknown()
+			.refine((value) => Array.isArray(value) && value.length <= 10_000)
+			.pipe(z.array(child)),
+		z.record(z.string(), child),
+	]);
+}
+const spacesQueryDatabaseFieldsSchema = spacesDatabaseArgSchema.extend({
+	parameters: z
+		.unknown()
+		.refine((value) => Array.isArray(value) && value.length <= 64)
+		.pipe(z.array(boundedRyuJsonSchema()))
+		.optional(),
+	query: z.string().max(8000).trim().min(1),
+});
+type SpacesQueryDatabaseInput = z.infer<typeof spacesQueryDatabaseFieldsSchema>;
+const spacesQueryDatabaseArgSchema = spacesQueryDatabaseFieldsSchema.transform(
+	(input): SpacesQueryDatabaseInput => {
+		const output: SpacesQueryDatabaseInput = {
+			database_id: input.database_id,
+			query: input.query,
+			space_id: input.space_id,
+		};
+		if (input.parameters !== undefined) {
+			output.parameters = input.parameters;
+		}
+		return output;
+	}
+);
+export const asSpacesQueryDatabaseArg = nullableRpcParser(
+	spacesQueryDatabaseArgSchema
+);
+
+/** Combined size of one video or audio job's inline inputs (frames, clip,
+ *  audio track and `provider_input`), counted in characters of their wire JSON.
+ *  Core's and the Gateway's video/audio job routes take 64 MiB bodies; 40 MiB
+ *  leaves room for base64 padding and the rest of the request, so a valid
+ *  bridge call is never refused upstream for size alone. */
+export const MAX_MEDIA_INPUT_CHARS = 40 * 1024 * 1024;
+/** The same budget for `media.image`. Core's and the Gateway's image
+ *  generation routes take 24 MiB bodies, so image requests get their own,
+ *  smaller budget; 22 MiB leaves envelope headroom under that limit. */
+export const MAX_MEDIA_IMAGE_INPUT_CHARS = 22 * 1024 * 1024;
+/** Reference frames a video job takes: the first and, optionally, the last. */
+export const MAX_MEDIA_VIDEO_FRAMES = 2;
+/** `provider_input` keys an app may never set. They choose the route, carry the
+ *  prompt, correlate the request, or are the canonical inputs themselves, so a
+ *  model-specific mapping can never re-route a job or smuggle a second prompt.
+ *  Mirrors Core's `RESERVED_PROVIDER_INPUT_KEYS`, plus the image-edit mask. */
+export const RESERVED_PROVIDER_INPUT_KEYS: ReadonlySet<string> = new Set([
+	"model",
+	"provider",
+	"prompt",
+	"request_id",
+	"n",
+	"project_id",
+	"input_images",
+	"input_video",
+	"input_audio",
+	"input_mask",
+	"provider_input",
+	"duration_s",
+	"kind",
+]);
+/** Inline media URI of one family. Only `data:` URIs: the sandboxed frame has no
+ *  network, and the host must never fetch a plugin-chosen URL for it. */
+function inlineMediaUriSchema(family: RegExp, label: string) {
+	return z
+		.string()
+		.max(MAX_MEDIA_INPUT_CHARS)
+		.refine((value) => family.test(value), {
+			message: `must be a base64 data:${label} URI`,
+		});
+}
+const videoFrameUriSchema = inlineMediaUriSchema(
+	new RegExp(`^data:image/(?:png|jpeg|jpg|webp);base64,${BASE64_BODY}$`, "u"),
+	"image/{png,jpeg,webp}"
+);
+const videoClipUriSchema = inlineMediaUriSchema(
+	new RegExp(
+		`^data:video/[a-z0-9][a-z0-9.+-]{0,63};base64,${BASE64_BODY}$`,
+		"u"
+	),
+	"video/*"
+);
+const audioTrackUriSchema = inlineMediaUriSchema(
+	new RegExp(
+		`^data:audio/[a-z0-9][a-z0-9.+-]{0,63};base64,${BASE64_BODY}$`,
+		"u"
+	),
+	"audio/*"
+);
+/** Keys a record parse would silently drop or treat specially. They are
+ *  refused so the bridge never forwards a different object than the app sent. */
+const PROTOTYPE_KEYS: ReadonlySet<string> = new Set([
+	"__proto__",
+	"constructor",
+	"prototype",
+]);
+/** A model-specific JSON object merged into the cloud provider body by Core.
+ *  Values may reference canonical inputs (`"$input_video"`), which Core
+ *  resolves; routing and canonical keys are refused here, before transport. */
+const providerInputSchema = z
+	.unknown()
+	.refine(
+		(value) =>
+			typeof value !== "object" ||
+			value === null ||
+			!Object.keys(value).some((key) => PROTOTYPE_KEYS.has(key)),
+		{ message: "provider_input cannot use prototype keys" }
+	)
+	.pipe(z.record(z.string().min(1).max(128), boundedRyuJsonSchema()))
+	.refine((value) => Object.keys(value).length <= 64, {
+		message: "provider_input takes at most 64 fields",
+	})
+	.refine(
+		(value) =>
+			!Object.keys(value).some((key) => RESERVED_PROVIDER_INPUT_KEYS.has(key)),
+		{
+			message:
+				"provider_input cannot set routing, prompt or canonical input fields",
+		}
+	);
+/** Seconds of generated media; Core accepts (0, 600]. */
+const mediaDurationSchema = z.number().finite().positive().max(600);
+
+/** Characters of a request's inline inputs, as they will appear on the wire. */
+function mediaInputChars(input: {
+	input_audio?: string;
+	input_images?: readonly string[];
+	input_video?: string;
+	provider_input?: Record<string, RyuJsonValue>;
+}): number {
+	let total = input.input_video?.length ?? 0;
+	total += input.input_audio?.length ?? 0;
+	for (const image of input.input_images ?? []) {
+		total += image.length;
+	}
+	if (input.provider_input !== undefined) {
+		total += JSON.stringify(input.provider_input).length;
+	}
+	return total;
+}
+const withinMediaInputBudget = {
+	check: (input: Parameters<typeof mediaInputChars>[0]) =>
+		mediaInputChars(input) <= MAX_MEDIA_INPUT_CHARS,
+	message: "media inputs exceed the 40 MiB total limit",
+};
+const withinMediaImageInputBudget = {
+	check: (input: Parameters<typeof mediaInputChars>[0]) =>
+		mediaInputChars(input) <= MAX_MEDIA_IMAGE_INPUT_CHARS,
+	message: "image inputs exceed the 22 MiB total limit",
+};
+
+const mediaImageFieldsSchema = z
+	.object({
+		model: z.string().optional(),
+		provider: z.string().optional(),
+		request_id: z.string().optional(),
+		prompt: z.string().min(1),
+		count: z.number().nonnegative().optional(),
+		size: z.string().optional(),
+		input_images: z
+			.unknown()
+			.refine((value) => Array.isArray(value) && value.length <= 16)
+			.pipe(
+				z.array(
+					z
+						.string()
+						.min(1)
+						.max(16 * 1024 * 1024)
+				)
 			)
-		) {
-			return null;
+			.optional(),
+		provider_input: providerInputSchema.optional(),
+	})
+	.refine(withinMediaImageInputBudget.check, {
+		message: withinMediaImageInputBudget.message,
+	});
+type MediaImageInput = z.infer<typeof mediaImageFieldsSchema>;
+const mediaImageArgSchema = mediaImageFieldsSchema.transform(
+	(input): MediaImageInput => {
+		const output: MediaImageInput = { prompt: input.prompt };
+		for (const key of ["model", "provider", "request_id", "size"] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
 		}
-		out.input_images = o.input_images;
-	}
-	return out;
-}
-
-/** Narrow to `media.video` input: `prompt` required non-empty; `provider`/`model`/
- * `request_id` optional strings. */
-export function asMediaVideoArg(data: unknown): {
-	prompt: string;
-	provider?: string;
-	model?: string;
-	request_id?: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.prompt !== "string" || o.prompt.length === 0) {
-		return null;
-	}
-	const out: {
-		prompt: string;
-		provider?: string;
-		model?: string;
-		request_id?: string;
-	} = {
-		prompt: o.prompt,
-	};
-	for (const f of ["provider", "model", "request_id"] as const) {
-		const v = optionalString(o, f);
-		if (v === null) {
-			return null;
+		if (input.count !== undefined) {
+			output.count = input.count;
 		}
-		if (v !== undefined) {
-			out[f] = v;
+		if (input.input_images !== undefined) {
+			output.input_images = input.input_images;
 		}
-	}
-	return out;
-}
-
-/** Narrow to `media.tts` input: `text` required non-empty; `engine`/`voice`/
- * `language`/`request_id` optional strings; `speed` optional finite non-negative. */
-export function asMediaTtsArg(data: unknown): {
-	text: string;
-	engine?: string;
-	voice?: string;
-	speed?: number;
-	language?: string;
-	request_id?: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.text !== "string" || o.text.length === 0) {
-		return null;
-	}
-	const out: {
-		text: string;
-		engine?: string;
-		voice?: string;
-		speed?: number;
-		language?: string;
-		request_id?: string;
-	} = { text: o.text };
-	for (const f of ["engine", "voice", "language", "request_id"] as const) {
-		const v = optionalString(o, f);
-		if (v === null) {
-			return null;
+		if (input.provider_input !== undefined) {
+			output.provider_input = input.provider_input;
 		}
-		if (v !== undefined) {
-			out[f] = v;
+		return output;
+	}
+);
+export const asMediaImageArg = nullableRpcParser(mediaImageArgSchema);
+
+const mediaVideoFieldsSchema = z
+	.object({
+		model: z.string().optional(),
+		provider: z.string().optional(),
+		request_id: z.string().optional(),
+		prompt: z.string().min(1),
+		// `[first, last?]` reference frames (image-to-video, first/last-frame).
+		input_images: z
+			.unknown()
+			.refine(
+				(value) =>
+					Array.isArray(value) && value.length <= MAX_MEDIA_VIDEO_FRAMES
+			)
+			.pipe(z.array(videoFrameUriSchema))
+			.optional(),
+		// A source clip (video-to-video, lip-sync, matting).
+		input_video: videoClipUriSchema.optional(),
+		// An audio track (lip-sync, talking avatars).
+		input_audio: audioTrackUriSchema.optional(),
+		duration_s: mediaDurationSchema.optional(),
+		provider_input: providerInputSchema.optional(),
+	})
+	.refine(withinMediaInputBudget.check, {
+		message: withinMediaInputBudget.message,
+	});
+type MediaVideoInput = z.infer<typeof mediaVideoFieldsSchema>;
+const mediaVideoArgSchema = mediaVideoFieldsSchema.transform(
+	(input): MediaVideoInput => {
+		const output: MediaVideoInput = { prompt: input.prompt };
+		for (const key of [
+			"model",
+			"provider",
+			"request_id",
+			"input_video",
+			"input_audio",
+		] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
 		}
+		if (input.input_images !== undefined && input.input_images.length > 0) {
+			output.input_images = input.input_images;
+		}
+		if (input.duration_s !== undefined) {
+			output.duration_s = input.duration_s;
+		}
+		if (input.provider_input !== undefined) {
+			output.provider_input = input.provider_input;
+		}
+		return output;
 	}
-	const speed = optionalNonNegNumber(o, "speed");
-	if (speed === null) {
-		return null;
-	}
-	if (speed !== undefined) {
-		out.speed = speed;
-	}
-	return out;
-}
+);
+export const asMediaVideoArg = nullableRpcParser(mediaVideoArgSchema);
 
-/** Narrow to `media.transcribe` input: `audio` required non-empty string (a
- *  `data:` URL); `filename` optional string. */
-export function asMediaTranscribeArg(
-	data: unknown
-): { audio: string; filename?: string; detailed?: boolean } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
+/** Music or sound-effect generation. Core has no local audio engine, so a
+ *  cloud `provider` and its `model` are required rather than defaulted. */
+const mediaAudioFieldsSchema = z
+	.object({
+		prompt: z.string().trim().min(1).max(8000),
+		kind: z.enum(["music", "sfx"]),
+		duration_s: mediaDurationSchema.optional(),
+		provider: z.string().trim().min(1).max(64),
+		model: z.string().trim().min(1).max(256),
+		provider_input: providerInputSchema.optional(),
+		request_id: z.string().max(256).optional(),
+	})
+	.refine(withinMediaInputBudget.check, {
+		message: withinMediaInputBudget.message,
+	});
+export type MediaAudioInput = z.infer<typeof mediaAudioFieldsSchema>;
+const mediaAudioArgSchema = mediaAudioFieldsSchema.transform(
+	(input): MediaAudioInput => {
+		const output: MediaAudioInput = {
+			kind: input.kind,
+			model: input.model,
+			prompt: input.prompt,
+			provider: input.provider,
+		};
+		if (input.duration_s !== undefined) {
+			output.duration_s = input.duration_s;
+		}
+		if (input.provider_input !== undefined) {
+			output.provider_input = input.provider_input;
+		}
+		if (input.request_id !== undefined) {
+			output.request_id = input.request_id;
+		}
+		return output;
 	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.audio !== "string" || o.audio.length === 0) {
-		return null;
-	}
-	const filename = optionalString(o, "filename");
-	if (filename === null) {
-		return null;
-	}
-	if (o.detailed !== undefined && typeof o.detailed !== "boolean") {
-		return null;
-	}
-	return {
-		audio: o.audio,
-		...(filename === undefined ? {} : { filename }),
-		...(o.detailed === undefined ? {} : { detailed: o.detailed }),
-	};
-}
+);
+export const asMediaAudioArg = nullableRpcParser(mediaAudioArgSchema);
 
-/** Narrow an arg to `{ query: string }` (assets.searchGifs). An empty query is
- *  valid (returns trending), so only the shape is checked. */
-export function asAssetQueryArg(data: unknown): { query: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
+// One post-synthesis effect. `params` keys are short snake_case knobs whose
+// meaning the voice sidecar owns; Core re-checks the same bounds.
+const mediaTtsEffectSchema = z
+	.object({
+		type: z.enum(SPEAK_EFFECT_TYPES),
+		params: z
+			.record(z.string().regex(/^[a-z0-9_]{1,40}$/u), z.number().finite())
+			.refine((params) => Object.keys(params).length <= 16)
+			.optional(),
+	})
+	.strict();
+const mediaTtsFieldsSchema = z.object({
+	engine: z.string().optional(),
+	language: z.string().optional(),
+	request_id: z.string().optional(),
+	voice: z.string().optional(),
+	text: z.string().min(1).max(SPEAK_TEXT_MAX_CHARS),
+	speed: z.number().nonnegative().optional(),
+	reference_audio_data_url: z
+		.string()
+		.max(700_000)
+		.regex(/^data:audio\/wav;base64,[A-Za-z0-9+/]+={0,2}$/u)
+		.optional(),
+	seed: z.number().int().min(0).max(SPEAK_SEED_MAX).optional(),
+	instruct: z.string().max(SPEAK_INSTRUCT_MAX_CHARS).optional(),
+	reference_text: z.string().max(SPEAK_REFERENCE_TEXT_MAX_CHARS).optional(),
+	effects: z.array(mediaTtsEffectSchema).max(SPEAK_MAX_EFFECTS).optional(),
+	normalize: z.enum(SPEAK_NORMALIZE_MODES).optional(),
+	format: z.enum(SPEAK_FORMATS).optional(),
+});
+type MediaTtsInput = z.infer<typeof mediaTtsFieldsSchema>;
+const mediaTtsArgSchema = mediaTtsFieldsSchema.transform(
+	(input): MediaTtsInput => {
+		const output: MediaTtsInput = { text: input.text };
+		for (const key of [
+			"engine",
+			"language",
+			"request_id",
+			"voice",
+			"reference_audio_data_url",
+			"instruct",
+			"reference_text",
+		] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
+		}
+		if (input.speed !== undefined) {
+			output.speed = input.speed;
+		}
+		if (input.normalize !== undefined) {
+			output.normalize = input.normalize;
+		}
+		if (input.format !== undefined) {
+			output.format = input.format;
+		}
+		if (input.seed !== undefined) {
+			output.seed = input.seed;
+		}
+		if (input.effects !== undefined) {
+			// Rebuild each effect so only the declared keys cross the bridge.
+			output.effects = input.effects.map((effect) =>
+				effect.params === undefined
+					? { type: effect.type }
+					: { type: effect.type, params: { ...effect.params } }
+			);
+		}
+		return output;
 	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.query !== "string") {
-		return null;
-	}
-	return { query: o.query };
-}
+);
+export const asMediaTtsArg = nullableRpcParser(mediaTtsArgSchema);
 
-/** Narrow an arg to the provider-aware image catalog query. */
-export function asImageSearchArg(data: unknown): {
-	provider: "openverse" | "unsplash";
-	query: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
+const mediaTtsEngineInstallArgSchema = z.object({
+	engine: z.string().regex(/^[a-z0-9_-]{1,80}$/u),
+});
+export const asMediaTtsEngineInstallArg = nullableRpcParser(
+	mediaTtsEngineInstallArgSchema
+);
+
+const mediaTranscribeFieldsSchema = z.object({
+	audio: z.string().min(1),
+	detailed: z.boolean().optional(),
+	filename: z.string().optional(),
+	// `auto` or a BCP-47 tag; anything else is dropped rather than forwarded.
+	language: z
+		.string()
+		.trim()
+		.max(35)
+		.regex(/^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/)
+		.optional()
+		.catch(undefined),
+});
+type MediaTranscribeInput = z.infer<typeof mediaTranscribeFieldsSchema>;
+const mediaTranscribeArgSchema = mediaTranscribeFieldsSchema.transform(
+	(input): MediaTranscribeInput => {
+		const output: MediaTranscribeInput = { audio: input.audio };
+		if (input.detailed !== undefined) {
+			output.detailed = input.detailed;
+		}
+		if (input.filename !== undefined) {
+			output.filename = input.filename;
+		}
+		if (input.language !== undefined) {
+			output.language = input.language;
+		}
+		return output;
 	}
-	const o = data as Record<string, unknown>;
-	if (
-		(o.provider !== "openverse" && o.provider !== "unsplash") ||
-		typeof o.query !== "string"
-	) {
-		return null;
-	}
-	return { provider: o.provider, query: o.query };
-}
+);
+export const asMediaTranscribeArg = nullableRpcParser(mediaTranscribeArgSchema);
+
+const assetQueryArgSchema = z.object({ query: z.string() });
+export const asAssetQueryArg = nullableRpcParser(assetQueryArgSchema);
+
+const imageSearchArgSchema = z.object({
+	provider: z.enum(["openverse", "unsplash"]),
+	query: z.string(),
+});
+export const asImageSearchArg = nullableRpcParser(imageSearchArgSchema);
 
 /** Narrow an arg to `{ id: string }` (finetune.get / cancel / stream). */
-export function asFinetuneIdArg(data: unknown): { id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return { id: o.id };
-}
+const finetuneIdArgSchema = z.object({ id: z.string().min(1) });
+export const asFinetuneIdArg = nullableRpcParser(finetuneIdArgSchema);
 
-/** Narrow an arg to a plain object record (finetune.start / merge job specs). The
- *  fields are forwarded VERBATIM to Core, which validates each defensively, so this
- *  only rejects non-objects. */
-export function asRecordArg(data: unknown): Record<string, unknown> | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	return data as Record<string, unknown>;
+/** Decode an extensible workflow definition without enforcing Core's DAG rules.
+ * Preserve the original JSON object so future node options reach Core unchanged. */
+export function asRecordArg(
+	data: Parameters<typeof workflowDefinitionInputSchema.safeParse>[0]
+): WorkflowDefinitionInput | null {
+	const parsed = workflowDefinitionInputSchema.safeParse(data);
+	return parsed.success ? parsed.data : null;
 }
 
 /** Narrow an arg to `{ id: string }` (monitors get/delete/run). */
-export function asMonitorIdArg(data: unknown): { id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return { id: o.id };
-}
+const monitorIdArgSchema = z.object({ id: z.string().min(1) });
+export const asMonitorIdArg = nullableRpcParser(monitorIdArgSchema);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+// Preserve the monitor vocabulary's existing numeric passthrough; Core owns
+// the final check-specific policy for optional status/threshold fields.
+const monitorPassthroughNumberSchema = z.union([
+	z.number(),
+	z.nan(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+const monitorCheckSchema = z.discriminatedUnion("type", [
+	z.looseObject({
+		type: z.literal("uptime"),
+		expect_status: z.array(monitorPassthroughNumberSchema).optional(),
+	}),
+	z.looseObject({
+		type: z.literal("keyword"),
+		pattern: z.string(),
+		is_regex: z.boolean().optional(),
+		case_sensitive: z.boolean().optional(),
+		alert_when_present: z.boolean().optional(),
+	}),
+	z.looseObject({
+		type: z.literal("content_diff"),
+		region_regex: z.string().nullable().optional(),
+	}),
+	z.looseObject({
+		type: z.literal("price"),
+		extract_regex: z.string(),
+		comparator: z
+			.enum([
+				"changed",
+				"less_than",
+				"greater_than",
+				"drops_by_pct",
+				"rises_by_pct",
+			])
+			.optional(),
+		threshold: monitorPassthroughNumberSchema.nullable().optional(),
+	}),
+	z.looseObject({
+		type: z.literal("stock"),
+		in_stock_pattern: z.string(),
+		is_regex: z.boolean().optional(),
+		alert_when_in_stock: z.boolean().optional(),
+	}),
+	z.looseObject({
+		type: z.literal("provider_usage_reset"),
+		provider_id: z.string(),
+		// Absent/null follows the provider's active account.
+		account_id: z.string().min(1).max(256).nullish(),
+		target_ids: z.array(z.string()),
+		minimum_drop_percent: z.number(),
+	}),
+]) satisfies z.ZodType<MonitorCheckType>;
+const monitorNotifySchema = z.discriminatedUnion("kind", [
+	z.looseObject({ kind: z.literal("webhook"), url: z.string() }),
+	z.looseObject({
+		kind: z.literal("telegram"),
+		bot_token: z.string(),
+		chat_id: z.string(),
+	}),
+	z.looseObject({ kind: z.literal("expo_push"), token: z.string() }),
+	z.looseObject({ kind: z.literal("email"), to: z.string() }),
+]) satisfies z.ZodType<MonitorNotifyTarget>;
+const monitorInputSchema = z.looseObject({
+	backend: z.enum(["http", "spider", "agentbrowser"]),
+	check: monitorCheckSchema,
+	enabled: z.boolean(),
+	interval: z.string(),
+	name: z.string(),
+	notify: z.array(monitorNotifySchema),
+	url: z.string(),
+}) satisfies z.ZodType<MonitorInputPayload>;
+function isMonitorInput<T>(value: T): value is T & MonitorInputPayload {
+	return monitorInputSchema.safeParse(value).success;
 }
-
-function isCheckType(value: unknown): value is MonitorCheckType {
-	if (!isRecord(value) || typeof value.type !== "string") {
-		return false;
-	}
-	if (value.type === "uptime") {
-		return (
-			value.expect_status === undefined ||
-			(Array.isArray(value.expect_status) &&
-				value.expect_status.every((status) => typeof status === "number"))
-		);
-	}
-	if (value.type === "keyword") {
-		return (
-			typeof value.pattern === "string" &&
-			(value.is_regex === undefined || typeof value.is_regex === "boolean") &&
-			(value.case_sensitive === undefined ||
-				typeof value.case_sensitive === "boolean") &&
-			(value.alert_when_present === undefined ||
-				typeof value.alert_when_present === "boolean")
-		);
-	}
-	if (value.type === "content_diff") {
-		return (
-			value.region_regex === undefined ||
-			value.region_regex === null ||
-			typeof value.region_regex === "string"
-		);
-	}
-	if (value.type === "price") {
-		return (
-			typeof value.extract_regex === "string" &&
-			(value.comparator === undefined ||
-				[
-					"changed",
-					"less_than",
-					"greater_than",
-					"drops_by_pct",
-					"rises_by_pct",
-				].includes(value.comparator as string)) &&
-			(value.threshold === undefined ||
-				value.threshold === null ||
-				typeof value.threshold === "number")
-		);
-	}
-	if (value.type === "stock") {
-		return (
-			typeof value.in_stock_pattern === "string" &&
-			(value.is_regex === undefined || typeof value.is_regex === "boolean") &&
-			(value.alert_when_in_stock === undefined ||
-				typeof value.alert_when_in_stock === "boolean")
-		);
-	}
-	return false;
-}
-
-function isNotifyTarget(value: unknown): value is MonitorNotifyTarget {
-	if (!isRecord(value) || typeof value.kind !== "string") {
-		return false;
-	}
-	if (value.kind === "webhook") {
-		return typeof value.url === "string";
-	}
-	if (value.kind === "telegram") {
-		return (
-			typeof value.bot_token === "string" && typeof value.chat_id === "string"
-		);
-	}
-	if (value.kind === "expo_push") {
-		return typeof value.token === "string";
-	}
-	return value.kind === "email" && typeof value.to === "string";
-}
-
-/** Narrow a monitor create/update payload to the canonical Core wire model while
- * preserving unknown fields for forward-compatible server validation. */
-function isMonitorInput(value: unknown): value is MonitorInputPayload {
-	if (!isRecord(value)) {
-		return false;
-	}
-	return (
-		(value.backend === "http" ||
-			value.backend === "spider" ||
-			value.backend === "agentbrowser") &&
-		typeof value.check === "object" &&
-		isCheckType(value.check) &&
-		typeof value.enabled === "boolean" &&
-		typeof value.interval === "string" &&
-		typeof value.name === "string" &&
-		Array.isArray(value.notify) &&
-		value.notify.every(isNotifyTarget) &&
-		typeof value.url === "string"
-	);
-}
-
-export function asMonitorInputArg(data: unknown): MonitorInputPayload | null {
-	return isMonitorInput(data) ? data : null;
-}
-
-/** Narrow a monitor update arg `{ id, input }`. The nested `input` is validated
- *  with {@link asMonitorInputArg}. */
-export function asMonitorUpdateArg(
-	data: unknown
-): { id: string; input: MonitorInputPayload } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	const input = asMonitorInputArg(o.input);
-	if (!input) {
-		return null;
-	}
-	return { id: o.id, input };
-}
+// Keep unknown server-owned fields and object identity when forwarding a
+// validated monitor, rather than projecting the payload to today's UI model.
+const monitorInputBoundarySchema =
+	z.custom<MonitorInputPayload>(isMonitorInput);
+export const asMonitorInputArg = nullableRpcParser(monitorInputBoundarySchema);
+const monitorUpdateArgSchema = z.object({
+	id: z.string().min(1),
+	input: monitorInputBoundarySchema,
+});
+export const asMonitorUpdateArg = nullableRpcParser(monitorUpdateArgSchema);
 
 /** Narrow an arg to `{ id: string, limit?: number }` (monitors snapshots/alerts).
  *  `limit`, when present, must be a finite non-negative number. */
-export function asMonitorListLimitArg(
-	data: unknown
-): { id: string; limit?: number } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	const limit = optionalNonNegNumber(o, "limit");
-	if (limit === null) {
-		return null;
-	}
-	return limit === undefined ? { id: o.id } : { id: o.id, limit };
-}
+const monitorListLimitArgSchema = z
+	.object({ id: z.string().min(1), limit: z.number().nonnegative().optional() })
+	.transform((input) =>
+		input.limit === undefined
+			? { id: input.id }
+			: { id: input.id, limit: input.limit }
+	);
+export const asMonitorListLimitArg = nullableRpcParser(
+	monitorListLimitArgSchema
+);
 
 /** Narrow an arg to `{ id: string }` (quests complete/dismiss/delete/judge +
  *  suggestion accept/dismiss). */
-export function asQuestIdArg(data: unknown): { id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return { id: o.id };
-}
+const questIdArgSchema = z.object({ id: z.string().min(1) });
+export const asQuestIdArg = nullableRpcParser(questIdArgSchema);
 
 /** Narrow an explicit-recipient Inbox notification payload. Core applies the
  *  authoritative length and membership bounds after the host gate. */
-export function asNotificationSendArg(data: unknown): {
-	body?: string;
-	target_user_id: string;
-	title: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		typeof o.target_user_id !== "string" ||
-		o.target_user_id.length === 0 ||
-		typeof o.title !== "string" ||
-		o.title.length === 0 ||
-		(o.body !== undefined && typeof o.body !== "string")
-	) {
-		return null;
-	}
-	return {
-		...(o.body === undefined ? {} : { body: o.body }),
-		target_user_id: o.target_user_id,
-		title: o.title,
-	};
-}
+/** Optional notification archive filter; invalid filters never reach Core. */
+const notificationListInputSchema = z
+	.object({ archived: z.boolean().optional() })
+	.optional();
+export const asNotificationListArg = nullableRpcParser(
+	notificationListInputSchema
+);
 
-/** Read an optional boolean field off a loose arg object. Anything that is not a
- *  real boolean is dropped so the host applies its own default rather than
- *  coercing a truthy string into `true`. */
-function asOptionalBoolean(data: unknown, key: string): boolean | undefined {
-	if (typeof data !== "object" || data === null) {
-		return undefined;
-	}
-	const v = (data as Record<string, unknown>)[key];
-	return typeof v === "boolean" ? v : undefined;
-}
+const notificationSendArgSchema = z
+	.object({
+		target_user_id: z.string().min(1),
+		title: z.string().min(1),
+		body: z.string().optional(),
+	})
+	.transform(({ target_user_id, title, body }) =>
+		body === undefined
+			? { target_user_id, title }
+			: { target_user_id, title, body }
+	);
+export const asNotificationSendArg = nullableRpcParser(
+	notificationSendArgSchema
+);
+
+/** Optional task state remains absent unless the incoming field is a real boolean. */
+const optionalCompleteSchema = z
+	.object({ complete: z.boolean().optional().catch(undefined) })
+	.catch(() => ({}))
+	.transform(({ complete }) => complete);
+const optionalPinnedSchema = z
+	.object({ pinned: z.boolean().optional().catch(undefined) })
+	.catch(() => ({}))
+	.transform(({ pinned }) => pinned);
+const asOptionalComplete = optionalCompleteSchema.parse;
+const asOptionalPinned = optionalPinnedSchema.parse;
 
 /** Narrow an optional `{ kind?: string }` for `quests.list`. A missing or blank
  *  kind means "every kind", which is what the board asks for. */
-export function asQuestListArg(data: unknown): { kind?: string } {
-	if (typeof data !== "object" || data === null) {
-		return {};
-	}
-	const kind = (data as Record<string, unknown>).kind;
-	if (typeof kind !== "string" || kind.trim().length === 0) {
-		return {};
-	}
-	return { kind };
-}
+const questListArgSchema = z
+	.object({
+		kind: z
+			.string()
+			.refine((kind) => kind.trim().length > 0)
+			.optional()
+			.catch(undefined),
+	})
+	.transform(({ kind }) => (kind === undefined ? {} : { kind }))
+	.catch(() => ({}));
+export const asQuestListArg = questListArgSchema.parse;
 
 /** Narrow a `quests.capture` arg. Only `body` is required; `kind`/`title` are
  *  inferred server-side when absent, and a source with no usable field is dropped
  *  rather than forwarded as an empty object. */
-export function asQuestCaptureArg(data: unknown): {
-	body: string;
-	kind?: string;
-	title?: string;
-	source?: { app?: string; title?: string; url?: string };
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.body !== "string" || o.body.trim().length === 0) {
-		return null;
-	}
-	const out: {
-		body: string;
-		kind?: string;
-		title?: string;
-		source?: { app?: string; title?: string; url?: string };
-	} = { body: o.body };
-	if (typeof o.kind === "string" && o.kind.length > 0) {
-		out.kind = o.kind;
-	}
-	if (typeof o.title === "string" && o.title.length > 0) {
-		out.title = o.title;
-	}
-	if (typeof o.source === "object" && o.source !== null) {
-		const s = o.source as Record<string, unknown>;
-		const source: { app?: string; title?: string; url?: string } = {};
+const questCaptureSourceFieldsSchema = z.object({
+	app: z.string().min(1).optional().catch(undefined),
+	title: z.string().min(1).optional().catch(undefined),
+	url: z.string().min(1).optional().catch(undefined),
+});
+const questCaptureSourceSchema = questCaptureSourceFieldsSchema
+	.transform((value) => {
+		const source: z.output<typeof questCaptureSourceFieldsSchema> = {};
 		for (const key of ["app", "title", "url"] as const) {
-			const v = s[key];
-			if (typeof v === "string" && v.length > 0) {
-				source[key] = v;
+			if (value[key] !== undefined) {
+				source[key] = value[key];
 			}
 		}
-		if (Object.keys(source).length > 0) {
-			out.source = source;
-		}
+		return Object.keys(source).length > 0 ? source : undefined;
+	})
+	.optional()
+	.catch(undefined);
+const questCaptureFieldsSchema = z.object({
+	body: z.string().refine((body) => body.trim().length > 0),
+	kind: z.string().min(1).optional().catch(undefined),
+	title: z.string().min(1).optional().catch(undefined),
+	source: questCaptureSourceSchema,
+});
+const questCaptureArgSchema = questCaptureFieldsSchema.transform((value) => {
+	const output: z.output<typeof questCaptureFieldsSchema> = {
+		body: value.body,
+	};
+	if (value.kind !== undefined) {
+		output.kind = value.kind;
 	}
-	return out;
-}
+	if (value.title !== undefined) {
+		output.title = value.title;
+	}
+	if (value.source !== undefined) {
+		output.source = value.source;
+	}
+	return output;
+});
+export const asQuestCaptureArg = nullableRpcParser(questCaptureArgSchema);
 
 /** Narrow a `quests.setScratchpad` arg to its text. An empty string is VALID
  *  (that is how the buffer is cleared), so this returns `null` only when the
  *  argument is not a `{ text: string }` at all. */
-export function asQuestScratchpadArg(data: unknown): string | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const text = (data as Record<string, unknown>).text;
-	return typeof text === "string" ? text : null;
-}
+const questScratchpadArgSchema = z
+	.object({ text: z.string() })
+	.transform(({ text }) => text);
+export const asQuestScratchpadArg = nullableRpcParser(questScratchpadArgSchema);
 
 /** Narrow an optional `{ limit?: number }` for `activity.list`. Missing/invalid
  *  limit is dropped (Core applies its own default cap), so this always returns a
  *  well-formed object — the read has no required argument. */
-export function asActivityListArg(data: unknown): { limit?: number } {
-	if (typeof data !== "object" || data === null) {
-		return {};
-	}
-	const o = data as Record<string, unknown>;
-	return typeof o.limit === "number" && Number.isFinite(o.limit)
-		? { limit: o.limit }
-		: {};
-}
+const activityListArgSchema = z
+	.object({ limit: z.number().optional().catch(undefined) })
+	.transform(({ limit }) => (limit === undefined ? {} : { limit }))
+	.catch(() => ({}));
+export const asActivityListArg = activityListArgSchema.parse;
 
 /** Narrow the read-only Gateway audit filters used by `activity.audit`. */
-export function asActivityAuditArg(data: unknown): ActivityAuditInput {
-	if (typeof data !== "object" || data === null) {
-		return {};
-	}
-	const o = data as Record<string, unknown>;
-	const result: ActivityAuditInput = {};
-	if (typeof o.agent_id === "string" && o.agent_id.trim().length > 0) {
-		result.agent_id = o.agent_id.trim();
-	}
-	if (typeof o.event_type === "string" && o.event_type.trim().length > 0) {
-		result.event_type = o.event_type.trim();
-	}
-	if (typeof o.model === "string" && o.model.trim().length > 0) {
-		result.model = o.model.trim();
-	}
-	if (typeof o.provider === "string" && o.provider.trim().length > 0) {
-		result.provider = o.provider.trim();
-	}
-	if (typeof o.errors_only === "boolean") {
-		result.errors_only = o.errors_only;
-	}
-	if (typeof o.from === "string" && o.from.length <= 64) {
-		result.from = o.from;
-	}
-	if (typeof o.limit === "number" && Number.isInteger(o.limit) && o.limit > 0) {
-		result.limit = Math.min(o.limit, 1000);
-	}
-	if (typeof o.until === "string" && o.until.length <= 64) {
-		result.until = o.until;
-	}
-	if (
-		typeof o.widget_instance_id === "string" &&
-		o.widget_instance_id.trim().length > 0
-	) {
-		result.widget_instance_id = o.widget_instance_id.trim();
-	}
-	return result;
-}
+const activityAuditFieldsSchema = z.object({
+	agent_id: z.string().trim().min(1).optional().catch(undefined),
+	event_type: z.string().trim().min(1).optional().catch(undefined),
+	model: z.string().trim().min(1).optional().catch(undefined),
+	provider: z.string().trim().min(1).optional().catch(undefined),
+	widget_instance_id: z.string().trim().min(1).optional().catch(undefined),
+	from: z.string().max(64).optional().catch(undefined),
+	until: z.string().max(64).optional().catch(undefined),
+	errors_only: z.boolean().optional().catch(undefined),
+	limit: z
+		.number()
+		.refine(Number.isInteger)
+		.positive()
+		.transform((limit) => Math.min(limit, 1000))
+		.optional()
+		.catch(undefined),
+});
+const activityAuditArgSchema = activityAuditFieldsSchema
+	.transform((value): ActivityAuditInput => {
+		const result: ActivityAuditInput = {};
+		for (const key of [
+			"agent_id",
+			"event_type",
+			"model",
+			"provider",
+			"widget_instance_id",
+			"from",
+			"until",
+		] as const) {
+			if (value[key] !== undefined) {
+				result[key] = value[key];
+			}
+		}
+		if (value.errors_only !== undefined) {
+			result.errors_only = value.errors_only;
+		}
+		if (value.limit !== undefined) {
+			result.limit = value.limit;
+		}
+		return result;
+	})
+	.catch(() => ({}));
+export const asActivityAuditArg = activityAuditArgSchema.parse;
 
-/** Narrow a completed output for `activity.score` before it reaches Core. */
-export function asActivityScoreArg(data: unknown): ActivityScoreInput | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (!("response" in o) || o.response === undefined) {
-		return null;
-	}
-	try {
-		if (JSON.stringify(o.response).length > 1_000_000) {
-			return null;
+/** Bound expanded work before validation or serialization of frame-owned JSON. */
+const activityCompletedResponseSchema = z
+	.unknown()
+	.refine(isBoundedActivityJson)
+	.pipe(preserveHostResponse(databaseResponseJsonSchema));
+const activityOptionalJsonSchema = z.unknown().refine(isBoundedActivityJson);
+const activityScoreTextSchema = z
+	.string()
+	.max(4096)
+	.trim()
+	.min(1)
+	.optional()
+	.catch(undefined);
+const activityScoreEvaluatorsSchema = z
+	.array(z.unknown())
+	.max(100)
+	.transform((values) =>
+		values.flatMap((value) => {
+			const evaluator = z.string().max(256).safeParse(value);
+			return evaluator.success ? [evaluator.data] : [];
+		})
+	)
+	.optional()
+	.catch(undefined);
+const activityScoreFieldsSchema = z.object({
+	response: activityCompletedResponseSchema,
+	agent_id: activityScoreTextSchema,
+	description: activityScoreTextSchema,
+	expected: activityScoreTextSchema,
+	id: activityScoreTextSchema,
+	model: activityScoreTextSchema,
+	prompt: activityScoreTextSchema,
+	cost_micro_usd: z.number().nonnegative().optional().catch(undefined),
+	latency_ms: z.number().nonnegative().optional().catch(undefined),
+	threshold: z.number().min(0).max(1).optional().catch(undefined),
+	assertions: activityOptionalJsonSchema
+		.pipe(preserveHostResponse(z.array(databaseResponseJsonSchema).max(100)))
+		.optional()
+		.catch(undefined),
+	evaluators: activityScoreEvaluatorsSchema,
+	metadata: activityOptionalJsonSchema
+		.pipe(preserveHostResponse(jsonResponseDocumentSchema))
+		.optional()
+		.catch(undefined),
+	vars: activityOptionalJsonSchema
+		.pipe(preserveHostResponse(jsonResponseDocumentSchema))
+		.optional()
+		.catch(undefined),
+	context: activityOptionalJsonSchema
+		.pipe(
+			preserveHostResponse(
+				z.union([
+					jsonResponseDocumentSchema,
+					z.array(databaseResponseJsonSchema),
+				])
+			)
+		)
+		.optional()
+		.catch(undefined),
+});
+/** Keep JSON projections intact while omitting malformed optional selectors and limits. */
+export const activityScoreInputSchema = activityScoreFieldsSchema.transform(
+	(input) => {
+		const output: z.output<typeof activityScoreFieldsSchema> = {
+			response: input.response,
+		};
+		for (const key of [
+			"agent_id",
+			"description",
+			"expected",
+			"id",
+			"model",
+			"prompt",
+		] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
 		}
-	} catch {
-		return null;
-	}
-	const result: ActivityScoreInput = { response: o.response };
-	for (const key of [
-		"agent_id",
-		"description",
-		"expected",
-		"id",
-		"model",
-		"prompt",
-	] as const) {
-		const value = o[key];
-		if (
-			typeof value === "string" &&
-			value.trim().length > 0 &&
-			value.length <= 4096
-		) {
-			result[key] = value.trim();
+		for (const key of ["cost_micro_usd", "latency_ms", "threshold"] as const) {
+			if (input[key] !== undefined) {
+				output[key] = input[key];
+			}
 		}
-	}
-	for (const key of ["cost_micro_usd", "latency_ms"] as const) {
-		const value = o[key];
-		if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-			result[key] = value;
+		if (input.assertions !== undefined) {
+			output.assertions = input.assertions;
 		}
+		if (input.evaluators !== undefined) {
+			output.evaluators = input.evaluators;
+		}
+		if (input.metadata !== undefined) {
+			output.metadata = input.metadata;
+		}
+		if (input.vars !== undefined) {
+			output.vars = input.vars;
+		}
+		if (input.context !== undefined) {
+			output.context = input.context;
+		}
+		return output;
 	}
-	if (
-		typeof o.threshold === "number" &&
-		Number.isFinite(o.threshold) &&
-		o.threshold >= 0 &&
-		o.threshold <= 1
-	) {
-		result.threshold = o.threshold;
-	}
-	if (Array.isArray(o.assertions) && o.assertions.length <= 100) {
-		result.assertions = o.assertions;
-	}
-	if (Array.isArray(o.evaluators) && o.evaluators.length <= 100) {
-		result.evaluators = o.evaluators.filter(
-			(value): value is string =>
-				typeof value === "string" && value.length <= 256
-		);
-	}
-	if (
-		typeof o.metadata === "object" &&
-		o.metadata !== null &&
-		!Array.isArray(o.metadata)
-	) {
-		result.metadata = o.metadata as Record<string, unknown>;
-	}
-	if (typeof o.vars === "object" && o.vars !== null && !Array.isArray(o.vars)) {
-		result.vars = o.vars as Record<string, unknown>;
-	}
-	if (typeof o.context === "object" && o.context !== null) {
-		result.context = o.context;
-	}
-	return result;
-}
+);
+export const asActivityScoreArg = nullableRpcParser(activityScoreInputSchema);
 
 /** Narrow a run id for both trace inspection and trace-to-test import. */
-export function asActivityTraceArg(data: unknown): { run_id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const runId = (data as Record<string, unknown>).run_id;
-	return typeof runId === "string" && runId.trim().length > 0
-		? { run_id: runId.trim() }
-		: null;
-}
+const activityTraceArgSchema = z.object({ run_id: z.string().trim().min(1) });
+export const asActivityTraceArg = nullableRpcParser(activityTraceArgSchema);
 
 /** Narrow the trace-import target and optional agent/suite selectors. */
-export function asActivityImportTraceArg(
-	data: unknown
-): { agent_id?: string; run_id: string; suite_id?: string } | null {
-	const trace = asActivityTraceArg(data);
-	if (!trace || typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	const result: { agent_id?: string; run_id: string; suite_id?: string } =
-		trace;
-	if (typeof o.agent_id === "string" && o.agent_id.trim().length > 0) {
-		result.agent_id = o.agent_id.trim();
-	}
-	if (typeof o.suite_id === "string" && o.suite_id.trim().length > 0) {
-		result.suite_id = o.suite_id.trim();
-	}
-	return result;
-}
+type ActivityImportTraceInput = NonNullable<
+	Parameters<NonNullable<HostServices["activityImportTrace"]>>[0]
+>;
+const activityImportTraceArgSchema = activityTraceArgSchema
+	.extend({
+		agent_id: z.string().trim().min(1).optional().catch(undefined),
+		suite_id: z.string().trim().min(1).optional().catch(undefined),
+	})
+	.transform((value) => {
+		const result: ActivityImportTraceInput = {
+			run_id: value.run_id,
+		};
+		if (value.agent_id !== undefined) {
+			result.agent_id = value.agent_id;
+		}
+		if (value.suite_id !== undefined) {
+			result.suite_id = value.suite_id;
+		}
+		return result;
+	});
+export const asActivityImportTraceArg = nullableRpcParser(
+	activityImportTraceArgSchema
+);
 
 /** Narrow the provider-backed security sweep input. */
-export function asActivityRedteamArg(
-	data: unknown
-): { agent_id: string; model?: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.agent_id !== "string" || o.agent_id.trim().length === 0) {
-		return null;
-	}
-	const result: { agent_id: string; model?: string } = {
-		agent_id: o.agent_id.trim(),
-	};
-	if (typeof o.model === "string" && o.model.trim().length > 0) {
-		result.model = o.model.trim().slice(0, 256);
-	}
-	return result;
-}
+const activityRedteamArgSchema = z
+	.object({
+		agent_id: z.string().trim().min(1),
+		model: z
+			.string()
+			.trim()
+			.min(1)
+			.transform((model) => model.slice(0, 256))
+			.optional()
+			.catch(undefined),
+	})
+	.transform(({ agent_id, model }) =>
+		model === undefined ? { agent_id } : { agent_id, model }
+	);
+export const asActivityRedteamArg = nullableRpcParser(activityRedteamArgSchema);
 
 /** Narrow an optional background-process list arg. Core applies the running-only
  * default; invalid optional fields are dropped rather than widening the read. */
-export function asBackgroundListArg(data: unknown): {
-	producer?: string;
-	running_only?: boolean;
-} {
-	if (typeof data !== "object" || data === null) {
-		return {};
-	}
-	const o = data as Record<string, unknown>;
-	const result: { producer?: string; running_only?: boolean } = {};
-	if (typeof o.running_only === "boolean") {
-		result.running_only = o.running_only;
-	}
-	if (typeof o.producer === "string" && o.producer.trim().length > 0) {
-		result.producer = o.producer.trim();
-	}
-	return result;
-}
+type BackgroundListInput = NonNullable<
+	Parameters<NonNullable<HostServices["backgroundList"]>>[0]
+>;
+const backgroundListArgSchema = z
+	.object({
+		producer: z.string().trim().min(1).optional().catch(undefined),
+		running_only: z.boolean().optional().catch(undefined),
+	})
+	.transform((value) => {
+		const result: BackgroundListInput = {};
+		if (value.producer !== undefined) {
+			result.producer = value.producer;
+		}
+		if (value.running_only !== undefined) {
+			result.running_only = value.running_only;
+		}
+		return result;
+	})
+	.catch(() => ({}));
+export const asBackgroundListArg = backgroundListArgSchema.parse;
 
 /** Narrow a background stop arg so an empty id never reaches the Core queue. */
-export function asBackgroundStopArg(
-	data: unknown
-): { process_id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const processId = (data as Record<string, unknown>).process_id;
-	if (typeof processId !== "string" || processId.trim().length === 0) {
-		return null;
-	}
-	return { process_id: processId.trim() };
-}
+const backgroundStopArgSchema = z.object({
+	process_id: z.string().trim().min(1),
+});
+export const asBackgroundStopArg = nullableRpcParser(backgroundStopArgSchema);
 
 /** Narrow an RPC argument to a `{ session_id: string }` for `activity.openSession`.
  *  Returns null for any other shape so a malformed nav call never opens a tab. */
-export function asActivitySessionArg(
-	data: unknown
-): { session_id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.session_id !== "string" || o.session_id.length === 0) {
-		return null;
-	}
-	return { session_id: o.session_id };
-}
+const activitySessionArgSchema = z.object({ session_id: z.string().min(1) });
+export const asActivitySessionArg = nullableRpcParser(activitySessionArgSchema);
 
 /** Narrow an RPC argument to a `{ rangeMinutes: number }` for `timeline.list`.
  *  Returns null for any other shape so a malformed read never reaches Shadow. */
-export function asTimelineRangeArg(
-	data: unknown
-): { rangeMinutes: number } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.rangeMinutes !== "number" || !Number.isFinite(o.rangeMinutes)) {
-		return null;
-	}
-	return { rangeMinutes: o.rangeMinutes };
-}
+const timelineRangeArgSchema = z.object({ rangeMinutes: z.number() });
+export const asTimelineRangeArg = nullableRpcParser(timelineRangeArgSchema);
 
 /** Narrow an RPC argument to `{ rangeMinutes: number, narrate?: boolean }` for
  *  `timeline.journal`. A present non-boolean `narrate` is dropped (defaults off);
  *  a missing/invalid `rangeMinutes` rejects (null). */
-export function asTimelineJournalArg(
-	data: unknown
-): { rangeMinutes: number; narrate?: boolean } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.rangeMinutes !== "number" || !Number.isFinite(o.rangeMinutes)) {
-		return null;
-	}
-	return typeof o.narrate === "boolean"
-		? { rangeMinutes: o.rangeMinutes, narrate: o.narrate }
-		: { rangeMinutes: o.rangeMinutes };
-}
+const timelineJournalArgSchema = z
+	.object({
+		rangeMinutes: z.number(),
+		narrate: z.boolean().optional().catch(undefined),
+	})
+	.transform((input) =>
+		input.narrate === undefined
+			? { rangeMinutes: input.rangeMinutes }
+			: { rangeMinutes: input.rangeMinutes, narrate: input.narrate }
+	);
+export const asTimelineJournalArg = nullableRpcParser(timelineJournalArgSchema);
 
 /** Narrow an RPC argument to a `{ tsMicros: number }` for `timeline.frame`.
  *  Returns null for any other shape so a malformed keyframe read is rejected. */
-export function asTimelineFrameArg(data: unknown): { tsMicros: number } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.tsMicros !== "number" || !Number.isFinite(o.tsMicros)) {
-		return null;
-	}
-	return { tsMicros: o.tsMicros };
-}
+const timelineFrameArgSchema = z.object({ tsMicros: z.number() });
+export const asTimelineFrameArg = nullableRpcParser(timelineFrameArgSchema);
 
 /** Parse an approval decide payload (`{ id, note? }`). The note is optional; a
  *  present non-string is dropped (never forwarded as a bad shape). */
-export function asApprovalDecideArg(
-	data: unknown
-): ApprovalDecidePayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	const out: ApprovalDecidePayload = { id: o.id };
-	if (typeof o.note === "string") {
-		out.note = o.note;
-	}
-	return out;
-}
+const approvalDecideArgSchema = z
+	.object({
+		id: z.string().min(1),
+		note: z.string().optional().catch(undefined),
+	})
+	.transform((input) =>
+		input.note === undefined
+			? { id: input.id }
+			: { id: input.id, note: input.note }
+	);
+export const asApprovalDecideArg = nullableRpcParser(approvalDecideArgSchema);
 
-const SUGGESTION_FEEDBACK_KINDS = new Set([
+const SUGGESTION_FEEDBACK_KINDS = z.enum([
 	"thumbs_up",
 	"thumbs_down",
 	"dismiss",
 ]);
 
 /** Parse a Shadow feedback payload (`{ kind, suggestion_type }`). */
-export function asSuggestionFeedbackArg(
-	data: unknown
-): SuggestionFeedbackPayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		typeof o.kind !== "string" ||
-		!SUGGESTION_FEEDBACK_KINDS.has(o.kind) ||
-		typeof o.suggestion_type !== "string"
-	) {
-		return null;
-	}
-	return {
-		kind: o.kind as SuggestionFeedbackPayload["kind"],
-		suggestion_type: o.suggestion_type,
-	};
-}
+const suggestionFeedbackArgSchema = z.object({
+	kind: SUGGESTION_FEEDBACK_KINDS,
+	suggestion_type: z.string(),
+});
+export const asSuggestionFeedbackArg = nullableRpcParser(
+	suggestionFeedbackArgSchema
+);
 
 /** Parse a chat-open navigation payload (`{ prompt: string }`). */
-export function asOpenInChatArg(data: unknown): { prompt: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.prompt !== "string") {
-		return null;
-	}
-	return { prompt: o.prompt };
-}
+const openInChatArgSchema = z.object({ prompt: z.string() });
+export const asOpenInChatArg = nullableRpcParser(openInChatArgSchema);
 
 /** Narrow an arg to `{ id: string }` (mail delete / rotate-secret). */
-export function asMailIdArg(data: unknown): { id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return { id: o.id };
-}
+const mailIdArgSchema = z.object({ id: z.string().min(1) });
+export const asMailIdArg = nullableRpcParser(mailIdArgSchema);
 
 /** Narrow an arg to `{ inboxId: string }` (mail messages / inbound URL). */
-export function asMailInboxRefArg(data: unknown): { inboxId: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.inboxId !== "string" || o.inboxId.length === 0) {
-		return null;
-	}
-	return { inboxId: o.inboxId };
-}
+const mailInboxRefArgSchema = z.object({ inboxId: z.string().min(1) });
+export const asMailInboxRefArg = nullableRpcParser(mailInboxRefArgSchema);
 
-/** Type guard: a value is a well-formed create-inbox payload. Only the shape
- *  (`name`+`address` strings) is checked — Core validates server-side. Written as
- *  a predicate so a matching value NARROWS to {@link MailCreatePayload} (no cast),
- *  which is what lets {@link asMailCreateArg} forward `data` verbatim (unknown
- *  fields survive) without the unsound `Record<string, unknown>` double-cast. */
-function isMailCreatePayload(data: unknown): data is MailCreatePayload {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return false;
-	}
-	const o = data as Record<string, unknown>;
-	return typeof o.name === "string" && typeof o.address === "string";
-}
-
-/** Narrow a mail create payload `{ name, address, provider? }`. Only the shape
- *  (`name`+`address` strings) is checked — Core validates server-side — and the
- *  whole object is forwarded verbatim so unknown fields survive. */
-export function asMailCreateArg(data: unknown): MailCreatePayload | null {
-	return isMailCreatePayload(data) ? data : null;
-}
-
-/** Narrow a mail send payload `{ inboxId, to, subject, text? }`. `to` must be a
- *  non-empty array of strings; `subject` a string (may be empty); `text` optional. */
-export function asMailSendArg(data: unknown): MailSendPayload | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.inboxId !== "string" || o.inboxId.length === 0) {
-		return null;
-	}
-	if (
-		!Array.isArray(o.to) ||
-		o.to.length === 0 ||
-		!o.to.every((t) => typeof t === "string")
-	) {
-		return null;
-	}
-	if (typeof o.subject !== "string") {
-		return null;
-	}
-	if (o.text !== undefined && typeof o.text !== "string") {
-		return null;
-	}
-	return {
-		inboxId: o.inboxId,
-		to: o.to as string[],
-		subject: o.subject,
-		...(Array.isArray(o.attachments) ? { attachments: o.attachments } : {}),
-		...(Array.isArray(o.bcc) ? { bcc: o.bcc as string[] } : {}),
-		...(Array.isArray(o.cc) ? { cc: o.cc as string[] } : {}),
-		...(typeof o.clientId === "string" ? { clientId: o.clientId } : {}),
-		...(typeof o.headers === "object" &&
-		o.headers !== null &&
-		!Array.isArray(o.headers)
-			? { headers: o.headers as Record<string, string> }
-			: {}),
-		...(typeof o.html === "string" ? { html: o.html } : {}),
-		...(typeof o.inReplyTo === "string" ? { inReplyTo: o.inReplyTo } : {}),
-		...(Array.isArray(o.labels) ? { labels: o.labels as string[] } : {}),
-		...(typeof o.references === "string" || Array.isArray(o.references)
-			? { references: o.references as string | string[] }
-			: {}),
-		...(Array.isArray(o.replyTo) ? { replyTo: o.replyTo as string[] } : {}),
-		...(o.text === undefined ? {} : { text: o.text as string }),
-		...(typeof o.trackOpens === "boolean" ? { trackOpens: o.trackOpens } : {}),
-	};
-}
-
-export function asMailRequestArg(data: unknown): MailRequestPayload | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const value = data as Record<string, unknown>;
-	if (
-		typeof value.path !== "string" ||
-		!/^\/api\/mail\/(?:status|inboxes|messages|attachments|webhooks|lists|pods|domains|events)(?:\/|$)/.test(
-			value.path
-		) ||
-		value.path.includes("..") ||
-		/%(?:2e|2f|5c)/i.test(value.path) ||
-		value.path.includes("\\")
-	) {
-		return null;
-	}
-	const method = value.method ?? "GET";
-	if (
-		method !== "GET" &&
-		method !== "POST" &&
-		method !== "PATCH" &&
-		method !== "DELETE"
-	) {
-		return null;
-	}
-	return {
-		path: value.path,
-		method,
-		...(value.body === undefined ? {} : { body: value.body }),
-	};
-}
+/** Parse every endpoint-owned inbox and send field before privileged mail I/O. */
+export const asMailCreateArg = nullableRpcParser(mailCreateInputSchema);
+export const asMailSendArg = nullableRpcParser(mailSendInputSchema);
+export const asMailRequestArg = nullableRpcParser(mailRequestInputSchema);
 
 /** Narrow an RPC argument to a `{ id: string }` for `meetings.transcript`/`finalize`/
  *  `delete`. Returns null for any other shape so a malformed call never reaches Core. */
-export function asMeetingIdArg(data: unknown): { id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return { id: o.id };
-}
+const meetingIdArgSchema = z.object({ id: z.string().min(1) });
+export const asMeetingIdArg = nullableRpcParser(meetingIdArgSchema);
 
 /** Narrow an optional `{ source?, app?, title? }` for `meetings.start`. Missing/invalid
  *  fields are dropped (Core applies its own defaults), so this always returns a
  *  well-formed object — the start has no required argument. */
-export function asMeetingStartArg(data: unknown): MeetingStartPayload {
-	if (typeof data !== "object" || data === null) {
-		return {};
-	}
-	const o = data as Record<string, unknown>;
-	return {
-		...(typeof o.source === "string" ? { source: o.source } : {}),
-		...(typeof o.app === "string" ? { app: o.app } : {}),
-		...(typeof o.title === "string" ? { title: o.title } : {}),
-	};
-}
+const meetingStartArgSchema = z
+	.object({
+		source: z.string().optional().catch(undefined),
+		app: z.string().optional().catch(undefined),
+		title: z.string().optional().catch(undefined),
+	})
+	.transform((value): MeetingStartPayload => {
+		const output: MeetingStartPayload = {};
+		for (const key of ["source", "app", "title"] as const) {
+			if (value[key] !== undefined) {
+				output[key] = value[key];
+			}
+		}
+		return output;
+	})
+	.catch(() => ({}));
+export const asMeetingStartArg = meetingStartArgSchema.parse;
 
 /** Methods `social.request` will forward. A closed set, so the frame cannot reach the
  *  sidecar with a verb its router does not serve (PUT, HEAD, or an arbitrary string). */
-const SOCIAL_METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
-const APP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+const SOCIAL_METHODS = z.enum(["GET", "POST", "PATCH", "DELETE"]);
+const APP_METHODS = z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
 /** The mount Core serves the `ryu-social` sidecar on. Mirrors `SOCIAL_MOUNT` in
  *  `apps/desktop/src/lib/api/social.ts`, which is the layer that actually builds the
@@ -7135,102 +8040,111 @@ function resolveMountedRequestPath(mount: string, path: string): string | null {
 	return `${rest || "/"}${url.search}`;
 }
 
-function resolveSocialRequestPath(path: string): string | null {
-	return resolveMountedRequestPath(SOCIAL_MOUNT, path);
+interface MountedRequestInput<Method extends string> {
+	body?: RyuJsonValue;
+	method: Method;
+	path: string;
+}
+
+function mountedRequestSchema<Method extends string>(
+	mount: string,
+	methodSchema: z.ZodType<Method>,
+	policy: { rejectQueryAndFragment?: boolean } = {}
+) {
+	const pathSchema = z
+		.string()
+		.refine(
+			(path) =>
+				path.startsWith("/") &&
+				!path.startsWith("//") &&
+				!path.includes("\\") &&
+				!(
+					policy.rejectQueryAndFragment &&
+					(path.includes("?") || path.includes("#"))
+				)
+		)
+		.transform((path, context) => {
+			const resolved = resolveMountedRequestPath(mount, path);
+			if (resolved === null) {
+				context.addIssue({
+					code: "custom",
+					message: "Path must remain within the granted application mount",
+				});
+				return z.NEVER;
+			}
+			return resolved;
+		});
+	return z
+		.object({
+			body: preserveHostResponse(databaseResponseJsonSchema).optional(),
+			method: methodSchema,
+			path: pathSchema,
+		})
+		.transform((input): MountedRequestInput<Method> => {
+			const output: MountedRequestInput<Method> = {
+				method: input.method,
+				path: input.path,
+			};
+			if (input.body !== undefined) {
+				output.body = input.body;
+			}
+			return output;
+		});
 }
 
 /** Validate the relative half of an own-app request. A synthetic fixed mount lets
  * the same WHATWG containment check catch encoded dot segments before the trusted
  * host attaches credentials and the real owning plugin id. */
-export function asAppRequestArg(data: unknown): AppRequestPayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const value = data as Record<string, unknown>;
-	if (
-		typeof value.path !== "string" ||
-		!value.path.startsWith("/") ||
-		value.path.startsWith("//") ||
-		value.path.includes("\\")
-	) {
-		return null;
-	}
-	const path = resolveMountedRequestPath("/api/ext/app", value.path);
-	if (!path) {
-		return null;
-	}
-	const method = value.method ?? "GET";
-	if (typeof method !== "string" || !APP_METHODS.has(method)) {
-		return null;
-	}
-	return {
-		path,
-		method: method as AppRequestPayload["method"],
-		...(value.body === undefined ? {} : { body: value.body }),
-	};
-}
+const appRequestArgSchema = mountedRequestSchema(
+	"/api/ext/app",
+	z.preprocess((value) => value ?? "GET", APP_METHODS)
+);
+/** The optional target app: a concrete scoped id, never a pattern. */
+const appRequestTargetSchema = z.object({
+	app: z.string().refine(isScopedAppId).optional(),
+});
+export const asAppRequestArg = nullableRpcParser(
+	z
+		.intersection(appRequestTargetSchema, appRequestArgSchema)
+		.transform(({ app, ...request }) =>
+			app === undefined ? request : { ...request, app }
+		)
+);
 
-function nonEmptyString(value: unknown, maxLength = 512): value is string {
-	return (
-		typeof value === "string" &&
-		value.trim().length > 0 &&
-		value.length <= maxLength
+const realtimeConnectArgSchema = z.object({
+	room_id: z.string().max(512).trim().min(1),
+});
+export const asRealtimeConnectArg = nullableRpcParser(realtimeConnectArgSchema);
+const realtimeConnectionArgSchema = z.object({
+	connection_id: z
+		.string()
+		.max(128)
+		.refine((value) => value.trim().length > 0),
+});
+export const asRealtimeConnectionArg = nullableRpcParser(
+	realtimeConnectionArgSchema
+);
+const realtimePublishArgSchema = realtimeConnectionArgSchema
+	.extend({ event: z.string().max(128).trim().min(1), data: z.unknown() })
+	.transform(
+		(input): RealtimePublishPayload => ({
+			connection_id: input.connection_id,
+			data: input.data,
+			event: input.event,
+		})
 	);
-}
-
-/** Narrow a generic application-room connect payload. */
-export function asRealtimeConnectArg(
-	data: unknown
-): RealtimeConnectPayload | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const value = data as Record<string, unknown>;
-	return nonEmptyString(value.room_id)
-		? { room_id: value.room_id.trim() }
-		: null;
-}
-
-/** Narrow a host-owned connection reference. */
-export function asRealtimeConnectionArg(
-	data: unknown
-): RealtimeConnectionPayload | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const value = data as Record<string, unknown>;
-	return nonEmptyString(value.connection_id, 128)
-		? { connection_id: value.connection_id }
-		: null;
-}
-
-/** Narrow a named event publish payload. */
-export function asRealtimePublishArg(
-	data: unknown
-): RealtimePublishPayload | null {
-	const connection = asRealtimeConnectionArg(data);
-	if (!connection || typeof data !== "object" || data === null) {
-		return null;
-	}
-	const value = data as Record<string, unknown>;
-	return nonEmptyString(value.event, 128)
-		? { ...connection, event: value.event.trim(), data: value.data }
-		: null;
-}
-
-/** Narrow a presence payload while preserving its opaque app-owned data. */
-export function asRealtimePresenceArg(
-	data: unknown
-): RealtimePresencePayload | null {
-	const connection = asRealtimeConnectionArg(data);
-	if (!connection || typeof data !== "object" || data === null) {
-		return null;
-	}
-	return {
-		...connection,
-		data: (data as Record<string, unknown>).data,
-	};
-}
+export const asRealtimePublishArg = nullableRpcParser(realtimePublishArgSchema);
+const realtimePresenceArgSchema = realtimeConnectionArgSchema
+	.extend({ data: z.unknown() })
+	.transform(
+		(input): RealtimePresencePayload => ({
+			connection_id: input.connection_id,
+			data: input.data,
+		})
+	);
+export const asRealtimePresenceArg = nullableRpcParser(
+	realtimePresenceArgSchema
+);
 
 /**
  * Narrow an RPC argument to a `social.request` payload, or null.
@@ -7244,47 +8158,23 @@ export function asRealtimePresenceArg(
  *  - must carry no `\` (a backslash is a path separator to some URL parsers and not to
  *    others, which is exactly how a traversal slips past a `/`-only check);
  *  - must RESOLVE to a path under `/api/social` — see
- *    {@link resolveSocialRequestPath}. The returned `path` is the normalized one, not
+ *    {@link resolveMountedRequestPath}. The returned `path` is the normalized one, not
  *    the frame's raw string, so nothing downstream can re-derive a different target.
  *
  * `method` falls back to `"GET"`; anything outside {@link SOCIAL_METHODS} is refused
- * rather than silently downgraded. `body` is passed through untouched — it is JSON the
- * sidecar validates, not something this layer can meaningfully check.
+ * rather than silently downgraded. `body` must be JSON and retains its original
+ * identity; endpoint-specific fields are validated by the owning sidecar.
  */
-export function asSocialRequestArg(data: unknown): SocialRequestPayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	const path = o.path;
-	if (typeof path !== "string" || !path.startsWith("/")) {
-		return null;
-	}
-	if (path.startsWith("//") || path.includes("\\")) {
-		return null;
-	}
-	const resolved = resolveSocialRequestPath(path);
-	if (resolved === null) {
-		return null;
-	}
-	let method: SocialRequestPayload["method"] = "GET";
-	if (o.method !== undefined) {
-		if (typeof o.method !== "string" || !SOCIAL_METHODS.has(o.method)) {
-			return null;
-		}
-		method = o.method as SocialRequestPayload["method"];
-	}
-	return {
-		path: resolved,
-		method,
-		...(o.body === undefined ? {} : { body: o.body }),
-	};
-}
+const socialRequestArgSchema = mountedRequestSchema(
+	SOCIAL_MOUNT,
+	SOCIAL_METHODS.default("GET")
+);
+export const asSocialRequestArg = nullableRpcParser(socialRequestArgSchema);
 
 /** Methods `reasoning.request` will forward. `PUT` instead of Outpost's `PATCH`,
  *  matching the sidecar's policy-update route; a verb outside this set is refused
  *  rather than downgraded to GET. */
-const REASONING_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
+const REASONING_METHODS = z.enum(["GET", "POST", "PUT", "DELETE"]);
 
 /** The mount Core serves the `ryu-reasoning` sidecar on. Mirrors `REASONING_MOUNT` in
  *  `apps/desktop/src/lib/api/reasoning.ts`, which is the layer that actually builds
@@ -7301,87 +8191,34 @@ const REASONING_MOUNT = "/api/reasoning";
  * collapse into dot segments after the check runs), and a re-implementation is exactly
  * where that lesson gets lost a second time.
  */
-export function asReasoningRequestArg(
-	data: unknown
-): ReasoningRequestPayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	const path = o.path;
-	if (typeof path !== "string" || !path.startsWith("/")) {
-		return null;
-	}
-	if (path.startsWith("//") || path.includes("\\")) {
-		return null;
-	}
-	const resolved = resolveMountedRequestPath(REASONING_MOUNT, path);
-	if (resolved === null) {
-		return null;
-	}
-	let method: ReasoningRequestPayload["method"] = "GET";
-	if (o.method !== undefined) {
-		if (typeof o.method !== "string" || !REASONING_METHODS.has(o.method)) {
-			return null;
-		}
-		method = o.method as ReasoningRequestPayload["method"];
-	}
-	return {
-		path: resolved,
-		method,
-		...(o.body === undefined ? {} : { body: o.body }),
-	};
-}
+const reasoningRequestArgSchema = mountedRequestSchema(
+	REASONING_MOUNT,
+	REASONING_METHODS.default("GET")
+);
+export const asReasoningRequestArg = nullableRpcParser(
+	reasoningRequestArgSchema
+);
 
-const SAFE_ACTIONS_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
+const SAFE_ACTIONS_METHODS = z.enum(["GET", "POST", "PUT", "DELETE"]);
 const SAFE_ACTIONS_MOUNT = "/api/tools/plans";
 
 /** Validate a frame-chosen Safe Actions sub-path with the same URL-parser
  * containment rule used by the other fixed-mount companion bridges. */
-export function asSafeActionsRequestArg(
-	data: unknown
-): SafeActionsRequestPayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const value = data as Record<string, unknown>;
-	if (
-		typeof value.path !== "string" ||
-		!value.path.startsWith("/") ||
-		value.path.startsWith("//") ||
-		value.path.includes("\\") ||
-		value.path.includes("?") ||
-		value.path.includes("#")
-	) {
-		return null;
-	}
-	const path = resolveMountedRequestPath(SAFE_ACTIONS_MOUNT, value.path);
-	if (path === null) {
-		return null;
-	}
-	let method: SafeActionsRequestPayload["method"] = "GET";
-	if (value.method !== undefined) {
-		if (
-			typeof value.method !== "string" ||
-			!SAFE_ACTIONS_METHODS.has(value.method)
-		) {
-			return null;
-		}
-		method = value.method as SafeActionsRequestPayload["method"];
-	}
-	return {
-		path,
-		method,
-		...(value.body === undefined ? {} : { body: value.body }),
-	};
-}
+const safeActionsRequestArgSchema = mountedRequestSchema(
+	SAFE_ACTIONS_MOUNT,
+	SAFE_ACTIONS_METHODS.default("GET"),
+	{ rejectQueryAndFragment: true }
+);
+export const asSafeActionsRequestArg = nullableRpcParser(
+	safeActionsRequestArgSchema
+);
 
 /** Methods `rlm.request` will forward. The companion creates contexts (POST),
  *  reads them (GET) and deletes them (DELETE); nothing is edited in place, because a
  *  context is immutable by construction — but PUT is accepted so a future route does
  *  not need a change here. A verb outside this set is refused rather than downgraded
  *  to GET. */
-const RLM_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
+const RLM_METHODS = z.enum(["GET", "POST", "PUT", "DELETE"]);
 
 /** The mount Core serves the `ryu-rlm` sidecar on. Mirrors `RLM_MOUNT` in
  *  `apps/desktop/src/lib/api/rlm.ts`, which is the layer that actually builds the
@@ -7398,42 +8235,18 @@ const RLM_MOUNT = "/api/rlm";
  * dot segments after the check runs), and a re-implementation is exactly where that
  * lesson gets lost a second time.
  */
-export function asRlmRequestArg(data: unknown): RlmRequestPayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	const path = o.path;
-	if (typeof path !== "string" || !path.startsWith("/")) {
-		return null;
-	}
-	if (path.startsWith("//") || path.includes("\\")) {
-		return null;
-	}
-	const resolved = resolveMountedRequestPath(RLM_MOUNT, path);
-	if (resolved === null) {
-		return null;
-	}
-	let method: RlmRequestPayload["method"] = "GET";
-	if (o.method !== undefined) {
-		if (typeof o.method !== "string" || !RLM_METHODS.has(o.method)) {
-			return null;
-		}
-		method = o.method as RlmRequestPayload["method"];
-	}
-	return {
-		path: resolved,
-		method,
-		...(o.body === undefined ? {} : { body: o.body }),
-	};
-}
+const rlmRequestArgSchema = mountedRequestSchema(
+	RLM_MOUNT,
+	RLM_METHODS.default("GET")
+);
+export const asRlmRequestArg = nullableRpcParser(rlmRequestArgSchema);
 
 /** Methods `tuition.request` and `news.request` will forward. Both surfaces patch in
  *  place (a skill's name, a source's title) and replace whole documents (settings), so
  *  both verbs are here. A verb outside the set is refused rather than downgraded to
  *  GET, so a frame asking for one gets an error instead of silently reading where it
  *  meant to write. */
-const APP_CRUD_METHODS = new Set(["DELETE", "GET", "PATCH", "POST", "PUT"]);
+const APP_CRUD_METHODS = z.enum(["DELETE", "GET", "PATCH", "POST", "PUT"]);
 
 /** The mount Core serves the `ryu-tuition` sidecar on. Mirrors `TUITION_MOUNT` in
  *  `apps/desktop/src/lib/api/tuition.ts`, which is the layer that actually builds the
@@ -7455,17 +8268,19 @@ const NEWS_MOUNT = "/api/news";
  * collapse into dot segments after the check runs), and a re-implementation is exactly
  * where that lesson gets lost a second time.
  */
-export function asTuitionRequestArg(
-	data: unknown
-): TuitionRequestPayload | null {
-	return asMountedCrudArg(data, TUITION_MOUNT) as TuitionRequestPayload | null;
-}
+const tuitionRequestArgSchema = mountedRequestSchema(
+	TUITION_MOUNT,
+	APP_CRUD_METHODS.default("GET")
+);
+export const asTuitionRequestArg = nullableRpcParser(tuitionRequestArgSchema);
 
 /** Narrow an RPC argument to a `news.request` payload, or null. Same boundary and the
  *  same shared resolver as {@link asTuitionRequestArg}. */
-export function asNewsRequestArg(data: unknown): NewsRequestPayload | null {
-	return asMountedCrudArg(data, NEWS_MOUNT) as NewsRequestPayload | null;
-}
+const newsRequestArgSchema = mountedRequestSchema(
+	NEWS_MOUNT,
+	APP_CRUD_METHODS.default("GET")
+);
+export const asNewsRequestArg = nullableRpcParser(newsRequestArgSchema);
 
 /** The mount Core serves the `ryu-subtitles` sidecar on. Mirrors `SUBTITLES_MOUNT` in
  *  `apps/desktop/src/lib/api/subtitles.ts`, which is the layer that actually builds
@@ -7476,7 +8291,7 @@ const SUBTITLES_MOUNT = "/api/subtitles";
  *  field in place, and a verb outside this set is refused rather than downgraded to
  *  GET, so a frame asking for one gets an error instead of silently reading where it
  *  meant to write. */
-const SUBTITLES_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
+const SUBTITLES_METHODS = z.enum(["GET", "POST", "PUT", "DELETE"]);
 
 /**
  * Narrow an RPC argument to a `subtitles.request` payload, or null.
@@ -7488,80 +8303,24 @@ const SUBTITLES_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
  * collapse into dot segments after the check runs), and a re-implementation is exactly
  * where that lesson gets lost a second time.
  */
-export function asSubtitlesRequestArg(
-	data: unknown
-): SubtitlesRequestPayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	const path = o.path;
-	if (typeof path !== "string" || !path.startsWith("/")) {
-		return null;
-	}
-	if (path.startsWith("//") || path.includes("\\")) {
-		return null;
-	}
-	const resolved = resolveMountedRequestPath(SUBTITLES_MOUNT, path);
-	if (resolved === null) {
-		return null;
-	}
-	let method: SubtitlesRequestPayload["method"] = "GET";
-	if (o.method !== undefined) {
-		if (typeof o.method !== "string" || !SUBTITLES_METHODS.has(o.method)) {
-			return null;
-		}
-		method = o.method as SubtitlesRequestPayload["method"];
-	}
-	return {
-		path: resolved,
-		method,
-		...(o.body === undefined ? {} : { body: o.body }),
-	};
-}
+const subtitlesRequestArgSchema = mountedRequestSchema(
+	SUBTITLES_MOUNT,
+	SUBTITLES_METHODS.default("GET")
+);
+export const asSubtitlesRequestArg = nullableRpcParser(
+	subtitlesRequestArgSchema
+);
 
 /** The shared body of the two validators above. Shared between THEM only — not with
  *  the reasoning or social validators, whose method unions differ — so that widening
  *  one app's verbs cannot silently widen another's. */
-function asMountedCrudArg(
-	data: unknown,
-	mount: string
-): { body?: unknown; method?: string; path: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	const path = o.path;
-	if (typeof path !== "string" || !path.startsWith("/")) {
-		return null;
-	}
-	if (path.startsWith("//") || path.includes("\\")) {
-		return null;
-	}
-	const resolved = resolveMountedRequestPath(mount, path);
-	if (resolved === null) {
-		return null;
-	}
-	let method = "GET";
-	if (o.method !== undefined) {
-		if (typeof o.method !== "string" || !APP_CRUD_METHODS.has(o.method)) {
-			return null;
-		}
-		method = o.method;
-	}
-	return {
-		path: resolved,
-		method,
-		...(o.body === undefined ? {} : { body: o.body }),
-	};
-}
 
 /** Methods `blueprint.request` will forward — three, not four: the plan-review
  *  surface never edits in place (see {@link BlueprintRequestPayload}), so there is no
  *  PUT and no PATCH to accept. A verb outside this set is refused rather than
  *  downgraded to GET, so a frame asking for one gets an error instead of silently
  *  reading where it meant to write. */
-const BLUEPRINT_METHODS = new Set(["GET", "POST", "DELETE"]);
+const BLUEPRINT_METHODS = z.enum(["GET", "POST", "DELETE"]);
 
 /** The mount Core serves the `ryu-blueprint` sidecar on. Mirrors `BLUEPRINT_MOUNT` in
  *  `apps/desktop/src/lib/api/blueprint.ts`, which is the layer that actually builds
@@ -7583,37 +8342,13 @@ const BLUEPRINT_MOUNT = "/api/blueprint";
  * string. The sidecar validates ids again on its side — this is the outer half of
  * that pair, not a substitute for it.
  */
-export function asBlueprintRequestArg(
-	data: unknown
-): BlueprintRequestPayload | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	const path = o.path;
-	if (typeof path !== "string" || !path.startsWith("/")) {
-		return null;
-	}
-	if (path.startsWith("//") || path.includes("\\")) {
-		return null;
-	}
-	const resolved = resolveMountedRequestPath(BLUEPRINT_MOUNT, path);
-	if (resolved === null) {
-		return null;
-	}
-	let method: BlueprintRequestPayload["method"] = "GET";
-	if (o.method !== undefined) {
-		if (typeof o.method !== "string" || !BLUEPRINT_METHODS.has(o.method)) {
-			return null;
-		}
-		method = o.method as BlueprintRequestPayload["method"];
-	}
-	return {
-		path: resolved,
-		method,
-		...(o.body === undefined ? {} : { body: o.body }),
-	};
-}
+const blueprintRequestArgSchema = mountedRequestSchema(
+	BLUEPRINT_MOUNT,
+	BLUEPRINT_METHODS.default("GET")
+);
+export const asBlueprintRequestArg = nullableRpcParser(
+	blueprintRequestArgSchema
+);
 
 /** Narrow an RPC argument to a `social.open` payload. Total rather than nullable: both
  *  fields are optional (no id opens the Outpost tab itself), so there is no shape a
@@ -7623,336 +8358,230 @@ export function asBlueprintRequestArg(
  *  `window.ryu.context.section`, but that arrives through the mount context, not
  *  through this verb — accepting a `section` here would be an argument the host silently
  *  drops, which is how a verb becomes decorative. */
-export function asSocialOpenArg(data: unknown): {
-	postId?: string;
-	title?: string;
-} {
-	if (typeof data !== "object" || data === null) {
-		return {};
-	}
-	const o = data as Record<string, unknown>;
-	return {
-		...(typeof o.postId === "string" && o.postId.length > 0
-			? { postId: o.postId }
-			: {}),
-		...(typeof o.title === "string" ? { title: o.title } : {}),
-	};
-}
+type SocialOpenInput = NonNullable<
+	Parameters<NonNullable<HostServices["socialOpen"]>>[0]
+>;
+const socialOpenArgSchema = z
+	.object({
+		postId: z.string().min(1).optional().catch(undefined),
+		title: z.string().optional().catch(undefined),
+	})
+	.transform((value) => {
+		const output: SocialOpenInput = {};
+		if (value.postId !== undefined) {
+			output.postId = value.postId;
+		}
+		if (value.title !== undefined) {
+			output.title = value.title;
+		}
+		return output;
+	})
+	.catch(() => ({}));
+export const asSocialOpenArg = socialOpenArgSchema.parse;
 
 /** Narrow an RPC argument to `{ id: string, title: string }` for `meetings.rename`.
  *  Returns null for any other shape so a malformed rename never reaches Core. */
-export function asMeetingRenameArg(
-	data: unknown
-): { id: string; title: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	if (typeof o.title !== "string") {
-		return null;
-	}
-	return { id: o.id, title: o.title };
-}
+const meetingRenameArgSchema = z.object({
+	id: z.string().min(1),
+	title: z.string(),
+});
+export const asMeetingRenameArg = nullableRpcParser(meetingRenameArgSchema);
 
 /** Narrow an RPC argument to `{ id: string, icon: unknown | null }` for
  *  `meetings.setIcon`. `icon` may be null (clear) or any JSON glyph object. */
-export function asMeetingSetIconArg(
-	data: unknown
-): { id: string; icon: unknown | null } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	if (!("icon" in o)) {
-		return null;
-	}
-	return { id: o.id, icon: o.icon ?? null };
-}
+const meetingSetIconArgSchema = z
+	.object({ id: z.string().min(1), icon: z.unknown() })
+	.refine((value) => "icon" in value)
+	.transform(({ id, icon }) => ({ id, icon: icon ?? null }));
+export const asMeetingSetIconArg = nullableRpcParser(meetingSetIconArgSchema);
 
 /** Narrow an RPC argument to `{ id: string, title? }` for the `meetings.open`
  *  shell-navigation verb. Returns null for any other shape so a malformed nav call
  *  never opens a tab. */
-export function asMeetingOpenArg(
-	data: unknown
-): { id: string; title?: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return {
-		id: o.id,
-		...(typeof o.title === "string" ? { title: o.title } : {}),
-	};
-}
+const meetingOpenArgSchema = z
+	.object({
+		id: z.string().min(1),
+		title: z.string().optional().catch(undefined),
+	})
+	.transform(({ id, title }) => (title === undefined ? { id } : { id, title }));
+export const asMeetingOpenArg = nullableRpcParser(meetingOpenArgSchema);
 
 /** Narrow an RPC argument to `{ spaceId, docId, title? }` for the `meetings.openNotes`
  *  shell-navigation verb. Returns null for any other shape so a malformed nav call
  *  never opens a tab. */
-export function asMeetingOpenNotesArg(
-	data: unknown
-): { spaceId: string; docId: string; title?: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.spaceId !== "string" || o.spaceId.length === 0) {
-		return null;
-	}
-	if (typeof o.docId !== "string" || o.docId.length === 0) {
-		return null;
-	}
-	return {
-		spaceId: o.spaceId,
-		docId: o.docId,
-		...(typeof o.title === "string" ? { title: o.title } : {}),
-	};
-}
+const meetingOpenNotesArgSchema = z
+	.object({
+		spaceId: z.string().min(1),
+		docId: z.string().min(1),
+		title: z.string().optional().catch(undefined),
+	})
+	.transform(({ spaceId, docId, title }) =>
+		title === undefined ? { spaceId, docId } : { spaceId, docId, title }
+	);
+export const asMeetingOpenNotesArg = nullableRpcParser(
+	meetingOpenNotesArgSchema
+);
 
 /** Narrow an RPC argument to a `{ id: string }` for skill reads/distribution.
  *  Returns null for any other shape so a malformed read never reaches Core. */
-export function asSkillIdArg(data: unknown): { id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return { id: o.id };
-}
+const skillIdArgSchema = z.object({ id: z.string().min(1) });
+export const asSkillIdArg = nullableRpcParser(skillIdArgSchema);
 
 /** Narrow the shared skill-draft fields (`name` + `body` required; `description`/
  *  `allowedTools`/`alwaysOn` optional, invalid-typed ones dropped). Returns null when
  *  a required field is missing so a malformed write never reaches Core. */
-function pickSkillDraft(o: Record<string, unknown>): SkillDraftPayload | null {
-	if (typeof o.name !== "string" || o.name.length === 0) {
-		return null;
+const skillDraftArgSchema = z.object({
+	name: z.string().min(1),
+	body: z.string(),
+	description: z.string().nullable().optional().catch(undefined),
+	allowedTools: z.array(z.string()).optional().catch(undefined),
+	alwaysOn: z.boolean().optional().catch(undefined),
+});
+function canonicalSkillDraft(
+	value: z.output<typeof skillDraftArgSchema>
+): SkillDraftPayload {
+	const draft: SkillDraftPayload = { name: value.name, body: value.body };
+	if (value.description !== undefined) {
+		draft.description = value.description;
 	}
-	if (typeof o.body !== "string") {
-		return null;
+	if (value.allowedTools !== undefined) {
+		draft.allowedTools = value.allowedTools;
 	}
-	const out: SkillDraftPayload = { name: o.name, body: o.body };
-	if (typeof o.description === "string") {
-		out.description = o.description;
-	} else if (o.description === null) {
-		out.description = null;
+	if (value.alwaysOn !== undefined) {
+		draft.alwaysOn = value.alwaysOn;
 	}
-	if (
-		Array.isArray(o.allowedTools) &&
-		o.allowedTools.every((t) => typeof t === "string")
-	) {
-		out.allowedTools = o.allowedTools as string[];
-	}
-	if (typeof o.alwaysOn === "boolean") {
-		out.alwaysOn = o.alwaysOn;
-	}
-	return out;
+	return draft;
 }
-
-/** Narrow a `skills.create` payload (a bare {@link SkillDraftPayload}). */
-export function asSkillDraftArg(data: unknown): SkillDraftPayload | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	return pickSkillDraft(data as Record<string, unknown>);
-}
-
-/** Narrow a `skills.update` payload (`{ id }` + a {@link SkillDraftPayload}). */
-export function asSkillUpdateArg(
-	data: unknown
-): ({ id: string } & SkillDraftPayload) | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	const draft = pickSkillDraft(o);
-	if (!draft) {
-		return null;
-	}
-	return { id: o.id, ...draft };
-}
+export const asSkillDraftArg = nullableRpcParser(
+	skillDraftArgSchema.transform(canonicalSkillDraft)
+);
+const skillUpdateArgSchema = skillDraftArgSchema
+	.extend({ id: z.string().min(1) })
+	.transform((value) => ({ id: value.id, ...canonicalSkillDraft(value) }));
+export const asSkillUpdateArg = nullableRpcParser(skillUpdateArgSchema);
 
 /** Narrow an RPC argument to `{ id, versionId }` for `skills.versionSource`/`restore`. */
-export function asSkillVersionRefArg(
-	data: unknown
-): { id: string; versionId: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	if (typeof o.versionId !== "string" || o.versionId.length === 0) {
-		return null;
-	}
-	return { id: o.id, versionId: o.versionId };
-}
+const skillVersionRefArgSchema = z.object({
+	id: z.string().min(1),
+	versionId: z.string().min(1),
+});
+export const asSkillVersionRefArg = nullableRpcParser(skillVersionRefArgSchema);
 
 /** Narrow a `skills.snapshot` payload (`{ id, label? }`; a non-string label dropped). */
-export function asSkillSnapshotArg(
-	data: unknown
-): { id: string; label?: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return typeof o.label === "string"
-		? { id: o.id, label: o.label }
-		: { id: o.id };
-}
+const skillSnapshotArgSchema = z
+	.object({
+		id: z.string().min(1),
+		label: z.string().optional().catch(undefined),
+	})
+	.transform(({ id, label }) => (label === undefined ? { id } : { id, label }));
+export const asSkillSnapshotArg = nullableRpcParser(skillSnapshotArgSchema);
 
 /** Narrow a `skills.setTitle` payload (`{ title: string }`). Returns null for any
  *  other shape so a malformed nav call never renames the tab. */
-export function asSkillTitleArg(data: unknown): { title: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.title !== "string" || o.title.length === 0) {
-		return null;
-	}
-	return { title: o.title };
-}
+const skillTitleArgSchema = z.object({ title: z.string().min(1) });
+export const asSkillTitleArg = nullableRpcParser(skillTitleArgSchema);
 
 /** Narrow a calendar New-automation payload `{ agentId, agentName,
  *  conversationId?, schedule, requireApproval? }`. The `schedule` must be a tagged `{ kind: "cron", expr }` or
  *  `{ kind: "every", interval }`; Core validates the cron/interval server-side. Any
  *  other shape returns null so a malformed call never reaches the composite. */
-export function asCalendarCreateAutomationArg(
-	data: unknown
-): CalendarCreateAutomationPayload | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.agentId !== "string" || o.agentId.length === 0) {
-		return null;
-	}
-	if (typeof o.agentName !== "string") {
-		return null;
-	}
-	if (typeof o.schedule !== "object" || o.schedule === null) {
-		return null;
-	}
-	const s = o.schedule as Record<string, unknown>;
-	let schedule: CalendarCreateAutomationPayload["schedule"];
-	if (s.kind === "cron" && typeof s.expr === "string") {
-		schedule = { kind: "cron", expr: s.expr };
-	} else if (s.kind === "every" && typeof s.interval === "string") {
-		schedule = { kind: "every", interval: s.interval };
-	} else {
-		return null;
-	}
-	if (
-		o.requireApproval !== undefined &&
-		typeof o.requireApproval !== "boolean"
-	) {
-		return null;
-	}
-	if (
-		o.conversationId !== undefined &&
-		o.conversationId !== null &&
-		(typeof o.conversationId !== "string" || o.conversationId.length === 0)
-	) {
-		return null;
-	}
-	return {
-		agentId: o.agentId,
-		agentName: o.agentName,
-		...(o.conversationId === undefined
-			? {}
-			: { conversationId: o.conversationId as string | null }),
-		schedule,
-		...(o.requireApproval === undefined
-			? {}
-			: { requireApproval: o.requireApproval as boolean }),
-	};
-}
+const calendarScheduleSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("cron"), expr: z.string() }),
+	z.object({ kind: z.literal("every"), interval: z.string() }),
+]);
+const calendarCreateAutomationArgSchema = z
+	.object({
+		agentId: z.string().min(1),
+		agentName: z.string(),
+		conversationId: z.string().min(1).nullable().optional(),
+		requireApproval: z.boolean().optional(),
+		schedule: calendarScheduleSchema,
+	})
+	.transform((value): CalendarCreateAutomationPayload => {
+		const output: CalendarCreateAutomationPayload = {
+			agentId: value.agentId,
+			agentName: value.agentName,
+			schedule: value.schedule,
+		};
+		if (value.conversationId !== undefined) {
+			output.conversationId = value.conversationId;
+		}
+		if (value.requireApproval !== undefined) {
+			output.requireApproval = value.requireApproval;
+		}
+		return output;
+	});
+export const asCalendarCreateAutomationArg = nullableRpcParser(
+	calendarCreateAutomationArgSchema
+);
 
 /**
  * Narrow the job list `warmup.apply` replaces this app's schedule with.
  *
  * Deliberately reconstructs each entry field by field rather than forwarding the
  * object: the frame must not be able to widen this capability past what it is
- * for. `target` is pinned to `agent` (a workflow or monitor target would let a
- * warmup grant schedule arbitrary work), and the owning app id is NOT read from
+ * for. `target` is pinned to `agent` or `provider_account` (a workflow or
+ * monitor target would let a warmup grant schedule arbitrary work), and the owning app id is NOT read from
  * the input at all — the host stamps it, so the frame cannot claim ownership of
  * another app's jobs and have the same call delete them.
  *
  * Cron expressions, intervals and zone names are left to Core, which already
  * validates all three and answers 400 with a message the app surfaces.
  */
-export function asWarmupJobsArg(data: unknown): WarmupJobInput[] | null {
-	if (!Array.isArray(data)) {
-		return null;
-	}
-	const jobs: WarmupJobInput[] = [];
-	for (const item of data) {
-		if (typeof item !== "object" || item === null || Array.isArray(item)) {
-			return null;
-		}
-		const o = item as Record<string, unknown>;
-		if (typeof o.name !== "string" || o.name.length === 0) {
-			return null;
-		}
-		if (typeof o.schedule !== "object" || o.schedule === null) {
-			return null;
-		}
-		const s = o.schedule as Record<string, unknown>;
-		let schedule: WarmupJobInput["schedule"];
-		if (s.kind === "cron" && typeof s.expr === "string") {
-			schedule =
-				typeof s.tz === "string" && s.tz.length > 0
-					? { kind: "cron", expr: s.expr, tz: s.tz }
-					: { kind: "cron", expr: s.expr };
-		} else if (s.kind === "every" && typeof s.interval === "string") {
-			schedule = { kind: "every", interval: s.interval };
-		} else {
-			return null;
-		}
-		if (typeof o.target !== "object" || o.target === null) {
-			return null;
-		}
-		const t = o.target as Record<string, unknown>;
-		if (
-			t.type !== "agent" ||
-			typeof t.agentId !== "string" ||
-			t.agentId.length === 0 ||
-			typeof t.prompt !== "string"
-		) {
-			return null;
-		}
-		jobs.push({
-			name: o.name,
-			schedule,
-			target: {
-				type: "agent",
-				agentId: t.agentId,
-				prompt: t.prompt,
-				...(typeof t.model === "string" && t.model.length > 0
-					? { model: t.model }
-					: {}),
-			},
-		});
-	}
-	return jobs;
-}
+const warmupCronScheduleSchema = z
+	.object({
+		kind: z.literal("cron"),
+		expr: z.string(),
+		tz: z.string().min(1).optional().catch(undefined),
+	})
+	.transform(({ kind, expr, tz }) =>
+		tz === undefined ? { kind, expr } : { kind, expr, tz }
+	);
+const warmupScheduleSchema = z.union([
+	warmupCronScheduleSchema,
+	z.object({ kind: z.literal("every"), interval: z.string() }),
+]);
+const warmupAgentTargetSchema = z
+	.object({
+		type: z.literal("agent"),
+		agentId: z.string().min(1),
+		prompt: z.string(),
+		model: z.string().min(1).optional().catch(undefined),
+	})
+	.transform(({ type, agentId, prompt, model }) =>
+		model === undefined
+			? { type, agentId, prompt }
+			: { type, agentId, prompt, model }
+	);
+// One saved login of a provider pool. Core checks the provider supports
+// per-account pings and that the account is saved before accepting the job.
+const warmupProviderAccountTargetSchema = z
+	.object({
+		type: z.literal("provider_account"),
+		providerId: z.string().min(1),
+		accountId: z.string().min(1),
+		prompt: z.string(),
+		model: z.string().min(1),
+	})
+	.transform(({ type, providerId, accountId, prompt, model }) => ({
+		type,
+		providerId,
+		accountId,
+		prompt,
+		model,
+	}));
+const warmupTargetSchema = z.union([
+	warmupAgentTargetSchema,
+	warmupProviderAccountTargetSchema,
+]);
+const warmupJobsArgSchema = z.array(
+	z.object({
+		name: z.string().min(1),
+		schedule: warmupScheduleSchema,
+		target: warmupTargetSchema,
+	})
+);
+export const asWarmupJobsArg = nullableRpcParser(warmupJobsArgSchema);
 
 /**
  * Narrow the one-off `warmup.runNow` payload.
@@ -7962,317 +8591,201 @@ export function asWarmupJobsArg(data: unknown): WarmupJobInput[] | null {
  * used to run an arbitrary prompt on an arbitrary agent. The host additionally
  * refuses a job this app does not own.
  */
-export function asWarmupRunNowArg(data: unknown): WarmupRunNowPayload | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.jobId !== "string" || o.jobId.length === 0) {
-		return null;
-	}
-	return { jobId: o.jobId };
-}
+const warmupRunNowArgSchema = z.object({ jobId: z.string().min(1) });
+export const asWarmupRunNowArg = nullableRpcParser(warmupRunNowArgSchema);
 
 /** Narrow a quest create payload. Only the shape (`title`+`completion_condition`
  *  strings) is checked — Core validates server-side — and the whole object is
  *  forwarded verbatim so unknown fields survive. */
-export function asQuestInputArg(data: unknown): QuestInputPayload | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		typeof o.title !== "string" ||
-		typeof o.completion_condition !== "string"
-	) {
-		return null;
-	}
-	return o as QuestInputPayload;
+const questInputFieldsSchema = z.object({
+	title: z.string(),
+	completion_condition: z.string(),
+});
+function isQuestInput<T>(value: T): value is T & QuestInputPayload {
+	return questInputFieldsSchema.safeParse(value).success;
 }
+const questInputBoundarySchema = z.custom<QuestInputPayload>(isQuestInput);
+export const asQuestInputArg = nullableRpcParser(questInputBoundarySchema);
 
 /** Narrow a quest update arg `{ id, input }`. The nested `input` is validated with
  *  {@link asQuestInputArg}. */
-export function asQuestUpdateArg(
-	data: unknown
-): { id: string; input: QuestInputPayload } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	const input = asQuestInputArg(o.input);
-	if (!input) {
-		return null;
-	}
-	return { id: o.id, input };
-}
+const questUpdateArgSchema = z.object({
+	id: z.string().min(1),
+	input: questInputBoundarySchema,
+});
+export const asQuestUpdateArg = nullableRpcParser(questUpdateArgSchema);
 
 /** Narrow an arg to `{ id: string }` (workflows get/delete/versionsList/webhook/
  *  templateGet). */
-export function asWorkflowIdArg(data: unknown): { id: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	return { id: o.id };
-}
+const workflowIdArgSchema = z.object({ id: z.string().min(1) });
+export const asWorkflowIdArg = nullableRpcParser(workflowIdArgSchema);
 
-export function asWorkflowBindingArg(data: unknown, field: "connectTriggerId" | "bindingId"): {id:string;value:string} | null {
-	if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-	const object = data as Record<string, unknown>;
-	if (Object.keys(object).some((key) => key !== "id" && key !== field)) return null;
-	const id = object.id;
-	const value = object[field];
-	if (typeof id !== "string" || !id || id.length > 256 || /\s/.test(id) ||
-		typeof value !== "string" || !value || value.length > 256 || /\s/.test(value)) return null;
-	return {id,value};
+const workflowBindingIdentifierSchema = z
+	.string()
+	.min(1)
+	.max(256)
+	.refine((value) => !/\s/.test(value));
+const workflowConnectBindingSchema = z
+	.strictObject({
+		id: workflowBindingIdentifierSchema,
+		connectTriggerId: workflowBindingIdentifierSchema,
+	})
+	.transform(({ id, connectTriggerId }) => ({ id, value: connectTriggerId }));
+const workflowTriggerBindingSchema = z
+	.strictObject({
+		id: workflowBindingIdentifierSchema,
+		bindingId: workflowBindingIdentifierSchema,
+	})
+	.transform(({ id, bindingId }) => ({ id, value: bindingId }));
+export function asWorkflowBindingArg(
+	data: Parameters<typeof workflowConnectBindingSchema.safeParse>[0],
+	field: "connectTriggerId" | "bindingId"
+) {
+	return nullableRpcParser(
+		field === "connectTriggerId"
+			? workflowConnectBindingSchema
+			: workflowTriggerBindingSchema
+	)(data);
 }
 
 /** Strict selector used by the Connect binding read; identity fields are never ignored. */
-export function asConnectWorkflowIdArg(data: unknown): { id: string } | null {
-	if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-	const object = data as Record<string, unknown>;
-	if (Object.keys(object).length !== 1 || typeof object.id !== "string") return null;
-	if (!object.id || object.id.length > 256 || /\s/.test(object.id)) return null;
-	return {id: object.id};
-}
+const connectWorkflowIdArgSchema = z.strictObject({
+	id: z
+		.string()
+		.min(1)
+		.max(256)
+		.refine((id) => !/\s/.test(id)),
+});
+export const asConnectWorkflowIdArg = nullableRpcParser(
+	connectWorkflowIdArgSchema
+);
 
 /** Narrow an explicit Webhooks secret read to `{ id: string }`. */
-export function asWebhookSecretIdArg(data: unknown): { id: string } | null {
-	if (typeof data !== "object" || data === null || Array.isArray(data)) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.trim().length === 0) {
-		return null;
-	}
-	return { id: o.id };
-}
+const webhookSecretIdArgSchema = z.object({
+	id: z.string().refine((id) => id.trim().length > 0),
+});
+export const asWebhookSecretIdArg = nullableRpcParser(webhookSecretIdArgSchema);
 
 /** Narrow a Webhooks secret write to `{ id: string, secret?: string }`. */
-export function asWebhookSecretSetArg(
-	data: unknown
-): { id: string; secret?: string } | null {
-	const id = asWebhookSecretIdArg(data);
-	if (!id) {
-		return null;
-	}
-	const secret = optionalString(data as Record<string, unknown>, "secret");
-	if (secret === null) {
-		return null;
-	}
-	return secret === undefined ? id : { ...id, secret };
-}
+const webhookSecretSetArgSchema = webhookSecretIdArgSchema
+	.extend({ secret: z.string().optional() })
+	.transform(({ id, secret }) =>
+		secret === undefined ? { id } : { id, secret }
+	);
+export const asWebhookSecretSetArg = nullableRpcParser(
+	webhookSecretSetArgSchema
+);
 
 /** Narrow an arg to `{ id: string, versionId: string }` (workflows versionGet/
  *  versionRestore). */
-export function asWorkflowVersionGetArg(
-	data: unknown
-): { id: string; versionId: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		typeof o.id !== "string" ||
-		o.id.length === 0 ||
-		typeof o.versionId !== "string" ||
-		o.versionId.length === 0
-	) {
-		return null;
-	}
-	return { id: o.id, versionId: o.versionId };
-}
+const workflowVersionGetArgSchema = z.object({
+	id: z.string().min(1),
+	versionId: z.string().min(1),
+});
+export const asWorkflowVersionGetArg = nullableRpcParser(
+	workflowVersionGetArgSchema
+);
 
-/** Narrow an arg to `{ id: string, label?: string }` (workflows.versionCreate). */
-export function asWorkflowVersionCreateArg(
-	data: unknown
-): { id: string; label?: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	const label = optionalString(o, "label");
-	if (label === null) {
-		return null;
-	}
-	return label === undefined ? { id: o.id } : { id: o.id, label };
-}
+/** Narrow an arg to `{ id: string, label?: string; expectedRevision?: string }` (workflows.versionCreate). */
+type WorkflowVersionCreateInput = NonNullable<
+	Parameters<NonNullable<HostServices["workflowsVersionCreate"]>>[0]
+>;
+const workflowVersionCreateArgSchema = z
+	.object({
+		id: z.string().min(1),
+		label: z.string().optional(),
+		expectedRevision: z.string().optional(),
+	})
+	.transform((value) => {
+		const output: WorkflowVersionCreateInput = {
+			id: value.id,
+		};
+		if (value.label !== undefined) {
+			output.label = value.label;
+		}
+		if (value.expectedRevision !== undefined) {
+			output.expectedRevision = value.expectedRevision;
+		}
+		return output;
+	});
+export const asWorkflowVersionCreateArg = nullableRpcParser(
+	workflowVersionCreateArgSchema
+);
 
 /** Narrow an arg to `{ templateId: string }` (workflows.templateInstall). */
-export function asTemplateInstallArg(
-	data: unknown
-): { templateId: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.templateId !== "string" || o.templateId.length === 0) {
-		return null;
-	}
-	return { templateId: o.templateId };
-}
+const templateInstallArgSchema = z.object({ templateId: z.string().min(1) });
+export const asTemplateInstallArg = nullableRpcParser(templateInstallArgSchema);
 
 /** Narrow an arg to `{ id: string, input?: Record<string,string>, dryRun?: boolean }` (workflows.run).
  *  `input` is an optional string→string map (the initial run inputs); a present-but-
  *  malformed value rejects the whole arg. `dryRun` is an optional boolean that
  *  requests Core's transient read-only execution mode. */
-export function asWorkflowRunArg(
-	data: unknown
-): { dryRun?: boolean; id: string; input?: Record<string, string> } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.id !== "string" || o.id.length === 0) {
-		return null;
-	}
-	if (o.dryRun !== undefined && typeof o.dryRun !== "boolean") {
-		return null;
-	}
-	const dryRun = o.dryRun as boolean | undefined;
-	if (o.input === undefined) {
-		return dryRun === undefined ? { id: o.id } : { id: o.id, dryRun };
-	}
-	if (
-		typeof o.input !== "object" ||
-		o.input === null ||
-		Array.isArray(o.input)
-	) {
-		return null;
-	}
-	const input: Record<string, string> = {};
-	for (const [k, v] of Object.entries(o.input)) {
-		if (typeof v !== "string") {
-			return null;
+const workflowRunInputsSchema = z.record(z.string(), z.string());
+type WorkflowRunInput = NonNullable<
+	Parameters<NonNullable<HostServices["workflowsRun"]>>[0]
+>;
+const workflowRunArgSchema = z
+	.object({
+		id: z.string().min(1),
+		dryRun: z.boolean().optional(),
+		input: workflowRunInputsSchema.optional(),
+	})
+	.transform((value) => {
+		const output: WorkflowRunInput = { id: value.id };
+		if (value.dryRun !== undefined) {
+			output.dryRun = value.dryRun;
 		}
-		input[k] = v;
-	}
-	return dryRun === undefined
-		? { id: o.id, input }
-		: { id: o.id, input, dryRun };
-}
+		if (value.input !== undefined) {
+			output.input = value.input;
+		}
+		return output;
+	});
+export const asWorkflowRunArg = nullableRpcParser(workflowRunArgSchema);
 
 /** Narrow an arg to `{ runId: string }` (workflows.runGet). */
-export function asWorkflowRunIdArg(data: unknown): { runId: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.runId !== "string" || o.runId.length === 0) {
-		return null;
-	}
-	return { runId: o.runId };
-}
+const workflowRunIdArgSchema = z.object({ runId: z.string().min(1) });
+export const asWorkflowRunIdArg = nullableRpcParser(workflowRunIdArgSchema);
 
 /** Narrow an arg to `{ runId: string, payload: string }` (workflows.resume). */
-export function asWorkflowResumeArg(
-	data: unknown
-): { runId: string; payload: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		typeof o.runId !== "string" ||
-		o.runId.length === 0 ||
-		typeof o.payload !== "string"
-	) {
-		return null;
-	}
-	return { runId: o.runId, payload: o.payload };
-}
+const workflowResumeArgSchema = z.object({
+	runId: z.string().min(1),
+	payload: z.string(),
+});
+export const asWorkflowResumeArg = nullableRpcParser(workflowResumeArgSchema);
 
 /** Narrow an arg to the composio catalog request (workflows.composio): a `kind`
  *  from the closed set + an optional `toolkit` slug. */
-export function asComposioArg(data: unknown): {
-	kind: "status" | "toolkits" | "triggers" | "connections";
-	toolkit?: string;
-} | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (
-		o.kind !== "status" &&
-		o.kind !== "toolkits" &&
-		o.kind !== "triggers" &&
-		o.kind !== "connections"
-	) {
-		return null;
-	}
-	const toolkit = optionalString(o, "toolkit");
-	if (toolkit === null) {
-		return null;
-	}
-	return toolkit === undefined ? { kind: o.kind } : { kind: o.kind, toolkit };
-}
+const composioArgSchema = z
+	.object({
+		kind: workflowComposioKindSchema,
+		toolkit: z.string().optional(),
+	})
+	.transform((input) =>
+		input.toolkit === undefined
+			? { kind: input.kind }
+			: { kind: input.kind, toolkit: input.toolkit }
+	);
+export const asComposioArg = nullableRpcParser(composioArgSchema);
 
 /** Narrow an arg to `{ task: string }` (ghost.recordStart). */
-export function asRecordStartArg(data: unknown): { task: string } | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const o = data as Record<string, unknown>;
-	if (typeof o.task !== "string") {
-		return null;
-	}
-	return { task: o.task };
-}
+const recordStartArgSchema = z.object({ task: z.string() });
+export const asRecordStartArg = nullableRpcParser(recordStartArgSchema);
 
 /** Narrow an unknown postMessage payload to a valid {@link RpcRequest}. Rejects
  *  anything not shaped like our envelope so stray messages never reach dispatch. */
-export function asRpcRequest(data: unknown): RpcRequest | null {
-	const MAX_RPC_ARGS = 16;
-	const MAX_RPC_ID = 2 ** 31 - 1;
-	const MAX_RPC_METHOD_LENGTH = 128;
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const candidate = data as Record<string, unknown>;
-	if (
-		candidate.kind !== "ryu-plugin-rpc" ||
-		typeof candidate.id !== "number" ||
-		!Number.isSafeInteger(candidate.id) ||
-		candidate.id < 0 ||
-		candidate.id > MAX_RPC_ID ||
-		typeof candidate.method !== "string" ||
-		candidate.method.length === 0 ||
-		candidate.method.length > MAX_RPC_METHOD_LENGTH ||
-		!Array.isArray(candidate.args) ||
-		candidate.args.length > MAX_RPC_ARGS
-	) {
-		return null;
-	}
-	return {
-		kind: "ryu-plugin-rpc",
-		id: candidate.id,
-		method: candidate.method,
-		args: candidate.args,
-	};
-}
+const rpcRequestSchema = z.object({
+	args: z.custom<unknown[]>(
+		(value) => Array.isArray(value) && value.length <= 16
+	),
+	id: z
+		.number()
+		.int()
+		.min(0)
+		.max(2 ** 31 - 1),
+	kind: z.literal("ryu-plugin-rpc"),
+	method: z.string().min(1).max(128),
+}) satisfies z.ZodType<RpcRequest>;
+export const asRpcRequest = nullableRpcParser(rpcRequestSchema);
 
-/** Narrow an unknown RPC argument to a {@link RouteClaim}. Returns null for
- *  anything not shaped like `{ path: string, title: string }`, so a malformed
- *  claim never reaches {@link validatePluginRoute}. */
-export function asRouteClaim(data: unknown): RouteClaim | null {
-	if (typeof data !== "object" || data === null) {
-		return null;
-	}
-	const candidate = data as Record<string, unknown>;
-	if (
-		typeof candidate.path !== "string" ||
-		typeof candidate.title !== "string"
-	) {
-		return null;
-	}
-	return { path: candidate.path, title: candidate.title };
-}
+/** Route shape validation shares its owner with the route allowlist. */
+export const asRouteClaim = nullableRpcParser(routeClaimSchema);

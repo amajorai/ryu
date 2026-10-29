@@ -1,0 +1,29 @@
+.fill {
+	background-color: var(--appearance-fill);
+}
+.swatchFrame {
+	width: 32px;
+	height: 20px;
+}
+.swatchPrimary {
+	height: 4px;
+}
+.swatchSurface {
+	height: 5px;
+	background-color: var(--appearance-fill);
+}
+.fontSample {
+	font-family: var(--appearance-font);
+}
+.treeScheme {
+	color-scheme: var(--appearance-tree-scheme);
+}
+.treeBackground {
+	background-color: var(--appearance-tree-background);
+}
+.treeForeground {
+	color: var(--appearance-tree-foreground);
+}
+.treeBorder {
+	border-color: var(--appearance-tree-border);
+}

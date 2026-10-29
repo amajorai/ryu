@@ -9,6 +9,7 @@ import type {
 import { parseDiffFromFile } from "@pierre/diffs";
 import { Editor, type EditorOptions } from "@pierre/diffs/edit";
 import { EditProvider, FileDiff, PatchDiff } from "@pierre/diffs/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
 	HoverCardContent,
@@ -151,6 +152,7 @@ export function RichPatchDiff({
 	showSave = true,
 	style,
 }: RichPatchDiffProps) {
+	const tl = useLiteralMessages();
 	const [comments, setComments] = useState<
 		DiffLineAnnotation<ReviewCommentMetadata>[]
 	>([]);
@@ -159,6 +161,7 @@ export function RichPatchDiff({
 	);
 	const [editedFile, setEditedFile] = useState<FileContents | null>(null);
 	const [saving, setSaving] = useState(false);
+	const [saveError, setSaveError] = useState<string | null>(null);
 	const baselineRef = useRef<string | null>(null);
 	const commentCountRef = useRef(0);
 	const hydratedDiff = useMemo(() => {
@@ -171,6 +174,7 @@ export function RichPatchDiff({
 	useEffect(() => {
 		baselineRef.current = newFile?.contents ?? null;
 		setEditedFile(null);
+		setSaveError(null);
 	}, [newFile?.contents]);
 
 	const addComment = useCallback(
@@ -239,8 +243,13 @@ export function RichPatchDiff({
 						<HugeiconsIcon className="size-3.5" icon={Message01Icon} />
 						<span className="font-medium">Review comment</span>
 						<span className="text-muted-foreground">
-							{annotation.side === "additions" ? "added" : "removed"} line{" "}
-							{formatCount(annotation.lineNumber) ?? "—"}
+							{annotation.side === "additions"
+								? tl("added line {lineNumber}", {
+										lineNumber: formatCount(annotation.lineNumber) ?? "—",
+									})
+								: tl("removed line {lineNumber}", {
+										lineNumber: formatCount(annotation.lineNumber) ?? "—",
+									})}
 						</span>
 						<button
 							aria-label="Remove review comment"
@@ -261,7 +270,7 @@ export function RichPatchDiff({
 				</div>
 			);
 		},
-		[removeComment, updateComment]
+		[removeComment, tl, updateComment]
 	);
 
 	const renderGutterUtility = useCallback(
@@ -328,9 +337,16 @@ export function RichPatchDiff({
 			return;
 		}
 		setSaving(true);
+		setSaveError(null);
 		try {
 			await onSave(editedFile);
 			baselineRef.current = editedFile.contents;
+		} catch (error) {
+			setSaveError(
+				error instanceof Error
+					? error.message
+					: "Unable to save file. Try again."
+			);
 		} finally {
 			setSaving(false);
 		}
@@ -358,6 +374,11 @@ export function RichPatchDiff({
 							</button>
 						)}
 					</div>
+				)}
+				{saveError && (
+					<p className="px-2 py-1 text-status-destructive text-xs" role="alert">
+						{saveError}
+					</p>
 				)}
 				{hydratedDiff ? (
 					<FileDiff
@@ -403,7 +424,8 @@ export function DiffFilePreviewPopover({
 			<HoverCardTrigger closeDelay={120} delay={180} render={children} />
 			<HoverCardContent
 				align="start"
-				className="w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border-border/70 bg-popover/95 p-2 shadow-xl backdrop-blur-xl"
+				appearance="composer-preview"
+				className="w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden"
 				side="left"
 				sideOffset={10}
 			>

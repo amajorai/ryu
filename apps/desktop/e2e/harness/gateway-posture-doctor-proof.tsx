@@ -1,3 +1,31 @@
+// React's style contract includes the exact CSS custom properties consumed below.
+declare module "react" {
+	interface CSSProperties {
+		"--fixture-value-1"?: string | number;
+		"--fixture-value-2"?: string | number;
+		"--fixture-value-3"?: string | number;
+		"--fixture-value-4"?: string | number;
+		"--fixture-value-5"?: string | number;
+		"--fixture-value-6"?: string | number;
+		"--fixture-value-7"?: string | number;
+		"--fixture-value-8"?: string | number;
+		"--fixture-value-9"?: string | number;
+		"--fixture-value-10"?: string | number;
+		"--fixture-value-11"?: string | number;
+		"--fixture-value-12"?: string | number;
+		"--fixture-value-13"?: string | number;
+		"--fixture-value-14"?: string | number;
+		"--fixture-value-15"?: string | number;
+		"--fixture-value-16"?: string | number;
+		"--fixture-value-17"?: string | number;
+		"--fixture-value-18"?: string | number;
+		"--fixture-value-19"?: string | number;
+		"--fixture-value-20"?: string | number;
+		"--fixture-value-21"?: string | number;
+		"--fixture-value-22"?: string | number;
+	}
+}
+
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -7,6 +35,7 @@ import {
 	type GatewayPosture,
 	resolveGatewayPosture,
 } from "@/src/lib/api/gateway-posture.ts";
+import proofStyles from "./gateway-posture-doctor-proof.module.css";
 
 const BASELINE = {
 	enabled: true,
@@ -27,18 +56,6 @@ const DOCTOR_CHECKS = [
 	["connectivity", "Provider and classifier availability"],
 	["coverage", "Core approvals and agent egress routing"],
 ] as const;
-
-const colors = {
-	background: "#09090b",
-	panel: "#111113",
-	panelRaised: "#18181b",
-	border: "#27272a",
-	muted: "#a1a1aa",
-	text: "#f4f4f5",
-	accent: "#c4b5fd",
-	green: "#86efac",
-	amber: "#fcd34d",
-};
 
 function GatewayPostureDoctorProof() {
 	const [index, setIndex] = useState(1);
@@ -65,109 +82,46 @@ function GatewayPostureDoctorProof() {
 	const doctorHealthy = doctorState === "healthy";
 
 	return (
-		<main
-			style={{
-				background: colors.background,
-				boxSizing: "border-box",
-				color: colors.text,
-				fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-				minHeight: "100vh",
-				padding: "36px 24px 52px",
-			}}
-		>
-			<div style={{ margin: "0 auto", maxWidth: 980 }}>
-				<header
-					style={{
-						alignItems: "start",
-						display: "flex",
-						gap: 20,
-						justifyContent: "space-between",
-						marginBottom: 28,
-					}}
-				>
+		<main className={proofStyles.fixture1}>
+			<div className={proofStyles.fixture2}>
+				<header className={proofStyles.fixture3}>
 					<div>
-						<div
-							style={{ color: colors.accent, fontSize: 12, letterSpacing: 1.4 }}
-						>
-							RYU · LIVE REACT PROOF
-						</div>
-						<h1
-							style={{ fontSize: 34, letterSpacing: -1.2, margin: "7px 0 0" }}
-						>
-							Gateway posture + Doctor
-						</h1>
-						<p
-							style={{
-								color: colors.muted,
-								fontSize: 16,
-								lineHeight: 1.55,
-								margin: "12px 0 0",
-								maxWidth: 700,
-							}}
-						>
+						<div className={proofStyles.fixture4}>RYU · LIVE REACT PROOF</div>
+						<h1 className={proofStyles.fixture5}>Gateway posture + Doctor</h1>
+						<p className={proofStyles.fixture6}>
 							One detented slider coordinates Gateway guardrails with Core
 							approvals; Doctor makes configuration, security, performance, and
 							coverage gaps visible.
 						</p>
 					</div>
-					<div
-						data-testid="proof-status"
-						style={{
-							background: "#123022",
-							border: "1px solid #245c3e",
-							borderRadius: 999,
-							color: colors.green,
-							fontSize: 11,
-							fontWeight: 800,
-							letterSpacing: 1,
-							padding: "9px 12px",
-							whiteSpace: "nowrap",
-						}}
-					>
+					<div className={proofStyles.fixture7} data-testid="proof-status">
 						VERIFIED
 					</div>
 				</header>
 
 				<section
 					aria-label="Safety posture preview"
-					style={{
-						background: colors.panel,
-						border: `1px solid ${colors.border}`,
-						borderRadius: 18,
-						padding: 24,
-					}}
+					className={proofStyles.fixture8}
 				>
-					<div
-						style={{
-							alignItems: "start",
-							display: "flex",
-							gap: 16,
-							justifyContent: "space-between",
-						}}
-					>
+					<div className={proofStyles.fixture9}>
 						<div>
-							<div
-								style={{ color: colors.muted, fontSize: 12, letterSpacing: 1 }}
-							>
-								SAFETY POSTURE
-							</div>
+							<div className={proofStyles.fixture10}>SAFETY POSTURE</div>
 							<h2
+								className={proofStyles.fixture11}
 								data-testid="selected-posture"
-								style={{ fontSize: 25, margin: "6px 0 0" }}
 							>
 								{selected.label}
 							</h2>
-							<p
-								style={{ color: colors.muted, fontSize: 14, margin: "7px 0 0" }}
-							>
-								{selected.description}
-							</p>
+							<p className={proofStyles.fixture12}>{selected.description}</p>
 						</div>
 						<div
+							className={proofStyles.dynamicFixture1}
 							data-testid="applied-posture"
 							style={{
-								color: isApplied ? colors.green : colors.amber,
-								fontSize: 13,
+								"--fixture-value-1": isApplied
+									? "var(--gateway-posture-doctor-proof-color-1)"
+									: "var(--gateway-posture-doctor-proof-color-2)",
+								"--fixture-value-2": "13px",
 							}}
 						>
 							{isApplied
@@ -176,35 +130,31 @@ function GatewayPostureDoctorProof() {
 						</div>
 					</div>
 
-					<div style={{ marginTop: 24 }}>
+					<div className={proofStyles.fixture13}>
 						<input
 							aria-label="Gateway safety posture"
+							className={proofStyles.fixture14}
 							data-testid="posture-slider"
 							max={2}
 							min={0}
 							onChange={(event) => setIndex(Number(event.target.value))}
 							step={1}
-							style={{ accentColor: colors.accent, width: "100%" }}
 							type="range"
 							value={index}
 						/>
-						<div
-							style={{
-								display: "flex",
-								justifyContent: "space-between",
-								marginTop: 8,
-							}}
-						>
+						<div className={proofStyles.fixture15}>
 							{GATEWAY_POSTURE_OPTIONS.map((option) => (
 								<span
+									className={proofStyles.dynamicFixture2}
 									key={option.level}
 									style={{
-										color:
+										"--fixture-value-3":
 											option.level === selected.level
-												? colors.text
-												: colors.muted,
-										fontSize: 12,
-										fontWeight: option.level === selected.level ? 700 : 400,
+												? "var(--gateway-posture-doctor-proof-color-3)"
+												: "var(--gateway-posture-doctor-proof-color-4)",
+										"--fixture-value-4": "12px",
+										"--fixture-value-5":
+											option.level === selected.level ? 700 : 400,
 									}}
 								>
 									{option.label}
@@ -213,82 +163,48 @@ function GatewayPostureDoctorProof() {
 						</div>
 					</div>
 
-					<div
-						style={{
-							display: "grid",
-							gap: 10,
-							gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-							marginTop: 22,
-						}}
-					>
-						<div
-							data-testid="gateway-policy"
-							style={{
-								background: colors.panelRaised,
-								borderRadius: 10,
-								padding: 13,
-							}}
-						>
-							<div style={{ color: colors.muted, fontSize: 11 }}>
-								GATEWAY DETECTIONS
-							</div>
-							<strong style={{ display: "block", fontSize: 17, marginTop: 5 }}>
+					<div className={proofStyles.fixture16}>
+						<div className={proofStyles.fixture17} data-testid="gateway-policy">
+							<div className={proofStyles.fixture18}>GATEWAY DETECTIONS</div>
+							<strong className={proofStyles.fixture19}>
 								{preview.firewall.policy}
 							</strong>
 						</div>
-						<div
-							data-testid="core-approval"
-							style={{
-								background: colors.panelRaised,
-								borderRadius: 10,
-								padding: 13,
-							}}
-						>
-							<div style={{ color: colors.muted, fontSize: 11 }}>
-								CORE APPROVALS
-							</div>
-							<strong style={{ display: "block", fontSize: 17, marginTop: 5 }}>
+						<div className={proofStyles.fixture20} data-testid="core-approval">
+							<div className={proofStyles.fixture21}>CORE APPROVALS</div>
+							<strong className={proofStyles.fixture22}>
 								{preview.approval}
 							</strong>
 						</div>
-						<div
-							style={{
-								background: colors.panelRaised,
-								borderRadius: 10,
-								padding: 13,
-							}}
-						>
-							<div style={{ color: colors.muted, fontSize: 11 }}>
-								RESOLVED STATE
-							</div>
+						<div className={proofStyles.fixture23}>
+							<div className={proofStyles.fixture24}>RESOLVED STATE</div>
 							<strong
+								className={proofStyles.fixture25}
 								data-testid="resolved-posture"
-								style={{ display: "block", fontSize: 17, marginTop: 5 }}
 							>
 								{preview.resolved}
 							</strong>
 						</div>
 					</div>
 
-					<div
-						style={{
-							display: "flex",
-							justifyContent: "flex-end",
-							marginTop: 22,
-						}}
-					>
+					<div className={proofStyles.fixture26}>
 						<button
+							className={proofStyles.dynamicFixture3}
 							data-testid="apply-posture"
 							disabled={isApplied}
 							onClick={() => setApplied(selected.level)}
 							style={{
-								background: isApplied ? colors.panelRaised : colors.accent,
-								border: 0,
-								borderRadius: 9,
-								color: isApplied ? colors.muted : "#17131f",
-								cursor: isApplied ? "default" : "pointer",
-								fontWeight: 700,
-								padding: "10px 15px",
+								"--fixture-value-6": isApplied
+									? "var(--gateway-posture-doctor-proof-color-5)"
+									: "var(--gateway-posture-doctor-proof-color-6)",
+								"--fixture-value-7": 0,
+								"--fixture-value-8": "9px",
+								"--fixture-value-9": isApplied
+									? "var(--gateway-posture-doctor-proof-color-4)"
+									: "var(--gateway-posture-doctor-proof-color-7)",
+								"--fixture-value-10": isApplied ? "default" : "pointer",
+								"--fixture-value-11": 700,
+								"--fixture-value-12": "10px 15px",
 							}}
 						>
 							{isApplied ? "Applied" : "Apply posture"}
@@ -296,38 +212,22 @@ function GatewayPostureDoctorProof() {
 					</div>
 				</section>
 
-				<section
-					aria-label="Doctor report"
-					style={{
-						background: colors.panel,
-						border: `1px solid ${colors.border}`,
-						borderRadius: 18,
-						marginTop: 18,
-						padding: 24,
-					}}
-				>
-					<div
-						style={{
-							alignItems: "center",
-							display: "flex",
-							justifyContent: "space-between",
-						}}
-					>
+				<section aria-label="Doctor report" className={proofStyles.fixture27}>
+					<div className={proofStyles.fixture28}>
 						<div>
-							<div
-								style={{ color: colors.muted, fontSize: 12, letterSpacing: 1 }}
-							>
-								DOCTOR
-							</div>
-							<h2 style={{ fontSize: 22, margin: "6px 0 0" }}>
+							<div className={proofStyles.fixture29}>DOCTOR</div>
+							<h2 className={proofStyles.fixture30}>
 								Doctor audit + safe fixes
 							</h2>
 						</div>
 						<div
+							className={proofStyles.dynamicFixture4}
 							data-testid="doctor-summary"
 							style={{
-								color: doctorHealthy ? colors.green : colors.amber,
-								fontSize: 13,
+								"--fixture-value-13": doctorHealthy
+									? "var(--gateway-posture-doctor-proof-color-1)"
+									: "var(--gateway-posture-doctor-proof-color-2)",
+								"--fixture-value-14": "13px",
 							}}
 						>
 							{doctorHealthy
@@ -335,103 +235,66 @@ function GatewayPostureDoctorProof() {
 								: "0 errors · 1 warning · 5 check families"}
 						</div>
 					</div>
-					<div
-						style={{
-							alignItems: "center",
-							display: "flex",
-							gap: 10,
-							marginTop: 16,
-						}}
-					>
+					<div className={proofStyles.fixture31}>
 						<button
+							className={proofStyles.fixture32}
 							data-testid="doctor-run"
 							onClick={() => setDoctorRuns((runs) => runs + 1)}
-							style={{
-								background: colors.panelRaised,
-								border: `1px solid ${colors.border}`,
-								borderRadius: 9,
-								color: colors.text,
-								cursor: "pointer",
-								fontWeight: 700,
-								padding: "9px 13px",
-							}}
 						>
 							Run audit{doctorRuns > 0 ? ` · ${doctorRuns}` : ""}
 						</button>
 						{doctorHealthy || doctorPreview ? null : (
 							<button
+								className={proofStyles.fixture33}
 								data-testid="doctor-preview"
 								onClick={() => setDoctorPreview(true)}
-								style={{
-									background: colors.accent,
-									border: 0,
-									borderRadius: 9,
-									color: "#17131f",
-									cursor: "pointer",
-									fontWeight: 700,
-									padding: "9px 13px",
-								}}
 							>
 								Preview safe fixes
 							</button>
 						)}
 					</div>
-					<div
-						style={{
-							display: "grid",
-							gap: 10,
-							gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-							marginTop: 20,
-						}}
-					>
+					<div className={proofStyles.fixture34}>
 						{DOCTOR_CHECKS.map(([category, label]) => (
 							<div
+								className={proofStyles.fixture35}
 								data-testid={`doctor-${category}`}
 								key={category}
-								style={{
-									alignItems: "center",
-									background: colors.panelRaised,
-									borderRadius: 10,
-									display: "flex",
-									gap: 10,
-									padding: 12,
-								}}
 							>
 								<span
+									className={proofStyles.dynamicFixture5}
 									style={{
-										color:
+										"--fixture-value-15":
 											category === "security" && !doctorHealthy
-												? colors.amber
-												: colors.green,
-										fontSize: 18,
+												? "var(--gateway-posture-doctor-proof-color-2)"
+												: "var(--gateway-posture-doctor-proof-color-1)",
+										"--fixture-value-16": "18px",
 									}}
 								>
 									{category === "security" && !doctorHealthy ? "!" : "✓"}
 								</span>
 								<div>
-									<div
-										style={{
-											color: colors.muted,
-											fontSize: 11,
-											letterSpacing: 0.6,
-										}}
-									>
+									<div className={proofStyles.fixture36}>
 										{category.toUpperCase()}
 									</div>
-									<div style={{ fontSize: 13, marginTop: 3 }}>{label}</div>
+									<div className={proofStyles.fixture37}>{label}</div>
 								</div>
 							</div>
 						))}
 					</div>
 					<div
+						className={proofStyles.dynamicFixture6}
 						data-testid="doctor-safety-state"
 						style={{
-							background: doctorHealthy ? "#123022" : "#352a12",
-							borderRadius: 10,
-							color: doctorHealthy ? colors.green : colors.amber,
-							fontSize: 13,
-							marginTop: 16,
-							padding: "11px 13px",
+							"--fixture-value-17": doctorHealthy
+								? "var(--gateway-posture-doctor-proof-color-8)"
+								: "var(--gateway-posture-doctor-proof-color-9)",
+							"--fixture-value-18": "10px",
+							"--fixture-value-19": doctorHealthy
+								? "var(--gateway-posture-doctor-proof-color-1)"
+								: "var(--gateway-posture-doctor-proof-color-2)",
+							"--fixture-value-20": "13px",
+							"--fixture-value-21": "16px",
+							"--fixture-value-22": "11px 13px",
 						}}
 					>
 						{doctorHealthy
@@ -441,36 +304,17 @@ function GatewayPostureDoctorProof() {
 								: "At risk · safe redaction fix is available"}
 					</div>
 					{doctorPreview && !doctorHealthy ? (
-						<div
-							style={{
-								background: colors.panelRaised,
-								border: `1px solid ${colors.accent}`,
-								borderRadius: 10,
-								marginTop: 12,
-								padding: 14,
-							}}
-						>
-							<strong style={{ display: "block", fontSize: 14 }}>
-								Safe fix plan
-							</strong>
-							<div style={{ color: colors.muted, fontSize: 13, marginTop: 6 }}>
+						<div className={proofStyles.fixture38}>
+							<strong className={proofStyles.fixture39}>Safe fix plan</strong>
+							<div className={proofStyles.fixture40}>
 								Enable PII and secret redaction · idempotent · no restart
 							</div>
 							<button
+								className={proofStyles.fixture41}
 								data-testid="doctor-apply"
 								onClick={() => {
 									setDoctorState("healthy");
 									setDoctorPreview(false);
-								}}
-								style={{
-									background: colors.accent,
-									border: 0,
-									borderRadius: 9,
-									color: "#17131f",
-									cursor: "pointer",
-									fontWeight: 700,
-									marginTop: 12,
-									padding: "9px 13px",
 								}}
 							>
 								Apply safe fixes
@@ -478,31 +322,19 @@ function GatewayPostureDoctorProof() {
 						</div>
 					) : null}
 					{doctorHealthy ? (
-						<p
-							data-testid="doctor-applied"
-							style={{ color: colors.green, fontSize: 13, margin: "14px 0 0" }}
-						>
+						<p className={proofStyles.fixture42} data-testid="doctor-applied">
 							Applied 1 safe fix · report refreshed
 						</p>
 					) : null}
-					<p
-						style={{
-							color: colors.muted,
-							fontSize: 13,
-							lineHeight: 1.5,
-							margin: "18px 0 0",
-						}}
-					>
+					<p className={proofStyles.fixture43}>
 						The live implementation exposes the same report at
-						<code style={{ color: colors.text, marginLeft: 5 }}>
-							GET /v1/doctor
-						</code>{" "}
-						and
-						<code style={{ color: colors.text, marginLeft: 5 }}>
+						<code className={proofStyles.fixture44}>GET /v1/doctor</code>{" "}
+						{"and"}
+						<code className={proofStyles.fixture45}>
 							GET /api/gateway/doctor
 						</code>
 						and
-						<code style={{ color: colors.text, marginLeft: 5 }}>
+						<code className={proofStyles.fixture46}>
 							POST /api/gateway/doctor/fix · dryRun
 						</code>
 						.

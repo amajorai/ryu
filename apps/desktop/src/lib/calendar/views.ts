@@ -7,7 +7,10 @@
 // to render, the toolbar label, and how prev/next/today move the cursor.
 //
 // Windows are returned half-open as `[start, end)` so they line up directly with
-// `buildCalendarEvents(jobs, start, end)` in `./events`.
+// `buildCalendarEvents(jobs, start, end)` in `./events`. The cursor and the day
+// columns are civil dates (local-midnight `Date`s carrying only year, month and
+// day); the fetch window is the instants those dates begin at in the display
+// time zone, so a run is fetched for the day it is filed under.
 
 import {
 	addDays,
@@ -15,7 +18,6 @@ import {
 	addWeeks,
 	endOfMonth,
 	endOfWeek,
-	format,
 	startOfDay,
 	startOfMonth,
 	startOfWeek,
@@ -23,6 +25,8 @@ import {
 	subMonths,
 	subWeeks,
 } from "date-fns";
+import { calendarViewLabel } from "@/src/lib/calendar/date-labels.ts";
+import { displayDayStart } from "@/src/lib/calendar/display-days.ts";
 
 export type CalendarView = "month" | "week" | "day" | "agenda";
 
@@ -43,8 +47,8 @@ export interface ViewRange {
 	start: Date;
 }
 
-/** The `[start, end)` window of events a view needs for the given cursor. */
-export function viewRange(view: CalendarView, cursor: Date): ViewRange {
+/** The `[start, end)` civil dates a view shows for the given cursor. */
+function civilRange(view: CalendarView, cursor: Date): ViewRange {
 	switch (view) {
 		case "month": {
 			const start = startOfWeek(startOfMonth(cursor));
@@ -72,12 +76,21 @@ export function viewRange(view: CalendarView, cursor: Date): ViewRange {
 }
 
 /**
+ * The `[start, end)` window of events a view needs for the given cursor: the
+ * display-zone instants at which its first and last-plus-one civil days begin.
+ */
+export function viewRange(view: CalendarView, cursor: Date): ViewRange {
+	const { start, end } = civilRange(view, cursor);
+	return { start: displayDayStart(start), end: displayDayStart(end) };
+}
+
+/**
  * The day columns a view renders. Month returns its 6-week (42-cell) grid,
  * Week returns 7 days, Day returns 1, and Agenda returns its full span (so the
  * list can iterate day-by-day and skip empty ones).
  */
 export function viewDays(view: CalendarView, cursor: Date): Date[] {
-	const { start, end } = viewRange(view, cursor);
+	const { start, end } = civilRange(view, cursor);
 	const days: Date[] = [];
 	for (let d = start; d < end; d = addDays(d, 1)) {
 		days.push(d);
@@ -106,32 +119,12 @@ export function navigate(
 	}
 }
 
-/** Toolbar label describing the visible period for the current view. */
-export function viewLabel(view: CalendarView, cursor: Date): string {
-	switch (view) {
-		case "month":
-			return format(cursor, "MMMM yyyy");
-		case "week": {
-			const start = startOfWeek(cursor);
-			const end = endOfWeek(cursor);
-			const sameMonth = start.getMonth() === end.getMonth();
-			const sameYear = start.getFullYear() === end.getFullYear();
-			if (sameMonth) {
-				return `${format(start, "MMM d")} – ${format(end, "d, yyyy")}`;
-			}
-			if (sameYear) {
-				return `${format(start, "MMM d")} – ${format(end, "MMM d, yyyy")}`;
-			}
-			return `${format(start, "MMM d, yyyy")} – ${format(end, "MMM d, yyyy")}`;
-		}
-		case "day":
-			return format(cursor, "EEEE, MMMM d, yyyy");
-		case "agenda": {
-			const start = startOfDay(cursor);
-			const end = addDays(start, AGENDA_DAYS - 1);
-			return `${format(start, "MMM d")} – ${format(end, "MMM d, yyyy")}`;
-		}
-		default:
-			return format(cursor, "MMMM yyyy");
-	}
+/** Toolbar label describing the visible period for the current view, in
+ * `locale` (the active i18n locale) through Intl. */
+export function viewLabel(
+	view: CalendarView,
+	cursor: Date,
+	locale?: string
+): string {
+	return calendarViewLabel(view, cursor, AGENDA_DAYS, locale);
 }

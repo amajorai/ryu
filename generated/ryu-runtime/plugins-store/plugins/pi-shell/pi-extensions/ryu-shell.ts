@@ -161,7 +161,13 @@
 import { Buffer } from "node:buffer";
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import type {
@@ -169,7 +175,10 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { type Static, type TSchema, Type } from "typebox";
+import { Value } from "typebox/value";
+
+const SHELL_TEXT_INPUT = Type.String();
 
 /** Prefix on every stderr line so Core's `acp_subprocess` log is greppable. */
 const LOG_PREFIX = "[ryu-shell]";
@@ -363,11 +372,6 @@ let controlPollInFlight = false;
 
 // ── Small helpers ───────────────────────────────────────────────────────────
 
-/** Message of a thrown value, without assuming it is an Error. */
-function errorText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
-
 /**
  * The reason channel. Visible when Pi is run standalone; DISCARDED under Ryu,
  * because pi-acp sinks its child's stderr into a no-op handler (see the
@@ -382,8 +386,7 @@ function log(message: string): void {
 	}
 }
 
-function backgroundProcessId(shellOrId: BackgroundShell | string): string {
-	const shellId = typeof shellOrId === "string" ? shellOrId : shellOrId.id;
+function backgroundProcessId(shellId: BackgroundShell["id"]): string {
 	return `${process.pid}:${shellId}`;
 }
 
@@ -392,11 +395,24 @@ function coreUrl(): string | undefined {
 	return raw ? raw.replace(/\/+$/, "") : undefined;
 }
 
-async function coreBackgroundRequest<T>(
+// Actual Core publishers return JSON objects; the control publisher emits
+// StopRequest.process_id and reason as strings. Admission occurs at fetch I/O.
+const CORE_BACKGROUND_ACK = Type.Object({});
+const CORE_BACKGROUND_CONTROL = Type.Object({
+	stops: Type.Array(
+		Type.Object({
+			process_id: Type.String(),
+			reason: Type.String(),
+		})
+	),
+});
+
+async function coreBackgroundRequest<Schema extends TSchema>(
 	requestPath: string,
 	init: RequestInit,
+	schema: Schema,
 	quiet = false
-): Promise<T | undefined> {
+): Promise<Static<Schema> | undefined> {
 	const base = coreUrl();
 	if (!base) {
 		return undefined;
@@ -419,11 +435,15 @@ async function coreBackgroundRequest<T>(
 		if (!response.ok) {
 			throw new Error(`${response.status} ${response.statusText}`);
 		}
-		return (await response.json()) as T;
+		const data = await response.json();
+		if (!Value.Check(schema, data)) {
+			throw new Error("Core background bridge returned an invalid response");
+		}
+		return data;
 	} catch (error) {
 		if (!quiet) {
 			log(
-				`Core background bridge ${requestPath} failed (${errorText(error)}).`
+				`Core background bridge ${requestPath} failed (${error instanceof Error ? error.message : String(error)}).`
 			);
 		}
 		return undefined;
@@ -433,7 +453,7 @@ async function coreBackgroundRequest<T>(
 function backgroundProcessSnapshot(shell: BackgroundShell) {
 	const exit = shell.exit;
 	return {
-		process_id: backgroundProcessId(shell),
+		process_id: backgroundProcessId(shell.id),
 		shell_id: shell.id,
 		producer: BACKGROUND_PRODUCER,
 		kind: "shell",
@@ -457,6 +477,7 @@ async function publishBackgroundProcess(shell: BackgroundShell): Promise<void> {
 			body: JSON.stringify({ process: backgroundProcessSnapshot(shell) }),
 			method: "POST",
 		},
+		CORE_BACKGROUND_ACK,
 		true
 	);
 }
@@ -465,6 +486,7 @@ async function releaseBackgroundProcess(processId: string): Promise<void> {
 	await coreBackgroundRequest(
 		"/api/background/processes/release",
 		{ body: JSON.stringify({ process_id: processId }), method: "POST" },
+		CORE_BACKGROUND_ACK,
 		true
 	);
 }
@@ -487,25 +509,21 @@ async function pollStopRequests(): Promise<void> {
 	}
 	controlPollInFlight = true;
 	await Promise.all(live.map((shell) => publishBackgroundProcess(shell)));
-	const response = await coreBackgroundRequest<{
-		stops?: Array<{ process_id?: string; reason?: string }>;
-	}>(
+	const response = await coreBackgroundRequest(
 		"/api/background/processes/control",
 		{
 			body: JSON.stringify({
-				process_ids: live.map((shell) => backgroundProcessId(shell)),
+				process_ids: live.map((shell) => backgroundProcessId(shell.id)),
 			}),
 			method: "POST",
 		},
+		CORE_BACKGROUND_CONTROL,
 		true
 	);
 	controlPollInFlight = false;
 	for (const stop of response?.stops ?? []) {
-		if (typeof stop.process_id !== "string") {
-			continue;
-		}
 		const shell = live.find(
-			(candidate) => backgroundProcessId(candidate) === stop.process_id
+			(candidate) => backgroundProcessId(candidate.id) === stop.process_id
 		);
 		if (shell && isLive(shell)) {
 			await terminate(shell, stop.reason?.trim() || "stopped from Ryu");
@@ -679,6 +697,88 @@ function ledgerPath(): string | undefined {
 	return ledgerDir ? path.join(ledgerDir, LEDGER_FILE) : undefined;
 }
 
+// Admission of persisted JSON uses the actual shipping ShellRecord fields.
+// Invalid advisory ledgers follow the existing logged-empty fallback.
+const SHELL_LEDGER_INPUT = Type.Object({
+	shells: Type.Optional(
+		Type.Record(
+			Type.String(),
+			Type.Object({
+				code: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+				command: Type.String(),
+				cwd: Type.String(),
+				description: Type.Optional(Type.String()),
+				finished_at: Type.Optional(Type.Number()),
+				pid: Type.Optional(Type.Number()),
+				process_pid: Type.Number(),
+				reason: Type.Optional(Type.String()),
+				signal: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+				started_at: Type.Number(),
+				status: Type.Union([
+					Type.Literal("running"),
+					Type.Literal("finished"),
+					Type.Literal("stopped"),
+				]),
+			})
+		)
+	),
+});
+
+/** Longest command preview kept in the ledger; the rest is dropped. */
+const LEDGER_COMMAND_MAX_CHARS = 400;
+
+const LEDGER_REDACTED = "[redacted]";
+
+/**
+ * Credential-shaped fragments of a command line, each with the replacement that
+ * keeps the shape readable. Order matters: header and URL forms run before the
+ * generic flag form so a `-H 'Authorization: Bearer …'` loses its value once.
+ */
+const LEDGER_SECRET_PATTERNS: readonly [RegExp, string][] = [
+	// `Authorization: Bearer …`, `x-api-key: …`, `Cookie: …` (curl -H, httpie).
+	[
+		/\b(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|x-ryu-node-token|cookie)(\s*[:=]\s*)[^'"\n]+/gi,
+		`$1$2${LEDGER_REDACTED}`,
+	],
+	// A bare `Bearer …` / `Basic …` scheme anywhere else.
+	[
+		/\b(bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+		`$1 ${LEDGER_REDACTED}`,
+	],
+	// URL user-info: `https://user:pass@host`.
+	[/(\b[a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, `$1${LEDGER_REDACTED}@`],
+	// Inline env assignments whose NAME says secret: `OPENAI_API_KEY=… cmd`.
+	[
+		/\b([A-Za-z_][A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PWD|AUTH|CREDENTIALS?|COOKIE)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi,
+		`$1=${LEDGER_REDACTED}`,
+	],
+	// Flags whose name says secret: `--token abc`, `--password=abc`, `-p abc` is left alone.
+	[
+		/(--?(?:[a-z0-9]+-)*(?:token|password|passwd|secret|api-?key|auth|key|credentials?|cookie)(?:\s+|=))("[^"]*"|'[^']*'|\S+)/gi,
+		`$1${LEDGER_REDACTED}`,
+	],
+	// curl/wget basic-auth: `-u user:pass`, `--user user:pass`.
+	[/(\s-u\s+|--user[=\s]+)\S+:\S+/g, `$1${LEDGER_REDACTED}`],
+];
+
+/**
+ * The command as the ledger keeps it. The ledger outlives the conversation and
+ * is read back only to tell a restarted agent which shell it lost, so it keeps
+ * a credential-redacted, length-capped preview, never the exact command line
+ * (which often carries `API_KEY=… npm run dev` or a bearer header). Exported for
+ * tests.
+ */
+export function redactLedgerCommand(command: string): string {
+	let redacted = command;
+	for (const [pattern, replacement] of LEDGER_SECRET_PATTERNS) {
+		redacted = redacted.replace(pattern, replacement);
+	}
+	if (redacted.length > LEDGER_COMMAND_MAX_CHARS) {
+		redacted = `${redacted.slice(0, LEDGER_COMMAND_MAX_CHARS)}…`;
+	}
+	return redacted;
+}
+
 /** Read the ledger. Any failure yields an empty ledger — the file is advisory. */
 function loadLedger(): ShellLedger {
 	const file = ledgerPath();
@@ -689,12 +789,21 @@ function loadLedger(): ShellLedger {
 		if (!existsSync(file)) {
 			return { version: 1, shells: {} };
 		}
-		const parsed = JSON.parse(
-			readFileSync(file, "utf8")
-		) as Partial<ShellLedger>;
-		return { version: 1, shells: parsed.shells ?? {} };
+		const parsed = JSON.parse(readFileSync(file, "utf8"));
+		if (!Value.Check(SHELL_LEDGER_INPUT, parsed)) {
+			throw new Error("invalid background shell ledger");
+		}
+		const shells = parsed.shells ?? {};
+		// Ledgers written before redaction carried the raw command; the next
+		// save writes the redacted preview back (lazy migration).
+		for (const rec of Object.values(shells)) {
+			rec.command = redactLedgerCommand(rec.command);
+		}
+		return { version: 1, shells };
 	} catch (err) {
-		log(`ledger read failed (${errorText(err)}); treating as empty.`);
+		log(
+			`ledger read failed (${err instanceof Error ? err.message : String(err)}); treating as empty.`
+		);
 		return { version: 1, shells: {} };
 	}
 }
@@ -707,10 +816,15 @@ function saveLedger(ledger: ShellLedger): void {
 	}
 	try {
 		mkdirSync(path.dirname(file), { recursive: true });
-		writeFileSync(file, JSON.stringify(ledger, null, "\t"));
+		// Owner-only: the preview is redacted, but cwd and descriptions are still
+		// the user's. `mode` applies only on create, so tighten an older file too.
+		writeFileSync(file, JSON.stringify(ledger, null, "\t"), { mode: 0o600 });
+		if (process.platform !== "win32") {
+			chmodSync(file, 0o600);
+		}
 	} catch (err) {
 		log(
-			`ledger write failed (${errorText(err)}); shell state will not survive a restart.`
+			`ledger write failed (${err instanceof Error ? err.message : String(err)}); shell state will not survive a restart.`
 		);
 	}
 }
@@ -727,7 +841,9 @@ function updateLedger(mutate: (ledger: ShellLedger) => void): void {
 	try {
 		mutate(ledger);
 	} catch (err) {
-		log(`ledger update failed (${errorText(err)}).`);
+		log(
+			`ledger update failed (${err instanceof Error ? err.message : String(err)}).`
+		);
 		return;
 	}
 	saveLedger(ledger);
@@ -774,7 +890,7 @@ function recordStarted(shell: BackgroundShell): void {
 		updateLedger((ledger) => {
 			pruneLedger(ledger);
 			ledger.shells[shell.id] = {
-				command: shell.command,
+				command: redactLedgerCommand(shell.command),
 				cwd: shell.cwd,
 				description: shell.description,
 				pid: shell.pid,
@@ -925,7 +1041,9 @@ function notifyOrphans(
 			timestamp: Date.now(),
 		});
 	} catch (err) {
-		log(`could not inject the restart notice (${errorText(err)}).`);
+		log(
+			`could not inject the restart notice (${err instanceof Error ? err.message : String(err)}).`
+		);
 	}
 }
 
@@ -940,10 +1058,10 @@ function clearTtl(shell: BackgroundShell): void {
 }
 
 /**
- * Record the end of a shell exactly once. Called from both `exit` and `error`,
- * either of which may arrive first, so the first writer wins and the second is a
- * no-op — otherwise a spawn failure followed by an exit would overwrite the
- * useful reason with a bare code.
+ * Record the end of a shell exactly once. Natural completion waits for `close`
+ * so stdout and stderr have drained before the shell becomes collectable. A
+ * spawn `error` can arrive first, so the first writer wins and the later close
+ * event is a no-op instead of overwriting the useful reason with a bare code.
  */
 function finish(shell: BackgroundShell, exit: ShellExit): void {
 	clearTtl(shell);
@@ -985,36 +1103,42 @@ function terminate(
 	if (!(child && isLive(shell))) {
 		return Promise.resolve();
 	}
-	// Recorded BEFORE the signal, because `spawnShell`'s persistent `exit`
-	// listener fires ahead of the one installed below and would otherwise finish
-	// the shell with no explanation at all.
+	// Recorded before the signal so the persistent close listener and the
+	// cancellation waiter both preserve the caller's explanation.
 	shell.pendingReason = reason;
-	if (child.exitCode !== null || child.signalCode !== null) {
-		finish(shell, { code: child.exitCode, signal: child.signalCode, reason });
-		return Promise.resolve();
-	}
+	const alreadyExited = child.exitCode !== null || child.signalCode !== null;
 	return new Promise<void>((resolve) => {
+		let settled = false;
+		const complete = (
+			code: number | null,
+			signal: NodeJS.Signals | null,
+			completionReason = reason
+		) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearTimeout(grace);
+			finish(shell, { code, signal, reason: completionReason });
+			resolve();
+		};
 		const grace = setTimeout(() => {
 			try {
 				child.kill("SIGKILL");
 			} catch {
 				// Already reaped between the deadline firing and this call.
 			}
-			finish(shell, { code: null, signal: "SIGKILL", reason });
-			resolve();
+			complete(null, "SIGKILL");
 		}, TERM_GRACE_MS);
 		grace.unref?.();
-		child.once("exit", (code, signal) => {
-			clearTimeout(grace);
-			finish(shell, { code, signal, reason });
-			resolve();
-		});
+		child.once("close", complete);
+		if (alreadyExited) {
+			return;
+		}
 		try {
 			child.kill("SIGTERM");
 		} catch (err) {
-			clearTimeout(grace);
-			finish(shell, { code: null, signal: null, reason: errorText(err) });
-			resolve();
+			complete(null, null, err instanceof Error ? err.message : String(err));
 		}
 	});
 }
@@ -1030,11 +1154,18 @@ async function stopAllShells(reason: string): Promise<void> {
 	const entries = [...shells.values()];
 	shells = new Map();
 	await Promise.all(
-		entries.map((shell) =>
-			terminate(shell, reason).catch((err: unknown) => {
-				log(`${shell.id}: teardown failed (${errorText(err)}).`);
-			})
-		)
+		entries.map((shell) => {
+			const pending = terminate(shell, reason);
+			return (async () => {
+				try {
+					await pending;
+				} catch (err) {
+					log(
+						`${shell.id}: teardown failed (${err instanceof Error ? err.message : String(err)}).`
+					);
+				}
+			})();
+		})
 	);
 }
 
@@ -1160,10 +1291,17 @@ function startShell(shell: BackgroundShell, cwd: string): BackgroundShell {
 	// A spawn failure (bad cwd, no shell) surfaces asynchronously and would
 	// otherwise be an unhandled 'error' event, which is fatal to the Pi process.
 	child.on("error", (err) => {
-		appendChunk(shell, `${LOG_PREFIX} spawn failed: ${errorText(err)}\n`);
-		finish(shell, { code: null, signal: null, reason: errorText(err) });
+		appendChunk(
+			shell,
+			`${LOG_PREFIX} spawn failed: ${err instanceof Error ? err.message : String(err)}\n`
+		);
+		finish(shell, {
+			code: null,
+			signal: null,
+			reason: err instanceof Error ? err.message : String(err),
+		});
 	});
-	child.on("exit", (code, signal) => {
+	child.on("close", (code, signal) => {
 		finish(shell, { code, signal });
 	});
 
@@ -1192,8 +1330,11 @@ function startShell(shell: BackgroundShell, cwd: string): BackgroundShell {
  * async 'error' event, so `bash_background` would report success for a shell
  * that never ran and the model would poll a corpse.
  */
-async function resolveCwd(raw: unknown, sessionCwd: string): Promise<string> {
-	const requested = typeof raw === "string" ? raw.trim() : "";
+async function resolveCwd<Input>(
+	raw: Input,
+	sessionCwd: string
+): Promise<string> {
+	const requested = Value.Check(SHELL_TEXT_INPUT, raw) ? raw.trim() : "";
 	if (!requested) {
 		return sessionCwd;
 	}
@@ -1232,8 +1373,8 @@ function shellDetails(shell: BackgroundShell, drainedChars: number) {
  * `isError` and shows the model the reason, which is exactly what it needs to
  * recover from a stale or invented id.
  */
-function requireShell(raw: unknown): BackgroundShell {
-	const id = typeof raw === "string" ? raw.trim() : "";
+function requireShell<Input>(raw: Input): BackgroundShell {
+	const id = Value.Check(SHELL_TEXT_INPUT, raw) ? raw.trim() : "";
 	const shell = id ? shells.get(id) : undefined;
 	if (!shell) {
 		// Not in this process's registry. Before declaring it unknown, consult the
@@ -1349,10 +1490,9 @@ export default function (pi: ExtensionAPI) {
 			if (!command) {
 				throw new Error("bash_background: `command` is required.");
 			}
-			const description =
-				typeof params?.description === "string"
-					? params.description.trim() || undefined
-					: undefined;
+			const description = Value.Check(SHELL_TEXT_INPUT, params?.description)
+				? params.description.trim() || undefined
+				: undefined;
 			// The cap check and the registration happen together, with NO `await`
 			// between them — Pi runs a message's tool calls concurrently, so a
 			// check-then-await-then-register would let a whole batch past a cap none

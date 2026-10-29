@@ -1,0 +1,57 @@
+.surface {
+	color: var(--color-slate-100);
+	background-color: #0b0f14;
+}
+.muted {
+	color: var(--color-slate-400);
+}
+.secondary {
+	color: var(--color-slate-300);
+}
+.emptyActivity {
+	color: var(--color-slate-500);
+}
+.eyebrow {
+	color: var(--color-slate-400);
+	letter-spacing: 0.18em;
+}
+.openState {
+	color: var(--color-emerald-200);
+	background-color: color-mix(
+		in oklab,
+		var(--color-emerald-400) 15%,
+		transparent
+	);
+}
+.closedState {
+	color: var(--color-slate-300);
+	background-color: color-mix(
+		in oklab,
+		var(--color-slate-400) 15%,
+		transparent
+	);
+}
+.pendingState {
+	color: var(--color-amber-200);
+	background-color: color-mix(
+		in oklab,
+		var(--color-amber-400) 15%,
+		transparent
+	);
+}
+.activeTab {
+	background-color: color-mix(in oklab, var(--color-cyan-300) 10%, transparent);
+	border-color: color-mix(in oklab, var(--color-cyan-300) 70%, transparent);
+}
+.selection {
+	color: var(--color-cyan-200);
+}
+.saveButton {
+	color: #071017;
+	background-color: var(--color-cyan-300);
+}
+@media (hover: hover) {
+	.saveButton:hover {
+		background-color: var(--color-cyan-200);
+	}
+}

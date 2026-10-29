@@ -2,7 +2,8 @@
 //
 // The Integrations Store tab: a brand-first front door. One card per service
 // (Notion, Slack, GitHub, …), merged by Core from the integrations.sh directory,
-// Composio's toolkit catalog, and Treg's public platform catalog. Selecting a
+// Composio's toolkit catalog, and the public tool catalogs (Ryu's own and
+// Treg's, each row labelled by source). Selecting a
 // brand opens a preview that gathers
 // everything which connects to it — Skills, MCP servers, Plugins, Agents — by
 // running the store-wide search for the brand name and grouping the hits per
@@ -37,8 +38,8 @@ import {
 import ImportToolsAction from "@ryu/marketplace/catalog/import-tools-action";
 import { REALM_ICONS } from "@ryu/marketplace/catalog/realm-icons";
 import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { ContextMenuItem } from "@ryu/ui/components/context-menu.tsx";
 import {
 	Empty,
@@ -47,10 +48,18 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/empty.tsx";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@ryu/ui/components/select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { useQuery } from "@tanstack/react-query";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useIntegrationsCatalog } from "@/src/hooks/useIntegrationsCatalog.ts";
@@ -61,26 +70,32 @@ import {
 import type {
 	IntegrationBrand,
 	IntegrationOption,
+	IntegrationProviderPin,
 } from "@/src/lib/api/integrations.ts";
-import { fetchIntegration } from "@/src/lib/api/integrations.ts";
+import {
+	fetchIntegration,
+	setIntegrationProviderPin,
+} from "@/src/lib/api/integrations.ts";
+import { providerOptionPrice } from "@/src/lib/integration-price.ts";
 
 /** Which catalog surfaced a brand, as a small chip on the preview. */
-const SOURCE_LABELS: Record<string, string> = {
-	directory: "Directory",
-	composio: "Composio",
-	treg: "Treg",
-};
+const SOURCE_LABELS = new Map<string, string>([
+	["directory", "Directory"],
+	["composio", "Composio"],
+	["treg", "Treg"],
+	["ryu", "Ryu catalog"],
+]);
 
 /** Fallback labels for normalized catalog kinds that do not have a dedicated
  * provider-specific label. */
-const KIND_LABELS: Record<string, string> = {
-	api: "REST API",
-	cli: "CLI",
-	graphql: "GraphQL",
-	mcp: "MCP",
-	openapi: "REST API",
-	rest: "REST",
-};
+const KIND_LABELS = new Map<string, string>([
+	["api", "REST API"],
+	["cli", "CLI"],
+	["graphql", "GraphQL"],
+	["mcp", "MCP"],
+	["openapi", "REST API"],
+	["rest", "REST"],
+]);
 
 /** Most-actionable kind first, so a brand whose one MCP entry sits behind twenty
  *  OpenAPI ones still leads with the one-click install. */
@@ -92,11 +107,39 @@ const OPTION_ACTION_ORDER = [
 	"chat-setup",
 ];
 
-/** How many connection rows to render before collapsing the tail into a count.
- *  A few multi-service API brands carry a long record list, and the preview is a
- *  preview — the realm tabs below are where you go for depth. */
+/** Managed-provider order: direct records first, then the tool catalogs
+ *  (Treg, billed at provider cost, and Ryu's own), then Composio as the
+ *  fallback. Core's `rank_managed_providers` applies the user's per-app pin
+ *  through `providerRole`, which wins over this default. */
+const PROVIDER_TIER = new Map<string, number>([
+	["treg", 1],
+	["ryu", 1],
+	["composio", 2],
+]);
+
+function managedRank(option: IntegrationOption): number {
+	const tier = PROVIDER_TIER.get(option.source);
+	if (tier === undefined) {
+		return 0;
+	}
+	if (option.providerRole === "primary") {
+		return 1;
+	}
+	if (option.providerRole === "alternative") {
+		return 2;
+	}
+	return tier;
+}
+
+/** The per-app managed-source choice: follow Ryu's suggestion, or pin one. */
+const AUTO_SOURCE = "auto";
+
 function orderedOptions(options: IntegrationOption[]): IntegrationOption[] {
 	return [...options].sort((a, b) => {
+		const tierDelta = managedRank(a) - managedRank(b);
+		if (tierDelta !== 0) {
+			return tierDelta;
+		}
 		const rank = (option: IntegrationOption) => {
 			const index = OPTION_ACTION_ORDER.indexOf(option.action);
 			return index === -1 ? OPTION_ACTION_ORDER.length : index;
@@ -237,11 +280,7 @@ function IntegrationList({
 	}
 
 	if (loading && integrations.length === 0) {
-		return (
-			<div className="flex h-40 items-center justify-center">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows spacing="spacious" />;
 	}
 
 	if (integrations.length === 0) {
@@ -331,6 +370,9 @@ function IntegrationDetailPanel({
 		detailBrand.name
 	);
 	const options = orderedOptions(detailBrand.options ?? []);
+	const offersBothManaged =
+		options.some((option) => option.providerRole === "primary") &&
+		options.some((option) => option.providerRole === "alternative");
 
 	const domainHref = detailBrand.domain
 		? safeHttpUrl(`https://${detailBrand.domain}`)
@@ -361,7 +403,7 @@ function IntegrationDetailPanel({
 								{
 									label: "Directories",
 									value: detailBrand.sources
-										.map((s) => SOURCE_LABELS[s] ?? s)
+										.map((s) => SOURCE_LABELS.get(s) ?? s)
 										.join(", "),
 								},
 								{
@@ -371,15 +413,14 @@ function IntegrationDetailPanel({
 							]}
 						/>
 					</ListingAsideCard>
+					{offersBothManaged ? (
+						<ManagedSourcePicker brand={detailBrand} target={target} />
+					) : null}
 					{detailBrand.categories.length > 0 ? (
 						<ListingAsideCard title="Categories">
 							<div className="flex flex-wrap gap-1">
 								{detailBrand.categories.map((c) => (
-									<Badge
-										className="font-normal text-xs"
-										key={c}
-										variant="outline"
-									>
+									<Badge key={c} typography="normal" variant="outline">
 										{c}
 									</Badge>
 								))}
@@ -390,14 +431,14 @@ function IntegrationDetailPanel({
 			}
 			hero={
 				<ListingHero
-					badges={detailBrand.sources.map((s) => SOURCE_LABELS[s] ?? s)}
+					badges={detailBrand.sources.map((s) => SOURCE_LABELS.get(s) ?? s)}
 					icon={
 						detailBrand.logo ? (
 							<img
 								alt=""
 								className="size-full object-cover"
 								loading="lazy"
-								src={detailBrand.logo}
+								src={safeMediaUrl(detailBrand.logo) ?? undefined}
 							/>
 						) : (
 							<HugeiconsIcon className="size-8" icon={REALM_ICONS.plugins} />
@@ -434,12 +475,6 @@ function IntegrationDetailPanel({
 		>
 			{options.length > 0 ? (
 				<ListingSection title="Integration options">
-					{detailQuery.isFetching ? (
-						<div className="mb-2 flex items-center gap-2 text-muted-foreground text-xs">
-							<Spinner className="size-3.5" />
-							Refreshing provider options…
-						</div>
-					) : null}
 					<div className="flex max-h-96 flex-col gap-1.5 overflow-y-auto pr-1">
 						{options.map((option) => (
 							<ProviderOptionRow
@@ -461,11 +496,7 @@ function IntegrationDetailPanel({
 			) : null}
 
 			<ListingSection title="Related in the catalog">
-				{loading ? (
-					<div className="flex h-20 items-center justify-center">
-						<Spinner className="size-5" />
-					</div>
-				) : null}
+				{loading ? <SkeletonRows spacing="spacious" /> : null}
 				{!loading && hasQuery && isEmpty ? (
 					<p className="text-muted-foreground text-sm">
 						Nothing in the catalog references {detailBrand.name} yet.
@@ -486,25 +517,71 @@ function IntegrationDetailPanel({
 	);
 }
 
-function providerOptionPrice(price: IntegrationOption["price"]): string {
-	if (!price) {
-		return "Price not published";
-	}
-	if (price.usd != null && Number.isFinite(price.usd)) {
-		if (price.usd === 0) {
-			return "Free";
-		}
-		const amount = price.usd.toLocaleString(undefined, {
-			maximumFractionDigits: 6,
-			minimumFractionDigits: 0,
-		});
-		return `$${amount}${price.unit ? ` / ${price.unit}` : ""}`;
-	}
-	if (price.value != null) {
-		const currency = price.currency ?? "credits";
-		return `${price.value} ${currency}${price.unit ? ` / ${price.unit}` : ""}`;
-	}
-	return "Pricing varies";
+/** Which managed source runs this app's actions when both offer it. Same
+ *  `Select` source-picker idiom as the Marketplace's catalog source; the
+ *  choice is a Core preference that the Store and agent routing both read. */
+function ManagedSourcePicker({
+	brand,
+	target,
+}: {
+	brand: IntegrationBrand;
+	target: { url: string; token: string | null; userJwt: string | null };
+}) {
+	const queryClient = useQueryClient();
+	const pin = useMutation({
+		mutationFn: (source: IntegrationProviderPin | null) =>
+			setIntegrationProviderPin(target, brand.id, source),
+		onSuccess: () =>
+			queryClient.invalidateQueries({ queryKey: ["integrations"] }),
+	});
+	const suggested =
+		SOURCE_LABELS.get(brand.suggestedSource ?? "") ?? brand.suggestedSource;
+	const items = [
+		{
+			value: AUTO_SOURCE,
+			label: suggested ? `Suggested (${suggested})` : "Suggested",
+		},
+		{ value: "treg", label: "Treg (provider cost)" },
+		{ value: "composio", label: "Composio" },
+	];
+	return (
+		<ListingAsideCard title="Managed provider">
+			<div className="flex flex-col gap-1.5">
+				<Select
+					disabled={pin.isPending}
+					items={items}
+					onValueChange={(value) => {
+						if (value === "treg" || value === "composio") {
+							pin.mutate(value);
+						} else if (value === AUTO_SOURCE) {
+							pin.mutate(null);
+						}
+					}}
+					value={brand.preferredSource ?? AUTO_SOURCE}
+				>
+					<SelectTrigger className="h-8 w-full" size="sm">
+						<SelectValue placeholder="Provider" />
+					</SelectTrigger>
+					<SelectContent>
+						{items.map((item) => (
+							<SelectItem key={item.value} value={item.value}>
+								{item.label}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+				<p className="text-muted-foreground text-xs">
+					Agents call {brand.name} through this source. Composio still serves
+					what Treg does not offer, such as your own connected accounts.
+				</p>
+				{pin.isError ? (
+					<p className="text-destructive text-xs">
+						Could not save the provider choice.
+					</p>
+				) : null}
+			</div>
+		</ListingAsideCard>
+	);
 }
 
 function providerOptionKind(option: IntegrationOption): string {
@@ -517,14 +594,20 @@ function providerOptionKind(option: IntegrationOption): string {
 	if (option.kind === "treg-endpoint") {
 		return "Treg endpoint";
 	}
-	return KIND_LABELS[option.kind.toLowerCase()] ?? option.kind;
+	if (option.kind === "ryu-platform") {
+		return "Platform catalog";
+	}
+	if (option.kind === "ryu-endpoint") {
+		return "Ryu endpoint";
+	}
+	return KIND_LABELS.get(option.kind.toLowerCase()) ?? option.kind;
 }
 
 function installChatPrompt(
 	brandName: string,
 	option: IntegrationOption
 ): string {
-	const source = SOURCE_LABELS[option.source] ?? option.source;
+	const source = SOURCE_LABELS.get(option.source) ?? option.source;
 	const kind = providerOptionKind(option).toLowerCase();
 	const reference = safeHttpUrl(option.url);
 	return [
@@ -626,11 +709,21 @@ function ProviderOptionRow({
 			<div className="min-w-0">
 				<div className="flex flex-wrap items-center gap-1.5">
 					<Badge className="shrink-0" variant="secondary">
-						{SOURCE_LABELS[option.source] ?? option.source}
+						{SOURCE_LABELS.get(option.source) ?? option.source}
 					</Badge>
 					<Badge className="shrink-0" variant="outline">
 						{providerOptionKind(option)}
 					</Badge>
+					{option.providerRole === "primary" ? (
+						<Badge className="shrink-0" variant="default">
+							Primary
+						</Badge>
+					) : null}
+					{option.providerRole === "alternative" ? (
+						<Badge className="shrink-0" variant="outline">
+							Alternative
+						</Badge>
+					) : null}
 					{option.isCheapest ? (
 						<Badge className="shrink-0" variant="default">
 							Lowest listed price
@@ -642,7 +735,9 @@ function ProviderOptionRow({
 						</Badge>
 					) : null}
 				</div>
-				<div className="mt-1 truncate font-medium text-sm">{option.name}</div>
+				<div className="mt-1 truncate font-medium text-sm" title={option.name}>
+					{option.name}
+				</div>
 				{option.description ? (
 					<div className="line-clamp-2 text-muted-foreground text-xs">
 						{option.description}
@@ -679,9 +774,8 @@ function RelatedRealmSection({
 					Related {group.label}
 				</span>
 				<Button
-					className="h-6 gap-1 px-1.5 text-xs"
 					onClick={() => onOpenRealm(group.realm, brandName)}
-					size="sm"
+					size="micro"
 					variant="ghost"
 				>
 					See all
@@ -697,11 +791,17 @@ function RelatedRealmSection({
 						type="button"
 					>
 						<span className="min-w-0 flex-1">
-							<span className="block truncate font-medium text-sm">
+							<span
+								className="block truncate font-medium text-sm"
+								title={item.name}
+							>
 								{item.name}
 							</span>
 							{item.description ? (
-								<span className="block truncate text-muted-foreground text-xs">
+								<span
+									className="block truncate text-muted-foreground text-xs"
+									title={item.description}
+								>
 									{item.description}
 								</span>
 							) : null}

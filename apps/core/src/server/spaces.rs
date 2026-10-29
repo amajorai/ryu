@@ -28,12 +28,75 @@
 //! crate can't own), by *constructor injection* like `ryu-storage`.
 
 use anyhow::Result;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::Json;
 use ryu_rag::Embedder;
+use serde::Deserialize;
+use serde_json::Value;
 
 pub use ryu_spaces::*;
 
 use crate::identity_verify::ResourceTenancy;
 use crate::server::conversations::Tenancy;
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QueryDatabaseBody {
+    query: String,
+    #[serde(default)]
+    parameters: Vec<Value>,
+}
+
+/// Run a bounded, read-only SQL query against a Space database document.
+pub async fn query_database(
+    State(state): State<crate::server::ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Path((space_id, document_id)): Path<(String, String)>,
+    Json(body): Json<QueryDatabaseBody>,
+) -> axum::response::Response {
+    if crate::server::enforce_permission_on(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+        crate::acl::KIND_SPACE,
+        &space_id,
+    )
+    .await
+    .is_err()
+    {
+        return crate::server::json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
+    if let Err(response) = crate::server::require_resource_read(
+        space_access_meta(&state.spaces, &space_id).await,
+        caller.as_ref(),
+        "space not found",
+    ) {
+        return response;
+    }
+    if let Err(response) = crate::server::require_resource_read(
+        doc_access_meta(&state.spaces, &document_id).await,
+        caller.as_ref(),
+        "database not found",
+    ) {
+        return response;
+    }
+    match state
+        .spaces
+        .query_database(&space_id, &document_id, &body.query, &body.parameters)
+        .await
+    {
+        Ok(result) => Json(result).into_response(),
+        Err(error) => crate::server::json_error(
+            StatusCode::BAD_REQUEST,
+            format!("database query failed: {error}"),
+        ),
+    }
+}
 
 /// Resolve a per-Spaces embedding preference through Core's single RAG resolver.
 pub fn embedder_for_pref(pref: &EmbeddingModelPref) -> Embedder {
@@ -169,21 +232,40 @@ pub fn background_owner() -> DocOwner {
 /// implementation. The embedder fields have no file key; see `registry`'s module
 /// header for why the vec0 table width makes that the right answer.
 pub fn open_default() -> Result<SpaceStore> {
-    ryu_spaces::set_source_history_root(crate::paths::ryu_dir().join("source-history"));
+    // `spaces.db` content and the blob files are sealed under keys derived from
+    // the master key; the store resolves them through the installed host and
+    // starts its background sealing migration (see `ryu_spaces::seal`).
+    crate::crypto_host::install();
+    // Decrypted parser inputs a crash left behind (no job survives a restart).
+    crate::document_parse::sweep_on_start();
+    ryu_spaces::set_source_history_root(crate::paths::files_path("source-history"));
     let registry = crate::rag_host::retrieval_registry();
     let embedder = crate::rag_host::embedder_from_registry(&registry);
     let dims = embedder.dims();
     let extraction_model = registry.graph_extraction_model.clone();
     let reranker = crate::rag_host::reranker_local_server(&registry);
     SpaceStore::open_at(
-        crate::paths::ryu_dir().join("spaces.db"),
+        crate::paths::db_path("spaces.db"),
         embedder,
         dims,
         extraction_model,
         reranker,
-        crate::paths::ryu_dir().join("blobs"),
+        crate::paths::files_path("blobs"),
         backfill_owner(),
     )
+}
+
+/// Sealing diagnostics of the Spaces store (counts only, never content): the
+/// `spaces.db.unreadable_rows` counter, whether the store accepts writes (a
+/// store sealed under a key this process does not hold refuses them), the
+/// background migration and blob-sweep progress (`blobs_sealed`/`blobs_total`),
+/// and how much of the sealed vector index is searchable from memory
+/// (`vector_coverage`). A health or recall surface embeds this object.
+pub fn seal_diagnostics(store: &SpaceStore) -> serde_json::Value {
+    serde_json::json!({
+        "sealing": store.seal_status(),
+        "vector_coverage": store.vector_coverage(),
+    })
 }
 
 /// Read a document's access metadata and map it into the shared
@@ -230,6 +312,15 @@ mod tests {
     // `ModelRegistry` is a Core type. `ryu-spaces` tests the supported extractor-id
     // boundary itself.
     use crate::registry::ModelRegistry;
+
+    #[tokio::test]
+    async fn seal_diagnostics_report_counts_only() {
+        let store = ryu_spaces::SpaceStore::open_in_memory().unwrap();
+        let report = super::seal_diagnostics(&store);
+        assert_eq!(report["sealing"]["unreadable_rows"], 0);
+        assert_eq!(report["sealing"]["writable"], true);
+        assert!(report["vector_coverage"]["hydrated"].is_u64());
+    }
 
     #[test]
     fn registry_graph_extraction_model_defaults_to_local() {

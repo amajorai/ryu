@@ -1,0 +1,96 @@
+{
+  "tags": ["browser", "automation", "steel", "remote", "web"],
+  "id": "@ryu/steel",
+  "name": "Steel",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "hidden": true,
+  "external": true,
+  "description": "Preview of Steel cloud browsers as a provider for Ryu's swappable browser.control layer, over Steel's official MCP server. Not usable as the Browser layer yet: Ryu starts a fresh Steel server process for every tool call, and the session handle that browser.navigate gets back exists only inside the process that created it, so the next call cannot use it. It is hidden from the store while that is the case. Steel's stateless tools that take a URL directly, such as steel_scrape, stay available under steel.*. Needs a Steel API key stored as the STEEL_API_KEY vault secret and Node on PATH.",
+  "tagline": "Preview of Steel cloud browsers for Ryu",
+  "icon": "ai-browser",
+  "iconDither": { "from": 210, "to": "transparent", "direction": "down" },
+  "banner": {
+    "style": "gradient",
+    "colors": ["#1f2937", "#0b0f14"],
+    "seed": 17
+  },
+  "author": { "name": "Steel", "url": "https://steel.dev" },
+  "homepage": "https://steel.dev",
+  "repository": "https://github.com/steel-dev/steel-mcp-server",
+  "privacyPolicyUrl": "https://steel.dev/privacy",
+  "termsOfServiceUrl": "https://steel.dev/terms",
+  "license": "MIT",
+  "keywords": ["browser", "automation", "steel", "remote", "web"],
+  "category": "Browsers",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "full" },
+    "mobile": { "support": "full" },
+    "extension": { "support": "full" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "provides": [
+    {
+      "capability": "browser.control",
+      "version": "1.0.0",
+      "title": "Browser",
+      "grant": "browser:control",
+      "selectable": true,
+      "target": "remote-desktop",
+      "tools": {
+        "browser.navigate": {
+          "tool": "steel.steel_navigate",
+          "adapter": {
+            "tools": ["steel.steel_session_create"],
+            "code_file": "adapters/browser.navigate.js"
+          }
+        },
+        "browser.snapshot": {
+          "tool": "steel.steel_snapshot",
+          "adapter": { "code_file": "adapters/browser.snapshot.js" }
+        },
+        "browser.click": {
+          "tool": "steel.steel_act",
+          "adapter": { "code_file": "adapters/browser.click.js" }
+        },
+        "browser.type": {
+          "tool": "steel.steel_act",
+          "adapter": { "code_file": "adapters/browser.type.js" }
+        },
+        "browser.hover": {
+          "tool": "steel.steel_act",
+          "adapter": { "code_file": "adapters/browser.hover.js" }
+        },
+        "browser.scroll": {
+          "tool": "steel.steel_act",
+          "adapter": { "code_file": "adapters/browser.scroll.js" }
+        },
+        "browser.screenshot": {
+          "tool": "steel.steel_screenshot",
+          "adapter": { "code_file": "adapters/browser.screenshot.js" }
+        }
+      }
+    }
+  ],
+  "permission_grants": ["mcp:server", "tool:execute"],
+  "mcp_servers": {
+    "steel": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:steel-dev/steel-mcp-server#4c0c583a3704ea3605fe3c72d7d0e9a9b1b94994"
+      ],
+      "env": {
+        "STEEL_API_KEY": "secret:STEEL_API_KEY",
+        "STEEL_PROFILE": "browse"
+      },
+      "description": "Steel MCP server v2.0.1 (pinned commit), launched with npx from GitHub because Steel does not publish it to npm. Tools include steel_scrape, steel_screenshot, steel_pdf, session create/release, navigate, snapshot, find, act, wait_for, handoff, batch, and session options. Unavailable until Node is installed and STEEL_API_KEY resolves from the vault."
+    }
+  }
+}

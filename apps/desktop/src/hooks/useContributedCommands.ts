@@ -1,3 +1,4 @@
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 // apps/desktop/src/hooks/useContributedCommands.ts
 //
 // Feeds the command palette the app-registered sidebar contributions so the shell
@@ -59,7 +60,7 @@ export function useContributedSectionItems(
 	const fetchable = useMemo<FetchableSection[]>(
 		() =>
 			sections.flatMap((section) => {
-				const source = section.spec?.source;
+				const source = pluginSidebarSpec(section)?.source;
 				const sourceRequest = contributionSourceRequest(section, source);
 				return source && sourceRequest
 					? [{ section, source, sourceRequest }]
@@ -107,7 +108,7 @@ export function useContributedSectionItems(
 				plugin: section.plugin,
 				title: section.title,
 				icon: section.icon,
-				itemTarget: section.spec?.itemTarget,
+				itemTarget: pluginSidebarSpec(section)?.itemTarget,
 				items: results[index]?.data ?? [],
 			})),
 		[fetchable, results]

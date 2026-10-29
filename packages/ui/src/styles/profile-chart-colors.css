@@ -1,0 +1,14 @@
+/* Profile chart palette consumed by ProfileCharts (`--color-profile-chart-1`
+ * through `-7`). The global `--chart-*` tokens are intentionally monochrome, so
+ * these mid-lightness oklch values read on both light and dark backgrounds.
+ * Shared by globals.css and isolated stylesheets (such as the Fumadocs UI
+ * preview) that render ProfileCharts. */
+:root {
+	--color-profile-chart-1: oklch(0.62 0.19 256);
+	--color-profile-chart-2: oklch(0.56 0.18 306);
+	--color-profile-chart-3: oklch(0.64 0.21 1);
+	--color-profile-chart-4: oklch(0.78 0.16 76);
+	--color-profile-chart-5: oklch(0.7 0.12 182);
+	--color-profile-chart-6: oklch(0.63 0.19 149);
+	--color-profile-chart-7: oklch(0.62 0.19 256);
+}

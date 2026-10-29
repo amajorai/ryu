@@ -33,6 +33,10 @@ export const STORE_CATEGORY_ORDER: readonly string[] = [
 	// CatalogKind of their own, so this shelf is how one is findable in the
 	// Plugins tab. The web store's Themes TAB filters on this same value.
 	"Themes",
+	// Interfaces ride in the same way (`contributes.interfaces`): a data-only
+	// pick of a host-owned renderer plus bounded params, never its own
+	// CatalogKind. This shelf is how one is findable in the Plugins tab.
+	"Interfaces",
 	"Media & Voice",
 	"Research",
 	"Developer Tools",

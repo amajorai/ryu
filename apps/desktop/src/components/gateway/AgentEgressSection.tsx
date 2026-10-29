@@ -461,10 +461,22 @@ export function AgentEgressSection({ target }: { target: ApiTarget }) {
 				</SettingsGroup>
 			) : null}
 			{query.isError ? (
-				<p className="px-3.5 text-muted-foreground text-sm">
-					Could not read this node's agent settings, so nothing is shown here.
-					an empty list would read as "no agents are ungoverned".
-				</p>
+				<div className="flex flex-wrap items-center gap-2 px-3.5">
+					<p className="text-sm text-status-destructive" role="alert">
+						Could not read this node's agent settings, so nothing is shown.
+						Retry to load the current policy.
+					</p>
+					<Button
+						disabled={query.isFetching}
+						onClick={() => {
+							void query.refetch();
+						}}
+						size="sm"
+						variant="outline"
+					>
+						Retry
+					</Button>
+				</div>
 			) : null}
 			{view && view.rows.length > 0 ? (
 				<SettingsGroup>

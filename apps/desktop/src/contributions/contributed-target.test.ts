@@ -44,4 +44,14 @@ describe("parseContributedTarget", () => {
 		// An unfilled template leaves an empty value — not a conversation id.
 		expect(parseContributedTarget("/chat?conversationId=").options).toEqual({});
 	});
+	it("drops inherited object names from the contributed option allowlist", () => {
+		for (const key of ["constructor", "toString", "__proto__"]) {
+			expect(
+				parseContributedTarget(`/chat?${key}=blocked&conversationId=conv-safe`)
+			).toEqual({
+				path: "/chat",
+				options: { conversationId: "conv-safe" },
+			});
+		}
+	});
 });

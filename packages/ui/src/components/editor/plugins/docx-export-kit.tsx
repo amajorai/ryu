@@ -16,6 +16,18 @@ import {
 import { TocElementDocx } from "@ryu/ui/components/editor/ui/toc-node-static.tsx";
 import { KEYS } from "platejs";
 
+export const DocxExportComponents = {
+	[KEYS.codeBlock]: CodeBlockElementDocx,
+	[KEYS.codeLine]: CodeLineElementDocx,
+	[KEYS.codeSyntax]: CodeSyntaxLeafDocx,
+	[KEYS.column]: ColumnElementDocx,
+	[KEYS.columnGroup]: ColumnGroupElementDocx,
+	[KEYS.equation]: EquationElementDocx,
+	[KEYS.inlineEquation]: InlineEquationElementDocx,
+	[KEYS.callout]: CalloutElementDocx,
+	[KEYS.toc]: TocElementDocx,
+};
+
 /**
  * Editor kit for DOCX export.
  *
@@ -32,17 +44,7 @@ import { KEYS } from "platejs";
 export const DocxExportKit = [
 	DocxExportPlugin.configure({
 		override: {
-			components: {
-				[KEYS.codeBlock]: CodeBlockElementDocx,
-				[KEYS.codeLine]: CodeLineElementDocx,
-				[KEYS.codeSyntax]: CodeSyntaxLeafDocx,
-				[KEYS.column]: ColumnElementDocx,
-				[KEYS.columnGroup]: ColumnGroupElementDocx,
-				[KEYS.equation]: EquationElementDocx,
-				[KEYS.inlineEquation]: InlineEquationElementDocx,
-				[KEYS.callout]: CalloutElementDocx,
-				[KEYS.toc]: TocElementDocx,
-			},
+			components: DocxExportComponents,
 		},
 	}),
 ];

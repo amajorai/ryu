@@ -1,0 +1,30 @@
+[package]
+name = "ryu-code-runner"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Core-side language runners for Ryu workflow code steps: Lean 4, Bend and BAML programs run or checked through the swappable sandbox backend (Lean/Bend) or a scrubbed, gateway-only host server (BAML). An extracted Core capability crate with ZERO dependency on apps/core."
+repository = "https://github.com/amajorai/ryu"
+
+# Workflow `code` steps. Lean and Bend programs can perform arbitrary IO (Lean
+# even at elaboration time through `#eval`), so they run through a
+# command-capable `ryu-sandbox` backend and refuse the bare host in release
+# builds unless the operator opts in. BAML has no IO of its own: its only effect
+# is a model call, so `baml-cli` runs on the host with a cleared environment and a
+# Core-provided client that can only reach the Ryu gateway.
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+ryu-sandbox = { path = "../sandbox", version = "0.5.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "net", "process", "rt", "rt-multi-thread", "time"] }

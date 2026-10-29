@@ -8,7 +8,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -60,6 +60,7 @@ mock.module("@/src/lib/api/update.ts", () => ({
 }));
 mock.module("@/src/lib/app-version.ts", () => ({
 	getAppVersion: async () => "1.0.0",
+	isNewerVersion: () => false,
 	releaseIsNewerThanApp: () => false,
 }));
 mock.module("@/src/lib/services-api.ts", () => ({
@@ -67,8 +68,9 @@ mock.module("@/src/lib/services-api.ts", () => ({
 	installSidecar: async () => undefined,
 }));
 mock.module("@/src/store/useNodeStore.ts", () => ({
-	useNodeStore: (
-		selector: (state: { getActiveNode: () => typeof node }) => unknown
+	isLocalNode: () => true,
+	useNodeStore: <TResult,>(
+		selector: (state: { getActiveNode: () => typeof node }) => TResult
 	) => selector({ getActiveNode: () => node }),
 }));
 mock.module("sileo", () => ({

@@ -1,0 +1,45 @@
+{
+  "name": "@ryuhq/client",
+  "version": "0.5.0",
+  "type": "module",
+  "description": "TypeScript client SDK for embedding Ryu Core and using the standalone Notify and Box APIs, the Managed Agents API, and Ryu Messaging",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amajorai/ryu-sdk",
+    "directory": "packages/client"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "bin": {
+    "box-tunnel": "./dist/box-tunnel.js"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "bun run clean && tsup",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@ryuhq/protocol": "workspace:*",
+    "zod": "catalog:"
+  }
+}

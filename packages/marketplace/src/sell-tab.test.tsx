@@ -10,7 +10,12 @@ import {
 	MarketplaceHostProvider,
 	type SellerState,
 } from "./host.tsx";
-import { payoutButtonLabel, SellTab } from "./sell-tab.tsx";
+import {
+	payoutButtonLabel,
+	payoutsHandoffCopy,
+	SellTab,
+	startSellerPayouts,
+} from "./sell-tab.tsx";
 import type { SellerStatus } from "./types.ts";
 
 describe("payoutButtonLabel", () => {
@@ -40,7 +45,10 @@ function makeStatus(over: Partial<SellerStatus> = {}): SellerStatus {
 	};
 }
 
-function makeHost(over: Partial<SellerState>): MarketplaceHost {
+function makeHost(
+	over: Partial<SellerState>,
+	hostOver: Partial<MarketplaceHost> = {}
+): MarketplaceHost {
 	const seller: SellerState = {
 		authed: true,
 		error: null,
@@ -58,13 +66,18 @@ function makeHost(over: Partial<SellerState>): MarketplaceHost {
 			throw new Error("unused");
 		},
 		useSellerStatus: () => seller,
+		...hostOver,
 	};
 }
 
-function render(over: Partial<SellerState>): string {
+function render(
+	over: Partial<SellerState>,
+	hostOver: Partial<MarketplaceHost> = {},
+	layout: "page" | "settings" = "page"
+): string {
 	return renderToStaticMarkup(
-		<MarketplaceHostProvider host={makeHost(over)}>
-			<SellTab />
+		<MarketplaceHostProvider host={makeHost(over, hostOver)}>
+			<SellTab layout={layout} />
 		</MarketplaceHostProvider>
 	);
 }
@@ -122,5 +135,153 @@ describe("SellTab — states", () => {
 			status: makeStatus(),
 		});
 		expect(html).toContain("onboarding failed to load");
+	});
+});
+
+describe("startSellerPayouts", () => {
+	test("prefers the host's in-app payouts view over a hosted link", async () => {
+		const calls: string[] = [];
+		const path = await startSellerPayouts({
+			onboard: () => {
+				calls.push("onboard");
+				return Promise.resolve("https://connect.stripe.test/setup");
+			},
+			openExternal: (url) => {
+				calls.push(`external:${url}`);
+			},
+			openSellerPayouts: () => {
+				calls.push("in-app");
+			},
+		});
+		expect(path).toBe("in-app");
+		expect(calls).toEqual(["in-app"]);
+	});
+
+	test("without one, mints a hosted onboarding link and opens it", async () => {
+		const calls: string[] = [];
+		const path = await startSellerPayouts({
+			onboard: () => {
+				calls.push("onboard");
+				return Promise.resolve("https://connect.stripe.test/setup");
+			},
+			openExternal: (url) => {
+				calls.push(`external:${url}`);
+			},
+		});
+		expect(path).toBe("hosted");
+		expect(calls).toEqual([
+			"onboard",
+			"external:https://connect.stripe.test/setup",
+		]);
+	});
+
+	test("an onboarding failure surfaces to the caller", async () => {
+		await expect(
+			startSellerPayouts({
+				onboard: () => Promise.reject(new Error("no stripe")),
+				openExternal: () => undefined,
+			})
+		).rejects.toThrow("no stripe");
+	});
+});
+
+describe("SellTab — payout handoff copy", () => {
+	test("a host with its own payouts view says setup opens here", () => {
+		const html = render(
+			{ status: makeStatus() },
+			{ openSellerPayouts: () => undefined }
+		);
+		expect(html).toContain(payoutsHandoffCopy(true));
+		expect(html).not.toContain("in your browser");
+	});
+
+	test("a hosted-link surface says Stripe opens in the browser", () => {
+		const html = render({ status: makeStatus() });
+		expect(html).toContain("opens in your browser");
+	});
+});
+
+describe("SellTab — settings layout", () => {
+	test("the page layout keeps its own frame and title", () => {
+		const html = render({ status: makeStatus() });
+		expect(html).toContain("max-w-2xl");
+		expect(html).toContain("Marketplace &amp; payouts");
+	});
+
+	test("a settings pane drops the page frame for a Payouts section", () => {
+		const html = render(
+			{
+				status: makeStatus({
+					onboardingStatus: "active",
+					payoutsEnabled: true,
+				}),
+			},
+			{},
+			"settings"
+		);
+		expect(html).not.toContain("max-w-2xl");
+		expect(html).not.toContain("<h2");
+		expect(html).not.toContain("Marketplace &amp; payouts");
+		expect(html).toContain("Payouts");
+		expect(html).toContain("Refresh");
+		expect(html).toContain("Payout status");
+		expect(html).toContain("Payouts enabled");
+		expect(html).toContain("Manage seller account");
+		expect(html).toContain("opens in your browser");
+	});
+
+	test("settings keeps the Stripe-unavailable and error copy", () => {
+		const unavailable = render(
+			{
+				error: { kind: "stripe", message: "no stripe" },
+				status: makeStatus(),
+			},
+			{},
+			"settings"
+		);
+		expect(unavailable).toContain("Stripe is not configured on this server");
+		expect(unavailable).not.toContain("Set up payouts");
+		expect(
+			render(
+				{
+					error: { kind: "network", message: "onboarding failed to load" },
+					status: makeStatus(),
+				},
+				{},
+				"settings"
+			)
+		).toContain("onboarding failed to load");
+	});
+
+	test("A Major Pass is a plain settings section, not a highlight box", () => {
+		const html = render(
+			{ status: makeStatus() },
+			{
+				useMembershipReport: () => ({
+					authed: true,
+					error: null,
+					loading: false,
+					refresh: () => undefined,
+					report: {
+						currencies: [
+							{
+								currency: "usd",
+								failedMinor: 0,
+								paidMinor: 500,
+								pendingMinor: 1200,
+								usageCount: 7,
+							},
+						],
+						eligibleListingCount: 3,
+					},
+				}),
+			},
+			"settings"
+		);
+		expect(html).toContain("A Major Pass");
+		expect(html).toContain("Recurring plans only");
+		expect(html).toContain("Eligible paid apps");
+		expect(html).toContain("12.00");
+		expect(html).not.toContain("bg-primary/5");
 	});
 });

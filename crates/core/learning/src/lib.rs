@@ -30,6 +30,7 @@ use std::path::PathBuf;
 pub mod api;
 pub mod engine;
 pub mod host;
+mod seal;
 pub mod store;
 
 #[cfg(test)]
@@ -55,9 +56,10 @@ pub use engine::{
 pub use host::{ConvMeta, LearningHost, Msg, QueuedApproval};
 pub use store::{Experience, ExperienceStore};
 
-/// The crate's data directory (`experience.db` lives under it). Set once at startup
-/// from Core (`ryu_dir()`); [`data_dir`] falls back to the system temp dir so unit
-/// tests and any pre-init handler never panic. Mirrors `ryu_finetune::data_dir`.
+/// The Ryu data directory (`db/experience.db` and `state/learning/` live under
+/// it). Set once at startup from Core (`ryu_dir()`); [`data_dir`] falls back to
+/// the resolved Ryu data dir (`ryu_sidecar_runtime::ryu_dir`) for any pre-init
+/// caller, and to the system temp dir in this crate's own unit tests.
 static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 /// Publish the learning data directory. Idempotent: a second call is ignored.
@@ -65,7 +67,13 @@ pub fn init_data_dir(dir: PathBuf) {
     let _ = DATA_DIR.set(dir);
 }
 
-/// The learning data directory, or the system temp dir when uninitialized.
+/// The learning data directory, or the resolved Ryu data dir when uninitialized.
 pub(crate) fn data_dir() -> PathBuf {
-    DATA_DIR.get().cloned().unwrap_or_else(std::env::temp_dir)
+    DATA_DIR.get().cloned().unwrap_or_else(|| {
+        if cfg!(test) {
+            std::env::temp_dir()
+        } else {
+            ryu_sidecar_runtime::ryu_dir()
+        }
+    })
 }

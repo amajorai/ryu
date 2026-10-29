@@ -21,7 +21,7 @@ const MB = 1024 * 1024;
 // Percent-complete badge when the total is known, otherwise the received size in
 // MB (matches how the desktop download center degrades on an unknown total).
 function progressBadge(task: DownloadTask): string {
-	if (typeof task.total_bytes === "number" && task.total_bytes > 0) {
+	if (task.total_bytes !== null && task.total_bytes > 0) {
 		const pct = Math.floor((task.received_bytes / task.total_bytes) * 100);
 		return `${task.state} ${pct}%`;
 	}

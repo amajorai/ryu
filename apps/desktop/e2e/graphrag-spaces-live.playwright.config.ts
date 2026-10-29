@@ -10,8 +10,7 @@ const STORY_URL = `http://127.0.0.1:${VITE_PORT}`;
 const NODE_TOKEN = "graphrag-e2e-node-token-2026-08-23";
 const dataDir = path.resolve("test-results/graphrag-spaces-live/ryu-dir");
 const coreCommand =
-	process.env.GRAPHRAG_CORE_COMMAND ??
-	"cargo run --manifest-path ../../core/Cargo.toml";
+	process.env.GRAPHRAG_CORE_COMMAND ?? "cargo run -p ryu-core";
 
 if (process.env.TEST_WORKER_INDEX === undefined) {
 	rmSync(dataDir, { force: true, recursive: true });
@@ -46,6 +45,7 @@ export default defineConfig({
 		},
 		{
 			command: coreCommand,
+			cwd: path.resolve(import.meta.dirname, "../../.."),
 			env: {
 				RYU_BIND: `127.0.0.1:${CORE_PORT}`,
 				RYU_CORS_ORIGINS: STORY_URL,

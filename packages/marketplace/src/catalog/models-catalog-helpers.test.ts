@@ -318,6 +318,18 @@ describe("deviceSummaryLines", () => {
 		).toEqual(["RTX 4090", "24 GB GPU RAM", "64 GB system RAM"]);
 	});
 
+	test("free disk closes the summary when Core reports it", () => {
+		expect(
+			deviceSummaryLines(
+				device({
+					diskFreeHuman: "120 GB",
+					ramHuman: "16 GB",
+					unifiedMemory: true,
+				})
+			)
+		).toEqual(["16 GB unified memory", "120 GB free disk"]);
+	});
+
 	test("no hardware details falls back to the OS name", () => {
 		expect(deviceSummaryLines(device({ os: "windows" }))).toEqual(["windows"]);
 	});

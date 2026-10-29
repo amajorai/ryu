@@ -218,6 +218,9 @@ import icon28mono from "../assets/app-icons/ryu--invoices-mono.png";
 import icon77dark from "../assets/app-icons/ryu--jdtls-lsp-dark.png";
 import icon77light from "../assets/app-icons/ryu--jdtls-lsp-light.png";
 import icon77mono from "../assets/app-icons/ryu--jdtls-lsp-mono.png";
+import icon154dark from "../assets/app-icons/ryu--jina-reader-dark.png";
+import icon154light from "../assets/app-icons/ryu--jina-reader-light.png";
+import icon154mono from "../assets/app-icons/ryu--jina-reader-mono.png";
 import icon78dark from "../assets/app-icons/ryu--kotlin-lsp-dark.png";
 import icon78light from "../assets/app-icons/ryu--kotlin-lsp-light.png";
 import icon78mono from "../assets/app-icons/ryu--kotlin-lsp-mono.png";
@@ -486,9 +489,11 @@ import icon153dark from "../assets/app-icons/ryu--zvec-grep-dark.png";
 import icon153light from "../assets/app-icons/ryu--zvec-grep-light.png";
 import icon153mono from "../assets/app-icons/ryu--zvec-grep-mono.png";
 
+import { isNativeText } from "./native-primitive-observation.ts";
+
 /** @param {string | {src: string}} image */
 function url(image) {
-	return typeof image === "string" ? image : image.src;
+	return isNativeText(image) ? image : image.src;
 }
 export const COMPOSER_ICONS = {
 	"@ryu/activity": {
@@ -1070,6 +1075,11 @@ export const COMPOSER_ICONS = {
 		light: url(icon115light),
 		dark: url(icon115dark),
 		mono: url(icon115mono),
+	},
+	"@ryu/jina-reader": {
+		light: url(icon154light),
+		dark: url(icon154dark),
+		mono: url(icon154mono),
 	},
 	"@ryu/mem0": {
 		light: url(icon116light),

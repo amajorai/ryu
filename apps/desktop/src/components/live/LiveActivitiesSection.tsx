@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import "./LiveActivitiesSection.css";
 // apps/desktop/src/components/live/LiveActivitiesSection.tsx
 //
 // The sidebar's "Live" section — a pinned, self-hiding block of live-activity
@@ -7,18 +9,18 @@
 // accent-coloured compact cards, hidden entirely when nothing is live.
 
 import type { LiveActivity } from "@ryu/app-host/live-activity";
-import { Icon } from "@ryu/ui/components/icon";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { Icon } from "@ryu/ui/components/icon.tsx";
+import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useLiveActivities } from "@/src/store/useLiveActivityStore.ts";
 
 /** Status → tone colour, matching the island's status-dot language. */
-const STATUS_TONE: Record<LiveActivity["status"], string> = {
+const STATUS_TONE = {
 	running: "var(--primary)",
-	waiting: "var(--warning, #f59e0b)",
-	review: "var(--warning, #f59e0b)",
-	done: "var(--success, #22c55e)",
+	waiting: "var(--warning)",
+	review: "var(--warning)",
+	done: "var(--success)",
 	error: "var(--destructive)",
-};
+} satisfies Record<LiveActivity["status"], string>;
 
 /** A compact row: glyph tile + title/detail + optional progress bar. */
 function LiveActivityRow({
@@ -30,30 +32,47 @@ function LiveActivityRow({
 }) {
 	const tone = STATUS_TONE[activity.status] ?? "var(--primary)";
 	const clickable = Boolean(activity.action);
+	const activityTintVariables1: CSSProperties & {
+		"--live-activity-tint": string;
+	} = { "--live-activity-tint": tone };
+	const activityTintVariables2: CSSProperties & {
+		"--live-activity-tint": string;
+	} = { "--live-activity-tint": tone };
+	const activityProgressVariables3: CSSProperties & {
+		"--live-activity-tint": string;
+		"--live-activity-progress": string;
+	} = {
+		"--live-activity-tint": tone,
+		"--live-activity-progress": `${Math.round((activity.progress ?? 0) * 100)}%`,
+	};
 	const row = (
 		<div className="flex min-w-0 flex-1 items-start gap-2">
 			<span
 				aria-hidden
 				className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md"
-				style={{
-					backgroundColor: `color-mix(in srgb, ${tone} 15%, transparent)`,
-				}}
+				data-live-activity-tile=""
+				data-live-activity-tint=""
+				style={activityTintVariables1}
 			>
 				<Icon className="size-3.5" icon={activity.icon ?? "activity-03"} />
 			</span>
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-1.5">
-					<span className="truncate font-medium text-foreground text-xs">
+					<span
+						className="truncate font-medium text-foreground text-xs"
+						title={activity.title}
+					>
 						{activity.title}
 					</span>
 					<span
 						aria-hidden
-						className={`size-1.5 shrink-0 rounded-full ${activity.status === "running" ? "animate-pulse" : ""}`}
-						style={{ backgroundColor: tone }}
+						className={`size-1.5 shrink-0 rounded-full ${activity.status === "running" ? "motion-safe:animate-pulse" : ""}`}
+						data-live-activity-tint=""
+						style={activityTintVariables2}
 					/>
 				</div>
 				{activity.detail && (
-					<p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground leading-snug">
+					<p className="type-caption mt-0.5 line-clamp-2 text-muted-foreground leading-snug">
 						{activity.detail}
 					</p>
 				)}
@@ -63,11 +82,10 @@ function LiveActivityRow({
 						className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted"
 					>
 						<div
-							className="h-full rounded-full transition-[width] duration-300"
-							style={{
-								backgroundColor: tone,
-								width: `${Math.round(activity.progress * 100)}%`,
-							}}
+							className="h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none"
+							data-live-activity-progress=""
+							data-live-activity-tint=""
+							style={activityProgressVariables3}
 						/>
 					</div>
 				)}
@@ -81,17 +99,22 @@ function LiveActivityRow({
 			</div>
 		);
 	}
+	const activityTintVariables4: CSSProperties & {
+		"--live-activity-tint": string;
+	} = { "--live-activity-tint": tone };
 	return (
 		<button
 			className="group/act relative flex w-full gap-2.5 rounded-lg border border-border/60 border-l-2 bg-muted/40 p-2.5 text-left transition-colors hover:bg-muted/70"
+			data-live-activity-border=""
 			onClick={() => onOpen(activity)}
-			style={{ borderLeftColor: tone }}
+			style={activityTintVariables4}
 			type="button"
 		>
 			{row}
 			<Icon
-				className="mt-0.5 size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/act:opacity-100"
+				className="mt-0.5 size-3 shrink-0"
 				icon="arrow-up-right-01"
+				tone="muted"
 			/>
 		</button>
 	);
@@ -100,7 +123,7 @@ function LiveActivityRow({
 /** Pinned "Live" block for the sidebar. Self-hides when nothing is live. */
 export function LiveActivitiesSection() {
 	const activities = useLiveActivities();
-	const { openTab } = useTabsContext();
+	const openTab = useTabSelector((state) => state.openTab);
 
 	if (activities.length === 0) {
 		return null;
@@ -115,13 +138,13 @@ export function LiveActivitiesSection() {
 	return (
 		<div className="flex flex-col gap-1.5 px-2 pb-1">
 			<div className="flex items-center gap-2 px-1">
-				<span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+				<span className="type-compact font-medium text-muted-foreground uppercase tracking-wide">
 					Live
 				</span>
 				<div className="flex-1" />
 				<span
 					aria-hidden
-					className="size-1.5 animate-pulse rounded-full bg-primary"
+					className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse"
 				/>
 			</div>
 			<div className="scroll-fade flex max-h-[38vh] flex-col gap-1.5 overflow-y-auto">

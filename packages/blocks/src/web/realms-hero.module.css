@@ -1,0 +1,15 @@
+.heading {
+	font-size: clamp(2.75rem, 7vw, 6.5rem) !important;
+}
+
+/* A low violet glow along the horizon, in the night sky's own purple. */
+.horizon {
+	inset: auto 0 0;
+	height: 55%;
+	background: radial-gradient(
+		70% 80% at 50% 100%,
+		rgb(139 76 222 / 0.28),
+		rgb(96 44 168 / 0.1) 45%,
+		transparent 75%
+	);
+}

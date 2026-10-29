@@ -1,7 +1,7 @@
 // Build-identity chip in the sidebar footer: a compact pulsed div (not a tiny
 // badge). Clicking opens Gateway → Updates. Hidden on a plain Stable release.
 
-import { BorderBeam } from "@ryu/ui/components/border-beam";
+import { BorderBeam } from "@ryu/ui/components/border-beam.tsx";
 import { useTheme } from "next-themes";
 import { useBuildProfile } from "@/src/lib/build-profile.ts";
 import { channelLabel } from "@/src/lib/channel-brand.ts";
@@ -53,7 +53,7 @@ export function BuildBadge({ className }: { className?: string } = {}) {
 			>
 				{labels.map((label) => (
 					<span
-						className="font-medium text-[10px] text-foreground uppercase leading-none tracking-wide"
+						className="type-compact font-medium text-foreground uppercase leading-none tracking-wide"
 						key={label}
 					>
 						{label}

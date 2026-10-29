@@ -12,15 +12,16 @@
 // the frames already carry inline data URLs (no per-frame fetch), so there is no
 // persistence or clip-id involved. It is a "what was I just doing" context grab.
 
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/popover.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { IconAlertTriangle, IconHistory } from "@tabler/icons-react";
 import { useCallback, useId, useState } from "react";
 import type { ComposerSendFile } from "@/src/components/assistant/useComposerSlot.tsx";
@@ -52,6 +53,7 @@ export function AttachRecentActivityControl({
 	className,
 	onAttach,
 }: AttachRecentActivityControlProps) {
+	const tl = useLiteralMessages();
 	const node = useNodeStore((s) => s.getActiveNode());
 	const minutesFieldId = useId();
 
@@ -84,7 +86,7 @@ export function AttachRecentActivityControl({
 				setError(null);
 				setIsOpen(false);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				setError(
 					err instanceof Error
 						? err.message
@@ -109,7 +111,8 @@ export function AttachRecentActivityControl({
 				render={
 					<Button
 						aria-label="Attach recent activity"
-						className={cn("size-7 rounded-full", className)}
+						className={cn("size-7", className)}
+						radius="pill"
 						size="icon"
 						title="Attach recent activity"
 						type="button"
@@ -119,7 +122,12 @@ export function AttachRecentActivityControl({
 			>
 				<IconHistory className="size-4 text-muted-foreground" />
 			</PopoverTrigger>
-			<PopoverContent align="start" className="w-72 gap-3" sideOffset={6}>
+			<PopoverContent
+				align="start"
+				className="w-72"
+				sideOffset={6}
+				spacing="form"
+			>
 				<div className="flex flex-col gap-1.5">
 					<Label htmlFor={minutesFieldId}>Minutes to attach</Label>
 					<Input
@@ -138,8 +146,13 @@ export function AttachRecentActivityControl({
 						value={minutes}
 					/>
 					<p className="text-muted-foreground text-xs">
-						Grabs the last {clampMinutes(minutes)} min of screen activity as
-						ephemeral context (nothing is saved). Max {MAX_MINUTES}.
+						{tl(
+							"Grabs the last {minutes} min of screen activity as ephemeral context (nothing is saved). Max {maxMinutes}.",
+							{
+								maxMinutes: String(MAX_MINUTES),
+								minutes: String(clampMinutes(minutes)),
+							}
+						)}
 					</p>
 				</div>
 
@@ -150,12 +163,7 @@ export function AttachRecentActivityControl({
 					</p>
 				) : null}
 
-				<Button
-					className="gap-1.5"
-					loading={busy}
-					onClick={handleSubmit}
-					type="button"
-				>
+				<Button loading={busy} onClick={handleSubmit} type="button">
 					{busy ? "Gathering…" : "Attach recent activity"}
 				</Button>
 			</PopoverContent>

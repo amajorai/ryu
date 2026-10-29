@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ComposioConnection, ComposioToolkit } from "./api/composio.ts";
 import {
 	activationRewardProgress,
+	activationStartAction,
 	buildActivationRecommendations,
 	buildActivationTaskDraft,
 	deriveActivationEligibility,
@@ -91,4 +92,69 @@ describe("onboarding activation", () => {
 			}).taskAllowed
 		).toBe(true);
 	});
+	test("uses complete generic tasks for inherited-name app slugs", () => {
+		for (const slug of ["constructor", "toString", "__proto__"]) {
+			const draft = buildActivationTaskDraft([
+				{
+					active: false,
+					appName: "Connected app",
+					appSlug: slug,
+					connectionId: null,
+					description: null,
+					logo: null,
+					prompt: "Original recommendation prompt",
+					reason: "Connected account",
+					title: "Original recommendation title",
+				},
+			]);
+			expect(draft).toEqual({
+				appName: "Connected app",
+				appSlug: slug,
+				prompt: `Review my recent ${slug} work and suggest the next task I can delegate. Keep it concise, cite the relevant source, and ask before changing anything.`,
+				title: `Find the next task in ${slug}`,
+			});
+		}
+	});
+});
+
+test("managed task requires its selected connection and paid inference", () => {
+	const recommendations = buildActivationRecommendations({
+		connections: [],
+		toolkits: [toolkit("notion", "Notion")],
+	});
+	const task = buildActivationTaskDraft(recommendations);
+	expect(
+		activationStartAction({ task, recommendations, managedInference: false })
+	).toBe("connect");
+	expect(
+		activationStartAction({ task, recommendations, managedInference: true })
+	).toBe("connect");
+	const connected = buildActivationRecommendations({
+		connections: [connection("notion", true)],
+		toolkits: [toolkit("notion", "Notion")],
+	});
+	expect(
+		activationStartAction({
+			task,
+			recommendations: connected,
+			managedInference: false,
+		})
+	).toBe("checkout");
+	expect(
+		activationStartAction({
+			task,
+			recommendations: connected,
+			managedInference: true,
+		})
+	).toBe("execute");
+});
+test("a general task still requires payment for managed inference", () => {
+	const task = buildActivationTaskDraft([]);
+	expect(
+		activationStartAction({
+			task,
+			recommendations: [],
+			managedInference: false,
+		})
+	).toBe("checkout");
 });

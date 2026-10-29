@@ -8,7 +8,7 @@ import { MODALITIES } from "@/src/lib/api/gateway.ts";
 //
 // Imported as data rather than by rendering the component, so this stays a unit
 // test with no DOM.
-const ROUTED = ["image", "stt", "tts", "video"] as const;
+const ROUTED = ["image", "stt", "tts", "video", "audio"] as const;
 
 describe("capability provider rows", () => {
 	test("every routed capability is a real gateway modality", () => {
@@ -21,7 +21,7 @@ describe("capability provider rows", () => {
 		// Chat is the section ABOVE this one and is routed by the model map, not
 		// the modality map. Listing it here would offer the same choice twice from
 		// two controls that disagree.
-		expect(ROUTED).not.toContain("chat" as never);
+		expect(ROUTED).not.toContain("chat");
 	});
 
 	test("covers every non-chat modality the gateway defines", () => {
@@ -29,7 +29,7 @@ describe("capability provider rows", () => {
 		// not would be invisible in settings — routable, but with nothing on
 		// screen saying so.
 		const uncovered = MODALITIES.filter(
-			(m) => m !== "chat" && !ROUTED.includes(m as (typeof ROUTED)[number])
+			(m) => m !== "chat" && !ROUTED.includes(m)
 		);
 		expect(uncovered).toEqual([]);
 	});

@@ -1,3 +1,10 @@
+import {
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
+import { nativeSdkSchemaAdmits } from "../desktop/agent-elements/utils/native-sdk-admission.ts";
+import type { NativeSdkValue } from "../desktop/agent-elements/utils/native-sdk-observation.ts";
 // Side-channel parts Core streams alongside the reply.
 //
 // Three `data-*` parts are NOT transcript content — they drive client state:
@@ -21,10 +28,10 @@
 // guarding on it no-ops mid-stream instead of stomping a manual pick.
 
 /** The subset of a UIMessage these scans need — kept structural so the helpers
- *  work against `ai`'s `UIMessage` without importing it. */
+ *  work against the native AI SDK UIMessage while allowing legacy parts. */
 export interface StreamedPartsMessage {
 	id: string;
-	parts?: unknown[];
+	parts?: NativeSdkValue[];
 	role: string;
 }
 
@@ -35,8 +42,19 @@ export interface StreamedEmission<T> {
 	value: T;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+interface StreamedPartObservation {
+	readonly config?: NativeSdkValue;
+	readonly currentModeId?: NativeSdkValue;
+	readonly data?: NativeSdkValue;
+	readonly text?: NativeSdkValue;
+	readonly type?: NativeSdkValue;
+}
+
+const streamedPartObjectSchema =
+	z.custom<StreamedPartObservation>(isNativeObjectLike);
+
+function isRecord(value: NativeSdkValue): value is StreamedPartObservation {
+	return nativeSdkSchemaAdmits(streamedPartObjectSchema, value);
 }
 
 /**
@@ -46,7 +64,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function findLatestPart<T>(
 	messages: readonly StreamedPartsMessage[],
 	type: string,
-	read: (data: unknown) => T | null
+	read: (data: NativeSdkValue) => T | null
 ): StreamedEmission<T> | null {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const message = messages[i];
@@ -74,7 +92,7 @@ export function latestStreamedAcpMode(
 	return (
 		findLatestPart(messages, "data-ryu-acp-mode", (data) => {
 			const modeId = isRecord(data) ? data.currentModeId : undefined;
-			const trimmed = typeof modeId === "string" ? modeId.trim() : "";
+			const trimmed = isNativeText(modeId) ? modeId.trim() : "";
 			return trimmed.length > 0 ? trimmed : null;
 		})?.value ?? null
 	);
@@ -89,6 +107,7 @@ export function latestStreamedAcpConfig(
 		if (!(isRecord(config) && Object.keys(config).length > 0)) {
 			return null;
 		}
+		// SAFETY: Core emits this named config channel from AcpEvent::ConfigUpdate(BTreeMap<String, String>); pi_config_updates drops each non-string value before mod.rs serializes { config: updates }. The existing object/nonempty guard handles absent frames and the original map identity is retained.
 		return config as Record<string, string>;
 	});
 }
@@ -100,7 +119,7 @@ export function latestPluginNote(
 ): StreamedEmission<string> | null {
 	return findLatestPart(messages, "data-plugin_note", (data) => {
 		const text = isRecord(data) ? data.text : undefined;
-		const trimmed = typeof text === "string" ? text.trim() : "";
+		const trimmed = isNativeText(text) ? text.trim() : "";
 		return trimmed.length > 0 ? trimmed : null;
 	});
 }

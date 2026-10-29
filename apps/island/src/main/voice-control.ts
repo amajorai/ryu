@@ -27,42 +27,45 @@ interface HookKeyEvent {
 }
 
 /** Named/punctuation Electron accelerator tokens → uiohook key names. */
-const NAMED_KEY_ALIASES: Record<string, keyof typeof UiohookKey> = {
-	SPACE: "Space",
-	TAB: "Tab",
-	BACKSPACE: "Backspace",
-	DELETE: "Delete",
-	DEL: "Delete",
-	INSERT: "Insert",
-	RETURN: "Enter",
-	ENTER: "Enter",
-	ESC: "Escape",
-	ESCAPE: "Escape",
-	UP: "ArrowUp",
-	DOWN: "ArrowDown",
-	LEFT: "ArrowLeft",
-	RIGHT: "ArrowRight",
-	HOME: "Home",
-	END: "End",
-	PAGEUP: "PageUp",
-	PAGEDOWN: "PageDown",
-	CAPSLOCK: "CapsLock",
-	NUMLOCK: "NumLock",
-	SCROLLLOCK: "ScrollLock",
-	PRINTSCREEN: "PrintScreen",
-	";": "Semicolon",
-	"=": "Equal",
-	",": "Comma",
-	"-": "Minus",
-	".": "Period",
-	"/": "Slash",
-	"`": "Backquote",
-	"~": "Backquote",
-	"[": "BracketLeft",
-	"\\": "Backslash",
-	"]": "BracketRight",
-	"'": "Quote",
-};
+const NAMED_KEY_ALIASES = new Map(
+	Object.entries({
+		SPACE: "Space",
+		TAB: "Tab",
+		BACKSPACE: "Backspace",
+		DELETE: "Delete",
+		DEL: "Delete",
+		INSERT: "Insert",
+		RETURN: "Enter",
+		ENTER: "Enter",
+		ESC: "Escape",
+		ESCAPE: "Escape",
+		UP: "ArrowUp",
+		DOWN: "ArrowDown",
+		LEFT: "ArrowLeft",
+		RIGHT: "ArrowRight",
+		HOME: "Home",
+		END: "End",
+		PAGEUP: "PageUp",
+		PAGEDOWN: "PageDown",
+		CAPSLOCK: "CapsLock",
+		NUMLOCK: "NumLock",
+		SCROLLLOCK: "ScrollLock",
+		PRINTSCREEN: "PrintScreen",
+		";": "Semicolon",
+		"=": "Equal",
+		",": "Comma",
+		"-": "Minus",
+		".": "Period",
+		"/": "Slash",
+		"`": "Backquote",
+		"~": "Backquote",
+		"[": "BracketLeft",
+		"\\": "Backslash",
+		"]": "BracketRight",
+		"'": "Quote",
+	} satisfies Record<string, keyof typeof UiohookKey>)
+);
+const DIRECT_KEYCODES = new Map(Object.entries(UiohookKey));
 
 /**
  * Map the primary (non-modifier) key of an Electron accelerator to a uiohook
@@ -81,12 +84,13 @@ export function acceleratorPrimaryKeycode(accelerator: string): number | null {
 		return null;
 	}
 	// Letters, digits, and F-keys match a UiohookKey entry by their own name.
-	const direct = UiohookKey[primary.toUpperCase() as keyof typeof UiohookKey];
-	if (typeof direct === "number") {
+	const direct = DIRECT_KEYCODES.get(primary.toUpperCase());
+	if (direct !== undefined) {
 		return direct;
 	}
 	const alias =
-		NAMED_KEY_ALIASES[primary.toUpperCase()] ?? NAMED_KEY_ALIASES[primary];
+		NAMED_KEY_ALIASES.get(primary.toUpperCase()) ??
+		NAMED_KEY_ALIASES.get(primary);
 	if (alias) {
 		return UiohookKey[alias];
 	}

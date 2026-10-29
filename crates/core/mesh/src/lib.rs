@@ -191,7 +191,8 @@ pub struct MeshPeer {
     pub os: String,
 }
 
-/// The canonical `GET /api/mesh/status` superset (Contract 6). snake_case keys;
+/// The canonical `GET /api/mesh/status` network and tunnel superset (Contract 6).
+/// Legacy fields remain snake_case; new fields use camelCase.
 /// `reachable` and `up` are both present and equal. `enabled:false` ⇒ all-default.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct MeshStatus {
@@ -199,7 +200,8 @@ pub struct MeshStatus {
     pub reachable: bool,
     /// `up == reachable` — both present in the wire shape per Contract 6.
     pub up: bool,
-    /// `"tailscale"` | `"headscale"` | `"tailcat"` | `null`.
+    /// `"tailscale"` | `"headscale"` | `"tailcat"` | `"cloudflared"` |
+    /// `"opentunnel"` | `"plugin"` | `null`.
     pub backend: Option<String>,
     /// Provider state (Tailscale's raw `BackendState`, or `Running`/`Stopped`
     /// for Tailcat).
@@ -209,14 +211,58 @@ pub struct MeshStatus {
     pub control_server: Option<String>,
     pub magic_dns_name: Option<String>,
     pub tailscale_ips: Vec<String>,
-    /// The active Tailcat connection address, or `null` for Tailscale/Headscale.
+    /// The active Tailcat connection address, or `null` for other backends.
     /// This is a bearer for the point-to-point connection and is returned only
     /// through the authenticated status route.
     pub tailcat_address: Option<String>,
+    /// The active public Cloudflare Quick Tunnel URL, or null for other backends.
+    #[serde(rename = "cloudflaredUrl")]
+    pub cloudflared_url: Option<String>,
+    /// The active public URL of any public tunnel backend (Cloudflared,
+    /// OpenTunnel, or a plugin tunnel), or null. Supersedes `cloudflaredUrl`,
+    /// which is kept for older clients.
+    #[serde(rename = "publicUrl")]
+    pub public_url: Option<String>,
+    /// The plugin serving the `network.tunnel` capability when the backend is
+    /// `"plugin"`, else null.
+    #[serde(rename = "tunnelProvider")]
+    pub tunnel_provider: Option<MeshTunnelProvider>,
+    /// Why the selected backend is not running, when the provider reported one
+    /// (OpenTunnel provisioning failures, plugin adapter errors). Null otherwise.
+    #[serde(rename = "backendError")]
+    pub backend_error: Option<String>,
     pub peers: Vec<MeshPeer>,
     /// Independent of mesh — P7 reads the ingress mode from
     /// `/api/webhook-ingress/status`, not here. Always `null` in this object.
     pub webhook_ingress_mode: Option<String>,
+    /// This node's own key posture. Present only for the `tailscale` and `headscale`
+    /// backends (the ones with a node key); omitted for every other backend.
+    #[serde(rename = "nodeKey", skip_serializing_if = "Option::is_none")]
+    pub node_key: Option<MeshNodeKey>,
+    /// Tailnet Lock (a signed-node allowlist that stops a compromised control plane
+    /// from adding nodes): `"enabled"` | `"disabled"` | `"unknown"` (the client did
+    /// not report it) | `"unsupported"` (Headscale has no Tailnet Lock, which is a
+    /// property of the backend, not a misconfiguration). Present only for the
+    /// `tailscale` and `headscale` backends; omitted for every other backend.
+    #[serde(rename = "tailnetLock", skip_serializing_if = "Option::is_none")]
+    pub tailnet_lock: Option<String>,
+}
+
+/// A node's own key posture, from the `Self` entry of `tailscale status --json`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MeshNodeKey {
+    /// When the node key expires (RFC 3339), or `null` when key expiry is disabled for
+    /// this node (tagged nodes, or expiry turned off in the admin console) or unreported.
+    pub expiry: Option<String>,
+    /// Whether the node key has already expired and the node must re-authenticate.
+    pub expired: bool,
+}
+
+/// The plugin behind a `"plugin"` tunnel backend.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MeshTunnelProvider {
+    pub id: String,
+    pub name: String,
 }
 
 impl Default for MeshStatus {
@@ -231,8 +277,14 @@ impl Default for MeshStatus {
             magic_dns_name: None,
             tailscale_ips: Vec::new(),
             tailcat_address: None,
+            cloudflared_url: None,
+            public_url: None,
+            tunnel_provider: None,
+            backend_error: None,
             peers: Vec::new(),
             webhook_ingress_mode: None,
+            node_key: None,
+            tailnet_lock: None,
         }
     }
 }
@@ -259,6 +311,7 @@ fn classify_provider_backend(
     explicit_backend: Option<&str>,
     control_url: Option<&str>,
     tailcat_address: Option<&str>,
+    cloudflared_url: Option<&str>,
 ) -> Option<String> {
     if explicit_backend
         .map(|value| value.eq_ignore_ascii_case("tailcat"))
@@ -266,6 +319,18 @@ fn classify_provider_backend(
         || tailcat_address.is_some()
     {
         return Some("tailcat".to_owned());
+    }
+    if let Some(explicit) = explicit_backend.map(str::to_ascii_lowercase) {
+        if explicit == "opentunnel" || explicit == "plugin" {
+            return Some(explicit);
+        }
+    }
+    if explicit_backend
+        .map(|value| value.eq_ignore_ascii_case("cloudflared"))
+        .unwrap_or(false)
+        || cloudflared_url.is_some()
+    {
+        return Some("cloudflared".to_owned());
     }
     classify_backend(control_url)
 }
@@ -311,15 +376,44 @@ pub fn parse_status_json(enabled: bool, raw: &serde_json::Value) -> MeshStatus {
         .and_then(|v| v.as_str())
         .map(str::to_owned)
         .filter(|s| !s.is_empty());
+    let cloudflared_url = raw
+        .get("Self")
+        .and_then(|self_node| self_node.get("CloudflaredUrl"))
+        .and_then(|value| value.as_str())
+        .map(str::to_owned)
+        .filter(|url| !url.is_empty());
     let explicit_backend = raw.get("Backend").and_then(|v| v.as_str());
+    let self_str = |key: &str| {
+        raw.get("Self")
+            .and_then(|self_node| self_node.get(key))
+            .and_then(|value| value.as_str())
+            .map(str::to_owned)
+            .filter(|value| !value.is_empty())
+    };
+    let public_url = self_str("PublicUrl").or_else(|| cloudflared_url.clone());
+    let tunnel_provider = self_str("TunnelProvider").map(|id| MeshTunnelProvider {
+        name: self_str("TunnelProviderName").unwrap_or_else(|| id.clone()),
+        id,
+    });
+    let backend_error = raw
+        .get("Error")
+        .and_then(|value| value.as_str())
+        .map(str::to_owned)
+        .filter(|value| !value.is_empty());
 
-    let backend = if backend_state == "Stopped" || backend_state == "NoState" {
+    // A public-tunnel backend names itself even while stopped or provisioning,
+    // so the picker can show progress and errors against the right row.
+    let names_itself = explicit_backend.is_some_and(|value| {
+        value.eq_ignore_ascii_case("opentunnel") || value.eq_ignore_ascii_case("plugin")
+    });
+    let backend = if (backend_state == "Stopped" || backend_state == "NoState") && !names_itself {
         None
     } else {
         classify_provider_backend(
             explicit_backend,
             control_server.as_deref(),
             tailcat_address.as_deref(),
+            cloudflared_url.as_deref(),
         )
     };
 
@@ -345,6 +439,35 @@ pub fn parse_status_json(enabled: bool, raw: &serde_json::Value) -> MeshStatus {
         .map(|map| map.values().map(parse_peer).collect::<Vec<_>>())
         .unwrap_or_default();
 
+    // Key posture exists only where there is a node key to speak of. The Tailnet Lock
+    // answer is not part of `tailscale status --json`; Core adds it under `TailnetLock`
+    // (from `tailscale lock status --json`) before calling this.
+    let has_node_key = matches!(backend.as_deref(), Some("tailscale" | "headscale"));
+    let node_key = has_node_key.then(|| MeshNodeKey {
+        expiry: self_str("KeyExpiry"),
+        expired: self_node
+            .and_then(|s| s.get("Expired"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    });
+    let tailnet_lock = match backend.as_deref() {
+        // Headscale has no Tailnet Lock: report the capability gap, not a warning.
+        Some("headscale") => Some("unsupported".to_owned()),
+        Some("tailscale") => Some(
+            match raw
+                .get("TailnetLock")
+                .and_then(|lock| lock.get("Enabled"))
+                .and_then(|v| v.as_bool())
+            {
+                Some(true) => "enabled",
+                Some(false) => "disabled",
+                None => "unknown",
+            }
+            .to_owned(),
+        ),
+        _ => None,
+    };
+
     MeshStatus {
         enabled,
         reachable,
@@ -355,8 +478,14 @@ pub fn parse_status_json(enabled: bool, raw: &serde_json::Value) -> MeshStatus {
         magic_dns_name,
         tailscale_ips,
         tailcat_address,
+        cloudflared_url,
+        public_url: if reachable { public_url } else { None },
+        tunnel_provider,
+        backend_error,
         peers,
         webhook_ingress_mode: None,
+        node_key,
+        tailnet_lock,
     }
 }
 
@@ -448,8 +577,9 @@ pub async fn query_status() -> MeshStatus {
     }
 }
 
-/// Ensure a Tailscale Funnel is serving `port` to the public internet, returning
-/// the public HTTPS URL. Consumed by P6's `TailscaleFunnelSource`.
+/// Ensure a Tailscale Funnel publishes Core's webhook paths (not the whole `port`) to
+/// the public internet, returning the public HTTPS URL. `port` is the local Core port
+/// the path-scoped mounts proxy to. Consumed by P6's `TailscaleFunnelSource`.
 ///
 /// Requires the mesh to be enabled and the daemon running with HTTPS certs
 /// provisioned; otherwise returns a clear error so the ingress seam can fall back
@@ -724,6 +854,98 @@ mod tests {
     }
 
     #[test]
+    fn parse_status_json_reports_node_key_expiry_and_tailnet_lock() {
+        let mut raw = running_status_json();
+        raw["Self"]["KeyExpiry"] = serde_json::json!("2027-04-01T12:00:00Z");
+        raw["TailnetLock"] = serde_json::json!({ "Enabled": true });
+        let status = parse_status_json(true, &raw);
+        assert_eq!(status.backend.as_deref(), Some("tailscale"));
+        assert_eq!(
+            status.node_key,
+            Some(MeshNodeKey {
+                expiry: Some("2027-04-01T12:00:00Z".to_owned()),
+                expired: false,
+            })
+        );
+        assert_eq!(status.tailnet_lock.as_deref(), Some("enabled"));
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["nodeKey"]["expiry"], "2027-04-01T12:00:00Z");
+        assert_eq!(json["nodeKey"]["expired"], false);
+        assert_eq!(json["tailnetLock"], "enabled");
+    }
+
+    #[test]
+    fn parse_status_json_flags_an_expired_key_and_disabled_lock() {
+        let mut raw = running_status_json();
+        raw["Self"]["KeyExpiry"] = serde_json::json!("2025-01-01T00:00:00Z");
+        raw["Self"]["Expired"] = serde_json::json!(true);
+        raw["TailnetLock"] = serde_json::json!({ "Enabled": false });
+        let status = parse_status_json(true, &raw);
+        let key = status.node_key.expect("a node key");
+        assert!(key.expired);
+        assert_eq!(key.expiry.as_deref(), Some("2025-01-01T00:00:00Z"));
+        assert_eq!(status.tailnet_lock.as_deref(), Some("disabled"));
+    }
+
+    #[test]
+    fn parse_status_json_without_expiry_or_lock_data_is_null_and_unknown() {
+        // A tagged node has no key expiry, and an older client or a failed `lock status`
+        // leaves the lock answer out: expiry reads `null` (disabled/unreported) and the
+        // lock reads `unknown`, never a guess.
+        let status = parse_status_json(true, &running_status_json());
+        assert_eq!(
+            status.node_key,
+            Some(MeshNodeKey {
+                expiry: None,
+                expired: false,
+            })
+        );
+        assert_eq!(status.tailnet_lock.as_deref(), Some("unknown"));
+        let json = serde_json::to_value(&status).unwrap();
+        assert!(json["nodeKey"]["expiry"].is_null());
+    }
+
+    #[test]
+    fn headscale_reports_tailnet_lock_as_unsupported_not_a_warning() {
+        let mut raw = running_status_json();
+        raw["Self"]["ControlURL"] = serde_json::json!("https://headscale.example.org");
+        raw["Self"]["KeyExpiry"] = serde_json::json!("2027-04-01T12:00:00Z");
+        // Even a stray lock answer must not turn Headscale into "disabled".
+        raw["TailnetLock"] = serde_json::json!({ "Enabled": false });
+        let status = parse_status_json(true, &raw);
+        assert_eq!(status.backend.as_deref(), Some("headscale"));
+        assert_eq!(status.tailnet_lock.as_deref(), Some("unsupported"));
+        assert_eq!(
+            status.node_key.and_then(|key| key.expiry).as_deref(),
+            Some("2027-04-01T12:00:00Z")
+        );
+    }
+
+    #[test]
+    fn backends_without_a_node_key_omit_the_key_posture() {
+        let tailcat = parse_status_json(
+            true,
+            &serde_json::json!({
+                "BackendState": "Running",
+                "Backend": "tailcat",
+                "Self": { "TailcatAddress": "tcExampleToken" }
+            }),
+        );
+        assert!(tailcat.node_key.is_none());
+        assert!(tailcat.tailnet_lock.is_none());
+        let json = serde_json::to_value(&tailcat).unwrap();
+        assert!(json.get("nodeKey").is_none());
+        assert!(json.get("tailnetLock").is_none());
+        // A daemon that needs login has no classified backend yet, so nothing is claimed.
+        let needs_login = parse_status_json(
+            true,
+            &serde_json::json!({ "BackendState": "NeedsLogin", "Self": {} }),
+        );
+        assert!(needs_login.node_key.is_none());
+        assert!(needs_login.tailnet_lock.is_none());
+    }
+
+    #[test]
     fn parse_status_json_tailcat_backend() {
         let raw = serde_json::json!({
             "BackendState": "Running",
@@ -742,6 +964,92 @@ mod tests {
     }
 
     #[test]
+    fn parse_status_json_cloudflared_backend() {
+        let raw = serde_json::json!({
+            "BackendState": "Running",
+            "Backend": "cloudflared",
+            "Self": {
+                "CloudflaredUrl": "https://warm-tree.trycloudflare.com"
+            }
+        });
+        let status = parse_status_json(true, &raw);
+        assert!(status.enabled);
+        assert!(status.reachable);
+        assert_eq!(status.backend.as_deref(), Some("cloudflared"));
+        assert!(status.control_server.is_none());
+        assert_eq!(
+            status.cloudflared_url.as_deref(),
+            Some("https://warm-tree.trycloudflare.com")
+        );
+        let contract_fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/mesh-status-cloudflared.json"))
+                .expect("shared Core/desktop contract fixture");
+        assert_eq!(serde_json::to_value(&status).unwrap(), contract_fixture);
+        assert!(status.tailcat_address.is_none());
+        assert!(status.peers.is_empty());
+    }
+
+    #[test]
+    fn parse_status_json_opentunnel_backend() {
+        let raw = serde_json::json!({
+            "BackendState": "Running",
+            "Backend": "opentunnel",
+            "Self": { "PublicUrl": "https://0123456789abcdef.abcdefghjkmn.opentunnel.xyz" }
+        });
+        let status = parse_status_json(true, &raw);
+        assert!(status.reachable);
+        assert_eq!(status.backend.as_deref(), Some("opentunnel"));
+        assert_eq!(
+            status.public_url.as_deref(),
+            Some("https://0123456789abcdef.abcdefghjkmn.opentunnel.xyz")
+        );
+        assert!(status.cloudflared_url.is_none());
+        assert!(status.tunnel_provider.is_none());
+    }
+
+    #[test]
+    fn provisioning_opentunnel_names_itself_without_a_url() {
+        let raw = serde_json::json!({
+            "BackendState": "Provisioning",
+            "Backend": "opentunnel",
+            "Self": { "PublicUrl": "https://stale.example" }
+        });
+        let status = parse_status_json(true, &raw);
+        assert!(!status.reachable);
+        assert_eq!(status.backend.as_deref(), Some("opentunnel"));
+        assert!(
+            status.public_url.is_none(),
+            "a URL is only published while running"
+        );
+    }
+
+    #[test]
+    fn parse_status_json_plugin_backend_reports_provider_and_error() {
+        let raw = serde_json::json!({
+            "BackendState": "Failed",
+            "Backend": "plugin",
+            "Self": {
+                "TunnelProvider": "com.acme.tunnel",
+                "TunnelProviderName": "Acme Tunnel"
+            },
+            "Error": "quota exceeded"
+        });
+        let status = parse_status_json(true, &raw);
+        assert!(!status.reachable);
+        assert_eq!(status.backend.as_deref(), Some("plugin"));
+        assert_eq!(
+            status.tunnel_provider,
+            Some(MeshTunnelProvider {
+                id: "com.acme.tunnel".to_owned(),
+                name: "Acme Tunnel".to_owned(),
+            })
+        );
+        assert_eq!(status.backend_error.as_deref(), Some("quota exceeded"));
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["tunnelProvider"]["name"], "Acme Tunnel");
+    }
+
+    #[test]
     fn disabled_shape_is_all_default() {
         let status = MeshStatus::default();
         assert!(!status.enabled);
@@ -753,6 +1061,7 @@ mod tests {
         assert!(status.magic_dns_name.is_none());
         assert!(status.tailscale_ips.is_empty());
         assert!(status.tailcat_address.is_none());
+        assert!(status.cloudflared_url.is_none());
         assert!(status.peers.is_empty());
         assert!(status.webhook_ingress_mode.is_none());
     }
@@ -769,6 +1078,10 @@ mod tests {
         assert_eq!(json["magic_dns_name"], serde_json::Value::Null);
         assert_eq!(json["tailscale_ips"], serde_json::json!([]));
         assert_eq!(json["tailcat_address"], serde_json::Value::Null);
+        assert_eq!(json["cloudflaredUrl"], serde_json::Value::Null);
+        assert_eq!(json["publicUrl"], serde_json::Value::Null);
+        assert_eq!(json["tunnelProvider"], serde_json::Value::Null);
+        assert_eq!(json["backendError"], serde_json::Value::Null);
         assert_eq!(json["peers"], serde_json::json!([]));
         assert_eq!(json["webhook_ingress_mode"], serde_json::Value::Null);
     }

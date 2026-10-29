@@ -1,6 +1,6 @@
-import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu";
-import { Switch } from "@ryu/ui/components/switch";
-import { cn } from "@ryu/ui/lib/utils";
+import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { setInterfaceLevel } from "@/src/lib/interface-level.ts";
 
@@ -23,7 +23,6 @@ export function InterfaceLevelMenuItem() {
 
 	return (
 		<DropdownMenuItem
-			className="gap-1.5 py-2"
 			closeOnClick={false}
 			onKeyDown={(event) => {
 				if (event.key !== " " && event.key !== "Enter") {
@@ -35,6 +34,7 @@ export function InterfaceLevelMenuItem() {
 					setInterfaceLevel(isCode ? "simple" : "expert");
 				}
 			}}
+			purpose="interface-level"
 		>
 			<span
 				className={cn(
@@ -47,7 +47,6 @@ export function InterfaceLevelMenuItem() {
 			<Switch
 				aria-label="Interface mode"
 				checked={isCode}
-				className="ryu-interface-mode-switch"
 				onCheckedChange={(checked) =>
 					setInterfaceLevel(checked ? "expert" : "simple")
 				}

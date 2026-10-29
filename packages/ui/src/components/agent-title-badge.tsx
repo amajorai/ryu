@@ -16,7 +16,7 @@ export function AgentTitleBadge({
 	return (
 		<span
 			className={cn(
-				"inline-flex max-w-28 shrink-0 items-center truncate rounded-full border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-medium text-[10px] text-primary leading-none",
+				"type-compact inline-flex max-w-28 shrink-0 items-center truncate rounded-full border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-medium text-primary leading-none",
 				className
 			)}
 			data-slot="agent-title-badge"

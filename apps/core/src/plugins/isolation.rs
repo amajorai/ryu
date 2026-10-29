@@ -4,11 +4,12 @@
 //! Ryu runs plugin code on lanes with **very different** isolation strength, and
 //! until this module nothing reported the difference:
 //!
-//! - The **Deno lane** (turn hooks, capability adapters, PTC tool-exec) is a real
-//!   sandbox: `--no-prompt` plus path-scoped `--allow-read`/`--allow-write`,
-//!   host-scoped `--allow-net`, name-scoped `--allow-run`, and `--allow-env` is
-//!   never passed. An ungranted access fails rather than prompting. See
-//!   [`ryu_tool_exec::deno_backend`].
+//! - The **JS sandbox lane** (turn hooks, capability adapters, inline tools, PTC
+//!   tool-exec) is a real sandbox: a WebAssembly instance with no filesystem,
+//!   network or environment, whose only door out is the host bridge. A manifest
+//!   granting filesystem or network is refused; `child_process` admits only the
+//!   bare program names the manifest's `run` list and capability shims name. See
+//!   `ryu_tool_exec`'s `js_backend`.
 //! - The **browser lane** (a plugin's `ui_code` bundle) renders in an iframe with
 //!   `sandbox="allow-scripts"` and no `allow-same-origin` — browser-enforced.
 //! - The **native lane** (manifest `sidecars`, `mcp_servers`) has **no enforcement
@@ -80,11 +81,39 @@ pub const TRUSTED_IDS_PREF: &str = "ryu:plugins-trusted-ids";
 /// it is the user's call, not a silent upgrade.
 pub const REQUIRE_TRUST_PREF: &str = "ryu:plugins-require-trust-for-host-access";
 
+/// Why Core will not run a plugin's host-access lanes right now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum HostAccessRefusal {
+    /// The installed plugin (or this installed version of it) is on the node's
+    /// local revocation list ([`crate::plugins::PluginStore::revoke`]).
+    Revoked { entry: String },
+    /// [`REQUIRE_TRUST_PREF`] is on and the plugin's host-access lane has no
+    /// trust basis.
+    UntrustedHostAccess,
+}
+
+impl std::fmt::Display for HostAccessRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Revoked { entry } => write!(
+                f,
+                "plugin is revoked on this node ('{entry}'); remove the revocation to run it again"
+            ),
+            Self::UntrustedHostAccess => f.write_str(
+                "plugin runs unsandboxed host-access lanes (sidecars, MCP servers, Pi \
+                 extensions or LSP servers) with no trust basis, and this node requires trust \
+                 for host access",
+            ),
+        }
+    }
+}
+
 /// What a lane's isolation mechanism can actually enforce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Enforcement {
-    /// A real, mechanically-enforced sandbox denies by default (Deno lane, or the
+    /// A real, mechanically-enforced sandbox denies by default (JS sandbox lane, or the
     /// browser's iframe sandbox for UI bundles).
     Sandboxed,
     /// No isolation mechanism exists for this lane today. The process runs with
@@ -97,7 +126,7 @@ pub enum Enforcement {
 #[serde(rename_all = "snake_case")]
 pub enum LaneKind {
     /// `contributes.turn_hooks[]` — a JS fragment spliced into an async IIFE and
-    /// run in the Deno sandbox on the turn boundary.
+    /// run in the JS sandbox on the turn boundary.
     TurnHook,
     /// `provides[].tools.<verb>.adapter` — a capability adapter body, same lane.
     CapabilityAdapter,
@@ -108,6 +137,15 @@ pub enum LaneKind {
     Sidecar,
     /// A `mcp_servers` entry: a spawned MCP server subprocess. Full host access.
     McpServer,
+    /// A `contributes.pi_extensions` file: TypeScript the managed Pi process
+    /// loads with its own (full host) privilege.
+    PiExtension,
+    /// A `contributes.lsp_servers` entry: a spawned language-server process.
+    LspServer,
+    /// The top-level `runtime` block: an external runtime Core provisions on
+    /// enable (a venv plus `pip install` of manifest-chosen requirements, whose
+    /// build hooks run on the host). Full host access.
+    ExternalRuntime,
 }
 
 impl LaneKind {
@@ -117,7 +155,11 @@ impl LaneKind {
     pub const fn enforcement(self) -> Enforcement {
         match self {
             Self::TurnHook | Self::CapabilityAdapter | Self::UiBundle => Enforcement::Sandboxed,
-            Self::Sidecar | Self::McpServer => Enforcement::Unenforceable,
+            Self::Sidecar
+            | Self::McpServer
+            | Self::PiExtension
+            | Self::LspServer
+            | Self::ExternalRuntime => Enforcement::Unenforceable,
         }
     }
 }
@@ -212,36 +254,7 @@ pub struct PluginProvenance {
     pub captured_at: Option<String>,
 }
 
-#[must_use]
-pub fn manifest_sha256(manifest: &PluginManifest) -> String {
-    use sha2::{Digest, Sha256};
-    let bytes = serde_json::to_vec(manifest).unwrap_or_default();
-    format!("{:x}", Sha256::digest(bytes))
-}
-
-/// Digest the capability-bearing manifest shape used for compiled first-party
-/// trust decisions.
-///
-/// Standalone bundles add `ui_code_sha256` and, for inline backends,
-/// `backend_sha256` after reading the satellite's carriage. Those fields protect
-/// the carried bytes at the install boundary, but they are not capability or
-/// lifecycle declarations. Including them in the compiled-manifest identity
-/// would make every standalone build look like a modified Community package and
-/// would disable its manifest-owned sidecar/MCP lanes. Signed marketplace
-/// provenance continues to use [`manifest_sha256`] over the exact accepted
-/// manifest bytes.
-#[must_use]
-pub fn manifest_sha256_for_trust(manifest: &PluginManifest) -> String {
-    use sha2::{Digest, Sha256};
-
-    let mut value = serde_json::to_value(manifest).unwrap_or_default();
-    if let Some(object) = value.as_object_mut() {
-        object.remove("ui_code_sha256");
-        object.remove("backend_sha256");
-    }
-    let bytes = serde_json::to_vec(&value).unwrap_or_default();
-    format!("{:x}", Sha256::digest(bytes))
-}
+pub use digest::{manifest_sha256, manifest_sha256_for_trust};
 
 impl PluginProvenance {
     /// Provenance for a manifest compiled into the Core binary.
@@ -264,57 +277,36 @@ pub struct TrustPolicy {
     /// Refuse, rather than report, an unvetted host-access lane
     /// ([`REQUIRE_TRUST_PREF`]).
     pub require_trust_for_host_access: bool,
+    /// The node's local revocation entries (`id` or `id@version`), read from
+    /// [`crate::plugins::PluginStore::list_revocations`]. Revocation only ever
+    /// tightens, so an unreadable list is reported, not trusted.
+    pub revoked: BTreeSet<String>,
 }
 
-impl TrustPolicy {
-    /// Resolve the trust basis for one plugin.
-    ///
-    /// The ordering is deliberate and **fail-closed**: the user allowlist is
-    /// consulted *last* and can only re-label a plugin whose provenance already
-    /// vouches for its publisher. Listing a sideloaded id does nothing. Without
-    /// that rule the preference is a universal sandbox bypass that any process
-    /// able to write one preference key could arm.
-    #[must_use]
-    pub fn resolve_trust(&self, id: &str, provenance: Option<&PluginProvenance>) -> TrustBasis {
-        if crate::plugins::builtins::is_system_plugin(id) {
-            return TrustBasis::SystemPlugin;
-        }
-        // No provenance captured ⇒ nothing is known ⇒ nothing is trusted. This is
-        // the migration path for every record installed before the column existed.
-        let Some(p) = provenance else {
-            return TrustBasis::Untrusted;
-        };
-        // A compiled manifest is an official Ryu artifact, but compilation is
-        // not the same thing as being part of the system. Only the explicit
-        // SYSTEM_PLUGINS allowlist above receives the non-removable
-        // SystemPlugin basis. This distinction lets ordinary first-party
-        // packages move to the verified marketplace without changing their
-        // trust semantics.
-        if p.builtin {
-            return TrustBasis::OfficialMarketplace;
-        }
-        let from_official = p.source_id.as_deref() == Some(OFFICIAL_MARKETPLACE_SOURCE_ID);
-        let signed_official = from_official && p.signature_verified;
-        let basis = if p.org_verified && signed_official {
-            TrustBasis::VerifiedPublisher {
-                org: p.publisher_org.clone(),
-                tier: p.org_verified_tier.clone(),
-            }
-        } else if signed_official {
-            TrustBasis::OfficialMarketplace
-        } else {
-            // A third-party source can claim `orgVerified` in its own JSON. Ryu's
-            // blue check is an admin decision in Ryu's own control plane, so a
-            // claim carried by any other source is publisher-controlled data and
-            // is not a trust signal.
-            TrustBasis::Untrusted
-        };
-        if self.trusted_ids.contains(id) && basis.vouches() {
-            return TrustBasis::UserAllowlisted;
-        }
-        basis
+/// Whether the manifest Core has loaded no longer matches the manifest the
+/// recorded provenance vouched for.
+///
+/// - Signed marketplace installs record [`PluginProvenance::manifest_sha256`] over
+///   the exact accepted manifest; any other loaded manifest has drifted.
+/// - Compiled (`builtin`) provenance vouches only for the manifest compiled into
+///   this binary, so a loaded manifest that is not that exact manifest has drifted.
+/// - A legacy signed row without a digest cannot be compared and is not reported as
+///   drifted here; the startup re-verification backfills its digest.
+#[must_use]
+pub fn manifest_drifted(manifest: &PluginManifest, provenance: Option<&PluginProvenance>) -> bool {
+    let Some(provenance) = provenance else {
+        return false;
+    };
+    if provenance.builtin {
+        return !crate::plugins::builtins::is_exact_compiled_manifest(manifest);
     }
+    provenance
+        .manifest_sha256
+        .as_deref()
+        .is_some_and(|recorded| recorded != manifest_sha256(manifest))
 }
+
+pub use policy::{load_trust_policy, revocation_matches};
 
 /// The full isolation report for one installed plugin.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -330,6 +322,10 @@ pub struct PluginIsolation {
     pub unenforceable_lanes: Vec<LaneReport>,
     pub trust: TrustBasis,
     pub host_access: HostAccess,
+    /// The loaded manifest no longer matches the manifest its provenance vouched
+    /// for, so `trust` was downgraded ([`manifest_drifted`]).
+    #[serde(default)]
+    pub manifest_drifted: bool,
 }
 
 impl PluginIsolation {
@@ -406,6 +402,31 @@ pub fn lanes_of(manifest: &PluginManifest) -> Vec<LaneReport> {
         });
     }
 
+    if let Some(contributes) = &manifest.contributes {
+        for ext in &contributes.pi_extensions {
+            lanes.push(LaneReport {
+                kind: LaneKind::PiExtension,
+                enforcement: LaneKind::PiExtension.enforcement(),
+                detail: ext.id.clone(),
+            });
+        }
+        for name in contributes.lsp_servers.keys() {
+            lanes.push(LaneReport {
+                kind: LaneKind::LspServer,
+                enforcement: LaneKind::LspServer.enforcement(),
+                detail: name.clone(),
+            });
+        }
+    }
+
+    if let Some(runtime) = &manifest.runtime {
+        lanes.push(LaneReport {
+            kind: LaneKind::ExternalRuntime,
+            enforcement: LaneKind::ExternalRuntime.enforcement(),
+            detail: format!("{} ({})", runtime.entry, runtime.kind),
+        });
+    }
+
     lanes
 }
 
@@ -423,7 +444,8 @@ pub fn resolve(
         .filter(|l| l.enforcement == Enforcement::Unenforceable)
         .cloned()
         .collect();
-    let trust = policy.resolve_trust(&manifest.id, provenance);
+    let manifest_drifted = manifest_drifted(manifest, provenance);
+    let trust = policy.resolve_trust_for_manifest(manifest, provenance);
     let host_access = if unenforceable_lanes.is_empty() {
         HostAccess::NotRequested
     } else if trust.vouches() {
@@ -441,204 +463,12 @@ pub fn resolve(
         lanes,
         trust,
         host_access,
+        manifest_drifted,
     }
 }
+
+mod digest;
+mod policy;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn policy_with(ids: &[&str], require: bool) -> TrustPolicy {
-        TrustPolicy {
-            trusted_ids: ids.iter().map(|s| (*s).to_owned()).collect(),
-            require_trust_for_host_access: require,
-        }
-    }
-
-    #[test]
-    fn standalone_carriage_hashes_do_not_change_compiled_trust_identity() {
-        let mut manifest: PluginManifest = serde_json::from_value(serde_json::json!({
-            "id": "@ryu/test-app",
-            "name": "Test App",
-            "version": "1.0.0",
-            "runnables": []
-        }))
-        .expect("minimal manifest");
-        let exact = manifest_sha256_for_trust(&manifest);
-        let exact_bytes = manifest_sha256(&manifest);
-
-        manifest.ui_code_sha256 = Some("ui-hash".to_owned());
-        manifest.backend_sha256 = Some("backend-hash".to_owned());
-
-        assert_eq!(manifest_sha256_for_trust(&manifest), exact);
-        assert_ne!(manifest_sha256(&manifest), exact_bytes);
-    }
-
-    fn official(org_verified: bool) -> PluginProvenance {
-        PluginProvenance {
-            source_id: Some(OFFICIAL_MARKETPLACE_SOURCE_ID.to_owned()),
-            publisher_org: Some("org_acme".to_owned()),
-            org_verified,
-            signature_verified: true,
-            ..PluginProvenance::default()
-        }
-    }
-
-    #[test]
-    fn official_source_without_a_verified_signature_is_untrusted() {
-        let policy = TrustPolicy::default();
-        assert_eq!(
-            policy.resolve_trust(
-                "com.acme.app",
-                Some(&PluginProvenance {
-                    source_id: Some(OFFICIAL_MARKETPLACE_SOURCE_ID.to_owned()),
-                    ..PluginProvenance::default()
-                }),
-            ),
-            TrustBasis::Untrusted
-        );
-    }
-
-    fn sideloaded() -> PluginProvenance {
-        PluginProvenance {
-            source_id: Some("github-topic".to_owned()),
-            ..PluginProvenance::default()
-        }
-    }
-
-    // ── The two fail-closed cases this whole feature turns on ────────────────
-
-    #[test]
-    fn allowlisting_a_sideloaded_id_does_not_trust_it() {
-        // The discriminating case: the user (or anything able to write one
-        // preference key) names a sideloaded plugin. Provenance does not vouch for
-        // it, so the allowlist must not promote it.
-        let policy = policy_with(&["com.example.evil"], false);
-        let trust = policy.resolve_trust("com.example.evil", Some(&sideloaded()));
-        assert_eq!(trust, TrustBasis::Untrusted);
-        assert!(!trust.vouches());
-    }
-
-    #[test]
-    fn absent_provenance_is_untrusted_not_trusted() {
-        // Every record installed before the provenance column existed deserializes
-        // as `None`. That must read as "nothing is known", never as a free pass.
-        let policy = policy_with(&["com.example.legacy"], false);
-        assert_eq!(
-            policy.resolve_trust("com.example.legacy", None),
-            TrustBasis::Untrusted
-        );
-    }
-
-    // ── Trust resolution ─────────────────────────────────────────────────────
-
-    #[test]
-    fn verified_org_on_the_official_marketplace_vouches() {
-        let policy = TrustPolicy::default();
-        let trust = policy.resolve_trust("com.acme.app", Some(&official(true)));
-        assert!(matches!(trust, TrustBasis::VerifiedPublisher { .. }));
-        assert!(trust.vouches());
-    }
-
-    #[test]
-    fn official_marketplace_without_a_verified_org_still_vouches_but_says_so() {
-        let policy = TrustPolicy::default();
-        assert_eq!(
-            policy.resolve_trust("com.acme.app", Some(&official(false))),
-            TrustBasis::OfficialMarketplace
-        );
-    }
-
-    #[test]
-    fn a_third_party_source_claiming_org_verified_is_ignored() {
-        // `orgVerified` is an admin decision in Ryu's control plane. Any other
-        // source asserting it is just publisher-controlled JSON.
-        let liar = PluginProvenance {
-            source_id: Some("github-topic".to_owned()),
-            org_verified: true,
-            org_verified_tier: Some("gold".to_owned()),
-            ..PluginProvenance::default()
-        };
-        let policy = TrustPolicy::default();
-        assert_eq!(
-            policy.resolve_trust("com.example.liar", Some(&liar)),
-            TrustBasis::Untrusted
-        );
-    }
-
-    #[test]
-    fn allowlisting_a_marketplace_plugin_relabels_it() {
-        let policy = policy_with(&["com.acme.app"], false);
-        assert_eq!(
-            policy.resolve_trust("com.acme.app", Some(&official(false))),
-            TrustBasis::UserAllowlisted
-        );
-    }
-
-    #[test]
-    fn builtin_provenance_reads_as_a_system_plugin() {
-        let policy = TrustPolicy::default();
-        assert_eq!(
-            policy.resolve_trust("com.example.compiled", Some(&PluginProvenance::builtin())),
-            TrustBasis::OfficialMarketplace
-        );
-    }
-
-    // ── Enforcement vs exemption must not collapse ───────────────────────────
-
-    #[test]
-    fn sandboxed_and_unenforceable_lanes_are_distinct() {
-        assert_eq!(LaneKind::TurnHook.enforcement(), Enforcement::Sandboxed);
-        assert_eq!(
-            LaneKind::CapabilityAdapter.enforcement(),
-            Enforcement::Sandboxed
-        );
-        assert_eq!(LaneKind::UiBundle.enforcement(), Enforcement::Sandboxed);
-        assert_eq!(LaneKind::Sidecar.enforcement(), Enforcement::Unenforceable);
-        assert_eq!(
-            LaneKind::McpServer.enforcement(),
-            Enforcement::Unenforceable
-        );
-    }
-
-    #[test]
-    fn refusal_requires_the_user_to_have_opted_in() {
-        let report = PluginIsolation {
-            id: "com.example.evil".to_owned(),
-            name: "Evil".to_owned(),
-            lanes: vec![],
-            fully_sandboxed: false,
-            unenforceable_lanes: vec![LaneReport {
-                kind: LaneKind::Sidecar,
-                enforcement: Enforcement::Unenforceable,
-                detail: "back (binary)".to_owned(),
-            }],
-            trust: TrustBasis::Untrusted,
-            host_access: HostAccess::Unvetted,
-        };
-        // Default policy reports, never breaks a working install.
-        assert!(!report.should_refuse_host_access(&policy_with(&[], false)));
-        // Only an explicit opt-in refuses.
-        assert!(report.should_refuse_host_access(&policy_with(&[], true)));
-    }
-
-    #[test]
-    fn a_vouched_plugin_is_never_refused() {
-        let report = PluginIsolation {
-            id: "com.acme.app".to_owned(),
-            name: "Acme".to_owned(),
-            lanes: vec![],
-            fully_sandboxed: false,
-            unenforceable_lanes: vec![LaneReport {
-                kind: LaneKind::Sidecar,
-                enforcement: Enforcement::Unenforceable,
-                detail: "back (python)".to_owned(),
-            }],
-            trust: TrustBasis::OfficialMarketplace,
-            host_access: HostAccess::Permitted {
-                basis: TrustBasis::OfficialMarketplace,
-            },
-        };
-        assert!(!report.should_refuse_host_access(&policy_with(&[], true)));
-    }
-}
+mod tests;

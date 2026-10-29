@@ -1,3 +1,6 @@
+import { viewSourceRowSchema } from "@ryu/app-host/views";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 // apps/desktop/src/components/layout/contributed-create-actions.ts
 //
 // The app half of the sidebar "+" create menu. Built-in rows (New chat, New
@@ -88,13 +91,13 @@ export function useContributedCreateActions(): CreateMenuAction[] {
 
 	const run = useCallback(
 		async (section: PluginSidebarSection) => {
-			const create = section.spec?.create;
+			const create = pluginSidebarSpec(section)?.create;
 			const sectionKey = `${section.plugin}:${section.id}`;
 			if (pendingSection === sectionKey) {
 				return;
 			}
 			const http = create && "http" in create ? create.http : undefined;
-			if (create && "target" in create && typeof create.target === "string") {
+			if (create && "target" in create && isNativeText(create.target)) {
 				openTab(create.target, {
 					title: create.label ?? `New ${section.title}`,
 				});
@@ -128,8 +131,8 @@ export function useContributedCreateActions(): CreateMenuAction[] {
 				if (!resp.ok) {
 					return;
 				}
-				const created = (await resp.json()) as Record<string, unknown>;
-				const itemTarget = section.spec?.itemTarget;
+				const created = viewSourceRowSchema.parse(await resp.json());
+				const itemTarget = pluginSidebarSpec(section)?.itemTarget;
 				// `targetFrom` names the response key holding the new row's id; without
 				// it (or without an `itemTarget`) the app only wanted the row created,
 				// and the owning section picks it up on its next fetch.
@@ -179,11 +182,11 @@ export function useContributedCreateActions(): CreateMenuAction[] {
 		const seen = new Set<string>();
 		return sidebar_sections
 			.filter((section) => {
-				const create = section.spec?.create;
+				const create = pluginSidebarSpec(section)?.create;
 				if (!create) {
 					return false;
 				}
-				if ("target" in create && typeof create.target === "string") {
+				if ("target" in create && isNativeText(create.target)) {
 					return true;
 				}
 				const http = "http" in create ? create.http : undefined;
@@ -211,7 +214,8 @@ export function useContributedCreateActions(): CreateMenuAction[] {
 			)
 			.map((section) => ({
 				id: `contrib:${section.plugin}:${section.id}`,
-				label: section.spec?.create?.label ?? `New ${section.title}`,
+				label:
+					pluginSidebarSpec(section)?.create?.label ?? `New ${section.title}`,
 				onSelect: () => {
 					void run(section);
 				},

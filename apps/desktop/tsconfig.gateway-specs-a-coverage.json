@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/gateway/ModelsDefaultsCard.tsx",
+    "src/components/gateway/ModelsDefaultsCard.test.tsx",
+    "src/components/gateway/GatewayDialog.tsx",
+    "src/lib/api/gateway.ts",
+    "src/lib/api/gateway.test.ts",
+    "src/components/gateway/ByokCard.tsx",
+    "src/components/evaluators/EvaluatorEditorDialog.tsx"
+  ]
+}

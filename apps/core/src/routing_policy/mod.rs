@@ -113,10 +113,26 @@ pub enum Condition {
         /// Fire when the key's remaining credit is under this many dollars.
         below_usd: f64,
     },
-    /// A subscription agent's rolling rate-limit window.
+    /// A subscription's rolling rate-limit window.
+    ///
+    /// Scoped to exactly ONE of: an agent's own CLI login (`agent_id`), or a
+    /// Ryu subscription provider's saved accounts (`provider_id`, optionally
+    /// narrowed to one `account_id`). See [`Condition::validate_shape`].
     SubscriptionWindow {
         /// The agent whose windows are read (`acp:claude`, `acp:codex`, …).
+        /// Empty for a provider-scoped rule; rules written before provider
+        /// scope existed always carry it.
+        #[serde(default)]
         agent_id: String,
+        /// A Ryu subscription provider (`claude-pro-max`, …). Without
+        /// `account_id` the rule watches the provider's whole account pool and
+        /// fires only when every eligible account with a reading is below the
+        /// threshold.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_id: Option<String>,
+        /// One saved account of `provider_id`. Requires `provider_id`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account_id: Option<String>,
         /// Case-insensitive substring of the window's label ("weekly",
         /// "session"). Empty means "whichever window is most consumed", which is
         /// the honest default: vendors name windows differently and a rule that
@@ -132,16 +148,113 @@ pub enum Condition {
     },
 }
 
+/// Upper bound for provider and account ids in a rule, matching the
+/// subscriptions surfaces.
+const MAX_SCOPE_ID_CHARS: usize = crate::subscriptions::MAX_ID_CHARS;
+
+/// What a subscription condition is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Subject<'a> {
+    /// Not about one subscription (the wallet and BYOK balance rules).
+    Any,
+    /// One agent's own CLI login.
+    Agent(&'a str),
+    /// A Ryu subscription provider's pool, or one of its saved accounts.
+    Provider {
+        provider_id: &'a str,
+        account_id: Option<&'a str>,
+    },
+    /// A subscription rule whose scope is malformed. It never applies.
+    Invalid,
+}
+
 impl Condition {
     /// The agent this condition is *about*, when it is about one. Used to skip
     /// a subscription rule on a turn run by a different agent — reading Claude's
-    /// weekly window says nothing about a turn Codex is answering.
-    fn subject_agent(&self) -> Option<&str> {
-        match self {
-            Self::SubscriptionWindow { agent_id, .. } => Some(agent_id.as_str()),
+    /// weekly window says nothing about a turn Codex is answering. `None` for
+    /// provider-scoped and malformed rules.
+    pub fn agent_id(&self) -> Option<&str> {
+        match self.subject() {
+            Subject::Agent(agent_id) => Some(agent_id),
             _ => None,
         }
     }
+
+    /// The provider (and optional single account) a provider-scoped
+    /// subscription rule watches.
+    pub fn provider_scope(&self) -> Option<(&str, Option<&str>)> {
+        match self.subject() {
+            Subject::Provider {
+                provider_id,
+                account_id,
+            } => Some((provider_id, account_id)),
+            _ => None,
+        }
+    }
+
+    fn subject(&self) -> Subject<'_> {
+        let Self::SubscriptionWindow {
+            agent_id,
+            provider_id,
+            account_id,
+            ..
+        } = self
+        else {
+            return Subject::Any;
+        };
+        if self.validate_shape().is_err() {
+            return Subject::Invalid;
+        }
+        match provider_id.as_deref() {
+            Some(provider_id) => Subject::Provider {
+                provider_id,
+                account_id: account_id.as_deref(),
+            },
+            None => Subject::Agent(agent_id.as_str()),
+        }
+    }
+
+    /// Structural rules for a subscription condition: exactly one of a
+    /// non-empty `agent_id` or `provider_id`, and `account_id` only together
+    /// with `provider_id`. Pure, so evaluation can refuse a malformed stored
+    /// rule (it abstains) without touching the vault.
+    pub fn validate_shape(&self) -> Result<(), String> {
+        let Self::SubscriptionWindow {
+            agent_id,
+            provider_id,
+            account_id,
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        let has_agent = !agent_id.trim().is_empty();
+        match (has_agent, provider_id.as_deref()) {
+            (true, Some(_)) => {
+                return Err(
+                    "a subscription rule names either an agent or a provider, not both".into(),
+                );
+            }
+            (false, None) => {
+                return Err("a subscription rule needs an agent or a provider".into());
+            }
+            (false, Some(provider)) if !valid_scope_id(provider) => {
+                return Err("provider_id must be 1 to 256 characters".into());
+            }
+            _ => {}
+        }
+        match account_id.as_deref() {
+            Some(_) if provider_id.is_none() => Err("account_id requires provider_id".into()),
+            Some(account) if !valid_scope_id(account) => {
+                Err("account_id must be 1 to 256 characters".into())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+fn valid_scope_id(value: &str) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= MAX_SCOPE_ID_CHARS
 }
 
 /// One user-written rule.
@@ -214,6 +327,70 @@ impl RoutingPolicy {
         serde_json::to_string(self).unwrap_or_default()
     }
 
+    /// Check every rule before it is saved: the structural rules of
+    /// [`Condition::validate_shape`], plus that a provider-scoped rule names a
+    /// Ryu subscription provider and that its `account_id` is one of that
+    /// provider's saved accounts.
+    ///
+    /// Stored rules are never re-validated on load: an account deleted after
+    /// the rule was saved simply has no reading, so the rule abstains. For the
+    /// same reason a rule whose id and provider scope are unchanged from
+    /// `stored` skips the saved-account check, so a deleted account never
+    /// blocks saving edits to other rules.
+    pub fn validate(&self, stored: &RoutingPolicy) -> Result<(), String> {
+        self.validate_with(
+            stored,
+            |provider_id| {
+                crate::subscriptions::provider_kind(provider_id)
+                    == Some(crate::subscriptions::ProviderKind::Subscription)
+            },
+            |provider_id| {
+                crate::pi_config::list_provider_accounts(provider_id)
+                    .into_iter()
+                    .map(|info| info.account_id)
+                    .collect()
+            },
+        )
+    }
+
+    fn validate_with(
+        &self,
+        stored: &RoutingPolicy,
+        is_subscription_provider: impl Fn(&str) -> bool,
+        saved_accounts: impl Fn(&str) -> Vec<String>,
+    ) -> Result<(), String> {
+        for rule in &self.rules {
+            rule.when
+                .validate_shape()
+                .map_err(|error| format!("rule '{}': {error}", rule.id))?;
+            let Some((provider_id, account_id)) = rule.when.provider_scope() else {
+                continue;
+            };
+            if !is_subscription_provider(provider_id) {
+                return Err(format!(
+                    "rule '{}': '{provider_id}' is not a subscription provider",
+                    rule.id
+                ));
+            }
+            let unchanged = stored.rules.iter().any(|previous| {
+                previous.id == rule.id
+                    && previous.when.provider_scope() == Some((provider_id, account_id))
+            });
+            if let Some(account_id) = account_id.filter(|_| !unchanged) {
+                if !saved_accounts(provider_id)
+                    .iter()
+                    .any(|id| id == account_id)
+                {
+                    return Err(format!(
+                        "rule '{}': account '{account_id}' is not saved for '{provider_id}'",
+                        rule.id
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// True when no enabled rule exists — the fast path that skips signal reads
     /// entirely, so a node that never configured this pays nothing per turn.
     pub fn is_inert(&self) -> bool {
@@ -232,11 +409,27 @@ impl RoutingPolicy {
                         required.providers.push(provider_id.clone());
                     }
                 }
-                Condition::SubscriptionWindow { agent_id, .. } => {
-                    if !required.agents.contains(agent_id) {
-                        required.agents.push(agent_id.clone());
+                Condition::SubscriptionWindow { .. } => match rule.when.subject() {
+                    Subject::Agent(agent_id) => {
+                        if !required.agents.iter().any(|a| a == agent_id) {
+                            required.agents.push(agent_id.to_owned());
+                        }
                     }
-                }
+                    Subject::Provider {
+                        provider_id,
+                        account_id,
+                    } => {
+                        let scope = ProviderScope {
+                            provider_id: provider_id.to_owned(),
+                            account_id: account_id.map(str::to_owned),
+                        };
+                        if !required.provider_accounts.contains(&scope) {
+                            required.provider_accounts.push(scope);
+                        }
+                    }
+                    // A malformed rule abstains; it needs no signal.
+                    Subject::Any | Subject::Invalid => {}
+                },
             }
         }
         required
@@ -249,6 +442,17 @@ pub struct RequiredSignals {
     pub ryu_credits: bool,
     pub providers: Vec<String>,
     pub agents: Vec<String>,
+    /// Ryu subscription provider pools (`account_id: None`) and single saved
+    /// accounts whose windows provider-scoped rules read.
+    pub provider_accounts: Vec<ProviderScope>,
+}
+
+/// One provider-scoped subscription read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderScope {
+    pub provider_id: String,
+    /// `None` reads the provider's whole pool.
+    pub account_id: Option<String>,
 }
 
 /// One rolling window, flattened out of `ryu_usage::UsageWindow` so this module
@@ -274,9 +478,44 @@ pub struct Signals {
     pub provider_credits_usd: Vec<(String, f64)>,
     /// Subscription windows by agent id.
     pub subscription_windows: Vec<(String, Vec<WindowReading>)>,
+    /// Cached per-account windows for provider-scoped rules, by provider id.
+    pub provider_accounts: Vec<ProviderAccounts>,
+    /// The managed Pi's configured provider, read only when a provider-scoped
+    /// rule exists. A provider rule governs default-agent turns only when this
+    /// matches its provider.
+    pub pi_provider: Option<String>,
+}
+
+/// Cached readings for one Ryu subscription provider's saved accounts.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProviderAccounts {
+    pub provider_id: String,
+    /// The provider's product name ("Claude Pro/Max"). Never an account label:
+    /// account labels are often email addresses and the info bar is not an
+    /// owner-only surface.
+    pub label: String,
+    /// Only accounts that currently HAVE a cached reading. An account missing
+    /// here is unknown, never "0% left".
+    pub accounts: Vec<AccountWindows>,
+}
+
+/// One saved account's cached windows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountWindows {
+    pub account_id: String,
+    /// Enabled in the provider's pool and not waiting on sign-in: the accounts
+    /// a pool rule judges.
+    pub eligible: bool,
+    pub windows: Vec<WindowReading>,
 }
 
 impl Signals {
+    fn accounts_for(&self, provider_id: &str) -> Option<&ProviderAccounts> {
+        self.provider_accounts
+            .iter()
+            .find(|p| p.provider_id.eq_ignore_ascii_case(provider_id))
+    }
+
     fn provider_credit(&self, provider_id: &str) -> Option<f64> {
         self.provider_credits_usd
             .iter()
@@ -390,7 +629,7 @@ pub fn evaluate(policy: &RoutingPolicy, signals: &Signals, target: &Target) -> A
     let mut best = Advice::unchanged(target.clone());
 
     for rule in policy.rules.iter().filter(|r| r.enabled) {
-        if !rule_applies_to(rule, target) {
+        if !rule_applies_to(rule, target, signals) {
             continue;
         }
         let Some(reading) = read_signal(&rule.when, signals) else {
@@ -458,7 +697,7 @@ pub async fn load(prefs: &crate::server::preferences::PreferencesStore) -> Routi
 }
 
 /// Does this rule govern this turn at all?
-fn rule_applies_to(rule: &FallbackRule, target: &Target) -> bool {
+fn rule_applies_to(rule: &FallbackRule, target: &Target, signals: &Signals) -> bool {
     if !rule.applies_to_agents.is_empty()
         && !rule
             .applies_to_agents
@@ -469,10 +708,27 @@ fn rule_applies_to(rule: &FallbackRule, target: &Target) -> bool {
     }
     // A subscription rule is about one agent's own plan; it says nothing about a
     // turn another agent is running.
-    match rule.when.subject_agent() {
-        Some(subject) => subject.eq_ignore_ascii_case(&target.agent_id),
-        None => true,
+    match rule.when.subject() {
+        Subject::Any => true,
+        Subject::Agent(subject) => subject.eq_ignore_ascii_case(&target.agent_id),
+        // A provider rule governs turns aimed at the provider itself, and
+        // default-agent turns while the managed Pi is configured for it.
+        Subject::Provider { provider_id, .. } => {
+            provider_id.eq_ignore_ascii_case(&target.agent_id)
+                || (is_default_agent(&target.agent_id)
+                    && signals
+                        .pi_provider
+                        .as_deref()
+                        .is_some_and(|p| p.eq_ignore_ascii_case(provider_id)))
+        }
+        Subject::Invalid => false,
     }
+}
+
+/// The flagship agent that runs the managed Pi. An empty id is the composer's
+/// "no agent picked", which also runs it.
+fn is_default_agent(agent_id: &str) -> bool {
+    agent_id.is_empty() || agent_id.eq_ignore_ascii_case(crate::registry::DEFAULT_AGENT_ID)
 }
 
 /// Turn a fired rule into a verdict, degrading to a warning when the rule's
@@ -557,24 +813,78 @@ fn read_signal(condition: &Condition, signals: &Signals) -> Option<SignalReading
             unit: SignalUnit::Usd,
         }),
         Condition::SubscriptionWindow {
-            agent_id,
             window,
             model,
             remaining_below_percent,
-        } => {
-            let windows = signals.windows_for(agent_id)?;
-            let matched = pick_window(windows, window, model.as_deref())?;
-            Some(SignalReading {
-                label: format!("{} · {}", short_agent(agent_id), matched.label),
-                // Rules are written in "how much is LEFT", vendors report "how
-                // much is USED". Converting here (rather than at every call site)
-                // is what keeps the rule text and the info bar in one vocabulary.
-                value: (100.0 - matched.used_percent).clamp(0.0, 100.0),
-                threshold: *remaining_below_percent,
-                unit: SignalUnit::Percent,
-            })
-        }
+            ..
+        } => match condition.subject() {
+            Subject::Agent(agent_id) => {
+                let windows = signals.windows_for(agent_id)?;
+                let matched = pick_window(windows, window, model.as_deref())?;
+                Some(SignalReading {
+                    label: format!("{} · {}", short_agent(agent_id), matched.label),
+                    value: remaining(matched),
+                    threshold: *remaining_below_percent,
+                    unit: SignalUnit::Percent,
+                })
+            }
+            Subject::Provider {
+                provider_id,
+                account_id,
+            } => {
+                let provider = signals.accounts_for(provider_id)?;
+                let (value, window_label) = match account_id {
+                    Some(account_id) => {
+                        let account = provider
+                            .accounts
+                            .iter()
+                            .find(|a| a.account_id == account_id)?;
+                        let matched = pick_window(&account.windows, window, model.as_deref())?;
+                        (remaining(matched), matched.label.clone())
+                    }
+                    None => pool_headroom(provider, window, model.as_deref())?,
+                };
+                let scope = if account_id.is_some() {
+                    "account"
+                } else {
+                    "pool"
+                };
+                Some(SignalReading {
+                    label: format!("{} {scope} · {window_label}", provider.label),
+                    value,
+                    threshold: *remaining_below_percent,
+                    unit: SignalUnit::Percent,
+                })
+            }
+            Subject::Any | Subject::Invalid => None,
+        },
     }
+}
+
+/// Rules are written in "how much is LEFT", vendors report "how much is USED".
+/// Converting here (rather than at every call site) is what keeps the rule text
+/// and the info bar in one vocabulary.
+fn remaining(window: &WindowReading) -> f64 {
+    (100.0 - window.used_percent).clamp(0.0, 100.0)
+}
+
+/// A pool's headroom is the MOST any eligible account has left: the rule fires
+/// only when every eligible account with a reading is below the threshold,
+/// because the pool can still route to any one that is not. Accounts without a
+/// reading (or without a matching window) are unknown and skipped; when none
+/// is known the rule abstains.
+fn pool_headroom(
+    provider: &ProviderAccounts,
+    label_filter: &str,
+    model_filter: Option<&str>,
+) -> Option<(f64, String)> {
+    provider
+        .accounts
+        .iter()
+        .filter(|account| account.eligible)
+        .filter_map(|account| pick_window(&account.windows, label_filter, model_filter))
+        .map(|window| (remaining(window), window.label.clone()))
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 /// Choose the window a subscription rule is about.
@@ -780,6 +1090,8 @@ mod tests {
                 "weekly",
                 Condition::SubscriptionWindow {
                     agent_id: "acp:claude".to_string(),
+                    provider_id: None,
+                    account_id: None,
                     window: "weekly".to_string(),
                     model: None,
                     remaining_below_percent: 50.0,
@@ -823,6 +1135,8 @@ mod tests {
                 "weekly",
                 Condition::SubscriptionWindow {
                     agent_id: "acp:claude".to_string(),
+                    provider_id: None,
+                    account_id: None,
                     window: String::new(),
                     model: None,
                     remaining_below_percent: 50.0,
@@ -860,6 +1174,8 @@ mod tests {
                 "any",
                 Condition::SubscriptionWindow {
                     agent_id: "acp:claude".to_string(),
+                    provider_id: None,
+                    account_id: None,
                     window: String::new(),
                     model: None,
                     remaining_below_percent: 20.0,
@@ -897,6 +1213,8 @@ mod tests {
                 "opus-weekly",
                 Condition::SubscriptionWindow {
                     agent_id: "acp:claude".to_string(),
+                    provider_id: None,
+                    account_id: None,
                     window: String::new(),
                     model: Some("opus".to_string()),
                     remaining_below_percent: 30.0,
@@ -1117,6 +1435,8 @@ mod tests {
                     "a",
                     Condition::SubscriptionWindow {
                         agent_id: "acp:claude".to_string(),
+                        provider_id: None,
+                        account_id: None,
                         window: String::new(),
                         model: None,
                         remaining_below_percent: 10.0,
@@ -1152,6 +1472,8 @@ mod tests {
                 "r",
                 Condition::SubscriptionWindow {
                     agent_id: "acp:claude".to_string(),
+                    provider_id: None,
+                    account_id: None,
                     window: "weekly".to_string(),
                     model: Some("opus".to_string()),
                     remaining_below_percent: 50.0,
@@ -1162,5 +1484,362 @@ mod tests {
         let raw = policy.to_pref_value();
         assert!(raw.contains("\"source\":\"subscription_window\""));
         assert_eq!(RoutingPolicy::parse(&raw), policy);
+    }
+
+    fn provider_condition(provider: &str, account: Option<&str>, below: f64) -> Condition {
+        Condition::SubscriptionWindow {
+            agent_id: String::new(),
+            provider_id: Some(provider.to_string()),
+            account_id: account.map(str::to_string),
+            window: "weekly".to_string(),
+            model: None,
+            remaining_below_percent: below,
+        }
+    }
+
+    fn weekly(used_percent: f64) -> Vec<WindowReading> {
+        vec![WindowReading {
+            label: "Weekly".to_string(),
+            model: None,
+            used_percent,
+        }]
+    }
+
+    fn pool_signals(accounts: Vec<AccountWindows>) -> Signals {
+        Signals {
+            provider_accounts: vec![ProviderAccounts {
+                provider_id: "claude-pro-max".to_string(),
+                label: "Claude Pro/Max".to_string(),
+                accounts,
+            }],
+            pi_provider: Some("claude-pro-max".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn account(id: &str, eligible: bool, used_percent: f64) -> AccountWindows {
+        AccountWindows {
+            account_id: id.to_string(),
+            eligible,
+            windows: weekly(used_percent),
+        }
+    }
+
+    fn ryu_turn() -> Target {
+        Target {
+            agent_id: crate::registry::DEFAULT_AGENT_ID.to_string(),
+            model: "opus".to_string(),
+            at_conversation_start: true,
+        }
+    }
+
+    #[test]
+    fn legacy_agent_rule_json_parses_and_round_trips() {
+        let legacy = r#"{"rules":[{"id":"weekly","enabled":true,"when":{"source":"subscription_window","agent_id":"acp:claude","window":"weekly","remaining_below_percent":50.0},"fallback":{"agent_id":"","model":"sonnet"},"applies_to_agents":[],"notify":true}]}"#;
+        let policy = RoutingPolicy::parse(legacy);
+        assert_eq!(policy.rules.len(), 1);
+        assert_eq!(policy.rules[0].when.agent_id(), Some("acp:claude"));
+        assert_eq!(policy.rules[0].when.provider_scope(), None);
+        let raw = policy.to_pref_value();
+        assert!(!raw.contains("provider_id"));
+        assert!(!raw.contains("account_id"));
+        assert_eq!(RoutingPolicy::parse(&raw), policy);
+    }
+
+    #[test]
+    fn provider_scope_round_trips_and_omits_empty_fields() {
+        let policy = RoutingPolicy {
+            rules: vec![model_rule(
+                "pool",
+                provider_condition("claude-pro-max", Some("acct_1"), 20.0),
+                "sonnet",
+            )],
+        };
+        let raw = policy.to_pref_value();
+        assert!(raw.contains("\"provider_id\":\"claude-pro-max\""));
+        assert!(raw.contains("\"account_id\":\"acct_1\""));
+        let parsed = RoutingPolicy::parse(&raw);
+        assert_eq!(parsed, policy);
+        assert_eq!(
+            parsed.rules[0].when.provider_scope(),
+            Some(("claude-pro-max", Some("acct_1")))
+        );
+        assert_eq!(parsed.rules[0].when.agent_id(), None);
+    }
+
+    #[test]
+    fn agent_and_provider_scopes_are_mutually_exclusive() {
+        let both = Condition::SubscriptionWindow {
+            agent_id: "acp:claude".to_string(),
+            provider_id: Some("claude-pro-max".to_string()),
+            account_id: None,
+            window: String::new(),
+            model: None,
+            remaining_below_percent: 10.0,
+        };
+        assert!(both.validate_shape().is_err());
+        assert_eq!(both.agent_id(), None);
+        assert_eq!(both.provider_scope(), None);
+
+        let neither = Condition::SubscriptionWindow {
+            agent_id: String::new(),
+            provider_id: None,
+            account_id: None,
+            window: String::new(),
+            model: None,
+            remaining_below_percent: 10.0,
+        };
+        assert!(neither.validate_shape().is_err());
+
+        let orphan_account = Condition::SubscriptionWindow {
+            agent_id: "acp:claude".to_string(),
+            provider_id: None,
+            account_id: Some("acct_1".to_string()),
+            window: String::new(),
+            model: None,
+            remaining_below_percent: 10.0,
+        };
+        assert!(orphan_account.validate_shape().is_err());
+
+        assert!(provider_condition("claude-pro-max", None, 10.0)
+            .validate_shape()
+            .is_ok());
+        assert!(provider_condition("", None, 10.0).validate_shape().is_err());
+        assert!(Condition::RyuCredits { below_usd: 1.0 }
+            .validate_shape()
+            .is_ok());
+    }
+
+    #[test]
+    fn a_malformed_rule_abstains_and_requests_nothing() {
+        let rule = model_rule(
+            "bad",
+            Condition::SubscriptionWindow {
+                agent_id: "acp:claude".to_string(),
+                provider_id: Some("claude-pro-max".to_string()),
+                account_id: None,
+                window: String::new(),
+                model: None,
+                remaining_below_percent: 90.0,
+            },
+            "sonnet",
+        );
+        let policy = RoutingPolicy { rules: vec![rule] };
+        assert_eq!(policy.required_signals(), RequiredSignals::default());
+        let mut signals = pool_signals(vec![account("acct_1", true, 99.0)]);
+        signals.subscription_windows = vec![("acp:claude".to_string(), weekly(99.0))];
+        assert_eq!(
+            evaluate(&policy, &signals, &claude_turn()).severity,
+            Severity::Continue
+        );
+    }
+
+    #[test]
+    fn validation_requires_a_subscription_provider_and_a_saved_account() {
+        let policy = |condition| RoutingPolicy {
+            rules: vec![model_rule("r", condition, "sonnet")],
+        };
+        let is_subscription = |id: &str| id == "claude-pro-max";
+        let saved = |_: &str| vec!["acct_1".to_string()];
+        assert!(
+            policy(provider_condition("claude-pro-max", Some("acct_1"), 10.0))
+                .validate_with(&RoutingPolicy::default(), is_subscription, saved)
+                .is_ok()
+        );
+        assert!(policy(provider_condition("claude-pro-max", None, 10.0))
+            .validate_with(&RoutingPolicy::default(), is_subscription, saved)
+            .is_ok());
+        assert!(
+            policy(provider_condition("claude-pro-max", Some("acct_x"), 10.0))
+                .validate_with(&RoutingPolicy::default(), is_subscription, saved)
+                .is_err()
+        );
+        assert!(policy(provider_condition("openrouter", None, 10.0))
+            .validate_with(&RoutingPolicy::default(), is_subscription, saved)
+            .is_err());
+    }
+
+    #[test]
+    fn unchanged_rule_for_a_deleted_account_does_not_block_saving() {
+        let stored = RoutingPolicy {
+            rules: vec![model_rule(
+                "r",
+                provider_condition("claude-pro-max", Some("gone"), 10.0),
+                "sonnet",
+            )],
+        };
+        let is_subscription = |id: &str| id == "claude-pro-max";
+        let saved = |_: &str| vec!["acct_1".to_string()];
+        let mut edited = stored.clone();
+        edited.rules[0].enabled = false;
+        edited.rules.push(model_rule(
+            "other",
+            provider_condition("claude-pro-max", None, 20.0),
+            "haiku",
+        ));
+        assert!(edited
+            .validate_with(&stored, is_subscription, saved)
+            .is_ok());
+        // Re-pointing a rule at a missing account is still rejected.
+        let mut repointed = stored.clone();
+        repointed.rules[0].id = "new".to_string();
+        assert!(repointed
+            .validate_with(&stored, is_subscription, saved)
+            .is_err());
+    }
+
+    #[test]
+    fn required_signals_lists_provider_scopes_once() {
+        let policy = RoutingPolicy {
+            rules: vec![
+                model_rule(
+                    "pool",
+                    provider_condition("claude-pro-max", None, 10.0),
+                    "a",
+                ),
+                model_rule(
+                    "pool2",
+                    provider_condition("claude-pro-max", None, 20.0),
+                    "b",
+                ),
+                model_rule(
+                    "one",
+                    provider_condition("claude-pro-max", Some("acct_1"), 10.0),
+                    "c",
+                ),
+            ],
+        };
+        let required = policy.required_signals();
+        assert!(required.agents.is_empty());
+        assert_eq!(
+            required.provider_accounts,
+            vec![
+                ProviderScope {
+                    provider_id: "claude-pro-max".to_string(),
+                    account_id: None,
+                },
+                ProviderScope {
+                    provider_id: "claude-pro-max".to_string(),
+                    account_id: Some("acct_1".to_string()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn pool_rule_abstains_on_a_cold_cache() {
+        let policy = RoutingPolicy {
+            rules: vec![model_rule(
+                "pool",
+                provider_condition("claude-pro-max", None, 50.0),
+                "sonnet",
+            )],
+        };
+        // No readings at all, then a provider row whose accounts are all unread.
+        for signals in [
+            Signals {
+                pi_provider: Some("claude-pro-max".to_string()),
+                ..Default::default()
+            },
+            pool_signals(Vec::new()),
+        ] {
+            assert_eq!(
+                evaluate(&policy, &signals, &ryu_turn()).severity,
+                Severity::Continue
+            );
+        }
+    }
+
+    #[test]
+    fn pool_rule_fires_only_when_every_eligible_account_is_below() {
+        let policy = RoutingPolicy {
+            rules: vec![model_rule(
+                "pool",
+                provider_condition("claude-pro-max", None, 20.0),
+                "sonnet",
+            )],
+        };
+        // One eligible account still has 60% left: the pool can route to it.
+        let healthy = pool_signals(vec![
+            account("acct_1", true, 95.0),
+            account("acct_2", true, 40.0),
+        ]);
+        assert_eq!(
+            evaluate(&policy, &healthy, &ryu_turn()).severity,
+            Severity::Continue
+        );
+        // Every eligible account is spent; the disabled one's headroom does not count.
+        let spent = pool_signals(vec![
+            account("acct_1", true, 95.0),
+            account("acct_2", true, 90.0),
+            account("acct_off", false, 0.0),
+        ]);
+        let advice = evaluate(&policy, &spent, &ryu_turn());
+        assert_eq!(advice.severity, Severity::Swap);
+        assert_eq!(advice.effective.model, "sonnet");
+        let signal = advice.signal.expect("signal");
+        assert_eq!(signal.value, 10.0);
+        assert_eq!(signal.label, "Claude Pro/Max pool · Weekly");
+    }
+
+    #[test]
+    fn account_rule_reads_only_its_account() {
+        let policy = RoutingPolicy {
+            rules: vec![model_rule(
+                "one",
+                provider_condition("claude-pro-max", Some("acct_2"), 20.0),
+                "sonnet",
+            )],
+        };
+        let signals = pool_signals(vec![
+            account("acct_1", true, 10.0),
+            account("acct_2", true, 90.0),
+        ]);
+        let advice = evaluate(&policy, &signals, &ryu_turn());
+        assert_eq!(advice.severity, Severity::Swap);
+        assert_eq!(advice.signal.expect("signal").value, 10.0);
+
+        // An account with no cached reading is unknown: abstain.
+        let unread = pool_signals(vec![account("acct_1", true, 99.0)]);
+        assert_eq!(
+            evaluate(&policy, &unread, &ryu_turn()).severity,
+            Severity::Continue
+        );
+    }
+
+    #[test]
+    fn provider_rule_is_scoped_to_turns_on_that_provider() {
+        let policy = RoutingPolicy {
+            rules: vec![model_rule(
+                "pool",
+                provider_condition("claude-pro-max", None, 50.0),
+                "sonnet",
+            )],
+        };
+        let mut signals = pool_signals(vec![account("acct_1", true, 99.0)]);
+        // An ACP agent's turn never reads a Ryu provider pool.
+        assert_eq!(
+            evaluate(&policy, &signals, &claude_turn()).severity,
+            Severity::Continue
+        );
+        // A turn aimed at the provider id itself does.
+        let provider_turn = Target {
+            agent_id: "claude-pro-max".to_string(),
+            ..claude_turn()
+        };
+        assert_eq!(
+            evaluate(&policy, &signals, &provider_turn).severity,
+            Severity::Swap
+        );
+        // The default agent only while the managed Pi is configured for it.
+        assert_eq!(
+            evaluate(&policy, &signals, &ryu_turn()).severity,
+            Severity::Swap
+        );
+        signals.pi_provider = Some("chatgpt".to_string());
+        assert_eq!(
+            evaluate(&policy, &signals, &ryu_turn()).severity,
+            Severity::Continue
+        );
     }
 }

@@ -6,6 +6,7 @@
 // Tauri's `openExternal` for the hosted Stripe URLs. The host is a stable module
 // const so the hooks it carries keep a consistent identity across renders.
 
+import type { MarketplaceCreatorsService } from "@ryu/marketplace/creators/types";
 import {
 	type MarketplaceHost,
 	MarketplaceHostProvider,
@@ -25,10 +26,14 @@ import { useSellerStatus } from "@/src/hooks/useSellerStatus.ts";
 import {
 	deleteReview,
 	fetchLikeCounts,
+	fetchMarketplaceCreator,
+	fetchMarketplaceCreators,
+	fetchOwnCreatorProfile,
 	fetchReviews,
 	hasMarketplaceAuth,
 	likeItem,
 	postReview,
+	saveOwnCreatorProfile,
 	startPurchase,
 	unlikeItem,
 } from "@/src/lib/api/marketplace.ts";
@@ -92,7 +97,20 @@ const desktopLikes: MarketplaceLikesService = {
 	},
 };
 
+/** The Creators tab, backed by the control plane (:3000). Listing navigation
+ *  is supplied by the Store page (it owns section switching), and the desktop
+ *  has no follow model yet, so profiles render without a follow control. */
+const desktopCreators: MarketplaceCreatorsService = {
+	get: fetchMarketplaceCreator,
+	list: fetchMarketplaceCreators,
+	ownProfile: {
+		load: fetchOwnCreatorProfile,
+		save: saveOwnCreatorProfile,
+	},
+};
+
 const desktopMarketplaceHost: MarketplaceHost = {
+	creators: desktopCreators,
 	likes: desktopLikes,
 	openExternal,
 	openMarketplace: () =>

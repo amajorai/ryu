@@ -260,8 +260,15 @@ mod tests {
 
         use nix::sys::signal::kill;
         use nix::unistd::Pid;
+        // The killed grandchild is reparented to PID 1 and stays a zombie group
+        // member until that reaper collects it, so allow a short reap window.
+        let group = Pid::from_raw(-process_group);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while kill(group, None).is_ok() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         assert!(
-            kill(Pid::from_raw(-process_group), None).is_err(),
+            kill(group, None).is_err(),
             "the inhibitor process group survived state drop"
         );
     }

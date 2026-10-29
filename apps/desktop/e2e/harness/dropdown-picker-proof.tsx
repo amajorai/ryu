@@ -130,15 +130,15 @@ function DropdownProof() {
 						list window grows as its sentinel reaches the viewport.
 					</p>
 				</div>
-				<span className="rounded-full border px-2 py-1 font-medium text-[11px]">
+				<span className="type-caption rounded-full border px-2 py-1 font-medium">
 					data-driven
 				</span>
 			</div>
 			<div className="flex min-h-0 justify-center rounded-xl border border-dashed p-3">
 				<DropdownMenu>
 					<DropdownMenuTrigger
-						className="rounded-lg border px-3 py-2 text-sm"
 						data-testid="dropdown-proof-trigger"
+						variant="rounded-control"
 					>
 						Open 65 commits
 					</DropdownMenuTrigger>
@@ -173,8 +173,8 @@ function DropdownProof() {
 			<div className="flex min-h-0 justify-center rounded-xl border border-dashed p-3">
 				<DropdownMenu>
 					<DropdownMenuTrigger
-						className="rounded-lg border px-3 py-2 text-sm"
 						data-testid="dropdown-short-trigger"
+						variant="rounded-control"
 					>
 						Open short menu
 					</DropdownMenuTrigger>
@@ -321,7 +321,7 @@ function ModelPickerProof() {
 					</p>
 				</div>
 				<span
-					className="rounded-full bg-muted px-2 py-1 text-[11px]"
+					className="type-caption rounded-full bg-muted px-2 py-1"
 					data-testid="recent-count"
 				>
 					{recentRefs.length} recent
@@ -358,7 +358,7 @@ function ProofPage() {
 			<div className="mx-auto flex max-w-6xl flex-col gap-6">
 				<header className="flex flex-col gap-3 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
 					<div>
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							React verification artifact
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
@@ -370,7 +370,7 @@ function ProofPage() {
 						</p>
 					</div>
 					<span
-						className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 font-medium text-emerald-700 text-xs dark:text-emerald-300"
+						className="rounded-full border border-success/30 bg-success/10 px-3 py-1.5 font-medium text-success text-xs"
 						data-testid="proof-status"
 					>
 						LIVE COMPONENT PROOF

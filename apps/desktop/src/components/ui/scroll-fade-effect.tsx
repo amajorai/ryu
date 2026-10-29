@@ -2,7 +2,7 @@
 // scroll-driven animations (`animation-timeline: scroll(self)`). The mask
 // utility lives in the shared UI stylesheet (`scroll-fade`).
 
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 
 interface ScrollFadeEffectProps {

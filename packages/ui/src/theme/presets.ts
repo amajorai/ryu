@@ -4,6 +4,8 @@
 // renderer or process. DOM application lives in `./apply`, persistence shape in
 // `./prefs`.
 
+import { accessibleRingColor } from "./ring.ts";
+
 type Tokens = Record<string, string>;
 
 export type ThemeDensity = "compact" | "comfortable" | "spacious";
@@ -57,6 +59,10 @@ interface Palette {
 	mutedFg: string;
 	primary: string;
 	primaryFg: string;
+	/** Focus-ring colour when `primary` is under 3:1 against this palette's
+	 * bg/card/sidebar (WCAG 1.4.11). Same hue as `primary`, minimum lightness
+	 * shift; omitted when `primary` already passes. */
+	ring?: string;
 	sidebar: string;
 }
 
@@ -91,7 +97,7 @@ function makeVariant(
 			"--destructive": destructive,
 			"--border": p.border,
 			"--input": p.border,
-			"--ring": p.primary,
+			"--ring": p.ring ?? p.primary,
 			"--sidebar": p.sidebar,
 			"--sidebar-foreground": p.fg,
 			"--sidebar-primary": p.primary,
@@ -99,7 +105,7 @@ function makeVariant(
 			"--sidebar-accent": p.muted,
 			"--sidebar-accent-foreground": p.fg,
 			"--sidebar-border": p.border,
-			"--sidebar-ring": p.primary,
+			"--sidebar-ring": p.ring ?? p.primary,
 		},
 	};
 }
@@ -153,7 +159,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			"--destructive": "oklch(0.645 0.246 16.439)",
 			"--border": "oklch(0.92 0.004 286.32)",
 			"--input": "oklch(0.92 0.004 286.32)",
-			"--ring": "oklch(0.708 0 0)",
+			"--ring": "oklch(0.64 0 0)",
 			"--sidebar": "oklch(0.985 0 0)",
 			"--sidebar-foreground": "oklch(0.141 0.005 285.823)",
 			"--sidebar-primary": "#0099ff",
@@ -161,7 +167,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			"--sidebar-accent": "oklch(0.967 0.001 286.375)",
 			"--sidebar-accent-foreground": "oklch(0.21 0.006 285.885)",
 			"--sidebar-border": "oklch(0.92 0.004 286.32)",
-			"--sidebar-ring": "oklch(0.708 0 0)",
+			"--sidebar-ring": "oklch(0.64 0 0)",
 		},
 	},
 	// "Ryu Light": the previous neutral grayscale default, kept as a preset.
@@ -187,13 +193,13 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			"--secondary": "oklch(0.97 0 0)",
 			"--secondary-foreground": "oklch(0.205 0 0)",
 			"--muted": "oklch(0.97 0 0)",
-			"--muted-foreground": "oklch(0.556 0 0)",
+			"--muted-foreground": "oklch(0.545 0 0)",
 			"--accent": "oklch(0.97 0 0)",
 			"--accent-foreground": "oklch(0.205 0 0)",
 			"--destructive": "oklch(0.577 0.245 27.325)",
 			"--border": "oklch(0.922 0 0)",
 			"--input": "oklch(0.922 0 0)",
-			"--ring": "oklch(0.708 0 0)",
+			"--ring": "oklch(0.64 0 0)",
 			"--sidebar": "oklch(0.985 0 0)",
 			"--sidebar-foreground": "oklch(0.145 0 0)",
 			"--sidebar-primary": "oklch(0.205 0 0)",
@@ -201,7 +207,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			"--sidebar-accent": "oklch(0.97 0 0)",
 			"--sidebar-accent-foreground": "oklch(0.205 0 0)",
 			"--sidebar-border": "oklch(0.922 0 0)",
-			"--sidebar-ring": "oklch(0.708 0 0)",
+			"--sidebar-ring": "oklch(0.64 0 0)",
 		},
 	},
 	// Default "Ryu" dark: the original ryu-desktop brand palette (blue primary)
@@ -242,7 +248,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			"--sidebar-accent": "oklch(0.274 0.006 286.033)",
 			"--sidebar-accent-foreground": "oklch(0.985 0 0)",
 			"--sidebar-border": "oklch(1 0 0 / 10%)",
-			"--sidebar-ring": "oklch(0.439 0 0)",
+			"--sidebar-ring": "oklch(0.556 0 0)",
 		},
 	},
 	// "Ryu Dark": the previous neutral grayscale default, kept as a preset.
@@ -376,6 +382,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			card: "#fafafa",
 			primary: "#ff9940",
 			primaryFg: "#ffffff",
+			ring: "#db780d",
 			muted: "#edeff1",
 			mutedFg: "#adaeb1",
 			border: "#d9dde1",
@@ -650,6 +657,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			card: "#f4f4f5",
 			primary: "#ff6363",
 			primaryFg: "#ffffff",
+			ring: "#f3585a",
 			muted: "#e9e9eb",
 			mutedFg: "#8a8a8e",
 			border: "#d9d9dc",
@@ -686,6 +694,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			card: "#d0d5e3",
 			primary: "#2e7de9",
 			primaryFg: "#ffffff",
+			ring: "#2676e1",
 			muted: "#c4c8da",
 			mutedFg: "#848cb5",
 			border: "#b4b5b9",
@@ -727,6 +736,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			card: "#ebdbb2",
 			primary: "#d65d0e",
 			primaryFg: "#fbf1c7",
+			ring: "#d05800",
 			muted: "#d5c4a1",
 			mutedFg: "#928374",
 			border: "#d5c4a1",
@@ -775,6 +785,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			card: "#f6efdd",
 			primary: "#83a26d",
 			primaryFg: "#fdf6e3",
+			ring: "#75935f",
 			muted: "#efe8d4",
 			mutedFg: "#939f91",
 			border: "#dfd8c5",
@@ -791,6 +802,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			card: "#e5ddb0",
 			primary: "#d27e99",
 			primaryFg: "#ffffff",
+			ring: "#b5647f",
 			muted: "#e4d794",
 			mutedFg: "#716e61",
 			border: "#dad2a1",
@@ -823,6 +835,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			card: "#f2f2f2",
 			primary: "#80cbc4",
 			primaryFg: "#253238",
+			ring: "#4d9892",
 			muted: "#e5e9ea",
 			mutedFg: "#c0cbcb",
 			border: "#dce3e3",
@@ -871,6 +884,7 @@ export const THEME_VARIANTS: ThemeVariant[] = [
 			card: "#f3f4f5",
 			primary: "#2dae58",
 			primaryFg: "#ffffff",
+			ring: "#18a24d",
 			muted: "#e9f0ec",
 			mutedFg: "#adb1c2",
 			border: "#e1e6e8",
@@ -1725,6 +1739,9 @@ export interface CustomTokens {
 	muted: string;
 	mutedForeground: string;
 	primary: string;
+	/** Explicit focus-ring colour. Omitted → derived from `primary`, adjusted to
+	 * reach 3:1 against the theme's surfaces (see `accessibleRingColor`). */
+	ring?: string;
 	sidebar: string;
 }
 
@@ -1825,6 +1842,9 @@ export function customTokensToVariant(
 ): ThemeVariant {
 	const card = t.sidebar;
 	const primaryFg = contrastForeground(t.primary, mode);
+	const ring =
+		t.ring ??
+		accessibleRingColor(t.primary, [t.background, card, t.sidebar], mode);
 	return {
 		id,
 		label,
@@ -1853,7 +1873,7 @@ export function customTokensToVariant(
 			"--destructive": mode === "light" ? "#ef4444" : "#f87171",
 			"--border": t.border,
 			"--input": t.border,
-			"--ring": t.primary,
+			"--ring": ring,
 			"--sidebar": t.sidebar,
 			"--sidebar-foreground": t.foreground,
 			"--sidebar-primary": t.primary,
@@ -1861,7 +1881,7 @@ export function customTokensToVariant(
 			"--sidebar-accent": t.muted,
 			"--sidebar-accent-foreground": t.foreground,
 			"--sidebar-border": t.border,
-			"--sidebar-ring": t.primary,
+			"--sidebar-ring": ring,
 		},
 	};
 }

@@ -4,7 +4,7 @@ import { useQuery } from "@ryu/ui/hooks/use-query.ts";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);

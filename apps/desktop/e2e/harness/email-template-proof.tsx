@@ -1,3 +1,8 @@
+import proofStyles from "./email-template-proof.module.css";
+import "../../src/index.css";
+import "./email-template-proof.css";
+document.documentElement.classList.add("dark");
+
 import { render } from "@react-email/render";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
@@ -171,12 +176,12 @@ function EmailCard({ label, content }: (typeof EMAILS)[number]) {
 	}, [content]);
 
 	return (
-		<section className="card">
+		<section className={proofStyles.card}>
 			<h2>{label}</h2>
 			{html ? (
 				<iframe srcDoc={html} title={`${label} rendered email`} />
 			) : (
-				<div className="loading" role="status">
+				<div className={proofStyles.loading} role="status">
 					Rendering email preview…
 				</div>
 			)}
@@ -188,7 +193,7 @@ function Proof() {
 	return (
 		<main>
 			<header>
-				<p className="eyebrow">Ryu lifecycle email proof</p>
+				<p className={proofStyles.eyebrow}>Ryu lifecycle email proof</p>
 				<h1>13 Better Auth email templates, rendered in Ryu.</h1>
 				<p>
 					Every available auth template has a distinct renderer. The
@@ -196,7 +201,7 @@ function Proof() {
 					the Better Auth template vocabulary.
 				</p>
 			</header>
-			<div className="grid">
+			<div className={proofStyles.grid}>
 				{EMAILS.map((email) => (
 					<EmailCard key={email.label} {...email} />
 				))}
@@ -205,24 +210,4 @@ function Proof() {
 	);
 }
 
-const style = document.createElement("style");
-style.textContent = `
-	:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-	* { box-sizing: border-box; }
-	body { margin: 0; background: #0b0b0c; color: #f4f4f5; }
-	main { max-width: 1440px; margin: 0 auto; padding: 48px; }
-	header { max-width: 700px; margin-bottom: 28px; }
-	.eyebrow { color: #a1a1aa; font-size: 12px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
-	h1 { margin: 12px 0; font-size: clamp(28px, 4vw, 48px); letter-spacing: -.04em; }
-	header p:last-child { color: #a1a1aa; font-size: 16px; line-height: 1.6; }
-	.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
-	.card { overflow: hidden; border: 1px solid #27272a; border-radius: 18px; background: #161618; box-shadow: 0 20px 60px #0006; }
-	.card h2 { margin: 0; padding: 16px 20px; color: #d4d4d8; font-size: 14px; }
-	.loading { display: grid; height: 690px; place-items: center; color: #71717a; font-size: 14px; }
-	iframe { display: block; width: 100%; height: 690px; border: 0; background: #fff; }
-	@media (max-width: 1200px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-	@media (max-width: 900px) { main { padding: 24px; } .grid { grid-template-columns: 1fr; } }
-`;
-document.head.append(style);
-
-createRoot(document.getElementById("root") as HTMLElement).render(<Proof />);
+createRoot(document.getElementById("root")!).render(<Proof />);

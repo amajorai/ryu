@@ -2,11 +2,21 @@
 
 // beui.dev/components/motion/preview-rail
 
-import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable";
-import { EASE_OUT, SPRING_LAYOUT } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable.ts";
+import { EASE_OUT, SPRING_LAYOUT } from "@ryu/ui/lib/ease.ts";
+import { safeNavigationUrl } from "@ryu/ui/lib/safe-url.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type ReactNode, useId, useState } from "react";
+import { type CSSProperties, type ReactNode, useId, useState } from "react";
+
+import css from "./preview-rail.module.css";
+
+interface RailStyle extends CSSProperties {
+	"--rail-columns"?: CSSProperties["gridTemplateColumns"];
+	"--rail-height"?: string;
+	"--rail-rows"?: CSSProperties["gridTemplateRows"];
+	"--rail-width"?: string;
+}
 
 export interface PreviewRailItem {
 	ariaLabel?: string;
@@ -111,6 +121,20 @@ export function PreviewRail({
 		onActiveChange?.(id);
 	};
 
+	const gridStyle: RailStyle = {
+		"--rail-columns": isHorizontal ? rowTemplate : undefined,
+		"--rail-rows": isHorizontal ? undefined : rowTemplate,
+	};
+	const itemStyle: RailStyle = {
+		"--rail-width": isHorizontal ? `${itemSize}px` : undefined,
+		"--rail-height": isHorizontal ? undefined : `${itemSize}px`,
+	};
+
+	const previewStyle: RailStyle = {
+		"--rail-width": itemStyle["--rail-width"],
+		"--rail-height": itemStyle["--rail-height"],
+	};
+
 	return (
 		<motion.div
 			className={cn(
@@ -129,19 +153,18 @@ export function PreviewRail({
 		>
 			<nav
 				aria-label={label}
-				className={cn(
-					"relative z-10 grid shrink-0",
-					isHorizontal
-						? "h-12 w-fit max-w-full justify-center self-center"
-						: "w-12 content-center",
-					railClassName
-				)}
+				className={[
+					css.grid,
+					cn(
+						"relative z-10 grid shrink-0",
+						isHorizontal
+							? "h-12 w-fit max-w-full justify-center self-center"
+							: "w-12 content-center",
+						railClassName
+					),
+				].join(" ")}
 				onPointerLeave={() => setHoveredId(null)}
-				style={
-					isHorizontal
-						? { gridTemplateColumns: rowTemplate }
-						: { gridTemplateRows: rowTemplate }
-				}
+				style={gridStyle}
 			>
 				{items.map((item, index) => {
 					const selected = item.id === selectedId;
@@ -180,9 +203,10 @@ export function PreviewRail({
 							? "h-12 w-6 items-end justify-center"
 							: "h-6 w-12 items-center"
 					);
-					const sharedStyle = isHorizontal
-						? { width: itemSize }
-						: { height: itemSize };
+					const sharedStyle: RailStyle = {
+						"--rail-width": itemStyle["--rail-width"],
+						"--rail-height": itemStyle["--rail-height"],
+					};
 					const handlePointerEnter = () => {
 						if (canHover) {
 							setHoveredId(item.id);
@@ -197,14 +221,15 @@ export function PreviewRail({
 						selectItem(item.id);
 						onItemSelect?.(item);
 					};
+					const safeHref = safeNavigationUrl(item.href);
 
-					return item.href ? (
+					return safeHref ? (
 						<a
 							aria-current={selected ? "page" : undefined}
 							aria-label={item.ariaLabel ?? item.label}
-							className={sharedClassName}
+							className={[css.item, sharedClassName].join(" ")}
 							data-slot="preview-rail-item"
-							href={item.href}
+							href={safeHref}
 							key={item.id}
 							onClick={handleSelect}
 							onFocus={(event) => handleFocus(event.currentTarget)}
@@ -224,7 +249,7 @@ export function PreviewRail({
 						<button
 							aria-current={selected ? "location" : undefined}
 							aria-label={item.ariaLabel ?? item.label}
-							className={sharedClassName}
+							className={[css.item, sharedClassName].join(" ")}
 							data-slot="preview-rail-item"
 							key={item.id}
 							onClick={handleSelect}
@@ -244,29 +269,31 @@ export function PreviewRail({
 			{showPreview ? (
 				<div
 					aria-hidden="true"
-					className={cn(
-						"pointer-events-none absolute z-50 grid",
-						isHorizontal
-							? "top-1/2 left-1/2 h-5 w-fit max-w-full -translate-x-1/2 -translate-y-1/2 justify-center"
-							: previewSide === "before"
-								? "inset-y-0 right-16 left-4 content-center"
-								: "inset-y-0 right-4 left-16 content-center",
-						previewContainerClassName
-					)}
-					style={
-						isHorizontal
-							? { gridTemplateColumns: rowTemplate }
-							: { gridTemplateRows: rowTemplate }
-					}
+					className={[
+						css.grid,
+						cn(
+							"pointer-events-none absolute z-50 grid",
+							isHorizontal
+								? "top-1/2 left-1/2 h-5 w-fit max-w-full -translate-x-1/2 -translate-y-1/2 justify-center"
+								: previewSide === "before"
+									? "inset-y-0 right-16 left-4 content-center"
+									: "inset-y-0 right-4 left-16 content-center",
+							previewContainerClassName
+						),
+					].join(" ")}
+					style={gridStyle}
 				>
 					{items.map((item) => (
 						<div
-							className={cn(
-								"relative flex items-center",
-								isHorizontal ? "justify-center" : undefined
-							)}
+							className={[
+								css.item,
+								cn(
+									"relative flex items-center",
+									isHorizontal ? "justify-center" : undefined
+								),
+							].join(" ")}
 							key={item.id}
-							style={isHorizontal ? { width: itemSize } : { height: itemSize }}
+							style={previewStyle}
 						>
 							{item.id === displayedId ? (
 								<div

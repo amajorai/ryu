@@ -5,7 +5,8 @@
 //! contract so Desktop, Web, CLI, channels, and external SDKs can start a run,
 //! reconnect by cursor, and inspect the same lifecycle.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{LazyLock, Mutex};
 
 use axum::{
     extract::{Path, Query, State},
@@ -17,8 +18,8 @@ use axum::{
 use futures_util::StreamExt;
 use ryu_agent_contracts::{
     ApprovalMode, ApprovalOption, ExecutionProfile, ExecutionProfileKind, HarnessRun,
-    HarnessSession, NetworkMode, RunEvent, RunEventEnvelope, RunStatus, SandboxMode,
-    StartRunRequest, PROTOCOL_VERSION,
+    HarnessSession, MultitaskStrategy, NetworkMode, RunEvent, RunEventEnvelope, RunStatus,
+    SandboxMode, StartRunRequest, PROTOCOL_VERSION,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -112,10 +113,10 @@ fn profile_supported(profile: &ExecutionProfile) -> Result<(), &'static str> {
     match profile.kind {
         ExecutionProfileKind::Local | ExecutionProfileKind::Worktree => {}
         ExecutionProfileKind::Remote => {
-            return Err("remote execution is not available on this Core node")
+            return Err("remote execution is not available on this Core node");
         }
         ExecutionProfileKind::Cloud => {
-            return Err("cloud execution is not available on this Core node")
+            return Err("cloud execution is not available on this Core node");
         }
     }
     if let Some(cwd) = profile.cwd.as_deref() {
@@ -196,7 +197,7 @@ pub(crate) async fn create_harness_session_handler(
                 return json_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("parent session lookup failed: {error}"),
-                )
+                );
             }
         }
     }
@@ -225,7 +226,7 @@ pub(crate) async fn create_harness_session_handler(
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to create harness session: {error}"),
-            )
+            );
         }
     };
     if let Err(error) = state
@@ -436,6 +437,7 @@ pub(crate) async fn start_harness_run_handler(
     headers: HeaderMap,
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Extension(super::VerifiedUserJwt(user_jwt)): Extension<super::VerifiedUserJwt>,
+    authorization: Option<Extension<super::ResolvedAuthorization>>,
     Path(session_id): Path<String>,
     Json(body): Json<StartRunRequest>,
 ) -> Response {
@@ -445,7 +447,7 @@ pub(crate) async fn start_harness_run_handler(
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("session lookup failed: {error}"),
-            )
+            );
         }
     }) else {
         return json_error(StatusCode::NOT_FOUND, "session not found");
@@ -486,6 +488,8 @@ pub(crate) async fn start_harness_run_handler(
             "this runnable kind has no harness chat adapter on this node",
         );
     }
+    // Validate the input shape up front for every strategy so a queued run
+    // cannot be accepted now and fail only when it is promoted.
     let messages = match input_messages(&body.input) {
         Ok(messages) => messages,
         Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
@@ -501,6 +505,7 @@ pub(crate) async fn start_harness_run_handler(
             let status = if error_text.contains("resume_run_id")
                 || error_text.contains("idempotency_key")
                 || error_text.contains("active run")
+                || error_text.contains("queued run")
             {
                 StatusCode::CONFLICT
             } else {
@@ -509,27 +514,37 @@ pub(crate) async fn start_harness_run_handler(
             return json_error(status, error_text);
         }
     };
+    let context = DispatchContext {
+        caller,
+        user_jwt,
+        headers,
+        authorization,
+    };
     if started.created {
-        let dispatch_state = state.clone();
-        let dispatch_caller = caller.clone();
-        let dispatch_headers = headers;
-        let dispatch_user_jwt = user_jwt;
-        let dispatch_session = legacy_session.clone();
-        let dispatch_profile = profile;
-        let run_id = started.run.id.clone();
-        tokio::spawn(async move {
-            dispatch_harness_run(
-                dispatch_state,
-                run_id,
-                dispatch_session,
+        if started.run.status == RunStatus::Running {
+            spawn_dispatch(
+                state.clone(),
+                started.run.id.clone(),
+                legacy_session.clone(),
                 messages,
-                dispatch_profile,
-                dispatch_caller,
-                dispatch_user_jwt,
-                dispatch_headers,
-            )
-            .await;
-        });
+                profile,
+                context,
+            );
+        } else {
+            remember_queued_context(&started.run.id, context);
+            if let Some(displaced) = started.displaced_run_id.as_deref() {
+                let strategy = body.multitask_strategy.unwrap_or_default();
+                stop_displaced_run(
+                    &state,
+                    displaced,
+                    &legacy_session,
+                    &started.run.id,
+                    strategy,
+                )
+                .await;
+            }
+            drive_session_queue(state.clone(), session_id.clone()).await;
+        }
     }
     let created = started.created;
     let status = if created {
@@ -538,17 +553,310 @@ pub(crate) async fn start_harness_run_handler(
         StatusCode::OK
     };
     let events_url = format!("/api/harness/runs/{}/events", started.run.id);
-    let run = started.run;
+    let queued = started.run.status == RunStatus::Pending;
+    let run = match state.conversations.get_harness_run(&started.run.id).await {
+        Ok(Some(run)) => run,
+        _ => started.run,
+    };
     (
         status,
         Json(json!({
             "protocolVersion": PROTOCOL_VERSION,
             "created": created,
+            "queued": queued,
+            "displacedRunId": started.displaced_run_id,
             "run": run,
             "eventsUrl": events_url,
         })),
     )
         .into_response()
+}
+
+/// The verified request context a run is dispatched with. A queued run keeps
+/// its submitter's context in memory until it is promoted, so it runs with the
+/// author's permissions rather than node authority.
+#[derive(Clone)]
+struct DispatchContext {
+    caller: Option<crate::identity_verify::VerifiedCaller>,
+    user_jwt: Option<String>,
+    headers: HeaderMap,
+    authorization: Option<Extension<super::ResolvedAuthorization>>,
+}
+
+impl DispatchContext {
+    /// A detached context for a node-owned session whose queued run outlived
+    /// the process that accepted it. Mirrors boot auto-resume, which also runs
+    /// only untenanted conversations without a caller.
+    fn detached() -> Self {
+        Self {
+            caller: None,
+            user_jwt: None,
+            headers: HeaderMap::new(),
+            authorization: None,
+        }
+    }
+}
+
+/// Runs whose dispatch task is still draining a stream, per session. The queue
+/// is only advanced once every task of the session has ended, so a canceled
+/// run whose turn is still unwinding never overlaps the run that replaces it.
+/// Keyed by run (not only session) so a task that ends without dispatching
+/// (its run was closed before it started) cannot clear the marker of the run
+/// that replaced it.
+static LIVE_DISPATCH: LazyLock<Mutex<HashMap<String, HashSet<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Request contexts of runs accepted into a session queue by this process.
+static QUEUED_CONTEXTS: LazyLock<Mutex<HashMap<String, DispatchContext>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn session_has_live_dispatch(session_id: &str) -> bool {
+    LIVE_DISPATCH
+        .lock()
+        .map(|live| live.get(session_id).is_some_and(|runs| !runs.is_empty()))
+        .unwrap_or(false)
+}
+
+fn run_has_live_dispatch(session_id: &str, run_id: &str) -> bool {
+    LIVE_DISPATCH
+        .lock()
+        .map(|live| {
+            live.get(session_id)
+                .is_some_and(|runs| runs.contains(run_id))
+        })
+        .unwrap_or(false)
+}
+
+fn mark_live_dispatch(session_id: &str, run_id: &str) {
+    if let Ok(mut live) = LIVE_DISPATCH.lock() {
+        live.entry(session_id.to_owned())
+            .or_default()
+            .insert(run_id.to_owned());
+    }
+}
+
+fn clear_live_dispatch(session_id: &str, run_id: &str) {
+    if let Ok(mut live) = LIVE_DISPATCH.lock() {
+        if let Some(runs) = live.get_mut(session_id) {
+            runs.remove(run_id);
+            if runs.is_empty() {
+                live.remove(session_id);
+            }
+        }
+    }
+}
+
+fn remember_queued_context(run_id: &str, context: DispatchContext) {
+    if let Ok(mut contexts) = QUEUED_CONTEXTS.lock() {
+        contexts.insert(run_id.to_owned(), context);
+    }
+}
+
+fn take_queued_context(run_id: &str) -> Option<DispatchContext> {
+    QUEUED_CONTEXTS
+        .lock()
+        .ok()
+        .and_then(|mut contexts| contexts.remove(run_id))
+}
+
+/// Mark the session live, dispatch the run, then advance the session queue
+/// when the run's stream has fully drained.
+fn spawn_dispatch(
+    state: ServerState,
+    run_id: String,
+    session: Session,
+    messages: Vec<UiMessage>,
+    profile: ExecutionProfile,
+    context: DispatchContext,
+) {
+    mark_live_dispatch(&session.id, &run_id);
+    tokio::spawn(async move {
+        let session_id = session.id.clone();
+        let live_run_id = run_id.clone();
+        // A cancel can close the run between its creation and this task; a
+        // closed run is never dispatched.
+        let still_open = matches!(
+            state.conversations.get_harness_run(&run_id).await,
+            Ok(Some(ref run)) if !run.status.is_terminal()
+        );
+        if still_open {
+            dispatch_harness_run(
+                state.clone(),
+                run_id,
+                session,
+                messages,
+                profile,
+                context.caller,
+                context.user_jwt,
+                context.headers,
+                context.authorization,
+            )
+            .await;
+        }
+        clear_live_dispatch(&session_id, &live_run_id);
+        drive_session_queue(state, session_id).await;
+    });
+}
+
+/// Start the session's next queued run when nothing is live. Safe to call
+/// from any path: the store promotes at most one run while none is active, and
+/// a session with a draining dispatch task is left for that task to advance.
+fn drive_session_queue(
+    state: ServerState,
+    session_id: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        loop {
+            if session_has_live_dispatch(&session_id) {
+                return;
+            }
+            let promoted = match state
+                .conversations
+                .promote_next_harness_run(&session_id)
+                .await
+            {
+                Ok(Some(promoted)) => promoted,
+                Ok(None) => return,
+                Err(error) => {
+                    tracing::warn!(session_id, "harness queue promotion failed: {error:#}");
+                    return;
+                }
+            };
+            let run_id = promoted.run.id.clone();
+            if promoted.removed_messages > 0 {
+                tracing::info!(
+                    run_id,
+                    removed = promoted.removed_messages,
+                    "harness rollback removed the displaced run's turns"
+                );
+            }
+            match prepare_promoted_dispatch(&state, &session_id, &promoted).await {
+                Ok((session, messages, context)) => {
+                    spawn_dispatch(
+                        state.clone(),
+                        run_id,
+                        session,
+                        messages,
+                        promoted.run.execution_profile.clone(),
+                        context,
+                    );
+                    return;
+                }
+                Err(reason) => {
+                    let _ = state
+                        .conversations
+                        .finish_harness_run(&run_id, RunStatus::Failed, Some(&reason), None)
+                        .await;
+                    // Keep draining: the next queued run may still be runnable.
+                }
+            }
+        }
+    })
+}
+
+async fn prepare_promoted_dispatch(
+    state: &ServerState,
+    session_id: &str,
+    promoted: &super::conversations::PromotedHarnessRun,
+) -> Result<(Session, Vec<UiMessage>, DispatchContext), String> {
+    let context = take_queued_context(&promoted.run.id);
+    let session = state
+        .conversations
+        .get_session(session_id)
+        .await
+        .map_err(|error| format!("session lookup failed: {error}"))?
+        .ok_or_else(|| "session not found".to_owned())?;
+    let context = match context {
+        Some(context) => context,
+        None => {
+            if conversation_is_attributed(state, &promoted.conversation_id).await {
+                return Err(QUEUED_AUTHOR_LOST.to_owned());
+            }
+            DispatchContext::detached()
+        }
+    };
+    let messages = input_messages(&promoted.input).map_err(str::to_owned)?;
+    Ok((session, messages, context))
+}
+
+/// Failure recorded on a queued run of a person's or org's session that a
+/// restart separated from its author's verified credentials.
+const QUEUED_AUTHOR_LOST: &str =
+    "queued run lost its author's credentials when Core restarted; submit it again";
+
+async fn conversation_is_attributed(state: &ServerState, conversation_id: &str) -> bool {
+    // Fail closed: an unreadable tenancy is treated as attributed so a queued
+    // run never falls back to node authority by accident.
+    match state.conversations.get_access_meta(conversation_id).await {
+        Ok(Some(meta)) => meta.owner_user_id.is_some() || meta.org_id.is_some(),
+        Ok(None) => false,
+        Err(_) => true,
+    }
+}
+
+/// Stop the run an `interrupt`/`rollback` request displaces. The stop uses the
+/// same cancellation seam as `POST /api/harness/runs/:id/cancel`; the turn
+/// ends at its next cancellation point and its partial transcript stays (a
+/// rollback removes it when the replacement run is promoted).
+async fn stop_displaced_run(
+    state: &ServerState,
+    displaced_run_id: &str,
+    session: &Session,
+    replacement_run_id: &str,
+    strategy: MultitaskStrategy,
+) {
+    let reason = format!(
+        "{} by run {replacement_run_id}",
+        match strategy {
+            MultitaskStrategy::Rollback => "rolled back",
+            _ => "interrupted",
+        }
+    );
+    if !run_has_live_dispatch(&session.id, displaced_run_id) {
+        // Nothing is draining this run (it outlived its task, or its task has
+        // not started yet and will skip a closed run), so close it now and let
+        // the queue advance immediately.
+        let _ = state
+            .conversations
+            .finish_harness_run(displaced_run_id, RunStatus::Canceled, Some(&reason), None)
+            .await;
+        return;
+    }
+    let durable = crate::sidecar::adapters::live_turn::is_cancellable(&session.conversation_id);
+    if durable {
+        let _ = state
+            .conversations
+            .finish_harness_run(displaced_run_id, RunStatus::Canceled, Some(&reason), None)
+            .await;
+    }
+    let cancelled = super::cancel_conversation_turn(&session.conversation_id);
+    if cancelled && !durable {
+        let _ = state
+            .conversations
+            .finish_harness_run(displaced_run_id, RunStatus::Canceled, Some(&reason), None)
+            .await;
+    }
+}
+
+/// Drain the queues a restart left behind. Runs of node-owned sessions are
+/// dispatched without a caller (as boot auto-resume does); runs of a person's
+/// or org's session fail with [`QUEUED_AUTHOR_LOST`] because their verified
+/// credentials did not survive the restart.
+pub(crate) async fn resume_queued_harness_runs(state: ServerState) {
+    let sessions = match state
+        .conversations
+        .list_sessions_with_queued_harness_runs()
+        .await
+    {
+        Ok(sessions) => sessions,
+        Err(error) => {
+            tracing::warn!("harness queue resume: listing queued sessions failed: {error:#}");
+            return;
+        }
+    };
+    for queued in sessions {
+        drive_session_queue(state.clone(), queued.session_id).await;
+    }
 }
 
 fn input_messages(input: &Value) -> Result<Vec<UiMessage>, &'static str> {
@@ -565,6 +873,7 @@ fn input_messages(input: &Value) -> Result<Vec<UiMessage>, &'static str> {
             return Err("input.prompt must not be empty");
         }
         return Ok(vec![UiMessage {
+            metadata: None,
             role: "user".to_owned(),
             content: UiContent::Text(prompt.to_owned()),
             parts: Vec::new(),
@@ -583,6 +892,7 @@ async fn dispatch_harness_run(
     caller: Option<crate::identity_verify::VerifiedCaller>,
     user_jwt: Option<String>,
     headers: HeaderMap,
+    authorization: Option<Extension<super::ResolvedAuthorization>>,
 ) {
     let mut request = ChatStreamRequest {
         messages,
@@ -611,6 +921,7 @@ async fn dispatch_harness_run(
         headers,
         Extension(caller),
         Extension(super::VerifiedUserJwt(user_jwt)),
+        authorization,
         Json(request),
     )
     .await;
@@ -930,7 +1241,7 @@ pub(crate) async fn harness_run_events_handler(
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to read harness events: {error}"),
-            )
+            );
         }
     };
     let terminal_without_new_events = run.status.is_terminal() && initial.is_empty();
@@ -995,15 +1306,63 @@ pub(crate) async fn cancel_harness_run_handler(
         Ok(run) => run,
         Err(response) => return response,
     };
+    // A finished run has nothing left to stop. Signalling its session's
+    // conversation would stop whatever turn runs there now instead.
+    if run.status.is_terminal() {
+        return Json(json!({
+            "cancelled": false,
+            "runId": run_id,
+        }))
+        .into_response();
+    }
+    // A queued run has no turn to signal: drop it from the queue directly.
+    if run.status == RunStatus::Pending {
+        let _ = take_queued_context(&run_id);
+        let cancelled = matches!(
+            state
+                .conversations
+                .finish_harness_run(&run_id, RunStatus::Canceled, None, None)
+                .await,
+            Ok(Some(ref finished)) if finished.status == RunStatus::Canceled
+        );
+        return Json(json!({
+            "cancelled": cancelled,
+            "runId": run_id,
+        }))
+        .into_response();
+    }
     let Some(session) = (match state.conversations.get_session(&run.session_id).await {
         Ok(session) => session,
         Err(error) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }) else {
         return json_error(StatusCode::NOT_FOUND, "run session not found");
     };
-    let cancelled = crate::sidecar::adapters::acp::request_cancel(&session.conversation_id)
-        || crate::a2a::request_cancel(&session.conversation_id);
-    if cancelled {
+    if !run_has_live_dispatch(&session.id, &run_id) {
+        // No task is draining this run (it outlived the process that started
+        // it), so close it here and let any queued run start.
+        let _ = state
+            .conversations
+            .finish_harness_run(&run_id, RunStatus::Canceled, None, None)
+            .await;
+        drive_session_queue(state.clone(), session.id.clone()).await;
+        return Json(json!({
+            "cancelled": true,
+            "runId": run_id,
+        }))
+        .into_response();
+    }
+    // A durable driver ends its stream with a finish frame the moment it is
+    // stopped, and the run's drain task would record that as a completed run.
+    // Mark the run canceled first so the terminal status is the user's Cancel.
+    let durable = crate::sidecar::adapters::live_turn::is_cancellable(&session.conversation_id);
+    if durable {
+        let _ = state
+            .conversations
+            .finish_harness_run(&run_id, RunStatus::Canceled, None, None)
+            .await;
+    }
+    let cancelled = super::cancel_conversation_turn(&session.conversation_id);
+    if cancelled && !durable {
         let _ = state
             .conversations
             .finish_harness_run(&run_id, RunStatus::Canceled, None, None)
@@ -1019,6 +1378,25 @@ pub(crate) async fn cancel_harness_run_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_dispatch_is_tracked_per_run() {
+        let session = format!("ses_live_{}", uuid::Uuid::new_v4().simple());
+        assert!(!session_has_live_dispatch(&session));
+        // A run closed before its task started (interrupted while its start
+        // was still in flight) must not clear the marker of its replacement.
+        mark_live_dispatch(&session, "run_replacement");
+        mark_live_dispatch(&session, "run_displaced");
+        clear_live_dispatch(&session, "run_displaced");
+        assert!(session_has_live_dispatch(&session));
+        assert!(run_has_live_dispatch(&session, "run_replacement"));
+        assert!(!run_has_live_dispatch(&session, "run_displaced"));
+        clear_live_dispatch(&session, "run_replacement");
+        assert!(!session_has_live_dispatch(&session));
+        // Clearing an unknown run is a no-op.
+        clear_live_dispatch(&session, "run_unknown");
+        assert!(!session_has_live_dispatch(&session));
+    }
 
     #[test]
     fn incomplete_streams_are_terminally_interrupted() {
@@ -1071,3 +1449,7 @@ mod tests {
         assert!(!ok);
     }
 }
+
+#[cfg(test)]
+#[path = "harness_routes_test.rs"]
+mod routes_test;

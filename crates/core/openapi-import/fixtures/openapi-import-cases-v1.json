@@ -1,0 +1,1796 @@
+{
+  "version": 1,
+  "description": "Golden cases for Ryu's OpenAPI parse rules: ryu-openapi-import (Rust, Core's install-time importer, tests/golden_cases.rs) and its TypeScript port for the generated tool catalog tier (tools/tool-catalog-generate/openapi-rules.ts, Treg parity C1) must both produce exactly these results. A case gives a spec (JSON value) or specText (JSON or YAML text), the operation cap and an optional base URL override, and expects either the imported API (tools in canonical url, method, slug order) or an error message. Specs are synthetic, written for these cases.",
+  "cases": [
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://api.petstore.example/v1",
+        "domain": "api.petstore.example",
+        "dropped": 0,
+        "title": "Pet Store",
+        "tools": [
+          {
+            "description": "Create a pet",
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": ["name"],
+              "type": "object"
+            },
+            "method": "POST",
+            "name": "Create a pet",
+            "secretHeaders": {
+              "X-API-Key": "env:RYU_TOOL_CREATEPET_AUTH"
+            },
+            "slug": "createpet",
+            "url": "https://api.petstore.example/v1/pets"
+          },
+          {
+            "description": "Get a pet",
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "petId": {
+                  "type": "string"
+                },
+                "verbose": {
+                  "description": "Include history.",
+                  "type": "boolean"
+                }
+              },
+              "required": ["petId"],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "Get a pet",
+            "secretHeaders": {
+              "X-API-Key": "env:RYU_TOOL_GETPET_AUTH"
+            },
+            "slug": "getpet",
+            "url": "https://api.petstore.example/v1/pets/{petId}"
+          }
+        ],
+        "totalOperations": 2
+      },
+      "name": "petstore: path, query, body and a header apiKey kept server-side",
+      "spec": {
+        "components": {
+          "securitySchemes": {
+            "key": {
+              "in": "header",
+              "name": "X-API-Key",
+              "type": "apiKey"
+            }
+          }
+        },
+        "info": {
+          "title": "Pet Store"
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/pets": {
+            "post": {
+              "operationId": "createPet",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["name"],
+                      "type": "object"
+                    }
+                  }
+                }
+              },
+              "summary": "Create a pet"
+            }
+          },
+          "/pets/{petId}": {
+            "get": {
+              "operationId": "getPet",
+              "parameters": [
+                {
+                  "in": "path",
+                  "name": "petId",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "description": "Include history.",
+                  "in": "query",
+                  "name": "verbose",
+                  "schema": {
+                    "type": "boolean"
+                  }
+                }
+              ],
+              "summary": "Get a pet"
+            }
+          }
+        },
+        "security": [
+          {
+            "key": []
+          }
+        ],
+        "servers": [
+          {
+            "url": "https://api.petstore.example/v1"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 1,
+      "expected": {
+        "baseUrl": "https://api.petstore.example/v1",
+        "domain": "api.petstore.example",
+        "dropped": 1,
+        "title": "Pet Store",
+        "tools": [
+          {
+            "description": "Get a pet",
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "petId": {
+                  "type": "string"
+                },
+                "verbose": {
+                  "description": "Include history.",
+                  "type": "boolean"
+                }
+              },
+              "required": ["petId"],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "Get a pet",
+            "secretHeaders": {
+              "X-API-Key": "env:RYU_TOOL_GETPET_AUTH"
+            },
+            "slug": "getpet",
+            "url": "https://api.petstore.example/v1/pets/{petId}"
+          }
+        ],
+        "totalOperations": 2
+      },
+      "name": "the cap keeps GETs first and reports the rest as dropped",
+      "spec": {
+        "components": {
+          "securitySchemes": {
+            "key": {
+              "in": "header",
+              "name": "X-API-Key",
+              "type": "apiKey"
+            }
+          }
+        },
+        "info": {
+          "title": "Pet Store"
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/pets": {
+            "post": {
+              "operationId": "createPet",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["name"],
+                      "type": "object"
+                    }
+                  }
+                }
+              },
+              "summary": "Create a pet"
+            }
+          },
+          "/pets/{petId}": {
+            "get": {
+              "operationId": "getPet",
+              "parameters": [
+                {
+                  "in": "path",
+                  "name": "petId",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "description": "Include history.",
+                  "in": "query",
+                  "name": "verbose",
+                  "schema": {
+                    "type": "boolean"
+                  }
+                }
+              ],
+              "summary": "Get a pet"
+            }
+          }
+        },
+        "security": [
+          {
+            "key": []
+          }
+        ],
+        "servers": [
+          {
+            "url": "https://api.petstore.example/v1"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://api.legacy.example/v2",
+        "domain": "api.legacy.example",
+        "dropped": 0,
+        "title": "Legacy",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "ping",
+            "secretHeaders": {},
+            "slug": "ping",
+            "url": "https://api.legacy.example/v2/ping"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "swagger 2 host, basePath and https scheme",
+      "spec": {
+        "basePath": "/v2",
+        "host": "api.legacy.example",
+        "info": {
+          "title": "Legacy"
+        },
+        "paths": {
+          "/ping": {
+            "get": {
+              "operationId": "ping"
+            }
+          }
+        },
+        "schemes": ["http", "https"],
+        "swagger": "2.0"
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://API.Legacy.Example:8443",
+        "domain": "api.legacy.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "get_ping",
+            "secretHeaders": {},
+            "slug": "get_ping",
+            "url": "https://API.Legacy.Example:8443/ping"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "swagger 2 without schemes defaults to https",
+      "spec": {
+        "host": "API.Legacy.Example:8443",
+        "paths": {
+          "/ping": {
+            "get": {}
+          }
+        },
+        "swagger": "2.0"
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://y.example",
+        "domain": "y.example",
+        "dropped": 0,
+        "title": "Y",
+        "tools": [
+          {
+            "description": "Read A",
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "Read A",
+            "secretHeaders": {},
+            "slug": "aget",
+            "url": "https://y.example/a"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "yaml text parses like json",
+      "specText": "openapi: 3.0.0\ninfo:\n  title: Y\nservers:\n  - url: https://y.example\npaths:\n  /a:\n    get:\n      operationId: aGet\n      summary: Read A\n"
+    },
+    {
+      "cap": 40,
+      "error": "no resolvable server/base URL in spec",
+      "name": "a spec without servers fails without an override",
+      "spec": {
+        "info": {
+          "title": "Quests"
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/api/quests/{id}": {
+            "get": {
+              "operationId": "get_quest",
+              "parameters": [
+                {
+                  "in": "path",
+                  "name": "id",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "summary": "Read one quest"
+            }
+          }
+        }
+      }
+    },
+    {
+      "baseUrl": "http://127.0.0.1:8011",
+      "cap": 40,
+      "expected": {
+        "baseUrl": "http://127.0.0.1:8011",
+        "domain": "127.0.0.1",
+        "dropped": 0,
+        "title": "Quests",
+        "tools": [
+          {
+            "description": "Read one quest",
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": ["id"],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "Read one quest",
+            "secretHeaders": {},
+            "slug": "get_quest",
+            "url": "http://127.0.0.1:8011/api/quests/{id}"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "a base URL override wins over missing servers",
+      "spec": {
+        "info": {
+          "title": "Quests"
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/api/quests/{id}": {
+            "get": {
+              "operationId": "get_quest",
+              "parameters": [
+                {
+                  "in": "path",
+                  "name": "id",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "summary": "Read one quest"
+            }
+          }
+        }
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://secure.s.example/api/",
+        "domain": "secure.s.example",
+        "dropped": 0,
+        "title": "S",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "x",
+            "secretHeaders": {},
+            "slug": "x",
+            "url": "https://secure.s.example/api/x"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "servers: templated and relative URLs are skipped, https preferred",
+      "spec": {
+        "info": {
+          "title": "S"
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/x": {
+            "get": {
+              "operationId": "x"
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "/relative"
+          },
+          {
+            "url": "https://{region}.s.example"
+          },
+          {
+            "url": "http://plain.s.example"
+          },
+          {
+            "url": "https://secure.s.example/api/"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "http://plain.s.example/base",
+        "domain": "plain.s.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "DELETE",
+            "name": "removex",
+            "secretHeaders": {},
+            "slug": "removex",
+            "url": "http://plain.s.example/base/x"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "servers: http only when no https server is usable",
+      "spec": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/x": {
+            "delete": {
+              "operationId": "removeX"
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "http://plain.s.example/base"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "error": "spec has no paths",
+      "name": "no paths is an error",
+      "spec": {
+        "openapi": "3.0.0",
+        "servers": [
+          {
+            "url": "https://e.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "error": "spec produced no importable operations",
+      "name": "no importable operations is an error",
+      "spec": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/x": {
+            "head": {
+              "operationId": "h"
+            },
+            "options": {},
+            "trace": {}
+          },
+          "/y": "not an object"
+        },
+        "servers": [
+          {
+            "url": "https://e.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://e.example",
+        "domain": "e.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": "List keys",
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "List keys",
+            "secretHeaders": {},
+            "slug": "get_v1_users_user_id_keys",
+            "url": "https://e.example/v1/Users/{user_id}/Keys"
+          },
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "PATCH",
+            "name": "patch_keys_now",
+            "secretHeaders": {},
+            "slug": "patch_keys_now",
+            "url": "https://e.example/v1/Users/{user_id}/Keys"
+          },
+          {
+            "description": "Replace keys.",
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "PUT",
+            "name": "put_v1_users_user_id_keys",
+            "secretHeaders": {},
+            "slug": "put_v1_users_user_id_keys",
+            "url": "https://e.example/v1/Users/{user_id}/Keys"
+          }
+        ],
+        "totalOperations": 3
+      },
+      "name": "slug falls back to method and path; name to slug; description to summary",
+      "spec": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/v1/Users/{user_id}/Keys": {
+            "get": {
+              "summary": "List keys"
+            },
+            "patch": {
+              "operationId": "Patch--Keys..Now"
+            },
+            "put": {
+              "description": "Replace keys.",
+              "operationId": "!!!"
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://e.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://e.example",
+        "domain": "e.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": ["X-Trace"],
+            "inputSchema": {
+              "properties": {
+                "X-Trace": {
+                  "type": "string"
+                },
+                "fields": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["id", "fields"],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "getitem",
+            "secretHeaders": {},
+            "slug": "getitem",
+            "url": "https://e.example/items/{id}"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "path-level params merge; the operation's own param wins on name and location",
+      "spec": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/items/{id}": {
+            "get": {
+              "operationId": "getItem",
+              "parameters": [
+                {
+                  "in": "path",
+                  "name": "id",
+                  "required": true,
+                  "schema": {
+                    "description": "Own id.",
+                    "type": "string"
+                  }
+                },
+                {
+                  "in": "query",
+                  "name": "fields",
+                  "required": true
+                },
+                {
+                  "in": "query"
+                },
+                "bad"
+              ]
+            },
+            "parameters": [
+              {
+                "description": "Path-level id.",
+                "in": "path",
+                "name": "id",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              {
+                "in": "header",
+                "name": "X-Trace"
+              },
+              {
+                "in": "query",
+                "name": "id",
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            ]
+          }
+        },
+        "servers": [
+          {
+            "url": "https://e.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://crm.example",
+        "domain": "crm.example",
+        "dropped": 0,
+        "title": "CRM",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "owner": {
+                  "properties": {
+                    "email": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "title": {
+                  "description": "Display name.",
+                  "type": "string"
+                }
+              },
+              "required": ["title", "owner"],
+              "type": "object"
+            },
+            "method": "POST",
+            "name": "creatething",
+            "secretHeaders": {},
+            "slug": "creatething",
+            "url": "https://crm.example/things"
+          },
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "title"],
+              "type": "object"
+            },
+            "method": "PUT",
+            "name": "putthing",
+            "secretHeaders": {},
+            "slug": "putthing",
+            "url": "https://crm.example/things/{id}"
+          }
+        ],
+        "totalOperations": 2
+      },
+      "name": "request body $ref resolves, a nested property ref one level",
+      "spec": {
+        "components": {
+          "requestBodies": {
+            "Thing": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CreateThing"
+                  }
+                }
+              }
+            }
+          },
+          "schemas": {
+            "CreateThing": {
+              "properties": {
+                "owner": {
+                  "$ref": "#/components/schemas/Owner"
+                },
+                "title": {
+                  "description": "Display name.",
+                  "type": "string"
+                }
+              },
+              "required": ["title", "owner"],
+              "type": "object"
+            },
+            "Owner": {
+              "properties": {
+                "email": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "info": {
+          "title": "CRM"
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/things": {
+            "post": {
+              "operationId": "createThing",
+              "requestBody": {
+                "$ref": "#/components/requestBodies/Thing"
+              }
+            }
+          },
+          "/things/{id}": {
+            "put": {
+              "operationId": "putThing",
+              "parameters": [
+                {
+                  "in": "path",
+                  "name": "id",
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "properties": {
+                        "id": {
+                          "type": "number"
+                        },
+                        "title": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "title"],
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://crm.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://loop.example",
+        "domain": "loop.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "POST",
+            "name": "makenode",
+            "secretHeaders": {},
+            "slug": "makenode",
+            "url": "https://loop.example/n"
+          },
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "child": {
+                  "$ref": "#/components/schemas/Node"
+                },
+                "external": {
+                  "$ref": "common.yaml#/Leaf"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "method": "POST",
+            "name": "maketree",
+            "secretHeaders": {},
+            "slug": "maketree",
+            "url": "https://loop.example/t"
+          }
+        ],
+        "totalOperations": 2
+      },
+      "name": "a ref cycle does not hang and yields no body args",
+      "spec": {
+        "components": {
+          "parameters": {
+            "Loop": {
+              "$ref": "#/components/parameters/Loop"
+            }
+          },
+          "schemas": {
+            "Node": {
+              "$ref": "#/components/schemas/Node"
+            },
+            "Tree": {
+              "properties": {
+                "child": {
+                  "$ref": "#/components/schemas/Node"
+                },
+                "external": {
+                  "$ref": "common.yaml#/Leaf"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/n": {
+            "post": {
+              "operationId": "makeNode",
+              "parameters": [
+                {
+                  "$ref": "#/components/parameters/Loop"
+                }
+              ],
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Node"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/t": {
+            "post": {
+              "operationId": "makeTree",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Tree"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://loop.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://legacy.example",
+        "domain": "legacy.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "sku": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "method": "POST",
+            "name": "addthing",
+            "secretHeaders": {},
+            "slug": "addthing",
+            "url": "https://legacy.example/things"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "swagger 2 definitions refs resolve",
+      "spec": {
+        "definitions": {
+          "Thing": {
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/things": {
+            "post": {
+              "operationId": "addThing",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/definitions/Thing"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://legacy.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://opt.example",
+        "domain": "opt.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "method": "PATCH",
+            "name": "patchthing",
+            "secretHeaders": {},
+            "slug": "patchthing",
+            "url": "https://opt.example/things/{id}"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "anyOf with a null type unwraps to the one real branch",
+      "spec": {
+        "components": {
+          "schemas": {
+            "Patch": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "openapi": "3.1.0",
+        "paths": {
+          "/things/{id}": {
+            "patch": {
+              "operationId": "patchThing",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Patch"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://opt.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://opt.example",
+        "domain": "opt.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "method": "PATCH",
+            "name": "patchthing",
+            "secretHeaders": {},
+            "slug": "patchthing",
+            "url": "https://opt.example/things/{id}"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "oneOf with a null type array unwraps",
+      "spec": {
+        "components": {
+          "schemas": {
+            "Patch": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "openapi": "3.1.0",
+        "paths": {
+          "/things/{id}": {
+            "patch": {
+              "operationId": "patchThing",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/Patch"
+                        },
+                        {
+                          "type": ["null"]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://opt.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://opt.example",
+        "domain": "opt.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "method": "PATCH",
+            "name": "patchthing",
+            "secretHeaders": {},
+            "slug": "patchthing",
+            "url": "https://opt.example/things/{id}"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "openapi 3.0 nullable and empty branches unwrap",
+      "spec": {
+        "components": {
+          "schemas": {
+            "Patch": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "openapi": "3.1.0",
+        "paths": {
+          "/things/{id}": {
+            "patch": {
+              "operationId": "patchThing",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Patch"
+                        },
+                        {
+                          "nullable": true
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://opt.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://opt.example",
+        "domain": "opt.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "method": "PATCH",
+            "name": "patchthing",
+            "secretHeaders": {},
+            "slug": "patchthing",
+            "url": "https://opt.example/things/{id}"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "an empty branch counts as null",
+      "spec": {
+        "components": {
+          "schemas": {
+            "Patch": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "openapi": "3.1.0",
+        "paths": {
+          "/things/{id}": {
+            "patch": {
+              "operationId": "patchThing",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/Patch"
+                        },
+                        {}
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://opt.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://u.example",
+        "domain": "u.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "POST",
+            "name": "postx",
+            "secretHeaders": {},
+            "slug": "postx",
+            "url": "https://u.example/x"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "a real union body is left alone",
+      "spec": {
+        "components": {
+          "schemas": {
+            "A": {
+              "properties": {
+                "a": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "B": {
+              "properties": {
+                "b": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "openapi": "3.1.0",
+        "paths": {
+          "/x": {
+            "post": {
+              "operationId": "postX",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/A"
+                        },
+                        {
+                          "$ref": "#/components/schemas/B"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://u.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://refs.example",
+        "domain": "refs.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "cursor": {
+                  "description": "Opaque cursor.",
+                  "type": "string"
+                },
+                "page": {
+                  "description": "1-based page number.",
+                  "type": "integer"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "listitems",
+            "secretHeaders": {},
+            "slug": "listitems",
+            "url": "https://refs.example/items"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "ref parameters resolve and a missing schema defaults to string",
+      "spec": {
+        "components": {
+          "parameters": {
+            "Cursor": {
+              "description": "Opaque cursor.",
+              "in": "query",
+              "name": "cursor"
+            },
+            "PageParam": {
+              "description": "1-based page number.",
+              "in": "query",
+              "name": "page",
+              "schema": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/items": {
+            "get": {
+              "operationId": "listItems",
+              "parameters": [
+                {
+                  "$ref": "#/components/parameters/PageParam"
+                },
+                {
+                  "$ref": "#/components/parameters/Cursor"
+                },
+                {
+                  "$ref": "#/components/parameters/Missing"
+                }
+              ]
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://refs.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://sec.example",
+        "domain": "sec.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "usesglobal",
+            "secretHeaders": {
+              "Authorization": "env:RYU_TOOL_USESGLOBAL_AUTH"
+            },
+            "slug": "usesglobal",
+            "url": "https://sec.example/global"
+          },
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "POST",
+            "name": "mixed_auth",
+            "secretHeaders": {
+              "Authorization": "env:RYU_TOOL_MIXED_AUTH_AUTH",
+              "X-Key": "env:RYU_TOOL_MIXED_AUTH_AUTH",
+              "api_key": "env:RYU_TOOL_MIXED_AUTH_AUTH"
+            },
+            "slug": "mixed_auth",
+            "url": "https://sec.example/mixed"
+          },
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "noauth",
+            "secretHeaders": {},
+            "slug": "noauth",
+            "url": "https://sec.example/open"
+          },
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {
+                "key": {
+                  "description": "API key",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "queryauth",
+            "secretHeaders": {},
+            "slug": "queryauth",
+            "url": "https://sec.example/query"
+          }
+        ],
+        "totalOperations": 4
+      },
+      "name": "security: bearer and header keys are secrets, query keys are args, basic and oauth are ignored, [] opts out",
+      "spec": {
+        "components": {
+          "securitySchemes": {
+            "basic": {
+              "scheme": "basic",
+              "type": "http"
+            },
+            "bearer": {
+              "scheme": "bearer",
+              "type": "http"
+            },
+            "headerKey": {
+              "name": "X-Key",
+              "type": "apiKey"
+            },
+            "noName": {
+              "in": "header",
+              "type": "apiKey"
+            },
+            "oauth": {
+              "flows": {},
+              "type": "oauth2"
+            },
+            "plainHttp": {
+              "type": "http"
+            },
+            "queryKey": {
+              "in": "query",
+              "name": "key",
+              "type": "apiKey"
+            }
+          }
+        },
+        "openapi": "3.0.0",
+        "paths": {
+          "/global": {
+            "get": {
+              "operationId": "usesGlobal"
+            }
+          },
+          "/mixed": {
+            "post": {
+              "operationId": "mixed.Auth",
+              "security": [
+                {
+                  "headerKey": [],
+                  "plainHttp": []
+                },
+                {
+                  "noName": []
+                },
+                {
+                  "unknownScheme": []
+                },
+                "bad"
+              ]
+            }
+          },
+          "/open": {
+            "get": {
+              "operationId": "noAuth",
+              "security": []
+            }
+          },
+          "/query": {
+            "get": {
+              "operationId": "queryAuth",
+              "security": [
+                {
+                  "queryKey": []
+                },
+                {
+                  "basic": [],
+                  "oauth": []
+                }
+              ]
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "servers": [
+          {
+            "url": "https://sec.example"
+          }
+        ]
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://sw.example",
+        "domain": "sw.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": [],
+            "inputSchema": {
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "a",
+            "secretHeaders": {
+              "Api-Key": "env:RYU_TOOL_A_AUTH"
+            },
+            "slug": "a",
+            "url": "https://sw.example/a"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "swagger 2 securityDefinitions",
+      "spec": {
+        "host": "sw.example",
+        "paths": {
+          "/a": {
+            "get": {
+              "operationId": "a",
+              "security": [
+                {
+                  "k": []
+                }
+              ]
+            }
+          }
+        },
+        "securityDefinitions": {
+          "k": {
+            "in": "header",
+            "name": "Api-Key",
+            "type": "apiKey"
+          }
+        },
+        "swagger": "2.0"
+      }
+    },
+    {
+      "cap": 40,
+      "expected": {
+        "baseUrl": "https://user:pw@h.example:9000/p?q=1",
+        "domain": "h.example",
+        "dropped": 0,
+        "title": "API",
+        "tools": [
+          {
+            "description": null,
+            "headerParams": ["X-Request-Id"],
+            "inputSchema": {
+              "properties": {
+                "X-Request-Id": {
+                  "type": "string"
+                }
+              },
+              "required": ["X-Request-Id"],
+              "type": "object"
+            },
+            "method": "GET",
+            "name": "withheader",
+            "secretHeaders": {},
+            "slug": "withheader",
+            "url": "https://user:pw@h.example:9000/p?q=1/h"
+          }
+        ],
+        "totalOperations": 1
+      },
+      "name": "title defaults to API; a header param is a header arg",
+      "spec": {
+        "openapi": "3.0.0",
+        "paths": {
+          "/h": {
+            "get": {
+              "operationId": "withHeader",
+              "parameters": [
+                {
+                  "in": "header",
+                  "name": "X-Request-Id",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "servers": [
+          {
+            "url": "https://user:pw@h.example:9000/p?q=1"
+          }
+        ]
+      }
+    }
+  ]
+}

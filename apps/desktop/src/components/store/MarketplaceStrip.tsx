@@ -11,17 +11,35 @@
 
 import { Store01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { MarketplaceItemCard } from "@ryu/blocks/desktop/marketplace";
-import { LANGUAGE_PACKS_CHANGED_EVENT } from "@ryu/i18n/core";
-import { useOptionalI18n } from "@ryu/i18n/react";
+import { MarketplaceItemCard } from "@ryu/blocks/desktop/marketplace.tsx";
+import {
+	LANGUAGE_PACK_STORAGE_KEY,
+	LANGUAGE_PACKS_CHANGED_EVENT,
+} from "@ryu/i18n/core";
+import { useLiteralMessages, useOptionalI18n } from "@ryu/i18n/react";
 import { StoreCardGrid } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import ItemLikeButton from "@ryu/marketplace/likes/like-button";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import MarketplaceDetailDialog from "@/src/components/marketplace/MarketplaceDetailDialog.tsx";
 import { useMarketplacePurchase } from "@/src/components/marketplace/useMarketplacePurchase.ts";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
+import { bundleSkillChanges } from "@/src/components/skills/skill-set-change.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import {
+	LANGUAGE_MODE_CHANGED_EVENT,
+	LANGUAGE_MODE_KEY,
+	setLanguageMode,
+} from "@/src/hooks/useLanguageMode.ts";
 import { useMarketplaceCatalog } from "@/src/hooks/useMarketplaceCatalog.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { setLanguagePackEnabled } from "@/src/lib/api/language-packs.ts";
@@ -33,6 +51,7 @@ import {
 	type PortablePackageState,
 } from "@/src/lib/api/marketplace.ts";
 import {
+	describeBundleManualSteps,
 	installMarketplaceBundle,
 	type MarketplaceBundleInstallResult,
 } from "@/src/lib/api/marketplace-bundles.ts";
@@ -47,16 +66,22 @@ export default function MarketplaceStrip({
 	initialSelectedId?: string;
 	kind: MarketplaceKind;
 }) {
-	const { items, loading, error, refresh } = useMarketplaceCatalog(
-		kind,
-		initialQuery
-	);
+	const { items, loading, error, refresh, hasMore, loadMore, loadingMore } =
+		useMarketplaceCatalog(kind, initialQuery);
 	const node = useActiveNode();
+	const { confirmSkillSetChange } = useSkillDistributionFlow();
 	const i18n = useOptionalI18n();
+	const tl = useLiteralMessages();
 	const target = useMemo(
 		() => toTarget(node),
 		[node.token, node.url, node.userJwt]
 	);
+	const languageScope = useMemo(() => ({ kind, target }), [kind, target]);
+	const activeLanguageScope = useRef<typeof languageScope | null>(null);
+	const languageOperation = useRef<{
+		id: string;
+		scope: typeof languageScope;
+	} | null>(null);
 	const { buying, buy, isLicensed, detail, openDetail, closeDetail } =
 		useMarketplacePurchase();
 	const openedSelection = useRef<string | null>(null);
@@ -64,20 +89,71 @@ export default function MarketplaceStrip({
 		PortablePackageState[]
 	>([]);
 	const [languagePackBusy, setLanguagePackBusy] = useState<string | null>(null);
-	const [pendingLanguagePackId, setPendingLanguagePackId] = useState<
-		string | null
-	>(null);
+	const [pendingLanguagePack, setPendingLanguagePack] = useState<NonNullable<
+		typeof languageOperation.current
+	> | null>(null);
 	const [bundleBusy, setBundleBusy] = useState<string | null>(null);
 	const [bundleProgress, setBundleProgress] = useState<{
 		completed: number;
 		total: number;
 	} | null>(null);
+	const retireLanguageOperation = useCallback(() => {
+		languageOperation.current = null;
+		setPendingLanguagePack(null);
+		setLanguagePackBusy(null);
+	}, []);
+
+	useLayoutEffect(() => {
+		// A returning node or credential tuple is a new visit, not permission for
+		// an earlier response to publish into this language picker.
+		activeLanguageScope.current = languageScope;
+		retireLanguageOperation();
+		setPortablePackages([]);
+		return () => {
+			if (activeLanguageScope.current === languageScope) {
+				activeLanguageScope.current = null;
+				languageOperation.current = null;
+			}
+		};
+	}, [languageScope, retireLanguageOperation]);
+
+	useEffect(() => {
+		const onStorage = (event: StorageEvent) => {
+			if (
+				(event.storageArea === null || event.storageArea === localStorage) &&
+				(event.key === null ||
+					event.key === LANGUAGE_MODE_KEY ||
+					event.key === LANGUAGE_PACK_STORAGE_KEY)
+			) {
+				retireLanguageOperation();
+			}
+		};
+		window.addEventListener(
+			LANGUAGE_MODE_CHANGED_EVENT,
+			retireLanguageOperation
+		);
+		window.addEventListener("storage", onStorage);
+		return () => {
+			window.removeEventListener(
+				LANGUAGE_MODE_CHANGED_EVENT,
+				retireLanguageOperation
+			);
+			window.removeEventListener("storage", onStorage);
+		};
+	}, [retireLanguageOperation]);
 
 	const installBundle = useCallback(
 		async (id: string) => {
 			setBundleBusy(id);
 			try {
 				const bundle = await fetchDetail("bundle", id);
+				// New skill members change every skill-loading thread's prompt.
+				const confirmed = await confirmSkillSetChange(
+					await bundleSkillChanges(target, bundle.bundleMembers)
+				);
+				if (!confirmed) {
+					return;
+				}
 				const result: MarketplaceBundleInstallResult =
 					await installMarketplaceBundle(
 						target,
@@ -88,13 +164,49 @@ export default function MarketplaceStrip({
 				const requiredFailures = result.failures.filter(
 					({ member }) => member.required
 				);
+				const manualNote = describeBundleManualSteps(result.manual);
 				if (requiredFailures.length > 0) {
 					toast.error("Bundle installed with required items missing", {
-						description: `${result.completed.length} installed, ${result.skipped.length} already present, ${requiredFailures.length} required failed. ${requiredFailures[0]?.error ?? "Retry from the bundle details."}`,
+						description: tl(
+							"{installed} installed, {present} already present, {failed} required failed. {reason}{manualNote}",
+							{
+								failed: requiredFailures.length,
+								installed: result.completed.length,
+								manualNote: manualNote ? ` ${manualNote}` : "",
+								present: result.skipped.length,
+								reason:
+									requiredFailures[0]?.error ??
+									tl("Retry from the bundle details."),
+							}
+						),
+					});
+				} else if (manualNote) {
+					toast.warning("Bundle installed with manual steps left", {
+						description: tl(
+							"{installed} installed, {present} already present. {manualNote}",
+							{
+								installed: result.completed.length,
+								manualNote,
+								present: result.skipped.length,
+							}
+						),
 					});
 				} else {
 					toast.success("Bundle installed", {
-						description: `${result.completed.length} installed, ${result.skipped.length} already present${result.failures.length > 0 ? `, ${result.failures.length} optional skipped` : ""}.`,
+						description:
+							result.failures.length > 0
+								? tl(
+										"{installed} installed, {present} already present, {skipped} optional skipped.",
+										{
+											installed: result.completed.length,
+											present: result.skipped.length,
+											skipped: result.failures.length,
+										}
+									)
+								: tl("{installed} installed, {present} already present.", {
+										installed: result.completed.length,
+										present: result.skipped.length,
+									}),
 					});
 				}
 				await refresh();
@@ -107,7 +219,7 @@ export default function MarketplaceStrip({
 				setBundleProgress(null);
 			}
 		},
-		[refresh, target]
+		[confirmSkillSetChange, refresh, target, tl]
 	);
 
 	useEffect(() => {
@@ -133,6 +245,18 @@ export default function MarketplaceStrip({
 
 	const installLanguagePack = useCallback(
 		async (id: string) => {
+			if (
+				languageScope.kind !== "language_pack" ||
+				activeLanguageScope.current !== languageScope
+			) {
+				return;
+			}
+			const operation = { id, scope: languageScope };
+			languageOperation.current = operation;
+			setPendingLanguagePack(null);
+			const isCurrent = () =>
+				languageOperation.current === operation &&
+				activeLanguageScope.current === operation.scope;
 			setLanguagePackBusy(id);
 			try {
 				const existing = portablePackages.find(
@@ -145,38 +269,61 @@ export default function MarketplaceStrip({
 					}
 				} else {
 					await installPortablePackage(target, { id, kind: "language_pack" });
+					if (!isCurrent()) {
+						return;
+					}
 					await setLanguagePackEnabled(target, { enabled: true, id });
 				}
-				setPortablePackages(await fetchInstalledPortablePackages(target));
-				setPendingLanguagePackId(id);
+				if (!isCurrent()) {
+					return;
+				}
+				const next = await fetchInstalledPortablePackages(target);
+				if (!isCurrent()) {
+					return;
+				}
+				setPortablePackages(next);
+				setPendingLanguagePack(operation);
 				// Installing through the Marketplace updates Core, while the shell's
 				// language catalog is loaded by LanguagePackBridge. Wake that bridge so
 				// the newly installed pack can be selected immediately instead of waiting
 				// for a node change or a later reload.
 				window.dispatchEvent(new Event(LANGUAGE_PACKS_CHANGED_EVENT));
 			} catch (cause) {
+				if (!isCurrent()) {
+					return;
+				}
 				toast.error("Couldn't install language pack", {
 					description: cause instanceof Error ? cause.message : String(cause),
 				});
 			} finally {
-				setLanguagePackBusy(null);
+				if (isCurrent()) {
+					setLanguagePackBusy(null);
+				}
 			}
 		},
-		[portablePackages, target]
+		[languageScope, portablePackages, target]
 	);
 
 	useEffect(() => {
-		if (!pendingLanguagePackId) {
-			return;
-		}
 		if (
-			!i18n?.availablePacks.some((pack) => pack.id === pendingLanguagePackId)
+			!pendingLanguagePack ||
+			languageOperation.current !== pendingLanguagePack ||
+			activeLanguageScope.current !== pendingLanguagePack.scope
 		) {
 			return;
 		}
-		i18n.selectPack(pendingLanguagePackId);
-		setPendingLanguagePackId(null);
-	}, [i18n, pendingLanguagePackId]);
+		if (
+			!i18n?.availablePacks.some(
+				(pack) => pack.id === pendingLanguagePack.id && pack.enabled !== false
+			)
+		) {
+			return;
+		}
+		languageOperation.current = null;
+		setLanguageMode("fixed");
+		i18n.selectPack(pendingLanguagePack.id);
+		setPendingLanguagePack(null);
+	}, [i18n, pendingLanguagePack]);
 
 	useEffect(() => {
 		if (!initialSelectedId || openedSelection.current === initialSelectedId) {
@@ -217,11 +364,14 @@ export default function MarketplaceStrip({
 				</h3>
 				{bundleBusy && bundleProgress ? (
 					<span aria-live="polite" className="text-muted-foreground text-xs">
-						Installing {bundleProgress.completed}/{bundleProgress.total}
+						{tl("Installing {completed}/{total}", {
+							completed: bundleProgress.completed,
+							total: bundleProgress.total,
+						})}
 					</span>
 				) : null}
 				{loading && items.length === 0 ? (
-					<Spinner className="size-3.5 text-muted-foreground" />
+					<Spinner className="size-3.5" />
 				) : null}
 			</div>
 
@@ -284,6 +434,20 @@ export default function MarketplaceStrip({
 						);
 					})}
 				</StoreCardGrid>
+			) : null}
+
+			{items.length > 0 && hasMore ? (
+				<Button
+					className="mt-3"
+					loading={loadingMore}
+					onClick={() => {
+						void loadMore();
+					}}
+					size="sm"
+					variant="ghost"
+				>
+					Load more
+				</Button>
 			) : null}
 
 			{detail ? (

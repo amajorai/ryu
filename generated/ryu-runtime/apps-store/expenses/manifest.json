@@ -59,6 +59,7 @@
       },
       "port": 8017,
       "health_path": "/health",
+      "host_api": { "grants": ["crypto:seal"] },
       "lazy": true,
       "idle_stop_secs": 900,
       "http": {

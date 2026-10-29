@@ -140,7 +140,7 @@ export const emptyConfigSchema = z.object({});
  */
 export function parseConfig<S extends z.ZodType>(
 	schema: S,
-	config: unknown
+	config: Parameters<S["safeParse"]>[0]
 ): z.infer<S> {
 	const parsed = schema.safeParse(config ?? {});
 	if (parsed.success) {

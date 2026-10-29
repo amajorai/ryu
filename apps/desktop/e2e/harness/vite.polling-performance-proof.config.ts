@@ -39,6 +39,8 @@ export default defineConfig({
 	optimizeDeps: {
 		entries: ["polling-performance-proof.html"],
 		include: ["lucide-react"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	server: {
 		host: "127.0.0.1",

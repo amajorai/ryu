@@ -16,9 +16,9 @@
 // All three are surfaced as their own line with its own fix, because "it doesn't
 // work" with no explanation is the failure mode this feature is most prone to.
 
-import { Button } from "@ryu/ui/components/button";
-import { toast } from "@ryu/ui/components/sileo";
-import { Switch } from "@ryu/ui/components/switch";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -46,6 +46,8 @@ interface QuickCaptureStatus {
 	supported: boolean;
 }
 
+const GESTURE_TITLE = "Keep The Selection With A Double-Tap Of Shift";
+
 const BINDINGS: { id: Binding; label: string }[] = [
 	{ id: "either", label: "Either Shift" },
 	{ id: "left", label: "Left only" },
@@ -67,7 +69,9 @@ export function QuickCaptureSettings() {
 	}, []);
 
 	useEffect(() => {
-		refresh();
+		void refresh();
+		window.addEventListener("focus", refresh);
+		return () => window.removeEventListener("focus", refresh);
 	}, [refresh]);
 
 	const toggle = async (next: boolean) => {
@@ -120,8 +124,10 @@ export function QuickCaptureSettings() {
 			>
 				<SettingsGroup>
 					<SettingsItem
-						actions={<Switch checked={false} disabled />}
-						title="Keep The Selection With A Double-Tap Of Shift"
+						actions={
+							<Switch aria-label={GESTURE_TITLE} checked={false} disabled />
+						}
+						title={GESTURE_TITLE}
 					/>
 				</SettingsGroup>
 			</SettingsSection>
@@ -137,12 +143,13 @@ export function QuickCaptureSettings() {
 				<SettingsItem
 					actions={
 						<Switch
+							aria-label={GESTURE_TITLE}
 							checked={status.enabled}
 							disabled={busy}
 							onCheckedChange={toggle}
 						/>
 					}
-					title="Keep The Selection With A Double-Tap Of Shift"
+					title={GESTURE_TITLE}
 				/>
 
 				<SettingsItem
@@ -150,6 +157,7 @@ export function QuickCaptureSettings() {
 						<div className="flex items-center gap-1">
 							{BINDINGS.map((b) => (
 								<Button
+									aria-pressed={status.binding === b.id}
 									key={b.id}
 									onClick={() => setBinding(b.id)}
 									size="sm"
@@ -165,25 +173,24 @@ export function QuickCaptureSettings() {
 				/>
 
 				<PermissionRow
+					description="Required. The gesture can't be detected without it."
 					granted={status.input_monitoring}
 					onFix={async () => {
 						await requestInputMonitoringPermission();
 						await openInputMonitoringSettings();
 						await refresh();
 					}}
-					requiredText="Required. The gesture can't be detected without it."
 					title="Input Monitoring"
 				/>
 
 				<PermissionRow
-					description="A freshly granted permission takes effect after Ryu restarts."
+					description="Optional. Captures still work and still record which app they came from; without it they lose the window title and page URL. A freshly granted permission takes effect after Ryu restarts."
 					granted={status.accessibility}
 					onFix={async () => {
 						await requestAccessibilityPermission();
 						await openAccessibilitySettings();
 						await refresh();
 					}}
-					requiredText="Optional. Captures still work and still record which app they came from; without it they lose the window title and page URL."
 					title="Accessibility"
 				/>
 
@@ -214,17 +221,18 @@ export function QuickCaptureSettings() {
 	);
 }
 
+// `description` is read by the enclosing SettingsGroup off this element's own
+// props and rendered as the caption under the row; it must be passed at the call
+// site; text computed inside this wrapper would never be shown.
 function PermissionRow({
 	title,
 	granted,
-	requiredText,
 	description,
 	onFix,
 }: {
 	title: string;
 	granted: boolean;
-	requiredText: string;
-	description?: string;
+	description: string;
 	onFix: () => Promise<void>;
 }) {
 	return (
@@ -238,7 +246,7 @@ function PermissionRow({
 					</Button>
 				)
 			}
-			description={description ?? requiredText}
+			description={description}
 			title={title}
 		/>
 	);

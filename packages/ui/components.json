@@ -22,6 +22,7 @@
     "hooks": "@ryu/ui/hooks"
   },
   "registries": {
-    "@beui": "https://beui.dev/r/{name}.json"
+    "@beui": "https://beui.dev/r/{name}.json",
+    "@componentry": "https://componentry.dev/r/{name}.json"
   }
 }

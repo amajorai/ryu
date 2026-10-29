@@ -329,6 +329,14 @@ pub async fn dispatch(
             target.name
         ));
     }
+    // The next turn runs under the target's own record, so a caller with
+    // limited account access may only hand the conversation to an agent whose
+    // reach into the user's accounts is within its own.
+    let caller_policy = crate::agent_access::AgentAccountPolicy::from_record(&caller);
+    let caller_profiles = caller_policy.user_identity_profiles(caller.identity_profile_ids.clone());
+    if !crate::agent_access::may_delegate_to(&caller_policy, &caller_profiles, &target) {
+        return Err(crate::agent_access::delegation_refusal(target_agent_id));
+    }
     if let Some(model) = patch.model.as_deref() {
         if !model_is_allowed_for_agent(&target, model) {
             return Err(anyhow!(

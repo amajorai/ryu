@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IslandQuestEvent, IslandSuggestion } from "../../shared/ipc.ts";
 import { useIslandState } from "../store/island-state.ts";
@@ -27,6 +28,7 @@ interface Detected {
 
 export function useQuestDetect(): QuestDetect {
 	const setState = useIslandState((store) => store.setState);
+	const tl = useLiteralMessages();
 	const [detected, setDetected] = useState<Detected | null>(null);
 	const tsRef = useRef(0);
 
@@ -78,7 +80,7 @@ export function useQuestDetect(): QuestDetect {
 				source: "local_model",
 				suggestionType: "quest",
 				title: "Task looks done",
-				body: `${detected.title} — mark it done?`,
+				body: tl("{title} — mark it done?", { title: detected.title }),
 				action: "dismiss",
 				confidence: detected.confidence / 100,
 				appName: null,

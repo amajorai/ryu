@@ -1,0 +1,4 @@
+.question {
+	composes: an-tool-question from global;
+	width: 100%;
+}

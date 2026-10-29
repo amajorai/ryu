@@ -1,4 +1,5 @@
 import { abortableDelay } from "@/src/lib/abortable-delay.ts";
+
 // apps/desktop/src/lib/api/channelStatus.ts
 //
 // Live connection status for channel bots (Telegram/Slack/…), consumed by the
@@ -12,7 +13,9 @@ import { abortableDelay } from "@/src/lib/abortable-delay.ts";
 // with backoff (re-fetching a snapshot on each reconnect so a missed heartbeat
 // while disconnected self-heals).
 
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { activityJsonValueSchema } from "@ryuhq/core-client/activity.ts";
+import { z } from "zod";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 
 /** Effective liveness state as computed by the control plane. */
 export type ChannelLiveState =
@@ -29,6 +32,21 @@ export interface ChannelStatus {
 	lastHeartbeatAt: string | null;
 	state: ChannelLiveState;
 }
+
+const channelStatusFieldsSchema = z.object({
+	detail: z.string().nullable(),
+	id: z.string(),
+	lastHeartbeatAt: z.string().nullable(),
+	state: z.enum(["online", "connecting", "error", "offline", "unknown"]),
+});
+export const channelStatusSchema = z.custom<ChannelStatus>(
+	(value) =>
+		activityJsonValueSchema.safeParse(value).success &&
+		channelStatusFieldsSchema.safeParse(value).success
+);
+const channelStatusesReplySchema = z.object({
+	statuses: z.array(channelStatusSchema).nullish(),
+});
 
 type StatusMap = Map<string, ChannelLiveState>;
 type Listener = (statuses: StatusMap) => void;
@@ -48,7 +66,7 @@ let running = false;
 
 function authToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		return null;
 	}
@@ -79,7 +97,7 @@ async function loadSnapshot(token: string, signal: AbortSignal): Promise<void> {
 	if (!resp.ok) {
 		throw new Error(`status snapshot failed: ${resp.status}`);
 	}
-	const body = (await resp.json()) as { statuses?: ChannelStatus[] };
+	const body = channelStatusesReplySchema.parse(await resp.json());
 	for (const status of body.statuses ?? []) {
 		if (signal.aborted) {
 			return;
@@ -104,7 +122,7 @@ function dispatchFrame(frame: string): void {
 		return;
 	}
 	try {
-		applyStatus(JSON.parse(dataLines.join("\n")) as ChannelStatus);
+		applyStatus(channelStatusSchema.parse(JSON.parse(dataLines.join("\n"))));
 	} catch {
 		// Ignore malformed frames; the next heartbeat self-heals.
 	}

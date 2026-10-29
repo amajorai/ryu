@@ -1,15 +1,23 @@
 import "./setup-dom.ts";
 
 import { afterEach, describe, expect, it } from "bun:test";
+import type { UIMessage } from "ai";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { WorkflowRunProgressCard } from "../../../../packages/blocks/src/desktop/agent-elements/workflow-run-part.tsx";
+import {
+	type WorkflowResumeHandler,
+	WorkflowRunProgressCard,
+} from "../../../../packages/blocks/src/desktop/agent-elements/workflow-run-part.tsx";
 
-(
-	globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
+// The installed ReactDOM act environment reads this native boolean global.
+declare global {
+	var IS_REACT_ACT_ENVIRONMENT: boolean;
+}
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const message = {
+	id: "workflow-resume-message",
+	role: "assistant",
 	parts: [
 		{
 			data: {
@@ -23,14 +31,12 @@ const message = {
 			type: "data-ryu-workflow" as const,
 		},
 	],
-};
+} satisfies UIMessage;
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
-async function mount(
-	onResume: (runId: string, payload: string) => Promise<unknown>
-): Promise<HTMLDivElement> {
+async function mount(onResume: WorkflowResumeHandler): Promise<HTMLDivElement> {
 	container = document.createElement("div");
 	document.body.appendChild(container);
 	root = createRoot(container);

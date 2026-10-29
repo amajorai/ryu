@@ -13,6 +13,11 @@ import {
 	useCallback,
 } from "react";
 
+interface CellPresenceStyle extends CSSProperties {
+	"--tw-ring-color": NonNullable<
+		ReturnType<typeof useDataGridPresence>
+	>["color"];
+}
 interface DataGridCellWrapperProps<TData>
 	extends DataGridCellProps<TData>,
 		ComponentProps<"div"> {}
@@ -166,6 +171,9 @@ export function DataGridCellWrapper<TData>({
 		}
 	}, [tableMeta, isEditing]);
 
+	// SAFETY: The style assertion below only adds the authored --tw-ring-color
+	// slot from CellPresenceStyle. Native React forwards its string color to
+	// DOM style.setProperty; CSSProperties omits the slot from its declaration.
 	return (
 		<div
 			data-editing={isEditing ? "" : undefined}
@@ -206,7 +214,10 @@ export function DataGridCellWrapper<TData>({
 			ref={composedRef}
 			style={
 				cellPresence
-					? ({ "--tw-ring-color": cellPresence.color } as CSSProperties)
+					? // SAFETY: React forwards this exact custom property to native DOM style.setProperty; its closed CSSProperties declaration omits the slot. The complete native presence owner supplies its string color unchanged.
+						({
+							"--tw-ring-color": cellPresence.color,
+						} satisfies CellPresenceStyle as CSSProperties)
 					: undefined
 			}
 		/>

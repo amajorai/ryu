@@ -23,12 +23,23 @@ export const ryuOrganizationRoles = {
 		...defaultRoles.owner.statements,
 		apiKey: ["create", "read", "update", "delete"],
 	}),
+	// Members and viewers carry no API-key record authority. Listing org keys is
+	// Ryu's `gateway.configure` capability (enforced by the control plane, which
+	// reads the key store itself), so the native `/api-key/list` and `/get`
+	// endpoints must not hand them the org's key inventory.
 	member: ryuOrganizationAccessControl.newRole({
 		...defaultRoles.member.statements,
-		apiKey: ["read"],
+		apiKey: [],
 	}),
 	viewer: ryuOrganizationAccessControl.newRole({
 		...defaultRoles.member.statements,
-		apiKey: ["read"],
+		apiKey: [],
+	}),
+	// Billing contacts manage payment and read usage. Ryu's control plane grants
+	// `billing.manage` on top of the viewer floor for this role; it carries no
+	// organization-management or API-key record authority here.
+	billing: ryuOrganizationAccessControl.newRole({
+		...defaultRoles.member.statements,
+		apiKey: [],
 	}),
 };

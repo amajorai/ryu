@@ -14,7 +14,10 @@
 
 import { useEffect } from "react";
 import { reapplyActivePreset } from "@/src/hooks/useThemePreset.ts";
-import type { PluginTheme } from "@/src/lib/api/plugins.ts";
+import {
+	type PluginTheme,
+	pluginThemeResponseSchema,
+} from "@/src/lib/api/plugins.ts";
 import {
 	loadPluginThemes,
 	savePluginThemes,
@@ -41,15 +44,10 @@ function toVariant(theme: PluginTheme): ThemeVariant {
  * than at every consumer.
  */
 function isRenderable(theme: PluginTheme): boolean {
+	const parsed = pluginThemeResponseSchema.safeParse(theme);
 	return (
-		typeof theme?.id === "string" &&
-		theme.id.length > 0 &&
-		typeof theme.label === "string" &&
-		(theme.mode === "light" || theme.mode === "dark") &&
-		typeof theme.preview?.bg === "string" &&
-		typeof theme.preview?.primary === "string" &&
-		typeof theme.preview?.surface === "string" &&
-		!!theme.tokens &&
+		parsed.success &&
+		parsed.data.id.length > 0 &&
 		Object.keys(theme.tokens).length > 0
 	);
 }

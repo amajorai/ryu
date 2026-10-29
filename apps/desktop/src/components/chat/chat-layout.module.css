@@ -1,0 +1,16 @@
+.folderRow {
+	padding-left: var(--folder-indent);
+}
+.folderNote {
+	padding-left: var(--folder-indent);
+}
+.launchpadPage {
+	grid-template-rows: repeat(var(--launchpad-rows), minmax(0, 1fr));
+	grid-template-columns: repeat(var(--launchpad-columns), minmax(0, 1fr));
+}
+.artifactFrame {
+	transition-property: height;
+}
+.titlebarInset {
+	padding-top: var(--ryu-titlebar-inset, 3rem);
+}

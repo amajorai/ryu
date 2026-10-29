@@ -1,0 +1,51 @@
+{
+  "features": ["sandbox-wasmtime", "voice-parakeet", "voice-vad"],
+  "ort": {
+    "crate": "2.0.0-rc.12",
+    "runtime": "1.24.2",
+    "archive": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-linux-x64-1.24.2.tgz",
+    "bytes": 8123282,
+    "sha256": "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
+    "env": {
+      "ORT_LIB_PATH": "<extracted>/onnxruntime-linux-x64-1.24.2/lib",
+      "ORT_PREFER_DYNAMIC_LINK": "1",
+      "ORT_SKIP_DOWNLOAD": "1",
+      "LD_LIBRARY_PATH": "<extracted>/onnxruntime-linux-x64-1.24.2/lib:<native env LD_LIBRARY_PATH>"
+    }
+  },
+  "parakeet": {
+    "repo": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+    "commit": "8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce",
+    "files": {
+      "encoder-model.int8.onnx": {
+        "bytes": 652183999,
+        "sha256": "6139d2fa7e1b086097b277c7149725edbab89cc7c7ae64b23c741be4055aff09"
+      },
+      "decoder_joint-model.int8.onnx": {
+        "bytes": 18202004,
+        "sha256": "eea7483ee3d1a30375daedc8ed83e3960c91b098812127a0d99d1c8977667a70"
+      },
+      "nemo128.onnx": {
+        "bytes": 139764,
+        "sha256": "a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f"
+      },
+      "vocab.txt": {
+        "bytes": 93939,
+        "git_blob_sha1": "fc43e1c723e262df60b70e1919614417162d1fe2",
+        "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+      }
+    }
+  },
+  "silero": {
+    "url": "https://raw.githubusercontent.com/snakers4/silero-vad/v4.0/files/silero_vad.onnx",
+    "bytes": 1807522,
+    "sha256": "a35ebf52fd3ce5f1469b2a36158dba761bc47b973ea3382b3186ca15b1f5af28"
+  },
+  "known_gap": "Enabling existing tests compiles ONNX engines but does not perform voice inference; need actual model inference proof with shipped WAV fixture. Default handy model archive and automatic ort-rs CDN returned HEAD403.",
+  "sample": {
+    "crate_url": "https://static.crates.io/crates/transcribe-rs/transcribe-rs-0.3.11.crate",
+    "crate_sha256": "fb9d5cfb8e68a2a8fc27fb548987473221d3cc3776a331ccde46c8bd8b2eda0f",
+    "member": "transcribe-rs-0.3.11/samples/jfk.wav",
+    "sha256": "59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e"
+  }
+}

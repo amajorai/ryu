@@ -37,6 +37,18 @@
 //! unauthenticated) health probe, and re-stamps it on every proxied hop — so a
 //! well-behaved sidecar can refuse any loopback caller that did not come through
 //! Core. Sidecars SHOULD bind loopback only.
+//!
+//! ## Web-delegated requests
+//!
+//! The web app's server tier forwards a signed-in browser's `app.request` calls here
+//! with the server-held node token, which Core would otherwise read as the node
+//! owner. It therefore stamps [`HDR_WEB_DELEGATION`] on every such request, and Core
+//! narrows those requests in [`web_delegated_admission`]: a verified member of a
+//! bound node, a route the app annotated with a `permission`, a target app that
+//! supports the web surface, and a named calling app ([`HDR_APP_CALLER`]) that is
+//! enabled, web-capable, has a Companion and holds the reviewed `app:http` (own app)
+//! or `app:http:<target>` (another app) grant. The marker only ever narrows: a request
+//! without it is handled exactly as before.
 
 use axum::body::Body;
 use axum::extract::{
@@ -72,8 +84,37 @@ pub(crate) const HDR_PLUGIN_ID: &str = "x-ryu-plugin-id";
 const HDR_FORWARDED_AUTHORIZATION: &str = "x-ryu-forwarded-authorization";
 const HDR_CALLER_USER_ID: &str = "x-ryu-caller-user-id";
 const HDR_CALLER_ORG_ID: &str = "x-ryu-caller-org-id";
+/// The verified caller's email from the signed identity token, stamped only when
+/// the token also carries `email_verified: true`. Like the user and org headers,
+/// a caller-supplied copy is stripped before Core stamps it, so a sidecar can
+/// match email-addressed grants (named editors or viewers) without receiving the
+/// caller's JWT, and never against an address the caller has not proven to own.
+const HDR_CALLER_EMAIL: &str = "x-ryu-caller-email";
+const HDR_CALLER_RESOURCE_IDS: &str = "x-ryu-caller-resource-ids";
+/// Pseudonymous per-client rate subject, stamped only for sidecars whose
+/// manifest sets `forward_caller_rate_subject` (see [`rate_subject_for`]).
+/// Stripped from caller input for every sidecar.
+const HDR_CALLER_RATE_SUBJECT: &str = "x-ryu-caller-rate-subject";
 pub(crate) const HDR_CALLER_AGENT_ID: &str = "x-ryu-caller-agent-id";
 pub(crate) const HDR_CALLER_AGENT_PROOF: &str = "x-ryu-caller-agent-proof";
+/// Opt-in marker the web app's server tier stamps on every ext request it forwards
+/// for a browser. Its PRESENCE (any value) routes the request through
+/// [`web_delegated_admission`]. It is deliberately separate from `x-ryu-surface`,
+/// which is presentation-only. Stripped before the sidecar hop. The web tier also
+/// stamps it on app host-bridge calls (`server::plugin_bridge_api`).
+pub(crate) const HDR_WEB_DELEGATION: &str = "x-ryu-web-delegation";
+/// Stamped by Core, with the delivery id, on an event delivery to a subscriber's
+/// route ([`crate::sidecar::event_subscribers`]) and stripped from every other hop,
+/// so a subscriber can tell Core's delivery from a caller that reached the same
+/// declared route through this proxy.
+pub(crate) const HDR_EVENT_DELIVERY: &str = "x-ryu-event-delivery";
+/// The calling app the web host names for a web-delegated request. Browser-asserted,
+/// so it is not identity: it pins each request to ONE reviewed grant edge on an
+/// enabled, web-capable Companion app. Stripped before the sidecar hop.
+const HDR_APP_CALLER: &str = "x-ryu-app-caller";
+/// The own-app `app.request` grant; its reviewed per-target form is
+/// `app:http:<scoped target id>`. Both are existing reviewed grants.
+const APP_HTTP_GRANT: &str = "app:http";
 const AGENT_LANE_PROOF_DOMAIN: &str = "ryu-agent-lane-v1";
 
 type AgentLaneMac = Hmac<Sha256>;
@@ -123,10 +164,47 @@ const DEFAULT_MAX_PROXY_BYTES: usize = 10 * 1024 * 1024;
 /// hop is its own task).
 const PROXY_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Bound on waking a lazy/idle-stopped sidecar (start + health warm-up) before the
-/// proxy gives up with a 503. A resumable (`.part`) download means a later request
-/// warms a slow-to-fetch binary sidecar.
+/// How long a request WAITS for a lazy/idle-stopped sidecar to wake (start + health
+/// warm-up) before the proxy answers 503 + `Retry-After`. Only the wait: the start
+/// runs detached in the manager with its own long budget, so a first start that is a
+/// download or a `pip install` keeps going and a retry finds it warm (or joins it).
 const WAKE_WARMUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// `Retry-After` (seconds) on a 503 for a sidecar that is still starting.
+const WAKE_RETRY_AFTER_SECS: &str = "5";
+
+/// The response for a wake that did not produce a warm sidecar.
+///
+/// "Still starting" (the caller's wait ran out; the start continues detached) is a
+/// retryable 503 with `Retry-After`. A start that actually FAILED is a 503 without
+/// it — retrying immediately will not help — and says so instead of "warming up".
+/// The start's own error text is logged, not returned. `json_body` keeps each
+/// lane's existing body shape (plain text on the proxy lanes, JSON on the broker).
+fn wake_failed_response(who: &str, name: &str, err: &anyhow::Error, json_body: bool) -> Response {
+    let still_starting = crate::sidecar::manager::is_still_starting(err);
+    tracing::warn!("{who}: waking sidecar '{name}' failed: {err:#}");
+    let message = if still_starting {
+        "sidecar is still starting, retry shortly"
+    } else {
+        "sidecar failed to start"
+    };
+    let mut response = if json_body {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": message, "retryable": still_starting })),
+        )
+            .into_response()
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, message).into_response()
+    };
+    if still_starting {
+        response.headers_mut().insert(
+            axum::http::header::RETRY_AFTER,
+            axum::http::HeaderValue::from_static(WAKE_RETRY_AFTER_SECS),
+        );
+    }
+    response
+}
 
 /// Activation-event token fired (globally, like `onChat`/`onStartup`) the first time
 /// a lazy sidecar is cold-started by an inbound proxy hit, so a plugin's Runnables
@@ -244,15 +322,21 @@ fn has_dot_segment(sub_path: &str) -> bool {
         {
             return true;
         }
+        if current.contains('\\') {
+            return true;
+        }
         let decoded = match urlencoding::decode(&current) {
             Ok(next) => next.into_owned(),
             // Not valid percent-encoding (or not UTF-8 once decoded). Nothing
             // downstream will get a cleaner read of it than we just did.
-            Err(_) => return false,
+            Err(_) => return true,
         };
         // A segment separator that only APPEARS after decoding (`..%2fadmin`) means
         // the pre-decode split never saw the boundary. Re-splitting on the next
         // round is what catches it.
+        if decoded.matches('/').count() != current.matches('/').count() || decoded.contains('\\') {
+            return true;
+        }
         if decoded == current {
             return false;
         }
@@ -261,6 +345,91 @@ fn has_dot_segment(sub_path: &str) -> bool {
     // Still changing after the bound: pathologically nested encoding. Refuse rather
     // than hand a path we have not finished understanding to the forwarder.
     true
+}
+
+/// Whether `sub_path` holds a `?` or `#`, literally or under any layer of percent
+/// encoding.
+///
+/// Axum has already decoded the path once, so a caller's `%3F` arrives here as a
+/// literal `?`. The route and permission gates would match the path WITH it (and gate
+/// on a resource id such as `job-1?`), but the forward builds a URL from the same
+/// string, where the first `?` starts the query and `#` the fragment: the sidecar
+/// would serve the shorter path (`job-1`) the gates never saw. A deeper layer
+/// (`%253F`) is refused for the same reason the dot-segment guard decodes until the
+/// path stops changing: the sidecar's own framework may decode once more.
+fn has_query_or_fragment_delimiter(sub_path: &str) -> bool {
+    const MAX_DECODE_ROUNDS: usize = 8;
+
+    let mut current = sub_path.to_owned();
+    for _ in 0..MAX_DECODE_ROUNDS {
+        if current.contains(['?', '#']) {
+            return true;
+        }
+        let decoded = match urlencoding::decode(&current) {
+            Ok(next) => next.into_owned(),
+            Err(_) => return true,
+        };
+        if decoded == current {
+            return false;
+        }
+        current = decoded;
+    }
+    true
+}
+
+/// Whether `sub_path` holds a tab, LF or CR, literally or under any layer of percent
+/// encoding.
+///
+/// The gates match `sub_path` as given, but the forward hands
+/// `http://127.0.0.1:<port><mount><sub_path><query>` to reqwest, whose URL parser
+/// deletes every tab, LF and CR BEFORE it collapses dot segments. So
+/// `/webhook/.<TAB>./admin` (sent as `.%09.`) has no literal `..` for
+/// [`has_dot_segment`] to refuse and matches a Public `/webhook/*rest` route, yet the
+/// sidecar is asked for `/admin` carrying Core's hop bearer. Deletion alone renames a
+/// path too: under a Public `/*rest`, `/ad<TAB>min` is forwarded as the Protected
+/// `/admin`. A deeper layer (`%09`) is refused for the same reason the dot-segment
+/// guard decodes until the path stops changing: the sidecar's own framework may
+/// decode once more. Other C0 controls are not refused here: the parser
+/// percent-encodes them inside the path, so they reach the sidecar as matched (a
+/// trailing one is trimmed instead; see [`forward_url_trims_path_end`]).
+fn has_url_parser_deleted_character(sub_path: &str) -> bool {
+    const MAX_DECODE_ROUNDS: usize = 8;
+
+    let mut current = sub_path.to_owned();
+    for _ in 0..MAX_DECODE_ROUNDS {
+        if current.contains(['\t', '\n', '\r']) {
+            return true;
+        }
+        let decoded = match urlencoding::decode(&current) {
+            Ok(next) => next.into_owned(),
+            Err(_) => return true,
+        };
+        if decoded == current {
+            return false;
+        }
+        current = decoded;
+    }
+    true
+}
+
+/// Whether the HTTP forward's URL parser would trim the end of `sub_path` off the path
+/// it requests from the sidecar.
+///
+/// reqwest's URL parser trims C0 controls and spaces off the end of the WHOLE URL. The
+/// forward appends `?<query>` whenever the request had one (even an empty one), so the
+/// path is the end of that URL exactly when `query` is `None`. Only then is anything
+/// trimmed, and then it always is: `/webhook/..<SPACE>` is forwarded as `/webhook/..`
+/// and collapses to the mount root, and under a Public `/*rest` route `/admin<SPACE>`
+/// is forwarded as the Protected `/admin`. So this refuses only a path the forward
+/// would already send to a different place from the one the gates matched. A space
+/// anywhere else, or one followed by a query, is percent-encoded and reaches the
+/// sidecar as matched, and a still-encoded `%20` is never trimmed.
+///
+/// The WebSocket lane needs no such check: its bridge parses the upstream URL as an
+/// `http::Uri`, which rejects a literal space or control character outright, so such
+/// a socket is closed without ever reaching the sidecar.
+fn forward_url_trims_path_end(sub_path: &str, query: Option<&str>) -> bool {
+    query.is_none() && sub_path.ends_with(|c: char| c <= ' ')
 }
 
 /// The value captured by a named `:param` of `pattern` from `actual`, or `None` when
@@ -309,12 +478,20 @@ fn required_permission_for(
     Some((permission, resource_id))
 }
 
+/// The agent a request runs for, when Core's HTTP-tool seam stamped one.
+///
 /// Browser managed-Bot lanes are an internal Core capability, not a public
 /// query selector. Accept the query only when the Core HTTP-tool seam supplied
 /// a proof tied to the exact request; direct ext-proxy callers are refused.
+///
+/// Every other app learns its agent from [`HDR_CALLER_AGENT_ID`], which counts
+/// only with a [`HDR_CALLER_AGENT_PROOF`] tied to the same agent, method, path
+/// and query. A named agent with a missing or bad proof is refused rather than
+/// forwarded as an agent-less call, so an agent can never shed its account
+/// access by mangling the proof.
 fn verified_agent_lane(req: &Request, plugin_id: &str) -> Result<Option<String>, Response> {
     if plugin_id != "@ryu/browser" {
-        return Ok(None);
+        return verified_agent_header(req);
     }
     let query = req.uri().query().unwrap_or_default();
     let agent_ids: Vec<String> = url::form_urlencoded::parse(query.as_bytes())
@@ -353,6 +530,61 @@ fn verified_agent_lane(req: &Request, plugin_id: &str) -> Result<Option<String>,
     Ok(Some(agent_id.clone()))
 }
 
+/// Whether a request that resolved to a `Public` route must be refused because its
+/// ORIGINAL (still percent-encoded) URI path hides a dot segment, a backslash, or a
+/// separator that only appears after decoding.
+///
+/// Axum has already decoded the Path capture that [`resolve_route`] sees, so a
+/// separator encoded once (`/slug%2F..%2Fadmin`, `/slug%2Fsessions`) is invisible
+/// there. Public routes are reachable without any credential, and the satellites
+/// behind them (Forms, Bot Flows, inbound webhooks, …) resolve slugs against their
+/// own stores, so the raw URI must be unambiguous before it reaches them. This holds
+/// for every plugin's public routes; there is deliberately no per-app branch.
+/// Protected routes keep the decoded-path check only: they already require the node
+/// bearer, and some legitimately carry encoded separators in ids.
+fn public_route_raw_path_is_unsafe(auth: RouteAuth, raw_path: &str) -> bool {
+    auth == RouteAuth::Public && has_dot_segment(raw_path)
+}
+
+fn verified_agent_header(req: &Request) -> Result<Option<String>, Response> {
+    let mut named = req.headers().get_all(HDR_CALLER_AGENT_ID).iter();
+    let Some(agent_id) = named.next() else {
+        return Ok(None);
+    };
+    let agent_id = agent_id
+        .to_str()
+        .ok()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && named.next().is_none())
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                "the calling agent must be named exactly once",
+            )
+                .into_response()
+        })?;
+    let Some(proof) = req
+        .headers()
+        .get(HDR_CALLER_AGENT_PROOF)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "a calling agent requires a Core-issued capability proof",
+        )
+            .into_response());
+    };
+    let path_and_query = req
+        .uri()
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or_else(|| req.uri().path());
+    if !verify_agent_lane(agent_id, req.method().as_str(), path_and_query, proof) {
+        return Err((StatusCode::FORBIDDEN, "calling agent proof is invalid").into_response());
+    }
+    Ok(Some(agent_id.to_owned()))
+}
+
 /// Find the most-specific declared route on `manifest` that matches `sub_path`,
 /// returning the matched sidecar spec, its http spec, and the matched route. Equal
 /// specificity is rejected so auth posture never depends on declaration order.
@@ -369,7 +601,10 @@ fn resolve_route<'a>(
     &'a HttpProxySpec,
     &'a crate::plugin_manifest::schema::RouteSpec,
 )> {
-    if has_dot_segment(sub_path) {
+    if has_dot_segment(sub_path)
+        || has_query_or_fragment_delimiter(sub_path)
+        || has_url_parser_deleted_character(sub_path)
+    {
         return None;
     }
     let mut best: Option<(
@@ -480,8 +715,20 @@ fn copy_headers(
                 .eq_ignore_ascii_case(HDR_FORWARDED_AUTHORIZATION)
             || name.as_str().eq_ignore_ascii_case(HDR_CALLER_USER_ID)
             || name.as_str().eq_ignore_ascii_case(HDR_CALLER_ORG_ID)
+            || name.as_str().eq_ignore_ascii_case(HDR_CALLER_EMAIL)
+            || name.as_str().eq_ignore_ascii_case(HDR_CALLER_RESOURCE_IDS)
+            || name.as_str().eq_ignore_ascii_case(HDR_CALLER_RATE_SUBJECT)
+            || name
+                .as_str()
+                .eq_ignore_ascii_case(crate::sidecar::deferred_authorization::PRINCIPAL_HEADER)
             || name.as_str().eq_ignore_ascii_case(HDR_CALLER_AGENT_ID)
             || name.as_str().eq_ignore_ascii_case(HDR_CALLER_AGENT_PROOF)
+            || name
+                .as_str()
+                .eq_ignore_ascii_case(crate::sidecar::deferred_authorization::AGENT_GRANT_HEADER)
+            || name.as_str().eq_ignore_ascii_case(HDR_WEB_DELEGATION)
+            || name.as_str().eq_ignore_ascii_case(HDR_APP_CALLER)
+            || name.as_str().eq_ignore_ascii_case(HDR_EVENT_DELIVERY)
         {
             continue;
         }
@@ -708,6 +955,157 @@ fn upstream_path_for(mount: &str, sub_path: &str) -> String {
     }
 }
 
+// ── Web-delegated admission ───────────────────────────────────────────────────
+
+/// The facts [`web_delegated_admission`] needs from the manifest snapshot, captured
+/// while [`proxy_for_plugin`] still holds the manifest guard (the gate itself runs
+/// after the guard is dropped, so it never nests a second read of the same lock).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WebDelegationFacts {
+    /// Whether the matched route declares a per-route `permission`.
+    route_declares_permission: bool,
+    /// Whether the TARGET app strictly supports the web surface.
+    target_supports_web: bool,
+    /// The named calling app, when the header held a valid id of an installed app.
+    caller_app: Option<WebCallerApp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WebCallerApp {
+    id: String,
+    supports_web: bool,
+    has_companion: bool,
+}
+
+/// Whether `manifest` declares the web surface at `full` or `limited`.
+///
+/// Deliberately NOT [`crate::plugin_manifest::PluginManifest::supports_surface`]: that
+/// reads an absent `surfaces` map with empty legacy `targets` as "every surface" and an
+/// unknown support level as supported, which is the right listing default but the wrong
+/// answer for a credential-bearing web hop. Here an absent map, an absent key, and every
+/// other level fail closed.
+fn strictly_supports_web(manifest: &crate::plugin_manifest::PluginManifest) -> bool {
+    use crate::plugin_manifest::{Surface, SurfaceSupport};
+    let Some(entry) = manifest
+        .surfaces
+        .as_ref()
+        .and_then(|surfaces| surfaces.get(&Surface::Web))
+    else {
+        return false;
+    };
+    match entry.support {
+        SurfaceSupport::Full | SurfaceSupport::Limited => true,
+        SurfaceSupport::List
+        | SurfaceSupport::Commands
+        | SurfaceSupport::None
+        | SurfaceSupport::Unknown => false,
+    }
+}
+
+/// Capture the web-delegation facts for `target` from the manifest snapshot.
+fn web_delegation_facts(
+    manifests: &[crate::plugin_manifest::PluginManifest],
+    target: &crate::plugin_manifest::PluginManifest,
+    route_declares_permission: bool,
+    headers: &HeaderMap,
+) -> WebDelegationFacts {
+    let caller_app = headers
+        .get(HDR_APP_CALLER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|id| crate::plugin_manifest::validate_plugin_id(id).is_ok())
+        .and_then(|id| manifests.iter().find(|manifest| manifest.id == id))
+        .map(|manifest| WebCallerApp {
+            id: manifest.id.clone(),
+            supports_web: strictly_supports_web(manifest),
+            has_companion: manifest
+                .runnables
+                .iter()
+                .any(|entry| entry.kind == crate::runnable::RunnableKind::Companion),
+        });
+    WebDelegationFacts {
+        route_declares_permission,
+        target_supports_web: strictly_supports_web(target),
+        caller_app,
+    }
+}
+
+/// The manifest half of the web-delegated gate. Every refusal is a 404, the same
+/// answer as an undeclared route or a disabled app, so a web caller cannot enumerate
+/// which routes exist but are not web-reachable.
+fn web_delegated_route_gate(facts: &WebDelegationFacts) -> Result<&WebCallerApp, StatusCode> {
+    if !(facts.route_declares_permission && facts.target_supports_web) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let caller_app = facts.caller_app.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+    if !(caller_app.supports_web && caller_app.has_companion) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(caller_app)
+}
+
+/// The one reviewed grant edge a web-delegated request rides: `app:http` for the
+/// calling app's own sidecar, or exactly `app:http:<target>` for another app's.
+fn web_caller_required_grant(caller_app: &str, target: &str) -> String {
+    if caller_app == target {
+        APP_HTTP_GRANT.to_owned()
+    } else {
+        format!("{APP_HTTP_GRANT}:{target}")
+    }
+}
+
+/// The named calling app must be enabled and hold the exact grant edge in its CURRENT
+/// approved set (approved AND still declared by its manifest), never the manifest claim.
+async fn web_caller_app_admitted(
+    state: &ServerState,
+    caller_app: &str,
+    target: &str,
+) -> Result<(), StatusCode> {
+    let record = match state.app_store.get(caller_app).await {
+        Ok(Some(record)) if record.enabled => record,
+        Ok(_) => return Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::warn!("ext proxy: app_store lookup for caller app '{caller_app}' failed: {e}");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+    let approved =
+        crate::plugin_host::current_approved_grants(state, caller_app, &record.approved_grants)
+            .await;
+    if approved.contains(&web_caller_required_grant(caller_app, target)) {
+        Ok(())
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
+/// Admission for a request the web tier forwarded for a browser ([`HDR_WEB_DELEGATION`]).
+///
+/// The web tier reaches Core with the server-held node token, which on its own reads as
+/// the node owner, so the boundary has to live here where the caller and the grants are
+/// known. Runs before the per-route permission check, the registration/wake gate and the
+/// body buffer, so a refused web caller can neither wake a sidecar nor push a body.
+async fn web_delegated_admission(
+    state: &ServerState,
+    target: &str,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    facts: &WebDelegationFacts,
+) -> Result<(), StatusCode> {
+    let Some(user) = caller.as_ref() else {
+        return Err(StatusCode::FORBIDDEN);
+    };
+    // A shared web portal must never inherit the unbound-node owner semantics.
+    crate::server::web_delegated_candidate(caller)?;
+    let caller_app = web_delegated_route_gate(facts)?;
+    web_caller_app_admitted(state, &caller_app.id, target).await?;
+    tracing::info!(
+        plugin = %target,
+        caller_app = %caller_app.id,
+        user_id = %user.user_id,
+        "ext proxy: admitted a web-delegated request"
+    );
+    Ok(())
+}
+
 /// The shared reverse-proxy core: enabled-gate → resolve the declared route
 /// (undeclared ⇒ 404) → per-route auth → forward to the sidecar with the plugin's
 /// minted token. Used by BOTH the `/api/ext/:id/*` catch-all and the build-time
@@ -736,16 +1134,40 @@ async fn proxy_for_plugin(
     let Some(manifest) = manifests.iter().find(|m| m.id == plugin_id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    // The forward below appends `?<query>` exactly when the request carries one.
+    if forward_url_trims_path_end(sub_path, req.uri().query()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let Some((spec, http, route)) = resolve_route(manifest, sub_path, &request_method) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let auth = route.auth;
+    if public_route_raw_path_is_unsafe(auth, req.uri().path()) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     // Resolved while the manifest guard is still held, since the gate below runs
     // after it is dropped.
     let required = required_permission_for(route, sub_path, plugin_id);
+    // Only a web-delegated request pays for (or is affected by) these facts.
+    let web_facts = req
+        .headers()
+        .contains_key(HDR_WEB_DELEGATION)
+        .then(|| web_delegation_facts(&manifests, manifest, required.is_some(), req.headers()));
     let caller_agent_id = match verified_agent_lane(&req, plugin_id) {
         Ok(value) => value,
         Err(response) => return response,
+    };
+    // Only an agent whose account access is restricted needs the app's
+    // provider calls tied to its grant; an unrestricted one may use every
+    // account the user's own (grant-less) calls use. A store error counts as
+    // restricted.
+    let caller_agent_restricted = match caller_agent_id.as_deref() {
+        Some(agent_id) => {
+            crate::agent_access::account_confinement_for_agent(&state.agent_store, agent_id)
+                .await
+                .is_confined()
+        }
+        None => false,
     };
     let caller = crate::server::verified_caller_from_headers(req.headers()).await;
     if crate::sidecar::control_plane::is_managed_node()
@@ -771,6 +1193,9 @@ async fn proxy_for_plugin(
         .unwrap_or_default();
     let max_body = http.max_body_bytes.unwrap_or(DEFAULT_MAX_PROXY_BYTES);
     let forward_cookie_names = http.forward_cookie_names.clone();
+    let forward_caller_email = http.forward_caller_email;
+    let forward_caller_rate_subject = http.forward_caller_rate_subject;
+    let caller_resource_scope = http.caller_resource_scope.clone();
     // The manager key for this sidecar.
     let sidecar_name = crate::sidecar::manifest_sidecar::namespaced_name(plugin_id, &spec.name);
     drop(manifests);
@@ -795,6 +1220,16 @@ async fn proxy_for_plugin(
             {
                 return StatusCode::UNAUTHORIZED.into_response();
             }
+        }
+    }
+
+    // A request the web tier forwarded for a browser carries the node token, so on its
+    // own it would read as the owner. Narrow it to a verified member of a bound node, a
+    // permission-annotated route, and a reviewed grant edge of a web-capable Companion
+    // app. A request without the marker skips this entirely, byte for byte as before.
+    if let Some(facts) = web_facts.as_ref() {
+        if let Err(status) = web_delegated_admission(state, plugin_id, &caller, facts).await {
+            return status.into_response();
         }
     }
 
@@ -825,6 +1260,52 @@ async fn proxy_for_plugin(
             return status.into_response();
         }
     }
+
+    let caller_resource_ids = match caller_resource_scope.as_deref() {
+        None => None,
+        Some("conversation") => {
+            let (user_id, org_id, team_ids_json, node_bound) =
+                crate::server::tenancy_filter_args(&caller);
+            // Ids and source versions only (no summary decryption), newest first,
+            // so the bounded header below keeps the caller's most recently active
+            // conversations. Each entry is `<version>:<id>`: the version changes
+            // when a conversation is deleted and another is created under the same
+            // id, so the sidecar never serves the old one's derived data to it.
+            let visible = state
+                .conversations
+                .visible_conversation_versions_for_teams(
+                    user_id.as_deref(),
+                    org_id.as_deref(),
+                    node_bound,
+                    team_ids_json.as_deref(),
+                )
+                .await;
+            let visible = match visible {
+                Ok(visible) => visible,
+                Err(error) => {
+                    tracing::warn!(%error, "ext proxy: caller resource scope lookup failed");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            };
+            let entries: Vec<String> = visible
+                .iter()
+                .map(|(id, version)| format!("{version}:{id}"))
+                .collect();
+            let (encoded, omitted) = encode_caller_resource_ids(
+                entries.iter().map(String::as_str),
+                MAX_CALLER_RESOURCE_IDS_BYTES,
+            );
+            if omitted > 0 {
+                tracing::warn!(
+                    plugin_id,
+                    omitted,
+                    "ext proxy: caller resource scope truncated to the most recently updated resources"
+                );
+            }
+            Some(encoded)
+        }
+        Some(_) => return StatusCode::FORBIDDEN.into_response(),
+    };
 
     // ── Registration gate + wake-on-demand ────────────────────────────────────
     //
@@ -889,14 +1370,7 @@ async fn proxy_for_plugin(
                         fire_lazy_activation(state, ACTIVATION_ON_ROUTE);
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("ext proxy: waking sidecar '{sidecar_name}' failed: {e}");
-                    return (
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "sidecar warming up, retry shortly",
-                    )
-                        .into_response();
-                }
+                Err(e) => return wake_failed_response("ext proxy", &sidecar_name, &e, false),
             }
             // Re-resolve rather than trusting the wake's return: a wake that reports
             // success but leaves the process down must 503, never fall back to a blind
@@ -921,6 +1395,8 @@ async fn proxy_for_plugin(
             .into_response();
     };
 
+    let caller_rate_subject = forward_caller_rate_subject
+        .then(|| rate_subject_for(plugin_id, caller.as_ref(), request_client_ip(&req)));
     let (parts, body) = req.into_parts();
     let body_bytes = match axum::body::to_bytes(body, max_body).await {
         Ok(b) => b,
@@ -929,7 +1405,7 @@ async fn proxy_for_plugin(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "ext proxy: request body too large",
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -940,7 +1416,7 @@ async fn proxy_for_plugin(
         .unwrap_or_default();
     let upstream_path = upstream_path_for(&mount, sub_path);
 
-    forward_to_sidecar(ForwardArgs {
+    let mut response = forward_to_sidecar(ForwardArgs {
         target,
         upstream_path: &upstream_path,
         query: &query,
@@ -950,10 +1426,33 @@ async fn proxy_for_plugin(
         hop_plugin_id: plugin_id,
         forward_payment_authorization: auth == RouteAuth::Public,
         forward_cookie_names: &forward_cookie_names,
+        forward_caller_email,
         caller: caller.as_ref(),
+        caller_resource_ids: caller_resource_ids.as_deref(),
+        caller_rate_subject: caller_rate_subject.as_deref(),
         caller_agent_id: caller_agent_id.as_deref(),
+        caller_agent_restricted,
+        event_delivery: None,
     })
-    .await
+    .await;
+    if web_facts.is_some() {
+        mark_web_delegation_admitted(&mut response);
+    }
+    response
+}
+
+/// The echo [`mark_web_delegation_admitted`] stamps on a web-delegated forward.
+const WEB_DELEGATION_ADMITTED: &str = "admitted";
+
+/// Tell the web tier this node ran [`web_delegated_admission`] for the request. The
+/// web tier forwards only after `GET /api/version` advertised
+/// [`crate::update::FEATURE_WEB_DELEGATED_EXT`]; this echo is its second check, and
+/// any response without it is withheld. Overwrites a value the sidecar may have sent.
+fn mark_web_delegation_admitted(response: &mut Response) {
+    response.headers_mut().insert(
+        HDR_WEB_DELEGATION,
+        axum::http::HeaderValue::from_static(WEB_DELEGATION_ADMITTED),
+    );
 }
 
 /// The refusal every "I never dialed" path in this file returns: **503**, naming the
@@ -1012,12 +1511,194 @@ struct ForwardArgs<'a> {
     /// App-owned browser cookie names explicitly declared by the manifest. Core
     /// forwards only these names; all other cookies remain hop-local.
     forward_cookie_names: &'a [String],
+    /// Whether the manifest opted this sidecar into the verified caller email
+    /// ([`HttpProxySpec::forward_caller_email`]). Only an address the token marks
+    /// `email_verified` is stamped; caller-supplied copies of the header are
+    /// stripped for every sidecar regardless.
+    forward_caller_email: bool,
     /// Verified human identity, if Core resolved one. Caller-controlled copies
     /// of the corresponding headers are stripped before this is stamped.
     caller: Option<&'a crate::identity_verify::VerifiedCaller>,
-    /// Core-verified agent lane for the Browser sidecar. Caller-controlled lane
-    /// headers are stripped before this value is stamped.
+    /// Current ids in the manifest-requested resource scope. This value is
+    /// derived by Core after authenticating the caller and replaces any inbound
+    /// header with the same name.
+    caller_resource_ids: Option<&'a str>,
+    /// Pseudonymous per-client rate subject ([`rate_subject_for`]), for a
+    /// sidecar that opted in. Replaces any inbound header with the same name.
+    caller_rate_subject: Option<&'a str>,
+    /// Core-verified calling agent (see [`verified_agent_lane`]). Caller-controlled
+    /// lane and grant headers are stripped before this value and its agent grant
+    /// are stamped.
     caller_agent_id: Option<&'a str>,
+    /// Whether `caller_agent_id`'s account access is restricted (or could not
+    /// be read). Only then does the forward open the agent-request context in
+    /// which the app's grant-less `providers.call`s are refused.
+    caller_agent_restricted: bool,
+    /// The delivery id of a Core event delivery, stamped as [`HDR_EVENT_DELIVERY`]
+    /// (any caller-supplied copy is stripped first). `None` on every other hop.
+    event_delivery: Option<&'a str>,
+}
+
+/// The pseudonymous rate subject Core stamps as [`HDR_CALLER_RATE_SUBJECT`]:
+///
+/// - `user:<24 hex>` for a verified caller (their user id);
+/// - `peer:<24 hex>` for an anonymous caller, from the client address Core
+///   resolved (the socket peer, or `X-Forwarded-For` only behind a configured
+///   trusted proxy). IPv6 addresses are reduced to their /64 prefix, which one
+///   client typically controls whole;
+/// - `unknown` when Core cannot tell clients apart: no connect info, a loopback
+///   peer behind the forwarding tunnel, or a resolved address that is not a
+///   plausible end-client address ([`is_shared_or_local_address`]). The last
+///   case is a reverse proxy on the same host or network that Core was not told
+///   to trust (nginx, Caddy or a user-run tunnel on loopback, a LAN proxy): every
+///   visitor would arrive from that one address, so a per-client bucket keyed on
+///   it would let one visitor exhaust the bound for all of them.
+///
+/// Each hash is `SHA-256` over a domain tag, the plugin id and the value, so two
+/// apps cannot correlate one visitor and no app receives the raw address.
+fn rate_subject_for(
+    plugin_id: &str,
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    client_ip: Option<std::net::IpAddr>,
+) -> String {
+    let (kind, value) = if let Some(caller) = caller {
+        ("user", caller.user_id.clone())
+    } else if let Some(ip) = client_ip
+        .map(|ip| ip.to_canonical())
+        .filter(|ip| !is_shared_or_local_address(*ip))
+    {
+        let network = match ip {
+            std::net::IpAddr::V4(v4) => v4.to_string(),
+            std::net::IpAddr::V6(v6) => {
+                let segments = v6.segments();
+                format!(
+                    "{:x}:{:x}:{:x}:{:x}::/64",
+                    segments[0], segments[1], segments[2], segments[3]
+                )
+            }
+        };
+        ("peer", network)
+    } else {
+        return "unknown".to_owned();
+    };
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"ryu-caller-rate-subject-v1\0");
+    hasher.update(plugin_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(kind.as_bytes());
+    hasher.update([0]);
+    hasher.update(value.as_bytes());
+    let digest = hasher.finalize();
+    format!("{kind}:{}", hex::encode(&digest[..12]))
+}
+
+/// Whether `ip` is a loopback, unspecified, private (RFC 1918 / ULA),
+/// link-local, shared carrier-grade NAT (RFC 6598) or broadcast address. Such an
+/// address is not a distinct public client: it is Core's own host, a proxy on the
+/// same host or network, or a NAT that many clients share. `ip` must already be
+/// canonical (IPv4-mapped IPv6 unwrapped).
+fn is_shared_or_local_address(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let [first, second, ..] = v4.octets();
+            v4.is_loopback()
+                || v4.is_unspecified()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                // 100.64.0.0/10, shared address space for carrier-grade NAT.
+                || (first == 100 && (second & 0b1100_0000) == 64)
+        }
+        std::net::IpAddr::V6(v6) => {
+            let first = v6.segments()[0];
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // fc00::/7, unique local addresses.
+                || (first & 0xfe00) == 0xfc00
+                // fe80::/10, link-local unicast.
+                || (first & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// The client address of an inbound proxy request, resolved the same way the
+/// vault's CIDR binding does ([`crate::vault::tokens::resolve_client_ip`]).
+fn request_client_ip(req: &Request) -> Option<std::net::IpAddr> {
+    let peer = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|info| info.0.ip());
+    let forwarded = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok());
+    crate::vault::tokens::resolve_client_ip(
+        peer,
+        forwarded,
+        &crate::vault::tokens::trusted_proxies(),
+        crate::sidecar::forwarding_tunnel_active(),
+    )
+}
+
+/// Upper bound for the `x-ryu-caller-resource-ids` header. Sized well inside the
+/// default HTTP/1 header buffer of a hyper/axum sidecar (~408 KiB) while holding
+/// several thousand UUID conversation ids.
+const MAX_CALLER_RESOURCE_IDS_BYTES: usize = 256 * 1024;
+
+/// Encode the caller's authorized resource ids as a JSON array no longer than
+/// `max_bytes`. `ids` must arrive in priority order (newest first): when the full
+/// set does not fit, the tail is dropped and its length is returned, so the
+/// sidecar sees FEWER ids than the caller may read, never more. Fails closed
+/// without refusing every request of a caller who can see many resources.
+fn encode_caller_resource_ids<'a>(
+    ids: impl Iterator<Item = &'a str>,
+    max_bytes: usize,
+) -> (String, usize) {
+    let mut encoded = String::from("[");
+    let mut omitted = 0usize;
+    for id in ids {
+        if omitted > 0 {
+            omitted += 1;
+            continue;
+        }
+        let quoted = ascii_json_string(id);
+        let separator = usize::from(encoded.len() > 1);
+        // +1 for the closing bracket.
+        if encoded.len() + separator + quoted.len() + 1 > max_bytes {
+            omitted += 1;
+            continue;
+        }
+        if separator == 1 {
+            encoded.push(',');
+        }
+        encoded.push_str(&quoted);
+    }
+    encoded.push(']');
+    (encoded, omitted)
+}
+
+/// A JSON string literal that is pure printable ASCII, so it is always a valid
+/// header value: control and non-ASCII characters become `\uXXXX` escapes
+/// (surrogate pairs above the BMP), which any JSON parser decodes back exactly.
+fn ascii_json_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            ' '..='~' => out.push(character),
+            _ => {
+                let mut units = [0u16; 2];
+                for unit in character.encode_utf16(&mut units) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Reuse connection pools across proxy hops; credentials stay on each request.
@@ -1047,8 +1728,13 @@ async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
         hop_plugin_id,
         forward_payment_authorization,
         forward_cookie_names,
+        forward_caller_email,
         caller,
+        caller_resource_ids,
+        caller_rate_subject,
         caller_agent_id,
+        caller_agent_restricted,
+        event_delivery,
     } = args;
 
     let hop_token = ext_token(node_token().as_deref(), hop_plugin_id);
@@ -1062,6 +1748,21 @@ async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
     let payment_authorization =
         forwarded_payment_authorization(src_headers, forward_payment_authorization);
     copy_headers(src_headers, &mut headers, forward_cookie_names);
+    if let Some(proof) = crate::sidecar::deferred_authorization::principal_proof(
+        hop_plugin_id,
+        caller,
+        src_headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer ")),
+    ) {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(&proof) {
+            headers.insert(
+                crate::sidecar::deferred_authorization::PRINCIPAL_HEADER,
+                value,
+            );
+        }
+    }
     if let Some(caller) = caller {
         if let Ok(value) = reqwest::header::HeaderValue::from_str(&caller.user_id) {
             headers.insert(HDR_CALLER_USER_ID, value);
@@ -1071,10 +1772,54 @@ async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
                 headers.insert(HDR_CALLER_ORG_ID, value);
             }
         }
+        // An unverified address is the identity provider's claim, not proof of
+        // mailbox ownership, so it never reaches a sidecar that grants access by
+        // email. No header is safer than an unverified one.
+        if let Some(email) = caller.verified_email().filter(|_| forward_caller_email) {
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(email) {
+                headers.insert(HDR_CALLER_EMAIL, value);
+            }
+        }
     }
+    if let Some(resource_ids) = caller_resource_ids {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(resource_ids) {
+            headers.insert(HDR_CALLER_RESOURCE_IDS, value);
+        } else {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+    if let Some(subject) = caller_rate_subject {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(subject) {
+            headers.insert(HDR_CALLER_RATE_SUBJECT, value);
+        }
+    }
+    // While the app serves a restricted agent's request, its `providers.call`s
+    // must carry that agent's grant; one without it is refused rather than run
+    // with the user's accounts. Held until the response body ends. An
+    // unrestricted agent may use every account a grant-less call uses, so its
+    // requests do not hold up the app's other work.
+    let agent_context = caller_agent_id
+        .filter(|_| caller_agent_restricted)
+        .map(|_| crate::sidecar::deferred_authorization::enter_agent_request(hop_plugin_id));
     if let Some(agent_id) = caller_agent_id {
         if let Ok(value) = reqwest::header::HeaderValue::from_str(agent_id) {
             headers.insert(HDR_CALLER_AGENT_ID, value);
+        }
+        // The app hands this back on `providers.call` (also for work it defers),
+        // so Core can apply the agent's account access there.
+        if let Some(value) =
+            crate::sidecar::deferred_authorization::agent_grant(hop_plugin_id, agent_id)
+                .and_then(|grant| reqwest::header::HeaderValue::from_str(&grant).ok())
+        {
+            headers.insert(
+                crate::sidecar::deferred_authorization::AGENT_GRANT_HEADER,
+                value,
+            );
+        }
+    }
+    if let Some(delivery_id) = event_delivery {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(delivery_id) {
+            headers.insert(HDR_EVENT_DELIVERY, value);
         }
     }
     if let Ok(val) = reqwest::header::HeaderValue::from_str(&format!("Bearer {hop_token}")) {
@@ -1127,7 +1872,17 @@ async fn forward_to_sidecar(args: ForwardArgs<'_>) -> Response {
     // preserve); only the REQUEST body stays capped (`to_bytes(body, max_body)`).
     // content-length + transfer-encoding are stripped as hop-by-hop above, so hyper
     // re-frames the outgoing stream itself.
-    (status, out, Body::from_stream(resp.bytes_stream())).into_response()
+    let body = match agent_context {
+        Some(context) => {
+            use futures_util::StreamExt as _;
+            Body::from_stream(resp.bytes_stream().map(move |chunk| {
+                let _held_until_the_body_ends = &context;
+                chunk
+            }))
+        }
+        None => Body::from_stream(resp.bytes_stream()),
+    };
+    (status, out, body).into_response()
 }
 
 // ── WebSocket tunnel (/api/ext/ws/*) ──────────────────────────────────────────
@@ -1249,6 +2004,10 @@ async fn ext_ws_tunnel(
     } else {
         None
     };
+    let revocation = match ext_ws_revocation_for(ticket.as_ref()) {
+        Ok(revocation) => revocation,
+        Err(status) => return status.into_response(),
+    };
 
     // The ticket carries the verified caller from the HTTP exchange. The route
     // permission must be checked before waking the sidecar or accepting the
@@ -1294,14 +2053,7 @@ async fn ext_ws_tunnel(
                         fire_lazy_activation(state, ACTIVATION_ON_ROUTE);
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("ext ws proxy: waking sidecar '{sidecar_name}' failed: {e}");
-                    return (
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "sidecar warming up, retry shortly",
-                    )
-                        .into_response();
-                }
+                Err(e) => return wake_failed_response("ext ws proxy", &sidecar_name, &e, false),
             }
             target = match state.manager.forward_target(&sidecar_name) {
                 Ok(t) => Some(t),
@@ -1325,20 +2077,95 @@ async fn ext_ws_tunnel(
     let upstream_path = ws_upstream_path(&mount, sub_path);
     let hop_token = ext_token(node_token().as_deref(), plugin_id);
 
-    ws.on_upgrade(move |socket| bridge_ws_to_sidecar(socket, port, upstream_path, hop_token))
+    ws.on_upgrade(move |socket| {
+        let revoked =
+            wait_for_ext_ws_revocation(revocation, crate::node_token::subscribe_generation());
+        bridge_ws_to_sidecar(socket, port, upstream_path, hop_token, revoked)
+    })
+}
+
+/// The authorization a Protected tunnel was opened under: the caller's JWT expiry
+/// and the node-token generation the WS ticket was minted in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExtWsRevocation {
+    jwt_expires_at: Option<i64>,
+    node_generation: u64,
+}
+
+/// The pre-upgrade lifetime gate for a consumed WS ticket. A ticket outlives nothing
+/// it was minted from: an identity that has already expired is refused with 401
+/// here, exactly as the realtime and voice sockets refuse it. Otherwise it returns
+/// what ends the tunnel's authorization once it is open. A Public route has no
+/// ticket (`None`), so nothing revokes it beyond the sockets themselves.
+fn ext_ws_revocation_for(
+    ticket: Option<&crate::server::ws_ticket::WsTicketClaims>,
+) -> Result<Option<ExtWsRevocation>, StatusCode> {
+    let Some(ticket) = ticket else {
+        return Ok(None);
+    };
+    if ticket
+        .jwt_expires_at
+        .is_some_and(|expires_at| expires_at <= chrono::Utc::now().timestamp())
+    {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(Some(ExtWsRevocation {
+        jwt_expires_at: ticket.jwt_expires_at,
+        node_generation: ticket.node_generation,
+    }))
+}
+
+/// WebSocket close code 1008 (policy violation), the code the realtime and voice
+/// sockets close with when the caller's authorization lapses.
+const WS_CLOSE_POLICY: u16 = 1008;
+
+/// Resolves when a Protected tunnel's authorization lapses: the caller's JWT expires,
+/// or the node token rotates away from the generation the ticket was minted in (or
+/// its watch closes, which fails closed). `None` (a Public route) never resolves.
+/// The permission gate runs once before the upgrade, so without this signal a socket
+/// would keep reaching the sidecar under Core's hop bearer for as long as it stayed
+/// open.
+async fn wait_for_ext_ws_revocation(
+    revocation: Option<ExtWsRevocation>,
+    mut generation_updates: tokio::sync::watch::Receiver<u64>,
+) {
+    let Some(revocation) = revocation else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    let rotation = async move {
+        loop {
+            if *generation_updates.borrow_and_update() != revocation.node_generation {
+                return;
+            }
+            if generation_updates.changed().await.is_err() {
+                return;
+            }
+        }
+    };
+    tokio::select! {
+        () = crate::server::ws_ticket::wait_for_jwt_expiry(revocation.jwt_expires_at) => {}
+        () = rotation => {}
+    }
 }
 
 /// Bridge one accepted client socket to the sidecar's loopback WS endpoint, pumping
-/// bytes (binary and text) both ways until either side closes. The hop bearer is
-/// re-stamped on the upstream dial, exactly like the HTTP lane.
+/// bytes (binary and text) both ways until either side closes or `revoked` resolves
+/// (for a Protected route, the caller's authorization lapsed:
+/// [`wait_for_ext_ws_revocation`]), which closes the client with 1008 and drops the
+/// upstream socket. The hop bearer is re-stamped on the upstream dial, exactly like
+/// the HTTP lane.
 async fn bridge_ws_to_sidecar(
     mut client: WebSocket,
     port: u16,
     upstream_path: String,
     hop_token: String,
+    revoked: impl std::future::Future<Output = ()> + Send,
 ) {
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    tokio::pin!(revoked);
 
     let url = format!("ws://127.0.0.1:{port}{upstream_path}");
     let mut request = match url.clone().into_client_request() {
@@ -1369,6 +2196,15 @@ async fn bridge_ws_to_sidecar(
 
     loop {
         tokio::select! {
+            () = &mut revoked => {
+                let _ = client
+                    .send(WsMessage::Close(Some(axum::extract::ws::CloseFrame {
+                        code: WS_CLOSE_POLICY,
+                        reason: "authorization expired".into(),
+                    })))
+                    .await;
+                break;
+            }
             msg = client.recv() => {
                 match msg {
                     Some(Ok(m)) => {
@@ -1532,7 +2368,9 @@ pub(crate) async fn authenticate_sidecar(
         Ok(_) => return Err((StatusCode::NOT_FOUND, "plugin not enabled")),
         Err(_) => return Err((StatusCode::INTERNAL_SERVER_ERROR, "lookup failed")),
     };
-    let approved: HashSet<String> = record.approved_grants.into_iter().collect();
+    let approved =
+        crate::plugin_host::current_approved_grants(state, &plugin_id, &record.approved_grants)
+            .await;
     Ok((plugin_id, approved))
 }
 
@@ -1568,7 +2406,7 @@ pub(crate) async fn authorize_host_call(
 /// `POST /api/host/model/complete` — a sidecar's authenticated model-completion
 /// callback, gated on `hook:side-model` and routed through the SAME
 /// [`PluginHookBridge`](crate::plugin_host::PluginHookBridge) `host.sideModel`
-/// capability the Deno turn-hook sandbox and the in-desktop bridge use (one
+/// capability the JS turn-hook sandbox and the in-desktop bridge use (one
 /// implementation, one grant vocabulary, one Gateway-governed egress).
 async fn host_model_complete(
     State(state): State<ServerState>,
@@ -1600,7 +2438,7 @@ async fn host_model_complete(
 /// `POST /api/host/rpc` — the **extension-host RPC** endpoint. A managed `kind:
 /// "node"` sidecar (via the embedded bootstrap's `ctx.host.call`) invokes ONE
 /// host-API method, which Core dispatches through the SAME
-/// [`PluginHookBridge`](crate::plugin_host::PluginHookBridge) the Deno turn-hook
+/// [`PluginHookBridge`](crate::plugin_host::PluginHookBridge) the JS turn-hook
 /// sandbox and the iframe app-host use — arm-for-arm, one grant vocabulary, one
 /// Gateway-governed egress.
 ///
@@ -1697,44 +2535,67 @@ struct KernelCapability {
     /// **and** Gateway-approved (the [`authorize_host_call`] intersection — never the
     /// manifest claim alone).
     ///
-    /// `None` means "the Gateway's reviewed host-primitive vocabulary has no word for
-    /// this yet", NOT "unguarded". Every kernel capability is still (a) authenticated
-    /// by the caller's minted [`ext_token`] and (b) pinned to its owning app by the
-    /// handler itself (each one re-runs [`authenticate_sidecar`] and 403s a caller
-    /// that is not the app it serves). That pair IS the gate the retired per-app route
-    /// had, so a `None` row is exactly as tight as before and never looser. Adding the
-    /// missing vocabulary is a Gateway governance change (`reserved_namespaces` +
-    /// `default_grant_allowlist`), not a Core one.
+    /// `None` means "no reviewed grant is required for this row", NOT "unguarded".
+    /// Every kernel capability is still authenticated by the caller's minted
+    /// [`ext_token`] (each handler re-runs [`authenticate_sidecar`]), and a `None` row
+    /// carries its own tighter gate instead: ownership (`events.emit`), the active
+    /// user's own inbox, or `notifications:send-to-user` for any other recipient
+    /// (`notify.deliver`, checked in the handler), Core-derived tenancy
+    /// (`billing.recordToolCharge` takes the organization from the registered node,
+    /// never the body), or an app pin (`notify.fanout`).
+    ///
+    /// A `Some(grant)` row is not proof that the grant covers the handler's whole
+    /// operation. Some handlers ALSO pin their calling app because the grant is
+    /// necessary but not sufficient: `mcp.callTool` (`@ryu/monitors`),
+    /// `spaces.fileNotes` (`@ryu/meetings`), `email.*` (`@ryu/mail`) and `ghost.*`
+    /// (`@ryu/recipes`). A pin keeps its row single-app, so it is never looser than
+    /// the retired per-app route it replaced. The pins are inventoried by
+    /// `app_boundary_guard::no_new_kernel_handler_app_pins` and tracked in
+    /// `docs/app-boundary-extraction-plan.md`. Replacing one needs reviewed
+    /// vocabulary that fits the handler exactly (a Gateway governance change:
+    /// `reserved_namespaces` + `default_grant_allowlist` + consent labels), not a Core
+    /// one.
     grant: Option<&'static str>,
 }
 
 /// The kernel-capability table — the Core-implemented half of the broker.
 ///
-/// Every row here replaces one retired `/api/host/<app>/*` route. The handlers still
-/// live in the `*_client.rs` loopback shims and still pin their calling app, so the
-/// *routing* is generic today and the *tenancy* stays single-app until those shims
-/// are retired; nothing in this table names an app.
+/// Every row here replaces one retired `/api/host/<app>/*` route. The handlers live
+/// beside the kernel code they expose (`server::app_*`, `recipes_host`), and some
+/// still pin their calling app, so the *routing* is generic today and the *tenancy*
+/// of a pinned row stays single-app until the Gateway vocabulary has a reviewed
+/// grant for it; nothing in this table names an app.
 const KERNEL_CAPABILITIES: &[KernelCapability] = &[
     // Run one MCP tool through Core's shared `McpRegistry`, which no sidecar can host
     // (it owns the stdio child processes). Body `{ tool, args }` → `{ result }`.
     // `tools.invoke` is the reviewed MCP tool-plane scope in the Gateway allowlist;
     // the `tools` namespace is reserved, so it can never be self-granted by name.
+    //
+    // `tools.invoke` is necessary but NOT sufficient here. The handler runs the tool
+    // with no user, agent, agent allowlist or org policy (`call_tool(.., None)`),
+    // unlike `tools.call` below, which requires a verified caller and that user's
+    // agent permission. The `@ryu/monitors` pin plus the fixed tool allowlist in
+    // `server::app_mcp_call` is the remaining gate; see that module's doc for why no
+    // existing grant replaces it.
     KernelCapability {
         cap: "mcp.callTool",
         grant: Some("tools.invoke"),
     },
-    // Raise a host notification: fan it out through the kernel notify store (per-app
-    // channels + mobile push + `notification` plugin hooks) and record it on the
-    // unified activity feed. Body `{ alert, targets }`.
+    // Fan a fired alert out through the kernel notify store (the caller-chosen
+    // webhook / Telegram / Expo / email targets + node-wide mobile push +
+    // `notification` plugin hooks), copy it into the app inbox, and record it on the
+    // unified activity feed as a "monitors" item. Body `{ alert, targets }`.
     //
-    // The one `grant: None` row. There is no host-primitive scope for "raise a
-    // notification" in the Gateway's reviewed vocabulary (`notifications.*` maps to
-    // `approvals:crud`, which is owner-scoped to the Approvals app and not a
-    // notification-raising grant), and minting one is a Gateway change. Requiring an
-    // ill-fitting scope here would be worse than none: fan-out reaches every channel
-    // the user has configured, so it must not ride a grant an unrelated app can hold.
-    // Until the vocabulary exists, the gate stays exactly what the retired
-    // `/api/host/monitors/alert` had — minted token + the handler's app pin.
+    // `grant: None` + the handler's `@ryu/monitors` pin. The Gateway's reviewed
+    // notification grants each cover a narrower, single-recipient, in-product
+    // delivery: `notifications:send` (one bounded notification for the active user,
+    // no recipient or channel choice), `notifications:send-to-user` (one member of
+    // the resolved org/team, for a verified org caller) and `native:notifications`
+    // (a bounded native host effect). None covers caller-chosen external channels,
+    // node-wide push, notification hooks and an attributed activity row, and riding
+    // an ill-fitting grant would hand that reach to every app that holds it. So the
+    // gate stays exactly what the retired `/api/host/monitors/alert` had: minted
+    // token + the app pin (`server::app_notify::host_notify_fanout`).
     KernelCapability {
         cap: "notify.fanout",
         grant: None,
@@ -1744,10 +2605,12 @@ const KERNEL_CAPABILITIES: &[KernelCapability] = &[
     // `notify.fanout` (monitors' EXTERNAL channel fan-out), this writes the row
     // the desktop's Inbox renders, so the app's icon/name shows there. The
     // `source_app_id` stamped on the row is the AUTHENTICATED caller, never a body
-    // field. `grant: None` for the same reason as `notify.fanout`: the Gateway
-    // vocabulary has no reviewed "raise a notification" scope, and writing to the
-    // user's own inbox is the seam's entire purpose — the gate is the minted token
-    // + the enabled-app check, exactly as `events.emit` (which is also `None`).
+    // field. `grant: None` because the row-level gate depends on the recipient:
+    // writing to the node's own active user needs only the minted token + the
+    // enabled-app check, while naming any OTHER member requires the approved
+    // `notifications:send-to-user` grant (checked in `app_notify::deliver_for_app`,
+    // which the `events.emit` notify hint shares) plus org-roster membership on a
+    // managed node.
     KernelCapability {
         cap: "notify.deliver",
         grant: None,
@@ -1786,9 +2649,31 @@ const KERNEL_CAPABILITIES: &[KernelCapability] = &[
         cap: "providers.call",
         grant: Some("tools.invoke"),
     },
+    // Ask whether the agent a grant names may use a provider, for an app that
+    // reaches it with credentials it holds itself instead of `providers.call`.
+    // Same account-access rules; nothing is called.
+    KernelCapability {
+        cap: "providers.authorize",
+        grant: Some("tools.invoke"),
+    },
+    // Generic visitor-authenticated app tool dispatch. Never an owner/node fallback.
+    KernelCapability {
+        cap: "tools.call",
+        grant: Some("tools.invoke"),
+    },
+    KernelCapability {
+        cap: "plugins.installBundle",
+        grant: Some("plugins:install"),
+    },
     // File a notes document into a Core-owned system Space under the background
     // owner. Core owns the `SpaceStore` + its tenancy, so a sidecar cannot do this
     // itself. Body `{ title, markdown }` → `{ space_id, doc_id }`.
+    //
+    // `spaces:docs` is necessary but NOT sufficient: it covers an app's OWN
+    // documents (`kind = "app:<plugin_id>"`) under the caller's Space ACL, not a
+    // document no app owns, filed into the shared "Meetings" system Space under
+    // `background_owner()` with no per-user Space access check. So the handler's
+    // `@ryu/meetings` pin stays (`server::app_file_notes`).
     KernelCapability {
         cap: "spaces.fileNotes",
         grant: Some("spaces:docs"),
@@ -1811,6 +2696,27 @@ const KERNEL_CAPABILITIES: &[KernelCapability] = &[
     KernelCapability {
         cap: "chat.startTurn",
         grant: Some(crate::server::host_chat::GRANT_SEND_FOLLOW_UP),
+    },
+    // Projects › Bots/Groups › Sessions placement for an app's own turns: find or
+    // create a project/bot/group main thread, put a conversation in a project, and
+    // write project-scoped model defaults. They only shape where `chat.startTurn`
+    // turns land and which model they use, so they reuse its grant
+    // (`server::host_hierarchy`).
+    KernelCapability {
+        cap: "threads.ensureMainThread",
+        grant: Some(crate::server::host_chat::GRANT_SEND_FOLLOW_UP),
+    },
+    KernelCapability {
+        cap: "threads.placeInProject",
+        grant: Some(crate::server::host_chat::GRANT_SEND_FOLLOW_UP),
+    },
+    KernelCapability {
+        cap: "scopeDefaults.set",
+        grant: Some(crate::server::host_chat::GRANT_SEND_FOLLOW_UP),
+    },
+    KernelCapability {
+        cap: "scopeGuidance.set",
+        grant: Some(crate::server::host_hierarchy::GRANT_PROJECT_GUIDANCE),
     },
     // The live facts an app needs to decide whether now is a good time to send: the
     // COUNT of active agent runs, and how full each named agent's usage windows
@@ -1868,6 +2774,75 @@ const KERNEL_CAPABILITIES: &[KernelCapability] = &[
         cap: "realtime.publish",
         grant: Some("app:realtime"),
     },
+    // Read Core's inbound-webhook registry and ingress status (Composio receiver +
+    // workflow `Webhook` triggers, with resolved public URLs). Metadata only: the
+    // signing-secret read/write stays on its per-user ACL-checked route. Gated by
+    // the existing `webhooks:crud` grant (`server::app_webhooks`); the same
+    // operations answer a Companion's `window.ryu.webhooks.*` through the app
+    // host bridge.
+    KernelCapability {
+        cap: "webhooks.list",
+        grant: Some(crate::server::app_webhooks::GRANT_WEBHOOKS),
+    },
+    KernelCapability {
+        cap: "webhooks.ingressStatus",
+        grant: Some(crate::server::app_webhooks::GRANT_WEBHOOKS),
+    },
+    // Warmup over Core's heartbeat scheduler (`server::app_warmup`): detect
+    // subscription agents, and list / replace / run-now the CALLER's own jobs
+    // (owner = the authenticated plugin id). Gated by the existing `warmup:crud`
+    // grant; the scheduler's own `agent.view` / `agent.edit` checks still run, with
+    // no user (so they pass only on an unbound single-operator node). The same
+    // operations answer a Companion's `window.ryu.warmup.*` through the app host
+    // bridge, with the signed-in user.
+    KernelCapability {
+        cap: "warmup.detect",
+        grant: Some(crate::server::app_warmup::GRANT_WARMUP),
+    },
+    KernelCapability {
+        cap: "warmup.list",
+        grant: Some(crate::server::app_warmup::GRANT_WARMUP),
+    },
+    KernelCapability {
+        cap: "warmup.apply",
+        grant: Some(crate::server::app_warmup::GRANT_WARMUP),
+    },
+    KernelCapability {
+        cap: "warmup.runNow",
+        grant: Some(crate::server::app_warmup::GRANT_WARMUP),
+    },
+    // Run recovery (`server::app_runs`): what a `core#run.failed` subscriber (the
+    // Self-Healing sidecar) acts through. Each rides its own reviewed grant:
+    // queue a heal approval (closed set of kinds, deduped on the source); re-run a
+    // failed agent run under a Core-minted `healrun_` id; re-run a FAILED workflow
+    // run (the existing `workflows:runstate`, which `workflows.run` already rides).
+    KernelCapability {
+        cap: "approvals.request",
+        grant: Some(crate::server::app_runs::GRANT_APPROVALS_REQUEST),
+    },
+    KernelCapability {
+        cap: "runs.rerunAgent",
+        grant: Some(crate::server::app_runs::GRANT_RERUN_AGENT),
+    },
+    KernelCapability {
+        cap: "workflows.rerun",
+        grant: Some(crate::server::app_runs::GRANT_WORKFLOW_RUNSTATE),
+    },
+    // Agent accounts (`crate::vault::agent_accounts`): release one field of an
+    // agent's website account to the sidecar that types it into a page, or store
+    // a 2FA seed the sidecar read off a setup page. Both bind to the page origin
+    // the sidecar reports and are named for the vault primitive, not the app
+    // that fills. The reviewed `vault:fill` grant (a reserved namespace) is the
+    // gate; the node bearer never reaches these, so no tool result carries a
+    // secret.
+    KernelCapability {
+        cap: "vault.credentialFill",
+        grant: Some(crate::server::vault_agent_accounts_api::GRANT_VAULT_FILL),
+    },
+    KernelCapability {
+        cap: "vault.totpEnroll",
+        grant: Some(crate::server::vault_agent_accounts_api::GRANT_VAULT_FILL),
+    },
 ];
 
 /// The [`KernelCapability`] row for `cap`, or `None` when the name belongs to the
@@ -1899,6 +2874,15 @@ pub(crate) struct EventEmitBody {
     /// delivery failure never fails the emit.
     #[serde(default)]
     notify: Option<EventEmitNotify>,
+    /// OPTIONAL activity-feed row to record alongside the fan-out
+    /// (`{ kind, title, body?, level?, metadata? }`). Recorded with `source` derived
+    /// from the AUTHENTICATED caller (`@ryu/meetings` → `meetings`), never from the
+    /// body, so an app can only ever write rows attributed to itself. This is how an
+    /// out-of-process app feeds the unified activity feed without Core holding a
+    /// per-app subscribe loop. Best-effort: an invalid hint or a failed write is
+    /// logged and never fails the emit.
+    #[serde(default)]
+    activity: Option<crate::plugin_host::AppEventActivity>,
 }
 
 /// Body of the generic application-room sidecar publish capability. The caller
@@ -1949,6 +2933,35 @@ async fn host_realtime_publish(
     Json(json!({ "published": true })).into_response()
 }
 
+/// `warmup.*` — Core's heartbeat scheduler, scoped to the caller's own jobs.
+///
+/// Re-authenticates the caller to pin the owner (never taken from the body),
+/// then runs the shared [`crate::server::app_warmup::WarmupOp`] with no user:
+/// the scheduler's `agent.view` / `agent.edit` checks treat a sidecar exactly as
+/// an anonymous caller, so an app grant never stands in for a user permission.
+async fn host_warmup(
+    cap: &str,
+    state: ServerState,
+    headers: HeaderMap,
+    args: serde_json::Value,
+) -> Response {
+    let plugin_id = match authenticate_sidecar(&state, &headers).await {
+        Ok((id, _)) => id,
+        Err((status, msg)) => return (status, Json(json!({ "error": msg }))).into_response(),
+    };
+    let Some(op) = crate::server::app_warmup::WarmupOp::from_name(cap) else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({ "error": "kernel capability has no implementation", "capability": cap })),
+        )
+            .into_response();
+    };
+    match op.run(&state, &plugin_id, &None, &args).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => error.into_capability_response(),
+    }
+}
+
 /// The `notify` hint carried on an `events.emit` request.
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct EventEmitNotify {
@@ -1978,8 +2991,8 @@ async fn host_events_emit(
     headers: HeaderMap,
     Json(body): Json<EventEmitBody>,
 ) -> Response {
-    let plugin_id = match authenticate_sidecar(&state, &headers).await {
-        Ok((id, _)) => id,
+    let (plugin_id, grants) = match authenticate_sidecar(&state, &headers).await {
+        Ok(caller) => caller,
         Err((status, msg)) => return (status, Json(json!({ "error": msg }))).into_response(),
     };
 
@@ -2007,6 +3020,17 @@ async fn host_events_emit(
             })),
         )
             .into_response();
+    }
+
+    if let Some(activity) = &body.activity {
+        crate::plugin_host::record_app_event_activity(&state, &plugin_id, &body.event, activity)
+            .await;
+    }
+
+    // Sidecar subscribers (`subscribes`) are delivered off this request's path: the
+    // fan-out queues per subscriber and returns immediately.
+    if let Some(fanout) = crate::sidecar::event_subscribers::global() {
+        fanout.publish(&body.event, body.payload.clone());
     }
 
     let ctx = crate::plugin_host::HookContext {
@@ -2038,6 +3062,7 @@ async fn host_events_emit(
             let _ = crate::server::app_notify::deliver_for_app(
                 &state.client,
                 &plugin_id,
+                &grants,
                 notify.target_user_id.as_deref(),
                 title,
                 notify.body.as_deref().unwrap_or(""),
@@ -2103,9 +3128,10 @@ fn host_api_grant_usable(
 /// The handlers keep their existing `(State, HeaderMap, Json<Body>)` shape and are
 /// called directly — no HTTP hop, no signature change (they are still the same
 /// functions the retired per-app routes pointed at, which is what makes this a
-/// re-routing rather than a rewrite). Each re-runs [`authenticate_sidecar`] and
-/// refuses a caller that is not the app it serves; that pin is deliberately preserved
-/// (see [`KernelCapability::grant`]).
+/// re-routing rather than a rewrite). Each re-runs [`authenticate_sidecar`]; the
+/// pinned ones (`mcp.callTool`, `notify.fanout`, `spaces.fileNotes`, `email.*`,
+/// `ghost.*`) also refuse a caller that is not the app they serve. Those pins are
+/// deliberately preserved (see [`KernelCapability::grant`]).
 async fn dispatch_kernel_capability(
     cap: &str,
     state: ServerState,
@@ -2141,7 +3167,7 @@ async fn dispatch_kernel_capability(
 
     match cap {
         "mcp.callTool" => {
-            crate::monitors_client::host_spider_crawl(
+            crate::server::app_mcp_call::host_mcp_call_tool(
                 State(state),
                 headers,
                 body!(serde_json::Value),
@@ -2156,6 +3182,38 @@ async fn dispatch_kernel_capability(
             )
             .await
         }
+        "threads.ensureMainThread" => {
+            crate::server::host_hierarchy::host_ensure_main_thread(
+                State(state),
+                headers,
+                body!(crate::server::host_hierarchy::EnsureMainThreadBody),
+            )
+            .await
+        }
+        "threads.placeInProject" => {
+            crate::server::host_hierarchy::host_place_in_project(
+                State(state),
+                headers,
+                body!(crate::server::host_hierarchy::PlaceInProjectBody),
+            )
+            .await
+        }
+        "scopeDefaults.set" => {
+            crate::server::host_hierarchy::host_set_scope_default(
+                State(state),
+                headers,
+                body!(crate::server::host_hierarchy::SetScopeDefaultBody),
+            )
+            .await
+        }
+        "scopeGuidance.set" => {
+            crate::server::host_hierarchy::host_set_scope_guidance(
+                State(state),
+                headers,
+                body!(crate::server::host_hierarchy::SetScopeGuidanceBody),
+            )
+            .await
+        }
         "node.readings" => {
             crate::server::host_chat::host_node_readings(
                 State(state),
@@ -2165,10 +3223,10 @@ async fn dispatch_kernel_capability(
             .await
         }
         "notify.fanout" => {
-            crate::monitors_client::host_monitor_alert(
+            crate::server::app_notify::host_notify_fanout(
                 State(state),
                 headers,
-                body!(crate::monitors_client::AlertFanoutBody),
+                body!(crate::server::app_notify::AlertFanoutBody),
             )
             .await
         }
@@ -2189,6 +3247,22 @@ async fn dispatch_kernel_capability(
             .await
         }
         "email.status" => crate::server::app_email::host_email_status(State(state), headers).await,
+        "vault.credentialFill" => {
+            crate::server::vault_agent_accounts_api::host_credential_fill(
+                State(state),
+                headers,
+                body!(crate::server::vault_agent_accounts_api::FillBody),
+            )
+            .await
+        }
+        "vault.totpEnroll" => {
+            crate::server::vault_agent_accounts_api::host_totp_enroll(
+                State(state),
+                headers,
+                body!(crate::server::vault_agent_accounts_api::EnrollBody),
+            )
+            .await
+        }
         "egress.fetch" => {
             crate::server::app_egress::host_egress_fetch(
                 State(state),
@@ -2221,20 +3295,40 @@ async fn dispatch_kernel_capability(
             )
             .await
         }
-        "spaces.fileNotes" => {
-            crate::meetings_client::host_save_notes(
+        "providers.authorize" => {
+            crate::server::provider_router::host_provider_authorize(
                 State(state),
                 headers,
-                body!(crate::meetings_client::SaveNotesBody),
+                body!(crate::server::provider_router::ProviderAuthorizeBody),
+            )
+            .await
+        }
+        "tools.call" => {
+            crate::server::call_tool_for_sidecar(
+                state,
+                headers,
+                body!(crate::server::SidecarToolCall).0,
+            )
+            .await
+        }
+        "plugins.installBundle" => {
+            crate::server::install_bundle_for_sidecar(state, headers, body!(serde_json::Value).0)
+                .await
+        }
+        "spaces.fileNotes" => {
+            crate::server::app_file_notes::host_file_notes(
+                State(state),
+                headers,
+                body!(crate::server::app_file_notes::FileNotesBody),
             )
             .await
         }
         "ghost.replay" => {
-            crate::recipes_client::host_recipes_run(State(state), headers, body!(serde_json::Value))
+            crate::recipes_host::host_recipes_run(State(state), headers, body!(serde_json::Value))
                 .await
         }
         "ghost.recordStart" => {
-            crate::recipes_client::host_recipes_record_start(
+            crate::recipes_host::host_recipes_record_start(
                 State(state),
                 headers,
                 body!(serde_json::Value),
@@ -2242,12 +3336,34 @@ async fn dispatch_kernel_capability(
             .await
         }
         "ghost.recordStatus" => {
-            crate::recipes_client::host_recipes_record_status(State(state), headers).await
+            crate::recipes_host::host_recipes_record_status(State(state), headers).await
         }
         "ghost.recordStop" => {
-            crate::recipes_client::host_recipes_record_stop(State(state), headers).await
+            crate::recipes_host::host_recipes_record_stop(State(state), headers).await
         }
         "events.emit" => host_events_emit(state, headers, body!(EventEmitBody)).await,
+        "webhooks.list" | "webhooks.ingressStatus" => {
+            match crate::server::app_webhooks::WebhookOp::from_name(cap) {
+                Some(op) => Json(op.run(&state).await).into_response(),
+                None => (
+                    StatusCode::NOT_IMPLEMENTED,
+                    Json(json!({ "error": "kernel capability has no implementation", "capability": cap })),
+                )
+                    .into_response(),
+            }
+        }
+        "warmup.detect" | "warmup.list" | "warmup.apply" | "warmup.runNow" => {
+            host_warmup(cap, state, headers, body!(serde_json::Value).0).await
+        }
+        "approvals.request" | "runs.rerunAgent" | "workflows.rerun" => {
+            crate::server::app_runs::host_run_recovery(
+                cap,
+                &state,
+                &headers,
+                body!(serde_json::Value).0,
+            )
+            .await
+        }
         "realtime.publish" => {
             host_realtime_publish(state, headers, body!(RealtimePublishBody)).await
         }
@@ -2280,6 +3396,10 @@ async fn dispatch_kernel_capability(
 /// - **App-provided** capabilities — resolved to a bound provider app and proxied to
 ///   its sidecar route with the PROVIDER's minted token (the consumer never sees it).
 ///   This is where a `requires: [rag]` edge turns into a real call.
+///
+/// A **fan-out** capability ([`crate::plugins::binding::FANOUT_CAPABILITIES`]) is
+/// neither: Core calls it on every provider itself, and the broker refuses it (404)
+/// whatever the caller declares or holds.
 ///
 /// The provider path's three-way check, fail-closed at each step:
 /// 1. the CALLER **declared** the edge (its `requires.capabilities` names `cap`) —
@@ -2319,10 +3439,25 @@ async fn host_capability(
         let bytes = match axum::body::to_bytes(body, DEFAULT_MAX_PROXY_BYTES).await {
             Ok(b) => b,
             Err(_) => {
-                return (StatusCode::PAYLOAD_TOO_LARGE, "capability body too large").into_response()
+                return (StatusCode::PAYLOAD_TOO_LARGE, "capability body too large")
+                    .into_response();
             }
         };
         return dispatch_kernel_capability(&cap, state, parts.headers, &bytes).await;
+    }
+
+    // 1c. FAN-OUT capability (`data.*`, `jobs.*`): served by every app for its OWN
+    //     data or jobs, and called only by Core on each provider in turn. Never
+    //     brokered: the ordinary ladder would bind a sole provider and let any
+    //     sidecar that declared the edge read or run another app's data or jobs.
+    if crate::plugins::binding::is_fanout_capability(&cap) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(
+                json!({ "error": "capability not callable through the broker", "capability": cap }),
+            ),
+        )
+            .into_response();
     }
 
     // 2. The caller must have DECLARED this capability edge; capture its version floor.
@@ -2353,7 +3488,7 @@ async fn host_capability(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": "lookup failed" })),
             )
-                .into_response()
+                .into_response();
         }
     };
     let enabled_ids: HashSet<String> = records
@@ -2443,14 +3578,7 @@ async fn host_capability(
                     fire_lazy_activation(&state, ACTIVATION_ON_CAPABILITY_CALL);
                 }
             }
-            Err(e) => {
-                tracing::warn!("broker: waking provider '{wake}' failed: {e}");
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(json!({ "error": "provider sidecar warming up, retry shortly" })),
-                )
-                    .into_response();
-            }
+            Err(e) => return wake_failed_response("broker", wake, &e, true),
         }
         Some(state.manager.enter_request(wake))
     } else {
@@ -2474,7 +3602,7 @@ async fn host_capability(
     let body_bytes = match axum::body::to_bytes(body, DEFAULT_MAX_PROXY_BYTES).await {
         Ok(b) => b.to_vec(),
         Err(_) => {
-            return (StatusCode::PAYLOAD_TOO_LARGE, "capability body too large").into_response()
+            return (StatusCode::PAYLOAD_TOO_LARGE, "capability body too large").into_response();
         }
     };
     let query = parts
@@ -2492,8 +3620,13 @@ async fn host_capability(
         hop_plugin_id: &provider_id,
         forward_payment_authorization: false,
         forward_cookie_names: &[],
+        forward_caller_email: false,
         caller: None,
+        caller_resource_ids: None,
+        caller_rate_subject: None,
         caller_agent_id: None,
+        caller_agent_restricted: false,
+        event_delivery: None,
     })
     .await
 }
@@ -2545,16 +3678,104 @@ pub(crate) fn resolve_provider_route(
     Ok(ProviderRoute {
         provider_id: provider_id.to_owned(),
         sidecar_name,
-        upstream_path: format!("{mount}{route}"),
+        // Same root rule as the inbound proxy: a declared `"/"` route forwards to the
+        // bare mount, because sidecars nest their routers there and `{mount}/` 404s.
+        upstream_path: upstream_path_for(&mount, route),
         wake_name,
     })
+}
+
+/// Wake (when lazy) and pin a resolved provider route to the manager's live,
+/// registered target — the broker's step 3b + 3c, shared with the Core-as-consumer
+/// helper ([`crate::sidecar::capability_consumer`]) so both lanes apply the SAME
+/// registration gate before handing a provider its minted token. The returned guard
+/// (if any) must stay alive across the hop so an idle-stop sidecar is not reaped
+/// between the wake and the call.
+pub(crate) async fn provider_target(
+    manager: &std::sync::Arc<crate::sidecar::SidecarManager>,
+    route: &ProviderRoute,
+) -> Result<
+    (
+        ForwardTarget,
+        Option<crate::sidecar::manager::ActivityGuard>,
+    ),
+    String,
+> {
+    let activity = if let Some(wake) = &route.wake_name {
+        manager
+            .wake_and_await_healthy(wake, WAKE_WARMUP_TIMEOUT)
+            .await
+            .map_err(|e| format!("waking provider '{wake}' failed: {e}"))?;
+        Some(manager.enter_request(wake))
+    } else {
+        None
+    };
+    let target = manager
+        .forward_target(&route.sidecar_name)
+        .map_err(|denied| denied.reason())?;
+    Ok((target, activity))
+}
+
+/// POST a JSON body to a resolved provider route through [`forward_to_sidecar`] —
+/// the single Core→sidecar hop the ext-proxy and the broker share — stamping the
+/// PROVIDER's minted token. No caller identity, cookies, or payment headers are
+/// forwarded: Core itself is the consumer.
+pub(crate) async fn post_to_provider(
+    target: ForwardTarget,
+    route: &ProviderRoute,
+    body: Vec<u8>,
+) -> Response {
+    post_to_provider_hop(target, route, body, None).await
+}
+
+/// [`post_to_provider`] for a Core event delivery: also stamps
+/// [`HDR_EVENT_DELIVERY`] with `delivery_id`, which no other hop can carry.
+pub(crate) async fn post_event_delivery(
+    target: ForwardTarget,
+    route: &ProviderRoute,
+    body: Vec<u8>,
+    delivery_id: &str,
+) -> Response {
+    post_to_provider_hop(target, route, body, Some(delivery_id)).await
+}
+
+async fn post_to_provider_hop(
+    target: ForwardTarget,
+    route: &ProviderRoute,
+    body: Vec<u8>,
+    event_delivery: Option<&str>,
+) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    forward_to_sidecar(ForwardArgs {
+        target,
+        upstream_path: &route.upstream_path,
+        query: "",
+        method: reqwest::Method::POST,
+        src_headers: &headers,
+        body,
+        hop_plugin_id: &route.provider_id,
+        forward_payment_authorization: false,
+        forward_cookie_names: &[],
+        forward_caller_email: false,
+        caller: None,
+        caller_resource_ids: None,
+        caller_rate_subject: None,
+        caller_agent_id: None,
+        caller_agent_restricted: false,
+        event_delivery,
+    })
+    .await
 }
 
 /// A resolved broker target: where to forward + how to wake the provider sidecar.
 ///
 /// `pub(crate)` alongside [`resolve_provider_route`] — the facade in
 /// [`crate::document_parse`] holds one of these across its submit/poll hops.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ProviderRoute {
     pub(crate) provider_id: String,
     /// The manager key (`<plugin_id>/<local_name>`) of the provider's sidecar. NOT a
@@ -2573,6 +3794,402 @@ pub(crate) struct ProviderRoute {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// End to end through the real `events.emit` handler: an app's own declared
+    /// event carrying an `activity` hint lands on the activity feed attributed to
+    /// the AUTHENTICATED caller; a `core#` kernel event is refused outright.
+    #[tokio::test]
+    async fn events_emit_records_owner_attributed_activity_and_refuses_kernel_events() {
+        const APP: &str = "@example/feedapp";
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        state.app_store.insert(APP, "1.0.0").await.unwrap();
+        state.app_store.set_enabled(APP, &[]).await.unwrap();
+        let manifest: crate::plugin_manifest::PluginManifest = serde_json::from_value(json!({
+            "id": APP, "name": "Feed", "version": "1.0.0", "runnables": [],
+            "contributes": { "hook_events": [
+                { "id": "@example/feedapp#thing.done", "title": "Thing done" }
+            ] }
+        }))
+        .unwrap();
+        state.app_manifests.write().await.push(manifest);
+        let mut headers = HeaderMap::new();
+        headers.insert(HDR_PLUGIN_ID, APP.parse().unwrap());
+        headers.insert(
+            "authorization",
+            format!("Bearer {}", ext_token(None, APP)).parse().unwrap(),
+        );
+
+        let emit = |event: &str| EventEmitBody {
+            event: event.to_owned(),
+            payload: json!({ "id": "t1" }),
+            conversation_id: None,
+            notify: None,
+            activity: Some(crate::plugin_host::AppEventActivity {
+                kind: "thing".to_owned(),
+                title: "Thing done: t1".to_owned(),
+                body: None,
+                level: Some("success".to_owned()),
+                metadata: Some(json!({ "thing_id": "t1" })),
+            }),
+        };
+        let ok = host_events_emit(
+            state.clone(),
+            headers.clone(),
+            Json(emit("@example/feedapp#thing.done")),
+        )
+        .await;
+        assert_eq!(ok.status(), StatusCode::OK);
+        let rows = state.activity.list(10, None).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source, "feedapp");
+        assert_eq!(rows[0].title, "Thing done: t1");
+        assert_eq!(rows[0].metadata["thing_id"], "t1");
+
+        let refused = host_events_emit(state.clone(), headers, Json(emit("core#run.failed"))).await;
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+        assert_eq!(state.activity.list(10, None).await.unwrap().len(), 1);
+    }
+
+    /// A sidecar reaches `warmup.*` only with `warmup:crud` both declared in its
+    /// `host_api.grants` and approved; the owner is its authenticated id.
+    #[tokio::test]
+    async fn warmup_kernel_capability_requires_the_declared_and_approved_grant() {
+        const APP: &str = "@example/pinger";
+        let directory = tempfile::tempdir().unwrap();
+        let jobs = directory.path().join("jobs");
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        state.app_store.insert(APP, "1.0.0").await.unwrap();
+        state
+            .app_store
+            .set_enabled(APP, &["warmup:crud".to_owned()])
+            .await
+            .unwrap();
+        let manifest = |host_grants: Vec<&str>| -> crate::plugin_manifest::PluginManifest {
+            serde_json::from_value(json!({
+                "id": APP, "name": "Pinger", "version": "1.0.0", "runnables": [],
+                "permission_grants": ["warmup:crud"],
+                "sidecars": [{ "name": "svc", "port": 18999,
+                               "process": { "kind": "local", "command": "true" },
+                               "host_api": { "grants": host_grants } }],
+            }))
+            .unwrap()
+        };
+        let call = |state: ServerState| async move {
+            let request = Request::builder()
+                .method("POST")
+                .header(HDR_PLUGIN_ID, APP)
+                .header("authorization", format!("Bearer {}", ext_token(None, APP)))
+                .body(axum::body::Body::from("{}"))
+                .unwrap();
+            let response =
+                host_capability(State(state), Path("warmup.list".to_owned()), request).await;
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            )
+        };
+        crate::scheduler::store::with_test_jobs_directory(jobs, async {
+            let mut foreign = crate::scheduler::store::ScheduledJob {
+                id: "foreign".to_owned(),
+                name: "foreign".to_owned(),
+                schedule: crate::scheduler::store::Schedule::Every {
+                    interval: "1h".to_owned(),
+                },
+                target: crate::scheduler::store::JobTarget::Agent {
+                    agent_id: "a".to_owned(),
+                    prompt: "p".to_owned(),
+                    model: None,
+                    conversation_id: None,
+                },
+                enabled: true,
+                require_approval: false,
+                owner_app: Some("@example/other".to_owned()),
+                owner_user_id: None,
+                org_id: None,
+                created_at: "now".to_owned(),
+                updated_at: "now".to_owned(),
+                last_run_at: None,
+                last_outcome: None,
+                history: Vec::new(),
+            };
+            crate::scheduler::store::save_job(&foreign).unwrap();
+            foreign.id = "own".to_owned();
+            foreign.owner_app = Some(APP.to_owned());
+            crate::scheduler::store::save_job(&foreign).unwrap();
+
+            // Approved but not declared as a host-API grant: refused.
+            state.app_manifests.write().await.push(manifest(vec![]));
+            let (status, body) = call(state.clone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+            // Declared and approved: answers with the caller's own jobs only.
+            state.app_manifests.write().await.clear();
+            state
+                .app_manifests
+                .write()
+                .await
+                .push(manifest(vec!["warmup:crud"]));
+            let (status, body) = call(state.clone()).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            let ids: Vec<&str> = body["jobs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|j| j["id"].as_str().unwrap())
+                .collect();
+            assert_eq!(ids, vec!["own"]);
+        })
+        .await;
+    }
+
+    /// Records what the run-recovery capabilities asked Core to do.
+    #[derive(Default)]
+    struct RecordingRunHost {
+        approvals: std::sync::Mutex<Vec<crate::approvals::ApprovalRequest>>,
+        agent_reruns: std::sync::Mutex<Vec<(Option<String>, String, String)>>,
+        workflow_reruns: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::server::app_runs::RunRecoveryHost for RecordingRunHost {
+        async fn request_approval(
+            &self,
+            request: crate::approvals::ApprovalRequest,
+        ) -> Result<Option<String>, crate::server::app_runs::RunOpError> {
+            let id = request.id.clone();
+            self.approvals.lock().unwrap().push(request);
+            Ok(Some(id))
+        }
+        fn start_agent_rerun(
+            &self,
+            agent_id: Option<String>,
+            run_id: String,
+            prompt: String,
+        ) -> Result<(), crate::server::app_runs::RunOpError> {
+            self.agent_reruns
+                .lock()
+                .unwrap()
+                .push((agent_id, run_id, prompt));
+            Ok(())
+        }
+        fn start_workflow_rerun(
+            &self,
+            source_id: String,
+        ) -> Result<(), crate::server::app_runs::RunOpError> {
+            self.workflow_reruns.lock().unwrap().push(source_id);
+            Ok(())
+        }
+    }
+
+    /// Each run-recovery capability is refused unless its OWN grant is declared in
+    /// `host_api.grants` and approved, and with it does exactly what
+    /// `CoreHealingHost` did: the heal approval kinds, a `healrun_` agent re-run id
+    /// Core mints, and a workflow re-run of the named run.
+    #[tokio::test]
+    async fn run_recovery_capabilities_are_each_gated_by_their_own_grant() {
+        use crate::server::app_runs::{
+            GRANT_APPROVALS_REQUEST, GRANT_RERUN_AGENT, GRANT_WORKFLOW_RUNSTATE, TEST_HOST,
+        };
+        const APP: &str = "@example/healer";
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        state.app_store.insert(APP, "1.0.0").await.unwrap();
+        let all = [
+            GRANT_APPROVALS_REQUEST,
+            GRANT_RERUN_AGENT,
+            GRANT_WORKFLOW_RUNSTATE,
+        ];
+        let manifest = |host_grants: &[&str]| -> crate::plugin_manifest::PluginManifest {
+            serde_json::from_value(json!({
+                "id": APP, "name": "Healer", "version": "1.0.0", "runnables": [],
+                "permission_grants": all,
+                "sidecars": [{ "name": "svc", "port": 18998,
+                               "process": { "kind": "local", "command": "true" },
+                               "host_api": { "grants": host_grants } }],
+            }))
+            .unwrap()
+        };
+        let call = |state: ServerState, cap: &'static str, body: serde_json::Value| async move {
+            let request = Request::builder()
+                .method("POST")
+                .header(HDR_PLUGIN_ID, APP)
+                .header("authorization", format!("Bearer {}", ext_token(None, APP)))
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap();
+            let response = host_capability(State(state), Path(cap.to_owned()), request).await;
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_default(),
+            )
+        };
+        let cases: [(&'static str, &str, serde_json::Value); 3] = [
+            (
+                "approvals.request",
+                GRANT_APPROVALS_REQUEST,
+                json!({ "kind": "heal_fix", "source_id": "conv-1", "agent_id": "a1",
+                        "diagnosis": "bad query", "corrected": "search for X" }),
+            ),
+            (
+                "runs.rerunAgent",
+                GRANT_RERUN_AGENT,
+                json!({ "agent_id": "a1", "prompt": "search for X" }),
+            ),
+            (
+                "workflows.rerun",
+                GRANT_WORKFLOW_RUNSTATE,
+                json!({ "source_id": "run-9" }),
+            ),
+        ];
+        let host = std::sync::Arc::new(RecordingRunHost::default());
+        TEST_HOST
+            .scope(host.clone(), async {
+                for (cap, grant, body) in &cases {
+                    // Approved, but the sidecar declares every grant EXCEPT this one.
+                    let others: Vec<&str> = all.iter().copied().filter(|g| g != grant).collect();
+                    state
+                        .app_store
+                        .set_enabled(APP, &all.map(str::to_owned))
+                        .await
+                        .unwrap();
+                    *state.app_manifests.write().await = vec![manifest(&others)];
+                    let (status, _) = call(state.clone(), cap, body.clone()).await;
+                    assert_eq!(status, StatusCode::FORBIDDEN, "{cap} without its grant");
+                    // Declared, but the Gateway approved every grant EXCEPT this one.
+                    *state.app_manifests.write().await = vec![manifest(&all)];
+                    let approved: Vec<String> = others.iter().map(|g| (*g).to_owned()).collect();
+                    state.app_store.set_enabled(APP, &approved).await.unwrap();
+                    let (status, _) = call(state.clone(), cap, body.clone()).await;
+                    assert_eq!(status, StatusCode::FORBIDDEN, "{cap} unapproved");
+                }
+                assert!(host.approvals.lock().unwrap().is_empty());
+                assert!(host.agent_reruns.lock().unwrap().is_empty());
+                assert!(host.workflow_reruns.lock().unwrap().is_empty());
+
+                // Declared and approved: each one acts.
+                state
+                    .app_store
+                    .set_enabled(APP, &all.map(str::to_owned))
+                    .await
+                    .unwrap();
+                for (cap, _, body) in &cases {
+                    let (status, reply) = call(state.clone(), cap, body.clone()).await;
+                    assert!(status.is_success(), "{cap}: {status} {reply}");
+                }
+            })
+            .await;
+
+        let approvals = host.approvals.lock().unwrap();
+        assert_eq!(approvals.len(), 1);
+        assert_eq!(approvals[0].kind, crate::approvals::ApprovalKind::HealFix);
+        assert_eq!(approvals[0].source_ref.as_deref(), Some("conv-1"));
+        let reruns = host.agent_reruns.lock().unwrap();
+        assert_eq!(reruns.len(), 1);
+        assert_eq!(reruns[0].0.as_deref(), Some("a1"));
+        assert!(reruns[0].1.starts_with(ryu_healing_contracts::HEAL_PREFIX));
+        assert_eq!(reruns[0].2, "search for X");
+        assert_eq!(*host.workflow_reruns.lock().unwrap(), vec!["run-9"]);
+    }
+
+    /// A fan-out capability is never brokered: a sidecar that declares the edge
+    /// and holds the provider's grant is still refused before any binding, so it
+    /// cannot run or purge another app's jobs or data even when that app is the
+    /// sole provider.
+    #[tokio::test]
+    async fn fanout_capabilities_are_refused_by_the_broker() {
+        const CALLER: &str = "@example/curious";
+        const PROVIDER: &str = "@example/owner";
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        for (id, grants) in [
+            (
+                CALLER,
+                vec!["owner:jobs".to_owned(), "owner:data".to_owned()],
+            ),
+            (PROVIDER, Vec::new()),
+        ] {
+            state.app_store.insert(id, "1.0.0").await.unwrap();
+            state.app_store.set_enabled(id, &grants).await.unwrap();
+        }
+        let caller: crate::plugin_manifest::PluginManifest = serde_json::from_value(json!({
+            "id": CALLER, "name": "Curious", "version": "1.0.0", "runnables": [],
+            "permission_grants": ["owner:jobs", "owner:data"],
+            "requires": { "capabilities": [
+                { "capability": "jobs.run" }, { "capability": "data.purge" }
+            ] },
+            "sidecars": [{ "name": "svc", "port": 18997,
+                           "process": { "kind": "local", "command": "true" } }],
+        }))
+        .unwrap();
+        let provider: crate::plugin_manifest::PluginManifest = serde_json::from_value(json!({
+            "id": PROVIDER, "name": "Owner", "version": "1.0.0", "runnables": [],
+            "sidecars": [{ "name": "svc", "port": 18996,
+                           "process": { "kind": "local", "command": "true" },
+                           "http": { "mount": "/api/owner", "routes": [
+                               { "path": "/run", "method": "POST" },
+                               { "path": "/purge", "method": "POST" }
+                           ] } }],
+            "provides": [
+                { "capability": "jobs.run", "version": "1.0.0", "sidecar": "svc",
+                  "route": "/run", "grant": "owner:jobs" },
+                { "capability": "data.purge", "version": "1.0.0", "sidecar": "svc",
+                  "route": "/purge", "grant": "owner:data" }
+            ],
+        }))
+        .unwrap();
+        *state.app_manifests.write().await = vec![caller, provider];
+        for cap in ["jobs.run", "data.purge"] {
+            let request = Request::builder()
+                .method("POST")
+                .header(HDR_PLUGIN_ID, CALLER)
+                .header(
+                    "authorization",
+                    format!("Bearer {}", ext_token(None, CALLER)),
+                )
+                .body(axum::body::Body::from(r#"{"id":"j1","category":"x"}"#))
+                .unwrap();
+            let response =
+                host_capability(State(state.clone()), Path(cap.to_owned()), request).await;
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(status, StatusCode::NOT_FOUND, "{cap}: {body}");
+            assert_eq!(body["error"], "capability not callable through the broker");
+            assert_eq!(body["capability"], cap);
+        }
+    }
+
+    #[test]
+    fn a_still_starting_wake_is_a_retryable_503_and_a_failed_start_is_not() {
+        let starting = anyhow::Error::new(crate::sidecar::manager::SidecarStillStarting {
+            name: "com.acme.tool/engine".to_owned(),
+            waited: std::time::Duration::from_secs(20),
+        });
+        let response = wake_failed_response("test", "com.acme.tool/engine", &starting, false);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers().get(axum::http::header::RETRY_AFTER),
+            Some(&axum::http::HeaderValue::from_static(WAKE_RETRY_AFTER_SECS))
+        );
+
+        let failed = anyhow::anyhow!("pip install failed");
+        let response = wake_failed_response("test", "com.acme.tool/engine", &failed, true);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(response
+            .headers()
+            .get(axum::http::header::RETRY_AFTER)
+            .is_none());
+    }
 
     #[test]
     fn ext_token_is_random_per_plugin_and_owner_token_independent() {
@@ -2674,6 +4291,14 @@ mod tests {
 
     #[test]
     fn multiply_encoded_dot_segments_are_rejected() {
+        for path in [
+            "/admin%2Fforms",
+            "/admin%252Fforms",
+            "/admin%5cforms",
+            "/admin%255cforms",
+        ] {
+            assert!(has_dot_segment(path));
+        }
         // The single-decode assumption this guard used to rest on holds for a route,
         // but not for a path parameter VALUE. A derived tool fills `{id}` from model
         // arguments and `build_rest_request` percent-encodes on the way in, so a model
@@ -2692,11 +4317,301 @@ mod tests {
         assert!(has_dot_segment("/records/%252e%252e/admin"));
 
         // Encoded content that is NOT a dot segment still passes — the guard must not
-        // become "reject anything with a percent sign", or ordinary ids with spaces or
-        // slashes in them stop working.
+        // become "reject anything with a percent sign", or ordinary ids with spaces in them stop working. Encoded separators
+        // remain ambiguous across the proxy and sidecar and are refused.
         assert!(!has_dot_segment("/records/my%20record/fields"));
         assert!(!has_dot_segment("/records/a%2Eb/fields"));
         assert!(!has_dot_segment("/search/%7Bquery%7D"));
+    }
+
+    /// Every plugin's public routes refuse a raw URI whose decoding would introduce a
+    /// dot segment or a new separator, not just one app's. Protected routes are left
+    /// to the decoded-path check in [`resolve_route`].
+    #[test]
+    fn public_routes_refuse_encoded_separators_in_the_raw_uri_for_every_plugin() {
+        for raw in [
+            "/bots/support%2F..%2Fadmin",
+            "/f/contact/%2e%2e/admin",
+            "/api/ext/@ryu/bot-flows/support%2Fsessions",
+            "/api/ext/@ryu/anything/hook/..%5Cadmin",
+            "/bots/support/../admin",
+        ] {
+            assert!(
+                public_route_raw_path_is_unsafe(RouteAuth::Public, raw),
+                "public route must refuse {raw}"
+            );
+            assert!(
+                !public_route_raw_path_is_unsafe(RouteAuth::Protected, raw),
+                "protected routes keep only the decoded-path check: {raw}"
+            );
+        }
+        for raw in [
+            "/bots/support",
+            "/bots/support/embed.js",
+            "/api/ext/@ryu/bot-flows/support/sessions/abc123/reply",
+            "/f/my%20form",
+        ] {
+            assert!(
+                !public_route_raw_path_is_unsafe(RouteAuth::Public, raw),
+                "clean public path must pass: {raw}"
+            );
+        }
+    }
+
+    /// `GET /api/ext/<app>/<victim>%3F` reaches the proxy as the sub-path `/<victim>?`.
+    /// The gates must never match it (they would check the resource `<victim>?`) while
+    /// the forward ends the path at the `?` and the sidecar serves `/<victim>`.
+    #[test]
+    fn query_and_fragment_delimiters_in_a_sub_path_resolve_no_route() {
+        let mut manifest = provider_manifest(9099, None);
+        manifest.sidecars[0]
+            .http
+            .as_mut()
+            .expect("the provider fixture declares http")
+            .routes = vec![route("/:id", Some("jobs.view"), Some("id"))];
+
+        let (_, _, matched) = resolve_route(&manifest, "/job-1", "GET").expect("plain id");
+        assert_eq!(
+            required_permission_for(matched, "/job-1", &manifest.id),
+            Some(("jobs.view".to_owned(), "job-1".to_owned()))
+        );
+        for sub_path in [
+            "/job-1?",
+            "/job-1?x=1",
+            "/job-1#",
+            "/job-1#frag",
+            "/job-1%3F",
+            "/job-1%3f",
+            "/job-1%23",
+            "/job-1%253F",
+        ] {
+            assert!(
+                resolve_route(&manifest, sub_path, "GET").is_none(),
+                "{sub_path} must not resolve"
+            );
+        }
+        assert!(has_query_or_fragment_delimiter("/a/b?c"));
+        assert!(!has_query_or_fragment_delimiter("/records/my%20record"));
+        assert!(!has_query_or_fragment_delimiter(""));
+    }
+
+    /// A manifest with a Public `/*rest`, a Public `/webhook/*rest` and a Protected
+    /// `/admin`: the shape where a rewritten forward path crosses the auth boundary.
+    fn public_wildcards_beside_a_protected_route() -> crate::plugin_manifest::PluginManifest {
+        let mut manifest = provider_manifest(9099, None);
+        let mut catch_all = route("/*rest", None, None);
+        catch_all.auth = RouteAuth::Public;
+        let mut webhook = route("/webhook/*rest", None, None);
+        webhook.auth = RouteAuth::Public;
+        manifest.sidecars[0]
+            .http
+            .as_mut()
+            .expect("the provider fixture declares http")
+            .routes = vec![catch_all, webhook, route("/admin", None, None)];
+        manifest
+    }
+
+    /// `GET /api/ext/<app>/webhook/.%09./admin` reaches the proxy as the sub-path
+    /// `/webhook/.<TAB>./admin`. No segment is literally `..`, so the Public
+    /// `/webhook/*rest` route matches it, yet the URL parser behind the forward deletes
+    /// the tab, sees `..`, and the sidecar serves the Protected `/admin` with Core's hop
+    /// bearer. Deletion alone forwards `/ad<TAB>min` (matched by the Public `/*rest`)
+    /// as `/admin`.
+    #[test]
+    fn tabs_and_newlines_the_forward_url_parser_deletes_resolve_no_route() {
+        let manifest = public_wildcards_beside_a_protected_route();
+
+        // The disagreement being guarded: the path the forward actually requests.
+        for (forwarded, requested) in [
+            ("http://127.0.0.1:9099/webhook/.\t./admin", "/admin"),
+            ("http://127.0.0.1:9099/webhook/.\n./admin", "/admin"),
+            ("http://127.0.0.1:9099/webhook/.\r./admin", "/admin"),
+            ("http://127.0.0.1:9099/ad\tmin", "/admin"),
+            // Other characters inside the path are percent-encoded, not dropped, so
+            // the sidecar receives what the gates matched.
+            ("http://127.0.0.1:9099/webhook/a\u{0}b", "/webhook/a%00b"),
+            (
+                "http://127.0.0.1:9099/webhook/my record",
+                "/webhook/my%20record",
+            ),
+        ] {
+            let url = url::Url::parse(forwarded).expect("the forward URL parses");
+            assert_eq!(url.path(), requested, "{forwarded:?}");
+        }
+
+        for sub_path in [
+            "/webhook/.\t./admin",
+            "/webhook/.\n./admin",
+            "/webhook/.\r./admin",
+            "/ad\tmin",
+            // One layer deeper: the sidecar's own framework may decode once more.
+            "/webhook/.%09./admin",
+            "/webhook/.%0A./admin",
+            "/webhook/.%2509./admin",
+        ] {
+            assert!(
+                has_url_parser_deleted_character(sub_path),
+                "{sub_path:?} holds a deleted character"
+            );
+            assert!(
+                resolve_route(&manifest, sub_path, "GET").is_none(),
+                "{sub_path:?} must not resolve"
+            );
+        }
+
+        // Ordinary paths, and characters the forward carries faithfully, still resolve.
+        let (_, _, matched) = resolve_route(&manifest, "/admin", "GET").expect("/admin");
+        assert_eq!(matched.path, "/admin");
+        for sub_path in [
+            "/webhook/abc",
+            "/webhook/my record",
+            "/webhook/my%20record",
+            "/webhook/name ",
+            "/webhook/a\u{0}b",
+            "/webhook/a.b",
+        ] {
+            assert!(!has_url_parser_deleted_character(sub_path), "{sub_path:?}");
+            let (_, _, matched) = resolve_route(&manifest, sub_path, "GET")
+                .unwrap_or_else(|| panic!("{sub_path:?} must resolve"));
+            assert_eq!(matched.path, "/webhook/*rest");
+        }
+    }
+
+    /// The forward's URL parser trims spaces and C0 controls off the end of the WHOLE
+    /// URL, so they come off the path when no query follows it, and only then. Each
+    /// refused case is one the forward would already send to a different path.
+    #[test]
+    fn a_trailing_space_or_control_is_refused_only_where_the_forward_trims_it() {
+        // Trimmed: the sidecar would be asked for a different path from the gated one.
+        for (sub_path, forwarded, requested) in [
+            ("/webhook/.. ", "http://127.0.0.1:9099/webhook/.. ", "/"),
+            (
+                "/webhook/..\u{0}",
+                "http://127.0.0.1:9099/webhook/..\u{0}",
+                "/",
+            ),
+            ("/admin ", "http://127.0.0.1:9099/admin ", "/admin"),
+            (
+                "/webhook/x ",
+                "http://127.0.0.1:9099/webhook/x ",
+                "/webhook/x",
+            ),
+            (
+                "/webhook/x \u{1f}",
+                "http://127.0.0.1:9099/webhook/x \u{1f}",
+                "/webhook/x",
+            ),
+        ] {
+            let url = url::Url::parse(forwarded).expect("the forward URL parses");
+            assert_eq!(url.path(), requested, "{forwarded:?}");
+            assert!(
+                forward_url_trims_path_end(sub_path, None),
+                "{sub_path:?} without a query must be refused"
+            );
+        }
+
+        // Not trimmed: a query follows the path (even an empty one), or the space is
+        // still encoded. The sidecar receives the path the gates matched.
+        for (sub_path, query, forwarded, requested) in [
+            (
+                "/webhook/x ",
+                Some("x=1"),
+                "http://127.0.0.1:9099/webhook/x ?x=1",
+                "/webhook/x%20",
+            ),
+            (
+                "/webhook/x ",
+                Some(""),
+                "http://127.0.0.1:9099/webhook/x ?",
+                "/webhook/x%20",
+            ),
+            (
+                "/webhook/..\u{0}",
+                Some("x=1"),
+                "http://127.0.0.1:9099/webhook/..\u{0}?x=1",
+                "/webhook/..%00",
+            ),
+            (
+                "/webhook/x%20",
+                None,
+                "http://127.0.0.1:9099/webhook/x%20",
+                "/webhook/x%20",
+            ),
+        ] {
+            let url = url::Url::parse(forwarded).expect("the forward URL parses");
+            assert_eq!(url.path(), requested, "{forwarded:?}");
+            assert!(!forward_url_trims_path_end(sub_path, query), "{sub_path:?}");
+        }
+        assert!(!forward_url_trims_path_end("/", None));
+        assert!(!forward_url_trims_path_end("/webhook/my record", None));
+    }
+
+    /// The WebSocket bridge parses its upstream URL as an `http::Uri`, which refuses a
+    /// literal space or control character, so that lane can never forward a path the
+    /// HTTP lane's parser would trim or delete characters from.
+    #[test]
+    fn the_ws_bridge_never_forwards_a_space_or_control_character() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        for url in [
+            "ws://127.0.0.1:9099/admin ",
+            "ws://127.0.0.1:9099/webhook/..\u{0}",
+            "ws://127.0.0.1:9099/webhook/.\t./admin",
+        ] {
+            assert!(url.into_client_request().is_err(), "{url:?}");
+        }
+        assert!("ws://127.0.0.1:9099/webhook/x%20"
+            .into_client_request()
+            .is_ok());
+    }
+
+    /// End to end through the real `/api/ext` router, so axum's decoding of the request
+    /// path is part of the test: every path the forward would rewrite is refused (404)
+    /// before any auth decision or sidecar gate, while the forms the forward carries
+    /// faithfully still reach the registration gate (503: no sidecar is registered in
+    /// this isolated state).
+    #[tokio::test]
+    async fn the_ext_lane_refuses_paths_the_forward_would_rewrite() {
+        use tower::ServiceExt as _;
+
+        const APP: &str = "@acme/rewrite";
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        state.app_store.insert(APP, "1.0.0").await.unwrap();
+        state.app_store.set_enabled(APP, &[]).await.unwrap();
+        let mut manifest = web_app(APP, None, false, &[]);
+        let mut webhook = route("/webhook/*rest", None, None);
+        webhook.auth = RouteAuth::Public;
+        manifest.sidecars[0]
+            .http
+            .as_mut()
+            .expect("the web app fixture declares http")
+            .routes = vec![webhook, route("/admin", None, None)];
+        state.app_manifests.write().await.push(manifest);
+        let router = ext_routes(None).with_state(state);
+
+        for (path, expected) in [
+            ("/webhook/.%09./admin", StatusCode::NOT_FOUND),
+            ("/webhook/.%0A./admin", StatusCode::NOT_FOUND),
+            ("/webhook/.%0D./admin", StatusCode::NOT_FOUND),
+            ("/webhook/.%2509./admin", StatusCode::NOT_FOUND),
+            ("/webhook/..%20", StatusCode::NOT_FOUND),
+            ("/webhook/..%00", StatusCode::NOT_FOUND),
+            ("/webhook/x%20", StatusCode::NOT_FOUND),
+            ("/webhook/x%20?x=1", StatusCode::SERVICE_UNAVAILABLE),
+            ("/webhook/x%20?", StatusCode::SERVICE_UNAVAILABLE),
+            ("/webhook/name%2520", StatusCode::SERVICE_UNAVAILABLE),
+            ("/webhook/my%20record", StatusCode::SERVICE_UNAVAILABLE),
+            ("/webhook/abc", StatusCode::SERVICE_UNAVAILABLE),
+        ] {
+            let request = Request::builder()
+                .method("GET")
+                .uri(format!("/api/ext/{APP}{path}"))
+                .body(Body::empty())
+                .unwrap();
+            let response = router.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), expected, "{path}");
+        }
     }
 
     // ── App-declared route permissions ──────────────────────────────────────────
@@ -2895,6 +4810,7 @@ mod tests {
 
         let vocab = build_vocabulary(vec![DeclaredLevel {
             plugin_id: plugin_id.to_owned(),
+            builtin: false,
             id: permission.clone(),
             label: "Can close tabs".to_owned(),
             description: "Closes tabs.".to_owned(),
@@ -2989,8 +4905,13 @@ mod tests {
                 hop_plugin_id: plugin,
                 forward_payment_authorization: false,
                 forward_cookie_names: &[],
+                forward_caller_email: false,
                 caller: None,
+                caller_resource_ids: None,
+                caller_rate_subject: None,
                 caller_agent_id: None,
+                caller_agent_restricted: false,
+                event_delivery: None,
             })
             .await;
             assert_eq!(response.status(), StatusCode::OK);
@@ -3052,8 +4973,13 @@ mod tests {
                 hop_plugin_id: "com.test.app",
                 forward_payment_authorization: false,
                 forward_cookie_names: &[],
+                forward_caller_email: false,
                 caller: None,
+                caller_resource_ids: None,
+                caller_rate_subject: None,
                 caller_agent_id: None,
+                caller_agent_restricted: false,
+                event_delivery: None,
             })
             .await
         };
@@ -3113,8 +5039,13 @@ mod tests {
             hop_plugin_id: "com.test.sse",
             forward_payment_authorization: false,
             forward_cookie_names: &[],
+            forward_caller_email: false,
             caller: None,
+            caller_resource_ids: None,
+            caller_rate_subject: None,
             caller_agent_id: None,
+            caller_agent_restricted: false,
+            event_delivery: None,
         });
         // Headers must arrive well before the body finishes (buffering ⇒ >3s ⇒ timeout).
         let resp = tokio::time::timeout(Duration::from_secs(1), fut)
@@ -3157,6 +5088,9 @@ mod tests {
                     mount: mount.map(str::to_owned),
                     public_mount: None,
                     forward_cookie_names: Vec::new(),
+                    forward_caller_email: false,
+                    caller_resource_scope: None,
+                    forward_caller_rate_subject: false,
                     routes: vec![RouteSpec {
                         path: "/query".to_owned(),
                         method: None,
@@ -3170,6 +5104,7 @@ mod tests {
                 lazy: false,
                 idle_stop_secs: None,
                 provides_provider: None,
+                sandbox: None,
             }],
             provides: vec![ProvidesEntry {
                 capability: "rag".to_owned(),
@@ -3181,6 +5116,18 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn resolve_provider_route_maps_a_root_route_to_the_bare_mount() {
+        // Sidecars nest their routers at the bare mount and axum does no
+        // trailing-slash redirect, so a `"/"` capability route must not become
+        // `{mount}/` (which 404s upstream) — same rule as the inbound proxy.
+        let m = provider_manifest(9099, Some("/api/rag"));
+        let mut entry = m.provided_capabilities()[0].clone();
+        entry.route = Some("/".to_owned());
+        let route = resolve_provider_route(&m, &entry, "@ryu/rag").expect("resolves");
+        assert_eq!(route.upstream_path, "/api/rag");
     }
 
     #[test]
@@ -3298,14 +5245,12 @@ mod tests {
     }
 
     #[test]
-    fn public_mount_routes_include_bootstrap_apps() {
+    fn public_mount_routes_include_installed_and_compiled_apps() {
         let installed = crate::plugin_manifest::PluginManifestLoader::load_builtins()
             .into_iter()
             .filter(|manifest| manifest.id == "@ryu/mail")
             .collect::<Vec<_>>();
-        let bootstrap = crate::plugin_manifest::PluginManifestLoader::load_bootstrap();
-        let manifests =
-            crate::plugin_manifest::PluginManifestLoader::for_router(&installed, &bootstrap);
+        let manifests = crate::plugin_manifest::PluginManifestLoader::for_router(&installed);
 
         assert!(
             manifests.iter().any(|manifest| manifest.id == "@ryu/mail"),
@@ -3314,7 +5259,7 @@ mod tests {
         for id in ["@ryu/meetings", "@ryu/teams", "@ryu/dashboards"] {
             assert!(
                 manifests.iter().any(|manifest| manifest.id == id),
-                "bootstrap manifest {id} must be available when the router is built"
+                "compiled manifest {id} must be available when the router is built"
             );
         }
         assert!(
@@ -3330,10 +5275,7 @@ mod tests {
 
     #[test]
     fn public_mount_routes_include_compiled_opt_in_sidecars() {
-        let installed = Vec::new();
-        let bootstrap = crate::plugin_manifest::PluginManifestLoader::load_bootstrap();
-        let manifests =
-            crate::plugin_manifest::PluginManifestLoader::for_router(&installed, &bootstrap);
+        let manifests = crate::plugin_manifest::PluginManifestLoader::for_router(&[]);
 
         for id in [
             "@ryu/finetune",
@@ -3401,8 +5343,13 @@ mod tests {
             hop_plugin_id: "com.test.root",
             forward_payment_authorization: false,
             forward_cookie_names: &[],
+            forward_caller_email: false,
             caller: None,
+            caller_resource_ids: None,
+            caller_rate_subject: None,
             caller_agent_id: None,
+            caller_agent_restricted: false,
+            event_delivery: None,
         })
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
@@ -3455,6 +5402,277 @@ mod tests {
             .unwrap();
         assert_eq!(sub.status(), reqwest::StatusCode::OK);
         assert_eq!(sub.text().await.unwrap(), "SUB");
+    }
+
+    // ── WS tunnel authorization lifetime ────────────────────────────────────────
+
+    const RAG_WS_PATH: &str = "/api/ext/ws/@ryu/rag/query";
+
+    fn ext_ws_ticket(jwt_expires_at: Option<i64>) -> crate::server::ws_ticket::WsTicketClaims {
+        crate::server::ws_ticket::WsTicketClaims {
+            app_id: None,
+            caller: None,
+            kind: None,
+            path: Some(RAG_WS_PATH.to_owned()),
+            member: false,
+            peer_is_loopback: false,
+            room_id: None,
+            route: crate::server::ws_ticket::WsTicketRoute::Extension,
+            jwt_expires_at,
+            user_jwt: None,
+            node_generation: crate::node_token::active_generation(),
+        }
+    }
+
+    fn ext_ws_revocation(jwt_expires_at: Option<i64>, node_generation: u64) -> ExtWsRevocation {
+        ExtWsRevocation {
+            jwt_expires_at,
+            node_generation,
+        }
+    }
+
+    #[test]
+    fn an_ext_ws_ticket_whose_identity_already_expired_is_refused() {
+        let now = chrono::Utc::now().timestamp();
+        for expired in [now - 60, now] {
+            assert_eq!(
+                ext_ws_revocation_for(Some(&ext_ws_ticket(Some(expired)))),
+                Err(StatusCode::UNAUTHORIZED),
+                "a ticket whose JWT expired at {expired} (now {now}) must not upgrade"
+            );
+        }
+
+        let live = ext_ws_ticket(Some(now + 3_600));
+        assert_eq!(
+            ext_ws_revocation_for(Some(&live)),
+            Ok(Some(ext_ws_revocation(
+                Some(now + 3_600),
+                live.node_generation
+            ))),
+            "a live identity upgrades, carrying its expiry and node generation"
+        );
+        let local = ext_ws_ticket(None);
+        assert_eq!(
+            ext_ws_revocation_for(Some(&local)),
+            Ok(Some(ext_ws_revocation(None, local.node_generation))),
+            "a node-token ticket upgrades and is still bound to its generation"
+        );
+        assert_eq!(
+            ext_ws_revocation_for(None),
+            Ok(None),
+            "a Public route has no ticket to revoke"
+        );
+    }
+
+    /// End to end through the real `/api/ext/ws` router: a Protected route's ticket
+    /// whose JWT already expired is a 401 before the upgrade (and before any sidecar
+    /// wake), while a live ticket clears the gate and reaches the sidecar gate.
+    #[tokio::test]
+    async fn an_expired_ext_ws_ticket_is_a_401_before_the_upgrade() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        // The route is Protected (the default) and its sidecar is never registered.
+        let manifest = provider_manifest(1, None);
+        let app = manifest.id.clone();
+        state.app_store.insert(&app, "1.0.0").await.unwrap();
+        state.app_store.set_enabled(&app, &[]).await.unwrap();
+        state.app_manifests.write().await.push(manifest);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let router = ext_routes(None).with_state(state);
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+        let handshake_status = |ticket: String| async move {
+            let url = format!("ws://127.0.0.1:{port}{RAG_WS_PATH}?{WS_TICKET_PARAM}={ticket}");
+            match tokio_tungstenite::connect_async(url).await {
+                Err(tokio_tungstenite::tungstenite::Error::Http(response)) => response.status(),
+                Ok(_) => panic!("the socket must not upgrade without a registered sidecar"),
+                Err(other) => panic!("unexpected handshake failure: {other}"),
+            }
+        };
+
+        let now = chrono::Utc::now().timestamp();
+        let expired = crate::server::ws_ticket::mint_for_test(ext_ws_ticket(Some(now - 60)));
+        assert_eq!(
+            handshake_status(expired).await.as_u16(),
+            StatusCode::UNAUTHORIZED.as_u16()
+        );
+
+        let live = crate::server::ws_ticket::mint_for_test(ext_ws_ticket(Some(now + 3_600)));
+        assert_eq!(
+            handshake_status(live).await.as_u16(),
+            StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+            "a live ticket passes the identity gate and stops only at the unregistered sidecar"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_ext_ws_tunnel_is_revoked_when_the_node_token_rotates() {
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        // Rotated between minting the ticket and the upgrade: revoked at once.
+        let (_tx, rx) = tokio::sync::watch::channel(5_u64);
+        let revoked = wait_for_ext_ws_revocation(Some(ext_ws_revocation(None, 4)), rx);
+        assert!(timeout(Duration::from_millis(1), revoked).await.is_ok());
+
+        // Rotated while the tunnel is open.
+        let (tx, rx) = tokio::sync::watch::channel(4_u64);
+        let revoked = wait_for_ext_ws_revocation(Some(ext_ws_revocation(None, 4)), rx);
+        tokio::pin!(revoked);
+        assert!(
+            timeout(Duration::from_secs(86_400), &mut revoked)
+                .await
+                .is_err(),
+            "an unrotated node token keeps the tunnel open"
+        );
+        tx.send(4).unwrap();
+        assert!(
+            timeout(Duration::from_secs(3_600), &mut revoked)
+                .await
+                .is_err(),
+            "republishing the same generation is not a rotation"
+        );
+        tx.send(5).unwrap();
+        assert!(timeout(Duration::from_millis(1), &mut revoked)
+            .await
+            .is_ok());
+
+        // The generation watch closing fails closed.
+        let (tx, rx) = tokio::sync::watch::channel(4_u64);
+        let revoked = wait_for_ext_ws_revocation(Some(ext_ws_revocation(None, 4)), rx);
+        tokio::pin!(revoked);
+        assert!(timeout(Duration::from_secs(3_600), &mut revoked)
+            .await
+            .is_err());
+        drop(tx);
+        assert!(timeout(Duration::from_millis(1), &mut revoked)
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_ext_ws_tunnel_is_revoked_when_the_callers_jwt_expires() {
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let now = chrono::Utc::now().timestamp();
+        let (_tx, rx) = tokio::sync::watch::channel(7_u64);
+        let revoked = wait_for_ext_ws_revocation(Some(ext_ws_revocation(Some(now + 600), 7)), rx);
+        tokio::pin!(revoked);
+        assert!(
+            timeout(Duration::from_secs(540), &mut revoked)
+                .await
+                .is_err(),
+            "still within the JWT's lifetime"
+        );
+        assert!(
+            timeout(Duration::from_secs(120), &mut revoked)
+                .await
+                .is_ok(),
+            "the tunnel's authorization ends with the JWT"
+        );
+
+        let (_tx, rx) = tokio::sync::watch::channel(7_u64);
+        let revoked = wait_for_ext_ws_revocation(Some(ext_ws_revocation(Some(now - 1), 7)), rx);
+        assert!(timeout(Duration::from_millis(1), revoked).await.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_public_ext_ws_tunnel_is_never_revoked() {
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let (tx, rx) = tokio::sync::watch::channel(1_u64);
+        let revoked = wait_for_ext_ws_revocation(None, rx);
+        tokio::pin!(revoked);
+        assert!(timeout(Duration::from_secs(86_400), &mut revoked)
+            .await
+            .is_err());
+        let _ = tx.send(2);
+        drop(tx);
+        assert!(timeout(Duration::from_secs(86_400), &mut revoked)
+            .await
+            .is_err());
+    }
+
+    /// An open tunnel whose authorization is revoked tells the client why (1008,
+    /// "authorization expired") and drops its upstream socket to the sidecar.
+    #[tokio::test]
+    async fn a_revoked_ext_ws_tunnel_closes_with_1008_and_drops_the_sidecar_socket() {
+        use futures_util::{SinkExt as _, StreamExt as _};
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        // Sidecar stub: echoes text frames and reports when its socket ends.
+        let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_port = upstream.local_addr().unwrap().port();
+        let (upstream_ended_tx, upstream_ended) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let (stream, _) = upstream.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(Ok(message)) = socket.next().await {
+                if message.is_close() {
+                    break;
+                }
+                if message.is_text() && socket.send(message).await.is_err() {
+                    break;
+                }
+            }
+            let _ = upstream_ended_tx.send(());
+        });
+
+        // Core side: the real bridge under a revocation the test fires by hand.
+        let revoke = std::sync::Arc::new(tokio::sync::Notify::new());
+        let handler_revoke = revoke.clone();
+        let router = Router::new().route(
+            "/ws",
+            get(move |ws: WebSocketUpgrade| {
+                let revoke = handler_revoke.clone();
+                async move {
+                    ws.on_upgrade(move |socket| {
+                        bridge_ws_to_sidecar(
+                            socket,
+                            upstream_port,
+                            "/".to_owned(),
+                            "hop".to_owned(),
+                            async move { revoke.notified().await },
+                        )
+                    })
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/ws"))
+            .await
+            .unwrap();
+        client.send(TsMessage::text("ping")).await.unwrap();
+        let echoed = timeout(Duration::from_secs(10), client.next())
+            .await
+            .expect("the tunnel carries frames while authorized")
+            .expect("a frame")
+            .unwrap();
+        assert_eq!(echoed.into_text().unwrap(), "ping");
+
+        revoke.notify_one();
+        let closed = timeout(Duration::from_secs(10), client.next())
+            .await
+            .expect("the tunnel closes once revoked")
+            .expect("a close frame")
+            .unwrap();
+        let TsMessage::Close(Some(frame)) = closed else {
+            panic!("expected a close frame, got {closed:?}");
+        };
+        assert_eq!(u16::from(frame.code), WS_CLOSE_POLICY);
+        assert_eq!(&*frame.reason, "authorization expired");
+        timeout(Duration::from_secs(10), upstream_ended)
+            .await
+            .expect("the sidecar socket is dropped")
+            .unwrap();
     }
 
     #[test]
@@ -3540,12 +5758,23 @@ mod tests {
         src.insert("connection", "keep-alive".parse().unwrap());
         src.insert("x-ryu-plugin-id", "com.acme.app".parse().unwrap());
         src.insert(
+            crate::sidecar::deferred_authorization::PRINCIPAL_HEADER,
+            "forged".parse().unwrap(),
+        );
+        src.insert(
             HDR_FORWARDED_AUTHORIZATION,
             "Payment forged".parse().unwrap(),
+        );
+        src.insert(
+            HDR_CALLER_RESOURCE_IDS,
+            r#"["forged-conversation"]"#.parse().unwrap(),
         );
 
         let mut dst = reqwest::header::HeaderMap::new();
         copy_headers(&src, &mut dst, &[]);
+        assert!(dst
+            .get(crate::sidecar::deferred_authorization::PRINCIPAL_HEADER)
+            .is_none());
 
         // End-to-end app headers are forwarded.
         assert_eq!(
@@ -3558,6 +5787,10 @@ mod tests {
         );
         assert!(dst.get("x-ryu-user-jwt").is_none());
         assert!(dst.get("cookie").is_none());
+        assert!(
+            dst.get(HDR_CALLER_RESOURCE_IDS).is_none(),
+            "caller must not forge Core's resource scope"
+        );
         // Browser-context + hop-by-hop headers are dropped.
         assert!(dst.get("origin").is_none(), "Origin must be stripped");
         assert!(dst.get("referer").is_none(), "Referer must be stripped");
@@ -3570,6 +5803,1512 @@ mod tests {
             dst.get("connection").is_none(),
             "Connection must be stripped"
         );
+    }
+
+    // ── Web-delegated admission ─────────────────────────────────────────────────
+
+    /// A manifest fixture for the web-delegation gate: an optional `surfaces.web`
+    /// level, an optional Companion runnable, declared grants, and one annotated
+    /// (`/items`) and one unannotated (`/open`) route. Routes are `public` so these
+    /// tests never depend on whichever node token the test process holds.
+    fn web_app(
+        id: &str,
+        web: Option<&str>,
+        companion: bool,
+        grants: &[&str],
+    ) -> crate::plugin_manifest::PluginManifest {
+        let runnables = if companion {
+            json!([{ "id": "panel", "name": "Panel", "kind": "companion",
+                     "config": { "label": "Panel" } }])
+        } else {
+            json!([])
+        };
+        let mut value = json!({
+            "id": id, "name": id, "version": "1.0.0",
+            "runnables": runnables,
+            "permission_grants": grants,
+            "sidecars": [{ "name": "svc", "port": 18997,
+                           "process": { "kind": "local", "command": "true" },
+                           "http": { "mount": "/api/svc", "routes": [
+                               { "path": "/items", "permission": "items.view", "auth": "public" },
+                               { "path": "/open", "auth": "public" }
+                           ] } }],
+        });
+        if let Some(level) = web {
+            value["surfaces"] = json!({ "web": { "support": level } });
+        }
+        serde_json::from_value(value).expect("web app fixture parses")
+    }
+
+    fn caller_header(id: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(HDR_APP_CALLER, id.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn a_web_delegated_forward_is_marked_admitted_over_any_sidecar_value() {
+        let mut response = Response::builder()
+            .header(HDR_WEB_DELEGATION, "forged-by-sidecar")
+            .body(Body::empty())
+            .unwrap();
+        mark_web_delegation_admitted(&mut response);
+        let values: Vec<_> = response
+            .headers()
+            .get_all(HDR_WEB_DELEGATION)
+            .iter()
+            .collect();
+        assert_eq!(values, vec![WEB_DELEGATION_ADMITTED]);
+    }
+
+    #[test]
+    fn copy_headers_strips_the_web_delegation_headers() {
+        let mut src = HeaderMap::new();
+        src.insert(HDR_WEB_DELEGATION, "1".parse().unwrap());
+        src.insert(HDR_APP_CALLER, "@acme/caller".parse().unwrap());
+        src.insert("accept", "application/json".parse().unwrap());
+        let mut dst = reqwest::header::HeaderMap::new();
+        copy_headers(&src, &mut dst, &[]);
+        assert!(dst.get(HDR_WEB_DELEGATION).is_none());
+        assert!(dst.get(HDR_APP_CALLER).is_none());
+        assert!(dst.get("accept").is_some());
+    }
+
+    /// Only Core's own event fan-out may carry the delivery marker: a caller's copy
+    /// never crosses a proxied hop, so a subscriber can trust it.
+    #[test]
+    fn copy_headers_strips_a_caller_supplied_event_delivery_marker() {
+        let mut src = HeaderMap::new();
+        src.insert(HDR_EVENT_DELIVERY, "forged".parse().unwrap());
+        let mut dst = reqwest::header::HeaderMap::new();
+        copy_headers(&src, &mut dst, &[]);
+        assert!(dst.get(HDR_EVENT_DELIVERY).is_none());
+    }
+
+    /// Only an explicit `full` or `limited` web entry counts. The listing rule
+    /// (`supports_surface`) admits legacy manifests and unknown levels; this gate must
+    /// not.
+    #[test]
+    fn strict_web_support_admits_only_full_and_limited() {
+        for (level, expected) in [
+            (Some("full"), true),
+            (Some("limited"), true),
+            (Some("list"), false),
+            (Some("commands"), false),
+            (Some("none"), false),
+            (Some("future-level"), false),
+            (None, false),
+        ] {
+            let manifest = web_app("@acme/app", level, true, &[]);
+            assert_eq!(
+                strictly_supports_web(&manifest),
+                expected,
+                "web support {level:?}"
+            );
+        }
+        // Legacy: no `surfaces` and an empty `targets` list is "every surface" for
+        // listing, but never a credential-bearing web hop.
+        let legacy = web_app("@acme/app", None, true, &[]);
+        assert!(legacy.supports_surface(crate::plugin_manifest::Surface::Web));
+        assert!(!strictly_supports_web(&legacy));
+        // Another surface's entry does not stand in for web.
+        let mut desktop_only = web_app("@acme/app", None, true, &[]);
+        desktop_only.surfaces = serde_json::from_value(json!({
+            "desktop": { "support": "full" }
+        }))
+        .unwrap();
+        assert!(!strictly_supports_web(&desktop_only));
+    }
+
+    #[test]
+    fn web_delegation_facts_read_only_a_valid_installed_caller_app() {
+        let target = web_app("@acme/target", Some("full"), true, &[]);
+        let caller = web_app("@acme/caller", Some("limited"), true, &["app:http"]);
+        let headless = web_app("@acme/headless", Some("full"), false, &[]);
+        let manifests = vec![target.clone(), caller, headless];
+
+        let facts = web_delegation_facts(&manifests, &target, true, &caller_header("@acme/caller"));
+        assert_eq!(
+            facts,
+            WebDelegationFacts {
+                route_declares_permission: true,
+                target_supports_web: true,
+                caller_app: Some(WebCallerApp {
+                    id: "@acme/caller".to_owned(),
+                    supports_web: true,
+                    has_companion: true,
+                }),
+            }
+        );
+        let facts =
+            web_delegation_facts(&manifests, &target, true, &caller_header("@acme/headless"));
+        assert_eq!(facts.caller_app.map(|app| app.has_companion), Some(false));
+        // Missing, malformed and uninstalled caller ids name no app at all.
+        for headers in [
+            HeaderMap::new(),
+            caller_header("@ACME/caller"),
+            caller_header("@acme/caller/extra"),
+            caller_header("@acme/missing"),
+        ] {
+            assert_eq!(
+                web_delegation_facts(&manifests, &target, true, &headers).caller_app,
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn web_delegated_route_gate_refuses_with_404_until_every_manifest_fact_holds() {
+        let caller = WebCallerApp {
+            id: "@acme/caller".to_owned(),
+            supports_web: true,
+            has_companion: true,
+        };
+        let admitted = WebDelegationFacts {
+            route_declares_permission: true,
+            target_supports_web: true,
+            caller_app: Some(caller.clone()),
+        };
+        assert_eq!(web_delegated_route_gate(&admitted), Ok(&caller));
+
+        let refusals = [
+            WebDelegationFacts {
+                route_declares_permission: false,
+                ..admitted.clone()
+            },
+            WebDelegationFacts {
+                target_supports_web: false,
+                ..admitted.clone()
+            },
+            WebDelegationFacts {
+                caller_app: None,
+                ..admitted.clone()
+            },
+            WebDelegationFacts {
+                caller_app: Some(WebCallerApp {
+                    supports_web: false,
+                    ..caller.clone()
+                }),
+                ..admitted.clone()
+            },
+            WebDelegationFacts {
+                caller_app: Some(WebCallerApp {
+                    has_companion: false,
+                    ..caller.clone()
+                }),
+                ..admitted.clone()
+            },
+        ];
+        for facts in refusals {
+            assert_eq!(
+                web_delegated_route_gate(&facts),
+                Err(StatusCode::NOT_FOUND),
+                "{facts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn web_caller_grant_is_own_app_http_or_the_exact_target_edge() {
+        assert_eq!(
+            web_caller_required_grant("@ryu/finetune", "@ryu/finetune"),
+            "app:http"
+        );
+        assert_eq!(
+            web_caller_required_grant("@ryu/workflows", "@ryu/recipes"),
+            "app:http:@ryu/recipes"
+        );
+    }
+
+    /// The caller app must be enabled and hold the exact edge in its CURRENT approved
+    /// set: plain `app:http` never reaches another app, a target grant never reaches
+    /// the caller's own sidecar, a wildcard is not an edge, and an approval the
+    /// manifest no longer declares does not count.
+    #[tokio::test]
+    async fn web_caller_app_admission_requires_the_exact_reviewed_grant() {
+        const CALLER: &str = "@acme/caller";
+        const TARGET: &str = "@acme/target";
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        state.app_manifests.write().await.push(web_app(
+            CALLER,
+            Some("full"),
+            true,
+            &["app:http", "app:http:@acme/target", "app:http:@acme/*"],
+        ));
+
+        // Not installed, then installed but disabled.
+        assert_eq!(
+            web_caller_app_admitted(&state, CALLER, CALLER).await,
+            Err(StatusCode::NOT_FOUND)
+        );
+        state.app_store.insert(CALLER, "1.0.0").await.unwrap();
+        assert_eq!(
+            web_caller_app_admitted(&state, CALLER, CALLER).await,
+            Err(StatusCode::NOT_FOUND)
+        );
+
+        let approve = |grants: &[&str]| grants.iter().map(|g| (*g).to_owned()).collect::<Vec<_>>();
+
+        state
+            .app_store
+            .set_enabled(CALLER, &approve(&["app:http"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            web_caller_app_admitted(&state, CALLER, CALLER).await,
+            Ok(())
+        );
+        assert_eq!(
+            web_caller_app_admitted(&state, CALLER, TARGET).await,
+            Err(StatusCode::NOT_FOUND),
+            "plain app:http never reaches another app"
+        );
+
+        state
+            .app_store
+            .set_enabled(CALLER, &approve(&["app:http:@acme/target"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            web_caller_app_admitted(&state, CALLER, TARGET).await,
+            Ok(())
+        );
+        assert_eq!(
+            web_caller_app_admitted(&state, CALLER, CALLER).await,
+            Err(StatusCode::NOT_FOUND),
+            "a target grant does not cover the caller's own sidecar"
+        );
+
+        state
+            .app_store
+            .set_enabled(CALLER, &approve(&["app:http:@acme/*"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            web_caller_app_admitted(&state, CALLER, TARGET).await,
+            Err(StatusCode::NOT_FOUND),
+            "a wildcard is not a reviewed edge"
+        );
+
+        // Approved but no longer declared by the manifest: not current.
+        state
+            .app_store
+            .set_enabled(CALLER, &approve(&["app:http:@acme/other"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            web_caller_app_admitted(&state, CALLER, "@acme/other").await,
+            Err(StatusCode::NOT_FOUND)
+        );
+    }
+
+    /// Anonymous callers and an unbound node (this test process) are refused before
+    /// any manifest or grant fact is consulted, even when every one of them holds.
+    #[tokio::test]
+    async fn web_delegated_admission_refuses_anonymous_and_unbound_callers() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        let facts = WebDelegationFacts {
+            route_declares_permission: true,
+            target_supports_web: true,
+            caller_app: Some(WebCallerApp {
+                id: "@acme/target".to_owned(),
+                supports_web: true,
+                has_companion: true,
+            }),
+        };
+        assert_eq!(
+            web_delegated_admission(&state, "@acme/target", &None, &facts).await,
+            Err(StatusCode::FORBIDDEN)
+        );
+        let member = crate::identity_verify::VerifiedCaller {
+            user_id: "alice".to_owned(),
+            email: None,
+            email_verified: false,
+            org_id: Some("org1".to_owned()),
+            role: crate::identity_verify::OrgRole::Member,
+            teams: Vec::new(),
+        };
+        assert!(crate::sidecar::control_plane::registered_org().is_none());
+        assert_eq!(
+            web_delegated_admission(&state, "@acme/target", &Some(member), &facts).await,
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    /// End to end through `proxy_for_plugin`: the marker refuses before the
+    /// registration/wake gate (403, nothing dialed or woken), while the same request
+    /// WITHOUT the marker is unchanged and reaches that gate (503: no sidecar is
+    /// registered in this isolated state). The refusal is the same on an annotated
+    /// and an unannotated route.
+    #[tokio::test]
+    async fn web_delegated_requests_are_refused_before_the_sidecar_gate() {
+        const APP: &str = "@acme/target";
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        state.app_store.insert(APP, "1.0.0").await.unwrap();
+        state
+            .app_store
+            .set_enabled(APP, &["app:http".to_owned()])
+            .await
+            .unwrap();
+        state
+            .app_manifests
+            .write()
+            .await
+            .push(web_app(APP, Some("full"), true, &["app:http"]));
+
+        let request = |path: &str, web: bool| {
+            let mut builder = Request::builder()
+                .method("GET")
+                .uri(format!("/api/ext/{APP}{path}"));
+            if web {
+                builder = builder
+                    .header(HDR_WEB_DELEGATION, "1")
+                    .header(HDR_APP_CALLER, APP);
+            }
+            builder.body(Body::empty()).unwrap()
+        };
+
+        for path in ["/items", "/open"] {
+            let refused = proxy_for_plugin(&state, APP, path, None, request(path, true)).await;
+            assert_eq!(refused.status(), StatusCode::FORBIDDEN, "web {path}");
+
+            let unchanged = proxy_for_plugin(&state, APP, path, None, request(path, false)).await;
+            assert_eq!(
+                unchanged.status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "a request without the marker must reach the registration gate ({path})"
+            );
+        }
+        assert!(
+            !state.manager.is_wake_eligible("@acme/target/svc"),
+            "nothing was registered or woken"
+        );
+    }
+
+    fn org_bound_node(org: &str) -> crate::sidecar::control_plane::RegisteredNode {
+        crate::sidecar::control_plane::RegisteredNode {
+            org: crate::sidecar::control_plane::RegisteredOrg {
+                id: org.to_owned(),
+                name: org.to_owned(),
+                slug: None,
+            },
+            node_id: "node-web".to_owned(),
+            scope: crate::sidecar::control_plane::NodeScope::Org,
+            team_id: None,
+            owner_user_id: None,
+        }
+    }
+
+    fn org_member(user: &str, org: &str) -> crate::identity_verify::VerifiedCaller {
+        crate::identity_verify::VerifiedCaller {
+            user_id: user.to_owned(),
+            email: None,
+            email_verified: false,
+            org_id: Some(org.to_owned()),
+            role: crate::identity_verify::OrgRole::Member,
+            teams: Vec::new(),
+        }
+    }
+
+    /// On a bound node the admission admits a member of the node's org on exactly the
+    /// reviewed edge (`app:http` for the caller's own app, `app:http:<target>` for
+    /// another), and refuses a caller from another org even when every fact holds.
+    #[tokio::test]
+    async fn web_delegated_admission_admits_a_bound_org_member_on_the_exact_edge() {
+        const CALLER: &str = "@acme/webcaller";
+        const TARGET: &str = "@acme/webtarget";
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        state.app_manifests.write().await.push(web_app(
+            CALLER,
+            Some("full"),
+            true,
+            &["app:http", "app:http:@acme/webtarget"],
+        ));
+        state.app_store.insert(CALLER, "1.0.0").await.unwrap();
+        state
+            .app_store
+            .set_enabled(CALLER, &["app:http".to_owned()])
+            .await
+            .unwrap();
+        let facts = WebDelegationFacts {
+            route_declares_permission: true,
+            target_supports_web: true,
+            caller_app: Some(WebCallerApp {
+                id: CALLER.to_owned(),
+                supports_web: true,
+                has_companion: true,
+            }),
+        };
+
+        crate::sidecar::control_plane::with_test_node_binding(
+            true,
+            Some(org_bound_node("org1")),
+            async {
+                let member = Some(org_member("alice", "org1"));
+                assert_eq!(
+                    web_delegated_admission(&state, CALLER, &member, &facts).await,
+                    Ok(()),
+                    "own app under app:http"
+                );
+                assert_eq!(
+                    web_delegated_admission(&state, TARGET, &member, &facts).await,
+                    Err(StatusCode::NOT_FOUND),
+                    "app:http never reaches another app"
+                );
+                let outsider = Some(org_member("mallory", "org2"));
+                assert_eq!(
+                    web_delegated_admission(&state, CALLER, &outsider, &facts).await,
+                    Err(StatusCode::FORBIDDEN),
+                    "a caller from another org"
+                );
+
+                state
+                    .app_store
+                    .set_enabled(CALLER, &["app:http:@acme/webtarget".to_owned()])
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    web_delegated_admission(&state, TARGET, &member, &facts).await,
+                    Ok(()),
+                    "another app under its exact app:http:<target> edge"
+                );
+                assert_eq!(
+                    web_delegated_admission(&state, TARGET, &outsider, &facts).await,
+                    Err(StatusCode::FORBIDDEN)
+                );
+            },
+        )
+        .await;
+    }
+
+    /// End to end through `proxy_for_plugin` on a bound node, with real signed user
+    /// JWTs and a registered fake sidecar: an admitted web request reaches the sidecar
+    /// and is marked admitted; the same request without the marker is not marked; the
+    /// route permission still applies to an admitted caller; an unannotated route and
+    /// another org's caller are refused before the sidecar is dialed.
+    #[tokio::test]
+    async fn an_admitted_web_request_reaches_the_sidecar_and_is_marked_admitted() {
+        use crate::server::multiplayer_journey_tests::TestIdentityProvider;
+        use crate::sidecar::capability_consumer::test_support::{
+            register_sidecar_for, reserve_port, serve,
+        };
+        const APP: &str = "@acme/webforward";
+        const ORG: &str = "org-webforward";
+
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        let port = reserve_port();
+        let mut manifest = web_app(APP, Some("full"), true, &["app:http"]);
+        let sidecar = &mut manifest.sidecars[0];
+        sidecar.name = "engine".to_owned();
+        sidecar.port = port;
+        // A kernel permission a member holds and a viewer does not.
+        sidecar.http.as_mut().expect("fixture http").routes[0].permission =
+            Some(crate::identity_verify::permissions::SPACE_WRITE.to_owned());
+        state.app_manifests.write().await.push(manifest);
+        state.app_store.insert(APP, "1.0.0").await.unwrap();
+        state
+            .app_store
+            .set_enabled(APP, &["app:http".to_owned()])
+            .await
+            .unwrap();
+        let _sidecar = register_sidecar_for(&state.manager, APP, port).await;
+        let reached = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = reached.clone();
+        let router = Router::new()
+            .route(
+                "/api/svc/items",
+                get(move || {
+                    let counter = counter.clone();
+                    async move {
+                        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Json(json!({ "items": ["a"] }))
+                    }
+                }),
+            )
+            .route(
+                "/api/svc/open",
+                get(|| async { Json(json!({ "open": true })) }),
+            );
+        let server = serve(port, router).await;
+
+        let identity = TestIdentityProvider::start().await;
+        let member = identity.mint("web-member", ORG, "member", &[]);
+        let viewer = identity.mint("web-viewer", ORG, "viewer", &[]);
+        let outsider = identity.mint("web-outsider", "org-elsewhere", "member", &[]);
+        let request = |path: &str, jwt: &str, web: bool| {
+            let mut builder = Request::builder()
+                .method("GET")
+                .uri(format!("/api/ext/{APP}{path}"))
+                .header("x-ryu-user-jwt", jwt);
+            if web {
+                builder = builder
+                    .header(HDR_WEB_DELEGATION, "1")
+                    .header(HDR_APP_CALLER, APP);
+            }
+            builder.body(Body::empty()).unwrap()
+        };
+
+        crate::sidecar::control_plane::with_test_node_binding(
+            true,
+            Some(org_bound_node(ORG)),
+            async {
+                let admitted = proxy_for_plugin(
+                    &state,
+                    APP,
+                    "/items",
+                    None,
+                    request("/items", &member, true),
+                )
+                .await;
+                assert_eq!(admitted.status(), StatusCode::OK);
+                assert_eq!(
+                    admitted.headers().get(HDR_WEB_DELEGATION).unwrap(),
+                    WEB_DELEGATION_ADMITTED
+                );
+                let body = axum::body::to_bytes(admitted.into_body(), 1024)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+                    json!({ "items": ["a"] })
+                );
+                assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+                let direct = proxy_for_plugin(
+                    &state,
+                    APP,
+                    "/items",
+                    None,
+                    request("/items", &member, false),
+                )
+                .await;
+                assert_eq!(direct.status(), StatusCode::OK);
+                assert!(
+                    direct.headers().get(HDR_WEB_DELEGATION).is_none(),
+                    "only a web-delegated forward is marked admitted"
+                );
+                assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+                for (jwt, path, expected, why) in [
+                    (&viewer, "/items", StatusCode::FORBIDDEN, "route permission"),
+                    (&outsider, "/items", StatusCode::FORBIDDEN, "another org"),
+                    (&member, "/open", StatusCode::NOT_FOUND, "unannotated route"),
+                ] {
+                    let refused =
+                        proxy_for_plugin(&state, APP, path, None, request(path, jwt, true)).await;
+                    assert_eq!(refused.status(), expected, "{why}");
+                    assert!(refused.headers().get(HDR_WEB_DELEGATION).is_none(), "{why}");
+                }
+                assert_eq!(
+                    reached.load(std::sync::atomic::Ordering::SeqCst),
+                    2,
+                    "no refused request reached the sidecar"
+                );
+            },
+        )
+        .await;
+        server.abort();
+    }
+
+    /// The web tier forwards only to a Core whose `GET /api/version` advertises the
+    /// admission this module runs.
+    #[test]
+    fn version_advertises_the_web_delegated_admission() {
+        assert!(crate::update::version_info()
+            .features
+            .iter()
+            .any(|feature| feature == crate::update::FEATURE_WEB_DELEGATED_EXT));
+    }
+
+    /// A derived-index sidecar (`caller_resource_scope: "conversation"`) must receive
+    /// exactly the conversations the VERIFIED caller may read on a shared node: Bob
+    /// never sees Alice's private chat id, and a caller-forged scope header is
+    /// replaced, not trusted. This is the Core half of the Mission Control fix.
+    #[tokio::test]
+    async fn conversation_scope_carries_only_the_verified_callers_conversations() {
+        use crate::server::conversations::Tenancy;
+        use crate::server::multiplayer_journey_tests::TestIdentityProvider;
+        use crate::sidecar::capability_consumer::test_support::{
+            register_sidecar_for, reserve_port, serve,
+        };
+        const APP: &str = "@acme/derived-index";
+        const ORG: &str = "org-derived";
+
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        let port = reserve_port();
+        let mut manifest = web_app(APP, None, false, &["app:http"]);
+        let sidecar = &mut manifest.sidecars[0];
+        sidecar.name = "engine".to_owned();
+        sidecar.port = port;
+        let http = sidecar.http.as_mut().expect("fixture http");
+        http.caller_resource_scope = Some("conversation".to_owned());
+        http.routes[0].permission =
+            Some(crate::identity_verify::permissions::SPACE_WRITE.to_owned());
+        state.app_manifests.write().await.push(manifest);
+        state.app_store.insert(APP, "1.0.0").await.unwrap();
+        state
+            .app_store
+            .set_enabled(APP, &["app:http".to_owned()])
+            .await
+            .unwrap();
+        for (conversation, owner) in [("alice-private", "alice"), ("bob-private", "bob")] {
+            state
+                .conversations
+                .ensure_conversation(
+                    conversation,
+                    None,
+                    Some(conversation),
+                    Tenancy::Owned {
+                        user_id: owner.to_owned(),
+                        org_id: Some(ORG.to_owned()),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let _sidecar = register_sidecar_for(&state.manager, APP, port).await;
+        let seen = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<Option<String>>::new()));
+        let captured = seen.clone();
+        let router = Router::new().route(
+            "/api/svc/items",
+            get(move |headers: HeaderMap| {
+                let captured = captured.clone();
+                async move {
+                    captured.lock().await.push(
+                        headers
+                            .get(HDR_CALLER_RESOURCE_IDS)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned),
+                    );
+                    Json(json!({ "items": [] }))
+                }
+            }),
+        );
+        let server = serve(port, router).await;
+
+        let identity = TestIdentityProvider::start().await;
+        let alice = identity.mint("alice", ORG, "member", &[]);
+        let bob = identity.mint("bob", ORG, "member", &[]);
+        let request = |jwt: &str| {
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/ext/{APP}/items"))
+                .header("x-ryu-user-jwt", jwt)
+                // Forged: Bob claims Alice's conversation.
+                .header(HDR_CALLER_RESOURCE_IDS, r#"["alice-private"]"#)
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        crate::sidecar::control_plane::with_test_node_binding(
+            true,
+            Some(org_bound_node(ORG)),
+            async {
+                for jwt in [&bob, &alice] {
+                    let response =
+                        proxy_for_plugin(&state, APP, "/items", None, request(jwt)).await;
+                    assert_eq!(response.status(), StatusCode::OK);
+                }
+                assert!(state
+                    .conversations
+                    .delete_conversation("alice-private")
+                    .await
+                    .unwrap());
+                state
+                    .conversations
+                    .ensure_conversation(
+                        "alice-private",
+                        None,
+                        Some("alice-private"),
+                        Tenancy::Owned {
+                            user_id: "bob".to_owned(),
+                            org_id: Some(ORG.to_owned()),
+                        },
+                    )
+                    .await
+                    .unwrap();
+                for jwt in [&bob, &alice] {
+                    let response =
+                        proxy_for_plugin(&state, APP, "/items", None, request(jwt)).await;
+                    assert_eq!(response.status(), StatusCode::OK);
+                }
+            },
+        )
+        .await;
+        server.abort();
+
+        let seen = seen.lock().await.clone();
+        let parse = |raw: &Option<String>| -> Vec<(String, String)> {
+            let entries: Vec<String> =
+                serde_json::from_str(raw.as_deref().expect("Core stamps the scope header"))
+                    .expect("scope header is a JSON array");
+            entries
+                .into_iter()
+                .map(|entry| {
+                    let (version, id) = entry.split_once(':').expect("<version>:<id> entry");
+                    (id.to_owned(), version.to_owned())
+                })
+                .collect()
+        };
+        assert_eq!(seen.len(), 4);
+        let bob_scope = parse(&seen[0]);
+        let alice_scope = parse(&seen[1]);
+        assert_eq!(bob_scope.len(), 1);
+        assert_eq!(bob_scope[0].0, "bob-private");
+        assert_eq!(alice_scope.len(), 1);
+        assert_eq!(alice_scope[0].0, "alice-private");
+        assert_eq!(alice_scope[0].1.len(), 12);
+
+        // Re-creation: Alice's conversation is deleted, and Bob creates a new one
+        // under the SAME id. Bob now sees that id, but with a different source
+        // version, so a derived index keyed on the version cannot hand him
+        // Alice's old digest.
+        let bob_recreated = parse(&seen[2]);
+        let recreated = bob_recreated
+            .iter()
+            .find(|(id, _)| id == "alice-private")
+            .expect("bob owns the re-created id");
+        assert_ne!(
+            recreated.1, alice_scope[0].1,
+            "a re-created conversation must not reuse the deleted one's source version"
+        );
+        assert!(
+            parse(&seen[3]).iter().all(|(id, _)| id != "alice-private"),
+            "alice no longer sees the id bob re-created"
+        );
+    }
+
+    /// A caller who may read more conversations than fit in one header keeps a
+    /// working sidecar (no blanket 503): the scope is truncated to the newest ids,
+    /// so it can only ever NARROW what the sidecar serves.
+    #[test]
+    fn caller_resource_ids_are_bounded_by_dropping_the_oldest() {
+        let ids: Vec<String> = (0..20_000)
+            .map(|index| format!("{index:08}-0000-4000-8000-000000000000"))
+            .collect();
+        let (encoded, omitted) = encode_caller_resource_ids(
+            ids.iter().map(String::as_str),
+            MAX_CALLER_RESOURCE_IDS_BYTES,
+        );
+        assert!(encoded.len() <= MAX_CALLER_RESOURCE_IDS_BYTES);
+        assert!(reqwest::header::HeaderValue::from_str(&encoded).is_ok());
+        let kept: Vec<String> = serde_json::from_str(&encoded).unwrap();
+        assert!(omitted > 0);
+        assert_eq!(kept.len() + omitted, ids.len());
+        assert_eq!(
+            kept[..],
+            ids[..kept.len()],
+            "the newest ids are kept, in order"
+        );
+
+        let (small, none_omitted) = encode_caller_resource_ids(["a", "b"].into_iter(), 64);
+        assert_eq!((small.as_str(), none_omitted), (r#"["a","b"]"#, 0));
+        let (empty, _) = encode_caller_resource_ids(std::iter::empty(), 64);
+        assert_eq!(empty, "[]");
+    }
+
+    /// The source version binds an id to the row's immutable identity: stable for
+    /// one row, different for a row re-created under the same id by anyone else
+    /// or at another time.
+    #[test]
+    fn conversation_source_version_distinguishes_a_re_created_row() {
+        use crate::server::conversations::conversation_source_version;
+        let original = conversation_source_version("c1", 1_000, Some("alice"), Some("org"));
+        assert_eq!(original.len(), 12);
+        assert_eq!(
+            original,
+            conversation_source_version("c1", 1_000, Some("alice"), Some("org"))
+        );
+        for other in [
+            conversation_source_version("c1", 1_000, Some("bob"), Some("org")),
+            conversation_source_version("c1", 1_001, Some("alice"), Some("org")),
+            conversation_source_version("c1", 1_000, Some("alice"), Some("other-org")),
+            conversation_source_version("c1", 1_000, None, None),
+        ] {
+            assert_ne!(original, other);
+        }
+    }
+
+    #[test]
+    fn caller_resource_ids_stay_valid_header_values_for_any_id() {
+        let ids = [
+            "plain",
+            "quote\"back\\slash",
+            "café",
+            "emoji-\u{1F600}",
+            "tab\tnl\n",
+        ];
+        let (encoded, omitted) =
+            encode_caller_resource_ids(ids.into_iter(), MAX_CALLER_RESOURCE_IDS_BYTES);
+        assert_eq!(omitted, 0);
+        assert!(encoded.is_ascii());
+        assert!(reqwest::header::HeaderValue::from_str(&encoded).is_ok());
+        let decoded: Vec<String> = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, ids);
+    }
+
+    #[test]
+    fn copy_headers_strips_caller_supplied_identity_headers() {
+        let mut src = HeaderMap::new();
+        src.insert(HDR_CALLER_USER_ID, "forged-user".parse().unwrap());
+        src.insert(HDR_CALLER_ORG_ID, "forged-org".parse().unwrap());
+        src.insert(HDR_CALLER_EMAIL, "owner@example.com".parse().unwrap());
+        src.insert(HDR_CALLER_AGENT_ID, "forged-agent".parse().unwrap());
+        src.insert(HDR_CALLER_AGENT_PROOF, "forged-proof".parse().unwrap());
+        src.insert(
+            crate::sidecar::deferred_authorization::AGENT_GRANT_HEADER,
+            "forged-grant".parse().unwrap(),
+        );
+        src.insert(HDR_CALLER_RATE_SUBJECT, "peer:forged".parse().unwrap());
+        src.insert("content-type", "application/json".parse().unwrap());
+
+        let mut dst = reqwest::header::HeaderMap::new();
+        copy_headers(&src, &mut dst, &[]);
+
+        for name in [
+            HDR_CALLER_USER_ID,
+            HDR_CALLER_ORG_ID,
+            HDR_CALLER_EMAIL,
+            HDR_CALLER_AGENT_ID,
+            HDR_CALLER_AGENT_PROOF,
+            crate::sidecar::deferred_authorization::AGENT_GRANT_HEADER,
+            HDR_CALLER_RATE_SUBJECT,
+        ] {
+            assert!(
+                dst.get(name).is_none(),
+                "a caller must not forge the {name} hop header"
+            );
+        }
+        assert!(dst.get("content-type").is_some());
+    }
+
+    /// The rate subject tells clients apart without carrying their address: one
+    /// subject per IPv4 address or IPv6 /64, scoped to the plugin, keyed on the
+    /// verified user when there is one, and `unknown` when Core cannot tell.
+    #[test]
+    fn rate_subject_distinguishes_clients_and_never_carries_the_address() {
+        use std::net::IpAddr;
+        let ip = |raw: &str| Some(raw.parse::<IpAddr>().unwrap());
+        let app = "@ryu/feedback-board";
+        let a = rate_subject_for(app, None, ip("203.0.113.7"));
+        assert!(
+            a.starts_with("peer:") && a.len() == "peer:".len() + 24,
+            "{a}"
+        );
+        assert!(!a.contains("203.0.113.7"));
+        assert_eq!(a, rate_subject_for(app, None, ip("203.0.113.7")));
+        assert_ne!(a, rate_subject_for(app, None, ip("203.0.113.8")));
+        assert_ne!(a, rate_subject_for("@ryu/other", None, ip("203.0.113.7")));
+        // An IPv4-mapped IPv6 peer is the same client as its IPv4 form.
+        assert_eq!(a, rate_subject_for(app, None, ip("::ffff:203.0.113.7")));
+        // One /64 is one client: rotating the interface id does not mint subjects.
+        assert_eq!(
+            rate_subject_for(app, None, ip("2001:db8:1:2::1")),
+            rate_subject_for(app, None, ip("2001:db8:1:2:ffff::9"))
+        );
+        assert_ne!(
+            rate_subject_for(app, None, ip("2001:db8:1:2::1")),
+            rate_subject_for(app, None, ip("2001:db8:1:3::1"))
+        );
+        assert_eq!(rate_subject_for(app, None, None), "unknown");
+        let caller = crate::identity_verify::VerifiedCaller {
+            user_id: "member-a".to_owned(),
+            email: None,
+            email_verified: false,
+            org_id: None,
+            role: crate::identity_verify::OrgRole::Member,
+            teams: Vec::new(),
+        };
+        let user = rate_subject_for(app, Some(&caller), ip("203.0.113.7"));
+        assert!(user.starts_with("user:"), "{user}");
+        assert_eq!(
+            user,
+            rate_subject_for(app, Some(&caller), ip("198.51.100.1"))
+        );
+    }
+
+    /// The subject Core stamps for an anonymous request, exactly as the forward
+    /// path computes it (`rate_subject_for(.., request_client_ip(&req))`), for a
+    /// request whose socket peer is `peer` and which carries `forwarded_for`.
+    fn anonymous_subject_for_peer(peer: &str, forwarded_for: Option<&str>) -> String {
+        let peer: std::net::SocketAddr = peer.parse().unwrap();
+        let mut builder = Request::builder().uri("/api/ext/@ryu/feedback-board/x");
+        if let Some(forwarded_for) = forwarded_for {
+            builder = builder.header("x-forwarded-for", forwarded_for);
+        }
+        let mut req = builder.body(Body::empty()).unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(peer));
+        rate_subject_for("@ryu/feedback-board", None, request_client_ip(&req))
+    }
+
+    /// The round-2 gap: a reverse proxy on the same host (nginx, Caddy, a
+    /// user-run cloudflared) or the LAN that Core was not told to trust is the
+    /// socket peer of EVERY visitor. Keying a per-client bucket on it let one
+    /// visitor spend the 5/hour bound for the whole board. Such a peer is not a
+    /// distinct client, so its subject is `unknown` (the node-wide backstop), and
+    /// a forged `X-Forwarded-For` through it still cannot pick a subject.
+    #[test]
+    fn a_local_or_private_peer_is_not_a_per_client_subject() {
+        // Loopback with no forwarding tunnel: a same-host reverse proxy.
+        assert!(!crate::sidecar::forwarding_tunnel_active());
+        assert!(crate::vault::tokens::trusted_proxies().is_empty());
+        for peer in [
+            "127.0.0.1:50000",
+            "[::1]:50000",
+            "[::ffff:127.0.0.1]:50000",
+            // RFC 1918, carrier-grade NAT, link-local, IPv6 ULA and link-local.
+            "10.0.0.5:443",
+            "172.16.4.2:443",
+            "192.168.1.20:443",
+            "100.64.1.1:443",
+            "169.254.10.10:443",
+            "[::ffff:10.0.0.5]:443",
+            "[fd12:3456:789a::1]:443",
+            "[fe80::1]:443",
+        ] {
+            assert_eq!(anonymous_subject_for_peer(peer, None), "unknown", "{peer}");
+            // A visitor behind that proxy cannot pick a subject by forging the
+            // header: the peer is not a trusted proxy, so it is ignored.
+            assert_eq!(
+                anonymous_subject_for_peer(peer, Some("203.0.113.9")),
+                "unknown",
+                "{peer}"
+            );
+        }
+        // Visitors behind one untrusted local proxy therefore never share a
+        // small per-client bucket keyed on the proxy's address.
+        assert_eq!(
+            anonymous_subject_for_peer("127.0.0.1:1", None),
+            anonymous_subject_for_peer("127.0.0.1:2", None)
+        );
+
+        // A public peer is still its own client, and a forged header from it is
+        // ignored rather than letting it rotate subjects.
+        let public = anonymous_subject_for_peer("198.51.100.20:443", None);
+        assert!(public.starts_with("peer:"), "{public}");
+        assert_eq!(
+            public,
+            anonymous_subject_for_peer("198.51.100.20:443", Some("203.0.113.9"))
+        );
+        assert!(anonymous_subject_for_peer("[2001:db8:5::1]:443", None).starts_with("peer:"));
+        // Behind a proxy Core does trust, the forwarded client address is the
+        // subject: a public client is per-client, a private one is `unknown`.
+        let trusted = [crate::vault::tokens::Cidr::parse("127.0.0.1/32").unwrap()];
+        let via_trusted = |forwarded: &str| {
+            rate_subject_for(
+                "@ryu/feedback-board",
+                None,
+                crate::vault::tokens::resolve_client_ip(
+                    Some("127.0.0.1".parse().unwrap()),
+                    Some(forwarded),
+                    &trusted,
+                    false,
+                ),
+            )
+        };
+        assert!(via_trusted("203.0.113.9").starts_with("peer:"));
+        assert_ne!(via_trusted("203.0.113.9"), via_trusted("203.0.113.10"));
+        assert_eq!(via_trusted("10.1.2.3"), "unknown");
+        // Boundary addresses just outside the local/shared ranges stay public.
+        for peer in [
+            "172.32.0.1:443",
+            "100.128.0.1:443",
+            "11.0.0.1:443",
+            "[fe00::1]:443",
+        ] {
+            assert!(
+                anonymous_subject_for_peer(peer, None).starts_with("peer:"),
+                "{peer}"
+            );
+        }
+    }
+
+    /// With the forwarding tunnel active, a loopback peer is a remote client of
+    /// unknown address: also `unknown`.
+    #[tokio::test]
+    async fn a_loopback_peer_behind_the_tunnel_is_unknown() {
+        let subject = crate::sidecar::FORCE_FORWARDING_FOR_TEST
+            .scope(true, async {
+                anonymous_subject_for_peer("127.0.0.1:50000", None)
+            })
+            .await;
+        assert_eq!(subject, "unknown");
+    }
+
+    /// Only Core's rate subject crosses the hop: a forged copy is replaced when
+    /// the sidecar opted in and stripped when it did not.
+    #[tokio::test]
+    async fn forward_stamps_cores_rate_subject_over_a_forged_copy() {
+        use axum::routing::get;
+        use axum::Router;
+        use std::sync::Arc;
+
+        let seen = Arc::new(tokio::sync::Mutex::new(Vec::<Option<String>>::new()));
+        let captured = seen.clone();
+        let app = Router::new().route(
+            "/who",
+            get(move |headers: HeaderMap| {
+                let captured = captured.clone();
+                async move {
+                    captured.lock().await.push(
+                        headers
+                            .get(HDR_CALLER_RATE_SUBJECT)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned),
+                    );
+                    "ok"
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let mut forged = HeaderMap::new();
+        forged.insert(HDR_CALLER_RATE_SUBJECT, "peer:forged".parse().unwrap());
+        for subject in [Some("peer:0123456789abcdef01234567"), None] {
+            let response = forward_to_sidecar(ForwardArgs {
+                target: ForwardTarget::for_test(port),
+                upstream_path: "/who",
+                query: "",
+                method: reqwest::Method::GET,
+                src_headers: &forged,
+                body: Vec::new(),
+                hop_plugin_id: "com.test.rate-subject",
+                forward_payment_authorization: false,
+                forward_cookie_names: &[],
+                forward_caller_email: false,
+                caller: None,
+                caller_resource_ids: None,
+                caller_rate_subject: subject,
+                caller_agent_id: None,
+                caller_agent_restricted: false,
+                event_delivery: None,
+            })
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        assert_eq!(
+            *seen.lock().await,
+            vec![Some("peer:0123456789abcdef01234567".to_owned()), None]
+        );
+        server.abort();
+    }
+
+    /// The rate subject is an explicit per-app opt-in, declared only by the public
+    /// feedback board to bound anonymous vote identities per client.
+    #[test]
+    fn only_the_feedback_board_opts_into_the_rate_subject() {
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        let opted_in: Vec<&str> = manifests
+            .iter()
+            .filter(|manifest| {
+                manifest
+                    .sidecars
+                    .iter()
+                    .filter_map(|sidecar| sidecar.http.as_ref())
+                    .any(|http| http.forward_caller_rate_subject)
+            })
+            .map(|manifest| manifest.id.as_str())
+            .collect();
+        assert_eq!(opted_in, vec!["@ryu/feedback-board"]);
+    }
+
+    /// The hop carries the verified email from the signed identity token, never a
+    /// caller-chosen copy, and omits the header when the token has no email or
+    /// does not mark it `email_verified` (a forged copy is still stripped then).
+    #[tokio::test]
+    async fn forward_stamps_the_verified_caller_email_over_a_forged_copy() {
+        use axum::routing::get;
+        use axum::Router;
+        use std::sync::Arc;
+
+        let seen = Arc::new(tokio::sync::Mutex::new(Vec::<Option<String>>::new()));
+        let captured = seen.clone();
+        let app = Router::new().route(
+            "/who",
+            get(move |headers: HeaderMap| {
+                let captured = captured.clone();
+                async move {
+                    captured.lock().await.push(
+                        headers
+                            .get(HDR_CALLER_EMAIL)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned),
+                    );
+                    "ok"
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let mut forged = HeaderMap::new();
+        forged.insert(HDR_CALLER_EMAIL, "victim@example.com".parse().unwrap());
+        let caller =
+            |email: Option<&str>, email_verified: bool| crate::identity_verify::VerifiedCaller {
+                user_id: "member-a".to_owned(),
+                email: email.map(str::to_owned),
+                email_verified,
+                org_id: Some("org-1".to_owned()),
+                role: crate::identity_verify::OrgRole::Member,
+                teams: Vec::new(),
+            };
+        let verified = caller(Some("member@example.com"), true);
+        // A valid session whose identity provider never proved the mailbox: the
+        // address must not satisfy a sidecar's email-addressed grant.
+        let unverified = caller(Some("unproven@example.com"), false);
+        let without_email = caller(None, true);
+        // (caller, manifest opted in): only an opted-in sidecar receives the
+        // verified email, and the forged copy never crosses any hop.
+        for (current, opted_in) in [
+            (Some(&verified), true),
+            (Some(&verified), false),
+            (Some(&unverified), true),
+            (Some(&without_email), true),
+            (None, true),
+        ] {
+            let response = forward_to_sidecar(ForwardArgs {
+                target: ForwardTarget::for_test(port),
+                upstream_path: "/who",
+                query: "",
+                method: reqwest::Method::GET,
+                src_headers: &forged,
+                body: Vec::new(),
+                hop_plugin_id: "com.test.caller-email",
+                forward_payment_authorization: false,
+                forward_cookie_names: &[],
+                forward_caller_email: opted_in,
+                caller: current,
+                caller_resource_ids: None,
+                caller_rate_subject: None,
+                caller_agent_id: None,
+                caller_agent_restricted: false,
+                event_delivery: None,
+            })
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        assert_eq!(
+            *seen.lock().await,
+            vec![
+                Some("member@example.com".to_owned()),
+                None,
+                None,
+                None,
+                None
+            ],
+            "only an opted-in sidecar receives Core's verified email"
+        );
+        server.abort();
+    }
+
+    fn agent_lane_request(uri: &str, headers: &[(&str, &str)]) -> Request {
+        let mut builder = axum::http::Request::builder().method("POST").uri(uri);
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        builder.body(axum::body::Body::empty()).unwrap()
+    }
+
+    /// Any app learns its calling agent from a header signed over the exact
+    /// request. A named agent without a valid proof is refused, never
+    /// downgraded to an agent-less call.
+    #[test]
+    fn non_browser_agent_lane_requires_a_proof_for_the_exact_request() {
+        let uri = "/api/ext/@ryu/social/posts?workspace_id=w1";
+        let path_and_query = "/api/ext/@ryu/social/posts?workspace_id=w1";
+        let proof = sign_agent_lane("agent-1", "POST", path_and_query)
+            .expect("an isolated test node has a token");
+
+        let signed = agent_lane_request(
+            uri,
+            &[
+                (HDR_CALLER_AGENT_ID, "agent-1"),
+                (HDR_CALLER_AGENT_PROOF, &proof),
+            ],
+        );
+        assert_eq!(
+            verified_agent_lane(&signed, "@ryu/social").ok().flatten(),
+            Some("agent-1".to_owned())
+        );
+
+        let anonymous = agent_lane_request(uri, &[]);
+        assert_eq!(
+            verified_agent_lane(&anonymous, "@ryu/social").ok(),
+            Some(None)
+        );
+
+        for headers in [
+            vec![(HDR_CALLER_AGENT_ID, "agent-1")],
+            vec![
+                (HDR_CALLER_AGENT_ID, "agent-2"),
+                (HDR_CALLER_AGENT_PROOF, proof.as_str()),
+            ],
+            vec![
+                (HDR_CALLER_AGENT_ID, "agent-1"),
+                (HDR_CALLER_AGENT_PROOF, "00"),
+            ],
+        ] {
+            let response = verified_agent_lane(&agent_lane_request(uri, &headers), "@ryu/social")
+                .expect_err("a bad agent lane is refused");
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{headers:?}");
+        }
+        // The proof covers the query, so it cannot be moved to another request.
+        let moved = agent_lane_request(
+            "/api/ext/@ryu/social/posts?workspace_id=w2",
+            &[
+                (HDR_CALLER_AGENT_ID, "agent-1"),
+                (HDR_CALLER_AGENT_PROOF, &proof),
+            ],
+        );
+        assert!(verified_agent_lane(&moved, "@ryu/social").is_err());
+        let twice = agent_lane_request(
+            uri,
+            &[
+                (HDR_CALLER_AGENT_ID, "agent-1"),
+                (HDR_CALLER_AGENT_ID, "agent-1"),
+                (HDR_CALLER_AGENT_PROOF, &proof),
+            ],
+        );
+        assert_eq!(
+            verified_agent_lane(&twice, "@ryu/social")
+                .expect_err("a repeated agent header is refused")
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        // The Browser keeps its query lane: a header alone names no lane there.
+        assert_eq!(
+            verified_agent_lane(
+                &agent_lane_request(
+                    "/api/ext/@ryu/browser/sessions",
+                    &[(HDR_CALLER_AGENT_ID, "agent-1")]
+                ),
+                "@ryu/browser"
+            )
+            .ok(),
+            Some(None)
+        );
+    }
+
+    /// A verified calling agent reaches the app with a Core-signed grant bound
+    /// to that app, which the app hands back on `providers.call`.
+    #[tokio::test]
+    async fn forward_stamps_an_agent_grant_bound_to_the_hop_plugin() {
+        use axum::routing::get;
+        use axum::Router;
+        use std::sync::Arc;
+
+        let seen = Arc::new(tokio::sync::Mutex::new(Vec::<(
+            Option<String>,
+            Option<String>,
+        )>::new()));
+        let captured = seen.clone();
+        let app = Router::new().route(
+            "/who",
+            get(move |headers: HeaderMap| {
+                let captured = captured.clone();
+                async move {
+                    let read = |name: &str| {
+                        headers
+                            .get(name)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned)
+                    };
+                    captured.lock().await.push((
+                        read(HDR_CALLER_AGENT_ID),
+                        read(crate::sidecar::deferred_authorization::AGENT_GRANT_HEADER),
+                    ));
+                    "ok"
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let mut forged = HeaderMap::new();
+        forged.insert(
+            crate::sidecar::deferred_authorization::AGENT_GRANT_HEADER,
+            "forged-grant".parse().unwrap(),
+        );
+        for agent in [Some("agent-1"), None] {
+            let response = forward_to_sidecar(ForwardArgs {
+                target: ForwardTarget::for_test(port),
+                upstream_path: "/who",
+                query: "",
+                method: reqwest::Method::GET,
+                src_headers: &forged,
+                body: Vec::new(),
+                hop_plugin_id: "@ryu/social",
+                forward_payment_authorization: false,
+                forward_cookie_names: &[],
+                forward_caller_email: false,
+                caller: None,
+                caller_resource_ids: None,
+                caller_rate_subject: None,
+                caller_agent_id: agent,
+                caller_agent_restricted: agent.is_some(),
+                event_delivery: None,
+            })
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+        server.abort();
+        let seen = seen.lock().await;
+        let (agent, grant) = &seen[0];
+        assert_eq!(agent.as_deref(), Some("agent-1"));
+        let grant = grant.as_deref().expect("a calling agent gets a grant");
+        assert_eq!(
+            crate::sidecar::deferred_authorization::verify_agent_grant(grant, "@ryu/social"),
+            Ok("agent-1".to_owned())
+        );
+        assert!(
+            crate::sidecar::deferred_authorization::verify_agent_grant(grant, "@ryu/ugc").is_err()
+        );
+        assert_eq!(seen[1], (None, None), "no agent, no grant, no forged copy");
+    }
+
+    /// While Core forwards a restricted agent's request, the app is marked as
+    /// serving an agent, so its grant-less `providers.call`s are refused. The
+    /// mark covers the whole response body and ends with it; a request with no
+    /// agent, or from an unrestricted agent, sets none, so the app's own work
+    /// (a user's widget refresh, a scheduled job) is never held up by it.
+    #[tokio::test]
+    async fn forward_marks_the_app_as_serving_an_agent_until_the_body_ends() {
+        use crate::sidecar::deferred_authorization::has_active_agent_request;
+        use axum::routing::get;
+        use axum::Router;
+        use std::sync::Arc;
+
+        // Not an app constant: a test-only id no other test forwards to.
+        let plugin: &'static str = "test.agent-context-forward";
+        let seen = Arc::new(tokio::sync::Mutex::new(Vec::<bool>::new()));
+        let captured = seen.clone();
+        let app = Router::new().route(
+            "/work",
+            get(move || {
+                let captured = captured.clone();
+                async move {
+                    captured.lock().await.push(has_active_agent_request(plugin));
+                    "done"
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        for (agent, restricted) in [
+            (Some("agent-1"), true),
+            (Some("unrestricted-agent"), false),
+            (None, false),
+        ] {
+            let response = forward_to_sidecar(ForwardArgs {
+                target: ForwardTarget::for_test(port),
+                upstream_path: "/work",
+                query: "",
+                method: reqwest::Method::GET,
+                src_headers: &HeaderMap::new(),
+                body: Vec::new(),
+                hop_plugin_id: plugin,
+                forward_payment_authorization: false,
+                forward_cookie_names: &[],
+                forward_caller_email: false,
+                caller: None,
+                caller_resource_ids: None,
+                caller_rate_subject: None,
+                caller_agent_id: agent,
+                caller_agent_restricted: restricted,
+                event_delivery: None,
+            })
+            .await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                has_active_agent_request(plugin),
+                restricted,
+                "the mark lasts while the body is still unread"
+            );
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(&body[..], b"done");
+            assert!(
+                !has_active_agent_request(plugin),
+                "the mark ends with the body"
+            );
+        }
+        server.abort();
+        assert_eq!(*seen.lock().await, vec![true, false, false]);
+    }
+
+    /// The caller email is an explicit per-app opt-in. Sites declares it to match
+    /// named editors and invited viewers; every other compiled app must not, so a
+    /// new opt-in is a reviewed manifest change rather than a default.
+    #[test]
+    fn only_the_sites_manifest_opts_into_the_caller_email() {
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        let opted_in: Vec<&str> = manifests
+            .iter()
+            .filter(|manifest| {
+                manifest
+                    .sidecars
+                    .iter()
+                    .filter_map(|sidecar| sidecar.http.as_ref())
+                    .any(|http| http.forward_caller_email)
+            })
+            .map(|manifest| manifest.id.as_str())
+            .collect();
+        assert_eq!(opted_in, vec!["@ryu/sites"]);
+    }
+
+    /// The Sites database console actions are four-segment routes that the
+    /// generic `/projects/:id/:action` route cannot reach. Pin that Core's own
+    /// matcher, fed the shipped Sites manifest, admits them and nothing nearby.
+    #[test]
+    fn sites_manifest_declares_its_database_and_visitor_data_routes() {
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        let sites = manifests
+            .iter()
+            .find(|manifest| manifest.id == "@ryu/sites")
+            .expect("the Sites manifest is compiled into the catalog");
+        for (path, method) in [
+            ("/projects/site-1/database/connect", "POST"),
+            ("/projects/site-1/database/query", "POST"),
+            ("/projects/site-1/database", "GET"),
+            ("/projects/site-1/visitors", "GET"),
+            ("/projects/site-1/visitors/dmlzaXRvci1h/data", "DELETE"),
+        ] {
+            let (_, _, route) = resolve_route(sites, path, method)
+                .unwrap_or_else(|| panic!("{method} {path} must resolve"));
+            assert_eq!(route.permission.as_deref(), Some("sites.manage"), "{path}");
+        }
+        for (path, method) in [
+            ("/projects/site-1/database/drop", "POST"),
+            ("/projects/site-1/database/query", "GET"),
+            ("/projects/site-1/visitors/dmlzaXRvci1h/data", "GET"),
+            ("/projects/site-1/visitors/dmlzaXRvci1h/files", "DELETE"),
+        ] {
+            assert!(
+                resolve_route(sites, path, method).is_none(),
+                "{method} {path} must stay undeclared"
+            );
+        }
     }
 
     #[test]
@@ -3741,6 +7480,15 @@ mod tests {
         assert!(kernel_capability("rag").is_none());
         assert!(kernel_capability("ghost.record").is_none());
         assert!(kernel_capability("").is_none());
+        // User-aware operations are app host-bridge methods only: a sidecar
+        // carries no signed-in user to check or record as the reviewer.
+        for user_aware in [
+            "webhooks.secretGet",
+            "webhooks.secretSet",
+            "safeActions.request",
+        ] {
+            assert!(kernel_capability(user_aware).is_none(), "{user_aware}");
+        }
     }
 
     /// Pin the exact contents of the kernel-capability table.
@@ -3775,8 +7523,15 @@ mod tests {
                 "billing.recordToolCharge",
                 "providers.status",
                 "providers.call",
+                "providers.authorize",
+                "tools.call",
+                "plugins.installBundle",
                 "spaces.fileNotes",
                 "chat.startTurn",
+                "threads.ensureMainThread",
+                "threads.placeInProject",
+                "scopeDefaults.set",
+                "scopeGuidance.set",
                 "node.readings",
                 "ghost.replay",
                 "ghost.recordStart",
@@ -3784,10 +7539,43 @@ mod tests {
                 "ghost.recordStop",
                 "events.emit",
                 "realtime.publish",
+                "webhooks.list",
+                "webhooks.ingressStatus",
+                "warmup.detect",
+                "warmup.list",
+                "warmup.apply",
+                "warmup.runNow",
+                "approvals.request",
+                "runs.rerunAgent",
+                "workflows.rerun",
+                "vault.credentialFill",
+                "vault.totpEnroll",
             ],
             "KERNEL_CAPABILITIES changed — add the matching arm to \
              `dispatch_kernel_capability` (a missing arm 501s) and update this list"
         );
+    }
+
+    /// The rows whose handler ALSO pins its calling app keep exactly the grant they
+    /// were reviewed with. On these rows the grant is necessary but not sufficient
+    /// (or absent), and the app pin is the remaining gate, so changing the grant must
+    /// be a deliberate edit made next to the pin rationale (`server::app_mcp_call`,
+    /// `server::app_notify`, `server::app_file_notes`), never a drive-by cleanup.
+    #[test]
+    fn kernel_capability_grants_are_pinned() {
+        for (cap, grant) in [
+            ("mcp.callTool", Some("tools.invoke")),
+            ("notify.fanout", None),
+            ("spaces.fileNotes", Some("spaces:docs")),
+        ] {
+            let row = kernel_capability(cap)
+                .unwrap_or_else(|| panic!("'{cap}' is not in KERNEL_CAPABILITIES"));
+            assert_eq!(
+                row.grant, grant,
+                "'{cap}' changed its grant; its handler pins the calling app because no \
+                 existing grant covers it (see docs/app-boundary-extraction-plan.md)"
+            );
+        }
     }
 
     /// The naming invariant that IS the point of this table: a kernel capability is
@@ -3840,7 +7628,11 @@ mod tests {
     /// grant without the manifests following).
     #[test]
     fn callers_declare_the_grant_their_kernel_capability_requires() {
-        let cases: [(&str, &str, &crate::plugin_manifest::PluginManifest); 6] = [
+        let healing = fixture(include_str!("../../../../generated/ryu-runtime/apps-store/healing/manifest.json"));
+        let cases: [(&str, &str, &crate::plugin_manifest::PluginManifest); 9] = [
+            ("approvals.request", "healing", &healing),
+            ("runs.rerunAgent", "healing", &healing),
+            ("workflows.rerun", "healing", &healing),
             (
                 "mcp.callTool",
                 "monitors",
@@ -3889,7 +7681,7 @@ mod tests {
             // ...and the app must be able to HOLD it: the Gateway only approves a
             // grant the manifest also lists in `permission_grants`.
             assert!(
-                manifest.permission_grants.iter().any(|g| g == grant),
+                manifest.declares_permission_grant(grant),
                 "'{app}' declares '{grant}' on its sidecar but not in permission_grants, \
                  so the Gateway can never approve it"
             );

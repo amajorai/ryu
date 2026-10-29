@@ -4,12 +4,143 @@
 // `useSystemStatus` hook that drives the shell status indicator (Core up/down,
 // active engine, running sidecars).
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
-import {
-	type MeshStatus,
-	normalizeMeshStatus,
-	type RawMeshStatus,
-} from "./mesh.ts";
+import { type MeshStatus, normalizeMeshStatus } from "./mesh.ts";
+import { meshStatusResponseSchema as systemMeshSchema } from "./mesh-wire.ts";
+
+// Complete current Rust publisher fields; optional known members preserve the
+// documented normalization of older omitted probes and SystemInfo's {} error reply.
+function systemResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+const systemNumber = z.union([
+	z.number(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+const systemText = z.string();
+const systemOptionalText = systemText.nullable().optional();
+const systemOptionalNumber = systemNumber.nullable().optional();
+const systemSidecarSchema = systemResponse(
+	z.object({
+		name: systemText,
+		running: z.boolean(),
+		lazy: z.boolean().optional(),
+		pid: systemNumber.optional(),
+		memory_bytes: systemNumber.optional(),
+		cpu_percent: systemNumber.nullable().optional(),
+		failure_reason: systemText.optional(),
+		sandbox: systemResponse(
+			z.object({
+				mode: z.enum(["off", "audit", "enforce"]),
+				backend: systemText,
+				enforced: z.boolean(),
+				fs_restricted: z.boolean(),
+				detail: systemText.optional(),
+			})
+		).optional(),
+	})
+);
+const systemFsSchema = systemResponse(
+	z.object({
+		read: z.array(systemText).optional(),
+		write: z.array(systemText).optional(),
+	})
+);
+const systemPermissionSetSchema = systemResponse(
+	z.object({
+		fs: systemFsSchema.optional(),
+		child_process: z.boolean().optional(),
+		run: z.array(systemText).optional(),
+		network: z.union([z.boolean(), z.array(systemText)]).optional(),
+		tool: z.array(systemText).optional(),
+	})
+);
+const systemNativePermissionsSchema = systemResponse(
+	z.object({
+		name: systemText,
+		plugin_id: systemText,
+		declared: systemPermissionSetSchema.nullable(),
+		enforced: z.boolean(),
+	})
+);
+const systemMissingBinarySchema = systemResponse(
+	z.object({
+		name: systemText,
+		plugin_id: systemText,
+		command: systemText,
+		expected_asset: systemText,
+		reason: systemText,
+	})
+);
+export const sidecarStatusResponseSchema = systemResponse(
+	z.object({
+		sidecars: z.array(systemSidecarSchema).optional(),
+		native_permissions: z.array(systemNativePermissionsSchema).optional(),
+		node_runtime: systemOptionalText,
+		missing_binaries: z.array(systemMissingBinarySchema).optional(),
+	})
+);
+const systemEngineSchema = systemResponse(
+	z.object({
+		active: systemOptionalText,
+		running: z.boolean().optional(),
+		available: z.array(systemText).optional(),
+		llamacpp_variant: systemOptionalText,
+	})
+);
+export const systemStatusResponseSchema = systemResponse(
+	z.object({
+		core: systemResponse(z.object({ reachable: z.boolean() })).optional(),
+		engine: systemEngineSchema.optional(),
+		sidecars: z.array(systemSidecarSchema).optional(),
+		gateway: systemResponse(
+			z.object({ reachable: z.boolean().optional() })
+		).optional(),
+		mesh: systemMeshSchema.nullable().optional(),
+	})
+);
+export const systemHealthResponseSchema = systemResponse(
+	z.object({
+		status: systemText.optional(),
+		version: systemText.optional(),
+		gatewayVersion: systemOptionalText,
+		requiredRuntimeReady: z.boolean().optional(),
+		updateRuntimeNonce: systemOptionalText,
+		channel: systemText.optional(),
+		capabilities: z.array(systemText).optional(),
+	})
+);
+export const systemInfoResponseSchema = systemResponse(
+	z.object({
+		hostname: systemOptionalText,
+		os: systemText.optional(),
+		cpu_name: systemOptionalText,
+		cpu_cores: systemOptionalNumber,
+		physical_cores: systemOptionalNumber,
+		total_ram_bytes: systemOptionalNumber,
+		used_ram_bytes: systemOptionalNumber,
+		ram_human: systemText.optional(),
+		used_ram_human: systemText.optional(),
+		total_disk_bytes: systemOptionalNumber,
+		used_disk_bytes: systemOptionalNumber,
+		disk_human: systemText.optional(),
+		used_disk_human: systemText.optional(),
+		vram_bytes: systemOptionalNumber,
+		vram_human: systemText.optional(),
+		gpu_name: systemOptionalText,
+		unified_memory: z.boolean().optional(),
+		managed: z.boolean().optional(),
+		org_id: systemOptionalText,
+		org_name: systemOptionalText,
+	})
+);
 
 export interface HealthResult {
 	status: string;
@@ -32,13 +163,6 @@ export interface SystemStatusSnapshot {
 	sidecars: Record<string, boolean>;
 }
 
-interface SystemStatusWire {
-	engine?: { active?: string | null; running?: boolean };
-	gateway?: { reachable?: boolean };
-	mesh?: RawMeshStatus | null;
-	sidecars?: { name: string; running: boolean }[];
-}
-
 /**
  * Fetch the merged system status in one call. Throws if Core is unreachable so
  * the caller maps the failure to "Core down" (clearing the derived slices).
@@ -47,13 +171,15 @@ export async function fetchSystemStatus(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<SystemStatusSnapshot> {
-	const w = await request<SystemStatusWire>(target, "/api/system/status", {
-		signal,
-	});
-	const sidecars: Record<string, boolean> = {};
-	for (const s of w.sidecars ?? []) {
-		sidecars[s.name] = s.running;
-	}
+	const w = await request(
+		target,
+		"/api/system/status",
+		{
+			signal,
+		},
+		systemStatusResponseSchema
+	);
+	const sidecars = sidecarRunningMap(w.sidecars);
 	// Mesh disabled (enabled:false) or absent → null (neutral), matching the
 	// per-probe semantics the status spine relied on.
 	const meshRaw = w.mesh ?? null;
@@ -70,7 +196,12 @@ export async function fetchSystemStatus(
 
 /** Probe Core liveness via `/api/health`. Throws if Core is unreachable. */
 export async function fetchHealth(target: ApiTarget): Promise<HealthResult> {
-	const json = await request<{ status?: string }>(target, "/api/health");
+	const json = await request(
+		target,
+		"/api/health",
+		{},
+		systemHealthResponseSchema
+	);
 	return { status: json.status ?? "ok" };
 }
 
@@ -105,37 +236,27 @@ export interface SystemInfo {
 	vramHuman: string;
 }
 
-interface SystemInfoWire {
-	cpu_cores?: number | null;
-	cpu_name?: string | null;
-	disk_human?: string;
-	gpu_name?: string | null;
-	hostname?: string | null;
-	managed?: boolean;
-	org_id?: string | null;
-	org_name?: string | null;
-	os?: string;
-	physical_cores?: number | null;
-	ram_human?: string;
-	total_disk_bytes?: number | null;
-	total_ram_bytes?: number | null;
-	unified_memory?: boolean;
-	used_disk_bytes?: number | null;
-	used_disk_human?: string;
-	used_ram_bytes?: number | null;
-	used_ram_human?: string;
-	vram_bytes?: number | null;
-	vram_human?: string;
-}
-
 /** Fetch the node's live CPU/RAM/disk/GPU snapshot. */
 export async function fetchSystemInfo(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<SystemInfo> {
-	const w = await request<SystemInfoWire>(target, "/api/system/info", {
-		signal,
-	});
+	return systemInfoFromWire(
+		await request(
+			target,
+			"/api/system/info",
+			{
+				signal,
+			},
+			systemInfoResponseSchema
+		)
+	);
+}
+
+/** Normalize Core's snake_case `SystemInfo` reply (absent fields → defaults). */
+export function systemInfoFromWire(
+	w: z.output<typeof systemInfoResponseSchema>
+): SystemInfo {
 	return {
 		hostname: w.hostname ?? null,
 		os: w.os ?? "",
@@ -168,11 +289,21 @@ export async function fetchSidecarStatus(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<Record<string, boolean>> {
-	const json = await request<{
-		sidecars?: { name: string; running: boolean }[];
-	}>(target, "/api/sidecar/status", { signal });
+	const json = await request(
+		target,
+		"/api/sidecar/status",
+		{ signal },
+		sidecarStatusResponseSchema
+	);
+	return sidecarRunningMap(json.sidecars);
+}
+
+/** Normalize a sidecar list to a name->running map. */
+export function sidecarRunningMap(
+	sidecars: readonly { name: string; running: boolean }[] | undefined
+): Record<string, boolean> {
 	const map: Record<string, boolean> = {};
-	for (const s of json.sidecars ?? []) {
+	for (const s of sidecars ?? []) {
 		map[s.name] = s.running;
 	}
 	return map;

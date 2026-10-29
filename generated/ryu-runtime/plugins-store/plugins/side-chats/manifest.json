@@ -58,6 +58,16 @@
           "intent": "explain"
         },
         "order": 110
+      },
+      {
+        "id": "side-chats.proofread-selection",
+        "label": "Fix grammar",
+        "kind": "button",
+        "args": {
+          "dispatch": "side-chat.selection",
+          "intent": "proofread"
+        },
+        "order": 120
       }
     ],
     "slash_commands": [

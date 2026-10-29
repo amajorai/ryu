@@ -1,3 +1,5 @@
+import type { DynamicToolUIPart } from "ai";
+
 /**
  * Tool state cache for detecting AI SDK in-place mutations.
  * AI SDK mutates objects in-place during streaming, so we must
@@ -13,11 +15,17 @@ interface CachedToolState {
 const toolStateCache = new Map<string, CachedToolState>();
 
 interface ToolPartLike {
-	input?: unknown;
-	output?: { success?: boolean } | null;
+	input?: DynamicToolUIPart["input"];
+	output?: DynamicToolUIPart["output"];
 	state?: string;
 	toolCallId?: string;
 	type?: string;
+}
+
+/** An erased view of the native optional success lookup, not an object brand
+ * or a full tool result. The SDK output and observed slot remain opaque. */
+interface NativeToolOutputLookup {
+	readonly success?: DynamicToolUIPart["output"];
 }
 
 function getToolStateSnapshot(part: ToolPartLike): CachedToolState {
@@ -103,7 +111,12 @@ export function getToolStatus(part: ToolPartLike, chatStatus?: string) {
 		part.state !== "output-available" && part.state !== "output-error";
 	const isError =
 		part.state === "output-error" ||
-		(part.state === "output-available" && part.output?.success === false);
+		(part.state === "output-available" &&
+			// SAFETY: this raw SDK output view permits only the existing native optional
+			// property read. It asserts no object brand or field value, performs no
+			// boxing/inspection and preserves primitive/Proxy/getter receivers/errors.
+			(part.output as NativeToolOutputLookup | null | undefined)?.success ===
+				false);
 	const isSuccess = part.state === "output-available" && !isError;
 	const isPending = basePending && chatStatus === "streaming";
 	const isInterrupted =

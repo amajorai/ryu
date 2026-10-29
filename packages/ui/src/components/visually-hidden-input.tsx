@@ -1,14 +1,8 @@
 "use client";
 
-import {
-	type CSSProperties,
-	type InputHTMLAttributes,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { type InputHTMLAttributes, useEffect, useMemo, useRef } from "react";
+
+import { isNativeObjectLike } from "../lib/native-primitive-observation.ts";
 
 type InputValue = string[] | string;
 
@@ -23,19 +17,16 @@ interface VisuallyHiddenInputProps<T = InputValue>
 	value?: T;
 }
 
-function VisuallyHiddenInput<T = InputValue>(
-	props: VisuallyHiddenInputProps<T>
-) {
-	const {
-		control,
-		value,
-		checked,
-		bubbles = true,
-		type = "hidden",
-		style,
-		...inputProps
-	} = props;
-
+function VisuallyHiddenInput<T = InputValue>({
+	control: _control,
+	value,
+	checked,
+	bubbles = true,
+	type = "hidden",
+	style,
+	className,
+	...inputProps
+}: VisuallyHiddenInputProps<T>) {
 	const isCheckInput = useMemo(
 		() => type === "checkbox" || type === "radio" || type === "switch",
 		[type]
@@ -59,60 +50,6 @@ function VisuallyHiddenInput<T = InputValue>(
 		return prevValueRef.current.previous;
 	}, [isCheckInput, value, checked]);
 
-	const [controlSize, setControlSize] = useState<{
-		width?: number;
-		height?: number;
-	}>({});
-
-	useLayoutEffect(() => {
-		if (!control) {
-			setControlSize({});
-			return;
-		}
-
-		setControlSize({
-			width: control.offsetWidth,
-			height: control.offsetHeight,
-		});
-
-		if (typeof window === "undefined") {
-			return;
-		}
-
-		const resizeObserver = new ResizeObserver((entries) => {
-			if (!(Array.isArray(entries) && entries.length)) {
-				return;
-			}
-
-			const entry = entries[0];
-			if (!entry) {
-				return;
-			}
-
-			let width: number;
-			let height: number;
-
-			if ("borderBoxSize" in entry) {
-				const borderSizeEntry = entry.borderBoxSize;
-				const borderSize = Array.isArray(borderSizeEntry)
-					? borderSizeEntry[0]
-					: borderSizeEntry;
-				width = borderSize.inlineSize;
-				height = borderSize.blockSize;
-			} else {
-				width = control.offsetWidth;
-				height = control.offsetHeight;
-			}
-
-			setControlSize({ width, height });
-		});
-
-		resizeObserver.observe(control, { box: "border-box" });
-		return () => {
-			resizeObserver.disconnect();
-		};
-	}, [control]);
-
 	useEffect(() => {
 		const input = inputRef.current;
 		if (!input) {
@@ -126,7 +63,7 @@ function VisuallyHiddenInput<T = InputValue>(
 
 		const serializedCurrentValue = isCheckInput
 			? checked
-			: typeof value === "object" && value !== null
+			: isNativeObjectLike(value)
 				? JSON.stringify(value)
 				: value;
 
@@ -141,33 +78,15 @@ function VisuallyHiddenInput<T = InputValue>(
 		}
 	}, [prevValue, value, checked, bubbles, isCheckInput]);
 
-	const composedStyle = useMemo<CSSProperties>(() => {
-		return {
-			...style,
-			...(controlSize.width !== undefined && controlSize.height !== undefined
-				? controlSize
-				: {}),
-			border: 0,
-			clip: "rect(0 0 0 0)",
-			clipPath: "inset(50%)",
-			height: "1px",
-			margin: "-1px",
-			overflow: "hidden",
-			padding: 0,
-			position: "absolute",
-			whiteSpace: "nowrap",
-			width: "1px",
-		};
-	}, [style, controlSize]);
-
 	return (
 		<input
 			type={type}
 			{...inputProps}
 			aria-hidden={isCheckInput}
+			className={`sr-only! [clip-path:inset(50%)]! ${className ?? ""}`}
 			defaultChecked={isCheckInput ? checked : undefined}
 			ref={inputRef}
-			style={composedStyle}
+			style={style}
 			tabIndex={-1}
 		/>
 	);

@@ -7,10 +7,10 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/dashboards",
   "name": "Dashboards",
-  "version": "0.1.14",
+  "version": "0.1.16",
   "stability": "experimental",
   "category": "Productivity",
-  "description": "Dashboards: composable widget boards that assemble live views over monitors, meetings, quests, and other Core surfaces via soft HTTP loopback. Declares the out-of-process ryu-dashboards sidecar (kind:local) that owns the store + refresh loop + /api/dashboards/* surface, served to the desktop through the generic ext-proxy public_mount. Started eagerly (not lazy) so the kernel hardware device-dashboard renderer + nudge loop can reach it at boot / on a device poll before any desktop has opened Home. The dashboard_builder MCP runnable + the hardware render seam reach it over loopback via dashboards_client.",
+  "description": "Dashboards: composable widget boards that assemble live views from Composio actions, guarded HTTPS endpoints, and inline data. Declares the out-of-process ryu-dashboards sidecar (kind:local) that owns the store + refresh loop + /api/dashboards/* surface, served to the desktop through the generic ext-proxy public_mount. Started eagerly (not lazy) so the kernel hardware device-dashboard renderer + nudge loop can reach it at boot / on a device poll before any desktop has opened Home. The dashboard_builder MCP runnable and the hardware render seam reach it only through the dashboards.* capabilities it provides.",
   "tagline": "Live widget boards over your node",
   "keywords": ["dashboards", "widgets", "monitoring", "home"],
   "icon": "dashboard-square-01",
@@ -39,7 +39,7 @@
         "port_env": "RYU_DASHBOARDS_PORT"
       },
       "host_api": {
-        "grants": ["tools.invoke"]
+        "grants": ["tools.invoke", "crypto:seal"]
       },
       "port": 7997,
       "health_path": "/api/dashboards/catalog",
@@ -95,9 +95,175 @@
             "path": "/:id/widgets/:wid/refresh",
             "method": "POST",
             "permission": "dashboards.edit"
+          },
+          {
+            "path": "/changes",
+            "method": "POST",
+            "permission": "dashboards.view"
+          },
+          {
+            "path": "/resolve",
+            "method": "POST",
+            "permission": "dashboards.view"
+          },
+          {
+            "path": "/rename",
+            "method": "POST",
+            "permission": "dashboards.edit"
+          },
+          {
+            "path": "/widgets/upsert",
+            "method": "POST",
+            "permission": "dashboards.edit"
+          },
+          {
+            "path": "/widgets/remove",
+            "method": "POST",
+            "permission": "dashboards.edit"
+          },
+          {
+            "path": "/device/manifest",
+            "method": "POST",
+            "permission": "dashboards.view"
+          },
+          {
+            "path": "/device/image",
+            "method": "POST",
+            "permission": "dashboards.view"
+          },
+          {
+            "path": "/device/config",
+            "method": "POST",
+            "permission": "dashboards.view"
+          },
+          {
+            "path": "/device/config/set",
+            "method": "POST",
+            "permission": "dashboards.edit"
+          },
+          {
+            "path": "/device/ensure",
+            "method": "POST",
+            "permission": "dashboards.edit"
+          },
+          {
+            "path": "/device/unbind",
+            "method": "POST",
+            "permission": "dashboards.edit"
+          },
+          {
+            "path": "/device-bindings",
+            "method": "POST",
+            "permission": "dashboards.view"
           }
         ]
       }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "dashboards.get",
+      "version": "1.0.0",
+      "title": "Dashboard lookup",
+      "sidecar": "ryu-dashboards",
+      "route": "/resolve",
+      "grant": "dashboards:view"
+    },
+    {
+      "capability": "dashboards.create",
+      "version": "1.0.0",
+      "title": "Dashboard creation",
+      "sidecar": "ryu-dashboards",
+      "route": "/",
+      "grant": "dashboards:edit"
+    },
+    {
+      "capability": "dashboards.rename",
+      "version": "1.0.0",
+      "title": "Dashboard rename",
+      "sidecar": "ryu-dashboards",
+      "route": "/rename",
+      "grant": "dashboards:edit"
+    },
+    {
+      "capability": "dashboards.upsertWidget",
+      "version": "1.0.0",
+      "title": "Dashboard widget upsert",
+      "sidecar": "ryu-dashboards",
+      "route": "/widgets/upsert",
+      "grant": "dashboards:edit"
+    },
+    {
+      "capability": "dashboards.deleteWidget",
+      "version": "1.0.0",
+      "title": "Dashboard widget removal",
+      "sidecar": "ryu-dashboards",
+      "route": "/widgets/remove",
+      "grant": "dashboards:edit"
+    },
+    {
+      "capability": "dashboards.changes",
+      "version": "1.0.0",
+      "title": "Dashboard change stream",
+      "sidecar": "ryu-dashboards",
+      "route": "/changes",
+      "grant": "dashboards:view"
+    },
+    {
+      "capability": "dashboards.ensureDeviceDashboard",
+      "version": "1.0.0",
+      "title": "Device dashboard binding",
+      "sidecar": "ryu-dashboards",
+      "route": "/device/ensure",
+      "grant": "dashboards:edit"
+    },
+    {
+      "capability": "dashboards.deviceManifest",
+      "version": "1.0.0",
+      "title": "Device dashboard manifest",
+      "sidecar": "ryu-dashboards",
+      "route": "/device/manifest",
+      "grant": "dashboards:view"
+    },
+    {
+      "capability": "dashboards.deviceImage",
+      "version": "1.0.0",
+      "title": "Device dashboard image",
+      "sidecar": "ryu-dashboards",
+      "route": "/device/image",
+      "grant": "dashboards:view"
+    },
+    {
+      "capability": "dashboards.deviceConfig",
+      "version": "1.0.0",
+      "title": "Device dashboard config",
+      "sidecar": "ryu-dashboards",
+      "route": "/device/config",
+      "grant": "dashboards:view"
+    },
+    {
+      "capability": "dashboards.setDevice",
+      "version": "1.0.0",
+      "title": "Device dashboard update",
+      "sidecar": "ryu-dashboards",
+      "route": "/device/config/set",
+      "grant": "dashboards:edit"
+    },
+    {
+      "capability": "dashboards.unbindDevice",
+      "version": "1.0.0",
+      "title": "Device dashboard unbind",
+      "sidecar": "ryu-dashboards",
+      "route": "/device/unbind",
+      "grant": "dashboards:edit"
+    },
+    {
+      "capability": "dashboards.deviceBindings",
+      "version": "1.0.0",
+      "title": "Device dashboard bindings",
+      "sidecar": "ryu-dashboards",
+      "route": "/device-bindings",
+      "grant": "dashboards:view"
     }
   ],
   "permission_grants": ["tools.invoke", "app:realtime"],
@@ -105,7 +271,7 @@
     {
       "id": "dashboards.view",
       "label": "Can view",
-      "description": "Open dashboards and the live data their widgets pull from monitors, meetings, quests, and other node surfaces."
+      "description": "Open dashboards and the live data their widgets pull from connected actions, web endpoints, and inline content."
     },
     {
       "id": "dashboards.edit",
@@ -115,31 +281,18 @@
     }
   ],
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "dashboards.chat",
-        "title": "Dashboards widget",
-        "description": "Dashboards chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["dashboards widget"],
-        "examples": ["Show me a dashboards widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "hook_events": [
       {
         "id": "@ryu/dashboards#widget.failed",
         "title": "Dashboard widget broke",
-        "description": "A widget's data source stopped resolving — the endpoint errored, the agent refused, the monitor or workflow it reads is gone. Fires on the TRANSITION into failure, which includes a brand-new widget whose very first resolve fails; a widget that then STAYS broken re-tries every interval but does not re-fire, so this is safe to hang an alert on. `source_type` is the wire tag of the resolver that broke (`core_endpoint` / `monitor` / `workflow` / `composio` / `http` / `agent`). Note that expensive sources are only refreshed while someone is watching the dashboard, so their failures surface when the board is opened rather than in the background.",
+        "description": "A widget's data source stopped resolving — the endpoint errored, the Composio action failed, or the source kind is not available on this node. Fires on the TRANSITION into failure, which includes a brand-new widget whose very first resolve fails; a widget that then STAYS broken re-tries every interval but does not re-fire, so this is safe to hang an alert on. `source_type` is the wire tag of the resolver that broke (`core_endpoint` / `monitor` / `workflow` / `composio` / `http` / `agent`). Note that expensive sources are only refreshed while someone is watching the dashboard, so their failures surface when the board is opened rather than in the background.",
         "payload_example": {
           "dashboard_id": "dash_9f3c1b2a4d5e6f708192a3b4c5d6e7f8",
           "widget_id": "wid_4c7e1a9b2d3f4058617293a4b5c6d7e8",
           "title": "Open incidents",
           "kind": "stat",
-          "source_type": "core_endpoint",
-          "error": "core endpoint 'monitors' returned 503",
+          "source_type": "http",
+          "error": "http GET returned 503",
           "at": "2026-08-01T10:15:00Z"
         }
       },
@@ -152,7 +305,7 @@
           "widget_id": "wid_4c7e1a9b2d3f4058617293a4b5c6d7e8",
           "title": "Open incidents",
           "kind": "stat",
-          "source_type": "core_endpoint",
+          "source_type": "http",
           "at": "2026-08-01T10:20:00Z"
         }
       }

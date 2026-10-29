@@ -30,25 +30,24 @@ export type ChatPreviewVariant =
 // composer's context ring fills to ~73% (amber warning band) with a full token
 // breakdown on hover.
 const CONTEXT_DEMO_WINDOW = 12_000;
-const statsMessage = (): UIMessage =>
-	({
-		id: "assistant-1",
-		role: "assistant",
-		parts: [
-			{ type: "text", text: `${ASSISTANT_INTRO}\n\n${ASSISTANT_DONE}` },
-			{
-				type: "data-ryu-stats",
-				data: {
-					tokensPerSecond: 47.3,
-					promptTokens: 8200,
-					cachedTokens: 4096,
-					completionTokens: 512,
-					reasoningTokens: 128,
-					totalTokens: 8712,
-				},
+const statsMessage = (): UIMessage => ({
+	id: "assistant-1",
+	role: "assistant",
+	parts: [
+		{ type: "text", text: `${ASSISTANT_INTRO}\n\n${ASSISTANT_DONE}` },
+		{
+			type: "data-ryu-stats",
+			data: {
+				tokensPerSecond: 47.3,
+				promptTokens: 8200,
+				cachedTokens: 4096,
+				completionTokens: 512,
+				reasoningTokens: 128,
+				totalTokens: 8712,
 			},
-		],
-	}) as unknown as UIMessage;
+		},
+	],
+});
 
 const noop = () => {
 	// Storyboard preview: the composer is inert.
@@ -59,12 +58,11 @@ const textMessage = (
 	id: string,
 	role: "user" | "assistant",
 	text: string
-): UIMessage =>
-	({
-		id,
-		role,
-		parts: [{ type: "text", text }],
-	}) as unknown as UIMessage;
+): UIMessage => ({
+	id,
+	role,
+	parts: [{ type: "text", text }],
+});
 
 const REFACTOR_PROMPT = "Can you refactor the auth flow to use device codes?";
 
@@ -74,31 +72,30 @@ const ASSISTANT_INTRO =
 const ASSISTANT_DONE =
 	"The new flow polls `/device/token` until the user approves. I've kept OAuth as the default, so existing sign-ins are untouched.";
 
-const toolMessage = (): UIMessage =>
-	({
-		id: "assistant-tool",
-		role: "assistant",
-		parts: [
-			{ type: "text", text: ASSISTANT_INTRO },
-			{
-				type: "tool-Read",
-				toolCallId: "call_read_1",
-				state: "output-available",
-				input: { file_path: "src/lib/auth-client.ts" },
-				output: { content: "export async function signIn() { /* … */ }" },
+const toolMessage = (): UIMessage => ({
+	id: "assistant-tool",
+	role: "assistant",
+	parts: [
+		{ type: "text", text: ASSISTANT_INTRO },
+		{
+			type: "tool-Read",
+			toolCallId: "call_read_1",
+			state: "output-available",
+			input: { file_path: "src/lib/auth-client.ts" },
+			output: { content: "export async function signIn() { /* … */ }" },
+		},
+		{
+			type: "tool-Edit",
+			toolCallId: "call_edit_1",
+			state: "input-available",
+			input: {
+				file_path: "src/lib/auth-client.ts",
+				old_string: "// oauth only",
+				new_string: "// oauth + device code",
 			},
-			{
-				type: "tool-Edit",
-				toolCallId: "call_edit_1",
-				state: "input-available",
-				input: {
-					file_path: "src/lib/auth-client.ts",
-					old_string: "// oauth only",
-					new_string: "// oauth + device code",
-				},
-			},
-		],
-	}) as unknown as UIMessage;
+		},
+	],
+});
 
 const conversationFor = (variant: ChatPreviewVariant): UIMessage[] => {
 	if (variant === "empty" || variant === "offline") {

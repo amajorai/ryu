@@ -3,21 +3,21 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-let node = {
+let node: import("@/src/lib/api/client.ts").ApiTarget & { name?: string } = {
 	url: "http://local.test",
 	token: "first",
-	userJwt: null as string | null,
+	userJwt: null,
 	name: "Local",
 };
 let ready = true;
 const commands: boolean[] = [];
 const calls: {
 	signal: AbortSignal;
-	resolve: (value: unknown) => void;
+	resolve: <TValue>(value: TValue) => void;
 	token: string | null;
 }[] = [];
 mock.module("./useActiveNode.ts", () => ({ useActiveNode: () => node }));

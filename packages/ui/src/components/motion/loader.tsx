@@ -5,10 +5,18 @@
 // variants (dither, metaballs, newton, helix, percent) are omitted — this is the
 // compact port the agent loading states use.
 
-import { EASE_IN_OUT } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { EASE_IN_OUT } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
+import styles from "./loader.module.css";
+
+interface LoaderDrawingStyle extends CSSProperties {
+	"--loader-font-size"?: string;
+	"--loader-gap"?: string;
+	"--loader-part-height"?: string;
+	"--loader-part-width"?: string;
+}
 
 export type LoaderVariant =
 	| "spinner"
@@ -20,8 +28,19 @@ export type LoaderVariant =
 	| "ascii-blocks"
 	| "ascii-bounce";
 
+interface AsciiFrameSets {
+	ascii: string[];
+	"ascii-blocks": string[];
+	"ascii-bounce": string[];
+	"ascii-braille": string[];
+	"ascii-line": string[];
+	bars?: never;
+	dots?: never;
+	spinner?: never;
+}
+
 // Terminal-style frame sets — the loaders CLI AI agents cycle through.
-const ASCII_SETS: Record<string, string[]> = {
+const ASCII_SETS: AsciiFrameSets = {
 	ascii: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
 	"ascii-line": ["|", "/", "-", "\\"],
 	"ascii-braille": ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"],
@@ -113,8 +132,13 @@ function Spinner({ size, speed, reduce }: PartProps) {
 
 function Dots({ size, speed, reduce }: PartProps) {
 	const dot = size * 0.24;
+	const gapStyle: LoaderDrawingStyle = { "--loader-gap": `${size * 0.14}px` };
+	const dotStyle: LoaderDrawingStyle = {
+		"--loader-part-width": `${dot}px`,
+		"--loader-part-height": `${dot}px`,
+	};
 	return (
-		<span className="flex items-center" style={{ gap: size * 0.14 }}>
+		<span className={cn("flex items-center", styles.parts)} style={gapStyle}>
 			{[0, 1, 2].map((i) => (
 				<motion.span
 					animate={
@@ -122,9 +146,9 @@ function Dots({ size, speed, reduce }: PartProps) {
 							? { opacity: [0.4, 1, 0.4] }
 							: { y: [0, -size * 0.3, 0], opacity: [0.5, 1, 0.5] }
 					}
-					className="rounded-full bg-current"
+					className={cn("rounded-full bg-current", styles.part)}
 					key={i}
-					style={{ width: dot, height: dot }}
+					style={dotStyle}
 					transition={{
 						duration: speed,
 						ease: EASE_IN_OUT,
@@ -139,16 +163,26 @@ function Dots({ size, speed, reduce }: PartProps) {
 
 function Bars({ size, speed, reduce }: PartProps) {
 	const bar = Math.max(2, size * 0.12);
+	const gapStyle: LoaderDrawingStyle = {
+		"--loader-gap": `${Math.max(1, size * 0.08)}px`,
+	};
+	const barStyle: LoaderDrawingStyle = {
+		"--loader-part-width": `${bar}px`,
+		"--loader-part-height": `${size * 0.55}px`,
+	};
 	return (
-		<span className="flex items-end" style={{ gap: Math.max(1, size * 0.08) }}>
+		<span className={cn("flex items-end", styles.parts)} style={gapStyle}>
 			{[0, 1, 2, 3].map((i) => (
 				<motion.span
 					animate={
 						reduce ? { opacity: [0.4, 1, 0.4] } : { scaleY: [0.35, 1, 0.35] }
 					}
-					className="w-1 origin-bottom rounded-full bg-current"
+					className={cn(
+						"w-1 origin-bottom rounded-full bg-current",
+						styles.part
+					)}
 					key={i}
-					style={{ width: bar, height: size * 0.55 }}
+					style={barStyle}
 					transition={{
 						duration: speed,
 						ease: EASE_IN_OUT,
@@ -168,6 +202,7 @@ function Ascii({
 	reduce,
 }: PartProps & { frames: string[] }) {
 	const [frame, setFrame] = useState(0);
+	const asciiStyle: LoaderDrawingStyle = { "--loader-font-size": `${size}px` };
 	useEffect(() => {
 		// Reduced motion slows the cycle rather than stopping it — it's a glyph
 		// swap, not on-screen movement.
@@ -181,8 +216,8 @@ function Ascii({
 
 	return (
 		<span
-			className="font-mono tabular-nums leading-none"
-			style={{ fontSize: size, lineHeight: 1 }}
+			className={cn("font-mono tabular-nums leading-none", styles.ascii)}
+			style={asciiStyle}
 		>
 			{frames[frame % frames.length]}
 		</span>

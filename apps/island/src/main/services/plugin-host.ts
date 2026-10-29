@@ -8,6 +8,11 @@
 // bearer token) and its streaming pattern (`chatStream` in `core.ts`).
 
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import {
+	type hostJsonSchema,
+	parseHostArguments,
+} from "../../shared/host-json.ts";
 import type {
 	PluginCompanion,
 	PluginContributionsResult,
@@ -21,6 +26,15 @@ import type {
 	PluginView,
 } from "../../shared/ipc.ts";
 import { coreHeaders, loadConfig } from "./config.ts";
+import {
+	hostErrorSchema,
+	hostResultSchema,
+	hostStreamPartSchema,
+	type pluginCompanionWireSchema,
+	pluginContributionsSchema,
+	type pluginViewWireSchema,
+	uiBundleSchema,
+} from "./plugin-host-contract.ts";
 import { withResponseDeadline } from "./response-deadline.ts";
 import { SseDecoder } from "./sse.ts";
 
@@ -37,8 +51,16 @@ export interface HostStreamSink {
 
 /** In-flight host streams keyed by stream id, for abort. */
 const activeStreams = new Map<string, AbortController>();
+export function abortAllPluginHostStreams(): void {
+	for (const controller of activeStreams.values()) {
+		controller.abort();
+	}
+}
 
-function reasonFromError(error: unknown): string {
+const failureSchema = z
+	.union([z.instanceof(DOMException), z.instanceof(Error)])
+	.catch(new Error("unreachable"));
+function reasonFromError(error: z.infer<typeof failureSchema>): string {
 	if (error instanceof DOMException && error.name === "AbortError") {
 		return "timeout";
 	}
@@ -66,57 +88,27 @@ function codeForStatus(status: number): PluginHostErrorCode {
 	}
 }
 
-/** Wire shape of a companion (snake_case from Rust serde). */
-interface PluginCompanionWire {
-	approved_grants?: string[];
-	has_ui?: boolean;
-	icon?: string;
-	id?: unknown;
-	label?: unknown;
-	name?: unknown;
-	plugin_id?: string;
-	shortcut?: string;
-}
-
-/** Wire shape of a declarative-view contribution (Core tags each with `plugin`). */
-interface PluginViewWire {
-	id?: unknown;
-	plugin?: unknown;
-	spec?: unknown;
-	title?: unknown;
-	view?: unknown;
-}
-
 /** Project a wire view contribution to {@link PluginView}. Requires a string `id`
  *  and a `view` discriminant; the `spec` is forwarded verbatim (the host renderer
  *  runs `validateView` and degrades unknown/malformed specs, so the main process
  *  stays a dumb pipe here — exactly like the desktop client's `views: json.views`). */
-function toPluginView(w: PluginViewWire): PluginView | null {
-	if (typeof w.id !== "string" || typeof w.view !== "string") {
-		return null;
-	}
-	return {
-		id: w.id,
-		view: w.view,
-		title: typeof w.title === "string" ? w.title : undefined,
-		plugin: typeof w.plugin === "string" ? w.plugin : undefined,
-		spec: w.spec as PluginView["spec"],
-	};
+function toPluginView(w: z.infer<typeof pluginViewWireSchema>): PluginView {
+	return w;
 }
 
-function toPluginCompanion(w: PluginCompanionWire): PluginCompanion | null {
-	if (typeof w.id !== "string") {
-		return null;
-	}
+function toPluginCompanion(
+	w: z.infer<typeof pluginCompanionWireSchema>
+): PluginCompanion {
 	return {
 		id: w.id,
-		name: typeof w.name === "string" ? w.name : w.id,
-		label: typeof w.label === "string" ? w.label : w.id,
-		icon: typeof w.icon === "string" ? w.icon : null,
-		shortcut: typeof w.shortcut === "string" ? w.shortcut : null,
-		pluginId: w.plugin_id ?? "",
-		approvedGrants: Array.isArray(w.approved_grants) ? w.approved_grants : [],
-		hasUi: w.has_ui === true,
+		name: w.name ?? w.id,
+		label: w.label ?? w.id,
+		icon: w.icon,
+		shortcut: w.shortcut,
+		pluginId: w.plugin_id,
+		approvedGrants: w.approved_grants,
+		defaultCspEnforced: w.default_csp_enforced,
+		hasUi: w.has_ui,
 	};
 }
 
@@ -137,20 +129,17 @@ export async function pluginContributions(): Promise<PluginContributionsResult> 
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as {
-					companions?: PluginCompanionWire[];
-					views?: PluginViewWire[];
-				};
+				const data = pluginContributionsSchema.parse(await resp.json());
 				const companions: PluginCompanion[] = [];
 				for (const raw of data.companions ?? []) {
-					const mapped = toPluginCompanion(raw);
+					const mapped = raw === null ? null : toPluginCompanion(raw);
 					if (mapped) {
 						companions.push(mapped);
 					}
 				}
 				const views: PluginView[] = [];
 				for (const raw of data.views ?? []) {
-					const mapped = toPluginView(raw);
+					const mapped = raw === null ? null : toPluginView(raw);
 					if (mapped) {
 						views.push(mapped);
 					}
@@ -159,7 +148,10 @@ export async function pluginContributions(): Promise<PluginContributionsResult> 
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(failureSchema.parse(error)),
+		};
 	}
 }
 
@@ -185,15 +177,18 @@ export async function pluginUiBundle(
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as { code?: unknown };
+				const data = uiBundleSchema.parse(await resp.json());
 				return {
 					available: true,
-					code: typeof data.code === "string" ? data.code : null,
+					code: data.code,
 				};
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(failureSchema.parse(error)),
+		};
 	}
 }
 
@@ -207,7 +202,7 @@ export async function pluginUiBundle(
 export async function pluginHostInvoke(
 	pluginId: string,
 	method: string,
-	args: unknown
+	args: Parameters<typeof hostJsonSchema.parse>[0]
 ): Promise<PluginHostInvokeResult> {
 	const { coreBaseUrl } = loadConfig();
 	try {
@@ -216,7 +211,7 @@ export async function pluginHostInvoke(
 			{
 				method: "POST",
 				headers: coreHeaders({ "Content-Type": "application/json" }),
-				body: JSON.stringify({ method, args }),
+				body: JSON.stringify({ method, args: parseHostArguments(args) }),
 			},
 			INVOKE_TIMEOUT_MS,
 			async (resp) => {
@@ -224,30 +219,26 @@ export async function pluginHostInvoke(
 					let code = codeForStatus(resp.status);
 					let message = `host bridge ${method} failed: ${resp.status}`;
 					try {
-						const body = (await resp.json()) as {
-							error?: { code?: string; message?: string };
-						};
-						if (body.error) {
-							if (typeof body.error.message === "string") {
-								message = body.error.message;
-							}
-							if (typeof body.error.code === "string") {
-								code = body.error.code as PluginHostErrorCode;
-							}
-						}
+						const body = hostErrorSchema.parse(await resp.json());
+						message = body.error?.message ?? message;
+						code = body.error?.code ?? code;
 					} catch {
 						// Non-JSON error body: keep the status-derived code + message.
 					}
 					return { ok: false, code, message };
 				}
-				const json = (await resp.json().catch(() => ({}))) as {
-					result?: unknown;
-				};
+				const json = hostResultSchema.parse(
+					await resp.json().catch(() => ({}))
+				);
 				return { ok: true, result: json.result };
 			}
 		);
 	} catch (error) {
-		return { ok: false, code: "server_error", message: reasonFromError(error) };
+		return {
+			ok: false,
+			code: "server_error",
+			message: reasonFromError(failureSchema.parse(error)),
+		};
 	}
 }
 
@@ -305,12 +296,16 @@ export async function pluginCoreHttp(
 						message: `${req.path} failed: ${resp.status}`,
 					};
 				}
-				const data: unknown = await resp.json().catch(() => null);
+				const data = z.json().parse(await resp.json().catch(() => null));
 				return { ok: true, status: resp.status, data };
 			}
 		);
 	} catch (error) {
-		return { ok: false, code: "server_error", message: reasonFromError(error) };
+		return {
+			ok: false,
+			code: "server_error",
+			message: reasonFromError(failureSchema.parse(error)),
+		};
 	}
 }
 
@@ -322,7 +317,7 @@ export async function pluginCoreHttp(
  */
 export function startPluginHostStream(
 	pluginId: string,
-	input: unknown,
+	input: Parameters<typeof hostJsonSchema.parse>[0],
 	sink: HostStreamSink
 ): PluginHostStreamHandle {
 	const streamId = randomUUID();
@@ -337,7 +332,7 @@ export function startPluginHostStream(
 async function runHostStream(
 	streamId: string,
 	pluginId: string,
-	input: unknown,
+	input: Parameters<typeof hostJsonSchema.parse>[0],
 	sink: HostStreamSink,
 	controller: AbortController
 ): Promise<void> {
@@ -348,7 +343,10 @@ async function runHostStream(
 			{
 				method: "POST",
 				headers: coreHeaders({ "Content-Type": "application/json" }),
-				body: JSON.stringify({ method: "agent.run", args: input }),
+				body: JSON.stringify({
+					method: "agent.run",
+					args: parseHostArguments(input),
+				}),
 				signal: controller.signal,
 			}
 		);
@@ -381,7 +379,7 @@ async function runHostStream(
 			streamId,
 			reason: "error",
 			code: "server_error",
-			error: reasonFromError(error),
+			error: reasonFromError(failureSchema.parse(error)),
 		});
 	} finally {
 		// Terminal SSE frames can arrive before the HTTP body closes.
@@ -402,47 +400,51 @@ async function pumpHostStream(
 	const reader = body.getReader();
 	const decoder = new TextDecoder();
 	const sse = new SseDecoder();
-	const emit = (part: {
-		type: string;
-		delta?: unknown;
-		errorText?: unknown;
-	}): string | null | undefined => {
-		if (part.type === "text-delta" && typeof part.delta === "string") {
-			sink.chunk(part.delta);
+	const emit = (
+		part: Parameters<typeof hostStreamPartSchema.safeParse>[0]
+	): string | undefined => {
+		const parsed = hostStreamPartSchema.safeParse(part);
+		if (!parsed.success) {
 			return undefined;
 		}
-		if (part.type === "error") {
-			return typeof part.errorText === "string"
-				? part.errorText
-				: "agent stream error";
+		if (parsed.data.type === "text-delta") {
+			sink.chunk(parsed.data.delta);
+			return undefined;
 		}
-		return undefined;
+		return parsed.data.errorText;
 	};
 	let done = false;
-	while (!done) {
-		const { value, done: streamDone } = await reader.read();
-		if (streamDone) {
-			break;
-		}
-		const chunk = decoder.decode(value, { stream: true });
-		for (const event of sse.push(chunk)) {
-			if (event.kind === "done") {
-				done = true;
+	try {
+		while (!done) {
+			const { value, done: streamDone } = await reader.read();
+			if (streamDone) {
 				break;
 			}
-			const err = emit(event.part);
-			if (typeof err === "string") {
-				return err;
+			const chunk = decoder.decode(value, { stream: true });
+			// An oversized frame throws here, before any of its parts reach IPC.
+			for (const event of sse.push(chunk)) {
+				if (event.kind === "done") {
+					done = true;
+					break;
+				}
+				const err = emit(event.part);
+				if (err !== undefined) {
+					return err;
+				}
 			}
 		}
-	}
-	for (const event of sse.flush()) {
-		if (event.kind === "part") {
-			const err = emit(event.part);
-			if (typeof err === "string") {
-				return err;
+		for (const event of sse.flush()) {
+			if (event.kind === "part") {
+				const err = emit(event.part);
+				if (err !== undefined) {
+					return err;
+				}
 			}
 		}
+	} finally {
+		sse.flush();
+		await reader.cancel().catch(() => undefined);
+		reader.releaseLock();
 	}
 	// `streamId` is threaded only so a future per-stream diagnostic can reference
 	// it; the sink already carries it on every event.

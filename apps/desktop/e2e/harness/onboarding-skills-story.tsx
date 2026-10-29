@@ -1,10 +1,16 @@
-import { OnboardingView } from "@ryu/blocks/desktop/onboarding";
+import { OnboardingView } from "@ryu/blocks/desktop/onboarding.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { OnboardingSkillPackOption } from "@/src/lib/api/onboarding-skills.ts";
 import "../../src/index.css";
 
 const PACKS: OnboardingSkillPackOption[] = [
+	{
+		description:
+			"Interface design, typography, color, layout, accessibility, writing, and review skills.",
+		id: "jakubkrehel/skills",
+		name: "Jakubkrehel Skills",
+	},
 	{
 		description:
 			"TDD, code review, debugging, domain modeling and writing workflows.",
@@ -167,4 +173,4 @@ function ProofApp() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(<ProofApp />);
+createRoot(document.getElementById("root")!).render(<ProofApp />);

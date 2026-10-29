@@ -9,6 +9,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StarRating, StarRatingInput } from "./star-rating.tsx";
 
 describe("StarRating", () => {
+	test("numeric sizes preserve the requested pixel dimensions for every star", () => {
+		const html = renderToStaticMarkup(<StarRating size={18} value={4} />);
+		expect(html.split("--marketplace-size:18px").length - 1).toBe(5);
+	});
+
 	test("without a count the aria-label omits the reviews clause", () => {
 		const html = renderToStaticMarkup(<StarRating value={4} />);
 		expect(html).toContain('aria-label="Rated 4 out of 5"');

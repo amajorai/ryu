@@ -12,8 +12,8 @@
 // Controlled by AgentEditPage state so the values are folded into the agent's
 // create/update body alongside tools, skills, persona, etc.
 
-import { Button } from "@ryu/ui/components/button";
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -44,15 +44,12 @@ function OnOffToggle({
 		>
 			{ON_OFF.map((opt) => (
 				<Button
+					appearance={value === opt.value ? "island-tab-active" : "default"}
 					aria-pressed={value === opt.value}
-					className={cn(
-						"h-6 px-2 text-xs",
-						value === opt.value && "bg-accent text-accent-foreground"
-					)}
 					disabled={disabled}
 					key={opt.label}
 					onClick={() => onChange(opt.value)}
-					size="sm"
+					size="tiny"
 					type="button"
 					variant="ghost"
 				>
@@ -89,14 +86,15 @@ export function OrchestrationPanel({
 	onChangeCanCreateAgents: (next: boolean) => void;
 	disabled?: boolean;
 }) {
-	const values: Record<string, boolean> = {
+	const tl = useLiteralMessages();
+	const values = {
 		orchestrator,
 		canCreateAgents,
-	};
-	const handlers: Record<string, (next: boolean) => void> = {
+	} satisfies Record<(typeof ROWS)[number]["key"], boolean>;
+	const handlers = {
 		orchestrator: onChangeOrchestrator,
 		canCreateAgents: onChangeCanCreateAgents,
-	};
+	} satisfies Record<(typeof ROWS)[number]["key"], (next: boolean) => void>;
 
 	return (
 		<SettingsSection
@@ -108,7 +106,7 @@ export function OrchestrationPanel({
 					<SettingsItem
 						actions={
 							<OnOffToggle
-								ariaLabel={`${row.label} capability`}
+								ariaLabel={tl("{label} capability", { label: row.label })}
 								disabled={disabled}
 								onChange={handlers[row.key]}
 								value={values[row.key]}

@@ -1,3 +1,5 @@
+import previewStyles from "../settings/settings-preview.module.css";
+import type { PreviewStyle } from "../settings/settings-preview-style.ts";
 // The onboarding look-and-feel step. It is deliberately the same three knobs the
 // Settings → Appearance panel leads with (mode, a preset per mode, roundness)
 // driven through the *same* setters, so whatever the user picks here is already
@@ -13,22 +15,23 @@
 
 import { Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding";
-import { Button } from "@ryu/ui/components/button";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid";
-import { PageHeader } from "@ryu/ui/components/page-header";
+import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/select.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useTheme } from "next-themes";
 import { type ReactNode, useMemo, useState } from "react";
+import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import {
 	DEFAULT_RADIUS,
 	setDarkPreset,
@@ -82,22 +85,28 @@ function readStoredRadius(): number {
 
 /** Three-band preview of a preset: page, surface, accent. */
 function PresetSwatch({ variant }: { variant: ThemeVariant }) {
+	const backgroundStyle: PreviewStyle = {
+		"--settings-preview-background": variant.preview.bg,
+	};
+	const surfaceStyle: PreviewStyle = {
+		"--settings-preview-background": variant.preview.surface,
+	};
+	const primaryStyle: PreviewStyle = {
+		"--settings-preview-background": variant.preview.primary,
+	};
 	return (
-		<span
-			className="inline-flex flex-shrink-0 flex-col overflow-hidden rounded border border-border/60"
-			style={{ width: 32, height: 20 }}
-		>
+		<span className="inline-flex h-5 w-8 shrink-0 flex-col overflow-hidden rounded border border-border/60">
 			<span
-				className="block flex-1"
-				style={{ backgroundColor: variant.preview.bg }}
+				className={`block flex-1 ${previewStyles.paint}`}
+				style={backgroundStyle}
 			/>
 			<span
-				className="block"
-				style={{ backgroundColor: variant.preview.surface, height: 5 }}
+				className={`block h-[5px] ${previewStyles.paint}`}
+				style={surfaceStyle}
 			/>
 			<span
-				className="block"
-				style={{ backgroundColor: variant.preview.primary, height: 4 }}
+				className={`block h-1 ${previewStyles.paint}`}
+				style={primaryStyle}
 			/>
 		</span>
 	);
@@ -145,7 +154,7 @@ function PresetSelect({
 				<p className="text-muted-foreground text-xs">{caption}</p>
 			</div>
 			<Select items={items} onValueChange={onChange} value={value}>
-				<SelectTrigger className="h-9 w-full text-sm">
+				<SelectTrigger className="h-9 w-full">
 					<SelectValue />
 				</SelectTrigger>
 				<SelectContent>
@@ -213,7 +222,7 @@ export function ColorStep({ busy = false, onContinue }: ColorStepProps) {
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						<RyuOnboardingAvatar />
 					</div>
 					<PageHeader
 						stagger={false}
@@ -246,17 +255,17 @@ export function ColorStep({ busy = false, onContinue }: ColorStepProps) {
 											type="radio"
 											value={value}
 										/>
-										{/* biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: static preview art, sized by the class */}
+										{/* static preview art, sized by the class */}
 										<img
 											alt={label}
 											className={cn(
-												"rounded-lg border-2 shadow-md transition-all hover:scale-105 motion-reduce:transition-none",
+												"rounded-lg border-2 shadow-md transition-[scale,border-color,box-shadow] hover:scale-105 motion-reduce:transition-none",
 												theme === value
 													? "border-ring ring-2 ring-ring ring-offset-2 ring-offset-background"
 													: "border-border hover:border-ring/50"
 											)}
 											height={70}
-											src={image}
+											src={safeMediaUrl(image) ?? undefined}
 											width={88}
 										/>
 										<span className="flex items-center gap-1 font-medium text-xs">

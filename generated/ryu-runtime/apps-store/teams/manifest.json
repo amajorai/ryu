@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/teams",
   "name": "Groups",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Communication",
   "description": "Groups: named collections of agents you can address as one. Governance shell over the agent-group store (agent-id membership only); no documents, no external dependencies. Runs the out-of-process group sidecar.",
@@ -51,12 +51,18 @@
       },
       "port": 8002,
       "health_path": "/health",
+      "host_api": { "grants": ["crypto:seal"] },
       "http": {
         "mount": "/api/teams",
         "public_mount": "/api/teams",
         "routes": [
           { "path": "/", "method": "GET", "permission": "teams.view" },
           { "path": "/", "method": "POST", "permission": "teams.manage" },
+          {
+            "path": "/resolve",
+            "method": "POST",
+            "permission": "teams.view"
+          },
           { "path": "/:id", "method": "GET", "permission": "teams.view" },
           { "path": "/:id", "method": "PATCH", "permission": "teams.manage" },
           { "path": "/:id", "method": "DELETE", "permission": "teams.manage" },
@@ -72,6 +78,24 @@
           }
         ]
       }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "teams.resolve",
+      "version": "1.0.0",
+      "title": "Agent team lookup",
+      "sidecar": "ryu-teams",
+      "route": "/resolve",
+      "grant": "teams:view"
+    },
+    {
+      "capability": "teams.create",
+      "version": "1.0.0",
+      "title": "Agent team creation",
+      "sidecar": "ryu-teams",
+      "route": "/",
+      "grant": "teams:manage"
     }
   ],
   "permission_grants": [
@@ -98,19 +122,6 @@
     "icon": "user-multiple-02"
   },
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "groups.chat",
-        "title": "Groups widget",
-        "description": "Groups chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["groups widget"],
-        "examples": ["Show me a groups widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "sidebar_sections": [
       {
         "id": "teams",

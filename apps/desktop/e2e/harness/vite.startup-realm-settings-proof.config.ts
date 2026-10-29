@@ -16,6 +16,10 @@ export default defineConfig({
 	},
 	define: { "process.env": {} },
 	root: harnessDir,
+	optimizeDeps: {
+		esbuildOptions: { target: "esnext" },
+		entries: ["startup-realm-settings-proof.html"],
+	},
 	publicDir: path.resolve(desktopRoot, "public"),
 	clearScreen: false,
 	resolve: {

@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 const STORY_URL = "/onboarding-skills-story.html";
 const PROOF_PATH = path.resolve(
 	import.meta.dirname,
-	"../../../docs/proof/onboarding-skills/optional-skill-selection.png"
+	"../../../docs/proof/onboarding-skills/jakubkrehel-skills-pack.png"
 );
 
 test.describe("onboarding optional skill selection", () => {
@@ -15,7 +15,7 @@ test.describe("onboarding optional skill selection", () => {
 		await expect(page.getByText("Choose recommended skills")).toBeVisible();
 		await expect(
 			page.getByTestId("onboarding-skills-selected-count")
-		).toHaveText("20 of 20 selected");
+		).toHaveText("21 of 21 selected");
 		await expect(
 			page.getByRole("button", { name: "Select all", exact: true })
 		).toBeVisible();
@@ -29,6 +29,9 @@ test.describe("onboarding optional skill selection", () => {
 		).toBeVisible();
 		await expect(
 			page.getByTestId("onboarding-skill-pack-wshobson-agents")
+		).toHaveAttribute("aria-pressed", "true");
+		await expect(
+			page.getByTestId("onboarding-skill-pack-jakubkrehel-skills")
 		).toHaveAttribute("aria-pressed", "true");
 		await expect(
 			page.getByText("Ryu Health Audit", { exact: true })
@@ -46,24 +49,24 @@ test.describe("onboarding optional skill selection", () => {
 			.click();
 		await expect(
 			page.getByTestId("onboarding-skills-selected-count")
-		).toHaveText("0 of 20 selected");
+		).toHaveText("0 of 21 selected");
 		await page.getByTestId("onboarding-skill-pack-wshobson-agents").click();
 		await expect(
 			page.getByTestId("onboarding-skills-selected-count")
-		).toHaveText("1 of 20 selected");
+		).toHaveText("1 of 21 selected");
 		await page.getByRole("button", { name: "Select all", exact: true }).click();
 		await expect(
 			page.getByTestId("onboarding-skills-selected-count")
-		).toHaveText("20 of 20 selected");
+		).toHaveText("21 of 21 selected");
 		await page.getByTestId("onboarding-skill-pack-wshobson-agents").click();
 		await expect(
 			page.getByTestId("onboarding-skills-selected-count")
-		).toHaveText("19 of 20 selected");
+		).toHaveText("20 of 21 selected");
 		await page
-			.getByRole("button", { name: "Install 19 packs & continue" })
+			.getByRole("button", { name: "Install 20 packs & continue" })
 			.click();
 		await expect(page.getByTestId("skills-selection-saved")).toContainText(
-			"19 optional collections selected"
+			"20 optional collections selected"
 		);
 	});
 });

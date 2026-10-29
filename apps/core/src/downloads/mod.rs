@@ -54,10 +54,6 @@ impl ryu_downloads::DownloadsHost for CoreDownloadsHost {
     }
 
     fn authorize(&self, url: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        if crate::hf_auth::is_hf_url(url) {
-            crate::hf_auth::authorize(req)
-        } else {
-            req
-        }
+        crate::hf_auth::authorize(url, req)
     }
 }

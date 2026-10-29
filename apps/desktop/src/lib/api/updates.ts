@@ -1,8 +1,9 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/updates.ts
 //
-// Public control-plane feed of recent blog posts and changelog entries from
-// Notion (packages/api `/api/updates/recent`). No auth required — same source
-// as the marketing site's blog/changelog pages.
+// Public control-plane feed of recent blog posts and changelog entries
+// (packages/api `/api/updates/recent`, which forwards the marketing site's MDX
+// feed). No auth required — same source as the site's blog/changelog pages.
 
 import { BACKEND_URL } from "@/lib/auth-client.ts";
 
@@ -53,6 +54,30 @@ export async function fetchRecentUpdates(options?: {
 		throw new Error(`Failed to load updates: ${resp.status}`);
 	}
 
-	const json = (await resp.json()) as RecentUpdatesResponse;
+	const common = z.object({
+		id: z.string(),
+		title: z.string(),
+		slug: z.string(),
+		date: z.string(),
+	});
+	const json = z
+		.object({
+			items: z
+				.array(
+					z.discriminatedUnion("kind", [
+						common.extend({
+							kind: z.literal("blog"),
+							tag: z.string().optional(),
+						}),
+						common.extend({
+							kind: z.literal("changelog"),
+							version: z.string(),
+							type: z.string(),
+						}),
+					])
+				)
+				.optional(),
+		})
+		.parse(await resp.json());
 	return json.items ?? [];
 }

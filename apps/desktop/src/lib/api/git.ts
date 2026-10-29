@@ -1,3 +1,4 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/git.ts
 //
 // Typed client for Core's git endpoints:
@@ -7,7 +8,14 @@
 //   - `GET /api/worktree/:run_id/diff` (consumed by DiffReviewPane)
 //   - `POST /api/worktree/:run_id/apply` (consumed by DiffReviewPane)
 
-import type { FileEditUndoPlan } from "@ryu/blocks/desktop/agent-elements/turn-end-cards";
+import type { FileEditUndoPlan } from "@ryu/blocks/desktop/agent-elements/turn-end-cards.ts";
+import type {
+	ApplyOptions,
+	ApplyResult,
+	CheckoutResult,
+	GitBranches,
+	WorktreeDiff,
+} from "@ryuhq/core-client/git.ts";
 import {
 	type ApiTarget,
 	apiUrl,
@@ -15,6 +23,34 @@ import {
 	makeHeaders,
 	readJsonBody,
 } from "./client.ts";
+import {
+	type GitResponseInput,
+	gitApplyWireSchema,
+	gitBranchesWireSchema,
+	gitCheckoutResultWireSchema,
+	gitCommitPushResultWireSchema,
+	gitFileDiffSchema,
+	gitInitResultWireSchema,
+	gitPullRequestResultWireSchema,
+	gitRemoteResultWireSchema,
+	gitReverseEditsSchema,
+	gitStatusWireSchema,
+	gitWorktreeDiffWireSchema,
+	gitWorktreeStatusWireSchema,
+} from "./git-wire-contracts.ts";
+
+export type {
+	ApplyMode,
+	ApplyOptions,
+	ApplyResult,
+	ApplySuccess,
+	CheckoutResult,
+	ConflictError,
+	FileChangeKind,
+	FileSummary,
+	GitBranches,
+	WorktreeDiff,
+} from "@ryuhq/core-client/git.ts";
 
 export interface GitFileDiffResult {
 	patch: string;
@@ -34,46 +70,15 @@ export type ReverseEditsResult =
 			reason: ReverseEditsConflictReason;
 	  };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+function parseFileDiff(value: GitResponseInput): GitFileDiffResult | undefined {
+	const parsed = gitFileDiffSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
-
-function stringArray(value: unknown): string[] | undefined {
-	return Array.isArray(value) && value.every((item) => typeof item === "string")
-		? value
-		: undefined;
-}
-
-function parseFileDiff(value: unknown): GitFileDiffResult | undefined {
-	if (!isRecord(value) || typeof value.patch !== "string") {
-		return undefined;
-	}
-	const paths = stringArray(value.paths);
-	return paths ? { patch: value.patch, paths } : undefined;
-}
-
 function parseReverseEditsResult(
-	value: unknown
+	value: GitResponseInput
 ): ReverseEditsResult | undefined {
-	if (!isRecord(value)) {
-		return undefined;
-	}
-	const paths = stringArray(value.paths);
-	if (!paths) {
-		return undefined;
-	}
-	if (value.kind === "applied") {
-		return { kind: "applied", paths };
-	}
-	if (
-		value.kind === "conflict" &&
-		(value.reason === "changed_since_turn" ||
-			value.reason === "staged_changes" ||
-			value.reason === "unsupported_file")
-	) {
-		return { kind: "conflict", paths, reason: value.reason };
-	}
-	return undefined;
+	const parsed = gitReverseEditsSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
 export async function fetchGitFileDiff(
@@ -88,7 +93,11 @@ export async function fetchGitFileDiff(
 		method: "POST",
 		signal,
 	});
-	const { data, error } = await readJsonBody<unknown>(response, "file diff");
+	const { data, error } = await readJsonBody(
+		response,
+		"file diff",
+		gatewayJsonValueSchema
+	);
 	if (error) {
 		throw new Error(error);
 	}
@@ -111,9 +120,10 @@ export async function reverseGitEdits(
 		method: "POST",
 		signal,
 	});
-	const { data, error, status } = await readJsonBody<unknown>(
+	const { data, error, status } = await readJsonBody(
 		response,
-		"reverse edits"
+		"reverse edits",
+		gatewayJsonValueSchema
 	);
 	const parsed = parseReverseEditsResult(data);
 	if (status === 409 && parsed?.kind === "conflict") {
@@ -169,9 +179,10 @@ export async function initializeGit(
 			body: JSON.stringify({ cwd }),
 			signal,
 		});
-		const { data, error } = await readJsonBody<Partial<GitInitResult>>(
+		const { data, error } = await readJsonBody(
 			resp,
-			"git init"
+			"git init",
+			gitInitResultWireSchema
 		);
 		if (error) {
 			return { success: false, error };
@@ -208,7 +219,7 @@ export async function fetchGitStatus(
 		if (!resp.ok) {
 			return NOT_REPO;
 		}
-		const json = (await resp.json()) as Partial<GitStatus>;
+		const json = gitStatusWireSchema.parse(await resp.json()) ?? {};
 		return {
 			is_repo: json.is_repo ?? false,
 			branch: json.branch ?? null,
@@ -225,12 +236,6 @@ export async function fetchGitStatus(
 }
 
 // ── Branch list + switch (composer branch selector) ──────────────────────────
-
-export interface GitBranches {
-	branches: string[];
-	current: string | null;
-	is_repo: boolean;
-}
 
 const NO_BRANCHES: GitBranches = {
 	is_repo: false,
@@ -257,7 +262,7 @@ export async function fetchGitBranches(
 		if (!resp.ok) {
 			return NO_BRANCHES;
 		}
-		const json = (await resp.json()) as Partial<GitBranches>;
+		const json = gitBranchesWireSchema.parse(await resp.json()) ?? {};
 		return {
 			is_repo: json.is_repo ?? false,
 			current: json.current ?? null,
@@ -266,12 +271,6 @@ export async function fetchGitBranches(
 	} catch {
 		return NO_BRANCHES;
 	}
-}
-
-export interface CheckoutResult {
-	branch?: string;
-	error?: string;
-	success: boolean;
 }
 
 /**
@@ -291,9 +290,10 @@ export async function checkoutBranch(
 			body: JSON.stringify({ cwd, branch }),
 			signal,
 		});
-		const { data, error } = await readJsonBody<Partial<CheckoutResult>>(
+		const { data, error } = await readJsonBody(
 			resp,
-			"checkout"
+			"checkout",
+			gitCheckoutResultWireSchema
 		);
 		if (error) {
 			return { success: false, error };
@@ -325,9 +325,10 @@ export async function createBranch(
 			body: JSON.stringify({ cwd, branch }),
 			signal,
 		});
-		const { data, error } = await readJsonBody<Partial<CheckoutResult>>(
+		const { data, error } = await readJsonBody(
 			resp,
-			"create branch"
+			"create branch",
+			gitCheckoutResultWireSchema
 		);
 		if (error) {
 			return { success: false, error };
@@ -388,9 +389,10 @@ export async function commitPush(
 			}),
 			signal,
 		});
-		const { data, error } = await readJsonBody<Partial<CommitPushResult>>(
+		const { data, error } = await readJsonBody(
 			resp,
-			"commit/push"
+			"commit/push",
+			gitCommitPushResultWireSchema
 		);
 		if (error) {
 			return { success: false, error };
@@ -431,9 +433,10 @@ async function runGitRemoteAction(
 			body: JSON.stringify({ cwd }),
 			signal,
 		});
-		const { data, error } = await readJsonBody<Partial<GitRemoteResult>>(
+		const { data, error } = await readJsonBody(
 			resp,
-			`git ${action}`
+			`git ${action}`,
+			gitRemoteResultWireSchema
 		);
 		if (error) {
 			return { success: false, error };
@@ -517,9 +520,10 @@ export async function createPullRequest(
 			}),
 			signal,
 		});
-		const { data, error } = await readJsonBody<Partial<PullRequestResult>>(
+		const { data, error } = await readJsonBody(
 			resp,
-			"pull request"
+			"pull request",
+			gitPullRequestResultWireSchema
 		);
 		if (error) {
 			return { success: false, error };
@@ -547,21 +551,6 @@ export async function createPullRequest(
 }
 
 // ── Worktree diff (Unit U011) ─────────────────────────────────────────────────
-
-export type FileChangeKind = "added" | "modified" | "deleted" | "renamed";
-
-export interface FileSummary {
-	additions: number;
-	deletions: number;
-	kind: FileChangeKind;
-	path: string;
-}
-
-export interface WorktreeDiff {
-	files: FileSummary[];
-	has_changes: boolean;
-	unified_diff: string;
-}
 
 const EMPTY_DIFF: WorktreeDiff = {
 	has_changes: false,
@@ -614,7 +603,7 @@ export async function fetchWorktreeStatus(
 		if (!resp.ok) {
 			return NO_WORKTREE;
 		}
-		const json = (await resp.json()) as Partial<WorktreeStatus>;
+		const json = gitWorktreeStatusWireSchema.parse(await resp.json()) ?? {};
 		return {
 			active: json.active ?? false,
 			branch: json.branch ?? null,
@@ -628,28 +617,6 @@ export async function fetchWorktreeStatus(
 }
 
 // ── Worktree apply (Unit U012) ────────────────────────────────────────────────
-
-export type ApplyMode = "merge" | "pr";
-
-export interface ApplyOptions {
-	base?: string;
-	message: string;
-	mode: ApplyMode;
-}
-
-export interface ApplySuccess {
-	commit: string | null;
-	pr_url: string | null;
-	success: true;
-}
-
-export interface ConflictError {
-	conflicted_files: string[];
-	error: "merge_conflict";
-	success: false;
-}
-
-export type ApplyResult = ApplySuccess | ConflictError;
 
 /**
  * Apply a completed run's changes: commit + merge into base (mode='merge') or
@@ -674,24 +641,28 @@ export async function applyWorktree(
 	// This one still THROWS on failure by contract (DiffReviewPane catches), but
 	// the throw must carry the server's reason — never a raw `SyntaxError` from
 	// parsing a text/plain rejection body.
-	const { data, error, status } = await readJsonBody<Record<string, unknown>>(
-		resp,
-		"apply"
-	);
+	const {
+		data: raw,
+		error,
+		status,
+	} = await readJsonBody(resp, "apply", gatewayJsonValueSchema);
 	if (status === 409) {
+		const parsed = gitApplyWireSchema.safeParse(raw);
+		const data = parsed.success ? parsed.data : null;
 		return {
 			success: false,
 			error: "merge_conflict",
-			conflicted_files: (data?.conflicted_files as string[] | undefined) ?? [],
+			conflicted_files: data?.conflicted_files ?? [],
 		};
 	}
 	if (error) {
 		throw new Error(error);
 	}
+	const data = gitApplyWireSchema.parse(raw);
 	return {
 		success: true,
-		commit: (data?.commit as string | null) ?? null,
-		pr_url: (data?.pr_url as string | null) ?? null,
+		commit: data?.commit ?? null,
+		pr_url: data?.pr_url ?? null,
 	};
 }
 
@@ -722,7 +693,7 @@ export async function fetchWorktreeDiff(
 		if (!resp.ok) {
 			return EMPTY_DIFF;
 		}
-		const json = (await resp.json()) as Partial<WorktreeDiff>;
+		const json = gitWorktreeDiffWireSchema.parse(await resp.json()) ?? {};
 		return {
 			has_changes: json.has_changes ?? false,
 			files: json.files ?? [],

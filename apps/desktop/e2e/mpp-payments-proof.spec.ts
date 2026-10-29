@@ -91,87 +91,91 @@ async function installMppBridge(
 			},
 		});
 
-		const bridgeWindow = window as typeof window & {
-			__mppProofCalls?: typeof calls;
-			ryu?: {
-				app: {
-					request(input: {
-						body?: unknown;
-						method?: string;
-						path: string;
-					}): Promise<unknown>;
+		const appRequest = async (input: {
+			body?: unknown;
+			method?: string;
+			path: string;
+		}) => {
+			const method = input.method ?? "GET";
+			calls.push({
+				...(input.body === undefined ? undefined : { body: input.body }),
+				method,
+				path: input.path,
+			});
+			if (method === "GET" && input.path === "/status") {
+				return status;
+			}
+			if (method === "GET" && input.path === "/services") {
+				return {
+					services: [
+						{
+							categories: ["payments", "developer tools"],
+							description: "Official MPP challenge and settlement service.",
+							endpoints: [
+								{
+									method: "GET",
+									path: "/api/ping/paid",
+									price: "0.25 pathUSD",
+								},
+							],
+							id: "mpp-proof-service",
+							name: "MPP Protocol",
+							status: "available",
+							url: "https://mpp.dev",
+						},
+					],
 				};
-				context: null;
-				shell: {
-					subscribeTheme(options: {
-						onChange(tokens: Record<string, string>): void;
-					}): { dispose(): void };
+			}
+			if (method === "GET" && input.path === "/receipts") {
+				return { receipts };
+			}
+			if (method === "POST" && input.path === "/payments/prepare") {
+				return makePayment("http");
+			}
+			if (method === "POST" && input.path === "/payments/prepare-mcp") {
+				return makePayment("mcp");
+			}
+			if (method === "POST" && input.path === "/payments/pay") {
+				status.budget.availableAtomic = "4750000";
+				status.budget.spentAtomic = "250000";
+				if (receipts.length === 0) {
+					receipts.push(settledReceipt);
+				}
+				return {
+					receipt: settledReceipt,
+					resource: {
+						body: '{"ok":true}',
+						contentType: "application/json",
+						headers: {},
+						status: 200,
+					},
+				};
+			}
+			throw new Error(`Unexpected MPP proof request: ${method} ${input.path}`);
+		};
+
+		const bridgeWindow =
+			/* SAFETY: This private browser fixture replaces window.ryu with the exact app/context/shell provider assigned below; it does not implement the production RyuBridge. Other browser members retain the complete DOM Window contract. */ window as Omit<
+				Window,
+				"ryu"
+			> & {
+				__mppProofCalls?: typeof calls;
+				ryu?: {
+					app: {
+						request: typeof appRequest;
+					};
+					context: null;
+					shell: {
+						subscribeTheme(options: {
+							onChange(tokens: Record<string, string>): void;
+						}): { dispose(): void };
+					};
 				};
 			};
-		};
 		bridgeWindow.__mppProofCalls = calls;
 		bridgeWindow.ryu = {
 			app: {
-				async request(input) {
-					const method = input.method ?? "GET";
-					calls.push({
-						...(input.body === undefined ? {} : { body: input.body }),
-						method,
-						path: input.path,
-					});
-					if (method === "GET" && input.path === "/status") {
-						return status;
-					}
-					if (method === "GET" && input.path === "/services") {
-						return {
-							services: [
-								{
-									categories: ["payments", "developer tools"],
-									description: "Official MPP challenge and settlement service.",
-									endpoints: [
-										{
-											method: "GET",
-											path: "/api/ping/paid",
-											price: "0.25 pathUSD",
-										},
-									],
-									id: "mpp-proof-service",
-									name: "MPP Protocol",
-									status: "available",
-									url: "https://mpp.dev",
-								},
-							],
-						};
-					}
-					if (method === "GET" && input.path === "/receipts") {
-						return { receipts };
-					}
-					if (method === "POST" && input.path === "/payments/prepare") {
-						return makePayment("http");
-					}
-					if (method === "POST" && input.path === "/payments/prepare-mcp") {
-						return makePayment("mcp");
-					}
-					if (method === "POST" && input.path === "/payments/pay") {
-						status.budget.availableAtomic = "4750000";
-						status.budget.spentAtomic = "250000";
-						if (receipts.length === 0) {
-							receipts.push(settledReceipt);
-						}
-						return {
-							receipt: settledReceipt,
-							resource: {
-								body: '{"ok":true}',
-								contentType: "application/json",
-								headers: {},
-								status: 200,
-							},
-						};
-					}
-					throw new Error(
-						`Unexpected MPP proof request: ${method} ${input.path}`
-					);
-				},
+				request: appRequest,
 			},
 			context: null,
 			shell: {
@@ -207,9 +211,11 @@ async function proofCalls(
 	page: Page
 ): Promise<Array<{ method: string; path: string }>> {
 	return page.evaluate(() => {
-		const proofWindow = window as typeof window & {
-			__mppProofCalls?: Array<{ method: string; path: string }>;
-		};
+		const proofWindow =
+			/* SAFETY: This fixture initialization defines __mppProofCalls on its own browser window. */ window as Window &
+				typeof window & {
+					__mppProofCalls?: Array<{ method: string; path: string }>;
+				};
 		return proofWindow.__mppProofCalls ?? [];
 	});
 }

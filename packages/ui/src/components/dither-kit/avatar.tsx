@@ -1,6 +1,8 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useLiteralMessages } from "@ryu/i18n/react"
+import { type CSSProperties, useEffect, useRef } from "react"
+import styles from "./dither.module.css"
 import { cn } from "./lib"
 import { rgb } from "./palette"
 import {
@@ -9,6 +11,7 @@ import {
   fnv1a,
   hueFill,
   type PixelBloom,
+  type PixelBloomStyle,
   pixelBloomStyle,
   pixelPrefersReducedMotion,
   xorshift32,
@@ -18,6 +21,10 @@ import {
 // axis bit and 180 hues that's 2^33 × 180 ≈ 1.5 trillion distinct avatars.
 const GRID = 8
 const CELL_PX = 4 // backing px per cell → a 32×32 canvas, scaled up pixelated
+
+interface AvatarSizeStyle extends CSSProperties {
+ "--dither-avatar-size"?: string;
+}
 
 export type AvatarMirror = "auto" | "horizontal" | "vertical"
 
@@ -125,8 +132,8 @@ function avatarModel(
   const hue = hueProp ?? drawnHue
   const direction = directionProp === "auto" ? drawnDirection : directionProp
 
-  const on = new Array<boolean>(GRID * GRID)
-  const density = new Array<number>(GRID * GRID)
+  const on = Array<boolean>(GRID * GRID)
+  const density = Array<number>(GRID * GRID)
   for (let r = 0; r < GRID; r++) {
     for (let c = 0; c < GRID; c++) {
       const i = vertical
@@ -246,6 +253,7 @@ export function DitherAvatar({
   replayToken = 0,
   className,
 }: DitherAvatarProps) {
+  const tl = useLiteralMessages()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const bloomRef = useRef<HTMLCanvasElement>(null)
 
@@ -271,24 +279,31 @@ export function DitherAvatar({
   ])
 
   const bloomStyle = pixelBloomStyle(bloom)
+  const bloomVariables: PixelBloomStyle = {
+    "--dither-bloom-filter": bloomStyle?.["--dither-bloom-filter"],
+    "--dither-bloom-opacity": bloomStyle?.["--dither-bloom-opacity"],
+  };
+
+  const sizeStyle: AvatarSizeStyle = {
+    "--dither-avatar-size": size == null ? undefined : `${size}px`,
+  };
 
   return (
     <div
       role="img"
-      aria-label={`${name} avatar`}
-      className={cn("relative", className)}
-      style={size != null ? { width: size, height: size } : undefined}
+      aria-label={tl("{name} avatar", { name })}
+      className={cn("relative", size != null && styles.avatarSize, className)}
+      style={sizeStyle}
     >
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 h-full w-full"
-        style={{ imageRendering: "pixelated" }}
+        className={cn("absolute inset-0 h-full w-full", styles.pixelated)}
       />
       {bloomStyle && (
         <canvas
           ref={bloomRef}
-          className="pointer-events-none absolute inset-0 h-full w-full"
-          style={bloomStyle}
+          className={cn("pointer-events-none absolute inset-0 h-full w-full", styles.bloom)}
+          style={bloomVariables}
         />
       )}
     </div>

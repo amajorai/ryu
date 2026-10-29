@@ -26,8 +26,9 @@ use ryu_mesh::MeshHost;
 pub const MESH_ENABLED_PREF_KEY: &str = "mesh-enabled";
 
 /// The Core preference holding which network backend the tunnel uses —
-/// `"headscale"` (self-hosted), `"tailscale"` (SaaS), or `"tailcat"` (the
-/// short-lived no-setup default). Written by the node selector's **Tunnel** layer;
+/// `"headscale"` (self-hosted), `"tailscale"` (SaaS), `"tailcat"` (the
+/// short-lived no-setup default), `"cloudflared"`, `"opentunnel"`, or `"plugin"`
+/// (the bound `network.tunnel` adapter). Written by the node selector's **Tunnel** layer;
 /// read by
 /// [`crate::sidecar::tailscale::mesh_backend`].
 ///
@@ -94,9 +95,8 @@ pub fn install() {
     ryu_mesh::set_global_host(std::sync::Arc::new(CoreMeshHost));
 }
 
-/// Core's `MeshHost` — the process side of the network seam. Status dispatches to
-/// the selected Tailscale/Headscale or Tailcat adapter; Funnel remains a
-/// Tailscale-only capability.
+/// Core's mesh and tunnel host. Status dispatches to the selected network
+/// adapter; Funnel remains a Tailscale-only capability.
 pub struct CoreMeshHost;
 
 #[async_trait]
@@ -105,6 +105,22 @@ impl MeshHost for CoreMeshHost {
         match crate::sidecar::tailscale::mesh_backend().await.0 {
             crate::sidecar::tailscale::MeshBackend::Tailcat => {
                 crate::sidecar::tailcat::status_json()
+            }
+            crate::sidecar::tailscale::MeshBackend::Cloudflared => {
+                let url = ryu_webhook_ingress::CloudflaredSource::owned_base_url(
+                    ryu_webhook_ingress::CloudflaredOwner::TunnelToolkit,
+                );
+                Ok(serde_json::json!({
+                    "Backend": "cloudflared",
+                    "BackendState": if url.is_some() { "Running" } else { "Stopped" },
+                    "Self": { "CloudflaredUrl": url },
+                }))
+            }
+            crate::sidecar::tailscale::MeshBackend::OpenTunnel => {
+                Ok(crate::sidecar::opentunnel::status_json())
+            }
+            crate::sidecar::tailscale::MeshBackend::Plugin => {
+                Ok(crate::sidecar::plugin_tunnel::status_json().await)
             }
             crate::sidecar::tailscale::MeshBackend::Headscale
             | crate::sidecar::tailscale::MeshBackend::Tailscale => {
@@ -120,6 +136,15 @@ impl MeshHost for CoreMeshHost {
                     "Tailcat does not provide Funnel ingress; select Tailscale for Funnel"
                 )
             }
+            crate::sidecar::tailscale::MeshBackend::Cloudflared => {
+                anyhow::bail!("Cloudflare Quick Tunnels do not provide Tailscale Funnel ingress")
+            }
+            crate::sidecar::tailscale::MeshBackend::OpenTunnel => {
+                anyhow::bail!("OpenTunnel does not provide Tailscale Funnel ingress")
+            }
+            crate::sidecar::tailscale::MeshBackend::Plugin => {
+                anyhow::bail!("plugin tunnels do not provide Tailscale Funnel ingress")
+            }
             crate::sidecar::tailscale::MeshBackend::Headscale
             | crate::sidecar::tailscale::MeshBackend::Tailscale => {
                 crate::sidecar::tailscale::ensure_funnel(port).await
@@ -130,6 +155,9 @@ impl MeshHost for CoreMeshHost {
     async fn funnel_url(&self, port: u16) -> Option<String> {
         match crate::sidecar::tailscale::mesh_backend().await.0 {
             crate::sidecar::tailscale::MeshBackend::Tailcat => None,
+            crate::sidecar::tailscale::MeshBackend::Cloudflared
+            | crate::sidecar::tailscale::MeshBackend::OpenTunnel
+            | crate::sidecar::tailscale::MeshBackend::Plugin => None,
             crate::sidecar::tailscale::MeshBackend::Headscale
             | crate::sidecar::tailscale::MeshBackend::Tailscale => {
                 crate::sidecar::tailscale::funnel_url(port).await

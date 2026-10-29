@@ -1,3 +1,10 @@
+declare module "react" {
+	interface CSSProperties {
+		"--launchpad-width"?: string;
+	}
+}
+
+import proofStyles from "./app-launchpad-story.module.css";
 // Standalone browser story for the REAL `AppLaunchpadGrid` — the macOS-Launchpad
 // grid of app tiles under the composer on the empty chat start page.
 //
@@ -150,18 +157,15 @@ function Pane({
 	width: number;
 }) {
 	return (
-		<section style={{ marginBottom: 40 }}>
-			<h2
-				style={{
-					fontSize: 12,
-					marginBottom: 8,
-					opacity: 0.6,
-					fontFamily: "system-ui, sans-serif",
-				}}
-			>
+		<section className={proofStyles.fixture1}>
+			<h2 className={proofStyles.fixture2}>
 				{label} — {width}px
 			</h2>
-			<div data-testid={`launchpad-${width}`} style={{ width }}>
+			<div
+				className={proofStyles.launchpadPane}
+				data-testid={`launchpad-${width}`}
+				style={{ "--launchpad-width": `${width}px` }}
+			>
 				<AppLaunchpadGrid
 					items={items}
 					onInstallStandalone={onInstallStandalone}
@@ -195,30 +199,30 @@ function Story() {
 		}
 	};
 	const onInstallStandalone = (item: LaunchpadItem) => {
-		if (!item.appId) {
+		const appId = item.appId;
+		if (!appId) {
 			return;
 		}
-		setStandaloneAppIds((current) =>
-			new Set(current).add(item.appId as string)
-		);
+		setStandaloneAppIds((current) => new Set(current).add(appId));
 		setStatus(`Installed standalone: ${item.label}`);
 	};
 	const onOpenStandalone = (item: LaunchpadItem) => {
 		setStatus(`Opened standalone: ${item.label}`);
 	};
 	const onRemoveStandalone = (item: LaunchpadItem) => {
-		if (!item.appId) {
+		const appId = item.appId;
+		if (!appId) {
 			return;
 		}
 		setStandaloneAppIds((current) => {
 			const next = new Set(current);
-			next.delete(item.appId as string);
+			next.delete(appId);
 			return next;
 		});
 		setStatus(`Removed standalone: ${item.label}; app data stays in Ryu`);
 	};
 	return (
-		<div style={{ padding: 40 }}>
+		<div className={proofStyles.fixture3}>
 			<Pane
 				items={items}
 				label="Narrow split pane"
@@ -246,17 +250,10 @@ function Story() {
 			{/* The empty list must render NOTHING — no stray strip under the
 			    composer for a user whose apps are all off. */}
 			<section>
-				<h2
-					style={{
-						fontSize: 12,
-						marginBottom: 8,
-						opacity: 0.6,
-						fontFamily: "system-ui, sans-serif",
-					}}
-				>
+				<h2 className={proofStyles.fixture4}>
 					No apps enabled (must render nothing)
 				</h2>
-				<div data-testid="launchpad-empty" style={{ width: 720 }}>
+				<div className={proofStyles.fixture5} data-testid="launchpad-empty">
 					<AppLaunchpadGrid items={[]} onOpen={recordOpen} />
 				</div>
 			</section>

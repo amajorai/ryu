@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { RouteClaim } from "./rpc.ts";
 import {
 	asAppRequestArg,
 	capabilitiesFromGrants,
@@ -9,7 +10,7 @@ import {
 const services = (appRequest: HostServices["appRequest"]): HostServices => ({
 	appRequest,
 	listAgents: () => Promise.resolve([]),
-	registerRoute: () => Promise.resolve(null),
+	registerRoute: (claim: RouteClaim) => Promise.resolve({ path: claim.path }),
 });
 
 describe("asAppRequestArg", () => {
@@ -36,8 +37,9 @@ describe("asAppRequestArg", () => {
 	});
 
 	test("dispatches only with the Gateway-approved app:http grant", async () => {
-		const appRequest = async (input: unknown) => ({ input });
-		const args = [{ method: "GET", path: "/status" }];
+		const appRequest: HostServices["appRequest"] = async (input) => ({ input });
+		const input = { method: "GET", path: "/status" };
+		const args = [input];
 		await expect(
 			dispatchRpc(
 				"app.request",
@@ -45,7 +47,7 @@ describe("asAppRequestArg", () => {
 				capabilitiesFromGrants(["app:http"]),
 				services(appRequest)
 			)
-		).resolves.toEqual({ input: args[0] });
+		).resolves.toEqual({ input });
 		await expect(
 			dispatchRpc("app.request", args, new Set(), services(appRequest))
 		).rejects.toMatchObject({ code: "denied" });

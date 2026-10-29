@@ -3,20 +3,28 @@
 import { parseTwitterUrl, parseVideoUrl } from "@platejs/media";
 import { MediaEmbedPlugin, useMediaState } from "@platejs/media/react";
 import { ResizableProvider, useResizableValue } from "@platejs/resizable";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { safeHttpUrl } from "@ryu/ui/lib/safe-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { TMediaEmbedElement } from "platejs";
 import type { PlateElementProps } from "platejs/react";
 import { PlateElement, withHOC } from "platejs/react";
+import type { CSSProperties as ReactCSSProperties } from "react";
 import LiteYouTubeEmbed from "react-lite-youtube-embed";
 import { Tweet } from "react-tweet";
-
+import editorStyles from "../editor-lint.module.css";
 import { Caption, CaptionTextarea } from "./caption.tsx";
 import { MediaToolbar } from "./media-toolbar.tsx";
+import { requireMediaEmbedId } from "./required-media-embed-id.ts";
 import {
 	mediaResizeHandleVariants,
 	Resizable,
 	ResizeHandle,
 } from "./resize-handle.tsx";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editormediaEmbedNode1-width"?: string | number;
+}
 
 export const MediaEmbedElement = withHOC(
 	ResizableProvider,
@@ -35,7 +43,13 @@ export const MediaEmbedElement = withHOC(
 		});
 		const width = useResizableValue("width");
 		const provider = embed?.provider;
+		const safeEmbedUrl = safeHttpUrl(embed?.url);
 
+		const editormediaEmbedNode1Style: EditorVariableStyle = {
+			"--editormediaEmbedNode1-width": isNativeNumber(width)
+				? `${width}px`
+				: width,
+		};
 		return (
 			<MediaToolbar plugin={MediaEmbedPlugin}>
 				<PlateElement className="py-2.5" {...props}>
@@ -60,7 +74,7 @@ export const MediaEmbedElement = withHOC(
 								isYoutube ? (
 									<div>
 										<LiteYouTubeEmbed
-											id={embed?.id!}
+											id={requireMediaEmbedId(embed?.id)}
 											title="youtube"
 											wrapperClass={cn(
 												"rounded-sm",
@@ -97,7 +111,7 @@ export const MediaEmbedElement = withHOC(
 												isVideo && "border-0",
 												focused && selected && "ring-2 ring-ring ring-offset-2"
 											)}
-											src={embed?.url}
+											src={safeEmbedUrl ?? undefined}
 											title="embed"
 										/>
 									</div>
@@ -113,7 +127,7 @@ export const MediaEmbedElement = withHOC(
 											"[&_.react-tweet-theme]:ring-2 [&_.react-tweet-theme]:ring-ring [&_.react-tweet-theme]:ring-offset-2"
 									)}
 								>
-									<Tweet id={embed?.id!} />
+									<Tweet id={requireMediaEmbedId(embed?.id)} />
 								</div>
 							)}
 
@@ -123,8 +137,12 @@ export const MediaEmbedElement = withHOC(
 							/>
 						</Resizable>
 
-						<Caption align={align} style={{ width }}>
-							<CaptionTextarea placeholder="Write a caption..." />
+						<Caption
+							align={align}
+							className={editorStyles.editormediaEmbedNode1}
+							style={editormediaEmbedNode1Style}
+						>
+							<CaptionTextarea placeholder="Write a caption…" />
 						</Caption>
 					</figure>
 

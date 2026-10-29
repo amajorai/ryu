@@ -16,13 +16,32 @@
 //   GET  /api/billing/portal              -> the Polar billing portal URL
 //   GET  /api/credits/wallet              -> the pooled org wallet balance
 
+import {
+	type AppRequestValue,
+	appRequestValueSchema,
+} from "@ryuhq/core-client/app-request-json.ts";
 import { openSse, type SseMessage } from "@ryuhq/protocol/sse";
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import type { z } from "zod";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
+import { billingStatusUpdateSchema } from "./billing-login-stream-contracts.ts";
+import { walletResponseSchema } from "./credits-wire-contracts.ts";
+import {
+	hostedAgentsCheckoutSchema,
+	organizationMembershipsSchema,
+	organizationPlanCheckoutSchema,
+	teamsBillingErrorReplySchema,
+	teamsBillingPortalSchema,
+	teamsCheckoutSchema,
+	teamsOnboardingCheckoutSchema,
+	teamsSeatStatusSchema,
+	teamsSeatUpdateSchema,
+	teamsSubscriptionStatusSchema,
+} from "./teams-billing-wire-contracts.ts";
 
 /** The Better-Auth session bearer token, or null when signed out / no storage. */
 function authToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		// No storage — treated as signed out.
 		return null;
@@ -34,13 +53,11 @@ export function hasTeamsBillingAuth(): boolean {
 	return Boolean(authToken());
 }
 
-function authHeaders(): Record<string, string> {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-	};
+function authHeaders(): Headers {
+	const headers = new Headers({ "Content-Type": "application/json" });
 	const token = authToken();
 	if (token) {
-		headers.Authorization = `Bearer ${token}`;
+		headers.set("Authorization", `Bearer ${token}`);
 	}
 	return headers;
 }
@@ -73,69 +90,75 @@ export class TeamsBillingError extends Error {
 }
 
 async function toError(resp: Response): Promise<TeamsBillingError> {
-	let message: string | undefined;
+	let message: AppRequestValue;
 	let needsUpgrade = false;
 	try {
-		const body = (await resp.json()) as {
-			message?: string;
-			error?: string;
-			needsUpgrade?: boolean;
-		};
+		const body = teamsBillingErrorReplySchema.parse(await resp.json());
 		message = body.message ?? body.error;
 		needsUpgrade = Boolean(body.needsUpgrade);
 	} catch {
 		// Non-JSON body.
 	}
 	if (resp.status === 401) {
-		return new TeamsBillingError("auth", message ?? "Sign in to manage Teams.");
+		return new TeamsBillingError(
+			"auth",
+			String(message ?? "Sign in to manage Teams.")
+		);
 	}
 	if (resp.status === 403) {
 		return new TeamsBillingError(
 			"forbidden",
-			message ?? "Only an organization owner or admin can do that."
+			String(message ?? "Only an organization owner or admin can do that.")
 		);
 	}
 	if (resp.status === 409) {
 		return new TeamsBillingError(
 			"no_org",
-			message ?? "Teams applies to an organization. Create or select one first."
+			String(
+				message ??
+					"Teams applies to an organization. Create or select one first."
+			)
 		);
 	}
 	if (resp.status === 422) {
 		return new TeamsBillingError(
 			needsUpgrade ? "needs_upgrade" : "invalid",
-			message ?? "Invalid seat count.",
+			String(message ?? "Invalid seat count."),
 			needsUpgrade
 		);
 	}
 	return new TeamsBillingError(
 		"unknown",
-		message ?? `Request failed: ${resp.status}`
+		String(message ?? `Request failed: ${resp.status}`)
 	);
 }
 
-async function get<T>(path: string): Promise<T> {
+async function get<T>(path: string, responseSchema: z.ZodType<T>): Promise<T> {
 	const resp = await fetch(`${BASE}${path}`, { headers: authHeaders() });
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	return (await resp.json()) as T;
+	return responseSchema.parse(await resp.json());
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(
+	path: string,
+	body: AppRequestValue,
+	responseSchema: z.ZodType<T>
+): Promise<T> {
 	const headers = authHeaders();
 	if (path.startsWith("/billing/checkout")) {
-		headers["Idempotency-Key"] = crypto.randomUUID();
+		headers.set("Idempotency-Key", crypto.randomUUID());
 	}
 	const resp = await fetch(`${BASE}${path}`, {
 		method: "POST",
 		headers,
-		body: JSON.stringify(body),
+		body: JSON.stringify(appRequestValueSchema.parse(body)),
 	});
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	return (await resp.json()) as T;
+	return responseSchema.parse(await resp.json());
 }
 
 /** The entitlement resolved by subscription-status (subset read here). */
@@ -155,11 +178,9 @@ export interface SubscriptionStatus {
 	 * silently type-drop it while the TTL path kept working — the hardest
 	 * version of this bug to notice.
 	 *
-	 * Required, matching this file's all-required style. Note the compiler
-	 * cannot enforce it either way: both desktop mirrors are independent
-	 * structural declarations cast off `resp.json()`, NOT imports of the
-	 * server's `SubscriptionStatusPayload`, so nothing links them. They are kept
-	 * in step by hand.
+	 * Required by the established HTTP view and validated against the same
+	 * complete publisher-field owner used by the SSE path. Older HTTP peers
+	 * can omit newer rollout fields without losing their existing flags.
 	 */
 	features: Record<string, boolean>;
 	/** Non-renewing personal access received through a gift. */
@@ -176,7 +197,7 @@ export interface SubscriptionStatus {
 }
 
 export function fetchSubscriptionStatus(): Promise<SubscriptionStatus> {
-	return get<SubscriptionStatus>("/billing/subscription-status");
+	return get("/billing/subscription-status", teamsSubscriptionStatusSchema);
 }
 
 /** Member-seat state for the active organization. Polar owns billedSeats. */
@@ -210,7 +231,7 @@ export interface OrganizationPlanCheckout {
 }
 
 export function fetchTeamsSeatStatus(): Promise<TeamsSeatStatus> {
-	return get<TeamsSeatStatus>("/billing/seats");
+	return get("/billing/seats", teamsSeatStatusSchema);
 }
 
 /** Start a native Polar checkout for a human-seat organization plan. */
@@ -220,12 +241,16 @@ export function checkoutOrganizationPlan(
 	seats: number,
 	organizationId?: string | null
 ): Promise<OrganizationPlanCheckout> {
-	return post("/billing/checkout/organization", {
-		interval,
-		organizationId,
-		planId,
-		seats,
-	});
+	return post(
+		"/billing/checkout/organization",
+		{
+			interval,
+			organizationId,
+			planId,
+			seats,
+		},
+		organizationPlanCheckoutSchema
+	);
 }
 
 /** Start the native Polar seat-based Teams checkout. */
@@ -234,11 +259,15 @@ export function checkoutTeams(
 	seats: number,
 	organizationId?: string | null
 ): Promise<{ seats: number; url: string }> {
-	return post("/billing/checkout/teams", {
-		interval,
-		organizationId,
-		seats,
-	});
+	return post(
+		"/billing/checkout/teams",
+		{
+			interval,
+			organizationId,
+			seats,
+		},
+		teamsCheckoutSchema
+	);
 }
 
 /** Start the one-month desktop onboarding offer at the fixed five-seat floor. */
@@ -255,7 +284,11 @@ export interface TeamsOnboardingCheckout {
 export function checkoutTeamsOnboarding(
 	organizationId?: string | null
 ): Promise<TeamsOnboardingCheckout> {
-	return post("/billing/checkout/teams/onboarding", { organizationId });
+	return post(
+		"/billing/checkout/teams/onboarding",
+		{ organizationId },
+		teamsOnboardingCheckoutSchema
+	);
 }
 
 /** Update the billed seat quantity; server-side RBAC and floors still apply. */
@@ -266,7 +299,7 @@ export function updateTeamsSeats(seats: number): Promise<{
 	prorationLabel: string;
 	seats: number;
 }> {
-	return post("/billing/seats", { seats });
+	return post("/billing/seats", { seats }, teamsSeatUpdateSchema);
 }
 
 export type HostedAgentPlanId = "max" | "pro" | "teams";
@@ -304,6 +337,7 @@ export function openBillingStatusStream(
 	signal: AbortSignal
 ): AsyncGenerator<SseMessage<BillingStatusUpdate>> {
 	return openSse<BillingStatusUpdate>(`${BASE}/billing/status/stream`, {
+		decode: billingStatusUpdateSchema.parse,
 		token: authToken(),
 		signal,
 	});
@@ -319,12 +353,16 @@ export function checkoutHostedAgents(
 	planId: HostedAgentPlanId;
 	url: string;
 }> {
-	return post("/billing/checkout/agents", { agentCount, planId });
+	return post(
+		"/billing/checkout/agents",
+		{ agentCount, planId },
+		hostedAgentsCheckoutSchema
+	);
 }
 
 /** Open the Polar billing portal (owner/admin only) to change/cancel a plan. */
 export function openBillingPortalUrl(): Promise<{ url: string }> {
-	return get<{ url: string }>("/billing/portal");
+	return get("/billing/portal", teamsBillingPortalSchema);
 }
 
 /** The pooled org wallet. */
@@ -336,7 +374,7 @@ export interface WalletView {
 	giftBalanceMicroUsd?: number | null;
 	id: string;
 	providerAllocations?: CreditProviderAllocation[];
-	source?: "local" | "polar";
+	source?: string;
 	/** Remaining included plan credit for the current billing period. */
 	subscriptionBalanceMicroUsd: number | null;
 	/** Remaining purchased credit; this balance rolls over. */
@@ -354,7 +392,7 @@ export interface CreditProviderAllocation {
 }
 
 export function fetchWallet(): Promise<{ wallet: WalletView }> {
-	return get<{ wallet: WalletView }>("/credits/wallet");
+	return get("/credits/wallet", walletResponseSchema);
 }
 
 /** One org membership row (the control plane maps BA roles onto OrgRole). */
@@ -373,8 +411,9 @@ export interface OrgMembership {
 export async function fetchOrgRole(
 	organizationId: string
 ): Promise<OrgMembership["role"]> {
-	const { organizations } = await get<{ organizations: OrgMembership[] }>(
-		"/control-plane/orgs"
+	const { organizations } = await get(
+		"/control-plane/orgs",
+		organizationMembershipsSchema
 	);
 	const org = organizations.find((o) => o.id === organizationId);
 	return org?.role ?? null;

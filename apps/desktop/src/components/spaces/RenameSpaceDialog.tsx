@@ -9,7 +9,7 @@ import {
 } from "@ryu/ui/components/dialog.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { type SubmitEvent, useEffect, useId, useState } from "react";
 import type { Space } from "@/src/lib/api/spaces.ts";
 
 /** Rename a user-created Space without leaving the sidebar. */
@@ -36,7 +36,7 @@ export function RenameSpaceDialog({
 		}
 	}, [open, space.name]);
 
-	const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+	const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		const nextName = name.trim();
 		if (!nextName) {

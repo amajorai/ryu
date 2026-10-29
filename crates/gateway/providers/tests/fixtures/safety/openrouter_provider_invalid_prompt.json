@@ -1,0 +1,18 @@
+{
+  "provider": "openrouter",
+  "status": 400,
+  "expectRow": "openrouter.provider_invalid_prompt",
+  "provenance": "composed: the provider_code forwarding shape from the aggregator's error documentation with the OpenAI code from public reports; not captured from a live request (spec Q-03-1)",
+  "source": "https://openrouter.ai/docs/api-reference/errors",
+  "body": {
+    "error": {
+      "code": 400,
+      "message": "RYU_TEST_FIXTURE upstream refusal message",
+      "metadata": {
+        "provider_name": "OpenAI",
+        "provider_code": "invalid_prompt",
+        "error_type": "invalid_request_error"
+      }
+    }
+  }
+}

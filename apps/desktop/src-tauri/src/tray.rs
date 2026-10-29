@@ -57,7 +57,8 @@ fn island_control_url() -> String {
 /// is a Shadow concern, so the desktop tray talks to it directly rather than
 /// proxying through the island. Profile-aware port (release 3030, dev 4030),
 /// matching Core's spawn side; the request carries Shadow's shared-secret
-/// bearer (see `shadow_auth`) because every non-`/health` route is gated.
+/// bearer because every non-`/health` route is gated, and only after the
+/// listener proves it is Shadow (see `shadow_auth::send_verified`).
 fn shadow_capture_url() -> String {
     format!(
         "http://127.0.0.1:{}/capture/control",
@@ -144,6 +145,12 @@ fn complete_quit<R: Runtime>(app: tauri::AppHandle<R>) {
 /// Check local work before a real application quit. Closing to the tray does
 /// not call this path because it deliberately keeps Core alive.
 pub(crate) fn request_quit<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if crate::core::process::preserve_desktop_core_on_exit() {
+        if !is_quitting() {
+            complete_quit(app.clone());
+        }
+        return;
+    }
     if is_quitting()
         || CLOSE_CONFIRMING.swap(true, std::sync::atomic::Ordering::SeqCst)
     {
@@ -238,8 +245,7 @@ pub async fn set_island_visibility(visible: bool) -> Option<bool> {
 async fn toggle_shadow_capture() -> Option<bool> {
     let client = control_client()?;
     let url = shadow_capture_url();
-    let current = crate::shadow_auth::with_auth(client.get(&url))
-        .send()
+    let current = crate::shadow_auth::send_verified(client.get(&url))
         .await
         .ok()?
         .json::<serde_json::Value>()
@@ -250,14 +256,16 @@ async fn toggle_shadow_capture() -> Option<bool> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let next = !paused;
-    let updated = crate::shadow_auth::with_auth(client.post(&url))
-        .json(&serde_json::json!({ "paused": next }))
-        .send()
-        .await
-        .ok()?
-        .json::<serde_json::Value>()
-        .await
-        .ok()?;
+    let updated = crate::shadow_auth::send_verified(
+        client
+            .post(&url)
+            .json(&serde_json::json!({ "paused": next })),
+    )
+    .await
+    .ok()?
+    .json::<serde_json::Value>()
+    .await
+    .ok()?;
     Some(
         updated
             .get("paused")
@@ -299,24 +307,42 @@ pub(crate) fn read_close_to_tray<R: Runtime, M: Manager<R>>(app: &M) -> bool {
 
 pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show Ryu", true, None::<&str>)?;
-    // # 0.1.0: Island disabled — uncomment when re-enabling the companion tray item
     // The island (companion overlay) and its capture pipeline are driven from here
-    // now that the island has no menu-bar icon of its own.
-    // let companion = MenuItem::with_id(app, "companion", "Show/Hide Companion", true, None::<&str>)?;
+    // now that the island has no menu-bar icon of its own. The companion item is
+    // only added to the menu when the `ISLAND_ENABLED` release gate is on.
+    let companion = MenuItem::with_id(app, "companion", "Show/Hide Companion", true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", "Pause Capture", true, None::<&str>)?;
     let timeline = MenuItem::with_id(app, "timeline", "Open Timeline", true, None::<&str>)?;
     let palette = MenuItem::with_id(app, "palette", "Search Everything…", true, None::<&str>)?;
+    // Interface escape hatches that work whatever an interface draws.
+    let switch_interface =
+        MenuItem::with_id(app, "switch-interface", "Switch Interface…", true, None::<&str>)?;
+    let default_interface = MenuItem::with_id(
+        app,
+        "default-interface",
+        "Back to Default Interface",
+        true,
+        None::<&str>,
+    )?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let sep3 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(
-        app,
-        &[
-            // # 0.1.0: Island disabled — restore `&companion,` after `&sep1,`
-            &show, &sep1, /* &companion, */ &capture, &sep2, &timeline, &palette, &sep3, &quit,
-        ],
-    )?;
+    let mut items: Vec<&dyn tauri::menu::IsMenuItem<R>> = Vec::with_capacity(11);
+    items.push(&show);
+    items.push(&sep1);
+    if crate::ISLAND_ENABLED {
+        items.push(&companion);
+    }
+    items.push(&capture);
+    items.push(&sep2);
+    items.push(&timeline);
+    items.push(&palette);
+    items.push(&switch_interface);
+    items.push(&default_interface);
+    items.push(&sep3);
+    items.push(&quit);
+    let menu = Menu::with_items(app, &items)?;
 
     // On macOS the menu bar recolors a "template" image automatically for the
     // active light/dark appearance, using only its alpha channel. We rasterize
@@ -343,11 +369,11 @@ pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             "show" => {
                 focus_main(app);
             }
-            // # 0.1.0: Island disabled — uncomment when re-enabling Show/Hide Companion
-            // // Toggle the Electron island overlay via its loopback control server.
-            // "companion" => {
-            // 	tauri::async_runtime::spawn(island_control("toggle"));
-            // }
+            // Toggle the Electron island overlay via its loopback control server.
+            // Only reachable when the companion item is in the menu (ISLAND_ENABLED).
+            "companion" => {
+                tauri::async_runtime::spawn(island_control("toggle"));
+            }
             // Pause/resume Shadow capture, then reflect the new state in the label.
             "capture" => {
                 let item = capture_item.clone();
@@ -371,6 +397,14 @@ pub fn setup_tray<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             "palette" => {
                 focus_main(app);
                 let _ = app.emit("tray-open-palette", ());
+            }
+            "switch-interface" => {
+                focus_main(app);
+                let _ = app.emit("tray-switch-interface", ());
+            }
+            "default-interface" => {
+                focus_main(app);
+                let _ = app.emit("tray-default-interface", ());
             }
             // Stop the companion island too, then exit — the unified tray owns both
             // lifecycles, and the island has no other quit affordance.

@@ -1,6 +1,12 @@
+declare const window: Window;
+
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+
+interface PickerPaintWindow extends Window {
+	__pickerPaintSamples: number[];
+}
 
 const agentCount = Number(process.env.RYU_PICKER_AGENTS ?? 250);
 const deferOffscreen = process.env.RYU_PICKER_DEFER === "1";
@@ -14,7 +20,7 @@ test("measure populated picker input-to-frame time independently of click waits"
 		if (!url.pathname.startsWith("/api/")) {
 			return route.continue();
 		}
-		const payloads: Record<string, unknown> = {
+		const payloads = {
 			"/api/agents": {
 				agents: Array.from({ length: agentCount }, (_, index) => ({
 					id: `fixture-${index}`,
@@ -36,7 +42,10 @@ test("measure populated picker input-to-frame time independently of click waits"
 			"/api/apps": { apps: [] },
 			"/api/identities": { profiles: [] },
 		};
-		return route.fulfill({ json: payloads[url.pathname] ?? {} });
+		const payload = Object.entries(payloads).find(
+			([endpoint]) => endpoint === url.pathname
+		)?.[1];
+		return route.fulfill({ json: payload ?? {} });
 	});
 	await page.goto("/mcp-performance-proof.html");
 	if (deferOffscreen) {
@@ -48,7 +57,9 @@ test("measure populated picker input-to-frame time independently of click waits"
 	await page.getByRole("button", { name: "Filter & add", exact: true }).click();
 	await page.evaluate(() => {
 		const samples: number[] = [];
-		Reflect.set(window, "__pickerPaintSamples", samples);
+		// SAFETY: this callback installs and owns the native numeric sample array read by later callbacks.
+		const proofWindow = window as PickerPaintWindow;
+		proofWindow.__pickerPaintSamples = samples;
 		document.addEventListener(
 			"pointerdown",
 			(event) => {
@@ -92,9 +103,7 @@ test("measure populated picker input-to-frame time independently of click waits"
 		if (!cdp) {
 			return null;
 		}
-		const result = (await cdp.send("Performance.getMetrics")) as {
-			metrics: { name: string; value: number }[];
-		};
+		const result = await cdp.send("Performance.getMetrics");
 		return Object.fromEntries(
 			result.metrics.map((metric) => [metric.name, metric.value])
 		);
@@ -117,17 +126,19 @@ test("measure populated picker input-to-frame time independently of click waits"
 		).toBeVisible();
 		await expect
 			.poll(() =>
-				page.evaluate(
-					() => (Reflect.get(window, "__pickerPaintSamples") as number[]).length
-				)
+				page.evaluate(() => {
+					// SAFETY: the preceding instrumentation installs this numeric array on this same page before measuring any pointer events.
+					const proofWindow = window as PickerPaintWindow;
+					return proofWindow.__pickerPaintSamples.length;
+				})
 			)
 			.toBe(index + 1);
 		const after = await metrics();
-		const inputToTwoFramesMs = await page.evaluate(
-			(index) =>
-				(Reflect.get(window, "__pickerPaintSamples") as number[])[index],
-			index
-		);
+		const inputToTwoFramesMs = await page.evaluate((index) => {
+			// SAFETY: instrumentation above installs and owns the sample array, and the poll confirms the requested index exists.
+			const proofWindow = window as PickerPaintWindow;
+			return proofWindow.__pickerPaintSamples[index];
+		}, index);
 		samples.push({
 			index,
 			inputToTwoFramesMs,

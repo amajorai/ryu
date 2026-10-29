@@ -4,8 +4,10 @@ import {
 	languagePackArchive,
 	validateLanguagePack,
 } from "@ryu/i18n";
-import { importLanguagePack as importLanguagePackAtNode } from "@ryuhq/core-client/language-packs";
+import { importLanguagePack as importLanguagePackAtNode } from "@ryuhq/core-client/language-packs.ts";
+import { z } from "zod";
 import { type ApiTarget, request } from "./client.ts";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 
 /** Read the validated language-pack payloads installed on the active Core node. */
 export async function fetchInstalledLanguagePacks(
@@ -15,12 +17,17 @@ export async function fetchInstalledLanguagePacks(
 	const result = await request<{ packs?: unknown[] }>(
 		target,
 		"/api/language-packs/installed",
-		{ signal }
+		{ signal },
+		z
+			.object({ packs: z.array(gatewayJsonValueSchema).optional() })
+			.passthrough()
 	);
 	const packs: LanguagePack[] = [];
 	for (const value of result.packs ?? []) {
 		try {
-			const raw = value as { enabled?: unknown };
+			const raw = z
+				.object({ enabled: z.boolean().optional().catch(undefined) })
+				.parse(value);
 			const pack = validateLanguagePack(value);
 			packs.push({ ...pack, enabled: raw.enabled !== false });
 		} catch {
@@ -39,7 +46,8 @@ export async function setLanguagePackEnabled(
 	await request(
 		target,
 		`/api/marketplace/packages/language_pack/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`,
-		{ method: "POST" }
+		{ method: "POST" },
+		gatewayJsonValueSchema.transform(() => undefined)
 	);
 	window.dispatchEvent(new Event(LANGUAGE_PACKS_CHANGED_EVENT));
 }
@@ -73,5 +81,8 @@ export function downloadLanguagePack(pack: LanguagePack): void {
 	window.document.body.append(link);
 	link.click();
 	link.remove();
-	window.setTimeout(() => URL.revokeObjectURL(url), 0);
+	// Give Chromium time to hand the Blob URL to its download manager before
+	// revoking it. Revoking in the next timer turn can cancel programmatic
+	// downloads before the browser emits a download event.
+	window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

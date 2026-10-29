@@ -1,0 +1,60 @@
+.trace {
+	color: #d4d4d8;
+}
+
+.traceLabel {
+	color: #a1a1aa;
+}
+
+.policyCode {
+	color: #d4d4d8;
+	background-color: #18181b;
+	border-color: #3f3f46;
+}
+
+.policyLabel {
+	color: #a1a1aa;
+}
+
+.policyPanel {
+	background-color: #111113;
+	border-color: #27272a;
+}
+
+.onlineBadge {
+	color: #a1a1aa;
+	border-color: #3f3f46;
+}
+
+.deviceLabel {
+	color: #a1a1aa;
+}
+
+.deviceHeader {
+	border-color: #27272a;
+}
+
+.devicePanel {
+	background-color: #111113;
+	border-color: #27272a;
+}
+
+.fixtureBadge {
+	color: #d4d4d8;
+	background-color: #18181b;
+	border-color: #3f3f46;
+}
+
+.description {
+	color: #a1a1aa;
+}
+
+.eyebrow {
+	color: #c4b5fd;
+	letter-spacing: 1.4px;
+}
+
+.surface {
+	color: #f4f4f5;
+	background-color: #09090b;
+}

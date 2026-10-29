@@ -34,11 +34,12 @@ fix. Please give us reasonable time to ship a fix before any public disclosure.
 
 These are the three places where Ryu actually contains an adversarial agent:
 
-1. **Deny-by-default code-exec sandbox.** The always-on Deno backend spawns `deno run` with zero
-   `--allow-*` flags plus `--no-prompt`: no network, no filesystem, no env, and any attempt fails
-   instead of prompting (`apps/core/src/tool_exec/deno_backend.rs`). The optional wasmtime/WASI
+1. **Deny-by-default code-exec sandbox.** Code mode, plugin hooks, adapters and inline tools run in
+   QuickJS compiled to WebAssembly, inside Core's process under Wasmtime
+   (`crates/core/tool-exec/src/js_backend.rs`): no network, no filesystem, no env, and the only way
+   out is the tool bridge. The optional wasmtime/WASI
    sandbox (feature `sandbox-wasmtime`) gives the same deny-by-default posture
-   (`apps/core/src/sandbox/mod.rs`).
+   (`crates/core/sandbox/src/wasmtime.rs`).
 2. **`RYU_TOKEN` + loopback-default bind + fail-closed remote/mesh auth.** Core binds
    `127.0.0.1:7980` by default. If the mesh is enabled or the bind is non-loopback and no strong
    `RYU_TOKEN` is set, Core **refuses to start** (`enforce_remote_auth` in
@@ -56,7 +57,7 @@ pattern-based heuristics. Treat them as seat belts, not as the wall.
 
 **In scope** (please report):
 
-- Escape from declared isolation: sandbox or process escape from the Deno/WASI backend.
+- Escape from declared isolation: escape from the JS (QuickJS/Wasmtime) or WASI sandbox, or from a process boundary.
 - Tool-allowlist bypass: invoking a tool an agent was not granted.
 - Credential exfiltration via env-scrub bugs.
 - Auth bypass or fail-open in remote/mesh binding (reachable off-box without a valid `RYU_TOKEN`).

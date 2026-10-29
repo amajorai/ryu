@@ -55,9 +55,13 @@ pub fn is_hf_url(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Attach HF bearer auth to a request when a token is available; otherwise pass
-/// the builder through unchanged.
-pub fn authorize(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+/// Attach HF bearer auth only when the request target is on the Hub. Keep the
+/// host check in this boundary so a future caller cannot accidentally forward
+/// the user's token to an unrelated URL.
+pub fn authorize(url: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    if !is_hf_url(url) {
+        return req;
+    }
     match token() {
         Some(t) => req.bearer_auth(t),
         None => req,
@@ -67,6 +71,8 @@ pub fn authorize(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static TOKEN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn host_match_is_strict() {
@@ -81,11 +87,49 @@ mod tests {
 
     #[test]
     fn set_then_clear_token() {
+        let _guard = TOKEN_TEST_LOCK.lock().unwrap();
+        let previous_token = token();
+        let previous_env = std::env::var("HF_TOKEN").ok();
         set_token("  hf_abc123  ");
         assert_eq!(token().as_deref(), Some("hf_abc123"));
         set_token("   ");
-        // Falls back to env (unset in tests) → None.
-        std::env::remove_var("HF_TOKEN");
-        assert_eq!(token(), None);
+        match previous_env {
+            Some(value) => std::env::set_var("HF_TOKEN", value),
+            None => std::env::remove_var("HF_TOKEN"),
+        }
+        match previous_token {
+            Some(value) => set_token(&value),
+            None => assert_eq!(token(), None),
+        }
+    }
+
+    #[test]
+    fn authorize_attaches_the_token_only_to_hugging_face_hosts() {
+        let _guard = TOKEN_TEST_LOCK.lock().unwrap();
+        let previous = token();
+        set_token("hf-test-token");
+        let client = reqwest::Client::new();
+
+        let hub_url = "https://huggingface.co/api/models/owner/model";
+        let hub_request = authorize(hub_url, client.get(hub_url)).build().unwrap();
+        assert_eq!(
+            hub_request
+                .headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .unwrap(),
+            "Bearer hf-test-token"
+        );
+
+        let other_url = "https://example.com/model";
+        let other_request = authorize(other_url, client.get(other_url)).build().unwrap();
+        assert!(other_request
+            .headers()
+            .get(reqwest::header::AUTHORIZATION)
+            .is_none());
+
+        match previous {
+            Some(token) => set_token(&token),
+            None => set_token(""),
+        }
     }
 }

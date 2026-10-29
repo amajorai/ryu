@@ -1,37 +1,10 @@
 {
   "slug": "customer-support",
   "name": "Customer Support",
-  "navLabel": "Customer Support",
-  "category": "Sales & Marketing",
   "icon": "Headphones",
   "tagline": "Find answers in your help center and draft ticket replies for your team to approve.",
-  "heroEyebrow": "Ryu for Customer Support",
   "heroTitle": "Ryu for customer support",
-  "heroSubtitle": "Find answers in your help center and draft ticket replies for your team to approve.",
   "visualKey": "ConnectionsVisual",
-  "intro": "Support is a volume game where accuracy and trust both matter. A generic chatbot invents answers and leaks customer data; your team needs replies grounded in your real knowledge base and a clear record of what was sent. Ryu grounds agents on your docs, connects them to your help desk, and keeps PII redacted on every model call.",
-  "highlights": [
-    {
-      "title": "Answers from your docs",
-      "description": "Agents pull from your help center, macros, and past tickets with Spaces and RAG, so replies cite a real source.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Customer data stays safe",
-      "description": "The Gateway redacts names, emails, and account details on egress, and can run fully local for sensitive queues.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Wired into your help desk",
-      "description": "Connect to Zendesk, Intercom, or your stack to tag, route, and update tickets, not just suggest text.",
-      "icon": "Plug"
-    },
-    {
-      "title": "Human stays in the loop",
-      "description": "Every draft is a suggestion your agent reviews and sends, with the reasoning and sources visible.",
-      "icon": "Bot"
-    }
-  ],
   "useCases": [
     {
       "title": "Reply drafting",
@@ -43,43 +16,33 @@
     },
     {
       "title": "Knowledge base search",
-      "description": "Ask plain questions across your docs and macros; get the answer plus a link to the exact article it came from."
+      "description": "Ask plain questions across your docs and macros, and get the answer plus a link to the article it came from."
     },
     {
       "title": "Escalation summaries",
-      "description": "Bundle a messy thread into a clean summary with the issue, steps tried, and account context for the next tier."
+      "description": "Bundle a messy thread into a short summary with the issue, steps tried, and account context for the next tier."
     },
     {
       "title": "Macro and article drafting",
       "description": "Spot repeat questions in recent tickets and draft new help articles or canned responses to cover them."
     },
     {
-      "title": "Follow-up and CSAT chasing",
-      "description": "Draft polite follow-ups on stalled tickets and post-resolution check-ins, queued for an agent to send."
+      "title": "Follow-ups",
+      "description": "Draft follow-ups on stalled tickets and check-ins after resolution, for your team to send."
     }
-  ],
-  "examplePrompts": [
-    "Read this ticket and draft a reply, citing the help article it's based on.",
-    "Triage the last 50 open tickets by topic and urgency, and tell me which need a human now.",
-    "Summarize this 12-message thread into an escalation note with the issue, steps tried, and account details.",
-    "We keep getting asked about refunds, draft a help-center article and a canned macro for it.",
-    "Find every ticket from this week mentioning the export bug and group them for the engineering handoff."
   ],
   "faq": [
     {
       "q": "Where do the answers come from?",
-      "a": "From your own knowledge base, macros, and past resolutions, grounded with Spaces and RAG. Replies cite the article they came from so your agent can verify before sending, instead of trusting a guess."
+      "a": "From your knowledge base, macros, and past resolutions, added to a Space. Replies cite the article they came from so your team can verify before sending."
     },
     {
       "q": "Is customer data protected?",
-      "a": "Yes. The Gateway redacts PII like names, emails, and account numbers on egress, logs every call, and can route sensitive queues to a fully local model so nothing leaves your device."
+      "a": "Yes, within the rules you set. Use a local model to keep content on your machine, or route cloud calls through the Gateway to redact and log them. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Will it auto-send replies to customers?",
       "a": "Only if you choose to. By default agents draft and your team reviews and sends. You can keep a human in the loop for every reply or automate low-risk ones once you trust the workflow."
     }
-  ],
-  "ctaTitle": "Clear the queue without cutting corners.",
-  "ctaSubtitle": "Grounded drafts, clean triage, and protected customer data, all reviewed by your team.",
-  "ctaNote": "Grounded answers · PII redaction · Help-desk connected"
+  ]
 }

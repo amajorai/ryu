@@ -18,7 +18,7 @@
 // re-sync new messages appended to an already-imported thread (that needs an
 // "update import" path in Core) — a deliberate v1 boundary.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { readAutoImportThreads } from "@/src/hooks/useAutoImportThreads.ts";
 import { agentSupportsHistoryHint } from "@/src/lib/agent-history.ts";
 import { engineForAgent } from "@/src/lib/agent-logos.tsx";
@@ -28,6 +28,11 @@ import {
 	listAgentThreads,
 } from "@/src/lib/api/agent-threads.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import {
+	autoImportSeenKey,
+	loadAutoImportSeen,
+	saveAutoImportSeen,
+} from "@/src/lib/auto-import-seen.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 
@@ -43,29 +48,6 @@ const FOCUS_DEBOUNCE_MS = 30 * 1000;
 const MAX_IMPORTS_PER_SCAN = 50;
 
 const SEEN_KEY = "ryu:auto-imported-thread-ids";
-
-function loadSeen(): Set<string> {
-	try {
-		const raw = localStorage.getItem(SEEN_KEY);
-		if (!raw) {
-			return new Set();
-		}
-		const parsed = JSON.parse(raw) as unknown;
-		return Array.isArray(parsed)
-			? new Set(parsed.filter((v) => typeof v === "string"))
-			: new Set();
-	} catch {
-		return new Set();
-	}
-}
-
-function saveSeen(seen: Set<string>) {
-	try {
-		localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
-	} catch {
-		// best-effort; the Core-side dedup still prevents duplicate conversations
-	}
-}
 
 /** First agent per engine, filtered to engines that plausibly keep history —
  *  threads are engine-relative, so importing under one agent per engine is
@@ -104,22 +86,50 @@ export function useAutoThreadImport({
 	// Latest values, read inside the timer/effect without re-arming it each render.
 	const agentsRef = useRef(agents);
 	agentsRef.current = agents;
-	const targetRef = useRef(target);
-	targetRef.current = target;
+	const authority = useMemo(
+		() => ({
+			target: {
+				url: target.url.replace(/\/$/, ""),
+				token: target.token ?? null,
+				userJwt: target.userJwt ?? null,
+			},
+		}),
+		[
+			target.url.replace(/\/$/, ""),
+			target.token ?? null,
+			target.userJwt ?? null,
+		]
+	);
+	const authorityRef = useRef(authority);
+	authorityRef.current = authority;
+	const memorySeen = useRef(new Map<string, Set<string>>());
 	const onImportedRef = useRef(onImported);
 	onImportedRef.current = onImported;
 	const addFolderRef = useRef(addProjectFolder);
 	addFolderRef.current = addProjectFolder;
 
 	// One scan at a time; a poll that fires mid-scan is skipped.
-	const scanningRef = useRef(false);
-	const lastFocusScanRef = useRef(0);
 
 	useEffect(() => {
 		let cancelled = false;
+		let scanning = false;
+		let lastFocusScan = 0;
+		const capturedTarget = authority.target;
+		const ownsAuthority = () =>
+			!cancelled &&
+			authorityRef.current === authority &&
+			readAutoImportThreads();
+		const memoryKey = JSON.stringify([
+			capturedTarget.url,
+			capturedTarget.token,
+			capturedTarget.userJwt,
+		]);
+		const fallbackSeen = memorySeen.current.get(memoryKey) ?? new Set<string>();
+		memorySeen.current.set(memoryKey, fallbackSeen);
+		let seenKey: string | null = null;
 
 		const scan = async () => {
-			if (cancelled || scanningRef.current || !readAutoImportThreads()) {
+			if (!ownsAuthority() || scanning || !readAutoImportThreads()) {
 				return;
 			}
 			const historyAgents = historyAgentsByEngine(agentsRef.current);
@@ -127,14 +137,14 @@ export function useAutoThreadImport({
 				return;
 			}
 			// Own the entire scan, including the slow profile lookup, before yielding.
-			scanningRef.current = true;
+			scanning = true;
 			let seen: Set<string> | undefined;
 			let importedAny = false;
 			let budget = MAX_IMPORTS_PER_SCAN;
 			try {
 				const managedEngines = new Set<string>();
 				try {
-					const profiles = (await listAgentSyncProfiles(targetRef.current))
+					const profiles = (await listAgentSyncProfiles(capturedTarget))
 						.profiles;
 					for (const profile of profiles) {
 						if (profile.importEnabled) {
@@ -150,25 +160,28 @@ export function useAutoThreadImport({
 						.toLowerCase();
 					return !managedEngines.has(engine);
 				});
-				if (cancelled || candidates.length === 0) {
+				if (!ownsAuthority() || candidates.length === 0) {
 					return;
 				}
-				seen = loadSeen();
+				seenKey = await autoImportSeenKey(SEEN_KEY, capturedTarget);
+				if (!ownsAuthority()) return;
+				seen = loadAutoImportSeen(seenKey, fallbackSeen);
 				for (const agent of candidates) {
-					if (cancelled || budget <= 0) {
+					if (!ownsAuthority() || budget <= 0) {
 						break;
 					}
 					let listing: Awaited<ReturnType<typeof listAgentThreads>>;
 					try {
-						listing = await listAgentThreads(targetRef.current, agent.id);
+						listing = await listAgentThreads(capturedTarget, agent.id);
 					} catch {
 						continue;
 					}
+					if (!ownsAuthority()) return;
 					if (!listing.supported) {
 						continue;
 					}
 					for (const thread of listing.threads) {
-						if (cancelled || budget <= 0) {
+						if (!ownsAuthority() || budget <= 0) {
 							break;
 						}
 						const key = `${listing.engine || agent.id}:${thread.id}`;
@@ -177,10 +190,11 @@ export function useAutoThreadImport({
 						}
 						try {
 							const result = await importAgentThread(
-								targetRef.current,
+								capturedTarget,
 								agent.id,
 								thread.id
 							);
+							if (!ownsAuthority()) return;
 							seen.add(key);
 							budget -= 1;
 							// Register the workspace folder so the imported chat groups
@@ -198,11 +212,11 @@ export function useAutoThreadImport({
 					}
 				}
 			} finally {
-				if (seen) {
-					saveSeen(seen);
+				if (seen && ownsAuthority()) {
+					saveAutoImportSeen(seenKey, seen, fallbackSeen);
 				}
-				scanningRef.current = false;
-				if (importedAny && !cancelled) {
+				scanning = false;
+				if (importedAny && ownsAuthority()) {
 					onImportedRef.current?.();
 				}
 			}
@@ -217,10 +231,10 @@ export function useAutoThreadImport({
 		}, POLL_INTERVAL_MS);
 		const onFocus = () => {
 			const now = Date.now();
-			if (now - lastFocusScanRef.current < FOCUS_DEBOUNCE_MS) {
+			if (now - lastFocusScan < FOCUS_DEBOUNCE_MS) {
 				return;
 			}
-			lastFocusScanRef.current = now;
+			lastFocusScan = now;
 			scan().catch(() => undefined);
 		};
 		window.addEventListener("focus", onFocus);
@@ -231,5 +245,5 @@ export function useAutoThreadImport({
 			clearInterval(interval);
 			window.removeEventListener("focus", onFocus);
 		};
-	}, []);
+	}, [authority]);
 }

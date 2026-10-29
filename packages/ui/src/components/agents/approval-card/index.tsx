@@ -2,14 +2,17 @@
 
 // beui.dev/components/agents/approval-card
 
-import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure";
-import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll";
-import { Button } from "@ryu/ui/components/motion/button/index";
-import { Checkbox } from "@ryu/ui/components/motion/checkbox";
-import { Input } from "@ryu/ui/components/motion/input";
-import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/motion/radio";
-import { EASE_OUT, SPRING_SWAP } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
+import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll.tsx";
+import { Button } from "@ryu/ui/components/motion/button/index.tsx";
+import { Checkbox } from "@ryu/ui/components/motion/checkbox.tsx";
+import { Input } from "@ryu/ui/components/motion/input.tsx";
+import {
+	RadioGroup,
+	RadioGroupItem,
+} from "@ryu/ui/components/motion/radio.tsx";
+import { EASE_OUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	ArrowLeft,
 	ArrowRight,
@@ -27,7 +30,7 @@ import type {
 	ApprovalCardProps,
 	ApprovalCardQuestion,
 	ApprovalCardStatus,
-} from "./types";
+} from "./types.ts";
 
 export type {
 	ApprovalCardAnswer,
@@ -36,7 +39,7 @@ export type {
 	ApprovalCardProps,
 	ApprovalCardQuestion,
 	ApprovalCardStatus,
-} from "./types";
+} from "./types.ts";
 
 const EMPTY_ANSWER: ApprovalCardAnswer = { selected: [], custom: "" };
 
@@ -221,6 +224,7 @@ export function ApprovalCard({
 	submitLabel = "Submit response",
 	result,
 	className,
+	appearance = "default",
 }: ApprovalCardProps) {
 	const reduce = useReducedMotion() ?? false;
 	const [internalAnswers, setInternalAnswers] =
@@ -309,6 +313,7 @@ export function ApprovalCard({
 			aria-busy={busy}
 			className={cn(
 				"w-full overflow-hidden rounded-2xl bg-muted p-4 text-sm",
+				appearance === "docs" && "bg-docs-preview-background",
 				className
 			)}
 			data-state={status}
@@ -350,7 +355,7 @@ export function ApprovalCard({
 						) : (
 							<span
 								className={cn(
-									"shrink-0 rounded-full border px-2 py-0.5 font-medium text-[11px] transition-colors",
+									"type-caption shrink-0 rounded-full border px-2 py-0.5 font-medium transition-colors",
 									getStatusBadgeClass(status)
 								)}
 							>

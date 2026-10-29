@@ -1,14 +1,20 @@
-//! Screenpipe installer — installs screenpipe@latest via npm into `~/.ryu`.
+//! Screenpipe installer — installs screenpipe@latest via npm into the data
+//! dir's shared npm prefix (`<data dir>/runtimes/npm`).
 
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use tokio::process::Command;
 
-use crate::sidecar::download_manager::{ryu_dir, ProgressCallback, ProgressEvent, VersionStore};
+use crate::sidecar::download_manager::{ProgressCallback, ProgressEvent, VersionStore};
 use crate::win_process::NoWindow;
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
+
+/// The npm prefix screenpipe installs into — never the data dir root.
+fn npm_prefix() -> PathBuf {
+    crate::paths::runtime_dir("npm")
+}
 
 fn bin_path() -> PathBuf {
     let name = if cfg!(target_os = "windows") {
@@ -16,7 +22,7 @@ fn bin_path() -> PathBuf {
     } else {
         "screenpipe"
     };
-    ryu_dir().join("bin").join(name)
+    npm_prefix().join("node_modules").join(".bin").join(name)
 }
 
 // ── ScreenpipeDownloader ──────────────────────────────────────────────────────
@@ -35,8 +41,9 @@ impl ScreenpipeDownloader {
         self
     }
 
-    /// Install screenpipe@latest via `npm install --prefix ~/.ryu screenpipe@latest`,
-    /// which places the binary wrapper at `~/.ryu/bin/screenpipe`.
+    /// Install screenpipe@latest via `npm install --prefix <data dir>/runtimes/npm
+    /// screenpipe@latest`, which places the binary wrapper at
+    /// `runtimes/npm/node_modules/.bin/screenpipe`.
     pub async fn ensure_installed(&self) -> Result<()> {
         let dest = bin_path();
 
@@ -50,7 +57,10 @@ impl ScreenpipeDownloader {
             return Ok(());
         }
 
-        let prefix = ryu_dir().to_string_lossy().into_owned();
+        let prefix_dir = npm_prefix();
+        std::fs::create_dir_all(&prefix_dir)
+            .with_context(|| format!("creating npm prefix {}", prefix_dir.display()))?;
+        let prefix = prefix_dir.to_string_lossy().into_owned();
         tracing::info!("installing screenpipe via npm --prefix {prefix}");
 
         if let Some(cb) = self.on_progress.as_ref() {
@@ -73,7 +83,7 @@ impl ScreenpipeDownloader {
             .no_window()
             .status()
             .await
-            .context("running `npm install --prefix ~/.ryu screenpipe@latest --ignore-scripts`")?;
+            .context("running `npm install --prefix <data dir>/runtimes/npm screenpipe@latest --ignore-scripts`")?;
 
         if !status.success() {
             anyhow::bail!("`npm install --prefix {prefix} screenpipe@latest --ignore-scripts` failed with {status}");
@@ -124,15 +134,16 @@ mod tests {
 
     #[test]
     fn bin_path_uses_the_npm_wrapper_name() {
-        // npm's `--prefix ~/.ryu` install drops a `.cmd` wrapper on Windows, a bare
-        // shim elsewhere — both under `~/.ryu/bin`.
+        // npm's `--prefix runtimes/npm` install drops a `.cmd` wrapper on Windows, a
+        // bare shim elsewhere — both under `node_modules/.bin`.
         let p = bin_path();
         assert!(p.ends_with(if cfg!(target_os = "windows") {
             "screenpipe.cmd"
         } else {
             "screenpipe"
         }));
-        assert_eq!(p.parent().unwrap().file_name().unwrap(), "bin");
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), ".bin");
+        assert!(p.starts_with(crate::paths::runtime_dir("npm")));
     }
 
     #[test]

@@ -1,13 +1,9 @@
 //! llama-swap is externally managed: Ryu adopts its loopback API, while
 //! llama-swap owns its YAML configuration, backend commands, and model swapping.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
-use anyhow::Context;
 use serde::Deserialize;
 
-use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
+use super::adopted::{AdoptedEngine, AdoptedProbe};
 
 pub const ENGINE_NAME: &str = "llama-swap";
 /// Dedicated external endpoint, avoiding llama.cpp's :8080. Not profile-shifted.
@@ -64,24 +60,14 @@ impl Model {
     }
 }
 
-pub struct LlamaSwapManager {
-    adopted: Arc<AtomicBool>,
-    client: reqwest::Client,
-    base_url: String,
-}
+/// The llama-swap marker for [`AdoptedEngine`].
+pub struct LlamaSwap;
 
-impl LlamaSwapManager {
-    pub fn new() -> Self {
-        Self {
-            adopted: Arc::new(AtomicBool::new(false)),
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(3))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("llama-swap HTTP client"),
-            base_url: BASE_URL.to_owned(),
-        }
-    }
+impl AdoptedProbe for LlamaSwap {
+    const ENGINE: &'static str = ENGINE_NAME;
+    const LABEL: &'static str = "llama-swap";
+    const DEFAULT_BASE: &'static str = BASE_URL;
+    const SETUP_HINT: &'static str = SETUP_HINT;
 
     async fn probe(client: &reqwest::Client, base_url: &str) -> anyhow::Result<()> {
         let health = client
@@ -102,22 +88,11 @@ impl LlamaSwapManager {
             .await?;
         Ok(())
     }
+}
 
-    pub async fn ensure_available(&self) -> anyhow::Result<()> {
-        Self::probe(&self.client, &self.base_url)
-            .await
-            .context(SETUP_HINT)
-    }
+pub type LlamaSwapManager = AdoptedEngine<LlamaSwap>;
 
-    pub async fn install(&self) -> anyhow::Result<String> {
-        self.ensure_available().await?;
-        crate::sidecar::download_manager::VersionStore::set_version_persisted(
-            ENGINE_NAME,
-            "adopted",
-        )?;
-        Ok("adopted".to_owned())
-    }
-
+impl AdoptedEngine<LlamaSwap> {
     pub async fn chat_models(&self) -> anyhow::Result<Vec<crate::sidecar::adapters::EngineModel>> {
         let response = self
             .client
@@ -146,75 +121,6 @@ impl LlamaSwapManager {
                 })
             })
             .collect())
-    }
-}
-
-impl Default for LlamaSwapManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Sidecar for LlamaSwapManager {
-    fn name(&self) -> &str {
-        ENGINE_NAME
-    }
-    fn is_required(&self) -> bool {
-        false
-    }
-
-    fn start(&self) -> BoxFuture<anyhow::Result<()>> {
-        let adopted = Arc::clone(&self.adopted);
-        let client = self.client.clone();
-        let base_url = self.base_url.clone();
-        Box::pin(async move {
-            let result = Self::probe(&client, &base_url).await.context(SETUP_HINT);
-            adopted.store(result.is_ok(), Ordering::Relaxed);
-            result?;
-            tracing::info!("llama-swap adopted for local inference");
-            Ok(())
-        })
-    }
-
-    fn stop(&self) -> BoxFuture<anyhow::Result<()>> {
-        let adopted = Arc::clone(&self.adopted);
-        Box::pin(async move {
-            adopted.store(false, Ordering::Relaxed);
-            tracing::info!("llama-swap detached; externally managed server left running");
-            Ok(())
-        })
-    }
-
-    fn health_check(&self) -> BoxFuture<HealthStatus> {
-        let adopted = Arc::clone(&self.adopted);
-        let client = self.client.clone();
-        let base_url = self.base_url.clone();
-        Box::pin(async move {
-            // A stopped engine must not be re-adopted by the health monitor.
-            if !adopted.load(Ordering::Relaxed) {
-                return HealthStatus::Unhealthy("llama-swap is not active in Ryu".to_owned());
-            }
-            match Self::probe(&client, &base_url).await {
-                Ok(()) => HealthStatus::Healthy,
-                Err(_) => {
-                    adopted.store(false, Ordering::Relaxed);
-                    HealthStatus::Unhealthy(SETUP_HINT.to_owned())
-                }
-            }
-        })
-    }
-
-    fn is_running(&self) -> bool {
-        self.adopted.load(Ordering::Relaxed)
-    }
-
-    fn uninstall(&self, _delete_data: bool) -> BoxFuture<anyhow::Result<()>> {
-        let adopted = Arc::clone(&self.adopted);
-        Box::pin(async move {
-            adopted.store(false, Ordering::Relaxed);
-            crate::sidecar::remove_from_version_store(ENGINE_NAME);
-            Ok(())
-        })
     }
 }
 

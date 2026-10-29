@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Shared auto-update preference: the cross-surface contract persisted in Core
 // under the `auto-updates` key. The desktop reads/writes the SAME key from its
 // own settings, so the island companion (a separate Electron process) reads and
@@ -30,8 +31,10 @@ export function parseAutoUpdate(raw: string | null): AutoUpdatePref {
 		return DEFAULT_AUTO_UPDATE;
 	}
 	try {
-		const parsed = JSON.parse(raw) as { enabled?: unknown };
-		return { enabled: parsed.enabled !== false };
+		return z
+			.object({ enabled: z.boolean().catch(true) })
+			.catch(DEFAULT_AUTO_UPDATE)
+			.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_AUTO_UPDATE;
 	}

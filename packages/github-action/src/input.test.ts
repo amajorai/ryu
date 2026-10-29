@@ -6,10 +6,8 @@ import {
 	validateOperationInputs,
 } from "./input.ts";
 
-function reader(values: Record<string, string>): {
-	get: (name: string) => string;
-} {
-	return { get: (name) => values[name] ?? "" };
+function reader(values: Record<string, string>) {
+	return { get: (name: string) => values[name] ?? "" };
 }
 
 describe("GitHub Action input parsing", () => {
@@ -50,6 +48,25 @@ describe("GitHub Action input parsing", () => {
 		expect(normalizeNodeUrl("https://ryu.example///")).toBe(
 			"https://ryu.example"
 		);
+	});
+
+	it("accepts plain http only for a literal loopback node", () => {
+		for (const remote of [
+			"http://ryu.example",
+			"http://10.0.0.5:7980",
+			"http://localhost:7980",
+			"http://127.0.0.1.nip.io:7980",
+			"http://[fe80::1]:7980",
+		]) {
+			expect(() => normalizeNodeUrl(remote)).toThrow("must use https");
+		}
+		expect(normalizeNodeUrl("http://127.0.0.1:7980/")).toBe(
+			"http://127.0.0.1:7980"
+		);
+		expect(normalizeNodeUrl("http://127.1.2.3:7980")).toBe(
+			"http://127.1.2.3:7980"
+		);
+		expect(normalizeNodeUrl("http://[::1]:7980")).toBe("http://[::1]:7980");
 	});
 
 	it("resolves explicit and environment targets with predictable precedence", () => {

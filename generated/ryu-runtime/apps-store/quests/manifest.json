@@ -51,6 +51,7 @@
       },
       "port": 7991,
       "health_path": "/health",
+      "host_api": { "grants": ["crypto:seal"] },
       "http": {
         "mount": "/api/quests",
         "public_mount": "/api/quests",
@@ -81,6 +82,8 @@
             "method": "PUT",
             "permission": "quests.edit"
           },
+          { "path": "/list", "method": "POST", "permission": "quests.view" },
+          { "path": "/judge", "method": "POST", "permission": "quests.edit" },
           { "path": "/", "method": "GET", "permission": "quests.view" },
           { "path": "/", "method": "POST", "permission": "quests.edit" },
           { "path": "/:id", "method": "GET", "permission": "quests.view" },
@@ -96,6 +99,24 @@
           { "path": "/:id/suggestion/dismiss", "permission": "quests.edit" }
         ]
       }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "quests.list",
+      "version": "1.0.0",
+      "title": "Quest list for scheduling",
+      "sidecar": "ryu-quests",
+      "route": "/list",
+      "grant": "quests:jobs"
+    },
+    {
+      "capability": "quests.judge",
+      "version": "1.0.0",
+      "title": "Quest detection pass",
+      "sidecar": "ryu-quests",
+      "route": "/judge",
+      "grant": "quests:jobs"
     }
   ],
   "permission_grants": [

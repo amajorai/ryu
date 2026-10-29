@@ -1,7 +1,23 @@
 import { OrganizationSeatEntitlement } from "@ryu/db/models/organization-seat-entitlement.model";
 import { PolarBillingProjection } from "@ryu/db/models/polar-billing-projection.model";
+import { z } from "zod";
 import { polarClient } from "./payments.ts";
 import { polarOrganizationExternalId } from "./polar-credits.ts";
+
+const providerErrorStatusSchema = z
+	.object({
+		statusCode: z.number().nullish().catch(Number.NaN),
+		status: z.number().nullish().catch(Number.NaN),
+	})
+	.transform((error) => error.statusCode ?? error.status)
+	.catch(undefined);
+const organizationCustomerMetadataSchema = z.object({ orgId: z.string() });
+
+/** Polar's answer when a customer with this external id or email already exists. */
+function isProviderConflict(error: unknown): boolean {
+	const status = providerErrorStatusSchema.parse(error);
+	return status === 409 || status === 422;
+}
 
 /** A provider customer id cannot be safely reused until its Ryu owner is proven. */
 export class OrganizationPolarCustomerReconciliationError extends Error {
@@ -29,11 +45,7 @@ export async function resolveOrganizationPolarCustomerId(
 		}
 		return customer.id;
 	} catch (error) {
-		const status =
-			typeof error === "object" && error !== null
-				? ((error as { statusCode?: unknown }).statusCode ??
-					(error as { status?: unknown }).status)
-				: undefined;
+		const status = providerErrorStatusSchema.parse(error);
 		if (status !== 404) {
 			throw error;
 		}
@@ -100,17 +112,20 @@ export async function ensureOrganizationPolarCustomer(input: {
 			type: "team",
 		});
 	} catch (error) {
-		const status =
-			typeof error === "object" && error !== null
-				? ((error as { statusCode?: unknown }).statusCode ??
-					(error as { status?: unknown }).status)
-				: undefined;
-		if (status === 409 || status === 422) {
-			throw new OrganizationPolarCustomerReconciliationError(
-				"Polar already has a customer for this organization contact; reconcile the provider customer identity before retrying checkout"
-			);
+		if (!isProviderConflict(error)) {
+			throw error;
 		}
-		throw error;
+		// A concurrent checkout for this organization may have created the
+		// customer between our lookup and create. Re-resolve once with the same
+		// strict identity checks; only a conflict that is still unexplained is a
+		// real collision. Errors from the re-resolve propagate unchanged.
+		const raced = await resolveOrganizationPolarCustomerId(organizationId);
+		if (raced) {
+			return raced;
+		}
+		throw new OrganizationPolarCustomerReconciliationError(
+			"Polar already has a customer for this organization contact; reconcile the provider customer identity before retrying checkout"
+		);
 	}
 	if (customer.externalId !== externalId || !customer.id) {
 		throw new Error("Polar returned an invalid organization customer identity");
@@ -145,17 +160,18 @@ export async function ensurePersonalPolarCustomer(input: {
 			type: "individual",
 		});
 	} catch (error) {
-		const status =
-			typeof error === "object" && error !== null
-				? ((error as { statusCode?: unknown }).statusCode ??
-					(error as { status?: unknown }).status)
-				: undefined;
-		if (status === 409 || status === 422) {
-			throw new OrganizationPolarCustomerReconciliationError(
-				"Polar already has a customer for this personal contact; reconcile the provider customer identity before retrying checkout"
-			);
+		if (!isProviderConflict(error)) {
+			throw error;
 		}
-		throw error;
+		// Same race as the organization path: adopt a customer a concurrent
+		// checkout just created for this exact user, never an email match.
+		const raced = await resolvePersonalPolarCustomerId(userId);
+		if (raced) {
+			return raced;
+		}
+		throw new OrganizationPolarCustomerReconciliationError(
+			"Polar already has a customer for this personal contact; reconcile the provider customer identity before retrying checkout"
+		);
 	}
 	if (customer.externalId !== userId || !customer.id) {
 		throw new Error("Polar returned an invalid personal customer identity");
@@ -177,7 +193,7 @@ export async function resolvePersonalPolarCustomerId(
 		if (
 			customer.externalId !== userId ||
 			customer.metadata.scope === "org" ||
-			typeof customer.metadata.orgId === "string"
+			organizationCustomerMetadataSchema.safeParse(customer.metadata).success
 		) {
 			throw new Error(
 				"Polar returned a customer for a different billing identity"
@@ -185,11 +201,7 @@ export async function resolvePersonalPolarCustomerId(
 		}
 		return customer.id;
 	} catch (error) {
-		const status =
-			typeof error === "object" && error !== null
-				? ((error as { statusCode?: unknown }).statusCode ??
-					(error as { status?: unknown }).status)
-				: undefined;
+		const status = providerErrorStatusSchema.parse(error);
 		if (status !== 404) {
 			throw error;
 		}

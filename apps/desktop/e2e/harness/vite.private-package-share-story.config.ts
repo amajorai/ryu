@@ -34,4 +34,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "private-package-share-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

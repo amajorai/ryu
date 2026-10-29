@@ -1,12 +1,14 @@
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardDescription,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
+} from "@ryu/ui/components/card.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
 	Download,
@@ -49,7 +51,7 @@ const MEMORY_GIT_PATH_KEY = "ryu.memory.git-root.v1";
 const MEMORY_GIT_ROOT_PREF_KEY = "memory.git-root";
 
 function storedRoot(): string {
-	if (typeof window === "undefined") {
+	if (globalThis.window === undefined) {
 		return "";
 	}
 	return window.localStorage.getItem(MEMORY_GIT_PATH_KEY) ?? "";
@@ -75,6 +77,7 @@ export function MemoryGitSourceCard({
 	onImported: () => void;
 	target?: ApiTarget;
 }) {
+	const tl = useLiteralMessages();
 	const activeNode = useActiveNode();
 	const { canUseNativeShell } = useAppSurface();
 	const apiTarget = target ?? toTarget(activeNode);
@@ -112,7 +115,7 @@ export function MemoryGitSourceCard({
 
 	const chooseFolder = useCallback(async () => {
 		const selected = await open({ directory: true, multiple: false });
-		if (typeof selected !== "string") {
+		if (!isNativeText(selected)) {
 			return;
 		}
 		window.localStorage.setItem(MEMORY_GIT_PATH_KEY, selected);
@@ -165,7 +168,10 @@ export function MemoryGitSourceCard({
 				await writeProjectMarkdown(root, file.path, file.content);
 			}
 			setNotice(
-				`${memories.length} memories exported as source Markdown. Vectors stay local to this node.`
+				tl(
+					"{memoryCount} memories exported as source Markdown. Vectors stay local to this node.",
+					{ memoryCount: String(memories.length) }
+				)
 			);
 			await refreshStatus();
 		} catch (cause) {
@@ -173,7 +179,7 @@ export function MemoryGitSourceCard({
 		} finally {
 			setBusy(false);
 		}
-	}, [memories, refreshStatus, root, status?.is_repo]);
+	}, [memories, refreshStatus, root, status?.is_repo, tl]);
 
 	const importSource = useCallback(async () => {
 		if (!(root && status?.is_repo)) {
@@ -220,14 +226,17 @@ export function MemoryGitSourceCard({
 			}
 			onImported();
 			setNotice(
-				`${imported} memory source file${imported === 1 ? "" : "s"} imported. Git history remains in the repository.`
+				tl(
+					"{importedCount, plural, one {{importedLabel} memory source file} other {{importedLabel} memory source files}} imported. Git history remains in the repository.",
+					{ importedCount: imported, importedLabel: String(imported) }
+				)
 			);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "Memory import failed");
 		} finally {
 			setBusy(false);
 		}
-	}, [apiTarget, memories, onImported, root, status?.is_repo]);
+	}, [apiTarget, memories, onImported, root, status?.is_repo, tl]);
 
 	const commit = useCallback(async () => {
 		if (!(root && status?.is_repo)) {
@@ -261,7 +270,7 @@ export function MemoryGitSourceCard({
 
 	if (!(canUseNativeShell && isLocalNode(activeNode))) {
 		return (
-			<Card className="border border-border/60 bg-muted/20">
+			<Card appearance="memory-source" borderTone="subtle">
 				<CardHeader>
 					<CardTitle>Git-backed memory</CardTitle>
 					<CardDescription>
@@ -275,11 +284,11 @@ export function MemoryGitSourceCard({
 	}
 
 	return (
-		<Card className="border border-border/60 bg-muted/20">
-			<CardHeader className="gap-3">
+		<Card appearance="memory-source" borderTone="subtle">
+			<CardHeader spacing="chart">
 				<div className="flex items-start justify-between gap-3">
 					<div>
-						<CardTitle className="flex items-center gap-2">
+						<CardTitle layout="badge-row">
 							<GitBranch className="size-4" />
 							Git-backed memory
 						</CardTitle>
@@ -300,7 +309,7 @@ export function MemoryGitSourceCard({
 					{root ? <span>· {statusLabel(status)}</span> : null}
 				</div>
 			</CardHeader>
-			<CardContent className="flex flex-wrap items-center gap-2">
+			<CardContent layout="memory-actions">
 				<Button
 					disabled={busy}
 					onClick={() => void chooseFolder()}

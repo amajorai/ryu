@@ -3,10 +3,11 @@ import {
 	BaseFootnoteReferencePlugin,
 } from "@platejs/footnote";
 import { MarkdownPlugin, remarkMdx, remarkMention } from "@platejs/markdown";
-import { KEYS } from "platejs";
+import { type InferOptions, KEYS } from "platejs";
 import remarkEmoji from "remark-emoji";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { isNativeText } from "../../../lib/native-primitive-observation.ts";
 
 // Regex for raw Obsidian wiki syntax in plain text (`[[Title]]` / `[[Title|Alias]]`).
 const WIKILINK_TEXT_RE = /\[\[([^\][|]+)(?:\|[^\]]*)?\]\]/g;
@@ -63,7 +64,7 @@ function remarkWikiLink() {
 		for (const child of node.children) {
 			if (
 				child.type === "link" &&
-				typeof child.url === "string" &&
+				isNativeText(child.url) &&
 				child.url.startsWith(WIKILINK_URL_PREFIX)
 			) {
 				const raw = child.url.slice(WIKILINK_URL_PREFIX.length);
@@ -78,7 +79,7 @@ function remarkWikiLink() {
 			}
 			if (
 				child.type === "text" &&
-				typeof child.value === "string" &&
+				isNativeText(child.value) &&
 				child.value.includes("[[")
 			) {
 				next.push(...splitWikilinkText(child.value));
@@ -101,7 +102,11 @@ export const MarkdownKit = [
 			remarkPlugins: [
 				remarkMath,
 				remarkGfm,
-				remarkEmoji as any,
+				// SAFETY: Plate deserialization forwards the complete remark-parse mdast Root;
+				// serialization builds a complete mdast Root. Its generic Plugin slot erases this native tree protocol.
+				remarkEmoji as NonNullable<
+					InferOptions<typeof MarkdownPlugin>["remarkPlugins"]
+				>[number],
 				remarkMdx,
 				remarkMention,
 				remarkWikiLink,

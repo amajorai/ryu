@@ -1,12 +1,14 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import styles from "./dither.module.css"
 import { cn } from "./lib"
 import { rgb } from "./palette"
 import {
   BAYER4,
   fillOf,
   type PixelBloom,
+  type PixelBloomStyle,
   type PixelColor,
   pixelBloomStyle,
 } from "./pixel"
@@ -135,13 +137,17 @@ export function DitherGradient({
       })
     }
     paint()
-    if (typeof ResizeObserver === "undefined") return
+    if (globalThis.ResizeObserver === undefined) return
     const ro = new ResizeObserver(paint)
     ro.observe(wrap)
     return () => ro.disconnect()
   }, [from, to, direction, cell, opacity, bloom])
 
   const bloomStyle = pixelBloomStyle(bloom)
+  const bloomVariables: PixelBloomStyle = {
+    "--dither-bloom-filter": bloomStyle?.["--dither-bloom-filter"],
+    "--dither-bloom-opacity": bloomStyle?.["--dither-bloom-opacity"],
+  };
 
   return (
     <div
@@ -154,14 +160,13 @@ export function DitherGradient({
     >
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 h-full w-full"
-        style={{ imageRendering: "pixelated" }}
+        className={cn("absolute inset-0 h-full w-full", styles.pixelated)}
       />
       {bloomStyle && (
         <canvas
           ref={bloomRef}
-          className="absolute inset-0 h-full w-full"
-          style={bloomStyle}
+          className={cn("absolute inset-0 h-full w-full", styles.bloom)}
+          style={bloomVariables}
         />
       )}
     </div>

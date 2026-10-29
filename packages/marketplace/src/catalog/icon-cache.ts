@@ -26,7 +26,12 @@
 // and anything that fails to fetch (a failure must never be sticky — the next launch
 // retries).
 
+import {
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useEffect, useState } from "react";
+import { z } from "zod";
 
 /** localStorage key prefix. One entry per `<id>@<version>` per source URL. */
 const PREFIX = "ryu:icon-cache:";
@@ -40,19 +45,19 @@ const MAX_ENTRIES = 120;
  *  at a 2 MB PNG would otherwise evict the entire cache to hold one icon. */
 const MAX_BYTES = 64 * 1024;
 
-interface CacheEntry {
-	/** The `data:` URI of the fetched art. */
-	data: string;
-	/** `Date.now()` at write, used only to pick an eviction victim. */
-	storedAt: number;
-	/** The source URL these bytes came from. A cache hit requires it to match, so
-	 *  an app that changes its icon URL within one version still repaints. */
-	url: string;
-}
+const cacheEntrySchema = z.object({
+	/** The fetched art and the original source URL. */
+	data: z.string(),
+	url: z.string(),
+	/** Legacy entries lacking a numeric write time are treated as oldest. */
+	storedAt: z.custom<number>(isNativeNumber).catch(0),
+});
+
+type CacheEntry = z.output<typeof cacheEntrySchema>;
 
 function storage(): Storage | null {
 	try {
-		return typeof localStorage === "undefined" ? null : localStorage;
+		return globalThis.localStorage === undefined ? null : localStorage;
 	} catch {
 		// Storage can throw outright (disabled cookies, sandboxed iframe).
 		return null;
@@ -83,13 +88,9 @@ function readEntry(key: string): CacheEntry | null {
 		return null;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<CacheEntry>;
-		if (typeof parsed.data === "string" && typeof parsed.url === "string") {
-			return {
-				data: parsed.data,
-				storedAt: typeof parsed.storedAt === "number" ? parsed.storedAt : 0,
-				url: parsed.url,
-			};
+		const parsed = cacheEntrySchema.safeParse(JSON.parse(raw));
+		if (parsed.success) {
+			return parsed.data;
 		}
 	} catch {
 		// A corrupt entry is a miss, not a crash.
@@ -108,8 +109,10 @@ function entriesByAge(store: Storage): { key: string; storedAt: number }[] {
 		}
 		let storedAt = 0;
 		try {
-			storedAt = (JSON.parse(store.getItem(key) ?? "{}") as CacheEntry)
-				.storedAt;
+			const parsed = cacheEntrySchema.safeParse(
+				JSON.parse(store.getItem(key) ?? "{}")
+			);
+			storedAt = parsed.success ? parsed.data.storedAt : 0;
 		} catch {
 			// Unparseable → treat as ancient so it is evicted first.
 		}
@@ -171,7 +174,7 @@ function toDataUri(blob: Blob): Promise<string | null> {
 		const reader = new FileReader();
 		reader.onerror = () => resolve(null);
 		reader.onload = () =>
-			resolve(typeof reader.result === "string" ? reader.result : null);
+			resolve(isNativeText(reader.result) ? reader.result : null);
 		reader.readAsDataURL(blob);
 	});
 }

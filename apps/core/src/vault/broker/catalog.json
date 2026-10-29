@@ -1,0 +1,90 @@
+[
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "host": "api.anthropic.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:ANTHROPIC_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "x-api-key",
+      "value": "secret:ANTHROPIC_API_KEY"
+    }
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "host": "api.openai.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:OPENAI_API_KEY",
+    "auth": { "type": "bearer", "token": "secret:OPENAI_API_KEY" }
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "host": "api.github.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:GITHUB_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:GITHUB_TOKEN" }
+  },
+  {
+    "id": "gitlab",
+    "name": "GitLab",
+    "host": "gitlab.com",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:GITLAB_TOKEN",
+    "auth": {
+      "type": "api_key",
+      "header": "PRIVATE-TOKEN",
+      "value": "secret:GITLAB_TOKEN"
+    }
+  },
+  {
+    "id": "gemini",
+    "name": "Google Gemini",
+    "host": "generativelanguage.googleapis.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:GEMINI_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "x-goog-api-key",
+      "value": "secret:GEMINI_API_KEY"
+    }
+  },
+  {
+    "id": "linear",
+    "name": "Linear",
+    "host": "api.linear.app",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:LINEAR_API_KEY",
+    "auth": {
+      "type": "api_key",
+      "header": "Authorization",
+      "value": "secret:LINEAR_API_KEY"
+    }
+  },
+  {
+    "id": "npm",
+    "name": "npm registry",
+    "host": "registry.npmjs.org",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:NPM_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:NPM_TOKEN" }
+  },
+  {
+    "id": "slack",
+    "name": "Slack Web API",
+    "host": "slack.com",
+    "pathPrefix": "/api",
+    "suggestedRef": "secret:SLACK_BOT_TOKEN",
+    "auth": { "type": "bearer", "token": "secret:SLACK_BOT_TOKEN" }
+  },
+  {
+    "id": "stripe",
+    "name": "Stripe",
+    "host": "api.stripe.com",
+    "pathPrefix": "/",
+    "suggestedRef": "secret:STRIPE_SECRET_KEY",
+    "auth": { "type": "bearer", "token": "secret:STRIPE_SECRET_KEY" }
+  }
+]

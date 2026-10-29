@@ -1,7 +1,9 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
+import type { ChannelStatus } from "./channelStatus.ts";
+import type { TrafficEvent } from "./gateway.ts";
 
 let response: Response;
-let statuses: unknown[] = [];
+let statuses: ChannelStatus[] = [];
 let streamCalls = 0;
 const originalFetch = globalThis.fetch;
 const storage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -10,6 +12,8 @@ Object.defineProperty(globalThis, "localStorage", {
 	value: { getItem: () => "fixture-token" },
 });
 mock.module("./client.ts", () => ({
+	// `gateway.ts` (reached through `notifications.ts`) checks `instanceof ApiError`.
+	ApiError: class ApiError extends Error {},
 	authenticatedFetch: () => Promise.resolve(response),
 	apiUrl: (target: { url: string }, path: string) => target.url + path,
 	requestHeaders: () => Promise.resolve({}),
@@ -19,6 +23,9 @@ mock.module("./system.ts", () => ({ restartGateway: () => Promise.resolve() }));
 mock.module("@/lib/auth-client.ts", () => ({
 	BACKEND_URL: "http://fixture.test",
 	TOKEN_KEY: "fixture",
+	// The node store's desktop-route sync reads the signed-in account.
+	getActiveUserId: () => null,
+	getActiveToken: () => globalThis.localStorage?.getItem("fixture") ?? null,
 }));
 mock.module("@/lib/core-url.ts", () => ({
 	DEFAULT_CORE_URL: "http://fixture.test",
@@ -108,37 +115,43 @@ async function until(predicate: () => boolean) {
 	);
 }
 const frame = (id: string) =>
-	`data: ${JSON.stringify({ id, type: "fixture" })}\n\n`;
+	`data: ${JSON.stringify({ id, type: "dashboard_updated", dashboard_id: "fixture", title: "Fixture", level: "info" })}\n\n`;
+// The notification consumer validates its publisher's complete event shape,
+// so its frames carry those fields.
+const notificationFrame = (id: string) =>
+	`data: ${JSON.stringify({ level: "info", notification_id: id, title: id })}\n\n`;
 const cases: {
 	name: string;
-	invoke: (
-		callback: (event: unknown) => void,
-		signal: AbortSignal
-	) => Promise<void>;
+	frame: (id: string) => string;
+	invoke: (callback: () => void, signal: AbortSignal) => Promise<void>;
 }[] = [
 	{
 		name: "notifications",
+		frame: notificationFrame,
 		invoke: (callback, signal) =>
 			streamUserNotifications(target, "fixture", callback, signal),
 	},
 	{
 		name: "dashboard",
+		frame,
 		invoke: (callback, signal) =>
 			streamDashboardEvents(target, callback, signal),
 	},
 	{
 		name: "meetings",
+		frame,
 		invoke: (callback, signal) => streamMeetingEvents(target, callback, signal),
 	},
 	{
 		name: "Shadow",
+		frame,
 		invoke: (callback, signal) =>
 			streamActivityChat("Fixture", [], callback, signal),
 	},
 ];
 for (const item of cases) {
 	test(`${item.name} clean EOF releases its reader and preserves valid frames`, async () => {
-		const stream = source(`data: invalid\n\n${frame("first")}`, true);
+		const stream = source(`data: invalid\n\n${item.frame("first")}`, true);
 		let calls = 0;
 		await bounded(
 			item.invoke(() => {
@@ -149,7 +162,7 @@ for (const item of cases) {
 		expect(stream.body.locked).toBe(false);
 	});
 	test(`${item.name} abort stops buffered events and cancels its reader`, async () => {
-		const stream = source(frame("first") + frame("late"));
+		const stream = source(item.frame("first") + item.frame("late"));
 		const controller = new AbortController();
 		let calls = 0;
 		await bounded(
@@ -164,7 +177,7 @@ for (const item of cases) {
 	});
 }
 test("notification consumer failure releases the stream", async () => {
-	const stream = source(frame("first"));
+	const stream = source(notificationFrame("first"));
 	await expect(
 		streamUserNotifications(target, "fixture", () => {
 			throw new Error("Consumer stopped");
@@ -173,8 +186,25 @@ test("notification consumer failure releases the stream", async () => {
 	expect(stream.cancelled()).toBe(1);
 	expect(stream.body.locked).toBe(false);
 });
+const trafficFrame = (requestId: string) => {
+	const event: TrafficEvent = {
+		api_key: "fixture",
+		cache_hit: false,
+		error: null,
+		event_type: "chat",
+		input_tokens: 1,
+		latency_ms: 1,
+		model: "fixture-model",
+		output_tokens: 1,
+		provider: "fixture-provider",
+		request_id: requestId,
+		session_id: null,
+		ts: "2026-10-09T00:00:00Z",
+	};
+	return `event: traffic\ndata: ${JSON.stringify(event)}\n\n`;
+};
 test("Gateway traffic unsubscribe stops buffered events and releases its reader", async () => {
-	const stream = source(frame("first") + frame("late"));
+	const stream = source(trafficFrame("first") + trafficFrame("late"));
 	let calls = 0;
 	let stop = () => {};
 	stop = subscribeGatewayTraffic(target, () => {
@@ -185,8 +215,14 @@ test("Gateway traffic unsubscribe stops buffered events and releases its reader"
 	await until(() => stream.cancelled() === 1 && !stream.body.locked);
 	expect(calls).toBe(1);
 });
+const channelStatus = (id: string): ChannelStatus => ({
+	id,
+	state: "online",
+	detail: null,
+	lastHeartbeatAt: null,
+});
 const channelFrame = (id: string) =>
-	`event: status\ndata: ${JSON.stringify({ id, state: "online" })}\n\n`;
+	`event: status\ndata: ${JSON.stringify(channelStatus(id))}\n\n`;
 test("last channel subscriber releases the reader without restoring stale buffered state", async () => {
 	const stream = source(channelFrame("first") + channelFrame("late"));
 	let calls = 0;
@@ -209,10 +245,7 @@ test("last channel subscriber releases the reader without restoring stale buffer
 });
 test("channel snapshot teardown does not start a stream or refill shared state", async () => {
 	source("");
-	statuses = [
-		{ id: "first", state: "online" },
-		{ id: "late", state: "online" },
-	];
+	statuses = [channelStatus("first"), channelStatus("late")];
 	let calls = 0;
 	let stop = () => {};
 	stop = subscribeChannelStatus((value) => {

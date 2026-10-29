@@ -59,12 +59,13 @@ export const DateSeparator = memo(function DateSeparator({
 			// below it brings its own `mt-2` — so the pair around a day boundary is
 			// unchanged at 8px/8px. Tune breathing room with `py-*`, never by
 			// widening a gap that would also push every turn apart.
-			className={cn("mt-2 shrink-0 py-1", className)}
+			className={cn("mt-2 shrink-0", className)}
 			data-slot="chat-date-separator"
+			spacing="turn"
 			variant="separator"
 		>
-			<MarkerContent className="select-none font-medium text-[11px]">
-				{label}
+			<MarkerContent className="select-none">
+				<span className="type-caption font-medium">{label}</span>
 			</MarkerContent>
 		</Marker>
 	);

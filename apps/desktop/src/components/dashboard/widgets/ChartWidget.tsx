@@ -1,3 +1,5 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // Chart widget: line / bar / area / pie, rendered through the shared shadcn chart
 // wrapper (recharts under the hood). The widget value is an array of data points;
 // config picks the x axis and series. Consistent styling comes from the wrapper.
@@ -9,7 +11,8 @@ import {
 	ChartLegendContent,
 	ChartTooltip,
 	ChartTooltipContent,
-} from "@ryu/ui/components/chart";
+	chartColorVariableName,
+} from "@ryu/ui/components/chart.tsx";
 import { useId } from "react";
 import {
 	Area,
@@ -26,7 +29,7 @@ import {
 	YAxis,
 } from "recharts";
 import type { WidgetKind } from "@/src/lib/api/dashboard.ts";
-import { asRecord, resolveArray, toNumber } from "./data.ts";
+import { asRecord, type JsonValue, resolveArray, toNumber } from "./data.ts";
 import { chartConfigSchema, parseConfig } from "./schema.ts";
 
 // A vibrant, theme-agnostic palette. The app's global `--chart-*` tokens are
@@ -43,15 +46,18 @@ const PALETTE = [
 ];
 
 /** Rows of records from the widget value. */
-function rows(value: unknown, dataKey?: string): Record<string, unknown>[] {
+function rows<TValue>(
+	value: TValue,
+	dataKey?: string
+): NonNullable<ReturnType<typeof asRecord>>[] {
 	return resolveArray(value, dataKey)
 		.map((r) => asRecord(r))
-		.filter((r): r is Record<string, unknown> => r !== null);
+		.filter((r) => r !== null);
 }
 
 function firstKeyWhere(
-	row: Record<string, unknown> | undefined,
-	predicate: (v: unknown) => boolean
+	row: NonNullable<ReturnType<typeof asRecord>> | undefined,
+	predicate: (v: JsonValue | undefined) => boolean
 ): string | undefined {
 	if (!row) {
 		return undefined;
@@ -82,21 +88,22 @@ export function ChartBody({
 	value: unknown;
 	config: unknown;
 }) {
+	const tl = useLiteralMessages();
 	// Unique prefix so multiple area-chart widgets on one grid don't share a
 	// `<linearGradient id>` (duplicate ids make later charts reuse the first fill).
-	const gradientId = useId();
+	const gradientId = `chart-${useId().replace(/[^a-zA-Z0-9_-]/gu, "")}`;
 	const cfg = parseConfig(chartConfigSchema, config);
 	const data = rows(value, cfg.data_key);
-	const ariaLabel = `${humanizeKey(kind)} dashboard chart`;
+	const ariaLabel = tl("{chartKind} dashboard chart", {
+		chartKind: humanizeKey(kind),
+	});
 	if (data.length === 0) {
 		return <EmptyChart />;
 	}
 
 	if (kind === "pie_chart") {
 		const nameKey =
-			cfg.name_key ??
-			firstKeyWhere(data[0], (v) => typeof v === "string") ??
-			"name";
+			cfg.name_key ?? firstKeyWhere(data[0], (v) => isNativeText(v)) ?? "name";
 		const valueKey =
 			cfg.value_key ??
 			firstKeyWhere(data[0], (v) => toNumber(v) !== null) ??
@@ -135,7 +142,7 @@ export function ChartBody({
 
 	// Cartesian charts (line / bar / area).
 	const xKey =
-		cfg.x_key ?? firstKeyWhere(data[0], (v) => typeof v === "string") ?? "x";
+		cfg.x_key ?? firstKeyWhere(data[0], (v) => isNativeText(v)) ?? "x";
 	const series =
 		cfg.series && cfg.series.length > 0
 			? cfg.series
@@ -148,6 +155,10 @@ export function ChartBody({
 			{ label: humanizeKey(s), color: PALETTE[i % PALETTE.length] },
 		])
 	);
+	const seriesVariables = series.map((key) => ({
+		key,
+		name: chartColorVariableName(key),
+	}));
 
 	// Recharts does not reliably flatten a fragment supplied as a child. Keep
 	// these as keyed elements so the grid, axes, tooltip, and legend all survive
@@ -168,7 +179,7 @@ export function ChartBody({
 			cursor={false}
 			key="tooltip"
 		/>,
-		...(series.length > 1
+		...(seriesVariables.length > 1
 			? [
 					<ChartLegend
 						content={<ChartLegendContent />}
@@ -194,11 +205,11 @@ export function ChartBody({
 					margin={{ bottom: 4, left: 0, right: 8, top: 8 }}
 				>
 					{axes}
-					{series.map((s) => (
+					{seriesVariables.map(({ key, name }) => (
 						<Bar
-							dataKey={s}
-							fill={`var(--color-${s})`}
-							key={s}
+							dataKey={key}
+							fill={`var(${name})`}
+							key={key}
 							maxBarSize={28}
 							radius={4}
 						/>
@@ -222,18 +233,18 @@ export function ChartBody({
 					margin={{ bottom: 4, left: 0, right: 8, top: 8 }}
 				>
 					<defs>
-						{series.map((s) => {
-							const id = `${gradientId}-${s}`;
+						{seriesVariables.map(({ key, name }) => {
+							const id = `${gradientId}-${name.slice("--color-".length)}`;
 							return (
-								<linearGradient id={id} key={s} x1="0" x2="0" y1="0" y2="1">
+								<linearGradient id={id} key={key} x1="0" x2="0" y1="0" y2="1">
 									<stop
 										offset="5%"
-										stopColor={`var(--color-${s})`}
+										stopColor={`var(${name})`}
 										stopOpacity={0.7}
 									/>
 									<stop
 										offset="95%"
-										stopColor={`var(--color-${s})`}
+										stopColor={`var(${name})`}
 										stopOpacity={0.05}
 									/>
 								</linearGradient>
@@ -241,12 +252,12 @@ export function ChartBody({
 						})}
 					</defs>
 					{axes}
-					{series.map((s) => (
+					{seriesVariables.map(({ key, name }) => (
 						<Area
-							dataKey={s}
-							fill={`url(#${gradientId}-${s})`}
-							key={s}
-							stroke={`var(--color-${s})`}
+							dataKey={key}
+							fill={`url(#${gradientId}-${name.slice("--color-".length)})`}
+							key={key}
+							stroke={`var(${name})`}
 							strokeWidth={2}
 							type="monotone"
 						/>
@@ -270,13 +281,13 @@ export function ChartBody({
 				margin={{ bottom: 4, left: 0, right: 8, top: 8 }}
 			>
 				{axes}
-				{series.map((s) => (
+				{seriesVariables.map(({ key, name }) => (
 					<Line
 						activeDot={{ r: 3 }}
-						dataKey={s}
+						dataKey={key}
 						dot={false}
-						key={s}
-						stroke={`var(--color-${s})`}
+						key={key}
+						stroke={`var(${name})`}
 						strokeWidth={2}
 						type="monotone"
 					/>

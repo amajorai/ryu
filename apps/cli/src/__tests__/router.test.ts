@@ -20,7 +20,7 @@ test("resolveSurface maps the home chat path to the chat surface", () => {
 });
 
 test("resolveSurface resolves each canonical nav path to a distinct surface", () => {
-	const cases: Record<string, string> = {
+	const cases = {
 		"/home": "home",
 		"/agents": "agents",
 		"/teams": "teams",
@@ -40,7 +40,7 @@ test("resolveSurface resolves each canonical nav path to a distinct surface", ()
 		"/inbox": "inbox",
 		"/downloads": "downloads",
 		"/setup": "setup",
-	};
+	} satisfies Record<string, string>;
 	for (const [path, id] of Object.entries(cases)) {
 		expect(resolveSurface(path)?.id).toBe(id);
 	}

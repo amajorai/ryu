@@ -1,8 +1,10 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
 } from "@ryu/ui/components/hover-card";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -11,6 +13,13 @@ import {
 	ContextRing,
 	type ContextUsage,
 } from "../context-usage.tsx";
+import {
+	isNonPositiveContextCount,
+	isPositiveContextCount,
+	nativeContextPct,
+	nativeContextRemaining,
+} from "../native-context-usage.mjs";
+import { PromptCacheSummary } from "../prompt-cache-summary.tsx";
 
 function BreakdownRow({
 	label,
@@ -35,14 +44,13 @@ function BreakdownRow({
 		</div>
 	);
 }
-
 /**
  * Persistent context-window meter for the composer toolbar. Shows how full the
  * model's context window is BEFORE the user sends — a donut ring that shifts
  * muted → amber → red as the conversation grows, with the used percentage
  * beside it. Hovering reveals the token breakdown (input / cached / output /
- * reasoning / total) and the window utilization, mirroring assistant-ui's
- * ContextDisplay.
+ * reasoning / total), the window utilization, mirroring assistant-ui's
+ * ContextDisplay, and the prompt cache's hit rate and estimated warmth.
  *
  * With `onOpen` the meter also becomes a button that opens the full Context
  * panel — the hover card is the summary, the panel is the per-category
@@ -64,42 +72,59 @@ export function ContextMeter({
 	/** Open the full breakdown. Omit to leave the meter non-interactive. */
 	onOpen?: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const { used, total } = usage;
-	if (!(total > 0) || used <= 0) {
+	if (!isPositiveContextCount(total) || isNonPositiveContextCount(used)) {
 		return null;
 	}
-
-	const pct = (used / total) * 100;
-	const remaining = Math.max(0, total - used);
+	const pct = nativeContextPct(used, total);
+	const remaining = nativeContextRemaining(
+		() => total,
+		() => used
+	);
 	const near = pct >= CONTEXT_WARN_PCT;
 	const over = pct >= CONTEXT_CRITICAL_PCT;
-
-	const rows: Array<{ label: string; value: string }> = [];
-	if (typeof usage.promptTokens === "number") {
+	const rows: Array<{
+		label: string;
+		value: string;
+	}> = [];
+	if (isNativeNumber(usage.promptTokens)) {
 		rows.push({
 			label: "Input",
 			value: formatCount(usage.promptTokens) ?? "—",
 		});
 	}
-	if (typeof usage.cachedTokens === "number") {
+	const cacheReadTokens = usage.cacheReadTokens ?? usage.cachedTokens;
+	if (isNativeNumber(cacheReadTokens)) {
 		rows.push({
-			label: "Cached",
-			value: formatCount(usage.cachedTokens) ?? "—",
+			label: "Cache hits",
+			value: formatCount(cacheReadTokens) ?? "—",
 		});
 	}
-	if (typeof usage.completionTokens === "number") {
+	if (isNativeNumber(usage.cacheWriteTokens)) {
+		rows.push({
+			label: "Cache writes",
+			value: formatCount(usage.cacheWriteTokens) ?? "—",
+		});
+	}
+	if (isNativeNumber(usage.cacheMissTokens)) {
+		rows.push({
+			label: "Cache misses",
+			value: formatCount(usage.cacheMissTokens) ?? "—",
+		});
+	}
+	if (isNativeNumber(usage.completionTokens)) {
 		rows.push({
 			label: "Output",
 			value: formatCount(usage.completionTokens) ?? "—",
 		});
 	}
-	if (typeof usage.reasoningTokens === "number") {
+	if (isNativeNumber(usage.reasoningTokens)) {
 		rows.push({
 			label: "Reasoning",
 			value: formatCount(usage.reasoningTokens) ?? "—",
 		});
 	}
-
 	// Delays live on the TRIGGER in Base UI (`delay`/`closeDelay`); on the root
 	// they were unknown props and silently ignored.
 	//
@@ -110,22 +135,21 @@ export function ContextMeter({
 	return (
 		<HoverCard>
 			<HoverCardTrigger
+				appearance="context-meter"
 				aria-label={
 					onOpen
-						? `Context ${Math.round(pct)}% used — open breakdown`
-						: `Context ${Math.round(pct)}% used`
+						? tl("Context {percent}% used — open breakdown", {
+								percent: String(Math.round(pct)),
+							})
+						: tl("Context {percent}% used", {
+								percent: String(Math.round(pct)),
+							})
 				}
-				className={cn(
-					"flex h-7 w-fit shrink-0 select-none items-center gap-1 rounded-md px-1 text-[11px] text-muted-foreground tabular-nums",
-					onOpen
-						? "cursor-pointer hover:bg-accent hover:text-foreground"
-						: "cursor-default",
-					near && "text-status-warning",
-					over && "text-status-destructive",
-					className
-				)}
+				className={cn(className)}
 				closeDelay={80}
+				contextTone={over ? "destructive" : near ? "warning" : undefined}
 				delay={120}
+				interactive={!!onOpen}
 				onClick={onOpen}
 				// A real <button> only when it does something: rendering one with no
 				// handler would put an empty stop in the composer's tab order.
@@ -134,7 +158,7 @@ export function ContextMeter({
 				<ContextRing pct={pct} />
 				<span>{Math.round(pct)}%</span>
 			</HoverCardTrigger>
-			<HoverCardContent className="w-56 text-xs">
+			<HoverCardContent className="w-64" typography="compact">
 				<div className="flex flex-col gap-1.5">
 					<div className="flex items-center justify-between gap-6 font-medium">
 						<span>Context window</span>
@@ -153,8 +177,12 @@ export function ContextMeter({
 						muted
 						value={`${formatCount(remaining)} tokens`}
 					/>
+					<PromptCacheSummary
+						className="mt-1 border-border border-t pt-2"
+						usage={usage}
+					/>
 					{onOpen ? (
-						<div className="pt-1 text-[11px] text-muted-foreground">
+						<div className="type-caption pt-1 text-muted-foreground">
 							Click for the full breakdown
 						</div>
 					) : null}

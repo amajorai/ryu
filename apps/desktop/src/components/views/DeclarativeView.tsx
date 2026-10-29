@@ -1,3 +1,4 @@
+import { type ViewSourceRow, viewSourceRowSchema } from "@ryu/app-host/views";
 // The **desktop renderer** for the declarative view tier (the Raycast model on
 // Ryu's contribution registry). A companion app returns a `ViewSpec` — pure DATA
 // tagged by a `view` kind — and this component maps it to real `@ryu/ui` components.
@@ -31,22 +32,22 @@ import {
 	sourceItemsFromResponse,
 	validateView,
 } from "@ryu/app-host/views";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
+} from "@ryu/ui/components/card.tsx";
 import {
 	Empty,
 	EmptyContent,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Item,
 	ItemActions,
@@ -54,13 +55,13 @@ import {
 	ItemDescription,
 	ItemGroup,
 	ItemTitle,
-} from "@ryu/ui/components/item";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/item.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/native-select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import {
 	Table,
 	TableBody,
@@ -68,8 +69,8 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
-} from "@ryu/ui/components/table";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/table.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useEffect, useMemo, useState } from "react";
 
 /** Fires when a user activates any action in the rendered view. The renderer
@@ -79,7 +80,7 @@ import { useEffect, useMemo, useState } from "react";
 export type ViewActionHandler = (
 	action: ViewAction,
 	ctx: ViewActionContext
-) => void;
+) => void | Promise<void>;
 
 /** The host's authenticated Core fetch seam a source-carrying view uses at mount.
  *  Resolves parsed JSON; rejects on a non-2xx. The spec never sees a token. */
@@ -87,7 +88,7 @@ export type ViewSourceFetcher = (
 	method: ViewActionHttpMethod,
 	path: string,
 	signal?: AbortSignal
-) => Promise<unknown>;
+) => Promise<Parameters<typeof sourceItemsFromResponse>[1]>;
 
 type BadgeVariant = React.ComponentProps<typeof Badge>["variant"];
 type ButtonVariant = React.ComponentProps<typeof Button>["variant"];
@@ -144,6 +145,7 @@ function Actions({
 	onAction?: ViewActionHandler;
 	ctx?: ViewActionContext;
 }) {
+	const [pending, setPending] = useState(false);
 	if (!actions || actions.length === 0) {
 		return null;
 	}
@@ -151,9 +153,18 @@ function Actions({
 		<div className="flex flex-wrap gap-2">
 			{actions.map((a) => (
 				<Button
+					disabled={pending}
 					key={a.id}
-					onClick={() => onAction?.(a, ctx ?? {})}
+					onClick={async () => {
+						setPending(true);
+						try {
+							await onAction?.(a, ctx ?? {});
+						} finally {
+							setPending(false);
+						}
+					}}
 					size="sm"
+					type="button"
 					variant={buttonVariant(a.style)}
 				>
 					{a.label}
@@ -164,23 +175,27 @@ function Actions({
 }
 
 /** A declared (non-source) item's fields as a `{{item.<key>}}` templating base. */
-function itemRecord(item: ViewItem): Record<string, unknown> {
-	return { ...item };
+function itemRecord(item: ViewItem): ViewSourceRow {
+	return viewSourceRowSchema.parse(item);
 }
 
 /**
  * Fetch a `list-detail` view's declarative `source` at mount (and whenever
  * `reloadToken` bumps, e.g. after a successful action), mapping response rows to
  * items via the vocabulary's field-map. `null` while unresolved (the caller
- * falls back to the spec's static `items`); a failed fetch degrades to `[]`.
+ * falls back to the spec's static `items`); failed reads expose a retry state.
  */
 function useSourceItems(
 	source: ViewSource | undefined,
 	fetchJson: ViewSourceFetcher | undefined,
 	reloadToken: number
-): SourceItem[] | null {
+) {
 	const [items, setItems] = useState<SourceItem[] | null>(null);
+	const [error, setError] = useState(false);
+	const [attempt, setAttempt] = useState(0);
 	useEffect(() => {
+		setItems(null);
+		setError(false);
 		if (!(source && fetchJson)) {
 			setItems(null);
 			return;
@@ -195,13 +210,14 @@ function useSourceItems(
 			.catch(() => {
 				if (!controller.signal.aborted) {
 					setItems([]);
+					setError(true);
 				}
 			});
 		return () => {
 			controller.abort();
 		};
-	}, [source, fetchJson, reloadToken]);
-	return items;
+	}, [source, fetchJson, reloadToken, attempt]);
+	return { items, error, retry: () => setAttempt((value) => value + 1) };
 }
 
 function ListDetail({
@@ -215,7 +231,11 @@ function ListDetail({
 	fetchJson?: ViewSourceFetcher;
 	reloadToken: number;
 }) {
-	const sourceItems = useSourceItems(spec.source, fetchJson, reloadToken);
+	const {
+		items: sourceItems,
+		error,
+		retry,
+	} = useSourceItems(spec.source, fetchJson, reloadToken);
 	const rows: SourceItem[] = useMemo(
 		() =>
 			sourceItems ??
@@ -228,6 +248,30 @@ function ListDetail({
 	const selected =
 		rows.find((r) => r.item.id === selectedId) ?? rows[0] ?? null;
 
+	if (spec.source && fetchJson && sourceItems === null) {
+		return (
+			<Empty>
+				<EmptyHeader>
+					<EmptyTitle>Loading view…</EmptyTitle>
+				</EmptyHeader>
+			</Empty>
+		);
+	}
+	if (error) {
+		return (
+			<Empty>
+				<EmptyHeader>
+					<EmptyTitle>Couldn't load this view.</EmptyTitle>
+					<EmptyDescription>
+						Check your connection or app permissions, then try again.
+					</EmptyDescription>
+				</EmptyHeader>
+				<EmptyContent>
+					<Button onClick={retry}>Try again</Button>
+				</EmptyContent>
+			</Empty>
+		);
+	}
 	if (rows.length === 0) {
 		return (
 			<Empty>
@@ -262,7 +306,13 @@ function ListDetail({
 						>
 							<ItemContent>
 								<ItemTitle>
-									{item.title}
+									<button
+										className="text-left"
+										onClick={() => setSelectedId(item.id)}
+										type="button"
+									>
+										{item.title}
+									</button>
 									<Badges badges={item.badges} />
 								</ItemTitle>
 								{item.subtitle ? (
@@ -301,8 +351,8 @@ function FormField({
 	onChange,
 }: {
 	field: ViewField;
-	value: unknown;
-	onChange: (next: unknown) => void;
+	value: ViewField["value"];
+	onChange: (next: ViewField["value"]) => void;
 }) {
 	switch (field.type) {
 		case "switch":
@@ -365,10 +415,16 @@ function FormField({
 	}
 }
 
-function initialFormValues(fields: ViewField[]): Record<string, unknown> {
-	const values: Record<string, unknown> = {};
+function initialFormValues(fields: ViewField[]) {
+	const values: Record<string, ViewField["value"]> = {};
 	for (const field of fields) {
-		values[field.id] = field.value ?? (field.type === "switch" ? false : "");
+		values[field.id] =
+			field.value ??
+			(field.type === "switch"
+				? false
+				: field.type === "select"
+					? (field.options?.[0]?.value ?? "")
+					: "");
 	}
 	return values;
 }
@@ -382,18 +438,24 @@ function FormRenderer({
 }) {
 	// Controlled inputs: the collected values ARE the form-submit contract — the
 	// `Record<string,unknown>` handed to every action fired from this form.
-	const [values, setValues] = useState<Record<string, unknown>>(() =>
+	const [values, setValues] = useState<Record<string, ViewField["value"]>>(() =>
 		initialFormValues(spec.fields)
 	);
-	const setField = (id: string, next: unknown) =>
+	const [pending, setPending] = useState(false);
+	const setField = (id: string, next: ViewField["value"]) =>
 		setValues((prev) => ({ ...prev, [id]: next }));
 	return (
 		<form
 			className="flex max-w-md flex-col gap-4"
-			onSubmit={(e) => {
+			onSubmit={async (e) => {
 				e.preventDefault();
 				if (spec.submit) {
-					onAction?.(spec.submit, { values });
+					setPending(true);
+					try {
+						await onAction?.(spec.submit, { values });
+					} finally {
+						setPending(false);
+					}
 				}
 			}}
 		>
@@ -409,7 +471,11 @@ function FormRenderer({
 			))}
 			<Actions actions={spec.actions} ctx={{ values }} onAction={onAction} />
 			{spec.submit ? (
-				<Button type="submit" variant={buttonVariant(spec.submit.style)}>
+				<Button
+					disabled={pending}
+					type="submit"
+					variant={buttonVariant(spec.submit.style)}
+				>
 					{spec.submit.label}
 				</Button>
 			) : null}
@@ -571,9 +637,7 @@ export function DeclarativeView({
 					{spec.stats.map((stat) => (
 						<Card key={stat.id}>
 							<CardHeader>
-								<CardTitle className="text-muted-foreground text-xs">
-									{stat.label}
-								</CardTitle>
+								<CardTitle variant="metric-label">{stat.label}</CardTitle>
 							</CardHeader>
 							<CardContent>
 								<div className="font-medium text-2xl">{stat.value}</div>

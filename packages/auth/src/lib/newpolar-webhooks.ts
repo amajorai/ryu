@@ -19,6 +19,7 @@ import {
 	WebhookVerificationError as StandardWebhookVerificationError,
 	Webhook,
 } from "standardwebhooks";
+import { z } from "zod";
 
 /**
  * The one verification error type the API route handles as HTTP 400.
@@ -48,11 +49,14 @@ export type PolarWebhookHeaders = Record<string, string>;
  * camelCase objects the interpreters already consume. Signed but unsupported
  * event types remain a parse error and are acknowledged by the existing route.
  */
-function parsePolarWebhookPayload(payload: unknown): unknown {
-	const type =
-		typeof payload === "object" && payload !== null && "type" in payload
-			? (payload as { type?: unknown }).type
-			: undefined;
+const eventEnvelopeSchema = z.preprocess(
+	(value) => value,
+	z.object({ type: z.string() })
+);
+function parsePolarWebhookPayload(
+	payload: z.input<typeof eventEnvelopeSchema>
+) {
+	const { type } = eventEnvelopeSchema.parse(payload);
 	switch (type) {
 		case "customer.state_changed":
 			return WebhookCustomerStateChangedPayload$inboundSchema.parse(payload);
@@ -85,21 +89,24 @@ function parsePolarWebhookPayload(payload: unknown): unknown {
 	}
 }
 
-function isVerificationError(error: unknown): error is Error {
-	return (
-		error instanceof StandardWebhookVerificationError ||
-		error instanceof PolarSdkWebhookVerificationError ||
-		(error instanceof Error && error.name === "WebhookVerificationError")
-	);
-}
-
-function unifiedVerificationError(
-	error: unknown
-): UnifiedPolarWebhookVerificationError {
-	return new UnifiedPolarWebhookVerificationError(
-		error instanceof Error ? error.message : "Polar webhook verification failed"
-	);
-}
+const isVerificationError = z
+	.unknown()
+	.transform(
+		(error) =>
+			error instanceof StandardWebhookVerificationError ||
+			error instanceof PolarSdkWebhookVerificationError ||
+			(error instanceof Error && error.name === "WebhookVerificationError")
+	).parse;
+const unifiedVerificationError = z
+	.unknown()
+	.transform(
+		(error) =>
+			new UnifiedPolarWebhookVerificationError(
+				error instanceof Error
+					? error.message
+					: "Polar webhook verification failed"
+			)
+	).parse;
 
 /**
  * Verify and parse a Polar delivery.
@@ -114,7 +121,7 @@ export function validatePolarEvent(
 	body: string | Buffer,
 	headers: PolarWebhookHeaders,
 	secret: string
-): unknown {
+) {
 	if (secret.startsWith("whsec_")) {
 		try {
 			const payload = new Webhook(secret).verify(body, headers);

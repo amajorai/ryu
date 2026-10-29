@@ -13,7 +13,9 @@
 //   GET  /api/seller/status   -> stored onboarding + payouts-enabled state
 //   POST /api/seller/onboard  -> a fresh Stripe-hosted onboarding URL (admin-gated)
 
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { appRequestValueSchema } from "@ryuhq/core-client/app-request-json.ts";
+import { z } from "zod";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 
 /** Onboarding lifecycle, mirroring the server's `SellerOnboardingStatus`. */
 export type SellerOnboardingStatus =
@@ -39,20 +41,18 @@ export interface SellerStatus {
 /** True when the user has a session token; the seller flow requires sign-in. */
 export function hasSellerAuth(): boolean {
 	try {
-		return Boolean(localStorage.getItem(TOKEN_KEY));
+		return Boolean(getActiveToken());
 	} catch {
 		return false;
 	}
 }
 
-function authHeaders(): Record<string, string> {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-	};
+function authHeaders() {
+	const headers = new Headers({ "Content-Type": "application/json" });
 	try {
-		const token = localStorage.getItem(TOKEN_KEY);
+		const token = getActiveToken();
 		if (token) {
-			headers.Authorization = `Bearer ${token}`;
+			headers.set("Authorization", `Bearer ${token}`);
 		}
 	} catch {
 		// No storage — request will 401 and the UI prompts to sign in.
@@ -85,11 +85,50 @@ export class SellerError extends Error {
 	}
 }
 
+// Full status fields published by readSellerStatus; older servers may omit
+// fields. The consumed projection below retains its established defaults.
+const sellerStatusReplySchema = z.object({
+	stripeConnectAccountId: z.string().nullish(),
+	payoutsEnabled: appRequestValueSchema.optional(),
+	chargesEnabled: appRequestValueSchema.optional(),
+	onboardingStatus: z
+		.enum(["none", "pending", "active", "restricted"])
+		.nullish(),
+	stripeIdentityStatus: z
+		.enum(["none", "pending", "verified", "restricted"])
+		.nullish(),
+	stripeIdentityVerifiedAt: z.string().nullish(),
+});
+const sellerOnboardReplySchema = z.object({
+	accountId: z.string().nullish(),
+	created: appRequestValueSchema.optional(),
+	url: z.string().nullish(),
+});
+const sellerErrorReplySchema = z.object({
+	message: z.string().nullish(),
+	error: z.string().nullish(),
+});
+const sellerNetworkErrorSchema = z.instanceof(Error);
+/** Classify unexpected transport failures without claiming every caught value
+ * is the API's SellerError. Existing classified errors retain their identity. */
+export const toSellerError = z
+	.instanceof(SellerError)
+	.or(
+		sellerNetworkErrorSchema.transform(
+			(error) => new SellerError("unknown", error.message)
+		)
+	)
+	.catch(
+		() => new SellerError("unknown", "Could not load seller status")
+	).parse;
+
 async function toError(resp: Response): Promise<SellerError> {
 	let message: string | undefined;
 	try {
-		const body = (await resp.json()) as { message?: string; error?: string };
-		message = body.message ?? body.error;
+		const body = sellerErrorReplySchema.safeParse(await resp.json());
+		if (body.success) {
+			message = body.data.message ?? body.data.error ?? undefined;
+		}
 	} catch {
 		// Non-JSON body.
 	}
@@ -127,7 +166,7 @@ export async function fetchSellerStatus(): Promise<SellerStatus> {
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<SellerStatus>;
+	const json = sellerStatusReplySchema.parse(await resp.json());
 	return {
 		stripeConnectAccountId: json.stripeConnectAccountId ?? null,
 		payoutsEnabled: Boolean(json.payoutsEnabled),
@@ -157,7 +196,7 @@ export async function startOnboarding(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<OnboardResult>;
+	const json = sellerOnboardReplySchema.parse(await resp.json());
 	if (!json.url) {
 		throw new SellerError("unknown", "Onboarding session has no URL.");
 	}

@@ -29,8 +29,14 @@ describe("managed-server plan access", () => {
 
 	it("keeps the Enterprise contract in customer-facing copy", () => {
 		expect(CLOUD_NODE_CHANGE_PLANS_LABEL).toBe(
-			"Business, Teams, Teams Lite, or Enterprise"
+			"Business, Teams, or Enterprise"
 		);
+	});
+
+	it("never names a private plan in customer-facing copy", () => {
+		expect(CLOUD_NODE_CHANGE_PLANS_LABEL).not.toMatch(/\bPlus\b|Teams Lite/u);
+		// The private plan still buys nodes; only its name stays out of the copy.
+		expect(planAllowsCloudNodeChanges("teams-lite")).toBe(true);
 	});
 
 	it("allows an active Enterprise contract without inventing a catalog plan", () => {

@@ -1,9 +1,9 @@
 /* @jsxImportSource @opentui/react */
 import { expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
 import { CoreProvider } from "../core/CoreContext.tsx";
 import { useGatewayStatus } from "../overlays/gateway/status.ts";
+import { testRender } from "./cli-test-render.ts";
 
 async function until(predicate: () => boolean) {
 	const deadline = Date.now() + 3000;

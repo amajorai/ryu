@@ -1,9 +1,10 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { buttonVariants } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
-import { Check, Copy, Gift, Sparkles } from "lucide-react";
-import { motion } from "motion/react";
+import { Check, Copy, Gift } from "lucide-react";
+import { MotionConfig, motion } from "motion/react";
 import {
 	type PointerEvent as ReactPointerEvent,
 	useCallback,
@@ -91,7 +92,7 @@ const paintFoil = (
 	);
 	ctx.font =
 		"400 13px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
-	ctx.fillText("🪙 drag across the card", width / 2, height / 2 + 12);
+	ctx.fillText("Drag across the card", width / 2, height / 2 + 12);
 };
 
 export default function ScratchCard({
@@ -111,6 +112,7 @@ export default function ScratchCard({
 	revealAnnouncement = "Your offer is revealed.",
 	revealThreshold = REVEAL_THRESHOLD,
 }: ScratchCardProps) {
+	const tl = useLiteralMessages();
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const scratchingRef = useRef(false);
 	// Once the user has scratched, stop auto-repainting the foil on resize so we
@@ -238,102 +240,105 @@ export default function ScratchCard({
 	}, [code]);
 
 	return (
-		<div
-			className={cn(
-				"relative mx-auto w-full max-w-sm select-none overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-background to-background p-6 shadow-lg",
-				className
-			)}
-		>
-			<div className="mb-4 flex items-center justify-center gap-2 text-muted-foreground text-sm">
-				<Gift aria-hidden="true" className="size-4 text-primary" />
-				<span>{headline}</span>
-			</div>
-
-			{/* The reward that sits under the foil. */}
-			<div className="relative aspect-[16/9] w-full">
-				<div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl border border-primary/30 border-dashed bg-gradient-to-br from-primary/15 to-primary/5 text-center">
-					<span className="flex items-center gap-1 font-medium text-primary text-xs uppercase tracking-widest">
-						<Sparkles aria-hidden="true" className="size-3" />
-						{discountLabel} off
-					</span>
-					<motion.span
-						animate={
-							revealed ? { scale: 1, opacity: 1 } : { scale: 0.9, opacity: 0.8 }
-						}
-						className="mt-1 font-medium font-mono text-3xl text-foreground tracking-widest md:text-4xl"
-						transition={{ type: "spring", stiffness: 260, damping: 18 }}
-					>
-						{code}
-					</motion.span>
-					<span className="mt-1 text-muted-foreground text-xs">
-						Coupon code
-					</span>
+		<MotionConfig reducedMotion="user">
+			<div
+				className={cn(
+					"relative mx-auto w-full max-w-sm select-none overflow-hidden rounded-2xl border border-border bg-card p-6",
+					className
+				)}
+			>
+				<div className="mb-4 flex items-center justify-center gap-2 text-muted-foreground text-sm">
+					<Gift aria-hidden="true" className="size-4 text-primary" />
+					<span>{headline}</span>
 				</div>
 
-				{/* The scratchable foil overlay. */}
-				<canvas
-					aria-label={ariaLabel}
-					className={cn(
-						"absolute inset-0 size-full rounded-xl transition-opacity duration-500",
-						revealed
-							? "pointer-events-none opacity-0"
-							: "cursor-grab touch-none active:cursor-grabbing"
-					)}
-					onPointerCancel={stopScratching}
-					onPointerDown={handlePointerDown}
-					onPointerLeave={stopScratching}
-					onPointerMove={handlePointerMove}
-					onPointerUp={stopScratching}
-					ref={canvasRef}
-					role="img"
-				/>
-			</div>
-			<span aria-live="polite" className="sr-only">
-				{revealed ? revealAnnouncement : ""}
-			</span>
+				{/* The reward that sits under the foil. */}
+				<div className="relative aspect-[16/9] w-full">
+					<div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl border border-border border-dashed bg-muted text-center">
+						<span className="font-medium text-primary text-sm">
+							{tl("{discountLabel} off", { discountLabel })}
+						</span>
+						<motion.span
+							animate={
+								revealed
+									? { scale: 1, opacity: 1 }
+									: { scale: 0.9, opacity: 0.8 }
+							}
+							className="mt-1 font-medium font-mono text-3xl text-foreground tracking-widest md:text-4xl"
+							transition={{ type: "spring", stiffness: 260, damping: 18 }}
+						>
+							{code}
+						</motion.span>
+						<span className="mt-1 text-muted-foreground text-xs">
+							Coupon code
+						</span>
+					</div>
 
-			<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-				{revealed ? (
-					<button
-						className={cn(buttonVariants({ variant: "default", size: "sm" }))}
-						onClick={handleCopy}
-						type="button"
-					>
-						{copied ? (
-							<Check aria-hidden="true" className="size-4" />
-						) : (
-							<Copy aria-hidden="true" className="size-4" />
-						)}
-						{copied ? "Copied!" : `Copy ${code}`}
-					</button>
-				) : (
-					<button
-						className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-						onClick={clearFoil}
-						type="button"
-					>
-						Can't scratch? Reveal code
-					</button>
-				)}
-				{onNeverShowAgain ? (
-					<button
+					{/* The scratchable foil overlay. */}
+					<canvas
+						aria-label={ariaLabel}
 						className={cn(
-							buttonVariants({ variant: "ghost", size: "sm" }),
-							"text-muted-foreground hover:text-foreground"
+							"absolute inset-0 size-full rounded-xl transition-opacity duration-500",
+							revealed
+								? "pointer-events-none opacity-0"
+								: "cursor-grab touch-none active:cursor-grabbing"
 						)}
-						onClick={onNeverShowAgain}
-						type="button"
-					>
-						Never show again
-					</button>
+						onPointerCancel={stopScratching}
+						onPointerDown={handlePointerDown}
+						onPointerLeave={stopScratching}
+						onPointerMove={handlePointerMove}
+						onPointerUp={stopScratching}
+						ref={canvasRef}
+						role="img"
+					/>
+				</div>
+				<span aria-live="polite" className="sr-only">
+					{revealed ? revealAnnouncement : ""}
+				</span>
+
+				<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+					{revealed ? (
+						<button
+							className={cn(buttonVariants({ variant: "mono", size: "sm" }))}
+							onClick={handleCopy}
+							type="button"
+						>
+							{copied ? (
+								<Check aria-hidden="true" className="size-4" />
+							) : (
+								<Copy aria-hidden="true" className="size-4" />
+							)}
+							{copied ? "Copied!" : tl("Copy {code}", { code })}
+						</button>
+					) : (
+						<button
+							className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+							onClick={clearFoil}
+							type="button"
+						>
+							Can't scratch? Reveal code
+						</button>
+					)}
+					{onNeverShowAgain ? (
+						<button
+							className={cn(
+								buttonVariants({ variant: "ghost", size: "sm" }),
+								"text-muted-foreground hover:text-foreground"
+							)}
+							onClick={onNeverShowAgain}
+							type="button"
+						>
+							Never show again
+						</button>
+					) : null}
+				</div>
+
+				{caption ? (
+					<p className="mt-3 text-center text-muted-foreground/70 text-xs">
+						{caption}
+					</p>
 				) : null}
 			</div>
-
-			{caption ? (
-				<p className="mt-3 text-center text-muted-foreground/70 text-xs">
-					{caption}
-				</p>
-			) : null}
-		</div>
+		</MotionConfig>
 	);
 }

@@ -33,4 +33,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "popup-overlay-blur-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

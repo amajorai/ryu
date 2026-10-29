@@ -9,25 +9,20 @@
 // would put the troubleshooting tool behind a switch nobody in trouble knows to
 // find. It lives under General → Troubleshooting for that reason.
 //
-// Restart-on-apply is the honest behaviour, not a shortcut. Suppression happens at
+// Applying Safe Mode requires restarting the selected node. Suppression happens at
 // Core's BOOT, before anything spawns; a live flip would leave every sidecar, MCP
 // child and scheduler loop that already started still running, so the switch would
 // report success while the CPU cost it exists to remove kept being paid. The copy
-// says so rather than hiding it.
+// says so rather than hiding it. The desktop can restart its local Core; a
+// remote save remains pending until that node is restarted by its operator.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
-import { useCallback, useEffect, useState } from "react";
-import { restartRyuCore } from "@/lib/tauri-bridge.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
-import {
-	applySafeMode,
-	fetchSafeMode,
-	readSafeModeSentinel,
-	type SafeModeState,
-} from "@/src/lib/api/safe-mode.ts";
+import { useSafeMode } from "@/src/hooks/useSafeMode.ts";
+import type { SafeModeState } from "@/src/lib/api/safe-mode.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -67,82 +62,37 @@ function statusLine(state: SafeModeState): string {
 }
 
 export function SafeModeSettings() {
+	const tl = useLiteralMessages();
 	const activeNode = useActiveNode();
-	const [state, setState] = useState<SafeModeState | null>(null);
-	const [busy, setBusy] = useState(false);
-	// The sentinel read, which works with Core down. `null` = not resolved yet.
-	const [sentinel, setSentinel] = useState<boolean | null>(null);
-
-	const target: ApiTarget = {
-		token: activeNode.token ?? null,
-		userJwt: activeNode.userJwt ?? null,
-		url: activeNode.url,
-	};
-	const targetUrl = target.url;
-	const targetToken = target.token;
-	const targetUserJwt = target.userJwt ?? null;
-
-	const refresh = useCallback(async () => {
-		// The sentinel first, because it is the read that survives a Core that will
-		// not answer — which is the state a user reaching for Safe Mode is often in.
-		setSentinel(await readSafeModeSentinel());
+	const { state, sentinel, pending, busy, apply, local } =
+		useSafeMode(activeNode);
+	const handleToggle = async (next: boolean) => {
 		try {
-			setState(
-				await fetchSafeMode({
-					token: targetToken,
-					url: targetUrl,
-					userJwt: targetUserJwt,
-				})
+			await apply(next);
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Couldn't change Safe Mode"
 			);
-		} catch {
-			// An unreachable node is exactly the situation this panel is for, so a
-			// failed read must not blank the section — the switch falls back to the
-			// sentinel and stays usable.
-			setState(null);
 		}
-	}, [targetToken, targetUrl, targetUserJwt]);
+	};
 
-	useEffect(() => {
-		refresh();
-	}, [refresh]);
-
-	const handleToggle = useCallback(
-		async (next: boolean) => {
-			setBusy(true);
-			try {
-				// Core when it is up (it owns both persistence tiers), the on-disk
-				// sentinel when it is not — so a node that will not answer can still
-				// be brought up safe.
-				await applySafeMode(target, next);
-				toast.success(
-					next
-						? "Safe Mode armed — restarting the node"
-						: "Safe Mode cleared — restarting the node"
-				);
-				// The write already persisted to BOTH tiers (preference + sentinel), so
-				// even if this restart fails the next launch is correct.
-				await restartRyuCore().catch(() => undefined);
-				await refresh();
-			} catch (e) {
-				toast.error(
-					e instanceof Error ? e.message : "Couldn't change Safe Mode"
-				);
-			} finally {
-				setBusy(false);
-			}
-		},
-		[refresh, target]
-	);
-
-	// Core's effective answer wins; the sentinel is the fallback when it is silent.
-	const enabled = state?.enabled ?? sentinel ?? false;
+	// Show the saved next-boot choice, while status copy describes the running
+	// process. An environment override always wins. Local offline recovery may
+	// read the desktop sentinel; remote nodes never inherit that flag.
+	const enabled =
+		pending ??
+		(state?.userClearable === false
+			? state.enabled
+			: state?.preferenceEnabled) ??
+		sentinel ??
+		false;
 	// An env-forced node cannot be talked out of Safe Mode from here (Core answers
 	// 409), so the switch is disabled rather than offered and then refused.
 	const locked = busy || (enabled && state?.userClearable === false);
 
 	return (
 		<SettingsSection
-			caption="Starts the node with apps, plugins, skills, your MCP servers and the scheduler switched off, so you can tell whether one of them is what's slow. Chat, agents and settings keep working. Nothing is uninstalled or reconfigured; this only changes what loads."
+			caption="Starts the node with apps, plugins, skills, your MCP servers and the scheduler switched off, so you can tell whether one of them is what's slow. Chat, agents and settings keep working. Nothing is uninstalled or reconfigured; this only changes what loads. Turning it on or off changes every thread's system prompt, so each thread's next message after the restart is sent without the prompt cache."
 			title="Troubleshooting"
 		>
 			<SettingsGroup>
@@ -157,8 +107,12 @@ export function SafeModeSettings() {
 					}
 					description={
 						state
-							? `${statusLine(state)} Applies on restart; the node restarts when you flip this.`
-							: `The node isn't answering, so this reads the on-disk flag instead: Safe Mode is ${enabled ? "armed" : "off"} for its next boot.`
+							? `${statusLine(state)} ${local ? "Applies on restart; the node restarts when you flip this." : pending !== null || state.preferenceEnabled !== state.enabled ? "Saved for this node. Restart the remote node to apply the change." : "Applies after you restart the remote node."}`
+							: local
+								? enabled
+									? "The node isn't answering, so this reads the on-disk flag instead: Safe Mode is armed for its next boot."
+									: "The node isn't answering, so this reads the on-disk flag instead: Safe Mode is off for its next boot."
+								: "The remote node is not answering. Retry saving when it is reachable."
 					}
 					title="Safe Mode"
 				/>
@@ -166,7 +120,7 @@ export function SafeModeSettings() {
 					<SettingsItem
 						actions={
 							<Button
-								disabled={busy}
+								disabled={busy || pending === false}
 								onClick={() => handleToggle(false)}
 								size="sm"
 								variant="ghost"
@@ -174,7 +128,10 @@ export function SafeModeSettings() {
 								Leave Safe Mode
 							</Button>
 						}
-						description={`${state.suppressed.kernelPlugins} core plugin${state.suppressed.kernelPlugins === 1 ? "" : "s"} kept running so chat and retrieval still work. Leaving restarts the node and brings everything back.`}
+						description={`${tl(
+							"{kernelPlugins, plural, one {# core plugin} other {# core plugins}} kept running so chat and retrieval still work.",
+							{ kernelPlugins: state.suppressed.kernelPlugins }
+						)} ${local ? "Leaving restarts the node and brings everything back." : "Restart the remote node after saving to bring everything back."}`}
 						title="Back to a normal boot"
 					/>
 				) : null}

@@ -25,6 +25,36 @@ fn header_string(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// `x-ryu-purpose`, kept only when it satisfies the shared Core/Gateway
+/// contract ([`crate::audit::valid_purpose`]).
+fn purpose_header(headers: &HeaderMap) -> Option<String> {
+    header_string(headers, "x-ryu-purpose")
+        .filter(|purpose| crate::audit::valid_purpose(purpose).is_some())
+}
+
+/// Whether the request carries `x-ryu-untrusted-caller` set to a true value
+/// (`1`, `true`, `on` or `yes`). Any other value, or no header, is the normal
+/// path; the header can only restrict.
+fn untrusted_caller_header(headers: &HeaderMap) -> bool {
+    header_string(headers, "x-ryu-untrusted-caller").is_some_and(|value| {
+        matches!(
+            value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "on" | "yes"
+        )
+    })
+}
+
+/// Core's host conversation (`x-ryu-host-conversation-id`) with the proof Core
+/// minted for it (`x-ryu-host-conversation-proof`). Both are required; either
+/// alone is ignored. The Gateway cannot verify the proof, so this stays caller
+/// input until `authenticate` keeps it for a trusted forwarder.
+fn host_conversation_headers(headers: &HeaderMap) -> Option<crate::tools::HostConversation> {
+    Some(crate::tools::HostConversation {
+        id: header_string(headers, "x-ryu-host-conversation-id")?,
+        proof: header_string(headers, "x-ryu-host-conversation-proof")?,
+    })
+}
+
 /// Stable lowercase label for a budget action (response header value).
 fn budget_action_label(action: BudgetAction) -> &'static str {
     match action {
@@ -80,7 +110,9 @@ fn apply_anthropic_beta(headers: &HeaderMap, body: &mut Value) {
     // betas by writing the private field straight into the JSON body, bypassing
     // the header that is supposed to be its only source.
     obj.remove(pipeline::ANTHROPIC_BETA_FIELD);
-    let Some(betas) = header_string(headers, "anthropic-beta") else {
+    // Every header line is folded, not just the first, so a value on a second
+    // `anthropic-beta` line reaches the fleet's allowlist check.
+    let Some(betas) = pipeline::upstream_features::beta_header(headers) else {
         return;
     };
     obj.insert(
@@ -129,6 +161,15 @@ pub async fn chat_completions(
     let tools_header = header_string(&headers, "x-ryu-tools");
     let tools_header_present = tools_header.is_some();
     let tool_actions = tools_header;
+    // Core's automatic, turn-scoped capability suggestions. This is discovery
+    // metadata only; the Gateway still checks every execution against the
+    // allowlist below.
+    let capability_hints = header_string(&headers, "x-ryu-capability-hints");
+    // Core marks a turn spoken by an unverified phone caller. The header only
+    // removes tool surfaces (always-on tools, `tool_search`, hint grants, and
+    // the managed loops when no explicit allowlist is present), so a client can
+    // use it only to restrict its own request; it needs no authentication.
+    let untrusted_caller = untrusted_caller_header(&headers);
     // Explicit opt-in to the unified search-based tool loop (#475). `on`/`true`/`1`
     // flips the chat path to the buffered tool loop even without an allowlist
     // header (so the model can discover tools via `tool_search`). Core's ACP
@@ -152,11 +193,18 @@ pub async fn chat_completions(
     let slot_model = header_string(&headers, "x-ryu-slot-chat-model");
     // Core conversation/session id for per-run audit correlation (M4 / #176).
     let session_id = header_string(&headers, "x-ryu-session-id");
+    // Core's host conversation and the process-local proof it minted for it.
+    // Caller input here: `authenticate` keeps it only for a trusted forwarder.
+    let host_conversation = host_conversation_headers(&headers);
     // Product surface that originated this request (profiles / usage-points):
     // `chat` | `island` | `predict` | `agent`. Recorded on the audit row so the
     // reporter can build the per-feature daily usage breakdown. Absent on
     // self-hosted / legacy callers.
     let feature = header_string(&headers, "x-ryu-feature");
+    // Background feature that issued this call (`compaction`, `auto_title`,
+    // `plugin:<id>`, ...). Attribution only: it never changes routing or
+    // policy, and a value outside the shared contract is dropped to NULL.
+    let purpose = purpose_header(&headers);
     // Companion-sourced flag (M7 / #199): true when Core has tagged this request as
     // originating from the screen-capture companion path. Triggers unconditional
     // Gateway DLP/PII redaction before the provider call.
@@ -206,31 +254,37 @@ pub async fn chat_completions(
     let node_routing = header_string(&headers, "x-ryu-node-routing")
         .and_then(|v| pipeline::node_routing::parse(&v, &state.config.node_routing));
 
-    let ctx = authenticate(
+    let mut ctx = authenticate(
         &state,
         AuthInputs {
             raw_api_key: raw_key,
             user_id,
+            user_jwt: header_string(&headers, "x-ryu-user-jwt"),
             agent_id,
+            agent_provider_access: header_string(&headers, "x-ryu-agent-provider-access"),
             agent_proof,
             skill_ids,
             tool_actions,
             tools_header_present,
+            capability_hints,
             slot_provider,
             slot_model,
             session_id,
             feature,
             companion_source,
             tool_search_requested,
+            untrusted_caller,
             priority,
             tool_profile,
             raw_tools,
             prompt_cache_mode,
             prompt_cache_ttl,
             node_routing,
+            host_conversation,
         },
     )
     .await?;
+    ctx.purpose = purpose;
     debug!(request_id = %ctx.request_id, "chat_completions: authenticated");
 
     // Caller-requested Anthropic betas, carried to the provider on the body.
@@ -404,6 +458,71 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(name, HeaderValue::from_static(value));
         headers
+    }
+
+    #[test]
+    fn purpose_header_keeps_only_contract_values() {
+        for value in ["compaction", "auto_title", "plugin:@ryu/notes", "a.b-c_9"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-ryu-purpose", HeaderValue::from_str(value).unwrap());
+            assert_eq!(purpose_header(&headers).as_deref(), Some(value), "{value}");
+        }
+        let too_long = "a".repeat(65);
+        for value in ["Compaction", "auto title", "x;drop", "", too_long.as_str()] {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-ryu-purpose", HeaderValue::from_str(value).unwrap());
+            assert_eq!(purpose_header(&headers), None, "{value}");
+        }
+        assert_eq!(purpose_header(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn untrusted_caller_header_reads_only_true_values() {
+        for value in ["1", "true", "ON", "yes"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "x-ryu-untrusted-caller",
+                HeaderValue::from_str(value).unwrap(),
+            );
+            assert!(untrusted_caller_header(&headers), "{value}");
+        }
+        for value in ["0", "false", "", "maybe"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "x-ryu-untrusted-caller",
+                HeaderValue::from_str(value).unwrap(),
+            );
+            assert!(!untrusted_caller_header(&headers), "{value}");
+        }
+        assert!(!untrusted_caller_header(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn host_conversation_needs_both_the_id_and_its_proof() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-ryu-host-conversation-id",
+            HeaderValue::from_static("conv-1"),
+        );
+        assert_eq!(host_conversation_headers(&headers), None);
+        headers.insert(
+            "x-ryu-host-conversation-proof",
+            HeaderValue::from_static("proof-1"),
+        );
+        assert_eq!(
+            host_conversation_headers(&headers),
+            Some(crate::tools::HostConversation {
+                id: "conv-1".into(),
+                proof: "proof-1".into(),
+            })
+        );
+        assert_eq!(
+            host_conversation_headers(&headers_with(
+                "x-ryu-host-conversation-proof",
+                "proof-1"
+            )),
+            None
+        );
     }
 
     #[test]

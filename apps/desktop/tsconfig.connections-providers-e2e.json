@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/connections-providers-coverage.playwright.config.ts",
+    "e2e/connections-tab-proof.spec.ts",
+    "e2e/gateway-integrations-settings-proof.spec.ts",
+    "e2e/gateway-ai-providers-proof.spec.ts",
+    "e2e/composio-billing-proof.spec.ts",
+    "e2e/composio-billing-proof.playwright.config.ts",
+    "e2e/harness/vite.composio-billing-proof.config.ts",
+    "e2e/harness/composio-billing-proof.tsx",
+    "e2e/harness/connections-tab-proof.tsx",
+    "e2e/harness/gateway-ai-providers-proof.tsx",
+    "e2e/harness/gateway-integrations-settings-proof.tsx",
+    "e2e/harness/gateway-integrations-settings-proof.mock.ts"
+  ]
+}

@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // Ryu design-system scorecard rules for UI-bearing apps and plugins.
 //
 // The scanner only reads bounded source evidence supplied by the catalog host.
@@ -62,7 +63,7 @@ function usableFiles(
 		.filter(
 			(file) =>
 				SOURCE_FILE_PATTERN.test(file.path) &&
-				typeof file.contents === "string" &&
+				isNativeText(file.contents) &&
 				file.contents.trim().length > 0
 		)
 		.slice(0, MAX_FILES)

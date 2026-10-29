@@ -118,7 +118,7 @@ function TemplateCard({ template }: { template: TemplateProof }) {
 						{template.name}
 					</h2>
 				</div>
-				<span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-medium text-emerald-700 text-xs dark:text-emerald-300">
+				<span className="rounded-full border border-success/30 bg-success/10 px-2.5 py-1 font-medium text-success text-xs dark:text-success">
 					marketplace
 				</span>
 			</div>
@@ -178,7 +178,7 @@ function ProofChecks() {
 			<div className="flex items-center justify-between gap-3">
 				<h2 className="font-semibold text-base">Verification evidence</h2>
 				<span
-					className="rounded-full bg-emerald-500/15 px-2.5 py-1 font-semibold text-emerald-700 text-xs dark:text-emerald-300"
+					className="rounded-full bg-success/15 px-2.5 py-1 font-semibold text-success text-xs dark:text-success"
 					data-testid="proof-status"
 				>
 					RENDERED
@@ -213,7 +213,7 @@ function Story() {
 			<main className="mx-auto flex max-w-7xl flex-col gap-6 p-6 md:p-10">
 				<header className="flex flex-col gap-3 border-b pb-6 md:flex-row md:items-end md:justify-between">
 					<div>
-						<p className="font-semibold text-primary text-xs uppercase tracking-[0.2em]">
+						<p className="font-semibold text-primary text-xs uppercase tracking-widest">
 							Ryu marketplace · agent templates
 						</p>
 						<h1 className="mt-2 max-w-3xl font-semibold text-3xl tracking-tight md:text-4xl">

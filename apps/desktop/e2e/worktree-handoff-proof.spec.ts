@@ -3,10 +3,6 @@ import { expect, test } from "@playwright/test";
 test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/worktree-handoff-proof.html";
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/Documents/Code/ryu/apps/desktop/test-results/worktree-handoff-proof.png";
-const PROOF_RESULT_SCREENSHOT =
-	"/Users/jiawei/Documents/Code/ryu/apps/desktop/test-results/worktree-handoff-result.png";
 
 test("hands off the pinned Environment chat to a named worktree", async ({
 	page,
@@ -34,7 +30,10 @@ test("hands off the pinned Environment chat to a named worktree", async ({
 		)
 	).toBeVisible();
 
-	await page.screenshot({ animations: "disabled", path: PROOF_SCREENSHOT });
+	await page.screenshot({
+		animations: "disabled",
+		path: test.info().outputPath("worktree-handoff-proof.png"),
+	});
 
 	const branch = page.getByLabel("Branch name");
 	await branch.fill("codex/release-version-021");
@@ -47,6 +46,6 @@ test("hands off the pinned Environment chat to a named worktree", async ({
 	);
 	await page.screenshot({
 		animations: "disabled",
-		path: PROOF_RESULT_SCREENSHOT,
+		path: test.info().outputPath("worktree-handoff-result.png"),
 	});
 });

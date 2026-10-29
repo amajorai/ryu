@@ -15,9 +15,7 @@ export function ErrorMessage({
 	className,
 }: ErrorMessageProps) {
 	return (
-		<div
-			className={cn("rounded-[var(--radius)] bg-muted px-3 py-2", className)}
-		>
+		<div className={cn("rounded-(--radius) bg-muted px-3 py-2", className)}>
 			{title && (
 				<p className="mb-0.5 font-medium text-sm text-status-destructive">
 					{title}

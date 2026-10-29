@@ -16,7 +16,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/mineru",
   "name": "MinerU",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "Document parsing via MinerU (opendatalab) — the highest-fidelity `document.parse` backend, and the heaviest. Built for scientific and scanned PDFs: it runs layout detection to reconstruct true reading order across multi-column pages, converts formulas to LaTeX, converts tables to HTML, and OCRs scanned pages, so a physics paper comes back as markdown a model can actually follow instead of two columns interleaved line by line. The cost is real: MinerU wants Python 3.10-3.13, 16 GB of RAM (32 GB recommended), about 20 GB of disk for its model set, and a 4 GB-VRAM GPU for the pipeline backend (8 GB for the VLM backends) to be quick — a CPU-only host works through the `pipeline` backend but parses take minutes. Models download on first use. MinerU ships as a CLI, so each parse is a supervised subprocess with a hard wall-clock kill: a timed-out or cancelled parse takes its whole process group with it rather than leaving a multi-gigabyte orphan. Parses run as jobs: submit returns 202 + a job_id, the caller polls.",
   "icon": "pdf-01",
@@ -70,16 +70,14 @@
         "entry": "ryu_mineru",
         "port_env": "RYU_MINERU_PORT",
         "python_version": "3.11",
-        "pyproject_extra": "all",
+        "pyproject_extra": "core",
         "source": {
           "url": "https://github.com/amajorai/ryu/releases/download/mineru-sidecar-v1/ryu-mineru-sidecar.tar.gz",
           "format": "tar.gz"
         },
         "env": {
-          "RYU_MINERU_HOST": "127.0.0.1",
           "RYU_MINERU_ROOTS": "${RYU_DIR}",
-          "RYU_MINERU_WORKDIR": "${RYU_DIR}/cache/mineru",
-          "RYU_MINERU_BACKEND": "pipeline",
+          "RYU_MINERU_WORKDIR": "${RYU_PLUGIN_DATA_DIR}/cache",
           "HF_HOME": "${RYU_DIR}/models/hf",
           "TORCH_HOME": "${RYU_DIR}/models/torch",
           "MINERU_MODEL_SOURCE": "huggingface",
@@ -96,20 +94,5 @@
         ]
       }
     }
-  ],
-  "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "mineru.chat",
-        "title": "MinerU widget",
-        "description": "MinerU chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["mineru widget"],
-        "examples": ["Show me a mineru widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ]
-  }
+  ]
 }

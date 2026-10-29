@@ -1,3 +1,9 @@
+import { createTabsProofContext } from "./tabs-proof-context.ts";
+
+declare const window: Window;
+
+import { setTimezonePreference } from "@ryu/ui/lib/timezone.ts";
+import proofStyles from "./sidebar-picker-story.module.css";
 // Standalone browser story for the primitives the "Projects & Spaces as pickers"
 // model is built out of: the REAL `SidebarScopePicker`, the REAL `SidebarChatList`
 // (which is what routes any sidebar chat list through the "Group lists by date"
@@ -36,14 +42,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+	MessagingAgentRowBody,
 	SidebarChatList,
 	SidebarScopePicker,
 	SpacesPickerBody,
 } from "../../src/components/layout/AppSidebar.tsx";
+import type { ChatRowHandlers } from "../../src/components/layout/sidebar-conversation-rows.tsx";
 import { TabsContext } from "../../src/contexts/TabsContext.tsx";
 import { CHAT_DATE_GROUPING_KEY } from "../../src/hooks/useChatDateGrouping.ts";
+import type { AgentSummary } from "../../src/lib/api/agents.ts";
 import type { Space, SpaceDocument } from "../../src/lib/api/spaces.ts";
-import type { Conversation } from "../../src/types/chat.ts";
+import type { Conversation } from "../../types/chat.ts";
 import "../../src/index.css";
 
 const DAY_MS = 86_400_000;
@@ -61,15 +70,14 @@ function conv(
 		id,
 		title,
 		runStatus: "idle",
-		folderPath,
-		worktreePath: null,
-		branch: null,
+
+		folderPath: folderPath ?? undefined,
 		participants: [],
-		agentId: null,
+
 		messages: [],
 		createdAt: stamp,
 		updatedAt: stamp,
-	} as unknown as Conversation;
+	};
 }
 
 const ALPHA = "/Users/dev/alpha";
@@ -78,13 +86,64 @@ const BETA = "/Users/dev/beta";
 // BOTH projects own a "yesterday" chat on purpose: the collapse-leak case needs the
 // same bucket to exist in both scopes, or "beta's Yesterday is still expanded" would
 // pass for the trivial reason that beta has no Yesterday.
-const CONVERSATIONS = [
+const DEFAULT_CONVERSATIONS = [
 	conv("a1", "Alpha today", 0, ALPHA),
 	conv("a2", "Alpha yesterday", 1, ALPHA),
 	conv("b1", "Beta today", 0, BETA),
 	conv("b2", "Beta yesterday", 1, BETA),
 	conv("b3", "Beta last week", 4, BETA),
 ];
+
+const rollover = new URLSearchParams(location.search).get("rollover");
+const ROLLOVER_STAMPS =
+	rollover === "spring"
+		? [Date.parse("2026-03-08T05:30Z"), Date.parse("2026-03-09T03:30Z")]
+		: [Date.parse("2026-11-01T04:30Z"), Date.parse("2026-11-02T04:30Z")];
+const CONVERSATIONS = rollover
+	? ROLLOVER_STAMPS.map((at, index) => ({
+			...conv(`rollover-${index}`, `Stable midnight row ${index}`, 0, ALPHA),
+			createdAt: at,
+			updatedAt: at,
+		}))
+	: DEFAULT_CONVERSATIONS;
+
+// The shipping messaging-row stamp is a second, independent day consumer: its
+// label (clock time, "Yesterday", weekday, short date) comes from the same civil
+// boundaries as the grouped rows, but the row receives no prop when midnight
+// passes. It shares the latest rollover record so both consumers move together.
+const MIDNIGHT_AGENT: AgentSummary = {
+	avatarGlyph: null,
+	avatarUrl: null,
+	builtIn: true,
+	createdAt: null,
+	description: null,
+	engine: "ryu",
+	id: "midnight-agent",
+	installHint: null,
+	installed: true,
+	latestVersion: null,
+	lifecycleStatus: "active",
+	locked: false,
+	model: null,
+	name: "Midnight agent",
+	recommended: false,
+	safetyProfile: "autonomous",
+	systemPrompt: null,
+	title: "",
+	transport: "acp",
+	version: null,
+	versionStatus: "unknown",
+};
+const MIDNIGHT_AGENT_CONVERSATION = rollover
+	? {
+			...conv("midnight-agent-thread", "Midnight agent thread", 0, null),
+			createdAt: ROLLOVER_STAMPS[1],
+			lastMessage: "Retained agent preview",
+			lastMessageAt: ROLLOVER_STAMPS[1],
+			lastMessageRole: "assistant" as const,
+			updatedAt: ROLLOVER_STAMPS[1],
+		}
+	: undefined;
 
 const OPTIONS = [
 	{ label: "alpha", value: ALPHA },
@@ -110,6 +169,7 @@ const handlers = {
 	onOpenInNewWindow: () => undefined,
 	onOpenNewSideChat: () => undefined,
 	onOpenSideChat: () => undefined,
+	onMoveToProject: () => undefined,
 	onRemoveFromProject: () => undefined,
 	onRenameConversation: () => undefined,
 	onRequestConversationVisibility: () => undefined,
@@ -117,19 +177,23 @@ const handlers = {
 	onSetConversationIcon: () => undefined,
 	onToggleArchive: () => undefined,
 	onTogglePin: () => undefined,
+	projectTargets: [],
 	projectNameForFolder: (folderPath: string) =>
 		folderPath.split("/").at(-1) ?? folderPath,
 	target: { url: "http://127.0.0.1:8980", token: null },
-	// biome-ignore lint/suspicious/noExplicitAny: the story supplies only the
-	// handlers a row can reach; the rest of the bundle is unused here.
-} as any;
+	// The fixture supplies the native row handler owner completely.
+} satisfies ChatRowHandlers;
 
 // ── The spaces case ──────────────────────────────────────────────────────────
 
-const SPACES = [
+const SPACES: Space[] = [
 	{
 		id: "sp-notes",
 		name: "Notes",
+		createdAt: 0,
+		updatedAt: 0,
+		description: null,
+		retrievalMode: "vector",
 		icon: null,
 		system: false,
 		documentCount: 2,
@@ -137,11 +201,15 @@ const SPACES = [
 	{
 		id: "sp-uploads",
 		name: "Uploads",
+		createdAt: 0,
+		updatedAt: 0,
+		description: null,
+		retrievalMode: "vector",
 		icon: null,
 		system: true,
 		documentCount: 1,
 	},
-] as unknown as Space[];
+];
 
 function doc(
 	id: string,
@@ -164,16 +232,18 @@ function doc(
 		indexState: null,
 		indexMessage: null,
 		indexWarnings: [],
-	} as unknown as SpaceDocument;
+	};
 }
 
-const DOCS: Record<string, SpaceDocument[]> = {
-	"sp-notes": [
-		doc("d1", "sp-notes", "Note from today", 0),
-		doc("d2", "sp-notes", "Note from yesterday", 1),
-	],
-	"sp-uploads": [doc("d3", "sp-uploads", "receipt.pdf", 0)],
-};
+const DOCS = new Map<string, SpaceDocument[]>(
+	Object.entries({
+		"sp-notes": [
+			doc("d1", "sp-notes", "Note from today", 0),
+			doc("d2", "sp-notes", "Note from yesterday", 1),
+		],
+		"sp-uploads": [doc("d3", "sp-uploads", "receipt.pdf", 0)],
+	})
+);
 
 /** Records which spaces were actually asked for, so the spec can assert the
  *  aggregate fans out per space rather than reading one endpoint. */
@@ -185,22 +255,22 @@ function listDocuments(spaceId: string): Promise<SpaceDocument[]> {
 	if (out) {
 		out.textContent = requested.join(",");
 	}
-	return Promise.resolve(DOCS[spaceId] ?? []);
+	return Promise.resolve(DOCS.get(spaceId) ?? []);
 }
 
 // Minimal TabsContext: a space document row reads `updateTabsIconWhere`, and
 // `useTabsContext` throws without a provider.
-const tabsStub = {
+const tabsStub = createTabsProofContext({
 	updateTabsIconWhere: () => undefined,
-	openTab: () => undefined,
-	// biome-ignore lint/suspicious/noExplicitAny: only the two members a document
+	openTab: () => "sidebar-picker-proof-tab",
+	// only the two members a document
 	// row can reach are supplied; the context is 40+ members wide.
-} as any;
+});
 
 // Stand in for Core: the only read a chat row makes on mount.
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
 	if (url.includes("/api/plugins/contributions")) {
 		return Promise.resolve(
 			new Response(JSON.stringify({ context_menu_items: [] }), {
@@ -209,8 +279,8 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 			})
 		);
 	}
-	return realFetch(input as RequestInfo, init);
-}) as typeof fetch;
+	return realFetch(input, init);
+};
 
 const params = new URLSearchParams(location.search);
 const groupOff = params.get("group") === "off";
@@ -226,6 +296,7 @@ const queryClient = new QueryClient({
 });
 
 function ProjectsCase() {
+	const [mounted, setMounted] = useState(true);
 	const [selection, setSelection] = useState("all");
 	const shown =
 		selection === "all"
@@ -239,11 +310,55 @@ function ProjectsCase() {
 				options={OPTIONS}
 				value={selection}
 			/>
-			<SidebarChatList
-				conversations={shown}
-				handlers={handlers}
-				scope={selection}
-			/>
+			{rollover && (
+				<>
+					<button onClick={() => setMounted((value) => !value)} type="button">
+						Toggle mounted rows
+					</button>
+					<button onClick={() => setTimezonePreference("UTC")} type="button">
+						Use UTC
+					</button>
+					<button
+						onClick={() => setTimezonePreference("America/New_York")}
+						type="button"
+					>
+						Use New York
+					</button>
+					<pre data-testid="immutable-row-stamps">
+						{JSON.stringify(
+							CONVERSATIONS.map(({ id, createdAt, updatedAt }) => ({
+								id,
+								createdAt,
+								updatedAt,
+							}))
+						)}
+					</pre>
+				</>
+			)}
+			{mounted && rollover && (
+				<div
+					className="group/row flex items-center gap-2"
+					data-testid="midnight-agent-row"
+				>
+					<MessagingAgentRowBody
+						agent={MIDNIGHT_AGENT}
+						conversation={MIDNIGHT_AGENT_CONVERSATION}
+						onEdit={() => undefined}
+						onToggleThreads={() => undefined}
+						showEdit={false}
+						threadCount={0}
+						threadsExpanded={false}
+						usageBarVisible={false}
+					/>
+				</div>
+			)}
+			{mounted && (
+				<SidebarChatList
+					conversations={shown}
+					handlers={handlers}
+					scope={selection}
+				/>
+			)}
 			<pre data-testid="selection">{selection}</pre>
 		</>
 	);
@@ -279,8 +394,8 @@ function Story() {
 	return (
 		<QueryClientProvider client={queryClient}>
 			<TabsContext.Provider value={tabsStub}>
-				<div style={{ padding: 40 }}>
-					<div data-testid="section" style={{ width: 260 }}>
+				<div className={proofStyles.fixture1}>
+					<div className={proofStyles.fixture2} data-testid="section">
 						{spacesView ? <SpacesCase /> : <ProjectsCase />}
 					</div>
 				</div>

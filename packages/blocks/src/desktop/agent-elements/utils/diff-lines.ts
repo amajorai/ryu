@@ -18,7 +18,7 @@ export function diffLines(oldText: string, newText: string): FileDiffLine[] {
 
 	// LCS table over line indices.
 	const lcs = Array.from({ length: oldLines.length + 1 }, () =>
-		new Array<number>(newLines.length + 1).fill(0)
+		Array.from({ length: newLines.length + 1 }, () => 0)
 	);
 	for (let i = oldLines.length - 1; i >= 0; i -= 1) {
 		for (let j = newLines.length - 1; j >= 0; j -= 1) {

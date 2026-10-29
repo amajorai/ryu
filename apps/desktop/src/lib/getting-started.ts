@@ -1,3 +1,4 @@
+import { z } from "zod";
 // "Get started" mini-quests: a small, app-state-driven onboarding checklist
 // surfaced on the home tab and in the sidebar. Completion is *detected* (sticky)
 // rather than manually ticked, so it reads like a quest log, not a todo list.
@@ -11,6 +12,7 @@
 import {
 	BrainIcon,
 	Chat01Icon,
+	Folder01Icon,
 	PotionIcon,
 	SlidersHorizontalIcon,
 	Target01Icon,
@@ -47,6 +49,15 @@ export const GETTING_STARTED_QUESTS: GettingStartedQuest[] = [
 		icon: Chat01Icon,
 		path: "/chat",
 		forceNew: true,
+	},
+	{
+		id: "project",
+		content: "Create your first project",
+		description:
+			"Give a goal its own place: a coordinator thread, the bots working on it, and shared context.",
+		cta: "Open Projects",
+		icon: Folder01Icon,
+		path: "/projects",
 	},
 	{
 		id: "agent",
@@ -95,18 +106,14 @@ const STORAGE_KEY = "ryu:getting-started";
 /** Fired whenever the completed set changes, so every surface stays in sync. */
 export const GETTING_STARTED_EVENT = "ryu:getting-started-changed";
 
-interface Persisted {
-	completed: string[];
-}
-
 function readStorage(): string[] {
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (!raw) {
 			return [];
 		}
-		const parsed = JSON.parse(raw) as Persisted;
-		return Array.isArray(parsed.completed) ? parsed.completed : [];
+		return z.object({ completed: z.array(z.string()) }).parse(JSON.parse(raw))
+			.completed;
 	} catch {
 		// Corrupt or unavailable storage: treat as a fresh start.
 		return [];

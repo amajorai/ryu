@@ -1,0 +1,38 @@
+/* Banner paint and the custom hue swatch are owned by this picker. */
+.wash {
+	background: var(--agent-banner-paint);
+	opacity: var(--agent-banner-opacity);
+}
+/* Keep this literal in sync with AGENT_BANNER_BASE in agent-banner-dialog.tsx.
+   CSS modules must stay pure (no global :root tokens), so the gradient lives
+   on the local class rather than in a shared custom property. */
+.base {
+	background: linear-gradient(
+		135deg,
+		hsl(222 18% 7%),
+		hsl(222 12% 13%) 58%,
+		hsl(224 10% 22%)
+	);
+}
+.swatch {
+	background-color: var(--agent-banner-swatch);
+}
+.customHue {
+	padding: 0;
+	border-color: var(--border);
+	border-radius: calc(infinity * 1px);
+}
+.customHue.customHueSelected {
+	--tw-ring-color: var(--primary);
+	--tw-ring-shadow: 0 0 0 calc(2px + var(--tw-ring-offset-width, 0px))
+		var(--tw-ring-color);
+	border-color: var(--foreground);
+	box-shadow:
+		var(--tw-inset-shadow), var(--tw-inset-ring-shadow),
+		var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+
+.customHuePaint {
+	forced-color-adjust: none;
+	background-color: var(--agent-banner-swatch);
+}

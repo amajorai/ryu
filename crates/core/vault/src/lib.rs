@@ -52,7 +52,9 @@ pub use source::{
     is_known_source, known_source_ids, CredentialBackend, CredentialSource,
     CredentialSourceRegistry, LoginFlow, LoginKind, ManualImport, DEFAULT_SOURCE_ENV,
 };
-pub use store::IdentityStore;
+pub use store::{
+    IdentityStore, LegacyMigration, QuarantinedState, UnmigratedLegacyState, UnreadableLegacyState,
+};
 
 use serde::{Deserialize, Serialize};
 

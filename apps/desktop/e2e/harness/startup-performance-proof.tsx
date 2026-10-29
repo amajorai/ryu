@@ -13,6 +13,7 @@ import {
 	AppSurfaceProvider,
 } from "../../src/contexts/app-surface-context.tsx";
 import { DESKTOP_HOTKEYS } from "../../src/lib/hotkeys/actions.ts";
+import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import { useGatewayDialog } from "../../src/store/useGatewayDialog.ts";
 import { useSettingsDialog } from "../../src/store/useSettingsDialog.ts";
 import "../../src/index.css";
@@ -21,6 +22,10 @@ import { WIDGET_DEFINITIONS } from "../../src/components/dashboard/widgets/regis
 import { MarkdownEditor } from "../../src/components/editor/MarkdownEditor.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { queryClient } from "../../src/lib/query-client.ts";
+
+// Gateway opens only in Console; grant the access App's ProductModeAccessSync
+// would grant a local node.
+useProductModeStore.setState({ requestedMode: "console", consoleAccess: true });
 
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
@@ -183,7 +188,6 @@ function ProofSurface() {
 									</Button>
 
 									<Button
-										className="rounded-lg border bg-card px-3 py-2 text-sm"
 										data-testid="switch-mobile"
 										onClick={() => setSurface("mobile")}
 										size="sm"
@@ -193,7 +197,6 @@ function ProofSurface() {
 										Switch to mobile surface
 									</Button>
 									<Button
-										className="rounded-lg border bg-card px-3 py-2 text-sm"
 										data-testid="open-mobile-keyboard"
 										onClick={() => openSettings("keyboard")}
 										size="sm"

@@ -1,9 +1,12 @@
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import type { CSSProperties as LayoutCSSProperties } from "react";
 import { useSidebarTodoProgress } from "@/src/hooks/useSidebarTodoProgress.ts";
 import type { TodoProgressMessage } from "@/src/lib/todo-progress.ts";
 import type { Conversation } from "@/types/chat.ts";
+import layoutStyles from "./SidebarTodoProgress.module.css";
 
 export interface SidebarTodoProgressProps {
 	/** Only session rows may show the completed-unread celebration. */
@@ -21,6 +24,7 @@ export function SidebarTodoProgress({
 	loadMessages,
 	nodeUrl,
 }: SidebarTodoProgressProps): React.ReactNode {
+	const tl = useLiteralMessages();
 	const progress = useSidebarTodoProgress({
 		conversationId: conversation?.id,
 		loadMessages,
@@ -35,8 +39,14 @@ export function SidebarTodoProgress({
 		return null;
 	}
 
-	const label = `${progress.completed} of ${progress.total} steps complete`;
+	const label = tl("{completed} of {total} steps complete", {
+		completed: progress.completed,
+		total: progress.total,
+	});
 	const showCelebration = celebrate && progress.isComplete;
+	const cssVariables1: LayoutCssVariables = {
+		"--desktop-inline1-width": `${progress.percentage}%`,
+	};
 	return (
 		<>
 			{progress.hasInProgress ? (
@@ -70,12 +80,22 @@ export function SidebarTodoProgress({
 			>
 				<span
 					className={cn(
-						"block h-full rounded-full transition-[width] duration-300 ease-out motion-reduce:transition-none",
-						progress.isComplete ? "bg-success" : "bg-primary/80"
+						cn(
+							cn(
+								"block h-full rounded-full duration-300 ease-out motion-reduce:transition-none",
+								layoutStyles.authored1
+							),
+							progress.isComplete ? "bg-success" : "bg-primary/80"
+						),
+						layoutStyles.inline1
 					)}
-					style={{ width: `${progress.percentage}%` }}
+					style={cssVariables1}
 				/>
 			</div>
 		</>
 	);
+}
+
+interface LayoutCssVariables extends LayoutCSSProperties {
+	"--desktop-inline1-width"?: string | number;
 }

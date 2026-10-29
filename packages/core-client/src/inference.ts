@@ -15,6 +15,11 @@
 // through with no remapping. Every field is optional: an absent field means
 // "leave the engine default".
 
+import { z } from "zod";
+import {
+	type AppRequestValue,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
 
 /** Per-request generation params (per-agent defaults; per-request override). */
@@ -27,7 +32,7 @@ export interface SamplingConfig {
 	// llama.cpp advanced research samplers.
 	dynatemp_range?: number;
 	/** Raw passthrough: arbitrary body fields merged verbatim, overriding the above. */
-	extra?: Record<string, unknown>;
+	extra?: Record<string, AppRequestValue>;
 	frequency_penalty?: number;
 	max_tokens?: number;
 	min_p?: number;
@@ -51,13 +56,47 @@ export interface SamplingConfig {
 	xtc_threshold?: number;
 }
 
+/** Validate actual authored generation fields while retaining future JSON metadata. */
+export const samplingConfigSchema = z
+	.object({
+		dry_allowed_length: z.number().optional(),
+		dry_base: z.number().optional(),
+		dry_multiplier: z.number().optional(),
+		dry_penalty_last_n: z.number().optional(),
+		dynatemp_exponent: z.number().optional(),
+		dynatemp_range: z.number().optional(),
+		extra: z.record(z.string(), z.json()).optional(),
+		frequency_penalty: z.number().optional(),
+		max_tokens: z.number().optional(),
+		min_p: z.number().optional(),
+		mirostat: z.number().optional(),
+		mirostat_eta: z.number().optional(),
+		mirostat_tau: z.number().optional(),
+		presence_penalty: z.number().optional(),
+		repeat_last_n: z.number().optional(),
+		repeat_penalty: z.number().optional(),
+		samplers: z.string().optional(),
+		seed: z.number().optional(),
+		stop: z.array(z.string()).optional(),
+		temperature: z.number().optional(),
+		top_k: z.number().optional(),
+		top_n_sigma: z.number().optional(),
+		top_p: z.number().optional(),
+		typical_p: z.number().optional(),
+		xtc_probability: z.number().optional(),
+		xtc_threshold: z.number().optional(),
+	})
+	.catchall(z.json()) satisfies z.ZodType<SamplingConfig>;
+
 /** Per-model engine-launch flags (require an engine restart to take effect). */
 export interface LaunchConfig {
 	batch_size?: number;
+	cache_reuse?: number;
 	cache_type_k?: string;
 	cache_type_v?: string;
 	chat_template?: string;
 	chat_template_file?: string;
+	cont_batching?: boolean;
 	// MoE offload (llama.cpp).
 	cpu_moe?: boolean;
 	// Context + hardware.
@@ -71,37 +110,110 @@ export interface LaunchConfig {
 	enable_prefix_caching?: boolean;
 	/** Raw passthrough: extra CLI args appended verbatim to the spawn command. */
 	extra_args?: string[];
-	flash_attn?: "on" | "off" | "auto";
+	flash_attn?: string;
 	gpu_layers?: number;
 	// vLLM / SGLang.
 	gpu_memory_utilization?: number;
 	// Chat template (jinja).
 	jinja?: boolean;
 	kv_cache_dtype?: string;
+	kv_unified?: boolean;
 	max_num_seqs?: number;
 	max_running_requests?: number;
 	mem_fraction_static?: number;
 	mlock?: boolean;
 	n_cpu_moe?: number;
+	/**
+	 * Engine-native options keyed by the catalog from
+	 * `GET /api/engines/{engine}/launch-options`.
+	 */
+	native?: Record<string, AppRequestValue>;
 	no_mmap?: boolean;
 	override_tensor?: string;
+	parallel?: number;
 	quantization?: string;
 	rope_freq_base?: number;
 	rope_freq_scale?: number;
 	rope_scale?: number;
 	// RoPE / YaRN.
 	rope_scaling?: string;
+	sleep_idle_secs?: number;
 	/**
 	 * llama.cpp `--spec-type`: "draft-mtp" (multi-token prediction) or an n-gram
 	 * variant (ngram-cache | ngram-simple | ngram-map-k | ngram-map-k4v | ngram-mod).
 	 */
 	spec_type?: string;
 	speculative_algorithm?: string;
-	speculative_config?: Record<string, unknown>;
+	speculative_config?: AppRequestValue;
 	tensor_parallel?: number;
 	threads?: number;
 	ubatch_size?: number;
 }
+
+// Complete Rust LaunchConfig fields. Current Core publishes this object directly;
+// the older nested launch_config envelope remains accepted for existing nodes.
+// Preserve the current client's {} fallback for direct native replies.
+const launchConfigFields = z.object({
+	ctx_size: z.number().optional(),
+	gpu_layers: z.number().optional(),
+	batch_size: z.number().optional(),
+	ubatch_size: z.number().optional(),
+	threads: z.number().optional(),
+	flash_attn: z.string().optional(),
+	cache_type_k: z.string().optional(),
+	cache_type_v: z.string().optional(),
+	mlock: z.boolean().optional(),
+	no_mmap: z.boolean().optional(),
+	sleep_idle_secs: z.number().optional(),
+	parallel: z.number().optional(),
+	kv_unified: z.boolean().optional(),
+	cache_reuse: z.number().optional(),
+	cont_batching: z.boolean().optional(),
+	cpu_moe: z.boolean().optional(),
+	n_cpu_moe: z.number().optional(),
+	override_tensor: z.string().optional(),
+	jinja: z.boolean().optional(),
+	chat_template: z.string().optional(),
+	chat_template_file: z.string().optional(),
+	spec_type: z.string().optional(),
+	draft_model: z.string().optional(),
+	draft_max: z.number().optional(),
+	draft_min: z.number().optional(),
+	draft_p_min: z.number().optional(),
+	rope_scaling: z.string().optional(),
+	rope_scale: z.number().optional(),
+	rope_freq_base: z.number().optional(),
+	rope_freq_scale: z.number().optional(),
+	gpu_memory_utilization: z.number().optional(),
+	mem_fraction_static: z.number().optional(),
+	tensor_parallel: z.number().optional(),
+	dtype: z.string().optional(),
+	quantization: z.string().optional(),
+	kv_cache_dtype: z.string().optional(),
+	max_num_seqs: z.number().optional(),
+	max_running_requests: z.number().optional(),
+	enable_prefix_caching: z.boolean().optional(),
+	speculative_algorithm: z.string().optional(),
+	speculative_config: appResponseValueSchema.optional(),
+	extra_args: z.array(z.string()).optional(),
+	native: z.record(z.string(), appResponseValueSchema).optional(),
+});
+const launchResponseFields = launchConfigFields.extend({
+	launch_config: launchConfigFields.nullable().optional(),
+});
+const launchResponseSchema = z.custom<z.output<typeof launchResponseFields>>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		launchResponseFields.safeParse(value).success
+);
+const savedLaunchResponseFields = z.object({ ok: z.boolean(), id: z.string() });
+const savedLaunchResponseSchema = z.custom<
+	z.output<typeof savedLaunchResponseFields>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		savedLaunchResponseFields.safeParse(value).success
+);
 
 /**
  * Fetch the saved launch config for a model. Returns an empty object when none
@@ -113,11 +225,16 @@ export async function getModelLaunchConfig(
 	id: string
 ): Promise<LaunchConfig> {
 	try {
-		const json = await request<{ launch_config?: LaunchConfig | null }>(
+		const json = await request(
 			target,
-			`/api/models/${encodeURIComponent(id)}/launch-config`
+			`/api/models/${encodeURIComponent(id)}/launch-config`,
+			undefined,
+			launchResponseSchema
 		);
-		return json.launch_config ?? {};
+		// Current Core sends the config flat; an older node wraps it (null when
+		// nothing is saved, which leaves the flat remainder empty).
+		const { launch_config: legacy, ...flat } = json;
+		return legacy ?? flat;
 	} catch {
 		return {};
 	}
@@ -129,10 +246,11 @@ export async function saveModelLaunchConfig(
 	id: string,
 	config: LaunchConfig
 ): Promise<void> {
-	await request<unknown>(
+	await request(
 		target,
 		`/api/models/${encodeURIComponent(id)}/launch-config`,
-		{ method: "PUT", body: config }
+		{ method: "PUT", body: config },
+		savedLaunchResponseSchema
 	);
 }
 

@@ -11,6 +11,7 @@ import {
 	type SmartBarSuggestion,
 } from "../../../../packages/blocks/src/extension/smart-bar.tsx";
 import "./extension-local-search-proof.css";
+import styles from "./extension-local-search-proof.module.css";
 
 const PROOF_DOCUMENTS: LocalSearchDocument[] = [
 	{
@@ -106,15 +107,18 @@ function LocalSearchProof() {
 	);
 
 	return (
-		<section className="local-search-card" data-testid="local-search-proof">
-			<div className="local-search-heading">
+		<section
+			className={styles.localSearchCard}
+			data-testid="local-search-proof"
+		>
+			<div className={styles.localSearchHeading}>
 				<div>
-					<p className="local-search-kicker">Extension capability</p>
+					<p className={styles.localSearchKicker}>Extension capability</p>
 					<h2>Local search parity</h2>
 				</div>
-				<span className="local-search-badge">Orama · metadata only</span>
+				<span className={styles.localSearchBadge}>Orama · metadata only</span>
 			</div>
-			<p className="local-search-copy">
+			<p className={styles.localSearchCopy}>
 				Searches conversation titles and browser-bookmark metadata locally with
 				fuzzy matching, field boosts, filters, facets, sorting, and grouped
 				results.
@@ -127,7 +131,10 @@ function LocalSearchProof() {
 				suggestionStatus={status}
 				suggestions={suggestions}
 			/>
-			<div aria-label="Local search metrics" className="local-search-metrics">
+			<div
+				aria-label="Local search metrics"
+				className={styles.localSearchMetrics}
+			>
 				<span>
 					<strong data-testid="local-search-count">{resultCount}</strong>{" "}
 					matches
@@ -138,7 +145,7 @@ function LocalSearchProof() {
 				</span>
 			</div>
 			<p
-				className="local-search-selection"
+				className={styles.localSearchSelection}
 				data-testid="local-search-selection"
 			>
 				{selection}
@@ -149,9 +156,9 @@ function LocalSearchProof() {
 
 function Proof() {
 	return (
-		<main className="local-search-proof-shell">
-			<header className="local-search-proof-header">
-				<p className="local-search-kicker">RYU · BROWSER EXTENSION</p>
+		<main className={styles.localSearchProofShell}>
+			<header className={styles.localSearchProofHeader}>
+				<p className={styles.localSearchKicker}>RYU · BROWSER EXTENSION</p>
 				<h1>Search your Ryu library without leaving the tab</h1>
 				<p>
 					A rendered proof of the local Orama-backed projection and

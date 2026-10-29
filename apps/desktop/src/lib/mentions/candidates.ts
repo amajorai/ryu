@@ -223,16 +223,24 @@ export function buildMentionGroups(
 		"App items",
 		(sources.appItems ?? [])
 			.filter((item) => matches(item.name, item.id, item.description ?? ""))
-			.map((item) => ({
-				accentColor: item.accentColor,
-				kind: "app-item",
-				id: item.id,
-				label: item.name,
-				description: item.description,
-				target: item.target,
-				icon: IconApps,
-				visualIcon: item.visualIcon,
-			}))
+			.map((item) => {
+				const owner: Pick<MentionItem, "ownerId"> = {};
+				if (item.ownerId) {
+					owner.ownerId = item.ownerId;
+				}
+				return {
+					accentColor: item.accentColor,
+					kind: "app-item",
+					resourceUri: item.resourceUri,
+					id: item.id,
+					label: item.name,
+					...owner,
+					description: item.description,
+					target: item.target,
+					icon: IconApps,
+					visualIcon: item.visualIcon,
+				} satisfies MentionItem;
+			})
 	);
 	add(
 		"integration",

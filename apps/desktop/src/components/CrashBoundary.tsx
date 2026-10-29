@@ -1,3 +1,4 @@
+import "./CrashBoundary.css";
 // apps/desktop/src/components/CrashBoundary.tsx
 //
 // Renderer error boundary for the crash reporting tier (#544, P3). Wraps the app so
@@ -29,7 +30,7 @@
 // state — see the comment on `episode` for why putting it in state would silently
 // unbound the retries.
 
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -37,9 +38,9 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Logo } from "@ryu/ui/components/logo";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/empty.tsx";
+import { Logo } from "@ryu/ui/components/logo.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { Component, type ErrorInfo, Fragment, type ReactNode } from "react";
 import { isDeveloperMode } from "@/src/hooks/useDeveloperMode.ts";
 import {
@@ -401,7 +402,7 @@ export class CrashBoundary extends Component<
 	render(): ReactNode {
 		if (this.state.phase === "recovering") {
 			return this.renderShell(
-				<Empty className="gap-3 p-8">
+				<Empty purpose="recovery">
 					<EmptyHeader>
 						<EmptyMedia variant="icon">
 							<Spinner className="size-6" />
@@ -414,9 +415,9 @@ export class CrashBoundary extends Component<
 
 		if (this.state.phase === "terminal") {
 			return this.renderShell(
-				<Empty className="gap-5 p-8">
-					<EmptyHeader className="gap-3">
-						<EmptyMedia className="mb-0 text-status-destructive">
+				<Empty purpose="terminal">
+					<EmptyHeader spacing="relaxed">
+						<EmptyMedia className="mb-0" tone="destructive">
 							<Logo
 								animated={false}
 								animation="idle"
@@ -428,7 +429,7 @@ export class CrashBoundary extends Component<
 						<EmptyTitle>Something broke</EmptyTitle>
 						<EmptyDescription>Try again or reload.</EmptyDescription>
 					</EmptyHeader>
-					<EmptyContent className="gap-2">
+					<EmptyContent spacing="compact">
 						<div className="flex flex-wrap items-center justify-center gap-2">
 							{/* Try again first: it remounts in place and keeps app state,
 							    where Reload throws the whole renderer away. */}
@@ -468,7 +469,8 @@ export class CrashBoundary extends Component<
 	private renderShell(content: ReactNode): ReactNode {
 		return (
 			<div
-				className="flex h-screen w-full items-center justify-center overflow-hidden rounded-[var(--ryu-window-radius-base,2rem)] bg-background backdrop-blur-xl"
+				className="flex h-screen w-full items-center justify-center overflow-hidden bg-background backdrop-blur-xl"
+				data-crash-window-shell=""
 				data-tauri-drag-region
 			>
 				{content}

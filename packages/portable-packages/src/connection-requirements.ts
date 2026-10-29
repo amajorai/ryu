@@ -1,3 +1,10 @@
+import { wireObject } from "@ryuhq/protocol/wire-object";
+import { z } from "zod";
+import {
+	connectionInputSchema,
+	connectionObjectSchema,
+} from "./connection-input.ts";
+import type { PackageSerdeObject, PackageSerdeValue } from "./serde.ts";
 export const CONNECTION_REQUIREMENT_FIELDS = [
 	"connection_requirements",
 	"connectionRequirements",
@@ -110,12 +117,12 @@ export interface ConnectionChecklistSummary {
 	total: number;
 }
 
-type RecordValue = Record<string, unknown>;
+type RecordValue = PackageSerdeObject;
 
 interface CollectedDeclaration {
 	defaultConsumers: string[];
 	path: string;
-	value: unknown;
+	value: PackageSerdeValue;
 }
 
 interface EntryContext {
@@ -126,8 +133,8 @@ const IDENTIFIER_RE = /^\S+$/;
 const SECRET_VALUE_RE =
 	/(?:sk-[A-Za-z0-9_-]{16,}|rk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/;
 
-function isRecord(value: unknown): value is RecordValue {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+function isRecord(value: PackageSerdeValue): value is RecordValue {
+	return connectionObjectSchema.safeParse(value).success;
 }
 
 function hasOwn(value: RecordValue, key: string): boolean {
@@ -157,12 +164,12 @@ function isCredentialKey(key: string): boolean {
 }
 
 function findCredentialPath(
-	value: unknown,
+	value: PackageSerdeValue,
 	path: string,
 	seen: Set<object>
 ): string | null {
-	if (typeof value === "string") {
-		return SECRET_VALUE_RE.test(value) ? path || "$" : null;
+	if (z.string().safeParse(value).success) {
+		return SECRET_VALUE_RE.test(z.string().parse(value)) ? path || "$" : null;
 	}
 	if (Array.isArray(value)) {
 		if (seen.has(value)) {
@@ -198,7 +205,7 @@ function findCredentialPath(
 }
 
 function credentialIssue(
-	value: unknown
+	value: PackageSerdeValue
 ): ConnectionRequirementValidationIssue | null {
 	const path = findCredentialPath(value, "", new Set());
 	return path
@@ -210,7 +217,7 @@ function credentialIssue(
 }
 
 function textValue(
-	value: unknown,
+	value: PackageSerdeValue,
 	path: string,
 	issues: ConnectionRequirementValidationIssue[],
 	options: { required?: boolean; identifier?: boolean } = {}
@@ -221,11 +228,12 @@ function textValue(
 		}
 		return null;
 	}
-	if (typeof value !== "string") {
+	const string = z.string().safeParse(value);
+	if (!string.success) {
 		issues.push({ path, message: "must be a string" });
 		return null;
 	}
-	const text = value.trim();
+	const text = string.data.trim();
 	if (!text) {
 		issues.push({ path, message: "must be a non-empty string" });
 		return null;
@@ -241,14 +249,17 @@ function textValue(
 }
 
 function optionalText(
-	value: unknown,
+	value: PackageSerdeValue,
 	path: string,
 	issues: ConnectionRequirementValidationIssue[]
 ): string | null {
 	return textValue(value, path, issues);
 }
 
-function firstValue(source: RecordValue, keys: readonly string[]): unknown {
+function firstValue(
+	source: RecordValue,
+	keys: readonly string[]
+): PackageSerdeValue {
 	for (const key of keys) {
 		if (hasOwn(source, key)) {
 			return source[key];
@@ -258,7 +269,7 @@ function firstValue(source: RecordValue, keys: readonly string[]): unknown {
 }
 
 function normalizeStringList(
-	value: unknown,
+	value: PackageSerdeValue,
 	path: string,
 	issues: ConnectionRequirementValidationIssue[],
 	options: { allowString?: boolean } = {}
@@ -266,8 +277,9 @@ function normalizeStringList(
 	if (value === undefined) {
 		return [];
 	}
-	if (options.allowString !== false && typeof value === "string") {
-		const text = value.trim();
+	const string = z.string().safeParse(value);
+	if (options.allowString !== false && string.success) {
+		const text = string.data.trim();
 		if (!text) {
 			issues.push({ path, message: "must contain non-empty strings" });
 			return [];
@@ -280,14 +292,15 @@ function normalizeStringList(
 	}
 	const result: string[] = [];
 	for (const [index, entry] of value.entries()) {
-		if (typeof entry !== "string" || !entry.trim()) {
+		const string = z.string().safeParse(entry);
+		if (!(string.success && string.data.trim())) {
 			issues.push({
 				path: `${path}[${index}]`,
 				message: "must be a non-empty string",
 			});
 			continue;
 		}
-		result.push(entry.trim());
+		result.push(string.data.trim());
 	}
 	return uniqueSorted(result);
 }
@@ -313,8 +326,9 @@ function inferConsumers(
 		return normalizeStringList(declared, "consumers", issues);
 	}
 	const kind = firstValue(value, ["kind", "type"]);
-	if (typeof kind === "string" && kind.trim()) {
-		return [kind.trim()];
+	const kindString = z.string().safeParse(kind);
+	if (kindString.success && kindString.data.trim()) {
+		return [kindString.data.trim()];
 	}
 	if (hasOwn(value, "system_prompt") || hasOwn(value, "display_name")) {
 		return ["agent"];
@@ -323,7 +337,7 @@ function inferConsumers(
 }
 
 function collectDeclarations(
-	value: unknown,
+	value: PackageSerdeValue,
 	path: string,
 	context: EntryContext,
 	options: ConnectionRequirementNormalizationOptions,
@@ -414,21 +428,22 @@ function derivedRequirementId(
 }
 
 function normalizeEntry(
-	value: unknown,
+	value: PackageSerdeValue,
 	path: string,
 	defaultConsumers: readonly string[],
 	issues: ConnectionRequirementValidationIssue[]
 ): ConnectionRequirement | null {
-	const source: RecordValue =
-		typeof value === "string"
-			? { provider: value }
-			: isRecord(value)
-				? value
-				: {};
-	if (typeof value !== "string" && !isRecord(value)) {
+	const string = z.string().safeParse(value);
+	const object = connectionObjectSchema.safeParse(value);
+	if (!(string.success || object.success)) {
 		issues.push({ path, message: "must be a string or object" });
 		return null;
 	}
+	const source: RecordValue = string.success
+		? { provider: string.data }
+		: object.success
+			? object.data
+			: {};
 
 	const provider = textValue(source.provider, `${path}.provider`, issues, {
 		identifier: true,
@@ -458,28 +473,29 @@ function normalizeEntry(
 
 	const requiredValue = source.required;
 	const optionalValue = source.optional;
-	if (requiredValue !== undefined && typeof requiredValue !== "boolean") {
+	const requiredBoolean = z.boolean().safeParse(requiredValue);
+	const optionalBoolean = z.boolean().safeParse(optionalValue);
+	if (requiredValue !== undefined && !requiredBoolean.success) {
 		issues.push({ path: `${path}.required`, message: "must be a boolean" });
 	}
-	if (optionalValue !== undefined && typeof optionalValue !== "boolean") {
+	if (optionalValue !== undefined && !optionalBoolean.success) {
 		issues.push({ path: `${path}.optional`, message: "must be a boolean" });
 	}
 	if (
-		typeof requiredValue === "boolean" &&
-		typeof optionalValue === "boolean" &&
-		requiredValue === optionalValue
+		requiredBoolean.success &&
+		optionalBoolean.success &&
+		requiredBoolean.data === optionalBoolean.data
 	) {
 		issues.push({
 			path,
 			message: "required and optional declarations disagree",
 		});
 	}
-	const required =
-		typeof requiredValue === "boolean"
-			? requiredValue
-			: typeof optionalValue === "boolean"
-				? !optionalValue
-				: true;
+	const required = requiredBoolean.success
+		? requiredBoolean.data
+		: optionalBoolean.success
+			? !optionalBoolean.data
+			: true;
 
 	const consumerValue = firstValue(source, [
 		"consumers",
@@ -561,9 +577,10 @@ function normalizeDefaults(
 }
 
 export function normalizeConnectionRequirement(
-	value: unknown,
+	input: Parameters<typeof connectionInputSchema.parse>[0],
 	options: ConnectionRequirementNormalizationOptions = {}
 ): ConnectionRequirement {
+	const value = connectionInputSchema.parse(input);
 	const secret = credentialIssue(value);
 	if (secret) {
 		throw new ConnectionRequirementValidationError([secret]);
@@ -582,9 +599,10 @@ export function normalizeConnectionRequirement(
 }
 
 export function normalizeConnectionRequirements(
-	value: unknown,
+	input: Parameters<typeof connectionInputSchema.parse>[0],
 	options: ConnectionRequirementNormalizationOptions = {}
 ): ConnectionRequirement[] {
+	const value = connectionInputSchema.parse(input);
 	const secret = credentialIssue(value);
 	if (secret) {
 		throw new ConnectionRequirementValidationError([secret]);
@@ -637,14 +655,14 @@ export function normalizeConnectionRequirements(
 }
 
 export function validateConnectionRequirements(
-	value: unknown,
+	value: Parameters<typeof connectionInputSchema.parse>[0],
 	options: ConnectionRequirementNormalizationOptions = {}
 ): ConnectionRequirement[] {
 	return normalizeConnectionRequirements(value, options);
 }
 
 export function normalizeAgentConnectionRequirements(
-	value: unknown
+	value: Parameters<typeof connectionInputSchema.parse>[0]
 ): ConnectionRequirement[] {
 	return normalizeConnectionRequirements(value, {
 		defaultConsumers: ["agent"],
@@ -652,70 +670,93 @@ export function normalizeAgentConnectionRequirements(
 }
 
 export function normalizePackageConnectionRequirements(
-	value: unknown,
+	value: Parameters<typeof connectionInputSchema.parse>[0],
 	options: ConnectionRequirementNormalizationOptions = {}
 ): ConnectionRequirement[] {
 	return normalizeConnectionRequirements(value, options);
 }
 
-function hostStatusFor(
-	source: ConnectionStatusSource | undefined,
-	requirement: ConnectionRequirement
-): ConnectionStatusValue | undefined {
-	if (!source) {
-		return undefined;
-	}
-	if (typeof source === "function") {
-		return source(requirement);
-	}
-	if (
-		typeof source === "object" &&
-		source !== null &&
-		"get" in source &&
-		typeof source.get === "function"
-	) {
-		return source.get(requirement.id);
-	}
-	return (
-		source as Readonly<Record<string, ConnectionStatusValue | undefined>>
-	)[requirement.id];
-}
-
+const statusStateSchema = z.enum(CONNECTION_CHECKLIST_STATES);
+const statusObjectSchema = wireObject({
+	state: statusStateSchema,
+	message: z.string().or(z.undefined()).catch(undefined),
+});
 function normalizedHostStatus(
-	value: ConnectionStatusValue | undefined
+	value: Parameters<typeof statusObjectSchema.parse>[0]
 ): ConnectionHostStatus | undefined {
 	if (value === undefined) {
 		return undefined;
 	}
-	if (typeof value === "string") {
-		return CONNECTION_CHECKLIST_STATES.includes(value)
-			? { state: value }
+	const string = z.string().safeParse(value);
+	if (string.success) {
+		const state = statusStateSchema.safeParse(string.data);
+		return state.success
+			? { state: state.data }
 			: {
 					message: "host supplied an invalid connection status",
 					state: "error",
 				};
 	}
-	if (!isRecord(value)) {
+	const object = statusObjectSchema.safeParse(value);
+	if (!object.success) {
 		return {
 			message: "host supplied an invalid connection status",
 			state: "error",
 		};
 	}
-	const state = value.state;
-	if (
-		typeof state !== "string" ||
-		!CONNECTION_CHECKLIST_STATES.includes(state as ConnectionChecklistState)
-	) {
-		return {
-			message: "host supplied an invalid connection status",
-			state: "error",
-		};
+	return {
+		message: object.data.message?.trim() || undefined,
+		state: object.data.state,
+	};
+}
+const normalizedStatusSchema: z.ZodType<ConnectionHostStatus | undefined> =
+	z.preprocess(
+		normalizedHostStatus,
+		z
+			.object({ state: statusStateSchema, message: z.string().optional() })
+			.optional()
+	);
+const requirementSchema: z.ZodType<ConnectionRequirement> = z.object({
+	consumers: z.array(z.string()),
+	display_name: z.string(),
+	id: z.string(),
+	provider: z.string(),
+	purpose: z.string().nullable(),
+	required: z.boolean(),
+	toolkit: z.string().nullable(),
+	usage: z.array(z.string()),
+});
+const statusProviderSchema = z.function({
+	input: z.tuple([requirementSchema]),
+	output: normalizedStatusSchema,
+});
+const statusGetterSchema = wireObject({
+	get: z.function({
+		input: z.tuple([z.string()]),
+		output: normalizedStatusSchema,
+	}),
+});
+function hostStatusFor(
+	source: ConnectionStatusSource | undefined,
+	requirement: ConnectionRequirement
+): ConnectionHostStatus | undefined {
+	if (!source) {
+		return undefined;
 	}
-	const message =
-		typeof value.message === "string" && value.message.trim()
-			? value.message.trim()
-			: undefined;
-	return { message, state: state as ConnectionChecklistState };
+	const provider = statusProviderSchema.safeParse(source);
+	if (provider.success) {
+		return normalizedStatusSchema.parse(provider.data(requirement));
+	}
+	const getter = statusGetterSchema.safeParse(source);
+	if (getter.success) {
+		return normalizedStatusSchema.parse(
+			getter.data.get.call(source, requirement.id)
+		);
+	}
+	const dictionary = wireObject({
+		[requirement.id]: normalizedStatusSchema,
+	}).safeParse(source);
+	return dictionary.success ? dictionary.data[requirement.id] : undefined;
 }
 
 function checklistState(
@@ -731,15 +772,15 @@ function checklistState(
 			: suppliedState === "optional" && requirement.required
 				? "needs_connection"
 				: suppliedState;
-	return {
-		...requirement,
-		...(hostStatus?.message ? { message: hostStatus.message } : {}),
-		state,
-	};
+	const item: Omit<ConnectionChecklistItem, "state"> = { ...requirement };
+	if (hostStatus?.message) {
+		item.message = hostStatus.message;
+	}
+	return { ...item, state };
 }
 
 export function deriveConnectionChecklist(
-	value: unknown,
+	value: Parameters<typeof connectionInputSchema.parse>[0],
 	statuses?: ConnectionStatusSource
 ): ConnectionChecklistSummary {
 	const requirements = normalizeConnectionRequirements(value);

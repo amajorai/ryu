@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { usdToMicro } from "./plans.ts";
 
 /** Live organization plans for hosted business automation. */
@@ -76,8 +77,62 @@ export const TEAMS_FOUNDING_TRIAL = {
 	trialMonthlyPriceUsd: 50,
 } as const;
 
-/** @deprecated Use {@link TEAMS_FOUNDING_TRIAL}; retained for rollout callers. */
-export const PRO_FOUNDING_TRIAL = TEAMS_FOUNDING_TRIAL;
+/**
+ * Largest share of the amount ACTUALLY PAID for a discounted Teams period that
+ * may be granted back as the organization's included credit pool.
+ *
+ * The list Teams pool ($50 per five billed seats) is sized against the list
+ * price. An 80% promotional discount keeps the full pool and the included
+ * `cx43` node while collecting a fifth of the revenue: at five seats that was
+ * about -$41 a month (about -$168 a month at fifty seats).
+ *
+ * 20% rather than the 30% ceiling the margin review allowed: after Polar
+ * processing and the OpenRouter funding fee plus GST, a 30% pool still leaves
+ * the five-seat month about $1 under water once the `cx43` reserve is paid.
+ * `discounted-offer-economics.test.ts` holds both offers to a non-negative
+ * contribution for every discounted period.
+ */
+export const DISCOUNTED_TEAMS_PERIOD_POOL_SHARE_BASIS_POINTS = 2000;
+
+/** What a percentage discount leaves the customer paying for one period. */
+export function discountedPeriodPaidMicroUsd(input: {
+	discountBasisPoints: number;
+	listPriceMicroUsd: number;
+}): number {
+	const { discountBasisPoints, listPriceMicroUsd } = input;
+	if (!(Number.isFinite(listPriceMicroUsd) && listPriceMicroUsd > 0)) {
+		return 0;
+	}
+	const keptBasisPoints = Math.min(
+		10_000,
+		Math.max(0, 10_000 - discountBasisPoints)
+	);
+	// Round DOWN: the pool cap below is derived from this figure, so an
+	// over-stated payment would over-grant.
+	return Math.floor((listPriceMicroUsd * keptBasisPoints) / 10_000);
+}
+
+/**
+ * The included pool for a period on which a promotional discount is active:
+ * the list pool, capped at {@link DISCOUNTED_TEAMS_PERIOD_POOL_SHARE_BASIS_POINTS}
+ * of what the customer actually paid for that period. Never negative.
+ */
+export function discountedPeriodPoolMicroUsd(input: {
+	listPoolMicroUsd: number;
+	paidMicroUsd: number;
+}): number {
+	const { listPoolMicroUsd, paidMicroUsd } = input;
+	if (!(Number.isFinite(paidMicroUsd) && paidMicroUsd > 0)) {
+		return 0;
+	}
+	if (!(Number.isFinite(listPoolMicroUsd) && listPoolMicroUsd > 0)) {
+		return 0;
+	}
+	const cap = Math.floor(
+		(paidMicroUsd * DISCOUNTED_TEAMS_PERIOD_POOL_SHARE_BASIS_POINTS) / 10_000
+	);
+	return Math.min(listPoolMicroUsd, cap);
+}
 
 /**
  * Legacy hosted automation catalog. Teams' current public commercial unit is
@@ -87,9 +142,13 @@ export const PRO_FOUNDING_TRIAL = TEAMS_FOUNDING_TRIAL;
  * Teams starts with a five-agent process bundle. Pro and Max remain internal
  * legacy hosted contracts until the sales motion is repeatable.
  */
-export const HOSTED_AGENT_PLANS: Readonly<
-	Record<HostedAgentPlanId, HostedAgentPlan>
-> = {
+/** Each catalog entry exposes the commercial plan contract, including optional member caps. */
+interface HostedAgentPlanCatalog {
+	readonly max: HostedAgentPlan;
+	readonly pro: HostedAgentPlan;
+	readonly teams: HostedAgentPlan;
+}
+export const HOSTED_AGENT_PLANS: HostedAgentPlanCatalog = {
 	teams: {
 		agentBundleSize: HOSTED_AGENT_BUNDLE_SIZE,
 		id: "teams",
@@ -176,16 +235,18 @@ export const HOSTED_AGENT_PLANS: Readonly<
 export const MAX_HOSTED_AGENT_COUNT = 1000;
 
 /** Parse a support bonus expiry from persisted or webhook metadata. */
-export const hostedAgentBonusExpiry = (value: unknown): Date | null => {
-	if (value instanceof Date) {
-		return Number.isNaN(value.getTime()) ? null : value;
-	}
-	if (typeof value !== "string" || !value.trim()) {
-		return null;
-	}
-	const date = new Date(value);
-	return Number.isNaN(date.getTime()) ? null : date;
-};
+export const hostedAgentBonusExpiry = z
+	.union([
+		z.date(),
+		z
+			.string()
+			.trim()
+			.min(1)
+			.transform((value) => new Date(value))
+			.pipe(z.date()),
+	])
+	.nullable()
+	.catch(null).parse;
 
 const hostedAgentPlan = (planId: HostedAgentPlanId): HostedAgentPlan =>
 	HOSTED_AGENT_PLANS[planId];
@@ -376,27 +437,24 @@ export const quoteHostedAgentPlan = (input: {
 };
 
 /** Narrow untrusted plan ids before looking them up. */
+const hostedPlanIdBoundarySchema = z.preprocess(
+	(value) => value,
+	z.enum(HOSTED_AGENT_PLAN_IDS)
+);
 export const isHostedAgentPlanId = (
-	value: unknown
+	value: z.input<typeof hostedPlanIdBoundarySchema>
 ): value is HostedAgentPlanId =>
-	typeof value === "string" &&
-	(HOSTED_AGENT_PLAN_IDS as readonly string[]).includes(value);
+	hostedPlanIdBoundarySchema.safeParse(value).success;
 
 /** Convert first-rollout ids to the current public Pro/Max ids. */
-export const normalizeHostedAgentPlanId = (
-	value: unknown
-): HostedAgentPlanId | null => {
-	if (isHostedAgentPlanId(value)) {
-		return value;
-	}
-	if (value === "business-agents") {
-		return "pro";
-	}
-	if (value === "enterprise-agents") {
-		return "max";
-	}
-	return null;
-};
+export const normalizeHostedAgentPlanId = z
+	.union([
+		z.enum(HOSTED_AGENT_PLAN_IDS),
+		z.literal("business-agents").transform(() => "pro" as const),
+		z.literal("enterprise-agents").transform(() => "max" as const),
+	])
+	.nullable()
+	.catch(null).parse;
 
 /** Restore a persisted entitlement from its org-level contract fields. */
 export const hostedAgentEntitlementFromContract = (input: {
@@ -406,19 +464,19 @@ export const hostedAgentEntitlementFromContract = (input: {
 	monthlyPriceMicroUsd?: number;
 	planId: HostedAgentPlanId;
 }): HostedAgentQuote => {
-	const quote = quoteHostedAgentPlan({
-		planId: input.planId,
-		agentCount: input.contractedAgents + Math.max(0, input.bonusAgents ?? 0),
-		bonusAgents: input.bonusAgents,
-		allowLegacyBelowFloor: true,
-	});
-	return {
-		...quote,
-		...(input.includedCreditPoolMicroUsd === undefined
-			? {}
-			: { includedCreditPoolMicroUsd: input.includedCreditPoolMicroUsd }),
-		...(input.monthlyPriceMicroUsd === undefined
-			? {}
-			: { monthlyPriceMicroUsd: input.monthlyPriceMicroUsd }),
+	const quote = {
+		...quoteHostedAgentPlan({
+			planId: input.planId,
+			agentCount: input.contractedAgents + Math.max(0, input.bonusAgents ?? 0),
+			bonusAgents: input.bonusAgents,
+			allowLegacyBelowFloor: true,
+		}),
 	};
+	if (input.includedCreditPoolMicroUsd !== undefined) {
+		quote.includedCreditPoolMicroUsd = input.includedCreditPoolMicroUsd;
+	}
+	if (input.monthlyPriceMicroUsd !== undefined) {
+		quote.monthlyPriceMicroUsd = input.monthlyPriceMicroUsd;
+	}
+	return quote;
 };

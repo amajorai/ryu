@@ -172,6 +172,7 @@ export function SidecarRowView({
 							"truncate font-medium text-sm",
 							!isInstalled && "text-muted-foreground"
 						)}
+						title={entry.displayName}
 					>
 						{entry.displayName}
 					</span>
@@ -183,7 +184,10 @@ export function SidecarRowView({
 					) : null}
 				</div>
 				{entry.description ? (
-					<p className="truncate text-muted-foreground text-xs">
+					<p
+						className="truncate text-muted-foreground text-xs"
+						title={entry.description}
+					>
 						{entry.description}
 					</p>
 				) : null}
@@ -194,7 +198,7 @@ export function SidecarRowView({
 					<span className="text-muted-foreground text-xs">Installing…</span>
 				) : isFailed ? (
 					<Button
-						className="h-7 px-2 text-status-warning hover:text-status-warning"
+						appearance="service-retry"
 						disabled={pending !== null}
 						onClick={() => onInstall?.(entry.name)}
 						size="sm"
@@ -211,7 +215,7 @@ export function SidecarRowView({
 						<>
 							{hasUpdate ? (
 								<Button
-									className="h-7 px-2 text-status-info hover:text-status-info"
+									appearance="service-update"
 									disabled={pending !== null}
 									onClick={() => onInstall?.(entry.name)}
 									size="sm"
@@ -227,7 +231,7 @@ export function SidecarRowView({
 							{entry.running ? (
 								<>
 									<Button
-										className="h-7 px-2"
+										appearance="service-action"
 										disabled={pending !== null}
 										onClick={() => onStop?.(entry.name)}
 										size="sm"
@@ -240,7 +244,7 @@ export function SidecarRowView({
 										Stop
 									</Button>
 									<Button
-										className="h-7 px-2"
+										appearance="service-action"
 										disabled={pending !== null}
 										onClick={() => onRestart?.(entry.name)}
 										size="sm"
@@ -255,7 +259,7 @@ export function SidecarRowView({
 								</>
 							) : (
 								<Button
-									className="h-7 px-2"
+									appearance="service-action"
 									disabled={pending !== null}
 									onClick={() => onStart?.(entry.name)}
 									size="sm"
@@ -269,7 +273,7 @@ export function SidecarRowView({
 					) : null
 				) : (
 					<Button
-						className="h-7 px-2"
+						appearance="service-action"
 						disabled={pending !== null}
 						onClick={() => onInstall?.(entry.name)}
 						size="sm"
@@ -335,7 +339,7 @@ function GatewayRow({
 				{running ? (
 					<>
 						<Button
-							className="h-7 px-2"
+							appearance="service-action"
 							disabled={pending != null}
 							onClick={onStop}
 							size="sm"
@@ -345,7 +349,7 @@ function GatewayRow({
 							Stop
 						</Button>
 						<Button
-							className="h-7 px-2"
+							appearance="service-action"
 							disabled={pending != null}
 							onClick={onStart}
 							size="sm"
@@ -360,7 +364,7 @@ function GatewayRow({
 					</>
 				) : (
 					<Button
-						className="h-7 px-2"
+						appearance="service-action"
 						disabled={pending != null}
 						onClick={onStart}
 						size="sm"
@@ -418,7 +422,7 @@ function SandboxRow({
 			<div className="flex flex-shrink-0 items-center gap-1.5">
 				{available ? (
 					<Button
-						className="h-7 px-2"
+						appearance="service-action"
 						disabled={pending}
 						onClick={onToggle}
 						size="sm"
@@ -480,7 +484,12 @@ function DockerRow({ sandbox }: { sandbox: SandboxView | null | undefined }) {
 			</div>
 			<div className="min-w-0 flex-1">
 				<span className="truncate font-medium text-sm">Docker backend</span>
-				<p className="truncate text-muted-foreground text-xs">{description}</p>
+				<p
+					className="truncate text-muted-foreground text-xs"
+					title={description}
+				>
+					{description}
+				</p>
 			</div>
 			<div className="flex flex-shrink-0 items-center gap-1.5">
 				<span className="text-muted-foreground text-xs">

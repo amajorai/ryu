@@ -39,7 +39,7 @@ export function useStoreToolbar(
 	const setToolbar = useContext(StoreToolbarContext);
 	const configRef = useRef(config);
 	configRef.current = config;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: `deps` is the caller-owned change signal; the latest config is read via configRef, not closed over.
+	// `deps` is the caller-owned change signal; the latest config is read via configRef, not closed over.
 	useEffect(() => {
 		setToolbar?.(configRef.current);
 		return () => setToolbar?.(null);

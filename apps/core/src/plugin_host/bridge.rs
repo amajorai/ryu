@@ -1,7 +1,7 @@
 //! The plugin host-capability bridge.
 //!
 //! Implements [`crate::tool_exec::SandboxBridge`] so a plugin hook running in the
-//! Deno sandbox can call `host.*` capabilities. Every capability is gated by a
+//! JS sandbox can call `host.*` capabilities. Every capability is gated by a
 //! manifest grant; an ungranted call returns an error the hook can see (it never
 //! silently succeeds). All plugin-specific logic lives here, keeping
 //! [`crate::tool_exec`] a generic substrate.
@@ -24,6 +24,66 @@ use crate::workflow::delegation::{
 
 /// Grant required to call `host.sideModel`.
 const GRANT_SIDE_MODEL: &str = "hook:side-model";
+/// At most this many images may accompany one `host.sideModel` call.
+pub(crate) const MAX_SIDE_MODEL_IMAGES: usize = 8;
+/// Combined length of a call's image data URIs. Leaves room under the Gateway's
+/// 2 MiB chat body limit for the prompt and system text; the encoded request as
+/// a whole is checked against that limit before it is sent
+/// ([`crate::server::encode_side_model_request`]).
+pub(crate) const MAX_SIDE_MODEL_IMAGE_BYTES: usize = 1536 * 1024;
+/// Raster formats every vision-capable provider behind the Gateway accepts.
+const SIDE_MODEL_IMAGE_PREFIXES: [&str; 3] = [
+    "data:image/png;base64,",
+    "data:image/jpeg;base64,",
+    "data:image/webp;base64,",
+];
+
+/// Validate `host.sideModel`'s optional `images`: at most
+/// [`MAX_SIDE_MODEL_IMAGES`] inline `data:image/{png,jpeg,webp};base64` URIs
+/// totalling at most [`MAX_SIDE_MODEL_IMAGE_BYTES`]. Inline only, so the
+/// Gateway never fetches a plugin-chosen URL on the plugin's behalf.
+pub(crate) fn validate_side_model_images(args: &Value) -> Result<Vec<String>, String> {
+    use base64::Engine as _;
+    let items = match args.get("images") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(items)) => items,
+        Some(_) => return Err("host.sideModel 'images' must be an array".to_owned()),
+    };
+    if items.len() > MAX_SIDE_MODEL_IMAGES {
+        return Err(format!(
+            "host.sideModel accepts at most {MAX_SIDE_MODEL_IMAGES} images"
+        ));
+    }
+    let mut total = 0usize;
+    let mut images = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let Some(url) = item.as_str() else {
+            return Err(format!("host.sideModel images[{index}] must be a string"));
+        };
+        let Some(payload) = SIDE_MODEL_IMAGE_PREFIXES
+            .iter()
+            .find_map(|prefix| url.strip_prefix(prefix))
+        else {
+            return Err(format!(
+                "host.sideModel images[{index}] must be a data:image/png, jpeg or webp base64 URI"
+            ));
+        };
+        total = total.saturating_add(url.len());
+        if total > MAX_SIDE_MODEL_IMAGE_BYTES {
+            return Err("host.sideModel images exceed the 1.5 MiB total limit".to_owned());
+        }
+        if base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .map_or(true, |bytes| bytes.is_empty())
+        {
+            return Err(format!(
+                "host.sideModel images[{index}] has an empty or invalid base64 payload"
+            ));
+        }
+        images.push(url.to_owned());
+    }
+    Ok(images)
+}
 /// Grant required to read the secret-free runtime catalog. This deliberately
 /// shares the existing read-only agent-catalog grant; the projection below
 /// never contains credentials, hook code, or provider endpoints.
@@ -35,15 +95,24 @@ const GRANT_STORAGE: &str = "storage:kv";
 const GRANT_CRYPTO: &str = "crypto:seal";
 #[path = "backup_bridge.rs"]
 mod backup_bridge;
+#[path = "workflow_script_bridge.rs"]
+mod workflow_script_bridge;
 
 /// Grant required to call `host.runAgent` (spawn a full tool-using sub-agent).
+/// On its own it admits only READ-ONLY presets (`code_read`, `research`,
+/// `summarise`); see [`GRANT_RUN_AGENT_WRITE`].
 const GRANT_RUN_AGENT: &str = "hook:run-agent";
+/// Additional explicit grant required before `host.runAgent` / `host.runFanout`
+/// may launch a MUTATING preset (`code_write`: write files, apply patches, run
+/// commands). Deliberately NOT on the Gateway's default allowlist — only reviewed
+/// first-party owners (or an operator allowlist override) can hold it, so a
+/// marketplace plugin holding plain `hook:run-agent` cannot escalate to a
+/// write-capable sub-agent by passing `preset: "code_write"`.
+const GRANT_RUN_AGENT_WRITE: &str = "hook:run-agent:write";
 /// Grant required to call `host.spaces_*` (own Space documents).
 const GRANT_SPACES: &str = "spaces:docs";
-/// Grant required to call `host.finetune_*` (drive fine-tune runs). Owned by the
-/// `@ryu/finetune` app; Core still owns the orchestration + job store, the app
-/// reaches it through this governed bridge.
-const GRANT_FINETUNE: &str = "finetune:runs";
+/// Grant required to create, inspect, update, or query native Space databases.
+const GRANT_SPACES_DATABASE: &str = "spaces:database";
 /// Grant required to call `host.navigate` (ask the host shell to navigate/deep-link).
 const GRANT_NAVIGATE: &str = "shell:navigate";
 /// Grant required to call `host.setConversationTitle`.
@@ -57,6 +126,15 @@ const GRANT_PREFERENCES_READ: &str = "preferences:read";
 const GRANT_BACKGROUND_CONTROL: &str = "background:control";
 /// Grant required to read an agent's normalized subscription usage snapshot.
 const GRANT_USAGE_READ: &str = "usage:read";
+/// Separate approval for cross-caller administrative Gateway audit records.
+const GRANT_USAGE_AUDIT: &str = "usage:audit";
+/// Grant required to call `host.subscriptions_*`: owner-tier subscription
+/// accounts with their labels (often email addresses) and cached usage.
+/// `subscriptions:pin` is a reserved name for future account pinning only.
+const GRANT_SUBSCRIPTIONS_READ: &str = "subscriptions:read";
+/// One live vendor read per (plugin, provider, account) per interval; later
+/// calls inside the interval are served cache-only.
+const SUBSCRIPTION_LIVE_READ_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 /// Grant required to call `host.recordFeedback` (the Learning message-action seam).
 const GRANT_LEARNING_FEEDBACK: &str = "learning:crud";
 /// Grant required to call `host.synthesizeSkill` (the Learning context-menu seam).
@@ -75,6 +153,22 @@ const GRANT_NOTIFY_TARGET: &str = "notifications:send-to-user";
 const MAX_NOTIFICATION_TITLE_CHARS: usize = 120;
 const MAX_NOTIFICATION_BODY_CHARS: usize = 2000;
 const MAX_NOTIFICATION_TARGET_CHARS: usize = 256;
+
+/// Shared no-redirect client for `security.check`. Plugin hooks can call it on
+/// every turn, so building a client per call reloaded the TLS config and opened
+/// a new Gateway connection each time. Redirects stay off so the bearer token
+/// never follows a 3xx, and the timeout is set per request.
+fn security_check_client() -> Option<&'static reqwest::Client> {
+    static CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
 
 fn project_catalog_provider(provider: &Value) -> Value {
     json!({
@@ -109,6 +203,8 @@ pub fn dispatch_path_for(method: &str) -> Option<&'static str> {
     Some(match method {
         "security.check" => "host.security_check",
         "identity.current" => "host.identity_current",
+        "authorization.issue" => "host.authorization_issue",
+        "authorization.check" => "host.authorization_check",
         "catalog.snapshot" => "host.catalogSnapshot",
         "catalog.models" => "host.catalogModels",
         "model.complete" => "host.sideModel",
@@ -134,19 +230,23 @@ pub fn dispatch_path_for(method: &str) -> Option<&'static str> {
         "spaces.updateDoc" => "host.spaces_update_doc",
         "spaces.listDocs" => "host.spaces_list_docs",
         "spaces.deleteDoc" => "host.spaces_delete_doc",
-        "finetune.capability" => "host.finetune_capability",
-        "finetune.start" => "host.finetune_start",
-        "finetune.list" => "host.finetune_list",
-        "finetune.get" => "host.finetune_get",
-        "finetune.cancel" => "host.finetune_cancel",
-        "finetune.adapters" => "host.finetune_adapters",
-        "finetune.merge" => "host.finetune_merge",
+        "spaces.createDatabase" => "host.spaces_create_database",
+        "spaces.listDatabases" => "host.spaces_list_databases",
+        "spaces.getDatabase" => "host.spaces_get_database",
+        "spaces.updateDatabase" => "host.spaces_update_database",
+        "spaces.queryDatabase" => "host.spaces_query_database",
+        "spaces.deleteDatabase" => "host.spaces_delete_database",
         "conversation.setTitle" => "host.setConversationTitle",
         "conversation.addReaction" => "host.addMessageReaction",
         "preferences.get" => "host.getPreference",
         "background.list" => "host.background_list",
         "background.stop" => "host.background_stop",
+        "execution.pause" => "host.execution_pause",
+        "execution.resume" => "host.execution_resume",
+        "execution.status" => "host.execution_status",
         "usage.snapshot" => "host.usageSnapshot",
+        "subscriptions.list" => "host.subscriptions_list",
+        "subscriptions.usage" => "host.subscriptions_usage",
         "gateway.budgetSpend" => "host.gatewayBudgetSpend",
         "gateway.audit" => "host.gatewayAudit",
         "learning.recordFeedback" => "host.recordFeedback",
@@ -157,7 +257,8 @@ pub fn dispatch_path_for(method: &str) -> Option<&'static str> {
     })
 }
 
-/// Hooks currently running through `host.runHook`, keyed `"<plugin>:<hook>"`.
+/// Hooks currently running through `host.runHook`, keyed
+/// `"<plugin>:<user>:<conversation>"`.
 ///
 /// The re-entrancy guard for [`PluginHookBridge::run_own_hook`]: a hook body that
 /// calls `host.runHook` on itself would otherwise spawn sandboxes until the
@@ -169,20 +270,70 @@ fn manual_hook_runs() -> &'static std::sync::Mutex<HashSet<String>> {
     RUNS.get_or_init(|| std::sync::Mutex::new(HashSet::new()))
 }
 
-/// Claim a manual run slot. `false` when one is already in flight for this key.
-/// A poisoned lock resolves to "refuse": failing closed here costs one menu click,
-/// while failing open costs the recursion bound this exists to hold.
-fn manual_run_begin(key: &str) -> bool {
-    manual_hook_runs()
-        .lock()
-        .map(|mut set| set.insert(key.to_string()))
-        .unwrap_or(false)
+/// One claimed slot in [`manual_hook_runs`], released on drop, so a cancelled
+/// request (a client disconnect drops the handler future mid-run) or a panicking
+/// hook cannot leave the hook blocked for that conversation until Core restarts.
+struct ManualRunGuard {
+    key: String,
 }
 
-fn manual_run_end(key: &str) {
-    if let Ok(mut set) = manual_hook_runs().lock() {
-        set.remove(key);
+impl ManualRunGuard {
+    /// Claim a manual run slot. `None` when one is already in flight for `key`.
+    /// A poisoned lock resolves to "refuse": failing closed here costs one menu
+    /// click, while failing open costs the recursion bound this exists to hold.
+    fn claim(key: &str) -> Option<Self> {
+        let inserted = manual_hook_runs()
+            .lock()
+            .map(|mut set| set.insert(key.to_owned()))
+            .unwrap_or(false);
+        inserted.then(|| Self {
+            key: key.to_owned(),
+        })
     }
+}
+
+impl Drop for ManualRunGuard {
+    fn drop(&mut self) {
+        // Release even through poison, so a slot never outlives its run.
+        manual_hook_runs()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.key);
+    }
+}
+
+/// The node owner, or an owner/admin of the node's org: who may see saved
+/// subscription logins and spend their quota.
+pub(crate) fn node_owner_or_admin(
+    verified_caller: Option<&crate::identity_verify::VerifiedCaller>,
+) -> bool {
+    if crate::sidecar::control_plane::is_managed_node()
+        && crate::sidecar::control_plane::registered_org().is_none()
+    {
+        return false;
+    }
+    let Some(node) = crate::sidecar::control_plane::registered_node() else {
+        return match crate::sidecar::control_plane::registered_org() {
+            Some(org) => is_org_admin(verified_caller, &org.id),
+            None => true,
+        };
+    };
+    let Some(caller) = verified_caller else {
+        return false;
+    };
+    if node.scope == crate::sidecar::control_plane::NodeScope::Personal {
+        return node.owner_user_id.as_deref() == Some(caller.user_id.as_str());
+    }
+    is_org_admin(Some(caller), &node.org.id)
+}
+
+fn is_org_admin(caller: Option<&crate::identity_verify::VerifiedCaller>, org_id: &str) -> bool {
+    caller.is_some_and(|caller| {
+        caller.org_id.as_deref() == Some(org_id)
+            && caller
+                .role
+                .satisfies(crate::identity_verify::OrgRole::Admin)
+    })
 }
 
 /// Bridges sandbox `host.*` calls for one plugin hook run.
@@ -196,11 +347,23 @@ pub struct PluginHookBridge {
     /// from the tool arguments, so a sandboxed body cannot react as another agent.
     calling_agent_id: Option<String>,
     storage_tenant: Option<String>,
+    #[cfg(test)]
+    test_storage: Option<crate::plugin_storage::PluginStorage>,
     middleware_next: Option<crate::plugin_host::MiddlewareNext>,
     middleware_next_used: Arc<AtomicBool>,
 }
 
+fn requires_user_agent_run_permission(has_verified_caller: bool, has_parent_agent: bool) -> bool {
+    has_verified_caller || !has_parent_agent
+}
+
 impl PluginHookBridge {
+    #[cfg(test)]
+    pub(super) fn with_test_storage(mut self, store: crate::plugin_storage::PluginStorage) -> Self {
+        self.test_storage = Some(store);
+        self
+    }
+
     pub fn new(plugin_id: String, grants: HashSet<String>, state: ServerState) -> Self {
         Self::new_for_request(plugin_id, grants, state, None, None)
     }
@@ -220,6 +383,8 @@ impl PluginHookBridge {
             authorized_conversation_id,
             calling_agent_id: None,
             storage_tenant: None,
+            #[cfg(test)]
+            test_storage: None,
             middleware_next: None,
             middleware_next_used: Arc::new(AtomicBool::new(false)),
         }
@@ -308,30 +473,67 @@ impl PluginHookBridge {
     }
 
     fn usage_admin_allowed(&self) -> bool {
-        if crate::sidecar::control_plane::is_managed_node()
-            && crate::sidecar::control_plane::registered_org().is_none()
-        {
-            return false;
-        }
-        let Some(node) = crate::sidecar::control_plane::registered_node() else {
-            return true;
-        };
-        let Some(caller) = self.verified_caller.as_ref() else {
-            return false;
-        };
-        if node.scope == crate::sidecar::control_plane::NodeScope::Personal {
-            return node.owner_user_id.as_deref() == Some(caller.user_id.as_str());
-        }
-        caller.org_id.as_deref() == Some(node.org.id.as_str())
-            && caller
-                .role
-                .satisfies(crate::identity_verify::OrgRole::Admin)
+        node_owner_or_admin(self.verified_caller.as_ref())
     }
 
     async fn handle_inner(&self, path: String, args: Value) -> InvokeOutcome {
         // The sandbox proxy delivers `host.<method>` as the path.
         let method = path.strip_prefix("host.").unwrap_or(&path);
         match method {
+            "authorization_issue" | "authorization_check" => {
+                if !self.grants.contains("authorization:defer") {
+                    return err("authorization:defer is not granted".to_owned());
+                }
+                match crate::sidecar::deferred_authorization::invoke(
+                    &self.state,
+                    &self.plugin_id,
+                    method,
+                    args,
+                )
+                .await
+                {
+                    Ok(value) => ok(value),
+                    Err(error) => err(error.to_owned()),
+                }
+            }
+            "execution_pause" | "execution_resume" | "execution_status" => {
+                if !self.grants.contains("execution:control") {
+                    return err("execution:control is not granted".to_owned());
+                }
+                if !self.usage_admin_allowed() {
+                    return err("execution control is not granted to this caller".to_owned());
+                }
+                let _control = crate::execution_control::control_lock().await;
+                let mut cancelled = 0;
+                if method == "execution_pause" {
+                    crate::execution_control::pause();
+                    cancelled += crate::sidecar::adapters::acp::request_cancel_all();
+                    cancelled += crate::a2a::request_cancel_all();
+                } else if method == "execution_resume" {
+                    crate::execution_control::resume();
+                }
+                let interrupted_conversations = if method == "execution_pause" {
+                    match self
+                        .state
+                        .conversations
+                        .interrupt_running_conversations()
+                        .await
+                    {
+                        Ok(interrupted) => interrupted,
+                        Err(error) => {
+                            tracing::error!(%error, "execution paused but run statuses could not be updated");
+                            return err("execution paused, but run statuses could not be updated"
+                                .to_owned());
+                        }
+                    }
+                } else {
+                    0
+                };
+                tracing::info!(plugin = %self.plugin_id, method, cancelled, "execution control");
+                ok(
+                    json!({ "paused": crate::execution_control::is_paused(), "cancelledTurns": cancelled, "interruptedConversations": interrupted_conversations }),
+                )
+            }
             "security_check" => {
                 if !self.grants.contains("security:check") {
                     return err("security:check is not granted".to_owned());
@@ -340,13 +542,8 @@ impl PluginHookBridge {
                     Some(text) if text.len() <= 2_000_000 => text,
                     _ => return err("security.check requires text up to 2 MB".to_owned()),
                 };
-                let client = match reqwest::Client::builder()
-                    .redirect(reqwest::redirect::Policy::none())
-                    .timeout(std::time::Duration::from_secs(15))
-                    .build()
-                {
-                    Ok(client) => client,
-                    Err(_) => return err("Security scanner unavailable".to_owned()),
+                let Some(client) = security_check_client() else {
+                    return err("Security scanner unavailable".to_owned());
                 };
                 let endpoint = format!(
                     "{}/v1/firewall/check",
@@ -354,6 +551,7 @@ impl PluginHookBridge {
                 );
                 let mut request = client
                     .post(endpoint)
+                    .timeout(std::time::Duration::from_secs(15))
                     .json(&json!({ "text": text, "checks": ["secret"] }));
                 if let Some(token) = crate::sidecar::gateway::gateway_token() {
                     request = request.bearer_auth(token);
@@ -373,10 +571,12 @@ impl PluginHookBridge {
                 if !self.grants.contains("identity:read") {
                     return err("identity:read is not granted".to_owned());
                 }
+                // Apps match email-addressed grants against this address, so it
+                // carries only an email the identity token marks verified.
                 let principal = self.verified_caller.as_ref().map(|caller| {
                     json!({
                         "id": caller.user_id,
-                        "email": caller.email.as_deref().unwrap_or_default(),
+                        "email": caller.verified_email().unwrap_or_default(),
                         "workspaceIds": caller.org_id.iter().collect::<Vec<_>>(),
                     })
                 });
@@ -389,6 +589,8 @@ impl PluginHookBridge {
             "sideModel" => self.side_model(args).await,
             "runAgent" => self.run_agent(args).await,
             "runFanout" => self.run_fanout(args).await,
+            "workflowScript" => self.workflow_script(args).await,
+            "workflowRunStatus" => self.workflow_run_status(args).await,
             "storage_get"
             | "storage_set"
             | "storage_delete"
@@ -406,20 +608,20 @@ impl PluginHookBridge {
             | "spaces_get_doc"
             | "spaces_update_doc"
             | "spaces_list_docs"
-            | "spaces_delete_doc" => self.spaces(method, args).await,
-            "finetune_capability"
-            | "finetune_start"
-            | "finetune_list"
-            | "finetune_get"
-            | "finetune_cancel"
-            | "finetune_adapters"
-            | "finetune_merge" => self.finetune(method, args).await,
+            | "spaces_delete_doc"
+            | "spaces_create_database"
+            | "spaces_list_databases"
+            | "spaces_get_database"
+            | "spaces_update_database"
+            | "spaces_query_database"
+            | "spaces_delete_database" => self.spaces(method, args).await,
             "setConversationTitle" => self.set_conversation_title(args).await,
             "addMessageReaction" => self.add_message_reaction(args).await,
             "getPreference" => self.get_preference(args).await,
             "background_list" => self.background_list(args).await,
             "background_stop" => self.background_stop(args).await,
             "usageSnapshot" => self.usage_snapshot(args).await,
+            "subscriptions_list" | "subscriptions_usage" => self.subscriptions(method, args).await,
             "gatewayBudgetSpend" => self.gateway_budget_spend(args).await,
             "gatewayAudit" => self.gateway_audit(args).await,
             "recordFeedback" => self.record_feedback(args).await,
@@ -825,8 +1027,9 @@ impl PluginHookBridge {
         }
     }
 
-    /// `host.addMessageReaction({ message_id, emoji })` — add an agent-authored
-    /// reaction to one exact persisted message in the current conversation.
+    /// `host.addMessageReaction({ message_id?, emoji })` — add an agent-authored
+    /// reaction to one exact persisted message in the current conversation, or
+    /// to its latest user message when `message_id` is omitted.
     ///
     /// The current conversation and actor are bound when the inline tool bridge is
     /// created. This is intentionally not a general conversation-id argument: an
@@ -883,14 +1086,38 @@ impl PluginHookBridge {
             );
         }
 
-        let message_id = args
+        // An omitted id means "what the user just said": the agent is never shown
+        // persisted message ids, so the acknowledgement case resolves server-side
+        // to the latest user message of the bound conversation.
+        let named_message_id = args
             .get("message_id")
             .and_then(Value::as_str)
             .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let Some(message_id) = message_id else {
-            return err("host.addMessageReaction requires a non-empty 'message_id'".to_owned());
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let message_id = match named_message_id {
+            Some(message_id) => message_id,
+            None => match self
+                .state
+                .conversations
+                .latest_user_message_id(conversation_id)
+                .await
+            {
+                Ok(Some(message_id)) => message_id,
+                Ok(None) => {
+                    return err(
+                        "host.addMessageReaction found no user message to react to in the current conversation"
+                            .to_owned(),
+                    );
+                }
+                Err(error) => {
+                    return err(format!(
+                        "host.addMessageReaction could not resolve the latest user message: {error}"
+                    ));
+                }
+            },
         };
+        let message_id = message_id.as_str();
         if message_id.len() > 200 {
             return err("host.addMessageReaction 'message_id' exceeds 200 bytes".to_owned());
         }
@@ -918,12 +1145,12 @@ impl PluginHookBridge {
                 return err(
                     "host.addMessageReaction requires the Message Reactions plugin to be enabled"
                         .to_owned(),
-                )
+                );
             }
             Err(error) => {
                 return err(format!(
                     "host.addMessageReaction could not verify the Message Reactions plugin: {error}"
-                ))
+                ));
             }
         }
 
@@ -980,9 +1207,16 @@ impl PluginHookBridge {
         }
     }
 
-    /// `host.usageSnapshot({ agent_id })` — read the same normalized, read-only
-    /// subscription windows shown in the composer. The credential reader never
-    /// refreshes tokens and the snapshot contains no credential material.
+    /// `host.usageSnapshot(args)` accepts exactly one of two forms:
+    ///
+    /// - `{ agent_id }`: the same normalized, read-only subscription windows
+    ///   shown in the composer. A Ryu subscription provider id reads the vault's
+    ///   active account. The credential reader never refreshes tokens and the
+    ///   snapshot contains no credential material.
+    /// - `{ provider_id, account_id? }`: every saved account of one provider,
+    ///   label-free and cache-only (a miss is `pending` and schedules a
+    ///   background read), so a turn hook never waits on a vendor. Node
+    ///   owner/admin only.
     async fn usage_snapshot(&self, args: Value) -> InvokeOutcome {
         if !self.grants.contains(GRANT_USAGE_READ) {
             return err(format!(
@@ -990,17 +1224,28 @@ impl PluginHookBridge {
                 self.plugin_id
             ));
         }
-        let agent_id = args
-            .get("agent_id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim();
-        if agent_id.is_empty() {
-            return err("host.usageSnapshot requires a non-empty 'agent_id'".to_string());
-        }
+        let agent_id = match parse_usage_args(&args) {
+            Ok(UsageArgs::Agent(agent_id)) => agent_id,
+            Ok(UsageArgs::Provider {
+                provider_id,
+                account_id,
+            }) => return self.provider_usage(provider_id, account_id).await,
+            Err(message) => return err(message),
+        };
         if !crate::fleet::is_agent_available(agent_id) {
             return err(
                 "host.usageSnapshot agent is unavailable under organization policy".to_owned(),
+            );
+        }
+        // A Ryu subscription provider id reads the owner's active saved
+        // account, so it carries the same owner gate as the provider form.
+        if crate::subscriptions::provider_kind(agent_id)
+            == Some(crate::subscriptions::ProviderKind::Subscription)
+            && !self.usage_admin_allowed()
+        {
+            return err(
+                "host.usageSnapshot provider readings are visible to the node owner only"
+                    .to_owned(),
             );
         }
         if let Err(response) = crate::server::enforce_agent_resource_permission(
@@ -1016,10 +1261,151 @@ impl PluginHookBridge {
                 response.status()
             ));
         }
-        match serde_json::to_value(ryu_usage::fetch_usage(agent_id).await) {
+        match serde_json::to_value(crate::subscriptions::reading::agent_reading(agent_id).await) {
             Ok(snapshot) => ok(snapshot),
             Err(e) => err(e.to_string()),
         }
+    }
+
+    /// The `{ provider_id, account_id? }` form of `host.usageSnapshot`. Cache
+    /// only and label-free: account labels never reach a turn hook.
+    async fn provider_usage(&self, provider_id: &str, account_id: Option<&str>) -> InvokeOutcome {
+        if !self.usage_admin_allowed() {
+            return err(
+                "host.usageSnapshot provider readings are visible to the node owner only"
+                    .to_owned(),
+            );
+        }
+        // With an account named, only that account is probed on a miss.
+        let snapshot = crate::subscriptions::snapshot(crate::subscriptions::SnapshotQuery {
+            provider_id: Some(provider_id.to_owned()),
+            usage: crate::subscriptions::UsageMode::Cached,
+            include_labels: false,
+            max_age: crate::subscriptions::DEFAULT_MAX_AGE,
+            only_account: account_id.map(str::to_owned),
+        })
+        .await;
+        let provider = snapshot
+            .providers
+            .into_iter()
+            .find(|provider| provider.provider_id == provider_id);
+        // The raw cached snapshots need each account's credential revision,
+        // which is a vault read: collect them off the async workers.
+        let wanted: Vec<String> = provider
+            .iter()
+            .flat_map(|provider| provider.accounts.iter())
+            .filter(|row| account_id.is_none_or(|wanted| row.account_id == wanted))
+            .map(|row| row.account_id.clone())
+            .collect();
+        let owned_provider = provider_id.to_owned();
+        let cached: std::collections::HashMap<String, (ryu_usage::UsageSnapshot, String)> =
+            crate::subscriptions::blocking(move || {
+                wanted
+                    .into_iter()
+                    .filter_map(|account| {
+                        cached_account_snapshot(&owned_provider, &account).map(|hit| (account, hit))
+                    })
+                    .collect()
+            })
+            .await;
+        ok(provider_usage_projection(
+            provider.as_ref(),
+            provider_id,
+            account_id,
+            |_, account| cached.get(account).cloned(),
+        ))
+    }
+
+    /// `host.subscriptions_list` / `host.subscriptions_usage` — the owner-tier
+    /// (T1) subscription inventory with account labels. Fails closed: grant,
+    /// then node owner/admin, then argument validation.
+    async fn subscriptions(&self, method: &str, args: Value) -> InvokeOutcome {
+        if let Err(message) = subscriptions_gate(
+            &self.plugin_id,
+            self.grants.contains(GRANT_SUBSCRIPTIONS_READ),
+            || self.usage_admin_allowed(),
+        ) {
+            return err(message);
+        }
+        let args = if args.is_null() { json!({}) } else { args };
+        let result = if method == "subscriptions_list" {
+            self.subscriptions_list(args).await
+        } else {
+            self.subscriptions_usage(args).await
+        };
+        match result {
+            Ok(value) => ok(value),
+            Err(message) => err(message),
+        }
+    }
+
+    async fn subscriptions_list(&self, args: Value) -> Result<Value, String> {
+        let args: SubscriptionsListArgs = serde_json::from_value(args)
+            .map_err(|error| format!("subscriptions.list received invalid arguments: {error}"))?;
+        if let Some(provider_id) = args.provider_id.as_deref() {
+            validate_subscription_id("providerId", provider_id)?;
+        }
+        let mut usage = parse_list_usage(args.usage.as_deref())?;
+        if usage == crate::subscriptions::UsageMode::Refresh
+            && !self.take_live_read(args.provider_id.as_deref().unwrap_or("*"), "*")
+        {
+            usage = crate::subscriptions::UsageMode::Cached;
+        }
+        let snapshot = crate::subscriptions::snapshot(crate::subscriptions::SnapshotQuery {
+            provider_id: args.provider_id,
+            usage,
+            include_labels: true,
+            max_age: crate::subscriptions::DEFAULT_MAX_AGE,
+            only_account: None,
+        })
+        .await;
+        serde_json::to_value(snapshot).map_err(|error| error.to_string())
+    }
+
+    async fn subscriptions_usage(&self, args: Value) -> Result<Value, String> {
+        let args: SubscriptionsUsageArgs = serde_json::from_value(args)
+            .map_err(|error| format!("subscriptions.usage received invalid arguments: {error}"))?;
+        validate_subscription_id("providerId", &args.provider_id)?;
+        if let Some(account_id) = args.account_id.as_deref() {
+            validate_subscription_id("accountId", account_id)?;
+        }
+        let account = args.account_id.as_deref().map_or(
+            crate::subscriptions::AccountSel::Active,
+            crate::subscriptions::AccountSel::Exact,
+        );
+        let mode = if self.take_live_read(
+            &args.provider_id,
+            args.account_id.as_deref().unwrap_or("@active"),
+        ) {
+            crate::subscriptions::UsageMode::Refresh
+        } else {
+            crate::subscriptions::UsageMode::Cached
+        };
+        let reading = crate::subscriptions::reading::read_with(
+            &args.provider_id,
+            account,
+            crate::subscriptions::reading::ReadOptions {
+                mode,
+                max_age: crate::subscriptions::DEFAULT_MAX_AGE,
+                model: None,
+                include_label: true,
+            },
+        )
+        .await;
+        serde_json::to_value(reading).map_err(|error| error.to_string())
+    }
+
+    /// Claim this plugin's live-read slot for one provider account.
+    fn take_live_read(&self, provider_id: &str, account_id: &str) -> bool {
+        subscription_live_reads().try_acquire(
+            (
+                self.plugin_id.clone(),
+                provider_id.to_owned(),
+                account_id.to_owned(),
+            ),
+            std::time::Instant::now(),
+            SUBSCRIPTION_LIVE_READ_INTERVAL,
+        )
     }
 
     /// `host.gatewayBudgetSpend()` — read the Gateway-owned charged-spend
@@ -1096,12 +1482,24 @@ impl PluginHookBridge {
         }
     }
 
-    /// `host.gatewayAudit({ limit })` — read redacted Gateway audit rows without
-    /// exposing the Gateway admin credential to the plugin or sidecar.
+    /// `host.gatewayAudit({ limit })` — read administrative Gateway audit rows.
+    /// A separate audit grant and node administrator authority are both required;
+    /// ordinary usage permission never authorizes cross-caller records.
     async fn gateway_audit(&self, args: Value) -> InvokeOutcome {
-        if !self.grants.contains(GRANT_USAGE_READ) {
+        let current = match self.state.app_store.get(&self.plugin_id).await {
+            Ok(Some(record)) if record.enabled => {
+                crate::plugin_host::current_approved_grants(
+                    &self.state,
+                    &self.plugin_id,
+                    &record.approved_grants,
+                )
+                .await
+            }
+            _ => HashSet::new(),
+        };
+        if !self.grants.contains(GRANT_USAGE_AUDIT) || !current.contains(GRANT_USAGE_AUDIT) {
             return err(format!(
-                "capability '{GRANT_USAGE_READ}' not granted to plugin '{}'",
+                "capability '{GRANT_USAGE_AUDIT}' not granted to plugin '{}'",
                 self.plugin_id
             ));
         }
@@ -1201,7 +1599,7 @@ impl PluginHookBridge {
             Some(other) => {
                 return err(format!(
                     "host.recordFeedback rating must be 'up', 'down' or null, got '{other}'"
-                ))
+                ));
             }
         }
         let updated = match self
@@ -1214,7 +1612,7 @@ impl PluginHookBridge {
             Err(error) => {
                 return err(format!(
                     "host.recordFeedback could not persist vote: {error}"
-                ))
+                ));
             }
         };
         if !updated {
@@ -1360,9 +1758,9 @@ impl PluginHookBridge {
         };
 
         let key = format!("{}:{}:{}", self.plugin_id, caller.user_id, conversation_id);
-        if !manual_run_begin(&key) {
+        let Some(manual_run) = ManualRunGuard::claim(&key) else {
             return err(format!("hook '{hook_id}' is already running"));
-        }
+        };
 
         // Build the same shape the turn loop passes, from the persisted transcript.
         const MAX_TRANSCRIPT: usize = 20;
@@ -1383,7 +1781,6 @@ impl PluginHookBridge {
                     .collect()
             }
             Err(e) => {
-                manual_run_end(&key);
                 return err(format!("host.runHook could not load the transcript: {e}"));
             }
         };
@@ -1392,14 +1789,19 @@ impl PluginHookBridge {
             _ => serde_json::Map::new(),
         };
         event.insert("source".to_string(), json!("manual"));
+        // Carry the verified caller into the hook, as the turn path does: the
+        // inner bridge needs it for conversation/resource ACLs on registered
+        // nodes and for the caller's storage tenant.
         let ctx = crate::plugin_host::HookContext {
             conversation_id: Some(conversation_id),
+            caller_user_id: Some(caller.user_id.clone()),
+            verified_caller: Some(caller.clone()),
             transcript,
             event: Some(Value::Object(event)),
             ..Default::default()
         };
         let directive = crate::plugin_host::run_hook(&self.state, &hook, &ctx).await;
-        manual_run_end(&key);
+        drop(manual_run);
         // A hook that returns `None` decided to do nothing — its gate did not
         // match, its model returned nothing, its write failed. Reporting that as
         // success is how a menu row ends up toasting "Renamed" over a chat whose
@@ -1472,12 +1874,60 @@ impl PluginHookBridge {
         ok(serde_json::json!({ "queued": true, "target": target }))
     }
 
+    async fn require_user_agent_run_permission(&self) -> Result<(), String> {
+        // A verified user must hold the collection permission in addition to
+        // the app's hook grant. Sidecar-only calls without a user are checked
+        // against node scope by enforce_permission; only a bridge invoked from
+        // an identified agent tool inherits its enclosing turn's authorization.
+        if !requires_user_agent_run_permission(
+            self.verified_caller.is_some(),
+            self.calling_agent_id.is_some(),
+        ) {
+            return Ok(());
+        }
+        crate::server::enforce_permission(
+            &self.state,
+            &self.verified_caller,
+            crate::identity_verify::permissions::AGENT_RUN,
+        )
+        .await
+        .map_err(|_| "permission 'agent.run' is not granted to this caller".to_owned())
+    }
+
+    /// The `x-ryu-agent-provider-access` value of the agent whose turn invoked
+    /// this bridge, or `None` when there is no calling agent or its model
+    /// providers are unrestricted. A store error fails closed to `none`.
+    pub(super) async fn calling_agent_provider_access(&self) -> Option<String> {
+        let agent_id = self.calling_agent_id.as_deref()?;
+        crate::agent_access::provider_access_for_agent(&self.state.agent_store, agent_id)
+            .await
+            .map(|ids| crate::agent_access::provider_access_header_value(&ids))
+    }
+
+    /// Sub-agents and fan-out delegates are Gateway completions on the node's
+    /// model providers with no provider-access header, so an agent whose model
+    /// providers are limited would get them all back through an app's tool.
+    pub(super) async fn refuse_limited_provider_access(&self, verb: &str) -> Result<(), String> {
+        if self.calling_agent_provider_access().await.is_some() {
+            return Err(format!(
+                "{verb} runs sub-tasks on all of your model providers, which this agent's account access does not allow"
+            ));
+        }
+        Ok(())
+    }
+
     async fn run_agent(&self, args: Value) -> InvokeOutcome {
         if !self.grants.contains(GRANT_RUN_AGENT) {
             return err(format!(
                 "capability '{GRANT_RUN_AGENT}' not granted to plugin '{}'",
                 self.plugin_id
             ));
+        }
+        if let Err(error) = self.require_user_agent_run_permission().await {
+            return err(error);
+        }
+        if let Err(error) = self.refuse_limited_provider_access("host.runAgent").await {
+            return err(error);
         }
         let task = args
             .get("task")
@@ -1528,6 +1978,9 @@ impl PluginHookBridge {
             }
         }
         let preset = parse_preset(args.get("preset").and_then(Value::as_str));
+        if let Err(error) = check_preset_grant(&self.grants, &self.plugin_id, preset) {
+            return err(error);
+        }
 
         // Bound the verifier: clamp the wall time to a sane range so a stuck
         // sub-agent can never wedge the post-turn hook indefinitely.
@@ -1579,6 +2032,12 @@ impl PluginHookBridge {
                 "capability '{GRANT_RUN_AGENT}' not granted to plugin '{}'",
                 self.plugin_id
             ));
+        }
+        if let Err(error) = self.require_user_agent_run_permission().await {
+            return err(error);
+        }
+        if let Err(error) = self.refuse_limited_provider_access("host.runFanout").await {
+            return err(error);
         }
         let raw_delegates = match args.get("delegates") {
             Some(Value::Array(items)) if !items.is_empty() => items,
@@ -1680,6 +2139,11 @@ impl PluginHookBridge {
         caps.max_concurrent = caps.effective_concurrency();
         caps.wall_time_secs = caps.wall_time_secs.clamp(5, 600);
         caps.max_tokens = caps.effective_max_tokens();
+        for delegate in &delegates {
+            if let Err(error) = check_preset_grant(&self.grants, &self.plugin_id, delegate.preset) {
+                return err(error);
+            }
+        }
         let read_only = delegates
             .iter()
             .all(|delegate| !delegate.preset.allows_mutation());
@@ -1855,6 +2319,18 @@ impl PluginHookBridge {
         if system.chars().count() > 64 * 1024 {
             return err("host.sideModel system prompt exceeds the 64 KiB limit".to_owned());
         }
+        let images = match validate_side_model_images(&args) {
+            Ok(images) => images,
+            Err(message) => return err(message),
+        };
+        // Character limits do not bound bytes: escaped or multi-byte text plus
+        // images can still exceed the Gateway's chat body limit. Refuse here,
+        // with the bridge's own name, instead of surfacing a Gateway 413.
+        if let Err(message) = crate::server::encode_side_model_request(
+            &crate::server::side_model_payload("", "", system, prompt, &images),
+        ) {
+            return err(format!("host.sideModel refused: {message}"));
+        }
         let explicit = args.get("model").and_then(Value::as_str);
         let provider = args
             .get("provider")
@@ -1879,13 +2355,19 @@ impl PluginHookBridge {
         } else {
             effort
         };
-        match crate::server::call_side_model_with_provider(
+        // The calling agent's provider limit travels with the call, so the
+        // Gateway keeps the completion on the providers that agent may use.
+        let provider_access = self.calling_agent_provider_access().await;
+        match crate::server::call_side_model_with_images(
             &self.state,
+            &crate::sidecar::gateway::SidePurpose::Plugin(self.plugin_id.clone()),
             &model,
             provider,
             effort,
             system,
             prompt,
+            &images,
+            provider_access.as_deref(),
         )
         .await
         {
@@ -1901,7 +2383,15 @@ impl PluginHookBridge {
                 self.plugin_id
             ));
         }
-        let Some(store) = crate::plugin_storage::global() else {
+        #[cfg(test)]
+        let selected_store: Option<&crate::plugin_storage::PluginStorage> =
+            match self.test_storage.as_ref() {
+                Some(store) => Some(store),
+                None => crate::plugin_storage::global(),
+            };
+        #[cfg(not(test))]
+        let selected_store = crate::plugin_storage::global();
+        let Some(store) = selected_store else {
             return err("plugin storage is unavailable".to_string());
         };
         let namespace = args
@@ -2057,9 +2547,23 @@ impl PluginHookBridge {
     /// docs or a built-in doc. `plugin_id` is the bridge's path-bound owner id, so
     /// it cannot be spoofed by the frame.
     async fn spaces(&self, method: &str, args: Value) -> InvokeOutcome {
-        if !self.grants.contains(GRANT_SPACES) {
+        let database_method = matches!(
+            method,
+            "spaces_create_database"
+                | "spaces_list_databases"
+                | "spaces_get_database"
+                | "spaces_update_database"
+                | "spaces_query_database"
+                | "spaces_delete_database"
+        );
+        let required_grant = if database_method {
+            GRANT_SPACES_DATABASE
+        } else {
+            GRANT_SPACES
+        };
+        if !self.grants.contains(required_grant) {
             return err(format!(
-                "capability '{GRANT_SPACES}' not granted to plugin '{}'",
+                "capability '{required_grant}' not granted to plugin '{}'",
                 self.plugin_id
             ));
         }
@@ -2084,6 +2588,7 @@ impl PluginHookBridge {
                         .unwrap_or(8)
                         .clamp(1, 50) as usize,
                     link_expansion: None,
+                    ..Default::default()
                 }),
             )
             .await;
@@ -2118,6 +2623,11 @@ impl PluginHookBridge {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .trim();
+        let database_id = args
+            .get("database_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
 
         // App namespace ownership does not replace the request caller's Space ACL.
         // Apply the same coarse and resource gates used by the public document routes.
@@ -2130,9 +2640,15 @@ impl PluginHookBridge {
             {
                 return err("Space creation is not permitted for this caller".to_owned());
             }
-        } else if matches!(method, "spaces_create_doc" | "spaces_list_docs") && !space_id.is_empty()
+        } else if matches!(
+            method,
+            "spaces_create_doc"
+                | "spaces_list_docs"
+                | "spaces_create_database"
+                | "spaces_list_databases"
+        ) && !space_id.is_empty()
         {
-            let write = method == "spaces_create_doc";
+            let write = matches!(method, "spaces_create_doc" | "spaces_create_database");
             if crate::server::enforce_permission_on(
                 &self.state,
                 caller,
@@ -2190,6 +2706,43 @@ impl PluginHookBridge {
             };
             if allowed.is_err() {
                 return err("Document is unavailable or access was denied".to_owned());
+            }
+        } else if matches!(
+            method,
+            "spaces_get_database"
+                | "spaces_update_database"
+                | "spaces_query_database"
+                | "spaces_delete_database"
+        ) && !database_id.is_empty()
+        {
+            let write = matches!(method, "spaces_update_database" | "spaces_delete_database");
+            let Some(parent) = crate::server::document_parent_space(&self.state, database_id).await
+            else {
+                return err("Database is unavailable".to_owned());
+            };
+            if parent != space_id {
+                return err("Database is unavailable".to_owned());
+            }
+            if crate::server::enforce_permission_on(
+                &self.state,
+                caller,
+                if write { SPACE_WRITE } else { SPACE_READ },
+                crate::acl::KIND_SPACE,
+                &parent,
+            )
+            .await
+            .is_err()
+            {
+                return err("Database access is not permitted for this caller".to_owned());
+            }
+            let meta = crate::server::spaces::doc_access_meta(store, database_id).await;
+            let allowed = if write {
+                crate::server::require_resource_write(meta, caller.as_ref(), "database not found")
+            } else {
+                crate::server::require_resource_read(meta, caller.as_ref(), "database not found")
+            };
+            if allowed.is_err() {
+                return err("Database is unavailable or access was denied".to_owned());
             }
         }
 
@@ -2300,74 +2853,163 @@ impl PluginHookBridge {
                     Err(e) => err(e.to_string()),
                 }
             }
+            "spaces_create_database" => {
+                if space_id.is_empty() {
+                    return err(
+                        "host.spaces.createDatabase requires a non-empty 'space_id'".to_owned()
+                    );
+                }
+                let title = args
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|title| !title.is_empty() && title.len() <= 100)
+                    .unwrap_or("Untitled");
+                match store.create_database(space_id, title, &owner).await {
+                    Ok(id) => ok(json!(id)),
+                    Err(error) => err(error.to_string()),
+                }
+            }
+            "spaces_list_databases" => {
+                if space_id.is_empty() {
+                    return err(
+                        "host.spaces.listDatabases requires a non-empty 'space_id'".to_owned()
+                    );
+                }
+                match store
+                    .list_documents(space_id, crate::server::caller_doc_filter(caller))
+                    .await
+                {
+                    Ok(documents) => {
+                        let databases: Vec<Value> = documents
+                            .into_iter()
+                            .filter(|document| document.kind == "database")
+                            .map(|document| {
+                                json!({
+                                    "id": document.id,
+                                    "title": document.title,
+                                    "updated_at": document.updated_at,
+                                })
+                            })
+                            .collect();
+                        ok(json!(databases))
+                    }
+                    Err(error) => err(error.to_string()),
+                }
+            }
+            "spaces_get_database" => {
+                if database_id.is_empty() {
+                    return err(
+                        "host.spaces.getDatabase requires a non-empty 'database_id'".to_owned()
+                    );
+                }
+                match store.get_document(database_id).await {
+                    Ok(Some(document))
+                        if document.space_id == space_id && document.kind == "database" =>
+                    {
+                        match serde_json::to_value(document) {
+                            Ok(value) => ok(value),
+                            Err(error) => err(error.to_string()),
+                        }
+                    }
+                    Ok(_) => ok(Value::Null),
+                    Err(error) => err(error.to_string()),
+                }
+            }
+            "spaces_update_database" => {
+                if database_id.is_empty() {
+                    return err(
+                        "host.spaces.updateDatabase requires a non-empty 'database_id'".to_owned(),
+                    );
+                }
+                let Some(expected_revision) = args
+                    .get("expected_revision")
+                    .and_then(Value::as_i64)
+                    .filter(|revision| *revision >= 0)
+                else {
+                    return err(
+                        "host.spaces.updateDatabase requires a non-negative 'expected_revision'"
+                            .to_owned(),
+                    );
+                };
+                let source = args
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if source.len() > 1_500_000 {
+                    return err("database source exceeds the 1500000 byte limit".to_owned());
+                }
+                let title = match args.get("title").and_then(Value::as_str) {
+                    Some(title) if !title.trim().is_empty() && title.len() <= 100 => {
+                        title.trim().to_owned()
+                    }
+                    Some(_) => return err("database title must contain 1 to 100 bytes".to_owned()),
+                    None => match store.get_document(database_id).await {
+                        Ok(Some(document))
+                            if document.space_id == space_id && document.kind == "database" =>
+                        {
+                            document.title
+                        }
+                        _ => return err("Database is unavailable".to_owned()),
+                    },
+                };
+                match store
+                    .update_database_document(
+                        space_id,
+                        database_id,
+                        &title,
+                        source,
+                        expected_revision,
+                    )
+                    .await
+                {
+                    Ok(crate::server::spaces::DocumentUpdateOutcome::Applied(result)) => {
+                        ok(json!(result))
+                    }
+                    Ok(crate::server::spaces::DocumentUpdateOutcome::Conflict {
+                        current_revision,
+                    }) => err(format!("database revision conflict at {current_revision}")),
+                    Err(error) => err(error.to_string()),
+                }
+            }
+            "spaces_query_database" => {
+                if database_id.is_empty() {
+                    return err(
+                        "host.spaces.queryDatabase requires a non-empty 'database_id'".to_owned(),
+                    );
+                }
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let parameters = match args.get("parameters") {
+                    Some(Value::Array(parameters)) => parameters.as_slice(),
+                    Some(_) => return err("query 'parameters' must be an array".to_owned()),
+                    None => &[],
+                };
+                match store
+                    .query_database(space_id, database_id, query, parameters)
+                    .await
+                {
+                    Ok(result) => match serde_json::to_value(result) {
+                        Ok(value) => ok(value),
+                        Err(error) => err(error.to_string()),
+                    },
+                    Err(error) => err(error.to_string()),
+                }
+            }
+            "spaces_delete_database" => {
+                if database_id.is_empty() {
+                    return err(
+                        "host.spaces.deleteDatabase requires a non-empty 'database_id'".to_owned(),
+                    );
+                }
+                match store.delete_database_document(space_id, database_id).await {
+                    Ok(()) => ok(json!(true)),
+                    Err(error) => err(error.to_string()),
+                }
+            }
             _ => err(format!("unknown spaces method '{method}'")),
-        }
-    }
-
-    /// `host.finetune_*` — the `@ryu/finetune` app drives fine-tune runs. The
-    /// orchestration, GPU gate, durable job store, adapter→GGUF merge, and Python
-    /// `unsloth` worker now live OUT-OF-PROCESS in the `ryu-finetune` sidecar; the
-    /// app reaches them through this governed bridge (host holds the node token; the
-    /// frame never does), which forwards each call to the sidecar over loopback via
-    /// [`crate::finetune_client::FinetuneClient`] — the SAME `/api/finetune/*` surface
-    /// the sidecar serves publicly, so the two never drift. Live progress is streamed
-    /// separately over the plugin-host streaming endpoint (`finetune.stream`), not here.
-    async fn require_finetune_permission(&self, method: &str) -> Result<(), String> {
-        let permission = match method {
-            "finetune_capability" | "finetune_adapters" | "finetune_list" | "finetune_get" => {
-                "finetune.view"
-            }
-            "finetune_start" | "finetune_merge" | "finetune_cancel" => "finetune.run",
-            _ => return Ok(()),
-        };
-        crate::server::enforce_permission(&self.state, &self.verified_caller, permission)
-            .await
-            .map_err(|_| format!("capability '{permission}' is not granted to this caller"))
-    }
-
-    async fn finetune(&self, method: &str, args: Value) -> InvokeOutcome {
-        if !self.grants.contains(GRANT_FINETUNE) {
-            return err(format!(
-                "capability '{GRANT_FINETUNE}' not granted to plugin '{}'",
-                self.plugin_id
-            ));
-        }
-        if self.plugin_id != crate::plugin_manifest::FINETUNE_PLUGIN_ID {
-            return err("fine-tune capabilities are reserved for the owning app".to_owned());
-        }
-        if let Err(error) = self.require_finetune_permission(method).await {
-            return err(error);
-        }
-        let ft = &self.state.finetune;
-        let id = args
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        let result = match method {
-            "finetune_capability" => ft.capability().await,
-            "finetune_adapters" => ft.adapters_for(self.verified_caller.as_ref()).await,
-            "finetune_list" => ft.list_for(self.verified_caller.as_ref()).await,
-            "finetune_start" => ft.start_for(args, self.verified_caller.as_ref()).await,
-            "finetune_merge" => ft.merge_for(args, self.verified_caller.as_ref()).await,
-            "finetune_get" => {
-                if id.is_empty() {
-                    return err("host.finetune.get requires a non-empty 'id'".to_string());
-                }
-                ft.get_for(&id, self.verified_caller.as_ref()).await
-            }
-            "finetune_cancel" => {
-                if id.is_empty() {
-                    return err("host.finetune.cancel requires a non-empty 'id'".to_string());
-                }
-                ft.cancel_for(&id, self.verified_caller.as_ref()).await
-            }
-            _ => return err(format!("unknown finetune method '{method}'")),
-        };
-        match result {
-            Ok(v) => ok(v),
-            Err(e) => err(e),
         }
     }
 
@@ -2417,10 +3059,7 @@ impl PluginHookBridge {
                 return (v, String::new());
             }
         }
-        (
-            crate::registry::DEFAULT_LOCAL_CHAT_MODEL_ID.to_string(),
-            String::new(),
-        )
+        (crate::registry::local_chat_model_id(), String::new())
     }
 }
 
@@ -2437,6 +3076,23 @@ impl SandboxBridge for PluginHookBridge {
 /// Map a permission-preset string to the closed [`PermissionPreset`] set. An
 /// unknown/absent value falls back to the safest non-trivial preset (read but
 /// never mutate) — the right default for an independent verifier.
+/// Plain `hook:run-agent` admits only read-only presets; a mutating preset also
+/// needs [`GRANT_RUN_AGENT_WRITE`]. Returns the denial message (classified as a
+/// 403 `denied` by the bridge API because it contains "not granted").
+fn check_preset_grant(
+    grants: &HashSet<String>,
+    plugin_id: &str,
+    preset: PermissionPreset,
+) -> Result<(), String> {
+    if preset.allows_mutation() && !grants.contains(GRANT_RUN_AGENT_WRITE) {
+        return Err(format!(
+            "capability '{GRANT_RUN_AGENT_WRITE}' not granted to plugin '{plugin_id}': \
+             '{GRANT_RUN_AGENT}' only allows read-only presets (code_read, research, summarise)"
+        ));
+    }
+    Ok(())
+}
+
 fn parse_preset(s: Option<&str>) -> PermissionPreset {
     match s.map(str::trim).unwrap_or_default() {
         "research" => PermissionPreset::Research,
@@ -2466,14 +3122,225 @@ fn ok(value: Value) -> InvokeOutcome {
     })
 }
 
-/// Flatten a `(StatusCode, Value)` error body from a shared finetune value fn into
-/// a single message string for the bridge's `err` outcome. Prefers the `error`
-/// field the handlers set; falls back to the whole JSON.
-fn status_error(body: &Value) -> String {
-    body.get("error")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| body.to_string())
+/// The two mutually exclusive argument forms of `host.usageSnapshot`.
+#[derive(Debug, PartialEq, Eq)]
+enum UsageArgs<'a> {
+    Agent(&'a str),
+    Provider {
+        provider_id: &'a str,
+        account_id: Option<&'a str>,
+    },
+}
+
+/// An optional trimmed string argument; `null` counts as absent.
+fn usage_text_arg<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>, String> {
+    match args.get(key).filter(|value| !value.is_null()) {
+        None => Ok(None),
+        Some(value) => value
+            .as_str()
+            .map(|value| Some(value.trim()))
+            .ok_or_else(|| format!("host.usageSnapshot '{key}' must be a string")),
+    }
+}
+
+fn parse_usage_args(args: &Value) -> Result<UsageArgs<'_>, String> {
+    let agent_id = usage_text_arg(args, "agent_id")?;
+    let provider_id = usage_text_arg(args, "provider_id")?;
+    let account_id = usage_text_arg(args, "account_id")?;
+    match (agent_id, provider_id) {
+        (Some(_), Some(_)) => Err(
+            "host.usageSnapshot accepts either 'agent_id' or 'provider_id', not both".to_owned(),
+        ),
+        (_, None) if account_id.is_some() => {
+            Err("host.usageSnapshot 'account_id' requires 'provider_id'".to_owned())
+        }
+        (Some(agent_id), None) if !agent_id.is_empty() => Ok(UsageArgs::Agent(agent_id)),
+        (None, Some(provider_id)) => {
+            validate_subscription_id("provider_id", provider_id)?;
+            if let Some(account_id) = account_id {
+                validate_subscription_id("account_id", account_id)?;
+            }
+            Ok(UsageArgs::Provider {
+                provider_id,
+                account_id,
+            })
+        }
+        _ => Err("host.usageSnapshot requires a non-empty 'agent_id' or 'provider_id'".to_owned()),
+    }
+}
+
+/// Validate a caller-supplied provider or account id (1..=256 characters).
+fn validate_subscription_id(field: &str, value: &str) -> Result<(), String> {
+    let chars = value.chars().count();
+    if value.trim().is_empty() || chars > crate::subscriptions::MAX_ID_CHARS {
+        return Err(format!(
+            "'{field}' must be 1..={} characters",
+            crate::subscriptions::MAX_ID_CHARS
+        ));
+    }
+    Ok(())
+}
+
+/// Fail-closed gate for the owner-tier subscription calls: the grant first,
+/// then a verified node owner/admin caller. The admin check only runs once the
+/// grant is held.
+fn subscriptions_gate(
+    plugin_id: &str,
+    granted: bool,
+    admin_allowed: impl FnOnce() -> bool,
+) -> Result<(), String> {
+    if !granted {
+        return Err(format!(
+            "capability '{GRANT_SUBSCRIPTIONS_READ}' not granted to plugin '{plugin_id}'"
+        ));
+    }
+    if !admin_allowed() {
+        return Err("subscriptions are visible to the node owner only".to_owned());
+    }
+    Ok(())
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubscriptionsListArgs {
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    usage: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubscriptionsUsageArgs {
+    provider_id: String,
+    #[serde(default)]
+    account_id: Option<String>,
+}
+
+/// The bridge never forces a vendor read; `force` is owner-HTTP only.
+fn parse_list_usage(usage: Option<&str>) -> Result<crate::subscriptions::UsageMode, String> {
+    use crate::subscriptions::UsageMode;
+    match usage {
+        None | Some("cached") => Ok(UsageMode::Cached),
+        Some("none") => Ok(UsageMode::None),
+        Some("refresh") => Ok(UsageMode::Refresh),
+        Some(_) => Err("subscriptions.list 'usage' must be none, cached or refresh".to_owned()),
+    }
+}
+
+type LiveReadKey = (String, String, String);
+
+/// Per-(plugin, provider, account) live-read limiter for the T1 bridge calls.
+#[derive(Default)]
+struct LiveReadLimiter {
+    last: std::sync::Mutex<std::collections::HashMap<LiveReadKey, std::time::Instant>>,
+}
+
+impl LiveReadLimiter {
+    /// `true` (and the slot is taken) when `key` had no live read in the last
+    /// `interval`; `false` means the caller must stay cache-only.
+    fn try_acquire(
+        &self,
+        key: LiveReadKey,
+        now: std::time::Instant,
+        interval: std::time::Duration,
+    ) -> bool {
+        let mut last = self
+            .last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        last.retain(|_, at| now.saturating_duration_since(*at) < interval);
+        if last.contains_key(&key) {
+            return false;
+        }
+        last.insert(key, now);
+        true
+    }
+}
+
+fn subscription_live_reads() -> &'static LiveReadLimiter {
+    static LIMITER: std::sync::OnceLock<LiveReadLimiter> = std::sync::OnceLock::new();
+    LIMITER.get_or_init(LiveReadLimiter::default)
+}
+
+/// The cached raw snapshot (and when it was observed) for one saved account
+/// under its current credential revision. Never reads the vendor.
+fn cached_account_snapshot(
+    provider_id: &str,
+    account_id: &str,
+) -> Option<(ryu_usage::UsageSnapshot, String)> {
+    let scope = crate::pi_config::provider_account_scope(provider_id)?;
+    let revision = crate::pi_config::accounts::global()?
+        .credential_revision(&scope, account_id)
+        .ok()
+        .flatten()?;
+    let hit = crate::subscriptions::cache::global().lookup(
+        provider_id,
+        account_id,
+        &revision,
+        crate::subscriptions::cache::Freshness::MaxAge(crate::subscriptions::DEFAULT_MAX_AGE),
+    )?;
+    Some((hit.snapshot, hit.observed_at.to_rfc3339()))
+}
+
+/// Project one provider for the label-free hook form. Account rows carry ids,
+/// eligibility and the cached raw snapshot only — never the saved label.
+fn provider_usage_projection(
+    provider: Option<&crate::subscriptions::SubscriptionProvider>,
+    provider_id: &str,
+    account_id: Option<&str>,
+    cached: impl Fn(&str, &str) -> Option<(ryu_usage::UsageSnapshot, String)>,
+) -> Value {
+    use crate::subscriptions::AccountState;
+    let usage_supported = provider.is_some_and(|provider| provider.capabilities.account_usage);
+    let pool_strategy = provider
+        .and_then(|provider| provider.policy.as_ref())
+        .and_then(|policy| serde_json::to_value(policy.strategy).ok())
+        .unwrap_or(Value::Null);
+    let rows = provider.map_or(&[][..], |provider| provider.accounts.as_slice());
+    let mut accounts = Vec::new();
+    for row in rows
+        .iter()
+        .filter(|row| account_id.is_none_or(|wanted| row.account_id == wanted))
+    {
+        let mut state = row.state;
+        let mut usage = Value::Null;
+        let mut observed_at = None;
+        if matches!(state, AccountState::Ok | AccountState::Unavailable) {
+            match cached(provider_id, &row.account_id) {
+                Some((snapshot, observed)) => {
+                    usage = serde_json::to_value(snapshot).unwrap_or(Value::Null);
+                    observed_at = Some(observed);
+                }
+                // The reading expired between the listing and this lookup.
+                None if state == AccountState::Ok => state = AccountState::Pending,
+                None => {}
+            }
+        }
+        let mut entry = json!({
+            "account_id": row.account_id,
+            "active": row.active,
+            "eligible": row.pool_enabled && !row.needs_reauth,
+            "needs_reauth": row.needs_reauth,
+            "state": serde_json::to_value(state).unwrap_or(Value::Null),
+            "usage": usage,
+        });
+        if let (Some(observed_at), Some(object)) = (observed_at, entry.as_object_mut()) {
+            object.insert("observed_at".to_owned(), Value::String(observed_at));
+        }
+        accounts.push(entry);
+    }
+    let account_not_found = account_id.is_some() && accounts.is_empty();
+    let mut out = json!({
+        "provider_id": provider_id,
+        "usage_supported": usage_supported,
+        "pool_strategy": pool_strategy,
+        "accounts": accounts,
+    });
+    if account_not_found {
+        out["error"] = Value::String("account_not_found".to_owned());
+    }
+    out
 }
 
 /// A host error the hook can catch (rejects the awaited call).
@@ -2489,6 +3356,56 @@ fn err(message: String) -> InvokeOutcome {
 mod tests {
     use super::*;
 
+    #[test]
+    fn manual_run_guard_refuses_a_second_claim_and_releases_on_drop() {
+        let key = format!("test-plugin:user:conv-{}", uuid::Uuid::new_v4().simple());
+        let first = ManualRunGuard::claim(&key).expect("first claim");
+        assert!(ManualRunGuard::claim(&key).is_none());
+        drop(first);
+        assert!(ManualRunGuard::claim(&key).is_some());
+    }
+
+    /// A dropped handler future (client disconnect, an outer sandbox timeout)
+    /// must release the slot; the old begin/end pair left it claimed forever.
+    #[tokio::test]
+    async fn manual_run_slot_is_released_when_the_run_is_cancelled() {
+        let key = format!("test-plugin:user:conv-{}", uuid::Uuid::new_v4().simple());
+        let (claimed_tx, claimed_rx) = tokio::sync::oneshot::channel();
+        let run_key = key.clone();
+        let run = tokio::spawn(async move {
+            let _slot = ManualRunGuard::claim(&run_key).expect("claim");
+            let _ = claimed_tx.send(());
+            std::future::pending::<()>().await;
+        });
+        claimed_rx.await.expect("the run holds its slot");
+        assert!(ManualRunGuard::claim(&key).is_none());
+        run.abort();
+        let _ = run.await;
+        assert!(
+            ManualRunGuard::claim(&key).is_some(),
+            "a cancelled run must release its slot"
+        );
+    }
+
+    #[test]
+    fn execution_control_rejects_non_admin_and_cross_org_callers() {
+        let mut caller = crate::identity_verify::VerifiedCaller {
+            user_id: "user".to_owned(),
+            email: None,
+            email_verified: false,
+            org_id: Some("org".to_owned()),
+            role: crate::identity_verify::OrgRole::Viewer,
+            teams: vec![],
+        };
+        assert!(!is_org_admin(None, "org"));
+        assert!(!is_org_admin(Some(&caller), "org"));
+        caller.role = crate::identity_verify::OrgRole::Admin;
+        assert!(is_org_admin(Some(&caller), "org"));
+        assert!(!is_org_admin(Some(&caller), "other-org"));
+        caller.org_id = None;
+        assert!(!is_org_admin(Some(&caller), "org"));
+    }
+
     fn grants(items: &[&str]) -> HashSet<String> {
         items.iter().map(|s| s.to_string()).collect()
     }
@@ -2503,7 +3420,7 @@ mod tests {
         assert_eq!(GRANT_STORAGE, "storage:kv");
         assert_eq!(GRANT_RUN_AGENT, "hook:run-agent");
         assert_eq!(GRANT_SPACES, "spaces:docs");
-        assert_eq!(GRANT_FINETUNE, "finetune:runs");
+        assert_eq!(GRANT_SPACES_DATABASE, "spaces:database");
         assert_eq!(GRANT_SET_TITLE, "conversation:set-title");
         assert_eq!(GRANT_PREFERENCES_READ, "preferences:read");
         assert_eq!(GRANT_BACKGROUND_CONTROL, "background:control");
@@ -2543,6 +3460,91 @@ mod tests {
     }
 
     #[test]
+    fn side_model_images_are_bounded_by_count_type_and_size() {
+        let png = "data:image/png;base64,aGVsbG8=";
+        assert!(validate_side_model_images(&json!({})).unwrap().is_empty());
+        assert_eq!(
+            validate_side_model_images(&json!({ "images": [png, "data:image/jpeg;base64,aGk=", "data:image/webp;base64,aGk="] }))
+                .unwrap()
+                .len(),
+            3
+        );
+        let too_many = vec![png; MAX_SIDE_MODEL_IMAGES + 1];
+        assert!(validate_side_model_images(&json!({ "images": too_many }))
+            .unwrap_err()
+            .contains("at most 8"));
+        for bad in [
+            json!({ "images": "data:image/png;base64,aGk=" }),
+            json!({ "images": [42] }),
+            json!({ "images": ["https://example.test/a.png"] }),
+            json!({ "images": ["data:image/svg+xml;base64,PHN2Zz4="] }),
+            json!({ "images": ["data:image/gif;base64,R0lGOA=="] }),
+            json!({ "images": ["data:image/png;base64,"] }),
+            json!({ "images": ["data:image/png;base64,not base64!"] }),
+        ] {
+            assert!(validate_side_model_images(&bad).is_err(), "{bad}");
+        }
+        // Each image under the cap, but together over it.
+        let chunk = format!(
+            "data:image/png;base64,{}",
+            "A".repeat(MAX_SIDE_MODEL_IMAGE_BYTES / 2)
+        );
+        assert!(validate_side_model_images(&json!({ "images": [chunk.clone()] })).is_ok());
+        assert!(
+            validate_side_model_images(&json!({ "images": [chunk.clone(), chunk] }))
+                .unwrap_err()
+                .contains("1.5 MiB")
+        );
+    }
+
+    #[test]
+    fn side_model_request_is_bounded_by_its_encoded_size() {
+        // Within every per-field limit, but escaped text plus a full image
+        // budget encodes past the Gateway's 2 MiB chat body limit.
+        let escaped = "\u{1}".repeat(64 * 1024);
+        let image = format!(
+            "data:image/png;base64,{}",
+            "A".repeat(MAX_SIDE_MODEL_IMAGE_BYTES - 64)
+        );
+        let images = validate_side_model_images(&json!({ "images": [image] })).unwrap();
+        let payload = crate::server::side_model_payload("m", "", &escaped, &escaped, &images);
+        let error = crate::server::encode_side_model_request(&payload).unwrap_err();
+        assert!(error.contains("2 MiB chat request limit"), "{error}");
+
+        let fits = crate::server::side_model_payload("m", "", "system", "describe", &images);
+        let bytes = crate::server::encode_side_model_request(&fits).unwrap();
+        assert!(bytes.len() <= crate::server::MAX_SIDE_MODEL_REQUEST_BYTES);
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), fits);
+    }
+
+    #[test]
+    fn side_model_payload_uses_image_url_parts_only_when_images_are_present() {
+        let plain = crate::server::side_model_payload("m", "", "sys", "describe", &[]);
+        assert_eq!(plain["messages"][1]["content"], json!("describe"));
+        assert!(plain.get("reasoning_effort").is_none());
+
+        let images = vec![
+            "data:image/png;base64,aGVsbG8=".to_owned(),
+            "data:image/jpeg;base64,aGk=".to_owned(),
+        ];
+        let vision = crate::server::side_model_payload("m", "low", "sys", "tag these", &images);
+        assert_eq!(
+            vision["messages"][0],
+            json!({ "role": "system", "content": "sys" })
+        );
+        assert_eq!(
+            vision["messages"][1]["content"],
+            json!([
+                { "type": "text", "text": "tag these" },
+                { "type": "image_url", "image_url": { "url": "data:image/png;base64,aGVsbG8=" } },
+                { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,aGk=" } },
+            ])
+        );
+        assert_eq!(vision["reasoning_effort"], json!("low"));
+        assert_eq!(vision["stream"], json!(false));
+    }
+
+    #[test]
     fn fanout_token_cap_is_hard_bounded() {
         let caps = DelegationCaps {
             max_tokens: u32::MAX,
@@ -2567,7 +3569,19 @@ mod tests {
         assert_eq!(grant_for("agent.run"), Some(GRANT_RUN_AGENT));
         assert_eq!(grant_for("storage.get"), Some(GRANT_STORAGE));
         assert_eq!(grant_for("spaces.createDoc"), Some(GRANT_SPACES));
-        assert_eq!(grant_for("finetune.start"), Some(GRANT_FINETUNE));
+        assert_eq!(
+            grant_for("spaces.queryDatabase"),
+            Some(GRANT_SPACES_DATABASE)
+        );
+        assert_eq!(
+            grant_for("spaces.deleteDatabase"),
+            Some(GRANT_SPACES_DATABASE)
+        );
+        // `finetune.*` keeps its host-API grant row (host API is additive within a
+        // major) but has no Core bridge path: hosts forward it to the app's own
+        // sidecar through the generic ext-proxy.
+        assert_eq!(grant_for("finetune.start"), Some("finetune:runs"));
+        assert_eq!(dispatch_path_for("finetune.start"), None);
         assert_eq!(grant_for("conversation.setTitle"), Some(GRANT_SET_TITLE));
         assert_eq!(
             grant_for("conversation.addReaction"),
@@ -2576,7 +3590,17 @@ mod tests {
         assert_eq!(grant_for("preferences.get"), Some(GRANT_PREFERENCES_READ));
         assert_eq!(grant_for("background.list"), Some(GRANT_BACKGROUND_CONTROL));
         assert_eq!(grant_for("gateway.budgetSpend"), Some(GRANT_USAGE_READ));
-        assert_eq!(grant_for("gateway.audit"), Some(GRANT_USAGE_READ));
+        assert_eq!(grant_for("gateway.audit"), Some(GRANT_USAGE_AUDIT));
+        assert_ne!(grant_for("gateway.audit"), grant_for("usage.snapshot"));
+        assert_eq!(grant_for("usage.snapshot"), Some(GRANT_USAGE_READ));
+        assert_eq!(
+            grant_for("subscriptions.list"),
+            Some(GRANT_SUBSCRIPTIONS_READ)
+        );
+        assert_eq!(
+            grant_for("subscriptions.usage"),
+            Some(GRANT_SUBSCRIPTIONS_READ)
+        );
         assert_eq!(grant_for("notifications.send"), Some(GRANT_NOTIFY_TARGET));
     }
 
@@ -2623,7 +3647,7 @@ mod tests {
             "agent.runFanout",
             "storage.get",
             "spaces.createDoc",
-            "finetune.start",
+            "spaces.createDatabase",
             "conversation.setTitle",
             "conversation.addReaction",
             "preferences.get",
@@ -2631,6 +3655,8 @@ mod tests {
             "background.stop",
             "gateway.budgetSpend",
             "gateway.audit",
+            "subscriptions.list",
+            "subscriptions.usage",
         ] {
             assert!(
                 dispatch_path_for(method).is_some(),
@@ -2646,6 +3672,11 @@ mod tests {
             m,
             "security_check"
                 | "identity_current"
+                | "authorization_issue"
+                | "authorization_check"
+                | "execution_pause"
+                | "execution_resume"
+                | "execution_status"
                 | "catalogSnapshot"
                 | "catalogModels"
                 | "sideModel"
@@ -2671,17 +3702,18 @@ mod tests {
                 | "spaces_update_doc"
                 | "spaces_list_docs"
                 | "spaces_delete_doc"
-                | "finetune_capability"
-                | "finetune_start"
-                | "finetune_list"
-                | "finetune_get"
-                | "finetune_cancel"
-                | "finetune_adapters"
-                | "finetune_merge"
+                | "spaces_create_database"
+                | "spaces_list_databases"
+                | "spaces_get_database"
+                | "spaces_update_database"
+                | "spaces_query_database"
+                | "spaces_delete_database"
                 | "setConversationTitle"
                 | "addMessageReaction"
                 | "getPreference"
                 | "usageSnapshot"
+                | "subscriptions_list"
+                | "subscriptions_usage"
                 | "gatewayBudgetSpend"
                 | "gatewayAudit"
                 | "background_list"
@@ -2703,11 +3735,228 @@ mod tests {
     }
 
     #[test]
-    fn finetune_gate_requires_grant() {
-        let g = grants(&["spaces:docs"]);
-        assert!(!g.contains(GRANT_FINETUNE));
-        let g = grants(&["finetune:runs"]);
-        assert!(g.contains(GRANT_FINETUNE));
+    fn subscriptions_gate_denies_missing_grant_before_checking_the_caller() {
+        let error = subscriptions_gate("com.x.app", false, || {
+            panic!("the caller check must not run without the grant")
+        })
+        .expect_err("ungranted");
+        assert!(
+            error.starts_with("capability 'subscriptions:read' not granted"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn subscriptions_gate_denies_a_non_admin_caller() {
+        assert_eq!(
+            subscriptions_gate("com.x.app", true, || false),
+            Err("subscriptions are visible to the node owner only".to_owned())
+        );
+        assert_eq!(subscriptions_gate("com.x.app", true, || true), Ok(()));
+    }
+
+    #[test]
+    fn subscriptions_args_reject_unknown_fields_and_force() {
+        assert!(serde_json::from_value::<SubscriptionsListArgs>(json!({})).is_ok());
+        assert!(
+            serde_json::from_value::<SubscriptionsListArgs>(json!({ "provider": "x" })).is_err()
+        );
+        assert!(serde_json::from_value::<SubscriptionsUsageArgs>(
+            json!({ "providerId": "claude-pro-max", "accountId": "acct_1", "label": true })
+        )
+        .is_err());
+        assert!(serde_json::from_value::<SubscriptionsUsageArgs>(json!({})).is_err());
+        assert!(parse_list_usage(Some("force")).is_err());
+        assert_eq!(
+            parse_list_usage(None),
+            Ok(crate::subscriptions::UsageMode::Cached)
+        );
+        assert_eq!(
+            parse_list_usage(Some("refresh")),
+            Ok(crate::subscriptions::UsageMode::Refresh)
+        );
+        assert!(validate_subscription_id("providerId", "").is_err());
+        assert!(validate_subscription_id("providerId", &"a".repeat(257)).is_err());
+        assert!(validate_subscription_id("providerId", &"a".repeat(256)).is_ok());
+    }
+
+    #[test]
+    fn subscription_live_reads_are_limited_per_plugin_provider_and_account() {
+        let limiter = LiveReadLimiter::default();
+        let start = std::time::Instant::now();
+        let interval = SUBSCRIPTION_LIVE_READ_INTERVAL;
+        let key = |plugin: &str, account: &str| {
+            (
+                plugin.to_owned(),
+                "claude-pro-max".to_owned(),
+                account.to_owned(),
+            )
+        };
+        assert!(limiter.try_acquire(key("a", "acct_1"), start, interval));
+        assert!(!limiter.try_acquire(key("a", "acct_1"), start, interval));
+        assert!(limiter.try_acquire(key("a", "acct_2"), start, interval));
+        assert!(limiter.try_acquire(key("b", "acct_1"), start, interval));
+        assert!(limiter.try_acquire(key("a", "acct_1"), start + interval, interval));
+    }
+
+    #[test]
+    fn usage_args_accept_exactly_one_form() {
+        assert_eq!(
+            parse_usage_args(&json!({ "agent_id": " claude " })),
+            Ok(UsageArgs::Agent("claude"))
+        );
+        assert_eq!(
+            parse_usage_args(&json!({ "provider_id": "claude-pro-max" })),
+            Ok(UsageArgs::Provider {
+                provider_id: "claude-pro-max",
+                account_id: None
+            })
+        );
+        assert_eq!(
+            parse_usage_args(&json!({ "provider_id": "claude-pro-max", "account_id": "acct_1" })),
+            Ok(UsageArgs::Provider {
+                provider_id: "claude-pro-max",
+                account_id: Some("acct_1")
+            })
+        );
+        for invalid in [
+            json!({ "agent_id": "claude", "provider_id": "claude-pro-max" }),
+            json!({ "agent_id": "claude", "account_id": "acct_1" }),
+            json!({ "account_id": "acct_1" }),
+            json!({ "agent_id": "" }),
+            json!({ "provider_id": "" }),
+            json!({ "provider_id": 7 }),
+            json!({}),
+        ] {
+            assert!(
+                parse_usage_args(&invalid).is_err(),
+                "{invalid} must be rejected"
+            );
+        }
+    }
+
+    fn pool_provider() -> crate::subscriptions::SubscriptionProvider {
+        use crate::server::oauth_pool_policy::Strategy;
+        use crate::subscriptions::{
+            AccountPinning, AccountState, PoolPolicySummary, ProviderCapabilities, ProviderKind,
+            SubscriptionAccount, SubscriptionProvider,
+        };
+        let account =
+            |account_id: &str, state: AccountState, needs_reauth: bool| SubscriptionAccount {
+                account_id: account_id.to_owned(),
+                label: Some(format!("{account_id}@example.test")),
+                kind: "oauth".to_owned(),
+                active: account_id == "acct_ok",
+                gateway_active: false,
+                needs_reauth,
+                updated_at: 1,
+                connection_state: None,
+                pool_enabled: state != AccountState::PoolDisabled,
+                pool_priority: Some(0),
+                state,
+                usage: None,
+            };
+        SubscriptionProvider {
+            provider_id: "claude-pro-max".to_owned(),
+            label: "Claude Pro/Max".to_owned(),
+            kind: ProviderKind::Subscription,
+            managed: false,
+            capabilities: ProviderCapabilities {
+                account_usage: true,
+                account_ping: true,
+                account_pinning: AccountPinning::None,
+                pool_strategies: vec![Strategy::QuotaFirst],
+                quota_observations: true,
+            },
+            policy: Some(PoolPolicySummary {
+                strategy: Strategy::QuotaFirst,
+                drain_threshold_percent: 80,
+            }),
+            active_account_id: Some("acct_ok".to_owned()),
+            accounts: vec![
+                account("acct_ok", AccountState::Ok, false),
+                account("acct_expired", AccountState::Ok, false),
+                account("acct_reauth", AccountState::NeedsReauth, true),
+                account("acct_off", AccountState::PoolDisabled, false),
+            ],
+        }
+    }
+
+    fn cached_ok(
+        provider_id: &str,
+        account_id: &str,
+    ) -> Option<(ryu_usage::UsageSnapshot, String)> {
+        (account_id == "acct_ok").then(|| {
+            (
+                ryu_usage::UsageSnapshot {
+                    agent_id: provider_id.to_owned(),
+                    engine: "claude".to_owned(),
+                    available: true,
+                    provider_id: Some(provider_id.to_owned()),
+                    account_id: Some(account_id.to_owned()),
+                    ..Default::default()
+                },
+                "2026-10-14T00:00:00+00:00".to_owned(),
+            )
+        })
+    }
+
+    #[test]
+    fn provider_usage_form_is_label_free_and_cache_only() {
+        let provider = pool_provider();
+        let out = provider_usage_projection(Some(&provider), "claude-pro-max", None, cached_ok);
+        assert_eq!(out["provider_id"], "claude-pro-max");
+        assert_eq!(out["usage_supported"], true);
+        assert_eq!(out["pool_strategy"], "quota_first");
+        assert!(out.get("error").is_none());
+        let accounts = out["accounts"].as_array().expect("accounts");
+        assert_eq!(accounts.len(), 4);
+        for account in accounts {
+            let object = account.as_object().expect("account object");
+            assert!(!object.contains_key("label"));
+            assert!(!object.contains_key("account_label"));
+        }
+        assert!(!out.to_string().contains("@example.test"));
+
+        assert_eq!(accounts[0]["state"], "ok");
+        assert_eq!(accounts[0]["eligible"], true);
+        assert_eq!(accounts[0]["usage"]["account_id"], "acct_ok");
+        assert_eq!(accounts[0]["observed_at"], "2026-10-14T00:00:00+00:00");
+        // A listed reading that expired before the raw lookup reads as pending.
+        assert_eq!(accounts[1]["state"], "pending");
+        assert!(accounts[1]["usage"].is_null());
+        assert!(accounts[1].get("observed_at").is_none());
+        assert_eq!(accounts[2]["state"], "needs_reauth");
+        assert_eq!(accounts[2]["eligible"], false);
+        assert_eq!(accounts[3]["state"], "pool_disabled");
+        assert_eq!(accounts[3]["eligible"], false);
+    }
+
+    #[test]
+    fn provider_usage_form_reports_unknown_account_and_unknown_provider() {
+        let provider = pool_provider();
+        let out = provider_usage_projection(
+            Some(&provider),
+            "claude-pro-max",
+            Some("acct_missing"),
+            cached_ok,
+        );
+        assert_eq!(out["accounts"], json!([]));
+        assert_eq!(out["error"], "account_not_found");
+
+        let one = provider_usage_projection(
+            Some(&provider),
+            "claude-pro-max",
+            Some("acct_ok"),
+            cached_ok,
+        );
+        assert_eq!(one["accounts"].as_array().map(Vec::len), Some(1));
+
+        let unknown = provider_usage_projection(None, "nope", None, cached_ok);
+        assert_eq!(unknown["usage_supported"], false);
+        assert!(unknown["pool_strategy"].is_null());
+        assert_eq!(unknown["accounts"], json!([]));
+        assert!(unknown.get("error").is_none());
     }
 
     #[test]
@@ -2724,11 +3973,121 @@ mod tests {
     }
 
     #[test]
+    fn plain_run_agent_grant_only_allows_read_only_presets() {
+        let read = grants(&["hook:run-agent"]);
+        for preset in [
+            PermissionPreset::CodeRead,
+            PermissionPreset::Research,
+            PermissionPreset::Summarise,
+        ] {
+            assert!(check_preset_grant(&read, "p", preset).is_ok());
+        }
+        let denied = check_preset_grant(&read, "p", PermissionPreset::CodeWrite)
+            .expect_err("code_write must need the write grant");
+        assert!(denied.contains("hook:run-agent:write"));
+        assert!(denied.contains("not granted"));
+
+        let write = grants(&["hook:run-agent", "hook:run-agent:write"]);
+        assert!(check_preset_grant(&write, "p", PermissionPreset::CodeWrite).is_ok());
+    }
+
+    fn refusal_of(outcome: InvokeOutcome) -> Option<String> {
+        match outcome {
+            InvokeOutcome::Result(result) if result.is_error => result.error,
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_calling_agent_with_limited_model_providers_cannot_fan_out_on_all_of_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+        let limited = state
+            .agent_store
+            .create(crate::agents::CreateAgent {
+                name: "Limited".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .id;
+        state
+            .agent_store
+            .update(
+                &limited,
+                crate::agents::UpdateAgent {
+                    account_access: Some(Some(vec!["provider:openai".into()])),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let open = state
+            .agent_store
+            .create(crate::agents::CreateAgent {
+                name: "Open".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .id;
+        let bridge_for = |agent: &str| {
+            PluginHookBridge::new_for_agent_tool(
+                "@test/app".to_owned(),
+                grants(&["hook:run-agent", "hook:side-model"]),
+                state.clone(),
+                Some(agent),
+                Some("conv-1"),
+            )
+        };
+
+        let bridge = bridge_for(&limited);
+        assert_eq!(
+            bridge.calling_agent_provider_access().await.as_deref(),
+            Some("openai")
+        );
+        let delegates = json!({ "delegates": [{ "id": "a", "task": "x" }] });
+        for (verb, outcome) in [
+            (
+                "host.runAgent",
+                bridge.run_agent(json!({ "task": "x" })).await,
+            ),
+            ("host.runFanout", bridge.run_fanout(delegates).await),
+        ] {
+            let error = refusal_of(outcome).expect("a limited agent is refused");
+            assert!(error.starts_with(verb), "{error}");
+            assert!(error.contains("model providers"), "{error}");
+        }
+
+        // An unrestricted agent, and a bridge with no calling agent, carry no limit.
+        assert_eq!(
+            bridge_for(&open).calling_agent_provider_access().await,
+            None
+        );
+        let no_agent = PluginHookBridge::new_for_agent_tool(
+            "@test/app".to_owned(),
+            grants(&["hook:run-agent"]),
+            state.clone(),
+            None,
+            None,
+        );
+        assert_eq!(no_agent.calling_agent_provider_access().await, None);
+    }
+
+    #[test]
     fn run_agent_gate_requires_grant() {
         let g = grants(&["hook:side-model"]);
         assert!(!g.contains(GRANT_RUN_AGENT));
         let g = grants(&["hook:run-agent"]);
         assert!(g.contains(GRANT_RUN_AGENT));
+    }
+
+    #[test]
+    fn agent_run_permission_is_skipped_only_for_an_identified_parent_agent() {
+        assert!(requires_user_agent_run_permission(false, false));
+        assert!(!requires_user_agent_run_permission(false, true));
+        assert!(requires_user_agent_run_permission(true, false));
+        assert!(requires_user_agent_run_permission(true, true));
     }
 
     #[test]

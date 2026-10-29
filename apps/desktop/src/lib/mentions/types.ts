@@ -38,6 +38,7 @@ export interface MentionSourceItem {
 	id: string;
 	name: string;
 	ownerId?: string;
+	resourceUri?: string;
 	target?: MentionTarget;
 	visualIcon?: ReactNode;
 }
@@ -54,6 +55,9 @@ export interface MentionItem {
 	kind: MentionKind;
 	/** Display label — also the text inserted for entity mentions. */
 	label: string;
+	/** Owning app or plugin for app-contributed rows. */
+	ownerId?: string;
+	resourceUri?: string;
 	/** Host route for app rows, Space pages, and other navigable resources. */
 	target?: MentionTarget;
 	/** App-owned artwork, kept as a node so hosts can reuse their canonical icon. */

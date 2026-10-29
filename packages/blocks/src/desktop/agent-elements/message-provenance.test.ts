@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
 import { widgetMessageProvenanceKey } from "./types.ts";
 
-function message(metadata?: Record<string, unknown>): UIMessage {
-	return { id: "message", role: "user", parts: [], metadata } as UIMessage;
+function message(metadata?: UIMessage["metadata"]): UIMessage {
+	return { id: "message", role: "user", parts: [], metadata };
 }
 
 describe("widget message provenance", () => {

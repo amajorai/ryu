@@ -87,6 +87,7 @@ describe("toolDetailStepIndex", () => {
 	for (const { args, expandedCount, parked } of PARKING_CASES) {
 		it(`parks a custom combo with ${expandedCount} expanded on ${parked}`, () => {
 			const [group, edits, commands, code] = args;
+			// SAFETY: The authored custom literal is explicitly part of the native ToolDetailValue union declared by tool-detail-ladder; this fixture passes that supported mode unchanged.
 			const index = toolDetailStepIndex(
 				"custom" as ToolDetailValue,
 				group,

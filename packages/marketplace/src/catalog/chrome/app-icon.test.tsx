@@ -17,12 +17,12 @@ const THEME_PREVIEW = {
 };
 
 function swatchBarStyles(html: string): string[] {
-	// Pull the three inline `background-color`s off the bars (bg fills the rest of
-	// the tile; surface/primary are the bottom two bars). React renders the style
-	// without a trailing `;`, so stop at the closing quote.
-	return [...html.matchAll(/background-color:([^"']+)/g)].flatMap((m) =>
-		m[1] ? [m[1]] : []
-	);
+	// Read each bar's palette input from the owned stylesheet variable (the
+	// legacy direct background-color remains accepted for the same contract).
+	// React renders the style without a trailing semicolon.
+	return [
+		...html.matchAll(/(?:background-color|--catalog-swatch-color):([^"']+)/g),
+	].flatMap((m) => (m[1] ? [m[1]] : []));
 }
 
 describe("AppIcon theme preview", () => {
@@ -68,7 +68,14 @@ describe("AppIcon theme preview", () => {
 
 		expect(html).not.toContain("<canvas");
 		expect(html).toContain('data-app-icon="fallback"');
-		expect(html).toContain("mask-image");
+		// The plate is painted from the seeded material, and the glyph is the
+		// registered Icon: its class owns the CSS mask and its variable names the
+		// requested art.
+		expect(html).toContain("--catalog-icon-material:url(");
+		expect(html).toContain("ryu-registered-icon");
+		expect(html).toContain(
+			"--ryu-icon-mask:url(&quot;https://api.iconify.design/hugeicons/chat-01.svg"
+		);
 	});
 
 	test("applies manifest padding to raster logo art", () => {

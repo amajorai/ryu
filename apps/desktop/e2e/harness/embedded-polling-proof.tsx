@@ -52,7 +52,7 @@ function App() {
 				</Button>
 				<output data-testid="visibility">{visibility}</output>
 			</div>
-			<div style={{ display: active ? "block" : "none" }}>
+			<div className={active ? "block" : "hidden"}>
 				<iframe
 					className="h-[700px] w-full rounded-xl border"
 					sandbox="allow-scripts"

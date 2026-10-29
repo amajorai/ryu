@@ -31,7 +31,7 @@ test("renders the plan gate and Enterprise included-server upgrade path", async 
 	const planGate = page.locator('[data-node-plan-gate="true"]');
 	await expect(planGate).toBeVisible();
 	await expect(
-		page.getByText("Business, Teams, Teams Lite, or Enterprise", {
+		page.getByText("Business, Teams, or Enterprise", {
 			exact: false,
 		})
 	).toBeVisible();

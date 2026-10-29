@@ -1,6 +1,34 @@
 {
   "methods": [
     {
+      "capability": "file.access",
+      "grant": null,
+      "method": "files.read",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "file.access",
+      "grant": null,
+      "method": "files.write",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "authorization.defer",
+      "grant": "authorization:defer",
+      "method": "authorization.issue",
+      "streaming": false,
+      "tsHost": false
+    },
+    {
+      "capability": "authorization.defer",
+      "grant": "authorization:defer",
+      "method": "authorization.check",
+      "streaming": false,
+      "tsHost": false
+    },
+    {
       "capability": "identity.read",
       "grant": "identity:read",
       "method": "identity.current",
@@ -311,6 +339,13 @@
     {
       "capability": "assistant.context",
       "grant": "assistant:context",
+      "method": "ui.updateModelContext",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "assistant.context",
+      "grant": "assistant:context",
       "method": "assistant.clearContext",
       "streaming": false,
       "tsHost": true
@@ -442,6 +477,20 @@
       "tsHost": false
     },
     {
+      "capability": "subscriptions.read",
+      "grant": "subscriptions:read",
+      "method": "subscriptions.list",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "subscriptions.read",
+      "grant": "subscriptions:read",
+      "method": "subscriptions.usage",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
       "capability": "gateway.budgetSpend",
       "grant": "usage:read",
       "method": "gateway.budgetSpend",
@@ -450,7 +499,7 @@
     },
     {
       "capability": "gateway.audit",
-      "grant": "usage:read",
+      "grant": "usage:audit",
       "method": "gateway.audit",
       "streaming": false,
       "tsHost": false
@@ -489,6 +538,27 @@
       "method": "agent.cancel",
       "streaming": false,
       "tsHost": true
+    },
+    {
+      "capability": "execution.control",
+      "grant": "execution:control",
+      "method": "execution.pause",
+      "streaming": false,
+      "tsHost": false
+    },
+    {
+      "capability": "execution.control",
+      "grant": "execution:control",
+      "method": "execution.resume",
+      "streaming": false,
+      "tsHost": false
+    },
+    {
+      "capability": "execution.control",
+      "grant": "execution:control",
+      "method": "execution.status",
+      "streaming": false,
+      "tsHost": false
     },
     {
       "capability": "spaces.docs",
@@ -533,6 +603,48 @@
       "tsHost": true
     },
     {
+      "capability": "spaces.database",
+      "grant": "spaces:database",
+      "method": "spaces.createDatabase",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.database",
+      "grant": "spaces:database",
+      "method": "spaces.listDatabases",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.database",
+      "grant": "spaces:database",
+      "method": "spaces.getDatabase",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.database",
+      "grant": "spaces:database",
+      "method": "spaces.updateDatabase",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.database",
+      "grant": "spaces:database",
+      "method": "spaces.queryDatabase",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "spaces.database",
+      "grant": "spaces:database",
+      "method": "spaces.deleteDatabase",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
       "capability": "spaces.docs",
       "grant": "spaces:docs",
       "method": "spaces.search",
@@ -556,7 +668,28 @@
     {
       "capability": "media.generate",
       "grant": "media:generate",
+      "method": "media.audio",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "media.generate",
+      "grant": "media:generate",
       "method": "media.tts",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "media.generate",
+      "grant": "media:generate",
+      "method": "media.ttsEngines",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "voice.models.manage",
+      "grant": "voice:models:manage",
+      "method": "media.ttsEngineInstall",
       "streaming": false,
       "tsHost": true
     },
@@ -1347,6 +1480,13 @@
     {
       "capability": "approvals.crud",
       "grant": "approvals:crud",
+      "method": "notifications.appIcons",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
       "method": "notifications.markRead",
       "streaming": false,
       "tsHost": true
@@ -1355,6 +1495,20 @@
       "capability": "approvals.crud",
       "grant": "approvals:crud",
       "method": "notifications.ack",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "notifications.archive",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "approvals.crud",
+      "grant": "approvals:crud",
+      "method": "notifications.unarchive",
       "streaming": false,
       "tsHost": true
     },
@@ -1590,6 +1744,13 @@
       "tsHost": true
     },
     {
+      "capability": "plugins.install",
+      "grant": "plugins:install",
+      "method": "apps.installBundle",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
       "capability": "shell.integrate",
       "grant": "shell:integrate",
       "method": "shell.openTab",
@@ -1639,5 +1800,5 @@
       "tsHost": false
     }
   ],
-  "version": "1.15.0"
+  "version": "1.20.0"
 }

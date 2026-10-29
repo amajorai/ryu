@@ -26,6 +26,7 @@ pub mod connect;
 pub mod consumer;
 pub mod execute;
 pub mod host;
+pub mod receipt;
 pub mod service;
 pub mod triggers;
 pub mod worker;

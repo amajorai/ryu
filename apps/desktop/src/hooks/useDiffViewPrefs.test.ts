@@ -108,6 +108,9 @@ describe("diffViewPrefsToOptions", () => {
 describe("persistence: setDiffViewPrefs / resetDiffViewPrefs", () => {
 	test("setDiffViewPrefs merges a partial patch onto current prefs", () => {
 		setDiffViewPrefs({ diffStyle: "unified" });
+		// SAFETY: beforeEach clears this test's storage. The immediately preceding
+		// typed preference write serializes defaults plus this test's authored patch;
+		// no external storage publisher participates in this readback.
 		const stored = JSON.parse(
 			localStorage.getItem(STORAGE_KEY) ?? "{}"
 		) as DiffViewPrefs;
@@ -119,6 +122,9 @@ describe("persistence: setDiffViewPrefs / resetDiffViewPrefs", () => {
 	test("successive patches accumulate rather than replace", () => {
 		setDiffViewPrefs({ diffStyle: "unified" });
 		setDiffViewPrefs({ wrapLines: true });
+		// SAFETY: beforeEach clears this test's storage. The immediately preceding
+		// typed preference write serializes defaults plus this test's authored patch;
+		// no external storage publisher participates in this readback.
 		const stored = JSON.parse(
 			localStorage.getItem(STORAGE_KEY) ?? "{}"
 		) as DiffViewPrefs;
@@ -131,6 +137,9 @@ describe("persistence: setDiffViewPrefs / resetDiffViewPrefs", () => {
 		localStorage.setItem(STORAGE_KEY, JSON.stringify({ diffStyle: "unified" }));
 		// setDiffViewPrefs reads current (merged) prefs, patches, and rewrites.
 		setDiffViewPrefs({ wrapLines: true });
+		// SAFETY: beforeEach clears this test's storage. The immediately preceding
+		// typed preference write serializes defaults plus this test's authored patch;
+		// no external storage publisher participates in this readback.
 		const stored = JSON.parse(
 			localStorage.getItem(STORAGE_KEY) ?? "{}"
 		) as DiffViewPrefs;
@@ -143,6 +152,9 @@ describe("persistence: setDiffViewPrefs / resetDiffViewPrefs", () => {
 	test("resetDiffViewPrefs restores every field to its default", () => {
 		setDiffViewPrefs({ diffStyle: "unified", wrapLines: true });
 		resetDiffViewPrefs();
+		// SAFETY: beforeEach clears this test's storage. The immediately preceding
+		// typed preference write serializes defaults plus this test's authored patch;
+		// no external storage publisher participates in this readback.
 		const stored = JSON.parse(
 			localStorage.getItem(STORAGE_KEY) ?? "{}"
 		) as DiffViewPrefs;
@@ -153,6 +165,9 @@ describe("persistence: setDiffViewPrefs / resetDiffViewPrefs", () => {
 		localStorage.setItem(STORAGE_KEY, "{not valid json");
 		// read() swallows the parse error; setDiffViewPrefs patches over defaults.
 		expect(() => setDiffViewPrefs({ wrapLines: true })).not.toThrow();
+		// SAFETY: beforeEach clears this test's storage. The immediately preceding
+		// typed preference write serializes defaults plus this test's authored patch;
+		// no external storage publisher participates in this readback.
 		const stored = JSON.parse(
 			localStorage.getItem(STORAGE_KEY) ?? "{}"
 		) as DiffViewPrefs;

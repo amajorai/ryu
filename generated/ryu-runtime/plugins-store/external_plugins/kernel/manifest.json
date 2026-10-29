@@ -1,0 +1,89 @@
+{
+  "tags": ["browser", "automation", "kernel", "remote", "web"],
+  "id": "@ryu/kernel",
+  "name": "Kernel",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "external": true,
+  "description": "Kernel cloud browsers for Ryu's swappable browser.control layer, over Kernel's hosted OAuth MCP server. A Kernel browser session is the browser.* tab id: each navigate creates a new session on the URL, tabs lists live sessions, and screenshot, click_at, key, scroll, and drag drive it by viewport coordinates. Element-reference verbs stay unbound because Kernel controls the browser by pixels; the full Kernel tool set (Playwright execution, browser REPL, profiles, replays, files) remains available under kernel.*.",
+  "tagline": "Cloud browsers for agents from Kernel",
+  "icon": "ai-browser",
+  "iconDither": { "from": 150, "to": "transparent", "direction": "down" },
+  "banner": {
+    "style": "gradient",
+    "colors": ["#0f766e", "#0b1215"],
+    "seed": 31
+  },
+  "author": { "name": "Kernel", "url": "https://www.kernel.sh" },
+  "homepage": "https://www.kernel.sh",
+  "repository": "https://github.com/kernel/kernel-mcp-server",
+  "privacyPolicyUrl": "https://www.kernel.sh/privacy",
+  "termsOfServiceUrl": "https://www.kernel.sh/terms",
+  "license": "MIT",
+  "keywords": ["browser", "automation", "kernel", "remote", "web"],
+  "category": "Browsers",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "full" },
+    "mobile": { "support": "full" },
+    "extension": { "support": "full" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "provides": [
+    {
+      "capability": "browser.control",
+      "version": "1.0.0",
+      "title": "Browser",
+      "grant": "browser:control",
+      "selectable": true,
+      "target": "remote-desktop",
+      "tools": {
+        "browser.navigate": {
+          "tool": "kernel.manage_browsers",
+          "adapter": { "code_file": "adapters/browser.navigate.js" }
+        },
+        "browser.tabs": {
+          "tool": "kernel.manage_browsers",
+          "adapter": { "code_file": "adapters/browser.tabs.js" }
+        },
+        "browser.screenshot": {
+          "tool": "kernel.computer_action",
+          "adapter": { "code_file": "adapters/browser.screenshot.js" }
+        },
+        "browser.click_at": {
+          "tool": "kernel.computer_action",
+          "adapter": { "code_file": "adapters/browser.click_at.js" }
+        },
+        "browser.key": {
+          "tool": "kernel.computer_action",
+          "adapter": { "code_file": "adapters/browser.key.js" }
+        },
+        "browser.scroll": {
+          "tool": "kernel.computer_action",
+          "adapter": {
+            "tools": ["kernel.manage_browsers"],
+            "code_file": "adapters/browser.scroll.js"
+          }
+        },
+        "browser.drag": {
+          "tool": "kernel.computer_action",
+          "adapter": { "code_file": "adapters/browser.drag.js" }
+        }
+      }
+    }
+  ],
+  "permission_grants": ["mcp:server", "identity.read", "tool:execute"],
+  "mcp_servers": {
+    "kernel": {
+      "type": "streamable-http",
+      "url": "https://mcp.onkernel.com/mcp",
+      "auth": { "type": "oauth" },
+      "description": "Kernel remote OAuth MCP server. Native tools include manage_browsers, computer_action, execute_playwright_code, browser_repl, profiles, proxies, replays, browser files, and documentation search."
+    }
+  }
+}

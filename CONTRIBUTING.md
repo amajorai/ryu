@@ -76,4 +76,9 @@ orchestration in Gateway will be asked to move.
 ## License
 
 By contributing, you agree that your contribution is licensed under the same license as the unit
-you touch: Apache-2.0 for most units and AGPL-3.0 for `apps/gateway`. See each unit's `LICENSE`.
+you touch: Apache-2.0 for most open-source units, and AGPL-3.0 for `apps/gateway` and the
+`crates/gateway/*` crates other than `crates/gateway/credentials`. Contributions to the
+source-available units (Desktop, Island, and the shared packages listed as Commercial in
+[`LICENSING.md`](./LICENSING.md)) are made under the contribution terms in
+[`LICENSE-COMMERCIAL.md`](./LICENSE-COMMERCIAL.md). See [`LICENSING.md`](./LICENSING.md) for the
+full unit map.

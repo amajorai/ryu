@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_3235364111de401abd5b3a63582d1e9d"
+  },
+  "body": {
+    "data": [
+      {
+        "id": "passport-review",
+        "name": "passport-review",
+        "description": "Review identity boundaries"
+      }
+    ],
+    "object": "list"
+  }
+}

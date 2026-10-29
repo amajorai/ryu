@@ -1,40 +1,13 @@
 {
   "slug": "hr",
   "name": "Human Resources",
-  "navLabel": "Human Resources",
-  "category": "People & Operations",
   "icon": "Users",
   "tagline": "Answer questions from your handbook and prepare onboarding documents for review.",
-  "heroEyebrow": "Ryu for Human Resources",
   "heroTitle": "Ryu for human resources",
-  "heroSubtitle": "Answer questions from your handbook and prepare onboarding documents for review.",
   "visualKey": "AgentsVisual",
-  "intro": "HR handles the most sensitive data in the company: salaries, performance, health, complaints. That rules out generic AI tools that train on your input. Ryu runs a capable agent on your own machine, grounds it on your actual policies, and uses the Gateway to redact and audit every call, so you get help without putting people data at risk.",
-  "highlights": [
-    {
-      "title": "People data stays put",
-      "description": "Run a local model for sensitive work, so salaries, reviews, and complaints never leave your device.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Answers from your handbook",
-      "description": "Ground agents on your real policies and benefits docs with Spaces, so answers cite the actual source.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Redacted and logged",
-      "description": "When you use a cloud model, the Gateway strips PII on egress and records the call for compliance.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Configurable per task",
-      "description": "Build an HR agent as a card with the right model, tools, and access for each kind of work.",
-      "icon": "Cpu"
-    }
-  ],
   "useCases": [
     {
-      "title": "Policy Q and A",
+      "title": "Policy questions",
       "description": "Answer employee questions on leave, benefits, and conduct straight from your handbook, with a citation."
     },
     {
@@ -58,28 +31,18 @@
       "description": "Track training and certification deadlines and draft the reminder nudges for who's due."
     }
   ],
-  "examplePrompts": [
-    "How many days of parental leave does our policy give, and what's the notice period? Cite the handbook.",
-    "Draft an offer letter from our template for a senior engineer in Singapore at this band.",
-    "Build a first-week onboarding plan and welcome note for a new product manager.",
-    "Turn this hiring-manager brief into an inclusive job description aligned to our L4 framework.",
-    "Summarize these 200 open-ended survey responses into themes, without quoting anyone identifiable."
-  ],
   "faq": [
     {
       "q": "Is employee data safe to use with Ryu?",
-      "a": "Yes. Ryu is local-first, so you can run an agent entirely on your machine with no telemetry for sensitive work. When you route to a cloud model, the Gateway redacts PII and logs the call for compliance."
+      "a": "Yes. With a local model, employee data stays on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Will policy answers be accurate to our company?",
-      "a": "Ground agents on your own handbook and benefits docs with Spaces and RAG. Answers cite the specific policy section, so you can confirm before sharing with an employee."
+      "a": "Yes, if you add your handbook and benefits docs to a Space. Answers cite the policy section so you can check before sharing."
     },
     {
       "q": "Can it make HR decisions for us?",
-      "a": "No. Ryu drafts documents and surfaces information so an HR professional can decide and finalize. Every output is a first pass for a human, and the audit trail keeps it accountable."
+      "a": "No. Ryu drafts documents and gathers information so an HR professional can decide and finalize. The audit trail records which model ran and when."
     }
-  ],
-  "ctaTitle": "Help your people faster, keep their data private.",
-  "ctaSubtitle": "Policy answers, sensitive drafts, and onboarding prep, grounded in your handbook and kept on your machine.",
-  "ctaNote": "Local-first · PII redaction · Handbook-grounded"
+  ]
 }

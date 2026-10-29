@@ -34,7 +34,7 @@ const RYU_DARK_COLORS = {
 	foreground: "#E5E7EB",
 	muted: "#1F2230",
 	mutedForeground: "#9CA3AF",
-	border: "#3A3D4D",
+	border: "#2A2D39",
 	focusRing: "#0099FF",
 	selection: "#006EB8",
 	selectionForeground: "#FFFFFF",
@@ -59,7 +59,7 @@ const RYU_LIGHT_COLORS = {
 	foreground: "#1F2030",
 	muted: "#EEF0F6",
 	mutedForeground: "#5F6472",
-	border: "#D6D9E5",
+	border: "#E1E3EB",
 	focusRing: "#006EB8",
 	selection: "#D9F0FF",
 	selectionForeground: "#003C66",
@@ -84,7 +84,7 @@ const RYU_MONO_DARK_COLORS = {
 	foreground: "#FAFAFA",
 	muted: "#27272A",
 	mutedForeground: "#A1A1AA",
-	border: "#52525B",
+	border: "#3F3F46",
 	focusRing: "#F4F4F5",
 	selection: "#52525B",
 	selectionForeground: "#FFFFFF",
@@ -109,7 +109,7 @@ const RYU_MONO_LIGHT_COLORS = {
 	foreground: "#18181B",
 	muted: "#F4F4F5",
 	mutedForeground: "#52525B",
-	border: "#D4D4D8",
+	border: "#E4E4E7",
 	focusRing: "#27272A",
 	selection: "#E4E4E7",
 	selectionForeground: "#18181B",
@@ -139,8 +139,40 @@ const RYU_MONO_LIGHT_BORDER = {
 	focusColor: RYU_MONO_LIGHT_COLORS.focusRing,
 } satisfies ThemeBorder;
 
-// Ryu brand palette. Keeps the existing dark theme's exact semantic values so
-// the current App remains visually and structurally compatible.
+// NO_COLOR (https://no-color.org) palettes. OpenTUI always paints explicit
+// colors, so honoring the convention means dropping every hue: status, accent,
+// and focus collapse onto the neutral foreground ramp, and state is carried by
+// the glyphs and labels the components already render (✓ ✗ ⚠ ● ○ ›).
+const RYU_NO_COLOR_DARK_COLORS = {
+	...RYU_MONO_DARK_COLORS,
+	accent: RYU_MONO_DARK_COLORS.foreground,
+	error: RYU_MONO_DARK_COLORS.foreground,
+	errorForeground: RYU_MONO_DARK_COLORS.background,
+	info: RYU_MONO_DARK_COLORS.foreground,
+	infoForeground: RYU_MONO_DARK_COLORS.background,
+	primary: RYU_MONO_DARK_COLORS.foreground,
+	success: RYU_MONO_DARK_COLORS.foreground,
+	successForeground: RYU_MONO_DARK_COLORS.background,
+	warning: RYU_MONO_DARK_COLORS.foreground,
+	warningForeground: RYU_MONO_DARK_COLORS.background,
+} satisfies ThemeColors;
+
+const RYU_NO_COLOR_LIGHT_COLORS = {
+	...RYU_MONO_LIGHT_COLORS,
+	accent: RYU_MONO_LIGHT_COLORS.foreground,
+	error: RYU_MONO_LIGHT_COLORS.foreground,
+	errorForeground: RYU_MONO_LIGHT_COLORS.background,
+	info: RYU_MONO_LIGHT_COLORS.foreground,
+	infoForeground: RYU_MONO_LIGHT_COLORS.background,
+	primary: RYU_MONO_LIGHT_COLORS.foreground,
+	success: RYU_MONO_LIGHT_COLORS.foreground,
+	successForeground: RYU_MONO_LIGHT_COLORS.background,
+	warning: RYU_MONO_LIGHT_COLORS.foreground,
+	warningForeground: RYU_MONO_LIGHT_COLORS.background,
+} satisfies ThemeColors;
+
+// Ryu brand palette. Soft boundaries let spacing and text lead while selection
+// and focus retain their existing accent contrast.
 export const ryuTheme: Theme = createTheme({
 	name: "ryu",
 	colors: RYU_DARK_COLORS,
@@ -167,6 +199,18 @@ export const ryuMonoLightTheme: Theme = createTheme({
 	border: RYU_MONO_LIGHT_BORDER,
 });
 
+export const ryuNoColorDarkTheme: Theme = createTheme({
+	name: "ryu-no-color-dark",
+	colors: RYU_NO_COLOR_DARK_COLORS,
+	border: RYU_MONO_DARK_BORDER,
+});
+
+export const ryuNoColorLightTheme: Theme = createTheme({
+	name: "ryu-no-color-light",
+	colors: RYU_NO_COLOR_LIGHT_COLORS,
+	border: RYU_MONO_LIGHT_BORDER,
+});
+
 export interface RyuThemePreset {
 	readonly dark: Theme;
 	readonly label: string;
@@ -189,7 +233,9 @@ export const THEME_CATALOG = {
 export type ThemePresetId = keyof typeof THEME_CATALOG;
 
 export const THEME_PRESET_IDS: readonly ThemePresetId[] = Object.freeze(
-	Object.keys(THEME_CATALOG) as ThemePresetId[]
+	Object.keys(THEME_CATALOG).filter((id): id is ThemePresetId =>
+		Object.hasOwn(THEME_CATALOG, id)
+	)
 );
 
 // Descriptive alias for callers that prefer the term "presets" to "catalog".

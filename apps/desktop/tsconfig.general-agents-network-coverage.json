@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/AgentProfile.tsx",
+    "src/components/settings/general-agents-network.test-support.ts",
+    "src/components/settings/UpdatesSettings.coverage.native-http.test.tsx",
+    "src/components/settings/AgentAccessPanel.coverage.native-http.test.tsx",
+    "src/components/settings/MemoryTab.coverage.native-http.test.tsx",
+    "src/components/settings/AgentProfile.coverage.native-http.test.tsx",
+    "e2e/general-agents-network-coverage.playwright.config.ts",
+    "e2e/harness/vite.general-agents-network-coverage.config.ts"
+  ]
+}

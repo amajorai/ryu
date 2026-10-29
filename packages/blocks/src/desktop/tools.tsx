@@ -1,4 +1,6 @@
 "use client";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import styles from "./tools.module.css";
 
 // Presentational layer of the desktop Tools page. The live app
 // (`apps/desktop/src/pages/ToolsPage.tsx`) is a thin container that loads the
@@ -24,7 +26,6 @@ import { Button } from "@ryu/ui/components/button";
 import {
 	Card,
 	CardContent,
-	CardDescription,
 	CardHeader,
 	CardTitle,
 } from "@ryu/ui/components/card";
@@ -56,7 +57,9 @@ import {
 } from "@ryu/ui/components/select";
 import { Spinner } from "@ryu/ui/components/spinner";
 import { Textarea } from "@ryu/ui/components/textarea";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import type { callMcpTool, McpCallResult } from "@ryuhq/core-client/mcp";
 import { type ChangeEvent, useMemo, useState } from "react";
 
 const ALL_AGENTS = "__all__";
@@ -82,11 +85,11 @@ export interface AgentOption {
 	name: string;
 }
 
-export interface ToolCallResult {
-	error?: string;
-	ok: boolean;
-	output?: unknown;
-}
+/** The actual native Core MCP call result, including its opaque output slot. */
+export type ToolCallResult = McpCallResult;
+
+/** The existing Core call serialization input; no decoded arguments DTO. */
+type McpCallArguments = Parameters<typeof callMcpTool>[1]["arguments"];
 
 export interface CreateServerResult {
 	error?: string;
@@ -109,7 +112,7 @@ export interface ToolsViewProps {
 	onCallTool?: (
 		tool: string,
 		agentId: string,
-		args: unknown
+		args: McpCallArguments
 	) => Promise<ToolCallResult>;
 	onCreateServer?: (input: CreateServerInput) => Promise<CreateServerResult>;
 	onRetry?: () => void;
@@ -165,10 +168,7 @@ export function ToolsView({
 		<div className="flex h-full flex-col overflow-hidden">
 			<div className="flex shrink-0 items-center justify-end border-b px-4 py-3">
 				<div className="flex items-center gap-2">
-					<Label
-						className="text-muted-foreground text-xs"
-						htmlFor="agent-filter"
-					>
+					<Label htmlFor="agent-filter" size="compact" tone="muted">
 						Allowlist
 					</Label>
 					<Select
@@ -229,23 +229,32 @@ export function ToolsView({
 							{servers.map((server) => (
 								<Card key={server.name}>
 									<CardHeader>
-										<CardTitle className="flex items-center gap-2 text-base">
+										<CardTitle layout="badge-row" variant="default">
 											{server.name}
 										</CardTitle>
-										<CardDescription className="flex flex-wrap gap-1">
+										<div
+											className={cn(
+												"flex flex-wrap text-muted-foreground text-sm",
+												styles.serverBadges
+											)}
+											data-slot="card-description"
+										>
 											<Badge variant={server.enabled ? "default" : "secondary"}>
 												{server.enabled ? "Enabled" : "Disabled"}
 											</Badge>
 											{server.available === false ? (
 												<Badge variant="secondary">Not installed</Badge>
 											) : null}
-										</CardDescription>
+										</div>
 									</CardHeader>
 									<CardContent>
 										<p className="line-clamp-2 text-muted-foreground text-sm">
 											{server.description ?? "No description"}
 										</p>
-										<code className="mt-2 block truncate rounded bg-muted px-2 py-1 text-muted-foreground text-xs">
+										<code
+											className="mt-2 block truncate rounded bg-muted px-2 py-1 text-muted-foreground text-xs"
+											title={[server.command, ...server.args].join(" ")}
+										>
 											{[server.command, ...server.args].join(" ")}
 										</code>
 									</CardContent>
@@ -497,7 +506,7 @@ function ToolRow({
 	onCallTool?: (
 		tool: string,
 		agentId: string,
-		args: unknown
+		args: McpCallArguments
 	) => Promise<ToolCallResult>;
 }) {
 	const [open, setOpen] = useState(false);
@@ -514,7 +523,7 @@ function ToolRow({
 		if (!result.ok) {
 			return result.error ?? "Tool call failed";
 		}
-		return typeof result.output === "string"
+		return isNativeText(result.output)
 			? result.output
 			: JSON.stringify(result.output, null, 2);
 	}, [result]);
@@ -526,7 +535,7 @@ function ToolRow({
 			setParseError("Choose an agent to run this tool as.");
 			return;
 		}
-		let parsed: unknown;
+		let parsed: McpCallArguments;
 		try {
 			parsed = argsText.trim() ? JSON.parse(argsText) : {};
 		} catch {
@@ -562,7 +571,7 @@ function ToolRow({
 				role="button"
 				tabIndex={0}
 			>
-				<CardTitle className="flex items-center gap-2 text-sm">
+				<CardTitle layout="badge-row" variant="section">
 					<HugeiconsIcon
 						className="size-4 opacity-70"
 						icon={ComputerTerminal01Icon}
@@ -577,13 +586,19 @@ function ToolRow({
 					/>
 				</CardTitle>
 				{tool.description ? (
-					<CardDescription className="line-clamp-1">
+					<p
+						className={cn(
+							"text-muted-foreground text-sm",
+							styles.toolDescription
+						)}
+						data-slot="card-description"
+					>
 						{tool.description}
-					</CardDescription>
+					</p>
 				) : null}
 			</CardHeader>
 			{open ? (
-				<CardContent className="flex flex-col gap-3">
+				<CardContent layout="stack">
 					{agents.length === 0 ? (
 						<p className="rounded bg-muted px-3 py-2 text-muted-foreground text-xs">
 							Create an agent first, then come back here to try this tool. Tools
@@ -592,10 +607,7 @@ function ToolRow({
 					) : (
 						<>
 							<div className="flex items-center gap-2">
-								<Label
-									className="text-muted-foreground text-xs"
-									htmlFor={`agent-${tool.id}`}
-								>
+								<Label htmlFor={`agent-${tool.id}`} size="compact" tone="muted">
 									Run as
 								</Label>
 								<Select
@@ -620,20 +632,17 @@ function ToolRow({
 								</Select>
 							</div>
 							<div className="flex flex-col gap-1">
-								<Label
-									className="text-muted-foreground text-xs"
-									htmlFor={`args-${tool.id}`}
-								>
+								<Label htmlFor={`args-${tool.id}`} size="compact" tone="muted">
 									Arguments (JSON)
 								</Label>
 								<Textarea
-									className="font-mono text-xs"
 									id={`args-${tool.id}`}
 									onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
 										setArgsText(e.target.value)
 									}
 									rows={3}
 									value={argsText}
+									variant="code-caption"
 								/>
 							</div>
 							{parseError ? (

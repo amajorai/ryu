@@ -1,0 +1,14 @@
+.previewBox {
+	width: var(--pass-studio-1-width);
+	height: var(--pass-studio-1-height);
+}
+.exportBox {
+	width: var(--pass-studio-2-width);
+	height: var(--pass-studio-2-height);
+}
+.previewImage {
+	max-height: var(--pass-studio-3-max-height);
+}
+.exportImage {
+	max-height: var(--pass-studio-4-max-height);
+}

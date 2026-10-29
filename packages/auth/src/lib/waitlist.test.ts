@@ -1,25 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	adminEmails,
+	DEFAULT_INVITES_PER_WEEK,
 	generateReferralCode,
 	invitesPerWeek,
 	isAdmin,
 	isAdminEmail,
+	isVerifiedAdminEmail,
 	isWaitlistBypassed,
 	isWaitlisted,
 	observedInvitesPerWeek,
+	reconciledAdminRole,
 	referralUrlFor,
 	waitlistEnabledOverride,
 	waitlistEtaLabel,
 	webOrigin,
 } from "./waitlist.ts";
 
-const ENV_KEYS = [
-	"ADMIN_EMAILS",
-	"FRONTEND_URL",
-	"WAITLIST_ENABLED",
-	"WAITLIST_INVITES_PER_WEEK",
-] as const;
+const ENV_KEYS = ["ADMIN_EMAILS", "FRONTEND_URL", "WAITLIST_ENABLED"] as const;
 
 const saved: Record<string, string | undefined> = {};
 
@@ -76,11 +74,102 @@ describe("isAdmin", () => {
 		expect(isAdmin({ email: "user@example.com", role: "user" })).toBe(false);
 	});
 
-	it("keeps the configured admin email as the bootstrap authority", () => {
+	it("keeps a verified configured admin email as the bootstrap authority", () => {
 		process.env.ADMIN_EMAILS = "bootstrap@example.com";
+		expect(
+			isAdmin({
+				email: "bootstrap@example.com",
+				emailVerified: true,
+				role: "user",
+			})
+		).toBe(true);
+	});
+
+	it("does not honour the allowlist for an unverified or unknown-verification address", () => {
+		process.env.ADMIN_EMAILS = "bootstrap@example.com";
+		expect(
+			isAdmin({
+				email: "bootstrap@example.com",
+				emailVerified: false,
+				role: "user",
+			})
+		).toBe(false);
 		expect(isAdmin({ email: "bootstrap@example.com", role: "user" })).toBe(
-			true
+			false
 		);
+	});
+});
+
+describe("isVerifiedAdminEmail", () => {
+	it("requires both the allowlist and emailVerified === true", () => {
+		process.env.ADMIN_EMAILS = "admin@ryu.dev";
+		expect(
+			isVerifiedAdminEmail({ email: "ADMIN@ryu.dev", emailVerified: true })
+		).toBe(true);
+		expect(
+			isVerifiedAdminEmail({ email: "admin@ryu.dev", emailVerified: false })
+		).toBe(false);
+		expect(
+			isVerifiedAdminEmail({ email: "admin@ryu.dev", emailVerified: null })
+		).toBe(false);
+		expect(isVerifiedAdminEmail({ email: "admin@ryu.dev" })).toBe(false);
+		expect(
+			isVerifiedAdminEmail({ email: "other@ryu.dev", emailVerified: true })
+		).toBe(false);
+	});
+});
+
+describe("reconciledAdminRole", () => {
+	it("promotes a verified allowlisted address and leaves an unverified one", () => {
+		process.env.ADMIN_EMAILS = "admin@ryu.dev";
+		expect(
+			reconciledAdminRole({
+				email: "admin@ryu.dev",
+				emailVerified: true,
+				role: "waitlist",
+			})
+		).toBe("admin");
+		expect(
+			reconciledAdminRole({
+				email: "admin@ryu.dev",
+				emailVerified: false,
+				role: "waitlist",
+			})
+		).toBeNull();
+	});
+
+	it("demotes an admin role an unverified allowlisted address carries", () => {
+		process.env.ADMIN_EMAILS = "admin@ryu.dev";
+		expect(
+			reconciledAdminRole({
+				email: "admin@ryu.dev",
+				emailVerified: false,
+				role: "admin",
+			})
+		).toBe("waitlist");
+		process.env.WAITLIST_ENABLED = "false";
+		expect(reconciledAdminRole({ email: "admin@ryu.dev", role: "admin" })).toBe(
+			"user"
+		);
+	});
+
+	it("never touches a verified admin or an unlisted admin-plugin grant", () => {
+		process.env.ADMIN_EMAILS = "admin@ryu.dev";
+		expect(
+			reconciledAdminRole({
+				email: "admin@ryu.dev",
+				emailVerified: true,
+				role: "admin",
+			})
+		).toBeNull();
+		expect(
+			reconciledAdminRole({
+				email: "moderator@ryu.dev",
+				emailVerified: false,
+				role: "admin",
+			})
+		).toBeNull();
+		expect(reconciledAdminRole({ email: null, role: "admin" })).toBeNull();
 	});
 });
 
@@ -150,10 +239,28 @@ describe("isWaitlisted", () => {
 		expect(isWaitlisted({ role: "user", email: "user@x.io" })).toBe(false);
 	});
 
-	it("is false for an admin email even with the waitlist role", () => {
+	it("is false for a verified admin email even with the waitlist role", () => {
 		process.env.ADMIN_EMAILS = "admin@ryu.dev";
+		expect(
+			isWaitlisted({
+				role: "waitlist",
+				email: "admin@ryu.dev",
+				emailVerified: true,
+			})
+		).toBe(false);
+	});
+
+	it("keeps an unverified allowlisted address on the waitlist", () => {
+		process.env.ADMIN_EMAILS = "admin@ryu.dev";
+		expect(
+			isWaitlisted({
+				role: "waitlist",
+				email: "admin@ryu.dev",
+				emailVerified: false,
+			})
+		).toBe(true);
 		expect(isWaitlisted({ role: "waitlist", email: "admin@ryu.dev" })).toBe(
-			false
+			true
 		);
 	});
 
@@ -199,22 +306,18 @@ describe("webOrigin / referralUrlFor", () => {
 });
 
 describe("invitesPerWeek", () => {
-	it("defaults to 50 when unset", () => {
-		expect(invitesPerWeek()).toBe(50);
+	it("is the typed 50-per-week constant", () => {
+		expect(DEFAULT_INVITES_PER_WEEK).toBe(50);
+		expect(invitesPerWeek()).toBe(DEFAULT_INVITES_PER_WEEK);
 	});
 
-	it("uses a positive integer from env", () => {
+	it("is not read from the environment", () => {
 		process.env.WAITLIST_INVITES_PER_WEEK = "120";
-		expect(invitesPerWeek()).toBe(120);
-	});
-
-	it("falls back to the default for zero, negative, or garbage", () => {
-		process.env.WAITLIST_INVITES_PER_WEEK = "0";
-		expect(invitesPerWeek()).toBe(50);
-		process.env.WAITLIST_INVITES_PER_WEEK = "-5";
-		expect(invitesPerWeek()).toBe(50);
-		process.env.WAITLIST_INVITES_PER_WEEK = "abc";
-		expect(invitesPerWeek()).toBe(50);
+		try {
+			expect(invitesPerWeek()).toBe(50);
+		} finally {
+			delete process.env.WAITLIST_INVITES_PER_WEEK;
+		}
 	});
 });
 
@@ -241,10 +344,9 @@ describe("waitlistEtaLabel", () => {
 		expect(waitlistEtaLabel(450)).toBe("~2 months");
 	});
 
-	it("respects a custom throughput from env", () => {
-		process.env.WAITLIST_INVITES_PER_WEEK = "10";
+	it("respects a caller-supplied throughput", () => {
 		// 25 -> ceil(25/10) = 3 weeks
-		expect(waitlistEtaLabel(25)).toBe("~3 weeks");
+		expect(waitlistEtaLabel(25, 10)).toBe("~3 weeks");
 	});
 });
 

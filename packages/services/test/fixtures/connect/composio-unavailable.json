@@ -1,0 +1,13 @@
+{
+  "status": 503,
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_eaaab3cfe9834f419c5cda2c83765fb8"
+  },
+  "body": {
+    "code": "native_composio_unavailable",
+    "error": "Native Composio is not configured",
+    "ok": false
+  }
+}

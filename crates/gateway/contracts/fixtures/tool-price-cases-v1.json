@@ -1,0 +1,569 @@
+{
+  "version": 1,
+  "description": "Golden cases for the tool price contract. `validation` lists the issue codes validate_price_record returns (compared as a sorted set). `quote` prices a record for a usage against this file's `usdRates` and expects {microUsd, free} or {error}. `select` merges a Ryu record and a Treg record under a precedence and expects the winning source label. The records here are synthetic test inputs, not catalog rows. Rust (tests/tool_price_fixture.rs) and TypeScript (packages/protocol/src/tool-price.test.ts) assert the same expectations.",
+  "usdRates": [
+    {
+      "unit": "acme_credit",
+      "kind": "vendor_credit",
+      "microUsd": 2500,
+      "per": 1,
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-01",
+      "sourceUrl": "https://acme.example/pricing"
+    },
+    {
+      "unit": "eur",
+      "kind": "currency",
+      "microUsd": 1080000,
+      "per": 1,
+      "provenance": "unverified",
+      "confidence": "low"
+    }
+  ],
+  "validation": [
+    {
+      "name": "a vendor-page per-call price is valid",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "platform": "web",
+        "capability": "web.search",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            { "rule": "per_call", "microAmount": 5000000, "per": 1000 }
+          ]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "issues": []
+    },
+    {
+      "name": "a measured free price needs no URL",
+      "record": {
+        "endpoint": "acme.status",
+        "provider": "acme",
+        "source": "ryu",
+        "price": { "type": "free" },
+        "provenance": "ryu_measured",
+        "confidence": "medium",
+        "checkedOn": "2026-10-01"
+      },
+      "issues": []
+    },
+    {
+      "name": "free is never unverified, and unverified is always low confidence",
+      "record": {
+        "endpoint": "acme.status",
+        "provider": "acme",
+        "source": "treg",
+        "price": { "type": "free" },
+        "provenance": "unverified",
+        "confidence": "high"
+      },
+      "issues": ["unverified_confidence", "unverified_free"]
+    },
+    {
+      "name": "zero is written as free, not as a zero amount",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            { "rule": "per_call", "microAmount": 0, "per": 1 },
+            {
+              "rule": "per_unit",
+              "meter": "pages",
+              "microAmount": 10,
+              "per": 0
+            }
+          ]
+        },
+        "provenance": "vendor_api",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/v1/prices"
+      },
+      "issues": ["zero_amount", "zero_per"]
+    },
+    {
+      "name": "vendor provenance needs an https source and a calendar date",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [{ "rule": "per_call", "microAmount": 10, "per": 1 }]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-02-30",
+        "sourceUrl": "http://acme.example/pricing"
+      },
+      "issues": ["invalid_checked_on", "invalid_source_url"]
+    },
+    {
+      "name": "vendor provenance without a source or date",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [{ "rule": "per_call", "microAmount": 10, "per": 1 }]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high"
+      },
+      "issues": ["missing_checked_on", "missing_source_url"]
+    },
+    {
+      "name": "grammar of ids, units, meters and taxonomy references",
+      "record": {
+        "endpoint": "Acme",
+        "provider": "Acme Inc",
+        "source": "ryu",
+        "platform": "web",
+        "model": "flux pro",
+        "price": {
+          "type": "metered",
+          "unit": "Credits!",
+          "components": [
+            {
+              "rule": "per_unit",
+              "meter": "calls",
+              "microAmount": 10,
+              "per": 1
+            }
+          ]
+        },
+        "provenance": "ryu_measured",
+        "confidence": "medium",
+        "checkedOn": "2026-10-01"
+      },
+      "issues": [
+        "invalid_endpoint",
+        "invalid_meter",
+        "invalid_model",
+        "invalid_provider",
+        "invalid_unit",
+        "model_without_capability",
+        "partial_taxonomy_ref"
+      ]
+    },
+    {
+      "name": "tiers ascend and end open; an empty rule table is refused",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            {
+              "rule": "tiered",
+              "meter": "calls",
+              "tiers": [
+                { "upTo": 1000, "microAmount": 0, "per": 1 },
+                { "upTo": 500, "microAmount": 10, "per": 1 }
+              ]
+            }
+          ]
+        },
+        "provenance": "ryu_measured",
+        "confidence": "medium",
+        "checkedOn": "2026-10-01"
+      },
+      "issues": ["invalid_tiers"]
+    },
+    {
+      "name": "a metered price with no components",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": { "type": "metered", "unit": "USD", "components": [] },
+        "provenance": "ryu_measured",
+        "confidence": "medium",
+        "checkedOn": "2026-10-01"
+      },
+      "issues": ["no_components"]
+    },
+    {
+      "name": "an all-zero tier table is free written the long way",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            {
+              "rule": "tiered",
+              "meter": "calls",
+              "tiers": [{ "upTo": null, "microAmount": 0, "per": 1 }]
+            }
+          ]
+        },
+        "provenance": "ryu_measured",
+        "confidence": "medium",
+        "checkedOn": "2026-10-01"
+      },
+      "issues": ["zero_amount"]
+    }
+  ],
+  "quote": [
+    {
+      "name": "per call in USD rounds up once",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            { "rule": "per_call", "microAmount": 7000000, "per": 1000 }
+          ]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 3 },
+      "expected": { "microUsd": 21000, "free": false }
+    },
+    {
+      "name": "per call plus per unit sums exactly before rounding",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            { "rule": "per_call", "microAmount": 1, "per": 3 },
+            {
+              "rule": "per_unit",
+              "meter": "results_over_10",
+              "microAmount": 1000000,
+              "per": 1000
+            }
+          ]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 2, "meters": { "results_over_10": 5 } },
+      "expected": { "microUsd": 5001, "free": false }
+    },
+    {
+      "name": "a vendor credit converts through the USD rate table",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "acme_credit",
+          "components": [
+            { "rule": "per_call", "microAmount": 2000000, "per": 1 }
+          ]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 3 },
+      "expected": { "microUsd": 15000, "free": false }
+    },
+    {
+      "name": "graduated tiers price the month-to-date position",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            {
+              "rule": "tiered",
+              "meter": "calls",
+              "tiers": [
+                { "upTo": 1000, "microAmount": 0, "per": 1 },
+                { "upTo": 10000, "microAmount": 2000, "per": 1 },
+                { "upTo": null, "microAmount": 1000, "per": 1 }
+              ]
+            }
+          ]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 500, "monthToDate": { "calls": 800 } },
+      "expected": { "microUsd": 600000, "free": false }
+    },
+    {
+      "name": "a tier boundary crossed at the top tier",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            {
+              "rule": "tiered",
+              "meter": "pages",
+              "tiers": [
+                { "upTo": 10, "microAmount": 100, "per": 1 },
+                { "upTo": null, "microAmount": 50, "per": 1 }
+              ]
+            }
+          ]
+        },
+        "provenance": "ryu_measured",
+        "confidence": "medium",
+        "checkedOn": "2026-10-01"
+      },
+      "usage": { "meters": { "pages": 4 }, "monthToDate": { "pages": 8 } },
+      "expected": { "microUsd": 300, "free": false }
+    },
+    {
+      "name": "free is free whatever the usage",
+      "record": {
+        "endpoint": "acme.status",
+        "provider": "acme",
+        "source": "ryu",
+        "price": { "type": "free" },
+        "provenance": "vendor_page",
+        "confidence": "medium",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 1000 },
+      "expected": { "microUsd": 0, "free": true }
+    },
+    {
+      "name": "an unverified price refuses paid routing",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [{ "rule": "per_call", "microAmount": 10, "per": 1 }]
+        },
+        "provenance": "unverified",
+        "confidence": "low"
+      },
+      "usage": { "calls": 1 },
+      "expected": { "error": "price_unverified" }
+    },
+    {
+      "name": "a unit missing from the rate table is refused",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "zeta_token",
+          "components": [{ "rule": "per_call", "microAmount": 10, "per": 1 }]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 1 },
+      "expected": { "error": "unknown_unit" }
+    },
+    {
+      "name": "an unverified exchange rate refuses paid routing",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "eur",
+          "components": [{ "rule": "per_call", "microAmount": 10, "per": 1 }]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 1 },
+      "expected": { "error": "rate_unverified" }
+    },
+    {
+      "name": "an invalid record is not quoted",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": { "type": "metered", "unit": "USD", "components": [] },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 1 },
+      "expected": { "error": "invalid_price" }
+    },
+    {
+      "name": "a charge beyond the safe integer range overflows",
+      "record": {
+        "endpoint": "acme.search",
+        "provider": "acme",
+        "source": "ryu",
+        "price": {
+          "type": "metered",
+          "unit": "USD",
+          "components": [
+            { "rule": "per_call", "microAmount": 9007199254740991, "per": 1 }
+          ]
+        },
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-01",
+        "sourceUrl": "https://acme.example/pricing"
+      },
+      "usage": { "calls": 2 },
+      "expected": { "error": "overflow" }
+    }
+  ],
+  "records": {
+    "ryuVerified": {
+      "endpoint": "acme.search",
+      "provider": "acme",
+      "source": "ryu",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [{ "rule": "per_call", "microAmount": 10, "per": 1 }]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-01",
+      "sourceUrl": "https://acme.example/pricing"
+    },
+    "ryuUnverified": {
+      "endpoint": "acme.search",
+      "provider": "acme",
+      "source": "ryu",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [{ "rule": "per_call", "microAmount": 10, "per": 1 }]
+      },
+      "provenance": "unverified",
+      "confidence": "low"
+    },
+    "treg": {
+      "endpoint": "acme.search",
+      "provider": "acme",
+      "source": "treg",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [{ "rule": "per_call", "microAmount": 12, "per": 1 }]
+      },
+      "provenance": "vendor_api",
+      "confidence": "medium",
+      "checkedOn": "2026-10-15",
+      "sourceUrl": "https://acme.example/v1/prices"
+    }
+  },
+  "select": [
+    {
+      "name": "default: a verified Ryu record wins",
+      "precedence": "ryu_verified_first",
+      "ryu": "ryuVerified",
+      "treg": "treg",
+      "expected": "ryu"
+    },
+    {
+      "name": "default: an unverified Ryu record yields to Treg",
+      "precedence": "ryu_verified_first",
+      "ryu": "ryuUnverified",
+      "treg": "treg",
+      "expected": "treg"
+    },
+    {
+      "name": "default: an unverified Ryu record stands alone (and refuses paid routing)",
+      "precedence": "ryu_verified_first",
+      "ryu": "ryuUnverified",
+      "treg": null,
+      "expected": "ryu"
+    },
+    {
+      "name": "default: Treg alone",
+      "precedence": "ryu_verified_first",
+      "ryu": null,
+      "treg": "treg",
+      "expected": "treg"
+    },
+    {
+      "name": "treg_first prefers Treg",
+      "precedence": "treg_first",
+      "ryu": "ryuVerified",
+      "treg": "treg",
+      "expected": "treg"
+    },
+    {
+      "name": "treg_first falls back to Ryu",
+      "precedence": "treg_first",
+      "ryu": "ryuVerified",
+      "treg": null,
+      "expected": "ryu"
+    },
+    {
+      "name": "ryu_only ignores Treg",
+      "precedence": "ryu_only",
+      "ryu": null,
+      "treg": "treg",
+      "expected": null
+    },
+    {
+      "name": "treg_only ignores Ryu",
+      "precedence": "treg_only",
+      "ryu": "ryuVerified",
+      "treg": null,
+      "expected": null
+    },
+    {
+      "name": "nothing to select",
+      "precedence": "ryu_verified_first",
+      "ryu": null,
+      "treg": null,
+      "expected": null
+    }
+  ]
+}

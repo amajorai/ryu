@@ -27,6 +27,8 @@ export default defineConfig({
 			"chat-grouping-story.html",
 			"chat-search-story.html",
 		],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	clearScreen: false,
 	resolve: {

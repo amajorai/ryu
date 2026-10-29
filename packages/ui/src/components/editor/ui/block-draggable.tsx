@@ -1,6 +1,11 @@
 "use client";
 
-import { DndPlugin, useDraggable, useDropLine } from "@platejs/dnd";
+import {
+	DndPlugin,
+	type ElementDragItemNode,
+	useDraggable,
+	useDropLine,
+} from "@platejs/dnd";
 import { expandListItemsWithChildren } from "@platejs/list";
 import { BlockSelectionPlugin } from "@platejs/selection/react";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
@@ -9,6 +14,8 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@ryu/ui/components/editor/ui/tooltip.tsx";
+import { useDropNudge } from "@ryu/ui/hooks/use-drop-nudge.ts";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { GripVertical } from "lucide-react";
 import { getPluginByType, isType, KEYS, type TElement } from "platejs";
@@ -22,14 +29,22 @@ import {
 	usePluginOption,
 	useSelected,
 } from "platejs/react";
+import type { CSSProperties as ReactCSSProperties } from "react";
 import {
 	type ComponentProps,
 	memo,
 	type RefObject,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
+import editorStyles from "../editor-lint.module.css";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editorblockDraggable1-top"?: string | number;
+	"--editorblockDraggable2-top"?: string | number;
+}
 
 const UNDRAGGABLE_KEYS = [KEYS.column, KEYS.tr, KEYS.td];
 
@@ -87,7 +102,10 @@ function Draggable(props: PlateElementProps) {
 		useDraggable({
 			element,
 			onDropHandler: (_, { dragItem }) => {
-				const id = (dragItem as { id: string[] | string }).id;
+				// SAFETY: The installed Dnd useDropNode routes packets without id to onDropFiles
+				// before calling onDropHandler. This hook uses that native dispatcher and its
+				// complete ElementDragItemNode packet, retaining every native field and id read.
+				const id = (dragItem as ElementDragItemNode).id;
 
 				if (blockSelectionApi) {
 					blockSelectionApi.add(id);
@@ -98,6 +116,7 @@ function Draggable(props: PlateElementProps) {
 
 	const isInColumn = path.length === 3;
 	const isInTable = path.length === 4;
+	const wrapperRef = useRef<HTMLDivElement>(null);
 
 	const [previewTop, setPreviewTop] = useState(0);
 
@@ -125,6 +144,16 @@ function Draggable(props: PlateElementProps) {
 
 	const [dragButtonTop, setDragButtonTop] = useState(0);
 
+	const editorblockDraggable1Style: EditorVariableStyle = {
+		"--editorblockDraggable1-top": isNativeNumber(`${dragButtonTop + 3}px`)
+			? `${`${dragButtonTop + 3}px`}px`
+			: `${dragButtonTop + 3}px`,
+	};
+	const editorblockDraggable2Style: EditorVariableStyle = {
+		"--editorblockDraggable2-top": isNativeNumber(`${-previewTop}px`)
+			? `${`${-previewTop}px`}px`
+			: `${-previewTop}px`,
+	};
 	return (
 		<div
 			className={cn(
@@ -140,28 +169,26 @@ function Draggable(props: PlateElementProps) {
 				}
 				setDragButtonTop(calcDragButtonTop(editor, element));
 			}}
+			ref={wrapperRef}
 		>
 			{!isInTable && (
 				<Gutter>
-					<div
-						className={cn(
-							"slate-blockToolbarWrapper",
-							"flex h-[1.5em]",
-							isInColumn && "h-4"
-						)}
-					>
+					<div className={cn("flex h-[1.5em]", isInColumn && "h-4")}>
 						<div
 							className={cn(
-								"slate-blockToolbar relative w-4.5",
+								"relative w-4.5",
 								"pointer-events-auto me-1 flex items-center",
 								isInColumn && "me-1.5"
 							)}
 						>
 							<Button
-								className="absolute -start-0 h-6 w-full p-0"
+								className={cn(
+									"absolute -start-0 h-6 w-full p-0",
+									editorStyles.editorblockDraggable1
+								)}
 								data-plate-prevent-deselect
 								ref={handleRef}
-								style={{ top: `${dragButtonTop + 3}px` }}
+								style={editorblockDraggable1Style}
 								variant="ghost"
 							>
 								<DragHandle
@@ -177,14 +204,17 @@ function Draggable(props: PlateElementProps) {
 			)}
 
 			<div
-				className={cn("absolute -start-0 hidden w-full")}
+				className={cn(
+					"absolute -start-0 hidden w-full",
+					editorStyles.editorblockDraggable2
+				)}
 				contentEditable={false}
 				ref={previewRef}
-				style={{ top: `${-previewTop}px` }}
+				style={editorblockDraggable2Style}
 			/>
 
 			<div
-				className="slate-blockWrapper flow-root"
+				className="flow-root"
 				onContextMenu={(event) =>
 					editor
 						.getApi(BlockSelectionPlugin)
@@ -193,7 +223,7 @@ function Draggable(props: PlateElementProps) {
 				ref={nodeRef}
 			>
 				<MemoizedChildren>{children}</MemoizedChildren>
-				<DropLine />
+				<DropGap targetRef={wrapperRef} />
 			</div>
 		</div>
 	);
@@ -212,7 +242,6 @@ function Gutter({ children, className, ...props }: ComponentProps<"div">) {
 		<div
 			{...props}
 			className={cn(
-				"slate-gutterLeft",
 				"absolute top-0 z-50 flex h-full -translate-x-full cursor-text hover:opacity-100 sm:opacity-0 rtl:translate-x-full",
 				getPluginByType(editor, element.type)?.node.isContainer
 					? "group-hover/container:opacity-100"
@@ -291,6 +320,8 @@ const DragHandle = memo(function DragHandle({
 							previewRef.current?.classList.add("opacity-0");
 							editor.setOption(DndPlugin, "multiplePreviewRef", previewRef);
 
+							// SAFETY: The native selection API stores entries of this authored
+							// outer array in its Set unchanged; do not claim each raw id is a string.
 							editor
 								.getApi(BlockSelectionPlugin)
 								.blockSelection.set(blocks.map((block) => block.id as string));
@@ -320,8 +351,12 @@ const DragHandle = memo(function DragHandle({
 								selectedBlocks
 							);
 
+							// SAFETY: This local array is consumed only by native Array.includes
+							// identity checks below; retain the raw ids, without string validation.
 							const ids = processedBlocks.map((block) => block[0].id as string);
 
+							// SAFETY: Array.includes compares this unchanged node identity with
+							// the raw ids just captured; the annotation supplies no string proof.
 							if (ids.length > 1 && ids.includes(element.id as string)) {
 								const previewTop = calculatePreviewTop(editor, {
 									blocks: processedBlocks.map((block) => block[0]),
@@ -346,29 +381,16 @@ const DragHandle = memo(function DragHandle({
 	);
 });
 
-const DropLine = memo(function DropLine({
-	className,
-	...props
-}: ComponentProps<"div">) {
+/** Eases this block and its neighbour apart where a dragged block would drop,
+ *  in place of a drawn drop line. */
+const DropGap = memo(function DropGap({
+	targetRef,
+}: {
+	targetRef: RefObject<HTMLDivElement | null>;
+}) {
 	const { dropLine } = useDropLine();
-
-	if (!dropLine) {
-		return null;
-	}
-
-	return (
-		<div
-			{...props}
-			className={cn(
-				"slate-dropLine",
-				"reorder-drop-indicator absolute inset-x-0 h-0.5 opacity-100 transition-opacity",
-				"bg-brand/50",
-				dropLine === "top" && "-top-px",
-				dropLine === "bottom" && "-bottom-px",
-				className
-			)}
-		/>
-	);
+	useDropNudge(targetRef, dropLine);
+	return null;
 });
 
 const createDragPreviewElements = (
@@ -382,7 +404,7 @@ const createDragPreviewElements = (
 	 * Remove data attributes from the element to avoid recognized as slate
 	 * elements incorrectly.
 	 */
-	const removeDataAttributes = (element: HTMLElement) => {
+	const removeDataAttributes = (element: Element) => {
 		Array.from(element.attributes).forEach((attr) => {
 			if (
 				attr.name.startsWith("data-slate") ||
@@ -393,12 +415,15 @@ const createDragPreviewElements = (
 		});
 
 		Array.from(element.children).forEach((child) => {
-			removeDataAttributes(child as HTMLElement);
+			removeDataAttributes(child);
 		});
 	};
 
 	const resolveElement = (node: TElement, index: number) => {
 		const domNode = editor.api.toDOMNode(node)!;
+		// SAFETY: Slate toDOMNode supplies this full HTMLElement. Native DOM cloneNode
+		// preserves the concrete element interface; its inherited Node declaration
+		// returns the broader base type. The complete clone is forwarded unchanged.
 		const newDomNode = domNode.cloneNode(true) as HTMLElement;
 
 		// Apply visual compensation for horizontal scroll
@@ -436,6 +461,9 @@ const createDragPreviewElements = (
 
 		applyScrollCompensation(domNode, newDomNode);
 
+		// SAFETY: The complete native Dnd path keeps this original id in its
+		// draggingId array, compares entries with Array.includes and forwards
+		// them to native node lookup. It does not validate a string brand here.
 		ids.push(node.id as string);
 		const wrapper = document.createElement("div");
 		wrapper.append(newDomNode);

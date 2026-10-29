@@ -1,26 +1,29 @@
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CSSProperties, DragEvent } from "react";
-import { useState } from "react";
-import { findSplit, useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { useRef, useState } from "react";
+import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import type { SplitDirection } from "@/src/lib/splitTree.ts";
+import { useDesktopWorkbench } from "@/src/workbench/DesktopWorkbenchContext.tsx";
+import { applyWorkbenchPaneDrop } from "@/src/workbench/workbench-drop.ts";
+import layoutStyles from "./SplitDropZones.module.css";
 import {
-	computeSplitLayout,
-	FULL_PANE_RECT,
+	computeCenterGroupLayout,
 	type PaneRect,
 	paneRectPx,
 } from "./SplitView.tsx";
 import { useTabDnd } from "./tabDnd.tsx";
 
-// The titlebar overlays the top 48px of the content area; the overlay starts
-// below it so drags over the strip keep hitting the strip's own targets.
-const TITLEBAR_PX = 48;
+// Kept as a re-export for callers and tests that import it from here.
+export { applyWorkbenchPaneDrop } from "@/src/workbench/workbench-drop.ts";
 
-// Cursor bands inside a pane: the middle CENTER_BAND (per axis) reads as the
-// center zone, the rest picks the nearest edge.
+const TITLEBAR_PX = 48;
 const CENTER_BAND = 0.5;
+const OVERLAY_STYLE: CSSProperties & { "--tab-drop-top": string } = {
+	"--tab-drop-top": `${TITLEBAR_PX}px`,
+};
 
 interface HoverZone {
-	tabId: string;
+	groupId: string;
 	zone: SplitDirection | "center";
 }
 
@@ -31,8 +34,6 @@ interface PxRect {
 	width: number;
 }
 
-/** The half (or whole, for center/swap) of the hovered pane the drop would
-    occupy — the live split preview. */
 function previewRect(pane: PxRect, zone: SplitDirection | "center"): PxRect {
 	switch (zone) {
 		case "left":
@@ -62,178 +63,175 @@ function zoneForCursor(
 	pane: PxRect,
 	centerAllowed: boolean
 ): SplitDirection | "center" {
-	// Normalized cursor position inside the pane, 0..1 per axis.
-	const nx = (x - pane.left) / Math.max(1, pane.width);
-	const ny = (y - pane.top) / Math.max(1, pane.height);
+	const normalizedX = (x - pane.left) / Math.max(1, pane.width);
+	const normalizedY = (y - pane.top) / Math.max(1, pane.height);
 	const margin = (1 - CENTER_BAND) / 2;
 	const inCenter =
-		nx > margin && nx < 1 - margin && ny > margin && ny < 1 - margin;
+		normalizedX > margin &&
+		normalizedX < 1 - margin &&
+		normalizedY > margin &&
+		normalizedY < 1 - margin;
 	if (inCenter && centerAllowed) {
 		return "center";
 	}
-	// Nearest edge by normalized distance, so wide panes still split top/bottom
-	// near their horizontal edges.
 	const distances: [SplitDirection, number][] = [
-		["left", nx],
-		["right", 1 - nx],
-		["up", ny],
-		["down", 1 - ny],
+		["left", normalizedX],
+		["right", 1 - normalizedX],
+		["up", normalizedY],
+		["down", 1 - normalizedY],
 	];
-	distances.sort((a, b) => a[1] - b[1]);
+	distances.sort((first, second) => first[1] - second[1]);
 	return distances[0][0];
 }
 
-/** Warp-style drop zones over the visible panes while a tab is being dragged:
-    hovering a pane edge previews the split that dropping would create (the
-    highlighted half IS the suggestion), the center swaps two panes of an open
-    split. Dropping calls `splitPane`/`swapSplitPanes`. Rendered only during a
-    tab drag, so it never intercepts normal pointer traffic. */
-export function SplitDropZones({
-	containerRef,
-}: {
-	containerRef: React.RefObject<HTMLElement | null>;
-}) {
+/** Drop targets are Center group leaves. Edge drops split the target group and
+ * move the dragged item; center drops exchange the active items of two Center
+ * groups, or move a tab from Left/Right/Bottom into the hovered group. */
+export function SplitDropZones() {
 	const dnd = useTabDnd();
-	const { tabs, splits, activeTabId, splitPane, swapSplitPanes } =
-		useTabsContext();
+	const { dispatch, state } = useDesktopWorkbench();
+	const { prepareTabForWorkbenchSplit } = useTabsContext();
+	const overlayRef = useRef<HTMLDivElement | null>(null);
 	const [hover, setHover] = useState<HoverZone | null>(null);
-
 	const draggingId = dnd.draggingId;
 	if (!draggingId) {
 		return null;
 	}
 
-	// The panes currently on screen: the active split's tiles, else the single
-	// focused pane filling the content area.
-	const activeSplit = findSplit(tabs, splits, activeTabId);
-	const paneRects = new Map<string, PaneRect>();
-	if (activeSplit) {
-		for (const [id, rect] of computeSplitLayout(activeSplit.root).panes) {
-			paneRects.set(id, rect);
-		}
-	} else if (activeTabId) {
-		paneRects.set(activeTabId, FULL_PANE_RECT);
-	}
-	// No usable drop target: nothing visible, or only the dragged tab itself is
-	// on screen with nothing to split against.
-	paneRects.delete(draggingId);
-	if (paneRects.size === 0) {
-		return null;
-	}
-
-	const draggedInActiveSplit =
-		!!activeSplit &&
-		tabs.find((t) => t.id === draggingId)?.splitId === activeSplit.id;
-
+	const layout = computeCenterGroupLayout(state.centerTree);
+	const sourceGroup = state.groups.find((group) =>
+		group.itemIds.includes(draggingId)
+	);
+	const paneRects = new Map<string, PaneRect>(layout.panes);
 	const pxRects = (): Map<string, PxRect> | null => {
-		const el = containerRef.current;
-		if (!el) {
+		const element = overlayRef.current?.parentElement;
+		if (!element) {
 			return null;
 		}
-		const box = el.getBoundingClientRect();
-		const out = new Map<string, PxRect>();
-		for (const [id, rect] of paneRects) {
-			out.set(id, paneRectPx(rect, { width: box.width, height: box.height }));
+		const box = element.getBoundingClientRect();
+		const result = new Map<string, PxRect>();
+		for (const [groupId, rect] of paneRects) {
+			result.set(
+				groupId,
+				paneRectPx(rect, { width: box.width, height: box.height })
+			);
 		}
-		return out;
+		return result;
 	};
 
-	const hitTest = (e: DragEvent): HoverZone | null => {
-		const el = containerRef.current;
+	const hitTest = (event: DragEvent): HoverZone | null => {
+		const element = overlayRef.current?.parentElement;
 		const rects = pxRects();
-		if (!(el && rects)) {
+		if (!(element && rects)) {
 			return null;
 		}
-		const box = el.getBoundingClientRect();
-		const x = e.clientX - box.left;
-		const y = e.clientY - box.top;
-		for (const [tabId, pane] of rects) {
+		const box = element.getBoundingClientRect();
+		const x = event.clientX - box.left;
+		const y = event.clientY - box.top;
+		for (const [groupId, pane] of rects) {
 			if (
 				x >= pane.left &&
 				x <= pane.left + pane.width &&
 				y >= pane.top &&
 				y <= pane.top + pane.height
 			) {
-				// Center = swap, only meaningful between two panes of the open split.
-				const centerAllowed = draggedInActiveSplit;
-				return { tabId, zone: zoneForCursor(x, y, pane, centerAllowed) };
+				return {
+					groupId,
+					zone: zoneForCursor(
+						x,
+						y,
+						pane,
+						sourceGroup !== undefined && sourceGroup.id !== groupId
+					),
+				};
 			}
 		}
 		return null;
 	};
 
-	const onDragOver = (e: DragEvent) => {
-		e.preventDefault();
-		e.dataTransfer.dropEffect = "move";
-		const next = hitTest(e);
-		setHover((prev) =>
-			prev?.tabId === next?.tabId && prev?.zone === next?.zone ? prev : next
+	const onDragOver = (event: DragEvent) => {
+		event.preventDefault();
+		event.dataTransfer.dropEffect = "move";
+		const next = hitTest(event);
+		setHover((previous) =>
+			previous?.groupId === next?.groupId && previous?.zone === next?.zone
+				? previous
+				: next
 		);
 	};
 
-	const onDrop = (e: DragEvent) => {
-		e.preventDefault();
-		const target = hitTest(e);
+	const onDrop = (event: DragEvent) => {
+		event.preventDefault();
+		const target = hitTest(event);
 		setHover(null);
 		if (!target) {
 			dnd.onEnd();
 			return;
 		}
-		if (target.zone === "center") {
-			swapSplitPanes(draggingId, target.tabId);
-		} else {
-			splitPane(draggingId, target.tabId, target.zone);
-		}
+		applyWorkbenchPaneDrop({
+			dispatch,
+			draggingId,
+			state,
+			synchronizeRoute: prepareTabForWorkbenchSplit,
+			targetGroupId: target.groupId,
+			zone: target.zone,
+		});
 		dnd.onEnd();
 	};
 
-	// The preview rect, positioned in px against the live container box.
-	let previewStyle: CSSProperties | null = null;
-	if (hover) {
-		const rects = pxRects();
-		const pane = rects?.get(hover.tabId);
-		if (pane) {
-			const r = previewRect(pane, hover.zone);
-			previewStyle = {
-				left: r.left,
-				top: Math.max(r.top, TITLEBAR_PX),
-				width: r.width,
-				height: r.height - Math.max(0, TITLEBAR_PX - r.top),
-			};
-		}
-	}
+	const pane = hover ? pxRects()?.get(hover.groupId) : undefined;
+	const preview = pane && hover ? previewRect(pane, hover.zone) : null;
+	const previewStyle: PreviewVariables | null = preview
+		? {
+				"--preview-left": `${preview.left}px`,
+				"--preview-top": `${Math.max(preview.top, TITLEBAR_PX) - TITLEBAR_PX}px`,
+				"--preview-width": `${preview.width}px`,
+				"--preview-height": `${preview.height - Math.max(0, TITLEBAR_PX - preview.top)}px`,
+			}
+		: null;
 
+	// Keep the pane target below the tab strip. Mounting a hit surface over
+	// the pressed source during dragstart makes Chromium cancel its native
+	// drag before it can deliver dragover/drop to either target.
 	return (
-		// biome-ignore lint/a11y/noStaticElementInteractions: pure drag-and-drop catcher, keyboard flows use the tab context menus
 		<div
 			aria-hidden
-			className="absolute inset-x-0 bottom-0 z-30"
+			className="absolute inset-x-0 top-(--tab-drop-top) bottom-0 z-30"
+			data-tab-drop-overlay
 			onDragLeave={() => setHover(null)}
 			onDragOver={onDragOver}
 			onDrop={onDrop}
-			style={{ top: TITLEBAR_PX }}
+			ref={overlayRef}
+			style={OVERLAY_STYLE}
 		>
-			{previewStyle && (
+			{previewStyle ? (
 				<div
 					className={cn(
-						"pointer-events-none absolute rounded-lg bg-primary/15 ring-2 ring-primary/50 ring-inset transition-[background-color,left,opacity,top,width,height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+						layoutStyles.preview,
+						cn(
+							"pointer-events-none absolute rounded-lg bg-primary/15 ring-2 ring-primary/50 ring-inset duration-200 motion-reduce:transition-none",
+							layoutStyles.authored1,
+							layoutStyles.authored2
+						),
 						hover?.zone === "center" && "bg-primary/10 ring-primary/40"
 					)}
 					data-drop-preview={hover?.zone}
-					// The overlay's own origin already sits at TITLEBAR_PX, so pull the
-					// container-relative preview coords back up by that offset.
-					style={{
-						...previewStyle,
-						top: (previewStyle.top as number) - TITLEBAR_PX,
-					}}
+					style={previewStyle}
 				>
-					{hover?.zone === "center" && (
+					{hover?.zone === "center" ? (
 						<span className="absolute inset-0 flex items-center justify-center font-medium text-primary/80 text-xs">
-							Swap panes
+							{sourceGroup?.region === "center" ? "Swap panes" : "Move here"}
 						</span>
-					)}
+					) : null}
 				</div>
-			)}
+			) : null}
 		</div>
 	);
+}
+
+interface PreviewVariables extends CSSProperties {
+	"--preview-height": string;
+	"--preview-left": string;
+	"--preview-top": string;
+	"--preview-width": string;
 }

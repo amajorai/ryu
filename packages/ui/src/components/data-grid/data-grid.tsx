@@ -8,19 +8,38 @@ import { DataGridSearch } from "@ryu/ui/components/data-grid/data-grid-search.ts
 import { useAsRef } from "@ryu/ui/hooks/use-as-ref.ts";
 import type { useDataGrid } from "@ryu/ui/hooks/use-data-grid.ts";
 import {
+	type ColumnPinningStyle,
 	flexRender,
 	getColumnBorderVisibility,
 	getColumnPinningStyle,
 } from "@ryu/ui/lib/data-grid.ts";
+import type { SelectionSummary } from "@ryu/ui/lib/data-grid-fill.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { Direction } from "@ryu/ui/types/data-grid.ts";
 import { Plus } from "lucide-react";
 import {
 	type ComponentProps,
+	type CSSProperties,
 	type KeyboardEvent,
 	type MouseEvent,
 	useCallback,
+	useLayoutEffect,
 } from "react";
+import { isNativeFunction } from "../../lib/native-primitive-observation.ts";
+
+import styles from "./data-grid.module.css";
+
+interface GridColumnStyle extends CSSProperties {
+	[key: `--header-${string}-size`]: number;
+	[key: `--col-${string}-size`]: number;
+}
+interface GridStyle extends Partial<ColumnPinningStyle> {
+	"--grid-body-height"?: string;
+	"--grid-cell-width"?: string;
+	"--grid-contain"?: string;
+	"--grid-height"?: string;
+	"--grid-total-width"?: string;
+}
 
 const EMPTY_CELL_SELECTION_SET = new Set<string>();
 
@@ -55,6 +74,9 @@ export function DataGrid<TData>({
 	contextMenu,
 	pasteDialog,
 	onRowAdd: onRowAddProp,
+	fillHandleCell,
+	enableSelectionSummary,
+	selectionSummary,
 	height = 600,
 	stretchColumns = false,
 	adjustLayout = false,
@@ -96,6 +118,31 @@ export function DataGrid<TData>({
 		[onRowAddRef]
 	);
 
+	const gridStyle: GridStyle = { "--grid-height": `${height}px` };
+	const columnStyle: GridColumnStyle = { ...columnSizeVars };
+	useLayoutEffect(() => {
+		const element = dataGridRef.current;
+		if (!element) {
+			return;
+		}
+		for (const [name, size] of Object.entries(columnStyle)) {
+			element.style.setProperty(name, String(size));
+		}
+		return () => {
+			for (const name of Object.keys(columnStyle)) {
+				element.style.removeProperty(name);
+			}
+		};
+	}, [columnStyle, dataGridRef]);
+	const minimumStyle: GridStyle = {
+		"--grid-total-width": `${table.getTotalSize()}px`,
+	};
+	const bodyStyle: GridStyle = {
+		...minimumStyle,
+		"--grid-body-height": `${virtualTotalSize}px`,
+		"--grid-contain": adjustLayout ? "layout paint" : "strict",
+	};
+
 	return (
 		<div
 			data-slot="grid-wrapper"
@@ -114,15 +161,15 @@ export function DataGrid<TData>({
 				aria-colcount={columns.length}
 				aria-label="Data grid"
 				aria-rowcount={rows.length + (onRowAddProp ? 1 : 0)}
-				className="relative grid select-none overflow-auto rounded-md border focus:outline-none"
+				className={cn(
+					"relative grid select-none overflow-auto rounded-md border focus:outline-none",
+					styles.grid
+				)}
 				data-slot="grid"
 				onContextMenu={onDataGridContextMenu}
 				ref={dataGridRef}
 				role="grid"
-				style={{
-					...columnSizeVars,
-					maxHeight: `${height}px`,
-				}}
+				style={gridStyle}
 				tabIndex={0}
 			>
 				{/* `minWidth` is load-bearing, not cosmetic. The scroll container is a
@@ -134,11 +181,14 @@ export function DataGrid<TData>({
 				    already pinned `table.getTotalSize()` for exactly this reason; the
 				    header and body were simply never given the same treatment. */}
 				<div
-					className="sticky top-0 z-10 grid border-b bg-background"
+					className={cn(
+						"sticky top-0 z-10 grid border-b bg-background",
+						styles.minimum
+					)}
 					data-slot="grid-header"
 					ref={headerRef}
 					role="rowgroup"
-					style={{ minWidth: table.getTotalSize() }}
+					style={minimumStyle}
 				>
 					{table.getHeaderGroups().map((headerGroup, rowIndex) => (
 						<div
@@ -167,6 +217,23 @@ export function DataGrid<TData>({
 										isLastColumn,
 									});
 
+								const pinStyle = getColumnPinningStyle({
+									column: header.column,
+									dir,
+								});
+								const cellStyle: GridStyle = {
+									"--data-grid-pin-left": pinStyle["--data-grid-pin-left"],
+									"--data-grid-pin-right": pinStyle["--data-grid-pin-right"],
+									"--data-grid-pin-opacity":
+										pinStyle["--data-grid-pin-opacity"],
+									"--data-grid-pin-position":
+										pinStyle["--data-grid-pin-position"],
+									"--data-grid-pin-shadow": pinStyle["--data-grid-pin-shadow"],
+									"--data-grid-pin-width": pinStyle["--data-grid-pin-width"],
+									"--data-grid-pin-z-index":
+										pinStyle["--data-grid-pin-z-index"],
+									"--grid-cell-width": `calc(var(--header-${header.id}-size) * 1px)`,
+								};
 								return (
 									<div
 										aria-colindex={colIndex + 1}
@@ -179,7 +246,7 @@ export function DataGrid<TData>({
 														? "none"
 														: undefined
 										}
-										className={cn("relative", {
+										className={cn("relative", styles.cell, {
 											grow: stretchColumns && header.column.id !== "select",
 											"border-e":
 												showEndBorder && header.column.id !== "select",
@@ -189,14 +256,12 @@ export function DataGrid<TData>({
 										data-slot="grid-header-cell"
 										key={header.id}
 										role="columnheader"
-										style={{
-											...getColumnPinningStyle({ column: header.column, dir }),
-											width: `calc(var(--header-${header.id}-size) * 1px)`,
-										}}
+										style={cellStyle}
 										tabIndex={-1}
 									>
-										{header.isPlaceholder ? null : typeof header.column
-												.columnDef.header === "function" ? (
+										{header.isPlaceholder ? null : isNativeFunction(
+												header.column.columnDef.header
+											) ? (
 											<div className="size-full px-3 py-1.5">
 												{flexRender(
 													header.column.columnDef.header,
@@ -213,15 +278,10 @@ export function DataGrid<TData>({
 					))}
 				</div>
 				<div
-					className="relative grid"
+					className={cn("relative grid", styles.body)}
 					data-slot="grid-body"
 					role="rowgroup"
-					style={{
-						height: `${virtualTotalSize}px`,
-						// Same total as the header above — see the note there.
-						minWidth: table.getTotalSize(),
-						contain: adjustLayout ? "layout paint" : "strict",
-					}}
+					style={bodyStyle}
 				>
 					{virtualItems.map((virtualItem) => {
 						const row = rows[virtualItem.index];
@@ -243,10 +303,16 @@ export function DataGrid<TData>({
 								activeSearchMatch={isActiveSearchRow ? activeSearchMatch : null}
 								adjustLayout={adjustLayout}
 								cellSelectionKeys={cellSelectionKeys}
+								columnDefs={columns}
 								columnPinning={columnPinning}
 								columnVisibility={columnVisibility}
 								dir={dir}
 								editingCell={editingCell}
+								fillHandleColumnId={
+									fillHandleCell?.rowIndex === virtualItem.index
+										? fillHandleCell.columnId
+										: null
+								}
 								focusedCell={focusedCell}
 								key={row.id}
 								measureElement={measureElement}
@@ -262,7 +328,7 @@ export function DataGrid<TData>({
 						);
 					})}
 				</div>
-				{!readOnly && onRowAdd && (
+				{!readOnly && onRowAddProp && (
 					<div
 						className="sticky bottom-0 z-10 grid border-t bg-background"
 						data-slot="grid-footer"
@@ -277,14 +343,14 @@ export function DataGrid<TData>({
 							tabIndex={-1}
 						>
 							<div
-								className="relative flex h-9 grow items-center bg-muted/30 transition-colors hover:bg-muted/50 focus:bg-muted/50 focus:outline-none"
+								className={cn(
+									"relative flex h-9 grow items-center bg-muted/30 transition-colors hover:bg-muted/50 focus:bg-muted/50 focus:outline-none",
+									styles.add
+								)}
 								onClick={onRowAdd}
 								onKeyDown={onFooterCellKeyDown}
 								role="gridcell"
-								style={{
-									width: table.getTotalSize(),
-									minWidth: table.getTotalSize(),
-								}}
+								style={minimumStyle}
 								tabIndex={0}
 							>
 								<div className="sticky start-0 flex items-center gap-2 px-3 text-muted-foreground">
@@ -296,6 +362,61 @@ export function DataGrid<TData>({
 					</div>
 				)}
 			</div>
+			{enableSelectionSummary && (
+				<DataGridStatusBar
+					rowCount={rows.length}
+					summary={selectionSummary}
+					totalRowCount={table.getCoreRowModel().rows.length}
+				/>
+			)}
 		</div>
+	);
+}
+
+const numberFormat = new Intl.NumberFormat(undefined, {
+	maximumFractionDigits: 4,
+});
+
+function DataGridStatusBar({
+	rowCount,
+	summary,
+	totalRowCount,
+}: {
+	rowCount: number;
+	summary: SelectionSummary | null;
+	totalRowCount: number;
+}) {
+	const rowsLabel =
+		rowCount === totalRowCount
+			? numberFormat.format(rowCount)
+			: `${numberFormat.format(rowCount)} of ${numberFormat.format(totalRowCount)}`;
+	const items: [label: string, value: string][] = summary
+		? [["Count", numberFormat.format(summary.count)]]
+		: [[totalRowCount === 1 ? "Row" : "Rows", rowsLabel]];
+	if (summary && summary.numericCount > 0) {
+		for (const [label, value] of [
+			["Average", summary.average],
+			["Min", summary.min],
+			["Max", summary.max],
+			["Sum", summary.sum],
+		] as const) {
+			if (value !== null) {
+				items.push([label, numberFormat.format(value)]);
+			}
+		}
+	}
+
+	return (
+		<output
+			aria-live="polite"
+			className="flex h-7 items-center justify-end gap-4 px-1 text-muted-foreground text-xs tabular-nums"
+			data-slot="grid-status-bar"
+		>
+			{items.map(([label, value]) => (
+				<span key={label}>
+					{label}: <span className="text-foreground">{value}</span>
+				</span>
+			))}
+		</output>
 	);
 }

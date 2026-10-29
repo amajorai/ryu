@@ -3,7 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import type { FetchLike } from "./client.ts";
+import type { JsonValue } from "./json.ts";
 import type { ActionRuntime } from "./runtime.ts";
 
 interface FixtureRequest {
@@ -34,19 +36,15 @@ const bundlePath = resolve(
 );
 
 interface BundledRunner {
-	executeAction: (options: {
-		environment: Record<string, string | undefined>;
-		fetchImpl: FetchLike;
-		runtime: ActionRuntime;
-		workingDirectory: string;
-	}) => Promise<unknown>;
+	executeAction: typeof import("./runner.ts").executeAction;
 }
 
+// SAFETY: This imports the fresh tsup bundle of runner.ts, whose exported executeAction signature is referenced above.
 const { executeAction: executeBundledAction } = (await import(
 	bundlePath
 )) as BundledRunner;
 
-function jsonResponse(value: unknown, status = 200): Response {
+function jsonResponse(value: JsonValue, status = 200): Response {
 	return new Response(JSON.stringify(value), {
 		headers: { "content-type": "application/json" },
 		status,
@@ -155,7 +153,7 @@ async function runBundle(
 	const exportedEnvironment: Record<string, string> = {};
 	const stdout: string[] = [];
 	const stderr: string[] = [];
-	const environment: Record<string, string | undefined> = {
+	const environment = {
 		...process.env,
 		GITHUB_ACTIONS: "true",
 		GITHUB_STEP_SUMMARY: summaryPath,
@@ -169,7 +167,8 @@ async function runBundle(
 		getInput: (name) => inputs[name] ?? "",
 		info: (message) => stdout.push(message),
 		setOutput: (name, value) => {
-			outputs[name] = typeof value === "string" ? value : JSON.stringify(value);
+			const text = z.string().safeParse(value);
+			outputs[name] = text.success ? text.data : (JSON.stringify(value) ?? "");
 		},
 		setSecret: () => undefined,
 		warning: (message) => stderr.push(message),

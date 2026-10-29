@@ -1,4 +1,4 @@
-//! The double-Shift gesture, as a pure state machine.
+//! Bare-modifier double-tap gestures, as a pure state machine.
 //!
 //! Deliberately free of any OS types so it can be unit-tested: the platform layer
 //! ([`super::mac`]) translates raw events into [`Input`]s and feeds them here, and
@@ -7,15 +7,14 @@
 //! ## Why this is not "two flagsChanged events"
 //!
 //! Typing `Hello World` presses and releases Shift twice within a few hundred
-//! milliseconds. A detector that only watches the Shift bit would fire a capture
+//! milliseconds. A detector that only watches a modifier bit would fire a capture
 //! mid-sentence, over and over. The gesture is a double tap only when **nothing
 //! else happened between the two taps**:
 //!
 //! - a non-modifier key going down cancels (that Shift was a capital letter);
 //! - another modifier joining cancels (that was `⇧⌘K`, someone's shortcut);
-//! - holding Shift rather than tapping it cancels (that was a selection drag);
-//! - the two taps must be the same physical key, so left and right stay distinct
-//!   (macOS keycode 56 vs 60 — the modifier flags alone cannot tell them apart).
+//! - holding the modifier rather than tapping it cancels (that was a selection drag);
+//! - the two taps must be the same physical key, so left and right stay distinct.
 //!
 //! Left and right are reported separately so a future "capture as a prompt"
 //! variant can bind to right-Shift without a second detector.
@@ -24,13 +23,44 @@
 pub const SHIFT_LEFT_KEYCODE: i64 = 56;
 /// macOS virtual keycode for the right Shift key.
 pub const SHIFT_RIGHT_KEYCODE: i64 = 60;
+/// macOS virtual keycode for the left Command key.
+pub const COMMAND_LEFT_KEYCODE: i64 = 55;
+/// macOS virtual keycode for the right Command key.
+pub const COMMAND_RIGHT_KEYCODE: i64 = 54;
+/// macOS virtual keycode for the left Option/Alt key.
+pub const ALT_LEFT_KEYCODE: i64 = 58;
+/// macOS virtual keycode for the right Option/Alt key.
+pub const ALT_RIGHT_KEYCODE: i64 = 61;
 
 /// How long after the first tap the second one still counts. 400ms is a
 /// comfortable deliberate double-tap without being long enough to catch two
 /// unrelated Shifts in ordinary typing.
 pub const DOUBLE_TAP_WINDOW_MS: u64 = 400;
 
-/// Which physical Shift key.
+/// Which modifier owns a detector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Modifier {
+    Shift,
+    Command,
+    Alt,
+}
+
+impl Modifier {
+    /// The macOS modifier and physical side for a virtual keycode.
+    pub fn from_keycode(keycode: i64) -> Option<(Self, Side)> {
+        match keycode {
+            SHIFT_LEFT_KEYCODE => Some((Self::Shift, Side::Left)),
+            SHIFT_RIGHT_KEYCODE => Some((Self::Shift, Side::Right)),
+            COMMAND_LEFT_KEYCODE => Some((Self::Command, Side::Left)),
+            COMMAND_RIGHT_KEYCODE => Some((Self::Command, Side::Right)),
+            ALT_LEFT_KEYCODE => Some((Self::Alt, Side::Left)),
+            ALT_RIGHT_KEYCODE => Some((Self::Alt, Side::Right)),
+            _ => None,
+        }
+    }
+}
+
+/// Which physical side of a modifier key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Left,
@@ -56,6 +86,14 @@ pub enum Input {
     ShiftDown { side: Side, other_modifiers: bool },
     /// A Shift key came back up.
     ShiftUp { side: Side },
+    /// A configurable modifier key went down.
+    ModifierDown {
+        modifier: Modifier,
+        side: Side,
+        other_modifiers: bool,
+    },
+    /// A configurable modifier key came back up.
+    ModifierUp { modifier: Modifier, side: Side },
     /// Any non-modifier key went down.
     KeyDown,
     /// A modifier other than Shift changed state.
@@ -77,6 +115,7 @@ struct Pending {
 /// Feeds on [`Input`]s and emits a [`Trigger`] on a clean double tap.
 #[derive(Debug)]
 pub struct Detector {
+    modifier: Modifier,
     window_ms: u64,
     /// A Shift that is currently down and still eligible to become a tap.
     pending: Option<Pending>,
@@ -86,13 +125,24 @@ pub struct Detector {
 
 impl Default for Detector {
     fn default() -> Self {
-        Self::new(DOUBLE_TAP_WINDOW_MS)
+        Self::for_modifier(Modifier::Shift)
     }
 }
 
 impl Detector {
+    /// Construct the legacy Shift detector with a custom timing window.
     pub fn new(window_ms: u64) -> Self {
+        Self::with_modifier(Modifier::Shift, window_ms)
+    }
+
+    /// Construct a detector for a particular bare modifier.
+    pub fn for_modifier(modifier: Modifier) -> Self {
+        Self::with_modifier(modifier, DOUBLE_TAP_WINDOW_MS)
+    }
+
+    fn with_modifier(modifier: Modifier, window_ms: u64) -> Self {
         Self {
+            modifier,
             window_ms,
             pending: None,
             last_tap: None,
@@ -119,23 +169,40 @@ impl Detector {
             Input::ShiftDown {
                 side,
                 other_modifiers,
-            } => {
-                if other_modifiers {
-                    // Shift joining an existing chord is never a capture.
-                    self.reset();
-                    return None;
-                }
-                self.pending = Some(Pending {
-                    side,
-                    down_at_ms: now_ms,
-                });
-                None
-            }
-            Input::ShiftUp { side } => self.on_shift_up(now_ms, side),
+            } => self.on_modifier_down(now_ms, Modifier::Shift, side, other_modifiers),
+            Input::ShiftUp { side } => self.on_modifier_up(now_ms, Modifier::Shift, side),
+            Input::ModifierDown {
+                modifier,
+                side,
+                other_modifiers,
+            } => self.on_modifier_down(now_ms, modifier, side, other_modifiers),
+            Input::ModifierUp { modifier, side } => self.on_modifier_up(now_ms, modifier, side),
         }
     }
 
-    fn on_shift_up(&mut self, now_ms: u64, side: Side) -> Option<Trigger> {
+    fn on_modifier_down(
+        &mut self,
+        now_ms: u64,
+        modifier: Modifier,
+        side: Side,
+        other_modifiers: bool,
+    ) -> Option<Trigger> {
+        if modifier != self.modifier || other_modifiers {
+            self.reset();
+            return None;
+        }
+        self.pending = Some(Pending {
+            side,
+            down_at_ms: now_ms,
+        });
+        None
+    }
+
+    fn on_modifier_up(&mut self, now_ms: u64, modifier: Modifier, side: Side) -> Option<Trigger> {
+        if modifier != self.modifier {
+            self.reset();
+            return None;
+        }
         let pending = self.pending.take()?;
         if pending.side != side {
             // Both Shifts were down; this is not a clean tap of either.
@@ -348,5 +415,41 @@ mod tests {
         assert_eq!(Side::from_keycode(SHIFT_LEFT_KEYCODE), Some(Side::Left));
         assert_eq!(Side::from_keycode(SHIFT_RIGHT_KEYCODE), Some(Side::Right));
         assert_eq!(Side::from_keycode(0), None);
+    }
+
+    #[test]
+    fn command_detector_fires_on_two_clean_taps() {
+        let mut detector = Detector::for_modifier(Modifier::Command);
+        let tap = |detector: &mut Detector, at: u64| {
+            detector.feed(
+                at,
+                Input::ModifierDown {
+                    modifier: Modifier::Command,
+                    side: Side::Left,
+                    other_modifiers: false,
+                },
+            );
+            detector.feed(
+                at + 40,
+                Input::ModifierUp {
+                    modifier: Modifier::Command,
+                    side: Side::Left,
+                },
+            )
+        };
+        assert_eq!(tap(&mut detector, 0), None);
+        assert_eq!(tap(&mut detector, 200), Some(Trigger { side: Side::Left }));
+    }
+
+    #[test]
+    fn command_and_alt_keycodes_are_distinct() {
+        assert_eq!(
+            Modifier::from_keycode(COMMAND_LEFT_KEYCODE),
+            Some((Modifier::Command, Side::Left))
+        );
+        assert_eq!(
+            Modifier::from_keycode(ALT_RIGHT_KEYCODE),
+            Some((Modifier::Alt, Side::Right))
+        );
     }
 }

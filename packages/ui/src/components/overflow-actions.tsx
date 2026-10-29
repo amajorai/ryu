@@ -20,6 +20,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { isNativeText } from "../lib/native-primitive-observation.ts";
 
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
@@ -34,6 +35,7 @@ export interface OverflowActionItem {
 	id: string;
 	label: ReactNode;
 	onClick?: () => void;
+	pressed?: boolean;
 }
 
 export interface OverflowActionsClassNames {
@@ -91,30 +93,30 @@ const OVERFLOW_ACTION_VARIANTS: Variants = {
 	exit: { opacity: 0, filter: "blur(4px)" },
 };
 
-const TRACK_SIZE_CLASS: Record<OverflowActionsSize, string> = {
+const TRACK_SIZE_CLASS = {
 	sm: "gap-1 p-1 text-xs",
 	md: "gap-1.5 p-1.5 text-sm",
-};
+} satisfies Record<OverflowActionsSize, string>;
 
-const GROUP_GAP_CLASS: Record<OverflowActionsSize, string> = {
+const GROUP_GAP_CLASS = {
 	sm: "gap-1",
 	md: "gap-1.5",
-};
+} satisfies Record<OverflowActionsSize, string>;
 
-const ACTION_SIZE_CLASS: Record<OverflowActionsSize, string> = {
+const ACTION_SIZE_CLASS = {
 	sm: "h-8 min-w-8 gap-1.5 px-3",
 	md: "h-9 min-w-9 gap-2 px-3.5",
-};
+} satisfies Record<OverflowActionsSize, string>;
 
-const TOGGLE_SIZE_CLASS: Record<OverflowActionsSize, string> = {
+const TOGGLE_SIZE_CLASS = {
 	sm: "h-8 w-8",
 	md: "h-9 w-9",
-};
+} satisfies Record<OverflowActionsSize, string>;
 
-const ICON_SIZE_CLASS: Record<OverflowActionsSize, string> = {
+const ICON_SIZE_CLASS = {
 	sm: "h-3.5 w-3.5",
 	md: "h-4 w-4",
-};
+} satisfies Record<OverflowActionsSize, string>;
 
 function useControllableExpanded({
 	expanded,
@@ -347,7 +349,7 @@ function ActionButton({
 	iconClassName?: string;
 	labelClassName?: string;
 }) {
-	const label = typeof item.label === "string" ? item.label : undefined;
+	const label = isNativeText(item.label) ? item.label : undefined;
 	const allowHoverScale = !(reduce || !canHover || item.disabled);
 
 	return (
@@ -364,6 +366,7 @@ function ActionButton({
 		>
 			<button
 				aria-label={item.ariaLabel}
+				aria-pressed={item.pressed}
 				className={cn(
 					"inline-flex shrink-0 items-center justify-center rounded-full bg-background font-medium text-foreground outline-none",
 					"disabled:pointer-events-none disabled:opacity-45",

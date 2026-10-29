@@ -116,9 +116,85 @@ pub fn default_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join(format!("ryu{}", suffix())).join("gateway.toml"))
 }
 
+/// Where the gateway keeps its own data-dir state.
+///
+/// Under Core (`RYU_DIR` set — Core's data dir) each file goes to its slot in
+/// the shared layout (`state/`, `secrets/`, `db/`); a standalone gateway keeps
+/// everything flat in its profile's own `<data_local>/ryu<sfx>/` so a dev
+/// gateway never shares the release gateway's files. `None` only when neither
+/// is resolvable (no platform data dir), which callers degrade gracefully.
+pub enum DataSlot {
+    /// `state/<file>` — JSON state (e.g. the channel pairing store).
+    State,
+    /// `secrets/<file>` — keys and credentials.
+    Secret,
+}
+
+/// Resolve `file` in the gateway's data location (see [`DataSlot`]).
+pub fn data_file(slot: DataSlot, file: &str) -> Option<PathBuf> {
+    data_file_for(
+        std::env::var_os("RYU_DIR")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
+        dirs::data_local_dir(),
+        &suffix(),
+        slot,
+        file,
+    )
+}
+
+fn data_file_for(
+    ryu_dir: Option<PathBuf>,
+    data_local_dir: Option<PathBuf>,
+    suffix: &str,
+    slot: DataSlot,
+    file: &str,
+) -> Option<PathBuf> {
+    use ryu_sidecar_runtime::layout;
+    if let Some(root) = ryu_dir {
+        return Some(match slot {
+            DataSlot::State => layout::state_path(&root, file),
+            DataSlot::Secret => layout::secret_path(&root, file),
+        });
+    }
+    data_local_dir.map(|dir| dir.join(format!("ryu{suffix}")).join(file))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_files_use_the_core_layout_when_managed_and_a_profile_dir_standalone() {
+        let managed = Some(PathBuf::from("/d"));
+        let local = Some(PathBuf::from("/local"));
+        assert_eq!(
+            data_file_for(
+                managed.clone(),
+                local.clone(),
+                "-dev",
+                DataSlot::State,
+                "p.json"
+            ),
+            Some(PathBuf::from("/d/state/p.json"))
+        );
+        assert_eq!(
+            data_file_for(managed, local.clone(), "-dev", DataSlot::Secret, "k"),
+            Some(PathBuf::from("/d/secrets/k"))
+        );
+        assert_eq!(
+            data_file_for(None, local.clone(), "-dev", DataSlot::Secret, "k"),
+            Some(PathBuf::from("/local/ryu-dev/k"))
+        );
+        assert_eq!(
+            data_file_for(None, local, "", DataSlot::State, "p.json"),
+            Some(PathBuf::from("/local/ryu/p.json"))
+        );
+        assert_eq!(
+            data_file_for(None, None, "", DataSlot::State, "p.json"),
+            None
+        );
+    }
 
     // These assert relationships that hold regardless of which profile the test
     // process resolved to (RYU_PROFILE is process-global + cached in a OnceLock, so

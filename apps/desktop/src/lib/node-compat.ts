@@ -13,7 +13,7 @@
 // lockstep (one release train, and a lapsed-updates install pins both), so the
 // real skew is a *remote* node on its own release schedule.
 
-import { assessNode } from "@ryuhq/core-client/node-compat";
+import { assessNode } from "@ryuhq/core-client/node-compat.ts";
 
 export {
 	assessNode,
@@ -26,7 +26,7 @@ export {
 	type NodeCompatibility,
 	type NodeIdentity,
 	STABLE_CHANNEL,
-} from "@ryuhq/core-client/node-compat";
+} from "@ryuhq/core-client/node-compat.ts";
 
 /**
  * Whether the desktop and the node it is driving are on different release

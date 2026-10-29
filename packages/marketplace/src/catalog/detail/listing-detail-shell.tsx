@@ -1,3 +1,4 @@
+import visualStyles from "../../marketplace-visual.module.css";
 // packages/marketplace/src/catalog/detail/listing-detail-shell.tsx
 //
 // THE store listing preview. One layout, every realm, both hosts.
@@ -5,7 +6,7 @@
 // The shape is the one every app store converged on, top to bottom:
 //
 //   ┌──────────────────────────────────────────────────────────────┐
-//   │ HERO — full-bleed wash, icon tile, name + CTA on one row     │
+//   │ HERO — full-bleed wash, icon tile, name + CTA (one row ≥ sm) │
 //   ├──────────────────────────────────────────────────────────────┤
 //   │ STAT STRIP — cells: rating · version · category · …          │
 //   ├──────────────────────────────────────────────────────────────┤
@@ -120,6 +121,14 @@ export function ListingDetailShell({
 // Hero
 // ---------------------------------------------------------------------------
 
+/** What the hero paints for a listing with no banner, no paintable dither, no
+ *  icon background and no caller fallback. A fixed dark ramp rather than a theme
+ *  token, because the copy over it is fixed white in BOTH themes: `bg-muted` (the
+ *  banner's own last resort) is near-white in light theme, which put the title at
+ *  roughly 2:1 contrast on every art-less listing. */
+export const LISTING_HERO_NO_ART_BACKGROUND =
+	"linear-gradient(160deg, oklch(0.36 0 0), oklch(0.2 0 0))";
+
 export function ListingHero({
 	name,
 	nameBadge,
@@ -140,6 +149,8 @@ export function ListingHero({
 	dither,
 	iconBackground,
 	fallback,
+	plain = false,
+	titleAs = "h2",
 }: {
 	name: ReactNode;
 	/** The primary controls — Add/Remove, the like heart — right-aligned on the
@@ -224,9 +235,25 @@ export function ListingHero({
 	banner?: CatalogBanner | null;
 	dither?: CardDither | null;
 	iconBackground?: string | null;
-	/** Flat CSS background when there is neither a banner nor a dither. */
+	/** Flat CSS background when there is neither a banner nor a dither. When it
+	 *  and `iconBackground` are both absent the hero paints
+	 *  {@link LISTING_HERO_NO_ART_BACKGROUND}, never the theme's `bg-muted`: the
+	 *  title and tagline are fixed white, and in light theme `bg-muted` is
+	 *  near-white. */
 	fallback?: string | null;
+	/** The title's element. `h2` inside a dialog, which owns its own `h1`/title;
+	 *  `h1` when the hero IS the page (the web's crawlable listing routes), so the
+	 *  listing's name is that page's top-level heading. */
+	titleAs?: "h1" | "h2";
+	/** The public web's quiet hero: chips are solid outlines (no translucent
+	 *  wash, no blur), and with no `banner` the band paints nothing generated —
+	 *  the title sits on the page background in the foreground colour. Off by
+	 *  default, so the desktop hero renders exactly as before. */
+	plain?: boolean;
 }) {
+	const Title = titleAs;
+	// Plain with no banner: no generated wash, so the copy uses theme colours.
+	const bare = plain && !banner;
 	// The tile is `AppIcon`'s `hero` variant, not a square painted here. It used to
 	// be the latter, and the cost was structural rather than cosmetic: taking the
 	// art as an opaque ReactNode meant every caller resolved its own icon, so 13 of
@@ -236,29 +263,51 @@ export function ListingHero({
 	// glyph, the ring and the counter-direction ramp — while the resolution order,
 	// the dither validation and the icon cache come from the one component.
 	return (
-		<div className="relative h-56 shrink-0 overflow-hidden sm:h-64">
+		// A MINIMUM height, with the copy in flow, rather than a fixed band with the
+		// copy absolutely pinned inside it: on a phone the title row wraps (below),
+		// and a fixed band would clip the top of a taller stack — the listing's name
+		// first. At every width where the stack fits, the band is the same size.
+		<div
+			className={cn(
+				"relative flex shrink-0 flex-col justify-end overflow-hidden bg-background",
+				bare ? null : "min-h-56 sm:min-h-64"
+			)}
+		>
 			{/* `live` — the ONE opt-in to a WebGL context in the catalog. A hero is a
 			    single band per open detail pane, which is the only place an
 			    `animated-gradient` banner can animate without instances evicting each
 			    other's contexts; see the tier + budget note in `dither-banner.tsx`.
 			    Cards and rows call the same component without this prop and get the
 			    static paint. */}
-			<DitherBanner
-				banner={banner}
-				dither={dither}
-				fallback={fallback ?? iconBackground ?? null}
-				live
-			/>
-			{/* Scrim: the wash is author-supplied and can land anywhere on the
-			    lightness range, so the title needs a floor it can read against
-			    rather than relying on the colour being dark. Weighted toward the
-			    BOTTOM two thirds — that is where the title, tagline and chips sit —
-			    so the listing's own art still reads across the top of the band. */}
+			{bare ? null : (
+				<>
+					<DitherBanner
+						banner={banner}
+						dither={dither}
+						fallback={
+							fallback ?? iconBackground ?? LISTING_HERO_NO_ART_BACKGROUND
+						}
+						live
+					/>
+					{/* One ramp keeps white copy readable, then feathers the wash
+					    directly into the detail body's background token at the
+					    bottom edge. */}
+					<div
+						aria-hidden="true"
+						className={cn(
+							"pointer-events-none absolute inset-0",
+							visualStyles.heroScrim
+						)}
+						data-testid="listing-hero-scrim"
+					/>
+				</>
+			)}
 			<div
-				aria-hidden="true"
-				className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/45 to-transparent"
-			/>
-			<div className="absolute inset-0 flex items-end gap-4 p-5 lg:px-7">
+				className={cn(
+					"relative flex items-end gap-4",
+					bare ? "py-2" : "px-5 pt-5 pb-16 lg:px-7"
+				)}
+			>
 				<AppIcon
 					cacheKey={cacheKey}
 					className="size-16 sm:size-20"
@@ -276,18 +325,34 @@ export function ListingHero({
 					variant="hero"
 				/>
 				<div className="min-w-0 flex-1 pb-0.5">
-					{/* `truncate` sits on the INNER span, not the h2: the row has to be a
-					    flex line so `nameBadge` keeps its width while the title alone
-					    gives way. With `truncate` on the h2 the badge was clipped along
-					    with the overflowing name.
+					{/* `truncate` sits on the INNER span, not the heading: the row has to
+					    be a flex line so `nameBadge` keeps its width while the title alone
+					    gives way. With `truncate` on the heading the badge was clipped
+					    along with the overflowing name.
 
-					    The CTA cluster shares this line and is `shrink-0`, so a long name
-					    truncates and the button the dialog exists for never does. */}
-					<div className="flex min-w-0 items-center gap-3">
-						<h2 className="flex min-w-0 flex-1 items-center gap-2 font-medium text-white text-xl drop-shadow-md sm:text-2xl">
-							<span className="truncate">{name}</span>
+					    From `sm` up the CTA cluster shares this line and is `shrink-0`, so
+					    a long name truncates and the button the dialog exists for never
+					    does. Below `sm` the heading takes the whole line and the cluster
+					    wraps under it: on a 375px phone the cluster alone is ~185px of a
+					    ~223px text column, which left the listing's name 2-3 characters
+					    and an ellipsis. */}
+					<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:flex-nowrap">
+						<Title
+							className={cn(
+								"flex min-w-0 grow basis-full items-center gap-2 font-medium text-xl sm:basis-0 sm:text-2xl",
+								bare
+									? "font-heading text-foreground tracking-tight"
+									: "text-white drop-shadow-md"
+							)}
+						>
+							<span
+								className="truncate"
+								title={typeof name === "string" ? name : undefined}
+							>
+								{name}
+							</span>
 							{nameBadge}
-						</h2>
+						</Title>
 						{actions ? (
 							<div className="flex shrink-0 items-center gap-1.5">
 								{actions}
@@ -295,7 +360,14 @@ export function ListingHero({
 						) : null}
 					</div>
 					{tagline ? (
-						<p className="line-clamp-2 text-sm text-white/85 drop-shadow sm:text-[0.9375rem]">
+						<p
+							className={cn(
+								"sm:text-(length:--text-comfortable) line-clamp-2 text-sm",
+								bare
+									? "mt-1 text-muted-foreground"
+									: "text-white/85 drop-shadow"
+							)}
+						>
 							{tagline}
 						</p>
 					) : null}
@@ -304,7 +376,10 @@ export function ListingHero({
 							{statusIcons}
 							{(badges ?? []).map((badge) => (
 								<span
-									className="rounded-full bg-white/15 px-2 py-0.5 font-medium text-[11px] text-white/90 leading-4 backdrop-blur-sm"
+									className={cn(
+										"type-caption rounded-full px-2 py-0.5 font-medium leading-4",
+										plainChipClass(plain, bare)
+									)}
 									key={badge}
 								>
 									{badge}
@@ -316,6 +391,16 @@ export function ListingHero({
 			</div>
 		</div>
 	);
+}
+
+function plainChipClass(plain: boolean, bare: boolean): string {
+	if (bare) {
+		return "border border-border text-muted-foreground";
+	}
+	if (plain) {
+		return "border border-white/50 text-white";
+	}
+	return "bg-white/15 text-white/90 backdrop-blur-sm";
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +443,7 @@ export function ListingStatStrip({ items }: { items: ListingStat[] }) {
 				{items.map((stat) => {
 					const body = (
 						<>
-							<span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+							<span className="type-compact font-medium text-muted-foreground uppercase tracking-wider">
 								{stat.label}
 							</span>
 							{/* The value gets its OWN truncating span rather than `truncate`
@@ -374,10 +459,17 @@ export function ListingStatStrip({ items }: { items: ListingStat[] }) {
 										icon={stat.icon}
 									/>
 								) : null}
-								<span className="truncate">{stat.value}</span>
+								<span
+									className="truncate"
+									title={
+										typeof stat.value === "string" ? stat.value : undefined
+									}
+								>
+									{stat.value}
+								</span>
 							</span>
 							{stat.sub ? (
-								<span className="truncate text-[11px] text-muted-foreground">
+								<span className="type-caption truncate text-muted-foreground">
 									{stat.sub}
 								</span>
 							) : null}

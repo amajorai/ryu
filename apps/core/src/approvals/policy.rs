@@ -15,9 +15,17 @@
 //!         irreversible tools (send/delete/pay/deploy) get HITL on a default
 //!         install. `off` must be an explicit operator choice.
 //!
-//! A "Layer C — Gateway consult" (org-policy layer) has been designed but is NOT
-//! implemented; nothing in this module calls the Gateway. Do not describe it as
-//! an active control until it exists.
+//!   - **Layer C — organization policy consult.** On an org-bound node the
+//!     control plane's effective tool policy (`deniedTools` / `allowedTools`,
+//!     refreshed live by `sidecar::control_plane::run_scope_refresh_loop`) is
+//!     consulted *before* Layers A/B. A tool the organization denies, or one
+//!     outside a non-empty org allowlist, is refused outright: it is never
+//!     queued, because a local approval must not be able to override an
+//!     administrator's decision. Layer C never *adds* a gate for a tool the
+//!     policy allows, and it is a no-op on unbound nodes. The policy has no
+//!     "require approval" rule today, so this conservative deny-only form is the
+//!     whole layer; MCP-server allowlists are enforced at dispatch, where the
+//!     serving server is known.
 //!
 //! ## Risk classification
 //!
@@ -140,6 +148,36 @@ const SPACE_MUTATION_ACTIONS: &[&str] = &[
     "rename_space",
 ];
 
+/// An agent's hosted email address is a public identity: claiming one is
+/// permanent (addresses are never reissued), and sending or replying speaks for
+/// the organization to outside recipients. Gate all four unless the operator
+/// selected the global `off` mode (exact `<namespace>.<action>` match).
+/// `set_address` is refused locally without a service call, so it is not here.
+const AGENT_INBOX_MUTATION_ACTIONS: &[&str] = &[
+    "agent_inbox.claim_email_alias",
+    "agent_inbox.create",
+    "agent_inbox.send",
+    "agent_inbox.reply",
+];
+
+/// `agent_inbox` tools that only read the calling agent's own alias and mail.
+/// Their names contain `email` or `message`, which the smart name heuristic
+/// treats as outbound verbs; reading one's own inbox is not, so smart mode lets
+/// them through. Manual mode still gates them like every other tool.
+const AGENT_INBOX_READ_ACTIONS: &[&str] = &[
+    "agent_inbox.get",
+    "agent_inbox.check_email_alias",
+    "agent_inbox.check_address",
+    "agent_inbox.list_messages",
+    "agent_inbox.read_message",
+    "agent_inbox.get_verification_code",
+];
+
+/// Workspace shell actions that change how Ryu looks for the user rather than
+/// only taking them somewhere. Opening a page stays ungated; switching the whole
+/// interface always asks the user, even under the global `off` mode.
+const WORKSPACE_SHELL_MUTATION_ACTIONS: &[&str] = &["workspace.switch_interface"];
+
 /// Routine CRUD changes what runs in the background, so it is a consequential
 /// mutation even when the action name is not one of the broad outbound verbs.
 const ROUTINE_MUTATION_ACTIONS: &[&str] = &["create", "update", "delete", "run_now"];
@@ -180,6 +218,24 @@ pub fn classify_risk(tool_id: &str) -> Vec<String> {
         .collect()
 }
 
+/// Layer **C** (pure): the organization tool policy verdict for `tool_id`.
+/// Returns the denial reason when the policy refuses the call, `None` when there
+/// is no policy or it allows the call.
+pub fn org_policy_denial(
+    rules: Option<&crate::org_policy::OrgToolRules>,
+    tool_id: &str,
+) -> Option<String> {
+    let rules = rules?;
+    match crate::org_policy::evaluate_tool(
+        rules,
+        &crate::sidecar::mcp::canonical_tool_id(tool_id),
+        None,
+    ) {
+        crate::org_policy::ToolPolicyDecision::Allow => None,
+        crate::org_policy::ToolPolicyDecision::Deny { reason } => Some(reason),
+    }
+}
+
 /// Layers **A + B** (Core-local, pure, synchronous — the fast path). Returns
 /// `Some(risk_tags)` when the call must be gated, `None` when the Core-local
 /// layers permit it (Layer C, the Gateway consult, is ORed in separately by the
@@ -191,12 +247,28 @@ pub fn should_require_approval_local(
     mode: ApprovalMode,
     mode_pref: Option<&str>,
 ) -> Option<Vec<String>> {
-    // Research executes agent-edited native code outside Core's Deno/WASI
+    if crate::runnable::agent_configuration_policy::requires_operator_approval(
+        &crate::sidecar::mcp::canonical_tool_id(tool_id),
+    ) {
+        return Some(vec!["agent-configuration".to_owned()]);
+    }
+    // Research executes agent-edited native code outside Core's JS/WASI
     // sandbox. It is therefore a privileged unsandboxed capability: every
     // attempt needs an operator decision, including when the global approval
     // preference is explicitly `off`.
     if tool_id == "research.run" {
         return Some(vec!["privileged-native-execution".to_owned()]);
+    }
+    // A Ryu Challenges submission publishes a project entry under the user's
+    // own account and identity. Like research.run it is confirmed on every call,
+    // including under an explicit `off`: the agent may draft it, but only the
+    // user decides that it is sent.
+    if crate::sidecar::mcp::canonical_tool_id(tool_id)
+        == crate::sidecar::mcp::challenges_tool::SUBMIT_TOOL_ID
+    {
+        let mut tags = classify_risk(tool_id);
+        tags.push("challenge-submission".to_owned());
+        return Some(tags);
     }
     // Layer A: this agent explicitly gates this tool.
     if agent_approval_tools.iter().any(|t| t == tool_id) {
@@ -204,26 +276,28 @@ pub fn should_require_approval_local(
         tags.push("agent-gated".to_owned());
         return Some(tags);
     }
-    // Layer B′ — Core self-API mutations. A mutating (non-GET) `ryu_api.*` tool
-    // lets an agent drive Ryu itself (create/delete/update Core state), so it is
-    // treated as risky *regardless* of whether the verb heuristic fires — closing
-    // the gap where `put`/`patch` slip past `RISKY_PATTERNS`.
-    //
-    // Unlike ordinary Layer B, this gate reads the *raw* pref (`mode_pref`) rather
-    // than the collapsed [`ApprovalMode`], so it can tell an unset pref from an
-    // explicit `off`. Per the user mandate that mutations need a human in the loop,
-    // it gates whenever the operator has NOT explicitly opted out — i.e. on unset
-    // (`None`), `smart`, and `manual`. The ONE escape hatch is an explicit `off`,
-    // where an operator says "let the agent run unattended". The multi-tenant
-    // safety boundary is still the org-bound *refusal* in `self_api` dispatch (a
-    // shared node rejects CoreApi entirely); this gate is the unbound-node HITL.
+    // Layer B′ — Core self-API mutations and the interface switch. A mutating
+    // (non-GET) `ryu_api.*` tool lets an agent drive Ryu itself (Gateway
+    // routing, budgets, guardrails, model launch settings, installed packages),
+    // and switching the interface changes what the user is looking at. Both
+    // need the person's explicit approval on every call, like `research.run`:
+    // in a live chat that is the in-chat card (`chat_grants`), elsewhere the
+    // Approvals inbox. An explicit `off` does NOT skip it; `off` is for the
+    // agent's ordinary tools, not for letting it reconfigure Ryu unasked. The
+    // multi-tenant boundary is separate: on an org-bound node `self_api`
+    // dispatch checks the person's role before the loopback runs.
     let core_api_opted_out = matches!(
         mode_pref.map(|s| s.trim().to_ascii_lowercase()).as_deref(),
         Some("off")
     );
-    if !core_api_opted_out && crate::self_api::is_mutating(tool_id) {
+    if crate::self_api::is_mutating(tool_id) {
         let mut tags = classify_risk(tool_id);
         tags.push("core-api-mutation".to_owned());
+        return Some(tags);
+    }
+    if WORKSPACE_SHELL_MUTATION_ACTIONS.contains(&action_suffix(tool_id).as_str()) {
+        let mut tags = classify_risk(tool_id);
+        tags.push("workspace-shell-mutation".to_owned());
         return Some(tags);
     }
     // Layer B′ (continued) — DERIVED app-API mutations. A derived tool
@@ -250,8 +324,9 @@ pub fn should_require_approval_local(
     // learn to click through prompts — which is how the real writes stop being
     // read either.
     //
-    // Same escape-hatch semantics as the CoreApi rule, and for the same reason:
-    // gate on unset / `smart` / `manual`, and let ONLY an explicit `off` through.
+    // Unlike the CoreApi rule, an app's own API keeps the `off` escape hatch:
+    // these write the app's data (a note, a contact), not Ryu's configuration.
+    // Gate on unset / `smart` / `manual`, and let ONLY an explicit `off` through.
     if !core_api_opted_out && crate::ext_api::is_mutating(tool_id) {
         let mut tags = classify_risk(tool_id);
         tags.push("ext-api-mutation".to_owned());
@@ -274,6 +349,13 @@ pub fn should_require_approval_local(
         tags.push("routine-mutation".to_owned());
         return Some(tags);
     }
+    if !core_api_opted_out
+        && AGENT_INBOX_MUTATION_ACTIONS.contains(&action_suffix(tool_id).as_str())
+    {
+        let mut tags = classify_risk(tool_id);
+        tags.push("agent-inbox-mutation".to_owned());
+        return Some(tags);
+    }
     if !core_api_opted_out && SPACE_MUTATION_ACTIONS.contains(&action_segment(tool_id).as_str()) {
         let mut tags = classify_risk(tool_id);
         tags.push("spaces-mutation".to_owned());
@@ -288,6 +370,9 @@ pub fn should_require_approval_local(
             Some(tags)
         }
         ApprovalMode::Smart => {
+            if AGENT_INBOX_READ_ACTIONS.contains(&action_suffix(tool_id).as_str()) {
+                return None;
+            }
             let tags = classify_risk(tool_id);
             if tags.is_empty() {
                 None
@@ -301,6 +386,21 @@ pub fn should_require_approval_local(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn org_policy_layer_denies_only_what_the_policy_refuses() {
+        let rules = crate::org_policy::OrgToolRules {
+            allowed_tools: vec!["github.*".to_owned(), "plans.*".to_owned()],
+            denied_tools: vec!["github.delete_*".to_owned()],
+            allowed_mcp_servers: Vec::new(),
+        };
+        assert!(org_policy_denial(None, "github.delete_repo").is_none());
+        assert!(org_policy_denial(Some(&rules), "github.get_repo").is_none());
+        assert!(org_policy_denial(Some(&rules), "github.delete_repo")
+            .is_some_and(|reason| reason.contains("denied")));
+        assert!(org_policy_denial(Some(&rules), "slack.post_message")
+            .is_some_and(|reason| reason.contains("not in your organization's allowed tools")));
+    }
 
     #[test]
     fn mode_parses_case_insensitively_and_defaults_smart() {
@@ -329,6 +429,66 @@ mod tests {
     }
 
     #[test]
+    fn agent_inbox_mutations_gate_unless_explicit_off_and_reads_do_not() {
+        for tool in [
+            "agent_inbox.claim_email_alias",
+            "agent_inbox.create",
+            "agent_inbox.send",
+            "agent_inbox.reply",
+        ] {
+            let tags = should_require_approval_local(&[], tool, ApprovalMode::Smart, Some("smart"))
+                .expect("an address claim or a send must gate under smart");
+            assert!(tags.iter().any(|t| t == "agent-inbox-mutation"), "{tool}");
+            assert!(should_require_approval_local(&[], tool, ApprovalMode::Smart, None).is_some());
+            assert!(
+                should_require_approval_local(&[], tool, ApprovalMode::Off, Some("off")).is_none(),
+                "{tool}"
+            );
+        }
+        for tool in [
+            "agent_inbox.get",
+            "agent_inbox.check_email_alias",
+            "agent_inbox.check_address",
+            "agent_inbox.list_messages",
+            "agent_inbox.read_message",
+            "agent_inbox.get_verification_code",
+            "agent_inbox.set_address",
+        ] {
+            assert!(
+                should_require_approval_local(&[], tool, ApprovalMode::Smart, Some("smart"))
+                    .is_none(),
+                "{tool}"
+            );
+            assert!(
+                should_require_approval_local(&[], tool, ApprovalMode::Manual, Some("manual"))
+                    .is_some(),
+                "manual mode still gates {tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn challenge_submission_always_requires_user_confirmation() {
+        for (mode, pref) in [
+            (ApprovalMode::Smart, None),
+            (ApprovalMode::Smart, Some("smart")),
+            (ApprovalMode::Manual, Some("manual")),
+            (ApprovalMode::Off, Some("off")),
+        ] {
+            let tags = should_require_approval_local(&[], "challenges.submit", mode, pref)
+                .expect("challenges.submit must always be confirmed");
+            assert!(tags.iter().any(|tag| tag == "challenge-submission"));
+        }
+        for read in ["challenges.list", "challenges.get"] {
+            assert!(
+                should_require_approval_local(&[], read, ApprovalMode::Smart, Some("smart"))
+                    .is_none(),
+                "{read}"
+            );
+        }
+    }
+
+    #[test]
     fn routine_mutations_gate_unless_explicit_off() {
         for action in ["create", "update", "delete", "run_now"] {
             let tool = format!("routines.{action}");
@@ -352,6 +512,39 @@ mod tests {
             should_require_approval_local(&[], "routines.create", ApprovalMode::Off, None)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn interface_switch_always_gates_and_page_opens_do_not() {
+        let tags = should_require_approval_local(
+            &[],
+            "workspace.switch_interface",
+            ApprovalMode::Smart,
+            Some("smart"),
+        )
+        .expect("switching the interface must ask the user");
+        assert!(tags.iter().any(|tag| tag == "workspace-shell-mutation"));
+        assert!(should_require_approval_local(
+            &[],
+            "workspace.switch_interface",
+            ApprovalMode::Off,
+            None
+        )
+        .is_some());
+        assert!(should_require_approval_local(
+            &[],
+            "workspace.switch_interface",
+            ApprovalMode::Off,
+            Some("off")
+        )
+        .is_some());
+        assert!(should_require_approval_local(
+            &[],
+            "workspace.open_tab",
+            ApprovalMode::Smart,
+            Some("smart")
+        )
+        .is_none());
     }
 
     /// The headline gate: a derived non-GET tool must gate under `smart`.
@@ -429,8 +622,8 @@ mod tests {
         assert!(crate::ext_api::is_mutating("ryu_ext.crm_contacts"));
     }
 
-    /// Same escape-hatch semantics as the CoreApi rule: the operator has to say
-    /// `off` out loud. Unset and empty are "never chose", not "chose off".
+    /// The `off` escape hatch for app APIs: the operator has to say `off` out
+    /// loud. Unset and empty are "never chose", not "chose off".
     #[test]
     fn derived_mutation_gate_is_disabled_only_by_explicit_off() {
         let put = "ryu_ext.ryu_crm.put_contacts_id";
@@ -522,6 +715,25 @@ mod tests {
     }
 
     #[test]
+    fn agent_configuration_requires_approval_in_every_mode_and_legacy_namespace() {
+        for tool in [
+            "agent_builder.configure_agent",
+            "agent_builder__configure_agent",
+        ] {
+            for (mode, preference) in [
+                (ApprovalMode::Off, Some("off")),
+                (ApprovalMode::Smart, Some("smart")),
+                (ApprovalMode::Manual, Some("manual")),
+                (ApprovalMode::Smart, None),
+            ] {
+                let tags = should_require_approval_local(&[], tool, mode, preference)
+                    .expect("agent configuration always requires operator review");
+                assert!(tags.iter().any(|tag| tag == "agent-configuration"));
+            }
+        }
+    }
+
+    #[test]
     fn off_mode_gates_nothing_without_agent_layer() {
         assert!(should_require_approval_local(
             &[],
@@ -562,22 +774,29 @@ mod tests {
     }
 
     #[test]
-    fn core_api_mutation_gates_in_smart_and_manual_but_not_explicit_off() {
+    fn core_api_mutation_gates_in_every_mode_including_explicit_off() {
         // A PUT self-API tool: the verb heuristic would NOT catch it, but the
-        // CoreApi-mutation rule must — in both smart and manual.
-        let put = "ryu_api.put_api_agents_id";
-        assert!(
-            should_require_approval_local(&[], put, ApprovalMode::Smart, Some("smart")).is_some()
-        );
-        assert!(
-            should_require_approval_local(&[], put, ApprovalMode::Manual, Some("manual")).is_some()
-        );
-        // An explicit `off` is the ONE escape hatch.
-        assert!(should_require_approval_local(&[], put, ApprovalMode::Off, Some("off")).is_none());
-        // The tag is present so the approval card can explain why.
-        let tags = should_require_approval_local(&[], put, ApprovalMode::Smart, Some("smart"))
-            .expect("gated in smart");
-        assert!(tags.iter().any(|t| t == "core-api-mutation"));
+        // CoreApi-mutation rule must, in every mode.
+        let put = "ryu_api.put_api_gateway_config";
+        for (mode, pref) in [
+            (ApprovalMode::Smart, Some("smart")),
+            (ApprovalMode::Manual, Some("manual")),
+            (ApprovalMode::Off, Some("off")),
+            (ApprovalMode::Off, None),
+        ] {
+            let tags = should_require_approval_local(&[], put, mode, pref)
+                .expect("changing Ryu itself always needs the person's approval");
+            // The tag is present so the approval card can explain why.
+            assert!(tags.iter().any(|t| t == "core-api-mutation"), "{pref:?}");
+        }
+        // Reads stay ungated, so looking around never prompts.
+        assert!(should_require_approval_local(
+            &[],
+            "ryu_api.get_api_gateway_config",
+            ApprovalMode::Off,
+            Some("off")
+        )
+        .is_none());
     }
 
     #[test]

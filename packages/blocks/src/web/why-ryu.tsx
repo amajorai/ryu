@@ -41,7 +41,7 @@ export default function WhyRyu() {
 					</StaggerLines>
 					<div className="mt-8 flex flex-col gap-3 sm:flex-row">
 						<Link
-							className={cn(buttonVariants({ variant: "default" }))}
+							className={cn(buttonVariants({ variant: "mono" }))}
 							href="https://cal.com/amajor/ryu-demo"
 							rel="noopener noreferrer"
 							target="_blank"

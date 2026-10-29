@@ -50,7 +50,10 @@ export function SkillListRow({
 			type="button"
 		>
 			<div className="flex items-center gap-1.5">
-				<span className="flex-1 truncate font-medium text-sm">
+				<span
+					className="flex-1 truncate font-medium text-sm"
+					title={skill.name}
+				>
 					{skill.name}
 				</span>
 				{skill.installed ? (
@@ -67,7 +70,12 @@ export function SkillListRow({
 					)
 				) : null}
 			</div>
-			<p className="truncate text-muted-foreground text-xs">{skill.source}</p>
+			<p
+				className="truncate text-muted-foreground text-xs"
+				title={skill.source}
+			>
+				{skill.source}
+			</p>
 			{skill.installsLabel ? (
 				<div className="mt-1 flex items-center gap-1 text-muted-foreground text-xs">
 					<HugeiconsIcon className="size-3" icon={Download01Icon} />
@@ -104,7 +112,7 @@ export function SkillInstallControl({
 	}
 	return (
 		<div className="flex shrink-0 items-center gap-3">
-			<Badge className="gap-1" variant="secondary">
+			<Badge variant="secondary">
 				<HugeiconsIcon
 					className="size-3.5 text-status-success"
 					icon={CheckmarkCircle02Icon}

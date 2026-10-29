@@ -10,6 +10,7 @@ import {
 	passwordStrengthLabel,
 	passwordStrengthScore,
 } from "@ryu/auth/lib/password-policy";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { motion, useReducedMotion } from "motion/react";
 
@@ -22,6 +23,7 @@ export function PasswordStrengthMeter({
 	idPrefix?: string;
 	value: string;
 }) {
+	const tl = useLiteralMessages();
 	const score = passwordStrengthScore(value);
 	const label = passwordStrengthLabel(score);
 	const reduceMotion = useReducedMotion();
@@ -51,7 +53,7 @@ export function PasswordStrengthMeter({
 			</div>
 
 			<div
-				aria-label={`Password strength: ${label}`}
+				aria-label={tl("Password strength: {label}", { label })}
 				aria-valuemax={PASSWORD_RULES.length}
 				aria-valuemin={0}
 				aria-valuenow={score}

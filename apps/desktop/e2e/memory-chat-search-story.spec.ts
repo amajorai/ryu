@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { pluginDocumentSchema } from "../src/lib/api/plugin-wire-values.ts";
 
 const STORY_URL = "/memory-chat-search-story.html";
 
@@ -15,7 +16,7 @@ test.beforeEach(async ({ page }) => {
 			});
 			return;
 		}
-		const body = route.request().postDataJSON() as { value?: string };
+		const body = pluginDocumentSchema.parse(route.request().postDataJSON());
 		chatMemoryEnabled = body.value !== "false";
 		await route.fulfill({
 			contentType: "application/json",

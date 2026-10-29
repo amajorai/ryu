@@ -1,8 +1,9 @@
-import { type ContextType, useState } from "react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { SpaceScopeMenu } from "../../src/components/layout/AppSidebar.tsx";
 import { TabsContext } from "../../src/contexts/TabsContext.tsx";
 import type { Space } from "../../src/lib/api/spaces.ts";
+import { createTabsProofContext } from "./tabs-proof-context.ts";
 import "../../src/index.css";
 
 const INITIAL_SPACE: Space = {
@@ -20,9 +21,9 @@ const INITIAL_SPACE: Space = {
 function Story() {
 	const [space, setSpace] = useState(INITIAL_SPACE);
 	const [status, setStatus] = useState("Ready");
-	const tabsContext = {
+	const tabsContext = createTabsProofContext({
 		updateTabsIconWhere: () => undefined,
-	} as unknown as NonNullable<ContextType<typeof TabsContext>>;
+	});
 
 	return (
 		<TabsContext.Provider value={tabsContext}>

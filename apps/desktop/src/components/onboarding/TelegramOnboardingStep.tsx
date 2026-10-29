@@ -1,10 +1,11 @@
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding";
-import { Button } from "@ryu/ui/components/button";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
+import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { type ReactNode, useState } from "react";
 import { TelegramManagedBotPanel } from "@/src/components/channels/TelegramManagedBotPanel.tsx";
+import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import type { ManagedBotPairingRequest } from "@/src/lib/api/managed-bots.ts";
 
@@ -35,7 +36,7 @@ function Shell({
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						<RyuOnboardingAvatar />
 					</div>
 					<PageHeader stagger={false} subtitle={subtitle} title={title} />
 				</StaggerReveal>
@@ -117,6 +118,7 @@ export function TelegramOnboardingStep({
 	/** Open the hosted-bot Telegram Login hand-off in the user's browser. */
 	onUseTelegramLogin: () => void;
 }) {
+	const tl = useLiteralMessages();
 	const [ready, setReady] = useState(false);
 	const [unsupported, setUnsupported] = useState<string | null>(null);
 	const [telegramLoginOpened, setTelegramLoginOpened] = useState(false);
@@ -158,8 +160,10 @@ export function TelegramOnboardingStep({
 				>
 					<div>
 						<p className="font-medium text-sm">
-							{existingChannelCount} configured channel
-							{existingChannelCount === 1 ? "" : "s"} found
+							{tl(
+								"{existingChannelCount, plural, one {# configured channel} other {# configured channels}} found",
+								{ existingChannelCount }
+							)}
 						</p>
 						<p className="mt-1 text-muted-foreground text-sm">
 							No duplicate Telegram bot will be created. Manage your channels

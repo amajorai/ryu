@@ -66,4 +66,6 @@ export default defineConfig({
 		port: 5199,
 		strictPort: true,
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

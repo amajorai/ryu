@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { PiCatalog } from "@/src/lib/api/pi-config.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -18,35 +18,76 @@ mock.module("./useActiveNode.ts", () => ({ useActiveNode: () => node }));
 const reads: Array<{
 	kind: string;
 	signal: AbortSignal;
-	resolve: (value: unknown) => void;
+	resolve: <TValue>(value: TValue) => void;
 }> = [];
+const realUsage = await import("@ryuhq/core-client/usage.ts");
 mock.module("@/src/lib/api/usage.ts", () => ({
-	supportsUsage: (id: string) => id === "acp:codex",
-	fetchAgentUsage: (_target: unknown, _id: string, signal: AbortSignal) =>
-		new Promise((resolve) => reads.push({ kind: "agent", signal, resolve })),
-	fetchProviderAccountUsage: (
-		_target: unknown,
-		_provider: string,
-		_account: string,
+	subscriptionQueryKeys: realUsage.subscriptionQueryKeys,
+	fetchConversationProviderAccount: () => new Promise(() => undefined),
+	supportsUsage: (id: string) => id === "acp:codex" || id === "claude-pro-max",
+	usageSnapshotFromReading: (reading: { providerId: string }) => ({
+		agentId: reading.providerId,
+	}),
+	fetchAgentUsage: (
+		_target: Parameters<
+			typeof import("@/src/lib/api/usage.ts").fetchAgentUsage
+		>[0],
+		_id: string,
 		signal: AbortSignal
+	) => new Promise((resolve) => reads.push({ kind: "agent", signal, resolve })),
+	fetchSubscriptionsSnapshot: (
+		_target: Parameters<
+			typeof import("@/src/lib/api/usage.ts").fetchSubscriptionsSnapshot
+		>[0],
+		opts: { signal: AbortSignal; usage: string }
 	) =>
-		new Promise((resolve) => reads.push({ kind: "account", signal, resolve })),
+		new Promise((resolve) =>
+			reads.push({
+				kind: `subscriptions:${opts.usage}`,
+				signal: opts.signal,
+				resolve,
+			})
+		),
+	fetchProviderUsageReading: (
+		_target: Parameters<
+			typeof import("@/src/lib/api/usage.ts").fetchProviderUsageReading
+		>[0],
+		opts: { signal: AbortSignal }
+	) =>
+		new Promise((resolve) =>
+			reads.push({ kind: "reading", signal: opts.signal, resolve })
+		),
 }));
 const { useAgentUsage } = await import("./useAgentUsage.ts");
 const { useSubscriptionUsage } = await import("./useSubscriptionUsage.ts");
-const catalog = {
+const catalog: PiCatalog = {
+	apiTypes: [],
+	thinkingLevels: [],
 	providers: [
 		{
 			id: "codex",
 			label: "Codex",
 			authKind: "subscription",
 			managed: false,
+			api: "openai-responses",
+			authEnv: "",
+			configured: true,
+			custom: false,
+			routing: "direct",
+			suggestedModels: [],
 			accounts: [
-				{ accountId: "one", label: "One", kind: "oauth", active: true },
+				{
+					accountId: "one",
+					label: "One",
+					kind: "oauth",
+					active: true,
+					gatewayActive: false,
+					updatedAt: 0,
+				},
 			],
 		},
 	],
-} as unknown as PiCatalog;
+};
 const client = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
@@ -86,23 +127,28 @@ test("inactive usage observers stay quiet, cancel on hide and separate credentia
 	expect(reads[0].signal.aborted).toBe(true);
 	await render(true, true);
 	expect(reads).toHaveLength(3);
-	const accountQueryFns = client
-		.getQueryCache()
-		.getAll()
-		.filter((query) => query.queryKey[0] === "provider-account-usage")
-		.map((query) => query.options.queryFn);
-	await render(true, true);
-	expect(reads).toHaveLength(3);
-	expect(
+	const snapshotQueries = () =>
 		client
 			.getQueryCache()
 			.getAll()
-			.filter((query) => query.queryKey[0] === "provider-account-usage")
-			.map((query) => query.options.queryFn)
-	).toEqual(accountQueryFns);
+			.filter(
+				(query) =>
+					query.queryKey[0] === "subscriptions" &&
+					query.queryKey.at(-1) === "refresh"
+			);
+	expect(snapshotQueries()).toHaveLength(1);
+	await render(true, true);
+	expect(reads).toHaveLength(3);
+	expect(snapshotQueries()).toHaveLength(1);
+	const settle = (read: (typeof reads)[number]) =>
+		read.resolve(
+			read.kind.startsWith("subscriptions")
+				? { version: 1, generatedAt: "", providers: [] }
+				: { available: true }
+		);
 	await act(async () => {
-		reads[1].resolve({ available: true });
-		reads[2].resolve({ available: true });
+		settle(reads[1]);
+		settle(reads[2]);
 		await Bun.sleep(10);
 	});
 	node = { ...node, token: "two" };
@@ -113,7 +159,7 @@ test("inactive usage observers stay quiet, cancel on hide and separate credentia
 			.slice(3)
 			.map((read) => read.kind)
 			.sort()
-	).toEqual(["account", "agent"]);
+	).toEqual(["agent", "subscriptions:refresh"]);
 	node = { ...node, userJwt: "caller-two" };
 	await render(true, true);
 	expect(reads).toHaveLength(7);
@@ -132,7 +178,7 @@ test("inactive usage observers stay quiet, cancel on hide and separate credentia
 	await render(false, true);
 	expect(reads).toHaveLength(8);
 	await act(async () => {
-		reads[7].resolve({ available: true });
+		settle(reads[7]);
 		await Bun.sleep(10);
 	});
 	accountTabActive = false;
@@ -140,4 +186,44 @@ test("inactive usage observers stay quiet, cancel on hide and separate credentia
 	accountTabActive = true;
 	await render(false, true);
 	expect(reads).toHaveLength(8);
+});
+
+function ProviderAgent() {
+	useAgentUsage("claude-pro-max");
+	return null;
+}
+test("a Ryu provider id reads its active account, never the agent route", async () => {
+	reads.length = 0;
+	const providerRoot = createRoot(document.createElement("div"));
+	await act(() =>
+		providerRoot.render(
+			<QueryClientProvider client={client}>
+				<ProviderAgent />
+			</QueryClientProvider>
+		)
+	);
+	await act(async () => {
+		await Bun.sleep(10);
+	});
+	expect(reads.map((read) => read.kind)).toEqual(["subscriptions:none"]);
+	await act(async () => {
+		reads[0].resolve({
+			version: 1,
+			generatedAt: "",
+			providers: [
+				{
+					providerId: "claude-pro-max",
+					kind: "subscription",
+					capabilities: { accountUsage: true },
+					accounts: [],
+				},
+			],
+		});
+		await Bun.sleep(10);
+	});
+	expect(reads.map((read) => read.kind)).toEqual([
+		"subscriptions:none",
+		"reading",
+	]);
+	await act(() => providerRoot.unmount());
 });

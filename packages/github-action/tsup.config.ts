@@ -10,7 +10,7 @@ export default defineConfig({
 	dts: true,
 	format: ["cjs"],
 	minify: false,
-	noExternal: ["@actions/core"],
+	noExternal: ["@actions/core", "@ryuhq/core-client", "zod"],
 	platform: "node",
 	splitting: false,
 	target: "node20",

@@ -7,6 +7,11 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ModelOption } from "@/components/agent-elements/types.ts";
+import {
+	getAcpConfig,
+	getAcpMode,
+	getAcpModel,
+} from "@/src/lib/acp-selections.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import {
 	type ChatResponseMode,
@@ -141,7 +146,9 @@ export function useBuilderRuntime(storageKey: string): BuilderRuntime {
 		const interfaceLevel = readInterfaceLevel();
 		const routingFields = modelRoutingFieldsForInterface(interfaceLevel, {
 			model: isAcp ? null : override,
-			acpModel: isAcp ? override : null,
+			acpModel: isAcp ? (getAcpModel(id) ?? override) : null,
+			acpMode: isAcp ? getAcpMode(id) : null,
+			acpConfig: isAcp ? getAcpConfig(id) : undefined,
 			simpleApprovalDefaults: simpleApprovalDefaultsRef.current,
 		});
 		return {

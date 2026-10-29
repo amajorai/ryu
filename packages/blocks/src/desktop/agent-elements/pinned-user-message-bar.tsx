@@ -1,17 +1,22 @@
+import {
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import type { UIMessage } from "ai";
+import type { TextUIPart, UIMessage } from "ai";
 import { memo } from "react";
 import { CollapsibleText } from "./collapsible-text.tsx";
+import { stripQuestionAnswerMarkers } from "./question/async-question.ts";
 import { splitLeadingQuote } from "./quote.tsx";
 
 function getMessageText(message: UIMessage): string {
 	return (message.parts ?? [])
 		.filter(
-			(part): part is { type: "text"; text: string } =>
-				typeof part === "object" &&
+			(part): part is TextUIPart =>
+				isNativeObjectLike(part) &&
 				part !== null &&
-				(part as { type?: string }).type === "text" &&
-				typeof (part as { text?: unknown }).text === "string"
+				part.type === "text" &&
+				isNativeText(part.text)
 		)
 		.map((part) => part.text)
 		.join("");
@@ -26,7 +31,7 @@ export const PinnedUserMessageBar = memo(function PinnedUserMessageBar({
 	onScrollTo?: () => void;
 	className?: string;
 }) {
-	const text = getMessageText(message);
+	const text = stripQuestionAnswerMarkers(getMessageText(message));
 	const { body } = splitLeadingQuote(text);
 	const display = body || text;
 

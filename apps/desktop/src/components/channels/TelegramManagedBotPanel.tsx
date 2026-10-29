@@ -14,9 +14,9 @@
 // component never receives it (see lib/api/managed-bots.ts). That is why the
 // nonce is safe to put in a QR code the user may hold up to a phone camera.
 
-import { Button } from "@ryu/ui/components/button";
-import { ExpandableQRCode } from "@ryu/ui/components/qr-code";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { ExpandableQRCode } from "@ryu/ui/components/qr-code.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
@@ -48,6 +48,25 @@ const MAX_POLL_FAILURES = 4;
 const TICK_MS = 1000;
 const SECONDS_PER_MINUTE = 60;
 const QR_SIZE = 168;
+
+function safeTelegramDeepLink(value: string): string | null {
+	try {
+		const url = new URL(value);
+		if (
+			url.protocol === "https:" &&
+			new Set(["t.me", "telegram.me", "www.t.me", "www.telegram.me"]).has(
+				url.hostname
+			)
+		) {
+			return url.href;
+		}
+		return url.protocol === "tg:" && url.hostname === "resolve"
+			? url.href
+			: null;
+	} catch {
+		return null;
+	}
+}
 
 type Phase =
 	| "idle"
@@ -258,7 +277,7 @@ export function TelegramManagedBotPanel({
 					setPhase("completing");
 					onReadyRef.current(status.token);
 				})
-				.catch((error: unknown) => {
+				.catch((error) => {
 					if (stopped || controller.signal.aborted) {
 						return;
 					}
@@ -342,6 +361,19 @@ export function TelegramManagedBotPanel({
 		form.proactive_opening === true && !form.proactive_target?.trim();
 
 	if (phase === "waiting" && pairing) {
+		const deepLink = safeTelegramDeepLink(pairing.deep_link);
+		if (!deepLink) {
+			return (
+				<div className="space-y-3">
+					<p className="text-status-destructive text-xs">
+						Telegram returned an invalid pairing link. Cancel and start again.
+					</p>
+					<Button onClick={cancel} size="xs" variant="ghost">
+						Cancel
+					</Button>
+				</div>
+			);
+		}
 		return (
 			<div className="space-y-3">
 				<p className="text-muted-foreground text-xs">
@@ -349,14 +381,14 @@ export function TelegramManagedBotPanel({
 					bot you own, and Ryu never sees your Telegram login or @BotFather.
 				</p>
 				<div className="flex flex-col items-center gap-3">
-					<ExpandableQRCode size={QR_SIZE} value={pairing.deep_link} />
+					<ExpandableQRCode size={QR_SIZE} value={deepLink} />
 					<a
 						className="break-all text-center text-sm underline hover:text-foreground"
-						href={pairing.deep_link}
+						href={deepLink}
 						rel="noopener noreferrer"
 						target="_blank"
 					>
-						{pairing.deep_link}
+						{deepLink}
 					</a>
 				</div>
 				<div className="flex items-center justify-between gap-2">
@@ -415,7 +447,7 @@ export function TelegramManagedBotPanel({
 						Connect @{created.botUsername}
 					</Button>
 					<Button onClick={refuse} size="sm" variant="ghost">
-						Not mine — discard
+						Not mine, discard
 					</Button>
 				</div>
 			</div>

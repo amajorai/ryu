@@ -1,5 +1,7 @@
 import { createPublicKey, verify as verifySignature } from "node:crypto";
+import { z } from "zod";
 import {
+	ENTERPRISE_CAPABILITIES,
 	type EnterpriseCapability,
 	normalizeEnterpriseCapabilities,
 } from "./enterprise-entitlement-policy.ts";
@@ -16,25 +18,39 @@ export interface SelfHostedEnterpriseLicense {
 	plan: "enterprise" | "enterprise-plus" | "dedicated";
 }
 
-function decodeJson(value: string): Record<string, unknown> | null {
+const headerSchema = z.object({
+	alg: z.literal("RS256"),
+});
+const payloadSchema = z.object({
+	organizationId: z.string().min(1),
+	plan: z.enum(["enterprise", "enterprise-plus", "dedicated"]),
+	aud: z.literal(LICENSE_AUDIENCE).optional(),
+	iss: z.literal("ryu").optional(),
+	iat: z.number().optional(),
+	exp: z.number().optional(),
+	nbf: z.number().optional(),
+	capabilities: z.preprocess(
+		(value) => normalizeEnterpriseCapabilities(value),
+		z.array(z.enum(ENTERPRISE_CAPABILITIES))
+	),
+	licenseId: z.string().nullable().catch(null),
+});
+function decodeJson<S extends z.ZodType>(
+	value: string,
+	schema: S
+): z.output<S> | null {
 	try {
-		const parsed: unknown = JSON.parse(
-			Buffer.from(value, "base64url").toString("utf8")
+		const parsed = schema.safeParse(
+			JSON.parse(Buffer.from(value, "base64url").toString("utf8"))
 		);
-		return typeof parsed === "object" && parsed !== null
-			? (parsed as Record<string, unknown>)
-			: null;
+		return parsed.success ? parsed.data : null;
 	} catch {
 		return null;
 	}
 }
-
-function unixDate(value: unknown): Date | null | undefined {
+function unixDate(value: number | undefined): Date | null | undefined {
 	if (value === undefined) {
 		return undefined;
-	}
-	if (typeof value !== "number" || !Number.isFinite(value)) {
-		return null;
 	}
 	const date = new Date(value * 1000);
 	return Number.isNaN(date.getTime()) ? null : date;
@@ -58,33 +74,12 @@ export function verifySelfHostedEnterpriseLicense(
 	if (!(encodedHeader && encodedPayload && encodedSignature)) {
 		return null;
 	}
-	const header = decodeJson(encodedHeader);
-	const payload = decodeJson(encodedPayload);
-	if (
-		!(header && payload) ||
-		header.alg !== "RS256" ||
-		(header.typ !== undefined && header.typ !== "JWT")
-	) {
+	const header = decodeJson(encodedHeader, headerSchema);
+	const payload = decodeJson(encodedPayload, payloadSchema);
+	if (!(header && payload)) {
 		return null;
 	}
-
-	const organizationId = payload.organizationId;
-	const plan = payload.plan;
-	if (
-		typeof organizationId !== "string" ||
-		organizationId.length === 0 ||
-		(plan !== "enterprise" &&
-			plan !== "enterprise-plus" &&
-			plan !== "dedicated")
-	) {
-		return null;
-	}
-	if (payload.aud !== undefined && payload.aud !== LICENSE_AUDIENCE) {
-		return null;
-	}
-	if (payload.iss !== undefined && payload.iss !== "ryu") {
-		return null;
-	}
+	const { organizationId, plan } = payload;
 
 	const issuedAt = unixDate(payload.iat);
 	const expiresAt = unixDate(payload.exp);
@@ -131,7 +126,7 @@ export function verifySelfHostedEnterpriseLicense(
 		capabilities,
 		expiresAt: expiresAt ?? null,
 		issuedAt: issuedAt ?? null,
-		licenseId: typeof payload.licenseId === "string" ? payload.licenseId : null,
+		licenseId: payload.licenseId,
 		organizationId,
 		plan,
 	};

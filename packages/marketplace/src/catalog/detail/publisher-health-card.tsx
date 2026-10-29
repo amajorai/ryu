@@ -4,6 +4,7 @@ import {
 	InformationCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Card,
@@ -12,6 +13,8 @@ import {
 	CardTitle,
 } from "@ryu/ui/components/card.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import type { CSSProperties } from "react";
+import visualStyles from "../../marketplace-visual.module.css";
 import {
 	calculatePublisherHealth,
 	type PublisherHealthInput,
@@ -34,12 +37,16 @@ export function PublisherHealthCard({
 	className,
 	...input
 }: PublisherHealthInput & { className?: string }) {
+	const tl = useLiteralMessages();
 	const health = calculatePublisherHealth(input);
+	const progressStyle: HealthProgressStyle = {
+		"--marketplace-width": `${health.score}%`,
+	};
 	return (
-		<Card className={cn("bg-muted/20", className)}>
-			<CardHeader className="pb-3">
+		<Card appearance="publisher-health" className={className}>
+			<CardHeader spacing="compact">
 				<div className="flex items-center justify-between gap-3">
-					<CardTitle className="text-sm">Publisher health</CardTitle>
+					<CardTitle variant="section">Publisher health</CardTitle>
 					<Badge
 						variant={
 							input.publisherTrust === "dotted" ? "outline" : "secondary"
@@ -49,7 +56,9 @@ export function PublisherHealthCard({
 					</Badge>
 				</div>
 				<div
-					aria-label={`Publisher health score ${health.score} out of 100`}
+					aria-label={tl("Publisher health score {score} out of 100", {
+						score: health.score,
+					})}
 					aria-valuemax={100}
 					aria-valuemin={0}
 					aria-valuenow={health.score}
@@ -58,14 +67,15 @@ export function PublisherHealthCard({
 				>
 					<div
 						className={cn(
-							"h-full rounded-full transition-[width]",
+							"h-full rounded-full",
+							visualStyles.progress,
 							health.score >= 70
 								? "bg-success"
 								: health.score >= 40
 									? "bg-warning"
 									: "bg-destructive"
 						)}
-						style={{ width: `${health.score}%` }}
+						style={progressStyle}
 					/>
 				</div>
 				<p className="text-muted-foreground text-xs">
@@ -73,7 +83,7 @@ export function PublisherHealthCard({
 					installing.
 				</p>
 			</CardHeader>
-			<CardContent className="grid gap-2 pt-0">
+			<CardContent layout="signal-grid" topSpacing="flush">
 				{health.signals.map((signal) => (
 					<div className="flex items-center gap-2 text-xs" key={signal.label}>
 						<HugeiconsIcon
@@ -94,4 +104,8 @@ export function PublisherHealthCard({
 			</CardContent>
 		</Card>
 	);
+}
+
+interface HealthProgressStyle extends CSSProperties {
+	"--marketplace-width": string;
 }

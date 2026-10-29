@@ -1,3 +1,4 @@
+import { createFetchFixture } from "./test-support/http-fixture.ts";
 // packages/core-client/src/pure-helpers.test.ts
 //
 // Pure-logic unit tests for the small deterministic helpers scattered across the
@@ -22,7 +23,7 @@ import { isInFlight, isTerminal } from "./downloads.ts";
 import { generateGatewayKey } from "./gateway.ts";
 import { isLocalEngine } from "./inference.ts";
 import { normalizeMeshStatus } from "./mesh.ts";
-import { type DependencyError, describeDependencyError } from "./plugins.ts";
+import { describeDependencyError } from "./plugins.ts";
 import { updateCheckFailed } from "./updates.ts";
 import { voiceWsUrl } from "./voice-session.ts";
 
@@ -277,7 +278,7 @@ describe("describeDependencyError", () => {
 		expect(
 			describeDependencyError({
 				code: "future_variant",
-			} as unknown as DependencyError)
+			})
 		).toBe("This change conflicts with the current plugin dependencies.");
 	});
 });
@@ -308,6 +309,15 @@ describe("chat URL + headers", () => {
 		expect(chatHeaders(target())).toEqual({});
 	});
 
+	test("chatHeaders keeps the user identity header for shared nodes", () => {
+		expect(
+			chatHeaders({ token: "t", url: "http://127.0.0.1:7980", userJwt: "jwt" })
+		).toEqual({
+			Authorization: "Bearer t",
+			"x-ryu-user-jwt": "jwt",
+		});
+	});
+
 	test("chatStreamResumeUrl encodes conversation ids", () => {
 		expect(chatStreamResumeUrl(target(), "thread/a b")).toBe(
 			"http://127.0.0.1:7980/api/chat/stream/resume/thread%2Fa%20b"
@@ -317,10 +327,12 @@ describe("chat URL + headers", () => {
 	test("cancelChat posts the conversation id and returns the server result", async () => {
 		const originalFetch = globalThis.fetch;
 		let body = "";
-		globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
-			body = String(init?.body ?? "");
-			return Promise.resolve(Response.json({ cancelled: true }));
-		}) as unknown as typeof fetch;
+		globalThis.fetch = createFetchFixture(
+			(_input: RequestInfo | URL, init?: RequestInit) => {
+				body = String(init?.body ?? "");
+				return Promise.resolve(Response.json({ cancelled: true }));
+			}
+		);
 		try {
 			expect(await cancelChat(target(), "c1")).toBe(true);
 			expect(body).toBe(JSON.stringify({ conversation_id: "c1" }));
@@ -332,10 +344,12 @@ describe("chat URL + headers", () => {
 	test("answerNowChat posts the native turn control request", async () => {
 		const originalFetch = globalThis.fetch;
 		let body = "";
-		globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
-			body = String(init?.body ?? "");
-			return Promise.resolve(Response.json({ accepted: true }));
-		}) as unknown as typeof fetch;
+		globalThis.fetch = createFetchFixture(
+			(_input: RequestInfo | URL, init?: RequestInit) => {
+				body = String(init?.body ?? "");
+				return Promise.resolve(Response.json({ accepted: true }));
+			}
+		);
 		try {
 			expect(await answerNowChat(target(), "c1", "turn_1")).toBe(true);
 			expect(body).toBe(
@@ -352,8 +366,9 @@ describe("chat URL + headers", () => {
 
 	test("suggestion failures degrade to an empty list", async () => {
 		const originalFetch = globalThis.fetch;
-		globalThis.fetch = (() =>
-			Promise.reject(new Error("offline"))) as unknown as typeof fetch;
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.reject(new Error("offline"))
+		);
 		try {
 			expect(await fetchNextPromptSuggestions(target(), "c1")).toEqual([]);
 		} finally {

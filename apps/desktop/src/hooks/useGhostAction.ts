@@ -14,7 +14,8 @@
 // The two-step confirm + execute design keeps the confirmation gate in the UI
 // layer (the dialog) without passing a boolean flag down into the API client.
 
-import { useCallback, useRef, useState } from "react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	callGhostAction,
@@ -59,9 +60,26 @@ export function useGhostAction(target: ApiTarget): UseGhostActionResult {
 
 	// Ref mirrors `pending` so `execute` always reads the latest confirmed action
 	// without needing to capture `state` in the closure (which would go stale).
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const pendingRef = useRef<GhostActionInput | null>(null);
 
+	const generation = useRef(0);
+	const executing = useRef(false);
+	useEffect(() => {
+		generation.current += 1;
+		pendingRef.current = null;
+		executing.current = false;
+		setState({ error: null, executing: false, pending: null, result: null });
+		return () => {
+			generation.current += 1;
+		};
+	}, [target.url, target.token, target.userJwt]);
 	const confirm = useCallback((input: GhostActionInput) => {
+		if (executing.current) {
+			return;
+		}
 		pendingRef.current = input;
 		setState({
 			error: null,
@@ -74,10 +92,13 @@ export function useGhostAction(target: ApiTarget): UseGhostActionResult {
 	const execute = useCallback(
 		async (agentId: string) => {
 			const action = pendingRef.current;
-			if (!action) {
+			if (!action || executing.current) {
 				return;
 			}
 
+			pendingRef.current = null;
+			executing.current = true;
+			const activeGeneration = generation.current;
 			setState((prev) => ({
 				...prev,
 				error: null,
@@ -87,6 +108,10 @@ export function useGhostAction(target: ApiTarget): UseGhostActionResult {
 
 			try {
 				const res = await callGhostAction(target, agentId, action);
+				if (activeGeneration !== generation.current) {
+					return;
+				}
+				executing.current = false;
 				setState((prev) => ({
 					...prev,
 					error: null,
@@ -94,10 +119,14 @@ export function useGhostAction(target: ApiTarget): UseGhostActionResult {
 					result: res,
 				}));
 			} catch (err) {
+				if (activeGeneration !== generation.current) {
+					return;
+				}
+				executing.current = false;
 				const message = err instanceof Error ? err.message : String(err);
 				setState((prev) => ({
 					...prev,
-					error: `Ghost action failed: ${message}`,
+					error: tlRef.current("Ghost action failed: {message}", { message }),
 					executing: false,
 					result: null,
 				}));
@@ -107,6 +136,8 @@ export function useGhostAction(target: ApiTarget): UseGhostActionResult {
 	);
 
 	const reset = useCallback(() => {
+		generation.current += 1;
+		executing.current = false;
 		pendingRef.current = null;
 		setState({ error: null, executing: false, pending: null, result: null });
 	}, []);

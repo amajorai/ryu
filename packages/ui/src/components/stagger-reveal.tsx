@@ -6,12 +6,11 @@ import {
 	cloneElement,
 	Fragment,
 	isValidElement,
-	type ReactElement,
 	type ReactNode,
 	useEffect,
 	useState,
 } from "react";
-
+import { nativeRevealCloneProps } from "../lib/native-reveal-clone-props.mjs";
 import { cn } from "../lib/utils.ts";
 
 /**
@@ -30,9 +29,13 @@ const DEFAULT_STEP_MS = STAGGER_STEP_MS;
 // ms so the eye lands on the first line first. `transition-[...]` enumerates the
 // exact properties (not `all`) so unrelated style changes don't ride in.
 const LINE_BASE =
-	"transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+	"[transition-delay:var(--reveal-delay)] transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 const LINE_HIDDEN = "translate-y-3 opacity-0 blur-[3px]";
 const LINE_SHOWN = "translate-y-0 opacity-100 blur-[0px]";
+
+interface StaggerRevealStyle extends CSSProperties {
+	"--reveal-delay": string;
+}
 
 interface StaggerRevealProps {
 	children: ReactNode;
@@ -56,11 +59,6 @@ interface StaggerRevealProps {
 	 * off when the lines are grid cells carrying `col-span-*`.
 	 */
 	wrap?: boolean;
-}
-
-interface StyledProps {
-	className?: string;
-	style?: CSSProperties;
 }
 
 /**
@@ -92,9 +90,11 @@ export function StaggerReveal({
 	// against the top-level children ("two children with the same key, `.0`").
 	const lines: { node: ReactNode; key: string }[] = [];
 	for (const child of Children.toArray(children)) {
-		if (isValidElement(child) && child.type === Fragment) {
-			const fragmentChildren = (child.props as { children?: ReactNode })
-				.children;
+		if (
+			isValidElement<React.ComponentProps<typeof Fragment>>(child) &&
+			child.type === Fragment
+		) {
+			const fragmentChildren = child.props.children;
 			for (const inner of Children.toArray(fragmentChildren)) {
 				const innerKey = isValidElement(inner) ? inner.key : null;
 				lines.push({
@@ -110,8 +110,8 @@ export function StaggerReveal({
 
 	return lines.map(({ node, key }, index) => {
 		const revealClass = cn(LINE_BASE, shown ? LINE_SHOWN : LINE_HIDDEN);
-		const revealStyle: CSSProperties = {
-			transitionDelay: shown ? `${startDelay + index * step}ms` : "0ms",
+		const revealStyle: StaggerRevealStyle = {
+			"--reveal-delay": shown ? `${startDelay + index * step}ms` : "0ms",
 		};
 
 		if (wrap) {
@@ -125,11 +125,15 @@ export function StaggerReveal({
 		if (!isValidElement(node)) {
 			return node;
 		}
-		const element = node as ReactElement<StyledProps>;
-		return cloneElement(element, {
+		const cloneStyle: StaggerRevealStyle = {
+			"--reveal-delay": revealStyle["--reveal-delay"],
+		};
+		const cloneProps = nativeRevealCloneProps(
+			node,
 			key,
-			className: cn(revealClass, element.props.className),
-			style: { ...element.props.style, ...revealStyle },
-		});
+			revealClass,
+			cloneStyle
+		);
+		return cloneElement(node, cloneProps);
 	});
 }

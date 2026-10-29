@@ -1,8 +1,10 @@
 // apps/core/src/catalog/mod.rs
 
 pub mod cache;
+pub mod docker;
 pub mod github;
 pub mod npm;
+pub mod pypi;
 pub mod registry;
 
 use crate::sidecar::download_manager::VersionStore;
@@ -11,8 +13,18 @@ use cache::VersionCache;
 use registry::{required_platforms, static_registry, supported_on_node, SidecarSource};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
+
+/// Connect bound for one catalog version lookup request.
+const CATALOG_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Total bound for one catalog version lookup request.
+const CATALOG_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// Bound for one source's whole lookup (a Docker Hub lookup is several
+/// requests), so one stalled upstream cannot hang `GET /api/catalog`.
+const CATALOG_SOURCE_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Serialize)]
 pub struct CatalogItem {
@@ -32,6 +44,11 @@ pub struct CatalogItem {
     /// and CPU arch. Authoritative: a client (which may be a remote desktop) must
     /// disable install/enable when this is `false`, regardless of its own OS.
     pub supported: bool,
+    /// Plain-language reason THIS node can't run the entry (OS, CPU arch, or
+    /// macOS version), or `None` when `supported`. Clients render it verbatim
+    /// rather than rebuilding a message from `platforms`, which can't express
+    /// the arch or OS-version parts of the gate.
+    pub unsupported_reason: Option<String>,
     /// Whether a reinstall would actually move this entry to a newer build.
     ///
     /// Computed HERE rather than client-side (`installed != latest`) because only
@@ -46,13 +63,32 @@ pub struct CatalogItem {
 pub struct CatalogManager {
     client: reqwest::Client,
     cache: Arc<Mutex<VersionCache>>,
+    /// Single-flight for the sidecar version refresh: concurrent stale reads
+    /// wait for one fan-out instead of each launching their own, which would
+    /// exhaust GitHub's unauthenticated budget the update check also uses.
+    refresh: Mutex<()>,
+    /// Whether refreshed versions are written back to `catalog-cache.json`.
+    /// Off for test managers, so their stub versions never reach the real data
+    /// dir's cache that a running node reads.
+    persist: bool,
 }
 
 impl CatalogManager {
     pub fn new() -> Self {
+        Self::with_cache(VersionCache::load(), true)
+    }
+
+    fn with_cache(cache: VersionCache, persist: bool) -> Self {
+        let client = reqwest::Client::builder()
+            .connect_timeout(CATALOG_CONNECT_TIMEOUT)
+            .timeout(CATALOG_REQUEST_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            client: reqwest::Client::new(),
-            cache: Arc::new(Mutex::new(VersionCache::load())),
+            client,
+            cache: Arc::new(Mutex::new(cache)),
+            refresh: Mutex::new(()),
+            persist,
         }
     }
 
@@ -122,7 +158,7 @@ impl CatalogManager {
                         (Some(installed), Some(latest)) => {
                             registry::is_comparable_version(installed)
                                 && registry::is_comparable_version(latest)
-                                && installed != latest
+                                && registry::update_differs(installed, latest)
                         }
                         _ => false,
                     };
@@ -142,54 +178,114 @@ impl CatalogManager {
                         .map(|p| (*p).to_string())
                         .collect(),
                     supported,
+                    unsupported_reason: registry::platform_requirement(entry.name)
+                        .map(str::to_string),
                     update_available,
                 }
             })
             .collect()
     }
 
+    /// Latest npm version of an agent package, cached for an hour under `key`.
+    ///
+    /// Shares this manager's HTTP client and in-memory cache, so the agent
+    /// catalog's concurrent per-agent lookups reuse connections and never race
+    /// each other (or the sidecar refresh) on `catalog-cache.json`. The lock is
+    /// released during the fetch so agents resolve in parallel.
+    pub async fn npm_latest_cached(&self, key: &str, package: &str) -> Option<String> {
+        if let Some(version) = self.cache.lock().await.get_fresh_entry(key) {
+            return Some(version.clone());
+        }
+        let latest = tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            npm::fetch_latest_version(&self.client, package),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)?;
+        let mut cache = self.cache.lock().await;
+        cache.set_entry(key, latest.clone());
+        if self.persist {
+            let _ = cache.save();
+        }
+        Some(latest)
+    }
+
     /// Returns latest versions from cache, fetching from remote if stale.
     async fn resolve_versions(&self) -> HashMap<String, String> {
-        let mut cache = self.cache.lock().await;
-        if cache.is_fresh() {
-            return cache.versions.clone();
+        let client = self.client.clone();
+        self.resolve_versions_with(move |source| fetch_source_version(client.clone(), source))
+            .await
+    }
+
+    /// [`Self::resolve_versions`] with the per-source lookup injected, so the
+    /// single-flight and the per-source bound are testable without the network.
+    async fn resolve_versions_with<F, Fut>(&self, fetch: F) -> HashMap<String, String>
+    where
+        F: Fn(SidecarSource) -> Fut,
+        Fut: Future<Output = Option<String>> + Send + 'static,
+    {
+        if let Some(versions) = self.fresh_versions().await {
+            return versions;
         }
+        let _refresh = self.refresh.lock().await;
+        // A concurrent caller may have refreshed while this one waited.
+        if let Some(versions) = self.fresh_versions().await {
+            return versions;
+        }
+        // The cache lock is not held across the network fetches below, so agent
+        // version lookups sharing this cache are not stalled by a refresh.
 
-        // Fetch versions for github and npm sources concurrently
-        let entries = static_registry();
+        // Fetch versions for every source (GitHub, npm, Docker Hub, PyPI) concurrently
         let mut tasks = Vec::new();
-
-        for entry in &entries {
-            let client = self.client.clone();
+        for entry in static_registry() {
             let name = entry.name.to_string();
-            let source = entry.source.clone();
+            let lookup = fetch(entry.source.clone());
             tasks.push(tokio::spawn(async move {
-                let version = match source {
-                    SidecarSource::Github { repo } => {
-                        github::fetch_latest_version(&client, repo).await.ok()
-                    }
-                    SidecarSource::Npm { package } => {
-                        npm::fetch_latest_version(&client, package).await.ok()
-                    }
-                    // Docker and Pip version resolution not yet implemented
-                    _ => None,
-                };
+                let version = tokio::time::timeout(CATALOG_SOURCE_TIMEOUT, lookup)
+                    .await
+                    .ok()
+                    .flatten();
                 (name, version)
             }));
         }
 
-        let mut versions = cache.versions.clone();
+        let mut fetched = Vec::new();
         for task in tasks {
             if let Ok((name, Some(version))) = task.await {
-                versions.insert(name, version);
+                fetched.push((name, version));
             }
         }
 
-        cache.versions = versions.clone();
+        let mut cache = self.cache.lock().await;
+        for (name, version) in fetched {
+            cache.set(name, version);
+        }
         cache.mark_fresh();
-        let _ = cache.save();
+        if self.persist {
+            let _ = cache.save();
+        }
 
-        versions
+        cache.versions.clone()
+    }
+
+    async fn fresh_versions(&self) -> Option<HashMap<String, String>> {
+        let cache = self.cache.lock().await;
+        cache.is_fresh().then(|| cache.versions.clone())
+    }
+}
+
+/// Latest upstream version for one catalog source, or `None` when the lookup
+/// fails.
+async fn fetch_source_version(client: reqwest::Client, source: SidecarSource) -> Option<String> {
+    match source {
+        SidecarSource::Github { repo } => github::fetch_latest_version(&client, repo).await.ok(),
+        SidecarSource::Npm { package } => npm::fetch_latest_version(&client, package).await.ok(),
+        SidecarSource::Docker { image } => docker::fetch_latest_version(&client, image)
+            .await
+            .ok()
+            .flatten(),
+        SidecarSource::Pip { package } => pypi::fetch_latest_version(&client, package).await.ok(),
     }
 }
 
@@ -217,6 +313,64 @@ mod tests {
         // counts must stay in lock-step — assert against the registry length
         // rather than a magic number that drifts when entries are added.
         assert_eq!(items.len(), super::registry::static_registry().len());
+    }
+
+    #[tokio::test]
+    async fn concurrent_stale_refreshes_fetch_each_source_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let manager = CatalogManager::with_cache(VersionCache::default(), false);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let fetch = |_source: SidecarSource| {
+            let calls = Arc::clone(&calls);
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Some("v1".to_owned())
+            }
+        };
+        let (first, second) = tokio::join!(
+            manager.resolve_versions_with(fetch),
+            manager.resolve_versions_with(fetch)
+        );
+        let sources = static_registry().len();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            sources,
+            "one fan-out, not two"
+        );
+        assert_eq!(first.len(), sources);
+        assert_eq!(first, second);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_source_does_not_hang_the_refresh() {
+        let manager = CatalogManager::with_cache(VersionCache::default(), false);
+        let stalled = static_registry()
+            .into_iter()
+            .find(|entry| matches!(entry.source, SidecarSource::Github { .. }))
+            .expect("a GitHub-sourced entry");
+        let SidecarSource::Github { repo: stalled_repo } = stalled.source else {
+            unreachable!("filtered to GitHub sources");
+        };
+        let versions = manager
+            .resolve_versions_with(move |source| async move {
+                if matches!(source, SidecarSource::Github { repo } if repo == stalled_repo) {
+                    std::future::pending::<()>().await;
+                }
+                Some("v1".to_owned())
+            })
+            .await;
+        assert!(!versions.contains_key(stalled.name));
+        for entry in static_registry() {
+            let is_stalled =
+                matches!(entry.source, SidecarSource::Github { repo } if repo == stalled_repo);
+            assert_eq!(
+                versions.contains_key(entry.name),
+                !is_stalled,
+                "{}",
+                entry.name
+            );
+        }
     }
 
     #[tokio::test]

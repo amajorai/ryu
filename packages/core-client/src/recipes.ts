@@ -7,7 +7,165 @@
 // replays it forever. All logic is in Core; this is a thin transport layer over
 // the shared {@link request} plumbing (base URL + bearer come from the node).
 
+import { z } from "zod";
+import {
+	type AppJsonValue,
+	appJsonValueSchema,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+
+function recipeResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+function recipeMap<S extends z.ZodType>(entry: S) {
+	const fields = z.record(z.string(), entry);
+	return z.custom<z.output<typeof fields>>(
+		(value) =>
+			fields.safeParse(value).success &&
+			Object.values(new Object(value)).every(
+				(item) => entry.safeParse(item).success
+			)
+	);
+}
+const recipeLocatorSchema = recipeResponse(
+	z.object({
+		app: z.string().nullish(),
+		dom_class: z.string().nullish(),
+		dom_id: z.string().nullish(),
+		identifier: z.string().nullish(),
+		query: z.string().nullish(),
+		role: z.string().nullish(),
+	})
+);
+const recipeWaitSchema = recipeResponse(
+	z.object({
+		condition: z.string(),
+		target: recipeLocatorSchema.nullish(),
+		value: z.string().nullish(),
+		timeout: z.number().nullish(),
+	})
+);
+const recipeParamSchema = recipeResponse(
+	z.object({
+		description: z.string(),
+		required: z.boolean().nullish(),
+		type: z.string(),
+	})
+);
+const recipeStepSchema = recipeResponse(
+	z.object({
+		action: z.string(),
+		id: z.number(),
+		note: z.string().nullish(),
+		on_failure: z.string().nullish(),
+		params: recipeMap(z.string()).nullish(),
+		target: recipeLocatorSchema.nullish(),
+		wait_after: recipeWaitSchema.nullish(),
+	})
+);
+export const recipeResponseSchema = recipeResponse(
+	z.object({
+		schema_version: z.number(),
+		name: z.string(),
+		description: z.string(),
+		app: z.string().nullish(),
+		params: recipeMap(recipeParamSchema).nullish(),
+		preconditions: recipeResponse(
+			z.object({
+				app_running: z.string().nullish(),
+				url_contains: z.string().nullish(),
+			})
+		).nullish(),
+		steps: z.array(recipeStepSchema),
+		on_failure: z.string().nullish(),
+	})
+);
+const recipeSummarySchema = recipeResponse(
+	z.object({
+		app: z.string().nullable(),
+		description: z.string(),
+		name: z.string(),
+		params: z.array(z.string()),
+		step_count: z.number(),
+	})
+);
+const recipeListResponseSchema = recipeResponse(
+	z.object({ recipes: z.array(recipeSummarySchema).nullish() })
+);
+const recipeGetResponseSchema = recipeResponse(
+	z.object({ recipe: recipeResponseSchema })
+);
+const recipeSaveResponseSchema = recipeResponse(
+	z.object({
+		name: z.string(),
+		saved: z.boolean(),
+		recipe: recipeResponseSchema,
+	})
+);
+const recipeDeleteResponseSchema = recipeResponse(
+	z.object({ name: z.string(), deleted: z.boolean() })
+);
+const recipeStepResultSchema = recipeResponse(
+	z.object({
+		action: z.string(),
+		duration_ms: z.number(),
+		error: z.string().nullish(),
+		note: z.string().nullish(),
+		step_id: z.number(),
+		success: z.boolean(),
+	})
+);
+export const recipeRunResultResponseSchema = recipeResponse(
+	z.object({
+		error: z.string().nullish(),
+		recipe_name: z.string(),
+		step_results: z.array(recipeStepResultSchema),
+		steps_completed: z.number(),
+		success: z.boolean(),
+		total_steps: z.number(),
+	})
+);
+const recipeRunResponseSchema = recipeResponse(
+	z.object({ result: recipeRunResultResponseSchema })
+);
+const learnedEventSchema = recipeResponse(
+	z.object({
+		app_name: z.string().nullish(),
+		element_id: z.string().nullish(),
+		element_name: z.string().nullish(),
+		element_role: z.string().nullish(),
+		event_type: z.string(),
+		key: z.string().nullish(),
+		ts_ms: z.number(),
+		x: z.number().nullish(),
+		y: z.number().nullish(),
+	})
+);
+export const recordingStateResponseSchema = recipeResponse(
+	z.object({
+		recording: z.boolean(),
+		started_at: z.string().optional(),
+		status: appJsonValueSchema.optional(),
+		info: appJsonValueSchema.optional(),
+		task: z.string().optional(),
+	})
+);
+export const recordingStopResponseSchema = recipeResponse(
+	z.object({
+		draft: recipeResponseSchema.optional(),
+		event_count: z.number(),
+		events: z.array(learnedEventSchema),
+		recording: z.literal(false),
+		started_at: z.string(),
+		suggestion: z.string().optional(),
+		task: z.string(),
+	})
+);
 
 /** A recipe row in the list view (summary form). */
 export interface RecipeSummary {
@@ -22,7 +180,7 @@ export interface RecipeSummary {
 /** A recipe parameter declaration. */
 export interface RecipeParam {
 	description: string;
-	required?: boolean;
+	required?: boolean | null;
 	type: string;
 }
 
@@ -36,6 +194,14 @@ export interface RecipeLocator {
 	role?: string | null;
 }
 
+/** A full native wait condition declared on a recipe step. */
+export interface RecipeWaitCondition {
+	condition: string;
+	target?: RecipeLocator | null;
+	timeout?: number | null;
+	value?: string | null;
+}
+
 /** A single recorded step. */
 export interface RecipeStep {
 	action: string;
@@ -44,6 +210,7 @@ export interface RecipeStep {
 	on_failure?: string | null;
 	params?: Record<string, string> | null;
 	target?: RecipeLocator | null;
+	wait_after?: RecipeWaitCondition | null;
 }
 
 /** A full recipe definition (ghost-os v2 schema). */
@@ -83,10 +250,12 @@ export interface RecipeRunResult {
 
 /** Live recording status. */
 export interface RecordingState {
+	/** Native ghost recorder-start information. */
+	info?: AppJsonValue;
 	recording: boolean;
 	started_at?: string;
 	/** Raw `ghost_learn_status` payload while recording (event count, elapsed). */
-	status?: unknown;
+	status?: AppJsonValue;
 	task?: string;
 }
 
@@ -119,9 +288,11 @@ export interface RecordingStopResult {
 }
 
 export async function listRecipes(target: ApiTarget): Promise<RecipeSummary[]> {
-	const json = await request<{ recipes?: RecipeSummary[] }>(
+	const json = await request(
 		target,
-		"/api/recipes"
+		"/api/recipes",
+		{},
+		recipeListResponseSchema
 	);
 	return json.recipes ?? [];
 }
@@ -130,9 +301,11 @@ export async function getRecipe(
 	target: ApiTarget,
 	name: string
 ): Promise<Recipe> {
-	const json = await request<{ recipe: Recipe }>(
+	const json = await request(
 		target,
-		`/api/recipes/${encodeURIComponent(name)}`
+		`/api/recipes/${encodeURIComponent(name)}`,
+		{},
+		recipeGetResponseSchema
 	);
 	return json.recipe;
 }
@@ -141,10 +314,15 @@ export async function saveRecipe(
 	target: ApiTarget,
 	recipe: Recipe
 ): Promise<string> {
-	const json = await request<{ name: string }>(target, "/api/recipes", {
-		method: "POST",
-		body: { recipe },
-	});
+	const json = await request(
+		target,
+		"/api/recipes",
+		{
+			method: "POST",
+			body: { recipe },
+		},
+		recipeSaveResponseSchema
+	);
 	return json.name;
 }
 
@@ -152,9 +330,14 @@ export async function deleteRecipe(
 	target: ApiTarget,
 	name: string
 ): Promise<void> {
-	await request<unknown>(target, `/api/recipes/${encodeURIComponent(name)}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/api/recipes/${encodeURIComponent(name)}`,
+		{
+			method: "DELETE",
+		},
+		recipeDeleteResponseSchema
+	);
 }
 
 export async function runRecipe(
@@ -162,10 +345,11 @@ export async function runRecipe(
 	name: string,
 	params: Record<string, string>
 ): Promise<RecipeRunResult> {
-	const json = await request<{ result: RecipeRunResult }>(
+	const json = await request(
 		target,
 		`/api/recipes/${encodeURIComponent(name)}/run`,
-		{ method: "POST", body: { params } }
+		{ method: "POST", body: { params } },
+		recipeRunResponseSchema
 	);
 	return json.result;
 }
@@ -237,24 +421,35 @@ export async function startRecording(
 	target: ApiTarget,
 	task: string
 ): Promise<RecordingState> {
-	return await request<RecordingState>(target, "/api/recipes/record/start", {
-		method: "POST",
-		body: { task },
-	});
+	return await request(
+		target,
+		"/api/recipes/record/start",
+		{
+			method: "POST",
+			body: { task },
+		},
+		recordingStateResponseSchema
+	);
 }
 
 export async function getRecordingStatus(
 	target: ApiTarget
 ): Promise<RecordingState> {
-	return await request<RecordingState>(target, "/api/recipes/record/status");
+	return await request(
+		target,
+		"/api/recipes/record/status",
+		{},
+		recordingStateResponseSchema
+	);
 }
 
 export async function stopRecording(
 	target: ApiTarget
 ): Promise<RecordingStopResult> {
-	return await request<RecordingStopResult>(
+	return await request(
 		target,
 		"/api/recipes/record/stop",
-		{ method: "POST" }
+		{ method: "POST" },
+		recordingStopResponseSchema
 	);
 }

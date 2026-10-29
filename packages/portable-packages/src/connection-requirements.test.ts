@@ -167,3 +167,68 @@ test("rejects credential-shaped fields and values before normalization", () => {
 		})
 	).toThrow("credential-shaped");
 });
+
+test("preserves cycle diagnostics and checks credentials beyond repeated graph nodes", () => {
+	interface CyclicDeclaration {
+		metadata?: CyclicDeclaration;
+		password?: string;
+		provider: string;
+	}
+	const declaration: CyclicDeclaration = { provider: "github" };
+	declaration.metadata = declaration;
+	expect(() => normalizeConnectionRequirements(declaration)).toThrow(
+		"contains a cyclic value"
+	);
+	declaration.password = "private";
+	expect(() => normalizeConnectionRequirements(declaration)).toThrow(
+		"credential-shaped fields and values are not allowed"
+	);
+	expect(() =>
+		normalizeConnectionRequirements(
+			JSON.parse('{"connections":["github"],"__proto__":{"token":""}}')
+		)
+	).toThrow("credential-shaped fields and values are not allowed");
+});
+
+test("uses native inherited getter receivers without claiming inherited declaration ownership", () => {
+	class Requirement {
+		readonly #provider = "github";
+		get provider() {
+			return this.#provider;
+		}
+	}
+	expect(
+		normalizeConnectionRequirements([new Requirement()])[0]?.provider
+	).toBe("github");
+	expect(normalizeConnectionRequirements(new Requirement())).toEqual([]);
+});
+
+test("preserves native Map and function status providers and invalid-status fallback", () => {
+	const declarations = [{ provider: "github", required: true }];
+	const mapped = deriveConnectionChecklist(
+		declarations,
+		new Map([["github", { state: "optional" }]])
+	);
+	expect(mapped.items[0]?.state).toBe("needs_connection");
+	const supplied = deriveConnectionChecklist(declarations, () => ({
+		state: "connected",
+		message: " Ready ",
+	}));
+	expect(supplied.items[0]?.message).toBe("Ready");
+	expect(supplied.items[0]?.state).toBe("connected");
+});
+
+test("nested metadata has linear connection-validation cost", () => {
+	let metadata = {};
+	for (let i = 0; i < 400; i++) {
+		metadata = { metadata };
+	}
+	const started = performance.now();
+	expect(
+		normalizePackageConnectionRequirements({
+			connections: [],
+			descriptor: metadata,
+		})
+	).toEqual([]);
+	expect(performance.now() - started).toBeLessThan(500);
+});

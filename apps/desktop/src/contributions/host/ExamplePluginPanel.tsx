@@ -24,7 +24,7 @@ import { fetchAgents } from "@/src/lib/api/agents.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
-function readHostThemeTokens(): Record<string, string> {
+function readHostThemeTokens() {
 	return readCompanionThemeTokens(undefined, {
 		includeStoredPreferences: true,
 	});
@@ -50,9 +50,9 @@ export function ExamplePluginPanel() {
 	// One nonce per mount. Host-generated, never plugin/user input.
 	const nonce = useMemo(
 		() =>
-			typeof crypto?.randomUUID === "function"
-				? crypto.randomUUID()
-				: `nonce-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+			globalThis.crypto === undefined
+				? `nonce-${Date.now()}-${Math.round(Math.random() * 1e9)}`
+				: crypto.randomUUID(),
 		[]
 	);
 	const srcdoc = useMemo(

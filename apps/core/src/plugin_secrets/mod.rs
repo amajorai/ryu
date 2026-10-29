@@ -64,12 +64,22 @@
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use ryu_channel_contracts::credential_scope::{CredentialLevel, LADDER};
 use ryu_crypto::FieldCipher;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
+
+pub mod kv;
+pub mod kv_meta;
+pub mod migrate;
+
+pub use kv::{
+    Generator, KvFolder, KvFolderReplace, KvFolderState, SecretCoords, SecretMetadata,
+    SecretMetadataPatch, SecretStatus, VersionSource, WriteOptions, WriteRequest,
+};
 
 fn now_millis() -> i64 {
     SystemTime::now()
@@ -143,6 +153,25 @@ impl SecretScope {
             _ => None,
         }
     }
+
+    /// The vault scope for a contract level. The vault has no project level,
+    /// so `project` is skipped; the match is exhaustive so a new contract
+    /// level forces an explicit decision here.
+    pub const fn from_credential_level(level: CredentialLevel) -> Option<Self> {
+        match level {
+            CredentialLevel::User => Some(Self::User),
+            CredentialLevel::Node => Some(Self::Node),
+            CredentialLevel::Project => None,
+            CredentialLevel::Team => Some(Self::Team),
+            CredentialLevel::Org => Some(Self::Org),
+        }
+    }
+
+    /// Vault resolution precedence, most specific first, derived from the
+    /// contract [`LADDER`] restricted to the levels the vault stores.
+    pub fn precedence() -> impl Iterator<Item = Self> {
+        LADDER.into_iter().filter_map(Self::from_credential_level)
+    }
 }
 
 /// Optional consumer binding for a vault value. An absent binding is usable by
@@ -189,6 +218,22 @@ pub struct VaultSecretInfo {
     pub scope_id: String,
     pub binding: Option<SecretBinding>,
     pub updated_at: i64,
+    /// Environment slug (`default` for pre-environment values).
+    pub environment: String,
+    /// Normalized folder path (`/` for the root).
+    pub path: String,
+    /// Current version number (1-based).
+    pub version: i64,
+    pub metadata: kv::SecretMetadata,
+    pub created_at: i64,
+    pub created_by: Option<String>,
+    pub updated_by: Option<String>,
+    /// Epoch millis of the last value change (rotation clock).
+    pub rotated_at: i64,
+    /// Epoch millis of a soft delete; `None` while live.
+    pub deleted_at: Option<i64>,
+    /// Metadata check-and-set counter; bumped on every metadata change.
+    pub metadata_version: i64,
 }
 
 /// Server-derived context used to resolve `secret:NAME`. The fields are built
@@ -199,13 +244,128 @@ pub struct SecretResolutionContext {
     pub user_id: Option<String>,
     pub org_id: Option<String>,
     pub team_id: Option<String>,
+    pub team_authority: Option<VerifiedTeamSecretScope>,
     pub node_id: String,
     /// Exact MCP/server/plugin aliases accepted for this dispatch. A value
     /// bound to any one of them is still narrower than an unbound value.
     pub mcp_ids: Vec<String>,
+    /// Environment for unqualified references; `None` uses the node's active
+    /// environment ([`crate::vault::active_environment`]).
+    pub environment: Option<String>,
+    /// Owning conversation, recorded on audit rows for correlation only.
+    pub conversation_id: Option<String>,
+    /// The verified owner's organization role names (`member`, `viewer`, …),
+    /// so `role:<name>` policies apply at dispatch as they do in management.
+    pub roles: Vec<String>,
+    /// A bound node could not verify the owner's current principal (control
+    /// plane unreachable, timeout, refusal, or no complete team list). Their
+    /// role and team policy subjects are then unknown, so resolution fails
+    /// closed instead of evaluating policies without the `role:`/`team:`
+    /// denies that bind them.
+    pub principal_unverified: bool,
+    /// Policy subjects a human broker session recorded when it was minted
+    /// (`user:<id>`, `role:<name>`, `team:<id>`). Their `role:`/`team:`
+    /// entries apply only when the recorded `user:` subject is this
+    /// context's user, the same subjects card substitution evaluates.
+    pub minted_subjects: Vec<String>,
 }
 
+/// Team credential authority built only from a verified, current membership.
+/// Sharing metadata alone cannot construct this witness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedTeamSecretScope {
+    user_id: String,
+    org_id: String,
+    /// Teams whose Team-scope values this context may resolve. On a team node
+    /// the control plane narrows these to the node's own team.
+    team_ids: Vec<String>,
+    /// Every team the owner holds in the org, for `team:<id>` policy
+    /// subjects. Never narrowed: a deny bound to any of them applies.
+    policy_team_ids: Vec<String>,
+}
+
+impl VerifiedTeamSecretScope {
+    pub fn from_verified_caller(caller: &crate::identity_verify::VerifiedCaller) -> Option<Self> {
+        let org_id = caller.org_id.as_ref()?;
+        let team_ids: Vec<String> = caller
+            .teams
+            .iter()
+            .filter(|team| &team.org_id == org_id)
+            .map(|team| team.id.clone())
+            .collect();
+        Some(Self {
+            user_id: caller.user_id.clone(),
+            org_id: org_id.clone(),
+            policy_team_ids: team_ids.clone(),
+            team_ids,
+        })
+    }
+
+    /// Replace the policy teams with the owner's complete team list in the
+    /// org, as the control plane reports it alongside a narrowed principal.
+    /// Candidate Team scopes stay limited to the verified `team_ids`.
+    #[must_use]
+    pub fn with_policy_team_ids(mut self, policy_team_ids: Vec<String>) -> Self {
+        let mut ids = policy_team_ids;
+        ids.extend(self.team_ids.iter().cloned());
+        ids.retain(|id| is_valid_scope_id(id));
+        ids.sort();
+        ids.dedup();
+        self.policy_team_ids = ids;
+        self
+    }
+
+    fn allows(&self, context: &SecretResolutionContext, team_id: &str) -> bool {
+        context.user_id.as_deref() == Some(self.user_id.as_str())
+            && context.org_id.as_deref() == Some(self.org_id.as_str())
+            && self.team_ids.iter().any(|id| id == team_id)
+    }
+
+    /// Every verified team of the context's owner, as policy subjects. Like
+    /// management's caller subjects, this is independent of the single team
+    /// the conversation or node requests as a candidate scope, so a
+    /// `team:<id>`-bound deny applies to every member at dispatch.
+    fn policy_team_ids(&self, context: &SecretResolutionContext) -> &[String] {
+        if context.user_id.as_deref() == Some(self.user_id.as_str())
+            && context.org_id.as_deref() == Some(self.org_id.as_str())
+        {
+            &self.policy_team_ids
+        } else {
+            &[]
+        }
+    }
+}
 impl SecretResolutionContext {
+    /// Apply the owner's current principal to a bound node's dispatch
+    /// context: `Some((caller, policy_team_ids))` when the control plane
+    /// verified the owner and reported every team they hold in the org,
+    /// `None` when the lookup failed or the team list is incomplete. A
+    /// missing principal or team list leaves the owner's `role:`/`team:`
+    /// policy subjects unknown, so the context fails closed
+    /// ([`Self::principal_unverified`]).
+    pub fn apply_owner_principal(
+        &mut self,
+        principal: Option<(&crate::identity_verify::VerifiedCaller, Option<Vec<String>>)>,
+    ) {
+        let verified = principal.and_then(|(caller, policy_team_ids)| {
+            let authority = VerifiedTeamSecretScope::from_verified_caller(caller)?
+                .with_policy_team_ids(policy_team_ids?);
+            Some((authority, caller.role.label().to_owned()))
+        });
+        match verified {
+            Some((authority, role)) => {
+                self.team_authority = Some(authority);
+                self.roles = vec![role];
+                self.principal_unverified = false;
+            }
+            None => {
+                self.team_authority = None;
+                self.roles = Vec::new();
+                self.principal_unverified = true;
+            }
+        }
+    }
+
     /// Build a node-only context for a caller that has no user principal.
     pub fn node_only(node_id: impl Into<String>, mcp_ids: Vec<String>) -> Self {
         Self {
@@ -245,14 +405,22 @@ pub struct SecretKeyInfo {
 /// Cheap to clone (wraps an `Arc`).
 #[derive(Clone)]
 pub struct PluginSecretStore {
-    conn: Arc<Mutex<Connection>>,
-    cipher: FieldCipher,
+    pub(crate) conn: Arc<Mutex<Connection>>,
+    pub(crate) keyring: Arc<crate::vault::keyring::Keyring>,
+    pub(crate) audit_key: Arc<Vec<u8>>,
+    /// Audit rows appended inside a still-open transaction. Their device
+    /// fan-out and vault event wait until [`Self::flush_audit`] confirms the
+    /// row was committed, so a rolled-back write never reaches a device or a
+    /// subscriber.
+    pending_audit: Arc<std::sync::Mutex<Vec<(crate::vault::audit::AuditRow, String)>>>,
 }
 
 impl PluginSecretStore {
-    /// Open (or create) the store at a specific path, encrypting with the shared
-    /// [`ryu_crypto`] master key. Fails closed if the key cannot be resolved —
-    /// an ephemeral key would write rows that die on the next restart.
+    /// Open (or create) the store at a specific path, wrapping the vault
+    /// keyring with the shared [`ryu_crypto`] master key. Fails closed if the
+    /// key cannot be resolved: an ephemeral key would write rows that die on
+    /// the next restart. A schema upgrade first copies the database to
+    /// `<path>.v<old>.bak` so an operator can roll back.
     pub fn open(path: PathBuf) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -260,11 +428,54 @@ impl PluginSecretStore {
         }
         let conn = Connection::open(&path)
             .with_context(|| format!("opening plugin-secrets db {}", path.display()))?;
-        Self::init_schema(&conn)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            cipher: ryu_crypto::global_cipher()?,
-        })
+        migrate::backup_before_upgrade(&conn, &path)?;
+        // Seal card metadata an older build kept in plaintext before the store
+        // serves anything, then scrub the freed pages and drop pre-upgrade
+        // backups that still hold it (the sealed copy is committed first). The
+        // seal records the scrub debt before rewriting anything, so a crash
+        // after its commit, or deleted legacy rows left in free pages, are
+        // still scrubbed at this or the next open.
+        let sealed = crate::vault::items::cards::seal_legacy_card_rows(&conn)?;
+        let owed = crate::vault::items::cards::card_scrub_owed(&conn)?;
+        if sealed > 0 {
+            if let Err(error) = ryu_crypto::content_sqlite::finish_store(
+                &conn,
+                &path,
+                crate::vault::items::cards::CARD_STORE,
+            ) {
+                tracing::warn!(%error, "vault card metadata scrub deferred");
+            }
+        } else if owed {
+            // Core's boot path: a store over `VACUUM_NOW_MAX_BYTES` only gets
+            // its freelist scrub here; its `VACUUM` is deferred below.
+            if let Err(error) = ryu_crypto::content_sqlite::run_pending_vacuum_gated(
+                &conn,
+                &path,
+                crate::vault::items::cards::CARD_STORE,
+            ) {
+                tracing::warn!(%error, "vault card metadata scrub deferred");
+            }
+        }
+        if sealed > 0 || owed {
+            crate::vault::items::cards::remove_plaintext_card_backups(&path);
+        }
+        let compaction_owed = ryu_crypto::content_sqlite::compaction_owed(
+            &conn,
+            crate::vault::items::cards::CARD_STORE,
+        )
+        .unwrap_or(false);
+        let store = Self::from_connection(conn, ryu_crypto::global_cipher()?)?;
+        if compaction_owed {
+            // Too large to compact while Core boots: the background worker
+            // runs it later under this store's connection lock.
+            ryu_crypto::content_sqlite::defer_compaction_with(
+                crate::vault::items::cards::CARD_STORE,
+                &path,
+                &store.conn,
+                |owner, run| run(&*owner.blocking_lock()),
+            );
+        }
+        Ok(store)
     }
 
     /// In-memory store with an ephemeral key, for tests. Never touches the real
@@ -272,76 +483,161 @@ impl PluginSecretStore {
     #[cfg(test)]
     pub fn in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().context("opening in-memory plugin-secrets db")?;
-        Self::init_schema(&conn)?;
+        Self::from_connection(conn, FieldCipher::new(&[0x37; 32]))
+    }
+
+    /// Build a store over an open connection: migrate the schema, load the
+    /// keyring, and load (or create) the audit key.
+    pub(crate) fn from_connection(conn: Connection, master: FieldCipher) -> Result<Self> {
+        migrate::migrate(&conn)?;
+        let keyring = crate::vault::keyring::Keyring::load(&conn, master)?;
+        let audit_key = crate::vault::audit::load_or_create_key(&conn, keyring.master())?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
-            cipher: FieldCipher::new(&[0x37; 32]),
+            keyring: Arc::new(keyring),
+            audit_key: Arc::new(audit_key),
+            pending_audit: Arc::default(),
         })
     }
 
-    fn init_schema(conn: &Connection) -> Result<()> {
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             CREATE TABLE IF NOT EXISTS plugin_secrets (
-                 plugin_id  TEXT NOT NULL,
-                 key        TEXT NOT NULL,
-                 nonce      BLOB NOT NULL,
-                 ciphertext BLOB NOT NULL,
-                 updated_at INTEGER NOT NULL,
-                 PRIMARY KEY (plugin_id, key)
-             );
-             CREATE TABLE IF NOT EXISTS vault_secrets (
-                 scope        TEXT NOT NULL,
-                 scope_id     TEXT NOT NULL,
-                 binding_kind TEXT NOT NULL DEFAULT '',
-                 binding_id   TEXT NOT NULL DEFAULT '',
-                 name         TEXT NOT NULL,
-                 nonce        BLOB NOT NULL,
-                 ciphertext   BLOB NOT NULL,
-                 updated_at   INTEGER NOT NULL,
-                 PRIMARY KEY (scope, scope_id, binding_kind, binding_id, name)
-             );
-             CREATE INDEX IF NOT EXISTS idx_vault_secrets_scope
-                 ON vault_secrets(scope, scope_id, updated_at DESC);
-             CREATE INDEX IF NOT EXISTS idx_vault_secrets_name
-                 ON vault_secrets(name, updated_at DESC);
-             ",
-        )
-        .context("initializing plugin-secrets schema")?;
-        // Additive columns, when this table eventually needs one, go through the
-        // in-repo `PRAGMA table_info` + `ALTER TABLE` migration idiom (see
-        // `ryu_memory::MemoryStore::add_column_if_missing`). None yet, so the
-        // helper is not written out here.
-        Ok(())
+    /// Append one audit row while already holding the connection, fan it out
+    /// to the enabled audit devices, and publish its vault event.
+    ///
+    /// Returns whether the operation may proceed. That is always `true`
+    /// unless `RYU_VAULT_AUDIT_FAIL_CLOSED` is set, in which case it is `true`
+    /// only when the chain append succeeded and at least one enabled
+    /// synchronous device (file or syslog) accepted the row. Callers that
+    /// hand out secret material (reveal, export, backup, runtime resolution,
+    /// transit decrypt/sign/HMAC/datakey, TOTP codes, PKI issue, lease issue,
+    /// snapshot export, unwrap, cubbyhole reads, vault and identity tokens)
+    /// must honor `false`.
+    ///
+    /// Inside an open transaction the row is appended to the chain but its
+    /// device fan-out and event are deferred until the caller commits and
+    /// calls [`Self::flush_audit`]; such writes return `true` once the append
+    /// succeeded, so a path that hands out a value must audit after its
+    /// commit instead, on the autocommit connection.
+    pub(crate) fn audit_locked(
+        &self,
+        conn: &Connection,
+        entry: &crate::vault::audit::AuditEntry,
+    ) -> bool {
+        let fail_closed = crate::vault::audit_devices::fail_closed();
+        let in_transaction = !conn.is_autocommit();
+        if !in_transaction {
+            self.flush_audit(conn);
+        }
+        match crate::vault::audit::append_row(conn, &self.audit_key, entry) {
+            Ok(appended) if in_transaction => {
+                if let Ok(mut pending) = self.pending_audit.lock() {
+                    pending.push(appended);
+                }
+                true
+            }
+            Ok((row, chain_hmac)) => {
+                let outcome =
+                    crate::vault::audit_devices::dispatch(conn, &self.audit_key, &row, &chain_hmac);
+                crate::vault::events::publish_row(&row);
+                let permitted = crate::vault::audit_devices::permits(outcome, fail_closed);
+                if !permitted {
+                    tracing::warn!(
+                        action = %row.action,
+                        "fail-closed vault audit: no audit device accepted row {}",
+                        row.seq
+                    );
+                }
+                permitted
+            }
+            Err(error) => {
+                // Without fail-closed mode the audit log is evidence, not the
+                // authorization gate; a write failure is surfaced in logs and
+                // never blocks the operation that already passed its checks.
+                tracing::warn!("vault audit append failed: {error:#}");
+                !fail_closed
+            }
+        }
+    }
+
+    /// Fan out audit rows that were appended inside a transaction, once that
+    /// transaction has ended. A row is delivered only if the chain still holds
+    /// it with the same link, so rows from a rolled-back transaction are
+    /// dropped instead of reaching devices and subscribers. A no-op while a
+    /// transaction is still open.
+    pub(crate) fn flush_audit(&self, conn: &Connection) {
+        if !conn.is_autocommit() {
+            return;
+        }
+        let pending = match self.pending_audit.lock() {
+            Ok(mut pending) if !pending.is_empty() => std::mem::take(&mut *pending),
+            _ => return,
+        };
+        for (row, chain_hmac) in pending {
+            let committed = conn
+                .query_row(
+                    "SELECT hmac FROM vault_audit WHERE seq = ?1",
+                    rusqlite::params![row.seq],
+                    |stored| stored.get::<_, String>(0),
+                )
+                .map(|stored| stored == chain_hmac)
+                .unwrap_or(false);
+            if committed {
+                crate::vault::audit_devices::dispatch(conn, &self.audit_key, &row, &chain_hmac);
+                crate::vault::events::publish_row(&row);
+            }
+        }
+    }
+
+    /// Append one audit row. See [`Self::audit_locked`] for the return value.
+    pub async fn audit(&self, entry: &crate::vault::audit::AuditEntry) -> bool {
+        let conn = self.conn.lock().await;
+        self.audit_locked(&conn, entry)
+    }
+
+    /// Decrypt a row sealed with `key_version`, mapping a sealed vault to the
+    /// typed error so callers can return `vault_sealed`.
+    pub(crate) fn open_row(
+        &self,
+        key_version: u32,
+        nonce: &[u8],
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>> {
+        self.keyring.decrypt(key_version, nonce, ciphertext)
+    }
+
+    /// Seal `plaintext` with the active data key.
+    pub(crate) fn seal_row(&self, plaintext: &[u8]) -> Result<(u32, Vec<u8>, Vec<u8>)> {
+        self.keyring.encrypt(plaintext)
     }
 
     /// Read and decrypt one secret. `Ok(None)` when unset.
     ///
     /// A row that fails to decrypt (master key rotated / db copied between
-    /// machines) is treated as UNSET rather than as an error: the caller is the
-    /// header resolver, whose "absent" path omits the header and lets the tool
-    /// surface its own auth error. Turning a stale row into a hard failure would
-    /// take the whole tool call down over a credential the user can simply re-enter.
+    /// machines / vault sealed) is treated as UNSET rather than as an error:
+    /// the caller is the header resolver, whose "absent" path omits the header
+    /// and lets the tool surface its own auth error. Turning a stale row into a
+    /// hard failure would take the whole tool call down over a credential the
+    /// user can simply re-enter.
     pub async fn get(&self, plugin_id: &str, key: &str) -> Result<Option<String>> {
-        let row: Option<(Vec<u8>, Vec<u8>)> = {
+        let row: Option<(u32, Vec<u8>, Vec<u8>)> = {
             let conn = self.conn.lock().await;
             conn.query_row(
-                "SELECT nonce, ciphertext FROM plugin_secrets WHERE plugin_id = ?1 AND key = ?2",
+                "SELECT key_version, nonce, ciphertext FROM plugin_secrets
+                 WHERE plugin_id = ?1 AND key = ?2",
                 params![plugin_id, key],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()
             .context("reading plugin_secrets")?
         };
-        let Some((nonce, ciphertext)) = row else {
+        let Some((key_version, nonce, ciphertext)) = row else {
             return Ok(None);
         };
-        match self.cipher.decrypt(&nonce, &ciphertext) {
+        match self.open_row(key_version, &nonce, &ciphertext) {
             Ok(plain) => Ok(Some(String::from_utf8_lossy(&plain).into_owned())),
             Err(e) => {
                 tracing::warn!(
                     "plugin secret '{key}' for '{plugin_id}' could not be decrypted \
-                     (master key changed?); treating it as unset: {e:#}"
+                     (master key changed or vault sealed?); treating it as unset: {e:#}"
                 );
                 Ok(None)
             }
@@ -357,16 +653,17 @@ impl PluginSecretStore {
         if value.trim().is_empty() {
             return self.delete(plugin_id, key).await;
         }
-        let (nonce, ciphertext) = self.cipher.encrypt(value.as_bytes())?;
+        let (key_version, nonce, ciphertext) = self.seal_row(value.as_bytes())?;
         let conn = self.conn.lock().await;
         conn.execute(
-            "INSERT INTO plugin_secrets (plugin_id, key, nonce, ciphertext, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO plugin_secrets (plugin_id, key, nonce, ciphertext, updated_at, key_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(plugin_id, key) DO UPDATE SET
                  nonce = excluded.nonce,
                  ciphertext = excluded.ciphertext,
-                 updated_at = excluded.updated_at",
-            params![plugin_id, key, nonce, ciphertext, now_millis()],
+                 updated_at = excluded.updated_at,
+                 key_version = excluded.key_version",
+            params![plugin_id, key, nonce, ciphertext, now_millis(), key_version],
         )
         .context("writing plugin_secrets")?;
         Ok(())
@@ -420,348 +717,6 @@ impl PluginSecretStore {
         Ok(out)
     }
 
-    /// Read and decrypt one user-managed vault value using the supplied
-    /// server-derived context. The first matching candidate wins according to
-    /// `user > node > team > org`; within each scope an exact MCP binding wins
-    /// over an unbound value. No caller-supplied identity is accepted here.
-    pub async fn resolve_vault_secret(
-        &self,
-        name: &str,
-        context: &SecretResolutionContext,
-    ) -> Result<Option<String>> {
-        if !is_valid_vault_secret_name(name) {
-            bail!("invalid vault secret name");
-        }
-
-        let mut scopes: Vec<(SecretScope, String)> = Vec::new();
-        if let Some(user_id) = context
-            .user_id
-            .as_deref()
-            .filter(|value| is_valid_scope_id(value))
-        {
-            scopes.push((SecretScope::User, user_id.to_owned()));
-        }
-        if is_valid_scope_id(&context.node_id) {
-            scopes.push((SecretScope::Node, context.node_id.clone()));
-        }
-        // A shared value is never resolved without a server-derived user. This
-        // prevents a raw node bearer or an agent-less background job from
-        // turning an org/team name into a shared-secret read.
-        if context.user_id.is_some() {
-            if let Some(team_id) = context
-                .team_id
-                .as_deref()
-                .filter(|value| is_valid_scope_id(value))
-            {
-                scopes.push((SecretScope::Team, team_id.to_owned()));
-            }
-            if let Some(org_id) = context
-                .org_id
-                .as_deref()
-                .filter(|value| is_valid_scope_id(value))
-            {
-                scopes.push((SecretScope::Org, org_id.to_owned()));
-            }
-        }
-
-        for (scope, scope_id) in scopes {
-            for mcp_id in &context.mcp_ids {
-                if !is_valid_scope_id(mcp_id) {
-                    continue;
-                }
-                let binding = SecretBinding {
-                    kind: SecretBindingKind::Mcp,
-                    id: mcp_id.clone(),
-                };
-                if let Some(value) = self
-                    .get_vault_value(scope, &scope_id, Some(&binding), name)
-                    .await?
-                {
-                    return Ok(Some(value));
-                }
-            }
-            if let Some(value) = self.get_vault_value(scope, &scope_id, None, name).await? {
-                return Ok(Some(value));
-            }
-        }
-        Ok(None)
-    }
-
-    /// Resolve `secret:NAME` tokens inside a server-side MCP header or
-    /// environment template. Literal text is preserved exactly. If any secret
-    /// reference is unavailable, the whole template is absent so a caller never
-    /// accidentally sends the literal reference upstream.
-    pub async fn resolve_vault_template(
-        &self,
-        template: &str,
-        context: &SecretResolutionContext,
-    ) -> Result<Option<String>> {
-        let mut out = String::with_capacity(template.len());
-        let mut cursor = 0;
-        let mut saw_reference = false;
-
-        while cursor < template.len() {
-            let rest = &template[cursor..];
-            let whitespace_len = rest
-                .chars()
-                .take_while(|character| character.is_whitespace())
-                .map(char::len_utf8)
-                .sum::<usize>();
-            if whitespace_len > 0 {
-                out.push_str(&rest[..whitespace_len]);
-                cursor += whitespace_len;
-                continue;
-            }
-
-            let word_len = rest.find(char::is_whitespace).unwrap_or(rest.len());
-            let word = &rest[..word_len];
-            cursor += word_len;
-            let Some(name) = word.strip_prefix("secret:") else {
-                out.push_str(word);
-                continue;
-            };
-            saw_reference = true;
-            let value = self.resolve_vault_secret(name, context).await?;
-            let Some(value) = value else {
-                return Ok(None);
-            };
-            out.push_str(&value);
-        }
-
-        if saw_reference {
-            Ok(Some(out))
-        } else {
-            Ok(Some(template.to_owned()))
-        }
-    }
-
-    /// Store (or replace) one user-managed vault value. Empty/whitespace-only
-    /// values clear the row, matching the plugin BYOK store's write-only UI
-    /// semantics.
-    pub async fn set_vault_secret(
-        &self,
-        scope: SecretScope,
-        scope_id: &str,
-        binding: Option<&SecretBinding>,
-        name: &str,
-        value: &str,
-    ) -> Result<Option<VaultSecretInfo>> {
-        if !is_valid_vault_secret_name(name) {
-            bail!("invalid vault secret name");
-        }
-        if !is_valid_scope_id(scope_id) {
-            bail!("invalid vault secret scope id");
-        }
-        if let Some(binding) = binding {
-            binding.validate()?;
-        }
-        if value.len() > MAX_VAULT_SECRET_VALUE_LEN {
-            bail!("vault secret value exceeds the maximum allowed size");
-        }
-        if value.trim().is_empty() {
-            self.delete_vault_secret(scope, scope_id, binding, name)
-                .await?;
-            return Ok(None);
-        } else {
-            let (nonce, ciphertext) = self.cipher.encrypt(value.as_bytes())?;
-            let (binding_kind, binding_id) = binding
-                .map(SecretBinding::storage_parts)
-                .unwrap_or(("", ""));
-            let conn = self.conn.lock().await;
-            conn.execute(
-                "INSERT INTO vault_secrets
-                    (scope, scope_id, binding_kind, binding_id, name, nonce, ciphertext, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(scope, scope_id, binding_kind, binding_id, name) DO UPDATE SET
-                    nonce = excluded.nonce,
-                    ciphertext = excluded.ciphertext,
-                    updated_at = excluded.updated_at",
-                params![
-                    scope.as_str(),
-                    scope_id.trim(),
-                    binding_kind,
-                    binding_id,
-                    name,
-                    nonce,
-                    ciphertext,
-                    now_millis(),
-                ],
-            )
-            .context("writing vault_secrets")?;
-        }
-
-        // The row is read back as metadata only. This keeps the response shape
-        // identical for both a set and a clear and never echoes the value.
-        self.vault_secret_info(scope, scope_id, binding, name)
-            .await
-            .and_then(|info| {
-                info.ok_or_else(|| anyhow::anyhow!("vault secret write did not persist"))
-            })
-            .map(Some)
-    }
-
-    /// Delete one user-managed value. Idempotent and metadata-free.
-    pub async fn delete_vault_secret(
-        &self,
-        scope: SecretScope,
-        scope_id: &str,
-        binding: Option<&SecretBinding>,
-        name: &str,
-    ) -> Result<()> {
-        if !is_valid_vault_secret_name(name) {
-            bail!("invalid vault secret name");
-        }
-        if !is_valid_scope_id(scope_id) {
-            bail!("invalid vault secret scope id");
-        }
-        if let Some(binding) = binding {
-            binding.validate()?;
-        }
-        let (binding_kind, binding_id) = binding
-            .map(SecretBinding::storage_parts)
-            .unwrap_or(("", ""));
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "DELETE FROM vault_secrets
-             WHERE scope = ?1 AND scope_id = ?2 AND binding_kind = ?3
-               AND binding_id = ?4 AND name = ?5",
-            params![
-                scope.as_str(),
-                scope_id.trim(),
-                binding_kind,
-                binding_id,
-                name,
-            ],
-        )
-        .context("deleting vault_secrets")?;
-        Ok(())
-    }
-
-    /// List every user-managed value's metadata. Callers must filter this
-    /// projection through their authorization context before returning it.
-    /// Ciphertext columns are not selected, so this method cannot leak a value.
-    pub async fn list_vault_secrets(&self) -> Result<Vec<VaultSecretInfo>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn
-            .prepare(
-                "SELECT scope, scope_id, binding_kind, binding_id, name, updated_at
-                 FROM vault_secrets
-                 ORDER BY updated_at DESC, scope ASC, scope_id ASC, name ASC",
-            )
-            .context("preparing vault_secrets listing")?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                ))
-            })
-            .context("querying vault_secrets listing")?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (scope, scope_id, binding_kind, binding_id, name, updated_at) =
-                row.context("reading vault_secrets metadata")?;
-            let Some(scope) = SecretScope::from_str(&scope) else {
-                // Unknown future scopes are not exposed by an older binary.
-                continue;
-            };
-            let binding = match binding_kind.as_str() {
-                "" => None,
-                "mcp" if is_valid_scope_id(&binding_id) => Some(SecretBinding {
-                    kind: SecretBindingKind::Mcp,
-                    id: binding_id,
-                }),
-                _ => continue,
-            };
-            out.push(VaultSecretInfo {
-                name,
-                scope,
-                scope_id,
-                binding,
-                updated_at,
-            });
-        }
-        Ok(out)
-    }
-
-    async fn vault_secret_info(
-        &self,
-        scope: SecretScope,
-        scope_id: &str,
-        binding: Option<&SecretBinding>,
-        name: &str,
-    ) -> Result<Option<VaultSecretInfo>> {
-        let (binding_kind, binding_id) = binding
-            .map(SecretBinding::storage_parts)
-            .unwrap_or(("", ""));
-        let conn = self.conn.lock().await;
-        let updated_at = conn
-            .query_row(
-                "SELECT updated_at FROM vault_secrets
-                 WHERE scope = ?1 AND scope_id = ?2 AND binding_kind = ?3
-                   AND binding_id = ?4 AND name = ?5",
-                params![
-                    scope.as_str(),
-                    scope_id.trim(),
-                    binding_kind,
-                    binding_id,
-                    name
-                ],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .context("reading vault secret metadata")?;
-        Ok(updated_at.map(|updated_at| VaultSecretInfo {
-            name: name.to_owned(),
-            scope,
-            scope_id: scope_id.trim().to_owned(),
-            binding: binding.cloned(),
-            updated_at,
-        }))
-    }
-
-    async fn get_vault_value(
-        &self,
-        scope: SecretScope,
-        scope_id: &str,
-        binding: Option<&SecretBinding>,
-        name: &str,
-    ) -> Result<Option<String>> {
-        let (binding_kind, binding_id) = binding
-            .map(SecretBinding::storage_parts)
-            .unwrap_or(("", ""));
-        let row: Option<(Vec<u8>, Vec<u8>)> = {
-            let conn = self.conn.lock().await;
-            conn.query_row(
-                "SELECT nonce, ciphertext FROM vault_secrets
-                 WHERE scope = ?1 AND scope_id = ?2 AND binding_kind = ?3
-                   AND binding_id = ?4 AND name = ?5",
-                params![scope.as_str(), scope_id, binding_kind, binding_id, name],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()
-            .context("reading vault_secrets")?
-        };
-        let Some((nonce, ciphertext)) = row else {
-            return Ok(None);
-        };
-        match self.cipher.decrypt(&nonce, &ciphertext) {
-            Ok(plain) => Ok(Some(String::from_utf8_lossy(&plain).into_owned())),
-            Err(error) => {
-                tracing::warn!(
-                    scope = scope.as_str(),
-                    name,
-                    "vault secret could not be decrypted; treating it as unset: {error:#}"
-                );
-                Ok(None)
-            }
-        }
-    }
-
     /// The raw stored ciphertext for a row, for tests that must prove a response
     /// body leaks neither the plaintext NOR the encrypted form. Not part of the
     /// production API — there is deliberately no way to reach the bytes otherwise.
@@ -780,7 +735,7 @@ impl PluginSecretStore {
 }
 
 fn default_db_path() -> PathBuf {
-    crate::paths::ryu_dir().join("plugin-secrets.db")
+    crate::paths::secret_path("plugin-secrets.db")
 }
 
 /// Open (or create) the store at the default path (`~/.ryu/plugin-secrets.db`).
@@ -1042,8 +997,10 @@ mod tests {
             user_id: Some("user-1".to_owned()),
             org_id: Some("org-1".to_owned()),
             team_id: Some("team-1".to_owned()),
+            team_authority: None,
             node_id: "node-1".to_owned(),
             mcp_ids: vec!["github".to_owned()],
+            ..Default::default()
         };
         // User scope outranks node scope, even when the node has an exact MCP
         // binding. This makes a user's explicit override predictable.
@@ -1084,6 +1041,113 @@ mod tests {
                 .await
                 .unwrap(),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn team_secrets_require_current_membership_bound_to_user_and_org() {
+        let store = PluginSecretStore::in_memory().unwrap();
+        store
+            .set_vault_secret(
+                SecretScope::Team,
+                "target-team",
+                None,
+                "TEAM_TOKEN",
+                "team-secret",
+            )
+            .await
+            .unwrap();
+        let mut context = SecretResolutionContext {
+            user_id: Some("owner".into()),
+            org_id: Some("org-1".into()),
+            team_id: Some("target-team".into()),
+            node_id: "node-1".into(),
+            ..SecretResolutionContext::default()
+        };
+        // Previously forged sharing metadata is not an authorization witness.
+        assert_eq!(
+            store
+                .resolve_vault_secret("TEAM_TOKEN", &context)
+                .await
+                .unwrap(),
+            None
+        );
+        let mut caller = crate::identity_verify::VerifiedCaller {
+            user_id: "owner".into(),
+            email: None,
+            email_verified: false,
+            org_id: Some("org-1".into()),
+            role: crate::identity_verify::OrgRole::Member,
+            teams: Vec::new(),
+        };
+        context.team_authority = VerifiedTeamSecretScope::from_verified_caller(&caller);
+        assert_eq!(
+            store
+                .resolve_vault_secret("TEAM_TOKEN", &context)
+                .await
+                .unwrap(),
+            None
+        );
+        caller.teams.push(crate::identity_verify::TeamMembership {
+            id: "target-team".into(),
+            org_id: "other-org".into(),
+            role: "member".into(),
+        });
+        context.team_authority = VerifiedTeamSecretScope::from_verified_caller(&caller);
+        assert_eq!(
+            store
+                .resolve_vault_secret("TEAM_TOKEN", &context)
+                .await
+                .unwrap(),
+            None
+        );
+        caller.teams[0].org_id = "org-1".into();
+        context.team_authority = VerifiedTeamSecretScope::from_verified_caller(&caller);
+        assert_eq!(
+            store
+                .resolve_vault_secret("TEAM_TOKEN", &context)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("team-secret")
+        );
+        context.user_id = Some("different-user".into());
+        assert_eq!(
+            store
+                .resolve_vault_secret("TEAM_TOKEN", &context)
+                .await
+                .unwrap(),
+            None
+        );
+        context.user_id = Some("owner".into());
+        context.org_id = Some("other-org".into());
+        assert_eq!(
+            store
+                .resolve_vault_secret("TEAM_TOKEN", &context)
+                .await
+                .unwrap(),
+            None
+        );
+        context.org_id = Some("org-1".into());
+        // An unavailable/revoked authority still permits existing node secrets.
+        context.team_authority = None;
+        store
+            .set_vault_secret(
+                SecretScope::Node,
+                "node-1",
+                None,
+                "TEAM_TOKEN",
+                "node-secret",
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .resolve_vault_secret("TEAM_TOKEN", &context)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("node-secret")
         );
     }
 

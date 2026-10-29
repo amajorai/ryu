@@ -4,16 +4,16 @@
 // + launch config). Each maps a single optional config field: an empty/cleared
 // control means "unset" (the key is omitted) so Core keeps the engine default.
 
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import type { ReactNode } from "react";
 
 let fieldSeq = 0;

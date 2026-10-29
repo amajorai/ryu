@@ -31,8 +31,9 @@ mod win_process;
 
 pub use dispatch::{
     deliver_inbound, deliver_workflow_webhook, first_http_delivery, forget_http_delivery,
-    last_delivery, record_delivery, timestamp_fresh, workflow_webhook_path, InboundOutcome,
-    WorkflowWebhookOutcome,
+    last_delivery, record_delivery, release_composio_delivery, reserve_composio_delivery,
+    timestamp_fresh, workflow_webhook_path, InboundOutcome, WorkflowWebhookOutcome,
+    COMPOSIO_DELIVERY_RETENTION_SECS,
 };
 pub use host::{set_global_host, InboundWebhookHeaders, WebhookIngressHost, WorkflowWebhookSecret};
 pub use public_edge::{
@@ -41,10 +42,10 @@ pub use public_edge::{
     PublicEdgeRequest, PublicEdgeRoute, PublicEdgeTarget, PublicEdgeTransport, RouteLeaseStatus,
     SitePublicEdgeFrame, MANAGED_SITES_DOMAIN,
 };
-pub use ryu_relay::{ensure_relay_started, relay_inbound_url};
+pub use ryu_relay::{ensure_relay_started, relay_inbound_url, relay_server_base};
 pub use tunnels::{
-    CloudflaredSource, Ingress, OwnRelaySource, RyuRelaySource, TailscaleFunnelSource,
-    OWN_RELAY_URL_ENV, WEBHOOK_PATH,
+    funnel_mount_covers, CloudflaredOwner, CloudflaredSource, Ingress, OwnRelaySource,
+    RyuRelaySource, TailscaleFunnelSource, FUNNEL_PUBLIC_MOUNTS, OWN_RELAY_URL_ENV, WEBHOOK_PATH,
 };
 
 use std::str::FromStr;
@@ -137,6 +138,28 @@ pub fn set_public_url(url: Option<String>) {
 /// The current public ingress URL, if one has been resolved.
 pub fn public_url() -> Option<String> {
     PUBLIC_URL.read().ok().and_then(|g| g.clone())
+}
+
+/// Replace the published public URL with `current`, but only while it still
+/// publishes `previous` (or nothing). The RyuRelay loop uses this after a token
+/// rotation, so it never overwrites the URL of a different backend. Returns
+/// whether the URL was replaced.
+pub(crate) fn replace_public_url(previous: &str, current: &str) -> bool {
+    replace_url_in(&PUBLIC_URL, previous, current)
+}
+
+fn replace_url_in(slot: &RwLock<Option<String>>, previous: &str, current: &str) -> bool {
+    let Ok(mut guard) = slot.write() else {
+        return false;
+    };
+    if guard
+        .as_deref()
+        .is_some_and(|published| published != previous)
+    {
+        return false;
+    }
+    *guard = Some(current.to_owned());
+    true
 }
 
 /// The resolved public **origin** base URL (no webhook path) — but ONLY when the
@@ -288,6 +311,48 @@ mod tests {
         );
         set_public_url(None);
         assert!(public_url().is_none());
+    }
+
+    #[test]
+    fn replace_url_swaps_only_the_previous_url() {
+        // A local slot, not the process-global PUBLIC_URL, so this runs without
+        // PUBLIC_URL_LOCK.
+        let slot = RwLock::new(Some("https://relay.example/old".to_owned()));
+        assert!(replace_url_in(
+            &slot,
+            "https://relay.example/old",
+            "https://relay.example/new"
+        ));
+        assert_eq!(
+            slot.read().unwrap().as_deref(),
+            Some("https://relay.example/new")
+        );
+
+        // A URL published by another backend is left in place.
+        let other = RwLock::new(Some(
+            "https://tunnel.example/api/composio/webhook".to_owned(),
+        ));
+        assert!(!replace_url_in(
+            &other,
+            "https://relay.example/old",
+            "https://relay.example/new"
+        ));
+        assert_eq!(
+            other.read().unwrap().as_deref(),
+            Some("https://tunnel.example/api/composio/webhook")
+        );
+
+        // Nothing published yet: the relay URL is the one to advertise.
+        let empty = RwLock::new(None);
+        assert!(replace_url_in(
+            &empty,
+            "https://relay.example/old",
+            "https://relay.example/new"
+        ));
+        assert_eq!(
+            empty.read().unwrap().as_deref(),
+            Some("https://relay.example/new")
+        );
     }
 
     #[test]

@@ -1,0 +1,13 @@
+.fixture1 {
+	padding: 24px;
+}
+
+.fixture2 {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 12px;
+}
+
+.fixture3 {
+	height: 200px;
+}

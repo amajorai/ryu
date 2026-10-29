@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // Error transport shared by unary and streaming host RPC.
 
 /** A structured error the host relays to a widget (decisions doc D6). `code` is a
@@ -17,7 +19,7 @@ export type WidgetRpcErrorCode =
 	| "server_error"
 	| "invalid_args";
 
-const WIDGET_RPC_ERROR_CODES = new Set<string>([
+export const widgetRpcErrorCodeSchema = z.enum([
 	"denied",
 	"not_found",
 	"over_budget",
@@ -25,9 +27,10 @@ const WIDGET_RPC_ERROR_CODES = new Set<string>([
 	"invalid_args",
 ] satisfies WidgetRpcErrorCode[]);
 
-function isWidgetRpcErrorCode(value: unknown): value is WidgetRpcErrorCode {
-	return typeof value === "string" && WIDGET_RPC_ERROR_CODES.has(value);
-}
+const publicRpcFailureSchema = z.object({
+	code: z.string(),
+	message: z.string().optional().catch(undefined),
+});
 
 /** Thrown (and caught into an RpcResponse.error) when a call is not permitted.
  *  Serialized to a plain STRING error (the legacy plugin path shape). */
@@ -54,21 +57,14 @@ export class CodedRpcError extends Error {
  * string so the existing plugin bridge (which checks `typeof error === "string"`)
  * is unaffected.
  */
-export function toRpcError(err: unknown): string | RpcErrorPayload {
-	if (
-		err &&
-		typeof err === "object" &&
-		"code" in err &&
-		typeof err.code === "string"
-	) {
-		const message =
-			"message" in err && typeof err.message === "string"
-				? err.message
-				: String(err);
+export function toRpcError(cause: unknown): string | RpcErrorPayload {
+	const failure = publicRpcFailureSchema.safeParse(cause);
+	if (failure.success) {
+		const publicCode = widgetRpcErrorCodeSchema.safeParse(failure.data.code);
 		return {
-			code: isWidgetRpcErrorCode(err.code) ? err.code : "server_error",
-			message,
+			code: publicCode.success ? publicCode.data : "server_error",
+			message: failure.data.message ?? String(cause),
 		};
 	}
-	return err instanceof Error ? err.message : String(err);
+	return cause instanceof Error ? cause.message : String(cause);
 }

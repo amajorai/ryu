@@ -15,13 +15,20 @@
 import { useKeyboard } from "@opentui/react";
 import type { ApiTarget } from "@ryuhq/core-client/client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { Badge } from "@/components/ui/badge.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import type { ListRow } from "../core/featureList.ts";
 import { useInputFocused } from "../core/InputFocusContext.tsx";
+import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
+import { sanitizeTerminalText } from "../core/transcriptPresentation.ts";
 import { ErrorView } from "./ErrorView.tsx";
 import { Loading } from "./Loading.tsx";
+import { ListPosition, SelectableRow } from "./SelectableRow.tsx";
+import { useListWindow } from "./useListWindow.ts";
+
+const listActionNoticeSchema = z.string();
 
 export type ListLoader = (
 	target: ApiTarget,
@@ -41,7 +48,8 @@ export interface ListTabProps {
 	active: boolean;
 	/** Shown when the loaded list is empty. */
 	emptyLabel?: string;
-	/** Max visible rows before windowing kicks in. */
+	/** Optional cap on visible rows. The window otherwise fills the measured
+	 *  space the layout gives the list (see useListWindow). */
 	height?: number;
 	/** Async row loader. Re-invoked on 'r' and when url/token change. */
 	load: ListLoader;
@@ -51,17 +59,15 @@ export interface ListTabProps {
 	onSecondary?: ListAction;
 }
 
-const DEFAULT_HEIGHT = 16;
-
 export function ListTab({
 	active,
 	load,
 	onActivate,
 	onSecondary,
 	emptyLabel = "No items",
-	height = DEFAULT_HEIGHT,
+	height,
 }: ListTabProps) {
-	const { target, url, token } = useCore();
+	const { target } = useCore();
 	const theme = useTheme();
 	const inputFocused = useInputFocused();
 
@@ -80,6 +86,9 @@ export function ListTab({
 		const reqId = ++reqRef.current;
 		setLoading(true);
 		setError(null);
+		// Action notices describe the previous catalog snapshot. Clear them as a
+		// refresh begins so a completed install does not keep saying "installing".
+		setNotice(null);
 		load(target)
 			.then((next) => {
 				if (reqRef.current !== reqId) {
@@ -89,11 +98,11 @@ export function ListTab({
 				setIndex((i) => (next.length === 0 ? 0 : Math.min(i, next.length - 1)));
 				setLoaded(true);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (reqRef.current !== reqId) {
 					return;
 				}
-				setError(err instanceof Error ? err.message : String(err));
+				setError(nativeErrorMessage(err));
 				setLoaded(true);
 			})
 			.finally(() => {
@@ -115,6 +124,16 @@ export function ListTab({
 	}, [active, runLoad, reloadKey]);
 
 	const selected = rows[index];
+	// Window the rows to the measured space so the selection stays visible
+	// without a focus-capturing scrollbox (which would fight the shell for arrow
+	// keys), and so a short terminal never overlaps rows.
+	const linesPerRow = rows.some((row) => row.subtitle) ? 2 : 1;
+	const { start, end, onSizeChange } = useListWindow({
+		count: rows.length,
+		index,
+		linesPerRow,
+		maxRows: height,
+	});
 
 	const handleAction = useCallback(
 		(action: ListAction | undefined) => {
@@ -123,14 +142,13 @@ export function ListTab({
 			}
 			Promise.resolve(action(selected, target))
 				.then((msg) => {
-					if (typeof msg === "string") {
-						setNotice(msg);
+					const notice = listActionNoticeSchema.safeParse(msg);
+					if (notice.success) {
+						setNotice(notice.data);
 					}
 				})
-				.catch((err: unknown) => {
-					setNotice(
-						`error: ${err instanceof Error ? err.message : String(err)}`
-					);
+				.catch((err) => {
+					setNotice(`error: ${nativeErrorMessage(err)}`);
 				});
 		},
 		[selected, target]
@@ -157,66 +175,83 @@ export function ListTab({
 		return <Loading label="Loading…" />;
 	}
 	if (error) {
-		return <ErrorView message={error} />;
+		return (
+			<ErrorView
+				message={sanitizeTerminalText(
+					humanizeError(error, { url: target.url })
+				)}
+				onRetry
+			/>
+		);
 	}
 
-	// Window the rows so the selection stays visible without a focus-capturing
-	// scrollbox (which would fight the shell for arrow keys).
-	const start = Math.max(
-		0,
-		Math.min(index - Math.floor(height / 2), Math.max(0, rows.length - height))
-	);
-	const visible = rows.slice(start, start + height);
+	const visible = rows.slice(start, end);
 
 	return (
-		<box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
+		<box
+			flexDirection="column"
+			flexGrow={1}
+			minHeight={0}
+			paddingLeft={1}
+			paddingTop={1}
+		>
 			{notice ? (
-				<box paddingBottom={1}>
-					<text fg={theme.colors.success}>{notice}</text>
+				<box flexShrink={0} paddingBottom={1}>
+					<text fg={theme.colors.success}>{sanitizeTerminalText(notice)}</text>
 				</box>
 			) : null}
 			{rows.length === 0 ? (
-				<text fg={theme.colors.mutedForeground}>{emptyLabel}</text>
+				<text fg={theme.colors.mutedForeground}>
+					{sanitizeTerminalText(emptyLabel)}
+				</text>
 			) : (
-				<box flexDirection="column">
-					{visible.map((row, i) => {
-						const absolute = start + i;
-						const isSel = absolute === index;
-						return (
-							<box flexDirection="row" gap={1} key={`${row.id}-${absolute}`}>
-								<text fg={isSel ? theme.colors.primary : theme.colors.muted}>
-									{isSel ? "›" : " "}
-								</text>
-								<box flexDirection="column" flexGrow={1}>
-									<box flexDirection="row" gap={1}>
-										<text
-											fg={
-												isSel ? theme.colors.primary : theme.colors.foreground
-											}
-										>
-											{isSel ? <b>{row.title}</b> : row.title}
-										</text>
-										{row.badge ? (
-											<Badge bordered={false} variant="secondary">
-												{row.badge}
+				<>
+					<box
+						flexBasis={0}
+						flexDirection="column"
+						flexGrow={1}
+						minHeight={0}
+						onSizeChange={onSizeChange}
+						overflow="hidden"
+					>
+						{visible.map((row, i) => {
+							const absolute = start + i;
+							return (
+								<SelectableRow
+									key={`${row.id}-${absolute}`}
+									linesPerRow={linesPerRow}
+									selected={absolute === index}
+									subtitle={
+										row.subtitle
+											? sanitizeTerminalText(row.subtitle)
+											: undefined
+									}
+									title={sanitizeTerminalText(row.title)}
+									titleSuffix={
+										row.badge ? (
+											<Badge
+												bordered={false}
+												color={
+													absolute === index
+														? theme.colors.selectionForeground
+														: undefined
+												}
+												variant="secondary"
+											>
+												{sanitizeTerminalText(row.badge)}
 											</Badge>
-										) : null}
-									</box>
-									{row.subtitle ? (
-										<text fg={theme.colors.mutedForeground}>
-											{row.subtitle}
-										</text>
-									) : null}
-								</box>
-							</box>
-						);
-					})}
-					{rows.length > visible.length ? (
-						<text fg={theme.colors.mutedForeground}>
-							{`${index + 1}/${rows.length}`}
-						</text>
-					) : null}
-				</box>
+										) : undefined
+									}
+								/>
+							);
+						})}
+					</box>
+					<ListPosition
+						count={rows.length}
+						index={index}
+						visible={visible.length}
+					/>
+				</>
 			)}
 		</box>
 	);

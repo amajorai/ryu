@@ -1,27 +1,35 @@
 import {
 	approveLoginApproval,
 	denyLoginApproval,
+	LOGIN_APPROVAL_STABLE_CONNECTION_MS,
 	type LoginApprovalRequest,
 	listLoginApprovals,
+	loginApprovalRetryDelay,
 	streamLoginApprovals,
 } from "@ryu/auth/lib/login-approval-client";
-import { LoginApprovalPrompt } from "@ryu/blocks/web/login-approval";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { LoginApprovalPrompt } from "@ryu/blocks/web/login-approval.tsx";
+import { useEffect, useRef, useState } from "react";
 import {
 	BACKEND_URL,
+	getActiveToken,
 	getActiveUserId,
-	TOKEN_KEY,
 	useSession,
 } from "@/lib/auth-client.ts";
-
-const RECONNECT_DELAY_MS = 2000;
+import { abortableDelay } from "@/src/lib/abortable-delay.ts";
 
 function activeToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		return null;
 	}
+}
+
+function withoutRequest(
+	requests: LoginApprovalRequest[],
+	requestId: string
+): LoginApprovalRequest[] {
+	return requests.filter((request) => request.id !== requestId);
 }
 
 /**
@@ -33,39 +41,48 @@ function activeToken(): string | null {
 export function LoginApprovalEvents() {
 	const { data: session } = useSession();
 	const userId = session?.user?.id ?? getActiveUserId();
-	const token = useMemo(activeToken, [userId]);
-	const [activeRequest, setActiveRequest] =
-		useState<LoginApprovalRequest | null>(null);
+	// Pending requests in arrival order, minus the ones handled or dismissed here.
+	// The prompt shows the head; resolving, dismissing or expiring it advances
+	// to the next, so a second sign-in started meanwhile is not lost.
+	const [pending, setPending] = useState<LoginApprovalRequest[]>([]);
+	const activeRequest = pending[0] ?? null;
 	const [approving, setApproving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const dismissed = useRef(new Set<string>());
 
 	useEffect(() => {
 		if (!userId) {
-			setActiveRequest(null);
+			setPending([]);
 			return;
 		}
 
 		let cancelled = false;
-		let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 		const controller = new AbortController();
-		const auth = { token };
 
 		const addRequest = (request: LoginApprovalRequest) => {
 			if (cancelled || dismissed.current.has(request.id)) {
 				return;
 			}
-			setActiveRequest((current) => current ?? request);
-		};
-
-		const removeRequest = (requestId: string) => {
-			setActiveRequest((current) =>
-				current?.id === requestId ? null : current
+			setPending((current) =>
+				current.some((entry) => entry.id === request.id)
+					? current
+					: [...current, request]
 			);
 		};
 
+		const removeRequest = (requestId: string) => {
+			dismissed.current.delete(requestId);
+			setPending((current) => withoutRequest(current, requestId));
+		};
+
 		const run = async () => {
+			let attempt = 0;
 			while (!cancelled) {
+				const connectedAt = Date.now();
+				let lastError: unknown = null;
+				// Read per connection: signing in again as the same user writes a
+				// new token without changing `userId`, so a captured one goes stale.
+				const auth = { token: activeToken() };
 				try {
 					const snapshot = await listLoginApprovals(
 						BACKEND_URL,
@@ -73,13 +90,23 @@ export function LoginApprovalEvents() {
 						controller.signal
 					);
 					if (!cancelled) {
-						setActiveRequest((current) =>
-							current && snapshot.some((request) => request.id === current.id)
-								? current
-								: (snapshot.find(
-										(request) => !dismissed.current.has(request.id)
-									) ?? null)
+						// Forget dismissals of requests that are no longer pending.
+						for (const id of dismissed.current) {
+							if (!snapshot.some((request) => request.id === id)) {
+								dismissed.current.delete(id);
+							}
+						}
+						const fresh = snapshot.filter(
+							(request) => !dismissed.current.has(request.id)
 						);
+						// Keep the prompt already on screen at the head.
+						setPending((current) => {
+							const head = current[0];
+							const shown = head && fresh.find((entry) => entry.id === head.id);
+							return shown
+								? [shown, ...withoutRequest(fresh, shown.id)]
+								: fresh;
+						});
 					}
 					if (cancelled) {
 						break;
@@ -96,28 +123,31 @@ export function LoginApprovalEvents() {
 						},
 						controller.signal
 					);
-				} catch {
+				} catch (error) {
 					// Auth service/network recovery is best-effort; the next connection
 					// receives a durable pending snapshot before live events resume.
+					lastError = error;
 				}
 				if (cancelled) {
 					break;
 				}
-				await new Promise<void>((resolve) => {
-					reconnectTimer = setTimeout(resolve, RECONNECT_DELAY_MS);
-				});
+				if (Date.now() - connectedAt >= LOGIN_APPROVAL_STABLE_CONNECTION_MS) {
+					attempt = 0;
+				}
+				// Jittered backoff, so every client dropped by the same outage does
+				// not return as one wave; a refused session (401/403) waits minutes.
+				const delay = loginApprovalRetryDelay(attempt, lastError);
+				attempt += 1;
+				await abortableDelay(delay, controller.signal);
 			}
 		};
-		void run();
+		run().catch(() => undefined);
 
 		return () => {
 			cancelled = true;
 			controller.abort();
-			if (reconnectTimer) {
-				clearTimeout(reconnectTimer);
-			}
 		};
-	}, [token, userId]);
+	}, [userId]);
 
 	useEffect(() => {
 		if (!activeRequest) {
@@ -129,14 +159,17 @@ export function LoginApprovalEvents() {
 		}
 		const timer = setTimeout(
 			() => {
-				setActiveRequest((current) =>
-					current?.id === activeRequest.id ? null : current
-				);
+				setPending((current) => withoutRequest(current, activeRequest.id));
 			},
 			Math.max(0, expiresAt - Date.now())
 		);
 		return () => clearTimeout(timer);
 	}, [activeRequest]);
+
+	const dismiss = (requestId: string) => {
+		dismissed.current.add(requestId);
+		setPending((current) => withoutRequest(current, requestId));
+	};
 
 	const resolve = async (action: "approve" | "deny") => {
 		if (!activeRequest || approving) {
@@ -147,9 +180,10 @@ export function LoginApprovalEvents() {
 		try {
 			const resolveRequest =
 				action === "approve" ? approveLoginApproval : denyLoginApproval;
-			await resolveRequest(BACKEND_URL, activeRequest.id, { token });
-			dismissed.current.add(activeRequest.id);
-			setActiveRequest(null);
+			await resolveRequest(BACKEND_URL, activeRequest.id, {
+				token: activeToken(),
+			});
+			dismiss(activeRequest.id);
 		} catch (resolveError) {
 			setError(
 				resolveError instanceof Error
@@ -172,7 +206,7 @@ export function LoginApprovalEvents() {
 			onDeny={() => resolve("deny")}
 			onOpenChange={(open) => {
 				if (!(open || approving)) {
-					setActiveRequest(null);
+					dismiss(activeRequest.id);
 				}
 			}}
 			open

@@ -21,9 +21,13 @@ import type {
 	ViewAction,
 	ViewActionContext,
 } from "@ryu/app-host/views";
-import { renderActionHttp, sourceItemsFromResponse } from "@ryu/app-host/views";
+import {
+	renderActionHttp,
+	sourceItemsFromResponse,
+	viewSpecSchema,
+} from "@ryu/app-host/views";
 import { IslandViewPanel } from "@ryu/blocks/island/declarative-view";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PluginView } from "../../shared/ipc.ts";
 import { pluginHostInvoke } from "../host/island-plugin-host-invoke.ts";
 
@@ -34,8 +38,14 @@ export function ContributedView({ view }: { view: PluginView }) {
 	// re-renders from truth (mirrors the desktop `reloadToken`).
 	const [reloadToken, setReloadToken] = useState(0);
 	const [sourceItems, setSourceItems] = useState<SourceItem[] | null>(null);
+	const parsedSpec = useMemo(
+		() => viewSpecSchema.safeParse(view.spec),
+		[view.spec]
+	);
 	const source =
-		view.spec?.view === "list-detail" ? view.spec.source : undefined;
+		parsedSpec.success && parsedSpec.data.view === "list-detail"
+			? parsedSpec.data.source
+			: undefined;
 
 	useEffect(() => {
 		if (!source) {
@@ -45,6 +55,7 @@ export function ContributedView({ view }: { view: PluginView }) {
 		let cancelled = false;
 		window.island.plugins
 			.coreHttp({
+				coreGeneration: view.coreGeneration,
 				method: source.http.method ?? "GET",
 				path: source.http.path,
 			})
@@ -63,11 +74,11 @@ export function ContributedView({ view }: { view: PluginView }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [source, reloadToken]);
+	}, [source, reloadToken, view.coreGeneration]);
 
 	const runAction = useCallback(
 		async (action: ViewAction, ctx: ViewActionContext) => {
-			// biome-ignore lint/suspicious/noAlert: the v1 declarative confirm gate — a spec-declared destructive-action prompt.
+			// the v1 declarative confirm gate — a spec-declared destructive-action prompt.
 			if (action.confirm && !(await confirm(action.confirm))) {
 				return;
 			}
@@ -77,6 +88,7 @@ export function ContributedView({ view }: { view: PluginView }) {
 					// authenticated Core client (renderActionHttp refuses non-/api/ paths).
 					const rendered = renderActionHttp(action.http, ctx);
 					const res = await window.island.plugins.coreHttp({
+						coreGeneration: view.coreGeneration,
 						method: rendered.method,
 						path: rendered.path,
 						body: rendered.body,
@@ -87,14 +99,19 @@ export function ContributedView({ view }: { view: PluginView }) {
 				} else if (view.plugin) {
 					// App-backed intent: relay over the plugin host bridge so it reaches
 					// `POST /api/plugins/:id/host` (grant-gated `view.action` dispatch).
-					await pluginHostInvoke(view.plugin, "view.action", {
-						view_id: view.id,
-						action_id: action.id,
-						intent: action.intent ?? null,
-						payload: action.payload ?? null,
-						values: ctx.values ?? null,
-						item: ctx.item ?? null,
-					});
+					await pluginHostInvoke(
+						view.plugin,
+						"view.action",
+						{
+							view_id: view.id,
+							action_id: action.id,
+							intent: action.intent ?? null,
+							payload: action.payload ?? null,
+							values: ctx.values ?? null,
+							item: ctx.item ?? null,
+						},
+						view.coreGeneration
+					);
 				}
 				setReloadToken((n) => n + 1);
 			} catch {

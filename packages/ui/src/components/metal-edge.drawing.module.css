@@ -1,0 +1,10 @@
+.edgeRail {
+	width: var(--metal-edge-1-width);
+	height: var(--metal-edge-1-height);
+}
+.edgeRing {
+	padding: var(--metal-edge-2-padding);
+}
+.plainRing {
+	padding: var(--metal-edge-3-padding);
+}

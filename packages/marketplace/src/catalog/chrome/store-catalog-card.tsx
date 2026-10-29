@@ -39,6 +39,7 @@
 // the far end of the square is nearly white and the glyph vanished on it. One
 // component means a surface cannot ship without that branch again.
 
+import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -53,6 +54,7 @@ import type { PublisherTrustLevel } from "@ryuhq/protocol/publisher-trust";
 import { createContext, type ReactNode, useContext } from "react";
 import ItemLikeButton from "../../likes/like-button.tsx";
 import type { MarketplaceCommunityStats } from "../bundle-types.ts";
+import { DEPRECATED_LABEL } from "../deprecation.ts";
 import { stabilityLabel } from "../stability.ts";
 import {
 	type CardDither,
@@ -61,6 +63,7 @@ import {
 	catalogLayerBadges,
 } from "../types.ts";
 import AppIcon from "./app-icon.tsx";
+import { RyuReviewedBadge } from "./ryu-reviewed-badge.tsx";
 import VerifiedBadge from "./verified-badge.tsx";
 
 export interface StoreCardLinkProps {
@@ -113,8 +116,11 @@ export default function StoreCatalogCard({
 	external = false,
 	layers,
 	stability,
+	deprecated = false,
 	orgVerified,
 	orgVerifiedTier,
+	reviewed,
+	communityApp = false,
 	publisherTrust,
 	publisherVerification,
 	membershipEntitled = false,
@@ -125,6 +131,7 @@ export default function StoreCatalogCard({
 	onClick,
 	action,
 	contextMenu,
+	density,
 	likeNamespace,
 	likeSeed,
 }: {
@@ -186,6 +193,9 @@ export default function StoreCatalogCard({
 	/** How finished this listing is ("alpha", "beta", …). Absent/stable renders
 	 *  nothing — a finished listing must not sprout a badge. */
 	stability?: string | null;
+	/** The listing's manifest marks it deprecated. Renders a "Deprecated" badge;
+	 *  the reason lives on the detail page. */
+	deprecated?: boolean;
 	/** The PUBLISHING ORGANIZATION is identity-verified — the blue check beside the
 	 *  name. One of THREE separate axes, never to be merged: `reviewed` is "did Ryu
 	 *  vet this listing's CODE" (the amber "Not reviewed by Ryu" notice),
@@ -196,6 +206,10 @@ export default function StoreCatalogCard({
 	 *  absent-renders-nothing, because ~15 out-of-package call sites build this
 	 *  card and only the ones whose feed carries the flag pass it. */
 	orgVerified?: boolean;
+	/** Ryu's human code review of an app listing; independent of org identity. */
+	reviewed?: boolean;
+	/** The published listing remains community-published until Ryu reviews it. */
+	communityApp?: boolean;
 	/** The org's verification tier, used only as a qualifier in the badge's label.
 	 *  Camel-cased like every other prop even though the card payload spells it
 	 *  `org_verified_tier` — props are camelCase regardless of the wire's casing. */
@@ -252,9 +266,16 @@ export default function StoreCatalogCard({
 	action?: ReactNode;
 	/** Optional right-click context menu content for the card. */
 	contextMenu?: ReactNode;
+	/** "catalog" is the calm public-web grid: every card has the same height, a
+	 *  one-line title, a two-line description and at most ONE chip, chosen by
+	 *  priority (deprecated, then community app, then the publisher check). The
+	 *  heart, layer chips, access badge, bundle line and community stats are left
+	 *  to the detail page. Unset (the desktop) renders exactly as before. */
+	density?: "catalog";
 }) {
 	const renderLink = useContext(StoreCardLinkContext);
-	const layerBadges = catalogLayerBadges(layers, external);
+	const catalog = density === "catalog";
+	const layerBadges = catalog ? [] : catalogLayerBadges(layers, external);
 	// The stretched, transparent click target. First child so every control that
 	// follows paints over it, and `absolute inset-0` so the WHOLE row is the hit
 	// area — the icon, the name and the description are all inert (their column
@@ -270,7 +291,7 @@ export default function StoreCatalogCard({
 		: null;
 	const target = linkProps ? (
 		(renderLink?.(linkProps) ?? (
-			// biome-ignore lint/a11y/useAnchorContent: the row's visible text is the
+			// the row's visible text is the
 			// accessible content; the overlay carries it as an aria-label so a screen
 			// reader announces one link, not a link plus a duplicate text node.
 			<a
@@ -289,10 +310,16 @@ export default function StoreCatalogCard({
 		/>
 	);
 
+	const catalogChip = catalog
+		? catalogDensityChip({ communityApp, deprecated })
+		: null;
+	const showNameBadges = !(catalog && catalogChip);
+
 	const card = (
 		<div
 			className={cn(
 				"group relative flex items-center gap-3 rounded-xl py-2.5 pr-2 pl-2.5 transition-colors",
+				catalog && "h-24 overflow-hidden",
 				selected ? "bg-accent" : "hover:bg-accent/50",
 				dimmed && UNAVAILABLE_ROW_CLASS
 			)}
@@ -328,36 +355,25 @@ export default function StoreCatalogCard({
 					{/* Beside the NAME, not on the icon: the icon is the app's own
 					    identity, the check is a claim about who published it. `shrink-0`
 					    so a long name truncates and the badge survives. */}
-					<VerifiedBadge
-						orgVerified={orgVerified}
-						publisherTrust={publisherTrust}
-						tier={orgVerifiedTier}
-						verificationDetails={publisherVerification}
-					/>
-					<MarketplaceAccessBadge
-						membershipEntitled={membershipEntitled}
-						membershipIncluded={membershipIncluded}
-					/>
-					{stabilityLabel(stability) ? (
-						<span className="shrink-0 rounded-sm border border-warning/40 px-1 py-px text-[10px] text-status-warning leading-tight">
-							{stabilityLabel(stability)}
-						</span>
+					{showNameBadges ? (
+						<>
+							<VerifiedBadge
+								orgVerified={orgVerified}
+								publisherTrust={publisherTrust}
+								tier={orgVerifiedTier}
+								verificationDetails={publisherVerification}
+							/>
+							<RyuReviewedBadge reviewed={reviewed} />
+						</>
 					) : null}
-					{layerBadges.slice(0, 2).map((label, index) => (
-						<span
-							className="shrink-0 rounded-sm border border-border/70 px-1 py-px text-[10px] text-muted-foreground leading-tight"
-							key={`${label}-${index}`}
-						>
-							{label}
-						</span>
-					))}
+					{catalogChip}
 					{/* The heart rides WITH THE TITLE, not out in the right-hand cluster:
 					    a like is a statement about this listing, so it belongs against
 					    the listing's name, and the right edge is reserved for the one
 					    thing the user came to do (Add / the lifecycle menu). It needs
 					    `pointer-events-auto` to opt back out of the inert text column,
 					    and `relative z-10` to sit above the stretched target. */}
-					{likeNamespace ? (
+					{likeNamespace && !catalog ? (
 						<ItemLikeButton
 							className="pointer-events-auto relative z-10 shrink-0"
 							namespace={likeNamespace}
@@ -365,22 +381,73 @@ export default function StoreCatalogCard({
 						/>
 					) : null}
 				</span>
+				{!catalog &&
+				(communityApp ||
+					membershipEntitled ||
+					membershipIncluded ||
+					deprecated ||
+					stabilityLabel(stability) ||
+					layerBadges.length > 0) ? (
+					<span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+						{communityApp ? (
+							<Badge
+								appearance="catalog-label"
+								className="shrink-0"
+								data-testid="community-app-badge"
+								variant="outline"
+							>
+								Community app
+							</Badge>
+						) : null}
+						<MarketplaceAccessBadge
+							membershipEntitled={membershipEntitled}
+							membershipIncluded={membershipIncluded}
+						/>
+						{deprecated ? (
+							<span
+								className="type-compact shrink-0 rounded-sm border border-destructive/40 px-1 py-px text-status-destructive leading-tight"
+								data-testid="deprecated-badge"
+							>
+								{DEPRECATED_LABEL}
+							</span>
+						) : null}
+						{stabilityLabel(stability) ? (
+							<span className="type-compact shrink-0 rounded-sm border border-warning/40 px-1 py-px text-status-warning leading-tight">
+								{stabilityLabel(stability)}
+							</span>
+						) : null}
+						{layerBadges.slice(0, 2).map((label, index) => (
+							<span
+								className="type-compact shrink-0 rounded-sm border border-border/70 px-1 py-px text-muted-foreground leading-tight"
+								key={`${label}-${index}`}
+							>
+								{label}
+							</span>
+						))}
+					</span>
+				) : null}
 				{publisher ? (
-					<span className="pointer-events-auto relative z-10 mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+					<span className="type-caption pointer-events-auto relative z-10 mt-0.5 flex min-w-0 items-center gap-1.5 text-muted-foreground">
 						{publisher}
 					</span>
 				) : null}
-				<span className="block truncate text-muted-foreground text-xs">
+				<span
+					className={cn(
+						"block text-muted-foreground text-xs",
+						catalog ? "mt-0.5 line-clamp-2 leading-relaxed" : "truncate"
+					)}
+				>
 					{description || "No description provided."}
 				</span>
-				{bundleMemberCount ? (
-					<span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+				{bundleMemberCount && !catalog ? (
+					<span className="type-caption mt-0.5 block truncate text-muted-foreground">
 						Bundle · {bundleMemberCount} items · one-click install
 					</span>
 				) : null}
-				{communityStats &&
+				{!catalog &&
+				communityStats &&
 				(communityStats.downloads > 0 || communityStats.runs > 0) ? (
-					<span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+					<span className="type-caption mt-0.5 block truncate text-muted-foreground">
 						Community · {formatCount(communityStats.downloads)} installs ·{" "}
 						{formatCount(communityStats.runs)} runs
 					</span>
@@ -400,4 +467,39 @@ export default function StoreCatalogCard({
 			<ContextMenuContent align="end">{contextMenu}</ContextMenuContent>
 		</ContextMenu>
 	);
+}
+
+/** The single chip a catalog-density card may carry. Deprecation outranks the
+ *  community disclosure; when neither applies the publisher check beside the
+ *  name is the only signal, so this returns null and the name badges render. */
+function catalogDensityChip({
+	communityApp,
+	deprecated,
+}: {
+	communityApp: boolean;
+	deprecated: boolean;
+}): ReactNode {
+	if (deprecated) {
+		return (
+			<span
+				className="type-compact shrink-0 rounded-sm border border-destructive/40 px-1 py-px text-status-destructive leading-tight"
+				data-testid="deprecated-badge"
+			>
+				{DEPRECATED_LABEL}
+			</span>
+		);
+	}
+	if (communityApp) {
+		return (
+			<Badge
+				appearance="catalog-label"
+				className="shrink-0"
+				data-testid="community-app-badge"
+				variant="outline"
+			>
+				Community app
+			</Badge>
+		);
+	}
+	return null;
 }

@@ -27,6 +27,8 @@ interface PageHeaderProps {
 	subtitleClassName?: string;
 	title: ReactNode;
 	titleClassName?: string;
+	titleTone?: "default" | "destructive";
+	typography?: "default" | "exchange";
 }
 
 /**
@@ -48,6 +50,8 @@ export function PageHeader({
 	title,
 	subtitle,
 	className,
+	titleTone = "default",
+	typography = "default",
 	titleClassName,
 	stagger = true,
 	style,
@@ -74,6 +78,8 @@ export function PageHeader({
 				className={cn(
 					"font-medium text-xl",
 					stagger && "t-stagger-line t-stagger-line--1",
+					titleTone === "destructive" && "text-status-destructive",
+					typography === "exchange" && "text-2xl",
 					titleClassName
 				)}
 			>
@@ -84,6 +90,8 @@ export function PageHeader({
 					className={cn(
 						"font-medium text-muted-foreground text-xl",
 						stagger && "t-stagger-line t-stagger-line--2",
+						typography === "exchange" &&
+							"font-normal text-muted-foreground text-sm",
 						subtitleClassName
 					)}
 				>

@@ -28,7 +28,7 @@ narrow **`MeshHost`** trait
   node-admittance security model this crate anchors — `enforce_remote_auth` stays in
   Core and consults `is_insecure_auth_token_placeholder` here.
 - `ensure_funnel` / `funnel_url` — the Funnel primitives P6 (webhook ingress)
-  consumes for a public URL.
+  consumes for a public URL. The Funnel publishes only the webhook paths, not Core's port.
 
 The network is **opt-in** — `RYU_MESH_ENABLED` (env, wins when set) OR the
 `mesh-enabled` pref that Core seeds into `set_pref_enabled` (the desktop's Gateway →

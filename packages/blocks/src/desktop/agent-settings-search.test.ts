@@ -75,6 +75,18 @@ describe("searchAgentSettings", () => {
 		expect(hits[0]?.id).toBe("agent.skills");
 	});
 
+	test("finds the identity and account access sections by plain words", () => {
+		expect(searchAgentSettings("on my behalf")[0]?.id).toBe(
+			"agent.identity-mode"
+		);
+		expect(searchAgentSettings("treg").map((h) => h.id)).toContain(
+			"agent.account-access"
+		);
+		expect(searchAgentSettings("which accounts")[0]?.id).toBe(
+			"agent.account-access"
+		);
+	});
+
 	test("respects the limit", () => {
 		expect(searchAgentSettings("a", 3).length).toBeLessThanOrEqual(3);
 	});

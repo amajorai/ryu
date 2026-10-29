@@ -228,9 +228,33 @@ pub struct GuardedResponse {
 /// Execute one DNS-pinned request with no automatic redirects. This is the shared
 /// host seam for app protocols that need to apply their own origin/redirect rules;
 /// an app must not reimplement hostname screening or private-address rejection.
+///
+/// This client still honours `HTTP(S)_PROXY`/`ALL_PROXY`; when one is set the
+/// proxy resolves the hostname itself, so the screened addresses are not the
+/// ones connected to. Credential-bearing callers should use
+/// [`guarded_request_direct`].
 pub async fn guarded_request(
     request: GuardedRequest,
     policy: GuardedFetchPolicy,
+) -> Result<GuardedResponse, String> {
+    send_guarded_request(request, policy, false).await
+}
+
+/// [`guarded_request`] without environment or system proxies: the connection
+/// goes only to the screened, pinned addresses. Use it wherever the request
+/// carries credentials, so a configured egress proxy cannot re-resolve the host
+/// into a network the private-address screen was meant to exclude.
+pub async fn guarded_request_direct(
+    request: GuardedRequest,
+    policy: GuardedFetchPolicy,
+) -> Result<GuardedResponse, String> {
+    send_guarded_request(request, policy, true).await
+}
+
+async fn send_guarded_request(
+    request: GuardedRequest,
+    policy: GuardedFetchPolicy,
+    direct: bool,
 ) -> Result<GuardedResponse, String> {
     let parsed =
         url::Url::parse(request.url.trim()).map_err(|error| format!("invalid url: {error}"))?;
@@ -247,10 +271,14 @@ pub async fn guarded_request(
     }
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|error| format!("invalid HTTP method: {error}"))?;
-    let client = reqwest::Client::builder()
+    let mut client = reqwest::Client::builder()
         .timeout(policy.timeout)
         .redirect(reqwest::redirect::Policy::none())
-        .resolve_to_addrs(&target.host, &target.addresses)
+        .resolve_to_addrs(&target.host, &target.addresses);
+    if direct {
+        client = client.no_proxy();
+    }
+    let client = client
         .build()
         .map_err(|error| format!("failed to build guarded HTTP client: {error}"))?;
     let mut builder = client.request(method, parsed.as_str());
@@ -263,12 +291,12 @@ pub async fn guarded_request(
     let mut response = builder
         .send()
         .await
-        .map_err(|error| format!("guarded request failed: {error}"))?;
+        .map_err(|error| format!("guarded request failed: {}", error.without_url()))?;
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| format!("reading guarded response body: {error}"))?
+        .map_err(|error| format!("reading guarded response body: {}", error.without_url()))?
     {
         if body.len() as u64 + chunk.len() as u64 > policy.max_body_bytes {
             return Err(format!(
@@ -310,7 +338,7 @@ async fn guarded_get_once(
         .get(parsed.as_str())
         .send()
         .await
-        .map_err(|error| format!("guarded request failed: {error}"))
+        .map_err(|error| format!("guarded request failed: {}", error.without_url()))
 }
 
 pub async fn guarded_fetch_text_with_policy(
@@ -341,7 +369,7 @@ pub async fn guarded_fetch_text_with_policy(
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|error| format!("reading guarded response body: {error}"))?
+            .map_err(|error| format!("reading guarded response body: {}", error.without_url()))?
         {
             if bytes.len() as u64 + chunk.len() as u64 > policy.max_body_bytes {
                 let remaining = (policy.max_body_bytes as usize).saturating_sub(bytes.len());
@@ -421,6 +449,91 @@ mod tests {
         assert!(screen_url("file:///etc/passwd").await.is_err());
         assert!(screen_url("http://localhost:7980/api").await.is_err());
         assert!(screen_url("http://127.0.0.1:7980/api").await.is_err());
+    }
+
+    /// Serializes tests that rewrite the process-wide proxy variables.
+    static PROXY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Points the proxy variables at `proxy` (clearing `NO_PROXY`) while held,
+    /// and restores every variable to its previous value on drop, so the rest
+    /// of the test binary never sees the fixture proxy.
+    struct ProxyEnvGuard {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ProxyEnvGuard {
+        const CLEARED: [&'static str; 2] = ["NO_PROXY", "no_proxy"];
+        const PROXIED: [&'static str; 4] = ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"];
+
+        fn set(proxy: &str) -> Self {
+            let lock = PROXY_ENV_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let saved = Self::CLEARED
+                .iter()
+                .chain(Self::PROXIED.iter())
+                .map(|name| (*name, std::env::var_os(name)))
+                .collect();
+            for name in Self::CLEARED {
+                std::env::remove_var(name);
+            }
+            for name in Self::PROXIED {
+                std::env::set_var(name, proxy);
+            }
+            Self { saved, _lock: lock }
+        }
+    }
+
+    impl Drop for ProxyEnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.saved {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
+    /// The direct variant must never hand a pinned request to an env proxy.
+    /// The non-direct call is the positive control proving the env proxy is live.
+    #[tokio::test]
+    async fn direct_requests_ignore_environment_proxies() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = format!("http://{}", listener.local_addr().unwrap());
+        let connections = Arc::new(AtomicUsize::new(0));
+        let seen = connections.clone();
+        tokio::spawn(async move {
+            while let Ok((socket, _)) = listener.accept().await {
+                seen.fetch_add(1, Ordering::SeqCst);
+                drop(socket);
+            }
+        });
+        let _env = ProxyEnvGuard::set(&proxy);
+        let request = || super::GuardedRequest {
+            method: "GET".to_owned(),
+            // A public IP literal needs no DNS and passes the address screen.
+            url: "https://1.1.1.1/".to_owned(),
+            headers: vec![("cookie".to_owned(), "session=fixture".to_owned())],
+            body: None,
+        };
+        let policy = GuardedFetchPolicy {
+            allow_http: false,
+            max_redirect_hops: 0,
+            timeout: std::time::Duration::from_secs(2),
+            ..GuardedFetchPolicy::default()
+        };
+        let _ = super::guarded_request(request(), policy).await;
+        assert!(
+            connections.load(Ordering::SeqCst) > 0,
+            "control: the env proxy should receive the non-direct request"
+        );
+        let before = connections.load(Ordering::SeqCst);
+        let _ = super::guarded_request_direct(request(), policy).await;
+        assert_eq!(connections.load(Ordering::SeqCst), before);
     }
 
     #[tokio::test]

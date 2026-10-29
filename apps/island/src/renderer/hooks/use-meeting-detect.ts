@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IslandMeetingEvent, IslandSuggestion } from "../../shared/ipc.ts";
 import { useIslandState } from "../store/island-state.ts";
@@ -25,6 +26,7 @@ interface Detected {
 
 export function useMeetingDetect(): MeetingDetect {
 	const setState = useIslandState((store) => store.setState);
+	const tl = useLiteralMessages();
 	const [detected, setDetected] = useState<Detected | null>(null);
 	// Remember the state the island was in before the chip so dismiss can restore
 	// something sensible without fighting the live-context effect.
@@ -70,7 +72,7 @@ export function useMeetingDetect(): MeetingDetect {
 				source: "local_model",
 				suggestionType: "meeting",
 				title: "Meeting detected",
-				body: `${detected.title} — start notes?`,
+				body: tl("{title} — start notes?", { title: detected.title }),
 				action: "chat",
 				confidence: 1,
 				appName: detected.app,

@@ -1,3 +1,10 @@
+import { nativeSdkSchemaAdmits } from "@ryu/blocks/desktop/agent-elements/utils/native-sdk-admission.ts";
+import {
+	type NativeSdkMessageFields,
+	type NativeSdkValue,
+	nativeReadbackContentSchema,
+	nativeReadbackTextSchema,
+} from "@ryu/blocks/desktop/agent-elements/utils/native-sdk-observation.ts";
 import type { AgentSummary } from "./api/agents.ts";
 
 /** Returns true when the selected agent uses ACP transport (never touches the gateway). */
@@ -49,6 +56,14 @@ export function isAcpAgent(
  * with sibling ids) get an entry, so the pager renders solely at real branch
  * points.
  */
+export interface ChatVersionPager {
+	count: number;
+	ids: string[];
+	index: number;
+}
+export interface ChatVersionPagers {
+	[messageId: string]: ChatVersionPager;
+}
 export function buildVersions(
 	history: Array<{
 		id: string;
@@ -56,9 +71,8 @@ export function buildVersions(
 		siblingCount?: number;
 		siblingIds?: string[];
 	}>
-): Record<string, { index: number; count: number; ids: string[] }> {
-	const map: Record<string, { index: number; count: number; ids: string[] }> =
-		{};
+): ChatVersionPagers {
+	const map: ChatVersionPagers = {};
 	for (const h of history) {
 		if (h.siblingCount && h.siblingCount > 1 && h.siblingIds?.length) {
 			map[h.id] = {
@@ -71,23 +85,30 @@ export function buildVersions(
 	return map;
 }
 
+/** Native SDK messages and legacy content retain their complete opaque values. */
+export interface AssistantReadbackInput {
+	content?: NativeSdkValue;
+	parts?: NativeSdkValue[];
+}
+function hasNativeReadbackContent(
+	message: AssistantReadbackInput
+): message is AssistantReadbackInput & { content: string } {
+	return nativeSdkSchemaAdmits(nativeReadbackContentSchema, message);
+}
+
 /** Plain text from the last assistant message's parts (for auto read-back). */
-export function extractAssistantText(message: {
-	parts?: unknown[];
-	content?: string;
-}): string {
+export function extractAssistantText(message: AssistantReadbackInput): string {
 	if (Array.isArray(message.parts) && message.parts.length > 0) {
 		return message.parts
 			.filter(
-				(part): part is { type: string; text?: string } =>
-					typeof part === "object" &&
-					part !== null &&
-					(part as { type?: string }).type === "text" &&
-					typeof (part as { text?: string }).text === "string"
+				(
+					part
+				): part is NativeSdkMessageFields & { type: "text"; text: string } =>
+					nativeSdkSchemaAdmits(nativeReadbackTextSchema, part)
 			)
 			.map((part) => part.text ?? "")
 			.join("\n\n")
 			.trim();
 	}
-	return typeof message.content === "string" ? message.content.trim() : "";
+	return hasNativeReadbackContent(message) ? message.content.trim() : "";
 }

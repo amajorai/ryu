@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import type { ReconnectRetryState } from "@/src/hooks/useReconnectRetry.ts";
 
 export function ReconnectRetryBanner({
@@ -5,13 +6,17 @@ export function ReconnectRetryBanner({
 }: {
 	state: ReconnectRetryState;
 }) {
+	const tl = useLiteralMessages();
 	if (state.phase === "idle") {
 		return null;
 	}
 
 	const copy = {
 		complete: {
-			detail: `${state.retriedCount} ${state.retriedCount === 1 ? "chat is" : "chats are"} running again.`,
+			detail: tl(
+				"{retriedCount, plural, one {# chat is} other {# chats are}} running again.",
+				{ retriedCount: state.retriedCount }
+			),
 			title: "Connection restored",
 		},
 		error: {
@@ -20,11 +25,17 @@ export function ReconnectRetryBanner({
 			title: "Reconnect retry needs attention",
 		},
 		offline: {
-			detail: `${state.candidateCount} active ${state.candidateCount === 1 ? "chat is" : "chats are"} queued for one retry when the node returns.`,
+			detail: tl(
+				"{candidateCount, plural, one {# active chat is} other {# active chats are}} queued for one retry when the node returns.",
+				{ candidateCount: state.candidateCount }
+			),
 			title: "Connection lost",
 		},
 		retrying: {
-			detail: `Starting one retry for ${state.candidateCount} ${state.candidateCount === 1 ? "chat" : "chats"}…`,
+			detail: tl(
+				"Starting one retry for {candidateCount, plural, one {# chat} other {# chats}}…",
+				{ candidateCount: state.candidateCount }
+			),
 			title: "Connection restored",
 		},
 	}[state.phase];

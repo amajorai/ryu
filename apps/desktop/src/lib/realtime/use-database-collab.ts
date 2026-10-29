@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Doc } from "yjs";
-import { getRealtimeJwt } from "./jwt.ts";
+import { realtimeJwtForTarget } from "@/src/lib/api/client.ts";
 import {
 	type DatabaseDoc,
 	type DbColumn,
@@ -134,7 +134,7 @@ export function useDatabaseCollab(
 		let maySeed = false;
 
 		const setup = async () => {
-			const jwt = await getRealtimeJwt();
+			const jwt = await realtimeJwtForTarget({ url, token, userJwt });
 			if (cancelled) {
 				return;
 			}

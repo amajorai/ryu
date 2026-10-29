@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import type { ApprovalRequest } from "@/src/lib/api/approvals.ts";
 import type { DownloadTask } from "@/src/lib/api/downloads.ts";
 
-if (typeof document === "undefined") {
+if (!globalThis.document) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);

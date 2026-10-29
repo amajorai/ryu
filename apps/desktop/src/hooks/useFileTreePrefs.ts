@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/hooks/useFileTreePrefs.ts
 //
 // localStorage-backed preferences for the workspace "Files" tab file tree
@@ -8,6 +9,27 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { TREE_THEME_INHERIT } from "@/src/lib/pierre-themes.ts";
+
+const storedPreferences = z
+	.object({
+		coloredIcons: z.boolean(),
+		darkTheme: z.string(),
+		lightTheme: z.string(),
+		density: z.enum(["compact", "default", "relaxed"]),
+		dragAndDrop: z.boolean(),
+		flattenEmptyDirectories: z.boolean(),
+		iconSet: z.enum(["minimal", "standard", "complete", "none"]),
+		initialExpansion: z.enum(["closed", "open"]),
+		renaming: z.boolean(),
+		searchMode: z.enum([
+			"expand-matches",
+			"collapse-non-matches",
+			"hide-non-matches",
+		]),
+		showSearch: z.boolean(),
+		stickyFolders: z.boolean(),
+	})
+	.partial();
 
 const STORAGE_KEY = "ryu:file-tree-prefs";
 
@@ -74,7 +96,7 @@ function read(): FileTreePrefs {
 		cache = raw
 			? {
 					...DEFAULT_FILE_TREE_PREFS,
-					...(JSON.parse(raw) as Partial<FileTreePrefs>),
+					...storedPreferences.parse(JSON.parse(raw)),
 				}
 			: DEFAULT_FILE_TREE_PREFS;
 	} catch {

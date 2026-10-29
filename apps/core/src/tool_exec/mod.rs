@@ -1,7 +1,7 @@
 //! **Programmatic tool calling (PTC)** — Core host shim for the extracted
 //! [`ryu_tool_exec`] sandbox primitive.
 //!
-//! The sandbox itself (#476, P4) — the Deno / secure-exec subprocess machinery,
+//! The sandbox itself (#476, P4) — the in-process QuickJS-on-Wasmtime runtime,
 //! the parked-execution store, the `CodeExecutor` backend enum, the
 //! `SandboxToolInvoker`/`SandboxBridge` bridge, the Contract-4 schema defs — now
 //! lives in the `ryu-tool-exec` crate (in-process, function-call hot path). This
@@ -27,15 +27,15 @@
 #[allow(unused_imports)]
 pub use ryu_tool_exec::{
     build_capability_adapter_program, build_inline_tool_program, detect_elicitation, is_available,
-    run_sandboxed, schema, tool_path_to_id, CodeExecutor, Elicitation, ExecOutcome, InvokeOutcome,
-    RegistryToolInvoker, ResumeDecision, SandboxBridge, SandboxToolInvoker, ToolCaller,
-    ToolInvocation, ToolInvokeResult, BACKEND_DENO, CAPABILITY_ADAPTER_CALL_PATH,
+    run_sandboxed, run_sandboxed_warm, schema, tool_path_to_id, CodeExecutor, Elicitation,
+    ExecOutcome, InvokeOutcome, RegistryToolInvoker, ResumeDecision, RunDataFlow, SandboxBridge,
+    SandboxToolInvoker, ToolCaller, ToolInvocation, ToolInvokeResult, CAPABILITY_ADAPTER_CALL_PATH,
     CAPABILITY_ADAPTER_NAMED_PATH, DEFAULT_DEADLINE_SECS, DEFAULT_MEMORY_MB, GRANT_TOOL_EXECUTE,
     MAX_PARKED, MAX_PREVIEW_CHARS, PARKED_TTL,
 };
 
-#[cfg(feature = "tool-exec-securexec")]
-pub use ryu_tool_exec::BACKEND_SECUREXEC;
+#[cfg(feature = "js-sandbox")]
+pub use ryu_tool_exec::BACKEND_JS;
 
 // The pure JS eval-evaluator runner (`run_eval_js`/`EvalJsOutcome`) is consumed
 // directly from `ryu_tool_exec` by the `ryu-eval-code` crate — Core no longer
@@ -48,6 +48,9 @@ use std::sync::Arc;
 
 use crate::sidecar::mcp::McpRegistry;
 
+pub(crate) mod bin_version;
+pub(crate) mod egress_broker;
+
 /// Install the crate's Core-side security-scrubber seams. Called once from
 /// `main.rs` at startup so the sandbox's final-value/log scrub and child-env
 /// scrub stay single-source with Core's `untrusted::strip_template_tokens` /
@@ -59,12 +62,28 @@ pub fn install_tool_exec_host_hooks() {
     });
 }
 
+/// Compile the JavaScript sandbox's guest on a background thread at startup.
+/// On unix the compiled guest is cached under `<data dir>/cache/js-sandbox` so
+/// later starts load it instead of compiling; on other platforms it is compiled
+/// in memory once per process and leftover cache files there are deleted. Called
+/// once from `main.rs`; the first hook or program then runs without waiting on
+/// compilation.
+pub fn warm_up_sandbox() {
+    let cache_dir = crate::paths::cache_path("js-sandbox");
+    ryu_tool_exec::warm_up(Some(cache_dir));
+}
+
 /// Core's implementation of the crate's narrow [`ToolCaller`] seam: routes a PTC
 /// program's `tools.*` call through the same [`McpRegistry::call_tool_with_identity`]
 /// path (and the same resolved allowlist) the chat tool loop uses. Keeping this
 /// impl Core-side is what frees `ryu-tool-exec` of any `apps/core` dependency —
 /// the `tool_registry_host`/`ToolEmbedder` precedent. `Arc<McpRegistry>` coerces
 /// to `Arc<dyn ToolCaller>` at the invoker construction sites unchanged.
+///
+/// The call runs inside the program run's data-flow scope, so the registry's
+/// dispatch can apply the exfiltration guard
+/// ([`crate::approvals::exfiltration_guard`]) to it. No other ingress sets that
+/// scope.
 #[async_trait]
 impl ToolCaller for McpRegistry {
     async fn call_tool_with_identity(
@@ -77,18 +96,22 @@ impl ToolCaller for McpRegistry {
         profile_ids: &[String],
         session_id: Option<String>,
         host_conversation_id: Option<&str>,
+        data_flow: &Arc<RunDataFlow>,
     ) -> Result<Value, String> {
         // The inherent method wins path resolution over this trait method.
-        McpRegistry::call_tool_with_identity(
-            self,
-            agent_id,
-            tool_id,
-            arguments,
-            allowlist,
-            user_id,
-            profile_ids,
-            session_id,
-            host_conversation_id,
+        crate::approvals::exfiltration_guard::scope_sandbox_run(
+            Arc::clone(data_flow),
+            McpRegistry::call_tool_with_identity(
+                self,
+                agent_id,
+                tool_id,
+                arguments,
+                allowlist,
+                user_id,
+                profile_ids,
+                session_id,
+                host_conversation_id,
+            ),
         )
         .await
         .map_err(|e| e.to_string())
@@ -465,7 +488,7 @@ fn build_rest_request(
 
 /// The soft-unavailable envelope a `fail_open` http tool returns instead of an
 /// `Err`, mirroring the deleted exa provider's `unavailable()` shape so a downstream
-/// consumer's `{available:false,…}` handling (quests_client / usage_api) is reused.
+/// consumer's `{available:false,…}` handling (quest evidence gathering / usage_api) is reused.
 fn http_unavailable(reason: impl Into<String>) -> Value {
     serde_json::json!({
         "available": false,
@@ -670,8 +693,9 @@ fn plugin_env_prefix(plugin_id: &str) -> String {
 /// "env:ANTHROPIC_API_KEY"}` (or `RYU_MASTER_KEY`, or a gateway token) with a URL it
 /// controls and exfiltrate a credential the user never knew it could see.
 ///
-/// The discriminator is manifest **provenance**, not tier
-/// ([`crate::plugins::builtins::is_compiled_in_manifest`]):
+/// App dispatch first filters sources with [`restrict_backend_env_sources`],
+/// binding shared-variable access to the actual compiled manifest bytes. This
+/// lower-level gate also handles host-generated requests and scoped variables:
 ///
 /// - A **compiled-in** manifest (`plugin_manifest/fixtures/*.manifest.json`, embedded
 ///   with `include_str!`) reads any var. Its bytes ship inside the binary, and
@@ -692,6 +716,10 @@ pub(crate) fn may_read_env_secret(plugin_id: &str, var: &str) -> bool {
     if crate::plugins::builtins::is_compiled_in_manifest(plugin_id) {
         return true;
     }
+    may_read_scoped_env_secret(plugin_id, var)
+}
+
+fn may_read_scoped_env_secret(plugin_id: &str, var: &str) -> bool {
     // The allowlist var itself is never readable through the gate it configures:
     // a plugin whose id encodes to the `env` namespace would otherwise sit exactly on
     // `RYU_PLUGIN_ENV_` and read the policy naming its own escape hatch.
@@ -706,6 +734,32 @@ pub(crate) fn may_read_env_secret(plugin_id: &str, var: &str) -> bool {
             .map(str::trim)
             .any(|entry| !entry.is_empty() && entry == var)
     })
+}
+
+/// Check environment sources against the manifest that actually owns execution.
+/// Catalog membership of its id cannot establish provenance of installed bytes.
+pub(crate) fn restrict_backend_env_sources(
+    manifest: &crate::plugin_manifest::PluginManifest,
+    backend: &mut crate::plugin_manifest::schema::ToolBackend,
+) {
+    if crate::plugins::builtins::is_exact_compiled_manifest(manifest) {
+        return;
+    }
+    let allowed = |source: &str| {
+        source.split_whitespace().all(|word| {
+            word.strip_prefix("env:")
+                .is_none_or(|var| may_read_scoped_env_secret(&manifest.id, var))
+        })
+    };
+    match backend {
+        crate::plugin_manifest::schema::ToolBackend::Http { secret_headers, .. } => {
+            secret_headers.retain(|_, source| allowed(source));
+        }
+        crate::plugin_manifest::schema::ToolBackend::Command { env, .. } => {
+            env.retain(|_, source| allowed(source));
+        }
+        _ => {}
+    }
 }
 
 /// Resolve an `env:VARNAME` token to its value, from the process environment or —
@@ -786,6 +840,28 @@ async fn resolve_env_secret_from(
             tracing::warn!("reading plugin secret '{var}' for '{plugin_id}' failed: {e:#}");
             SecretToken::Absent
         }
+    }
+}
+
+/// Resolve an explicitly declared sidecar environment reference using the same
+/// plugin namespace and encrypted-store precedence as HTTP credentials.
+/// Callers must apply reserved sidecar environment values after this result.
+pub(crate) async fn resolve_sidecar_env_source(
+    plugin_id: &str,
+    source: &str,
+    store: Option<&crate::plugin_secrets::PluginSecretStore>,
+    manifest: Option<&crate::plugin_manifest::PluginManifest>,
+) -> Option<String> {
+    let var = source.strip_prefix("env:")?;
+    let trusted = manifest.is_some_and(|manifest| {
+        manifest.id == plugin_id && crate::plugins::builtins::is_exact_compiled_manifest(manifest)
+    });
+    if !trusted && !may_read_scoped_env_secret(plugin_id, var) {
+        return None;
+    }
+    match resolve_env_secret_from(plugin_id, var, store).await {
+        SecretToken::Value(value) => Some(value),
+        SecretToken::Absent | SecretToken::Literal => None,
     }
 }
 
@@ -1034,14 +1110,79 @@ fn node_token_target_is_local_core(url: &str) -> bool {
             ))
 }
 
-fn core_request_path_and_query(url: &str) -> Option<String> {
-    let parsed = reqwest::Url::parse(url).ok()?;
-    let mut path = parsed.path().to_owned();
-    if let Some(query) = parsed.query() {
-        path.push('?');
-        path.push_str(query);
+fn secret_headers_use_only_node_token(
+    secret_headers: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    !secret_headers.is_empty()
+        && secret_headers.values().all(|source| {
+            let mut found_node_token = false;
+            for word in source.split_whitespace() {
+                if word.starts_with("env:") || word.starts_with("vault:") {
+                    if word != "env:RYU_TOKEN" {
+                        return false;
+                    }
+                    found_node_token = true;
+                }
+            }
+            found_node_token
+        })
+}
+
+/// Whether `url` is the local Core ext-proxy, where a calling agent is stamped.
+fn targets_local_ext_proxy(url: &str) -> bool {
+    node_token_target_is_local_core(url)
+        && reqwest::Url::parse(url)
+            .ok()
+            .is_some_and(|url| url.path().starts_with("/api/ext/"))
+}
+
+/// Name `agent_id` on a built request with a proof over its final method, path
+/// and query, replacing any agent headers a tool's own header params set.
+/// Without an agent (or a node token) both headers are removed, so a tool can
+/// never name an agent itself; the proxy refuses an unproven one anyway.
+fn sign_agent_lane_request(request: &mut reqwest::Request, agent_id: Option<&str>) {
+    let headers = request.headers_mut();
+    headers.remove(crate::sidecar::ext_proxy::HDR_CALLER_AGENT_ID);
+    headers.remove(crate::sidecar::ext_proxy::HDR_CALLER_AGENT_PROOF);
+    let Some(agent_id) = agent_id else {
+        return;
+    };
+    let url = request.url();
+    let mut path_and_query = url.path().to_owned();
+    if let Some(query) = url.query() {
+        path_and_query.push('?');
+        path_and_query.push_str(query);
     }
-    Some(path)
+    let method = request.method().as_str().to_owned();
+    let Some(proof) =
+        crate::sidecar::ext_proxy::sign_agent_lane(agent_id, &method, &path_and_query)
+    else {
+        return;
+    };
+    if let (Ok(agent), Ok(proof)) = (
+        reqwest::header::HeaderValue::from_str(agent_id),
+        reqwest::header::HeaderValue::from_str(&proof),
+    ) {
+        let headers = request.headers_mut();
+        headers.insert(crate::sidecar::ext_proxy::HDR_CALLER_AGENT_ID, agent);
+        headers.insert(crate::sidecar::ext_proxy::HDR_CALLER_AGENT_PROOF, proof);
+    }
+}
+
+fn guarded_http_client(
+    pin: Option<&(String, Vec<std::net::SocketAddr>)>,
+) -> Result<reqwest::Client, String> {
+    // A proxy resolves the target itself, bypassing the addresses already screened
+    // by the SSRF guard. This dispatcher must connect to the validated first hop.
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none());
+    if let Some((host, addresses)) = pin {
+        builder = builder.resolve_to_addrs(host, addresses);
+    }
+    builder
+        .build()
+        .map_err(|error| format!("http tool: client build failed: {error}"))
 }
 
 /// Proxy a plugin `http` tool call to `url`, Gateway-governed and egress-grant-gated.
@@ -1160,27 +1301,31 @@ pub async fn run_http_tool_with_secret_context(
     // Expand `core:` to this profile's loopback origin BEFORE the egress/SSRF
     // guards, so they screen the URL that is actually dialled.
     let url = resolve_core_url(url);
-    if !secret_headers.is_empty() {
-        let scheme = reqwest::Url::parse(&url)
-            .map_err(|error| format!("http tool: invalid secret-header URL: {error}"))?
-            .scheme()
-            .to_owned();
-        if scheme != "https" {
-            return Err("http tool: secret headers require an HTTPS destination".to_owned());
-        }
-    }
     // Secret headers are deliberately omitted from this first lowering pass. The
     // URL, query, and body do not depend on them, and this lets the cheap egress /
     // SSRF / gateway gates run before Core decrypts any user-managed value.
     let (final_url, query_pairs, mut body, ordinary_headers) =
         build_rest_request(&url, &args, bodyless, header_params, &[])?;
 
+    let is_local_core = node_token_target_is_local_core(&final_url);
+    if !secret_headers.is_empty() {
+        let scheme = reqwest::Url::parse(&final_url)
+            .map_err(|error| format!("http tool: invalid secret-header URL: {error}"))?
+            .scheme()
+            .to_owned();
+        let local_core_node_token =
+            is_local_core && secret_headers_use_only_node_token(secret_headers);
+        if scheme != "https" && !local_core_node_token {
+            return Err("http tool: secret headers require an HTTPS destination".to_owned());
+        }
+    }
+
     let uses_node_token = secret_headers.values().any(|source| {
         source
             .split_whitespace()
             .any(|word| word == "env:RYU_TOKEN")
     });
-    if uses_node_token && !node_token_target_is_local_core(&final_url) {
+    if uses_node_token && !is_local_core {
         return Err(
             "http tool: the Core node token may only authenticate loopback Core destinations"
                 .to_owned(),
@@ -1421,22 +1566,13 @@ pub async fn run_http_tool_with_secret_context(
         .map(|(_, value)| value.clone())
         .collect();
 
-    // The Browser managed-Bot lane is Core-owned. When a manifest tool calls
-    // the local Core ext-proxy, stamp the actual dispatcher-selected agent with
-    // an HMAC tied to this exact request; the sidecar rejects a bare query lane.
-    let browser_agent_lane = audit_agent_id
-        .filter(|_| {
-            node_token_target_is_local_core(&final_url)
-                && reqwest::Url::parse(&final_url)
-                    .ok()
-                    .is_some_and(|url| url.path().starts_with("/api/ext/@ryu/browser"))
-        })
-        .and_then(|agent_id| {
-            core_request_path_and_query(&final_url).and_then(|path_and_query| {
-                crate::sidecar::ext_proxy::sign_agent_lane(agent_id, &method_upper, &path_and_query)
-                    .map(|proof| (agent_id, proof))
-            })
-        });
+    // The calling agent of an app request is Core-owned. When a tool calls the
+    // local Core ext-proxy, stamp the dispatcher-selected agent with an HMAC
+    // tied to the exact request actually sent (see `sign_agent_lane_request`).
+    // The proxy refuses a named agent without it, and forwards the app a grant
+    // it hands back on managed provider calls (Treg), so the agent's account
+    // access applies there too.
+    let lane_agent = audit_agent_id.filter(|_| targets_local_ext_proxy(&final_url));
 
     // 3. Perform the request. Body is the tool args as JSON for methods that carry
     //    one; GET/HEAD send none. Response is `{ status, body }` (JSON if parseable).
@@ -1445,29 +1581,13 @@ pub async fn run_http_tool_with_secret_context(
     // re-issue the request to the `Location` host WITHOUT re-running the egress-grant
     // + SSRF checks above — the classic allowlist bypass (granted public domain →
     // 302 → 127.0.0.1 / 169.254.169.254). The guarded first hop is the only hop.
-    let mut client_builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
-    // Pin the connection to the addresses the SSRF guard validated. Without this,
-    // reqwest re-resolves the host at send() and an attacker who controls the
-    // granted domain's DNS could answer with an internal address the guard never
-    // saw (DNS rebinding). `None` = a deliberate internal/localhost/literal-IP
-    // grant with no DNS lookup to race, so no pin is needed.
-    if let Some((host, addrs)) = &ssrf_pin {
-        client_builder = client_builder.resolve_to_addrs(host, addrs);
-    }
-    let client = client_builder
-        .build()
-        .map_err(|e| format!("http tool: client build failed: {e}"))?;
+    let client = guarded_http_client(ssrf_pin.as_ref())?;
     let mut req = client
         .request(m.clone(), &final_url)
         .timeout(std::time::Duration::from_secs(30));
     for (name, value) in &headers {
         // Invalid header name/value surfaces as a request error at `.send()`.
         req = req.header(name, value);
-    }
-    if let Some((agent_id, proof)) = browser_agent_lane {
-        req = req
-            .header(crate::sidecar::ext_proxy::HDR_CALLER_AGENT_ID, agent_id)
-            .header(crate::sidecar::ext_proxy::HDR_CALLER_AGENT_PROOF, proof);
     }
     if bodyless {
         if !query_pairs.is_empty() {
@@ -1476,7 +1596,14 @@ pub async fn run_http_tool_with_secret_context(
     } else {
         req = req.json(&body);
     }
-    let (result, exit_code, audit_err) = match req.send().await {
+    let sent = match req.build() {
+        Ok(mut request) => {
+            sign_agent_lane_request(&mut request, lane_agent);
+            client.execute(request).await
+        }
+        Err(error) => Err(error),
+    };
+    let (result, exit_code, audit_err) = match sent {
         Ok(resp) => {
             let status = resp.status().as_u16();
             if status == reqwest::StatusCode::PAYMENT_REQUIRED.as_u16() {
@@ -1639,7 +1766,7 @@ static BUILTIN_COMMAND_SEED: std::sync::OnceLock<BTreeMap<String, std::path::Pat
 /// `rtk init` for a user-driven toggle rather than admitting a bin to the
 /// model-reachable tool allowlist.
 fn trusted_builtin_bin_path(bin_key: &str) -> Option<std::path::PathBuf> {
-    let ryu_bin = || crate::paths::ryu_dir().join("bin");
+    let ryu_bin = || crate::paths::bin_dir();
     match bin_key {
         "spider" => Some(
             std::env::var_os("RYU_SPIDER_BIN")
@@ -1731,7 +1858,13 @@ fn resolve_command_bin(bin_key: &str) -> Result<BinResolution, String> {
         ));
     };
     match std::fs::metadata(path) {
-        Ok(meta) if meta.is_file() => Ok(BinResolution::Ready(path.clone())),
+        Ok(meta) if meta.is_file() && is_executable_mode(&meta) => {
+            Ok(BinResolution::Ready(path.clone()))
+        }
+        Ok(meta) if meta.is_file() => Ok(BinResolution::NotInstalled(format!(
+            "command tool: bin '{bin_key}' path {} is not executable",
+            path.display()
+        ))),
         Ok(_) => Ok(BinResolution::NotInstalled(format!(
             "command tool: bin '{bin_key}' path {} is not a regular file",
             path.display()
@@ -1740,6 +1873,21 @@ fn resolve_command_bin(bin_key: &str) -> Result<BinResolution, String> {
             "command tool: bin '{bin_key}' is not installed at {} ({e})",
             path.display()
         ))),
+    }
+}
+
+/// True when a regular file's mode lets it be executed (any execute bit on
+/// unix; always true elsewhere, where executability is not a mode bit).
+fn is_executable_mode(meta: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        true
     }
 }
 
@@ -1812,10 +1960,14 @@ fn render_command_arg(template: &str, args: &Value) -> Result<String, String> {
 /// does not stop a read-only binary from opening an arbitrary absolute path.
 /// Canonicalization happens after the grant check and before spawn, so a command
 /// tool gets neither a path outside its caller's workspace nor a symlink escape.
+/// `hidden` holds the canonical stores the calling agent's account access
+/// hides from it ([`account_hidden_paths`]): a path inside one, or a folder
+/// that contains one (which a recursive tool would walk into), is refused.
 fn prepare_workspace_path_args(
     args: &mut Value,
     path_args: &[String],
     workspace_root: Option<&std::path::Path>,
+    hidden: &[std::path::PathBuf],
 ) -> Result<(), String> {
     if path_args.is_empty() {
         return Ok(());
@@ -1837,6 +1989,14 @@ fn prepare_workspace_path_args(
             .and_then(Value::as_str)
             .ok_or_else(|| format!("command tool: missing filesystem path argument '{name}'"))?;
         let resolved = resolve_workspace_path(&root, raw)?;
+        let resolved_path = std::path::Path::new(&resolved);
+        if hidden.iter().any(|store| {
+            path_is_within(resolved_path, store) || path_is_within(store, resolved_path)
+        }) {
+            return Err(
+                "command tool: this agent's account access hides that path from it".to_owned(),
+            );
+        }
         object.insert(name.clone(), Value::String(resolved));
     }
     Ok(())
@@ -1876,10 +2036,67 @@ fn resolve_workspace_path(workspace_root: &std::path::Path, raw: &str) -> Result
     if path_has_symlink_component_below_root(&candidate, workspace_root) {
         return Err("command tool: filesystem path may not contain symlinks".to_owned());
     }
-    if is_protected_host_path(&canonical) {
+    if is_or_contains_protected_host_path(&canonical) {
         return Err("command tool: protected host paths are not searchable".to_owned());
     }
     Ok(canonical.to_string_lossy().into_owned())
+}
+
+/// The stores the OS sandbox hides from a limited agent's engine
+/// ([`crate::agent_access::AccountConfinement`]), canonical: Ryu's data dir,
+/// the home credential stores (SSH, cloud, package-registry and Git keys,
+/// browser profiles), the Ryu Desktop's and Ryu Browser's data and, when its
+/// model providers are limited, the user's provider sign-in and key stores.
+/// Empty for an unrestricted agent or an unattributed call.
+async fn account_hidden_paths(agent_id: Option<&str>) -> Vec<std::path::PathBuf> {
+    let (Some(agent_id), Some(store)) = (agent_id, crate::agents::global()) else {
+        return Vec::new();
+    };
+    let confinement = crate::agent_access::account_confinement_for_agent(store, agent_id).await;
+    if !confinement.is_confined() {
+        return Vec::new();
+    }
+    let provider_stores = confinement
+        .hides_providers()
+        .then(crate::agent_access::user_provider_stores);
+    confined_hidden_paths(
+        &crate::paths::ryu_dir(),
+        dirs::home_dir().as_deref(),
+        provider_stores.as_deref(),
+    )
+}
+
+/// The canonical stores a confined agent's command tools may not reach:
+/// `ryu_dir`, the home credential stores under `home`
+/// ([`crate::agent_sandbox::home_credential_masks`]), the user's Keychain
+/// files ([`crate::agent_sandbox::keychain_masks`]), the Ryu Desktop's and
+/// Ryu Browser's data, and `provider_stores` when given. Each is resolved
+/// through symlinks, so a store linked elsewhere is hidden where it really
+/// lives; a store that does not exist is skipped, since a path inside it
+/// cannot resolve either. `home` itself is not a store: a workspace in the
+/// home folder keeps its ordinary paths, though a folder containing a store
+/// is refused by [`prepare_workspace_path_args`].
+fn confined_hidden_paths(
+    ryu_dir: &std::path::Path,
+    home: Option<&std::path::Path>,
+    provider_stores: Option<&[std::path::PathBuf]>,
+) -> Vec<std::path::PathBuf> {
+    let mut paths = vec![ryu_dir.to_owned()];
+    paths.extend(crate::agent_sandbox::home_credential_masks(home));
+    paths.extend(crate::agent_sandbox::keychain_masks(home));
+    paths.extend(crate::agent_sandbox::ryu_app_data_masks(
+        &crate::agent_sandbox::ryu_app_data_roots(home),
+    ));
+    if let Some(stores) = provider_stores {
+        paths.extend(stores.iter().cloned());
+    }
+    let mut hidden: Vec<std::path::PathBuf> = paths
+        .into_iter()
+        .filter_map(|path| std::fs::canonicalize(path).ok())
+        .collect();
+    hidden.sort();
+    hidden.dedup();
+    hidden
 }
 
 fn path_is_within(path: &std::path::Path, root: &std::path::Path) -> bool {
@@ -1914,22 +2131,9 @@ fn path_has_symlink_component_below_root(
 /// parent directory as the active workspace. Known Ryu credential filenames are
 /// denied at any depth as a second defense for copied or nested data directories.
 pub(crate) fn is_protected_host_path(path: &std::path::Path) -> bool {
-    let mut roots = vec![crate::paths::ryu_dir()];
-    if let Some(home) = dirs::home_dir() {
-        roots.extend([
-            home.join(".ssh"),
-            home.join(".gnupg"),
-            home.join(".aws"),
-            home.join(".azure"),
-            home.join(".codex"),
-            home.join(".pi"),
-            home.join(".config").join("gcloud"),
-        ]);
-    }
-    if roots
-        .into_iter()
-        .filter_map(|root| std::fs::canonicalize(root).ok())
-        .any(|root| path_is_within(path, &root))
+    if protected_host_roots()
+        .iter()
+        .any(|root| path_is_within(path, root))
     {
         return true;
     }
@@ -1943,16 +2147,52 @@ pub(crate) fn is_protected_host_path(path: &std::path::Path) -> bool {
     )
 }
 
+/// True when `path` is a protected store or a directory that holds one (a parent
+/// of the home folder such as `/home`, or of `~/.ssh`). A tool that mounts or
+/// walks the whole directory, `just-bash` reading `alice/.ssh/id_ed25519` through
+/// `/home`, would otherwise reach the store although the path itself is not inside it.
+fn is_or_contains_protected_host_path(path: &std::path::Path) -> bool {
+    is_protected_host_path(path)
+        || protected_host_roots()
+            .iter()
+            .any(|root| path_is_within(root, path))
+}
+
+/// The conventional protected stores, canonical; a store that does not exist is skipped.
+fn protected_host_roots() -> Vec<std::path::PathBuf> {
+    let mut roots = vec![crate::paths::ryu_dir()];
+    if let Some(home) = dirs::home_dir() {
+        roots.extend([
+            home.join(".ssh"),
+            home.join(".gnupg"),
+            home.join(".aws"),
+            home.join(".azure"),
+            home.join(".codex"),
+            home.join(".pi"),
+            home.join(".config").join("gcloud"),
+        ]);
+    }
+    roots
+        .into_iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .collect()
+}
+
 /// Reject workspace roots that would turn a narrowly selected project search
 /// into a host-wide search. The active root must be a real directory below the
-/// filesystem root and must not be the user's home or a protected host store.
+/// filesystem root and must not be the user's home, a parent of it (`/home`,
+/// `/Users`), or a protected host store or a folder holding one.
 pub(crate) fn is_usable_workspace_root(path: &std::path::Path) -> bool {
-    if !path.is_dir() || path.parent().is_none() || is_protected_host_path(path) {
+    if !path.is_dir() || path.parent().is_none() {
+        return false;
+    }
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    if is_or_contains_protected_host_path(&canonical) {
         return false;
     }
     dirs::home_dir()
         .and_then(|home| std::fs::canonicalize(home).ok())
-        .is_none_or(|home| path != home)
+        .is_none_or(|home| !path_is_within(&home, &canonical))
 }
 
 /// Build argv from a structured [`ArgSpec`] list (the `command_args` template
@@ -2156,13 +2396,17 @@ pub async fn run_command_tool_with_agent(
         audit_agent_id,
         None,
         &[],
+        None,
     )
     .await
 }
 
 /// Variant of [`run_command_tool_with_agent`] for command tools that declare
-/// caller-workspace path arguments. The workspace root is resolved by the MCP
-/// registry from the server-owned conversation context; passing it separately
+/// caller-workspace path arguments or a `bin_version` requirement (the two
+/// wrappers above pass neither, so they refuse any `egress_url_arg`; the MCP
+/// dispatcher passes the manifest's).
+/// The workspace root is resolved by the MCP registry from the server-owned
+/// conversation context; passing it separately
 /// keeps this generic command runner independent of conversation storage.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_command_tool_with_agent_and_workspace(
@@ -2182,6 +2426,7 @@ pub async fn run_command_tool_with_agent_and_workspace(
     audit_agent_id: Option<&str>,
     workspace_root: Option<&std::path::Path>,
     workspace_path_args: &[String],
+    bin_version_req: Option<&crate::plugin_manifest::schema::CommandBinVersion>,
 ) -> Result<Value, String> {
     use crate::plugin_manifest::schema::CommandOutput;
     use tokio::io::AsyncReadExt;
@@ -2202,15 +2447,30 @@ pub async fn run_command_tool_with_agent_and_workspace(
         ));
     }
 
-    prepare_workspace_path_args(&mut args, workspace_path_args, workspace_root)?;
-
-    if let Some(arg_name) = egress_url_arg {
-        let _ = arg_name;
-        return Err(
-            "command tool: URL-fetching child processes are disabled until a mediated pinned egress broker is available"
-                .to_owned(),
-        );
+    // 1b. EGRESS ⇒ VERSION: the egress broker only mediates a binary release that
+    //     was verified to honour `HTTP(S)_PROXY`, so a URL-fetching command tool
+    //     must never run unversioned. Manifest validation already requires
+    //     `bin_version` alongside `egress_url_arg`; this runner-level refusal holds
+    //     the same invariant for every entry point (including the wrappers above,
+    //     which pass no requirement), before any I/O.
+    if egress_url_arg.is_some() && bin_version_req.is_none() {
+        return Err(format!(
+            "command tool: '{bin_key}' declares egress_url_arg but no bin_version requirement \
+             (the egress proxy only mediates a verified binary release)"
+        ));
     }
+
+    let hidden = account_hidden_paths(audit_agent_id).await;
+    prepare_workspace_path_args(&mut args, workspace_path_args, workspace_root, &hidden)?;
+
+    // URL-fetching child: screen the URL argument first (fail fast on private,
+    // internal, non-http(s), and disallowed-port targets), snapshotting the
+    // policy the per-invocation egress broker will apply to EVERY connection the
+    // child opens. The broker itself is started right before spawn.
+    let egress_policy = match egress_url_arg {
+        Some(arg_name) => Some(screen_command_egress_url(&args, arg_name, timeout_secs).await?),
+        None => None,
+    };
 
     // 2. ALLOWLIST RESOLUTION (the control): KEY → absolute path, file-verified.
     //    An UNKNOWN key stays a fail-closed `Err` (the allowlist is the security
@@ -2221,6 +2481,21 @@ pub async fn run_command_tool_with_agent_and_workspace(
         BinResolution::Ready(path) => path,
         BinResolution::NotInstalled(reason) => return Ok(command_unavailable(reason)),
     };
+
+    // 4. ENV (computed here so the version probe runs under the same posture):
+    //    inherit → scrub secret-shaped keys. The declared overlay is layered below.
+    let scrubbed = crate::sidecar::env_scrub::scrub_child_env(std::env::vars(), &[]);
+    let mut child_env: BTreeMap<String, String> = scrubbed.into_iter().collect();
+
+    // 2b. BINARY VERSION: a declared `bin_version` requirement is probed against
+    //     the resolved binary (cached per path/size/mtime) and refused fail-closed
+    //     when unparsable or out of range — before argv, Gateway, broker, or spawn.
+    if let Some(requirement) = bin_version_req {
+        let probe_timeout = bin_version::BIN_VERSION_PROBE_TIMEOUT
+            .min(std::time::Duration::from_secs(timeout_secs.max(1)));
+        bin_version::check_bin_version(bin_key, &abs_path, requirement, &child_env, probe_timeout)
+            .await?;
+    }
 
     // 3. ARGV BUILD (NO shell). Structured `arg_specs` (map/split) supersede the
     //    `command_args` template path when present — the map/split expansions the
@@ -2237,10 +2512,8 @@ pub async fn run_command_tool_with_agent_and_workspace(
         }
     };
 
-    // 4. ENV: inherit → scrub secret-shaped keys → layer ONLY the declared vars.
-    //    Declared VALUES never enter the scan/audit content below.
-    let scrubbed = crate::sidecar::env_scrub::scrub_child_env(std::env::vars(), &[]);
-    let mut child_env: BTreeMap<String, String> = scrubbed.into_iter().collect();
+    // 4b. ENV overlay: layer ONLY the declared vars onto the scrubbed base.
+    //     Declared VALUES never enter the scan/audit content below.
     for (child_key, source) in env_map {
         // v1 supports only `env:VARNAME` — read Core's process env.
         if let Some(var) = source.strip_prefix("env:") {
@@ -2318,6 +2591,23 @@ pub async fn run_command_tool_with_agent_and_workspace(
             return Err(format!("gateway denied command exec: {reason}"));
         }
     }
+
+    // 5b. EGRESS BROKER for URL-fetching children: a loopback forward proxy with
+    //     a random per-invocation credential that re-screens and IP-pins every
+    //     connection. Installed AFTER the declared env so a manifest cannot
+    //     override the proxy variables or exempt hosts through `NO_PROXY`. The
+    //     handle lives until this function returns (child exited or killed) and
+    //     its lifetime is capped at the tool timeout.
+    let _egress_broker = match egress_policy {
+        Some(policy) => {
+            let broker = egress_broker::EgressBroker::start(policy)
+                .await
+                .map_err(|e| format!("command tool: failed to start egress broker: {e}"))?;
+            broker.apply_to_env(&mut child_env);
+            Some(broker)
+        }
+        None => None,
+    };
 
     // 6. SPAWN — argv array, cleared+declared env, piped stdout/stderr, no stdin.
     let started = std::time::Instant::now();
@@ -2448,7 +2738,8 @@ pub async fn run_command_tool_with_agent_and_workspace(
     )
     .await;
 
-    let truncated = stdout_bytes.len() >= MAX_COMMAND_OUTPUT_BYTES;
+    let truncated = stdout_bytes.len() >= MAX_COMMAND_OUTPUT_BYTES
+        || stderr_bytes.len() >= MAX_COMMAND_OUTPUT_BYTES;
     let stdout_str = String::from_utf8_lossy(&stdout_bytes).into_owned();
     let stderr_str = String::from_utf8_lossy(&stderr_bytes).into_owned();
     // A non-zero exit is returned as `Ok` (the exit code is in the payload +
@@ -2471,13 +2762,42 @@ pub async fn run_command_tool_with_agent_and_workspace(
             // Structured JSON stdout is returned verbatim: it has no free-text
             // field, and splicing stderr in would corrupt the parsed value.
             Ok(v) => Ok(v),
+            // A stream past the cap is cut mid-document, so it lands here too; say so
+            // rather than hand the agent half a JSON envelope as if it were whole.
             Err(_) => Ok(serde_json::json!({
                 "available": true,
                 "content": merge_stderr(stdout_str, &stderr_str),
                 "exit_code": exit_code,
+                "truncated": truncated,
             })),
         },
     }
+}
+
+/// Pre-spawn screen for a command tool's `egress_url_arg`: the URL must be a
+/// string, pass Core's agent egress screen ([`crate::server::screen_agent_egress_url`]:
+/// http/https only, internal hosts and private/loopback/metadata addresses refused
+/// unless allowlisted), and use a port the egress broker will permit. Returns the
+/// broker policy snapshot so the URL screen and the per-connection screen agree.
+async fn screen_command_egress_url(
+    args: &Value,
+    arg_name: &str,
+    timeout_secs: u64,
+) -> Result<egress_broker::BrokerPolicy, String> {
+    let raw = args.get(arg_name).and_then(Value::as_str).ok_or_else(|| {
+        format!("command tool: egress URL argument '{arg_name}' must be a string")
+    })?;
+    let parsed = crate::server::screen_agent_egress_url(raw)
+        .await
+        .map_err(|e| format!("command tool: egress URL refused: {e}"))?;
+    let policy =
+        egress_broker::BrokerPolicy::from_env(std::time::Duration::from_secs(timeout_secs));
+    let host = parsed.host_str().unwrap_or_default();
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    policy
+        .check_port(host, port)
+        .map_err(|e| format!("command tool: egress URL refused: {e}"))?;
+    Ok(policy)
 }
 
 /// Append non-empty `stderr` to a command's `text` output, matching the original
@@ -2625,2204 +2945,4 @@ pub async fn resume_execution_opt(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::plugin_manifest::schema::CommandOutput;
-    use crate::sidecar::adapters::acp::AcpAgentRegistry;
-
-    // ── Declarative `command` ToolBackend ─────────────────────────────────────
-
-    fn grants(items: &[&str]) -> std::collections::HashSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    fn test_absolute_path(path: &str) -> std::path::PathBuf {
-        #[cfg(windows)]
-        {
-            let name = path
-                .trim_start_matches('/')
-                .trim_start_matches('\\')
-                .replace('/', "_")
-                .replace('\\', "_");
-            std::env::temp_dir().join(format!("ryu-core-test-path-{name}"))
-        }
-        #[cfg(not(windows))]
-        {
-            std::path::PathBuf::from(path)
-        }
-    }
-
-    fn test_command_path(_name: &str) -> std::path::PathBuf {
-        #[cfg(windows)]
-        {
-            std::env::var_os("SystemRoot")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
-                .join("System32")
-                .join("WindowsPowerShell")
-                .join("v1.0")
-                .join("powershell.exe")
-        }
-        #[cfg(not(windows))]
-        {
-            let path = std::env::var_os("PATH").and_then(|value| {
-                std::env::split_paths(&value)
-                    .map(|dir| dir.join(_name))
-                    .find(|candidate| candidate.is_file())
-            });
-            path.unwrap_or_else(|| std::path::PathBuf::from(format!("/bin/{_name}")))
-        }
-    }
-
-    fn test_allowlist_entry(name: &str) -> String {
-        format!("{name}={}", test_command_path(name).display())
-    }
-
-    /// Return the platform-native child arguments used by command-tool tests.
-    /// Windows PowerShell's `-File` mode keeps the rendered values in `$args`,
-    /// rather than reparsing them as a `-Command` string, so metacharacter and
-    /// JSON tests retain their literal-argv coverage.
-    fn test_command_args(
-        command: &str,
-        placeholders: &[&str],
-    ) -> (Option<tempfile::TempDir>, Vec<String>) {
-        #[cfg(windows)]
-        {
-            let script_body = match command {
-                "echo" => "[Console]::WriteLine([String]::Join(' ', $args))\n",
-                "sleep" => "Start-Sleep -Seconds 30\n",
-                "dd" => "[byte[]]$bytes = New-Object byte[] 2097152\n[Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)\n[Console]::Error.WriteLine('records')\n",
-                "env" => "Get-ChildItem Env: | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value }\n",
-                "sh" => "[Console]::WriteLine('the-stdout')\n[Console]::Error.WriteLine('the-stderr')\n",
-                _ => panic!("unknown Windows test command: {command}"),
-            };
-            let dir = tempfile::tempdir().expect("test command tempdir");
-            let script = dir.path().join(format!("{command}.ps1"));
-            std::fs::write(&script, script_body).expect("write PowerShell test script");
-            let mut args = vec![
-                "-NoProfile".to_owned(),
-                "-ExecutionPolicy".to_owned(),
-                "Bypass".to_owned(),
-                "-File".to_owned(),
-                script.to_string_lossy().into_owned(),
-            ];
-            args.extend(placeholders.iter().map(|name| format!("{{{name}}}")));
-            (Some(dir), args)
-        }
-        #[cfg(not(windows))]
-        {
-            let args = match command {
-                "echo" => placeholders
-                    .iter()
-                    .map(|name| format!("{{{name}}}"))
-                    .collect(),
-                "sleep" => vec!["30".to_owned()],
-                "dd" => vec![
-                    "if=/dev/zero".to_owned(),
-                    "bs=1024".to_owned(),
-                    "count=2048".to_owned(),
-                ],
-                "env" => Vec::new(),
-                "sh" => vec![
-                    "-c".to_owned(),
-                    "printf 'the-stdout\\n'; printf 'the-stderr\\n' 1>&2".to_owned(),
-                ],
-                _ => panic!("unknown Unix test command: {command}"),
-            };
-            (None, args)
-        }
-    }
-
-    #[test]
-    fn parse_command_allowlist_keeps_only_absolute_named_entries() {
-        let echo = test_command_path("echo");
-        let sleep = test_command_path("sleep");
-        let invalid_name = test_command_path("invalid");
-        let dd = test_command_path("dd");
-        let map = parse_command_allowlist(&format!(
-            "echo={}, sleep = {} ; bad=relative/path, ={}, noeq, dd={}",
-            echo.display(),
-            sleep.display(),
-            invalid_name.display(),
-            dd.display()
-        ));
-        assert_eq!(map.get("echo"), Some(&echo));
-        assert_eq!(map.get("sleep"), Some(&sleep));
-        assert_eq!(map.get("dd"), Some(&dd));
-        // Relative path, empty name, and malformed entries are dropped.
-        assert!(!map.contains_key("bad"));
-        assert_eq!(map.len(), 3);
-        // Empty string ⇒ empty map ⇒ fail-closed.
-        assert!(parse_command_allowlist("").is_empty());
-    }
-
-    #[test]
-    fn render_command_arg_substitutes_rejects_and_guards() {
-        let args = serde_json::json!({ "q": "hello", "n": 5, "obj": { "a": 1 } });
-        // Glued flag keeps the value one token.
-        assert_eq!(
-            render_command_arg("--query={q}", &args).unwrap(),
-            "--query=hello"
-        );
-        // Numbers stringify.
-        assert_eq!(render_command_arg("--num={n}", &args).unwrap(), "--num=5");
-        // Missing placeholder → error.
-        assert!(render_command_arg("{missing}", &args).is_err());
-        // Non-scalar arg → error.
-        assert!(render_command_arg("{obj}", &args).is_err());
-        // Option-injection guard: a leading-dash interpolated VALUE is rejected …
-        let dash = serde_json::json!({ "q": "-rf" });
-        assert!(render_command_arg("{q}", &dash).is_err());
-        // … but a leading dash in the TEMPLATE (author-controlled) is fine.
-        assert_eq!(
-            render_command_arg("--flag={q}", &serde_json::json!({ "q": "ok" })).unwrap(),
-            "--flag=ok"
-        );
-    }
-
-    #[test]
-    fn workspace_path_args_allow_only_existing_non_symlink_workspace_paths() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("workspace");
-        let nested = root.join("src");
-        std::fs::create_dir_all(&nested).unwrap();
-        let file = nested.join("main.rs");
-        std::fs::write(&file, "fn main() {}\n").unwrap();
-
-        let mut args = serde_json::json!({ "path": "src/main.rs" });
-        prepare_workspace_path_args(&mut args, &["path".to_owned()], Some(&root)).unwrap();
-        assert_eq!(
-            args["path"].as_str(),
-            Some(
-                std::fs::canonicalize(&file)
-                    .unwrap()
-                    .to_string_lossy()
-                    .as_ref()
-            )
-        );
-
-        for path in ["../outside", "/tmp", "src/missing.rs"] {
-            let mut args = serde_json::json!({ "path": path });
-            let error = prepare_workspace_path_args(&mut args, &["path".to_owned()], Some(&root))
-                .expect_err("out-of-workspace or missing path must be denied");
-            assert!(
-                error.contains("workspace")
-                    || error.contains("resolved")
-                    || error.contains("symlink"),
-                "unexpected error for {path}: {error}"
-            );
-        }
-
-        #[cfg(unix)]
-        {
-            let outside = temp.path().join("outside.txt");
-            std::fs::write(&outside, "not in workspace\n").unwrap();
-            let link = root.join("link.txt");
-            std::os::unix::fs::symlink(&outside, &link).unwrap();
-            let mut args = serde_json::json!({ "path": "link.txt" });
-            let error = prepare_workspace_path_args(&mut args, &["path".to_owned()], Some(&root))
-                .expect_err("symlink path must be denied");
-            assert!(
-                error.contains("symlink") || error.contains("workspace"),
-                "unexpected error: {error}"
-            );
-        }
-    }
-
-    #[test]
-    fn protected_host_paths_are_denied_even_when_the_workspace_is_a_parent() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("workspace");
-        std::fs::create_dir_all(&root).unwrap();
-        let token = root.join("node-auth.token");
-        std::fs::write(&token, "not a real token").unwrap();
-
-        let mut args = serde_json::json!({ "path": "node-auth.token" });
-        let error = prepare_workspace_path_args(&mut args, &["path".to_owned()], Some(&root))
-            .expect_err("known Ryu credential filenames must be denied");
-        assert!(error.contains("protected"), "unexpected error: {error}");
-
-        if let Some(home) = dirs::home_dir() {
-            for directory in [".codex", ".pi"] {
-                if let Ok(path) = std::fs::canonicalize(home.join(directory)) {
-                    assert!(
-                        is_protected_host_path(&path),
-                        "agent credential directory {directory} must be protected"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn workspace_path_args_require_a_workspace_root() {
-        let mut args = serde_json::json!({ "path": "src/main.rs" });
-        let error = prepare_workspace_path_args(&mut args, &["path".to_owned()], None)
-            .expect_err("path-scoped commands must fail closed without a root");
-        assert!(
-            error.contains("active workspace"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[tokio::test]
-    async fn ripgrep_workspace_boundary_allows_in_root_and_denies_outside() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("workspace");
-        std::fs::create_dir_all(&root).unwrap();
-        let inside = root.join("notes.txt");
-        let outside = temp.path().join("outside.txt");
-        std::fs::write(&inside, "RYU_WORKSPACE_SEARCH_PROOF\n").unwrap();
-        std::fs::write(&outside, "RYU_OUTSIDE_SEARCH_PROOF\n").unwrap();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("rg"));
-
-        let templates = vec![
-            "--json".to_owned(),
-            "--color".to_owned(),
-            "never".to_owned(),
-            "--".to_owned(),
-            "{pattern}".to_owned(),
-            "{path}".to_owned(),
-        ];
-        let path_args = vec!["path".to_owned()];
-        let grants = grants(&["tool:command:rg"]);
-        let inside_result = run_command_tool_with_agent_and_workspace(
-            "rg",
-            &templates,
-            None,
-            &BTreeMap::new(),
-            None,
-            10,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({ "pattern": "RYU_WORKSPACE_SEARCH_PROOF", "path": "notes.txt" }),
-            &grants,
-            "@ryu/ripgrep",
-            None,
-            None,
-            Some(&root),
-            &path_args,
-        )
-        .await
-        .expect("in-workspace ripgrep search runs");
-        let stdout = inside_result["stdout"].as_str().unwrap_or_default();
-        assert!(stdout.contains("RYU_WORKSPACE_SEARCH_PROOF"), "{stdout}");
-
-        let outside_error = run_command_tool_with_agent_and_workspace(
-            "rg",
-            &templates,
-            None,
-            &BTreeMap::new(),
-            None,
-            10,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({ "pattern": "RYU_OUTSIDE_SEARCH_PROOF", "path": outside }),
-            &grants,
-            "@ryu/ripgrep",
-            None,
-            None,
-            Some(&root),
-            &path_args,
-        )
-        .await
-        .expect_err("outside-workspace ripgrep search must be denied");
-        assert!(
-            outside_error.contains("active workspace"),
-            "{outside_error}"
-        );
-    }
-
-    /// Build the exact `rtk` arg-spec list (mode-map + shell-split command).
-    fn rtk_specs() -> Vec<crate::plugin_manifest::schema::ArgSpec> {
-        serde_json::from_value(serde_json::json!([
-            { "from": "mode", "map": { "wrap": [], "proxy": ["proxy"], "test": ["test"], "err": ["err"] }, "default": "wrap" },
-            { "from": "command", "split": "shell", "required": true }
-        ]))
-        .unwrap()
-    }
-
-    #[test]
-    fn expand_arg_specs_reproduces_rtk_argv() {
-        let specs = rtk_specs();
-        // mode "wrap" contributes ZERO tokens; command shell-splits into variadic.
-        assert_eq!(
-            expand_arg_specs(
-                &specs,
-                &serde_json::json!({ "command": "git status", "mode": "wrap" })
-            )
-            .unwrap(),
-            vec!["git", "status"]
-        );
-        // Absent mode defaults to "wrap" → still zero mode tokens.
-        assert_eq!(
-            expand_arg_specs(&specs, &serde_json::json!({ "command": "cargo test" })).unwrap(),
-            vec!["cargo", "test"]
-        );
-        // A non-wrap mode prepends its subcommand token.
-        assert_eq!(
-            expand_arg_specs(
-                &specs,
-                &serde_json::json!({ "command": "ls -la", "mode": "proxy" })
-            )
-            .unwrap(),
-            vec!["proxy", "ls", "-la"]
-        );
-        // Split tokens carrying leading dashes are NOT option-injection-guarded
-        // (a wrapped command legitimately has flags).
-        assert_eq!(
-            expand_arg_specs(&specs, &serde_json::json!({ "command": "grep -rn foo" })).unwrap(),
-            vec!["grep", "-rn", "foo"]
-        );
-    }
-
-    #[test]
-    fn expand_arg_specs_error_paths() {
-        let specs = rtk_specs();
-        // Unknown mode → error (mirrors the old mode_prefix rejection).
-        assert!(expand_arg_specs(
-            &specs,
-            &serde_json::json!({ "command": "ls", "mode": "bogus" })
-        )
-        .is_err());
-        // Blank required command → error.
-        assert!(expand_arg_specs(&specs, &serde_json::json!({ "command": "   " })).is_err());
-        // Missing required command → error.
-        assert!(expand_arg_specs(&specs, &serde_json::json!({})).is_err());
-        // Unbalanced quotes → parse error, nothing spawned.
-        assert!(
-            expand_arg_specs(&specs, &serde_json::json!({ "command": "git \"status" })).is_err()
-        );
-    }
-
-    #[tokio::test]
-    async fn command_tool_missing_grant_refused_before_allowlist_io() {
-        // No grant → deterministic refusal before any allowlist read or spawn.
-        let err = run_command_tool(
-            "echo",
-            &["{msg}".to_string()],
-            None,
-            &BTreeMap::new(),
-            None,
-            5,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({ "msg": "hi" }),
-            &grants(&[]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect_err("missing grant must be refused");
-        assert!(
-            err.contains("not granted") && err.contains("tool:command:echo"),
-            "{err}"
-        );
-    }
-
-    /// URL-fetching command tools fail closed before any child spawn because a
-    /// subprocess can re-resolve DNS or follow links after an in-process screen.
-    async fn crawl_url(url: &str) -> Result<Value, String> {
-        // Pin the guard to its default posture (ON, no host allowlist) so the
-        // assertions don't depend on ambient env; these are the process defaults,
-        // so writing them is harmless even if it leaks to a sibling test.
-        std::env::set_var("RYU_AGENT_EGRESS_SSRF_GUARD", "1");
-        std::env::remove_var("RYU_AGENT_EGRESS_ALLOW_HOSTS");
-        run_command_tool(
-            "spider",
-            &["crawl".to_string(), "--".to_string(), "{url}".to_string()],
-            None,
-            &BTreeMap::new(),
-            None,
-            5,
-            CommandOutput::Json,
-            Some("url"),
-            &BTreeMap::new(),
-            serde_json::json!({ "url": url }),
-            &grants(&["tool:command:spider"]),
-            "spider",
-            None,
-        )
-        .await
-    }
-
-    /// URL-fetching child processes are rejected before any downstream allowlist
-    /// or network behavior.
-    fn assert_blocked_by_screen(res: &Result<Value, String>, what: &str) {
-        let err = res.as_ref().expect_err(what);
-        assert!(
-            !err.contains("allowlist"),
-            "{what}: expected an egress-screen rejection, but the error came from \
-             allowlist resolution (screen let it through): {err}"
-        );
-    }
-
-    // These tests pin the fail-closed command-network boundary for the deleted
-    // native crawler provider.
-
-    #[tokio::test]
-    async fn command_tool_egress_passes_public_ip_to_allowlist() {
-        let err = crawl_url("http://93.184.216.34/")
-            .await
-            .expect_err("URL-fetching command tools must fail closed");
-        assert!(
-            !err.contains("allowlist"),
-            "network child must be refused at the boundary"
-        );
-    }
-
-    #[tokio::test]
-    async fn command_tool_egress_rejects_non_http_scheme() {
-        assert_blocked_by_screen(
-            &crawl_url("file:///etc/passwd").await,
-            "file:// must be rejected",
-        );
-        assert_blocked_by_screen(
-            &crawl_url("ftp://example.com").await,
-            "ftp:// must be rejected",
-        );
-    }
-
-    #[tokio::test]
-    async fn command_tool_egress_rejects_flag_smuggling_url() {
-        // A flag-shaped "url" is not valid http/https, so the scheme screen catches
-        // it before it can ever reach argv as an injected option.
-        assert_blocked_by_screen(
-            &crawl_url("--config=/etc/shadow").await,
-            "flag-like URL must be rejected",
-        );
-    }
-
-    #[tokio::test]
-    async fn command_tool_egress_blocks_metadata_ip() {
-        assert_blocked_by_screen(
-            &crawl_url("http://169.254.169.254/").await,
-            "cloud metadata IP must be blocked before any spawn",
-        );
-    }
-
-    #[tokio::test]
-    async fn command_tool_egress_blocks_private_ip() {
-        for url in [
-            "http://10.0.0.1/",
-            "http://127.0.0.1/",
-            "https://192.168.1.1/",
-        ] {
-            assert_blocked_by_screen(
-                &crawl_url(url).await,
-                &format!("private/loopback IP {url} must be blocked"),
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn command_tool_unknown_bin_refused_with_no_spawn() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        std::env::remove_var(ENV_COMMAND_TOOL_ALLOWLIST);
-        let err = run_command_tool(
-            "echo",
-            &[],
-            None,
-            &BTreeMap::new(),
-            None,
-            5,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({}),
-            &grants(&["tool:command:echo"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect_err("unknown bin (empty allowlist) must be refused");
-        assert!(err.contains("command allowlist"), "{err}");
-    }
-
-    /// Arm the fail-open gateway posture + disarm the exec-approval scan so a
-    /// spawn test reaches the actual child (the scan is armed BY DEFAULT and the
-    /// budget gate fails CLOSED on an unreachable gateway), and RESTORE those
-    /// process-global vars on drop so the posture never leaks into sibling tests.
-    /// Must be constructed while holding [`lock_gateway_env`].
-    struct CmdEnvGuard {
-        previous_gateway_url: Option<String>,
-        previous_fallback: Option<String>,
-        previous_exec_mode: Option<String>,
-        previous_allowlist: Option<String>,
-    }
-    impl CmdEnvGuard {
-        fn armed() -> Self {
-            let previous_gateway_url = std::env::var("RYU_GATEWAY_URL").ok();
-            let previous_fallback = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
-            let previous_exec_mode = std::env::var("RYU_EXEC_APPROVAL_MODE").ok();
-            let previous_allowlist = std::env::var(ENV_COMMAND_TOOL_ALLOWLIST).ok();
-            // A live default Gateway may belong to another local process and return
-            // 401 for this test's local bearer. Force the documented unreachable
-            // path so the fallback posture is deterministic.
-            std::env::set_var("RYU_GATEWAY_URL", "http://127.0.0.1:1");
-            std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", "1");
-            std::env::set_var("RYU_EXEC_APPROVAL_MODE", "off");
-            Self {
-                previous_gateway_url,
-                previous_fallback,
-                previous_exec_mode,
-                previous_allowlist,
-            }
-        }
-    }
-    impl Drop for CmdEnvGuard {
-        fn drop(&mut self) {
-            restore_env("RYU_GATEWAY_URL", self.previous_gateway_url.take());
-            restore_env("RYU_ALLOW_GATEWAY_FALLBACK", self.previous_fallback.take());
-            restore_env("RYU_EXEC_APPROVAL_MODE", self.previous_exec_mode.take());
-            restore_env(ENV_COMMAND_TOOL_ALLOWLIST, self.previous_allowlist.take());
-        }
-    }
-
-    fn restore_env(name: &str, value: Option<String>) {
-        match value {
-            Some(value) => std::env::set_var(name, value),
-            None => std::env::remove_var(name),
-        }
-    }
-
-    #[tokio::test]
-    async fn command_tool_no_shell_metachars_are_literal() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("echo"));
-        // A value packed with shell metacharacters must arrive as ONE literal argv
-        // element — proving there is no shell (this asserts literal argv, NOT scan
-        // denial; the scan is disarmed in this test env).
-        let payload = "; echo $(whoami) `id` && echo pwned";
-        let (_script_dir, command_args) = test_command_args("echo", &["msg"]);
-        let out = run_command_tool(
-            "echo",
-            &command_args,
-            None,
-            &BTreeMap::new(),
-            None,
-            10,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({ "msg": payload }),
-            &grants(&["tool:command:echo"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("echo runs");
-        let stdout = out
-            .get("stdout")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        assert!(
-            stdout.contains(payload),
-            "metachars must be literal, got: {stdout:?}"
-        );
-        assert_eq!(out.get("exit_code").and_then(|v| v.as_i64()), Some(0));
-    }
-
-    #[tokio::test]
-    async fn command_tool_timeout_kills_child() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("sleep"));
-        let (_script_dir, command_args) = test_command_args("sleep", &[]);
-        let out = run_command_tool(
-            "sleep",
-            &command_args,
-            None,
-            &BTreeMap::new(),
-            None,
-            1, // 1s timeout vs a 30s sleep
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({}),
-            &grants(&["tool:command:sleep"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("a timed-out command degrades gracefully (turn-continuation), not Err");
-        // Graceful degradation: the child was killed and the result is a soft
-        // {available:false} envelope naming the timeout (the audit still records
-        // exit 124 independently).
-        assert_eq!(out.get("available").and_then(Value::as_bool), Some(false));
-        assert!(
-            out.get("reason")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .contains("timed out"),
-            "reason must name the timeout, got: {out}"
-        );
-    }
-
-    #[tokio::test]
-    async fn command_tool_output_cap_and_stderr_drain() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("dd"));
-        let (_script_dir, command_args) = test_command_args("dd", &[]);
-        // The test command writes ~2 MiB of zeros to stdout (> the 1 MiB cap) and
-        // reports on stderr;
-        // the bounded read must cap stdout and the concurrent stderr drain must keep
-        // the child from deadlocking on a full stderr pipe.
-        let out = run_command_tool(
-            "dd",
-            &command_args,
-            None,
-            &BTreeMap::new(),
-            None,
-            20,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({}),
-            &grants(&["tool:command:dd"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("dd runs to completion without deadlock");
-        assert_eq!(out.get("truncated").and_then(|v| v.as_bool()), Some(true));
-        // The `stdout` field now carries the bounded stdout PLUS the merged (also
-        // bounded) stderr, so each stream is capped at MAX and the field stays
-        // bounded by 2×MAX — the child never deadlocks and memory stays bounded.
-        let len = out
-            .get("stdout")
-            .and_then(|v| v.as_str())
-            .map(str::len)
-            .unwrap_or(0);
-        assert!(
-            len <= 2 * MAX_COMMAND_OUTPUT_BYTES,
-            "merged output must stay bounded, was {len}"
-        );
-        // The test command reports its transfer on stderr — proof the merge fired.
-        let stdout = out
-            .get("stdout")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        assert!(
-            stdout.contains("records"),
-            "dd's stderr stats must be merged into the output"
-        );
-    }
-
-    #[tokio::test]
-    async fn command_tool_json_output_parsed_and_invalid_errors() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("echo"));
-        let (_script_dir, command_args) = test_command_args("echo", &["payload"]);
-        // Valid JSON passed via an interpolated arg is parsed into the result.
-        let out = run_command_tool(
-            "echo",
-            &command_args,
-            None,
-            &BTreeMap::new(),
-            None,
-            10,
-            CommandOutput::Json,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({ "payload": "{\"a\":1}" }),
-            &grants(&["tool:command:echo"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("json echo runs");
-        assert_eq!(out.get("a").and_then(|v| v.as_i64()), Some(1));
-        // Non-JSON stdout under output=json degrades gracefully (spider's posture):
-        // the agent still receives the raw text as `content`, not a hard error.
-        let soft = run_command_tool(
-            "echo",
-            &command_args,
-            None,
-            &BTreeMap::new(),
-            None,
-            10,
-            CommandOutput::Json,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({ "payload": "not json" }),
-            &grants(&["tool:command:echo"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("non-JSON stdout under output=json degrades to raw content, not Err");
-        assert_eq!(soft.get("available").and_then(Value::as_bool), Some(true));
-        assert!(
-            soft.get("content")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .contains("not json"),
-            "raw stdout must be surfaced as content, got: {soft}"
-        );
-    }
-
-    #[tokio::test]
-    async fn command_tool_env_injects_declared_and_scrubs_secrets() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("env"));
-        let (_script_dir, command_args) = test_command_args("env", &[]);
-        // The source var sits in THIS plugin's own `RYU_PLUGIN_<ID>_` namespace, which
-        // is what `may_read_env_secret` admits for a disk manifest. It used to be a
-        // bare `RYU_CMD_TEST_SRC`; that only worked because the child-env `env:` arm
-        // was ungated, so keeping it would mean this test silently asserted the hole.
-        // The gate's REFUSAL path has its own test
-        // (`a_command_tools_child_env_obeys_the_same_namespace_gate_as_headers`).
-        std::env::set_var("RYU_PLUGIN_COM_X2E_TEST_X2E_CMD_SRC", "injected-value");
-        assert_eq!(
-            std::env::var("RYU_PLUGIN_COM_X2E_TEST_X2E_CMD_SRC").as_deref(),
-            Ok("injected-value")
-        );
-        assert!(may_read_env_secret(
-            "com.test.cmd",
-            "RYU_PLUGIN_COM_X2E_TEST_X2E_CMD_SRC"
-        ));
-        // A secret-shaped inherited var that must be scrubbed from the child.
-        std::env::set_var("RYU_CMD_TEST_SECRET_TOKEN", "leak-me");
-        let mut env_map = BTreeMap::new();
-        env_map.insert(
-            "RYU_CMD_TEST_DEST".to_string(),
-            "env:RYU_PLUGIN_COM_X2E_TEST_X2E_CMD_SRC".to_string(),
-        );
-        let out = run_command_tool(
-            "env",
-            &command_args,
-            None,
-            &env_map,
-            None,
-            10,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({}),
-            &grants(&["tool:command:env"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("env runs");
-        assert_eq!(
-            out.get("available"),
-            None,
-            "env command should execute, got unavailable payload: {out}"
-        );
-        let stdout = out
-            .get("stdout")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        assert!(
-            stdout.contains("RYU_CMD_TEST_DEST=injected-value"),
-            "declared env var must be injected, got: {stdout}"
-        );
-        assert!(
-            !stdout.contains("leak-me") && !stdout.contains("RYU_CMD_TEST_SECRET_TOKEN"),
-            "secret-shaped inherited var must be scrubbed, got: {stdout}"
-        );
-        std::env::remove_var("RYU_PLUGIN_COM_X2E_TEST_X2E_CMD_SRC");
-        std::env::remove_var("RYU_CMD_TEST_SECRET_TOKEN");
-    }
-
-    // ── #4 command graceful degradation + #3 allowlist seeding + #5 clamp ────────
-
-    #[tokio::test]
-    async fn command_tool_allowlisted_but_absent_file_degrades_gracefully() {
-        // An allowlisted key whose file does not exist is an OPERATIONAL failure →
-        // graceful {available:false} "not installed", NOT a fail-closed Err (which
-        // is reserved for an UNKNOWN/unlisted key — the security control).
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        let missing_dir = tempfile::tempdir().expect("missing command tempdir");
-        let missing_path = missing_dir.path().join("ghost-binary");
-        std::env::set_var(
-            ENV_COMMAND_TOOL_ALLOWLIST,
-            format!("ghost={}", missing_path.display()),
-        );
-        let out = run_command_tool(
-            "ghost",
-            &[],
-            None,
-            &BTreeMap::new(),
-            None,
-            5,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({}),
-            &grants(&["tool:command:ghost"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("an allowlisted-but-not-installed bin degrades gracefully, not Err");
-        assert_eq!(out.get("available").and_then(Value::as_bool), Some(false));
-        assert!(
-            out.get("reason")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .contains("not installed"),
-            "reason must say not installed, got: {out}"
-        );
-    }
-
-    #[test]
-    fn builtin_command_seed_covers_only_trusted_builtin_bins() {
-        // The trusted command keys are seeded independently of the runtime
-        // manifest catalog, and an untrusted/user manifest bin never could be.
-        // Pure — never touches the process-global OnceLock.
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        // Deterministic paths regardless of the dev box's PATH.
-        std::env::set_var("RYU_SPIDER_BIN", "/opt/ryu/bin/spider");
-        std::env::set_var("RYU_RTK_BIN", "/opt/ryu/bin/rtk");
-        std::env::set_var("RYU_BWS_BIN", "/opt/ryu/bin/bws");
-        let seed = builtin_command_seed();
-        assert_eq!(
-            seed.get("spider"),
-            Some(&std::path::PathBuf::from("/opt/ryu/bin/spider"))
-        );
-        assert_eq!(
-            seed.get("rtk"),
-            Some(&std::path::PathBuf::from("/opt/ryu/bin/rtk"))
-        );
-        assert_eq!(
-            seed.get("bws"),
-            Some(&std::path::PathBuf::from("/opt/ryu/bin/bws"))
-        );
-        // No arbitrary/untrusted bin is ever auto-allowlisted.
-        assert!(!seed.contains_key("bash"));
-        assert!(!seed.contains_key("echo"));
-        std::env::remove_var("RYU_SPIDER_BIN");
-        std::env::remove_var("RYU_RTK_BIN");
-        std::env::remove_var("RYU_BWS_BIN");
-    }
-
-    #[test]
-    fn trusted_command_keys_are_independent_of_builtin_manifests() {
-        assert_eq!(TRUSTED_COMMAND_BIN_KEYS, &["spider", "rtk", "bws"]);
-        let seed = builtin_command_seed();
-        let keys = seed.keys().map(String::as_str).collect::<Vec<_>>();
-        assert_eq!(keys, ["bws", "rtk", "spider"]);
-    }
-
-    #[test]
-    fn merge_command_allowlist_env_wins_and_is_additive() {
-        let seed_spider = test_absolute_path("/seed/spider");
-        let seed_rtk = test_absolute_path("/seed/rtk");
-        let env_spider = test_absolute_path("/env/spider");
-        let env_extra = test_absolute_path("/env/extra");
-        let mut seed = BTreeMap::new();
-        seed.insert("spider".to_owned(), seed_spider.clone());
-        seed.insert("rtk".to_owned(), seed_rtk.clone());
-        let env = parse_command_allowlist(&format!(
-            "spider={}, extra={}",
-            env_spider.display(),
-            env_extra.display()
-        ));
-        let merged = merge_command_allowlist(&seed, env);
-        // Env overrides a seeded key …
-        assert_eq!(merged.get("spider"), Some(&env_spider));
-        // … keeps a seed-only key …
-        assert_eq!(merged.get("rtk"), Some(&seed_rtk));
-        // … and adds an env-only key.
-        assert_eq!(merged.get("extra"), Some(&env_extra));
-    }
-
-    #[tokio::test]
-    async fn command_tool_clamps_and_defaults_from_input_schema() {
-        // #5: bounds sourced from input_schema clamp at render time via the
-        // `command_args` path (so spider's real `depth`/`limit` flow is exercised),
-        // and an integral clamp renders as "10", not "10.0".
-        use crate::plugin_manifest::schema::extract_arg_bounds;
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("echo"));
-        let (_script_dir, command_args) = test_command_args("echo", &["depth", "limit"]);
-        let bounds = extract_arg_bounds(Some(&serde_json::json!({
-            "properties": {
-                "depth": { "type": "integer", "default": 1, "maximum": 10 },
-                "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
-            }
-        })));
-        // depth=9999 clamps to 10; limit=0 clamps to 1 — both echoed as integers.
-        let out = run_command_tool(
-            "echo",
-            &command_args,
-            None,
-            &BTreeMap::new(),
-            None,
-            10,
-            CommandOutput::Stdout,
-            None,
-            &bounds,
-            serde_json::json!({ "depth": 9999, "limit": 0 }),
-            &grants(&["tool:command:echo"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("echo runs");
-        let stdout = out
-            .get("stdout")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        assert_eq!(stdout.trim(), "10 1", "clamped integers, got: {stdout:?}");
-
-        // Absent depth falls back to its schema default (1).
-        let (_script_dir2, command_args2) = test_command_args("echo", &["depth"]);
-        let out2 = run_command_tool(
-            "echo",
-            &command_args2,
-            None,
-            &BTreeMap::new(),
-            None,
-            10,
-            CommandOutput::Stdout,
-            None,
-            &bounds,
-            serde_json::json!({ "limit": 5 }),
-            &grants(&["tool:command:echo"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("echo runs");
-        assert_eq!(
-            out2.get("stdout")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .trim(),
-            "1",
-            "absent depth must use the schema default"
-        );
-    }
-
-    // ── #1 http secret headers + fail-open ───────────────────────────────────────
-
-    #[test]
-    fn build_rest_request_injects_resolved_secret_header() {
-        // A pre-resolved secret header rides onto the request without ever being a
-        // model arg: it is not consumed from `args`, not required, and never in the
-        // url/query/body.
-        let (final_url, query, body, headers) = build_rest_request(
-            "https://api.exa.ai/search",
-            &serde_json::json!({ "query": "hi" }),
-            false,
-            &[],
-            &[("Authorization".to_owned(), "Bearer abc".to_owned())],
-        )
-        .unwrap();
-        assert_eq!(final_url, "https://api.exa.ai/search");
-        assert!(query.is_empty());
-        assert!(
-            headers
-                .iter()
-                .any(|(n, v)| n == "Authorization" && v == "Bearer abc"),
-            "secret header must be present"
-        );
-        // The body still carries the real arg, and NOT the secret name.
-        assert_eq!(body.get("query").and_then(Value::as_str), Some("hi"));
-        assert!(body.get("Authorization").is_none());
-    }
-
-    #[test]
-    fn build_rest_request_secret_header_absent_when_empty() {
-        let (_url, _q, _body, headers) = build_rest_request(
-            "https://api.example.com/x",
-            &serde_json::json!({ "X-Head": "v", "q": "1" }),
-            true,
-            &["X-Head".to_owned()],
-            &[],
-        )
-        .unwrap();
-        // Only the declared header_params entry, no secret header (back-compat).
-        assert_eq!(headers, vec![("X-Head".to_owned(), "v".to_owned())]);
-    }
-
-    #[test]
-    fn finalize_http_result_matrix() {
-        // Default `unwrap_body=false` throughout this matrix (envelope behavior).
-        // fail_open=false: transport err → Err; any response → Ok({status,body}).
-        let (r, exit, err) =
-            finalize_http_result(false, false, None, Value::Null, Some("boom".to_owned()));
-        assert!(r.is_err() && exit == 1 && err.as_deref() == Some("boom"));
-        let (r, exit, _) = finalize_http_result(
-            false,
-            false,
-            Some(200),
-            serde_json::json!({ "ok": 1 }),
-            None,
-        );
-        assert_eq!(r.unwrap()["status"], 200);
-        assert_eq!(exit, 0);
-
-        // fail_open=true: transport err + 401/403 → Ok(available:false) but audit
-        // exit stays 1 (audit-decoupling — outages/auth failures never vanish).
-        let (r, exit, err) =
-            finalize_http_result(true, false, None, Value::Null, Some("boom".to_owned()));
-        assert_eq!(r.unwrap()["available"], false);
-        assert_eq!(exit, 1);
-        assert!(err.is_some());
-        let (r, exit, _) = finalize_http_result(true, false, Some(401), Value::Null, None);
-        assert_eq!(r.unwrap()["available"], false);
-        assert_eq!(exit, 1);
-        let (r, _, _) = finalize_http_result(true, false, Some(403), Value::Null, None);
-        assert_eq!(r.unwrap()["available"], false);
-        // Every other status still returns {status,body} even with fail_open.
-        let (r, exit, _) =
-            finalize_http_result(true, false, Some(404), serde_json::json!("x"), None);
-        assert_eq!(r.unwrap()["status"], 404);
-        assert_eq!(exit, 1);
-        let (r, exit, _) =
-            finalize_http_result(true, false, Some(200), serde_json::json!("y"), None);
-        assert_eq!(r.unwrap()["status"], 200);
-        assert_eq!(exit, 0);
-    }
-
-    #[test]
-    fn finalize_http_result_unwrap_body_returns_2xx_verbatim() {
-        // GAP A: `unwrap_body=true` returns the parsed 2xx body VERBATIM — no
-        // `{status,body}` envelope — reproducing the original exa raw-JSON shape.
-        let raw = serde_json::json!({ "results": [{ "title": "t", "url": "u" }] });
-        let (r, exit, _) = finalize_http_result(false, true, Some(200), raw.clone(), None);
-        assert_eq!(r.unwrap(), raw);
-        assert_eq!(exit, 0);
-        // A 201 is still a success → still unwrapped verbatim.
-        let (r, _, _) =
-            finalize_http_result(false, true, Some(201), serde_json::json!({ "id": 5 }), None);
-        assert_eq!(r.unwrap()["id"], 5);
-
-        // Non-2xx is NOT unwrapped even with unwrap_body: the envelope preserves the
-        // status so an error is legible (500 without fail_open).
-        let (r, exit, _) =
-            finalize_http_result(false, true, Some(500), serde_json::json!("oops"), None);
-        let v = r.unwrap();
-        assert_eq!(v["status"], 500);
-        assert_eq!(v["body"], "oops");
-        assert_eq!(exit, 1);
-
-        // fail_open 401/403 still wins over unwrap → {available:false}, not verbatim.
-        let (r, exit, _) = finalize_http_result(true, true, Some(401), Value::Null, None);
-        assert_eq!(r.unwrap()["available"], false);
-        assert_eq!(exit, 1);
-    }
-
-    #[test]
-    fn http_tool_redacts_resolved_secret_values_from_reflected_bodies() {
-        let body = serde_json::json!({
-            "echo": "Bearer super-secret",
-            "nested": ["super-secret", "safe"],
-        });
-        let redacted = redact_secret_values(body, &[String::from("super-secret")]);
-        assert_eq!(redacted["echo"], "Bearer [REDACTED]");
-        assert_eq!(redacted["nested"][0], "[REDACTED]");
-        assert_eq!(redacted["nested"][1], "safe");
-    }
-
-    #[test]
-    fn deep_merge_json_defaults_under_model_args() {
-        // GAP B: manifest `body_defaults` deep-merged UNDER the model body — the
-        // model wins on every collision, nested default sub-objects survive omission.
-        let defaults = serde_json::json!({
-            "num_results": 10,
-            "use_autoprompt": true,
-            "contents": { "text": true }
-        });
-        // Model supplies only `query` + overrides `num_results`; omits the rest.
-        let model = serde_json::json!({ "query": "cats", "num_results": 3 });
-        let mut merged = defaults.clone();
-        deep_merge_json(&mut merged, &model);
-        assert_eq!(merged["query"], "cats");
-        // Model wins on the collision.
-        assert_eq!(merged["num_results"], 3);
-        // Untouched default carried through.
-        assert_eq!(merged["use_autoprompt"], true);
-        // Nested default sub-object survives when the model omits it.
-        assert_eq!(merged["contents"]["text"], true);
-
-        // A nested object collision merges key-by-key (model wins per leaf).
-        let mut merged2 = defaults.clone();
-        deep_merge_json(
-            &mut merged2,
-            &serde_json::json!({ "contents": { "text": false, "summary": true } }),
-        );
-        assert_eq!(merged2["contents"]["text"], false);
-        assert_eq!(merged2["contents"]["summary"], true);
-        // Sibling default still present.
-        assert_eq!(merged2["num_results"], 10);
-    }
-
-    #[test]
-    fn exa_search_manifest_resolves_unwrap_and_body_defaults() {
-        // GAP A+B, exa success shape: the shipped exa search fixture resolves to an
-        // Http backend with unwrap_body ON and the full body_defaults object, so the
-        // declarative knobs (not exa-specific code) close both parity gaps.
-        use crate::plugin_manifest::schema::{ToolBackend, ToolConfig};
-        let cfg: ToolConfig = serde_json::from_value(serde_json::json!({
-            "slug": "exa.search",
-            "backend": "http",
-            "method": "POST",
-            "url": "https://api.exa.ai/search",
-            "secret_headers": { "Authorization": "env:RYU_EXA_API_KEY" },
-            "fail_open": true,
-            "unwrap_body": true,
-            "body_defaults": {
-                "num_results": 10,
-                "use_autoprompt": true,
-                "contents": { "text": true }
-            }
-        }))
-        .unwrap();
-        match cfg.resolve_backend().unwrap() {
-            ToolBackend::Http {
-                unwrap_body,
-                body_defaults,
-                fail_open,
-                ..
-            } => {
-                assert!(unwrap_body);
-                assert!(fail_open);
-                assert_eq!(body_defaults["num_results"], 10);
-                assert_eq!(body_defaults["use_autoprompt"], true);
-                assert_eq!(body_defaults["contents"]["text"], true);
-            }
-            other => panic!("expected Http backend, got {other:?}"),
-        }
-
-        // A non-object body_defaults is a manifest authoring error.
-        let bad: ToolConfig = serde_json::from_value(serde_json::json!({
-            "slug": "x", "backend": "http", "url": "https://api.example.com/x",
-            "body_defaults": [1, 2, 3]
-        }))
-        .unwrap();
-        assert!(bad.resolve_backend().is_err());
-    }
-
-    #[test]
-    fn http_unavailable_shape() {
-        let v = http_unavailable("nope");
-        assert_eq!(v["available"], false);
-        assert_eq!(v["reason"], "nope");
-        assert!(v["hint"].is_string());
-    }
-
-    #[tokio::test]
-    async fn resolve_secret_header_source_env_and_unsupported() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        std::env::set_var("RYU_TEST_SECRET_TOK", "Bearer topsecret");
-        // env: source resolves without the model supplying anything.
-        let v = resolve_secret_header_source(
-            "Authorization",
-            "env:RYU_TEST_SECRET_TOK",
-            SECRET_HEADER_TEST_PLUGIN,
-            &[],
-            None,
-        )
-        .await
-        .unwrap();
-        assert_eq!(v.as_deref(), Some("Bearer topsecret"));
-        // A missing env var resolves to "absent" (header omitted), NOT an error.
-        let none = resolve_secret_header_source(
-            "X",
-            "env:RYU_TEST_MISSING_XYZ",
-            SECRET_HEADER_TEST_PLUGIN,
-            &[],
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(none.is_none());
-        // An unsupported prefix is a hard error (never a silent skip).
-        assert!(
-            resolve_secret_header_source("X", "foo:bar", SECRET_HEADER_TEST_PLUGIN, &[], None)
-                .await
-                .is_err()
-        );
-        std::env::remove_var("RYU_TEST_SECRET_TOK");
-    }
-
-    #[test]
-    fn resume_decision_parses_enum() {
-        assert_eq!(
-            ResumeDecision::parse("accept"),
-            Some(ResumeDecision::Accept)
-        );
-        assert_eq!(
-            ResumeDecision::parse("decline"),
-            Some(ResumeDecision::Decline)
-        );
-        assert_eq!(
-            ResumeDecision::parse("cancel"),
-            Some(ResumeDecision::Cancel)
-        );
-        assert_eq!(ResumeDecision::parse("bogus"), None);
-        assert_eq!(ResumeDecision::parse(""), None);
-    }
-
-    #[test]
-    fn exec_outcome_completed_serializes_flat() {
-        let out = ExecOutcome::Completed {
-            result: Some(serde_json::json!(42)),
-            logs: vec!["hi".into()],
-            is_error: false,
-            error: None,
-        };
-        let v = serde_json::to_value(&out).unwrap();
-        assert_eq!(v["status"], "completed");
-        assert_eq!(v["result"], 42);
-        assert_eq!(v["logs"][0], "hi");
-        assert_eq!(v["is_error"], false);
-        // `error: None` is skipped.
-        assert!(v.get("error").is_none());
-    }
-
-    #[test]
-    fn exec_outcome_paused_serializes_flat() {
-        let out = ExecOutcome::Paused {
-            execution_id: "exec_1".into(),
-            message: "connect github".into(),
-            elicitation: Elicitation {
-                kind: "url".into(),
-                message: "connect github".into(),
-                url: Some("https://x".into()),
-                requested_schema: None,
-            },
-        };
-        let v = serde_json::to_value(&out).unwrap();
-        assert_eq!(v["status"], "paused");
-        assert_eq!(v["execution_id"], "exec_1");
-        assert_eq!(v["elicitation"]["kind"], "url");
-        assert_eq!(v["elicitation"]["url"], "https://x");
-        // requested_schema is skipped when None.
-        assert!(v["elicitation"].get("requested_schema").is_none());
-    }
-
-    #[tokio::test]
-    async fn resume_execution_rejects_bad_action() {
-        // The Contract-4 shim parses `action: String`; a bad action is a
-        // terminal error completion (not a panic, not a silent success).
-        let out = resume_execution(
-            "exec_x".into(),
-            "ryu",
-            "bogus".into(),
-            serde_json::json!({}),
-        )
-        .await;
-        match out {
-            ExecOutcome::Completed {
-                is_error, error, ..
-            } => {
-                assert!(is_error);
-                assert!(error.unwrap_or_default().contains("invalid resume action"));
-            }
-            ExecOutcome::Paused { .. } => panic!("expected error completion"),
-        }
-    }
-
-    #[tokio::test]
-    async fn resume_execution_unknown_id_is_error_completion() {
-        // A valid action but unknown id → the shim maps None → execution_not_found.
-        // The resume now runs a fail-closed gateway budget pre-gate (security M1).
-        // To exercise the id-lookup path (not a budget deny), point the gate at a
-        // guaranteed-unreachable gateway and enable the unreachable→allow
-        // fallback (deterministic regardless of any gateway running locally); the
-        // gate's deny behavior is covered by the gateway module's own tests.
-        // These are process-global vars other modules' tests also mutate, so hold
-        // the shared gateway-env lock across the whole body and restore on exit —
-        // otherwise a parallel test can strip RYU_ALLOW_GATEWAY_FALLBACK during
-        // the await and flip this into a fail-closed deny.
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let prev_url = std::env::var("RYU_GATEWAY_URL").ok();
-        let prev_fb = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
-        std::env::set_var("RYU_GATEWAY_URL", "http://127.0.0.1:1");
-        std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", "1");
-        let out = resume_execution(
-            "exec_does_not_exist".into(),
-            "ryu",
-            "accept".into(),
-            serde_json::json!({}),
-        )
-        .await;
-        match prev_url {
-            Some(v) => std::env::set_var("RYU_GATEWAY_URL", v),
-            None => std::env::remove_var("RYU_GATEWAY_URL"),
-        }
-        match prev_fb {
-            Some(v) => std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", v),
-            None => std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK"),
-        }
-        match out {
-            ExecOutcome::Completed {
-                is_error, error, ..
-            } => {
-                assert!(is_error);
-                assert_eq!(error.as_deref(), Some("execution_not_found"));
-            }
-            ExecOutcome::Paused { .. } => panic!("expected error completion"),
-        }
-    }
-
-    #[test]
-    fn allowlist_rejects_missing_agent_id() {
-        let reg = AcpAgentRegistry::new();
-        assert!(resolve_agent_allowlist(&reg, None).is_err());
-        assert!(resolve_agent_allowlist(&reg, Some("")).is_err());
-    }
-
-    #[test]
-    fn allowlist_rejects_unknown_agent() {
-        let reg = AcpAgentRegistry::new();
-        let err = resolve_agent_allowlist(&reg, Some("does-not-exist-xyz")).unwrap_err();
-        assert!(err.contains("unknown agent"));
-    }
-
-    #[test]
-    fn allowlist_accepts_flagship_ryu_with_no_restriction() {
-        // Ensure no env allowlist leaks in from the environment.
-        std::env::remove_var("RYU_MCP_ALLOWLIST");
-        std::env::remove_var("RYU_MCP_ALLOWLIST_RYU");
-        let reg = AcpAgentRegistry::new();
-        // Policy (a): the flagship default agent has no restriction (None) so
-        // tool_search → execute does not 403 the demo.
-        let resolved = resolve_agent_allowlist(&reg, Some("ryu")).expect("ryu is a known agent");
-        assert!(
-            resolved.is_none(),
-            "flagship ryu must default to no restriction"
-        );
-    }
-
-    #[test]
-    fn allowlist_rejects_an_agent_id_that_only_prefix_matches() {
-        let reg = AcpAgentRegistry::new();
-        let err = resolve_agent_allowlist(&reg, Some("ryu-forged"))
-            .expect_err("authorization must require the exact registered principal");
-        assert!(err.contains("unknown agent"));
-    }
-
-    #[test]
-    fn ssrf_guard_classifies_internal_addresses() {
-        use std::net::IpAddr;
-        for s in [
-            "127.0.0.1",
-            "10.1.2.3",
-            "192.168.0.5",
-            "172.16.9.9",
-            "169.254.169.254", // cloud metadata
-            "100.64.0.1",      // CGNAT
-            "0.0.0.0",
-            "::1",
-            "fe80::1",
-            "fc00::1",
-            "::ffff:127.0.0.1", // v4-mapped loopback
-        ] {
-            assert!(
-                is_internal_ip(&s.parse::<IpAddr>().unwrap()),
-                "{s} must be classified internal"
-            );
-        }
-        for s in ["8.8.8.8", "1.1.1.1", "93.184.216.34", "2606:2800:220:1::1"] {
-            assert!(
-                !is_internal_ip(&s.parse::<IpAddr>().unwrap()),
-                "{s} must be classified public"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn ssrf_guard_blocks_ip_literal_and_exempts_explicit_grant() {
-        // A URL whose host is an internal IP literal is blocked when the grant was
-        // for a public domain...
-        assert!(
-            http_ssrf_guard("http://169.254.169.254/latest/meta-data/", "example.com")
-                .await
-                .is_err()
-        );
-        // ...but allowed when the plugin explicitly holds a grant for that literal
-        // internal host (deliberate, install-validated intent). A deliberate
-        // internal grant needs no address pin (there is no attacker-raceable DNS
-        // lookup), so the guard returns `None`.
-        assert_eq!(
-            http_ssrf_guard("http://127.0.0.1:9000/health", "127.0.0.1")
-                .await
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            http_ssrf_guard("http://localhost:9000/health", "localhost")
-                .await
-                .unwrap(),
-            None
-        );
-        // A literal public IP in the URL also needs no pin — no DNS lookup happens.
-        assert_eq!(
-            http_ssrf_guard("http://93.184.216.34/", "example.com")
-                .await
-                .unwrap(),
-            None
-        );
-    }
-
-    /// The pin mechanism the guard hands back MUST actually override reqwest's DNS
-    /// resolution. This is the load-bearing half of the F5 DNS-rebinding fix: the
-    /// guard screens one set of addresses, and the request has to connect to THOSE,
-    /// not re-resolve the name to something else. `evil.test` is a reserved,
-    /// never-resolvable name (RFC 6761), so a request that reaches a listener at all
-    /// proves reqwest honored the pinned addr instead of resolving the host.
-    #[tokio::test]
-    async fn resolve_to_addrs_pins_connection_and_skips_re_resolution() {
-        // A local listener standing in for "the address the guard validated".
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-        let port = local_addr.port();
-
-        // Accept exactly one connection and answer with a minimal HTTP/1.1 200.
-        let server = tokio::spawn(async move {
-            let (mut sock, _) = listener.accept().await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = tokio::io::AsyncReadExt::read(&mut sock, &mut buf).await;
-            tokio::io::AsyncWriteExt::write_all(
-                &mut sock,
-                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
-            )
-            .await
-            .unwrap();
-        });
-
-        // Pin the un-resolvable `evil.test` to the local listener, exactly as
-        // `run_http_tool` does with the guard's `Some((host, addrs))`.
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .resolve_to_addrs("evil.test", &[local_addr])
-            .build()
-            .unwrap();
-
-        let resp = client
-            .get(format!("http://evil.test:{port}/"))
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-            .expect("request must reach the pinned listener, not re-resolve evil.test");
-        assert_eq!(resp.status().as_u16(), 200);
-        assert_eq!(resp.text().await.unwrap(), "ok");
-        server.await.unwrap();
-    }
-
-    // ── `secret_headers` value-TEMPLATE resolution ───────────────────────────
-
-    /// The plugin id every template-grammar test resolves under. A COMPILED-IN id,
-    /// so `may_read_env_secret` is unrestricted and these tests keep exercising the
-    /// template grammar (literal text, multi-token, absent → omit) rather than the
-    /// env-namespace gate, which has its own tests below.
-    const SECRET_HEADER_TEST_PLUGIN: &str = "@ryu/shadow";
-
-    #[tokio::test]
-    async fn secret_header_bearer_scheme_substitutes_env_token() {
-        // "Bearer env:X" → "Bearer <resolved>": the scheme prefix is literal text
-        // preserved around the substituted token (the exa 401 fix).
-        std::env::set_var("RYU_HDR_TEST_BEARER", "sk-abc123");
-        let out = resolve_secret_header_source(
-            "Authorization",
-            "Bearer env:RYU_HDR_TEST_BEARER",
-            SECRET_HEADER_TEST_PLUGIN,
-            &[],
-            None,
-        )
-        .await
-        .expect("valid template resolves");
-        assert_eq!(out.as_deref(), Some("Bearer sk-abc123"));
-        std::env::remove_var("RYU_HDR_TEST_BEARER");
-    }
-
-    #[tokio::test]
-    async fn secret_header_multi_token_substitution() {
-        // Multiple tokens in one value each resolve; literal separators survive.
-        std::env::set_var("RYU_HDR_TEST_ID", "id-9");
-        std::env::set_var("RYU_HDR_TEST_SECRET", "shh");
-        let out = resolve_secret_header_source(
-            "X-Auth",
-            "Token env:RYU_HDR_TEST_ID env:RYU_HDR_TEST_SECRET",
-            SECRET_HEADER_TEST_PLUGIN,
-            &[],
-            None,
-        )
-        .await
-        .expect("multi-token template resolves");
-        assert_eq!(out.as_deref(), Some("Token id-9 shh"));
-        std::env::remove_var("RYU_HDR_TEST_ID");
-        std::env::remove_var("RYU_HDR_TEST_SECRET");
-    }
-
-    #[tokio::test]
-    async fn secret_header_whole_value_backcompat() {
-        // The degenerate whole-value `env:NAME` still yields the bare secret.
-        std::env::set_var("RYU_HDR_TEST_WHOLE", "bare-value");
-        let out = resolve_secret_header_source(
-            "X-Api-Key",
-            "env:RYU_HDR_TEST_WHOLE",
-            SECRET_HEADER_TEST_PLUGIN,
-            &[],
-            None,
-        )
-        .await
-        .expect("whole-value template resolves");
-        assert_eq!(out.as_deref(), Some("bare-value"));
-        std::env::remove_var("RYU_HDR_TEST_WHOLE");
-    }
-
-    #[tokio::test]
-    async fn secret_header_missing_env_omits_header() {
-        // An unset env token → the WHOLE header is omitted (Ok(None)), which with
-        // fail_open + a downstream 401 reproduces the exa missing-key path.
-        std::env::remove_var("RYU_HDR_TEST_UNSET");
-        let out = resolve_secret_header_source(
-            "Authorization",
-            "Bearer env:RYU_HDR_TEST_UNSET",
-            SECRET_HEADER_TEST_PLUGIN,
-            &[],
-            None,
-        )
-        .await
-        .expect("missing env is a soft omit, not an Err");
-        assert_eq!(out, None);
-    }
-
-    #[tokio::test]
-    async fn secret_header_no_token_is_rejected() {
-        // A value carrying no `env:`/`vault:` token at all is an unsupported
-        // source (never a silent skip) — mirrors the command `env:` rejection.
-        let err = resolve_secret_header_source(
-            "Authorization",
-            "Bearer static",
-            SECRET_HEADER_TEST_PLUGIN,
-            &[],
-            None,
-        )
-        .await
-        .expect_err("a token-less value must be rejected");
-        assert!(err.contains("unsupported secret source"), "got: {err}");
-    }
-
-    // ── `env:` secret-header namespace gate ──────────────────────────────────
-
-    /// Serializes the tests that mutate process-global env vars. Reuses the SAME
-    /// guard the rest of this module already takes (`lock_gateway_env`) rather than
-    /// a private mutex — two independent locks would not serialize against each
-    /// other, and `RYU_RTK_BIN` in particular is set by both the built-in-seed test
-    /// and the PATH-shadowing test below.
-    fn lock_env_secret() -> std::sync::MutexGuard<'static, ()> {
-        crate::sidecar::gateway::lock_gateway_env()
-    }
-
-    /// A Community-tier manifest naming an unrelated credential var must resolve to
-    /// "absent" — the header is omitted rather than shipped. `secret_headers` values
-    /// are excluded from the firewall/DLP scan and the audit trail by design, so an
-    /// unrestricted `env:` read would be an invisible credential transfer to
-    /// whatever URL the same manifest names.
-    #[tokio::test]
-    async fn community_plugin_cannot_read_an_unrelated_env_secret() {
-        let _lock = lock_env_secret();
-        std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-victim");
-        std::env::remove_var(ENV_SECRET_ALLOWLIST);
-
-        let out = resolve_secret_header_source(
-            "X-K",
-            "env:ANTHROPIC_API_KEY",
-            "com.evil.plugin",
-            &[],
-            None,
-        )
-        .await
-        .expect("an ungated var is a soft omit, not an Err");
-        assert_eq!(
-            out, None,
-            "a Community plugin must not read a credential outside its own namespace"
-        );
-
-        std::env::remove_var("ANTHROPIC_API_KEY");
-    }
-
-    /// A third-party plugin's OWN `RYU_PLUGIN_<UPPER(id)>_*` namespace resolves with
-    /// no operator configuration at all — the BYOK seam still works, it just lives
-    /// in a namespace Core does not use for its own configuration.
-    #[tokio::test]
-    async fn community_plugin_reads_its_own_prefixed_env_secret() {
-        let _lock = lock_env_secret();
-        std::env::set_var("RYU_PLUGIN_COM_X2E_ACME_X2E_WEATHER_API_KEY", "acme-key");
-        std::env::remove_var(ENV_SECRET_ALLOWLIST);
-
-        let out = resolve_secret_header_source(
-            "Authorization",
-            "Bearer env:RYU_PLUGIN_COM_X2E_ACME_X2E_WEATHER_API_KEY",
-            "com.acme.weather",
-            &[],
-            None,
-        )
-        .await
-        .expect("own-namespace var resolves");
-        assert_eq!(out.as_deref(), Some("Bearer acme-key"));
-
-        std::env::remove_var("RYU_PLUGIN_COM_X2E_ACME_X2E_WEATHER_API_KEY");
-    }
-
-    /// NAMESPACE SQUATTING: plugin ids are free-form (a bare kebab id is legal), so
-    /// a `RYU_<UPPER(id)>_` prefix would let a plugin name ITSELF after a Core
-    /// config family and read that family's secrets — id `master` covering
-    /// `RYU_MASTER_KEY` is the worst case, and `gateway`/`ext`/`github`/
-    /// `marketplace` are all equally claimable (none is a compiled-in fixture id).
-    /// The prefix must therefore live under `RYU_PLUGIN_`, which Core never uses for
-    /// its own configuration.
-    #[test]
-    fn a_plugin_cannot_squat_a_core_env_namespace_by_choosing_its_id() {
-        for (squatter_id, core_var) in [
-            ("master", "RYU_MASTER_KEY"),
-            ("gateway", "RYU_GATEWAY_TOKEN"),
-            ("gateway", "RYU_GATEWAY_KEY"),
-            ("ext", "RYU_EXT_TOKEN"),
-            ("github", "RYU_GITHUB_TOKEN"),
-            ("marketplace", "RYU_MARKETPLACE_SIGNING_KEY"),
-            ("default-llm", "RYU_DEFAULT_LLM_API_KEY"),
-        ] {
-            assert!(
-                !crate::plugins::builtins::is_compiled_in_manifest(squatter_id),
-                "'{squatter_id}' must be claimable by a disk manifest for this test to mean \
-                 anything — if it became a built-in id, pick another squatter"
-            );
-            assert!(
-                !may_read_env_secret(squatter_id, core_var),
-                "a plugin calling itself '{squatter_id}' must not reach Core's '{core_var}'"
-            );
-        }
-    }
-
-    /// The allowlist var is never readable through the gate it configures (a plugin
-    /// whose id folds to `env` sits exactly on `RYU_PLUGIN_ENV_`).
-    #[test]
-    fn the_env_allowlist_var_is_not_itself_plugin_readable() {
-        assert!(!may_read_env_secret("env", ENV_SECRET_ALLOWLIST));
-    }
-
-    /// The COMMAND tool's child-env is the crate's SECOND `env:` reader, and the
-    /// more dangerous one: a header value stays inside a request Core builds, while
-    /// this hands the raw secret to a spawned child that can do anything with it.
-    /// It must obey the same namespace gate as `secret_headers` — a disk manifest
-    /// declaring `{"env": {"KEY": "env:ANTHROPIC_API_KEY"}}` on an allowlisted binary
-    /// must not read Core's env.
-    ///
-    /// This spawns a platform-native environment command and reads the child's
-    /// actual environment rather than asserting `may_read_env_secret` directly.
-    /// Asserting the predicate would
-    /// be vacuous: it passes whether or not the spawn path consults it, which is
-    /// exactly the bug being guarded against (the gate existed for `secret_headers`
-    /// and this path simply did not call it).
-    #[tokio::test]
-    async fn a_command_tools_child_env_obeys_the_same_namespace_gate_as_headers() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("env"));
-        let (_script_dir, command_args) = test_command_args("env", &[]);
-
-        let disk_plugin = "evil";
-        assert!(
-            !crate::plugins::builtins::is_compiled_in_manifest(disk_plugin),
-            "'{disk_plugin}' must be a disk-manifest id for this test to mean anything"
-        );
-        // This models the ACTUAL attack. The child inherits Core's env with
-        // `scrub_child_env` applied, which already strips secret-SHAPED keys — so a
-        // real secret (ANTHROPIC_API_KEY, RYU_MASTER_KEY, RYU_TOKEN) never rides in
-        // by inheritance. The declared `env:` map was the way to put one BACK, under
-        // a fresh name the scrubber has no opinion about. So the victim var here must
-        // itself be secret-shaped (hence `_TOKEN`): that proves the gate closes the
-        // re-introduction path rather than re-proving what the scrubber already does.
-        std::env::set_var("RYU_CMD_VICTIM_TOKEN", "victim-secret");
-        let mut env_map = BTreeMap::new();
-        env_map.insert("STOLEN".to_string(), "env:RYU_CMD_VICTIM_TOKEN".to_string());
-
-        let out = run_command_tool(
-            "env",
-            &command_args,
-            None,
-            &env_map,
-            None,
-            10,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({}),
-            &grants(&["tool:command:env"]),
-            disk_plugin,
-            None,
-        )
-        .await
-        .expect("env runs");
-        let stdout = out
-            .get("stdout")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        assert!(
-            !stdout.contains("victim-secret") && !stdout.contains("STOLEN="),
-            "an out-of-namespace env source must never reach the child, got: {stdout}"
-        );
-        std::env::remove_var("RYU_CMD_VICTIM_TOKEN");
-    }
-
-    /// The operator escape hatch: a var named in `RYU_PLUGIN_ENV_ALLOWLIST` is
-    /// readable by any plugin, so a deployment can share a credential without
-    /// handing out a Core-tier id.
-    #[tokio::test]
-    async fn operator_allowlist_opens_a_shared_env_secret() {
-        let _lock = lock_env_secret();
-        std::env::set_var("RYU_SHARED_PROXY_KEY", "shared");
-        std::env::set_var(ENV_SECRET_ALLOWLIST, "OTHER_VAR, RYU_SHARED_PROXY_KEY");
-
-        let out = resolve_secret_header_source(
-            "X-K",
-            "env:RYU_SHARED_PROXY_KEY",
-            "com.acme.weather",
-            &[],
-            None,
-        )
-        .await
-        .expect("allowlisted var resolves");
-        assert_eq!(out.as_deref(), Some("shared"));
-
-        std::env::remove_var(ENV_SECRET_ALLOWLIST);
-        std::env::remove_var("RYU_SHARED_PROXY_KEY");
-    }
-
-    /// First-party regression: `@ryu/advisor` and `shadow` authenticate to
-    /// loopback Core with the SHARED `env:RYU_TOKEN`, which by construction fits no
-    /// per-plugin prefix. Both ship as compiled-in fixtures, so the gate must not
-    /// touch them — and `@ryu/advisor` is Community-TIER, which is exactly why
-    /// the gate keys on provenance rather than tier. The live node token wins over
-    /// the process environment so rotation never races a child spawn.
-    #[tokio::test]
-    async fn compiled_in_plugins_still_read_the_shared_ryu_token() {
-        let _lock = lock_env_secret();
-        std::env::remove_var(ENV_SECRET_ALLOWLIST);
-        let expected = crate::node_token::active_token().expect("node token is available");
-        let expected_header = format!("Bearer {expected}");
-
-        for plugin_id in ["@ryu/shadow", "@ryu/advisor"] {
-            let out = resolve_secret_header_source(
-                "Authorization",
-                "Bearer env:RYU_TOKEN",
-                plugin_id,
-                &[],
-                None,
-            )
-            .await
-            .expect("core-tier read resolves");
-            assert_eq!(
-                out.as_deref(),
-                Some(expected_header.as_str()),
-                "{plugin_id} must keep reading the shared RYU_TOKEN"
-            );
-        }
-    }
-
-    /// The prefix is a BYOK seam of the same SHAPE first-party manifests author
-    /// (`exa` reads `env:RYU_EXA_API_KEY`), but rooted one level deeper so it cannot
-    /// reach into Core's own configuration namespace. `exa` is compiled in and takes
-    /// the provenance arm at runtime; a third-party plugin authored the same way
-    /// names its var `RYU_PLUGIN_<ID>_API_KEY` and needs no operator configuration.
-    #[test]
-    fn the_prefix_rule_is_rooted_under_the_plugin_namespace() {
-        assert_eq!(
-            plugin_env_prefix("@ryu/exa"),
-            "RYU_PLUGIN__X40_RYU_X2F_EXA_"
-        );
-        assert!("RYU_PLUGIN__X40_RYU_X2F_EXA_API_KEY".starts_with(&plugin_env_prefix("@ryu/exa")));
-        // Crucially NOT Core's own `RYU_EXA_API_KEY` namespace — which `exa` still
-        // reads, but by PROVENANCE (it is compiled in), not by prefix. Every in-repo
-        // manifest that authors an `env:` secret header (`exa`, `shadow`, `advisor`)
-        // is a compiled-in fixture, so narrowing the prefix regresses none of them.
-        assert!(!"RYU_EXA_API_KEY".starts_with(&plugin_env_prefix("@ryu/exa")));
-        assert!(may_read_env_secret("@ryu/exa", "RYU_EXA_API_KEY"));
-        // Every punctuation byte is escaped, so scoped and flat ids cannot
-        // collide even when their punctuation would previously fold together.
-        assert_eq!(
-            plugin_env_prefix("com.acme.my-app"),
-            "RYU_PLUGIN_COM_X2E_ACME_X2E_MY_X2D_APP_"
-        );
-        assert_ne!(plugin_env_prefix("@a/b"), plugin_env_prefix("a-b"));
-        // And the rule is a real fence: the shared loopback token fits no prefix.
-        assert!(!may_read_env_secret("com.acme.weather", "RYU_TOKEN"));
-    }
-
-    // ── `env:` → encrypted plugin secret store fallback ──────────────────────
-
-    /// THE GAP THIS CLOSES: `exa`/`tavily` declare `env:RYU_<X>_API_KEY` and there
-    /// was no way to set such a var from the UI, so swapping the `web.search`
-    /// capability to a provider whose key was never exported produced a silently
-    /// unauthenticated tool. With the store wired, the SAME manifest token resolves
-    /// from an encrypted row — no manifest edit anywhere.
-    #[tokio::test]
-    async fn an_unset_env_var_falls_back_to_the_plugin_secret_store() {
-        let _lock = lock_env_secret();
-        std::env::remove_var("RYU_TAVILY_API_KEY");
-        std::env::remove_var(ENV_SECRET_ALLOWLIST);
-
-        let store = crate::plugin_secrets::PluginSecretStore::in_memory().unwrap();
-        store
-            .set("@ryu/tavily", "RYU_TAVILY_API_KEY", "tvly-from-ui")
-            .await
-            .unwrap();
-
-        let out = resolve_env_secret_from("@ryu/tavily", "RYU_TAVILY_API_KEY", Some(&store)).await;
-        assert_eq!(out, SecretToken::Value("tvly-from-ui".to_string()));
-
-        // With no store published at all, behaviour is exactly the pre-store one.
-        assert_eq!(
-            resolve_env_secret_from("@ryu/tavily", "RYU_TAVILY_API_KEY", None).await,
-            SecretToken::Absent
-        );
-    }
-
-    /// Precedence is env-then-store, never the reverse: an operator who exported the
-    /// var in a service unit must see that value in effect, and must be able to
-    /// explain the process with `env | grep`. A stale UI entry silently shadowing
-    /// the deployment's own configuration is the failure this pins.
-    #[tokio::test]
-    async fn the_process_environment_wins_over_a_stored_secret() {
-        let _lock = lock_env_secret();
-        std::env::set_var("RYU_TAVILY_API_KEY", "tvly-from-env");
-        std::env::remove_var(ENV_SECRET_ALLOWLIST);
-
-        let store = crate::plugin_secrets::PluginSecretStore::in_memory().unwrap();
-        store
-            .set("@ryu/tavily", "RYU_TAVILY_API_KEY", "tvly-from-ui")
-            .await
-            .unwrap();
-
-        let out = resolve_env_secret_from("@ryu/tavily", "RYU_TAVILY_API_KEY", Some(&store)).await;
-        assert_eq!(out, SecretToken::Value("tvly-from-env".to_string()));
-
-        std::env::remove_var("RYU_TAVILY_API_KEY");
-    }
-
-    #[test]
-    fn live_node_token_wins_over_the_startup_environment_after_rotation() {
-        assert_eq!(
-            resolve_process_env_value("RYU_TOKEN", Some("live-token"), Some("startup-token")),
-            Some("live-token".to_owned())
-        );
-        assert_eq!(
-            resolve_process_env_value(
-                "RYU_TAVILY_API_KEY",
-                Some("unrelated-node-token"),
-                Some("provider-key")
-            ),
-            Some("provider-key".to_owned())
-        );
-    }
-
-    /// THE LOAD-BEARING GUARD. The store is keyed by the CALLING plugin id, so
-    /// without the namespace gate a disk manifest could name any variable and read
-    /// whatever the UI had stored under that name for it — turning a write-only
-    /// settings field into a credential-harvesting surface. The gate must run BEFORE
-    /// the fallback, not only before the env read.
-    ///
-    /// Asserted through `resolve_env_secret_from` (the real path) rather than
-    /// against `may_read_env_secret` directly: the predicate passes whether or not
-    /// the fallback consults it, which is exactly the bug being guarded against.
-    #[tokio::test]
-    async fn the_namespace_gate_also_guards_the_store_fallback() {
-        let _lock = lock_env_secret();
-        std::env::remove_var(ENV_SECRET_ALLOWLIST);
-        std::env::remove_var("ANTHROPIC_API_KEY");
-
-        let evil = "com.evil.plugin";
-        assert!(
-            !crate::plugins::builtins::is_compiled_in_manifest(evil),
-            "'{evil}' must be a disk-manifest id for this test to mean anything"
-        );
-
-        let store = crate::plugin_secrets::PluginSecretStore::in_memory().unwrap();
-        // The attacker stored a value under its OWN row, using a name outside its
-        // namespace. The row exists; the gate is the only thing standing between the
-        // manifest token and the value.
-        store
-            .set(evil, "ANTHROPIC_API_KEY", "stolen-shape")
-            .await
-            .unwrap();
-
-        assert_eq!(
-            resolve_env_secret_from(evil, "ANTHROPIC_API_KEY", Some(&store)).await,
-            SecretToken::Absent,
-            "a plugin must not reach a stored secret named outside its namespace"
-        );
-        // Its own namespace still works — the gate is a fence, not a wall.
-        store
-            .set(evil, "RYU_PLUGIN_COM_X2E_EVIL_X2E_PLUGIN_API_KEY", "mine")
-            .await
-            .unwrap();
-        assert_eq!(
-            resolve_env_secret_from(
-                evil,
-                "RYU_PLUGIN_COM_X2E_EVIL_X2E_PLUGIN_API_KEY",
-                Some(&store)
-            )
-            .await,
-            SecretToken::Value("mine".to_string())
-        );
-    }
-
-    /// An empty stored value is "absent", matching the env branch's
-    /// `.filter(|v| !v.is_empty())` — so the whole header is omitted rather than a
-    /// `Bearer ` with nothing after it being shipped to the provider.
-    #[tokio::test]
-    async fn an_empty_stored_secret_resolves_to_absent() {
-        let _lock = lock_env_secret();
-        std::env::remove_var("RYU_PLUGIN_COM_X2E_ACME_X2E_WEATHER_API_KEY");
-        std::env::remove_var(ENV_SECRET_ALLOWLIST);
-
-        let store = crate::plugin_secrets::PluginSecretStore::in_memory().unwrap();
-        store
-            .set(
-                "com.acme.weather",
-                "RYU_PLUGIN_COM_X2E_ACME_X2E_WEATHER_API_KEY",
-                "k",
-            )
-            .await
-            .unwrap();
-        // Clearing it through the same API used by `PUT` with a blank body.
-        store
-            .set(
-                "com.acme.weather",
-                "RYU_PLUGIN_COM_X2E_ACME_X2E_WEATHER_API_KEY",
-                "  ",
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            resolve_env_secret_from(
-                "com.acme.weather",
-                "RYU_PLUGIN_COM_X2E_ACME_X2E_WEATHER_API_KEY",
-                Some(&store)
-            )
-            .await,
-            SecretToken::Absent
-        );
-    }
-
-    // ── built-in command-bin allowlist seed ──────────────────────────────────
-
-    /// The `rtk` allowlist entry must resolve to an operator-set absolute override
-    /// or Ryu's own `~/.ryu/bin/rtk` — never to a `$PATH` walk. `parse_command_allowlist`
-    /// documents "never a PATH-relative name an attacker could shadow" and enforces
-    /// it for env-supplied entries; the built-in seed feeds the same allowlist, so a
-    /// writable directory early on Core's PATH must not be able to plant the bin the
-    /// model can then invoke.
-    #[test]
-    fn rtk_builtin_bin_never_resolves_through_path() {
-        let _lock = lock_env_secret();
-
-        let planted_dir =
-            std::env::temp_dir().join(format!("ryu-rtk-shadow-{}", std::process::id()));
-        std::fs::create_dir_all(&planted_dir).expect("temp dir");
-        let exe = if cfg!(windows) { "rtk.exe" } else { "rtk" };
-        let planted = planted_dir.join(exe);
-        std::fs::write(&planted, b"#!/bin/sh\n").expect("plant a shadowing rtk");
-
-        let prev_path = std::env::var_os("PATH");
-        let prev_bin = std::env::var_os("RYU_RTK_BIN");
-        std::env::remove_var("RYU_RTK_BIN");
-        std::env::set_var("PATH", &planted_dir);
-
-        let resolved = trusted_builtin_bin_path("rtk").expect("rtk is a known built-in key");
-
-        match prev_path {
-            Some(v) => std::env::set_var("PATH", v),
-            None => std::env::remove_var("PATH"),
-        }
-        if let Some(v) = prev_bin {
-            std::env::set_var("RYU_RTK_BIN", v);
-        }
-        let _ = std::fs::remove_dir_all(&planted_dir);
-
-        assert_ne!(
-            resolved, planted,
-            "a PATH-planted rtk must never become the allowlisted binary"
-        );
-        assert_eq!(
-            resolved,
-            crate::paths::ryu_dir().join("bin").join("rtk"),
-            "rtk must fall back to Ryu's own bin dir, like spider"
-        );
-    }
-
-    /// The operator override still wins, and `spider`'s arm is untouched.
-    #[test]
-    fn builtin_bin_env_overrides_still_win() {
-        let _lock = lock_env_secret();
-
-        let prev = std::env::var_os("RYU_RTK_BIN");
-        let abs = if cfg!(windows) {
-            "C:\\ops\\rtk.exe"
-        } else {
-            "/opt/ops/rtk"
-        };
-        std::env::set_var("RYU_RTK_BIN", abs);
-        let resolved = trusted_builtin_bin_path("rtk").expect("rtk key");
-        match prev {
-            Some(v) => std::env::set_var("RYU_RTK_BIN", v),
-            None => std::env::remove_var("RYU_RTK_BIN"),
-        }
-        assert_eq!(resolved, std::path::PathBuf::from(abs));
-        assert!(trusted_builtin_bin_path("nope").is_none());
-    }
-
-    // ── command SUCCESS merges child stderr into the text output ──────────────
-
-    #[tokio::test]
-    async fn command_tool_success_merges_stderr_into_output() {
-        let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let _env = CmdEnvGuard::armed();
-        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("sh"));
-        let (_script_dir, command_args) = test_command_args("sh", &[]);
-        let out = run_command_tool(
-            "sh",
-            &command_args,
-            None,
-            &BTreeMap::new(),
-            None,
-            10,
-            CommandOutput::Stdout,
-            None,
-            &BTreeMap::new(),
-            serde_json::json!({}),
-            &grants(&["tool:command:sh"]),
-            "com.test.cmd",
-            None,
-        )
-        .await
-        .expect("sh runs");
-        assert_eq!(out.get("exit_code").and_then(Value::as_i64), Some(0));
-        let stdout = out
-            .get("stdout")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        assert!(
-            stdout.contains("the-stdout"),
-            "stdout must be present, got: {stdout:?}"
-        );
-        assert!(
-            stdout.contains("the-stderr"),
-            "non-empty stderr must be merged into the output, got: {stdout:?}"
-        );
-    }
-
-    /// The BYOK providers the layer feature ships MUST pass the namespace gate, or
-    /// the settings panel renders "Stored, but this plugin is not allowed to read
-    /// this name" on the one feature added to make them configurable.
-    ///
-    /// They pass by PROVENANCE, not tier: both are Community-tier yet compiled into
-    /// the binary, and `is_compiled_in_manifest` is what the gate consults. A future
-    /// change that moved either out of `BUILTIN_MANIFESTS` would silently break BYOK
-    /// for it, which is what this pins.
-    #[test]
-    fn the_shipped_byok_providers_may_read_their_own_keys() {
-        assert!(may_read_env_secret("@ryu/tavily", "RYU_TAVILY_API_KEY"));
-        assert!(may_read_env_secret("@ryu/exa", "RYU_EXA_API_KEY"));
-        // And the gate still holds sideways: one plugin cannot read another's key by
-        // simply naming it.
-        assert!(!may_read_env_secret(
-            "acme-thirdparty",
-            "RYU_TAVILY_API_KEY"
-        ));
-    }
-
-    /// `core:` must resolve to the ACTIVE profile's Core port, never a hardcoded
-    /// 7980. The bug this pins: under the `dev` profile (what `bun dev` runs) Core
-    /// binds 8980, so a hardcoded manifest url reached nothing — or reached a
-    /// release-profile Core running alongside it, crossing two profiles' data.
-    #[test]
-    fn the_core_scheme_resolves_to_this_profiles_loopback_port() {
-        // Only the PORT is taken from RYU_BIND; a node bound to 0.0.0.0 is still
-        // dialled on loopback, because `http://0.0.0.0/...` is not a route.
-        // Only the PORT is taken from RYU_BIND; a node bound to 0.0.0.0 is still
-        // dialled on loopback, because `http://0.0.0.0/...` is not a route.
-        assert_eq!(core_port_from_bind(Some("0.0.0.0:8980")), 8980);
-        assert_eq!(core_port_from_bind(Some("127.0.0.1:7980")), 7980);
-        // Absent / malformed falls back through the ONE offset source.
-        assert_eq!(
-            core_port_from_bind(None),
-            crate::profile::port(CORE_BASE_PORT)
-        );
-        assert_eq!(
-            core_port_from_bind(Some("not-a-bind")),
-            crate::profile::port(CORE_BASE_PORT)
-        );
-
-        let origin = "http://127.0.0.1:8980";
-        assert_eq!(
-            resolve_core_url_with("core:/api/shadow/search", origin),
-            "http://127.0.0.1:8980/api/shadow/search"
-        );
-        // A leading slash is optional in the manifest and never doubles up.
-        assert_eq!(
-            resolve_core_url_with("core:api/memory", origin),
-            "http://127.0.0.1:8980/api/memory"
-        );
-    }
-
-    #[test]
-    fn a_non_core_url_is_returned_untouched() {
-        // The scheme is opt-in: every external provider url must pass through byte
-        // for byte, or the egress guard would screen something other than what is
-        // dialled.
-        for url in [
-            "https://api.exa.ai/search",
-            "https://api.tavily.com/extract",
-            "http://127.0.0.1:9999/whatever",
-        ] {
-            assert_eq!(resolve_core_url(url), url);
-            assert_eq!(resolve_core_url_with(url, "http://127.0.0.1:8980"), url);
-        }
-    }
-
-    #[test]
-    fn node_tokens_are_only_allowed_on_loopback_core_port() {
-        assert!(node_token_target_is_local_core(&format!(
-            "http://127.0.0.1:{}/api/ext/core",
-            core_port_from_bind(None)
-        )));
-        assert!(!node_token_target_is_local_core("https://example.test/api"));
-        assert!(!node_token_target_is_local_core(
-            "http://127.0.0.1:9999/api"
-        ));
-    }
-
-    /// Every shipped manifest that addresses Core must use `core:`, or it silently
-    /// breaks on a non-release profile. Guards the migration from regressing.
-    #[test]
-    fn no_shipped_manifest_hardcodes_cores_port() {
-        for manifest in crate::plugin_manifest::PluginManifestLoader::load_builtins() {
-            for entry in &manifest.runnables {
-                let Some(cfg) = entry.config.as_ref() else {
-                    continue;
-                };
-                let raw = cfg.to_string();
-                assert!(
-                    !raw.contains("127.0.0.1:7980"),
-                    "manifest '{}' hardcodes Core's release port; use the core: scheme \
-                     so it resolves per profile",
-                    manifest.id
-                );
-            }
-        }
-    }
-}
+mod tests;

@@ -19,11 +19,12 @@ use uuid::Uuid;
 use ryu_crypto::FieldCipher;
 
 use crate::{
-    validate_endpoint, validate_task_transition, A2aPeer, A2aPrincipal, A2aScope, A2aServerConfig,
-    A2aTaskRecord, CredentialKind, EndpointError, EndpointPolicy, IssuedPrincipalToken,
-    PeerCredential, PeerTrust, PeerUpsert, PublishedAgent, PublishedAgentUpsert, PushConfigInput,
-    PushConfigSummary, ResolvedPeer, ResolvedPushConfig, TaskCreate, TaskDirection,
-    TaskEventRecord, TaskItemKind, TaskItemRecord, TaskState, TransitionError,
+    validate_endpoint, validate_task_transition, A2aPeer, A2aPrincipal, A2aPublicAgentBinding,
+    A2aScope, A2aServerConfig, A2aTaskRecord, CredentialKind, EndpointError, EndpointPolicy,
+    IssuedPrincipalToken, PeerCredential, PeerTrust, PeerUpsert, PublishedAgent,
+    PublishedAgentUpsert, PushConfigInput, PushConfigSummary, ResolvedPeer, ResolvedPushConfig,
+    TaskCreate, TaskDirection, TaskEventRecord, TaskItemKind, TaskItemRecord, TaskState,
+    TransitionError,
 };
 
 const MAX_PAGE_SIZE: u32 = 200;
@@ -136,6 +137,15 @@ impl A2aStore {
              CREATE INDEX IF NOT EXISTS idx_a2a_published_agents_tenant
                ON a2a_published_agents (tenant_id, name COLLATE NOCASE);
 
+             CREATE TABLE IF NOT EXISTS a2a_principal_public_bindings (
+               principal_id TEXT PRIMARY KEY REFERENCES a2a_principals(id) ON DELETE CASCADE,
+               tenant_id TEXT NOT NULL,
+               published_agent_id TEXT NOT NULL,
+               capability_allowlist_json TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_a2a_principal_public_bindings_agent
+               ON a2a_principal_public_bindings (tenant_id, published_agent_id);
+
              CREATE TABLE IF NOT EXISTS a2a_tasks (
                id TEXT PRIMARY KEY,
                context_id TEXT NOT NULL,
@@ -188,6 +198,18 @@ impl A2aStore {
              );
 
              PRAGMA user_version = 1;",
+        )?;
+        ensure_column(
+            &connection,
+            "a2a_peers",
+            "card_signature_json",
+            "card_signature_json TEXT",
+        )?;
+        ensure_column(
+            &connection,
+            "a2a_server_config",
+            "require_signed_peer_cards",
+            "require_signed_peer_cards INTEGER NOT NULL DEFAULT 0",
         )?;
         Ok(Self {
             connection: Mutex::new(connection),
@@ -248,17 +270,23 @@ impl A2aStore {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
+        let card_signature_json = input
+            .card_signature
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
 
         connection.execute(
             "INSERT INTO a2a_peers (
                id, tenant_id, name, agent_card_url, agent_card_json,
                credential_kind, credential_sealed, trust, enabled, last_error,
-               created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11)
+               created_at, updated_at, card_signature_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
                name = excluded.name,
                agent_card_url = excluded.agent_card_url,
                agent_card_json = excluded.agent_card_json,
+               card_signature_json = excluded.card_signature_json,
                credential_kind = excluded.credential_kind,
                credential_sealed = excluded.credential_sealed,
                enabled = excluded.enabled,
@@ -277,6 +305,7 @@ impl A2aStore {
                 input.enabled,
                 created_at,
                 now,
+                card_signature_json,
             ],
         )?;
         load_peer_row(&connection, &input.tenant_id, &id)?
@@ -296,7 +325,7 @@ impl A2aStore {
         let mut statement = connection.prepare(
             "SELECT id, tenant_id, name, agent_card_url, agent_card_json,
                     credential_kind, credential_sealed, trust, enabled, last_error,
-                    created_at, updated_at
+                    created_at, updated_at, card_signature_json
              FROM a2a_peers WHERE tenant_id = ?1 ORDER BY name COLLATE NOCASE, id",
         )?;
         let rows = statement.query_map([tenant_id], peer_row_from_sql)?;
@@ -404,8 +433,9 @@ impl A2aStore {
         self.connection()?.execute(
             "INSERT INTO a2a_server_config (
                tenant_id, enabled, display_name, description, public_base_url,
-               expose_extended_card, max_payload_bytes, max_concurrent_tasks, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+               expose_extended_card, max_payload_bytes, max_concurrent_tasks, updated_at,
+               require_signed_peer_cards
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(tenant_id) DO UPDATE SET
                enabled = excluded.enabled,
                display_name = excluded.display_name,
@@ -414,6 +444,7 @@ impl A2aStore {
                expose_extended_card = excluded.expose_extended_card,
                max_payload_bytes = excluded.max_payload_bytes,
                max_concurrent_tasks = excluded.max_concurrent_tasks,
+               require_signed_peer_cards = excluded.require_signed_peer_cards,
                updated_at = excluded.updated_at",
             params![
                 config.tenant_id,
@@ -427,6 +458,7 @@ impl A2aStore {
                 })?,
                 config.max_concurrent_tasks,
                 config.updated_at,
+                config.require_signed_peer_cards,
             ],
         )?;
         Ok(config)
@@ -437,7 +469,8 @@ impl A2aStore {
         connection
             .query_row(
                 "SELECT tenant_id, enabled, display_name, description, public_base_url,
-                        expose_extended_card, max_payload_bytes, max_concurrent_tasks, updated_at
+                        expose_extended_card, max_payload_bytes, max_concurrent_tasks, updated_at,
+                        require_signed_peer_cards
                  FROM a2a_server_config WHERE tenant_id = ?1",
                 [tenant_id],
                 |row| {
@@ -451,6 +484,7 @@ impl A2aStore {
                         max_payload_bytes: u64::try_from(row.get::<_, i64>(6)?)
                             .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(6, -1))?,
                         max_concurrent_tasks: row.get(7)?,
+                        require_signed_peer_cards: row.get(9)?,
                         updated_at: row.get(8)?,
                     })
                 },
@@ -581,6 +615,48 @@ impl A2aStore {
         name: &str,
         scopes: BTreeSet<A2aScope>,
     ) -> Result<IssuedPrincipalToken, StoreError> {
+        self.issue_principal_token_with_binding(tenant_id, name, scopes, None)
+    }
+
+    pub fn issue_public_agent_principal_token(
+        &self,
+        tenant_id: &str,
+        name: &str,
+        scopes: BTreeSet<A2aScope>,
+        published_agent_id: &str,
+        capability_allowlist: BTreeSet<String>,
+    ) -> Result<IssuedPrincipalToken, StoreError> {
+        validate_identifier("published agent record ID", published_agent_id)?;
+        if scopes != BTreeSet::from([A2aScope::Send]) {
+            return Err(StoreError::InvalidInput(
+                "a public agent principal may only receive the send scope".to_owned(),
+            ));
+        }
+        let published = self.get_published_agent(tenant_id, published_agent_id)?;
+        if !published.enabled {
+            return Err(StoreError::Conflict(
+                "a public principal requires an enabled published agent".to_owned(),
+            ));
+        }
+        validate_public_capability_allowlist(&capability_allowlist)?;
+        self.issue_principal_token_with_binding(
+            tenant_id,
+            name,
+            scopes,
+            Some(A2aPublicAgentBinding {
+                published_agent_id: published_agent_id.to_owned(),
+                capability_allowlist,
+            }),
+        )
+    }
+
+    fn issue_principal_token_with_binding(
+        &self,
+        tenant_id: &str,
+        name: &str,
+        scopes: BTreeSet<A2aScope>,
+        public_agent: Option<A2aPublicAgentBinding>,
+    ) -> Result<IssuedPrincipalToken, StoreError> {
         validate_identifier("tenant ID", tenant_id)?;
         validate_label("principal name", name, 160)?;
         if scopes.is_empty() {
@@ -593,7 +669,13 @@ impl A2aStore {
         let token_hash = hash_token(&token);
         let created_at = timestamp();
         let scopes_json = serde_json::to_string(&scopes)?;
-        self.connection()?.execute(
+        let capability_allowlist_json = public_agent
+            .as_ref()
+            .map(|binding| serde_json::to_string(&binding.capability_allowlist))
+            .transpose()?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
             "INSERT INTO a2a_principals (
                id, tenant_id, name, token_hash, scopes_json, created_at, last_used_at, revoked_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL)",
@@ -606,12 +688,29 @@ impl A2aStore {
                 created_at
             ],
         )?;
+        if let (Some(binding), Some(capability_allowlist_json)) =
+            (public_agent.as_ref(), capability_allowlist_json)
+        {
+            transaction.execute(
+                "INSERT INTO a2a_principal_public_bindings (
+                   principal_id, tenant_id, published_agent_id, capability_allowlist_json
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    id,
+                    tenant_id,
+                    binding.published_agent_id,
+                    capability_allowlist_json
+                ],
+            )?;
+        }
+        transaction.commit()?;
         Ok(IssuedPrincipalToken {
             principal: A2aPrincipal {
                 id,
                 tenant_id: tenant_id.to_owned(),
                 name: name.to_owned(),
                 scopes,
+                public_agent,
                 created_at,
                 last_used_at: None,
                 revoked_at: None,
@@ -633,10 +732,17 @@ impl A2aStore {
         let connection = self.connection()?;
         let raw = connection
             .query_row(
-                "SELECT id, tenant_id, name, token_hash, scopes_json, created_at,
-                        last_used_at, revoked_at
-                 FROM a2a_principals
-                 WHERE tenant_id = ?1 AND token_hash = ?2 AND revoked_at IS NULL",
+                "SELECT principal.id, principal.tenant_id, principal.name,
+                        principal.token_hash, principal.scopes_json, principal.created_at,
+                        principal.last_used_at, principal.revoked_at,
+                        binding.published_agent_id, binding.capability_allowlist_json
+                 FROM a2a_principals AS principal
+                 LEFT JOIN a2a_principal_public_bindings AS binding
+                   ON binding.principal_id = principal.id
+                  AND binding.tenant_id = principal.tenant_id
+                 WHERE principal.tenant_id = ?1
+                   AND principal.token_hash = ?2
+                   AND principal.revoked_at IS NULL",
                 params![tenant_id, candidate_hash.as_slice()],
                 |row| {
                     Ok(PrincipalRow {
@@ -648,6 +754,8 @@ impl A2aStore {
                         created_at: row.get(5)?,
                         last_used_at: row.get(6)?,
                         revoked_at: row.get(7)?,
+                        published_agent_id: row.get(8)?,
+                        capability_allowlist_json: row.get(9)?,
                     })
                 },
             )
@@ -674,9 +782,15 @@ impl A2aStore {
     pub fn list_principals(&self, tenant_id: &str) -> Result<Vec<A2aPrincipal>, StoreError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, tenant_id, name, token_hash, scopes_json, created_at,
-                    last_used_at, revoked_at
-             FROM a2a_principals WHERE tenant_id = ?1 ORDER BY created_at DESC",
+            "SELECT principal.id, principal.tenant_id, principal.name,
+                    principal.token_hash, principal.scopes_json, principal.created_at,
+                    principal.last_used_at, principal.revoked_at,
+                    binding.published_agent_id, binding.capability_allowlist_json
+             FROM a2a_principals AS principal
+             LEFT JOIN a2a_principal_public_bindings AS binding
+               ON binding.principal_id = principal.id
+              AND binding.tenant_id = principal.tenant_id
+             WHERE principal.tenant_id = ?1 ORDER BY principal.created_at DESC",
         )?;
         let rows = statement.query_map([tenant_id], |row| {
             Ok(PrincipalRow {
@@ -688,6 +802,8 @@ impl A2aStore {
                 created_at: row.get(5)?,
                 last_used_at: row.get(6)?,
                 revoked_at: row.get(7)?,
+                published_agent_id: row.get(8)?,
+                capability_allowlist_json: row.get(9)?,
             })
         })?;
         rows.map(|row| {
@@ -1259,6 +1375,7 @@ struct PeerRow {
     last_error: Option<String>,
     created_at: String,
     updated_at: String,
+    card_signature_json: Option<String>,
 }
 
 impl PeerRow {
@@ -1272,6 +1389,9 @@ impl PeerRow {
             name: self.name,
             agent_card_url: self.agent_card_url,
             agent_card,
+            card_signature: self
+                .card_signature_json
+                .and_then(|value| serde_json::from_str(&value).ok()),
             credential_kind: self.credential_kind,
             credential_configured: self.credential_sealed.is_some(),
             trust: self.trust,
@@ -1297,6 +1417,7 @@ fn peer_row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawPeerRow> {
         last_error: row.get(9)?,
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
+        card_signature_json: row.get(12)?,
     })
 }
 
@@ -1313,6 +1434,7 @@ struct RawPeerRow {
     last_error: Option<String>,
     created_at: String,
     updated_at: String,
+    card_signature_json: Option<String>,
 }
 
 fn parse_peer_row(raw: RawPeerRow) -> rusqlite::Result<PeerRow> {
@@ -1329,7 +1451,26 @@ fn parse_peer_row(raw: RawPeerRow) -> rusqlite::Result<PeerRow> {
         last_error: raw.last_error,
         created_at: raw.created_at,
         updated_at: raw.updated_at,
+        card_signature_json: raw.card_signature_json,
     })
+}
+
+/// Add a column to a table created by an earlier schema, once.
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), StoreError> {
+    let exists = connection
+        .prepare(&format!(
+            "SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"
+        ))?
+        .exists([column])?;
+    if !exists {
+        connection.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {definition};"))?;
+    }
+    Ok(())
 }
 
 fn load_peer_row(
@@ -1341,7 +1482,7 @@ fn load_peer_row(
         .query_row(
             "SELECT id, tenant_id, name, agent_card_url, agent_card_json,
                     credential_kind, credential_sealed, trust, enabled, last_error,
-                    created_at, updated_at
+                    created_at, updated_at, card_signature_json
              FROM a2a_peers WHERE tenant_id = ?1 AND id = ?2",
             params![tenant_id, peer_id],
             peer_row_from_sql,
@@ -1361,15 +1502,32 @@ struct PrincipalRow {
     created_at: String,
     last_used_at: Option<String>,
     revoked_at: Option<String>,
+    published_agent_id: Option<String>,
+    capability_allowlist_json: Option<String>,
 }
 
 impl PrincipalRow {
     fn into_public(self) -> Result<A2aPrincipal, StoreError> {
+        let public_agent = match (self.published_agent_id, self.capability_allowlist_json) {
+            (None, None) => None,
+            (Some(published_agent_id), Some(capability_allowlist_json)) => {
+                Some(A2aPublicAgentBinding {
+                    published_agent_id,
+                    capability_allowlist: serde_json::from_str(&capability_allowlist_json)?,
+                })
+            }
+            _ => {
+                return Err(StoreError::Corrupt(
+                    "A2A public principal binding is incomplete".to_owned(),
+                ));
+            }
+        };
         Ok(A2aPrincipal {
             id: self.id,
             tenant_id: self.tenant_id,
             name: self.name,
             scopes: serde_json::from_str(&self.scopes_json)?,
+            public_agent,
             created_at: self.created_at,
             last_used_at: self.last_used_at,
             revoked_at: self.revoked_at,
@@ -1631,6 +1789,48 @@ fn validate_identifier(label: &str, value: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+fn validate_public_capability_allowlist(capabilities: &BTreeSet<String>) -> Result<(), StoreError> {
+    const MAX_PUBLIC_CAPABILITIES: usize = 256;
+    const MAX_PUBLIC_CAPABILITY_BYTES: usize = 256;
+    const MAX_PUBLIC_CAPABILITY_JSON_BYTES: usize = 64 * 1024;
+    const ALLOWED_PREFIXES: [&str; 4] = ["tool:", "composio:", "skill:", "identity:"];
+
+    if capabilities.len() > MAX_PUBLIC_CAPABILITIES {
+        return Err(StoreError::InvalidInput(format!(
+            "a public principal may allow at most {MAX_PUBLIC_CAPABILITIES} capabilities"
+        )));
+    }
+    for capability in capabilities {
+        let Some((prefix, id)) = capability.split_once(':') else {
+            return Err(StoreError::InvalidInput(
+                "public capabilities must use a supported namespace".to_owned(),
+            ));
+        };
+        let prefix = format!("{prefix}:");
+        if !ALLOWED_PREFIXES.contains(&prefix.as_str())
+            || id.trim().is_empty()
+            || id.len() > MAX_PUBLIC_CAPABILITY_BYTES
+            || id.contains('*')
+            || id.chars().any(char::is_control)
+        {
+            return Err(StoreError::InvalidInput(
+                "public capabilities must be exact, namespaced identifiers".to_owned(),
+            ));
+        }
+        if capability.len() > MAX_PUBLIC_CAPABILITY_BYTES {
+            return Err(StoreError::InvalidInput(
+                "a public capability identifier is too long".to_owned(),
+            ));
+        }
+    }
+    if serde_json::to_vec(capabilities)?.len() > MAX_PUBLIC_CAPABILITY_JSON_BYTES {
+        return Err(StoreError::InvalidInput(
+            "the public capability allowlist exceeds the 64 KiB limit".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_label(label: &str, value: &str, max_bytes: usize) -> Result<(), StoreError> {
     if value.trim().is_empty() || value.len() > max_bytes {
         return Err(StoreError::InvalidInput(format!(
@@ -1691,6 +1891,7 @@ mod tests {
                     name: "Reference agent".to_owned(),
                     agent_card_url: "http://127.0.0.1:7788/.well-known/agent-card.json".to_owned(),
                     agent_card: Some(json!({"name": "Reference agent"})),
+                    card_signature: None,
                     credential: Some(PeerCredential::Bearer {
                         token: "super-secret".to_owned(),
                     }),
@@ -1731,6 +1932,7 @@ mod tests {
                     name: "Reference agent".to_owned(),
                     agent_card_url: "http://127.0.0.1:7788/.well-known/agent-card.json".to_owned(),
                     agent_card: None,
+                    card_signature: None,
                     credential: Some(PeerCredential::Bearer {
                         token: "super-secret".to_owned(),
                     }),
@@ -1791,6 +1993,222 @@ mod tests {
             store.authenticate_principal("tenant-a", &issued.token, A2aScope::Send),
             Err(StoreError::AuthenticationFailed)
         ));
+    }
+
+    #[test]
+    fn public_principals_are_bound_to_one_enabled_publication_and_restore_exact_capabilities() {
+        let store = store();
+        let published = store
+            .upsert_published_agent(PublishedAgentUpsert {
+                id: Some("publication-a".to_owned()),
+                tenant_id: "tenant-a".to_owned(),
+                agent_id: "agent-a".to_owned(),
+                name: "Agent A".to_owned(),
+                description: "A published test agent".to_owned(),
+                skills: Vec::new(),
+                enabled: true,
+            })
+            .expect("publish agent");
+        let capabilities = BTreeSet::from([
+            "tool:files.read_file".to_owned(),
+            "skill:public-faq".to_owned(),
+        ]);
+        let issued = store
+            .issue_public_agent_principal_token(
+                "tenant-a",
+                "Profile visitor",
+                BTreeSet::from([A2aScope::Send]),
+                &published.id,
+                capabilities.clone(),
+            )
+            .expect("issue public principal");
+
+        assert!(!format!("{issued:?}").contains(&issued.token));
+        assert!(issued.principal.allows_published_agent(&published.id));
+        assert!(!issued.principal.allows_published_agent("publication-b"));
+        assert!(issued
+            .principal
+            .allows_public_capability("tool:files.read_file"));
+        assert!(!issued
+            .principal
+            .allows_public_capability("tool:files.write_file"));
+
+        let authenticated = store
+            .authenticate_principal("tenant-a", &issued.token, A2aScope::Send)
+            .expect("authenticate bound principal");
+        let binding = authenticated.public_agent.expect("public binding");
+        assert_eq!(binding.published_agent_id, published.id);
+        assert_eq!(binding.capability_allowlist, capabilities);
+    }
+
+    #[test]
+    fn public_principal_capabilities_must_be_explicit_and_exact() {
+        let store = store();
+        let published = store
+            .upsert_published_agent(PublishedAgentUpsert {
+                id: Some("publication-a".to_owned()),
+                tenant_id: "tenant-a".to_owned(),
+                agent_id: "agent-a".to_owned(),
+                name: "Agent A".to_owned(),
+                description: "A published test agent".to_owned(),
+                skills: Vec::new(),
+                enabled: true,
+            })
+            .expect("publish agent");
+        for capability in ["*", "tool:*", "unknown:capability", "tool: "] {
+            assert!(matches!(
+                store.issue_public_agent_principal_token(
+                    "tenant-a",
+                    "Profile visitor",
+                    BTreeSet::from([A2aScope::Send]),
+                    &published.id,
+                    BTreeSet::from([capability.to_owned()]),
+                ),
+                Err(StoreError::InvalidInput(_))
+            ));
+        }
+        for scopes in [
+            BTreeSet::from([A2aScope::Send, A2aScope::Read]),
+            BTreeSet::from([A2aScope::Send, A2aScope::Cancel]),
+            BTreeSet::from([A2aScope::Send, A2aScope::Subscribe]),
+            BTreeSet::from([A2aScope::Send, A2aScope::PushConfig]),
+            BTreeSet::from([A2aScope::Send, A2aScope::ExtendedCard]),
+            BTreeSet::from([A2aScope::Read]),
+        ] {
+            assert!(matches!(
+                store.issue_public_agent_principal_token(
+                    "tenant-a",
+                    "Profile visitor",
+                    scopes,
+                    &published.id,
+                    BTreeSet::new(),
+                ),
+                Err(StoreError::InvalidInput(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn existing_principals_migrate_as_unbound_without_behavior_changes() {
+        let connection = Connection::open_in_memory().expect("open legacy database");
+        connection
+            .execute_batch(
+                "CREATE TABLE a2a_principals (
+                   id TEXT PRIMARY KEY,
+                   tenant_id TEXT NOT NULL,
+                   name TEXT NOT NULL,
+                   token_hash BLOB NOT NULL UNIQUE,
+                   scopes_json TEXT NOT NULL,
+                   created_at TEXT NOT NULL,
+                   last_used_at TEXT,
+                   revoked_at TEXT
+                 );",
+            )
+            .expect("create legacy principal schema");
+        let token = generate_token();
+        let token_hash = hash_token(&token);
+        connection
+            .execute(
+                "INSERT INTO a2a_principals (
+                   id, tenant_id, name, token_hash, scopes_json, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    "legacy-principal",
+                    "tenant-a",
+                    "Legacy principal",
+                    token_hash.as_slice(),
+                    serde_json::to_string(&BTreeSet::from([A2aScope::Send])).expect("scopes"),
+                    timestamp(),
+                ],
+            )
+            .expect("insert legacy principal");
+
+        let store = A2aStore::from_connection(connection, FieldCipher::new(&[7_u8; 32]))
+            .expect("migrate legacy database");
+        let principal = store
+            .authenticate_principal("tenant-a", &token, A2aScope::Send)
+            .expect("authenticate legacy principal");
+        assert!(principal.public_agent.is_none());
+        assert!(principal.allows_published_agent("any-publication"));
+        assert!(principal.allows_public_capability("tool:any-tool"));
+    }
+
+    #[test]
+    fn legacy_databases_gain_card_signature_columns() {
+        let connection = Connection::open_in_memory().expect("open legacy database");
+        connection
+            .execute_batch(
+                "CREATE TABLE a2a_peers (
+                   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL,
+                   agent_card_url TEXT NOT NULL, agent_card_json TEXT,
+                   credential_kind TEXT NOT NULL, credential_sealed TEXT, trust TEXT NOT NULL,
+                   enabled INTEGER NOT NULL, last_error TEXT,
+                   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                 );
+                 CREATE TABLE a2a_server_config (
+                   tenant_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL,
+                   display_name TEXT NOT NULL, description TEXT NOT NULL,
+                   public_base_url TEXT, expose_extended_card INTEGER NOT NULL,
+                   max_payload_bytes INTEGER NOT NULL, max_concurrent_tasks INTEGER NOT NULL,
+                   updated_at TEXT NOT NULL
+                 );
+                 INSERT INTO a2a_server_config VALUES
+                   ('tenant-a', 1, 'Ryu', 'Legacy', NULL, 0, 1048576, 32, 'then');
+                 INSERT INTO a2a_peers VALUES
+                   ('peer-1', 'tenant-a', 'Legacy peer', 'https://peer.example.com', NULL,
+                    'none', NULL, 'pending', 1, NULL, 'then', 'then');",
+            )
+            .expect("create legacy schema");
+        let store = A2aStore::from_connection(connection, FieldCipher::new(&[7_u8; 32]))
+            .expect("migrate legacy database");
+        assert!(
+            !store
+                .server_config("tenant-a")
+                .expect("legacy config")
+                .require_signed_peer_cards
+        );
+        assert!(store
+            .get_peer("tenant-a", "peer-1")
+            .expect("legacy peer")
+            .card_signature
+            .is_none());
+
+        let mut config = store.server_config("tenant-a").expect("config");
+        config.require_signed_peer_cards = true;
+        store
+            .save_server_config(config, development_policy())
+            .expect("save config");
+        assert!(
+            store
+                .server_config("tenant-a")
+                .expect("config")
+                .require_signed_peer_cards
+        );
+
+        let verified = crate::CardSignatureStatus::Verified {
+            kid: "kid-1".to_owned(),
+            jku: Some("https://peer.example.com/a2a-card/jwks.json".to_owned()),
+        };
+        let peer = store
+            .upsert_peer(
+                PeerUpsert {
+                    id: Some("peer-1".to_owned()),
+                    tenant_id: "tenant-a".to_owned(),
+                    name: "Legacy peer".to_owned(),
+                    agent_card_url: "https://peer.example.com".to_owned(),
+                    agent_card: Some(json!({"name": "Legacy peer"})),
+                    card_signature: Some(verified.clone()),
+                    credential: None,
+                    enabled: true,
+                },
+                development_policy(),
+            )
+            .expect("save peer");
+        assert_eq!(peer.card_signature, Some(verified.clone()));
+        let listed = store.list_peers("tenant-a").expect("list peers");
+        assert_eq!(listed[0].card_signature, Some(verified));
+        let public = serde_json::to_value(&listed[0]).expect("serialize peer");
+        assert_eq!(public["cardSignature"]["status"], "verified");
     }
 
     #[test]
@@ -2025,6 +2443,7 @@ mod tests {
                     name: "Renamed agent".to_owned(),
                     agent_card_url: original.agent_card_url,
                     agent_card: original.agent_card,
+                    card_signature: original.card_signature,
                     credential: None,
                     enabled: true,
                 },

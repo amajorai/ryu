@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { release } from "node:os";
 import { join } from "node:path";
 import {
 	BrowserWindow,
@@ -9,9 +10,31 @@ import {
 	type IslandBackground,
 	isMaterialAppearance,
 } from "../shared/appearance.ts";
+import { notchWindowRect } from "../shared/notch.ts";
+import { placementArg, TRANSLUCENT_WINDOW_INSET } from "../shared/placement.ts";
+import {
+	placeAtAnchor,
+	rectAt,
+	rectCenter,
+	type Size,
+	TRANSLUCENT_WINDOW_SIZE,
+	windowOriginFor,
+} from "./anchor.ts";
 import { getEdgeOffset } from "./edge-offset.ts";
-import { restingPill, restorePosition } from "./position.ts";
-import { DEFAULT_DOCK_ZONE, zoneWindowPosition } from "./zones.ts";
+import {
+	applyMaterialMask,
+	hasMaterialMask,
+	supportsMacLiquidGlass,
+} from "./material-mask.ts";
+import {
+	allowsMicrophoneCheck,
+	allowsMicrophoneRequest,
+} from "./media-permissions.ts";
+import { getNotchGeometry } from "./notch.ts";
+import { initialAnchor } from "./position.ts";
+import { attachPositioner } from "./positioner.ts";
+import { presentWindow } from "./visibility.ts";
+import { supportsBuiltInAcrylic } from "./windows-material.ts";
 
 // `mica-electron` is a Windows-only NATIVE module (Win11 Mica/Acrylic via DWM).
 // It is an optionalDependency and loaded lazily so the app builds + runs on macOS/
@@ -20,18 +43,8 @@ import { DEFAULT_DOCK_ZONE, zoneWindowPosition } from "./zones.ts";
 // native equivalent is `vibrancy`, which the acrylic options already set.
 const require = createRequire(import.meta.url);
 
-/** The extra effect methods a `MicaBrowserWindow` carries beyond BrowserWindow. */
-type MicaWindow = BrowserWindow & {
-	setAcrylic(): void;
-	setDarkTheme(): void;
-	setMicaAcrylicEffect(): void;
-	setRoundedCorner(): void;
-};
-
-interface MicaElectron {
-	IS_WINDOWS_11: boolean;
-	MicaBrowserWindow: new (opts: BrowserWindowConstructorOptions) => MicaWindow;
-}
+type MicaWindow = import("mica-electron").MicaBrowserWindow;
+type MicaElectron = typeof import("mica-electron");
 
 /** Load `mica-electron` on Windows, or `null` if unavailable (other OS / not installed). */
 function loadMica(): MicaElectron | null {
@@ -39,6 +52,8 @@ function loadMica(): MicaElectron | null {
 		return null;
 	}
 	try {
+		// SAFETY: The optional module is loaded by its package name on Windows;
+		// its installed declarations own the constructor and material methods.
 		return require("mica-electron") as MicaElectron;
 	} catch {
 		return null;
@@ -46,18 +61,13 @@ function loadMica(): MicaElectron | null {
 }
 
 // In the translucent appearance the window stays at the maximum panel size at
-// all times; the morphing island shapes are drawn inside it by the renderer and
+// all times (`TRANSLUCENT_WINDOW_SIZE`); the morphing island shapes are drawn
+// inside it by the renderer, aligned to the island's anchor corner, and
 // everything outside them is click-through, so the oversized window never blocks
-// the apps underneath. It must hold the widest/tallest footprint — the expanded
-// chat: logo circle (40) + gap (8) + panel (400) = 448 wide, 480 tall — PLUS a
-// generous margin on every side so the shapes' drop shadows (`shadow-2xl`) and
-// ring are never clipped by the window edge. The extra area is transparent +
-// click-through, so a roomy window costs nothing but stops the cut-off shadows.
-const PANEL_WIDTH = 600;
-const PANEL_HEIGHT = 620;
-// The acrylic window is the island itself (a native OS material fills the whole
-// window rectangle), so it starts at the resting footprint and the renderer
-// resizes it per state via `win:setContentSize`. Exported so the auto-jump gate
+// the apps underneath.
+// The acrylic window follows the island's footprint, while its material mask
+// clips the native blur to the separate painted shapes. The renderer resizes it
+// per state via `win:setContentSize`. Exported so the auto-jump gate
 // can tell whether a material window is at rest (vs morphed open) before moving it.
 export const ACRYLIC_START_WIDTH = 144;
 export const ACRYLIC_START_HEIGHT = 44;
@@ -65,8 +75,8 @@ export const ACRYLIC_START_HEIGHT = 44;
 /** Window options for the translucent appearance: oversized + transparent. */
 function translucentOptions(): BrowserWindowConstructorOptions {
 	return {
-		width: PANEL_WIDTH,
-		height: PANEL_HEIGHT,
+		width: TRANSLUCENT_WINDOW_SIZE.width,
+		height: TRANSLUCENT_WINDOW_SIZE.height,
 		frame: false,
 		transparent: true,
 		resizable: false,
@@ -79,25 +89,30 @@ function translucentOptions(): BrowserWindowConstructorOptions {
 /**
  * Window options for the acrylic appearance: a window-tracked transparent
  * window carrying a native OS material. `backgroundMaterial: "acrylic"` drives
- * the Windows 11 blur; `vibrancy: "under-window"` drives macOS vibrancy (each is
- * ignored on the other platform). The transparent web layer lets the native
- * material show through the Island's lightly-tinted shape.
+ * the Windows 11 blur. macOS 26+ uses a clipped Liquid Glass view; older macOS
+ * uses Sidebar vibrancy. The transparent web layer lets either native material
+ * show through the lightly tinted Island surfaces.
  */
 function acrylicOptions(): BrowserWindowConstructorOptions {
-	return {
+	const options: BrowserWindowConstructorOptions = {
 		width: ACRYLIC_START_WIDTH,
 		height: ACRYLIC_START_HEIGHT,
 		frame: false,
 		transparent: true,
 		backgroundColor: "#00000000",
-		backgroundMaterial: "acrylic",
-		vibrancy: "under-window",
-		visualEffectState: "active",
 		resizable: false,
 		skipTaskbar: true,
-		hasShadow: true,
+		hasShadow: false,
 		show: false,
 	};
+	if (process.platform === "win32") {
+		options.backgroundMaterial = "acrylic";
+	}
+	if (process.platform === "darwin" && !supportsMacLiquidGlass()) {
+		options.vibrancy = "sidebar";
+		options.visualEffectState = "active";
+	}
+	return options;
 }
 
 /**
@@ -114,19 +129,23 @@ function micaOptions(): BrowserWindowConstructorOptions {
 		backgroundColor: "#00000000",
 		resizable: false,
 		skipTaskbar: true,
-		hasShadow: true,
+		hasShadow: false,
 		show: false,
 	};
 }
 
 /** Apply the dark Win11 Mica/Acrylic material to a freshly-created mica window. */
-function applyMicaEffect(win: MicaWindow, mica: MicaElectron): void {
+function applyMicaEffect(
+	win: MicaWindow,
+	mica: MicaElectron,
+	legacyAcrylic: boolean
+): void {
 	// Dark theme to match the Siri look; rounded corners (DWM).
 	win.setDarkTheme();
 	win.setRoundedCorner();
 	// Acrylic actually blurs what is behind (Mica only samples the wallpaper), so
 	// it is the closer match to the frosted-glass goal. Win10 uses plain Acrylic.
-	if (mica.IS_WINDOWS_11) {
+	if (mica.IS_WINDOWS_11 && !legacyAcrylic) {
 		win.setMicaAcrylicEffect();
 	} else {
 		win.setAcrylic();
@@ -136,35 +155,53 @@ function applyMicaEffect(win: MicaWindow, mica: MicaElectron): void {
 /**
  * Creates the frameless, always-on-top island window for the given appearance.
  *
- * - `translucent` (default): an oversized transparent window anchored to the
+ * - `translucent`: an oversized transparent window anchored to the
  *   bottom-right of the primary display's work area. It starts click-through; the
  *   renderer captures the mouse only while the pointer is over an island shape.
- * - `acrylic`: a window-tracked native-material window (built-in
- *   `backgroundMaterial`/`vibrancy`). It is the island, so it starts interactive
- *   and resizes to the visible footprint as the island morphs.
+ * - `acrylic` (default): a window-tracked native-material window. Mac uses
+ *   Liquid Glass or Sidebar vibrancy; Windows uses built-in Acrylic or the
+ *   native Windows 10 fallback. It resizes to the visible footprint.
  * - `mica`: same window-tracked behaviour as `acrylic`, but on Windows the Win11
  *   Mica/Acrylic material is applied via the `mica-electron` native module. If
  *   that module is unavailable (non-Windows, or not installed), it falls back to
  *   the built-in acrylic options (so macOS still gets `vibrancy`).
  */
 export function createIslandWindow(
-	background: IslandBackground = "translucent"
+	background: IslandBackground = "acrylic"
 ): BrowserWindow {
-	const material = isMaterialAppearance(background);
-	const startWidth = material ? ACRYLIC_START_WIDTH : PANEL_WIDTH;
-	const startHeight = material ? ACRYLIC_START_HEIGHT : 0;
-	const primary = screen.getPrimaryDisplay();
-	const pill = restingPill(startWidth, startHeight, material);
-	const { x, y } = zoneWindowPosition(
-		primary.workArea,
-		DEFAULT_DOCK_ZONE,
-		pill,
+	const notch = getNotchGeometry();
+	const material = !notch && isMaterialAppearance(background);
+	// Start from the persisted anchor (or the default dock) so the first frame is
+	// already in place; the renderer is told the placement up front so its group
+	// is aligned to the anchor corner before the window is shown.
+	const anchor = initialAnchor(material);
+	const startFootprint: Size = {
+		width: ACRYLIC_START_WIDTH,
+		height: ACRYLIC_START_HEIGHT,
+	};
+	const startRect = placeAtAnchor(
+		anchor,
+		startFootprint,
+		screen.getDisplayNearestPoint(rectCenter(rectAt(anchor, startFootprint)))
+			.workArea,
 		getEdgeOffset()
 	);
+	const { x, y } = material
+		? startRect
+		: windowOriginFor(
+				startRect,
+				anchor.placement,
+				TRANSLUCENT_WINDOW_SIZE,
+				TRANSLUCENT_WINDOW_INSET
+			);
 
-	// Use mica-electron only for the `mica` appearance on Windows; otherwise the
-	// material path uses Electron's built-in acrylic/vibrancy options.
-	const mica = background === "mica" ? loadMica() : null;
+	// Electron's built-in Acrylic needs Windows 11 22H2. The existing native
+	// module covers Windows 10 and Windows 11 21H2 for the default appearance.
+	const legacyAcrylic =
+		background === "acrylic" &&
+		process.platform === "win32" &&
+		!supportsBuiltInAcrylic(release());
+	const mica = background === "mica" || legacyAcrylic ? loadMica() : null;
 	let baseOptions: BrowserWindowConstructorOptions;
 	if (mica) {
 		baseOptions = micaOptions();
@@ -180,30 +217,52 @@ export function createIslandWindow(
 		y,
 		webPreferences: {
 			preload: join(import.meta.dirname, "../preload/index.cjs"),
+			additionalArguments: [placementArg(anchor.placement)],
 			contextIsolation: true,
 			nodeIntegration: false,
 		},
 	};
 
+	if (notch) {
+		options.roundedCorners = false;
+		Object.assign(
+			options,
+			notchWindowRect(notch, notch.width + 80, notch.height + 40)
+		);
+	}
+
 	let win: BrowserWindow;
 	if (mica) {
 		const micaWin = new mica.MicaBrowserWindow(options);
-		applyMicaEffect(micaWin, mica);
+		applyMicaEffect(micaWin, mica, legacyAcrylic);
 		win = micaWin;
 	} else {
 		win = new BrowserWindow(options);
 	}
+	attachPositioner(win, material, anchor, startFootprint);
 
 	// Voice input captures the mic via getUserMedia in the renderer; without an
 	// explicit grant Electron denies it silently. Allow only media (audio) for
 	// this window's session — everything else stays denied.
-	const isMediaPermission = (permission: string): boolean =>
-		permission === "media" || permission === "audioCapture";
 	win.webContents.session.setPermissionRequestHandler(
-		(_wc, permission, callback) => callback(isMediaPermission(permission))
+		(webContents, permission, callback, details) =>
+			callback(
+				allowsMicrophoneRequest(
+					webContents === win.webContents,
+					permission,
+					details.isMainFrame,
+					"mediaTypes" in details ? details.mediaTypes : undefined
+				)
+			)
 	);
-	win.webContents.session.setPermissionCheckHandler((_wc, permission) =>
-		isMediaPermission(permission)
+	win.webContents.session.setPermissionCheckHandler(
+		(webContents, permission, _origin, details) =>
+			allowsMicrophoneCheck(
+				webContents === win.webContents,
+				permission,
+				details.isMainFrame,
+				details.mediaType
+			)
 	);
 
 	win.setAlwaysOnTop(true, "screen-saver");
@@ -221,8 +280,22 @@ export function createIslandWindow(
 	}
 
 	win.once("ready-to-show", () => {
-		restorePosition(win, material);
-		win.show();
+		if (material && !hasMaterialMask(win)) {
+			// The renderer normally reports its first shape before this event. Mask
+			// the resting logo if it has not yet done so, avoiding a shell flash.
+			const [width, height] = win.getContentSize();
+			const diameter = Math.min(40, height);
+			applyMaterialMask(win, width, height, [
+				{
+					x: Math.round((width - diameter) / 2),
+					y: 0,
+					width: diameter,
+					height: diameter,
+					radius: diameter / 2,
+				},
+			]);
+		}
+		presentWindow(win, false);
 	});
 
 	if (process.env.ELECTRON_RENDERER_URL) {

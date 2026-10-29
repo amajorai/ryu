@@ -13,43 +13,76 @@ export interface CellSelectOption {
 	value: string;
 }
 
-export type CellOpts =
-	| {
-			variant: "short-text";
-	  }
-	| {
-			variant: "long-text";
-	  }
-	| {
-			variant: "number";
-			min?: number;
-			max?: number;
-			step?: number;
-	  }
-	| {
-			variant: "select";
-			options: CellSelectOption[];
-	  }
-	| {
-			variant: "multi-select";
-			options: CellSelectOption[];
-	  }
-	| {
-			variant: "checkbox";
-	  }
-	| {
-			variant: "date";
-	  }
-	| {
-			variant: "url";
-	  }
-	| {
-			variant: "file";
-			maxFileSize?: number;
-			maxFiles?: number;
-			accept?: string;
-			multiple?: boolean;
-	  };
+/** Conditional-formatting comparisons (Excel's "Highlight Cells Rules"). */
+export type CellFormatOperator =
+	| "isEmpty"
+	| "isNotEmpty"
+	| "equals"
+	| "notEquals"
+	| "contains"
+	| "notContains"
+	| "greaterThan"
+	| "greaterThanOrEqual"
+	| "lessThan"
+	| "lessThanOrEqual";
+
+/** Tint a cell with `color` (a select-option palette key) when it matches. */
+export interface CellFormatRule {
+	color: string;
+	id: string;
+	operator: CellFormatOperator;
+	value?: string;
+}
+
+interface CellFormatOpts {
+	/** Conditional formatting; the first matching rule colors the cell. */
+	formatRules?: CellFormatRule[];
+}
+
+export type CellOpts = CellFormatOpts &
+	(
+		| {
+				variant: "short-text";
+		  }
+		| {
+				variant: "long-text";
+		  }
+		| {
+				variant: "number";
+				min?: number;
+				max?: number;
+				step?: number;
+		  }
+		| {
+				variant: "select";
+				options: CellSelectOption[];
+		  }
+		| {
+				variant: "multi-select";
+				options: CellSelectOption[];
+		  }
+		| {
+				variant: "checkbox";
+		  }
+		| {
+				variant: "date";
+		  }
+		| {
+				variant: "url";
+		  }
+		| {
+				variant: "file";
+				maxFileSize?: number;
+				maxFiles?: number;
+				accept?: string;
+				multiple?: boolean;
+		  }
+		| {
+				/** Read-only value computed from other columns (see data-grid-formula.ts). */
+				variant: "formula";
+				expression: string;
+		  }
+	);
 
 export interface CellUpdate {
 	columnId: string;
@@ -98,7 +131,11 @@ declare module "@tanstack/react-table" {
 		onCellMouseUp?: () => void;
 		onCellsCopy?: () => void;
 		onCellsCut?: () => void;
-		onCellsPaste?: (expand?: boolean) => void;
+		onCellsPaste?: (expand?: boolean, overrideText?: string) => void;
+		/** Paste the clipboard with its rows and columns swapped. */
+		onCellsPasteTransposed?: () => void;
+		/** Size a column to fit its header and cell contents (Excel's double-click on the border). */
+		onColumnAutoFit?: (columnId: string) => void;
 		onColumnClick?: (columnId: string) => void;
 		/** Open the column (property) editor — rename / change type / edit options. */
 		onColumnEdit?: (columnId: string) => void;
@@ -114,11 +151,21 @@ declare module "@tanstack/react-table" {
 			rowIndex: number;
 			columnId: string;
 		}) => Promise<FileCellData[]>;
+		/** Double-click on the fill handle: AutoFill down to the end of the adjacent data. */
+		onFillHandleDoubleClick?: () => void;
+		/** Start dragging the fill handle at the selection's bottom-end corner. */
+		onFillHandleMouseDown?: (event: React.MouseEvent) => void;
+		/** Ctrl+D / Ctrl+R: copy the first row/column of the selection across it. */
+		onFillSelection?: (direction: "down" | "right") => void;
 		onPasteDialogOpenChange?: (open: boolean) => void;
+		onRedo?: () => void;
 		onRowHeightChange?: (value: RowHeightValue) => void;
 		onRowSelect?: (rowId: string, checked: boolean, shiftKey: boolean) => void;
 		onRowsDelete?: (rowIndices: number[]) => void | Promise<void>;
+		/** Insert empty rows above/below the selection, or duplicate it below. */
+		onRowsInsert?: (position: "above" | "below" | "duplicate") => void;
 		onSelectionClear?: () => void;
+		onUndo?: () => void;
 		pasteDialog?: PasteDialogState;
 		readOnly?: boolean;
 		rowHeight?: RowHeightValue;
@@ -158,6 +205,8 @@ export interface PasteDialogState {
 	clipboardText: string;
 	open: boolean;
 	rowsNeeded: number;
+	/** Raw clipboard text `clipboardText` was derived from (e.g. before transposing). */
+	sourceClipboardText?: string;
 }
 
 export type NavigationDirection =
@@ -169,6 +218,8 @@ export type NavigationDirection =
 	| "end"
 	| "ctrl+up"
 	| "ctrl+down"
+	| "ctrl+left"
+	| "ctrl+right"
 	| "ctrl+home"
 	| "ctrl+end"
 	| "pageup"

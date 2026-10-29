@@ -17,8 +17,11 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use ryu_sidecar_runtime::layout::{EngineGroup, Modality};
+
 use crate::sidecar::download_manager::{
-    build_http_client, extract_all_to_dir, ryu_dir, ProgressCallback, VersionStore,
+    build_http_client, engine_dir, extract_all_to_dir_from, model_family_dir, ProgressCallback,
+    VersionStore,
 };
 
 /// Pinned whisper.cpp release that ships the Windows server asset.
@@ -32,17 +35,30 @@ const DEFAULT_MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
 const MODEL_STORE_KEY: &str = "whisper-model:ggml-base.en";
 
-fn server_binary_path() -> PathBuf {
+/// `<data dir>/engines/audio/whispercpp` — the release archive (server binary
+/// plus its ggml/whisper shared libraries) is extracted here as one unit.
+pub fn install_dir() -> PathBuf {
+    engine_dir(EngineGroup::Audio, "whispercpp")
+}
+
+/// Path of the installed `whisper-server` executable inside [`install_dir`].
+pub fn server_binary_path() -> PathBuf {
     let name = if cfg!(target_os = "windows") {
         "whisper-server.exe"
     } else {
         "whisper-server"
     };
-    ryu_dir().join("bin").join(name)
+    install_dir().join(name)
 }
 
-fn model_path() -> PathBuf {
-    ryu_dir().join("models").join(DEFAULT_MODEL_FILE)
+/// `<data dir>/models/speech-to-text/whisper` — whisper GGML weights.
+pub fn models_dir() -> PathBuf {
+    model_family_dir(Modality::SpeechToText, "whisper")
+}
+
+/// The default GGML model (`models/speech-to-text/whisper/ggml-base.en.bin`).
+pub fn model_path() -> PathBuf {
+    models_dir().join(DEFAULT_MODEL_FILE)
 }
 
 /// whisper.cpp Windows release asset (plain CPU x64 build — no BLAS/CUDA, so it
@@ -100,11 +116,25 @@ impl WhisperCppDownloader {
 
         let url = archive_url();
         tracing::info!("downloading whisper.cpp from {url}");
+        // An engine is executed, so DownloadCenter refuses it unverified: read the
+        // digest the pinned release publishes for this asset.
+        let release = crate::sidecar::download_manager::fetch_github_release(
+            &self.client,
+            "ggml-org/whisper.cpp",
+            Some(TARGET_VERSION),
+        )
+        .await
+        .context("fetching the whisper.cpp release")?;
+        let archive_sha256 = crate::sidecar::download_manager::require_release_asset_sha256(
+            &self.client,
+            &release,
+            "whisper-bin-x64.zip",
+        )
+        .await?;
 
         // Download the archive through the center to a deterministic temp dest
         // (so its own `.part`/resume works), then read it back to extract.
-        let archive_dest = ryu_dir()
-            .join("tmp")
+        let archive_dest = crate::sidecar::download_manager::tmp_dir()
             .join(format!("whispercpp-{TARGET_VERSION}.zip"));
         let archive_path = downloads
             .download_blocking(crate::downloads::DownloadSpec {
@@ -113,21 +143,30 @@ impl WhisperCppDownloader {
                 label: "whisper.cpp".to_string(),
                 url,
                 dest: archive_dest,
-                sha256: None,
+                sha256: Some(archive_sha256),
                 version_record: None,
             })
             .await
             .context("downloading whisper.cpp archive")?;
-        let archive = tokio::fs::read(&archive_path)
-            .await
-            .context("reading downloaded whisper.cpp archive")?;
+        // Streamed from disk rather than read whole into memory first.
+        let archive = std::io::BufReader::new(
+            std::fs::File::open(&archive_path).context("opening downloaded whisper.cpp archive")?,
+        );
 
         // Extract the whole archive — the server binary links against the
-        // sibling DLLs, so they must all land in ~/.ryu/bin together.
-        let bin = ryu_dir().join("bin");
-        let written = tokio::task::spawn_blocking(move || extract_all_to_dir(&archive, &bin))
-            .await
-            .context("spawn_blocking for zip extraction")??;
+        // sibling DLLs, so they must all land together in the engine's own dir
+        // (Windows resolves a DLL from the executable's directory first). Clear
+        // the previous build so an upgrade never mixes two sets of DLLs.
+        let engine = install_dir();
+        if engine.exists() {
+            tokio::fs::remove_dir_all(&engine)
+                .await
+                .with_context(|| format!("clearing {}", engine.display()))?;
+        }
+        let written =
+            tokio::task::spawn_blocking(move || extract_all_to_dir_from(archive, &engine))
+                .await
+                .context("spawn_blocking for zip extraction")??;
 
         if !written.iter().any(|f| f == "whisper-server.exe") {
             anyhow::bail!(
@@ -142,9 +181,6 @@ impl WhisperCppDownloader {
         // Extraction succeeded; drop the temp archive.
         let _ = tokio::fs::remove_file(&archive_path).await;
 
-        if let Err(e) = crate::sidecar::path_manager::PathManager::add_to_path() {
-            tracing::warn!("Failed to add ~/.ryu/bin to PATH: {e}");
-        }
         tracing::info!(
             "whisper.cpp {TARGET_VERSION} installed ({} files) at {}",
             written.len(),
@@ -168,7 +204,7 @@ impl WhisperCppDownloader {
         );
     }
 
-    /// Download the default GGML model into ~/.ryu/models if absent. Honors a
+    /// Download the default GGML model into `models/speech-to-text/whisper/` if absent. Honors a
     /// `RYU_WHISPER_MODEL` override pointing at an existing file.
     async fn ensure_model(&self, downloads: &crate::downloads::DownloadCenter) -> Result<()> {
         if let Ok(custom) = std::env::var("RYU_WHISPER_MODEL") {
@@ -187,10 +223,10 @@ impl WhisperCppDownloader {
         }
 
         tracing::info!("downloading whisper model from {DEFAULT_MODEL_URL}");
-        let models_dir = ryu_dir().join("models");
+        let models_dir = models_dir();
         tokio::fs::create_dir_all(&models_dir)
             .await
-            .context("creating ~/.ryu/models")?;
+            .with_context(|| format!("creating {}", models_dir.display()))?;
 
         // The model is a single file placed directly at its final path; route it
         // through the center (no temp/extract). The center records the version +

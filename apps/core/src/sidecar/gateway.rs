@@ -15,7 +15,7 @@
 //! the Gateway's `/v1/agents/:agent_id` ingress rather than by intercepting the
 //! subprocess.
 
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -35,6 +35,10 @@ pub const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:7981";
 const ENV_GATEWAY_URL: &str = "RYU_GATEWAY_URL";
 /// Env var with a bearer token for the gateway, when it runs with auth enabled.
 const ENV_GATEWAY_TOKEN: &str = "RYU_GATEWAY_TOKEN";
+/// Core-only trusted relay for an externally managed Gateway.
+const ENV_GATEWAY_CORE_TOKEN: &str = "RYU_GATEWAY_CORE_TOKEN";
+/// Proof-only Core signer; never a bearer or standalone authorization key.
+const ENV_GATEWAY_CORE_PROOF_KEY: &str = "RYU_GATEWAY_CORE_PROOF_KEY";
 /// Env var to disable Core spawning/managing the gateway (assume external).
 const ENV_GATEWAY_MANAGED: &str = "RYU_GATEWAY_MANAGED";
 /// Env var pointing the MANAGED provider at the hosted gateway fleet.
@@ -123,8 +127,9 @@ fn select_managed_fleet(
 /// source for anything — the node's opinions have to travel per request or not at
 /// all. Most already do: `connect_openai` sends the slot pins, prompt-cache
 /// mode/ttl, agent id and priority, and injects `ryu_smart_route` into the body.
-/// The two that had nowhere to go are the node's preferred FALLBACK ORDER and its
-/// own EXTRA firewall rules — this is their carrier.
+/// The preferences that had nowhere to go are the node's preferred FALLBACK
+/// ORDER, its EXTRA firewall rules, and its OpenRouter provider options. This is
+/// their carrier.
 ///
 /// The value is stored in the node preference store under
 /// [`NODE_ROUTING_PREF_KEY`]. Core loads it at boot and refreshes it when the
@@ -153,8 +158,18 @@ static NODE_ROUTING_PREF: std::sync::RwLock<Option<String>> = std::sync::RwLock:
 /// re-checked against the org's credit pools. So an id here can reorder, never
 /// widen. `firewall` is a `FirewallOverlay`-shaped object applied as the narrowest
 /// scope and only ever additively (it can tighten a dial or append a pattern; it
-/// cannot loosen one). Both empty ⇒ the header is omitted entirely.
+/// cannot loosen one). `openrouter` carries request provider defaults used only
+/// on OpenRouter attempts; managed Gateway privacy policy remains authoritative.
+/// All three empty ⇒ the header is omitted entirely.
 pub fn set_node_routing_prefs(fallback: Vec<String>, firewall: Option<serde_json::Value>) {
+    set_node_routing_prefs_with_openrouter(fallback, firewall, None);
+}
+
+fn set_node_routing_prefs_with_openrouter(
+    fallback: Vec<String>,
+    firewall: Option<serde_json::Value>,
+    openrouter: Option<serde_json::Value>,
+) {
     use base64::Engine as _;
 
     let fallback: Vec<String> = fallback
@@ -162,7 +177,12 @@ pub fn set_node_routing_prefs(fallback: Vec<String>, firewall: Option<serde_json
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
         .collect();
-    let encoded = if fallback.is_empty() && firewall.is_none() {
+    let openrouter = openrouter.filter(|value| {
+        value
+            .as_object()
+            .is_some_and(|preferences| !preferences.is_empty())
+    });
+    let encoded = if fallback.is_empty() && firewall.is_none() && openrouter.is_none() {
         None
     } else {
         let mut doc = serde_json::Map::new();
@@ -171,6 +191,9 @@ pub fn set_node_routing_prefs(fallback: Vec<String>, firewall: Option<serde_json
         }
         if let Some(fw) = firewall {
             doc.insert("firewall".to_owned(), fw);
+        }
+        if let Some(openrouter) = openrouter {
+            doc.insert("openrouter".to_owned(), openrouter);
         }
         // A document that will not serialize is dropped rather than sent half
         // formed — the whole channel is best-effort by design.
@@ -191,8 +214,8 @@ pub fn set_node_routing_prefs(fallback: Vec<String>, firewall: Option<serde_json
 /// Refresh the encoded request carrier from the raw preference-store value.
 ///
 /// The preference is deliberately a small JSON envelope instead of a second
-/// set of KV keys: fallback order and the additive firewall overlay must update
-/// atomically. Unknown fields are ignored for forward compatibility, while a
+/// set of KV keys: fallback order, additive firewall overlay, and OpenRouter
+/// provider options must update atomically. Unknown fields are ignored for forward compatibility, while a
 /// malformed value clears the old carrier so an invalid edit cannot continue to
 /// affect requests.
 pub fn set_node_routing_prefs_from_json(raw: &str) {
@@ -201,6 +224,7 @@ pub fn set_node_routing_prefs_from_json(raw: &str) {
     struct NodeRoutingPreference {
         fallback: Vec<String>,
         firewall: Option<serde_json::Value>,
+        openrouter: Option<serde_json::Value>,
     }
 
     let Ok(value) = serde_json::from_str::<NodeRoutingPreference>(raw) else {
@@ -209,7 +233,7 @@ pub fn set_node_routing_prefs_from_json(raw: &str) {
     };
 
     let firewall = value.firewall.filter(|value| !value.is_null());
-    set_node_routing_prefs(value.fallback, firewall);
+    set_node_routing_prefs_with_openrouter(value.fallback, firewall, value.openrouter);
 }
 /// Env var overriding the gateway binary path (otherwise resolved on PATH).
 const ENV_GATEWAY_BIN: &str = "RYU_GATEWAY_BIN";
@@ -235,6 +259,20 @@ const ENV_CLASSIFY_LLM_URL: &str = "RYU_CLASSIFY_LLM_URL";
 /// to `default_provider`, i.e. a hosted provider, which 400s while the guardrail
 /// failed open in silence). Read by `apps/gateway/src/config.rs::classify_model_id`.
 const ENV_CLASSIFY_MODEL_ID: &str = "RYU_CLASSIFY_MODEL_ID";
+/// Env var carrying the `local` provider's model rewrites as a JSON object
+/// (`{"llama3.2": "ryu-llama3.2-<hash>"}`): requested name → name the engine
+/// serves. Populated from the Ollama derived-model routes that apply per-model
+/// launch settings. Read by `apps/gateway/src/config.rs`.
+const ENV_LOCAL_MODEL_ROUTES: &str = "RYU_LOCAL_MODEL_ROUTES";
+
+/// The JSON value for [`ENV_LOCAL_MODEL_ROUTES`], or `None` when no route is set.
+fn local_model_routes_env() -> Option<String> {
+    let routes = crate::sidecar::providers::ollama::derived::routes_snapshot();
+    if routes.is_empty() {
+        return None;
+    }
+    serde_json::to_string(&routes).ok()
+}
 
 /// Base URL Core forwards chat completions to. Always non-empty.
 ///
@@ -243,23 +281,56 @@ const ENV_CLASSIFY_MODEL_ID: &str = "RYU_CLASSIFY_MODEL_ID";
 /// `RYU_GATEWAY_URL`, so the env branch normally wins; the default is computed via
 /// the same `profile::port(7981)` so both agree.)
 static REJECTED_LOCAL_GATEWAY: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+    // Managed local endpoints remain quarantined from process initialization,
+    // including the time spent starting engines before GatewayManager::start.
+    std::sync::atomic::AtomicBool::new(true);
 
 pub fn gateway_url() -> String {
-    if REJECTED_LOCAL_GATEWAY.load(std::sync::atomic::Ordering::Acquire)
-        && !remote_data_plane()
-        && is_managed()
-    {
-        return "http://127.0.0.1:0".to_owned();
-    }
-    configured_gateway_url()
+    routed_gateway_url(
+        configured_gateway_url(),
+        REJECTED_LOCAL_GATEWAY.load(std::sync::atomic::Ordering::Acquire),
+        remote_data_plane(),
+        is_managed(),
+    )
 }
 
-fn configured_gateway_url() -> String {
+fn routed_gateway_url(configured: String, rejected: bool, remote: bool, managed: bool) -> String {
+    if rejected && !remote && managed {
+        "http://127.0.0.1:0".to_owned()
+    } else {
+        configured
+    }
+}
+
+/// Configuration-only endpoint. This never establishes readiness; authenticated
+/// I/O must check readiness independently. ACP launch checks readiness
+/// separately so durable command/config declarations do not capture port zero.
+pub(crate) fn configured_gateway_url() -> String {
     std::env::var(ENV_GATEWAY_URL)
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("http://127.0.0.1:{}", crate::profile::port(7981)))
+}
+
+pub(crate) fn local_gateway_quarantined() -> bool {
+    REJECTED_LOCAL_GATEWAY.load(std::sync::atomic::Ordering::Acquire)
+        && !remote_data_plane()
+        && is_managed()
+}
+
+#[cfg(test)]
+pub(crate) struct GatewayQuarantineTestGuard(bool);
+#[cfg(test)]
+impl Drop for GatewayQuarantineTestGuard {
+    fn drop(&mut self) {
+        REJECTED_LOCAL_GATEWAY.store(self.0, std::sync::atomic::Ordering::Release);
+    }
+}
+#[cfg(test)]
+pub(crate) fn quarantine_for_test(rejected: bool) -> GatewayQuarantineTestGuard {
+    GatewayQuarantineTestGuard(
+        REJECTED_LOCAL_GATEWAY.swap(rejected, std::sync::atomic::Ordering::AcqRel),
+    )
 }
 
 /// Inference-only bearer. Local managed nodes provision it automatically; remote
@@ -284,9 +355,18 @@ pub fn gateway_bearer() -> anyhow::Result<String> {
     if remote_data_plane() || !is_managed() {
         anyhow::bail!("an externally managed Gateway requires RYU_GATEWAY_TOKEN");
     }
-    ryu_gw_credentials::load_or_create(
-        &crate::paths::ryu_dir().join("gateway-relay.key"),
+    // Only Core reads this file (the Gateway child receives the key through
+    // `GATEWAY_RELAY_KEY`), so it is sealed with the master key (`enc:v1:`).
+    // A legacy plaintext file is resealed in place on first read; without a
+    // key nothing is read or minted (fail closed). Installing the host is
+    // idempotent (`main` already did); it covers callers that never ran `main`,
+    // such as tests and one-shot CLI subcommands.
+    crate::crypto_host::install();
+    let cipher = ryu_crypto::global_cipher()?;
+    ryu_gw_credentials::load_or_create_sealed(
+        &crate::paths::secret_path("gateway-relay.key"),
         "gwrelay_",
+        &cipher,
     )
 }
 
@@ -300,39 +380,229 @@ pub fn gateway_core_token() -> Option<String> {
         .ok()
 }
 
+/// Preserve tenant billing identity on externally managed inference routes.
+/// Core forwarding keys remain reserved for local inference and control APIs.
+pub fn required_gateway_inference_token() -> anyhow::Result<String> {
+    if remote_data_plane() || !is_managed() {
+        gateway_bearer()
+    } else {
+        required_gateway_core_token()
+    }
+}
+
+pub fn gateway_inference_token() -> Option<String> {
+    required_gateway_inference_token()
+        .map_err(|error| tracing::error!(%error, "gateway inference credential unavailable"))
+        .ok()
+}
+
+pub(crate) fn gateway_inference_agent_proof(
+    bearer: &str,
+    agent_id: &str,
+) -> anyhow::Result<Option<String>> {
+    if !remote_data_plane() && is_managed() {
+        return Ok(None);
+    }
+    ryu_gw_credentials::sign_agent_route_proof(
+        &required_gateway_core_proof_key()?,
+        bearer,
+        agent_id,
+    )
+    .map(Some)
+}
+
 pub fn required_gateway_core_token() -> anyhow::Result<String> {
     if remote_data_plane() || !is_managed() {
-        return gateway_bearer();
+        let token = std::env::var(ENV_GATEWAY_CORE_TOKEN).map_err(|_| {
+            anyhow::anyhow!("an externally managed Gateway requires RYU_GATEWAY_CORE_TOKEN")
+        })?;
+        ryu_gw_credentials::validate(&token)?;
+        return Ok(token);
     }
-    ryu_gw_credentials::load_or_create(
-        &crate::paths::ryu_dir().join("gateway-core-relay.key"),
-        "gwcore_",
-    )
+    Ok(ephemeral_gateway_key(&LOCAL_GATEWAY_CORE_KEY, "gwcore_"))
+}
+
+pub fn required_gateway_core_proof_key() -> anyhow::Result<String> {
+    if remote_data_plane() || !is_managed() {
+        let key = std::env::var(ENV_GATEWAY_CORE_PROOF_KEY).map_err(|_| {
+            anyhow::anyhow!("an externally managed Gateway requires RYU_GATEWAY_CORE_PROOF_KEY")
+        })?;
+        ryu_gw_credentials::validate(&key)?;
+        return Ok(key);
+    }
+    Ok(ephemeral_gateway_key(
+        &LOCAL_GATEWAY_CORE_PROOF_KEY,
+        "gwproof_",
+    ))
+}
+
+pub fn gateway_core_proof_key() -> Option<String> {
+    required_gateway_core_proof_key()
+        .map_err(|error| tracing::error!(%error, "gateway Core proof key unavailable"))
+        .ok()
 }
 
 /// Export a signed identity without exporting Core's forwarding authority.
 /// Remote enrollment keeps its existing fleet bearer and agent-route proof.
+///
+/// `provider_access` is the agent's model provider access
+/// ([`crate::agent_access::AgentAccountPolicy::user_provider_access`]); it is
+/// signed into the scope so the agent's own HTTP client cannot drop it.
 pub fn gateway_bearer_for_agent(
     agent_id: Option<&str>,
     user_id: Option<&str>,
     session_id: Option<&str>,
+    provider_access: Option<&[String]>,
 ) -> anyhow::Result<String> {
-    if remote_data_plane() || !is_managed() {
+    if !scoped_inference_proxy_enabled() {
+        // Only a Core-managed Gateway verifies Core's scope, so a limited
+        // agent's provider list could not travel with this bearer. Refuse
+        // rather than hand the agent an unlimited one.
+        if agent_id.is_some() && provider_access.is_some() {
+            anyhow::bail!(
+                "this agent's model provider access is limited, which needs the Gateway Core manages"
+            );
+        }
         return gateway_bearer();
     }
     let Some(agent_id) = agent_id else {
         return gateway_bearer();
     };
-    ryu_gw_credentials::InferenceScope {
+    scoped_inference_bearer(agent_id, user_id, session_id, provider_access)
+}
+
+/// Whether Core signs scoped `gws1` bearers itself: a managed, local Gateway.
+/// Only then can Core's ACP inference proxy refresh an agent's bearer.
+pub(crate) fn scoped_inference_proxy_enabled() -> bool {
+    !remote_data_plane() && is_managed()
+}
+
+/// The current Core-signed bearer for one (agent, user, session) scope, reused
+/// from the cache while it has comfortable lifetime left.
+pub(crate) fn scoped_inference_bearer(
+    agent_id: &str,
+    user_id: Option<&str>,
+    session_id: Option<&str>,
+    provider_access: Option<&[String]>,
+) -> anyhow::Result<String> {
+    if !scoped_inference_proxy_enabled() {
+        anyhow::bail!("scoped inference bearers are issued only for a managed local Gateway");
+    }
+    let core_token = required_gateway_core_token()?;
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(u64::MAX);
+    let mut cache = INFERENCE_BEARER_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cached_inference_bearer(
+        &mut cache,
+        &core_token,
+        agent_id,
+        user_id,
+        session_id,
+        provider_access,
+        now_secs,
+    )
+}
+
+/// Lifetime of a Core-signed scoped inference bearer.
+const INFERENCE_BEARER_LIFETIME_SECS: u64 = 60 * 60;
+/// A cached bearer is reused only while it has more than this much validity left.
+/// Half the lifetime: every proxied request still starts with at least 30
+/// minutes of validity, and a bearer is reminted at most every 30 minutes.
+const INFERENCE_BEARER_REMINT_MARGIN_SECS: u64 = 30 * 60;
+
+/// Scope a cached bearer was minted for. `signer` is a SHA-256 fingerprint of
+/// Core's signing token, never the token itself, so a rotated token cannot be
+/// answered with a bearer signed by its predecessor.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct InferenceBearerCacheKey {
+    signer: String,
+    agent_id: String,
+    user_id: Option<String>,
+    session_id: Option<String>,
+    /// The agent's signed model provider access: a different list is a
+    /// different scope and never reuses another list's bearer.
+    provider_access: Option<Vec<String>>,
+}
+
+pub(crate) type InferenceBearerCache =
+    std::collections::HashMap<InferenceBearerCacheKey, (String, u64)>;
+
+static INFERENCE_BEARER_CACHE: OnceLock<std::sync::Mutex<InferenceBearerCache>> = OnceLock::new();
+
+/// Return the bearer for one (agent, user, session, signing key) scope, reusing
+/// the previously minted one while it has comfortable lifetime left.
+///
+/// A route builds the spawn command with this bearer, and a pooled agent never
+/// keeps it: `spawn_acp_task` redeems it for a per-instance credential that
+/// Core's ACP inference proxy resolves to the scope, and the proxy asks this
+/// cache again on every request. Reusing the bearer keeps route resolution
+/// cheap, and the remint margin means every request starts with at least 30
+/// minutes of validity left. A remint changes nothing about the running agent.
+/// Entries inside the margin are pruned on every call, which keeps the cache
+/// bounded.
+pub(crate) fn cached_inference_bearer(
+    cache: &mut InferenceBearerCache,
+    core_token: &str,
+    agent_id: &str,
+    user_id: Option<&str>,
+    session_id: Option<&str>,
+    provider_access: Option<&[String]>,
+    now_secs: u64,
+) -> anyhow::Result<String> {
+    let reusable =
+        |expires_at: u64| expires_at.saturating_sub(now_secs) > INFERENCE_BEARER_REMINT_MARGIN_SECS;
+    cache.retain(|_, (_, expires_at)| reusable(*expires_at));
+    let key = InferenceBearerCacheKey {
+        signer: hex::encode(<Sha256 as sha2::Digest>::digest(core_token.as_bytes())),
         agent_id: agent_id.to_owned(),
         user_id: user_id.map(str::to_owned),
         session_id: session_id.map(str::to_owned),
-        expires_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_secs().saturating_add(60 * 60))
-            .unwrap_or(u64::MAX),
+        provider_access: provider_access.map(<[String]>::to_vec),
+    };
+    if let Some((bearer, _)) = cache.get(&key) {
+        return Ok(bearer.clone());
     }
-    .sign(&required_gateway_core_token()?)
+    let expires_at = now_secs.saturating_add(INFERENCE_BEARER_LIFETIME_SECS);
+    let bearer = ryu_gw_credentials::InferenceScope {
+        agent_id: key.agent_id.clone(),
+        user_id: key.user_id.clone(),
+        session_id: key.session_id.clone(),
+        expires_at,
+        provider_access: key.provider_access.clone(),
+    }
+    .sign(core_token)?;
+    cache.insert(key, (bearer.clone(), expires_at));
+    Ok(bearer)
+}
+
+/// Verify a `gws1` bearer this Core signed with its current key and that has
+/// not expired, returning its scope and the signing key's SHA-256 fingerprint
+/// (never the key). `None` for anything else, including when Core does not
+/// sign scoped bearers (remote or unmanaged Gateway).
+pub(crate) fn verify_scoped_inference_bearer(
+    token: &str,
+) -> Option<(ryu_gw_credentials::InferenceScope, String)> {
+    if !scoped_inference_proxy_enabled() || !token.starts_with("gws1.") {
+        return None;
+    }
+    let core_token = required_gateway_core_token().ok()?;
+    let scope = ryu_gw_credentials::InferenceScope::verify(token, &core_token).ok()?;
+    let signer = hex::encode(<Sha256 as sha2::Digest>::digest(core_token.as_bytes()));
+    Some((scope, signer))
+}
+
+/// OpenAI-compatible base URL of Core's ACP inference proxy.
+pub(crate) fn acp_inference_proxy_v1() -> String {
+    format!(
+        "{}{}/v1",
+        core_self_url().trim_end_matches('/'),
+        crate::server::acp_inference_proxy::PROXY_PREFIX
+    )
 }
 
 /// Mint the proof carried by an agent-scoped Gateway URL.
@@ -340,17 +610,96 @@ pub fn gateway_bearer_for_agent(
 /// A managed `rgw_` bearer is intentionally not treated as a trusted-forwarder
 /// key by the Gateway: callers holding it can reach the fleet, but they must not
 /// be able to rotate `x-ryu-agent-id` and move spend between agents. Core is the
-/// holder of the bearer and therefore signs the concrete agent route with it.
-/// The fleet verifies the same HMAC before accepting the agent identity.
+/// holder of the Core relay signer and therefore signs the concrete agent route
+/// with it. The fleet verifies this with the trusted Core relay key, never the
+/// inference bearer. Binding the bearer fingerprint prevents a proof from moving
+/// between organizations when the Core relay key is shared by the hosted fleet.
 pub fn gateway_agent_proof(agent_id: &str) -> anyhow::Result<String> {
-    type AgentRouteMac = Hmac<Sha256>;
-
     let token = gateway_bearer()?;
-    let mut mac = AgentRouteMac::new_from_slice(token.as_bytes())
-        .map_err(|_| anyhow::anyhow!("gateway bearer cannot sign agent route"))?;
-    mac.update(b"ryu-agent-route-v1\0");
-    mac.update(agent_id.as_bytes());
-    Ok(hex::encode(mac.finalize().into_bytes()))
+    ryu_gw_credentials::sign_agent_route_proof(
+        &required_gateway_core_proof_key()?,
+        &token,
+        agent_id,
+    )
+}
+
+/// A charge's `(user_id, agent_id)`. An agent's own Composio entity
+/// (`agent:<owner>:<agent_id>`) is not a user: it is billed to its owner, and
+/// names the agent when the caller did not. Callers already pass the owner
+/// (`composio::charge_user_id`); this keeps the Gateway contract even if one
+/// does not.
+fn charge_identity<'a>(
+    user_id: Option<&'a str>,
+    agent_id: Option<&'a str>,
+) -> (Option<&'a str>, Option<&'a str>) {
+    match user_id.and_then(crate::agent_access::AgentAccountPolicy::parse_composio_agent_entity) {
+        Some((owner, entity_agent)) => (Some(owner), agent_id.or(Some(entity_agent))),
+        None => (user_id, agent_id),
+    }
+}
+
+fn composio_authorization_body(org_id: &str, user_id: Option<&str>) -> serde_json::Value {
+    let (user_id, _) = charge_identity(user_id, None);
+    serde_json::json!({
+        "org_id": org_id,
+        "provider": "composio",
+        "tool_calls": 1,
+        "user_id": user_id,
+        "authorizeOnly": true,
+    })
+}
+
+fn tool_charge_body(
+    org_id: Option<&str>,
+    agent_id: Option<&str>,
+    user_id: Option<&str>,
+    session_id: Option<&str>,
+    tool_calls: u64,
+    receipt: Option<&ryu_composio::receipt::ComposioReceipt>,
+    accounting_unavailable: bool,
+) -> serde_json::Value {
+    let (user_id, agent_id) = charge_identity(user_id, agent_id);
+    serde_json::json!({
+        "tool_calls": tool_calls,
+        "org_id": org_id,
+        "agent_id": agent_id,
+        "user_id": user_id,
+        "session_id": session_id,
+        "request_id": format!("acp-tool:{}", uuid::Uuid::new_v4()),
+        "composioUsage": receipt.map(|receipt| &receipt.usage),
+        "transaction_id": receipt.map(|receipt| &receipt.transaction_id),
+        "composioAccountingUnavailable": accounting_unavailable,
+    })
+}
+
+/// Ask the Gateway whether one Composio action may run for `user_id`, the
+/// user it is billed to (never an agent's own entity).
+pub async fn authorize_composio_execution(
+    client: &reqwest::Client,
+    user_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let Some(org) = crate::sidecar::control_plane::registered_org() else {
+        return Ok(());
+    };
+    let token = if remote_data_plane() {
+        gateway_relay_token()
+    } else {
+        gateway_admin_key()
+    }
+    .ok_or_else(|| anyhow::anyhow!("Gateway Composio authorization unavailable"))?;
+    let response = client
+        .post(format!(
+            "{}/v1/budget/charge",
+            gateway_url().trim_end_matches('/')
+        ))
+        .bearer_auth(token)
+        .json(&composio_authorization_body(&org.id, user_id))
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        anyhow::bail!("Composio authorization rejected with {}", response.status());
+    }
+    Ok(())
 }
 
 /// Best-effort notification that a Composio action executed in Core's ACP/MCP
@@ -364,32 +713,44 @@ pub async fn record_tool_charge(
     user_id: Option<&str>,
     session_id: Option<&str>,
     tool_calls: u64,
+    receipt: Option<&ryu_composio::receipt::ComposioReceipt>,
+    accounting_unavailable: bool,
 ) -> anyhow::Result<()> {
     if tool_calls == 0 {
         return Ok(());
     }
-    let token = if remote_data_plane() {
+    let remote = remote_data_plane();
+    let token = if remote {
         gateway_relay_token()
     } else {
         gateway_admin_key()
     }
     .ok_or_else(|| anyhow::anyhow!("gateway tool-charge credential is unavailable"))?;
-    let agent_proof = agent_id.and_then(|id| gateway_agent_proof(id).ok());
+    let core_proof_key = if remote {
+        Some(
+            gateway_core_proof_key()
+                .ok_or_else(|| anyhow::anyhow!("gateway Core proof key is unavailable"))?,
+        )
+    } else {
+        None
+    };
+    let org_id = crate::sidecar::control_plane::registered_org().map(|org| org.id);
     let url = format!("{}/v1/budget/charge", gateway_url().trim_end_matches('/'));
-    let body = serde_json::json!({
-        "tool_calls": tool_calls,
-        "agent_id": agent_id,
-        "agent_proof": agent_proof,
-        "user_id": user_id,
-        "session_id": session_id,
-        "request_id": format!("acp-tool:{}", uuid::Uuid::new_v4()),
-    });
-    let response = client
-        .post(url)
-        .bearer_auth(token)
-        .json(&body)
-        .send()
-        .await?;
+    let body = tool_charge_body(
+        org_id.as_deref(),
+        agent_id,
+        user_id,
+        session_id,
+        tool_calls,
+        receipt,
+        accounting_unavailable,
+    );
+    let request = client.post(url).bearer_auth(token).json(&body);
+    let request = match core_proof_key {
+        Some(core_proof_key) => request.header("x-ryu-core-key", core_proof_key),
+        None => request,
+    };
+    let response = request.send().await?;
     if response.status().is_success() {
         return Ok(());
     }
@@ -411,6 +772,7 @@ pub struct ExternalToolCharge {
     pub request_id: String,
     pub tool_calls: u64,
     pub task_label: Option<String>,
+    pub composio_usage: Option<ryu_channel_contracts::composio_billing::ComposioUsage>,
 }
 
 /// Forward a provider-neutral sidecar charge to Gateway. Gateway owns the local
@@ -424,12 +786,21 @@ pub async fn record_external_tool_charge(
     if charge.tool_calls == 0 {
         return Ok(());
     }
-    let token = if remote_data_plane() {
+    let remote = remote_data_plane();
+    let token = if remote {
         gateway_relay_token()
     } else {
         gateway_admin_key()
     }
     .ok_or_else(|| anyhow::anyhow!("gateway tool-charge credential is unavailable"))?;
+    let core_proof_key = if remote {
+        Some(
+            gateway_core_proof_key()
+                .ok_or_else(|| anyhow::anyhow!("gateway Core proof key is unavailable"))?,
+        )
+    } else {
+        None
+    };
     let request_id = charge
         .transaction_id
         .as_deref()
@@ -446,13 +817,18 @@ pub async fn record_external_tool_charge(
         "transaction_id": charge.transaction_id,
         "task_label": charge.task_label,
         "request_id": request_id,
+        "composioUsage": charge.composio_usage,
+        // A hosted node's dynamic bearer requires the same Core-bound proof as
+        // ACP billing. This reserved scope is accounting, not a runnable agent.
+        "agent_id": remote_data_plane().then_some("external-tool-usage"),
+        "agent_proof": if remote_data_plane() { Some(gateway_agent_proof("external-tool-usage")?) } else { None },
     });
-    let response = client
-        .post(url)
-        .bearer_auth(token)
-        .json(&body)
-        .send()
-        .await?;
+    let request = client.post(url).bearer_auth(token).json(&body);
+    let request = match core_proof_key {
+        Some(core_proof_key) => request.header("x-ryu-core-key", core_proof_key),
+        None => request,
+    };
+    let response = request.send().await?;
     if response.status().is_success() {
         return Ok(());
     }
@@ -461,26 +837,70 @@ pub async fn record_external_tool_charge(
     anyhow::bail!("gateway external tool charge returned {status}: {detail}");
 }
 
+/// Charge a delivered event once, independent of the number of targets fired.
+/// The ID comes from verified ingress/Connect, and the org comes from the node.
+pub async fn record_composio_trigger_delivery(
+    client: &reqwest::Client,
+    delivery_id: &str,
+) -> anyhow::Result<()> {
+    let Some(org) = crate::sidecar::control_plane::registered_org() else {
+        return Ok(());
+    };
+    if delivery_id.is_empty() || delivery_id.len() > 256 {
+        anyhow::bail!("Invalid Composio delivery billing identity");
+    }
+    record_external_tool_charge(
+        client,
+        &org.id,
+        ExternalToolCharge {
+            provider: "composio".to_owned(),
+            tool_id: "composio.trigger".to_owned(),
+            cost_micro_usd: None,
+            estimated: false,
+            transaction_id: Some(format!("trigger:{delivery_id}")),
+            request_id: format!("composio-trigger:{delivery_id}"),
+            tool_calls: 1,
+            task_label: Some("Delivered Composio trigger event".to_owned()),
+            composio_usage: Some(ryu_channel_contracts::composio_billing::ComposioUsage {
+                kind: ryu_channel_contracts::composio_billing::ComposioUsageKind::TriggerEvent,
+                ..Default::default()
+            }),
+        },
+    )
+    .await
+}
+
 /// Ask the managed Gateway whether a provider is configured. Provider credentials
 /// stay in Gateway's runtime/vault; Core only carries the authenticated app request.
 pub async fn managed_provider_status(
     client: &reqwest::Client,
     provider: &str,
 ) -> Result<bool, ryu_app_events::ProviderRouterError> {
-    let token = if remote_data_plane() {
+    let remote = remote_data_plane();
+    let token = if remote {
         gateway_relay_token()
     } else {
         gateway_admin_key()
     }
     .ok_or(ryu_app_events::ProviderRouterError::NotHosted)?;
+    let core_proof_key = if remote {
+        Some(gateway_core_proof_key().ok_or(ryu_app_events::ProviderRouterError::NotHosted)?)
+    } else {
+        None
+    };
     let url = format!(
         "{}/v1/providers/status",
         gateway_url().trim_end_matches('/')
     );
-    let response = client
+    let request = client
         .post(url)
         .bearer_auth(token)
-        .json(&serde_json::json!({ "provider": provider }))
+        .json(&serde_json::json!({ "provider": provider }));
+    let request = match core_proof_key {
+        Some(core_proof_key) => request.header("x-ryu-core-key", core_proof_key),
+        None => request,
+    };
+    let response = request
         .send()
         .await
         .map_err(ryu_app_events::ProviderRouterError::Transport)?;
@@ -500,32 +920,127 @@ pub async fn managed_provider_status(
         .unwrap_or(false))
 }
 
-/// Forward one provider-neutral app operation to Gateway. Gateway injects the
-/// provider credential, executes the call, and schedules the org-wallet debit.
-pub async fn call_managed_provider(
-    client: &reqwest::Client,
-    org_id: Option<&str>,
+/// The header Gateway's provider admission reads as the caller's cost ceiling.
+const MAX_COST_HEADER: &str = "x-ryu-max-cost-micro-usd";
+
+/// The facts about a provider call that only Core may set: the node's org,
+/// the authenticated caller, and the routing facts Core decides (the user's
+/// provider pin for the call's brand, and whether Gateway must refuse a call
+/// the provider cannot serve rather than run it).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CoreCallFacts<'a> {
+    pub org_id: Option<&'a str>,
+    pub caller_id: &'a str,
+    pub provider_pin: Option<crate::provider_pins::ProviderPin>,
+    pub require_servable: bool,
+    /// The agent, user and session an agent tool call runs for, so Gateway
+    /// attributes the debit to them. `None` for app calls.
+    pub agent_id: Option<&'a str>,
+    pub user_id: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+}
+
+/// Body fields that only Core writes. Any copy the call carried is dropped
+/// before Core's own values are written.
+const CORE_ONLY_FIELDS: [&str; 7] = [
+    "orgId",
+    "callerId",
+    "providerPin",
+    "requireServable",
+    "agentId",
+    "userId",
+    "sessionId",
+];
+
+/// The `/v1/providers/call` body for an app's call: the app's operation facts,
+/// plus the identity and routing facts only Core may set. Values the app sent
+/// for those fields never survive: the call type has no such fields, any copy
+/// is removed, and Core's values are written last.
+fn managed_provider_call_body(
     call: ryu_app_events::ManagedProviderCall,
+    facts: &CoreCallFacts<'_>,
 ) -> Result<serde_json::Value, ryu_app_events::ProviderRouterError> {
-    let token = if remote_data_plane() {
-        gateway_relay_token()
-    } else {
-        gateway_admin_key()
-    }
-    .ok_or(ryu_app_events::ProviderRouterError::NotHosted)?;
-    let url = format!("{}/v1/providers/call", gateway_url().trim_end_matches('/'));
     let mut body = serde_json::to_value(call).map_err(|error| {
         ryu_app_events::ProviderRouterError::Invalid(format!(
             "managed provider call could not be serialized: {error}"
         ))
     })?;
-    if let Some(org_id) = org_id.filter(|value| !value.trim().is_empty()) {
+    if let Some(object) = body.as_object_mut() {
+        // The caller's cost ceiling travels as a header (Gateway's admission
+        // reads it there), never in the body.
+        object.remove("maxCostMicroUsd");
+        for field in CORE_ONLY_FIELDS {
+            object.remove(field);
+        }
+    }
+    if let Some(org_id) = facts.org_id.filter(|value| !value.trim().is_empty()) {
         body["orgId"] = serde_json::Value::String(org_id.to_owned());
     }
-    let response = client
-        .post(url)
-        .bearer_auth(token)
-        .json(&body)
+    if let Some(pin) = facts.provider_pin {
+        body["providerPin"] = serde_json::Value::String(pin.as_str().to_owned());
+    }
+    if facts.require_servable {
+        body["requireServable"] = serde_json::Value::Bool(true);
+    }
+    for (field, value) in [
+        ("agentId", facts.agent_id),
+        ("userId", facts.user_id),
+        ("sessionId", facts.session_id),
+    ] {
+        if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+            body[field] = serde_json::Value::String(value.to_owned());
+        }
+    }
+    body["callerId"] = serde_json::Value::String(facts.caller_id.to_owned());
+    Ok(body)
+}
+
+/// Forward one provider-neutral operation to Gateway with Core's identity and
+/// routing facts. Gateway injects the provider credential, executes the call,
+/// and schedules the org-wallet debit.
+///
+/// `facts.caller_id` is the authenticated app (sidecar plugin id) or Core's own
+/// agent identity. Core sets it, never the app: Gateway scopes provider-side
+/// idempotency by it.
+pub(crate) async fn call_managed_provider_with(
+    client: &reqwest::Client,
+    facts: &CoreCallFacts<'_>,
+    call: ryu_app_events::ManagedProviderCall,
+) -> Result<serde_json::Value, ryu_app_events::ProviderRouterError> {
+    let remote = remote_data_plane();
+    let token = if remote {
+        gateway_relay_token()
+    } else {
+        gateway_admin_key()
+    }
+    .ok_or(ryu_app_events::ProviderRouterError::NotHosted)?;
+    let core_proof_key = if remote {
+        Some(gateway_core_proof_key().ok_or(ryu_app_events::ProviderRouterError::NotHosted)?)
+    } else {
+        None
+    };
+    let url = format!("{}/v1/providers/call", gateway_url().trim_end_matches('/'));
+    // A call that declares a long-running upstream operation gets a matching
+    // per-request bound, so Core's shared client never cuts it off first.
+    let timeout = call.timeout_ms.map(|timeout_ms| {
+        std::time::Duration::from_millis(
+            timeout_ms.saturating_add(ryu_app_events::ManagedProviderCall::TIMEOUT_MARGIN_MS),
+        )
+    });
+    let max_cost = call.max_cost_micro_usd;
+    let body = managed_provider_call_body(call, facts)?;
+    let mut request = client.post(url).bearer_auth(token).json(&body);
+    if let Some(timeout) = timeout {
+        request = request.timeout(timeout);
+    }
+    if let Some(max_cost) = max_cost {
+        request = request.header(MAX_COST_HEADER, max_cost.to_string());
+    }
+    let request = match core_proof_key {
+        Some(core_proof_key) => request.header("x-ryu-core-key", core_proof_key),
+        None => request,
+    };
+    let response = request
         .send()
         .await
         .map_err(ryu_app_events::ProviderRouterError::Transport)?;
@@ -543,9 +1058,13 @@ pub async fn call_managed_provider(
 
 /// Admin authority stays in Core and never enters an app's inference bearer.
 const ENV_GATEWAY_ADMIN_KEY: &str = "GATEWAY_ADMIN_KEY";
+static LOCAL_GATEWAY_ADMIN_KEY: OnceLock<String> = OnceLock::new();
+static LOCAL_GATEWAY_CORE_KEY: OnceLock<String> = OnceLock::new();
+static LOCAL_GATEWAY_CORE_PROOF_KEY: OnceLock<String> = OnceLock::new();
 
-fn gateway_admin_key_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("gateway-admin.key")
+fn ephemeral_gateway_key(slot: &'static OnceLock<String>, prefix: &str) -> String {
+    slot.get_or_init(|| format!("{prefix}{}", uuid::Uuid::new_v4().simple()))
+        .clone()
 }
 
 fn required_gateway_admin_key() -> anyhow::Result<String> {
@@ -561,7 +1080,8 @@ fn required_gateway_admin_key() -> anyhow::Result<String> {
     if let Some(path) = std::env::var_os("GATEWAY_CONFIG") {
         match std::fs::read_to_string(path) {
             Ok(content) => {
-                let config: toml::Value = toml::from_str(&content)?;
+                // `master_key` is sealed on disk; open it with the Gateway subkey.
+                let config = ryu_gw_credentials::sealed_config::open_document(&content)?;
                 if let Some(key) = config
                     .get("auth")
                     .and_then(|auth| auth.get("master_key"))
@@ -579,7 +1099,10 @@ fn required_gateway_admin_key() -> anyhow::Result<String> {
         ryu_gw_credentials::validate(&key)?;
         return Ok(key);
     }
-    ryu_gw_credentials::load_or_create(&gateway_admin_key_path(), "gwadm_")
+    if !is_managed() {
+        anyhow::bail!("an externally managed Gateway requires GATEWAY_ADMIN_KEY");
+    }
+    Ok(ephemeral_gateway_key(&LOCAL_GATEWAY_ADMIN_KEY, "gwadm_"))
 }
 
 pub fn gateway_admin_key() -> Option<String> {
@@ -619,7 +1142,7 @@ pub async fn govern_egress(text: &str) -> Result<(), String> {
         "checks": ["pii", "secret"],
     });
 
-    let client = reqwest::Client::new();
+    let client = gateway_http_client();
     let endpoint = format!("{}/v1/firewall/check", gateway_url().trim_end_matches('/'));
     let mut builder = client
         .post(&endpoint)
@@ -687,9 +1210,8 @@ pub async fn govern_egress(text: &str) -> Result<(), String> {
 pub fn local_engine_gateway_url() -> Option<String> {
     let explicit = std::env::var(ENV_LOCAL_LLM_URL).ok();
     let active = ActiveEngineStore::load().active;
-    let llamacpp_installed = crate::sidecar::download_manager::VersionStore::load()
-        .installed_version("llamacpp")
-        .is_some();
+    let llamacpp_installed =
+        llamacpp_recorded(&crate::sidecar::download_manager::VersionStore::load());
     local_engine_gateway_url_with_state(
         explicit,
         active,
@@ -751,9 +1273,15 @@ fn managed_llamacpp_selected() -> bool {
     if let Some(active) = ActiveEngineStore::load().active {
         return active.eq_ignore_ascii_case("llamacpp");
     }
-    crate::sidecar::download_manager::VersionStore::load()
-        .installed_version("llamacpp")
-        .is_some()
+    llamacpp_recorded(&crate::sidecar::download_manager::VersionStore::load())
+}
+
+/// Whether the version store records a llama.cpp install. llama.cpp versions
+/// are build tags (`b10218`), not semver, so `installed_version` — which parses
+/// semver — is always `None` for them; presence of the key is the install fact
+/// (the same rule `SetupManager::seed_installed_from_disk` uses).
+fn llamacpp_recorded(store: &crate::sidecar::download_manager::VersionStore) -> bool {
+    store.versions.contains_key("llamacpp")
 }
 
 /// OpenAI-compatible base URL of the local classify tier (`llamacpp-classify`),
@@ -980,7 +1508,7 @@ pub fn register_sidecar_manager(manager: std::sync::Arc<crate::sidecar::SidecarM
 /// `default_firewall_section_selects_nothing_for_cores_lazy_start`.
 ///
 /// **Arm 3 over-fires, verified (2026-07-30).** Re-read of the consumer
-/// (`apps/gateway/src/pipeline/mod.rs`'s `flag_inline_binding`) settles what the
+/// (`apps/gateway/src/pipeline/inline_flags.rs`'s `flag_inline_binding`) settles what the
 /// previous round asserted without checking: it matches on `EvaluatorImpl`, and
 /// **only `LlmJudge` reaches `InspectorClient::inspect_rubric`**. `Regex` and
 /// `Heuristic` go to `scanner.scan_kind` (no LLM at all), `Code` and `Builtin`
@@ -1334,13 +1862,12 @@ fn maybe_start_classify_tier(patch: &serde_json::Value) {
     };
     tokio::spawn(async move {
         if let Err(e) = manager.start_sidecar(CLASSIFY_SIDECAR_NAME).await {
-            // `warn`, not `debug`, and recorded — not because `debug` is filtered
-            // (Core's default `EnvFilter` is `ryu_core=debug,info`, so it does print)
-            // but because a `debug!` line is indistinguishable from the whole
-            // `ryu_core=debug` firehose, disappears under any operator `RUST_LOG=info`,
-            // and leaves NO queryable record. This is the one failure class the
-            // desktop's classify-tier badge cannot derive: it crosses
-            // `/api/sidecar/status` with a weights probe, which covers exactly one
+            // `warn`, not `debug`, and recorded — Core now defaults to `info`, so
+            // debug is hidden unless an operator opts in. Even when enabled, a
+            // `debug!` line is indistinguishable from the `ryu_core=debug` firehose,
+            // disappears under `RUST_LOG=info`, and leaves NO queryable record.
+            // This is the one failure class the desktop's classify-tier badge cannot derive.
+            // It crosses `/api/sidecar/status` with a weights probe, which covers exactly one
             // cause (`unweighted`) and reads every other — llama.cpp binary missing,
             // port 8083 taken, `'…' is not installed` because the derived-sidecar list
             // drifted, download center unwired — as the sidecar's NORMAL lazy `idle`.
@@ -1504,21 +2031,35 @@ pub(crate) async fn fetch_config(client: &reqwest::Client) -> anyhow::Result<ser
 /// `local` provider at the active engine. Empty when nothing is selected.
 fn gateway_spawn_env() -> Vec<(String, String)> {
     let mut env = Vec::new();
+    // The gateway keeps its own data-dir state (channel pairing, marketplace
+    // signing key) under Core's layout only when it knows the data dir.
+    env.push((
+        "RYU_DIR".to_owned(),
+        crate::paths::ryu_dir().to_string_lossy().into_owned(),
+    ));
     // Keep a profile-isolated child Gateway's audit store beside Core's active
     // data. A stale absolute `audit.db_path` in gateway.toml must not send a dev
     // or test child back to the release database; the audit crate treats this as
     // a runtime override and never persists it.
     env.push((
         "RYU_AUDIT_DB_PATH".to_owned(),
-        crate::paths::ryu_dir()
-            .join("audit.db")
+        crate::paths::db_path("audit.db")
             .to_string_lossy()
             .into_owned(),
     ));
-    // Ryu-owned analytics is a typed relay, not the customer's OTLP exporter.
-    // Managed local Gateways receive only the relay URL/key and the explicit
-    // product-analytics gate; no Ryu Axiom credential is ever forwarded.
+    // The Ryu Axiom diagnostics mirror is a typed relay, not the customer's OTLP
+    // exporter. Managed local Gateways receive only the relay URL/key; the
+    // diagnostics gate below controls delivery. No Axiom credential is forwarded.
     env.extend(crate::ryu_analytics::gateway_child_env());
+    // The Gateway's own sealing subkey for `gateway.toml` secrets (HKDF of the
+    // master key, never the master key itself). The Gateway captures it into
+    // memory and removes it from its environment before any thread starts.
+    match ryu_crypto::component_child_env(ryu_crypto::components::GATEWAY) {
+        Ok(entries) => env.extend(entries),
+        Err(error) => {
+            tracing::warn!("gateway: no seal key for the child ({error}); it will resolve its own")
+        }
+    }
     // Startup validates all three credentials before computing the child environment.
     if let Some(key) = gateway_admin_key() {
         env.push((ENV_GATEWAY_ADMIN_KEY.to_owned(), key));
@@ -1529,9 +2070,17 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
     if let Some(key) = gateway_core_token() {
         env.push(("GATEWAY_CORE_RELAY_KEY".to_owned(), key));
     }
+    if let Some(key) = gateway_core_proof_key() {
+        env.push(("GATEWAY_CORE_PROOF_KEY".to_owned(), key));
+    }
     if let Some(url) = local_engine_gateway_url() {
         tracing::info!(local_llm_url = %url, "gateway: registering active local engine as provider");
         env.push((ENV_LOCAL_LLM_URL.to_owned(), url));
+    }
+    // Ollama launch settings are baked into a derived model; tell the gateway's
+    // `local` provider to serve the base name from it. Empty ⇒ not published.
+    if let Some(routes) = local_model_routes_env() {
+        env.push((ENV_LOCAL_MODEL_ROUTES.to_owned(), routes));
     }
     // Classify tier: always published, NOT gated on the sidecar being installed or
     // running. The spawn env is computed once, so gating it would mean a classifier
@@ -1554,6 +2103,12 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
     );
     env.push((ENV_CLASSIFY_LLM_URL.to_owned(), classify_url));
     env.push((ENV_CLASSIFY_MODEL_ID.to_owned(), classify_model));
+    // Node-tier hazard screener endpoints (decision model, guard model). Off by
+    // default: nothing is published until the operator opts the node in, and
+    // the Gateway still screens nothing until its own `[screening]` section
+    // names these variables. Never Ryu's platform floor, which binds only the
+    // hosted fleet.
+    env.extend(crate::sidecar::node_screener::screener_spawn_env());
     // Context compression (M2 / #425): when the headroom proxy is enabled, turn
     // on the gateway's egress compression transform and point it at the proxy.
     // This auto-wraps every gateway-routed agent. The gateway fails open if the
@@ -1606,7 +2161,9 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
     // data plane (WS1) these keys live ONLY in the hosted gateway fleet — Core must
     // hold and inject NONE of them, so skip the whole block without even resolving
     // the local key prefs. (This is belt-and-suspenders: `start()` never spawns a
-    // local gateway in remote mode, so this env is not built there anyway.)
+    // local gateway in remote mode, so this env is not built there anyway.) Every
+    // managed node is a remote data plane, so a managed node never passes a
+    // provider key to a gateway child (D8).
     if remote_data_plane() {
         tracing::info!(
             "gateway: remote data plane — provider keys live in the hosted fleet, injecting none"
@@ -1646,6 +2203,14 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
     // local installs stay graceful-degrade (no debit attempted). Markup is 0 —
     // the platform margin is captured at deposit (B2), so usage debits at cost.
     env.extend(credits_spawn_env());
+    // Provider routes through the owner's desktop: hand the Gateway the node's
+    // provider proxy so its Anthropic passthrough follows them. Only nodes that
+    // run the local-egress entry have one.
+    env.extend(
+        crate::local_egress::entry::gateway_proxy_env()
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value)),
+    );
     // Crash reporting tier (#544, P3): forward the user's `crash-reports-enabled`
     // consent + the Sentry DSN so the gateway's Sentry panic tier follows the SAME
     // single toggle (the gateway has no `PreferencesStore`, so it reads these env
@@ -1694,9 +2259,22 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
         // OTLP request headers (auth) — forwarded only when configured. The
         // vendor-neutral `OTEL_EXPORTER_OTLP_HEADERS` works for any sink; the
         // PostHog key convenience is folded in by the resolver.
-        if let Some(headers) = crate::telemetry::otlp_headers_env() {
+        if let Some(headers) = crate::telemetry::gateway_otlp_headers_env() {
             env.push((crate::telemetry::OTLP_HEADERS_ENV.to_owned(), headers));
         }
+        // Exporter presets: the verbatim traces URL + resource attributes Core
+        // already resolved (credentials included in the headers above).
+        env.extend(crate::telemetry::gateway_export_env());
+        // Content mode is a SEPARATE opt-in layered on export consent; forward
+        // the user's choice + byte cap only inside this consented branch.
+        env.push((
+            crate::privacy::DIAGNOSTICS_CONTENT_MODE_ENV.to_owned(),
+            crate::telemetry::content_mode().as_str().to_owned(),
+        ));
+        env.push((
+            crate::privacy::DIAGNOSTICS_MAX_CONTENT_BYTES_ENV.to_owned(),
+            crate::telemetry::max_content_bytes().to_string(),
+        ));
     } else {
         // Consent OFF (or no endpoint): push an EXPLICIT "0" rather than relying on
         // absence. The gateway child inherits Core's process env, so an operator-set
@@ -1706,68 +2284,54 @@ fn gateway_spawn_env() -> Vec<(String, String)> {
         // requires enabled=true), so "off → nothing sent" holds end-to-end. Mirrors
         // the crash tier, which pushes an explicit "0" for the same reason.
         env.push(("RYU_DIAGNOSTICS_EXPORT_ENABLED".to_owned(), "0".to_owned()));
+        // An inherited operator preset must not resolve a destination either.
+        env.push((
+            crate::privacy::DIAGNOSTICS_OTLP_PRESET_ENV.to_owned(),
+            "otlp".to_owned(),
+        ));
+        // Likewise neutralize an inherited content-mode opt-in.
+        env.push((
+            crate::privacy::DIAGNOSTICS_CONTENT_MODE_ENV.to_owned(),
+            crate::privacy::ContentMode::MetadataOnly
+                .as_str()
+                .to_owned(),
+        ));
     }
     env
 }
 
-/// Resolve and inject the local provider-credential env (Composio / OpenRouter /
-/// Replicate / Fal) onto the gateway spawn env. Only called on a LOCAL data plane
-/// (see [`gateway_spawn_env`]) — on a remote data plane the keys live only in the
-/// hosted fleet and this is never called, so no local key pref is even resolved.
+/// Inject the user's own provider credentials (Composio / OpenRouter /
+/// Replicate / Fal) onto a LOCAL gateway's spawn env.
+///
+/// Only called on a local data plane (see [`gateway_spawn_env`]), which is never
+/// a managed node: [`remote_data_plane`] is true on every managed node, so a
+/// managed node calls the hosted fleet gateway with its `rgw_` credential and
+/// this function never runs there. The resolvers also ignore env keys on a
+/// managed node, so even a misrouted call could only see the tenant's own saved
+/// keys, never a Ryu key (D8).
 fn push_provider_key_env(env: &mut Vec<(String, String)>) {
-    // Composio (#456 deep integration): inject the user's Composio API key so the
-    // gateway's tool loop is enabled — key presence alone flips
-    // `ComposioConfig.enabled` (apps/gateway/src/config.rs). Resolved from the
-    // in-process resolver (preferences-first, env fallback); this spawn path is
-    // sync, so it must not touch the async PreferencesStore. On a key change the
-    // preferences handler calls `GatewayManager::refresh()` to respawn with the
-    // new value.
+    // Composio (#456 deep integration): key presence alone flips the gateway's
+    // `ComposioConfig.enabled` (apps/gateway/src/config.rs) and turns on its tool
+    // loop. Resolved from the in-process resolver (preferences first, env
+    // fallback); this spawn path is sync, so it must not touch the async
+    // PreferencesStore. On a key change the preferences handler calls
+    // `GatewayManager::refresh()` to respawn with the new value.
     if let Some(key) = crate::composio_auth::key() {
         tracing::info!("gateway: Composio key present, enabling tool loop");
         env.push(("COMPOSIO_API_KEY".to_owned(), key));
-    } else if managed_node() {
-        // On a managed node Composio is the expected zero-setup default (mirrors
-        // the OpenRouter block below); warn (do not fail) so an operator notices
-        // a missing credential. Resolved through the env fallback in
-        // `composio_auth::key()` (`RYU_COMPOSIO_API_KEY` / `COMPOSIO_API_KEY`),
-        // which a headless managed node sets — never the desktop UI.
-        tracing::warn!(
-            "gateway: managed node has no Composio key (set RYU_COMPOSIO_API_KEY); Composio tool loop will be inactive"
-        );
     }
-    // OpenRouter (A4 / #501): inject the resolved OpenRouter API key so the
-    // gateway activates its `openrouter` provider — key presence alone flips it
-    // on (apps/gateway/src/config.rs). Resolved through the same preferences-
-    // first/env-fallback resolver as Composio, so a key set in the desktop UI
-    // (persisted, never on Core's process env) still reaches the gateway. This
-    // is unconditional, not gated on `managed`: a key resolving means the
-    // operator/user wants OpenRouter, exactly like the Composio block above.
-    // The whole point on a MANAGED Ryu Cloud node is that the operator sets this
-    // once and every end user gets OpenRouter routing with zero setup.
+    // OpenRouter (A4 / #501): key presence alone activates the gateway's
+    // `openrouter` provider. Resolved through the same preferences-first resolver,
+    // so a key set in the desktop UI (persisted, never on Core's process env)
+    // still reaches the gateway. The user's own routing policy is never
+    // overridden here.
     if let Some(key) = crate::openrouter_auth::key() {
         tracing::info!("gateway: OpenRouter key present, enabling openrouter provider");
         env.push(("OPENROUTER_API_KEY".to_owned(), key));
-        // Managed nodes: privacy-by-default. Route only to OpenRouter providers
-        // that do not retain/train on prompts. Scoped to managed nodes so a
-        // self-host / BYOK user's own routing is never overridden, and skipped
-        // when the operator already pinned the policy explicitly.
-        if managed_node() && std::env::var_os("OPENROUTER_DATA_COLLECTION").is_none() {
-            tracing::info!("gateway: managed node — defaulting OpenRouter data_collection=deny");
-            env.push(("OPENROUTER_DATA_COLLECTION".to_owned(), "deny".to_owned()));
-        }
-    } else if managed_node() {
-        // On a managed node OpenRouter is the expected zero-setup default; warn
-        // (do not fail) so an operator notices a missing credential.
-        tracing::warn!(
-            "gateway: managed node has no OpenRouter key (set RYU_OPENROUTER_API_KEY); openrouter provider will be inactive"
-        );
     }
-    // Cloud media providers (Replicate / Fal): inject the resolved keys so the
-    // gateway activates its `replicate` / `fal` providers for cloud image/video
-    // generation — key presence alone flips each on. Same preferences-first/env-
-    // fallback resolver as OpenRouter above, so a key set in the desktop UI (BYOK)
-    // or by a managed-node operator both reach the gateway. On a managed node the
-    // operator sets these once and every end user gets cloud media with zero setup.
+    // Cloud media providers (Replicate / Fal): key presence alone activates the
+    // gateway's `replicate` / `fal` providers for cloud image and video
+    // generation. Same preferences-first resolver as OpenRouter above.
     if let Some(key) = crate::replicate_auth::key() {
         tracing::info!("gateway: Replicate key present, enabling replicate media provider");
         env.push(("REPLICATE_API_KEY".to_owned(), key));
@@ -1798,10 +2362,10 @@ const ENV_CREDITS_WALLET_EMPTY_ACTION: &str = "GATEWAY_CREDITS_WALLET_EMPTY_ACTI
 /// Composio is not free, so on the managed plan each executed `composio.*` tool
 /// call debits the org wallet by this amount (at cost). Operator-provisioned on a
 /// managed node; same name on both sides — Core forwards it to the gateway.
-/// Default `300` ⇒ the current standard $0.30/1,000 execution rate. Deployments
-/// using managed-app or premium-tool contracts can override it explicitly.
+/// Default `500` ⇒ $0.50 per 1,000 executions, Composio's managed-app rate.
+/// Deployments with a different Composio contract can override it explicitly.
 const ENV_CREDITS_COST_PER_TOOL_CALL: &str = "GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD";
-const DEFAULT_CREDITS_COST_PER_TOOL_CALL_MICRO_USD: u64 = 300;
+const DEFAULT_CREDITS_COST_PER_TOOL_CALL_MICRO_USD: u64 = 500;
 
 /// Sandbox per-resource billing rates, in **nano-USD per unit-second** (`u64`),
 /// forwarded to the gateway alongside the credits hook. Rates are nano-USD (not
@@ -1861,10 +2425,11 @@ const ENV_CREDITS_SANDBOX_MARKUP_BPS: &str = "GATEWAY_CREDITS_SANDBOX_MARKUP_BPS
 const DEFAULT_SANDBOX_MARKUP_BPS: u64 = 3000;
 
 /// Env var flagging this Core as a **managed node** (e.g. a Ryu Cloud host).
-/// On a managed node Core self-registers to the control plane and the gateway
-/// is expected to be pre-provisioned with provider creds (OpenRouter, Composio)
-/// + the credits hook so end users do zero setup. Default off — a normal local
-/// install is never "managed". Read by [`managed_node`] and surfaced on
+/// On a managed node Core self-registers to the control plane and its data plane
+/// is remote ([`remote_data_plane`]): managed model, media and tool traffic goes
+/// to the hosted fleet gateway with the node's `rgw_` credential, and the node
+/// holds no Ryu provider key (D8). Composio runs through the Connect service.
+/// Default off; a normal local install is never "managed". Read by [`managed_node`] and surfaced on
 /// `GET /api/system/info` so a reachable managed node identifies itself.
 pub const ENV_MANAGED_NODE: &str = "RYU_MANAGED_NODE";
 
@@ -1976,7 +2541,7 @@ fn credits_spawn_env() -> Vec<(String, String)> {
         .filter(|s| s == "stop" || s == "downgrade")
         .unwrap_or_else(|| "stop".to_owned());
     // Per-tool-call (Composio) cost: forward the operator-provisioned rate,
-    // defaulting to the current standard $0.30/1,000 execution rate. Only a
+    // defaulting to $0.50/1,000 (Composio's managed-app rate). Only a
     // valid non-negative integer is honoured; malformed input uses the safe
     // non-zero default so a managed gateway cannot silently under-bill.
     let tool_call_cost = resolve_u64_env_string(
@@ -2073,6 +2638,98 @@ fn is_managed() -> bool {
     }
 }
 
+/// Whether Core's Gateway is the local sidecar Core spawns itself (not a remote
+/// data plane, a managed node's hosted fleet, or an operator-run Gateway). Its
+/// usage is then only in the local audit store unless that Gateway's own config
+/// enables control-plane reporting.
+pub(crate) fn core_spawned_local_gateway() -> bool {
+    !remote_data_plane() && is_managed()
+}
+
+/// Non-secret marker recorded by `ryu-core gateway-seal-env`: the operator
+/// has taken the Gateway's `gateway.toml` sealing subkey for an externally
+/// managed Gateway.
+const SEAL_KEY_HANDOFF_MARKER: &str = "gateway-seal-key-handoff";
+
+fn seal_key_handoff_marker() -> std::path::PathBuf {
+    crate::paths::state_path(SEAL_KEY_HANDOFF_MARKER)
+}
+
+/// What Core tells an operator whose externally managed Gateway may not hold
+/// the key for a secret Core is about to seal into `gateway.toml`.
+pub(crate) const EXTERNAL_GATEWAY_SEAL_KEY_REQUIRED: &str =
+    "The Gateway is externally managed (RYU_GATEWAY_MANAGED=0), and Core cannot confirm it \
+     holds the key that seals gateway.toml secrets, so the new secret was not saved. Run \
+     `ryu-core gateway-seal-env` and start the Gateway with the RYU_SEAL_KEY and \
+     RYU_SEAL_SCOPE it prints (or give Core and the Gateway the same RYU_MASTER_KEY), \
+     then save again.";
+
+/// Whether Core may seal a new secret into a `gateway.toml` the Gateway reads.
+/// A Core-spawned Gateway always receives the subkey; an external one only has
+/// it when the operator supplied the master key to both, or took the subkey
+/// with `ryu-core gateway-seal-env`.
+fn external_seal_decision(
+    managed: bool,
+    master_from_env: bool,
+    handoff_recorded: bool,
+) -> Result<(), String> {
+    if managed || master_from_env || handoff_recorded {
+        Ok(())
+    } else {
+        Err(EXTERNAL_GATEWAY_SEAL_KEY_REQUIRED.to_owned())
+    }
+}
+
+/// [`ryu_gw_credentials::sealed_config::WriteGate`] installed by Core. It runs
+/// only before a write seals a new secret into a file that holds no sealed
+/// leaf, so a file an external Gateway already seals is unaffected.
+pub(crate) fn external_config_write_gate() -> Result<(), String> {
+    let master_from_env = ryu_crypto::key_custody()
+        .is_ok_and(|custody| custody.source == ryu_crypto::MasterKeySource::Env);
+    external_seal_decision(
+        is_managed(),
+        master_from_env,
+        seal_key_handoff_marker().is_file(),
+    )
+}
+
+/// `ryu-core gateway-seal-env`: print the Gateway's `gateway.toml` sealing
+/// subkey (HKDF of the master key, never the master key) as environment
+/// assignments for an externally managed Gateway, and record that the operator
+/// holds it. Returns the process exit code.
+pub(crate) fn run_seal_env_subcommand() -> i32 {
+    let entries = match ryu_crypto::component_child_env(ryu_crypto::components::GATEWAY) {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!("ryu-core gateway-seal-env: the master key is unavailable: {error}");
+            return 1;
+        }
+    };
+    let marker = seal_key_handoff_marker();
+    let stamp = format!(
+        "recorded {}\n",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default()
+    );
+    if let Err(error) = std::fs::write(&marker, stamp) {
+        eprintln!(
+            "ryu-core gateway-seal-env: could not record the key handoff at {}: {error}",
+            marker.display()
+        );
+        return 1;
+    }
+    for (key, value) in entries {
+        println!("{key}={value}");
+    }
+    eprintln!(
+        "Give these to the externally managed Gateway only (they open gateway.toml \
+         secrets); keep them in a secret manager, not in a file next to gateway.toml."
+    );
+    0
+}
+
 /// Manages the local gateway child process.
 pub struct GatewayManager {
     handle: ProcessHandle,
@@ -2083,6 +2740,87 @@ impl GatewayManager {
         Self {
             handle: ProcessHandle::new(),
         }
+    }
+
+    /// Apply committed provider bytes without changing the child lifetime.
+    /// Revision only; upstream keys remain in the authored Gateway file/runtime.
+    pub async fn apply_provider_revision(
+        &self,
+        revision: &ryu_gw_credentials::ConfigRevision,
+    ) -> ryu_gw_credentials::ProviderApplyOutcome {
+        use ryu_gw_credentials::{ProviderApplyErrorCode as Code, ProviderApplyOutcome as Outcome};
+        if !is_managed() || remote_data_plane() {
+            return Outcome::Unmanaged {
+                requested_revision: revision.clone(),
+            };
+        }
+        let owned = self.handle.is_running();
+        let base = if owned {
+            gateway_url()
+        } else {
+            configured_gateway_url()
+        };
+        let adoption_client = if owned {
+            None
+        } else {
+            REJECTED_LOCAL_GATEWAY.store(true, std::sync::atomic::Ordering::Release);
+            let Some(url) = local_gateway_control_url(&base) else {
+                return Outcome::Failed {
+                    requested_revision: revision.clone(),
+                    active_revision: None,
+                    code: Code::Transport,
+                };
+            };
+            let client = match local_gateway_control_client(&url).build() {
+                Ok(client) => client,
+                Err(_) => {
+                    return Outcome::Failed {
+                        requested_revision: revision.clone(),
+                        active_revision: None,
+                        code: Code::Transport,
+                    }
+                }
+            };
+            if !client
+                .get(format!("{}/health", base.trim_end_matches('/')))
+                .send()
+                .await
+                .is_ok_and(|response| response.status().is_success())
+            {
+                return Outcome::Offline {
+                    requested_revision: revision.clone(),
+                };
+            }
+            Some(client)
+        };
+        let Some(admin) = gateway_admin_key() else {
+            return Outcome::Failed {
+                requested_revision: revision.clone(),
+                active_revision: None,
+                code: Code::Transport,
+            };
+        };
+        if let Some(client) = adoption_client {
+            let credentials = gateway_bearer()
+                .and_then(|relay| required_gateway_core_token().map(|core| (relay, core)));
+            let verified = match credentials {
+                Ok((relay, core)) => {
+                    verify_managed_gateway_with_client(&client, &base, &admin, &relay, &core)
+                        .await
+                        .is_ok()
+                }
+                Err(_) => false,
+            };
+            REJECTED_LOCAL_GATEWAY.store(!verified, std::sync::atomic::Ordering::Release);
+            if !verified {
+                return Outcome::Failed {
+                    requested_revision: revision.clone(),
+                    active_revision: None,
+                    code: Code::UnexpectedResponse,
+                };
+            }
+        }
+        send_provider_revision(&base, &admin, revision).await
     }
 
     /// Spawn the gateway (unless externally managed) and wait for it to report
@@ -2177,6 +2915,10 @@ impl GatewayManager {
             self.handle.start_path_with_env(&bin, &args, &env).await
         };
         spawned.map_err(|e| anyhow::anyhow!("failed to spawn ryu-gateway ({bin}): {e}"))?;
+        // The opted-in guard tier serves the endpoint the spawn env just
+        // published. Fire-and-forget: a guard still loading is a down backend
+        // to the Gateway, never a failed spawn.
+        crate::sidecar::node_screener::maybe_start_guard_tier(SIDECAR_MANAGER.get().cloned());
 
         // Wait long enough for a cold first launch to load its config and
         // initialize provider clients. A seven-second window quarantined a
@@ -2215,7 +2957,7 @@ impl GatewayManager {
             return Ok(false);
         }
         if self.handle.is_running() {
-            self.handle.stop().await?;
+            self.handle.stop_graceful(GATEWAY_STOP_GRACE).await?;
         }
         self.start().await
     }
@@ -2227,8 +2969,108 @@ impl GatewayManager {
 
     /// Stop the managed gateway child (if any).
     pub async fn stop(&self) -> anyhow::Result<()> {
-        self.handle.stop().await
+        self.handle.stop_graceful(GATEWAY_STOP_GRACE).await
     }
+}
+
+/// How long a managed Gateway gets after SIGTERM to drain and flush its OTLP
+/// batch (bounded there by a 5 s flush timeout) before it is killed.
+const GATEWAY_STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(7);
+
+async fn send_provider_revision(
+    base_url: &str,
+    admin: &str,
+    revision: &ryu_gw_credentials::ConfigRevision,
+) -> ryu_gw_credentials::ProviderApplyOutcome {
+    use ryu_gw_credentials::{ProviderApplyErrorCode as Code, ProviderApplyOutcome as Outcome};
+    let failure = |code| Outcome::Failed {
+        requested_revision: revision.clone(),
+        active_revision: None,
+        code,
+    };
+    let Some(mut url) = local_gateway_control_url(base_url) else {
+        return failure(Code::Transport);
+    };
+    url.set_path(&format!(
+        "{}/v1/config/providers/apply",
+        url.path().trim_end_matches('/')
+    ));
+    let client = match local_gateway_control_client(&url).build() {
+        Ok(client) => client,
+        Err(_) => return failure(Code::Transport),
+    };
+    let mut response = match client
+        .post(url)
+        .bearer_auth(admin)
+        .json(&serde_json::json!({"revision":revision}))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return failure(Code::Transport),
+    };
+    if !response.status().is_success()
+        || response
+            .content_length()
+            .is_some_and(|length| length > 16 * 1024)
+    {
+        return failure(Code::UnexpectedResponse);
+    }
+    let mut bytes = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) if bytes.len() + chunk.len() <= 16 * 1024 => {
+                bytes.extend_from_slice(&chunk)
+            }
+            Ok(Some(_)) => return failure(Code::UnexpectedResponse),
+            Ok(None) => break,
+            Err(_) => return failure(Code::Transport),
+        }
+    }
+    match serde_json::from_slice::<Outcome>(&bytes) {
+        Ok(outcome) if outcome.validates_request(revision) => outcome,
+        _ => failure(Code::UnexpectedResponse),
+    }
+}
+
+fn local_gateway_control_url(base: &str) -> Option<reqwest::Url> {
+    let url = reqwest::Url::parse(base).ok()?;
+    let loopback = url.host_str().is_some_and(|host| {
+        host == "localhost"
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    });
+    if !loopback
+        || !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return None;
+    }
+    Some(url)
+}
+
+fn local_gateway_control_client(url: &reqwest::Url) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(10));
+    if url.host_str() == Some("localhost") {
+        let port = url.port_or_known_default().unwrap_or(80);
+        builder = builder.resolve_to_addrs(
+            "localhost",
+            &[
+                std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+                std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port)),
+            ],
+        );
+    }
+    builder
 }
 
 impl Default for GatewayManager {
@@ -2352,7 +3194,7 @@ async fn check_widget_budget_request(payload: serde_json::Value) -> ExecBudgetOu
         "{}/v1/exec/budget/check",
         gateway_url().trim_end_matches('/')
     );
-    let mut req = reqwest::Client::new()
+    let mut req = gateway_http_client()
         .post(&endpoint)
         .timeout(std::time::Duration::from_secs(5))
         .json(&payload);
@@ -2418,7 +3260,7 @@ async fn check_exec_budget_request(payload: serde_json::Value) -> ExecBudgetOutc
     let endpoint = format!("{}/v1/exec/budget/check", base.trim_end_matches('/'));
     let token = gateway_core_token();
 
-    let client = reqwest::Client::new();
+    let client = gateway_http_client();
     let mut req = client
         .post(&endpoint)
         .timeout(std::time::Duration::from_secs(5))
@@ -2565,7 +3407,7 @@ pub async fn check_exec_scan(
     let endpoint = format!("{}/v1/exec/scan", base.trim_end_matches('/'));
     let token = gateway_core_token();
 
-    let client = reqwest::Client::new();
+    let client = gateway_http_client();
     let mut req = client
         .post(&endpoint)
         .timeout(std::time::Duration::from_secs(5))
@@ -2678,7 +3520,7 @@ pub async fn report_exec_audit_with_attribution(
     let endpoint = format!("{}/v1/exec/audit", base.trim_end_matches('/'));
     let token = gateway_core_token();
 
-    let client = reqwest::Client::new();
+    let client = gateway_http_client();
     let mut req = client
         .post(&endpoint)
         .timeout(std::time::Duration::from_secs(5))
@@ -2759,7 +3601,7 @@ pub async fn check_identity_grant(scope: &str, context: &str) -> IdentityGrantOu
     let endpoint = format!("{}/v1/grants/validate", base.trim_end_matches('/'));
     let token = gateway_core_token();
 
-    let client = reqwest::Client::new();
+    let client = gateway_http_client();
     let mut req = client
         .post(&endpoint)
         .timeout(std::time::Duration::from_secs(5))
@@ -2860,7 +3702,7 @@ pub async fn report_credential_read_audit_with_attribution(
     let endpoint = format!("{}/v1/exec/audit", base.trim_end_matches('/'));
     let token = gateway_core_token();
 
-    let client = reqwest::Client::new();
+    let client = gateway_http_client();
     let mut req = client
         .post(&endpoint)
         .timeout(std::time::Duration::from_secs(5))
@@ -2940,6 +3782,16 @@ async fn verify_managed_gateway(
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(3))
         .build()?;
+    verify_managed_gateway_with_client(&client, base, admin, relay, core_relay).await
+}
+
+async fn verify_managed_gateway_with_client(
+    client: &reqwest::Client,
+    base: &str,
+    admin: &str,
+    relay: &str,
+    core_relay: &str,
+) -> anyhow::Result<()> {
     let base = base.trim_end_matches('/');
     // Prove key possession without sending any bearer to an untrusted listener.
     // Binding the signature to its real socket prevents forwarding this nonce to
@@ -2952,6 +3804,10 @@ async fn verify_managed_gateway(
     let mut response = client
         .get(format!("{base}/v1/auth/readiness"))
         .query(&[("nonce", &nonce)])
+        .header(
+            "x-ryu-readiness-proof",
+            ryu_gw_credentials::readiness_request_signature(&nonce, admin)?,
+        )
         .send()
         .await?;
     anyhow::ensure!(
@@ -3035,9 +3891,19 @@ async fn verify_managed_gateway(
     Ok(())
 }
 
+/// Process-wide client for Core to Gateway calls. The per-turn health probe and
+/// the per-command firewall, budget, scan and audit calls used to build a fresh
+/// client each time, which reloads the TLS config and opens a new connection
+/// for every call. One shared pool keeps the Gateway connection warm. Timeouts
+/// stay on each request, so callers keep their own deadlines.
+pub(crate) fn gateway_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
 async fn health_check(base_url: &str) -> bool {
     let endpoint = format!("{}/health", base_url.trim_end_matches('/'));
-    let client = reqwest::Client::new();
+    let client = gateway_http_client();
     let Ok(resp) = client
         .get(&endpoint)
         .timeout(Duration::from_millis(500))
@@ -3088,6 +3954,10 @@ pub(crate) fn lock_gateway_env() -> std::sync::MutexGuard<'static, ()> {
 pub(crate) static MANAGED_NODE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Acquire [`MANAGED_NODE_TEST_LOCK`], recovering a poisoned guard.
+///
+/// A test that needs both locks takes this one first, then
+/// [`lock_gateway_env`]; the opposite order deadlocks under the parallel test
+/// harness.
 #[cfg(test)]
 pub(crate) fn lock_managed_node_env() -> std::sync::MutexGuard<'static, ()> {
     MANAGED_NODE_TEST_LOCK
@@ -3095,1392 +3965,582 @@ pub(crate) fn lock_managed_node_env() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|e| e.into_inner())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// ── Side-model call attribution ──────────────────────────────────────────────
+//
+// Core makes many one-shot "side" completions next to the main chat turn (the
+// `/btw` aside, the advisor, compaction, titles, suggestions, the learning
+// judge, plugin `host.sideModel`, …). Without a tag every one of them landed in
+// the Gateway's audit log looking like an ordinary chat turn, so their spend
+// could not be told apart. Each such request now carries `x-ryu-purpose`: a
+// bounded identifier the Gateway stores verbatim (and stores as NULL when it is
+// malformed). The names are a closed set shared with the Gateway; plugins get a
+// `plugin:<id>` value so one noisy plugin is visible on its own.
 
-    #[test]
-    fn managed_fleet_precedence_is_environment_then_enrollment_then_manual_preference() {
-        let environment = Some((" https://env.example ".into(), " env-token ".into()));
-        let enrolled = Some(("https://enrolled.example".into(), "enrolled-token".into()));
-        let preference = Some(("https://manual.example".into(), "manual-token".into()));
-        assert_eq!(
-            select_managed_fleet(environment, enrolled.clone(), preference.clone()),
-            Some(("https://env.example".into(), "env-token".into()))
-        );
-        assert_eq!(
-            select_managed_fleet(None, enrolled.clone(), preference.clone()),
-            enrolled
-        );
-        assert_eq!(
-            select_managed_fleet(None, None, preference.clone()),
-            preference
-        );
-    }
+/// Header naming what a Core side-model call is for.
+pub const PURPOSE_HEADER: &str = "x-ryu-purpose";
+/// Local-engine admission priority the Gateway already honors
+/// (`concurrency::Priority::from_header`).
+pub const PRIORITY_HEADER: &str = "x-ryu-priority";
+/// Upper bound on an `x-ryu-purpose` value, shared with the Gateway's parser.
+pub const MAX_PURPOSE_LEN: usize = 64;
 
-    /// One test for the whole `x-ryu-node-routing` encoder, deliberately: the
-    /// slot is a process-global and cargo runs tests in one process in parallel,
-    /// so splitting these would make them observe each other's writes.
-    #[test]
-    fn node_routing_header_encodes_and_clears() {
-        // Default: an untouched node states nothing, so the header is omitted and
-        // the request stays byte-identical to before this channel existed.
-        set_node_routing_prefs(Vec::new(), None);
-        assert_eq!(node_routing_header(), None);
+/// What a Core side-model call is for. The named variants are the closed set
+/// the Gateway understands; [`SidePurpose::Plugin`] carries the calling
+/// plugin's id and renders as `plugin:<id>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidePurpose {
+    Btw,
+    Advisor,
+    Compaction,
+    Handoff,
+    AutoTitle,
+    ChatSuggestions,
+    ComposerPrediction,
+    Predict,
+    MemoryDream,
+    Recommendations,
+    LearningJudge,
+    AgentAutoRoute,
+    WorkflowPrompt,
+    Delegate,
+    AppModelStream,
+    RetrievalExpansion,
+    Plugin(String),
+}
 
-        // Blank-only input is the same as no input — never a `v1.` of nothing.
-        set_node_routing_prefs(vec!["  ".into(), String::new()], None);
-        assert_eq!(node_routing_header(), None);
-
-        set_node_routing_prefs(
-            vec![" anthropic ".into(), "groq".into()],
-            Some(serde_json::json!({ "redact_pii": true })),
-        );
-        let raw = node_routing_header().expect("stated prefs produce a header");
-        let encoded = raw
-            .strip_prefix("v1.")
-            .expect("the version tag is part of the grammar the reader parses");
-
-        use base64::Engine as _;
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(encoded)
-            .expect("base64url, no padding — header-safe by construction");
-        let doc: serde_json::Value =
-            serde_json::from_slice(&decoded).expect("the payload is compact JSON");
-        assert_eq!(doc["fallback"], serde_json::json!(["anthropic", "groq"]));
-        assert_eq!(doc["firewall"]["redact_pii"], serde_json::json!(true));
-
-        // The preference-store reader feeds the same carrier and clears a
-        // previous value when an edit is malformed rather than leaving stale
-        // routing active.
-        set_node_routing_prefs_from_json(
-            r#"{"fallback":["groq"],"firewall":{"custom_patterns":[]}}"#,
-        );
-        assert!(node_routing_header().is_some());
-        set_node_routing_prefs_from_json("not-json");
-        assert_eq!(node_routing_header(), None);
-
-        // Clearing is reachable, so a node that retracts its preferences stops
-        // sending the header rather than pinning the last value forever.
-        set_node_routing_prefs(Vec::new(), None);
-        assert_eq!(node_routing_header(), None);
-    }
-
-    #[test]
-    fn gateway_url_defaults_to_loopback() {
-        // Without RYU_GATEWAY_URL set in this process, the default applies.
-        if std::env::var(ENV_GATEWAY_URL).is_err() {
-            assert_eq!(
-                gateway_url(),
-                format!("http://127.0.0.1:{}", crate::profile::port(7981))
-            );
+impl SidePurpose {
+    /// The purpose name. A plugin call is just `plugin` here; its full header
+    /// value (with the id) comes from [`SidePurpose::header_value`].
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Btw => "btw",
+            Self::Advisor => "advisor",
+            Self::Compaction => "compaction",
+            Self::Handoff => "handoff",
+            Self::AutoTitle => "auto_title",
+            Self::ChatSuggestions => "chat_suggestions",
+            Self::ComposerPrediction => "composer_prediction",
+            Self::Predict => "predict",
+            Self::MemoryDream => "memory_dream",
+            Self::Recommendations => "recommendations",
+            Self::LearningJudge => "learning_judge",
+            Self::AgentAutoRoute => "agent_auto_route",
+            Self::WorkflowPrompt => "workflow_prompt",
+            Self::Delegate => "delegate",
+            Self::AppModelStream => "app_model_stream",
+            Self::RetrievalExpansion => "retrieval_expansion",
+            Self::Plugin(_) => "plugin",
         }
     }
 
-    #[test]
-    fn bind_extracts_host_port_from_url() {
-        // Default URL has an explicit port → host:port preserved.
-        let bind = gateway_bind_from_url();
-        assert!(
-            bind.contains(':'),
-            "bind should contain host:port, got {bind}"
-        );
-    }
-
-    #[test]
-    fn explicit_local_llm_url_takes_precedence() {
-        // An operator-set LOCAL_LLM_URL must win over the active-engine mapping
-        // so a custom/external local server can be targeted.
-        let prev = std::env::var(ENV_LOCAL_LLM_URL).ok();
-        std::env::set_var(ENV_LOCAL_LLM_URL, "http://example.test:9999/v1");
-        assert_eq!(
-            local_engine_gateway_url().as_deref(),
-            Some("http://example.test:9999/v1")
-        );
-        match prev {
-            Some(v) => std::env::set_var(ENV_LOCAL_LLM_URL, v),
-            None => std::env::remove_var(ENV_LOCAL_LLM_URL),
-        }
-    }
-
-    #[test]
-    fn derived_llamacpp_url_requires_verified_sidecar_readiness() {
-        let expected = local_engine_url("llamacpp");
-        assert_eq!(
-            local_engine_gateway_url_with_state(None, Some("llamacpp".to_owned()), true, false,),
-            None,
-            "a persisted llama.cpp selection must not publish before readiness"
-        );
-        assert_eq!(
-            local_engine_gateway_url_with_state(None, Some("llamacpp".to_owned()), true, true,),
-            expected.clone()
-        );
-        assert_eq!(
-            local_engine_gateway_url_with_state(None, None, true, false),
-            None,
-            "the installed-engine fallback must also wait for readiness"
-        );
-        assert_eq!(
-            local_engine_gateway_url_with_state(None, Some("ollama".to_owned()), true, false),
-            local_engine_url("ollama"),
-            "other local engines keep their existing URL contract"
-        );
-        assert_eq!(
-            local_engine_gateway_url_with_state(
-                Some("http://127.0.0.1:9999/v1".to_owned()),
-                Some("llamacpp".to_owned()),
-                true,
-                false,
-            ),
-            Some("http://127.0.0.1:9999/v1".to_owned()),
-            "an explicit operator endpoint remains authoritative"
-        );
-    }
-
-    /// Snapshot + restore a set of env vars so a test that mutates process env
-    /// does not leak into the others (cargo runs tests in the same process).
-    struct EnvGuard {
-        saved: Vec<(&'static str, Option<String>)>,
-    }
-    impl EnvGuard {
-        fn capture(names: &[&'static str]) -> Self {
-            let saved = names.iter().map(|n| (*n, std::env::var(n).ok())).collect();
-            for n in names {
-                std::env::remove_var(n);
-            }
-            Self { saved }
-        }
-    }
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            for (n, v) in &self.saved {
-                match v {
-                    Some(val) => std::env::set_var(n, val),
-                    None => std::env::remove_var(n),
+    /// The `x-ryu-purpose` value, or `None` when it would not be a valid
+    /// identifier. A plugin id is lowercased, every character outside the
+    /// header charset becomes `-`, and the whole value is cut to
+    /// [`MAX_PURPOSE_LEN`]; an id that sanitizes to nothing sends no header.
+    pub fn header_value(&self) -> Option<String> {
+        let value = match self {
+            Self::Plugin(id) => {
+                let id: String = id
+                    .trim()
+                    .chars()
+                    .map(|c| {
+                        let c = c.to_ascii_lowercase();
+                        if is_purpose_char(c) {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect();
+                let id = id.trim_matches('-');
+                if id.is_empty() {
+                    return None;
                 }
+                let mut value = format!("plugin:{id}");
+                // Every char is ASCII after sanitizing, so a byte cut is safe.
+                value.truncate(MAX_PURPOSE_LEN);
+                value
             }
-        }
-    }
-
-    /// Serializes the credits tests that mutate process-global env vars. cargo
-    /// runs tests in one process and in parallel, so without this two of them can
-    /// race on the same vars between `EnvGuard::capture` and its `Drop` restore.
-    /// Poison-tolerant: a panicking test must not cascade-fail the rest.
-    static CREDITS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    fn lock_credits_env() -> std::sync::MutexGuard<'static, ()> {
-        CREDITS_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    const CREDITS_ENV: &[&str] = &[
-        ENV_CREDITS_ENABLED,
-        ENV_CREDITS_INTERNAL_SECRET,
-        ENV_CREDITS_URL,
-        ENV_CREDITS_WALLET_EMPTY_ACTION,
-        ENV_CREDITS_COST_PER_TOOL_CALL,
-        "RYU_CONTROL_PLANE_URL",
-        "RYU_SERVER_URL",
-    ];
-
-    #[test]
-    fn credits_env_absent_when_unconfigured() {
-        let _lock = lock_credits_env();
-        let _g = EnvGuard::capture(CREDITS_ENV);
-        // Nothing set → NOP, no vars injected (graceful degrade preserved).
-        assert!(credits_spawn_env().is_empty());
-        assert!(!credits_configured());
-
-        // Enabled but no secret → still inert (control plane would reject).
-        std::env::set_var(ENV_CREDITS_ENABLED, "true");
-        assert!(!credits_configured());
-        assert!(credits_spawn_env().is_empty());
-
-        // Secret but not enabled → still inert.
-        std::env::remove_var(ENV_CREDITS_ENABLED);
-        std::env::set_var(ENV_CREDITS_INTERNAL_SECRET, "shh");
-        assert!(!credits_configured());
-        assert!(credits_spawn_env().is_empty());
-    }
-
-    #[test]
-    fn credits_env_present_when_configured() {
-        let _lock = lock_credits_env();
-        let _g = EnvGuard::capture(CREDITS_ENV);
-        std::env::set_var(ENV_CREDITS_ENABLED, "1");
-        std::env::set_var(ENV_CREDITS_INTERNAL_SECRET, "  top-secret  ");
-        std::env::set_var("RYU_CONTROL_PLANE_URL", "https://cp.example.test");
-
-        assert!(credits_configured());
-        let env = credits_spawn_env();
-        let get = |k: &str| {
-            env.iter()
-                .find(|(name, _)| name == k)
-                .map(|(_, v)| v.as_str())
+            named => named.as_str().to_owned(),
         };
-
-        assert_eq!(get(ENV_CREDITS_ENABLED), Some("true"));
-        // Secret trimmed, never echoed elsewhere.
-        assert_eq!(get(ENV_CREDITS_INTERNAL_SECRET), Some("top-secret"));
-        // Markup pinned to 0 — margin is at deposit (B2).
-        assert_eq!(get("GATEWAY_CREDITS_MARKUP_BPS"), Some("0"));
-        // Per-tool-call cost defaults to the current standard Composio rate.
-        assert_eq!(get(ENV_CREDITS_COST_PER_TOOL_CALL), Some("300"));
-        // Wallet-empty action defaults to Stop.
-        assert_eq!(get(ENV_CREDITS_WALLET_EMPTY_ACTION), Some("stop"));
-        // Base derived from the control-plane URL + the `/api` mount.
-        assert_eq!(get(ENV_CREDITS_URL), Some("https://cp.example.test/api"));
+        is_valid_purpose(&value).then_some(value)
     }
 
-    #[test]
-    fn credits_base_url_resolution() {
-        let _lock = lock_credits_env();
-        let _g = EnvGuard::capture(CREDITS_ENV);
-
-        // Default local dev when nothing is set.
-        assert_eq!(credits_base_url(), "http://127.0.0.1:3000/api");
-
-        // RYU_SERVER_URL is the fallback.
-        std::env::set_var("RYU_SERVER_URL", "http://server.test:3000/");
-        assert_eq!(credits_base_url(), "http://server.test:3000/api");
-
-        // RYU_CONTROL_PLANE_URL wins over RYU_SERVER_URL.
-        std::env::set_var("RYU_CONTROL_PLANE_URL", "http://cp.test:3000");
-        assert_eq!(credits_base_url(), "http://cp.test:3000/api");
-
-        // An explicit GATEWAY_CREDITS_URL always wins, and an existing `/api`
-        // mount is not doubled.
-        std::env::set_var(ENV_CREDITS_URL, "http://explicit.test/api/");
-        assert_eq!(credits_base_url(), "http://explicit.test/api");
+    /// Whether the Gateway may queue this call behind interactive turns on a
+    /// busy local engine. This keeps the priority these calls already sent
+    /// (titles, suggestions, predictions, the routing classifier) and adds the
+    /// periodic jobs nobody waits on. Calls a user is watching for (`/btw`, the
+    /// advisor, compaction and handoff inside a turn, workflows, delegation,
+    /// app streams, plugin calls of unknown shape) stay interactive.
+    pub fn is_background(&self) -> bool {
+        matches!(
+            self,
+            Self::AutoTitle
+                | Self::ChatSuggestions
+                | Self::ComposerPrediction
+                | Self::AgentAutoRoute
+                | Self::MemoryDream
+                | Self::Recommendations
+                | Self::LearningJudge
+        )
     }
+}
 
-    #[test]
-    fn credits_wallet_empty_action_downgrade_passthrough() {
-        let _lock = lock_credits_env();
-        let _g = EnvGuard::capture(CREDITS_ENV);
-        std::env::set_var(ENV_CREDITS_ENABLED, "yes");
-        std::env::set_var(ENV_CREDITS_INTERNAL_SECRET, "s");
-        std::env::set_var(ENV_CREDITS_WALLET_EMPTY_ACTION, "Downgrade");
-        let env = credits_spawn_env();
-        let action = env
-            .iter()
-            .find(|(k, _)| k == ENV_CREDITS_WALLET_EMPTY_ACTION)
-            .map(|(_, v)| v.as_str());
-        assert_eq!(action, Some("downgrade"));
+fn is_purpose_char(c: char) -> bool {
+    matches!(c, 'a'..='z' | '0'..='9' | '_' | ':' | '.' | '@' | '/' | '-')
+}
+
+/// The shared `x-ryu-purpose` grammar: 1..=64 chars from `[a-z0-9_:.@/-]`.
+pub fn is_valid_purpose(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_PURPOSE_LEN && value.chars().all(is_purpose_char)
+}
+
+/// The attribution headers for one Gateway side-model request: the purpose and
+/// `background` priority for calls nobody is waiting on. `x-ryu-feature` is
+/// deliberately absent: it names the product surface for usage points, and a
+/// side call must not be counted as a chat or agent turn.
+///
+/// `x-ryu-session-id` is deliberately absent too, even when the call belongs to
+/// a chat. The Gateway keys per-session routing state on it (the smart
+/// router's decision cache and escalation streaks, the session budget, and
+/// provider cache affinity), so a small title or suggestions prompt carrying
+/// the chat's id would reset the chat's escalation streak, inherit or seed the
+/// chat's cached model, and pin the routing classifier's choice for the whole
+/// conversation.
+pub fn side_call_headers(purpose: &SidePurpose) -> Vec<(&'static str, String)> {
+    let mut headers = Vec::with_capacity(2);
+    if let Some(value) = purpose.header_value() {
+        headers.push((PURPOSE_HEADER, value));
     }
-
-    #[test]
-    fn credits_tool_call_cost_passthrough() {
-        // #496: an operator-provisioned per-tool-call (Composio) cost is forwarded
-        // to the gateway verbatim; a non-integer value falls back to "0" (free).
-        let _lock = lock_credits_env();
-        let _g = EnvGuard::capture(CREDITS_ENV);
-        std::env::set_var(ENV_CREDITS_ENABLED, "1");
-        std::env::set_var(ENV_CREDITS_INTERNAL_SECRET, "s");
-
-        std::env::set_var(ENV_CREDITS_COST_PER_TOOL_CALL, "1500");
-        let env = credits_spawn_env();
-        let cost = env
-            .iter()
-            .find(|(k, _)| k == ENV_CREDITS_COST_PER_TOOL_CALL)
-            .map(|(_, v)| v.as_str());
-        assert_eq!(cost, Some("1500"));
-
-        // Garbage → the safe standard rate, never propagated as an invalid value.
-        std::env::set_var(ENV_CREDITS_COST_PER_TOOL_CALL, "not-a-number");
-        let env = credits_spawn_env();
-        let cost = env
-            .iter()
-            .find(|(k, _)| k == ENV_CREDITS_COST_PER_TOOL_CALL)
-            .map(|(_, v)| v.as_str());
-        assert_eq!(cost, Some("300"));
+    if purpose.is_background() {
+        headers.push((PRIORITY_HEADER, "background".to_owned()));
     }
+    headers
+}
 
-    #[test]
-    fn managed_node_zero_setup_provider_keys_resolve_from_env() {
-        // A4 / #501: a headless managed node sets provider keys via env (never the
-        // desktop UI), and the resolvers must pick them up so the gateway spawn
-        // injects them with zero user setup. Pins the env-fallback contract both
-        // `gateway_spawn_env` blocks depend on.
-        let _lock = super::lock_managed_node_env();
-        let _g = EnvGuard::capture(&[
-            ENV_MANAGED_NODE,
-            "RYU_OPENROUTER_API_KEY",
-            "OPENROUTER_API_KEY",
-            "RYU_COMPOSIO_API_KEY",
-            "COMPOSIO_API_KEY",
-        ]);
-        std::env::set_var(ENV_MANAGED_NODE, "1");
-        std::env::set_var("RYU_OPENROUTER_API_KEY", "sk-or-managed");
-        std::env::set_var("RYU_COMPOSIO_API_KEY", "comp-managed");
-        // Clear any in-process preference cache a concurrent test may have set, so
-        // resolution falls through to the env vars this test controls.
-        crate::openrouter_auth::set_key("");
-        crate::composio_auth::set_key("");
-        assert!(managed_node());
-        assert_eq!(
-            crate::openrouter_auth::key().as_deref(),
-            Some("sk-or-managed")
-        );
-        assert_eq!(crate::composio_auth::key().as_deref(), Some("comp-managed"));
+/// Stamp [`side_call_headers`] onto a Gateway request.
+pub fn with_side_call_headers(
+    mut request: reqwest::RequestBuilder,
+    purpose: &SidePurpose,
+) -> reqwest::RequestBuilder {
+    for (name, value) in side_call_headers(purpose) {
+        request = request.header(name, value);
     }
+    request
+}
 
-    #[test]
-    fn managed_node_defaults_off_and_reads_env() {
-        let _lock = super::lock_managed_node_env();
-        let _g = EnvGuard::capture(&[ENV_MANAGED_NODE]);
-        // Unset → not managed.
-        assert!(!managed_node());
-        // Truthy values flip it on.
-        for v in ["1", "true", "yes", "YES", " True "] {
-            std::env::set_var(ENV_MANAGED_NODE, v);
-            assert!(managed_node(), "{v:?} should be managed");
-        }
-        // Anything else stays off.
-        std::env::set_var(ENV_MANAGED_NODE, "0");
-        assert!(!managed_node());
+/// Token counts reported for one side-model completion. A field is `None`
+/// when the provider did not report it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SideUsage {
+    pub prompt: Option<u64>,
+    pub completion: Option<u64>,
+    pub cache_read: Option<u64>,
+    pub cache_write: Option<u64>,
+}
+
+/// Read token usage from a non-streaming completion body. Accepts the whole
+/// response (`usage` plus llama.cpp's `timings`) or a bare usage object, and
+/// covers the OpenAI (`prompt_tokens`, `prompt_tokens_details.cached_tokens`),
+/// Anthropic (`input_tokens`, `cache_read_input_tokens`,
+/// `cache_creation_input_tokens`) and llama.cpp (`timings.prompt_n`,
+/// `predicted_n`, `cache_n`) shapes. The key order mirrors the chat stream's
+/// stats builder in `sidecar::adapters`, so both report the same numbers.
+pub fn parse_side_usage(body: &serde_json::Value) -> SideUsage {
+    use serde_json::Value;
+    let usage = body.get("usage").unwrap_or(body);
+    let timings = body.get("timings");
+    let top = |key: &str| usage.get(key).and_then(Value::as_u64);
+    let nested = |outer: &str, inner: &str| {
+        usage
+            .get(outer)
+            .and_then(|d| d.get(inner))
+            .and_then(Value::as_u64)
+    };
+    let timing = |key: &str| {
+        timings
+            .and_then(|t| t.get(key))
+            .and_then(Value::as_f64)
+            .map(|n| n as u64)
+    };
+    // llama.cpp counts prompt tokens reused from its KV cache as `cache_n`;
+    // `prompt_n` is only the part it had to evaluate.
+    let llama_cache = timing("cache_n");
+    SideUsage {
+        prompt: timing("prompt_n")
+            .map(|n| n + llama_cache.unwrap_or(0))
+            .or_else(|| top("prompt_tokens"))
+            .or_else(|| top("input_tokens")),
+        completion: timing("predicted_n")
+            .or_else(|| top("completion_tokens"))
+            .or_else(|| top("output_tokens")),
+        cache_read: nested("prompt_tokens_details", "cached_tokens")
+            .or_else(|| nested("input_tokens_details", "cached_tokens"))
+            .or_else(|| top("cached_tokens"))
+            .or_else(|| top("cache_read_input_tokens"))
+            .or(llama_cache),
+        cache_write: nested("prompt_tokens_details", "cache_write_tokens")
+            .or_else(|| nested("prompt_tokens_details", "cache_creation_input_tokens"))
+            .or_else(|| nested("input_tokens_details", "cache_write_tokens"))
+            .or_else(|| top("cache_write_tokens"))
+            .or_else(|| top("cache_creation_input_tokens")),
     }
+}
 
-    #[test]
-    fn unmanaged_gateway_requires_an_explicit_relay_token() {
-        // Manifest sidecars receive the Gateway relay credential at spawn. An
-        // externally managed/remote Gateway must therefore fail closed when the
-        // operator omitted that credential, while a validated token is accepted.
-        // Serialize both env domains because `remote_data_plane()` also reads the
-        // managed-node flag.
-        let _managed_lock = super::lock_managed_node_env();
-        let _gateway_lock = super::lock_gateway_env();
-        let _g = EnvGuard::capture(&[
-            ENV_GATEWAY_MANAGED,
-            ENV_GATEWAY_REMOTE,
-            ENV_MANAGED_NODE,
-            ENV_GATEWAY_TOKEN,
-        ]);
-        std::env::set_var(ENV_GATEWAY_MANAGED, "0");
-        std::env::set_var(ENV_GATEWAY_REMOTE, "0");
-        std::env::set_var(ENV_MANAGED_NODE, "0");
+/// Log a side call's token usage at debug level. The Gateway's audit row is
+/// the durable record (keyed by `x-ryu-purpose`); this is the Core-side trace
+/// for correlating it. Counts and the purpose only, never content.
+pub fn log_side_usage(purpose: &SidePurpose, model: &str, body: &serde_json::Value) {
+    let usage = parse_side_usage(body);
+    tracing::debug!(
+        purpose = purpose
+            .header_value()
+            .as_deref()
+            .unwrap_or(purpose.as_str()),
+        model,
+        prompt_tokens = usage.prompt,
+        completion_tokens = usage.completion,
+        cache_read_tokens = usage.cache_read,
+        cache_write_tokens = usage.cache_write,
+        "side-model usage"
+    );
+}
 
-        let err = gateway_bearer().expect_err("unmanaged Gateway must require a token");
-        assert!(
-            err.to_string().contains("requires RYU_GATEWAY_TOKEN"),
-            "unexpected error: {err}"
-        );
+#[cfg(test)]
+mod side_call_tests {
+    use super::*;
+    use serde_json::json;
 
-        let token = "gwrelay_gateway-test-token-20260917-please-do-not-use-outside-tests";
-        std::env::set_var(ENV_GATEWAY_TOKEN, token);
-        assert_eq!(gateway_bearer().expect("validated relay token"), token);
-    }
-
-    /// #447: the four gateway/sandbox policy plugins (compression / firewall /
-    /// routing / sandbox) round-trip through their on/off flag into the surface
-    /// the gateway actually reads. Three are gateway-spawn-env policies, so they
-    /// must appear in `gateway_spawn_env` when ON and vanish when OFF; the fourth
-    /// (sandbox) is Core-local, so it round-trips through `sandbox::is_enabled()`,
-    /// NOT the gateway env. This is the test that lets #447 close: every policy
-    /// `apply_policy` flips is observable end-to-end.
-    #[test]
-    fn policy_flags_roundtrip_into_their_surface() {
-        // These flip the process-global policy atomics (firewall / routing /
-        // headroom / sandbox); serialize against every other test that reads or
-        // writes them, and restore each to its prior value on exit.
-        let _flags = crate::sidecar::gateway_policy::lock_policy_flags();
-        let prev_firewall = crate::sidecar::gateway_policy::firewall_enabled();
-        let prev_routing = crate::sidecar::gateway_policy::routing_enabled();
-        let prev_headroom = crate::sidecar::headroom::is_enabled();
-        let prev_sandbox = crate::sidecar::mcp::sandbox::is_enabled();
-        // The three gateway-env policies. Capture their dev-seed env so a stray
-        // GATEWAY_* in the runner does not skew the OFF assertions.
-        let _g = EnvGuard::capture(&[
-            "GATEWAY_FIREWALL_ENABLED",
-            "GATEWAY_SMART_ROUTING_ENABLED",
-            "RYU_HEADROOM_ENABLED",
-            "GATEWAY_COMPRESSION_ENABLED",
-            // Sandbox toggles via this env var; restore it so the test leaves no
-            // residue (cargo runs all tests in one process).
-            "RYU_SANDBOX_DISABLED",
-        ]);
-        let has = |env: &[(String, String)], key: &str| env.iter().any(|(k, _)| k == key);
-
-        // ── ON: flip every flag the way apply_policy does, assert it lands. ──
-        crate::sidecar::gateway_policy::set_firewall_enabled(true);
-        crate::sidecar::gateway_policy::set_routing_enabled(true);
-        crate::sidecar::headroom::set_enabled(true);
-        crate::sidecar::mcp::sandbox::set_enabled(true);
-
-        let env_on = gateway_spawn_env();
-        assert!(
-            has(&env_on, "GATEWAY_FIREWALL_ENABLED"),
-            "firewall policy ON must inject GATEWAY_FIREWALL_ENABLED"
-        );
-        assert!(
-            has(&env_on, "GATEWAY_SMART_ROUTING_ENABLED"),
-            "routing policy ON must inject GATEWAY_SMART_ROUTING_ENABLED"
-        );
-        assert!(
-            has(&env_on, "GATEWAY_COMPRESSION_ENABLED"),
-            "compression policy ON must inject GATEWAY_COMPRESSION_ENABLED"
-        );
-        // Sandbox is Core-local — it round-trips through is_enabled, not the env.
-        assert!(
-            crate::sidecar::mcp::sandbox::is_enabled(),
-            "sandbox policy ON must flip sandbox::is_enabled()"
-        );
-
-        // ── OFF: every flag back down, every surface clears. ──
-        crate::sidecar::gateway_policy::set_firewall_enabled(false);
-        crate::sidecar::gateway_policy::set_routing_enabled(false);
-        crate::sidecar::headroom::set_enabled(false);
-        crate::sidecar::mcp::sandbox::set_enabled(false);
-
-        let env_off = gateway_spawn_env();
-        assert!(
-            !has(&env_off, "GATEWAY_FIREWALL_ENABLED"),
-            "firewall OFF must not inject the env"
-        );
-        assert!(
-            !has(&env_off, "GATEWAY_SMART_ROUTING_ENABLED"),
-            "routing OFF must not inject the env"
-        );
-        assert!(
-            !has(&env_off, "GATEWAY_COMPRESSION_ENABLED"),
-            "compression OFF must not inject the env"
-        );
-        assert!(
-            !crate::sidecar::mcp::sandbox::is_enabled(),
-            "sandbox OFF must flip sandbox::is_enabled() back"
-        );
-
-        // Restore the flags to their prior values so this test leaves no residue.
-        crate::sidecar::gateway_policy::set_firewall_enabled(prev_firewall);
-        crate::sidecar::gateway_policy::set_routing_enabled(prev_routing);
-        crate::sidecar::headroom::set_enabled(prev_headroom);
-        crate::sidecar::mcp::sandbox::set_enabled(prev_sandbox);
-    }
-
-    // ── Classify tier (llamacpp-classify) ───────────────────────────────────
-
-    /// The gateway can only register the `classify` provider if Core tells it where
-    /// the tier lives, and it must be told UNCONDITIONALLY: the spawn env is
-    /// computed once, so gating on install state would hide a later-installed
-    /// classifier until a respawn.
-    #[test]
-    fn spawn_env_always_publishes_the_classify_tier_url() {
-        // Two locks, both required: `lock_policy_flags` because `gateway_spawn_env`
-        // folds the policy atomics in, and the crate-wide gateway-env lock because
-        // this asserts an exact URL *value* — a stricter contract on process-global
-        // env than the presence-only policy test above, and `RYU_CLASSIFY_LLM_URL`
-        // is a gateway env var this module owns.
-        let _flags = crate::sidecar::gateway_policy::lock_policy_flags();
-        let _env = super::lock_gateway_env();
-        let _g = EnvGuard::capture(&["RYU_CLASSIFY_LLM_URL"]);
-        let env = gateway_spawn_env();
-        let url = env
-            .iter()
-            .find(|(k, _)| k == "RYU_CLASSIFY_LLM_URL")
-            .map(|(_, v)| v.clone())
-            .expect("gateway spawn env must always carry RYU_CLASSIFY_LLM_URL");
-        // Profile-aware loopback port + the OpenAI-compatible `/v1` suffix the
-        // gateway's provider base URLs expect.
-        assert_eq!(
-            url,
-            format!(
-                "http://127.0.0.1:{}/v1",
-                crate::sidecar::providers::llamacpp::classify::classify_port()
-            )
-        );
-        // And it must NOT be the resident chat engine's URL — pointing the classify
-        // tier at `local` is exactly the bug this unit fixes.
-        assert!(!url.contains(&format!(":{}/", crate::profile::port(8080))));
-        // The URL alone is not enough: the gateway also needs the resolved model ID,
-        // or its inspector default stays an independent literal and a registry swap
-        // produces an unroutable config.
-        let model = env
-            .iter()
-            .find(|(k, _)| k == "RYU_CLASSIFY_MODEL_ID")
-            .map(|(_, v)| v.clone())
-            .expect("gateway spawn env must carry RYU_CLASSIFY_MODEL_ID beside the URL");
-        // It must be the id the SIDECAR serves, resolved from the same registry entry
-        // that picks its GGUF — not a second literal, which is the whole bug.
-        assert_eq!(
-            model,
-            crate::registry::ModelRegistry::from_env()
-                .local_classifier_model
-                .id
-        );
-        assert!(!model.trim().is_empty(), "a blank id would break the seed");
-        // And Core's start predicate must agree with what it published, or Core
-        // starts a tier for one id while the gateway routes another.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "inspector": { "enabled": true, "model": model } } }),
-            &model
-        ));
-    }
-
-    #[test]
-    fn spawn_env_pins_audit_store_to_the_active_core_data_dir() {
-        let _env = super::lock_gateway_env();
-        let env = gateway_spawn_env();
-        let path = env
-            .iter()
-            .find(|(key, _)| key == "RYU_AUDIT_DB_PATH")
-            .map(|(_, value)| value.as_str())
-            .expect("gateway spawn env must carry the active audit path");
-        assert_eq!(
-            path,
-            crate::paths::ryu_dir().join("audit.db").to_string_lossy()
-        );
-    }
-
-    /// An operator-set `RYU_CLASSIFY_LLM_URL` points the tier at an external small
-    /// model and must win over the built-in loopback default.
-    #[test]
-    fn explicit_classify_url_env_wins() {
-        // Same lock as the test above — these two are the only writers of
-        // `RYU_CLASSIFY_LLM_URL`, so they must serialize against each other.
-        let _env = super::lock_gateway_env();
-        let _g = EnvGuard::capture(&["RYU_CLASSIFY_LLM_URL"]);
-        std::env::set_var("RYU_CLASSIFY_LLM_URL", "http://example.test:1234/v1");
-        assert_eq!(classify_gateway_url(), "http://example.test:1234/v1");
-    }
-
-    /// The composition `maybe_start_classify_tier`'s second spend gate performs: an
-    /// operator who repoints the tier at an EXTERNAL small model must not still pay for
-    /// a local 300-400 MB llama-server nobody dials.
-    ///
-    /// This is only sound because the gateway obeys the variable over its own
-    /// `[providers.classify]` (`apps/gateway/src/config.rs`, env-wins); the
-    /// `cores_published_classify_url_wins_the_file_table` test in that crate is the
-    /// other half. Asserted through the real `classify_gateway_url` rather than a
-    /// literal, so a change to how Core resolves the URL breaks this too.
-    #[test]
-    fn external_classify_url_blocks_the_local_lazy_start() {
-        let _env = super::lock_gateway_env();
-        let _g = EnvGuard::capture(&["RYU_CLASSIFY_LLM_URL"]);
-
-        std::env::set_var(
-            "RYU_CLASSIFY_LLM_URL",
-            "http://small-model.internal:9999/v1",
-        );
-        assert!(
-            !url_targets_this_machine(&classify_gateway_url()),
-            "an external classify endpoint must not spend local RAM on a tier it \
-             replaced"
-        );
-
-        // A loopback override is still local: the operator swapped the port, not the box.
-        std::env::set_var("RYU_CLASSIFY_LLM_URL", "http://127.0.0.1:18083/v1");
-        assert!(url_targets_this_machine(&classify_gateway_url()));
-
-        // …and the computed default (no override) is loopback by construction, so the
-        // ordinary node is unaffected by the gate.
-        std::env::remove_var("RYU_CLASSIFY_LLM_URL");
-        assert!(
-            url_targets_this_machine(&classify_gateway_url()),
-            "the default must still start the tier — a gate that blocked the common \
-             case would silently disable the guardrail everywhere"
-        );
-    }
-
-    /// The half-configuration detector, over the four states it has to separate.
-    ///
-    /// Pure, so no env and no registry: `(url, id)` in, verdict out. The loopback row
-    /// is the one that matters most — an ordinary node must never be told its default
-    /// configuration is suspect.
-    #[test]
-    fn a_repointed_classify_url_with_the_default_model_id_is_half_configured() {
-        let default_id = crate::registry::DEFAULT_LOCAL_CLASSIFIER_MODEL_ID;
-
-        // Repointed endpoint, id left at the registry default: the gateway will ask
-        // that endpoint for OUR id. Indistinguishable from a misconfiguration.
-        assert!(half_configured_external_classify_tier(
-            "http://small-model.internal:9999/v1",
-            default_id
-        ));
-        // Whitespace must not smuggle the default id past the comparison — the
-        // gateway seeds its route from a trimmed id.
-        assert!(half_configured_external_classify_tier(
-            "http://small-model.internal:9999/v1",
-            &format!("  {default_id}  ")
-        ));
-        // Both halves moved: a deliberate, complete external tier. Silence is correct.
-        assert!(!half_configured_external_classify_tier(
-            "http://small-model.internal:9999/v1",
-            "some-other-tiny-model"
-        ));
-        // Local target — the ordinary node, and a loopback port swap. The tier gets
-        // started, so there is nothing to warn about in either.
-        assert!(!half_configured_external_classify_tier(
-            &format!(
-                "http://127.0.0.1:{}/v1",
-                crate::sidecar::providers::llamacpp::classify::classify_port()
-            ),
-            default_id
-        ));
-        assert!(!half_configured_external_classify_tier(
-            "http://localhost:18083/v1",
-            default_id
-        ));
-        // An unparseable override cannot be proven local either, so it lands in the
-        // same reported bucket. Documented on the predicate rather than special-cased:
-        // it is also a misconfiguration.
-        assert!(half_configured_external_classify_tier(
-            "not a url",
-            default_id
-        ));
-    }
-
-    /// The regression this pairs with: spend gate 2 must not log a half-configuration
-    /// past at `debug!`.
-    ///
-    /// Gate 2 stopped the local sidecar from accidentally answering for the registry
-    /// id at a repointed endpoint. That was the ONLY thing making the half-configured
-    /// state visible, and `/api/sidecar/status` reports the skipped tier exactly like a
-    /// lazy tier nobody has needed yet. So the skip has to leave a queryable record —
-    /// which this drives through the real `maybe_start_classify_tier`, not through the
-    /// predicate, because the recording is the behaviour under test.
-    #[test]
-    fn a_half_configured_classify_tier_records_why_the_start_was_skipped() {
-        use crate::sidecar::providers::llamacpp::classify as classify_sidecar;
-
-        // Both globals: the env (this reads `RYU_CLASSIFY_LLM_URL` + `RYU_GATEWAY_URL`)
-        // and the record itself, whose other test writer lives in `classify.rs`.
-        let _env = super::lock_gateway_env();
-        let _rec = classify_sidecar::lock_lazy_start_record();
-        let _g = EnvGuard::capture(&["RYU_CLASSIFY_LLM_URL", "RYU_GATEWAY_URL"]);
-
-        // Gate 1 must pass, or gate 2 is never reached: keep the gateway on this box.
-        std::env::set_var("RYU_GATEWAY_URL", "http://127.0.0.1:8088");
-        // A patch that genuinely selects the tier (inspector on, naming the classify
-        // model), so the skip below is the gate's decision and not the predicate's.
-        let patch = serde_json::json!({
-            "firewall": { "inspector": { "enabled": true, "model": classify_model_id() } }
-        });
-
-        classify_sidecar::clear_lazy_start_failure_for_test();
-        std::env::set_var(
-            "RYU_CLASSIFY_LLM_URL",
-            "http://small-model.internal:9999/v1",
-        );
-        maybe_start_classify_tier(&patch);
-        let recorded = classify_sidecar::lazy_start_failure_reason_for_test()
-            .expect("a half-configured external tier must leave a reason behind");
-        // The reason has to name both halves and the fix, or it is just another
-        // "something is wrong" line.
-        assert!(recorded.contains("http://small-model.internal:9999/v1"));
-        assert!(recorded.contains(&classify_model_id()));
-        assert!(recorded.contains("RYU_LOCAL_CLASSIFIER_MODEL_ID"));
-
-        // The ordinary node must stay quiet: a local target is not a skip at all, so
-        // nothing is recorded (the start itself then no-ops in a test process, which
-        // has no registered sidecar manager). Asserted against a freshly cleared slot
-        // so it cannot pass on the previous write.
-        //
-        // The other quiet case — a fully configured EXTERNAL tier — is covered by
-        // `a_repointed_classify_url_with_the_default_model_id_is_half_configured`
-        // rather than here, deliberately: driving it needs
-        // `RYU_LOCAL_CLASSIFIER_MODEL_ID`, whose only serializing lock is private to
-        // `registry::tests`, so setting it here would race that module's own
-        // override test in the shared test process.
-        classify_sidecar::clear_lazy_start_failure_for_test();
-        std::env::set_var("RYU_CLASSIFY_LLM_URL", "http://127.0.0.1:18083/v1");
-        maybe_start_classify_tier(&patch);
-        assert_eq!(
-            classify_sidecar::lazy_start_failure_reason_for_test(),
-            None,
-            "a local classify target is not a skip and must not be reported as one"
-        );
-
-        // Leave the slot as we found it for whatever runs next.
-        classify_sidecar::clear_lazy_start_failure_for_test();
-    }
-
-    /// The lazy-start predicate must fire for ALL THREE consumers of the classify
-    /// tier and for both ways of naming it (the configured id, and the router's
-    /// builtin `gemma-3-270m` prefix — matched case-insensitively, mirroring
-    /// `RoutingTables::route`) — and only when that consumer is switched ON.
-    #[test]
-    fn classify_predicate_fires_for_every_enabled_consumer() {
-        let id = crate::registry::DEFAULT_LOCAL_CLASSIFIER_MODEL_ID;
-
-        // 1. Firewall inspector selection, inspector enabled.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "enabled": true, "inspector": { "enabled": true, "model": id } } }),
-            id
-        ));
-        // The inspector is independent of the OUTER firewall switch (`pipeline` gates
-        // it on `inspector.enabled` alone), so an armed inspector inside a disarmed
-        // firewall still fires — requiring `firewall.enabled` would be a miss.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "enabled": false, "inspector": { "enabled": true, "model": id } } }),
-            id
-        ));
-        // 2. Smart-routing classifier selection — the exact patch shape
-        // `build_routing_patch` produces (top-level `routing` → `smart_routing`).
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "routing": { "smart_routing": { "enabled": true, "classifier_model": id } } }),
-            id
-        ));
-        // Prefix + case: the router lowercases before matching builtin prefixes, so
-        // Core must too or it would decline to start a tier the gateway will use.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "routing": { "smart_routing": { "enabled": true, "classifier_model": "GEMMA-3-270M-IT" } } }),
-            id
-        ));
-        // 3. An LLM-judge evaluator binding borrows `inspector.model` REGARDLESS of
-        // `inspector.enabled`, so an enabled binding is its own arm. Without it, the
-        // feature gate would leave judge users with a permanently cold tier.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": {
-                "inspector": { "enabled": false, "model": id },
-                "evaluators": [{ "id": "toxicity", "enabled": true }],
-            } }),
-            id
-        ));
-        // A custom (registry-swapped) classifier id with no gemma prefix still fires,
-        // because the predicate also matches the configured id itself.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "inspector": { "enabled": true, "model": " my-tiny-classifier " } } }),
-            "my-tiny-classifier"
-        ));
-    }
-
-    /// The blank/absent-model contract for BOTH fields that can name the classify
-    /// tier. Pinned here because neither is true by anything in this crate: both hold
-    /// only by virtue of a serde attribute in `apps/gateway/src/config.rs` that runs
-    /// in another PROCESS, downstream of this predicate.
-    ///
-    /// * `InspectorConfig::model` → `deserialize_with = de_inspector_model`, which
-    ///   maps a blank to `classify_model_id()`, plus a field default and a manual
-    ///   `Default` impl that both fill the same id. Blank therefore MEANS "the
-    ///   classify tier" — so declining here (what the code did before) is what left
-    ///   the guardrail silently dead for a user who followed the dialog's own advice
-    ///   to leave the box empty.
-    /// * `SmartRoutingConfig::classifier_model` → the SAME pair as of the P1-2 fix
-    ///   (`default = "default_classifier_model"`, `deserialize_with =
-    ///   "de_classifier_model"`). It used to be a plain `#[serde(default)] String`
-    ///   documented "Empty ⇒ smart routing is inert", and this test used to assert
-    ///   the OPPOSITE for it.
-    ///
-    /// **The assertion flipped, and that is the point of the rename.** While the
-    /// field resolved blanks and this arm did not, Core declined to start the tier
-    /// and the gateway dialled it anyway — connection refused, fail open, nothing
-    /// warned. Identical in shape to the inspector bug above, reintroduced through
-    /// the other field. A green test asserting the old rationale is what would have
-    /// hidden it, so the rationale is pinned to the CURRENT serde attributes and
-    /// fails loudly if either field stops resolving.
-    #[test]
-    fn a_blank_model_on_either_field_selects_the_classify_tier() {
-        let id = crate::registry::DEFAULT_LOCAL_CLASSIFIER_MODEL_ID;
-
-        for blank in ["", "   "] {
-            // The shape that reaches `PUT /api/gateway/config` from any client that
-            // does not pre-resolve the field: the inspector switched on with the
-            // Model box left empty. (The current desktop resolves it client-side in
-            // `withResolvedInspectorModels`; this endpoint is a generic proxy, so
-            // Core cannot depend on that.)
-            assert!(
-                patch_selects_classify_tier(
-                    &serde_json::json!({ "firewall": {
-                        "enabled": true,
-                        "inspector": { "enabled": true, "model": blank },
-                    } }),
-                    id
-                ),
-                "a blank inspector model ({blank:?}) resolves to the classify id in the \
-                 gateway, so Core must start the tier"
-            );
-            // …and now the same rule, not the mirror of it: `de_classifier_model`
-            // resolves this blank to the classify id too, so declining here would
-            // leave the gateway dialling a tier Core never started.
-            assert!(
-                patch_selects_classify_tier(
-                    &serde_json::json!({ "routing": {
-                        "smart_routing": { "enabled": true, "classifier_model": blank },
-                    } }),
-                    id
-                ),
-                "a blank classifier_model ({blank:?}) resolves to the classify id in the \
-                 gateway, so Core must start the tier"
-            );
-        }
-
-        // An ABSENT `classifier_model` inside a PRESENT, ENABLED `smart_routing` hits
-        // `#[serde(default = "default_classifier_model")]` — the same resolved id.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "routing": { "smart_routing": { "enabled": true } } }),
-            id
-        ));
-        // The feature gate still holds: smart routing that this patch does not switch
-        // ON never arms, however its model reads. This is what keeps the widening from
-        // reopening the spawn-on-every-routing-push regression.
-        assert!(!patch_selects_classify_tier(
-            &serde_json::json!({ "routing": {
-                "smart_routing": { "enabled": false, "classifier_model": "" },
-            } }),
-            id
-        ));
-
-        // An ABSENT `model` inside a PRESENT `inspector` hits
-        // `#[serde(default = "default_inspector_model")]` — same resolved id.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "inspector": { "enabled": true } } }),
-            id
-        ));
-        // An absent `inspector` OBJECT resolves through `FirewallConfig`'s
-        // `#[serde(default)] pub inspector` → the manual `Default for InspectorConfig`,
-        // which also fills the classify id. So a judge binding still gets the tier
-        // even when the patch names no inspector at all.
-        assert!(patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": {
-                "evaluators": [{ "id": "llm_as_a_judge", "enabled": true }],
-            } }),
-            id
-        ));
-        // A non-string `model` is NOT a selection: `de_inspector_model` begins with
-        // `String::deserialize`, so the gateway rejects the whole push and nothing
-        // ever dials the tier.
-        assert!(!patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "inspector": { "enabled": true, "model": 7 } } }),
-            id
-        ));
-        // Blank still needs the consuming feature ON — the flag gate is what stops a
-        // "Log detections" checkbox save from spawning a resident llama-server.
-        assert!(!patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": {
-                "log_detections": true,
-                "inspector": { "enabled": false, "model": "" },
-                "evaluators": [],
-            } }),
-            id
-        ));
-    }
-
-    /// The regression this gate exists for: the gateway resolves a blank
-    /// `inspector.model` to the classify id, so EVERY firewall push names the
-    /// classifier. Selecting the model must not be enough — the consuming feature has
-    /// to be on, or a "Log detections" checkbox save (and enabling *or disabling* the
-    /// firewall plugin, whose patch is sourced from the live config) spawns a 241 MB
-    /// llama-server that never exits.
-    #[test]
-    fn classify_predicate_declines_when_the_consuming_feature_is_off() {
-        let id = crate::registry::DEFAULT_LOCAL_CLASSIFIER_MODEL_ID;
-
-        // The firewall-plugin toggle shape, both directions: the live firewall section
-        // carries the resolved classify id in `inspector.model` while the inspector
-        // itself is off, and no evaluator binding is enabled. That this is what a
-        // fresh node's `FirewallConfig` actually serializes to is pinned in the crate
-        // that owns the default, by
-        // `ryu-gateway`'s `default_firewall_section_selects_nothing_for_cores_lazy_start`.
-        for firewall_enabled in [true, false] {
-            let patch = serde_json::json!({ "firewall": {
-                "enabled": firewall_enabled,
-                "log_detections": true,
-                "inspector": { "enabled": false, "model": id },
-                "evaluators": [{ "id": "toxicity", "enabled": false }],
-            } });
-            assert!(
-                !patch_selects_classify_tier(&patch, id),
-                "firewall.enabled={firewall_enabled} with the inspector off must not start the tier"
-            );
-        }
-        // Smart routing configured but not switched on.
-        assert!(!patch_selects_classify_tier(
-            &serde_json::json!({ "routing": { "smart_routing": { "enabled": false, "classifier_model": id } } }),
-            id
-        ));
-        // An ABSENT flag reads as off. Every real writer sends whole sections, so a
-        // missing flag means "this patch does not turn the consumer on"; treating it
-        // as enabled would restore the spawn-on-any-push bug.
-        assert!(!patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "inspector": { "model": id } } }),
-            id
-        ));
-        assert!(!patch_selects_classify_tier(
-            &serde_json::json!({ "routing": { "smart_routing": { "classifier_model": id } } }),
-            id
-        ));
-        // An empty evaluator list is not "an enabled binding".
-        assert!(!patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "inspector": { "model": id }, "evaluators": [] } }),
-            id
-        ));
-    }
-
-    /// The host-locality test behind both classify spend gates: pushing a classify
-    /// selection at a REMOTE gateway must not start a local sidecar (~300-400 MB here
-    /// for a server nothing dials, while the remote gateway's own loopback `classify`
-    /// provider stays empty either way), and neither must a classify URL pointing at an
-    /// external small model.
-    #[test]
-    fn classify_start_is_local_only() {
-        for local in [
-            "http://127.0.0.1:7981",
-            "http://127.0.0.1:8981/",
-            "http://localhost:7981",
-            "http://LOCALHOST:7981",
-            "http://[::1]:7981",
-            "http://127.5.5.5:7981",
-            // The gateway's own default BIND address still means "this box".
-            "http://0.0.0.0:7981",
-        ] {
-            assert!(
-                url_targets_this_machine(local),
-                "{local} is this machine — the lazy start must run"
-            );
-        }
-        for remote in [
-            "http://gateway.internal:7981",
-            "https://gw.example.com",
-            "http://10.0.0.7:7981",
-            "http://192.168.1.20:7981",
-            "http://[2606:4700::1]:7981",
-            // Unparseable ⇒ cannot prove local ⇒ do not spend the RAM.
-            "not a url",
-            "",
-        ] {
-            assert!(
-                !url_targets_this_machine(remote),
-                "{remote} is not this machine — the remote node must start its own tier"
-            );
-        }
-    }
-
-    /// The negative that earns its keep: the DEFAULT local chat model must not trip
-    /// the predicate. A prefix slip there would start a second llama-server on every
-    /// routing config push.
-    #[test]
-    fn classify_predicate_ignores_the_default_chat_model_and_empty_patches() {
-        let id = crate::registry::DEFAULT_LOCAL_CLASSIFIER_MODEL_ID;
-        for model in [
-            crate::registry::DEFAULT_LOCAL_CHAT_MODEL_ID, // gemma-4-E2B-it-Q4_K_M
-            "gemma-3-27b-it",                             // same family, 100x the size
-            "gpt-4o-mini",
-        ] {
-            // Both consumers ENABLED, so the model id is the only discriminator left
-            // — this is a model-matching assertion, not a feature-gate one.
-            let patch = serde_json::json!({
-                "firewall": { "inspector": { "enabled": true, "model": model } },
-                "routing": { "smart_routing": { "enabled": true, "classifier_model": model } },
-            });
-            assert!(
-                !patch_selects_classify_tier(&patch, id),
-                "{model:?} must not select the classify tier"
-            );
-        }
-        // A BLANK model is deliberately NOT in the loop above: it is a SELECTION on
-        // both fields rather than a non-match, so it belongs to
-        // `a_blank_model_on_either_field_selects_the_classify_tier`, not here.
-        // Patches that carry neither key at all (the common case: a firewall
-        // pattern-pack toggle) never fire.
-        assert!(!patch_selects_classify_tier(
-            &serde_json::json!({ "firewall": { "enabled": true, "custom_patterns": [] } }),
-            id
-        ));
-        assert!(!patch_selects_classify_tier(&serde_json::json!({}), id));
-    }
-
-    // ── Command-approval scan gate (check_exec_scan) ─────────────────────────
-
-    /// Serializes the scan-gate tests: they mutate the process-global
-    /// `RYU_EXEC_APPROVAL_MODE` / `RYU_GATEWAY_URL` / `RYU_ALLOW_GATEWAY_FALLBACK`
-    /// env vars. These are the SAME vars other modules' tests touch, so this
-    /// delegates to the one crate-wide [`super::GATEWAY_ENV_TEST_LOCK`] rather
-    /// than a second parallel lock (two locks on one global do not serialize).
-    fn lock_scan_env() -> std::sync::MutexGuard<'static, ()> {
-        super::lock_gateway_env()
-    }
-
-    const SCAN_ENV: &[&str] = &[
-        ENV_EXEC_APPROVAL_MODE,
-        ENV_GATEWAY_URL,
-        ENV_ALLOW_GATEWAY_FALLBACK,
-        "RYU_ALLOW_PERMANENT_DELETE",
+    const NAMED: [(SidePurpose, &str); 16] = [
+        (SidePurpose::Btw, "btw"),
+        (SidePurpose::Advisor, "advisor"),
+        (SidePurpose::Compaction, "compaction"),
+        (SidePurpose::Handoff, "handoff"),
+        (SidePurpose::AutoTitle, "auto_title"),
+        (SidePurpose::ChatSuggestions, "chat_suggestions"),
+        (SidePurpose::ComposerPrediction, "composer_prediction"),
+        (SidePurpose::Predict, "predict"),
+        (SidePurpose::MemoryDream, "memory_dream"),
+        (SidePurpose::Recommendations, "recommendations"),
+        (SidePurpose::LearningJudge, "learning_judge"),
+        (SidePurpose::AgentAutoRoute, "agent_auto_route"),
+        (SidePurpose::WorkflowPrompt, "workflow_prompt"),
+        (SidePurpose::Delegate, "delegate"),
+        (SidePurpose::AppModelStream, "app_model_stream"),
+        (SidePurpose::RetrievalExpansion, "retrieval_expansion"),
     ];
 
-    #[test]
-    fn exec_scan_verdict_mapping() {
-        // The pure decision mapper: allow → Allow, approval_required → Approval,
-        // deny / anything else → fail-closed Deny.
-        assert_eq!(map_scan_decision("allow", ""), ExecScanOutcome::Allow);
-        assert_eq!(
-            map_scan_decision("approval_required", "needs sign-off"),
-            ExecScanOutcome::ApprovalRequired("needs sign-off".to_owned())
-        );
-        assert_eq!(
-            map_scan_decision("deny", "blocked by firewall"),
-            ExecScanOutcome::Deny("blocked by firewall".to_owned())
-        );
-        // Unknown verdict is fail-closed (Deny), never a silent allow.
-        assert!(matches!(
-            map_scan_decision("wat", ""),
-            ExecScanOutcome::Deny(_)
-        ));
-        // Empty reasons get sensible defaults.
-        assert!(matches!(
-            map_scan_decision("approval_required", ""),
-            ExecScanOutcome::ApprovalRequired(_)
-        ));
+    fn header<'a>(headers: &'a [(&'static str, String)], name: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.as_str())
     }
 
     #[test]
-    fn exec_scan_off_mode_reads_env() {
-        let _lock = lock_scan_env();
-        let _g = EnvGuard::capture(SCAN_ENV);
-        // Unset → ARMED (the default-on posture; only explicit `off` disarms).
-        std::env::remove_var(ENV_EXEC_APPROVAL_MODE);
-        assert!(exec_approval_enabled(), "unset must arm the gate");
-        // "off" (any case, trimmed) → disabled.
-        for v in ["off", "OFF", " Off "] {
-            std::env::set_var(ENV_EXEC_APPROVAL_MODE, v);
-            assert!(!exec_approval_enabled(), "{v:?} should disable the gate");
+    fn every_named_purpose_sends_its_snake_case_name() {
+        for (purpose, name) in NAMED {
+            assert_eq!(purpose.as_str(), name);
+            assert!(
+                is_valid_purpose(name),
+                "{name} must satisfy the shared grammar"
+            );
+            let headers = side_call_headers(&purpose);
+            assert_eq!(header(&headers, PURPOSE_HEADER), Some(name));
+            assert_eq!(
+                header(&headers, PRIORITY_HEADER),
+                purpose.is_background().then_some("background"),
+                "{name} priority"
+            );
+            assert!(header(&headers, "x-ryu-feature").is_none());
         }
-        // Any other value → enabled.
-        for v in ["on", "enforce", "prompt", ""] {
-            std::env::set_var(ENV_EXEC_APPROVAL_MODE, v);
-            assert!(exec_approval_enabled(), "{v:?} should enable the gate");
-        }
-    }
-
-    #[tokio::test]
-    async fn exec_scan_off_mode_short_circuits_without_network() {
-        let _lock = lock_scan_env();
-        let _g = EnvGuard::capture(SCAN_ENV);
-        // Gate explicitly disarmed + a guaranteed-unreachable gateway + NO
-        // fallback. If the off-mode path touched the network it would fail-closed
-        // to Deny; an Allow proves it short-circuited before any HTTP call.
-        std::env::set_var(ENV_EXEC_APPROVAL_MODE, "off");
-        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
-        std::env::remove_var(ENV_ALLOW_GATEWAY_FALLBACK);
-        let out = check_exec_scan("deno", "echo hi", Some("sess"), Some("ryu")).await;
-        assert_eq!(out, ExecScanOutcome::Allow);
-    }
-
-    #[tokio::test]
-    async fn permanent_deletion_is_denied_before_gateway_fallback() {
-        let _lock = lock_scan_env();
-        let _g = EnvGuard::capture(SCAN_ENV);
-        std::env::set_var(ENV_EXEC_APPROVAL_MODE, "off");
-        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
-        std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
-        let out = check_exec_scan("acp", "rm -rf ./disposable", None, Some("ryu")).await;
-        assert!(
-            matches!(&out, ExecScanOutcome::Deny(reason) if reason.contains("permanent file deletion")),
-            "permanent deletion must stay denied even with approval and gateway fallbacks: {out:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn legacy_permanent_deletion_policy_change_is_ignored() {
-        let _lock = lock_scan_env();
-        let _g = EnvGuard::capture(SCAN_ENV);
-        std::env::set_var(ENV_EXEC_APPROVAL_MODE, "off");
-        // A legacy deployment may still carry this variable. It must never
-        // weaken the deletion block after an upgrade.
-        std::env::set_var("RYU_ALLOW_PERMANENT_DELETE", "1");
-        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
-        std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
-        let out = check_exec_scan("acp", "rm -rf ./disposable", None, Some("ryu")).await;
-        assert!(matches!(
-            out,
-            ExecScanOutcome::Deny(reason) if reason.contains("permanent file deletion")
-        ));
-    }
-
-    #[tokio::test]
-    async fn exec_scan_default_is_armed_and_fail_closed() {
-        let _lock = lock_scan_env();
-        let _g = EnvGuard::capture(SCAN_ENV);
-        // The load-bearing default: with NOTHING configured, the scan runs and an
-        // unreachable gateway fails closed — a default install's headless runs
-        // cannot execute unscanned commands.
-        std::env::remove_var(ENV_EXEC_APPROVAL_MODE);
-        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
-        std::env::remove_var(ENV_ALLOW_GATEWAY_FALLBACK);
-        let out = check_exec_scan("deno", "echo hi", None, None).await;
-        assert!(
-            matches!(out, ExecScanOutcome::Deny(_)),
-            "default-armed gate must fail closed on an unreachable gateway, got {out:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn exec_scan_unreachable_denies_unless_fallback() {
-        let _lock = lock_scan_env();
-        let _g = EnvGuard::capture(SCAN_ENV);
-        // Gate enabled, gateway unreachable, no fallback → fail-closed Deny.
-        std::env::set_var(ENV_EXEC_APPROVAL_MODE, "enforce");
-        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
-        std::env::remove_var(ENV_ALLOW_GATEWAY_FALLBACK);
-        let denied = check_exec_scan("deno", "echo hi", None, None).await;
-        assert!(
-            matches!(denied, ExecScanOutcome::Deny(_)),
-            "unreachable gateway must fail closed, got {denied:?}"
-        );
-
-        // Same, but with the fallback opt-in → Allow.
-        std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
-        let allowed = check_exec_scan("deno", "echo hi", None, None).await;
-        assert_eq!(allowed, ExecScanOutcome::Allow);
     }
 
     #[test]
-    fn widget_budget_response_requires_a_boolean_allowed_verdict() {
-        for body in [
-            serde_json::json!({}),
-            serde_json::json!({ "allowed": null }),
-            serde_json::json!({ "allowed": "true" }),
-        ] {
-            assert!(matches!(
-                parse_widget_budget_response(body),
-                ExecBudgetOutcome::Deny(_)
-            ));
-        }
-        assert_eq!(
-            parse_widget_budget_response(serde_json::json!({ "allowed": true })),
-            ExecBudgetOutcome::Allow
-        );
+    fn background_is_limited_to_calls_nobody_waits_on() {
+        assert!(SidePurpose::AutoTitle.is_background());
+        assert!(SidePurpose::MemoryDream.is_background());
+        assert!(!SidePurpose::Btw.is_background());
+        assert!(!SidePurpose::Compaction.is_background());
+        assert!(!SidePurpose::Plugin("@ryu/browser".into()).is_background());
     }
 
     #[test]
-    fn exec_budget_response_requires_a_boolean_allowed_verdict() {
-        for body in [
-            serde_json::json!({}),
-            serde_json::json!({ "allowed": null }),
-            serde_json::json!({ "allowed": "true" }),
-        ] {
-            assert!(matches!(
-                parse_exec_budget_response(body),
-                ExecBudgetOutcome::Deny(_)
-            ));
+    fn side_calls_never_carry_the_session_header() {
+        // The Gateway keys smart-router and budget state on `x-ryu-session-id`;
+        // a side call must not touch the chat's routing state.
+        let plugin = SidePurpose::Plugin("@ryu/browser".into());
+        for (purpose, _) in NAMED.into_iter().chain([(plugin, "plugin")]) {
+            let headers = side_call_headers(&purpose);
+            assert!(header(&headers, "x-ryu-session-id").is_none());
         }
+    }
+
+    #[test]
+    fn plugin_ids_are_sanitized_truncated_or_dropped() {
+        let value = |id: &str| SidePurpose::Plugin(id.to_owned()).header_value();
         assert_eq!(
-            parse_exec_budget_response(serde_json::json!({ "allowed": true })),
-            ExecBudgetOutcome::Allow
+            value("@ryu/browser").as_deref(),
+            Some("plugin:@ryu/browser")
         );
+        assert_eq!(
+            value("  My Plugin!v2 ").as_deref(),
+            Some("plugin:my-plugin-v2")
+        );
+        assert_eq!(value("Ünïcode").as_deref(), Some("plugin:n-code"));
+
+        let long = value(&"a".repeat(200)).expect("long id still renders");
+        assert_eq!(long.len(), MAX_PURPOSE_LEN);
+        assert!(long.starts_with("plugin:aaa"));
+        assert!(is_valid_purpose(&long));
+
+        for id in ["", "   ", "!!!", "\u{1F600}"] {
+            assert_eq!(value(id), None, "{id:?}");
+            let headers = side_call_headers(&SidePurpose::Plugin(id.to_owned()));
+            assert!(header(&headers, PURPOSE_HEADER).is_none());
+        }
     }
 
-    #[tokio::test]
-    async fn widget_budget_ignores_gateway_fallback_on_unreachable_gateway() {
-        let _lock = lock_gateway_env();
-        let _env = EnvGuard::capture(&[ENV_GATEWAY_URL, ENV_ALLOW_GATEWAY_FALLBACK]);
-        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
-        std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
-
-        assert!(matches!(
-            check_widget_followup("widget-instance", "com.example.widget").await,
-            ExecBudgetOutcome::Deny(_)
-        ));
+    #[test]
+    fn purpose_grammar_rejects_out_of_charset_and_overlong_values() {
+        assert!(!is_valid_purpose(""));
+        assert!(!is_valid_purpose("Auto_Title"));
+        assert!(!is_valid_purpose("a b"));
+        assert!(!is_valid_purpose(&"a".repeat(MAX_PURPOSE_LEN + 1)));
+        assert!(is_valid_purpose(&"a".repeat(MAX_PURPOSE_LEN)));
     }
 
-    /// The config-push transport must PUT `/v1/config` and forward the gateway
-    /// bearer (the master key on a remote gateway) so a remote/unmanaged gateway
-    /// toggle is actually authorized — the item-1 "verify the master-key auth is
-    /// sent" requirement. Drives a oneshot listener so no process env is touched.
-    #[tokio::test]
-    async fn config_request_puts_config_path_and_forwards_bearer() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind oneshot listener");
-        let addr = listener.local_addr().unwrap();
-
-        let server = tokio::spawn(async move {
-            let (mut sock, _) = listener.accept().await.unwrap();
-            // Read until we have the full request (header block + JSON body). One
-            // small localhost request usually arrives at once, but loop with a
-            // short timeout so a split header/body still assembles.
-            let mut raw = Vec::new();
-            let mut buf = [0u8; 2048];
-            loop {
-                match tokio::time::timeout(
-                    std::time::Duration::from_millis(500),
-                    sock.read(&mut buf),
-                )
-                .await
-                {
-                    Ok(Ok(0)) => break,
-                    Ok(Ok(n)) => {
-                        raw.extend_from_slice(&buf[..n]);
-                        // Stop once the body token has arrived.
-                        if String::from_utf8_lossy(&raw).contains("\"firewall\"") {
-                            break;
-                        }
-                    }
-                    _ => break,
-                }
+    #[test]
+    fn parses_openai_usage() {
+        let body = json!({
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 30,
+                "prompt_tokens_details": { "cached_tokens": 100, "cache_write_tokens": 20 }
             }
-            let _ = sock
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
-                .await;
-            String::from_utf8_lossy(&raw).into_owned()
         });
-
-        let client = reqwest::Client::new();
-        let base = format!("http://{addr}");
-        let patch = serde_json::json!({ "firewall": { "enabled": true } });
-        let resp = gateway_config_request(&client, &base, Some("secret-master-key"), &patch)
-            .send()
-            .await
-            .expect("request sent to oneshot listener");
-        assert!(resp.status().is_success());
-
-        let raw = server.await.unwrap();
-        let lower = raw.to_ascii_lowercase();
-        assert!(
-            lower.contains("put /v1/config"),
-            "must target PUT /v1/config, got:\n{raw}"
-        );
-        assert!(
-            lower.contains("authorization: bearer secret-master-key"),
-            "must forward the master-key bearer, got:\n{raw}"
-        );
-        assert!(
-            raw.contains("\"firewall\""),
-            "must carry the config patch body, got:\n{raw}"
+        assert_eq!(
+            parse_side_usage(&body),
+            SideUsage {
+                prompt: Some(120),
+                completion: Some(30),
+                cache_read: Some(100),
+                cache_write: Some(20),
+            }
         );
     }
 
-    /// The live-config READ (the read-modify-write source for a firewall toggle)
-    /// must GET `/v1/config` and forward the gateway bearer, so a remote gateway's
-    /// live firewall section is actually readable (else the toggle fail-closed
-    /// no-ops remotely). Mirror of the PUT test, driven off a oneshot listener.
-    #[tokio::test]
-    async fn config_get_request_targets_config_path_and_forwards_bearer() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind oneshot listener");
-        let addr = listener.local_addr().unwrap();
-
-        let server = tokio::spawn(async move {
-            let (mut sock, _) = listener.accept().await.unwrap();
-            let mut raw = Vec::new();
-            let mut buf = [0u8; 2048];
-            loop {
-                match tokio::time::timeout(
-                    std::time::Duration::from_millis(500),
-                    sock.read(&mut buf),
-                )
-                .await
-                {
-                    Ok(Ok(0)) => break,
-                    Ok(Ok(n)) => {
-                        raw.extend_from_slice(&buf[..n]);
-                        // A GET has no body; stop as soon as the header block ends.
-                        if String::from_utf8_lossy(&raw).contains("\r\n\r\n") {
-                            break;
-                        }
-                    }
-                    _ => break,
-                }
-            }
-            let body = b"{\"firewall\":{\"enabled\":true,\"policy\":\"block\"}}";
-            let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
-            let _ = sock.write_all(head.as_bytes()).await;
-            let _ = sock.write_all(body).await;
-            String::from_utf8_lossy(&raw).into_owned()
+    #[test]
+    fn parses_anthropic_usage() {
+        let usage = json!({
+            "input_tokens": 50,
+            "output_tokens": 12,
+            "cache_read_input_tokens": 40,
+            "cache_creation_input_tokens": 8
         });
-
-        let client = reqwest::Client::new();
-        let base = format!("http://{addr}");
-        let resp = gateway_config_get_request(&client, &base, Some("secret-master-key"))
-            .send()
-            .await
-            .expect("request sent to oneshot listener");
-        assert!(resp.status().is_success());
-        let cfg: serde_json::Value = resp.json().await.unwrap();
-        assert_eq!(cfg["firewall"]["policy"], serde_json::json!("block"));
-
-        let raw = server.await.unwrap();
-        let lower = raw.to_ascii_lowercase();
-        assert!(
-            lower.contains("get /v1/config"),
-            "must target GET /v1/config, got:\n{raw}"
+        let expected = SideUsage {
+            prompt: Some(50),
+            completion: Some(12),
+            cache_read: Some(40),
+            cache_write: Some(8),
+        };
+        assert_eq!(
+            parse_side_usage(&json!({ "usage": usage.clone() })),
+            expected
         );
-        assert!(
-            lower.contains("authorization: bearer secret-master-key"),
-            "must forward the master-key bearer, got:\n{raw}"
+        assert_eq!(parse_side_usage(&usage), expected);
+    }
+
+    #[test]
+    fn parses_llama_timings_over_usage() {
+        let body = json!({
+            "usage": { "prompt_tokens": 1, "completion_tokens": 1 },
+            "timings": { "prompt_n": 10.0, "predicted_n": 7.0, "cache_n": 90.0 }
+        });
+        assert_eq!(
+            parse_side_usage(&body),
+            SideUsage {
+                prompt: Some(100),
+                completion: Some(7),
+                cache_read: Some(90),
+                cache_write: None,
+            }
+        );
+    }
+
+    #[test]
+    fn missing_usage_is_all_none() {
+        assert_eq!(
+            parse_side_usage(&json!({ "choices": [] })),
+            SideUsage::default()
         );
     }
 }
 
 #[cfg(test)]
-mod managed_readiness_tests {
+mod provider_apply_transport_tests {
     use super::*;
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode},
-        response::IntoResponse,
-        routing::any,
-        Router,
-    };
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
+    use axum::{http::HeaderMap, routing::post, Json, Router};
+    use ryu_gw_credentials::{ProviderApplyErrorCode as Code, ProviderApplyOutcome as Outcome};
 
-    async fn readiness_fixture(
-        forged_address: bool,
-    ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let requests_with_bearer = Arc::new(AtomicUsize::new(0));
-        let observed = Arc::clone(&requests_with_bearer);
-        let app = Router::new().fallback(any(move |request: Request<Body>| {
-            let observed = Arc::clone(&observed);
-            async move {
-                let bearer = request.headers().get("authorization").and_then(|header| header.to_str().ok()).unwrap_or("");
-                if !bearer.is_empty() { observed.fetch_add(1, Ordering::SeqCst); }
-                let json = |value: serde_json::Value| axum::Json(value).into_response();
-                match request.uri().path() {
-                    "/v1/auth/readiness" => {
-                        let nonce = request.uri().query().unwrap_or("").strip_prefix("nonce=").unwrap_or("");
-                        let mut proof_address = address;
-                        if forged_address { proof_address.set_port(address.port().saturating_add(1)); }
-                        let proof = ryu_gw_credentials::ReadinessProof::sign(ryu_gw_credentials::Readiness {
-                            protocol: "ryu-gateway-readiness-v1".into(), version: env!("CARGO_PKG_VERSION").into(), nonce: nonce.into(),
-                            listener: proof_address, require_auth: true,
-                            inference_keys: vec![ryu_gw_credentials::fingerprint("relay")],
-                            core_keys: vec![ryu_gw_credentials::fingerprint("core")],
-                        }, "admin").unwrap();
-                        json(serde_json::to_value(proof).unwrap())
+    fn revision() -> ryu_gw_credentials::ConfigRevision {
+        ryu_gw_credentials::ConfigRevision::parse(&"a".repeat(64)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn private_transport_sends_only_revision_and_binds_auth_and_receipt() {
+        let revision = revision();
+        let receipt = Outcome::Applied {
+            requested_revision: revision.clone(),
+            applied_revision: revision.clone(),
+            epoch: ryu_gw_credentials::ProviderRuntimeEpoch {
+                boot: uuid::Uuid::new_v4(),
+                sequence: 2,
+            },
+        };
+        let expected = receipt.clone();
+        let app = Router::new().route(
+            "/v1/config/providers/apply",
+            post(
+                move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
+                    let receipt = receipt.clone();
+                    async move {
+                        assert_eq!(headers["authorization"], "Bearer apply-admin-test");
+                        assert_eq!(body.as_object().unwrap().len(), 1);
+                        assert_eq!(body["revision"], receipt.requested_revision().as_str());
+                        Json(receipt)
                     }
-                    "/v1/config" if bearer == "Bearer admin" => json(serde_json::json!({"auth":{"require_auth":true}})),
-                    "/v1/auth/status" if bearer == "Bearer relay" || bearer == "Bearer core" => json(serde_json::json!({"admin":false,"trustedForwarder":bearer == "Bearer core"})),
-                    _ => StatusCode::UNAUTHORIZED.into_response(),
-                }
-            }
-        }));
-        let task = tokio::spawn(async move {
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        (format!("http://{address}"), requests_with_bearer, task)
-    }
-
-    #[tokio::test]
-    async fn managed_readiness_accepts_expected_listener_and_roles() {
-        let (url, bearers, task) = readiness_fixture(false).await;
-        let result = verify_managed_gateway(&url, "admin", "relay", "core").await;
-        task.abort();
-        result.unwrap();
-        assert_eq!(bearers.load(Ordering::SeqCst), 4);
-    }
-
-    #[tokio::test]
-    async fn managed_readiness_rejects_forwarded_or_fake_proof_before_sending_bearers() {
-        let (url, bearers, task) = readiness_fixture(true).await;
-        assert!(verify_managed_gateway(&url, "admin", "relay", "core")
-            .await
-            .is_err());
-        task.abort();
-        assert_eq!(bearers.load(Ordering::SeqCst), 0);
-        let (url, bearers, task) = readiness_fixture(false).await;
-        assert!(
-            verify_managed_gateway(&url, "different-admin", "relay", "core")
-                .await
-                .is_err()
+        assert_eq!(
+            send_provider_revision(&base, "apply-admin-test", &revision).await,
+            expected
         );
-        task.abort();
-        assert_eq!(bearers.load(Ordering::SeqCst), 0);
+        assert!(matches!(
+            send_provider_revision(
+                &base.replace("127.0.0.1", "localhost"),
+                "apply-admin-test",
+                &revision
+            )
+            .await,
+            Outcome::Applied { .. }
+        ));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn mismatched_or_oversized_receipts_fail_without_echoing_material() {
+        let revision = revision();
+        let bad = serde_json::json!({"status":"applied","requestedRevision":revision,"appliedRevision":"b".repeat(64),"epoch":{"boot":uuid::Uuid::new_v4(),"sequence":1}});
+        let app = Router::new().route(
+            "/v1/config/providers/apply",
+            post(move || {
+                let bad = bad.clone();
+                async move { Json(bad) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        assert!(matches!(
+            send_provider_revision(&base, "apply-admin-test", &revision).await,
+            Outcome::Failed {
+                code: Code::UnexpectedResponse,
+                ..
+            }
+        ));
+        server.abort();
+        let app = Router::new().route(
+            "/v1/config/providers/apply",
+            post(|| async { "private-material".repeat(2048) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let outcome = send_provider_revision(&base, "apply-admin-test", &revision).await;
+        assert!(matches!(
+            outcome,
+            Outcome::Failed {
+                code: Code::UnexpectedResponse,
+                ..
+            }
+        ));
+        assert!(!serde_json::to_string(&outcome)
+            .unwrap()
+            .contains("private-material"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn transport_refuses_remote_destination_and_redirect_replay() {
+        let revision = revision();
+        assert!(matches!(
+            send_provider_revision("https://example.invalid", "apply-admin-test", &revision).await,
+            Outcome::Failed {
+                code: Code::Transport,
+                ..
+            }
+        ));
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sink = Router::new().route(
+            "/sink",
+            post({
+                let calls = calls.clone();
+                move || {
+                    calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    async { "unexpected" }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination = format!("http://{}/sink", listener.local_addr().unwrap());
+        let sink_server = tokio::spawn(async move {
+            axum::serve(listener, sink).await.unwrap();
+        });
+        let app = Router::new().route(
+            "/v1/config/providers/apply",
+            post(move || {
+                let destination = destination.clone();
+                async move {
+                    (
+                        axum::http::StatusCode::TEMPORARY_REDIRECT,
+                        [(axum::http::header::LOCATION, destination)],
+                        "redirect",
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let source_server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        assert!(matches!(
+            send_provider_revision(&base, "apply-admin-test", &revision).await,
+            Outcome::Failed {
+                code: Code::UnexpectedResponse,
+                ..
+            }
+        ));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        source_server.abort();
+        sink_server.abort();
     }
 }
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod managed_readiness_tests;

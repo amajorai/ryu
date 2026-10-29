@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/components/gateway/DefaultsSection.tsx",
+    "src/components/gateway/DefaultsSection.consumer.native-http.test.tsx",
+    "src/hooks/useNodeDefaultModel.ts",
+    "src/components/agents/AgentEvalsView.tsx"
+  ]
+}

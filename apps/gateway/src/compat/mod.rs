@@ -22,3 +22,5 @@
 
 pub mod anthropic;
 pub mod gemini;
+pub mod responses;
+pub mod responses_tools;

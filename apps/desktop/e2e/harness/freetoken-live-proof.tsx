@@ -6,11 +6,12 @@ import { MemoryRouter } from "react-router-dom";
 import EnginesCatalogSection from "../../src/components/store/EnginesCatalogSection.tsx";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import "../../src/index.css";
+import { consumeProofClientToken } from "./proof-client-token.ts";
 
 const node = {
 	name: "FreeToken verification",
 	url: window.location.origin,
-	token: null,
+	token: consumeProofClientToken(),
 };
 useNodeStore.setState({
 	nodes: [node],

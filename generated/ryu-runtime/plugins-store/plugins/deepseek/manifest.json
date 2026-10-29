@@ -1,0 +1,181 @@
+{
+  "tags": ["search", "web", "extract", "fetch"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/deepseek",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/deepseek",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/deepseek",
+  "name": "DeepSeek Search",
+  "version": "0.1.14",
+  "stability": "experimental",
+  "description": "Web search and page fetch via the DeepSeek Search / Fetch API (https://api-docs.deepseek.com/guides/search), powered by DeepSeek's in-house search engine and exposed as two declarative HTTP tools. Provides the swappable `web.search` and `web.extract` layers, so selecting it in the layer picker re-points the stable `web.search` / `web.extract` tools at DeepSeek without changing what agents call. Billed per successful request; requires a BYOK DeepSeek API key.",
+  "icon": "radar-01",
+  "iconUrl": "https://www.deepseek.com/favicon.ico",
+  "iconPadding": "md",
+  "iconDither": { "from": 228, "to": "transparent", "direction": "down" },
+  "tagline": "DeepSeek's own search engine, built for models",
+  "keywords": ["search", "web", "extract", "fetch", "deepseek"],
+  "category": "Search",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": {
+    "ryu": ">=0.1.0"
+  },
+  "runnables": [
+    {
+      "id": "tool-deepseek-search",
+      "name": "DeepSeek Search",
+      "kind": "tool",
+      "config": {
+        "slug": "deepseek.search",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://api.deepseek.com/v1/tools/search",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_DEEPSEEK_API_KEY"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "body_defaults": {
+          "count": 10
+        },
+        "description": "Web search on DeepSeek's own engine. Returns reranked results with a title, URL, short snippet, a longer model-readable summary, a 0-3 rerank_score, a 0-4 authority tier, and the publication date. The query accepts site:, -site:, \"phrase\", -term, lang:, after: and before: operators. Billed per successful request. Requires RYU_DEEPSEEK_API_KEY.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The search query, 1-128 characters. Supports site:, -site:, \"exact phrase\", -term, lang:zh,en, after:YYYY-MM-DD and before:YYYY-MM-DD operators.",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "count": {
+              "type": "integer",
+              "description": "Number of results to return (default 10).",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "ori_question": {
+              "type": "string",
+              "description": "The user's original question, 1-128 characters, used to improve ranking.",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "need_content": {
+              "type": "boolean",
+              "description": "Also return each page's full content (default false, which leaves content empty)."
+            }
+          },
+          "required": ["query"]
+        }
+      }
+    },
+    {
+      "id": "tool-deepseek-fetch",
+      "name": "DeepSeek Fetch",
+      "kind": "tool",
+      "config": {
+        "slug": "deepseek.fetch",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://api.deepseek.com/v1/tools/fetch",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_DEEPSEEK_API_KEY"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Fetch one web page and return its title and content as markdown. Success depends on the target site's availability and access policy. Billed per successful request. Requires RYU_DEEPSEEK_API_KEY.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The http(s) URL of the page to fetch, without embedded credentials (up to 8192 characters).",
+              "maxLength": 8192
+            }
+          },
+          "required": ["url"]
+        }
+      }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "web.search",
+      "version": "1.0.0",
+      "title": "Search",
+      "selectable": true,
+      "tools": {
+        "web.search": {
+          "tool": "deepseek.search",
+          "args": {
+            "limit": "count"
+          },
+          "arg_clamp": {
+            "limit": {
+              "min": 1,
+              "max": 50
+            }
+          },
+          "response": {
+            "results": "results",
+            "fields": {
+              "title": "title",
+              "url": "url",
+              "snippet": "summary",
+              "score": "rerank_score",
+              "published": "date"
+            }
+          }
+        }
+      }
+    },
+    {
+      "capability": "web.extract",
+      "version": "1.0.0",
+      "title": "Extract",
+      "selectable": true,
+      "tools": {
+        "web.extract": {
+          "tool": "deepseek.fetch",
+          "args": {
+            "format": ""
+          },
+          "response": {
+            "fields": {
+              "title": "title",
+              "content": "content"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:api.deepseek.com"],
+  "contributes": {
+    "settings_tabs": [
+      {
+        "id": "deepseek.settings",
+        "title": "DeepSeek Search",
+        "scope": "node",
+        "fields": [
+          {
+            "type": "secret",
+            "pref_key": "RYU_DEEPSEEK_API_KEY",
+            "label": "DeepSeek API key",
+            "description": "Create a key at https://platform.deepseek.com/api_keys and paste it here. Search and fetch are billed per successful request against your DeepSeek balance. Stored encrypted on this node and never shown again — re-paste to change it. Without a key the DeepSeek tools stay installed but return nothing, so `web.search` / `web.extract` fall back to whichever other provider you select."
+          }
+        ]
+      }
+    ]
+  }
+}

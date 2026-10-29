@@ -1,6 +1,57 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
+import {
+	bindingBodyObservationSchema,
+	bindingRequestsSchema,
+} from "./node-binding-proof.contracts.ts";
+
+async function readRequests(page: import("@playwright/test").Page) {
+	return bindingRequestsSchema.parse(
+		await page.evaluate(() => {
+			const fixture = window.__nodeBindingProof;
+			if (!fixture) {
+				throw new Error("Node organization binding fixture is not installed");
+			}
+			return fixture.requests();
+		})
+	);
+}
+async function expectEnrollment(
+	page: import("@playwright/test").Page,
+	name = "My Ryu node"
+) {
+	const requests = await readRequests(page);
+	const enrollment = requests.filter(
+		(request) =>
+			request.method === "POST" &&
+			(request.path === "/api/fleet/enroll" ||
+				request.path.endsWith("/nodes/enrollment-tokens"))
+	);
+	expect(enrollment).toHaveLength(2);
+	expect(enrollment[0]).toEqual({
+		authorization: "Bearer proof-session",
+		query: "",
+		body: { kind: "byod", name },
+		method: "POST",
+		path: "/api/control-plane/orgs/org-acme/nodes/enrollment-tokens",
+	});
+	expect(enrollment[1]).toMatchObject({
+		body: { token: `rfe_${"a".repeat(64)}` },
+		method: "POST",
+		path: "/api/fleet/enroll",
+	});
+	expect(
+		Object.keys(bindingBodyObservationSchema.parse(enrollment[1]?.body)).sort()
+	).toEqual(["controlPlaneUrl", "token"]);
+	expect(
+		requests.filter(
+			(request) =>
+				request.path === "/api/fleet/status" && request.method === "GET"
+		).length
+	).toBeGreaterThanOrEqual(3);
+}
+
 const STORY_URL = "/node-organization-binding-proof.html";
 
 test.describe.configure({ timeout: 120_000 });
@@ -24,8 +75,23 @@ test("binds the active Core and proves the saved organization after reload", asy
 	await page.getByRole("combobox", { name: "Organization" }).click();
 	await page.getByRole("option", { name: "Acme Research" }).click();
 	await expect(page.getByText("One secure enrollment")).toBeVisible();
+	const nodeName = page.getByLabel("Node name");
+	await expect(nodeName).toHaveAttribute("maxlength", "128");
+	await nodeName.fill("   ");
+	await expect(page.getByText("Enter a name for this node.")).toBeVisible();
+	await expect(page.getByRole("button", { name: "Bind node" })).toBeDisabled();
+	expect(
+		(await readRequests(page)).filter(
+			(request) =>
+				request.method === "POST" &&
+				(request.path === "/api/fleet/enroll" ||
+					request.path.endsWith("/nodes/enrollment-tokens"))
+		)
+	).toEqual([]);
+	await nodeName.fill("  Coverage research node  ");
 	await page.getByRole("button", { name: "Bind node" }).click();
 	await expect(page.getByText("Managed inference ready")).toBeVisible();
+	await expectEnrollment(page, "Coverage research node");
 
 	await page.reload();
 	await expect(
@@ -62,6 +128,14 @@ test("shows a read-only explanation without a binding action", async ({
 	await expect(page.getByText("Read-only access")).toBeVisible();
 	await expect(page.getByText(/gateway\.configure/)).toBeVisible();
 	await expect(page.getByRole("button", { name: "Bind node" })).toBeDisabled();
+	expect(
+		(await readRequests(page)).filter(
+			(request) =>
+				request.method === "POST" &&
+				(request.path === "/api/fleet/enroll" ||
+					request.path.endsWith("/nodes/enrollment-tokens"))
+		)
+	).toEqual([]);
 });
 
 test("shows a permission error and recovers through retry", async ({
@@ -73,6 +147,18 @@ test("shows a permission error and recovers through retry", async ({
 	await expect(page.getByText("Could not check access")).toBeVisible();
 	await page.getByRole("button", { name: "Retry access check" }).click();
 	await expect(page.getByText("One secure enrollment")).toBeVisible();
+	const permissionReads = (await readRequests(page)).filter(
+		(request) => request.path === "/api/control-plane/me/permissions"
+	);
+	expect(permissionReads).toHaveLength(2);
+	expect(
+		permissionReads.every((request) => request.query === "?orgId=org-acme")
+	).toBe(true);
+	expect(
+		permissionReads.every(
+			(request) => request.authorization === "Bearer proof-session"
+		)
+	).toBe(true);
 });
 
 test("refreshes status when the enroll response is lost after Core saves", async ({
@@ -83,6 +169,7 @@ test("refreshes status when the enroll response is lost after Core saves", async
 	await page.getByRole("option", { name: "Acme Research" }).click();
 	await page.getByRole("button", { name: "Bind node" }).click();
 	await expect(page.getByText("Managed inference ready")).toBeVisible();
+	await expectEnrollment(page);
 	await expect(page.getByTestId("bound-organization")).toHaveText(
 		"Acme Research"
 	);

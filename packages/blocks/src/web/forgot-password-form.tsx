@@ -80,7 +80,7 @@ export default function ForgotPasswordForm({
 								aria-invalid={Boolean(visibleEmailError)}
 								autoComplete="email"
 								autoFocus
-								className="h-16 border-0 bg-muted shadow-none"
+								className="h-16"
 								id="email"
 								inputMode="email"
 								name="email"
@@ -91,6 +91,7 @@ export default function ForgotPasswordForm({
 								placeholder="Email Address"
 								type="email"
 								value={email}
+								variant="muted"
 							/>
 							{visibleEmailError ? (
 								<FieldError
@@ -104,15 +105,15 @@ export default function ForgotPasswordForm({
 					{captcha}
 
 					<Button className="w-full" disabled={loading} size="lg" type="submit">
-						{loading ? "Sending..." : "Send reset code"}
+						{loading ? "Sending…" : "Send reset code"}
 					</Button>
 				</form>
 
 				<div className="flex flex-col gap-4 text-center">
 					<Button
-						className="mx-auto text-muted-foreground"
+						className="mx-auto"
 						onClick={onBackToSignIn}
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						Back to sign in
 					</Button>

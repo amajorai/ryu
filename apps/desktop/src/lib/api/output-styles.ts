@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/output-styles.ts
 //
 // Typed client for Core's output-styles API (`/api/output-styles/*`, served by the
@@ -121,11 +122,12 @@ export interface OutputStyleSelection {
 export async function listOutputStyles(
 	target: ApiTarget
 ): Promise<OutputStyleList> {
-	const json = await request<{
-		forced?: string | null;
-		selected?: string | null;
-		styles?: OutputStyleSummary[];
-	}>(target, "/api/output-styles");
+	const json = await request(
+		target,
+		"/api/output-styles",
+		undefined,
+		listOutputStylesResponseSchema
+	);
 	return {
 		styles: json.styles ?? [],
 		selected: json.selected ?? null,
@@ -138,9 +140,11 @@ export async function getOutputStyle(
 	target: ApiTarget,
 	id: string
 ): Promise<OutputStyleRecord> {
-	const json = await request<{ style: OutputStyleRecord }>(
+	const json = await request(
 		target,
-		`/api/output-styles/${encodeURIComponent(id)}`
+		`/api/output-styles/${encodeURIComponent(id)}`,
+		undefined,
+		getOutputStyleResponseSchema
 	);
 	return json.style;
 }
@@ -150,9 +154,11 @@ export function getOutputStyleSource(
 	target: ApiTarget,
 	id: string
 ): Promise<OutputStyleFile> {
-	return request<OutputStyleFile>(
+	return request(
 		target,
-		`/api/output-styles/${encodeURIComponent(id)}/source`
+		`/api/output-styles/${encodeURIComponent(id)}/source`,
+		undefined,
+		outputStyleFileResponseSchema
 	);
 }
 
@@ -162,10 +168,11 @@ export async function createOutputStyle(
 	target: ApiTarget,
 	draft: OutputStyleDraft
 ): Promise<OutputStyleWriteResult> {
-	const json = await request<Omit<OutputStyleWriteResult, "forked">>(
+	const json = await request(
 		target,
 		"/api/output-styles",
-		{ method: "POST", body: draft }
+		{ method: "POST", body: draft },
+		omitResponseSchema
 	);
 	// A create has nothing to fork FROM; normalized here so callers can treat both
 	// write paths as one shape.
@@ -180,10 +187,11 @@ export async function updateOutputStyle(
 	id: string,
 	draft: OutputStyleDraft
 ): Promise<OutputStyleWriteResult> {
-	const json = await request<Partial<OutputStyleWriteResult>>(
+	const json = await request(
 		target,
 		`/api/output-styles/${encodeURIComponent(id)}`,
-		{ method: "PUT", body: draft }
+		{ method: "PUT", body: draft },
+		partialResponseSchema
 	);
 	return {
 		id: json.id ?? id,
@@ -200,10 +208,11 @@ export async function deleteOutputStyle(
 	target: ApiTarget,
 	id: string
 ): Promise<boolean> {
-	const json = await request<{ deleted?: boolean }>(
+	const json = await request(
 		target,
 		`/api/output-styles/${encodeURIComponent(id)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		deleteOutputStyleResponseSchema
 	);
 	return json.deleted ?? false;
 }
@@ -220,12 +229,107 @@ export async function selectOutputStyle(
 	target: ApiTarget,
 	styleId: string | null
 ): Promise<OutputStyleSelection> {
-	const json = await request<{
-		forced?: string | null;
-		selected?: string | null;
-	}>(target, "/api/output-styles/select", {
-		method: "POST",
-		body: { style_id: styleId },
-	});
+	const json = await request(
+		target,
+		"/api/output-styles/select",
+		{
+			method: "POST",
+			body: { style_id: styleId },
+		},
+		selectOutputStyleResponseSchema
+	);
 	return { selected: json.selected ?? null, forced: json.forced ?? null };
 }
+
+const outputStyleSummaryResponseSchema = z
+	.object({
+		active: z.boolean(),
+		description: z.union([z.null(), z.string()]),
+		editable: z.boolean(),
+		forced: z.boolean(),
+		id: z.string(),
+		keep_coding_instructions: z.boolean(),
+		name: z.string(),
+		source: z.union([
+			z.literal("user"),
+			z.literal("builtin"),
+			z.literal("plugin"),
+			z.literal("project"),
+			z.literal("managed"),
+		]),
+	})
+	.passthrough();
+
+const listOutputStylesResponseSchema = z
+	.object({
+		forced: z.union([z.null(), z.string()]).optional(),
+		selected: z.union([z.null(), z.string()]).optional(),
+		styles: z.array(outputStyleSummaryResponseSchema).optional(),
+	})
+	.passthrough();
+
+const outputStyleRecordResponseSchema = z
+	.object({
+		body: z.string(),
+		description: z.union([z.null(), z.string()]),
+		force_for_plugin: z.boolean(),
+		id: z.string(),
+		keep_coding_instructions: z.boolean(),
+		name: z.string(),
+		path: z.union([z.null(), z.string()]),
+		source: z.union([
+			z.literal("user"),
+			z.literal("builtin"),
+			z.literal("plugin"),
+			z.literal("project"),
+			z.literal("managed"),
+		]),
+	})
+	.passthrough();
+
+const getOutputStyleResponseSchema = z
+	.object({ style: outputStyleRecordResponseSchema })
+	.passthrough();
+
+const outputStyleFileResponseSchema = z
+	.object({
+		body: z.string(),
+		description: z.union([z.null(), z.string()]),
+		editable: z.boolean(),
+		id: z.string(),
+		keep_coding_instructions: z.boolean(),
+		name: z.string(),
+		raw: z.string(),
+		source: z.union([
+			z.literal("user"),
+			z.literal("builtin"),
+			z.literal("plugin"),
+			z.literal("project"),
+			z.literal("managed"),
+		]),
+	})
+	.passthrough();
+
+const omitResponseSchema = z
+	.object({ path: z.string(), id: z.string(), raw: z.string() })
+	.passthrough();
+
+const partialResponseSchema = z
+	.object({
+		forked: z.boolean().optional(),
+		id: z.string().optional(),
+		path: z.string().optional(),
+		raw: z.string().optional(),
+	})
+	.passthrough();
+
+const deleteOutputStyleResponseSchema = z
+	.object({ deleted: z.boolean().optional() })
+	.passthrough();
+
+const selectOutputStyleResponseSchema = z
+	.object({
+		forced: z.union([z.null(), z.string()]).optional(),
+		selected: z.union([z.null(), z.string()]).optional(),
+	})
+	.passthrough();

@@ -1,4 +1,5 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,13 +9,13 @@ import { useMeetingStream } from "../../src/hooks/useMeetingStream.ts";
 import { useEnabledApps } from "../../src/lib/gating/useEnabledApps.ts";
 import { queryClient } from "../../src/lib/query-client.ts";
 import { useMeetingRecordingStore } from "../../src/store/useMeetingRecordingStore.ts";
-import { useNodeStore } from "../../src/store/useNodeStore.ts";
+import { type Node, useNodeStore } from "../../src/store/useNodeStore.ts";
 import "../../src/index.css";
-const node = {
+const node: Node = {
 	name: "App fixture",
 	url: location.origin,
 	token: null,
-	userJwt: null as string | null,
+	userJwt: null,
 };
 const select = (userJwt: string | null) =>
 	useNodeStore.setState({
@@ -57,17 +58,34 @@ function Runtime() {
 }
 function Story() {
 	const [mounted, setMounted] = useState(true);
+	const [enabledRefreshes, setEnabledRefreshes] = useState(0);
+	const noticeOnly =
+		new URLSearchParams(window.location.search).get("notice-only") === "1";
 	return (
 		<QueryClientProvider client={queryClient}>
 			<main className="min-h-screen bg-background p-8 text-foreground">
-				<div className="flex gap-2">
-					<Button onClick={() => select("second-fixture")}>
-						Rotate identity
-					</Button>
-					<Button onClick={() => setMounted(false)}>Unmount runtime</Button>
-				</div>
-				{mounted ? <Runtime /> : <p>Runtime closed</p>}
+				{noticeOnly ? (
+					<>
+						<p data-testid="enabled-refreshes">{enabledRefreshes}</p>
+						<AppDisabledNotice
+							app="@ryu/meetings"
+							message="Enable the Meetings app"
+							onEnabled={() => setEnabledRefreshes((count) => count + 1)}
+						/>
+					</>
+				) : (
+					<>
+						<div className="flex gap-2">
+							<Button onClick={() => select("second-fixture")}>
+								Rotate identity
+							</Button>
+							<Button onClick={() => setMounted(false)}>Unmount runtime</Button>
+						</div>
+						{mounted ? <Runtime /> : <p>Runtime closed</p>}
+					</>
+				)}
 			</main>
+			<Toaster position="bottom-right" theme="light" />
 		</QueryClientProvider>
 	);
 }

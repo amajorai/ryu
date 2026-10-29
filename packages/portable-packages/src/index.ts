@@ -23,13 +23,31 @@ import {
 	parseLanguagePackJson,
 	validateLanguagePack,
 } from "@ryu/i18n/core";
+import { wireObject } from "@ryuhq/protocol/wire-object";
 import { unzipSync, type Zippable, zipSync } from "fflate";
+import { z } from "zod";
 import {
 	CONNECTION_REQUIREMENT_FIELDS,
 	type ConnectionRequirement,
 	ConnectionRequirementValidationError,
 	normalizePackageConnectionRequirements,
 } from "./connection-requirements.ts";
+import {
+	type GithubTreeEntry,
+	githubCommitResponseSchema,
+	githubTreeResponseSchema,
+} from "./github-response.ts";
+import { manifestFieldsSchema, packageScopeSchema } from "./manifest-fields.ts";
+import { nativeJsonSchema, nativeNumberSchema } from "./native-json.ts";
+
+export { nativeJsonSchema };
+
+import {
+	type PackageSerdeObject,
+	type PackageSerdeValue,
+	packageSerdeObjectSchema,
+	packageSerdeSchema,
+} from "./serde.ts";
 
 export * from "./connection-requirements.ts";
 
@@ -79,8 +97,20 @@ export interface PackageSecurity {
 	redacted: boolean;
 }
 
+/** The listing a remix was copied from, credited on the remix's own listing. */
+export interface PackageRemixSource {
+	id: string;
+	kind: string;
+	version?: string;
+}
+
 export interface RyuPackageManifest {
 	$schema?: string;
+	/**
+	 * Whether others may remix (copy, edit and republish) this package. Absent
+	 * means allowed; only an explicit `false` opts out. See `packageAllowsRemix`.
+	 */
+	allowRemix?: boolean;
 	artifacts: string[];
 	capabilities: string[];
 	/** Declarative setup requirements; never contains credentials or connection state. */
@@ -89,8 +119,10 @@ export interface RyuPackageManifest {
 	includes?: string[];
 	kind: PackageKind;
 	/** Safe presentation metadata carried into marketplace listings. */
-	metadata?: Record<string, unknown>;
+	metadata?: Record<string, z.core.util.JSONType>;
 	name: string;
+	/** The listing this package was remixed from, when it is a remix. */
+	remixedFrom?: PackageRemixSource;
 	requires: Record<string, string>;
 	schemaVersion: typeof PACKAGE_SCHEMA_VERSION;
 	/** Export scopes this package can safely apply. */
@@ -152,6 +184,21 @@ export interface SecretEnvelope {
 	version: 1;
 }
 
+const secretEnvelopeValidation: z.ZodType<SecretEnvelope> = z.object({
+	algorithm: z.literal("aes-256-gcm"),
+	ciphertext: z.string(),
+	kdf: z.literal("scrypt"),
+	nonce: z.string(),
+	packageId: z.string(),
+	packageVersion: z.string(),
+	salt: z.string(),
+	tag: z.string(),
+	version: z.literal(1),
+});
+const secretEnvelopeSchema = z.custom<SecretEnvelope>(
+	(value) => secretEnvelopeValidation.safeParse(value).success
+);
+
 export interface ResolvedGithubPackage {
 	commit: string;
 	source: PackageSource;
@@ -189,8 +236,14 @@ const SENSITIVE_FILE_RE =
 	/(^|\/)(?:\.env(?:\..*)?|secrets?\.(?:json|ya?ml)|credentials?\.(?:json|ya?ml)|.*\.(?:pem|key|p12|pfx))$/i;
 const PRIVATE_CONTENT_RE = /^(?:content|documents|private)(?:\/|$)/i;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+const errorCodeSchema = wireObject({
+	code: z.string().or(z.undefined()).catch(undefined),
+});
+function errorCode(
+	error: Parameters<typeof errorCodeSchema.parse>[0]
+): string | undefined {
+	const decoded = errorCodeSchema.safeParse(error);
+	return decoded.success ? decoded.data.code : undefined;
 }
 
 async function readBoundedResponseBytes(
@@ -240,16 +293,8 @@ async function readBoundedResponseBytes(
 	return data;
 }
 
-function isStringArray(value: unknown): value is string[] {
-	return (
-		Array.isArray(value) && value.every((item) => typeof item === "string")
-	);
-}
-
-function cleanStringArray(value: unknown): string[] {
-	return isStringArray(value)
-		? value.map((item) => item.trim()).filter(Boolean)
-		: [];
+function cleanStringArray(value: string[] | undefined): string[] {
+	return value?.map((item) => item.trim()).filter(Boolean) ?? [];
 }
 
 function normalizePath(path: string): string {
@@ -267,64 +312,28 @@ function normalizePath(path: string): string {
 }
 
 function stringField(
-	value: unknown,
+	value: string | undefined,
 	path: string,
 	issues: PackageValidationIssue[]
 ): string {
-	if (typeof value !== "string" || value.trim() === "") {
+	if (value === undefined || value.trim() === "") {
 		issues.push({ path, message: "must be a non-empty string" });
 		return "";
 	}
 	return value.trim();
 }
 
-function packageSecurity(value: unknown): PackageSecurity {
-	if (!isRecord(value)) {
-		return {
-			containsSecrets: false,
-			permissions: [],
-			privateContent: false,
-			redacted: false,
-		};
-	}
-	return {
-		containsSecrets: value.containsSecrets === true,
-		permissions: cleanStringArray(value.permissions),
-		privateContent: value.privateContent === true,
-		redacted: value.redacted === true,
-	};
-}
-
-function packageSource(value: unknown): PackageSource | undefined {
-	if (!isRecord(value)) {
-		return undefined;
-	}
-	const type = value.type;
-	if (type !== "github" && type !== "local" && type !== "archive") {
-		return undefined;
-	}
-	const source: PackageSource = { type };
-	for (const key of [
-		"repository",
-		"path",
-		"ref",
-		"commit",
-		"checksum",
-	] as const) {
-		if (typeof value[key] === "string" && value[key].trim()) {
-			source[key] = value[key].trim();
-		}
-	}
-	return source;
-}
-
-export function validatePackageManifest(value: unknown): RyuPackageManifest {
+export function validatePackageManifest(
+	input: Parameters<typeof manifestFieldsSchema.parse>[0]
+): RyuPackageManifest {
 	const issues: PackageValidationIssue[] = [];
-	if (!isRecord(value)) {
+	const decoded = manifestFieldsSchema.safeParse(input);
+	if (!decoded.success) {
 		throw new PackageValidationError([
 			{ path: PACKAGE_MANIFEST_FILE, message: "must contain a JSON object" },
 		]);
 	}
+	const value = decoded.data;
 	const schemaVersion = value.schemaVersion;
 	if (schemaVersion !== PACKAGE_SCHEMA_VERSION) {
 		issues.push({
@@ -333,7 +342,7 @@ export function validatePackageManifest(value: unknown): RyuPackageManifest {
 		});
 	}
 	const kind = value.kind;
-	if (!PACKAGE_KINDS.includes(kind as PackageKind)) {
+	if (kind === undefined) {
 		issues.push({
 			path: "kind",
 			message: `must be one of ${PACKAGE_KINDS.join(", ")}`,
@@ -354,26 +363,19 @@ export function validatePackageManifest(value: unknown): RyuPackageManifest {
 	}
 	const artifacts = cleanStringArray(value.artifacts);
 	const targets = cleanStringArray(value.targets);
-	const scopes = cleanStringArray(value.scopes).filter(
-		(scope): scope is PackageScope =>
-			PACKAGE_SCOPES.includes(scope as PackageScope)
-	);
-	const requirements: Record<string, string> = {};
-	if (isRecord(value.requires)) {
-		for (const [key, item] of Object.entries(value.requires)) {
-			if (key.trim() && typeof item === "string") {
-				requirements[key] = item;
-			}
-		}
-	}
+	const scopes = cleanStringArray(value.scopes).flatMap((scope) => {
+		const parsed = packageScopeSchema.safeParse(scope);
+		return parsed.success ? [parsed.data] : [];
+	});
+	const requirements = value.requires;
 	const capabilities = cleanStringArray(value.capabilities);
 	const hasConnectionRequirements = CONNECTION_REQUIREMENT_FIELDS.some(
-		(field) => Object.hasOwn(value, field)
+		(field) => Object.hasOwn(new Object(input), field)
 	);
 	let connectionRequirements: ConnectionRequirement[] | undefined;
 	if (hasConnectionRequirements) {
 		try {
-			connectionRequirements = normalizePackageConnectionRequirements(value);
+			connectionRequirements = normalizePackageConnectionRequirements(input);
 		} catch (error) {
 			if (error instanceof ConnectionRequirementValidationError) {
 				issues.push(
@@ -390,13 +392,13 @@ export function validatePackageManifest(value: unknown): RyuPackageManifest {
 			}
 		}
 	}
-	if (!isStringArray(value.artifacts)) {
+	if (value.artifacts === undefined) {
 		issues.push({ path: "artifacts", message: "must be an array of strings" });
 	}
-	if (!isStringArray(value.targets)) {
+	if (value.targets === undefined) {
 		issues.push({ path: "targets", message: "must be an array of strings" });
 	}
-	if (!isStringArray(value.scopes)) {
+	if (value.scopes === undefined) {
 		issues.push({ path: "scopes", message: "must be an array of strings" });
 	}
 	for (const path of artifacts) {
@@ -412,47 +414,65 @@ export function validatePackageManifest(value: unknown): RyuPackageManifest {
 	if (scopes.length !== cleanStringArray(value.scopes).length) {
 		issues.push({ path: "scopes", message: "contains an unsupported scope" });
 	}
-	if (issues.length > 0) {
+	if (issues.length > 0 || kind === undefined) {
 		throw new PackageValidationError(issues);
 	}
-	return {
-		$schema: typeof value.$schema === "string" ? value.$schema : undefined,
+	const manifest: RyuPackageManifest = {
+		$schema: value.$schema,
 		artifacts,
 		capabilities,
 		id,
 		includes: cleanStringArray(value.includes),
-		kind: kind as PackageKind,
+		kind,
 		name,
 		requires: requirements,
 		schemaVersion: PACKAGE_SCHEMA_VERSION,
-		security: packageSecurity(value.security),
-		source: packageSource(value.source),
+		security: value.security,
+		source: value.source,
 		targets,
 		version,
 		scopes,
-		metadata: isRecord(value.metadata) ? value.metadata : undefined,
-		...(hasConnectionRequirements
-			? { connectionRequirements: connectionRequirements ?? [] }
-			: {}),
+		metadata: value.metadata,
 	};
+	const allowRemix = value.allowRemix ?? value.allow_remix;
+	if (allowRemix !== undefined) {
+		manifest.allowRemix = allowRemix;
+	}
+	if (value.remixedFrom) {
+		manifest.remixedFrom = value.remixedFrom;
+	}
+	if (hasConnectionRequirements) {
+		manifest.connectionRequirements = connectionRequirements ?? [];
+	}
+	return manifest;
 }
 
-function canonicalize(value: unknown): unknown {
+/** Whether a package may be remixed. Absent means allowed (the default). */
+export function packageAllowsRemix(
+	manifest: Pick<RyuPackageManifest, "allowRemix">
+): boolean {
+	return manifest.allowRemix !== false;
+}
+
+function canonicalize(value: PackageSerdeValue): PackageSerdeValue {
 	if (Array.isArray(value)) {
 		return value.map(canonicalize);
 	}
-	if (!isRecord(value)) {
+	const object = packageSerdeObjectSchema.safeParse(value);
+	if (!object.success) {
 		return value;
 	}
 	return Object.fromEntries(
-		Object.keys(value)
+		Object.keys(object.data)
 			.sort()
-			.map((key) => [key, canonicalize(value[key])])
+			.map((key) => [key, canonicalize(object.data[key])])
 	);
 }
 
-export function canonicalJson(value: unknown): string {
-	return JSON.stringify(canonicalize(value));
+export function canonicalJson(
+	value: Parameters<typeof packageSerdeSchema.parse>[0]
+): string | undefined {
+	return JSON.stringify(canonicalize(packageSerdeSchema.parse(value)));
 }
 
 function manifestBytes(manifest: RyuPackageManifest): Uint8Array {
@@ -549,7 +569,9 @@ function languagePackIdentityIssues(
 	return issues;
 }
 
-function packageAad(manifest: RyuPackageManifest): Buffer {
+function packageAad(
+	manifest: Pick<RyuPackageManifest, "id" | "version">
+): Buffer {
 	return Buffer.from(
 		`${SECRET_AAD_PREFIX}${manifest.id}:${manifest.version}`,
 		"utf8"
@@ -557,7 +579,7 @@ function packageAad(manifest: RyuPackageManifest): Buffer {
 }
 
 export function encryptSecrets(
-	value: unknown,
+	value: z.core.util.JSONType,
 	passphrase: string,
 	manifest: Pick<RyuPackageManifest, "id" | "version">
 ): Uint8Array {
@@ -573,7 +595,7 @@ export function encryptSecrets(
 		r: SCRYPT_R,
 	});
 	const cipher = createCipheriv("aes-256-gcm", key, nonce);
-	const aad = packageAad(manifest as RyuPackageManifest);
+	const aad = packageAad(manifest);
 	cipher.setAAD(aad);
 	const ciphertext = Buffer.concat([
 		cipher.update(JSON.stringify(value), "utf8"),
@@ -597,7 +619,7 @@ export function decryptSecrets(
 	data: Uint8Array,
 	passphrase: string,
 	manifest: Pick<RyuPackageManifest, "id" | "version">
-): unknown {
+): z.core.util.JSONType {
 	if (!passphrase) {
 		throw new Error("A passphrase is required to decrypt package secrets");
 	}
@@ -606,22 +628,29 @@ export function decryptSecrets(
 		throw new Error("Unsupported package secret envelope");
 	}
 	const remainder = raw.slice(SECRET_PREFIX.length).trim();
-	let envelope: SecretEnvelope;
+	let payload: z.core.util.JSONType;
 	try {
-		envelope = JSON.parse(remainder) as SecretEnvelope;
+		payload = nativeJsonSchema.parse(JSON.parse(remainder));
 	} catch {
 		throw new Error("Malformed package secret envelope");
 	}
-	if (
-		envelope.version !== 1 ||
-		envelope.algorithm !== "aes-256-gcm" ||
-		envelope.kdf !== "scrypt" ||
-		envelope.packageId !== manifest.id ||
-		envelope.packageVersion !== manifest.version
-	) {
+	const binding = z.object({
+		version: z.literal(1),
+		algorithm: z.literal("aes-256-gcm"),
+		kdf: z.literal("scrypt"),
+		packageId: z.literal(manifest.id),
+		packageVersion: z.literal(manifest.version),
+	});
+	if (!binding.safeParse(payload).success) {
 		throw new Error(
 			"Package secret envelope does not match the package manifest"
 		);
+	}
+	let envelope: SecretEnvelope;
+	try {
+		envelope = secretEnvelopeSchema.parse(payload);
+	} catch {
+		throw new Error("Malformed package secret envelope");
 	}
 	const salt = Buffer.from(envelope.salt, "base64url");
 	const nonce = Buffer.from(envelope.nonce, "base64url");
@@ -634,14 +663,14 @@ export function decryptSecrets(
 		r: SCRYPT_R,
 	});
 	const decipher = createDecipheriv("aes-256-gcm", key, nonce);
-	decipher.setAAD(packageAad(manifest as RyuPackageManifest));
+	decipher.setAAD(packageAad(manifest));
 	decipher.setAuthTag(tag);
 	try {
 		const plaintext = Buffer.concat([
 			decipher.update(ciphertext),
 			decipher.final(),
 		]).toString("utf8");
-		return JSON.parse(plaintext) as unknown;
+		return nativeJsonSchema.parse(JSON.parse(plaintext));
 	} catch {
 		throw new Error(
 			"Unable to decrypt package secrets: the unlock key is incorrect"
@@ -655,7 +684,7 @@ export function hasEncryptedSecrets(tree: PackageTree): boolean {
 
 export function withEncryptedSecrets(
 	tree: PackageTree,
-	value: unknown,
+	value: z.core.util.JSONType,
 	passphrase: string
 ): PackageTree {
 	return {
@@ -691,12 +720,12 @@ function equalBytes(
 }
 
 function mergeJsonValue(
-	base: unknown,
-	local: unknown,
-	upstream: unknown,
+	base: PackageSerdeValue,
+	local: PackageSerdeValue,
+	upstream: PackageSerdeValue,
 	path: string,
 	conflicts: string[]
-): unknown {
+): PackageSerdeValue {
 	if (canonicalJson(local) === canonicalJson(base)) {
 		return upstream;
 	}
@@ -706,18 +735,21 @@ function mergeJsonValue(
 	if (canonicalJson(local) === canonicalJson(upstream)) {
 		return local;
 	}
-	if (isRecord(base) && isRecord(local) && isRecord(upstream)) {
+	const baseObject = packageSerdeObjectSchema.safeParse(base);
+	const localObject = packageSerdeObjectSchema.safeParse(local);
+	const upstreamObject = packageSerdeObjectSchema.safeParse(upstream);
+	if (baseObject.success && localObject.success && upstreamObject.success) {
 		const keys = new Set([
-			...Object.keys(base),
-			...Object.keys(local),
-			...Object.keys(upstream),
+			...Object.keys(baseObject.data),
+			...Object.keys(localObject.data),
+			...Object.keys(upstreamObject.data),
 		]);
-		const result: Record<string, unknown> = {};
+		const result: PackageSerdeObject = {};
 		for (const key of [...keys].sort()) {
 			const merged = mergeJsonValue(
-				base[key],
-				local[key],
-				upstream[key],
+				baseObject.data[key],
+				localObject.data[key],
+				upstreamObject.data[key],
 				`${path}.${key}`,
 				conflicts
 			);
@@ -736,13 +768,15 @@ function mergeJsonValue(
 			conflicts.push(path);
 			return local;
 		}
-		const arrayKey = (item: unknown): string | null => {
-			if (!isRecord(item)) {
+		const arrayKey = (item: PackageSerdeValue): string | null => {
+			const object = packageSerdeObjectSchema.safeParse(item);
+			if (!object.success) {
 				return null;
 			}
 			for (const key of ["id", "name", "key", "slug"]) {
-				if (typeof item[key] === "string" && item[key].length > 0) {
-					return `${key}:${item[key]}`;
+				const text = z.string().safeParse(object.data[key]);
+				if (text.success && text.data.length > 0) {
+					return `${key}:${text.data}`;
 				}
 			}
 			return null;
@@ -751,8 +785,15 @@ function mergeJsonValue(
 			items.every((item) => arrayKey(item) !== null)
 		);
 		if (keyed) {
-			const byId = (items: unknown[]) =>
-				new Map(items.map((item) => [arrayKey(item) as string, item]));
+			const byId = (items: PackageSerdeValue[]) =>
+				new Map(
+					items.flatMap((item) => {
+						const key = arrayKey(item);
+						return key === null
+							? []
+							: [[key, item] satisfies [string, PackageSerdeValue]];
+					})
+				);
 			const baseById = byId(base);
 			const localById = byId(local);
 			const upstreamById = byId(upstream);
@@ -761,7 +802,7 @@ function mergeJsonValue(
 				...localById.keys(),
 				...upstreamById.keys(),
 			]);
-			const result: unknown[] = [];
+			const result: PackageSerdeValue[] = [];
 			for (const id of [...ids].sort()) {
 				const merged = mergeJsonValue(
 					baseById.get(id),
@@ -778,17 +819,23 @@ function mergeJsonValue(
 		}
 		if (
 			[base, local, upstream].every((items) =>
-				items.every((item) =>
-					["string", "number", "boolean"].includes(typeof item)
+				items.every(
+					(item) =>
+						z
+							.union([z.string(), nativeNumberSchema, z.nan(), z.boolean()])
+							.safeParse(item).success
 				)
 			)
 		) {
 			// Tool and skill lists are set-like agent configuration. When both sides
 			// add entries, preserve both additions instead of turning an otherwise
 			// safe update into a conflict. Object arrays use stable ids/names above.
-			const values = new Map<string, unknown>();
+			const values = new Map<string, PackageSerdeValue>();
 			for (const item of [...local, ...upstream]) {
-				values.set(`${typeof item}:${String(item)}`, item);
+				values.set(
+					`${z.string().safeParse(item).success ? "string" : z.boolean().safeParse(item).success ? "boolean" : "number"}:${String(item)}`,
+					item
+				);
 			}
 			return [...values.values()].sort((left, right) =>
 				String(left).localeCompare(String(right))
@@ -799,12 +846,14 @@ function mergeJsonValue(
 	return local;
 }
 
-function parseJsonFile(data: Uint8Array | undefined): unknown | undefined {
+function parseJsonFile(
+	data: Uint8Array | undefined
+): z.core.util.JSONType | undefined {
 	if (!data) {
 		return undefined;
 	}
 	try {
-		return JSON.parse(stringFromBytes(data)) as unknown;
+		return nativeJsonSchema.parse(JSON.parse(stringFromBytes(data)));
 	} catch {
 		return undefined;
 	}
@@ -907,9 +956,9 @@ export function diffPackageTrees(
 	}
 	const manifestConflicts: string[] = [];
 	const mergedManifestValue = mergeJsonValue(
-		base.manifest,
-		local.manifest,
-		upstream.manifest,
+		packageSerdeSchema.parse(base.manifest),
+		packageSerdeSchema.parse(local.manifest),
+		packageSerdeSchema.parse(upstream.manifest),
 		PACKAGE_MANIFEST_FILE,
 		manifestConflicts
 	);
@@ -956,7 +1005,7 @@ async function ensureSafeDirectory(
 			throw new Error(`Package output root is not a directory: ${current}`);
 		}
 	} catch (error) {
-		if (isRecord(error) && error.code === "ENOENT") {
+		if (errorCode(error) === "ENOENT") {
 			await mkdir(current, { recursive: true });
 		} else {
 			throw error;
@@ -973,7 +1022,7 @@ async function ensureSafeDirectory(
 				throw new Error(`Package output path is not a directory: ${current}`);
 			}
 		} catch (error) {
-			if (isRecord(error) && error.code === "ENOENT") {
+			if (errorCode(error) === "ENOENT") {
 				await mkdir(current);
 				continue;
 			}
@@ -989,7 +1038,7 @@ async function assertSafeOutputFile(path: string): Promise<void> {
 			throw new Error(`Package output cannot be a symbolic link: ${path}`);
 		}
 	} catch (error) {
-		if (isRecord(error) && error.code === "ENOENT") {
+		if (errorCode(error) === "ENOENT") {
 			return;
 		}
 		throw error;
@@ -1060,7 +1109,7 @@ export async function readPackageFolder(root: string): Promise<PackageTree> {
 		);
 	}
 	const manifest = validatePackageManifest(
-		JSON.parse(await readFile(manifestPath, "utf8")) as unknown
+		JSON.parse(await readFile(manifestPath, "utf8"))
 	);
 	const files: Record<string, Uint8Array> = {};
 	await collectFiles(absoluteRoot, absoluteRoot, files, {
@@ -1164,7 +1213,7 @@ export function unpackPackage(data: Uint8Array): PackageTree {
 		]);
 	}
 	const manifest = validatePackageManifest(
-		JSON.parse(stringFromBytes(manifestData)) as unknown
+		JSON.parse(stringFromBytes(manifestData))
 	);
 	const files: Record<string, Uint8Array> = {};
 	for (const [rawPath, value] of Object.entries(entries)) {
@@ -1177,7 +1226,7 @@ export function unpackPackage(data: Uint8Array): PackageTree {
 	return validatePackageTree({ files, manifest });
 }
 
-function githubHeaders(): Record<string, string> {
+function githubHeaders() {
 	return {
 		Accept: "application/vnd.github+json",
 		"User-Agent": "ryu-portable-packages",
@@ -1278,15 +1327,16 @@ export function parseGithubPackageReference(
 	return { path, ref, repository: `${parts[0]}/${parts[1]}` };
 }
 
-async function githubJson(
+async function githubJson<T>(
 	fetcher: PackageFetcher,
-	url: string
-): Promise<Record<string, unknown>> {
+	url: string,
+	schema: z.ZodType<T>
+): Promise<T> {
 	const response = await fetcher(url, { headers: githubHeaders() });
 	if (!response.ok) {
 		throw new Error(`GitHub package request failed (${response.status})`);
 	}
-	const value: unknown = JSON.parse(
+	const value = JSON.parse(
 		new TextDecoder().decode(
 			await readBoundedResponseBytes(
 				response,
@@ -1295,10 +1345,10 @@ async function githubJson(
 			)
 		)
 	);
-	if (!isRecord(value)) {
+	if (!z.looseObject({}).safeParse(value).success) {
 		throw new Error("GitHub package response was not an object");
 	}
-	return value;
+	return schema.parse(value);
 }
 
 interface GithubPackageTreeEntry {
@@ -1308,14 +1358,14 @@ interface GithubPackageTreeEntry {
 }
 
 function githubTreeEntries(
-	value: Record<string, unknown>
-): Record<string, unknown>[] {
+	value: z.infer<typeof githubTreeResponseSchema>
+): GithubTreeEntry[] {
 	if (value.truncated === true) {
 		throw new Error(
 			"GitHub package tree was truncated; select a package subdirectory or reduce the repository size"
 		);
 	}
-	return Array.isArray(value.tree) ? value.tree.filter(isRecord) : [];
+	return value.tree;
 }
 
 async function githubPackageTreeEntries(
@@ -1325,8 +1375,8 @@ async function githubPackageTreeEntries(
 	packagePath: string
 ): Promise<GithubPackageTreeEntry[]> {
 	let requests = 0;
-	const trees = new Map<string, Record<string, unknown>[]>();
-	const fetchTree = async (sha: string): Promise<Record<string, unknown>[]> => {
+	const trees = new Map<string, GithubTreeEntry[]>();
+	const fetchTree = async (sha: string): Promise<GithubTreeEntry[]> => {
 		const cached = trees.get(sha);
 		if (cached) {
 			return cached;
@@ -1338,7 +1388,8 @@ async function githubPackageTreeEntries(
 		const tree = githubTreeEntries(
 			await githubJson(
 				fetcher,
-				`${apiBase}/git/trees/${encodeURIComponent(sha)}`
+				`${apiBase}/git/trees/${encodeURIComponent(sha)}`,
+				githubTreeResponseSchema
 			)
 		);
 		trees.set(sha, tree);
@@ -1348,10 +1399,7 @@ async function githubPackageTreeEntries(
 	const rootEntries = await fetchTree(rootSha);
 	const prefix = packagePath ? `${packagePath}/` : "";
 	const legacyEntries = rootEntries.filter(
-		(entry) =>
-			typeof entry.path === "string" &&
-			entry.path.startsWith(prefix) &&
-			entry.type === "blob"
+		(entry) => entry.path?.startsWith(prefix) && entry.type === "blob"
 	);
 	// Older GitHub mocks and a few enterprise proxies return a flat recursive
 	// listing even when `recursive=1` is omitted. Accept that shape only when the
@@ -1368,7 +1416,7 @@ async function githubPackageTreeEntries(
 		let totalBytes = 0;
 		return legacyEntries.map((entry) => {
 			const path = normalizePath(String(entry.path).slice(prefix.length));
-			const size = typeof entry.size === "number" ? entry.size : 0;
+			const size = entry.size ?? 0;
 			if (size > MAX_PACKAGE_FILE_BYTES) {
 				throw new Error(
 					`GitHub package file exceeds the 32 MiB limit: ${path}`
@@ -1383,7 +1431,7 @@ async function githubPackageTreeEntries(
 			return {
 				path,
 				type: "blob" as const,
-				size: typeof entry.size === "number" ? entry.size : undefined,
+				size: entry.size,
 			};
 		});
 	}
@@ -1391,16 +1439,13 @@ async function githubPackageTreeEntries(
 	let fileCount = 0;
 	let totalBytes = 0;
 	const result: GithubPackageTreeEntry[] = [];
-	const addBlob = (
-		entry: Record<string, unknown>,
-		relativePath: string
-	): void => {
+	const addBlob = (entry: GithubTreeEntry, relativePath: string): void => {
 		const path = normalizePath(relativePath);
 		fileCount += 1;
 		if (fileCount > MAX_PACKAGE_FILES) {
 			throw new Error("GitHub package contains too many files");
 		}
-		const size = typeof entry.size === "number" ? entry.size : 0;
+		const size = entry.size ?? 0;
 		if (size > MAX_PACKAGE_FILE_BYTES) {
 			throw new Error(`GitHub package file exceeds the 32 MiB limit: ${path}`);
 		}
@@ -1411,13 +1456,13 @@ async function githubPackageTreeEntries(
 		result.push({
 			path,
 			type: "blob",
-			size: typeof entry.size === "number" ? entry.size : undefined,
+			size: entry.size,
 		});
 	};
 
 	const walk = async (sha: string, relativePrefix: string): Promise<void> => {
 		for (const entry of await fetchTree(sha)) {
-			const entryPath = typeof entry.path === "string" ? entry.path : "";
+			const entryPath = entry.path ?? "";
 			if (!entryPath || entry.type === "commit") {
 				continue;
 			}
@@ -1428,7 +1473,7 @@ async function githubPackageTreeEntries(
 				addBlob(entry, relativePath);
 				continue;
 			}
-			if (entry.type === "tree" && typeof entry.sha === "string") {
+			if (entry.type === "tree" && entry.sha !== undefined) {
 				await walk(entry.sha, relativePath);
 			}
 		}
@@ -1440,7 +1485,7 @@ async function githubPackageTreeEntries(
 			const entry = (await fetchTree(selectedSha)).find(
 				(candidate) => candidate.path === segment && candidate.type === "tree"
 			);
-			if (!entry || typeof entry.sha !== "string") {
+			if (!entry || entry.sha === undefined) {
 				throw new Error(`GitHub package path was not found: ${packagePath}`);
 			}
 			selectedSha = entry.sha;
@@ -1452,7 +1497,7 @@ async function githubPackageTreeEntries(
 
 export async function readGithubPackage(
 	input: string,
-	fetcher: PackageFetcher = fetch as unknown as PackageFetcher
+	fetcher: PackageFetcher = fetch
 ): Promise<ResolvedGithubPackage> {
 	const reference = parseGithubPackageReference(input);
 	if (!reference) {
@@ -1464,16 +1509,14 @@ export async function readGithubPackage(
 	const apiBase = `https://api.github.com/repos/${owner}/${repositoryName}`;
 	const commit = await githubJson(
 		fetcher,
-		`${apiBase}/commits/${encodeURIComponent(reference.ref)}`
+		`${apiBase}/commits/${encodeURIComponent(reference.ref)}`,
+		githubCommitResponseSchema
 	);
-	const commitSha = typeof commit.sha === "string" ? commit.sha : "";
+	const commitSha = commit.sha ?? "";
 	if (!commitSha) {
 		throw new Error("GitHub package response did not contain a commit SHA");
 	}
-	const commitTree =
-		isRecord(commit.tree) && typeof commit.tree.sha === "string"
-			? commit.tree.sha
-			: commitSha;
+	const commitTree = commit.tree?.sha ?? commitSha;
 	const treeEntries = await githubPackageTreeEntries(
 		fetcher,
 		apiBase,
@@ -1541,7 +1584,7 @@ export async function readGithubPackage(
 		throw new Error("GitHub package exceeds the 64 MiB download limit");
 	}
 	const manifest = validatePackageManifest(
-		JSON.parse(stringFromBytes(manifestBytes)) as unknown
+		JSON.parse(stringFromBytes(manifestBytes))
 	);
 	const resolvedTree = validatePackageTree({ files, manifest });
 	return {
@@ -1573,7 +1616,7 @@ export async function readPackageInput(input: string): Promise<PackageTree> {
 			return unpackPackage(new Uint8Array(await readFile(input)));
 		}
 	} catch (error) {
-		const code = isRecord(error) ? error.code : null;
+		const code = errorCode(error);
 		switch (code) {
 			case "ENOENT":
 			case "ENOTDIR":
@@ -1619,13 +1662,13 @@ export function packageFileText(
 export function packageFileJson(
 	tree: PackageTree,
 	path: string
-): unknown | null {
+): z.core.util.JSONType | null {
 	const text = packageFileText(tree, path);
 	if (text === null) {
 		return null;
 	}
 	try {
-		return JSON.parse(text) as unknown;
+		return nativeJsonSchema.parse(JSON.parse(text));
 	} catch {
 		return null;
 	}
@@ -1661,7 +1704,7 @@ export function languagePackFromTree(tree: PackageTree): LanguagePack {
 /** Build a portable package tree for a language pack without adding executable code. */
 export function languagePackPackageTree(
 	pack: LanguagePack,
-	options: { metadata?: Record<string, unknown> } = {}
+	options: { metadata?: Record<string, z.core.util.JSONType> } = {}
 ): PackageTree {
 	const validated = validateLanguagePack(pack);
 	const manifest = validatePackageManifest(
@@ -1822,6 +1865,8 @@ export function packageSummary(tree: PackageTree) {
 		id: tree.manifest.id,
 		kind: tree.manifest.kind,
 		name: tree.manifest.name,
+		allowRemix: packageAllowsRemix(tree.manifest),
+		remixedFrom: tree.manifest.remixedFrom ?? null,
 		security: tree.manifest.security,
 		version: tree.manifest.version,
 	};

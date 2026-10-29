@@ -5,12 +5,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
 	fetchMarketplaceMembershipPublisherReport,
 	hasMarketplaceAuth,
-	type MarketplaceError,
+	MarketplaceError,
 	type MarketplaceMembershipPublisherReport,
 } from "@/src/lib/api/marketplace.ts";
 
-function toHostError(error: unknown): MarketplaceMembershipState["error"] {
-	const typed = error as MarketplaceError;
+function toHostError(cause: unknown): MarketplaceMembershipState["error"] {
+	const typed = cause instanceof MarketplaceError ? cause : null;
 	return {
 		kind: typed?.kind ?? "unknown",
 		message: typed?.message ?? "Could not load A Major Pass revenue.",

@@ -135,6 +135,25 @@
  *     `requestExtensionPermission` catch, which answers `{ cancelled: true }`,
  *     so `confirm` resolves `false` and we block.
  *
+ * AGENT TOOL SCOPE: ONE MORE REASON THE GATE LIVES HERE
+ * -----------------------------------------------------
+ * The managed Pi also runs built-in agents other than the flagship (Jay Jr.),
+ * and an agent's MCP allowlist only governs the tools Core brokers through
+ * `ryu-mcp.ts`. Pi's own `bash`/`read`/`write`/`edit`, and tools from plugin
+ * extensions (`Task`, `bash_background`, …), never pass through Core. So when a
+ * built-in other than the flagship declares a finite allowlist, or a turn runs
+ * for a public-agent visitor (`acp::confines_managed_pi_tools`), Core sets
+ * `RYU_PI_ACTIVE_TOOLS` on the spawn (`acp::PI_ACTIVE_TOOLS_ENV`) to the
+ * comma-separated Pi tools it may run,
+ * and this file narrows the active tool set to it at session start and refuses
+ * every other `tool_call` FIRST, before plan mode or any policy. The refusal is
+ * the enforcement (it also covers tools registered or activated later, and calls
+ * made through `ctx.executeTool`); the narrowing only keeps the model from being
+ * offered tools it cannot use. An env var is the right channel here, unlike for
+ * plan mode below: the scope is fixed for the agent, so a change SHOULD start a
+ * fresh Pi. A present-but-empty value refuses everything; only an absent
+ * variable means unscoped.
+ *
  * SUBAGENT CHILDREN ARE NOT GATED TO DEATH
  * ----------------------------------------
  * A subagent spawned by `ryu-subagent.ts` runs `pi --mode json -p`, where
@@ -149,9 +168,11 @@
  *     before it can plan), so during plan mode `bash` still runs — governed by
  *     the hard denylist and the gateway exec scan below, but not withheld.
  *     That is a known, accepted hole.
- *   - The gateway exec scan is a fail-OPEN hop: if Core cannot be reached the
- *     verdict is skipped and only the local policy applies (see
- *     `scanExecCommand` for why that is the right trade at this hop).
+ *   - The gateway exec scan FAILS CLOSED for shell commands: when Core cannot
+ *     be reached, times out, answers non-2xx, or returns an unknown verdict,
+ *     the command is blocked. The local lists are only a floor under the
+ *     shared deletion classifier (they miss `unlink` and a plain `rm`), so
+ *     they must never stand in for a missing verdict.
  *   - The permission gate ALLOWS a confirm-worthy call when there is no UI to
  *     ask (an unattended turn), having applied the hard denies and the scan
  *     first. Blocking instead would strand every headless turn. Combined with
@@ -190,6 +211,7 @@ import type {
 	ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { Check } from "typebox/value";
 
 // ── Logging and small helpers ───────────────────────────────────────────────
 
@@ -225,27 +247,32 @@ function log(message: string): void {
 	}
 }
 
-/** Message of a thrown value, without assuming it is an Error. */
-function errorText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+/** Native thrown errors are normalized at each catch boundary. */
+function errorText(err: Error): string {
+	return err.message;
 }
 
-/**
- * Widen an unknown tool input to a readable bag. `ToolCallEvent` is a union
- * whose per-variant `input` types have no index signature, so every read below
- * goes through here rather than through a cast at each call site.
- */
-function toRecord(input: unknown): Record<string, unknown> {
-	return input && typeof input === "object"
-		? (input as Record<string, unknown>)
-		: {};
+interface GuardInput {
+	command?: string;
+	/** `copy_paste` cuts from `path` instead of only reading it. */
+	move?: boolean;
+	path?: string;
+	/** `copy_paste`'s destination; defaults to `path`. */
+	to_path?: string;
 }
-
-/** Read a string field off a tool input, or "" when it is absent/not a string. */
-function stringField(input: unknown, key: string): string {
-	const value = toRecord(input)[key];
-	return typeof value === "string" ? value : "";
-}
+const commandInputSchema = Type.Object({ command: Type.String() });
+const pathInputSchema = Type.Object({ path: Type.String() });
+const toPathInputSchema = Type.Object({ to_path: Type.String() });
+const moveInputSchema = Type.Object({ move: Type.Boolean() });
+const persistedPlanSchema = Type.Object({ enabled: Type.Boolean() });
+const scanVerdictSchema = Type.Object({
+	decision: Type.Union([
+		Type.Literal("allow"),
+		Type.Literal("approval_required"),
+		Type.Literal("deny"),
+	]),
+});
+const scanReasonSchema = Type.Object({ reason: Type.String() });
 
 /**
  * Whether Pi has a dialog-capable UI bound right now.
@@ -283,6 +310,62 @@ function withUi(
 	}
 }
 
+// ── Agent tool scope ────────────────────────────────────────────────────────
+
+/**
+ * The spawn variable naming the only Pi tools this agent may run. Mirrors
+ * `acp::PI_ACTIVE_TOOLS_ENV` in Core; a Rust test pins the two spellings.
+ */
+const TOOL_SCOPE_ENV = "RYU_PI_ACTIVE_TOOLS";
+
+/** Reason surfaced to the model when a tool is outside the agent's scope. */
+const TOOL_SCOPE_REASON =
+	"This agent's tool allowlist does not include this tool. Ryu tools it may use are listed by ryu_list_tools and run through ryu_call_tool.";
+
+/**
+ * Parse the scope. `undefined` means unscoped (the variable is absent). A
+ * present value is always a scope, even an empty or malformed one, so a bad
+ * value fails closed instead of reading as "every tool".
+ */
+function readToolScope(
+	raw: string | undefined
+): ReadonlySet<string> | undefined {
+	if (raw === undefined) {
+		return undefined;
+	}
+	return new Set(
+		raw
+			.split(",")
+			.map((name) => name.trim())
+			.filter((name) => name.length > 0)
+	);
+}
+
+/**
+ * Keep only in-scope tools in the set declared to the model. Never widens it.
+ * Best-effort: the `tool_call` refusal is what enforces the scope, so a stale
+ * runtime here costs the model a refused call, not a hole.
+ */
+function applyToolScope(
+	pi: ExtensionAPI,
+	scope: ReadonlySet<string> | undefined
+): void {
+	if (!scope) {
+		return;
+	}
+	try {
+		const active = pi.getActiveTools();
+		const scoped = active.filter((name) => scope.has(name));
+		if (scoped.length !== active.length) {
+			pi.setActiveTools(scoped);
+		}
+	} catch (err) {
+		log(
+			`could not narrow the active tools to the agent's scope (${errorText(err instanceof Error ? err : new Error(String(err)))}); out-of-scope calls are still refused.`
+		);
+	}
+}
+
 // ── Plan-mode state ─────────────────────────────────────────────────────────
 
 /**
@@ -313,7 +396,7 @@ let toolsBeforePlan: string[] | undefined;
  * Note the asymmetry in how the two layers cover these names. `edit` and
  * `write` are Pi built-ins and are always in `getActiveTools()`, so withholding
  * them is the primary enforcement and the `tool_call` block is a backstop.
- * `bash_background`, `Task` and `ryu_call_tool` are registered by SIBLING
+ * `bash_background`, `Task`, `copy_paste` and `ryu_call_tool` are registered by SIBLING
  * extensions that may not be loaded at all, so for those the `tool_call` block
  * is the ONLY enforcement — filtering a name that is not in the active set is a
  * harmless no-op.
@@ -323,6 +406,8 @@ const PLAN_DENY_TOOLS: ReadonlySet<string> = new Set([
 	"write",
 	"bash_background",
 	"Task",
+	// `copy_paste` (the `pi-copy` plugin) writes files exactly like `edit`/`write`.
+	"copy_paste",
 	// `ryu_call_tool` (registered by the sibling `ryu-mcp.ts`) proxies ARBITRARY
 	// Ryu tools through Core, so leaving it out would let a plan-mode turn mutate
 	// the filesystem and everything else by proxy — the one path that is neither
@@ -330,14 +415,35 @@ const PLAN_DENY_TOOLS: ReadonlySet<string> = new Set([
 	"ryu_call_tool",
 ]);
 
+/**
+ * Prefix of the tools Pi's built-in MCP client registers for Core's bridge
+ * (`ryu-mcp.ts` registers it as server `ryu`). Like `ryu_call_tool`, each of
+ * them runs an arbitrary Ryu tool through Core, so plan mode refuses them —
+ * except the read-only discovery and question tools, which a plan needs.
+ */
+const RYU_MCP_TOOL_PREFIX = "mcp__ryu__";
+const PLAN_ALLOWED_RYU_MCP_TOOLS: ReadonlySet<string> = new Set([
+	"mcp__ryu__tool_search",
+	"mcp__ryu__describe",
+	"mcp__ryu__ask_user",
+]);
+
+/** True when plan mode withholds `toolName` from the model. */
+export function isPlanDeniedTool(toolName: string): boolean {
+	if (PLAN_DENY_TOOLS.has(toolName)) {
+		return true;
+	}
+	return (
+		toolName.startsWith(RYU_MCP_TOOL_PREFIX) &&
+		!PLAN_ALLOWED_RYU_MCP_TOOLS.has(toolName)
+	);
+}
+
 /** The session-entry `customType` under which the plan flag is persisted. */
 const PLAN_ENTRY_TYPE = "ryu-plan";
 
 /** Key for this extension's footer status slot (decoration only, TUI-visible). */
 const RYU_PLAN_UI_KEY = "ryu-plan";
-
-/** The sentinel the user types. Never registered as a command — see preamble. */
-const PLAN_SENTINEL = "/plan";
 
 /** Block separator Core uses between the preamble, context and user message. */
 const BLOCK_SEPARATOR = "\n\n";
@@ -393,6 +499,14 @@ const USER_DENIED_REASON = "Denied by the user.";
  */
 const GUARD_ERROR_REASON =
 	"Blocked: Ryu's safety guard failed to evaluate this call. Retry, or ask the user to run it.";
+
+/**
+ * Reason surfaced when Core's exec scan produced no usable verdict. The local
+ * lists are a floor, not the shared deletion classifier, so a command the scan
+ * never classified must not run (`unlink`, a plain `rm`, … slip past them).
+ */
+const SCAN_UNAVAILABLE_REASON =
+	"Blocked: Ryu could not check this command against the node's command policy. Retry once Ryu is reachable, or ask the user to run it.";
 
 /** How much of the prompt head goes into the diagnostic log line. */
 const LOG_HEAD_CHARS = 60;
@@ -559,14 +673,16 @@ function enterPlanMode(pi: ExtensionAPI): void {
 	}
 	try {
 		const active = pi.getActiveTools();
-		pi.setActiveTools(active.filter((name) => !PLAN_DENY_TOOLS.has(name)));
+		pi.setActiveTools(active.filter((name) => !isPlanDeniedTool(name)));
 		// Assigned only after `setActiveTools` succeeded, so a throw leaves the
 		// guard clear and the next attempt can still snapshot the real set.
 		toolsBeforePlan = [...active];
 	} catch (err) {
 		// The `tool_call` denial below still holds the line on its own; this is
 		// the belt, not the braces.
-		log(`could not withhold mutating tools (${errorText(err)}).`);
+		log(
+			`could not withhold mutating tools (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
+		);
 	}
 }
 
@@ -587,7 +703,7 @@ function exitPlanMode(pi: ExtensionAPI): void {
 		toolsBeforePlan = undefined;
 	} catch (err) {
 		log(
-			`could not restore the tool set (${errorText(err)}); keeping the snapshot.`
+			`could not restore the tool set (${errorText(err instanceof Error ? err : new Error(String(err)))}); keeping the snapshot.`
 		);
 	}
 }
@@ -601,7 +717,9 @@ function persistPlanState(pi: ExtensionAPI): void {
 	try {
 		pi.appendEntry(PLAN_ENTRY_TYPE, { enabled: planMode });
 	} catch (err) {
-		log(`could not persist plan state (${errorText(err)}).`);
+		log(
+			`could not persist plan state (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
+		);
 	}
 }
 
@@ -612,9 +730,7 @@ function persistPlanState(pi: ExtensionAPI): void {
 function readPersistedPlanState(
 	ctx: ExtensionContext | undefined
 ): boolean | undefined {
-	const entries = ctx?.sessionManager?.getEntries?.() as
-		| Array<{ customType?: string; data?: unknown; type?: string }>
-		| undefined;
+	const entries = ctx?.sessionManager?.getEntries?.();
 	if (!Array.isArray(entries)) {
 		return undefined;
 	}
@@ -623,9 +739,8 @@ function readPersistedPlanState(
 		if (entry?.type !== "custom" || entry.customType !== PLAN_ENTRY_TYPE) {
 			continue;
 		}
-		const enabled = toRecord(entry.data).enabled;
-		if (typeof enabled === "boolean") {
-			return enabled;
+		if (Check(persistedPlanSchema, entry.data)) {
+			return entry.data.enabled;
 		}
 		// A malformed row is SKIPPED, not terminal. Returning undefined here would
 		// let one bad entry shadow every good one before it, and the caller would
@@ -747,9 +862,9 @@ const SCAN_AGENT_ID = process.env.RYU_MCP_AGENT_ID || "ryu";
 
 /**
  * Hard bound on the scan round trip. A safety check that hangs a turn is worse
- * than one that is occasionally skipped, and Core's own gateway call is already
- * bounded — this only covers a half-open loopback socket, where a fetch would
- * otherwise never settle.
+ * than one that refuses, and Core's own gateway call is already bounded — this
+ * only covers a half-open loopback socket, where a fetch would otherwise never
+ * settle. A timeout yields no verdict, which blocks the command.
  */
 const SCAN_TIMEOUT_MS = 5000;
 
@@ -764,19 +879,18 @@ interface ScanVerdict {
 /**
  * Ask Core whether this command may run.
  *
- * Returns `undefined` on a transport failure so the local hard-deny policy can
- * still classify the command. Any command that would require interactive
- * approval remains blocked when no approval channel is available.
+ * Returns `undefined` when no valid verdict was obtained: a transport failure,
+ * a timeout, a non-2xx answer, or a body outside the verdict schema. The
+ * caller treats that as a refusal, never as permission: the local lists only
+ * cover a subset of the shared deletion classifier this scan applies.
  */
 async function scanExecCommand(
 	command: string
 ): Promise<ScanVerdict | undefined> {
 	try {
-		const headers: Record<string, string> = {
-			"content-type": "application/json",
-		};
+		const headers = new Headers({ "content-type": "application/json" });
 		if (CORE_TOKEN) {
-			headers.authorization = `Bearer ${CORE_TOKEN}`;
+			headers.set("authorization", `Bearer ${CORE_TOKEN}`);
 		}
 		const res = await fetch(`${CORE_URL}/api/exec/scan`, {
 			method: "POST",
@@ -785,27 +899,22 @@ async function scanExecCommand(
 			signal: AbortSignal.timeout(SCAN_TIMEOUT_MS),
 		});
 		if (!res.ok) {
-			log(
-				`exec scan unavailable (HTTP ${res.status}); using the local policy.`
-			);
+			log(`exec scan unavailable (HTTP ${res.status}); blocking the command.`);
 			return undefined;
 		}
-		const body = (await res.json()) as ScanVerdict;
-		const decision = body?.decision;
-		if (
-			decision !== "allow" &&
-			decision !== "approval_required" &&
-			decision !== "deny"
-		) {
-			log("exec scan returned an unknown decision; using the local policy.");
+		const body = await res.json();
+		if (!Check(scanVerdictSchema, body)) {
+			log("exec scan returned an unknown decision; blocking the command.");
 			return undefined;
 		}
 		return {
-			decision,
-			reason: typeof body.reason === "string" ? body.reason : undefined,
+			decision: body.decision,
+			reason: Check(scanReasonSchema, body) ? body.reason : undefined,
 		};
 	} catch (err) {
-		log(`exec scan failed (${errorText(err)}); using the local policy.`);
+		log(
+			`exec scan failed (${errorText(err instanceof Error ? err : new Error(String(err)))}); blocking the command.`
+		);
 		return undefined;
 	}
 }
@@ -834,10 +943,13 @@ const COMMAND_HEAD_CHARS = 48;
 const COMMAND_TOOLS: ReadonlySet<string> = new Set(["bash", "bash_background"]);
 
 /** Tools that write to a path, mapped to the verb the prompt should use. */
-const PATH_TOOL_VERBS: Readonly<Record<string, string>> = {
+const PATH_TOOL_VERBS = {
 	edit: "edit",
 	write: "overwrite",
-};
+} satisfies Record<"edit" | "write", string>;
+
+/** The `pi-copy` tool: writes its destination, and its source too on a move. */
+const COPY_PASTE_TOOL = "copy_paste";
 
 /** Collapse a command to one line and cap it, for a legible prompt title. */
 function commandHead(command: string): string {
@@ -871,11 +983,11 @@ function pathNeedsConfirm(target: string): boolean {
  * A hard refusal for this call, or undefined. The returned string is the reason
  * the MODEL sees, so it names the command and says why, rather than just "no".
  */
-function hardDeny(toolName: string, input: unknown): string | undefined {
+function hardDeny(toolName: string, input: GuardInput): string | undefined {
 	if (!COMMAND_TOOLS.has(toolName)) {
 		return undefined;
 	}
-	const command = stringField(input, "command");
+	const command = input.command ?? "";
 	if (!command) {
 		return undefined;
 	}
@@ -896,10 +1008,10 @@ function hardDeny(toolName: string, input: unknown): string | undefined {
  */
 function needsConfirm(
 	toolName: string,
-	input: unknown
+	input: GuardInput
 ): { title: string } | undefined {
 	if (COMMAND_TOOLS.has(toolName)) {
-		const command = stringField(input, "command");
+		const command = input.command ?? "";
 		if (!command) {
 			return undefined;
 		}
@@ -910,15 +1022,39 @@ function needsConfirm(
 		}
 		return undefined;
 	}
-	const verb = PATH_TOOL_VERBS[toolName];
+	if (toolName === COPY_PASTE_TOOL) {
+		return copyPasteNeedsConfirm(input);
+	}
+	const verb =
+		toolName === "edit" || toolName === "write"
+			? PATH_TOOL_VERBS[toolName]
+			: undefined;
 	if (!verb) {
 		return undefined;
 	}
-	const target = stringField(input, "path");
+	const target = input.path ?? "";
 	if (!(target && pathNeedsConfirm(target))) {
 		return undefined;
 	}
 	return { title: `${verb} ${baseName(target)}` };
+}
+
+/**
+ * `copy_paste` writes `to_path` (default `path`) and, with `move`, cuts from
+ * `path` as well — so both are written targets and either can need a confirm.
+ */
+function copyPasteNeedsConfirm(
+	input: GuardInput
+): { title: string } | undefined {
+	const source = input.path ?? "";
+	const dest = input.to_path || source;
+	if (dest && pathNeedsConfirm(dest)) {
+		return { title: `paste into ${baseName(dest)}` };
+	}
+	if (input.move && source && pathNeedsConfirm(source)) {
+		return { title: `cut from ${baseName(source)}` };
+	}
+	return undefined;
 }
 
 // ── Tool result rendering ───────────────────────────────────────────────────
@@ -934,11 +1070,11 @@ interface TodoItem {
 const TODO_STATUSES = ["pending", "in_progress", "completed"] as const;
 
 /** Glyphs for the model-facing echo of the list. The desktop renders its own. */
-const TODO_GLYPHS: Readonly<Record<string, string>> = {
+const TODO_GLYPHS = {
 	completed: "[x]",
 	in_progress: "[~]",
 	pending: "[ ]",
-};
+} satisfies Record<TodoItem["status"], string>;
 
 /**
  * The last list written this session, echoed back so a follow-up TodoWrite can
@@ -969,6 +1105,10 @@ export default function (pi: ExtensionAPI) {
 	// AND NO `pi.registerCommand(…)`, EVER — see the preamble. `/plan` must fall
 	// through Pi's command dispatch as plain text to reach the `input` hook, and
 	// a registered extension command reached over ACP deadlocks the turn.
+
+	// Read per extension instance, not at module load, so each Pi process (and
+	// each test load) sees the scope its own spawn declared.
+	const toolScope = readToolScope(process.env[TOOL_SCOPE_ENV]);
 
 	/**
 	 * The to-do list. The name `TodoWrite` is a WIRE CONTRACT with the desktop,
@@ -1016,7 +1156,7 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params) {
-			const todos = (toRecord(params).todos ?? []) as TodoItem[];
+			const todos = params.todos;
 			lastTodos = Array.isArray(todos) ? todos : [];
 			return {
 				content: [{ type: "text", text: renderTodos(lastTodos) }],
@@ -1065,8 +1205,8 @@ export default function (pi: ExtensionAPI) {
 			}),
 		}),
 		async execute(_toolCallId, params) {
-			const plan = toRecord(toRecord(params).plan);
-			const title = typeof plan.title === "string" ? plan.title : "";
+			const plan = params.plan;
+			const title = plan.title;
 			if (!title.trim()) {
 				// Throwing marks the result isError:true and reports it to the model,
 				// which is far better than the desktop silently rendering nothing.
@@ -1144,7 +1284,7 @@ export default function (pi: ExtensionAPI) {
 					);
 				} catch (err) {
 					log(
-						`ExitPlanMode confirm failed (${errorText(err)}); staying in plan mode.`
+						`ExitPlanMode confirm failed (${errorText(err instanceof Error ? err : new Error(String(err)))}); staying in plan mode.`
 					);
 					approved = false;
 				}
@@ -1167,7 +1307,7 @@ export default function (pi: ExtensionAPI) {
 			persistPlanState(pi);
 			paintPlanStatus(ctx);
 			log("plan mode OFF (ExitPlanMode approved).");
-			const note = stringField(params, "plan");
+			const note = params.plan ?? "";
 			return {
 				content: [
 					{
@@ -1200,7 +1340,7 @@ export default function (pi: ExtensionAPI) {
 	 */
 	pi.on("input", (event, ctx) => {
 		try {
-			const text = typeof event.text === "string" ? event.text : "";
+			const text = event.text;
 			const match = findSentinel(text);
 			const head = text
 				.slice(0, LOG_HEAD_CHARS)
@@ -1237,7 +1377,7 @@ export default function (pi: ExtensionAPI) {
 			// prompt through unchanged is that the literal `/plan` reaches the model,
 			// which is visible and harmless. Swallowing the user's turn is not.
 			log(
-				`input hook failed (${errorText(err)}); prompt passed through unchanged.`
+				`input hook failed (${errorText(err instanceof Error ? err : new Error(String(err)))}); prompt passed through unchanged.`
 			);
 			return;
 		}
@@ -1247,6 +1387,7 @@ export default function (pi: ExtensionAPI) {
 	 * THE GATE. Ordering is the whole reason plan mode and permissions share this
 	 * file, and it is:
 	 *
+	 *     0. agent tool scope   — outside the agent's allowlist, nothing else matters
 	 *     1. plan-mode denial   — the mode the user explicitly asked for wins
 	 *     2. local hard deny    — irreversible, no prompt can make it safe
 	 *     3. gateway exec scan  — the node's own command policy, via Core
@@ -1255,7 +1396,8 @@ export default function (pi: ExtensionAPI) {
 	 * Steps 2 and 3 are both refusals, and the LOCAL one runs first on purpose:
 	 * it needs no network, so a command nothing could make safe is refused even
 	 * when Core is unreachable. Step 3 can only ever tighten the answer — it
-	 * denies, or it raises step 4's prompt for a command the local list did not
+	 * denies (including when it cannot produce a verdict at all), or it raises
+	 * step 4's prompt for a command the local list did not
 	 * know about.
 	 *
 	 * IT MUST NOT THROW. Pi's `emitToolCall` has no try/catch of its own (unlike
@@ -1265,32 +1407,56 @@ export default function (pi: ExtensionAPI) {
 	 */
 	pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
 		try {
-			if (planMode && PLAN_DENY_TOOLS.has(event.toolName)) {
+			if (toolScope && !toolScope.has(event.toolName)) {
+				log(`refused ${event.toolName}: outside this agent's tool scope.`);
+				return { block: true, reason: TOOL_SCOPE_REASON };
+			}
+			if (planMode && isPlanDeniedTool(event.toolName)) {
 				return { block: true, reason: PLAN_BLOCK_REASON };
 			}
-			const denied = hardDeny(event.toolName, event.input);
+			const input: GuardInput = {
+				command: Check(commandInputSchema, event.input)
+					? event.input.command
+					: undefined,
+				path: Check(pathInputSchema, event.input)
+					? event.input.path
+					: undefined,
+				to_path: Check(toPathInputSchema, event.input)
+					? event.input.to_path
+					: undefined,
+				move: Check(moveInputSchema, event.input)
+					? event.input.move
+					: undefined,
+			};
+			const denied = hardDeny(event.toolName, input);
 			if (denied) {
 				log(`hard-denied ${event.toolName}.`);
 				return { block: true, reason: denied };
 			}
-			let ask = needsConfirm(event.toolName, event.input);
+			let ask = needsConfirm(event.toolName, input);
 			// Gateway governance for shell commands, between the local hard denies
 			// and the local confirm list. It runs for a subagent child too — a child
 			// cannot answer a prompt, but a `deny` needs no answer, and the child's
 			// shell is exactly as unsupervised as the parent's.
 			const command = COMMAND_TOOLS.has(event.toolName)
-				? stringField(event.input, "command")
+				? (input.command ?? "")
 				: "";
 			if (command) {
 				const verdict = await scanExecCommand(command);
-				if (verdict?.decision === "deny") {
+				if (!verdict) {
+					// Fail closed. The local lists above are a floor, not the shared
+					// deletion classifier, so an unclassified command must not run.
+					log(`no exec scan verdict for ${event.toolName}; blocking.`);
+					return { block: true, reason: SCAN_UNAVAILABLE_REASON };
+				}
+				if (verdict.decision === "deny") {
 					log(`gateway exec scan denied ${event.toolName}.`);
 					return {
 						block: true,
 						reason: `Refused by Ryu's command policy: ${verdict.reason ?? "this command is not allowed on this node"}.`,
 					};
 				}
-				if (verdict?.decision === "approval_required" && !ask) {
+				if (verdict.decision === "approval_required" && !ask) {
 					// Escalate to the same confirm the local list would have raised, so
 					// there is exactly one prompt shape for the user to learn.
 					ask = { title: `run \`${commandHead(command)}\`` };
@@ -1304,13 +1470,15 @@ export default function (pi: ExtensionAPI) {
 				// Never turn ApprovalRequired into an unattended allow.
 				return {
 					block: true,
-					reason: "This command requires interactive user approval, which is unavailable in a headless subagent.",
+					reason:
+						"This command requires interactive user approval, which is unavailable in a headless subagent.",
 				};
 			}
 			if (!uiAvailable(ctx)) {
 				return {
 					block: true,
-					reason: "This command requires interactive user approval, which is unavailable in headless mode.",
+					reason:
+						"This command requires interactive user approval, which is unavailable in headless mode.",
 				};
 			}
 			// Fails closed by construction: any ACP transport failure lands in
@@ -1323,7 +1491,9 @@ export default function (pi: ExtensionAPI) {
 			}
 			return;
 		} catch (err) {
-			log(`guard failed for ${event.toolName} (${errorText(err)}); blocking.`);
+			log(
+				`guard failed for ${event.toolName} (${errorText(err instanceof Error ? err : new Error(String(err)))}); blocking.`
+			);
 			return { block: true, reason: GUARD_ERROR_REASON };
 		}
 	});
@@ -1335,6 +1505,9 @@ export default function (pi: ExtensionAPI) {
 	 * when the tool set says otherwise. Logged either way so the miss is visible.
 	 */
 	pi.on("session_start", (_event, ctx) => {
+		// Scope first, so a rehydrated plan mode snapshots the scoped set and
+		// `ExitPlanMode` can never restore an out-of-scope tool.
+		applyToolScope(pi, toolScope);
 		try {
 			const restored = readPersistedPlanState(ctx);
 			if (restored === undefined) {
@@ -1348,7 +1521,9 @@ export default function (pi: ExtensionAPI) {
 			log(`session_start: plan mode rehydrated ${restored ? "ON" : "OFF"}.`);
 			paintPlanStatus(ctx);
 		} catch (err) {
-			log(`session_start rehydrate failed (${errorText(err)}).`);
+			log(
+				`session_start rehydrate failed (${errorText(err instanceof Error ? err : new Error(String(err)))}).`
+			);
 		}
 	});
 }

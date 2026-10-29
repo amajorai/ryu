@@ -173,6 +173,13 @@ pub fn detect_local(model_ref: &str) -> Option<DetectedCaps> {
 /// the GGUF metadata once without needing to resolve via the provenance index.
 /// Returns `false` on any read or parse failure.
 pub fn detect_local_is_diffusion(stem: &str) -> bool {
+    // stable-diffusion.cpp's diffusion GGUFs may omit the normal GGUF metadata
+    // block (the current Qwen Image 2.1 files begin directly with tensor info),
+    // so retain a narrow filename fallback for the official Qwen Image family.
+    let lower = stem.to_ascii_lowercase();
+    if lower.starts_with("qwen_image_2.1-") || lower.starts_with("qwen-image-2.1-") {
+        return true;
+    }
     let path = installed::model_file_path(stem);
     gguf::read_metadata(&path)
         .ok()
@@ -223,10 +230,10 @@ fn config_option_is_reasoning(opt: &serde_json::Value) -> bool {
         .any(|m| hay.contains(m))
 }
 
-// ── Override store (`~/.ryu/agent-capability-overrides.json`) ─────────────────
+// ── Override store (`<data dir>/state/agent-capability-overrides.json`) ───────
 
 fn store_path() -> PathBuf {
-    crate::ryu_dir().join("agent-capability-overrides.json")
+    ryu_sidecar_runtime::layout::state_path(&crate::ryu_dir(), "agent-capability-overrides.json")
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -508,6 +515,14 @@ mod tests {
         .unwrap();
         assert!(detect_local_is_diffusion(flux));
 
+        let qwen = "qwen_image_2.1-Q4_K";
+        std::fs::write(
+            installed::model_file_path(qwen),
+            b"not-a-standard-metadata-gguf",
+        )
+        .unwrap();
+        assert!(detect_local_is_diffusion(qwen));
+
         let chat = "cap-test-chat-unique-a5";
         std::fs::write(
             installed::model_file_path(chat),
@@ -520,6 +535,7 @@ mod tests {
         assert!(!detect_local_is_diffusion("cap-test-missing-unique-a6"));
 
         let _ = std::fs::remove_file(installed::model_file_path(flux));
+        let _ = std::fs::remove_file(installed::model_file_path(qwen));
         let _ = std::fs::remove_file(installed::model_file_path(chat));
     }
 }

@@ -7,8 +7,13 @@ import { useEffect, useRef, useState } from "react";
 import { useCore } from "../core/CoreContext.tsx";
 import { emptySidebarData, loadSidebarData, type SidebarData } from "./data.ts";
 
-export function useSidebarData(): { data: SidebarData; loading: boolean } {
-	const { target, url, token } = useCore();
+export interface SidebarDataState {
+	data: SidebarData;
+	loading: boolean;
+}
+
+export function useSidebarData(): SidebarDataState {
+	const { target } = useCore();
 	const [data, setData] = useState<SidebarData>(emptySidebarData);
 	const [loading, setLoading] = useState(false);
 	const reqRef = useRef(0);
@@ -27,7 +32,7 @@ export function useSidebarData(): { data: SidebarData; loading: boolean } {
 					setLoading(false);
 				}
 			});
-		// url/token (primitives) drive a reload on node switch; target is derived.
+		// The memoized target changes when the active node changes.
 	}, [target]);
 
 	return { data, loading };

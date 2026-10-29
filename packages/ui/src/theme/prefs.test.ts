@@ -2,7 +2,7 @@
 // coercion of an unknown JSON payload (Core round-trips this blob), and the
 // active-preset resolver. normalizeThemePrefs is deliberately lenient — it
 // coerces by field type and lets downstream clamp — so these tests PIN that
-// tolerant behavior rather than tightening it.
+// tolerant scalar behavior. Custom-theme collections use the complete wire schema.
 
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_CONTRAST, DEFAULT_RADIUS } from "./apply.ts";
@@ -11,11 +11,12 @@ import {
 	defaultThemePrefs,
 	normalizeThemePrefs,
 	THEME_PREFS_VERSION,
+	themePrefsSchema,
 } from "./prefs.ts";
 import {
 	DEFAULT_DARK_ID,
 	DEFAULT_LIGHT_ID,
-	type ThemeVariant,
+	THEME_VARIANTS,
 } from "./presets.ts";
 
 describe("defaultThemePrefs", () => {
@@ -123,12 +124,43 @@ describe("normalizeThemePrefs", () => {
 		expect(normalizeThemePrefs({ version: 99 }).version).toBe(99);
 	});
 
-	test("customThemes must be an array; a non-array falls back to empty", () => {
-		expect(
-			normalizeThemePrefs({ customThemes: { id: "x" } }).customThemes
-		).toEqual([]);
-		const arr = [{ id: "z" }] as unknown as ThemeVariant[];
-		expect(normalizeThemePrefs({ customThemes: arr }).customThemes).toBe(arr);
+	test("valid custom themes retain values/order using parsed array and field copies", () => {
+		const source = THEME_VARIANTS.slice(0, 2).map((variant) => ({
+			...variant,
+			tokens: { ...variant.tokens },
+			extra: "retained",
+		}));
+		expect(source).toHaveLength(2);
+		const parsed = normalizeThemePrefs({ customThemes: source }).customThemes;
+		expect(parsed).toEqual(source);
+		expect(parsed).not.toBe(source);
+		expect(parsed[0]).not.toBe(source[0]);
+		expect(parsed[0]?.tokens).not.toBe(source[0]?.tokens);
+		expect(normalizeThemePrefs({ customThemes: [] }).customThemes).toEqual([]);
+	});
+
+	test("malformed custom collections fall back without tightening scalar tolerance", () => {
+		const valid = THEME_VARIANTS[0];
+		if (!valid) {
+			throw new Error("The authored theme catalog must contain a fixture");
+		}
+		const invalidCollections = [
+			undefined,
+			null,
+			{ id: "x" },
+			[{ id: "z" }],
+			[valid, null],
+			[{ ...valid, tokens: null }],
+			[{ ...valid, mode: "neon" }],
+			[{ ...valid, preview: { ...valid.preview, primary: 3 } }],
+			[{ ...valid, tokens: { "--primary": 3 } }],
+			[{ ...valid, appearance: { radius: Number.NaN } }],
+		];
+		for (const customThemes of invalidCollections) {
+			const prefs = normalizeThemePrefs({ customThemes, contrast: Number.NaN });
+			expect(prefs.customThemes).toEqual([]);
+			expect(Number.isNaN(prefs.contrast)).toBe(true);
+		}
 	});
 
 	test("optional font fields survive only as strings", () => {
@@ -148,5 +180,20 @@ describe("activePresetId", () => {
 		const prefs = { ...defaultThemePrefs(), lightPreset: "L", darkPreset: "D" };
 		expect(activePresetId(prefs, true)).toBe("D");
 		expect(activePresetId(prefs, false)).toBe("L");
+	});
+});
+
+describe("themePrefsSchema", () => {
+	test("validates a saved wire blob without normalizing numeric appearance values", () => {
+		const prefs = { ...defaultThemePrefs(), contrast: 80, radius: 1.5 };
+		expect<typeof prefs>(themePrefsSchema.parse(prefs)).toEqual(prefs);
+	});
+	test("rejects corrupt custom theme entries before they reach a renderer", () => {
+		expect(
+			themePrefsSchema.safeParse({
+				...defaultThemePrefs(),
+				customThemes: [{ id: "custom", tokens: null }],
+			}).success
+		).toBe(false);
 	});
 });

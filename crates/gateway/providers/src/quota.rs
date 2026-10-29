@@ -55,12 +55,25 @@ struct QuotaState {
     rate_limited: bool,
     /// Unix seconds of the last update.
     updated_at: u64,
+    window_seconds: Option<u64>,
+}
+
+/// One coherent header observation. Absent fields remain unknown instead of
+/// combining stale remaining/limit values from different windows.
+#[derive(Clone, Debug)]
+pub struct QuotaObservation {
+    pub remaining: Option<u64>,
+    pub limit: Option<u64>,
+    pub reset_at: Option<u64>,
+    pub window_seconds: Option<u64>,
+    pub observed_at: u64,
 }
 
 /// Live per-provider quota snapshot store. Cheap to clone the `Arc`.
 #[derive(Default)]
 pub struct ProviderQuotas {
     states: DashMap<String, QuotaState>,
+    observations: DashMap<String, QuotaObservation>,
 }
 
 impl ProviderQuotas {
@@ -73,6 +86,24 @@ impl ProviderQuotas {
     /// set doesn't wipe previously-seen values.
     pub fn record_success(&self, provider: &str, info: &RateLimitInfo) {
         let mut e = self.states.entry(provider.to_string()).or_default();
+        let previous_reset = e.reset_at;
+        if let Some(reset) = info.reset_at {
+            if let Some(previous) = previous_reset.filter(|previous| reset > *previous) {
+                e.window_seconds = Some(reset - previous);
+            }
+        }
+        // The routing view is a complete latest observation; the metrics view
+        // below retains historical optional fields for display compatibility.
+        self.observations.insert(
+            provider.to_owned(),
+            QuotaObservation {
+                remaining: info.remaining,
+                limit: info.limit,
+                reset_at: info.reset_at,
+                window_seconds: e.window_seconds,
+                observed_at: now_secs(),
+            },
+        );
         if info.remaining.is_some() {
             e.remaining = info.remaining;
         }
@@ -102,6 +133,20 @@ impl ProviderQuotas {
         e.remaining = Some(0);
         e.rate_limited = true;
         e.updated_at = now_secs();
+        self.observations.insert(
+            provider.to_owned(),
+            QuotaObservation {
+                remaining: Some(0),
+                limit: e.limit,
+                reset_at,
+                window_seconds: e.window_seconds,
+                observed_at: e.updated_at,
+            },
+        );
+    }
+
+    pub fn observation(&self, provider: &str) -> Option<QuotaObservation> {
+        self.observations.get(provider).map(|entry| entry.clone())
     }
 
     /// A JSON object keyed by provider name, each carrying its remaining quota and
@@ -164,6 +209,55 @@ mod tests {
             ..Default::default()
         }
         .is_some());
+    }
+
+    #[test]
+    fn routing_observation_does_not_pair_new_remaining_with_old_limit() {
+        let quotas = ProviderQuotas::new();
+        quotas.record_success(
+            "openai",
+            &RateLimitInfo {
+                remaining: Some(10),
+                limit: Some(100),
+                reset_at: Some(1000),
+                retry_after: None,
+            },
+        );
+        quotas.record_success(
+            "openai",
+            &RateLimitInfo {
+                remaining: Some(20),
+                ..Default::default()
+            },
+        );
+        let observed = quotas.observation("openai").unwrap();
+        assert_eq!(observed.remaining, Some(20));
+        assert_eq!(observed.limit, None);
+        assert_eq!(observed.reset_at, None);
+    }
+
+    #[test]
+    fn routing_window_requires_two_reported_reset_boundaries() {
+        let quotas = ProviderQuotas::new();
+        quotas.record_success(
+            "openai",
+            &RateLimitInfo {
+                reset_at: Some(1000),
+                ..Default::default()
+            },
+        );
+        assert_eq!(quotas.observation("openai").unwrap().window_seconds, None);
+        quotas.record_success(
+            "openai",
+            &RateLimitInfo {
+                reset_at: Some(1060),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            quotas.observation("openai").unwrap().window_seconds,
+            Some(60)
+        );
     }
 
     #[test]

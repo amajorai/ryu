@@ -13,6 +13,7 @@ import {
 } from "@ryu/ui/components/avatar.tsx";
 import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import type { ComponentProps } from "react";
 
 /**
  * One avatar for every entity that can have a picture — user, organization,
@@ -30,6 +31,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
  */
 export function EntityAvatar({
 	className,
+	framing,
 	name,
 	seed,
 	size = "default",
@@ -37,6 +39,7 @@ export function EntityAvatar({
 	hue,
 }: {
 	className?: string;
+	framing?: ComponentProps<typeof Avatar>["framing"];
 	/** Display name, used for alt text and as the default dither seed. */
 	name: string;
 	/** Stable identity key (e.g. org id). Falls back to `name`. */
@@ -48,7 +51,7 @@ export function EntityAvatar({
 	hue?: number;
 }) {
 	return (
-		<Avatar className={cn(className)} size={size}>
+		<Avatar className={cn(className)} framing={framing} size={size}>
 			{src ? <AvatarImage alt={name} src={src} /> : null}
 			<AvatarFallback className="overflow-hidden bg-transparent p-0">
 				<DitherAvatar

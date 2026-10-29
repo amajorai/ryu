@@ -11,7 +11,6 @@ import type { ApiTarget } from "@ryuhq/core-client/client";
 import {
 	SEARCH_REALMS,
 	STORE_SECTIONS,
-	type StoreSection,
 	sectionFromPath,
 } from "../surfaces/store/sections.ts";
 
@@ -28,7 +27,7 @@ test("bare /store defaults to the plugins section", () => {
 });
 
 test("deep /store/<section> links land on that section", () => {
-	const cases: Record<string, StoreSection> = {
+	const cases = {
 		"/store/plugins": "plugins",
 		"/store/models": "models",
 		"/store/skills": "skills",
@@ -36,7 +35,7 @@ test("deep /store/<section> links land on that section", () => {
 		"/store/agents": "agents",
 		"/store/engines": "engines",
 		"/store/finetune": "finetune",
-	};
+	} as const;
 	for (const [path, section] of Object.entries(cases)) {
 		expect(sectionFromPath(path)).toBe(section);
 	}
@@ -92,9 +91,9 @@ test("the sidecar catalog is labelled 'Sidecars', not 'Apps' (stops claiming to 
 test("every search realm exposes an id, label, and callable loader", () => {
 	expect(SEARCH_REALMS.length).toBeGreaterThanOrEqual(5);
 	for (const realm of SEARCH_REALMS) {
-		expect(typeof realm.id).toBe("string");
-		expect(typeof realm.label).toBe("string");
-		expect(typeof realm.load).toBe("function");
+		expect(realm.id).toBeTypeOf("string");
+		expect(realm.label).toBeTypeOf("string");
+		expect(realm.load).toBeTypeOf("function");
 	}
 	// The plugins realm reads the real /api/plugins registry.
 	const plugins = SEARCH_REALMS.find((r) => r.id === "plugins");
@@ -103,7 +102,10 @@ test("every search realm exposes an id, label, and callable loader", () => {
 
 test("the plugins realm loader reads the configured container key and title fields", async () => {
 	let capturedUrl = "";
-	globalThis.fetch = ((url: string | URL) => {
+	const provide = (
+		...args: Parameters<typeof realFetch>
+	): ReturnType<typeof realFetch> => {
+		const [url] = args;
 		capturedUrl = String(url);
 		return Promise.resolve(
 			new Response(
@@ -113,7 +115,10 @@ test("the plugins realm loader reads the configured container key and title fiel
 				{ status: 200 }
 			)
 		);
-	}) as unknown as typeof fetch;
+	};
+	globalThis.fetch = Object.assign(provide, {
+		preconnect: realFetch.preconnect,
+	});
 
 	const plugins = SEARCH_REALMS.find((r) => r.id === "plugins");
 	const target: ApiTarget = { url: "http://node:7980", token: null };

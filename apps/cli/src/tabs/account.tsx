@@ -1,3 +1,25 @@
+import { z } from "zod";
+import {
+	type Account,
+	accountMutationResponseSchema,
+	accountsResponseSchema,
+	type LoginStart,
+	loginStartResponseSchema,
+	sessionsResponseSchema,
+} from "../core/account-response.ts";
+import {
+	type CoreAuthStatusWire as CoreAuthStatus,
+	coreAuthStatusWireSchema,
+} from "../core/auth-status-wire.ts";
+import {
+	nativeErrorMessage as errText,
+	humanizeError,
+} from "../core/native-errors.ts";
+import {
+	type SecuritySessionResponse as SessionWire,
+	securityPasswordStatusResponseSchema,
+	securitySessionResponseSchema,
+} from "../overlays/settings/account-security-response-contracts.ts";
 /* @jsxImportSource @opentui/react */
 // Account tab - parity with apps/cli's SidebarTab::Account
 // (apps/cli/src/{auth.rs,ui.rs::render_account_content,main.rs}).
@@ -17,24 +39,33 @@
 //     r = refresh, l = sign in (device flow), Shift+L = sign out active.
 //
 // Architecture note (reported as the integration gap): the rich profile fields
-// live on the CONTROL-PLANE auth backend (RYU_AUTH_URL, default
-// http://localhost:3000), NOT on Ryu Core, and there is no core-client auth
+// live on the CONTROL-PLANE auth backend (RYU_AUTH_URL; see
+// core/controlPlane.ts for the defaults), NOT on Ryu Core, and there is no core-client auth
 // module. So this tab drives the device-login/logout/status through Core
 // (/api/auth/login|status|logout via the core-client `request` primitive) and
 // fetches the profile from the auth backend with a second ApiTarget
 // { url: authBackendUrl, token } - exactly what apps/cli's auth.rs does. Core
 // hydrates the persisted token into /api/auth/status on boot
 // (apps/core/src/auth/mod.rs AuthState::new), so the bearer it returns matches
-// the ~/.ryu/auth.json token apps/cli reads.
+// the ~/.ryu/secrets/auth.json token apps/cli reads.
 
 import { useKeyboard } from "@opentui/react";
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { startAccountPolling } from "../core/account-polling.ts";
+import {
+	type AccountProbeResult,
+	startAccountPolling,
+} from "../core/account-polling.ts";
+import { AUTH_BACKEND_URL, accountBackendTarget } from "../core/authBackend.ts";
 import { useCore } from "../core/CoreContext.tsx";
+import { refreshCliIdentityAfterAccountChange } from "../core/identity.ts";
+// Best-effort open of the device-login URL; the panel always shows it too.
+import { openBrowser } from "../core/openBrowser.ts";
+import { AccountSecurity } from "../overlays/settings/account-security.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
 import { useToast } from "../ui/toast.tsx";
@@ -42,8 +73,6 @@ import type { TabProps } from "./types.ts";
 
 // The control-plane (Better-Auth) backend that owns profile/billing/sessions.
 // apps/cli reads this from RYU_AUTH_URL with the same default.
-const AUTH_BACKEND_URL =
-	process.env.RYU_AUTH_URL?.trim() || "http://localhost:3000";
 const POLL_INTERVAL_MS = 1500;
 const LOGIN_TIMEOUT_MS = 300_000;
 
@@ -54,41 +83,9 @@ interface AuthInfo {
 	name: string;
 	plan: string;
 	sessionCount: number;
+	token: string;
 	twoFactor: boolean;
 	verified: boolean;
-}
-
-interface CoreAuthStatus {
-	authenticated?: boolean;
-	pending?: boolean;
-	token?: string | null;
-	userCode?: string | null;
-	verificationUri?: string | null;
-}
-
-interface LoginStart {
-	error?: string;
-	userCode?: string | null;
-	verificationUri?: string | null;
-	verificationUriComplete?: string | null;
-}
-
-interface SessionWire {
-	user?: {
-		email?: string | null;
-		emailVerified?: boolean | null;
-		name?: string | null;
-		twoFactorEnabled?: boolean | null;
-	} | null;
-}
-
-interface PasswordWire {
-	authMethod?: string | null;
-	hasPassword?: boolean | null;
-}
-
-interface SessionsWire {
-	sessions?: unknown[];
 }
 
 interface LoginPrompt {
@@ -99,23 +96,6 @@ interface LoginPrompt {
 // One signed-in account in the local device vault Core maintains. Tokens NEVER
 // cross the wire - Core returns only these safe fields (parity with the shared
 // multi-account contract used by every bearer surface).
-interface Account {
-	active: boolean;
-	email: string;
-	image?: string | null;
-	name?: string | null;
-	userId: string;
-}
-
-interface AccountsWire {
-	accounts?: Account[];
-	activeUserId?: string | null;
-}
-
-interface MutationWire {
-	error?: string;
-	success?: boolean;
-}
 
 type Phase = "loading" | "ready";
 
@@ -136,25 +116,22 @@ function initials(account: Account): string {
 
 // Mirror apps/cli main.rs::format_plan: collapse the subscription payload into a
 // short human label.
-function formatPlan(sub: Record<string, unknown>): string {
+function formatPlan(sub: SubscriptionStatus): string {
 	const lifetime = sub.lifetime;
-	if (lifetime && typeof lifetime === "object") {
-		const lt = lifetime as Record<string, unknown>;
+	if (lifetime) {
+		const lt = lifetime;
 		if (lt.expired === true) {
 			return "Lifetime (updates expired)";
 		}
-		const until =
-			typeof lt.updatesExpiresAt === "string"
-				? (lt.updatesExpiresAt.split("T")[0] ?? "—")
-				: "—";
+		const until = lt.updatesExpiresAt?.split("T")[0] ?? "—";
 		return `Lifetime (updates until ${until})`;
 	}
 
 	const subscription = sub.subscription;
-	if (subscription && typeof subscription === "object") {
-		const s = subscription as Record<string, unknown>;
-		const status = typeof s.status === "string" ? s.status : "unknown";
-		const interval = typeof s.interval === "string" ? s.interval : "";
+	if (subscription) {
+		const s = subscription;
+		const status = s.status;
+		const interval = s.interval;
 		if (status === "trialing") {
 			return `Trial (${interval}ly after trial)`;
 		}
@@ -170,24 +147,59 @@ function formatPlan(sub: Record<string, unknown>): string {
 	return "Free";
 }
 
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
-
 type LoadResult =
 	| { kind: "coreDown"; message: string }
 	| { kind: "loggedIn"; info: AuthInfo }
 	| { kind: "loggedOut" };
 
-// One device-status probe: true once Core reports authenticated with a token.
-async function pollOnce(
+// One device-status probe of the flow `/api/auth/login` started under
+// `userCode`. Core stays `authenticated` with the previous account when an "add
+// account" flow is denied or expires, so success is read from the outcome Core
+// records for THIS code (`lastFlow`), never from `authenticated` alone.
+export async function pollOnce(
 	target: ApiTarget,
+	userCode: string | null,
 	signal?: AbortSignal
-): Promise<boolean> {
-	const status = await request<CoreAuthStatus>(target, "/api/auth/status", {
-		signal,
-	});
-	return Boolean(status.authenticated && status.token);
+): Promise<AccountProbeResult> {
+	const status = await request(
+		target,
+		"/api/auth/status",
+		{
+			signal,
+		},
+		coreAuthStatusWireSchema
+	);
+	const flow = status.lastFlow;
+	if (userCode !== null && flow?.userCode === userCode) {
+		return flow.result === "succeeded"
+			? true
+			: { failed: flow.error ?? "failed" };
+	}
+	if (status.pending) {
+		return false;
+	}
+	if (userCode === null || flow === undefined) {
+		// A Core that predates `lastFlow` (or a flow without a code) only
+		// publishes the settled state.
+		return Boolean(status.authenticated && status.token);
+	}
+	// Core is no longer waiting and recorded no outcome for this code: the flow
+	// was cancelled (sign-out) or replaced by another one.
+	return { failed: "cancelled" };
+}
+
+// Human copy for a device flow that ended without signing in.
+function describeFlowFailure(reason: string): string {
+	if (reason === "access_denied") {
+		return "Sign-in was denied";
+	}
+	if (reason === "device_code_expired" || reason === "timeout") {
+		return "Sign-in code expired";
+	}
+	if (reason === "cancelled") {
+		return "Sign-in was cancelled";
+	}
+	return `Sign-in failed: ${reason}`;
 }
 
 // Resolve the full account state in one pass (no setState - the caller applies it
@@ -199,9 +211,14 @@ async function fetchAuth(
 ): Promise<LoadResult> {
 	let status: CoreAuthStatus;
 	try {
-		status = await request<CoreAuthStatus>(target, "/api/auth/status", {
-			signal,
-		});
+		status = await request(
+			target,
+			"/api/auth/status",
+			{
+				signal,
+			},
+			coreAuthStatusWireSchema
+		);
 	} catch (err) {
 		return { kind: "coreDown", message: errText(err) };
 	}
@@ -210,37 +227,54 @@ async function fetchAuth(
 		return { kind: "loggedOut" };
 	}
 
-	const authTarget: ApiTarget = { url: AUTH_BACKEND_URL, token };
+	const authTarget = accountBackendTarget(token);
 	let session: SessionWire;
 	try {
-		session = await request<SessionWire>(authTarget, "/api/auth/get-session", {
-			signal,
-		});
+		session = await request(
+			authTarget,
+			"/api/auth/get-session",
+			{
+				signal,
+			},
+			securitySessionResponseSchema
+		);
 	} catch {
 		return { kind: "loggedOut" };
 	}
-	const user = session.user;
+	const user = session?.user;
 	if (!user) {
 		return { kind: "loggedOut" };
 	}
 
 	const [pw, sub, sessions] = await Promise.all([
-		request<PasswordWire>(authTarget, "/api/user/password-status", {
-			signal,
-		}).catch(() => null),
-		request<Record<string, unknown>>(
+		request(
+			authTarget,
+			"/api/user/password-status",
+			{
+				signal,
+			},
+			securityPasswordStatusResponseSchema
+		).catch(() => null),
+		request(
 			authTarget,
 			"/api/billing/subscription-status",
-			{ signal }
+			{ signal },
+			appResponseValueSchema
+		)
+			.then((value) => subscriptionStatusSchema.parse(value))
+			.catch(() => null),
+		request(
+			authTarget,
+			"/api/sessions",
+			{ signal },
+			sessionsResponseSchema
 		).catch(() => null),
-		request<SessionsWire>(authTarget, "/api/sessions", { signal }).catch(
-			() => null
-		),
 	]);
 
 	return {
 		kind: "loggedIn",
 		info: {
+			token,
 			name: user.name ?? "Unknown",
 			email: user.email ?? "—",
 			verified: user.emailVerified ?? false,
@@ -260,47 +294,36 @@ async function fetchAccounts(
 	signal?: AbortSignal
 ): Promise<Account[]> {
 	try {
-		const wire = await request<AccountsWire>(target, "/api/auth/accounts", {
-			signal,
-		});
+		const wire = await request(
+			target,
+			"/api/auth/accounts",
+			{
+				signal,
+			},
+			accountsResponseSchema
+		);
 		return Array.isArray(wire.accounts) ? wire.accounts : [];
 	} catch {
 		return [];
 	}
 }
 
-// Best-effort browser open for the device-login URL. The URL is always shown in
-// the panel too (apps/cli prints it as a fallback), so failures are ignored.
-function openBrowser(url: string | null): void {
-	if (!url) {
-		return;
-	}
-	try {
-		const bun = (globalThis as { Bun?: { spawn: (cmd: string[]) => unknown } })
-			.Bun;
-		if (!bun) {
-			return;
-		}
-		const platform = process.platform;
-		let cmd: string[];
-		if (platform === "win32") {
-			cmd = ["cmd", "/c", "start", "", url];
-		} else if (platform === "darwin") {
-			cmd = ["open", url];
-		} else {
-			cmd = ["xdg-open", url];
-		}
-		bun.spawn(cmd);
-	} catch {
-		// Best-effort only - the panel shows the URL.
-	}
-}
-
-export function AccountTab({ active }: TabProps) {
+export function AccountTab({
+	active,
+	onEditingChange,
+}: TabProps & { onEditingChange?: (editing: boolean) => void }) {
 	const { target } = useCore();
 	const theme = useTheme();
 	const { notify } = useToast();
 
+	const securityEditing = useRef(false);
+	const setSecurityEditing = useCallback(
+		(editing: boolean) => {
+			securityEditing.current = editing;
+			onEditingChange?.(editing);
+		},
+		[onEditingChange]
+	);
 	const [phase, setPhase] = useState<Phase>("loading");
 	const [info, setInfo] = useState<AuthInfo | null>(null);
 	const [accounts, setAccounts] = useState<Account[]>([]);
@@ -366,33 +389,42 @@ export function AccountTab({ active }: TabProps) {
 		loginRequestRef.current = null;
 	}, []);
 
-	const startPolling = useCallback(() => {
-		stopPolling();
-		if (
-			!(mountedRef.current && scopeRef.current.active) ||
-			scopeRef.current.target !== target
-		) {
-			return;
-		}
-		pollRef.current = startAccountPolling(
-			(signal) => pollOnce(target, signal),
-			(signedIn) => {
-				pollRef.current = null;
-				if (!mountedRef.current || scopeRef.current.target !== target) {
-					return;
-				}
-				setLoginPending(false);
-				setLoginPrompt(null);
-				if (signedIn) {
-					notify("Signed in", "success");
-					loadAuth();
-				} else {
-					notify("Sign-in timed out", "error");
-				}
-			},
-			{ intervalMs: POLL_INTERVAL_MS, timeoutMs: LOGIN_TIMEOUT_MS }
-		);
-	}, [target, notify, loadAuth, stopPolling]);
+	const startPolling = useCallback(
+		(userCode: string | null) => {
+			stopPolling();
+			if (
+				!(mountedRef.current && scopeRef.current.active) ||
+				scopeRef.current.target !== target
+			) {
+				return;
+			}
+			pollRef.current = startAccountPolling(
+				(signal) => pollOnce(target, userCode, signal),
+				async (signedIn, failure) => {
+					pollRef.current = null;
+					if (!mountedRef.current || scopeRef.current.target !== target) {
+						return;
+					}
+					setLoginPending(false);
+					setLoginPrompt(null);
+					if (signedIn) {
+						await refreshCliIdentityAfterAccountChange();
+						if (!mountedRef.current || scopeRef.current.target !== target) {
+							return;
+						}
+						notify("Signed in", "success");
+						loadAuth();
+					} else if (failure === undefined) {
+						notify("Sign-in timed out", "error");
+					} else {
+						notify(describeFlowFailure(failure), "error");
+					}
+				},
+				{ intervalMs: POLL_INTERVAL_MS, timeoutMs: LOGIN_TIMEOUT_MS }
+			);
+		},
+		[target, notify, loadAuth, stopPolling]
+	);
 
 	// Device flow, shared by first sign-in AND "add account". Unlike the old
 	// single-account tab it does NOT bail when already signed in: adding a second
@@ -417,11 +449,16 @@ export function AccountTab({ active }: TabProps) {
 		notify("Starting sign-in…", "loading");
 		let start: LoginStart;
 		try {
-			start = await request<LoginStart>(target, "/api/auth/login", {
-				method: "POST",
-				body: { backendUrl: AUTH_BACKEND_URL },
-				signal: controller.signal,
-			});
+			start = await request(
+				target,
+				"/api/auth/login",
+				{
+					method: "POST",
+					body: { backendUrl: AUTH_BACKEND_URL },
+					signal: controller.signal,
+				},
+				loginStartResponseSchema
+			);
 		} catch (err) {
 			if (
 				mountedRef.current &&
@@ -460,7 +497,7 @@ export function AccountTab({ active }: TabProps) {
 			setLoginPrompt({ userCode: start.userCode ?? null, url });
 		}
 		openBrowser(url);
-		startPolling();
+		startPolling(start.userCode ?? null);
 	}, [loginPending, target, notify, startPolling, stopPolling]);
 
 	// Mirror do_logout: only acts when signed in.
@@ -472,14 +509,20 @@ export function AccountTab({ active }: TabProps) {
 		setLoginPending(false);
 		setLoginPrompt(null);
 		try {
-			await request<unknown>(target, "/api/auth/logout", { method: "POST" });
+			await request(
+				target,
+				"/api/auth/logout",
+				{ method: "POST" },
+				appResponseValueSchema
+			);
 		} catch (err) {
 			if (mountedRef.current) {
 				notify(`Sign-out failed: ${errText(err)}`, "error");
 			}
 			return;
 		}
-		if (mountedRef.current) {
+		await refreshCliIdentityAfterAccountChange();
+		if (mountedRef.current && scopeRef.current.target === target) {
 			notify("Signed out", "info");
 			loadAuth();
 		}
@@ -491,10 +534,11 @@ export function AccountTab({ active }: TabProps) {
 		async (userId: string) => {
 			notify("Switching account…", "loading");
 			try {
-				const res = await request<MutationWire>(
+				const res = await request(
 					target,
 					"/api/auth/accounts/switch",
-					{ method: "POST", body: { userId } }
+					{ method: "POST", body: { userId } },
+					accountMutationResponseSchema
 				);
 				if (res.error) {
 					if (mountedRef.current) {
@@ -508,7 +552,8 @@ export function AccountTab({ active }: TabProps) {
 				}
 				return;
 			}
-			if (mountedRef.current) {
+			await refreshCliIdentityAfterAccountChange();
+			if (mountedRef.current && scopeRef.current.target === target) {
 				notify("Switched account", "success");
 				loadAuth();
 			}
@@ -524,10 +569,11 @@ export function AccountTab({ active }: TabProps) {
 			setLoginPending(false);
 			setLoginPrompt(null);
 			try {
-				const res = await request<MutationWire>(
+				const res = await request(
 					target,
 					"/api/auth/accounts/remove",
-					{ method: "POST", body: { userId } }
+					{ method: "POST", body: { userId } },
+					accountMutationResponseSchema
 				);
 				if (res.error) {
 					if (mountedRef.current) {
@@ -541,7 +587,8 @@ export function AccountTab({ active }: TabProps) {
 				}
 				return;
 			}
-			if (mountedRef.current) {
+			await refreshCliIdentityAfterAccountChange();
+			if (mountedRef.current && scopeRef.current.target === target) {
 				notify("Signed out of account", "info");
 				loadAuth();
 			}
@@ -583,7 +630,7 @@ export function AccountTab({ active }: TabProps) {
 	}, [accounts.length]);
 
 	useKeyboard((key) => {
-		if (!active) {
+		if (!active || securityEditing.current) {
 			return;
 		}
 		const name = key.name?.toLowerCase();
@@ -625,7 +672,8 @@ export function AccountTab({ active }: TabProps) {
 		body = (
 			<ErrorView
 				hint="Press r to retry · Core may be unreachable"
-				message={coreError}
+				message={humanizeError(coreError, { url: target.url })}
+				onRetry
 			/>
 		);
 	} else {
@@ -645,7 +693,17 @@ export function AccountTab({ active }: TabProps) {
 			<text fg={theme.colors.foreground}>
 				<b>Account</b>
 			</text>
-			<box marginTop={1}>{body}</box>
+			<scrollbox flexGrow={1} marginTop={1}>
+				{body}
+				{info && !loginPending && phase === "ready" ? (
+					<AccountSecurity
+						active={active}
+						authTarget={accountBackendTarget(info.token)}
+						onEditingChange={setSecurityEditing}
+						onRefresh={loadAuth}
+					/>
+				) : null}
+			</scrollbox>
 		</box>
 	);
 }
@@ -852,3 +910,21 @@ function NotSignedInCard() {
 		</Card>
 	);
 }
+
+const subscriptionStatusSchema = z.object({
+	lifetime: z
+		.object({
+			expired: z.boolean().catch(false),
+			updatesExpiresAt: z.string().nullable().catch(null),
+		})
+		.nullable()
+		.catch(null),
+	subscription: z
+		.object({
+			status: z.string().catch("unknown"),
+			interval: z.string().catch(""),
+		})
+		.nullable()
+		.catch(null),
+});
+type SubscriptionStatus = z.infer<typeof subscriptionStatusSchema>;

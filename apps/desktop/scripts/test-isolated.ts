@@ -23,7 +23,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
 
 const files = [
-	...new Glob("{src,components}/**/*.test.{ts,tsx}").scanSync("."),
+	...new Glob("{src,components,lib,e2e}/**/*.test.{ts,tsx}").scanSync("."),
 ].sort();
 if (files.length === 0) {
 	console.error("no test files found");
@@ -61,15 +61,23 @@ if (existsSync(devEnvPath)) {
 	}
 }
 
+// A file that never settles (an awaited stream nobody closes) must fail the
+// gate, not hold it open forever with every later file unrun.
+const FILE_TIMEOUT_MS = 10 * 60 * 1000;
+
 let failed = 0;
 for (const file of files) {
 	const run = spawnSync("bun", ["test", file], {
 		stdio: "inherit",
 		env: childEnv,
+		killSignal: "SIGKILL",
+		timeout: FILE_TIMEOUT_MS,
 	});
 	if (run.status !== 0) {
 		failed += 1;
-		console.error(`FAIL ${file}`);
+		const reason =
+			run.signal === "SIGKILL" ? ` (killed after ${FILE_TIMEOUT_MS} ms)` : "";
+		console.error(`FAIL ${file}${reason}`);
 	}
 }
 console.log(`\n${files.length - failed}/${files.length} test files green`);

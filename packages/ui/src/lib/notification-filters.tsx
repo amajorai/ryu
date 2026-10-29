@@ -19,11 +19,11 @@ export interface NotificationFilterOption {
 	value: NotificationFilter;
 }
 
-const STATUS_LABELS: Record<"all" | "unread" | "archived", string> = {
+const STATUS_LABELS = {
 	all: "All",
 	unread: "Unread",
 	archived: "Archived",
-};
+} satisfies Record<"all" | "unread" | "archived", string>;
 
 const PREFERRED_LEVEL_ORDER = ["info", "success", "warning", "error"];
 const LEVEL_SEPARATOR = /[_\s-]+/;
@@ -42,12 +42,12 @@ export function notificationLevelLabel(level: string): string {
 }
 
 export function notificationFilterForLevel(level: string): NotificationFilter {
-	return `level:${normalizeNotificationLevel(level)}` as NotificationFilter;
+	return `level:${normalizeNotificationLevel(level)}`;
 }
 
 export function notificationFilterLabel(filter: NotificationFilter): string {
-	if (Object.hasOwn(STATUS_LABELS, filter)) {
-		return STATUS_LABELS[filter as keyof typeof STATUS_LABELS];
+	if (filter === "all" || filter === "unread" || filter === "archived") {
+		return STATUS_LABELS[filter];
 	}
 	return notificationLevelLabel(filter.slice("level:".length));
 }
@@ -159,8 +159,11 @@ export function NotificationFilterTabs<T extends NotificationFilterItem>({
 		<Tabs
 			className={cn("min-w-0 max-w-full", className)}
 			onValueChange={(nextValue) => {
-				if (typeof nextValue === "string") {
-					onValueChange(nextValue as NotificationFilter);
+				const selected = visibleOptions.find(
+					(option) => option.value === nextValue
+				);
+				if (selected) {
+					onValueChange(selected.value);
 				}
 			}}
 			value={value}
@@ -180,7 +183,7 @@ export function NotificationFilterTabs<T extends NotificationFilterItem>({
 					>
 						<span>{option.label}</span>
 						{showCounts ? (
-							<span className="text-[10px] tabular-nums opacity-60">
+							<span className="type-compact tabular-nums opacity-60">
 								{option.count}
 							</span>
 						) : null}

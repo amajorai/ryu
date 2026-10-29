@@ -1,8 +1,11 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { ExpandableQRCode } from "@ryu/ui/components/qr-code.tsx";
 import { buildRyuDeepLink } from "@ryuhq/protocol/deep-link";
 import { useEffect, useState } from "react";
+import { nodeSettingsLabel } from "@/src/components/gateway/GatewayNodeScopePicker.tsx";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { invokeWhenReady } from "@/src/lib/tauri-ready.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import { isLocalNode } from "@/src/store/useNodeStore.ts";
 
 const LOOPBACK_HOST =
 	/^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:|\/|$)/i;
@@ -16,8 +19,10 @@ function withDetectedHost(nodeUrl: string, wifiAddress: string): string {
 }
 
 function ConnectDeviceQR() {
-	const getActiveNode = useNodeStore((s) => s.getActiveNode);
-	const node = getActiveNode();
+	const tl = useLiteralMessages();
+	// The settings dialog's scoped computer (or the active node outside it). The
+	// QR carries this computer's credential, so the caption names it.
+	const node = useActiveNode();
 	const [host, setHost] = useState(node.url);
 
 	// Re-seed the editable address when the active node changes, and — because a
@@ -58,11 +63,15 @@ function ConnectDeviceQR() {
 	return (
 		<div className="flex flex-col items-center gap-3">
 			<p className="text-muted-foreground text-sm">
-				Scan with the Ryu mobile app to connect this device.
+				{isLocalNode(node)
+					? "Scan with the Ryu mobile app to connect this device."
+					: tl("Scan with the Ryu mobile app to connect {nodeName}.", {
+							nodeName: nodeSettingsLabel(node),
+						})}
 			</p>
 			<div className="w-full space-y-1">
 				<label
-					className="text-[11px] text-muted-foreground"
+					className="type-caption text-muted-foreground"
 					htmlFor="connect-device-address"
 				>
 					Address other devices use to reach this device
@@ -77,7 +86,7 @@ function ConnectDeviceQR() {
 				/>
 			</div>
 			{isLoopback && (
-				<p className="text-[11px] text-status-warning">
+				<p className="type-caption text-status-warning">
 					This address only works on this device. Enter the address other
 					devices on the same Wi-Fi use to reach it, for example
 					http://192.168.1.50:7980.

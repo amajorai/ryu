@@ -1,10 +1,12 @@
 // The draggable / resizable widget grid (react-grid-layout v2). Layout (x/y/w/h)
 // is persisted to Core per widget — never localStorage — because the AI builder
 // arranges widgets and positions must round-trip. Drag is gated to the widget
-// header via the `.widget-drag-handle` class; resize handles are themed in
-// index.css. The `layout` array is memoized on `widgets` so the frequent
-// live-value re-renders (SSE ticks every few seconds) don't change its identity
-// and abort an in-progress drag/resize gesture.
+// header via its `data-widget-drag-handle` attribute, and a control inside the
+// header opts out with the `nodrag` class (the same opt-out the canvas view's
+// React Flow honours); resize handles are themed in index.css. The `layout`
+// array is memoized on `widgets` so the frequent live-value re-renders (SSE
+// ticks every few seconds) don't change its identity and abort an in-progress
+// drag/resize gesture.
 
 import GridLayout, { type Layout, useContainerWidth } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
@@ -131,7 +133,10 @@ export function DashboardGrid({
 		<div className="h-full w-full" ref={containerRef}>
 			{mounted && (
 				<GridLayout
-					dragConfig={{ handle: ".widget-drag-handle" }}
+					dragConfig={{
+						cancel: ".nodrag",
+						handle: "[data-widget-drag-handle]",
+					}}
 					gridConfig={{
 						cols: GRID_COLS,
 						rowHeight: ROW_HEIGHT,

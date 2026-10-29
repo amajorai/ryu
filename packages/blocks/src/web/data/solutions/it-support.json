@@ -1,37 +1,10 @@
 {
   "slug": "it-support",
   "name": "IT Support",
-  "navLabel": "IT Support",
-  "category": "Engineering & Product",
   "icon": "LifeBuoy",
   "tagline": "Find answers in your runbooks and draft support replies using connected tools.",
-  "heroEyebrow": "Ryu for IT Support",
-  "heroTitle": "Ryu for it support",
-  "heroSubtitle": "Find answers in your runbooks and draft support replies using connected tools.",
-  "visualKey": "McpVisual",
-  "intro": "IT support is a firehose of repeat questions and time-sensitive tickets. Ryu connects agents to your help desk, directory, and documentation through MCP, so they answer from your real systems and procedures. Sensitive employee data stays governed and logged by the Gateway, and routine lookups can run entirely on your machine.",
-  "highlights": [
-    {
-      "title": "Wired to your systems",
-      "description": "Connect ticketing, identity, and your knowledge base through MCP, so an agent reads the real ticket and acts.",
-      "icon": "Plug"
-    },
-    {
-      "title": "Answers from your docs",
-      "description": "Ground agents on your runbooks and IT wiki in Spaces, so replies follow your procedures and cite the source.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Governed and logged",
-      "description": "The Gateway records every tool call and can redact employee data, so support actions stay auditable and compliant.",
-      "icon": "Eye"
-    },
-    {
-      "title": "Sensitive lookups local",
-      "description": "Run a local model with no telemetry for anything touching employee records, keeping personal data on your machine.",
-      "icon": "Shield"
-    }
-  ],
+  "heroTitle": "Ryu for IT support",
+  "visualKey": "WorkflowsVisual",
   "useCases": [
     {
       "title": "Ticket triage",
@@ -43,7 +16,7 @@
     },
     {
       "title": "Knowledge base answers",
-      "description": "Answer common how-to questions from your IT wiki, with a link to the exact article the answer came from."
+      "description": "Answer common how-to questions from your IT wiki, with a link to the article the answer came from."
     },
     {
       "title": "Onboarding and offboarding",
@@ -58,28 +31,18 @@
       "description": "Schedule a workflow that checks systems on an interval and opens a ticket when something looks wrong."
     }
   ],
-  "examplePrompts": [
-    "Triage this VPN connection ticket, set the priority, and draft a first reply with the most likely fix.",
-    "Walk this user through resetting MFA on a new phone using our standard procedure.",
-    "Answer how to request access to the shared finance drive and link the relevant wiki article.",
-    "Generate the offboarding checklist for a departing engineer covering accounts, access, and devices.",
-    "Turn this printer fix I just did into a runbook entry for the help desk."
-  ],
   "faq": [
     {
-      "q": "Can it act on real tickets?",
-      "a": "Yes. Ryu connects to your help desk, directory, and knowledge base through MCP, so an agent reads the actual ticket, drafts or sends a reply, and updates status, with every action logged in the Gateway."
+      "q": "Can it act on tickets?",
+      "a": "Yes. Connect your help desk, directory, and knowledge base through MCP. The agent reads the ticket, drafts or sends a reply, and updates its status."
     },
     {
       "q": "Is employee data protected?",
-      "a": "Yes. Run sensitive lookups on a local model with no telemetry to keep personal data on your machine, and when you route out the Gateway redacts data and records every call for compliance."
+      "a": "Yes. With a local model, employee data stays on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Will answers follow our procedures?",
-      "a": "Yes. Ground agents on your runbooks and IT wiki in a Space, so replies follow your documented steps and cite the article, instead of inventing a fix."
+      "a": "Yes. Add your runbooks and IT wiki to a Space, so replies follow your documented steps and cite the article."
     }
-  ],
-  "ctaTitle": "Clear the queue without cutting corners.",
-  "ctaSubtitle": "Triage, resolve, and document tickets with agents that know your systems.",
-  "ctaNote": "System connectors · Grounded in your docs · Data governed"
+  ]
 }

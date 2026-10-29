@@ -1,4 +1,5 @@
 import { decideUpdateEligibility } from "@ryu/auth/lib/plans";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useEffect, useRef } from "react";
 import { sileo } from "sileo";
 import {
@@ -375,7 +376,7 @@ interface AppUpdateOptions {
 	pinned?: boolean;
 }
 
-function isEligibleForAppUpdate(verdict: UpdateCheck): boolean {
+export function isEligibleForAppUpdate(verdict: UpdateCheck): boolean {
 	const releasedAtMs = verdict.published_at
 		? Date.parse(verdict.published_at)
 		: Number.NaN;
@@ -410,7 +411,15 @@ function sourceForUpdate(verdict: UpdateCheck, options?: AppUpdateOptions) {
 			},
 		});
 	}
-	return resolveAppUpdateSource({ channel, pin: { kind: "none" } });
+	return resolveAppUpdateSource({
+		channel,
+		latest: {
+			fromLocalNode: options?.node !== undefined && isLocalNode(options.node),
+			tag: verdict.tag,
+			version: verdict.latest,
+		},
+		pin: { kind: "none" },
+	});
 }
 
 export async function prepareUpdate(
@@ -435,7 +444,7 @@ export function showPreparedUpdatePrompt(
 	verdict: UpdateCheck,
 	options?: AppUpdateOptions
 ): void {
-	sileo.info({
+	toast.info({
 		title: `Update ready — v${verdict.latest}`,
 		description: updateToastBody({
 			notes: verdict.notes,
@@ -460,7 +469,7 @@ export function showDownloadUpdatePrompt(
 	verdict: UpdateCheck,
 	options?: AppUpdateOptions
 ): void {
-	sileo.info({
+	toast.info({
 		title: `Update available — v${verdict.latest}`,
 		description: updateToastBody({
 			notes: verdict.notes,
@@ -472,24 +481,43 @@ export function showDownloadUpdatePrompt(
 		button: {
 			title: "Download update",
 			onClick: () => {
-				prepareUpdate(verdict, options)
-					.then((prepared) => {
-						if (prepared) {
-							showPreparedUpdatePrompt(verdict, options);
-						}
-					})
-					.catch((error: unknown) => {
-						showPreparationFailure(verdict, options, error);
-					});
+				prepareAndPrompt(verdict, options).catch((error) => {
+					showPreparationFailure(verdict, options, error);
+				});
 			},
 		},
 	});
 }
 
-function showPreparationFailure(
+/**
+ * Prepare an update from a toast button and show what comes next.
+ *
+ * `prepareUpdate` answers `null` when the update is outside the updates window
+ * (it already said so), or when no signed feed could serve it — a missing source,
+ * or a release whose feed is not up yet. The second case must still leave the
+ * user a way forward; otherwise "Download update" is a button that does nothing.
+ */
+async function prepareAndPrompt(
+	verdict: UpdateCheck,
+	options: AppUpdateOptions | undefined
+): Promise<void> {
+	const prepared = await prepareUpdate(verdict, options);
+	if (prepared) {
+		showPreparedUpdatePrompt(verdict, options);
+		return;
+	}
+	if (isEligibleForAppUpdate(verdict)) {
+		offerManualDownload(
+			verdict,
+			verdict.html_url ?? "https://ryuhq.com/downloads?ref=ryu-app"
+		);
+	}
+}
+
+function showPreparationFailure<TError>(
 	verdict: UpdateCheck,
 	options: AppUpdateOptions | undefined,
-	error: unknown
+	error: TError
 ): void {
 	sileo.error({
 		title: "Update download failed",
@@ -498,15 +526,9 @@ function showPreparationFailure(
 		button: {
 			title: "Retry download",
 			onClick: () => {
-				prepareUpdate(verdict, options)
-					.then((prepared) => {
-						if (prepared) {
-							showPreparedUpdatePrompt(verdict, options);
-						}
-					})
-					.catch((retryError: unknown) => {
-						showPreparationFailure(verdict, options, retryError);
-					});
+				prepareAndPrompt(verdict, options).catch((retryError) => {
+					showPreparationFailure(verdict, options, retryError);
+				});
 			},
 		},
 	});
@@ -658,6 +680,9 @@ function canPinInstall(
 // Install only through the native prepared-artifact boundary. An explicit click
 // may download first when no verified artifact exists; automatic launch checks
 // call `prepareUpdate` instead and never enter this function.
+let installFailureToastId: string | undefined;
+let installFailureToastSequence = 0;
+
 export async function installUpdate(
 	verdict: UpdateCheck,
 	options?: AppUpdateOptions
@@ -665,6 +690,14 @@ export async function installUpdate(
 	if (!isEligibleForAppUpdate(verdict)) {
 		notifyUpdateOutsideWindow(verdict);
 		return;
+	}
+
+	// Both the Settings action and the notification's Retry enter here. Retire
+	// only this install's previous failure before starting another eligible try;
+	// native cancellation must not leave an obsolete persistent error behind.
+	if (installFailureToastId !== undefined) {
+		sileo.dismiss(installFailureToastId);
+		installFailureToastId = undefined;
 	}
 
 	const downloadsUrl =
@@ -693,31 +726,46 @@ export async function installUpdate(
 		}
 
 		progressId = sileo.info({
-			title: `Installing update v${verdict.latest}…`,
-			description: "Ryu will restart after the verified update is installed.",
+			title: `Preparing to install v${verdict.latest}…`,
+			description: "Checking the runtime release. Ryu asks before restarting.",
 			duration: null,
 		});
 		const installed = await installPreparedAppUpdate();
 		sileo.dismiss(progressId);
 		progressId = undefined;
+		if (installed === null) {
+			return;
+		}
 		if (!installed) {
 			offerManualDownload(verdict, downloadsUrl);
 			return;
 		}
 		sileo.success({
-			title: "Update installed",
-			description: "Restarting Ryu…",
+			title: "Update installer finished",
+			description: "Restarting Ryu to load the new release…",
 			duration: 2000,
 		});
 		const { relaunch } = await import("@tauri-apps/plugin-process");
 		setTimeout(() => {
-			relaunch().catch(() => undefined);
+			relaunch().catch((error) => {
+				sileo.error({
+					title: "Couldn't restart Ryu",
+					description:
+						error instanceof Error
+							? error.message
+							: "Close and reopen Ryu to finish loading the update.",
+					duration: null,
+				});
+			});
 		}, 1500);
 	} catch (error) {
 		if (progressId !== undefined) {
 			sileo.dismiss(progressId);
 		}
-		sileo.error({
+		installFailureToastId = toast.error({
+			// Sileo removes dismissed IDs after their exit animation. A failed
+			// retry needs a fresh ID so the older dismissal cannot remove it.
+			id: `ryu-app-update-install-error-${++installFailureToastSequence}`,
 			title: "Update failed",
 			description: error instanceof Error ? error.message : String(error),
 			duration: null,

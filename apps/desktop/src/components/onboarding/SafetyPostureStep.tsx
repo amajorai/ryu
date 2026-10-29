@@ -1,7 +1,7 @@
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
 import { PageHeader } from "@ryu/ui/components/page-header.tsx";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
 import { GatewayPostureCard } from "@/src/components/gateway/GatewayPostureCard.tsx";
+import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 
 interface SafetyPostureStepProps {
@@ -21,7 +21,7 @@ export function SafetyPostureStep({
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						<RyuOnboardingAvatar />
 					</div>
 					<PageHeader
 						stagger={false}

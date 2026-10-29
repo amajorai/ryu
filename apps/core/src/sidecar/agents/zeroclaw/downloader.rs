@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 
 use crate::sidecar::download_manager::{
     build_http_client, compute_sha256, extract_from_tar_gz, extract_from_zip, retry_download,
-    ryu_dir, ProgressCallback, VersionStore,
+    ProgressCallback, VersionStore,
 };
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ fn bin_path() -> PathBuf {
     } else {
         "zeroclaw"
     };
-    ryu_dir().join("bin").join(name)
+    crate::paths::bin_dir().join(name)
 }
 
 pub fn binary_path() -> PathBuf {
@@ -118,14 +118,24 @@ impl ZeroClawDownloader {
         } else {
             "tar.gz"
         };
-        let url = format!(
-            "https://github.com/zeroclaw-labs/zeroclaw/releases/download/{tag}/zeroclaw-{platform}.{ext}"
-        );
+        let asset = format!("zeroclaw-{platform}.{ext}");
+        let url =
+            format!("https://github.com/zeroclaw-labs/zeroclaw/releases/download/{tag}/{asset}");
+        // An agent binary is executed, so DownloadCenter refuses it unverified:
+        // read the digest the release itself publishes for this asset.
+        let archive_sha256 = crate::sidecar::download_manager::require_release_asset_sha256(
+            &self.client,
+            &release,
+            &asset,
+        )
+        .await
+        .context("verifying the ZeroClaw release")?;
         tracing::info!("downloading zeroclaw {tag} from {url}");
 
         // Download the asset archive through the center to a deterministic temp
         // dest (so its own `.part`/resume works), then read it back to extract.
-        let archive_dest = ryu_dir().join("tmp").join(format!("zeroclaw-{tag}.{ext}"));
+        let archive_dest =
+            crate::sidecar::download_manager::tmp_dir().join(format!("zeroclaw-{tag}.{ext}"));
         let archive_path = downloads
             .download_blocking(crate::downloads::DownloadSpec {
                 kind: crate::downloads::DownloadKind::Agent,
@@ -133,7 +143,7 @@ impl ZeroClawDownloader {
                 label: "ZeroClaw".to_string(),
                 url,
                 dest: archive_dest,
-                sha256: None,
+                sha256: Some(archive_sha256),
                 version_record: None,
             })
             .await

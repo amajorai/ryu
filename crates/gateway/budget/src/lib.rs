@@ -8,14 +8,35 @@
 //! Cross-user / team coordination (a shared budget pool across many gateways) is
 //! explicitly out of scope here; that is the control-plane coordinator (U29).
 //!
-//! Counters are lifetime charged spend totals in micro-USD. They live only in
-//! memory: a restart resets them. That matches "local counters" — durable,
-//! cross-restart accounting is the audit log's job and the coordinator's job.
+//! Counters are charged spend totals in micro-USD, kept per UTC calendar
+//! window (daily / weekly / monthly / lifetime, see [`BudgetWindow`]) in a
+//! [`SpendStore`]. The gateway backs that store with a SQLite file next to
+//! `audit.db`, so user and agent spend survives a restart and a config swap;
+//! tests and audit-less gateways use the in-memory [`MemorySpendStore`]. The
+//! per-session counter stays in memory: session ids are ephemeral.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+
+mod spend_store;
+mod window;
+
+pub use spend_store::{
+    MemorySpendStore, SpendSeal, SpendStore, SqliteSpendStore, KEY_MISMATCH, KEY_UNAVAILABLE,
+    SPEND_STORE, SUBJECT_FIELD,
+};
+pub use window::{unix_now, BudgetWindow};
+
+/// Spend-store scope label for per-user local budget counters.
+pub const SCOPE_USER: &str = "user";
+/// Spend-store scope label for per-agent local budget counters.
+pub const SCOPE_AGENT: &str = "agent";
+/// In-flight claim scope label for the per-session cap (sessions keep their
+/// recorded spend in memory, not in the [`SpendStore`]).
+const SCOPE_SESSION: &str = "session";
 
 /// Notification fan-out tier, shared across gateway stages (see the crate).
 pub use ryu_gw_contracts::AlertTier;
@@ -107,9 +128,13 @@ impl BudgetChargeInclusion {
 /// A single budget rule: a charged-spend cap plus the action taken once it is reached.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BudgetRule {
-    /// Lifetime charged-spend cap in micro-USD for this scope. 1_000_000 = $1;
-    /// 0 = unlimited.
+    /// Charged-spend cap in micro-USD for this scope over `window`.
+    /// 1_000_000 = $1; 0 = unlimited.
     pub limit: u64,
+    /// UTC calendar window `limit` is measured over. Missing in old configs →
+    /// `lifetime`, the original meaning of `limit`.
+    #[serde(default)]
+    pub window: BudgetWindow,
     /// Action to take once `limit` is reached. Defaults to `stop` so a
     /// configured limit blocks without an explicit action.
     #[serde(default)]
@@ -272,6 +297,20 @@ pub enum BudgetScope {
     User,
     Agent,
     Session,
+    /// A control-plane org-wide cap (hosted `rgw_` traffic).
+    Org,
+    /// A control-plane per-member cap (explicit entry or the member default).
+    Member,
+    /// A control-plane per-team cap.
+    Team,
+    /// A control-plane per-gateway-key cap.
+    Key,
+    /// A control-plane cap shared by every gateway key of one org service
+    /// account.
+    ServiceAccount,
+    /// A control-plane builder tag budget (Treg parity C6): spend of calls the
+    /// caller tagged with `x-ryu-tags`, counted per organization and tag.
+    Tag,
 }
 
 impl BudgetScope {
@@ -280,6 +319,12 @@ impl BudgetScope {
             BudgetScope::User => "user",
             BudgetScope::Agent => "agent",
             BudgetScope::Session => "session",
+            BudgetScope::Org => "org",
+            BudgetScope::Member => "member",
+            BudgetScope::Team => "team",
+            BudgetScope::Key => "key",
+            BudgetScope::ServiceAccount => "service_account",
+            BudgetScope::Tag => "tag",
         }
     }
 }
@@ -305,13 +350,94 @@ pub struct BudgetDecision {
     pub alert: AlertTier,
 }
 
-/// In-memory budget enforcer. Cheap to clone-check on the request path.
+/// Estimated charged micro-USD of requests that were admitted but whose spend
+/// is not recorded yet, per `(scope, id)`.
+///
+/// Spend is recorded only after a response, so without this term every request
+/// in a parallel burst would be checked against the same recorded figure and a
+/// `Stop` cap would bound only sequential traffic. Shared across config swaps
+/// (like the [`SpendStore`]) so a hot-swap never forgets the claims held by
+/// requests that are still running.
+#[derive(Default)]
+pub struct BudgetInFlight {
+    claims: DashMap<(String, String), u64>,
+}
+
+impl BudgetInFlight {
+    /// Micro-USD currently claimed by running requests for `(scope, id)`.
+    pub fn claimed_micro_usd(&self, scope: &str, id: &str) -> u64 {
+        self.claims
+            .get(&(scope.to_owned(), id.to_owned()))
+            .map_or(0, |claimed| *claimed)
+    }
+
+    /// Give a claim back. Private: the only caller is [`BudgetHold::drop`].
+    fn release(&self, key: &(String, String), amount_micro_usd: u64) {
+        let mut remove = false;
+        if let Some(mut claimed) = self.claims.get_mut(key) {
+            *claimed = claimed.saturating_sub(amount_micro_usd);
+            remove = *claimed == 0;
+        }
+        if remove {
+            // Drop the key at zero so an idle process keeps no entry per id.
+            self.claims.remove_if(key, |_, claimed| *claimed == 0);
+        }
+    }
+}
+
+/// The in-flight claims one request holds against its user, agent, and session
+/// caps, released on drop.
+///
+/// Same RAII contract as [`CreditReservation`]: the hold is moved into whatever
+/// owns the request's lifetime and released when that owner dies, on every
+/// exit path including a client hang-up or a panic. There is deliberately no
+/// public `release()`. The claim is an ESTIMATE that only decides who may
+/// start; the recorded charge after the response is what counts.
+pub struct BudgetHold {
+    in_flight: Arc<BudgetInFlight>,
+    claims: Vec<((String, String), u64)>,
+}
+
+impl Drop for BudgetHold {
+    fn drop(&mut self) {
+        for (key, amount) in &self.claims {
+            self.in_flight.release(key, *amount);
+        }
+    }
+}
+
+impl std::fmt::Debug for BudgetHold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BudgetHold")
+            .field("claims", &self.claims)
+            .finish()
+    }
+}
+
+/// The result of admitting one request against its local budgets.
+#[derive(Debug, Default)]
+pub struct BudgetAdmission {
+    /// The most restrictive user/agent decision, as
+    /// [`BudgetEnforcer::evaluate_charge`] reports it.
+    pub decision: Option<BudgetDecision>,
+    /// The per-session decision, as [`BudgetEnforcer::evaluate_session_charge`]
+    /// reports it.
+    pub session: Option<BudgetDecision>,
+    /// HOLD THIS FOR AS LONG AS THE REQUEST RUNS (until its spend is recorded).
+    /// `None` when nothing was claimed.
+    pub hold: Option<BudgetHold>,
+}
+
+/// Budget enforcer over a [`SpendStore`]. Cheap to check on the request path:
+/// every read is an in-memory map lookup.
 pub struct BudgetEnforcer {
     config: BudgetConfig,
-    /// Lifetime charged micro-USD used per user id.
-    user_usage: DashMap<String, u64>,
-    /// Lifetime charged micro-USD used per agent id.
-    agent_usage: DashMap<String, u64>,
+    /// Windowed charged micro-USD per user id (scope [`SCOPE_USER`]) and per
+    /// agent id (scope [`SCOPE_AGENT`]). Shared across config swaps.
+    store: Arc<dyn SpendStore>,
+    /// Estimated spend of admitted, still-running requests. Shared across
+    /// config swaps.
+    in_flight: Arc<BudgetInFlight>,
     /// Lifetime charged micro-USD used per session id (#510). Bounded by
     /// `MAX_SESSION_ENTRIES`; cleared wholesale on overflow.
     session_usage: DashMap<String, u64>,
@@ -319,7 +445,23 @@ pub struct BudgetEnforcer {
 }
 
 impl BudgetEnforcer {
+    /// Build an enforcer with process-memory counters (reset on restart).
     pub fn new(config: BudgetConfig) -> Self {
+        Self::with_store(config, Arc::new(MemorySpendStore::new()))
+    }
+
+    /// Build an enforcer whose user/agent counters live in `store`.
+    pub fn with_store(config: BudgetConfig, store: Arc<dyn SpendStore>) -> Self {
+        Self::with_store_and_in_flight(config, store, Arc::default())
+    }
+
+    /// Build an enforcer over a shared counter store and in-flight claim map,
+    /// so a rebuilt enforcer keeps both recorded spend and running claims.
+    pub fn with_store_and_in_flight(
+        config: BudgetConfig,
+        store: Arc<dyn SpendStore>,
+        in_flight: Arc<BudgetInFlight>,
+    ) -> Self {
         // The session cap (a single global rule) also activates enforcement, so
         // a deployment can run with ONLY a session budget configured. Forgetting
         // this would make `record` early-return and the counter never move.
@@ -327,11 +469,15 @@ impl BudgetEnforcer {
             !config.users.is_empty() || !config.agents.is_empty() || config.session.limit > 0;
         Self {
             config,
-            user_usage: DashMap::new(),
-            agent_usage: DashMap::new(),
+            store,
+            in_flight,
             session_usage: DashMap::new(),
             enabled,
         }
+    }
+
+    fn used(&self, scope: &str, id: &str, rule: &BudgetRule) -> u64 {
+        self.store.spent(scope, id, rule.window, unix_now())
     }
 
     /// Return the current budget config (used by GET /v1/config to report live state).
@@ -378,7 +524,7 @@ impl BudgetEnforcer {
 
         if let Some(uid) = user_id.filter(|s| !s.is_empty()) {
             if let Some(rule) = self.config.users.get(uid) {
-                let used = self.user_usage.get(uid).map(|v| *v).unwrap_or(0);
+                let used = self.used(SCOPE_USER, uid, rule);
                 if rule.include.includes(kind) {
                     if let Some(decision) = Self::decide(BudgetScope::User, uid, rule, used) {
                         best = Some(decision);
@@ -389,7 +535,7 @@ impl BudgetEnforcer {
 
         if let Some(aid) = agent_id.filter(|s| !s.is_empty()) {
             if let Some(rule) = self.config.agents.get(aid) {
-                let used = self.agent_usage.get(aid).map(|v| *v).unwrap_or(0);
+                let used = self.used(SCOPE_AGENT, aid, rule);
                 if rule.include.includes(kind) {
                     if let Some(decision) = Self::decide(BudgetScope::Agent, aid, rule, used) {
                         best = match best {
@@ -436,11 +582,148 @@ impl BudgetEnforcer {
         Self::decide(BudgetScope::Session, sid, &rule, used)
     }
 
+    /// Admit one request: decide its user, agent, and session budgets counting
+    /// the estimated spend of requests already running, and claim
+    /// `estimate_micro_usd` against every capped scope that does not stop it.
+    ///
+    /// A request is never counted against its own estimate, so a lone request
+    /// sees exactly what [`Self::evaluate_charge`] and
+    /// [`Self::evaluate_session_charge`] report; only concurrent requests see
+    /// each other. The returned hold must live until the request's spend is
+    /// recorded (or it fails).
+    pub fn admit_charge(
+        &self,
+        user_id: Option<&str>,
+        agent_id: Option<&str>,
+        session_id: Option<&str>,
+        kind: BudgetChargeKind,
+        estimate_micro_usd: u64,
+    ) -> BudgetAdmission {
+        if !self.enabled {
+            return BudgetAdmission::default();
+        }
+        let now = unix_now();
+        let mut claims = Vec::new();
+
+        let mut decision: Option<BudgetDecision> = None;
+        if let Some(uid) = user_id.filter(|s| !s.is_empty()) {
+            if let Some(rule) = self
+                .config
+                .users
+                .get(uid)
+                .filter(|r| r.include.includes(kind))
+            {
+                let spent = self.store.spent(SCOPE_USER, uid, rule.window, now);
+                decision = self.admit_scope(
+                    (BudgetScope::User, SCOPE_USER),
+                    uid,
+                    rule,
+                    spent,
+                    estimate_micro_usd,
+                    &mut claims,
+                );
+            }
+        }
+        if let Some(aid) = agent_id.filter(|s| !s.is_empty()) {
+            if let Some(rule) = self
+                .config
+                .agents
+                .get(aid)
+                .filter(|r| r.include.includes(kind))
+            {
+                let spent = self.store.spent(SCOPE_AGENT, aid, rule.window, now);
+                if let Some(agent) = self.admit_scope(
+                    (BudgetScope::Agent, SCOPE_AGENT),
+                    aid,
+                    rule,
+                    spent,
+                    estimate_micro_usd,
+                    &mut claims,
+                ) {
+                    decision = match decision {
+                        Some(prev) if severity(prev.action) >= severity(agent.action) => Some(prev),
+                        _ => Some(agent),
+                    };
+                }
+            }
+        }
+
+        let mut session = None;
+        if self.config.session.limit > 0 && self.config.session.include.includes(kind) {
+            if let Some(sid) = session_id.filter(|s| !s.is_empty()) {
+                let spent = self.session_usage.get(sid).map_or(0, |v| *v);
+                let rule = Self::session_rule(&self.config.session);
+                session = self.admit_scope(
+                    (BudgetScope::Session, SCOPE_SESSION),
+                    sid,
+                    &rule,
+                    spent,
+                    estimate_micro_usd,
+                    &mut claims,
+                );
+            }
+        }
+
+        let hold = (!claims.is_empty()).then(|| BudgetHold {
+            in_flight: Arc::clone(&self.in_flight),
+            claims,
+        });
+        BudgetAdmission {
+            decision,
+            session,
+            hold,
+        }
+    }
+
+    /// Decide one scope against `spent` plus the claims of running requests,
+    /// and claim `estimate` unless the scope stops this request.
+    ///
+    /// THE ONE ATOMIC STEP, as in [`WalletState::try_reserve`]: `DashMap::entry`
+    /// holds the key's write lock across read-decide-claim, so two requests
+    /// arriving together cannot both see the same headroom and both take it.
+    fn admit_scope(
+        &self,
+        (scope, label): (BudgetScope, &'static str),
+        id: &str,
+        rule: &BudgetRule,
+        spent: u64,
+        estimate: u64,
+        claims: &mut Vec<((String, String), u64)>,
+    ) -> Option<BudgetDecision> {
+        if rule.limit == 0 {
+            return None;
+        }
+        let key = (label.to_owned(), id.to_owned());
+        let (decision, claimed) = {
+            let mut in_flight = self.in_flight.claims.entry(key.clone()).or_insert(0);
+            let decision = Self::decide(scope, id, rule, spent.saturating_add(*in_flight));
+            let stopped = decision
+                .as_ref()
+                .is_some_and(|decision| decision.action == BudgetAction::Stop);
+            let claimed = estimate > 0 && !stopped;
+            if claimed {
+                *in_flight = in_flight.saturating_add(estimate);
+            }
+            (decision, claimed)
+        };
+        if claimed {
+            claims.push((key, estimate));
+        } else {
+            // `entry` inserted a zero for a key nobody holds; drop it again (the
+            // shard lock is released, so this cannot deadlock).
+            self.in_flight
+                .claims
+                .remove_if(&key, |_, claimed| *claimed == 0);
+        }
+        decision
+    }
+
     /// Project the global [`SessionBudgetConfig`] onto a transient [`BudgetRule`]
     /// so `decide`/`record` treat a session exactly like a user/agent scope.
     fn session_rule(cfg: &SessionBudgetConfig) -> BudgetRule {
         BudgetRule {
             limit: cfg.limit,
+            window: BudgetWindow::Lifetime,
             action: cfg.action,
             downgrade_to: cfg.downgrade_to.clone(),
             restrict_max_tokens: cfg.restrict_max_tokens,
@@ -505,7 +788,7 @@ impl BudgetEnforcer {
                 .get(uid)
                 .is_some_and(|rule| rule.include.includes(kind))
             {
-                *self.user_usage.entry(uid.to_string()).or_insert(0) += cost_micro_usd;
+                self.store.add(SCOPE_USER, uid, cost_micro_usd, unix_now());
             }
         }
         if let Some(aid) = agent_id.filter(|s| !s.is_empty()) {
@@ -515,7 +798,7 @@ impl BudgetEnforcer {
                 .get(aid)
                 .is_some_and(|rule| rule.include.includes(kind))
             {
-                *self.agent_usage.entry(aid.to_string()).or_insert(0) += cost_micro_usd;
+                self.store.add(SCOPE_AGENT, aid, cost_micro_usd, unix_now());
             }
         }
     }
@@ -556,10 +839,16 @@ impl BudgetEnforcer {
         *self.session_usage.entry(sid.to_string()).or_insert(0) += cost_micro_usd;
     }
 
-    /// Current lifetime charged micro-USD recorded for a user (test/observability helper).
+    /// Charged micro-USD recorded for a user in its rule's current window
+    /// (lifetime when no rule is configured). Test/observability helper.
     #[allow(dead_code)]
     pub fn user_usage(&self, user_id: &str) -> u64 {
-        self.user_usage.get(user_id).map(|v| *v).unwrap_or(0)
+        let window = self
+            .config
+            .users
+            .get(user_id)
+            .map_or(BudgetWindow::Lifetime, |rule| rule.window);
+        self.store.spent(SCOPE_USER, user_id, window, unix_now())
     }
 
     /// Current lifetime charged micro-USD recorded for a session (test/observability helper).
@@ -568,10 +857,16 @@ impl BudgetEnforcer {
         self.session_usage.get(session_id).map(|v| *v).unwrap_or(0)
     }
 
-    /// Current lifetime charged micro-USD recorded for an agent (test/observability helper).
+    /// Charged micro-USD recorded for an agent in its rule's current window
+    /// (lifetime when no rule is configured). Test/observability helper.
     #[allow(dead_code)]
     pub fn agent_usage(&self, agent_id: &str) -> u64 {
-        self.agent_usage.get(agent_id).map(|v| *v).unwrap_or(0)
+        let window = self
+            .config
+            .agents
+            .get(agent_id)
+            .map_or(BudgetWindow::Lifetime, |rule| rule.window);
+        self.store.spent(SCOPE_AGENT, agent_id, window, unix_now())
     }
 }
 
@@ -634,6 +929,24 @@ pub trait BudgetBackend: Send + Sync {
             None
         }
     }
+    /// Admit one request against its user, agent, and session budgets,
+    /// counting and claiming in-flight spend (see
+    /// [`BudgetEnforcer::admit_charge`]). Backends without in-flight tracking
+    /// keep the read-only evaluation and claim nothing.
+    fn admit_charge(
+        &self,
+        user_id: Option<&str>,
+        agent_id: Option<&str>,
+        session_id: Option<&str>,
+        kind: BudgetChargeKind,
+        _estimate_micro_usd: u64,
+    ) -> BudgetAdmission {
+        BudgetAdmission {
+            decision: self.evaluate_charge(user_id, agent_id, kind),
+            session: self.evaluate_session_charge(session_id, kind),
+            hold: None,
+        }
+    }
     /// Record charged micro-USD against user + agent counters.
     fn record(&self, user_id: Option<&str>, agent_id: Option<&str>, cost_micro_usd: u64);
     /// Record a charged amount for a specific spend category. Backends that
@@ -673,17 +986,17 @@ pub trait BudgetBackend: Send + Sync {
     }
 }
 
-/// A point-in-time snapshot of the in-memory budget spend counters, keyed by
-/// identity. Lifetime charged micro-USD totals, the same figure the budget
-/// gate compares against each scope's `limit`. In-memory only — a gateway
-/// restart resets these to empty (see the crate-level note on counter
-/// durability). Consumed by the `GET /v1/budget/spend` read surface so the
-/// desktop can show live per-scope spend.
+/// A point-in-time snapshot of the budget spend counters, keyed by identity.
+/// Each figure is the charged micro-USD in the scope rule's current window —
+/// the same figure the budget gate compares against that rule's `limit`. User
+/// and agent counters persist across restarts when the gateway has an audit
+/// database; session counters are in memory only. Consumed by the
+/// `GET /v1/budget/spend` read surface so the desktop can show live spend.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct BudgetSpendSnapshot {
-    /// Lifetime charged micro-USD per user id (only ids with a configured budget accrue).
+    /// Charged micro-USD per budgeted user id, in that rule's current window.
     pub users: HashMap<String, u64>,
-    /// Lifetime charged micro-USD per agent id (only ids with a configured budget accrue).
+    /// Charged micro-USD per budgeted agent id, in that rule's current window.
     pub agents: HashMap<String, u64>,
     /// Lifetime charged micro-USD per session id (populated only when the global session
     /// budget is active). Bounded by `MAX_SESSION_ENTRIES`.
@@ -715,6 +1028,23 @@ impl BudgetBackend for BudgetEnforcer {
     ) -> Option<BudgetDecision> {
         BudgetEnforcer::evaluate_session_charge(self, session_id, kind)
     }
+    fn admit_charge(
+        &self,
+        user_id: Option<&str>,
+        agent_id: Option<&str>,
+        session_id: Option<&str>,
+        kind: BudgetChargeKind,
+        estimate_micro_usd: u64,
+    ) -> BudgetAdmission {
+        BudgetEnforcer::admit_charge(
+            self,
+            user_id,
+            agent_id,
+            session_id,
+            kind,
+            estimate_micro_usd,
+        )
+    }
     fn record(&self, user_id: Option<&str>, agent_id: Option<&str>, cost_micro_usd: u64) {
         BudgetEnforcer::record(self, user_id, agent_id, cost_micro_usd);
     }
@@ -739,13 +1069,22 @@ impl BudgetBackend for BudgetEnforcer {
         BudgetEnforcer::record_session_charge(self, session_id, kind, cost_micro_usd);
     }
     fn spend_snapshot(&self) -> BudgetSpendSnapshot {
-        let dump = |m: &DashMap<String, u64>| -> HashMap<String, u64> {
-            m.iter().map(|e| (e.key().clone(), *e.value())).collect()
+        let now = unix_now();
+        let dump = |scope: &str, rules: &HashMap<String, BudgetRule>| -> HashMap<String, u64> {
+            rules
+                .iter()
+                .map(|(id, rule)| (id.clone(), self.store.spent(scope, id, rule.window, now)))
+                .filter(|(_, spent)| *spent > 0)
+                .collect()
         };
         BudgetSpendSnapshot {
-            users: dump(&self.user_usage),
-            agents: dump(&self.agent_usage),
-            sessions: dump(&self.session_usage),
+            users: dump(SCOPE_USER, &self.config.users),
+            agents: dump(SCOPE_AGENT, &self.config.agents),
+            sessions: self
+                .session_usage
+                .iter()
+                .map(|e| (e.key().clone(), *e.value()))
+                .collect(),
         }
     }
 }
@@ -760,6 +1099,12 @@ impl BudgetBackend for BudgetEnforcer {
 /// so a read never outlives a swap.
 pub struct BudgetRegistry {
     inner: std::sync::RwLock<BudgetRegistryInner>,
+    /// Counter store shared by every built-in rebuild, so a config swap keeps
+    /// the spend already recorded.
+    store: Arc<dyn SpendStore>,
+    /// In-flight claims shared by every built-in rebuild, so a config swap
+    /// keeps counting the requests that are still running.
+    in_flight: Arc<BudgetInFlight>,
 }
 
 struct BudgetRegistryInner {
@@ -774,10 +1119,21 @@ impl BudgetRegistry {
     pub const BUILTIN: &'static str = "builtin";
 
     /// Build the registry from config, registering a fresh built-in
-    /// [`BudgetEnforcer`] as the default active backend.
+    /// [`BudgetEnforcer`] over process-memory counters as the default active
+    /// backend.
     pub fn new(config: BudgetConfig) -> Self {
+        Self::with_store(config, Arc::new(MemorySpendStore::new()))
+    }
+
+    /// Build the registry with the built-in enforcer's counters in `store`.
+    pub fn with_store(config: BudgetConfig, store: Arc<dyn SpendStore>) -> Self {
+        let in_flight = Arc::<BudgetInFlight>::default();
         let builtin: std::sync::Arc<dyn BudgetBackend> =
-            std::sync::Arc::new(BudgetEnforcer::new(config));
+            std::sync::Arc::new(BudgetEnforcer::with_store_and_in_flight(
+                config,
+                Arc::clone(&store),
+                Arc::clone(&in_flight),
+            ));
         let mut backends = std::collections::HashMap::new();
         backends.insert(Self::BUILTIN.to_string(), std::sync::Arc::clone(&builtin));
         Self {
@@ -787,7 +1143,19 @@ impl BudgetRegistry {
                 active_id: Self::BUILTIN.to_string(),
                 active: builtin,
             }),
+            store,
+            in_flight,
         }
+    }
+
+    /// The counter store the built-in enforcer records into.
+    pub fn store(&self) -> Arc<dyn SpendStore> {
+        Arc::clone(&self.store)
+    }
+
+    /// The in-flight claims the built-in enforcer admits against.
+    pub fn in_flight(&self) -> Arc<BudgetInFlight> {
+        Arc::clone(&self.in_flight)
     }
 
     /// Clone the active backend out under a brief read lock (recovering from a
@@ -805,15 +1173,20 @@ impl BudgetRegistry {
     }
 
     /// Hot-swap the active built-in enforcer with one built from a new config.
-    /// In-memory counters reset on swap (intentional — see the module comment).
-    /// Only rebuilds the built-in; a non-built-in active backend is left in place.
+    /// User and agent counters live in the shared store and carry over; the
+    /// ephemeral per-session counters reset. Only rebuilds the built-in; a
+    /// non-built-in active backend is left in place.
     pub fn update_config(&self, config: BudgetConfig) {
         let mut guard = match self.inner.write() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
         let builtin: std::sync::Arc<dyn BudgetBackend> =
-            std::sync::Arc::new(BudgetEnforcer::new(config));
+            std::sync::Arc::new(BudgetEnforcer::with_store_and_in_flight(
+                config,
+                Arc::clone(&self.store),
+                Arc::clone(&self.in_flight),
+            ));
         guard
             .backends
             .insert(Self::BUILTIN.to_string(), std::sync::Arc::clone(&builtin));
@@ -886,6 +1259,7 @@ mod tests {
     fn rule(limit: u64, action: BudgetAction) -> BudgetRule {
         BudgetRule {
             limit,
+            window: Default::default(),
             action,
             downgrade_to: None,
             restrict_max_tokens: 256,
@@ -978,6 +1352,7 @@ mod tests {
             "agent-a".to_string(),
             BudgetRule {
                 limit: 1_000_000,
+                window: Default::default(),
                 action: BudgetAction::Stop,
                 downgrade_to: None,
                 restrict_max_tokens: 256,
@@ -1085,6 +1460,7 @@ mod tests {
     fn downgrade_with_target_keeps_downgrade() {
         let r = BudgetRule {
             limit: 10,
+            window: Default::default(),
             action: BudgetAction::Downgrade,
             downgrade_to: Some("gpt-4o-mini".to_string()),
             restrict_max_tokens: 256,
@@ -1441,16 +1817,22 @@ impl SharedBudgetState {
 /// the flag WITHOUT inventing a balance: we know the org must be gated, we do
 /// not know what it holds, and reporting a made-up number would fire a
 /// dollar-threshold rule on a transport error.
-use std::sync::Arc;
 
 /// `in_flight_micro_usd` is the third field and the one that makes the other two
 /// safe under concurrency. See [`WalletState::try_reserve`].
+///
+/// `balance_reported` timestamps the last debit's balance report, so a request
+/// can tell whether the balance its admission read from the control-plane
+/// resolve is older than that report. See
+/// [`WalletState::balance_reported_after`].
 #[derive(Default)]
 pub struct WalletState {
     accounting_unavailable: DashMap<String, bool>,
     empty: DashMap<String, bool>,
     balance_micro_usd: DashMap<String, i64>,
     in_flight_micro_usd: DashMap<String, i64>,
+    /// The last debit-reported balance and when it arrived.
+    balance_reported: DashMap<String, (i64, Instant)>,
 }
 
 /// A claim on part of an org's balance, held for the life of one request.
@@ -1545,8 +1927,31 @@ impl WalletState {
     pub fn set_org_balance(&self, org_id: &str, balance_micro_usd: i64) {
         self.balance_micro_usd
             .insert(org_id.to_string(), balance_micro_usd);
+        self.balance_reported
+            .insert(org_id.to_string(), (balance_micro_usd, Instant::now()));
         self.set_org_accounting_unavailable(org_id, false);
         self.set_org_empty(org_id, balance_micro_usd <= 0);
+    }
+
+    /// The balance the last debit reported, when it arrived AFTER
+    /// `resolved_at`; otherwise `None`.
+    ///
+    /// A request's budget comes from the resolve cache, which can be up to a
+    /// minute old, while each debit response reports the balance after that
+    /// debit. Read on its own, the cached figure lets parallel requests spend a
+    /// balance a large debit has already used. A report newer than the
+    /// resolve the request's figures came from is the fresher truth.
+    ///
+    /// `resolved_at` is that request's own resolve. Resolutions are cached per
+    /// credential and operation, so another entry of the same org resolving
+    /// later says nothing about how old this request's figures are.
+    ///
+    /// `None` keeps the resolved figure: no debit has reported, or the resolve
+    /// is at least as new as the report, as after a top-up is picked up on the
+    /// next resolve.
+    pub fn balance_reported_after(&self, org_id: &str, resolved_at: Instant) -> Option<i64> {
+        let (balance, reported_at) = *self.balance_reported.get(org_id)?;
+        (reported_at > resolved_at).then_some(balance)
     }
 
     /// The last observed balance for an org, or `None` when no debit has
@@ -1708,6 +2113,28 @@ mod wallet_state_tests {
         w.set_org_balance("org_1", 10_000_000);
         assert!(!w.is_org_accounting_unavailable("org_1"));
         assert!(!w.is_org_empty("org_1"));
+    }
+
+    #[test]
+    fn a_debit_report_counts_only_when_newer_than_the_resolve() {
+        use std::time::{Duration, Instant};
+        let w = WalletState::default();
+        let resolved = Instant::now();
+        // No debit has reported a balance.
+        assert_eq!(w.balance_reported_after("org_1", resolved), None);
+
+        // A debit reported after the resolve is the fresher figure.
+        std::thread::sleep(Duration::from_millis(2));
+        w.set_org_balance("org_1", 400_000);
+        assert_eq!(w.balance_reported_after("org_1", resolved), Some(400_000));
+        assert_eq!(w.balance_reported_after("org_2", resolved), None);
+
+        // A resolve fetched after the report (a top-up is picked up) wins.
+        std::thread::sleep(Duration::from_millis(2));
+        assert_eq!(w.balance_reported_after("org_1", Instant::now()), None);
+        // The earlier resolve still sees the report: each request compares
+        // against its own resolve, not the org's newest.
+        assert_eq!(w.balance_reported_after("org_1", resolved), Some(400_000));
     }
 
     #[test]
@@ -1919,6 +2346,7 @@ mod registry_tests {
             "u".to_string(),
             BudgetRule {
                 limit: 1,
+                window: Default::default(),
                 action: BudgetAction::Stop,
                 downgrade_to: None,
                 restrict_max_tokens: 256,
@@ -1943,6 +2371,64 @@ mod registry_tests {
         ));
     }
 
+    fn user_rule(limit: u64, window: BudgetWindow) -> BudgetConfig {
+        let mut users = std::collections::HashMap::new();
+        users.insert(
+            "u".to_string(),
+            BudgetRule {
+                limit,
+                window,
+                action: BudgetAction::Stop,
+                downgrade_to: None,
+                restrict_max_tokens: 256,
+                alert: AlertTier::default(),
+                include: BudgetChargeInclusion::default(),
+            },
+        );
+        BudgetConfig {
+            users,
+            ..BudgetConfig::default()
+        }
+    }
+
+    #[test]
+    fn update_config_keeps_recorded_spend_in_the_shared_store() {
+        let reg = BudgetRegistry::new(user_rule(10, BudgetWindow::Lifetime));
+        reg.with_active(|b| b.record(Some("u"), None, 6));
+        assert!(reg.with_active(|b| b.evaluate(Some("u"), None)).is_none());
+        // Lowering the cap must see the 6 already spent, not a reset counter.
+        reg.update_config(user_rule(5, BudgetWindow::Lifetime));
+        assert!(reg.with_active(|b| b.evaluate(Some("u"), None)).is_some());
+        assert_eq!(
+            reg.store()
+                .spent(SCOPE_USER, "u", BudgetWindow::Daily, unix_now()),
+            6
+        );
+    }
+
+    #[test]
+    fn a_daily_rule_ignores_yesterdays_spend() {
+        let store: Arc<dyn SpendStore> = Arc::new(MemorySpendStore::new());
+        store.add(SCOPE_USER, "u", 100, unix_now() - 86_400);
+        let daily =
+            BudgetEnforcer::with_store(user_rule(50, BudgetWindow::Daily), Arc::clone(&store));
+        assert!(daily.evaluate(Some("u"), None).is_none());
+        let lifetime = BudgetEnforcer::with_store(user_rule(50, BudgetWindow::Lifetime), store);
+        let decision = lifetime
+            .evaluate(Some("u"), None)
+            .expect("lifetime cap reached");
+        assert_eq!(decision.used, 100);
+    }
+
+    #[test]
+    fn rule_window_defaults_to_lifetime_and_parses() {
+        let legacy: BudgetRule = serde_json::from_str(r#"{ "limit": 10 }"#).unwrap();
+        assert_eq!(legacy.window, BudgetWindow::Lifetime);
+        let monthly: BudgetRule =
+            serde_json::from_str(r#"{ "limit": 10, "window": "monthly" }"#).unwrap();
+        assert_eq!(monthly.window, BudgetWindow::Monthly);
+    }
+
     #[test]
     fn register_then_set_active_swaps_the_live_backend() {
         let reg = BudgetRegistry::new(BudgetConfig::default());
@@ -1964,5 +2450,119 @@ mod registry_tests {
         // Unknown id is a no-op keeping the current active backend.
         assert!(!reg.set_active("nope"));
         assert_eq!(reg.active_id(), "stub");
+    }
+
+    const USD: u64 = 1_000_000;
+
+    fn admit(enforcer: &BudgetEnforcer, estimate: u64) -> BudgetAdmission {
+        enforcer.admit_charge(Some("u"), None, None, BudgetChargeKind::Model, estimate)
+    }
+
+    fn stopped(admission: &BudgetAdmission) -> bool {
+        admission
+            .decision
+            .as_ref()
+            .is_some_and(|decision| decision.action == BudgetAction::Stop)
+    }
+
+    #[test]
+    fn stop_cap_counts_in_flight_admissions() {
+        let enforcer = BudgetEnforcer::new(user_rule(5 * USD, BudgetWindow::Lifetime));
+        enforcer.record(Some("u"), None, 4_900_000);
+
+        // A lone request is never counted against its own estimate.
+        let first = admit(&enforcer, 200_000);
+        assert!(first.decision.is_none());
+        assert!(first.hold.is_some());
+        // While it runs, its claim fills the remaining headroom.
+        let second = admit(&enforcer, 200_000);
+        assert!(stopped(&second), "{:?}", second.decision);
+        assert!(second.hold.is_none(), "a stopped request claims nothing");
+        assert_eq!(second.decision.as_ref().unwrap().used, 5_100_000);
+        // The read-only check is unchanged and still sees recorded spend only.
+        assert!(enforcer.evaluate(Some("u"), None).is_none());
+
+        drop(first);
+        assert_eq!(enforcer.in_flight.claimed_micro_usd(SCOPE_USER, "u"), 0);
+        assert!(enforcer.in_flight.claims.is_empty());
+        assert!(admit(&enforcer, 200_000).decision.is_none());
+    }
+
+    #[test]
+    fn session_cap_counts_in_flight_admissions() {
+        let enforcer = BudgetEnforcer::new(BudgetConfig {
+            session: SessionBudgetConfig {
+                limit: 100,
+                ..SessionBudgetConfig::default()
+            },
+            ..BudgetConfig::default()
+        });
+        enforcer.record_session(Some("s"), 90);
+        let admit_session =
+            || enforcer.admit_charge(None, None, Some("s"), BudgetChargeKind::Model, 10);
+        let first = admit_session();
+        assert!(first.session.is_none());
+        let second = admit_session();
+        assert_eq!(
+            second.session.as_ref().map(|decision| decision.action),
+            Some(BudgetAction::Stop)
+        );
+        drop(first);
+        assert!(admit_session().session.is_none());
+        assert!(enforcer.in_flight.claims.is_empty());
+    }
+
+    #[test]
+    fn parallel_admissions_never_exceed_headroom() {
+        let enforcer = BudgetEnforcer::new(user_rule(10 * USD, BudgetWindow::Lifetime));
+        let holds = std::sync::Mutex::new(Vec::new());
+        std::thread::scope(|scope| {
+            for _ in 0..32 {
+                scope.spawn(|| {
+                    let admission = admit(&enforcer, USD);
+                    if !stopped(&admission) {
+                        holds.lock().unwrap().push(admission.hold);
+                    }
+                });
+            }
+        });
+        let holds = holds.into_inner().unwrap();
+        assert_eq!(holds.len(), 10, "exactly the headroom is admitted");
+        assert_eq!(
+            enforcer.in_flight.claimed_micro_usd(SCOPE_USER, "u"),
+            10 * USD
+        );
+        drop(holds);
+        assert!(enforcer.in_flight.claims.is_empty());
+    }
+
+    #[test]
+    fn in_flight_claims_survive_config_swap() {
+        let reg = BudgetRegistry::new(user_rule(10, BudgetWindow::Lifetime));
+        reg.with_active(|b| b.record(Some("u"), None, 5));
+        let held =
+            reg.with_active(|b| b.admit_charge(Some("u"), None, None, BudgetChargeKind::Model, 5));
+        assert!(held.decision.is_none());
+        // A rebuilt enforcer still counts the request that is running.
+        reg.update_config(user_rule(10, BudgetWindow::Lifetime));
+        let blocked =
+            reg.with_active(|b| b.admit_charge(Some("u"), None, None, BudgetChargeKind::Model, 5));
+        assert!(stopped(&blocked), "{:?}", blocked.decision);
+        drop(held);
+        assert_eq!(reg.in_flight().claimed_micro_usd(SCOPE_USER, "u"), 0);
+        let admitted =
+            reg.with_active(|b| b.admit_charge(Some("u"), None, None, BudgetChargeKind::Model, 5));
+        assert!(admitted.decision.is_none());
+    }
+
+    #[test]
+    fn backends_without_in_flight_tracking_fall_back_to_evaluate() {
+        let stub = StubBackend {
+            cfg: BudgetConfig::default(),
+            records: AtomicU64::new(0),
+        };
+        let admission = stub.admit_charge(Some("u"), None, None, BudgetChargeKind::Model, USD);
+        assert!(stopped(&admission));
+        assert!(admission.hold.is_none());
     }
 }

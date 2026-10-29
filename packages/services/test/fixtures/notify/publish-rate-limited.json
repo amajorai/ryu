@@ -1,0 +1,22 @@
+{
+  "status": 429,
+  "headers": {
+    "content-type": "application/json;charset=utf-8",
+    "retry-after": "1",
+    "x-request-id": "req_a94d3c7e10b24bdcb757a9b90039e9ad"
+  },
+  "body": {
+    "code": "rate_limited",
+    "error": {
+      "code": "rate_limited",
+      "message": "This tenant is publishing too fast; retry after the Retry-After delay.",
+      "requestId": "req_a94d3c7e10b24bdcb757a9b90039e9ad",
+      "status": 429
+    },
+    "message": "This tenant is publishing too fast; retry after the Retry-After delay.",
+    "ok": false,
+    "requestId": "req_a94d3c7e10b24bdcb757a9b90039e9ad",
+    "status": 429,
+    "type": "notify.error"
+  }
+}

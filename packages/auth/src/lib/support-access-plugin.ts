@@ -9,6 +9,7 @@ import {
 	createAuthEndpoint,
 	createAuthMiddleware,
 	getAuthoritativeSessionFromCtx,
+	getSessionFromCtx,
 } from "better-auth/api";
 import {
 	deleteSessionCookie,
@@ -22,6 +23,7 @@ import { resolveSessionForHook } from "./step-up-plugin.ts";
 import {
 	isGrantUsable,
 	isSupportActor,
+	isVerifiedSupportActor,
 	normalizeScopes,
 	resolveSupportAccessSession,
 	SUPPORT_ACCESS_RAW_SAFE_PATHS,
@@ -32,6 +34,24 @@ import {
 
 const BEARER_PREFIX = /^bearer\s+/i;
 
+/**
+ * Whether Better Auth's bearer plugin could turn this request's Authorization
+ * header into a session. That plugin reads the request header and falls back
+ * to the context headers when the first is empty, so check both sources: a
+ * bearer caller misread as a cookie caller would skip the support checks.
+ */
+function hasBearerAuthorization(ctx: {
+	headers?: Headers;
+	request?: Request;
+}): boolean {
+	return [
+		ctx.request?.headers.get("authorization"),
+		ctx.headers?.get("authorization"),
+	].some((authorization) =>
+		Boolean(authorization && BEARER_PREFIX.test(authorization))
+	);
+}
+
 const supportSessionBody = z.object({
 	reason: z.string().trim().min(1).max(500),
 	scopes: z.array(z.string().trim().min(1).max(64)).min(1).optional(),
@@ -40,19 +60,16 @@ const supportSessionBody = z.object({
 
 const SUPPORT_SESSION_MAX_DURATION_MS = 60 * 60 * 1000;
 
-function hasAdminRole(role: unknown): boolean {
-	return (
-		typeof role === "string" &&
-		role
-			.split(",")
-			.map((value) => value.trim())
-			.includes("admin")
-	);
-}
+const hasAdminRole = z
+	.string()
+	.transform((role) =>
+		role.split(",").some((value) => value.trim() === "admin")
+	)
+	.catch(false).parse;
 
 function isValidScopeList(input: readonly unknown[]): boolean {
 	const normalized = input.map((value) =>
-		typeof value === "string" ? value.trim() : ""
+		z.string().trim().catch("").parse(value)
 	);
 	const known = normalizeScopes(normalized);
 	return (
@@ -84,7 +101,7 @@ async function closeSupportAudit(
  */
 async function restoreAdminSessionAfterDeletedTarget(
 	ctx: Parameters<typeof getAuthoritativeSessionFromCtx>[0]
-): Promise<unknown | null> {
+) {
 	const adminCookie = ctx.context.createAuthCookie("admin_session");
 	const raw = await ctx.getSignedCookie(adminCookie.name, ctx.context.secret);
 	if (!raw) {
@@ -136,7 +153,7 @@ async function restoreAdminSessionAfterDeletedTarget(
  * keeps native session lookup, expiry, and `admin_session` restoration intact
  * without making a second token format or a server-only bypass header.
  */
-export function supportAccessPlugin(): BetterAuthPlugin {
+export function supportAccessPlugin() {
 	return {
 		id: "ryu-support-access",
 		endpoints: {
@@ -162,7 +179,7 @@ export function supportAccessPlugin(): BetterAuthPlugin {
 					}
 
 					const actor = actorSession.user;
-					if (!(isSupportActor(actor.email) && hasAdminRole(actor.role))) {
+					if (!(isVerifiedSupportActor(actor) && hasAdminRole(actor.role))) {
 						throw supportError(
 							SUPPORT_ACCESS_REQUIRED,
 							"This account is not an allowlisted support actor"
@@ -189,7 +206,9 @@ export function supportAccessPlugin(): BetterAuthPlugin {
 							message: "Target user not found",
 						});
 					}
-					const targetRole = (target as { role?: unknown }).role;
+					const targetRole = z
+						.object({ role: z.string().optional() })
+						.parse(target).role;
 					if (hasAdminRole(targetRole) || isSupportActor(target.email)) {
 						throw supportError(
 							SUPPORT_ACCESS_REQUIRED,
@@ -247,7 +266,15 @@ export function supportAccessPlugin(): BetterAuthPlugin {
 					}
 
 					const now = new Date();
-					const grantExpiresAt = new Date(grant.expiresAt as Date | string);
+					const grantExpiresAt = z
+						.union([
+							z.date(),
+							z
+								.string()
+								.transform((value) => new Date(value))
+								.pipe(z.date()),
+						])
+						.parse(grant.expiresAt);
 					const nativeExpiresAt = new Date(
 						now.getTime() + SUPPORT_SESSION_MAX_DURATION_MS
 					);
@@ -340,6 +367,45 @@ export function supportAccessPlugin(): BetterAuthPlugin {
 						);
 						throw new APIError("INTERNAL_SERVER_ERROR", {
 							message: "Support access could not be audited",
+						});
+					}
+
+					// The owner's status read deletes support sessions that stay unbound
+					// past a grace period, conditional on the `updatedAt` it read. Touch
+					// the row now that its audit binding is durable: either the touch
+					// lands first and the sweep leaves the row, or the row is already
+					// gone and this start fails instead of handing off a dead session.
+					let bound: unknown;
+					try {
+						bound = await ctx.context.internalAdapter.updateSession(
+							supportSession.token,
+							{ updatedAt: new Date() }
+						);
+					} catch (error) {
+						try {
+							await ctx.context.internalAdapter.deleteSession(
+								supportSession.token
+							);
+							await closeSupportAudit(supportSession.id, "stopped");
+						} catch (cleanupError) {
+							ctx.context.logger.error(
+								"Failed to clean up unbound support session",
+								cleanupError
+							);
+						}
+						ctx.context.logger.error(
+							"Failed to bind support session to its audit",
+							error
+						);
+						throw new APIError("INTERNAL_SERVER_ERROR", {
+							message: "Support access is temporarily unavailable",
+						});
+					}
+					if (!bound) {
+						await closeSupportAudit(supportSession.id, "expired");
+						throw new APIError("CONFLICT", {
+							message:
+								"The support session lapsed before it could start. Start it again.",
 						});
 					}
 
@@ -459,7 +525,55 @@ export function supportAccessPlugin(): BetterAuthPlugin {
 					matcher: () => true,
 					handler: createAuthMiddleware(async (ctx) => {
 						const path = ctx.path ?? "";
-						const session = await resolveSessionForHook(ctx);
+						let cachedSupportSession = false;
+						if (path === "/get-session" && !hasBearerAuthorization(ctx)) {
+							// Display reads are what the cookie cache exists for, and every
+							// client polls this route. The signed cache is bound to the
+							// session token and carries `impersonatedBy`, so an ordinary
+							// session can be answered from it, while a support session still
+							// falls through to the live store and grant checks below. Bearer
+							// callers are excluded: their session is not in the cookies.
+							// Honors the caller's own `disableCookieCache`.
+							const cached = await getSessionFromCtx(ctx);
+							// Never leave the cached copy behind for later hooks to trust.
+							ctx.context.session = null;
+							if (!cached?.session?.impersonatedBy) {
+								return;
+							}
+							cachedSupportSession = true;
+						}
+						let session = await resolveSessionForHook(ctx);
+						if (cachedSupportSession && !session?.session) {
+							// The handler answers this route from the same signed cache, so
+							// a support session the store no longer has would otherwise be
+							// served until the cache expires.
+							throw supportError(
+								SUPPORT_ACCESS_REQUIRED,
+								"Support session has ended"
+							);
+						}
+						if (session?.session?.impersonatedBy) {
+							// A cached support cookie must not survive deletion of the
+							// authoritative target session, even while its grant is live.
+							const authoritative = session.session.token
+								? await ctx.context.internalAdapter.findSession(
+										session.session.token
+									)
+								: null;
+							ctx.context.session = authoritative;
+							session = authoritative;
+							ctx.query = { ...ctx.query, disableCookieCache: true };
+							if (
+								!session?.session &&
+								path !== "/admin/stop-impersonating" &&
+								path !== "/sign-out"
+							) {
+								throw supportError(
+									SUPPORT_ACCESS_REQUIRED,
+									"Support session has ended"
+								);
+							}
+						}
 						if (path === "/admin/stop-impersonating" && !session?.session) {
 							// Revoke/expiry may have removed the target row before the
 							// operator clicked Stop. Restore the original Better Auth
@@ -492,11 +606,7 @@ export function supportAccessPlugin(): BetterAuthPlugin {
 							SUPPORT_ACCESS_RAW_SAFE_PATHS.has(path) &&
 							path !== "/get-session"
 						) {
-							const authorization =
-								ctx.request?.headers.get("authorization") ??
-								ctx.headers?.get("authorization");
-							const isBearerRequest =
-								authorization && BEARER_PREFIX.test(authorization);
+							const isBearerRequest = hasBearerAuthorization(ctx);
 							const adminCookie = ctx.context.createAuthCookie("admin_session");
 							const adminSessionCookie = isBearerRequest
 								? await ctx.getSignedCookie(
@@ -568,7 +678,20 @@ export function supportAccessPlugin(): BetterAuthPlugin {
 							});
 						}
 						if (path === "/get-session") {
-							return;
+							// The issuer caps the native row at the grant expiry (<= 1h).
+							// A bearer request carries no dont-remember cookie, so Better
+							// Auth's sliding refresh would otherwise extend that row to the
+							// ordinary account lifetime on first use. Hook mutations of
+							// `ctx` do not reach the endpoint; return the query override.
+							return {
+								context: {
+									query: {
+										...ctx.query,
+										disableCookieCache: true,
+										disableRefresh: true,
+									},
+								},
+							};
 						}
 						throw supportError(
 							SUPPORT_ACCESS_SCOPE_REQUIRED,
@@ -634,7 +757,7 @@ export function supportAccessPlugin(): BetterAuthPlugin {
 				},
 			],
 		},
-	};
+	} satisfies BetterAuthPlugin;
 }
 
 export type { SupportAccessScope };

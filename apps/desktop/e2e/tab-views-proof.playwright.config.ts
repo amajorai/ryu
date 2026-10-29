@@ -18,6 +18,10 @@ export default defineConfig({
 			use: {
 				...devices["Desktop Chrome"],
 				viewport: { height: 900, width: 1440 },
+				// Opt-in installed Chromium when the locked Playwright build is absent.
+				launchOptions: {
+					executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+				},
 			},
 		},
 	],

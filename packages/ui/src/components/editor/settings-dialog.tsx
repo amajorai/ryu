@@ -1,10 +1,7 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
-
-/* DEMO ONLY, DO NOT USE IN PRODUCTION */
-
 import { CopilotPlugin } from "@platejs/ai/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 import {
 	Command,
@@ -39,7 +36,7 @@ import {
 	Wand2Icon,
 } from "lucide-react";
 import { useEditorRef } from "platejs/react";
-
+import { type SubmitEvent, useState } from "react";
 import { aiChatPlugin } from "./plugins/ai-kit.tsx";
 
 interface Model {
@@ -221,6 +218,7 @@ const DEFAULT_MODEL: Model = models[7] ??
 	};
 
 export function SettingsDialog() {
+	const tl = useLiteralMessages();
 	const editor = useEditorRef();
 
 	const [tempModel, setTempModel] = useState<Model>(DEFAULT_MODEL);
@@ -232,7 +230,7 @@ export function SettingsDialog() {
 	const [open, setOpen] = useState(false);
 	const [openModel, setOpenModel] = useState(false);
 
-	const handleSubmit = (e: FormEvent) => {
+	const handleSubmit = (e: SubmitEvent<HTMLFormElement>) => {
 		e.preventDefault();
 
 		// Update AI chat options
@@ -270,7 +268,7 @@ export function SettingsDialog() {
 		<div className="group relative">
 			<div className="flex items-center justify-between">
 				<label
-					className="absolute top-1/2 block -translate-y-1/2 cursor-text px-1 text-muted-foreground/70 text-sm transition-all group-focus-within:pointer-events-none group-focus-within:top-0 group-focus-within:cursor-default group-focus-within:font-medium group-focus-within:text-foreground group-focus-within:text-xs has-[+input:not(:placeholder-shown)]:pointer-events-none has-[+input:not(:placeholder-shown)]:top-0 has-[+input:not(:placeholder-shown)]:cursor-default has-[+input:not(:placeholder-shown)]:font-medium has-[+input:not(:placeholder-shown)]:text-foreground has-[+input:not(:placeholder-shown)]:text-xs"
+					className="absolute top-1/2 block -translate-y-1/2 cursor-text px-1 text-muted-foreground/70 text-sm transition-[top,font-size,color] group-focus-within:pointer-events-none group-focus-within:top-0 group-focus-within:cursor-default group-focus-within:font-medium group-focus-within:text-foreground group-focus-within:text-xs has-[+input:not(:placeholder-shown)]:pointer-events-none has-[+input:not(:placeholder-shown)]:top-0 has-[+input:not(:placeholder-shown)]:cursor-default has-[+input:not(:placeholder-shown)]:font-medium has-[+input:not(:placeholder-shown)]:text-foreground has-[+input:not(:placeholder-shown)]:text-xs"
 					htmlFor={label}
 				>
 					<span className="inline-flex bg-background px-2">{label}</span>
@@ -294,7 +292,7 @@ export function SettingsDialog() {
 					variant="ghost"
 				>
 					<ExternalLinkIcon className="size-4" />
-					<span className="sr-only">Get {label}</span>
+					<span className="sr-only">{tl("Get {label}", { label })}</span>
 				</Button>
 			</div>
 
@@ -333,6 +331,7 @@ export function SettingsDialog() {
 			<DialogTrigger
 				render={
 					<Button
+						aria-label="Settings"
 						className={cn(
 							"group fixed right-4 bottom-4 z-50 size-10 overflow-hidden",
 							"rounded-full shadow-md hover:shadow-lg"
@@ -356,8 +355,8 @@ export function SettingsDialog() {
 					{/* AI Settings Group */}
 					<div className="space-y-4">
 						<div className="flex items-center gap-2">
-							<div className="size-8 rounded-full bg-purple-100 p-2 dark:bg-purple-900">
-								<Wand2Icon className="size-4 text-purple-600 dark:text-purple-400" />
+							<div className="size-8 rounded-full bg-muted p-2 dark:bg-muted">
+								<Wand2Icon className="size-4 text-primary dark:text-primary" />
 							</div>
 							<h4 className="font-medium">AI</h4>
 						</div>
@@ -390,7 +389,7 @@ export function SettingsDialog() {
 									</PopoverTrigger>
 									<PopoverContent className="w-full p-0">
 										<Command>
-											<CommandInput placeholder="Search model..." />
+											<CommandInput placeholder="Search model…" />
 											<CommandEmpty>No model found.</CommandEmpty>
 											<CommandList>
 												<CommandGroup>

@@ -1,3 +1,4 @@
+import { isNativeFunction } from "@ryu/ui/lib/native-primitive-observation.ts";
 import {
 	type RefObject,
 	useCallback,
@@ -56,7 +57,7 @@ export function useTranscriptAnchor({
 			}
 			const behavior = options?.behavior ?? "smooth";
 			const top = el.offsetTop - topOffset;
-			if (typeof viewport.scrollTo === "function") {
+			if (isNativeFunction(viewport.scrollTo)) {
 				viewport.scrollTo({ top, behavior });
 			} else {
 				viewport.scrollTop = top;

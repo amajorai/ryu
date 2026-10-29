@@ -5,6 +5,7 @@ import {
 	COMMAND_SPECS,
 	commandHelpRows,
 	dispatchCommand,
+	isAdvertisedAgentCommand,
 	parseCommand,
 	renderCommandHelp,
 	resolveCommand,
@@ -38,6 +39,20 @@ test("parses aliases and preserves unknown slash commands for a warning", () => 
 		kind: "unknown",
 		message: "Unknown command: /not-a-command",
 	});
+});
+
+test("only whole unknown slash commands advertised by the active ACP agent pass through", () => {
+	const advertised = [{ name: "acp-review" }];
+	expect(isAdvertisedAgentCommand("/acp-review --strict", advertised)).toBe(
+		true
+	);
+	expect(isAdvertisedAgentCommand("/acp-reviewer --strict", advertised)).toBe(
+		false
+	);
+	expect(isAdvertisedAgentCommand("/group team-review", advertised)).toBe(
+		false
+	);
+	expect(isAdvertisedAgentCommand("plain chat text", advertised)).toBe(false);
 });
 
 test("returns pure intents for local, overlay, and pass-through commands", () => {
@@ -81,4 +96,15 @@ test("derives help rows and help text from the registry", () => {
 	expect(help).toContain("/queue [list|clear|drop <id>|up <id>|down <id>]");
 	expect(help).toContain("/b");
 	expect(help).toContain("choose ACP settings");
+});
+
+test("takesArguments agrees with each usage line and gates run-on-Enter", () => {
+	for (const spec of COMMAND_SPECS) {
+		expect({ name: spec.name, takesArguments: spec.takesArguments }).toEqual({
+			name: spec.name,
+			takesArguments: /[<[]/.test(spec.usage),
+		});
+	}
+	expect(resolveCommand("new")?.takesArguments).toBe(false);
+	expect(resolveCommand("model")?.takesArguments).toBe(true);
 });

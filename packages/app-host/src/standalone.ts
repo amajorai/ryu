@@ -1,9 +1,14 @@
+import { z } from "zod";
+
+const standaloneManifestSchema = z.record(z.string(), z.unknown());
+export type StandaloneAppManifest = z.infer<typeof standaloneManifestSchema>;
+
 /** Shared contract for a Desktop host built around one Ryu app. */
 
 export interface StandaloneAppBundle {
 	appId: string;
 	appName: string;
-	manifest: Record<string, unknown>;
+	manifest: StandaloneAppManifest;
 	schemaVersion: 1;
 	sidecars: readonly StandaloneSidecarResource[];
 	uiCode: string | null;
@@ -30,36 +35,33 @@ export interface StandaloneAppRegistry {
 
 const MAX_STANDALONE_APP_INSTALLATIONS = 128;
 
-function isStandaloneAppId(value: unknown): value is string {
-	return (
-		typeof value === "string" &&
-		value.length > 0 &&
-		value.length <= 200 &&
-		/^[a-zA-Z0-9@._/-]+$/.test(value) &&
-		!value.startsWith("/") &&
-		!value.endsWith("/") &&
-		!value.includes("//") &&
-		value.split("/").every((segment) => segment !== "." && segment !== "..")
+const standaloneAppIdSchema = z
+	.string()
+	.min(1)
+	.max(200)
+	.regex(/^[a-zA-Z0-9@._/-]+$/)
+	.refine(
+		(value) =>
+			!(value.startsWith("/") || value.endsWith("/") || value.includes("//")) &&
+			value.split("/").every((segment) => segment !== "." && segment !== "..")
 	);
+
+const standaloneAppInstallationSchema = z.object({
+	appId: standaloneAppIdSchema,
+	installedAt: z.string().min(1).max(80),
+	version: z.string().min(1).max(100),
+});
+
+function isStandaloneAppInstallation<T>(
+	value: T
+): value is T & StandaloneAppInstallation {
+	return standaloneAppInstallationSchema.safeParse(value).success;
 }
 
-function isStandaloneAppInstallation(
-	value: unknown
-): value is StandaloneAppInstallation {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		return false;
-	}
-	const candidate = value as Record<string, unknown>;
-	return (
-		isStandaloneAppId(candidate.appId) &&
-		typeof candidate.version === "string" &&
-		candidate.version.length > 0 &&
-		candidate.version.length <= 100 &&
-		typeof candidate.installedAt === "string" &&
-		candidate.installedAt.length > 0 &&
-		candidate.installedAt.length <= 80
-	);
-}
+const standaloneAppRegistrySchema = z.object({
+	apps: z.array(z.unknown()),
+	schemaVersion: z.literal(1),
+});
 
 function dedupeStandaloneAppInstallations(
 	apps: readonly StandaloneAppInstallation[]
@@ -81,19 +83,10 @@ export function parseStandaloneAppRegistry(
 		return [];
 	}
 	try {
-		const parsed: unknown = JSON.parse(value);
-		if (
-			typeof parsed !== "object" ||
-			parsed === null ||
-			Array.isArray(parsed) ||
-			(parsed as { schemaVersion?: unknown }).schemaVersion !== 1
-		) {
-			return [];
-		}
-		const apps = (parsed as { apps?: unknown }).apps;
-		return Array.isArray(apps)
+		const parsed = standaloneAppRegistrySchema.safeParse(JSON.parse(value));
+		return parsed.success
 			? dedupeStandaloneAppInstallations(
-					apps.filter(isStandaloneAppInstallation)
+					parsed.data.apps.filter(isStandaloneAppInstallation)
 				)
 			: [];
 	} catch {
@@ -200,62 +193,34 @@ export function standaloneCompanionId(
 	);
 }
 
+const standaloneSidecarSchema = z.looseObject({
+	command: z.string().nullable(),
+	commandEnv: z.string().optional(),
+	mode: z.enum(["core-provisioned", "embedded"]),
+	name: z.string(),
+	resourcePath: z.string().optional(),
+	sha256: z.string().optional(),
+});
+
+const standaloneAppBundleSchema = z.object({
+	appId: z.string().trim().min(1),
+	appName: z.string().trim().min(1),
+	manifest: standaloneManifestSchema,
+	schemaVersion: z.literal(1),
+	sidecars: z.array(standaloneSidecarSchema),
+	uiCode: z.string().nullable(),
+	version: z.string().trim().min(1),
+});
+
+const standaloneAppBundleBoundarySchema = z
+	.unknown()
+	.transform((value): StandaloneAppBundle | null => {
+		const parsed = standaloneAppBundleSchema.safeParse(value);
+		return parsed.success ? parsed.data : null;
+	});
+
 /** Validate the native carriage before it crosses the Tauri bridge. */
-export function parseStandaloneAppBundle(
-	value: unknown
-): StandaloneAppBundle | null {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		return null;
-	}
-	const record = value as Record<string, unknown>;
-	const schemaVersion = record.schemaVersion;
-	const appId = typeof record.appId === "string" ? record.appId.trim() : "";
-	const appName =
-		typeof record.appName === "string" ? record.appName.trim() : "";
-	const version =
-		typeof record.version === "string" ? record.version.trim() : "";
-	const manifest = record.manifest;
-	const sidecars = record.sidecars;
-	const uiCode = record.uiCode;
-	if (
-		schemaVersion !== 1 ||
-		!(appId && appName) ||
-		!version ||
-		typeof manifest !== "object" ||
-		manifest === null ||
-		Array.isArray(manifest) ||
-		!Array.isArray(sidecars) ||
-		!sidecars.every((sidecar) => {
-			if (typeof sidecar !== "object" || sidecar === null) {
-				return false;
-			}
-			const candidate = sidecar as Record<string, unknown>;
-			return (
-				typeof candidate.name === "string" &&
-				(candidate.mode === "core-provisioned" ||
-					candidate.mode === "embedded") &&
-				(candidate.command === null || typeof candidate.command === "string") &&
-				(candidate.commandEnv === undefined ||
-					typeof candidate.commandEnv === "string") &&
-				(candidate.resourcePath === undefined ||
-					typeof candidate.resourcePath === "string") &&
-				(candidate.sha256 === undefined || typeof candidate.sha256 === "string")
-			);
-		}) ||
-		(uiCode !== null && typeof uiCode !== "string")
-	) {
-		return null;
-	}
-	return {
-		schemaVersion: 1,
-		appId,
-		appName,
-		version,
-		manifest: manifest as Record<string, unknown>,
-		sidecars: sidecars as StandaloneSidecarResource[],
-		uiCode: uiCode as string | null,
-	};
-}
+export const parseStandaloneAppBundle = standaloneAppBundleBoundarySchema.parse;
 
 export const standalonePortOffsetBounds = {
 	max: STANDALONE_PORT_OFFSET_MIN + STANDALONE_PORT_OFFSET_SPAN - 1,

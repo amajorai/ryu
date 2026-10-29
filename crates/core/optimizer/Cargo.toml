@@ -1,0 +1,17 @@
+[package]
+name = "ryu-optimizer"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Network-free agent optimizer for Ryu: turns an agent's production history into replay cases, reads Gateway eval results, and proposes reversible model and tool changes."
+repository = "https://github.com/amajorai/ryu"
+
+[dependencies]
+anyhow = "1"
+ryu-json-store = { path = "../json-store", version = "0.5.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -8,8 +8,8 @@ import {
 	Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -17,9 +17,9 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { openExternal } from "@/lib/tauri-bridge.ts";
@@ -32,11 +32,13 @@ import {
 	initiateComposioConnection,
 } from "@/src/lib/api/composio.ts";
 import {
+	forgetRedeemedPrivatePackageShareSession,
 	formatPrivatePackageShareCode,
 	installPortablePackage,
 	normalizePrivatePackageShareCode,
 	type PackageConnectionRequirement,
 	type PrivatePackageSharePreview,
+	peekRedeemedPrivatePackageShareSession,
 	previewPrivatePackageShareCode,
 	redeemPrivatePackageShareCode,
 } from "@/src/lib/api/marketplace.ts";
@@ -77,7 +79,7 @@ function wait(milliseconds: number): Promise<void> {
 function setupSummary(
 	requirements: PackageConnectionRequirement[],
 	statuses: Map<string, ConnectionStatus>
-): { connected: number; missing: number; required: number } {
+) {
 	const required = requirements.filter((requirement) => requirement.required);
 	const connected = required.filter(
 		(requirement) => statuses.get(requirement.id)?.state === "connected"
@@ -241,6 +243,17 @@ export default function PrivatePackageInstallDialog({
 		setError(null);
 		setLoading(true);
 		try {
+			// This account already redeemed the code (an earlier install failed or
+			// the dialog was closed): resume with that session. The server preview
+			// rejects a code at its redemption ceiling, and redeeming it again would
+			// spend another redemption. Install re-reads the session from the cache.
+			const redeemed = peekRedeemedPrivatePackageShareSession(code);
+			if (redeemed) {
+				setPreview(redeemed.preview);
+				setStage("preview");
+				await refreshSetup(redeemed.preview);
+				return;
+			}
 			const nextPreview = await previewPrivatePackageShareCode(code);
 			setPreview(nextPreview);
 			setStage("preview");
@@ -264,13 +277,19 @@ export default function PrivatePackageInstallDialog({
 		setLoading(true);
 		setStage("installing");
 		try {
-			let session = installSession;
-			let redeemedPreview = preview;
+			// Reuse the session this account already redeemed for the code while it
+			// is live (the cache drops it near expiry); redeeming again would spend
+			// another of the code's redemptions.
+			const reusable = peekRedeemedPrivatePackageShareSession(code);
+			let session = reusable?.installSession ?? installSession;
+			let redeemedPreview = reusable?.preview ?? preview;
 			if (!session) {
 				const redeemed = await redeemPrivatePackageShareCode(code);
 				session = redeemed.installSession;
 				redeemedPreview = redeemed.preview;
-				setInstallSession(session);
+				// A session with a known expiry lives in the API cache; keep only an
+				// expiry-less one in state so this dialog can retry without redeeming.
+				setInstallSession(redeemed.installSessionExpiresAt ? null : session);
 				setPreview(redeemedPreview);
 			}
 			if (!(session && redeemedPreview)) {
@@ -284,6 +303,7 @@ export default function PrivatePackageInstallDialog({
 				},
 				{ installSession: session }
 			);
+			forgetRedeemedPrivatePackageShareSession(code);
 			setStage("complete");
 			await refreshSetup(redeemedPreview);
 		} catch (cause) {
@@ -388,8 +408,8 @@ export default function PrivatePackageInstallDialog({
 				}}
 				open={open}
 			>
-				<DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-xl">
-					<DialogHeader className="border-border/60 border-b px-6 py-5 text-left">
+				<DialogContent appearance="package-install">
+					<DialogHeader className="text-left" purpose="package-install">
 						<div className="flex items-start gap-3">
 							<div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
 								<HugeiconsIcon className="size-5" icon={Package01Icon} />
@@ -450,7 +470,7 @@ export default function PrivatePackageInstallDialog({
 									</span>
 								</label>
 								{error ? <ErrorNotice message={error} /> : null}
-								<DialogFooter className="px-0 pt-1">
+								<DialogFooter purpose="package-actions">
 									<Button disabled={!canPreview} type="submit">
 										{loading ? <Spinner className="size-4" /> : null}
 										Preview package
@@ -478,7 +498,8 @@ export default function PrivatePackageInstallDialog({
 										</p>
 									</div>
 									<Badge
-										className="shrink-0 gap-1.5"
+										className="shrink-0"
+										spacing="relaxed"
 										variant={
 											preview.verification === "invalid"
 												? "destructive"
@@ -576,7 +597,7 @@ export default function PrivatePackageInstallDialog({
 								)}
 
 								{error ? <ErrorNotice message={error} /> : null}
-								<DialogFooter className="gap-2 px-0">
+								<DialogFooter purpose="package-list-actions">
 									{stage === "complete" ? (
 										<Button onClick={onClose} type="button">
 											Done
@@ -672,11 +693,11 @@ function ConnectionRow({
 				<div className="flex flex-wrap items-center gap-1.5">
 					<span className="font-medium text-sm">{requirement.displayName}</span>
 					{requirement.required ? (
-						<Badge className="text-[10px]" variant="outline">
+						<Badge size="compact" variant="outline">
 							Required
 						</Badge>
 					) : (
-						<Badge className="text-[10px]" variant="secondary">
+						<Badge size="compact" variant="secondary">
 							Optional
 						</Badge>
 					)}

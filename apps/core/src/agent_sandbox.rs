@@ -1,265 +1,106 @@
-//! OS-level deletion containment for Ryu-managed ACP agents.
+//! OS-level containment for Ryu-managed ACP agents.
 //!
 //! The Codex hook and command scanner are policy guardrails, but an ACP agent
 //! still runs as a child process. This module inserts a tiny Ryu-owned runner
-//! between the ACP client and Codex so the operating system can deny file
-//! removal before the agent's shell or descendants start.
+//! between the ACP client and the agent so the operating system enforces limits
+//! before the agent's shell or any descendant starts. The runner is the Core
+//! binary re-executed with [`AGENT_SANDBOX_RUNNER_ARG`]; options between the
+//! marker and `--` select what it confines.
 //!
-//! Platform posture:
-//! - Linux uses Landlock with `REMOVE_FILE` and `REMOVE_DIR` handled and no
-//!   allow rules, which denies unlink and rename for the runner and descendants.
-//! - macOS uses the system Seatbelt runner with a narrow deletion-denial profile.
-//!   `sandbox-exec` is deprecated by Apple; the packaged App Sandbox/VM runner
-//!   is the follow-up replacement, but silently spawning an unconfined Codex is
-//!   not acceptable in the meantime.
-//! - Windows fails closed until Ryu has a native AppContainer runner. The
-//!   Recycle Bin helper remains available for an explicitly brokered operation;
-//!   it is not an OS containment boundary for an arbitrary child process.
+//! Two layers:
 //!
-//! This is deliberately scoped to Codex for the first rollout. Other ACP agents
-//! retain their existing Ryu scanner/permission behavior until their process
-//! contracts are audited against the same runner.
+//! - **Deletion denial** (managed Codex, always). Linux uses Landlock with
+//!   `REMOVE_FILE` and `REMOVE_DIR` handled and no allow rules; macOS uses a
+//!   narrow Seatbelt profile. Windows fails closed for managed Codex until Ryu
+//!   has a native AppContainer runner. Other agents opt out with
+//!   `--allow-delete`: their process contracts (atomic renames of their own
+//!   state files) have not been audited against it.
+//! - **Untrusted-workspace profile** (every ACP agent whose folder is not
+//!   trusted, see [`crate::workspace_trust`]). Credential stores in the home
+//!   directory and Core's own state files are hidden from the agent, and its
+//!   network is cut to the Ryu Gateway (and Core, for the managed Pi) so a
+//!   payload a repository talks the agent into running cannot read keys or
+//!   send them anywhere.
+//!   - Linux: a private user + mount + network namespace. Credential paths are
+//!     covered by empty read-only mounts, then a second user namespace locks
+//!     those mounts so the agent cannot unmount them. Inside the network
+//!     namespace only loopback exists; a forwarder there relays the allowed
+//!     ports over Unix sockets to Core, which connects them to the real
+//!     loopback services ([`ensure_loopback_relay`]).
+//!   - macOS: a Seatbelt profile denying reads and writes of the same paths
+//!     and all outbound network except `localhost`.
+//!   - Hosts without the needed primitives (Windows, Linux without
+//!     unprivileged user namespaces) report [`untrusted_support`] as
+//!     unavailable; Core then runs the agent unconfined and says so, keeping
+//!     the workspace-trust permission rules as the remaining guard.
+//! - **Account-access profile** (every ACP agent whose account access is
+//!   limited, see [`crate::agent_access::AccountConfinement`], in any folder).
+//!   The same mask mechanism hides Core's tokens, keys, databases, state, app
+//!   data and logs ([`account_restricted_masks`]), and, when the agent's model
+//!   providers are limited, every stored provider key and sign-in except the
+//!   one its own engine signs in with. Its network is left alone unless the
+//!   folder is also untrusted. Without the runner this profile cannot be
+//!   applied, so Core refuses the agent instead (Ryu's own engine may still run
+//!   with its shell and file tools off).
+//!   - macOS also denies the user's Keychain ([`UntrustedProfile::deny_keychain`]):
+//!     Seatbelt refuses the Keychain daemons' Mach services
+//!     ([`KEYCHAIN_MACH_SERVICES`]) and `~/Library/Keychains`
+//!     ([`keychain_masks`]), so neither the `security` CLI nor the Security
+//!     framework can read an item from inside the sandbox. `(allow default)`
+//!     still lets the tree ask launchd or LaunchServices (`launchctl submit`,
+//!     `open`) to start a job, which runs unconfined, so this denies the
+//!     sandboxed process tree, not every way the agent could reach the
+//!     Keychain (the file masks share that gap; not verified on a Mac).
+//!     Seatbelt cannot allow single items, so an
+//!     engine whose own sign-in lives in the Keychain (Claude Code) keeps the
+//!     whole Keychain; Core decides that per engine. Linux's Secret Service
+//!     (reached over the D-Bus session bus) is not covered.
+//!
+//! None of this is a VM: the agent still runs as the user, can read the
+//! repository and anything not listed here, and UDP/DNS is only cut on Linux.
+//! It narrows what a hijacked agent can reach; it does not make untrusted code
+//! safe to run.
 
 use std::path::{Path, PathBuf};
 
-use agent_client_protocol::schema::McpServerStdio;
+use agent_client_protocol::schema::v1::McpServerStdio;
 use anyhow::{bail, Context, Result};
+
+mod codex_identity;
+#[cfg(test)]
+mod core_policy_classifier_tests;
+
+mod codex_launch;
+#[cfg(target_os = "linux")]
+mod linux;
+mod masks;
+mod relay;
+mod runner;
+#[cfg(test)]
+mod tests;
+
+pub use codex_identity::is_codex_stdio;
+pub use codex_launch::*;
+pub use masks::*;
+pub use relay::*;
+pub use runner::*;
 
 /// Marker argument used when the Ryu Core binary is acting as the child runner.
 pub const AGENT_SANDBOX_RUNNER_ARG: &str = "--ryu-agent-sandbox-runner";
 
 const ARG_SEPARATOR: &str = "--";
 
-/// Rewrite a Codex stdio server to launch through Ryu's OS-level runner.
-///
-/// Non-Codex ACP servers are returned unchanged for compatibility. Codex is
-/// rejected on platforms where this build cannot establish a deletion boundary;
-/// there is no unsafe direct-spawn fallback.
-pub fn confine_codex_stdio(mut stdio: McpServerStdio) -> Result<McpServerStdio> {
-    if !is_codex_stdio(&stdio) {
-        return Ok(stdio);
-    }
-
-    ensure_runner_supported()?;
-    let runner = std::env::current_exe().context("resolving the Ryu agent runner")?;
-    let original_command = std::mem::replace(&mut stdio.command, PathBuf::new());
-    let original_args = std::mem::take(&mut stdio.args);
-    let mut runner_args = Vec::with_capacity(original_args.len() + 3);
-    runner_args.push(AGENT_SANDBOX_RUNNER_ARG.to_owned());
-    runner_args.push(ARG_SEPARATOR.to_owned());
-    runner_args.push(original_command.to_string_lossy().into_owned());
-    runner_args.extend(original_args);
-
-    stdio.command = runner;
-    stdio.args = runner_args;
-    Ok(stdio)
-}
-
-fn is_codex_stdio(stdio: &McpServerStdio) -> bool {
-    let command = stdio.command.to_string_lossy().to_ascii_lowercase();
-    let args = stdio
-        .args
-        .iter()
-        .map(|arg| arg.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-    command.contains("codex") || args.iter().any(|arg| arg.contains("codex-acp"))
-}
-
-fn ensure_runner_supported() -> Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        return Ok(());
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let path = Path::new("/usr/bin/sandbox-exec");
-        if is_executable(path) {
-            return Ok(());
-        }
-        bail!(
-            "Ryu cannot start managed Codex: macOS deletion containment requires /usr/bin/sandbox-exec"
-        )
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        bail!(
-            "Ryu cannot start managed Codex on Windows yet: native AppContainer deletion containment is not available in this build"
-        )
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    {
-        bail!("Ryu cannot start managed Codex: this OS has no verified deletion containment runner")
-    }
-}
-
-fn is_executable(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
-}
-
-/// Run the Ryu Core binary as the ACP child runner when the marker argument is
-/// present. This executes before normal Core startup, so it does not open any
-/// database, start an HTTP server, or invoke agent code outside the OS boundary.
-pub fn run_if_requested() -> bool {
-    let args = std::env::args().collect::<Vec<_>>();
-    let Some(marker_index) = args.iter().position(|arg| arg == AGENT_SANDBOX_RUNNER_ARG) else {
-        return false;
-    };
-
-    if let Err(error) = run_child(&args[marker_index + 1..]) {
-        eprintln!("ryu agent sandbox runner refused to start: {error}");
-        std::process::exit(126);
-    }
-    unreachable!("agent sandbox runner returned without replacing the process")
-}
-
-fn run_child(args: &[String]) -> Result<()> {
-    if args.first().map(String::as_str) != Some(ARG_SEPARATOR) {
-        bail!("runner arguments must start with '{ARG_SEPARATOR}'")
-    }
-    let Some(command) = args.get(1) else {
-        bail!("runner received no child command")
-    };
-    let child_args = &args[2..];
-
-    #[cfg(target_os = "linux")]
-    {
-        install_linux_delete_denial()?;
-        use std::os::unix::process::CommandExt;
-        let error = std::process::Command::new(command).args(child_args).exec();
-        return Err(error).context("execing the confined Codex child");
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        const PROFILE: &str = "(version 1) (allow default) (deny file-write-unlink)";
-        use std::os::unix::process::CommandExt;
-        let error = std::process::Command::new("/usr/bin/sandbox-exec")
-            .arg("-p")
-            .arg(PROFILE)
-            .arg(command)
-            .args(child_args)
-            .exec();
-        return Err(error).context("execing the macOS Seatbelt Codex child");
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let _ = (command, child_args);
-        bail!("native Windows AppContainer deletion containment is not available in this build")
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    {
-        let _ = (command, child_args);
-        bail!("this OS has no verified deletion containment runner")
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn install_linux_delete_denial() -> Result<()> {
-    // Landlock syscall numbers are stable in the asm-generic syscall table used
-    // by supported Linux architectures. This ruleset handles only removal
-    // rights and installs no path rules, so those rights are denied everywhere.
-    const LANDLOCK_CREATE_RULESET: libc::c_long = 444;
-    const LANDLOCK_RESTRICT_SELF: libc::c_long = 446;
-    const LANDLOCK_ACCESS_FS_REMOVE_DIR: u64 = 1 << 4;
-    const LANDLOCK_ACCESS_FS_REMOVE_FILE: u64 = 1 << 5;
-
-    let no_new_privs = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
-    if no_new_privs != 0 {
-        return Err(std::io::Error::last_os_error()).context("enabling no_new_privs for Landlock");
-    }
-
-    #[repr(C)]
-    struct RulesetAttr {
-        handled_access_fs: u64,
-    }
-    let attr = RulesetAttr {
-        handled_access_fs: LANDLOCK_ACCESS_FS_REMOVE_DIR | LANDLOCK_ACCESS_FS_REMOVE_FILE,
-    };
-    let fd = unsafe {
-        libc::syscall(
-            LANDLOCK_CREATE_RULESET,
-            &attr as *const RulesetAttr,
-            std::mem::size_of::<RulesetAttr>(),
-            0,
-        )
-    };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("creating the Landlock deletion-denial ruleset");
-    }
-
-    let restricted = unsafe { libc::syscall(LANDLOCK_RESTRICT_SELF, fd, 0) };
-    let restrict_error = if restricted != 0 {
-        Some(std::io::Error::last_os_error())
-    } else {
-        None
-    };
-    unsafe {
-        libc::close(fd as libc::c_int);
-    }
-    if let Some(error) = restrict_error {
-        return Err(error).context("installing the Landlock deletion-denial ruleset");
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn non_codex_stdio_is_not_rewritten() {
-        let stdio = McpServerStdio::new("safe-agent", "/usr/bin/echo");
-        let confined = confine_codex_stdio(stdio.clone()).expect("non-Codex agent unchanged");
-        assert_eq!(confined.command, stdio.command);
-        assert_eq!(confined.args, stdio.args);
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    #[test]
-    fn codex_stdio_uses_the_runner_marker() {
-        let stdio = McpServerStdio::new("codex", "codex-acp").args(vec!["--version".to_owned()]);
-        let confined = confine_codex_stdio(stdio).expect("supported host runner");
-        assert_eq!(
-            confined.command,
-            std::env::current_exe().expect("current executable")
-        );
-        assert_eq!(confined.args[0], AGENT_SANDBOX_RUNNER_ARG);
-        assert_eq!(confined.args[1], ARG_SEPARATOR);
-        assert_eq!(confined.args[2], "codex-acp");
-        assert_eq!(confined.args[3], "--version");
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_codex_spawn_fails_closed_without_native_runner() {
-        let stdio = McpServerStdio::new("codex", "codex-acp");
-        let error = confine_codex_stdio(stdio).expect_err("Windows must fail closed");
-        assert!(error.to_string().contains("AppContainer"));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn mac_runner_is_available_without_running_a_deletion_command() {
-        ensure_runner_supported().expect("macOS Seatbelt runner");
-    }
-}
+/// Runner option: do not install deletion denial (non-Codex agents).
+const OPT_ALLOW_DELETE: &str = "--allow-delete";
+/// Runner option: hide this path (repeatable).
+const OPT_MASK: &str = "--mask";
+/// Runner option: cut the network except relayed loopback ports.
+const OPT_ISOLATE_NETWORK: &str = "--isolate-network";
+/// Runner option: deny the user's Keychain (macOS; ignored elsewhere).
+const OPT_DENY_KEYCHAIN: &str = "--deny-keychain";
+/// Runner option: a loopback TCP port to relay out of the isolated network.
+const OPT_LOOPBACK_PORT: &str = "--loopback-port";
+/// Runner option: the directory holding Core's per-port relay sockets.
+const OPT_RELAY_DIR: &str = "--relay-dir";
+/// Marker argument for the one-shot capability probe (Linux).
+pub const AGENT_SANDBOX_PROBE_ARG: &str = "--ryu-agent-sandbox-probe";

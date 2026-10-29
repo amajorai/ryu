@@ -4,6 +4,7 @@ import {
 	LOGIN_APPROVAL_SURFACE_LABELS,
 	type LoginApprovalRequest,
 } from "@ryu/auth/lib/login-approval-contract";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Dialog,
@@ -13,6 +14,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog";
+import { OTPCodeDisplay } from "@ryu/ui/components/motion/otp-input";
 import { QRCode } from "@ryu/ui/components/qr-code.tsx";
 import { Spinner } from "@ryu/ui/components/spinner";
 import {
@@ -42,6 +44,7 @@ export function LoginApprovalPrompt({
 	open,
 	request,
 }: LoginApprovalPromptProps) {
+	const tl = useLiteralMessages();
 	if (!request) {
 		return null;
 	}
@@ -59,8 +62,10 @@ export function LoginApprovalPrompt({
 					</div>
 					<DialogTitle>Approve sign-in</DialogTitle>
 					<DialogDescription>
-						{surfaceLabel} is asking to sign in to your Ryu account. Approve
-						only if you started this request.
+						{tl(
+							"{surfaceLabel} is asking to sign in to your Ryu account. Approve only if you started this request.",
+							{ surfaceLabel }
+						)}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -77,12 +82,16 @@ export function LoginApprovalPrompt({
 						</div>
 					</div>
 					<div className="border-border/60 border-t pt-3 text-center">
-						<p className="text-muted-foreground text-xs uppercase tracking-[0.16em]">
+						<p className="text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							Matching code
 						</p>
-						<p className="mt-1 font-medium font-mono text-2xl tracking-[0.18em]">
-							{request.userCode}
-						</p>
+						<div className="mt-2 flex justify-center">
+							<OTPCodeDisplay
+								aria-label="Matching sign-in code"
+								code={request.userCode}
+								size="compact"
+							/>
+						</div>
 						<p className="mt-1 text-muted-foreground text-xs">
 							Make sure it matches the code shown on the device.
 						</p>
@@ -153,7 +162,7 @@ export function LoginApprovalWait({
 							className="mb-5 flex flex-col items-center gap-3 border-border/60 border-b pb-5"
 							data-testid="login-approval-qr"
 						>
-							<div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.16em]">
+							<div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 								<QrCodeIcon className="size-4" />
 								Scan with Ryu Mobile
 							</div>
@@ -172,12 +181,23 @@ export function LoginApprovalWait({
 							</p>
 						</div>
 					) : null}
-					<p className="text-muted-foreground text-xs uppercase tracking-[0.16em]">
-						Fallback sign-in code
-					</p>
-					<p className="mt-2 font-medium font-mono text-3xl tracking-[0.2em]">
-						{userCode ?? "••••••••"}
-					</p>
+					{userCode ? (
+						<div>
+							<p className="text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
+								Fallback sign-in code
+							</p>
+							<div className="mt-2 flex justify-center">
+								<OTPCodeDisplay
+									aria-label="Fallback sign-in code"
+									code={userCode}
+									size="compact"
+								/>
+							</div>
+							<p className="mt-1 text-muted-foreground text-xs">
+								Make sure it matches the code shown on the device.
+							</p>
+						</div>
+					) : null}
 					<div className="mt-4 flex items-center justify-center gap-2 text-muted-foreground text-sm">
 						{status ?? (
 							<>

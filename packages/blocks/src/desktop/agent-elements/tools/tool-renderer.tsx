@@ -1,32 +1,49 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { IconSparkles } from "@tabler/icons-react";
 import type React from "react";
 import { memo } from "react";
 import { AgentUI } from "../agent-ui/agent-ui.tsx";
+import { agentUiSurfaceFromPart } from "../agent-ui/surface.ts";
+import {
+	AgentUiSurfaceChip,
+	useAgentUiSurfaceHost,
+} from "../agent-ui/surface-context.tsx";
 import { useChatDisplayPrefs } from "../chat-display-prefs.tsx";
 import { QuestionTool } from "../question/question-tool.tsx";
 import type {
 	AgentMessageContext,
+	AgentUiSubmit,
 	CustomToolRendererProps,
-	WidgetAvailablePart,
 } from "../types.ts";
 import { getToolStatus } from "../utils/format-tool.ts";
+import type { NativeSdkValue } from "../utils/native-sdk-observation.ts";
 import { unwrapMcpOutput } from "../utils/unwrap-mcp-output.ts";
+import { isWidgetAvailablePart } from "../utils/widget-stream-boundary.ts";
 import { useWidgetHost } from "../widget-host-context.tsx";
-import { AgentMessageTool } from "./agent-message-tool.tsx";
 import { isAgentMessageToolPart } from "./agent-message-tool-logic.ts";
+import { AgentMessagesMarker } from "./agent-messages-marker.tsx";
 import {
 	ArtifactTool,
 	artifactIdForPart,
 	isArtifactPart,
 } from "./artifact-tool.tsx";
 import { BashTool } from "./bash-tool.tsx";
+import { ConsentTool, consentRequestKind } from "./consent-tool.tsx";
 import { EditTool } from "./edit-tool.tsx";
 import { GenericTool } from "./generic-tool.tsx";
 import { McpTool } from "./mcp-tool.tsx";
 import { PlanTool } from "./plan-tool.tsx";
 import { SandboxTool } from "./sandbox-tool.tsx";
 import { SearchTool } from "./search-tool.tsx";
+import { SessionCardTool } from "./session-card-tool.tsx";
+import { isSessionToolPart } from "./session-card-tool-logic.ts";
 import { looksLikeStackTrace, StackTrace } from "./stack-trace.tsx";
 import { SubagentTool } from "./subagent-tool.tsx";
+import { isSuggestTaskPart } from "./suggested-task.ts";
 import { ThinkingTool } from "./thinking-tool.tsx";
 import { TodoTool } from "./todo-tool.tsx";
 import {
@@ -40,7 +57,7 @@ export interface ToolRendererProps {
 	agentMessageContext?: AgentMessageContext;
 	chatStatus?: string;
 	nestedTools?: any[];
-	onAgentUiSubmit?: (value: unknown) => void | Promise<void>;
+	onAgentUiSubmit?: AgentUiSubmit;
 	part: any;
 	toolRenderers?: Record<string, React.ComponentType<CustomToolRendererProps>>;
 }
@@ -52,9 +69,7 @@ export interface ToolRendererProps {
  * can be used as a subtitle fallback on generic tool rows.
  */
 function formatLocations(part: any): string | undefined {
-	const locations = part?.input?._ryuLocations as
-		| { path?: string; line?: number }[]
-		| undefined;
+	const locations = part?.input?._ryuLocations;
 	if (!Array.isArray(locations) || locations.length === 0) {
 		return undefined;
 	}
@@ -64,7 +79,7 @@ function formatLocations(part: any): string | undefined {
 			if (!path) {
 				return null;
 			}
-			return typeof loc.line === "number" ? `${path}:${loc.line}` : path;
+			return isNativeNumber(loc.line) ? `${path}:${loc.line}` : path;
 		})
 		.filter((v): v is string => Boolean(v));
 	return labels.length > 0 ? labels.join(", ") : undefined;
@@ -92,14 +107,14 @@ function deriveToolStatus(
 // Core surfaces as a `dynamic-tool`. Any dynamic tool carrying `input.code`
 // counts too, so BYO code-runners render in the sandbox card, not a bare row.
 function isCodeExecPart(part: any): boolean {
-	const partType = part.type as string;
+	const partType = part.type;
 	if (partType === "tool-execute") {
 		return true;
 	}
 	if (partType !== "dynamic-tool") {
 		return false;
 	}
-	return part.toolName === "execute" || typeof part.input?.code === "string";
+	return part.toolName === "execute" || isNativeText(part.input?.code);
 }
 
 // Pull a JS/Node stack trace out of a tool part's error surface, if any. Checks
@@ -107,9 +122,9 @@ function isCodeExecPart(part: any): boolean {
 // shapes. `looksLikeStackTrace` gates on real `at …` frames so ordinary error
 // strings never render as a full trace.
 function extractStackTrace(part: any): string | null {
-	const candidates: unknown[] = [
+	const candidates: NativeSdkValue[] = [
 		part.errorText,
-		typeof part.output === "string" ? part.output : undefined,
+		isNativeText(part.output) ? part.output : undefined,
 		part.output?.error,
 		part.output?.stack,
 		part.output?.message,
@@ -143,10 +158,12 @@ const ToolRendererInner = memo(function ToolRendererInner({
 	onAgentUiSubmit,
 	agentMessageContext,
 }: ToolRendererProps) {
-	const partType = part.type as string;
+	const tl = useLiteralMessages();
+	const partType = part.type;
 	const { groupToolUses, expandFileEdits, expandCommands } =
 		useChatDisplayPrefs();
 	const widgetHost = useWidgetHost();
+	const surfaceHost = useAgentUiSurfaceHost();
 
 	// Built-in artifact surface (artifact.render inline, or artifact.create's
 	// created file): render the agent's artifact as a live card with an "Open in
@@ -154,6 +171,39 @@ const ToolRendererInner = memo(function ToolRendererInner({
 	// degrades to a plain tool row on surfaces without one.
 	if (isArtifactPart(partType, part.toolName)) {
 		return <ArtifactTool id={artifactIdForPart(part.toolCallId)} part={part} />;
+	}
+
+	// Consent requests (consent.connect_app / consent.install_plugin): an inline
+	// Connect or Install card. The user's choice is sent back to the agent as
+	// their next message through the same submit path as generative UI.
+	const consentKind = consentRequestKind(partType, part.toolName);
+	if (consentKind) {
+		return (
+			<ConsentTool
+				kind={consentKind}
+				onFollowUp={onAgentUiSubmit}
+				part={part}
+			/>
+		);
+	}
+
+	// Suggested next task (tasks.suggest): the actionable card lives above the
+	// composer (see `latestSuggestedTask`). The transcript keeps a compact row so
+	// the suggestion is still on record after the card is dismissed.
+	if (isSuggestTaskPart(partType, part.toolName)) {
+		const status = deriveToolStatus(part, chatStatus);
+		const title = isNativeText(part.input?.title)
+			? part.input.title
+			: undefined;
+		return (
+			<GenericTool
+				icon={IconSparkles}
+				isError={status === "error"}
+				isPending={status === "streaming" || status === "pending"}
+				subtitle={title}
+				title="Suggested task"
+			/>
+		);
 	}
 
 	// Generative UI (ui.render): render the agent's spec inline as the app's own
@@ -164,20 +214,30 @@ const ToolRendererInner = memo(function ToolRendererInner({
 		(partType === "dynamic-tool" && part.toolName === "ui.render");
 	if (isUiRender) {
 		const status = deriveToolStatus(part, chatStatus);
-		const input = (part.input ?? {}) as {
-			format?: "json-render" | "a2ui";
-			spec?: unknown;
-			title?: string;
-		};
-		// Wait for the spec to finish streaming before rendering, so a partial spec
-		// doesn't flash the fallback. Core's dispatch is a near-instant no-op echo.
+		const input = part.input ?? {};
+		// Wait for the spec to finish streaming before rendering. AgentUI supports
+		// a `streaming` mode, but the pinned @json-render/react (0.19) predates the
+		// upstream hardening for incomplete streamed props (0.21), so a partially
+		// streamed element is never handed to its Renderer from here. Core's
+		// dispatch is a near-instant no-op echo, so the wait is short.
 		if (status === "streaming" || status === "pending" || input.spec == null) {
 			return <GenericTool isPending title="Rendering UI" />;
+		}
+		// A single-screen host (the Island) shows the UI as its live surface; the
+		// transcript keeps a chip that points at, or reopens, that screen.
+		const surface = surfaceHost
+			? agentUiSurfaceFromPart(part, part.toolCallId)
+			: null;
+		if (surfaceHost && surface) {
+			return <AgentUiSurfaceChip host={surfaceHost} surface={surface} />;
 		}
 		return (
 			<AgentUI
 				format={input.format}
 				onSubmit={onAgentUiSubmit}
+				persistKey={
+					typeof part.toolCallId === "string" ? part.toolCallId : undefined
+				}
 				spec={input.spec}
 				title={input.title}
 			/>
@@ -195,8 +255,13 @@ const ToolRendererInner = memo(function ToolRendererInner({
 			// degraded row is never in flight.
 			return <GenericTool isPending={false} title="App widget" />;
 		}
+		if (!isWidgetAvailablePart(part)) {
+			return (
+				<GenericTool isError isPending={false} title="App widget unavailable" />
+			);
+		}
 		const WidgetRenderer = widgetHost.Renderer;
-		return <WidgetRenderer part={part as WidgetAvailablePart} />;
+		return <WidgetRenderer part={part} />;
 	}
 
 	// Code-execution programs render as a sandbox card (code + output tabs)
@@ -206,15 +271,23 @@ const ToolRendererInner = memo(function ToolRendererInner({
 	}
 
 	// Switchboard's send call is a transcript event, not generic tool detail:
-	// keep the sender/recipient visible and show the actual message as a bubble.
+	// a "Messaged <agent>" marker that opens the exchange. The message list
+	// folds a run of these into one marker before it ever reaches here.
 	if (isAgentMessageToolPart(partType, part.toolName)) {
 		return (
-			<AgentMessageTool
+			<AgentMessagesMarker
 				chatStatus={chatStatus}
 				context={agentMessageContext}
-				part={part}
+				parts={[part]}
 			/>
 		);
+	}
+
+	// A coordinator spawning or messaging a session renders as a session card:
+	// sessions are not sidebar rows, so this is how the main thread shows (and
+	// opens) the work it delegated.
+	if (isSessionToolPart(partType, part.toolName)) {
+		return <SessionCardTool part={part} />;
 	}
 
 	// Specialized tool components with variant dispatch
@@ -234,7 +307,7 @@ const ToolRendererInner = memo(function ToolRendererInner({
 			return <QuestionTool chatStatus={chatStatus} part={part} />;
 		case "tool-Task":
 		case "tool-Agent": {
-			const labelBase = part.type === "tool-Agent" ? "Agent" : "Task";
+			const isAgent = part.type === "tool-Agent";
 			if (!groupToolUses) {
 				// When grouping is disabled, render the parent as a simple generic row
 				// and let the nested tools render individually (they're rendered by
@@ -245,8 +318,8 @@ const ToolRendererInner = memo(function ToolRendererInner({
 						isPending={isPending}
 						title={
 							isPending
-								? `Running ${labelBase.toLowerCase()}`
-								: `${labelBase} completed`
+								? tl(isAgent ? "Running agent" : "Running task")
+								: tl(isAgent ? "Agent completed" : "Task completed")
 						}
 					/>
 				);
@@ -279,7 +352,7 @@ const ToolRendererInner = memo(function ToolRendererInner({
 	// `ui_tool_input` in apps/core), so route them through the MCP renderer which
 	// also surfaces the approval footer when the chat tool loop attaches one.
 	if (partType === "dynamic-tool") {
-		const dynName = (part.toolName as string | undefined) ?? "tool";
+		const dynName = part.toolName ?? "tool";
 		const mcpInfo: McpToolInfo = {
 			serverName: "mcp",
 			toolName: dynName,
@@ -298,7 +371,7 @@ const ToolRendererInner = memo(function ToolRendererInner({
 			if (CustomRenderer) {
 				return (
 					<CustomRenderer
-						input={(part.input ?? {}) as Record<string, unknown>}
+						input={part.input ?? {}}
 						name={mcpInfo.toolName}
 						output={part.output ? unwrapMcpOutput(part.output) : undefined}
 						status={deriveToolStatus(part, chatStatus)}
@@ -331,7 +404,7 @@ const ToolRendererInner = memo(function ToolRendererInner({
 			isError={isError}
 			isPending={isPending}
 			subtitle={formatLocations(part)}
-			title={isPending ? `Running ${toolName}` : toolName}
+			title={isPending ? tl("Running {toolName}", { toolName }) : toolName}
 		/>
 	);
 });

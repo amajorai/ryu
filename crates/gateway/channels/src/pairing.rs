@@ -21,14 +21,24 @@
 //! runtime data (the same bot token on another node has its own pairings), and
 //! the gateway must be able to gate inbound traffic while the control plane is
 //! unreachable.
+//!
+//! At rest the whole JSON body is one `encb:v1:` envelope under the Gateway's
+//! content key for the store [`PAIRING_STORE`] ([`PairingSeal`]): its keys are
+//! phone numbers, handles and chat ids. The associated data binds a logical id,
+//! never the path, so the file can move (`RYU_CHANNEL_PAIRING_PATH`). A legacy
+//! plaintext file is read and resealed on load; a file that does not open is
+//! moved aside (`<name>.unreadable-<unix secs>`) and the store starts empty.
+//! Without a key nothing is written: the store keeps its state in memory only.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use ryu_crypto::{ContentCipher, ContentContext};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
@@ -61,6 +71,11 @@ const DELIVERY_LEASE: Duration = Duration::from_secs(60 * 30);
 /// closed at the webhook boundary so the provider retries instead of letting an
 /// unbounded attacker-controlled id set consume disk.
 const MAX_DELIVERY_RECORDS: usize = 8192;
+
+/// Hard bound on live, unapproved pairing codes. A full queue fails closed
+/// (unknown senders are dropped silently) so a flood of new DM senders cannot
+/// grow the node-local store, or the cost of rewriting it, without bound.
+const MAX_PENDING_PAIRINGS: usize = 1024;
 
 /// One durable provider delivery claim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,7 +201,110 @@ struct PairingFile {
     deliveries: HashMap<String, DeliveryRecord>,
 }
 
-/// Pairing state for every channel on this node, backed by a JSON file.
+/// The registered content-store name of the pairing file (KDF input; never
+/// rename it).
+pub const PAIRING_STORE: &str = "channel-pairing.json";
+
+/// The logical id bound into the pairing file's associated data.
+const PAIRING_FILE_ID: &str = "channel-pairing";
+
+/// How the pairing file is protected at rest.
+#[derive(Clone)]
+pub enum PairingSeal {
+    /// Seal the whole body with this cipher (the Gateway's content key for
+    /// [`PAIRING_STORE`]).
+    Sealed(ContentCipher),
+    /// No key in this process: a legacy plaintext file is still read, but the
+    /// store keeps every change in memory and never writes the file.
+    Unavailable(String),
+}
+
+fn pairing_context() -> ContentContext {
+    ContentContext::for_id("file", PAIRING_FILE_ID)
+}
+
+/// What [`PairingStore::load`] found on disk.
+enum Loaded {
+    /// No file yet.
+    Missing,
+    /// A body that opened; `reseal` when it was legacy plaintext or sealed
+    /// under a retired key.
+    Opened { file: PairingFile, reseal: bool },
+    /// A sealed body and no key to open it: left untouched.
+    Locked,
+    /// Neither sealed under this key nor valid JSON.
+    Unreadable(String),
+}
+
+fn decode_pairing_file(bytes: &[u8], seal: &PairingSeal) -> Loaded {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return Loaded::Unreadable("not UTF-8".to_owned());
+    };
+    let trimmed = text.trim();
+    let (json, reseal) = if ContentCipher::is_sealed_text(trimmed) {
+        let PairingSeal::Sealed(cipher) = seal else {
+            return Loaded::Locked;
+        };
+        match cipher.open_text(trimmed, &pairing_context()) {
+            Ok(opened) => (opened.value, opened.needs_reseal),
+            Err(error) => return Loaded::Unreadable(error.to_string()),
+        }
+    } else {
+        (text.to_owned(), true)
+    };
+    match serde_json::from_str::<PairingFile>(&json) {
+        Ok(file) => Loaded::Opened { file, reseal },
+        Err(error) => Loaded::Unreadable(format!("invalid pairing JSON: {error}")),
+    }
+}
+
+/// Logical id bound into a quarantined copy's associated data.
+const QUARANTINE_FILE_ID: &str = "channel-pairing.unreadable";
+
+/// Move an unreadable pairing file aside so a fresh store never overwrites
+/// data a key recovery could still open. A sealed body is renamed as it is
+/// (it is ciphertext). A plaintext body (a truncated legacy file) is never
+/// kept in plaintext: with a key it is sealed into the quarantine copy
+/// (0600, synced) before the original is removed; without one the renamed
+/// copy is at least narrowed to 0600.
+async fn quarantine(path: &Path, cipher: Option<&ContentCipher>) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let target = path.with_file_name(format!("{name}.unreadable-{}", unix_now()));
+    let bytes = tokio::fs::read(path).await.ok()?;
+    let sealed =
+        std::str::from_utf8(&bytes).is_ok_and(|text| ContentCipher::is_sealed_text(text.trim()));
+    if !sealed {
+        if let Some(cipher) = cipher {
+            let context = ContentContext::for_id("file", QUARANTINE_FILE_ID);
+            let body = cipher.seal_bytes(&bytes, &context).ok()?;
+            let written = async {
+                let mut options = tokio::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                options.mode(0o600);
+                let mut file = options.open(&target).await?;
+                file.write_all(&body).await?;
+                file.sync_all().await
+            }
+            .await;
+            if written.is_err() {
+                let _ = tokio::fs::remove_file(&target).await;
+                return None;
+            }
+            tokio::fs::remove_file(path).await.ok()?;
+            return Some(target);
+        }
+    }
+    tokio::fs::rename(path, &target).await.ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = tokio::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).await;
+    }
+    Some(target)
+}
+
+/// Pairing state for every channel on this node, backed by a sealed JSON file.
 ///
 /// Cloneable and cheap to share: the map lives behind one `Arc<RwLock<_>>`, so all
 /// channel loops on a node observe the same approvals the moment they land.
@@ -194,42 +312,88 @@ struct PairingFile {
 pub struct PairingStore {
     inner: Arc<RwLock<PairingFile>>,
     persist_lock: Arc<Mutex<()>>,
+    /// Set only together with `cipher`: the store never writes plaintext.
     path: Option<PathBuf>,
+    cipher: Option<ContentCipher>,
 }
 
 impl PairingStore {
     /// Load the store from `path`, or start empty when the file does not exist.
-    /// A corrupt file is logged and treated as empty rather than fatal — a bad
-    /// pairing file must not stop the gateway from booting, and "empty" is the
-    /// safe direction (everyone re-pairs; nobody is wrongly admitted).
-    pub async fn load(path: impl AsRef<Path>) -> Self {
+    ///
+    /// A file that cannot be read (corrupt, or sealed under a key this process
+    /// does not hold) is moved aside and logged, and the store starts empty
+    /// rather than failing: a bad pairing file must not stop the gateway from
+    /// booting, and "empty" is the safe direction (everyone re-pairs; nobody is
+    /// wrongly admitted). Legacy plaintext is resealed at once. Without a key
+    /// ([`PairingSeal::Unavailable`]) the store is memory-only and the file is
+    /// left exactly as it is.
+    pub async fn load(path: impl AsRef<Path>, seal: PairingSeal) -> Self {
         let path = path.as_ref().to_path_buf();
-        let file = match tokio::fs::read(&path).await {
-            Ok(bytes) => match serde_json::from_slice::<PairingFile>(&bytes) {
-                Ok(parsed) => {
-                    info!(
-                        path = %path.display(),
-                        entries = parsed.entries.len(),
-                        "loaded channel pairing store"
-                    );
-                    parsed
-                }
-                Err(err) => {
-                    warn!(
-                        path = %path.display(),
-                        %err,
-                        "channel pairing store is unreadable; starting empty (senders must re-pair)"
-                    );
-                    PairingFile::default()
-                }
-            },
-            Err(_) => PairingFile::default(),
+        let loaded = match tokio::fs::read(&path).await {
+            Ok(bytes) => decode_pairing_file(&bytes, &seal),
+            Err(_) => Loaded::Missing,
         };
-        Self {
+        let (file, reseal) = match loaded {
+            Loaded::Missing => (PairingFile::default(), false),
+            Loaded::Opened { file, reseal } => {
+                info!(entries = file.entries.len(), "loaded channel pairing store");
+                (file, reseal)
+            }
+            Loaded::Locked => {
+                warn!(
+                    path = %path.display(),
+                    "channel pairing store is sealed and no sealing key is available; \
+                     starting empty in memory and leaving the file untouched"
+                );
+                (PairingFile::default(), false)
+            }
+            Loaded::Unreadable(reason) => {
+                let cipher = match &seal {
+                    PairingSeal::Sealed(cipher) => Some(cipher),
+                    PairingSeal::Unavailable(_) => None,
+                };
+                let moved = quarantine(&path, cipher).await;
+                warn!(
+                    path = %path.display(),
+                    moved_to = ?moved.as_ref().map(|target| target.display().to_string()),
+                    %reason,
+                    "channel pairing store is unreadable; moved aside and starting empty \
+                     (senders must re-pair)"
+                );
+                (PairingFile::default(), false)
+            }
+        };
+        let (path, cipher) = match seal {
+            PairingSeal::Sealed(cipher) => (Some(path), Some(cipher)),
+            PairingSeal::Unavailable(reason) => {
+                warn!(
+                    %reason,
+                    "no sealing key for the channel pairing store; approvals and delivery \
+                     claims are kept in memory only and will not survive a restart"
+                );
+                (None, None)
+            }
+        };
+        let store = Self {
             inner: Arc::new(RwLock::new(file)),
             persist_lock: Arc::new(Mutex::new(())),
-            path: Some(path),
+            path,
+            cipher,
+        };
+        if reseal {
+            if let Some(path) = &store.path {
+                let _guard = store.persist_lock.lock().await;
+                let snapshot = store.inner.read().await.clone();
+                match store.persist_snapshot(path, &snapshot).await {
+                    Ok(()) => info!("sealed the channel pairing store"),
+                    Err(error) => warn!(
+                        %error,
+                        "could not seal the channel pairing store yet; the next write retries"
+                    ),
+                }
+            }
         }
+        store
     }
 
     /// An in-memory store with no file behind it. Used by tests and by a gateway
@@ -239,6 +403,7 @@ impl PairingStore {
             inner: Arc::new(RwLock::new(PairingFile::default())),
             persist_lock: Arc::new(Mutex::new(())),
             path: None,
+            cipher: None,
         }
     }
 
@@ -262,7 +427,13 @@ impl PairingStore {
     /// process/time slice so concurrent best-effort pairing writes cannot
     /// truncate a delivery claim that is being committed at the same time.
     async fn persist_snapshot(&self, path: &Path, snapshot: &PairingFile) -> anyhow::Result<()> {
-        let bytes = serde_json::to_vec_pretty(snapshot)?;
+        let Some(cipher) = &self.cipher else {
+            anyhow::bail!(
+                "the channel pairing store has no sealing key; refusing a plaintext write"
+            );
+        };
+        let json = serde_json::to_string(snapshot)?;
+        let bytes = cipher.seal_text(&json, &pairing_context())?.into_bytes();
         if let Some(parent) = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
@@ -278,8 +449,21 @@ impl PairingStore {
             std::process::id(),
             unix_nanos()
         ));
-        tokio::fs::write(&temporary, bytes).await?;
-        if let Err(error) = tokio::fs::rename(&temporary, path).await {
+        // Sync the contents before the rename publishes them: without it a power
+        // loss can leave a truncated file, which `load` treats as corrupt and
+        // replaces with an empty store (losing blocks and delivery claims).
+        let written = async {
+            let mut options = tokio::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            options.mode(0o600);
+            let mut file = options.open(&temporary).await?;
+            file.write_all(&bytes).await?;
+            file.sync_all().await?;
+            tokio::fs::rename(&temporary, path).await
+        }
+        .await;
+        if let Err(error) = written {
             let _ = tokio::fs::remove_file(&temporary).await;
             return Err(error.into());
         }
@@ -538,6 +722,34 @@ impl PairingStore {
         let code = generate_code(platform, sender_id, now);
         {
             let mut map = self.inner.write().await;
+            // Expired codes can never be approved; dropping them here keeps the
+            // store bounded by live codes rather than by every sender ever seen.
+            map.entries.retain(|_, state| match state {
+                PairState::Pending { issued_at, .. } => {
+                    now.saturating_sub(*issued_at) < CODE_TTL.as_secs()
+                }
+                PairState::Paired { .. } | PairState::Blocked => true,
+            });
+            // Another message may have decided this sender while the lock was
+            // released; answer from that decision instead of minting a new code.
+            match map.entries.get(&key) {
+                Some(PairState::Paired { .. }) => return Decision::Allow,
+                Some(PairState::Blocked) => return Decision::Deny,
+                Some(PairState::Pending { code, .. }) => return Decision::Pending(code.clone()),
+                None => {}
+            }
+            let pending = map
+                .entries
+                .values()
+                .filter(|state| matches!(state, PairState::Pending { .. }))
+                .count();
+            if pending >= MAX_PENDING_PAIRINGS {
+                warn!(
+                    platform,
+                    "channel pairing queue is full; dropping unknown DM sender"
+                );
+                return Decision::Deny;
+            }
             map.version = 1;
             map.entries.insert(
                 key,
@@ -548,7 +760,8 @@ impl PairingStore {
             );
         }
         self.persist().await;
-        info!(platform, code = %code, "issued channel pairing code");
+        // The code admits the sender once approved: never log it.
+        info!(platform, "issued channel pairing code");
         Decision::Challenge(code)
     }
 
@@ -694,7 +907,7 @@ impl AccessPolicy {
 /// each adapter) so every channel says the same thing.
 pub fn pairing_prompt(code: &str) -> String {
     format!(
-        "🔒 This assistant is private.\n\nYour pairing code is *{code}*.\n\nAsk the owner to approve it in Ryu (Settings → Channels → Pending). \
+        "🔒 This assistant is private.\n\nYour pairing code is *{code}*.\n\nAsk the owner to approve this code on the Ryu Gateway. \
          Once approved, just send your message again."
     )
 }
@@ -770,6 +983,185 @@ fn generate_code(platform: &str, sender_id: &str, now: u64) -> String {
 mod tests {
     use super::*;
 
+    fn test_seal() -> PairingSeal {
+        PairingSeal::Sealed(ContentCipher::from_root(&[5u8; 32], PAIRING_STORE))
+    }
+
+    fn temp_pairing_path(tag: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join(format!(
+                "ryu-pairing-{tag}-{}-{}",
+                std::process::id(),
+                unix_nanos()
+            ))
+            .join("channel-pairing.json")
+    }
+
+    #[tokio::test]
+    async fn the_file_on_disk_is_sealed_and_holds_no_sender_id() {
+        let path = temp_pairing_path("sealed");
+        let store = PairingStore::load(&path, test_seal()).await;
+        store.approve("whatsapp", "+14155550177").await;
+        let challenge = store.challenge("telegram", "tg-user-4242").await;
+        let bytes = tokio::fs::read(&path).await.unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.starts_with("encb:v1:"), "pairing file is not sealed");
+        for needle in ["+14155550177", "tg-user-4242", "whatsapp", "entries"] {
+            assert!(!text.contains(needle), "{needle} is plaintext on disk");
+        }
+        if let Decision::Challenge(code) = challenge {
+            assert!(
+                !text.contains(&code),
+                "the pairing code is plaintext on disk"
+            );
+        }
+        // The body is bound to a logical id, not the path: a moved file opens.
+        let moved = path.with_file_name("moved.json");
+        tokio::fs::rename(&path, &moved).await.unwrap();
+        let reopened = PairingStore::load(&moved, test_seal()).await;
+        assert!(matches!(
+            reopened.get("whatsapp", "+14155550177").await,
+            Some(PairState::Paired { .. })
+        ));
+        let _ = tokio::fs::remove_dir_all(path.parent().unwrap()).await;
+    }
+
+    #[tokio::test]
+    async fn legacy_plaintext_is_read_and_resealed_on_load() {
+        let path = temp_pairing_path("legacy");
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
+        let legacy =
+            r#"{"version":1,"entries":{"telegram:legacy-777":{"state":"paired","paired_at":1}}}"#;
+        tokio::fs::write(&path, legacy).await.unwrap();
+        let store = PairingStore::load(&path, test_seal()).await;
+        assert!(matches!(
+            store.get("telegram", "legacy-777").await,
+            Some(PairState::Paired { .. })
+        ));
+        let text = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(text.starts_with("encb:v1:"));
+        assert!(!text.contains("legacy-777"));
+        // Loading the sealed file again is a no-op that still finds the sender.
+        let again = PairingStore::load(&path, test_seal()).await;
+        assert!(again.get("telegram", "legacy-777").await.is_some());
+        let _ = tokio::fs::remove_dir_all(path.parent().unwrap()).await;
+    }
+
+    #[tokio::test]
+    async fn a_file_sealed_under_another_key_is_moved_aside_not_overwritten() {
+        let path = temp_pairing_path("wrong-key");
+        let store = PairingStore::load(&path, test_seal()).await;
+        store.approve("slack", "U123").await;
+        let original = tokio::fs::read(&path).await.unwrap();
+        let other = PairingSeal::Sealed(ContentCipher::from_root(&[6u8; 32], PAIRING_STORE));
+        let fresh = PairingStore::load(&path, other).await;
+        assert!(fresh.get("slack", "U123").await.is_none());
+        let mut kept = None;
+        let mut listing = tokio::fs::read_dir(path.parent().unwrap()).await.unwrap();
+        while let Some(entry) = listing.next_entry().await.unwrap() {
+            if entry.file_name().to_string_lossy().contains(".unreadable-") {
+                kept = Some(tokio::fs::read(entry.path()).await.unwrap());
+            }
+        }
+        assert_eq!(
+            kept.as_deref(),
+            Some(original.as_slice()),
+            "sealed data was lost"
+        );
+        let _ = tokio::fs::remove_dir_all(path.parent().unwrap()).await;
+    }
+
+    #[tokio::test]
+    async fn a_truncated_plaintext_file_is_quarantined_sealed_not_in_plaintext() {
+        let path = temp_pairing_path("truncated");
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
+        let truncated = r#"{"version":1,"entries":{"whatsapp:+14155550123":{"state":"pai"#;
+        tokio::fs::write(&path, truncated).await.unwrap();
+        let store = PairingStore::load(&path, test_seal()).await;
+        assert!(store.get("whatsapp", "+14155550123").await.is_none());
+        let mut kept = Vec::new();
+        let mut listing = tokio::fs::read_dir(path.parent().unwrap()).await.unwrap();
+        while let Some(entry) = listing.next_entry().await.unwrap() {
+            if entry.file_name().to_string_lossy().contains(".unreadable-") {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = entry.metadata().await.unwrap().permissions().mode();
+                    assert_eq!(mode & 0o777, 0o600);
+                }
+                kept.push(tokio::fs::read(entry.path()).await.unwrap());
+            }
+        }
+        assert_eq!(kept.len(), 1, "the unreadable file was not kept");
+        let copy = &kept[0];
+        assert!(
+            ContentCipher::is_sealed_bytes(copy),
+            "quarantine copy is plaintext"
+        );
+        assert!(!String::from_utf8_lossy(copy).contains("+14155550123"));
+        // A key recovery can still read what was set aside.
+        let PairingSeal::Sealed(cipher) = test_seal() else {
+            unreachable!()
+        };
+        let opened = cipher
+            .open_bytes(copy, &ContentContext::for_id("file", QUARANTINE_FILE_ID))
+            .unwrap();
+        assert_eq!(opened.value, truncated.as_bytes());
+        // Without a key the renamed copy is still narrowed to 0600.
+        let unkeyed = temp_pairing_path("truncated-no-key");
+        tokio::fs::create_dir_all(unkeyed.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&unkeyed, truncated).await.unwrap();
+        PairingStore::load(&unkeyed, PairingSeal::Unavailable("test".into())).await;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut listing = tokio::fs::read_dir(unkeyed.parent().unwrap())
+                .await
+                .unwrap();
+            while let Some(entry) = listing.next_entry().await.unwrap() {
+                let mode = entry.metadata().await.unwrap().permissions().mode();
+                assert_eq!(mode & 0o777, 0o600, "{:?}", entry.file_name());
+            }
+        }
+        let _ = tokio::fs::remove_dir_all(path.parent().unwrap()).await;
+        let _ = tokio::fs::remove_dir_all(unkeyed.parent().unwrap()).await;
+    }
+
+    #[tokio::test]
+    async fn without_a_key_the_store_is_memory_only_and_writes_nothing() {
+        let path = temp_pairing_path("no-key");
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
+        let legacy =
+            r#"{"version":1,"entries":{"telegram:legacy-888":{"state":"paired","paired_at":1}}}"#;
+        tokio::fs::write(&path, legacy).await.unwrap();
+        let store = PairingStore::load(&path, PairingSeal::Unavailable("test".into())).await;
+        assert!(store.get("telegram", "legacy-888").await.is_some());
+        store.approve("telegram", "new-999").await;
+        store.claim_delivery("telegram", "update-9").await.unwrap();
+        assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), legacy);
+        // A sealed file without a key is left untouched as well.
+        let sealed_path = temp_pairing_path("no-key-sealed");
+        PairingStore::load(&sealed_path, test_seal())
+            .await
+            .approve("slack", "U9")
+            .await;
+        let sealed = tokio::fs::read(&sealed_path).await.unwrap();
+        let locked =
+            PairingStore::load(&sealed_path, PairingSeal::Unavailable("test".into())).await;
+        locked.approve("slack", "U10").await;
+        assert_eq!(tokio::fs::read(&sealed_path).await.unwrap(), sealed);
+        let _ = tokio::fs::remove_dir_all(path.parent().unwrap()).await;
+        let _ = tokio::fs::remove_dir_all(sealed_path.parent().unwrap()).await;
+    }
+
     #[test]
     fn generated_code_uses_unambiguous_alphabet() {
         let code = generate_code("telegram", "42", 1);
@@ -817,7 +1209,7 @@ mod tests {
             std::process::id(),
             unix_now()
         ));
-        let store = PairingStore::load(&path).await;
+        let store = PairingStore::load(&path, test_seal()).await;
         store
             .bind_reply_messages(
                 "telegram",
@@ -828,7 +1220,7 @@ mod tests {
             .await;
         drop(store);
 
-        let restored = PairingStore::load(&path).await;
+        let restored = PairingStore::load(&path, test_seal()).await;
         assert_eq!(
             restored
                 .reply_message("telegram", "channel:bot:chat", "provider-42")
@@ -903,7 +1295,7 @@ mod tests {
             std::process::id(),
             unix_nanos()
         ));
-        let store = PairingStore::load(&path).await;
+        let store = PairingStore::load(&path, test_seal()).await;
         store
             .claim_delivery("whatsapp", "bot-a:wamid-1")
             .await
@@ -925,7 +1317,7 @@ mod tests {
             .unwrap();
         drop(store);
 
-        let restored = PairingStore::load(&path).await;
+        let restored = PairingStore::load(&path, test_seal()).await;
         assert_eq!(
             restored
                 .claim_delivery("whatsapp", "bot-a:wamid-1")
@@ -1076,16 +1468,124 @@ mod tests {
 
     #[tokio::test]
     async fn store_round_trips_through_a_file() {
-        let dir = std::env::temp_dir().join(format!("ryu-pairing-test-{}", unix_now()));
+        // Unique per process and per call so concurrent test binaries never
+        // share (and then delete) one another's directory.
+        let dir = std::env::temp_dir().join(format!(
+            "ryu-pairing-test-{}-{}",
+            std::process::id(),
+            unix_nanos()
+        ));
         let path = dir.join("pairing.json");
-        let store = PairingStore::load(&path).await;
+        let store = PairingStore::load(&path, test_seal()).await;
         store.approve("telegram", "u9").await;
+        store
+            .claim_delivery("telegram", "update-1")
+            .await
+            .expect("claim persists");
 
-        let reloaded = PairingStore::load(&path).await;
+        let reloaded = PairingStore::load(&path, test_seal()).await;
         assert!(matches!(
             reloaded.get("telegram", "u9").await,
             Some(PairState::Paired { .. })
         ));
+        // Every write is renamed into place; no temporary file is left behind.
+        let mut leftovers = Vec::new();
+        let mut listing = tokio::fs::read_dir(&dir).await.expect("list dir");
+        while let Some(entry) = listing.next_entry().await.expect("dir entry") {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.contains(".tmp-") {
+                leftovers.push(name);
+            }
+        }
+        assert!(leftovers.is_empty(), "temporary files left: {leftovers:?}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = tokio::fs::metadata(&path)
+                .await
+                .expect("pairing file metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o077, 0, "pairing file must be owner-only");
+        }
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Rewrite a pending entry's `issued_at` so it is past [`CODE_TTL`]. The
+    /// write lock is released before returning.
+    async fn age_pending(store: &PairingStore, platform: &str, sender_id: &str) {
+        let key = entry_key(platform, sender_id);
+        let mut map = store.inner.write().await;
+        let code = match map.entries.get(&key) {
+            Some(PairState::Pending { code, .. }) => code.clone(),
+            other => panic!("expected pending, got {other:?}"),
+        };
+        map.entries.insert(
+            key,
+            PairState::Pending {
+                code,
+                issued_at: unix_now() - CODE_TTL.as_secs() - 1,
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn expired_pending_codes_are_pruned_and_pending_codes_are_bounded() {
+        let store = PairingStore::ephemeral();
+        let policy = AccessPolicy::default();
+        store.challenge("telegram", "u-old").await;
+        age_pending(&store, "telegram", "u-old").await;
+        store.block("telegram", "u-blocked").await;
+        store.approve("telegram", "u-paired").await;
+
+        assert!(matches!(
+            store.challenge("telegram", "u-new").await,
+            Decision::Challenge(_)
+        ));
+        assert_eq!(store.get("telegram", "u-old").await, None);
+        assert_eq!(
+            store.get("telegram", "u-blocked").await,
+            Some(PairState::Blocked)
+        );
+        assert!(matches!(
+            store.get("telegram", "u-paired").await,
+            Some(PairState::Paired { .. })
+        ));
+
+        // Fill the queue with live codes ("u-new" already holds one).
+        for index in 1..MAX_PENDING_PAIRINGS {
+            assert!(matches!(
+                store.challenge("telegram", &format!("u-{index}")).await,
+                Decision::Challenge(_)
+            ));
+        }
+        let entries_when_full = store.inner.read().await.entries.len();
+        assert_eq!(
+            store.challenge("telegram", "u-fresh").await,
+            Decision::Deny,
+            "a full queue fails closed for unknown senders"
+        );
+        assert_eq!(store.inner.read().await.entries.len(), entries_when_full);
+
+        // Senders who already have a code, or are paired, are unaffected.
+        let Some(PairState::Pending { code, .. }) = store.get("telegram", "u-new").await else {
+            panic!("u-new should still be pending");
+        };
+        assert_eq!(
+            store.challenge("telegram", "u-new").await,
+            Decision::Pending(code)
+        );
+        assert_eq!(
+            policy.decide_dm(&store, "telegram", "u-paired").await,
+            Decision::Allow
+        );
+
+        // Once a code expires, a new sender can enrol again.
+        age_pending(&store, "telegram", "u-1").await;
+        assert!(matches!(
+            store.challenge("telegram", "u-fresh").await,
+            Decision::Challenge(_)
+        ));
+        assert_eq!(store.get("telegram", "u-1").await, None);
     }
 }

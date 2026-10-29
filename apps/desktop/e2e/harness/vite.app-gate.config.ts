@@ -25,6 +25,9 @@ export default mergeConfig(base, {
 		},
 	],
 	cacheDir: "/tmp/ryu-app-gate-cache",
-	optimizeDeps: { entries: ["app-gate-proof.html"] },
+	optimizeDeps: {
+		entries: ["app-gate-proof.html"],
+		esbuildOptions: { target: "esnext" },
+	},
 	server: { port: 5238, strictPort: true, watch: null, hmr: false },
 });

@@ -1,4 +1,4 @@
-import type { ViewMode } from "@ryu/blocks/desktop/view-toggle";
+import type { ViewMode } from "@ryu/blocks/desktop/view-toggle.tsx";
 import { useTabViewMode } from "./useTabViewMode.ts";
 
 // Persisted view preference for each Store section. The existing storage key is

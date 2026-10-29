@@ -1,19 +1,7 @@
 "use client";
 
-import {
-	type ComponentPropsWithoutRef,
-	memo,
-	type ReactElement,
-	type ReactNode,
-	useCallback,
-} from "react";
-
-/* eslint-disable react-hooks/refs */
-
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
-
 import type { Emoji } from "@emoji-mart/data";
-
 import {
 	type EmojiCategoryList,
 	type EmojiIconList,
@@ -33,6 +21,7 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@ryu/ui/components/editor/ui/tooltip.tsx";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	AppleIcon,
@@ -47,6 +36,21 @@ import {
 	StarIcon,
 	XIcon,
 } from "lucide-react";
+import type { CSSProperties as ReactCSSProperties } from "react";
+import {
+	type ComponentPropsWithoutRef,
+	memo,
+	type ReactElement,
+	type ReactNode,
+	useCallback,
+} from "react";
+import editorStyles from "../editor-lint.module.css";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editoremojiToolbarButton2-width"?: string | number;
+	"--editoremojiToolbarButton3-height"?: string | number;
+	"--editoremojiToolbarButton4-width"?: string | number;
+}
 
 export function EmojiToolbarButton({
 	options,
@@ -84,15 +88,13 @@ export function EmojiPopover({
 	setIsOpen,
 }: {
 	children: ReactNode;
-	control: ReactNode;
+	control: ComponentPropsWithoutRef<typeof PopoverPrimitive.Trigger>["render"];
 	isOpen: boolean;
 	setIsOpen: (open: boolean) => void;
 }) {
 	return (
 		<PopoverPrimitive.Root onOpenChange={setIsOpen} open={isOpen}>
-			<PopoverPrimitive.Trigger
-				render={control as ReactElement<Record<string, unknown>>}
-			/>
+			<PopoverPrimitive.Trigger render={control} />
 
 			<PopoverPrimitive.Portal>
 				<PopoverPrimitive.Positioner className="z-100">
@@ -200,12 +202,8 @@ const EmojiButton = memo(function EmojiButton({
 				className="absolute inset-0 rounded-full opacity-0 group-hover:opacity-100"
 			/>
 			<span
-				className="relative"
+				className={cn("relative", editorStyles.editoremojiToolbarButton1)}
 				data-emoji-set="native"
-				style={{
-					fontFamily:
-						'"Apple Color Emoji", "Segoe UI Emoji", NotoColorEmoji, "Noto Color Emoji", "Segoe UI Symbol", "Android Emoji", EmojiSymbols',
-				}}
 			>
 				{emoji.skins[0]?.native ?? ""}
 			</span>
@@ -280,19 +278,35 @@ function EmojiPickerContent({
 					const section = emojiLibrary.getGrid().section(categoryId);
 					const { buttonSize } = settings;
 
+					const editoremojiToolbarButton2Style: EditorVariableStyle = {
+						"--editoremojiToolbarButton2-width": isNativeNumber(getRowWidth)
+							? `${getRowWidth}px`
+							: getRowWidth,
+					};
+					const editoremojiToolbarButton3Style: EditorVariableStyle = {
+						"--editoremojiToolbarButton3-height": isNativeNumber(
+							section.getRows().length * buttonSize.value
+						)
+							? `${section.getRows().length * buttonSize.value}px`
+							: section.getRows().length * buttonSize.value,
+					};
 					return (
 						<div
+							className={editorStyles.editoremojiToolbarButton2}
 							data-id={categoryId}
 							key={categoryId}
 							ref={section.root}
-							style={{ width: getRowWidth }}
+							style={editoremojiToolbarButton2Style}
 						>
 							<div className="sticky -top-px z-1 bg-popover/90 p-1 py-2 font-medium text-sm backdrop-blur-xs">
 								{i18n.categories[categoryId]}
 							</div>
 							<div
-								className="relative flex flex-wrap"
-								style={{ height: section.getRows().length * buttonSize.value }}
+								className={cn(
+									"relative flex flex-wrap",
+									editorStyles.editoremojiToolbarButton3
+								)}
+								style={editoremojiToolbarButton3Style}
 							>
 								{isCategoryVisible(categoryId) &&
 									section
@@ -321,9 +335,18 @@ function EmojiPickerContent({
 		]
 	);
 
-	const SearchList = useCallback(
-		() => (
-			<div data-id="search" style={{ width: getRowWidth }}>
+	const SearchList = useCallback(() => {
+		const editoremojiToolbarButton4Style: EditorVariableStyle = {
+			"--editoremojiToolbarButton4-width": isNativeNumber(getRowWidth)
+				? `${getRowWidth}px`
+				: getRowWidth,
+		};
+		return (
+			<div
+				className={editorStyles.editoremojiToolbarButton4}
+				data-id="search"
+				style={editoremojiToolbarButton4Style}
+			>
 				<div className="sticky -top-px z-1 bg-popover/90 p-1 py-2 font-medium text-card-foreground text-sm backdrop-blur-xs">
 					{i18n.searchResult}
 				</div>
@@ -339,16 +362,15 @@ function EmojiPickerContent({
 					))}
 				</div>
 			</div>
-		),
-		[
-			emojiLibrary,
-			getRowWidth,
-			i18n.searchResult,
-			searchResult,
-			onSelectEmoji,
-			onMouseOver,
-		]
-	);
+		);
+	}, [
+		emojiLibrary,
+		getRowWidth,
+		i18n.searchResult,
+		searchResult,
+		onSelectEmoji,
+		onMouseOver,
+	]);
 
 	return (
 		<div
@@ -404,18 +426,18 @@ function EmojiPickerSearchAndClear({
 	return (
 		<div className="flex items-center text-foreground">
 			<div
-				className={cn(
+				className={
 					"absolute start-2.5 top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center text-foreground"
-				)}
+				}
 			>
 				{emojiSearchIcons.loupe}
 			</div>
 			{searchValue && (
 				<Button
 					aria-label="Clear"
-					className={cn(
+					className={
 						"absolute end-0.5 top-1/2 flex size-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-popover-foreground hover:bg-transparent"
-					)}
+					}
 					onClick={clearSearch}
 					size="icon"
 					title={i18n.clear}
@@ -545,13 +567,7 @@ function EmojiPickerNavigation({
 	);
 }
 
-const emojiCategoryIcons: Record<
-	EmojiCategoryList,
-	{
-		outline: ReactElement;
-		solid: ReactElement; // Needed to add another solid variant - outline will be used for now
-	}
-> = {
+const emojiCategoryIcons = {
 	activity: {
 		outline: (
 			<svg
@@ -633,7 +649,13 @@ const emojiCategoryIcons: Record<
 		outline: <MusicIcon className="size-full" />,
 		solid: <MusicIcon className="size-full" />,
 	},
-};
+} satisfies Record<
+	EmojiCategoryList,
+	{
+		outline: ReactElement;
+		solid: ReactElement; // Needed to add another solid variant - outline will be used for now
+	}
+>;
 
 const emojiSearchIcons = {
 	delete: <XIcon className="size-4 text-current" />,

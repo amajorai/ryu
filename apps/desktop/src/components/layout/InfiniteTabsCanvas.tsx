@@ -16,6 +16,7 @@ import {
 	type NodeProps,
 	NodeResizer,
 	type NodeTypes,
+	type OnMoveEnd,
 	Panel,
 	ReactFlow,
 	ReactFlowProvider,
@@ -35,6 +36,8 @@ import type {
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { usePrefersReducedMotion } from "@/src/hooks/usePrefersReducedMotion.ts";
 import { setTabLayout, useTabLayout } from "@/src/hooks/useTabLayout.ts";
+import { pluginValueSchema } from "@/src/lib/api/plugin-wire-values.ts";
+import layoutStyles from "./InfiniteTabsCanvas.module.css";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
 import { TabGlyph } from "./TitleBar.tsx";
 import {
@@ -51,7 +54,7 @@ import {
 const TAB_CANVAS_STORAGE_KEY = "ryu:tab-canvas-layout:v1";
 const WRITE_DEBOUNCE_MS = 500;
 
-const GROUP_SURFACE_CLASSES: Record<TabGroupColor, string> = {
+const GROUP_SURFACE_CLASSES = {
 	grey: "border-slate-500/40 bg-slate-500/10",
 	blue: "border-info/45 bg-info/10",
 	red: "border-destructive/45 bg-destructive/10",
@@ -61,7 +64,7 @@ const GROUP_SURFACE_CLASSES: Record<TabGroupColor, string> = {
 	purple: "border-purple-500/45 bg-purple-500/10",
 	cyan: "border-cyan-500/45 bg-cyan-500/10",
 	orange: "border-orange-500/45 bg-orange-500/10",
-};
+} satisfies Record<TabGroupColor, string>;
 
 interface CanvasRegion {
 	color: TabGroupColor;
@@ -91,10 +94,10 @@ type TabCanvasNode = Node<TabCanvasNodeData, "tab">;
 type RegionCanvasNode = Node<RegionCanvasNodeData, "region">;
 type CanvasNode = TabCanvasNode | RegionCanvasNode;
 
-function readStoredSnapshot(): unknown {
+function readStoredSnapshot() {
 	try {
 		const value = localStorage.getItem(TAB_CANVAS_STORAGE_KEY);
-		return value ? JSON.parse(value) : null;
+		return value ? pluginValueSchema.parse(JSON.parse(value)) : null;
 	} catch {
 		return null;
 	}
@@ -152,11 +155,16 @@ function CanvasRegionNodeView({ data }: NodeProps<RegionCanvasNode>) {
 			<div className="flex items-center justify-between gap-3">
 				<div className="min-w-0">
 					<p className="truncate font-medium text-sm">{data.label}</p>
-					<p className="mt-0.5 text-[10px] text-muted-foreground uppercase tracking-[0.14em]">
+					<p
+						className={cn(
+							"type-compact mt-0.5 text-muted-foreground uppercase",
+							layoutStyles.authored1
+						)}
+					>
 						Pane group
 					</p>
 				</div>
-				<span className="shrink-0 rounded-full bg-background/70 px-2 py-1 font-medium text-[10px] text-muted-foreground">
+				<span className="type-compact shrink-0 rounded-full bg-background/70 px-2 py-1 font-medium text-muted-foreground">
 					{data.memberCount} {data.memberCount === 1 ? "tab" : "tabs"}
 				</span>
 			</div>
@@ -185,18 +193,22 @@ function CanvasTabHeader({
 						className="flex min-h-11 items-center gap-2 border-border/60 border-b bg-card/95 px-3 py-2 backdrop-blur"
 						data-tab-view-header={tab.id}
 					>
-						<TabGlyph
-							busy={tab.busy}
-							busySpeed={tab.busySpeed}
+						<span
 							className={cn(
-								"size-4 shrink-0",
+								"flex size-4 shrink-0 items-center justify-center",
 								focused ? "text-foreground" : "text-muted-foreground"
 							)}
-							icon={tab.icon}
-							logoSize="16px"
-							path={tab.path}
-							unloaded={tab.unloaded}
-						/>
+						>
+							<TabGlyph
+								busy={tab.busy}
+								busySpeed={tab.busySpeed}
+								className="size-4"
+								icon={tab.icon}
+								logoSize="16px"
+								path={tab.path}
+								unloaded={tab.unloaded}
+							/>
+						</span>
 						<button
 							className={cn(
 								"min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -245,7 +257,7 @@ function TabCanvasNodeView({
 	return (
 		<>
 			<NodeResizer
-				handleClassName="!size-2 !rounded-[3px] !border-background !bg-primary"
+				handleClassName="!size-2 !rounded-glyph-compact !border-background !bg-primary"
 				isVisible={selected}
 				lineClassName="!border-primary/40"
 				minHeight={TAB_CANVAS_MIN_HEIGHT}
@@ -254,7 +266,11 @@ function TabCanvasNodeView({
 			/>
 			<TabViewPane
 				className={cn(
-					"h-full rounded-2xl border border-border/70 shadow-black/5 shadow-lg transition-[box-shadow,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
+					cn(
+						"h-full rounded-2xl border border-border/70 shadow-black/5 shadow-lg duration-200",
+						layoutStyles.authored2,
+						layoutStyles.authored3
+					),
 					dragging &&
 						data.motionEnabled &&
 						"-translate-y-px scale-[1.01] shadow-2xl ring-2 ring-primary/25"
@@ -297,8 +313,10 @@ function CanvasInner() {
 		() => regions.map((region) => region.id),
 		[regions]
 	);
+	const initialFitRef = useRef(false);
 	const [snapshot, setSnapshot] = useState<TabCanvasSnapshot>(() => {
 		const stored = readStoredSnapshot();
+		initialFitRef.current = stored !== null;
 		return stored
 			? reconcileTabCanvasSnapshot(stored, tabIds, regionIds)
 			: createInitialTabCanvasSnapshot(tabs, groups, splits);
@@ -307,7 +325,6 @@ function CanvasInner() {
 	const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([]);
 	const nodesRef = useRef<CanvasNode[]>([]);
-	const initialFitRef = useRef(false);
 	const reactFlow = useReactFlow<CanvasNode>();
 
 	useEffect(() => {
@@ -318,6 +335,14 @@ function CanvasInner() {
 		return () => {
 			if (writeTimerRef.current) {
 				clearTimeout(writeTimerRef.current);
+				try {
+					localStorage.setItem(
+						TAB_CANVAS_STORAGE_KEY,
+						JSON.stringify(snapshotRef.current)
+					);
+				} catch {
+					// Canvas geometry is a best-effort local preference.
+				}
 			}
 		};
 	}, []);
@@ -475,7 +500,7 @@ function CanvasInner() {
 	}, [fitAll, nodes.length]);
 
 	const handleMoveEnd = useCallback(
-		(_event: unknown, viewport: Viewport) => {
+		(_event: Parameters<OnMoveEnd>[0], viewport: Viewport) => {
 			if (
 				viewport.x === snapshotRef.current.viewport.x &&
 				viewport.y === snapshotRef.current.viewport.y &&
@@ -494,7 +519,7 @@ function CanvasInner() {
 	return (
 		<div
 			aria-label="Infinite tab canvas"
-			className="h-full min-h-0 min-w-0 pt-[var(--ryu-titlebar-inset,3rem)]"
+			className={cn("h-full min-h-0 min-w-0", layoutStyles.authored4)}
 			data-tab-layout={tabLayout}
 			data-testid="infinite-tabs-canvas"
 		>

@@ -26,6 +26,44 @@ export function findChatTab(
 }
 
 /**
+ * The computer a tab is bound to, or `null` for the default one.
+ *
+ * An override naming the default node is the same authority as no override, so
+ * it normalises to `null` — otherwise a tab bound to the default by name would
+ * never dedupe against a plain open of the same thread.
+ */
+export function tabNodeKey(
+	overrides: Readonly<Record<string, string>>,
+	tabId: string,
+	defaultNode: string
+): string | null {
+	const node = overrides[tabId];
+	return node && node !== defaultNode ? node : null;
+}
+
+/**
+ * The open chat tab showing `conversationId` ON `node` (`null` = the default
+ * computer). An RNP handoff keeps the source conversation id, so after one the
+ * same id lives on two computers; matching by id alone would focus the other
+ * computer's copy. `overrides` is the store's `tabOverrides`, already
+ * normalised through {@link tabNodeKey} by the caller when it can name the
+ * default node.
+ */
+export function findChatTabOnNode(
+	tabs: Tab[],
+	conversationId: string,
+	node: string | null,
+	overrides: Readonly<Record<string, string>>
+): Tab | undefined {
+	return tabs.find(
+		(t) =>
+			t.path === "/chat" &&
+			t.conversationId === conversationId &&
+			(overrides[t.id] ?? null) === node
+	);
+}
+
+/**
  * Bind `tabId` to `conversationId` — pass `undefined` to unbind.
  *
  * Returns `tabs` UNCHANGED (same reference) when nothing moves: the caller drives

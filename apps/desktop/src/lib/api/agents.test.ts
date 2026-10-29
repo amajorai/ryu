@@ -1,13 +1,70 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import {
 	type AgentInput,
 	createAgentVersion,
 	fetchAgent,
 	getAgentVersionSource,
 	listAgentVersions,
+	removeAgentAccount,
 	restoreAgentVersion,
+	switchAgentAccount,
 	toAgentBody,
 } from "./agents.ts";
+import {
+	type GatewayJsonValue,
+	gatewayJsonValueSchema,
+} from "./gateway-json-contracts.ts";
+
+describe("ACP account request bodies", () => {
+	test("returns a required native login without claiming a credential switch", async () => {
+		const originalFetch = globalThis.fetch;
+		Reflect.set(globalThis, "fetch", async () =>
+			Response.json({ switched: false, reauthenticate: true })
+		);
+		try {
+			const result = await switchAgentAccount(
+				{ token: "test-node", url: "http://127.0.0.1:7980", userJwt: null },
+				"acp:kiro",
+				{ accountId: "saved-account" }
+			);
+			expect(result).toEqual({ reauthenticate: true });
+		} finally {
+			Reflect.set(globalThis, "fetch", originalFetch);
+		}
+	});
+	test("switch and removal transmit JSON objects rather than encoded strings", async () => {
+		const originalFetch = globalThis.fetch;
+		const bodies: GatewayJsonValue[] = [];
+		Reflect.set(
+			globalThis,
+			"fetch",
+			async (_input: RequestInfo | URL, init?: RequestInit) => {
+				const body = z.string().parse(init?.body);
+				bodies.push(gatewayJsonValueSchema.parse(JSON.parse(body)));
+				return Response.json({ switched: true, removed: true });
+			}
+		);
+		try {
+			const target = {
+				token: "test-node",
+				url: "http://127.0.0.1:7980",
+				userJwt: null,
+			};
+			await switchAgentAccount(target, "acp:pi", {
+				accountId: "account-a",
+				provider: "claude-pro-max",
+			});
+			await removeAgentAccount(target, "acp:pi", "account-a");
+			expect(bodies).toEqual([
+				{ accountId: "account-a", provider: "claude-pro-max" },
+				{ accountId: "account-a" },
+			]);
+		} finally {
+			Reflect.set(globalThis, "fetch", originalFetch);
+		}
+	});
+});
 
 describe("agent setup model slot wire format", () => {
 	test("sends the legacy fields and the authoritative chat model slot", () => {
@@ -55,24 +112,27 @@ describe("agent setup model slot wire format", () => {
 
 	test("keeps the runtime engine separate from the chat provider slot", async () => {
 		const originalFetch = globalThis.fetch;
-		globalThis.fetch = (async () =>
-			Response.json({
-				agent: {
-					chat_model: {
-						engine: "openrouter",
-						model_id: "openai/gpt-5-mini",
+		globalThis.fetch = Object.assign(
+			async (..._args: Parameters<typeof originalFetch>) =>
+				Response.json({
+					agent: {
+						chat_model: {
+							engine: "openrouter",
+							model_id: "openai/gpt-5-mini",
+						},
+						engine: "acp:pi",
+						id: "researcher",
+						name: "Researcher",
+						persona: {
+							display_name: null,
+							output_style_id: "eli5",
+							tone: null,
+						},
 					},
-					engine: "acp:pi",
-					id: "researcher",
-					name: "Researcher",
-					persona: {
-						display_name: null,
-						output_style_id: "eli5",
-						tone: null,
-					},
-				},
-				source: '{"id":"researcher"}',
-			})) as unknown as typeof globalThis.fetch;
+					source: '{"id":"researcher"}',
+				}),
+			{ preconnect: originalFetch.preconnect }
+		);
 		try {
 			const agent = await fetchAgent(
 				{ token: null, url: "http://127.0.0.1:7980", userJwt: null },
@@ -93,39 +153,50 @@ describe("agent setup model slot wire format", () => {
 	test("maps complete agent version history and keeps the canonical diff source", async () => {
 		const originalFetch = globalThis.fetch;
 		const requests: string[] = [];
-		globalThis.fetch = (async (
-			input: RequestInfo | URL,
-			init?: RequestInit
-		) => {
-			requests.push(`${init?.method ?? "GET"} ${String(input)}`);
-			const url = String(input);
-			if (url.endsWith("/versions")) {
-				if (init?.method === "POST") {
+		globalThis.fetch = Object.assign(
+			async (...[input, init]: Parameters<typeof originalFetch>) => {
+				requests.push(`${init?.method ?? "GET"} ${String(input)}`);
+				const url = String(input);
+				if (url.endsWith("/versions")) {
+					if (init?.method === "POST") {
+						return Response.json({
+							version: {
+								agent_id: "agent_1",
+								created_at: 10,
+								id: "abcdef1",
+								label: "baseline",
+								name: "Regression agent",
+								version: "1.0.0",
+							},
+						});
+					}
 					return Response.json({
-						version: {
-							agent_id: "agent_1",
-							created_at: 10,
-							id: "abcdef1",
-							label: "baseline",
-							name: "Regression agent",
-							version: "1.0.0",
-						},
+						versions: [
+							{
+								agent_id: "agent_1",
+								created_at: 10,
+								id: "abcdef1",
+								label: "baseline",
+								name: "Regression agent",
+								version: "1.0.0",
+							},
+						],
 					});
 				}
-				return Response.json({
-					versions: [
-						{
-							agent_id: "agent_1",
-							created_at: 10,
-							id: "abcdef1",
-							label: "baseline",
+				if (url.includes("/versions/abcdef1/restore")) {
+					return Response.json({
+						agent: {
+							id: "agent_1",
 							name: "Regression agent",
-							version: "1.0.0",
 						},
-					],
-				});
-			}
-			if (url.includes("/versions/abcdef1/restore")) {
+						source: '{"name":"Regression agent"}',
+					});
+				}
+				if (url.endsWith("/versions/abcdef1")) {
+					return Response.json({
+						version: { source: '{"name":"Regression agent"}' },
+					});
+				}
 				return Response.json({
 					agent: {
 						id: "agent_1",
@@ -133,20 +204,9 @@ describe("agent setup model slot wire format", () => {
 					},
 					source: '{"name":"Regression agent"}',
 				});
-			}
-			if (url.endsWith("/versions/abcdef1")) {
-				return Response.json({
-					version: { source: '{"name":"Regression agent"}' },
-				});
-			}
-			return Response.json({
-				agent: {
-					id: "agent_1",
-					name: "Regression agent",
-				},
-				source: '{"name":"Regression agent"}',
-			});
-		}) as unknown as typeof globalThis.fetch;
+			},
+			{ preconnect: originalFetch.preconnect }
+		);
 		try {
 			const target = {
 				token: null,

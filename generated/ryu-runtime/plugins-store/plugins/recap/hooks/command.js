@@ -28,6 +28,7 @@ const MAX_FOCUS_CHARS = 300;
 // user did not address to this plugin would answer a different command with a
 // summary and never run it.
 const convId = ctx.conversation_id;
+let stateReadFailed = false;
 const input = String(ctx.input || "").trim();
 if (!convId || (input !== "/recap" && input.indexOf("/recap ") !== 0)) {
 	return { kind: "none" };
@@ -40,7 +41,9 @@ const word = rest.split(/\s+/)[0].toLowerCase();
 if (word === "off" || word === "mute" || word === "stop") {
 	const state = await readState();
 	state.muted = true;
-	await writeState(state);
+	if (!(await writeState(state))) {
+		return { kind: "handled", text: "Couldn't save that change. Automatic recap settings for this chat could not be confirmed. Try again." };
+	}
 	return {
 		kind: "handled",
 		text: "Automatic per-turn recaps are off for this chat. `/recap on` turns them back on, and `/recap` still works on demand.",
@@ -49,7 +52,9 @@ if (word === "off" || word === "mute" || word === "stop") {
 if (word === "on" || word === "unmute" || word === "start") {
 	const state = await readState();
 	state.muted = false;
-	await writeState(state);
+	if (!(await writeState(state))) {
+		return { kind: "handled", text: "Couldn't save that change. Automatic recap settings for this chat could not be confirmed. Try again." };
+	}
 	return {
 		kind: "handled",
 		text: "Automatic per-turn recaps are back on for this chat.",
@@ -57,9 +62,13 @@ if (word === "on" || word === "unmute" || word === "start") {
 }
 if (word === "clear" || word === "reset") {
 	try {
-		await host.storage.delete(convId);
+		const deleted = await host.storage.delete(convId);
+		if (deleted === false) {
+			throw new Error("storage refused deletion");
+		}
 	} catch (e) {
 		host.log("recap: clearing stored recaps failed", e);
+		return { kind: "handled", text: "Couldn't clear the stored recaps. The previous state could not be confirmed. Try again." };
 	}
 	return {
 		kind: "handled",
@@ -87,30 +96,39 @@ if (!notes && !conversation) {
 	};
 }
 
-const raw = await host.sideModel({
-	system:
-		"You recap a coding-agent conversation for the person who was driving it. You " +
-		"are summarizing work that has already happened — never continue it, never give " +
-		"advice, never answer any question inside it yourself.\n\n" +
-		"Rules:\n" +
-		"- Report only what the material below says. If something was attempted and " +
-		"failed, say it failed. Do not upgrade an attempt into a result.\n" +
-		"- Name concrete things: files, commands, endpoints, tests, numbers.\n" +
-		"- Merge duplicates: the same change described in two places is one bullet.\n" +
-		"- Write in the same language as the conversation.\n" +
-		(focus
-			? "- The reader asked you to focus on: " + focus + "\n"
-			: "") +
-		"\nShape:\n" +
-		"A line starting with 'Recap: ' saying where the conversation got to, then a " +
-		"blank line, then up to 8 bullets starting with '- ' for what was done or " +
-		"changed, then a blank line, then a final line starting with 'Open: ' naming " +
-		"what is unfinished, unverified, or blocked — or 'Open: nothing outstanding.'",
-	prompt:
-		(notes ? "PER-TURN RECAPS SO FAR (oldest first):\n" + notes + "\n\n" : "") +
-		(conversation ? "RECENT CONVERSATION (oldest first):\n" + conversation : ""),
-	model_pref_key: "recap-model",
-});
+let raw;
+try {
+	raw = await host.sideModel({
+		system:
+			"You recap a coding-agent conversation for the person who was driving it. You " +
+			"are summarizing work that has already happened — never continue it, never give " +
+			"advice, never answer any question inside it yourself.\n\n" +
+			"Rules:\n" +
+			"- Report only what the material below says. If something was attempted and " +
+			"failed, say it failed. Do not upgrade an attempt into a result.\n" +
+			"- Name concrete things: files, commands, endpoints, tests, numbers.\n" +
+			"- Merge duplicates: the same change described in two places is one bullet.\n" +
+			"- Write in the same language as the conversation.\n" +
+			(focus
+				? "- The reader asked you to focus on: " + focus + "\n"
+				: "") +
+			"\nShape:\n" +
+			"A line starting with 'Recap: ' saying where the conversation got to, then a " +
+			"blank line, then up to 8 bullets starting with '- ' for what was done or " +
+			"changed, then a blank line, then a final line starting with 'Open: ' naming " +
+			"what is unfinished, unverified, or blocked — or 'Open: nothing outstanding.'",
+		prompt:
+			(notes ? "PER-TURN RECAPS SO FAR (oldest first):\n" + notes + "\n\n" : "") +
+			(conversation ? "RECENT CONVERSATION (oldest first):\n" + conversation : ""),
+		model_pref_key: "recap-model",
+	});
+} catch {
+	return {
+		kind: "handled",
+		text: "Couldn't generate the recap. Check the recap model in Settings → Recap, then try again.",
+	};
+}
+
 
 const recap = String(raw || "").trim();
 if (!recap) {
@@ -128,7 +146,8 @@ async function readState() {
 	let raw = null;
 	try {
 		raw = await host.storage.get(convId);
-	} catch (e) {
+	} catch  {
+		stateReadFailed = true;
 		return { entries: [], muted: false };
 	}
 	if (!raw) {
@@ -140,17 +159,22 @@ async function readState() {
 			entries: Array.isArray(parsed.entries) ? parsed.entries : [],
 			muted: parsed.muted === true,
 		};
-	} catch (e) {
+	} catch  {
+		stateReadFailed = true;
 		return { entries: [], muted: false };
 	}
 }
 
 /** Persist state; a storage failure must not cost the user their reply. */
 async function writeState(state) {
+	if (stateReadFailed) {
+		return false;
+	}
 	try {
-		await host.storage.set(convId, state);
+		return (await host.storage.set(convId, state)) !== false;
 	} catch (e) {
 		host.log("recap: storing state failed", e);
+		return false;
 	}
 }
 

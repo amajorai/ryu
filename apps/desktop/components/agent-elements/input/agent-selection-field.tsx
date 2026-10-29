@@ -1,5 +1,7 @@
 "use client";
 
+import { useProviderCatalog } from "@/src/hooks/provider-query-scope.ts";
+
 // A settings field that captures the WHOLE target the chat composer can express
 // — agent, provider, model, thinking level, reasoning effort, and ACP access
 // (permission) mode — as one controlled `AgentSelection` value.
@@ -34,7 +36,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	FullAccessSelectionProvider,
 	useFullAccessSelectionGuard,
-} from "@ryu/blocks/composer/full-access-warning";
+} from "@ryu/blocks/composer/full-access-warning.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import {
@@ -63,10 +65,7 @@ import {
 import { fetchAcpConfig } from "@/src/lib/api/acp.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import {
-	fetchPiCatalog,
-	filterEnabledModels,
-} from "@/src/lib/api/pi-config.ts";
+import { filterEnabledModels } from "@/src/lib/api/pi-config.ts";
 import {
 	type AgentSelection,
 	EMPTY_AGENT_SELECTION,
@@ -78,12 +77,12 @@ import { ProviderBrandLogo } from "@/src/lib/provider-brand.tsx";
 const INHERIT = "__inherit__";
 
 /** Map a Pi provider id to its brand-logo key (mirrors `useUniversalPicker`). */
-const PROVIDER_ENGINE_KEY: Record<string, string> = {
-	google: "gemini",
-	"claude-pro-max": "claude",
-	"openai-codex": "codex",
-	chatgpt: "chatgpt",
-};
+const PROVIDER_ENGINE_KEY = new Map<string, string>([
+	["google", "gemini"],
+	["claude-pro-max", "claude"],
+	["openai-codex", "codex"],
+	["chatgpt", "chatgpt"],
+]);
 
 const NOOP = () => {
 	// Field mode never reaches the composer-only actions (upsell / install /
@@ -99,6 +98,8 @@ export interface AgentSelectionFieldProps {
 	ariaLabel: string;
 	className?: string;
 	disabled?: boolean;
+	/** Keep models visible in setup fields across interface levels. */
+	forceModelPicker?: boolean;
 	onChange: (next: AgentSelection) => void;
 	/** Shown when nothing is selected. */
 	placeholder?: string;
@@ -135,13 +136,12 @@ function CustomModelRow({
 	};
 	return (
 		<div>
-			<span className="px-1.5 pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+			<span className="type-caption px-1.5 pb-1 font-medium text-muted-foreground uppercase tracking-wide">
 				Custom model
 			</span>
 			<div className="flex items-center gap-1">
 				<Input
 					aria-label="Custom model id"
-					className="h-7 text-[13px]"
 					onChange={(e) => setDraft(e.target.value)}
 					onKeyDown={(e) => {
 						e.stopPropagation();
@@ -151,6 +151,7 @@ function CustomModelRow({
 						}
 					}}
 					placeholder="Any model id (e.g. a local or pinned model)"
+					purpose="model-identifier"
 					value={draft}
 				/>
 				<button
@@ -172,7 +173,7 @@ function InheritRow({ onClear }: { onClear: () => void }) {
 	return (
 		<div>
 			<button
-				className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-[13px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+				className="text-(length:--text-detail) flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
 				onClick={onClear}
 				type="button"
 			>
@@ -195,7 +196,7 @@ function SelectionMark({
 		if (agent?.avatarGlyph) {
 			return (
 				<AgentAvatar
-					className="size-4 shrink-0 rounded-full object-contain"
+					className="size-4 shrink-0 object-contain"
 					engine={agent ? engineForAgent(agent) : null}
 					glyph={agent.avatarGlyph}
 					size="16px"
@@ -230,7 +231,7 @@ function summarize(
 	const parts: string[] = [];
 	if (selection.agent_id) {
 		parts.push(agent?.name ?? selection.agent_id);
-		if (selection.provider && selection.model) {
+		if (selection.model) {
 			parts.push(selection.model);
 		}
 		if (selection.access_mode) {
@@ -258,12 +259,11 @@ function AgentSelectionFieldContent({
 	disabled,
 	allowedAgentIds,
 	allowedProviderIds,
+	forceModelPicker = false,
 	preserveRyuRoute = false,
 }: AgentSelectionFieldProps) {
 	const selectionGuard = useFullAccessSelectionGuard();
-	const catalogQuery = useQuery({
-		queryKey: ["pi-config-catalog", target.url],
-		queryFn: () => fetchPiCatalog(target),
+	const catalogQuery = useProviderCatalog(target, {
 		staleTime: 5 * 60 * 1000,
 		refetchOnWindowFocus: false,
 	});
@@ -356,7 +356,7 @@ function AgentSelectionFieldContent({
 				return {
 					id: p.id,
 					label: p.label,
-					engineKey: PROVIDER_ENGINE_KEY[p.id] ?? p.id,
+					engineKey: PROVIDER_ENGINE_KEY.get(p.id) ?? p.id,
 					authKind: p.authKind,
 					managed: false,
 					// Keep real discovery so a discovery-capable provider shows its
@@ -386,6 +386,7 @@ function AgentSelectionFieldContent({
 			activeModelSection: null,
 			activeExtraSections: [],
 			availableExternal: [],
+			forceModelPicker,
 			customAgents: availableAgents.filter(
 				(a) => a.transport !== "acp" && a.id !== flagship?.id
 			),
@@ -436,6 +437,7 @@ function AgentSelectionFieldContent({
 		allowedProviderIds,
 		availableAgents,
 		catalogQuery.data,
+		forceModelPicker,
 		flagship,
 		keepsRyuRoute,
 		onChange,
@@ -457,9 +459,7 @@ function AgentSelectionFieldContent({
 	const effortItems = useMemo(() => {
 		if (agentEffortOption) {
 			const raw = agentEffortOption.options ?? [];
-			const flat = raw.flatMap((o) =>
-				"options" in o ? o.options : [o as { name: string; value: string }]
-			);
+			const flat = raw.flatMap((o) => ("options" in o ? o.options : [o]));
 			return flat.map((o) => ({ value: o.value, label: o.name || o.value }));
 		}
 		return (catalogQuery.data?.thinkingLevels ?? []).map((l) => ({
@@ -524,7 +524,7 @@ function AgentSelectionFieldContent({
 
 			{effortItems.length > 0 && (
 				<div className="flex flex-col gap-1.5">
-					<Label className="text-muted-foreground text-xs">
+					<Label size="compact" tone="muted">
 						Thinking / effort level
 					</Label>
 					<Select
@@ -537,15 +537,13 @@ function AgentSelectionFieldContent({
 						}
 						value={value.effort || INHERIT}
 					>
-						<SelectTrigger className="h-8 text-sm">
+						<SelectTrigger appearance="editor-row">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem className="text-sm" value={INHERIT}>
-								Provider default
-							</SelectItem>
+							<SelectItem value={INHERIT}>Provider default</SelectItem>
 							{effortItems.map((it) => (
-								<SelectItem className="text-sm" key={it.value} value={it.value}>
+								<SelectItem key={it.value} value={it.value}>
 									{it.label}
 								</SelectItem>
 							))}
@@ -558,7 +556,9 @@ function AgentSelectionFieldContent({
 			    and the agent's own advertised set is the only honest option list. */}
 			{value.agent_id && accessModes.length > 0 && (
 				<div className="flex flex-col gap-1.5">
-					<Label className="text-muted-foreground text-xs">Access mode</Label>
+					<Label size="compact" tone="muted">
+						Access mode
+					</Label>
 					<Select
 						items={[
 							{ value: INHERIT, label: "Agent default" },
@@ -581,15 +581,13 @@ function AgentSelectionFieldContent({
 						}}
 						value={value.access_mode || INHERIT}
 					>
-						<SelectTrigger className="h-8 text-sm">
+						<SelectTrigger appearance="editor-row">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem className="text-sm" value={INHERIT}>
-								Agent default
-							</SelectItem>
+							<SelectItem value={INHERIT}>Agent default</SelectItem>
 							{accessModes.map((m) => (
-								<SelectItem className="text-sm" key={m.id} value={m.id}>
+								<SelectItem key={m.id} value={m.id}>
 									{m.name}
 								</SelectItem>
 							))}

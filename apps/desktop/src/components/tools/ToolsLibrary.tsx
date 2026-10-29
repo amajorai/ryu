@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
 // The Tools section of the unified Library (`/tools`, `/library/tools`) — the MCP
 // servers registered on the active node and the tools they expose.
 //
@@ -57,14 +59,14 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 	AlertDialogTrigger,
-} from "@ryu/ui/components/alert-dialog";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@ryu/ui/components/collapsible";
+} from "@ryu/ui/components/collapsible.tsx";
 import { ContextMenuItem } from "@ryu/ui/components/context-menu.tsx";
 import {
 	Dialog,
@@ -74,7 +76,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
-} from "@ryu/ui/components/dialog";
+} from "@ryu/ui/components/dialog.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -82,20 +84,24 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@ryu/ui/components/toggle-group";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import {
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@ryu/ui/components/toggle-group.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import {
 	type ChangeEvent,
@@ -254,11 +260,7 @@ export default function ToolsLibrary() {
 			: null;
 
 	if (loading) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	if (error) {
@@ -325,7 +327,7 @@ export default function ToolsLibrary() {
 				panel: (
 					<div className="flex flex-col gap-4 p-4">
 						<div className="flex flex-col gap-1.5">
-							<Label className="font-medium text-muted-foreground text-xs">
+							<Label size="compact" tone="muted">
 								Arrange
 							</Label>
 							<ToggleGroup
@@ -349,10 +351,7 @@ export default function ToolsLibrary() {
 							) : null}
 						</div>
 						<div className="flex flex-col gap-1.5">
-							<Label
-								className="font-medium text-muted-foreground text-xs"
-								htmlFor="agent-filter"
-							>
+							<Label htmlFor="agent-filter" size="compact" tone="muted">
 								Allowlist
 							</Label>
 							<Select
@@ -407,7 +406,7 @@ export default function ToolsLibrary() {
 						</div>
 					)}
 					{hasNothing ? (
-						<Empty className="p-8">
+						<Empty inset="compact">
 							<EmptyHeader>
 								<EmptyMedia variant="icon">
 									<HugeiconsIcon icon={ServerStack01Icon} />
@@ -502,7 +501,7 @@ function ServerToolGroup({
 	return (
 		<Collapsible onOpenChange={setOpen} open={open}>
 			<div className="flex items-center gap-2 px-1">
-				<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded py-1 text-left hover:bg-muted/40">
+				<CollapsibleTrigger appearance="tools-server">
 					<HugeiconsIcon
 						className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`}
 						icon={ArrowDown01Icon}
@@ -511,7 +510,10 @@ function ServerToolGroup({
 						className="size-3.5 shrink-0 text-muted-foreground"
 						icon={ServerStack01Icon}
 					/>
-					<span className="min-w-0 truncate font-medium text-sm">
+					<span
+						className="min-w-0 truncate font-medium text-sm"
+						title={server.name}
+					>
 						{server.name}
 					</span>
 					<Badge variant="secondary">
@@ -520,7 +522,7 @@ function ServerToolGroup({
 					<McpAuthBadge server={server} />
 					{server.enabled ? null : <Badge variant="outline">Disabled</Badge>}
 					{unavailable ? (
-						<Badge className="gap-1" variant="outline">
+						<Badge variant="outline">
 							<HugeiconsIcon className="size-3" icon={AlertCircleIcon} />
 							Not installed
 						</Badge>
@@ -627,7 +629,7 @@ function FlatToolList({
 }) {
 	if (tools.length === 0) {
 		return (
-			<Empty className="p-8">
+			<Empty inset="compact">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={Wrench01Icon} />
@@ -833,9 +835,14 @@ function ServerDetail({
 								className="rounded-lg border border-border/60 px-3 py-2 text-sm"
 								key={tool.id}
 							>
-								<div className="truncate font-medium">{tool.name}</div>
+								<div className="truncate font-medium" title={tool.name}>
+									{tool.name}
+								</div>
 								{tool.description ? (
-									<div className="truncate text-muted-foreground text-xs">
+									<div
+										className="truncate text-muted-foreground text-xs"
+										title={tool.description}
+									>
 										{tool.description}
 									</div>
 								) : null}
@@ -929,7 +936,7 @@ function McpKeyValueRows({
 }) {
 	return (
 		<div className="flex flex-col gap-2">
-			<Label className="font-medium text-sm">{label}</Label>
+			<Label variant="choice">{label}</Label>
 			{rows.map((row, index) => (
 				<div className="flex items-center gap-2" key={`${row.key}-${index}`}>
 					<Input
@@ -1145,10 +1152,10 @@ function McpServerSettingsDialog({
 					</div>
 					<div className="flex flex-col gap-1.5">
 						<Label htmlFor="mcp-settings-transport">Transport</Label>
-						<Select
+						<Select<McpTransport>
 							onValueChange={(value) => {
 								if (value) {
-									setTransport(value as McpTransport);
+									setTransport(value);
 								}
 							}}
 							value={transport}
@@ -1314,11 +1321,7 @@ function ToolDetail({
 }: {
 	tool: McpTool;
 	agents: { id: string; name: string }[];
-	onCallTool: (
-		tool: string,
-		agentId: string,
-		args: unknown
-	) => Promise<McpCallResult>;
+	onCallTool: ReturnType<typeof useMcp>["callTool"];
 }) {
 	const [argsText, setArgsText] = useState("{}");
 	const [agentId, setAgentId] = useState<string>(() => agents[0]?.id ?? "");
@@ -1333,7 +1336,7 @@ function ToolDetail({
 		if (!result.ok) {
 			return result.error ?? "Tool call failed";
 		}
-		return typeof result.output === "string"
+		return isNativeText(result.output)
 			? result.output
 			: JSON.stringify(result.output, null, 2);
 	}, [result]);
@@ -1404,10 +1407,7 @@ function ToolDetail({
 				) : (
 					<>
 						<div className="flex items-center gap-2">
-							<Label
-								className="text-muted-foreground text-xs"
-								htmlFor={`agent-${tool.id}`}
-							>
+							<Label htmlFor={`agent-${tool.id}`} size="compact" tone="muted">
 								Run as
 							</Label>
 							<Select
@@ -1432,20 +1432,17 @@ function ToolDetail({
 							</Select>
 						</div>
 						<div className="flex flex-col gap-1">
-							<Label
-								className="text-muted-foreground text-xs"
-								htmlFor={`args-${tool.id}`}
-							>
+							<Label htmlFor={`args-${tool.id}`} size="compact" tone="muted">
 								Arguments (JSON)
 							</Label>
 							<Textarea
-								className="font-mono text-xs"
 								id={`args-${tool.id}`}
 								onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
 									setArgsText(e.target.value)
 								}
 								rows={3}
 								value={argsText}
+								variant="code-caption"
 							/>
 						</div>
 						{parseError ? (
@@ -1563,18 +1560,20 @@ function AddServerDialog({
 				setFormError("Headers must be valid JSON.");
 				return;
 			}
-			if (
-				typeof parsed !== "object" ||
-				parsed === null ||
-				Array.isArray(parsed)
-			) {
+			const decoded = z
+				.record(
+					z.string().refine((key) => Boolean(key.trim())),
+					z.string()
+				)
+				.safeParse(parsed);
+			if (!decoded.success) {
 				setFormError("Headers must be a JSON object of string values.");
 				return;
 			}
-			const headerObject = parsed as Record<string, unknown>;
+			const headerObject = decoded.data;
 			for (const key of Object.keys(headerObject)) {
 				const value = headerObject[key];
-				if (!key.trim() || typeof value !== "string") {
+				if (!(key.trim() && isNativeText(value))) {
 					setFormError("Headers must be a JSON object of string values.");
 					return;
 				}
@@ -1637,8 +1636,8 @@ function AddServerDialog({
 					<DialogTitle>Add MCP server</DialogTitle>
 					<DialogDescription>
 						Register a new MCP server. The entry is saved to{" "}
-						<code className="text-xs">~/.ryu/mcp.json</code> and takes effect
-						immediately, no restart required.
+						<code className="text-xs">~/.ryu/state/mcp.json</code> and takes
+						effect immediately, no restart required.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -1657,10 +1656,10 @@ function AddServerDialog({
 
 					<div className="flex flex-col gap-1.5">
 						<Label htmlFor="mcp-transport">Transport</Label>
-						<Select
+						<Select<McpTransport>
 							onValueChange={(value) => {
 								if (value) {
-									setTransport(value as McpTransport);
+									setTransport(value);
 								}
 							}}
 							value={transport}

@@ -8,7 +8,6 @@
 // works on both surfaces regardless of whether a QueryClient ancestor exists.
 
 import { useCallback, useEffect, useState } from "react";
-import { toTarget } from "@/src/lib/api/client.ts";
 import { getPluginContributions } from "@/src/lib/api/plugins.ts";
 import { useCoreRefresh } from "@/src/lib/core-refresh.ts";
 import {
@@ -16,7 +15,7 @@ import {
 	type PluginSettingsTab,
 	parseSettingsTabs,
 } from "@/src/lib/pluginSettings.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import { useActiveNode, useActiveTargetGetter } from "./useActiveNode.ts";
 
 interface PluginSettingsTabsState {
 	byPlugin: Map<string, PluginSettingsTab[]>;
@@ -33,13 +32,17 @@ export function usePluginSettingsTabs(): PluginSettingsTabsState {
 	const [reloadKey, setReloadKey] = useState(0);
 
 	const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+	// The computer whose tabs are listed: the settings dialog's scoped computer
+	// when inside one, else the active node. Its credentials key the refetch.
+	const { url, token, userJwt } = useActiveNode();
+	const getTarget = useActiveTargetGetter();
 
 	// Auto-recover when Core reconnects or the user hits "Refresh all".
 	useCoreRefresh(reload);
 
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		setLoading(true);
 		setError(false);
 		getPluginContributions(target)
@@ -60,10 +63,11 @@ export function usePluginSettingsTabs(): PluginSettingsTabsState {
 			cancelled = true;
 		};
 		// `reloadKey` is load-bearing: it is the ONLY thing `reload()` changes, and
-		// three callers depend on it (useCoreRefresh above, PluginsSettings, and
+		// its callers depend on it (useCoreRefresh above and
 		// useScopedSettingsNav). Without it a newly installed plugin's settings tab
 		// never appears until the app restarts. A lint autofix emptied this once.
-	}, [reloadKey]);
+		// url/token/userJwt refetch the tabs when the computer changes.
+	}, [reloadKey, url, token, userJwt, getTarget]);
 
 	return { tabs, byPlugin: groupTabsByPlugin(tabs), loading, error, reload };
 }

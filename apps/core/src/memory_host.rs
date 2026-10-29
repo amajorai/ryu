@@ -21,7 +21,7 @@ use ryu_memory::MemoryStore;
 /// (`control_plane::registered_org()`) and the signed-in local account's user id
 /// (`auth::load_accounts().active()`).
 pub fn open_default() -> Result<MemoryStore> {
-    let db_path = crate::paths::ryu_dir().join("conversations.db");
+    let db_path = crate::paths::db_path("conversations.db");
     let node_bound = crate::sidecar::control_plane::registered_org().is_some();
     let owner = crate::auth::load_accounts()
         .active()

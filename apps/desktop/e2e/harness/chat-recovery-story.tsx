@@ -3,23 +3,23 @@
 // screenshot proves the two related states users see after a restart:
 // an interrupted turn and both sides of a compaction lifecycle are separator
 // markers, while
-// an empty composer stays an icon-only Play control rather than opening voice
-// mode by default.
+// an empty composer stays an icon-only, disabled send arrow rather than opening
+// voice mode by default.
 
-import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
-import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar";
-import type { UIMessage } from "ai";
+import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
+import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
+import type { ComponentProps } from "react";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MessageList } from "../../components/agent-elements/message-list.tsx";
 import "../../src/index.css";
 
-const MESSAGES: UIMessage[] = [
+const MESSAGES: ComponentProps<typeof MessageList>["messages"] = [
 	{
 		id: "recovery-user",
 		role: "user",
 		parts: [{ type: "text", text: "Continue the deployment check" }],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "recovery-assistant",
 		role: "assistant",
@@ -30,12 +30,12 @@ const MESSAGES: UIMessage[] = [
 				text: "I checked the first service and was about to inspect the remaining health checks.",
 			},
 		],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "credit-user",
 		role: "user",
 		parts: [{ type: "text", text: "Continue with OpenRouter" }],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "credit-assistant",
 		role: "assistant",
@@ -48,12 +48,12 @@ const MESSAGES: UIMessage[] = [
 					"The OpenRouter API key on this node has no prepaid credits left. Add credits to your OpenRouter account or choose another provider, then retry.",
 			},
 		],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "managed-credit-user",
 		role: "user",
 		parts: [{ type: "text", text: "Try the managed OpenRouter lane" }],
-	} as unknown as UIMessage,
+	},
 	{
 		id: "managed-credit-assistant",
 		role: "assistant",
@@ -66,7 +66,7 @@ const MESSAGES: UIMessage[] = [
 					"Your organization's Ryu credits are exhausted. Open Settings > Credits to top up, or choose a BYOK or local model, then retry.",
 			},
 		],
-	} as unknown as UIMessage,
+	},
 ];
 
 function noop() {

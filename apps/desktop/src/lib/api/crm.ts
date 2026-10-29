@@ -1,3 +1,9 @@
+import {
+	jsonResponseDocumentSchema,
+	jsonResponseValueSchema,
+} from "@ryu/app-host/json-values";
+import { z } from "zod";
+import type { GatewayJsonValue } from "./gateway-json-contracts.ts";
 // The desktop client for Harbor (`@ryu/crm`) — the object-first CRM sidecar.
 //
 // This is a `panel: "native"` dock contribution (the `@ryu/browser` /
@@ -174,7 +180,7 @@ export interface View {
  *  `unknown` rather than a union because the value's shape is decided by its
  *  field's type at runtime, and narrowing belongs at the one render/edit seam that
  *  already knows the field. */
-export type ValueBag = Record<string, unknown>;
+export type ValueBag = Record<string, GatewayJsonValue>;
 
 export interface CrmRecord {
 	created_at: string;
@@ -363,6 +369,359 @@ export interface RecordQuery {
 	sorts?: ViewSort[];
 }
 
+// Reply contracts mirror apps-store/crm/backend/src/models.rs; optional serde fields stay optional.
+const fieldTypeSchema = z.enum([
+	"checkbox",
+	"currency",
+	"date",
+	"datetime",
+	"email",
+	"long_text",
+	"multi_select",
+	"number",
+	"percent",
+	"phone",
+	"rating",
+	"relation",
+	"select",
+	"status",
+	"text",
+	"url",
+	"user",
+]);
+const viewKindSchema = z.enum(["board", "list", "table"]);
+const activityKindSchema = z.enum([
+	"call",
+	"field_change",
+	"meeting",
+	"note",
+	"stage_change",
+	"task",
+]);
+const sortDirectionSchema = z.enum(["asc", "desc"]);
+const filterConditionSchema = z.looseObject({
+	field_id: z.string(),
+	op: z.string(),
+	value: jsonResponseValueSchema,
+});
+const viewFilterSchema: z.ZodType<ViewFilter> = z.lazy(() =>
+	z.union([
+		z.looseObject({
+			and: z.looseObject({ filters: z.array(viewFilterSchema) }),
+		}),
+		z.looseObject({
+			or: z.looseObject({ filters: z.array(viewFilterSchema) }),
+		}),
+		z.looseObject({ not: z.looseObject({ filter: viewFilterSchema }) }),
+		z.looseObject({ condition: filterConditionSchema }),
+		z
+			.looseObject({
+				type: z.literal("and"),
+				filters: z.array(viewFilterSchema),
+			})
+			.transform((tree): ViewFilter => ({ and: { filters: tree.filters } })),
+		z
+			.looseObject({
+				type: z.literal("or"),
+				filters: z.array(viewFilterSchema),
+			})
+			.transform((tree): ViewFilter => ({ or: { filters: tree.filters } })),
+		z
+			.looseObject({ type: z.literal("not"), filter: viewFilterSchema })
+			.transform((tree): ViewFilter => ({ not: { filter: tree.filter } })),
+		filterConditionSchema.extend({ type: z.literal("condition") }).transform(
+			(tree): ViewFilter => ({
+				condition: {
+					field_id: tree.field_id,
+					op: tree.op,
+					value: tree.value,
+				},
+			})
+		),
+	])
+);
+const selectOptionSchema = z.looseObject({
+	color: z.union([z.string(), z.null()]).optional(),
+	id: z.string(),
+	is_lost: z.boolean().optional(),
+	is_won: z.boolean().optional(),
+	label: z.string(),
+	position: z.number(),
+}) satisfies z.ZodType<SelectOption>;
+const fieldConfigSchema = z.looseObject({
+	currency_code: z.union([z.string(), z.null()]).optional(),
+	default_value: jsonResponseValueSchema.optional(),
+	max_length: z.union([z.number(), z.null()]).optional(),
+	max_rating: z.union([z.number(), z.null()]).optional(),
+	options: z.array(selectOptionSchema).optional(),
+	precision: z.union([z.number(), z.null()]).optional(),
+	relation_inverse_label: z.union([z.string(), z.null()]).optional(),
+	relation_multiple: z.boolean().optional(),
+	relation_object_id: z.union([z.string(), z.null()]).optional(),
+}) satisfies z.ZodType<FieldConfig>;
+const fieldSchema = z.looseObject({
+	config: fieldConfigSchema.optional(),
+	created_at: z.string(),
+	description: z.union([z.string(), z.null()]).optional(),
+	field_type: fieldTypeSchema,
+	id: z.string(),
+	is_required: z.boolean(),
+	is_system: z.boolean(),
+	is_unique: z.boolean(),
+	list_id: z.union([z.string(), z.null()]).optional(),
+	name: z.string(),
+	object_id: z.string(),
+	position: z.number(),
+	slug: z.string(),
+	updated_at: z.string(),
+}) satisfies z.ZodType<Field>;
+const crmObjectSchema = z.looseObject({
+	created_at: z.string(),
+	description: z.union([z.string(), z.null()]).optional(),
+	icon: z.union([z.string(), z.null()]).optional(),
+	id: z.string(),
+	is_standard: z.boolean(),
+	plural: z.string(),
+	position: z.number(),
+	singular: z.string(),
+	slug: z.string(),
+	title_field_id: z.union([z.string(), z.null()]).optional(),
+	updated_at: z.string(),
+}) satisfies z.ZodType<CrmObject>;
+const viewSortSchema = z.looseObject({
+	direction: sortDirectionSchema.optional(),
+	field_id: z.string(),
+}) satisfies z.ZodType<ViewSort>;
+const viewSchema = z.looseObject({
+	created_at: z.string(),
+	filter: z.union([viewFilterSchema, z.null()]).optional(),
+	group_by_field_id: z.union([z.string(), z.null()]).optional(),
+	id: z.string(),
+	is_default: z.boolean(),
+	kind: viewKindSchema,
+	name: z.string(),
+	object_id: z.string(),
+	position: z.number(),
+	sorts: z.array(viewSortSchema).optional(),
+	updated_at: z.string(),
+	visible_field_ids: z.array(z.string()).optional(),
+}) satisfies z.ZodType<View>;
+const crmRecordSchema = z.looseObject({
+	created_at: z.string(),
+	created_by: z.union([z.string(), z.null()]).optional(),
+	deleted_at: z.union([z.string(), z.null()]).optional(),
+	id: z.string(),
+	object_id: z.string(),
+	title: z.string(),
+	updated_at: z.string(),
+	values: jsonResponseDocumentSchema.optional(),
+}) satisfies z.ZodType<CrmRecord>;
+const crmListSchema = z.looseObject({
+	created_at: z.string(),
+	description: z.union([z.string(), z.null()]).optional(),
+	icon: z.union([z.string(), z.null()]).optional(),
+	id: z.string(),
+	name: z.string(),
+	object_id: z.string(),
+	position: z.number(),
+	updated_at: z.string(),
+}) satisfies z.ZodType<CrmList>;
+const listEntrySchema = z.looseObject({
+	created_at: z.string(),
+	id: z.string(),
+	list_id: z.string(),
+	position: z.number(),
+	record_id: z.string(),
+	updated_at: z.string(),
+	values: jsonResponseDocumentSchema.optional(),
+}) satisfies z.ZodType<ListEntry>;
+const activitySchema = z.looseObject({
+	assignee: z.union([z.string(), z.null()]).optional(),
+	author: z.union([z.string(), z.null()]).optional(),
+	body: z.union([z.string(), z.null()]).optional(),
+	completed_at: z.union([z.string(), z.null()]).optional(),
+	created_at: z.string(),
+	due_at: z.union([z.string(), z.null()]).optional(),
+	field_id: z.union([z.string(), z.null()]).optional(),
+	from_value: jsonResponseValueSchema.optional(),
+	id: z.string(),
+	kind: activityKindSchema,
+	object_id: z.union([z.string(), z.null()]).optional(),
+	record_id: z.union([z.string(), z.null()]).optional(),
+	title: z.string().optional(),
+	to_value: jsonResponseValueSchema.optional(),
+	updated_at: z.string(),
+}) satisfies z.ZodType<Activity>;
+const objectWithFieldsSchema = z.union([
+	z.looseObject({
+		object: crmObjectSchema,
+		fields: z.array(fieldSchema),
+		views: z.array(viewSchema),
+		record_count: z.number(),
+	}),
+	crmObjectSchema
+		.extend({
+			fields: z.array(fieldSchema),
+			views: z.array(viewSchema),
+			record_count: z.number(),
+		})
+		.transform((row) => {
+			const { fields, views, record_count, ...object } = row;
+			return { ...row, object, fields, views, record_count };
+		}),
+]) satisfies z.ZodType<ObjectWithFields>;
+const schemaResponseSchema = z.looseObject({
+	lists: z.array(crmListSchema),
+	objects: z.array(objectWithFieldsSchema),
+}) satisfies z.ZodType<SchemaResponse>;
+const searchHitSchema = z.looseObject({
+	object_id: z.string(),
+	object_slug: z.string(),
+	rank: z.number(),
+	record_id: z.string(),
+	snippet: z.string(),
+	title: z.string(),
+}) satisfies z.ZodType<SearchHit>;
+const pipelineStageSchema = z.looseObject({
+	color: z.union([z.string(), z.null()]).optional(),
+	is_lost: z.boolean(),
+	is_won: z.boolean(),
+	label: z.string(),
+	option_id: z.string(),
+	position: z.number(),
+	record_count: z.number(),
+	share: z.number(),
+	value_cents: z.number(),
+}) satisfies z.ZodType<PipelineStage>;
+const pipelineReportSchema = z.looseObject({
+	currency_code: z.string(),
+	field_id: z.string(),
+	lost_count: z.number(),
+	lost_value_cents: z.number(),
+	object_id: z.string(),
+	stages: z.array(pipelineStageSchema),
+	total_records: z.number(),
+	total_value_cents: z.number(),
+	unassigned_count: z.number(),
+	value_field_id: z.union([z.string(), z.null()]).optional(),
+	win_rate: z.number(),
+	won_count: z.number(),
+	won_value_cents: z.number(),
+}) satisfies z.ZodType<PipelineReport>;
+const importColumnSchema = z.looseObject({
+	index: z.number(),
+	name: z.string(),
+	samples: z.array(z.string()),
+	suggested_field_id: z.union([z.string(), z.null()]).optional(),
+}) satisfies z.ZodType<ImportColumn>;
+const importMappingSchema = z.looseObject({
+	column_index: z.number(),
+	field_id: z.union([z.string(), z.null()]),
+}) satisfies z.ZodType<ImportMapping>;
+const importConflictSchema = z.looseObject({
+	existing: jsonResponseValueSchema,
+	field_id: z.string(),
+	field_slug: z.string(),
+	incoming: jsonResponseValueSchema,
+	record_id: z.string(),
+	row_index: z.number(),
+}) satisfies z.ZodType<ImportConflict>;
+const importPreviewSchema = z.looseObject({
+	conflicts: z.array(importConflictSchema).optional(),
+	create_count: z.number(),
+	error_count: z.number(),
+	skip_count: z.number(),
+	total_rows: z.number(),
+	truncated: z.boolean().optional(),
+	unmapped_columns: z.array(z.string()).optional(),
+	update_count: z.number(),
+}) satisfies z.ZodType<ImportPreview>;
+const importResultSchema = z.looseObject({
+	created: z.number(),
+	created_record_ids: z.array(z.string()).optional(),
+	failed: z.number(),
+	skipped: z.number(),
+	updated: z.number(),
+	updated_record_ids: z.array(z.string()).optional(),
+}) satisfies z.ZodType<ImportResult>;
+const importJobSchema = z.looseObject({
+	columns: z.array(importColumnSchema),
+	created_at: z.string(),
+	dedupe: z
+		.looseObject({ match_field_ids: z.array(z.string()), strategy: z.string() })
+		.optional(),
+	delimiter: z.string(),
+	error: z.union([z.string(), z.null()]).optional(),
+	filename: z.union([z.string(), z.null()]).optional(),
+	has_header: z.boolean(),
+	id: z.string(),
+	mappings: z.array(importMappingSchema).optional(),
+	object_id: z.string(),
+	preview: z.union([importPreviewSchema, z.null()]).optional(),
+	result: z.union([importResultSchema, z.null()]).optional(),
+	row_count: z.number(),
+	status: z.enum(["applied", "draft", "failed", "previewed"]),
+	updated_at: z.string(),
+}) satisfies z.ZodType<ImportJob>;
+const relatedGroupSchema = z.looseObject({
+	field_id: z.string(),
+	field_name: z.string(),
+	object_slug: z.string(),
+	records: z.array(crmRecordSchema),
+}) satisfies z.ZodType<RelatedGroup>;
+const duplicateGroupSchema = z.looseObject({
+	field_id: z.string(),
+	records: z.array(crmRecordSchema),
+}) satisfies z.ZodType<DuplicateGroup>;
+const crmSummarySchema = z.looseObject({
+	open_tasks: z.number(),
+	overdue_tasks: z.number(),
+	recent_activity: z.array(activitySchema),
+	total_records: z.number(),
+}) satisfies z.ZodType<CrmSummary>;
+function pageSchema<Schema extends z.ZodType>(item: Schema) {
+	return z.looseObject({
+		items: z.array(item),
+		has_more: z.boolean(),
+		limit: z.number(),
+		offset: z.number(),
+		total: z.number(),
+	});
+}
+const recordPageSchema = pageSchema(crmRecordSchema);
+const viewResultSchema = z.union([
+	recordPageSchema,
+	z
+		.looseObject({ page: recordPageSchema })
+		.transform((reply) => ({ ...reply, ...reply.page })),
+]);
+const recordResultSchema = z.union([
+	crmRecordSchema,
+	z
+		.looseObject({ record: crmRecordSchema })
+		.transform((reply) => ({ ...reply, ...reply.record })),
+	z
+		.looseObject({ survivor: crmRecordSchema })
+		.transform((reply) => ({ ...reply, ...reply.survivor })),
+]);
+const relatedReplySchema = z.looseObject({
+	groups: z.array(relatedGroupSchema),
+});
+const duplicatesReplySchema = z.looseObject({
+	groups: z.array(duplicateGroupSchema),
+});
+const searchReplySchema = z.looseObject({ hits: z.array(searchHitSchema) });
+/** Every CRM delete answers HTTP 200 `{"ok": true, …}` (never 204 — see
+ *  `apps-store/crm/backend/src/api/{objects,records}.rs`). */
+const deleteReplySchema = z.looseObject({ ok: z.boolean() });
+/** `RecordUpdate` (`apps-store/crm/backend/src/models.rs`): link/unlink answer
+ *  the same shape as a PATCH because a relation edit IS a field edit. */
+const recordUpdateSchema = z.looseObject({
+	changed: z.array(z.looseObject({})),
+	record: crmRecordSchema,
+	stage_change: z.looseObject({}).optional(),
+});
+
 // ── Transport ────────────────────────────────────────────────────────────────
 
 /** Thrown for any non-2xx. Carries the status so a caller can tell "the app is
@@ -386,11 +745,12 @@ interface RequestInitLite {
 	signal?: AbortSignal;
 }
 
-async function send<T>(
+async function send<Schema extends z.ZodType>(
 	target: ApiTarget,
 	path: string,
+	codec: Schema,
 	init?: RequestInitLite
-): Promise<T> {
+): Promise<z.output<Schema>> {
 	const headers = makeHeaders(target.token, target.userJwt);
 	if (init?.raw !== undefined) {
 		headers["Content-Type"] = "text/csv";
@@ -409,7 +769,9 @@ async function send<T>(
 		// than letting a parse error mask the real one.
 		let detail = response.statusText;
 		try {
-			const parsed = (await response.json()) as { error?: string };
+			const parsed = z
+				.object({ error: z.string().optional() })
+				.parse(await response.json());
 			if (parsed?.error) {
 				detail = parsed.error;
 			}
@@ -418,10 +780,9 @@ async function send<T>(
 		}
 		throw new CrmError(response.status, detail);
 	}
-	if (response.status === 204) {
-		return undefined as T;
-	}
-	return (await response.json()) as T;
+	return codec.parse(
+		response.status === 204 ? undefined : await response.json()
+	);
 }
 
 const enc = encodeURIComponent;
@@ -441,124 +802,141 @@ export function createCrmClient(target: ApiTarget) {
 		/** The panel's boot call: every object with its fields, views and record
 		 *  count, plus the curated lists. One round-trip, not N+1 per object. */
 		getSchema: (signal?: AbortSignal) =>
-			send<SchemaResponse>(target, "/schema", { signal }),
+			send(target, "/schema", schemaResponseSchema, { signal }),
 
 		createObject: (body: Partial<CrmObject>) =>
-			send<CrmObject>(target, "/objects", { body, method: "POST" }),
+			send(target, "/objects", crmObjectSchema, { body, method: "POST" }),
 
 		updateObject: (slug: string, body: Partial<CrmObject>) =>
-			send<CrmObject>(target, `/objects/${enc(slug)}`, {
+			send(target, `/objects/${enc(slug)}`, crmObjectSchema, {
 				body,
 				method: "PATCH",
 			}),
 
 		deleteObject: (slug: string) =>
-			send<void>(target, `/objects/${enc(slug)}`, { method: "DELETE" }),
+			send(target, `/objects/${enc(slug)}`, deleteReplySchema, {
+				method: "DELETE",
+			}),
 
 		createField: (slug: string, body: Partial<Field>) =>
-			send<Field>(target, `/objects/${enc(slug)}/fields`, {
+			send(target, `/objects/${enc(slug)}/fields`, fieldSchema, {
 				body,
 				method: "POST",
 			}),
 
 		updateField: (fieldId: string, body: Partial<Field>) =>
-			send<Field>(target, `/fields/${enc(fieldId)}`, {
+			send(target, `/fields/${enc(fieldId)}`, fieldSchema, {
 				body,
 				method: "PATCH",
 			}),
 
 		deleteField: (fieldId: string) =>
-			send<void>(target, `/fields/${enc(fieldId)}`, { method: "DELETE" }),
+			send(target, `/fields/${enc(fieldId)}`, deleteReplySchema, {
+				method: "DELETE",
+			}),
 
 		reorderFields: (slug: string, fieldIds: string[]) =>
-			send<void>(target, `/objects/${enc(slug)}/fields/reorder`, {
-				body: { field_ids: fieldIds },
-				method: "POST",
-			}),
+			send(
+				target,
+				`/objects/${enc(slug)}/fields/reorder`,
+				z.array(fieldSchema),
+				{
+					// `ReorderRequest { ids }` in the CRM backend.
+					body: { ids: fieldIds },
+					method: "POST",
+				}
+			),
 
 		// ── Records ──────────────────────────────────────────────────────────
 		/** The one read every grid and board goes through. Takes the SAME
 		 *  filter/sort shape a view stores, so "run this view" and "run an ad-hoc
 		 *  query" are one code path rather than two that can drift. */
 		queryRecords: (slug: string, query: RecordQuery, signal?: AbortSignal) =>
-			send<Page<CrmRecord>>(target, `/objects/${enc(slug)}/records/query`, {
+			send(target, `/objects/${enc(slug)}/records/query`, recordPageSchema, {
 				body: query,
 				method: "POST",
 				signal,
 			}),
 
 		createRecord: (slug: string, values: ValueBag) =>
-			send<CrmRecord>(target, `/objects/${enc(slug)}/records`, {
+			send(target, `/objects/${enc(slug)}/records`, recordResultSchema, {
 				body: { values },
 				method: "POST",
 			}),
 
 		getRecord: (recordId: string, signal?: AbortSignal) =>
-			send<CrmRecord>(target, `/records/${enc(recordId)}`, { signal }),
+			send(target, `/records/${enc(recordId)}`, recordResultSchema, { signal }),
 
 		/** Merges: fields not named are left alone, so a single-cell edit sends one
 		 *  key and cannot clobber a column the grid was not showing. */
 		updateRecord: (recordId: string, values: ValueBag) =>
-			send<CrmRecord>(target, `/records/${enc(recordId)}`, {
+			send(target, `/records/${enc(recordId)}`, recordResultSchema, {
 				body: { mode: "merge", values },
 				method: "PATCH",
 			}),
 
 		deleteRecord: (recordId: string) =>
-			send<void>(target, `/records/${enc(recordId)}`, { method: "DELETE" }),
+			send(target, `/records/${enc(recordId)}`, deleteReplySchema, {
+				method: "DELETE",
+			}),
 
 		restoreRecord: (recordId: string) =>
-			send<CrmRecord>(target, `/records/${enc(recordId)}/restore`, {
+			send(target, `/records/${enc(recordId)}/restore`, recordResultSchema, {
 				method: "POST",
 			}),
 
 		getRelated: (recordId: string, signal?: AbortSignal) =>
-			send<{ groups: RelatedGroup[] }>(
-				target,
-				`/records/${enc(recordId)}/related`,
-				{ signal }
-			),
+			send(target, `/records/${enc(recordId)}/related`, relatedReplySchema, {
+				signal,
+			}),
 
 		link: (recordId: string, fieldId: string, targetIds: string[]) =>
-			send<void>(target, `/records/${enc(recordId)}/links`, {
-				body: { field_id: fieldId, target_ids: targetIds },
+			send(target, `/records/${enc(recordId)}/links`, recordUpdateSchema, {
+				// `LinkRequest { field_id, target_record_ids }` in the CRM backend.
+				body: { field_id: fieldId, target_record_ids: targetIds },
 				method: "POST",
 			}),
 
 		unlink: (recordId: string, fieldId: string, targetIds: string[]) =>
-			send<void>(target, `/records/${enc(recordId)}/unlink`, {
-				body: { field_id: fieldId, target_ids: targetIds },
+			send(target, `/records/${enc(recordId)}/unlink`, recordUpdateSchema, {
+				// `LinkRequest { field_id, target_record_ids }` in the CRM backend.
+				body: { field_id: fieldId, target_record_ids: targetIds },
 				method: "POST",
 			}),
 
 		findDuplicates: (slug: string, signal?: AbortSignal) =>
-			send<{ groups: DuplicateGroup[] }>(
-				target,
-				`/objects/${enc(slug)}/duplicates`,
-				{ signal }
-			),
+			send(target, `/objects/${enc(slug)}/duplicates`, duplicatesReplySchema, {
+				signal,
+			}),
 
 		mergeRecords: (body: {
 			loser_ids: string[];
 			resolutions?: { field_id: string; source: string }[];
 			survivor_id: string;
-		}) => send<CrmRecord>(target, "/merge", { body, method: "POST" }),
+		}) => send(target, "/merge", recordResultSchema, { body, method: "POST" }),
 
 		// ── Views & lists ────────────────────────────────────────────────────
 		createView: (slug: string, body: Partial<View>) =>
-			send<View>(target, `/objects/${enc(slug)}/views`, {
+			send(target, `/objects/${enc(slug)}/views`, viewSchema, {
 				body,
 				method: "POST",
 			}),
 
 		updateView: (viewId: string, body: Partial<View>) =>
-			send<View>(target, `/views/${enc(viewId)}`, { body, method: "PATCH" }),
+			send(target, `/views/${enc(viewId)}`, viewSchema, {
+				body,
+				method: "PATCH",
+			}),
 
 		deleteView: (viewId: string) =>
-			send<void>(target, `/views/${enc(viewId)}`, { method: "DELETE" }),
+			send(target, `/views/${enc(viewId)}`, deleteReplySchema, {
+				method: "DELETE",
+			}),
 
 		setDefaultView: (viewId: string) =>
-			send<View>(target, `/views/${enc(viewId)}/default`, { method: "POST" }),
+			send(target, `/views/${enc(viewId)}/default`, viewSchema, {
+				method: "POST",
+			}),
 
 		/** Run a saved view server-side, so the board and the grid agree on what
 		 *  the view MEANS without either re-deriving its filter locally. */
@@ -567,43 +945,49 @@ export function createCrmClient(target: ApiTarget) {
 			overrides?: Partial<RecordQuery>,
 			signal?: AbortSignal
 		) =>
-			send<Page<CrmRecord>>(target, `/views/${enc(viewId)}/run`, {
+			send(target, `/views/${enc(viewId)}/run`, viewResultSchema, {
 				body: overrides ?? {},
 				method: "POST",
 				signal,
 			}),
 
 		createList: (body: Partial<CrmList>) =>
-			send<CrmList>(target, "/lists", { body, method: "POST" }),
+			send(target, "/lists", crmListSchema, { body, method: "POST" }),
 
 		queryListEntries: (
 			listId: string,
 			query?: RecordQuery,
 			signal?: AbortSignal
 		) =>
-			send<Page<ListEntry>>(target, `/lists/${enc(listId)}/entries/query`, {
-				body: query ?? {},
-				method: "POST",
-				signal,
-			}),
+			send(
+				target,
+				`/lists/${enc(listId)}/entries/query`,
+				pageSchema(listEntrySchema),
+				{
+					body: query ?? {},
+					method: "POST",
+					signal,
+				}
+			),
 
 		addListEntry: (listId: string, recordId: string) =>
-			send<ListEntry>(target, `/lists/${enc(listId)}/entries`, {
+			send(target, `/lists/${enc(listId)}/entries`, listEntrySchema, {
 				body: { record_id: recordId },
 				method: "POST",
 			}),
 
 		updateListEntry: (entryId: string, values: ValueBag) =>
-			send<ListEntry>(target, `/list-entries/${enc(entryId)}`, {
+			send(target, `/list-entries/${enc(entryId)}`, listEntrySchema, {
 				body: { values },
 				method: "PATCH",
 			}),
 
 		// ── Timeline ─────────────────────────────────────────────────────────
 		getTimeline: (recordId: string, limit?: number, signal?: AbortSignal) =>
-			send<Page<Activity>>(
+			send(
 				target,
 				`/records/${enc(recordId)}/activities${limit ? `?limit=${limit}` : ""}`,
+				pageSchema(activitySchema),
 				{ signal }
 			),
 
@@ -614,16 +998,16 @@ export function createCrmClient(target: ApiTarget) {
 			kind: ActivityKind;
 			record_id?: string;
 			title: string;
-		}) => send<Activity>(target, "/activities", { body, method: "POST" }),
+		}) => send(target, "/activities", activitySchema, { body, method: "POST" }),
 
 		completeActivity: (activityId: string, completed: boolean) =>
-			send<Activity>(target, `/activities/${enc(activityId)}/complete`, {
+			send(target, `/activities/${enc(activityId)}/complete`, activitySchema, {
 				body: { completed },
 				method: "POST",
 			}),
 
 		deleteActivity: (activityId: string) =>
-			send<void>(target, `/activities/${enc(activityId)}`, {
+			send(target, `/activities/${enc(activityId)}`, deleteReplySchema, {
 				method: "DELETE",
 			}),
 
@@ -649,25 +1033,31 @@ export function createCrmClient(target: ApiTarget) {
 				search.set("limit", String(params.limit));
 			}
 			search.set("utc_offset_minutes", String(-new Date().getTimezoneOffset()));
-			return send<Page<Activity>>(target, `/tasks?${search.toString()}`, {
-				signal,
-			});
+			return send(
+				target,
+				`/tasks?${search.toString()}`,
+				pageSchema(activitySchema),
+				{
+					signal,
+				}
+			);
 		},
 
 		// ── Import / export ──────────────────────────────────────────────────
 		/** Upload raw CSV text. The sidecar persists the bytes with the job so
 		 *  preview and apply are two requests over the SAME file, not two uploads. */
 		createImport: (slug: string, csv: string, filename?: string) =>
-			send<ImportJob>(
+			send(
 				target,
 				`/imports?object=${enc(slug)}${
 					filename ? `&filename=${enc(filename)}` : ""
 				}`,
+				importJobSchema,
 				{ method: "POST", raw: csv }
 			),
 
 		getImport: (importId: string) =>
-			send<ImportJob>(target, `/imports/${enc(importId)}`),
+			send(target, `/imports/${enc(importId)}`, importJobSchema),
 
 		setImportMapping: (
 			importId: string,
@@ -676,7 +1066,7 @@ export function createCrmClient(target: ApiTarget) {
 				mappings: ImportMapping[];
 			}
 		) =>
-			send<ImportJob>(target, `/imports/${enc(importId)}/mapping`, {
+			send(target, `/imports/${enc(importId)}/mapping`, importJobSchema, {
 				body,
 				method: "PUT",
 			}),
@@ -684,18 +1074,20 @@ export function createCrmClient(target: ApiTarget) {
 		/** The dry run. Nothing is written; the counts are exact for the whole file
 		 *  even when the per-row sample list is truncated. */
 		previewImport: (importId: string) =>
-			send<ImportPreview>(target, `/imports/${enc(importId)}/preview`, {
+			send(target, `/imports/${enc(importId)}/preview`, importPreviewSchema, {
 				method: "POST",
 			}),
 
 		/** Idempotent per job — applying twice does not double-create. */
 		applyImport: (importId: string) =>
-			send<ImportResult>(target, `/imports/${enc(importId)}/apply`, {
+			send(target, `/imports/${enc(importId)}/apply`, importResultSchema, {
 				method: "POST",
 			}),
 
 		deleteImport: (importId: string) =>
-			send<void>(target, `/imports/${enc(importId)}`, { method: "DELETE" }),
+			send(target, `/imports/${enc(importId)}`, deleteReplySchema, {
+				method: "DELETE",
+			}),
 
 		/** CSV of a view's current result set. Raw text, not JSON. */
 		exportView: async (viewId: string): Promise<string> => {
@@ -715,15 +1107,13 @@ export function createCrmClient(target: ApiTarget) {
 			if (object) {
 				params.set("object", object);
 			}
-			return send<{ hits: SearchHit[] }>(
-				target,
-				`/search?${params.toString()}`,
-				{ signal }
-			);
+			return send(target, `/search?${params.toString()}`, searchReplySchema, {
+				signal,
+			});
 		},
 
 		getSummary: (signal?: AbortSignal) =>
-			send<CrmSummary>(target, "/summary", { signal }),
+			send(target, "/summary", crmSummarySchema, { signal }),
 
 		getPipeline: (
 			body?: {
@@ -734,7 +1124,7 @@ export function createCrmClient(target: ApiTarget) {
 			},
 			signal?: AbortSignal
 		) =>
-			send<PipelineReport>(target, "/reports/pipeline", {
+			send(target, "/reports/pipeline", pipelineReportSchema, {
 				body: body ?? {},
 				method: "POST",
 				signal,

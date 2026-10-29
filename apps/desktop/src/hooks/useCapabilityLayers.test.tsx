@@ -5,12 +5,14 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-const reads: Array<{ signal: AbortSignal; resolve: (value: unknown) => void }> =
-	[];
+const reads: Array<{
+	signal: AbortSignal;
+	resolve: <TValue>(value: TValue) => void;
+}> = [];
 const writes: Array<{ target: ApiTarget; resolve: () => void }> = [];
 mock.module("@/src/lib/api/capability-layers.ts", () => ({
 	fetchCapabilityLayers: (_target: ApiTarget, signal: AbortSignal) =>
@@ -58,6 +60,7 @@ const model = {
 		{
 			capability: "web.search",
 			toolkit: true,
+			decisionModel: false,
 			selectable: true,
 			available: [],
 			providers: [provider],
@@ -65,7 +68,29 @@ const model = {
 			overridden: false,
 			title: "Search",
 		},
+		{
+			available: [],
+			bound: null,
+			capability: "decision.typed",
+			decisionModel: true,
+			overridden: false,
+			providers: [],
+			selectable: true,
+			title: "Decision Models",
+			toolkit: false,
+		},
 		{ capability: "private", toolkit: false },
+		{
+			available: [],
+			bound: "com.acme.tunnel",
+			capability: "network.tunnel",
+			decisionModel: false,
+			overridden: false,
+			providers: [{ ...provider, id: "com.acme.tunnel", name: "Acme Tunnel" }],
+			selectable: true,
+			title: "Tunnel",
+			toolkit: false,
+		},
 	],
 	verbs: [],
 };
@@ -81,6 +106,13 @@ test("capability reads share credentials and a completed old-node selection inva
 	await tick(() => reads[0].resolve(model));
 	expect(latest.layers).toHaveLength(1);
 	expect(latest.layers[0].boundProvider?.id).toBe("fixture");
+	expect(latest.decisionModels).toHaveLength(1);
+	expect(latest.decisionModels[0].capability).toBe("decision.typed");
+	// Plugin tunnels live in the VPN layer, never as a Toolkit row.
+	expect(latest.tunnel?.boundProvider?.name).toBe("Acme Tunnel");
+	expect(latest.layers.some((l) => l.capability === "network.tunnel")).toBe(
+		false
+	);
 	let selection: Promise<void> = Promise.resolve();
 	await tick(() => {
 		selection = latest.select("web.search", "next");

@@ -16,6 +16,8 @@
 // derived from `messageId + fenced-block index` (never Math.random) so the same
 // message always yields the same artifact ids across re-renders.
 
+import { z } from "zod";
+
 export type ArtifactKind =
 	| "html"
 	| "svg"
@@ -64,20 +66,69 @@ export interface Artifact {
  *  parts are kept as plain objects so BOTH text parts and tool parts (which carry
  *  `toolCallId`/`input`/`output`/`toolName`) fit the same array, and a caller's
  *  own part type (CoworkContextPanel's `StreamPart`) is structurally assignable.
- *  Field reads cast to a record defensively. */
+ *  Field reads pass through the artifact-part schema at extraction. */
 interface ArtifactSourceMessage {
 	id?: string;
 	parts?: Array<object | null | undefined>;
 	role?: string;
 }
 
-/** A part read as a loose record, or null when it isn't an object. */
+const optionalArtifactStringSchema = z.string().optional().catch(undefined);
+const artifactPayloadSchema = z.object({
+	actions: z
+		.array(
+			z.object({
+				id: z.string(),
+				label: z.string(),
+				tone: z.enum(["primary", "secondary", "ghost"]).optional(),
+			})
+		)
+		.optional()
+		.catch(undefined),
+	content: z.string().catch(""),
+	docId: optionalArtifactStringSchema,
+	filePath: optionalArtifactStringSchema,
+	kind: z
+		.string()
+		.toLowerCase()
+		.pipe(
+			z.enum(["html", "svg", "mermaid", "code", "file", "space", "database"])
+		)
+		.optional()
+		.catch(undefined),
+	language: optionalArtifactStringSchema,
+	mime: optionalArtifactStringSchema,
+	spaceId: optionalArtifactStringSchema,
+	title: optionalArtifactStringSchema,
+	url: optionalArtifactStringSchema,
+});
+const artifactToolInputSchema = artifactPayloadSchema.extend({
+	artifact: artifactPayloadSchema.optional().catch(undefined),
+});
+const artifactPartSchema = z.object({
+	type: optionalArtifactStringSchema,
+	text: optionalArtifactStringSchema,
+	toolName: optionalArtifactStringSchema,
+	toolCallId: optionalArtifactStringSchema,
+	input: artifactToolInputSchema.optional().catch(undefined),
+	output: z
+		.object({
+			mime: optionalArtifactStringSchema,
+			url: optionalArtifactStringSchema,
+			space_id: optionalArtifactStringSchema,
+			id: optionalArtifactStringSchema,
+		})
+		.optional()
+		.catch(undefined),
+});
+type ArtifactPart = z.infer<typeof artifactPartSchema>;
+/** Parse text/tool parts where the message stream enters artifact extraction. */
 function partRecord(
-	part: object | null | undefined
-): Record<string, unknown> | null {
-	return part && typeof part === "object"
-		? (part as Record<string, unknown>)
-		: null;
+	message: ArtifactSourceMessage,
+	partIndex: number
+): ArtifactPart | null {
+	const parsed = artifactPartSchema.safeParse(message.parts?.[partIndex]);
+	return parsed.success ? parsed.data : null;
 }
 
 // A fenced block: an opening ``` with an optional language token, then the body
@@ -113,7 +164,7 @@ const NON_CODE_LANGS = new Set([
 
 const MAX_TITLE_LEN = 48;
 
-function clampTitle(value: string): string {
+export function clampTitle(value: string): string {
 	const trimmed = value.replace(WHITESPACE_RE, " ").trim();
 	if (trimmed.length <= MAX_TITLE_LEN) {
 		return trimmed;
@@ -128,9 +179,9 @@ function messageText(message: ArtifactSourceMessage): string {
 		return "";
 	}
 	const chunks: string[] = [];
-	for (const part of parts) {
-		const record = partRecord(part);
-		if (record && record.type === "text" && typeof record.text === "string") {
+	for (const [partIndex] of parts.entries()) {
+		const record = partRecord(message, partIndex);
+		if (record && record.type === "text" && record.text !== undefined) {
 			chunks.push(record.text);
 		}
 	}
@@ -212,7 +263,11 @@ function codeTitle(lang: string): string {
 	return `${pretty} snippet`;
 }
 
-function titleFor(kind: ArtifactKind, lang: string, body: string): string {
+export function titleFor(
+	kind: ArtifactKind,
+	lang: string,
+	body: string
+): string {
 	if (kind === "html") {
 		return htmlTitle(body);
 	}
@@ -234,17 +289,15 @@ function titleFor(kind: ArtifactKind, lang: string, body: string): string {
 	return codeTitle(lang.toLowerCase());
 }
 
-/** Extract every renderable artifact from one message's text (in order). */
-function artifactsFromMessage(
-	message: ArtifactSourceMessage,
-	fallbackId: string
+/** Extract every renderable artifact from one message's joined text (in order).
+ *  Shared with the live extractor, which joins the text from native parts. */
+export function artifactsFromText(
+	text: string,
+	sourceMessageId: string
 ): Artifact[] {
-	const text = messageText(message);
 	if (!text.includes("```")) {
 		return [];
 	}
-	const sourceMessageId =
-		typeof message.id === "string" && message.id ? message.id : fallbackId;
 	const found: Artifact[] = [];
 	let blockIndex = 0;
 	for (const match of text.matchAll(FENCE_RE)) {
@@ -266,9 +319,10 @@ function artifactsFromMessage(
 	return found;
 }
 
-/** A tool part whose type names the built-in artifact surface. */
-function isArtifactToolPart(
-	part: Record<string, unknown> | null | undefined
+/** A tool part whose type names the built-in artifact surface. Generic over the
+ *  field type so the schema-parsed and the native-observation parts both fit. */
+export function isArtifactToolPart<PartField>(
+	part: { toolName?: PartField; type?: PartField } | null | undefined
 ): boolean {
 	if (!part) {
 		return false;
@@ -300,49 +354,36 @@ export function extractArtifacts(
 		if (!message || message.role === "user") {
 			continue;
 		}
-		const messageId =
-			typeof message.id === "string" && message.id ? message.id : `msg-${i}`;
-		const fromMessage = artifactsFromMessage(message, messageId);
+		const messageId = message.id || `msg-${i}`;
+		const fromMessage = artifactsFromText(messageText(message), messageId);
 		for (const artifact of fromMessage) {
 			all.push(artifact);
 		}
 		if (Array.isArray(message.parts)) {
-			for (const part of message.parts) {
-				const record = partRecord(part);
+			for (const [partIndex] of message.parts.entries()) {
+				const record = partRecord(message, partIndex);
 				if (!(record && isArtifactToolPart(record))) {
 					continue;
 				}
 				const toolName =
-					typeof record.toolName === "string"
-						? record.toolName
-						: typeof record.type === "string"
-							? record.type.slice("tool-".length)
-							: "";
-				const id = artifactIdFromToolCall(
-					typeof record.toolCallId === "string" ? record.toolCallId : undefined
-				);
-				const input = record.input as Record<string, unknown> | undefined;
-				const output = record.output as Record<string, unknown> | undefined;
+					record.toolName ?? record.type?.slice("tool-".length) ?? "";
+				const id = artifactIdFromToolCall(record.toolCallId);
+				const { input, output } = record;
 				if (toolName === "artifact.create") {
 					// The create RESULT carries url/mime/ids (title lived in the input).
-					const mime =
-						typeof output?.mime === "string" ? output.mime : undefined;
-					const url = typeof output?.url === "string" ? output.url : undefined;
+					const mime = output?.mime;
+					const url = output?.url;
 					if (!url) {
 						continue;
 					}
 					all.push(
 						artifactFromPayload(
 							{
-								title:
-									typeof input?.title === "string" ? input.title : undefined,
+								title: input?.title,
 								mime,
 								url,
-								spaceId:
-									typeof output?.space_id === "string"
-										? output.space_id
-										: undefined,
-								docId: typeof output?.id === "string" ? output.id : undefined,
+								spaceId: output?.space_id,
+								docId: output?.id,
 							},
 							id,
 							messageId
@@ -350,10 +391,8 @@ export function extractArtifacts(
 					);
 					continue;
 				}
-				const nested =
-					(input?.artifact as ArtifactPayload | undefined) ??
-					(input as ArtifactPayload | undefined);
-				if (nested && typeof nested === "object") {
+				const nested = input?.artifact ?? input;
+				if (nested) {
 					all.push(artifactFromPayload(nested, id, messageId));
 				}
 			}
@@ -367,16 +406,6 @@ export function extractArtifacts(
 // These arrive as a structured tool payload rather than being mined out of
 // message text. The desktop still normalizes them into the same `Artifact` shape
 // so every surface (inline card, dock tab, window tab) renders one model.
-
-const KNOWN_KINDS = new Set<ArtifactKind>([
-	"html",
-	"svg",
-	"mermaid",
-	"code",
-	"file",
-	"space",
-	"database",
-]);
 
 /** Map a MIME type onto the artifact kind it best renders as. Unknown types
  *  (pdf, docx, png, …) fall back to `file` — a download/open card. */
@@ -447,32 +476,25 @@ export function artifactFromPayload(
 	id: string,
 	sourceMessageId = "tool"
 ): Artifact {
-	const content = typeof payload?.content === "string" ? payload.content : "";
-	const declared =
-		typeof payload?.kind === "string"
-			? (payload.kind.toLowerCase() as ArtifactKind)
-			: undefined;
-	const kind: ArtifactKind =
-		declared && KNOWN_KINDS.has(declared)
-			? declared
-			: artifactKindFromMime(payload?.mime);
-	const title =
-		typeof payload?.title === "string" && payload.title.trim()
-			? clampTitle(payload.title)
-			: titleFor(kind, payload?.language ?? "", content) || "Artifact";
+	const parsed = artifactPayloadSchema.catch({ content: "" }).parse(payload);
+	const { content } = parsed;
+	const kind = parsed.kind ?? artifactKindFromMime(parsed.mime);
+	const title = parsed.title?.trim()
+		? clampTitle(parsed.title)
+		: titleFor(kind, parsed.language ?? "", content) || "Artifact";
 	return {
 		id,
 		sourceMessageId,
 		kind,
 		title,
 		content,
-		language: payload?.language,
-		filePath: payload?.filePath,
-		url: payload?.url,
-		mime: payload?.mime,
-		spaceId: payload?.spaceId,
-		docId: payload?.docId,
-		actions: payload?.actions,
+		language: parsed.language,
+		filePath: parsed.filePath,
+		url: parsed.url,
+		mime: parsed.mime,
+		spaceId: parsed.spaceId,
+		docId: parsed.docId,
+		actions: parsed.actions,
 	};
 }
 
@@ -510,18 +532,32 @@ function csvRows(text: string): string[][] {
  * row objects, or `{ columns, rows }`), or CSV. Returns null when the content
  * isn't tabular — the caller falls back to a code view.
  */
+const databaseRowSchema = z.record(z.string(), z.json());
+const databaseObjectRowsSchema = z.array(
+	databaseRowSchema.optional().catch(undefined)
+);
+const databaseExplicitTableSchema = z.object({
+	columns: z.array(z.string()),
+	rows: z.array(z.array(z.json()).catch([])),
+});
+const databaseTableSchema = z.union([
+	databaseObjectRowsSchema,
+	databaseExplicitTableSchema,
+]);
+const databaseStructuredCellSchema = z.union([
+	z.array(z.json()),
+	databaseRowSchema,
+]);
+
 export function parseTabularContent(content: string): DatabaseTable | null {
 	if (!content.trim()) {
 		return null;
 	}
 	if (content.trim().startsWith("[") || content.trim().startsWith("{")) {
 		try {
-			const parsed = JSON.parse(content) as unknown;
+			const parsed = databaseTableSchema.parse(JSON.parse(content));
 			if (Array.isArray(parsed)) {
-				const rows: Record<string, unknown>[] = parsed.filter(
-					(v): v is Record<string, unknown> =>
-						typeof v === "object" && v !== null && !Array.isArray(v)
-				);
+				const rows = parsed.filter((row) => row !== undefined);
 				if (rows.length === 0) {
 					return null;
 				}
@@ -531,41 +567,24 @@ export function parseTabularContent(content: string): DatabaseTable | null {
 				return {
 					columns,
 					rows: rows.map((row) =>
-						columns.map((col) =>
-							row[col] === null || row[col] === undefined
-								? ""
-								: typeof row[col] === "object"
-									? JSON.stringify(row[col])
-									: String(row[col])
-						)
+						columns.map((column) => {
+							const value = row[column];
+							if (value == null) {
+								return "";
+							}
+							return databaseStructuredCellSchema.safeParse(value).success
+								? JSON.stringify(value)
+								: String(value);
+						})
 					),
 				};
 			}
-			if (
-				typeof parsed === "object" &&
-				parsed !== null &&
-				!Array.isArray(parsed)
-			) {
-				const obj = parsed as {
-					columns?: unknown;
-					rows?: unknown;
-				};
-				if (
-					Array.isArray(obj.columns) &&
-					obj.columns.every((c) => typeof c === "string") &&
-					Array.isArray(obj.rows)
-				) {
-					return {
-						columns: obj.columns as string[],
-						rows: obj.rows
-							.map((row) =>
-								Array.isArray(row) ? row.map((cell) => String(cell ?? "")) : []
-							)
-							.filter((row) => row.length > 0),
-					};
-				}
-			}
-			return null;
+			return {
+				columns: parsed.columns,
+				rows: parsed.rows
+					.map((row) => row.map((cell) => String(cell ?? "")))
+					.filter((row) => row.length > 0),
+			};
 		} catch {
 			return null;
 		}

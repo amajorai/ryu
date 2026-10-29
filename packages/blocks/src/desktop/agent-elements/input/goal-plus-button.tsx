@@ -335,11 +335,12 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 					render={
 						<Button
 							aria-label="Add"
-							className="size-7 rounded-full text-muted-foreground"
+							className="size-7"
 							disabled={disabled}
+							radius="pill"
 							size="icon"
 							type="button"
-							variant="ghost"
+							variant="ghost-muted"
 						/>
 					}
 				>
@@ -347,9 +348,12 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 				</PopoverTrigger>
 				<PopoverContent
 					align="start"
-					className="w-[min(calc(100vw_-_32px),704px)] gap-0 rounded-2xl border-border/70 bg-popover/95 p-1.5 shadow-xl"
+					appearance="composer-menu"
+					className="w-[min(calc(100vw_-_32px),704px)]"
+					corners="rounded"
 					side="top"
 					sideOffset={8}
+					spacing="dense-menu"
 				>
 					<ComposerMenu
 						embedded
@@ -368,7 +372,7 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 					aria-label="Remove goal"
 					className={cn(
 						"group relative flex size-7 shrink-0 items-center justify-center rounded-full",
-						"bg-primary/10 text-primary transition-colors hover:bg-destructive/15 hover:text-status-destructive"
+						"bg-primary/10 text-primary transition-colors hover:bg-destructive/15 hover:text-status-destructive focus-visible:bg-destructive/15 focus-visible:text-status-destructive"
 					)}
 					onClick={goal.onRemove}
 					title="Goal active — click to remove"
@@ -376,11 +380,11 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 				>
 					{/* Target icon (default) morphs into a close icon on hover. */}
 					<HugeiconsIcon
-						className="absolute size-4 opacity-100 transition-opacity duration-150 group-hover:opacity-0"
+						className="absolute size-4 opacity-100 transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0"
 						icon={Target01Icon}
 					/>
 					<HugeiconsIcon
-						className="absolute size-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+						className="absolute size-4 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
 						icon={Cancel01Icon}
 						strokeWidth={2}
 					/>
@@ -392,8 +396,10 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 					<PopoverTrigger
 						render={
 							<Button
+								appearance={
+									verdictOk ? "goal-verdict-success" : "goal-verdict-warning"
+								}
 								aria-label="Show double-check result"
-								className={cn("size-7 shrink-0 rounded-full", verdictTone)}
 								size="icon"
 								title={
 									verdictOk
@@ -409,9 +415,11 @@ export const GoalPlusButton = memo(function GoalPlusButton({
 					</PopoverTrigger>
 					<PopoverContent
 						align="start"
-						className="max-w-sm rounded-2xl p-3"
+						className="max-w-sm"
+						corners="rounded"
 						side="top"
 						sideOffset={6}
+						spacing="rail"
 					>
 						<div className="flex items-center gap-1.5 font-medium text-sm">
 							<HugeiconsIcon

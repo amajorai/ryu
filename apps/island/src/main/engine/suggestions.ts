@@ -1,3 +1,4 @@
+import { z } from "zod";
 // The context monitor + local-model proactive suggestion engine (Island U3).
 //
 // Lifecycle: `start()` begins two loops and `stop()` tears them down cleanly
@@ -39,6 +40,8 @@ import { buildSuggestionMessages } from "./prompt.ts";
 export interface SuggestionEngineOptions {
 	/** Min model confidence to surface a suggestion. */
 	confidenceThreshold: number;
+	/** Core inbox poll interval for connection-trigger suggestions. */
+	connectionIntervalMs: number;
 	/** Context poll interval. */
 	contextIntervalMs: number;
 	/** Base per-app cooldown after emitting. */
@@ -58,6 +61,7 @@ export interface SuggestionEngineOptions {
 }
 
 export const DEFAULT_OPTIONS: SuggestionEngineOptions = {
+	connectionIntervalMs: 15_000,
 	contextIntervalMs: 4000,
 	proactiveIntervalMs: 30_000,
 	debounceMs: 8000,
@@ -69,8 +73,18 @@ export const DEFAULT_OPTIONS: SuggestionEngineOptions = {
 	dedupeMaxEntries: 50,
 };
 
+/** Minimal, validated notification projection used by the connection poller. */
+export interface ConnectionSuggestion {
+	body: string;
+	createdAt: string;
+	id: string;
+	title: string;
+}
+
 /** Outbound dependencies, injected so the engine stays testable. */
 export interface SuggestionEngineDeps {
+	/** Archive a connection suggestion after the user resolves it. */
+	archiveConnectionSuggestion?(id: string): Promise<void>;
 	/** Non-streaming local-model completion (Core client). Returns text or null. */
 	complete(
 		messages: ReturnType<typeof buildSuggestionMessages>
@@ -86,6 +100,8 @@ export interface SuggestionEngineDeps {
 	 * page is available; failures resolve to null and are non-fatal.
 	 */
 	getBrowserContext?(): Promise<{ content: string; url: string } | null>;
+	/** Fetch private connection suggestions from Core's notification inbox. */
+	getConnectionSuggestions?(): Promise<ConnectionSuggestion[]>;
 	/** Fetch the current screen context (Shadow client). */
 	getContext(): Promise<ShadowContextResult>;
 	/** Fetch the top push_now proactive suggestion (Shadow client). */
@@ -112,12 +128,16 @@ export class SuggestionEngine {
 	private running = false;
 	private contextTimer: ReturnType<typeof setInterval> | null = null;
 	private proactiveTimer: ReturnType<typeof setInterval> | null = null;
+	private connectionTimer: ReturnType<typeof setInterval> | null = null;
 	private lastSnapshot: ContextSnapshot | null = null;
 	private pending: PendingChange | null = null;
 	private lastContextReason: string | null = null;
 	private emittedCount = 0;
 	private contextTickActive = false;
 	private proactiveTickActive = false;
+	private connectionTickActive = false;
+	private activeConnectionSuggestionId: string | null = null;
+	private readonly seenConnectionSuggestionIds = new Set<string>();
 
 	constructor(
 		deps: SuggestionEngineDeps,
@@ -149,6 +169,12 @@ export class SuggestionEngine {
 		this.proactiveTimer = setInterval(() => {
 			this.proactiveTick().catch(noop);
 		}, this.opts.proactiveIntervalMs);
+		if (this.deps.getConnectionSuggestions) {
+			this.connectionTimer = setInterval(() => {
+				this.connectionTick().catch(noop);
+			}, this.opts.connectionIntervalMs);
+			this.connectionTick().catch(noop);
+		}
 		this.log("engine started");
 		return this.status();
 	}
@@ -163,6 +189,10 @@ export class SuggestionEngine {
 			clearInterval(this.proactiveTimer);
 			this.proactiveTimer = null;
 		}
+		if (this.connectionTimer) {
+			clearInterval(this.connectionTimer);
+			this.connectionTimer = null;
+		}
 		const wasRunning = this.running;
 		this.running = false;
 		this.pending = null;
@@ -170,6 +200,8 @@ export class SuggestionEngine {
 		this.dedupe.clear();
 		this.cooldown.clear();
 		this.emittedById.clear();
+		this.activeConnectionSuggestionId = null;
+		this.seenConnectionSuggestionIds.clear();
 		if (wasRunning) {
 			this.deps.emitCleared();
 			this.log("engine stopped");
@@ -194,6 +226,19 @@ export class SuggestionEngine {
 	async feedback(id: string, kind: FeedbackKind): Promise<void> {
 		const suggestion = this.emittedById.get(id);
 		const suggestionType = suggestion?.suggestionType ?? "context";
+		if (suggestion?.source === "connect_event") {
+			try {
+				await this.deps.archiveConnectionSuggestion?.(id);
+			} catch (error) {
+				this.log(
+					`connection suggestion archive failed: ${describeError(error)}`
+				);
+			}
+			if (this.activeConnectionSuggestionId === id) {
+				this.activeConnectionSuggestionId = null;
+			}
+			return;
+		}
 		try {
 			await this.deps.postFeedback(kind, suggestionType);
 		} catch (error) {
@@ -334,6 +379,66 @@ export class SuggestionEngine {
 		this.emitDeduped(suggestion, now);
 	}
 
+	private async connectionTick(): Promise<void> {
+		if (
+			this.connectionTickActive ||
+			this.activeConnectionSuggestionId ||
+			!this.deps.getConnectionSuggestions
+		) {
+			return;
+		}
+		this.connectionTickActive = true;
+		try {
+			const notifications = await this.deps.getConnectionSuggestions();
+			const now = Date.now();
+			for (const notification of [...notifications].reverse()) {
+				if (this.seenConnectionSuggestionIds.has(notification.id)) {
+					continue;
+				}
+				const createdAt = Date.parse(notification.createdAt);
+				if (
+					!Number.isFinite(createdAt) ||
+					now - createdAt > 6 * 60 * 60 * 1000
+				) {
+					this.rememberConnectionSuggestion(notification.id);
+					continue;
+				}
+				const suggestion: IslandSuggestion = {
+					id: notification.id,
+					source: "connect_event",
+					suggestionType: "connection",
+					title: notification.title,
+					body: notification.body,
+					action: "chat",
+					confidence: 1,
+					appName: "Connected app",
+					ts: createdAt,
+				};
+				this.activeConnectionSuggestionId = notification.id;
+				this.rememberConnectionSuggestion(notification.id);
+				this.emittedById.set(notification.id, suggestion);
+				this.emittedCount += 1;
+				this.deps.emit(suggestion);
+				this.log(`emit (connect_event): ${notification.title}`);
+				return;
+			}
+		} catch (error) {
+			this.log(`connection tick error: ${describeError(error)}`);
+		} finally {
+			this.connectionTickActive = false;
+		}
+	}
+
+	private rememberConnectionSuggestion(id: string): void {
+		this.seenConnectionSuggestionIds.add(id);
+		if (this.seenConnectionSuggestionIds.size > 200) {
+			const oldest = this.seenConnectionSuggestionIds.values().next().value;
+			if (oldest) {
+				this.seenConnectionSuggestionIds.delete(oldest);
+			}
+		}
+	}
+
 	private emitDeduped(suggestion: IslandSuggestion, now: number): void {
 		const key = suggestionKey(suggestion.title, suggestion.appName);
 		if (this.dedupe.isDuplicate(key, now)) {
@@ -352,8 +457,12 @@ export class SuggestionEngine {
 	}
 }
 
-function describeError(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
+const loggedErrorSchema = z.instanceof(Error);
+function describeError(
+	error: Parameters<typeof loggedErrorSchema.safeParse>[0]
+): string {
+	const parsed = loggedErrorSchema.safeParse(error);
+	return parsed.success ? parsed.data.message : String(error);
 }
 
 /** No-op for swallowing the never-rejecting tick promise in `setInterval`. */

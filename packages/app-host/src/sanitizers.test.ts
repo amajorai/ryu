@@ -68,7 +68,7 @@ describe("sanitizeCspOrigin (widget/companion resource_domains allowlist)", () =
 	it("rejects non-string / empty input", () => {
 		expect(sanitizeCspOrigin("")).toBeNull();
 		expect(sanitizeCspOrigin("   ")).toBeNull();
-		expect(sanitizeCspOrigin(undefined as unknown as string)).toBeNull();
+		expect(sanitizeCspOrigin(undefined)).toBeNull();
 	});
 });
 
@@ -105,7 +105,7 @@ describe("sanitizeProxyOrigin (Core /api/widgets/asset proxy origin)", () => {
 		expect(sanitizeProxyOrigin("not a url")).toBeNull();
 		// A delimiter-free but unparseable value reaches the URL parse and is caught.
 		expect(sanitizeProxyOrigin(":::")).toBeNull();
-		expect(sanitizeProxyOrigin(undefined as unknown as string)).toBeNull();
+		expect(sanitizeProxyOrigin(undefined)).toBeNull();
 	});
 });
 
@@ -159,9 +159,7 @@ describe("buildThemeTokenStyle (theme-token → :root style bridge)", () => {
 	});
 
 	it("drops a non-string or empty value", () => {
-		expect(
-			buildThemeTokenStyle({ "--x": 5 as unknown as string, "--y": "" })
-		).toBe("");
+		expect(buildThemeTokenStyle({ "--x": 5, "--y": "" })).toBe("");
 	});
 
 	it("trims a value's surrounding whitespace", () => {

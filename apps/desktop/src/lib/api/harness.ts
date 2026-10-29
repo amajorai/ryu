@@ -12,7 +12,7 @@ export type {
 	HarnessSession,
 	NetworkMode,
 	SandboxMode,
-} from "@ryuhq/core-client/harness";
+} from "@ryuhq/core-client/harness.ts";
 export {
 	bindNativeSession,
 	cancelHarnessRun,
@@ -24,4 +24,4 @@ export {
 	resolveHarnessPermission,
 	startHarnessRun,
 	streamHarnessRunEvents,
-} from "@ryuhq/core-client/harness";
+} from "@ryuhq/core-client/harness.ts";

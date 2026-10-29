@@ -3,7 +3,6 @@ use std::io::Cursor;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 pub(crate) const AUTO_BUCKET_MS: i64 = 10 * 60 * 1_000;
 pub(crate) const MAX_HISTORY_BYTES_PER_SPACE: i64 = 64 * 1024 * 1024;
@@ -21,7 +20,10 @@ pub(crate) struct SnapshotPayload {
 }
 
 pub(crate) struct EncodedSnapshot {
-    pub hash: String,
+    /// The canonical serialized snapshot. Its content address is a KEYED hash
+    /// (`ryu_history_hash`, a blind index of `spaces.db`), never a plain digest:
+    /// an unkeyed digest of a short page could be confirmed offline.
+    pub raw: Vec<u8>,
     pub payload: Vec<u8>,
     pub raw_bytes: i64,
     pub stored_bytes: i64,
@@ -29,15 +31,25 @@ pub(crate) struct EncodedSnapshot {
 
 pub(crate) fn encode_snapshot(snapshot: &SnapshotPayload) -> Result<EncodedSnapshot> {
     let raw = serde_json::to_vec(snapshot).context("serializing document history snapshot")?;
-    let hash = format!("{:x}", Sha256::digest(&raw));
     let payload = zstd::stream::encode_all(Cursor::new(&raw), 3)
         .context("compressing document history snapshot")?;
     Ok(EncodedSnapshot {
-        hash,
         raw_bytes: raw.len() as i64,
         stored_bytes: payload.len() as i64,
+        raw,
         payload,
     })
+}
+
+/// The canonical serialized snapshot inside a stored payload (what the content
+/// address is computed over).
+pub(crate) fn snapshot_raw(codec: &str, payload: &[u8]) -> Result<Vec<u8>> {
+    anyhow::ensure!(
+        codec == SNAPSHOT_CODEC,
+        "unsupported history codec '{codec}'"
+    );
+    zstd::stream::decode_all(Cursor::new(payload))
+        .context("decompressing document history snapshot")
 }
 
 pub(crate) fn decode_snapshot(codec: &str, payload: &[u8]) -> Result<SnapshotPayload> {
@@ -120,7 +132,11 @@ mod tests {
         let first = encode_snapshot(&snapshot).unwrap();
         let second = encode_snapshot(&snapshot).unwrap();
 
-        assert_eq!(first.hash, second.hash);
+        assert_eq!(first.raw, second.raw);
+        assert_eq!(
+            snapshot_raw(SNAPSHOT_CODEC, &first.payload).unwrap(),
+            first.raw
+        );
         assert_eq!(
             decode_snapshot(SNAPSHOT_CODEC, &first.payload).unwrap(),
             snapshot

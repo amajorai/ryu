@@ -1,7 +1,8 @@
 import { LibraryIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
+import { jsonResponseValueSchema } from "@ryu/app-host/json-values";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -9,14 +10,24 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { getOptionColorClass } from "@ryu/ui/lib/data-grid";
-import { cn } from "@ryu/ui/lib/utils";
-import type { CellSelectOption } from "@ryu/ui/types/data-grid";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { getOptionColorClass } from "@ryu/ui/lib/data-grid.ts";
+import {
+	computeFormulaColumns,
+	isFormulaError,
+} from "@ryu/ui/lib/data-grid-formula.ts";
+import {
+	isNativeBoolean,
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { CellSelectOption } from "@ryu/ui/types/data-grid.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import { MarkdownEditor } from "@/src/components/editor/MarkdownEditor.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import {
@@ -33,6 +44,7 @@ import {
 	type DatabaseDoc,
 	type DbColumn,
 	type DbRow,
+	type DbView,
 	parseDatabaseDoc,
 	setRowPageId,
 } from "@/src/lib/realtime/yjs-database.ts";
@@ -62,6 +74,7 @@ function OptionPills({
 				const isSelected = selected.has(option.value);
 				return (
 					<button
+						aria-pressed={isSelected}
 						className={cn(
 							"rounded-full px-2 py-0.5 text-xs",
 							isSelected
@@ -91,12 +104,29 @@ function PropertyField({
 	column: DbColumn;
 	value: unknown;
 	readOnly: boolean;
-	onChange: (value: unknown) => void;
+	onChange: (
+		value: Parameters<typeof applyCellEdits>[1][number]["value"]
+	) => void;
 }) {
 	const { cell } = column;
+	if (cell.variant === "formula") {
+		return (
+			<span
+				className={cn(
+					"block pt-1.5 text-sm",
+					isFormulaError(value) && "text-destructive"
+				)}
+			>
+				{isNativeBoolean(value)
+					? String(value).toUpperCase()
+					: String(value ?? "")}
+			</span>
+		);
+	}
 	if (cell.variant === "checkbox") {
 		return (
 			<Checkbox
+				aria-label={column.label}
 				checked={value === true}
 				disabled={readOnly}
 				onCheckedChange={(checked) => onChange(checked === true)}
@@ -106,37 +136,40 @@ function PropertyField({
 	if (cell.variant === "long-text") {
 		return (
 			<Textarea
+				aria-label={column.label}
 				className="min-h-16"
 				disabled={readOnly}
 				onChange={(e) => onChange(e.target.value)}
-				value={typeof value === "string" ? value : ""}
+				value={isNativeText(value) ? value : ""}
 			/>
 		);
 	}
 	if (cell.variant === "number") {
 		return (
 			<Input
+				aria-label={column.label}
 				disabled={readOnly}
 				onChange={(e) =>
 					onChange(e.target.value === "" ? null : Number(e.target.value))
 				}
 				type="number"
-				value={typeof value === "number" ? String(value) : ""}
+				value={isNativeNumber(value) ? String(value) : ""}
 			/>
 		);
 	}
 	if (cell.variant === "date") {
 		return (
 			<Input
+				aria-label={column.label}
 				disabled={readOnly}
 				onChange={(e) => onChange(e.target.value || null)}
 				type="date"
-				value={typeof value === "string" ? value.slice(0, 10) : ""}
+				value={isNativeText(value) ? value.slice(0, 10) : ""}
 			/>
 		);
 	}
 	if (cell.variant === "select") {
-		const current = typeof value === "string" ? value : null;
+		const current = isNativeText(value) ? value : null;
 		return (
 			<OptionPills
 				onToggle={(v) => onChange(current === v ? null : v)}
@@ -147,7 +180,7 @@ function PropertyField({
 		);
 	}
 	if (cell.variant === "multi-select") {
-		const current = Array.isArray(value) ? (value as string[]) : [];
+		const current = z.array(z.string()).catch([]).parse(value);
 		return (
 			<OptionPills
 				onToggle={(v) =>
@@ -166,10 +199,11 @@ function PropertyField({
 	// short-text / url / fallback
 	return (
 		<Input
+			aria-label={column.label}
 			disabled={readOnly}
 			onChange={(e) => onChange(e.target.value)}
 			type={cell.variant === "url" ? "url" : "text"}
-			value={typeof value === "string" ? value : ""}
+			value={isNativeText(value) ? value : ""}
 		/>
 	);
 }
@@ -205,6 +239,9 @@ export default function SpaceDatabaseRowPage({
 	const columnsRef = useRef<DbColumn[]>([]);
 	const rowsRef = useRef<DbRow[]>([]);
 	const dbTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const viewsRef = useRef<DbView[] | undefined>(undefined);
+	const [dbSaveError, setDbSaveError] = useState<string | null>(null);
+	const [savingDb, setSavingDb] = useState(false);
 
 	// Body (child page document) state.
 	const [bodyDocId, setBodyDocId] = useState<string | null>(null);
@@ -225,6 +262,7 @@ export default function SpaceDatabaseRowPage({
 				dbTitleRef.current = doc.title;
 				columnsRef.current = parsed.columns;
 				rowsRef.current = parsed.rows;
+				viewsRef.current = parsed.views;
 				setColumns(parsed.columns);
 				setRow(parsed.rows.find((r) => r.__id === rowId) ?? null);
 				setDbLoaded(true);
@@ -243,6 +281,7 @@ export default function SpaceDatabaseRowPage({
 		(snapshot: DatabaseSnapshot) => {
 			columnsRef.current = snapshot.columns;
 			rowsRef.current = snapshot.rows;
+			viewsRef.current = snapshot.views;
 			setColumns(snapshot.columns);
 			setRow(snapshot.rows.find((r) => r.__id === rowId) ?? null);
 		},
@@ -253,6 +292,7 @@ export default function SpaceDatabaseRowPage({
 		(): DatabaseDoc => ({
 			columns: columnsRef.current,
 			rows: stripRowIds(rowsRef.current),
+			views: viewsRef.current,
 		}),
 		[]
 	);
@@ -268,27 +308,45 @@ export default function SpaceDatabaseRowPage({
 	});
 	const readOnly = access === "read";
 
+	const flushDb = useCallback(async () => {
+		if (readOnly) {
+			return;
+		}
+		if (dbTimerRef.current) {
+			clearTimeout(dbTimerRef.current);
+			dbTimerRef.current = null;
+		}
+		setSavingDb(true);
+		const source = JSON.stringify({
+			columns: columnsRef.current,
+			rows: rowsRef.current,
+			views: viewsRef.current,
+		} satisfies DatabaseDoc);
+		try {
+			await saveDocument(spaceId, databaseId, dbTitleRef.current, source);
+			setDbSaveError(null);
+		} catch {
+			setDbSaveError("Couldn't save row changes. Your edits are still here.");
+		} finally {
+			setSavingDb(false);
+		}
+	}, [readOnly, saveDocument, spaceId, databaseId]);
+
 	const scheduleDbSave = useCallback(() => {
 		if (dbTimerRef.current) {
 			clearTimeout(dbTimerRef.current);
 		}
-		dbTimerRef.current = setTimeout(() => {
-			const source = JSON.stringify({
-				columns: columnsRef.current,
-				rows: stripRowIds(rowsRef.current),
-			} satisfies DatabaseDoc);
-			saveDocument(spaceId, databaseId, dbTitleRef.current, source).catch(
-				() => {
-					// Non-fatal: the embed engine may be down; local state is intact.
-				}
-			);
-		}, SAVE_DEBOUNCE_MS);
-	}, [saveDocument, spaceId, databaseId]);
+		dbTimerRef.current = setTimeout(() => void flushDb(), SAVE_DEBOUNCE_MS);
+	}, [flushDb]);
 
 	// Write one cell — live through the CRDT when collaborative, else local + save.
 	const setCell = useCallback(
-		(columnId: string, value: unknown) => {
-			if (readOnly) {
+		(
+			columnId: string,
+			value: Parameters<typeof applyCellEdits>[1][number]["value"]
+		) => {
+			const target = columns.find((column) => column.id === columnId);
+			if (readOnly || target?.cell.variant === "formula") {
 				return;
 			}
 			const doc = getCollabDoc();
@@ -296,24 +354,33 @@ export default function SpaceDatabaseRowPage({
 				applyCellEdits(doc, [{ rowId, columnId, value }]);
 				return;
 			}
+			const parsedValue = jsonResponseValueSchema.parse(value);
 			const nextRows = rowsRef.current.map((r) =>
-				r.__id === rowId ? { ...r, [columnId]: value } : r
+				r.__id === rowId ? { ...r, [columnId]: parsedValue } : r
 			);
 			rowsRef.current = nextRows;
 			setRow(nextRows.find((r) => r.__id === rowId) ?? null);
 			scheduleDbSave();
 		},
-		[readOnly, getCollabDoc, rowId, scheduleDbSave]
+		[readOnly, getCollabDoc, rowId, scheduleDbSave, columns]
+	);
+
+	// Formula columns are computed for display; storage keeps only the inputs.
+	const displayRow = useMemo(
+		() => (row ? (computeFormulaColumns([row], columns)[0] ?? row) : null),
+		[row, columns]
 	);
 
 	const titleColumnId = columns[0]?.id;
+	// A formula first property is computed, so the title shows it read-only.
+	const titleIsFormula = columns[0]?.cell.variant === "formula";
 	const titleValue =
-		titleColumnId && row ? String(row[titleColumnId] ?? "") : "";
+		titleColumnId && displayRow ? String(displayRow[titleColumnId] ?? "") : "";
 
 	// Resolve (or lazily create) the row's body page document, exactly once. Keyed
 	// on [dbLoaded, rowId] (not `row`) and reading from refs, so a CRDT snapshot
 	// arriving mid-creation can't cancel the in-flight create/fetch.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: run-once; reads refs + stable fns.
+	// run-once; reads refs + stable fns.
 	useEffect(() => {
 		if (!dbLoaded || bodyInitRef.current) {
 			return;
@@ -327,12 +394,15 @@ export default function SpaceDatabaseRowPage({
 		(async () => {
 			try {
 				let pageId =
-					typeof target.__page === "string" && target.__page
-						? target.__page
-						: null;
+					isNativeText(target.__page) && target.__page ? target.__page : null;
 				if (!pageId) {
+					if (readOnly) {
+						return;
+					}
 					const nameColumnId = columnsRef.current[0]?.id;
-					const name = nameColumnId ? String(target[nameColumnId] ?? "") : "";
+					const named =
+						computeFormulaColumns([target], columnsRef.current)[0] ?? target;
+					const name = nameColumnId ? String(named[nameColumnId] ?? "") : "";
 					pageId = await createPage(spaceId, name || "Untitled", databaseId);
 					const doc = getCollabDoc();
 					if (doc) {
@@ -382,10 +452,13 @@ export default function SpaceDatabaseRowPage({
 
 	const onBodyChange = useCallback(
 		(markdown: string) => {
+			if (readOnly) {
+				return;
+			}
 			bodyMarkdownRef.current = markdown;
 			scheduleBodySave();
 		},
-		[scheduleBodySave]
+		[readOnly, scheduleBodySave]
 	);
 
 	// Flush pending saves on unmount.
@@ -431,11 +504,7 @@ export default function SpaceDatabaseRowPage({
 	}
 
 	if (!dbLoaded) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	if (!row) {
@@ -468,11 +537,26 @@ export default function SpaceDatabaseRowPage({
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
 			<div className="mx-auto flex w-full max-w-3xl flex-1 flex-col overflow-auto px-8 py-6">
+				{dbSaveError && (
+					<div
+						className="mb-3 flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm"
+						role="alert"
+					>
+						<span>{dbSaveError}</span>
+						<Button
+							disabled={savingDb || readOnly}
+							onClick={() => void flushDb()}
+							size="sm"
+							variant="outline"
+						>
+							Retry save
+						</Button>
+					</div>
+				)}
 				{/* Title = the first column (the row's "Name"). */}
 				<Input
 					aria-label="Row title"
-					className="h-auto border-none bg-transparent px-0 font-medium text-2xl shadow-none focus-visible:ring-0"
-					disabled={readOnly || !titleColumnId}
+					disabled={readOnly || !titleColumnId || titleIsFormula}
 					onChange={(e) => {
 						if (titleColumnId) {
 							setCell(titleColumnId, e.target.value);
@@ -482,6 +566,7 @@ export default function SpaceDatabaseRowPage({
 						}
 					}}
 					placeholder="Untitled"
+					purpose="space-row-title"
 					value={titleValue}
 				/>
 
@@ -497,7 +582,7 @@ export default function SpaceDatabaseRowPage({
 										column={column}
 										onChange={(value) => setCell(column.id, value)}
 										readOnly={readOnly}
-										value={row[column.id]}
+										value={displayRow?.[column.id]}
 									/>
 								</div>
 							</div>
@@ -511,11 +596,15 @@ export default function SpaceDatabaseRowPage({
 							initialMarkdown={bodyInitial}
 							key={bodyDocId}
 							onChangeMarkdown={onBodyChange}
+							readOnly={readOnly}
+							toolbar="two-row"
 						/>
+					) : readOnly ? (
+						<p className="text-muted-foreground text-sm">
+							This row has no page yet.
+						</p>
 					) : (
-						<div className="flex items-center gap-2 text-muted-foreground text-sm">
-							<Spinner className="size-4" /> Preparing page…
-						</div>
+						<SkeletonRows label="Preparing page…" spacing="comfortable" />
 					)}
 				</div>
 			</div>

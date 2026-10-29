@@ -11,6 +11,8 @@ export default defineConfig({
 	optimizeDeps: {
 		entries: ["spaces-performance-proof.html"],
 		include: ["lucide-react"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		dedupe: ["react", "react-dom"],

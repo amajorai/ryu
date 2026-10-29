@@ -17,9 +17,9 @@
 //! (open/resume the ambient meeting, append a captured audio segment), in terms of
 //! plain owned types — never a `ryu_meetings` type. Core provides the impl:
 //!
-//! - in-process (`meetings_ingest::in_proc`) — wraps the in-process engine;
-//! - out-of-process (`meetings_client::MeetingsClient`) — proxies to the
-//!   `ryu-meetings` sidecar over loopback (`POST /api/meetings/:id/chunk`).
+//! `meeting_capabilities::CapabilityMeetingIngest`, which calls the `meetings.get` /
+//! `meetings.start` / `meetings.appendAudio` capabilities on whichever enabled app
+//! provides them (the Meetings sidecar).
 //!
 //! ## Hot-path note
 //!

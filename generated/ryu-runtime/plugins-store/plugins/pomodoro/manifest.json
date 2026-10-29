@@ -1,0 +1,55 @@
+{
+  "tags": ["productivity", "focus", "timer", "pomodoro", "widget"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/pomodoro",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/pomodoro",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/pomodoro",
+  "name": "Pomodoro Timer",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "category": "Productivity",
+  "description": "Ask an agent to start a focus session and get a Pomodoro timer inline in chat. A small local MCP server exposes one tool (pomodoro.start) that takes focus, short-break and long-break lengths, how many focus rounds come before a long break, and an optional task label. The self-contained widget runs the countdown, cycles focus and break phases, and can play a short chime. It keeps its progress in widget state, so a reload restores the session. It makes no network requests and keeps no data outside the chat.",
+  "tagline": "A focus timer that lives in your chat",
+  "keywords": [
+    "pomodoro",
+    "timer",
+    "focus",
+    "productivity",
+    "breaks",
+    "widget"
+  ],
+  "icon": "lucide:timer",
+  "iconDither": { "from": 12, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "full" },
+    "mobile": { "support": "full" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "list" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "permission_grants": ["mcp:server", "widget:render"],
+  "mcp_servers": {
+    "pomodoro": {
+      "command": "node",
+      "args": ["server.mjs"],
+      "description": "Pomodoro MCP server: the start tool and the ui://widget/pomodoro.html timer resource."
+    }
+  },
+  "contributes": {
+    "widgets": [
+      {
+        "tool_id": "pomodoro.start",
+        "uri": "ui://widget/pomodoro.html",
+        "mime": "text/html+skybridge",
+        "default_display_mode": "inline"
+      }
+    ]
+  }
+}

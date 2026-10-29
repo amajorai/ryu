@@ -2,11 +2,29 @@ import { describe, expect, test } from "bun:test";
 import {
 	mergeOutageCandidates,
 	normalizeRetryCandidates,
+	normalizeStoppedConversations,
 	RECONNECT_RETRY_TTL_MS,
 	selectPendingRetries,
 } from "./reconnect-retry.ts";
 
 const NOW = 1_000_000;
+
+test("durable Stop records reject invalid or expired values and retain the latest timestamp", () => {
+	expect(
+		normalizeStoppedConversations(
+			[
+				null,
+				{ conversationId: "", capturedAt: NOW },
+				{ conversationId: "future", capturedAt: NOW + 1 },
+				{ conversationId: "old", capturedAt: NOW - RECONNECT_RETRY_TTL_MS - 1 },
+				{ conversationId: "invalid", capturedAt: Number.NaN },
+				{ conversationId: "valid", capturedAt: NOW - 10 },
+				{ conversationId: "valid", capturedAt: NOW },
+			],
+			NOW
+		)
+	).toEqual([{ conversationId: "valid", capturedAt: NOW }]);
+});
 
 describe("reconnect retry candidate queue", () => {
 	test("captures each running conversation once", () => {

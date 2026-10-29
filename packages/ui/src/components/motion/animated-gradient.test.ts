@@ -6,7 +6,7 @@ import {
 	DEFAULT_ANIMATED_GRADIENT_PRESET,
 	isAnimatedGradientPreset,
 	resolveAnimatedGradient,
-	toAnimatedGradientShape,
+	toGradientPattern,
 } from "./animated-gradient.tsx";
 
 /**
@@ -35,7 +35,7 @@ describe("the preset table", () => {
 			for (const value of Object.values(preset)) {
 				expect(value).toBeDefined();
 			}
-			expect(toAnimatedGradientShape(preset.shape)).toBe(preset.shape);
+			expect(toGradientPattern(preset.shape)).toBe(preset.shape);
 		}
 	});
 
@@ -53,15 +53,15 @@ describe("shapes are matched against a closed set", () => {
 	test("upstream's capitalisation is accepted", () => {
 		// The component's own docs write `Checks` / `Stripes` / `Edge`, so an
 		// author copying them must not silently get the preset's shape instead.
-		expect(toAnimatedGradientShape("Checks")).toBe("checks");
-		expect(toAnimatedGradientShape("  Stripes ")).toBe("stripes");
-		expect(toAnimatedGradientShape("EDGE")).toBe("edge");
+		expect(toGradientPattern("Checks")).toBe("checks");
+		expect(toGradientPattern("  Stripes ")).toBe("stripes");
+		expect(toGradientPattern("EDGE")).toBe("edge");
 	});
 
 	test("anything else is rejected rather than passed to the shader", () => {
-		expect(toAnimatedGradientShape("blobs")).toBeNull();
-		expect(toAnimatedGradientShape(7)).toBeNull();
-		expect(toAnimatedGradientShape(null)).toBeNull();
+		expect(toGradientPattern("blobs")).toBeNull();
+		expect(toGradientPattern(7)).toBeNull();
+		expect(toGradientPattern(null)).toBeNull();
 	});
 });
 
@@ -79,6 +79,8 @@ describe("resolveAnimatedGradient", () => {
 	test("an unknown preset falls back rather than resolving undefined", () => {
 		expect(
 			resolveAnimatedGradient({
+				// SAFETY: Deliberately bypass the authored preset union in this
+				// malformed-input test; the real resolver must return prism.
 				preset: "made-up" as never,
 			})
 		).toEqual(resolveAnimatedGradient({ preset: "prism" }));

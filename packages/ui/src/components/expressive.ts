@@ -7,6 +7,7 @@
  * shared between the named expressions and the random animation cycle.
  */
 
+import { isNativeText } from "../lib/native-primitive-observation.ts";
 export const EXPRESSIVE_EXPRESSION_IDS = [
 	"neutral",
 	"attentive",
@@ -30,12 +31,12 @@ export const EXPRESSIVE_EXPRESSION_IDS = [
 export type ExpressiveExpression = (typeof EXPRESSIVE_EXPRESSION_IDS)[number];
 export type ExpressiveExpressionSelection = ExpressiveExpression | "random";
 
-export type ExpressiveEyeShape = "oval" | "x";
+export type EyeContour = "oval" | "x";
 
 export interface ExpressiveEye {
 	height: number;
 	open: number;
-	shape: ExpressiveEyeShape;
+	shape: EyeContour;
 	tilt: number;
 	width: number;
 }
@@ -61,8 +62,8 @@ const eye = (
 	height: number,
 	tilt = 0,
 	open = 1,
-	shape: ExpressiveEyeShape = "oval"
-): ExpressiveEye => ({ height, open, shape, tilt, width });
+	contour: EyeContour = "oval"
+): ExpressiveEye => ({ height, open, shape: contour, tilt, width });
 
 const xEye = (size: number): ExpressiveEye => eye(size, size, 0, 1, "x");
 
@@ -208,15 +209,15 @@ export const EXPRESSIVE_EXPRESSION_OPTIONS = [
 	value: ExpressiveExpressionSelection;
 }[];
 
-export function isExpressiveExpression(
-	value: unknown
-): value is ExpressiveExpression {
-	return typeof value === "string" && EXPRESSIVE_EXPRESSION_SET.has(value);
+export function isExpressiveExpression<T>(
+	value: T
+): value is T & ExpressiveExpression {
+	return isNativeText(value) && EXPRESSIVE_EXPRESSION_SET.has(value);
 }
 
-export function isExpressiveExpressionSelection(
-	value: unknown
-): value is ExpressiveExpressionSelection {
+export function isExpressiveExpressionSelection<T>(
+	value: T
+): value is T & ExpressiveExpressionSelection {
 	return value === "random" || isExpressiveExpression(value);
 }
 

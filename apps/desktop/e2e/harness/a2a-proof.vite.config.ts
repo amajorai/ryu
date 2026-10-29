@@ -28,4 +28,11 @@ export default defineConfig({
 		alias: { "@": desktopRoot },
 	},
 	root: harnessDir,
+	server: {
+		host: "127.0.0.1",
+		port: 5188,
+		strictPort: true,
+	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

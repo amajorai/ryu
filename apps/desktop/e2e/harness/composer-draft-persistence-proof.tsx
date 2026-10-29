@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { parseProofJsonRecord } from "../fixture-json.ts";
 // Browser proof for the real AgentChat composer. The desktop's persistence hook
 // writes these same draft ids to the Drafts sidecar; this hermetic story uses a
 // local durable adapter so tab switching and a cold remount can be inspected
@@ -58,13 +60,10 @@ function readRows(): DraftRows {
 		if (!raw) {
 			return {};
 		}
-		const parsed: unknown = JSON.parse(raw);
-		if (typeof parsed !== "object" || parsed === null) {
-			return {};
-		}
+		const parsed = parseProofJsonRecord(raw);
 		return Object.fromEntries(
-			Object.entries(parsed).filter(
-				(entry): entry is [string, string] => typeof entry[1] === "string"
+			Object.entries(parsed).filter((entry): entry is [string, string] =>
+				isNativeText(entry[1])
 			)
 		);
 	} catch {
@@ -94,7 +93,7 @@ function ProofInputBar({
 			onChange={(event) => onChange?.(event.target.value)}
 			placeholder="Write an unsent draft…"
 			rows={4}
-			value={typeof value === "string" ? value : ""}
+			value={isNativeText(value) ? value : ""}
 		/>
 	);
 }

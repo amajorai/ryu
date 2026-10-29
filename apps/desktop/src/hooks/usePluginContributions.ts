@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { pluginSidebarSpec } from "@/src/lib/api/plugin-contribution-specs.ts";
 // Data-driven bridge between Core's enabled-plugin contributions
 // (`GET /api/plugins/contributions`) and the desktop shell. Three hooks:
 //
@@ -16,28 +18,48 @@
 // the API payload.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createElement, useCallback, useEffect, useState } from "react";
-import { HelloDeclarativeViewHarness } from "@/src/components/views/DeclarativeView.tsx";
+import { createElement, lazy, useCallback, useEffect, useState } from "react";
 import { contributionRegistry } from "@/src/contributions/registry.ts";
 import {
 	registerTabIcon,
 	ruleFromItemTarget,
 } from "@/src/contributions/tab-icon-registry.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	getPluginContributions,
 	type PluginContributions,
 } from "@/src/lib/api/plugins.ts";
+import {
+	ENFORCE_CUSTOM_APP_CSP_PREF_KEY,
+	subscribePreferenceChanges,
+} from "@/src/lib/api/preferences.ts";
 import { useRealtimeRoom } from "@/src/lib/realtime/use-realtime-room.ts";
-import PluginCompanionPage from "@/src/pages/PluginCompanionPage.tsx";
-import PluginViewPage from "@/src/pages/PluginViewPage.tsx";
+
+// The route bodies load when a plugin route first opens (RouteOutlet suspends
+// on them), not with every surface that reads contributions, such as the
+// avatar provider.
+const PluginCompanionPage = lazy(
+	() => import("@/src/pages/PluginCompanionPage.tsx")
+);
+const PluginViewPage = lazy(() => import("@/src/pages/PluginViewPage.tsx"));
+const HelloDeclarativeViewHarness = lazy(() =>
+	import("@/src/components/views/DeclarativeView.tsx").then((module) => ({
+		default: module.HelloDeclarativeViewHarness,
+	}))
+);
 
 /** Stable empty payload so a missing/old Core (or an in-flight fetch) yields an
  *  identical reference every render — keeps the registration effect from looping. */
 const EMPTY: PluginContributions = {
 	agent_edit_panels: [],
+	agent_profile_tabs: [],
+	avatar_accessories: [],
+	avatar_styles: [],
 	composer_controls: [],
 	chat_features: [],
+	computer_use_planners: [],
+	backgrounds: [],
 	settings_tabs: [],
 	message_actions: [],
 	selection_actions: [],
@@ -47,12 +69,14 @@ const EMPTY: PluginContributions = {
 	slash_commands: [],
 	turn_hooks: [],
 	hook_events: [],
+	interfaces: [],
 	views: [],
 	sidebar_sections: [],
 	sidebar_modes: [],
 	sidebar_buttons: [],
 	themes: [],
 	dock_panels: [],
+	file_handlers: [],
 	live_activities: [],
 	store_tabs: [],
 	channels: [],
@@ -96,22 +120,26 @@ export const DECLARATIVE_VIEW_HARNESS_PATH = "/dev/declarative-view";
  */
 export function usePluginContributionsQuery(options?: {
 	notifyOnChangeProps?: "data"[];
+	target?: ApiTarget;
 }) {
 	const node = useActiveNode();
+	const target = options?.target ?? {
+		url: node.url,
+		token: node.token,
+		userJwt: node.userJwt ?? null,
+	};
 	const fetchContributions = useCallback(
 		({ signal }: { signal: AbortSignal }) =>
-			getPluginContributions(
-				{
-					url: node.url,
-					token: node.token,
-					userJwt: node.userJwt ?? null,
-				},
-				signal
-			),
-		[node.url, node.token, node.userJwt]
+			getPluginContributions(target, signal),
+		[target.url, target.token, target.userJwt]
 	);
 	return useQuery({
-		queryKey: ["plugin-contributions", node.url, node.token, node.userJwt],
+		queryKey: [
+			"plugin-contributions",
+			target.url,
+			target.token,
+			target.userJwt,
+		],
 		queryFn: fetchContributions,
 		// Best-effort surface: a stale window avoids hammering Core, and any error
 		// simply leaves `data` undefined → the stable EMPTY payload below. `retry`
@@ -124,13 +152,16 @@ export function usePluginContributionsQuery(options?: {
 }
 
 /** Shared, cached read of the enabled plugins' declarative contributions. */
-export function usePluginContributions(): PluginContributions {
+export function usePluginContributions(
+	target?: ApiTarget
+): PluginContributions {
 	// These consumers only read the payload. Suppress query status notifications
 	// (`isFetching` during a stale-window refresh) so a background plugin refresh
 	// cannot rebuild every sidebar/command consumer; payload identity still wakes
 	// them when a plugin actually changes.
 	const { data } = usePluginContributionsQuery({
 		notifyOnChangeProps: PLUGIN_CONTRIBUTION_DATA_PROPS,
+		target,
 	});
 	return data ?? EMPTY;
 }
@@ -151,15 +182,23 @@ const PLUGINS_ROOM = "system:plugins";
  */
 export function usePluginContributionsLiveRefresh(): void {
 	const queryClient = useQueryClient();
+	useEffect(
+		() =>
+			subscribePreferenceChanges((key) => {
+				if (key === ENFORCE_CUSTOM_APP_CSP_PREF_KEY) {
+					queryClient.invalidateQueries({
+						queryKey: ["plugin-contributions"],
+					});
+				}
+			}),
+		[queryClient]
+	);
 	// Prefix invalidation (the full key is ["plugin-contributions", url, token, userJwt])
 	// so a node switch mid-flight can't strand a stale cache entry.
 	useRealtimeRoom(PLUGINS_ROOM, "conversation", {
-		onEvent: (data: unknown) => {
-			const type =
-				typeof data === "object" && data !== null
-					? (data as { type?: unknown }).type
-					: undefined;
-			if (type === "contributions_changed") {
+		onEvent: (data: Parameters<typeof contributionChangeSchema.parse>[0]) => {
+			const changed = contributionChangeSchema.safeParse(data);
+			if (changed.success) {
 				queryClient.invalidateQueries({
 					queryKey: ["plugin-contributions"],
 				});
@@ -209,19 +248,20 @@ export function usePluginContributionRoutes(): void {
 			),
 			// One route per contributed declarative view, rendered natively by the
 			// desktop `DeclarativeView` (via `PluginViewPage`). Scoped by owning plugin.
-			...views
-				.filter((v) => typeof v.plugin === "string" && v.plugin.length > 0)
-				.map((v) =>
+			...views.flatMap((v) => {
+				const pluginId = v.plugin;
+				if (!pluginId) {
+					return [];
+				}
+				return [
 					contributionRegistry.registerRoute({
 						kind: "exact",
-						path: pluginViewPath(v.plugin as string, v.id),
+						path: pluginViewPath(pluginId, v.id),
 						render: () =>
-							createElement(PluginViewPage, {
-								pluginId: v.plugin as string,
-								viewId: v.id,
-							}),
-					})
-				),
+							createElement(PluginViewPage, { pluginId, viewId: v.id }),
+					}),
+				];
+			}),
 		];
 		forceReresolve((n) => n + 1);
 		return () => {
@@ -260,11 +300,11 @@ export function usePluginContributionTabIcons(): void {
 		}
 
 		for (const section of sidebar_sections) {
-			if (!(section.icon && section.spec?.itemTarget)) {
+			if (!(section.icon && pluginSidebarSpec(section)?.itemTarget)) {
 				continue;
 			}
 			const rule = ruleFromItemTarget(
-				section.spec.itemTarget,
+				pluginSidebarSpec(section)?.itemTarget ?? "",
 				section.icon,
 				`contrib:section:${section.plugin}:${section.id}`
 			);
@@ -294,3 +334,7 @@ export function usePluginContributionTabIcons(): void {
 		};
 	}, [companions, sidebar_sections, sidebar_buttons]);
 }
+
+const contributionChangeSchema = z.object({
+	type: z.literal("contributions_changed"),
+});

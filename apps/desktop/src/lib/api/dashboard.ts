@@ -1,3 +1,11 @@
+import { z } from "zod";
+import {
+	canvasLayoutSchema,
+	gridLayoutSchema,
+	widgetKindSchema,
+	widgetSourceSchema,
+} from "@/src/components/dashboard/widgets/schema.ts";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/dashboard.ts
 //
 // Typed client for the Core Home-dashboards API (`/api/dashboards/*`): the
@@ -80,12 +88,77 @@ export type DashboardEvent =
 	| { type: "widget_deleted"; dashboard_id: string; widget_id: string }
 	| { type: "dashboard_updated"; dashboard_id: string };
 
+const widgetSchema = z.object({
+	canvas: canvasLayoutSchema.nullish(),
+	config: z.json(),
+	dashboard_id: z.string(),
+	id: z.string(),
+	kind: widgetKindSchema,
+	last_error: z.string().nullish(),
+	last_refresh_at: z.string().nullish(),
+	last_value: z.json().optional(),
+	layout: gridLayoutSchema,
+	refresh_interval: z.string().nullish(),
+	source: widgetSourceSchema,
+	title: z.string(),
+});
+const dashboardEventSchema = z.discriminatedUnion("type", [
+	z.object({
+		type: z.literal("widget_data"),
+		dashboard_id: z.string(),
+		widget_id: z.string(),
+		value: z.json(),
+		at: z.string(),
+	}),
+	z.object({
+		type: z.literal("widget_error"),
+		dashboard_id: z.string(),
+		widget_id: z.string(),
+		error: z.string(),
+		at: z.string(),
+	}),
+	z.object({
+		type: z.literal("widget_updated"),
+		dashboard_id: z.string(),
+		widget: widgetSchema,
+	}),
+	z.object({
+		type: z.literal("widget_deleted"),
+		dashboard_id: z.string(),
+		widget_id: z.string(),
+	}),
+	z.object({ type: z.literal("dashboard_updated"), dashboard_id: z.string() }),
+]) satisfies z.ZodType<DashboardEvent>;
+
 // ── Dashboards ────────────────────────────────────────────────────────────────
 
+const dashboardResponseCodec: z.ZodType<Dashboard> = z
+	.object({
+		created_at: z.string(),
+		id: z.string(),
+		name: z.string(),
+		updated_at: z.string(),
+		view_mode: z
+			.union([z.union([z.literal("grid"), z.literal("canvas")]), z.null()])
+			.optional(),
+	})
+	.passthrough();
+const widgetResponseCodec: z.ZodType<Widget> = widgetSchema.passthrough();
+const dashboardCatalogResponseCodec: z.ZodType<DashboardCatalog> = z
+	.object({
+		core_endpoints: z.array(z.string()),
+		source_types: z.array(z.string()),
+		widget_kinds: z.array(widgetKindSchema),
+	})
+	.passthrough();
 export async function listDashboards(target: ApiTarget): Promise<Dashboard[]> {
 	const json = await request<{ dashboards?: Dashboard[] }>(
 		target,
-		"/api/dashboards"
+		"/api/dashboards",
+		{},
+		z
+			.object({ dashboards: z.array(dashboardResponseCodec).optional() })
+			.passthrough()
 	);
 	return json.dashboards ?? [];
 }
@@ -97,7 +170,13 @@ export async function createDashboard(
 	const json = await request<{ dashboard?: Dashboard; error?: string }>(
 		target,
 		"/api/dashboards",
-		{ method: "POST", body: { name } }
+		{ method: "POST", body: { name } },
+		z
+			.object({
+				dashboard: dashboardResponseCodec.optional(),
+				error: z.string().optional(),
+			})
+			.passthrough()
 	);
 	if (!json.dashboard) {
 		throw new Error(json.error ?? "failed to create dashboard");
@@ -113,7 +192,18 @@ export async function getDashboard(
 		dashboard?: Dashboard;
 		widgets?: Widget[];
 		error?: string;
-	}>(target, `/api/dashboards/${id}`);
+	}>(
+		target,
+		`/api/dashboards/${id}`,
+		{},
+		z
+			.object({
+				dashboard: dashboardResponseCodec.optional(),
+				widgets: z.array(widgetResponseCodec).optional(),
+				error: z.string().optional(),
+			})
+			.passthrough()
+	);
 	if (!json.dashboard) {
 		throw new Error(json.error ?? "dashboard not found");
 	}
@@ -128,7 +218,13 @@ export async function renameDashboard(
 	const json = await request<{ dashboard?: Dashboard; error?: string }>(
 		target,
 		`/api/dashboards/${id}`,
-		{ method: "PUT", body: { name } }
+		{ method: "PUT", body: { name } },
+		z
+			.object({
+				dashboard: dashboardResponseCodec.optional(),
+				error: z.string().optional(),
+			})
+			.passthrough()
 	);
 	if (!json.dashboard) {
 		throw new Error(json.error ?? "failed to rename dashboard");
@@ -140,7 +236,12 @@ export async function deleteDashboard(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/dashboards/${id}`, { method: "DELETE" });
+	await request(
+		target,
+		`/api/dashboards/${id}`,
+		{ method: "DELETE" },
+		gatewayJsonValueSchema.transform(() => undefined)
+	);
 }
 
 /**
@@ -155,7 +256,13 @@ export async function setDashboardViewMode(
 	const json = await request<{ dashboard?: Dashboard; error?: string }>(
 		target,
 		`/api/dashboards/${id}`,
-		{ method: "PUT", body: { view_mode: viewMode } }
+		{ method: "PUT", body: { view_mode: viewMode } },
+		z
+			.object({
+				dashboard: dashboardResponseCodec.optional(),
+				error: z.string().optional(),
+			})
+			.passthrough()
 	);
 	if (!json.dashboard) {
 		throw new Error(json.error ?? "failed to set view mode");
@@ -173,7 +280,13 @@ export async function createWidget(
 	const json = await request<{ widget?: Widget; error?: string }>(
 		target,
 		`/api/dashboards/${dashboardId}/widgets`,
-		{ method: "POST", body: data }
+		{ method: "POST", body: data },
+		z
+			.object({
+				widget: widgetResponseCodec.optional(),
+				error: z.string().optional(),
+			})
+			.passthrough()
 	);
 	if (!json.widget) {
 		throw new Error(json.error ?? "failed to create widget");
@@ -190,7 +303,13 @@ export async function updateWidget(
 	const json = await request<{ widget?: Widget; error?: string }>(
 		target,
 		`/api/dashboards/${dashboardId}/widgets/${widgetId}`,
-		{ method: "PUT", body: data }
+		{ method: "PUT", body: data },
+		z
+			.object({
+				widget: widgetResponseCodec.optional(),
+				error: z.string().optional(),
+			})
+			.passthrough()
 	);
 	if (!json.widget) {
 		throw new Error(json.error ?? "failed to update widget");
@@ -203,9 +322,14 @@ export async function deleteWidget(
 	dashboardId: string,
 	widgetId: string
 ): Promise<void> {
-	await request(target, `/api/dashboards/${dashboardId}/widgets/${widgetId}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/api/dashboards/${dashboardId}/widgets/${widgetId}`,
+		{
+			method: "DELETE",
+		},
+		gatewayJsonValueSchema.transform(() => undefined)
+	);
 }
 
 export async function updateWidgetLayout(
@@ -217,7 +341,8 @@ export async function updateWidgetLayout(
 	await request(
 		target,
 		`/api/dashboards/${dashboardId}/widgets/${widgetId}/layout`,
-		{ method: "PUT", body: layout }
+		{ method: "PUT", body: layout },
+		gatewayJsonValueSchema.transform(() => undefined)
 	);
 }
 
@@ -234,7 +359,8 @@ export async function updateWidgetCanvas(
 	await request(
 		target,
 		`/api/dashboards/${dashboardId}/widgets/${widgetId}/layout`,
-		{ method: "PUT", body: { canvas } }
+		{ method: "PUT", body: { canvas } },
+		gatewayJsonValueSchema.transform(() => undefined)
 	);
 }
 
@@ -246,12 +372,23 @@ export async function refreshWidget(
 	return await request<{ value?: unknown; error?: string }>(
 		target,
 		`/api/dashboards/${dashboardId}/widgets/${widgetId}/refresh`,
-		{ method: "POST" }
+		{ method: "POST" },
+		z
+			.object({
+				value: gatewayJsonValueSchema.optional(),
+				error: z.string().optional(),
+			})
+			.passthrough()
 	);
 }
 
 export async function getCatalog(target: ApiTarget): Promise<DashboardCatalog> {
-	return await request<DashboardCatalog>(target, "/api/dashboards/catalog");
+	return await request<DashboardCatalog>(
+		target,
+		"/api/dashboards/catalog",
+		{},
+		dashboardCatalogResponseCodec
+	);
 }
 
 /**
@@ -308,7 +445,7 @@ export async function streamDashboardEvents(
 						continue;
 					}
 					try {
-						onEvent(JSON.parse(payload) as DashboardEvent);
+						onEvent(dashboardEventSchema.parse(JSON.parse(payload)));
 					} catch {
 						// Non-JSON keep-alive or partial frame — ignore; the feed self-heals.
 					}

@@ -31,4 +31,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "multi-folder-project-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

@@ -26,6 +26,7 @@
 
 import type { ReactNode } from "react";
 import { agentsSurface } from "../surfaces/agents/index.tsx";
+import { appLauncherSurface } from "../surfaces/app-launcher/index.tsx";
 import { calendarSurface } from "../surfaces/calendar/index.tsx";
 import { chatSurface } from "../surfaces/chat/index.tsx";
 import { downloadsSurface } from "../surfaces/downloads/index.tsx";
@@ -100,6 +101,7 @@ export function listSurfaces(): readonly SurfaceModule[] {
 // default home surface; the rest mirror the desktop NAV_ITEMS + Store sections.
 registerSurface(homeSurface);
 registerSurface(chatSurface);
+registerSurface(appLauncherSurface);
 registerSurface(agentsSurface);
 registerSurface(teamsSurface);
 registerSurface(storeSurface);

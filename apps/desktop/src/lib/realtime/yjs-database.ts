@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
 // apps/desktop/src/lib/realtime/yjs-database.ts
 //
 // The Yjs shared-type model for a collaborative data grid (Spaces "database"
@@ -21,8 +23,98 @@
 // the mutators here (each wrapped in a `doc.transact` so it ships as one update).
 
 import { getEmptyCellValue } from "@ryu/ui/lib/data-grid.ts";
-import type { CellOpts } from "@ryu/ui/types/data-grid";
+import { renameFormulaReferences } from "@ryu/ui/lib/data-grid-formula.ts";
+import type { CellOpts } from "@ryu/ui/types/data-grid.ts";
 import { type Doc, type Array as YArray, Map as YMap } from "yjs";
+
+const databaseRowSchema = z
+	.record(z.string(), z.json().optional())
+	.and(
+		z.object({ __id: z.string().optional(), __page: z.string().optional() })
+	);
+const formatRulesSchema = z
+	.array(
+		z.object({
+			color: z.string(),
+			id: z.string(),
+			operator: z.enum([
+				"isEmpty",
+				"isNotEmpty",
+				"equals",
+				"notEquals",
+				"contains",
+				"notContains",
+				"greaterThan",
+				"greaterThanOrEqual",
+				"lessThan",
+				"lessThanOrEqual",
+			]),
+			value: z.string().optional(),
+		})
+	)
+	.optional();
+const selectOptionsSchema = z.array(
+	z.looseObject({
+		label: z.string(),
+		value: z.string(),
+		color: z.string().optional(),
+		count: z.number().optional(),
+	})
+);
+const cellSchema = z.discriminatedUnion("variant", [
+	z.object({
+		variant: z.literal("short-text"),
+		formatRules: formatRulesSchema,
+	}),
+	z.object({ variant: z.literal("long-text"), formatRules: formatRulesSchema }),
+	z.object({
+		variant: z.literal("number"),
+		min: z.number().optional(),
+		max: z.number().optional(),
+		step: z.number().optional(),
+		formatRules: formatRulesSchema,
+	}),
+	z.object({
+		variant: z.literal("select"),
+		options: selectOptionsSchema,
+		formatRules: formatRulesSchema,
+	}),
+	z.object({
+		variant: z.literal("multi-select"),
+		options: selectOptionsSchema,
+		formatRules: formatRulesSchema,
+	}),
+	z.object({ variant: z.literal("checkbox"), formatRules: formatRulesSchema }),
+	z.object({ variant: z.literal("date"), formatRules: formatRulesSchema }),
+	z.object({ variant: z.literal("url"), formatRules: formatRulesSchema }),
+	z.object({
+		variant: z.literal("file"),
+		maxFileSize: z.number().optional(),
+		maxFiles: z.number().optional(),
+		accept: z.string().optional(),
+		multiple: z.boolean().optional(),
+		formatRules: formatRulesSchema,
+	}),
+	z.object({
+		variant: z.literal("formula"),
+		expression: z.string(),
+		formatRules: formatRulesSchema,
+	}),
+]);
+const viewKindSchema = z.enum(["table", "board", "gallery", "list"]);
+const viewSchema = z.object({
+	id: z.string(),
+	kind: viewKindSchema,
+	name: z.string(),
+	groupByColumnId: z.string().optional(),
+});
+const databaseDocSchema = z.object({
+	columns: z.array(
+		z.object({ id: z.string(), label: z.string(), cell: cellSchema })
+	),
+	rows: z.array(databaseRowSchema),
+	views: z.array(viewSchema).optional(),
+});
 
 /** A column in a database document: stable id + display label + cell type. */
 export interface DbColumn {
@@ -58,7 +150,7 @@ export interface DbView {
  * grid only reads explicit `accessorKey` columns, so the extra `__id` key is
  * inert for rendering, search, and copy/paste.
  */
-export type DbRow = Record<string, unknown> & {
+export type DbRow = z.infer<typeof databaseRowSchema> & {
 	__id?: string;
 	/**
 	 * Optional id of the row's body page document (a child `kind:"page"` doc). Set
@@ -160,14 +252,7 @@ function midpoint(a: string, b: string | null): string {
 export function parseDatabaseDoc(source: string): DatabaseDoc {
 	if (source.trim()) {
 		try {
-			const parsed = JSON.parse(source) as Partial<DatabaseDoc>;
-			if (Array.isArray(parsed.columns) && Array.isArray(parsed.rows)) {
-				return {
-					columns: parsed.columns,
-					rows: parsed.rows,
-					views: Array.isArray(parsed.views) ? parsed.views : undefined,
-				};
-			}
+			return databaseDocSchema.parse(JSON.parse(source));
 		} catch {
 			// Fall through to a fresh default — never lose the editor to bad JSON.
 		}
@@ -228,10 +313,10 @@ function readViewMap(map: YMap<unknown>): DbView {
 	return {
 		id: String(map.get("id") ?? ""),
 		name: String(map.get("name") ?? ""),
-		kind: (String(map.get("kind") ?? "table") as DbViewKind) || "table",
-		...(typeof groupByColumnId === "string" && groupByColumnId
+		kind: viewKindSchema.catch("table").parse(map.get("kind")),
+		...(isNativeText(groupByColumnId) && groupByColumnId
 			? { groupByColumnId }
-			: {}),
+			: undefined),
 	};
 }
 
@@ -254,7 +339,7 @@ function readColumnMap(map: YMap<unknown>): DbColumn {
 	return {
 		id: String(map.get("id") ?? ""),
 		label: String(map.get("label") ?? ""),
-		cell: (map.get("cell") as CellOpts) ?? { variant: "short-text" },
+		cell: cellSchema.catch({ variant: "short-text" }).parse(map.get("cell")),
 	};
 }
 
@@ -269,7 +354,7 @@ function makeRowMap(
 	map.set(ROW_ID_KEY, id);
 	map.set(ROW_ORDER_KEY, order);
 	// Carry the body-page link across a JSON seed (it is persisted with the row).
-	if (typeof row.__page === "string" && row.__page) {
+	if (isNativeText(row.__page) && row.__page) {
 		map.set(ROW_PAGE_KEY, row.__page);
 	}
 	for (const column of columns) {
@@ -332,11 +417,7 @@ export function seedDatabase(doc: Doc, data: DatabaseDoc): void {
  * appends share an `__order`. Each row record carries its `__id` so a later cell
  * edit can address the exact row.
  */
-export function snapshotDatabase(doc: Doc): {
-	columns: DbColumn[];
-	rows: DbRow[];
-	views: DbView[];
-} {
+export function snapshotDatabase(doc: Doc) {
 	const columns = getColumnsArray(doc).map(readColumnMap);
 	// A pre-views document has an empty views array; synthesize a table view so
 	// the UI always has at least one view to render.
@@ -373,11 +454,14 @@ export function snapshotDatabase(doc: Doc): {
 	const rows: DbRow[] = entries.map((entry) => {
 		const row: DbRow = { __id: entry.id };
 		const page = entry.map.get(ROW_PAGE_KEY);
-		if (typeof page === "string" && page) {
+		if (isNativeText(page) && page) {
 			row.__page = page;
 		}
 		for (const column of columns) {
-			row[column.id] = entry.map.get(column.id);
+			const parsed = z.json().optional().safeParse(entry.map.get(column.id));
+			row[column.id] = parsed.success
+				? parsed.data
+				: getEmptyCellValue(column.cell.variant);
 		}
 		return row;
 	});
@@ -431,7 +515,7 @@ export function diffCellEdits(
 			continue;
 		}
 		const prevRow = current[i];
-		const rowId = (nextRow.__id ?? prevRow?.__id) as string | undefined;
+		const rowId = nextRow.__id ?? prevRow?.__id;
 		if (!rowId) {
 			continue;
 		}
@@ -477,6 +561,56 @@ export function addRow(doc: Doc, columns: DbColumn[]): string {
 		rowsArray.push([makeRowMap({}, columns, id, order)]);
 	});
 	return id;
+}
+
+/**
+ * Insert `rows` so they land at `index` in the displayed (snapshot) order —
+ * before the row currently at `index`, or at the end. A row carrying an `__id`
+ * keeps it (undoing a delete restores the same row); others get a fresh id.
+ * Returns the ids in insertion order.
+ */
+export function insertRows(
+	doc: Doc,
+	columns: DbColumn[],
+	index: number,
+	rows: DbRow[]
+): string[] {
+	const ids = rows.map((row) =>
+		isNativeText(row.__id) && row.__id ? row.__id : newRowId()
+	);
+	doc.transact(() => {
+		const rowsArray = getRowsArray(doc);
+		const sorted: Array<{ id: string; order: string }> = [];
+		for (const map of rowsArray) {
+			sorted.push({
+				id: String(map.get(ROW_ID_KEY) ?? ""),
+				order: String(map.get(ROW_ORDER_KEY) ?? ""),
+			});
+		}
+		sorted.sort((x, y) => {
+			if (x.order !== y.order) {
+				return x.order < y.order ? -1 : 1;
+			}
+			if (x.id === y.id) {
+				return 0;
+			}
+			return x.id < y.id ? -1 : 1;
+		});
+		const clamped = Math.max(0, Math.min(index, sorted.length));
+		let lower: string | null = sorted[clamped - 1]?.order ?? null;
+		let upper: string | null = sorted[clamped]?.order ?? null;
+		// Two rows sharing one order key (a concurrent append) leave no room
+		// between them; fall back to appending after the lower one.
+		if (lower !== null && upper !== null && lower >= upper) {
+			upper = null;
+		}
+		for (const [i, row] of rows.entries()) {
+			const order = orderKeyBetween(lower, upper);
+			rowsArray.push([makeRowMap(row, columns, ids[i] ?? newRowId(), order)]);
+			lower = order;
+		}
+	});
+	return ids;
 }
 
 /** The greatest `__order` currently present (rows are not stored sorted). */
@@ -534,10 +668,12 @@ export function updateColumn(
 		const columnsArray = getColumnsArray(doc);
 		let target: YMap<unknown> | null = null;
 		let prevVariant: string | undefined;
+		let prevLabel = "";
 		for (const map of columnsArray) {
 			if (map.get("id") === columnId) {
 				target = map;
-				prevVariant = (map.get("cell") as CellOpts | undefined)?.variant;
+				prevVariant = cellSchema.safeParse(map.get("cell")).data?.variant;
+				prevLabel = String(map.get("label") ?? "");
 				break;
 			}
 		}
@@ -553,6 +689,23 @@ export function updateColumn(
 				const empty = getEmptyCellValue(patch.cell.variant);
 				for (const map of getRowsArray(doc)) {
 					map.set(columnId, empty);
+				}
+			}
+		}
+		// Formulas name columns by label; carry a rename into them.
+		if (patch.label !== undefined && patch.label !== prevLabel) {
+			for (const map of columnsArray) {
+				const cell = cellSchema.safeParse(map.get("cell")).data;
+				if (cell?.variant !== "formula" || !cell.expression) {
+					continue;
+				}
+				const expression = renameFormulaReferences(
+					cell.expression,
+					prevLabel,
+					patch.label
+				);
+				if (expression !== cell.expression) {
+					map.set("cell", { ...cell, expression });
 				}
 			}
 		}

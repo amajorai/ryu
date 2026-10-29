@@ -24,7 +24,7 @@ import {
 	ProPlanCard,
 	TeamsPlanCard,
 } from "@ryu/blocks/web/pricing.tsx";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -32,13 +32,13 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { FieldSeparator } from "@ryu/ui/components/field";
-import { Input } from "@ryu/ui/components/input";
-import { Logo as OrbLogo } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import { TextSwap } from "@ryu/ui/components/text-swap";
+} from "@ryu/ui/components/dialog.tsx";
+import { FieldSeparator } from "@ryu/ui/components/field.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Logo as OrbLogo } from "@ryu/ui/components/logo.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
+import { TextSwap } from "@ryu/ui/components/text-swap.tsx";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { clearSessionToken, FRONTEND_URL, signOut } from "@/lib/auth-client.ts";
@@ -177,7 +177,7 @@ export function HardPaywallPage({ onApplyLicenseKey }: HardPaywallPageProps) {
 
 	return (
 		<div className="flex size-full flex-col">
-			{/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: top strip is the drag region */}
+			{/* top strip is the drag region */}
 			<div
 				aria-hidden
 				className="h-10 w-full shrink-0"
@@ -211,9 +211,7 @@ export function HardPaywallPage({ onApplyLicenseKey }: HardPaywallPageProps) {
 						>
 							I have a license key
 						</Button>
-						<FieldSeparator className="*:data-[slot=field-separator-content]:bg-background">
-							or
-						</FieldSeparator>
+						<FieldSeparator className="">or</FieldSeparator>
 					</div>
 
 					<Dialog onOpenChange={setLicenseDialogOpen} open={licenseDialogOpen}>
@@ -227,6 +225,7 @@ export function HardPaywallPage({ onApplyLicenseKey }: HardPaywallPageProps) {
 							</DialogHeader>
 							<div className="flex items-center gap-2">
 								<Input
+									aria-label="License key"
 									autoComplete="off"
 									className="flex-1"
 									disabled={validating}
@@ -245,7 +244,7 @@ export function HardPaywallPage({ onApplyLicenseKey }: HardPaywallPageProps) {
 										handleValidate().catch(() => undefined);
 									}}
 								>
-									<TextSwap>{validating ? "Checking..." : "Activate"}</TextSwap>
+									<TextSwap>{validating ? "Checking…" : "Activate"}</TextSwap>
 								</Button>
 							</div>
 							<DialogFooter showCloseButton />

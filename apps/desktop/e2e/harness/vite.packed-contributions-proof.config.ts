@@ -5,6 +5,7 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { PluginManifestSchema } from "../../../../packages/sdk/src/manifest.ts";
 
 const harnessDir = import.meta.dirname;
 const desktopRoot = path.resolve(harnessDir, "../..");
@@ -34,13 +35,18 @@ export default defineConfig({
 				if (result.status !== 0) {
 					throw new Error(result.stderr || "SDK pack failed");
 				}
-				const bundle = JSON.parse(
-					readFileSync(path.join(directory, "dist/plugin.bundle.json"), "utf8")
+				const bundle = PluginManifestSchema.parse(
+					JSON.parse(
+						readFileSync(
+							path.join(directory, "dist/plugin.bundle.json"),
+							"utf8"
+						)
+					)
 				);
 				const payload = JSON.stringify({
-					context_menu_items: (bundle.contributes.context_menu_items ?? []).map(
-						(item: Record<string, unknown>) => ({ ...item, plugin: bundle.id })
-					),
+					context_menu_items: (
+						bundle.contributes?.context_menu_items ?? []
+					).map((item) => ({ ...item, plugin: bundle.id })),
 				});
 				server.middlewares.use("/__packed-chat-title", (_req, res) => {
 					res.setHeader("Content-Type", "application/json");

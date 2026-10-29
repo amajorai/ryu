@@ -4,8 +4,10 @@ import {
 	HoverCardTrigger,
 } from "@ryu/ui/components/hover-card";
 import { cn } from "@ryu/ui/lib/utils";
-import type { UIMessage } from "ai";
 import { useEffect, useMemo, useState } from "react";
+import { z } from "zod";
+import styles from "./elements-one.module.css";
+import type { AgentGeometryStyle } from "./elements-one-style.ts";
 import {
 	DEFAULT_STATS_PREFERENCES,
 	deriveSessionStats,
@@ -15,12 +17,19 @@ import {
 	type StatsPreferences,
 	type StatsUsageMetric,
 	type StatsUsageSnapshot,
+	statsPreferenceFields,
 } from "./stats-model.ts";
 
 const STORAGE_KEY = "ryu:stats-plugin-preferences";
+const authoredStoredPreferences = z.object(statsPreferenceFields).partial();
+// Every current authored field is checked; unobserved future JSON fields remain
+// on the original decoded object and retain native object-spread persistence.
+const storedPreferencesSchema = z.custom<Partial<StatsPreferences>>(
+	(value) => authoredStoredPreferences.safeParse(value).success
+);
 
 function readPreferences(): StatsPreferences {
-	if (typeof window === "undefined") {
+	if (globalThis.window === undefined) {
 		return DEFAULT_STATS_PREFERENCES;
 	}
 	try {
@@ -28,7 +37,7 @@ function readPreferences(): StatsPreferences {
 		if (!raw) {
 			return DEFAULT_STATS_PREFERENCES;
 		}
-		const parsed = JSON.parse(raw) as Partial<StatsPreferences>;
+		const parsed = storedPreferencesSchema.parse(JSON.parse(raw));
 		return { ...DEFAULT_STATS_PREFERENCES, ...parsed };
 	} catch {
 		return DEFAULT_STATS_PREFERENCES;
@@ -177,7 +186,7 @@ function MetricChip({
 	}
 	return (
 		<span
-			className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground tabular-nums"
+			className="type-compact inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/30 px-1.5 py-0.5 text-muted-foreground tabular-nums"
 			data-testid={testId}
 		>
 			<span className="text-muted-foreground/70">{label}</span>
@@ -226,13 +235,27 @@ function UsageBar({
 			</div>
 			<div className="relative h-1.5 overflow-hidden rounded-full bg-muted">
 				<div
-					className="h-full rounded-full bg-primary transition-[width]"
-					style={{ width: `${percent ? Number.parseInt(percent, 10) : 0}%` }}
+					className={cn(
+						styles.widthTransition,
+						"h-full rounded-full bg-primary"
+					)}
+					style={
+						{
+							"--agent-width": `${percent ? Number.parseInt(percent, 10) : 0}%`,
+						} satisfies AgentGeometryStyle as AgentGeometryStyle
+					}
 				/>
 				{preferences.usageShowTimeCursor && cursor !== undefined ? (
 					<div
-						className="absolute inset-y-0 w-px bg-foreground/70"
-						style={{ left: `${cursor}%` }}
+						className={cn(
+							styles.cursor,
+							"absolute inset-y-0 w-px bg-foreground/70"
+						)}
+						style={
+							{
+								"--agent-cursor": `${cursor}%`,
+							} satisfies AgentGeometryStyle as AgentGeometryStyle
+						}
 					/>
 				) : null}
 			</div>
@@ -403,16 +426,18 @@ function StatsPreferencesPanel({
 	setPreferences: (next: Partial<StatsPreferences>) => void;
 }) {
 	return (
-		<div className="mt-3 border-border/60 border-t pt-3 text-[11px]">
+		<div className="type-caption mt-3 border-border/60 border-t pt-3">
 			<div className="mb-2 font-medium text-foreground">Stats settings</div>
 			<div className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2">
 				<label htmlFor="stats-cache-scope">Cache totals</label>
 				<select
-					className="rounded border border-border bg-background px-1.5 py-1 text-[10px]"
+					className="type-compact rounded border border-border bg-background px-1.5 py-1"
 					id="stats-cache-scope"
 					onChange={(event) =>
 						setPreferences({
-							cacheScope: event.target.value as StatsPreferences["cacheScope"],
+							cacheScope: statsPreferenceFields.cacheScope.parse(
+								event.target.value
+							),
 						})
 					}
 					value={preferences.cacheScope}
@@ -422,11 +447,14 @@ function StatsPreferencesPanel({
 				</select>
 				<label htmlFor="stats-cache-ttl">Cache timer TTL</label>
 				<select
-					className="rounded border border-border bg-background px-1.5 py-1 text-[10px]"
+					className="type-compact rounded border border-border bg-background px-1.5 py-1"
 					id="stats-cache-ttl"
 					onChange={(event) =>
 						setPreferences({
-							cacheTimerTtlMinutes: Number(event.target.value) as 5 | 60,
+							cacheTimerTtlMinutes:
+								statsPreferenceFields.cacheTimerTtlMinutes.parse(
+									Number(event.target.value)
+								),
 						})
 					}
 					value={preferences.cacheTimerTtlMinutes}
@@ -436,7 +464,7 @@ function StatsPreferencesPanel({
 				</select>
 				<label htmlFor="stats-rolling-window">Speed rolling window</label>
 				<select
-					className="rounded border border-border bg-background px-1.5 py-1 text-[10px]"
+					className="type-compact rounded border border-border bg-background px-1.5 py-1"
 					id="stats-rolling-window"
 					onChange={(event) =>
 						setPreferences({ rollingWindowSeconds: Number(event.target.value) })
@@ -452,12 +480,13 @@ function StatsPreferencesPanel({
 				</select>
 				<label htmlFor="stats-compaction-value">Compaction value</label>
 				<select
-					className="rounded border border-border bg-background px-1.5 py-1 text-[10px]"
+					className="type-compact rounded border border-border bg-background px-1.5 py-1"
 					id="stats-compaction-value"
 					onChange={(event) =>
 						setPreferences({
-							compactionValue: event.target
-								.value as StatsPreferences["compactionValue"],
+							compactionValue: statsPreferenceFields.compactionValue.parse(
+								event.target.value
+							),
 						})
 					}
 					value={preferences.compactionValue}
@@ -498,12 +527,13 @@ function StatsPreferencesPanel({
 				</label>
 				<label htmlFor="stats-usage-percent-mode">Usage percentage</label>
 				<select
-					className="rounded border border-border bg-background px-1.5 py-1 text-[10px]"
+					className="type-compact rounded border border-border bg-background px-1.5 py-1"
 					id="stats-usage-percent-mode"
 					onChange={(event) =>
 						setPreferences({
-							usagePercentMode: event.target
-								.value as StatsPreferences["usagePercentMode"],
+							usagePercentMode: statsPreferenceFields.usagePercentMode.parse(
+								event.target.value
+							),
 						})
 					}
 					value={preferences.usagePercentMode}
@@ -513,12 +543,13 @@ function StatsPreferencesPanel({
 				</select>
 				<label htmlFor="stats-reset-timer-mode">Reset timer display</label>
 				<select
-					className="rounded border border-border bg-background px-1.5 py-1 text-[10px]"
+					className="type-compact rounded border border-border bg-background px-1.5 py-1"
 					id="stats-reset-timer-mode"
 					onChange={(event) =>
 						setPreferences({
-							resetTimerMode: event.target
-								.value as StatsPreferences["resetTimerMode"],
+							resetTimerMode: statsPreferenceFields.resetTimerMode.parse(
+								event.target.value
+							),
 						})
 					}
 					value={preferences.resetTimerMode}
@@ -529,12 +560,14 @@ function StatsPreferencesPanel({
 				</select>
 				<label htmlFor="stats-reset-timezone">Reset timezone</label>
 				<select
-					className="rounded border border-border bg-background px-1.5 py-1 text-[10px]"
+					className="type-compact rounded border border-border bg-background px-1.5 py-1"
 					id="stats-reset-timezone"
 					onChange={(event) =>
 						setPreferences({
-							resetTimerTimezone: event.target
-								.value as StatsPreferences["resetTimerTimezone"],
+							resetTimerTimezone:
+								statsPreferenceFields.resetTimerTimezone.parse(
+									event.target.value
+								),
 						})
 					}
 					value={preferences.resetTimerTimezone}
@@ -544,7 +577,7 @@ function StatsPreferencesPanel({
 				</select>
 				<label htmlFor="stats-reset-locale">Reset locale</label>
 				<input
-					className="w-24 rounded border border-border bg-background px-1.5 py-1 text-[10px]"
+					className="type-compact w-24 rounded border border-border bg-background px-1.5 py-1"
 					id="stats-reset-locale"
 					maxLength={24}
 					onChange={(event) =>
@@ -559,7 +592,7 @@ function StatsPreferencesPanel({
 				/>
 				<label htmlFor="stats-cache-hot-glyph">Cache hot glyph</label>
 				<input
-					className="w-14 rounded border border-border bg-background px-1.5 py-1 text-center text-[10px]"
+					className="type-compact w-14 rounded border border-border bg-background px-1.5 py-1 text-center"
 					id="stats-cache-hot-glyph"
 					maxLength={4}
 					onChange={(event) =>
@@ -571,7 +604,7 @@ function StatsPreferencesPanel({
 					Cache countdown glyph
 				</label>
 				<input
-					className="w-14 rounded border border-border bg-background px-1.5 py-1 text-center text-[10px]"
+					className="type-compact w-14 rounded border border-border bg-background px-1.5 py-1 text-center"
 					id="stats-cache-countdown-glyph"
 					maxLength={4}
 					onChange={(event) =>
@@ -581,7 +614,7 @@ function StatsPreferencesPanel({
 				/>
 				<label htmlFor="stats-cache-cold-glyph">Cache cold glyph</label>
 				<input
-					className="w-14 rounded border border-border bg-background px-1.5 py-1 text-center text-[10px]"
+					className="type-compact w-14 rounded border border-border bg-background px-1.5 py-1 text-center"
 					id="stats-cache-cold-glyph"
 					maxLength={4}
 					onChange={(event) =>
@@ -648,7 +681,7 @@ export function StatsFooter({
 	className?: string;
 	contextFallback?: number;
 	contextSize?: number;
-	conversationMessages: readonly UIMessage[];
+	conversationMessages: readonly StatsMessage[];
 	isMainChainActive?: boolean;
 	modelName?: string;
 	usage?: StatsUsageSnapshot | null;
@@ -676,7 +709,7 @@ export function StatsFooter({
 		preferences.rollingWindowSeconds > 0 ? now : undefined;
 	const staticStats = useMemo(
 		() =>
-			deriveSessionStats(conversationMessages as readonly StatsMessage[], {
+			deriveSessionStats(conversationMessages, {
 				contextFallback,
 				contextWindowOverride: contextSize,
 				isMainChainActive,
@@ -725,14 +758,15 @@ export function StatsFooter({
 	return (
 		<HoverCard>
 			<HoverCardTrigger
+				appearance="statistics"
 				className={cn(
-					"flex min-w-0 cursor-default select-none flex-wrap items-center gap-1.5 text-muted-foreground",
+					"flex min-w-0 select-none flex-wrap items-center",
 					className
 				)}
 				closeDelay={80}
 				delay={120}
 			>
-				<span className="mr-0.5 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+				<span className="type-compact mr-0.5 font-medium text-muted-foreground/70 uppercase tracking-wider">
 					Stats
 				</span>
 				<MetricChip
@@ -816,7 +850,11 @@ export function StatsFooter({
 					/>
 				) : null}
 			</HoverCardTrigger>
-			<HoverCardContent align="start" className="w-[370px] text-xs">
+			<HoverCardContent
+				align="start"
+				className="w-[370px]"
+				typography="compact"
+			>
 				<div
 					className="flex flex-col gap-1.5"
 					data-testid="stats-plugin-details"
@@ -898,8 +936,15 @@ export function StatsFooter({
 						data-testid="stats-context-bar"
 					>
 						<div
-							className="h-full rounded-full bg-primary transition-[width]"
-							style={{ width: `${contextBarWidth}%` }}
+							className={cn(
+								styles.widthTransition,
+								"h-full rounded-full bg-primary"
+							)}
+							style={
+								{
+									"--agent-width": `${contextBarWidth}%`,
+								} satisfies AgentGeometryStyle as AgentGeometryStyle
+							}
 						/>
 					</div>
 					<DetailRow

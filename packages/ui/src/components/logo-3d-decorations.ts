@@ -1,12 +1,12 @@
 import {
 	Color,
+	Shape as ContourPath,
 	ExtrudeGeometry,
 	Group,
 	InstancedMesh,
 	Mesh,
 	MeshPhysicalMaterial,
 	Object3D,
-	Shape,
 	SphereGeometry,
 } from "three";
 import type { ExpressiveAnimationDecoration } from "./expressive-animation.ts";
@@ -22,7 +22,7 @@ export function createGhostDecorations(
 	const group = new Group();
 	const sphere = new SphereGeometry(1, 16, 12);
 	const transform = new Object3D();
-	const triangle = new Shape();
+	const triangle = new ContourPath();
 	triangle.moveTo(-1.6, 2.1);
 	triangle.lineTo(2.1, 0);
 	triangle.lineTo(-1.6, -2.1);

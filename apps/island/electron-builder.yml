@@ -27,8 +27,13 @@ files:
 # from inside the asar, so unpack them onto the real filesystem. electron-builder's
 # smartUnpack normally detects this, but pin it explicitly since the feature breaks
 # silently (voice input still works via the global shortcut) if the binary is missing.
+# `koffi` carries the AppKit mask bridge (and Windows fullscreen signal).
+# Liquid Glass and Mica also ship native binaries; all must load outside asar.
 asarUnpack:
   - "**/node_modules/uiohook-napi/**"
+  - "**/node_modules/koffi/**"
+  - "**/node_modules/electron-liquid-glass/**"
+  - "**/node_modules/mica-electron/**"
 # Icons for every target are derived by electron-builder from `resources/icon.png`
 # (512×512, the buildResources dir above): it emits the .ico (Windows), .icns
 # (macOS), and the Linux png set.
@@ -83,7 +88,11 @@ publish:
   provider: github
   owner: amajorai
   repo: ryu
-  # Auto-publish (not a draft): the island installers land in amajorai/ryu's matching
-  # v{version} release — the same one the desktop + binaries are mirrored into, so a
-  # single release holds every bundle for the version.
+  # The island installers land in amajorai/ryu's matching v{version} release — the
+  # same one the desktop + binaries are mirrored into, so a single release holds
+  # every bundle for the version. That release MUST already exist (mirrored by the
+  # train): release-island.yml's `preflight` job refuses to run otherwise, because
+  # with no release this setting would create a full, non-prerelease v{version}
+  # holding only Island and GitHub would make it `releases/latest`. Against an
+  # existing published release it has no effect.
   releaseType: release

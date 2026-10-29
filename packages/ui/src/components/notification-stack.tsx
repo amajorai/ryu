@@ -2,9 +2,11 @@
 
 import { ArrowUpRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useHoverCapable } from "@ryu/ui/hooks/use-hover-capable.ts";
-import { SPRING_LAYOUT } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { SPRING_LAYOUT } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { MotionStyle } from "motion/react";
 import { motion, type Transition, useReducedMotion } from "motion/react";
 import {
 	type FocusEvent,
@@ -14,6 +16,14 @@ import {
 	useRef,
 	useState,
 } from "react";
+import drawingStyles from "./notification-stack.drawing.module.css";
+
+interface NotificationCardStyle extends MotionStyle {
+	"--notification-stack-1-border-left-color"?: MotionStyle["borderLeftColor"];
+	"--notification-stack-1-grid-column"?: MotionStyle["gridColumn"];
+	"--notification-stack-1-grid-row"?: MotionStyle["gridRow"];
+	"--notification-stack-1-z-index"?: MotionStyle["zIndex"];
+}
 
 export interface NotificationStackItem {
 	accent?: string;
@@ -112,7 +122,7 @@ function NotificationCardContent({
 				<span className="flex min-w-0 items-start justify-between gap-2">
 					<span
 						className={cn(
-							"flex min-w-0 items-start gap-1.5 font-medium text-[13px] leading-snug",
+							"type-detail flex min-w-0 items-start gap-1.5 font-medium leading-snug",
 							item.muted && "text-muted-foreground",
 							classNames?.title
 						)}
@@ -128,7 +138,7 @@ function NotificationCardContent({
 					{item.trailing && (
 						<span
 							className={cn(
-								"shrink-0 text-[10px] text-muted-foreground/70 tabular-nums",
+								"type-compact shrink-0 text-muted-foreground/70 tabular-nums",
 								classNames?.trailing
 							)}
 						>
@@ -139,7 +149,7 @@ function NotificationCardContent({
 				{item.description && (
 					<span
 						className={cn(
-							"line-clamp-2 text-[11px] text-muted-foreground leading-snug",
+							"type-caption line-clamp-2 text-muted-foreground leading-snug",
 							classNames?.description
 						)}
 					>
@@ -171,6 +181,7 @@ export function NotificationStack({
 	onViewAll,
 }: NotificationStackProps) {
 	const reduce = useReducedMotion();
+	const tl = useLiteralMessages();
 	const canHover = useHoverCapable();
 	const hasFocus = useRef(false);
 	const [isExpanded, setIsExpanded] = useControllableExpanded({
@@ -283,6 +294,12 @@ export function NotificationStack({
 					{visibleItems.map((item, index) => {
 						const isPrimary = index === 0;
 						const interactive = Boolean(item.onActivate || onItemClick);
+						const notificationCardStyle: NotificationCardStyle = {
+							"--notification-stack-1-border-left-color": item.accent,
+							"--notification-stack-1-grid-column": 1,
+							"--notification-stack-1-grid-row": isExpanded ? index + 1 : 1,
+							"--notification-stack-1-z-index": visibleItems.length - index,
+						};
 						return (
 							<motion.div
 								animate={{
@@ -292,26 +309,29 @@ export function NotificationStack({
 									y: isExpanded ? 0 : index * STACK_PEEK,
 								}}
 								className={cn(
-									"relative block rounded-2xl border border-border/60 bg-background/90 px-4",
-									interactive && "cursor-pointer",
-									item.muted && "opacity-80",
-									classNames?.card
+									cn(
+										"relative block rounded-2xl border border-border/60 bg-background/90 px-4",
+										interactive && "cursor-pointer",
+										item.muted && "opacity-80",
+										classNames?.card
+									),
+									drawingStyles.notificationCard,
+									// Unlayered module rules outrank the border utilities, so the
+									// accent edge applies only to cards that set one.
+									item.accent && drawingStyles.notificationAccent
 								)}
 								initial={false}
 								key={item.id}
 								layout="position"
-								style={{
-									borderLeftColor: item.accent,
-									borderLeftWidth: item.accent ? 2 : undefined,
-									gridColumn: 1,
-									gridRow: isExpanded ? index + 1 : 1,
-									zIndex: visibleItems.length - index,
-								}}
+								style={notificationCardStyle}
 								transition={cardTransition}
 							>
 								{interactive && (
 									<button
-										aria-label={item.ariaLabel ?? `Open ${String(item.title)}`}
+										aria-label={
+											item.ariaLabel ??
+											tl("Open {title}", { title: String(item.title) })
+										}
 										className="absolute inset-0 z-0 rounded-2xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 										onClick={() => activateItem(item)}
 										type="button"
@@ -340,12 +360,22 @@ export function NotificationStack({
 					layout="position"
 					transition={transition}
 				>
-					<span className="grid size-7 shrink-0 place-items-center rounded-full bg-orange-500 font-medium text-white text-xs shadow-[inset_0_1px_2px_rgb(0_0_0/0.2),inset_0_-1px_0_rgb(255_255_255/0.16)]">
+					<span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary font-medium text-primary-foreground text-xs">
 						{items.length}
 					</span>
 					<button
 						aria-expanded={isExpanded}
-						aria-label={`${items.length} notifications. ${isExpanded ? expandedLabel : `Expand ${collapsedLabel.toLowerCase()}`}.`}
+						aria-label={
+							isExpanded
+								? tl("{count} notifications. {expandedLabel}.", {
+										count: String(items.length),
+										expandedLabel,
+									})
+								: tl("{count} notifications. Expand {collapsedLabel}.", {
+										collapsedLabel: collapsedLabel.toLowerCase(),
+										count: String(items.length),
+									})
+						}
 						className="flex items-center gap-1 rounded-lg px-1 py-1 text-left font-medium text-foreground text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 						onClick={handleFooterClick}
 						type="button"

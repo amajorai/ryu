@@ -1,0 +1,69 @@
+/* The four private blur layers retain their original fixed mask geometry. */
+.topEighth,
+.topQuarter,
+.topHalf,
+.topFull,
+.bottomEighth,
+.bottomQuarter,
+.bottomHalf,
+.bottomFull {
+	position: absolute;
+	inset: 0;
+}
+
+.topEighth {
+	-webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+	mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+}
+
+.topQuarter {
+	-webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 90%);
+	mask-image: linear-gradient(to bottom, black 70%, transparent 90%);
+}
+
+.topHalf {
+	-webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 80%);
+	mask-image: linear-gradient(to bottom, black 55%, transparent 80%);
+}
+
+.topFull {
+	-webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 70%);
+	mask-image: linear-gradient(to bottom, black 40%, transparent 70%);
+}
+
+.bottomEighth {
+	-webkit-mask-image: linear-gradient(to top, black 85%, transparent 100%);
+	mask-image: linear-gradient(to top, black 85%, transparent 100%);
+}
+
+.bottomQuarter {
+	-webkit-mask-image: linear-gradient(to top, black 70%, transparent 90%);
+	mask-image: linear-gradient(to top, black 70%, transparent 90%);
+}
+
+.bottomHalf {
+	-webkit-mask-image: linear-gradient(to top, black 55%, transparent 80%);
+	mask-image: linear-gradient(to top, black 55%, transparent 80%);
+}
+
+.bottomFull {
+	-webkit-mask-image: linear-gradient(to top, black 40%, transparent 70%);
+	mask-image: linear-gradient(to top, black 40%, transparent 70%);
+}
+
+.surface {
+	height: var(--progressive-blur-height);
+	-webkit-user-select: none;
+	user-select: none;
+	background: var(--progressive-blur-background);
+}
+.topSurface {
+	top: 0;
+}
+.bottomSurface {
+	bottom: 0;
+}
+.layer {
+	-webkit-backdrop-filter: var(--progressive-blur-filter);
+	backdrop-filter: var(--progressive-blur-filter);
+}

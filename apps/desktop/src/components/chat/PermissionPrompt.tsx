@@ -1,12 +1,18 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ToolApproval,
 	type ToolApprovalChoice,
 	ToolApprovalCode,
-} from "@ryu/ui/components/agents/tool-approval";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/agents/tool-approval.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { memo, useMemo } from "react";
+import { readPermissionToolFields } from "./permission-contract.ts";
+
+export { activePermissionSchema } from "./permission-contract.ts";
+
 import type { AcpPermissionOption } from "@/src/lib/api/acp.ts";
 
 export interface ActivePermission {
@@ -24,38 +30,17 @@ export interface PermissionPromptProps {
 	showTechnicalDetails?: boolean;
 }
 
-interface ToolCallShape {
-	fields?: ToolCallShape;
-	kind?: string;
-	locations?: { line?: number; path?: string }[];
-	rawInput?: Record<string, unknown>;
-	title?: string;
-}
-
-/** Best-effort human label for the tool the agent wants to run. */
-function toolTitle(toolCall: unknown): string {
-	const tc = toolCall as ToolCallShape | null | undefined;
-	return tc?.title ?? tc?.fields?.title ?? "run a tool";
-}
-
-/**
- * `ToolCallUpdate` carries its mutable fields behind a flattened `fields`
- * object in some agents' output and inline in others, so read through both.
- */
-function toolFields(toolCall: unknown): ToolCallShape {
-	const tc = (toolCall ?? {}) as ToolCallShape;
-	return { ...tc.fields, ...tc };
-}
-
 /** The shell command an exec-kind call wants to run, if it named one. */
-function toolCommand(fields: ToolCallShape): string | null {
+function toolCommand(
+	fields: ReturnType<typeof readPermissionToolFields>
+): string | null {
 	const raw = fields.rawInput;
 	if (!raw) {
 		return null;
 	}
 	for (const key of ["command", "cmd", "script"]) {
 		const value = raw[key];
-		if (typeof value === "string" && value.trim()) {
+		if (isNativeText(value) && value.trim()) {
 			return value;
 		}
 	}
@@ -65,8 +50,8 @@ function toolCommand(fields: ToolCallShape): string | null {
 const HIDDEN_PARAMETER_KEYS = new Set(["command", "cmd", "script"]);
 const MAX_PARAMETER_LENGTH = 200;
 
-function formatParameterValue(value: unknown): string {
-	const text = typeof value === "string" ? value : JSON.stringify(value);
+function formatParameterValue<TValue>(value: TValue): string {
+	const text = isNativeText(value) ? value : JSON.stringify(value);
 	if (!text) {
 		return "";
 	}
@@ -108,14 +93,12 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 	onRespond,
 	showTechnicalDetails = true,
 }: PermissionPromptProps) {
-	const title = useMemo(
-		() => toolTitle(permission.toolCall),
-		[permission.toolCall]
-	);
+	const tl = useLiteralMessages();
 	const fields = useMemo(
-		() => toolFields(permission.toolCall),
+		() => readPermissionToolFields(permission.toolCall),
 		[permission.toolCall]
 	);
+	const title = fields.title ?? "run a tool";
 	const command = useMemo(() => toolCommand(fields), [fields]);
 
 	const parameters = useMemo(() => {
@@ -156,8 +139,10 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 				choices={choices}
 				description={
 					showTechnicalDetails
-						? `The agent is asking to ${title}.`
-						: `Ryu wants to ${title}. Review the details before it runs.`
+						? tl("The agent is asking to {title}.", { title })
+						: tl("Ryu wants to {title}. Review the details before it runs.", {
+								title,
+							})
 				}
 				parameters={parameters}
 				question={approvalQuestion(title)}
@@ -173,9 +158,9 @@ export const PermissionPrompt = memo(function PermissionPrompt({
 						: title
 				}
 			>
-				{showTechnicalDetails && command ? (
-					<ToolApprovalCode code={command} language="bash" />
-				) : null}
+				{/* Always show the command: it is what the user is approving, and the
+				    title/description above are agent-supplied text. */}
+				{command ? <ToolApprovalCode code={command} language="bash" /> : null}
 			</ToolApproval>
 		</div>
 	);

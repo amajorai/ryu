@@ -1,3 +1,5 @@
+import { acpConfigResponseSchema } from "@ryuhq/core-client/acp.ts";
+import { z } from "zod";
 // apps/desktop/src/lib/api/acp.ts
 //
 // Typed client for Core's ACP session-config endpoints. These expose, per
@@ -13,39 +15,26 @@
 // permission prompt (when an agent in a gating mode asks to run a tool) is
 // resolved via `respondPermission`.
 
+import type {
+	AcpConfig,
+	AcpConfigOption,
+	AcpConfigSelectOption,
+} from "@ryuhq/core-client/acp.ts";
 import { type ApiTarget, request } from "./client.ts";
 
-/** A single permission/session mode the agent supports. */
-export interface AcpSessionMode {
-	description?: string | null;
-	id: string;
-	name: string;
-}
-
-/** The agent's mode set + currently active mode (from `session/new`). */
-export interface AcpSessionModeState {
-	availableModes: AcpSessionMode[];
-	currentModeId: string;
-}
-
-/** A selectable model the agent advertises (unstable ACP capability). */
-export interface AcpModelInfo {
-	description?: string | null;
-	modelId: string;
-	name: string;
-}
-
-export interface AcpSessionModelState {
-	availableModels: AcpModelInfo[];
-	currentModelId: string;
-}
-
-/** One selectable value for a `select` config option. */
-export interface AcpConfigSelectOption {
-	description?: string | null;
-	name: string;
-	value: string;
-}
+export type {
+	AcpAgentCapabilities,
+	AcpAgentSettingsSupport,
+	AcpAuthMethod,
+	AcpConfig,
+	AcpConfigOption,
+	AcpConfigSelectOption,
+	AcpModelInfo,
+	AcpPermissionOption,
+	AcpSessionMode,
+	AcpSessionModelState,
+	AcpSessionModeState,
+} from "@ryuhq/core-client/acp.ts";
 
 /**
  * A session config option. The common case (and the only `kind` Ryu surfaces a
@@ -53,66 +42,6 @@ export interface AcpConfigSelectOption {
  * `category` is a UX hint: `"mode"` | `"model"` | `"thoughtLevel"` (reasoning
  * effort) | any agent-defined string.
  */
-export interface AcpConfigOption {
-	category?: string | null;
-	currentValue?: string;
-	description?: string | null;
-	id: string;
-	name: string;
-	/** Flat list for ungrouped selects; grouped selects expose `{ options }`. */
-	options?: AcpConfigSelectOption[] | { options: AcpConfigSelectOption[] }[];
-	type?: string;
-}
-
-/**
- * An authentication method the ACP agent advertises at `session/new` — the
- * "Login with ChatGPT / Claude subscription"-style external sign-in an agent
- * needs before it can serve turns. Empty for agents that need no login.
- */
-export interface AcpAuthMethod {
-	description?: string | null;
-	id: string;
-	name: string;
-	/** Agent-defined method type (e.g. "oauth"); a UX hint, not switched on. */
-	type: string;
-}
-
-/** The agent's own advertised capabilities (ACP `agentCapabilities`). */
-export interface AcpAgentCapabilities {
-	/** Agent can warm-resume a prior session via `session/load`. */
-	loadSession?: boolean;
-	mcpCapabilities?: { http?: boolean; sse?: boolean };
-	promptCapabilities?: {
-		audio?: boolean;
-		embeddedContext?: boolean;
-		image?: boolean;
-	};
-	/**
-	 * ACP `sessionCapabilities` — which session lifecycle RPCs the agent
-	 * implements. Every member optional so an older Core that omits the key
-	 * parses unchanged; absent means "unknown", not "unsupported".
-	 *
-	 * Agents genuinely differ: captured `initialize` responses show pi-acp,
-	 * qwen-code and factory-droid advertising no `close`, which is why the
-	 * delete affordance has to read this rather than assume it.
-	 */
-	sessionCapabilities?: {
-		close?: boolean;
-		list?: boolean;
-		resume?: boolean;
-	};
-}
-
-/** The full agent-reported session config (each field null when unsupported). */
-export interface AcpConfig {
-	/** The agent's own capabilities, so the UI can gate features it supports. */
-	agentCapabilities?: AcpAgentCapabilities | null;
-	/** Sign-in methods the agent advertises (empty when none are required). */
-	authMethods?: AcpAuthMethod[] | null;
-	configOptions: AcpConfigOption[] | null;
-	models: AcpSessionModelState | null;
-	modes: AcpSessionModeState | null;
-}
 
 /** One agent-persisted session (external agents that track sessions). */
 export interface AcpSession {
@@ -130,14 +59,6 @@ export interface AcpSessionList {
 	nextCursor?: string | null;
 	sessions: AcpSession[];
 	unsupported?: boolean;
-}
-
-/** A permission option offered by the agent when it asks to run a tool. */
-export interface AcpPermissionOption {
-	/** allow_once | allow_always | reject_once | reject_always. */
-	kind: string;
-	name: string;
-	optionId: string;
 }
 
 /**
@@ -174,6 +95,33 @@ export function acpSelectionsParam(
  * agents (they have no `session/new` advertisement). Core caches per agent (and
  * per `selections`), so this is cheap to call on agent selection.
  */
+const acpAuthResultResponseCodec: z.ZodType<AcpAuthResult> = z
+	.object({
+		agentAccepted: z.boolean().optional(),
+		authenticated: z.boolean(),
+		changed: z.boolean().optional(),
+		code: z.string().optional(),
+		error: z.string().optional(),
+		nativeAccounts: z.boolean().optional(),
+		verificationRequired: z.boolean().optional(),
+		verified: z.boolean().optional(),
+	})
+	.passthrough();
+const acpSessionResponseCodec: z.ZodType<AcpSession> = z
+	.object({
+		cwd: z.string(),
+		sessionId: z.string(),
+		title: z.union([z.string(), z.null()]).optional(),
+		updatedAt: z.union([z.string(), z.null()]).optional(),
+	})
+	.passthrough();
+const acpSessionListResponseCodec: z.ZodType<AcpSessionList> = z
+	.object({
+		nextCursor: z.union([z.string(), z.null()]).optional(),
+		sessions: z.array(acpSessionResponseCodec),
+		unsupported: z.boolean().optional(),
+	})
+	.passthrough();
 export async function fetchAcpConfig(
 	target: ApiTarget,
 	agentId: string,
@@ -181,7 +129,9 @@ export async function fetchAcpConfig(
 ): Promise<AcpConfig> {
 	return await request<AcpConfig>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/acp-config${acpSelectionsParam(selections)}`
+		`/api/agents/${encodeURIComponent(agentId)}/acp-config${acpSelectionsParam(selections)}`,
+		{},
+		acpConfigResponseSchema
 	);
 }
 
@@ -195,10 +145,41 @@ export async function respondPermission(
 	requestId: string,
 	optionId: string | null
 ): Promise<{ resolved: boolean }> {
-	return await request<{ resolved: boolean }>(target, "/api/chat/permission", {
-		method: "POST",
-		body: { request_id: requestId, option_id: optionId },
-	});
+	return await request<{ resolved: boolean }>(
+		target,
+		"/api/chat/permission",
+		{
+			method: "POST",
+			body: { request_id: requestId, option_id: optionId },
+		},
+		z.object({ resolved: z.boolean() }).passthrough()
+	);
+}
+
+/**
+ * Answer a blocking Question card. `resolved: false` means no turn is waiting
+ * on it any more (it was async, timed out, or the user went away), and the
+ * caller should deliver the answer as a normal user message instead.
+ */
+export async function respondQuestion(
+	target: ApiTarget,
+	conversationId: string,
+	toolCallId: string,
+	answers: unknown[]
+): Promise<{ resolved: boolean }> {
+	return await request<{ resolved: boolean }>(
+		target,
+		"/api/chat/question",
+		{
+			method: "POST",
+			body: {
+				conversation_id: conversationId,
+				tool_call_id: toolCallId,
+				answers,
+			},
+		},
+		z.object({ resolved: z.boolean() }).passthrough()
+	);
 }
 
 /** Outcome of {@link authenticateAgent}, as OBSERVED by Core. */
@@ -209,13 +190,39 @@ export interface AcpAuthResult {
 	authenticated: boolean;
 	/** True when THIS call is what connected it (vs already being connected). */
 	changed?: boolean;
+	/**
+	 * Machine-readable outcome: `auth_verification_required` (accepted, but Core
+	 * cannot check the credential) or `native_account_login_required`.
+	 */
+	code?: string;
 	error?: string;
+	/** The agent signs in through isolated native accounts instead. */
+	nativeAccounts?: boolean;
+	/**
+	 * The agent accepted the request, but Core had no credential store to check,
+	 * so the login has to be finished (and confirmed) outside the app.
+	 */
+	verificationRequired?: boolean;
 	/**
 	 * Whether Core had ground truth to check. `false` means `authenticated` is
 	 * just the RPC result — an agent can accept the request having done nothing,
 	 * so callers must NOT word an unverified result as "signed in".
 	 */
 	verified?: boolean;
+}
+
+/**
+ * Whether the agent accepted a login that Core could not verify. That is not a
+ * failure: the vendor login may be running in a browser or terminal. It is not
+ * a sign-in either, so callers word it as "finish it there".
+ */
+export function acpAuthAwaitsVerification(result: AcpAuthResult): boolean {
+	return (
+		!result.authenticated &&
+		result.agentAccepted === true &&
+		(result.verificationRequired === true ||
+			result.code === "auth_verification_required")
+	);
 }
 
 /**
@@ -234,7 +241,8 @@ export async function authenticateAgent(
 	return await request<AcpAuthResult>(
 		target,
 		`/api/agents/${encodeURIComponent(agentId)}/authenticate`,
-		{ method: "POST", body: { method_id: methodId, provider_id: providerId } }
+		{ method: "POST", body: { method_id: methodId, provider_id: providerId } },
+		acpAuthResultResponseCodec
 	);
 }
 
@@ -250,7 +258,10 @@ export async function logoutAgent(
 	return await request<{ loggedOut: boolean; error?: string }>(
 		target,
 		`/api/agents/${encodeURIComponent(agentId)}/logout`,
-		{ method: "POST" }
+		{ method: "POST" },
+		z
+			.object({ loggedOut: z.boolean(), error: z.string().optional() })
+			.passthrough()
 	);
 }
 
@@ -261,7 +272,9 @@ export async function fetchAcpSessions(
 ): Promise<AcpSessionList> {
 	return await request<AcpSessionList>(
 		target,
-		`/api/agents/${encodeURIComponent(agentId)}/sessions`
+		`/api/agents/${encodeURIComponent(agentId)}/sessions`,
+		{},
+		acpSessionListResponseCodec
 	);
 }
 
@@ -274,7 +287,10 @@ export async function deleteAcpSession(
 	return await request<{ deleted: boolean; error?: string }>(
 		target,
 		`/api/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		z
+			.object({ deleted: z.boolean(), error: z.string().optional() })
+			.passthrough()
 	);
 }
 
@@ -288,9 +304,16 @@ export function flattenConfigOptions(
 	}
 	// Grouped form: `[{ options: [...] }, ...]`.
 	if ("options" in raw[0]) {
+		// SAFETY: The actual ACP 0.12 SessionConfigSelectOptions owner publishes
+		// homogeneous Grouped or Ungrouped arrays. This existing first-entry
+		// branch selects Grouped; TypeScript cannot refine the whole array from
+		// that entry. Keep native references and every original read unchanged.
 		return (raw as { options: AcpConfigSelectOption[] }[]).flatMap(
 			(g) => g.options
 		);
 	}
+	// SAFETY: The same actual homogeneous ACP array owner is nonempty here;
+	// the existing first-entry branch excludes Grouped. This cast returns the
+	// original Ungrouped array without reconstructing any native SDK fields.
 	return raw as AcpConfigSelectOption[];
 }

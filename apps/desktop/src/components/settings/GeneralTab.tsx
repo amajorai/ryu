@@ -30,8 +30,10 @@ import {
 	isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import { open } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { z } from "zod";
 import { listAccounts } from "@/lib/auth-client.ts";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
@@ -102,6 +104,7 @@ import {
 	isStartupRealm,
 	STARTUP_REALM_OPTIONS,
 	type StartupRealm,
+	useProductModeStore,
 } from "@/src/lib/product-mode.ts";
 import type { StartupSelectionMode } from "@/src/lib/startup-selection.ts";
 import {
@@ -114,6 +117,7 @@ import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 import { AvailabilitySettings } from "./AvailabilitySettings.tsx";
 import { LanguageSettings } from "./LanguageSettings.tsx";
 import { OpenSourceLicensesSettings } from "./OpenSourceLicensesSettings.tsx";
+import { ResumeInterruptedChatsSetting } from "./ResumeInterruptedChatsSetting.tsx";
 import { SafeModeSettings } from "./SafeModeSettings.tsx";
 import { SplitPresetSettings } from "./SplitPresetSettings.tsx";
 import {
@@ -207,10 +211,10 @@ const TAB_SWITCH_OPTIONS: { value: TabSwitchBehavior; label: string }[] = [
 	{ value: "recent", label: "Most recently used" },
 ];
 
-const TERMINAL_LOCATION_LABELS: Record<TerminalPanelLocation, string> = {
+const TERMINAL_LOCATION_LABELS = {
 	bottom: "Bottom",
 	right: "Right",
-};
+} satisfies Record<TerminalPanelLocation, string>;
 
 function KeepAwakeSetting() {
 	const { canManageDesktopLifecycle } = useAppSurface();
@@ -277,6 +281,101 @@ function KeepAwakeSetting() {
 	);
 }
 
+const hardwareAccelerationSchema = z.object({
+	active: z.boolean(),
+	enabled: z.boolean(),
+	supported: z.boolean(),
+});
+
+const HARDWARE_ACCELERATION_QUERY_KEY = ["desktop", "hardware-acceleration"];
+
+/**
+ * GPU rendering for the desktop window. The webview reads its GPU switches at
+ * launch, so the native side keeps the choice in a file applied before the first
+ * webview starts, and a change only takes effect after a restart.
+ */
+function HardwareAccelerationSetting() {
+	const queryClient = useQueryClient();
+	const statusQuery = useQuery({
+		queryKey: HARDWARE_ACCELERATION_QUERY_KEY,
+		queryFn: async () =>
+			hardwareAccelerationSchema.parse(
+				await invoke("get_hardware_acceleration")
+			),
+	});
+	const save = useMutation({
+		mutationFn: (enabled: boolean) =>
+			invoke("set_hardware_acceleration", { enabled }),
+		onSuccess: async () => {
+			await queryClient.invalidateQueries({
+				queryKey: HARDWARE_ACCELERATION_QUERY_KEY,
+			});
+		},
+		onError: (error: Error) => {
+			toast.error("Couldn't update hardware acceleration", {
+				description: error.message,
+			});
+		},
+	});
+	const restart = useMutation({
+		mutationFn: () => relaunch(),
+		onError: (error: Error) => {
+			toast.error("Couldn't restart Ryu", { description: error.message });
+		},
+	});
+
+	const status = statusQuery.data;
+	const supported = status?.supported ?? true;
+	const enabled = status?.enabled ?? true;
+	const pendingRestart = status ? status.enabled !== status.active : false;
+	let description =
+		"Use the graphics card to draw Ryu's window when available. Turn this off if you see blank windows, flickering, or rendering glitches. Takes effect after Ryu restarts.";
+	if (!supported) {
+		description =
+			"macOS always draws Ryu's window with the graphics card, so this can't be turned off here.";
+	} else if (pendingRestart) {
+		description = `Restart Ryu to turn hardware acceleration ${enabled ? "on" : "off"}.`;
+	}
+
+	// Its own group: a `SettingsGroup` reads a row's caption from its direct
+	// children's props, so inside the tray group this wrapper's description (the
+	// restart prompt, the macOS note) was silently dropped.
+	return (
+		<SettingsGroup>
+			<SettingsItem
+				actions={
+					<div className="flex items-center gap-2">
+						{pendingRestart ? (
+							<Button
+								disabled={restart.isPending}
+								onClick={() => restart.mutate()}
+								size="sm"
+								variant="ghost"
+							>
+								Restart now
+							</Button>
+						) : null}
+						<Switch
+							checked={enabled}
+							disabled={
+								!supported ||
+								statusQuery.isLoading ||
+								statusQuery.isError ||
+								save.isPending
+							}
+							id="hardware-acceleration-toggle"
+							onCheckedChange={(checked) => save.mutate(checked)}
+						/>
+					</div>
+				}
+				description={description}
+				settingsId="general.system.hardware-acceleration"
+				title="Use hardware acceleration"
+			/>
+		</SettingsGroup>
+	);
+}
+
 export function GeneralTab() {
 	const { canManageDesktopLifecycle, canUseNativeShell, isDesktop } =
 		useAppSurface();
@@ -292,8 +391,22 @@ export function GeneralTab() {
 	const tabOpenBehavior = useTabOpenBehavior();
 	const tabSwitchBehavior = useTabSwitchBehavior();
 	const startupBehavior = useStartupBehavior();
-	const { realm: startupRealm, setRealm: setStartupRealmPreference } =
-		useStartupRealm();
+	const {
+		realm: startupRealm,
+		pendingRealm: pendingStartupRealm,
+		error: startupRealmError,
+		retry: retryStartupRealm,
+		setRealm: setStartupRealmPreference,
+	} = useStartupRealm();
+	// OS is rolled out by flag. While it is off, offer it only if it is the
+	// saved choice, so the select never shows a value it cannot list.
+	const osAccess = useProductModeStore((state) => state.osAccess);
+	const startupRealmOptions = STARTUP_REALM_OPTIONS.filter(
+		(option) =>
+			option.value !== "os" ||
+			osAccess ||
+			(pendingStartupRealm ?? startupRealm) === "os"
+	);
 	const {
 		preferences: startupSelection,
 		setDefaultAccountId,
@@ -328,8 +441,11 @@ export function GeneralTab() {
 		TAB_UNLOAD_MINUTES_KEY,
 		DEFAULT_TAB_UNLOAD_MINUTES
 	);
-	const [projectlessTaskFolder, setProjectlessTaskFolder] =
-		useProjectlessTaskFolder();
+	const [
+		projectlessTaskFolder,
+		setProjectlessTaskFolder,
+		hasCustomProjectlessTaskFolder,
+	] = useProjectlessTaskFolder();
 	const [showBottomPanelToggle, setShowBottomPanelToggle] =
 		useShowBottomPanelToggle();
 	const [terminalPanelLocation, setTerminalPanelLocationPreference] =
@@ -443,8 +559,9 @@ export function GeneralTab() {
 				multiple: false,
 				title: "Choose projectless task folder",
 			});
-			if (typeof selected === "string") {
-				setProjectlessTaskFolder(selected);
+			const path = z.string().safeParse(selected);
+			if (path.success) {
+				setProjectlessTaskFolder(path.data);
 			}
 		} catch (error) {
 			toast.error("Couldn't choose the projectless task folder", {
@@ -527,32 +644,32 @@ export function GeneralTab() {
 									>
 										Change
 									</Button>
-									{projectlessTaskFolder ? (
+									{hasCustomProjectlessTaskFolder ? (
 										<Button
-											aria-label="Clear projectless task folder"
+											aria-label="Reset projectless task folder"
 											onClick={() => setProjectlessTaskFolder(null)}
 											size="sm"
 											variant="ghost"
 										>
-											Clear
+											Reset
 										</Button>
 									) : null}
 								</div>
 							}
-							description="New chats without an explicitly selected project use this folder as their local working directory. Existing chats and selected projects are unchanged."
+							description="Defaults to the OS Documents folder under Ryu/Projects. New chats without an explicitly selected project use this folder as their local working directory. Existing chats and selected projects are unchanged."
 							settingsId="general.on-startup.projectless-task-folder"
 							title="Projectless task folder"
 						/>
 					) : null}
 					<SettingsItem
 						actions={
-							<Select
+							<Select<StartupBehavior>
 								items={STARTUP_OPTIONS}
-								onValueChange={(v) => setStartupBehavior(v as StartupBehavior)}
+								onValueChange={(v) => setStartupBehavior(v)}
 								value={startupBehavior}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="startup-behavior-select"
 								>
 									<SelectValue />
@@ -572,32 +689,49 @@ export function GeneralTab() {
 					{isDesktop ? (
 						<SettingsItem
 							actions={
-								<Select
-									items={STARTUP_REALM_OPTIONS}
-									onValueChange={(value) => {
-										if (isStartupRealm(value)) {
-											setStartupRealmPreference(value);
-										}
-									}}
-									value={startupRealm}
-								>
-									<SelectTrigger
-										className="h-8 w-56 flex-shrink-0 text-sm"
-										id="startup-realm-select"
+								<div className="flex flex-col items-end gap-2">
+									<Select
+										items={startupRealmOptions}
+										onValueChange={(value) => {
+											if (isStartupRealm(value)) {
+												setStartupRealmPreference(value);
+											}
+										}}
+										value={pendingStartupRealm ?? startupRealm}
 									>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										{STARTUP_REALM_OPTIONS.map((option) => (
-											<SelectItem
-												key={option.value}
-												value={option.value satisfies StartupRealm}
+										<SelectTrigger
+											className="h-8 w-56 shrink-0"
+											id="startup-realm-select"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{startupRealmOptions.map((option) => (
+												<SelectItem
+													key={option.value}
+													value={option.value satisfies StartupRealm}
+												>
+													{option.label}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+									{startupRealmError ? (
+										<div className="flex max-w-80 flex-col items-end gap-2">
+											<p className="text-destructive text-sm" role="alert">
+												{startupRealmError} Your selected choice has not been
+												confirmed. Retry to save it.
+											</p>
+											<Button
+												onClick={retryStartupRealm}
+												size="sm"
+												variant="outline"
 											>
-												{option.label}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
+												Retry saving startup realm
+											</Button>
+										</div>
+									) : null}
+								</div>
 							}
 							description="Choose which realm opens when Ryu launches. Last used remembers the realm you selected most recently; new users start in Bot."
 							settingsId="general.on-startup.realm"
@@ -606,15 +740,13 @@ export function GeneralTab() {
 					) : null}
 					<SettingsItem
 						actions={
-							<Select
+							<Select<StartupSelectionMode>
 								items={STARTUP_SELECTION_OPTIONS}
-								onValueChange={(value) =>
-									setStartupSelectionMode(value as StartupSelectionMode)
-								}
+								onValueChange={(value) => setStartupSelectionMode(value)}
 								value={startupSelection.mode}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="startup-selection-mode-select"
 								>
 									<SelectValue />
@@ -652,7 +784,7 @@ export function GeneralTab() {
 								value={startupDefaultAccountValue}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="startup-default-account-select"
 								>
 									<SelectValue />
@@ -689,7 +821,7 @@ export function GeneralTab() {
 								value={startupDefaultNodeValue}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="startup-default-node-select"
 								>
 									<SelectValue />
@@ -734,15 +866,13 @@ export function GeneralTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<TabSwitchBehavior>
 								items={TAB_SWITCH_OPTIONS}
-								onValueChange={(v) =>
-									setTabSwitchBehavior(v as TabSwitchBehavior)
-								}
+								onValueChange={(v) => setTabSwitchBehavior(v)}
 								value={tabSwitchBehavior}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="tab-switch-behavior-select"
 								>
 									<SelectValue />
@@ -761,13 +891,13 @@ export function GeneralTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<TabLayout>
 								items={TAB_LAYOUT_OPTIONS}
-								onValueChange={(value) => setTabLayout(value as TabLayout)}
+								onValueChange={(value) => setTabLayout(value)}
 								value={tabLayout}
 							>
 								<SelectTrigger
-									className="h-8 w-52 flex-shrink-0 text-sm"
+									className="h-8 w-52 shrink-0"
 									id="tab-layout-select"
 								>
 									<SelectValue />
@@ -828,7 +958,7 @@ export function GeneralTab() {
 								value={String(tabUnloadMinutes)}
 							>
 								<SelectTrigger
-									className="h-8 w-40 flex-shrink-0 text-sm"
+									className="h-8 w-40 shrink-0"
 									id="tab-unload-select"
 								>
 									<SelectValue />
@@ -914,6 +1044,7 @@ export function GeneralTab() {
 						description="Automatically import agent setup instructions (AGENTS.md / CLAUDE.md) from your Claude Code, Cursor, and Codex config folders, so imported projects stay in sync. Only instructions are auto-imported — skills, MCP servers, and plugins are always imported explicitly from the Import setup dialog."
 						title="Auto-import agent setup"
 					/>
+					<ResumeInterruptedChatsSetting />
 					<SettingsItem
 						actions={
 							<Select
@@ -930,7 +1061,7 @@ export function GeneralTab() {
 								value={composerSendShortcut}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="composer-send-shortcut-select"
 								>
 									<SelectValue />
@@ -952,13 +1083,13 @@ export function GeneralTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<QueueDrainMode>
 								items={QUEUE_DRAIN_OPTIONS}
-								onValueChange={(v) => setQueueDrainMode(v as QueueDrainMode)}
+								onValueChange={(v) => setQueueDrainMode(v)}
 								value={queueDrainMode}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="queue-drain-mode-select"
 								>
 									<SelectValue />
@@ -987,7 +1118,7 @@ export function GeneralTab() {
 								value={composerSelectionApplyMode}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="composer-selection-apply-mode-select"
 								>
 									<SelectValue />
@@ -1019,8 +1150,8 @@ export function GeneralTab() {
 					<SettingsItem
 						actions={
 							<ToggleGroup
+								appearance="segmented"
 								aria-label="Default terminal location"
-								className="rounded-lg bg-muted/60 p-0.5"
 								onValueChange={(values: string[]) => {
 									const value = values[0];
 									if (value === "bottom" || value === "right") {
@@ -1033,7 +1164,7 @@ export function GeneralTab() {
 							>
 								{TERMINAL_PANEL_LOCATION_VALUES.map((value) => (
 									<ToggleGroupItem
-										className="h-7 px-3 text-xs aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+										density="segmented"
 										key={value}
 										value={value}
 									>
@@ -1058,7 +1189,7 @@ export function GeneralTab() {
 								value={terminalShell}
 							>
 								<SelectTrigger
-									className="h-8 w-56 flex-shrink-0 text-sm"
+									className="h-8 w-56 shrink-0"
 									id="terminal-shell-select"
 								>
 									<SelectValue />
@@ -1103,7 +1234,7 @@ export function GeneralTab() {
 							value={defaultFileOpener}
 						>
 							<SelectTrigger
-								className="h-8 w-56 flex-shrink-0 text-sm"
+								className="h-8 w-56 shrink-0"
 								id="default-file-opener-select"
 							>
 								<SelectValue />
@@ -1184,6 +1315,7 @@ export function GeneralTab() {
 						title="Show in menu bar"
 					/>
 				</SettingsGroup>
+				<HardwareAccelerationSetting />
 				<KeepAwakeSetting />
 			</SettingsSection>
 		</>

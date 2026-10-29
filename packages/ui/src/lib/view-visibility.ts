@@ -6,7 +6,7 @@ let stop: (() => void) | undefined;
 
 export function isViewVisible(): boolean {
 	return (
-		typeof document === "undefined" ||
+		globalThis.document === undefined ||
 		(document.visibilityState !== "hidden" && intersects)
 	);
 }
@@ -14,7 +14,7 @@ export function isViewVisible(): boolean {
 /** Includes CSS-hidden sandboxed frames without reading their parent document. */
 export function subscribeViewVisibility(listener: () => void): () => void {
 	listeners.add(listener);
-	if (!stop && typeof document !== "undefined") {
+	if (!stop && globalThis.document !== undefined) {
 		const notify = (force = false) => {
 			const visible = isViewVisible();
 			if (visible === lastVisible && !force) {
@@ -30,7 +30,7 @@ export function subscribeViewVisibility(listener: () => void): () => void {
 		document.addEventListener("visibilitychange", onDocumentVisibility);
 		let observer: IntersectionObserver | undefined;
 		if (
-			typeof IntersectionObserver !== "undefined" &&
+			globalThis.IntersectionObserver !== undefined &&
 			window.parent !== window
 		) {
 			observer = new IntersectionObserver((entries) => {

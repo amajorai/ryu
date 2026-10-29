@@ -1,13 +1,22 @@
+import { z } from "zod";
+
 /**
  * The Ryu-side ceiling for a connected account. Provider OAuth scopes and
  * Gateway grants remain separate; this is the choice the account owner makes
  * about what a connected MCP or Composio account may do through Ryu.
  */
-export type ConnectionAccessLevel =
-	| "risk_based"
-	| "read_only"
-	| "write"
-	| "full";
+export const connectionAccessLevelSchema = z.enum([
+	"risk_based",
+	"read_only",
+	"write",
+	"full",
+]);
+export type ConnectionAccessLevel = z.output<
+	typeof connectionAccessLevelSchema
+>;
+type ConnectionAccessInput = Parameters<
+	typeof connectionAccessLevelSchema.parse
+>[0];
 
 export const DEFAULT_CONNECTION_ACCESS_LEVEL: ConnectionAccessLevel =
 	"risk_based";
@@ -49,18 +58,12 @@ export const CONNECTION_ACCESS_OPTIONS: readonly ConnectionAccessOption[] = [
 	},
 ];
 
-const ACCESS_LEVELS = new Set<ConnectionAccessLevel>(
-	CONNECTION_ACCESS_OPTIONS.map((option) => option.id)
-);
-
-/** Normalize a wire or persisted value without ever widening unknown input. */
+/** Decode a persisted/provider policy before applying the established fallback. */
 export function normalizeConnectionAccessLevel(
-	value: unknown
+	value: ConnectionAccessInput
 ): ConnectionAccessLevel {
-	return typeof value === "string" &&
-		ACCESS_LEVELS.has(value as ConnectionAccessLevel)
-		? (value as ConnectionAccessLevel)
-		: DEFAULT_CONNECTION_ACCESS_LEVEL;
+	const parsed = connectionAccessLevelSchema.safeParse(value);
+	return parsed.success ? parsed.data : DEFAULT_CONNECTION_ACCESS_LEVEL;
 }
 
 export function connectionAccessOption(

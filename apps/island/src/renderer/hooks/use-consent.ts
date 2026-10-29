@@ -7,11 +7,7 @@ import type { ConsentPatch, ConsentState } from "../../shared/ipc.ts";
  * while `contextRead` or `proactive` is still unanswered) so the first-run card
  * can decide whether to show.
  */
-export function useConsent(): {
-	consent: ConsentState | null;
-	needsPrompt: boolean;
-	setConsent: (patch: ConsentPatch) => Promise<void>;
-} {
+export function useConsent() {
 	const [consent, setConsentState] = useState<ConsentState | null>(null);
 
 	useEffect(() => {

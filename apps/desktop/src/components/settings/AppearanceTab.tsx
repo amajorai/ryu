@@ -8,6 +8,7 @@ import {
 	FloppyDiskIcon,
 	Folder01Icon,
 	GitCompareIcon,
+	Layers01Icon,
 	Share08Icon,
 	SparklesIcon,
 	TextFontIcon,
@@ -17,21 +18,21 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { PatchDiff } from "@pierre/diffs/react";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { SettingsSubpages } from "@ryu/blocks/desktop/settings-nav.tsx";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@ryu/ui/components/collapsible";
+} from "@ryu/ui/components/collapsible.tsx";
 import {
 	ColorPicker,
 	ColorPickerContent,
 	ColorPickerPanel,
 	ColorPickerTrigger,
-} from "@ryu/ui/components/color-picker";
-import { Input } from "@ryu/ui/components/input";
-import { RangeSlider } from "@ryu/ui/components/motion/range-slider";
-import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid";
+} from "@ryu/ui/components/color-picker.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { RangeSlider } from "@ryu/ui/components/motion/range-slider.tsx";
+import { FluidSlider } from "@ryu/ui/components/motion/range-slider-fluid.tsx";
 import {
 	Select,
 	SelectContent,
@@ -41,14 +42,15 @@ import {
 	SelectSeparator,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
+} from "@ryu/ui/components/select.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { Switch } from "@ryu/ui/components/switch";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useBotTerminology } from "@ryu/ui/hooks/use-bot-terminology.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useTheme } from "next-themes";
 import type { CSSProperties } from "react";
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import {
 	getCurrentSeason,
 	getSeasonDisplayEmoji,
@@ -108,7 +110,7 @@ import { usePendingSubpage } from "@/src/hooks/useSettingSubpage.ts";
 import { useSidebarChatPreview } from "@/src/hooks/useSidebarChatPreview.ts";
 import { useSidebarGroupedNav } from "@/src/hooks/useSidebarGroupedNav.ts";
 import {
-	type SidebarMode,
+	sidebarModeSchema,
 	useSidebarMode,
 } from "@/src/hooks/useSidebarMode.ts";
 import { useSidebarModes } from "@/src/hooks/useSidebarModes.ts";
@@ -170,6 +172,8 @@ import {
 	TREE_DARK_THEMES,
 	TREE_LIGHT_THEMES,
 } from "@/src/lib/pierre-themes.ts";
+import { isRyuBot } from "@/src/lib/product.ts";
+import { useProductModeStore } from "@/src/lib/product-mode.ts";
 import {
 	type CustomTokens,
 	customTokensToVariant,
@@ -193,7 +197,9 @@ import {
 	type ToolDetailValue,
 	toolDetailStepIndex,
 } from "@/src/lib/tool-detail-ladder.ts";
+import appearanceStyles from "./appearance.module.css";
 import { BackgroundCustomizationSettings } from "./BackgroundCustomizationSettings.tsx";
+import { InterfaceSettingsPanel } from "./InterfaceSettingsPanel.tsx";
 import { LanguageSettings } from "./LanguageSettings.tsx";
 import {
 	SettingsCard,
@@ -202,6 +208,7 @@ import {
 	SettingsSection,
 } from "./shared/settings-items.tsx";
 import { TimezoneSetting } from "./TimezoneSetting.tsx";
+import { WallpaperSetting } from "./WallpaperSetting.tsx";
 
 const MODES = [
 	{
@@ -221,7 +228,10 @@ const MODES = [
 	},
 ] as const;
 
-const COLOR_FIELDS: Array<{ key: keyof CustomTokens; label: string }> = [
+const COLOR_FIELDS: Array<{
+	key: Exclude<keyof CustomTokens, "ring">;
+	label: string;
+}> = [
 	{ key: "background", label: "Background" },
 	{ key: "foreground", label: "Foreground" },
 	{ key: "primary", label: "Primary" },
@@ -249,9 +259,6 @@ const PRIMARY_PRESETS: Array<{
 	{ name: "rose", label: "Rose", light: "#e11d48", dark: "#fb7185" },
 	{ name: "neutral", label: "Neutral", light: "#18181b", dark: "#fafafa" },
 ];
-
-const CUSTOM_SWATCH_GRADIENT =
-	"conic-gradient(from 0deg, #ef4444, #f59e0b, #10b981, #3b82f6, #8b5cf6, #ef4444)";
 
 const OKLCH_RE = /oklch\(\s*([\d.]+%?)\s+([\d.]+)\s+([\d.]+)/;
 const HEX_6_RE = /^#[0-9a-fA-F]{6}$/;
@@ -357,6 +364,32 @@ function initTokens(variantId: string): CustomTokens {
 	return variantToCustomTokens(variant);
 }
 
+interface AppearanceTreePreviewStyle extends CSSProperties {
+	"--appearance-tree-background"?: string;
+	"--appearance-tree-border"?: string;
+	"--appearance-tree-foreground"?: string;
+	"--appearance-tree-scheme"?: string;
+	"--trees-theme-focus-ring"?: string;
+	"--trees-theme-git-added-fg"?: string;
+	"--trees-theme-git-deleted-fg"?: string;
+	"--trees-theme-git-modified-fg"?: string;
+	"--trees-theme-input-bg"?: string;
+	"--trees-theme-input-border"?: string;
+	"--trees-theme-list-active-selection-bg"?: string;
+	"--trees-theme-list-active-selection-fg"?: string;
+	"--trees-theme-list-hover-bg"?: string;
+	"--trees-theme-scrollbar-thumb"?: string;
+	"--trees-theme-sidebar-bg"?: string;
+	"--trees-theme-sidebar-border"?: string;
+	"--trees-theme-sidebar-fg"?: string;
+	"--trees-theme-sidebar-header-fg"?: string;
+}
+
+interface AppearancePaintStyle extends CSSProperties {
+	"--appearance-fill"?: string;
+	"--appearance-font"?: string;
+}
+
 function PresetSwatch({
 	bg,
 	surface,
@@ -366,14 +399,33 @@ function PresetSwatch({
 	surface: string;
 	primary: string;
 }) {
+	const backgroundStyle: AppearancePaintStyle = { "--appearance-fill": bg };
+	const surfaceStyle: AppearancePaintStyle = { "--appearance-fill": surface };
+	const primaryStyle: AppearancePaintStyle = { "--appearance-fill": primary };
+
 	return (
 		<span
-			className="inline-flex flex-shrink-0 flex-col overflow-hidden rounded border border-border/60"
-			style={{ width: 32, height: 20 }}
+			className={cn(
+				"inline-flex shrink-0 flex-col overflow-hidden rounded border border-border/60",
+				appearanceStyles.swatchFrame
+			)}
 		>
-			<span className="block flex-1" style={{ backgroundColor: bg }} />
-			<span className="block" style={{ backgroundColor: surface, height: 5 }} />
-			<span className="block" style={{ backgroundColor: primary, height: 4 }} />
+			<span
+				className={cn("block flex-1", appearanceStyles.fill)}
+				style={backgroundStyle}
+			/>
+			<span
+				className={cn("block", appearanceStyles.swatchSurface)}
+				style={surfaceStyle}
+			/>
+			<span
+				className={cn(
+					"block",
+					appearanceStyles.fill,
+					appearanceStyles.swatchPrimary
+				)}
+				style={primaryStyle}
+			/>
 		</span>
 	);
 }
@@ -398,11 +450,11 @@ function PresetSelectItem({ variant }: { variant: ThemeVariant }) {
 // themes that arrived with a marketplace plugin (`contributes.themes`); "Built-in"
 // is the shipped set — named for provenance, matching how VS Code and Zed label the
 // bundled half of their theme lists.
-const PRESET_GROUP_LABELS: Record<keyof GroupedVariants, string> = {
+const PRESET_GROUP_LABELS = {
 	custom: "My themes",
 	plugin: "Installed",
 	builtin: "Built-in",
-};
+} satisfies Record<keyof GroupedVariants, string>;
 
 const PRESET_GROUP_ORDER = ["custom", "plugin", "builtin"] as const;
 
@@ -486,7 +538,7 @@ function ColorField({
 	return (
 		<div className="flex items-center gap-3">
 			<label
-				className="w-24 flex-shrink-0 text-muted-foreground text-xs"
+				className="w-24 shrink-0 text-muted-foreground text-xs"
 				htmlFor={`${mode}-${fieldKey}`}
 			>
 				{label}
@@ -498,9 +550,10 @@ function ColorField({
 					value={hexVal}
 				>
 					<ColorPickerTrigger
-						className="flex h-7 flex-1 cursor-pointer items-center justify-center rounded border border-border px-2 font-mono text-xs transition-opacity hover:opacity-90"
+						appearance="theme-field"
+						className="h-7 flex-1"
 						id={`${mode}-${fieldKey}`}
-						style={{ backgroundColor: hexVal, color: textColor }}
+						palette={{ fillHex: hexVal, foregroundHex: textColor }}
 					>
 						{hexVal}
 					</ColorPickerTrigger>
@@ -532,25 +585,29 @@ function PrimaryColorField({
 
 	return (
 		<div className="flex items-start gap-3">
-			<span className="w-24 flex-shrink-0 pt-1 text-muted-foreground text-xs">
+			<span className="w-24 shrink-0 pt-1 text-muted-foreground text-xs">
 				Primary
 			</span>
 			<div className="flex flex-1 flex-wrap items-center gap-1.5">
 				{PRIMARY_PRESETS.map((p) => {
 					const swatch = mode === "light" ? p.light : p.dark;
 					const selected = swatch.toLowerCase() === hexVal;
+					const swatchStyle: AppearancePaintStyle = {
+						"--appearance-fill": swatch,
+					};
 					return (
 						<button
 							aria-label={`Set primary to ${p.label}`}
 							className={cn(
-								"size-6 rounded-md border-2 transition-all hover:scale-105",
+								"size-6 rounded-md border-2 transition-[scale,border-color] hover:scale-105 motion-reduce:transition-none",
+								appearanceStyles.fill,
 								selected
 									? "border-ring ring-2 ring-ring ring-offset-1 ring-offset-background"
 									: "border-border hover:border-ring/50"
 							)}
 							key={p.name}
 							onClick={() => onChange("primary", swatch)}
-							style={{ backgroundColor: swatch }}
+							style={swatchStyle}
 							title={p.label}
 							type="button"
 						/>
@@ -562,16 +619,12 @@ function PrimaryColorField({
 					value={hexVal}
 				>
 					<ColorPickerTrigger
+						appearance="theme-swatch"
 						aria-label="Custom primary color"
-						className={cn(
-							"flex size-6 cursor-pointer items-center justify-center rounded-md border-2 transition-all hover:scale-105",
-							matchesPreset
-								? "border-border hover:border-ring/50"
-								: "border-ring ring-2 ring-ring ring-offset-1 ring-offset-background"
-						)}
-						style={{
-							background: matchesPreset ? CUSTOM_SWATCH_GRADIENT : hexVal,
-						}}
+						className="size-6"
+						palette={{ fillHex: hexVal }}
+						selected={!matchesPreset}
+						spectrum={matchesPreset}
 						title="Custom color"
 					/>
 					<ColorPickerContent className="z-50">
@@ -646,7 +699,7 @@ function ThemePanel({
 						onValueChange={onSelectPreset}
 						value={dirty ? "" : selectedId}
 					>
-						<SelectTrigger className="h-9 w-full text-sm">
+						<SelectTrigger className="h-9 w-full">
 							{dirty ? (
 								<span className="flex items-center gap-2">
 									<PresetSwatch
@@ -686,7 +739,7 @@ function ThemePanel({
 						<>
 							<Button
 								aria-label={`Share ${selected?.label ?? "theme"}`}
-								className="h-9 w-9 flex-shrink-0"
+								className="h-9 w-9 shrink-0"
 								onClick={() => selected && shareTheme(selected)}
 								size="icon"
 								title="Copy a publishable plugin manifest for this theme"
@@ -696,7 +749,7 @@ function ThemePanel({
 							</Button>
 							<Button
 								aria-label={`Delete ${selected?.label ?? "theme"}`}
-								className="h-9 w-9 flex-shrink-0"
+								className="h-9 w-9 shrink-0"
 								onClick={() => setConfirmDeleteId(selectedId)}
 								size="icon"
 								title={`Delete ${selected?.label ?? "theme"}`}
@@ -713,20 +766,18 @@ function ThemePanel({
 							Delete “{selected?.label}”?
 						</span>
 						<Button
-							className="h-7 px-2 text-xs"
 							onClick={() => {
 								setConfirmDeleteId(null);
 								onDeletePreset(selectedId);
 							}}
-							size="sm"
+							size="dense"
 							variant="destructive"
 						>
 							Delete
 						</Button>
 						<Button
-							className="h-7 px-2 text-xs"
 							onClick={() => setConfirmDeleteId(null)}
-							size="sm"
+							size="dense"
 							variant="ghost"
 						>
 							Cancel
@@ -760,20 +811,15 @@ function ThemePanel({
 			{dirty && !saveDialogOpen && (
 				<div className="flex gap-2">
 					<Button
-						className="h-7 flex-1 text-xs"
+						className="flex-1"
 						onClick={onSaveClick}
-						size="sm"
+						size="compact"
 						variant="default"
 					>
 						<HugeiconsIcon className="mr-1" icon={FloppyDiskIcon} size={12} />
 						Save as preset
 					</Button>
-					<Button
-						className="h-7 text-xs"
-						onClick={onDiscardClick}
-						size="sm"
-						variant="ghost"
-					>
+					<Button onClick={onDiscardClick} size="compact" variant="ghost">
 						<HugeiconsIcon className="mr-1" icon={Cancel01Icon} size={12} />
 						Discard
 					</Button>
@@ -783,8 +829,9 @@ function ThemePanel({
 			{saveDialogOpen && (
 				<div className="flex items-center gap-2">
 					<Input
+						aria-label="Preset name"
 						autoFocus
-						className="h-7 flex-1 text-xs"
+						className="flex-1"
 						onChange={(e) => onSaveNameChange(e.target.value)}
 						onKeyDown={(e) => {
 							if (e.key === "Enter") {
@@ -794,24 +841,19 @@ function ThemePanel({
 								onSaveCancel();
 							}
 						}}
-						placeholder="Preset name..."
+						placeholder="Preset name…"
+						size="dense"
 						value={saveName}
 					/>
 					<Button
-						className="h-7 px-2 text-xs"
 						disabled={!saveName.trim()}
 						onClick={onSaveConfirm}
-						size="sm"
+						size="dense"
 						variant="default"
 					>
 						Save
 					</Button>
-					<Button
-						className="h-7 px-2 text-xs"
-						onClick={onSaveCancel}
-						size="sm"
-						variant="ghost"
-					>
+					<Button onClick={onSaveCancel} size="dense" variant="ghost">
 						Cancel
 					</Button>
 				</div>
@@ -850,14 +892,20 @@ function ToolDetailSlider({
 	return (
 		<div className={cn("flex w-[220px] flex-col gap-1.5", LEVEL_RAMP_CLASS)}>
 			<div className="flex items-center justify-end">
-				<span className="truncate text-foreground text-xs">{activeLabel}</span>
+				<span className="truncate text-foreground text-xs" title={activeLabel}>
+					{activeLabel}
+				</span>
 			</div>
 			<RangeSlider
 				aria-label="Detail level"
 				className="h-8"
 				fillColor={levelFillColor(step, TOOL_DETAIL_STEPS.length)}
+				// Announce what the caption shows: a Custom mix parks the thumb on
+				// the nearest level, but that level is not the user's setting.
 				formatValueText={(v) =>
-					TOOL_DETAIL_STEPS[Math.round(v)]?.label ?? String(v)
+					preset === "custom"
+						? activeLabel
+						: (TOOL_DETAIL_STEPS[Math.round(v)]?.label ?? String(v))
 				}
 				max={TOOL_DETAIL_STEPS.length - 1}
 				min={0}
@@ -869,7 +917,7 @@ function ToolDetailSlider({
 				{TOOL_DETAIL_STEPS.map((s, i) => (
 					<span
 						className={cn(
-							"flex-1 truncate text-[10px] leading-none",
+							"type-compact flex-1 truncate leading-none",
 							i === 0 && "text-left",
 							i === TOOL_DETAIL_STEPS.length - 1 && "text-right",
 							i > 0 && i < TOOL_DETAIL_STEPS.length - 1 && "text-center",
@@ -878,6 +926,7 @@ function ToolDetailSlider({
 								: "text-muted-foreground/70"
 						)}
 						key={s.id}
+						title={s.label}
 					>
 						{s.label}
 					</span>
@@ -899,7 +948,9 @@ function NotificationLayoutSlider({
 	return (
 		<div className={cn("flex w-[220px] flex-col gap-1.5", LEVEL_RAMP_CLASS)}>
 			<div className="flex items-center justify-end">
-				<span className="truncate text-foreground text-xs">{activeLabel}</span>
+				<span className="truncate text-foreground text-xs" title={activeLabel}>
+					{activeLabel}
+				</span>
 			</div>
 			<RangeSlider
 				aria-label="Notification layout"
@@ -918,7 +969,7 @@ function NotificationLayoutSlider({
 				{NOTIFICATION_LAYOUT_STEPS.map((layout, index) => (
 					<span
 						className={cn(
-							"flex-1 truncate text-[10px] leading-none",
+							"type-compact flex-1 truncate leading-none",
 							index === 0 && "text-left",
 							index === NOTIFICATION_LAYOUT_STEPS.length - 1 && "text-right",
 							index > 0 &&
@@ -927,6 +978,7 @@ function NotificationLayoutSlider({
 							index === step ? "text-foreground" : "text-muted-foreground/70"
 						)}
 						key={layout.id}
+						title={layout.label}
 					>
 						{layout.label}
 					</span>
@@ -935,6 +987,13 @@ function NotificationLayoutSlider({
 		</div>
 	);
 }
+
+// Where the chat model & agent picker sits. Passed to the Select as `items` so
+// the closed trigger names the stored choice instead of printing its raw value.
+const CHAT_PICKER_PLACEMENT_OPTIONS = [
+	{ value: "composer", label: "In composer" },
+	{ value: "tab-bar", label: "In tab bar actions tray" },
+] as const;
 
 // Diff viewer (`@pierre/diffs`) option lists for the Appearance selects.
 const DIFF_STYLE_OPTIONS = [
@@ -1017,15 +1076,23 @@ const FILE_TREE_PREVIEW_PATHS = [
 function FileTreePreview({
 	prefs,
 	style,
+	className,
 }: {
 	prefs: FileTreePrefs;
 	style?: CSSProperties;
+	className?: string;
 }) {
 	const { model } = useFileTree({
 		...fileTreePrefsToOptions(prefs),
-		paths: FILE_TREE_PREVIEW_PATHS as unknown as string[],
+		paths: [...FILE_TREE_PREVIEW_PATHS],
 	});
-	return <FileTree className="h-full w-full" model={model} style={style} />;
+	return (
+		<FileTree
+			className={cn("h-full w-full", className)}
+			model={model}
+			style={style}
+		/>
+	);
 }
 
 const SEASON_OPTIONS = [
@@ -1034,7 +1101,7 @@ const SEASON_OPTIONS = [
 		value: s.id,
 		label: `${getSeasonDisplayEmoji(s)} ${s.label}`,
 	})),
-];
+] satisfies { value: SeasonalThemeSetting; label: string }[];
 
 /**
  * The seasonal titlebar effects: the on/off switch, which season to show, and a
@@ -1087,15 +1154,18 @@ function SeasonalEffectsSettings() {
 				<SettingsItem
 					actions={
 						<div className="flex items-center gap-2">
-							<Select
+							<Select<SeasonalThemeSetting>
 								items={SEASON_OPTIONS}
-								onValueChange={(v) =>
-									setSeasonalThemeSetting(v as SeasonalThemeSetting)
-								}
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
+									setSeasonalThemeSetting(v);
+								}}
 								value={seasonSetting}
 							>
 								<SelectTrigger
-									className="h-8 w-56 text-sm"
+									className="h-8 w-56"
 									disabled={!(animationsEnabled && seasonalEffects)}
 								>
 									<SelectValue />
@@ -1134,6 +1204,10 @@ export function AppearanceTab() {
 	// page to open first.
 	const pendingSubpage = usePendingSubpage("appearance");
 	const { isDesktop } = useAppSurface();
+	// Workspace interfaces are what the Interfaces sub-page adjusts; without OS
+	// access (or in the bot build) there is nothing to open, so it is hidden.
+	const osAccess = useProductModeStore((state) => state.osAccess);
+	const showInterfaces = osAccess && !isRyuBot();
 	const { theme, setTheme } = useTheme();
 	// next-themes' setter lives in React; bind it so registry reset can call it.
 	useEffect(() => {
@@ -1240,6 +1314,59 @@ export function AppearanceTab() {
 	const diffPrefs = useDiffViewPrefs();
 	const fileTreePrefs = useFileTreePrefs();
 	const fileTreeThemeStyles = useFileTreeThemeStyles(fileTreePrefs);
+	// Preserve every custom property and all four native layout fields published
+	// by the installed @pierre/trees themeToTreeStyles owner.
+	const treeThemeValues = new Map(
+		Object.entries(
+			z.record(z.string(), z.string()).parse(fileTreeThemeStyles ?? {})
+		)
+	);
+	const treePreviewStyle: AppearanceTreePreviewStyle = {
+		"--appearance-tree-scheme": treeThemeValues.get("colorScheme"),
+		"--appearance-tree-background": treeThemeValues.get("backgroundColor"),
+		"--appearance-tree-foreground": treeThemeValues.get("color"),
+		"--appearance-tree-border": treeThemeValues.get("borderColor"),
+		"--trees-theme-focus-ring": treeThemeValues.get("--trees-theme-focus-ring"),
+		"--trees-theme-git-added-fg": treeThemeValues.get(
+			"--trees-theme-git-added-fg"
+		),
+		"--trees-theme-git-deleted-fg": treeThemeValues.get(
+			"--trees-theme-git-deleted-fg"
+		),
+		"--trees-theme-git-modified-fg": treeThemeValues.get(
+			"--trees-theme-git-modified-fg"
+		),
+		"--trees-theme-input-bg": treeThemeValues.get("--trees-theme-input-bg"),
+		"--trees-theme-input-border": treeThemeValues.get(
+			"--trees-theme-input-border"
+		),
+		"--trees-theme-list-active-selection-bg": treeThemeValues.get(
+			"--trees-theme-list-active-selection-bg"
+		),
+		"--trees-theme-list-active-selection-fg": treeThemeValues.get(
+			"--trees-theme-list-active-selection-fg"
+		),
+		"--trees-theme-list-hover-bg": treeThemeValues.get(
+			"--trees-theme-list-hover-bg"
+		),
+		"--trees-theme-scrollbar-thumb": treeThemeValues.get(
+			"--trees-theme-scrollbar-thumb"
+		),
+		"--trees-theme-sidebar-bg": treeThemeValues.get("--trees-theme-sidebar-bg"),
+		"--trees-theme-sidebar-border": treeThemeValues.get(
+			"--trees-theme-sidebar-border"
+		),
+		"--trees-theme-sidebar-fg": treeThemeValues.get("--trees-theme-sidebar-fg"),
+		"--trees-theme-sidebar-header-fg": treeThemeValues.get(
+			"--trees-theme-sidebar-header-fg"
+		),
+	};
+	const treePreviewClasses = cn(
+		treeThemeValues.get("colorScheme") && appearanceStyles.treeScheme,
+		treeThemeValues.get("backgroundColor") && appearanceStyles.treeBackground,
+		treeThemeValues.get("color") && appearanceStyles.treeForeground,
+		treeThemeValues.get("borderColor") && appearanceStyles.treeBorder
+	);
 
 	const toolDetailPreset = deriveToolDetailPreset(
 		hideToolDetail,
@@ -1373,11 +1500,16 @@ export function AppearanceTab() {
 	const [darkSaveDialog, setDarkSaveDialog] = useState(false);
 	const [lightSaveName, setLightSaveName] = useState("");
 	const [darkSaveName, setDarkSaveName] = useState("");
+	const pendingCustomPresetIds = useRef<{
+		light: string | null;
+		dark: string | null;
+	}>({ light: null, dark: null });
 
 	const handleLightPreset = useCallback((id: string | null) => {
 		if (!id) {
 			return;
 		}
+		pendingCustomPresetIds.current.light = null;
 		const tokens = initTokens(id);
 		setLightPresetId(id);
 		setLightTokens(tokens);
@@ -1390,6 +1522,7 @@ export function AppearanceTab() {
 		if (!id) {
 			return;
 		}
+		pendingCustomPresetIds.current.dark = null;
 		const tokens = initTokens(id);
 		setDarkPresetId(id);
 		setDarkTokens(tokens);
@@ -1425,15 +1558,26 @@ export function AppearanceTab() {
 		if (!name) {
 			return;
 		}
-		const id = `custom-light-${name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+		const id =
+			pendingCustomPresetIds.current.light ??
+			`custom-light-${name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+		pendingCustomPresetIds.current.light = id;
 		const variant = customTokensToVariant(id, name, "light", lightTokens);
-		saveCustomTheme(variant);
+		try {
+			saveCustomTheme(variant);
+			setLightPreset(id);
+		} catch {
+			toast.error(
+				"Couldn't save theme preset. Your draft is unchanged; try again."
+			);
+			return;
+		}
+		pendingCustomPresetIds.current.light = null;
 		setLightGroups(getGroupedVariants("light"));
 		setLightPresetId(id);
 		setLightBaseTokens(lightTokens);
 		setLightSaveDialog(false);
 		setLightSaveName("");
-		setLightPreset(id);
 	}, [lightSaveName, lightTokens]);
 
 	const handleDarkSaveConfirm = useCallback(() => {
@@ -1441,15 +1585,26 @@ export function AppearanceTab() {
 		if (!name) {
 			return;
 		}
-		const id = `custom-dark-${name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+		const id =
+			pendingCustomPresetIds.current.dark ??
+			`custom-dark-${name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+		pendingCustomPresetIds.current.dark = id;
 		const variant = customTokensToVariant(id, name, "dark", darkTokens);
-		saveCustomTheme(variant);
+		try {
+			saveCustomTheme(variant);
+			setDarkPreset(id);
+		} catch {
+			toast.error(
+				"Couldn't save theme preset. Your draft is unchanged; try again."
+			);
+			return;
+		}
+		pendingCustomPresetIds.current.dark = null;
 		setDarkGroups(getGroupedVariants("dark"));
 		setDarkPresetId(id);
 		setDarkBaseTokens(darkTokens);
 		setDarkSaveDialog(false);
 		setDarkSaveName("");
-		setDarkPreset(id);
 	}, [darkSaveName, darkTokens]);
 
 	// Deleting the ACTIVE preset would otherwise leave a dangling id in
@@ -1480,6 +1635,7 @@ export function AppearanceTab() {
 	);
 
 	const handleLightDiscard = useCallback(() => {
+		pendingCustomPresetIds.current.light = null;
 		// Re-apply the saved preset variant (not customTokensToVariant on the
 		// 7 base fields). customTokensToVariant invents primary-foreground and
 		// would leave Switch thumbs / primary ink wrong after a swatch edit.
@@ -1489,6 +1645,7 @@ export function AppearanceTab() {
 	}, [lightBaseTokens, lightPresetId]);
 
 	const handleDarkDiscard = useCallback(() => {
+		pendingCustomPresetIds.current.dark = null;
 		setDarkTokens(darkBaseTokens);
 		setDarkSaveDialog(false);
 		setDarkPreset(darkPresetId);
@@ -1519,62 +1676,49 @@ export function AppearanceTab() {
 	};
 
 	const handleContrast = (vals: number | readonly number[]) => {
-		const value = Array.isArray(vals)
-			? ((vals as number[])[0] ?? 50)
-			: (vals as number);
+		const value = [vals].flat()[0] ?? 50;
 		setContrastValue(value);
 		setContrast(value);
 	};
 
 	const handleRadius = (vals: number | readonly number[]) => {
-		const value = Array.isArray(vals)
-			? ((vals as number[])[0] ?? DEFAULT_RADIUS)
-			: (vals as number);
+		const value = [vals].flat()[0] ?? DEFAULT_RADIUS;
 		setRadiusValue(value);
 		setRadius(value);
 	};
 
 	const handleSpacing = (vals: number | readonly number[]) => {
-		const value = Array.isArray(vals)
-			? ((vals as number[])[0] ?? DEFAULT_SPACING)
-			: (vals as number);
+		const value = [vals].flat()[0] ?? DEFAULT_SPACING;
 		setSpacingValue(value);
 		setSpacing(value);
 	};
 
 	const handleScale = (vals: number | readonly number[]) => {
-		const value = Array.isArray(vals)
-			? ((vals as number[])[0] ?? DEFAULT_SCALE)
-			: (vals as number);
+		const value = [vals].flat()[0] ?? DEFAULT_SCALE;
 		setScaleValue(value);
 		setScale(value);
 	};
 
 	const handleCardSpacing = (vals: number | readonly number[]) => {
-		const value = Array.isArray(vals)
-			? ((vals as number[])[0] ?? DEFAULT_CARD_SPACING)
-			: (vals as number);
+		const value = [vals].flat()[0] ?? DEFAULT_CARD_SPACING;
 		setCardSpacingValue(value);
 		setCardSpacing(value);
 	};
 
 	const handleChatWidth = (vals: number | readonly number[]) => {
-		const value = Array.isArray(vals)
-			? ((vals as number[])[0] ?? DEFAULT_CHAT_WIDTH)
-			: (vals as number);
+		const value = [vals].flat()[0] ?? DEFAULT_CHAT_WIDTH;
 		setChatWidthValue(value);
 		setChatWidth(value);
 	};
 
 	const handleSidebarWidth = (vals: number | readonly number[]) => {
-		const value = Array.isArray(vals)
-			? ((vals as number[])[0] ?? DEFAULT_SIDEBAR_WIDTH)
-			: (vals as number);
+		const value = [vals].flat()[0] ?? DEFAULT_SIDEBAR_WIDTH;
 		setSidebarWidthValue(value);
 		setSidebarWidthSetting(value);
 	};
 
 	const resetAppearanceDefaults = () => {
+		pendingCustomPresetIds.current = { light: null, dark: null };
 		// Registry owns every appearance preference — adding a setting means
 		// registering it in appearance-settings.ts, not extending this list.
 		resetAppearanceSettings();
@@ -1640,11 +1784,11 @@ export function AppearanceTab() {
 								type="radio"
 								value={value}
 							/>
-							{/* biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: dynamic remote logo URL */}
+							{/* dynamic remote logo URL */}
 							<img
 								alt={label}
 								className={cn(
-									"rounded-lg border-2 shadow-md transition-all hover:scale-105",
+									"rounded-lg border-2 shadow-md transition-[scale,border-color,box-shadow] hover:scale-105 motion-reduce:transition-none",
 									theme === value
 										? "border-ring ring-2 ring-ring ring-offset-2 ring-offset-background"
 										: "border-border hover:border-ring/50"
@@ -1683,7 +1827,10 @@ export function AppearanceTab() {
 						mode="light"
 						onDeletePreset={handleLightDelete}
 						onDiscardClick={handleLightDiscard}
-						onSaveCancel={() => setLightSaveDialog(false)}
+						onSaveCancel={() => {
+							pendingCustomPresetIds.current.light = null;
+							setLightSaveDialog(false);
+						}}
 						onSaveClick={() => setLightSaveDialog(true)}
 						onSaveConfirm={handleLightSaveConfirm}
 						onSaveNameChange={setLightSaveName}
@@ -1702,7 +1849,10 @@ export function AppearanceTab() {
 						mode="dark"
 						onDeletePreset={handleDarkDelete}
 						onDiscardClick={handleDarkDiscard}
-						onSaveCancel={() => setDarkSaveDialog(false)}
+						onSaveCancel={() => {
+							pendingCustomPresetIds.current.dark = null;
+							setDarkSaveDialog(false);
+						}}
 						onSaveClick={() => setDarkSaveDialog(true)}
 						onSaveConfirm={handleDarkSaveConfirm}
 						onSaveNameChange={setDarkSaveName}
@@ -1833,15 +1983,25 @@ export function AppearanceTab() {
 								onValueChange={handleUiFont}
 								value={uiFont}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									{UI_FONTS.map((f) => (
-										<SelectItem key={f.label} value={f.value}>
-											<span style={{ fontFamily: f.value }}>{f.label}</span>
-										</SelectItem>
-									))}
+									{UI_FONTS.map((f) => {
+										const fontStyle: AppearancePaintStyle = {
+											"--appearance-font": f.value,
+										};
+										return (
+											<SelectItem key={f.label} value={f.value}>
+												<span
+													className={appearanceStyles.fontSample}
+													style={fontStyle}
+												>
+													{f.label}
+												</span>
+											</SelectItem>
+										);
+									})}
 								</SelectContent>
 							</Select>
 						}
@@ -1854,15 +2014,25 @@ export function AppearanceTab() {
 								onValueChange={handleHeadingFont}
 								value={headingFont}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									{HEADING_FONTS.map((f) => (
-										<SelectItem key={f.label} value={f.value}>
-											<span style={{ fontFamily: f.value }}>{f.label}</span>
-										</SelectItem>
-									))}
+									{HEADING_FONTS.map((f) => {
+										const fontStyle: AppearancePaintStyle = {
+											"--appearance-font": f.value,
+										};
+										return (
+											<SelectItem key={f.label} value={f.value}>
+												<span
+													className={appearanceStyles.fontSample}
+													style={fontStyle}
+												>
+													{f.label}
+												</span>
+											</SelectItem>
+										);
+									})}
 								</SelectContent>
 							</Select>
 						}
@@ -1875,15 +2045,25 @@ export function AppearanceTab() {
 								onValueChange={handleCodeFont}
 								value={codeFont}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									{CODE_FONTS.map((f) => (
-										<SelectItem key={f.label} value={f.value}>
-											<span style={{ fontFamily: f.value }}>{f.label}</span>
-										</SelectItem>
-									))}
+									{CODE_FONTS.map((f) => {
+										const fontStyle: AppearancePaintStyle = {
+											"--appearance-font": f.value,
+										};
+										return (
+											<SelectItem key={f.label} value={f.value}>
+												<span
+													className={appearanceStyles.fontSample}
+													style={fontStyle}
+												>
+													{f.label}
+												</span>
+											</SelectItem>
+										);
+									})}
 								</SelectContent>
 							</Select>
 						}
@@ -1893,6 +2073,8 @@ export function AppearanceTab() {
 			</SettingsSection>
 
 			<TimezoneSetting />
+
+			<WallpaperSetting />
 		</>
 	);
 
@@ -2088,7 +2270,7 @@ export function AppearanceTab() {
 									id={`sidebar-mode-${mode.key}`}
 									onCheckedChange={(checked) =>
 										setSidebarMode(
-											checked ? (mode.key as SidebarMode) : "sections"
+											checked ? sidebarModeSchema.parse(mode.key) : "sections"
 										)
 									}
 								/>
@@ -2167,6 +2349,7 @@ export function AppearanceTab() {
 					<SettingsItem
 						actions={
 							<Select
+								items={CHAT_PICKER_PLACEMENT_OPTIONS}
 								onValueChange={(value) => {
 									if (value === "composer" || value === "tab-bar") {
 										setChatPickerPlacement(value);
@@ -2175,16 +2358,17 @@ export function AppearanceTab() {
 								value={chatPickerPlacement}
 							>
 								<SelectTrigger
-									className="h-8 w-56 text-sm"
+									className="h-8 w-56"
 									id="chat-picker-placement-select"
 								>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="composer">In composer</SelectItem>
-									<SelectItem value="tab-bar">
-										In tab bar actions tray
-									</SelectItem>
+									{CHAT_PICKER_PLACEMENT_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
 								</SelectContent>
 							</Select>
 						}
@@ -2266,7 +2450,7 @@ export function AppearanceTab() {
 
 	const chatPage = (
 		<>
-			<SettingsSection title="Chat">
+			<SettingsSection title="Chat view">
 				<SettingsGroup>
 					<SettingsItem
 						actions={
@@ -2285,7 +2469,10 @@ export function AppearanceTab() {
 					onOpenChange={setToolDetailAdvancedOpen}
 					open={toolDetailAdvancedOpen}
 				>
-					<CollapsibleTrigger className="flex w-full items-center justify-between gap-3 rounded-lg px-3.5 py-2 text-left text-muted-foreground text-xs hover:bg-muted/40">
+					<CollapsibleTrigger
+						appearance="settings-detail"
+						className="flex w-full items-center justify-between text-left"
+					>
 						<span>Advanced detail</span>
 						<HugeiconsIcon
 							className={cn(
@@ -2295,7 +2482,7 @@ export function AppearanceTab() {
 							icon={ArrowDown01Icon}
 						/>
 					</CollapsibleTrigger>
-					<CollapsibleContent className="pt-1">
+					<CollapsibleContent spacing="settings-detail">
 						{/* At None there are no tool rows left for the first three to
 						    expand, so they are disabled rather than left as switches
 						    that flip and change nothing. Their stored values are
@@ -2406,7 +2593,7 @@ export function AppearanceTab() {
 	const usagePage = (
 		<>
 			<SettingsSection
-				caption="Subscription usage meters for agents like Claude Code and Codex, shown beside the composer and, optionally, next to each agent in the sidebar."
+				caption="Usage meters for supported subscription agents such as Claude Code, Codex, Copilot, Grok, Z.ai, Cursor, Devin, Antigravity, and OpenCode Go."
 				title="Usage meter"
 			>
 				<SettingsGroup>
@@ -2429,7 +2616,7 @@ export function AppearanceTab() {
 								onCheckedChange={(v) => setUsageBarPrefs({ sidebar: v })}
 							/>
 						}
-						description="Also show the usage meters next to each supported agent's name in the sidebar. Only agents with a readable subscription window (Claude Code, Codex) ever show one."
+						description="Also show usage meters next to supported agents in the sidebar. A meter appears when Ryu can read that agent's existing provider credentials."
 						title="Show in sidebar"
 					/>
 					<SettingsItem
@@ -2511,16 +2698,19 @@ export function AppearanceTab() {
 				<SettingsGroup>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<DiffViewPrefs["diffStyle"]>
 								items={DIFF_STYLE_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setDiffViewPrefs({
-										diffStyle: v as DiffViewPrefs["diffStyle"],
-									})
-								}
+										diffStyle: v,
+									});
+								}}
 								value={diffPrefs.diffStyle}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2537,16 +2727,19 @@ export function AppearanceTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<DiffViewPrefs["themeMode"]>
 								items={DIFF_THEME_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setDiffViewPrefs({
-										themeMode: v as DiffViewPrefs["themeMode"],
-									})
-								}
+										themeMode: v,
+									});
+								}}
 								value={diffPrefs.themeMode}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2572,7 +2765,7 @@ export function AppearanceTab() {
 								}}
 								value={diffPrefs.lightTheme}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2599,7 +2792,7 @@ export function AppearanceTab() {
 								}}
 								value={diffPrefs.darkTheme}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2617,16 +2810,19 @@ export function AppearanceTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<DiffViewPrefs["diffIndicators"]>
 								items={DIFF_INDICATOR_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setDiffViewPrefs({
-										diffIndicators: v as DiffViewPrefs["diffIndicators"],
-									})
-								}
+										diffIndicators: v,
+									});
+								}}
 								value={diffPrefs.diffIndicators}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2643,16 +2839,19 @@ export function AppearanceTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<DiffViewPrefs["lineDiffType"]>
 								items={DIFF_LINE_DIFF_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setDiffViewPrefs({
-										lineDiffType: v as DiffViewPrefs["lineDiffType"],
-									})
-								}
+										lineDiffType: v,
+									});
+								}}
 								value={diffPrefs.lineDiffType}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2669,16 +2868,19 @@ export function AppearanceTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<DiffViewPrefs["hunkSeparators"]>
 								items={DIFF_HUNK_SEPARATOR_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setDiffViewPrefs({
-										hunkSeparators: v as DiffViewPrefs["hunkSeparators"],
-									})
-								}
+										hunkSeparators: v,
+									});
+								}}
 								value={diffPrefs.hunkSeparators}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2763,9 +2965,10 @@ export function AppearanceTab() {
 						{/* Keyed on the constructor-time options only — theme rides in as
 						    host CSS variables and must not force a remount. */}
 						<FileTreePreview
+							className={treePreviewClasses}
 							key={JSON.stringify(fileTreePrefsToOptions(fileTreePrefs))}
 							prefs={fileTreePrefs}
-							style={fileTreeThemeStyles}
+							style={treePreviewStyle}
 						/>
 					</div>
 				</SettingsCard>
@@ -2773,16 +2976,19 @@ export function AppearanceTab() {
 				<SettingsGroup>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<FileTreePrefs["density"]>
 								items={FILE_TREE_DENSITY_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setFileTreePrefs({
-										density: v as FileTreePrefs["density"],
-									})
-								}
+										density: v,
+									});
+								}}
 								value={fileTreePrefs.density}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2808,7 +3014,7 @@ export function AppearanceTab() {
 								}}
 								value={fileTreePrefs.lightTheme}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2835,7 +3041,7 @@ export function AppearanceTab() {
 								}}
 								value={fileTreePrefs.darkTheme}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2853,16 +3059,19 @@ export function AppearanceTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<FileTreePrefs["iconSet"]>
 								items={FILE_TREE_ICON_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setFileTreePrefs({
-										iconSet: v as FileTreePrefs["iconSet"],
-									})
-								}
+										iconSet: v,
+									});
+								}}
 								value={fileTreePrefs.iconSet}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2879,16 +3088,19 @@ export function AppearanceTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<FileTreePrefs["searchMode"]>
 								items={FILE_TREE_SEARCH_MODE_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setFileTreePrefs({
-										searchMode: v as FileTreePrefs["searchMode"],
-									})
-								}
+										searchMode: v,
+									});
+								}}
 								value={fileTreePrefs.searchMode}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -2905,16 +3117,19 @@ export function AppearanceTab() {
 					/>
 					<SettingsItem
 						actions={
-							<Select
+							<Select<FileTreePrefs["initialExpansion"]>
 								items={FILE_TREE_EXPANSION_OPTIONS}
-								onValueChange={(v) =>
+								onValueChange={(v) => {
+									if (v === null) {
+										return;
+									}
 									setFileTreePrefs({
-										initialExpansion: v as FileTreePrefs["initialExpansion"],
-									})
-								}
+										initialExpansion: v,
+									});
+								}}
 								value={fileTreePrefs.initialExpansion}
 							>
-								<SelectTrigger className="h-8 w-56 text-sm">
+								<SelectTrigger className="h-8 w-56">
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -3012,7 +3227,7 @@ export function AppearanceTab() {
 					<SettingsItem
 						actions={
 							appearanceResetConfirm ? (
-								<div className="flex flex-shrink-0 items-center gap-2">
+								<div className="flex shrink-0 items-center gap-2">
 									<Button
 										onClick={resetAppearanceDefaults}
 										size="sm"
@@ -3030,7 +3245,7 @@ export function AppearanceTab() {
 								</div>
 							) : (
 								<Button
-									className="flex-shrink-0"
+									className="shrink-0"
 									onClick={() => setAppearanceResetConfirm(true)}
 									size="sm"
 									variant="ghost"
@@ -3087,12 +3302,24 @@ export function AppearanceTab() {
 				},
 				{
 					id: "chat",
-					title: "Chat",
-					hint: "How much detail a conversation shows while it runs.",
+					title: "Chat view",
+					hint: "How much detail a conversation shows while it runs, in the default chat and in every interface's thread view.",
 					icon: Chat01Icon,
 					tint: "teal",
 					content: chatPage,
 				},
+				...(showInterfaces
+					? [
+							{
+								id: "interfaces",
+								title: "Interfaces",
+								hint: "Each interface's own settings, and the options every interface shares.",
+								icon: Layers01Icon,
+								tint: "indigo" as const,
+								content: <InterfaceSettingsPanel />,
+							},
+						]
+					: []),
 				{
 					id: "usage",
 					title: "Usage meter",

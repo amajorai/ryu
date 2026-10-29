@@ -1,0 +1,182 @@
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+
+const desktopDir = path.resolve(import.meta.dirname, "..");
+const repositoryDir = path.resolve(desktopDir, "../..");
+const sidecarDirectory = path.join(
+	repositoryDir,
+	"apps-store/video-studio/sidecar"
+);
+const companionDirectory = path.join(
+	repositoryDir,
+	"apps-store/video-studio/ui"
+);
+const sidecar = path.join(sidecarDirectory, "dist/ryu-video-studio");
+const appHtml = path.join(companionDirectory, "dist/index.html");
+
+async function buildPackage(directory: string, name: string) {
+	const build = Bun.spawn(["bun", "run", "build"], {
+		cwd: directory,
+		stderr: "inherit",
+		stdout: "inherit",
+	});
+	const exitCode = await build.exited;
+	if (exitCode !== 0) {
+		throw new Error(`${name} build failed with exit code ${exitCode}.`);
+	}
+}
+
+await buildPackage(sidecarDirectory, "Video Studio sidecar");
+await buildPackage(companionDirectory, "Video Studio Companion");
+
+const token = randomUUID();
+const sidecarPort = await new Promise<number>((resolve, reject) => {
+	const reservation = createServer();
+	reservation.once("error", reject);
+	reservation.listen(0, "127.0.0.1", () => {
+		const address = reservation.address();
+		if (!address || isNativeText(address)) {
+			reservation.close();
+			reject(new Error("Could not reserve a local Video Studio sidecar port."));
+			return;
+		}
+		reservation.close((error) => {
+			if (error) {
+				reject(error);
+				return;
+			}
+			resolve(address.port);
+		});
+	});
+});
+const server = spawn(sidecar, [], {
+	env: {
+		...process.env,
+		RYU_EXT_TOKEN: token,
+		RYU_EXT_PLUGIN_ID: "@ryu/video-studio",
+		RYU_CORE_PORT: "27980",
+		RYU_PROFILE: "dev",
+		RYU_KEYCHAIN: "off",
+		RYU_DIR: path.join(
+			tmpdir(),
+			`ryu-video-studio-decision-e2e-${process.pid}`
+		),
+		RYU_VIDEO_STUDIO_PORT: String(sidecarPort),
+	},
+	stdio: "inherit",
+});
+
+let ready = false;
+for (let attempt = 0; attempt < 100; attempt += 1) {
+	if (server.exitCode !== null) {
+		throw new Error("The Video Studio sidecar exited during startup.");
+	}
+	ready = await fetch(
+		`http://127.0.0.1:${sidecarPort}/api/video-studio/projects`,
+		{ headers: { authorization: `Bearer ${token}` } }
+	).then(
+		(response) => response.ok,
+		() => false
+	);
+	if (ready) {
+		break;
+	}
+	await Bun.sleep(100);
+}
+if (!ready) {
+	server.kill();
+	throw new Error(
+		"The authenticated Video Studio sidecar did not become ready."
+	);
+}
+
+let failNextProjectSave = false;
+let failNextDecisionAppend = false;
+const bridge = `<script>
+const studioRequest=async(input)=>{
+  if(input.method==='PUT'&&/^\\/projects\\/[^/]+$/.test(input.path)){
+    const fault=await fetch('/__proof/take-save-failure',{method:'POST'}).then((response)=>response.json());
+    if(fault.fail)throw new Error('Fixture project save failed.');
+  }
+  if(input.method==='POST'&&/^\\/projects\\/[^/]+\\/decisions$/.test(input.path)){
+    const fault=await fetch('/__proof/take-decision-failure',{method:'POST'}).then((response)=>response.json());
+    if(fault.fail)throw new Error('Fixture decision append failed.');
+  }
+  const response=await fetch('/__studio'+input.path,{method:input.method||'GET',headers:{'content-type':'application/json'},...(input.body===undefined?{}:{body:JSON.stringify(input.body)})});
+  const result=await response.json();
+  if(!response.ok)throw new Error(result.message||'Request failed');
+  return result;
+};
+window.ryu={app:{request:studioRequest}};
+</script>`;
+const html = (await Bun.file(appHtml).text()).replace(
+	"<head>",
+	`<head>${bridge}`
+);
+const host = Bun.serve({
+	hostname: "127.0.0.1",
+	port: 5187,
+	async fetch(request) {
+		const url = new URL(request.url);
+		if (url.pathname === "/__ready") {
+			return new Response("ok");
+		}
+		if (
+			url.pathname === "/__proof/fail-next-project-save" &&
+			request.method === "POST"
+		) {
+			failNextProjectSave = true;
+			return Response.json({ armed: true });
+		}
+		if (
+			url.pathname === "/__proof/take-save-failure" &&
+			request.method === "POST"
+		) {
+			const fail = failNextProjectSave;
+			failNextProjectSave = false;
+			return Response.json({ fail });
+		}
+		if (
+			url.pathname === "/__proof/fail-next-decision-append" &&
+			request.method === "POST"
+		) {
+			failNextDecisionAppend = true;
+			return Response.json({ armed: true });
+		}
+		if (
+			url.pathname === "/__proof/take-decision-failure" &&
+			request.method === "POST"
+		) {
+			const fail = failNextDecisionAppend;
+			failNextDecisionAppend = false;
+			return Response.json({ fail });
+		}
+		if (url.pathname.startsWith("/__studio/")) {
+			return fetch(
+				`http://127.0.0.1:${sidecarPort}/api/video-studio${url.pathname.slice("/__studio".length)}${url.search}`,
+				{
+					method: request.method,
+					headers: {
+						"content-type": "application/json",
+						authorization: `Bearer ${token}`,
+					},
+					...(["GET", "HEAD"].includes(request.method)
+						? undefined
+						: { body: await request.arrayBuffer() }),
+				}
+			);
+		}
+		return new Response(html, { headers: { "content-type": "text/html" } });
+	},
+});
+
+const stop = () => {
+	host.stop();
+	server.kill();
+};
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);

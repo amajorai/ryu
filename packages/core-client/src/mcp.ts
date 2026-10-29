@@ -6,7 +6,164 @@
 // tool list to a single agent's allowlist, and test-calls a tool. Wire shapes
 // mirror `apps/core/src/sidecar/mcp/mod.rs` (snake_case fields, no serde rename).
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
+
 import { type ApiTarget, fetchForTarget, request } from "./client.ts";
+
+interface McpDispatchHeaders {
+	"Content-Type": string;
+	[header: string]: string;
+}
+function mcpDispatchHeaders(target: ApiTarget): McpDispatchHeaders {
+	const headers: McpDispatchHeaders = { "Content-Type": "application/json" };
+	if (target.token) {
+		headers.Authorization = `Bearer ${target.token}`;
+	}
+	return headers;
+}
+const mcpCreatedServerFields = z.object({
+	name: z.string(),
+	command: z.string(),
+	args: z.array(z.string()).nullable().optional(),
+	description: z.string().nullable().optional(),
+	enabled: z.boolean().nullable().optional(),
+	transport: z.string().optional(),
+	url: z.string().optional(),
+	available: z.boolean().nullable().optional(),
+	auth_required: z.boolean().optional(),
+	auth_configured: z.boolean().optional(),
+	auth_type: z.string().optional(),
+	owner_plugin_id: z.string().optional(),
+	owner_server_name: z.string().optional(),
+	env_keys: z.array(z.string()).optional(),
+	header_names: z.array(z.string()).optional(),
+});
+const mcpCreatedResponseFields = z.object({
+	ok: z.boolean().optional(),
+	server: mcpCreatedServerFields.nullable().optional(),
+	error: z.string().nullable().optional(),
+});
+const mcpCreatedResponse = z.custom<z.output<typeof mcpCreatedResponseFields>>(
+	(value) => mcpCreatedResponseFields.safeParse(value).success
+);
+const mcpCallResponseFields = z.object({
+	ok: z.boolean().nullable().optional(),
+	output: appResponseValueSchema.optional(),
+	error: z.string().optional(),
+});
+const mcpCallResponse = z.custom<z.output<typeof mcpCallResponseFields>>(
+	(value) => mcpCallResponseFields.safeParse(value).success
+);
+
+function mcpNativeResponse<S extends z.ZodObject>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+const mcpListedServerFields = mcpCreatedServerFields.extend({
+	enabled: z.boolean(),
+});
+const mcpListedServersSchema = mcpNativeResponse(
+	z.object({ servers: z.array(mcpListedServerFields).nullish() })
+);
+const mcpWidgetFields = z.object({
+	template_uri: z.string(),
+	widget_accessible: z.boolean(),
+	invoking_label: z.string().optional(),
+	invoked_label: z.string().optional(),
+});
+export const mcpListedToolFields = z.object({
+	id: z.string(),
+	server: z.string(),
+	name: z.string(),
+	description: z.string().nullish(),
+	input_schema: appResponseValueSchema.optional(),
+	output_schema: appResponseValueSchema.optional(),
+	annotations: appResponseValueSchema.optional(),
+	meta: appResponseValueSchema.optional(),
+	widget: mcpWidgetFields.optional(),
+	widget_accessible: z.boolean().optional(),
+	output_template: z.string().optional(),
+	// `InlineDeno` is what Core releases before the `inline_js` rename report for
+	// the same backend; keep it so a newer client can still list their tools.
+	app_backend: z
+		.enum(["Alias", "InlineJs", "InlineDeno", "Http", "Command"])
+		.optional(),
+});
+const mcpListedToolsSchema = mcpNativeResponse(
+	z.object({ tools: z.array(mcpListedToolFields).nullish() })
+);
+const mcpCatalogCardFields = z.object({
+	id: z.string(),
+	name: z.string().optional(),
+	description: z.string().nullish(),
+	version: z.string().nullish(),
+	has_packages: z.boolean().nullish(),
+	has_remotes: z.boolean().nullish(),
+	transports: z.array(z.string()).nullish(),
+	installed: z.boolean().nullish(),
+});
+const mcpCatalogPackageFields = z.object({
+	file_sha256: z.string().nullish(),
+	identifier: z.string().nullish(),
+	registry_base_url: z.string().nullish(),
+	registry_type: z.string().nullish(),
+	transport: z.string().nullish(),
+	version: z.string().nullish(),
+});
+const mcpCatalogRemoteFields = z.object({
+	transport_type: z.string().nullish(),
+	url: z.string().nullish(),
+});
+const mcpCatalogPageSchema = mcpNativeResponse(
+	z.object({
+		servers: z.array(mcpCatalogCardFields).nullish(),
+		next_cursor: z.string().nullish(),
+	})
+);
+const mcpCatalogDetailSchema = mcpNativeResponse(
+	z.object({
+		card: mcpCatalogCardFields,
+		packages: z.array(mcpCatalogPackageFields).nullish(),
+		remotes: z.array(mcpCatalogRemoteFields).nullish(),
+	})
+);
+const mcpInstalledServerFields = z.object({
+	args: z.array(z.string()),
+	command: z.string().nullable(),
+	name: z.string(),
+	transport: z.string(),
+	url: z.string().nullable(),
+	description: z.string().nullish(),
+	enabled: z.boolean().optional(),
+});
+const mcpInstalledResponseSchema = mcpNativeResponse(
+	z.object({
+		success: z.boolean().optional(),
+		error: z.string().optional(),
+		server: mcpInstalledServerFields.nullish(),
+		dryRun: z.boolean().optional(),
+		action: z.string().optional(),
+		writes: z.array(appResponseValueSchema).optional(),
+	})
+);
+const mcpSourceFields = z.object({
+	id: z.string(),
+	display_name: z.string(),
+	builtin: z.boolean().nullish(),
+	base_url: z.string().nullish(),
+	has_auth: z.boolean().optional(),
+});
+const mcpSourcesResponseSchema = mcpNativeResponse(
+	z.object({
+		kind: z.string().optional(),
+		active: z.string().nullish(),
+		sources: z.array(mcpSourceFields).nullish(),
+	})
+);
 
 /** A registered MCP server as Core summarizes it for the listing endpoint. */
 export interface McpServer {
@@ -36,22 +193,9 @@ export interface McpCallResult {
 	output?: unknown;
 }
 
-interface ServerWire {
-	args?: string[];
-	available?: boolean | null;
-	command: string;
-	description?: string | null;
-	enabled: boolean;
-	name: string;
-}
+type ServerWire = z.output<typeof mcpListedServerFields>;
 
-interface ToolWire {
-	description?: string | null;
-	id: string;
-	input_schema?: unknown | null;
-	name: string;
-	server: string;
-}
+type ToolWire = z.output<typeof mcpListedToolFields>;
 
 function toServer(s: ServerWire): McpServer {
 	return {
@@ -75,9 +219,11 @@ function toTool(t: ToolWire): McpTool {
 }
 
 export async function fetchMcpServers(target: ApiTarget): Promise<McpServer[]> {
-	const json = await request<{ servers?: ServerWire[] }>(
+	const json = await request(
 		target,
-		"/api/mcp/servers"
+		"/api/mcp/servers",
+		{},
+		mcpListedServersSchema
 	);
 	return (json.servers ?? []).map(toServer);
 }
@@ -91,9 +237,11 @@ export async function fetchMcpTools(
 	agentId?: string
 ): Promise<McpTool[]> {
 	const suffix = agentId ? `?agent=${encodeURIComponent(agentId)}` : "";
-	const json = await request<{ tools?: ToolWire[] }>(
+	const json = await request(
 		target,
-		`/api/mcp/tools${suffix}`
+		`/api/mcp/tools${suffix}`,
+		{},
+		mcpListedToolsSchema
 	);
 	return (json.tools ?? []).map(toTool);
 }
@@ -130,10 +278,7 @@ export async function createMcpServer(
 		`${target.url.replace(/\/$/, "")}/api/mcp/servers`,
 		{
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				...(target.token ? { Authorization: `Bearer ${target.token}` } : {}),
-			},
+			headers: mcpDispatchHeaders(target),
 			body: JSON.stringify({
 				name: input.name,
 				command: input.command,
@@ -144,17 +289,7 @@ export async function createMcpServer(
 		}
 	);
 	const text = await resp.text();
-	const parsed = (text ? JSON.parse(text) : {}) as {
-		ok?: boolean;
-		server?: {
-			name: string;
-			command: string;
-			args: string[];
-			description: string | null;
-			enabled: boolean;
-		};
-		error?: string;
-	};
+	const parsed = mcpCreatedResponse.parse(text ? JSON.parse(text) : {});
 	if (!resp.ok) {
 		return { ok: false, error: parsed.error ?? `HTTP ${resp.status}` };
 	}
@@ -209,7 +344,9 @@ export interface McpCatalogCard {
 
 /** A launchable package for a server (npm/pypi/oci, etc.). */
 export interface McpPackage {
+	fileSha256: string | null;
 	identifier: string | null;
+	registryBaseUrl: string | null;
 	registryType: string | null;
 	transport: string | null;
 	version: string | null;
@@ -228,28 +365,11 @@ export interface McpCatalogDetail {
 	remotes: McpRemote[];
 }
 
-interface CatalogCardWire {
-	description?: string | null;
-	has_packages?: boolean;
-	has_remotes?: boolean;
-	id: string;
-	installed?: boolean;
-	name?: string;
-	transports?: string[];
-	version?: string | null;
-}
+type CatalogCardWire = z.output<typeof mcpCatalogCardFields>;
 
-interface PackageWire {
-	identifier?: string | null;
-	registry_type?: string | null;
-	transport?: string | null;
-	version?: string | null;
-}
+type PackageWire = z.output<typeof mcpCatalogPackageFields>;
 
-interface RemoteWire {
-	transport_type?: string | null;
-	url?: string | null;
-}
+type RemoteWire = z.output<typeof mcpCatalogRemoteFields>;
 
 function toCatalogCard(w: CatalogCardWire): McpCatalogCard {
 	return {
@@ -266,7 +386,9 @@ function toCatalogCard(w: CatalogCardWire): McpCatalogCard {
 
 function toPackage(w: PackageWire): McpPackage {
 	return {
+		fileSha256: w.file_sha256 ?? null,
 		registryType: w.registry_type ?? null,
+		registryBaseUrl: w.registry_base_url ?? null,
 		identifier: w.identifier ?? null,
 		version: w.version ?? null,
 		transport: w.transport ?? null,
@@ -312,10 +434,12 @@ export async function searchMcpCatalog(
 	if (params.cursor) {
 		q.set("cursor", params.cursor);
 	}
-	const json = await request<{
-		servers?: CatalogCardWire[];
-		next_cursor?: string | null;
-	}>(target, `/api/mcp/catalog?${q.toString()}`);
+	const json = await request(
+		target,
+		`/api/mcp/catalog?${q.toString()}`,
+		{},
+		mcpCatalogPageSchema
+	);
 	return {
 		servers: (json.servers ?? []).map(toCatalogCard),
 		nextCursor: json.next_cursor ?? null,
@@ -327,11 +451,12 @@ export async function fetchMcpCatalogDetail(
 	target: ApiTarget,
 	id: string
 ): Promise<McpCatalogDetail> {
-	const json = await request<{
-		card: CatalogCardWire;
-		packages?: PackageWire[];
-		remotes?: RemoteWire[];
-	}>(target, `/api/mcp/catalog/detail?id=${encodeURIComponent(id)}`);
+	const json = await request(
+		target,
+		`/api/mcp/catalog/detail?id=${encodeURIComponent(id)}`,
+		{},
+		mcpCatalogDetailSchema
+	);
 	return {
 		card: toCatalogCard(json.card),
 		packages: (json.packages ?? []).map(toPackage),
@@ -340,11 +465,21 @@ export async function fetchMcpCatalogDetail(
 }
 
 /** The written server entry returned by a successful catalog install. */
-export interface McpInstallResult {
-	command: string;
-	name: string;
-	url: string | null;
-}
+export type McpInstallResult =
+	| {
+			args: string[];
+			command: string;
+			name: string;
+			transport: "stdio";
+			url: null;
+	  }
+	| {
+			args: [];
+			command: null;
+			name: string;
+			transport: "streamable-http";
+			url: string;
+	  };
 
 /**
  * Install a catalog server as a **disabled** `~/.ryu/mcp.json` entry. Core never
@@ -355,22 +490,42 @@ export async function installMcpServer(
 	target: ApiTarget,
 	id: string
 ): Promise<McpInstallResult> {
-	const json = await request<{
-		success?: boolean;
-		error?: string;
-		server?: { name: string; command: string; url?: string | null };
-	}>(target, "/api/mcp/catalog/install", {
-		method: "POST",
-		body: { id },
-	});
+	const json = await request(
+		target,
+		"/api/mcp/catalog/install",
+		{ method: "POST", body: { id } },
+		mcpInstalledResponseSchema
+	);
 	if (json.success === false || !json.server) {
 		throw new Error(json.error ?? `Failed to install ${id}`);
 	}
-	return {
-		name: json.server.name,
-		command: json.server.command,
-		url: json.server.url ?? null,
-	};
+	if (
+		json.server.transport === "stdio" &&
+		json.server.command &&
+		json.server.url === null
+	) {
+		return {
+			args: json.server.args,
+			command: json.server.command,
+			name: json.server.name,
+			transport: "stdio",
+			url: null,
+		};
+	}
+	if (
+		json.server.transport === "streamable-http" &&
+		json.server.command === null &&
+		json.server.url
+	) {
+		return {
+			args: [],
+			command: null,
+			name: json.server.name,
+			transport: "streamable-http",
+			url: json.server.url,
+		};
+	}
+	throw new Error("Core returned an invalid MCP install result");
 }
 
 // ── MCP catalog sources (#464) ───────────────────────────────────────────────
@@ -388,12 +543,7 @@ export interface McpCatalogSource {
 	id: string;
 }
 
-interface SourceWire {
-	base_url?: string | null;
-	builtin?: boolean;
-	display_name: string;
-	id: string;
-}
+type SourceWire = z.output<typeof mcpSourceFields>;
 
 /** The active source id plus every source available for the MCP kind. */
 export interface McpCatalogSources {
@@ -414,10 +564,12 @@ function toSource(w: SourceWire): McpCatalogSource {
 export async function fetchMcpSources(
 	target: ApiTarget
 ): Promise<McpCatalogSources> {
-	const json = await request<{
-		active?: string;
-		sources?: SourceWire[];
-	}>(target, "/api/catalog/sources?kind=mcp");
+	const json = await request(
+		target,
+		"/api/catalog/sources?kind=mcp",
+		{},
+		mcpSourcesResponseSchema
+	);
 	return {
 		active: json.active ?? "",
 		sources: (json.sources ?? []).map(toSource),
@@ -429,10 +581,15 @@ export async function selectMcpSource(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(target, "/api/catalog/sources/select", {
-		method: "POST",
-		body: { kind: "mcp", id },
-	});
+	await request(
+		target,
+		"/api/catalog/sources/select",
+		{
+			method: "POST",
+			body: { kind: "mcp", id },
+		},
+		appResponseValueSchema
+	);
 }
 
 // ── Ghost computer-use actions (M7 / issue #201) ─────────────────────────────
@@ -536,10 +693,7 @@ export async function callMcpTool(
 		`${target.url.replace(/\/$/, "")}/api/mcp/tools/call`,
 		{
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				...(target.token ? { Authorization: `Bearer ${target.token}` } : {}),
-			},
+			headers: mcpDispatchHeaders(target),
 			body: JSON.stringify({
 				tool: input.tool,
 				agent_id: input.agentId,
@@ -548,7 +702,7 @@ export async function callMcpTool(
 		}
 	);
 	const text = await resp.text();
-	const parsed = (text ? JSON.parse(text) : {}) as McpCallResult;
+	const parsed = mcpCallResponse.parse(text ? JSON.parse(text) : {});
 	return {
 		ok: parsed.ok ?? resp.ok,
 		output: parsed.output,

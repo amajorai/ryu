@@ -6,6 +6,8 @@
 // conversation and how they ended); creation/status mutation is driven by Core
 // itself during a run, not by the user.
 
+import { z } from "zod";
+
 import {
 	type ApiTarget,
 	apiUrl,
@@ -33,7 +35,7 @@ export interface Session {
 interface SessionWire {
 	conversation_id: string;
 	created_at: number;
-	execution_profile?: ExecutionProfile;
+	execution_profile?: ExecutionProfile | null;
 	id: string;
 	native_session_id?: string | null;
 	parent_session_id?: string | null;
@@ -42,6 +44,38 @@ interface SessionWire {
 	status: SessionStatus;
 	updated_at: number;
 }
+
+const sessionExecutionProfileFields = z.object({
+	approval: z.enum(["inherit", "on_risk", "always", "never"]),
+	cwd: z.string().optional(),
+	kind: z.enum(["local", "worktree", "remote", "cloud"]),
+	network: z.enum(["inherit", "denied", "gateway_only", "allow"]),
+	sandbox: z.enum(["inherit", "workspace", "strict"]),
+	worktreeBranch: z.string().optional(),
+	worktreeIsolation: z.boolean(),
+});
+const sessionExecutionProfileResponse = z.custom<
+	z.output<typeof sessionExecutionProfileFields>
+>((value) => sessionExecutionProfileFields.safeParse(value).success);
+const sessionWireFields = z.object({
+	id: z.string(),
+	conversation_id: z.string(),
+	runnable_id: z.string(),
+	runnable_kind: z.string(),
+	status: z.enum(["idle", "running", "completed", "failed"]),
+	execution_profile: sessionExecutionProfileResponse.nullable().optional(),
+	parent_session_id: z.string().nullable().optional(),
+	native_session_id: z.string().nullable().optional(),
+	created_at: z.number(),
+	updated_at: z.number(),
+});
+const sessionsResponseFields = z.object({
+	conversation_id: z.string().optional(),
+	sessions: z.array(sessionWireFields).nullable().optional(),
+});
+const sessionsResponse = z.custom<z.output<typeof sessionsResponseFields>>(
+	(value) => sessionsResponseFields.safeParse(value).success
+);
 
 function toSession(s: SessionWire): Session {
 	return {
@@ -76,7 +110,7 @@ export async function listSessionsForConversation(
 	if (!resp.ok) {
 		throw new Error(`Failed to load sessions: ${resp.status}`);
 	}
-	const body = (await resp.json()) as { sessions?: SessionWire[] };
+	const body = sessionsResponse.parse(await resp.json());
 	return (body.sessions ?? [])
 		.map(toSession)
 		.sort((a, b) => b.updatedAt - a.updatedAt);

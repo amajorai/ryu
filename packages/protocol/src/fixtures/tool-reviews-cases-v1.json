@@ -1,0 +1,982 @@
+{
+  "version": 1,
+  "now": "2026-10-21T12:00:00.000Z",
+  "submissions": [
+    {
+      "name": "minimal",
+      "input": {
+        "callId": "call_00000000000000000000000000000001",
+        "outcome": "useful",
+        "rating": 5
+      },
+      "ok": true
+    },
+    {
+      "name": "issues and comment",
+      "input": {
+        "callId": "call_00000000000000000000000000000002",
+        "outcome": "partial",
+        "rating": 3,
+        "issues": ["slow", "incomplete"],
+        "comment": "  half the results were empty  "
+      },
+      "ok": true
+    },
+    {
+      "name": "rating zero",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "useful",
+        "rating": 0
+      },
+      "ok": false
+    },
+    {
+      "name": "rating six",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "useful",
+        "rating": 6
+      },
+      "ok": false
+    },
+    {
+      "name": "fractional rating",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "useful",
+        "rating": 4.5
+      },
+      "ok": false
+    },
+    {
+      "name": "unknown outcome",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "great",
+        "rating": 4
+      },
+      "ok": false
+    },
+    {
+      "name": "unknown issue",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "partial",
+        "rating": 2,
+        "issues": ["ugly"]
+      },
+      "ok": false
+    },
+    {
+      "name": "repeated issue",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "partial",
+        "rating": 2,
+        "issues": ["slow", "slow"]
+      },
+      "ok": false
+    },
+    {
+      "name": "five issues",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "not_useful",
+        "rating": 1,
+        "issues": ["slow", "stale", "error", "incomplete", "bad_format"]
+      },
+      "ok": false
+    },
+    {
+      "name": "malformed call id",
+      "input": {
+        "callId": "call_123",
+        "outcome": "useful",
+        "rating": 4
+      },
+      "ok": false
+    },
+    {
+      "name": "receipt id is not a call id",
+      "input": {
+        "callId": "rvx_00000000000000000000000000000003",
+        "outcome": "useful",
+        "rating": 4
+      },
+      "ok": false
+    },
+    {
+      "name": "comment too long",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "useful",
+        "rating": 4,
+        "comment": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "ok": false
+    },
+    {
+      "name": "blank comment",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "useful",
+        "rating": 4,
+        "comment": "   "
+      },
+      "ok": false
+    },
+    {
+      "name": "extra field",
+      "input": {
+        "callId": "call_00000000000000000000000000000003",
+        "outcome": "useful",
+        "rating": 4,
+        "tenant": "org_x"
+      },
+      "ok": false
+    }
+  ],
+  "reviewable": [
+    {
+      "name": "just ran",
+      "callDaysAgo": 0,
+      "reviewable": true
+    },
+    {
+      "name": "thirty days",
+      "callDaysAgo": 30,
+      "reviewable": true
+    },
+    {
+      "name": "thirty-one days",
+      "callDaysAgo": 31,
+      "reviewable": false
+    },
+    {
+      "name": "in the future",
+      "callDaysAgo": -1,
+      "reviewable": false
+    }
+  ],
+  "summaries": [
+    {
+      "name": "nobody",
+      "rows": [],
+      "summaries": {}
+    },
+    {
+      "name": "four reviewers stay hidden",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003ea",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003eb",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003ec",
+          "withdrawn": false
+        }
+      ],
+      "summaries": {
+        "brave.web.search": {
+          "issues": null,
+          "lastReviewAt": null,
+          "minReviewers": 5,
+          "outcomes": null,
+          "rating": null,
+          "reviewers": 4,
+          "reviews": 4,
+          "shown": false
+        }
+      }
+    },
+    {
+      "name": "many reviews from one reviewer stay hidden",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "brave.web.search",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "brave.web.search",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "brave.web.search",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "brave.web.search",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "brave.web.search",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "brave.web.search",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000006",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        }
+      ],
+      "summaries": {
+        "brave.web.search": {
+          "issues": null,
+          "lastReviewAt": null,
+          "minReviewers": 5,
+          "outcomes": null,
+          "rating": null,
+          "reviewers": 1,
+          "reviews": 6,
+          "shown": false
+        }
+      }
+    },
+    {
+      "name": "five reviewers are shown",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "tavily.search.basic",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["slow"],
+          "key": "tavily.search.basic",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003ea",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["incomplete", "slow"],
+          "key": "tavily.search.basic",
+          "outcome": "partial",
+          "rating": 3,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003eb",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["wrong_results"],
+          "key": "tavily.search.basic",
+          "outcome": "not_useful",
+          "rating": 2,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003ec",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-21T12:00:00.000Z",
+          "issues": [],
+          "key": "tavily.search.basic",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003ed",
+          "withdrawn": false
+        }
+      ],
+      "summaries": {
+        "tavily.search.basic": {
+          "issues": [
+            {
+              "issue": "slow",
+              "share": 0.4
+            },
+            {
+              "issue": "incomplete",
+              "share": 0.2
+            },
+            {
+              "issue": "wrong_results",
+              "share": 0.2
+            }
+          ],
+          "lastReviewAt": "2026-10-21T12:00:00.000Z",
+          "minReviewers": 5,
+          "outcomes": {
+            "not_useful": 0.2,
+            "partial": 0.2,
+            "useful": 0.6
+          },
+          "rating": 3.8,
+          "reviewers": 5,
+          "reviews": 5,
+          "shown": true
+        }
+      }
+    },
+    {
+      "name": "each reviewer weighs the same",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_0000000000000000000000000000000a",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_0000000000000000000000000000000b",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_0000000000000000000000000000000c",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_0000000000000000000000000000000d",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_0000000000000000000000000000000e",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_0000000000000000000000000000000f",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000010",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000011",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000012",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "exa.search.fast",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000013",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "exa.search.fast",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003ea",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "exa.search.fast",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003eb",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "exa.search.fast",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003ec",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "exa.search.fast",
+          "outcome": "useful",
+          "rating": 5,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003ed",
+          "withdrawn": false
+        }
+      ],
+      "summaries": {
+        "exa.search.fast": {
+          "issues": [
+            {
+              "issue": "error",
+              "share": 0.2
+            }
+          ],
+          "lastReviewAt": "2026-10-20T12:00:00.000Z",
+          "minReviewers": 5,
+          "outcomes": {
+            "not_useful": 0.2,
+            "partial": 0,
+            "useful": 0.8
+          },
+          "rating": 4.2,
+          "reviewers": 5,
+          "reviews": 14,
+          "shown": true
+        }
+      }
+    },
+    {
+      "name": "withdrawn and old rows are ignored",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "github.GITHUB_GET_AN_ISSUE",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "github.GITHUB_GET_AN_ISSUE",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003ea",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "github.GITHUB_GET_AN_ISSUE",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003eb",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "github.GITHUB_GET_AN_ISSUE",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003ec",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "github.GITHUB_GET_AN_ISSUE",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003ed",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "github.GITHUB_GET_AN_ISSUE",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000014",
+          "reviewer": "000000000000000000000000000003ee",
+          "withdrawn": true
+        },
+        {
+          "at": "2026-07-22T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "github.GITHUB_GET_AN_ISSUE",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000015",
+          "reviewer": "000000000000000000000000000003ef",
+          "withdrawn": false
+        }
+      ],
+      "summaries": {
+        "github.GITHUB_GET_AN_ISSUE": {
+          "issues": [],
+          "lastReviewAt": "2026-10-20T12:00:00.000Z",
+          "minReviewers": 5,
+          "outcomes": {
+            "not_useful": 0,
+            "partial": 0,
+            "useful": 1
+          },
+          "rating": 4,
+          "reviewers": 5,
+          "reviews": 5,
+          "shown": true
+        }
+      }
+    },
+    {
+      "name": "withdrawing one of five hides the summary",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003ea",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003eb",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003ec",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003ed",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003ed",
+          "withdrawn": true
+        }
+      ],
+      "summaries": {
+        "brave.web.search": {
+          "issues": null,
+          "lastReviewAt": null,
+          "minReviewers": 5,
+          "outcomes": null,
+          "rating": null,
+          "reviewers": 4,
+          "reviews": 4,
+          "shown": false
+        }
+      }
+    },
+    {
+      "name": "a repeated review id keeps its last row",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003ea",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003eb",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003ec",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "brave.web.search",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003ed",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["stale"],
+          "key": "brave.web.search",
+          "outcome": "not_useful",
+          "rating": 1,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        }
+      ],
+      "summaries": {
+        "brave.web.search": {
+          "issues": [
+            {
+              "issue": "stale",
+              "share": 0.2
+            }
+          ],
+          "lastReviewAt": "2026-10-20T12:00:00.000Z",
+          "minReviewers": 5,
+          "outcomes": {
+            "not_useful": 0.2,
+            "partial": 0,
+            "useful": 0.8
+          },
+          "rating": 3.4,
+          "reviewers": 5,
+          "reviews": 5,
+          "shown": true
+        }
+      }
+    },
+    {
+      "name": "issue ties sort by name and only three are listed",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["slow", "stale"],
+          "key": "k.v",
+          "outcome": "partial",
+          "rating": 3,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error", "slow"],
+          "key": "k.v",
+          "outcome": "partial",
+          "rating": 3,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003ea",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["bad_format", "stale"],
+          "key": "k.v",
+          "outcome": "partial",
+          "rating": 3,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003eb",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["error"],
+          "key": "k.v",
+          "outcome": "partial",
+          "rating": 3,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003ec",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": ["overpriced"],
+          "key": "k.v",
+          "outcome": "partial",
+          "rating": 3,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003ed",
+          "withdrawn": false
+        }
+      ],
+      "summaries": {
+        "k.v": {
+          "issues": [
+            {
+              "issue": "error",
+              "share": 0.4
+            },
+            {
+              "issue": "slow",
+              "share": 0.4
+            },
+            {
+              "issue": "stale",
+              "share": 0.4
+            }
+          ],
+          "lastReviewAt": "2026-10-20T12:00:00.000Z",
+          "minReviewers": 5,
+          "outcomes": {
+            "not_useful": 0,
+            "partial": 1,
+            "useful": 0
+          },
+          "rating": 3,
+          "reviewers": 5,
+          "reviews": 5,
+          "shown": true
+        }
+      }
+    },
+    {
+      "name": "keys are summarized apart",
+      "rows": [
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "a.one",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000001",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "a.one",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000002",
+          "reviewer": "000000000000000000000000000003ea",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "a.one",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000003",
+          "reviewer": "000000000000000000000000000003eb",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "a.one",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000004",
+          "reviewer": "000000000000000000000000000003ec",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "a.one",
+          "outcome": "useful",
+          "rating": 4,
+          "reviewId": "rvw_00000000000000000000000000000005",
+          "reviewer": "000000000000000000000000000003ed",
+          "withdrawn": false
+        },
+        {
+          "at": "2026-10-20T12:00:00.000Z",
+          "issues": [],
+          "key": "b.two",
+          "outcome": "partial",
+          "rating": 2,
+          "reviewId": "rvw_00000000000000000000000000000009",
+          "reviewer": "000000000000000000000000000003e9",
+          "withdrawn": false
+        }
+      ],
+      "summaries": {
+        "a.one": {
+          "issues": [],
+          "lastReviewAt": "2026-10-20T12:00:00.000Z",
+          "minReviewers": 5,
+          "outcomes": {
+            "not_useful": 0,
+            "partial": 0,
+            "useful": 1
+          },
+          "rating": 4,
+          "reviewers": 5,
+          "reviews": 5,
+          "shown": true
+        },
+        "b.two": {
+          "issues": null,
+          "lastReviewAt": null,
+          "minReviewers": 5,
+          "outcomes": null,
+          "rating": null,
+          "reviewers": 1,
+          "reviews": 1,
+          "shown": false
+        }
+      }
+    }
+  ]
+}

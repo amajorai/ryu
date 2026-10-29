@@ -1,10 +1,12 @@
 import { Alert02Icon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
+} from "@ryu/ui/components/native-select.tsx";
 import {
 	SettingsCard,
 	SettingsSection,
@@ -14,18 +16,18 @@ import type {
 	AgentSafetyProfile,
 } from "@/src/lib/api/agents.ts";
 
-const LIFECYCLE_LABELS: Record<AgentLifecycleStatus, string> = {
+const LIFECYCLE_LABELS = {
 	draft: "Draft",
 	trial: "Trial",
 	active: "Active",
-};
+} satisfies Record<AgentLifecycleStatus, string>;
 
-const SAFETY_LABELS: Record<AgentSafetyProfile, string> = {
+const SAFETY_LABELS = {
 	read_only: "Read-only",
 	approval_required: "Approval required",
 	verified_plan_only: "Verified plans only",
 	autonomous: "Autonomous",
-};
+} satisfies Record<AgentSafetyProfile, string>;
 
 export function AgentExecutionPolicyPanel({
 	disabled,
@@ -33,6 +35,7 @@ export function AgentExecutionPolicyPanel({
 	lifecycleStatus,
 	onLifecycleStatusChange,
 	onSafetyProfileChange,
+	onPostureRetry,
 	postureError,
 	postureSaving,
 	safetyProfile,
@@ -42,10 +45,12 @@ export function AgentExecutionPolicyPanel({
 	lifecycleStatus: AgentLifecycleStatus;
 	onLifecycleStatusChange: (status: AgentLifecycleStatus) => void;
 	onSafetyProfileChange: (profile: AgentSafetyProfile) => void;
+	onPostureRetry?: () => void;
 	postureError?: string | null;
 	postureSaving?: boolean;
 	safetyProfile: AgentSafetyProfile;
 }) {
+	const tl = useLiteralMessages();
 	const activeDisabled = isNew || lifecycleStatus === "draft";
 	const warning =
 		lifecycleStatus === "draft"
@@ -79,7 +84,8 @@ export function AgentExecutionPolicyPanel({
 							disabled={disabled || postureSaving}
 							onChange={(event) =>
 								onLifecycleStatusChange(
-									event.target.value as AgentLifecycleStatus
+									/* SAFETY: NativeSelect forwards this authored select event; its options are exactly draft, trial and active. This is a native UI selection, not a decoder for arbitrary synthetic events. */ event
+										.target.value as AgentLifecycleStatus
 								)
 							}
 							value={lifecycleStatus}
@@ -87,7 +93,7 @@ export function AgentExecutionPolicyPanel({
 							<NativeSelectOption value="draft">Draft</NativeSelectOption>
 							<NativeSelectOption value="trial">Trial</NativeSelectOption>
 							<NativeSelectOption disabled={activeDisabled} value="active">
-								Active{isNew ? " (after Trial save)" : ""}
+								{isNew ? tl("Active (after Trial save)") : tl("Active")}
 							</NativeSelectOption>
 						</NativeSelect>
 					</label>
@@ -98,7 +104,10 @@ export function AgentExecutionPolicyPanel({
 							aria-label="Agent safety profile"
 							disabled={disabled || postureSaving}
 							onChange={(event) =>
-								onSafetyProfileChange(event.target.value as AgentSafetyProfile)
+								onSafetyProfileChange(
+									/* SAFETY: This NativeSelect renders only SAFETY_LABELS keys, checked against AgentSafetyProfile by satisfies. This is a native UI selection, not a decoder for arbitrary synthetic events. */ event
+										.target.value as AgentSafetyProfile
+								)
 							}
 							value={safetyProfile}
 						>
@@ -128,7 +137,18 @@ export function AgentExecutionPolicyPanel({
 					</p>
 				) : null}
 				{postureError ? (
-					<p className="text-status-destructive text-xs">{postureError}</p>
+					<div className="flex items-center gap-2">
+						<p className="text-status-destructive text-xs">{postureError}</p>
+						{onPostureRetry ? (
+							<Button
+								disabled={postureSaving}
+								onClick={onPostureRetry}
+								type="button"
+							>
+								Retry
+							</Button>
+						) : null}
+					</div>
 				) : null}
 			</SettingsCard>
 		</SettingsSection>

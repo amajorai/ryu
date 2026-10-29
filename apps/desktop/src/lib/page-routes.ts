@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/lib/page-routes.ts
 //
 // The surface-agnostic PAGE KEY vocabulary (`chat`, `spaces`, `apps`, …) and the
@@ -21,7 +22,7 @@
  * malicious or stale link (or an agent-chosen key) can't navigate somewhere
  * unexpected. "apps"/"plugins" share the plugins route.
  */
-export const PAGE_ROUTES: Record<string, string> = {
+export const PAGE_ROUTES = {
 	chat: "/chat",
 	// Agents/Spaces/Workflows are consolidated into the unified Library; deep
 	// links open the matching Library tab.
@@ -54,12 +55,13 @@ export const PAGE_ROUTES: Record<string, string> = {
 	store: "/store",
 	calendar: "/calendar",
 };
+const PAGE_ROUTES_BY_KEY = new Map(Object.entries(PAGE_ROUTES));
 
 /**
  * The route a page key names, or `undefined` for a key outside the vocabulary.
  *
  * `hasOwn` + the `typeof` re-check are not belt-and-braces: `PAGE_ROUTES` is an
- * object literal, so a bare `PAGE_ROUTES[page]` resolves `"toString"` and
+ * object literal, so a bare `PAGE_ROUTES_BY_KEY.get(page)` resolves `"toString"` and
  * `"constructor"` up the prototype chain and hands back a FUNCTION. TypeScript
  * types the index access as `string`, so nothing catches it at build time, and the
  * value is truthy — it would sail past every `if (!route)` guard and blow up on
@@ -70,8 +72,8 @@ export function pageRoute(page: string): string | undefined {
 	if (!Object.hasOwn(PAGE_ROUTES, page)) {
 		return undefined;
 	}
-	const path = PAGE_ROUTES[page];
-	return typeof path === "string" ? path : undefined;
+	const path = PAGE_ROUTES_BY_KEY.get(page);
+	return isNativeText(path) ? path : undefined;
 }
 
 /**

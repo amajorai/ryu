@@ -31,7 +31,7 @@ function CheckRow({ label, value }: (typeof CHECKS)[number]) {
 			data-status={value ? "pass" : "fail"}
 		>
 			<span className="text-sm text-white/80">{label}</span>
-			<span className="rounded-full bg-emerald-400/15 px-2.5 py-1 font-medium text-emerald-300 text-xs">
+			<span className="rounded-full bg-success/15 px-2.5 py-1 font-medium text-success text-xs">
 				{value ? "Verified" : "Needs attention"}
 			</span>
 		</li>
@@ -40,10 +40,10 @@ function CheckRow({ label, value }: (typeof CHECKS)[number]) {
 
 function Proof() {
 	return (
-		<main className="min-h-screen bg-[#09090b] px-6 py-12 text-white sm:px-10">
+		<main className="dark min-h-screen bg-background px-6 py-12 text-white sm:px-10">
 			<div className="mx-auto max-w-3xl">
 				<header className="mb-8">
-					<p className="mb-3 font-medium text-cyan-300 text-xs uppercase tracking-[0.24em]">
+					<p className="mb-3 font-medium text-info text-xs uppercase tracking-(--tracking-section)">
 						Ryu · Update proof
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight sm:text-4xl">
@@ -61,7 +61,7 @@ function Proof() {
 				>
 					<div className="flex items-start justify-between gap-4">
 						<div>
-							<p className="text-white/45 text-xs uppercase tracking-[0.18em]">
+							<p className="text-white/45 text-xs uppercase tracking-(--tracking-section)">
 								Release behavior
 							</p>
 							<h2 className="mt-2 font-medium text-xl">
@@ -69,7 +69,7 @@ function Proof() {
 							</h2>
 						</div>
 						<span
-							className="rounded-full bg-emerald-400/15 px-3 py-1.5 font-semibold text-emerald-300 text-xs"
+							className="rounded-full bg-success/15 px-3 py-1.5 font-semibold text-success text-xs"
 							data-testid="proof-status"
 						>
 							Verified
@@ -82,7 +82,7 @@ function Proof() {
 						))}
 					</ul>
 
-					<div className="mt-6 rounded-2xl bg-amber-300/10 p-4 text-amber-100/80 text-sm">
+					<div className="mt-6 rounded-2xl bg-warning/10 p-4 text-sm text-warning/80">
 						Windows may still show a UAC consent prompt when the OS requires
 						administrator approval. The update wizard itself is silent; the app
 						cannot bypass the operating system&apos;s security decision.

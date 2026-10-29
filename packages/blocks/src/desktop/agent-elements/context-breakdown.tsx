@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import {
@@ -8,6 +9,15 @@ import {
 	formatContextPct,
 } from "./context-breakdown-model.ts";
 import type { ContextUsage } from "./context-usage.tsx";
+import styles from "./elements-one.module.css";
+import type { AgentGeometryStyle } from "./elements-one-style.ts";
+import {
+	isPositiveContextCount,
+	nativeContextMax,
+	nativeContextRemaining,
+} from "./native-context-usage.mjs";
+import type { NativeTokenOperand } from "./native-token-count.mjs";
+import { PromptCacheSummary } from "./prompt-cache-summary.tsx";
 
 export type {
 	ContextBreakdownData,
@@ -29,13 +39,21 @@ export type {
  *
  * See `apps/core/src/sidecar/adapters/context_breakdown.rs` for the producer.
  */
-
-function BandRow({ band, total }: { band: ContextBand; total: number }) {
+function BandRow({
+	band,
+	total,
+}: {
+	band: ContextBand;
+	total: NativeTokenOperand;
+}) {
 	return (
 		<div className="flex items-start gap-2.5 py-1.5">
 			<span
 				aria-hidden="true"
-				className={cn("mt-1 size-2.5 shrink-0 rounded-[3px]", band.className)}
+				className={cn(
+					"mt-1 size-2.5 shrink-0 rounded-(--radius-glyph-compact)",
+					band.className
+				)}
 			/>
 			<div className="min-w-0 flex-1">
 				<div className="truncate text-foreground text-xs">{band.label}</div>
@@ -43,15 +61,17 @@ function BandRow({ band, total }: { band: ContextBand; total: number }) {
 					// Wraps rather than truncates: the detail is where the "why" lives
 					// (what the unattributed band is, how many servers the tools came
 					// from), and a clipped explanation is worse than a second line.
-					<div className="text-[11px] text-muted-foreground">{band.detail}</div>
+					<div className="type-caption text-muted-foreground">
+						{band.detail}
+					</div>
 				) : null}
 			</div>
 			<div className="shrink-0 text-right">
 				<div className="font-mono text-foreground text-xs tabular-nums">
 					{formatCount(band.tokens)}
 				</div>
-				{total > 0 ? (
-					<div className="font-mono text-[11px] text-muted-foreground tabular-nums">
+				{isPositiveContextCount(total) ? (
+					<div className="type-caption font-mono text-muted-foreground tabular-nums">
 						{formatContextPct(contextPct(band.tokens, total))}
 					</div>
 				) : null}
@@ -59,7 +79,6 @@ function BandRow({ band, total }: { band: ContextBand; total: number }) {
 		</div>
 	);
 }
-
 function SummaryRow({
 	label,
 	muted,
@@ -83,7 +102,6 @@ function SummaryRow({
 		</div>
 	);
 }
-
 /**
  * The stacked bar. Segments are separated by a 2px surface gap rather than a
  * border so adjacent fills never blend into one another, and the whole bar keeps
@@ -94,11 +112,13 @@ function BreakdownBar({
 	window: windowSize,
 }: {
 	bands: ContextBand[];
-	window: number;
+	window: NativeTokenOperand;
 }) {
-	const drawn =
-		windowSize > 0 ? windowSize : bands.reduce((a, b) => a + b.tokens, 0);
-	if (!(drawn > 0)) {
+	const tl = useLiteralMessages();
+	const drawn = isPositiveContextCount(windowSize)
+		? windowSize
+		: bands.reduce((a, b) => a + b.tokens, 0);
+	if (!isPositiveContextCount(drawn)) {
 		return null;
 	}
 	return (
@@ -114,19 +134,26 @@ function BreakdownBar({
 				return (
 					<div
 						className={cn(
+							styles.width,
 							"h-full first:rounded-l-full last:rounded-r-full",
 							band.className
 						)}
 						key={band.key}
-						style={{ width: `${width}%` }}
-						title={`${band.label} — ${formatCount(band.tokens)} tokens`}
+						style={
+							{
+								"--agent-width": `${width}%`,
+							} satisfies AgentGeometryStyle as AgentGeometryStyle
+						}
+						title={tl("{label} — {tokenCount} tokens", {
+							label: band.label,
+							tokenCount: String(formatCount(band.tokens)),
+						})}
 					/>
 				);
 			})}
 		</div>
 	);
 }
-
 /**
  * Full context breakdown for one conversation.
  *
@@ -147,7 +174,6 @@ export function ContextBreakdownPanel({
 }) {
 	const windowSize = usage?.total || breakdown?.window || 0;
 	const reported = usage?.used ?? 0;
-
 	if (!breakdown) {
 		return (
 			<div
@@ -164,17 +190,23 @@ export function ContextBreakdownPanel({
 			</div>
 		);
 	}
-
 	const bands = contextBands(breakdown, reported);
-	const occupied =
-		reported > 0
-			? Math.max(reported, breakdown.attributed)
-			: breakdown.attributed;
-	const free = Math.max(0, windowSize - occupied);
+	const occupied = isPositiveContextCount(reported)
+		? nativeContextMax(
+				() => reported,
+				() => breakdown.attributed
+			)
+		: breakdown.attributed;
+	const free = nativeContextRemaining(
+		() => windowSize,
+		() => occupied
+	);
 	// Over-estimation: Core attributed MORE than the provider billed. Surfaced as
 	// its own line so the numbers below the bar always add up on inspection.
-	const overEstimate = Math.max(0, breakdown.attributed - reported);
-
+	const overEstimate = nativeContextRemaining(
+		() => breakdown.attributed,
+		() => reported
+	);
 	return (
 		<div
 			className={cn(
@@ -187,14 +219,14 @@ export function ContextBreakdownPanel({
 					<h2 className="font-medium text-foreground text-sm">
 						Context window
 					</h2>
-					{windowSize > 0 ? (
+					{isPositiveContextCount(windowSize) ? (
 						<span className="font-mono text-foreground text-sm tabular-nums">
 							{formatContextPct(contextPct(occupied, windowSize))}
 						</span>
 					) : null}
 				</div>
 				<BreakdownBar bands={bands} window={windowSize} />
-				<p className="text-[11px] text-muted-foreground">
+				<p className="type-caption text-muted-foreground">
 					{breakdown.plane === "acp"
 						? "Estimated — this agent builds part of its own prompt, so Core can only measure what it supplied."
 						: "Estimated from the prompt Core assembled for the last turn."}
@@ -208,7 +240,7 @@ export function ContextBreakdownPanel({
 			</div>
 
 			<div className="flex flex-col gap-1.5 border-border border-t pt-3">
-				{reported > 0 ? (
+				{isPositiveContextCount(reported) ? (
 					<SummaryRow
 						label="Reported by provider"
 						value={formatCount(reported) ?? "—"}
@@ -232,7 +264,7 @@ export function ContextBreakdownPanel({
 						value={`${formatCount(breakdown.reserveOutput)} tokens`}
 					/>
 				) : null}
-				{windowSize > 0 ? (
+				{isPositiveContextCount(windowSize) ? (
 					<SummaryRow
 						label="Free"
 						muted
@@ -240,6 +272,13 @@ export function ContextBreakdownPanel({
 					/>
 				) : null}
 			</div>
+
+			{usage ? (
+				<PromptCacheSummary
+					className="border-border border-t pt-3 text-xs"
+					usage={usage}
+				/>
+			) : null}
 		</div>
 	);
 }

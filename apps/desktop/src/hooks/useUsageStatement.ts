@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-	type CreditsError,
+	CreditsError,
 	fetchUsage,
 	type LedgerEntry,
 	type UsageFilters,
@@ -79,7 +79,14 @@ export function useUsageStatement(): UseUsageStatement {
 					!controller.signal.aborted &&
 					latestOrgId.current === requestOrgId
 				) {
-					setError(err as CreditsError);
+					setError(
+						err instanceof CreditsError
+							? err
+							: new CreditsError(
+									"unknown",
+									err instanceof Error ? err.message : "Could not load usage."
+								)
+					);
 				}
 			} finally {
 				if (
@@ -120,7 +127,14 @@ export function useUsageStatement(): UseUsageStatement {
 					!controller.signal.aborted &&
 					latestOrgId.current === requestOrgId
 				) {
-					setError(err as CreditsError);
+					setError(
+						err instanceof CreditsError
+							? err
+							: new CreditsError(
+									"unknown",
+									err instanceof Error ? err.message : "Could not load usage."
+								)
+					);
 				}
 			})
 			.finally(() => {

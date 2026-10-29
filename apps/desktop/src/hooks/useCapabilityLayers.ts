@@ -1,9 +1,9 @@
 // apps/desktop/src/hooks/useCapabilityLayers.ts
 //
-// Backs the "Layers" block in the node selector: the TOOLKIT capabilities on a
-// node (search / extract / crawl / browser / computer / memory / document parsing
-// / whatever a third-party app declares) plus the swap that pins one to a
-// provider app.
+// Backs the Toolkits and Decision Models blocks in the node selector, plus the
+// plugin tunnel adapters listed inside the VPN layer. Both are
+// capability providers on a node; Core's computed layer flags keep their pickers
+// separate and let either surface pin one provider.
 //
 // Joins Core's `/api/capabilities` read model into one row per capability, with
 // the bound provider resolved from `providers` so a caller never has to do the
@@ -11,7 +11,7 @@
 //
 // Two deliberate behaviours:
 //
-//   - NON-TOOLKIT capabilities are filtered out. `toolkit` is COMPUTED by Core:
+//   - Capabilities assigned to neither picker are filtered out. `toolkit` is COMPUTED by Core:
 //     true when a host facade owns the capability (the verbs, or the parse route,
 //     stay the same whichever provider is bound) or when two or more known
 //     manifests provide it. Anything else is one app's private wiring to its own
@@ -38,6 +38,7 @@ import {
 	setCapabilityBinding,
 } from "@/src/lib/api/capability-layers.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { TUNNEL_CAPABILITY } from "@/src/lib/api/mesh.ts";
 
 /** One toolkit capability, ready to render as a swap layer. */
 export interface CapabilityLayerEntry {
@@ -53,6 +54,8 @@ export interface CapabilityLayerEntry {
 	boundProvider: CapabilityProvider | null;
 	/** The capability name (`"web.search"`, `"memory"`, …). */
 	capability: string;
+	/** True when Core classifies this as a Decision Models capability. */
+	decisionModel: boolean;
 	/** True when the pick is an explicit user override, not Core's auto-pick. */
 	overridden: boolean;
 	/** Every enabled app that provides this capability, sorted by id. */
@@ -70,6 +73,8 @@ export interface CapabilityLayerEntry {
 }
 
 export interface UseCapabilityLayersResult {
+	/** Decision-model capabilities, presented separately from tool selection. */
+	decisionModels: CapabilityLayerEntry[];
 	/** Selectable capabilities only; empty while loading or on an older Core. */
 	layers: CapabilityLayerEntry[];
 	loading: boolean;
@@ -80,6 +85,11 @@ export interface UseCapabilityLayersResult {
 	 * callers should surface `binding_error`, not swallow it.
 	 */
 	select: (capability: string, providerId: string) => Promise<void>;
+	/**
+	 * The `network.tunnel` capability: plugin tunnel adapters. Rendered inside
+	 * the VPN layer, never as its own Toolkit row; `null` when no app provides it.
+	 */
+	tunnel: CapabilityLayerEntry | null;
 }
 
 function capabilityLayersKey(target: ApiTarget) {
@@ -98,31 +108,45 @@ export function useCapabilityLayers(
 	const queryClient = useQueryClient();
 	const query = useQuery({
 		enabled,
-		queryFn: async ({ signal }): Promise<CapabilityLayerEntry[]> => {
+		queryFn: async ({
+			signal,
+		}): Promise<{
+			decisionModels: CapabilityLayerEntry[];
+			layers: CapabilityLayerEntry[];
+			tunnel: CapabilityLayerEntry | null;
+		}> => {
 			// Absent on an older Core → no layers rather than a broken section.
 			const model = await fetchCapabilityLayers(target, signal).catch(
 				() => null
 			);
 			if (!model) {
-				return [];
+				return { layers: [], decisionModels: [], tunnel: null };
 			}
-			// `toolkit`, not `selectable`. The latter is the binder's tie-break flag —
-			// a unanimity check across providers that is trivially true for a sole
-			// provider — so four app-private capabilities were rendering here as
-			// swappable layers.
-			return model.capabilities
-				.filter((c) => c.toolkit)
-				.map(
-					(c): CapabilityLayerEntry => ({
-						available: c.available,
-						bound: c.bound,
-						boundProvider: c.providers.find((p) => p.id === c.bound) ?? null,
-						capability: c.capability,
-						overridden: c.overridden,
-						providers: c.providers,
-						title: c.title,
-					})
-				);
+			const toEntry = (
+				c: (typeof model.capabilities)[number]
+			): CapabilityLayerEntry => ({
+				available: c.available,
+				bound: c.bound,
+				boundProvider: c.providers.find((p) => p.id === c.bound) ?? null,
+				capability: c.capability,
+				decisionModel: c.decisionModel,
+				overridden: c.overridden,
+				providers: c.providers,
+				title: c.title,
+			});
+			// `toolkit` / `decisionModel`, not `selectable`. The latter is the
+			// binder's tie-break flag and is trivially true for a sole provider.
+			const entries = model.capabilities
+				.filter((c) => c.toolkit || c.decisionModel)
+				.map(toEntry);
+			const tunnel = model.capabilities.find(
+				(c) => c.capability === TUNNEL_CAPABILITY
+			);
+			return {
+				layers: entries.filter((entry) => !entry.decisionModel),
+				decisionModels: entries.filter((entry) => entry.decisionModel),
+				tunnel: tunnel ? toEntry(tunnel) : null,
+			};
 		},
 		queryKey: capabilityLayersKey(target),
 		refetchInterval: 30_000,
@@ -155,7 +179,9 @@ export function useCapabilityLayers(
 	);
 
 	return {
-		layers: query.data ?? [],
+		layers: query.data?.layers ?? [],
+		decisionModels: query.data?.decisionModels ?? [],
+		tunnel: query.data?.tunnel ?? null,
 		// `isPending` (not `isLoading`) stays true FOREVER on a disabled query, so a
 		// consumer gated on `enabled` would render a permanent spinner.
 		loading: query.isLoading,

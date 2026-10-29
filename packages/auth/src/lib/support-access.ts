@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Support-access helpers (#545): the user-granted "Grant support access"
 // feature fronting Better Auth's impersonation primitive.
 //
@@ -21,9 +22,6 @@ export const SUPPORT_ACCESS_REQUIRED = "SUPPORT_ACCESS_REQUIRED";
 /** Machine-readable refusal for a support request outside its grant. */
 export const SUPPORT_ACCESS_SCOPE_REQUIRED = "SUPPORT_ACCESS_SCOPE_REQUIRED";
 
-/** The Better Auth endpoint used by the server-side support handoff. */
-export const SUPPORT_ACCESS_AUTH_PATH = "/support/impersonate-user";
-
 /** The only raw-auth operations a support session may use for cleanup/identity. */
 export const SUPPORT_ACCESS_RAW_SAFE_PATHS = new Set([
 	"/admin/stop-impersonating",
@@ -38,6 +36,20 @@ export function isSupportActor(email: string | null | undefined): boolean {
 	return isAdminEmail(email);
 }
 
+/**
+ * True when this signed-in user may ACT as a support actor: the allowlist
+ * names the address and the address is verified. An unverified address (an
+ * SSO- or SCIM-asserted one, or a sign-up before the mailbox link) proves
+ * nothing about who holds it, so it never starts or stops support sessions.
+ * `isSupportActor` alone stays the broader check for refusing TARGETS.
+ */
+export function isVerifiedSupportActor(user: {
+	email?: string | null;
+	emailVerified?: boolean | null;
+}): boolean {
+	return user.emailVerified === true && isSupportActor(user.email);
+}
+
 /** Filter an arbitrary string list down to the known, valid scopes. */
 export function normalizeScopes(
 	input: readonly string[] | undefined | null
@@ -45,12 +57,15 @@ export function normalizeScopes(
 	if (!input) {
 		return [];
 	}
-	const valid = new Set<string>(SUPPORT_ACCESS_SCOPES);
 	const out: SupportAccessScope[] = [];
 	for (const raw of input) {
-		const s = typeof raw === "string" ? raw.trim() : "";
-		if (valid.has(s) && !out.includes(s as SupportAccessScope)) {
-			out.push(s as SupportAccessScope);
+		const parsed = z
+			.string()
+			.trim()
+			.pipe(z.enum(SUPPORT_ACCESS_SCOPES))
+			.safeParse(raw);
+		if (parsed.success && !out.includes(parsed.data)) {
+			out.push(parsed.data);
 		}
 	}
 	return out;
@@ -68,7 +83,7 @@ export function resolveGrantExpiry(
 	const maxMinutes = SUPPORT_ACCESS_MAX_DURATION_MS / 60_000;
 	let minutes = maxMinutes;
 	if (
-		typeof durationMinutes === "number" &&
+		durationMinutes != null &&
 		Number.isFinite(durationMinutes) &&
 		durationMinutes > 0
 	) {
@@ -267,7 +282,7 @@ export async function resolveSupportAccessSession(
 	if (!startedAt || startedAt.getTime() > now.getTime()) {
 		return null;
 	}
-	if (typeof audit.reason !== "string" || !audit.reason.trim()) {
+	if (!z.string().trim().min(1).safeParse(audit.reason).success) {
 		return null;
 	}
 
@@ -283,7 +298,7 @@ export async function resolveSupportAccessSession(
 	const grantScopes = normalizeScopes(grant.scopes);
 	const rawGrantScopes = Array.isArray(grant.scopes) ? grant.scopes : [];
 	const normalizedRawGrantScopes = rawGrantScopes
-		.filter((value): value is string => typeof value === "string")
+		.filter((value) => z.string().safeParse(value).success)
 		.map((value) => value.trim());
 	// Grant rows are authorization state. Treat an unknown, duplicate, or
 	// malformed persisted scope as invalid instead of silently shrinking it to a
@@ -301,7 +316,7 @@ export async function resolveSupportAccessSession(
 	// instead of silently shrinking the reviewer's requested boundary.
 	const rawAuditScopes = Array.isArray(audit.scopes) ? audit.scopes : [];
 	const normalizedRawAuditScopes = rawAuditScopes
-		.filter((value): value is string => typeof value === "string")
+		.filter((value) => z.string().safeParse(value).success)
 		.map((value) => value.trim());
 	if (
 		auditScopes.length === 0 ||
@@ -313,7 +328,7 @@ export async function resolveSupportAccessSession(
 	}
 
 	if (
-		typeof audit.actorEmail !== "string" ||
+		audit.actorEmail == null ||
 		!audit.actorEmail.trim() ||
 		!isSupportActor(audit.actorEmail)
 	) {
@@ -324,7 +339,15 @@ export async function resolveSupportAccessSession(
 		actorId,
 		auditId,
 		expiresAt: sessionExpiresAt,
-		grantExpiresAt: new Date(grant.expiresAt as Date | string),
+		grantExpiresAt: z
+			.union([
+				z.date(),
+				z
+					.string()
+					.transform((value) => new Date(value))
+					.pipe(z.date()),
+			])
+			.parse(grant.expiresAt),
 		grantId: auditGrantId,
 		reason: audit.reason ?? "",
 		scopes: auditScopes,

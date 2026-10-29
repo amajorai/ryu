@@ -7,4 +7,4 @@ export {
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
-} from "@ryu/blocks/desktop/settings-items";
+} from "@ryu/blocks/desktop/settings-items.tsx";

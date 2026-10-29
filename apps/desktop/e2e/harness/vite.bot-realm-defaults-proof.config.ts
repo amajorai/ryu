@@ -30,4 +30,6 @@ export default defineConfig({
 		port,
 		strictPort: true,
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

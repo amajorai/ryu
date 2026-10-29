@@ -11,6 +11,7 @@
 // behaviour; `className` overrides keep the compact, near-black glass look the
 // overlay is tuned for.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import { Switch } from "@ryu/ui/components/switch";
@@ -21,11 +22,11 @@ const FIELD_CLASS =
 
 export type IslandConsentCapability = "chat" | "contextRead" | "proactive";
 
-const TOGGLE_COPY: Record<IslandConsentCapability, string> = {
+const TOGGLE_COPY = {
 	chat: "Chat with Core",
 	contextRead: "Read screen context",
 	proactive: "Proactive suggestions",
-};
+} satisfies Record<IslandConsentCapability, string>;
 
 const CAPABILITIES: IslandConsentCapability[] = [
 	"chat",
@@ -85,11 +86,11 @@ export interface SettingsPanelViewProps {
 	version?: string | null;
 }
 
-const DEFAULT_CONSENT: Record<IslandConsentCapability, boolean | null> = {
+const DEFAULT_CONSENT = {
 	chat: true,
 	contextRead: true,
 	proactive: false,
-};
+} satisfies Record<IslandConsentCapability, boolean | null>;
 
 const DEFAULT_SETTINGS: IslandSettingsView = {
 	coreUrl: "http://localhost:7980",
@@ -120,6 +121,7 @@ export function SettingsPanelView({
 	onSaveEngine = noop,
 	onQuitAndInstall = noop,
 }: SettingsPanelViewProps) {
+	const tl = useLiteralMessages();
 	return (
 		<div className="flex flex-col gap-4">
 			<section className="flex flex-col gap-2 rounded-2xl bg-card p-3">
@@ -137,42 +139,42 @@ export function SettingsPanelView({
 			<section className="flex flex-col gap-2 rounded-2xl bg-card p-3">
 				<h3 className="font-medium text-foreground text-xs">Connections</h3>
 				<label
-					className="flex flex-col gap-1 text-[11px] text-muted-foreground"
+					className="type-caption flex flex-col gap-1 text-muted-foreground"
 					htmlFor="island-core-url"
 				>
 					Core URL
 					<Input
-						className={FIELD_CLASS}
 						defaultValue={settings.coreUrl}
 						id="island-core-url"
 						onBlur={onSaveEndpoints}
 						onChange={(event) => onChangeCoreUrl(event.target.value)}
 						type="text"
+						variant="island-settings"
 					/>
 				</label>
-				<div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+				<div className="type-caption flex flex-col gap-1 text-muted-foreground">
 					<span>Shadow URL</span>
 					<span className={`${FIELD_CLASS} text-muted-foreground`}>
 						{settings.shadowUrl}
 					</span>
-					<span className="text-[10px] text-muted-foreground">
+					<span className="type-compact text-muted-foreground">
 						Local only — Shadow captures this device and can't be repointed at
 						another node.
 					</span>
 				</div>
 				<label
-					className="flex flex-col gap-1 text-[11px] text-muted-foreground"
+					className="type-caption flex flex-col gap-1 text-muted-foreground"
 					htmlFor="island-core-token"
 				>
 					Core token (optional)
 					<Input
-						className={FIELD_CLASS}
 						defaultValue={settings.coreToken ?? ""}
 						id="island-core-token"
 						onBlur={onSaveEndpoints}
 						onChange={(event) => onChangeCoreToken(event.target.value)}
 						placeholder="RYU_TOKEN"
 						type="password"
+						variant="island-settings"
 					/>
 				</label>
 			</section>
@@ -182,41 +184,43 @@ export function SettingsPanelView({
 					Suggestion engine
 				</h3>
 				<label
-					className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground"
+					className="type-caption flex items-center justify-between gap-2 text-muted-foreground"
 					htmlFor="island-poll"
 				>
 					Poll interval (s)
 					<Input
-						className={`w-20 ${FIELD_CLASS}`}
+						className="w-20"
 						defaultValue={String(settings.pollIntervalSeconds)}
 						id="island-poll"
 						min={1}
 						onBlur={onSaveEngine}
 						onChange={(event) => onChangePoll(event.target.value)}
 						type="number"
+						variant="island-settings"
 					/>
 				</label>
 				<label
-					className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground"
+					className="type-caption flex items-center justify-between gap-2 text-muted-foreground"
 					htmlFor="island-cooldown"
 				>
 					Cooldown (s)
 					<Input
-						className={`w-20 ${FIELD_CLASS}`}
+						className="w-20"
 						defaultValue={String(settings.cooldownSeconds)}
 						id="island-cooldown"
 						min={1}
 						onBlur={onSaveEngine}
 						onChange={(event) => onChangeCooldown(event.target.value)}
 						type="number"
+						variant="island-settings"
 					/>
 				</label>
 			</section>
 
 			<section className="flex flex-col gap-2 rounded-2xl bg-card p-3">
 				<h3 className="font-medium text-foreground text-xs">Updates</h3>
-				<p className="text-[11px] text-muted-foreground">
-					Version {version ?? "…"}
+				<p className="type-caption text-muted-foreground">
+					{tl("Version {version}", { version: version ?? "…" })}
 				</p>
 				<label
 					className="flex items-center justify-between gap-3 text-foreground text-xs"
@@ -236,8 +240,11 @@ export function SettingsPanelView({
 						onClick={onQuitAndInstall}
 						size="xs"
 					>
-						Restart to update
-						{updateReady.version ? ` (${updateReady.version})` : ""}
+						{updateReady.version
+							? tl("Restart to update ({version})", {
+									version: updateReady.version,
+								})
+							: tl("Restart to update")}
 					</Button>
 				) : null}
 			</section>

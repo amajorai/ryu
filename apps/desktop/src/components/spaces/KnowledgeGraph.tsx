@@ -9,11 +9,11 @@ import { useMemo } from "react";
 import type { DocGraph } from "@/src/lib/api/spaces.ts";
 import { layoutForceGraph } from "@/src/lib/force-directed-graph.ts";
 
-const EDGE_COLOR: Record<string, string> = {
-	wiki: "var(--primary)",
-	mention: "#3b82f6",
-	parent: "var(--muted-foreground)",
-};
+const EDGE_COLOR = new Map<string, string>([
+	["wiki", "var(--primary)"],
+	["mention", "#3b82f6"],
+	["parent", "var(--muted-foreground)"],
+]);
 
 function nodeStyle(kind: string, pending: boolean): React.CSSProperties {
 	if (pending) {
@@ -81,7 +81,7 @@ export function KnowledgeGraph({
 				target: edge.dst,
 				animated: false,
 				style: {
-					stroke: EDGE_COLOR[edge.kind] ?? "var(--border)",
+					stroke: EDGE_COLOR.get(edge.kind) ?? "var(--border)",
 					strokeDasharray: edge.kind === "parent" ? "4 4" : undefined,
 				},
 			})),

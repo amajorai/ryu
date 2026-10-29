@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // Edit a project folder's display name + AGENTS.md instructions. Loads any
 // existing AGENTS.md / agents.md / CLAUDE.md from the folder; first save creates
 // AGENTS.md when none exists. Uses the same Plate MarkdownEditor as Spaces pages.
@@ -24,7 +26,7 @@ import {
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEffect, useRef, useState } from "react";
@@ -104,6 +106,7 @@ export function ProjectSettingsDialog({
 	const [filePath, setFilePath] = useState<string | null>(null);
 	const [existed, setExisted] = useState(false);
 	const [loadError, setLoadError] = useState<string | null>(null);
+	const [saveError, setSaveError] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	const markdownRef = useRef("");
 	const [environments, setEnvironments] = useState<ProjectEnvironment[]>([]);
@@ -144,6 +147,7 @@ export function ProjectSettingsDialog({
 		setSourceFolders(currentProject?.folders ?? [path]);
 		setMarkdown(null);
 		setLoadError(null);
+		setSaveError(null);
 		setFileName("AGENTS.md");
 		setFilePath(null);
 		setExisted(false);
@@ -154,15 +158,11 @@ export function ProjectSettingsDialog({
 			storedActiveEnvironment ?? nextEnvironments[0]?.id ?? null;
 		setActiveEnvironmentId(nextActive);
 		setEditingEnvironmentId(nextActive);
-		request<{
-			mappings: Array<{
-				organizationId: string;
-				projectId: string;
-				root: string;
-			}>;
-		}>(
+		request(
 			{ url: node.url, token: node.token, userJwt: node.userJwt ?? null },
-			"/api/org-project-mappings"
+			"/api/org-project-mappings",
+			undefined,
+			projectRootMappingsResponseSchema
 		)
 			.then(({ mappings }) => {
 				const mapping = mappings.find((item) => item.root === root) ?? null;
@@ -253,6 +253,7 @@ export function ProjectSettingsDialog({
 		}
 		const targetPath =
 			filePath ?? joinPath(projectRoot, fileName || "AGENTS.md");
+		setSaveError(null);
 		setSaving(true);
 		try {
 			await writeProjectFile(targetPath, markdownRef.current);
@@ -262,23 +263,33 @@ export function ProjectSettingsDialog({
 				userJwt: node.userJwt ?? null,
 			};
 			if (mappingOrganizationId.trim() && mappingProjectId.trim()) {
-				await request(apiTarget, "/api/org-project-mappings", {
-					body: {
-						organizationId: mappingOrganizationId.trim(),
-						projectId: mappingProjectId.trim(),
-						root: projectRoot,
+				await request(
+					apiTarget,
+					"/api/org-project-mappings",
+					{
+						body: {
+							organizationId: mappingOrganizationId.trim(),
+							projectId: mappingProjectId.trim(),
+							root: projectRoot,
+						},
+						method: "PUT",
 					},
-					method: "PUT",
-				});
+					gatewayJsonValueSchema
+				);
 			} else if (loadedMapping) {
 				const query = new URLSearchParams({
 					organizationId: loadedMapping.organizationId,
 					projectId: loadedMapping.projectId,
 					root: projectRoot,
 				});
-				await request(apiTarget, `/api/org-project-mappings?${query}`, {
-					method: "DELETE",
-				});
+				await request(
+					apiTarget,
+					`/api/org-project-mappings?${query}`,
+					{
+						method: "DELETE",
+					},
+					gatewayJsonValueSchema
+				);
 			}
 			// Empty / basename-equal clears the override so the leaf stays the source of truth.
 			setProjectName(
@@ -302,9 +313,12 @@ export function ProjectSettingsDialog({
 			);
 		} catch (e) {
 			console.error("Failed to save project settings", e);
+			setSaveError(
+				"Couldn't save project settings. Check that the project folder and node are writable, then try again."
+			);
 			toast.error("Couldn't save project settings", {
 				description:
-					"Something went wrong writing AGENTS.md. Please try again.",
+					"Check that the project folder and node are writable, then try again.",
 			});
 		} finally {
 			setSaving(false);
@@ -314,24 +328,34 @@ export function ProjectSettingsDialog({
 	return (
 		<>
 			<Dialog onOpenChange={onOpenChange} open={open}>
-				<DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
-					<DialogHeader className="shrink-0 space-y-1.5 border-b px-6 py-4">
+				<DialogContent appearance="project-settings">
+					<DialogHeader className="shrink-0" purpose="project-settings">
 						<DialogTitle>Edit project</DialogTitle>
 						<DialogDescription>
 							Set how this folder appears in the sidebar and the instructions
 							agents read from{" "}
-							<code className="rounded bg-muted px-1 font-mono text-[11px]">
+							<code className="type-caption rounded bg-muted px-1 font-mono">
 								{fileName}
 							</code>
 							.
 						</DialogDescription>
 					</DialogHeader>
+					{saveError ? (
+						<div className="shrink-0 px-6 pt-3">
+							<p
+								className="rounded-md border border-status-destructive/40 bg-status-destructive/10 px-3 py-2 text-sm text-status-destructive"
+								role="alert"
+							>
+								{saveError}
+							</p>
+						</div>
+					) : null}
 
 					<div className="scroll-fade flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
 						<div className="flex flex-col gap-1.5">
 							<Label htmlFor="project-settings-name">Name</Label>
 							<Input
-								// biome-ignore lint/a11y/noAutofocus: dialog opened by explicit user action
+								// dialog opened by explicit user action
 								autoFocus
 								disabled={saving}
 								id="project-settings-name"
@@ -392,8 +416,8 @@ export function ProjectSettingsDialog({
 											)}
 											{index > 0 && (
 												<Button
+													appearance="plain-label"
 													aria-label={`Make ${folder} primary`}
-													className="font-normal"
 													disabled={saving}
 													onClick={() =>
 														setSourceFolders((current) =>
@@ -439,13 +463,13 @@ export function ProjectSettingsDialog({
 										type="button"
 									>
 										<HugeiconsIcon className="size-4" icon={SourceCodeIcon} />
-										Clone from GitHub
+										Clone from Git
 									</button>
 								</div>
 							</div>
 						</section>
 
-						<div className="flex min-h-0 flex-col gap-1.5">
+						<div className="flex shrink-0 flex-col gap-1.5">
 							<Label htmlFor="project-settings-instructions">
 								Instructions
 								{!existed && markdown !== null ? (
@@ -458,12 +482,10 @@ export function ProjectSettingsDialog({
 								<p className="text-sm text-status-destructive">{loadError}</p>
 							) : null}
 							{markdown === null ? (
-								<div className="flex min-h-48 items-center justify-center rounded-md border">
-									<Spinner className="size-5" />
-								</div>
+								<SkeletonRows rows={6} spacing="library" />
 							) : (
 								<div
-									className="overflow-hidden rounded-md border"
+									className="min-h-48 shrink-0 overflow-hidden rounded-md border"
 									id="project-settings-instructions"
 								>
 									<MarkdownEditor
@@ -478,11 +500,11 @@ export function ProjectSettingsDialog({
 							)}
 							<p className="text-muted-foreground text-xs">
 								Same editor as Spaces pages. Agents pick up{" "}
-								<code className="rounded bg-muted px-1 font-mono text-[11px]">
+								<code className="type-caption rounded bg-muted px-1 font-mono">
 									AGENTS.md
 								</code>{" "}
 								(or an existing{" "}
-								<code className="rounded bg-muted px-1 font-mono text-[11px]">
+								<code className="type-caption rounded bg-muted px-1 font-mono">
 									CLAUDE.md
 								</code>
 								) at the project root.
@@ -623,16 +645,18 @@ export function ProjectSettingsDialog({
 						</section>
 					</div>
 
-					<DialogFooter className="shrink-0 justify-between border-t px-6 py-4">
+					<DialogFooter
+						className="shrink-0 justify-between"
+						purpose="panel-actions"
+					>
 						<Button
-							className="text-status-destructive hover:text-status-destructive"
 							disabled={saving}
 							onClick={() => {
 								removeProject(project?.id ?? projectRoot);
 								onOpenChange(false);
 							}}
 							type="button"
-							variant="ghost"
+							variant="destructive"
 						>
 							Remove local project
 						</Button>
@@ -769,7 +793,6 @@ function EnvironmentEditor({
 					<div className="flex gap-2" key={variable.id}>
 						<Input
 							aria-label="Variable name"
-							className="font-mono"
 							onChange={(event) =>
 								onChange({
 									...environment,
@@ -782,10 +805,10 @@ function EnvironmentEditor({
 							}
 							placeholder="DATABASE_URL"
 							value={variable.key}
+							variant="code"
 						/>
 						<Input
 							aria-label="Variable value"
-							className="font-mono"
 							onChange={(event) =>
 								onChange({
 									...environment,
@@ -798,6 +821,7 @@ function EnvironmentEditor({
 							}
 							placeholder="value"
 							value={variable.value}
+							variant="code"
 						/>
 						<Button
 							aria-label={`Remove ${variable.key || "variable"}`}
@@ -951,10 +975,7 @@ function ScriptEditor({
 				))}
 			</div>
 			<Textarea
-				className={cn(
-					"resize-y font-mono text-xs",
-					compact ? "min-h-20" : "min-h-28"
-				)}
+				className={cn("resize-y", compact ? "min-h-20" : "min-h-28")}
 				onChange={(event) =>
 					onChange({ ...scripts, [platform]: event.target.value })
 				}
@@ -965,7 +986,20 @@ function ScriptEditor({
 				}
 				spellCheck={false}
 				value={scripts[platform]}
+				variant="code-caption"
 			/>
 		</div>
 	);
 }
+
+const projectRootMappingResponseSchema = z
+	.object({
+		organizationId: z.string(),
+		projectId: z.string(),
+		root: z.string(),
+	})
+	.passthrough();
+
+const projectRootMappingsResponseSchema = z
+	.object({ mappings: z.array(projectRootMappingResponseSchema) })
+	.passthrough();

@@ -15,9 +15,8 @@
 //   • the group dividers (non-tab spans inside the tab list) do not swallow
 //     arrow-key focus;
 //   • the scrolled-edge fade engages ONLY while that edge has more to show
-//     (`data-edges`: none → end → both → start), and an overflowing edge also
-//     reveals the compact rounded popover controls that replaced the strip's
-//     visible scrollbars;
+//     (`data-edges`: none → end → both → start), and directional arrows page
+//     the strip while staying disabled at the corresponding edge;
 //   • NEITHER scrollbar is reachable on the strip: the old code hid them with a
 //     `scrollbar-none` class defined in no stylesheet, and left `overflow-y` to
 //     resolve to `auto` beside a non-visible `overflow-x`;
@@ -340,7 +339,7 @@ test.describe("store section tabs — pills, edges, and the global search", () =
 		// In the flow, not floated over the content: the retired bottom bar was
 		// `absolute`, and that is what forced every section to reserve its height.
 		const positioned = await input.evaluate((el) => {
-			let node: HTMLElement | null = el as HTMLElement;
+			let node: Element | null = el;
 			while (node && node.getAttribute("data-testid") !== "page-shell") {
 				if (getComputedStyle(node).position === "absolute") {
 					return true;
@@ -370,6 +369,9 @@ test.describe("store section tabs — pills, edges, and the global search", () =
 	test("the strip shows neither scrollbar", async ({ page }) => {
 		await page.goto(STORY_URL);
 		const metrics = await narrowScroller(page).evaluate((el) => {
+			if (!(el instanceof HTMLElement)) {
+				throw new Error("Store strip must be a native HTML element");
+			}
 			const s = getComputedStyle(el);
 			return {
 				gutterX: el.offsetHeight - el.clientHeight,
@@ -382,7 +384,7 @@ test.describe("store section tabs — pills, edges, and the global search", () =
 		expect(metrics.gutterY).toBeLessThanOrEqual(1);
 	});
 
-	test("an overflowing edge offers rounded popover controls that page the strip", async ({
+	test("an overflowing edge offers directional arrows that page the strip", async ({
 		page,
 	}, testInfo) => {
 		await page.goto(STORY_URL);
@@ -391,27 +393,18 @@ test.describe("store section tabs — pills, edges, and the global search", () =
 			timeout: 10_000,
 		});
 		const panel = page.getByTestId("narrow-panel");
-		const trigger = panel.getByRole("button", {
-			name: "Open tab scroll controls",
+		const controls = panel.getByRole("group", {
+			name: "Tab scrolling controls",
 		});
-		await expect(trigger).toHaveCount(1);
-		// At rest it is invisible; the strip's hover is what reveals the compact
-		// trigger and its two-button popover.
-		expect(await trigger.evaluate((el) => getComputedStyle(el).opacity)).toBe(
-			"0"
-		);
-		await scroller.hover();
-		const controls = page.locator('[data-slot="tabs-overflow-controls"]');
 		await expect(controls).toBeVisible();
 		const backward = controls.getByRole("button", { name: "Scroll tabs left" });
 		const forward = controls.getByRole("button", { name: "Scroll tabs right" });
 		await expect(backward).toBeDisabled();
 		await expect(forward).toBeEnabled();
-		await expect(controls).toHaveClass(/rounded-full/);
-		await expect(backward).toHaveClass(/rounded-full/);
-		await expect(forward).toHaveClass(/rounded-full/);
+		await expect(backward).toHaveClass(/rounded-l-full/);
+		await expect(forward).toHaveClass(/rounded-r-full/);
 		await page.screenshot({
-			path: testInfo.outputPath("tabs-overflow-controls-proof.png"),
+			path: testInfo.outputPath("tabs-overflow-arrows-proof.png"),
 		});
 		const before = await scroller.evaluate((el) => el.scrollLeft);
 		await forward.click();
@@ -425,9 +418,9 @@ test.describe("store section tabs — pills, edges, and the global search", () =
 	test("a strip that fits offers no overflow controls", async ({ page }) => {
 		await page.goto(STORY_URL);
 		await expect(
-			page
-				.locator('[data-testid="wide-panel"]')
-				.getByRole("button", { name: "Open tab scroll controls" })
+			page.locator(
+				'[data-testid="wide-panel"] [data-slot="tabs-overflow-controls"]'
+			)
 		).toHaveCount(0);
 	});
 

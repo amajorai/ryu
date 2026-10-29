@@ -1,13 +1,13 @@
 export {
 	AgentProgress,
 	type AgentProgressProps,
-} from "./agent-progress";
+} from "./agent-progress.tsx";
 export {
 	ReasoningText,
 	type ReasoningTextProps,
 	type ReasoningTextVariant,
-} from "./reasoning-text";
+} from "./reasoning-text.tsx";
 export {
 	ThinkingShimmer,
 	type ThinkingShimmerProps,
-} from "./thinking-shimmer";
+} from "./thinking-shimmer.tsx";

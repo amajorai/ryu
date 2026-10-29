@@ -2,7 +2,20 @@
 // Injected globals: `input`, `defaults`, `callTool`, and `callNamed`.
 // This flat fragment runs inside Core's generated async adapter IIFE.
 
-const url = typeof input.url === "string" ? input.url.trim() : "";
+// Decode the JSON input as a string without coercing numbers, arrays, or objects.
+function parseUrl(raw) {
+	if (typeof raw !== "string") {
+		throw new TypeError("Expected a string");
+	}
+	return raw.trim();
+}
+
+let url;
+try {
+	url = parseUrl(input.url);
+} catch {
+	url = "";
+}
 if (!url) {
 	return { error: "url is required" };
 }
@@ -22,8 +35,12 @@ try {
 	snapshot = { content: text ?? "" };
 }
 return {
+	// The capability projects page content, not arbitrary provider-owned fields.
+	// Preserve the complete response in raw and an opaque snapshot when it has no content.
+	content: snapshot?.content === undefined ? snapshot : snapshot.content,
+	// The caller-selected URL is the capability identity. Provider content is
+	// untrusted and must not redirect the returned handle by shadowing these keys.
 	tab_id: url,
 	url,
-	...(snapshot && typeof snapshot === "object" ? snapshot : { content: snapshot }),
 	raw,
 };

@@ -1,0 +1,6 @@
+.rect {
+	top: var(--annotation-top);
+	left: var(--annotation-left);
+	width: var(--annotation-width);
+	height: var(--annotation-height);
+}

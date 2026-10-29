@@ -11,9 +11,12 @@
 //!     (Homebrew / `pip install git+…`) — see [`installer`].
 //!   - It serves **nothing until a model is present** in its model dir, so a
 //!     freshly-activated oMLX is an empty engine until the user adds a model
-//!     (via oMLX's own `/admin` dashboard or by populating `~/.omlx/models`).
-//!   - The exact `omlx serve` flag surface is **unverified here** (no Apple
-//!     Silicon node to test on); we pass only the documented `--model-dir`.
+//!     (via oMLX's own `/admin` dashboard or by populating `models/chat/omlx/`
+//!     in the Ryu data dir, or `RYU_OMLX_MODEL_DIR`).
+//!   - Core passes `serve --model-dir <dir>` and pins the loopback host and
+//!     port through `OMLX_HOST`/`OMLX_PORT`. Saved native options (verified
+//!     against oMLX v0.7.1rc1's `serve` parser and settings overrides) are
+//!     mostly `OMLX_*` environment; see [`process`].
 
 pub mod installer;
 pub mod process;
@@ -25,6 +28,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 
+use super::engine_child;
+use super::readiness;
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 use process::DEFAULT_PORT;
 
@@ -78,8 +83,27 @@ impl Sidecar for OmlxManager {
         let port = self.port;
         let process = Arc::clone(&self.process);
         let running = Arc::clone(&self.running);
+        let client = self.client.clone();
 
         Box::pin(async move {
+            // Never respawn a resident engine: storing a new child drops the
+            // serving one (spawned with kill_on_drop(false)), orphaning it with
+            // its port and GPU memory. A child still loading after an earlier
+            // readiness timeout is waited on again. Model switches stop first
+            // (restart_sidecar / set_active_local_engine).
+            if engine_child::held_child_is_running(&process) {
+                engine_child::wait_for_listener(
+                    &process,
+                    port,
+                    "oMLX",
+                    engine_child::READY_TIMEOUT,
+                )
+                .await?;
+                running.store(true, Ordering::Relaxed);
+                tracing::info!("omlx already running — nothing to start");
+                return Ok(());
+            }
+
             // Node-gate: oMLX only runs on Apple Silicon.
             installer::ensure_supported().context("oMLX is not supported on this node")?;
 
@@ -94,22 +118,30 @@ impl Sidecar for OmlxManager {
             let model_dir = model_dir.unwrap_or_else(process::default_model_dir);
             tracing::info!("starting omlx (model-dir {model_dir}) on port {port}");
 
-            let mut proc = OmlxProcess::new(binary, model_dir);
+            let launch = super::engine_launch_config("omlx").await;
+            // vLLM shares oMLX's default :8000; refuse rather than let a stale
+            // or foreign listener answer for the new child.
+            readiness::ensure_port_free("omlx", port).await?;
+            let mut proc = OmlxProcess::new(binary, model_dir).with_launch(launch);
             proc.start().await.context("spawning oMLX process")?;
             *process.lock().unwrap() = Some(proc);
 
-            // Wait up to 120 s for the HTTP server to become reachable.
-            let addr = format!("127.0.0.1:{port}");
-            tokio::time::timeout(std::time::Duration::from_secs(120), async {
-                loop {
-                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            // Readiness is the live child answering `/v1/models`. oMLX is a
+            // multi-model server that starts empty, so no model id is required.
+            let probe = readiness::ReadyProbe {
+                engine: "omlx",
+                port,
+                health_path: None,
+                expected_model: None,
+                timeout: std::time::Duration::from_secs(120),
+            };
+            if let Err(error) = readiness::wait_for_child(&client, &probe, &process).await {
+                let failed_child = process.lock().unwrap().take();
+                if let Some(mut child) = failed_child {
+                    let _ = child.stop().await;
                 }
-            })
-            .await
-            .context("oMLX did not start within 120 s")?;
+                return Err(error).context("oMLX readiness check failed");
+            }
 
             running.store(true, Ordering::Relaxed);
             tracing::info!("omlx started");
@@ -158,17 +190,63 @@ impl Sidecar for OmlxManager {
         guard.as_mut().map(|p| p.is_running()).unwrap_or(false)
     }
 
-    fn uninstall(&self, _delete_data: bool) -> crate::sidecar::BoxFuture<anyhow::Result<()>> {
+    fn uninstall(&self, delete_data: bool) -> crate::sidecar::BoxFuture<anyhow::Result<()>> {
         Box::pin(async move {
             // oMLX is user-installed (Homebrew / pip-git / .dmg); we don't own the
             // install, so we only drop our version record and leave removal to the
-            // user's package manager (mirrors the Tailscale adopt model).
+            // user's package manager (mirrors the Tailscale adopt model). With
+            // `delete_data`, only Ryu's own model store goes.
             crate::sidecar::remove_from_version_store(installer::VERSION_KEY);
+            if delete_data {
+                crate::sidecar::remove_dir(&process::ryu_model_dir()).await;
+            }
             tracing::info!(
                 "oMLX version record cleared; remove the binary via your installer \
                  (e.g. `brew uninstall omlx`) if desired"
             );
             Ok(())
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// A second start (start-all, the services panel) while the engine is
+    /// resident keeps the serving child instead of spawning a competitor that
+    /// would replace, and so orphan, it. Returning before install also proves
+    /// no spawn path ran.
+    #[tokio::test]
+    async fn start_keeps_a_live_engine_instead_of_respawning() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mgr = {
+            let mut mgr = OmlxManager::new();
+            mgr.port = port;
+            mgr
+        };
+        let child = tokio::process::Command::new("/bin/sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn sleeping child fixture");
+        *mgr.process.lock().unwrap() = Some(OmlxProcess::from_child_for_test(child));
+        let pid = || {
+            mgr.process
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(OmlxProcess::pid)
+        };
+        let serving = pid();
+        assert!(serving.is_some());
+
+        mgr.start().await.expect("a live engine is already started");
+        assert_eq!(pid(), serving, "the serving child must not be replaced");
+        assert!(mgr.is_running());
+
+        mgr.stop().await.expect("stop the fixture child");
+        assert!(!mgr.is_running());
     }
 }

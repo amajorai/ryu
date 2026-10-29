@@ -1,20 +1,13 @@
 import { expect, test } from "@playwright/test";
 
-test("shows discounted OpenRouter picker prices and managed accounting", async ({
+test("renders supplied model prices and score bars in the shipping hover preview", async ({
 	page,
 }) => {
 	await page.goto("/model-pricing-proof.html");
 
-	await expect(page.getByTestId("proof-status")).toHaveText("VERIFIED");
 	await expect(
-		page.getByRole("heading", { name: "Discount-aware model pricing" })
+		page.getByRole("heading", { name: "Model price preview rendering" })
 	).toBeVisible();
-	await expect(page.getByTestId("model-row-openai/gpt-5.6-sol")).toContainText(
-		"2.50 / 15.00 / 1M"
-	);
-	await expect(page.getByTestId("price-preview")).toContainText(
-		"Current OpenRouter transaction price"
-	);
 	const scoreBars = page
 		.getByTestId("price-preview")
 		.locator('[data-slot="model-score-bar"]');
@@ -32,9 +25,6 @@ test("shows discounted OpenRouter picker prices and managed accounting", async (
 	await expect(page.getByTestId("price-preview")).toContainText("In $2.50 /1M");
 	await expect(page.getByTestId("price-preview")).toContainText(
 		"Out $15.00 /1M"
-	);
-	await expect(page.getByTestId("accounting-proof")).toContainText(
-		"provider_cost_micro_usd=1250"
 	);
 
 	await page.getByTestId("model-row-anthropic/claude-sonnet-4").click();

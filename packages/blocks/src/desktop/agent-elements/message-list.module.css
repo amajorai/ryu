@@ -1,0 +1,3 @@
+.copyTransition {
+	transition-property: opacity, transform;
+}

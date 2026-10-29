@@ -1,0 +1,32 @@
+[package]
+name = "ryu-acp-server"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Agent Client Protocol (ACP) server mode: lets ACP editors drive Ryu agents through a running Core"
+
+# The editor-facing half of Ryu's ACP support. Core's existing ACP adapter is the
+# CLIENT side (Core drives external agents); this crate is the AGENT side (an
+# editor drives Ryu). It talks to an already-running Core over the same local HTTP
+# API and node token the CLI uses, so it never opens Core's stores or starts a
+# second Core. `ryu-core acp` is the shipped entry point.
+[dependencies]
+# Same pinned version as Core's ACP client so the schema types unify.
+agent-client-protocol = "=3.5.0"
+base64 = "0.22"
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-std"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }

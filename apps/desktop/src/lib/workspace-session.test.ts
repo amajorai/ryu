@@ -79,6 +79,25 @@ describe("workspace session snapshots", () => {
 		expect(sameWorkspaceSessionState(empty, undefined)).toBe(false);
 	});
 
+	test("retains historical and future identifiers for renderer boundary normalization", () => {
+		const state = parseWorkspaceSessionState({
+			bottom: {
+				tabs: [
+					{ kind: "browser", label: "Legacy browser" },
+					{ kind: "future-panel", label: "Future panel" },
+					{ kind: "plugin:@ryu/custom:panel", label: "Plugin panel" },
+				],
+				activeIndex: 2,
+			},
+		});
+		expect(state?.bottom.tabs.map((tab) => tab.kind)).toEqual([
+			"browser",
+			"future-panel",
+			"plugin:@ryu/custom:panel",
+		]);
+		expect(state?.bottom.activeIndex).toBe(2);
+	});
+
 	test("compares tab fields instead of relying on JSON key order", () => {
 		const first = parseWorkspaceSessionState({
 			bottom: {

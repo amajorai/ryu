@@ -1,5 +1,5 @@
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -7,14 +7,15 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
-import { ApiError, type ApiTarget } from "@ryuhq/core-client/client";
+} from "@ryu/ui/components/native-select.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { ApiError, type ApiTarget } from "@ryuhq/core-client/client.ts";
 import { useQuery } from "@tanstack/react-query";
 import {
 	useCallback,
@@ -24,6 +25,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { z } from "zod";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import {
 	type BackupDestination,
@@ -55,7 +57,7 @@ const EMPTY: BackupOverview = {
 	policies: [],
 };
 
-function message(error: unknown): string {
+function message<TError>(error: TError): string {
 	if (error instanceof ApiError && error.serverMessage) {
 		return error.serverMessage;
 	}
@@ -155,7 +157,7 @@ function DestinationDialog({
 					placeholder={placeholder}
 					required={key !== "prefix" && key !== "sessionToken"}
 					type={secret ? "password" : "text"}
-					value={typeof value === "string" ? value : ""}
+					value={isNativeText(value) ? value : ""}
 				/>
 			</div>
 		);
@@ -221,7 +223,7 @@ function DestinationDialog({
 						)
 							.then(onSaved)
 							.then(onClose)
-							.catch((error: unknown) => setError(message(error)))
+							.catch((error) => setError(message(error)))
 							.finally(() => setBusy(false));
 					}}
 				>
@@ -546,20 +548,17 @@ function ScopedBackupSettings({
 		setSchedule(policy?.schedule ?? "0 2 * * *");
 		setRetention(policy?.retentionCount ?? 7);
 	}, [policy?.schedule, policy?.retentionCount]);
-	async function act(action: () => Promise<unknown>, success: string) {
+	async function act<TResult>(action: () => Promise<TResult>, success: string) {
 		setBusy(true);
 		setError(null);
 		setNotice(null);
 		try {
 			const result = await action();
-			if (
-				result &&
-				typeof result === "object" &&
-				"status" in result &&
-				"id" in result &&
-				typeof result.id === "string"
-			) {
-				setTrackedOperation(result.id);
+			const operation = z
+				.object({ status: z.string(), id: z.string() })
+				.safeParse(result);
+			if (operation.success) {
+				setTrackedOperation(operation.data.id);
 			}
 			setNotice(success);
 			await reload();
@@ -626,7 +625,7 @@ function ScopedBackupSettings({
 						</p>
 						<Button
 							onClick={() => {
-								reload().catch((error: unknown) => setError(message(error)));
+								reload().catch((error) => setError(message(error)));
 							}}
 							size="sm"
 							variant="outline"
@@ -1042,12 +1041,17 @@ function ScopedBackupSettings({
 }
 
 function OperationRow({ operation }: { operation: BackupOperation }) {
-	const result =
-		typeof operation.result === "object" && operation.result !== null
-			? (operation.result as Record<string, unknown>)
-			: {};
-	const recoveryPath =
-		typeof result.recoveryPath === "string" ? result.recoveryPath : null;
+	const parsed = z
+		.object({
+			recoveryPath: z.string().optional().catch(undefined),
+			spaceId: z.string().optional().catch(undefined),
+			needsReindex: z.boolean().optional().catch(undefined),
+		})
+		.safeParse(operation.result);
+	const result = parsed.success ? parsed.data : {};
+	const recoveryPath = isNativeText(result.recoveryPath)
+		? result.recoveryPath
+		: null;
 	return (
 		<SettingsCard>
 			<div className="flex flex-wrap items-center justify-between gap-2">
@@ -1077,7 +1081,7 @@ function OperationRow({ operation }: { operation: BackupOperation }) {
 					{operation.error}
 				</p>
 			)}
-			{typeof result.spaceId === "string" && (
+			{isNativeText(result.spaceId) && (
 				<p className="mt-2 text-sm">
 					A new private Space has been restored.
 					{result.needsReindex === true

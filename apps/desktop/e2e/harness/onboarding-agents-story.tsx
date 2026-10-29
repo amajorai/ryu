@@ -18,7 +18,7 @@
 import {
 	type OnboardingAgentOption,
 	OnboardingView,
-} from "@ryu/blocks/desktop/onboarding";
+} from "@ryu/blocks/desktop/onboarding.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
@@ -109,7 +109,7 @@ function Column({
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<div className="flex min-h-screen">
 		<Column agents={DETECTED} dark={false} label="Detected" suggested={[]} />
 		<Column dark label="Failed" suggested={CURATED} unavailable />

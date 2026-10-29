@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Popover,
 	PopoverContent,
@@ -17,6 +18,7 @@ import {
 	MailCheck,
 	ShieldCheck,
 } from "lucide-react";
+import { isNativeText } from "../lib/native-primitive-observation.ts";
 
 export type VerificationMethodKind =
 	| "custom"
@@ -36,14 +38,14 @@ export interface VerificationDetails {
 	verifiedSince?: string | null;
 }
 
-const METHOD_ICONS: Record<VerificationMethodKind, LucideIcon> = {
+const METHOD_ICONS = {
 	custom: ShieldCheck,
 	domain: Globe2,
 	email: MailCheck,
 	identity: ShieldCheck,
 	organization: BadgeIcon,
 	platform: BadgeIcon,
-};
+} satisfies Record<VerificationMethodKind, LucideIcon>;
 
 /** Format a server-provided ISO date with a stable UTC calendar date. */
 export function formatVerificationDate(value?: string | null): string | null {
@@ -93,6 +95,25 @@ function VerificationMark({
 	);
 }
 
+type VerificationAppearance =
+	| "default"
+	| "publisher-gold-card"
+	| "publisher-gold-hero"
+	| "publisher-blue-card"
+	| "publisher-blue-hero"
+	| "publisher-dotted";
+
+const publisherAppearanceClasses = {
+	"publisher-gold-card":
+		"text-publisher-verification-gold drop-shadow-(--publisher-verification-gold-shadow) dark:text-publisher-verification-gold-dark",
+	"publisher-gold-hero":
+		"text-publisher-verification-gold-hero drop-shadow-(--publisher-verification-gold-hero-shadow)",
+	"publisher-blue-card": "text-status-info",
+	"publisher-blue-hero": "text-publisher-verification-blue-hero",
+	"publisher-dotted":
+		"text-muted-foreground/70 opacity-50 transition-opacity focus-within:opacity-100 hover:opacity-100",
+} satisfies Record<Exclude<VerificationAppearance, "default">, string>;
+
 /**
  * A compact verification mark that explains its evidence on demand.
  *
@@ -102,6 +123,7 @@ function VerificationMark({
  * assistive technology.
  */
 export function VerificationPopover({
+	appearance = "default",
 	className,
 	description,
 	details,
@@ -109,6 +131,7 @@ export function VerificationPopover({
 	title,
 	variant,
 }: {
+	appearance?: VerificationAppearance;
 	className?: string;
 	description?: string | null;
 	details?: VerificationDetails | null;
@@ -116,25 +139,29 @@ export function VerificationPopover({
 	title: string;
 	variant: "badge" | "shield";
 }) {
+	const tl = useLiteralMessages();
+	const markClassName =
+		appearance === "default"
+			? className
+			: cn(publisherAppearanceClasses[appearance], className);
 	const verifiedSince = formatVerificationDate(details?.verifiedSince);
 	const methods = (details?.methods ?? []).filter(
 		(method) =>
-			method &&
-			typeof method.label === "string" &&
-			method.label.trim().length > 0
+			method && isNativeText(method.label) && method.label.trim().length > 0
 	);
-	const triggerLabel = label ?? `Show verification details for ${title}`;
+	const triggerLabel =
+		label ?? tl("Show verification details for {title}", { title });
 
 	return (
 		<Popover modal={false}>
 			<PopoverTrigger
 				aria-label={triggerLabel}
 				className={cn(
-					"pointer-events-auto relative z-10 inline-flex size-5 shrink-0 items-center justify-center rounded-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60",
+					"pointer-events-auto relative z-10 inline-flex size-5 shrink-0 items-center justify-center rounded-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
 					variant === "shield"
 						? "text-status-success hover:text-status-success/80"
 						: "hover:text-foreground",
-					className
+					markClassName
 				)}
 				data-slot="verification-trigger"
 				render={
@@ -153,7 +180,7 @@ export function VerificationPopover({
 					<PopoverTitle className="flex items-center gap-2">
 						<VerificationMark
 							className={
-								variant === "shield" ? "text-status-success" : className
+								variant === "shield" ? "text-status-success" : markClassName
 							}
 							variant={variant}
 						/>

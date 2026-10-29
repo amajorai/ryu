@@ -1,0 +1,28 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/models-plugins-settings-coverage.playwright.config.ts",
+    "e2e/harness/vite.models-plugins-settings-coverage.config.ts",
+    "e2e/agent-models-settings-coverage.spec.ts",
+    "e2e/agent-models-settings-proof.spec.ts",
+    "e2e/harness/agent-models-settings-proof.tsx",
+    "e2e/app-updates-settings-coverage.spec.ts",
+    "e2e/harness/app-updates-settings-proof.tsx",
+    "e2e/app-update-transaction-proof.spec.ts",
+    "e2e/harness/app-update-transaction-proof.tsx",
+    "e2e/node-permissions-settings-proof.spec.ts",
+    "e2e/harness/node-permissions-settings-proof.tsx",
+    "e2e/plugin-settings-fields-coverage.spec.ts",
+    "e2e/plugin-settings-fields-proof.spec.ts",
+    "e2e/harness/plugin-settings-fields-proof.tsx",
+    "e2e/harness/plugin-settings-manifests-proof.tsx",
+    "e2e/provider-login-dialog-proof.spec.ts",
+    "e2e/provider-login-dialog-proof.playwright.config.ts",
+    "e2e/harness/provider-login-dialog-proof.tsx"
+  ]
+}

@@ -6,6 +6,8 @@ import {
 	Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { SettingsIconTile } from "@ryu/blocks/desktop/settings-nav.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -13,12 +15,17 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@ryu/ui/components/collapsible.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { SettingsSection } from "@/src/components/settings/shared/settings-items.tsx";
+import {
+	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "@/src/components/settings/shared/settings-items.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchGatewayGovernance,
@@ -36,6 +43,7 @@ import {
 	type GovernanceView,
 } from "./GovernanceScopeSwitcher.tsx";
 import { groupHookInventory, type HookPhaseGroup } from "./hooks-view.ts";
+import { SettingsNotice } from "./SettingsNotice.tsx";
 
 const hooksQueryKey = (target: ApiTarget) => [
 	"hook-management",
@@ -66,7 +74,7 @@ const localWriteScope = (
 
 function HookMetadata({ hook }: { hook: HookInventoryItem }) {
 	return (
-		<dl className="grid gap-x-4 gap-y-2 rounded-xl border border-border/70 bg-background/65 px-4 py-3 text-xs sm:grid-cols-[100px_minmax(0,1fr)]">
+		<dl className="grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-[100px_minmax(0,1fr)]">
 			<dt className="text-muted-foreground">Handler</dt>
 			<dd>{hook.handler.display}</dd>
 			{hook.handler.path ? (
@@ -104,6 +112,7 @@ function HookRow({
 	view: GovernanceView;
 }) {
 	const [open, setOpen] = useState(false);
+	const tl = useLiteralMessages();
 	const scope = localWriteScope(view);
 	const localPolicy = scope ? hook.localOverrides[scope] : undefined;
 	const enabled = localPolicy?.enabled ?? hook.enabled;
@@ -118,17 +127,22 @@ function HookRow({
 
 	return (
 		<Collapsible onOpenChange={setOpen} open={open}>
-			<div className="border-border/65 border-b px-3 py-2.5 last:border-b-0">
+			<div className="min-h-11 px-3.5 py-2.5">
 				<div className="flex min-w-0 items-center gap-2">
 					<CollapsibleTrigger
-						aria-label={`${open ? "Hide" : "Show"} details for ${hook.id}`}
-						className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						appearance="gateway-hook"
+						aria-label={
+							open
+								? tl("Hide details for {hookId}", { hookId: hook.id })
+								: tl("Show details for {hookId}", { hookId: hook.id })
+						}
+						className="flex min-w-0 flex-1 items-center text-left"
 					>
-						<span className="min-w-0 flex-1 truncate font-medium text-sm">
+						<span className="min-w-0 flex-1 truncate text-sm" title={hook.id}>
 							{hook.id}
 						</span>
 						{inherited ? (
-							<span className="text-[11px] text-muted-foreground">
+							<span className="type-caption text-muted-foreground">
 								Inherited
 							</span>
 						) : null}
@@ -167,10 +181,12 @@ function HookRow({
 				</div>
 				{hook.pluginEnabled ? null : (
 					<p className="mt-1 text-muted-foreground text-xs">
-						Enable {hook.ownerName} before this hook can run.
+						{tl("Enable {ownerName} before this hook can run.", {
+							ownerName: hook.ownerName,
+						})}
 					</p>
 				)}
-				<CollapsibleContent className="pt-2">
+				<CollapsibleContent spacing="gateway-detail">
 					<HookMetadata hook={hook} />
 				</CollapsibleContent>
 			</div>
@@ -178,48 +194,24 @@ function HookRow({
 	);
 }
 
-function HookPhase({
-	canConfigure,
-	onUpdate,
-	pendingKey,
-	phase,
-	view,
-}: {
-	canConfigure: boolean;
-	onUpdate: (
-		hook: HookInventoryItem,
-		policy: HookPolicyOverride
-	) => Promise<void>;
-	pendingKey: string | null;
-	phase: HookPhaseGroup;
-	view: GovernanceView;
-}) {
+// A phase label inside its owner's card: the phase name with its description
+// beneath, then the phase's hooks follow as sibling rows of the same group.
+function HookPhaseHeader({ phase }: { phase: HookPhaseGroup }) {
 	return (
-		<section>
-			<div className="flex items-center gap-3 border-border/65 border-b bg-muted/15 px-4 py-3">
-				<HugeiconsIcon className="size-4 shrink-0" icon={CodeCircleIcon} />
-				<div className="min-w-0 flex-1">
-					<h4 className="font-medium text-sm">{phase.title}</h4>
-					<p className="text-muted-foreground text-xs">{phase.description}</p>
-				</div>
-				{phase.hooks.some((hook) => hook.reviewRequired) ? (
-					<HugeiconsIcon
-						className="size-4 text-status-warning"
-						icon={Alert02Icon}
-					/>
-				) : null}
+		<div className="flex items-center gap-3 px-3.5 py-2">
+			<div className="min-w-0 flex-1">
+				<h4 className="font-medium text-foreground/70 text-xs">
+					{phase.title}
+				</h4>
+				<p className="text-muted-foreground text-xs">{phase.description}</p>
 			</div>
-			{phase.hooks.map((hook) => (
-				<HookRow
-					canConfigure={canConfigure}
-					hook={hook}
-					key={hook.hookKey}
-					onUpdate={onUpdate}
-					pending={pendingKey === hook.hookKey}
-					view={view}
+			{phase.hooks.some((hook) => hook.reviewRequired) ? (
+				<HugeiconsIcon
+					className="size-4 text-status-warning"
+					icon={Alert02Icon}
 				/>
-			))}
-		</section>
+			) : null}
+		</div>
 	);
 }
 
@@ -231,8 +223,14 @@ export function HooksSection({
 	target: ApiTarget;
 }) {
 	const queryClient = useQueryClient();
+	const tl = useLiteralMessages();
 	const [view, setView] = useState<GovernanceView>("effective");
 	const [pendingKey, setPendingKey] = useState<string | null>(null);
+	const [failedUpdate, setFailedUpdate] = useState<{
+		hook: HookInventoryItem;
+		policy: HookPolicyOverride;
+		scope: Extract<GovernanceScope, "node" | "user">;
+	} | null>(null);
 	const hooksQuery = useQuery({
 		queryKey: hooksQueryKey(target),
 		queryFn: ({ signal }) => fetchHookInventory(target, signal),
@@ -246,13 +244,15 @@ export function HooksSection({
 
 	const updatePolicy = async (
 		hook: HookInventoryItem,
-		policy: HookPolicyOverride
+		policy: HookPolicyOverride,
+		scopeOverride?: Extract<GovernanceScope, "node" | "user">
 	) => {
-		const scope = localWriteScope(view);
+		const scope = scopeOverride ?? localWriteScope(view);
 		if (!scope) {
 			return;
 		}
 		setPendingKey(hook.hookKey);
+		setFailedUpdate(null);
 		try {
 			const inventory = await updateHookOverride(target, {
 				hookKey: hook.hookKey,
@@ -260,6 +260,8 @@ export function HooksSection({
 				scope,
 			});
 			queryClient.setQueryData<HookInventory>(hooksQueryKey(target), inventory);
+		} catch {
+			setFailedUpdate({ hook, policy, scope });
 		} finally {
 			setPendingKey(null);
 		}
@@ -285,90 +287,134 @@ export function HooksSection({
 				}
 				title="Hooks"
 			>
-				<div className="space-y-4 px-3">
-					<GovernanceScopeSwitcher
-						layers={governanceQuery.data?.layers ?? []}
-						onValueChange={setView}
-						value={view}
+				<GovernanceScopeSwitcher
+					layers={governanceQuery.data?.layers ?? []}
+					onValueChange={setView}
+					value={view}
+				/>
+				<SettingsCard className="flex items-start gap-2 text-sm">
+					<HugeiconsIcon
+						className="mt-0.5 size-4 shrink-0 text-status-warning"
+						icon={Alert02Icon}
 					/>
-					<div className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm">
-						<HugeiconsIcon
-							className="mt-0.5 size-4 shrink-0 text-status-warning"
-							icon={Alert02Icon}
-						/>
-						<p>
-							Hooks can act at lifecycle boundaries. Review newly installed or
-							changed hooks before trusting them.
+					<p>
+						Hooks can act at lifecycle boundaries. Review newly installed or
+						changed hooks before trusting them.
+					</p>
+				</SettingsCard>
+				{failedUpdate ? (
+					<SettingsNotice
+						action={
+							<Button
+								disabled={pendingKey !== null}
+								onClick={() =>
+									void updatePolicy(
+										failedUpdate.hook,
+										failedUpdate.policy,
+										failedUpdate.scope
+									)
+								}
+								size="sm"
+								variant="outline"
+							>
+								Retry
+							</Button>
+						}
+						role="alert"
+					>
+						Hook policy could not be saved. Check the connection and retry.
+					</SettingsNotice>
+				) : null}
+				{hooksQuery.isLoading ? (
+					<SettingsCard>
+						<SkeletonRows spacing="status" />
+					</SettingsCard>
+				) : null}
+				{hooksQuery.error ? (
+					<SettingsNotice
+						action={
+							<Button
+								disabled={hooksQuery.isFetching}
+								onClick={() => void hooksQuery.refetch()}
+								size="sm"
+								variant="outline"
+							>
+								Retry
+							</Button>
+						}
+						role="alert"
+						secondary={
+							hooksQuery.error instanceof Error
+								? hooksQuery.error.message
+								: undefined
+						}
+					>
+						Couldn’t load hooks.
+					</SettingsNotice>
+				) : null}
+				{!(hooksQuery.isLoading || hooksQuery.error) && groups.length === 0 ? (
+					<SettingsCard>
+						<p className="text-center text-muted-foreground text-sm">
+							No hooks installed. Hooks from configuration and enabled plugins
+							will appear here.
 						</p>
-					</div>
-				</div>
+					</SettingsCard>
+				) : null}
 			</SettingsSection>
 
-			{hooksQuery.isLoading ? (
-				<div className="flex items-center justify-center py-12">
-					<Spinner className="size-5" />
-				</div>
-			) : null}
-			{hooksQuery.error ? (
-				<p className="px-3 text-sm text-status-destructive">
-					{hooksQuery.error instanceof Error
-						? hooksQuery.error.message
-						: "Hooks could not be loaded."}
-				</p>
-			) : null}
-			{!(hooksQuery.isLoading || hooksQuery.error) && groups.length === 0 ? (
-				<div className="rounded-2xl border border-dashed px-6 py-10 text-center">
-					<p className="font-medium text-sm">No hooks installed</p>
-					<p className="mt-1 text-muted-foreground text-xs">
-						Hooks from configuration and enabled plugins will appear here.
-					</p>
-				</div>
-			) : null}
-
 			{groups.map((group) => (
-				<section className="space-y-3" key={group.source}>
-					<h3 className="px-1 font-medium text-sm">{group.label}</h3>
+				<SettingsSection key={group.source} title={group.label}>
 					{group.owners.map((owner) => (
-						<div
-							className="overflow-hidden rounded-2xl border border-border/80 bg-card/45"
-							key={owner.ownerId}
-						>
-							<div className="flex items-center gap-3 border-border/65 border-b px-4 py-3.5">
-								<div className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted/70">
-									<HugeiconsIcon className="size-4" icon={CodeCircleIcon} />
-								</div>
-								<div className="min-w-0 flex-1">
-									<p className="truncate font-medium">{owner.ownerName}</p>
-									<p className="text-muted-foreground text-xs">
-										{owner.hookCount} hook{owner.hookCount === 1 ? "" : "s"}
-									</p>
-								</div>
-								{owner.reviewCount > 0 ? (
-									<Badge className="gap-1" variant="outline">
-										<HugeiconsIcon
-											className="size-3.5 text-status-warning"
-											icon={Alert02Icon}
-										/>
-										{owner.reviewCount} need{owner.reviewCount === 1 ? "s" : ""}{" "}
-										review
-									</Badge>
-								) : (
-									<Badge variant="secondary">Reviewed</Badge>
-								)}
-							</div>
-							{owner.phases.map((phase) => (
-								<HookPhase
-									canConfigure={canConfigure}
-									key={phase.phase}
-									onUpdate={updatePolicy}
-									pendingKey={pendingKey}
-									phase={phase}
-									view={view}
-								/>
-							))}
-						</div>
+						<SettingsGroup key={owner.ownerId}>
+							<SettingsItem
+								actions={
+									<span className="flex items-center gap-2">
+										<span className="text-muted-foreground text-sm">
+											{tl("{hookCount, plural, one {# hook} other {# hooks}}", {
+												hookCount: owner.hookCount,
+											})}
+										</span>
+										{owner.reviewCount > 0 ? (
+											<Badge variant="outline">
+												<HugeiconsIcon
+													className="size-3.5 text-status-warning"
+													icon={Alert02Icon}
+												/>
+												{tl(
+													"{reviewCount, plural, one {# needs review} other {# need review}}",
+													{ reviewCount: owner.reviewCount }
+												)}
+											</Badge>
+										) : (
+											<Badge variant="secondary">Reviewed</Badge>
+										)}
+									</span>
+								}
+								title={
+									<span className="flex min-w-0 items-center gap-2.5">
+										<SettingsIconTile icon={CodeCircleIcon} tint="indigo" />
+										<span className="truncate" title={owner.ownerName}>
+											{owner.ownerName}
+										</span>
+									</span>
+								}
+							/>
+							{owner.phases.flatMap((phase) => [
+								<HookPhaseHeader key={`${phase.phase}-header`} phase={phase} />,
+								...phase.hooks.map((hook) => (
+									<HookRow
+										canConfigure={canConfigure}
+										hook={hook}
+										key={hook.hookKey}
+										onUpdate={updatePolicy}
+										pending={pendingKey === hook.hookKey}
+										view={view}
+									/>
+								)),
+							])}
+						</SettingsGroup>
 					))}
-				</section>
+				</SettingsSection>
 			))}
 		</div>
 	);

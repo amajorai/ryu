@@ -4,18 +4,22 @@ import {
 	DialogDescription,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/dialog.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useState } from "react";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import { useTimezoneRevision } from "@/src/hooks/useTimezone.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
+import {
+	WallpaperPicker,
+	WallpaperPreview,
+} from "../wallpaper/WallpaperPicker.tsx";
 
 export const OS_HOME_SETTINGS = [
 	{
 		key: "intro",
 		label: "Welcome text",
-		description: "Show a short welcome for five seconds when you enter Ryu OS.",
+		description: "Show a short welcome for five seconds when you enter OS.",
 		defaultValue: true,
 	},
 	{
@@ -79,14 +83,20 @@ export function OsHomeSettings({
 }) {
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
 				<DialogHeader>
 					<DialogTitle>Customize desktop</DialogTitle>
 					<DialogDescription>
-						Choose what appears on Ryu OS home. Your choices are saved on this
-						device.
+						Choose your wallpaper and what appears on the OS home. Your choices
+						are saved on this device.
 					</DialogDescription>
 				</DialogHeader>
+				<section className="space-y-3">
+					<h3 className="font-medium text-sm">Wallpaper</h3>
+					<WallpaperPreview />
+					<WallpaperPicker />
+				</section>
+				<h3 className="font-medium text-sm">Home</h3>
 				<div className="divide-y divide-border/50">
 					{OS_HOME_SETTINGS.map((setting) => (
 						<HomeSetting key={setting.key} setting={setting} />
@@ -175,11 +185,11 @@ export function OsHome({ visible }: { visible: boolean }) {
 			{intro && (
 				<p
 					aria-hidden={!welcomeVisible}
-					className="absolute inset-x-6 top-2/3 text-sm text-white/65 transition-opacity duration-500 motion-reduce:transition-none"
+					className="absolute inset-x-6 top-2/3 text-sm text-white/65 transition-opacity duration-500 data-[welcome-visible=false]:opacity-0 data-[welcome-visible=true]:opacity-100 motion-reduce:transition-none"
 					data-testid="os-home-intro"
-					style={{ opacity: welcomeVisible ? 1 : 0 }}
+					data-welcome-visible={welcomeVisible}
 				>
-					Welcome to Ryu OS. Open an app from the dock to get started.
+					Welcome to OS. Open an app from the dock to get started.
 				</p>
 			)}
 		</div>

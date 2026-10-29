@@ -43,6 +43,7 @@ The `description` is what a loading agent reads to decide whether to open the sk
 - [ryu-build-agent](ryu-build-agent/SKILL.md) - create and configure an agent on a node via the `/api/agents` REST surface.
 - [ryu-app-ui](ryu-app-ui/SKILL.md) - build Companion apps with the fixed Ryu App UI v1 primitives and theme contract.
 - [ryu-local-model](ryu-local-model/SKILL.md) - search, download, and serve a local GGUF model via the models and engines REST surface.
+- [ryu-connect](ryu-connect/SKILL.md) - call tools through Ryu Connect: money rules, maximum cost, failure codes, retries and idempotency, connection prompts, and masked credentials. Connect serves it from its own Skill hosting.
 - [ryu-author-skill](ryu-author-skill/SKILL.md) - author a new skill in this same SKILL.md format so the ecosystem is self-extending.
 
 - [ryu-app-icon](ryu-app-icon/SKILL.md) - design layered app and plugin artwork with Icon Composer.

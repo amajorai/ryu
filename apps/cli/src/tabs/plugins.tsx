@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
 /* @jsxImportSource @opentui/react */
 // Plugins tab — the REAL plugin lifecycle surface, backed by Core's `/api/plugins`
 // (a manifest.json bundle + its installed/enabled record), NOT the sidecar catalog
@@ -13,6 +15,8 @@
 //   - update:    POST /api/plugins/:id/update     (installed)
 //   - keys:      j/k or ↑/↓ navigate · i install · e enable/disable · D uninstall ·
 //                u update · C cascade the last blocked destructive action · r refresh
+//   - D and C are destructive, so they open an inline ConfirmPrompt first (Cancel is
+//     the default; y confirms, n/Esc cancels) and nothing is sent until confirmed.
 //
 // Typed refusals are surfaced READABLY: the core-client already folds
 // describeDependencyError() into `err.message`, so a `blocked_by_dependents` disable
@@ -27,6 +31,7 @@ import {
 	type AppInfo,
 	type AppLifecycleError,
 	type DependencyError,
+	dependencyErrorSchema,
 	disableApp,
 	enableApp,
 	fetchApps,
@@ -37,23 +42,35 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
+import { ConfirmPrompt } from "../ui/ConfirmPrompt.tsx";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
+import { ListPosition, SelectableRow } from "../ui/SelectableRow.tsx";
 import { useToast } from "../ui/toast.tsx";
+import { useListWindow } from "../ui/useListWindow.ts";
 import type { TabProps } from "./types.ts";
 
 const NAME_WIDTH = 20;
 const STATE_WIDTH = 12;
-const LIST_HEIGHT = 16;
 
 type ThemeValue = ReturnType<typeof useTheme>;
 
 // A destructive action the dependency graph refused, remembered so pressing C can
 // retry the SAME action with cascade:true (disable/uninstall the dependents too).
 interface PendingCascade {
+	/** Ids Core named as blocking the action; the cascade also acts on these. */
+	dependents: string[];
 	id: string;
 	kind: "disable" | "uninstall";
 	name: string;
+}
+
+// A destructive action held until the user answers the inline ConfirmPrompt.
+interface PendingConfirm {
+	confirmLabel: string;
+	consequence: string;
+	run: () => void;
+	title: string;
 }
 
 // The shape core-client throws: `Object.assign(new Error(msg), AppLifecycleError)`.
@@ -61,19 +78,32 @@ interface PendingCascade {
 // already `err.message`), never by string-parsing prose.
 type LifecycleErrorLike = Partial<AppLifecycleError> & { message: string };
 
-function asLifecycleError(err: unknown): LifecycleErrorLike {
-	if (err instanceof Error) {
-		const e = err as Error & Partial<AppLifecycleError>;
-		return {
-			message: e.message,
-			builtIn: e.builtIn,
-			dependencyError: e.dependencyError ?? null,
-			hint: e.hint ?? null,
-			gatewayUnreachable: e.gatewayUnreachable,
-			grantsDenied: e.grantsDenied,
-		};
+const nativeErrorAdmissionSchema = z.instanceof(Error);
+const nativeLifecycleErrorSchema = z.object({
+	builtIn: z.boolean().optional().catch(undefined),
+	dependencyError: dependencyErrorSchema.nullable().optional().catch(null),
+	hint: z.string().nullable().optional().catch(null),
+	gatewayUnreachable: z.boolean().optional().catch(undefined),
+	grantsDenied: z.boolean().optional().catch(undefined),
+});
+
+function asLifecycleError(
+	err: Parameters<typeof nativeLifecycleErrorSchema.safeParse>[0]
+): LifecycleErrorLike {
+	const admitted = nativeErrorAdmissionSchema.safeParse(err);
+	const parsed = nativeLifecycleErrorSchema.safeParse(err);
+	if (!(admitted.success && parsed.success)) {
+		return { message: nativeErrorMessage(err) };
 	}
-	return { message: String(err) };
+	const e = parsed.data;
+	return {
+		message: admitted.data.message,
+		builtIn: e.builtIn,
+		dependencyError: e.dependencyError ?? null,
+		hint: e.hint ?? null,
+		gatewayUnreachable: e.gatewayUnreachable,
+		grantsDenied: e.grantsDenied,
+	};
 }
 
 /** True when the refusal was a 409 `blocked_by_dependents` — the one case a cascade
@@ -97,7 +127,7 @@ function chipFor(app: AppInfo): StateChip {
 	if (app.enabled) {
 		return { label: "enabled", color: (t) => t.colors.success };
 	}
-	return { label: "disabled", color: (t) => t.colors.muted };
+	return { label: "disabled", color: (t) => t.colors.mutedForeground };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -132,7 +162,7 @@ export function PluginsTab({ active }: TabProps) {
 				setIndex((i) => (next.length === 0 ? 0 : Math.min(i, next.length - 1)));
 				setLoaded(true);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (reqRef.current !== reqId) {
 					return;
 				}
@@ -157,14 +187,20 @@ export function PluginsTab({ active }: TabProps) {
 	// Surface a typed refusal readably and, when a cascade would resolve it, remember
 	// the action so C can retry it. Returns nothing; callers already cleared busy.
 	const reportFailure = useCallback(
-		(verb: string, app: AppInfo, err: unknown) => {
-			const e = asLifecycleError(err);
+		(verb: string, app: AppInfo, e: LifecycleErrorLike) => {
 			pendingCascade.current = null;
 			if (
 				blockedByDependents(e) &&
 				(verb === "disable" || verb === "uninstall")
 			) {
-				pendingCascade.current = { id: app.id, kind: verb, name: app.name };
+				const dep = e.dependencyError;
+				pendingCascade.current = {
+					dependents:
+						dep?.code === "blocked_by_dependents" ? dep.dependents : [],
+					id: app.id,
+					kind: verb,
+					name: app.name,
+				};
 				notify(`${e.message} — press C to ${verb} dependents too.`, "warning");
 				return;
 			}
@@ -181,11 +217,11 @@ export function PluginsTab({ active }: TabProps) {
 	// Run a lifecycle mutation against `app`, clearing any stale cascade offer on a
 	// fresh (non-cascade) action, refreshing on success, and reporting typed refusals.
 	const mutate = useCallback(
-		(
+		<T,>(
 			verb: string,
 			app: AppInfo,
-			run: () => Promise<unknown>,
-			opts?: { keepCascade?: boolean; onOk?: (result: unknown) => void }
+			run: () => Promise<T>,
+			opts?: { keepCascade?: boolean; onOk?: (result: T) => void }
 		) => {
 			if (!opts?.keepCascade) {
 				pendingCascade.current = null;
@@ -199,7 +235,7 @@ export function PluginsTab({ active }: TabProps) {
 					}
 					runLoad();
 				})
-				.catch((err: unknown) => reportFailure(verb, app, err))
+				.catch((err) => reportFailure(verb, app, asLifecycleError(err)))
 				.finally(() => setBusy(null));
 		},
 		[notify, runLoad, reportFailure]
@@ -239,11 +275,7 @@ export function PluginsTab({ active }: TabProps) {
 			}
 			mutate("uninstall", app, () => uninstallApp(target, app.id), {
 				onOk: (result) => {
-					const r = result as {
-						disabled?: string[];
-						externallyManaged?: boolean;
-						notice?: string;
-					};
+					const r = result;
 					if (r.externallyManaged && r.notice) {
 						notify(r.notice, "warning");
 					} else {
@@ -301,6 +333,10 @@ export function PluginsTab({ active }: TabProps) {
 		pendingCascade.current = null;
 	}, [apps, target, notify, mutate]);
 
+	// A destructive action waiting on the inline ConfirmPrompt. While it is set, the
+	// tab's own keys are ignored so y/n/r reach only the prompt.
+	const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
+
 	const selected = apps[index];
 
 	const activate = (run: (app: AppInfo) => void) => {
@@ -309,8 +345,48 @@ export function PluginsTab({ active }: TabProps) {
 		}
 	};
 
+	const askUninstall = () => {
+		if (!selected || busy) {
+			return;
+		}
+		if (!selected.installed) {
+			notify(`${selected.name} is not installed`, "info");
+			return;
+		}
+		const app = selected;
+		setConfirm({
+			title: `Uninstall ${app.name}?`,
+			consequence: `${app.name} will be removed from this node; reinstall it to use it again.`,
+			confirmLabel: "Uninstall",
+			run: () => doUninstall(app),
+		});
+	};
+
+	const askCascade = () => {
+		if (busy) {
+			return;
+		}
+		const pending = pendingCascade.current;
+		if (!pending) {
+			notify("Nothing to cascade", "info");
+			return;
+		}
+		const verb = pending.kind === "disable" ? "Disable" : "Uninstall";
+		const verbs = pending.kind === "disable" ? "disables" : "uninstalls";
+		const who =
+			pending.dependents.length > 0
+				? pending.dependents.join(", ")
+				: `every plugin that depends on ${pending.name}`;
+		setConfirm({
+			title: `${verb} ${pending.name} and its dependents?`,
+			consequence: `Also ${verbs} ${who}.`,
+			confirmLabel: `${verb} all`,
+			run: doCascade,
+		});
+	};
+
 	useKeyboard((key) => {
-		if (!active) {
+		if (!active || confirm) {
 			return;
 		}
 		const { name } = key;
@@ -325,11 +401,9 @@ export function PluginsTab({ active }: TabProps) {
 		} else if (name === "u") {
 			activate(doUpdate);
 		} else if (name === "D" || (name === "d" && key.shift)) {
-			activate(doUninstall);
+			askUninstall();
 		} else if (name === "C" || (name === "c" && key.shift)) {
-			if (!busy) {
-				doCascade();
-			}
+			askCascade();
 		} else if (name === "r") {
 			runLoad();
 		}
@@ -339,12 +413,20 @@ export function PluginsTab({ active }: TabProps) {
 		return <Loading label="Loading plugins…" />;
 	}
 	if (error) {
-		return <ErrorView message={error} />;
+		return (
+			<ErrorView message={humanizeError(error, { url: target.url })} onRetry />
+		);
 	}
 
 	return (
-		<box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
-			<box paddingBottom={1}>
+		<box
+			flexDirection="column"
+			flexGrow={1}
+			minHeight={0}
+			paddingLeft={1}
+			paddingTop={1}
+		>
+			<box flexShrink={0} paddingBottom={1}>
 				<text fg={theme.colors.foreground}>
 					<b>Plugins</b>
 				</text>
@@ -356,12 +438,28 @@ export function PluginsTab({ active }: TabProps) {
 			) : (
 				<PluginList apps={apps} busy={busy} index={index} theme={theme} />
 			)}
-			<box paddingTop={1}>
-				<text fg={theme.colors.mutedForeground}>
-					↑↓ navigate · i install · e enable/disable · D uninstall · u update ·
-					C cascade · r refresh
-				</text>
-			</box>
+			{confirm ? (
+				<box flexShrink={0} paddingTop={1}>
+					<ConfirmPrompt
+						active={active}
+						confirmLabel={confirm.confirmLabel}
+						consequence={confirm.consequence}
+						onCancel={() => setConfirm(null)}
+						onConfirm={() => {
+							setConfirm(null);
+							confirm.run();
+						}}
+						title={confirm.title}
+					/>
+				</box>
+			) : (
+				<box flexShrink={0} paddingTop={1}>
+					<text fg={theme.colors.mutedForeground}>
+						↑↓ navigate · i install · e enable/disable · D uninstall · u update
+						· C cascade · r refresh
+					</text>
+				</box>
+			)}
 		</box>
 	);
 }
@@ -381,22 +479,37 @@ function PluginRow({
 	const name = app.name.padEnd(NAME_WIDTH);
 	const stateText = (busy ? "working" : chip.label).padEnd(STATE_WIDTH);
 	const version = app.installedVersion ?? app.version ?? "";
+	const muted = selected
+		? theme.colors.selectionForeground
+		: theme.colors.mutedForeground;
+	// State tones are tuned for the page background and fall below text
+	// contrast on the selection background; the label still carries the state.
+	const toneColor = busy ? theme.colors.info : chip.color(theme);
+	const stateColor = selected ? theme.colors.selectionForeground : toneColor;
 	return (
-		<box flexDirection="row" gap={1}>
-			<text fg={selected ? theme.colors.primary : theme.colors.muted}>
-				{selected ? "›" : " "}
-			</text>
-			<text fg={selected ? theme.colors.primary : theme.colors.foreground}>
+		<SelectableRow selected={selected}>
+			<text
+				fg={
+					selected ? theme.colors.selectionForeground : theme.colors.foreground
+				}
+				flexShrink={0}
+			>
 				{selected ? <b>{name}</b> : name}
 			</text>
-			<text fg={busy ? theme.colors.info : chip.color(theme)}>{stateText}</text>
+			<text fg={stateColor} flexShrink={0}>
+				{stateText}
+			</text>
 			{app.builtIn ? (
-				<text fg={theme.colors.mutedForeground}>[built-in]</text>
+				<text fg={muted} flexShrink={0}>
+					[built-in]
+				</text>
 			) : null}
 			{version ? (
-				<text fg={theme.colors.mutedForeground}>{version}</text>
+				<text fg={muted} truncate wrapMode="none">
+					{version}
+				</text>
 			) : null}
-		</box>
+		</SelectableRow>
 	);
 }
 
@@ -411,36 +524,44 @@ function PluginList({
 	index: number;
 	theme: ThemeValue;
 }) {
-	// Window the rows so the selection stays visible without a focus-capturing
-	// scrollbox (which would fight the shell for arrow keys) — parity with apps.tsx.
-	const start = Math.max(
-		0,
-		Math.min(
-			index - Math.floor(LIST_HEIGHT / 2),
-			Math.max(0, apps.length - LIST_HEIGHT)
-		)
-	);
-	const visible = apps.slice(start, start + LIST_HEIGHT);
+	// Window the rows to the measured space so the selection stays visible
+	// without a focus-capturing scrollbox (which would fight the shell for arrow
+	// keys) — parity with apps.tsx.
+	const { start, end, onSizeChange } = useListWindow({
+		count: apps.length,
+		index,
+		linesPerRow: 1,
+	});
+	const visible = apps.slice(start, end);
 
 	return (
-		<box flexDirection="column">
-			{visible.map((app, i) => {
-				const absolute = start + i;
-				return (
-					<PluginRow
-						app={app}
-						busy={busy === app.id}
-						key={app.id}
-						selected={absolute === index}
-						theme={theme}
-					/>
-				);
-			})}
-			{apps.length > visible.length ? (
-				<text fg={theme.colors.mutedForeground}>
-					{`${index + 1}/${apps.length}`}
-				</text>
-			) : null}
-		</box>
+		<>
+			<box
+				flexBasis={0}
+				flexDirection="column"
+				flexGrow={1}
+				minHeight={0}
+				onSizeChange={onSizeChange}
+				overflow="hidden"
+			>
+				{visible.map((app, i) => {
+					const absolute = start + i;
+					return (
+						<PluginRow
+							app={app}
+							busy={busy === app.id}
+							key={app.id}
+							selected={absolute === index}
+							theme={theme}
+						/>
+					);
+				})}
+			</box>
+			<ListPosition
+				count={apps.length}
+				index={index}
+				visible={visible.length}
+			/>
+		</>
 	);
 }

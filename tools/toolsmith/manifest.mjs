@@ -66,7 +66,7 @@ export function findManifestSeat(dir, spec, kind) {
 			return {
 				manifest,
 				manifestPath,
-				seat: { type: "inline_deno", config: runnable.config },
+				seat: { type: "inline_js", config: runnable.config },
 			};
 		}
 	}
@@ -76,7 +76,7 @@ export function findManifestSeat(dir, spec, kind) {
 /**
  * Does the manifest carry exactly the body the cases tested?
  *
- * For an `inline_deno` tool the manifest's `code` string is the ONLY form Core
+ * For an `inline_js` tool the manifest's `code` string is the ONLY form Core
  * loads, and it is sealed from the authored file by `toolsmith sync`. Nothing
  * else notices when the two diverge — the file is what gets reviewed and tested,
  * the string is what gets executed.
@@ -123,13 +123,26 @@ export function checkBodyDrift(seat, spec, code) {
 }
 
 /**
+ * Mirrors `validate_code_file_path` in `crates/core/kernel-contracts/src/manifest.rs`
+ * and `isValidCodeFilePath` in `packages/sdk/src/cli/code-file-contracts.ts`.
+ */
+const CODE_FILE_PATH =
+	/^(?:hooks|adapters)\/(?!\.)(?!.*\.\.)[A-Za-z0-9._-]*\.m?js$/;
+
+/**
+ * Mirrors `is_inline_js_backend` in `crates/core/kernel-contracts/src/schema.rs`:
+ * the current backend name plus its deprecated pre-rename alias.
+ */
+const INLINE_JS_BACKENDS = new Set(["inline_js", "inline_deno"]);
+
+/**
  * Mirror, in JS, the load-time rules Core applies to the tool seat — the subset a
  * generated tool can plausibly get wrong.
  *
  * Not a reimplementation of `PluginManifest::validate`: that lives in Rust and is
  * authoritative. This is the fast feedback loop for the handful of rules whose
  * violation produces a *silent* failure rather than a load error — chiefly the
- * missing `tool:execute` grant, which lets an `inline_deno` tool register, appear
+ * missing `tool:execute` grant, which lets an `inline_js` tool register, appear
  * in discovery, and then refuse every call it receives.
  */
 export function checkManifestContract(manifest, spec, kind, seat) {
@@ -143,29 +156,62 @@ export function checkManifestContract(manifest, spec, kind, seat) {
 	if (!/^\d+\.\d+\.\d+(?:[-+].*)?$/.test(manifest.version ?? "")) {
 		problems.push(`version '${manifest.version}' is not semver`);
 	}
-	if (!manifest.description || /^TODO/.test(manifest.description)) {
+	if (
+		!manifest.description ||
+		String.prototype.startsWith.call(manifest.description, "TODO")
+	) {
 		problems.push(
 			"description is missing or still the TODO placeholder — it is what the model routes on"
 		);
 	}
 
+	if (kind === "adapter" && seat?.type === "adapter" && spec.adapter_tools) {
+		// The harness enforces `adapter_tools` as the callNamed allowlist; it must be
+		// the manifest's own list, or a case could pass against a call Core refuses.
+		const declared = [...(seat.binding.adapter?.tools ?? [])].sort();
+		const tested = [...spec.adapter_tools].sort();
+		if (JSON.stringify(declared) !== JSON.stringify(tested)) {
+			problems.push(
+				`cases adapter_tools [${tested.join(", ")}] differ from the manifest's adapter.tools [${declared.join(", ")}] for '${spec.tool}'`
+			);
+		}
+	}
+
 	if (kind === "adapter" || kind === "turn_hook") {
-		// `validate_code_file_path`: exactly `<hooks|adapters>/<name>.js`, flat.
-		if (!/^(hooks|adapters)\/[A-Za-z0-9._-]+\.m?js$/.test(spec.code_file)) {
+		// `validate_code_file_path` (and the SDK's `isValidCodeFilePath`): exactly
+		// `<hooks|adapters>/<name>.{js,mjs}`, flat, file name from `A-Za-z0-9._-`,
+		// no leading `.` and no `..` anywhere (so `adapters/a..js` is rejected).
+		if (!CODE_FILE_PATH.test(spec.code_file ?? "")) {
 			problems.push(
 				`code_file '${spec.code_file}' is not '<hooks|adapters>/<name>.js' — Core rejects anything else at load`
+			);
+		}
+		// An adapter is shipped code exactly like an inline_js body: without the
+		// grant the provider still appears in the layer picker, and Core refuses
+		// every verb call it routes through the adapter.
+		if (
+			kind === "adapter" &&
+			!(manifest.permission_grants ?? []).includes("tool:execute")
+		) {
+			problems.push(
+				"manifest does not grant 'tool:execute' — Core lists the provider and then refuses every call through its adapter (GRANT_TOOL_EXECUTE)"
 			);
 		}
 		return problems;
 	}
 
 	const config = seat.config;
-	if (config.backend !== "inline_deno") {
+	// `inline_deno` is the deprecated pre-rename spelling of the same backend.
+	// Core still loads it (as `inline_js`), so an older package still verifies.
+	if (!INLINE_JS_BACKENDS.has(String(config.backend ?? "").trim())) {
 		problems.push(
-			`runnable for '${spec.tool}' has backend '${config.backend}', expected 'inline_deno'`
+			`runnable for '${spec.tool}' has backend '${config.backend}', expected 'inline_js'`
 		);
 	}
-	if (!config.description || /^TODO/.test(config.description)) {
+	if (
+		!config.description ||
+		String.prototype.startsWith.call(config.description, "TODO")
+	) {
 		problems.push(
 			`tool '${spec.tool}' has no real description — the model picks tools by description, so a TODO makes it unroutable`
 		);

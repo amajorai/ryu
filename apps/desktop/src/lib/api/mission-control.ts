@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/mission-control.ts
 //
 // Typed client for the `@ryu/mission-control` sidecar, plus the indexer that
@@ -166,7 +168,8 @@ export function getMissionOverview(
 	return request<MissionOverview>(
 		target,
 		`${BASE}/overview${windowQuery(window)}`,
-		{ signal }
+		{ signal },
+		missionOverviewResponseSchema
 	);
 }
 
@@ -178,7 +181,8 @@ export function getMissionConversation(
 	return request<MissionConversationDetail>(
 		target,
 		`${BASE}/conversations/${encodeURIComponent(conversationId)}`,
-		{ signal }
+		{ signal },
+		missionConversationDetailResponseSchema
 	);
 }
 
@@ -190,7 +194,8 @@ export function summarizeMissionConversation(
 	return request(
 		target,
 		`${BASE}/conversations/${encodeURIComponent(conversationId)}/summarize`,
-		{ method: "POST", signal }
+		{ method: "POST", signal },
+		summarizeMissionConversationResponseSchema
 	);
 }
 
@@ -202,7 +207,8 @@ export function forgetMissionConversation(
 	return request(
 		target,
 		`${BASE}/conversations/${encodeURIComponent(conversationId)}`,
-		{ method: "DELETE", signal }
+		{ method: "DELETE", signal },
+		forgetMissionConversationResponseSchema
 	);
 }
 
@@ -259,7 +265,8 @@ async function indexOne(
 	const detail = await request<CoreConversationDetail>(
 		target,
 		`/api/conversations/${encodeURIComponent(summary.id)}`,
-		{ signal }
+		{ signal },
+		coreConversationDetailResponseSchema
 	);
 	const digest = buildMissionDigest(detail.messages ?? []);
 	if (!isWorthIndexing(digest)) {
@@ -297,7 +304,8 @@ async function indexOne(
 				open_items: digest.openTodos,
 				done_items: digest.doneTodos,
 			},
-		}
+		},
+		indexOneResponseSchema
 	);
 	return true;
 }
@@ -321,11 +329,17 @@ export async function syncMissionIndex(
 		request<{ conversations: CoreConversationSummary[] }>(
 			target,
 			"/api/conversations",
-			{ signal }
+			{ signal },
+			syncMissionIndexResponseSchema
 		),
-		request<{ conversations: IndexStateRow[] }>(target, `${BASE}/index-state`, {
-			signal,
-		}),
+		request<{ conversations: IndexStateRow[] }>(
+			target,
+			`${BASE}/index-state`,
+			{
+				signal,
+			},
+			syncMissionIndexResponseSchema8
+		),
 	]);
 
 	const stored = new Map(
@@ -368,4 +382,231 @@ export async function syncMissionIndex(
 	}
 
 	return { deferred: stale.length - batch.length, indexed, skipped };
+}
+
+const missionOverviewResponseSchema: z.ZodType<MissionOverview> =
+	retainValidatedResponse(
+		z
+			.object({
+				conversations: z.array(
+					z
+						.object({
+							agent_id: z.union([z.string(), z.null()]),
+							conversation_id: z.string(),
+							done_count: z.number(),
+							folder_path: z.union([z.string(), z.null()]),
+							headline: z.union([z.string(), z.null()]),
+							indexed_at: z.number(),
+							open_count: z.number(),
+							source_updated_at: z.number(),
+							summarized_at: z.union([z.number(), z.null()]),
+							summary: z.union([z.string(), z.null()]),
+							title: z.union([z.string(), z.null()]),
+							totals: z
+								.object({
+									commands: z.number(),
+									failures: z.number(),
+									files_touched: z.number(),
+									tool_calls: z.number(),
+									turns: z.number(),
+									writes: z.number(),
+								})
+								.passthrough(),
+						})
+						.passthrough()
+				),
+				days: z.array(
+					z
+						.object({
+							conversations: z.number(),
+							date: z.string(),
+							failures: z.number(),
+							turns: z.number(),
+							writes: z.number(),
+						})
+						.passthrough()
+				),
+				files: z.array(
+					z
+						.object({
+							conversations: z.number(),
+							kind: z.string(),
+							path: z.string(),
+							touches: z.number(),
+						})
+						.passthrough()
+				),
+				folder_path: z.union([z.string(), z.null()]),
+				open_items: z.array(
+					z
+						.object({
+							content: z.string(),
+							conversation_id: z.string(),
+							conversation_title: z.union([z.string(), z.null()]),
+							folder_path: z.union([z.string(), z.null()]),
+							source_updated_at: z.number(),
+							status: z.string(),
+						})
+						.passthrough()
+				),
+				since_ms: z.union([z.number(), z.null()]),
+				totals: z
+					.object({
+						commands: z.number(),
+						failures: z.number(),
+						files_touched: z.number(),
+						tool_calls: z.number(),
+						turns: z.number(),
+						writes: z.number(),
+						conversations: z.number(),
+						open_items: z.number(),
+					})
+					.passthrough(),
+			})
+			.passthrough()
+	);
+const missionConversationDetailResponseSchema: z.ZodType<MissionConversationDetail> =
+	retainValidatedResponse(
+		z
+			.object({
+				done_items: z.array(
+					z.object({ content: z.string(), status: z.string() }).passthrough()
+				),
+				files: z.array(
+					z
+						.object({ count: z.number(), kind: z.string(), path: z.string() })
+						.passthrough()
+				),
+				open_items: z.array(
+					z.object({ content: z.string(), status: z.string() }).passthrough()
+				),
+				turns: z.array(
+					z
+						.object({
+							files: z.array(
+								z
+									.object({
+										count: z.number(),
+										kind: z.string(),
+										path: z.string(),
+									})
+									.passthrough()
+							),
+							headline: z.string(),
+							index: z.number(),
+							outcome: z.string(),
+							rationale: z.string(),
+							request: z.string(),
+							status: z.string(),
+						})
+						.passthrough()
+				),
+				agent_id: z.union([z.string(), z.null()]),
+				conversation_id: z.string(),
+				done_count: z.number(),
+				folder_path: z.union([z.string(), z.null()]),
+				headline: z.union([z.string(), z.null()]),
+				indexed_at: z.number(),
+				open_count: z.number(),
+				source_updated_at: z.number(),
+				summarized_at: z.union([z.number(), z.null()]),
+				summary: z.union([z.string(), z.null()]),
+				title: z.union([z.string(), z.null()]),
+				totals: z
+					.object({
+						commands: z.number(),
+						failures: z.number(),
+						files_touched: z.number(),
+						tool_calls: z.number(),
+						turns: z.number(),
+						writes: z.number(),
+					})
+					.passthrough(),
+			})
+			.passthrough()
+	);
+const summarizeMissionConversationResponseSchema: z.ZodType<{
+	summarized_at: number;
+	summary: string;
+}> = retainValidatedResponse(
+	z.object({ summarized_at: z.number(), summary: z.string() }).passthrough()
+);
+const forgetMissionConversationResponseSchema: z.ZodType<{ removed: boolean }> =
+	retainValidatedResponse(z.object({ removed: z.boolean() }).passthrough());
+const coreConversationDetailResponseSchema: z.ZodType<CoreConversationDetail> =
+	retainValidatedResponse(
+		z
+			.object({
+				messages: z
+					.array(
+						z
+							.object({
+								id: z.string().optional(),
+								parts: z
+									.array(
+										z
+											.object({
+												input: gatewayJsonValueSchema.optional(),
+												output: gatewayJsonValueSchema.optional(),
+												state: z.string().optional(),
+												text: gatewayJsonValueSchema.optional(),
+												toolCallId: z.string().optional(),
+												toolName: z.string().optional(),
+												type: z.string().optional(),
+											})
+											.passthrough()
+									)
+									.optional(),
+								role: z.string().optional(),
+							})
+							.passthrough()
+					)
+					.optional(),
+			})
+			.passthrough()
+	);
+const indexOneResponseSchema: z.ZodType<boolean> = retainValidatedResponse(
+	z.boolean()
+);
+const syncMissionIndexResponseSchema: z.ZodType<{
+	conversations: CoreConversationSummary[];
+}> = retainValidatedResponse(
+	z
+		.object({
+			conversations: z.array(
+				z
+					.object({
+						agent_id: z.union([z.string(), z.null()]),
+						archived: z.boolean().optional(),
+						folder_path: z.union([z.string(), z.null()]),
+						id: z.string(),
+						message_count: z.number(),
+						title: z.union([z.string(), z.null()]),
+						updated_at: z.number(),
+					})
+					.passthrough()
+			),
+		})
+		.passthrough()
+);
+const syncMissionIndexResponseSchema8: z.ZodType<{
+	conversations: IndexStateRow[];
+}> = retainValidatedResponse(
+	z
+		.object({
+			conversations: z.array(
+				z
+					.object({
+						conversation_id: z.string(),
+						source_updated_at: z.number(),
+						summarized: z.boolean(),
+					})
+					.passthrough()
+			),
+		})
+		.passthrough()
+);
+
+function retainValidatedResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>((value) => fields.safeParse(value).success);
 }

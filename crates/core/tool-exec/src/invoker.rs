@@ -1,14 +1,14 @@
 //! The sandbox-to-Core tool bridge.
 //!
-//! When sandboxed JS calls `await tools.<server>.<tool>(args)`, the Deno host
-//! relays that request over **stdio** (never the network — the sandbox has no
-//! net/FS permission) to Core, which routes it through the same
+//! When sandboxed JS calls `await tools.<server>.<tool>(args)`, the sandbox host
+//! relays that request through its `ryu` import (never the network — the
+//! WebAssembly guest has no net/FS) to Core, which routes it through the same
 //! [`McpRegistry::call_tool`] path and the same **resolved agent allowlist** the
 //! chat tool loop uses. No escalation: a tool the agent may not call in chat it
 //! may not call from a program.
 //!
-//! Dispatch convention (Contract 4 / scope-review HIGH #1/#8): with the
-//! Deno-first default the invoker is `Send`, so heterogeneous invokers are a
+//! Dispatch convention (Contract 4 / scope-review HIGH #1/#8): the invoker is
+//! `Send`, so heterogeneous invokers are a
 //! closed enum match-dispatched exactly like `catalog_source::Source` — **no
 //! `async-trait`, no `dyn`**. A `Mock` variant lets the security-critical logic
 //! (allowlist rejection, `__ryu_elicitation__` → `Suspend`, `agent_id`
@@ -26,6 +26,8 @@ use super::{Elicitation, InvokeOutcome, ToolInvocation, ToolInvokeResult};
 /// of any `apps/core` dependency — the `tool_registry`/`ToolEmbedder` precedent.
 /// `agent_id` names the CALLING agent so the host's approval policy can apply
 /// the agent's configured per-tool approval list (Layer A); `None` skips it.
+/// `data_flow` is the run's [`RunDataFlow`]: the host records private-data reads
+/// on it and holds later egress-capable calls in the same run for approval.
 #[async_trait]
 pub trait ToolCaller: Send + Sync {
     /// Route one tool call through the host registry under the agent's resolved
@@ -42,7 +44,36 @@ pub trait ToolCaller: Send + Sync {
         profile_ids: &[String],
         session_id: Option<String>,
         host_conversation_id: Option<&str>,
+        data_flow: &Arc<RunDataFlow>,
     ) -> Result<Value, String>;
+}
+
+/// What one program run has done with private data, shared by every tool call
+/// the run makes (the lethal-trifecta guard's per-run state).
+///
+/// The crate never classifies tools: the host decides which calls read private
+/// data and marks the run, and the host holds a later egress-capable call in the
+/// same run for human approval. The state lives on the run's
+/// [`RegistryToolInvoker`], so it is never global, it travels with a parked
+/// execution through pause and resume, and a new run starts clean. The first
+/// source is kept so the hold can name it. `OnceLock` makes concurrent calls from
+/// one run (a `Promise.all` fan-out) safe without a lock.
+#[derive(Debug, Default)]
+pub struct RunDataFlow {
+    private_source: std::sync::OnceLock<String>,
+}
+
+impl RunDataFlow {
+    /// Record that this run read private data through `tool_id`. Only the first
+    /// source is kept; later reads change nothing.
+    pub fn mark_private_read(&self, tool_id: &str) {
+        let _ = self.private_source.set(tool_id.to_owned());
+    }
+
+    /// The tool through which this run first read private data, if it has.
+    pub fn private_read_source(&self) -> Option<&str> {
+        self.private_source.get().map(String::as_str)
+    }
 }
 
 /// Keep a JS tool path (`<server>.<tool>` / `<server>.<a>.<b>`) in the registry's
@@ -168,6 +199,7 @@ impl SandboxToolInvoker {
             user_id,
             identity_profile_ids,
             host_conversation_id,
+            data_flow: Arc::default(),
         })
     }
 
@@ -207,6 +239,8 @@ pub struct RegistryToolInvoker {
     identity_profile_ids: Vec<String>,
     /// Core-validated conversation principal for conversation-scoped tools.
     host_conversation_id: Option<String>,
+    /// This run's private-data state, handed to every call (see [`RunDataFlow`]).
+    data_flow: Arc<RunDataFlow>,
 }
 
 impl RegistryToolInvoker {
@@ -223,6 +257,7 @@ impl RegistryToolInvoker {
                 &self.identity_profile_ids,
                 None,
                 self.host_conversation_id.as_deref(),
+                &self.data_flow,
             )
             .await
         {
@@ -271,6 +306,12 @@ mod tests {
     #[derive(Default)]
     struct RecordingCaller {
         host_conversation_id: Mutex<Option<String>>,
+        /// Each call's tool id and the address of the run state it was handed.
+        flows: Mutex<Vec<(String, usize)>>,
+    }
+
+    fn flow_address(flow: &Arc<RunDataFlow>) -> usize {
+        Arc::as_ptr(flow) as usize
     }
 
     #[async_trait]
@@ -278,17 +319,86 @@ mod tests {
         async fn call_tool_with_identity(
             &self,
             _agent_id: Option<&str>,
-            _tool_id: &str,
+            tool_id: &str,
             _arguments: Value,
             _allowlist: Option<&[String]>,
             _user_id: Option<&str>,
             _profile_ids: &[String],
             _session_id: Option<String>,
             host_conversation_id: Option<&str>,
+            data_flow: &Arc<RunDataFlow>,
         ) -> Result<Value, String> {
             *self.host_conversation_id.lock().unwrap() = host_conversation_id.map(str::to_owned);
+            self.flows
+                .lock()
+                .unwrap()
+                .push((tool_id.to_owned(), flow_address(data_flow)));
+            if tool_id == "search_conversations.search" {
+                data_flow.mark_private_read(tool_id);
+            }
             Ok(json!({ "ok": true }))
         }
+    }
+
+    fn registry_invoker(caller: Arc<RecordingCaller>) -> SandboxToolInvoker {
+        SandboxToolInvoker::registry(caller, "agent-1".into(), None, None)
+    }
+
+    fn call(path: &str) -> ToolInvocation {
+        ToolInvocation {
+            path: path.into(),
+            args: json!({}),
+        }
+    }
+
+    fn run_flow(invoker: &SandboxToolInvoker) -> &Arc<RunDataFlow> {
+        match invoker {
+            SandboxToolInvoker::Registry(inner) => &inner.data_flow,
+            _ => panic!("expected a registry invoker"),
+        }
+    }
+
+    #[test]
+    fn run_data_flow_marks_once_and_keeps_first_source() {
+        let flow = RunDataFlow::default();
+        assert_eq!(flow.private_read_source(), None);
+        flow.mark_private_read("memory.search");
+        flow.mark_private_read("search_conversations.search");
+        assert_eq!(flow.private_read_source(), Some("memory.search"));
+    }
+
+    #[tokio::test]
+    async fn registry_invoker_hands_one_run_flow_to_every_call() {
+        let caller = Arc::new(RecordingCaller::default());
+        let invoker = registry_invoker(caller.clone());
+        invoker.invoke(call("search_conversations.search")).await;
+        invoker.invoke(call("web.extract")).await;
+
+        let flows = caller.flows.lock().unwrap();
+        assert_eq!(flows.len(), 2);
+        assert_eq!(flows[0].1, flows[1].1, "one run shares one state");
+        assert_eq!(flows[0].1, flow_address(run_flow(&invoker)));
+        assert_eq!(
+            run_flow(&invoker).private_read_source(),
+            Some("search_conversations.search")
+        );
+    }
+
+    #[tokio::test]
+    async fn each_registry_invoker_starts_with_a_clean_flow() {
+        let caller = Arc::new(RecordingCaller::default());
+        let first = registry_invoker(caller.clone());
+        first.invoke(call("search_conversations.search")).await;
+        let second = registry_invoker(caller.clone());
+        second.invoke(call("web.extract")).await;
+
+        let flows = caller.flows.lock().unwrap();
+        assert_ne!(flows[0].1, flows[1].1, "runs never share state");
+        assert_eq!(
+            run_flow(&first).private_read_source(),
+            Some("search_conversations.search")
+        );
+        assert_eq!(run_flow(&second).private_read_source(), None);
     }
 
     #[test]

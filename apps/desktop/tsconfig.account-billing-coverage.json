@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/AccountTab.tsx",
+    "src/components/settings/ProfileTab.tsx",
+    "src/components/settings/BillingTab.tsx",
+    "src/components/settings/TeamsBillingTab.tsx",
+    "src/components/settings/ResendVerificationButton.tsx",
+    "src/components/settings/CreditTransferCard.tsx",
+    "src/components/settings/dialogs/EmailChangeDialog.tsx",
+    "src/components/settings/dialogs/PasswordChangeDialog.tsx",
+    "src/components/settings/dialogs/TwoFactorDialog.tsx",
+    "src/components/settings/account-billing.native-http.helpers.ts",
+    "src/components/settings/account-billing.native-http.dom.ts",
+    "src/components/settings/AccountTab.coverage.native-http.test.tsx",
+    "src/components/settings/ProfileTab.coverage.native-http.test.tsx",
+    "src/components/settings/BillingTab.coverage.native-http.test.tsx",
+    "src/components/settings/TeamsBillingTab.coverage.native-http.test.tsx",
+    "src/components/settings/CreditTransferCard.native-http.test.tsx",
+    "src/components/settings/dialogs/TwoFactorDialog.coverage.native-http.test.tsx"
+  ]
+}

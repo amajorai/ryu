@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/pages/CompanionPage.tsx
 //
 // Companion overlay page. Renders a floating context pill showing the active
@@ -22,16 +23,14 @@
 // happens at the section level.
 
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { FRONTEND_URL } from "@/lib/auth-client.ts";
-import { openExternal } from "@/lib/tauri-bridge.ts";
 import type { CompanionConsent } from "@/src/components/companion/ConsentSettings.tsx";
 import ConsentSettings from "@/src/components/companion/ConsentSettings.tsx";
 import { SuggestionChip } from "@/src/components/companion/SuggestionChip.tsx";
+import { useCompanionWindowSizing } from "@/src/components/companion/useCompanionWindowSizing.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { AskIntent } from "@/src/hooks/useAskScreen.ts";
 import { useAskScreen } from "@/src/hooks/useAskScreen.ts";
 import { useCompanionContext } from "@/src/hooks/useCompanionContext.ts";
-import { useEntitlement } from "@/src/hooks/useEntitlement.ts";
 import type { UseGhostActionResult } from "@/src/hooks/useGhostAction.ts";
 import { useGhostAction } from "@/src/hooks/useGhostAction.ts";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
@@ -39,11 +38,11 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { GhostActionInput, GhostActionKind } from "@/src/lib/api/mcp.ts";
 
 /** Label shown on each action button. */
-const ACTION_LABELS: Record<AskIntent, string> = {
+const ACTION_LABELS = {
 	explain: "Explain",
 	summarize: "Summarize",
 	translate: "Translate",
-};
+} satisfies Record<AskIntent, string>;
 
 /** Max characters of selected text shown in the context pill. */
 const SELECTION_PREVIEW_MAX = 120;
@@ -112,7 +111,11 @@ function GhostActionPanel({
 	}, []);
 
 	const handleConfirm = useCallback(async () => {
-		if (!(staged && agentId)) {
+		if (
+			!(staged && agentId) ||
+			ghost.executing ||
+			(staged.needsTarget && !targetText.trim())
+		) {
 			return;
 		}
 		const input: GhostActionInput = {
@@ -195,6 +198,7 @@ function GhostActionPanel({
 					<p className="font-medium text-sm">Confirm: {staged.label}</p>
 					{staged.needsTarget && (
 						<input
+							aria-label="Target"
 							autoFocus
 							className="rounded-md bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
 							onChange={(e) => setTargetText(e.target.value)}
@@ -241,7 +245,7 @@ function GhostActionPanel({
 
 			{/* Executing indicator */}
 			{ghost.executing && (
-				<p className="animate-pulse text-muted-foreground text-xs">
+				<p className="animate-skeleton text-muted-foreground text-xs">
 					Running action…
 				</p>
 			)}
@@ -258,7 +262,7 @@ function GhostActionPanel({
 					{ghost.result.ok ? (
 						<>
 							<span className="font-medium">Done.</span>
-							{typeof ghost.result.output === "string" &&
+							{isNativeText(ghost.result.output) &&
 								ghost.result.output.trim() !== "" && (
 									<p className="mt-1 whitespace-pre-wrap break-words text-xs opacity-80">
 										{ghost.result.output}
@@ -343,7 +347,7 @@ function ContextPill({
 	}
 	if (loading) {
 		return (
-			<span className="animate-pulse text-muted-foreground">
+			<span className="animate-skeleton text-muted-foreground">
 				Capturing context…
 			</span>
 		);
@@ -374,21 +378,27 @@ function ContextPill({
 // ── RecordingIndicator ────────────────────────────────────────────────────
 
 /** Always-visible recording indicator — AC3: reflects capture state. */
-function RecordingIndicator({ paused }: { paused: boolean }) {
+function RecordingIndicator({
+	paused,
+	enabled,
+}: {
+	paused: boolean;
+	enabled: boolean;
+}) {
 	return (
 		<div
 			aria-live="polite"
 			className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${
-				paused
+				paused || !enabled
 					? "border border-warning/30 bg-warning/10 text-status-warning dark:text-status-warning"
 					: "border border-success/30 bg-success/10 text-status-success dark:text-status-success"
 			}`}
 		>
 			<span
 				aria-hidden
-				className={`h-1.5 w-1.5 rounded-full ${paused ? "bg-warning" : "animate-pulse bg-success"}`}
+				className={`h-1.5 w-1.5 rounded-full ${paused || !enabled ? "bg-warning" : "bg-success motion-safe:animate-pulse"}`}
 			/>
-			{paused ? "Capture paused" : "Capturing"}
+			{enabled ? (paused ? "Capture paused" : "Capturing") : "Capture disabled"}
 		</div>
 	);
 }
@@ -399,14 +409,7 @@ function RecordingIndicator({ paused }: { paused: boolean }) {
 type OverlayTab = "companion" | "settings";
 
 export default function CompanionPage() {
-	// Band-2 gate (free-tier plan): the in-desktop companion overlay is a Pro
-	// feature. This page renders in the standalone companion window, which has no
-	// EntitlementProvider, so it reads the shared entitlement directly via
-	// useEntitlement (the cached last-good verdict is written by the main app) and
-	// upsells by opening the web pricing page — the PaywallModal lives only in the
-	// main window. Lock only once the verdict is resolved so a paying user never
-	// sees a flash of the locked state.
-	const { canUse, ready } = useEntitlement();
+	const { sizingRef, sizingError } = useCompanionWindowSizing();
 	const activeNode = useActiveNode();
 	const nodeUrl = activeNode.url;
 	const nodeToken = activeNode.token ?? null;
@@ -435,15 +438,19 @@ export default function CompanionPage() {
 		unavailable,
 		loading: ctxLoading,
 		refresh,
-	} = useCompanionContext(consent.contextRead);
+	} = useCompanionContext(
+		consent.contextRead && !capturePaused,
+		5000,
+		consent.proactive && !capturePaused
+	);
 
 	// Refresh on mount so the pill always shows up-to-date context when the
 	// overlay is opened via the global hotkey.
 	useEffect(() => {
-		if (consent.contextRead) {
+		if (consent.contextRead && !capturePaused) {
 			refresh();
 		}
-	}, [refresh, consent.contextRead]);
+	}, [refresh, consent.contextRead, capturePaused]);
 
 	const { loading, answer, error, ask, reset } = useAskScreen(target);
 	const ghost = useGhostAction(target);
@@ -463,6 +470,8 @@ export default function CompanionPage() {
 	useEffect(() => {
 		let cancelled = false;
 		setAgentsError(false);
+		setFirstAgentId(null);
+		setNoAgents(false);
 		fetchAgents({ url: nodeUrl, token: nodeToken, userJwt: nodeUserJwt })
 			.then((list) => {
 				if (cancelled) {
@@ -503,38 +512,19 @@ export default function CompanionPage() {
 
 	const openSettings = useCallback(() => setActiveTab("settings"), []);
 
-	// Locked upsell — shown once the verdict resolves and the feature is not
-	// unlocked. Placed after every hook so the hook order stays stable.
-	if (ready && !canUse("companion-overlay")) {
-		return (
-			<div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-				<h1 className="font-medium text-base">Companion is a Pro feature</h1>
-				<p className="max-w-xs text-muted-foreground text-xs">
-					The in-desktop companion overlay reads your screen context and acts on
-					it. Upgrade to Pro to turn it on.
-				</p>
-				<button
-					className="rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90"
-					onClick={() => {
-						openExternal(`${FRONTEND_URL.replace(/\/$/, "")}/pricing`).catch(
-							() => undefined
-						);
-					}}
-					type="button"
-				>
-					Upgrade to Pro
-				</button>
-			</div>
-		);
-	}
-
 	return (
-		<div className="flex h-full flex-col gap-0">
+		<div
+			className="flex max-h-screen min-h-[80px] flex-col gap-0 overflow-y-auto"
+			ref={sizingRef}
+		>
 			{/* ── Header: recording indicator + tab bar ──────────────────────── */}
 			<div className="flex items-center justify-between border-b px-4 py-2">
-				<RecordingIndicator paused={capturePaused} />
+				<RecordingIndicator
+					enabled={consent.contextRead}
+					paused={capturePaused}
+				/>
 				<div className="flex gap-1">
-					{(["companion", "settings"] as OverlayTab[]).map((tab) => (
+					{(["companion", "settings"] satisfies OverlayTab[]).map((tab) => (
 						<button
 							className={`rounded px-3 py-1 font-medium text-xs transition-colors ${
 								activeTab === tab
@@ -552,18 +542,16 @@ export default function CompanionPage() {
 			</div>
 
 			{/* ── Settings tab ───────────────────────────────────────────────── */}
-			{activeTab === "settings" && (
-				<div className="flex-1 overflow-y-auto">
-					<ConsentSettings
-						onConsentChange={setConsent}
-						onPausedChange={setCapturePaused}
-					/>
-				</div>
-			)}
+			<div hidden={activeTab !== "settings"}>
+				<ConsentSettings
+					onConsentChange={setConsent}
+					onPausedChange={setCapturePaused}
+				/>
+			</div>
 
 			{/* ── Companion tab ──────────────────────────────────────────────── */}
 			{activeTab === "companion" && (
-				<div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+				<div className="flex flex-col gap-3 p-4">
 					{/* Context pill (AC1: gated by contextRead) */}
 					<div className="rounded-md bg-muted/40 px-3 py-2 text-xs">
 						<ContextPill
@@ -586,29 +574,33 @@ export default function CompanionPage() {
 					{/* Ask action pills (gated by contextRead) */}
 					{consent.contextRead && (
 						<div className="flex gap-2">
-							{(Object.keys(ACTION_LABELS) as AskIntent[]).map((intent) => (
-								<button
-									className="flex-1 rounded-md bg-background px-3 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-									disabled={loading || capturePaused}
-									key={intent}
-									onClick={() => {
-										handleAction(intent).catch(() => undefined);
-									}}
-									type="button"
-								>
-									{ACTION_LABELS[intent]}
-								</button>
-							))}
+							{
+								/* SAFETY: ACTION_LABELS is the local unmodified authored explain/summarize/translate map checked against the complete AskIntent union; native Object.keys erases that own-key union to string[]. */ (
+									Object.keys(ACTION_LABELS) as AskIntent[]
+								).map((intent) => (
+									<button
+										className="flex-1 rounded-md bg-background px-3 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+										disabled={loading || capturePaused}
+										key={intent}
+										onClick={() => {
+											handleAction(intent).catch(() => undefined);
+										}}
+										type="button"
+									>
+										{ACTION_LABELS[intent]}
+									</button>
+								))
+							}
 						</div>
 					)}
 
 					{/* Streamed answer */}
 					{(loading || answer) && (
-						<div className="flex-1 overflow-y-auto rounded-md bg-background p-3 text-sm">
+						<div className="max-h-64 overflow-y-auto rounded-md bg-background p-3 text-sm">
 							{answer ? (
 								<p className="whitespace-pre-wrap">{answer}</p>
 							) : (
-								<p className="animate-pulse text-muted-foreground text-xs">
+								<p className="animate-skeleton text-muted-foreground text-xs">
 									Thinking…
 								</p>
 							)}
@@ -633,6 +625,7 @@ export default function CompanionPage() {
 						<GhostActionPanel
 							agentId={firstAgentId}
 							ghost={ghost}
+							key={`${nodeUrl}:${nodeToken}:${nodeUserJwt}`}
 							loadError={agentsError}
 							noAgentWarning={noAgents}
 							onRetryAgents={retryLoadAgents}
@@ -651,6 +644,11 @@ export default function CompanionPage() {
 						</div>
 					)}
 				</div>
+			)}
+			{sizingError && (
+				<p className="px-4 py-2 text-status-destructive text-xs" role="alert">
+					{sizingError}
+				</p>
 			)}
 		</div>
 	);

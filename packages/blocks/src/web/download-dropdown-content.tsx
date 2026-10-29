@@ -12,21 +12,15 @@ import {
 	DropdownMenuSubContent,
 	DropdownMenuSubTrigger,
 } from "@ryu/ui/components/dropdown-menu";
-import { toast } from "@ryu/ui/components/sileo";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	ArrowUpRight,
-	Blocks,
 	BookOpen,
 	Cloud,
 	FlaskConical,
 	History,
 	Moon,
-	Plug,
-	Sparkles,
-	Terminal,
 } from "lucide-react";
-import type { Route } from "next";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { DOCS_URL } from "./data/resources.tsx";
@@ -51,29 +45,6 @@ import {
 	WEBAPP_URL,
 } from "./download.tsx";
 import { GITHUB_SVGL, OS_SVGL, SvglIcon } from "./svgl-icon.tsx";
-
-const SETUP_SKILL_PATH = "/api/skills/setup-ryu";
-
-const AGENT_LINKS = [
-	{ href: "/products/cli", label: "CLI", Icon: Terminal },
-	{ href: "/products/sdk", label: "SDK", Icon: Blocks },
-	{ href: "/products/mcp", label: "MCP", Icon: Plug },
-	{ href: "/products/skills", label: "Skills", Icon: Sparkles },
-] as const;
-
-async function copySetupSkill() {
-	try {
-		const response = await fetch(SETUP_SKILL_PATH);
-		if (!response.ok) {
-			throw new Error("Skill unavailable");
-		}
-		const text = await response.text();
-		await navigator.clipboard.writeText(text);
-		toast.success("Setup skill copied — paste it into your agent");
-	} catch {
-		toast.error("Could not copy the setup skill. Try again.");
-	}
-}
 
 /**
  * Trailing text for a row, keeping the arch visible when the label doesn't
@@ -227,21 +198,21 @@ function sectionNote(state: DownloadState): string {
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-	return (
-		<DropdownMenuLabel className="select-none font-medium text-muted-foreground text-xs">
-			{children}
-		</DropdownMenuLabel>
-	);
+	return <DropdownMenuLabel>{children}</DropdownMenuLabel>;
 }
 
 export function DownloadDropdownContent({
 	align = "start",
 	className,
 	side = "bottom",
+	siteOrigin = "",
 }: {
 	align?: "center" | "end" | "start";
 	className?: string;
 	side?: "bottom" | "left" | "right" | "top";
+	/** Prefix for site-relative links when the menu renders off ryuhq.com
+	 * (the docs site passes the main site URL). */
+	siteOrigin?: string;
 }) {
 	const [os, setOs] = useState<DownloadOS>("macos");
 	const [arch, setArch] = useState<DownloadArch>("intel");
@@ -327,43 +298,6 @@ export function DownloadDropdownContent({
 					releases={releases}
 				/>
 			</DropdownMenuGroup>
-
-			{/* <DropdownMenuSeparator />
-
-			<DropdownMenuGroup>
-				<SectionLabel>Extensions</SectionLabel>
-				{BROWSERS.map(({ id, name }) => (
-					<DropdownMenuItem disabled key={id}>
-						<SvglIcon spec={BROWSER_SVGL[id]} />
-						{name}
-						<span className="ml-auto text-muted-foreground text-xs">
-							Coming soon
-						</span>
-					</DropdownMenuItem>
-				))}
-			</DropdownMenuGroup>
-
-			<DropdownMenuSeparator />
-
-			<DropdownMenuGroup>
-				<SectionLabel>Agents</SectionLabel>
-				<DropdownMenuItem
-					onClick={() => {
-						copySetupSkill().catch(() => undefined);
-					}}
-				>
-					<Bot className="size-4" />
-					Ask agent to set it up
-				</DropdownMenuItem>
-				{AGENT_LINKS.map(({ href, label, Icon }) => (
-					<DropdownMenuItem key={href} render={<Link href={href as Route} />}>
-						<Icon className="size-4" />
-						{label}
-					</DropdownMenuItem>
-				))}
-			</DropdownMenuGroup>
-
-			<DropdownMenuSeparator /> */}
 
 			<DropdownMenuGroup>
 				<SectionLabel>Others</SectionLabel>
@@ -462,7 +396,13 @@ export function DownloadDropdownContent({
 			<DropdownMenuGroup>
 				<SectionLabel>Cloud</SectionLabel>
 				<DropdownMenuItem
-					render={<Link href={"/login?view=signup" as Route} />}
+					render={
+						siteOrigin ? (
+							<a href={`${siteOrigin}/login?view=signup`} />
+						) : (
+							<Link href="/login?view=signup" />
+						)
+					}
 				>
 					<Cloud className="size-4" />
 					Join waitlist

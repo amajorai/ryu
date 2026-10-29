@@ -6,18 +6,12 @@
 //! Note: `mlx_lm server` defaults to port 8080 (which collides with llama.cpp),
 //! so `--port` is passed explicitly, never relied on as a default.
 
-use std::process::Stdio;
+use crate::sidecar::providers::python_server::{PythonServer, PythonServerProcess};
 
-use anyhow::{Context, Result};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
-
-use crate::win_process::NoWindow;
-
-pub const DEFAULT_HOST: &str = "127.0.0.1";
 /// MLX's canonical (release) loopback port. 8086 is free in the 808x block
-/// (8080 = llama.cpp, 8081 = embeddings, 8082 = rerank, 8083 = stable-diffusion,
-/// 8084 = mlx-vlm, 8085 = tts, 8087 = research, 8090 = whisper) — moved off the
+/// (8080 = llama.cpp, 8081 = embeddings, 8082 = rerank, 8083 = classify,
+/// 8084 = mlx-vlm, 8085 = tts, 8087 = research, 8088 = speech processing,
+/// 8089 = apfel, 8090 = whisper, 8091 = audio.cpp) — moved off the
 /// old 8082 which collided with the reranker. The concrete port is profile-aware;
 /// see [`default_port`].
 pub const DEFAULT_PORT_BASE: u16 = 8086;
@@ -29,125 +23,27 @@ pub fn default_port() -> u16 {
     crate::profile::port(DEFAULT_PORT_BASE)
 }
 
-pub struct MlxProcess {
-    python: String,
-    model: String,
-    port: u16,
-    /// Advanced per-model launch config. MLX's launch surface is minimal, so this
-    /// is wired for parity with vLLM/SGLang but currently emits no extra flags
-    /// (see `crate::inference::LaunchConfig::to_args` for `Engine::Mlx`).
-    launch: crate::inference::LaunchConfig,
-    child: Option<Child>,
-    log_tasks: Vec<tokio::task::JoinHandle<()>>,
-}
+/// MLX's launch dialect: `python -m mlx_lm server --model <model>` (the
+/// non-deprecated invocation; `python -m mlx_lm.server` still works but warns).
+/// MLX's launch surface is minimal, so the advanced launch config is wired for
+/// parity with vLLM/SGLang but currently emits no extra flags (see
+/// `crate::inference::LaunchConfig::to_args` for `Engine::Mlx`).
+pub struct Mlx;
 
-impl MlxProcess {
-    pub fn new(python: String, model: String, port: u16) -> Self {
-        Self {
-            python,
-            model,
-            port,
-            launch: crate::inference::LaunchConfig::default(),
-            child: None,
-            log_tasks: Vec::new(),
-        }
+impl PythonServer for Mlx {
+    const NAME: &'static str = "mlx";
+    const MODULE: &'static str = "mlx_lm";
+    const MODULE_ARGS: &'static [&'static str] = &["server"];
+    const MODEL_FLAG: &'static str = "--model";
+    const ENGINE: crate::inference::Engine = crate::inference::Engine::Mlx;
+
+    fn log_stdout(line: &str) {
+        tracing::info!(target: "mlx", "{line}");
     }
 
-    /// Attach an advanced launch config (applied as extra CLI args at spawn).
-    pub fn with_launch(mut self, launch: crate::inference::LaunchConfig) -> Self {
-        self.launch = launch;
-        self
-    }
-
-    pub async fn start(&mut self) -> Result<()> {
-        let mut cmd = Command::new(&self.python);
-        // `python -m mlx_lm server ...` is the non-deprecated invocation
-        // (`python -m mlx_lm.server` still works but warns).
-        cmd.args([
-            "-m",
-            "mlx_lm",
-            "server",
-            "--model",
-            &self.model,
-            "--host",
-            DEFAULT_HOST,
-            "--port",
-            &self.port.to_string(),
-        ]);
-        // Advanced inference launch flags (research flags via `extra_args` ride along).
-        for arg in self.launch.to_args(crate::inference::Engine::Mlx) {
-            cmd.arg(arg);
-        }
-        let mut child = cmd
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(false)
-            .no_window()
-            .spawn()
-            .context("spawning mlx server")?;
-
-        if let Some(stdout) = child.stdout.take() {
-            self.log_tasks.push(tokio::spawn(async move {
-                let mut lines = BufReader::new(stdout).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::info!(target: "mlx", "{line}");
-                }
-            }));
-        }
-
-        if let Some(stderr) = child.stderr.take() {
-            self.log_tasks.push(tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::warn!(target: "mlx", "{line}");
-                }
-            }));
-        }
-
-        self.child = Some(child);
-        Ok(())
-    }
-
-    pub async fn stop(&mut self) -> Result<()> {
-        for handle in self.log_tasks.drain(..) {
-            handle.abort();
-        }
-
-        if let Some(mut child) = self.child.take() {
-            #[cfg(unix)]
-            if let Some(pid) = child.id() {
-                use nix::sys::signal::{kill, Signal};
-                use nix::unistd::Pid;
-                let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
-            }
-
-            #[cfg(windows)]
-            let _ = child.kill().await;
-
-            let mut child = child;
-            match tokio::time::timeout(std::time::Duration::from_secs(10), child.wait()).await {
-                Ok(_) => {}
-                Err(_) => {
-                    tracing::warn!("mlx did not exit within 10 s — sending SIGKILL");
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn is_running(&mut self) -> bool {
-        let Some(child) = self.child.as_mut() else {
-            return false;
-        };
-        match child.try_wait() {
-            Ok(None) => true,
-            _ => {
-                self.child = None;
-                false
-            }
-        }
+    fn log_stderr(line: &str) {
+        tracing::warn!(target: "mlx", "{line}");
     }
 }
+
+pub type MlxProcess = PythonServerProcess<Mlx>;

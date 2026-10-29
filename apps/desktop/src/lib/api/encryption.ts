@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/encryption.ts
 //
 // Typed client for Core's at-rest encryption posture (`/api/encryption/status`).
@@ -6,6 +7,39 @@
 // endpoint never returns key material in any form, so neither does this module.
 
 import { type ApiTarget, request } from "./client.ts";
+
+const keyResponseSchema = z.looseObject({
+	available: z.boolean(),
+	envVar: z.string(),
+	error: z.union([z.null(), z.string()]),
+	keychainAccount: z.union([z.null(), z.string()]),
+	keychainService: z.union([z.null(), z.string()]),
+	keyFile: z.union([z.null(), z.string()]),
+	legacyMemoryKeyPresent: z.boolean(),
+	source: z.union([
+		z.null(),
+		z.literal("file"),
+		z.literal("env"),
+		z.literal("keychain"),
+	]),
+});
+const storesResponseSchema = z.looseObject({
+	detail: z.string(),
+	id: z.string(),
+	label: z.string(),
+	sealed: z.union([z.null(), z.number()]),
+	status: z.union([
+		z.literal("sealed"),
+		z.literal("partial"),
+		z.literal("plaintext"),
+	]),
+	total: z.union([z.null(), z.number()]),
+});
+const fetchEncryptionStatusResponseSchema = z.looseObject({
+	dataDir: z.string(),
+	key: keyResponseSchema,
+	stores: z.array(storesResponseSchema),
+});
 
 /** Which custody path the running Core resolved its master key from. */
 export type MasterKeySource = "env" | "keychain" | "file";
@@ -55,5 +89,10 @@ export interface EncryptionStatus {
 export function fetchEncryptionStatus(
 	target: ApiTarget
 ): Promise<EncryptionStatus> {
-	return request<EncryptionStatus>(target, "/api/encryption/status");
+	return request(
+		target,
+		"/api/encryption/status",
+		undefined,
+		fetchEncryptionStatusResponseSchema
+	);
 }

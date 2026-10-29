@@ -4,17 +4,22 @@ import { useCalloutEmojiPicker } from "@platejs/callout/react";
 import { useEmojiDropdownMenuState } from "@platejs/emoji/react";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { PlateElement } from "platejs/react";
-import type * as React from "react";
-
+import type { TCalloutElement } from "platejs";
+import { PlateElement, type PlateElementProps } from "platejs/react";
+import type { CSSProperties as ReactCSSProperties } from "react";
+import editorStyles from "../editor-lint.module.css";
 import { EmojiPicker, EmojiPopover } from "./emoji-toolbar-button.tsx";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editorcalloutNode1-background-color"?: string | number;
+}
 
 export function CalloutElement({
 	attributes,
 	children,
 	className,
 	...props
-}: React.ComponentProps<typeof PlateElement>) {
+}: PlateElementProps<TCalloutElement>) {
 	const { emojiPickerState, isOpen, setIsOpen } = useEmojiDropdownMenuState({
 		closeOnSelect: true,
 	});
@@ -25,16 +30,23 @@ export function CalloutElement({
 			setIsOpen,
 		});
 
+	// The unlayered module rule outranks `bg-muted`, so attach it only when the
+	// callout carries its own color; default callouts keep the muted fill.
+	const backgroundColor = props.element.backgroundColor;
+	const editorcalloutNode1Style: EditorVariableStyle = {
+		"--editorcalloutNode1-background-color": backgroundColor,
+	};
 	return (
 		<PlateElement
 			attributes={{
 				...attributes,
 				"data-plate-open-context-menu": true,
 			}}
-			className={cn("my-1 flex rounded-sm bg-muted p-4 ps-3", className)}
-			style={{
-				backgroundColor: props.element.backgroundColor as any,
-			}}
+			className={cn(
+				cn("my-1 flex rounded-sm bg-muted p-4 ps-3", className),
+				backgroundColor && editorStyles.editorcalloutNode1
+			)}
+			style={editorcalloutNode1Style}
 			{...props}
 		>
 			<div className="flex w-full gap-2 rounded-md">
@@ -42,15 +54,14 @@ export function CalloutElement({
 					{...emojiToolbarDropdownProps}
 					control={
 						<Button
-							className="size-6 select-none p-1 text-[18px] hover:bg-muted-foreground/15"
+							className={cn(
+								"size-6 select-none p-1 text-[18px] hover:bg-muted-foreground/15",
+								editorStyles.editorcalloutNode2
+							)}
 							contentEditable={false}
-							style={{
-								fontFamily:
-									'"Apple Color Emoji", "Segoe UI Emoji", NotoColorEmoji, "Noto Color Emoji", "Segoe UI Symbol", "Android Emoji", EmojiSymbols',
-							}}
 							variant="ghost"
 						>
-							{(props.element.icon as any) || "💡"}
+							{props.element.icon || "💡"}
 						</Button>
 					}
 				>

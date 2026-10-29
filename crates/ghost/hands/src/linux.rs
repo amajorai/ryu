@@ -228,11 +228,59 @@ fn keymap(conn: &RustConnection) -> Result<Keymap> {
     })
 }
 
-fn tap_keysym(conn: &RustConnection, km: &Keymap, keysym: u32) -> Result<()> {
-    let Some((kc, needs_shift)) = find_keycode(km.min, km.per, &km.syms, keysym) else {
-        // Not in the active layout (e.g. a non-Latin char); skip rather than error.
-        return Ok(());
-    };
+/// Candidate X11 keysyms for one typed character, most specific first. Latin-1
+/// keysyms equal the code point; control characters use their function keysyms
+/// (they are not keysyms themselves); anything else uses the Unicode keysym form
+/// `0x0100_0000 | cp`, plus a legacy named keysym where layouts publish only that.
+fn char_keysyms(ch: char) -> Vec<u32> {
+    let cp = ch as u32;
+    match ch {
+        '\n' | '\r' => vec![0xFF0D], // Return
+        '\t' => vec![0xFF09],        // Tab
+        '\u{8}' => vec![0xFF08],     // BackSpace
+        _ if ch.is_control() => Vec::new(),
+        _ if cp <= 0xFF => vec![cp],
+        '€' => vec![0x0100_0000 | cp, 0x20AC], // EuroSign
+        _ => vec![0x0100_0000 | cp],
+    }
+}
+
+/// Resolve every character of `text` to (keycode, needs_shift) before anything is
+/// typed, so a character missing from the active layout fails the call instead of
+/// being dropped silently mid-text. CRLF is one Return.
+fn resolve_text_keys(
+    text: &str,
+    setup_min: u8,
+    per: usize,
+    keysyms: &[u32],
+) -> Result<Vec<(u8, bool)>> {
+    let mut keys = Vec::new();
+    let mut missing: Vec<char> = Vec::new();
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\r' && chars.peek() == Some(&'\n') {
+            continue;
+        }
+        match char_keysyms(ch)
+            .into_iter()
+            .find_map(|keysym| find_keycode(setup_min, per, keysyms, keysym))
+        {
+            Some(key) => keys.push(key),
+            None if !missing.contains(&ch) => missing.push(ch),
+            None => {}
+        }
+    }
+    if !missing.is_empty() {
+        let listed: Vec<String> = missing.iter().map(|ch| format!("{ch:?}")).collect();
+        return Err(anyhow!(
+            "Cannot type {} on the active X11 keyboard layout; nothing was typed",
+            listed.join(", ")
+        ));
+    }
+    Ok(keys)
+}
+
+fn tap_keycode(conn: &RustConnection, km: &Keymap, kc: u8, needs_shift: bool) -> Result<()> {
     let shift_kc = find_keycode(km.min, km.per, &km.syms, SHIFT_KEYSYM).map(|(c, _)| c);
     if needs_shift {
         if let Some(s) = shift_kc {
@@ -249,17 +297,26 @@ fn tap_keysym(conn: &RustConnection, km: &Keymap, keysym: u32) -> Result<()> {
     Ok(())
 }
 
+fn tap_keysym(conn: &RustConnection, km: &Keymap, keysym: u32) -> Result<()> {
+    let Some((kc, needs_shift)) = find_keycode(km.min, km.per, &km.syms, keysym) else {
+        // Named key not in the active layout; skip rather than error (press/hotkey).
+        return Ok(());
+    };
+    tap_keycode(conn, km, kc, needs_shift)
+}
+
 pub fn type_text(text: &str, clear: bool) -> Result<()> {
     let (conn, _screen) = connect()?;
     let km = keymap(&conn)?;
+    let keys = resolve_text_keys(text, km.min, km.per, &km.syms)?;
     if clear {
         hotkey_on(&conn, &km, &["ctrl", "a"])?;
         std::thread::sleep(std::time::Duration::from_millis(50));
         press_key_on(&conn, &km, "delete", &[])?;
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    for ch in text.chars() {
-        tap_keysym(&conn, &km, ch as u32)?;
+    for (kc, needs_shift) in keys {
+        tap_keycode(&conn, &km, kc, needs_shift)?;
         conn.flush()?;
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
@@ -481,4 +538,47 @@ pub fn window_action(
         WindowAction::List => unreachable!("handled above"),
     }
     Ok(serde_json::json!({ "success": true }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Two keysyms per keycode starting at keycode 8: 'a'/'A', Return, Tab, '€'.
+    const MIN: u8 = 8;
+    const SYMS: [u32; 8] = [0x61, 0x41, 0xFF0D, 0, 0xFF09, 0, 0x20AC, 0];
+
+    #[test]
+    fn char_keysyms_maps_control_and_non_latin1_characters() {
+        assert_eq!(char_keysyms('a'), vec![0x61]);
+        assert_eq!(char_keysyms('\n'), vec![0xFF0D]);
+        assert_eq!(char_keysyms('\t'), vec![0xFF09]);
+        assert_eq!(char_keysyms('é'), vec![0xE9]);
+        assert_eq!(char_keysyms('ж'), vec![0x0100_0436]);
+        assert_eq!(char_keysyms('€'), vec![0x0100_20AC, 0x20AC]);
+        assert!(char_keysyms('\u{7}').is_empty());
+    }
+
+    #[test]
+    fn resolve_text_keys_types_newlines_tabs_and_treats_crlf_as_one_return() {
+        let keys = resolve_text_keys("aA\r\n\t\n€", MIN, 2, &SYMS).unwrap();
+        assert_eq!(
+            keys,
+            vec![
+                (8, false),
+                (8, true),
+                (9, false),
+                (10, false),
+                (9, false),
+                (11, false)
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_text_keys_rejects_characters_missing_from_the_layout() {
+        let err = resolve_text_keys("a字b", MIN, 2, &SYMS).unwrap_err();
+        assert!(err.to_string().contains("'字'"), "{err}");
+        assert!(err.to_string().contains("nothing was typed"), "{err}");
+    }
 }

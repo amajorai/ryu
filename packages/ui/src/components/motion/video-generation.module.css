@@ -1,0 +1,6 @@
+.inline1 {
+	aspect-ratio: var(--video-generation-1-aspect-ratio);
+	background-image: var(--video-generation-1-background-image);
+	background-position: var(--video-generation-1-background-position);
+	background-size: var(--video-generation-1-background-size);
+}

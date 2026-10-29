@@ -1,0 +1,6 @@
+.height {
+	height: var(--review-height);
+}
+.width {
+	width: var(--review-width);
+}

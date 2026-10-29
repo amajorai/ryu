@@ -32,7 +32,9 @@ const { extractSources } = await import(
 	"@/src/components/panels/CoworkContextPanel.tsx"
 );
 
-function toolMessage(parts: Record<string, unknown>[]) {
+function toolMessage(
+	parts: NonNullable<Parameters<typeof extractSources>[0][number]["parts"]>
+) {
 	return { role: "assistant", parts };
 }
 

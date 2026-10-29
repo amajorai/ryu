@@ -1,0 +1,6 @@
+.inline1 {
+	clip-path: var(--range-slider-fluid-1-clip-path);
+}
+.inline2 {
+	color: var(--range-slider-fluid-2-color);
+}

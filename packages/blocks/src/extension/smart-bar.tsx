@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	ArrowUpRight,
 	AtSign,
@@ -19,14 +20,14 @@ import { route, type SmartIntent } from "./smart-bar-engine.ts";
 // importable from outside the package: this block is the public door to it.
 export * from "./smart-bar-engine.ts";
 
-const INTENT_ICON: Record<SmartIntent["kind"], typeof Globe> = {
+const INTENT_ICON = {
 	navigate: Globe,
 	search: Search,
 	ai: Sparkles,
 	bang: ArrowUpRight,
 	skill: TerminalSquare,
 	mention: AtSign,
-};
+} satisfies Record<SmartIntent["kind"], typeof Globe>;
 
 const PLACEHOLDER = "Search, type a URL, or ask Ryu…";
 
@@ -86,9 +87,9 @@ export interface SmartBarSuggestion {
 }
 
 function SuggestionIcon({ kind }: { kind: SmartBarSuggestion["kind"] }) {
-	const Icon = kind === "bookmark" ? Bookmark : MessageSquare;
+	const SuggestionGlyph = kind === "bookmark" ? Bookmark : MessageSquare;
 	return (
-		<Icon
+		<SuggestionGlyph
 			aria-hidden="true"
 			className="size-4 shrink-0 text-muted-foreground"
 		/>
@@ -110,6 +111,7 @@ export function SmartBar({
 	suggestions = [],
 	suggestionStatus = "idle",
 }: SmartBarProps) {
+	const tl = useLiteralMessages();
 	const [value, setValue] = useState(defaultValue);
 	const [cycle, setCycle] = useState(0);
 	const [suggestionIndex, setSuggestionIndex] = useState(-1);
@@ -190,7 +192,7 @@ export function SmartBar({
 					aria-controls={suggestions.length > 0 ? suggestionsId : undefined}
 					aria-label={PLACEHOLDER}
 					autoFocus={autoFocus}
-					className="flex-1 bg-transparent text-[14px] leading-[1.6] outline-none placeholder:text-muted-foreground"
+					className="flex-1 bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
 					onChange={(e) => {
 						setValue(e.target.value);
 						setCycle(0);
@@ -212,7 +214,7 @@ export function SmartBar({
 					id={suggestionsId}
 					role="listbox"
 				>
-					<div className="flex items-center justify-between border-border/60 border-b px-3 py-2 text-[11px] text-muted-foreground">
+					<div className="type-caption flex items-center justify-between border-border/60 border-b px-3 py-2 text-muted-foreground">
 						<span className="font-medium uppercase tracking-wider">
 							Local Ryu results
 						</span>
@@ -220,7 +222,9 @@ export function SmartBar({
 							{suggestionStatus === "loading"
 								? "Searching…"
 								: suggestions.length > 0
-									? `${suggestions.length} found`
+									? tl("{matchCount} found", {
+											matchCount: String(suggestions.length),
+										})
 									: "No matches"}
 						</span>
 					</div>

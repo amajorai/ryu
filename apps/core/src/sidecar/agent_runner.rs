@@ -130,6 +130,18 @@ impl AgentRunner {
         .await
     }
 
+    /// Return the selected agent's authored prompt for a tool-free background
+    /// suggestion pass. The caller runs the analysis through Core's default
+    /// model route, so an agent's ACP process or attached tools are never started.
+    pub async fn suggestion_guidance(&self, agent_id: &str) -> anyhow::Result<Option<String>> {
+        let Some(agent) = self.agent_store.get(agent_id).await? else {
+            return Ok(None);
+        };
+        Ok(agent
+            .system_prompt
+            .filter(|prompt| !prompt.trim().is_empty()))
+    }
+
     /// Run a scheduled agent turn in a durable conversation. `conversation_id`
     /// is either the routine's selected existing chat or a newly-created id for
     /// this firing. The row is ensured before the model starts so a routine that
@@ -201,10 +213,10 @@ impl AgentRunner {
     ///
     /// This is the primitive behind the coordinator-threads `send_message_to_thread`
     /// tool. Unlike [`AgentRunner::run`] (persist = false, no cwd), a coordinator
-    /// spawns durable workers whose transcripts it later reads back, and each
-    /// worker runs in its own worktree so parallel workers never collide in the
-    /// same checkout. The worktree is created lazily and reused across turns by
-    /// `route_chat_stream`'s persistent-session logic, keyed on `conversation_id`.
+    /// spawns durable workers whose transcripts it later reads back. Worktree
+    /// isolation is optional; when requested, the worktree is created lazily and
+    /// reused across turns by `route_chat_stream`'s persistent-session logic,
+    /// keyed on `conversation_id`.
     pub async fn run_worker(
         &self,
         agent_id: Option<String>,

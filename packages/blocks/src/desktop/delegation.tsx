@@ -1,4 +1,6 @@
 "use client";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import styles from "./delegation.module.css";
 
 // Presentational layer for a sub-agent delegation fan-out (delegate rows, caps,
 // streamed progress). The standalone desktop Delegation page was removed —
@@ -9,6 +11,7 @@
 
 import { HierarchyIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -85,22 +88,22 @@ export interface DelegationViewProps {
 	running?: boolean;
 }
 
-const STATUS_LABEL: Record<DelegateStatus, string> = {
+const STATUS_LABEL = {
 	pending: "Queued",
 	running: "Running",
 	done: "Done",
 	failed: "Failed",
-};
+} satisfies Record<DelegateStatus, string>;
 
-const STATUS_VARIANT: Record<
-	DelegateStatus,
-	"secondary" | "default" | "destructive" | "outline"
-> = {
+const STATUS_VARIANT = {
 	pending: "outline",
 	running: "secondary",
 	done: "default",
 	failed: "destructive",
-};
+} satisfies Record<
+	DelegateStatus,
+	"secondary" | "default" | "destructive" | "outline"
+>;
 
 export function DelegationView({
 	rows,
@@ -122,6 +125,7 @@ export function DelegationView({
 	onSubmit,
 	onCancel,
 }: DelegationViewProps) {
+	const tl = useLiteralMessages();
 	const hasProgress = Object.keys(progress).length > 0;
 
 	return (
@@ -137,12 +141,14 @@ export function DelegationView({
 									preset. Empty tasks are skipped.
 								</CardDescription>
 							</CardHeader>
-							<CardContent className="flex flex-col gap-4">
+							<CardContent layout="spaced-stack">
 								{rows.map((row, index) => (
 									<div className="flex flex-col gap-2" key={row.id}>
 										<div className="flex items-center justify-between">
-											<Label className="text-muted-foreground text-xs">
-												Delegate {index + 1}
+											<Label size="compact" tone="muted">
+												{tl("Delegate {delegateNumber}", {
+													delegateNumber: index + 1,
+												})}
 											</Label>
 											<Button
 												disabled={rows.length <= 1 || running}
@@ -155,12 +161,15 @@ export function DelegationView({
 											</Button>
 										</div>
 										<Textarea
+											aria-label={tl("Task for delegate {delegateNumber}", {
+												delegateNumber: index + 1,
+											})}
 											className="min-h-20"
 											disabled={running}
 											onChange={(e) =>
 												onUpdateRow?.(row.id, { task: e.target.value })
 											}
-											placeholder="Self-contained task for this sub-agent..."
+											placeholder="Self-contained task for this sub-agent…"
 											value={row.task}
 										/>
 										<Select
@@ -171,7 +180,13 @@ export function DelegationView({
 											}
 											value={row.preset}
 										>
-											<SelectTrigger className="w-full">
+											<SelectTrigger
+												aria-label={tl(
+													"Permission preset for delegate {delegateNumber}",
+													{ delegateNumber: index + 1 }
+												)}
+												className="w-full"
+											>
 												<SelectValue />
 											</SelectTrigger>
 											<SelectContent>
@@ -203,60 +218,70 @@ export function DelegationView({
 									are clamped server-side to their hard maximums.
 								</CardDescription>
 							</CardHeader>
-							<CardContent className="grid grid-cols-2 gap-4">
-								<div className="flex flex-col gap-1.5">
-									<Label htmlFor="cap-concurrency">
-										Concurrency (max {maxConcurrent})
-									</Label>
-									<Input
-										disabled={running}
-										id="cap-concurrency"
-										max={maxConcurrent}
-										min={1}
-										onChange={(e) =>
-											onUpdateCaps?.({ max_concurrent: Number(e.target.value) })
-										}
-										type="number"
-										value={caps.max_concurrent}
-									/>
-								</div>
-								<div className="flex flex-col gap-1.5">
-									<Label htmlFor="cap-depth">Depth (max {maxDepth})</Label>
-									<Input
-										disabled={running}
-										id="cap-depth"
-										max={maxDepth}
-										min={1}
-										onChange={(e) => onUpdateDepth?.(Number(e.target.value))}
-										type="number"
-										value={depth}
-									/>
-								</div>
-								<div className="flex flex-col gap-1.5">
-									<Label htmlFor="cap-tokens">Token budget</Label>
-									<Input
-										disabled={running}
-										id="cap-tokens"
-										min={1}
-										onChange={(e) =>
-											onUpdateCaps?.({ max_tokens: Number(e.target.value) })
-										}
-										type="number"
-										value={caps.max_tokens}
-									/>
-								</div>
-								<div className="flex flex-col gap-1.5">
-									<Label htmlFor="cap-walltime">Wall-time (s)</Label>
-									<Input
-										disabled={running}
-										id="cap-walltime"
-										min={1}
-										onChange={(e) =>
-											onUpdateCaps?.({ wall_time_secs: Number(e.target.value) })
-										}
-										type="number"
-										value={caps.wall_time_secs}
-									/>
+							<CardContent>
+								<div className={cn("grid grid-cols-2", styles.caps)}>
+									<div className="flex flex-col gap-1.5">
+										<Label htmlFor="cap-concurrency">
+											{tl("Concurrency (max {maxConcurrent})", {
+												maxConcurrent,
+											})}
+										</Label>
+										<Input
+											disabled={running}
+											id="cap-concurrency"
+											max={maxConcurrent}
+											min={1}
+											onChange={(e) =>
+												onUpdateCaps?.({
+													max_concurrent: Number(e.target.value),
+												})
+											}
+											type="number"
+											value={caps.max_concurrent}
+										/>
+									</div>
+									<div className="flex flex-col gap-1.5">
+										<Label htmlFor="cap-depth">
+											{tl("Depth (max {maxDepth})", { maxDepth })}
+										</Label>
+										<Input
+											disabled={running}
+											id="cap-depth"
+											max={maxDepth}
+											min={1}
+											onChange={(e) => onUpdateDepth?.(Number(e.target.value))}
+											type="number"
+											value={depth}
+										/>
+									</div>
+									<div className="flex flex-col gap-1.5">
+										<Label htmlFor="cap-tokens">Token budget</Label>
+										<Input
+											disabled={running}
+											id="cap-tokens"
+											min={1}
+											onChange={(e) =>
+												onUpdateCaps?.({ max_tokens: Number(e.target.value) })
+											}
+											type="number"
+											value={caps.max_tokens}
+										/>
+									</div>
+									<div className="flex flex-col gap-1.5">
+										<Label htmlFor="cap-walltime">Wall-time (s)</Label>
+										<Input
+											disabled={running}
+											id="cap-walltime"
+											min={1}
+											onChange={(e) =>
+												onUpdateCaps?.({
+													wall_time_secs: Number(e.target.value),
+												})
+											}
+											type="number"
+											value={caps.wall_time_secs}
+										/>
+									</div>
 								</div>
 							</CardContent>
 						</Card>
@@ -268,7 +293,7 @@ export function DelegationView({
 								onClick={onSubmit}
 								type="button"
 							>
-								{running ? "Delegating..." : "Run delegation"}
+								{running ? "Delegating…" : "Run delegation"}
 							</Button>
 							{running ? (
 								<Button onClick={onCancel} type="button" variant="ghost">
@@ -280,14 +305,20 @@ export function DelegationView({
 
 					<div className="flex flex-col gap-4">
 						{runError ? (
-							<Card className="border-destructive">
+							<Card>
 								<CardHeader>
-									<CardTitle className="text-status-destructive">
-										Delegation error
+									<CardTitle>
+										<span className={styles.errorTitle}>Delegation error</span>
 									</CardTitle>
-									<CardDescription className="break-words text-status-destructive">
+									<p
+										className={cn(
+											"break-words text-sm",
+											styles.errorDescription
+										)}
+										data-slot="card-description"
+									>
 										{runError}
-									</CardDescription>
+									</p>
 								</CardHeader>
 							</Card>
 						) : null}
@@ -299,12 +330,15 @@ export function DelegationView({
 									Per-delegate status streamed as the fan-out runs.
 								</CardDescription>
 							</CardHeader>
-							<CardContent className="flex flex-col gap-3">
+							<CardContent layout="stack">
 								{hasProgress ? (
 									rows
 										.filter((r) => progress[r.id])
 										.map((row, index) => {
 											const p = progress[row.id];
+											if (!p) {
+												return null;
+											}
 											return (
 												<div
 													className="flex flex-col gap-1 rounded-md border p-3"
@@ -312,7 +346,9 @@ export function DelegationView({
 												>
 													<div className="flex items-center justify-between gap-2">
 														<span className="font-medium text-sm">
-															Delegate {index + 1}
+															{tl("Delegate {delegateNumber}", {
+																delegateNumber: index + 1,
+															})}
 														</span>
 														<div className="flex items-center gap-2">
 															<Badge variant="secondary">{p.preset}</Badge>
@@ -324,7 +360,10 @@ export function DelegationView({
 															</Badge>
 														</div>
 													</div>
-													<p className="truncate text-muted-foreground text-xs">
+													<p
+														className="truncate text-muted-foreground text-xs"
+														title={row.task.trim()}
+													>
 														{row.task.trim()}
 													</p>
 												</div>
@@ -354,7 +393,7 @@ export function DelegationView({
 										Ordered results from the completed delegation run.
 									</CardDescription>
 								</CardHeader>
-								<CardContent className="flex flex-col gap-3">
+								<CardContent layout="stack">
 									{results.map((result, index) => (
 										<div
 											className="flex flex-col gap-1.5 rounded-md border p-3"
@@ -362,7 +401,9 @@ export function DelegationView({
 										>
 											<div className="flex items-center justify-between gap-2">
 												<span className="font-medium text-sm">
-													Result {index + 1}
+													{tl("Result {resultNumber}", {
+														resultNumber: index + 1,
+													})}
 												</span>
 												<Badge
 													variant={result.error ? "destructive" : "default"}

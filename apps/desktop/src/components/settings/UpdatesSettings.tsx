@@ -4,6 +4,7 @@
 // the storyboard renders with mock data.
 
 import { UpdatesView } from "@ryu/blocks/desktop/updates.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Select,
 	SelectContent,
@@ -11,6 +12,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useEffect, useState } from "react";
 import { sileo } from "sileo";
 import {
@@ -36,7 +38,7 @@ import {
 	updateCheckFailed,
 } from "@/src/lib/api/update.ts";
 import {
-	RELEASE_CHANNELS,
+	AVAILABLE_RELEASE_CHANNELS,
 	type ReleaseChannel,
 	useReleaseChannel,
 } from "@/src/lib/release-channel.ts";
@@ -47,6 +49,7 @@ import {
 } from "./shared/settings-items.tsx";
 
 export function UpdatesSettings() {
+	const tl = useLiteralMessages();
 	const getNode = useActiveNodeGetter();
 	const [version, setVersion] = useState<string | null>(null);
 	const [autoUpdate, setAutoUpdate] = useState<boolean>(true);
@@ -104,8 +107,8 @@ export function UpdatesSettings() {
 					description: verdict.error ?? "Check your connection and try again.",
 				});
 			} else if (verdict.update_available) {
-				sileo.info({
-					title: `Update available — v${verdict.latest}`,
+				toast.info({
+					title: tl("Update available — v{latest}", { latest: verdict.latest }),
 					// Deliberately NOT gated on the app's own version the way the App
 					// Updates tab is: this tab governs the NODE's Core/Gateway binaries,
 					// so `verdict.current` — the answering Core's version — is exactly
@@ -174,6 +177,7 @@ const TIME_ZONE_ITEMS = [
  * here: it admits LAN and mesh nodes too.
  */
 export function NodeTimeZonePicker() {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const orgId = node.orgId ?? null;
 	const serverId = node.serverId ?? null;
@@ -251,7 +255,9 @@ export function NodeTimeZonePicker() {
 				// The EFFECTIVE zone, not the override — the override is null on a
 				// node that is correctly following its own clock, so rendering it
 				// directly would render a blank.
-				`Scheduled resizes use 03:00 in ${zone.effectiveTimeZone}.`
+				tl("Scheduled resizes use 03:00 in {timeZone}.", {
+					timeZone: zone.effectiveTimeZone,
+				})
 			}
 			title="Quiet hour"
 		>
@@ -267,7 +273,8 @@ export function NodeTimeZonePicker() {
 							value={zone.timeZone ?? FOLLOW_NODE}
 						>
 							<SelectTrigger
-								className="h-8 w-56 flex-shrink-0 text-sm"
+								appearance="editor-row"
+								className="w-56 shrink-0"
 								id="node-time-zone-select"
 							>
 								<SelectValue />
@@ -275,7 +282,9 @@ export function NodeTimeZonePicker() {
 							<SelectContent>
 								<SelectItem value={FOLLOW_NODE}>
 									{zone.detectedTimeZone
-										? `Follow the node (${zone.detectedTimeZone})`
+										? tl("Follow the node ({timeZone})", {
+												timeZone: zone.detectedTimeZone,
+											})
 										: "Follow the node (not reported yet)"}
 								</SelectItem>
 								{NODE_TIME_ZONES.map((option) => (
@@ -291,7 +300,13 @@ export function NodeTimeZonePicker() {
 				/>
 				{overrideDiverges ? (
 					<SettingsItem
-						description={`Deferred Core and Gateway updates are scheduled by the node itself, from its own clock — those still run at 03:00 ${zone.detectedTimeZone}, not ${zone.timeZone}. Only resizes, which the control plane performs, follow the override.`}
+						description={tl(
+							"Deferred Core and Gateway updates are scheduled by the node itself, from its own clock — those still run at 03:00 {detectedTimeZone}, not {overrideTimeZone}. Only resizes, which the control plane performs, follow the override.",
+							{
+								detectedTimeZone: zone.detectedTimeZone,
+								overrideTimeZone: zone.timeZone,
+							}
+						)}
 						title="Updates keep the node's own night"
 					/>
 				) : null}
@@ -303,10 +318,11 @@ export function NodeTimeZonePicker() {
 	);
 }
 
-/** Chooses the release channel (Canary / Nightly / Beta / Stable). The choice
- *  decides which per-channel updater feed the Tauri updater checks, so switching
- *  it changes which builds this install receives. */
-const RELEASE_CHANNEL_ITEMS = RELEASE_CHANNELS.map((option) => ({
+/** Chooses the release channel (Canary / Nightly / Beta / Stable; Beta / Stable
+ *  in Ryu Bot, which has no nightly or canary builds). The choice decides which
+ *  per-channel updater feed the Tauri updater checks, so switching it changes
+ *  which builds this install receives. */
+const RELEASE_CHANNEL_ITEMS = AVAILABLE_RELEASE_CHANNELS.map((option) => ({
 	value: option.channel,
 	label: option.label,
 }));
@@ -322,19 +338,20 @@ export function ReleaseChannelPicker() {
 			<SettingsGroup>
 				<SettingsItem
 					actions={
-						<Select
+						<Select<ReleaseChannel>
 							items={RELEASE_CHANNEL_ITEMS}
-							onValueChange={(v) => setChannel(v as ReleaseChannel)}
+							onValueChange={(v) => setChannel(v)}
 							value={channel}
 						>
 							<SelectTrigger
-								className="h-8 w-56 flex-shrink-0 text-sm"
+								appearance="editor-row"
+								className="w-56 shrink-0"
 								id="release-channel-select"
 							>
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								{RELEASE_CHANNELS.map((option) => (
+								{AVAILABLE_RELEASE_CHANNELS.map((option) => (
 									<SelectItem key={option.channel} value={option.channel}>
 										{option.label}
 									</SelectItem>

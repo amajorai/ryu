@@ -1,17 +1,25 @@
-import { LANGUAGE_PACKS_CHANGED_EVENT, type LanguagePack } from "@ryu/i18n";
+import {
+	LANGUAGE_PACK_STORAGE_KEY,
+	LANGUAGE_PACKS_CHANGED_EVENT,
+	type LanguagePack,
+} from "@ryu/i18n";
 import { useI18n } from "@ryu/i18n/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
+} from "@ryu/ui/components/select.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
-import { useLanguageMode } from "@/src/hooks/useLanguageMode.ts";
+import {
+	LANGUAGE_MODE_CHANGED_EVENT,
+	LANGUAGE_MODE_KEY,
+	useLanguageMode,
+} from "@/src/hooks/useLanguageMode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	downloadLanguagePack,
@@ -39,8 +47,12 @@ export function LanguageSettings({
 		useI18n();
 	const [languageMode, setLanguageMode] = useLanguageMode();
 	const [busyId, setBusyId] = useState<string | null>(null);
-	const [pendingPackId, setPendingPackId] = useState<string | null>(null);
-	const [importError, setImportError] = useState<string | null>(null);
+	const [pendingPack, setPendingPack] = useState<{
+		id: string;
+		operation: symbol;
+	} | null>(null);
+	const [operationError, setOperationError] = useState<string | null>(null);
+	const operationRef = useRef<symbol | null>(null);
 	const importInputRef = useRef<HTMLInputElement>(null);
 	const packs = useMemo(
 		() =>
@@ -49,9 +61,44 @@ export function LanguageSettings({
 			),
 		[availablePacks]
 	);
+	const retireOperation = useCallback(() => {
+		operationRef.current = null;
+		setPendingPack(null);
+		setBusyId(null);
+		setOperationError(null);
+	}, []);
+
+	useEffect(() => {
+		// An operation belongs to one node and credential generation. Returning
+		// to an earlier owner must not revive a response from its previous visit.
+		retireOperation();
+		return () => {
+			operationRef.current = null;
+		};
+	}, [node.url, node.token, node.userJwt, retireOperation]);
+
+	useEffect(() => {
+		const onStorage = (event: StorageEvent) => {
+			if (
+				(event.storageArea === null || event.storageArea === localStorage) &&
+				(event.key === null ||
+					event.key === LANGUAGE_MODE_KEY ||
+					event.key === LANGUAGE_PACK_STORAGE_KEY)
+			) {
+				retireOperation();
+			}
+		};
+		window.addEventListener(LANGUAGE_MODE_CHANGED_EVENT, retireOperation);
+		window.addEventListener("storage", onStorage);
+		return () => {
+			window.removeEventListener(LANGUAGE_MODE_CHANGED_EVENT, retireOperation);
+			window.removeEventListener("storage", onStorage);
+		};
+	}, [retireOperation]);
 
 	const select = useCallback(
 		async (value: string | null) => {
+			retireOperation();
 			if (value === AUTO_DETECT_VALUE) {
 				setLanguageMode("auto");
 				selectPack(null);
@@ -61,55 +108,81 @@ export function LanguageSettings({
 			const id = value === DEFAULT_PACK_VALUE ? null : value;
 			const pack = id ? packs.find((candidate) => candidate.id === id) : null;
 			if (pack && pack.enabled === false) {
+				const operation = Symbol("language enable");
+				operationRef.current = operation;
 				setBusyId(pack.id);
 				try {
 					await setLanguagePackEnabled(toTarget(node), {
 						enabled: true,
 						id: pack.id,
 					});
-				} catch {
+				} catch (error) {
+					if (operationRef.current !== operation) {
+						return;
+					}
+					setOperationError(
+						error instanceof Error ? error.message : String(error)
+					);
 					setBusyId(null);
+					operationRef.current = null;
 					return;
 				}
+				if (operationRef.current !== operation) {
+					return;
+				}
+				operationRef.current = null;
 				setBusyId(null);
 			}
 			setLanguageMode("fixed");
 			selectPack(id);
 		},
-		[node, packs, selectPack, setLanguageMode, setLocale]
+		[node, packs, retireOperation, selectPack, setLanguageMode, setLocale]
 	);
 
 	useEffect(() => {
 		if (
 			!(
-				pendingPackId &&
-				availablePacks.some((pack) => pack.id === pendingPackId)
+				pendingPack &&
+				operationRef.current === pendingPack.operation &&
+				availablePacks.some(
+					(pack) => pack.id === pendingPack.id && pack.enabled !== false
+				)
 			)
 		) {
 			return;
 		}
+		operationRef.current = null;
 		setLanguageMode("fixed");
-		selectPack(pendingPackId);
-		setPendingPackId(null);
-	}, [availablePacks, pendingPackId, selectPack, setLanguageMode]);
+		selectPack(pendingPack.id);
+		setPendingPack(null);
+	}, [availablePacks, pendingPack, selectPack, setLanguageMode]);
 
 	const importFile = useCallback(
 		async (file: File) => {
+			retireOperation();
+			const operation = Symbol("language import");
+			operationRef.current = operation;
 			setBusyId("__import__");
-			setImportError(null);
 			try {
-				const pack = await importLanguagePack(
-					toTarget(node),
-					new Uint8Array(await file.arrayBuffer())
-				);
-				setPendingPackId(pack.id);
+				const archive = new Uint8Array(await file.arrayBuffer());
+				if (operationRef.current !== operation) {
+					return;
+				}
+				const pack = await importLanguagePack(toTarget(node), archive);
+				if (operationRef.current !== operation) {
+					return;
+				}
+				setPendingPack({ id: pack.id, operation });
 				window.dispatchEvent(
 					new CustomEvent<LanguagePack>(LANGUAGE_PACKS_CHANGED_EVENT, {
 						detail: pack,
 					})
 				);
 			} catch (error) {
-				setImportError(
+				if (operationRef.current !== operation) {
+					return;
+				}
+				setOperationError(
 					error instanceof Error
 						? error.message
 						: t(
@@ -119,10 +192,12 @@ export function LanguageSettings({
 							)
 				);
 			} finally {
-				setBusyId(null);
+				if (operationRef.current === operation) {
+					setBusyId(null);
+				}
 			}
 		},
-		[node, t]
+		[node, retireOperation, t]
 	);
 
 	return (
@@ -131,8 +206,11 @@ export function LanguageSettings({
 				caption={t("language.restart_not_required")}
 				headerAction={
 					<>
+						{/* The visible Import button is the control; this chooser is
+							only opened from it, so it is neither a Tab stop nor announced. */}
 						<input
 							accept=".ryupack,application/zip"
+							aria-hidden="true"
 							className="sr-only"
 							onChange={(event) => {
 								const file = event.target.files?.[0];
@@ -142,6 +220,7 @@ export function LanguageSettings({
 								}
 							}}
 							ref={importInputRef}
+							tabIndex={-1}
 							type="file"
 						/>
 						<Button
@@ -197,8 +276,10 @@ export function LanguageSettings({
 					/>
 				</SettingsGroup>
 			</SettingsSection>
-			{importError ? (
-				<p className="px-3.5 text-status-destructive text-xs">{importError}</p>
+			{operationError ? (
+				<p className="px-3.5 text-status-destructive text-xs" role="alert">
+					{operationError}
+				</p>
 			) : null}
 
 			<SettingsSection title={t("language.available_packs")}>

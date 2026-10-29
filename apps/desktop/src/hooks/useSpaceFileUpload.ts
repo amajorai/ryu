@@ -1,3 +1,4 @@
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import type { FileUploadItem } from "@ryu/ui/components/file-upload.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useCallback, useRef, useState } from "react";
@@ -13,7 +14,7 @@ interface QueuedUpload extends FileUploadItem {
 }
 
 /** Keep the upload outcome honest about what Core's extraction layer completed. */
-function indexNote(index: SpaceFileIndex): string {
+function indexNote(index: SpaceFileIndex, tl: LiteralMessage): string {
 	switch (index.state) {
 		case "indexed":
 			return "Stored and searchable";
@@ -23,7 +24,9 @@ function indexNote(index: SpaceFileIndex): string {
 			return "Stored — this node cannot read this format yet";
 		case "failed":
 			return index.message
-				? `Stored, but its text could not be read: ${index.message}`
+				? tl("Stored, but its text could not be read: {message}", {
+						message: index.message,
+					})
 				: "Stored, but its text could not be read";
 		case "unattempted":
 			return "Stored — its contents have not been indexed";
@@ -48,6 +51,9 @@ export function useSpaceFileUpload(
 	const [queue, setQueue] = useState<QueuedUpload[]>([]);
 	const chainRef = useRef<Promise<void>>(Promise.resolve());
 	const sequenceRef = useRef(0);
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 
 	const patch = useCallback((id: string, next: Partial<QueuedUpload>) => {
 		setQueue((current) =>
@@ -67,7 +73,7 @@ export function useSpaceFileUpload(
 					onProgress: (fraction) => patch(entry.id, { progress: fraction }),
 				});
 				patch(entry.id, {
-					note: indexNote(stored.index),
+					note: indexNote(stored.index, tlRef.current),
 					progress: 1,
 					status: "success",
 				});
@@ -126,7 +132,10 @@ export function useSpaceFileUpload(
 				...allowed,
 				...tooBig.map((entry) => ({
 					...entry,
-					error: `Too large — the limit is ${formatBytes(SPACE_UPLOAD_MAX_BYTES)}.`,
+					error: tlRef.current("Too large — the limit is {limit}.", {
+						limit: formatBytes(SPACE_UPLOAD_MAX_BYTES),
+					}),
+					retryable: false,
 					status: "error" as const,
 				})),
 			]);

@@ -1,8 +1,10 @@
+import type { CSSProperties } from "react";
 // Standalone pixel primitives for the non-chart Dither Kit pieces (avatar,
 // gradient). Deliberately free of the chart engine so those items install
 // without `core` — only palette.ts is shared. The Bayer matrix and bloom
 // presets mirror dither-paint.ts so everything reads as one texture.
 
+import { isNativeNumber } from "../../lib/native-primitive-observation.ts";
 import { type DitherColor, PALETTE, type Rgb } from "./palette"
 
 // 4×4 ordered (Bayer) matrix, normalized to 0–1 thresholds — the same matrix
@@ -71,39 +73,36 @@ export function hueFill(hue: number): Rgb {
 
 /** Resolve a {@link PixelColor} to its rgb fill. */
 export function fillOf(color: PixelColor): Rgb {
-  return typeof color === "number" ? hueFill(color) : PALETTE[color].fill
+  return isNativeNumber(color) ? hueFill(color) : PALETTE[color].fill
 }
 
 // Bloom — same recipe as the charts: a blurred copy of the crisp canvas,
 // composited additively so the glow stays in the dither's own colour.
 export type PixelBloom = "off" | "low" | "high" | "aura"
 
-const BLOOM_PRESET: Record<
-  Exclude<PixelBloom, "off">,
-  { blur: number; brightness: number; opacity: number; saturate: number }
-> = {
+const BLOOM_PRESET = {
   low: { blur: 3, brightness: 1.35, opacity: 0.7, saturate: 1.4 },
   high: { blur: 5, brightness: 1.5, opacity: 0.78, saturate: 1.5 },
   aura: { blur: 15, brightness: 2.9, opacity: 0.1, saturate: 3 },
+} satisfies Record<
+  Exclude<PixelBloom, "off">,
+  { blur: number; brightness: number; opacity: number; saturate: number }
+>
+
+export interface PixelBloomStyle extends CSSProperties {
+ "--dither-bloom-filter"?: string;
+ "--dither-bloom-opacity"?: number;
 }
 
-export type PixelBloomStyle = {
-  filter: string
-  opacity: number
-  mixBlendMode: "plus-lighter"
-  imageRendering: "auto"
-}
-
-/** Style for the bloom layer canvas. null when off. */
+/** Variables for the bloom layer canvas. null when off. */
 export function pixelBloomStyle(bloom: PixelBloom): PixelBloomStyle | null {
-  if (bloom === "off") return null
-  const cfg = BLOOM_PRESET[bloom]
-  return {
-    filter: `blur(${cfg.blur}px) brightness(${cfg.brightness}) saturate(${cfg.saturate})`,
-    opacity: cfg.opacity,
-    mixBlendMode: "plus-lighter",
-    imageRendering: "auto",
-  }
+ if (bloom === "off") return null
+ const cfg = BLOOM_PRESET[bloom]
+ const style: PixelBloomStyle = {
+  "--dither-bloom-filter": `blur(${cfg.blur}px) brightness(${cfg.brightness}) saturate(${cfg.saturate})`,
+  "--dither-bloom-opacity": cfg.opacity,
+ };
+ return style;
 }
 
 /** Whether the OS asks for reduced motion (skip entrances). */

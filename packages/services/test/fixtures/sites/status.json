@@ -1,0 +1,59 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json;charset=utf-8"
+  },
+  "body": {
+    "apiVersion": "v1",
+    "limits": {
+      "projects": 30,
+      "versions": 100,
+      "totalArtifactBytes": 50000000,
+      "databaseBytes": 1200000,
+      "recordBytes": 64000,
+      "records": 1000,
+      "fileBytes": 5000000,
+      "files": 100,
+      "recordsPerVisitor": 100,
+      "recordBytesPerVisitor": 120000,
+      "filesPerVisitor": 10,
+      "fileBytesPerVisitor": 25000000,
+      "answerSharePercent": 20,
+      "ownerConnections": 20,
+      "connectionCallsPerVisitor": 200,
+      "sharedRecords": 1000,
+      "sharedRecordBytes": 16000,
+      "sharedRecordsPerAuthor": 100,
+      "sharedBytesPerAuthor": 120000,
+      "sharedWritesPerVisitorPerMinute": 30,
+      "sharedWritesPerSitePerMinute": 600,
+      "sharedStreamsPerSite": 100,
+      "sharedStreamsPerVisitor": 4,
+      "remixesPerDay": 20
+    },
+    "sealing": {
+      "store": "sites",
+      "state": "unmanaged",
+      "sealing": "unmanaged",
+      "unreadableRows": 0,
+      "vacuumPending": false
+    },
+    "mode": "standalone",
+    "publicEnabled": false,
+    "identityAvailable": false,
+    "retrievalAvailable": false,
+    "answersAvailable": false,
+    "completionsAvailable": false,
+    "databaseAvailable": false,
+    "agentAvailable": false,
+    "scannerAvailable": true,
+    "connectionsAvailable": false,
+    "ownerConnectionsAvailable": false,
+    "domainsAvailable": false,
+    "mcpAvailable": false,
+    "pluginInstallAvailable": false,
+    "mcpUiAvailable": false,
+    "visitorPort": 8022,
+    "baseDomain": "localhost"
+  }
+}

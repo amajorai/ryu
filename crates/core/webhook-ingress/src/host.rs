@@ -36,8 +36,8 @@ pub enum WorkflowWebhookSecret {
 }
 
 /// Signed headers carried with an inbound webhook. Composio covers all three
-/// values in its current signature; generic workflow webhooks use only
-/// `signature` and can leave the other fields absent.
+/// values in its current signature; workflow v2 webhooks also require all
+/// three so a captured body/signature cannot be replayed under a fresh id.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InboundWebhookHeaders<'a> {
     pub signature: Option<&'a str>,
@@ -74,14 +74,41 @@ pub trait WebhookIngressHost: Send + Sync {
     /// Verify a per-workflow webhook against a trigger-specific secret.
     fn verify_workflow_webhook_signature(
         &self,
+        workflow_id: &str,
         secret: &str,
         raw_body: &[u8],
-        signature: Option<&str>,
+        headers: InboundWebhookHeaders<'_>,
     ) -> bool;
+    /// Persistently reserve a signed delivery id until `expires_at` (unix
+    /// seconds). `workflow_id` scopes the claim: a workflow id, or the Composio
+    /// webhook path for Composio deliveries. `false` means this authenticated id
+    /// already ran.
+    fn reserve_workflow_delivery(
+        &self,
+        workflow_id: &str,
+        delivery_id: &str,
+        expires_at: u64,
+    ) -> Result<bool>;
+    /// Release a reservation only when the run could not start, permitting a
+    /// retry. A started run keeps its reservation even if it later fails.
+    fn release_workflow_delivery(&self, workflow_id: &str, delivery_id: &str) -> Result<()>;
     /// Fan a verified Composio payload out to the triggers store, returning the
     /// number of agent runs fired. `None` when the store is not initialised.
     async fn composio_handle_webhook(&self, payload: &Value) -> Option<usize>;
-    /// Start a workflow run seeded with the trigger payload; returns the run id.
+    /// The host forwards billing facts to Gateway after signature verification.
+    async fn record_composio_trigger_delivery(&self, _delivery_id: &str) -> Result<()> {
+        Ok(())
+    }
+    /// The managed relay registered this node again under a new public URL (its
+    /// relay token was rotated), and that URL is now the advertised one. Core
+    /// re-points the destinations it registered with the old URL, such as the
+    /// Composio project webhook subscription. Called on a spawned task; the
+    /// default has nothing to update.
+    async fn relay_public_url_changed(&self, _public_url: &str) {}
+    /// Start a workflow run seeded with the trigger payload; returns the run id
+    /// once the run is seeded. `Err` means no run exists, so the caller may
+    /// release the delivery reservation; the run's own outcome is recorded on
+    /// the run, not returned here.
     async fn run_workflow_for_trigger(
         &self,
         workflow_id: &str,
@@ -95,9 +122,17 @@ pub trait WebhookIngressHost: Send + Sync {
     fn auth_token(&self) -> Option<String>;
     /// The `~/.ryu` data dir (where the relay token is persisted).
     fn data_dir(&self) -> PathBuf;
+    /// The Ryu server base URL this node signed in to (the account bearer was
+    /// issued by it), or the control plane it is enrolled with. The managed
+    /// relay falls back to it when `RYU_BACKEND_URL` is unset. Only a URL the
+    /// operator or the sign-in flow named may be returned, never a default.
+    fn backend_url(&self) -> Option<String> {
+        None
+    }
 
     // ── Mesh (Tailscale Funnel) ──────────────────────────────────────────────
-    /// Ensure a Funnel is serving `port`, returning its public base URL.
+    /// Ensure a Funnel publishes Core's webhook paths (`FUNNEL_PUBLIC_MOUNTS`, proxied to
+    /// local `port`), returning its public base URL. Never the whole port.
     async fn ensure_funnel(&self, port: u16) -> Result<String>;
     /// The active Funnel base URL for `port`, if any.
     async fn funnel_url(&self, port: u16) -> Option<String>;

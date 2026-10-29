@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=84.1.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ryu-functiongemma-sidecar"
+version = "0.1.0"
+requires-python = ">=3.11,<3.15"
+dependencies = []
+
+[project.optional-dependencies]
+server = [
+  "fastapi==0.115.12",
+  "uvicorn==0.34.0",
+  "torch==2.13.0",
+  "transformers==5.10.1",
+  "safetensors==0.6.2"
+]
+
+[project.scripts]
+ryu-functiongemma = "ryu_functiongemma.server:run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ryu_functiongemma*"]

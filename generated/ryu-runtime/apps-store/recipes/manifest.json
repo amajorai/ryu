@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/recipes",
   "name": "Recipes",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Automation",
   "description": "Desktop-automation recipes: record → save → replay UI action sequences. Backed by Ghost's RecipeStore, so it declares Ghost as a dependency and the graph refuses to disable Ghost out from under it.",
@@ -98,19 +98,6 @@
     }
   ],
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "recipes.chat",
-        "title": "Recipes widget",
-        "description": "Recipes chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["recipes widget"],
-        "examples": ["Show me a recipes widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "hook_events": [
       {
         "id": "@ryu/recipes#recording.ended",

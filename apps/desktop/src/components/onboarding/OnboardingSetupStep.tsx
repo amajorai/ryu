@@ -1,23 +1,33 @@
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding";
+import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
 import { SvglIcon, type SvglSpec } from "@ryu/blocks/web/svgl-icon.tsx";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import { Switch } from "@ryu/ui/components/switch";
-import { TextMorph } from "@ryu/ui/components/text-morph";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { TextMorph } from "@ryu/ui/components/text-morph.tsx";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useState,
+} from "react";
 import { AgentSelectionField } from "@/components/agent-elements/input/agent-selection-field.tsx";
 import { ConnectionPermissionDialog } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
 import {
 	AgentSuggestionsStep,
 	type OnboardingConnectedApp,
 } from "@/src/components/onboarding/AgentSuggestionsStep.tsx";
+import { MigrationSetup } from "@/src/components/onboarding/MigrationSetup.tsx";
+import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
+import { ProviderLoginDialog } from "@/src/components/settings/dialogs/ProviderLoginDialog.tsx";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import type { NativeThread } from "@/src/lib/api/agent-threads.ts";
+import type { AgentIdentityMode } from "@/src/lib/api/agents.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type {
 	ComposioConnection,
@@ -43,6 +53,7 @@ export type OnboardingSetupKind =
 	| "connections"
 	| "cloud-default"
 	| "imports"
+	| "migrate"
 	| "profile"
 	| "agent-suggestions";
 
@@ -113,12 +124,16 @@ function ConnectedAppLogo({
 	}
 	if (toolkit?.logo) {
 		return (
-			// biome-ignore lint/performance/noImgElement: Composio supplies toolkit logos
-			<img alt="" className="size-4 object-contain" src={toolkit.logo} />
+			// Composio supplies toolkit logos
+			<img
+				alt=""
+				className="size-4 object-contain"
+				src={safeMediaUrl(toolkit.logo) ?? undefined}
+			/>
 		);
 	}
 	return (
-		<span className="flex size-4 items-center justify-center rounded bg-muted font-medium text-[9px]">
+		<span className="type-micro flex size-4 items-center justify-center rounded bg-muted font-medium">
 			{name.slice(0, 1).toUpperCase()}
 		</span>
 	);
@@ -158,6 +173,8 @@ function connectedAppDetails(
 interface OnboardingSetupStepProps {
 	agentSuggestions: OnboardingAgentSuggestion[];
 	agentSuggestionsError: string | null;
+	/** The identity mode chosen per suggestion id; a missing one acts as you. */
+	agentSuggestionsIdentityModes: ReadonlyMap<string, AgentIdentityMode>;
 	agentSuggestionsReviewed: ReadonlySet<string>;
 	agentSuggestionsSelected: ReadonlySet<string>;
 	agentSuggestionsSubmitting: boolean;
@@ -165,6 +182,8 @@ interface OnboardingSetupStepProps {
 	allowedProviderIds?: readonly string[];
 	alreadyBuilt: boolean | null;
 	autoImport: boolean;
+	/** A parent setup save is pending; selection controls must remain locked. */
+	busy?: boolean;
 	cloudSelection: AgentSelection;
 	connectingToolkit: string | null;
 	connectionQuery: string;
@@ -174,8 +193,13 @@ interface OnboardingSetupStepProps {
 	freeCloud: boolean;
 	importing: boolean;
 	kind: OnboardingSetupKind;
+	laneSaveError?: string | null;
 	localSelection: AgentSelection;
 	nodeSetupKind: NodeSetupKind | null;
+	onAgentSuggestionIdentityModeChange: (
+		id: string,
+		mode: AgentIdentityMode
+	) => void;
 	onBackgroundProfile: () => void;
 	onCancelProfile: () => void;
 	onChooseOrganization: (organizationId: string) => void;
@@ -190,6 +214,7 @@ interface OnboardingSetupStepProps {
 	onCreateAgentSuggestions: () => void;
 	onImportThreads: () => void;
 	onLocalSelectionChange: (selection: AgentSelection) => void;
+	onProviderConnected?: () => void;
 	onReviewAgentSuggestion: (id: string, reviewed: boolean) => void;
 	onSearchConnections: (query: string) => void;
 	onSkip: () => void;
@@ -223,7 +248,7 @@ function Shell({
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						<RyuOnboardingAvatar />
 					</div>
 					<PageHeader stagger={false} subtitle={subtitle} title={title} />
 				</StaggerReveal>
@@ -267,6 +292,8 @@ function ContinueRow({
 }
 
 function LanePicker({
+	busy = false,
+	error,
 	cloud,
 	selection,
 	target,
@@ -278,7 +305,9 @@ function LanePicker({
 }: {
 	allowedAgentIds: readonly string[];
 	allowedProviderIds?: readonly string[];
+	busy?: boolean;
 	cloud: boolean;
+	error?: string | null;
 	onChange: (selection: AgentSelection) => void;
 	onContinue: () => void;
 	onSkip?: () => void;
@@ -308,6 +337,8 @@ function LanePicker({
 				ariaLabel={
 					cloud ? "Choose default cloud agent" : "Choose default local agent"
 				}
+				disabled={busy}
+				forceModelPicker
 				onChange={onChange}
 				preserveRyuRoute
 				target={target}
@@ -322,6 +353,11 @@ function LanePicker({
 			{cloud && isEmpty ? (
 				<p className="text-muted-foreground text-xs">
 					No cloud default is configured yet. Chats will use your local default.
+				</p>
+			) : null}
+			{error ? (
+				<p className="text-destructive text-sm" role="alert">
+					{error}
 				</p>
 			) : null}
 			<ContinueRow
@@ -356,11 +392,11 @@ function OrganizationPicker({
 						type="button"
 					>
 						{organization.logo ? (
-							// biome-ignore lint/performance/noImgElement: org logos are user-provided
+							// org logos are user-provided
 							<img
 								alt=""
 								className="size-9 rounded-lg object-cover"
-								src={organization.logo}
+								src={safeMediaUrl(organization.logo) ?? undefined}
 							/>
 						) : (
 							<div className="flex size-9 items-center justify-center rounded-lg bg-muted font-medium text-sm">
@@ -368,7 +404,10 @@ function OrganizationPicker({
 							</div>
 						)}
 						<span className="min-w-0 flex-1">
-							<span className="block truncate font-medium text-sm">
+							<span
+								className="block truncate font-medium text-sm"
+								title={organization.name}
+							>
 								{organization.name}
 							</span>
 							<span className="block truncate text-muted-foreground text-xs">
@@ -412,16 +451,22 @@ function ProviderSetup({
 	freeCloud,
 	busyId,
 	onConfigure,
+	onProviderConnected,
 	onContinue,
 }: {
 	busyId: string | null;
 	defaultProviderIds: readonly string[];
 	freeCloud: boolean;
 	onConfigure: (providerId: string, apiKey: string) => void;
+	onProviderConnected: () => void;
 	onContinue: () => void;
 	providers: PiProvider[];
 }) {
 	const [keys, setKeys] = useState<Record<string, string>>({});
+	const [connectedProviderIds, setConnectedProviderIds] = useState<string[]>(
+		[]
+	);
+	const [loginProvider, setLoginProvider] = useState<PiProvider | null>(null);
 	const visible = providers.filter(
 		(provider) =>
 			provider.id !== "local" &&
@@ -430,8 +475,21 @@ function ProviderSetup({
 	);
 	const configuredCount = visible.filter(
 		(provider) =>
-			provider.configured || defaultProviderIds.includes(provider.id)
+			provider.configured ||
+			defaultProviderIds.includes(provider.id) ||
+			connectedProviderIds.includes(provider.id)
 	).length;
+	const handleProviderLoginSuccess = useCallback(() => {
+		if (!loginProvider) {
+			return;
+		}
+		setConnectedProviderIds((current) =>
+			current.includes(loginProvider.id)
+				? current
+				: [...current, loginProvider.id]
+		);
+		onProviderConnected();
+	}, [loginProvider, onProviderConnected]);
 	return (
 		<div className="flex flex-col gap-3">
 			<div
@@ -440,18 +498,25 @@ function ProviderSetup({
 			>
 				{configuredCount > 0
 					? [
-							"Provider keys already set up — ",
+							"Provider connections already set up — ",
 							configuredCount,
 							" configured provider",
 							configuredCount === 1 ? "" : "s",
 							" found on this node.",
 						].join("")
-					: "Connect a provider key if you want a cloud lane on the free plan. Keys stay on this node and are never shown again."}
+					: "Provider connections are optional. Sign in to a subscription provider or add an API key for cloud chats; local chats keep working if you skip this step."}
 			</div>
 			{visible.map((provider) => {
 				const key = keys[provider.id] ?? "";
 				const configured =
-					provider.configured || defaultProviderIds.includes(provider.id);
+					provider.configured ||
+					defaultProviderIds.includes(provider.id) ||
+					connectedProviderIds.includes(provider.id);
+				const supportsOAuth =
+					provider.authKind === "subscription" &&
+					provider.supportsOAuth === true;
+				const oauthUnavailable =
+					provider.authKind === "subscription" && !supportsOAuth;
 				return (
 					<SettingsCard className="flex flex-col gap-3" key={provider.id}>
 						<div className="flex items-center gap-3">
@@ -461,16 +526,33 @@ function ProviderSetup({
 								<p className="text-muted-foreground text-xs">
 									{configured
 										? "Configured on this node"
-										: provider.authKind === "subscription"
+										: supportsOAuth
 											? "Sign in to use this provider"
-											: "API key"}
+											: oauthUnavailable
+												? "Finish sign-in in provider settings"
+												: "API key"}
 								</p>
 							</div>
 							{configured ? (
 								<span className="text-status-success text-xs">Ready</span>
 							) : null}
 						</div>
-						{configured ? null : (
+						{configured ? null : supportsOAuth ? (
+							<div className="flex justify-end">
+								<Button
+									disabled={loginProvider !== null || busyId === provider.id}
+									loading={loginProvider?.id === provider.id}
+									onClick={() => setLoginProvider(provider)}
+									size="sm"
+								>
+									Sign in
+								</Button>
+							</div>
+						) : oauthUnavailable ? (
+							<p className="text-right text-muted-foreground text-xs">
+								Add this provider from Settings → Providers.
+							</p>
+						) : (
 							<div className="flex gap-2">
 								<Input
 									aria-label={`${provider.label} API key`}
@@ -497,6 +579,19 @@ function ProviderSetup({
 					</SettingsCard>
 				);
 			})}
+			{loginProvider ? (
+				<ProviderLoginDialog
+					onOpenChange={(open) => {
+						if (!open) {
+							setLoginProvider(null);
+						}
+					}}
+					onSuccess={handleProviderLoginSuccess}
+					open
+					providerId={loginProvider.id}
+					providerLabel={loginProvider.label}
+				/>
+			) : null}
 			<ContinueRow onContinue={onContinue} />
 		</div>
 	);
@@ -517,8 +612,12 @@ function ToolkitLogo({ toolkit }: { toolkit: ComposioToolkit }) {
 	if (toolkit.logo) {
 		return (
 			<div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted p-2">
-				{/* biome-ignore lint/performance/noImgElement: Composio supplies toolkit logos */}
-				<img alt="" className="size-5 object-contain" src={toolkit.logo} />
+				{/* Composio supplies toolkit logos */}
+				<img
+					alt=""
+					className="size-5 object-contain"
+					src={safeMediaUrl(toolkit.logo) ?? undefined}
+				/>
 			</div>
 		);
 	}
@@ -615,7 +714,8 @@ function ConnectionSetup({
 							icon={Search01Icon}
 						/>
 						<Input
-							className="pl-9"
+							aria-label="Search integrations"
+							leadingAdornment="default"
 							onChange={(event) => onQuery(event.target.value)}
 							placeholder="Search Gmail, Notion, Slack, GitHub, or more"
 							value={query}
@@ -649,7 +749,10 @@ function ConnectionSetup({
 										>
 											<ToolkitLogo toolkit={toolkit} />
 											<div className="min-w-0 flex-1">
-												<p className="truncate font-medium text-sm">
+												<p
+													className="truncate font-medium text-sm"
+													title={toolkit.name}
+												>
 													{toolkit.name}
 												</p>
 												<p className="text-muted-foreground text-xs">
@@ -710,6 +813,7 @@ function ConnectionSetup({
 }
 
 function ImportSetup({
+	busy = false,
 	autoImport,
 	groups,
 	importing,
@@ -717,6 +821,7 @@ function ImportSetup({
 	onSkip,
 	onToggle,
 }: {
+	busy?: boolean;
 	autoImport: boolean;
 	groups: OnboardingThreadGroup[];
 	importing: boolean;
@@ -756,7 +861,11 @@ function ImportSetup({
 						Keep new agent sessions available in Ryu automatically.
 					</p>
 				</div>
-				<Switch checked={autoImport} onCheckedChange={onToggle} />
+				<Switch
+					checked={autoImport}
+					disabled={busy || importing}
+					onCheckedChange={onToggle}
+				/>
 			</div>
 			<ContinueRow
 				continueLabel={
@@ -906,13 +1015,13 @@ function ProfileSetup({
 				</TextMorph>
 			</div>
 			<p className="text-muted-foreground text-xs">
-				{job.materialized
-					? "Your profile chat is running in the background. Wait here to review agent drafts when it finishes, or continue setup now."
+				{job.background
+					? "Your profile keeps building in the background. Wait here to review agent drafts when it finishes, or continue setup now."
 					: "The connected content is read-only and treated as untrusted data. Recommendations never change your agents or external accounts automatically."}
 			</p>
 			<div className="flex items-center justify-between text-muted-foreground text-xs">
 				<span>{Math.floor(elapsed / 1000)}s elapsed</span>
-				{elapsed >= 20_000 && !job.materialized ? (
+				{elapsed >= 20_000 && !job.background ? (
 					<Button onClick={onBackground} size="sm" variant="outline">
 						Run in background
 					</Button>
@@ -922,7 +1031,7 @@ function ProfileSetup({
 				<Button onClick={onCancel} variant="ghost">
 					Skip and cancel
 				</Button>
-				{job.materialized ? (
+				{job.background ? (
 					<Button onClick={onContinueAfterBackground} size="sm" variant="mono">
 						Continue setup
 					</Button>
@@ -942,7 +1051,9 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 			>
 				<LanePicker
 					allowedAgentIds={props.allowedAgentIds}
+					busy={props.busy}
 					cloud={false}
+					error={props.laneSaveError}
 					onChange={props.onLocalSelectionChange}
 					onContinue={props.onContinue}
 					selection={props.localSelection}
@@ -978,6 +1089,7 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 					freeCloud={props.freeCloud}
 					onConfigure={props.onConfigureProvider}
 					onContinue={props.onContinue}
+					onProviderConnected={props.onProviderConnected ?? (() => undefined)}
 					providers={props.piProviders}
 				/>
 			</Shell>
@@ -1015,7 +1127,9 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 				<LanePicker
 					allowedAgentIds={props.allowedAgentIds}
 					allowedProviderIds={props.allowedProviderIds}
+					busy={props.busy}
 					cloud
+					error={props.laneSaveError}
 					onChange={props.onCloudSelectionChange}
 					onContinue={props.onContinue}
 					onSkip={props.freeCloud ? props.onSkip : undefined}
@@ -1033,11 +1147,26 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 			>
 				<ImportSetup
 					autoImport={props.autoImport}
+					busy={props.busy}
 					groups={props.threadGroups}
 					importing={props.importing}
 					onImport={props.onImportThreads}
 					onSkip={props.onSkip}
 					onToggle={props.onToggleAutoImport}
+				/>
+			</Shell>
+		);
+	}
+	if (kind === "migrate") {
+		return (
+			<Shell
+				subtitle="Bring your chats, agents, memory, and skills with you."
+				title="Coming from another agent?"
+			>
+				<MigrationSetup
+					onContinue={props.onContinue}
+					onSkip={props.onSkip}
+					target={props.target}
 				/>
 			</Shell>
 		);
@@ -1052,7 +1181,9 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 					busy={props.agentSuggestionsSubmitting}
 					connectedApps={connectedAppDetails(props.connections, props.toolkits)}
 					error={props.agentSuggestionsError}
+					identityModes={props.agentSuggestionsIdentityModes}
 					onCreate={props.onCreateAgentSuggestions}
+					onIdentityModeChange={props.onAgentSuggestionIdentityModeChange}
 					onReview={props.onReviewAgentSuggestion}
 					onSkip={props.onSkip}
 					onToggle={props.onToggleAgentSuggestion}

@@ -7,12 +7,17 @@ import {
 	type Tab,
 	type TabGroup,
 	TabsContext,
-	type TabsContextValue,
 } from "../../src/contexts/TabsContext.tsx";
 import type { RouteTab } from "../../src/contributions/registry.ts";
 import { contributionRegistry } from "../../src/contributions/registry.ts";
 import { setTabLayout, useTabLayout } from "../../src/hooks/useTabLayout.ts";
+import { useProductModeStore } from "../../src/lib/product-mode.ts";
+import { createTabsProofContext } from "./tabs-proof-context.ts";
 import "../../src/index.css";
+
+// Ryu Bot answers every non-chat route with a "belongs in Ryu Build" notice, so
+// the proof opts into Console the way the app's access sync would.
+useProductModeStore.setState({ consoleAccess: true, requestedMode: "console" });
 
 const TAB_LAYOUT_KEY = "ryu_tab_layout";
 const TAB_CANVAS_KEY = "ryu:tab-canvas-layout:v1";
@@ -76,7 +81,7 @@ contributionRegistry.registerRoute({
 	test: { startsWith: "/tab-proof/" },
 	render: (tab: RouteTab) => (
 		<div className="flex h-full flex-col gap-4 overflow-auto bg-muted/20 p-6">
-			<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
+			<p className="type-compact font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
 				Live route host
 			</p>
 			<h2 className="font-semibold text-2xl text-foreground">{tab.path}</h2>
@@ -125,7 +130,7 @@ function Story() {
 
 	const contextValue = useMemo(
 		() =>
-			({
+			createTabsProofContext({
 				activeTabId,
 				closeTab,
 				focusTab,
@@ -133,7 +138,7 @@ function Story() {
 				openTab,
 				splits: SPLITS,
 				tabs,
-			}) as unknown as TabsContextValue,
+			}),
 		[activeTabId, closeTab, focusTab, openTab, tabs]
 	);
 
@@ -142,7 +147,7 @@ function Story() {
 			<main className="min-h-screen bg-background text-foreground">
 				<header className="flex flex-wrap items-center justify-between gap-4 border-border/70 border-b px-6 py-4">
 					<div>
-						<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
+						<p className="type-compact font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
 							Desktop tab view proof
 						</p>
 						<h1 className="mt-1 font-semibold text-xl">Live panes, two ways</h1>

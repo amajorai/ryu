@@ -11,7 +11,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import { invoke } from "@tauri-apps/api/core";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import {
 	buildGitGraphLogCommand,
 	buildGitGraphRows,
@@ -45,7 +45,7 @@ const LANE_COLORS = [
 
 export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 	const terminalShell = useWorkspaceStore((state) => state.terminalShell);
-	const { openTab } = useTabsContext();
+	const openTab = useTabSelector((state) => state.openTab);
 	const [commits, setCommits] = useState<GitGraphCommit[]>([]);
 	const [branches, setBranches] = useState<GitGraphBranch[]>([]);
 	const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
@@ -166,7 +166,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 			{!compact && (
 				<div className="flex shrink-0 items-start justify-between gap-4 border-border/60 border-b px-5 py-4">
 					<div className="min-w-0">
-						<div className="mb-1 flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.16em]">
+						<div className="mb-1 flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							<HugeiconsIcon className="size-3.5" icon={GitBranchIcon} />
 							<span>Workspace / Git</span>
 						</div>
@@ -203,7 +203,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 					</span>
 					<HugeiconsIcon className="size-3 opacity-50" icon={ArrowDown01Icon} />
 				</div>
-				<label className="flex min-w-40 flex-1 items-center gap-1.5 rounded-full bg-muted/35 px-2.5 py-1 text-muted-foreground focus-within:text-foreground">
+				<label className="flex min-w-40 flex-1 items-center gap-1.5 rounded-full bg-muted/35 px-2.5 py-1 text-muted-foreground focus-within:text-foreground focus-within:ring-1 focus-within:ring-ring">
 					<HugeiconsIcon className="size-3.5 shrink-0" icon={Search01Icon} />
 					<span className="sr-only">Filter commits</span>
 					<input
@@ -213,7 +213,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 						value={query}
 					/>
 				</label>
-				<div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+				<div className="type-caption ml-auto flex items-center gap-1.5 text-muted-foreground">
 					<span className="rounded-full bg-muted/35 px-2 py-1">
 						{commits.length} commits
 					</span>
@@ -231,7 +231,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 			<div className="flex min-h-0 flex-1">
 				<aside className="flex w-52 shrink-0 flex-col border-border/60 border-r bg-sidebar/35">
 					<div className="flex items-center justify-between px-3 py-2.5">
-						<span className="font-medium text-muted-foreground text-xs uppercase tracking-[0.14em]">
+						<span className="font-medium text-muted-foreground text-xs uppercase tracking-widest">
 							Refs
 						</span>
 						<span className="text-muted-foreground/60 text-xs">
@@ -336,7 +336,7 @@ function BranchRefRow({
 			</span>
 			<span className="min-w-0 flex-1 truncate">{label}</span>
 			{branch?.current && (
-				<span className="text-[10px] text-primary">HEAD</span>
+				<span className="type-compact text-primary">HEAD</span>
 			)}
 		</button>
 	);
@@ -371,19 +371,20 @@ function GitGraphCommitRow({
 							"min-w-0 flex-1 truncate font-medium text-xs",
 							selected && "text-foreground"
 						)}
+						title={row.commit.subject}
 					>
 						{row.commit.subject}
 					</span>
 					{row.commit.refs.slice(0, 3).map((ref) => (
 						<span
-							className="hidden shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary sm:inline"
+							className="type-compact hidden shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-primary sm:inline"
 							key={ref}
 						>
 							{ref}
 						</span>
 					))}
 				</span>
-				<span className="mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+				<span className="type-caption mt-1 flex items-center gap-1.5 truncate text-muted-foreground">
 					<code className="font-mono text-foreground/70">
 						{row.commit.shortSha}
 					</code>
@@ -504,7 +505,7 @@ function CommitDetails({
 						<div className="flex flex-wrap gap-1">
 							{commit.refs.map((ref) => (
 								<span
-									className="rounded-full bg-primary/10 px-2 py-1 text-[10px] text-primary"
+									className="type-compact rounded-full bg-primary/10 px-2 py-1 text-primary"
 									key={ref}
 								>
 									{ref}
@@ -521,6 +522,7 @@ function CommitDetails({
 								<code
 									className="block truncate font-mono text-foreground/70"
 									key={parent}
+									title={parent}
 								>
 									{parent}
 								</code>
@@ -547,7 +549,7 @@ function CommitDetails({
 					Open project changes
 				</button>
 				<div
-					className="mt-2 truncate text-center text-[10px] text-muted-foreground/60"
+					className="type-compact mt-2 truncate text-center text-muted-foreground/60"
 					title={folder}
 				>
 					{folder}

@@ -7,7 +7,7 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
-} from "@ryu/ui/components/table";
+} from "@ryu/ui/components/table.tsx";
 import { asRecord, cell, inferColumns, resolveArray } from "./data.ts";
 import { parseConfig, tableConfigSchema } from "./schema.ts";
 
@@ -33,13 +33,10 @@ export function TableBodyWidget({
 	return (
 		<div className="h-full overflow-auto">
 			<Table>
-				<TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-sm">
-					<TableRow className="hover:bg-transparent">
+				<TableHeader appearance="widget" className="sticky top-0 z-10">
+					<TableRow appearance="header">
 						{columns.map((c) => (
-							<TableHead
-								className="font-medium text-[11px] text-muted-foreground uppercase tracking-wide"
-								key={c}
-							>
+							<TableHead key={c} presentation="widget-label">
 								{c}
 							</TableHead>
 						))}

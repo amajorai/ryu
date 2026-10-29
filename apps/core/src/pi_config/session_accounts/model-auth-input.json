@@ -1,0 +1,44 @@
+{
+  "providers": {
+    "xai": {
+      "apiKey": "fixture-wrong-account",
+      "baseUrl": "https://fixture.example.test/v1",
+      "authHeader": true,
+      "headers": {
+        "Authorization": "Bearer fixture-wrong-account",
+        "X-Client": "fixture-client"
+      },
+      "models": [
+        {
+          "id": "fixture-model",
+          "name": "Fixture model",
+          "contextWindow": 8192,
+          "maxTokens": 2048,
+          "headers": {
+            "X-Api-Key": "fixture-wrong-account",
+            "X-Model": "fixture-model"
+          }
+        }
+      ],
+      "modelOverrides": {
+        "fixture-model": {
+          "headers": {
+            "AUTHORIZATION": "Bearer fixture-wrong-account",
+            "X-Override": "fixture-override"
+          }
+        }
+      }
+    },
+    "unrelated": {
+      "apiKey": "fixture-unrelated-key",
+      "headers": { "Authorization": "Bearer fixture-unrelated-key" }
+    },
+    "referenced": {
+      "apiKey": "${RYU_PI_KEY_7265666572656E636564}",
+      "headers": {
+        "x-ryu-node-token": "${RYU_PI_NODE_TOKEN}",
+        "X-Client": "fixture-client"
+      }
+    }
+  }
+}

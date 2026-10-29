@@ -6,8 +6,13 @@ import {
 	WikiLinkElement,
 	WikiLinkInputElement,
 } from "@ryu/ui/components/editor/ui/wikilink-node.tsx";
-import { createSlatePlugin, createTSlatePlugin } from "platejs";
-import { toPlatePlugin } from "platejs/react";
+import { createSlatePlugin, createTSlatePlugin, type TElement } from "platejs";
+import { type PlateEditor, toPlatePlugin } from "platejs/react";
+
+interface WikiLinkInputNode extends TElement {
+	trigger: string;
+	userId?: PlateEditor["meta"]["userId"];
+}
 
 const BaseWikiLinkInputPlugin = createSlatePlugin({
 	key: WIKILINK_INPUT_KEY,
@@ -36,12 +41,7 @@ const BaseWikiLinkPlugin = createTSlatePlugin({
 				const previous = before ? editor.api.string(before) : "";
 				if (previous.endsWith("[")) {
 					editor.tf.delete({ reverse: true, unit: "character" });
-					const inputNode: {
-						children: { text: string }[];
-						trigger: string;
-						type: string;
-						userId?: string;
-					} = {
+					const inputNode: WikiLinkInputNode = {
 						children: [{ text: "" }],
 						trigger: "[[",
 						type: WIKILINK_INPUT_KEY,

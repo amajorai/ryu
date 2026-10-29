@@ -1,0 +1,14 @@
+.content {
+	gap: calc(var(--spacing) * 4);
+	padding: calc(var(--spacing) * 5);
+	border-radius: calc(var(--radius) + 12px);
+}
+.header {
+	gap: calc(var(--spacing) * 3);
+}
+.title {
+	gap: calc(var(--spacing) * 2);
+}
+.description {
+	line-height: var(--leading-relaxed);
+}

@@ -19,22 +19,24 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 
-export const KIND_ICON: Record<string, IconSvgElement> = {
-	agent: Target01Icon,
-	app: Package01Icon,
-	embedding: BrainIcon,
-	engine: LayerIcon,
-	mcp: PlugSocketIcon,
-	media: Image02Icon,
-	model: BrainIcon,
-	other: Package01Icon,
-	plugin: PlugSocketIcon,
-	skill: PotionIcon,
-	tool: Wrench01Icon,
-	voice: AudioWave01Icon,
-};
+export const KIND_ICON = new Map<string, IconSvgElement>(
+	Object.entries({
+		agent: Target01Icon,
+		app: Package01Icon,
+		embedding: BrainIcon,
+		engine: LayerIcon,
+		mcp: PlugSocketIcon,
+		media: Image02Icon,
+		model: BrainIcon,
+		other: Package01Icon,
+		plugin: PlugSocketIcon,
+		skill: PotionIcon,
+		tool: Wrench01Icon,
+		voice: AudioWave01Icon,
+	})
+);
 
 /** The glyph for a kind, falling back to the generic package. */
 export function kindIcon(kind: string): IconSvgElement {
-	return KIND_ICON[kind] ?? KIND_ICON.other;
+	return KIND_ICON.get(kind) ?? Package01Icon;
 }

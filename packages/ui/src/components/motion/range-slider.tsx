@@ -2,9 +2,26 @@
 
 // beui.dev/components/motion/range-slider
 
+import type { MotionStyle } from "motion/react";
+import type { CSSProperties } from "react";
+import css from "./range-slider.module.css";
+
+interface Inline1Style extends MotionStyle {
+	"--range-slider-1-background-color"?: MotionStyle["backgroundColor"];
+	"--range-slider-1-width"?: MotionStyle["width"];
+}
+interface Inline2Style extends CSSProperties {
+	"--range-slider-2-left"?: CSSProperties["left"];
+}
+interface Inline3Style extends MotionStyle {
+	"--range-slider-3-left"?: MotionStyle["left"];
+	"--range-slider-3-x"?: MotionStyle["x"];
+	"--range-slider-3-y"?: MotionStyle["y"];
+}
+
 import { type SliderOptions, useSlider } from "@ryu/ui/hooks/use-slider.ts";
-import { SPRING_GLIDE } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { SPRING_GLIDE } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	motion,
 	useMotionTemplate,
@@ -78,6 +95,15 @@ export function RangeSlider({
 				)
 			: [];
 
+	const inline1Style: Inline1Style = {
+		"--range-slider-1-width": left,
+		"--range-slider-1-background-color": fillColor,
+	};
+	const inline3Style: Inline3Style = {
+		"--range-slider-3-left": left,
+		"--range-slider-3-x": thumbX,
+		"--range-slider-3-y": "-50%",
+	};
 	return (
 		<div
 			{...trackProps}
@@ -93,13 +119,19 @@ export function RangeSlider({
 			{/* fill — runs from the left edge to the thumb. Neutral by default; a
 			    `fillColor` tints it and cross-fades as the value lands elsewhere. */}
 			<motion.div
-				className={cn(
-					"absolute inset-y-0 left-0",
-					fillColor
-						? "transition-[background-color] duration-300 ease-out"
-						: "bg-foreground/15"
-				)}
-				style={{ width: left, backgroundColor: fillColor }}
+				className={[
+					css.inline1,
+					cn(
+						"absolute inset-y-0 left-0",
+						fillColor
+							? [
+									css.fillTint,
+									"transition-[background-color] duration-300 ease-out",
+								]
+							: "bg-foreground/15"
+					),
+				].join(" ")}
+				style={inline1Style}
 			/>
 
 			{/* Ticks, inset by half the thumb's width. That inset is the span the
@@ -107,11 +139,17 @@ export function RangeSlider({
 			<div className="pointer-events-none absolute inset-x-[3px] inset-y-0">
 				{ticks.map((t) => {
 					const tp = ((t - min) / (max - min)) * 100;
+					const inline2Style: Inline2Style = {
+						"--range-slider-2-left": `${tp}%`,
+					};
 					return (
 						<span
-							className="absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/25"
+							className={[
+								css.inline2,
+								"absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/25",
+							].join(" ")}
 							key={t}
-							style={{ left: `${tp}%` }}
+							style={inline2Style}
 						/>
 					);
 				})}
@@ -121,9 +159,12 @@ export function RangeSlider({
 			<motion.div
 				{...sliderProps}
 				animate={reduce ? undefined : { scaleY: dragging ? 1.35 : 1 }}
-				className="absolute top-1/2 h-5 w-1.5 rounded-sm bg-foreground shadow-sm outline-none ring-foreground/30 ring-inset focus-visible:ring-4"
+				className={[
+					css.inline3,
+					"absolute top-1/2 h-5 w-1.5 rounded-sm bg-foreground shadow-sm outline-none ring-foreground/30 ring-inset focus-visible:ring-4",
+				].join(" ")}
 				data-slot="slider-thumb"
-				style={{ left, x: thumbX, y: "-50%" }}
+				style={inline3Style}
 				transition={SPRING_BOUNCY}
 			/>
 		</div>

@@ -1,3 +1,4 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/chrome/store-catalog-layout.tsx
 //
 // The shared body layout for every Store catalog section — the App Store shape:
@@ -72,12 +73,12 @@ function useContainerWidth(): [React.RefObject<HTMLDivElement | null>, number] {
 	const [width, setWidth] = useState(0);
 	useEffect(() => {
 		const el = ref.current;
-		if (!el || typeof ResizeObserver === "undefined") {
+		if (!el || globalThis.ResizeObserver === undefined) {
 			return;
 		}
 		const ro = new ResizeObserver((entries) => {
 			const w = entries[0]?.contentRect.width;
-			if (typeof w === "number") {
+			if (isNativeNumber(w)) {
 				setWidth(w);
 			}
 		});
@@ -95,6 +96,7 @@ export default function StoreCatalogLayout({
 	hasSelection,
 	onCloseDetail,
 	detailTitle = "Details",
+	detailOnly = false,
 	previewMode = "dialog",
 }: {
 	/** The giant search field pinned to the top. Omit for sections without search. */
@@ -121,6 +123,8 @@ export default function StoreCatalogLayout({
 	onCloseDetail: () => void;
 	/** Accessible dialog title used in the narrow-window fallback. */
 	detailTitle?: string;
+	/** Reuse the catalog preview inside another collection, such as Library. */
+	detailOnly?: boolean;
 	/** How the preview is presented. "dialog" (default) always opens the preview
 	 *  as a centered modal, so every tab reads the same. "auto" keeps the wide
 	 *  side-pane / narrow-dialog split — used only where a persistent side pane
@@ -133,83 +137,93 @@ export default function StoreCatalogLayout({
 	const narrow = width > 0 && width < NARROW_PX;
 	// "dialog" mode forces the modal at every width; "auto" shows the side pane
 	// when there is room and collapses to the dialog when narrow.
-	const showSidePane = hasSelection && !narrow && previewMode === "auto";
-	const showDialog = hasSelection && (narrow || previewMode === "dialog");
+	const showSidePane =
+		!detailOnly && hasSelection && !narrow && previewMode === "auto";
+	const showDialog =
+		hasSelection && (detailOnly || narrow || previewMode === "dialog");
 
 	return (
-		<div className="flex h-full flex-col overflow-hidden" ref={ref}>
-			<div className="flex min-h-0 flex-1 overflow-hidden">
-				{/* Left region — the section's controls and its centered card grid share
+		<div
+			className={
+				detailOnly ? "contents" : "flex h-full flex-col overflow-hidden"
+			}
+			ref={ref}
+		>
+			{detailOnly ? null : (
+				<div className="flex min-h-0 flex-1 overflow-hidden">
+					{/* Left region — the section's controls and its centered card grid share
 				    one column at the same max-width, so they stay aligned in both
 				    states; when the preview aside opens, the whole column narrows and
 				    every row recenters together. The section TITLE is not here: the
 				    Store's page chrome renders one title for every tab, carded or not. */}
-				<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-					{/* Card grid — the same centered max-width so selecting an item
+					<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+						{/* Card grid — the same centered max-width so selecting an item
 					    never reflows it; the preview is a FIXED-width pane beside.
 					    The section's own controls sit in one compact row above it:
 					    a search BUTTON that expands in place plus whatever the
 					    section declares (source, filters), so the row reads as
 					    buttons rather than a full-width field that pushed them onto
 					    a second line. Sticky, so it stays reachable while scrolling. */}
-					<div className="scroll-fade min-h-0 flex-1 overflow-auto">
-						{search || filter ? (
-							<div className="sticky top-0 z-10 mx-auto flex w-full max-w-4xl items-center justify-end gap-1 bg-background px-4 pb-2">
-								{search ? (
-									<StoreSearchButton
-										onChange={search.onChange}
-										placeholder={search.placeholder ?? "Search…"}
-										value={search.value}
-									/>
-								) : null}
-								{filter ? (
-									<Popover>
-										<PopoverTrigger
-											render={
-												<Button className="gap-1.5" size="sm" variant="ghost">
-													<HugeiconsIcon
-														className="size-3.5"
-														icon={filter.icon ?? SlidersHorizontalIcon}
-													/>
-													{filter.label ?? "Filters"}
-													{filter.activeCount ? (
-														<span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] text-background">
-															{filter.activeCount}
-														</span>
-													) : null}
-												</Button>
-											}
+						<div className="scroll-fade min-h-0 flex-1 overflow-auto">
+							{search || filter ? (
+								<div className="sticky top-0 z-10 mx-auto flex w-full max-w-4xl items-center justify-end gap-1 bg-background px-4 pb-2">
+									{search ? (
+										<StoreSearchButton
+											onChange={search.onChange}
+											placeholder={search.placeholder ?? "Search…"}
+											value={search.value}
 										/>
-										<PopoverContent
-											align="end"
-											className="w-[min(30rem,90vw)] p-0"
-										>
-											{filter.panel}
-										</PopoverContent>
-									</Popover>
-								) : null}
-							</div>
-						) : null}
-						<div className="mx-auto w-full max-w-4xl px-4 pb-24">{list}</div>
-					</div>
-				</div>
-
-				{showSidePane ? (
-					<aside className="w-[26rem] shrink-0 py-2 pr-2">
-						<div className="scroll-fade relative flex size-full flex-col overflow-auto rounded-3xl border border-border/60 bg-sidebar shadow-sm dark:bg-sidebar/50">
-							<button
-								aria-label="Close preview"
-								className="absolute top-3 right-3 z-10 flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-								onClick={onCloseDetail}
-								type="button"
-							>
-								<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
-							</button>
-							{detail}
+									) : null}
+									{filter ? (
+										<Popover>
+											<PopoverTrigger
+												render={
+													<Button size="sm" spacing="regular" variant="ghost">
+														<HugeiconsIcon
+															className="size-3.5"
+															icon={filter.icon ?? SlidersHorizontalIcon}
+														/>
+														{filter.label ?? "Filters"}
+														{filter.activeCount ? (
+															<span className="type-compact ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-background">
+																{filter.activeCount}
+															</span>
+														) : null}
+													</Button>
+												}
+											/>
+											<PopoverContent
+												align="end"
+												className="w-[min(30rem,90vw)]"
+												spacing="flush"
+											>
+												{filter.panel}
+											</PopoverContent>
+										</Popover>
+									) : null}
+								</div>
+							) : null}
+							<div className="mx-auto w-full max-w-4xl px-4 pb-24">{list}</div>
 						</div>
-					</aside>
-				) : null}
-			</div>
+					</div>
+
+					{showSidePane ? (
+						<aside className="w-[26rem] shrink-0 py-2 pr-2">
+							<div className="scroll-fade relative flex size-full flex-col overflow-auto rounded-3xl border border-border/60 bg-sidebar shadow-sm dark:bg-sidebar/50">
+								<button
+									aria-label="Close preview"
+									className="absolute top-3 right-3 z-10 flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+									onClick={onCloseDetail}
+									type="button"
+								>
+									<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
+								</button>
+								{detail}
+							</div>
+						</aside>
+					) : null}
+				</div>
+			)}
 
 			{showDialog ? (
 				<Dialog
@@ -239,7 +253,10 @@ export default function StoreCatalogLayout({
 					    matched `lg:` (a VIEWPORT breakpoint) and handed the aside
 					    `lg:w-72`, leaving the main column ~130px — the squashed preview.
 					    Matching `sm:` here removes `sm:max-w-md` from the output entirely. */}
-					<DialogContent className="max-h-[85vh] w-[min(80rem,94vw)] max-w-[min(80rem,94vw)] overflow-hidden p-0 sm:max-w-[min(80rem,94vw)]">
+					<DialogContent
+						className="max-h-[85vh] w-[min(80rem,94vw)] max-w-[min(80rem,94vw)] overflow-hidden sm:max-w-[min(80rem,94vw)]"
+						spacing="flush"
+					>
 						<DialogTitle className="sr-only">{detailTitle}</DialogTitle>
 						<div className="scroll-fade max-h-[85vh] overflow-auto">
 							{detail}
@@ -257,9 +274,12 @@ export default function StoreCatalogLayout({
  * and a missing class silently collapses the grid to one full-width column. */
 export function StoreCardGrid({
 	children,
+	columns = 2,
 	view,
 }: {
 	children: ReactNode;
+	/** Wide hosts (the public web) may opt into a third column on `lg`. */
+	columns?: 2 | 3;
 	view?: ViewMode;
 }) {
 	const context = useStoreViewMode();
@@ -268,6 +288,14 @@ export function StoreCardGrid({
 		return <div className="flex flex-col gap-1.5">{children}</div>;
 	}
 	return (
-		<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{children}</div>
+		<div
+			className={
+				columns === 3
+					? "grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3"
+					: "grid grid-cols-1 gap-2 sm:grid-cols-2"
+			}
+		>
+			{children}
+		</div>
 	);
 }

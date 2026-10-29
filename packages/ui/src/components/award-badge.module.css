@@ -1,0 +1,19 @@
+/* Product Hunt badge drawing colors are provider artwork, not host theme paint.
+ * Preserve its native mask, silver frame, ink and holographic overlay exactly. */
+.transform {
+	transform: var(--award-transform);
+	transform-origin: center center;
+	transition: transform 200ms ease-out;
+}
+.mask {
+	fill: white;
+}
+.frame {
+	stroke: #bbbbbb;
+}
+.ink {
+	fill: #666666;
+}
+.overlay {
+	mix-blend-mode: overlay;
+}

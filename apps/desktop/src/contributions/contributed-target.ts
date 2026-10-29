@@ -34,12 +34,10 @@ export interface ContributedTarget {
  * The allowlisted query parameters, mapped to their `openTab` option. Adding a
  * key here widens what a manifest can drive — weigh it against the note above.
  */
-const CONTRIBUTED_TARGET_PARAMS: Record<
+const CONTRIBUTED_TARGET_PARAMS = new Map<
 	string,
 	keyof ContributedTargetOptions
-> = {
-	conversationId: "conversationId",
-};
+>([["conversationId", "conversationId"]]);
 
 /**
  * Split an already-templated contributed target into the `(path, options)` pair
@@ -57,7 +55,7 @@ export function parseContributedTarget(target: string): ContributedTarget {
 	// URLSearchParams decodes the percent-encoding `renderTemplate({uriEncode})`
 	// applied when it substituted the row's value.
 	for (const [key, value] of new URLSearchParams(query)) {
-		const option = CONTRIBUTED_TARGET_PARAMS[key];
+		const option = CONTRIBUTED_TARGET_PARAMS.get(key);
 		if (option && value) {
 			options[option] = value;
 		}

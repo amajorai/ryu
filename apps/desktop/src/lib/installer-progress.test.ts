@@ -16,4 +16,9 @@ describe("installer progress labels", () => {
 	it("keeps unknown installer components visible", () => {
 		expect(installerComponentLabel("future-sidecar")).toBe("future-sidecar");
 	});
+	it("keeps inherited-name installer components as visible raw names", () => {
+		for (const component of ["constructor", "toString", "__proto__"]) {
+			expect(installerComponentLabel(component)).toBe(component);
+		}
+	});
 });

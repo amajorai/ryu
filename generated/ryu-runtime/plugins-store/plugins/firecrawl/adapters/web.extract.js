@@ -8,7 +8,14 @@
 // canonical result. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/adapters is excluded from Biome — a module parser rejects it.
 
-const res = await callTool({ url: input.url });
+// Canonical `format` → Firecrawl v2 `formats`. Firecrawl has `markdown` and
+// (cleaned) `html`, but no plain-text format, so `text` stays unmapped and keeps
+// Firecrawl's own markdown default rather than sending a value it rejects.
+const format =
+	input.format === "markdown" || input.format === "html" ? input.format : undefined;
+const res = await callTool(
+	format === undefined ? { url: input.url } : { url: input.url, formats: [format] }
+);
 // NOT a result set: these tools are fail_open, so a bad or missing API key comes
 // back as {available,reason,hint} and any other non-2xx as {status,body}. Shaping
 // either into `results` would report a broken key as an empty page — an invisible,
@@ -27,7 +34,7 @@ return {
 	results: items.map((item) => ({
 		url: one(item && item.metadata && item.metadata.sourceURL),
 		title: one(item && item.metadata && item.metadata.title),
-		content: item && item.markdown,
+		content: item && (format === "html" ? item.html : item.markdown),
 		raw: item,
 	})),
 };

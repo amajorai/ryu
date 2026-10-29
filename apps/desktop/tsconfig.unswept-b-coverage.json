@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/SettingsDialog.tsx",
+    "src/components/settings/LazySettingsDialog.tsx",
+    "src/components/settings/StatsTab.tsx",
+    "src/components/settings/SpacesSettings.tsx",
+    "src/components/settings/TrainingDataNotice.tsx",
+    "src/components/settings/SettingsSearchResults.tsx",
+    "src/components/settings/unswept-b.test-support.ts",
+    "src/components/settings/SettingsSearchResults.coverage.test.tsx",
+    "src/components/settings/TrainingDataNotice.coverage.test.tsx",
+    "src/components/settings/StatsTab.coverage.native-http.test.tsx",
+    "src/components/settings/SpacesSettings.coverage.native-http.test.tsx",
+    "src/hooks/useSettingReveal.ts",
+    "src/hooks/useSettingReveal.unswept-b.test.tsx",
+    "src/lib/settings-focus.ts"
+  ]
+}

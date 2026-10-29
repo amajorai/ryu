@@ -27,7 +27,7 @@ test("keeps the shared rail, tool UI, mention, and composer directory on every s
 			surface.locator('[data-slot="message-navigation-collapsed-rail"]')
 		).toHaveCount(1);
 		await expect(surface.locator('[data-mention-token="agent"]')).toBeVisible();
-		await expect(surface.locator(".agent-ui")).toHaveCount(2);
+		await expect(surface.locator('[data-slot="agent-ui"]')).toHaveCount(2);
 		await expect(surface.getByText("Shared JSON UI")).toBeVisible();
 		await expect(surface.getByText("A2UI shared preview")).toBeVisible();
 		await expect(

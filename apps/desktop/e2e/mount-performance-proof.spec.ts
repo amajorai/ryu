@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { z } from "zod";
 
 async function proofDirectory(browserName: string) {
 	const directory = path.resolve(
@@ -54,14 +55,20 @@ test("records cold and repeat mounts through the actual sandbox host", async ({
 }) => {
 	await page.goto("/mount-performance-proof.html");
 	const samples = async () =>
-		JSON.parse(
-			(await page.getByTestId("mount-timings").textContent()) ?? "[]"
-		) as Array<{
-			version: number;
-			wrapperMs: number;
-			handshakeMs: number;
-			readyMs: number;
-		}>;
+		z
+			.array(
+				z.object({
+					version: z.number(),
+					wrapperMs: z.number(),
+					handshakeMs: z.number(),
+					readyMs: z.number(),
+				})
+			)
+			.parse(
+				JSON.parse(
+					(await page.getByTestId("mount-timings").textContent()) ?? "[]"
+				)
+			);
 	await expect.poll(async () => (await samples()).length).toBe(1);
 	for (let version = 2; version <= 6; version++) {
 		await page
@@ -149,10 +156,7 @@ test("closing or replacing a companion aborts its pending own-app read", async (
 	request,
 }) => {
 	const state = async () =>
-		(await (await request.get("/proof-read-state")).json()) as {
-			started: number;
-			closed: number;
-		};
+		await (await request.get("/proof-read-state")).json();
 	const before = await state();
 	await page.goto("/mount-performance-proof.html?pendingRead=1");
 	const heading = page

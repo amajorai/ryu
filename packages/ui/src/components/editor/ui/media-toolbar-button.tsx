@@ -43,15 +43,22 @@ import {
 	ToolbarSplitButtonSecondary,
 } from "./toolbar.tsx";
 
-const MEDIA_CONFIG: Record<
-	string,
-	{
-		accept: string[];
-		icon: ReactNode;
-		title: string;
-		tooltip: string;
-	}
-> = {
+interface MediaToolbarConfig {
+	accept: string[];
+	icon: ReactNode;
+	title: string;
+	tooltip: string;
+}
+
+interface MediaToolbarConfigs {
+	[KEYS.audio]: MediaToolbarConfig;
+	[KEYS.file]: MediaToolbarConfig;
+	[KEYS.img]: MediaToolbarConfig;
+	[KEYS.video]: MediaToolbarConfig;
+	[nodeType: string]: MediaToolbarConfig;
+}
+
+const MEDIA_CONFIG: MediaToolbarConfigs = {
 	[KEYS.audio]: {
 		accept: ["audio/*"],
 		icon: <AudioLinesIcon className="size-4" />,
@@ -128,11 +135,11 @@ export function MediaToolbarButton({
 						onClick={(e) => e.stopPropagation()}
 					>
 						<DropdownMenuGroup>
-							<DropdownMenuItem onSelect={() => openFilePicker()}>
+							<DropdownMenuItem onClick={() => openFilePicker()}>
 								{currentConfig.icon}
 								Upload from computer
 							</DropdownMenuItem>
-							<DropdownMenuItem onSelect={() => setDialogOpen(true)}>
+							<DropdownMenuItem onClick={() => setDialogOpen(true)}>
 								<LinkIcon />
 								Insert via URL
 							</DropdownMenuItem>
@@ -193,7 +200,7 @@ function MediaUrlDialogContent({
 
 			<AlertDialogDescription className="group relative w-full">
 				<label
-					className="absolute top-1/2 block -translate-y-1/2 cursor-text px-1 text-muted-foreground/70 text-sm transition-all group-focus-within:pointer-events-none group-focus-within:top-0 group-focus-within:cursor-default group-focus-within:font-medium group-focus-within:text-foreground group-focus-within:text-xs has-[+input:not(:placeholder-shown)]:pointer-events-none has-[+input:not(:placeholder-shown)]:top-0 has-[+input:not(:placeholder-shown)]:cursor-default has-[+input:not(:placeholder-shown)]:font-medium has-[+input:not(:placeholder-shown)]:text-foreground has-[+input:not(:placeholder-shown)]:text-xs"
+					className="absolute top-1/2 block -translate-y-1/2 cursor-text px-1 text-muted-foreground/70 text-sm transition-[top,font-size,color] group-focus-within:pointer-events-none group-focus-within:top-0 group-focus-within:cursor-default group-focus-within:font-medium group-focus-within:text-foreground group-focus-within:text-xs has-[+input:not(:placeholder-shown)]:pointer-events-none has-[+input:not(:placeholder-shown)]:top-0 has-[+input:not(:placeholder-shown)]:cursor-default has-[+input:not(:placeholder-shown)]:font-medium has-[+input:not(:placeholder-shown)]:text-foreground has-[+input:not(:placeholder-shown)]:text-xs"
 					htmlFor="url"
 				>
 					<span className="inline-flex bg-background px-2">URL</span>

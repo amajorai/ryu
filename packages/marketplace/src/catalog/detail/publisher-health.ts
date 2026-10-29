@@ -1,3 +1,4 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { PublisherTrustLevel } from "@ryuhq/protocol/publisher-trust";
 
 export type PublisherSignatureStatus =
@@ -114,9 +115,9 @@ export function calculatePublisherHealth(
 		});
 	}
 	if (
-		typeof input.ratingCount === "number" &&
+		isNativeNumber(input.ratingCount) &&
 		input.ratingCount > 0 &&
-		typeof input.ratingAverage === "number"
+		isNativeNumber(input.ratingAverage)
 	) {
 		signals.push({
 			label: "Community ratings",

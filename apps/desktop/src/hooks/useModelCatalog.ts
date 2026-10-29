@@ -95,13 +95,16 @@ const SEARCH_DEBOUNCE_MS = 300;
 /** The facets the section opens with. Named so the Store's warm-up path can
  *  prefetch the FIRST view a user sees rather than a key nothing reads. */
 export const MODEL_LIST_DEFAULTS = {
-	category: "all" as ModelCategory,
-	format: "gguf" as ModelFormat,
+	category: "all",
+	format: "gguf",
 	installedOnly: false,
 	org: "",
 	query: "",
-	sort: "trending" as ModelSort,
-};
+	sort: "trending",
+} satisfies Pick<
+	UseModelCatalogResult,
+	"category" | "format" | "installedOnly" | "org" | "query" | "sort"
+>;
 
 /** Query descriptor shared with the Store's warm-up path (`useStorePrefetch`), so
  *  a prefetch lands under the key this hook reads. */
@@ -141,11 +144,21 @@ export function modelListQuery(
 				limit: 40,
 				cursor: pageParam,
 			}),
-		initialPageParam: undefined as string | undefined,
+		initialPageParam: undefined,
 		// Stop once the Hub returns no further cursor.
 		getNextPageParam: (last: { nextCursor?: string | null }) =>
 			last.nextCursor ?? undefined,
 	};
+}
+
+/** Mutations require the same selected ID as their public entry-point guard. */
+function requireSelectedModel(id: string | null): string {
+	if (id === null) {
+		throw new Error(
+			"Select a model before requesting its details or installation."
+		);
+	}
+	return id;
 }
 
 export function useModelCatalog(initialQuery = ""): UseModelCatalogResult {
@@ -171,7 +184,7 @@ export function useModelCatalog(initialQuery = ""): UseModelCatalogResult {
 		MODEL_LIST_DEFAULTS.category
 	);
 	const [format, setFormat] = useState<ModelFormat>(MODEL_LIST_DEFAULTS.format);
-	const [installedOnly, setInstalledOnly] = useState(
+	const [installedOnly, setInstalledOnly] = useState<boolean>(
 		MODEL_LIST_DEFAULTS.installedOnly
 	);
 	const [org, setOrg] = useState(MODEL_LIST_DEFAULTS.org);
@@ -214,7 +227,11 @@ export function useModelCatalog(initialQuery = ""): UseModelCatalogResult {
 			() => ({
 				queryKey: ["models", "detail", url, selectedId, selectedFormat],
 				queryFn: () =>
-					fetchModelDetail(target, selectedId as string, selectedFormat),
+					fetchModelDetail(
+						target,
+						requireSelectedModel(selectedId),
+						selectedFormat
+					),
 				enabled: selectedId !== null,
 			}),
 			[target, url, selectedId, selectedFormat]
@@ -223,29 +240,15 @@ export function useModelCatalog(initialQuery = ""): UseModelCatalogResult {
 
 	const installMutation = useMutation({
 		mutationFn: (file: string) =>
-			installModelFile({ url, token, userJwt }, selectedId as string, file),
-		// Optimistically flip the file (and its card) to installed so the button
-		// updates instantly; roll back if the download fails.
-		onMutate: async (file: string) => {
-			const key = ["models", "detail", url, selectedId, selectedFormat];
-			await qc.cancelQueries({ queryKey: key });
-			const previous = qc.getQueryData<ModelDetail>(key);
-			if (previous) {
-				qc.setQueryData<ModelDetail>(key, {
-					...previous,
-					card: { ...previous.card, installed: true },
-					files: previous.files.map((f) =>
-						f.filename === file ? { ...f, installed: true } : f
-					),
-				});
-			}
-			return { previous, key };
-		},
-		onError: (_err, _file, ctx) => {
-			if (ctx?.previous) {
-				qc.setQueryData(ctx.key, ctx.previous);
-			}
-		},
+			installModelFile(
+				{ url, token, userJwt },
+				requireSelectedModel(selectedId),
+				file
+			),
+		// Keep the server-confirmed installed state intact while a file transfer is
+		// pending. The selected row can then continue showing its own progress
+		// button; optimistic removal from the quant picker hid that button and
+		// briefly offered an install for a different quant during the download.
 		onSettled: () => {
 			Promise.resolve(
 				qc.invalidateQueries({ queryKey: ["models", "detail", url] })
@@ -258,31 +261,13 @@ export function useModelCatalog(initialQuery = ""): UseModelCatalogResult {
 
 	const uninstallMutation = useMutation({
 		mutationFn: (file: string) =>
-			uninstallModelFile({ url, token, userJwt }, selectedId as string, file),
-		// Optimistically flip the file back to not-installed so the button updates
-		// instantly; roll back if the delete fails. The card's `installed` flag is
-		// left for revalidation since other quants of the same repo may remain.
-		onMutate: async (file: string) => {
-			const key = ["models", "detail", url, selectedId, selectedFormat];
-			await qc.cancelQueries({ queryKey: key });
-			const previous = qc.getQueryData<ModelDetail>(key);
-			if (previous) {
-				const files = previous.files.map((f) =>
-					f.filename === file ? { ...f, installed: false } : f
-				);
-				qc.setQueryData<ModelDetail>(key, {
-					...previous,
-					card: { ...previous.card, installed: files.some((f) => f.installed) },
-					files,
-				});
-			}
-			return { previous, key };
-		},
-		onError: (_err, _file, ctx) => {
-			if (ctx?.previous) {
-				qc.setQueryData(ctx.key, ctx.previous);
-			}
-		},
+			uninstallModelFile(
+				{ url, token, userJwt },
+				requireSelectedModel(selectedId),
+				file
+			),
+		// Preserve the installed row while Core removes the file, so the same
+		// control remains visible in its pending state until the request settles.
 		onSettled: () => {
 			Promise.resolve(
 				qc.invalidateQueries({ queryKey: ["models", "detail", url] })
@@ -343,7 +328,7 @@ export function useModelCatalog(initialQuery = ""): UseModelCatalogResult {
 		mutationFn: () =>
 			installModelSnapshot(
 				{ url, token, userJwt },
-				selectedId as string,
+				requireSelectedModel(selectedId),
 				selectedFormat
 			),
 		onMutate: async () => {

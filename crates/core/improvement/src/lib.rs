@@ -228,6 +228,7 @@ fn init_schema(connection: &Connection) -> Result<(), StoreError> {
     connection
         .execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
              CREATE TABLE IF NOT EXISTS improvement_runs (
                  id TEXT PRIMARY KEY,
                  status TEXT NOT NULL,

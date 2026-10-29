@@ -36,7 +36,8 @@ export interface CompanionContextState {
  */
 export function useCompanionContext(
 	enabled: boolean,
-	intervalMs = 5000
+	intervalMs = 5000,
+	proactiveEnabled = enabled
 ): CompanionContextState {
 	const [context, setContext] = useState<ShadowContext | null>(null);
 	const [proactive, setProactive] = useState<ProactiveSuggestion | null>(null);
@@ -47,6 +48,7 @@ export function useCompanionContext(
 	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// Track first-fetch so loading is only shown before the initial response.
 	const hasLoadedRef = useRef(false);
+	const activeRef = useRef(false);
 
 	const fetchNow = useCallback(async () => {
 		abortRef.current?.abort();
@@ -58,33 +60,46 @@ export function useCompanionContext(
 		}
 
 		const [ctx, proac] = await Promise.all([
-			getCurrentContext(ctrl.signal),
-			getProactive(ctrl.signal),
+			enabled ? getCurrentContext(ctrl.signal) : Promise.resolve(null),
+			proactiveEnabled ? getProactive(ctrl.signal) : Promise.resolve(null),
 		]);
 
 		if (ctrl.signal.aborted) {
-			return;
+			return false;
 		}
 
 		hasLoadedRef.current = true;
 		setLoading(false);
 		setContext(ctx);
 		setProactive(proac);
-		setUnavailable(ctx === null && proac === null);
-	}, []);
+		setUnavailable(enabled && ctx === null);
+		return true;
+	}, [enabled, proactiveEnabled]);
 
 	// Schedule the next poll after each fetch completes.
 	const scheduleNext = useCallback(() => {
+		if (!activeRef.current) {
+			return;
+		}
 		if (timerRef.current !== null) {
 			clearTimeout(timerRef.current);
 		}
 		timerRef.current = setTimeout(() => {
-			fetchNow().then(scheduleNext);
+			fetchNow().then((completed) => {
+				if (completed) {
+					scheduleNext();
+				}
+			});
 		}, intervalMs);
 	}, [fetchNow, intervalMs]);
 
 	useEffect(() => {
-		if (!enabled) {
+		activeRef.current = enabled || proactiveEnabled;
+		if (!activeRef.current) {
+			setContext(null);
+			setProactive(null);
+			setLoading(false);
+			hasLoadedRef.current = false;
 			abortRef.current?.abort();
 			if (timerRef.current !== null) {
 				clearTimeout(timerRef.current);
@@ -94,23 +109,35 @@ export function useCompanionContext(
 		}
 
 		// Fetch immediately on enable, then chain polling.
-		fetchNow().then(scheduleNext);
+		fetchNow().then((completed) => {
+			if (completed) {
+				scheduleNext();
+			}
+		});
 
 		return () => {
+			activeRef.current = false;
 			abortRef.current?.abort();
 			if (timerRef.current !== null) {
 				clearTimeout(timerRef.current);
 				timerRef.current = null;
 			}
 		};
-	}, [enabled, fetchNow, scheduleNext]);
+	}, [enabled, proactiveEnabled, fetchNow, scheduleNext]);
 
 	const refresh = useCallback(() => {
+		if (!activeRef.current) {
+			return;
+		}
 		if (timerRef.current !== null) {
 			clearTimeout(timerRef.current);
 			timerRef.current = null;
 		}
-		fetchNow().then(scheduleNext);
+		fetchNow().then((completed) => {
+			if (completed) {
+				scheduleNext();
+			}
+		});
 	}, [fetchNow, scheduleNext]);
 
 	return { context, proactive, unavailable, loading, refresh };

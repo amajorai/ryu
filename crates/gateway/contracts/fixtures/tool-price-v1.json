@@ -1,0 +1,404 @@
+{
+  "version": 1,
+  "description": "Ryu's own endpoint price records (Treg parity B2). Each row prices one vendor endpoint in the vendor's native unit with its provenance, confidence, checked date and source URL; non-USD units convert through usdRates at serve time. Rows come only from vendors' own published pricing pages or Ryu's measurements, never from another catalog. A `free` price is an explicit vendor statement; an unverified row refuses paid routing. tools/check-tool-price-staleness.mjs warns on rows older than staleAfterDays. Read by ryu_gw_contracts::tool_price and @ryuhq/protocol/tool-price.",
+  "staleAfterDays": 90,
+  "usdRates": [
+    {
+      "unit": "tavily_credit",
+      "kind": "vendor_credit",
+      "microUsd": 8000,
+      "per": 1,
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.tavily.com/documentation/api-credits",
+      "note": "Pay-as-you-go price per credit; plan credits cost less and are not used for quoting."
+    }
+  ],
+  "rows": [
+    {
+      "endpoint": "composio.tool_call.managed_app",
+      "provider": "composio",
+      "source": "ryu",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 500,
+            "per": 1
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://composio.dev/pricing",
+      "note": "Composio-managed auth app. Composio's monthly free allowance belongs to Ryu's upstream project and is never passed to tenants."
+    },
+    {
+      "endpoint": "composio.tool_call.own_app",
+      "provider": "composio",
+      "source": "ryu",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 300,
+            "per": 1
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://composio.dev/pricing",
+      "note": "Own auth app, API key or MCP. Composio's monthly free allowance belongs to Ryu's upstream project and is never passed to tenants."
+    },
+    {
+      "endpoint": "composio.trigger_event.managed_app",
+      "provider": "composio",
+      "source": "ryu",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 5000,
+            "per": 1
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://composio.dev/pricing",
+      "note": "One delivered trigger event, Composio-managed app. Composio's monthly free allowance belongs to Ryu's upstream project and is never passed to tenants."
+    },
+    {
+      "endpoint": "composio.trigger_event.own_app",
+      "provider": "composio",
+      "source": "ryu",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 3000,
+            "per": 1
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://composio.dev/pricing",
+      "note": "One delivered trigger event, own app. Composio's monthly free allowance belongs to Ryu's upstream project and is never passed to tenants."
+    },
+    {
+      "endpoint": "exa.search.auto",
+      "provider": "exa",
+      "source": "ryu",
+      "platform": "web",
+      "capability": "web.search",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 7000000,
+            "per": 1000
+          },
+          {
+            "rule": "per_unit",
+            "meter": "results_over_10",
+            "microAmount": 1000000,
+            "per": 1000
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://exa.ai/pricing",
+      "note": "Base price covers up to 10 results; each result above 10 is metered as results_over_10."
+    },
+    {
+      "endpoint": "exa.search.fast",
+      "provider": "exa",
+      "source": "ryu",
+      "platform": "web",
+      "capability": "web.search",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 7000000,
+            "per": 1000
+          },
+          {
+            "rule": "per_unit",
+            "meter": "results_over_10",
+            "microAmount": 1000000,
+            "per": 1000
+          }
+        ]
+      },
+      "provenance": "unverified",
+      "confidence": "low",
+      "checkedOn": "2026-10-21",
+      "sourceUrl": "https://exa.ai/pricing",
+      "note": "Unverified: exa.ai/pricing no longer lists Fast Search (checked 2026-10-21) and Exa marks the fast type as legacy, so this figure has no vendor source and never routes a paid call. Base price covers up to 10 results; each result above 10 is metered as results_over_10."
+    },
+    {
+      "endpoint": "exa.search.instant",
+      "provider": "exa",
+      "source": "ryu",
+      "platform": "web",
+      "capability": "web.search",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 4000000,
+            "per": 1000
+          },
+          {
+            "rule": "per_unit",
+            "meter": "results_over_10",
+            "microAmount": 1000000,
+            "per": 1000
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://exa.ai/pricing",
+      "note": "Same price as the lite type. Base price covers up to 10 results; each result above 10 is metered as results_over_10."
+    },
+    {
+      "endpoint": "exa.contents.text",
+      "provider": "exa",
+      "source": "ryu",
+      "platform": "web",
+      "capability": "web.extract",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_unit",
+            "meter": "pages",
+            "microAmount": 1000000,
+            "per": 1000
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://exa.ai/pricing",
+      "note": "Text content only; each further content type (highlights, summary) is billed per page again."
+    },
+    {
+      "endpoint": "tavily.search.basic",
+      "provider": "tavily",
+      "source": "ryu",
+      "platform": "web",
+      "capability": "web.search",
+      "price": {
+        "type": "metered",
+        "unit": "tavily_credit",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 1000000,
+            "per": 1
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.tavily.com/documentation/api-credits",
+      "note": "One API credit per request."
+    },
+    {
+      "endpoint": "tavily.search.advanced",
+      "provider": "tavily",
+      "source": "ryu",
+      "platform": "web",
+      "capability": "web.search",
+      "price": {
+        "type": "metered",
+        "unit": "tavily_credit",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 2000000,
+            "per": 1
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.tavily.com/documentation/api-credits",
+      "note": "Two API credits per request."
+    },
+    {
+      "endpoint": "brave.web_search",
+      "provider": "brave",
+      "source": "ryu",
+      "platform": "web",
+      "capability": "web.search",
+      "price": {
+        "type": "metered",
+        "unit": "USD",
+        "components": [
+          {
+            "rule": "per_call",
+            "microAmount": 5000000,
+            "per": 1000
+          }
+        ]
+      },
+      "provenance": "vendor_page",
+      "confidence": "high",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://brave.com/search/api/",
+      "note": "Search plan."
+    },
+    {
+      "endpoint": "github.GITHUB_GET_THE_AUTHENTICATED_USER",
+      "provider": "github",
+      "source": "ryu",
+      "platform": "github",
+      "capability": "account.whoami",
+      "price": {
+        "type": "free"
+      },
+      "provenance": "vendor_page",
+      "confidence": "medium",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+    },
+    {
+      "endpoint": "github.GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+      "provider": "github",
+      "source": "ryu",
+      "platform": "github",
+      "capability": "repository.list",
+      "price": {
+        "type": "free"
+      },
+      "provenance": "vendor_page",
+      "confidence": "medium",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+    },
+    {
+      "endpoint": "github.GITHUB_LIST_REPOSITORY_ISSUES",
+      "provider": "github",
+      "source": "ryu",
+      "platform": "github",
+      "capability": "issue.list",
+      "price": {
+        "type": "free"
+      },
+      "provenance": "vendor_page",
+      "confidence": "medium",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+    },
+    {
+      "endpoint": "github.GITHUB_GET_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "platform": "github",
+      "capability": "issue.get",
+      "price": {
+        "type": "free"
+      },
+      "provenance": "vendor_page",
+      "confidence": "medium",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+    },
+    {
+      "endpoint": "github.GITHUB_CREATE_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "platform": "github",
+      "capability": "issue.create",
+      "price": {
+        "type": "free"
+      },
+      "provenance": "vendor_page",
+      "confidence": "medium",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+    },
+    {
+      "endpoint": "github.GITHUB_CREATE_AN_ISSUE_COMMENT",
+      "provider": "github",
+      "source": "ryu",
+      "platform": "github",
+      "capability": "issue.comment",
+      "price": {
+        "type": "free"
+      },
+      "provenance": "vendor_page",
+      "confidence": "medium",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+    },
+    {
+      "endpoint": "github.GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS",
+      "provider": "github",
+      "source": "ryu",
+      "platform": "github",
+      "capability": "issue.search",
+      "price": {
+        "type": "free"
+      },
+      "provenance": "vendor_page",
+      "confidence": "medium",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+    },
+    {
+      "endpoint": "github.GITHUB_LIST_ISSUES_ASSIGNED_TO_THE_AUTHENTICATED_USER",
+      "provider": "github",
+      "source": "ryu",
+      "platform": "github",
+      "capability": "issue.list_assigned",
+      "price": {
+        "type": "free"
+      },
+      "provenance": "vendor_page",
+      "confidence": "medium",
+      "checkedOn": "2026-10-20",
+      "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+    }
+  ]
+}

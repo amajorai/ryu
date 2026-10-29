@@ -52,7 +52,7 @@ function AgentPersonalityProfileProof() {
 		<main className="min-h-screen bg-background px-6 py-10 text-foreground">
 			<div className="mx-auto max-w-5xl">
 				<header className="mb-7">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-section">
 						Production component proof
 					</p>
 					<div className="mt-2 flex flex-wrap items-center gap-3">
@@ -157,6 +157,6 @@ function AgentPersonalityProfileProof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<AgentPersonalityProfileProof />
 );

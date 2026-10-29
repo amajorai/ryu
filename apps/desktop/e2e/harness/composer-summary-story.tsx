@@ -1,3 +1,4 @@
+import type {} from "./proof-css-custom-properties.d.ts";
 // Standalone browser story for the composer's status line — the REAL
 // `ComposerSettingsMenu` trigger, rendered from the same section shapes the
 // composer hook builds.
@@ -19,7 +20,7 @@
 //
 // Hermetic: the menu is presentational, so no Core node, no Tauri, no context.
 
-import { approvalModeStyle } from "@ryu/blocks/composer/composer-approval-style";
+import { approvalModeStyle } from "@ryu/blocks/composer/composer-approval-style.ts";
 import { IconCpu } from "@tabler/icons-react";
 import { createRoot } from "react-dom/client";
 import {
@@ -129,8 +130,8 @@ function ComposerPreview({
 				<span>{width}px container</span>
 			</div>
 			<div
-				className="composer-container min-w-0 rounded-2xl bg-muted p-3"
-				style={{ width }}
+				className="composer-container w-(--proof-composer-width) min-w-0 rounded-2xl bg-muted p-3"
+				style={{ "--proof-composer-width": `${width}px` }}
 			>
 				<textarea
 					aria-label={`${label} message`}

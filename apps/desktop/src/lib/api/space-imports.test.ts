@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import { fetchComposioActions } from "./composio.ts";
 import {
 	createSpaceComposioImport,
@@ -8,7 +9,7 @@ import {
 const TARGET = { url: "http://core.test", token: "secret" };
 const originalFetch = globalThis.fetch;
 
-function jsonResponse(payload: unknown): Response {
+function jsonResponse<TFixture>(payload: TFixture): Response {
 	return new Response(JSON.stringify(payload), {
 		status: 200,
 		headers: { "content-type": "application/json" },
@@ -41,24 +42,27 @@ afterEach(() => {
 describe("Space import API", () => {
 	it("keeps the Composio input schema needed by the import form", async () => {
 		let calledUrl = "";
-		globalThis.fetch = (async (input: URL | RequestInfo) => {
-			calledUrl = String(input);
-			return jsonResponse({
-				data: [
-					{
-						name: "GITHUB_LIST_ISSUES",
-						display_name: "List issues",
-						toolkit: "github",
-						tags: ["readOnlyHint"],
-						input_schema: {
-							type: "object",
-							required: ["repo"],
-							properties: { repo: { type: "string", title: "Repository" } },
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			async (input: URL | RequestInfo) => {
+				calledUrl = String(input);
+				return jsonResponse({
+					data: [
+						{
+							name: "GITHUB_LIST_ISSUES",
+							display_name: "List issues",
+							toolkit: "github",
+							tags: ["readOnlyHint"],
+							input_schema: {
+								type: "object",
+								required: ["repo"],
+								properties: { repo: { type: "string", title: "Repository" } },
+							},
 						},
-					},
-				],
-			});
-		}) as typeof fetch;
+					],
+				});
+			}
+		);
 
 		const [action] = await fetchComposioActions(TARGET, "github", "", [
 			"readOnlyHint",
@@ -71,10 +75,13 @@ describe("Space import API", () => {
 
 	it("normalizes durable history and every result document", async () => {
 		let calledUrl = "";
-		globalThis.fetch = (async (input: URL | RequestInfo) => {
-			calledUrl = String(input);
-			return jsonResponse({ imports: [historyWire] });
-		}) as typeof fetch;
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			async (input: URL | RequestInfo) => {
+				calledUrl = String(input);
+				return jsonResponse({ imports: [historyWire] });
+			}
+		);
 
 		const history = await fetchSpaceImports(TARGET, "space / one");
 
@@ -101,21 +108,48 @@ describe("Space import API", () => {
 		]);
 	});
 
+	it("lists connector imports with their provider as the format", async () => {
+		globalThis.fetch = createFetchFixture(originalFetch, async () =>
+			jsonResponse({
+				imports: [
+					historyWire,
+					{
+						...historyWire,
+						id: "import_2",
+						source_type: "connector",
+						source_name: "Notion",
+						source_format: "notion",
+						destination_kind: "page",
+					},
+				],
+			})
+		);
+
+		const history = await fetchSpaceImports(TARGET, "space_1");
+
+		expect(history.map((item) => [item.sourceType, item.sourceFormat])).toEqual(
+			[
+				["file", "csv"],
+				["connector", "notion"],
+			]
+		);
+	});
+
 	it("sends Composio imports to the scoped route with snake-case destination", async () => {
 		let call: { body: unknown; method: string; url: string } | undefined;
-		globalThis.fetch = (async (
-			input: URL | RequestInfo,
-			init?: RequestInit
-		) => {
-			call = {
-				url: String(input),
-				method: init?.method ?? "GET",
-				body: JSON.parse(String(init?.body ?? "{}")) as unknown,
-			};
-			return jsonResponse({
-				import: { ...historyWire, source_type: "composio" },
-			});
-		}) as typeof fetch;
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			async (input: URL | RequestInfo, init?: RequestInit) => {
+				call = {
+					url: String(input),
+					method: init?.method ?? "GET",
+					body: JSON.parse(String(init?.body ?? "{}")),
+				};
+				return jsonResponse({
+					import: { ...historyWire, source_type: "composio" },
+				});
+			}
+		);
 
 		await createSpaceComposioImport(TARGET, "space_1", {
 			toolkit: "github",

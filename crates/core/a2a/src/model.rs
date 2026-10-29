@@ -140,6 +140,10 @@ pub struct A2aPeer {
     pub name: String,
     pub agent_card_url: String,
     pub agent_card: Option<Value>,
+    /// Outcome of checking the stored card's `signatures` at discovery.
+    /// `None` when the card was saved without being fetched by Ryu.
+    #[serde(default)]
+    pub card_signature: Option<crate::CardSignatureStatus>,
     pub credential_kind: CredentialKind,
     pub credential_configured: bool,
     pub trust: PeerTrust,
@@ -156,6 +160,7 @@ pub struct PeerUpsert {
     pub name: String,
     pub agent_card_url: String,
     pub agent_card: Option<Value>,
+    pub card_signature: Option<crate::CardSignatureStatus>,
     pub credential: Option<PeerCredential>,
     pub enabled: bool,
 }
@@ -168,6 +173,7 @@ impl fmt::Debug for PeerUpsert {
             .field("tenant_id", &self.tenant_id)
             .field("name", &self.name)
             .field("agent_card_url", &self.agent_card_url)
+            .field("card_signature", &self.card_signature)
             .field(
                 "credential",
                 &self.credential.as_ref().map(PeerCredential::kind),
@@ -204,6 +210,9 @@ pub struct A2aServerConfig {
     pub expose_extended_card: bool,
     pub max_payload_bytes: u64,
     pub max_concurrent_tasks: u32,
+    /// Refuse to discover a peer whose Agent Card lacks a verified signature.
+    #[serde(default)]
+    pub require_signed_peer_cards: bool,
     pub updated_at: String,
 }
 
@@ -244,6 +253,7 @@ impl A2aServerConfig {
             expose_extended_card: false,
             max_payload_bytes: 1_048_576,
             max_concurrent_tasks: 32,
+            require_signed_peer_cards: false,
             updated_at: String::new(),
         }
     }
@@ -296,15 +306,45 @@ pub struct A2aPrincipal {
     pub tenant_id: String,
     pub name: String,
     pub scopes: BTreeSet<A2aScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_agent: Option<A2aPublicAgentBinding>,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub revoked_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct A2aPublicAgentBinding {
+    pub published_agent_id: String,
+    pub capability_allowlist: BTreeSet<String>,
+}
+
+impl A2aPublicAgentBinding {
+    #[must_use]
+    pub fn allows_capability(&self, capability: &str) -> bool {
+        self.capability_allowlist.contains(capability)
+    }
 }
 
 impl A2aPrincipal {
     #[must_use]
     pub fn allows(&self, scope: A2aScope) -> bool {
         self.revoked_at.is_none() && self.scopes.contains(&scope)
+    }
+
+    #[must_use]
+    pub fn allows_published_agent(&self, published_agent_id: &str) -> bool {
+        self.public_agent
+            .as_ref()
+            .is_none_or(|binding| binding.published_agent_id == published_agent_id)
+    }
+
+    #[must_use]
+    pub fn allows_public_capability(&self, capability: &str) -> bool {
+        self.public_agent
+            .as_ref()
+            .is_none_or(|binding| binding.allows_capability(capability))
     }
 }
 

@@ -3,7 +3,14 @@
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type ReactNode,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import styles from "./contributions-graph.module.css";
 
 /**
  * GitHub-style contributions heatmap, ported from the Componentry
@@ -20,6 +27,12 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
  */
 
 export interface ContributionDay {
+	/**
+	 * Marks a day as active even when `count` is zero (for example a day kept
+	 * alive by activity that carries no metered count). Such a day renders at
+	 * the lowest filled intensity instead of empty.
+	 */
+	active?: boolean;
 	count: number;
 	day: string;
 }
@@ -31,11 +44,13 @@ export type ContributionsGraphColorSchema =
 	| "purple"
 	| "orange"
 	| "gray";
-export type ContributionsGraphShape =
+export type ContributionsGraphCorners =
 	| "square"
 	| "rounded"
 	| "circle"
 	| "squircle";
+
+export type { ContributionsGraphCorners as ContributionsGraphShape };
 
 export interface ContributionsGraphProps {
 	className?: string;
@@ -45,13 +60,38 @@ export interface ContributionsGraphProps {
 	/** Number of filled intensity buckets (excludes the empty bucket). */
 	levels?: number;
 	/** Cell shape. Default "rounded". */
-	shape?: ContributionsGraphShape;
+	shape?: ContributionsGraphCorners;
 	/** Whether to show the total-contributions header. Default true. */
 	showTotal?: boolean;
 	/** Header label, rendered where the reference component shows "@username". */
 	title?: string;
 	/** Visual style variant. Default "default". */
 	variant?: ContributionsGraphVariant;
+}
+
+/**
+ * Builds heatmap data from a per-day count series plus an optional list of
+ * active days (a day can be active with no count row at all). Days only in
+ * `activeDays` are added with a zero count; both inputs are optional so older
+ * responses without activity data render exactly as before.
+ */
+export function withActiveDays(
+	days: ReadonlyArray<{ active?: boolean; count: number; day: string }>,
+	activeDays?: readonly string[]
+): ContributionDay[] {
+	const active = new Set(activeDays ?? []);
+	const merged: ContributionDay[] = days.map((entry) => ({
+		day: entry.day,
+		count: entry.count,
+		active: entry.active === true || active.has(entry.day),
+	}));
+	const seen = new Set(days.map((entry) => entry.day));
+	for (const day of active) {
+		if (!seen.has(day)) {
+			merged.push({ day, count: 0, active: true });
+		}
+	}
+	return merged;
 }
 
 const WEEKS = 53;
@@ -62,7 +102,14 @@ const MS_PER_DAY = 86_400_000;
 const SATURDAY = 6;
 const GLOW_INTENSITY = 5;
 
+interface ContributionsGraphGeometry extends CSSProperties {
+	"--contribution-cell-shadow"?: string;
+	"--contribution-tooltip-left"?: string;
+	"--contribution-tooltip-top"?: string;
+}
+
 interface Cell {
+	active: boolean;
 	bucket: number;
 	count: number;
 	date: Date;
@@ -78,43 +125,43 @@ interface LevelClasses {
 	level4: string;
 }
 
-const colorSchemas: Record<ContributionsGraphColorSchema, LevelClasses> = {
+const colorSchemas = {
 	gray: {
-		level0: "bg-zinc-100 dark:bg-zinc-900",
-		level1: "bg-zinc-300 dark:bg-zinc-800",
-		level2: "bg-zinc-400 dark:bg-zinc-700",
-		level3: "bg-zinc-600 dark:bg-zinc-500",
-		level4: "bg-zinc-800 dark:bg-zinc-300",
+		level0: styles.emptyCell,
+		level1: styles.grayLow,
+		level2: styles.grayMedium,
+		level3: styles.grayHigh,
+		level4: styles.grayPeak,
 	},
 	green: {
-		level0: "bg-zinc-100 dark:bg-zinc-900",
-		level1: "bg-emerald-200 dark:bg-emerald-900",
-		level2: "bg-emerald-300 dark:bg-emerald-700",
-		level3: "bg-emerald-400 dark:bg-emerald-500",
-		level4: "bg-emerald-500 dark:bg-emerald-400",
+		level0: styles.emptyCell,
+		level1: styles.greenLow,
+		level2: styles.greenMedium,
+		level3: styles.greenHigh,
+		level4: styles.greenPeak,
 	},
 	blue: {
-		level0: "bg-zinc-100 dark:bg-zinc-900",
-		level1: "bg-blue-200 dark:bg-blue-900",
-		level2: "bg-blue-300 dark:bg-blue-700",
-		level3: "bg-blue-400 dark:bg-blue-500",
-		level4: "bg-blue-500 dark:bg-blue-400",
+		level0: styles.emptyCell,
+		level1: styles.blueLow,
+		level2: styles.blueMedium,
+		level3: styles.blueHigh,
+		level4: styles.bluePeak,
 	},
 	purple: {
-		level0: "bg-zinc-100 dark:bg-zinc-900",
-		level1: "bg-purple-200 dark:bg-purple-900",
-		level2: "bg-purple-300 dark:bg-purple-700",
-		level3: "bg-purple-400 dark:bg-purple-500",
-		level4: "bg-purple-500 dark:bg-purple-400",
+		level0: styles.emptyCell,
+		level1: styles.purpleLow,
+		level2: styles.purpleMedium,
+		level3: styles.purpleHigh,
+		level4: styles.purplePeak,
 	},
 	orange: {
-		level0: "bg-zinc-100 dark:bg-zinc-900",
-		level1: "bg-orange-200 dark:bg-orange-900",
-		level2: "bg-orange-300 dark:bg-orange-700",
-		level3: "bg-orange-400 dark:bg-orange-500",
-		level4: "bg-orange-500 dark:bg-orange-400",
+		level0: styles.emptyCell,
+		level1: styles.orangeLow,
+		level2: styles.orangeMedium,
+		level3: styles.orangeHigh,
+		level4: styles.orangePeak,
 	},
-};
+} satisfies Record<ContributionsGraphColorSchema, LevelClasses>;
 
 const pad2 = (value: number): string => value.toString().padStart(2, "0");
 
@@ -153,10 +200,27 @@ const bucketForCount = (
 	return Math.min(Math.max(scaled, 1), levels);
 };
 
+/** An active day with no count still shows as the lowest filled level. */
+const bucketForDay = (
+	count: number,
+	active: boolean,
+	maxCount: number,
+	levels: number
+): number => {
+	if (count > 0) {
+		return bucketForCount(count, maxCount, levels);
+	}
+	return active ? 1 : 0;
+};
+
 const buildWeeks = (data: ContributionDay[], levels: number): Cell[][] => {
 	const counts = new Map<string, number>();
+	const activeKeys = new Set<string>();
 	let maxCount = 0;
 	for (const entry of data) {
+		if (entry.active === true) {
+			activeKeys.add(entry.day);
+		}
 		const next = (counts.get(entry.day) ?? 0) + entry.count;
 		counts.set(entry.day, next);
 		if (next > maxCount) {
@@ -175,11 +239,13 @@ const buildWeeks = (data: ContributionDay[], levels: number): Cell[][] => {
 			const date = addDays(firstCell, week * DAYS_IN_WEEK + weekday);
 			const key = toKey(date);
 			const count = counts.get(key) ?? 0;
+			const active = count > 0 || activeKeys.has(key);
 			days.push({
+				active,
 				date,
 				key,
 				count,
-				bucket: bucketForCount(count, maxCount, levels),
+				bucket: bucketForDay(count, active, maxCount, levels),
 				filler: date.getTime() > endDate.getTime(),
 			});
 		}
@@ -208,17 +274,17 @@ const levelClassFor = (
 	return levels.level4;
 };
 
-const shapeClassFor = (shape: ContributionsGraphShape): string => {
-	if (shape === "circle") {
+const cornersClassFor = (corners: ContributionsGraphCorners): string => {
+	if (corners === "circle") {
 		return "rounded-full";
 	}
-	if (shape === "square") {
+	if (corners === "square") {
 		return "rounded-none";
 	}
-	if (shape === "squircle") {
+	if (corners === "squircle") {
 		return "rounded-sm";
 	}
-	return "rounded-[2px]";
+	return styles.roundedCell;
 };
 
 const glowColorFor = (schema: ContributionsGraphColorSchema): string => {
@@ -254,7 +320,7 @@ export function ContributionsGraph({
 	className,
 	variant = "default",
 	colorSchema = "green",
-	shape = "rounded",
+	shape: corners = "rounded",
 	showTotal = true,
 }: ContributionsGraphProps) {
 	const safeLevels = Math.max(1, Math.floor(levels));
@@ -274,19 +340,25 @@ export function ContributionsGraph({
 
 	const gridRef = useRef<HTMLDivElement>(null);
 	const [hovered, setHovered] = useState<{
+		active: boolean;
 		count: number;
 		date: string;
 	} | null>(null);
 	const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
+	const tooltipPosition: ContributionsGraphGeometry = {
+		"--contribution-tooltip-left": `${mousePos.x}px`,
+		"--contribution-tooltip-top": `${mousePos.y - 40}px`,
+	};
+
 	const isGlowing = variant === "city-lights";
 	const isMinimal = variant === "minimal";
-	const shapeClass = shapeClassFor(shape);
+	const cornersClass = cornersClassFor(corners);
 	const glowColor = glowColorFor(colorSchema);
 
 	const handleCellEnter =
 		(cell: Cell) => (event: { currentTarget: HTMLDivElement }) => {
-			setHovered({ count: cell.count, date: cell.key });
+			setHovered({ active: cell.active, count: cell.count, date: cell.key });
 			const rect = event.currentTarget.getBoundingClientRect();
 			const parent = gridRef.current?.getBoundingClientRect();
 			if (parent) {
@@ -305,7 +377,7 @@ export function ContributionsGraph({
 					className={cn(
 						"aspect-square w-full",
 						levelClassFor(0, colorSchema),
-						shapeClass
+						cornersClass
 					)}
 					key={cell.key}
 				/>
@@ -316,12 +388,13 @@ export function ContributionsGraph({
 			"aspect-square w-full transition-colors duration-200",
 			levelClassFor(cell.bucket, colorSchema),
 			isGlowing && cell.bucket > 0 && "z-10",
-			shapeClass
+			isGlowing && cell.bucket > 0 && styles.glowingCell,
+			cornersClass
 		);
-		const style =
+		const glowStyle: ContributionsGraphGeometry | undefined =
 			isGlowing && cell.bucket > 0
 				? {
-						boxShadow: `0 0 ${
+						"--contribution-cell-shadow": `0 0 ${
 							cell.count > 3 ? GLOW_INTENSITY * 1.5 : GLOW_INTENSITY
 						}px ${glowColor}`,
 					}
@@ -333,7 +406,7 @@ export function ContributionsGraph({
 					className={cn(className, isMinimal && "scale-75")}
 					key={cell.key}
 					onMouseEnter={handleCellEnter(cell)}
-					style={style}
+					style={glowStyle}
 				/>
 			);
 		}
@@ -345,7 +418,7 @@ export function ContributionsGraph({
 				initial={{ opacity: 0, scale: 0 }}
 				key={cell.key}
 				onMouseEnter={handleCellEnter(cell)}
-				style={style}
+				style={glowStyle}
 				transition={{
 					delay: weekIndex * 0.01 + dayIndex * 0.01,
 					type: "spring",
@@ -372,7 +445,7 @@ export function ContributionsGraph({
 
 			<div className="overflow-x-auto">
 				<div
-					className="relative flex w-max flex-nowrap gap-[3px]"
+					className={cn("relative flex w-max flex-nowrap", styles.cellGap)}
 					onMouseLeave={() => setHovered(null)}
 					ref={gridRef}
 				>
@@ -380,17 +453,26 @@ export function ContributionsGraph({
 						{hovered ? (
 							<motion.div
 								animate={{ opacity: 1, scale: 1, y: 0 }}
-								className="pointer-events-none absolute z-50"
+								className={cn(
+									"pointer-events-none absolute z-50",
+									styles.tooltipPosition
+								)}
 								exit={{ opacity: 0, scale: 0.9, y: 5 }}
 								initial={{ opacity: 0, scale: 0.9, y: 10 }}
 								key="tooltip"
-								style={{ left: mousePos.x, top: mousePos.y - 40 }}
+								style={tooltipPosition}
 								transition={{ duration: 0.2 }}
 							>
-								<span className="block -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-3 py-1.5 text-white text-xs shadow-xl dark:bg-white dark:text-zinc-900">
+								<span
+									className={cn(
+										"block -translate-x-1/2 whitespace-nowrap rounded-md px-3 py-1.5 text-xs shadow-xl",
+										styles.tooltip
+									)}
+								>
 									<span className="mr-1 font-medium">{hovered.count}</span>
-									<span className="text-zinc-400 dark:text-zinc-500">
+									<span className={styles.tooltipDescription}>
 										contributions on {hovered.date}
+										{hovered.active && hovered.count === 0 ? " · active" : ""}
 									</span>
 								</span>
 							</motion.div>
@@ -398,7 +480,7 @@ export function ContributionsGraph({
 					</AnimatePresence>
 
 					{weeks.map((week, weekIndex) => (
-						<div className="flex w-[14px] flex-col gap-[3px]" key={weekIndex}>
+						<div className={cn("flex flex-col", styles.week)} key={weekIndex}>
 							{week.map((cell, dayIndex) =>
 								renderCell(cell, weekIndex, dayIndex)
 							)}
@@ -430,12 +512,12 @@ export function StatCard({
 	return (
 		<div
 			className={cn(
-				"flex flex-col gap-1 rounded-4xl bg-card p-4 text-card-foreground shadow-sm",
+				"flex flex-col gap-1 rounded-4xl border border-border bg-card p-4 text-card-foreground",
 				className
 			)}
 		>
 			<div className="flex items-center justify-between gap-2">
-				<span className="font-medium text-muted-foreground text-xs">
+				<span className="font-medium text-muted-foreground text-sm">
 					{title}
 				</span>
 				{icon ? (
@@ -447,11 +529,11 @@ export function StatCard({
 					</span>
 				) : null}
 			</div>
-			<span className="font-medium font-mono text-2xl text-foreground tabular-nums">
+			<span className="font-heading font-medium text-2xl text-foreground tabular-nums">
 				{value}
 			</span>
 			{sub ? (
-				<span className="text-muted-foreground text-xs">{sub}</span>
+				<span className="text-muted-foreground text-sm">{sub}</span>
 			) : null}
 			{chart ? <div className="mt-auto pt-2">{chart}</div> : null}
 		</div>

@@ -1,10 +1,15 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useSidebarSectionSources } from "@/src/hooks/useSidebarSectionSource.ts";
+import { callMcpTool, fetchMcpTools } from "@/src/lib/api/mcp.ts";
 import { listOutputStyles } from "@/src/lib/api/output-styles.ts";
 import type { PluginSidebarSection } from "@/src/lib/api/plugins.ts";
+import {
+	isMcpMentionTool,
+	mcpMentionSources,
+} from "@/src/lib/mentions/mcp-resources.ts";
 import {
 	buildContributedMentionSources,
 	buildOutputStyleMentionSources,
@@ -16,6 +21,7 @@ import { spaceDocumentListQueryOptions } from "@/src/lib/space-document-list-que
 /** The dynamic resources added to the shared chat @ directory. */
 export interface MentionableResources {
 	appItems: ReturnType<typeof buildContributedMentionSources>;
+	error?: string;
 	outputStyles: ReturnType<typeof buildOutputStyleMentionSources>;
 	pages: ReturnType<typeof buildSpacePageMentionSources>;
 }
@@ -29,7 +35,8 @@ export interface MentionableResources {
  * existing surfaces; a missing/old endpoint simply contributes no candidates.
  */
 export function useMentionableResources(
-	sections: PluginSidebarSection[]
+	sections: PluginSidebarSection[],
+	options?: { agentId?: string; query?: string | null }
 ): MentionableResources {
 	const activeNode = useActiveNode();
 	const {
@@ -59,6 +66,68 @@ export function useMentionableResources(
 			})),
 		[documentRevisions, spaces, spacesError, spacesLoading, target]
 	);
+	const [query, setQuery] = useState<string | null>(null);
+	const [remoteItems, setRemoteItems] = useState<
+		ReturnType<typeof mcpMentionSources>
+	>([]);
+	useEffect(() => {
+		setRemoteItems([]);
+	}, [target.url, target.token, target.userJwt, options?.agentId]);
+	useEffect(() => {
+		const timer = setTimeout(() => setQuery(options?.query ?? null), 250);
+		return () => clearTimeout(timer);
+	}, [options?.query]);
+	const remoteMentions = useQuery(
+		{
+			queryKey: [
+				"mcp-mention-search",
+				target.url,
+				target.token,
+				target.userJwt,
+				options?.agentId,
+				query,
+			],
+			enabled: Boolean(options?.agentId) && query !== null,
+			retry: false,
+			queryFn: async ({ signal }) => {
+				if (!options?.agentId || query === null) {
+					return [];
+				}
+				const tools = (
+					await fetchMcpTools(target, options.agentId, signal)
+				).filter(isMcpMentionTool);
+				const results = await Promise.all(
+					tools.slice(0, 8).map(async (tool) => {
+						const result = await callMcpTool(target, {
+							tool: tool.id,
+							agentId: options.agentId ?? "",
+							arguments: { query },
+						});
+						if (!result.ok) {
+							throw new Error(
+								result.error ?? `Mention search failed for ${tool.server}`
+							);
+						}
+						return mcpMentionSources(tool, result.output);
+					})
+				);
+				return results.flat();
+			},
+		},
+		queryClient
+	);
+	useEffect(() => {
+		if (!remoteMentions.data?.length) {
+			return;
+		}
+		setRemoteItems((previous) => {
+			const merged = new Map(previous.map((item) => [item.id, item]));
+			for (const item of remoteMentions.data ?? []) {
+				merged.set(item.id, item);
+			}
+			return [...merged.values()].slice(-500);
+		});
+	}, [remoteMentions.data]);
 	const documentQueries = useQueries(
 		{ queries: documentQueryOptions },
 		queryClient
@@ -82,7 +151,14 @@ export function useMentionableResources(
 
 	return useMemo(
 		() => ({
-			appItems: buildContributedMentionSources(contributedSourceData),
+			appItems: [
+				...buildContributedMentionSources(contributedSourceData),
+				...remoteItems,
+			],
+			error:
+				remoteMentions.error instanceof Error
+					? remoteMentions.error.message
+					: undefined,
 			outputStyles: buildOutputStyleMentionSources(
 				outputStyleData?.styles ?? []
 			),
@@ -91,6 +167,13 @@ export function useMentionableResources(
 				documentQueries.map((query) => query.data ?? [])
 			),
 		}),
-		[contributedSourceData, documentQueries, outputStyleData?.styles, spaces]
+		[
+			contributedSourceData,
+			documentQueries,
+			outputStyleData?.styles,
+			spaces,
+			remoteItems,
+			remoteMentions.error,
+		]
 	);
 }

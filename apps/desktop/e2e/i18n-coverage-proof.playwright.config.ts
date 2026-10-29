@@ -1,7 +1,7 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
-const harnessDirectory = path.resolve(import.meta.dirname, "harness");
+path.resolve(import.meta.dirname, "harness");
 const port = Number(process.env.RYU_I18N_E2E_PORT ?? "5224");
 
 export default defineConfig({

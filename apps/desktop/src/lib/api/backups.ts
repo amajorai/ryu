@@ -1,1 +1,1 @@
-export * from "@ryuhq/core-client/backups";
+export * from "@ryuhq/core-client/backups.ts";

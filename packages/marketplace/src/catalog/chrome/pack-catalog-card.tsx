@@ -1,3 +1,5 @@
+import visualStyles from "../../marketplace-visual.module.css";
+
 // packages/marketplace/src/catalog/chrome/pack-catalog-card.tsx
 //
 // The TCG-style **pack card** for the Skills catalog's Packs shelf. A pack is a
@@ -22,6 +24,7 @@
 
 import { CheckmarkCircle02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
@@ -34,7 +37,9 @@ import {
 import type { SkillPackCard } from "../pack-types.ts";
 
 /** GitHub avatar for an `owner/repo` pack id, when it is a real repo pack. */
-export function packAvatarUrl(pack: SkillPackCard): string | null {
+export function packAvatarUrl(
+	pack: Pick<SkillPackCard, "id"> & Partial<Omit<SkillPackCard, "id">>
+): string | null {
 	const parts = pack.id.split("/").filter(Boolean);
 	if (parts.length < 2) {
 		return null;
@@ -61,17 +66,24 @@ function FanCards({ pack }: { pack: SkillPackCard }) {
 				const off = i - (FAN_CARDS - 1) / 2;
 				const rotate = off * 7;
 				const y = Math.abs(off) * 3;
+				const paintStyle: PackFanPaintStyle = {
+					"--marketplace-background": packSeededColor(pack, i),
+				};
+				const fanStyle: PackFanStyle = {
+					"--marketplace-transform": `translateY(${y}px) rotate(${rotate}deg)`,
+				};
 				return (
 					<div
-						className="absolute inset-0 rounded-lg border border-border/70 bg-card shadow-sm"
+						className={cn(
+							"absolute inset-0 rounded-lg border border-border/70 bg-card shadow-sm",
+							visualStyles.transform
+						)}
 						key={i}
-						style={{
-							transform: `translateY(${y}px) rotate(${rotate}deg)`,
-						}}
+						style={fanStyle}
 					>
 						<div
-							className="h-1/3 rounded-t-lg"
-							style={{ background: packSeededColor(pack, i) }}
+							className={cn("h-1/3 rounded-t-lg", visualStyles.background)}
+							style={paintStyle}
 						/>
 						<div className="flex h-2/3 items-center justify-center px-2">
 							<div className="h-1.5 w-3/4 rounded-full bg-muted" />
@@ -140,12 +152,13 @@ export default function PackCatalogCard({
 	onOpenKeyDown?: KeyboardEventHandler<HTMLButtonElement>;
 	onPointerEnter?: PointerEventHandler<HTMLDivElement>;
 }) {
+	const tl = useLiteralMessages();
 	const [imgFailed, setImgFailed] = useState(false);
 	const avatar = packAvatarUrl(pack);
 	// The pack's mark: the owner avatar when it resolves, else a seeded tile.
 	const faceMark =
 		avatar && !imgFailed ? (
-			// biome-ignore lint/performance/noImgElement: a remote raster avatar is the
+			// a remote raster avatar is the
 			// pack's identity mark; no bundle can pre-optimize a GitHub owner's avatar.
 			<img
 				alt=""
@@ -171,7 +184,10 @@ export default function PackCatalogCard({
 			<FanCards pack={pack} />
 			{/* The pack face: top half is the mark, bottom holds name + count. */}
 			<button
-				aria-label={`Open the ${pack.name} pack (${pack.memberCount} skills)`}
+				aria-label={tl("Open the {name} pack ({memberCount} skills)", {
+					name: pack.name,
+					memberCount: pack.memberCount,
+				})}
 				className="relative z-10 flex aspect-[5/6] w-full cursor-pointer flex-col overflow-hidden rounded-2xl outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
 				onBlur={onOpenBlur}
 				onClick={onOpen}
@@ -187,14 +203,18 @@ export default function PackCatalogCard({
 				</div>
 				<div className="flex flex-1 flex-col justify-between gap-1 p-3">
 					<div className="min-w-0">
-						<p className="truncate font-medium text-sm">{pack.name}</p>
+						<p className="truncate font-medium text-sm" title={pack.name}>
+							{pack.name}
+						</p>
 						<p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">
 							{pack.description}
 						</p>
 					</div>
 					<div className="flex items-center justify-between">
-						<span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
-							{pack.memberCount} skill{pack.memberCount === 1 ? "" : "s"}
+						<span className="type-compact font-medium text-muted-foreground uppercase tracking-wide">
+							{tl("{memberCount, plural, one {# skill} other {# skills}}", {
+								memberCount: pack.memberCount,
+							})}
 						</span>
 						{installed ? (
 							<HugeiconsIcon
@@ -210,7 +230,7 @@ export default function PackCatalogCard({
 			{installable ? (
 				<div className="absolute right-2 bottom-2 z-20">
 					<button
-						aria-label={`Install the ${pack.name} pack`}
+						aria-label={tl("Install the {name} pack", { name: pack.name })}
 						className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-border/70 bg-background/90 font-medium text-xs shadow-sm backdrop-blur transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/40"
 						onClick={(event) => {
 							event.stopPropagation();
@@ -233,4 +253,11 @@ export default function PackCatalogCard({
 			) : null}
 		</div>
 	);
+}
+
+interface PackFanStyle extends CSSProperties {
+	"--marketplace-transform": string;
+}
+interface PackFanPaintStyle extends CSSProperties {
+	"--marketplace-background": string;
 }

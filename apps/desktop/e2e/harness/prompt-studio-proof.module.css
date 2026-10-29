@@ -1,0 +1,24 @@
+.eyebrow {
+	letter-spacing: 0.18em;
+}
+
+.mountedStatus {
+	--proof-prompt-status-border: color-mix(
+		in oklab,
+		oklch(69.6% 0.17 162.48) 30%,
+		transparent
+	);
+	--proof-prompt-status-surface: color-mix(
+		in oklab,
+		oklch(69.6% 0.17 162.48) 10%,
+		transparent
+	);
+	--proof-prompt-status-text: oklch(50.8% 0.118 165.612);
+	color: var(--proof-prompt-status-text);
+	background-color: var(--proof-prompt-status-surface);
+	border-color: var(--proof-prompt-status-border);
+}
+
+.mountedStatus:where([class~="dark"], [class~="dark"] *) {
+	--proof-prompt-status-text: oklch(84.5% 0.143 164.978);
+}

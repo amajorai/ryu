@@ -1,3 +1,9 @@
+import {
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/conversation-flags.ts
 //
 // Typed client for the server-backed pin/archive flags on a conversation
@@ -22,7 +28,8 @@ async function setFlag(
 		await request<{ ok?: boolean }>(
 			target,
 			`/api/conversations/${encodeURIComponent(id)}/${flag}`,
-			{ method: "POST", body: { value } }
+			{ method: "POST", body: { value } },
+			responseCodec1
 		);
 		return true;
 	} catch {
@@ -63,7 +70,8 @@ export async function setConversationTitle(
 		await request<{ ok?: boolean }>(
 			target,
 			`/api/conversations/${encodeURIComponent(id)}/title`,
-			{ method: "POST", body: { title } }
+			{ method: "POST", body: { title } },
+			responseCodec2
 		);
 		return true;
 	} catch {
@@ -81,12 +89,35 @@ export async function setConversationFolder(
 		await request<{ ok?: boolean }>(
 			target,
 			`/api/conversations/${encodeURIComponent(id)}/folder`,
-			{ method: "POST", body: { folder_path: folderPath } }
+			{ method: "POST", body: { folder_path: folderPath } },
+			responseCodec3
 		);
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Link or unlink a GitHub pull request to a conversation
+ * (`POST /api/conversations/:id/pull-requests`). Resolves to the conversation's
+ * full linked list. Throws so the caller can show Core's validation message.
+ */
+export async function setConversationPullRequestLinked(
+	target: ApiTarget,
+	id: string,
+	url: string,
+	linked: boolean
+): Promise<string[]> {
+	const response = await request(
+		target,
+		`/api/conversations/${encodeURIComponent(id)}/pull-requests`,
+		{ method: "POST", body: { linked, url } },
+		linkedPullRequestsResponseCodec
+	);
+	return (response.linked_pull_requests ?? []).filter(
+		(value): value is string => isNativeText(value)
+	);
 }
 
 /** One past title for a conversation (`GET /api/conversations/:id/title-history`). */
@@ -114,14 +145,21 @@ export async function getConversationTitleHistory(
 				source?: string;
 				title?: string;
 			}>;
-		}>(target, `/api/conversations/${encodeURIComponent(id)}/title-history`);
+		}>(
+			target,
+			`/api/conversations/${encodeURIComponent(id)}/title-history`,
+			undefined,
+			responseCodec4
+		);
 		const rows = Array.isArray(res.history) ? res.history : [];
 		return rows.flatMap((row) => {
 			if (
-				typeof row.id !== "string" ||
-				typeof row.title !== "string" ||
-				typeof row.source !== "string" ||
-				typeof row.created_at !== "number"
+				!(
+					isNativeText(row.id) &&
+					isNativeText(row.title) &&
+					isNativeText(row.source) &&
+					isNativeNumber(row.created_at)
+				)
 			) {
 				return [];
 			}
@@ -153,7 +191,8 @@ export async function setConversationIcon(
 		await request<{ ok?: boolean }>(
 			target,
 			`/api/conversations/${encodeURIComponent(id)}/icon`,
-			{ method: "POST", body: { icon } }
+			{ method: "POST", body: { icon } },
+			responseCodec5
 		);
 		return true;
 	} catch {
@@ -176,12 +215,74 @@ export async function setConversationVisibility(
 				method: "POST",
 				body: {
 					visibility,
-					...(visibility === "team" && teamId ? { team_id: teamId } : {}),
+					...(visibility === "team" && teamId
+						? { team_id: teamId }
+						: undefined),
 				},
-			}
+			},
+			responseCodec6
 		);
 		return true;
 	} catch {
 		return false;
 	}
 }
+
+/** Regenerate a title on demand; rejects so callers can display the model failure. */
+export async function regenerateConversationTitle(
+	target: ApiTarget,
+	id: string
+): Promise<string> {
+	const result = await request<{ title?: string }>(
+		target,
+		`/api/conversations/${encodeURIComponent(id)}/retitle`,
+		{ method: "POST" },
+		responseCodec7
+	);
+	const title = result.title?.trim();
+	if (!title) {
+		throw new Error("No title was generated");
+	}
+	return title;
+}
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const responseCodec1 = z
+	.object({ ok: z.boolean().optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec2 = z
+	.object({ ok: z.boolean().optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec3 = z
+	.object({ ok: z.boolean().optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec4 = z
+	.object({
+		history: z
+			.array(
+				z
+					.object({
+						created_at: z.number().optional(),
+						id: z.string().optional(),
+						source: z.string().optional(),
+						title: z.string().optional(),
+					})
+					.catchall(gatewayJsonValueSchema)
+			)
+			.optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec5 = z
+	.object({ ok: z.boolean().optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec6 = z
+	.object({ ok: z.boolean().optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec7 = z
+	.object({ title: z.string().optional() })
+	.catchall(gatewayJsonValueSchema);
+const linkedPullRequestsResponseCodec = z
+	.object({
+		linked_pull_requests: z.array(gatewayJsonValueSchema).optional(),
+	})
+	.catchall(gatewayJsonValueSchema);

@@ -1,4 +1,15 @@
 "use client";
+import {
+	isNativeNumber,
+	isNativeObjectLike,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import {
+	type AppResponseValue,
+	appResponseValueSchema,
+} from "@ryuhq/core-client/app-request-json";
+import type { CSSProperties } from "react";
+import styles from "./agent-banner-dialog.module.css";
 
 // packages/blocks/src/desktop/agent-banner-dialog.tsx
 //
@@ -31,6 +42,12 @@
 
 import { PaintBoardIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
+import {
+	type RenderableBackdrop,
+	resolveMarketplaceWallpaperSelection,
+	toMarketplaceWallpaperSelection,
+} from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
 import {
 	BANNER_COLORS,
 	BANNER_DIRECTIONS,
@@ -43,7 +60,12 @@ import {
 	isBannerPresetId,
 } from "@ryu/ui/components/banner-presets";
 import { Button } from "@ryu/ui/components/button";
-import { ColorPickerPopover } from "@ryu/ui/components/color-picker";
+import {
+	ColorPicker,
+	ColorPickerContent,
+	ColorPickerPanel,
+	ColorPickerTrigger,
+} from "@ryu/ui/components/color-picker";
 import {
 	Dialog,
 	DialogClose,
@@ -60,7 +82,12 @@ import {
 } from "@ryu/ui/components/dither-kit/gradient";
 import type { DitherColor } from "@ryu/ui/components/dither-kit/palette";
 import { cn } from "@ryu/ui/lib/utils";
-import { useCallback, useEffect, useState } from "react";
+import {
+	type MarketplaceWallpaperSelection,
+	parseMarketplaceWallpaperSelection,
+} from "@ryuhq/protocol/marketplace-wallpaper";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { MarketplaceWallpaperPickerDialog } from "./marketplace-wallpaper-picker.tsx";
 
 /** The slab the wash is painted over — the banner's own base, so the dialog's
  *  preview is the real thing rather than an approximation of it. */
@@ -69,7 +96,7 @@ export const AGENT_BANNER_BASE =
 
 /** Swatch fills for the colour picker — indicative only for the dither style,
  *  whose real fill is a dithered canvas that cannot be shown in a 16px dot. */
-const BANNER_SWATCHES: Record<DitherColor, string> = {
+const BANNER_SWATCHES = {
 	purple: "#b497cf",
 	blue: "#7aa2f7",
 	green: "#9ece6a",
@@ -77,7 +104,7 @@ const BANNER_SWATCHES: Record<DitherColor, string> = {
 	orange: "#e0a363",
 	red: "#e06c75",
 	grey: "#9aa0a6",
-};
+} satisfies Record<DitherColor, string>;
 
 /** Stable 32-bit hash of a string — same seed in, same banner out. */
 function bannerHash(seed: string): number {
@@ -102,6 +129,13 @@ export interface AgentBannerPrefs {
 	direction?: GradientDirection;
 	/** A `BANNER_PRESETS` id. Absent = the dither default. */
 	preset?: string;
+	/** Safe Marketplace choice rendered through a built-in host adapter. */
+	wallpaper?: MarketplaceWallpaperSelection;
+}
+
+export interface AgentBannerPreferenceStore {
+	get: (agentId: string) => Promise<string | null>;
+	set: (agentId: string, value: string) => Promise<void>;
 }
 
 /** Hex (#rrggbb) → hue, so the shared color picker can drive the wash. Only the
@@ -109,7 +143,7 @@ export interface AgentBannerPrefs {
  *  what keeps a custom colour looking like part of the same system. */
 function hexToHue(hex: string): number {
 	const m = /^#?([\da-f]{6})$/i.exec(hex.trim());
-	if (!m) {
+	if (!m?.[1]) {
 		return 0;
 	}
 	const n = Number.parseInt(m[1], 16);
@@ -134,6 +168,10 @@ function hexToHue(hex: string): number {
 }
 
 /** Hue → hex, so the colour input shows the currently-selected custom hue. */
+function bannerSwatchHex(color: BannerColor): string {
+	return isNativeNumber(color) ? hueToHex(color) : BANNER_SWATCHES[color];
+}
+
 function hueToHex(hue: number): string {
 	const h = ((hue % 360) + 360) % 360;
 	const s = 0.85;
@@ -162,6 +200,64 @@ function hueToHex(hue: number): string {
 
 const bannerPrefsKey = (agent: string) => `ryu:agent-banner:${agent}`;
 
+function isBannerColor<T>(value: T): value is T & BannerColor {
+	return (
+		(isNativeNumber(value) &&
+			Number.isFinite(value) &&
+			value >= 0 &&
+			value <= 360) ||
+		(isNativeText(value) && BANNER_COLORS.some((color) => color === value))
+	);
+}
+
+function isBannerDirection<T>(value: T): value is T & GradientDirection {
+	return BANNER_DIRECTIONS.some((direction) => direction === value);
+}
+
+/** Native JSON object domain from the complete shared raw tree owner. Arrays
+ * and primitives still take the existing empty-preference fallback. */
+type StoredBannerJsonObject = Exclude<
+	Extract<AppResponseValue, object>,
+	readonly AppResponseValue[]
+>;
+
+function isRecord(value: AppResponseValue): value is StoredBannerJsonObject {
+	return isNativeObjectLike(value) && !Array.isArray(value);
+}
+
+function parseAgentBannerPrefs(value: AppResponseValue): AgentBannerPrefs {
+	if (!isRecord(value)) {
+		return {};
+	}
+	const prefs: AgentBannerPrefs = {};
+	if (isBannerColor(value.color)) {
+		prefs.color = value.color;
+	}
+	if (isBannerDirection(value.direction)) {
+		prefs.direction = value.direction;
+	}
+	if (isNativeText(value.preset) && isBannerPresetId(value.preset)) {
+		prefs.preset = value.preset;
+	}
+	const wallpaper = parseMarketplaceWallpaperSelection(value.wallpaper);
+	if (wallpaper) {
+		prefs.wallpaper = wallpaper;
+	}
+	return prefs;
+}
+
+function readAgentBannerPrefs(raw: string | null): AgentBannerPrefs {
+	if (!raw) {
+		return {};
+	}
+	try {
+		const parsed = appResponseValueSchema.parse(JSON.parse(raw));
+		return parseAgentBannerPrefs(parsed);
+	} catch {
+		return {};
+	}
+}
+
 /**
  * Read one agent's stored banner prefs, dropping any field this build cannot
  * paint.
@@ -175,17 +271,7 @@ const bannerPrefsKey = (agent: string) => `ryu:agent-banner:${agent}`;
 export function loadAgentBannerPrefs(agent: string): AgentBannerPrefs {
 	try {
 		const raw = localStorage.getItem(bannerPrefsKey(agent));
-		const prefs = raw ? (JSON.parse(raw) as AgentBannerPrefs) : {};
-		if (
-			typeof prefs.color === "string" &&
-			!BANNER_COLORS.includes(prefs.color as DitherColor)
-		) {
-			prefs.color = undefined;
-		}
-		if (prefs.preset !== undefined && !isBannerPresetId(prefs.preset)) {
-			prefs.preset = undefined;
-		}
-		return prefs;
+		return readAgentBannerPrefs(raw);
 	} catch {
 		// Corrupt or unavailable storage must never break the editor.
 		return {};
@@ -206,31 +292,111 @@ export function saveAgentBannerPrefs(
 /** The prefs for one agent, loaded once per name and written through on change.
  *  Instant-apply — there is no Save button, so the preview and the banner behind
  *  the dialog move together. */
-export function useAgentBannerPrefs(agent: string) {
+export function useAgentBannerPrefs(
+	agent: string,
+	store?: AgentBannerPreferenceStore,
+	legacyAgent = agent
+) {
 	const [prefs, setPrefs] = useState<AgentBannerPrefs>(() =>
-		loadAgentBannerPrefs(agent)
+		store ? {} : loadAgentBannerPrefs(agent)
 	);
+	const [storageError, setStorageError] = useState<string | null>(null);
+	const [loading, setLoading] = useState(Boolean(store));
+	const prefsRef = useRef(prefs);
+
 	useEffect(() => {
-		setPrefs(loadAgentBannerPrefs(agent));
-	}, [agent]);
+		let current = true;
+		setLoading(Boolean(store));
+		if (!store) {
+			const next = loadAgentBannerPrefs(agent);
+			prefsRef.current = next;
+			setPrefs(next);
+			setStorageError(null);
+			setLoading(false);
+			return () => {
+				current = false;
+			};
+		}
+		setStorageError(null);
+		void (async () => {
+			try {
+				const raw = await store.get(agent);
+				let next: AgentBannerPrefs;
+				if (raw === null) {
+					next = loadAgentBannerPrefs(legacyAgent);
+					if (Object.keys(next).length > 0) {
+						await store.set(agent, JSON.stringify(next));
+					}
+				} else {
+					next = readAgentBannerPrefs(raw);
+				}
+				if (current) {
+					prefsRef.current = next;
+					setPrefs(next);
+					setLoading(false);
+				}
+			} catch {
+				if (current) {
+					prefsRef.current = {};
+					setPrefs({});
+					setStorageError(
+						"Agent banner preferences could not be read from this node."
+					);
+					setLoading(false);
+				}
+			}
+		})();
+		return () => {
+			current = false;
+		};
+	}, [agent, legacyAgent, store]);
 
 	const update = useCallback(
-		(next: AgentBannerPrefs) => {
-			setPrefs((prev) => {
-				const merged = { ...prev, ...next };
-				saveAgentBannerPrefs(agent, merged);
-				return merged;
-			});
+		async (next: AgentBannerPrefs): Promise<boolean> => {
+			const merged = { ...prefsRef.current, ...next };
+			if (Object.hasOwn(next, "wallpaper") && next.wallpaper === undefined) {
+				merged.wallpaper = undefined;
+			}
+			try {
+				if (store) {
+					await store.set(agent, JSON.stringify(merged));
+				} else {
+					saveAgentBannerPrefs(agent, merged);
+				}
+				prefsRef.current = merged;
+				setPrefs(merged);
+				setStorageError(null);
+				return true;
+			} catch {
+				setStorageError(
+					"Agent banner preferences could not be saved to this node."
+				);
+				return false;
+			}
 		},
-		[agent]
+		[agent, store]
 	);
 
-	const reset = useCallback(() => {
-		saveAgentBannerPrefs(agent, {});
-		setPrefs({});
-	}, [agent]);
+	const reset = useCallback(async (): Promise<boolean> => {
+		try {
+			if (store) {
+				await store.set(agent, "{}");
+			} else {
+				saveAgentBannerPrefs(agent, {});
+			}
+			prefsRef.current = {};
+			setPrefs({});
+			setStorageError(null);
+			return true;
+		} catch {
+			setStorageError(
+				"Agent banner preferences could not be saved to this node."
+			);
+			return false;
+		}
+	}, [agent, store]);
 
-	return { prefs, reset, update };
+	return { error: storageError, loading, prefs, reset, update };
 }
 
 /** Everything needed to paint one banner, with every default already resolved. */
@@ -263,6 +429,9 @@ export function resolveAgentBanner(
 		bannerPresetById(prefs.preset) ??
 		bannerPresetById(DITHER_BANNER_PRESET_ID) ??
 		BANNER_PRESETS[0];
+	if (color === undefined || direction === undefined || preset === undefined) {
+		throw new Error("Agent banner presets are unavailable");
+	}
 	return { color, direction, preset };
 }
 
@@ -272,6 +441,11 @@ export function resolveAgentBanner(
  * looks like. A gradient preset paints as CSS; the dither preset paints on
  * dither-kit's canvas.
  */
+interface BannerPaintStyle extends CSSProperties {
+	"--agent-banner-opacity"?: number;
+	"--agent-banner-paint"?: string;
+	"--agent-banner-swatch"?: string;
+}
 export function AgentBannerWash({
 	banner,
 	className,
@@ -286,8 +460,13 @@ export function AgentBannerWash({
 		return (
 			<div
 				aria-hidden
-				className={cn("absolute inset-0", className)}
-				style={{ background: gradient, opacity }}
+				className={cn("absolute inset-0", styles.wash, className)}
+				style={
+					{
+						"--agent-banner-paint": gradient,
+						"--agent-banner-opacity": opacity,
+					} satisfies BannerPaintStyle as BannerPaintStyle
+				}
 			/>
 		);
 	}
@@ -297,6 +476,16 @@ export function AgentBannerWash({
 			direction={banner.direction}
 			from={banner.color}
 			opacity={opacity}
+		/>
+	);
+}
+
+/** Feather the profile banner into the card surface below it. */
+export function AgentProfileBannerFade() {
+	return (
+		<div
+			aria-hidden
+			className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-card via-card/70 to-transparent"
 		/>
 	);
 }
@@ -311,167 +500,269 @@ function FieldLabel({ children }: { children: string }) {
  */
 export function AgentBannerDialog({
 	agent,
+	marketplaceWallpapers,
 	prefs,
+	onInstallWallpaper,
 	onReset,
 	onUpdate,
+	storageError,
+	loading,
 }: {
-	/** The agent's name — the seed for its default banner and its prefs key. */
+	/** Stable agent id, or the name in a storyboard without persisted ids. */
 	agent: string;
-	onReset: () => void;
-	onUpdate: (next: AgentBannerPrefs) => void;
+	marketplaceWallpapers: readonly RenderableBackdrop[];
+	onInstallWallpaper?: (
+		wallpaper: RenderableBackdrop
+	) => boolean | Promise<boolean>;
+	onReset: () => Promise<boolean>;
+	onUpdate: (next: AgentBannerPrefs) => Promise<boolean>;
 	prefs: AgentBannerPrefs;
+	storageError?: string | null;
+	loading?: boolean;
 }) {
 	const banner = resolveAgentBanner(agent, prefs);
 	const isDither = banner.preset.kind === "dither";
-	const customHue = typeof banner.color === "number" ? banner.color : null;
+	const customHue = isNativeNumber(banner.color) ? banner.color : null;
+	const [wallpaperPickerOpen, setWallpaperPickerOpen] = useState(false);
+	const selectedWallpaper = parseMarketplaceWallpaperSelection(prefs.wallpaper);
+	const renderedWallpaper = resolveMarketplaceWallpaperSelection(
+		prefs.wallpaper
+	);
+	const updateStyle = (next: AgentBannerPrefs) =>
+		onUpdate({ ...next, wallpaper: undefined });
 
 	return (
-		<Dialog>
-			<DialogTrigger
-				render={
-					<Button
-						className="border border-white/25 bg-black/35 text-white backdrop-blur hover:bg-black/55 hover:text-white"
-						size="sm"
-						variant="ghost"
-					/>
-				}
-			>
-				<HugeiconsIcon className="size-3.5" icon={PaintBoardIcon} />
-				Customize
-			</DialogTrigger>
-			<DialogContent className="sm:max-w-lg">
-				<DialogHeader>
-					<DialogTitle>Banner</DialogTitle>
-					<DialogDescription>
-						Pick a style and colour for this agent's banner. Saved on this
-						device.
-					</DialogDescription>
-				</DialogHeader>
+		<>
+			<Dialog>
+				<DialogTrigger
+					render={
+						<Button
+							appearance="banner-customize"
+							disabled={loading}
+							size="sm"
+							variant="ghost"
+						/>
+					}
+				>
+					<HugeiconsIcon className="size-3.5" icon={PaintBoardIcon} />
+					Customize
+				</DialogTrigger>
+				<DialogContent className="sm:max-w-lg">
+					<DialogHeader>
+						<DialogTitle>Banner</DialogTitle>
+						<DialogDescription>
+							Choose a style or Marketplace wallpaper. Once the agent is saved,
+							its banner is shared across devices connected to this node.
+						</DialogDescription>
+					</DialogHeader>
 
-				<div className="flex flex-col gap-4">
-					{/* The real wash at banner proportions — the whole reason the swatch
+					<div className="flex flex-col gap-4">
+						{/* The real wash at banner proportions — the whole reason the swatch
 					    strip used to live on the banner. */}
-					<div
-						className="relative h-24 overflow-hidden rounded-lg"
-						data-testid="banner-preview"
-						style={{ background: AGENT_BANNER_BASE }}
-					>
-						<AgentBannerWash banner={banner} />
-					</div>
+						<div
+							className={cn(
+								"relative h-24 overflow-hidden rounded-lg",
+								styles.base
+							)}
+							data-testid="banner-preview"
+						>
+							{renderedWallpaper ? (
+								<Backdrop
+									className="absolute inset-0"
+									definition={renderedWallpaper}
+									live={false}
+									params={renderedWallpaper.initialParams}
+								/>
+							) : (
+								<AgentBannerWash banner={banner} />
+							)}
+						</div>
+						<div className="flex flex-wrap items-center gap-2">
+							<Button
+								onClick={() => setWallpaperPickerOpen(true)}
+								size="sm"
+								variant="outline"
+							>
+								Browse Marketplace wallpapers
+							</Button>
+							{selectedWallpaper ? (
+								<Button
+									onClick={() => updateStyle({ wallpaper: undefined })}
+									size="sm"
+									variant="ghost"
+								>
+									Use banner style
+								</Button>
+							) : null}
+						</div>
+						{storageError ? (
+							<p className="text-sm text-status-destructive" role="alert">
+								{storageError}
+							</p>
+						) : null}
 
-					<div className="flex flex-col gap-2">
-						<FieldLabel>Style</FieldLabel>
-						{/* Fixed column count, not `auto-fill`: the tiles are previews and
+						<div className="flex flex-col gap-2">
+							<FieldLabel>Style</FieldLabel>
+							{/* Fixed column count, not `auto-fill`: the tiles are previews and
 						    have to stay wide enough to read as one, so a longer preset
 						    table wraps to another row rather than shrinking every tile. */}
-						<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-							{BANNER_PRESETS.map((preset) => {
-								const active = preset.id === banner.preset.id;
-								return (
-									<button
-										aria-pressed={active}
-										className={cn(
-											"flex flex-col gap-1 rounded-lg p-1 text-left transition-colors",
-											active ? "bg-accent" : "hover:bg-accent/50"
-										)}
-										data-testid="banner-style-tile"
-										key={preset.id}
-										onClick={() => onUpdate({ preset: preset.id })}
-										type="button"
-									>
-										<span
+							<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+								{BANNER_PRESETS.map((preset) => {
+									const active = preset.id === banner.preset.id;
+									return (
+										<button
+											aria-pressed={active}
 											className={cn(
-												"relative block h-10 overflow-hidden rounded-md ring-1 ring-inset",
-												active ? "ring-primary" : "ring-border"
+												"flex flex-col gap-1 rounded-lg p-1 text-left transition-colors",
+												active ? "bg-accent" : "hover:bg-accent/50"
 											)}
-											style={{ background: AGENT_BANNER_BASE }}
+											data-testid="banner-style-tile"
+											key={preset.id}
+											onClick={() => updateStyle({ preset: preset.id })}
+											type="button"
 										>
-											<AgentBannerWash
-												banner={{ ...banner, preset }}
-												opacity={0.8}
-											/>
-										</span>
-										<span className="truncate px-0.5 text-[11px] text-muted-foreground">
-											{preset.label}
-										</span>
-									</button>
-								);
-							})}
-						</div>
-					</div>
-
-					<div className="flex flex-col gap-2">
-						<FieldLabel>Colour</FieldLabel>
-						<div className="flex items-center gap-2">
-							{BANNER_COLORS.map((c) => (
-								<button
-									aria-label={`Banner colour ${c}`}
-									aria-pressed={banner.color === c}
-									className={cn(
-										"size-6 rounded-full border transition-transform hover:scale-110",
-										banner.color === c
-											? "border-foreground ring-2 ring-primary"
-											: "border-border"
-									)}
-									key={c}
-									onClick={() => onUpdate({ color: c })}
-									style={{ backgroundColor: BANNER_SWATCHES[c] }}
-									type="button"
-								/>
-							))}
-							{/* Custom colour: any hue, not just the six presets. Stored as a
-							    number, which both styles accept directly. */}
-							<ColorPickerPopover
-								onValueChange={(value) => onUpdate({ color: hexToHue(value) })}
-								swatches={Object.values(BANNER_SWATCHES)}
-								triggerAriaLabel="Custom banner colour"
-								triggerClassName={cn(
-									"size-6 rounded-full p-0",
-									customHue === null
-										? "border-border"
-										: "border-foreground ring-2 ring-primary"
-								)}
-								triggerShowValue={false}
-								value={customHue === null ? "#b497cf" : hueToHex(customHue)}
-							/>
-						</div>
-					</div>
-
-					{/* Direction is a dither-only control: a gradient preset carries its
-					    own angle, and offering a direction that does nothing would read
-					    as a broken control. */}
-					{isDither ? (
-						<div className="flex flex-col gap-2">
-							<FieldLabel>Direction</FieldLabel>
-							<div className="flex items-center gap-1.5">
-								{BANNER_DIRECTIONS.map((d) => (
-									<button
-										aria-pressed={banner.direction === d}
-										className={cn(
-											"rounded-md px-2.5 py-1 text-xs capitalize transition-colors",
-											banner.direction === d
-												? "bg-primary text-primary-foreground"
-												: "bg-muted text-muted-foreground hover:bg-accent"
-										)}
-										key={d}
-										onClick={() => onUpdate({ direction: d })}
-										type="button"
-									>
-										{d}
-									</button>
-								))}
+											<span
+												className={cn(
+													"relative block h-10 overflow-hidden rounded-md ring-1 ring-inset",
+													styles.base,
+													active ? "ring-primary" : "ring-border"
+												)}
+											>
+												<AgentBannerWash
+													banner={{ ...banner, preset }}
+													opacity={0.8}
+												/>
+											</span>
+											<span className="type-caption truncate px-0.5 text-muted-foreground">
+												{preset.label}
+											</span>
+										</button>
+									);
+								})}
 							</div>
 						</div>
-					) : null}
-				</div>
 
-				<DialogFooter>
-					<Button onClick={onReset} size="sm" variant="ghost">
-						Reset to default
-					</Button>
-					<DialogClose render={<Button size="sm" />}>Done</DialogClose>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+						<div className="flex flex-col gap-2">
+							<FieldLabel>Colour</FieldLabel>
+							<div className="flex items-center gap-2">
+								{BANNER_COLORS.map((c) => (
+									<button
+										aria-label={`Banner colour ${c}`}
+										aria-pressed={banner.color === c}
+										className={cn(
+											"size-6 rounded-full border transition-transform hover:scale-110",
+											styles.swatch,
+											banner.color === c
+												? "border-foreground ring-2 ring-primary"
+												: "border-border"
+										)}
+										key={c}
+										onClick={() => updateStyle({ color: c })}
+										style={
+											{
+												"--agent-banner-swatch": BANNER_SWATCHES[c],
+											} satisfies BannerPaintStyle as BannerPaintStyle
+										}
+										type="button"
+									/>
+								))}
+								{/* Custom colour: any hue, not just the six presets. Stored as a
+							    number, which both styles accept directly. */}
+								<ColorPicker
+									onValueChange={(value) =>
+										updateStyle({ color: hexToHue(value) })
+									}
+									swatches={Object.values(BANNER_SWATCHES)}
+									value={customHue === null ? "#b497cf" : hueToHex(customHue)}
+								>
+									<ColorPickerTrigger
+										aria-label="Custom banner colour"
+										render={
+											<button
+												className={cn(
+													"corner-squircle inline-flex size-6 min-w-12 items-center justify-center gap-2 border bg-background text-foreground hover:bg-muted dark:bg-transparent dark:hover:bg-muted/50",
+													styles.customHue,
+													customHue !== null && styles.customHueSelected
+												)}
+												type="button"
+											/>
+										}
+									>
+										<span
+											aria-hidden="true"
+											className={cn(
+												"corner-squircle size-5 shrink-0 rounded-sm border border-foreground/15",
+												styles.customHuePaint
+											)}
+											style={
+												{
+													"--agent-banner-swatch": bannerSwatchHex(
+														customHue ?? "purple"
+													),
+												} satisfies BannerPaintStyle as BannerPaintStyle
+											}
+										/>
+									</ColorPickerTrigger>
+									<ColorPickerContent>
+										<ColorPickerPanel />
+									</ColorPickerContent>
+								</ColorPicker>
+							</div>
+						</div>
+
+						{/* Direction is a dither-only control: a gradient preset carries its
+					    own angle, and offering a direction that does nothing would read
+					    as a broken control. */}
+						{isDither ? (
+							<div className="flex flex-col gap-2">
+								<FieldLabel>Direction</FieldLabel>
+								<div className="flex items-center gap-1.5">
+									{BANNER_DIRECTIONS.map((d) => (
+										<button
+											aria-pressed={banner.direction === d}
+											className={cn(
+												"rounded-md px-2.5 py-1 text-xs capitalize transition-colors",
+												banner.direction === d
+													? "bg-primary text-primary-foreground"
+													: "bg-muted text-muted-foreground hover:bg-accent"
+											)}
+											key={d}
+											onClick={() => updateStyle({ direction: d })}
+											type="button"
+										>
+											{d}
+										</button>
+									))}
+								</div>
+							</div>
+						) : null}
+					</div>
+
+					<DialogFooter>
+						<Button onClick={onReset} size="sm" variant="ghost">
+							Reset to default
+						</Button>
+						<DialogClose render={<Button size="sm" />}>Done</DialogClose>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+			<MarketplaceWallpaperPickerDialog
+				onOpenChange={setWallpaperPickerOpen}
+				onSelect={async (wallpaper) => {
+					if (onInstallWallpaper && !(await onInstallWallpaper(wallpaper))) {
+						return false;
+					}
+					return (
+						(await onUpdate({
+							wallpaper: toMarketplaceWallpaperSelection(wallpaper),
+						})) !== false
+					);
+				}}
+				open={wallpaperPickerOpen}
+				selectedId={selectedWallpaper?.id}
+				title="Choose an agent banner wallpaper"
+				wallpapers={marketplaceWallpapers}
+			/>
+		</>
 	);
 }

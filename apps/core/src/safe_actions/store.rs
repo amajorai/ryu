@@ -1,11 +1,47 @@
+//! `safe-actions.db`: policies, tool contracts, submissions, receipts, steps.
+//!
+//! Encryption at rest: `safe_action_submissions.json` (the planned tool calls with
+//! their concrete arguments, verification reports, review notes, conversation
+//! ids) is sealed per row as `encb:v1:` under the `safe-actions.db` content key,
+//! bound to the row `id`. The fields SQL filters on (`status`, `updated_at`,
+//! `reviewed_at`) are plaintext columns; crash recovery rewrites sealed rows in
+//! Rust inside one transaction. Policies and contracts (operator configuration)
+//! and receipts/steps (hashes, statuses and sanitized error digests only) stay
+//! plaintext.
+
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use ryu_crypto::content_sqlite::{ColumnPlan, KeyKind};
+use ryu_crypto::{ContentCipher, ContentContext};
 use ryu_safe_actions::{Certificate, EffectContract, Policy, ToolPlan, VerificationReport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::Mutex;
+
+use crate::activity::sealed_store::{core_cipher, StoreSeal};
+
+/// Registered store name (content-key input; never rename).
+const STORE: &str = "safe-actions.db";
+const SUBMISSION_PURPOSE: &str = "safe_action_submissions.json";
+
+fn submission_context(id: &str) -> ContentContext {
+    ContentContext::for_id(SUBMISSION_PURPOSE, id)
+}
+
+fn column_plans() -> Result<Vec<ColumnPlan>> {
+    Ok(vec![ColumnPlan::text(
+        "safe_action_submissions",
+        "json",
+        "id",
+        KeyKind::Text,
+    )?])
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicyRecord {
@@ -88,6 +124,7 @@ pub struct ExecutionReceipt {
 #[derive(Clone)]
 pub struct SafeActionsStore {
     conn: Arc<Mutex<Connection>>,
+    seal: StoreSeal,
 }
 
 fn now() -> String {
@@ -95,7 +132,7 @@ fn now() -> String {
 }
 
 fn default_path() -> PathBuf {
-    crate::paths::ryu_dir().join("safe-actions.db")
+    crate::paths::db_path("safe-actions.db")
 }
 
 impl SafeActionsStore {
@@ -104,25 +141,50 @@ impl SafeActionsStore {
     }
 
     pub fn open(path: PathBuf) -> Result<Self> {
+        Self::open_with_cipher(path, core_cipher(STORE)?)
+    }
+
+    /// [`Self::open`] under an explicit content cipher (tests).
+    pub fn open_with_cipher(path: PathBuf, cipher: ContentCipher) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating Safe Actions db dir {}", parent.display()))?;
         }
-        let conn = Connection::open(&path)
+        let mut conn = Connection::open(&path)
             .with_context(|| format!("opening Safe Actions db {}", path.display()))?;
         Self::init(&conn)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+        let seal = StoreSeal::prepare(&mut conn, Some(Path::new(&path)), cipher, &column_plans()?)
+            .context("sealing the Safe Actions store")?;
+        recover_crashed_submissions(&mut conn, &seal)?;
+        let conn = Arc::new(Mutex::new(conn));
+        seal.defer_compaction(&conn, Some(Path::new(&path)));
+        Ok(Self { conn, seal })
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory().context("opening in-memory Safe Actions db")?;
+        let mut conn = Connection::open_in_memory().context("opening in-memory Safe Actions db")?;
         Self::init(&conn)?;
+        let seal = StoreSeal::prepare(&mut conn, None, core_cipher(STORE)?, &column_plans()?)?;
+        recover_crashed_submissions(&mut conn, &seal)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            seal,
         })
+    }
+
+    /// Submission rows list reads skipped because they did not open.
+    pub fn unreadable_rows(&self) -> u64 {
+        self.seal.unreadable()
+    }
+
+    fn seal_submission(&self, record: &SubmissionRecord) -> Result<String> {
+        self.seal
+            .seal(&encode(record)?, &submission_context(&record.id))
+    }
+
+    fn open_submission(&self, id: &str, stored: &str) -> Result<SubmissionRecord> {
+        decode(&self.seal.open(stored, &submission_context(id))?)
     }
 
     fn init(conn: &Connection) -> Result<()> {
@@ -208,12 +270,20 @@ impl SafeActionsStore {
              WHERE status = 'running'",
             params![recovered_at],
         )?;
+        // `reviewed_at` is lifted out of the (sealed) JSON so the review list can
+        // filter on it. Backfill reads only rows that are still plaintext; every
+        // writer sets the column from then on.
+        let has_reviewed_at: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('safe_action_submissions') WHERE name = 'reviewed_at'")?
+            .exists([])?;
+        if !has_reviewed_at {
+            conn.execute_batch("ALTER TABLE safe_action_submissions ADD COLUMN reviewed_at TEXT")?;
+        }
         conn.execute(
             "UPDATE safe_action_submissions
-             SET status = 'unknown_after_crash', updated_at = ?1,
-                 json = json_set(json, '$.status', 'unknown_after_crash', '$.updated_at', ?1)
-             WHERE status = 'executing'",
-            params![recovered_at],
+             SET reviewed_at = json_extract(json, '$.reviewed_at')
+             WHERE reviewed_at IS NULL AND json NOT LIKE 'encb:%' AND json_valid(json)",
+            [],
         )?;
         Ok(())
     }
@@ -421,17 +491,17 @@ impl SafeActionsStore {
     }
 
     pub async fn insert_submission(&self, record: &SubmissionRecord) -> Result<SubmissionRecord> {
-        let json = encode(record)?;
+        let json = self.seal_submission(record)?;
         let conn = self.conn.lock().await;
-        if let Some(existing) = conn
+        if let Some((id, existing)) = conn
             .query_row(
-                "SELECT json FROM safe_action_submissions WHERE submission_key = ?1",
+                "SELECT id, json FROM safe_action_submissions WHERE submission_key = ?1",
                 params![record.submission_key],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?
         {
-            return decode(&existing);
+            return self.open_submission(&id, &existing);
         }
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM safe_action_submissions WHERE agent_id = ?1",
@@ -443,8 +513,9 @@ impl SafeActionsStore {
         }
         conn.execute(
             "INSERT INTO safe_action_submissions
-                 (id, submission_key, agent_id, policy_id, status, json, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (id, submission_key, agent_id, policy_id, status, json, created_at, updated_at,
+                  reviewed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 record.id,
                 record.submission_key,
@@ -453,7 +524,8 @@ impl SafeActionsStore {
                 record.status,
                 json,
                 record.created_at,
-                record.updated_at
+                record.updated_at,
+                record.reviewed_at
             ],
         )?;
         Ok(record.clone())
@@ -468,32 +540,48 @@ impl SafeActionsStore {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        json.map(|value| decode(&value)).transpose()
+        json.map(|value| self.open_submission(id, &value))
+            .transpose()
     }
 
     pub async fn get_submission_by_key(&self, key: &str) -> Result<Option<SubmissionRecord>> {
         let conn = self.conn.lock().await;
-        let json = conn
+        let row = conn
             .query_row(
-                "SELECT json FROM safe_action_submissions WHERE submission_key = ?1",
+                "SELECT id, json FROM safe_action_submissions WHERE submission_key = ?1",
                 params![key],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        json.map(|value| decode(&value)).transpose()
+        row.map(|(id, value)| self.open_submission(&id, &value))
+            .transpose()
     }
 
     pub async fn list_reviews(&self) -> Result<Vec<SubmissionRecord>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT json FROM safe_action_submissions
-             WHERE status = 'pending_review'
-                OR status = 'invalidated'
-                OR json_extract(json, '$.reviewed_at') IS NOT NULL
-             ORDER BY created_at DESC LIMIT 200",
-        )?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        rows.map(|row| decode(&row?)).collect()
+        let rows = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT id, json FROM safe_action_submissions
+                 WHERE status = 'pending_review'
+                    OR status = 'invalidated'
+                    OR reviewed_at IS NOT NULL
+                 ORDER BY created_at DESC LIMIT 200",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut out = Vec::with_capacity(rows.len());
+        let mut skipped = 0u64;
+        for (id, stored) in rows {
+            match self.open_submission(&id, &stored) {
+                Ok(record) => out.push(record),
+                Err(_) => skipped += 1,
+            }
+        }
+        self.seal.count_unreadable(skipped);
+        Ok(out)
     }
 
     pub async fn transition_submission(
@@ -505,19 +593,27 @@ impl SafeActionsStore {
         if !from.iter().any(|status| *status == updated.status) {
             updated.updated_at = now();
         }
-        let json = encode(&updated)?;
+        let json = self
+            .seal
+            .seal(&encode(&updated)?, &submission_context(id))?;
         let conn = self.conn.lock().await;
         let placeholders = (0..from.len())
-            .map(|index| format!("?{}", index + 5))
+            .map(|index| format!("?{}", index + 6))
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "UPDATE safe_action_submissions SET status = ?2, json = ?3, updated_at = ?4
+            "UPDATE safe_action_submissions
+             SET status = ?2, json = ?3, updated_at = ?4, reviewed_at = ?5
              WHERE id = ?1 AND status IN ({placeholders})"
         );
         // The dynamic text contains placeholders only; values remain parameters.
-        let mut values: Vec<&dyn rusqlite::ToSql> =
-            vec![&id, &updated.status, &json, &updated.updated_at];
+        let mut values: Vec<&dyn rusqlite::ToSql> = vec![
+            &id,
+            &updated.status,
+            &json,
+            &updated.updated_at,
+            &updated.reviewed_at,
+        ];
         values.extend(from.iter().map(|value| value as &dyn rusqlite::ToSql));
         let changed = conn.execute(&sql, values.as_slice())?;
         Ok(changed == 1)
@@ -530,16 +626,19 @@ impl SafeActionsStore {
         submission: &SubmissionRecord,
         receipt: &ExecutionReceipt,
     ) -> Result<bool> {
-        let submission_json = encode(submission)?;
+        let submission_json = self
+            .seal
+            .seal(&encode(submission)?, &submission_context(id))?;
         let mut persisted_receipt = receipt.clone();
         persisted_receipt.steps.clear();
         let receipt_json = encode(&persisted_receipt)?;
         let placeholders = (0..from.len())
-            .map(|index| format!("?{}", index + 5))
+            .map(|index| format!("?{}", index + 6))
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "UPDATE safe_action_submissions SET status = ?2, json = ?3, updated_at = ?4
+            "UPDATE safe_action_submissions
+             SET status = ?2, json = ?3, updated_at = ?4, reviewed_at = ?5
              WHERE id = ?1 AND status IN ({placeholders})"
         );
         let mut conn = self.conn.lock().await;
@@ -549,6 +648,7 @@ impl SafeActionsStore {
             &submission.status,
             &submission_json,
             &submission.updated_at,
+            &submission.reviewed_at,
         ];
         values.extend(from.iter().map(|value| value as &dyn rusqlite::ToSql));
         if transaction.execute(&sql, values.as_slice())? != 1 {
@@ -605,7 +705,7 @@ impl SafeActionsStore {
         let mut persisted_receipt = receipt.clone();
         persisted_receipt.steps.clear();
         let receipt_json = encode(&persisted_receipt)?;
-        let submission_json = encode(submission)?;
+        let submission_json = self.seal_submission(submission)?;
         let mut conn = self.conn.lock().await;
         let transaction = conn.transaction()?;
         let receipt_changed = transaction.execute(
@@ -621,13 +721,14 @@ impl SafeActionsStore {
         )?;
         let submission_changed = transaction.execute(
             "UPDATE safe_action_submissions
-             SET status = ?2, json = ?3, updated_at = ?4
+             SET status = ?2, json = ?3, updated_at = ?4, reviewed_at = ?5
              WHERE id = ?1 AND status = 'executing'",
             params![
                 submission.id,
                 submission.status,
                 submission_json,
-                submission.updated_at
+                submission.updated_at,
+                submission.reviewed_at
             ],
         )?;
         if receipt_changed != 1 || submission_changed != 1 {
@@ -699,6 +800,55 @@ impl SafeActionsStore {
     }
 }
 
+/// A process crash leaves no evidence that a side effect did or did not reach
+/// its provider: an `executing` submission becomes `unknown_after_crash`, never
+/// a success or a retry. The JSON is sealed, so the rewrite happens in Rust
+/// (open, edit, re-seal under the same id) inside one transaction.
+fn recover_crashed_submissions(conn: &mut Connection, seal: &StoreSeal) -> Result<()> {
+    if !seal.writable() {
+        return Ok(());
+    }
+    let recovered_at = now();
+    let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let rows = {
+        let mut stmt = transaction
+            .prepare("SELECT id, json FROM safe_action_submissions WHERE status = 'executing'")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    let mut unreadable = 0u64;
+    for (id, stored) in rows {
+        let context = submission_context(&id);
+        // A row that does not open still gets the status change (the column
+        // drives every guard); its JSON is left as it is.
+        let json = match seal.open(&stored, &context).and_then(|json| {
+            let mut value: Value = serde_json::from_str(&json)?;
+            if let Some(object) = value.as_object_mut() {
+                object.insert("status".into(), Value::from("unknown_after_crash"));
+                object.insert("updated_at".into(), Value::from(recovered_at.clone()));
+            }
+            seal.seal(&value.to_string(), &context)
+        }) {
+            Ok(json) => json,
+            Err(_) => {
+                unreadable += 1;
+                stored
+            }
+        };
+        transaction.execute(
+            "UPDATE safe_action_submissions
+             SET status = 'unknown_after_crash', updated_at = ?2, json = ?3
+             WHERE id = ?1 AND status = 'executing'",
+            params![id, recovered_at, json],
+        )?;
+    }
+    transaction.commit()?;
+    seal.count_unreadable(unreadable);
+    Ok(())
+}
+
 fn encode<T: Serialize>(value: &T) -> Result<String> {
     serde_json::to_string(value).context("serializing Safe Actions record")
 }
@@ -761,6 +911,10 @@ pub struct PolicyDeleteInput {
 #[serde(deny_unknown_fields)]
 pub struct ReviewDecisionInput {
     pub note: Option<String>,
+    /// Hash displayed to the reviewer. Core compares it with the persisted
+    /// submission before applying either decision so a stale UI selection
+    /// cannot decide a different plan id.
+    pub expected_plan_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -848,6 +1002,151 @@ mod tests {
             finished_at: None,
             steps: Vec::new(),
         }
+    }
+
+    fn test_cipher() -> ContentCipher {
+        ContentCipher::from_root(&[13u8; 32], STORE)
+    }
+
+    fn file_contains(path: &Path, needle: &str) -> bool {
+        std::fs::read(path)
+            .map(|bytes| bytes.windows(needle.len()).any(|w| w == needle.as_bytes()))
+            .unwrap_or(false)
+    }
+
+    fn raw_submission(path: &Path) -> (String, Option<String>) {
+        Connection::open(path)
+            .unwrap()
+            .query_row(
+                "SELECT json, reviewed_at FROM safe_action_submissions WHERE id = 'submission-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn submissions_are_sealed_and_reviews_filter_on_the_lifted_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("safe-actions.db");
+        let store = SafeActionsStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
+        let mut record = submission("pending_review");
+        record.host_conversation_id = Some("conversation-marker".to_owned());
+        store.insert_submission(&record).await.unwrap();
+        let mut reviewed = record.clone();
+        reviewed.status = "denied".to_owned();
+        reviewed.review_note = Some("review-note-marker".to_owned());
+        reviewed.reviewed_at = Some("2026-08-24T00:00:00Z".to_owned());
+        assert!(store
+            .transition_submission("submission-1", &["pending_review"], reviewed)
+            .await
+            .unwrap());
+
+        let (json, reviewed_at) = raw_submission(&path);
+        assert!(json.starts_with("encb:v1:"));
+        assert_eq!(reviewed_at.as_deref(), Some("2026-08-24T00:00:00Z"));
+        for file in [path.clone(), dir.path().join("safe-actions.db-wal")] {
+            assert!(!file_contains(&file, "conversation-marker"));
+            assert!(!file_contains(&file, "review-note-marker"));
+        }
+        // A decided (non-pending) review is still listed through `reviewed_at`.
+        let reviews = store.list_reviews().await.unwrap();
+        assert_eq!(reviews.len(), 1);
+        assert_eq!(
+            reviews[0].review_note.as_deref(),
+            Some("review-note-marker")
+        );
+        assert_eq!(
+            store
+                .get_submission_by_key("dedupe-key")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            "submission-1"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_submissions_are_lifted_sealed_once_and_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("safe-actions.db");
+        let mut legacy = submission("denied");
+        legacy.review_note = Some("legacy-note-marker".to_owned());
+        legacy.reviewed_at = Some("2026-08-24T00:00:00Z".to_owned());
+        {
+            // The pre-sealing schema: no `reviewed_at` column.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE safe_action_submissions (
+                     id TEXT PRIMARY KEY, submission_key TEXT NOT NULL UNIQUE,
+                     agent_id TEXT NOT NULL, policy_id TEXT NOT NULL, status TEXT NOT NULL,
+                     json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO safe_action_submissions VALUES
+                     ('submission-1', 'dedupe-key', 'agent-1', 'policy-1', 'denied', ?1, 'c', 'u')",
+                params![encode(&legacy).unwrap()],
+            )
+            .unwrap();
+        }
+        let store = SafeActionsStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
+        let (json, reviewed_at) = raw_submission(&path);
+        assert!(json.starts_with("encb:v1:"));
+        assert_eq!(reviewed_at.as_deref(), Some("2026-08-24T00:00:00Z"));
+        assert_eq!(store.list_reviews().await.unwrap().len(), 1);
+        drop(store);
+        for file in [path.clone(), dir.path().join("safe-actions.db-wal")] {
+            assert!(!file_contains(&file, "legacy-note-marker"));
+        }
+        let store = SafeActionsStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
+        assert_eq!(raw_submission(&path).0, json, "second open is a no-op");
+        let conn = Connection::open(&path).unwrap();
+        ryu_crypto::content_sqlite::assert_all_open(
+            &conn,
+            &test_cipher(),
+            &column_plans().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            store
+                .get_submission("submission-1")
+                .await
+                .unwrap()
+                .unwrap()
+                .review_note
+                .as_deref(),
+            Some("legacy-note-marker")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_submission_copied_to_another_row_does_not_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("safe-actions.db");
+        let store = SafeActionsStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
+        store
+            .insert_submission(&submission("pending_review"))
+            .await
+            .unwrap();
+        let mut other = submission("pending_review");
+        other.id = "submission-2".to_owned();
+        other.submission_key = "other-key".to_owned();
+        store.insert_submission(&other).await.unwrap();
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "UPDATE safe_action_submissions SET json =
+                     (SELECT json FROM safe_action_submissions WHERE id = 'submission-1')
+                 WHERE id = 'submission-2'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(store.get_submission("submission-2").await.is_err());
+        assert_eq!(store.list_reviews().await.unwrap().len(), 1);
+        assert_eq!(store.unreadable_rows(), 1);
     }
 
     #[tokio::test]

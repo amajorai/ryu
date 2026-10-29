@@ -1,0 +1,40 @@
+{
+  "tags": ["copy", "paste", "move", "refactor", "files", "developer"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/pi-copy",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/pi-copy",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/pi-copy",
+  "name": "Copy & Paste",
+  "version": "0.1.14",
+  "stability": "experimental",
+  "category": "Developer Tools",
+  "description": "Adds the copy_paste tool to the managed Pi agent, so it can copy or move a block of text between or within files byte-for-byte instead of retyping it.",
+  "tagline": "Move text between files without retyping it",
+  "keywords": ["copy", "paste", "move", "refactor", "files", "developer"],
+  "icon": "copy-01",
+  "iconDither": { "from": 12, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "limited" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "activation_events": ["*"],
+  "contributes": {
+    "pi_extensions": [
+      {
+        "id": "copy",
+        "file": "pi-extensions/ryu-copy.ts",
+        "description": "Byte-exact copy and move of text blocks for the managed Pi agent."
+      }
+    ]
+  }
+}

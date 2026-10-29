@@ -19,6 +19,9 @@
 
 import {
 	type AppRequestMethod,
+	type AppRequestValue,
+	type AppResponseValue,
+	type MountedAppPathInput,
 	mountedAppRequest,
 	resolveMountedAppPath,
 } from "./app-request.ts";
@@ -43,7 +46,7 @@ export type NewsMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
 
 export interface NewsRequestInput {
 	/** JSON body. Omit for GET/DELETE. */
-	body?: unknown;
+	body?: AppRequestValue;
 	/** Defaults to `"GET"`. */
 	method?: NewsMethod;
 	/** Path RELATIVE to `/api/news`, leading slash included, query and all. */
@@ -67,7 +70,7 @@ export interface NewsRequestInput {
  * `..` is what stops `%2e%2e` and its variants, which decode into dot segments only
  * AFTER a literal check would have run.
  */
-export function resolveNewsPath(path: unknown): string | null {
+export function resolveNewsPath(path: MountedAppPathInput): string | null {
 	return resolveMountedAppPath(NEWS_MOUNT, path);
 }
 
@@ -81,7 +84,7 @@ export function resolveNewsPath(path: unknown): string | null {
 export async function newsRequest(
 	target: ApiTarget,
 	input: NewsRequestInput
-): Promise<unknown> {
+): Promise<AppResponseValue> {
 	return await mountedAppRequest(target, input, {
 		allowedMethods: ALLOWED_METHODS,
 		invalidMethodMessage: (method) =>

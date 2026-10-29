@@ -13,6 +13,7 @@
 //     egress bypass); an api-key credential is stored in the isolated auth.json.
 
 import { RyuPiConfigView } from "@ryu/blocks/desktop/agent-edit.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
@@ -26,6 +27,7 @@ import {
 	setActiveModel,
 } from "@/src/lib/api/models.ts";
 import { discoverModels, isPiModelEnabled } from "@/src/lib/api/pi-config.ts";
+import { piModelDiscoveryKey } from "./pi-model-discovery-key.ts";
 
 /** Sentinel option id for defining a brand-new custom OpenAI-compatible provider. */
 const CUSTOM_PROVIDER_ID = "__custom__";
@@ -35,6 +37,7 @@ const THINKING_DEFAULT = "";
 export function RyuPiConfig() {
 	const { config, catalog, loading, error, saving, saveError, save } =
 		usePiConfig();
+	const tl = useLiteralMessages();
 
 	// Installed/active local model — the ready-to-pick option for gateway routing
 	// (the served-model stem the Gateway routes to), surfaced as a dropdown choice.
@@ -77,7 +80,9 @@ export function RyuPiConfig() {
 				stem
 			),
 		onSuccess: (res) => {
-			sileo.success({ title: `Now serving ${res.active}` });
+			sileo.success({
+				title: tl("Now serving {active}", { active: res.active }),
+			});
 			qc.invalidateQueries({
 				queryKey: ["models", "active", activeNode.url],
 			}).catch(() => undefined);
@@ -120,20 +125,26 @@ export function RyuPiConfig() {
 		: (selectedMeta?.routing ?? config?.routing ?? "gateway");
 	const showApiKey = isCustomNew || selectedMeta?.authKind === "api-key";
 	const discoveryProvider = isCustomNew ? customId.trim() : provider;
+	const discoveryAccountId =
+		selectedMeta?.accounts?.find((account) => account.active)?.accountId ??
+		null;
+	const discoveryBaseUrl = isCustomNew ? customBaseUrl.trim() || null : null;
+	const discoveryApi = isCustomNew ? customApi : null;
 
 	const discoveredQuery = useQuery({
-		queryKey: [
-			"pi-config-discover",
-			activeNode.url,
-			discoveryProvider,
+		queryKey: piModelDiscoveryKey({
+			nodeUrl: activeNode.url,
+			provider: discoveryProvider,
 			routing,
-			isCustomNew ? customApi : null,
-		],
+			accountId: discoveryAccountId,
+			baseUrl: discoveryBaseUrl,
+			api: discoveryApi,
+		}),
 		queryFn: () =>
 			discoverModels(target, {
 				provider: discoveryProvider || null,
-				baseUrl: isCustomNew ? customBaseUrl.trim() || null : null,
-				api: isCustomNew ? customApi : null,
+				baseUrl: discoveryBaseUrl,
+				api: discoveryApi,
 			}),
 		enabled: Boolean(discoveryProvider) && !loading,
 		staleTime: 60_000,
@@ -167,7 +178,7 @@ export function RyuPiConfig() {
 
 	// Dropdown options: discovered provider models + installed local stems (gateway)
 	// + suggestions + current value. Grouped by provider for the searchable picker.
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
+	// legacy component
 	const modelOptions = useMemo(() => {
 		const active = activeModelQuery.data;
 		const discovered = discoveredQuery.data?.models ?? [];
@@ -244,6 +255,9 @@ export function RyuPiConfig() {
 			baseUrl: isCustomNew ? customBaseUrl.trim() : null,
 			api: isCustomNew ? customApi : null,
 		});
+		await qc.invalidateQueries({
+			queryKey: ["pi-config-discover", activeNode.url, discoveryProvider],
+		});
 		setApiKey("");
 		setSaved(true);
 	}
@@ -262,7 +276,7 @@ export function RyuPiConfig() {
 			loading={loading}
 			model={model}
 			modelOptions={modelOptions}
-			modelsLoading={discoveredQuery.isFetching}
+			modelsLoading={discoveredQuery.isLoading}
 			onApiKeyChange={setApiKey}
 			onCustomApiChange={setCustomApi}
 			onCustomBaseUrlChange={setCustomBaseUrl}

@@ -12,18 +12,38 @@
 // SECURITY MODEL (do not "improve" this — it is deliberate):
 //   - The document runs in a NULL-ORIGIN sandboxed iframe (`sandbox="allow-scripts"`,
 //     no `allow-same-origin`). It has no Tauri IPC, no parent DOM, no cookies.
+//   - The host applies a restrictive default CSP unless Core explicitly reports
+//     that the user disabled it for a custom app without a declared CSP.
 //   - The plugin CAN observe the transferred port (it arrives as a window message
 //     any listener sees). We do NOT hide it. Holding the port grants NOTHING:
 //     every method is default-DENY on the HOST side (`dispatchRpc`), gated against
-//     the Gateway-approved grant set. So the isolation rests on (a) the host-side
-//     capability gate and (b) NO capability ever returning a secret or doing
-//     ungoverned egress (invariant #5).
+//     the Gateway-approved grant set. The default CSP also denies direct network
+//     egress; a user can opt out of that default for custom apps with no trusted CSP.
 //   - BASE64, not string concatenation, carries the bundle: a plugin body
 //     containing `</script>` cannot break out of the tag. This is defense in
 //     depth, NOT the load-bearing boundary (the null-origin sandbox is).
 
+import { z } from "zod";
+
+import { dialogEscapeScript } from "./dialog-escape-script.ts";
 import { HORIZONTAL_WHEEL_SCROLL_SCRIPT } from "./horizontal-wheel-scroll-script.ts";
+import { COMPANION_PRIVACY_STATE_SCRIPT } from "./notification-privacy.ts";
 import { handshakeAnnounceScript } from "./rpc.ts";
+
+/** Encode host mount data to a JSON literal safe for an inline script. */
+export const companionScriptLiteralSchema = z
+	.unknown()
+	.transform((value) => JSON.stringify(value ?? null))
+	.pipe(z.string())
+	.transform((serialized) =>
+		serialized
+			.replace(/</g, "\\u003c")
+			.replace(/>/g, "\\u003e")
+			.replace(/&/g, "\\u0026")
+			.replace(/\u2028/g, "\\u2028")
+			.replace(/\u2029/g, "\\u2029")
+	);
+const scriptSafe = companionScriptLiteralSchema.parse;
 
 const I18N_BRIDGE = `i18n: {
   get: function () { return call("i18n.get", []); },
@@ -39,6 +59,54 @@ const I18N_BRIDGE = `i18n: {
     return { dispose: h.cancel };
   }
 }`;
+
+/** Route a real user's external-link click through the host instead of asking a
+ *  sandboxed iframe to create a popup. The host performs its own URL validation. */
+const HOSTED_EXTERNAL_LINKS_SCRIPT = `
+document.addEventListener("click", function (event) {
+  if (event.defaultPrevented) return;
+  var path = typeof event.composedPath === "function" ? event.composedPath() : [event.target];
+  var link = null;
+  for (var i = 0; i < path.length; i++) {
+    var candidate = path[i];
+    if (candidate && candidate.nodeType === 1 && candidate.tagName === "A") {
+      link = candidate;
+      break;
+    }
+  }
+  if (!link || (link.getAttribute("target") || "").toLowerCase() !== "_blank") return;
+  // Cancel the frame's default popup/navigation even for scripted or unsafe links.
+  event.preventDefault();
+  if (!event.isTrusted || event.button !== 0) return;
+  var destination;
+  try { destination = new URL(link.href, document.baseURI); } catch (_) { return; }
+  if (destination.protocol !== "https:" && destination.protocol !== "http:") return;
+  call("ui.openExternal", [{ href: destination.href }]).catch(function () {});
+}, true);
+`;
+
+/** Marshal RPC arguments the way the JSON the host forwards does. Structured clone
+ *  keeps `undefined` members of plain objects, which a JSON body drops and the host's
+ *  JSON contracts reject; class instances (Blob, File, ArrayBuffer) pass unchanged. */
+export const RPC_ARGS_SCRIPT = `
+function rpcArgs(value) {
+  if (Array.isArray(value)) return value.map(rpcArgs);
+  if (value === null || typeof value !== "object") return value;
+  var prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  var output = {};
+  Object.keys(value).forEach(function (key) {
+    if (value[key] === undefined) return;
+    Object.defineProperty(output, key, {
+      configurable: true,
+      enumerable: true,
+      value: rpcArgs(value[key]),
+      writable: true
+    });
+  });
+  return output;
+}
+`;
 
 function indentGeneratedScript(value: string, prefix: string): string {
 	return value
@@ -108,7 +176,10 @@ export function buildCompanionThemeLayoutCss(scaleInParent: boolean): string {
  *                      that forges a different path is rejected regardless.
  *  @param themeTokens  Optional complete host appearance snapshot for first paint.
  *  @param scaleInParent  Whether the containing Ryu root already applies the UI
- *                        scale; prevents nested iframe zoom from doubling it. */
+ *                        scale; prevents nested iframe zoom from doubling it.
+ *  @param options  Whether to inject the default network-restricting CSP. Core keeps
+ *                  this on for trusted apps and defaults it on for custom apps
+ *                  unless the user opts out. */
 export function thirdPartyPluginSrcdoc(
 	nonce: string,
 	uiCodeBase64: string,
@@ -117,24 +188,19 @@ export function thirdPartyPluginSrcdoc(
 	// opened as a Space document). Baked in as `window.ryu.context` so the app knows
 	// which document to load/save via `spaces.getDoc`/`spaces.updateDoc`. Host-
 	// controlled, JSON-serialized (never plugin input).
-	mountContext?: unknown,
+	mountContext?: z.input<typeof companionScriptLiteralSchema>,
 	/** Optional resolved host appearance for a no-flash first paint. */
 	themeTokens?: Record<string, string>,
 	/** True when the containing Ryu root already applies `--ryu-ui-scale`. */
-	scaleInParent = false
+	scaleInParent = false,
+	options?: { enforceDefaultCsp?: boolean; closeOnEscape?: boolean }
 ): string {
+	const enforceDefaultCsp = options?.enforceDefaultCsp ?? true;
 	// JSON.stringify does NOT escape `</script>` or the JS line separators U+2028/9,
 	// so a value baked into the inline <script> could break out of the tag or the
 	// string literal. Escape the HTML/JS-sensitive chars for every interpolated
 	// literal (defense in depth — mount context is host-controlled, but a manifest
 	// `id` and future context values may not be).
-	const scriptSafe = (value: unknown): string =>
-		JSON.stringify(value ?? null)
-			.replace(/</g, "\\u003c")
-			.replace(/>/g, "\\u003e")
-			.replace(/&/g, "\\u0026")
-			.replace(/\u2028/g, "\\u2028")
-			.replace(/\u2029/g, "\\u2029");
 	const nonceLiteral = scriptSafe(nonce);
 	const codeLiteral = scriptSafe(uiCodeBase64);
 	const pluginIdLiteral = scriptSafe(pluginId);
@@ -145,24 +211,26 @@ export function thirdPartyPluginSrcdoc(
 	const themeLayoutStyle = themeTokens
 		? `<style>${buildCompanionThemeLayoutCss(scaleInParent)}</style>`
 		: "";
+	const defaultCspMeta = enforceDefaultCsp
+		? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" />`
+		: "";
 	return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<!-- Ungoverned egress is invariant #5: a null-origin sandbox isolates the DOM
-     but does NOT block network. This per-document CSP denies all network
+<!-- A null-origin sandbox isolates the DOM but does NOT block network. When the
+     default CSP setting is on, this per-document policy denies network
      (connect-src 'none') and remote code (default-src 'none' + inline-only
      script-src), so a benign-looking bundle cannot fetch/beacon out capability
      results or eval() a remote payload at runtime. Only the trusted inline
-     bootstrap + inline styles + data: images run. Any future "network"
-     capability MUST route through a host RPC that goes via the Gateway.
-     NOTE: script-src includes 'unsafe-eval' because the bootstrap executes the
-     plugin bundle via new Function (CSP gates that under 'unsafe-eval', NOT
-     'unsafe-inline'); without it the bundle throws a CSP violation and never
-     runs. This does NOT re-open egress: connect-src 'none' still blocks fetching
-     any remote payload to eval, so the plugin can only run its own
-     already-present, review-visible bundle. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" />
+     bootstrap + inline styles + data: images run. If the user turns the setting
+     off for a custom app, its UI can make direct network requests; privileged host
+     APIs remain grant-gated and continue through Core.
+     In the default policy, script-src includes 'unsafe-eval' because the bootstrap
+     executes the plugin bundle via new Function (CSP gates that under 'unsafe-eval',
+     NOT 'unsafe-inline'); connect-src 'none' still blocks fetching a remote payload
+     to eval. If the user opts out of the default policy, direct requests are allowed. -->
+${defaultCspMeta}
 <style>
   :root { color-scheme: light dark; }
   html, body { margin: 0; height: 100%; }
@@ -196,6 +264,7 @@ ${themeTokens ? `${themeStyle}\n${themeLayoutStyle}` : ""}
     var errEl = document.getElementById("ryu-plugin-error");
 
 ${indentGeneratedScript(COMPANION_THEME_STATE_SCRIPT, "    ")}
+${indentGeneratedScript(COMPANION_PRIVACY_STATE_SCRIPT, "    ")}
 
     function applyThemeTokens(tokens) {
       if (!tokens || typeof tokens !== "object") return;
@@ -224,6 +293,7 @@ ${indentGeneratedScript(COMPANION_THEME_STATE_SCRIPT, "    ")}
     });
 
 ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
+${dialogEscapeScript(options?.closeOnEscape === true)}
 
     function fail(text) {
       if (errEl) {
@@ -232,15 +302,19 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
       }
     }
 
+${indentGeneratedScript(RPC_ARGS_SCRIPT, "    ")}
+
     // RPC over the transferred MessageChannel port. Resolves/rejects by id.
     function call(method, args) {
       return new Promise(function (resolve, reject) {
         if (!port) { reject(new Error("bridge not ready")); return; }
         var id = nextId++;
         pending[id] = { resolve: resolve, reject: reject };
-        port.postMessage({ kind: "ryu-plugin-rpc", id: id, method: method, args: args || [] });
+        port.postMessage({ kind: "ryu-plugin-rpc", id: id, method: method, args: rpcArgs(args || []) });
       });
     }
+
+${indentGeneratedScript(HOSTED_EXTERNAL_LINKS_SCRIPT, "    ")}
 
     // Streaming RPC: the host pushes many "ryu-plugin-rpc-chunk" frames (delivered
     // to onChunk) then one terminal result. Returns { promise, cancel } — cancel
@@ -250,7 +324,7 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
       var resolve, reject;
       var promise = new Promise(function (res, rej) { resolve = res; reject = rej; });
       pending[id] = { resolve: resolve, reject: reject, onChunk: onChunk };
-      if (port) port.postMessage({ kind: "ryu-plugin-rpc", id: id, method: method, args: args || [] });
+      if (port) port.postMessage({ kind: "ryu-plugin-rpc", id: id, method: method, args: rpcArgs(args || []) });
       else reject(new Error("bridge not ready"));
       function cancel() {
         if (!port) return;
@@ -262,6 +336,10 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
     function onPortMessage(ev) {
       var msg = ev.data;
       if (!msg) return;
+      if (msg.kind === "ryu-widget-set-globals" && msg.globals && msg.globals.openedFile) {
+        window.dispatchEvent(new CustomEvent("ryu:file-changed", { detail: msg.globals.openedFile }));
+        return;
+      }
       if (msg.kind === "ryu-plugin-rpc-chunk") {
         var pc = pending[msg.id];
         if (pc && typeof pc.onChunk === "function") pc.onChunk(msg.delta);
@@ -320,6 +398,12 @@ ${indentGeneratedScript(I18N_BRIDGE, "          ")},
           catalog: {
             snapshot: function () { return call("catalog.snapshot", []); },
             models: function (a) { return call("catalog.models", [a || {}]); }
+          },
+          // Saved subscription accounts + usage (needs grant subscriptions:read; Core
+          // also requires the node owner/admin). Labels may be emails: never persist them.
+          subscriptions: {
+            list: function (a) { return call("subscriptions.list", [a || {}]); },
+            usage: function (a) { return call("subscriptions.usage", [a || {}]); }
           },
           // Cross-chat broadcast (needs grant chat.sendFollowUp). The host returns
           // only redacted summaries and accepts one explicitly targeted message;
@@ -385,7 +469,13 @@ ${indentGeneratedScript(I18N_BRIDGE, "          ")},
             getDoc: function (args) { return call("spaces.getDoc", [args || {}]); },
             updateDoc: function (args) { return call("spaces.updateDoc", [args || {}]); },
             listDocs: function (args) { return call("spaces.listDocs", [args || {}]); },
-            deleteDoc: function (args) { return call("spaces.deleteDoc", [args || {}]); }
+            deleteDoc: function (args) { return call("spaces.deleteDoc", [args || {}]); },
+            createDatabase: function (args) { return call("spaces.createDatabase", [args || {}]); },
+            listDatabases: function (args) { return call("spaces.listDatabases", [args || {}]); },
+            getDatabase: function (args) { return call("spaces.getDatabase", [args || {}]); },
+            updateDatabase: function (args) { return call("spaces.updateDatabase", [args || {}]); },
+            queryDatabase: function (args) { return call("spaces.queryDatabase", [args || {}]); },
+            deleteDatabase: function (args) { return call("spaces.deleteDatabase", [args || {}]); }
           }
         },
         // The plugin claims ITS OWN surface. The host service rejects any path
@@ -439,9 +529,19 @@ ${indentGeneratedScript(I18N_BRIDGE, "        ")},
           request: function (a) { return call("mail.request", [a || {}]); }
         },
         // Secret-free provider/model/agent/app/hook metadata for shared Ryu pickers.
+        files: {
+          read: function (a) { return call("files.read", [a || {}]); },
+          write: function (a) { return call("files.write", [a || {}]); }
+        },
         catalog: {
           snapshot: function () { return call("catalog.snapshot", []); },
           models: function (a) { return call("catalog.models", [a || {}]); }
+        },
+        // Saved subscription accounts + usage (needs grant subscriptions:read; Core
+        // also requires the node owner/admin). Labels may be emails: never persist them.
+        subscriptions: {
+          list: function (a) { return call("subscriptions.list", [a || {}]); },
+          usage: function (a) { return call("subscriptions.usage", [a || {}]); }
         },
         // Cross-chat broadcast (needs grant chat.sendFollowUp). The host returns
         // only redacted summaries and accepts one explicitly targeted message.
@@ -497,7 +597,13 @@ ${indentGeneratedScript(I18N_BRIDGE, "        ")},
           getDoc: function (args) { return call("spaces.getDoc", [args || {}]); },
           updateDoc: function (args) { return call("spaces.updateDoc", [args || {}]); },
           listDocs: function (args) { return call("spaces.listDocs", [args || {}]); },
-          deleteDoc: function (args) { return call("spaces.deleteDoc", [args || {}]); }
+          deleteDoc: function (args) { return call("spaces.deleteDoc", [args || {}]); },
+          createDatabase: function (args) { return call("spaces.createDatabase", [args || {}]); },
+          listDatabases: function (args) { return call("spaces.listDatabases", [args || {}]); },
+          getDatabase: function (args) { return call("spaces.getDatabase", [args || {}]); },
+          updateDatabase: function (args) { return call("spaces.updateDatabase", [args || {}]); },
+          queryDatabase: function (args) { return call("spaces.queryDatabase", [args || {}]); },
+          deleteDatabase: function (args) { return call("spaces.deleteDatabase", [args || {}]); }
         },
         // Media generation (needs grant media:generate) + speech-to-text
         // (media:transcribe). Results are always data: URLs (the host inlines remote
@@ -505,7 +611,10 @@ ${indentGeneratedScript(I18N_BRIDGE, "        ")},
         media: {
           image: function (args) { return call("media.image", [args || {}]); },
           video: function (args) { return call("media.video", [args || {}]); },
+          audio: function (args) { return call("media.audio", [args || {}]); },
           tts: function (args) { return call("media.tts", [args || {}]); },
+          ttsEngines: function () { return call("media.ttsEngines", []); },
+          ttsEngineInstall: function (args) { return call("media.ttsEngineInstall", [args || {}]); },
           recording: function (args) { return call("media.recording", [args || {}]); },
           transcribe: function (args) { return call("media.transcribe", [args || {}]); }
         },
@@ -515,6 +624,7 @@ ${indentGeneratedScript(I18N_BRIDGE, "        ")},
         // instructions while the app is open, and open/ask it. Write-only: an app
         // steers the assistant about itself and never reads the conversation back.
         assistant: {
+          updateModelContext: function (input) { return call("ui.updateModelContext", [input || {}]); },
           publishContext: function (items) { return call("assistant.publishContext", [{ items: items || [] }]); },
           clearContext: function () { return call("assistant.clearContext", []); },
           registerSurface: function (s) { return call("assistant.registerSurface", [s || {}]); },
@@ -734,6 +844,12 @@ ${indentGeneratedScript(I18N_BRIDGE, "        ")},
           distribute: function (a) { return call("skills.distribute", [a || {}]); },
           setTitle: function (a) { return call("skills.setTitle", [a || {}]); }
         },
+        // App installation (needs grant plugins:install). A builder app installs the
+        // companion-only app it made; the host checks the bundle against the caller's
+        // own com.local.<app>.* namespace. Kept in manual lockstep with Path B below.
+        apps: {
+          installBundle: function (b) { return call("apps.installBundle", [b]); }
+        },
         // Shell primitives (needs grant shell:integrate). The generic shell-integration
         // lane a DECOUPLED companion uses: open an allowlisted shell tab, and subscribe
         // to the live theme / palette commands / node event stream. openTab is unary; the
@@ -884,10 +1000,12 @@ ${handshakeAnnounceScript()}
 // mounted DIRECTLY as the iframe `srcdoc` — no bundle eval. This builder wraps that
 // app HTML by injecting, as the FIRST children of <head> (so both run before the
 // app's own deferred module scripts):
-//   1. A per-document CSP that keeps the egress lock (`connect-src 'none'`) but
+//   1. A per-document default CSP that keeps the egress lock (`connect-src 'none'`) but
 //      widens `font-src`/`img-src`/`worker-src` to `data:`/`blob:` so Excalidraw's
-//      inlined fonts, blob-URL images, and workers load. The frame still cannot
-//      fetch/beacon/eval-remote — its only channel out is the host port.
+//      inlined fonts, blob-URL images, and workers load. With the default policy,
+//      the frame cannot fetch/beacon/eval-remote; the host port remains available.
+//      The user's opt-out omits this fallback only for custom apps without a
+//      trusted declaration.
 //   2. The SAME `window.ryu` bridge `installWindowRyu` provides (model/agent/storage/
 //      spaces + mount context), but installed SYNCHRONOUSLY with an OUTBOX: the app's
 //      module scripts run on parse, before the host transfers the port, so a
@@ -908,6 +1026,10 @@ export interface CompanionCsp {
 	resourceDomains?: string[];
 }
 
+const cspOriginInputSchema = z
+	.unknown()
+	.pipe(z.string().refine((value) => !/[\s;'"]/.test(value)));
+
 /** Normalize an allowlist entry to a bare `https://host[:port]` origin, or null if
  *  it is not a safe https host. Rejects anything carrying CSP-delimiter characters
  *  (space, `;`, quotes, `'`) so a malicious entry cannot inject extra directives.
@@ -917,11 +1039,14 @@ export interface CompanionCsp {
  *  must not diverge (advisor point 4). The widget path additionally needs a
  *  loopback-tolerant check for the Core PROXY origin (`http://127.0.0.1:*`), which
  *  this deliberately rejects; that is a separate, documented concern there. */
-export function sanitizeCspOrigin(entry: string): string | null {
-	if (typeof entry !== "string" || /[\s;'"]/.test(entry)) {
+export function sanitizeCspOrigin(
+	entry: z.input<typeof cspOriginInputSchema>
+): string | null {
+	const parsed = cspOriginInputSchema.safeParse(entry);
+	if (!parsed.success) {
 		return null;
 	}
-	let candidate = entry.trim();
+	let candidate = parsed.data.trim();
 	if (!candidate) {
 		return null;
 	}
@@ -948,10 +1073,11 @@ export function sanitizeCspOrigin(entry: string): string | null {
 	}
 }
 
-/** Build the full-HTML companion CSP. The egress lock (`connect-src 'none'`) and the
- *  `data:`/`blob:` asset widening are ALWAYS present. A per-app `csp` allowlist (only
- *  ever a trusted manifest's) additionally appends sanitized https origins to
- *  `connect-src` (fetch targets) and `img-src`/`media-src` (remote assets). */
+/** Build the full-HTML companion's restricted policy. The egress lock
+ *  (`connect-src 'none'`) and the `data:`/`blob:` asset allowance are present when
+ *  this default policy is enabled. A per-app `csp` allowlist (only ever a trusted
+ *  manifest's) additionally appends sanitized https origins to `connect-src` and
+ *  `img-src`/`media-src`. */
 export function buildHtmlCompanionCsp(csp?: CompanionCsp): string {
 	const connect = (csp?.connectDomains ?? [])
 		.map(sanitizeCspOrigin)
@@ -988,11 +1114,12 @@ function htmlCompanionHeadFragment(
 	nonceLiteral: string,
 	pluginIdLiteral: string,
 	mountContextLiteral: string,
-	cspString: string,
-	initialThemeTokensLiteral: string
+	cspString: string | null,
+	initialThemeTokensLiteral: string,
+	closeOnEscape: boolean
 ): string {
 	const themeAliases = JSON.stringify(COMPANION_THEME_ALIASES);
-	return `<meta http-equiv="Content-Security-Policy" content="${cspString}" />
+	return `${cspString ? `<meta http-equiv="Content-Security-Policy" content="${cspString}" />` : ""}
 <script>
   (function () {
     var NONCE = ${nonceLiteral};
@@ -1008,22 +1135,27 @@ function htmlCompanionHeadFragment(
     var outbox = [];
 
 ${indentGeneratedScript(COMPANION_THEME_STATE_SCRIPT, "    ")}
+${indentGeneratedScript(COMPANION_PRIVACY_STATE_SCRIPT, "    ")}
+
+${indentGeneratedScript(RPC_ARGS_SCRIPT, "    ")}
 
     function call(method, args) {
       return new Promise(function (resolve, reject) {
         var id = nextId++;
         pending[id] = { resolve: resolve, reject: reject };
-        var env = { kind: "ryu-plugin-rpc", id: id, method: method, args: args || [] };
+        var env = { kind: "ryu-plugin-rpc", id: id, method: method, args: rpcArgs(args || []) };
         if (port) port.postMessage(env); else outbox.push(env);
       });
     }
+
+${indentGeneratedScript(HOSTED_EXTERNAL_LINKS_SCRIPT, "    ")}
 
     function callStream(method, args, onChunk) {
       var id = nextId++;
       var resolve, reject;
       var promise = new Promise(function (res, rej) { resolve = res; reject = rej; });
       pending[id] = { resolve: resolve, reject: reject, onChunk: onChunk };
-      var env = { kind: "ryu-plugin-rpc", id: id, method: method, args: args || [] };
+      var env = { kind: "ryu-plugin-rpc", id: id, method: method, args: rpcArgs(args || []) };
       if (port) port.postMessage(env); else outbox.push(env);
       function cancel() {
         var c = { kind: "ryu-plugin-rpc", id: nextId++, method: "agent.cancel", args: [id] };
@@ -1059,6 +1191,10 @@ ${indentGeneratedScript(COMPANION_THEME_STATE_SCRIPT, "    ")}
     function onPortMessage(ev) {
       var msg = ev.data;
       if (!msg) return;
+      if (msg.kind === "ryu-widget-set-globals" && msg.globals && msg.globals.openedFile) {
+        window.dispatchEvent(new CustomEvent("ryu:file-changed", { detail: msg.globals.openedFile }));
+        return;
+      }
       if (msg.kind === "ryu-plugin-rpc-chunk") {
         var pc = pending[msg.id];
         if (pc && typeof pc.onChunk === "function") pc.onChunk(msg.delta);
@@ -1103,9 +1239,19 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
         request: function (a) { return call("mail.request", [a || {}]); }
       },
       // Secret-free provider/model/agent/app/hook metadata for shared Ryu pickers.
+      files: {
+        read: function (a) { return call("files.read", [a || {}]); },
+        write: function (a) { return call("files.write", [a || {}]); }
+      },
       catalog: {
         snapshot: function () { return call("catalog.snapshot", []); },
         models: function (a) { return call("catalog.models", [a || {}]); }
+      },
+      // Saved subscription accounts + usage (needs grant subscriptions:read; Core
+      // also requires the node owner/admin). Labels may be emails: never persist them.
+      subscriptions: {
+        list: function (a) { return call("subscriptions.list", [a || {}]); },
+        usage: function (a) { return call("subscriptions.usage", [a || {}]); }
       },
       // Cross-chat broadcast (needs grant chat.sendFollowUp). The host returns
       // only redacted summaries and accepts one explicitly targeted message.
@@ -1155,12 +1301,21 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
         getDoc: function (a) { return call("spaces.getDoc", [a || {}]); },
         updateDoc: function (a) { return call("spaces.updateDoc", [a || {}]); },
         listDocs: function (a) { return call("spaces.listDocs", [a || {}]); },
-        deleteDoc: function (a) { return call("spaces.deleteDoc", [a || {}]); }
+        deleteDoc: function (a) { return call("spaces.deleteDoc", [a || {}]); },
+        createDatabase: function (a) { return call("spaces.createDatabase", [a || {}]); },
+        listDatabases: function (a) { return call("spaces.listDatabases", [a || {}]); },
+        getDatabase: function (a) { return call("spaces.getDatabase", [a || {}]); },
+        updateDatabase: function (a) { return call("spaces.updateDatabase", [a || {}]); },
+        queryDatabase: function (a) { return call("spaces.queryDatabase", [a || {}]); },
+        deleteDatabase: function (a) { return call("spaces.deleteDatabase", [a || {}]); }
       },
       media: {
         image: function (a) { return call("media.image", [a || {}]); },
         video: function (a) { return call("media.video", [a || {}]); },
+        audio: function (a) { return call("media.audio", [a || {}]); },
         tts: function (a) { return call("media.tts", [a || {}]); },
+        ttsEngines: function () { return call("media.ttsEngines", []); },
+        ttsEngineInstall: function (a) { return call("media.ttsEngineInstall", [a || {}]); },
         recording: function (a) { return call("media.recording", [a || {}]); },
         transcribe: function (a) { return call("media.transcribe", [a || {}]); }
       },
@@ -1168,6 +1323,7 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
       // deliberately: a verb present in only one builder is a verb whose
       // availability depends on how the app happened to be built.
       assistant: {
+        updateModelContext: function (input) { return call("ui.updateModelContext", [input || {}]); },
         publishContext: function (items) { return call("assistant.publishContext", [{ items: items || [] }]); },
         clearContext: function () { return call("assistant.clearContext", []); },
         registerSurface: function (s) { return call("assistant.registerSurface", [s || {}]); },
@@ -1349,8 +1505,9 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
       // Inbox / Approvals (needs grant approvals:crud). The @ryu/approvals companion
       // renders the unified inbox; the host calls Core's /api/approvals/* +
       // /api/notifications/* (host-resolved user id) + Shadow's /proactive + /api/feedback
-      // directly (the monitors pattern). openInChat is a shell-navigation verb (opens the
-      // chat tab prefilled with a suggestion). The inbox's quest task check-off reuses the
+      // directly (the monitors pattern). Sender icon, archive, and restore operations
+      // use the same notifications capability. Suggestions open chat through the generic
+      // shell-navigation verb. The inbox's quest task check-off reuses the
       // quests.* verbs above (the app also holds quests:crud).
       approvals: {
         list: function () { return call("approvals.list", []); },
@@ -1359,8 +1516,11 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
       },
       notifications: {
         list: function () { return call("notifications.list", []); },
+        appIcons: function (a) { return call("notifications.appIcons", [a || {}]); },
         markRead: function (a) { return call("notifications.markRead", [a || {}]); },
-        ack: function (a) { return call("notifications.ack", [a || {}]); }
+        ack: function (a) { return call("notifications.ack", [a || {}]); },
+        archive: function (a) { return call("notifications.archive", [a || {}]); },
+        unarchive: function (a) { return call("notifications.unarchive", [a || {}]); }
       },
       suggestions: {
         list: function () { return call("suggestions.list", []); },
@@ -1533,6 +1693,12 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
         distribute: function (a) { return call("skills.distribute", [a || {}]); },
         setTitle: function (a) { return call("skills.setTitle", [a || {}]); }
       },
+      // App installation (needs grant plugins:install). The @ryu/app-studio companion
+      // installs the companion-only app it built; the host validates the bundle
+      // (app-bundle.ts) and Core leaves it disabled until the user enables it.
+      apps: {
+        installBundle: function (b) { return call("apps.installBundle", [b]); }
+      },
       // Shell primitives (needs grant shell:integrate). The generic shell-integration
       // lane a DECOUPLED companion uses: open an allowlisted shell tab, and subscribe to
       // the live theme / palette commands / node event stream. openTab is unary; the
@@ -1597,7 +1763,8 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
     };
 	ryu.tokenTable = ryu.realtime;
     try {
-      window.ryu = ryu;
+        window.ryu = ryu;
+        ryu.updateModelContext = ryu.assistant.updateModelContext;
       if (!window.openai) window.openai = ryu;
       window.__ryuHostBridge = true;
     } catch (e) { /* frame globals writable in sandbox; ignore if not */ }
@@ -1612,6 +1779,7 @@ ${indentGeneratedScript(I18N_BRIDGE, "      ")},
     });
 
 ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
+${dialogEscapeScript(closeOnEscape)}
 
     // Accept the port ONLY from the host message carrying our nonce, once.
     window.addEventListener("message", function (ev) {
@@ -1692,6 +1860,11 @@ const THEME_TOKEN_NAME_RE = /^--[a-z0-9-]+$/;
  *  `{ } ; < >` is rejected (the whole entry dropped, fail-safe). */
 const THEME_TOKEN_VALUE_UNSAFE_RE = /[{}<>;]/;
 
+const safeThemeTokenValueSchema = z
+	.string()
+	.min(1)
+	.refine((value) => !THEME_TOKEN_VALUE_UNSAFE_RE.test(value));
+
 /**
  * Build the theme-token bridge `<style>` block from the host's resolved CSS custom
  * properties (the W7 theme-token bridge). The desktop host reads its live token
@@ -1711,34 +1884,31 @@ const THEME_TOKEN_VALUE_UNSAFE_RE = /[{}<>;]/;
  * declarations or escape the `<style>` element. Under the companion CSP
  * `style-src 'unsafe-inline'`, the inline `<style>` needs no nonce.
  */
+const themeTokenInputSchema = z.record(z.string(), z.unknown()).optional();
+
 export function buildThemeTokenStyle(
-	themeTokens?: Record<string, string>
+	input?: z.input<typeof themeTokenInputSchema>
 ): string {
+	const parsedInput = themeTokenInputSchema.safeParse(input);
+	const themeTokens = parsedInput.success ? parsedInput.data : undefined;
 	if (!themeTokens) {
 		return "";
 	}
 	const decls: string[] = [];
+
 	for (const [name, value] of Object.entries(themeTokens)) {
-		if (
-			typeof value === "string" &&
-			THEME_TOKEN_NAME_RE.test(name) &&
-			value.length > 0 &&
-			!THEME_TOKEN_VALUE_UNSAFE_RE.test(value)
-		) {
-			decls.push(`${name}: ${value.trim()};`);
+		const parsed = safeThemeTokenValueSchema.safeParse(value);
+		if (THEME_TOKEN_NAME_RE.test(name) && parsed.success) {
+			decls.push(`${name}: ${parsed.data.trim()};`);
 		}
 	}
 	for (const [alias, source] of Object.entries(COMPANION_THEME_ALIASES)) {
-		const value = themeTokens[source];
-		if (
-			!(alias in themeTokens) &&
-			typeof value === "string" &&
-			value.length > 0 &&
-			!THEME_TOKEN_VALUE_UNSAFE_RE.test(value)
-		) {
-			decls.push(`${alias}: ${value.trim()};`);
+		const parsed = safeThemeTokenValueSchema.safeParse(themeTokens[source]);
+		if (!(alias in themeTokens) && parsed.success) {
+			decls.push(`${alias}: ${parsed.data.trim()};`);
 		}
 	}
+
 	if (decls.length === 0) {
 		return "";
 	}
@@ -1756,33 +1926,30 @@ export function buildThemeTokenStyle(
  * @param mountContext Optional `{ spaceId, docId }` baked as `window.ryu.context`.
  * @param csp         Optional per-app CSP allowlist (only ever a TRUSTED manifest's).
  *                    Widens `connect-src` (fetch targets) + `img-src`/`media-src`
- *                    (remote assets) for the declared hosts; the egress lock is the
- *                    default when omitted.
+ *                    (remote assets) for the declared hosts.
  * @param scaleInParent Whether the containing Ryu root already applies the UI scale.
+ * @param options Whether to inject the restricted default when no trusted CSP
+ *                declaration is present.
  */
 export function htmlCompanionSrcdoc(
 	nonce: string,
 	appHtml: string,
 	pluginId: string,
-	mountContext?: unknown,
+	mountContext?: z.input<typeof companionScriptLiteralSchema>,
 	csp?: CompanionCsp,
 	themeTokens?: Record<string, string>,
 	/** True when the containing Ryu root already applies `--ryu-ui-scale`. */
-	scaleInParent = false
+	scaleInParent = false,
+	options?: { enforceDefaultCsp?: boolean; closeOnEscape?: boolean }
 ): string {
-	const scriptSafe = (value: unknown): string =>
-		JSON.stringify(value ?? null)
-			.replace(/</g, "\\u003c")
-			.replace(/>/g, "\\u003e")
-			.replace(/&/g, "\\u0026")
-			.replace(/\u2028/g, "\\u2028")
-			.replace(/\u2029/g, "\\u2029");
+	const enforceDefaultCsp = options?.enforceDefaultCsp ?? true;
 	const fragment = htmlCompanionHeadFragment(
 		scriptSafe(nonce),
 		scriptSafe(pluginId),
 		scriptSafe(mountContext),
-		buildHtmlCompanionCsp(csp),
-		scriptSafe(themeTokens)
+		csp || enforceDefaultCsp ? buildHtmlCompanionCsp(csp) : null,
+		scriptSafe(themeTokens),
+		options?.closeOnEscape === true
 	);
 	// The theme-token bridge goes AFTER the bridge script but still inside <head>.
 	// It uses an `html:root` selector (higher specificity than the companion's own

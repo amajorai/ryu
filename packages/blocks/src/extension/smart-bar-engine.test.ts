@@ -100,7 +100,7 @@ describe("route - explicit prefixes have no alternatives", () => {
 	it("labels a bare slash as pick-a-skill", () => {
 		const r = route("/");
 		expect(r.primary).toMatchObject({ kind: "skill", name: "", rest: "" });
-		expect((r.primary as { label: string }).label).toBe("Pick a skill");
+		expect(r.primary.label).toBe("Pick a skill");
 	});
 
 	it("collects @mentions into targets", () => {
@@ -129,7 +129,14 @@ describe("route - explicit prefixes have no alternatives", () => {
 	it("is case-insensitive on the bang keyword", () => {
 		const r = route("!GH ryu");
 		expect(r.primary).toMatchObject({ kind: "bang", bang: "GH" });
-		expect((r.primary as { url: string }).url).toBe(BANGS.gh.build("ryu"));
+		const github = BANGS.gh;
+		if (!github) {
+			throw new Error("GitHub bang is absent from the shipped registry");
+		}
+		if (r.primary.kind !== "bang") {
+			throw new Error("Expected the known bang to produce a bang intent");
+		}
+		expect(r.primary.url).toBe(github.build("ryu"));
 	});
 
 	it("falls back to search for an unknown bang", () => {
@@ -139,6 +146,13 @@ describe("route - explicit prefixes have no alternatives", () => {
 			query: "zzz find me",
 		});
 		expect(r.alternatives).toEqual([]);
+	});
+
+	it.each([
+		"!constructor",
+		"!__proto__ x",
+	])("treats the inherited object key %s as an unknown bang", (input) => {
+		expect(route(input).primary.kind).toBe("search");
 	});
 
 	it("forces search with a leading ? but offers AI as an alternative", () => {

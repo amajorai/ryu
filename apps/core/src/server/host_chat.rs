@@ -141,7 +141,14 @@ pub async fn host_chat_start_turn(
     // The authenticated calling app is the only trustworthy source for this
     // app-run signal. Core keeps it local until the existing anonymous beacon
     // sends a consented aggregate snapshot.
-    crate::stats_beacon::record_marketplace_event("app", &plugin_id, false);
+    {
+        let manifests = state.app_manifests.read().await;
+        if let Some(manifest) = manifests.iter().find(|manifest| manifest.id == plugin_id) {
+            for kind in ["app", "plugin"] {
+                crate::stats_beacon::record_definition_run(kind, &plugin_id, manifest);
+            }
+        }
+    }
 
     let text = body.text.trim();
     if text.is_empty() {
@@ -300,7 +307,7 @@ pub async fn host_node_readings(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": format!("could not read runs: {e}") })),
             )
-                .into_response()
+                .into_response();
         }
     };
 

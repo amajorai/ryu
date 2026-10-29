@@ -4,11 +4,11 @@
 // provider/model catalog are cached per active node; saving runs as a mutation
 // that revalidates both. Every decision lives in Core (`/api/pi-config`); this
 // hook only holds query state. The config is per-node (it lives in that node's
-// isolated PI_CODING_AGENT_DIR), so the cache key includes the node url.
+// isolated PI_CODING_AGENT_DIR), so the cache key includes URL and an opaque token/delegation authority identity.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { useProviderQueryScope } from "./provider-query-scope.ts";
 import {
 	fetchPiCatalog,
 	fetchPiConfig,
@@ -32,52 +32,78 @@ export interface UsePiConfigResult {
 
 export function usePiConfig(): UsePiConfigResult {
 	const node = useActiveNode();
-	const target = useMemo(() => toTarget(node), [node]);
-	const queryClient = useQueryClient();
+	const scope = useProviderQueryScope(node);
+	const target = scope.target;
 
 	const configQuery = useQuery({
-		queryKey: ["pi-config", node.url],
-		queryFn: () => fetchPiConfig(target),
-	});
-
-	const catalogQuery = useQuery({
-		queryKey: ["pi-config-catalog", node.url],
-		queryFn: () => fetchPiCatalog(target),
-	});
-
-	const mutation = useMutation({
-		mutationFn: (input: PiConfigInput) => updatePiConfig(target, input),
-		onSuccess: (config) => {
-			queryClient.setQueryData(["pi-config", node.url], config);
-			// Routing/credential changes can flip catalog `configured` flags.
-			queryClient.invalidateQueries({
-				queryKey: ["pi-config-catalog", node.url],
-			});
+		queryKey: scope.configKey,
+		queryFn: async () => {
+			await scope.waitForWrite();
+			return fetchPiConfig(target);
 		},
 	});
 
+	const catalogQuery = useQuery({
+		queryKey: scope.catalogKey,
+		queryFn: async () => {
+			await scope.waitForWrite();
+			return fetchPiCatalog(target);
+		},
+	});
+
+	const mutation = useMutation({
+		mutationFn: async ({
+			input,
+			owner,
+		}: {
+			input: PiConfigInput;
+			owner: typeof scope;
+		}) => ({
+			value: await owner.write(() => updatePiConfig(owner.target, input)),
+			owner,
+		}),
+		onSuccess: ({ value, owner }) => {
+			owner.publishConfig(value);
+			owner.invalidateCatalog();
+		},
+	});
 	const save = useCallback(
-		(input: PiConfigInput) => mutation.mutateAsync(input),
-		[mutation]
+		(input: PiConfigInput) =>
+			mutation
+				.mutateAsync({ input, owner: scope })
+				.then((result) => result.value),
+		[mutation, scope]
 	);
 
 	const reload = useCallback(() => {
-		queryClient.invalidateQueries({ queryKey: ["pi-config", node.url] });
-		queryClient.invalidateQueries({
-			queryKey: ["pi-config-catalog", node.url],
-		});
-	}, [queryClient, node.url]);
+		scope.invalidateConfig();
+		scope.invalidateCatalog();
+	}, [scope]);
 
+	const waitingForRefresh =
+		(scope.pending && scope.resource.owner !== scope.generation) ||
+		(scope.waitForRefresh &&
+			(!configQuery.isFetchedAfterMount ||
+				!catalogQuery.isFetchedAfterMount ||
+				!configQuery.isSuccess ||
+				!catalogQuery.isSuccess));
 	return {
-		config: configQuery.data ?? null,
-		catalog: catalogQuery.data ?? null,
-		loading: configQuery.isLoading || catalogQuery.isLoading,
+		config: waitingForRefresh ? null : (configQuery.data ?? null),
+		catalog: waitingForRefresh ? null : (catalogQuery.data ?? null),
+		loading:
+			(scope.pending && scope.resource.owner !== scope.generation) ||
+			(waitingForRefresh && !configQuery.isError && !catalogQuery.isError) ||
+			configQuery.isLoading ||
+			catalogQuery.isLoading,
 		error:
 			(configQuery.error as Error | null)?.message ??
 			(catalogQuery.error as Error | null)?.message ??
 			null,
-		saving: mutation.isPending,
-		saveError: (mutation.error as Error | null)?.message ?? null,
+		saving: scope.pending,
+		saveError:
+			mutation.variables?.owner.generation === scope.generation
+				? ((mutation.error as Error | null)?.message ?? null)
+				: null,
 		save,
 		reload,
 	};

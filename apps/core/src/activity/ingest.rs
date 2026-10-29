@@ -21,22 +21,16 @@ fn epoch_secs(rfc3339: &str) -> i64 {
 // ---- mappers ------------------------------------------------------------------
 
 // Monitors are now out-of-process (`ryu-monitors` sidecar); their alerts no longer
-// arrive on an in-process broadcast. Core records them into the activity store in
+// `server::app_notify::host_notify_fanout` (the `notify.fanout` kernel capability),
 // `monitors_client::host_monitor_alert` (the sidecar posts each fired alert back),
 // where the JSON→`ActivityItem` mapping (the dep-free successor to the old
 // `from_monitor_alert`) now lives.
 
-// Quests are now out-of-process (`ryu-quests` sidecar); their activity events no
-// longer arrive on an in-process broadcast. Core folds the sidecar's
-// `/api/quests/events` SSE into the activity store in `quests_client`, where the
-// JSON→`ActivityItem` mapping (the dep-free successor to the old `from_quest_event`)
-// now lives.
-
-// Meetings are now out-of-process (`ryu-meetings` sidecar); their lifecycle events no
-// longer arrive on an in-process `MeetingEvent` broadcast. Core folds the sidecar's
-// `/api/meetings/stream` SSE into the activity store in `meetings_client`, where the
-// JSON→`ActivityItem` mapping (the dep-free successor to the old `from_meeting_event`)
-// now lives.
+// Quests and Meetings are out-of-process (`ryu-quests`, `ryu-meetings` sidecars).
+// They feed the activity store themselves: each attaches an `activity` row to the
+// app events it emits, and `events.emit` records it attributed to the
+// authenticated caller (`plugin_host::record_app_event_activity`). Core holds no
+// per-app mapping or subscribe-loop for them.
 
 /// An approval-inbox event (a request was raised or decided).
 pub fn from_approval_event(event: &ApprovalEvent) -> ActivityItem {
@@ -88,8 +82,9 @@ pub fn from_approval_event(event: &ApprovalEvent) -> ActivityItem {
 
 /// Spawn the long-lived subscribe-loops that fold in-process producing engines' events
 /// into the activity feed. Each loop skips lagged frames and ends on channel close,
-/// exactly like the SSE handlers. Out-of-process producers (monitors/quests/meetings)
-/// are folded in their respective `*_client` modules over loopback, not here.
+/// exactly like the SSE handlers. Out-of-process producers record their own rows
+/// (monitors via its host-alert callback, quests/meetings via `events.emit` activity
+/// hints), not here.
 pub fn spawn(activity: ActivityStore, approvals: &crate::approvals::ApprovalEngine) {
     // Approvals → activity.
     {

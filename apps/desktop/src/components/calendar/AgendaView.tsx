@@ -6,28 +6,31 @@
 
 import { CalendarCheckIn01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	RunStatusTimeline,
 	RunStatusTimelineLegend,
-} from "@ryu/ui/components/run-status-timeline";
-import { cn } from "@ryu/ui/lib/utils";
-import { addDays, format, isToday, startOfDay } from "date-fns";
+} from "@ryu/ui/components/run-status-timeline.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { EventRow } from "@/src/components/calendar/event-display.tsx";
+import { useCalendarLocale } from "@/src/components/calendar/use-calendar-locale.ts";
 import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
+import { formatCalendarDate } from "@/src/lib/calendar/date-labels.ts";
+import {
+	civilDayKey,
+	displayDayBounds,
+	isDisplayToday,
+} from "@/src/lib/calendar/display-days.ts";
 import {
 	buildRunStatusTimelineEntries,
 	type CalendarEvent,
 	describeSchedule,
-	eventDayKey,
 	groupEventsByJob,
 } from "@/src/lib/calendar/events.ts";
 
 type JobStatus = "disabled" | "failure" | "none" | "scheduled" | "success";
 
-const JOB_STATUS_META: Record<
-	JobStatus,
-	{ className: string; dotClassName: string; label: string }
-> = {
+const JOB_STATUS_META = {
 	disabled: {
 		className: "text-muted-foreground",
 		dotClassName: "bg-muted-foreground/50",
@@ -53,7 +56,10 @@ const JOB_STATUS_META: Record<
 		dotClassName: "bg-success",
 		label: "Operational",
 	},
-};
+} satisfies Record<
+	JobStatus,
+	{ className: string; dotClassName: string; label: string }
+>;
 
 function statusForEvents(events: CalendarEvent[], enabled = true): JobStatus {
 	if (!enabled) {
@@ -108,8 +114,9 @@ function JobStatusRow({
 	job: ScheduledJob;
 	showScale: boolean;
 }) {
-	const dayStart = startOfDay(day);
-	const dayEnd = addDays(dayStart, 1);
+	const locale = useCalendarLocale();
+	const tl = useLiteralMessages();
+	const { start: dayStart, end: dayEnd } = displayDayBounds(day);
 	const status = statusForEvents(events, job.enabled);
 	const count = runCount(events);
 
@@ -118,7 +125,13 @@ function JobStatusRow({
 			<div className="flex items-center gap-3">
 				<div className="min-w-0 flex-1">
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-						<span className="truncate font-medium text-sm">{job.name}</span>
+						<span
+							className="truncate font-medium text-sm"
+							data-ryu-i18n="off"
+							title={job.name}
+						>
+							{job.name}
+						</span>
 						<StatusPill status={status} />
 					</div>
 					<p className="truncate text-muted-foreground text-xs">
@@ -131,10 +144,13 @@ function JobStatusRow({
 				</span>
 			</div>
 			<RunStatusTimeline
-				ariaLabel={`${job.name} run status for ${format(day, "MMMM d, yyyy")}`}
+				ariaLabel={tl("{name} run status for {date}", {
+					date: formatCalendarDate(day, "longDate", locale),
+					name: job.name,
+				})}
 				endAt={dayEnd.getTime()}
 				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events)}
-				nowAt={isToday(day) ? Date.now() : undefined}
+				nowAt={isDisplayToday(day) ? Date.now() : undefined}
 				showScale={showScale}
 				startAt={dayStart.getTime()}
 			/>
@@ -151,8 +167,10 @@ function StatusPageOverview({
 	events: CalendarEvent[];
 	jobs: ScheduledJob[];
 }) {
-	const dayStart = startOfDay(day);
-	const dayEnd = addDays(dayStart, 1);
+	const locale = useCalendarLocale();
+	const tl = useLiteralMessages();
+	const { start: dayStart, end: dayEnd } = displayDayBounds(day);
+	const totalRuns = runCount(events);
 	const eventsByJob = groupEventsByJob(events);
 	const status = statusForEvents(events);
 
@@ -165,25 +183,33 @@ function StatusPageOverview({
 						<StatusPill status={status} />
 					</div>
 					<p className="text-muted-foreground text-xs">
-						{jobs.length} {jobs.length === 1 ? "job" : "jobs"} ·{" "}
-						{runCount(events)} {runCount(events) === 1 ? "run" : "runs"} in this
-						24-hour window
+						{tl(
+							"{jobCount, plural, one {{jobCountLabel} job} other {{jobCountLabel} jobs}} · {runCount, plural, one {{runCountLabel} run} other {{runCountLabel} runs}} in this 24-hour window",
+							{
+								jobCount: jobs.length,
+								jobCountLabel: String(jobs.length),
+								runCount: totalRuns,
+								runCountLabel: String(totalRuns),
+							}
+						)}
 					</p>
 				</div>
 				<RunStatusTimelineLegend />
 			</div>
 			<RunStatusTimeline
-				ariaLabel={`All scheduled job status for ${format(day, "MMMM d, yyyy")}`}
+				ariaLabel={tl("All scheduled job status for {date}", {
+					date: formatCalendarDate(day, "longDate", locale),
+				})}
 				endAt={dayEnd.getTime()}
 				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events)}
-				nowAt={isToday(day) ? Date.now() : undefined}
+				nowAt={isDisplayToday(day) ? Date.now() : undefined}
 				showScale
 				startAt={dayStart.getTime()}
 			/>
 			<div className="flex items-baseline justify-between gap-3 border-t pt-3">
 				<h3 className="font-medium text-sm">Jobs</h3>
 				<span className="text-muted-foreground text-xs tabular-nums">
-					{jobs.length} tracked
+					{tl("{jobCount} tracked", { jobCount: jobs.length })}
 				</span>
 			</div>
 			<div className="divide-y rounded-lg border" role="list">
@@ -210,8 +236,9 @@ function DayRunTimeline({
 	events: CalendarEvent[];
 	showScale: boolean;
 }) {
-	const dayStart = startOfDay(day);
-	const dayEnd = addDays(dayStart, 1);
+	const locale = useCalendarLocale();
+	const tl = useLiteralMessages();
+	const { start: dayStart, end: dayEnd } = displayDayBounds(day);
 	const runCount = events.reduce(
 		(total, event) => total + (event.aggregateCount ?? 1),
 		0
@@ -220,18 +247,20 @@ function DayRunTimeline({
 	return (
 		<div className="flex flex-col gap-1">
 			<div className="flex items-center justify-between gap-3">
-				<span className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
+				<span className="type-compact font-medium text-muted-foreground uppercase tracking-widest">
 					24h run status
 				</span>
-				<span className="text-[10px] text-muted-foreground tabular-nums">
+				<span className="type-compact text-muted-foreground tabular-nums">
 					{runCount} {runCount === 1 ? "run" : "runs"}
 				</span>
 			</div>
 			<RunStatusTimeline
-				ariaLabel={`Run status for ${format(day, "MMMM d, yyyy")}`}
+				ariaLabel={tl("Run status for {date}", {
+					date: formatCalendarDate(day, "longDate", locale),
+				})}
 				endAt={dayEnd.getTime()}
 				entries={buildRunStatusTimelineEntries(dayStart, dayEnd, events)}
-				nowAt={isToday(day) ? Date.now() : undefined}
+				nowAt={isDisplayToday(day) ? Date.now() : undefined}
 				showScale={showScale}
 				startAt={dayStart.getTime()}
 			/>
@@ -248,11 +277,12 @@ export function AgendaView({
 	eventsByDay: Map<string, CalendarEvent[]>;
 	jobs: ScheduledJob[];
 }) {
+	const locale = useCalendarLocale();
 	const populated = days
-		.map((day) => ({ day, events: eventsByDay.get(eventDayKey(day)) ?? [] }))
+		.map((day) => ({ day, events: eventsByDay.get(civilDayKey(day)) ?? [] }))
 		.filter((entry) => entry.events.length > 0);
 	const overviewDay =
-		days.find((day) => isToday(day)) ?? populated[0]?.day ?? days[0];
+		days.find((day) => isDisplayToday(day)) ?? populated[0]?.day ?? days[0];
 
 	if (!overviewDay || (populated.length === 0 && jobs.length === 0)) {
 		return (
@@ -271,30 +301,30 @@ export function AgendaView({
 			<div className="mx-auto flex max-w-2xl flex-col gap-5 p-4">
 				<StatusPageOverview
 					day={overviewDay}
-					events={eventsByDay.get(eventDayKey(overviewDay)) ?? []}
+					events={eventsByDay.get(civilDayKey(overviewDay)) ?? []}
 					jobs={jobs}
 				/>
 				{populated.map(({ day, events }) => (
-					<section className="flex flex-col gap-2" key={eventDayKey(day)}>
+					<section className="flex flex-col gap-2" key={civilDayKey(day)}>
 						<div className="flex items-baseline gap-2 border-b pb-1.5">
 							<span
 								className={cn(
 									"font-medium text-sm",
-									isToday(day) ? "text-primary" : "text-foreground"
+									isDisplayToday(day) ? "text-primary" : "text-foreground"
 								)}
 							>
-								{format(day, "EEEE")}
+								{formatCalendarDate(day, "weekday", locale)}
 							</span>
 							<span className="text-muted-foreground text-xs">
-								{format(day, "MMMM d, yyyy")}
+								{formatCalendarDate(day, "longDate", locale)}
 							</span>
-							{isToday(day) && (
+							{isDisplayToday(day) && (
 								<span className="ml-auto font-medium text-primary text-xs">
 									Today
 								</span>
 							)}
 						</div>
-						{eventDayKey(day) === eventDayKey(overviewDay) ? null : (
+						{civilDayKey(day) === civilDayKey(overviewDay) ? null : (
 							<DayRunTimeline day={day} events={events} showScale={false} />
 						)}
 						<div className="flex flex-col gap-2">

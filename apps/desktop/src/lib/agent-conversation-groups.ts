@@ -1,3 +1,7 @@
+import {
+	isGroupMainThread,
+	sidebarThreadKind,
+} from "@/src/lib/thread-hierarchy.ts";
 import type { Conversation } from "@/types/chat.ts";
 
 /**
@@ -12,11 +16,21 @@ export function conversationParticipantIds(
 	return [...new Set(ids.filter((id): id is string => Boolean(id)))];
 }
 
-/** A conversation with more than one participant is shown as a group chat. */
+/** A conversation with more than one participant — or a group's coordinator
+ * main thread — is shown as a group chat. */
 export function isGroupConversation(
-	conversation: Pick<Conversation, "agentId" | "participants">
+	conversation: Pick<Conversation, "agentId" | "participants" | "hierarchy">
 ): boolean {
-	return conversationParticipantIds(conversation).length > 1;
+	return (
+		conversationParticipantIds(conversation).length > 1 ||
+		(conversation.hierarchy !== undefined && isGroupMainThread(conversation))
+	);
+}
+
+/** Only a plain bot thread (not a project/group main thread, not a hidden
+ * session) is drawn beneath its bot. */
+function isDirectBotThread(conversation: Conversation): boolean {
+	return sidebarThreadKind(conversation) === "chat";
 }
 
 /** Sort conversations by the activity stamp users see in the sidebar. */
@@ -41,6 +55,7 @@ export function directAgentThreads(
 		conversations.filter(
 			(conversation) =>
 				!(conversation.archived || isGroupConversation(conversation)) &&
+				isDirectBotThread(conversation) &&
 				conversationParticipantIds(conversation).includes(agentId)
 		)
 	);
@@ -52,7 +67,7 @@ export function groupDirectAgentThreads(
 ): Map<string, Conversation[]> {
 	const groups = new Map<string, Conversation[]>();
 	for (const conversation of conversations) {
-		if (conversation.archived) {
+		if (conversation.archived || !isDirectBotThread(conversation)) {
 			continue;
 		}
 		const ids = conversationParticipantIds(conversation);
@@ -79,6 +94,13 @@ export function conversationsForOtherChats(
 	knownAgentIds: ReadonlySet<string>
 ): Conversation[] {
 	return conversations.filter((conversation) => {
+		const kind = sidebarThreadKind(conversation);
+		if (kind === "session") {
+			return false;
+		}
+		if (kind !== "chat") {
+			return true;
+		}
 		const ids = conversationParticipantIds(conversation);
 		return ids.length !== 1 || !knownAgentIds.has(ids[0] ?? "");
 	});

@@ -5,6 +5,11 @@
 // one currently resident in Core. Used by the agents page and the system-status
 // spine (active-engine indicator).
 
+import { z } from "zod";
+import {
+	appJsonValueSchema,
+	appResponseValueSchema,
+} from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
 
 /** A selectable chat model (id + display name). Mirrors the desktop UI option
@@ -34,19 +39,82 @@ export interface ActiveEngine {
 	running: boolean;
 }
 
-interface EngineWire {
-	description?: string | null;
-	id: string;
-	install_hint?: string | null;
-	installed?: boolean | null;
-	name: string;
+// Full AgentInfo native publisher, including fields not displayed by the picker.
+// Nullable/optional additions retain the existing older-node normalization.
+function engineResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
 }
+export const engineInfoResponseSchema = engineResponse(
+	z.object({
+		id: z.string(),
+		name: z.string(),
+		title: z.string().nullish(),
+		description: z.string().nullish(),
+		install_hint: z.string().nullish(),
+		installed: z.boolean().nullish(),
+		model: z.string().nullish(),
+		system_prompt: z.string().nullish(),
+		created_at: z.string().nullish(),
+		engine: z.string().nullish(),
+		transport: z.string().nullish(),
+		recommended: z.boolean().nullish(),
+		version: z.string().nullish(),
+		latest_version: z.string().nullish(),
+		version_status: z.string().nullish(),
+		locked: z.boolean().nullish(),
+		enabled: z.boolean().nullish(),
+		gateway_bypass: z.boolean().nullish(),
+		avatar_url: z.string().nullish(),
+		avatar_glyph: appJsonValueSchema.optional(),
+		lifecycle_status: z.string().nullish(),
+		safety_profile: z.string().nullish(),
+	})
+);
+const enginesResponseSchema = engineResponse(
+	z.object({ engines: z.array(engineInfoResponseSchema).nullish() })
+);
+const engineModelResponseSchema = engineResponse(
+	z.object({ id: z.string(), name: z.string() })
+);
+const modelOptionsSchema = z.array(engineModelResponseSchema);
+const modelsMapFieldsSchema = z.record(z.string(), modelOptionsSchema);
+// Zod records skip __proto__; validate every actual own native map entry too.
+const modelsMapSchema = z.custom<z.output<typeof modelsMapFieldsSchema>>(
+	(value) =>
+		modelsMapFieldsSchema.safeParse(value).success &&
+		Object.values(new Object(value)).every(
+			(options) => modelOptionsSchema.safeParse(options).success
+		)
+);
+export const engineModelsResponseSchema = engineResponse(
+	z.object({ models: modelsMapSchema.nullish() })
+);
+export const activeEngineResponseSchema = engineResponse(
+	z.object({
+		active: z.string().nullish(),
+		running: z.boolean().optional(),
+		available: z.array(z.string()).nullish(),
+		llamacpp_variant: z.string().nullish(),
+	})
+);
+const engineSwapResponseSchema = engineResponse(
+	z.object({
+		success: z.boolean().optional(),
+		error: z.string().optional(),
+		active: z.string().nullish(),
+		stopped: z.string().nullish(),
+		running: z.boolean().optional(),
+		unchanged: z.boolean().optional(),
+		gateway_refreshed: z.boolean().optional(),
+	})
+);
 
 export async function fetchEngines(target: ApiTarget): Promise<Engine[]> {
-	const json = await request<{ engines?: EngineWire[] }>(
-		target,
-		"/api/engines"
-	);
+	const json = await request(target, "/api/engines", {}, enginesResponseSchema);
 	return (json.engines ?? []).map(
 		(e): Engine => ({
 			id: e.id,
@@ -66,20 +134,24 @@ export async function fetchEngines(target: ApiTarget): Promise<Engine[]> {
 export async function fetchEngineModels(
 	target: ApiTarget
 ): Promise<Record<string, ModelOption[]>> {
-	const json = await request<{
-		models?: Record<string, { id: string; name: string }[]>;
-	}>(target, "/api/engines/models");
+	const json = await request(
+		target,
+		"/api/engines/models",
+		{},
+		engineModelsResponseSchema
+	);
 	return json.models ?? {};
 }
 
 export async function fetchActiveEngine(
 	target: ApiTarget
 ): Promise<ActiveEngine> {
-	const json = await request<{
-		active?: string | null;
-		running?: boolean;
-		available?: string[];
-	}>(target, "/api/engine/active");
+	const json = await request(
+		target,
+		"/api/engine/active",
+		{},
+		activeEngineResponseSchema
+	);
 	return {
 		active: json.active ?? null,
 		running: json.running ?? false,
@@ -109,15 +181,12 @@ export async function setActiveEngine(
 	target: ApiTarget,
 	name: string
 ): Promise<EngineSwap> {
-	const json = await request<{
-		success?: boolean;
-		error?: string;
-		active?: string | null;
-		stopped?: string | null;
-		running?: boolean;
-		unchanged?: boolean;
-		gateway_refreshed?: boolean;
-	}>(target, "/api/engine/active", { method: "POST", body: { name } });
+	const json = await request(
+		target,
+		"/api/engine/active",
+		{ method: "POST", body: { name } },
+		engineSwapResponseSchema
+	);
 	if (json.success === false) {
 		throw new Error(json.error ?? `Failed to activate engine "${name}"`);
 	}

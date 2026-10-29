@@ -2,7 +2,15 @@
 
 // beui.dev/components/blocks/otp-input
 
-import { EASE_OUT } from "@ryu/ui/lib/ease";
+import type { MotionStyle } from "motion/react";
+import css from "./otp-input.module.css";
+
+interface Inline1Style extends MotionStyle {
+	"--otp-input-1-transform-origin"?: MotionStyle["transformOrigin"];
+	"--otp-input-1-transform-style"?: MotionStyle["transformStyle"];
+}
+
+import { EASE_OUT } from "@ryu/ui/lib/ease.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	AnimatePresence,
@@ -10,8 +18,16 @@ import {
 	motion,
 	useReducedMotion,
 } from "motion/react";
-import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import {
+	type ChangeEvent,
+	type ClipboardEvent,
+	Fragment,
+	type KeyboardEvent,
+	useEffect,
+	useId,
+	useRef,
+	useState,
+} from "react";
 
 /**
  * Slot-per-character code entry with a caret on the active slot, digits that
@@ -22,9 +38,10 @@ import { useEffect, useId, useRef, useState } from "react";
  * shadcn over the `input-otp` package) is the static predecessor and has no call
  * sites left — do not reach for it in new code.
  *
- * `charset="alphanumeric"` covers device codes (better-auth issues 8 uppercase
- * characters shown as `XXXX-XXXX`); pair it with `groupSize` to draw that gap.
- * The hyphen is presentational — `value` is always the ungrouped characters.
+ * `charset="alphanumeric"` covers device codes. Even lengths of six or more
+ * split at their midpoint by default; `groupSize` overrides that separator.
+ * Separators are presentational — `value` is always ungrouped. `OTPCodeDisplay`
+ * normalizes a returned code and uses its actual length with these same slots.
  */
 
 export type OTPStatus = "idle" | "error" | "success";
@@ -40,7 +57,7 @@ export interface OTPInputProps {
 	disabled?: boolean;
 	/** Message shown below the slots when status is "error". */
 	errorMessage?: string;
-	/** Draws a wider gap after every nth slot, e.g. 4 for `XXXX-XXXX`. */
+	/** Split point for a visual separator; by default even codes split in half. */
 	groupSize?: number;
 	/** Helper text shown below the slots while idle. */
 	hint?: string;
@@ -53,6 +70,10 @@ export interface OTPInputProps {
 	onChange?: (value: string) => void;
 	/** Fires once every slot is filled. */
 	onComplete?: (value: string) => void;
+	/** Render filled slots as a non-interactive code display. */
+	readOnly?: boolean;
+	/** Smaller slots for codes shown inside dense panels. */
+	size?: "compact" | "default";
 	/** External validation feedback. "error" shakes, "success" draws a check. */
 	status?: OTPStatus;
 	/** Message shown below the slots when status is "success". */
@@ -80,6 +101,8 @@ export function OTPInput({
 	groupSize,
 	mask = false,
 	disabled = false,
+	readOnly = false,
+	size = "default",
 	autoFocus = false,
 	"aria-label": ariaLabel = "One-time passcode",
 	className,
@@ -91,6 +114,8 @@ export function OTPInput({
 
 	const alphanumeric = charset === "alphanumeric";
 	const controlled = controlledValue !== undefined;
+	const effectiveGroupSize =
+		groupSize ?? (length >= 6 && length % 2 === 0 ? length / 2 : undefined);
 
 	// Source of truth is a fixed-length array, so a cleared middle slot stays an
 	// in-place hole instead of collapsing the characters after it to the left.
@@ -142,14 +167,14 @@ export function OTPInput({
 	};
 
 	const slotFromClientX = (clientX: number) => {
-		const els = slotsRef.current?.children;
+		const els =
+			slotsRef.current?.querySelectorAll<HTMLElement>("[data-otp-index]");
 		if (!els) {
 			return 0;
 		}
-		for (let i = 0; i < els.length; i++) {
-			const element = els[i];
+		for (const element of els) {
 			if (element && clientX < element.getBoundingClientRect().right) {
-				return i;
+				return Number(element.dataset.otpIndex);
 			}
 		}
 		return length - 1;
@@ -180,7 +205,7 @@ export function OTPInput({
 	// reliably blocks native insertion (unlike beforeinput in React), so the hidden
 	// input never accumulates a competing string and slot holes survive.
 	const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-		if (disabled || e.metaKey || e.ctrlKey || e.altKey) {
+		if (disabled || readOnly || e.metaKey || e.ctrlKey || e.altKey) {
 			return;
 		}
 		const k = e.key;
@@ -215,7 +240,7 @@ export function OTPInput({
 	};
 
 	const onPaste = (e: ClipboardEvent<HTMLInputElement>) => {
-		if (disabled) {
+		if (disabled || readOnly) {
 			return;
 		}
 		// preventDefault suppresses the duplicate onChange, keeping that path
@@ -228,6 +253,9 @@ export function OTPInput({
 	// shot. Keystrokes go through onKeyDown and paste through onPaste, so only
 	// autofill reaches here — spread it across the slots from the start.
 	const onChangeNative = (e: ChangeEvent<HTMLInputElement>) => {
+		if (readOnly) {
+			return;
+		}
 		const chars = sanitize(e.target.value, length, alphanumeric);
 		if (!chars) {
 			return;
@@ -250,7 +278,9 @@ export function OTPInput({
 
 	const showSuccess = status === "success";
 	const isError = status === "error";
-	const activeIndex = focused ? active : -1;
+	const isComplete = slots.every((char) => char !== "");
+	const activeIndex =
+		focused && !(isComplete && active === length - 1) ? active : -1;
 	let message = hint;
 	if (showSuccess) {
 		message = successMessage;
@@ -271,7 +301,7 @@ export function OTPInput({
 			<fieldset
 				className="relative m-0 inline-flex w-max border-0 p-0"
 				onMouseDown={(e) => {
-					if (disabled) {
+					if (disabled || readOnly) {
 						return;
 					}
 					// Suppress the native click-caret; we drive the active slot ourselves.
@@ -287,12 +317,14 @@ export function OTPInput({
 					aria-invalid={isError}
 					aria-label={ariaLabel}
 					autoCapitalize={alphanumeric ? "characters" : "off"}
-					autoComplete="one-time-code"
-					// biome-ignore lint/a11y/noAutofocus: opt-in via prop for code-first screens.
+					autoComplete={readOnly ? "off" : "one-time-code"}
 					autoFocus={autoFocus}
 					// Transparent overlay owns focus, the soft keyboard, paste and autofill;
 					// the slots below are purely presentational.
-					className="absolute inset-0 z-20 h-full w-full cursor-text bg-transparent text-transparent caret-transparent opacity-0 outline-none disabled:cursor-not-allowed"
+					className={cn(
+						"absolute inset-0 z-20 h-full w-full cursor-text bg-transparent text-transparent caret-transparent opacity-0 outline-none disabled:cursor-not-allowed",
+						readOnly && "pointer-events-none"
+					)}
 					disabled={disabled}
 					id={`${uid}-input`}
 					inputMode={alphanumeric ? "text" : "numeric"}
@@ -302,96 +334,139 @@ export function OTPInput({
 					onFocus={() => setFocused(true)}
 					onKeyDown={onKeyDown}
 					onPaste={onPaste}
+					readOnly={readOnly}
 					ref={inputRef}
 					spellCheck={false}
-					// Kept empty on purpose — our state owns the characters, native holds none.
-					value=""
+					tabIndex={readOnly ? -1 : undefined}
+					// Editable entry stays empty; read-only displays expose their value to assistive tech.
+					value={readOnly ? joined : ""}
 				/>
 
-				<div className="flex items-center gap-2" ref={slotsRef}>
+				<div
+					className={cn(
+						"flex items-center",
+						size === "compact" ? "gap-1" : "gap-[clamp(0.25rem,2vw,0.75rem)]"
+					)}
+					ref={slotsRef}
+				>
 					{Array.from({ length }, (_, i) => {
 						const char = slots[i] ?? "";
 						const isActive = i === activeIndex;
 						const endsGroup =
-							groupSize && i < length - 1 && (i + 1) % groupSize === 0;
+							effectiveGroupSize &&
+							i < length - 1 &&
+							(i + 1) % effectiveGroupSize === 0;
+						const inline1Style: Inline1Style = {
+							"--otp-input-1-transform-origin": "center bottom",
+							"--otp-input-1-transform-style": "preserve-3d",
+						};
 						return (
-							<div
-								className={cn(
-									"relative grid h-14 w-12 place-items-center overflow-hidden rounded-2xl border bg-input/50 font-medium text-xl tabular-nums transition-all duration-200",
-									showSuccess && "border-success text-foreground",
-									isError && "border-destructive text-foreground",
-									!(showSuccess || isError) &&
-										(char
-											? "border-input text-foreground"
-											: "border-input text-muted-foreground"),
-									// Active slot reads stronger; twMerge lets this win the border.
-									isActive &&
-										!(showSuccess || isError) &&
-										"z-10 border-ring ring-3 ring-ring/30",
-									endsGroup && "mr-3",
-									disabled && "opacity-50"
-								)}
-								data-active={isActive}
-								data-filled={char !== ""}
-								// biome-ignore lint/suspicious/noArrayIndexKey: fixed-length slot grid, never reordered.
-								key={`${uid}-${i}`}
-							>
-								{/* Blinking caret marks the active slot — centered when empty,
-                    trailing the character when the slot is already filled. */}
-								{isActive && !showSuccess ? (
-									<motion.span
-										animate={reduce ? undefined : { opacity: [1, 1, 0, 0] }}
-										aria-hidden
-										className={cn(
-											"pointer-events-none absolute top-1/2 h-6 w-px -translate-y-1/2 bg-foreground",
-											char ? "right-3" : "left-1/2 -translate-x-1/2"
-										)}
-										transition={
-											reduce
-												? undefined
-												: {
-														duration: 1,
-														repeat: Number.POSITIVE_INFINITY,
-														ease: "linear",
-													}
-										}
-									/>
-								) : null}
-
-								{/* Characters roll vertically. Each is absolutely centered so
-                    enter and exit overlap in place — no in-flow reflow, no
-                    sideways drift. */}
-								<AnimatePresence initial={false}>
-									{char ? (
+							<Fragment key={`${uid}-${i}`}>
+								<div
+									className={cn(
+										"relative grid aspect-square min-w-0 place-items-center overflow-hidden rounded-xl bg-foreground/[0.06] font-semibold tabular-nums outline-none ring-1 ring-foreground/10 transition-[background-color,color] duration-150 ease-out [container-type:inline-size] motion-reduce:transition-none",
+										size === "compact"
+											? "h-9 w-9 rounded-lg text-sm *:text-[min(0.875rem,43cqi)]"
+											: "h-[clamp(2rem,8vw,3.5rem)] w-[clamp(2rem,8vw,3.5rem)] text-2xl *:text-[min(1.5rem,43cqi)]",
+										showSuccess &&
+											"bg-status-success/10 ring-status-success/50",
+										isError && "bg-destructive/5 ring-destructive/40",
+										isActive &&
+											!(showSuccess || isError) &&
+											"z-10 bg-foreground/10",
+										disabled && "opacity-50"
+									)}
+									data-active={isActive}
+									data-filled={char !== ""}
+									data-index={i}
+									data-otp-index={i}
+								>
+									{isActive && !showSuccess ? (
 										<motion.span
-											animate={
-												reduce
-													? { opacity: 1 }
-													: { y: 0, opacity: 1, filter: "blur(0px)" }
-											}
-											className="absolute inset-0 grid place-items-center leading-none"
-											exit={
-												reduce
-													? { opacity: 0 }
-													: { y: -14, opacity: 0, filter: "blur(4px)" }
-											}
-											initial={
-												reduce
-													? { opacity: 0 }
-													: { y: 14, opacity: 0, filter: "blur(4px)" }
-											}
-											key={char}
+											aria-hidden
+											className={cn(
+												"pointer-events-none absolute inset-0 z-20 rounded-[inherit] ring-3",
+												isError ? "ring-destructive" : "ring-foreground/75"
+											)}
+											layoutId={reduce ? undefined : `${uid}-active-ring`}
 											transition={
 												reduce
 													? { duration: 0 }
-													: { duration: 0.22, ease: EASE_OUT }
+													: { type: "spring", duration: 0.25, bounce: 0.18 }
 											}
-										>
-											{mask ? "•" : char}
-										</motion.span>
+										/>
 									) : null}
-								</AnimatePresence>
-							</div>
+									{char ? null : (
+										<span
+											aria-hidden
+											className="select-none text-foreground/20"
+										>
+											{alphanumeric ? "·" : "0"}
+										</span>
+									)}
+									<AnimatePresence initial={false}>
+										{char ? (
+											<motion.span
+												animate={
+													reduce
+														? { opacity: 1 }
+														: {
+																y: 0,
+																opacity: 1,
+																rotateX: 0,
+																filter: "blur(0px)",
+															}
+												}
+												className={[
+													css.inline1,
+													"absolute inset-0 grid place-items-center text-foreground leading-none",
+												].join(" ")}
+												exit={
+													reduce
+														? { opacity: 0 }
+														: {
+																y: -2,
+																opacity: 0,
+																rotateX: 15,
+																filter: "blur(2px)",
+															}
+												}
+												initial={
+													reduce
+														? { opacity: 0 }
+														: {
+																y: 6,
+																opacity: 0,
+																rotateX: -35,
+																filter: "blur(2px)",
+															}
+												}
+												key={`${i}-${char}`}
+												style={inline1Style}
+												transition={
+													reduce
+														? { duration: 0 }
+														: { type: "spring", duration: 0.25, bounce: 0.2 }
+												}
+											>
+												{mask ? "•" : char}
+											</motion.span>
+										) : null}
+									</AnimatePresence>
+								</div>
+								{endsGroup ? (
+									<span
+										aria-hidden
+										className={cn(
+											"flex shrink-0 items-center justify-center text-muted-foreground/70",
+											size === "compact" ? "w-2" : "w-3"
+										)}
+										data-otp-separator
+									>
+										<span className="h-px w-2.5 rounded-full bg-current" />
+									</span>
+								) : null}
+							</Fragment>
 						);
 					})}
 				</div>
@@ -467,6 +542,44 @@ function sanitize(raw: string, length: number, alphanumeric: boolean) {
 function toSlots(raw: string, length: number, alphanumeric: boolean) {
 	const chars = sanitize(raw, length, alphanumeric);
 	return Array.from({ length }, (_, i) => chars[i] ?? "");
+}
+
+export interface OTPCodeDisplayProps {
+	"aria-label"?: string;
+	className?: string;
+	/** Code text from an auth or device-pairing response. */
+	code: string;
+	size?: "compact" | "default";
+}
+
+/** Read-only rendering of a code with the shared OTP slot treatment. */
+export function OTPCodeDisplay({
+	"aria-label": ariaLabel = "Verification code",
+	className,
+	code,
+	size = "default",
+}: OTPCodeDisplayProps) {
+	const value = code.toUpperCase().replace(NON_ALPHANUMERIC, "");
+	if (!value) {
+		return null;
+	}
+
+	return (
+		<OTPInput
+			aria-label={ariaLabel}
+			charset="alphanumeric"
+			className={className}
+			groupSize={
+				value.length >= 6 && value.length % 2 === 0
+					? value.length / 2
+					: undefined
+			}
+			length={value.length}
+			readOnly
+			size={size}
+			value={value}
+		/>
+	);
 }
 
 export default OTPInput;

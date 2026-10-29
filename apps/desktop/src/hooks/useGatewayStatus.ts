@@ -5,7 +5,7 @@ import {
 	fetchGatewayStatus,
 	type GatewayStatus,
 } from "@/src/lib/api/gateway.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import { useActiveNode } from "./useActiveNode.ts";
 
 const POLL_INTERVAL_MS = 5000;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -18,7 +18,7 @@ export interface UseGatewayStatus {
 }
 
 export function useGatewayStatus(enabled = true): UseGatewayStatus {
-	const node = useNodeStore((state) => state.getActiveNode());
+	const node = useActiveNode();
 	const { url, token, userJwt } = node;
 	const [status, setStatus] = useState<GatewayStatus | null>(null);
 	const [loading, setLoading] = useState(true);

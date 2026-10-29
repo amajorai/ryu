@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 
 test("catalog entrypoints retain mapping and time out a stalled skill response", async () => {
 	const root = await mkdtemp(join(tmpdir(), "ryu-island-catalog-"));
@@ -38,6 +39,11 @@ test("catalog entrypoints retain mapping and time out a stalled skill response",
 		},
 	});
 	try {
+		await symlink(
+			join(import.meta.dirname, "../../../../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
+		);
 		for (const name of ["catalog.ts", "response-deadline.ts"]) {
 			await copyFile(join(import.meta.dirname, name), join(root, name));
 		}
@@ -53,7 +59,9 @@ test("catalog entrypoints retain mapping and time out a stalled skill response",
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const result = (await new Response(child.stdout).json()) as unknown[];
+		const result = z
+			.array(z.json())
+			.parse(await new Response(child.stdout).json());
 		expect(await child.exited).toBe(0);
 		expect(result[0]).toMatchObject({ sources: [{ displayName: "Fixture" }] });
 		expect(result[1]).toMatchObject({ items: [{ installed: true }] });

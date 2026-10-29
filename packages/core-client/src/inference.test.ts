@@ -1,3 +1,7 @@
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 // packages/core-client/src/inference.test.ts
 //
 // Tests for the launch-config transport (`isLocalEngine` lives in
@@ -29,17 +33,25 @@ interface Captured {
 
 function stub(bodyText: string, status = 200): Captured {
 	const cap: Captured = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		cap.url = url;
 		cap.init = init;
 		return Promise.resolve(new Response(bodyText, { status }));
-	}) as unknown as typeof fetch;
+	});
 	return cap;
 }
 
 describe("getModelLaunchConfig", () => {
 	test("returns the saved config when present", async () => {
 		stub(JSON.stringify({ launch_config: { ctx_size: 8192, jinja: true } }));
+		expect(await getModelLaunchConfig(target, "m1")).toEqual({
+			ctx_size: 8192,
+			jinja: true,
+		});
+	});
+
+	test("returns the flat config current Core publishes", async () => {
+		stub(JSON.stringify({ ctx_size: 8192, jinja: true }));
 		expect(await getModelLaunchConfig(target, "m1")).toEqual({
 			ctx_size: 8192,
 			jinja: true,
@@ -62,8 +74,9 @@ describe("getModelLaunchConfig", () => {
 	});
 
 	test("fails open to {} when fetch itself rejects", async () => {
-		globalThis.fetch = (() =>
-			Promise.reject(new Error("network down"))) as unknown as typeof fetch;
+		globalThis.fetch = createFetchFixture(() =>
+			Promise.reject(new Error("network down"))
+		);
 		expect(await getModelLaunchConfig(target, "m1")).toEqual({});
 	});
 
@@ -78,12 +91,12 @@ describe("getModelLaunchConfig", () => {
 
 describe("saveModelLaunchConfig", () => {
 	test("PUTs the config to the encoded endpoint", async () => {
-		const cap = stub("{}");
+		const cap = stub(JSON.stringify({ ok: true, id: "org/model" }));
 		await saveModelLaunchConfig(target, "org/model", { gpu_layers: 30 });
 		expect(cap.url).toBe(
 			"http://127.0.0.1:7980/api/models/org%2Fmodel/launch-config"
 		);
 		expect(cap.init?.method).toBe("PUT");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({ gpu_layers: 30 });
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({ gpu_layers: 30 });
 	});
 });

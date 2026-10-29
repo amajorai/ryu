@@ -17,7 +17,7 @@
 //! is expected to be populated FROM those keys plus the levels an app declares in
 //! its manifest (`PluginManifest::permission_levels`), and a [`RoleCatalog`] from
 //! `permissions_for_role` unioned with the custom roles
-//! `control_plane::resolve_permissions` returns.
+//! `control_plane::resolve_permission_context` returns.
 //!
 //! What is genuinely new here is the PER-RESOURCE layer. The existing code answers
 //! "may this role do X anywhere in the org"; it has no way to say "…except in this
@@ -72,10 +72,6 @@
 //! no clock — for the same reason `can_access` is: this is the layer that has to
 //! be exhaustively unit-testable, because a mistake in it is invisible until it
 //! leaks data.
-
-// The resolver is the model half of the RBAC epic; the enforcement wiring that
-// calls it lands separately, so its public surface is intentionally unused here.
-#![allow(dead_code)]
 
 pub mod store;
 pub mod vocabulary;
@@ -157,6 +153,27 @@ impl PermissionRegistry {
             .entry(implier.to_string())
             .or_default()
             .insert(implied.to_string());
+        self.implied_by
+            .entry(implied.to_string())
+            .or_default()
+            .insert(implier.to_string());
+        self
+    }
+
+    /// Declare `implier -> implied` for DENIALS only: denying `implied` also
+    /// denies `implier`, but holding `implier` does not convey `implied`.
+    ///
+    /// This is the fail-closed half of an edge whose grant direction cannot be
+    /// trusted (its ids are contested between installed apps). Dropping the edge
+    /// outright would loosen access instead: a deny of `implied` would stop
+    /// reaching `implier`, so a less specific tier's allow of `implier` would
+    /// start to win. An extra deny-direction edge can only make a tier mention an
+    /// id as denied, never as allowed, so it can never widen a decision.
+    #[must_use]
+    pub fn with_denial_only_implication(mut self, implier: &str, implied: &str) -> Self {
+        if !self.declared.contains(implier) || !self.declared.contains(implied) {
+            return self;
+        }
         self.implied_by
             .entry(implied.to_string())
             .or_default()
@@ -893,6 +910,7 @@ mod enforcement_tests {
         VerifiedCaller {
             user_id: "u1".to_owned(),
             email: None,
+            email_verified: false,
             org_id: Some("org_1".to_owned()),
             role,
             teams: teams
@@ -1049,7 +1067,7 @@ mod enforcement_tests {
 /// `role_ids` carries the caller's Better Auth org role. Custom org roles are
 /// deliberately NOT merged in here: they are resolved per-caller by the control
 /// plane and arrive as a permission SET rather than a role id, so they are handed
-/// to [`decide_with_extra`] separately instead of being faked into a role.
+/// to [`decide_with_context`] separately instead of being faked into a role.
 pub fn principal_from_caller(caller: &crate::identity_verify::VerifiedCaller) -> Principal {
     Principal {
         user_id: caller.user_id.clone(),
@@ -1081,25 +1099,9 @@ fn ba_role_id(role: crate::identity_verify::OrgRole) -> String {
 /// for this caller. They widen the BASE only — they can never override a deny
 /// overwrite, because a custom role is an org-wide grant and the whole point of a
 /// resource overwrite is to carve an exception out of exactly that.
-pub fn decide_with_extra(
-    caller: &crate::identity_verify::VerifiedCaller,
-    kind: &str,
-    resource_id: &str,
-    permission: &str,
-    extra_permissions: &std::collections::HashSet<String>,
-) -> Decision {
-    decide_with_context(
-        caller,
-        kind,
-        resource_id,
-        permission,
-        extra_permissions,
-        &std::collections::HashSet::new(),
-    )
-}
-
-/// Decide one permission while carrying both the custom-role permission union
-/// and the custom role ids assigned to this caller. The permission union is
+///
+/// It carries both the custom-role permission union and the custom role ids
+/// assigned to this caller. The permission union is
 /// what grants the capability; the ids are needed so a resource ACL can target
 /// a named custom role without making the node invent a second role catalog.
 pub fn decide_with_context(
@@ -1118,7 +1120,7 @@ pub fn decide_with_context(
         // Fold the custom-role grant into a synthetic role the principal holds.
         // A reserved id that Better Auth can never issue, so it cannot collide
         // with a real role or be named by an overwrite.
-        const CUSTOM: &str = "__custom_role";
+        const CUSTOM: &str = RESERVED_CUSTOM_ROLE_ID;
         catalog = catalog.with_role(CUSTOM, extra_permissions.iter().cloned());
         let mut principal = principal;
         principal.role_ids.extend(extra_role_ids.iter().cloned());
@@ -1132,16 +1134,29 @@ pub fn decide_with_context(
 }
 
 /// Every permission level declared by an installed app, for the registry.
+///
+/// Each level is tagged with whether its plugin is a compiled-in built-in, so
+/// [`vocabulary::build_vocabulary`] can keep a built-in's level ids out of an
+/// installed package's reach. `load()` registers built-ins first and refuses an
+/// installed package reusing a built-in's plugin id, so a manifest whose id is in
+/// `load_builtins()` really is the compiled one.
 pub fn declared_levels() -> Vec<vocabulary::DeclaredLevel> {
+    let builtin_ids: std::collections::HashSet<String> =
+        crate::plugin_manifest::PluginManifestLoader::load_builtins()
+            .into_iter()
+            .map(|manifest| manifest.id)
+            .collect();
     crate::plugin_manifest::PluginManifestLoader::load()
         .into_iter()
         .flat_map(|manifest| {
             let plugin_id = manifest.id.clone();
+            let builtin = builtin_ids.contains(&plugin_id);
             manifest
                 .permission_levels
                 .into_iter()
                 .map(move |level| vocabulary::DeclaredLevel {
                     plugin_id: plugin_id.clone(),
+                    builtin,
                     id: level.id,
                     label: level.label,
                     description: level.description,
@@ -1154,7 +1169,7 @@ pub fn declared_levels() -> Vec<vocabulary::DeclaredLevel> {
 /// Process-wide cache of the assembled vocabulary.
 ///
 /// [`declared_levels`] reads every installed manifest off DISK, and
-/// `decide_with_extra` runs on an authorization path that a busy node hits many
+/// [`decide_with_context`] runs on an authorization path that a busy node hits many
 /// times per request. Rebuilding it each time turned every permission check into
 /// a directory scan plus N JSON parses.
 ///
@@ -1165,7 +1180,7 @@ pub fn declared_levels() -> Vec<vocabulary::DeclaredLevel> {
 static VOCABULARY_CACHE: std::sync::Mutex<Option<vocabulary::Vocabulary>> =
     std::sync::Mutex::new(None);
 
-fn cached_vocabulary() -> vocabulary::Vocabulary {
+pub(crate) fn cached_vocabulary() -> vocabulary::Vocabulary {
     let mut guard = VOCABULARY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     guard
         .get_or_insert_with(|| vocabulary::build_vocabulary(declared_levels()))
@@ -1178,4 +1193,395 @@ fn cached_vocabulary() -> vocabulary::Vocabulary {
 pub fn invalidate_vocabulary() {
     let mut guard = VOCABULARY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     *guard = None;
+}
+
+// ── Grant ceiling for ACL edits ──────────────────────────────────────────────
+//
+// Core's mirror of the control plane's `enforceCeiling` and outrank guard
+// (`packages/api/src/routers/control-plane.ts`). Holding `roles.manage` on a
+// resource lets a caller edit its overwrites, but never to hand out, or strip, a
+// permission the caller does not hold there, and never to retarget someone above
+// them on the built-in ladder. Without this, a delegated custom role carrying
+// `roles.manage` could allow itself `space.delete` or `app.install`, or deny an
+// owner, which the control plane forbids for the same capability.
+
+/// The synthetic role id [`decide_with_context`] folds custom-role grants into.
+/// Better Auth never issues it, and an overwrite must never name it: a role-tier
+/// row aimed at it would apply to every caller holding ANY custom role.
+pub const RESERVED_CUSTOM_ROLE_ID: &str = "__custom_role";
+
+/// One overwrite target an edit actually changes, with the ids whose allow or
+/// deny state moved (added or removed) on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AclEditChange {
+    pub target_type: String,
+    pub target_id: String,
+    pub changed_allow: BTreeSet<String>,
+    pub changed_deny: BTreeSet<String>,
+}
+
+/// Why an ACL edit was refused. Both lists are sorted and deduplicated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AclEditRefusal {
+    /// Permission ids the actor does not hold on this resource.
+    Unheld(Vec<String>),
+    /// `type:id` targets that outrank the actor.
+    Outranked(Vec<String>),
+}
+
+impl AclEditRefusal {
+    pub fn message(&self) -> String {
+        match self {
+            Self::Unheld(ids) => format!(
+                "cannot grant or revoke permissions you do not hold: {}",
+                ids.join(", ")
+            ),
+            Self::Outranked(targets) => format!(
+                "cannot change the access of a target that outranks you: {}",
+                targets.join(", ")
+            ),
+        }
+    }
+}
+
+/// The per-target difference between the stored rows and a replacement set.
+/// Unchanged rows are not reported, so re-saving an ACL an owner authored does
+/// not require the editor to hold every id it already names.
+pub fn acl_edit_changes(
+    current: &[store::StoredOverwrite],
+    proposed: &[store::StoredOverwrite],
+) -> Vec<AclEditChange> {
+    type Sets = (BTreeSet<String>, BTreeSet<String>);
+    fn fold(rows: &[store::StoredOverwrite]) -> BTreeMap<(String, String), Sets> {
+        let mut out: BTreeMap<(String, String), Sets> = BTreeMap::new();
+        for row in rows {
+            let entry = out
+                .entry((row.target_type.clone(), row.target_id.clone()))
+                .or_default();
+            entry.0.extend(row.allow.iter().cloned());
+            entry.1.extend(row.deny.iter().cloned());
+        }
+        out
+    }
+    let before = fold(current);
+    let after = fold(proposed);
+    let empty: Sets = (BTreeSet::new(), BTreeSet::new());
+    let targets: BTreeSet<&(String, String)> = before.keys().chain(after.keys()).collect();
+    targets
+        .into_iter()
+        .filter_map(|target| {
+            let old = before.get(target).unwrap_or(&empty);
+            let new = after.get(target).unwrap_or(&empty);
+            let changed_allow: BTreeSet<String> =
+                old.0.symmetric_difference(&new.0).cloned().collect();
+            let changed_deny: BTreeSet<String> =
+                old.1.symmetric_difference(&new.1).cloned().collect();
+            if changed_allow.is_empty() && changed_deny.is_empty() {
+                return None;
+            }
+            Some(AclEditChange {
+                target_type: target.0.clone(),
+                target_id: target.1.clone(),
+                changed_allow,
+                changed_deny,
+            })
+        })
+        .collect()
+}
+
+/// Member targets (other than the actor) whose rows an edit changes; the caller
+/// resolves their org roles before [`check_acl_edit`].
+pub fn changed_member_targets(changes: &[AclEditChange], actor_user_id: &str) -> BTreeSet<String> {
+    changes
+        .iter()
+        .filter(|c| c.target_type == "member" && c.target_id != actor_user_id)
+        .map(|c| c.target_id.clone())
+        .collect()
+}
+
+/// The ceiling and outrank check for a non-owner editing a resource ACL. Pure:
+/// `holds` answers whether the actor effectively holds an id on this resource
+/// now, and `member_roles` carries the org role of each changed member target.
+///
+/// - Every id whose allow or deny state changes must be held by the actor.
+/// - A built-in role target (`owner`/`admin`/`member`/`viewer`) needs the actor
+///   to satisfy that role.
+/// - A member target other than the actor needs the actor to satisfy that
+///   member's role; a member whose role is unknown is refused (fail closed).
+/// - A custom role target can never be the reserved fold id. An allow change on
+///   a custom role is judged by the ceiling alone, but a deny change on one, or
+///   on an org or team target, can reach an owner who holds that role or sits in
+///   that team, so it needs the actor to be an owner. Callers exempt owners
+///   before this check, so in practice such denies are owner-only.
+pub fn check_acl_edit(
+    changes: &[AclEditChange],
+    actor_user_id: &str,
+    actor_role: crate::identity_verify::OrgRole,
+    member_roles: &BTreeMap<String, crate::identity_verify::OrgRole>,
+    holds: impl Fn(&str) -> bool,
+) -> Result<(), AclEditRefusal> {
+    use crate::identity_verify::OrgRole;
+
+    let mut outranked: BTreeSet<String> = BTreeSet::new();
+    for change in changes {
+        let allowed = match change.target_type.as_str() {
+            "role" => match change.target_id.as_str() {
+                "owner" => actor_role.satisfies(OrgRole::Owner),
+                "admin" => actor_role.satisfies(OrgRole::Admin),
+                "member" => actor_role.satisfies(OrgRole::Member),
+                "viewer" => actor_role.satisfies(OrgRole::Viewer),
+                RESERVED_CUSTOM_ROLE_ID => false,
+                _ => change.changed_deny.is_empty() || actor_role.satisfies(OrgRole::Owner),
+            },
+            "member" if change.target_id == actor_user_id => true,
+            "member" => member_roles
+                .get(&change.target_id)
+                .is_some_and(|role| actor_role.satisfies(*role)),
+            "org" | "team" => {
+                change.changed_deny.is_empty() || actor_role.satisfies(OrgRole::Owner)
+            }
+            _ => false,
+        };
+        if !allowed {
+            outranked.insert(format!("{}:{}", change.target_type, change.target_id));
+        }
+    }
+    if !outranked.is_empty() {
+        return Err(AclEditRefusal::Outranked(outranked.into_iter().collect()));
+    }
+
+    let unheld: BTreeSet<String> = changes
+        .iter()
+        .flat_map(|c| c.changed_allow.iter().chain(c.changed_deny.iter()))
+        .filter(|id| !holds(id))
+        .cloned()
+        .collect();
+    if unheld.is_empty() {
+        Ok(())
+    } else {
+        Err(AclEditRefusal::Unheld(unheld.into_iter().collect()))
+    }
+}
+
+#[cfg(test)]
+mod edit_ceiling_tests {
+    use super::*;
+    use crate::identity_verify::OrgRole;
+
+    fn row(
+        target_type: &str,
+        target_id: &str,
+        allow: &[&str],
+        deny: &[&str],
+    ) -> store::StoredOverwrite {
+        store::StoredOverwrite {
+            target_type: target_type.to_owned(),
+            target_id: target_id.to_owned(),
+            allow: allow.iter().map(|s| (*s).to_owned()).collect(),
+            deny: deny.iter().map(|s| (*s).to_owned()).collect(),
+        }
+    }
+
+    /// The finding's actor: a built-in `member` whose custom role carries only
+    /// `roles.manage` and `space.read`.
+    fn delegated_holds(id: &str) -> bool {
+        matches!(id, "roles.manage" | "space.read")
+    }
+
+    fn check(
+        current: &[store::StoredOverwrite],
+        proposed: &[store::StoredOverwrite],
+        role: OrgRole,
+        members: &[(&str, OrgRole)],
+        holds: impl Fn(&str) -> bool,
+    ) -> Result<(), AclEditRefusal> {
+        let changes = acl_edit_changes(current, proposed);
+        let roles = members
+            .iter()
+            .map(|(id, r)| ((*id).to_owned(), *r))
+            .collect();
+        check_acl_edit(&changes, "alice", role, &roles, holds)
+    }
+
+    #[test]
+    fn delegated_manager_cannot_allow_space_delete_to_themselves() {
+        let proposed = [row(
+            "member",
+            "alice",
+            &["space.write", "space.delete"],
+            &[],
+        )];
+        assert_eq!(
+            check(&[], &proposed, OrgRole::Member, &[], delegated_holds),
+            Err(AclEditRefusal::Unheld(vec![
+                "space.delete".to_owned(),
+                "space.write".to_owned()
+            ]))
+        );
+    }
+
+    #[test]
+    fn delegated_manager_cannot_allow_app_lifecycle_on_the_node() {
+        let proposed = [row(
+            "member",
+            "alice",
+            &["app.install", "app.update", "app.uninstall"],
+            &[],
+        )];
+        let refusal = check(&[], &proposed, OrgRole::Member, &[], delegated_holds).unwrap_err();
+        assert_eq!(
+            refusal,
+            AclEditRefusal::Unheld(vec![
+                "app.install".to_owned(),
+                "app.uninstall".to_owned(),
+                "app.update".to_owned()
+            ])
+        );
+    }
+
+    #[test]
+    fn delegated_manager_cannot_deny_an_owner_or_admin() {
+        let deny_owner_role = [row("role", "owner", &[], &["space.read"])];
+        assert_eq!(
+            check(&[], &deny_owner_role, OrgRole::Member, &[], delegated_holds),
+            Err(AclEditRefusal::Outranked(vec!["role:owner".to_owned()]))
+        );
+        let deny_owner_member = [row("member", "olivia", &[], &["space.read"])];
+        assert_eq!(
+            check(
+                &[],
+                &deny_owner_member,
+                OrgRole::Member,
+                &[("olivia", OrgRole::Owner)],
+                delegated_holds
+            ),
+            Err(AclEditRefusal::Outranked(vec!["member:olivia".to_owned()]))
+        );
+        let deny_org = [row("org", "org1", &[], &["space.read"])];
+        assert_eq!(
+            check(&[], &deny_org, OrgRole::Member, &[], delegated_holds),
+            Err(AclEditRefusal::Outranked(vec!["org:org1".to_owned()]))
+        );
+    }
+
+    #[test]
+    fn an_unresolved_member_target_fails_closed() {
+        let proposed = [row("member", "ghost", &["space.read"], &[])];
+        assert_eq!(
+            check(&[], &proposed, OrgRole::Admin, &[], |_| true),
+            Err(AclEditRefusal::Outranked(vec!["member:ghost".to_owned()]))
+        );
+    }
+
+    #[test]
+    fn the_reserved_custom_role_id_is_never_a_target() {
+        let proposed = [row("role", RESERVED_CUSTOM_ROLE_ID, &["space.read"], &[])];
+        assert!(check(&[], &proposed, OrgRole::Admin, &[], |_| true).is_err());
+    }
+
+    #[test]
+    fn removing_an_unheld_grant_is_also_refused() {
+        let current = [row("team", "t1", &["space.delete"], &[])];
+        assert_eq!(
+            check(&current, &[], OrgRole::Member, &[], delegated_holds),
+            Err(AclEditRefusal::Unheld(vec!["space.delete".to_owned()]))
+        );
+    }
+
+    #[test]
+    fn legitimate_edits_within_the_ceiling_pass() {
+        // Grant a peer and a team what the actor holds.
+        let proposed = [
+            row("member", "bob", &["space.read"], &[]),
+            row("team", "t1", &["space.read"], &[]),
+            row("role", "member", &["space.read"], &[]),
+        ];
+        assert_eq!(
+            check(
+                &[],
+                &proposed,
+                OrgRole::Member,
+                &[("bob", OrgRole::Member)],
+                delegated_holds
+            ),
+            Ok(())
+        );
+        // Re-saving rows an owner authored, unchanged, needs no authority over them.
+        let current = [row("role", "owner", &[], &["space.delete"])];
+        let mut proposed_with_owner_row = current.to_vec();
+        proposed_with_owner_row.push(row("member", "alice", &["space.read"], &[]));
+        assert_eq!(
+            check(
+                &current,
+                &proposed_with_owner_row,
+                OrgRole::Member,
+                &[],
+                delegated_holds
+            ),
+            Ok(())
+        );
+        // An admin may target other admins and allow on org, team, and custom roles.
+        let admin_edit = [
+            row("member", "dana", &[], &["space.write"]),
+            row("org", "org1", &["space.read"], &[]),
+            row("team", "t1", &["space.write"], &[]),
+            row("role", "ops", &["space.write"], &[]),
+        ];
+        assert_eq!(
+            check(
+                &[],
+                &admin_edit,
+                OrgRole::Admin,
+                &[("dana", OrgRole::Admin)],
+                |_| true
+            ),
+            Ok(())
+        );
+        // A delegated manager may allow what they hold to a custom role.
+        let custom_allow = [row("role", "ops", &["space.read"], &[])];
+        assert_eq!(
+            check(&[], &custom_allow, OrgRole::Member, &[], delegated_holds),
+            Ok(())
+        );
+        // The check itself lets an owner deny broadly (callers exempt owners first).
+        let owner_deny = [
+            row("org", "org1", &[], &["space.write"]),
+            row("role", "ops", &[], &["space.write"]),
+        ];
+        assert_eq!(
+            check(&[], &owner_deny, OrgRole::Owner, &[], |_| true),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn delegated_manager_cannot_deny_on_a_custom_role() {
+        // An owner may hold `ops`; a deny there would strip them of a held id.
+        let proposed = [row("role", "ops", &[], &["roles.manage"])];
+        assert_eq!(
+            check(&[], &proposed, OrgRole::Member, &[], delegated_holds),
+            Err(AclEditRefusal::Outranked(vec!["role:ops".to_owned()]))
+        );
+        // Removing an existing custom-role deny is a deny change too.
+        let current = [row("role", "ops", &[], &["space.read"])];
+        assert_eq!(
+            check(&current, &[], OrgRole::Member, &[], delegated_holds),
+            Err(AclEditRefusal::Outranked(vec!["role:ops".to_owned()]))
+        );
+    }
+
+    #[test]
+    fn an_admin_cannot_add_denies_that_reach_owners() {
+        for target in [
+            row("org", "org1", &[], &["roles.manage"]),
+            row("team", "t1", &[], &["roles.manage"]),
+            row("role", "ops", &[], &["roles.manage"]),
+        ] {
+            let label = format!("{}:{}", target.target_type, target.target_id);
+            assert_eq!(
+                check(&[], &[target], OrgRole::Admin, &[], |_| true),
+                Err(AclEditRefusal::Outranked(vec![label]))
+            );
+        }
+    }
 }

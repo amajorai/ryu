@@ -18,8 +18,8 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -27,16 +27,17 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { openExternal } from "@/lib/tauri-bridge.ts";
@@ -60,6 +61,7 @@ import {
 	useMcpOAuthConnections,
 	useMcpOAuthFlow,
 } from "@/src/hooks/useMcpOAuth.ts";
+import { ApiError } from "@/src/lib/api/client.ts";
 import type {
 	ComposioConnection,
 	ComposioToolkit,
@@ -129,11 +131,7 @@ export default function ConnectionsTab() {
 				</p>
 			</div>
 
-			{status.isLoading ? (
-				<div className="flex justify-center py-12">
-					<Spinner className="size-5" />
-				</div>
-			) : null}
+			{status.isLoading ? <SkeletonRows spacing="status" /> : null}
 			{status.isLoading || keyConfigured ? null : (
 				<KeyMissingState onOpenKeys={() => openGateway("keys")} />
 			)}
@@ -145,7 +143,8 @@ export default function ConnectionsTab() {
 							icon={Search01Icon}
 						/>
 						<Input
-							className="pl-9"
+							aria-label="Search integrations"
+							leadingAdornment="default"
 							onChange={(e: ChangeEvent<HTMLInputElement>) =>
 								setQuery(e.target.value)
 							}
@@ -156,7 +155,7 @@ export default function ConnectionsTab() {
 
 					<ToolkitResults
 						connectionByToolkit={connectionByToolkit}
-						error={toolkits.error as Error | null}
+						error={toolkits.error}
 						isLoading={toolkits.isLoading}
 						onClearQuery={() => setQuery("")}
 						query={query}
@@ -180,7 +179,7 @@ export function OAuthConnections({
 		new Set(["personal", ...identities.profileIds])
 	).sort();
 	if (loading) {
-		return <Spinner className="size-4" />;
+		return <SkeletonRows />;
 	}
 	if (apps.length === 0) {
 		return null;
@@ -283,7 +282,12 @@ export function OAuthServerCard({
 			});
 		} catch (error) {
 			sileo.error({
-				title: error instanceof Error ? error.message : "Could not disconnect.",
+				title:
+					error instanceof ApiError
+						? (error.serverMessage ?? error.message)
+						: error instanceof Error
+							? error.message
+							: "Could not disconnect.",
 			});
 		}
 	};
@@ -292,7 +296,9 @@ export function OAuthServerCard({
 		<article className="rounded-lg bg-card p-4">
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0">
-					<p className="truncate font-medium text-sm">{app.name}</p>
+					<p className="truncate font-medium text-sm" title={app.name}>
+						{app.name}
+					</p>
 					<p className="truncate text-muted-foreground text-xs">
 						{server.name} · {server.resource}
 					</p>
@@ -386,11 +392,7 @@ function ToolkitResults({
 	query: string;
 }) {
 	if (isLoading) {
-		return (
-			<div className="flex justify-center py-12">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows spacing="status" />;
 	}
 	if (error) {
 		return (
@@ -401,7 +403,7 @@ function ToolkitResults({
 	}
 	if (toolkits.length === 0) {
 		return (
-			<Empty className="py-12">
+			<Empty>
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={PlugSocketIcon} />
@@ -462,7 +464,7 @@ function ConnectionStatusBadge({
 }) {
 	if (connected) {
 		return (
-			<Badge className="gap-1" variant="secondary">
+			<Badge variant="secondary">
 				<span className="size-1.5 rounded-full bg-success" />
 				Connected
 			</Badge>
@@ -509,7 +511,9 @@ function ToolkitCard({
 				<ToolkitLogo toolkit={toolkit} />
 				<div className="min-w-0 flex-1">
 					<div className="flex items-center gap-2">
-						<span className="truncate font-medium text-sm">{toolkit.name}</span>
+						<span className="truncate font-medium text-sm" title={toolkit.name}>
+							{toolkit.name}
+						</span>
 						<ConnectionStatusBadge
 							connected={isConnected}
 							pending={isPending}
@@ -571,13 +575,13 @@ function ToolkitCard({
 function ToolkitLogo({ toolkit }: { toolkit: ComposioToolkit }) {
 	if (toolkit.logo) {
 		return (
-			// biome-ignore lint/performance/noImgElement: Tauri/Vite app, no next/image; logo is a remote Composio URL
-			// biome-ignore lint/correctness/useImageSize: sized via the `size-9` class, dimensions are fixed
+			// Tauri/Vite app, no next/image; logo is a remote Composio URL
+			// sized via the `size-9` class, dimensions are fixed
 			<img
 				alt={`${toolkit.name} logo`}
 				className="size-9 shrink-0 rounded-md bg-background object-contain p-1"
 				draggable={false}
-				src={toolkit.logo}
+				src={safeMediaUrl(toolkit.logo) ?? undefined}
 			/>
 		);
 	}
@@ -599,7 +603,7 @@ function ToolkitTools({ toolkit }: { toolkit: string }) {
 		<div className="mt-3 space-y-3 border-t pt-3">
 			<ToolSection
 				emptyLabel="No tools listed for this integration."
-				error={actions.error as Error | null}
+				error={actions.error}
 				items={(actions.data ?? []).map((a) => ({
 					id: a.name,
 					label: a.displayName,
@@ -611,7 +615,7 @@ function ToolkitTools({ toolkit }: { toolkit: string }) {
 			{triggers.data && triggers.data.length > 0 ? (
 				<ToolSection
 					emptyLabel="No triggers for this integration."
-					error={triggers.error as Error | null}
+					error={triggers.error}
 					items={triggers.data.map((t) => ({
 						id: t.name,
 						label: t.displayName,
@@ -644,7 +648,7 @@ function ToolSectionBody({
 	emptyLabel: string;
 }) {
 	if (loading) {
-		return <Spinner className="size-4" />;
+		return <SkeletonRows />;
 	}
 	if (error) {
 		return <p className="text-status-destructive text-xs">{error.message}</p>;
@@ -661,7 +665,10 @@ function ToolSectionBody({
 				>
 					<span className="font-medium">{item.label}</span>
 					{item.description ? (
-						<span className="block truncate text-muted-foreground">
+						<span
+							className="block truncate text-muted-foreground"
+							title={item.description}
+						>
 							{item.description}
 						</span>
 					) : null}

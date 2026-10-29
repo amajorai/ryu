@@ -44,7 +44,6 @@ import {
 	type VerificationDetails,
 	VerificationPopover,
 } from "@ryu/ui/components/verification-popover.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type PublisherTrustLevel,
 	publisherTrustLabel,
@@ -60,11 +59,13 @@ import {
  *  word would put the string "Community" on a card next to an amber "Not
  *  reviewed by Ryu" alert and invite exactly the wrong reading, so the tier is
  *  never shown alone: it is always a qualifier on "Verified organization". */
-const TIER_LABEL: Record<string, string> = {
-	official: "Official",
-	partner: "Partner",
-	community: "Community",
-};
+const TIER_LABEL = new Map(
+	Object.entries({
+		official: "Official",
+		partner: "Partner",
+		community: "Community",
+	})
+);
 
 /**
  * The badge's accessible name and fallback description for a tier.
@@ -78,7 +79,7 @@ const TIER_LABEL: Record<string, string> = {
  * Exported so the label rules are unit-testable without rendering.
  */
 export function verifiedLabel(tier?: string | null): string {
-	const known = tier ? TIER_LABEL[tier.trim().toLowerCase()] : undefined;
+	const known = tier ? TIER_LABEL.get(tier.trim().toLowerCase()) : undefined;
 	return known ? `Verified organization — ${known}` : "Verified organization";
 }
 
@@ -109,8 +110,8 @@ export default function VerifiedBadge({
 	 *  `verified` here would read as the manifest-signature flag the web
 	 *  marketplace card carries under that exact word. */
 	orgVerified?: boolean;
-	/** The complete publisher identity mark. When present, dotted is intentional
-	 * and renders for an allowed-but-not-verified community publisher. */
+	/** The complete publisher identity mark. `dotted` (unpaid publisher)
+	 * renders nothing: only gold and blue publishers get a check. */
 	publisherTrust?: PublisherTrustLevel | null;
 	/** Server-derived evidence for the publisher mark. */
 	verificationDetails?: VerificationDetails | null;
@@ -128,16 +129,14 @@ export default function VerifiedBadge({
 	// New catalog payloads carry the complete publisher mark. Older Core-facing
 	// payloads only carry the org flag and tier, so retain their established
 	// semantics: an explicit true renders the tier-qualified organization badge;
-	// false/absent renders nothing. In particular, do not infer a visible dotted
-	// mark from a legacy false — dotted is meaningful only when the wire explicitly
-	// says that this publisher trust level was resolved.
+	// false/absent renders nothing.
 	const hasExplicitPublisherTrust =
 		publisherTrust !== null && publisherTrust !== undefined;
 	if (!(hasExplicitPublisherTrust || orgVerified)) {
 		return null;
 	}
-	const level = publisherTrust ?? "blue";
-	if (!level) {
+	const level = publisherTrust ?? "gold";
+	if (level === "dotted") {
 		return null;
 	}
 	const label = hasExplicitPublisherTrust
@@ -146,31 +145,26 @@ export default function VerifiedBadge({
 	const tooltip = hasExplicitPublisherTrust
 		? publisherTrustTooltip(level)
 		: label;
-	const details =
-		verificationDetails ??
-		(level === "dotted"
-			? { methods: [] }
-			: {
-					methods: [
-						{
-							kind: level === "gold" ? "organization" : "identity",
-							label: tooltip,
-						},
-					],
-				});
-	const iconTone =
+	const details = verificationDetails ?? {
+		methods: [
+			{
+				kind: level === "gold" ? "organization" : "platform",
+				label: tooltip,
+			},
+		],
+	};
+	const appearance =
 		level === "gold"
 			? tone === "hero"
-				? "text-yellow-100 drop-shadow-[0_0_4px_rgba(250,200,0,0.75)]"
-				: "text-yellow-500 drop-shadow-[0_0_3px_rgba(250,200,0,0.7)] dark:text-yellow-300"
-			: level === "blue"
-				? tone === "hero"
-					? "text-sky-100"
-					: "text-status-info"
-				: "text-muted-foreground/70 opacity-50 transition-opacity focus-within:opacity-100 hover:opacity-100";
+				? "publisher-gold-hero"
+				: "publisher-gold-card"
+			: tone === "hero"
+				? "publisher-blue-hero"
+				: "publisher-blue-card";
 	return (
 		<VerificationPopover
-			className={cn(iconTone, className)}
+			appearance={appearance}
+			className={className}
 			description={tooltip}
 			details={details}
 			label={label}

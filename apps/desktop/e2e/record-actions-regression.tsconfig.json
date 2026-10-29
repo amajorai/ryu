@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "record-actions-regression.spec.ts",
+    "record-actions-regression.playwright.config.ts",
+    "harness/record-companion-regression.types.ts"
+  ]
+}

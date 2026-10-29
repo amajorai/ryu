@@ -1,20 +1,20 @@
 {
   "name": "island",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "electron-vite build",
-    "dist": "electron-vite build && electron-builder --config electron-builder.yml",
-    "dist:win": "electron-vite build && electron-builder --win --config electron-builder.yml",
-    "dist:mac": "electron-vite build && electron-builder --mac --config electron-builder.yml",
-    "dist:linux": "electron-vite build && electron-builder --linux --config electron-builder.yml",
+    "build": "electron-vite build && node scripts/verify-built-bundles.mjs",
+    "dist": "electron-vite build && node scripts/verify-built-bundles.mjs && electron-builder --config electron-builder.yml",
+    "dist:win": "electron-vite build && node scripts/verify-built-bundles.mjs && electron-builder --win --config electron-builder.yml",
+    "dist:mac": "electron-vite build && node scripts/verify-built-bundles.mjs && electron-builder --mac --config electron-builder.yml",
+    "dist:linux": "electron-vite build && node scripts/verify-built-bundles.mjs && electron-builder --linux --config electron-builder.yml",
     "preview": "electron-vite preview",
     "check-types": "tsc --noEmit",
-    "test": "bun test src",
-    "clean": "rm -rf out artifacts && rm -f electron.vite.config.*.mjs"
+    "test": "bun test --isolate src",
+    "clean": "node ../../scripts/clean-paths.mjs paths out artifacts && node ../../scripts/clean-paths.mjs pattern electron-vite"
   },
   "dependencies": {
     "@ai-sdk/react": "catalog:",
@@ -35,14 +35,15 @@
     "react": "^19",
     "react-dom": "^19",
     "uiohook-napi": "^1.5.5",
-    "zustand": "^5"
+    "zustand": "^5",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
-    "electron": "^33.2.1",
+    "electron": "^42.11.16",
     "electron-builder": "^26.0.12",
     "electron-vite": "^2.3.0",
     "tailwindcss": "catalog:",
@@ -50,6 +51,7 @@
     "vite": "^6"
   },
   "optionalDependencies": {
+    "electron-liquid-glass": "1.1.1",
     "koffi": "^2.10.0",
     "mica-electron": "^1.5.17"
   },

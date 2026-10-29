@@ -1,6 +1,5 @@
-import { Button } from "@ryu/ui/components/button";
-import { Card } from "@ryu/ui/components/card";
-import { cn } from "@ryu/ui/lib/utils";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Card } from "@ryu/ui/components/card.tsx";
 import { Maximize2 } from "lucide-react";
 import type { DragEvent } from "react";
 import type { DbColumn, DbRow } from "@/src/lib/realtime/yjs-database.ts";
@@ -49,22 +48,24 @@ export function RowCard({
 
 	return (
 		<Card
-			className={cn(
-				"group cursor-pointer gap-2 p-3 shadow-sm transition-shadow hover:shadow-md",
-				dragging && "opacity-50"
-			)}
+			appearance="database-row"
+			className="group cursor-pointer"
 			draggable={draggable}
+			interaction={dragging ? "drag" : undefined}
 			onClick={() => onOpen(row)}
 			onDragEnd={onDragEnd}
 			onDragStart={onDragStart}
 		>
 			<div className="flex items-start justify-between gap-2">
-				<span className="min-w-0 flex-1 truncate font-medium text-sm">
+				<span
+					className="min-w-0 flex-1 truncate font-medium text-sm"
+					title={title}
+				>
 					{title}
 				</span>
 				<Button
 					aria-label="Open row"
-					className="size-6 shrink-0 opacity-0 group-hover:opacity-100"
+					className="size-6 shrink-0"
 					onClick={(e) => {
 						e.stopPropagation();
 						onOpen(row);

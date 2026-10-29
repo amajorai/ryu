@@ -37,7 +37,7 @@ impl LlmFit {
         } else {
             "llmfit"
         };
-        crate::paths::ryu_dir().join("bin").join(name)
+        crate::paths::bin_dir().join(name)
     }
 }
 

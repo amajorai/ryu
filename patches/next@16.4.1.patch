@@ -1,0 +1,92 @@
+diff --git a/dist/compiled/@vercel/og/index.edge.js b/dist/compiled/@vercel/og/index.edge.js
+index 8cd9c3c07ff245a162e87fe11aa0ddcf35e9aabc..adba5097f887e9fd22a899dd67073f125a4868dc 100644
+--- a/dist/compiled/@vercel/og/index.edge.js
++++ b/dist/compiled/@vercel/og/index.edge.js
+@@ -20526,6 +20526,7 @@ async function render(satori, resvg, sharp, opts, defaultFonts, element) {
+     width: options.width,
+     height: options.height,
+     debug: options.debug,
++    tailwindConfig: options.tailwindConfig,
+     fonts: options.fonts || defaultFonts,
+     loadAdditionalAsset: loadDynamicAsset({
+       emoji: options.emoji
+diff --git a/dist/compiled/@vercel/og/index.node.js b/dist/compiled/@vercel/og/index.node.js
+index 279524efd3e94fc0e9965f633736e8fba1aa6b04..b2fc653f6ccd6e7ab9b058442037681e49e63b1c 100644
+--- a/dist/compiled/@vercel/og/index.node.js
++++ b/dist/compiled/@vercel/og/index.node.js
+@@ -20501,6 +20501,7 @@ async function render(satori2, resvg, sharp, opts, defaultFonts, element) {
+     width: options.width,
+     height: options.height,
+     debug: options.debug,
++    tailwindConfig: options.tailwindConfig,
+     fonts: options.fonts || defaultFonts,
+     loadAdditionalAsset: loadDynamicAsset({
+       emoji: options.emoji
+diff --git a/dist/compiled/@vercel/og/types.d.ts b/dist/compiled/@vercel/og/types.d.ts
+index 301d228d11ceeb7c318e21ca4739ee4d00f419d0..fd4f6a9bf4e0df3a564716631b3b50159896a17b 100644
+--- a/dist/compiled/@vercel/og/types.d.ts
++++ b/dist/compiled/@vercel/og/types.d.ts
+@@ -40,6 +40,7 @@ type ImageOptions = {
+      * @default Noto Sans Latin Regular.
+      */
+     fonts?: SatoriOptions['fonts'];
++    tailwindConfig?: SatoriOptions['tailwindConfig'];
+     /**
+      * Using a specific Emoji style. Defaults to `twemoji`.
+      *
+diff --git a/dist/build/templates/app-page-runtime.js b/dist/build/templates/app-page-runtime.js
+index fc5eef1..5b24709 100644
+--- a/dist/build/templates/app-page-runtime.js
++++ b/dist/build/templates/app-page-runtime.js
+@@ -464,7 +464,22 @@ function createAppPageEntrypoint({ tree, page, pathname, require: __next_app_req
+         };
+         try {
+             const varyHeader = routeModule.getVaryHeader(resolvedPathname, interceptionRoutePatterns);
+-            res.setHeader('Vary', varyHeader);
++            // Keep Vary tokens set earlier (proxy, next.config headers) instead of
++            // replacing them: a page negotiated on Accept must say so to caches.
++            const earlierVary = res.getHeader('Vary');
++            const varyTokens = new Map();
++            for (const token of [
++                varyHeader,
++                ...Array.isArray(earlierVary) ? earlierVary : earlierVary == null ? [] : [
++                    String(earlierVary)
++                ]
++            ].join(',').split(',')){
++                const trimmed = token.trim();
++                if (trimmed && !varyTokens.has(trimmed.toLowerCase())) varyTokens.set(trimmed.toLowerCase(), trimmed);
++            }
++            res.setHeader('Vary', [
++                ...varyTokens.values()
++            ].join(', '));
+             let parentSpan;
+             const invokeRouteModule = async (span, context, renderOperation)=>{
+                 const nextReq = new _node.NodeNextRequest(req);
+diff --git a/dist/esm/build/templates/app-page-runtime.js b/dist/esm/build/templates/app-page-runtime.js
+index 96beb1b..0784b52 100644
+--- a/dist/esm/build/templates/app-page-runtime.js
++++ b/dist/esm/build/templates/app-page-runtime.js
+@@ -483,7 +483,22 @@ export function createAppPageEntrypoint({ tree, page, pathname, require: __next_
+         };
+         try {
+             const varyHeader = routeModule.getVaryHeader(resolvedPathname, interceptionRoutePatterns);
+-            res.setHeader('Vary', varyHeader);
++            // Keep Vary tokens set earlier (proxy, next.config headers) instead of
++            // replacing them: a page negotiated on Accept must say so to caches.
++            const earlierVary = res.getHeader('Vary');
++            const varyTokens = new Map();
++            for (const token of [
++                varyHeader,
++                ...Array.isArray(earlierVary) ? earlierVary : earlierVary == null ? [] : [
++                    String(earlierVary)
++                ]
++            ].join(',').split(',')){
++                const trimmed = token.trim();
++                if (trimmed && !varyTokens.has(trimmed.toLowerCase())) varyTokens.set(trimmed.toLowerCase(), trimmed);
++            }
++            res.setHeader('Vary', [
++                ...varyTokens.values()
++            ].join(', '));
+             let parentSpan;
+             const invokeRouteModule = async (span, context, renderOperation)=>{
+                 const nextReq = new NodeNextRequest(req);

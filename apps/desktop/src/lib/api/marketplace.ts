@@ -1,3 +1,45 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
+import {
+	catalogEnvelopeSchema,
+	creatorFieldsEnvelopeSchema,
+	creatorProfileEnvelopeSchema,
+	creatorsEnvelopeSchema,
+	githubCompletionWireSchema,
+	githubPublishWireSchema,
+	installedPortablePackagesSchema,
+	licensesEnvelopeSchema,
+	likesEnvelopeSchema,
+	marketplaceBundleKindSchema,
+	marketplaceDetailWireSchema,
+	marketplaceKindSchema,
+	marketplaceMembershipPublisherReportSchema,
+	marketplaceMembershipUsageResultSchema,
+	marketplaceOwnCreatorProfileSchema,
+	parseMarketplaceResponse,
+	portablePackageEnvelopeSchema,
+	postReviewResultSchema,
+	publishResultSchema,
+	purchaseWireSchema,
+	reportEnvelopeSchema,
+	reportSubmissionSchema,
+	reportsEnvelopeSchema,
+	reviewFailureSchema,
+	reviewsPageSchema,
+	urlResponseSchema,
+} from "./marketplace-response-contracts.ts";
+
+import {
+	type MarketplaceDocument,
+	type MarketplaceValue,
+	marketplaceDocumentSchema,
+	marketplaceNonemptyStrings,
+	marketplaceNumberField,
+	marketplaceRecord,
+	marketplaceString,
+	marketplaceStringField,
+	marketplaceStringList,
+	type marketplaceValueSchema,
+} from "./marketplace-wire-values.ts";
 // apps/desktop/src/lib/api/marketplace.ts
 //
 // Typed client for the Ryu Marketplace money layer (monetization #492, spec §3).
@@ -19,10 +61,11 @@
 //   POST /api/marketplace/purchase              -> a Stripe Checkout URL (Connect)
 //   GET  /api/marketplace/licenses              -> the active org's owned items
 //
-// Money amounts are integer minor units (cents); {@link formatPrice} converts for
-// display. The purchase opens a hosted Stripe URL externally and the license is
-// granted asynchronously by the server webhook, so the UI re-fetches licenses on
-// window focus (mirrors useCreditsWallet).
+// Money amounts are integer minor units (cents); `formatPrice`
+// (@ryu/marketplace/types) converts for display. The purchase opens a hosted
+// Stripe URL externally and the license is granted asynchronously by the server
+// webhook, so the UI re-fetches licenses on window focus (mirrors
+// useCreditsWallet).
 
 import type { LanguagePackSummary } from "@ryu/i18n/core";
 import type {
@@ -30,47 +73,37 @@ import type {
 	MarketplaceCommunityStats,
 } from "@ryu/marketplace/catalog/bundle-types";
 import { MARKETPLACE_BROWSE_KINDS } from "@ryu/marketplace/catalog/chrome/marketplace-sections";
+import type { MarketplacePublishPreflightReport } from "@ryu/marketplace/catalog/publish-preflight";
+import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import type { CatalogBanner } from "@ryu/marketplace/catalog/types";
+import type {
+	MarketplaceCreator,
+	MarketplaceCreatorProfile,
+	MarketplaceCreatorProfileFields,
+	MarketplaceCreatorSort,
+	MarketplaceOwnCreatorProfile,
+} from "@ryu/marketplace/creators/types";
+import {
+	formatPricingLabel,
+	type LicenseStatus,
+	type MarketplaceKind,
+	type OwnedLicense,
+} from "@ryu/marketplace/types";
 import type { VerificationDetails } from "@ryu/ui/components/verification-popover.tsx";
-import { formatMinorCurrency } from "@ryu/ui/lib/number-format.ts";
 import {
 	type PublisherTrustLevel,
 	type PublisherTrustSource,
-	resolvePublisherTrust,
+	publisherTrustFromOrgFlag,
 } from "@ryuhq/protocol/publisher-trust";
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 import {
 	type ApiTarget,
 	buyerTokenHeader,
 	request,
 } from "@/src/lib/api/client.ts";
 
-/** The catalog kinds, matching the server's `MarketplaceKind`.
- *
- * `agent` is a user-PUBLISHED Agent Template (instructions + model preference
- * + declared dependencies), not an ACP runtime like Claude Code — those live in
- * Core's own Agents catalog and never reach this client. */
-export type MarketplaceKind =
-	| "app"
-	| "plugin"
-	| "skill"
-	| "model"
-	| "mcp"
-	| "agent"
-	| "stack_template"
-	| "workflow"
-	| "theme"
-	| "language_pack"
-	| "space"
-	| "profile"
-	| "output_style"
-	| "bundle";
-
 /** Pricing model for a paid item. Free items carry no pricing at all. */
 export type PricingModel = "one_time" | "subscription" | "bounded_updates";
-
-/** Purchase/license lifecycle, mirroring the server's `LicenseStatus`. */
-export type LicenseStatus = "active" | "expired" | "refunded" | "disputed";
 
 /** The pricing view the server surfaces for a paid item (null ⇒ free). */
 export interface PricingView {
@@ -120,7 +153,7 @@ export interface MarketplaceCard {
 	description: string | null;
 	downloadUrl: string | null;
 	firstParty: boolean;
-	githubSource: Record<string, unknown> | null;
+	githubSource: MarketplaceDocument | null;
 	/** Resolvable logo URL (https / data:), or null when the item has no icon. */
 	iconUrl: string | null;
 	id: string;
@@ -139,8 +172,8 @@ export interface MarketplaceCard {
 	orgVerifiedTier: string | null;
 	packageChecksum: string | null;
 	packageKind: string | null;
-	packageSecurity: Record<string, unknown> | null;
-	packageSource: Record<string, unknown> | string | null;
+	packageSecurity: MarketplaceDocument | null;
+	packageSource: MarketplaceDocument | string | null;
 	pricing: PricingView | null;
 	publisherTrust: PublisherTrustLevel;
 	publisherTrustSource: PublisherTrustSource;
@@ -149,11 +182,11 @@ export interface MarketplaceCard {
 	ratingAverage: number;
 	/** Total count of published reviews. */
 	ratingCount: number;
-	requirements: Record<string, unknown>;
+	requirements: MarketplaceDocument;
 	scopes: string[];
 	targets: string[];
 	updateAvailable: boolean;
-	updatePreview: Record<string, unknown> | null;
+	updatePreview: MarketplaceDocument | null;
 	/** Manifest signature verdict for display (#450). See {@link VerificationStatus}. */
 	verification: VerificationStatus;
 	version: string;
@@ -161,7 +194,7 @@ export interface MarketplaceCard {
 
 /** Wire shape of a catalog card before client normalization. Forward-compatible:
  *  `verified`/`signature` are optional and only emitted once Core/server adds them. */
-interface MarketplaceCardWire
+export interface MarketplaceCardWire
 	extends Omit<
 		MarketplaceCard,
 		| "verification"
@@ -195,7 +228,7 @@ interface MarketplaceCardWire
 	bundleMemberCount?: number | null;
 	communityStats?: Partial<MarketplaceCommunityStats> | null;
 	downloadUrl?: string | null;
-	githubSource?: Record<string, unknown> | null;
+	githubSource?: MarketplaceDocument | null;
 	installedVersion?: string | null;
 	languagePack?: LanguagePackSummary | null;
 	latestVersion?: string | null;
@@ -206,18 +239,18 @@ interface MarketplaceCardWire
 	orgVerifiedTier?: string | null;
 	packageChecksum?: string | null;
 	packageKind?: string | null;
-	packageSecurity?: Record<string, unknown> | null;
-	packageSource?: Record<string, unknown> | string | null;
+	packageSecurity?: MarketplaceDocument | null;
+	packageSource?: MarketplaceDocument | string | null;
 	publisherTrust?: PublisherTrustLevel | null;
 	publisherTrustSource?: PublisherTrustSource | null;
 	publisherVerification?: VerificationDetails | null;
-	requirements?: Record<string, unknown> | null;
+	requirements?: MarketplaceDocument | null;
 	scopes?: string[] | null;
 	/** Future Core/server field: presence implies signed (verdict still preferred). */
 	signature?: string | null;
 	targets?: string[] | null;
 	updateAvailable?: boolean | null;
-	updatePreview?: Record<string, unknown> | null;
+	updatePreview?: MarketplaceDocument | null;
 	/** Future Core/server field: the manifest verification verdict, if reported. */
 	verified?: VerificationStatus | boolean | null;
 }
@@ -230,7 +263,12 @@ interface MarketplaceCardWire
  * "unknown" (provenance not reported, so do NOT claim "verified").
  */
 function resolveVerification(card: MarketplaceCardWire): VerificationStatus {
-	if (typeof card.verified === "string") {
+	if (
+		card.verified === "verified" ||
+		card.verified === "unsigned" ||
+		card.verified === "invalid" ||
+		card.verified === "unknown"
+	) {
 		return card.verified;
 	}
 	if (card.verified === true) {
@@ -249,43 +287,33 @@ function resolveVerification(card: MarketplaceCardWire): VerificationStatus {
 }
 
 function toMarketplaceCard(card: MarketplaceCardWire): MarketplaceCard {
-	const { verified, signature, ...rest } = card;
+	const { verified: _verified, signature: _signature, ...rest } = card;
 	return {
 		...rest,
 		artifactKinds: rest.artifactKinds ?? [],
-		bundleMemberCount:
-			typeof card.bundleMemberCount === "number" ? card.bundleMemberCount : 0,
+		bundleMemberCount: marketplaceNumberField(card.bundleMemberCount) ?? 0,
 		iconUrl: rest.iconUrl ?? null,
 		category: rest.category ?? null,
 		communityStats: {
-			downloads:
-				typeof card.communityStats?.downloads === "number"
-					? card.communityStats.downloads
-					: 0,
-			instances:
-				typeof card.communityStats?.instances === "number"
-					? card.communityStats.instances
-					: 0,
-			runs:
-				typeof card.communityStats?.runs === "number"
-					? card.communityStats.runs
-					: 0,
+			downloads: marketplaceNumberField(card.communityStats?.downloads) ?? 0,
+			instances: marketplaceNumberField(card.communityStats?.instances) ?? 0,
+			runs: marketplaceNumberField(card.communityStats?.runs) ?? 0,
 		},
-		likeCount: typeof card.likeCount === "number" ? card.likeCount : 0,
+		likeCount: marketplaceNumberField(card.likeCount) ?? 0,
 		likedByMe: card.likedByMe === true,
 		orgVerified: Boolean(card.orgVerified),
 		orgVerifiedTier: card.orgVerifiedTier ?? null,
 		publisherTrust:
 			card.publisherTrust ??
-			resolvePublisherTrust({
+			publisherTrustFromOrgFlag({
 				firstParty: card.firstParty,
-				ryuStaffVerified: card.orgVerified,
+				orgVerified: card.orgVerified,
 			}).level,
 		publisherTrustSource:
 			card.publisherTrustSource ??
-			resolvePublisherTrust({
+			publisherTrustFromOrgFlag({
 				firstParty: card.firstParty,
-				ryuStaffVerified: card.orgVerified,
+				orgVerified: card.orgVerified,
 			}).source,
 		publisherVerification: card.publisherVerification ?? null,
 		packageKind: rest.packageKind ?? null,
@@ -315,40 +343,8 @@ function toMarketplaceCard(card: MarketplaceCardWire): MarketplaceCard {
 	};
 }
 
-/** One owned license, enriched with the item's display name (#492). */
-export interface OwnedLicense {
-	buyerOrgId: string;
-	buyerUserId: string;
-	currency: string;
-	entitlementUntil: string | null;
-	id: string;
-	itemId: string;
-	itemKind: MarketplaceKind;
-	itemName: string | null;
-	itemVersion: string;
-	platformFeeMinor: number;
-	priceMinor: number;
-	purchasedAt: string;
-	status: LicenseStatus;
-	stripePaymentIntentId: string | null;
-	stripeSubscriptionId: string | null;
-}
-
-/** Format a minor-unit (cents) amount as a localized currency string. */
-export function formatPrice(amountMinor: number, currency = "usd"): string {
-	return formatMinorCurrency(amountMinor, currency);
-}
-
-/** Add the billing or included-update term to a marketplace price. */
-export function formatPricingLabel(pricing: PricingView): string {
-	const suffix =
-		pricing.model === "subscription"
-			? `/${pricing.interval === "year" ? "yr" : "mo"}`
-			: pricing.model === "bounded_updates"
-				? ` · ${pricing.maxUpdates ?? "limited"} updates`
-				: "";
-	return `${formatPrice(pricing.amountMinor, pricing.currency)}${suffix}`;
-}
+export type { LicenseStatus, MarketplaceKind, OwnedLicense };
+export { formatPricingLabel };
 
 export interface MarketplaceMembershipUsageResult {
 	created: boolean;
@@ -384,11 +380,14 @@ export async function recordMarketplaceMembershipUsage(input: {
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<MarketplaceMembershipUsageResult>;
+	const json = parseMarketplaceResponse(
+		marketplaceMembershipUsageResultSchema.partial(),
+		await resp.json()
+	);
 	return {
 		created: Boolean(json.created),
 		ok: Boolean(json.ok),
-		periodId: typeof json.periodId === "string" ? json.periodId : "",
+		periodId: marketplaceStringField(json.periodId) ?? "",
 	};
 }
 
@@ -400,38 +399,30 @@ export async function fetchMarketplaceMembershipPublisherReport(): Promise<Marke
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json =
-		(await resp.json()) as Partial<MarketplaceMembershipPublisherReport>;
+	const json = parseMarketplaceResponse(
+		marketplaceMembershipPublisherReportSchema.partial(),
+		await resp.json()
+	);
 	return {
 		currencies: Array.isArray(json.currencies)
 			? json.currencies.map((currency) => ({
-					currency:
-						typeof currency.currency === "string" ? currency.currency : "usd",
-					failedMinor:
-						typeof currency.failedMinor === "number" ? currency.failedMinor : 0,
-					paidMinor:
-						typeof currency.paidMinor === "number" ? currency.paidMinor : 0,
-					pendingMinor:
-						typeof currency.pendingMinor === "number"
-							? currency.pendingMinor
-							: 0,
-					usageCount:
-						typeof currency.usageCount === "number" ? currency.usageCount : 0,
+					currency: marketplaceStringField(currency.currency) ?? "usd",
+					failedMinor: marketplaceNumberField(currency.failedMinor) ?? 0,
+					paidMinor: marketplaceNumberField(currency.paidMinor) ?? 0,
+					pendingMinor: marketplaceNumberField(currency.pendingMinor) ?? 0,
+					usageCount: marketplaceNumberField(currency.usageCount) ?? 0,
 				}))
 			: [],
 		eligibleListingCount:
-			typeof json.eligibleListingCount === "number"
-				? json.eligibleListingCount
-				: 0,
-		organizationId:
-			typeof json.organizationId === "string" ? json.organizationId : "",
+			marketplaceNumberField(json.eligibleListingCount) ?? 0,
+		organizationId: marketplaceStringField(json.organizationId) ?? "",
 	};
 }
 
 /** True when the user has a session token; the money layer requires sign-in. */
 export function hasMarketplaceAuth(): boolean {
 	try {
-		return Boolean(localStorage.getItem(TOKEN_KEY));
+		return Boolean(getActiveToken());
 	} catch {
 		return false;
 	}
@@ -479,6 +470,15 @@ export interface PrivatePackageSharePreview {
 
 export interface PrivatePackageShareRedeemResult {
 	installSession: string;
+	/** When the install session stops authorizing installs, if the server said. */
+	installSessionExpiresAt?: string | null;
+	preview: PrivatePackageSharePreview;
+}
+
+/** A redeemed install session this process can still reuse for its code. */
+export interface RedeemedPrivatePackageShareSession {
+	expiresAtMs: number;
+	installSession: string;
 	preview: PrivatePackageSharePreview;
 }
 
@@ -520,27 +520,12 @@ export function formatPrivatePackageShareCode(value: string): string {
 	return normalized.match(/.{1,4}/g)?.join("-") ?? normalized;
 }
 
-function recordValue(value: unknown): Record<string, unknown> | null {
-	return value && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function stringValue(value: unknown): string | null {
-	return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function stringList(value: unknown): string[] {
-	return Array.isArray(value)
-		? value.filter(
-				(entry): entry is string =>
-					typeof entry === "string" && entry.trim().length > 0
-			)
-		: [];
-}
+const recordValue = marketplaceRecord;
+const stringValue = marketplaceString;
+const stringList = marketplaceStringList;
 
 function resolveConnectionRequirements(
-	value: unknown
+	value: Parameters<typeof marketplaceValueSchema.parse>[0]
 ): PackageConnectionRequirement[] {
 	if (!Array.isArray(value)) {
 		return [];
@@ -583,12 +568,12 @@ function resolveConnectionRequirements(
 }
 
 function resolvePrivateSharePreview(
-	value: unknown
+	value: Parameters<typeof marketplaceValueSchema.parse>[0]
 ): PrivatePackageSharePreview {
 	const envelope = recordValue(value);
 	const raw =
 		recordValue(envelope?.preview ?? envelope?.listing ?? value) ?? {};
-	const kind = stringValue(raw.kind) as MarketplaceKind | null;
+	const kind = marketplaceKindSchema.nullable().parse(stringValue(raw.kind));
 	const verification = stringValue(raw.verification ?? envelope?.verification);
 	return {
 		audience:
@@ -614,11 +599,9 @@ function resolvePrivateSharePreview(
 			raw.organization_name ?? raw.organizationName
 		),
 		packageSizeBytes:
-			typeof raw.package_size_bytes === "number"
-				? raw.package_size_bytes
-				: typeof raw.packageSizeBytes === "number"
-					? raw.packageSizeBytes
-					: null,
+			marketplaceNumberField(raw.package_size_bytes) ??
+			marketplaceNumberField(raw.packageSizeBytes) ??
+			null,
 		version: stringValue(raw.version) ?? "",
 		verification:
 			verification === "verified" ||
@@ -629,7 +612,7 @@ function resolvePrivateSharePreview(
 	};
 }
 
-async function postPrivateShareCode<T>(path: string, code: string): Promise<T> {
+async function postPrivateShareCode(path: string, code: string) {
 	const normalized = normalizePrivatePackageShareCode(code);
 	if (!CROCKFORD_CODE_RE.test(normalized)) {
 		throw new MarketplaceError(
@@ -660,26 +643,77 @@ async function postPrivateShareCode<T>(path: string, code: string): Promise<T> {
 		}
 		throw error;
 	}
-	return (await resp.json()) as T;
+	return marketplaceDocumentSchema.parse(await resp.json());
 }
 
 export async function previewPrivatePackageShareCode(
 	code: string
 ): Promise<PrivatePackageSharePreview> {
-	const json = await postPrivateShareCode<Record<string, unknown>>(
-		"/share-codes/preview",
-		code
-	);
+	const json = await postPrivateShareCode("/share-codes/preview", code);
 	return resolvePrivateSharePreview(json);
+}
+
+/** Do not hand out a cached session this close to its expiry. */
+const SHARE_SESSION_REUSE_MARGIN_MS = 30_000;
+/**
+ * The Marketplace's install-session lifetime. The server's expiry is read on
+ * this machine's clock, so a clock running behind would otherwise keep reusing
+ * a session the Marketplace already expired; reuse never outlives this.
+ */
+const SHARE_SESSION_MAX_REUSE_MS = 15 * 60_000;
+
+/**
+ * Install sessions redeemed in this process, keyed by signed-in account and
+ * normalized code. Every redeem spends one of the code's redemptions, while the
+ * session it returns stays valid until it expires, so a failed install or a
+ * reopened dialog reuses it instead of burning another redemption (a single-use
+ * code would otherwise be gone). Memory only; never written to storage.
+ */
+const redeemedShareSessions = new Map<
+	string,
+	RedeemedPrivatePackageShareSession
+>();
+
+function redeemedShareSessionKey(code: string): string {
+	return JSON.stringify([
+		authHeaders().get("Authorization") ?? "",
+		normalizePrivatePackageShareCode(code),
+	]);
+}
+
+/** The still-live session this account already redeemed for `code`, if any. */
+export function peekRedeemedPrivatePackageShareSession(
+	code: string
+): RedeemedPrivatePackageShareSession | null {
+	const key = redeemedShareSessionKey(code);
+	const entry = redeemedShareSessions.get(key);
+	if (!entry) {
+		return null;
+	}
+	if (entry.expiresAtMs - SHARE_SESSION_REUSE_MARGIN_MS > Date.now()) {
+		return entry;
+	}
+	redeemedShareSessions.delete(key);
+	return null;
+}
+
+/** Drop the cached session for `code` (after it installed successfully). */
+export function forgetRedeemedPrivatePackageShareSession(code: string): void {
+	redeemedShareSessions.delete(redeemedShareSessionKey(code));
 }
 
 export async function redeemPrivatePackageShareCode(
 	code: string
 ): Promise<PrivatePackageShareRedeemResult> {
-	const json = await postPrivateShareCode<Record<string, unknown>>(
-		"/share-codes/redeem",
-		code
-	);
+	const cached = peekRedeemedPrivatePackageShareSession(code);
+	if (cached) {
+		return {
+			installSession: cached.installSession,
+			installSessionExpiresAt: new Date(cached.expiresAtMs).toISOString(),
+			preview: cached.preview,
+		};
+	}
+	const json = await postPrivateShareCode("/share-codes/redeem", code);
 	const session =
 		stringValue(json.install_session) ??
 		stringValue(json.installSession) ??
@@ -692,17 +726,37 @@ export async function redeemPrivatePackageShareCode(
 			"The package code could not start an install session."
 		);
 	}
-	return {
+	const installSessionExpiresAt =
+		stringValue(json.install_session_expires_at) ??
+		stringValue(json.installSessionExpiresAt);
+	const result: PrivatePackageShareRedeemResult = {
 		installSession: session,
+		installSessionExpiresAt,
 		preview: resolvePrivateSharePreview(json),
 	};
+	const expiresAtMs = installSessionExpiresAt
+		? Math.min(
+				Date.parse(installSessionExpiresAt),
+				Date.now() + SHARE_SESSION_MAX_REUSE_MS
+			)
+		: Number.NaN;
+	if (Number.isFinite(expiresAtMs)) {
+		redeemedShareSessions.set(redeemedShareSessionKey(code), {
+			expiresAtMs,
+			installSession: session,
+			preview: result.preview,
+		});
+	}
+	return result;
 }
 
-function resolvePrivateShareCode(value: unknown): PrivatePackageShareCode {
+function resolvePrivateShareCode(
+	value: Parameters<typeof marketplaceValueSchema.parse>[0]
+): PrivatePackageShareCode {
 	const raw = recordValue(value) ?? {};
-	const kind = stringValue(
-		raw.item_kind ?? raw.itemKind
-	) as MarketplaceKind | null;
+	const kind = marketplaceKindSchema
+		.nullable()
+		.parse(stringValue(raw.item_kind ?? raw.itemKind));
 	return {
 		code: stringValue(raw.code) ?? "",
 		createdAt: stringValue(raw.created_at ?? raw.createdAt),
@@ -716,17 +770,13 @@ function resolvePrivateShareCode(value: unknown): PrivatePackageShareCode {
 		itemVersion: stringValue(raw.item_version ?? raw.itemVersion) ?? "",
 		label: stringValue(raw.label),
 		maxRedemptions:
-			typeof raw.max_redemptions === "number"
-				? raw.max_redemptions
-				: typeof raw.maxRedemptions === "number"
-					? raw.maxRedemptions
-					: 1,
+			marketplaceNumberField(raw.max_redemptions) ??
+			marketplaceNumberField(raw.maxRedemptions) ??
+			1,
 		redemptionCount:
-			typeof raw.redemption_count === "number"
-				? raw.redemption_count
-				: typeof raw.redemptionCount === "number"
-					? raw.redemptionCount
-					: 0,
+			marketplaceNumberField(raw.redemption_count) ??
+			marketplaceNumberField(raw.redemptionCount) ??
+			0,
 		revokedAt: stringValue(raw.revoked_at ?? raw.revokedAt),
 	};
 }
@@ -792,11 +842,16 @@ export async function revokePrivatePackageShareCode(id: string): Promise<void> {
 export async function fetchInstalledPortablePackages(
 	target: ApiTarget
 ): Promise<PortablePackageState[]> {
-	const result = await request<{ packages?: PortablePackageState[] }>(
+	const result = await request(
 		target,
-		"/api/marketplace/packages/installed"
+		"/api/marketplace/packages/installed",
+		{},
+		gatewayJsonValueSchema
 	);
-	return result.packages ?? [];
+	return (
+		parseMarketplaceResponse(installedPortablePackagesSchema, result)
+			.packages ?? []
+	);
 }
 
 /** Record one Core-verified Marketplace install action for anonymous community
@@ -806,10 +861,15 @@ export async function recordMarketplaceUsage(
 	target: ApiTarget,
 	input: { event: "download"; id: string; kind: MarketplaceKind }
 ): Promise<void> {
-	await request(target, "/api/marketplace/usage", {
-		method: "POST",
-		body: input,
-	});
+	await request(
+		target,
+		"/api/marketplace/usage",
+		{
+			method: "POST",
+			body: input,
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /**
@@ -832,22 +892,25 @@ export async function installPortablePackage(
 	const path = options.update
 		? "/api/marketplace/packages/update"
 		: "/api/marketplace/packages/install";
-	const result = await request<{ package: PortablePackageState }>(
+	const body: PortablePackageInstallRequest = { ...input };
+	if (options.version) {
+		body.version = options.version;
+	}
+	if (options.installSession) {
+		body.install_session = options.installSession;
+	}
+	const result = await request(
 		target,
 		path,
 		{
 			method: "POST",
 			headers: buyerTokenHeader(target),
-			body: {
-				...input,
-				...(options.version ? { version: options.version } : {}),
-				...(options.installSession
-					? { install_session: options.installSession }
-					: {}),
-			},
-		}
+			body,
+		},
+		gatewayJsonValueSchema
 	);
-	return result.package;
+	return parseMarketplaceResponse(portablePackageEnvelopeSchema, result)
+		.package;
 }
 
 export async function setPortablePackageEnabled(
@@ -855,12 +918,15 @@ export async function setPortablePackageEnabled(
 	input: { kind: string; id: string },
 	enabled: boolean
 ): Promise<PortablePackageState> {
-	const result = await request<{ package: PortablePackageState }>(
+	const result = await request(
 		target,
 		`/api/marketplace/packages/${encodeURIComponent(input.kind)}/${encodeURIComponent(input.id)}/${enabled ? "enable" : "disable"}`,
-		{ method: "POST" }
+		// Enable re-checks a paid package's license with the signed-in account.
+		{ method: "POST", headers: enabled ? buyerTokenHeader(target) : {} },
+		gatewayJsonValueSchema
 	);
-	return result.package;
+	return parseMarketplaceResponse(portablePackageEnvelopeSchema, result)
+		.package;
 }
 
 export async function uninstallPortablePackage(
@@ -876,18 +942,17 @@ export async function uninstallPortablePackage(
 			"/uninstall",
 		{
 			method: "POST",
-		}
+		},
+		gatewayJsonValueSchema
 	);
 }
 
-function authHeaders(): Record<string, string> {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-	};
+function authHeaders() {
+	const headers = new Headers({ "Content-Type": "application/json" });
 	try {
-		const token = localStorage.getItem(TOKEN_KEY);
+		const token = getActiveToken();
 		if (token) {
-			headers.Authorization = `Bearer ${token}`;
+			headers.set("Authorization", `Bearer ${token}`);
 		}
 	} catch {
 		// No storage — request will 401 and the UI prompts to sign in.
@@ -921,12 +986,12 @@ export type MarketplaceErrorKind =
 
 export class MarketplaceError extends Error {
 	readonly code: string | null;
-	readonly details: Record<string, unknown>;
+	readonly details: MarketplaceDocument;
 	readonly kind: MarketplaceErrorKind;
 	constructor(
 		kind: MarketplaceErrorKind,
 		message: string,
-		options: { code?: string | null; details?: Record<string, unknown> } = {}
+		options: { code?: string | null; details?: MarketplaceDocument } = {}
 	) {
 		super(message);
 		this.name = "MarketplaceError";
@@ -939,16 +1004,14 @@ export class MarketplaceError extends Error {
 async function toError(resp: Response): Promise<MarketplaceError> {
 	let message: string | undefined;
 	let code: string | null = null;
-	let details: Record<string, unknown> = {};
+	let details: MarketplaceDocument = {};
 	try {
-		const body = (await resp.json()) as {
-			code?: unknown;
-			error?: string;
-			message?: string;
-			[key: string]: unknown;
-		};
-		message = body.message ?? body.error;
-		code = typeof body.code === "string" ? body.code : null;
+		const body = parseMarketplaceResponse(
+			marketplaceDocumentSchema,
+			await resp.json()
+		);
+		message = marketplaceStringField(body.message ?? body.error);
+		code = marketplaceStringField(body.code) ?? null;
 		details = body;
 	} catch {
 		// Non-JSON body.
@@ -1012,19 +1075,55 @@ export async function fetchCatalog(
 	query = "",
 	signal?: AbortSignal
 ): Promise<MarketplaceCard[]> {
+	const page = await fetchCatalogPage(kind, query, { signal });
+	return page.items;
+}
+
+/** One page of a Marketplace catalog search. */
+export interface MarketplaceCatalogPage {
+	items: MarketplaceCard[];
+	/** Pass back as `cursor` for the next page; null on the last page. */
+	nextCursor: string | null;
+}
+
+/** Largest page the control plane serves (`CATALOG_MAX_LIMIT`). */
+const CATALOG_PAGE_MAX = 100;
+
+/**
+ * {@link fetchCatalog} with paging. `cursor` must be the `nextCursor` of the
+ * previous page for the same kind and query; the server refuses any other
+ * value with a 400 rather than silently restarting at page one.
+ */
+export async function fetchCatalogPage(
+	kind: MarketplaceKind,
+	query = "",
+	options: { cursor?: string | null; limit?: number; signal?: AbortSignal } = {}
+): Promise<MarketplaceCatalogPage> {
 	const q = new URLSearchParams({ kind });
 	if (query.trim()) {
 		q.set("query", query.trim());
 	}
+	if (options.limit !== undefined && options.limit > 0) {
+		q.set("limit", String(Math.min(options.limit, CATALOG_PAGE_MAX)));
+	}
+	if (options.cursor) {
+		q.set("cursor", options.cursor);
+	}
 	const resp = await fetch(`${BASE}/catalog?${q.toString()}`, {
 		headers: authHeaders(),
-		signal,
+		signal: options.signal,
 	});
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { items?: MarketplaceCardWire[] };
-	return (json.items ?? []).map(toMarketplaceCard);
+	const json = parseMarketplaceResponse(
+		catalogEnvelopeSchema,
+		await resp.json()
+	);
+	return {
+		items: (json.items ?? []).map(toMarketplaceCard),
+		nextCursor: json.nextCursor ?? null,
+	};
 }
 
 /** Search every published Marketplace kind for the global command palette.
@@ -1077,7 +1176,7 @@ export async function fetchFeatured(
 	if (kind) {
 		q.set("kind", kind);
 	}
-	if (typeof limit === "number" && limit > 0) {
+	if (limit !== undefined && limit > 0) {
 		q.set("limit", String(limit));
 	}
 	const suffix = q.toString();
@@ -1087,7 +1186,10 @@ export async function fetchFeatured(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { items?: MarketplaceCardWire[] };
+	const json = parseMarketplaceResponse(
+		catalogEnvelopeSchema,
+		await resp.json()
+	);
 	return (json.items ?? []).map(toMarketplaceCard);
 }
 
@@ -1112,23 +1214,17 @@ export async function startPurchase(input: {
 	successUrl?: string;
 	cancelUrl?: string;
 }): Promise<PurchaseResult> {
+	const headers = authHeaders();
+	headers.set("Idempotency-Key", crypto.randomUUID());
 	const resp = await fetch(`${BASE}/purchase`, {
 		method: "POST",
-		headers: {
-			...authHeaders(),
-			"Idempotency-Key": crypto.randomUUID(),
-		},
+		headers,
 		body: JSON.stringify(input),
 	});
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as {
-		url?: string;
-		sessionId?: string;
-		alreadyLicensed?: boolean;
-		license?: OwnedLicense | null;
-	};
+	const json = parseMarketplaceResponse(purchaseWireSchema, await resp.json());
 	return {
 		url: json.url ?? "",
 		sessionId: json.sessionId ?? "",
@@ -1143,7 +1239,10 @@ export async function fetchLicenses(): Promise<OwnedLicense[]> {
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { licenses?: OwnedLicense[] };
+	const json = parseMarketplaceResponse(
+		licensesEnvelopeSchema,
+		await resp.json()
+	);
 	return json.licenses ?? [];
 }
 
@@ -1208,6 +1307,10 @@ export interface MarketplaceDetail {
 	firstParty: boolean;
 	iconUrl: string | null;
 	id: string;
+	/** For an Agent Template: whose accounts the agent works with once added
+	 *  (`managed` acts as you, `individual` has its own identity, `mixed` both).
+	 *  Null for other kinds, and when the marketplace does not report it. */
+	identityMode: MarketplaceAgentIdentityMode | null;
 	kind: MarketplaceKind;
 	languagePack: LanguagePackSummary | null;
 	name: string;
@@ -1233,9 +1336,21 @@ export interface MarketplaceDetail {
 	website: string | null;
 }
 
+/** Core's `AgentIdentityMode` wire values, as a listing detail reports them. */
+export type MarketplaceAgentIdentityMode = "managed" | "individual" | "mixed";
+
+/** Only an exact mode is shown; anything else is left unlabelled, never guessed. */
+export function marketplaceAgentIdentityMode(
+	value: MarketplaceValue | undefined
+): MarketplaceAgentIdentityMode | null {
+	return value === "managed" || value === "individual" || value === "mixed"
+		? value
+		: null;
+}
+
 /** Readable labels for the permission grants the store surfaces most often. Keys
  *  are matched case-insensitively; anything unmapped is humanized generically. */
-const GRANT_CAPABILITY_LABELS: Record<string, string> = {
+const GRANT_CAPABILITY_LABELS = {
 	"mcp:web_scrape": "Web scraping",
 	"mcp:web_search": "Web search",
 	"mcp:web_browse": "Web browsing",
@@ -1246,14 +1361,16 @@ const GRANT_CAPABILITY_LABELS: Record<string, string> = {
 	"net:fetch": "Network access",
 	"fs:read": "Read files",
 	"fs:write": "Write files",
-};
+} satisfies Record<string, string>;
 
 /** Turn a raw permission-grant id into a human label: a curated match first, then
  *  a generic humanization (drop the `scope:`/`scope.` prefix, split on separators,
  *  title-case the words). */
 function grantToCapability(grant: string): string {
 	const key = grant.trim().toLowerCase();
-	const mapped = GRANT_CAPABILITY_LABELS[key];
+	const mapped = Object.entries(GRANT_CAPABILITY_LABELS).find(
+		([grant]) => grant === key
+	)?.[1];
 	if (mapped) {
 		return mapped;
 	}
@@ -1268,108 +1385,75 @@ function grantToCapability(grant: string): string {
 }
 
 /** Coerce an unknown JSON value into a string array of non-empty strings. */
-function toStringArray(value: unknown): string[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	return value.filter(
-		(v): v is string => typeof v === "string" && v.length > 0
-	);
-}
+const toStringArray = marketplaceNonemptyStrings;
 
-function resolveBundleMembers(value: unknown): MarketplaceBundleMember[] {
+function resolveBundleMembers(
+	value: Parameters<typeof marketplaceValueSchema.parse>[0]
+): MarketplaceBundleMember[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
-	const kinds = new Set<MarketplaceBundleMember["kind"]>([
-		"app",
-		"plugin",
-		"skill",
-		"model",
-		"mcp",
-		"agent",
-		"stack_template",
-		"workflow",
-		"theme",
-		"language_pack",
-		"space",
-		"profile",
-		"output_style",
-	]);
 	const members: MarketplaceBundleMember[] = [];
 	const seen = new Set<string>();
 	for (const entry of value.slice(0, 64)) {
-		if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+		const raw = recordValue(entry);
+		if (!raw) {
 			continue;
 		}
-		const raw = entry as Record<string, unknown>;
-		const id = typeof raw.id === "string" ? raw.id.trim() : "";
-		const kind = typeof raw.kind === "string" ? raw.kind.trim() : "";
-		if (
-			!(id && kinds.has(kind as MarketplaceBundleMember["kind"])) ||
-			seen.has(`${kind}:${id}`)
-		) {
+		const id = marketplaceStringField(raw.id)?.trim() ?? "";
+		const parsedKind = marketplaceBundleKindSchema.safeParse(
+			marketplaceStringField(raw.kind)?.trim()
+		);
+		if (!parsedKind.success) {
+			continue;
+		}
+		const kind = parsedKind.data;
+		if (!id || seen.has(`${kind}:${id}`)) {
 			continue;
 		}
 		seen.add(`${kind}:${id}`);
 		members.push({
 			id,
-			kind: kind as MarketplaceBundleMember["kind"],
-			name: typeof raw.name === "string" ? raw.name : null,
+			kind,
+			name: marketplaceStringField(raw.name) ?? null,
 			required: raw.required !== false,
-			source: typeof raw.source === "string" ? raw.source : null,
+			source: marketplaceStringField(raw.source) ?? null,
 		});
 	}
 	return members;
 }
 
-/** Defense-in-depth href allowlist: return the value only if it is a string with
- *  an http(s) scheme. Catalog sources are untrusted (a git `MarketplaceSource`
- *  can return an arbitrary `homepage`/`website`), so any URL rendered as an
- *  `<a href>` is scheme-checked here to block `javascript:`/`data:` XSS even if a
- *  backend sanitizer is ever bypassed. */
-function safeHttpUrl(value: unknown): string | null {
-	return typeof value === "string" && /^https?:\/\//i.test(value.trim())
-		? value.trim()
-		: null;
-}
-
 /** Resolve the developer/publisher name from either a plain string or a Claude
  *  `author` object (`{ name }`). */
 function resolveDeveloper(raw: {
-	developer?: unknown;
-	author?: unknown;
+	developer?: MarketplaceValue;
+	author?: MarketplaceValue;
 }): string | null {
-	if (typeof raw.developer === "string" && raw.developer) {
-		return raw.developer;
+	const developer = marketplaceStringField(raw.developer);
+	if (developer) {
+		return developer;
 	}
-	if (typeof raw.author === "string" && raw.author) {
-		return raw.author;
+	const author = marketplaceStringField(raw.author);
+	if (author) {
+		return author;
 	}
-	if (
-		raw.author &&
-		typeof raw.author === "object" &&
-		typeof (raw.author as { name?: unknown }).name === "string"
-	) {
-		return (raw.author as { name: string }).name;
-	}
-	return null;
+	return marketplaceStringField(recordValue(raw.author)?.name) ?? null;
 }
 
 /** Normalize the `setup` field, which may be a single card OR an array of steps. */
-function resolveSetup(value: unknown): DetailSetupStep[] {
+function resolveSetup(
+	value: Parameters<typeof marketplaceValueSchema.parse>[0]
+): DetailSetupStep[] {
 	const rawSteps = Array.isArray(value) ? value : value ? [value] : [];
 	const steps: DetailSetupStep[] = [];
 	for (const step of rawSteps) {
-		if (!step || typeof step !== "object") {
+		const s = recordValue(step);
+		if (!s) {
 			continue;
 		}
-		const s = step as Record<string, unknown>;
-		const title = typeof s.title === "string" ? s.title : null;
-		const description =
-			typeof s.description === "string" ? s.description : null;
-		const actionLabel =
-			typeof s.actionLabel === "string" ? s.actionLabel : null;
+		const title = marketplaceStringField(s.title) ?? null;
+		const description = marketplaceStringField(s.description) ?? null;
+		const actionLabel = marketplaceStringField(s.actionLabel) ?? null;
 		// The setup CTA renders as an <a href>, so scheme-check it (untrusted
 		// catalog source) — a non-http(s) actionUrl is dropped, not rendered.
 		const actionUrl = safeHttpUrl(s.actionUrl);
@@ -1383,7 +1467,9 @@ function resolveSetup(value: unknown): DetailSetupStep[] {
 
 /** Keep the manifest banner's prompt-palette fields typed without trusting the
  *  opaque control-plane payload. The renderer applies a second CSS/color guard. */
-function resolveCatalogBanner(value: unknown): CatalogBanner | null {
+function resolveCatalogBanner(
+	value: Parameters<typeof marketplaceValueSchema.parse>[0]
+): CatalogBanner | null {
 	const raw = recordValue(value);
 	if (!raw) {
 		return null;
@@ -1411,25 +1497,27 @@ function resolveCatalogBanner(value: unknown): CatalogBanner | null {
 	) {
 		banner.style = style;
 	}
-	if (typeof raw.seed === "number" && Number.isFinite(raw.seed)) {
-		banner.seed = Math.trunc(raw.seed);
+	if (marketplaceNumberField(raw.seed) !== undefined) {
+		banner.seed = Math.trunc(marketplaceNumberField(raw.seed) ?? 0);
 	}
 	return Object.keys(banner).length > 0 ? banner : null;
 }
 
 /** Normalize the `runnables` field into typed entries with enable state. */
-function resolveRunnables(value: unknown): DetailRunnable[] {
+function resolveRunnables(
+	value: Parameters<typeof marketplaceValueSchema.parse>[0]
+): DetailRunnable[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
 	const out: DetailRunnable[] = [];
 	for (const entry of value) {
-		if (!entry || typeof entry !== "object") {
+		const r = recordValue(entry);
+		if (!r) {
 			continue;
 		}
-		const r = entry as Record<string, unknown>;
-		const id = typeof r.id === "string" ? r.id : null;
-		const name = typeof r.name === "string" ? r.name : null;
+		const id = marketplaceStringField(r.id) ?? null;
+		const name = marketplaceStringField(r.name) ?? null;
 		// The server keeps a runnable descriptor with id OR name (id may be null),
 		// so mirror that here: require at least one, and fall back across them for
 		// the key/label so a name-only runnable still renders (and the Skills count
@@ -1438,10 +1526,10 @@ function resolveRunnables(value: unknown): DetailRunnable[] {
 			continue;
 		}
 		out.push({
-			id: id ?? (name as string),
-			name: name ?? (id as string),
-			kind: typeof r.kind === "string" ? r.kind : "runnable",
-			description: typeof r.description === "string" ? r.description : null,
+			id: id ?? name ?? "",
+			name: name ?? id ?? "",
+			kind: marketplaceStringField(r.kind) ?? "runnable",
+			description: marketplaceStringField(r.description) ?? null,
 			enabled: r.enabled === true,
 		});
 	}
@@ -1451,9 +1539,9 @@ function resolveRunnables(value: unknown): DetailRunnable[] {
 /** Resolve capabilities: an explicit list wins; otherwise derive from permission
  *  grants (either `capabilities`/`permission_grants`/`permissionGrants`). */
 function resolveCapabilities(raw: {
-	capabilities?: unknown;
-	permission_grants?: unknown;
-	permissionGrants?: unknown;
+	capabilities?: MarketplaceValue;
+	permission_grants?: MarketplaceValue;
+	permissionGrants?: MarketplaceValue;
 }): string[] {
 	const explicit = toStringArray(raw.capabilities);
 	if (explicit.length > 0) {
@@ -1487,36 +1575,23 @@ export async function fetchDetail(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<MarketplaceDetail> & {
-		author?: unknown;
-		banner?: unknown;
-		homepage?: unknown;
-		permission_grants?: unknown;
-		permissionGrants?: unknown;
-		runnables?: unknown;
-		screenshots?: unknown;
-		setup?: unknown;
-	};
+	const json = parseMarketplaceResponse(
+		marketplaceDetailWireSchema,
+		await resp.json()
+	);
+	const communityStats = recordValue(json.communityStats);
 	return {
 		banner: resolveCatalogBanner(json.banner),
 		bundleMembers: resolveBundleMembers(json.bundleMembers),
 		bundleSourceUrl: safeHttpUrl(json.bundleSourceUrl),
 		communityStats: {
-			downloads:
-				typeof json.communityStats?.downloads === "number"
-					? json.communityStats.downloads
-					: 0,
-			instances:
-				typeof json.communityStats?.instances === "number"
-					? json.communityStats.instances
-					: 0,
-			runs:
-				typeof json.communityStats?.runs === "number"
-					? json.communityStats.runs
-					: 0,
+			downloads: marketplaceNumberField(communityStats?.downloads) ?? 0,
+			instances: marketplaceNumberField(communityStats?.instances) ?? 0,
+			runs: marketplaceNumberField(communityStats?.runs) ?? 0,
 		},
 		id: json.id ?? id,
-		kind: (json.kind as MarketplaceKind) ?? kind,
+		identityMode: marketplaceAgentIdentityMode(json.identityMode),
+		kind: json.kind ?? kind,
 		languagePack: json.languagePack ?? null,
 		name: json.name ?? "",
 		firstParty: Boolean(json.firstParty),
@@ -1525,26 +1600,28 @@ export async function fetchDetail(
 		orgVerifiedTier: json.orgVerifiedTier ?? null,
 		publisherTrust:
 			json.publisherTrust ??
-			resolvePublisherTrust({
+			publisherTrustFromOrgFlag({
 				firstParty: json.firstParty,
-				ryuStaffVerified: json.orgVerified,
+				orgVerified: json.orgVerified,
 			}).level,
 		publisherTrustSource:
 			json.publisherTrustSource ??
-			resolvePublisherTrust({
+			publisherTrustFromOrgFlag({
 				firstParty: json.firstParty,
-				ryuStaffVerified: json.orgVerified,
+				orgVerified: json.orgVerified,
 			}).source,
 		publisherVerification: json.publisherVerification ?? null,
 		pricing: json.pricing ?? null,
-		iconUrl: json.iconUrl ?? null,
-		bannerUrl: json.bannerUrl ?? null,
+		iconUrl: safeHttpUrl(json.iconUrl),
+		bannerUrl: safeHttpUrl(json.bannerUrl),
 		category: json.category ?? null,
 		ratingAverage: json.ratingAverage ?? 0,
 		ratingCount: json.ratingCount ?? 0,
-		screenshots: toStringArray(json.screenshots),
-		tagline: typeof json.tagline === "string" ? json.tagline : null,
-		description: typeof json.description === "string" ? json.description : null,
+		screenshots: toStringArray(json.screenshots)
+			.map((url) => safeHttpUrl(url))
+			.filter((url): url is string => Boolean(url)),
+		tagline: marketplaceStringField(json.tagline) ?? null,
+		description: marketplaceStringField(json.description) ?? null,
 		developer: resolveDeveloper(json),
 		website: safeHttpUrl(json.website) ?? safeHttpUrl(json.homepage),
 		privacyPolicyUrl: safeHttpUrl(json.privacyPolicyUrl),
@@ -1598,9 +1675,10 @@ export async function fetchReviews(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<ReviewsPage> & {
-		reviews?: Review[];
-	};
+	const json = parseMarketplaceResponse(
+		reviewsPageSchema.partial(),
+		await resp.json()
+	);
 	return {
 		ratingAverage: json.ratingAverage ?? 0,
 		ratingCount: json.ratingCount ?? 0,
@@ -1642,11 +1720,7 @@ export async function postReview(input: {
 			let message: string | undefined;
 			let requiresPurchase = false;
 			try {
-				const b = (await resp.json()) as {
-					error?: string;
-					message?: string;
-					requiresPurchase?: boolean;
-				};
+				const b = reviewFailureSchema.parse(await resp.clone().json());
 				message = b.message ?? b.error;
 				requiresPurchase = Boolean(b.requiresPurchase);
 			} catch {
@@ -1661,7 +1735,10 @@ export async function postReview(input: {
 		}
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<PostReviewResult>;
+	const json = parseMarketplaceResponse(
+		postReviewResultSchema.partial(),
+		await resp.json()
+	);
 	return {
 		ok: json.ok ?? true,
 		verifiedPurchase: Boolean(json.verifiedPurchase),
@@ -1694,7 +1771,7 @@ export async function deleteReview(
  * typed `PublishBody` (packaging) drives the shape without a second source of
  * truth to keep in sync.
  */
-export type PublishRequest = Record<string, unknown> & {
+export type PublishRequest = MarketplaceDocument & {
 	id: string;
 	kind: MarketplaceKind;
 	name: string;
@@ -1726,19 +1803,23 @@ export async function publishRunnable(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<PublishResult>;
+	const json = parseMarketplaceResponse(
+		publishResultSchema.partial(),
+		await resp.json()
+	);
 	return {
 		id: json.id ?? body.id,
-		kind: (json.kind as MarketplaceKind) ?? body.kind,
+		kind: json.kind ?? body.kind,
 		status: json.status ?? "pending",
 		approved: json.approved ?? [],
 	};
 }
 
 export interface GithubPublishResult {
-	githubSource: Record<string, unknown> | null;
+	githubSource: MarketplaceDocument | null;
 	id: string;
 	kind: MarketplaceKind;
+	preflight: MarketplacePublishPreflightReport | null;
 	status: string;
 	version: string;
 }
@@ -1770,25 +1851,30 @@ export async function publishGithubPackage(input: {
 	pricing?: GithubPublishPricing;
 	url: string;
 }): Promise<GithubPublishResult> {
+	const body: GithubPublishRequest = { url: input.url };
+	if (input.pricing) {
+		body.pricing = input.pricing;
+	}
+	if (input.installationProof) {
+		body.installationProof = input.installationProof;
+	}
 	const resp = await fetch(`${BASE}/github/publish`, {
 		method: "POST",
 		headers: authHeaders(),
-		body: JSON.stringify({
-			url: input.url,
-			...(input.pricing ? { pricing: input.pricing } : {}),
-			...(input.installationProof
-				? { installationProof: input.installationProof }
-				: {}),
-		}),
+		body: JSON.stringify(body),
 	});
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<GithubPublishResult>;
+	const json = parseMarketplaceResponse(
+		githubPublishWireSchema,
+		await resp.json()
+	);
 	return {
 		githubSource: json.githubSource ?? null,
 		id: json.id ?? "",
-		kind: (json.kind as MarketplaceKind) ?? "plugin",
+		kind: json.kind ?? "plugin",
+		preflight: json.preflight ?? null,
 		status: json.status ?? "pending",
 		version: json.version ?? "",
 	};
@@ -1813,7 +1899,10 @@ export async function completeGithubInstallation(input: {
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as Partial<GithubInstallationResult>;
+	const json = parseMarketplaceResponse(
+		githubCompletionWireSchema,
+		await resp.json()
+	);
 	if (!(json.installationProof && json.repository && json.ready === true)) {
 		throw new MarketplaceError(
 			"github",
@@ -1849,11 +1938,11 @@ export async function uploadListingMedia(input: {
 	form.set("role", input.role);
 	form.set("file", input.file);
 
-	const headers: Record<string, string> = {};
+	const headers = new Headers();
 	try {
-		const token = localStorage.getItem(TOKEN_KEY);
+		const token = getActiveToken();
 		if (token) {
-			headers.Authorization = `Bearer ${token}`;
+			headers.set("Authorization", `Bearer ${token}`);
 		}
 	} catch {
 		// No storage — request will 401 and the UI prompts to sign in.
@@ -1867,7 +1956,7 @@ export async function uploadListingMedia(input: {
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { url?: string };
+	const json = parseMarketplaceResponse(urlResponseSchema, await resp.json());
 	return { url: json.url ?? "" };
 }
 
@@ -1924,9 +2013,10 @@ export async function submitReport(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as {
-		suggestIssuesUrl?: string | null;
-	};
+	const json = parseMarketplaceResponse(
+		reportSubmissionSchema,
+		await resp.json()
+	);
 	return { suggestIssuesUrl: json.suggestIssuesUrl ?? null };
 }
 
@@ -1944,9 +2034,10 @@ export interface MarketplaceReportView {
 	itemKind: string;
 	itemName: string | null;
 	reason: ReportReason;
-	reporterEmail: string | null;
-	reporterName: string | null;
-	reporterUserId: string;
+	/** Platform-admin views only; the seller inbox omits who filed a report. */
+	reporterEmail?: string | null;
+	reporterName?: string | null;
+	reporterUserId?: string;
 	resolutionNote: string | null;
 	resolvedAt: string | null;
 	sellerOrgId: string | null;
@@ -1969,7 +2060,10 @@ export async function fetchSellerReports(input?: {
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { reports?: MarketplaceReportView[] };
+	const json = parseMarketplaceResponse(
+		reportsEnvelopeSchema,
+		await resp.json()
+	);
 	return json.reports ?? [];
 }
 
@@ -1987,7 +2081,10 @@ export async function resolveReport(input: {
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { report?: MarketplaceReportView };
+	const json = parseMarketplaceResponse(
+		reportEnvelopeSchema,
+		await resp.json()
+	);
 	if (!json.report) {
 		throw new MarketplaceError("unknown", "Resolve returned no report.");
 	}
@@ -2008,12 +2105,14 @@ export interface LikeSnapshot {
 	namespace: string;
 }
 
-function toSnapshot(raw: unknown, fallbackNamespace: string): LikeSnapshot {
-	const row = (raw ?? {}) as Partial<LikeSnapshot>;
+function toSnapshot(
+	raw: Parameters<typeof marketplaceValueSchema.parse>[0],
+	fallbackNamespace: string
+): LikeSnapshot {
+	const row = recordValue(raw) ?? {};
 	return {
-		namespace:
-			typeof row.namespace === "string" ? row.namespace : fallbackNamespace,
-		count: typeof row.count === "number" ? Math.max(0, row.count) : 0,
+		namespace: marketplaceStringField(row.namespace) ?? fallbackNamespace,
+		count: Math.max(0, marketplaceNumberField(row.count) ?? 0),
 		liked: row.liked === true,
 	};
 }
@@ -2038,7 +2137,7 @@ export async function fetchLikeCounts(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { likes?: unknown[] };
+	const json = parseMarketplaceResponse(likesEnvelopeSchema, await resp.json());
 	return (json.likes ?? []).map((row) => toSnapshot(row, ""));
 }
 
@@ -2066,4 +2165,125 @@ export async function unlikeItem(namespace: string): Promise<LikeSnapshot> {
 		throw await toError(resp);
 	}
 	return toSnapshot(await resp.json(), namespace);
+}
+
+// ── Creators ─────────────────────────────────────────────────────────────────
+
+/** GET /api/marketplace/creators — the public Creators directory. */
+export async function fetchMarketplaceCreators(input: {
+	query?: string;
+	signal?: AbortSignal;
+	sort?: MarketplaceCreatorSort;
+}): Promise<MarketplaceCreator[]> {
+	const q = new URLSearchParams();
+	if (input.query?.trim()) {
+		q.set("query", input.query.trim());
+	}
+	if (input.sort) {
+		q.set("sort", input.sort);
+	}
+	const suffix = q.toString();
+	const resp = await fetch(`${BASE}/creators${suffix ? `?${suffix}` : ""}`, {
+		headers: authHeaders(),
+		signal: input.signal,
+	});
+	if (!resp.ok) {
+		throw await toError(resp);
+	}
+	const json = parseMarketplaceResponse(
+		creatorsEnvelopeSchema,
+		await resp.json()
+	);
+	return Array.isArray(json.creators) ? json.creators : [];
+}
+
+/** GET /api/marketplace/creators/:handle — one creator and their listings. */
+export async function fetchMarketplaceCreator(
+	handle: string,
+	signal?: AbortSignal
+): Promise<MarketplaceCreatorProfile | null> {
+	const resp = await fetch(`${BASE}/creators/${encodeURIComponent(handle)}`, {
+		headers: authHeaders(),
+		signal,
+	});
+	if (resp.status === 404) {
+		return null;
+	}
+	if (!resp.ok) {
+		throw await toError(resp);
+	}
+	const json = parseMarketplaceResponse(
+		creatorProfileEnvelopeSchema,
+		await resp.json()
+	);
+	return {
+		creator: json.creator,
+		listings: (json.listings ?? []).map((wire) => {
+			const card = toMarketplaceCard(wire);
+			return {
+				communityStats: card.communityStats,
+				description: card.description,
+				featured: wire.featured === true,
+				iconUrl: card.iconUrl,
+				id: card.id,
+				kind: card.kind,
+				name: card.name,
+				priceLabel: card.pricing ? formatPricingLabel(card.pricing) : "Free",
+				ratingAverage: card.ratingAverage,
+				ratingCount: card.ratingCount,
+			};
+		}),
+	};
+}
+
+/** GET /api/marketplace/creator-profile — the active org's editable profile. */
+export async function fetchOwnCreatorProfile(): Promise<MarketplaceOwnCreatorProfile> {
+	const resp = await fetch(`${BASE}/creator-profile`, {
+		headers: authHeaders(),
+	});
+	if (!resp.ok) {
+		throw await toError(resp);
+	}
+	return parseMarketplaceResponse(
+		marketplaceOwnCreatorProfileSchema,
+		await resp.json()
+	);
+}
+
+/** PUT /api/marketplace/creator-profile — save the active org's profile. */
+export async function saveOwnCreatorProfile(
+	fields: MarketplaceCreatorProfileFields,
+	organizationId?: string
+): Promise<MarketplaceCreatorProfileFields> {
+	const body: MarketplaceCreatorProfileFields & { organizationId?: string } = {
+		...fields,
+	};
+	if (organizationId) {
+		body.organizationId = organizationId;
+	}
+	const resp = await fetch(`${BASE}/creator-profile`, {
+		body: JSON.stringify(body),
+		headers: authHeaders(),
+		method: "PUT",
+	});
+	if (!resp.ok) {
+		throw await toError(resp);
+	}
+	const json = parseMarketplaceResponse(
+		creatorFieldsEnvelopeSchema,
+		await resp.json()
+	);
+	return json.profile;
+}
+
+interface PortablePackageInstallRequest {
+	id: string;
+	install_session?: string;
+	kind: string;
+	version?: string;
+}
+interface GithubPublishRequest {
+	installationProof?: string;
+	pricing?: GithubPublishPricing;
+	url: string;
 }

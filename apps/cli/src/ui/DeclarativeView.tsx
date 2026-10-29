@@ -1,3 +1,4 @@
+import { type ViewSourceRow, viewSourceRowSchema } from "../core/views.ts";
 /* @jsxImportSource @opentui/react */
 // The TERMINAL renderer for the declarative view tier — the third renderer of the
 // same `ViewSpec` the desktop draws with @ryu/ui (apps/desktop DeclarativeView) and
@@ -32,6 +33,7 @@ import { TextInput } from "@/components/ui/text-input.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useSetInputFocused } from "../core/InputFocusContext.tsx";
 import type {
+	RawViewSpec,
 	SourceItem,
 	ViewAction,
 	ViewActionContext,
@@ -42,7 +44,9 @@ import type {
 	ViewSpec,
 	ViewTone,
 } from "../core/views.ts";
-import { validateView } from "../core/views.ts";
+import { validateView, viewSpecSchema } from "../core/views.ts";
+import { ListPosition, SelectableRow } from "./SelectableRow.tsx";
+import { useListWindow } from "./useListWindow.ts";
 
 /** Fires when the user activates an action. The renderer supplies the context
  *  (selected `item`, collected form `values`); the shell decides what the action
@@ -61,21 +65,20 @@ export interface DeclarativeViewProps {
 	/** Host-fetched rows for a `source`-declaring list-detail spec. Null/absent =
 	 *  render the spec's static `items`. */
 	sourceItems?: SourceItem[] | null;
-	spec: ViewSpec;
+	spec: ViewSpec | RawViewSpec;
 }
 
-const VISIBLE_ROWS = 14;
 const MAX_ACTION_KEYS = 9;
 const CELL_WIDTH_CAP = 20;
 const CELL_WIDTH_FLOOR = 6;
 
-const TONE_VARIANT: Record<ViewTone, BadgeVariant> = {
+const TONE_VARIANT = {
 	neutral: "secondary",
 	success: "success",
 	warning: "warning",
 	danger: "error",
 	info: "info",
-};
+} satisfies Record<ViewTone, BadgeVariant>;
 
 /** One selectable row. list-detail and data-table both project onto this shape so
  *  selection, windowing and the command row are written once. */
@@ -88,7 +91,7 @@ interface RowModel {
 	cells?: string[];
 	id: string;
 	/** The `{{item.<key>}}` templating base for actions fired on this row. */
-	item: Record<string, unknown>;
+	item: ViewSourceRow;
 	subtitle?: string;
 	title: string;
 }
@@ -108,8 +111,8 @@ function withCtx(
 
 /** A declared (non-source) item's own fields as the templating base, mirroring the
  *  island renderer so `{{item.id}}` resolves identically on every surface. */
-function declaredItemRecord(item: ViewItem): Record<string, unknown> {
-	return { ...item };
+function declaredItemRecord(item: ViewItem): ViewSourceRow {
+	return viewSourceRowSchema.parse(item);
 }
 
 function rowsFromSpec(
@@ -146,8 +149,8 @@ function rowsFromSpec(
 	return [];
 }
 
-function initialFormValues(fields: ViewField[]): Record<string, unknown> {
-	const values: Record<string, unknown> = {};
+function initialFormValues(fields: ViewField[]) {
+	const values: Record<string, ViewField["value"]> = {};
 	for (const field of fields) {
 		values[field.id] = field.value ?? (field.type === "switch" ? false : "");
 	}
@@ -157,6 +160,10 @@ function initialFormValues(fields: ViewField[]): Record<string, unknown> {
 /** The digit a key press stands for (1-9), or null. OpenTUI reports a printable
  *  key on `name`, but a terminal that only fills `sequence` must work too. */
 function digitFromKey(key: KeyEvent): number | null {
+	// Alt+1…9 is the shell's jump-to-tab chord; only a plain digit fires.
+	if (key.ctrl || key.meta || key.option) {
+		return null;
+	}
 	const char = key.name?.length === 1 ? key.name : (key.sequence ?? "");
 	if (char.length !== 1 || char < "1" || char > "9") {
 		return null;
@@ -164,7 +171,15 @@ function digitFromKey(key: KeyEvent): number | null {
 	return Number(char);
 }
 
-function ToneBadges({ badges }: { badges?: ViewBadge[] }) {
+function ToneBadges({
+	badges,
+	color,
+}: {
+	badges?: ViewBadge[];
+	/** Overrides the tone colors, e.g. on the selection background where the
+	 *  tone colors fall below text contrast. */
+	color?: string;
+}) {
 	if (!badges || badges.length === 0) {
 		return null;
 	}
@@ -173,6 +188,7 @@ function ToneBadges({ badges }: { badges?: ViewBadge[] }) {
 			{badges.map((badge, i) => (
 				<Badge
 					bordered={false}
+					color={color}
 					key={`${badge.label}-${i}`}
 					variant={TONE_VARIANT[badge.tone ?? "neutral"]}
 				>
@@ -187,58 +203,68 @@ function ListRow({
 	row,
 	selected,
 	layout,
+	linesPerRow,
 }: {
 	/** Column geometry for a data-table row; absent for a list-detail row. */
 	layout?: ColumnLayout[];
+	linesPerRow: number;
 	row: RowModel;
 	selected: boolean;
 }) {
 	const theme = useTheme();
 	if (row.cells && layout) {
 		return (
-			<box flexDirection="row" gap={1}>
-				<text fg={selected ? theme.colors.primary : theme.colors.muted}>
-					{selected ? "›" : " "}
-				</text>
+			<SelectableRow
+				linesPerRow={linesPerRow}
+				selected={selected}
+				titleSuffix={
+					row.badges?.length ? (
+						<ToneBadges
+							badges={row.badges}
+							color={selected ? theme.colors.selectionForeground : undefined}
+						/>
+					) : undefined
+				}
+			>
 				{row.cells.map((cell, i) => {
 					const { align, width } = columnAt(layout, i);
 					return (
 						<text
 							fg={
-								i === 0 && selected
-									? theme.colors.primary
+								selected
+									? theme.colors.selectionForeground
 									: theme.colors.foreground
 							}
+							flexShrink={0}
 							key={`${row.id}-${i}`}
 						>
-							{pad(cell, width, align)}
+							{i === 0 && selected ? (
+								<b>{pad(cell, width, align)}</b>
+							) : (
+								pad(cell, width, align)
+							)}
 						</text>
 					);
 				})}
-				<ToneBadges badges={row.badges} />
-			</box>
+			</SelectableRow>
 		);
 	}
 	return (
-		<box flexDirection="row" gap={1}>
-			<text fg={selected ? theme.colors.primary : theme.colors.muted}>
-				{selected ? "›" : " "}
-			</text>
-			<box flexDirection="column" flexGrow={1}>
-				<box flexDirection="row" gap={1}>
-					<text fg={selected ? theme.colors.primary : theme.colors.foreground}>
-						{selected ? <b>{row.title}</b> : row.title}
-					</text>
-					<ToneBadges badges={row.badges} />
-				</box>
-				{row.subtitle ? (
-					<text fg={theme.colors.mutedForeground}>{row.subtitle}</text>
-				) : null}
-			</box>
-			{row.accessory ? (
-				<text fg={theme.colors.mutedForeground}>{row.accessory}</text>
-			) : null}
-		</box>
+		<SelectableRow
+			accessory={row.accessory}
+			linesPerRow={linesPerRow}
+			selected={selected}
+			subtitle={row.subtitle}
+			title={row.title}
+			titleSuffix={
+				row.badges?.length ? (
+					<ToneBadges
+						badges={row.badges}
+						color={selected ? theme.colors.selectionForeground : undefined}
+					/>
+				) : undefined
+			}
+		/>
 	);
 }
 
@@ -256,36 +282,45 @@ function RowList({
 	selected: number;
 }) {
 	const theme = useTheme();
+	// Window the rows to the measured space so the selection stays visible
+	// without a focus-capturing scrollbox (which would fight the shell for arrow
+	// keys) — the same windowing the built-in list surfaces use.
+	const linesPerRow = rows.some((row) => row.subtitle && !row.cells) ? 2 : 1;
+	const { start, end, onSizeChange } = useListWindow({
+		count: rows.length,
+		index: selected,
+		linesPerRow,
+	});
 	if (rows.length === 0) {
 		return <text fg={theme.colors.mutedForeground}>{emptyText}</text>;
 	}
-	// Window the rows so the selection stays visible without a focus-capturing
-	// scrollbox (which would fight the shell for arrow keys) — the same windowing
-	// the built-in list surfaces use.
-	const start = Math.max(
-		0,
-		Math.min(
-			selected - Math.floor(VISIBLE_ROWS / 2),
-			Math.max(0, rows.length - VISIBLE_ROWS)
-		)
-	);
-	const visible = rows.slice(start, start + VISIBLE_ROWS);
+	const visible = rows.slice(start, end);
 	return (
-		<box flexDirection="column">
-			{visible.map((row, i) => (
-				<ListRow
-					key={row.id}
-					layout={layout}
-					row={row}
-					selected={start + i === selected}
-				/>
-			))}
-			{rows.length > visible.length ? (
-				<text fg={theme.colors.mutedForeground}>
-					{`${selected + 1}/${rows.length}`}
-				</text>
-			) : null}
-		</box>
+		<>
+			<box
+				flexBasis={0}
+				flexDirection="column"
+				flexGrow={1}
+				minHeight={0}
+				onSizeChange={onSizeChange}
+				overflow="hidden"
+			>
+				{visible.map((row, i) => (
+					<ListRow
+						key={row.id}
+						layout={layout}
+						linesPerRow={linesPerRow}
+						row={row}
+						selected={start + i === selected}
+					/>
+				))}
+			</box>
+			<ListPosition
+				count={rows.length}
+				index={selected}
+				visible={visible.length}
+			/>
+		</>
 	);
 }
 
@@ -350,7 +385,7 @@ function TableHeader({
 }) {
 	const theme = useTheme();
 	return (
-		<box flexDirection="row" gap={1} paddingLeft={2}>
+		<box flexDirection="row" flexShrink={0} gap={1} paddingLeft={2}>
 			{spec.columns.map((column, i) => {
 				const { align, width } = columnAt(layout, i);
 				return (
@@ -368,28 +403,31 @@ function TableHeader({
 function FormRow({
 	editing,
 	field,
+	onChange,
 	onCommit,
 	selected,
 	value,
 }: {
 	editing: boolean;
 	field: ViewField;
+	onChange: (next: string) => void;
 	onCommit: (next: string) => void;
 	selected: boolean;
-	value: unknown;
+	value: ViewField["value"];
 }) {
 	const theme = useTheme();
 	const display =
 		field.type === "switch" ? boolLabel(value) : String(value ?? "");
 	return (
 		<box flexDirection="row" gap={1}>
-			<text fg={selected ? theme.colors.primary : theme.colors.muted}>
+			<text fg={selected ? theme.colors.primary : theme.colors.mutedForeground}>
 				{selected ? "›" : " "}
 			</text>
 			<text fg={theme.colors.mutedForeground}>{pad(field.label, 18)}</text>
 			{editing ? (
 				<TextInput
 					bordered={false}
+					onChange={onChange}
 					onSubmit={onCommit}
 					placeholder={field.placeholder}
 					value={display}
@@ -404,7 +442,7 @@ function FormRow({
 	);
 }
 
-function boolLabel(value: unknown): string {
+function boolLabel(value: ViewField["value"]): string {
 	return value === true ? "on" : "off";
 }
 
@@ -422,14 +460,14 @@ function CommandRow({
 	const theme = useTheme();
 	if (confirmText) {
 		return (
-			<box flexDirection="row" gap={1} paddingTop={1}>
+			<box flexDirection="row" flexShrink={0} gap={1} paddingTop={1}>
 				<text fg={theme.colors.warning}>{confirmText}</text>
 				<text fg={theme.colors.mutedForeground}>y confirm · n cancel</text>
 			</box>
 		);
 	}
 	return (
-		<box flexDirection="row" gap={1} paddingTop={1}>
+		<box flexDirection="row" flexShrink={0} gap={1} paddingTop={1}>
 			{entries.slice(0, MAX_ACTION_KEYS).map((entry, i) => (
 				<text
 					fg={
@@ -523,11 +561,11 @@ function UnsupportedBody({
 	spec,
 	errors,
 }: {
-	spec: ViewSpec;
+	spec: Pick<RawViewSpec, "view"> | undefined;
 	errors?: string[];
 }) {
 	const theme = useTheme();
-	const kind = String((spec as { view?: unknown })?.view ?? "unknown");
+	const kind = String(spec?.view ?? "unknown");
 	return (
 		<box flexDirection="column">
 			<text fg={theme.colors.mutedForeground}>
@@ -546,7 +584,7 @@ export function DeclarativeView({
 	onAction,
 	onReload,
 	sourceItems,
-	spec,
+	spec: rawSpec,
 }: DeclarativeViewProps) {
 	const setInputFocused = useSetInputFocused();
 	// The structural gate every renderer of this vocabulary runs (the desktop's
@@ -555,15 +593,21 @@ export function DeclarativeView({
 	// projection below assumes those arrays exist, and a terminal has no per-pane
 	// error boundary to absorb the throw. Validate ONCE, then draw nothing that
 	// dereferences an unvalidated field.
-	const validation = useMemo(() => validateView(spec), [spec]);
-	const renderable = validation.ok;
+	const validation = useMemo(() => validateView(rawSpec), [rawSpec]);
+	const parsedSpec = useMemo(
+		() => viewSpecSchema.safeParse(rawSpec),
+		[rawSpec]
+	);
+	const spec = parsedSpec.success ? parsedSpec.data : undefined;
+	const renderable = validation.ok && spec !== undefined;
 	const [index, setIndex] = useState(0);
 	// Guarded independently of `renderable`: a state initializer runs before the
 	// early return, so it may not assume the spec validated.
-	const [values, setValues] = useState<Record<string, unknown>>(() =>
-		spec?.view === "form" && Array.isArray(spec.fields)
-			? initialFormValues(spec.fields)
-			: {}
+	const [values, setValues] = useState<Record<string, ViewField["value"]>>(
+		() =>
+			spec?.view === "form" && Array.isArray(spec.fields)
+				? initialFormValues(spec.fields)
+				: {}
 	);
 	const [editingField, setEditingField] = useState<string | null>(null);
 	const [pending, setPending] = useState<ActionEntry | null>(null);
@@ -704,11 +748,11 @@ export function DeclarativeView({
 	// Placed AFTER every hook so the hook order is identical whether or not the spec
 	// validates (a reload can hand this component a different spec).
 	if (!renderable) {
-		return <UnsupportedBody errors={validation.errors} spec={spec} />;
+		return <UnsupportedBody errors={validation.errors} spec={rawSpec} />;
 	}
 
 	return (
-		<box flexDirection="column">
+		<box flexDirection="column" flexGrow={1} minHeight={0}>
 			{spec.view === "data-table" && layout ? (
 				<TableHeader layout={layout} spec={spec} />
 			) : null}
@@ -726,6 +770,9 @@ export function DeclarativeView({
 							editing={editingField === field.id}
 							field={field}
 							key={field.id}
+							onChange={(next) => {
+								setValues((prev) => ({ ...prev, [field.id]: next }));
+							}}
 							onCommit={(next) => {
 								setValues((prev) => ({
 									...prev,
@@ -764,7 +811,7 @@ function isEditable(field: ViewField): boolean {
 
 function cycleOption(
 	field: ViewField,
-	current: unknown,
+	current: ViewField["value"],
 	direction: 1 | -1
 ): string {
 	const options = field.options ?? [];
@@ -782,7 +829,7 @@ function cycleOption(
 function actionEntries(
 	spec: ViewSpec,
 	selectedRow: RowModel | undefined,
-	values: Record<string, unknown>
+	values: Record<string, ViewField["value"]>
 ): ActionEntry[] {
 	const item = selectedRow?.item;
 	if (spec.view === "list-detail") {

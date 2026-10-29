@@ -66,7 +66,7 @@
 }
 
 .an-text-shimmer--active {
-	animation: an-shimmer var(--an-shimmer-duration, 2s) linear infinite;
+	animation: an-shimmer var(--an-shimmer-duration, 0.9s) linear infinite;
 }
 
 .an-ellipsis {
@@ -186,15 +186,15 @@
 	max-width: 100%;
 }
 
-.composer-settings-trigger [data-composer-agent-name="true"] {
+[data-composer-settings-trigger="true"] [data-composer-agent-name="true"] {
 	max-width: 15rem;
 }
 
-.composer-settings-trigger [data-composer-model-name="true"] {
+[data-composer-settings-trigger="true"] [data-composer-model-name="true"] {
 	max-width: 12rem;
 }
 
-.composer-settings-trigger [data-composer-effort-meter="true"] {
+[data-composer-settings-trigger="true"] [data-composer-effort-meter="true"] {
 	margin-inline: 0.125rem;
 }
 
@@ -231,15 +231,15 @@
 		display: flex;
 	}
 
-	.composer-settings-trigger [data-composer-agent-name="true"] {
+	[data-composer-settings-trigger="true"] [data-composer-agent-name="true"] {
 		max-width: 11rem;
 	}
 
-	.composer-settings-trigger [data-composer-model-name="true"] {
+	[data-composer-settings-trigger="true"] [data-composer-model-name="true"] {
 		display: none;
 	}
 
-	.composer-settings-trigger [data-composer-section="model"] {
+	[data-composer-settings-trigger="true"] [data-composer-section="model"] {
 		gap: 0;
 	}
 }
@@ -247,11 +247,11 @@
 @container composer (max-width: 400px) {
 	/* Plain secondary settings remain available in the picker, but do not compete
 	 * with the agent, effort meter, approval icon, send and attach actions. */
-	.composer-settings-trigger [data-composer-section-kind="plain"] {
+	[data-composer-settings-trigger="true"] [data-composer-section-kind="plain"] {
 		display: none;
 	}
 
-	.composer-settings-trigger [data-composer-agent-name="true"] {
+	[data-composer-settings-trigger="true"] [data-composer-agent-name="true"] {
 		max-width: 8rem;
 	}
 
@@ -267,7 +267,7 @@
 		display: none;
 	}
 
-	.composer-settings-trigger [data-composer-agent-name="true"] {
+	[data-composer-settings-trigger="true"] [data-composer-agent-name="true"] {
 		max-width: 6.5rem;
 	}
 }

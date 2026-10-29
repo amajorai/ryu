@@ -3,6 +3,8 @@ import { expect, mock, test } from "bun:test";
 mock.module("@/lib/auth-client.ts", () => ({
 	BACKEND_URL: "http://fixture.invalid",
 	TOKEN_KEY: "test-session",
+	getActiveToken: () =>
+		globalThis.localStorage?.getItem("test-session") ?? null,
 }));
 const { fetchUsage } = await import("./credits.ts");
 

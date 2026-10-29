@@ -25,7 +25,7 @@
 // Tauri, and none of the desktop's context tree is involved.
 
 import type { ComposerMenuGroup } from "@ryu/blocks/desktop/agent-elements/input/composer-menu.tsx";
-import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar";
+import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";

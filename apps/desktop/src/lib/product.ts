@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 /**
  * Compile-time desktop product identity.
  *
@@ -8,7 +9,7 @@
 
 export type DesktopProduct = "app" | "build" | "bot";
 
-export function resolveDesktopProduct(value: unknown): DesktopProduct {
+export function resolveDesktopProduct<TValue>(value: TValue): DesktopProduct {
 	if (value === "app") {
 		return "app";
 	}
@@ -23,21 +24,23 @@ export const isRyuBot = (): boolean => DESKTOP_PRODUCT === "bot";
 
 export const isRyuStandaloneApp = (): boolean => DESKTOP_PRODUCT === "app";
 
-export const STANDALONE_APP_ID =
-	typeof import.meta.env.VITE_RYU_STANDALONE_APP_ID === "string"
-		? import.meta.env.VITE_RYU_STANDALONE_APP_ID.trim()
-		: "";
+export const STANDALONE_APP_ID = isNativeText(
+	import.meta.env.VITE_RYU_STANDALONE_APP_ID
+)
+	? import.meta.env.VITE_RYU_STANDALONE_APP_ID.trim()
+	: "";
 
-export const STANDALONE_APP_NAME =
-	typeof import.meta.env.VITE_RYU_STANDALONE_APP_NAME === "string"
-		? import.meta.env.VITE_RYU_STANDALONE_APP_NAME.trim()
-		: "";
+export const STANDALONE_APP_NAME = isNativeText(
+	import.meta.env.VITE_RYU_STANDALONE_APP_NAME
+)
+	? import.meta.env.VITE_RYU_STANDALONE_APP_NAME.trim()
+	: "";
 
-export const PRODUCT_DISPLAY_NAMES: Record<DesktopProduct, string> = {
+export const PRODUCT_DISPLAY_NAMES = {
 	app: "Ryu App",
 	bot: "Ryu Bot",
 	build: "Ryu",
-};
+} satisfies Record<DesktopProduct, string>;
 
 export function desktopProductName(
 	product: DesktopProduct = DESKTOP_PRODUCT

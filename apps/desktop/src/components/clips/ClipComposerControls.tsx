@@ -8,8 +8,9 @@
 // `attachClip`). It also hosts the "Attach recent activity" ambient-context
 // entry, which rides the same `onAttach` sink but is fully ephemeral.
 
-import { cn } from "@ryu/ui/lib/utils";
-import { useCallback, useMemo } from "react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComposerSendFile } from "@/src/components/assistant/useComposerSlot.tsx";
 import { AttachRecentActivityControl } from "@/src/components/clips/AttachRecentActivityControl.tsx";
 import { AttachVideoControl } from "@/src/components/clips/AttachVideoControl.tsx";
@@ -67,7 +68,7 @@ function describeSources(capture: ClipCapture): string {
 }
 
 /** Build the markdown context summary the agent reads alongside the frames. */
-function buildSummary(ctx: ClipContext): string {
+function buildSummary(ctx: ClipContext, frameCount: number): string {
 	const lines: string[] = [
 		`[Ryu Clip: ${ctx.title || "Untitled clip"}] duration ${ctx.durationMs}ms, captured ${ctx.createdAt}.`,
 		`Sources: ${describeSources(ctx.capture)}; tab ${ctx.capture.tab?.url ?? "none"}.`,
@@ -80,7 +81,11 @@ function buildSummary(ctx: ClipContext): string {
 	} else {
 		lines.push("Diagnostics (0): none captured.");
 	}
-	lines.push("Attached frames correspond to the moments above.");
+	lines.push(
+		frameCount > 0
+			? `${frameCount} frames attached for the moments above.`
+			: "No frames were available; this recording is attached as context without images."
+	);
 	return lines.join("\n");
 }
 
@@ -98,56 +103,149 @@ export function ClipComposerControls({
 	const node = useNodeStore((s) => s.getActiveNode());
 	const target = useMemo(() => toTarget(node), [node]);
 
-	const attachContext = useCallback(
-		async (ctx: ClipContext) => {
-			// Inline one finished frame so the native PiP window can render evidence
-			// without forwarding the active node's bearer token across webviews.
-			const poster = await fetchClipFrameDataUrl(target, ctx.id, 0).catch(
-				() => null
-			);
-			if (poster) {
-				publishMediaSource({
-					id: `clip:${ctx.id}`,
-					imageUrl: poster,
-					kind: "recording",
-					posterUrl: poster,
-					title: ctx.title || "Evidence recording",
-				});
+	type AttachmentRequest = { context: ClipContext } | { clipId: string };
+	const scope = JSON.stringify([target.url, target.token, target.userJwt]);
+	const currentScope = useRef(scope);
+	currentScope.current = scope;
+	const mounted = useRef(true);
+	const pending = useRef<symbol | null>(null);
+	const pendingClip = useRef<string | null>(null);
+	const queuedRequests = useRef<AttachmentRequest[]>([]);
+	const [isAttaching, setAttaching] = useState(false);
+	const [failedRequest, setFailedRequest] = useState<AttachmentRequest | null>(
+		null
+	);
+	const [attachmentError, setAttachmentError] = useState<string | null>(null);
+	useEffect(() => {
+		pending.current = null;
+		pendingClip.current = null;
+		queuedRequests.current = [];
+		setAttaching(false);
+		setFailedRequest(null);
+		setAttachmentError(null);
+	}, [scope]);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			pending.current = null;
+			queuedRequests.current = [];
+		};
+	}, []);
+	const runAttachment = useCallback(
+		async function attach(request: AttachmentRequest): Promise<void> {
+			if (currentScope.current !== scope) {
+				return;
 			}
-			const moments = pickMoments(ctx);
-			const frames: ComposerSendFile[] = [];
-			for (const atMs of moments) {
-				try {
-					const url = await fetchClipFrameDataUrl(target, ctx.id, atMs);
-					frames.push({
-						type: "file",
-						filename: `clip-frame-${atMs}.jpg`,
-						mediaType: "image/jpeg",
-						url,
+			const clipId = "context" in request ? request.context.id : request.clipId;
+			if (pending.current) {
+				if (
+					pendingClip.current !== clipId &&
+					!queuedRequests.current.some(
+						(queued) =>
+							("context" in queued ? queued.context.id : queued.clipId) ===
+							clipId
+					)
+				) {
+					queuedRequests.current.push(request);
+				}
+				return;
+			}
+			const operation = Symbol("attach recording");
+			pending.current = operation;
+			pendingClip.current = clipId;
+			let attached = false;
+			const isCurrent = () =>
+				mounted.current &&
+				currentScope.current === scope &&
+				pending.current === operation;
+			setAttaching(true);
+			setAttachmentError(null);
+			setFailedRequest(null);
+			try {
+				const ctx =
+					"context" in request
+						? request.context
+						: await getClipContext(target, request.clipId);
+				if (!isCurrent()) {
+					return;
+				}
+				// Poster and individual missing frames remain optional; never forward node credentials.
+				const poster = await fetchClipFrameDataUrl(target, ctx.id, 0).catch(
+					() => null
+				);
+				if (!isCurrent()) {
+					return;
+				}
+				if (poster) {
+					publishMediaSource({
+						id: `clip:${ctx.id}`,
+						imageUrl: poster,
+						kind: "recording",
+						posterUrl: poster,
+						title: ctx.title || "Evidence recording",
 					});
-				} catch {
-					// A single missing frame should not block the whole attachment.
+				}
+				const frames: ComposerSendFile[] = [];
+				for (const atMs of pickMoments(ctx)) {
+					try {
+						const url = await fetchClipFrameDataUrl(target, ctx.id, atMs);
+						if (!isCurrent()) {
+							return;
+						}
+						frames.push({
+							type: "file",
+							filename: `clip-frame-${atMs}.jpg`,
+							mediaType: "image/jpeg",
+							url,
+						});
+					} catch {
+						/* A missing frame must not discard otherwise useful context. */
+					}
+				}
+				if (!isCurrent()) {
+					return;
+				}
+				onAttach(buildSummary(ctx, frames.length), frames);
+				attached = true;
+			} catch (error) {
+				if (isCurrent()) {
+					setFailedRequest(request);
+					setAttachmentError(
+						error instanceof Error
+							? error.message
+							: "Failed to attach recording"
+					);
+				}
+			} finally {
+				if (isCurrent()) {
+					pending.current = null;
+					pendingClip.current = null;
+					setAttaching(false);
+					const next = attached ? queuedRequests.current.shift() : undefined;
+					if (next) {
+						void attach(next);
+					}
 				}
 			}
-			onAttach(buildSummary(ctx), frames);
 		},
-		[onAttach, target]
+		[onAttach, scope, target]
 	);
-
+	const attachContext = useCallback(
+		(context: ClipContext) => runAttachment({ context }),
+		[runAttachment]
+	);
 	const handleClipReady = useCallback(
-		(ctx: ClipContext) => {
-			attachContext(ctx);
+		(context: ClipContext) => {
+			void attachContext(context);
 		},
 		[attachContext]
 	);
-
 	const handlePick = useCallback(
 		(clipId: string) => {
-			getClipContext(target, clipId)
-				.then((ctx) => attachContext(ctx))
-				.catch(() => undefined);
+			void runAttachment({ clipId });
 		},
-		[attachContext, target]
+		[runAttachment]
 	);
 
 	// Clips is an APP: only surface its composer controls when `@ryu/clips` is
@@ -164,6 +262,32 @@ export function ClipComposerControls({
 			<ClipsList onPick={handlePick} />
 			<AttachVideoControl onIngested={attachContext} />
 			<AttachRecentActivityControl onAttach={onAttach} />
+			{isAttaching && (
+				<span className="text-muted-foreground text-xs" role="status">
+					Preparing recording…
+				</span>
+			)}
+			{attachmentError && (
+				<span
+					className="text-status-destructive text-xs"
+					role="alert"
+					title={attachmentError}
+				>
+					Could not attach recording.
+				</span>
+			)}
+			{failedRequest && (
+				<Button
+					onClick={() => {
+						void runAttachment(failedRequest);
+					}}
+					size="sm"
+					type="button"
+					variant="ghost"
+				>
+					Retry attachment
+				</Button>
+			)}
 		</div>
 	);
 }

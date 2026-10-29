@@ -1,0 +1,173 @@
+import { MarketplaceWallpaperPickerDialog } from "@ryu/blocks/desktop/marketplace-wallpaper-picker.tsx";
+import { Backdrop } from "@ryu/ui/components/backdrop/backdrop.tsx";
+import {
+	getMarketplaceBackdrops,
+	type RenderableBackdrop,
+	resolveMarketplaceWallpaperSelection,
+	toMarketplaceWallpaperSelection,
+} from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { useEffect, useMemo, useState } from "react";
+import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { getPreference, setPreference } from "@/src/lib/api/preferences.ts";
+import { usePluginBackgrounds } from "@/src/lib/plugin-backgrounds.ts";
+import { installWallpaper } from "@/src/lib/wallpaper-library.ts";
+
+function spaceCoverPreferenceKey(spaceId: string): string {
+	return `ryu.space-cover.v1:${encodeURIComponent(spaceId)}`;
+}
+
+export function SpaceWallpaperCover({
+	spaceId,
+	target,
+}: {
+	spaceId: string;
+	target: ApiTarget;
+}) {
+	const pluginBackgrounds = usePluginBackgrounds();
+	const wallpapers = useMemo(
+		() => getMarketplaceBackdrops(pluginBackgrounds),
+		[pluginBackgrounds]
+	);
+	const [wallpaper, setWallpaper] = useState<RenderableBackdrop | null>(null);
+	const [pickerOpen, setPickerOpen] = useState(false);
+	const [loading, setLoading] = useState(true);
+	const [saving, setSaving] = useState(false);
+	const [storageError, setStorageError] = useState<string | null>(null);
+	const preferenceKey = spaceCoverPreferenceKey(spaceId);
+
+	useEffect(() => {
+		let current = true;
+		setLoading(true);
+		setStorageError(null);
+		void getPreference(target, preferenceKey)
+			.then((raw) => {
+				let parsed: RenderableBackdrop | null = null;
+				if (raw) {
+					try {
+						parsed =
+							resolveMarketplaceWallpaperSelection(JSON.parse(raw)) ?? null;
+					} catch {
+						parsed = null;
+					}
+				}
+				if (current) {
+					setWallpaper(parsed);
+				}
+			})
+			.catch(() => {
+				if (current) {
+					setStorageError(
+						"This Space cover could not be loaded from the node."
+					);
+				}
+			})
+			.finally(() => {
+				if (current) {
+					setLoading(false);
+				}
+			});
+		return () => {
+			current = false;
+		};
+	}, [preferenceKey, target]);
+
+	const saveWallpaper = async (
+		selectedWallpaper: RenderableBackdrop
+	): Promise<boolean> => {
+		setSaving(true);
+		setStorageError(null);
+		try {
+			if (!installWallpaper(selectedWallpaper.id)) {
+				setStorageError("This wallpaper could not be added to your Library.");
+				return false;
+			}
+			const selection = toMarketplaceWallpaperSelection(selectedWallpaper);
+			await setPreference(target, preferenceKey, JSON.stringify(selection));
+			setWallpaper(selectedWallpaper);
+			return true;
+		} catch {
+			setStorageError("This Space cover could not be saved to the node.");
+			return false;
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	const clearWallpaper = async () => {
+		setSaving(true);
+		setStorageError(null);
+		try {
+			await setPreference(target, preferenceKey, "null");
+			setWallpaper(null);
+		} catch {
+			setStorageError("This Space cover could not be saved to the node.");
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	return (
+		<section aria-label="Space cover" className="space-y-2">
+			<div
+				className="relative isolate h-44 overflow-hidden rounded-xl border bg-muted sm:h-52"
+				data-testid="space-marketplace-cover"
+			>
+				{wallpaper ? (
+					<Backdrop
+						className="absolute inset-0"
+						definition={wallpaper}
+						live={false}
+						params={wallpaper.initialParams}
+					/>
+				) : (
+					<div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-muted to-background" />
+				)}
+				<div className="absolute inset-0 bg-gradient-to-r from-background/40 via-transparent to-background/10" />
+				<div className="absolute inset-0 bg-gradient-to-t from-background/75 via-background/10 to-transparent" />
+				<div className="absolute inset-0 bg-gradient-to-t from-background/75 via-background/10 to-transparent" />
+				<div className="absolute inset-x-3 top-3 flex flex-wrap justify-end gap-2">
+					{wallpaper ? (
+						<Button
+							disabled={saving || loading}
+							onClick={() => void clearWallpaper()}
+							size="sm"
+							variant="secondary"
+						>
+							Remove cover
+						</Button>
+					) : null}
+					<Button
+						disabled={saving || loading}
+						onClick={() => setPickerOpen(true)}
+						size="sm"
+						variant="secondary"
+					>
+						{wallpaper ? "Change cover" : "Choose cover"}
+					</Button>
+				</div>
+				<div className="absolute inset-x-4 bottom-4 text-foreground drop-shadow-sm">
+					<p className="font-medium">{wallpaper?.label ?? "Space cover"}</p>
+					<p className="text-foreground/80 text-sm">
+						{loading
+							? "Loading cover from this node…"
+							: "Saved on this node for every device connected to it."}
+					</p>
+				</div>
+			</div>
+			{storageError ? (
+				<p className="text-sm text-status-destructive" role="alert">
+					{storageError}
+				</p>
+			) : null}
+			<MarketplaceWallpaperPickerDialog
+				onOpenChange={setPickerOpen}
+				onSelect={saveWallpaper}
+				open={pickerOpen}
+				selectedId={wallpaper?.id}
+				title="Choose a Space cover"
+				wallpapers={wallpapers}
+			/>
+		</section>
+	);
+}

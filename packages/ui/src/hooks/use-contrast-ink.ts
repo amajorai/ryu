@@ -15,7 +15,7 @@
 // observer: a preset switch is an attribute mutation on that element, with no
 // React render to hang the recompute off.
 
-import { colorToHex, relativeLuminance } from "@ryu/ui/theme/presets";
+import { colorToHex, relativeLuminance } from "@ryu/ui/theme/presets.ts";
 import { useEffect, useState } from "react";
 
 function resolve(el: HTMLElement, name: string): string | null {

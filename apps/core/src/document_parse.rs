@@ -43,47 +43,25 @@
 //! [`crate::space_file_index`], which is how an uploaded file's contents reach a
 //! Space index.
 //!
-//! **One of the three HTTP routes is registered; two are not, and the split is
-//! deliberate.**
+//! **All three HTTP routes are registered** in the main route table of
+//! `apps/core/src/server/mod.rs`, deliberately *outside* the Spaces `AppGate` — the
+//! bound provider serves chat attachments too, so a node with Spaces turned off must
+//! still answer them.
 //!
-//! - [`parse_capability`] **is mounted** (`GET /api/documents/parse/capability`, in
-//!   the main route table of `apps/core/src/server/mod.rs`, deliberately *outside*
-//!   the Spaces `AppGate` — the bound provider serves chat attachments too, so a
-//!   node with Spaces turned off must still be able to read this). Its consumers
-//!   are the desktop's **Storage** settings panel
-//!   (`components/settings/StorageSettings.tsx`, mounted in the Gateway dialog),
+//! - [`parse_capability`] (`GET /api/documents/parse/capability`) feeds the
+//!   desktop's **Storage** settings panel (`components/settings/StorageSettings.tsx`),
 //!   which prints `max_input_bytes` as the node's upload ceiling, and the composer
-//!   attachment seam (`lib/composer/attachments.ts`). Before it was registered the
-//!   fetch 404'd, `capability` was `null`, and the row fell back to the client's
-//!   compiled-in default. There is no longer a **Document parsing** settings
-//!   section: the provider is bound from the node dropdown's Toolkits row, the
-//!   generic surface every swappable capability uses.
-//! - [`parse_document`] and [`parse_job`] are **still unmounted**. Their consumer is
-//!   the *composer* attachment flow, which now EXISTS as a seam
-//!   (`apps/desktop/src/lib/composer/attachments.ts`, whose `stageComposerFiles`
-//!   calls `parseDocument`) but which **no surface imports yet** — the chat page,
-//!   the Ask-Ryu dock and the launchpad still filter attachments to `image/*`
-//!   inline. A route with a caller nothing calls is still a route with no caller,
-//!   so registering them now would only widen the public surface ahead of its use.
-//!   Note for whoever wires that seam: `POST /api/documents/parse` must be
-//!   registered **with `DefaultBodyLimit::max(MAX_PARSE_BYTES)`**, or axum's
-//!   implicit 2 MiB limit rejects the body in the layer before the handler's
-//!   `{ code: "too_large" }` can name the real ceiling (see
-//!   `crate::server::uploads`' `a_route_without_an_explicit_limit_caps_at_axums_default`).
-//!
-//! They were left warning ("the `dead_code` warnings on them are accurate") — but a
-//! warning is not a decision. Eleven `never used` lines made `cargo check` merely
-//! *0-errors* instead of clean, and a reader could not tell this deliberate stub from
-//! an oversight; the next person's options were "delete it" or "leave the noise", and
-//! both lose the intent. So each still-unmounted route-only item carries an explicit
-//! `#[allow(dead_code)]` **with the reason on it**: the gate is the statement that
-//! these are unmounted on purpose, and removing the attribute is what the author of
-//! the composer surface does on the way to registering them in
-//! `apps/core/src/server/mod.rs` — exactly as this change did for
-//! [`parse_capability`]. Deleting them was the other honest option and was
-//! rejected: they are the designed shape of that surface (submit → poll, floor first,
-//! a 415 that names the extension), they compile, and re-deriving them later would
-//! re-derive the same three handlers from the same module doc.
+//!   attachment seam (`lib/composer/attachments.ts`). The provider itself is bound
+//!   from the node dropdown's Toolkits row, the generic surface every swappable
+//!   capability uses.
+//! - [`parse_document`] (`POST /api/documents/parse`) and [`parse_job`]
+//!   (`GET /api/documents/parse/jobs/:job_id`) are the submit → poll pair. Their
+//!   first consumer is the TypeScript SDK's document loaders (`coreDocumentParser`
+//!   in `@ryuhq/sdk/loaders`), which send local PDF and Office files here; the
+//!   desktop composer seam (`stageComposerFiles`) calls the same pair. The POST is
+//!   registered with [`crate::server::uploads::DOCUMENT_PARSE_BODY_LIMIT`], so a
+//!   body over [`MAX_PARSE_BYTES`] is refused with a message naming the ceiling
+//!   rather than axum's implicit 2 MiB default.
 //!
 //! ## There is no `/api/document-parse/*` and there never was
 //!
@@ -164,8 +142,11 @@ const PROVIDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30)
 /// runs on a settings-panel mount and on every composer mount.
 const CAPABILITY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// How long to wait for a lazy/idle-stopped provider sidecar to become healthy
-/// before declining the submit. Matches the ext-proxy's own wake budget.
+/// How long to WAIT for a lazy/idle-stopped provider sidecar to become healthy
+/// before declining the submit. Matches the ext-proxy's own wake budget. Only the
+/// wait: the start itself runs detached in the sidecar manager with its own long
+/// provisioning budget ([`crate::sidecar::manager::WAKE_START_BUDGET`]), so a first
+/// start's venv + `pip install` is never cancelled by this timeout.
 const WAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Extensions Core decodes itself, with no provider bound — the floor.
@@ -220,9 +201,8 @@ pub fn extension_of(filename: &str) -> String {
 /// dropped — a mangled character in a filename is recoverable, a silently shortened
 /// one is not.
 ///
-/// Route-only: decodes `x-filename` for [`parse_document`], which is unmounted
-/// (module doc). The in-process API is handed a title directly and needs no decode.
-#[allow(dead_code)]
+/// Route-only: decodes `x-filename` for [`parse_document`]. The in-process API is
+/// handed a title directly and needs no decode.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
@@ -351,9 +331,8 @@ pub fn mime_floor_name(title: &str, mime: &str) -> Option<String> {
 /// document" spends the context window on layout. Minimal on purpose — see
 /// [`strip_html`].
 ///
-/// Route-only: [`parse_document`] is its sole caller and is unmounted (module doc).
-/// The in-process floor is [`builtin_parse`], which differs deliberately — see there.
-#[allow(dead_code)]
+/// Route-only: [`parse_document`] is its sole caller. The in-process floor is
+/// [`builtin_parse`], which differs deliberately — see there.
 pub fn builtin_markdown(filename: &str, bytes: &[u8]) -> Option<(String, bool)> {
     let text = std::str::from_utf8(bytes).ok()?;
     Some(truncate_markdown(&apply_html_strip(filename, text)))
@@ -521,8 +500,7 @@ fn sibling_path(route: &ProviderRoute, name: &str) -> String {
 /// guard drops at header arrival, so without it an idle-stop sidecar can be reaped
 /// between the wake and the call.
 ///
-/// Route-only (module doc): the typed twin [`hold_provider`] is the live one.
-#[allow(dead_code)]
+/// Route-only: the in-process API uses its typed twin [`hold_provider`].
 async fn wake_provider(
     state: &ServerState,
     route: &ProviderRoute,
@@ -646,13 +624,7 @@ async fn provider_call(
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 //
-// **One of the three below is mounted: [`parse_capability`].** The other two still
-// carry `#[allow(dead_code)]` as the explicit statement that they are unmounted on
-// purpose, because a bare warning cannot distinguish a deliberate stub from an
-// oversight — see the module doc for which consumer each is waiting on and for what
-// registering them entails (a route table edit in `apps/core/src/server/mod.rs`, a
-// `DefaultBodyLimit` on the POST, plus a composer surface that actually imports
-// `stageComposerFiles` instead of filtering attachments to `image/*` inline).
+// All three are mounted in `apps/core/src/server/mod.rs` (see the module doc).
 
 /// `GET /api/documents/parse/capability` — what this node can read, right now.
 ///
@@ -776,25 +748,30 @@ pub async fn parse_capability(State(state): State<ServerState>) -> Response {
 /// Returns one of three things, and **never** silently succeeds with nothing:
 /// - `{ status: "succeeded", via: "builtin", markdown, truncated }` — the floor read it;
 /// - `{ status: "queued", via: "<provider id>", job_id }` — poll [`parse_job`];
-/// - `415 { code: "unsupported_format", extension }` — no floor, no provider that
-///   claims it. The caller shows this on the attachment chip.
+/// - `415 { code: "no_provider", extension }` — no floor, no provider that claims
+///   it (or `415 { code: "not_text" }` for a text extension that is not UTF-8). The
+///   caller shows this on the attachment chip.
 ///
-/// **Still unmounted** (unlike [`parse_capability`], which this change registered).
-/// Its consumer is `stageComposerFiles` in
-/// `apps/desktop/src/lib/composer/attachments.ts`, and no composer surface imports
-/// that seam yet. Register it together with the surface, and register it **with
-/// `DefaultBodyLimit::max(MAX_PARSE_BYTES)`** — without the layer, axum's implicit
-/// 2 MiB default refuses the body before this handler's `too_large` branch can name
-/// the real ceiling.
+/// Mounted with [`crate::server::uploads::DOCUMENT_PARSE_BODY_LIMIT`]: without that
+/// layer, axum's implicit 2 MiB default would refuse the body before this handler's
+/// `too_large` branch could name the real ceiling.
 #[utoipa::path(
     post,
     path = "/api/documents/parse",
     tag = "Documents",
     summary = "Extract markdown from a document",
+    description = "Send the document as the raw request body (any content type) with its \
+        percent-encoded file name in `x-filename`; the extension decides how it is read. \
+        Text formats are answered at once with `{ status: \"succeeded\", via: \"builtin\", \
+        markdown, truncated }`. Other formats go to the node's bound document parser and \
+        return `{ status: \"queued\", via, job_id }`; poll \
+        `GET /api/documents/parse/jobs/{job_id}`. Errors: `400 empty`, \
+        `413 too_large` (the body is over the node's upload ceiling), `415 not_text` \
+        (a text extension whose bytes are not UTF-8), and `415 no_provider` (no installed \
+        parser reads this format; `extension` names it).",
     request_body = serde_json::Value,
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-#[allow(dead_code)]
 pub async fn parse_document(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -942,18 +919,19 @@ pub async fn parse_document(
 /// Normalized to this facade's shape, so a caller written against `unstructured`
 /// keeps working when a different backend is bound.
 ///
-/// **Still unmounted**, for the same reason as [`parse_document`]: it is the poll
-/// half of that submit, and registering one without the other would be a route that
-/// can only ever return "unknown job".
+/// The poll half of [`parse_document`]; the two are mounted together.
 #[utoipa::path(
     get,
     path = "/api/documents/parse/jobs/{job_id}",
     tag = "Documents",
     summary = "Poll a document-parse job",
+    description = "Returns the job's `status` (`queued`, `running`, `succeeded`, `failed`, or \
+        `cancelled`), and on success its `markdown`. A finished job reports `error` when it \
+        failed. A non-2xx answer with `status: \"failed\"` means the job id is unknown or \
+        the parser was disabled while the job ran; a malformed id is `400 bad_job_id`.",
     params(("job_id" = String, Path, description = "Job id from POST /api/documents/parse")),
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-#[allow(dead_code)]
 pub async fn parse_job(State(state): State<ServerState>, Path(job_id): Path<String>) -> Response {
     // A job id is opaque and goes into a URL path; refuse anything that could
     // traverse out of the provider's `/jobs/` namespace rather than encoding around
@@ -1252,8 +1230,9 @@ pub fn builtin_parse(filename: &str, bytes: &[u8]) -> Result<ParseOutcome, Parse
     if bytes.len() > MAX_BLOB_PARSE_BYTES {
         return Err(ParseFailure::new(
             ParseFailureReason::TooLarge,
+            // No file name: this message is stored in the file-index status.
             format!(
-                "{filename} is {} bytes, over the {}-byte limit",
+                "the file is {} bytes, over the {}-byte limit",
                 bytes.len(),
                 MAX_BLOB_PARSE_BYTES
             ),
@@ -1476,10 +1455,184 @@ pub fn blob_input_path(sha256: &str) -> Result<std::path::PathBuf, ParseFailure>
         ));
     }
     let shard = &sha256[..2];
-    Ok(crate::paths::ryu_dir()
-        .join("blobs")
-        .join(shard)
-        .join(sha256))
+    Ok(crate::paths::files_path("blobs").join(shard).join(sha256))
+}
+
+/// Owner of the decrypted parser inputs under `tmp/`.
+const PARSE_TMP_OWNER: &str = "document-parse";
+
+/// Decrypted inputs older than this are crash or abandoned-job leftovers.
+const PARSE_INPUT_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+
+/// A blob decrypted for a parser that needs a path: an owner-only (`0600`) file
+/// in `tmp/document-parse/` (`0700`), removed when this value drops.
+///
+/// Blobs are sealed (`RYU-SF01`) at rest, so a provider can no longer open the
+/// stored file. This is the plaintext-in-flight copy the design allows for tools
+/// that need a path: unique name, owner-only, deleted when the job ends or its
+/// poller gives up ([`release_input`]). A crash leaves no job to finish, so Core
+/// empties the directory at startup ([`sweep_on_start`]), and every submission
+/// removes any file no running job holds.
+struct DecryptedBlobInput {
+    path: std::path::PathBuf,
+    created: std::time::Instant,
+}
+
+impl DecryptedBlobInput {
+    /// Claim `path` before anything is written to it, so a concurrent sweep
+    /// never removes a copy whose job id is not known yet.
+    fn claim(path: std::path::PathBuf) -> Self {
+        if let Ok(mut live) = live_parse_inputs().lock() {
+            live.insert(path.clone());
+        }
+        Self {
+            path,
+            created: std::time::Instant::now(),
+        }
+    }
+}
+
+impl Drop for DecryptedBlobInput {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        if let Ok(mut live) = live_parse_inputs().lock() {
+            live.remove(&self.path);
+        }
+    }
+}
+
+/// Paths of every decrypted input alive in this process (submitting or
+/// waiting for its job).
+fn live_parse_inputs() -> &'static std::sync::Mutex<HashSet<std::path::PathBuf>> {
+    static LIVE: std::sync::OnceLock<std::sync::Mutex<HashSet<std::path::PathBuf>>> =
+        std::sync::OnceLock::new();
+    LIVE.get_or_init(Default::default)
+}
+
+/// Decrypted inputs of provider jobs still running, by job id.
+fn pending_parse_inputs(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, DecryptedBlobInput>> {
+    static PENDING: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, DecryptedBlobInput>>,
+    > = std::sync::OnceLock::new();
+    PENDING.get_or_init(Default::default)
+}
+
+/// Drop decrypted inputs of jobs nobody polled for a long time, and remove
+/// every file in the scratch directory that no running job holds (crash
+/// leftovers), whatever its age.
+fn sweep_parse_inputs(dir: &std::path::Path) {
+    if let Ok(mut pending) = pending_parse_inputs().lock() {
+        pending.retain(|_, input| input.created.elapsed() < PARSE_INPUT_MAX_AGE);
+    }
+    let held: HashSet<std::path::PathBuf> = live_parse_inputs()
+        .lock()
+        .map(|live| live.clone())
+        .unwrap_or_default();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !held.contains(&path) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+/// Empty the decrypted-input directory at Core startup. No provider job
+/// survives a restart (the job map lives in memory), so anything there is a
+/// plaintext copy a crash or kill left behind. Call before any parse can be
+/// submitted.
+pub fn sweep_on_start() {
+    sweep_parse_inputs(&crate::paths::tmp_dir_for(PARSE_TMP_OWNER));
+}
+
+/// Release the decrypted input of a job its poller abandoned (poll budget
+/// spent): the file is deleted now rather than when the job map entry ages
+/// out. Harmless for an unknown or already finished job.
+pub fn release_input(job_id: &str) {
+    if let Ok(mut pending) = pending_parse_inputs().lock() {
+        pending.remove(job_id);
+    }
+}
+
+/// Decrypt the blob `sha256` into a fresh owner-only file whose name keeps the
+/// original extension (parsers dispatch on it).
+async fn decrypt_blob_input(
+    sha256: &str,
+    filename: &str,
+) -> Result<DecryptedBlobInput, ParseFailure> {
+    blob_input_path(sha256)?;
+    let dir = crate::paths::tmp_dir_for(PARSE_TMP_OWNER);
+    let extension = std::path::Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| !ext.is_empty() && ext.len() <= 16 && ext.chars().all(char::is_alphanumeric))
+        .map(|ext| format!(".{}", ext.to_ascii_lowercase()))
+        .unwrap_or_default();
+    let path = dir.join(format!("{}{extension}", uuid::Uuid::new_v4().simple()));
+    // Claimed first: dropped on any error below, which deletes a partial copy.
+    let input = DecryptedBlobInput::claim(path.clone());
+    let blob_root = crate::paths::files_path("blobs");
+    let sha = sha256.to_owned();
+    let target = path.clone();
+    let decrypted = tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+        std::fs::create_dir_all(&dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        sweep_parse_inputs(&dir);
+        ryu_spaces::decrypt_blob_to_path(&blob_root, &sha, &target)
+    })
+    .await
+    .map_err(|e| {
+        ParseFailure::new(
+            ParseFailureReason::BlobUnavailable,
+            format!("decrypting blob {sha256} failed: {e}"),
+        )
+    })?
+    .map_err(|e| {
+        ParseFailure::new(
+            ParseFailureReason::BlobUnavailable,
+            format!("cannot read blob {sha256}: {e:#}"),
+        )
+    })?;
+    if !decrypted {
+        return Err(ParseFailure::new(
+            ParseFailureReason::BlobUnavailable,
+            format!("cannot read blob {sha256}: it is not in the blob store"),
+        ));
+    }
+    Ok(input)
+}
+
+/// Read (and decrypt) a whole blob for the built-in floor, verifying its digest.
+async fn read_blob_bytes(sha256: &str) -> Result<Vec<u8>, ParseFailure> {
+    blob_input_path(sha256)?;
+    let blob_root = crate::paths::files_path("blobs");
+    let sha = sha256.to_owned();
+    let read = tokio::task::spawn_blocking(move || ryu_spaces::read_blob_at(&blob_root, &sha))
+        .await
+        .map_err(|e| {
+            ParseFailure::new(
+                ParseFailureReason::BlobUnavailable,
+                format!("reading blob {sha256} failed: {e}"),
+            )
+        })?;
+    match read {
+        Ok(Some(bytes)) => Ok(bytes),
+        Ok(None) => Err(ParseFailure::new(
+            ParseFailureReason::BlobUnavailable,
+            format!("cannot read blob {sha256}: it is not in the blob store"),
+        )),
+        Err(e) => Err(ParseFailure::new(
+            ParseFailureReason::BlobUnavailable,
+            format!("cannot read blob {sha256}: {e:#}"),
+        )),
+    }
 }
 
 /// Whether the host has a Python interpreter to bootstrap a sidecar venv from.
@@ -1512,23 +1665,35 @@ async fn hold_provider(
     let Some(wake) = route.wake_name.as_ref() else {
         return Ok(None);
     };
-    if state
+    if let Err(failure) = state
         .manager
         .wake_and_await_healthy(wake, WAKE_TIMEOUT)
         .await
-        .is_err()
     {
         // A bound provider that will not start is either a broken install or a host
         // with no Python, and only the second has an instruction the user can act on.
-        let reason = if host_python_missing().await {
-            ParseFailureReason::PythonMissing
+        if host_python_missing().await {
+            return Err(ParseFailure::new(
+                ParseFailureReason::PythonMissing,
+                format!("document parser '{wake}' did not become healthy"),
+            ));
+        }
+        // Still starting: the manager's detached start keeps provisioning, so this is
+        // the retryable answer, and the next parse finds the sidecar warm.
+        return Err(if crate::sidecar::manager::is_still_starting(&failure) {
+            ParseFailure::new(
+                ParseFailureReason::ProviderTimeout,
+                format!(
+                    "document parser '{wake}' is still starting (a first start installs \
+                     its Python environment); retry shortly"
+                ),
+            )
         } else {
-            ParseFailureReason::ProviderTimeout
-        };
-        return Err(ParseFailure::new(
-            reason,
-            format!("document parser '{wake}' did not become healthy"),
-        ));
+            ParseFailure::new(
+                ParseFailureReason::ProviderError,
+                format!("document parser '{wake}' failed to start: {failure:#}"),
+            )
+        });
     }
     Ok(Some(state.manager.enter_request(wake)))
 }
@@ -1540,9 +1705,11 @@ async fn hold_provider(
 /// ext-proxy caps a forwarded body at 10 MiB and base64 costs another third on top,
 /// so inlining a large document is not merely wasteful, it is unrepresentable. The
 /// provider runs on this machine and already has `${RYU_DIR}` in its allow-list, so it
-/// opens the file itself. Core resolves the sha to a path (never the provider), which
-/// keeps the shard layout — and therefore a future object-store backend — Core's
-/// business alone.
+/// opens the file itself. Core resolves the sha (never the provider), which keeps
+/// the shard layout — and therefore a future object-store backend — Core's
+/// business alone. Blobs are sealed at rest, so the path handed over is a
+/// decrypted owner-only copy under `tmp/document-parse/`, deleted when the job
+/// ends (see [`DecryptedBlobInput`]).
 pub async fn submit_blob(
     state: &ServerState,
     blob_sha256: &str,
@@ -1550,7 +1717,7 @@ pub async fn submit_blob(
     mime: &str,
     size_bytes: u64,
 ) -> Result<ParseSubmission, ParseFailure> {
-    let path = blob_input_path(blob_sha256)?;
+    blob_input_path(blob_sha256)?;
 
     // The floor, in the same two arms as
     // [`crate::space_file_index::create_file_indexed`] and for the same reason: the
@@ -1565,15 +1732,10 @@ pub async fn submit_blob(
     };
 
     if let Some(floor_name) = floor_name {
-        let bytes = tokio::fs::read(&path).await.map_err(|e| {
-            // The address validated but the file is not there (or not readable). That
-            // is this node's storage, not a missing parser — same reasoning as
-            // [`blob_input_path`].
-            ParseFailure::new(
-                ParseFailureReason::BlobUnavailable,
-                format!("cannot read blob {blob_sha256}: {e}"),
-            )
-        })?;
+        // The address validated but the blob is not there (or does not open or
+        // verify). That is this node's storage, not a missing parser — same
+        // reasoning as [`blob_input_path`].
+        let bytes = read_blob_bytes(blob_sha256).await?;
         let mut outcome = builtin_parse(&floor_name, &bytes)?;
         // Trust the caller's address over a recomputed one only when they agree;
         // a mismatch means the blob store handed us the wrong file, which the
@@ -1599,13 +1761,16 @@ pub async fn submit_blob(
 
     let _activity = hold_provider(state, &route).await?;
 
+    // Blobs are sealed at rest: the provider gets a decrypted owner-only copy,
+    // kept until the job is polled to an end (then deleted).
+    let input = decrypt_blob_input(blob_sha256, filename).await?;
     let (status, value) = provider_call_typed(
         state,
         &route,
         reqwest::Method::POST,
         &route.upstream_path,
         Some(json!({
-            "path": path.to_string_lossy(),
+            "path": input.path.to_string_lossy(),
             "blob_sha256": blob_sha256,
             "filename": filename,
             "mime": mime,
@@ -1631,6 +1796,9 @@ pub async fn submit_blob(
             "document parser accepted the file but returned no job id",
         ));
     };
+    if let Ok(mut pending) = pending_parse_inputs().lock() {
+        pending.insert(job_id.to_owned(), input);
+    }
     Ok(ParseSubmission::Job {
         job_id: job_id.to_owned(),
         backend_id: route.provider_id.clone(),
@@ -1640,6 +1808,22 @@ pub async fn submit_blob(
 /// Poll a job from [`submit_blob`]. `Ok(None)` means still running — not an error and
 /// not an empty document.
 pub async fn job_outcome(
+    state: &ServerState,
+    job_id: &str,
+    source_sha256: &str,
+) -> Result<Option<ParseOutcome>, ParseFailure> {
+    let outcome = job_outcome_inner(state, job_id, source_sha256).await;
+    // Any end of the job (success, failure, unknown job) releases its decrypted
+    // input; only "still running" keeps it.
+    if !matches!(outcome, Ok(None)) {
+        if let Ok(mut pending) = pending_parse_inputs().lock() {
+            pending.remove(job_id);
+        }
+    }
+    outcome
+}
+
+async fn job_outcome_inner(
     state: &ServerState,
     job_id: &str,
     source_sha256: &str,
@@ -1750,11 +1934,10 @@ mod tests {
     ///
     /// - `"/api/documents/parse"` is a prefix of the registered
     ///   `"/api/documents/parse/capability"`, so `contains` on the unquoted form
-    ///   reports the unmounted submit route as mounted;
+    ///   cannot tell the submit route from the capability route;
     /// - rustfmt moves a registration onto its own lines once the handler list
     ///   grows, so an indentation-sensitive needle reports a mounted route as
-    ///   absent — which would let the "these two are unmounted" assertions below
-    ///   keep passing after someone mounted them.
+    ///   absent.
     ///
     /// The closing quote is what makes the prefix case exact; `\s*` is what makes
     /// it formatting-proof. Mirrors `isRegistered` in
@@ -1787,22 +1970,11 @@ mod tests {
         );
     }
 
-    /// The `#[allow(dead_code)]` gate and the route table must agree.
-    ///
-    /// The gate is this module's way of saying "unmounted on purpose" (module doc).
-    /// Two ways for that statement to become false, both silent:
-    ///
-    /// 1. someone registers `parse_document` / `parse_job` and leaves the gate on —
-    ///    the next reader is told a live route is dead code;
-    /// 2. someone removes a gate without registering — the handler starts warning
-    ///    again and the deliberate-stub decision is lost to noise.
-    ///
-    /// So this checks the pairing in both directions for each of the two, over this
-    /// module's own source. Registering them is expected eventually; doing it
-    /// without deleting the gate (and without adding the `DefaultBodyLimit` the POST
-    /// needs) is what must not pass silently.
+    /// The submit and poll routes are registered and wired to these handlers, and
+    /// neither still carries the `#[allow(dead_code)]` gate it had while unmounted
+    /// (a live route documented as dead code misleads the next reader).
     #[test]
-    fn the_unmounted_handlers_are_gated_and_the_gated_handlers_are_unmounted() {
+    fn the_submit_and_poll_handlers_are_mounted_and_ungated() {
         let this_file = include_str!("document_parse.rs");
         for (handler, path) in [
             ("parse_document", "/api/documents/parse"),
@@ -1812,24 +1984,26 @@ mod tests {
             let declaration = this_file
                 .find(&signature)
                 .unwrap_or_else(|| panic!("{handler} is declared in this module"));
-            // The gate sits directly above the fn, after its `#[utoipa::path(...)]`
-            // block; take the 200 bytes before the signature so the search cannot
-            // wander into the previous handler's attributes.
             let preamble = &this_file[declaration.saturating_sub(200)..declaration];
             assert!(
-                preamble.contains("#[allow(dead_code)]"),
-                "{handler} is unmounted, so it must carry the gate that says so"
+                !preamble.contains("#[allow(dead_code)]"),
+                "{handler} is mounted, so it must not be gated as dead code"
             );
             assert!(
-                !is_registered(path),
-                "{handler} is registered at {path} but still carries #[allow(dead_code)] — \
-                 mount and gate disagree; drop the gate in the change that mounts it"
+                is_registered(path),
+                "{handler} must be registered at {path}"
             );
             assert!(
-                !SERVER_MOD_SRC.contains(&format!("crate::document_parse::{handler}")),
-                "{handler} is wired into the route table but still gated as dead code"
+                SERVER_MOD_SRC.contains(&format!("crate::document_parse::{handler}")),
+                "{path} must be wired to {handler}"
             );
         }
+        assert!(
+            SERVER_MOD_SRC.contains(
+                "uploads::DOCUMENT_PARSE_BODY_LIMIT.apply(post(crate::document_parse::parse_document))"
+            ),
+            "the submit route must carry its explicit body limit"
+        );
     }
 
     /// The number the desktop's parsing panel prints is the node's real ceiling.
@@ -2087,6 +2261,78 @@ mod tests {
                 "{ext} does not survive the floor's own check"
             );
         }
+    }
+
+    #[test]
+    fn crash_leftovers_go_at_startup_and_abandoned_jobs_release_their_input() {
+        let dir = crate::paths::tmp_dir_for(PARSE_TMP_OWNER);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A fresh plaintext copy a killed Core left behind.
+        let leftover = dir.join(format!("{}.pdf", uuid::Uuid::new_v4().simple()));
+        std::fs::write(&leftover, b"plaintext left by a crash").unwrap();
+        // A copy a running job still needs.
+        let live_path = dir.join(format!("{}.pdf", uuid::Uuid::new_v4().simple()));
+        let live = DecryptedBlobInput::claim(live_path.clone());
+        std::fs::write(&live_path, b"in use").unwrap();
+
+        sweep_on_start();
+        assert!(!leftover.exists(), "a leftover of any age is removed");
+        assert!(live_path.exists(), "a live job's input is kept");
+
+        // The poller gives up: the input goes now, not hours later.
+        let job_id = format!("job-{}", uuid::Uuid::new_v4().simple());
+        pending_parse_inputs()
+            .lock()
+            .unwrap()
+            .insert(job_id.clone(), live);
+        release_input(&job_id);
+        assert!(!live_path.exists(), "an abandoned job's input is deleted");
+        assert!(!live_parse_inputs().lock().unwrap().contains(&live_path));
+    }
+
+    #[tokio::test]
+    async fn sealed_blobs_reach_parsers_only_as_private_temporary_copies() {
+        let bytes = b"quarterly figures for the parser".to_vec();
+        let sha: String = {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(&bytes)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        };
+        let path = blob_input_path(&sha).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let cipher = ryu_crypto::content_cipher(ryu_spaces::BLOB_STORE).unwrap();
+        let context = ryu_crypto::content::ContentContext::for_id("blob", &sha);
+        let mut writer = ryu_crypto::SealedFileWriter::create(&path, &cipher, &context).unwrap();
+        writer.write_plain(&bytes).unwrap();
+        writer.finish().unwrap();
+
+        // The floor reads decrypted, verified bytes.
+        assert_eq!(read_blob_bytes(&sha).await.unwrap(), bytes);
+        // A provider gets an owner-only copy that disappears with the job.
+        let input = decrypt_blob_input(&sha, "report.PDF").await.unwrap();
+        assert!(input
+            .path
+            .starts_with(crate::paths::tmp_dir_for(PARSE_TMP_OWNER)));
+        assert_eq!(input.path.extension().and_then(|e| e.to_str()), Some("pdf"));
+        assert_eq!(std::fs::read(&input.path).unwrap(), bytes);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&input.path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let copy = input.path.clone();
+        drop(input);
+        assert!(
+            !copy.exists(),
+            "the decrypted copy is removed after the job"
+        );
+        // A missing blob is BlobUnavailable, not a missing parser.
+        let missing = "b".repeat(64);
+        let err = read_blob_bytes(&missing).await.unwrap_err();
+        assert_eq!(err.reason, ParseFailureReason::BlobUnavailable);
     }
 
     #[test]

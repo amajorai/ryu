@@ -63,8 +63,8 @@ impl Sidecar for OpenClawManager {
 
     fn uninstall(&self, _delete_data: bool) -> crate::sidecar::BoxFuture<anyhow::Result<()>> {
         Box::pin(async move {
-            // Remove the npm package from the ~/.ryu prefix.
-            let prefix = crate::paths::ryu_dir();
+            // Remove the npm package from the shared npm prefix.
+            let prefix = crate::paths::runtime_dir("npm");
             let prefix_str = prefix.to_string_lossy().into_owned();
 
             tracing::info!("removing openclaw npm package from {prefix_str}");

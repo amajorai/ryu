@@ -4,7 +4,7 @@ import {
 	ServerStack01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { InstallProgressButton } from "@ryu/blocks/desktop/install-button";
+import { InstallProgressButton } from "@ryu/blocks/desktop/install-button.tsx";
 import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
 import StoreCatalogLayout, {
 	StoreCardGrid,
@@ -23,9 +23,9 @@ import {
 	ListingStatStrip,
 } from "@ryu/marketplace/catalog/detail/listing-detail-shell";
 import { useInstalledOnly } from "@ryu/marketplace/catalog/installed-filter";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -33,15 +33,15 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
+} from "@ryu/ui/components/empty.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import InfiniteSentinel from "@/src/components/store/InfiniteSentinel.tsx";
@@ -63,7 +63,7 @@ import { useInstallProgress } from "@/src/store/useDownloadsStore.ts";
  * for the selected server. Browses MCP servers from the active source (the
  * official MCP registry by default), shows each server's launch surface
  * (packages/remotes), and installs a chosen server as a disabled
- * `~/.ryu/mcp.json` entry — Core never auto-launches a registry command.
+ * `~/.ryu/state/mcp.json` entry — Core never auto-launches a registry command.
  * Installed-state is derived from the registered server set, not the payload.
  */
 export default function McpCatalogSection({
@@ -100,6 +100,7 @@ export default function McpCatalogSection({
 		activeSource,
 		selectSource,
 		selectingSource,
+		retryList,
 	} = useMcpCatalog(initialQuery);
 
 	// The Store shell's "installed only" switch (the retired "Added" tab,
@@ -192,6 +193,9 @@ export default function McpCatalogSection({
 					loadingMore={loadingMore}
 					onClearSearch={() => setQuery("")}
 					onInstall={cardInstall}
+					onRetry={() => {
+						retryList().catch(() => undefined);
+					}}
 					onSelect={select}
 					selectedId={selectedId}
 					servers={visibleServers}
@@ -242,7 +246,7 @@ function McpSourcePicker({
 			}}
 			value={activeSource}
 		>
-			<SelectTrigger className="h-8 w-[180px] text-sm" size="sm">
+			<SelectTrigger className="h-8 w-[180px]" size="sm">
 				<SelectValue placeholder="Source" />
 			</SelectTrigger>
 			<SelectContent>
@@ -269,6 +273,7 @@ function McpServerList({
 	hasNextPage,
 	settingsOpener,
 	onClearSearch,
+	onRetry,
 }: {
 	servers: McpCatalogCard[];
 	loading: boolean;
@@ -279,6 +284,7 @@ function McpServerList({
 	onSelect: (id: string) => void;
 	onInstall: (id: string) => void;
 	onClearSearch: () => void;
+	onRetry: () => void;
 	fetchNextPage: () => void;
 	hasNextPage: boolean;
 	/** Resolves a server to the settings of the plugin that provides it, when one
@@ -291,21 +297,26 @@ function McpServerList({
 
 	if (loading && servers.length === 0) {
 		return (
-			<div className="flex items-center justify-center p-8 text-muted-foreground">
-				<Spinner className="size-5" />
+			<div className="p-8">
+				<SkeletonRows />
 			</div>
 		);
 	}
 	if (error) {
 		return (
-			<div className="p-4 text-sm text-status-destructive">
-				Couldn't load MCP servers: {error}
+			<div className="flex flex-col items-start gap-3 p-4 text-sm">
+				<p className="text-status-destructive">
+					Couldn't load MCP servers: {error}
+				</p>
+				<Button onClick={onRetry} size="sm" variant="ghost">
+					Try again
+				</Button>
 			</div>
 		);
 	}
 	if (servers.length === 0) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={ServerStack01Icon} />
@@ -437,11 +448,7 @@ function McpDetailPanel({
 		);
 	}
 	if (loading && !detail) {
-		return (
-			<div className="flex h-full items-center justify-center text-muted-foreground">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 	if (error) {
 		return (
@@ -486,7 +493,7 @@ function McpDetailPanel({
 			actions={
 				<>
 					{card.installed ? (
-						<Badge className="gap-1" variant="secondary">
+						<Badge variant="secondary">
 							<HugeiconsIcon
 								className="size-3.5 text-status-success"
 								icon={CheckmarkCircle02Icon}
@@ -567,12 +574,12 @@ function McpDetailPanel({
 							>
 								<div className="flex items-center gap-2">
 									{p.registryType && (
-										<Badge className="text-[10px]" variant="secondary">
+										<Badge size="compact" variant="secondary">
 											{p.registryType}
 										</Badge>
 									)}
 									{p.transport && (
-										<Badge className="text-[10px]" variant="outline">
+										<Badge size="compact" variant="outline">
 											{p.transport}
 										</Badge>
 									)}
@@ -598,7 +605,7 @@ function McpDetailPanel({
 								key={`${r.transportType}:${r.url}`}
 							>
 								{r.transportType && (
-									<Badge className="text-[10px]" variant="secondary">
+									<Badge size="compact" variant="secondary">
 										{r.transportType}
 									</Badge>
 								)}

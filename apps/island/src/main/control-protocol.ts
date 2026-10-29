@@ -8,6 +8,7 @@
 // out of its HTTP server for exactly this reason.
 
 import type { IncomingMessage } from "node:http";
+import { z } from "zod";
 
 export type GhostCursorPhase =
 	| "move"
@@ -19,6 +20,7 @@ export type GhostCursorPhase =
 
 export interface GhostCursorEvent {
 	agent: string;
+	identity?: GhostCursorIdentity;
 	intent: string;
 	phase: GhostCursorPhase;
 	seq: number;
@@ -26,6 +28,15 @@ export interface GhostCursorEvent {
 	ts: number;
 	x: number;
 	y: number;
+}
+
+export interface GhostCursorIdentity {
+	agentId?: string;
+	agentName?: string;
+	agentTitle?: string;
+	avatarEmoji?: string;
+	avatarUrl?: string;
+	sessionTitle?: string;
 }
 
 /** Base loopback port the desktop tray dials (kept distinct from Core/Shadow). */
@@ -55,19 +66,16 @@ export function resolveControlPort(
 /** Window/lifecycle actions the desktop tray can drive over the loopback POST. */
 export type ControlAction = "toggle" | "show" | "hide" | "quit";
 
-const VALID_ACTIONS = new Set<ControlAction>([
-	"toggle",
-	"show",
-	"hide",
-	"quit",
-]);
+const controlActionSchema = z.enum(["toggle", "show", "hide", "quit"]);
 
 /** Narrow an untrusted body field to a known control action. */
-export function isControlAction(value: unknown): value is ControlAction {
-	return typeof value === "string" && VALID_ACTIONS.has(value as ControlAction);
+export function isControlAction(
+	value: Parameters<typeof controlActionSchema.safeParse>[0]
+): value is ControlAction {
+	return controlActionSchema.safeParse(value).success;
 }
 
-const GHOST_PHASES = new Set<GhostCursorPhase>([
+const ghostPhaseSchema = z.enum([
 	"move",
 	"down",
 	"up",
@@ -77,6 +85,70 @@ const GHOST_PHASES = new Set<GhostCursorPhase>([
 ]);
 
 const MAX_GHOST_INTENT_LENGTH = 72;
+const MAX_CURSOR_TITLE_LENGTH = 160;
+const MAX_CURSOR_AGENT_LENGTH = 80;
+const MAX_CURSOR_AVATAR_URL_LENGTH = 20_000;
+
+function boundedTextSchema(limit: number) {
+	return z
+		.string()
+		.trim()
+		.min(1)
+		.transform((value) => Array.from(value).slice(0, limit).join(""))
+		.optional()
+		.catch(undefined);
+}
+
+function safeAvatarUrl(value: string): string | undefined {
+	const url = value.trim();
+	if (!url || url.length > MAX_CURSOR_AVATAR_URL_LENGTH) {
+		return;
+	}
+	if (/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(url)) {
+		return url;
+	}
+	try {
+		const parsed = new URL(url);
+		if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+			return url;
+		}
+	} catch {
+		return;
+	}
+}
+
+const cursorIdentitySchema = z
+	.object({
+		agentId: boundedTextSchema(96),
+		agentName: boundedTextSchema(MAX_CURSOR_AGENT_LENGTH),
+		agentTitle: boundedTextSchema(MAX_CURSOR_AGENT_LENGTH),
+		sessionTitle: boundedTextSchema(MAX_CURSOR_TITLE_LENGTH),
+		avatarUrl: z.string().transform(safeAvatarUrl).optional().catch(undefined),
+		avatarEmoji: boundedTextSchema(8),
+	})
+	.transform((identity) =>
+		Object.values(identity).some(Boolean) ? identity : undefined
+	)
+	.optional()
+	.catch(undefined);
+
+/** Stable display hue per agent, independent of the short-lived Ghost process id. */
+export function ghostCursorHueFor(
+	identity: GhostCursorIdentity | undefined,
+	fallbackAgent = "0"
+): number {
+	const seed =
+		identity?.agentId ||
+		identity?.agentName ||
+		identity?.sessionTitle ||
+		fallbackAgent ||
+		"0";
+	let hash = 0;
+	for (let index = 0; index < seed.length; index += 1) {
+		hash = (hash * 31 + seed.charCodeAt(index)) | 0;
+	}
+	return Math.abs(hash) % 360;
+}
 
 /** Give older Ghost sidecars a useful label while they roll forward. */
 export function defaultGhostIntent(
@@ -108,11 +180,11 @@ export function defaultGhostIntent(
 }
 
 function normalizeGhostIntent(
-	value: unknown,
+	value: string,
 	phase: GhostCursorPhase,
 	tool: string
 ): string {
-	const intent = typeof value === "string" ? value.trim() : "";
+	const intent = value.trim();
 	if (!intent) {
 		return defaultGhostIntent(phase, tool);
 	}
@@ -122,46 +194,43 @@ function normalizeGhostIntent(
 	return `${intent.slice(0, MAX_GHOST_INTENT_LENGTH - 1).trimEnd()}…`;
 }
 
-/**
- * Validate a raw `/ghost-cursor` body into a {@link GhostCursorEvent}. The agent
- * id is not in the body — it rides the `x-ghost-agent` header (the emitting pid) —
- * so it is threaded in separately. Returns `null` when the shape is wrong.
- */
+const ghostCursorBodySchema = z.object({
+	phase: ghostPhaseSchema,
+	x: z.number(),
+	y: z.number(),
+	tool: z.string().catch(""),
+	intent: z.string().catch(""),
+	identity: cursorIdentitySchema,
+	seq: z.number().catch(0),
+	ts: z.number().catch(0),
+});
+
+/** Validate a raw `/ghost-cursor` body before displaying the cursor. */
 export function parseGhostCursorEvent(
 	raw: string,
 	agent: string
 ): GhostCursorEvent | null {
-	let parsed: unknown;
 	try {
-		parsed = raw ? JSON.parse(raw) : null;
+		const parsed = ghostCursorBodySchema.safeParse(
+			raw ? JSON.parse(raw) : null
+		);
+		if (!parsed.success) {
+			return null;
+		}
+		const event = parsed.data;
+		const { identity, ...fields } = event;
+		const result: GhostCursorEvent = {
+			...fields,
+			agent,
+			intent: normalizeGhostIntent(event.intent, event.phase, event.tool),
+		};
+		if (identity) {
+			result.identity = identity;
+		}
+		return result;
 	} catch {
 		return null;
 	}
-	if (!parsed || typeof parsed !== "object") {
-		return null;
-	}
-	const e = parsed as Record<string, unknown>;
-	if (typeof e.phase !== "string") {
-		return null;
-	}
-	const phase = e.phase as GhostCursorPhase;
-	if (!GHOST_PHASES.has(phase)) {
-		return null;
-	}
-	if (typeof e.x !== "number" || typeof e.y !== "number") {
-		return null;
-	}
-	const tool = typeof e.tool === "string" ? e.tool : "";
-	return {
-		agent,
-		intent: normalizeGhostIntent(e.intent, phase, tool),
-		phase,
-		seq: typeof e.seq === "number" ? e.seq : 0,
-		tool,
-		ts: typeof e.ts === "number" ? e.ts : 0,
-		x: e.x,
-		y: e.y,
-	};
 }
 
 /**
@@ -176,11 +245,11 @@ export function parseGhostCursorEvent(
  * our own address:port is rejected.
  */
 export function isTrustedLocalRequest(
-	req: IncomingMessage,
+	req: Pick<IncomingMessage, "headers">,
 	port: number
 ): boolean {
 	const origin = req.headers.origin;
-	if (typeof origin === "string" && origin.length > 0) {
+	if (origin && origin.length > 0) {
 		return false;
 	}
 	const host = req.headers.host;
@@ -193,7 +262,7 @@ export function isTrustedLocalRequest(
  * cannot. Belt-and-suspenders on top of the Origin check: bodies are only
  * parsed as JSON when they claim to be JSON.
  */
-export function isJsonRequest(req: IncomingMessage): boolean {
+export function isJsonRequest(req: Pick<IncomingMessage, "headers">): boolean {
 	const contentType = req.headers["content-type"] ?? "";
 	return contentType.split(";")[0]?.trim().toLowerCase() === "application/json";
 }

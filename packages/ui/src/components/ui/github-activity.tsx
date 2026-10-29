@@ -1,14 +1,58 @@
 "use client";
 
-import { cn } from "@ryu/ui/lib/utils";
+import { safeHttpUrl } from "@ryu/ui/lib/safe-url.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { MotionStyle } from "motion/react";
 import {
 	AnimatePresence,
 	motion,
 	type Transition,
 	useReducedMotion,
 } from "motion/react";
+import type { CSSProperties } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
+import {
+	isNativeNumber,
+	isNativeText,
+} from "../../lib/native-primitive-observation.ts";
+import drawingStyles from "./github-activity.drawing.module.css";
+
+interface ContributionLevelStyle extends CSSProperties {
+	"--contribution-color"?: string;
+	"--contribution-opacity"?: number;
+}
+interface TooltipPositionStyle extends CSSProperties {
+	"--github-activity-1-left"?: string | undefined;
+	"--github-activity-1-top"?: string | undefined;
+	"--github-activity-1-transform"?: CSSProperties["transform"];
+}
+interface MonthRowStyle extends MotionStyle {
+	"--github-activity-2-gap"?: string | undefined;
+	"--github-activity-2-margin-bottom"?: string | undefined;
+}
+interface MonthCellStyle extends CSSProperties {
+	"--github-activity-3-width"?: string | undefined;
+}
+interface ContributionGridStyle extends CSSProperties {
+	"--github-activity-4-gap"?: string | undefined;
+}
+interface ContributionWeekStyle extends CSSProperties {
+	"--github-activity-5-gap"?: string | undefined;
+}
+interface ContributionCellStyle extends MotionStyle {
+	"--github-activity-6-height"?: string | undefined;
+	"--github-activity-6-width"?: string | undefined;
+}
+interface ActivityCardStyle extends CSSProperties {
+	"--github-activity-7-width"?: string | undefined;
+}
+interface ActivityPanelStyle extends MotionStyle {
+	"--github-activity-8-border-radius"?: string | undefined;
+}
+function drawingLength(value: CSSProperties["width"]): string | undefined {
+	return isNativeNumber(value) ? `${value}px` : value;
+}
 
 export type ContributionLevel = 0 | 1 | 2 | 3 | 4;
 
@@ -35,6 +79,7 @@ const MIN_CARD_WIDTH = 320;
 const MIN_LABEL_WEEKS = 3;
 // the p-4 on the card, both sides; the width math below has to add it back
 const CARD_PADDING = 32;
+const ACTIVITY_PANEL_RADIUS = 18;
 
 export interface ContributionUnit {
 	plural: string;
@@ -52,7 +97,7 @@ const weeksFor = (months: number) =>
 	Math.max(1, Math.ceil(months * WEEKS_PER_MONTH));
 
 const useIsoLayoutEffect =
-	typeof window === "undefined" ? React.useEffect : React.useLayoutEffect;
+	globalThis.window === undefined ? React.useEffect : React.useLayoutEffect;
 
 const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 const SPRING = { type: "spring", bounce: 0.2, duration: 0.62 } as const;
@@ -102,13 +147,13 @@ function toMonthLabels(weeks: Contribution[][]) {
 	return labels;
 }
 
-const LEVEL_OPACITY: Record<ContributionLevel, number> = {
+const LEVEL_OPACITY = {
 	0: 0,
 	1: 0.3,
 	2: 0.52,
 	3: 0.76,
 	4: 1,
-};
+} satisfies Record<ContributionLevel, number>;
 
 interface LevelStyle {
 	backgroundColor: string;
@@ -141,6 +186,14 @@ interface ApiDay {
 	level: number;
 }
 
+/** Decode the closed display domain; invalid levels already use level-zero paint. */
+function normalizedContributionLevel(
+	value: ApiDay["level"]
+): ContributionLevel {
+	const bounded = Math.min(4, Math.max(0, value));
+	return LEVELS.find((level) => level === bounded) ?? 0;
+}
+
 interface PushEvent {
 	payload?: { commits?: unknown[] };
 	repo?: { name: string };
@@ -166,7 +219,7 @@ async function fetchCalendar(login: string) {
 	return days.slice(start < 0 ? 0 : start).map<Contribution>((day) => ({
 		date: day.date,
 		count: day.count,
-		level: Math.min(4, Math.max(0, day.level)) as ContributionLevel,
+		level: normalizedContributionLevel(day.level),
 	}));
 }
 
@@ -244,13 +297,13 @@ function emptyDays(weeks: number): Contribution[] {
 		return {
 			date: date.toISOString().slice(0, 10),
 			count: 0,
-			level: 0 as ContributionLevel,
-		};
+			level: 0,
+		} satisfies Contribution;
 	});
 }
 
 function toScale(accent: string | string[]): LevelStyle[] {
-	if (typeof accent === "string") {
+	if (isNativeText(accent)) {
 		return LEVELS.map((level) => ({
 			backgroundColor: accent,
 			opacity: LEVEL_OPACITY[level],
@@ -314,18 +367,22 @@ const Tooltip = ({
 		setLeft(Math.min(Math.max(hovered.x, edge), window.innerWidth - edge));
 	}, [hovered]);
 
+	const tooltipPositionStyle: TooltipPositionStyle = {
+		"--github-activity-1-left": drawingLength(left),
+		"--github-activity-1-top": drawingLength(hovered.y),
+		"--github-activity-1-transform": "translate(-50%, calc(-100% - 8px))",
+	};
 	return createPortal(
 		<div
-			className="pointer-events-none fixed z-50"
-			style={{
-				left,
-				top: hovered.y,
-				transform: "translate(-50%, calc(-100% - 8px))",
-			}}
+			className={cn(
+				"pointer-events-none fixed z-50",
+				drawingStyles.tooltipPosition
+			)}
+			style={tooltipPositionStyle}
 		>
 			<motion.div
 				animate={{ opacity: 1, scale: 1 }}
-				className="whitespace-nowrap rounded-lg bg-foreground px-2 py-1 font-medium text-[11px] text-background shadow-md"
+				className="type-caption whitespace-nowrap rounded-lg bg-foreground px-2 py-1 font-medium text-background shadow-md"
 				exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.94 }}
 				initial={reduceMotion ? false : { opacity: 0, scale: 0.94 }}
 				ref={ref}
@@ -371,6 +428,13 @@ const ContributionGrid = ({
 		setHovered({ day, x: cell.left + cell.width / 2, y: cell.top });
 	};
 
+	const monthRowStyle: MonthRowStyle = {
+		"--github-activity-2-gap": drawingLength(gap),
+		"--github-activity-2-margin-bottom": drawingLength(gap),
+	};
+	const contributionGridStyle: ContributionGridStyle = {
+		"--github-activity-4-gap": drawingLength(gap),
+	};
 	return (
 		<div
 			aria-label={label}
@@ -382,62 +446,96 @@ const ContributionGrid = ({
 			{showMonths && (
 				<motion.div
 					animate={{ opacity: 1, filter: "blur(0px)" }}
-					className="flex justify-center"
+					className={cn("flex justify-center", drawingStyles.monthRow)}
 					initial={
 						reduceMotion
 							? false
 							: { opacity: 0, filter: `blur(${LABEL_BLUR}px)` }
 					}
-					style={{ gap, marginBottom: gap }}
+					style={monthRowStyle}
 					transition={{
 						...LABEL_REVEAL,
 						delay: reduceMotion ? 0 : sweepEnd,
 					}}
 				>
-					{toMonthLabels(visible).map((month, index) => (
-						<div
-							className="relative h-3 shrink-0"
-							key={index}
-							style={{ width: cellSize }}
-						>
-							{month && (
-								<span className="absolute top-0 left-0 text-[10px] text-foreground/40 leading-none">
-									{month}
-								</span>
-							)}
-						</div>
-					))}
+					{toMonthLabels(visible).map((month, index) => {
+						const monthCellStyle: MonthCellStyle = {
+							"--github-activity-3-width": drawingLength(cellSize),
+						};
+						return (
+							<div
+								className={cn("relative h-3 shrink-0", drawingStyles.monthCell)}
+								key={index}
+								style={monthCellStyle}
+							>
+								{month && (
+									<span className="type-compact absolute top-0 left-0 text-foreground/40 leading-none">
+										{month}
+									</span>
+								)}
+							</div>
+						);
+					})}
 				</motion.div>
 			)}
 
 			<div
-				className="flex justify-center overflow-hidden"
+				className={cn(
+					"flex justify-center overflow-hidden",
+					drawingStyles.contributionGrid
+				)}
 				onPointerLeave={() => setHovered(undefined)}
-				style={{ gap }}
+				style={contributionGridStyle}
 			>
-				{visible.map((week, weekIndex) => (
-					<div className="flex flex-col" key={weekIndex} style={{ gap }}>
-						{week.map((day) => (
-							<motion.div
-								animate={{ opacity: 1, scale: 1 }}
-								className="shrink-0 rounded-[3px] bg-foreground/[0.08]"
-								initial={reduceMotion ? false : { opacity: 0, scale: 0.4 }}
-								key={day.date}
-								onPointerEnter={hover(day)}
-								style={{ width: cellSize, height: cellSize }}
-								transition={{
-									...CELL_FADE,
-									delay: reduceMotion ? 0 : weekIndex * COLUMN_STAGGER,
-								}}
-							>
-								<div
-									className="h-full w-full rounded-[3px]"
-									style={scale[day.level] ?? scale[0]}
-								/>
-							</motion.div>
-						))}
-					</div>
-				))}
+				{visible.map((week, weekIndex) => {
+					const contributionWeekStyle: ContributionWeekStyle = {
+						"--github-activity-5-gap": drawingLength(gap),
+					};
+					return (
+						<div
+							className={cn("flex flex-col", drawingStyles.contributionWeek)}
+							key={weekIndex}
+							style={contributionWeekStyle}
+						>
+							{week.map((day) => {
+								const level = scale[day.level] ?? scale[0];
+								const levelStyle: ContributionLevelStyle = {
+									"--contribution-color": level?.backgroundColor,
+									"--contribution-opacity": level?.opacity,
+								};
+								const contributionCellStyle: ContributionCellStyle = {
+									"--github-activity-6-width": drawingLength(cellSize),
+									"--github-activity-6-height": drawingLength(cellSize),
+								};
+								return (
+									<motion.div
+										animate={{ opacity: 1, scale: 1 }}
+										className={cn(
+											"shrink-0 rounded-[3px] bg-foreground/[0.08]",
+											drawingStyles.contributionCell
+										)}
+										initial={reduceMotion ? false : { opacity: 0, scale: 0.4 }}
+										key={day.date}
+										onPointerEnter={hover(day)}
+										style={contributionCellStyle}
+										transition={{
+											...CELL_FADE,
+											delay: reduceMotion ? 0 : weekIndex * COLUMN_STAGGER,
+										}}
+									>
+										<div
+											className={cn(
+												"h-full w-full rounded-[3px]",
+												drawingStyles.level
+											)}
+											style={levelStyle}
+										/>
+									</motion.div>
+								);
+							})}
+						</div>
+					);
+				})}
 			</div>
 
 			<AnimatePresence>
@@ -467,7 +565,7 @@ const Avatar = ({
 }) => (
 	<motion.span
 		className={cn(
-			"grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted font-medium text-[11px] text-muted-foreground uppercase ring-2 ring-background",
+			"type-caption grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted font-medium text-muted-foreground uppercase",
 			"[&_img]:size-full [&_img]:object-cover [&_svg]:size-full",
 			className
 		)}
@@ -487,6 +585,7 @@ const RepoRow = ({
 	layoutId: string;
 	transition: Transition;
 }) => {
+	const safeHref = safeHttpUrl(repo.href);
 	const className =
 		"flex items-center gap-3 rounded-xl mx-2 px-2 py-2 transition-colors hover:bg-foreground/5";
 
@@ -502,8 +601,13 @@ const RepoRow = ({
 		</>
 	);
 
-	return repo.href ? (
-		<a className={className} href={repo.href} rel="noopener" target="_blank">
+	return safeHref ? (
+		<a
+			className={className}
+			href={safeHref}
+			rel="noopener noreferrer"
+			target="_blank"
+		>
 			{content}
 		</a>
 	) : (
@@ -626,15 +730,25 @@ const GitHubActivity = ({
 		columns * (cellSize + gap) - gap + CARD_PADDING
 	);
 
+	const activityCardStyle: ActivityCardStyle = {
+		"--github-activity-7-width": drawingLength(width),
+		...style,
+	};
+	const activityPanelStyle: ActivityPanelStyle = {
+		"--github-activity-8-border-radius": drawingLength(ACTIVITY_PANEL_RADIUS),
+	};
 	return (
 		<div
 			className={cn(
-				"relative max-w-full overflow-hidden rounded-[28px] bg-card p-4 text-card-foreground",
-				repos.length > 0 && "pb-[76px]",
-				className
+				cn(
+					"relative max-w-full overflow-hidden rounded-[28px] bg-card p-4 text-card-foreground",
+					repos.length > 0 && "pb-[76px]",
+					className
+				),
+				drawingStyles.activityCard
 			)}
 			data-slot="github-activity"
-			style={{ width, ...style }}
+			style={activityCardStyle}
 			{...props}
 		>
 			<p className="mb-4 px-1.5 font-medium text-base text-foreground">
@@ -654,15 +768,22 @@ const GitHubActivity = ({
 
 			{repos.length > 0 && (
 				<motion.div
+					// Motion scale-corrects only radii it owns, so hand the radius to it
+					// through `animate`; the module rule remains the static fallback.
+					animate={{ borderRadius: ACTIVITY_PANEL_RADIUS }}
 					className={cn(
-						"absolute inset-x-3 bottom-3 overflow-hidden bg-card/90 backdrop-blur-xl",
-						open && "top-3"
+						cn(
+							"absolute inset-x-3 bottom-3 overflow-hidden bg-card/90 backdrop-blur-xl",
+							open && "top-3"
+						),
+						drawingStyles.activityPanel
 					)}
 					data-slot="github-activity-panel"
 					data-state={open ? "open" : "closed"}
 					id={`${uid}-panel`}
+					initial={false}
 					layout
-					style={{ borderRadius: 18 }}
+					style={activityPanelStyle}
 					transition={transition}
 				>
 					<motion.div
@@ -674,7 +795,10 @@ const GitHubActivity = ({
 
 						<div className="flex items-center gap-3">
 							{!open && (
-								<div className="flex items-center">
+								<div
+									className="flex items-center [--avatar-overlap:--spacing(2)] [--avatar-size:--spacing(7)]"
+									data-avatar-stack=""
+								>
 									{repos.slice(0, STACK_LIMIT).map((repo, index) => (
 										<Avatar
 											className="-ml-2 first:ml-0"

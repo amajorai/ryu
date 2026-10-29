@@ -3,8 +3,6 @@ import { expect, test } from "@playwright/test";
 test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/git-graph-proof.html";
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/17/01a01154-e576-7be2-b0d0-f396c2394240/git-graph-proof.png";
 
 test("renders the connected side-chat rail and filters the real Git graph", async ({
 	page,
@@ -54,5 +52,8 @@ test("selects a commit, exposes details, and links to project changes", async ({
 		"/project/diff/%2FUsers%2Fjiawei%2FDocuments%2FCode%2Fryu-closed"
 	);
 
-	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("git-graph-proof.png"),
+		fullPage: true,
+	});
 });

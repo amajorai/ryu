@@ -34,9 +34,7 @@ describe("parseIslandAgentPrefs", () => {
 	});
 
 	it("falls back per-field to the flagship for a non-string value", () => {
-		expect(
-			parseIslandAgentPrefs(JSON.stringify({ voiceAgent: 42 as unknown }))
-		).toEqual({
+		expect(parseIslandAgentPrefs(JSON.stringify({ voiceAgent: 42 }))).toEqual({
 			voiceAgent: DEFAULT_AGENT_ID,
 			proactiveAgent: DEFAULT_AGENT_ID,
 		});

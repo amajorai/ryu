@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+
 import type {
 	SkillAgentTarget,
 	SkillDistributionResult,
@@ -19,6 +20,7 @@ if (!GlobalRegistrator.isRegistered) {
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 Reflect.set(Element.prototype, "getAnimations", () => []);
 
+const { CurrentTabIdProvider } = await import("@/src/contexts/TabsContext.tsx");
 const { SkillTargetsRequiredError } = await import("@/src/lib/api/skills.ts");
 const { useNodeStore } = await import("@/src/store/useNodeStore.ts");
 const { SkillDistributionProvider, useSkillDistributionFlow } = await import(
@@ -137,6 +139,23 @@ async function waitForDialog() {
 	throw new Error(`Dialog did not open: ${document.body.innerHTML}`);
 }
 
+async function waitForCacheConfirm() {
+	for (let attempt = 0; attempt < 100; attempt += 1) {
+		if (document.querySelector('[role="alertdialog"]')) {
+			return;
+		}
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		});
+	}
+	throw new Error(`Cache confirm did not open: ${document.body.innerHTML}`);
+}
+
+async function applyCacheReset() {
+	await waitForCacheConfirm();
+	await click(button("Apply now"));
+}
+
 async function start<T>(
 	action: () => Promise<T>
 ): Promise<{ promise: Promise<T> }> {
@@ -195,6 +214,80 @@ describe("SkillDistributionProvider", () => {
 		document.body.replaceChildren();
 	});
 
+	it("uses the invoking tab node for configured installs and exports", async () => {
+		useNodeStore.setState({
+			defaultNode: "local",
+			nodes: [
+				{ name: "local", url: "http://node-a", token: "a" },
+				{
+					name: "isolated",
+					url: "http://node-b",
+					token: "b",
+					userJwt: "identity-b",
+				},
+			],
+			tabOverrides: { "store-tab": "isolated" },
+			autoSelect: false,
+		});
+		await act(async () =>
+			root.render(
+				<SkillDistributionProvider
+					services={{ install, fetchTargets, distribute }}
+				>
+					<CurrentTabIdProvider tabId="store-tab">
+						<Harness
+							onFlow={(value) => {
+								flow = value;
+							}}
+						/>
+					</CurrentTabIdProvider>
+				</SkillDistributionProvider>
+			)
+		);
+		const { promise: installed } = await start(() =>
+			flow.installCatalogSkill({ id: "demo" })
+		);
+		await applyCacheReset();
+		await installed;
+		expect(install.mock.calls[0]?.[0]).toEqual({
+			url: "http://node-b",
+			token: "b",
+			userJwt: "identity-b",
+		});
+		expect(fetchTargets).not.toHaveBeenCalled();
+		const { promise } = await start(() =>
+			flow.distributeInstalledSkill("demo")
+		);
+		await waitForDialog();
+		await choose("Codex");
+		await click(button("Export"));
+		await promise;
+		expect(fetchTargets.mock.calls[0]?.[0]).toEqual(install.mock.calls[0]?.[0]);
+		expect(distribute.mock.calls[0]?.[0]).toEqual(install.mock.calls[0]?.[0]);
+	});
+
+	it("retains the original destination if the node changes before prompting", async () => {
+		install.mockImplementationOnce(async () => {
+			useNodeStore.setState({
+				defaultNode: "other",
+				nodes: [{ name: "other", url: "http://node-b", token: "b" }],
+			});
+			throw new SkillTargetsRequiredError();
+		});
+		const { promise } = await start(() =>
+			flow.installCatalogSkill({ id: "demo" })
+		);
+		await applyCacheReset();
+		await waitForDialog();
+		await click(button("Install"));
+		await promise;
+		expect(install.mock.calls.map((call) => call[0].url)).toEqual([
+			"http://node-a",
+			"http://node-a",
+		]);
+		expect(fetchTargets.mock.calls[0]?.[0].url).toBe("http://node-a");
+	});
+
 	it("retries a first install after target selection", async () => {
 		install
 			.mockRejectedValueOnce(new SkillTargetsRequiredError())
@@ -203,6 +296,7 @@ describe("SkillDistributionProvider", () => {
 		const { promise } = await start(() =>
 			flow.installCatalogSkill({ id: "demo" })
 		);
+		await applyCacheReset();
 		await waitForDialog();
 		await choose("Codex");
 		await choose("Cursor");
@@ -224,9 +318,11 @@ describe("SkillDistributionProvider", () => {
 
 	it("uses configured Core defaults without fetching targets or opening", async () => {
 		install.mockResolvedValueOnce(successfulInstall(null));
-		await expect(
+		const { promise } = await start(() =>
 			flow.installCatalogSkill({ id: "remembered", source: "private" })
-		).resolves.toEqual(successfulInstall(null));
+		);
+		await applyCacheReset();
+		await expect(promise).resolves.toEqual(successfulInstall(null));
 		expect(install).toHaveBeenCalledWith(
 			expect.anything(),
 			{ id: "remembered", source: "private" },
@@ -241,6 +337,7 @@ describe("SkillDistributionProvider", () => {
 		const { promise } = await start(() =>
 			flow.installCatalogSkill({ id: "demo" })
 		);
+		await applyCacheReset();
 		await waitForDialog();
 		await click(button("Cancel"));
 		await expect(promise).resolves.toBeNull();
@@ -370,6 +467,7 @@ describe("SkillDistributionProvider", () => {
 				target: explicitTarget,
 			})
 		);
+		await applyCacheReset();
 		await waitForDialog();
 		useNodeStore.setState({
 			defaultNode: "other",
@@ -393,6 +491,68 @@ describe("SkillDistributionProvider", () => {
 				targetIds: ["codex"],
 			}
 		);
+	});
+
+	it("asks before an install and names the skill", async () => {
+		const { promise } = await start(() =>
+			flow.installCatalogSkill({ id: "owner/repo/demo", name: "Demo" })
+		);
+		await waitForCacheConfirm();
+		expect(install).not.toHaveBeenCalled();
+		expect(document.body.textContent).toContain(
+			"The Demo skill is part of the system prompt for every thread that loads skills."
+		);
+		await click(button("Apply now"));
+		await expect(promise).resolves.toEqual(successfulInstall());
+		expect(install).toHaveBeenCalledTimes(1);
+	});
+
+	it("cancelling the cache confirm installs nothing", async () => {
+		const { promise } = await start(() =>
+			flow.installCatalogSkill({ id: "owner/repo/demo" })
+		);
+		await waitForCacheConfirm();
+		expect(document.body.textContent).toContain("The demo skill is part of");
+		await click(button("Cancel"));
+		await expect(promise).resolves.toBeNull();
+		expect(install).not.toHaveBeenCalled();
+		expect(fetchTargets).not.toHaveBeenCalled();
+	});
+
+	it("skips the cache confirm when the caller already asked", async () => {
+		const outcome: { result?: SkillInstallResult | null } = {};
+		await act(async () => {
+			outcome.result = await flow.installCatalogSkill({
+				id: "demo",
+				promptCacheConfirmed: true,
+			});
+		});
+		expect(outcome.result).toEqual(successfulInstall());
+		expect(install).toHaveBeenCalledTimes(1);
+		expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+	});
+
+	it("confirmSkillSetChange applies at once when no skill changes", async () => {
+		await expect(flow.confirmSkillSetChange([])).resolves.toBe(true);
+		await expect(flow.confirmSkillSetChange(["  "])).resolves.toBe(true);
+		expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+	});
+
+	it("confirmSkillSetChange resolves the user's answer", async () => {
+		const { promise: applied } = await start(() =>
+			flow.confirmSkillSetChange(["Alpha"])
+		);
+		await applyCacheReset();
+		await expect(applied).resolves.toBe(true);
+		const { promise: cancelled } = await start(() =>
+			flow.confirmSkillSetChange(["Alpha", "Beta"])
+		);
+		await waitForCacheConfirm();
+		expect(document.body.textContent).toContain(
+			"Alpha and Beta are part of the system prompt"
+		);
+		await click(button("Cancel"));
+		await expect(cancelled).resolves.toBe(false);
 	});
 
 	it("resolves a pending open as cancelled when the provider unmounts", async () => {

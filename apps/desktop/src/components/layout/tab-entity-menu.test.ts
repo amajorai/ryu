@@ -1,6 +1,12 @@
 import { describe, expect, it } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { Tab } from "@/src/contexts/TabsContext.tsx";
-import { deriveTabEntity } from "./tab-entity-menu.tsx";
+// The menu also mounts browser-backed workspace stores. Initialize their host
+// before importing the real menu; keep all entity routing assertions unchanged.
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
+const { deriveTabEntity } = await import("./tab-entity-menu.tsx");
 
 // `deriveTabEntity` is what decides whether a tab menu grows an entity section
 // at all, and which anchor apps get to contribute to. The failure modes are both

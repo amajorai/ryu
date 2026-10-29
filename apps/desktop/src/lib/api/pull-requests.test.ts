@@ -82,6 +82,9 @@ describe("Pull Requests app contract", () => {
 
 	test("normalizes app metadata and identifies failing checks", () => {
 		expect(pullRequest).not.toBeNull();
+		if (!pullRequest) {
+			throw new Error("Expected the valid pull request fixture");
+		}
 		expect(pullRequest?.repository).toBe("openai/codex");
 		expect(pullRequest?.commentsCount).toBe(3);
 		expect(pullRequest?.statusCheckRollup).toHaveLength(2);
@@ -99,9 +102,7 @@ describe("Pull Requests app contract", () => {
 				}
 			)
 		).toBe("fail");
-		expect(
-			failingPullRequestChecks(pullRequest as NonNullable<typeof pullRequest>)
-		).toHaveLength(1);
+		expect(failingPullRequestChecks(pullRequest)).toHaveLength(1);
 		const fallback = normalizeGitPullRequest({
 			pr_url: "https://github.com/openai/codex/pull/552",
 			title: "Fix CI",
@@ -145,29 +146,109 @@ describe("Pull Requests app contract", () => {
 		});
 
 		expect(conflicting).not.toBeNull();
-		expect(
-			pullRequestHasMergeConflicts(
-				conflicting as NonNullable<typeof conflicting>
-			)
-		).toBe(true);
-		expect(
-			pullRequestHasMergeConflicts(blocked as NonNullable<typeof blocked>)
-		).toBe(false);
-		expect(
-			buildPullRequestMergeConflictReport(
-				conflicting as NonNullable<typeof conflicting>
-			)
-		).toContain("Merge state: DIRTY");
+		if (!(conflicting && blocked)) {
+			throw new Error("Expected both valid pull request fixtures");
+		}
+		expect(pullRequestHasMergeConflicts(conflicting)).toBe(true);
+		expect(pullRequestHasMergeConflicts(blocked)).toBe(false);
+		expect(buildPullRequestMergeConflictReport(conflicting)).toContain(
+			"Merge state: DIRTY"
+		);
 	});
 
 	test("builds a bounded text report with failing check context", () => {
-		const report = buildPullRequestCheckReport(
-			pullRequest as NonNullable<typeof pullRequest>
-		);
+		if (!pullRequest) {
+			throw new Error("Expected the valid pull request fixture");
+		}
+		const report = buildPullRequestCheckReport(pullRequest);
 		expect(report).toContain("#42 Fix CI");
 		expect(report).toContain("Lint");
 		expect(report).toContain("https://github.com/check/1");
 		expect(report).toContain("Comments: 3");
 		expect(report.length).toBeLessThanOrEqual(12_000);
+	});
+});
+
+describe("Pull request wire fallbacks", () => {
+	test("keeps legacy aliases, count fallbacks, and check metadata", () => {
+		const result = normalizeGitPullRequest({
+			pr_url: " https://github.com/owner/project/pulls/73 ",
+			title: " Legacy response ",
+			number: -1,
+			commentsCount: -1,
+			comments_count: 0,
+			comments: [null, {}],
+			base: " main ",
+			branch: " feature ",
+			head_sha: " abc ",
+			is_draft: true,
+			repository: { name: " owner/project " },
+			status_check_rollup: [
+				false,
+				null,
+				[],
+				{
+					link: " https://ci.example/check ",
+					workflow: " CI ",
+					bucket: "fail",
+				},
+			],
+		});
+		expect(result?.number).toBe(73);
+		expect(result?.commentsCount).toBe(0);
+		expect(result?.isDraft).toBe(true);
+		expect(result?.repository).toBe("owner/project");
+		expect(result?.headRefOid).toBe("abc");
+		expect(result?.statusCheckRollup).toHaveLength(2);
+		expect(result?.statusCheckRollup[0]?.name).toBeNull();
+		expect(result?.statusCheckRollup[1]?.detailsUrl).toBe(
+			"https://ci.example/check"
+		);
+		expect(result?.statusCheckRollup[1]?.workflowName).toBe("CI");
+	});
+
+	test("keeps empty preferred rollups and rejects missing identity fields", () => {
+		const input = {
+			number: 1,
+			title: "valid",
+			url: "https://github.com/a/b/pull/1",
+			statusCheckRollup: [],
+			status_check_rollup: [{ bucket: "fail" }],
+		};
+		expect(normalizeGitPullRequest(input)?.statusCheckRollup).toEqual([]);
+		expect(normalizeGitPullRequest({ ...input, title: " " })).toBeNull();
+		expect(
+			normalizeGitPullRequest({
+				...input,
+				number: Number.MAX_SAFE_INTEGER + 1,
+				url: "https://github.com/a/b",
+			})
+		).toBeNull();
+		for (const value of [null, false, "invalid", []]) {
+			expect(normalizeGitPullRequest(value)).toBeNull();
+			expect(normalizeGitHubRepository(value)).toBeNull();
+		}
+	});
+
+	test("keeps legacy default branch and per-field invalid-value fallbacks", () => {
+		expect(
+			normalizeGitHubRepository({
+				nameWithOwner: " a/b ",
+				url: " https://github.com/a/b ",
+				defaultBranch: false,
+				defaultBranchRef: { name: " trunk " },
+			})
+		).toEqual({
+			defaultBranch: "trunk",
+			nameWithOwner: "a/b",
+			url: "https://github.com/a/b",
+		});
+		expect(
+			normalizeGitHubRepository({
+				nameWithOwner: "a/b",
+				url: "https://github.com/a/b",
+				defaultBranchRef: " main ",
+			})?.defaultBranch
+		).toBe("main");
 	});
 });

@@ -44,6 +44,12 @@ pub struct ModelMeta {
     /// USD per 1M output tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_output_per_1m: Option<f64>,
+    /// USD per 1M cache-read input tokens, when published by the catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_cache_read_per_1m: Option<f64>,
+    /// USD per 1M cache-write input tokens, when published by the catalog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_cache_write_per_1m: Option<f64>,
     #[serde(default)]
     pub modalities_input: Vec<String>,
     #[serde(default)]
@@ -86,7 +92,7 @@ fn is_fresh(fetched_at: u64, now: u64) -> bool {
 }
 
 fn disk_cache_path() -> PathBuf {
-    crate::ryu_dir().join("models-dev-cache.json")
+    ryu_sidecar_runtime::layout::cache_path(&crate::ryu_dir(), "models-dev-cache.json")
 }
 
 fn read_disk_cache() -> Option<CachedCatalog> {
@@ -179,6 +185,12 @@ fn parse_catalog(catalog: &Value) -> (HashMap<String, u32>, HashMap<String, Mode
                 max_output,
                 cost_input_per_1m: cost_input,
                 cost_output_per_1m: cost_output,
+                cost_cache_read_per_1m: cost
+                    .and_then(|c| c.get("cache_read"))
+                    .and_then(Value::as_f64),
+                cost_cache_write_per_1m: cost
+                    .and_then(|c| c.get("cache_write"))
+                    .and_then(Value::as_f64),
                 modalities_input,
                 modalities_output,
                 knowledge,
@@ -371,7 +383,7 @@ mod tests {
                         "name": "Claude Opus 4.5",
                         "description": "High-end Claude",
                         "limit": { "context": 200000, "output": 64000 },
-                        "cost": { "input": 5.0, "output": 25.0 },
+                        "cost": { "input": 5.0, "output": 25.0, "cache_read": 0.5, "cache_write": 6.25 },
                         "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
                         "reasoning": true,
                         "tool_call": true,
@@ -406,6 +418,8 @@ mod tests {
         assert_eq!(m.max_output, Some(64_000));
         assert_eq!(m.cost_input_per_1m, Some(5.0));
         assert_eq!(m.cost_output_per_1m, Some(25.0));
+        assert_eq!(m.cost_cache_read_per_1m, Some(0.5));
+        assert_eq!(m.cost_cache_write_per_1m, Some(6.25));
         assert_eq!(m.modalities_input, vec!["text", "image", "pdf"]);
         assert_eq!(m.reasoning, Some(true));
         assert_eq!(m.source, "models.dev");

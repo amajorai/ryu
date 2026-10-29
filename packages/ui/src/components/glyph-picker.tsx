@@ -1,18 +1,26 @@
 "use client";
 
+import styles from "./glyph-picker.module.css";
+
 /**
  * Shared glyph picker — the single primitive for picking an entity icon /
  * avatar across the product (agents, project folders, spaces, pages, meetings).
  *
  * Allowed kinds are decided here via {@link GLYPH_PRESETS} (or an explicit
  * allowlist). The canonical set is avatar · icon · emoji · dicebear; agents
- * additionally allow expressive ghost faces and a standalone dither gradient.
+ * additionally allow expressive ghost faces, marketplace avatar styles (shown
+ * only when an enabled plugin contributes one), and a standalone dither gradient.
  * Icons and emojis can also take dither as an optional *background* layer
  * (DiceBear and expressive faces cannot).
  */
 
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
+import { useAvatarContributions } from "@ryu/ui/components/avatar-contributions.tsx";
+import {
+	AvatarStyleControls,
+	defaultAvatarStyleValue,
+} from "@ryu/ui/components/avatar-style-controls.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -62,6 +70,7 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@ryu/ui/components/tabs.tsx";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	ArrowDown,
@@ -74,10 +83,16 @@ import {
 	Search,
 	X,
 } from "lucide-react";
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import type { GhostAvatarAppearance } from "./ghost-avatar.ts";
 import { GhostAvatarControls } from "./ghost-avatar-controls.tsx";
+
+interface GlyphPickerDrawingStyle extends CSSProperties {
+	"--glyph-picker-square-size"?: string;
+	"--glyph-picker-swatch-color"?: string;
+}
 
 interface Dimensions {
 	height: number;
@@ -173,7 +188,7 @@ function DitherLayerControls({
 					<span className="font-medium text-xs">Dither background</span>
 					<span
 						className={cn(
-							"rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide",
+							"type-compact rounded-full px-2 py-0.5 uppercase tracking-wide",
 							enabled
 								? "bg-foreground text-background"
 								: "bg-muted text-muted-foreground"
@@ -193,22 +208,28 @@ function DitherLayerControls({
 					<div className="space-y-1.5">
 						<span className="text-muted-foreground text-xs">Colour</span>
 						<div className="flex flex-wrap gap-2">
-							{DITHER_COLORS.map((color) => (
-								<button
-									aria-label={color}
-									aria-pressed={dither.from === color}
-									className={cn(
-										"size-7 rounded-full outline-none ring-offset-2 ring-offset-background focus-visible:ring-2 focus-visible:ring-ring",
-										dither.from === color
-											? "ring-2 ring-foreground"
-											: "ring-1 ring-border"
-									)}
-									key={color}
-									onClick={() => onChange({ ...dither, from: color })}
-									style={{ backgroundColor: rgb(PALETTE[color].fill) }}
-									type="button"
-								/>
-							))}
+							{DITHER_COLORS.map((color) => {
+								const swatchStyle: GlyphPickerDrawingStyle = {
+									"--glyph-picker-swatch-color": rgb(PALETTE[color].fill),
+								};
+								return (
+									<button
+										aria-label={color}
+										aria-pressed={dither.from === color}
+										className={cn(
+											"size-7 rounded-full outline-none ring-offset-2 ring-offset-background focus-visible:ring-2 focus-visible:ring-ring",
+											styles.colorSwatch,
+											dither.from === color
+												? "ring-2 ring-foreground"
+												: "ring-1 ring-border"
+										)}
+										key={color}
+										onClick={() => onChange({ ...dither, from: color })}
+										style={swatchStyle}
+										type="button"
+									/>
+								);
+							})}
 						</div>
 					</div>
 
@@ -231,22 +252,28 @@ function DitherLayerControls({
 							>
 								<X className="size-3.5" />
 							</button>
-							{DITHER_COLORS.map((color) => (
-								<button
-									aria-label={`Blend to ${color}`}
-									aria-pressed={dither.to === color}
-									className={cn(
-										"size-7 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring",
-										dither.to === color
-											? "ring-2 ring-foreground"
-											: "ring-1 ring-border"
-									)}
-									key={color}
-									onClick={() => onChange({ ...dither, to: color })}
-									style={{ backgroundColor: rgb(PALETTE[color].fill) }}
-									type="button"
-								/>
-							))}
+							{DITHER_COLORS.map((color) => {
+								const swatchStyle: GlyphPickerDrawingStyle = {
+									"--glyph-picker-swatch-color": rgb(PALETTE[color].fill),
+								};
+								return (
+									<button
+										aria-label={`Blend to ${color}`}
+										aria-pressed={dither.to === color}
+										className={cn(
+											"size-7 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring",
+											styles.colorSwatch,
+											dither.to === color
+												? "ring-2 ring-foreground"
+												: "ring-1 ring-border"
+										)}
+										key={color}
+										onClick={() => onChange({ ...dither, to: color })}
+										style={swatchStyle}
+										type="button"
+									/>
+								);
+							})}
 						</div>
 					</div>
 
@@ -278,14 +305,15 @@ function DitherLayerControls({
 	);
 }
 
-const TAB_LABEL: Record<GlyphKind, string> = {
+const TAB_LABEL = {
 	avatar: "Upload",
 	icon: "Icon",
 	emoji: "Emoji",
 	dicebear: "DiceBear",
 	expressive: "Expressive",
+	avatar_style: "Styles",
 	dither: "Dither",
-};
+} satisfies Record<GlyphKind, string>;
 
 const loadImage = (url: string): Promise<HTMLImageElement> =>
 	new Promise((resolve, reject) => {
@@ -340,7 +368,19 @@ export function GlyphPicker({
 	open: openProp,
 	onOpenChange: onOpenChangeProp,
 }: GlyphPickerProps) {
-	const kinds = resolveGlyphKinds(allowed);
+	const avatarContributions = useAvatarContributions();
+	const hasAvatarStyles = avatarContributions.styles.length > 0;
+	const allowedKinds = resolveGlyphKinds(allowed);
+	// Marketplace styles get a tab only when an enabled plugin contributes one,
+	// or when the current value already uses one (so it stays editable).
+	const keepStyleTab = hasAvatarStyles || value?.kind === "avatar_style";
+	const kinds = useMemo(
+		() =>
+			keepStyleTab
+				? allowedKinds
+				: allowedKinds.filter((kind) => kind !== "avatar_style"),
+		[allowedKinds, keepStyleTab]
+	);
 	const controlled = openProp !== undefined;
 	const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
 	const isDialogOpen = controlled ? Boolean(openProp) : uncontrolledOpen;
@@ -388,6 +428,11 @@ export function GlyphPicker({
 			NonNullable<Extract<GlyphValue, { kind: "expressive" }>["animation"]>
 		>("random");
 
+	// Marketplace avatar style
+	const [styleDraft, setStyleDraft] = useState<
+		Extract<GlyphValue, { kind: "avatar_style" }>
+	>(() => defaultAvatarStyleValue(avatarContributions.styles[0]?.id ?? ""));
+
 	// Dither — standalone tab and/or background under icon/emoji
 	const [dither, setDither] = useState<GlyphDitherValue>(DEFAULT_DITHER);
 	const [ditherAsBg, setDitherAsBg] = useState(false);
@@ -431,6 +476,13 @@ export function GlyphPicker({
 			setExpressiveSelection("random");
 			setExpressiveAnimationSelection("random");
 		}
+		if (value?.kind === "avatar_style") {
+			setStyleDraft({ ...value });
+		} else {
+			setStyleDraft(
+				defaultAvatarStyleValue(avatarContributions.styles[0]?.id ?? "")
+			);
+		}
 		const layered = glyphDitherOf(value);
 		if (layered) {
 			setDither({
@@ -443,7 +495,7 @@ export function GlyphPicker({
 			setDither(DEFAULT_DITHER);
 			setDitherAsBg(false);
 		}
-	}, [isDialogOpen, value, kinds]);
+	}, [isDialogOpen, value, kinds, avatarContributions.styles]);
 
 	// Debounce icon search.
 	useEffect(() => {
@@ -483,7 +535,11 @@ export function GlyphPicker({
 	const handleFileSelect = useCallback((file: File) => {
 		const reader = new FileReader();
 		reader.onload = (e) => {
-			setPreviewUrl((e.target?.result as string) ?? null);
+			// SAFETY: this private reader's only operation is readAsDataURL(file)
+			// below. FileReader's successful load event therefore exposes a data
+			// URL string, not the ArrayBuffer produced by readAsArrayBuffer. The
+			// original optional-target/null fallback is retained.
+			setPreviewUrl((e.target?.result as string | undefined) ?? null);
 			setRendered(null);
 			setZoom(1);
 		};
@@ -509,8 +565,8 @@ export function GlyphPicker({
 		onChange({
 			kind: "icon",
 			id,
-			...(iconColor ? { color: iconColor } : {}),
-			...(ditherAsBg ? { dither } : {}),
+			...(iconColor ? { color: iconColor } : undefined),
+			...(ditherAsBg ? { dither } : undefined),
 		});
 		setIsDialogOpen(false);
 	}, [iconDraft, iconColor, ditherAsBg, dither, onChange, setIsDialogOpen]);
@@ -523,7 +579,7 @@ export function GlyphPicker({
 			onChange({
 				kind: "emoji",
 				emoji,
-				...(ditherAsBg ? { dither } : {}),
+				...(ditherAsBg ? { dither } : undefined),
 			});
 			setIsDialogOpen(false);
 		},
@@ -538,6 +594,14 @@ export function GlyphPicker({
 		});
 		setIsDialogOpen(false);
 	}, [diceStyle, diceSeed, onChange, setIsDialogOpen]);
+
+	const applyAvatarStyle = useCallback(() => {
+		if (!styleDraft.style) {
+			return;
+		}
+		onChange({ ...styleDraft, seed: styleDraft.seed.trim() || "ryu" });
+		setIsDialogOpen(false);
+	}, [styleDraft, onChange, setIsDialogOpen]);
 
 	const applyDither = useCallback(() => {
 		onChange({ kind: "dither", dither });
@@ -560,10 +624,16 @@ export function GlyphPicker({
 		setIsDialogOpen,
 	]);
 
+	const previewSizeStyle: GlyphPickerDrawingStyle = {
+		"--glyph-picker-square-size": `${previewSize}px`,
+	};
 	const guideSide = rendered
 		? Math.min(rendered.width, rendered.height) / zoom
 		: 0;
 
+	const guideSizeStyle: GlyphPickerDrawingStyle = {
+		"--glyph-picker-square-size": `${guideSide}px`,
+	};
 	const dialog = (
 		<Dialog onOpenChange={setIsDialogOpen} open={isDialogOpen}>
 			<DialogContent className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-140 *:[button]:hidden">
@@ -583,7 +653,7 @@ export function GlyphPicker({
 
 				<Tabs
 					className="min-h-0 overflow-y-auto px-4 pt-3"
-					onValueChange={(v) => setTab(v as GlyphKind)}
+					onValueChange={(v) => setTab(v)}
 					value={tab}
 				>
 					<TabsList className="w-full flex-wrap">
@@ -601,9 +671,9 @@ export function GlyphPicker({
 								<div className="space-y-4">
 									<div className="flex h-64 items-center justify-center overflow-hidden rounded-lg bg-muted/30">
 										<div className="relative inline-flex">
-											{/* biome-ignore lint/performance/noImgElement: crop preview data URL */}
-											{/* biome-ignore lint/correctness/useImageSize: preview scales via object-contain */}
-											{/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: onLoad measures rendered size */}
+											{}
+											{}
+											{}
 											<img
 												alt="Crop preview"
 												className="block max-h-64 max-w-full object-contain"
@@ -614,18 +684,16 @@ export function GlyphPicker({
 														height: img.clientHeight,
 													});
 												}}
-												src={previewUrl}
+												src={safeMediaUrl(previewUrl) ?? undefined}
 											/>
 											{guideSide > 0 ? (
 												<div
-													className="pointer-events-none absolute rounded-full border-2 border-primary shadow-[0_0_0_9999px_rgba(0,0,0,0.4)]"
-													style={{
-														left: "50%",
-														top: "50%",
-														width: guideSide,
-														height: guideSide,
-														transform: "translate(-50%, -50%)",
-													}}
+													className={cn(
+														"pointer-events-none absolute rounded-full border-2 border-primary shadow-[0_0_0_9999px_rgba(0,0,0,0.4)]",
+														styles.cropGuidePosition,
+														styles.square
+													)}
+													style={guideSizeStyle}
 												/>
 											) : null}
 										</div>
@@ -638,7 +706,7 @@ export function GlyphPicker({
 											min={1}
 											onValueChange={(v) => {
 												const next = Array.isArray(v) ? v[0] : v;
-												if (typeof next === "number") {
+												if (isNativeNumber(next)) {
 													setZoom(next);
 												}
 											}}
@@ -673,8 +741,8 @@ export function GlyphPicker({
 											value={{
 												kind: "icon",
 												id: iconDraft,
-												...(iconColor ? { color: iconColor } : {}),
-												...(ditherAsBg ? { dither } : {}),
+												...(iconColor ? { color: iconColor } : undefined),
+												...(ditherAsBg ? { dither } : undefined),
 											}}
 										/>
 									) : (
@@ -700,26 +768,25 @@ export function GlyphPicker({
 									<div className="flex flex-wrap gap-1.5">
 										{GLYPH_ICON_COLORS.map((swatch) => {
 											const active = iconColor === swatch.value;
+											const swatchStyle: GlyphPickerDrawingStyle | undefined =
+												swatch.value
+													? { "--glyph-picker-swatch-color": swatch.value }
+													: undefined;
 											return (
 												<button
 													aria-label={swatch.label}
 													aria-pressed={active}
 													className={cn(
 														"size-6 rounded-full outline-none ring-offset-2 ring-offset-background focus-visible:ring-2 focus-visible:ring-ring",
+														styles.colorSwatch,
+														!swatch.value && styles.colorCycle,
 														active
 															? "ring-2 ring-foreground"
 															: "ring-1 ring-border"
 													)}
 													key={swatch.label}
 													onClick={() => setIconColor(swatch.value)}
-													style={
-														swatch.value
-															? { backgroundColor: swatch.value }
-															: {
-																	background:
-																		"conic-gradient(from 0deg, #ef4444, #eab308, #22c55e, #3b82f6, #a855f7, #ef4444)",
-																}
-													}
+													style={swatchStyle}
 													title={swatch.label}
 													type="button"
 												/>
@@ -754,6 +821,7 @@ export function GlyphPicker({
 											<div className="grid grid-cols-8 gap-1 p-2">
 												{iconHits.map((hit) => {
 													const active = iconDraft === hit.id;
+													const safePreviewUrl = safeMediaUrl(hit.previewUrl);
 													return (
 														<button
 															aria-label={hit.id}
@@ -767,13 +835,15 @@ export function GlyphPicker({
 															title={hit.id}
 															type="button"
 														>
-															{/* biome-ignore lint/performance/noImgElement: Iconify preview SVG URL */}
-															{/* biome-ignore lint/correctness/useImageSize: fixed tile */}
-															<img
-																alt=""
-																className="size-5"
-																src={hit.previewUrl}
-															/>
+															{}
+															{}
+															{safePreviewUrl ? (
+																<img
+																	alt=""
+																	className="size-5"
+																	src={safePreviewUrl}
+																/>
+															) : null}
 														</button>
 													);
 												})}
@@ -853,13 +923,19 @@ export function GlyphPicker({
 									onChange={setGhostAppearance}
 									value={ghostAppearance}
 								/>
-								<p className="text-muted-foreground text-xs">
+								<p
+									className="text-muted-foreground text-xs"
+									hidden={ghostAppearance.variant === "costume"}
+								>
 									Choose a mood and animation, or use Random to cycle. The live
 									preview uses your selected appearance.
 								</p>
 								<div
 									className="h-72 overflow-hidden rounded-lg border border-border"
-									hidden={ghostAppearance.behavior === "conversation"}
+									hidden={
+										ghostAppearance.behavior === "conversation" ||
+										ghostAppearance.variant === "costume"
+									}
 								>
 									<ScrollArea className="h-full">
 										<div className="space-y-3 p-2">
@@ -896,7 +972,7 @@ export function GlyphPicker({
 																		expression: option.value,
 																	}}
 																/>
-																<span className="w-full truncate text-center text-[10px] text-muted-foreground leading-tight">
+																<span className="type-compact w-full truncate text-center text-muted-foreground leading-tight">
 																	{option.label}
 																</span>
 															</button>
@@ -939,7 +1015,7 @@ export function GlyphPicker({
 																			expression: expressiveSelection,
 																		}}
 																	/>
-																	<span className="w-full truncate text-center text-[10px] text-muted-foreground leading-tight">
+																	<span className="type-compact w-full truncate text-center text-muted-foreground leading-tight">
 																		{option.label}
 																	</span>
 																</button>
@@ -960,8 +1036,8 @@ export function GlyphPicker({
 						<TabsContent className="pt-3" value="dicebear">
 							<div className="space-y-3">
 								<div className="flex h-28 items-center justify-center rounded-lg bg-muted/30">
-									{/* biome-ignore lint/performance/noImgElement: DiceBear preview */}
-									{/* biome-ignore lint/correctness/useImageSize: fixed preview box */}
+									{}
+									{}
 									<img
 										alt=""
 										className="size-20 rounded-lg"
@@ -1005,8 +1081,8 @@ export function GlyphPicker({
 														title={dicebearStyleLabel(style)}
 														type="button"
 													>
-														{/* biome-ignore lint/performance/noImgElement: DiceBear style thumb */}
-														{/* biome-ignore lint/correctness/useImageSize: fixed thumb */}
+														{}
+														{}
 														<img
 															alt=""
 															className="size-10 rounded-md"
@@ -1014,7 +1090,7 @@ export function GlyphPicker({
 																size: 40,
 															})}
 														/>
-														<span className="w-full truncate text-center text-[10px] text-muted-foreground leading-tight">
+														<span className="type-compact w-full truncate text-center text-muted-foreground leading-tight">
 															{dicebearStyleLabel(style)}
 														</span>
 													</button>
@@ -1024,6 +1100,16 @@ export function GlyphPicker({
 									</ScrollArea>
 								</div>
 							</div>
+						</TabsContent>
+					) : null}
+
+					{/* ── Marketplace avatar styles ── */}
+					{kinds.includes("avatar_style") ? (
+						<TabsContent className="pt-3" value="avatar_style">
+							<AvatarStyleControls
+								onChange={setStyleDraft}
+								value={styleDraft}
+							/>
 						</TabsContent>
 					) : null}
 
@@ -1096,6 +1182,19 @@ export function GlyphPicker({
 							Use ghost avatar
 						</Button>
 					) : null}
+					{tab === "avatar_style" ? (
+						<Button
+							disabled={
+								!avatarContributions.styles.some(
+									(row) => row.id === styleDraft.style
+								)
+							}
+							onClick={applyAvatarStyle}
+							type="button"
+						>
+							Use avatar
+						</Button>
+					) : null}
 					{tab === "dither" ? (
 						<Button onClick={applyDither} type="button">
 							Use gradient
@@ -1135,10 +1234,13 @@ export function GlyphPicker({
 			<div className={cn("relative", className)}>
 				<button
 					aria-label={value ? "Change icon" : "Set icon"}
-					className="group/glyph relative flex items-center justify-center overflow-hidden rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+					className={cn(
+						"group/glyph relative flex items-center justify-center overflow-hidden rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+						styles.square
+					)}
 					disabled={disabled}
 					onClick={() => setIsDialogOpen(true)}
-					style={{ width: previewSize, height: previewSize }}
+					style={previewSizeStyle}
 					type="button"
 				>
 					<GlyphDisplay

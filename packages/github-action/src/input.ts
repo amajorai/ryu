@@ -1,8 +1,21 @@
+import {
+	parseEvalThresholds,
+	parseScorerList,
+} from "@ryuhq/core-client/eval-gate";
+import { z } from "zod";
+import { assertSecureNodeUrl } from "./client.ts";
+import {
+	type JsonRecord,
+	JsonRecordSchema,
+	type JsonValue,
+	JsonValueSchema,
+} from "./json.ts";
 import type {
 	ActionInputs,
 	Operation,
 	ResolvedTarget,
 	TargetMode,
+	VaultSecretRef,
 } from "./types.ts";
 
 export interface InputReader {
@@ -10,7 +23,7 @@ export interface InputReader {
 }
 
 const TARGETS = new Set<TargetMode>(["auto", "self-hosted", "managed"]);
-const OPERATIONS = new Set<Operation>(["setup", "run", "tool"]);
+const OPERATIONS = new Set<Operation>(["setup", "run", "tool", "eval"]);
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 function clean(value: string | undefined): string | null {
@@ -36,13 +49,21 @@ function booleanInput(
 	throw new Error(`Input '${name}' must be true or false.`);
 }
 
-function jsonInput(reader: InputReader, name: string): unknown {
+/** Split a comma/newline-separated input into trimmed, non-empty entries. */
+function listInput(reader: InputReader, name: string): string[] {
+	return (reader.get(name) ?? "")
+		.split(/[,\n]/)
+		.map((entry) => entry.trim())
+		.filter((entry) => entry !== "");
+}
+
+function jsonInput(reader: InputReader, name: string): JsonValue {
 	const value = clean(reader.get(name));
 	if (value === null) {
 		return null;
 	}
 	try {
-		return JSON.parse(value) as unknown;
+		return JsonValueSchema.parse(JSON.parse(value));
 	} catch (error) {
 		throw new Error(
 			`Input '${name}' must contain valid JSON: ${error instanceof Error ? error.message : String(error)}`
@@ -50,18 +71,16 @@ function jsonInput(reader: InputReader, name: string): unknown {
 	}
 }
 
-function recordInput(
-	reader: InputReader,
-	name: string
-): Record<string, unknown> | null {
+function recordInput(reader: InputReader, name: string): JsonRecord | null {
 	const value = jsonInput(reader, name);
 	if (value === null) {
 		return null;
 	}
-	if (typeof value !== "object" || Array.isArray(value)) {
+	const parsed = JsonRecordSchema.safeParse(value);
+	if (!parsed.success) {
 		throw new Error(`Input '${name}' must contain a JSON object.`);
 	}
-	return value as Record<string, unknown>;
+	return parsed.data;
 }
 
 function booleanRecordInput(
@@ -73,11 +92,11 @@ function booleanRecordInput(
 		return null;
 	}
 	for (const [key, value] of Object.entries(record)) {
-		if (typeof value !== "boolean") {
+		if (!z.boolean().safeParse(value).success) {
 			throw new Error(`Input '${name}' field '${key}' must be a boolean.`);
 		}
 	}
-	return record as Record<string, boolean>;
+	return z.record(z.string(), z.boolean()).parse(record);
 }
 
 function positiveIntegerInput(
@@ -103,12 +122,78 @@ function enumInput<T extends string>(
 	fallback: T
 ): T {
 	const value = clean(reader.get(name)) ?? fallback;
-	if (!allowed.has(value as T)) {
+	const matched = [...allowed].find((option) => option === value);
+	if (matched === undefined) {
 		throw new Error(
 			`Input '${name}' must be one of: ${Array.from(allowed).join(", ")}.`
 		);
 	}
-	return value as T;
+	return matched;
+}
+
+const ENV_SLUG = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const FOLDER_SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_FOLDER_DEPTH = 8;
+
+/** Parse one vault reference with Core's grammar (`secret:` prefix optional). */
+export function parseVaultSecretRef(line: string): VaultSecretRef | null {
+	const reference = line.trim();
+	let rest = reference.startsWith("secret:")
+		? reference.slice("secret:".length)
+		: reference;
+	let environment: string | null = null;
+	const colon = rest.indexOf(":");
+	if (colon !== -1) {
+		environment = rest.slice(0, colon);
+		rest = rest.slice(colon + 1);
+		if (!ENV_SLUG.test(environment)) {
+			return null;
+		}
+	}
+	let path = "/";
+	if (rest.startsWith("/")) {
+		const segments = rest.split("/").slice(1);
+		rest = segments.pop() ?? "";
+		if (
+			segments.length > MAX_FOLDER_DEPTH ||
+			!segments.every((segment) => FOLDER_SEGMENT.test(segment))
+		) {
+			return null;
+		}
+		path = segments.length === 0 ? "/" : `/${segments.join("/")}`;
+	}
+	if (!SECRET_NAME.test(rest)) {
+		return null;
+	}
+	return { environment, name: rest, path, reference };
+}
+
+/** Parse the newline-separated `secrets` input. Blank lines and `#` comments
+ *  are ignored; two lines exporting the same variable name are rejected. */
+export function parseSecretsInput(value: string | undefined): VaultSecretRef[] {
+	const refs: VaultSecretRef[] = [];
+	const seen = new Set<string>();
+	for (const raw of (value ?? "").split(/\r?\n/)) {
+		const line = raw.trim();
+		if (line === "" || line.startsWith("#")) {
+			continue;
+		}
+		const ref = parseVaultSecretRef(line);
+		if (!ref) {
+			throw new Error(
+				`Input 'secrets' has an invalid reference '${line}'. Use NAME or ENV:/folder/NAME.`
+			);
+		}
+		if (seen.has(ref.name)) {
+			throw new Error(
+				`Input 'secrets' lists '${ref.name}' more than once; each exports one environment variable.`
+			);
+		}
+		seen.add(ref.name);
+		refs.push(ref);
+	}
+	return refs;
 }
 
 export function parseActionInputs(reader: InputReader): ActionInputs {
@@ -121,6 +206,12 @@ export function parseActionInputs(reader: InputReader): ActionInputs {
 		conversationId: clean(reader.get("conversation-id")),
 		cwd: clean(reader.get("cwd")),
 		enableLongTerm: booleanInput(reader, "enable-long-term", false),
+		evalDataset: clean(reader.get("eval-dataset")),
+		evalJudgeModel: clean(reader.get("eval-judge-model")),
+		evalJunitFile: clean(reader.get("eval-junit-file")),
+		evalModel: clean(reader.get("eval-model")),
+		evalScorers: parseScorerList([reader.get("eval-scorers") ?? ""]),
+		evalThresholds: listInput(reader, "eval-threshold"),
 		exportEnv: booleanInput(reader, "export-env", true),
 		inference: recordInput(reader, "inference"),
 		managedNodeToken: clean(reader.get("managed-node-token")),
@@ -132,12 +223,17 @@ export function parseActionInputs(reader: InputReader): ActionInputs {
 		pluginFlags: booleanRecordInput(reader, "plugin-flags"),
 		prompt: clean(reader.get("prompt")),
 		responseFile: clean(reader.get("response-file")),
+		secrets: parseSecretsInput(reader.get("secrets")),
 		target,
 		team: clean(reader.get("team")),
 		timeoutMs: positiveIntegerInput(reader, "timeout-ms", DEFAULT_TIMEOUT_MS),
 		tool: clean(reader.get("tool")),
 		toolArguments,
 		userId: clean(reader.get("user-id")),
+		vaultJwtAudience: clean(reader.get("vault-jwt-audience")),
+		vaultJwtIdentity: clean(reader.get("vault-jwt-identity")),
+		vaultRoleId: clean(reader.get("vault-role-id")),
+		vaultSecretId: clean(reader.get("vault-secret-id")),
 		workflow: clean(reader.get("workflow")),
 		worktreeIsolation: booleanInput(reader, "worktree-isolation", false),
 		writeSummary: booleanInput(reader, "write-summary", true),
@@ -169,8 +265,16 @@ export function normalizeNodeUrl(value: string): string {
 			"Ryu node URL must not include credentials, query parameters, or a fragment."
 		);
 	}
+	// The node token and vault login credentials never cross cleartext
+	// transport: plain http only reaches a node on the runner itself.
+	assertSecureNodeUrl(parsed.href);
 	const pathname = parsed.pathname.replace(/\/+$/, "");
 	return `${parsed.protocol}//${parsed.host}${pathname}`;
+}
+
+interface TargetCandidate {
+	token: string | null;
+	url: string | null;
 }
 
 export function resolveTarget(
@@ -188,7 +292,7 @@ export function resolveTarget(
 		token: pick(inputs.nodeToken, environment.RYU_CORE_TOKEN),
 		url: pick(inputs.nodeUrl, environment.RYU_CORE_URL),
 	};
-	let selected: { token: string | null; url: string | null };
+	let selected: TargetCandidate;
 	if (inputs.target === "managed") {
 		selected = managed;
 	} else if (inputs.target === "self-hosted") {
@@ -216,7 +320,27 @@ export function resolveTarget(
 	};
 }
 
+function validateVaultInputs(inputs: ActionInputs): void {
+	const appRole = inputs.vaultRoleId !== null || inputs.vaultSecretId !== null;
+	if (appRole && !(inputs.vaultRoleId && inputs.vaultSecretId)) {
+		throw new Error(
+			"Inputs 'vault-role-id' and 'vault-secret-id' must be set together."
+		);
+	}
+	if (appRole && inputs.vaultJwtIdentity) {
+		throw new Error(
+			"Use either 'vault-role-id'/'vault-secret-id' or 'vault-jwt-identity', not both."
+		);
+	}
+	if (inputs.secrets.length > 0 && !(appRole || inputs.vaultJwtIdentity)) {
+		throw new Error(
+			"Input 'secrets' needs 'vault-role-id' and 'vault-secret-id', or 'vault-jwt-identity'."
+		);
+	}
+}
+
 export function validateOperationInputs(inputs: ActionInputs): void {
+	validateVaultInputs(inputs);
 	if (inputs.operation === "run") {
 		if (!inputs.prompt) {
 			throw new Error("Input 'prompt' is required when operation is 'run'.");
@@ -227,6 +351,15 @@ export function validateOperationInputs(inputs: ActionInputs): void {
 		if (selectors.length > 1) {
 			throw new Error(
 				"Inputs 'agent', 'team', and 'workflow' are mutually exclusive for a run."
+			);
+		}
+	}
+	if (inputs.operation === "eval") {
+		try {
+			parseEvalThresholds(inputs.evalThresholds);
+		} catch (error) {
+			throw new Error(
+				`Input 'eval-threshold' is invalid: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
 	}

@@ -8,10 +8,18 @@ import { inlineSuggestionVariants } from "./suggestion.ts";
 describe("inlineSuggestionVariants", () => {
 	test("emits the insert (emerald) and remove (red) state classes", () => {
 		const cls = inlineSuggestionVariants();
-		expect(typeof cls).toBe("string");
-		expect(cls).toContain("data-[inline-suggestion=insert]:bg-emerald-100!");
-		expect(cls).toContain("data-[inline-suggestion=remove]:bg-red-100!");
-		expect(cls).toContain("data-[inline-suggestion=insert]:text-emerald-700!");
-		expect(cls).toContain("data-[inline-suggestion=remove]:text-red-700!");
+		expect(cls).toBeString();
+		expect(cls).toContain(
+			"data-[inline-suggestion=insert]:bg-suggestion-insert-surface!"
+		);
+		expect(cls).toContain(
+			"data-[inline-suggestion=remove]:bg-suggestion-remove-surface!"
+		);
+		expect(cls).toContain(
+			"data-[inline-suggestion=insert]:text-suggestion-insert-foreground!"
+		);
+		expect(cls).toContain(
+			"data-[inline-suggestion=remove]:text-suggestion-remove-foreground!"
+		);
 	});
 });

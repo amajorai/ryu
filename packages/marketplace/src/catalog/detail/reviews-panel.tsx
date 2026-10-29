@@ -35,7 +35,7 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { Textarea } from "@ryu/ui/components/textarea.tsx";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type {
 	MarketplaceReview,
 	MarketplaceReviewsService,
@@ -59,6 +59,7 @@ const UNRATED = 0;
 
 interface ReviewsState {
 	error: string | null;
+	hasLoaded: boolean;
 	loading: boolean;
 	loadingMore: boolean;
 	nextCursor: string | null;
@@ -69,6 +70,7 @@ interface ReviewsState {
 
 const EMPTY_STATE: ReviewsState = {
 	error: null,
+	hasLoaded: false,
 	loading: true,
 	loadingMore: false,
 	nextCursor: null,
@@ -94,11 +96,32 @@ export default function ReviewsPanel({
 	kind: MarketplaceKind;
 	service: MarketplaceReviewsService;
 }) {
+	return (
+		<ListingReviews
+			id={id}
+			key={`${kind}:${id}`}
+			kind={kind}
+			service={service}
+		/>
+	);
+}
+
+function ListingReviews({
+	id,
+	kind,
+	service,
+}: {
+	id: string;
+	kind: MarketplaceKind;
+	service: MarketplaceReviewsService;
+}) {
 	const [state, setState] = useState<ReviewsState>(EMPTY_STATE);
 	const [writing, setWriting] = useState(false);
+	const requestVersion = useRef(0);
 
 	const load = useCallback(
 		(cursor: string | null) => {
+			const version = ++requestVersion.current;
 			setState((prev) =>
 				cursor
 					? { ...prev, loadingMore: true, error: null }
@@ -107,8 +130,12 @@ export default function ReviewsPanel({
 			service
 				.list({ id, kind, cursor, limit: REVIEWS_PAGE_SIZE })
 				.then((page) => {
+					if (version !== requestVersion.current) {
+						return;
+					}
 					setState((prev) => ({
 						error: null,
+						hasLoaded: true,
 						loading: false,
 						loadingMore: false,
 						nextCursor: page.nextCursor,
@@ -119,7 +146,10 @@ export default function ReviewsPanel({
 						reviews: cursor ? [...prev.reviews, ...page.reviews] : page.reviews,
 					}));
 				})
-				.catch((e: unknown) => {
+				.catch((e) => {
+					if (version !== requestVersion.current) {
+						return;
+					}
 					setState((prev) => ({
 						...prev,
 						loading: false,
@@ -133,7 +163,13 @@ export default function ReviewsPanel({
 
 	// Reload when the selected listing changes — the panel is remounted per
 	// selection in the side pane, but the dialog preview reuses it.
-	useEffect(() => load(null), [load]);
+	useEffect(() => {
+		setWriting(false);
+		load(null);
+		return () => {
+			requestVersion.current++;
+		};
+	}, [load]);
 
 	const mine = state.reviews.find((r) => r.mine) ?? null;
 
@@ -142,6 +178,25 @@ export default function ReviewsPanel({
 			<div className="flex items-center justify-center p-6">
 				<Spinner className="size-5" />
 			</div>
+		);
+	}
+
+	if (state.error && !state.hasLoaded) {
+		return (
+			<Empty inset="dense" role="alert">
+				<EmptyHeader>
+					<EmptyMedia variant="icon">
+						<HugeiconsIcon icon={Alert02Icon} />
+					</EmptyMedia>
+					<EmptyTitle>Could not load reviews</EmptyTitle>
+					<EmptyDescription>{state.error}</EmptyDescription>
+				</EmptyHeader>
+				<EmptyContent>
+					<Button onClick={() => load(null)} size="sm" variant="outline">
+						Try again
+					</Button>
+				</EmptyContent>
+			</Empty>
 		);
 	}
 
@@ -155,7 +210,10 @@ export default function ReviewsPanel({
 			/>
 
 			{state.error ? (
-				<p className="flex items-center gap-1.5 text-sm text-status-destructive">
+				<p
+					className="flex items-center gap-1.5 text-sm text-status-destructive"
+					role="alert"
+				>
 					<HugeiconsIcon className="size-4" icon={Alert02Icon} />
 					{state.error}
 				</p>
@@ -176,7 +234,7 @@ export default function ReviewsPanel({
 			) : null}
 
 			{state.reviews.length === 0 ? (
-				<Empty className="p-6">
+				<Empty inset="dense">
 					<EmptyHeader>
 						<EmptyMedia variant="icon">
 							<HugeiconsIcon icon={MessageMultiple01Icon} />
@@ -278,7 +336,7 @@ function ReviewRow({ review }: { review: MarketplaceReview }) {
 					{review.userName ?? "Anonymous"}
 				</span>
 				{review.verifiedPurchase ? (
-					<Badge className="shrink-0 gap-1 text-xs" variant="secondary">
+					<Badge className="shrink-0" variant="secondary">
 						<HugeiconsIcon
 							className="size-3 text-status-success"
 							icon={CheckmarkBadge01Icon}
@@ -287,7 +345,7 @@ function ReviewRow({ review }: { review: MarketplaceReview }) {
 					</Badge>
 				) : null}
 				{review.mine ? (
-					<Badge className="shrink-0 text-xs" variant="outline">
+					<Badge className="shrink-0" variant="outline">
 						Yours
 					</Badge>
 				) : null}
@@ -352,7 +410,7 @@ function WriteReviewForm({
 			.then(() => onSaved())
 			// The server's message is the useful one here — it distinguishes "verified
 			// purchasers only" from a transport failure, and only it knows which.
-			.catch((e: unknown) => {
+			.catch((e) => {
 				setError(
 					e instanceof Error ? e.message : "Could not save your review."
 				);
@@ -366,12 +424,22 @@ function WriteReviewForm({
 		service
 			.remove({ id, kind })
 			.then(() => onSaved())
-			.catch((e: unknown) => {
+			.catch((e) => {
 				setError(
 					e instanceof Error ? e.message : "Could not delete your review."
 				);
 			})
 			.finally(() => setBusy(false));
+	};
+
+	const cancel = () => {
+		if (existing) {
+			setRating(existing.rating);
+			setTitle(existing.title ?? "");
+			setBody(existing.body ?? "");
+			setError(null);
+		}
+		onClose();
 	};
 
 	return (
@@ -410,7 +478,7 @@ function WriteReviewForm({
 				<Button loading={busy} onClick={submit} size="sm">
 					{existing ? "Update review" : "Post review"}
 				</Button>
-				<Button disabled={busy} onClick={onClose} size="sm" variant="ghost">
+				<Button disabled={busy} onClick={cancel} size="sm" variant="ghost">
 					Cancel
 				</Button>
 				{existing ? (

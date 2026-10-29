@@ -65,3 +65,41 @@ describe("RunStatusTimeline", () => {
 		expect(markup).toContain("Awaiting input");
 	});
 });
+
+it("does not perform now-marker arithmetic for runtime values outside the visible window", () => {
+	for (const nowAt of [
+		undefined,
+		Number.NaN,
+		Number.POSITIVE_INFINITY,
+		START_AT,
+		END_AT,
+		Symbol("invalid clock"),
+		{
+			valueOf() {
+				throw new Error("Clock must not be coerced");
+			},
+		},
+	]) {
+		// SAFETY: This adversarial runtime test deliberately violates the numeric prop contract to prove the marker never coerces rejected values.
+		const element = RunStatusTimeline({
+			ariaLabel: "Timeline",
+			startAt: START_AT,
+			endAt: END_AT,
+			entries: [],
+			nowAt: nowAt as number,
+		});
+		const markup = renderToStaticMarkup(element);
+		expect(markup).not.toContain("bg-foreground/70");
+	}
+	const markup = renderToStaticMarkup(
+		<RunStatusTimeline
+			ariaLabel="Timeline"
+			endAt={END_AT}
+			entries={[]}
+			nowAt={(START_AT + END_AT) / 2}
+			startAt={START_AT}
+		/>
+	);
+	expect(markup).toContain("--timeline-left:50%");
+	expect(markup).toContain("bg-foreground/70");
+});

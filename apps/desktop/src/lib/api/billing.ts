@@ -21,25 +21,29 @@
 //   POST /api/billing/license/validate    -> { active, status, expiresAt, productId }
 
 import type { Entitlement, PlanId } from "@ryu/auth/lib/plans";
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
+import {
+	checkoutReplySchema,
+	licenseValidateSchema,
+	subscriptionStatusSchema,
+	trialAnchorSchema,
+} from "./billing-wire-contracts.ts";
 
 /** True when the user has a session token; the gate requires sign-in. */
 export function hasBillingAuth(): boolean {
 	try {
-		return Boolean(localStorage.getItem(TOKEN_KEY));
+		return Boolean(getActiveToken());
 	} catch {
 		return false;
 	}
 }
 
-function authHeaders(): Record<string, string> {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-	};
+function authHeaders() {
+	const headers = new Headers({ "Content-Type": "application/json" });
 	try {
-		const token = localStorage.getItem(TOKEN_KEY);
+		const token = getActiveToken();
 		if (token) {
-			headers.Authorization = `Bearer ${token}`;
+			headers.set("Authorization", `Bearer ${token}`);
 		}
 	} catch {
 		// No storage — the request 401s and the caller treats it as a failed check.
@@ -57,7 +61,7 @@ const BASE = `${BACKEND_URL.replace(/\/$/, "")}/api/billing`;
  */
 export interface LifetimeUpdatesWindow {
 	expired: boolean;
-	purchasedAt: string;
+	purchasedAt?: string;
 	updatesExpiresAt: string;
 }
 
@@ -88,6 +92,7 @@ export interface SubscriptionStatus {
 		interval?: string | null;
 		status?: string | null;
 	} | null;
+	zeroDataRetentionEnabled?: boolean;
 }
 
 /**
@@ -107,6 +112,13 @@ export interface EntitlementSnapshot {
 	 */
 	features: Record<string, boolean> | null;
 	lifetime: LifetimeUpdatesWindow | null;
+	/**
+	 * The organization the server resolved this reply (and its `features`) for,
+	 * or null for the personal scope. Absent when an older server omits it. The
+	 * flag cache uses it to drop flags served for another org than the one the
+	 * request was captured under.
+	 */
+	organizationId?: string | null;
 }
 
 /**
@@ -125,11 +137,14 @@ export async function fetchEntitlementSnapshot(): Promise<EntitlementSnapshot | 
 		if (!resp.ok) {
 			return null;
 		}
-		const json = (await resp.json()) as SubscriptionStatus;
+		const json = subscriptionStatusSchema.parse(await resp.json());
 		return {
 			entitlement: json.entitlement ?? null,
 			features: json.features ?? null,
 			lifetime: json.lifetime ?? null,
+			...(json.organizationId === undefined
+				? {}
+				: { organizationId: json.organizationId }),
 		};
 	} catch {
 		return null;
@@ -157,7 +172,7 @@ export async function fetchEntitlementStatus(): Promise<SubscriptionStatus> {
 	if (!resp.ok) {
 		throw new Error(`Billing status failed: ${resp.status}`);
 	}
-	return (await resp.json()) as SubscriptionStatus;
+	return subscriptionStatusSchema.parse(await resp.json());
 }
 
 /** Why a checkout attempt could not produce a URL. */
@@ -189,12 +204,11 @@ export async function createCheckout(slug: string): Promise<string> {
 	}
 	let resp: Response;
 	try {
+		const headers = authHeaders();
+		headers.set("Idempotency-Key", crypto.randomUUID());
 		resp = await fetch(`${BASE}/checkout`, {
 			method: "POST",
-			headers: {
-				...authHeaders(),
-				"Idempotency-Key": crypto.randomUUID(),
-			},
+			headers,
 			body: JSON.stringify({ slug }),
 		});
 	} catch {
@@ -215,7 +229,7 @@ export async function createCheckout(slug: string): Promise<string> {
 	if (!resp.ok) {
 		throw new CheckoutError("unknown", `Checkout failed (${resp.status}).`);
 	}
-	const json = (await resp.json()) as { url?: string };
+	const json = checkoutReplySchema.parse(await resp.json());
 	if (!json.url) {
 		throw new CheckoutError("unknown", "Checkout did not return a URL.");
 	}
@@ -245,7 +259,7 @@ export async function ensureTrialAnchorMs(): Promise<number | null> {
 		if (!resp.ok) {
 			return null;
 		}
-		const json = (await resp.json()) as TrialAnchor;
+		const json = trialAnchorSchema.parse(await resp.json());
 		const ms = json.firstLaunchAt ? Date.parse(json.firstLaunchAt) : Number.NaN;
 		return Number.isFinite(ms) ? ms : null;
 	} catch {
@@ -316,5 +330,5 @@ export async function validateLicenseKey(
 			`License validation failed (${resp.status}).`
 		);
 	}
-	return (await resp.json()) as LicenseValidateResult;
+	return licenseValidateSchema.parse(await resp.json());
 }

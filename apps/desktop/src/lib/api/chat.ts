@@ -11,7 +11,8 @@ export {
 	chatHeaders,
 	chatStreamResumeUrl,
 	chatStreamUrl,
+	fetchComposerPrediction,
 	fetchNextPromptSuggestions,
 	startProactiveOpening,
-} from "@ryuhq/core-client/chat";
-export type { ApiTarget } from "@ryuhq/core-client/client";
+} from "@ryuhq/core-client/chat.ts";
+export type { ApiTarget } from "@ryuhq/core-client/client.ts";

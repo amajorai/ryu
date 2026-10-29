@@ -19,6 +19,9 @@
 //! other ("direct") provider deliberately bypasses the Gateway (an explicit,
 //! user-chosen egress path — see the routing toggle in the desktop UI).
 
+#[cfg(test)]
+mod shipped_lsp_runtime_tests;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -35,7 +38,15 @@ pub(crate) mod models_dev;
 /// and privilege gate behind [`sync_app_pi_extensions`].
 pub mod accounts;
 pub mod app_extensions;
+pub mod chatgpt_plan;
+pub mod kiro_oauth;
+pub mod native_accounts;
 pub mod oauth_login;
+pub mod qoder_cli;
+pub(crate) mod sdk_account_routing;
+pub(crate) mod secret_env;
+pub mod session_accounts;
+pub mod transcripts;
 
 /// Ryu-namespaced settings key recording whether the managed Pi routes through
 /// the Gateway. Pi ignores unknown settings keys, so this rides along safely in
@@ -51,27 +62,101 @@ pub const GATEWAY_PROVIDER_ID: &str = "gateway";
 
 /// The managed subscription provider (Ryu-hosted OpenRouter). Always Gateway-
 /// routed: it reuses the `openai` pin so egress is governed and metered against
-/// the org's Ryu $ wallet (`apps/gateway/src/pipeline/mod.rs`), and the Gateway
+/// the org's Ryu $ wallet (`apps/gateway/src/pipeline/debit.rs`), and the Gateway
 /// maps its default `openrouter/auto` model onto the OpenRouter provider. No BYOK.
 pub const MANAGED_OPENROUTER_ID: &str = "managed-openrouter";
 
-/// Pool-backed managed providers — Ryu-supplied capacity billed against a
-/// SEGREGATED donated credit pool rather than the retail pass-through one.
+/// RETIRED per-tier managed rows ("Ryu Fast", "Ryu Frontier", "Ryu Vision",
+/// "Ryu Reasoning", "Ryu Code"). The picker now offers ONE managed provider,
+/// Ryu Router ([`MANAGED_OPENROUTER_ID`]), with models under their real names;
+/// free credit is spent automatically when Ryu can serve the pick from its own
+/// supply (the Gateway's `own_supply` routing over the control plane's
+/// published own-supply table).
 ///
-/// The `managed-<poolId>` shape is load-bearing: the desktop composer binds a
-/// catalog row to a pool when the row is `managed` and its id is the pool id,
-/// `managed-<poolId>`, or one of the pool's gateway provider ids
-/// (`use-universal-picker.ts`). Renaming one of these silently unbinds the pool
-/// and the row loses its label, its balance badge and its upsell escape.
+/// The ids are kept only so a saved selection naming one still resolves: see
+/// [`canonical_provider_id`] and the spawn-time migration in
+/// [`ensure_managed_defaults`]. They are never offered.
 pub const MANAGED_CLOUDFLARE_ID: &str = "managed-cloudflare";
 pub const MANAGED_BEDROCK_ID: &str = "managed-bedrock";
+pub const MANAGED_VERTEX_ID: &str = "managed-vertex";
+pub const MANAGED_OPENAI_CREDITS_ID: &str = "managed-openai-credits";
+pub const MANAGED_ANTHROPIC_CREDITS_ID: &str = "managed-anthropic-credits";
+const LEGACY_MANAGED_TIER_IDS: &[&str] = &[
+    MANAGED_CLOUDFLARE_ID,
+    MANAGED_BEDROCK_ID,
+    MANAGED_VERTEX_ID,
+    MANAGED_OPENAI_CREDITS_ID,
+    MANAGED_ANTHROPIC_CREDITS_ID,
+];
+
+/// The provider id a (possibly saved) selection means today: a retired
+/// per-tier managed row resolves to the single Ryu Router row.
+pub(crate) fn canonical_provider_id(id: &str) -> &str {
+    if LEGACY_MANAGED_TIER_IDS.contains(&id) {
+        MANAGED_OPENROUTER_ID
+    } else {
+        id
+    }
+}
+
+/// The Ryu Router id a saved retired-tier model maps to: a Ryu alias
+/// (`ryu-code/standard`) becomes the real model id it names
+/// (`anthropic/claude-sonnet-4.5`) when Ryu Router lists it, else the managed
+/// default. `None` for anything that is not a retired alias.
+fn migrate_legacy_tier_model(model: &str) -> Option<String> {
+    let (slot, upstream) = ryu_gw_router::pool_model_alias_route(model)?;
+    Some(
+        ryu_gw_router::pool_model_equivalent_id(slot, upstream)
+            .unwrap_or(MANAGED_DEFAULT_MODEL)
+            .to_owned(),
+    )
+}
+
+/// The Ryu Router models free credit currently pays for — the picker's "Free"
+/// tag. The control plane's public projection (`/api/own-supply/free-models`),
+/// refreshed every 10 minutes by `sidecar::control_plane::
+/// run_free_models_refresh_loop` and cached on disk: only models an admin has
+/// enabled on one of Ryu's own provider accounts, whose account still has
+/// allowance. EMPTY before the first fetch, so the tag under-promises rather
+/// than marking a model the Gateway would not serve for free. Ids only: the
+/// supplier behind a model never reaches Core.
+fn ryu_router_free_models() -> Vec<String> {
+    ryu_model_catalog::ryu_free_models::current_ids(&ryu_free_models_cache_path())
+}
+
+/// Where Core keeps the last good Free-id list: `<data dir>/cache/`, through
+/// the data-dir layout (a regenerable cache).
+pub(crate) fn ryu_free_models_cache_path() -> std::path::PathBuf {
+    crate::paths::cache_path(ryu_model_catalog::ryu_free_models::CACHE_FILE)
+}
 
 /// Native ChatGPT-account provider backed by the Login with ChatGPT session
 /// flow. This is deliberately distinct from [`openai-codex`], whose Pi runtime
 /// owns the Codex client path.
 pub const CHATGPT_PROVIDER_ID: &str = "chatgpt";
 pub const CHATGPT_AUTH_KEY: &str = "openai-chatgpt";
-const CHATGPT_SUGGESTED_MODELS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"];
+pub const CHATGPT_PLAN_PROVIDER_ID: &str = "chatgpt-plan";
+pub const CHATGPT_PLAN_AUTH_KEY: &str = "openai-chatgpt-plan";
+pub const CLAUDE_AUTH_KEY: &str = "anthropic";
+pub const KIRO_PROVIDER_ID: &str = "kiro";
+const CLAUDE_PROXY_ACCESS: &str = "sk-ant-oat-ryu-local-proxy";
+
+fn claude_proxy_credential() -> Value {
+    json!({
+        "type": "oauth",
+        "access": CLAUDE_PROXY_ACCESS,
+        "refresh": "ryu-local-proxy",
+        "expires": 4_102_444_800_000_u64
+    })
+}
+
+fn is_claude_proxy_credential(auth_key: &str, credential: &Value) -> bool {
+    auth_key == CLAUDE_AUTH_KEY
+        && credential.get("access").and_then(Value::as_str) == Some(CLAUDE_PROXY_ACCESS)
+}
+// Pi 1.x's `openai-codex` catalog, led by its default (`gpt-6.1-sol`). A model
+// a user already saved is still declared (see `chatgpt_provider_patch`).
+const CHATGPT_SUGGESTED_MODELS: &[&str] = &["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.5"];
 const MAX_MODEL_DISCOVERY_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 // `@earendil-works/pi-ai` extracts an account id from the Codex adapter's
 // `apiKey` before it sends a request. The actual ChatGPT bearer is intentionally
@@ -113,13 +198,11 @@ const ACTIVE_KEY: &str = "x-ryu-active-provider";
 /// `RYU_PI_AGENT_DIR` (the "nothing hardcoded" knob); defaults to
 /// `~/.ryu/pi-agent`.
 pub fn config_dir() -> PathBuf {
-    if let Ok(custom) = std::env::var("RYU_PI_AGENT_DIR") {
-        let trimmed = custom.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-    crate::sidecar::download_manager::ryu_dir().join("pi-agent")
+    crate::required_update_runtime::pi_config_root(
+        &crate::sidecar::download_manager::ryu_dir(),
+        &crate::paths::config_dir(),
+    )
+    .expect("managed Pi configuration was validated during runtime admission")
 }
 
 /// `config_dir()` as a string, creating the directory first. This is the value
@@ -127,7 +210,480 @@ pub fn config_dir() -> PathBuf {
 pub fn config_dir_str() -> String {
     let dir = config_dir();
     let _ = fs::create_dir_all(&dir);
+    // Pi writes plaintext transcripts here: keep the folders owner-only and
+    // apply the transcript age cap (at most once a day).
+    transcripts::maintain_once_a_day(dir.clone());
     dir.to_string_lossy().into_owned()
+}
+
+/// Name of the legacy limited-agent config directory, which used to sit
+/// inside [`config_dir`]. Removed on the next limited spawn.
+const LEGACY_LIMITED_AGENT_DIR: &str = "agent-limited";
+
+/// The folder holding the config directories of managed Pis spawned for agents
+/// with limited model provider access: a sibling of [`config_dir`] named
+/// `<name>-limited` (`runtimes/pi-agent-limited` by default). It must never sit
+/// inside the managed dir, so the OS sandbox can hide the whole managed dir
+/// (the user's provider keys and sign-ins) from a limited agent while its own
+/// config stays readable. Each agent gets its own folder in it
+/// ([`limited_agent_dir`]); the OS sandbox hides the others' from a confined
+/// agent, so one agent can never plant code another agent's Pi loads.
+pub fn limited_agents_root() -> PathBuf {
+    limited_agents_root_for(&config_dir())
+}
+
+fn limited_agents_root_for(managed: &std::path::Path) -> PathBuf {
+    match managed.file_name() {
+        Some(name) => {
+            let mut limited = name.to_os_string();
+            limited.push("-limited");
+            managed.with_file_name(limited)
+        }
+        None => crate::paths::runtime_dir("pi-agent-limited"),
+    }
+}
+
+/// Prefix of a per-agent limited config folder name; the rest is
+/// [`LIMITED_AGENT_DIR_HASH_LEN`] hex digits of the agent id's SHA-256.
+const LIMITED_AGENT_DIR_PREFIX: &str = "agent-";
+const LIMITED_AGENT_DIR_HASH_LEN: usize = 32;
+
+/// The folder name of `agent_id`'s limited Pi config: a hash, so any agent id
+/// maps to one safe path component.
+fn limited_agent_dir_name(agent_id: Option<&str>) -> String {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(agent_id.unwrap_or_default().as_bytes());
+    let mut name = hex::encode(digest);
+    name.truncate(LIMITED_AGENT_DIR_HASH_LEN);
+    format!("{LIMITED_AGENT_DIR_PREFIX}{name}")
+}
+
+fn is_limited_agent_dir_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .and_then(|name| name.strip_prefix(LIMITED_AGENT_DIR_PREFIX))
+        .is_some_and(|hash| {
+            hash.len() == LIMITED_AGENT_DIR_HASH_LEN
+                && hash
+                    .bytes()
+                    .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        })
+}
+
+/// The config directory a managed Pi spawned for `agent_id` with limited model
+/// provider access reads, inside [`limited_agents_root`].
+pub fn limited_agent_dir(agent_id: Option<&str>) -> PathBuf {
+    limited_agents_root().join(limited_agent_dir_name(agent_id))
+}
+
+/// Remove `agent_id`'s limited Pi config folder, including the saved Pi
+/// sessions and debug log kept there across rebuilds. Used when the agent is
+/// deleted; a folder that does not exist is not an error.
+pub fn remove_limited_agent_dir(agent_id: &str) -> Result<()> {
+    let dir = limited_agent_dir(Some(agent_id));
+    anyhow::ensure!(
+        dir.parent() == Some(limited_agents_root().as_path())
+            && dir.file_name().is_some_and(is_limited_agent_dir_name),
+        "{} is not a limited-agent Pi config dir",
+        dir.display()
+    );
+    remove_entry(&dir)
+}
+
+/// Whether `path` is one of the config dirs Core hands a managed Pi: the
+/// managed dir in Gateway routing, or a limited agent's own dir.
+pub fn is_managed_agent_dir(path: &std::path::Path) -> bool {
+    (path == config_dir() && is_gateway_routing())
+        || (path.parent() == Some(limited_agents_root().as_path())
+            && path.file_name().is_some_and(is_limited_agent_dir_name))
+}
+
+/// The `PI_CODING_AGENT_DIR` for a managed Pi spawned for `agent_id`.
+///
+/// `None` provider access (unrestricted) reads the managed dir itself. A
+/// limited agent gets its own [`limited_agent_dir`] instead, rebuilt on every
+/// spawn: the managed settings and extensions, and a `models.json` holding only
+/// the Gateway provider pin, with no `auth.json`. The managed dir carries the
+/// user's active provider keys (see [`materialize_active_accounts`]); a Pi
+/// reading it could switch to one of those providers and call it directly,
+/// where the agent's signed provider access is never checked. Call after
+/// [`ensure_managed_defaults`], in Gateway routing only.
+pub fn agent_config_dir_str(
+    agent_id: Option<&str>,
+    provider_access: Option<&[String]>,
+) -> Result<String> {
+    let Some(provider_access) = provider_access else {
+        return Ok(config_dir_str());
+    };
+    let source = config_dir();
+    let root = limited_agents_root_for(&source);
+    match fs::remove_dir_all(source.join(LEGACY_LIMITED_AGENT_DIR)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            tracing::warn!(%error, "could not remove the legacy limited-agent Pi config dir");
+        }
+    }
+    prepare_limited_agents_root(&root)?;
+    let target = root.join(limited_agent_dir_name(agent_id));
+    let model = limited_agent_model_choice(provider_access).model;
+    write_limited_agent_dir(
+        &source,
+        &target,
+        Some(model.as_str()),
+        gateway_openai_patch(Some(model.as_str())),
+    )?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Rebuild the limited agent's Pi config dir `dir` in place right before its
+/// Pi starts. [`agent_config_dir_str`] already rebuilds it when the route is
+/// resolved, but the agent's earlier Pi can write to its own dir until this new
+/// one starts, and Pi loads code and prompts from it. The default model the
+/// route chose stays when it is one [`limited_agent_model_choice`] can pick:
+/// the managed default, a suggested model of a built-in provider, or the
+/// zero-key local model. Anything else falls back to the local model (Gateway
+/// still enforces the agent's provider access). Refuses a path that is not a
+/// limited agent's own folder.
+pub fn refresh_limited_agent_dir(dir: &std::path::Path) -> Result<()> {
+    let source = config_dir();
+    let root = limited_agents_root_for(&source);
+    anyhow::ensure!(
+        dir.parent() == Some(root.as_path())
+            && dir.file_name().is_some_and(is_limited_agent_dir_name),
+        "{} is not a limited-agent Pi config dir",
+        dir.display()
+    );
+    let written: Option<String> = fs::read_to_string(dir.join("settings.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<PiSettings>(&raw).ok())
+        .and_then(|settings| settings.default_model);
+    let local = default_gateway_model();
+    let managed = read_settings().default_model;
+    let model = match written {
+        Some(model)
+            if model == local
+                || Some(&model) == managed.as_ref()
+                || is_suggested_provider_model(&model) =>
+        {
+            model
+        }
+        _ => local,
+    };
+    prepare_limited_agents_root(&root)?;
+    write_limited_agent_dir(
+        &source,
+        dir,
+        Some(model.as_str()),
+        gateway_openai_patch(Some(model.as_str())),
+    )
+}
+
+/// Where the default model of a limited agent's managed Pi comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitedModelSource {
+    /// The managed default, on a model provider the agent may use.
+    AllowedProvider,
+    /// The managed default, served from Ryu's own supply (Ryu credits).
+    RyuCredits,
+    /// A suggested model of a signed-in provider the agent may use, because
+    /// the managed default is on one it may not.
+    FirstAllowedModel,
+    /// A model on the keyless local engine.
+    Local,
+}
+
+/// The default model a limited agent's managed Pi starts on, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LimitedModelChoice {
+    pub model: String,
+    pub source: LimitedModelSource,
+}
+
+/// The default model a limited agent's Pi starts on, for an agent whose model
+/// provider access is `provider_access` (Gateway registry ids; empty for "Its
+/// own identity"). See [`choose_limited_agent_model`].
+pub fn limited_agent_model_choice(provider_access: &[String]) -> LimitedModelChoice {
+    choose_limited_agent_model(
+        read_settings().default_model.as_deref(),
+        provider_access,
+        &ryu_router_free_models(),
+        allowed_provider_candidates,
+        default_gateway_model(),
+    )
+}
+
+/// Pick a limited agent's default model so Gateway's agent provider check
+/// (which this mirrors, see [`crate::agent_access::provider_needs_no_user_credential`])
+/// lets its turns through:
+///
+/// 1. the managed default, when the slot it routes to is in
+///    `provider_access`, or needs none of the user's credentials (Ryu's own
+///    supply or the local engine), or it is a Ryu Router pick Ryu serves from
+///    its own supply on free credit (`free_models`, the picker's "Free" list;
+///    the Auto Router whenever that list is not empty);
+/// 2. otherwise the first suggested model of a signed-in provider whose slot
+///    is in `provider_access` (`candidates` lists them in catalog order);
+/// 3. otherwise `local`, the zero-key local model.
+///
+/// The slot a model id routes to is read from the Gateway's compiled-in rules
+/// ([`ryu_gw_router::builtin_route`]); an id only an operator's model map or
+/// the Gateway's default provider would place is never assumed allowed.
+fn choose_limited_agent_model(
+    managed: Option<&str>,
+    provider_access: &[String],
+    free_models: &[String],
+    candidates: impl FnOnce() -> Vec<String>,
+    local: String,
+) -> LimitedModelChoice {
+    let allowed = |slot: &str| provider_access.iter().any(|id| id == slot);
+    if let Some(model) = managed.map(str::trim).filter(|model| !model.is_empty()) {
+        let slot = ryu_gw_router::builtin_route(model);
+        let source = if model == local {
+            Some(LimitedModelSource::Local)
+        } else {
+            match slot.as_deref() {
+                Some(slot) if allowed(slot) => Some(LimitedModelSource::AllowedProvider),
+                Some(ryu_gw_router::LOCAL_SLOT | ryu_gw_router::CLASSIFY_SLOT) => {
+                    Some(LimitedModelSource::Local)
+                }
+                Some(slot) if crate::agent_access::provider_needs_no_user_credential(slot) => {
+                    Some(LimitedModelSource::RyuCredits)
+                }
+                None | Some(RYU_ROUTER_SLOT) if ryu_router_serves_free(model, free_models) => {
+                    Some(LimitedModelSource::RyuCredits)
+                }
+                _ => None,
+            }
+        };
+        if let Some(source) = source {
+            return LimitedModelChoice {
+                model: model.to_owned(),
+                source,
+            };
+        }
+    }
+    let fallback = candidates()
+        .into_iter()
+        .find(|model| ryu_gw_router::builtin_route(model).is_some_and(|slot| allowed(&slot)));
+    match fallback {
+        Some(model) => LimitedModelChoice {
+            model,
+            source: LimitedModelSource::FirstAllowedModel,
+        },
+        None => LimitedModelChoice {
+            model: local,
+            source: LimitedModelSource::Local,
+        },
+    }
+}
+
+/// The Gateway slot Ryu Router picks route to (the managed OpenRouter).
+const RYU_ROUTER_SLOT: &str = "openrouter";
+
+/// Whether Ryu serves the Ryu Router pick `model` from its own supply on free
+/// credit: a pick on the "Free" list, or the Auto Router while any model is
+/// free (the Gateway then serves it with an own-supply pool's default model).
+fn ryu_router_serves_free(model: &str, free_models: &[String]) -> bool {
+    if model == OPENROUTER_AUTO_MODEL_ID {
+        return !free_models.is_empty();
+    }
+    free_models.iter().any(|free| free == model)
+}
+
+/// The suggested models of every signed-in built-in provider, in catalog
+/// order, leaving out Ryu's managed rows and models the user turned off. A
+/// provider with no suggested models is skipped before its sign-in is read.
+fn allowed_provider_candidates() -> Vec<String> {
+    PROVIDERS
+        .iter()
+        .filter(|meta| !meta.suggested_models.is_empty())
+        .filter(|meta| !is_managed_or_gateway(meta.id) && meta.auth_kind != "none")
+        .filter(|meta| provider_configured(meta))
+        .flat_map(|meta| enabled_suggested_models(meta.id))
+        .collect()
+}
+
+/// Whether `model` is a suggested model of a built-in provider (one
+/// [`allowed_provider_candidates`] could pick).
+fn is_suggested_provider_model(model: &str) -> bool {
+    PROVIDERS
+        .iter()
+        .filter(|meta| !is_managed_or_gateway(meta.id) && meta.auth_kind != "none")
+        .any(|meta| meta.suggested_models.contains(&model))
+}
+
+/// Create the limited agents' root as a real, private directory, and remove
+/// whatever in it is not a per-agent folder (the files of the older shared
+/// layout, or anything an agent left there). A symlinked root is refused.
+fn prepare_limited_agents_root(root: &std::path::Path) -> Result<()> {
+    match fs::symlink_metadata(root) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => anyhow::bail!(
+            "the limited-agent Pi config folder {} is not a directory",
+            root.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(root).context("create the limited-agent Pi config folder")?;
+        }
+        Err(error) => {
+            return Err(error).context("inspect the limited-agent Pi config folder");
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(root, fs::Permissions::from_mode(0o700));
+    }
+    for entry in fs::read_dir(root)
+        .context("read the limited-agent Pi config folder")?
+        .flatten()
+    {
+        let is_agent_dir = is_limited_agent_dir_name(&entry.file_name())
+            && entry.file_type().is_ok_and(|kind| kind.is_dir());
+        if !is_agent_dir {
+            remove_entry(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Remove a file, symlink or directory tree without following a symlink.
+fn remove_entry(path: &std::path::Path) -> Result<()> {
+    let result = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => fs::remove_dir_all(path),
+        Ok(_) => fs::remove_file(path),
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("remove stale Pi config entry {}", path.display()))
+        }
+    }
+}
+
+/// Files Core writes at the top of a limited agent's Pi config dir. Everything
+/// else there, except Pi's own data below, is removed on every spawn: Pi also
+/// loads code and prompts from its config dir (`extensions/<dir>/`,
+/// `SYSTEM.md`, `APPEND_SYSTEM.md`, `AGENTS.md`, `skills/`, `prompts/`,
+/// `themes/`, `tools/`, `bin/`), so nothing the agent wrote there may survive
+/// into its next start.
+const LIMITED_AGENT_DIR_FILES: &[&str] = &["settings.json", "models.json"];
+const LIMITED_AGENT_EXTENSIONS_DIR: &str = "extensions";
+/// What Pi itself writes there that holds data, never code or config: its
+/// saved sessions and its debug log. They are kept, so rebuilding the folder
+/// for one start does not wipe the sessions of a Pi already running for the
+/// same agent, or the ones a later `session/load` resumes. Only a real folder
+/// or file is kept; a symlink under either name is removed.
+const LIMITED_AGENT_SESSIONS_DIR: &str = "sessions";
+const LIMITED_AGENT_DEBUG_LOG: &str = "pi-debug.log";
+
+/// Write the limited-agent Pi config dir `target` from the managed dir
+/// `source`, from scratch. The only provider is `openai`, set to `gateway_pin`
+/// (the Gateway URL and the per-process bearer template), the default provider
+/// is forced to it, so the only model route left is the Gateway, and the
+/// default model is `default_model`.
+fn write_limited_agent_dir(
+    source: &std::path::Path,
+    target: &std::path::Path,
+    default_model: Option<&str>,
+    gateway_pin: Map<String, Value>,
+) -> Result<()> {
+    match fs::symlink_metadata(target) {
+        Ok(meta) if meta.is_dir() => {}
+        Ok(_) => remove_entry(target)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("inspect the limited-agent Pi config dir"),
+    }
+    fs::create_dir_all(target).context("create the limited-agent Pi config dir")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(target, fs::Permissions::from_mode(0o700));
+    }
+    // Only Core's own files survive: no stale credential file, and nothing the
+    // agent planted for its Pi to load.
+    for entry in fs::read_dir(target)
+        .context("read the limited-agent Pi config dir")?
+        .flatten()
+    {
+        let name = entry.file_name();
+        let kind = entry.file_type().ok();
+        let keep = match name.to_str() {
+            Some(LIMITED_AGENT_EXTENSIONS_DIR | LIMITED_AGENT_SESSIONS_DIR) => {
+                kind.is_some_and(|kind| kind.is_dir())
+            }
+            Some(name) if LIMITED_AGENT_DIR_FILES.contains(&name) => {
+                kind.is_some_and(|kind| kind.is_file())
+            }
+            Some(LIMITED_AGENT_DEBUG_LOG) => kind.is_some_and(|kind| kind.is_file()),
+            _ => false,
+        };
+        if !keep {
+            remove_entry(&entry.path())?;
+        }
+    }
+
+    let mut settings: PiSettings = fs::read_to_string(source.join("settings.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    settings.default_provider = Some("openai".to_owned());
+    if let Some(model) = default_model {
+        settings.default_model = Some(model.to_owned());
+    }
+    let body = serde_json::to_string_pretty(&settings).context("serialize settings.json")?;
+    crate::atomic_file::write_atomic(&target.join("settings.json"), body.as_bytes())
+        .context("write the limited-agent Pi settings.json")?;
+
+    // Keep the managed pin's model list; replace every connection field.
+    let managed: Value = fs::read_to_string(source.join("models.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| json!({}));
+    let mut pin = Map::new();
+    if let Some(models) = managed["providers"]["openai"].get("models") {
+        pin.insert("models".to_owned(), models.clone());
+    }
+    pin.extend(gateway_pin);
+    let models = json!({ "providers": { "openai": Value::Object(pin) } });
+    let body = serde_json::to_string_pretty(&models).context("serialize models.json")?;
+    write_secret_file(&target.join("models.json"), &body)?;
+
+    // The managed extensions (Ryu's own and enabled plugins') are flat files.
+    // Mirror them exactly: Pi loads every file and folder here, so one left
+    // behind by a since-disabled plugin, or put there by the agent, would
+    // otherwise run in its Pi.
+    let extensions = target.join(LIMITED_AGENT_EXTENSIONS_DIR);
+    fs::create_dir_all(&extensions).context("create the limited-agent Pi extensions dir")?;
+    let shipped: Vec<_> = fs::read_dir(source.join(LIMITED_AGENT_EXTENSIONS_DIR))
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+                .map(|entry| entry.file_name())
+                .collect()
+        })
+        .unwrap_or_default();
+    for entry in fs::read_dir(&extensions)
+        .context("read the limited-agent Pi extensions dir")?
+        .flatten()
+    {
+        let is_file = entry.file_type().is_ok_and(|kind| kind.is_file());
+        if !is_file || !shipped.contains(&entry.file_name()) {
+            remove_entry(&entry.path())?;
+        }
+    }
+    for name in &shipped {
+        fs::copy(
+            source.join(LIMITED_AGENT_EXTENSIONS_DIR).join(name),
+            extensions.join(name),
+        )
+        .with_context(|| format!("copy Pi extension {}", name.to_string_lossy()))?;
+    }
+    Ok(())
 }
 
 fn settings_path() -> PathBuf {
@@ -166,31 +722,14 @@ pub(crate) fn lock_pi_config_test_env() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|e| e.into_inner())
 }
 
-/// Write a file that may contain credentials. On Unix the file is created with
-/// `0600` from the outset (never world-readable, even briefly), mirroring Pi's
-/// own `auth.json` convention; on other platforms it is a plain write.
+/// Write a file that may contain credentials. Replaced atomically (temp file +
+/// fsync + rename) so a crash mid-write cannot leave Pi with a truncated
+/// `auth.json`/`models.json`; the temp file is created `0600` on Unix, so the
+/// result is never world-readable, even briefly, mirroring Pi's own `auth.json`
+/// convention.
 fn write_secret_file(path: &std::path::Path, body: &str) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::io::Write as _;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .with_context(|| format!("open {} for write", path.display()))?;
-        file.write_all(body.as_bytes())
-            .with_context(|| format!("write {}", path.display()))?;
-        // Re-assert mode in case the file pre-existed with looser permissions.
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, body).with_context(|| format!("write {}", path.display()))
-    }
+    crate::atomic_file::write_atomic(path, body.as_bytes())
+        .with_context(|| format!("write {}", path.display()))
 }
 
 // ── settings.json ─────────────────────────────────────────────────────────────
@@ -232,7 +771,10 @@ fn read_settings() -> PiSettings {
 fn write_settings(settings: &PiSettings) -> Result<()> {
     ensure_dir()?;
     let body = serde_json::to_string_pretty(settings).context("serialize settings.json")?;
-    fs::write(settings_path(), body).context("write settings.json")
+    // Atomic: a torn write would parse as empty, and the next write would then
+    // persist defaults over every unmanaged key the user had in settings.json.
+    crate::atomic_file::write_atomic(&settings_path(), body.as_bytes())
+        .context("write settings.json")
 }
 
 /// Whether the managed Pi should route the *active* provider through the Gateway.
@@ -271,6 +813,9 @@ fn is_managed_or_gateway(id: &str) -> bool {
 /// installs keep their mode); otherwise default `direct` (a BYOK provider the user
 /// added but never explicitly toggled routes directly to the vendor).
 fn provider_routing(id: &str) -> &'static str {
+    if id == CHATGPT_PLAN_PROVIDER_ID {
+        return ROUTING_DIRECT;
+    }
     if is_managed_or_gateway(id) {
         return ROUTING_GATEWAY;
     }
@@ -300,6 +845,15 @@ fn provider_routing(id: &str) -> &'static str {
 /// Persist the routing mode for a single provider in the per-provider map, without
 /// touching the active selection.
 fn set_provider_routing(id: &str, mode: &str) -> Result<()> {
+    if qoder_cli::is_provider(id) && mode != ROUTING_DIRECT {
+        anyhow::bail!("Qoder CLI profiles use direct Core routing");
+    }
+    if id == CHATGPT_PLAN_PROVIDER_ID {
+        if mode != ROUTING_DIRECT {
+            anyhow::bail!("ChatGPT plan usage uses its direct OpenAI connection");
+        }
+        return Ok(());
+    }
     if is_managed_or_gateway(id) {
         return Ok(()); // Always gateway; ignore attempts to flip it.
     }
@@ -333,7 +887,7 @@ fn active_provider_id_from(settings: &PiSettings) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        return Some(active.to_owned());
+        return Some(canonical_provider_id(active).to_owned());
     }
     let gateway = settings.extra.get(ROUTING_KEY).and_then(Value::as_str) != Some(ROUTING_DIRECT);
     if gateway {
@@ -343,24 +897,31 @@ fn active_provider_id_from(settings: &PiSettings) -> Option<String> {
     }
 }
 
+/// Ryu's subscription row is a product identity; Pi registers the Claude
+/// transport under its native `anthropic` provider id.
+fn pi_provider_id(provider: &str) -> &str {
+    match provider {
+        "claude-pro-max" => "anthropic",
+        _ => provider,
+    }
+}
+
 /// Build the `models.json` provider patch that pins Pi's built-in `openai`
 /// provider at the local Ryu Gateway.
 ///
 /// **Why this exists:** Pi's built-in `openai` provider defaults to the OpenAI
 /// **Responses API** at `api.openai.com` and does **not** honor the
 /// `OPENAI_BASE_URL` env var, so the spawn-time env injection alone never reaches
-/// the Gateway (Pi calls OpenAI directly → 401, or the Gateway 404s `/v1/responses`).
-/// This override redirects it: `baseUrl` = the local Gateway's `/v1`, `api` =
-/// `openai-completions` (the Gateway speaks `/v1/chat/completions`, not
-/// `/v1/responses`), `apiKey` = the Gateway token.
+/// the Gateway. This override redirects it: `baseUrl` = the Gateway's `/v1`,
+/// `api` = `openai-responses`, and `apiKey` = the Gateway token.
 ///
 /// `model` (the chosen `defaultModel`) is **declared** in the provider's `models`
 /// array. This is essential: a Ryu/local model id like `gemma-4-E2B-it-Q4_K_M` is
 /// not one of Pi's built-in `openai` models, so without declaring it Pi falls back
-/// to its built-in default (`gpt-5.4`), whose own `openai-responses` api overrides
-/// the provider-level `openai-completions` — and the Gateway then 404s `/responses`
-/// (or routes the wrong model id). Declaring the model as a custom `openai-completions`
-/// model makes Pi send the right id over chat-completions to the Gateway.
+/// to its built-in default (`gpt-5.5`), whose model-level API can override the
+/// provider setting. Declared models use Responses by default; models that need
+/// explicit OpenRouter cache-control breakpoints use Chat Completions so Pi can
+/// emit those markers.
 ///
 /// The declared `models` array is a **union**: already-declared ids + the zero-key
 /// local default ([`default_gateway_model`]) + `model`. Merging (instead of
@@ -396,7 +957,7 @@ fn chatgpt_provider_patch(model: Option<&str>) -> Map<String, Value> {
     let mut headers = Map::new();
     headers.insert(
         "x-ryu-node-token".to_owned(),
-        Value::String(crate::node_token::active_token().unwrap_or_else(|| "ryu-local".to_owned())),
+        Value::String(secret_env::reference(secret_env::NODE_TOKEN_ENV)),
     );
     patch.insert("headers".to_owned(), Value::Object(headers));
 
@@ -433,6 +994,68 @@ fn chatgpt_provider_patch(model: Option<&str>) -> Map<String, Value> {
     patch
 }
 
+fn claude_provider_patch() -> Map<String, Value> {
+    let mut patch = Map::new();
+    patch.insert(
+        "baseUrl".to_owned(),
+        Value::String(format!(
+            "{}/api/pi-config/claude",
+            crate::sidecar::gateway::core_self_url().trim_end_matches('/')
+        )),
+    );
+    patch.insert(
+        "api".to_owned(),
+        Value::String("anthropic-messages".to_owned()),
+    );
+    let mut headers = Map::new();
+    headers.insert(
+        "x-ryu-node-token".to_owned(),
+        Value::String(secret_env::reference(secret_env::NODE_TOKEN_ENV)),
+    );
+    headers.insert(
+        "x-ryu-session-id".to_owned(),
+        Value::String("$RYU_PI_HOST_CONVERSATION_ID".to_owned()),
+    );
+    patch.insert("headers".to_owned(), Value::Object(headers));
+    patch
+}
+
+fn chatgpt_plan_provider_patch(model: &str) -> Map<String, Value> {
+    let mut patch = Map::new();
+    patch.insert(
+        "baseUrl".to_owned(),
+        json!(format!(
+            "{}/api/pi-config/chatgpt-plan",
+            crate::sidecar::gateway::core_self_url().trim_end_matches('/')
+        )),
+    );
+    patch.insert("api".to_owned(), json!("openai-responses"));
+    patch.insert("apiKey".to_owned(), json!("ryu-chatgpt-plan-proxy"));
+    patch.insert(
+        "headers".to_owned(),
+        json!({
+            "x-ryu-node-token": secret_env::reference(secret_env::NODE_TOKEN_ENV),
+            "x-ryu-session-id": "$RYU_PI_HOST_CONVERSATION_ID"
+        }),
+    );
+    patch.insert("models".to_owned(), json!([{ "id": model }]));
+    patch
+}
+
+pub fn ensure_chatgpt_plan_models_json() -> Result<()> {
+    let settings = read_settings();
+    if active_provider_id_from(&settings).as_deref() == Some(CHATGPT_PLAN_PROVIDER_ID) {
+        if let Some(model) = settings
+            .default_model
+            .as_deref()
+            .filter(|model| !model.is_empty())
+        {
+            upsert_provider(CHATGPT_PLAN_PROVIDER_ID, chatgpt_plan_provider_patch(model))?;
+        }
+    }
+    Ok(())
+}
+
 /// As [`gateway_openai_patch`], but routes the MANAGED provider at the hosted
 /// gateway fleet when this node has managed coordinates.
 ///
@@ -455,20 +1078,36 @@ fn gateway_openai_patch_for(model: Option<&str>, managed: bool) -> Map<String, V
     };
     // Pi resolves this template from the process environment (verified against
     // its native resolve-config-value implementation). A shared models.json must
-    // never overwrite the per-agent signed bearer installed at ACP spawn.
-    let (base, token) = match fleet {
-        Some((url, token)) => (url, token),
+    // never overwrite the per-agent credential installed at ACP spawn.
+    // The fleet bearer itself travels in the Pi process environment
+    // ([`secret_env::FLEET_TOKEN_ENV`]), never in this shared file.
+    //
+    // When Core signs the agent's scoped Gateway bearer itself, Pi talks to
+    // Core's ACP inference proxy, which presents the current bearer on every
+    // request, so a long-lived Pi survives the bearer's remint. Pi does not
+    // template `baseUrl`, so the proxy is pinned here rather than per spawn.
+    let (v1, token) = match fleet {
+        Some((url, _token)) => (
+            format!("{}/v1", url.trim_end_matches('/')),
+            secret_env::reference(secret_env::FLEET_TOKEN_ENV),
+        ),
+        None if crate::sidecar::gateway::scoped_inference_proxy_enabled() => (
+            crate::sidecar::gateway::acp_inference_proxy_v1(),
+            "${OPENAI_API_KEY}".to_owned(),
+        ),
         None => (
-            crate::sidecar::gateway::gateway_url(),
+            format!(
+                "{}/v1",
+                crate::sidecar::gateway::configured_gateway_url().trim_end_matches('/')
+            ),
             "${OPENAI_API_KEY}".to_owned(),
         ),
     };
-    let v1 = format!("{}/v1", base.trim_end_matches('/'));
     let mut patch = Map::new();
     patch.insert("baseUrl".to_owned(), Value::String(v1));
     patch.insert(
         "api".to_owned(),
-        Value::String("openai-completions".to_owned()),
+        Value::String("openai-responses".to_owned()),
     );
     patch.insert("apiKey".to_owned(), Value::String(token));
 
@@ -542,6 +1181,17 @@ fn gateway_model_entry(id: &str, existing: Option<&Value>) -> Value {
     let local_id = default_gateway_model();
     if id != local_id {
         let mut entry = existing.cloned().unwrap_or_else(|| json!({ "id": id }));
+        let api = if explicit_cache_control_format(id).is_some() {
+            // Pi's OpenAI Responses adapter does not emit the per-block cache
+            // breakpoints OpenRouter needs for Claude, supported Qwen routes,
+            // and Gemini versions that require explicit caching.
+            // Keep those models on Chat Completions so compat.cacheControlFormat
+            // can add the markers; other models retain the Responses path.
+            "openai-completions"
+        } else {
+            "openai-responses"
+        };
+        entry["api"] = Value::String(api.to_owned());
         apply_cache_compat(id, &mut entry);
         return entry;
     }
@@ -555,8 +1205,10 @@ fn gateway_model_entry(id: &str, existing: Option<&Value>) -> Value {
         .or_insert_with(|| Value::String(id.to_owned()));
     obj.entry("name".to_owned())
         .or_insert_with(|| Value::String("Gemma 4 E2B IT Q4_K_M".to_owned()));
-    obj.entry("api".to_owned())
-        .or_insert_with(|| Value::String("openai-completions".to_owned()));
+    obj.insert(
+        "api".to_owned(),
+        Value::String("openai-responses".to_owned()),
+    );
     // The bundled Gemma 4 model is multimodal when its companion `mmproj`
     // artifact is present. Keep that capability in Pi's model metadata even
     // when an older settings file already declared the model as text-only;
@@ -582,19 +1234,49 @@ fn gateway_model_entry(id: &str, existing: Option<&Value>) -> Value {
 /// it only emits `cache_control` breakpoints (on the system prompt, the last
 /// tool definition, and the last user/assistant text) when the model's
 /// `compat.cacheControlFormat` is `"anthropic"`. Providers that cache
-/// automatically (OpenAI, DeepSeek, Grok, Gemini 2.5) need no marker, and Pi
+/// automatically (OpenAI, most DeepSeek, Grok, Gemini 2.5+) need no marker, and Pi
 /// already sends `prompt_cache_key` on the OpenAI path, so we only stamp the
 /// flag for the families that expose Anthropic-style *explicit* caching through
-/// the Gateway/OpenRouter: Claude and Qwen. This matches OpenRouter's caching
-/// contract (`cache_control: { type: "ephemeral" }` breakpoints on those
-/// providers). Returns the format string, or `None` when the model does not use
-/// explicit `cache_control` markers. Nothing is hardcoded per model: the family
-/// is derived from the id so any future Claude/Qwen id inherits it.
+/// the Gateway/OpenRouter: Claude, supported Alibaba Qwen models, DeepSeek
+/// V3.2, and older Gemini models. This matches OpenRouter's explicit cache-control support.
+/// Returns the format string, or `None` when the model does not use explicit
+/// `cache_control` markers. Qwen matching is intentionally limited to routes
+/// OpenRouter documents as cacheable; snapshot models must not receive markers.
 fn explicit_cache_control_format(id: &str) -> Option<&'static str> {
     let lid = id.to_ascii_lowercase();
-    let anthropic_style =
-        lid.contains("claude") || lid.contains("anthropic") || lid.contains("qwen");
-    anthropic_style.then_some("anthropic")
+    let claude = lid.contains("claude") || lid.contains("anthropic");
+    let alibaba_cache_model = [
+        "deepseek-v3.2",
+        "qwen3-max",
+        "qwen-plus",
+        "qwen3.6-plus",
+        "qwen3-coder-plus",
+        "qwen3-coder-flash",
+    ]
+    .iter()
+    .any(|family| lid.contains(family));
+    let anthropic_style = claude || alibaba_cache_model;
+    let legacy_gemini = lid.contains("gemini") && !gemini_has_implicit_caching(&lid);
+    (anthropic_style || legacy_gemini).then_some("anthropic")
+}
+
+fn gemini_has_implicit_caching(id: &str) -> bool {
+    let Some(version) = id
+        .split("gemini-")
+        .nth(1)
+        .and_then(|tail| tail.split('-').next())
+    else {
+        return false;
+    };
+    let mut parts = version.split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u32>().ok()) else {
+        return false;
+    };
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or(0);
+    major > 2 || (major == 2 && minor >= 5)
 }
 
 /// Merge the explicit prompt-cache `compat.cacheControlFormat` into a Pi model
@@ -663,6 +1345,102 @@ pub fn ensure_chatgpt_models_json() -> Result<()> {
     Ok(())
 }
 
+pub fn ensure_claude_models_json() -> Result<()> {
+    let oauth_active = if let Some(vault) = accounts::global() {
+        let scope = accounts::provider_scope(CLAUDE_AUTH_KEY);
+        vault
+            .active_info(&scope)?
+            .is_some_and(|active| active.kind == accounts::KIND_OAUTH)
+    } else {
+        false
+    };
+    let mut models = read_models();
+    let original = models.clone();
+    update_claude_model_route(&mut models, oauth_active)?;
+    if models != original {
+        write_models(&models)?;
+    }
+    Ok(())
+}
+
+/// Pi carries only a local proxy key; the OAuth credential stays in the vault.
+pub fn ensure_kiro_models_json(model: Option<&str>) -> Result<()> {
+    let mut patch = Map::new();
+    patch.insert(
+        "baseUrl".to_owned(),
+        json!(format!(
+            "{}/api/pi-config/kiro/v1",
+            crate::sidecar::gateway::core_self_url().trim_end_matches('/')
+        )),
+    );
+    patch.insert("api".to_owned(), json!("openai-completions"));
+    patch.insert("apiKey".to_owned(), json!("ryu-local-proxy"));
+    patch.insert("headers".to_owned(), json!({"x-ryu-node-token": secret_env::reference(secret_env::NODE_TOKEN_ENV), "x-ryu-session-id": "$RYU_PI_HOST_CONVERSATION_ID"}));
+    let mut models = read_models()["providers"][KIRO_PROVIDER_ID]["models"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(id) = model.filter(|id| !id.trim().is_empty()) {
+        if !models.iter().any(|entry| entry["id"].as_str() == Some(id)) {
+            models.push(json!({"id":id, "name":id, "input":["text"]}));
+        }
+    }
+    if !models.is_empty() {
+        patch.insert("models".to_owned(), Value::Array(models));
+    }
+    upsert_provider(KIRO_PROVIDER_ID, patch)
+}
+
+fn update_claude_model_route(models: &mut Value, oauth_active: bool) -> Result<()> {
+    let providers = models["providers"]
+        .as_object_mut()
+        .expect("providers object ensured by read_models");
+    if oauth_active {
+        let entry = providers
+            .entry(CLAUDE_AUTH_KEY.to_owned())
+            .or_insert_with(|| json!({}));
+        let object = entry
+            .as_object_mut()
+            .context("Anthropic model entry is not an object")?;
+        object.remove("apiKey");
+        for (key, value) in claude_provider_patch() {
+            if key == "headers" {
+                let headers = object
+                    .entry("headers".to_owned())
+                    .or_insert_with(|| json!({}));
+                let headers = headers
+                    .as_object_mut()
+                    .context("Anthropic headers are not an object")?;
+                headers.extend(value.as_object().expect("Claude patch headers").clone());
+            } else {
+                object.insert(key, value);
+            }
+        }
+        return Ok(());
+    }
+    if let Some(object) = providers
+        .get_mut(CLAUDE_AUTH_KEY)
+        .and_then(Value::as_object_mut)
+    {
+        if object
+            .get("baseUrl")
+            .and_then(Value::as_str)
+            .is_some_and(|url| url.ends_with("/api/pi-config/claude"))
+        {
+            object.insert(
+                "baseUrl".to_owned(),
+                Value::String("https://api.anthropic.com".to_owned()),
+            );
+            if let Some(headers) = object.get_mut("headers").and_then(Value::as_object_mut) {
+                headers.remove("x-ryu-node-token");
+                headers.remove("x-ryu-session-id");
+            }
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
 /// Value written to Pi's `settings.json` `skills` array to ask Pi not to
 /// auto-discover skills (`!` = exclude pattern, `**` = everything). Pi
 /// auto-loads `~/.agents/skills` (a hard-coded home path, independent of
@@ -704,6 +1482,19 @@ const PI_QUIET_STARTUP: &str = "quietStartup";
 /// managed default either.
 const PI_QUIET_STARTUP_LEGACY: &str = "quietStart";
 
+/// Pi's default tool selection (`settings.json` `defaultTools`). Entries of the
+/// form `+name` / `-name` adjust Pi's built-in defaults instead of replacing them
+/// (Pi 0.99+), so the managed default below adds one tool and leaves the rest of
+/// Pi's selection — and every later Pi default change — intact.
+const PI_DEFAULT_TOOLS: &str = "defaultTools";
+
+/// Pi's `codemode` tool: the model writes a short script that calls Pi's tools
+/// (and the deferred `mcp__ryu__*` tools) in parallel inside Pi's QuickJS
+/// sandbox, instead of one tool call per round trip. Nested calls still pass
+/// through every extension `tool_call` handler, so `ryu-plan`'s plan-mode and
+/// command guards apply to them unchanged.
+const PI_CODEMODE_DEFAULT_TOOL: &str = "+codemode";
+
 /// Enforce the managed-Pi config invariants. Idempotent; called at spawn time
 /// (see `acp::ryu_pi_acp_cmd` and the `ryu` PATH-fallback route) so a fresh
 /// install works with zero setup:
@@ -726,6 +1517,9 @@ const PI_QUIET_STARTUP_LEGACY: &str = "quietStart";
 ///    normalize `defaultProvider` to the gateway-redirected `openai`.
 /// 4. **The Gateway provider pin** — [`ensure_gateway_models_json`], declaring
 ///    the model so Pi actually sends it over chat-completions.
+/// 5. **Codemode on** — `defaultTools: ["+codemode"]` ([`PI_CODEMODE_DEFAULT_TOOL`]).
+///    Written only when the user has not set `defaultTools`; `"-codemode"` (or
+///    any explicit list) in the managed `settings.json` turns it off.
 pub fn ensure_managed_defaults() -> Result<()> {
     // Reflect the active account into Pi's auth.json / models.json before every
     // spawn so the files Pi reads always carry the SELECTED account, never a
@@ -733,6 +1527,42 @@ pub fn ensure_managed_defaults() -> Result<()> {
     materialize_active_accounts();
     let mut settings = read_settings();
     let mut dirty = false;
+    if settings.default_provider.as_deref() == Some("claude-pro-max") {
+        // Older Ryu builds wrote the product row id as Pi's provider id. Pi
+        // registers `anthropic`; preserve the product selection separately.
+        if settings.extra.get(ROUTING_KEY).and_then(Value::as_str) == Some(ROUTING_DIRECT) {
+            settings.default_provider = Some("anthropic".to_owned());
+            settings
+                .extra
+                .entry(ACTIVE_KEY.to_owned())
+                .or_insert_with(|| Value::String("claude-pro-max".to_owned()));
+        } else {
+            settings.default_provider = Some("openai".to_owned());
+        }
+        dirty = true;
+    }
+    // Retired per-tier managed rows → the single Ryu Router row, and their
+    // Ryu aliases → the real model id the user now picks (else the default).
+    let legacy_active = settings
+        .extra
+        .get(ACTIVE_KEY)
+        .and_then(Value::as_str)
+        .is_some_and(|active| LEGACY_MANAGED_TIER_IDS.contains(&active.trim()));
+    if legacy_active {
+        settings.extra.insert(
+            ACTIVE_KEY.to_owned(),
+            Value::String(MANAGED_OPENROUTER_ID.to_owned()),
+        );
+        dirty = true;
+    }
+    if let Some(migrated) = settings
+        .default_model
+        .as_deref()
+        .and_then(migrate_legacy_tier_model)
+    {
+        settings.default_model = Some(migrated);
+        dirty = true;
+    }
     if !settings.extra.contains_key("skills") {
         settings
             .extra
@@ -750,6 +1580,14 @@ pub fn ensure_managed_defaults() -> Result<()> {
         settings
             .extra
             .insert(PI_QUIET_STARTUP.to_owned(), json!(true));
+        dirty = true;
+    }
+
+    if !settings.extra.contains_key(PI_DEFAULT_TOOLS) {
+        settings.extra.insert(
+            PI_DEFAULT_TOOLS.to_owned(),
+            json!([PI_CODEMODE_DEFAULT_TOOL]),
+        );
         dirty = true;
     }
 
@@ -782,12 +1620,15 @@ pub fn ensure_managed_defaults() -> Result<()> {
     }
     ensure_gateway_models_json()?;
     ensure_chatgpt_models_json()?;
+    ensure_chatgpt_plan_models_json()?;
+    ensure_claude_models_json()?;
     // The three extensions that CANNOT become plugins. Each `ensure_pi_*` fn's own
     // doc says why in full; in one line each:
     //
-    // - `ryu-mcp` is the flagship agent's ONLY road to Ryu's tools (pi-acp advertises
-    //   no MCP-server support), so a toggle for it would be a switch that silently
-    //   strips every tool from the default agent.
+    // - `ryu-mcp` is the flagship agent's ONLY road to Ryu's tools (pi-acp ignores
+    //   `session/new` MCP servers; the extension registers Core's bridge with Pi's
+    //   own MCP client and keeps the `ryu_call_tool` proxy), so a toggle for it
+    //   would be a switch that silently strips every tool from the default agent.
     // - `ryu-lsp` IS the binding for `contributes.lsp_servers`; shipping it
     //   conditionally would let a node declare language servers with nothing to run
     //   them.
@@ -940,6 +1781,24 @@ const PI_PLAN_EXTENSION_SRC: &str = include_str!("../../assets/pi-extensions/ryu
 /// same registration rules as [`pi_mcp_extension_path`].
 fn pi_plan_extension_path() -> PathBuf {
     config_dir().join("extensions").join("ryu-plan.ts")
+}
+
+/// Every Pi extension Ryu itself ships, as `(file name, source)`: Core's own
+/// three plus the built-in plugins' embedded ones. The managed runtime readiness
+/// probe loads these against a candidate Pi before it may be activated.
+pub(crate) fn shipped_pi_extensions() -> Vec<(String, &'static str)> {
+    let core = [
+        ("ryu-mcp.ts", PI_MCP_EXTENSION_SRC),
+        ("ryu-lsp.ts", PI_LSP_EXTENSION_SRC),
+        ("ryu-plan.ts", PI_PLAN_EXTENSION_SRC),
+    ]
+    .map(|(name, source)| (name.to_owned(), source));
+    let plugins =
+        crate::plugin_manifest::builtin_pi_extension_sources().filter_map(|(path, source)| {
+            let name = std::path::Path::new(path).file_name()?.to_str()?.to_owned();
+            Some((name, source))
+        });
+    core.into_iter().chain(plugins).collect()
 }
 
 /// Ship + register the Ryu-Plan Pi extension into the MANAGED Pi config, with the
@@ -1284,7 +2143,10 @@ pub fn persist_turn_model(picked: &str) -> Result<()> {
     }
 
     if let Some(p) = provider {
-        settings.default_provider = Some(p.to_owned());
+        settings.default_provider = Some(pi_provider_id(p).to_owned());
+        settings
+            .extra
+            .insert(ACTIVE_KEY.to_owned(), Value::String(p.to_owned()));
     }
     settings.default_model = Some(model.to_owned());
     write_settings(&settings)
@@ -1310,8 +2172,14 @@ fn read_models() -> Value {
 
 fn write_models(value: &Value) -> Result<()> {
     ensure_dir()?;
-    let body = serde_json::to_string_pretty(value).context("serialize models.json")?;
-    // models.json can hold a custom provider's `apiKey`, so treat it as secret.
+    // The node bearer is never written here: a literal `x-ryu-node-token` (from
+    // an older build) becomes the env reference on every write.
+    let mut value = value.clone();
+    secret_env::template_node_token_headers(&mut value);
+    let body = serde_json::to_string_pretty(&value).context("serialize models.json")?;
+    // Provider secrets are `${RYU_PI_…}` references (see [`secret_env`]); a
+    // legacy literal `apiKey` may remain until the vault imports it, so the
+    // file stays owner-only.
     write_secret_file(&models_path(), &body)
 }
 
@@ -1401,9 +2269,13 @@ pub fn register_sidecar_provider(
         Value::String(plugin_id.to_owned()),
     );
     if let Some(key) = api_key.filter(|k| !k.trim().is_empty()) {
-        // models.json is written with `write_secret_file`, so this rides with the same
-        // protection as any other provider credential.
-        patch.insert("apiKey".to_owned(), Value::String(key.to_owned()));
+        // The minted token stays in Core's memory and reaches Pi in its spawn
+        // environment; models.json carries only the `${RYU_PI_EXT_…}` reference.
+        secret_env::remember_ext_token(id, key);
+        patch.insert(
+            "apiKey".to_owned(),
+            Value::String(secret_env::reference(&secret_env::ext_token_env(id))),
+        );
     }
     if let Some(label) = spec.label.as_deref().filter(|s| !s.trim().is_empty()) {
         patch.insert("label".to_owned(), Value::String(label.to_owned()));
@@ -1436,6 +2308,7 @@ pub fn deregister_sidecar_provider(plugin_id: &str, provider_id: &str) -> Result
     match provider_owner(id) {
         Some(owner) if owner == plugin_id => {
             remove_provider(id)?;
+            secret_env::forget_ext_token(id);
             Ok(true)
         }
         _ => Ok(false),
@@ -1486,6 +2359,7 @@ pub fn purge_sidecar_providers() -> Result<usize> {
     }
     for id in &owned {
         providers.remove(id);
+        secret_env::forget_ext_token(id);
     }
     tracing::info!(
         "pi_config: purged {} stale sidecar-registered provider(s) at boot: {}",
@@ -1536,15 +2410,6 @@ fn custom_provider_ids() -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn custom_provider_has_key(id: &str) -> bool {
-    read_models()["providers"]
-        .get(id)
-        .and_then(|p| p.get("apiKey"))
-        .and_then(Value::as_str)
-        .map(|s| !s.is_empty())
-        .unwrap_or(false)
-}
-
 // ── auth.json ─────────────────────────────────────────────────────────────────
 
 fn read_auth() -> Map<String, Value> {
@@ -1558,21 +2423,63 @@ fn read_auth() -> Map<String, Value> {
 /// the key as an account in the sealed vault, so the provider can hold several
 /// keys side by side and switch between them.
 fn set_auth_key(auth_key: &str, key: &str) -> Result<()> {
+    set_auth_key_with_vault(auth_key, key, accounts::global())
+}
+
+fn set_auth_key_with_vault(
+    auth_key: &str,
+    key: &str,
+    vault: Option<&accounts::AccountVault>,
+) -> Result<()> {
     ensure_dir()?;
-    let mut auth = read_auth();
-    auth.insert(
-        auth_key.to_owned(),
-        json!({ "type": "api_key", "key": key }),
-    );
-    let body = serde_json::to_string_pretty(&auth).context("serialize auth.json")?;
-    write_secret_file(&auth_path(), &body)?;
+    // Fail closed: the sealed vault is the only place the key is kept, and
+    // auth.json receives a reference Pi resolves from its spawn environment.
+    let vault = vault.context(
+        "The sealed provider account store is unavailable, so the API key was not saved",
+    )?;
     vault_upsert_credential(
+        Some(vault),
         &accounts::provider_scope(auth_key),
         "API key",
         accounts::KIND_API_KEY,
         json!({ "type": "api_key", "key": key }),
-    );
+    )?;
+    let mut auth = read_auth();
+    auth.insert(auth_key.to_owned(), auth_key_reference(auth_key));
+    let body = serde_json::to_string_pretty(&auth).context("serialize auth.json")?;
+    write_secret_file(&auth_path(), &body)?;
     Ok(())
+}
+
+/// The `auth.json` entry for a built-in provider whose API key is sealed in the
+/// vault: Pi resolves the reference from its spawn environment.
+fn auth_key_reference(auth_key: &str) -> Value {
+    json!({
+        "type": "api_key",
+        "key": secret_env::reference(&secret_env::provider_key_env(auth_key)),
+    })
+}
+
+/// Seal a custom provider's API key in the vault and return the reference that
+/// replaces it in `models.json`. Fails closed when the vault is unavailable.
+fn seal_custom_provider_key(
+    vault: Option<&accounts::AccountVault>,
+    provider: &str,
+    key: &str,
+) -> Result<String> {
+    let vault = vault.context(
+        "The sealed provider account store is unavailable, so the API key was not saved",
+    )?;
+    vault_upsert_credential(
+        Some(vault),
+        &accounts::provider_scope(provider),
+        "API key",
+        accounts::KIND_API_KEY,
+        Value::String(key.to_owned()),
+    )?;
+    Ok(secret_env::reference(&secret_env::provider_key_env(
+        provider,
+    )))
 }
 
 fn auth_has_key(auth_key: &str) -> bool {
@@ -1586,7 +2493,7 @@ fn auth_key_value(auth_key: &str) -> Option<String> {
         .get(auth_key)
         .and_then(|v| v.get("key"))
         .and_then(Value::as_str)
-        .map(str::to_owned)
+        .and_then(secret_env::resolve)
         .filter(|s| !s.is_empty())
 }
 
@@ -1621,6 +2528,18 @@ fn auth_has_any(auth_key: &str) -> bool {
         }
     }
     false
+}
+
+fn auth_has_oauth(auth_key: &str) -> bool {
+    read_auth().get(auth_key).is_some_and(|entry| {
+        entry.get("type").and_then(Value::as_str) == Some("oauth")
+            && ["access", "refresh"].iter().any(|field| {
+                entry
+                    .get(*field)
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.is_empty())
+            })
+    })
 }
 
 /// Remove an api-key credential from `auth.json`.
@@ -1671,23 +2590,68 @@ fn vault_account_label(vault: &accounts::AccountVault, scope: &str, base: &str) 
     format!("{base} · {n}")
 }
 
-/// Best-effort vault write: store `credential` as a NEW account in `scope` and
-/// make it active. Never fails the primary write when the vault is unavailable —
-/// the credential still lands in the active slot. `label` is the base display
-/// name; duplicates get a " · N" suffix.
-fn vault_upsert_credential(scope: &str, base_label: &str, kind: &str, credential: Value) {
-    let Some(vault) = accounts::global() else {
-        return;
+// Serialize legacy import and explicit credential capture to avoid duplicate accounts.
+static CREDENTIAL_CAPTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Capture a credential and make it active, reusing an identical API key in this scope.
+/// An initialized vault must accept the credential before its active slot is replaced.
+fn vault_upsert_credential(
+    vault: Option<&accounts::AccountVault>,
+    scope: &str,
+    base_label: &str,
+    kind: &str,
+    credential: Value,
+) -> Result<()> {
+    let Some(vault) = vault else {
+        return Ok(());
     };
+    let _capture = CREDENTIAL_CAPTURE_LOCK
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Provider account storage is unavailable"))?;
+    if kind == accounts::KIND_API_KEY {
+        if let Some(account_id) = existing_api_key_account(vault, scope, &credential)
+            .map_err(|_| anyhow::anyhow!("Could not read saved provider accounts"))?
+        {
+            if vault
+                .set_active(scope, &account_id)
+                .map_err(|_| anyhow::anyhow!("Could not select the saved provider account"))?
+            {
+                return Ok(());
+            }
+        }
+    }
     let account_id = format!("acct_{}", uuid::Uuid::new_v4().simple());
     let label = vault_account_label(vault, scope, base_label);
-    if let Err(e) = vault.upsert(scope, &account_id, &label, kind, Some(credential)) {
-        tracing::warn!(
-            scope,
-            error = %e,
-            "account vault write failed (credential kept in the active slot only)"
-        );
+    vault
+        .upsert(scope, &account_id, &label, kind, Some(credential))
+        .map_err(|_| anyhow::anyhow!("Could not store the provider account"))
+}
+
+fn existing_api_key_account(
+    vault: &accounts::AccountVault,
+    scope: &str,
+    credential: &Value,
+) -> Result<Option<String>> {
+    let key = credential
+        .as_str()
+        .or_else(|| credential.get("key").and_then(Value::as_str));
+    let Some(key) = key else {
+        return Ok(None);
+    };
+    for account in vault.list(scope)? {
+        if account.kind != accounts::KIND_API_KEY {
+            continue;
+        }
+        if let Some(saved) = vault.credential(scope, &account.account_id)? {
+            let saved_key = saved
+                .as_str()
+                .or_else(|| saved.get("key").and_then(Value::as_str));
+            if saved_key == Some(key) {
+                return Ok(Some(account.account_id));
+            }
+        }
     }
+    Ok(None)
 }
 
 /// Sealed-vault fallback for "does `scope` have any usable credential". The
@@ -1704,16 +2668,37 @@ fn vault_has_any(scope: &str) -> bool {
     }
 }
 
+fn active_auth_kind(auth_key: &str, kind: &str) -> bool {
+    let scope = accounts::provider_scope(auth_key);
+    if let Some(active) = accounts::global()
+        .and_then(|vault| vault.active_info(&scope).ok())
+        .flatten()
+    {
+        return active.kind == kind;
+    }
+    if kind == accounts::KIND_OAUTH {
+        auth_has_oauth(auth_key)
+    } else {
+        auth_has_key(auth_key)
+    }
+}
+
 /// Migrate credentials already sitting in Pi's plaintext files (`auth.json`
 /// api-key + oauth entries, `models.json` custom-provider `apiKey`s) into the
 /// sealed vault, one account per slot, active. Idempotent: a slot the vault
 /// already holds is left alone, so re-running after a partial failure only
 /// imports what is missing. Called at boot and before materialization.
 pub(crate) fn sync_plaintext_into_vault() {
+    let Ok(_capture) = CREDENTIAL_CAPTURE_LOCK.lock() else {
+        return;
+    };
     let Some(vault) = accounts::global() else {
         return;
     };
     for (auth_key, entry) in read_auth() {
+        if auth_key == CHATGPT_PLAN_AUTH_KEY || is_claude_proxy_credential(&auth_key, &entry) {
+            continue;
+        }
         let Some(credential) = usable_credential(&entry) else {
             continue;
         };
@@ -1743,7 +2728,7 @@ pub(crate) fn sync_plaintext_into_vault() {
             let Some(key) = provider
                 .get("apiKey")
                 .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
+                .filter(|s| !s.is_empty() && !secret_env::is_reference(s))
             else {
                 continue;
             };
@@ -1772,12 +2757,10 @@ fn new_account_id() -> String {
 /// api-key shape (`{type:"api_key", key}`) or the oauth shape (any usable
 /// `access`/`refresh`). Returns `None` for empty/degenerate entries.
 fn usable_credential(entry: &Value) -> Option<Value> {
-    if entry
-        .get("key")
-        .and_then(Value::as_str)
-        .is_some_and(|s| !s.is_empty())
-    {
-        return Some(entry.clone());
+    if let Some(key) = entry.get("key").and_then(Value::as_str) {
+        // A `${RYU_PI_…}` reference is Ryu's own pointer at the vault, not a
+        // credential to import.
+        return (!key.is_empty() && !secret_env::is_reference(key)).then(|| entry.clone());
     }
     let has_token = ["access", "refresh"].iter().any(|f| {
         entry
@@ -1802,6 +2785,13 @@ fn credential_kind(entry: &Value) -> &'static str {
 /// rather than leaving a stale credential Pi would silently use. Call this at
 /// spawn (`ensure_managed_defaults`) and after any account switch.
 pub(crate) fn materialize_active_accounts() {
+    let _guard = ACCOUNT_SELECTION_LOCK
+        .lock()
+        .expect("account selection lock");
+    materialize_active_accounts_unlocked();
+}
+
+fn materialize_active_accounts_unlocked() {
     // Import first so a fresh install's plaintext files seed the vault before it
     // is the source of truth for what goes back into them.
     sync_plaintext_into_vault();
@@ -1820,21 +2810,58 @@ pub(crate) fn materialize_active_accounts() {
             continue;
         }
         let auth_key = accounts::scope_key(&scope);
+        if auth_key == CHATGPT_PLAN_AUTH_KEY
+            || auth_key == KIRO_PROVIDER_ID
+            || qoder_cli::is_provider(auth_key)
+        {
+            auth_dirty |= auth.remove(auth_key).is_some();
+            continue;
+        }
         match vault.active_credential(&scope) {
-            Ok(Some((_account_id, credential))) => {
+            Ok(Some((account_id, credential))) => {
+                let credential =
+                    match materializable_account_credential(vault, &scope, &account_id, credential)
+                    {
+                        Ok(Some(credential)) => credential,
+                        Ok(None) | Err(_) => {
+                            auth_dirty |= auth.remove(auth_key).is_some();
+                            continue;
+                        }
+                    };
                 // Custom-provider scopes store a bare key string; everything else
-                // stores the Pi entry object verbatim.
+                // stores the Pi entry object. A real API key is never copied out:
+                // the file gets a `${RYU_PI_KEY_…}` reference and the key reaches
+                // Pi in its spawn environment (see [`secret_env`]). Templates and
+                // proxy sentinels are not secrets and are written as they are.
                 if let Some(key) = credential.as_str() {
+                    let stored = if secret_env::api_key_of(&credential).is_some() {
+                        secret_env::reference(&secret_env::provider_key_env(auth_key))
+                    } else {
+                        key.to_owned()
+                    };
                     if let Some(providers) = models["providers"].as_object_mut() {
                         if let Some(entry) = providers.get_mut(auth_key) {
                             if let Some(obj) = entry.as_object_mut() {
-                                obj.insert("apiKey".to_owned(), Value::String(key.to_owned()));
-                                models_dirty = true;
+                                if obj.get("apiKey").and_then(Value::as_str) != Some(&stored) {
+                                    obj.insert("apiKey".to_owned(), Value::String(stored));
+                                    models_dirty = true;
+                                }
                             }
                         }
                     }
                 } else {
-                    auth.insert(auth_key.to_owned(), credential);
+                    let pi_credential = if auth_key == CLAUDE_AUTH_KEY
+                        && credential_kind(&credential) == accounts::KIND_OAUTH
+                    {
+                        claude_proxy_credential()
+                    } else if secret_env::api_key_of(&credential).is_some() {
+                        auth_key_reference(auth_key)
+                    } else {
+                        // OAuth: Pi refreshes it itself and takes no template, so
+                        // the entry stays plaintext (owner-only file).
+                        credential
+                    };
+                    auth.insert(auth_key.to_owned(), pi_credential);
                     auth_dirty = true;
                 }
             }
@@ -1849,6 +2876,8 @@ pub(crate) fn materialize_active_accounts() {
             }
         }
     }
+    // An older build wrote the node bearer literally; rewrite it as a reference.
+    models_dirty |= secret_env::template_node_token_headers(&mut models);
     if auth_dirty {
         if let Err(e) = write_secret_file(
             &auth_path(),
@@ -1862,6 +2891,23 @@ pub(crate) fn materialize_active_accounts() {
             tracing::warn!(error = %e, "materialize: could not write models.json");
         }
     }
+    if let Err(error) = ensure_claude_models_json() {
+        tracing::warn!(error = %error, "materialize: could not update Claude transport");
+    }
+}
+
+fn materializable_account_credential(
+    vault: &accounts::AccountVault,
+    scope: &str,
+    account_id: &str,
+    credential: Value,
+) -> Result<Option<Value>> {
+    if credential_kind(&credential) == accounts::KIND_OAUTH
+        && vault.needs_reauth(scope, account_id)?
+    {
+        return Ok(None);
+    }
+    Ok(Some(credential))
 }
 
 // ── OAuth subscription token refresh ──────────────────────────────────────────
@@ -1871,89 +2917,27 @@ pub(crate) fn materialize_active_accounts() {
 /// through, so we mint a fresh token first.
 const OAUTH_REFRESH_SKEW_SECS: u64 = 60;
 
-/// Static OAuth-refresh parameters for a subscription provider the managed Pi can
-/// log into (`type:"oauth"` in `auth.json`).
-///
-/// **Provenance / trust (read before touching these values).** Pi does not vendor
-/// its own login source into this repo, so the endpoints + client ids below could
-/// NOT be verified against an in-repo file. They are the *public* PKCE client
-/// identifiers the underlying CLIs (Claude Code, Codex) use for subscription login
-/// — public, non-secret values (a PKCE public client carries no client secret, so
-/// nothing secret is hardcoded here). Two things bound the blast radius of a stale
-/// value: (1) both token endpoints live on the vendor's own first-party domain
-/// (`console.anthropic.com` / `auth.openai.com`) — the same origins Ryu already
-/// talks to for subscription usage (the `ryu_usage` crate) — so a wrong
-/// value fails the refresh loudly instead of leaking the refresh token to a third
-/// party; and (2) a *failed* refresh does not consume the (single-use) refresh
-/// token, so a wrong id degrades to a no-op, never a logout. Every field is
-/// overridable at runtime (the "nothing hardcoded" knob) via the env vars named
-/// below, so a rotated id/endpoint is corrected without a rebuild.
-struct OAuthProvider {
-    /// The `auth.json` key whose oauth entry this refreshes.
-    auth_key: &'static str,
-    /// OAuth 2.0 token endpoint (RFC 6749 §6, `grant_type=refresh_token`).
-    token_url: &'static str,
-    /// Public PKCE client id.
-    client_id: &'static str,
-    /// `scope` to echo on refresh when the provider requires it (`""` = omit).
-    scope: &'static str,
-    /// Env var overriding `token_url` (nothing hardcoded).
-    token_url_env: &'static str,
-    /// Env var overriding `client_id`.
-    client_id_env: &'static str,
-}
-
-/// The subscription providers whose Pi oauth login Ryu can refresh. See
-/// [`OAuthProvider`] for the trust/provenance rationale behind these constants.
-const OAUTH_PROVIDERS: &[OAuthProvider] = &[
-    // Claude Pro/Max — stored under the `anthropic` auth key (see `PROVIDERS`).
-    OAuthProvider {
-        auth_key: "anthropic",
-        token_url: "https://console.anthropic.com/v1/oauth/token",
-        client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-        scope: "",
-        token_url_env: "RYU_PI_OAUTH_ANTHROPIC_TOKEN_URL",
-        client_id_env: "RYU_PI_OAUTH_ANTHROPIC_CLIENT_ID",
-    },
-    // ChatGPT / Codex subscription — Pi's codex login stores it under `openai-codex`;
-    // the plain `openai` key is listed too so an oauth login persisted there also
-    // refreshes. Both use the same public Codex PKCE client.
-    OAuthProvider {
-        auth_key: "openai-codex",
-        token_url: "https://auth.openai.com/oauth/token",
-        client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
-        scope: "openid profile email",
-        token_url_env: "RYU_PI_OAUTH_OPENAI_TOKEN_URL",
-        client_id_env: "RYU_PI_OAUTH_OPENAI_CLIENT_ID",
-    },
-    // Native ChatGPT provider — it uses the same public OAuth client, but keeps
-    // its account and refresh-token slot separate from the Codex provider so
-    // provider selection and usage reporting cannot silently cross lanes.
-    OAuthProvider {
-        auth_key: CHATGPT_AUTH_KEY,
-        token_url: "https://auth.openai.com/oauth/token",
-        client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
-        scope: "openid profile email offline_access",
-        token_url_env: "RYU_PI_OAUTH_OPENAI_TOKEN_URL",
-        client_id_env: "RYU_PI_OAUTH_OPENAI_CLIENT_ID",
-    },
-    OAuthProvider {
-        auth_key: "openai",
-        token_url: "https://auth.openai.com/oauth/token",
-        client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
-        scope: "openid profile email",
-        token_url_env: "RYU_PI_OAUTH_OPENAI_TOKEN_URL",
-        client_id_env: "RYU_PI_OAUTH_OPENAI_CLIENT_ID",
-    },
-    // TODO(github-copilot): Copilot's credential is a bespoke GitHub device →
-    // Copilot-token exchange, NOT a plain OAuth refresh grant, and no authoritative
-    // endpoint/client is vendored in-repo to verify against — so it is deliberately
-    // left unwired (`refresh_oauth` warns + returns `Ok(false)`) rather than guessed.
+/// Pi-owned OAuth flows that may need a pre-turn refresh. Pi's provider module
+/// supplies the actual exchange contract; Core never holds vendor client IDs or
+/// refresh URLs. `openai` is retained for an older OAuth auth.json entry.
+const OAUTH_REFRESH_KEYS: &[&str] = &[
+    KIRO_PROVIDER_ID,
+    "anthropic",
+    "openai-codex",
+    CHATGPT_AUTH_KEY,
+    CHATGPT_PLAN_AUTH_KEY,
+    "openai",
+    "github-copilot",
+    "kimi-coding",
+    "radius",
+    "openrouter",
+    "xai",
 ];
 
-fn oauth_provider(auth_key: &str) -> Option<&'static OAuthProvider> {
-    OAUTH_PROVIDERS.iter().find(|p| p.auth_key == auth_key)
-}
+// Refresh tokens may be single-use. Serialize reads and writes so concurrent
+// turns cannot exchange the same token twice and then overwrite a rotated one.
+pub(crate) static OAUTH_REFRESH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static ACCOUNT_SELECTION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Current unix time in whole seconds. This is real runtime Rust (not a workflow
 /// script), so `SystemTime` is the correct clock.
@@ -1993,24 +2977,107 @@ fn oauth_needs_refresh(entry: &Value) -> bool {
     }
 }
 
-/// Merge a refreshed `{access, refresh?, expires_at}` back into the provider's
-/// oauth entry and persist the whole `auth.json` (`0600` on Unix), leaving every
-/// other field (`type`, account id, scopes, …) intact — mirroring
-/// [`clear_auth_key`]'s read-modify-write of the same file. The refreshed entry
-/// is also written back into the sealed vault's active account, so the vault
-/// copy never goes stale.
+fn subscription_needs_refresh(auth_key: &str, entry: &Value, now: u64) -> bool {
+    let has_refresh = entry
+        .get("refresh")
+        .and_then(Value::as_str)
+        .is_some_and(|refresh| !refresh.trim().is_empty());
+    let skew = if auth_key == CHATGPT_PLAN_AUTH_KEY && !has_refresh {
+        // OpenAI can issue an access token without a renewable session. Keep
+        // that token usable until its actual expiry, rather than requesting
+        // another login during the proactive refresh window.
+        0
+    } else {
+        if session_accounts::is_sdk_oauth_auth_key(auth_key) {
+            // Pi resolves OAuth with a five-minute minimum validity window.
+            // Refresh in Core first so its access-only session projection never
+            // rotates the sealed account's refresh token inside the child.
+            360
+        } else {
+            OAUTH_REFRESH_SKEW_SECS
+        }
+    };
+    oauth_expires_at(entry).is_none_or(|expiry| expiry <= now.saturating_add(skew))
+}
+
+/// Merge a refreshed `{access, refresh?, expires_at}` into the captured sealed
+/// account before updating Pi's `auth.json` (`0600` on Unix), if that account is
+/// still active. Other fields (`type`, account id, scopes, …) are retained. A
+/// failed vault write cannot resurrect a consumed refresh token on spawn.
 fn persist_oauth_refresh(
     auth_key: &str,
+    original: &Value,
+    account_id: Option<&str>,
     access: &str,
     refresh: Option<&str>,
     expires_at: Option<u64>,
 ) -> Result<()> {
+    persist_oauth_refresh_with_vault(
+        auth_key,
+        original,
+        account_id,
+        access,
+        refresh,
+        expires_at,
+        accounts::global(),
+    )
+}
+
+fn persist_oauth_refresh_with_vault(
+    auth_key: &str,
+    original: &Value,
+    account_id: Option<&str>,
+    access: &str,
+    refresh: Option<&str>,
+    expires_at: Option<u64>,
+    vault: Option<&accounts::AccountVault>,
+) -> Result<()> {
     ensure_dir()?;
+    let _selection_guard = ACCOUNT_SELECTION_LOCK
+        .lock()
+        .expect("account selection lock");
     let mut auth = read_auth();
-    let entry = auth
-        .entry(auth_key.to_owned())
-        .or_insert_with(|| json!({ "type": "oauth" }));
-    let obj = entry
+    let refreshed_entry = merged_oauth_credential(original, access, refresh, expires_at)?;
+    // Refresh tokens can be single-use. Persist the rotated credential in the
+    // sealed source of truth first, so a failed Pi-file write can be repaired by
+    // the next materialization instead of resurrecting the consumed token.
+    if let (Some(vault), Some(account_id)) = (vault, account_id) {
+        let scope = accounts::provider_scope(auth_key);
+        if !vault.replace_credential(&scope, account_id, original, refreshed_entry.clone())? {
+            anyhow::bail!("OAuth account changed while refreshing; retry with the current account");
+        }
+        if vault
+            .active_info(&scope)?
+            .as_ref()
+            .map(|info| info.account_id.as_str())
+            != Some(account_id)
+        {
+            return Ok(());
+        }
+    } else {
+        let has_saved_accounts = if let Some(vault) = vault {
+            vault.count(&accounts::provider_scope(auth_key))? > 0
+        } else {
+            false
+        };
+        if has_saved_accounts || auth.get(auth_key) != Some(original) {
+            anyhow::bail!("OAuth login changed while refreshing; retry with the current account");
+        }
+    }
+    auth.insert(auth_key.to_owned(), refreshed_entry);
+    let body = serde_json::to_string_pretty(&auth).context("serialize auth.json")?;
+    write_secret_file(&auth_path(), &body)?;
+    Ok(())
+}
+
+fn merged_oauth_credential(
+    original: &Value,
+    access: &str,
+    refresh: Option<&str>,
+    expires_at: Option<u64>,
+) -> Result<Value> {
+    let mut updated = original.clone();
+    let obj = updated
         .as_object_mut()
         .context("refresh_oauth: stored auth entry is not a JSON object")?;
     obj.insert("access".to_owned(), Value::String(access.to_owned()));
@@ -2019,160 +3086,418 @@ fn persist_oauth_refresh(
     }
     if let Some(expires_at) = expires_at {
         obj.insert("expires_at".to_owned(), json!(expires_at));
+        // Pi reads `expires` in milliseconds. Keep both spellings in sync.
+        obj.insert("expires".to_owned(), json!(expires_at.saturating_mul(1000)));
     }
-    drop(obj);
-    let refreshed_entry = entry.clone();
-    let kind = credential_kind(&refreshed_entry);
-    let body = serde_json::to_string_pretty(&auth).context("serialize auth.json")?;
-    write_secret_file(&auth_path(), &body)?;
-    // Keep the vault's active copy fresh so switching away and back does not
-    // resurrect an expired token.
-    if let Some(vault) = accounts::global() {
-        let scope = accounts::provider_scope(auth_key);
-        if let Ok(Some(info)) = vault.active_info(&scope) {
-            if let Err(e) = vault.upsert(
-                &scope,
-                &info.account_id,
-                &info.label,
-                kind,
-                Some(refreshed_entry),
-            ) {
-                tracing::warn!(
-                    auth_key,
-                    error = %e,
-                    "could not sync refreshed tokens into the account vault"
-                );
-            }
-        }
-    }
-    Ok(())
+    Ok(updated)
 }
+
+/// Whether a provider's saved logins have a Pi OAuth refresh flow Core can run.
+pub(crate) fn provider_supports_oauth_refresh(provider_id: &str) -> bool {
+    provider_meta(provider_id).is_some_and(|meta| OAUTH_REFRESH_KEYS.contains(&meta.auth_key))
+}
+
+/// Refresh one sealed OAuth account without changing the active Pi account or
+/// writing another account into the shared `auth.json` slot. The returned
+/// credential is for an account-bound dispatcher to use directly.
+pub async fn refresh_subscription_account(provider_id: &str, account_id: &str) -> Result<Value> {
+    let meta = provider_meta(provider_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown provider '{provider_id}'"))?;
+    if !OAUTH_REFRESH_KEYS.contains(&meta.auth_key) {
+        anyhow::bail!("provider '{provider_id}' has no supported OAuth refresh flow");
+    }
+    let vault = accounts::global()
+        .ok_or_else(|| anyhow::anyhow!("the pi-accounts vault is not initialized"))?;
+    refresh_subscription_account_with_vault(vault, meta.auth_key, account_id).await
+}
+
+/// Capture the currently selected subscription account for one outbound
+/// request. Refresh and use that exact account even if another login becomes
+/// active while the network exchange is in flight.
+pub async fn subscription_request_credential(provider_id: &str) -> Result<Option<Value>> {
+    let meta = provider_meta(provider_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown provider '{provider_id}'"))?;
+    if meta.auth_kind != "subscription" || meta.auth_key.is_empty() {
+        anyhow::bail!("provider '{provider_id}' is not a subscription provider");
+    }
+    if let Some(vault) = accounts::global() {
+        return subscription_request_credential_with_vault(vault, meta.auth_key).await;
+    }
+    // Legacy installations can still have a managed Pi auth file before the
+    // sealed account vault is initialized.
+    refresh_oauth(meta.auth_key).await?;
+    subscription_active_credential(provider_id)
+}
+
+/// Resolve one explicit sealed OAuth login for a request-local dispatcher.
+/// This never changes the account selected in Pi's shared auth file.
+pub async fn subscription_request_credential_for_account(
+    provider_id: &str,
+    account_id: &str,
+) -> Result<Value> {
+    let meta = provider_meta(provider_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown provider '{provider_id}'"))?;
+    if !OAUTH_REFRESH_KEYS.contains(&meta.auth_key) {
+        anyhow::bail!("provider '{provider_id}' has no supported OAuth refresh flow");
+    }
+    let vault = accounts::global()
+        .ok_or_else(|| anyhow::anyhow!("the pi-accounts vault is not initialized"))?;
+    refresh_subscription_account_with_vault(vault, meta.auth_key, account_id).await
+}
+
+async fn subscription_request_credential_with_vault(
+    vault: &accounts::AccountVault,
+    auth_key: &str,
+) -> Result<Option<Value>> {
+    let scope = accounts::provider_scope(auth_key);
+    let Some(info) = vault.active_info(&scope)? else {
+        return Ok(None);
+    };
+    if info.kind != accounts::KIND_OAUTH {
+        return Ok(None);
+    }
+    refresh_subscription_account_with_vault(vault, auth_key, &info.account_id)
+        .await
+        .map(Some)
+}
+
+async fn refresh_subscription_account_with_vault(
+    vault: &accounts::AccountVault,
+    auth_key: &str,
+    account_id: &str,
+) -> Result<Value> {
+    refresh_subscription_account_with(vault, auth_key, account_id, |original| async move {
+        oauth_login::refresh_credential(auth_key, &original).await
+    })
+    .await
+}
+
+async fn refresh_subscription_account_with<F, Fut>(
+    vault: &accounts::AccountVault,
+    auth_key: &str,
+    account_id: &str,
+    refresh: F,
+) -> Result<Value>
+where
+    F: FnOnce(Value) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<Value>>>,
+{
+    let _refresh_guard = OAUTH_REFRESH_LOCK.lock().await;
+    let scope = accounts::provider_scope(auth_key);
+    let account = vault
+        .list(&scope)?
+        .into_iter()
+        .find(|account| account.account_id == account_id)
+        .ok_or_else(|| anyhow::anyhow!("OAuth account is unavailable"))?;
+    if account.kind != accounts::KIND_OAUTH {
+        anyhow::bail!("account is not an OAuth login");
+    }
+    let original = vault
+        .credential(&scope, account_id)?
+        .ok_or_else(|| anyhow::anyhow!("OAuth credential is unavailable"))?;
+    if vault.needs_reauth(&scope, account_id)? {
+        return Err(accounts::RefreshFailure::Uncertain.into());
+    }
+    if !subscription_needs_refresh(auth_key, &original, now_unix()) {
+        return Ok(original);
+    }
+    if !OAUTH_REFRESH_KEYS.contains(&auth_key) {
+        anyhow::bail!("OAuth refresh is unsupported for this provider");
+    }
+    if original
+        .get("refresh")
+        .and_then(Value::as_str)
+        .is_none_or(|refresh| refresh.trim().is_empty())
+    {
+        anyhow::bail!("OAuth account needs a new login");
+    }
+    let revision = vault.begin_refresh(&scope, account_id, &original)?;
+    let refreshed = match refresh(original.clone()).await {
+        Ok(Some(refreshed)) => refreshed,
+        Ok(None) => anyhow::bail!("OAuth refresh is unavailable"),
+        Err(error) => {
+            let failure = error
+                .downcast_ref::<accounts::RefreshFailure>()
+                .copied()
+                .unwrap_or(accounts::RefreshFailure::Uncertain);
+            // The failure belongs to the dispatched credential generation, even
+            // if the user switched to another login meanwhile: `revision` scopes
+            // it, so only a newer login of this same account supersedes it.
+            vault.record_refresh_failure(&scope, account_id, &revision, failure)?;
+            if auth_key == CHATGPT_PLAN_AUTH_KEY && chatgpt_plan::terminal_refresh_error(&error) {
+                let registration =
+                    chatgpt_plan::StoredAccount::from_value(&original)?.registration();
+                let disconnected =
+                    serde_json::to_value(chatgpt_plan::StoredAccount::Disconnected(registration))?;
+                vault.finish_refresh(&scope, account_id, &original, &revision, disconnected)?;
+            }
+            return Err(failure.into());
+        }
+    };
+    if auth_key == CHATGPT_PLAN_AUTH_KEY {
+        chatgpt_plan::StoredAccount::from_value(&refreshed)?;
+        if !vault.finish_refresh(&scope, account_id, &original, &revision, refreshed.clone())? {
+            anyhow::bail!("ChatGPT registration changed while refreshing; retry");
+        }
+        return Ok(refreshed);
+    }
+    let access = refreshed
+        .get("access")
+        .and_then(Value::as_str)
+        .filter(|access| !access.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("OAuth refresh returned no access token"))?;
+    if auth_key == KIRO_PROVIDER_ID {
+        if !vault.finish_refresh(&scope, account_id, &original, &revision, refreshed.clone())? {
+            anyhow::bail!("Kiro login changed while refreshing; retry with the current account");
+        }
+        return Ok(refreshed);
+    }
+    let updated = merged_oauth_credential(
+        &original,
+        access,
+        refreshed.get("refresh").and_then(Value::as_str),
+        oauth_expires_at(&refreshed),
+    )?;
+    if !vault.finish_refresh(&scope, account_id, &original, &revision, updated.clone())? {
+        anyhow::bail!("OAuth account changed while refreshing; retry with the current account");
+    }
+    Ok(updated)
+}
+
+#[cfg(test)]
+mod oauth_refresh_tests;
 
 /// Refresh the OAuth access token for a Pi subscription login stored in
 /// `auth.json`, if one exists and is at/near expiry. Returns `Ok(true)` when a new
 /// access token was minted and persisted, `Ok(false)` when nothing needed doing
 /// (not an oauth entry, still fresh, or the provider has no known refresh flow).
 ///
-/// This targets the managed Pi's OWN isolated `auth.json` (`~/.ryu/pi-agent`),
-/// NEVER the user's `~/.claude` / `~/.codex`. That distinction is what makes
-/// refreshing safe here: unlike the read-only usage feature (the `ryu_usage` crate, which
-/// must not refresh a shared, single-use CLI token or it would log the real CLI
-/// out with `refresh_token_reused`), rotating a token in Ryu's private copy only
-/// affects this copy. pi-acp also spawns a fresh Pi process per `session/new` (one
-/// per turn), so a refresh made just before the turn lands before any Pi process
-/// holds the token — no double-refresh race with Pi's own client.
+/// Targets only Ryu's private Pi credentials. A renewable legacy slot must be
+/// sealed before dispatch. The same nonce-bound durable intent used by request
+/// refresh guards proactive refresh across retries, crashes, and newer logins.
 pub async fn refresh_oauth(auth_key: &str) -> Result<bool> {
-    let Some(entry) = read_auth().get(auth_key).cloned() else {
-        return Ok(false);
-    };
-    // Only oauth entries carry a refresh token; api-key entries never expire.
-    let Some(refresh) = entry
+    refresh_oauth_with(
+        accounts::global(),
+        &auth_path(),
+        auth_key,
+        |entry| async move { oauth_login::refresh_credential(auth_key, &entry).await },
+    )
+    .await
+}
+
+fn read_refresh_auth(path: &std::path::Path) -> Result<Map<String, Value>> {
+    match fs::read_to_string(path) {
+        Ok(body) => serde_json::from_str(&body).context("Could not read managed OAuth credentials"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Map::new()),
+        Err(_) => anyhow::bail!("Could not read managed OAuth credentials"),
+    }
+}
+
+fn renewable_oauth_needs_refresh(auth_key: &str, entry: &Value) -> bool {
+    entry
         .get("refresh")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    else {
-        return Ok(false);
-    };
-    if !oauth_needs_refresh(&entry) {
+        .is_some_and(|token| !token.trim().is_empty())
+        && subscription_needs_refresh(auth_key, entry, now_unix())
+}
+
+/// The proactive entrypoint and tests share this exact custody/dispatch path.
+/// The exchange closure is injectable; production always uses the OAuth bridge.
+async fn refresh_oauth_with<F, Fut>(
+    vault: Option<&accounts::AccountVault>,
+    path: &std::path::Path,
+    auth_key: &str,
+    refresh: F,
+) -> Result<bool>
+where
+    F: FnOnce(Value) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<Value>>>,
+{
+    if !OAUTH_REFRESH_KEYS.contains(&auth_key) {
         return Ok(false);
     }
-
-    let Some(provider) = oauth_provider(auth_key) else {
-        tracing::warn!(
-            auth_key,
-            "refresh_oauth: no known OAuth refresh flow for this provider — skipping (TODO: wire it)"
-        );
+    let scope = accounts::provider_scope(auth_key);
+    let (entry, account_id, shared_entry, revision) = {
+        let _selection_guard = ACCOUNT_SELECTION_LOCK
+            .lock()
+            .expect("account selection lock");
+        let shared_entry = read_refresh_auth(path)?.get(auth_key).cloned();
+        if let Some(vault) = vault {
+            // Import only this managed private slot, and only an empty scope.
+            // No ordinary vendor CLI stores or another account are consulted.
+            let _capture = CREDENTIAL_CAPTURE_LOCK
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Provider account storage is unavailable"))?;
+            if vault.count(&scope)? == 0 {
+                if let Some(entry) = shared_entry.as_ref().filter(|entry| {
+                    credential_kind(entry) == accounts::KIND_OAUTH
+                        && !is_claude_proxy_credential(auth_key, entry)
+                }) {
+                    if vault
+                        .upsert(
+                            &scope,
+                            &new_account_id(),
+                            "Login",
+                            accounts::KIND_OAUTH,
+                            Some(entry.clone()),
+                        )
+                        .is_err()
+                    {
+                        let mut auth = read_refresh_auth(path)?;
+                        if auth.get(auth_key) == Some(entry) && auth.remove(auth_key).is_some() {
+                            write_secret_file(path, &serde_json::to_string_pretty(&auth)?)?;
+                        }
+                        anyhow::bail!("OAuth account storage is unavailable; sign in again");
+                    }
+                }
+            }
+            let Some(info) = vault.active_info(&scope)? else {
+                if shared_entry
+                    .as_ref()
+                    .is_some_and(|entry| renewable_oauth_needs_refresh(auth_key, entry))
+                {
+                    let mut auth = read_refresh_auth(path)?;
+                    if auth.get(auth_key) == shared_entry.as_ref()
+                        && auth.remove(auth_key).is_some()
+                    {
+                        write_secret_file(path, &serde_json::to_string_pretty(&auth)?)?;
+                    }
+                    anyhow::bail!("OAuth account is unavailable; sign in again");
+                }
+                return Ok(false);
+            };
+            if info.kind != accounts::KIND_OAUTH {
+                return Ok(false);
+            }
+            let entry = vault
+                .credential(&scope, &info.account_id)?
+                .ok_or_else(|| anyhow::anyhow!("OAuth credential is unavailable"))?;
+            let revision = vault.credential_revision(&scope, &info.account_id)?;
+            (entry, Some(info.account_id), shared_entry, revision)
+        } else {
+            let Some(entry) = shared_entry.clone() else {
+                return Ok(false);
+            };
+            (entry, None, shared_entry, None)
+        }
+    };
+    let result = if let (Some(vault), Some(account_id)) = (vault, account_id.as_deref()) {
+        // This acquires the OAuth lock itself. Never nest it around this call.
+        refresh_subscription_account_with(vault, auth_key, account_id, refresh).await
+    } else if renewable_oauth_needs_refresh(auth_key, &entry) {
+        Err(anyhow::anyhow!(
+            "OAuth account storage is unavailable; sign in again"
+        ))
+    } else {
         return Ok(false);
     };
-
-    // Resolve endpoint + client id, honoring the env overrides (nothing hardcoded).
-    let token_url = std::env::var(provider.token_url_env)
-        .ok()
-        .map(|v| v.trim().to_owned())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| provider.token_url.to_owned());
-    let client_id = std::env::var(provider.client_id_env)
-        .ok()
-        .map(|v| v.trim().to_owned())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| provider.client_id.to_owned());
-
-    // OAuth 2.0 refresh grant (RFC 6749 §6), sent as JSON — the body shape both the
-    // Claude and Codex token endpoints accept.
-    let mut body = json!({
-        "grant_type": "refresh_token",
-        "refresh_token": refresh,
-        "client_id": client_id,
-    });
-    if !provider.scope.is_empty() {
-        body["scope"] = Value::String(provider.scope.to_owned());
-    }
-
-    let resp = reqwest::Client::new()
-        .post(&token_url)
-        .timeout(std::time::Duration::from_secs(15))
-        .json(&body)
-        .send()
-        .await
-        .with_context(|| format!("refresh_oauth: POST {token_url}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        // A failed refresh does NOT consume the single-use refresh token, so the
-        // stored credential is left untouched and Pi can still refresh on its own.
-        let detail = resp.text().await.unwrap_or_default();
-        anyhow::bail!("refresh_oauth: {auth_key} token endpoint returned {status}: {detail}");
-    }
-    let tokens: Value = resp
-        .json()
-        .await
-        .context("refresh_oauth: parse token response")?;
-
-    let Some(access) = tokens
-        .get("access_token")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    else {
-        anyhow::bail!("refresh_oauth: {auth_key} token response carried no access_token");
+    let _selection_guard = ACCOUNT_SELECTION_LOCK
+        .lock()
+        .expect("account selection lock");
+    let selected = if let (Some(vault), Some(account_id)) = (vault, account_id.as_deref()) {
+        vault
+            .active_info(&scope)?
+            .is_some_and(|info| info.account_id == account_id)
+    } else {
+        true
     };
-    // Providers MAY rotate the refresh token; keep the existing one if they didn't.
-    let rotated_refresh = tokens
-        .get("refresh_token")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let expires_at = tokens
-        .get("expires_in")
-        .and_then(Value::as_u64)
-        .map(|secs| now_unix().saturating_add(secs));
-
-    persist_oauth_refresh(auth_key, access, rotated_refresh, expires_at)?;
-    tracing::info!(
-        auth_key,
-        "refresh_oauth: minted a fresh subscription access token"
-    );
-    Ok(true)
+    if !selected {
+        return result.map(|updated| updated != entry);
+    }
+    let mut auth = read_refresh_auth(path)?;
+    match result {
+        Ok(updated) => {
+            let vault = vault.expect("guarded refresh requires a vault");
+            let account_id = account_id
+                .as_deref()
+                .expect("guarded refresh requires an account");
+            // Never materialize a result superseded by a newer login.
+            if vault.credential(&scope, account_id)?.as_ref() != Some(&updated) {
+                return Ok(false);
+            }
+            if auth_key != CHATGPT_PLAN_AUTH_KEY
+                && auth_key != KIRO_PROVIDER_ID
+                && auth_key != CLAUDE_AUTH_KEY
+            {
+                auth.insert(auth_key.to_owned(), updated.clone());
+                write_secret_file(path, &serde_json::to_string_pretty(&auth)?)?;
+            } else if auth
+                .get(auth_key)
+                .is_some_and(|entry| !is_claude_proxy_credential(auth_key, entry))
+                && auth.remove(auth_key).is_some()
+            {
+                // Native relays use sealed request credentials. Never leave
+                // their former renewable plaintext slot available to Pi.
+                write_secret_file(path, &serde_json::to_string_pretty(&auth)?)?;
+            }
+            Ok(updated != entry)
+        }
+        Err(error) => {
+            let unchanged_generation =
+                if let (Some(vault), Some(account_id)) = (vault, account_id.as_deref()) {
+                    vault.credential_revision(&scope, account_id)? == revision
+                } else {
+                    true
+                };
+            // Best-effort callers must not leave a consumed token for Pi's own
+            // refresh implementation to replay on the next process spawn.
+            if unchanged_generation
+                && auth.get(auth_key) == shared_entry.as_ref()
+                && auth.remove(auth_key).is_some()
+            {
+                write_secret_file(path, &serde_json::to_string_pretty(&auth)?)?;
+            }
+            Err(error)
+        }
+    }
 }
 
 /// Best-effort proactive refresh of every subscription OAuth login the managed Pi
 /// might use this turn. Called just before a Ryu/Pi ACP turn is sent (see
 /// `acp::run_acp_instance`) so a long-running / long-idle chat whose access token
 /// expired since the previous turn gets a fresh one before Pi makes its first model
-/// call. NEVER fails the turn: each provider is refreshed independently and errors
-/// are logged, not propagated. The common case is cheap — a provider with no oauth
+/// call. Providers are refreshed independently. A failed refresh only blocks the
+/// turn if an unsafe renewable credential remains readable by Pi, or its removal
+/// cannot be verified. The common case is cheap — a provider with no oauth
 /// entry, or a still-fresh token, returns after a single `auth.json` read with no
 /// network call.
-pub async fn refresh_pi_oauth_logins() {
-    for provider in OAUTH_PROVIDERS {
-        if let Err(e) = refresh_oauth(provider.auth_key).await {
+pub async fn refresh_pi_oauth_logins() -> Result<()> {
+    refresh_pi_oauth_logins_with(&auth_path(), refresh_oauth).await
+}
+
+async fn refresh_pi_oauth_logins_with<F, Fut>(path: &std::path::Path, mut refresh: F) -> Result<()>
+where
+    F: FnMut(&'static str) -> Fut,
+    Fut: std::future::Future<Output = Result<bool>>,
+{
+    for auth_key in OAUTH_REFRESH_KEYS {
+        // Claude's Pi slot is a non-expiring local proxy credential. The real
+        // sealed account is refreshed by the request proxy after session binding.
+        if *auth_key == CLAUDE_AUTH_KEY {
+            let auth = read_refresh_auth(path)?;
+            if auth
+                .get(*auth_key)
+                .is_none_or(|entry| is_claude_proxy_credential(auth_key, entry))
+            {
+                continue;
+            }
+        }
+        if let Err(e) = refresh(auth_key).await {
             tracing::warn!(
-                auth_key = provider.auth_key,
+                auth_key,
                 error = %e,
-                "refresh_pi_oauth_logins: refresh failed (continuing)"
+                "refresh_pi_oauth_logins: refresh failed"
             );
+            let auth = read_refresh_auth(path)?;
+            if auth
+                .get(*auth_key)
+                .is_some_and(|entry| renewable_oauth_needs_refresh(auth_key, entry))
+            {
+                anyhow::bail!("OAuth credentials could not be safely refreshed; sign in again");
+            }
         }
     }
+    Ok(())
 }
 
 /// Remove a custom-provider entry from `models.json`.
@@ -2230,9 +3555,33 @@ pub struct ProviderMeta {
 /// keeps egress governed. Sourced from pi.dev `providers.md` / `models.md`.
 pub const PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta {
-        id: MANAGED_OPENROUTER_ID,
-        label: "Ryu (managed · included with your plan)",
+        id: qoder_cli::GLOBAL_ID,
+        label: "Qoder Global",
         api: "openai-completions",
+        auth_key: qoder_cli::GLOBAL_ID,
+        auth_env: "",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: qoder_cli::CN_ID,
+        label: "Qoder CN",
+        api: "openai-completions",
+        auth_key: qoder_cli::CN_ID,
+        auth_env: "",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: MANAGED_OPENROUTER_ID,
+        // The ONE managed provider users see. Models keep their real names; the
+        // supplier that serves one is never shown.
+        label: "Ryu Router",
+        api: "openai-responses",
         auth_key: "",
         auth_env: "",
         // Subscription: no BYOK; billed against the plan's Ryu $ credits.
@@ -2254,7 +3603,7 @@ pub const PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta {
         id: GATEWAY_PROVIDER_ID,
         label: "Ryu Gateway (governed)",
-        api: "openai-completions",
+        api: "openai-responses",
         auth_key: "",
         auth_env: "",
         auth_kind: "none",
@@ -2262,80 +3611,10 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         suggested_models: &[],
         models_url: "",
     },
-    // ── Pool-backed managed supply ────────────────────────────────────────────
-    //
-    // Ryu runs on donated provider credit, segregated into pools so a $50 grant of
-    // cheap open-model capacity cannot be spent on expensive frontier capacity.
-    // A grant is restricted to its own pool, and the Gateway attributes a request
-    // to a pool from the provider that actually served it.
-    //
-    // Until these rows existed, the ONLY managed entry was `managed-openrouter`,
-    // whose default `openrouter/auto` routes to the `openrouter` provider and
-    // therefore attributes to the retail pool. A user holding only "Ryu Fast"
-    // credit has no budget under that key and `unrestricted` of zero, so the
-    // Gateway's pre-flight gate refused the turn with a 402 — on a wallet showing
-    // a positive balance. The credits were not merely unspent; they were
-    // unspendable through the UI.
-    //
-    // WHAT SELECTS A POOL IS THE MODEL ID, not this row. Every Gateway-routed
-    // provider writes the same `defaultProvider: "openai"` pin and the same
-    // managed-fleet patch, so Core cannot pin a provider — the Gateway's router
-    // matches the model id's PREFIX (`crates/gateway/router/src/lib.rs`). These
-    // rows exist to put routable ids in front of the user and to name the supply
-    // in the user's own words; `suggested_models` is therefore not a garnish, it
-    // is the entire list the picker will show (`models_url` is empty and a pool
-    // row is deliberately excluded from Gateway discovery, which would merge in
-    // every other provider's models and offer ids that debit the wrong pool).
-    //
-    // THERE ARE NO "Ryu Vision" / "Ryu Reasoning" ROWS, and adding them here is a
-    // money bug, not a feature. The router ships no builtin prefix for `vertex` or
-    // `openai-credits` — deliberately, because `google/gemini-*` is a live
-    // OpenRouter id and claiming that prefix would break working traffic. Their
-    // ids would fall through to `default_provider` and debit the wrong pool. Those
-    // two need an operator `routing.model_map` on the managed fleet first, which
-    // is fleet configuration, not a change here.
-    ProviderMeta {
-        id: MANAGED_CLOUDFLARE_ID,
-        // Byte-for-byte `CREDIT_POOLS.cloudflare.label`: the composer reads the
-        // pool catalog for its own label, and Settings renders THIS string raw, so
-        // a divergence shows the same supply under two names.
-        label: "Ryu Fast",
-        api: "openai-completions",
-        auth_key: "",
-        auth_env: "",
-        // Not "subscription": there is no login and no BYOK. Free-tier and
-        // referral grants land in this pool, so a user can hold it with no plan at
-        // all — and `provider_configured` treats "none" as always usable.
-        auth_kind: "none",
-        credit_pool: "cloudflare",
-        // Every id here is asserted routable to `cloudflare` by the router's own
-        // tests. Do not add one without adding it there.
-        suggested_models: &[
-            "@cf/meta/llama-3.1-8b-instruct",
-            "@cf/mistral/mistral-7b-instruct-v0.2",
-            "@cf/qwen/qwen1.5-14b-chat-awq",
-        ],
-        models_url: "",
-    },
-    ProviderMeta {
-        id: MANAGED_BEDROCK_ID,
-        label: "Ryu Frontier",
-        api: "openai-completions",
-        auth_key: "",
-        auth_env: "",
-        auth_kind: "none",
-        credit_pool: "bedrock",
-        // `anthropic.` / `amazon.` / `meta.` / `mistral.` are the routable
-        // prefixes. NOT `cohere.` / `ai21.` / `writer.` / `deepseek.`, which the
-        // router leaves unclaimed, and NOT the `us.` / `eu.` / `apac.`
-        // inference-profile forms.
-        suggested_models: &[
-            "anthropic.claude-3-5-sonnet-20241022-v2:0",
-            "amazon.nova-pro-v1:0",
-            "meta.llama3-1-70b-instruct-v1:0",
-        ],
-        models_url: "",
-    },
+    // The per-tier managed rows ("Ryu Fast" … "Ryu Code") were retired: free
+    // credit is now spent automatically on Ryu Router picks Ryu can serve from
+    // its own supply, so a tier row has nothing left to offer. Saved selections
+    // naming one resolve through `canonical_provider_id`.
     // Subscription LOGIN providers (Pi's OAuth). No API key — the desktop shows a
     // "Login" button that drives the ACP `authenticate` flow (probe authMethods →
     // `POST /api/agents/:id/authenticate`); Pi stores the result as an oauth entry
@@ -2364,11 +3643,33 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         models_url: "https://chatgpt.com/backend-api/codex/models",
     },
     ProviderMeta {
+        id: CHATGPT_PLAN_PROVIDER_ID,
+        label: "ChatGPT plan (self-hosted)",
+        api: "openai-responses",
+        auth_key: CHATGPT_PLAN_AUTH_KEY,
+        auth_env: "",
+        auth_kind: "subscription",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "https://api.openai.com/v1/models",
+    },
+    ProviderMeta {
         id: "claude-pro-max",
         label: "Claude (Pro/Max · login)",
         api: "anthropic-messages",
         // Pi stores the Claude Pro/Max OAuth under the `anthropic` auth key.
         auth_key: "anthropic",
+        auth_env: "",
+        auth_kind: "subscription",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: KIRO_PROVIDER_ID,
+        label: "Kiro (HTTP · login)",
+        api: "openai-completions",
+        auth_key: KIRO_PROVIDER_ID,
         auth_env: "",
         auth_kind: "subscription",
         credit_pool: "",
@@ -2387,6 +3688,193 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         models_url: "",
     },
     ProviderMeta {
+        id: "kimi-coding",
+        label: "Kimi Code (login)",
+        api: "anthropic-messages",
+        auth_key: "kimi-coding",
+        auth_env: "",
+        auth_kind: "subscription",
+        credit_pool: "",
+        suggested_models: &["kimi-for-coding", "k3"],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "radius",
+        label: "Radius (login)",
+        api: "pi-messages",
+        auth_key: "radius",
+        auth_env: "",
+        auth_kind: "subscription",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "ant-ling",
+        label: "Ant Ling",
+        api: "openai-completions",
+        auth_key: "ant-ling",
+        auth_env: "ANT_LING_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "baseten",
+        label: "Baseten",
+        api: "openai-completions",
+        auth_key: "baseten",
+        auth_env: "BASETEN_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "minimax-cn",
+        label: "MiniMax CN",
+        api: "anthropic-messages",
+        auth_key: "minimax-cn",
+        auth_env: "MINIMAX_CN_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "moonshotai-cn",
+        label: "Moonshot AI CN",
+        api: "openai-completions",
+        auth_key: "moonshotai-cn",
+        auth_env: "MOONSHOT_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "opencode",
+        label: "OpenCode Zen",
+        api: "anthropic-messages",
+        auth_key: "opencode",
+        auth_env: "OPENCODE_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "opencode-go",
+        label: "OpenCode Go",
+        api: "anthropic-messages",
+        auth_key: "opencode-go",
+        auth_env: "OPENCODE_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "qwen-token-plan",
+        label: "Qwen Token Plan",
+        api: "openai-completions",
+        auth_key: "qwen-token-plan",
+        auth_env: "QWEN_TOKEN_PLAN_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "qwen-token-plan-cn",
+        label: "Qwen Token Plan CN",
+        api: "openai-completions",
+        auth_key: "qwen-token-plan-cn",
+        auth_env: "QWEN_TOKEN_PLAN_CN_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "qwen-token-plan-individual",
+        label: "Qwen Token Plan Individual",
+        api: "openai-completions",
+        auth_key: "qwen-token-plan-individual",
+        auth_env: "QWEN_TOKEN_PLAN_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "vercel-ai-gateway",
+        label: "Vercel AI Gateway",
+        api: "anthropic-messages",
+        auth_key: "vercel-ai-gateway",
+        auth_env: "AI_GATEWAY_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "xiaomi",
+        label: "Xiaomi",
+        api: "openai-completions",
+        auth_key: "xiaomi",
+        auth_env: "XIAOMI_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "xiaomi-token-plan-ams",
+        label: "Xiaomi Token Plan AMS",
+        api: "openai-completions",
+        auth_key: "xiaomi-token-plan-ams",
+        auth_env: "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "xiaomi-token-plan-cn",
+        label: "Xiaomi Token Plan CN",
+        api: "openai-completions",
+        auth_key: "xiaomi-token-plan-cn",
+        auth_env: "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "xiaomi-token-plan-sgp",
+        label: "Xiaomi Token Plan SGP",
+        api: "openai-completions",
+        auth_key: "xiaomi-token-plan-sgp",
+        auth_env: "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
+        id: "zai-coding-cn",
+        label: "Z.AI Coding CN",
+        api: "openai-completions",
+        auth_key: "zai-coding-cn",
+        auth_env: "ZAI_CODING_CN_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "",
+    },
+    ProviderMeta {
         id: "anthropic",
         label: "Anthropic",
         api: "anthropic-messages",
@@ -2394,10 +3882,14 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "ANTHROPIC_API_KEY",
         auth_kind: "api-key",
         credit_pool: "",
+        // Pi 0.99–1.1 ship these with adaptive thinking; listed first so a key
+        // whose `/v1/models` discovery fails still offers the current family.
         suggested_models: &[
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
             "claude-opus-4-20250514",
             "claude-sonnet-4-20250514",
-            "claude-3-5-haiku-20241022",
         ],
         models_url: "https://api.anthropic.com/v1/models",
     },
@@ -2409,7 +3901,13 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         auth_env: "OPENAI_API_KEY",
         auth_kind: "api-key",
         credit_pool: "",
-        suggested_models: &["gpt-4o", "gpt-4o-mini", "o3", "o4-mini"],
+        suggested_models: &[
+            "gpt-6.1-sol",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-4o",
+            "gpt-4o-mini",
+        ],
         models_url: "https://api.openai.com/v1/models",
     },
     ProviderMeta {
@@ -2551,6 +4049,62 @@ pub const PROVIDERS: &[ProviderMeta] = &[
         suggested_models: &[],
         models_url: "",
     },
+    // Named compatible vendors from 9Router's 4a57df8 provider registry.
+    ProviderMeta {
+        id: "chutes",
+        label: "Chutes AI",
+        api: "openai-completions",
+        auth_key: "chutes",
+        auth_env: "CHUTES_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &[],
+        models_url: "https://llm.chutes.ai/v1/models",
+    },
+    ProviderMeta {
+        id: "hyperbolic",
+        label: "Hyperbolic",
+        api: "openai-completions",
+        auth_key: "hyperbolic",
+        auth_env: "HYPERBOLIC_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &["Qwen/QwQ-32B"],
+        models_url: "https://api.hyperbolic.xyz/v1/models",
+    },
+    ProviderMeta {
+        id: "siliconflow",
+        label: "SiliconFlow",
+        api: "openai-completions",
+        auth_key: "siliconflow",
+        auth_env: "SILICONFLOW_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &["deepseek-ai/DeepSeek-V4-Pro"],
+        models_url: "https://api.siliconflow.com/v1/models",
+    },
+    ProviderMeta {
+        id: "venice",
+        label: "Venice AI",
+        api: "openai-completions",
+        auth_key: "venice",
+        auth_env: "VENICE_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &["venice-uncensored-1-2"],
+        models_url: "https://api.venice.ai/api/v1/models",
+    },
+    ProviderMeta {
+        id: "featherless",
+        label: "Featherless",
+        api: "openai-completions",
+        auth_key: "featherless",
+        auth_env: "FEATHERLESS_API_KEY",
+        auth_kind: "api-key",
+        credit_pool: "",
+        suggested_models: &["deepseek-ai/DeepSeek-V4-Pro"],
+        models_url: "https://api.featherless.ai/v1/models",
+    },
     ProviderMeta {
         id: "huggingface",
         label: "Hugging Face",
@@ -2583,13 +4137,59 @@ pub const PROVIDERS: &[ProviderMeta] = &[
 /// The thinking levels Pi accepts for `defaultThinkingLevel`.
 pub const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high", "xhigh"];
 
-fn provider_meta(id: &str) -> Option<&'static ProviderMeta> {
+pub(crate) fn provider_meta(id: &str) -> Option<&'static ProviderMeta> {
     PROVIDERS.iter().find(|p| p.id == id)
+}
+
+const NAMED_COMPATIBLE_PROVIDERS: &[&str] = &[
+    "chutes",
+    "hyperbolic",
+    "siliconflow",
+    "venice",
+    "featherless",
+];
+
+/// These named vendors use Pi's custom-provider registry rather than assuming
+/// the installed SDK ships a built-in model table for every compatible service.
+fn ensure_named_compatible_provider(id: &str, model: Option<&str>) -> Result<()> {
+    if !NAMED_COMPATIBLE_PROVIDERS.contains(&id) {
+        return Ok(());
+    }
+    let base = ryu_gw_credentials::direct_compatible_provider_url(id)
+        .context("Named compatible provider endpoint unavailable")?;
+    let existing = read_models();
+    let entry = &existing["providers"][id];
+    let mut patch = Map::new();
+    if entry.get("baseUrl").is_none() {
+        patch.insert("baseUrl".into(), json!(base));
+    }
+    if entry.get("api").is_none() {
+        patch.insert("api".into(), json!("openai-completions"));
+    }
+    let mut rows = entry
+        .get("models")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(model) = model {
+        append_discovered_model_ids(&mut rows, &[json!({"id":model})]);
+    }
+    patch.insert("models".into(), json!(rows));
+    upsert_provider(id, patch)
 }
 
 /// Whether a provider has a usable credential (auth.json key, environment
 /// variable, or — for custom providers — an `apiKey` in models.json).
 fn provider_configured(meta: &ProviderMeta) -> bool {
+    if qoder_cli::is_provider(meta.id) {
+        return qoder_cli::capture_token(meta.id).is_ok();
+    }
+    if meta.id == CHATGPT_PLAN_PROVIDER_ID {
+        return matches!(
+            chatgpt_plan_connection_state(),
+            "authorized" | "identity-only"
+        );
+    }
     // "none" (gateway, and the pool-backed managed rows) needs no credential. A
     // managed provider is gated server-side by the wallet — a plan's credits or a
     // pool-restricted grant — so it is always usable from here.
@@ -2600,12 +4200,12 @@ fn provider_configured(meta: &ProviderMeta) -> bool {
     // Pi has a stored OAuth login for them (auth.json `{type:"oauth", …}`), or
     // the sealed vault holds an account.
     if meta.auth_kind == "subscription" {
-        return !meta.auth_key.is_empty()
-            && (auth_has_any(meta.auth_key)
-                || vault_has_any(&accounts::provider_scope(meta.auth_key)));
+        return !meta.auth_key.is_empty() && active_auth_kind(meta.auth_key, accounts::KIND_OAUTH);
     }
+    let supports_oauth = oauth_login::oauth_provider_id(meta.id).is_some();
     if !meta.auth_key.is_empty()
-        && (auth_has_key(meta.auth_key) || vault_has_any(&accounts::provider_scope(meta.auth_key)))
+        && (active_auth_kind(meta.auth_key, accounts::KIND_API_KEY)
+            || (supports_oauth && active_auth_kind(meta.auth_key, accounts::KIND_OAUTH)))
     {
         return true;
     }
@@ -2617,6 +4217,37 @@ fn provider_configured(meta: &ProviderMeta) -> bool {
         return true;
     }
     false
+}
+
+fn chatgpt_plan_connection_state() -> &'static str {
+    let Some(vault) = accounts::global() else {
+        return "unavailable";
+    };
+    match vault.active_credential(&accounts::provider_scope(CHATGPT_PLAN_AUTH_KEY)) {
+        Ok(Some((_, value))) => chatgpt_plan::connection_state(&value),
+        Ok(None) => "disconnected",
+        Err(_) => "unavailable",
+    }
+}
+
+fn provider_account_views(provider_id: &str) -> Vec<Value> {
+    let vault = accounts::global();
+    let scope = accounts::provider_scope(CHATGPT_PLAN_AUTH_KEY);
+    list_provider_accounts(provider_id)
+        .into_iter()
+        .map(|info| {
+            let mut view = serde_json::to_value(&info).unwrap_or_default();
+            if provider_id == CHATGPT_PLAN_PROVIDER_ID {
+                let state = vault
+                    .and_then(|vault| vault.credential(&scope, &info.account_id).ok())
+                    .flatten()
+                    .map(|value| chatgpt_plan::connection_state(&value))
+                    .unwrap_or("unavailable");
+                view["connectionState"] = json!(state);
+            }
+            view
+        })
+        .collect()
 }
 
 /// Whether a *subscription* provider (ChatGPT / Claude / Copilot) currently has a
@@ -2635,11 +4266,7 @@ pub fn subscription_login_present(provider_id: &str) -> Option<bool> {
     if meta.auth_kind != "subscription" {
         return None;
     }
-    Some(
-        !meta.auth_key.is_empty()
-            && (auth_has_any(meta.auth_key)
-                || vault_has_any(&accounts::provider_scope(meta.auth_key))),
-    )
+    Some(!meta.auth_key.is_empty() && active_auth_kind(meta.auth_key, accounts::KIND_OAUTH))
 }
 
 // ── Account management (multi-account switch/remove, backed by the vault) ─────
@@ -2739,6 +4366,25 @@ pub fn subscription_account_credential(
     vault.credential(&scope, account_id)
 }
 
+/// The sealed credential revision used to scope a subscription usage reading.
+/// A caller should read this before and after a vendor fetch, and accept the
+/// reading only if both revisions match. OAuth refresh can rotate the token
+/// while the fetch is in flight.
+pub fn subscription_account_credential_revision(
+    provider_id: &str,
+    account_id: &str,
+) -> Result<Option<Vec<u8>>> {
+    let meta = provider_meta(provider_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown provider '{provider_id}'"))?;
+    if meta.auth_kind != "subscription" || meta.auth_key.is_empty() {
+        anyhow::bail!("provider '{provider_id}' is not a subscription provider");
+    }
+    let scope = accounts::provider_scope(meta.auth_key);
+    let vault = accounts::global()
+        .ok_or_else(|| anyhow::anyhow!("the pi-accounts vault is not initialized"))?;
+    vault.credential_revision(&scope, account_id)
+}
+
 /// Read the currently selected OAuth credential for a native subscription
 /// provider. The value is consumed only by Core's provider proxy; it is never
 /// serialized into a response or handed to the desktop.
@@ -2750,11 +4396,27 @@ pub fn subscription_active_credential(provider_id: &str) -> Result<Option<Value>
     }
     let scope = accounts::provider_scope(meta.auth_key);
     if let Some(vault) = accounts::global() {
-        if let Some((_account_id, credential)) = vault.active_credential(&scope)? {
-            return Ok(Some(credential));
-        }
+        return active_oauth_credential_from_vault(vault, &scope);
     }
-    Ok(read_auth().get(meta.auth_key).cloned())
+    Ok(read_auth()
+        .get(meta.auth_key)
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("oauth"))
+        .cloned())
+}
+
+fn active_oauth_credential_from_vault(
+    vault: &accounts::AccountVault,
+    scope: &str,
+) -> Result<Option<Value>> {
+    if !vault
+        .active_info(scope)?
+        .is_some_and(|info| info.kind == accounts::KIND_OAUTH)
+    {
+        return Ok(None);
+    }
+    Ok(vault
+        .active_credential(scope)?
+        .map(|(_, credential)| credential))
 }
 
 /// Mark one saved account as the selected Gateway account after the Gateway has
@@ -2771,23 +4433,63 @@ pub fn list_provider_accounts(provider_id: &str) -> Vec<accounts::AccountInfo> {
     let Some(scope) = provider_account_scope(provider_id) else {
         return Vec::new();
     };
-    match accounts::global() {
+    let allowed_kind = provider_meta(provider_id).and_then(|meta| {
+        if meta.auth_kind == "subscription" {
+            Some(accounts::KIND_OAUTH)
+        } else if oauth_login::oauth_provider_id(provider_id).is_none() {
+            Some(accounts::KIND_API_KEY)
+        } else {
+            None
+        }
+    });
+    let accounts = match accounts::global() {
         Some(vault) => vault.list(&scope).unwrap_or_default(),
         None => Vec::new(),
-    }
+    };
+    accounts
+        .into_iter()
+        .filter(|account| allowed_kind.is_none_or(|kind| account.kind == kind))
+        .collect()
 }
 
 /// Make `account_id` the active account for a provider and materialize it into
 /// Pi's files. Returns the refreshed catalog. Errors when the provider has no
 /// such account.
 pub fn switch_provider_account(provider_id: &str, account_id: &str) -> Result<Value> {
+    let _selection_guard = ACCOUNT_SELECTION_LOCK
+        .lock()
+        .expect("account selection lock");
+    if !list_provider_accounts(provider_id)
+        .iter()
+        .any(|account| account.account_id == account_id)
+    {
+        anyhow::bail!("no account with id '{account_id}' for provider '{provider_id}'");
+    }
     let scope = provider_account_scope(provider_id)
         .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' holds no accounts"))?;
     let switched = with_account_vault(|vault| vault.set_active(&scope, account_id))?;
     if !switched {
         anyhow::bail!("no account with id '{account_id}' for provider '{provider_id}'");
     }
-    materialize_active_accounts();
+    materialize_active_accounts_unlocked();
+    Ok(catalog())
+}
+
+/// Rename a saved provider account without changing its credential or active
+/// selection. Returns the refreshed catalog for the desktop settings cache.
+pub fn rename_provider_account(provider_id: &str, account_id: &str, label: &str) -> Result<Value> {
+    if !list_provider_accounts(provider_id)
+        .iter()
+        .any(|account| account.account_id == account_id)
+    {
+        anyhow::bail!("no account with id '{account_id}' for provider '{provider_id}'");
+    }
+    let scope = provider_account_scope(provider_id)
+        .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' holds no accounts"))?;
+    let renamed = with_account_vault(|vault| vault.set_label(&scope, account_id, label))?;
+    if !renamed {
+        anyhow::bail!("no account with id '{account_id}' for provider '{provider_id}'");
+    }
     Ok(catalog())
 }
 
@@ -2795,22 +4497,59 @@ pub fn switch_provider_account(provider_id: &str, account_id: &str) -> Result<Va
 /// account becomes active and is materialized (the slot is cleared otherwise).
 /// Returns the refreshed catalog.
 pub fn remove_provider_account(provider_id: &str, account_id: &str) -> Result<Value> {
+    let _selection_guard = ACCOUNT_SELECTION_LOCK
+        .lock()
+        .expect("account selection lock");
+    if !list_provider_accounts(provider_id)
+        .iter()
+        .any(|account| account.account_id == account_id)
+    {
+        anyhow::bail!("no account with id '{account_id}' for provider '{provider_id}'");
+    }
     let scope = provider_account_scope(provider_id)
         .ok_or_else(|| anyhow::anyhow!("provider '{provider_id}' holds no accounts"))?;
+    // Conversations that ran under this account keep their Pi transcripts in
+    // their own account-session folders; they go with the account.
+    let session_keys = session_accounts::session_keys_for_account(provider_id, account_id);
     let removed = with_account_vault(|vault| vault.remove(&scope, account_id))?;
     if !removed {
         anyhow::bail!("no account with id '{account_id}' for provider '{provider_id}'");
     }
+    transcripts::delete_account_session_transcripts(&config_dir(), &session_keys);
     // Promote a remaining account so a removed active login does not leave the
     // provider with a cleared slot it cannot use.
-    let remaining = with_account_vault(|vault| vault.list(&scope))?;
-    if !remaining.is_empty() && !remaining.iter().any(|a| a.active) {
+    with_account_vault(|vault| settle_provider_scope_after_removal(vault, &scope))?;
+    materialize_active_accounts_unlocked();
+    Ok(catalog())
+}
+
+/// Keep a provider usable after one of its accounts was removed from `scope`.
+/// Promote a remaining account so a removed active login does not leave the
+/// provider with a cleared slot it cannot use; when none remain, remove the
+/// legacy slot before materialization can import it again. The caller holds
+/// `ACCOUNT_SELECTION_LOCK` and materializes afterwards.
+fn settle_provider_scope_after_removal(vault: &accounts::AccountVault, scope: &str) -> Result<()> {
+    let remaining = vault.list(scope)?;
+    if remaining.is_empty() {
+        return clear_provider_active_slot(accounts::scope_key(scope));
+    }
+    if !remaining.iter().any(|a| a.active) {
         if let Some(next) = remaining.first() {
-            let _ = with_account_vault(|vault| vault.set_active(&scope, &next.account_id));
+            let _ = vault.set_active(scope, &next.account_id);
         }
     }
-    materialize_active_accounts();
-    Ok(catalog())
+    Ok(())
+}
+
+fn clear_provider_active_slot(auth_key: &str) -> Result<()> {
+    clear_auth_key(auth_key)?;
+    let mut models = read_models();
+    if let Some(entry) = models["providers"][auth_key].as_object_mut() {
+        if entry.remove("apiKey").is_some() {
+            write_models(&models)?;
+        }
+    }
+    Ok(())
 }
 
 /// Snapshot every usable credential currently in Pi's `auth.json` into the
@@ -2819,10 +4558,16 @@ pub fn remove_provider_account(provider_id: &str, account_id: &str) -> Result<Va
 /// credential itself, and this is how Ryu captures it as a switchable account.
 /// Called on a successful managed-Pi `authenticate` and at boot.
 pub fn capture_pi_auth_into_vault() {
+    let _selection_guard = ACCOUNT_SELECTION_LOCK
+        .lock()
+        .expect("account selection lock");
     let Some(vault) = accounts::global() else {
         return;
     };
     for (auth_key, entry) in read_auth() {
+        if auth_key == CHATGPT_PLAN_AUTH_KEY || is_claude_proxy_credential(&auth_key, &entry) {
+            continue;
+        }
         let Some(credential) = usable_credential(&entry) else {
             continue;
         };
@@ -2845,7 +4590,7 @@ pub fn capture_pi_auth_into_vault() {
             );
         }
     }
-    materialize_active_accounts();
+    materialize_active_accounts_unlocked();
 }
 
 /// A human label for an `auth.json` key: the first built-in provider whose
@@ -2927,8 +4672,8 @@ pub fn record_acp_account(spawn_cmd: &str, provider_id: Option<&str>) {
 
 /// Make `account_id` the active account for an ACP agent. For the managed Pi the
 /// account carries a `provider` tag naming the provider scope to switch; for any
-/// other agent switching means re-running the agent's own login (the route's
-/// job), so this only acknowledges.
+/// other agent this validates the requested opaque record; its own login still
+/// needs to complete before the credential identity has changed.
 pub fn switch_acp_account(
     spawn_cmd: &str,
     account_id: &str,
@@ -2943,13 +4688,16 @@ pub fn switch_acp_account(
         })?;
         let scope = provider_account_scope(provider)
             .ok_or_else(|| anyhow::anyhow!("provider '{provider}' holds no accounts"))?;
+        let _selection_guard = ACCOUNT_SELECTION_LOCK
+            .lock()
+            .expect("account selection lock");
         let switched = vault.set_active(&scope, account_id)?;
         if switched {
-            materialize_active_accounts();
+            materialize_active_accounts_unlocked();
         }
         return Ok(switched);
     }
-    Ok(true)
+    vault.contains(&accounts::acp_scope(spawn_cmd), account_id)
 }
 
 /// Remove an account from an ACP agent. Managed Pi → remove from its provider
@@ -2959,24 +4707,56 @@ pub fn remove_acp_account(spawn_cmd: &str, account_id: &str) -> Result<bool> {
         return Ok(false);
     };
     if spawn_cmd.contains("PI_CODING_AGENT_DIR") {
-        let mut removed = false;
-        for meta in PROVIDERS {
-            if meta.auth_key.is_empty() {
-                continue;
-            }
-            let provider_scope = accounts::provider_scope(meta.auth_key);
-            if vault.remove(&provider_scope, account_id)? {
-                removed = true;
-                break;
-            }
-        }
-        if removed {
-            materialize_active_accounts();
-        }
-        return Ok(removed);
+        let _selection_guard = ACCOUNT_SELECTION_LOCK
+            .lock()
+            .expect("account selection lock");
+        return remove_pi_account_from(
+            vault,
+            account_id,
+            settle_provider_scope_after_removal,
+            materialize_active_accounts_unlocked,
+        );
     }
     let scope = accounts::acp_scope(spawn_cmd);
     vault.remove(&scope, account_id)
+}
+
+/// Remove a managed-Pi login from whichever provider scope holds it, then
+/// settle that scope and materialize. Once `vault.remove` succeeded the account
+/// is gone, so a settle failure is logged rather than returned: returning it
+/// would report a removed account as not removed and skip materialization,
+/// leaving the removed credential in Pi's `auth.json`. The caller holds
+/// `ACCOUNT_SELECTION_LOCK`.
+fn remove_pi_account_from(
+    vault: &accounts::AccountVault,
+    account_id: &str,
+    settle: impl Fn(&accounts::AccountVault, &str) -> Result<()>,
+    materialize: impl FnOnce(),
+) -> Result<bool> {
+    let mut removed = false;
+    for meta in PROVIDERS {
+        if meta.auth_key.is_empty() {
+            continue;
+        }
+        let provider_scope = accounts::provider_scope(meta.auth_key);
+        if vault.remove(&provider_scope, account_id)? {
+            // Same safeguards as `remove_provider_account`: without them the
+            // removed login re-imports from `auth.json`, or a removed active
+            // login leaves the remaining accounts with none selected.
+            if let Err(error) = settle(vault, &provider_scope) {
+                tracing::warn!(
+                    scope = %provider_scope,
+                    "pi account removed but its provider scope could not be settled: {error:#}"
+                );
+            }
+            removed = true;
+            break;
+        }
+    }
+    if removed {
+        materialize();
+    }
+    Ok(removed)
 }
 
 // ── Public API (consumed by the HTTP handlers) ────────────────────────────────
@@ -3030,6 +4810,20 @@ pub fn current() -> PiConfigView {
         provider_routing: routing_map,
         config_dir: config_dir().to_string_lossy().into_owned(),
     }
+}
+
+/// A built-in provider's suggested models the user has not turned off in
+/// models.json (an untoggled model is enabled), in catalog order.
+pub(crate) fn enabled_suggested_models(provider_id: &str) -> Vec<String> {
+    let Some(meta) = provider_meta(provider_id) else {
+        return Vec::new();
+    };
+    let overrides = model_overrides(&read_models(), provider_id);
+    meta.suggested_models
+        .iter()
+        .filter(|model_id| overrides.get(**model_id).and_then(Value::as_bool) != Some(false))
+        .map(|model_id| (*model_id).to_owned())
+        .collect()
 }
 
 /// Extract a provider's per-model `enabled` overrides from an already-read
@@ -3110,14 +4904,15 @@ pub fn provider_api_key(id: &str) -> Option<String> {
         }
         return None;
     }
-    // Custom (user-added) provider: its key lives inline in models.json.
+    // Custom (user-added) provider: models.json holds a reference to the sealed
+    // vault key (or, before migration, the legacy literal).
     read_models()["providers"]
         .get(id)
         .and_then(|p| p.get("apiKey"))
         .and_then(Value::as_str)
-        .map(str::trim)
+        .and_then(secret_env::resolve)
+        .map(|key| key.trim().to_owned())
         .filter(|s| !s.is_empty())
-        .map(str::to_owned)
 }
 
 /// The account listing a provider row carries — labels, kinds, active flag and
@@ -3151,26 +4946,39 @@ pub fn catalog() -> Value {
                 "label": p.label,
                 "api": p.api,
                 "authKind": p.auth_kind,
+                "supportsOAuth": oauth_login::oauth_provider_id(p.id).is_some(),
                 "authEnv": p.auth_env,
-                "routing": provider_routing(p.id),
+                "routing": if qoder_cli::is_provider(p.id) { ROUTING_DIRECT } else { provider_routing(p.id) },
                 // Managed/gateway providers can't be flipped off Gateway routing.
-                "routingLocked": is_managed_or_gateway(p.id),
+                "routingLocked": is_managed_or_gateway(p.id) || p.id == CHATGPT_PLAN_PROVIDER_ID || qoder_cli::is_provider(p.id),
                 "managed": is_managed(p.id),
                 // The credit pool this row's spend attributes to, so the composer
                 // can bind the row to the pool catalog and show its balance. Empty
                 // for BYOK.
                 "creditPool": p.credit_pool,
+                // Ryu Router models free credit pays for (the picker's "Free"
+                // tag). One source of truth with the Gateway's own-supply
+                // routing; empty on every other row.
+                "freeModels": if p.id == MANAGED_OPENROUTER_ID { ryu_router_free_models() } else { Vec::new() },
                 "configured": provider_configured(p),
                 "active": is_active(p.id),
                 "custom": false,
                 "suggestedModels": p.suggested_models,
-                "supportsDiscovery": !p.models_url.is_empty(),
+                "credentialLabel": if qoder_cli::is_provider(p.id) { Some("Personal access token") } else { None },
+                "transport": if qoder_cli::is_provider(p.id) { Some("official-cli") } else { None },
+                "cliAvailable": qoder_cli::cli_available(p.id),
+                "inputModalities": if qoder_cli::is_provider(p.id) { Some(vec!["text"]) } else { None },
+                "supportsDiscovery": !p.models_url.is_empty()
+                    || qoder_cli::is_provider(p.id)
+                    || oauth_login::builtin_catalog_provider_id(p.id).is_some(),
                 // Per-model enabled overrides (absent id ⇒ enabled). Lets the
                 // desktop render each model's on/off toggle.
                 "modelOverrides": model_overrides(&models_value, p.id),
                 // Every account the provider holds in the sealed vault (labels
                 // only — never a credential). Lets the picker list + switch.
-                "accounts": provider_accounts(&accounts::provider_scope(p.auth_key)),
+                "accounts": provider_account_views(p.id),
+                "accountRouting": crate::server::oauth_pool_policy::capabilities(p.id),
+                "connectionState": if p.id == CHATGPT_PLAN_PROVIDER_ID { Some(chatgpt_plan_connection_state()) } else { None },
             })
         })
         .collect();
@@ -3181,16 +4989,25 @@ pub fn catalog() -> Value {
         if provider_meta(&id).is_some() {
             continue;
         }
+        let entry = &models_value["providers"][&id];
+        let api = entry
+            .get("api")
+            .and_then(Value::as_str)
+            .unwrap_or("openai-completions");
+        let has_endpoint = entry
+            .get("baseUrl")
+            .and_then(Value::as_str)
+            .is_some_and(|url| !url.trim().is_empty());
         providers.push(json!({
             "id": id,
             "label": id,
-            "api": "openai-completions",
+            "api": api,
             "authKind": "api-key",
             "authEnv": "",
             "routing": provider_routing(&id),
             "routingLocked": false,
             "managed": false,
-            "configured": custom_provider_has_key(&id) || vault_has_any(&accounts::provider_scope(&id)),
+            "configured": has_endpoint,
             "active": is_active(&id),
             "custom": true,
             "suggestedModels": [],
@@ -3198,6 +5015,7 @@ pub fn catalog() -> Value {
             "supportsDiscovery": true,
             "modelOverrides": model_overrides(&models_value, &id),
             "accounts": provider_accounts(&accounts::provider_scope(&id)),
+            "accountRouting": crate::server::oauth_pool_policy::capabilities(&id),
         }));
     }
 
@@ -3244,6 +5062,11 @@ pub struct PiConfigInput {
     pub api: Option<String>,
 }
 
+/// Whether an incoming `apiKey` means "keep the stored key".
+fn is_kept_key_placeholder(key: &str) -> bool {
+    ryu_crypto::redact::is_placeholder(key) || secret_env::is_reference(key)
+}
+
 fn non_empty(value: &Option<String>) -> Option<String> {
     value
         .as_ref()
@@ -3254,7 +5077,8 @@ fn non_empty(value: &Option<String>) -> Option<String> {
 /// Apply a configuration change, writing the relevant Pi config files in the
 /// isolated directory. Returns the resulting view.
 pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
-    let provider = input.provider.trim().to_owned();
+    // An older desktop may still send a retired per-tier managed row.
+    let provider = canonical_provider_id(input.provider.trim()).to_owned();
     if provider.is_empty() {
         anyhow::bail!("provider is required");
     }
@@ -3271,8 +5095,45 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
     let gateway = is_managed_or_gateway(&provider);
     let managed = is_managed(&provider);
     let base_url = non_empty(&input.base_url);
-    let api_key = non_empty(&input.api_key);
+    // A masked placeholder or Ryu's own reference echoed back by a client keeps
+    // the stored key; only a real new key is sealed.
+    let api_key = non_empty(&input.api_key).filter(|key| !is_kept_key_placeholder(key));
     let custom_api = non_empty(&input.api);
+
+    if qoder_cli::is_provider(&provider) {
+        qoder_cli::validate_selector(&provider, base_url.as_deref(), custom_api.as_deref())?;
+        if api_key.is_some() || model.is_none() {
+            anyhow::bail!(
+                "Configure the Qoder PAT and discover its models before activating a model"
+            );
+        }
+        qoder_cli::capture_token(&provider)?;
+        qoder_cli::ensure_models(&provider, model.as_deref())?;
+    }
+
+    if NAMED_COMPATIBLE_PROVIDERS.contains(&provider.as_str()) && model.is_none() {
+        anyhow::bail!("Choose a model for '{provider}' before activating it");
+    }
+
+    if provider == KIRO_PROVIDER_ID
+        && (base_url.is_some() || api_key.is_some() || custom_api.is_some() || model.is_none())
+    {
+        anyhow::bail!("Choose a Kiro account model; its login and local relay route are fixed");
+    }
+
+    if provider == CHATGPT_PLAN_PROVIDER_ID {
+        if base_url.is_some()
+            || api_key.is_some()
+            || model.is_none()
+            || custom_api
+                .as_deref()
+                .is_some_and(|api| api != "openai-responses")
+        {
+            anyhow::bail!(
+                "Choose a ChatGPT account model; its API, credential, and direct route are fixed"
+            );
+        }
+    }
 
     // Validate non-gateway providers against the supported set, unless the user
     // is defining a custom provider (identified by a base URL).
@@ -3309,7 +5170,7 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
     settings.default_provider = Some(if gateway {
         "openai".to_owned()
     } else {
-        provider.clone()
+        pi_provider_id(&provider).to_owned()
     });
     settings.default_model = effective_model.clone();
     settings.default_thinking_level = thinking.clone();
@@ -3341,7 +5202,7 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
         // Pin Pi's built-in `openai` provider at the Gateway in models.json — the
         // `OPENAI_BASE_URL` env injection alone is ignored by Pi (see
         // `gateway_openai_patch`). Declare the chosen model so Pi sends it (not its
-        // built-in `gpt-5.4` default) over chat-completions.
+        // built-in `gpt-5.5` default) over the Responses API.
         //
         // `managed` picks the HOSTED fleet when this node has managed coordinates,
         // so the plan's credits are spendable from a self-hosted node; the
@@ -3353,6 +5214,15 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
         return Ok(current());
     }
 
+    if provider == CHATGPT_PLAN_PROVIDER_ID {
+        upsert_provider(
+            CHATGPT_PLAN_PROVIDER_ID,
+            chatgpt_plan_provider_patch(
+                effective_model.as_deref().expect("validated ChatGPT model"),
+            ),
+        )?;
+        return Ok(current());
+    }
     if provider == CHATGPT_PROVIDER_ID {
         // The ChatGPT provider is a native Core proxy: Pi sends the Responses
         // wire format to Core, and Core resolves/refreshed the selected ChatGPT
@@ -3365,6 +5235,10 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
         return Ok(current());
     }
 
+    if qoder_cli::is_provider(&provider) {
+        return Ok(current());
+    }
+
     // 2) Custom provider (local/proxy) → models.json entry.
     if let Some(url) = &base_url {
         let mut patch = Map::new();
@@ -3374,13 +5248,8 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
             Value::String(custom_api.unwrap_or_else(|| "openai-completions".to_owned())),
         );
         if let Some(key) = &api_key {
-            patch.insert("apiKey".to_owned(), Value::String(key.clone()));
-            vault_upsert_credential(
-                &accounts::provider_scope(&provider),
-                "API key",
-                accounts::KIND_API_KEY,
-                Value::String(key.clone()),
-            );
+            let reference = seal_custom_provider_key(accounts::global(), &provider, key)?;
+            patch.insert("apiKey".to_owned(), Value::String(reference));
         }
         if let Some(model_id) = &model {
             patch.insert("models".to_owned(), json!([{ "id": model_id }]));
@@ -3393,6 +5262,13 @@ pub fn apply(input: PiConfigInput) -> Result<PiConfigView> {
         }
     }
 
+    ensure_named_compatible_provider(&provider, model.as_deref())?;
+    if provider == KIRO_PROVIDER_ID {
+        ensure_kiro_models_json(model.as_deref())?;
+    }
+    if pi_provider_id(&provider) == CLAUDE_AUTH_KEY {
+        ensure_claude_models_json()?;
+    }
     Ok(current())
 }
 
@@ -3424,6 +5300,33 @@ pub fn configure_provider(input: ProviderConfigInput) -> Result<Value> {
     if provider.is_empty() {
         anyhow::bail!("provider is required");
     }
+    if qoder_cli::is_provider(&provider) {
+        qoder_cli::validate_selector(
+            &provider,
+            non_empty(&input.base_url).as_deref(),
+            non_empty(&input.api).as_deref(),
+        )?;
+        if non_empty(&input.routing).is_some_and(|mode| mode != ROUTING_DIRECT) {
+            anyhow::bail!("Qoder CLI profiles use direct Core routing");
+        }
+        if let Some(token) = non_empty(&input.api_key) {
+            qoder_cli::store_token(&provider, &token)?;
+        } else {
+            qoder_cli::capture_token(&provider)?;
+            qoder_cli::ensure_models(&provider, None)?;
+        }
+        set_provider_routing(&provider, ROUTING_DIRECT)?;
+        return Ok(catalog());
+    }
+    if matches!(
+        provider.as_str(),
+        CHATGPT_PLAN_PROVIDER_ID | KIRO_PROVIDER_ID
+    ) && (non_empty(&input.base_url).is_some()
+        || non_empty(&input.api_key).is_some()
+        || non_empty(&input.api).is_some())
+    {
+        anyhow::bail!("Use this provider's sign-in flow to configure its saved account");
+    }
     if is_managed_or_gateway(&provider) {
         // Managed/gateway providers carry no BYOK credential; only routing (locked
         // to gateway) — nothing to configure. Activation is the only action.
@@ -3431,7 +5334,9 @@ pub fn configure_provider(input: ProviderConfigInput) -> Result<Value> {
     }
 
     let base_url = non_empty(&input.base_url);
-    let api_key = non_empty(&input.api_key);
+    // A masked placeholder or Ryu's own reference echoed back by a client keeps
+    // the stored key; only a real new key is sealed.
+    let api_key = non_empty(&input.api_key).filter(|key| !is_kept_key_placeholder(key));
     let custom_api = non_empty(&input.api);
     let is_builtin = provider_meta(&provider).is_some();
 
@@ -3441,22 +5346,19 @@ pub fn configure_provider(input: ProviderConfigInput) -> Result<Value> {
         );
     }
 
-    if let Some(url) = &base_url {
+    if base_url.is_some() || (!is_builtin && api_key.is_some()) {
         // Custom OpenAI-compatible provider → models.json entry.
         let mut patch = Map::new();
-        patch.insert("baseUrl".to_owned(), Value::String(url.clone()));
-        patch.insert(
-            "api".to_owned(),
-            Value::String(custom_api.unwrap_or_else(|| "openai-completions".to_owned())),
-        );
-        if let Some(key) = &api_key {
-            patch.insert("apiKey".to_owned(), Value::String(key.clone()));
-            vault_upsert_credential(
-                &accounts::provider_scope(&provider),
-                "API key",
-                accounts::KIND_API_KEY,
-                Value::String(key.clone()),
+        if let Some(url) = &base_url {
+            patch.insert("baseUrl".to_owned(), Value::String(url.clone()));
+            patch.insert(
+                "api".to_owned(),
+                Value::String(custom_api.unwrap_or_else(|| "openai-completions".to_owned())),
             );
+        }
+        if let Some(key) = &api_key {
+            let reference = seal_custom_provider_key(accounts::global(), &provider, key)?;
+            patch.insert("apiKey".to_owned(), Value::String(reference));
         }
         upsert_provider(&provider, patch)?;
     } else if let (Some(meta), Some(key)) = (provider_meta(&provider), &api_key) {
@@ -3465,6 +5367,7 @@ pub fn configure_provider(input: ProviderConfigInput) -> Result<Value> {
         }
     }
 
+    ensure_named_compatible_provider(&provider, None)?;
     if let Some(mode) = non_empty(&input.routing) {
         set_provider_routing(&provider, &mode)?;
     }
@@ -3641,6 +5544,54 @@ fn models_url_from_base(base: &str) -> String {
 /// "fallback" }`. Runs server-side so keys never reach the browser.
 pub async fn discover_models(input: DiscoverInput) -> Value {
     let provider_id = non_empty(&input.provider);
+    if let Some(id) = provider_id
+        .as_deref()
+        .filter(|id| qoder_cli::is_provider(id))
+    {
+        if qoder_cli::validate_selector(
+            id,
+            non_empty(&input.base_url).as_deref(),
+            non_empty(&input.api).as_deref(),
+        )
+        .is_err()
+            || non_empty(&input.api_key).is_some()
+        {
+            return json!({"models":[],"source":"unavailable","error":"Use the selected sealed Qoder PAT and official CLI"});
+        }
+        return match crate::server::qoder_api::discover_models(id).await {
+            Ok(models) => match qoder_cli::persist_discovered_models(id, &models) {
+                Ok(()) => json!({"models":models,"source":"discovery"}),
+                Err(_) => {
+                    json!({"models":[],"source":"unavailable","error":"Could not save Qoder model discovery"})
+                }
+            },
+            Err(_) => {
+                json!({"models":[],"source":"unavailable","error":"Qoder CLI discovery is unavailable. Install the official regional CLI and configure a PAT."})
+            }
+        };
+    }
+    if provider_id.as_deref() == Some(KIRO_PROVIDER_ID) {
+        return match crate::server::kiro_api::discover_models().await {
+            Ok(models) => json!({"models": models, "source":"discovery"}),
+            Err(_) => {
+                json!({"models": [], "source":"unavailable", "error":"Kiro model discovery is unavailable. Check the selected login."})
+            }
+        };
+    }
+    if provider_id.as_deref() == Some(CHATGPT_PLAN_PROVIDER_ID) {
+        return match crate::server::chatgpt_plan_api::discover_models().await {
+            Ok(models) => json!({ "models": models, "source": "discovery" }),
+            Err(response) => {
+                let status = response.status().as_u16();
+                let body =
+                    axum::body::to_bytes(response.into_body(), MAX_MODEL_DISCOVERY_RESPONSE_BYTES)
+                        .await
+                        .ok();
+                let error = body.and_then(|body| serde_json::from_slice::<Value>(&body).ok());
+                json!({ "models": [], "source": "unavailable", "status": status, "error": error })
+            }
+        };
+    }
     let explicit_base = non_empty(&input.base_url);
     let explicit_key = non_empty(&input.api_key);
     let explicit_api = non_empty(&input.api);
@@ -3657,9 +5608,12 @@ pub async fn discover_models(input: DiscoverInput) -> Value {
 
     // Tier 1 — a live provider `GET /v1/models` (freshest, provider-authoritative).
     if let Some((url, auth)) = resolved {
-        let allow_trusted_local = provider_id
-            .as_deref()
-            .is_some_and(|id| id == GATEWAY_PROVIDER_ID || id == MANAGED_OPENROUTER_ID);
+        let allow_trusted_local = provider_id.as_deref().is_some_and(|id| {
+            id == GATEWAY_PROVIDER_ID
+                || id == MANAGED_OPENROUTER_ID
+                || (provider_meta(id).is_none()
+                    && custom_provider_ids().iter().any(|item| item == id))
+        });
         if let Ok(models) = fetch_models(&url, auth, allow_trusted_local).await {
             if !models.is_empty() {
                 return json!({ "models": models, "source": "discovery" });
@@ -3667,9 +5621,38 @@ pub async fn discover_models(input: DiscoverInput) -> Value {
         }
     }
 
-    // Tier 2 — models.dev, the upstream registry Pi's own table is generated from
-    // (covers providers without a live key or without an OpenAI `/v1/models`, e.g.
-    // Google and the subscription providers).
+    // A custom endpoint can go offline after its last successful discovery.
+    // Keep those persisted IDs selectable instead of returning an empty picker.
+    if let Some(id) = provider_id
+        .as_deref()
+        .filter(|id| provider_meta(id).is_none())
+    {
+        let saved: Vec<Value> = read_models()["providers"][id]["models"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|row| {
+                row.get("id")
+                    .and_then(Value::as_str)
+                    .map(|model_id| json!({ "id": model_id }))
+            })
+            .collect();
+        if !saved.is_empty() {
+            return json!({ "models": saved, "source": "saved" });
+        }
+    }
+
+    // Tier 2 — the installed Pi catalog for built-in API-key and OAuth providers. These are
+    // the model IDs that the managed agent can actually select, even offline.
+    if let Some(id) = &provider_id {
+        let builtins = oauth_login::builtin_models(id).await;
+        if !builtins.is_empty() {
+            return json!({ "models": builtins, "source": "pi" });
+        }
+    }
+
+    // Tier 3 — models.dev, the upstream registry Pi's own table is generated from
+    // (covers providers without a live key or without an OpenAI `/v1/models`).
     if let Some(id) = &provider_id {
         let md = models_dev::models_for(id).await;
         if !md.is_empty() {
@@ -3677,7 +5660,7 @@ pub async fn discover_models(input: DiscoverInput) -> Value {
         }
     }
 
-    // Tier 3 — the tiny static seed (offline, unknown provider). Free-text entry in
+    // Tier 4 — the tiny static seed (offline, unknown provider). Free-text entry in
     // the UI always works regardless.
     let seed: Vec<Value> = provider_id
         .as_deref()
@@ -3688,6 +5671,89 @@ pub async fn discover_models(input: DiscoverInput) -> Value {
         .map(|id| json!({ "id": id }))
         .collect();
     json!({ "models": seed, "source": "fallback" })
+}
+
+/// Populate a saved custom provider's Pi model table from its live `/models`
+/// endpoint. A failed or empty probe leaves the user's existing model entries
+/// untouched. Existing rows retain their metadata and enabled override; new
+/// rows are ID-only, which is Pi's valid static custom-model form.
+pub async fn refresh_custom_provider_models(id: &str) -> Result<usize> {
+    if provider_meta(id).is_some() || provider_owner(id).is_some() {
+        anyhow::bail!("model refresh is only available for user-defined providers");
+    }
+    let before = read_models();
+    let entry = before["providers"]
+        .get(id)
+        .and_then(Value::as_object)
+        .context("custom provider does not exist")?;
+    let base = entry
+        .get("baseUrl")
+        .and_then(Value::as_str)
+        .filter(|url| !url.trim().is_empty())
+        .context("custom provider has no base URL")?
+        .to_owned();
+    let api = entry.get("api").and_then(Value::as_str).map(str::to_owned);
+    let key = entry
+        .get("apiKey")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let discovered = fetch_models(
+        &models_url_from_base(&base),
+        discovery_auth_for(api.as_deref(), key.as_deref().and_then(secret_env::resolve)),
+        true,
+    )
+    .await?;
+    if discovered.is_empty() {
+        return Ok(0);
+    }
+
+    let mut models = read_models();
+    let current = models["providers"]
+        .get_mut(id)
+        .and_then(Value::as_object_mut)
+        .context("custom provider was removed during discovery")?;
+    if current.get("baseUrl").and_then(Value::as_str) != Some(base.as_str())
+        || current.get("api").and_then(Value::as_str) != api.as_deref()
+        || current.get("apiKey").and_then(Value::as_str) != key.as_deref()
+    {
+        anyhow::bail!("custom provider changed during discovery");
+    }
+    let rows = current
+        .entry("models".to_owned())
+        .or_insert_with(|| json!([]));
+    let rows = rows
+        .as_array_mut()
+        .context("custom provider models is not an array")?;
+    let added = append_discovered_model_ids(rows, &discovered);
+    if added > 0 {
+        write_models(&models)?;
+    }
+    Ok(added)
+}
+
+fn append_discovered_model_ids(rows: &mut Vec<Value>, discovered: &[Value]) -> usize {
+    const MAX_CUSTOM_MODELS: usize = 1_024;
+    let mut seen: std::collections::HashSet<String> = rows
+        .iter()
+        .filter_map(|row| row.get("id").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+    let mut added = 0;
+    for model in discovered {
+        if rows.len() >= MAX_CUSTOM_MODELS {
+            break;
+        }
+        let Some(id) = model.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if id.is_empty() || id.len() > 256 || id.chars().any(char::is_control) {
+            continue;
+        }
+        if seen.insert(id.to_owned()) {
+            rows.push(json!({ "id": id }));
+            added += 1;
+        }
+    }
+    added
 }
 
 /// A live connectivity probe against a provider's models endpoint.
@@ -3750,9 +5816,11 @@ pub async fn check_provider(input: CheckInput) -> CheckResult {
     };
 
     let started = std::time::Instant::now();
-    let allow_trusted_local = provider_id
-        .as_deref()
-        .is_some_and(|id| id == GATEWAY_PROVIDER_ID || id == MANAGED_OPENROUTER_ID);
+    let allow_trusted_local = provider_id.as_deref().is_some_and(|id| {
+        id == GATEWAY_PROVIDER_ID
+            || id == MANAGED_OPENROUTER_ID
+            || (provider_meta(id).is_none() && custom_provider_ids().iter().any(|item| item == id))
+    });
     match fetch_models(&url, auth, allow_trusted_local).await {
         Ok(models) => CheckResult {
             ok: true,
@@ -3836,7 +5904,7 @@ fn resolve_provider_discovery(
         entry
             .get("apiKey")
             .and_then(Value::as_str)
-            .map(str::to_owned)
+            .and_then(secret_env::resolve)
             .filter(|s| !s.is_empty())
     });
     let api = entry.get("api").and_then(Value::as_str);
@@ -3855,11 +5923,23 @@ async fn fetch_models(
     let host = parsed
         .host_str()
         .ok_or_else(|| anyhow::anyhow!("discovery URL has no host"))?;
-    let trusted_local = allow_trusted_local && is_trusted_gateway_endpoint(&parsed);
+    let trusted_local = allow_trusted_local
+        && (is_trusted_gateway_endpoint(&parsed) || is_literal_loopback_endpoint(&parsed));
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .redirect(reqwest::redirect::Policy::none());
-    if !trusted_local {
+    if trusted_local {
+        // A local model server must not be sent through an ambient HTTP proxy.
+        builder = builder.no_proxy();
+        if parsed.host_str() == Some("localhost") {
+            let port = parsed.port_or_known_default().unwrap_or(80);
+            let addresses = [
+                std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+                std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port)),
+            ];
+            builder = builder.resolve_to_addrs("localhost", &addresses);
+        }
+    } else {
         let (_, screened) = crate::server::screen_egress_url_pinned(url, true, None)
             .await
             .context("screen discovery endpoint")?;
@@ -3904,6 +5984,23 @@ async fn fetch_models(
         raw.extend_from_slice(&chunk);
     }
     let body: Value = serde_json::from_slice(&raw).context("parse discovery response")?;
+    Ok(parse_discovered_models(&body))
+}
+
+/// Whether a discovered row can serve as a Pi chat model. The Gateway labels
+/// its media, embedding, and rerank rows with a top-level `modality` (`image`,
+/// `tts`, `stt`, `video`, `embedding`, `rerank`, …) and its chat rows with
+/// `chat`; an unlabelled row from any other OpenAI-compatible `/models`
+/// endpoint is kept. Mirrors the optimizer's chat-only candidate filter.
+fn is_chat_discovery_row(row: &Value) -> bool {
+    row.get("modality")
+        .and_then(Value::as_str)
+        .is_none_or(|modality| modality == "chat")
+}
+
+/// Parse an OpenAI/Anthropic/OpenRouter-shaped `/models` body into Pi's
+/// `[{id, name?}]` rows, keeping only rows that can be picked as a chat model.
+fn parse_discovered_models(body: &Value) -> Vec<Value> {
     // OpenAI + Anthropic both use `{ data: [ { id, ... } ] }`; OpenRouter too.
     let mut items = body
         .get("data")
@@ -3919,8 +6016,9 @@ async fn fetch_models(
                 .map(|(id, entry)| json!({ "id": id, "name": entry.get("name") })),
         );
     }
-    let models: Vec<Value> = items
+    items
         .into_iter()
+        .filter(is_chat_discovery_row)
         .filter_map(|m| {
             let id = m
                 .get("slug")
@@ -3944,8 +6042,7 @@ async fn fetch_models(
             }
             Some(Value::Object(out))
         })
-        .collect();
-    Ok(models)
+        .collect()
 }
 
 /// The built-in Gateway provider is the one intentional loopback discovery
@@ -3960,1783 +6057,20 @@ fn is_trusted_gateway_endpoint(url: &reqwest::Url) -> bool {
         && url.port_or_known_default() == gateway.port_or_known_default()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Point the config dir at a temp location for the duration of a test.
-    ///
-    /// Takes the **registry** env lock as well as the pi-config one. Several of
-    /// these tests reach `default_gateway_model()` → `ProviderRegistry::load()`,
-    /// which reads the process-global `RYU_LOCAL_CHAT_MODEL_*` /
-    /// `RYU_REGISTRY_PATH` vars that `registry::tests` mutate transiently under
-    /// *their* lock. Without this, `gateway_patch_upgrades_bare_default_model_metadata`
-    /// — which calls `default_gateway_model()` twice, once to build the entry and
-    /// once inside `ensure_gateway_models_json` — can read two different ids across
-    /// a concurrent `RYU_LOCAL_CHAT_MODEL_ID` override and fail its `"Gemma 4 E2B IT
-    /// Q4_K_M"` assertion. A cross-module flake, not a bug in either test.
-    ///
-    /// Lock order is pi-config → registry, and it is the only order taken anywhere:
-    /// `registry::tests` never acquire the pi-config lock, and `sidecar::adapters`'
-    /// two pi-config users acquire nothing else. Keep it that way — the inverse
-    /// order in any new test deadlocks the whole suite, which is far worse than the
-    /// flake this closes.
-    pub(crate) fn with_temp_dir<F: FnOnce()>(f: F) {
-        let _guard = lock_pi_config_test_env();
-        let _registry_guard = crate::registry::lock_registry_env();
-        let dir = std::env::temp_dir().join(format!("ryu-pi-config-test-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        std::env::set_var("RYU_PI_AGENT_DIR", &dir);
-        f();
-        std::env::remove_var("RYU_PI_AGENT_DIR");
-        let _ = fs::remove_dir_all(&dir);
+/// A saved custom provider may point at a service on this same machine. Only a
+/// literal loopback address or the exact `localhost` name gets this exception;
+/// arbitrary private-network names still pass through the pinned egress screen.
+fn is_literal_loopback_endpoint(url: &reqwest::Url) -> bool {
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
     }
-
-    #[test]
-    fn gateway_is_default_routing() {
-        with_temp_dir(|| {
-            assert!(is_gateway_routing());
-            let view = current();
-            assert_eq!(view.provider, GATEWAY_PROVIDER_ID);
-            assert_eq!(view.routing, "gateway");
-        });
-    }
-
-    #[test]
-    fn pi_mcp_extension_is_shipped_and_registered_idempotently() {
-        with_temp_dir(|| {
-            // First call: writes the extension source and registers its absolute
-            // path in settings.json "extensions".
-            ensure_pi_mcp_extension().expect("first ensure");
-            let ext_path = pi_mcp_extension_path();
-            assert!(
-                ext_path.exists(),
-                "extension file is shipped to the managed dir"
-            );
-            let shipped = fs::read_to_string(&ext_path).unwrap();
-            assert_eq!(
-                shipped, PI_MCP_EXTENSION_SRC,
-                "shipped source matches the embed"
-            );
-
-            let abs = ext_path.to_string_lossy().into_owned();
-            let settings = read_settings();
-            let exts = settings
-                .extra
-                .get("extensions")
-                .and_then(Value::as_array)
-                .cloned();
-            let exts = exts.expect("extensions array present");
-            assert!(
-                exts.iter()
-                    .filter(|v| v.as_str() == Some(abs.as_str()))
-                    .count()
-                    == 1,
-                "registered exactly once"
-            );
-
-            // Second call: idempotent — no duplicate path, source unchanged.
-            ensure_pi_mcp_extension().expect("second ensure");
-            let settings2 = read_settings();
-            let exts2 = settings2
-                .extra
-                .get("extensions")
-                .and_then(Value::as_array)
-                .cloned()
-                .expect("extensions array present");
-            assert_eq!(
-                exts2
-                    .iter()
-                    .filter(|v| v.as_str() == Some(abs.as_str()))
-                    .count(),
-                1,
-                "second ensure does not duplicate the registration"
-            );
-        });
-    }
-
-    #[test]
-    fn pi_mcp_extension_preserves_unrelated_extensions() {
-        with_temp_dir(|| {
-            // A user (or another Ryu write) already listed an extension; ours must
-            // be appended, not clobber theirs.
-            let mut settings = read_settings();
-            settings
-                .extra
-                .insert("extensions".to_owned(), json!(["/tmp/other-ext.ts"]));
-            write_settings(&settings).unwrap();
-
-            ensure_pi_mcp_extension().expect("ensure");
-            let exts = read_settings()
-                .extra
-                .get("extensions")
-                .and_then(Value::as_array)
-                .cloned()
-                .expect("extensions array");
-            let abs = pi_mcp_extension_path().to_string_lossy().into_owned();
-            assert!(exts.iter().any(|v| v.as_str() == Some("/tmp/other-ext.ts")));
-            assert!(exts.iter().any(|v| v.as_str() == Some(abs.as_str())));
-        });
-    }
-
-    #[test]
-    fn pi_lsp_extension_is_shipped_and_registered_idempotently() {
-        with_temp_dir(|| {
-            ensure_pi_lsp_extension().expect("first ensure");
-            let ext_path = pi_lsp_extension_path();
-            let shipped = fs::read_to_string(&ext_path).expect("extension file is shipped");
-            assert_eq!(
-                shipped, PI_LSP_EXTENSION_SRC,
-                "shipped source matches the embed"
-            );
-
-            // A second ensure must neither rewrite the source nor double-register.
-            let mtime = fs::metadata(&ext_path).unwrap().modified().unwrap();
-            ensure_pi_lsp_extension().expect("second ensure");
-            assert_eq!(
-                fs::metadata(&ext_path).unwrap().modified().unwrap(),
-                mtime,
-                "identical source is not rewritten"
-            );
-
-            let abs = ext_path.to_string_lossy().into_owned();
-            let exts = read_settings()
-                .extra
-                .get("extensions")
-                .and_then(Value::as_array)
-                .cloned()
-                .expect("extensions array present");
-            assert_eq!(
-                exts.iter()
-                    .filter(|v| v.as_str() == Some(abs.as_str()))
-                    .count(),
-                1,
-                "registered exactly once"
-            );
-        });
-    }
-
-    #[test]
-    fn pi_plan_extension_is_shipped_and_registered_idempotently() {
-        with_temp_dir(|| {
-            ensure_pi_plan_extension().expect("first ensure");
-            let ext_path = pi_plan_extension_path();
-            let shipped = fs::read_to_string(&ext_path).expect("extension file is shipped");
-            assert_eq!(
-                shipped, PI_PLAN_EXTENSION_SRC,
-                "shipped source matches the embed"
-            );
-
-            // A second ensure must neither rewrite the source nor double-register.
-            let mtime = fs::metadata(&ext_path).unwrap().modified().unwrap();
-            ensure_pi_plan_extension().expect("second ensure");
-            assert_eq!(
-                fs::metadata(&ext_path).unwrap().modified().unwrap(),
-                mtime,
-                "identical source is not rewritten"
-            );
-
-            let abs = ext_path.to_string_lossy().into_owned();
-            let exts = read_settings()
-                .extra
-                .get("extensions")
-                .and_then(Value::as_array)
-                .cloned()
-                .expect("extensions array present");
-            assert_eq!(
-                exts.iter()
-                    .filter(|v| v.as_str() == Some(abs.as_str()))
-                    .count(),
-                1,
-                "registered exactly once"
-            );
-        });
-    }
-
-    #[test]
-    fn pi_plan_extension_preserves_unrelated_extensions() {
-        with_temp_dir(|| {
-            let mut settings = read_settings();
-            settings
-                .extra
-                .insert("extensions".to_owned(), json!(["/tmp/other-ext.ts"]));
-            write_settings(&settings).unwrap();
-
-            ensure_pi_plan_extension().expect("ensure");
-            let exts = read_settings()
-                .extra
-                .get("extensions")
-                .and_then(Value::as_array)
-                .cloned()
-                .expect("extensions array");
-            let abs = pi_plan_extension_path().to_string_lossy().into_owned();
-            assert!(exts.iter().any(|v| v.as_str() == Some("/tmp/other-ext.ts")));
-            assert!(exts.iter().any(|v| v.as_str() == Some(abs.as_str())));
-        });
-    }
-
-    /// The sentinel is a CONTRACT with `ryu-plan.ts`, not a free-form string: the
-    /// extension matches it with `/^\/plan(-off)?(?![\w-])[ \t]*(.*)$/` against the
-    /// first line of the prompt (or of its final `\n\n` block), then strips it. If
-    /// this drifts, plan mode does not fail loudly — the token simply reaches the
-    /// model as literal text and the mode never engages. So these assertions pin
-    /// the exact bytes the extension's regexes accept.
-    #[test]
-    fn plan_mode_sentinel_matches_the_extension_grammar() {
-        assert_eq!(plan_mode_sentinel(true), "/plan");
-        assert_eq!(plan_mode_sentinel(false), "/plan off");
-
-        // The extension's own two regexes, transcribed. `regex` is not a Core
-        // dependency, so this is a hand-rolled equivalent of what they accept —
-        // the point is that the token is a bare `/plan`, optionally followed by
-        // the word `off`, with nothing else attached to it.
-        for on in [true, false] {
-            let s = plan_mode_sentinel(on);
-            assert!(s.starts_with("/plan"), "{s}: sentinel token is `/plan`");
-            let rest = &s["/plan".len()..];
-            assert!(
-                rest.is_empty() || rest == " off",
-                "{s}: only the `off` word may follow, separated by a space"
-            );
-            // `(?![\w-])` — the character after the token must never extend it,
-            // or `/planning` and `/plan-offsite` would match too.
-            assert!(
-                !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-'),
-                "{s}: the token must not run into a word character"
-            );
-            // Single line: callers place this as its own first line, and a
-            // newline inside it would push the sentinel off that line.
-            assert!(!s.contains('\n'), "{s}: sentinel is a single line");
-            assert_eq!(s.trim(), s, "{s}: no leading/trailing whitespace");
-        }
-
-        // ON and OFF must be distinguishable — `/plan off` starting with `/plan`
-        // is exactly why the extension checks the `off` word before concluding
-        // "enter". A helper that returned the same string for both would silently
-        // make the pill a one-way switch.
-        assert_ne!(plan_mode_sentinel(true), plan_mode_sentinel(false));
-    }
-
-    #[test]
-    fn managed_defaults_ship_every_compiled_in_extension() {
-        with_temp_dir(|| {
-            ensure_managed_defaults().expect("managed defaults");
-            assert!(pi_mcp_extension_path().exists());
-            assert!(
-                pi_lsp_extension_path().exists(),
-                "the LSP binding rides the same spawn-time invariant pass as the MCP bridge"
-            );
-            assert!(pi_plan_extension_path().exists());
-        });
-    }
-
-    /// The UPGRADE path: a Core that ships a newer extension body must overwrite
-    /// the copy an OLDER Core already wrote to the user's managed Pi dir.
-    ///
-    /// **Why this is a test and not a comment.** The extensions are `include_str!`d
-    /// into the Core binary, so they travel with a Core upgrade for free — but only
-    /// as far as the binary. Reaching the user's `~/.ryu/pi-agent/extensions/`
-    /// depends entirely on [`ship_pi_extension`] doing a CONTENT compare
-    /// (`existing != src`) rather than an existence check. Those two are one word
-    /// apart and behave identically on a fresh install, so the difference is
-    /// invisible to every other test here — `managed_defaults_ship_every_ryu_extension`
-    /// and the per-extension idempotency tests all start from an empty dir.
-    ///
-    /// If someone "optimises" that to write-if-absent, every EXISTING user is frozen
-    /// on whatever extension body their first install wrote, forever, while the
-    /// release notes say the fix shipped. That is the silent-degradation class this
-    /// file's guards exist to prevent, so it gets pinned from the upgrade side too.
-    ///
-    /// Registration is asserted as well: the settings entry must not be duplicated
-    /// by the rewrite, since the path is unchanged.
-    #[test]
-    fn a_stale_extension_body_is_replaced_on_upgrade() {
-        with_temp_dir(|| {
-            // An older Core's install: every extension present, but with a body
-            // that predates the current embed.
-            ensure_managed_defaults().expect("first install");
-            let stale = "// shipped by an older Ryu\n";
-            let paths = [
-                pi_mcp_extension_path(),
-                pi_lsp_extension_path(),
-                pi_plan_extension_path(),
-            ];
-            for path in &paths {
-                fs::write(path, stale).expect("age the installed extension");
-            }
-
-            // The upgraded Core's spawn-time invariant pass.
-            ensure_managed_defaults().expect("upgrade");
-
-            for (path, expected) in paths.iter().zip([
-                PI_MCP_EXTENSION_SRC,
-                PI_LSP_EXTENSION_SRC,
-                PI_PLAN_EXTENSION_SRC,
-            ]) {
-                let on_disk = fs::read_to_string(path).expect("extension still present");
-                assert_ne!(
-                    on_disk,
-                    stale,
-                    "{} was left at the older body — an upgraded Core never reached the user",
-                    path.display()
-                );
-                assert_eq!(
-                    on_disk,
-                    expected,
-                    "{} does not match the embed after upgrade",
-                    path.display()
-                );
-            }
-
-            let exts = read_settings()
-                .extra
-                .get("extensions")
-                .and_then(Value::as_array)
-                .cloned()
-                .expect("extensions array present");
-            for path in &paths {
-                let abs = path.to_string_lossy().into_owned();
-                assert_eq!(
-                    exts.iter()
-                        .filter(|v| v.as_str() == Some(abs.as_str()))
-                        .count(),
-                    1,
-                    "{abs} registered exactly once after the upgrade rewrite"
-                );
-            }
-        });
-    }
-
-    /// The bijection guard: every `.ts` asset under `apps/core/assets/pi-extensions/`
-    /// must actually reach the managed Pi dir when Core runs its spawn-time
-    /// invariant pass.
-    ///
-    /// **Why this exists.** Nothing forces a new pi-extension asset to be wired up.
-    /// Dropping a `.ts` into that folder without an `include_str!` +
-    /// `ensure_pi_*_extension()` + a line in [`ensure_managed_defaults`] compiles,
-    /// ships nothing, and fails **silently** at runtime — the feature looks landed
-    /// and is simply absent. That is exactly how `ryu-plan.ts` could have gone in.
-    ///
-    /// This guard now covers only the **compiled-in** road. The plugin road
-    /// (`contributes.pi_extensions`) has its own pair in
-    /// [`crate::plugin_manifest`]: `builtin_pi_extension_table_matches_package_manifests`
-    /// (declared ⇄ embedded) and `packaged_pi_extension_files_are_all_declared`
-    /// (nothing on disk is undeclared), plus
-    /// [`super::app_extensions_round_trip_writes_then_removes`] for the bytes
-    /// actually reaching the managed dir. The three assets left here are the ones
-    /// that must never become plugins; see the chain comment in
-    /// [`ensure_managed_defaults`].
-    ///
-    /// Three properties, and all three are load-bearing:
-    /// 1. it drives [`ensure_managed_defaults`], not the individual `ensure_pi_*`
-    ///    fns — so forgetting the chain line fails here even though every
-    ///    per-extension test above still passes;
-    /// 2. it compares BYTES, not existence — so an `include_str!` pointing at the
-    ///    wrong asset (a copy/paste of the trio above) fails here;
-    /// 3. it asserts the exact asset count, so a globbing or extension-filter
-    ///    mistake that skips a file cannot pass by vacuous truth.
-    #[test]
-    fn every_pi_extension_asset_is_shipped() {
-        with_temp_dir(|| {
-            ensure_managed_defaults().expect("managed defaults");
-
-            let assets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("assets")
-                .join("pi-extensions");
-            let shipped_dir = config_dir().join("extensions");
-
-            let mut assets: Vec<PathBuf> = fs::read_dir(&assets_dir)
-                .expect("read the pi-extensions asset dir")
-                .map(|entry| entry.expect("asset dir entry").path())
-                .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("ts"))
-                .collect();
-            assets.sort();
-
-            // Every extension shipped by `ensure_managed_defaults` today. Change
-            // this deliberately when adding one — or when moving one out to a
-            // plugin package, which is what took it from 5 to 3.
-            const EXPECTED_ASSETS: usize = 3;
-            assert_eq!(
-                assets.len(),
-                EXPECTED_ASSETS,
-                "a pi-extension asset was added or removed without updating the \
-                 shipping chain in ensure_managed_defaults: {assets:?}"
-            );
-
-            for asset in &assets {
-                let name = asset
-                    .file_name()
-                    .expect("asset file name")
-                    .to_string_lossy()
-                    .into_owned();
-                let shipped = shipped_dir.join(&name);
-                let shipped_src = fs::read_to_string(&shipped).unwrap_or_else(|err| {
-                    panic!(
-                        "{name} is a pi-extension asset but ensure_managed_defaults never \
-                         shipped it ({err}). Two valid answers: if it must be compiled in \
-                         (see the chain comment in ensure_managed_defaults), add a \
-                         PI_*_EXTENSION_SRC include_str!, a pi_*_extension_path(), an \
-                         ensure_pi_*_extension() and a chain line. Otherwise it belongs in a \
-                         plugin package as a contributes.pi_extensions row — move the file to \
-                         plugins-store/{{plugins,lsp,external_plugins}}/<pkg>/pi-extensions/ and drop EXPECTED_ASSETS by one."
-                    )
-                });
-                let asset_src = fs::read_to_string(asset).expect("read asset source");
-                assert_eq!(
-                    shipped_src, asset_src,
-                    "{name} was shipped, but not from its own asset — an include_str! \
-                     points at the wrong file"
-                );
-            }
-        });
-    }
-
-    /// One resolved plugin extension, as [`app_extensions::resolve_pi_extensions`]
-    /// would produce it.
-    fn resolved_ext(plugin: &str, id: &str, source: &str) -> app_extensions::PiExtensionResolution {
-        app_extensions::PiExtensionResolution {
-            extensions: vec![app_extensions::ResolvedPiExtension {
-                plugin_id: plugin.to_owned(),
-                extension_id: id.to_owned(),
-                file_name: format!(
-                    "ext-{}-{id}.ts",
-                    crate::plugin_manifest::plugin_dir_name(plugin)
-                ),
-                source: source.to_owned(),
-            }],
-            skipped: vec![],
-        }
-    }
-
-    /// The whole point of the seam: an enabled plugin's extension is WRITTEN with
-    /// its own bytes and registered, and disabling that plugin (an empty
-    /// resolution) takes both the file and its `settings.json` entry away again.
-    ///
-    /// The byte compare is not decoration. A wrong file name or a prefix mismatch
-    /// in the reconciler would still satisfy the table⇄manifest bijection tests
-    /// while the extension silently never loads — which is the exact failure
-    /// `every_pi_extension_asset_is_shipped` exists to prevent on the other road.
-    #[test]
-    fn app_extensions_round_trip_writes_then_removes() {
-        with_temp_dir(|| {
-            let source = "// background bash\nexport default {};\n";
-            sync_app_pi_extensions(&resolved_ext("@ryu/pi-shell", "shell", source))
-                .expect("materialize");
-
-            let path = pi_extensions_dir().join("ext-@ryu+pi-shell-shell.ts");
-            assert_eq!(
-                fs::read_to_string(&path).expect("extension written"),
-                source,
-                "the materialized file must carry the resolved source verbatim"
-            );
-            let abs = path.to_string_lossy().into_owned();
-            let registered = |settings: &PiSettings| {
-                settings
-                    .extra
-                    .get("extensions")
-                    .and_then(Value::as_array)
-                    .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(abs.as_str())))
-            };
-            assert!(registered(&read_settings()), "path registered in settings");
-
-            // Disable: the reconcile is driven by the resolution, so an empty one is
-            // exactly what an uninstall or a disable produces.
-            sync_app_pi_extensions(&app_extensions::PiExtensionResolution::default())
-                .expect("reconcile empty");
-            assert!(
-                !path.exists(),
-                "disabling the plugin must delete the file — Pi auto-discovers this \
-                 directory, so an orphan keeps loading forever"
-            );
-            assert!(
-                !registered(&read_settings()),
-                "the settings.json registration must be pruned with the file"
-            );
-        });
-    }
-
-    /// The ownership boundary: the reconciler owns `ext-*.ts` and NOTHING else.
-    ///
-    /// This is the invariant whose failure bricks the flagship agent — an empty
-    /// resolution (every extension-contributing plugin disabled) must not be able
-    /// to delete `ryu-mcp.ts`, which is the managed Pi's only road to Ryu's tools.
-    #[test]
-    fn the_reconciler_never_touches_files_it_does_not_own() {
-        with_temp_dir(|| {
-            ensure_managed_defaults().expect("managed defaults");
-            let dir = pi_extensions_dir();
-            let hand_written = dir.join("my-own.ts");
-            fs::write(&hand_written, "// dropped in by hand\n").expect("write");
-
-            // A user entry in the array that is not even in this folder.
-            let mut settings = read_settings();
-            let elsewhere = "/somewhere/else/mine.ts";
-            settings
-                .extra
-                .entry("extensions".to_owned())
-                .or_insert_with(|| json!([]))
-                .as_array_mut()
-                .expect("array")
-                .push(Value::String(elsewhere.to_owned()));
-            write_settings(&settings).expect("write settings");
-
-            sync_app_pi_extensions(&app_extensions::PiExtensionResolution::default())
-                .expect("reconcile empty");
-
-            assert!(
-                dir.join("ryu-mcp.ts").exists(),
-                "compiled-in extension kept"
-            );
-            assert!(
-                dir.join("ryu-lsp.ts").exists(),
-                "compiled-in extension kept"
-            );
-            assert!(
-                dir.join("ryu-plan.ts").exists(),
-                "compiled-in extension kept"
-            );
-            assert!(
-                hand_written.exists(),
-                "a user's own file is not ours to delete"
-            );
-
-            let arr = read_settings()
-                .extra
-                .get("extensions")
-                .and_then(Value::as_array)
-                .cloned()
-                .expect("extensions array");
-            assert!(
-                arr.iter().any(|v| v.as_str() == Some(elsewhere)),
-                "an unrelated registration must survive the prune"
-            );
-            assert_eq!(
-                arr.iter()
-                    .filter(|v| v
-                        .as_str()
-                        .is_some_and(|s| s.contains("ryu-mcp.ts") || s.contains("ryu-plan.ts")))
-                    .count(),
-                2,
-                "the compiled-in registrations must survive the prune"
-            );
-        });
-    }
-
-    /// Re-materializing an unchanged set must not rewrite the file: this runs on
-    /// every managed-Pi spawn, so an unconditional write would churn the disk on
-    /// every new chat. Same content-compare contract as [`ship_pi_extension`].
-    #[test]
-    fn app_extensions_are_written_only_when_they_change() {
-        with_temp_dir(|| {
-            let resolution = resolved_ext("@ryu/pi-shell", "shell", "// v1\n");
-            sync_app_pi_extensions(&resolution).expect("first");
-            let path = pi_extensions_dir().join("ext-@ryu+pi-shell-shell.ts");
-            let first = fs::metadata(&path)
-                .expect("stat")
-                .modified()
-                .expect("mtime");
-
-            sync_app_pi_extensions(&resolution).expect("second");
-            assert_eq!(
-                fs::metadata(&path)
-                    .expect("stat")
-                    .modified()
-                    .expect("mtime"),
-                first,
-                "an unchanged resolution must not rewrite the file"
-            );
-
-            // A changed source DOES land, so idempotency never becomes staleness.
-            sync_app_pi_extensions(&resolved_ext("@ryu/pi-shell", "shell", "// v2\n"))
-                .expect("upgrade");
-            assert_eq!(fs::read_to_string(&path).expect("read"), "// v2\n");
-        });
-    }
-
-    /// One resolved stdio server, built through serde so the Claude Code defaults
-    /// (`restartOnCrash` / `diagnostics` = true) come from the contract itself.
-    fn resolved_go_server() -> crate::lsp::LspResolution {
-        let config = serde_json::from_value(json!({
-            "command": "gopls",
-            "extensionToLanguage": { ".go": "go" },
-        }))
-        .expect("valid declaration");
-        crate::lsp::LspResolution {
-            servers: vec![crate::lsp::ResolvedLspServer {
-                plugin_id: "com.example.go".to_owned(),
-                server_name: "go".to_owned(),
-                config,
-            }],
-            skipped: vec![],
-        }
-    }
-
-    #[test]
-    fn lsp_servers_file_lands_where_the_extension_reads_it() {
-        with_temp_dir(|| {
-            write_lsp_servers_file(&resolved_go_server()).expect("write");
-
-            // The path is a contract with assets/pi-extensions/ryu-lsp.ts, which
-            // reads `<PI_CODING_AGENT_DIR>/extensions/ryu-lsp.json`.
-            let path = config_dir().join("extensions").join("ryu-lsp.json");
-            let doc: Value =
-                serde_json::from_str(&fs::read_to_string(&path).expect("file written"))
-                    .expect("valid JSON");
-            let entry = &doc["servers"]["com.example.go/go"];
-            assert_eq!(entry["command"], "gopls");
-            assert_eq!(entry["extensionToLanguage"][".go"], "go");
-            assert_eq!(entry["restartOnCrash"], true);
-        });
-    }
-
-    #[test]
-    fn lsp_servers_file_is_written_once_and_removed_when_nothing_is_declared() {
-        with_temp_dir(|| {
-            let path = config_dir().join("extensions").join("ryu-lsp.json");
-            write_lsp_servers_file(&resolved_go_server()).expect("write");
-            let mtime = fs::metadata(&path).unwrap().modified().unwrap();
-
-            write_lsp_servers_file(&resolved_go_server()).expect("second write");
-            assert_eq!(
-                fs::metadata(&path).unwrap().modified().unwrap(),
-                mtime,
-                "an unchanged table is not rewritten on every Pi spawn"
-            );
-
-            // Disabling the last contributing plugin must actually stop the
-            // servers, so the stale table is removed rather than left behind.
-            write_lsp_servers_file(&crate::lsp::LspResolution::default()).expect("empty write");
-            assert!(!path.exists(), "an empty resolution deletes the file");
-
-            // ...and removing an already-absent file is not an error.
-            write_lsp_servers_file(&crate::lsp::LspResolution::default()).expect("idempotent");
-        });
-    }
-
-    #[test]
-    fn explicit_cache_control_format_matches_claude_and_qwen_only() {
-        // Explicit Anthropic-style cache_control families.
-        assert_eq!(
-            explicit_cache_control_format("claude-sonnet-4"),
-            Some("anthropic")
-        );
-        assert_eq!(
-            explicit_cache_control_format("anthropic/claude-3.5-sonnet"),
-            Some("anthropic")
-        );
-        assert_eq!(
-            explicit_cache_control_format("qwen/qwen3-coder-plus"),
-            Some("anthropic")
-        );
-        // Auto-caching or non-caching families: no marker.
-        assert_eq!(explicit_cache_control_format("gpt-4o"), None);
-        assert_eq!(explicit_cache_control_format("openai/gpt-4o"), None);
-        assert_eq!(explicit_cache_control_format("google/gemini-2.5-pro"), None);
-        assert_eq!(
-            explicit_cache_control_format("deepseek/deepseek-chat"),
-            None
-        );
-        assert_eq!(explicit_cache_control_format("x-ai/grok-4"), None);
-    }
-
-    #[test]
-    fn gateway_model_entry_stamps_cache_control_for_claude() {
-        // A cache-capable non-local id gets the compat flag so Pi emits
-        // cache_control breakpoints toward the gateway/OpenRouter.
-        let entry = gateway_model_entry("anthropic/claude-sonnet-4", None);
-        assert_eq!(
-            entry["compat"]["cacheControlFormat"],
-            json!("anthropic"),
-            "claude entry should opt into anthropic cache_control markers"
-        );
-        assert_eq!(entry["id"], json!("anthropic/claude-sonnet-4"));
-
-        // An OpenAI id (auto-caches, Pi sends prompt_cache_key) stays bare.
-        let openai = gateway_model_entry("gpt-4o", None);
-        assert!(openai.get("compat").is_none());
-    }
-
-    #[test]
-    fn bundled_local_model_preserves_vision_capability_on_existing_settings() {
-        let local_id = crate::registry::DEFAULT_LOCAL_CHAT_MODEL_ID;
-        let existing = json!({ "id": local_id, "input": ["text"] });
-        let entry = gateway_model_entry(local_id, Some(&existing));
-
-        assert_eq!(entry["input"], json!(["text", "image"]));
-    }
-
-    #[test]
-    fn apply_cache_compat_preserves_caller_declared_compat() {
-        // Do not clobber an existing compat block or a caller's own format.
-        let mut entry = json!({
-            "id": "anthropic/claude-sonnet-4",
-            "compat": { "cacheControlFormat": "anthropic", "supportsStrictMode": true }
-        });
-        apply_cache_compat("anthropic/claude-sonnet-4", &mut entry);
-        assert_eq!(entry["compat"]["supportsStrictMode"], json!(true));
-        assert_eq!(entry["compat"]["cacheControlFormat"], json!("anthropic"));
-    }
-
-    #[test]
-    /// Managed reaches the HOSTED fleet while the synthetic gateway provider
-    /// stays LOCAL — both on the same node — and managed falls back to local when
-    /// no fleet coordinates are configured.
-    ///
-    /// Regression: both used to resolve to the local gateway, so a self-hosted
-    /// user who picked "Ryu (managed · included with your plan)" was routed into
-    /// their own keyless gateway and could never spend the plan they paid for.
-    ///
-    /// One test, not three: these mutate PROCESS-GLOBAL env and `cargo test` runs
-    /// test fns in parallel, so separate cases race each other's vars.
-    #[test]
-    fn managed_routes_at_the_fleet_while_byok_stays_local() {
-        struct EnvGuard(&'static str, Option<String>);
-        impl EnvGuard {
-            fn set(k: &'static str, v: &str) -> Self {
-                let prev = std::env::var(k).ok();
-                std::env::set_var(k, v);
-                Self(k, prev)
-            }
-            fn clear(k: &'static str) -> Self {
-                let prev = std::env::var(k).ok();
-                std::env::remove_var(k);
-                Self(k, prev)
-            }
-        }
-        impl Drop for EnvGuard {
-            fn drop(&mut self) {
-                match &self.1 {
-                    Some(v) => std::env::set_var(self.0, v),
-                    None => std::env::remove_var(self.0),
-                }
-            }
-        }
-
-        with_temp_dir(|| {
-            {
-                let _u = EnvGuard::set("RYU_MANAGED_GATEWAY_URL", "https://gw.example.test");
-                let _t = EnvGuard::set("RYU_MANAGED_GATEWAY_TOKEN", "rgw_unit_test");
-
-                let managed = gateway_openai_patch_for(Some("openrouter/auto"), true);
-                assert_eq!(
-                    managed.get("baseUrl").and_then(Value::as_str),
-                    Some("https://gw.example.test/v1")
-                );
-                assert_eq!(
-                    managed.get("apiKey").and_then(Value::as_str),
-                    Some("rgw_unit_test")
-                );
-
-                // BYOK keeps the local gateway even while managed is configured.
-                let local = gateway_openai_patch_for(Some("gpt-4o"), false);
-                assert_eq!(
-                    local.get("apiKey").and_then(Value::as_str),
-                    Some("${OPENAI_API_KEY}"),
-                    "shared Pi configuration must preserve the process-scoped bearer"
-                );
-                let base = local.get("baseUrl").and_then(Value::as_str).unwrap();
-                assert!(
-                    base.contains("127.0.0.1"),
-                    "BYOK must stay on the local gateway, got {base}"
-                );
-            }
-            {
-                // No coordinates ⇒ managed falls back to local (opt-in must not
-                // regress a node that never opted in).
-                let _u = EnvGuard::clear("RYU_MANAGED_GATEWAY_URL");
-                let _t = EnvGuard::clear("RYU_MANAGED_GATEWAY_TOKEN");
-                crate::sidecar::gateway::set_managed_fleet_pref(None, None);
-                let patch = gateway_openai_patch_for(Some("openrouter/auto"), true);
-                let base = patch.get("baseUrl").and_then(Value::as_str).unwrap();
-                assert!(
-                    base.contains("127.0.0.1"),
-                    "expected local fallback, got {base}"
-                );
-            }
-        });
-    }
-
-    fn apply_gateway_writes_openai_provider_and_marker() {
-        with_temp_dir(|| {
-            let view = apply(PiConfigInput {
-                provider: GATEWAY_PROVIDER_ID.to_owned(),
-                model: Some("gpt-4o".to_owned()),
-                thinking_level: Some("medium".to_owned()),
-                api_key: None,
-                base_url: None,
-                api: None,
-            })
-            .unwrap();
-            assert_eq!(view.provider, "gateway");
-            assert_eq!(view.routing, "gateway");
-            assert_eq!(view.model.as_deref(), Some("gpt-4o"));
-            // On disk, gateway mode stores the openai provider + routing marker.
-            let settings = read_settings();
-            assert_eq!(settings.default_provider.as_deref(), Some("openai"));
-            assert!(is_gateway_routing());
-        });
-    }
-
-    #[test]
-    fn apply_direct_provider_disables_gateway_routing() {
-        with_temp_dir(|| {
-            let view = apply(PiConfigInput {
-                provider: "anthropic".to_owned(),
-                model: Some("claude-sonnet-4-20250514".to_owned()),
-                thinking_level: None,
-                api_key: Some("sk-ant-test".to_owned()),
-                base_url: None,
-                api: None,
-            })
-            .unwrap();
-            assert_eq!(view.provider, "anthropic");
-            assert_eq!(view.routing, "direct");
-            assert!(!is_gateway_routing());
-            // The key is written to auth.json under the provider's auth key.
-            assert!(auth_has_key("anthropic"));
-        });
-    }
-
-    #[test]
-    fn apply_custom_provider_writes_models_json() {
-        with_temp_dir(|| {
-            apply(PiConfigInput {
-                provider: "ollama".to_owned(),
-                model: Some("llama3.1:8b".to_owned()),
-                thinking_level: None,
-                api_key: Some("ollama".to_owned()),
-                base_url: Some("http://localhost:11434/v1".to_owned()),
-                api: None,
-            })
-            .unwrap();
-            let models = read_models();
-            let entry = &models["providers"]["ollama"];
-            assert_eq!(entry["baseUrl"], "http://localhost:11434/v1");
-            assert_eq!(entry["api"], "openai-completions");
-            assert_eq!(entry["models"][0]["id"], "llama3.1:8b");
-            assert!(!is_gateway_routing());
-        });
-    }
-
-    #[test]
-    fn apply_chatgpt_provider_writes_native_core_proxy_config() {
-        with_temp_dir(|| {
-            let view = apply(PiConfigInput {
-                provider: CHATGPT_PROVIDER_ID.to_owned(),
-                model: Some("gpt-5.4".to_owned()),
-                thinking_level: None,
-                api_key: None,
-                base_url: None,
-                api: None,
-            })
-            .expect("activate native ChatGPT provider");
-
-            assert_eq!(view.provider, CHATGPT_PROVIDER_ID);
-            let entry = &read_models()["providers"][CHATGPT_PROVIDER_ID];
-            assert_eq!(entry["api"], "openai-codex-responses");
-            assert_eq!(entry["apiKey"], CHATGPT_PROXY_API_KEY);
-            assert!(entry["headers"]["x-ryu-node-token"].is_string());
-            assert_eq!(entry["models"][0]["id"], "gpt-5.5");
-            assert!(entry["models"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|model| { model.get("id").and_then(Value::as_str) == Some("gpt-5.4") }));
-            assert!(
-                entry["baseUrl"]
-                    .as_str()
-                    .is_some_and(|url| url.ends_with("/api/pi-config/chatgpt")),
-                "native provider must point at Core's credential-resolving proxy"
-            );
-            assert_eq!(
-                read_settings().default_provider.as_deref(),
-                Some(CHATGPT_PROVIDER_ID)
-            );
-        });
-    }
-
-    /// A sidecar-declared provider round-trips: registered at the sidecar's loopback
-    /// port with ownership stamped, then removed again on deregistration.
-    #[test]
-    fn sidecar_provider_registers_and_deregisters() {
-        with_temp_dir(|| {
-            let spec = ProviderRegistrationSpec {
-                id: "chatgpt-bridge".to_owned(),
-                label: Some("ChatGPT bridge".to_owned()),
-                api: None,
-                base_path: None,
-                models: vec!["gpt-5".to_owned()],
-            };
-            register_sidecar_provider("com.example.bridge", &spec, 7997, Some("ext-tok")).unwrap();
-
-            let entry = read_models()["providers"]["chatgpt-bridge"].clone();
-            assert_eq!(entry["baseUrl"], "http://127.0.0.1:7997/v1");
-            assert_eq!(entry["api"], "openai-completions");
-            assert_eq!(entry[PROVIDER_OWNER_FIELD], "com.example.bridge");
-            assert_eq!(entry["models"][0]["id"], "gpt-5");
-            // The ext-token MUST be written as the apiKey: Pi calls baseUrl directly,
-            // bypassing the ext-proxy, and the extension-host bootstrap 401s any request
-            // without this exact bearer. Dropping it silently breaks every inference call.
-            assert_eq!(entry["apiKey"], "ext-tok");
-
-            assert!(deregister_sidecar_provider("com.example.bridge", "chatgpt-bridge").unwrap());
-            assert!(read_models()["providers"].get("chatgpt-bridge").is_none());
-        });
-    }
-
-    /// The boot purge: an unclean exit leaves a sidecar-owned entry holding a loopback
-    /// `baseUrl` and the plugin's minted ext token, and Pi dials that `baseUrl`
-    /// DIRECTLY — bypassing the ext-proxy and its registration gate — so if any other
-    /// process now holds the port it is handed the token and every request body. The
-    /// sweep must take every owned entry and leave hand-configured ones alone: the
-    /// ownership stamp is the whole authority for touching an entry.
-    #[test]
-    fn stale_owned_provider_entries_are_purged_at_boot() {
-        with_temp_dir(|| {
-            let spec = ProviderRegistrationSpec {
-                id: "chatgpt-bridge".to_owned(),
-                label: None,
-                api: None,
-                base_path: None,
-                models: vec![],
-            };
-            register_sidecar_provider("com.example.bridge", &spec, 7997, Some("ext-tok")).unwrap();
-            // A provider the USER configured by hand — no owner stamp, so not ours.
-            let mut mine = Map::new();
-            mine.insert(
-                "baseUrl".to_owned(),
-                Value::String("http://127.0.0.1:11434/v1".to_owned()),
-            );
-            upsert_provider("my-ollama", mine).unwrap();
-
-            assert_eq!(purge_sidecar_providers().unwrap(), 1);
-
-            let providers = read_models()["providers"].clone();
-            assert!(
-                providers.get("chatgpt-bridge").is_none(),
-                "the stale sidecar entry (and its ext token) must be gone"
-            );
-            assert_eq!(
-                providers["my-ollama"]["baseUrl"], "http://127.0.0.1:11434/v1",
-                "an unowned, hand-configured provider must survive untouched"
-            );
-
-            // Idempotent: nothing owned left to purge.
-            assert_eq!(purge_sidecar_providers().unwrap(), 0);
-        });
-    }
-
-    // A `purged_sidecar_provider_is_absent_then_restored_on_reregister` test used to
-    // sit here, claiming to cover "defect 3, the state half". It did not: every call it
-    // made — `register_sidecar_provider`, `purge_sidecar_providers`, `read_models` — is
-    // pre-existing behavior covered by the two tests above, so reverting the defect-3
-    // fix (the `provides_provider` ⇒ eager-start coercion) in its entirety left it
-    // passing. A test that cannot fail for the defect it names is worse than no test:
-    // it reads as coverage. The coercion is a `sidecar::manifest_sidecar` concern and is
-    // covered there — `provider_declaring_sidecar_starts_eagerly_even_when_lazy` for the
-    // predicate, `apply_sidecars_gates_the_register_only_branch_on_starts_eagerly` for
-    // the call site that makes the predicate matter.
-
-    /// The load-bearing guard: a plugin may NOT claim a built-in provider id. Allowing
-    /// it would let a plugin repoint `openai-codex`'s baseUrl at its own server and
-    /// collect the user's live subscription token on the next request.
-    #[test]
-    fn sidecar_provider_cannot_override_builtin() {
-        with_temp_dir(|| {
-            let spec = ProviderRegistrationSpec {
-                id: "openai-codex".to_owned(),
-                label: None,
-                api: None,
-                base_path: None,
-                models: vec![],
-            };
-            let err = register_sidecar_provider("com.evil.plugin", &spec, 9999, None).unwrap_err();
-            assert!(
-                err.to_string().contains("built-in"),
-                "expected built-in collision refusal, got: {err}"
-            );
-            assert!(read_models()["providers"].get("openai-codex").is_none());
-        });
-    }
-
-    /// A plugin may not hijack, or delete, a provider another owner created.
-    #[test]
-    fn sidecar_provider_respects_ownership() {
-        with_temp_dir(|| {
-            let spec = ProviderRegistrationSpec {
-                id: "shared-id".to_owned(),
-                label: None,
-                api: None,
-                base_path: None,
-                models: vec![],
-            };
-            register_sidecar_provider("com.first.plugin", &spec, 7001, None).unwrap();
-
-            let err =
-                register_sidecar_provider("com.second.plugin", &spec, 7002, None).unwrap_err();
-            assert!(
-                err.to_string().contains("already owned by"),
-                "expected ownership refusal, got: {err}"
-            );
-            // The original entry is untouched.
-            assert_eq!(
-                read_models()["providers"]["shared-id"]["baseUrl"],
-                "http://127.0.0.1:7001/v1"
-            );
-            // And a non-owner cannot remove it.
-            assert!(!deregister_sidecar_provider("com.second.plugin", "shared-id").unwrap());
-            assert!(read_models()["providers"].get("shared-id").is_some());
-        });
-    }
-
-    /// An id that is not a safe token is refused before it can reach the models file.
-    #[test]
-    fn sidecar_provider_rejects_unsafe_id() {
-        with_temp_dir(|| {
-            for bad in ["", "../escape", "Has-Caps", "with space", "sla/sh"] {
-                let spec = ProviderRegistrationSpec {
-                    id: bad.to_owned(),
-                    label: None,
-                    api: None,
-                    base_path: None,
-                    models: vec![],
-                };
-                let err =
-                    register_sidecar_provider("com.example.bridge", &spec, 7003, None).unwrap_err();
-                assert!(
-                    err.to_string().contains("not a safe token"),
-                    "id {bad:?} should be refused, got: {err}"
-                );
-            }
-        });
-    }
-
-    /// A hand-configured provider (no owner stamp) is never adopted or clobbered.
-    #[test]
-    fn sidecar_provider_refuses_unowned_existing() {
-        with_temp_dir(|| {
-            configure_provider(ProviderConfigInput {
-                provider: "handmade".to_owned(),
-                api_key: None,
-                base_url: Some("http://localhost:1234/v1".to_owned()),
-                api: None,
-                routing: None,
-            })
-            .unwrap();
-
-            let spec = ProviderRegistrationSpec {
-                id: "handmade".to_owned(),
-                label: None,
-                api: None,
-                base_path: None,
-                models: vec![],
-            };
-            let err =
-                register_sidecar_provider("com.example.bridge", &spec, 7004, None).unwrap_err();
-            assert!(
-                err.to_string().contains("unowned provider"),
-                "expected unowned refusal, got: {err}"
-            );
-            assert_eq!(
-                read_models()["providers"]["handmade"]["baseUrl"],
-                "http://localhost:1234/v1"
-            );
-        });
-    }
-
-    #[test]
-    fn unknown_provider_without_base_url_is_rejected() {
-        with_temp_dir(|| {
-            let err = apply(PiConfigInput {
-                provider: "made-up".to_owned(),
-                model: None,
-                thinking_level: None,
-                api_key: None,
-                base_url: None,
-                api: None,
-            })
-            .unwrap_err();
-            assert!(err.to_string().contains("unknown provider"));
-        });
-    }
-
-    #[test]
-    fn managed_defaults_fill_model_provider_and_disable_pi_skills() {
-        with_temp_dir(|| {
-            ensure_managed_defaults().unwrap();
-            let settings = read_settings();
-            // Fresh install (gateway-routed by default): a non-empty zero-key
-            // default model + the gateway-redirected provider are written…
-            let model = settings.default_model.clone().unwrap();
-            assert!(!model.trim().is_empty());
-            assert_eq!(settings.default_provider.as_deref(), Some("openai"));
-            // …Pi's own skill auto-discovery is disabled…
-            assert_eq!(
-                settings.extra.get("skills"),
-                Some(&json!([PI_SKILLS_DISABLED]))
-            );
-            // …and the model is declared on the gateway-pinned openai provider.
-            let models = read_models();
-            let declared = models["providers"]["openai"]["models"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let default = declared
-                .iter()
-                .find(|m| m["id"] == json!(model.clone()))
-                .expect("default model declared");
-            assert_eq!(default["api"], json!("openai-completions"));
-            assert_eq!(default["contextWindow"], json!(128_000));
-            assert_eq!(default["maxTokens"], json!(8_192));
-            assert_eq!(
-                default["cost"],
-                json!({
-                    "input": 0,
-                    "output": 0,
-                    "cacheRead": 0,
-                    "cacheWrite": 0
-                })
-            );
-        });
-    }
-
-    #[test]
-    fn managed_defaults_do_not_clobber_user_choices() {
-        with_temp_dir(|| {
-            let _ = ensure_dir();
-            fs::write(
-                settings_path(),
-                r#"{"defaultProvider":"openai","defaultModel":"my-model","skills":["+/keep/me"]}"#,
-            )
-            .unwrap();
-            ensure_managed_defaults().unwrap();
-            let settings = read_settings();
-            assert_eq!(settings.default_model.as_deref(), Some("my-model"));
-            assert_eq!(settings.extra.get("skills"), Some(&json!(["+/keep/me"])));
-        });
-    }
-
-    /// The managed default that stops a brand-new chat opening with the whole
-    /// machine's skills list already sitting in it as an assistant message.
-    ///
-    /// pi-acp's `getQuietStartup` defaults to **false**, so without this key it
-    /// builds a "## Skills" listing of all three skill roots (including the
-    /// hard-coded `~/.agents/skills`) on every `session/new` and emits it as an
-    /// `agent_message_chunk` — which Core then persists as an assistant row.
-    /// The `skills: ["!**"]` write next to it does NOT cover this: the bridge's
-    /// banner builder never consults the skills setting at all.
-    #[test]
-    fn managed_defaults_quiet_the_pi_startup_banner() {
-        with_temp_dir(|| {
-            ensure_managed_defaults().unwrap();
-            assert_eq!(
-                read_settings().extra.get(PI_QUIET_STARTUP),
-                Some(&json!(true))
-            );
-        });
-    }
-
-    /// Same "an explicit user choice stands" guard the `skills` write has — and
-    /// it has to hold for the legacy key too, because `getQuietStartup` reads
-    /// `quietStartup` first but falls back to `quietStart`. Writing our default
-    /// alongside a user's `quietStart: false` would take precedence over it and
-    /// silently reverse their choice, which is the one failure mode a "only when
-    /// unset" guard exists to prevent.
-    #[test]
-    fn managed_defaults_respect_an_explicit_startup_banner_choice() {
-        for key in [PI_QUIET_STARTUP, PI_QUIET_STARTUP_LEGACY] {
-            with_temp_dir(|| {
-                let _ = ensure_dir();
-                fs::write(settings_path(), format!(r#"{{"{key}":false}}"#)).unwrap();
-                ensure_managed_defaults().unwrap();
-                let settings = read_settings();
-                assert_eq!(
-                    settings.extra.get(key),
-                    Some(&json!(false)),
-                    "{key}: the user's choice must survive"
-                );
-                assert!(
-                    !(key == PI_QUIET_STARTUP_LEGACY
-                        && settings.extra.contains_key(PI_QUIET_STARTUP)),
-                    "the legacy key is what pi falls back to; writing the current \
-                     one next to it would override the user's `false`"
-                );
-            });
-        }
-    }
-
-    #[test]
-    fn persist_turn_model_gateway_openai_pick_is_persisted_and_declared() {
-        with_temp_dir(|| {
-            persist_turn_model("openai/gpt-4o").unwrap();
-            let settings = read_settings();
-            assert_eq!(settings.default_provider.as_deref(), Some("openai"));
-            assert_eq!(settings.default_model.as_deref(), Some("gpt-4o"));
-            let models = read_models();
-            let declared = models["providers"]["openai"]["models"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            assert!(declared.iter().any(|m| m["id"] == json!("gpt-4o")));
-        });
-    }
-
-    #[test]
-    fn persist_turn_model_gateway_skips_non_openai_providers() {
-        with_temp_dir(|| {
-            persist_turn_model("anthropic/claude-sonnet-4").unwrap();
-            let settings = read_settings();
-            // Gateway mode must not be flipped onto a direct provider by a pick.
-            assert!(settings.default_model.is_none());
-            assert!(settings.default_provider.is_none());
-        });
-    }
-
-    #[test]
-    fn persist_turn_model_direct_mode_mirrors_pick() {
-        with_temp_dir(|| {
-            apply(PiConfigInput {
-                provider: "anthropic".to_owned(),
-                model: Some("claude-3-5-haiku-20241022".to_owned()),
-                thinking_level: None,
-                api_key: Some("sk-ant-test".to_owned()),
-                base_url: None,
-                api: None,
-            })
-            .unwrap();
-            persist_turn_model("anthropic/claude-sonnet-4-20250514").unwrap();
-            let settings = read_settings();
-            assert_eq!(settings.default_provider.as_deref(), Some("anthropic"));
-            assert_eq!(
-                settings.default_model.as_deref(),
-                Some("claude-sonnet-4-20250514")
-            );
-            // Direct mode is preserved.
-            assert!(!is_gateway_routing());
-        });
-    }
-
-    #[test]
-    fn gateway_patch_merges_declared_models_instead_of_replacing() {
-        with_temp_dir(|| {
-            persist_turn_model("openai/model-a").unwrap();
-            persist_turn_model("openai/model-b").unwrap();
-            let models = read_models();
-            let declared: Vec<String> = models["providers"]["openai"]["models"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|m| m["id"].as_str().map(str::to_owned))
-                .collect();
-            // Both picks stay declared so the user can switch back.
-            assert!(declared.iter().any(|id| id == "model-a"));
-            assert!(declared.iter().any(|id| id == "model-b"));
-        });
-    }
-
-    #[test]
-    fn gateway_patch_upgrades_bare_default_model_metadata() {
-        with_temp_dir(|| {
-            let default_model = default_gateway_model();
-            upsert_provider(
-                "openai",
-                json!({
-                    "api": "openai-completions",
-                    "models": [
-                        { "id": default_model },
-                        { "id": "gpt-4o" }
-                    ]
-                })
-                .as_object()
-                .cloned()
-                .unwrap(),
-            )
-            .unwrap();
-            ensure_gateway_models_json().unwrap();
-            let models = read_models();
-            let declared = models["providers"]["openai"]["models"].as_array().unwrap();
-            let default = declared
-                .iter()
-                .find(|m| m["id"] == json!(default_model))
-                .expect("default model declared");
-            assert_eq!(default["name"], json!("Gemma 4 E2B IT Q4_K_M"));
-            assert_eq!(default["api"], json!("openai-completions"));
-            assert_eq!(default["contextWindow"], json!(128_000));
-            assert_eq!(default["maxTokens"], json!(8_192));
-            assert!(declared.iter().any(|m| m == &json!({ "id": "gpt-4o" })));
-        });
-    }
-
-    /// A pool row activates like the managed row, but defaults to a model that
-    /// routes to ITS OWN pool.
-    ///
-    /// The default model is the whole point. Core cannot pin a provider — every
-    /// Gateway-routed row writes the same `defaultProvider: "openai"` pin — so the
-    /// MODEL ID is the only thing that decides which supply the turn bills. A pool
-    /// row that fell back to the global `openrouter/auto` would present itself as
-    /// "Ryu Fast" and then spend the retail pool.
-    #[test]
-    fn a_pool_row_defaults_to_a_model_that_routes_to_its_own_pool() {
-        with_temp_dir(|| {
-            let view = apply(PiConfigInput {
-                provider: MANAGED_CLOUDFLARE_ID.to_owned(),
-                model: None,
-                thinking_level: None,
-                api_key: None,
-                base_url: None,
-                api: None,
-            })
-            .unwrap();
-            assert_eq!(view.provider, MANAGED_CLOUDFLARE_ID);
-            // Always Gateway-routed: a pool row's egress must stay metered, or the
-            // spend never reaches the pool it was supposed to draw from.
-            assert_eq!(view.routing, "gateway");
-            assert_eq!(
-                view.model.as_deref(),
-                Some("@cf/meta/llama-3.1-8b-instruct")
-            );
-            assert_ne!(view.model.as_deref(), Some(MANAGED_DEFAULT_MODEL));
-            let settings = read_settings();
-            assert_eq!(settings.default_provider.as_deref(), Some("openai"));
-        });
-    }
-
-    /// Every pool row reaches the desktop as `managed`, routing-locked, and
-    /// carrying its pool id.
-    ///
-    /// `managed` is the line that turns the composer on: it binds the row to the
-    /// pool catalog, which is where the row's label, its balance badge and its
-    /// upsell escape come from. Before this, `managed` was an equality against one
-    /// id, so a second managed provider was invisible to all three.
-    #[test]
-    fn pool_rows_reach_the_catalog_as_managed_and_routing_locked() {
-        with_temp_dir(|| {
-            let catalog = catalog();
-            let providers = catalog["providers"].as_array().unwrap();
-            for (id, pool) in [
-                (MANAGED_CLOUDFLARE_ID, "cloudflare"),
-                (MANAGED_BEDROCK_ID, "bedrock"),
-                (MANAGED_OPENROUTER_ID, "openrouter"),
-            ] {
-                let row = providers
-                    .iter()
-                    .find(|p| p["id"] == json!(id))
-                    .unwrap_or_else(|| panic!("{id} is in the catalog"));
-                assert_eq!(row["managed"], json!(true), "{id} is managed");
-                assert_eq!(row["routingLocked"], json!(true), "{id} is locked");
-                assert_eq!(row["creditPool"], json!(pool), "{id} carries its pool");
-                // The LABEL is duplicated: Settings renders Core's string raw
-                // while the composer reads the pool catalog's. Nothing enforces
-                // the match at compile time (they are different languages), so it
-                // is pinned here against the labels in
-                // `packages/auth/src/lib/credit-pools.ts`. A drift shows the same
-                // supply under two names on two screens.
-                let expected_label = match pool {
-                    "cloudflare" => Some("Ryu Fast"),
-                    "bedrock" => Some("Ryu Frontier"),
-                    // The retail row keeps its own longer label: its pool is
-                    // `visible: false` in the catalog, so it has no user-facing
-                    // pool name to borrow.
-                    _ => None,
-                };
-                if let Some(expected) = expected_label {
-                    assert_eq!(
-                        row["label"],
-                        json!(expected),
-                        "{id}'s label must match CREDIT_POOLS byte-for-byte"
-                    );
-                }
-                assert_eq!(row["configured"], json!(true), "{id} needs no key");
-            }
-            // A BYOK row is none of those things.
-            let byok = providers.iter().find(|p| p["id"] == json!("anthropic"));
-            if let Some(byok) = byok {
-                assert_eq!(byok["managed"], json!(false));
-                assert_eq!(byok["creditPool"], json!(""));
-            }
-        });
-    }
-
-    /// A pool row keeps its curated model list instead of the Gateway's merged one.
-    ///
-    /// Gateway discovery returns every configured provider's models in one flat
-    /// list with no provider or pool on any entry. Offering that under "Ryu Fast"
-    /// would put ids in front of the user that route somewhere else entirely and
-    /// silently bill a pool they hold nothing in.
-    #[test]
-    fn a_pool_row_does_not_take_the_gateways_merged_model_list() {
-        with_temp_dir(|| {
-            assert!(resolve_provider_discovery(MANAGED_CLOUDFLARE_ID, None).is_none());
-            assert!(resolve_provider_discovery(MANAGED_BEDROCK_ID, None).is_none());
-            // The retail managed row still does — it has no curated list.
-            assert!(resolve_provider_discovery(MANAGED_OPENROUTER_ID, None).is_some());
-        });
-    }
-
-    /// A pool row's suggested models must reach that pool's supply, and must
-    /// never carry ANOTHER pool's prefix.
-    ///
-    /// This is the money guard. Core cannot pin a provider — every Gateway-routed
-    /// row writes the same `defaultProvider: "openai"` pin — so the model id's
-    /// PREFIX is the only thing deciding which supply a turn bills, and a wrong id
-    /// bills a pool the user did not choose with no error anywhere.
-    ///
-    /// Two rules, because the pools are not symmetric:
-    ///
-    ///  - A SEGREGATED pool (cloudflare, bedrock) must be reached by prefix. Its
-    ///    ids are useless otherwise: with the prefix absent they fall through to
-    ///    the fleet's `default_provider`, which is the retail pool.
-    ///  - The RESIDUAL pool (openrouter) is that fallback, so its ids legitimately
-    ///    carry no prefix — `anthropic/claude-sonnet-4` is an OpenRouter id that
-    ///    routes by falling through, and demanding a prefix of it would be
-    ///    demanding a router row that must not exist (an `anthropic/` builtin
-    ///    would re-home the id onto a provider that cannot even serve its dialect).
-    ///    What it must NOT do is carry a segregated pool's prefix, which would
-    ///    silently spend a donated allowance on retail traffic.
-    ///
-    /// The prefixes are restated here as literals ON PURPOSE. Importing them would
-    /// make this test agree with a router change automatically, and agreeing
-    /// automatically is exactly what must not happen when the disagreement is
-    /// somebody's money.
-    #[test]
-    fn every_pool_row_model_reaches_its_own_supply() {
-        // Mirrors the segregated rows of `builtin_prefixes()` in
-        // crates/gateway/router/src/lib.rs. There is deliberately NO row for
-        // `vertex` or `openai-credits` — see the PROVIDERS table.
-        let segregated: &[(&str, &[&str])] = &[
-            ("cloudflare", &["@cf/"]),
-            ("bedrock", &["anthropic.", "amazon.", "meta.", "mistral."]),
-        ];
-        /// The pool a request lands in when no builtin prefix claims the id.
-        const RESIDUAL_POOL: &str = "openrouter";
-
-        for meta in PROVIDERS.iter().filter(|m| !m.credit_pool.is_empty()) {
-            assert!(
-                !meta.suggested_models.is_empty(),
-                "`{}` has no suggested models, and a pool row gets no discovery — \
-                 the picker would show an empty list",
-                meta.id
-            );
-            let own = segregated
-                .iter()
-                .find(|(pool, _)| *pool == meta.credit_pool);
-            assert!(
-                own.is_some() || meta.credit_pool == RESIDUAL_POOL,
-                "provider `{}` claims pool `{}`, which the router has no builtin \
-                 prefix for and which is not the residual pool — its traffic would \
-                 fall through to `default_provider` and debit the wrong supply",
-                meta.id,
-                meta.credit_pool
-            );
-            for model in meta.suggested_models {
-                if let Some((_, prefixes)) = own {
-                    assert!(
-                        prefixes.iter().any(|p| model.starts_with(p)),
-                        "`{}` suggests `{model}`, which carries no prefix routing to \
-                         `{}` — that turn would fall through to the residual pool",
-                        meta.id,
-                        meta.credit_pool
-                    );
-                } else {
-                    // The residual row: no prefix required, but it must not steal
-                    // a segregated pool's.
-                    for (pool, prefixes) in segregated {
-                        assert!(
-                            !prefixes.iter().any(|p| model.starts_with(p)),
-                            "`{}` (residual) suggests `{model}`, which carries a \
-                             `{pool}` prefix — retail traffic would silently spend \
-                             the donated {pool} allowance",
-                            meta.id
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn managed_openrouter_activation_pins_gateway_and_defaults_auto() {
-        with_temp_dir(|| {
-            let view = apply(PiConfigInput {
-                provider: MANAGED_OPENROUTER_ID.to_owned(),
-                model: None,
-                thinking_level: None,
-                api_key: None,
-                base_url: None,
-                api: None,
-            })
-            .unwrap();
-            // Logical active provider is reported as managed (not raw "openai").
-            assert_eq!(view.provider, MANAGED_OPENROUTER_ID);
-            assert_eq!(view.routing, "gateway");
-            // Managed users default to the Auto Router.
-            assert_eq!(view.model.as_deref(), Some(MANAGED_DEFAULT_MODEL));
-            assert!(is_gateway_routing());
-            // On disk it rides the openai gateway pin so egress is governed.
-            let settings = read_settings();
-            assert_eq!(settings.default_provider.as_deref(), Some("openai"));
-            let models = read_models();
-            assert!(models["providers"]["openai"]["models"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|m| m["id"] == json!(MANAGED_DEFAULT_MODEL)));
-            assert!(PROVIDERS
-                .iter()
-                .find(|provider| provider.id == MANAGED_OPENROUTER_ID)
-                .is_some_and(|provider| {
-                    provider
-                        .suggested_models
-                        .contains(&OPENROUTER_PARETO_CODE_MODEL_ID)
-                }));
-        });
-    }
-
-    #[test]
-    fn configure_provider_stores_key_without_activating() {
-        with_temp_dir(|| {
-            // Fresh install is gateway-routed; configuring a BYOK provider must not
-            // steal the active selection.
-            let catalog = configure_provider(ProviderConfigInput {
-                provider: "anthropic".to_owned(),
-                api_key: Some("sk-ant-test".to_owned()),
-                base_url: None,
-                api: None,
-                routing: None,
-            })
-            .unwrap();
-            // Still gateway-active.
-            assert!(is_gateway_routing());
-            assert_eq!(current().provider, GATEWAY_PROVIDER_ID);
-            // Key is stored + surfaced as configured, but not active.
-            assert!(auth_has_key("anthropic"));
-            let anthropic = catalog["providers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|p| p["id"] == "anthropic")
-                .unwrap();
-            assert_eq!(anthropic["configured"], json!(true));
-            assert_eq!(anthropic["active"], json!(false));
-        });
-    }
-
-    #[test]
-    fn per_provider_routing_toggle_persists() {
-        with_temp_dir(|| {
-            configure_provider(ProviderConfigInput {
-                provider: "openai".to_owned(),
-                api_key: Some("sk-test".to_owned()),
-                base_url: None,
-                api: None,
-                routing: Some("gateway".to_owned()),
-            })
-            .unwrap();
-            assert_eq!(provider_routing("openai"), "gateway");
-            configure_provider(ProviderConfigInput {
-                provider: "openai".to_owned(),
-                api_key: None,
-                base_url: None,
-                api: None,
-                routing: Some("direct".to_owned()),
-            })
-            .unwrap();
-            assert_eq!(provider_routing("openai"), "direct");
-        });
-    }
-
-    #[test]
-    fn managed_and_gateway_routing_cannot_be_flipped() {
-        with_temp_dir(|| {
-            // set_provider_routing is a no-op for locked providers.
-            set_provider_routing(MANAGED_OPENROUTER_ID, "direct").unwrap();
-            assert_eq!(provider_routing(MANAGED_OPENROUTER_ID), "gateway");
-            assert_eq!(provider_routing(GATEWAY_PROVIDER_ID), "gateway");
-        });
-    }
-
-    #[test]
-    fn remove_provider_clears_key_and_reverts_active() {
-        with_temp_dir(|| {
-            apply(PiConfigInput {
-                provider: "anthropic".to_owned(),
-                model: Some("claude-sonnet-4-20250514".to_owned()),
-                thinking_level: None,
-                api_key: Some("sk-ant-test".to_owned()),
-                base_url: None,
-                api: None,
-            })
-            .unwrap();
-            assert_eq!(current().provider, "anthropic");
-            assert!(auth_has_key("anthropic"));
-
-            remove_provider("anthropic").unwrap();
-            // Key gone, active reverts to the managed/gateway default.
-            assert!(!auth_has_key("anthropic"));
-            assert_eq!(current().provider, GATEWAY_PROVIDER_ID);
-            assert!(is_gateway_routing());
-        });
-    }
-
-    #[test]
-    fn managed_provider_cannot_be_configured_or_removed() {
-        with_temp_dir(|| {
-            assert!(configure_provider(ProviderConfigInput {
-                provider: MANAGED_OPENROUTER_ID.to_owned(),
-                api_key: Some("nope".to_owned()),
-                base_url: None,
-                api: None,
-                routing: None,
-            })
-            .is_err());
-            assert!(remove_provider(GATEWAY_PROVIDER_ID).is_err());
-        });
-    }
-
-    #[test]
-    fn subscription_account_credential_rejects_non_subscription_providers() {
-        with_temp_dir(|| {
-            let error = subscription_account_credential("openai", "acct-1")
-                .expect_err("API-key providers must not enter the usage reader");
-            assert!(error.to_string().contains("is not a subscription provider"));
-        });
-    }
-
-    #[test]
-    fn discover_models_falls_back_when_provider_unknown_and_registry_offline() {
-        // An unknown provider with the models.dev registry pointed at an
-        // unreachable host: tier-1 (no url) and tier-2 (not in registry) both yield
-        // nothing, so we get the tier-3 fallback with an empty model list. Free-text
-        // entry covers this case in the UI. Deterministic + offline.
-        with_temp_dir(|| {
-            std::env::set_var("RYU_MODELS_DEV_URL", "http://127.0.0.1:1/none");
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let out = rt.block_on(discover_models(DiscoverInput {
-                provider: Some("definitely-not-a-provider-xyz".to_owned()),
-                base_url: None,
-                api_key: None,
-                api: None,
-            }));
-            std::env::remove_var("RYU_MODELS_DEV_URL");
-            assert_eq!(out["source"], "fallback");
-            assert_eq!(out["models"].as_array().unwrap().len(), 0);
-        });
-    }
-
-    #[test]
-    fn settings_round_trip_preserves_unknown_keys() {
-        with_temp_dir(|| {
-            let _ = ensure_dir();
-            fs::write(settings_path(), r#"{"theme":"light","defaultModel":"old"}"#).unwrap();
-            apply(PiConfigInput {
-                provider: GATEWAY_PROVIDER_ID.to_owned(),
-                model: Some("gpt-4o".to_owned()),
-                thinking_level: None,
-                api_key: None,
-                base_url: None,
-                api: None,
-            })
-            .unwrap();
-            let settings = read_settings();
-            // Unmanaged key survives.
-            assert_eq!(
-                settings.extra.get("theme").and_then(Value::as_str),
-                Some("light")
-            );
-            assert_eq!(settings.default_model.as_deref(), Some("gpt-4o"));
-        });
-    }
-
-    #[test]
-    fn disabling_a_model_records_only_that_model() {
-        with_temp_dir(|| {
-            let catalog = set_model_enabled(ModelEnabledInput {
-                provider: "openai".to_owned(),
-                model: "gpt-4o".to_owned(),
-                enabled: false,
-            })
-            .expect("toggle");
-            let openai = catalog["providers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|p| p["id"] == "openai")
-                .expect("openai row");
-            assert_eq!(openai["modelOverrides"]["gpt-4o"], json!(false));
-            // Untoggled models stay absent — absent means enabled, so an existing
-            // config keeps every model it had before the feature existed.
-            assert!(openai["modelOverrides"].as_object().unwrap().len() == 1);
-
-            // Re-enabling records `true` rather than deleting, which is what lets
-            // the desktop show the switch as explicitly on.
-            let catalog = set_model_enabled(ModelEnabledInput {
-                provider: "openai".to_owned(),
-                model: "gpt-4o".to_owned(),
-                enabled: true,
-            })
-            .expect("re-enable");
-            let openai = catalog["providers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|p| p["id"] == "openai")
-                .expect("openai row");
-            assert_eq!(openai["modelOverrides"]["gpt-4o"], json!(true));
-        });
-    }
-
-    #[test]
-    fn agent_model_overrides_are_scoped_and_never_look_like_a_provider() {
-        with_temp_dir(|| {
-            let catalog = set_model_enabled(ModelEnabledInput {
-                provider: format!("{AGENT_OVERRIDE_PREFIX}claude"),
-                model: "claude-haiku-4-5".to_owned(),
-                enabled: false,
-            })
-            .expect("toggle an agent's model");
-
-            // Surfaced under its own map, keyed by the bare agent id.
-            assert_eq!(
-                catalog["agentModelOverrides"]["claude"]["claude-haiku-4-5"],
-                json!(false)
-            );
-
-            // …and NOT as a custom provider. A leaked `agent:claude` row would
-            // render an unconfigured provider in the picker and the providers tab,
-            // and would be accepted as a routing target.
-            let ids: Vec<&str> = catalog["providers"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter_map(|p| p["id"].as_str())
-                .collect();
-            assert!(
-                !ids.iter().any(|id| id.starts_with(AGENT_OVERRIDE_PREFIX)),
-                "agent scopes must not appear as providers: {ids:?}"
-            );
-            assert!(
-                !custom_provider_ids()
-                    .iter()
-                    .any(|id| id.starts_with(AGENT_OVERRIDE_PREFIX)),
-                "agent scopes must not be treated as custom providers"
-            );
-        });
-    }
-
-    #[test]
-    fn provider_discovery_rejects_loopback_before_connecting() {
-        let runtime = tokio::runtime::Runtime::new().expect("runtime");
-        let error = runtime
-            .block_on(fetch_models(
-                "http://127.0.0.1:1/models",
-                DiscoveryAuth::None,
-                false,
-            ))
-            .expect_err("custom provider checks must reject loopback");
-        assert!(
-            error.to_string().contains("screen discovery endpoint"),
-            "unexpected loopback rejection: {error}"
-        );
+    match url.host() {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        None => false,
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests;

@@ -23,7 +23,7 @@
 //! reasoning as `midnight_wipe.rs`:
 //!
 //!   * NOT `profile::ryu_home_dir()` (`~/.ryu{suffix}`). That is Core's data
-//!     dir, and Core's own record is `ryu_dir().join("pending-update.json")`. A
+//!     dir, and Core's own record is `state/pending-update.json` inside it. A
 //!     desktop record there would collide with Core's on a local node — two
 //!     different deferrals, one file, and whichever wrote last wins.
 //!   * NOT localStorage. Every channel ships the same bundle identifier
@@ -109,7 +109,17 @@ pub fn get_pending_app_update() -> Option<PendingAppUpdate> {
 /// actually made, and a stale record for a superseded version is not worth
 /// protecting. (Core's `set_pending` makes the same choice for the same reason.)
 #[tauri::command]
-pub fn set_pending_app_update(pending: PendingAppUpdate) -> Result<PendingAppUpdate, String> {
+pub fn set_pending_app_update(
+    window: tauri::Window,
+    pending: PendingAppUpdate,
+) -> Result<PendingAppUpdate, String> {
+    crate::app_update::require_update_window(window.label())?;
+    if pending.scheduled_for_ms <= 0
+        || pending.version.trim().is_empty()
+        || pending.time_zone.trim().is_empty()
+    {
+        return Err("Invalid deferred update time, version, or time zone".into());
+    }
     let path = state_path().ok_or_else(|| {
 		"could not resolve this machine's config directory, so a deferred update has nowhere to live"
 			.to_string()
@@ -117,8 +127,7 @@ pub fn set_pending_app_update(pending: PendingAppUpdate) -> Result<PendingAppUpd
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let json = serde_json::to_vec_pretty(&pending).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    ryu_runtime_install::handoff::write_json(&path, &pending).map_err(|e| e.to_string())?;
     Ok(pending)
 }
 
@@ -131,7 +140,8 @@ pub fn set_pending_app_update(pending: PendingAppUpdate) -> Result<PendingAppUpd
 /// reinstall forever. Clearing first costs a genuine failure one missed window
 /// instead of a restart loop — the same trade Core's scheduler makes.
 #[tauri::command]
-pub fn clear_pending_app_update() -> Result<(), String> {
+pub fn clear_pending_app_update(window: tauri::Window) -> Result<(), String> {
+    crate::app_update::require_update_window(window.label())?;
     let Some(path) = state_path() else {
         return Ok(());
     };
@@ -167,7 +177,7 @@ mod tests {
     }
 
     /// The collision this basename exists to prevent. Core's record is
-    /// `paths::ryu_dir().join("pending-update.json")`, and the desktop can
+    /// `paths::state_path("pending-update.json")`, and the desktop can
     /// resolve that same directory — so sharing the name would mean a local
     /// node's Core deferral and the app's own deferral overwriting each other.
     #[test]

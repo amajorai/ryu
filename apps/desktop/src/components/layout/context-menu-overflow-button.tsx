@@ -1,7 +1,9 @@
 import { MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { RefObject } from "react";
+import layoutStyles from "./context-menu-overflow-button.module.css";
 
 /** Open the Base UI context menu already attached to a row. Keeping this as a
  * native context-menu event means the hover ellipsis and right-click can never
@@ -33,11 +35,15 @@ export function ContextMenuOverflowButton({
 	label: string;
 	targetRef: RefObject<HTMLElement | null>;
 }) {
+	const tl = useLiteralMessages();
 	return (
 		<button
-			aria-label={`${label} options`}
+			aria-label={tl("{label} options", { label })}
 			className={cn(
-				"flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[opacity,background-color,color] hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/hdr:opacity-100 group-hover/row:opacity-100 group-hover/subsection:opacity-100 group-hover/tab:opacity-100",
+				cn(
+					"flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/hdr:opacity-100 group-hover/row:opacity-100 group-hover/subsection:opacity-100 group-hover/tab:opacity-100",
+					layoutStyles.authored1
+				),
 				className
 			)}
 			onClick={(event) => {

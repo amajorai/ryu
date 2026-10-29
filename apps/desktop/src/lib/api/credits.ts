@@ -24,9 +24,27 @@
 // checkout the UI re-fetches the wallet (the balance may lag a moment behind a
 // completed payment).
 
+import {
+	CREDIT_TOPUP_MAX_CENTS,
+	CREDIT_TOPUP_MIN_CENTS,
+	CREDIT_TOPUP_PACKS_USD,
+	type CreditTopupPackUsd,
+} from "@ryu/auth/lib/plans";
 import { formatMicroUsd as formatSharedMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import { openSse, SseConnectError, type SseMessage } from "@ryuhq/protocol/sse";
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { z } from "zod";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
+import {
+	autoTopupSettingsSchema,
+	creditAlertEventSchema,
+	creditAlertSettingsSchema,
+	creditsErrorWireSchema,
+	creditsSettingsWireSchema,
+	topupCheckoutSchema,
+	usageResponseSchema,
+	walletResponseSchema,
+	walletUpdateSchema,
+} from "./credits-wire-contracts.ts";
 
 /** Micro-USD (millionths of a dollar) per US cent; the server's wallet unit. */
 export const MICRO_USD_PER_DOLLAR = 1_000_000;
@@ -42,19 +60,18 @@ export function formatMicroUsd(microUsd: number, currency = "usd"): string {
 }
 
 /** The named credit packs the top-up checkout offers, in whole dollars. */
-export const CREDIT_PACKS = [10, 25, 100] as const;
-export type CreditPack = (typeof CREDIT_PACKS)[number];
+export const CREDIT_PACKS = CREDIT_TOPUP_PACKS_USD;
+export type CreditPack = CreditTopupPackUsd;
 
 /** Custom top-up bounds, mirroring the server's 500–100000 cents clamp. */
-export const MIN_TOPUP_DOLLARS = 5;
-export const MAX_TOPUP_DOLLARS = 1000;
+export const MIN_TOPUP_DOLLARS = CREDIT_TOPUP_MIN_CENTS / 100;
+export const MAX_TOPUP_DOLLARS = CREDIT_TOPUP_MAX_CENTS / 100;
 
 /**
  * Why a ledger entry was written. Mirrors the server's `LedgerReason` in
- * `@ryu/db/models/credits.model`. Nothing enforces the mirror — this union
- * narrows JSON the server already sent, it does not validate it — so a reason
- * added there and forgotten here renders as an UNLABELED row rather than a type
- * error. Adding a `LEDGER_REASONS` member is therefore always a two-file edit.
+ * `@ryu/db/models/credits.model`. Ledger entries retain the wire reason string, so
+ * newly introduced server reasons keep their existing raw-label fallback.
+ * These known reasons define the desktop labels and credit classification.
  */
 export type LedgerReason =
 	| "topup"
@@ -65,12 +82,24 @@ export type LedgerReason =
 	| "treg"
 	| "subscription_offset"
 	| "adjustment"
+	| "web_search"
 	| "campaign_grant"
 	| "referral_grant"
 	| "gift_credit"
 	| "gift_card"
 	| "gift_expired"
-	| "gift_reversal";
+	| "gift_reversal"
+	| "managed_agents"
+	| "box"
+	| "sandbox"
+	| "notify"
+	| "passport"
+	| "connect_native"
+	| "connect_vendor"
+	| "connect_composed"
+	| "composed_tool_earnings"
+	| "mail"
+	| "messaging";
 
 /** Reasons that CREDIT the wallet (positive delta). Mirrors the server's
  * `CREDIT_REASONS`; used so the ledger badges a credit consistently. */
@@ -81,10 +110,11 @@ export const CREDIT_LEDGER_REASONS: readonly LedgerReason[] = [
 	"referral_grant",
 	"gift_credit",
 	"gift_card",
+	"composed_tool_earnings",
 ];
 
 /** Human label for each ledger reason, for the ledger list. */
-export const LEDGER_REASON_LABELS: Record<LedgerReason, string> = {
+export const LEDGER_REASON_LABELS = {
 	topup: "Top-up",
 	plan_grant: "Plan credit",
 	gateway_usage: "Gateway usage",
@@ -93,6 +123,7 @@ export const LEDGER_REASON_LABELS: Record<LedgerReason, string> = {
 	treg: "Treg tool",
 	subscription_offset: "Subscription offset",
 	adjustment: "Adjustment",
+	web_search: "Web search",
 	// Campaign and referral money is POOL-RESTRICTED, but the label deliberately
 	// does not say which pool: the pool is a supply-side fact, and the user-facing
 	// promise is one Ryu-native unit. The per-pool breakdown lives on the balance
@@ -103,22 +134,49 @@ export const LEDGER_REASON_LABELS: Record<LedgerReason, string> = {
 	gift_card: "Gift card",
 	gift_expired: "Gift credits expired",
 	gift_reversal: "Gift credit reversal",
-};
+	managed_agents: "Managed Agents",
+	// Hosted standalone services, settled hourly from each service's usage.
+	box: "Box compute and storage",
+	// A session's Box on a node, metered per tick by the Gateway while it runs.
+	sandbox: "Box session compute",
+	notify: "Notify events",
+	passport: "Passport connections and fetches",
+	connect_native: "Connect tool call",
+	connect_vendor: "Connect vendor call (Ryu key)",
+	connect_composed: "Composed tool fee",
+	composed_tool_earnings: "Composed tool earnings",
+	mail: "Mail overage",
+	messaging: "Messaging (SMS, WhatsApp, voice)",
+} satisfies Record<LedgerReason, string>;
+
+/** Preserve the server reason fallback when a future ledger reason is introduced. */
+export function ledgerReasonLabel(reason: string) {
+	return Object.entries(LEDGER_REASON_LABELS).find(
+		([key]) => key === reason
+	)?.[1];
+}
+export function isCreditLedgerReason(reason: string) {
+	return CREDIT_LEDGER_REASONS.some((known) => known === reason);
+}
 
 /** The materialized prepaid balance for the caller's active org. */
 export interface CreditWallet {
+	/** Unrestricted balance less open credit holds (what a new send can use). */
+	availableMicroUsd?: number;
 	/** False when Polar returns only the aggregate meter balance. */
 	balanceBreakdownAvailable?: boolean;
 	balanceMicroUsd: number;
 	currency: string;
 	/** Remaining redeemed gift credit; each gift has its own expiry. */
 	giftBalanceMicroUsd?: number | null;
+	/** Money held by open credit holds, such as in-flight Messaging sends. */
+	heldMicroUsd?: number;
 	id: string;
 	ownerId: string;
 	ownerType: string;
 	providerAllocations?: CreditProviderAllocation[];
 	/** `polar` means Polar owns the provider balance; `local` is legacy mode. */
-	source?: "local" | "polar";
+	source?: string;
 	/** Remaining included plan credit for the current billing period. */
 	subscriptionBalanceMicroUsd: number | null;
 	/** Remaining purchased credit; this balance rolls over. */
@@ -126,6 +184,30 @@ export interface CreditWallet {
 	/** Polar aggregate meter balance available for any provider. */
 	unrestrictedBalanceMicroUsd?: number;
 	updatedAt: string;
+}
+
+/**
+ * Spendable balance for retail managed providers. Pool-restricted grants are
+ * deliberately excluded; the provider-specific pool path handles those.
+ */
+export function unrestrictedCreditBalanceMicroUsd(
+	wallet: CreditWallet | null
+): number {
+	if (!wallet) {
+		return 0;
+	}
+	if (wallet.unrestrictedBalanceMicroUsd !== undefined) {
+		return Math.max(0, wallet.unrestrictedBalanceMicroUsd);
+	}
+	if (wallet.balanceBreakdownAvailable === false) {
+		return Math.max(0, wallet.balanceMicroUsd);
+	}
+	return Math.max(
+		0,
+		(wallet.subscriptionBalanceMicroUsd ?? 0) +
+			(wallet.topupBalanceMicroUsd ?? 0) +
+			(wallet.giftBalanceMicroUsd ?? 0)
+	);
 }
 
 export interface CreditProviderAllocation {
@@ -152,12 +234,14 @@ export interface LedgerEntry {
 	model: string | null;
 	orgId: string | null;
 	outputTokens: number | null;
-	/** Upstream provider that served the work. NOT the credit pool. */
+	/** Provider Gateway charged through (for example, `openrouter`). */
 	provider: string | null;
-	reason: LedgerReason;
+	reason: string;
 	refId: string | null;
 	/** Human-facing label for what the spend was for. */
 	taskLabel: string | null;
+	/** Provider selected behind OpenRouter when it reported routing metadata. */
+	upstreamProvider: string | null;
 	userId: string | null;
 	walletId: string;
 }
@@ -211,7 +295,7 @@ export interface WalletResponse {
 /** The Better-Auth session bearer token, or null when signed out / no storage. */
 function authToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		// No storage — treated as signed out.
 		return null;
@@ -223,13 +307,11 @@ export function hasCreditsAuth(): boolean {
 	return Boolean(authToken());
 }
 
-function authHeaders(): Record<string, string> {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-	};
+function authHeaders() {
+	const headers = new Headers({ "Content-Type": "application/json" });
 	const token = authToken();
 	if (token) {
-		headers.Authorization = `Bearer ${token}`;
+		headers.set("Authorization", `Bearer ${token}`);
 	}
 	return headers;
 }
@@ -240,10 +322,17 @@ const BASE = `${BACKEND_URL.replace(/\/$/, "")}/api/credits`;
  * Distinguishes the degrade-cleanly states (per the hard rules) from generic
  * failures so the UI can render a tailored message:
  *   - "auth":   401, not signed in.
+ *   - "access_policy": 403, the organization's access policy (IP allowlist,
+ *     required 2FA, session age) refused this session.
  *   - "no_org": 409, the active org is missing (wallets are org-level).
  *   - "billing": 503, the payment provider is not configured (top-up disabled).
  */
-export type CreditsErrorKind = "auth" | "no_org" | "billing" | "unknown";
+export type CreditsErrorKind =
+	| "auth"
+	| "access_policy"
+	| "no_org"
+	| "billing"
+	| "unknown";
 
 export class CreditsError extends Error {
 	readonly kind: CreditsErrorKind;
@@ -259,12 +348,19 @@ export class CreditsError extends Error {
  * used for both the request path ({@link toError}) and the SSE connect path
  * (`openWalletStream`), which has no body to read a server message from.
  */
-function classifyStatus(status: number): {
+interface CreditsFailureStatus {
 	kind: CreditsErrorKind;
 	message: string;
-} {
+}
+function classifyStatus(status: number): CreditsFailureStatus {
 	if (status === 401) {
 		return { kind: "auth", message: "Sign in to view credits." };
+	}
+	if (status === 403) {
+		return {
+			kind: "access_policy",
+			message: "Your organization's access policy blocked this request.",
+		};
 	}
 	if (status === 409) {
 		return {
@@ -283,20 +379,30 @@ function classifyStatus(status: number): {
 }
 
 /** True when this failure will keep failing until the ACCOUNT changes — a retry
- *  loop must not treat it as a transient blip. `no_org` and `auth` are both
- *  fixed by user action elsewhere (create/select an org, sign in), never by
- *  reconnecting. */
-export function isTerminalCreditsError(e: unknown): boolean {
+ *  loop must not treat it as a transient blip. `no_org`, `auth` and
+ *  `access_policy` are all fixed by user action elsewhere (create/select an
+ *  org, sign in, satisfy the org's policy), never by reconnecting. */
+const creditsFailureSchema = z.instanceof(CreditsError);
+export function isTerminalCreditsError(
+	e: Parameters<typeof creditsFailureSchema.safeParse>[0]
+): boolean {
+	const parsed = creditsFailureSchema.safeParse(e);
 	return (
-		e instanceof CreditsError && (e.kind === "no_org" || e.kind === "auth")
+		parsed.success &&
+		(parsed.data.kind === "no_org" ||
+			parsed.data.kind === "auth" ||
+			parsed.data.kind === "access_policy")
 	);
 }
 
 async function toError(resp: Response): Promise<CreditsError> {
 	let message: string | undefined;
 	try {
-		const body = (await resp.json()) as { message?: string; error?: string };
-		message = body.message ?? body.error;
+		const body = creditsErrorWireSchema.parse(await resp.json());
+		const detail = body.message ?? body.error;
+		if (detail !== undefined && detail !== null) {
+			message = String(detail);
+		}
 	} catch {
 		// Non-JSON body.
 	}
@@ -310,7 +416,7 @@ export async function fetchWallet(): Promise<WalletResponse> {
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	return (await resp.json()) as WalletResponse;
+	return walletResponseSchema.parse(await resp.json());
 }
 
 /**
@@ -338,7 +444,7 @@ export async function fetchUsage(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	return (await resp.json()) as UsageResponse;
+	return usageResponseSchema.parse(await resp.json());
 }
 
 /**
@@ -348,8 +454,12 @@ export async function fetchUsage(
  * fields into the last full wallet rather than replacing it wholesale.
  */
 export interface WalletUpdate {
+	/** Sent on the snapshot frame only; balance-change frames omit it. */
+	availableMicroUsd?: number;
 	balanceMicroUsd: number;
 	currency: string;
+	/** Sent on the snapshot frame only; balance-change frames omit it. */
+	heldMicroUsd?: number;
 	id: string;
 	ownerId: string;
 	updatedAt: string;
@@ -362,6 +472,16 @@ export interface CreditAlertEvent {
 	level: "warning";
 	thresholdMicroUsd: number;
 	title: string;
+}
+
+/** Re-throw an SSE connect failure as the {@link CreditsError} kind its HTTP
+ *  status means, so a reconnect loop can tell a terminal refusal from a blip. */
+function toStreamError(e: unknown): unknown {
+	if (e instanceof SseConnectError) {
+		const classified = classifyStatus(e.status);
+		return new CreditsError(classified.kind, classified.message);
+	}
+	return e;
 }
 
 /**
@@ -380,32 +500,37 @@ export async function* openWalletStream(
 ): AsyncGenerator<SseMessage<WalletUpdate>> {
 	try {
 		yield* openSse<WalletUpdate>(`${BASE}/wallet/stream`, {
+			decode: walletUpdateSchema.parse,
 			token: authToken(),
 			signal,
 		});
 	} catch (e) {
-		if (e instanceof SseConnectError) {
-			const classified = classifyStatus(e.status);
-			throw new CreditsError(classified.kind, classified.message);
-		}
-		throw e;
+		throw toStreamError(e);
 	}
 }
 
-/** Open the edge-triggered cloud low-balance notification stream. */
+/**
+ * Open the edge-triggered cloud low-balance notification stream. A failed
+ * connect is re-thrown as a {@link CreditsError}, as in `openWalletStream`.
+ */
 export async function* openCreditAlertStream(
 	signal: AbortSignal
 ): AsyncGenerator<SseMessage<CreditAlertEvent>> {
-	yield* openSse<CreditAlertEvent>(`${BASE}/alert/stream`, {
-		token: authToken(),
-		signal,
-	});
+	try {
+		yield* openSse<CreditAlertEvent>(`${BASE}/alert/stream`, {
+			decode: creditAlertEventSchema.parse,
+			token: authToken(),
+			signal,
+		});
+	} catch (e) {
+		throw toStreamError(e);
+	}
 }
 
 export interface TopupInput {
 	/** A custom FACE amount in cents — credited to the wallet (clamped 500–100000). */
 	amountCents?: number;
-	/** A named pack (10 | 25 | 100), or omit and pass `amountCents`. */
+	/** A named pack (100 | 250 | 1000), or omit and pass `amountCents`. */
 	pack?: CreditPack;
 	/** Where Polar returns the buyer; defaults to the web frontend's receipt page. */
 	successUrl?: string;
@@ -422,6 +547,10 @@ export interface TopupQuote {
 	feeCents: number;
 }
 
+interface TopupWireRequest extends Omit<TopupInput, "pack"> {
+	pack?: string;
+}
+
 export interface TopupResult {
 	quote: TopupQuote | null;
 	url: string;
@@ -435,7 +564,7 @@ export interface TopupResult {
  * return.
  */
 export async function createTopup(input: TopupInput): Promise<TopupResult> {
-	const body: Record<string, unknown> = {};
+	const body: TopupWireRequest = {};
 	if (input.pack !== undefined) {
 		body.pack = String(input.pack);
 	}
@@ -445,18 +574,17 @@ export async function createTopup(input: TopupInput): Promise<TopupResult> {
 	if (input.successUrl) {
 		body.successUrl = input.successUrl;
 	}
+	const headers = authHeaders();
+	headers.set("Idempotency-Key", crypto.randomUUID());
 	const resp = await fetch(`${BASE}/topup`, {
 		method: "POST",
-		headers: {
-			...authHeaders(),
-			"Idempotency-Key": crypto.randomUUID(),
-		},
+		headers,
 		body: JSON.stringify(body),
 	});
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { url?: string; quote?: TopupQuote };
+	const json = topupCheckoutSchema.parse(await resp.json());
 	if (!json.url) {
 		throw new CreditsError("unknown", "Checkout session has no URL.");
 	}
@@ -508,35 +636,14 @@ export interface AutoTopupInput {
 }
 
 /** Coerce the server's `{ settings }` envelope into a typed view (or null). */
-function toAutoTopupSettings(raw: unknown): AutoTopupSettings | null {
-	if (!raw || typeof raw !== "object") {
-		return null;
-	}
-	const s = raw as Record<string, unknown>;
-	const num = (value: unknown): number =>
-		typeof value === "number" && Number.isFinite(value) ? value : 0;
-	return {
-		amountCents: num(s.amountCents),
-		consecutiveFailures: num(s.consecutiveFailures),
-		cooldownSec: num(s.cooldownSec),
-		enabled: Boolean(s.enabled),
-		lastAttemptAt: typeof s.lastAttemptAt === "string" ? s.lastAttemptAt : null,
-		lastError: typeof s.lastError === "string" ? s.lastError : null,
-		monthChargedMicroUsd: num(s.monthChargedMicroUsd),
-		monthKey: typeof s.monthKey === "string" ? s.monthKey : null,
-		monthlyCapCents: num(s.monthlyCapCents),
-		thresholdCents: num(s.thresholdCents),
-	};
-}
-
 /** Fetch the active org's auto-recharge settings, or null when unset. */
 export async function fetchAutoTopup(): Promise<AutoTopupSettings | null> {
 	const resp = await fetch(`${BASE}/autotopup`, { headers: authHeaders() });
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { settings?: unknown };
-	return toAutoTopupSettings(json.settings);
+	const json = creditsSettingsWireSchema.parse(await resp.json());
+	return autoTopupSettingsSchema.parse(json.settings);
 }
 
 /**
@@ -547,7 +654,7 @@ export async function fetchAutoTopup(): Promise<AutoTopupSettings | null> {
 export async function putAutoTopup(
 	input: AutoTopupInput
 ): Promise<AutoTopupSettings | null> {
-	const body: Record<string, unknown> = {
+	const body: AutoTopupInput = {
 		enabled: input.enabled,
 		amountCents: input.amountCents,
 		thresholdCents: input.thresholdCents,
@@ -566,8 +673,8 @@ export async function putAutoTopup(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { settings?: unknown };
-	return toAutoTopupSettings(json.settings);
+	const json = creditsSettingsWireSchema.parse(await resp.json());
+	return autoTopupSettingsSchema.parse(json.settings);
 }
 
 // --- Low-balance email alert -------------------------------------------------
@@ -596,35 +703,14 @@ export interface CreditAlertInput {
 }
 
 /** Coerce the server's `{ settings }` envelope into a typed view (or null). */
-function toCreditAlertSettings(raw: unknown): CreditAlertSettings | null {
-	if (!raw || typeof raw !== "object") {
-		return null;
-	}
-	const s = raw as Record<string, unknown>;
-	const recipients =
-		s.recipients === "owners" || s.recipients === "owners_admins"
-			? s.recipients
-			: "none";
-	return {
-		recipients,
-		thresholdCents:
-			typeof s.thresholdCents === "number" && Number.isFinite(s.thresholdCents)
-				? s.thresholdCents
-				: 0,
-		notifiedAt: typeof s.notifiedAt === "string" ? s.notifiedAt : null,
-		belowSince: typeof s.belowSince === "string" ? s.belowSince : null,
-		lastError: typeof s.lastError === "string" ? s.lastError : null,
-	};
-}
-
 /** Fetch the active org's low-balance alert settings, or null when unset. */
 export async function fetchCreditAlert(): Promise<CreditAlertSettings | null> {
 	const resp = await fetch(`${BASE}/alert`, { headers: authHeaders() });
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { settings?: unknown };
-	return toCreditAlertSettings(json.settings);
+	const json = creditsSettingsWireSchema.parse(await resp.json());
+	return creditAlertSettingsSchema.parse(json.settings);
 }
 
 /**
@@ -645,6 +731,6 @@ export async function putCreditAlert(
 	if (!resp.ok) {
 		throw await toError(resp);
 	}
-	const json = (await resp.json()) as { settings?: unknown };
-	return toCreditAlertSettings(json.settings);
+	const json = creditsSettingsWireSchema.parse(await resp.json());
+	return creditAlertSettingsSchema.parse(json.settings);
 }

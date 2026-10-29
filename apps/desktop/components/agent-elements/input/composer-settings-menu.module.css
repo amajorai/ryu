@@ -1,0 +1,20 @@
+.effortBar {
+	height: 5px;
+	border-radius: 1px;
+}
+
+.effortBar:nth-child(2) {
+	height: 7px;
+}
+
+.effortBar:nth-child(3) {
+	height: 9px;
+}
+
+.effortBar:nth-child(4) {
+	height: 11px;
+}
+
+.effortBar:nth-child(5) {
+	height: 13px;
+}

@@ -22,6 +22,9 @@ paths = [
   # credential) and trip generic-api-key on minified JS tokens. No real Ryu secret lives
   # here; scanning a vendored bundle is out of scope for this repo's secret hygiene.
   '''apps/core/src/plugin_manifest/fixtures/.*\.ui\.html''',
+  # The same kind of single-file companion bundle when Core embeds it straight from
+  # an app's committed sidecar build (tools/mirror-public/includes.mjs vendors it).
+  '''generated/ryu-runtime/apps-store/[^/]+/sidecar/bundle/.*\.html''',
   # Older public mirror commits carried this generated visual-proof bundle. It
   # is now pruned from the public tree, but the allowlist keeps history scans
   # honest about its bundled third-party credential-like strings.

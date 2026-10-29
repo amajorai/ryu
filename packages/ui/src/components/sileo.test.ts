@@ -13,8 +13,11 @@ describe("sileo slot ids", () => {
 	});
 
 	test("shared toaster preserves sentence casing in titles", () => {
-		const element = Toaster({ position: "bottom-center" });
+		const anchor = Toaster({ position: "bottom-center" });
+		// The toaster is wrapped in an always-mounted aria-live anchor.
+		const element = anchor.props.children;
 
+		expect(anchor.props["data-slot"]).toBe("toaster");
 		expect(element.props.position).toBe("bottom-center");
 		expect(element.props.options.styles.title).toBe("ryu-sileo-title");
 	});
@@ -78,6 +81,9 @@ describe("sileo slot ids", () => {
 
 	test("a caller-supplied id always wins", () => {
 		expect(
+			// SAFETY: This complete native Sileo options literal adds only id.
+			// The installed createToast reads merged.id, and the shared wrapper
+			// preserves explicit caller ids; its public options type omits id.
 			sileo.show({
 				id: "update-available",
 				type: "loading",

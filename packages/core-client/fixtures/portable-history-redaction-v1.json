@@ -1,0 +1,32 @@
+[
+  {
+    "input": "Email ava@example.com",
+    "expected": "Email [REDACTED:EMAIL]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "password='hunter2'",
+    "expected": "[REDACTED:CREDENTIAL]",
+    "pii": 0,
+    "secrets": 1
+  },
+  {
+    "input": "card 4111 1111 1111 1111",
+    "expected": "card [REDACTED:CARD]",
+    "pii": 1,
+    "secrets": 0
+  },
+  {
+    "input": "-----BEGIN PRIVATE KEY-----\nsynthetic-body\n-----END PRIVATE KEY-----",
+    "expected": "[REDACTED:PRIVATE_KEY]",
+    "pii": 0,
+    "secrets": 1
+  },
+  {
+    "input": "Safe local 127.0.0.1 and invalid card 4111 1111 1111 1112",
+    "expected": "Safe local 127.0.0.1 and invalid card 4111 1111 1111 1112",
+    "pii": 0,
+    "secrets": 0
+  }
+]

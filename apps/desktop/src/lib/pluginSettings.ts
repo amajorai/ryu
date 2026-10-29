@@ -17,6 +17,8 @@
 // stored as bare strings (booleans as `"true"`/`"false"`), matching the
 // existing preference conventions in `lib/api/preferences.ts`.
 
+import { z } from "zod";
+
 /** The control a plugin settings field renders as. Unknown types render as text. */
 export type PluginFieldType =
 	| "model_picker"
@@ -74,14 +76,10 @@ export interface PluginSettingsField {
  */
 export type SettingsScope = "node" | "user";
 
-/** Coerce a raw manifest `scope` value to a known scope; anything but the literal
- *  `"user"` (including absent/unknown) falls back to `"node"`. */
-function parseScope(value: unknown): SettingsScope {
-	return value === "user" ? "user" : "node";
-}
-
 /** A named group of fields a plugin contributes to the settings surface. */
 export interface PluginSettingsTab {
+	/** An owned companion mounted with a settings-specific context. */
+	companion?: string;
 	/**
 	 * Whether the owning plugin is currently ENABLED (Core's `app_enabled`).
 	 *
@@ -97,6 +95,7 @@ export interface PluginSettingsTab {
 	enabled: boolean;
 	fields: PluginSettingsField[];
 	id: string;
+	mcpSettings?: { readTool: string; updateTool: string; serverId?: string };
 	/** The owning plugin id (manifest id), tagged by Core. */
 	plugin: string;
 	/** The dialog this tab renders in (node = Gateway, user = App Settings). */
@@ -105,7 +104,7 @@ export interface PluginSettingsTab {
 	/**
 	 * A rich settings view an app ships instead of declarative `fields`. When set,
 	 * the desktop resolves it to a component (first-party built-in apps) or a
-	 * sandboxed UI (third-party, future) rather than rendering `fields`. This is how
+	 * sandboxed UI (through an explicit companion reference) rather than rendering `fields`. This is how
 	 * an app whose settings can't be expressed as simple fields (a full custom UI)
 	 * still registers through its manifest. Opaque here — the settings renderer owns
 	 * the vocabulary.
@@ -113,103 +112,116 @@ export interface PluginSettingsTab {
 	view?: string;
 }
 
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
-}
-
-function parseOptions(value: unknown): PluginSelectOption[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	const out: PluginSelectOption[] = [];
-	for (const raw of value) {
-		if (typeof raw === "string") {
-			out.push({ value: raw, label: raw });
-			continue;
+const optionalString = z.string().optional().catch(undefined);
+const selectOptionSchema = z
+	.union([
+		z.string().transform((value) => ({ value, label: value })),
+		z
+			.object({ value: z.string(), label: optionalString })
+			.transform((option) => ({
+				value: option.value,
+				label: option.label ?? option.value,
+			})),
+	])
+	.optional()
+	.catch(undefined);
+const settingsFieldSchema = z
+	.object({
+		pref_key: optionalString,
+		prefKey: optionalString,
+		type: optionalString,
+		label: optionalString,
+		description: optionalString,
+		placeholder: optionalString,
+		options: z.array(selectOptionSchema).catch([]),
+		default: z
+			.union([z.boolean(), z.number(), z.string()])
+			.optional()
+			.catch(undefined),
+		min: z.number().optional().catch(undefined),
+		max: z.number().optional().catch(undefined),
+		step: z.number().optional().catch(undefined),
+	})
+	.transform((field): PluginSettingsField | undefined => {
+		const prefKey = field.pref_key ?? field.prefKey;
+		if (!prefKey) {
+			return undefined;
 		}
-		if (raw && typeof raw === "object") {
-			const obj = raw as Record<string, unknown>;
-			const value_ = asString(obj.value);
-			if (value_ !== undefined) {
-				out.push({ value: value_, label: asString(obj.label) ?? value_ });
-			}
-		}
-	}
-	return out;
-}
+		return {
+			prefKey,
+			type: field.type ?? "text",
+			label: field.label ?? prefKey,
+			description: field.description,
+			placeholder: field.placeholder,
+			options: field.options.filter((option) => option !== undefined),
+			default: field.default,
+			min: field.min,
+			max: field.max,
+			step: field.step,
+		};
+	})
+	.optional()
+	.catch(undefined);
+const mcpSettingsDescriptorSchema = z
+	.object({
+		serverId: optionalString,
+		readTool: z.string(),
+		updateTool: z.string(),
+	})
+	.optional()
+	.catch(undefined);
+const settingsTabSchema = z.object({
+	plugin: optionalString,
+	id: optionalString,
+	title: optionalString,
+	fields: z.array(settingsFieldSchema).catch([]),
+	view: optionalString,
+	companion: optionalString,
+	scope: z.enum(["user", "node"]).catch("node"),
+	app_enabled: z.literal(false).optional().catch(undefined),
+	mcpSettings: mcpSettingsDescriptorSchema,
+});
+export type PluginSettingsTabInput = Parameters<
+	typeof settingsTabSchema.parse
+>[0];
 
-function asNumber(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value)
-		? value
-		: undefined;
-}
-
-function parseField(raw: unknown): PluginSettingsField | null {
-	if (!raw || typeof raw !== "object") {
-		return null;
-	}
-	const obj = raw as Record<string, unknown>;
-	// `pref_key` is the load-bearing binding; a field without one has nothing to
-	// persist, so drop it rather than render an inert control.
-	const prefKey = asString(obj.pref_key) ?? asString(obj.prefKey);
-	if (!prefKey) {
-		return null;
-	}
-	const type = asString(obj.type) ?? "text";
-	const defaultRaw = obj.default;
-	const defaultValue =
-		typeof defaultRaw === "boolean" ||
-		typeof defaultRaw === "number" ||
-		typeof defaultRaw === "string"
-			? defaultRaw
-			: undefined;
-	return {
-		type,
-		prefKey,
-		label: asString(obj.label) ?? prefKey,
-		description: asString(obj.description),
-		placeholder: asString(obj.placeholder),
-		options: parseOptions(obj.options),
-		default: defaultValue,
-		min: asNumber(obj.min),
-		max: asNumber(obj.max),
-		step: asNumber(obj.step),
-	};
-}
-
-/**
- * Parse the raw `settings_tabs` feed (opaque records tagged with a `plugin`
- * id) into typed tabs. Entries missing a plugin id, a title, or any renderable
- * field are dropped.
- */
+/** Parse Core's manifest contribution records, dropping entries without a renderable surface. */
 export function parseSettingsTabs(
-	raw: Record<string, unknown>[]
+	raw: PluginSettingsTabInput[]
 ): PluginSettingsTab[] {
 	const tabs: PluginSettingsTab[] = [];
 	for (const entry of raw) {
-		const plugin = asString(entry.plugin);
-		if (!plugin) {
+		const parsed = settingsTabSchema.safeParse(entry);
+		if (!(parsed.success && parsed.data.plugin)) {
 			continue;
 		}
-		const fields = Array.isArray(entry.fields)
-			? (entry.fields.map(parseField).filter(Boolean) as PluginSettingsField[])
-			: [];
-		const view = asString(entry.view);
-		// A tab needs SOMETHING to render: either declarative fields or a named view.
-		// Drop an empty tab rather than show an inert section.
-		if (fields.length === 0 && !view) {
+		const tab = parsed.data;
+		const plugin = parsed.data.plugin;
+		const fields = tab.fields.filter((field) => field !== undefined);
+		const settings = tab.mcpSettings;
+		const serverId = settings?.serverId ?? plugin;
+		const mcpSettings =
+			settings?.readTool.startsWith(`${serverId}.`) &&
+			settings.updateTool.startsWith(`${serverId}.`)
+				? {
+						readTool: settings.readTool,
+						updateTool: settings.updateTool,
+						serverId,
+					}
+				: undefined;
+		if (fields.length === 0 && !tab.view && !tab.companion && !mcpSettings) {
 			continue;
 		}
 		tabs.push({
 			plugin,
-			id: asString(entry.id) ?? `${plugin}.settings`,
-			title: asString(entry.title) ?? "Settings",
-			scope: parseScope(entry.scope),
-			// Only an explicit `false` means disabled — an older Core omits the bit
-			// and everything it sends is from an enabled plugin.
-			enabled: entry.app_enabled !== false,
+			id: tab.id ?? `${plugin}.settings`,
+			title: tab.title ?? "Settings",
+			scope: tab.scope,
+			enabled: tab.app_enabled !== false,
 			fields,
-			view,
+			view: tab.view,
+			companion: tab.companion,
+			mcpSettings,
 		});
 	}
 	return tabs;

@@ -18,7 +18,7 @@ export interface SearchEngine {
 	label: string;
 }
 
-export const SEARCH_ENGINES: Record<SearchEngineId, SearchEngine> = {
+export const SEARCH_ENGINES = {
 	google: {
 		id: "google",
 		label: "Google",
@@ -34,16 +34,34 @@ export const SEARCH_ENGINES: Record<SearchEngineId, SearchEngine> = {
 		label: "Bing",
 		buildUrl: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}`,
 	},
-};
+} satisfies Record<SearchEngineId, SearchEngine>;
 
 export const DEFAULT_ENGINE: SearchEngineId = "google";
 
 // "Bangs": !keyword routes the rest of the query straight to a destination.
 // Each entry takes the query (may be empty) and returns a URL.
-export const BANGS: Record<
-	string,
-	{ build: (q: string) => string; label: string }
-> = {
+export interface BangDestination {
+	build: (query: string) => string;
+	label: string;
+}
+
+/** Built-in destinations plus the same authored extension-key port. */
+export interface BangRegistry {
+	a: BangDestination;
+	b: BangDestination;
+	ddg: BangDestination;
+	g: BangDestination;
+	gh: BangDestination;
+	maps: BangDestination;
+	mdn: BangDestination;
+	npm: BangDestination;
+	so: BangDestination;
+	w: BangDestination;
+	yt: BangDestination;
+	[keyword: string]: BangDestination;
+}
+
+export const BANGS: BangRegistry = {
 	g: { label: "Google", build: (q) => SEARCH_ENGINES.google.buildUrl(q) },
 	ddg: {
 		label: "DuckDuckGo",
@@ -285,7 +303,7 @@ export function looksLikeUrl(input: string): boolean {
 		return false;
 	}
 
-	const host = s.split(HOST_SPLIT_RE)[0];
+	const host = s.split(HOST_SPLIT_RE)[0] ?? "";
 	return COMMON_TLDS.has(lastLabelTld(host));
 }
 
@@ -343,7 +361,7 @@ export function route(
 
 	// Explicit overrides win and do not offer a cycle.
 	if (input.startsWith("/")) {
-		const [name, ...rest] = input.slice(1).split(WHITESPACE_SPLIT_RE);
+		const [name = "", ...rest] = input.slice(1).split(WHITESPACE_SPLIT_RE);
 		return {
 			primary: {
 				kind: "skill",
@@ -355,7 +373,9 @@ export function route(
 		};
 	}
 	if (input.startsWith("@")) {
-		const targets = [...input.matchAll(MENTION_RE)].map((m) => m[1]);
+		const targets = [...input.matchAll(MENTION_RE)].flatMap((m) =>
+			m[1] ? [m[1]] : []
+		);
 		return {
 			primary: {
 				kind: "mention",
@@ -367,9 +387,12 @@ export function route(
 		};
 	}
 	if (input.startsWith("!")) {
-		const [bang, ...rest] = input.slice(1).split(WHITESPACE_SPLIT_RE);
+		const [bang = "", ...rest] = input.slice(1).split(WHITESPACE_SPLIT_RE);
 		const query = rest.join(" ");
-		const entry = BANGS[bang?.toLowerCase()];
+		const key = bang.toLowerCase();
+		// Own keys only: `!constructor` / `!__proto__` would otherwise resolve to
+		// inherited Object members that have no `build`.
+		const entry = Object.hasOwn(BANGS, key) ? BANGS[key] : undefined;
 		if (entry) {
 			return {
 				primary: {

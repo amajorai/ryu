@@ -8,7 +8,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 
-import "./ryu-logo-model.css";
+import styles from "./ryu-logo-model.module.css";
 
 const RYU_MODEL_SCALE = 0.22;
 const RYU_MASK_SIZE = 512;
@@ -24,16 +24,16 @@ const RYU_EYE_RADIUS_Y = 3;
  * coordinate system. The eye paths are holes in the volume, so the
  * background really passes through them instead of being painted over.
  */
-function createRyuShape() {
-	const shape = new THREE.Shape();
+function createRyuContour() {
+	const contour = new THREE.Shape();
 
-	shape.moveTo(12, 24);
-	shape.bezierCurveTo(21.2, 24, 24.9, 19.2, 24.4, 9.4);
-	shape.bezierCurveTo(24.1, 0.3, 12.8, -3.7, 8.8, 5.4);
-	shape.bezierCurveTo(6.6, 11.1, 9.9, 13.3, 5.9, 18);
-	shape.bezierCurveTo(5, 19.1, 4.1, 20, 3.2, 21.1);
-	shape.bezierCurveTo(2, 22.4, 3.9, 23.3, 5.1, 23.3);
-	shape.bezierCurveTo(7.4, 23.3, 9.7, 24, 12, 24);
+	contour.moveTo(12, 24);
+	contour.bezierCurveTo(21.2, 24, 24.9, 19.2, 24.4, 9.4);
+	contour.bezierCurveTo(24.1, 0.3, 12.8, -3.7, 8.8, 5.4);
+	contour.bezierCurveTo(6.6, 11.1, 9.9, 13.3, 5.9, 18);
+	contour.bezierCurveTo(5, 19.1, 4.1, 20, 3.2, 21.1);
+	contour.bezierCurveTo(2, 22.4, 3.9, 23.3, 5.1, 23.3);
+	contour.bezierCurveTo(7.4, 23.3, 9.7, 24, 12, 24);
 
 	const leftEye = new THREE.Path();
 	leftEye.absellipse(
@@ -57,12 +57,12 @@ function createRyuShape() {
 		true,
 		0
 	);
-	shape.holes.push(leftEye, rightEye);
+	contour.holes.push(leftEye, rightEye);
 
-	return shape;
+	return contour;
 }
 
-const RYU_SHAPE = createRyuShape();
+const RYU_CONTOUR = createRyuContour();
 
 function isPointInsidePolygon(
 	x: number,
@@ -71,13 +71,11 @@ function isPointInsidePolygon(
 ) {
 	let inside = false;
 
-	for (
-		let index = 0, previous = polygon.length - 1;
-		index < polygon.length;
-		previous = index++
-	) {
-		const currentPoint = polygon[index];
-		const previousPoint = polygon[previous];
+	let previousPoint = polygon.at(-1);
+	if (!previousPoint) {
+		return false;
+	}
+	for (const currentPoint of polygon) {
 		const crossesScanline =
 			currentPoint.y > y !== previousPoint.y > y &&
 			x <
@@ -88,20 +86,28 @@ function isPointInsidePolygon(
 		if (crossesScanline) {
 			inside = !inside;
 		}
+		previousPoint = currentPoint;
 	}
 
 	return inside;
 }
 
 function createRyuMaskTexture() {
-	const { holes, shape } = RYU_SHAPE.extractPoints(RYU_CURVE_SEGMENTS);
-	const shapeBounds = new THREE.Box2().setFromPoints(shape);
-	const shapeWidth = shapeBounds.max.x - shapeBounds.min.x;
-	const shapeHeight = shapeBounds.max.y - shapeBounds.min.y;
-	const padding = Math.max(shapeWidth, shapeHeight) * RYU_MASK_PADDING;
+	const { holes, shape: contour } =
+		RYU_CONTOUR.extractPoints(RYU_CURVE_SEGMENTS);
+	const contourBounds = new THREE.Box2().setFromPoints(contour);
+	const contourWidth = contourBounds.max.x - contourBounds.min.x;
+	const contourHeight = contourBounds.max.y - contourBounds.min.y;
+	const padding = Math.max(contourWidth, contourHeight) * RYU_MASK_PADDING;
 	const bounds = new THREE.Box2(
-		new THREE.Vector2(shapeBounds.min.x - padding, shapeBounds.min.y - padding),
-		new THREE.Vector2(shapeBounds.max.x + padding, shapeBounds.max.y + padding)
+		new THREE.Vector2(
+			contourBounds.min.x - padding,
+			contourBounds.min.y - padding
+		),
+		new THREE.Vector2(
+			contourBounds.max.x + padding,
+			contourBounds.max.y + padding
+		)
 	);
 	const width = bounds.max.x - bounds.min.x;
 	const height = bounds.max.y - bounds.min.y;
@@ -113,7 +119,7 @@ function createRyuMaskTexture() {
 		for (let x = 0; x < RYU_MASK_SIZE; x += 1) {
 			const pointX = bounds.min.x + ((x + 0.5) / RYU_MASK_SIZE) * width;
 			const visible =
-				isPointInsidePolygon(pointX, pointY, shape) &&
+				isPointInsidePolygon(pointX, pointY, contour) &&
 				!holes.some((hole) => isPointInsidePolygon(pointX, pointY, hole));
 			const value = visible ? 255 : 0;
 			const offset = (y * RYU_MASK_SIZE + x) * 4;
@@ -275,11 +281,15 @@ function RyuLogoScene({
 			<hemisphereLight args={["#ffffff", "#999999", 1.1]} />
 			<directionalLight
 				castShadow
-				color="#ffffff"
+				color={new THREE.Color(1, 1, 1)}
 				intensity={2.8}
 				position={[4, 6, 8]}
 			/>
-			<pointLight color="#ffffff" intensity={7} position={[-4, 1, 5]} />
+			<pointLight
+				color={new THREE.Color(1, 1, 1)}
+				intensity={7}
+				position={[-4, 1, 5]}
+			/>
 
 			<group rotation={[0.02, -0.14, 0]}>
 				<RyuLogoMesh />
@@ -355,20 +365,20 @@ export default function RyuLogoModel({
 	return (
 		<figure
 			aria-hidden={decorative ? true : undefined}
-			className={cn("ryu-logo-model", className)}
+			className={cn(styles.root, className)}
 		>
 			<div
 				aria-label="Interactive three-dimensional filled Ryu logo with transparent eyes"
-				className="ryu-logo-model__stage"
+				className={styles.stage}
 				data-dragging={isDragging}
 				role="img"
 			>
-				<div aria-hidden="true" className="ryu-logo-model__atmosphere" />
-				<div aria-hidden="true" className="ryu-logo-model__orbit" />
+				<div aria-hidden="true" className={styles.atmosphere} />
+				<div aria-hidden="true" className={styles.orbit} />
 				{webGLSupported ? (
 					<Canvas
 						camera={{ fov: 36, position: [0, 0, 11] }}
-						className="ryu-logo-model__canvas"
+						className={styles.canvas}
 						dpr={[1, 2]}
 						gl={{ alpha: true, antialias: true }}
 						shadows
@@ -382,24 +392,21 @@ export default function RyuLogoModel({
 						/>
 					</Canvas>
 				) : (
-					<Logo
-						animated={false}
-						className="ryu-logo-model__fallback"
-						size="100%"
-						variant="filled"
-					/>
+					<div className={styles.fallback}>
+						<Logo animated={false} size="100%" variant="filled" />
+					</div>
 				)}
-				<div aria-hidden="true" className="ryu-logo-model__shadow" />
+				<div aria-hidden="true" className={styles.shadow} />
 			</div>
 			{decorative ? null : (
 				<>
-					<figcaption className="ryu-logo-model__caption">
+					<figcaption className={styles.caption}>
 						<span>
 							<strong>Ryu / Filled form</strong>
 							<br />
 							Body solid · eyes transparent
 						</span>
-						<span className="ryu-logo-model__hint">
+						<span className={styles.hint}>
 							{webGLSupported
 								? isDragging
 									? "Release to let it drift"

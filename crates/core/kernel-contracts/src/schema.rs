@@ -42,6 +42,46 @@ pub struct AgentConfig {
     /// `permission_grants`).
     #[serde(default)]
     pub tools: Vec<String>,
+
+    /// Whose accounts the agent works with when Core creates it. Absent keeps
+    /// Core's default (`managed`, "Acts as you"), so manifests written before
+    /// this field existed load unchanged. An unknown value fails validation
+    /// rather than falling back to a wider mode.
+    ///
+    /// Only the mode travels in a manifest. The account allowlist
+    /// (`account_access`) is the user's choice on their own node: an app can
+    /// never grant its agent accounts, so [`validate_runnable`] rejects an
+    /// agent config that declares one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_mode: Option<ManifestAgentIdentityMode>,
+}
+
+/// The agent field an app manifest may never declare: which accounts an agent
+/// may use is set by the user on their own node, not by the app.
+pub const AGENT_CONFIG_FORBIDDEN_ACCOUNT_ACCESS: &str = "account_access";
+
+/// Identity mode an app manifest may declare for a `kind: "agent"` Runnable.
+/// Mirrors Core's agent identity mode; the wire spelling is the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ManifestAgentIdentityMode {
+    /// "Acts as you": works with the accounts the user connected.
+    Managed,
+    /// "Its own identity": its own accounts and logins, never the user's.
+    Individual,
+    /// "Both": its own accounts, plus the user's accounts the user allows.
+    Mixed,
+}
+
+impl ManifestAgentIdentityMode {
+    /// The wire spelling (`managed`, `individual` or `mixed`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Managed => "managed",
+            Self::Individual => "individual",
+            Self::Mixed => "mixed",
+        }
+    }
 }
 
 /// Config for a `kind: "workflow"` Runnable.
@@ -63,8 +103,8 @@ pub struct WorkflowConfig {
 ///   - `alias` (default / absent): the legacy behavior — re-expose an existing
 ///     registry tool named `slug` under the plugin's `app.<slug>` namespace.
 ///     Ships no new behavior; dispatch re-enters the target tool.
-///   - `inline_deno`: the plugin ships NEW logic. `code` is a JS body run in the
-///     existing `tool_exec` Deno sandbox with the same grant model as a turn hook
+///   - `inline_js`: the plugin ships NEW logic. `code` is a JS body run in the
+///     existing `tool_exec` JS sandbox with the same grant model as a turn hook
 ///     (`host.*` gated by the plugin's grants). Requires the `tool:execute` grant.
 ///   - `http`: Core proxies the call to `url` with Gateway egress governance,
 ///     gated by a `tool:http-egress:<domain>` grant.
@@ -79,14 +119,15 @@ pub struct WorkflowConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolConfig {
     /// Tool slug. For an `alias` tool this is the target registry tool id it
-    /// wraps (e.g. `"web_search"`); for `inline_deno`/`http` it is the tool's own
+    /// wraps (e.g. `"web_search"`); for `inline_js`/`http` it is the tool's own
     /// name. The registered, callable id is always `app.<slug>`.
     pub slug: String,
-    /// Backend kind: `"alias"` (default when absent) | `"inline_deno"` | `"http"`
-    /// | `"command"`.
+    /// Backend kind: `"alias"` (default when absent) | `"inline_js"` | `"http"`
+    /// | `"command"`. The pre-rename `"inline_deno"` is still accepted as a
+    /// deprecated alias of `"inline_js"` (see [`LEGACY_INLINE_DENO_BACKEND`]).
     #[serde(default)]
     pub backend: Option<String>,
-    /// `inline_deno`: the self-contained JS body run in the sandbox. Invoked with
+    /// `inline_js`: the self-contained JS body run in the sandbox. Invoked with
     /// `input` (the call arguments) and `host` (the capability bridge) in scope,
     /// exactly like a turn hook's `code`.
     #[serde(default)]
@@ -196,7 +237,7 @@ pub struct ToolConfig {
     /// `command`: absolute working directory for the child. `None` = inherit Core's.
     #[serde(default)]
     pub cwd: Option<String>,
-    /// `command` and `inline_deno`: hard wall-clock timeout in seconds. Commands
+    /// `command` and `inline_js`: hard wall-clock timeout in seconds. Commands
     /// default to [`DEFAULT_COMMAND_TIMEOUT_SECS`]; inline tools use this value
     /// as their scoped sandbox deadline when present.
     #[serde(default)]
@@ -211,9 +252,10 @@ pub struct ToolConfig {
     /// internal-address rejection (loopback / RFC1918 / link-local /
     /// 169.254.169.254 metadata / ULA / CGNAT), the same guard the `http` backend
     /// applies — so a network CLI cannot be turned into an SSRF probe. Absent = no
-    /// egress screen (a purely-local CLI). Because the child re-resolves DNS
-    /// itself, this is a pre-spawn screen (no IP-pinning), matching the inherent
-    /// residual for any shell-out fetcher.
+    /// egress screen (a purely-local CLI). Core additionally runs the child
+    /// behind a per-call screening egress proxy, which only mediates a binary
+    /// that honours the proxy environment, so a tool that sets this field must
+    /// also declare [`ToolConfig::bin_version`] (enforced by `resolve_backend`).
     #[serde(default)]
     pub egress_url_arg: Option<String>,
     /// `command`: structured argv builder that SUPERSEDES `command_args` when
@@ -229,6 +271,173 @@ pub struct ToolConfig {
     /// Absent = use `command_args` (the default template path; spider/exa).
     #[serde(default)]
     pub args: Option<Vec<ArgSpec>>,
+    /// `command`: version requirement for the allowlisted binary. Core runs the
+    /// declared probe against the resolved binary before every call (cached per
+    /// binary path, size, and modification time) and refuses the call when the
+    /// reported version is missing, unparsable, or outside `requirement`.
+    /// REQUIRED when `egress_url_arg` is set: Core's egress proxy only mediates a
+    /// child that honours the proxy environment, which is a property of a
+    /// specific, verified release rather than of the binary's name. Absent on a
+    /// non-egress tool = no version check (today's behaviour).
+    #[serde(default)]
+    pub bin_version: Option<CommandBinVersion>,
+}
+
+/// Maximum length of a [`CommandBinVersion::install_hint`].
+pub const MAX_BIN_VERSION_INSTALL_HINT_LEN: usize = 200;
+
+/// Placeholder a [`CommandBinVersion::pattern`] uses for the version token.
+pub const BIN_VERSION_PLACEHOLDER: &str = "{version}";
+
+/// A `command` tool's binary-version requirement ([`ToolConfig::bin_version`]).
+///
+/// ```json
+/// "bin_version": {
+///   "args": ["--version"],
+///   "pattern": "spider_cli {version}",
+///   "requirement": "=2.53.9",
+///   "install_hint": "cargo install spider_cli --version 2.53.9 --locked"
+/// }
+/// ```
+///
+/// The probe arguments are manifest-fixed literals (never interpolated from call
+/// arguments). `pattern` uses the same `{name}` placeholder grammar as
+/// `command_args`, with exactly one `{version}` slot: the literal text around it
+/// must appear in the probe output (stdout, then stderr) and the slot must hold a
+/// SemVer version. `requirement` is a SemVer requirement in the same syntax as
+/// `engines.ryu` (for example `">=2.53.9, <3.0.0"` or `"=2.53.9"`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CommandBinVersion {
+    /// Probe argv (no shell). Absent = `["--version"]`.
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+    /// Literal text with exactly one `{version}` placeholder.
+    pub pattern: String,
+    /// SemVer requirement the probed version must satisfy.
+    pub requirement: String,
+    /// Optional one-line install instruction shown when the check fails.
+    #[serde(default)]
+    pub install_hint: Option<String>,
+}
+
+impl CommandBinVersion {
+    /// The probe argv, defaulting to `["--version"]`.
+    pub fn probe_args(&self) -> Vec<String> {
+        self.args
+            .clone()
+            .unwrap_or_else(|| vec!["--version".to_owned()])
+    }
+
+    /// The parsed SemVer requirement.
+    pub fn version_req(&self) -> Result<semver::VersionReq, String> {
+        semver::VersionReq::parse(self.requirement.trim()).map_err(|e| {
+            format!(
+                "tool backend 'command': 'bin_version.requirement' '{}' is not a SemVer requirement ({e})",
+                self.requirement
+            )
+        })
+    }
+
+    /// Structural validation (checked at `resolve_backend` time).
+    pub fn validate(&self) -> Result<(), String> {
+        for arg in self.probe_args() {
+            if arg.is_empty() || arg.contains('{') || arg.contains('}') || arg.contains('\0') {
+                return Err(format!(
+                    "tool backend 'command': 'bin_version.args' entry '{arg}' must be a non-empty literal (no placeholders)"
+                ));
+            }
+        }
+        let (prefix, suffix) = self.split_pattern()?;
+        if prefix.contains(['\n', '\r']) || suffix.contains(['\n', '\r']) {
+            return Err(
+                "tool backend 'command': 'bin_version.pattern' must be a single line".to_owned(),
+            );
+        }
+        if self.requirement.trim().is_empty() {
+            return Err(
+                "tool backend 'command': 'bin_version.requirement' must not be empty".to_owned(),
+            );
+        }
+        self.version_req()?;
+        if let Some(hint) = &self.install_hint {
+            if hint.trim().is_empty()
+                || hint.len() > MAX_BIN_VERSION_INSTALL_HINT_LEN
+                || hint.contains(['\n', '\r'])
+            {
+                return Err(format!(
+                    "tool backend 'command': 'bin_version.install_hint' must be one non-empty line of at most {MAX_BIN_VERSION_INSTALL_HINT_LEN} bytes"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Split `pattern` around its single `{version}` placeholder.
+    fn split_pattern(&self) -> Result<(&str, &str), String> {
+        let Some((prefix, suffix)) = self.pattern.split_once(BIN_VERSION_PLACEHOLDER) else {
+            return Err(format!(
+                "tool backend 'command': 'bin_version.pattern' must contain {BIN_VERSION_PLACEHOLDER}"
+            ));
+        };
+        if [prefix, suffix]
+            .iter()
+            .any(|part| part.contains('{') || part.contains('}'))
+        {
+            return Err(format!(
+                "tool backend 'command': 'bin_version.pattern' must contain exactly one {BIN_VERSION_PLACEHOLDER} and no other placeholder"
+            ));
+        }
+        Ok((prefix, suffix))
+    }
+
+    /// Extract the version from probe output. **Pure.** Scans line by line for
+    /// the pattern's literal prefix, reads the maximal SemVer-shaped token after
+    /// it, requires the literal suffix to follow, and parses the token as a
+    /// [`semver::Version`]. The first line that matches wins; `None` when no line
+    /// matches.
+    pub fn extract_version(&self, output: &str) -> Option<semver::Version> {
+        let (prefix, suffix) = self.split_pattern().ok()?;
+        for line in output.lines() {
+            let mut search_from = 0;
+            while search_from <= line.len() {
+                let Some(found) = line[search_from..].find(prefix) else {
+                    break;
+                };
+                let start = search_from + found + prefix.len();
+                // An empty prefix must anchor at a token boundary, not mid-number.
+                let boundary_ok = !prefix.is_empty()
+                    || line[..start]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|c| !is_semver_char(c));
+                if boundary_ok {
+                    let rest = &line[start..];
+                    let token_len = rest
+                        .char_indices()
+                        .find(|&(_, c)| !is_semver_char(c))
+                        .map_or(rest.len(), |(i, _)| i);
+                    let token = &rest[..token_len];
+                    if rest[token_len..].starts_with(suffix) {
+                        if let Ok(version) = semver::Version::parse(token) {
+                            return Some(version);
+                        }
+                    }
+                }
+                // Advance past this match (one char for an empty prefix).
+                let step = line[search_from + found..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+                search_from += found + prefix.len().max(step);
+            }
+        }
+        None
+    }
+}
+
+/// Characters a SemVer version token may contain.
+fn is_semver_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')
 }
 
 /// One entry in a [`ToolConfig::args`] structured argv builder. Exactly one
@@ -305,6 +514,41 @@ impl ArgSpec {
 /// Default wall-clock timeout for a [`ToolBackend::Command`] child, in seconds.
 pub const DEFAULT_COMMAND_TIMEOUT_SECS: u64 = 30;
 
+/// The `backend` name of a sandboxed-JavaScript tool ([`ToolBackend::InlineJs`]).
+pub const INLINE_JS_BACKEND: &str = "inline_js";
+
+/// The name [`INLINE_JS_BACKEND`] had while the sandbox ran on Deno.
+///
+/// Deprecated, but still accepted as an exact alias: tools the agent built with
+/// `write_tool`, third-party plugins packed by older SDKs, and marketplace
+/// installs from before the rename all persist `"inline_deno"` on disk. Refusing
+/// it would make every one of those plugins vanish at load after an upgrade.
+pub const LEGACY_INLINE_DENO_BACKEND: &str = "inline_deno";
+
+/// Whether `backend` names the sandboxed-JavaScript tool backend, under its
+/// current name or the deprecated [`LEGACY_INLINE_DENO_BACKEND`] alias.
+#[must_use]
+pub fn is_inline_js_backend(backend: &str) -> bool {
+    matches!(
+        backend.trim(),
+        INLINE_JS_BACKEND | LEGACY_INLINE_DENO_BACKEND
+    )
+}
+
+/// Whether `entry` is a `tool` runnable still declaring the deprecated
+/// [`LEGACY_INLINE_DENO_BACKEND`] name. It loads exactly like `inline_js`; the
+/// host uses this only to warn the author to rename it.
+#[must_use]
+pub fn runnable_uses_legacy_inline_deno(entry: &RunnableEntry) -> bool {
+    entry.kind == RunnableKind::Tool
+        && entry
+            .config
+            .as_ref()
+            .and_then(|config| config.get("backend"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|backend| backend.trim() == LEGACY_INLINE_DENO_BACKEND)
+}
+
 /// How a [`ToolBackend::Command`] shapes its child's stdout into the tool result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub enum CommandOutput {
@@ -321,8 +565,8 @@ pub enum CommandOutput {
 pub enum ToolBackend {
     /// Re-expose an existing registry tool named `target` (the legacy alias).
     Alias { target: String },
-    /// Run `code` in the `tool_exec` Deno sandbox (grant: `tool:execute`).
-    InlineDeno { code: String },
+    /// Run `code` in the `tool_exec` JS sandbox (grant: `tool:execute`).
+    InlineJs { code: String },
     /// Proxy the call to `url` with `method` (grant: `tool:http-egress:<domain>`).
     /// `header_params` are the arg names lowered onto request headers (auth +
     /// OpenAPI `in: header` params); the rest lower onto path/query/body.
@@ -381,6 +625,9 @@ pub enum ToolBackend {
         /// workspace before the command is spawned. Empty = not a filesystem
         /// path-scoped command.
         workspace_path_args: Vec<String>,
+        /// Binary-version requirement probed before spawn (see
+        /// [`ToolConfig::bin_version`]). `None` = no version check.
+        bin_version: Option<CommandBinVersion>,
     },
 }
 
@@ -590,15 +837,15 @@ impl ToolConfig {
             "" | "alias" => Ok(ToolBackend::Alias {
                 target: self.slug.clone(),
             }),
-            "inline_deno" => {
+            // `inline_deno` is the deprecated pre-rename spelling; it resolves to
+            // the very same backend so manifests persisted before the rename load.
+            name @ (INLINE_JS_BACKEND | LEGACY_INLINE_DENO_BACKEND) => {
                 let code = self
                     .code
                     .as_deref()
                     .filter(|c| !c.trim().is_empty())
-                    .ok_or_else(|| {
-                        "tool backend 'inline_deno' requires a non-empty 'code'".to_owned()
-                    })?;
-                Ok(ToolBackend::InlineDeno {
+                    .ok_or_else(|| format!("tool backend '{name}' requires a non-empty 'code'"))?;
+                Ok(ToolBackend::InlineJs {
                     code: code.to_owned(),
                 })
             }
@@ -640,7 +887,7 @@ impl ToolConfig {
                     Some(_) => {
                         return Err(
                             "tool backend 'http': 'body_defaults' must be a JSON object".to_owned()
-                        )
+                        );
                     }
                 };
                 let caller_agent_query = match self.caller_agent_query.as_deref() {
@@ -699,8 +946,8 @@ impl ToolConfig {
                     Some("json") => CommandOutput::Json,
                     Some(other) => {
                         return Err(format!(
-                        "tool backend 'command': unknown output '{other}' (expected stdout | json)"
-                    ))
+                            "tool backend 'command': unknown output '{other}' (expected stdout | json)"
+                        ));
                     }
                 };
                 // Structured `args` (map/split), when present, supersedes the
@@ -718,6 +965,20 @@ impl ToolConfig {
                 };
                 let workspace_path_args = self.workspace_path_args.clone().unwrap_or_default();
                 validate_workspace_path_args(self, &workspace_path_args)?;
+                let egress_url_arg = self.egress_url_arg.clone().filter(|s| !s.trim().is_empty());
+                if let Some(requirement) = &self.bin_version {
+                    requirement.validate()?;
+                }
+                // An egress-screened child is only mediated by Core's proxy when the
+                // binary honours the proxy environment — a property of a verified
+                // release. Require the declaration so a different installed
+                // binary cannot silently run behind a proxy it may bypass.
+                if egress_url_arg.is_some() && self.bin_version.is_none() {
+                    return Err(
+                        "tool backend 'command': 'egress_url_arg' requires 'bin_version' (the egress proxy only mediates a verified binary release)"
+                            .to_owned(),
+                    );
+                }
                 Ok(ToolBackend::Command {
                     bin: bin.to_owned(),
                     args: self.command_args.clone().unwrap_or_default(),
@@ -725,14 +986,15 @@ impl ToolConfig {
                     cwd: self.cwd.clone().filter(|c| !c.trim().is_empty()),
                     timeout_secs: self.timeout_secs.unwrap_or(DEFAULT_COMMAND_TIMEOUT_SECS),
                     output,
-                    egress_url_arg: self.egress_url_arg.clone().filter(|s| !s.trim().is_empty()),
+                    egress_url_arg,
                     arg_specs,
                     arg_bounds: extract_arg_bounds(self.input_schema.as_ref()),
                     workspace_path_args,
+                    bin_version: self.bin_version.clone(),
                 })
             }
             other => Err(format!(
-                "unknown tool backend '{other}' (expected alias | inline_deno | http | command)"
+                "unknown tool backend '{other}' (expected alias | inline_js | http | command)"
             )),
         }
     }
@@ -917,6 +1179,13 @@ pub struct ExternalRuntimeConfig {
     #[serde(default)]
     pub assets: Vec<AssetSpec>,
 
+    /// Hugging Face model snapshots to fetch into this runtime before first run.
+    /// Each entry names the exact files the plugin needs, so a model package can
+    /// carry a complete local checkpoint without downloading README images,
+    /// evaluation artifacts, or executable files from the repository.
+    #[serde(default)]
+    pub model_snapshots: Vec<ModelSnapshotSpec>,
+
     /// Port the runtime's HTTP server binds to (adopt-or-spawn check).
     #[serde(default)]
     pub port: Option<u16>,
@@ -934,9 +1203,19 @@ pub struct ExternalRuntimeConfig {
     pub source: Option<SourceArchiveSpec>,
 
     /// Environment variables layered onto the runtime process at spawn. Values may
-    /// use `${RYU_DIR}` — expanded to the Core data dir (`~/.ryu`) at spawn — so a
-    /// runtime can point caches/outputs at Core-owned paths without hardcoding an
-    /// absolute path in the (portable) manifest. Nothing else is interpolated.
+    /// use `${RYU_DIR}` (the Core data dir), `${RYU_PLUGIN_DATA_DIR}` (this
+    /// plugin's own data dir, `<data dir>/plugin-data/<dir>`), `${RYU_MODELS_DIR}`
+    /// (the shared `<data dir>/models`), `${RYU_PLUGIN_DIR}` and
+    /// `${RYU_RUNTIME_DIR}` — expanded at spawn — so a runtime can point
+    /// caches/outputs at Core-owned paths without hardcoding an absolute path in
+    /// the (portable) manifest. Explicit `env:NAME` values resolve
+    /// through the plugin-scoped process environment and encrypted secret store at
+    /// sidecar start; missing or unauthorized references are omitted.
+    ///
+    /// `"RYU_EGRESS_PROXY_URL": "${RYU_EGRESS_PROXY_URL}"` is a reserved request,
+    /// not a general token: Core always removes it, then fills in the node's
+    /// egress proxy URL only for a sidecar of an exact compiled built-in manifest
+    /// (the Browser app). Any other manifest that declares it gets no such var.
     #[serde(default)]
     pub env: std::collections::BTreeMap<String, String>,
 }
@@ -949,6 +1228,7 @@ pub struct ExternalRuntimeConfig {
 pub struct SourceArchiveSpec {
     /// Direct **https** URL to the archive. Non-https is rejected by the SSRF egress
     /// screen at download time.
+    #[serde(default)]
     pub url: String,
 
     /// Optional lower-case-hex SHA-256 of the archive; when present the download is
@@ -957,8 +1237,47 @@ pub struct SourceArchiveSpec {
     pub sha256: Option<String>,
 
     /// Archive format: `"tar.gz"` or `"zip"`. Extracted whole-tree into the runtime
-    /// dir so the package's `pyproject.toml` lands at its root.
+    /// dir so the package's `pyproject.toml` lands at its root. `"directory"` is
+    /// also supported with [`Self::path`] for package-owned source trees.
     pub format: String,
+
+    /// Optional path to a source directory carried by the installed plugin package.
+    /// The path is resolved relative to the plugin root, never relative to the
+    /// shared Ryu data directory. It is useful for a plugin that ships its own
+    /// small Python sidecar instead of requiring a separately published archive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// A pinned, allowlisted Hugging Face repository snapshot for an external runtime.
+///
+/// The provisioner enumerates the Hub tree at `revision`, verifies every requested
+/// path exists, and downloads only those files into the sidecar's private runtime
+/// directory. This is intentionally separate from [`AssetSpec`], which is for one
+/// direct file and cannot preserve a model repository's directory layout.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelSnapshotSpec {
+    /// A public Hub repository reference such as `hf:convaiinnovations/laya`.
+    /// Direct URLs are not accepted for snapshots because the tree listing and
+    /// file allowlist are part of the trust boundary.
+    pub source: String,
+
+    /// Immutable Hub revision, normally a commit SHA. Branch names remain valid
+    /// for development but are not reproducible package provenance.
+    #[serde(default = "default_model_revision")]
+    pub revision: String,
+
+    /// Destination directory relative to the sidecar runtime directory.
+    pub dest_under_runtime: String,
+
+    /// Exact repository-relative files to fetch. Empty lists are rejected by the
+    /// provisioner so a manifest cannot claim to bundle a model while downloading
+    /// nothing.
+    pub files: Vec<String>,
+}
+
+fn default_model_revision() -> String {
+    "main".to_owned()
 }
 
 /// A single asset an external runtime needs, fetched before first run. Either a
@@ -1106,6 +1425,227 @@ pub struct SidecarSpec {
     /// [`idle_stop_secs`]: SidecarSpec::idle_stop_secs
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provides_provider: Option<ProviderRegistrationSpec>,
+
+    /// Optional **OS-isolation** declaration for this native process: extra
+    /// filesystem paths it needs beyond its own data directory and the system
+    /// temp directory, an optional stricter mode, and an optional memory cap.
+    ///
+    /// Isolation is controlled by the node operator (Core setting
+    /// `RYU_SIDECAR_SANDBOX`, default `off`). This block can only make a sidecar
+    /// **stricter**: its `mode` is combined with the operator's by taking the
+    /// stricter of the two, and its paths only widen the sandbox's allow-list
+    /// within the validated placeholder roots ([`SandboxPathBase`]), never to
+    /// another app's directory, the whole home directory, or the whole Core data
+    /// directory. Absent = the default policy (own data dir + temp dir +
+    /// system/runtime read access). Additive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<SidecarSandboxSpec>,
+}
+
+/// Operator-selectable OS-isolation mode for native sidecars, ordered from least
+/// to most strict so the effective mode is the `max` of every source.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum SidecarSandboxMode {
+    /// No policy is computed and nothing is applied (the default).
+    #[default]
+    Off,
+    /// The policy is computed and logged, and the would-be status is reported,
+    /// but nothing is applied to the process.
+    Audit,
+    /// The policy is applied with the platform backend (Landlock on Linux,
+    /// Seatbelt on macOS, a Job Object on Windows).
+    Enforce,
+}
+
+impl SidecarSandboxMode {
+    /// The wire spelling (`off` / `audit` / `enforce`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Audit => "audit",
+            Self::Enforce => "enforce",
+        }
+    }
+
+    /// Parse an operator-supplied spelling (case-insensitive, trimmed).
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "audit" => Some(Self::Audit),
+            "enforce" => Some(Self::Enforce),
+            _ => None,
+        }
+    }
+}
+
+/// The `sidecars[].sandbox` block. See [`SidecarSpec::sandbox`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SidecarSandboxSpec {
+    /// Minimum isolation mode this sidecar asks for. Combined with the operator
+    /// setting by taking the **stricter** of the two, so a manifest can opt itself
+    /// into `audit`/`enforce` but can never loosen what the operator chose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<SidecarSandboxMode>,
+
+    /// Extra filesystem paths, each written with a placeholder root
+    /// (`$APP_DATA`, `$RYU_DIR/...`, `$HOME/...`, `$TMP`). See
+    /// [`parse_sandbox_path`] for the accepted grammar.
+    #[serde(default, skip_serializing_if = "SidecarSandboxFs::is_empty")]
+    pub fs: SidecarSandboxFs,
+
+    /// Optional memory cap for the sidecar's process tree, in MiB. Applied by the
+    /// Windows Job Object backend only; ignored elsewhere. Must be `>= 64`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_limit_mb: Option<u64>,
+}
+
+/// Declared extra filesystem access for a sandboxed sidecar.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SidecarSandboxFs {
+    /// Paths the sidecar may read (and execute from).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read: Vec<String>,
+    /// Paths the sidecar may read and write.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub write: Vec<String>,
+}
+
+impl SidecarSandboxFs {
+    /// Whether no extra path is declared.
+    pub fn is_empty(&self) -> bool {
+        self.read.is_empty() && self.write.is_empty()
+    }
+}
+
+/// Upper bound on declared `sandbox.fs.read` + `sandbox.fs.write` entries.
+pub const MAX_SANDBOX_FS_PATHS: usize = 32;
+/// Upper bound on one declared sandbox path's length, in bytes.
+pub const MAX_SANDBOX_PATH_LEN: usize = 512;
+/// Smallest accepted `sandbox.memory_limit_mb`.
+pub const MIN_SANDBOX_MEMORY_LIMIT_MB: u64 = 64;
+
+/// The placeholder root a declared sandbox path is anchored to. Core resolves
+/// each to a concrete directory at spawn; a manifest never names an absolute path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxPathBase {
+    /// `$APP_DATA`: this plugin's own directory (`<plugins_dir>/<plugin>`).
+    AppData,
+    /// `$RYU_DIR/<sub>`: a named entry of the Core data directory. The bare root
+    /// and the `plugins`/`apps`/`plugin-data` namespaces (other apps' directories
+    /// and data) are refused.
+    RyuDir,
+    /// `$HOME/<sub>`: a named entry of the user's home directory. The bare home
+    /// directory is refused.
+    Home,
+    /// `$TMP`: the system temp directory.
+    Tmp,
+}
+
+/// A validated, not-yet-resolved sandbox path: a root plus plain relative segments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SandboxPathRef {
+    /// The placeholder root.
+    pub base: SandboxPathBase,
+    /// Plain path segments below the root (never `.`, `..`, or empty).
+    pub segments: Vec<String>,
+}
+
+/// Parse and validate one declared `sandbox.fs` path.
+///
+/// Grammar: `$APP_DATA`, `$TMP`, `$RYU_DIR`, or `$HOME`, optionally followed by
+/// `/` and plain relative segments. Refused: anything not starting with a known
+/// placeholder (absolute or relative literal paths, `~`), `.`/`..`/empty
+/// segments, backslashes, NUL, `:` (drive letters, alternate streams), a second
+/// `$`, the bare `$HOME` or `$RYU_DIR`, and `$RYU_DIR/plugins/...`,
+/// `$RYU_DIR/apps/...` or `$RYU_DIR/plugin-data/...` (other apps' directories and
+/// data; a sidecar's own directory is `$APP_DATA`, and its own data directory is
+/// granted without being declared). Core re-checks the resolved path at spawn (symlinks, overlap
+/// with another app's directory); this is the static half.
+pub fn parse_sandbox_path(raw: &str) -> Result<SandboxPathRef, String> {
+    if raw.len() > MAX_SANDBOX_PATH_LEN {
+        return Err(format!(
+            "sandbox path is longer than {MAX_SANDBOX_PATH_LEN} bytes"
+        ));
+    }
+    let (base, rest) = [
+        ("$APP_DATA", SandboxPathBase::AppData),
+        ("$RYU_DIR", SandboxPathBase::RyuDir),
+        ("$HOME", SandboxPathBase::Home),
+        ("$TMP", SandboxPathBase::Tmp),
+    ]
+    .into_iter()
+    .find_map(|(prefix, base)| {
+        let rest = raw.strip_prefix(prefix)?;
+        (rest.is_empty() || rest.starts_with('/')).then_some((base, rest))
+    })
+    .ok_or_else(|| {
+        format!("sandbox path '{raw}' must start with $APP_DATA, $RYU_DIR/, $HOME/, or $TMP")
+    })?;
+    let rest = rest.strip_prefix('/').unwrap_or(rest);
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    let mut segments = Vec::new();
+    if !rest.is_empty() {
+        for segment in rest.split('/') {
+            let unsafe_segment = segment.is_empty()
+                || segment == "."
+                || segment == ".."
+                || segment.contains(['\\', '\0', ':', '$']);
+            if unsafe_segment {
+                return Err(format!(
+                    "sandbox path '{raw}' has an unsafe segment '{segment}' (no empty, '.', '..', '\\', ':', '$', or NUL segments)"
+                ));
+            }
+            segments.push(segment.to_owned());
+        }
+    }
+    let names_app_dirs = segments.first().is_some_and(|first| {
+        ["plugins", "apps", "plugin-data"]
+            .iter()
+            .any(|namespace| first.eq_ignore_ascii_case(namespace))
+    });
+    match base {
+        SandboxPathBase::Home | SandboxPathBase::RyuDir if segments.is_empty() => Err(format!(
+            "sandbox path '{raw}' must name an entry below the root, not the whole directory"
+        )),
+        SandboxPathBase::RyuDir if names_app_dirs => Err(format!(
+            "sandbox path '{raw}' points into the app directories; use $APP_DATA for this app's own directory"
+        )),
+        _ => Ok(SandboxPathRef { base, segments }),
+    }
+}
+
+fn validate_sidecar_sandbox(name: &str, sandbox: &SidecarSandboxSpec) -> Result<(), String> {
+    let total = sandbox.fs.read.len() + sandbox.fs.write.len();
+    if total > MAX_SANDBOX_FS_PATHS {
+        return Err(format!(
+            "sidecar '{name}': 'sandbox.fs' declares {total} paths (max {MAX_SANDBOX_FS_PATHS})"
+        ));
+    }
+    for raw in sandbox.fs.read.iter().chain(&sandbox.fs.write) {
+        parse_sandbox_path(raw).map_err(|e| format!("sidecar '{name}': {e}"))?;
+    }
+    if let Some(mb) = sandbox.memory_limit_mb {
+        if mb < MIN_SANDBOX_MEMORY_LIMIT_MB {
+            return Err(format!(
+                "sidecar '{name}': 'sandbox.memory_limit_mb' must be >= {MIN_SANDBOX_MEMORY_LIMIT_MB} (got {mb})"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Declares that a [`SidecarSpec`] serves an OpenAI-compatible model endpoint Core
@@ -1256,6 +1796,34 @@ pub struct HttpProxySpec {
     /// namespace, so a sidecar cannot opt into Core's Better Auth cookie.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forward_cookie_names: Vec<String>,
+
+    /// Whether Core stamps the verified caller's email (`x-ryu-caller-email`, the
+    /// signed identity token's `email` claim) on hops to this sidecar. Off by
+    /// default: the caller's user and org IDs are the only identity every sidecar
+    /// receives, and a caller-supplied copy of the email header is stripped for
+    /// every sidecar either way. An app opts in only when it must match
+    /// email-addressed grants, such as named editors or invited viewers. Even
+    /// then, Core omits the header unless the token marks the email verified
+    /// (`email_verified: true`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forward_caller_email: bool,
+
+    /// Whether Core stamps a pseudonymous per-client rate subject
+    /// (`x-ryu-caller-rate-subject`) on hops to this sidecar, so an app can bound
+    /// anonymous public writes per client instead of node-wide. The value is
+    /// `user:<hash>` for a verified caller, `peer:<hash>` for an anonymous one
+    /// (derived from the client address Core resolved, IPv6 by /64 prefix), or
+    /// `unknown` when Core cannot tell clients apart. Hashes are scoped to the
+    /// plugin id and never carry the raw address. A caller-supplied copy of the
+    /// header is stripped for every sidecar either way. Off by default.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forward_caller_rate_subject: bool,
+
+    /// Ask Core to attach the current set of resource ids the verified caller may
+    /// read. Derived-index sidecars use this protected scope instead of trusting
+    /// client-supplied ownership fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_resource_scope: Option<String>,
 
     /// The exact set of proxied routes. Each entry's [`RouteSpec::path`] is matched
     /// against the incoming sub-path (the segment after `/api/ext/<plugin_id>`),
@@ -1455,9 +2023,43 @@ pub struct LocalProcessSpec {
 
     /// Extra environment for the child (the reserved `RYU_EXT_*` vars are injected
     /// last, so a manifest can never override them).
+    ///
+    /// `"RYU_EGRESS_PROXY_URL": "${RYU_EGRESS_PROXY_URL}"` is a reserved request,
+    /// not a general token: Core always removes it, then fills in the node's
+    /// egress proxy URL only for a sidecar of an exact compiled built-in manifest
+    /// (the Browser app). Any other manifest that declares it gets no such var.
     #[serde(default)]
     pub env: std::collections::BTreeMap<String, String>,
+
+    /// Optional per-platform **bundle** assets, keyed by Core's platform tag
+    /// (`update::platform_tag()`, e.g. `"macos-aarch64"`). On a host whose tag is a
+    /// key here, download-on-enable fetches the release asset
+    /// `<command>-<platform_tag>.<format>` (plus its sibling `.sha256`, required)
+    /// instead of the single-file `<command>-<platform_tag>[.exe]`, extracts it into
+    /// a managed per-command directory, and spawns [`LocalBundleSpec::entrypoint`]
+    /// inside it. This is for programs that cannot ship as one executable file —
+    /// e.g. a macOS `.app` bundle (`"Ryu Browser.app/Contents/MacOS/Ryu Browser"`).
+    /// Platforms not listed keep the single-file asset. Empty = single-file only.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub bundles: std::collections::BTreeMap<String, LocalBundleSpec>,
 }
+
+/// One per-platform bundle asset of a [`LocalProcessSpec`] (see
+/// [`LocalProcessSpec::bundles`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LocalBundleSpec {
+    /// Archive format of the release asset; also its file extension. Only
+    /// `"tar.gz"` is supported — it carries the symlinks and executable bits an
+    /// application bundle depends on.
+    pub format: String,
+
+    /// The program to spawn, as a traversal-safe path relative to the extraction
+    /// root (e.g. `"Ryu Browser.app/Contents/MacOS/Ryu Browser"`).
+    pub entrypoint: String,
+}
+
+/// The archive formats a [`LocalBundleSpec`] may declare.
+pub const SUPPORTED_BUNDLE_FORMATS: &[&str] = &["tar.gz"];
 
 /// A downloadable binary sidecar process. The artifact is fetched via the shared
 /// Core `DownloadCenter` (streaming `.part` + resume + checksum), never a
@@ -1506,6 +2108,11 @@ pub struct BinarySpec {
     pub args: Vec<String>,
 
     /// Extra environment variables layered on top of the inherited environment.
+    ///
+    /// `"RYU_EGRESS_PROXY_URL": "${RYU_EGRESS_PROXY_URL}"` is a reserved request,
+    /// not a general token: Core always removes it, then fills in the node's
+    /// egress proxy URL only for a sidecar of an exact compiled built-in manifest
+    /// (the Browser app). Any other manifest that declares it gets no such var.
     #[serde(default)]
     pub env: std::collections::BTreeMap<String, String>,
 }
@@ -1612,6 +2219,34 @@ pub fn validate_sidecar_spec(spec: &SidecarSpec) -> Result<(), String> {
                     spec.name
                 ));
             }
+            if !local.bundles.is_empty() && !is_safe_name_segment(&local.command) {
+                return Err(format!(
+                    "sidecar '{}': local 'bundles' requires 'command' to be a bare name (it names the release asset and install dir)",
+                    spec.name
+                ));
+            }
+            for (platform, bundle) in &local.bundles {
+                if !is_safe_name_segment(platform) {
+                    return Err(format!(
+                        "sidecar '{}': local bundle platform '{platform}' must be a platform tag like 'macos-aarch64'",
+                        spec.name
+                    ));
+                }
+                if !SUPPORTED_BUNDLE_FORMATS.contains(&bundle.format.as_str()) {
+                    return Err(format!(
+                        "sidecar '{}': unsupported bundle format '{}' for '{platform}' (expected one of {SUPPORTED_BUNDLE_FORMATS:?})",
+                        spec.name, bundle.format
+                    ));
+                }
+                if bundle.entrypoint != bundle.entrypoint.trim()
+                    || !is_safe_rel_path(std::path::Path::new(&bundle.entrypoint))
+                {
+                    return Err(format!(
+                        "sidecar '{}': bundle 'entrypoint' for '{platform}' must be a traversal-safe relative path",
+                        spec.name
+                    ));
+                }
+            }
         }
         SidecarProcess::Node(node) => {
             let entry = node.entry.trim();
@@ -1675,6 +2310,9 @@ pub fn validate_sidecar_spec(spec: &SidecarSpec) -> Result<(), String> {
                 spec.name
             ));
         }
+    }
+    if let Some(sandbox) = &spec.sandbox {
+        validate_sidecar_sandbox(&spec.name, sandbox)?;
     }
     Ok(())
 }
@@ -1740,20 +2378,39 @@ pub fn capability_label(grant: &str) -> String {
             format!("Runs the '{bin}' command")
         };
     }
+    // Per-target cross-app request grant (`app:http:<target app id>`), reviewed one
+    // target at a time; the target is open-ended, so it is prefix-matched.
+    if let Some(target) = grant.strip_prefix("app:http:") {
+        return format!("Calls the '{target}' app on your behalf");
+    }
     match grant {
         // Chat / turn-hook capabilities.
         "chat.sendFollowUp" => "Interactive".to_string(),
         "hook:side-model" => "Second-model review".to_string(),
-        "hook:run-agent" => "Runs sub-agents".to_string(),
+        "hook:run-agent" => "Runs read-only sub-agents".to_string(),
+        "hook:run-agent:write" => {
+            "Runs sub-agents that can edit files and run commands".to_string()
+        }
         "hook:storage" => "Local storage".to_string(),
         "conversation:set-title" => "Renames chats".to_string(),
         "conversation:reactions" => "Adds message reactions".to_string(),
         "preferences:read" => "Reads preferences".to_string(),
         "background:control" => "Controls background processes".to_string(),
+        "usage:audit" => "Reads administrative Gateway audit records across callers".to_string(),
+        // Run recovery (the Self-Healing extraction): receive failed runs, queue a
+        // proposed fix for the user's approval, and re-run a failed agent run.
+        "runs:failures" => {
+            "Reads failed agent and workflow runs, including their instruction and error"
+                .to_string()
+        }
+        "approvals:request" => "Asks for your approval before a proposed fix runs".to_string(),
+        "runs:rerun-agent" => "Re-runs failed agent runs".to_string(),
+        "subscriptions:read" => "See your subscription accounts".to_string(),
         // Spaces + media capabilities (full-page companion apps).
         "spaces:docs" => "Spaces documents".to_string(),
         "storage:kv" => "Local storage".to_string(),
         "backups:app" => "Backs up and restores its own data".to_string(),
+        "authorization:defer" => "Rechecks permissions for recurring work".to_string(),
         // Sealing primitive: the app encrypts its OWN data with a key it never
         // holds. Phrased as protection, not as a permission to fear — this grant
         // strictly reduces what a stolen disk yields.
@@ -1860,6 +2517,15 @@ pub fn validate_runnable(entry: &RunnableEntry) -> Result<(), String> {
         RunnableKind::Agent => {
             // Agent config is fully optional — all fields have defaults.
             if let Some(raw) = &entry.config {
+                // An app may say how its agent works, never which of the
+                // user's accounts it gets.
+                if raw.get(AGENT_CONFIG_FORBIDDEN_ACCOUNT_ACCESS).is_some() {
+                    return Err(format!(
+                        "runnable '{}' (kind=agent): '{AGENT_CONFIG_FORBIDDEN_ACCOUNT_ACCESS}' \
+                         cannot be set by an app; the user chooses which accounts an agent may use",
+                        entry.id
+                    ));
+                }
                 serde_json::from_value::<AgentConfig>(raw.clone()).map_err(|e| {
                     format!("runnable '{}' (kind=agent): invalid config: {e}", entry.id)
                 })?;
@@ -1906,7 +2572,7 @@ pub fn validate_runnable(entry: &RunnableEntry) -> Result<(), String> {
                     entry.id
                 ));
             }
-            // Validate the backend so a manifest that declares `inline_deno`/`http`
+            // Validate the backend so a manifest that declares `inline_js`/`http`
             // without the required `code`/`url` is rejected at load, not at dispatch.
             cfg.resolve_backend()
                 .map_err(|e| format!("runnable '{}' (kind=tool): {e}", entry.id))?;
@@ -2052,6 +2718,28 @@ mod tests {
         assert_eq!(capability_label("chat.sendFollowUp"), "Interactive");
         assert_eq!(capability_label("mcp:web_scrape"), "Web scraping");
         assert_eq!(capability_label("custom:do-thing"), "Do thing");
+        assert_eq!(
+            capability_label("usage:audit"),
+            "Reads administrative Gateway audit records across callers"
+        );
+        assert_eq!(
+            capability_label("subscriptions:read"),
+            "See your subscription accounts"
+        );
+    }
+
+    #[test]
+    fn capability_label_describes_run_recovery_grants() {
+        assert!(capability_label("runs:failures").contains("failed"));
+        assert!(capability_label("approvals:request").contains("approval"));
+        assert_eq!(
+            capability_label("runs:rerun-agent"),
+            "Re-runs failed agent runs"
+        );
+        assert_eq!(
+            capability_label("app:http:@ryu/recipes"),
+            "Calls the '@ryu/recipes' app on your behalf"
+        );
     }
 
     #[test]
@@ -2106,8 +2794,11 @@ mod tests {
                 arg_specs,
                 arg_bounds,
                 workspace_path_args,
+                bin_version,
             } => {
                 assert_eq!(bin, "exa");
+                // No version probe unless declared.
+                assert_eq!(bin_version, None);
                 // No numeric bounds without an input_schema.
                 assert!(arg_bounds.is_empty());
                 assert_eq!(args, vec!["search", "--query={query}"]);
@@ -2127,6 +2818,27 @@ mod tests {
                 assert!(workspace_path_args.is_empty());
             }
             other => panic!("expected Command backend, got {other:?}"),
+        }
+    }
+
+    /// Manifests written before the rename (self-built tools, older packages) keep
+    /// resolving: `inline_deno` is a deprecated alias of `inline_js`.
+    #[test]
+    fn the_legacy_inline_deno_backend_resolves_as_inline_js() {
+        for backend in ["inline_js", LEGACY_INLINE_DENO_BACKEND] {
+            let cfg: ToolConfig = serde_json::from_value(
+                json!({ "slug": "demo", "backend": backend, "code": "return 1;" }),
+            )
+            .unwrap();
+            assert_eq!(
+                cfg.resolve_backend().unwrap(),
+                ToolBackend::InlineJs {
+                    code: "return 1;".to_owned()
+                }
+            );
+            let empty: ToolConfig =
+                serde_json::from_value(json!({ "slug": "demo", "backend": backend })).unwrap();
+            assert!(empty.resolve_backend().unwrap_err().contains(backend));
         }
     }
 
@@ -2152,6 +2864,136 @@ mod tests {
                 "path-shaped bin '{bad}' must be rejected"
             );
         }
+    }
+
+    fn spider_bin_version() -> CommandBinVersion {
+        serde_json::from_value(json!({
+            "pattern": "spider_cli {version}",
+            "requirement": "=2.53.9",
+            "install_hint": "cargo install spider_cli --version 2.53.9 --locked"
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn bin_version_extracts_semver_from_probe_output() {
+        let spec = spider_bin_version();
+        assert_eq!(spec.probe_args(), vec!["--version"]);
+        // spider_cli 2.53.9's clap `--version` output, verbatim.
+        assert_eq!(
+            spec.extract_version("spider_cli 2.53.9\n"),
+            Some(semver::Version::new(2, 53, 9))
+        );
+        // A later line and pre-release/build metadata still parse.
+        assert_eq!(
+            spec.extract_version("warning: x\nspider_cli 3.0.0-rc.1+abc\n")
+                .map(|v| v.to_string()),
+            Some("3.0.0-rc.1+abc".to_owned())
+        );
+        // A different program name, a non-SemVer token, and empty output do not.
+        for unparsable in [
+            "spider 2.53.9",
+            "spider_cli 2.53",
+            "spider_cli v2.53.9",
+            "",
+            "spider_cli",
+        ] {
+            assert_eq!(spec.extract_version(unparsable), None, "{unparsable}");
+        }
+        // Suffix literals and an empty prefix anchor correctly.
+        let suffixed: CommandBinVersion = serde_json::from_value(json!({
+            "pattern": "tool v{version} (",
+            "requirement": ">=1.0.0",
+        }))
+        .unwrap();
+        assert_eq!(
+            suffixed.extract_version("tool v1.2.3 (abc)"),
+            Some(semver::Version::new(1, 2, 3))
+        );
+        assert_eq!(suffixed.extract_version("tool v1.2.3"), None);
+        let bare: CommandBinVersion = serde_json::from_value(json!({
+            "args": ["-V"],
+            "pattern": "{version}",
+            "requirement": ">=1.0.0",
+        }))
+        .unwrap();
+        assert_eq!(bare.probe_args(), vec!["-V"]);
+        assert_eq!(
+            bare.extract_version("build 12 release 4.5.6"),
+            Some(semver::Version::new(4, 5, 6))
+        );
+    }
+
+    #[test]
+    fn bin_version_requirement_ranges() {
+        let spec = spider_bin_version();
+        let req = spec.version_req().unwrap();
+        assert!(req.matches(&semver::Version::new(2, 53, 9)));
+        assert!(!req.matches(&semver::Version::new(2, 53, 8)));
+        assert!(!req.matches(&semver::Version::new(2, 54, 0)));
+        let range: CommandBinVersion = serde_json::from_value(json!({
+            "pattern": "x {version}",
+            "requirement": ">=2.53.9, <3.0.0",
+        }))
+        .unwrap();
+        let req = range.version_req().unwrap();
+        assert!(req.matches(&semver::Version::new(2, 99, 0)));
+        assert!(!req.matches(&semver::Version::new(3, 0, 0)));
+        assert!(!req.matches(&semver::Version::new(2, 40, 0)));
+    }
+
+    #[test]
+    fn bin_version_validation_and_egress_requirement() {
+        let base = json!({
+            "slug": "spider.crawl",
+            "backend": "command",
+            "bin": "spider",
+            "command_args": ["crawl", "--", "{url}"],
+            "egress_url_arg": "url",
+        });
+        // egress_url_arg without bin_version is refused at load.
+        let missing: ToolConfig = serde_json::from_value(base.clone()).unwrap();
+        let err = missing.resolve_backend().unwrap_err();
+        assert!(
+            err.contains("'egress_url_arg' requires 'bin_version'"),
+            "{err}"
+        );
+
+        let mut declared = base.clone();
+        declared["bin_version"] = serde_json::to_value(spider_bin_version()).unwrap();
+        let cfg: ToolConfig = serde_json::from_value(declared).unwrap();
+        match cfg.resolve_backend().unwrap() {
+            ToolBackend::Command { bin_version, .. } => {
+                assert_eq!(bin_version, Some(spider_bin_version()));
+            }
+            other => panic!("expected Command backend, got {other:?}"),
+        }
+
+        for bad in [
+            json!({"pattern": "spider_cli", "requirement": "=1.0.0"}),
+            json!({"pattern": "{version} {version}", "requirement": "=1.0.0"}),
+            json!({"pattern": "a {other} {version}", "requirement": "=1.0.0"}),
+            json!({"pattern": "a\n{version}", "requirement": "=1.0.0"}),
+            json!({"pattern": "a {version}", "requirement": ""}),
+            json!({"pattern": "a {version}", "requirement": "not-a-range"}),
+            json!({"pattern": "a {version}", "requirement": "=1.0.0", "args": ["{url}"]}),
+            json!({"pattern": "a {version}", "requirement": "=1.0.0", "args": [""]}),
+            json!({"pattern": "a {version}", "requirement": "=1.0.0", "install_hint": "a\nb"}),
+            json!({"pattern": "a {version}", "requirement": "=1.0.0", "install_hint": "x".repeat(MAX_BIN_VERSION_INSTALL_HINT_LEN + 1)}),
+        ] {
+            let mut entry = base.clone();
+            entry["bin_version"] = bad.clone();
+            let cfg: ToolConfig = serde_json::from_value(entry).unwrap();
+            assert!(cfg.resolve_backend().is_err(), "{bad}");
+        }
+
+        // A non-egress tool may declare a version requirement too.
+        let local: ToolConfig = serde_json::from_value(json!({
+            "slug": "x", "backend": "command", "bin": "x",
+            "bin_version": {"pattern": "x {version}", "requirement": ">=1.0.0"}
+        }))
+        .unwrap();
+        assert!(local.resolve_backend().is_ok());
     }
 
     #[test]
@@ -2214,7 +3056,7 @@ mod tests {
     fn action_metadata_round_trips_through_tool_config() {
         let raw = json!({
             "slug": "action-create-ticket",
-            "backend": "inline_deno",
+            "backend": "inline_js",
             "code": "return { ok: true };",
             "action": true,
             "output_schema": {
@@ -2318,6 +3160,55 @@ mod tests {
     }
 
     #[test]
+    fn agent_identity_mode_is_optional_and_never_widened_by_a_bad_value() {
+        // Manifests written before the field existed still load as managed.
+        assert!(validate_runnable(&entry("a", RunnableKind::Agent, Some(json!({})))).is_ok());
+        let legacy: AgentConfig = serde_json::from_value(json!({ "system_prompt": "Hi" })).unwrap();
+        assert_eq!(legacy.identity_mode, None);
+        assert!(!serde_json::to_value(&legacy)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("identity_mode"));
+
+        for mode in [
+            ManifestAgentIdentityMode::Managed,
+            ManifestAgentIdentityMode::Individual,
+            ManifestAgentIdentityMode::Mixed,
+        ] {
+            let config = json!({ "identity_mode": mode.as_str() });
+            assert!(
+                validate_runnable(&entry("a", RunnableKind::Agent, Some(config.clone()))).is_ok()
+            );
+            let parsed: AgentConfig = serde_json::from_value(config).unwrap();
+            assert_eq!(parsed.identity_mode, Some(mode));
+        }
+
+        for bad in [json!("owner"), json!("Managed"), json!(""), json!(true)] {
+            let err = validate_runnable(&entry(
+                "a",
+                RunnableKind::Agent,
+                Some(json!({ "identity_mode": bad })),
+            ))
+            .unwrap_err();
+            assert!(err.contains("invalid config"), "{err}");
+        }
+    }
+
+    #[test]
+    fn an_app_cannot_grant_its_agent_accounts() {
+        for access in [json!(null), json!([]), json!(["platform:treg"])] {
+            let err = validate_runnable(&entry(
+                "a",
+                RunnableKind::Agent,
+                Some(json!({ "identity_mode": "mixed", "account_access": access })),
+            ))
+            .unwrap_err();
+            assert!(err.contains("account_access"), "{err}");
+        }
+    }
+
+    #[test]
     fn validate_runnable_enforces_per_kind_required_fields() {
         assert!(validate_runnable(&entry("a", RunnableKind::Agent, None)).is_ok());
         assert!(validate_runnable(&entry("w", RunnableKind::Workflow, None)).is_err());
@@ -2362,6 +3253,50 @@ mod tests {
                 caller_agent_query: None,
             }
         );
+    }
+
+    // Manifests persisted before the rename (agent-built `write_tool` tools,
+    // plugins packed by older SDKs, earlier marketplace installs) still say
+    // `inline_deno`. They must keep loading, as the very same backend.
+    #[test]
+    fn legacy_inline_deno_backend_resolves_to_inline_js() {
+        let legacy: ToolConfig = serde_json::from_value(
+            json!({ "slug": "demo", "backend": "inline_deno", "code": "return 1;" }),
+        )
+        .unwrap();
+        assert_eq!(
+            legacy.resolve_backend().unwrap(),
+            ToolBackend::InlineJs {
+                code: "return 1;".to_owned()
+            }
+        );
+        let missing_code: ToolConfig =
+            serde_json::from_value(json!({ "slug": "demo", "backend": "inline_deno" })).unwrap();
+        let err = missing_code.resolve_backend().unwrap_err();
+        assert!(
+            err.contains("'inline_deno' requires a non-empty 'code'"),
+            "{err}"
+        );
+
+        assert!(is_inline_js_backend("inline_js"));
+        assert!(is_inline_js_backend(" inline_deno "));
+        assert!(!is_inline_js_backend("deno"));
+
+        let tool = |backend: &str| {
+            entry(
+                "tool-demo",
+                RunnableKind::Tool,
+                Some(json!({ "slug": "demo", "backend": backend, "code": "return 1;" })),
+            )
+        };
+        assert!(validate_runnable(&tool("inline_deno")).is_ok());
+        assert!(runnable_uses_legacy_inline_deno(&tool("inline_deno")));
+        assert!(!runnable_uses_legacy_inline_deno(&tool("inline_js")));
+        assert!(!runnable_uses_legacy_inline_deno(&entry(
+            "skill-demo",
+            RunnableKind::Skill,
+            Some(json!({ "skill_id": "demo", "backend": "inline_deno" })),
+        )));
     }
 
     #[test]
@@ -2640,6 +3575,60 @@ mod tests {
     }
 
     #[test]
+    fn local_sidecar_bundles_parse_validate_and_stay_additive() {
+        let raw = r#"{
+            "name": "browser",
+            "process": {
+                "kind": "local",
+                "command": "ryu-browser",
+                "bundles": {
+                    "macos-aarch64": {
+                        "format": "tar.gz",
+                        "entrypoint": "Ryu Browser.app/Contents/MacOS/Ryu Browser"
+                    }
+                }
+            },
+            "port": 7993
+        }"#;
+        let spec: SidecarSpec = serde_json::from_str(raw).expect("bundle sidecar parses");
+        assert!(validate_sidecar_spec(&spec).is_ok());
+        let back: SidecarSpec =
+            serde_json::from_str(&serde_json::to_string(&spec).unwrap()).unwrap();
+        assert_eq!(spec, back);
+
+        // Additive: a local sidecar without bundles serializes without the key.
+        let plain: SidecarSpec = serde_json::from_str(
+            r#"{"name":"m","process":{"kind":"local","command":"ryu-mail"},"port":7001}"#,
+        )
+        .unwrap();
+        assert!(!serde_json::to_string(&plain).unwrap().contains("bundles"));
+
+        let with = |format: &str, entrypoint: &str, command: &str, platform: &str| {
+            let mut s = spec.clone();
+            let SidecarProcess::Local(local) = &mut s.process else {
+                unreachable!()
+            };
+            local.command = command.to_owned();
+            local.bundles.clear();
+            local.bundles.insert(
+                platform.to_owned(),
+                LocalBundleSpec {
+                    format: format.to_owned(),
+                    entrypoint: entrypoint.to_owned(),
+                },
+            );
+            validate_sidecar_spec(&s)
+        };
+        assert!(with("zip", "a/b", "ryu-browser", "macos-aarch64").is_err());
+        assert!(with("tar.gz", "../escape", "ryu-browser", "macos-aarch64").is_err());
+        assert!(with("tar.gz", "/abs/path", "ryu-browser", "macos-aarch64").is_err());
+        assert!(with("tar.gz", "", "ryu-browser", "macos-aarch64").is_err());
+        assert!(with("tar.gz", "a/b", "bin/ryu-browser", "macos-aarch64").is_err());
+        assert!(with("tar.gz", "a/b", "ryu-browser", "../x").is_err());
+        assert!(with("tar.gz", "a/b", "ryu-browser", "macos-aarch64").is_ok());
+    }
+
+    #[test]
     fn python_sidecar_serialization_emits_one_process_discriminator() {
         let raw = r#"{
             "name": "trainer",
@@ -2760,6 +3749,7 @@ mod tests {
             lazy: false,
             idle_stop_secs: None,
             provides_provider: None,
+            sandbox: None,
         };
         // Empty entry.
         assert!(validate_sidecar_spec(&mk("", None)).is_err());
@@ -2772,6 +3762,88 @@ mod tests {
         // Known runtimes accepted.
         assert!(validate_sidecar_spec(&mk("index.mjs", Some("node"))).is_ok());
         assert!(validate_sidecar_spec(&mk("index.mjs", Some("bun"))).is_ok());
+    }
+
+    #[test]
+    fn sandbox_paths_accept_only_placeholder_rooted_plain_segments() {
+        let ok = |raw: &str| parse_sandbox_path(raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
+        assert_eq!(ok("$APP_DATA").base, SandboxPathBase::AppData);
+        assert!(ok("$APP_DATA").segments.is_empty());
+        assert_eq!(ok("$TMP").base, SandboxPathBase::Tmp);
+        let home = ok("$HOME/.cache/my-app/");
+        assert_eq!(home.base, SandboxPathBase::Home);
+        assert_eq!(home.segments, vec![".cache", "my-app"]);
+        assert_eq!(ok("$RYU_DIR/mail-blobs").segments, vec!["mail-blobs"]);
+
+        for bad in [
+            "",
+            "/etc/passwd",
+            "relative/path",
+            "~/.ssh",
+            "$HOMEX/a",
+            "$APP_DATA/../other",
+            "$APP_DATA/./x",
+            "$APP_DATA//x",
+            "$HOME/a/../../etc",
+            "$HOME",
+            "$HOME/",
+            "$RYU_DIR",
+            "$RYU_DIR/plugins/other-app",
+            "$RYU_DIR/Apps/other-app",
+            "$RYU_DIR/plugin-data/@ryu+mail",
+            "$RYU_DIR/Plugin-Data",
+            "$HOME/a\\b",
+            "$HOME/C:",
+            "$HOME/$RYU_DIR",
+            "$UNKNOWN/x",
+        ] {
+            assert!(parse_sandbox_path(bad).is_err(), "{bad:?} must be refused");
+        }
+        assert!(
+            parse_sandbox_path(&format!("$HOME/{}", "a".repeat(MAX_SANDBOX_PATH_LEN))).is_err()
+        );
+    }
+
+    #[test]
+    fn sidecar_sandbox_block_is_validated_and_additive() {
+        let raw = r#"{"name":"svc","process":{"kind":"local","command":"svc"},"port":9000}"#;
+        let mut spec: SidecarSpec = serde_json::from_str(raw).expect("parses without sandbox");
+        assert!(spec.sandbox.is_none());
+        assert!(!serde_json::to_string(&spec).unwrap().contains("sandbox"));
+
+        let with: SidecarSpec = serde_json::from_str(
+            r#"{"name":"svc","process":{"kind":"local","command":"svc"},"port":9000,
+                "sandbox":{"mode":"enforce","fs":{"read":["$HOME/.config/svc"],"write":["$TMP"]},"memory_limit_mb":512}}"#,
+        )
+        .expect("parses with sandbox");
+        let sandbox = with.sandbox.clone().expect("sandbox block");
+        assert_eq!(sandbox.mode, Some(SidecarSandboxMode::Enforce));
+        assert_eq!(sandbox.fs.read, vec!["$HOME/.config/svc"]);
+        assert!(validate_sidecar_spec(&with).is_ok());
+
+        spec.sandbox = Some(SidecarSandboxSpec {
+            fs: SidecarSandboxFs {
+                read: vec![],
+                write: vec!["$RYU_DIR/plugins/someone-else".to_owned()],
+            },
+            ..SidecarSandboxSpec::default()
+        });
+        let err = validate_sidecar_spec(&spec).unwrap_err();
+        assert!(err.contains("app directories"), "{err}");
+
+        spec.sandbox = Some(SidecarSandboxSpec {
+            memory_limit_mb: Some(1),
+            ..SidecarSandboxSpec::default()
+        });
+        assert!(validate_sidecar_spec(&spec).is_err());
+
+        assert!(SidecarSandboxMode::Enforce > SidecarSandboxMode::Audit);
+        assert!(SidecarSandboxMode::Audit > SidecarSandboxMode::Off);
+        assert_eq!(
+            SidecarSandboxMode::parse(" Enforce "),
+            Some(SidecarSandboxMode::Enforce)
+        );
+        assert_eq!(SidecarSandboxMode::parse("strict"), None);
     }
 
     #[test]

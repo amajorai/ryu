@@ -38,12 +38,10 @@
 //! ## ABI (v1) — see [`WasmVerdict`] and the module doc on the guest contract.
 //!
 //! ## Dedupe / follow-up
-//! Core's `apps/core/src/sandbox/` is a bare M6 spike: `Engine::default()`, the
-//! FULL WASI p1 linker, and NONE of fuel/epoch/`StoreLimits`. There is therefore
-//! nothing safe to reuse from it — this host is built fresh, pinned to the same
-//! wasmtime v45. The documented follow-up is to factor a shared `ryu-wasm-host`
-//! crate (this hardened `Config` + limits + epoch ticker) under `crates/` and
-//! retrofit the Core spike, which is itself currently unsafe for untrusted wasm.
+//! Core's unhardened M6 wasmtime spike has been removed; Core's wasmtime lane
+//! now lives in `crates/core/sandbox`. The documented follow-up is to factor a
+//! shared `ryu-wasm-host` crate (this hardened `Config` + limits + epoch ticker)
+//! under `crates/` and reuse it there.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

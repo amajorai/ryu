@@ -2,7 +2,7 @@
 //!
 //! Mirrors Core's `crash.rs`. The gateway has no `PreferencesStore`, so it reads
 //! its consent from env: `RYU_CRASH_REPORTS_ENABLED` (default ON, opt-out) plus a
-//! DSN (`SENTRY_DSN`/`RYU_SENTRY_DSN`). Core's `gateway_spawn_env()` forwards the
+//! DSN (`RYU_SENTRY_DSN`). Core's `gateway_spawn_env()` forwards the
 //! user's desktop `crash-reports-enabled` pref + the DSN into these env vars when
 //! it spawns the gateway as a sidecar, so the gateway tier follows the same single
 //! consent toggle. With the flag off or no DSN this is a true no-op (never crashes
@@ -17,8 +17,8 @@
 //! user's own diagnostics; it enforces no policy. The DSN is a swappable config
 //! value, never a hardcoded vendor.
 
-/// The Sentry DSN env vars, in resolution order (Ryu mirror first).
-const SENTRY_DSN_ENVS: [&str; 2] = ["RYU_SENTRY_DSN", "SENTRY_DSN"];
+/// The Sentry DSN env var. Core forwards its DSN under this name.
+const SENTRY_DSN_ENV: &str = "RYU_SENTRY_DSN";
 
 /// Env mirror of the `crash-reports-enabled` consent. Default ON (opt-out), matching
 /// Core's pref default; only an explicit falsey value disables.
@@ -40,17 +40,12 @@ fn enabled() -> bool {
         .unwrap_or(true)
 }
 
-/// Resolve the configured DSN (Ryu mirror first). Empty/unset → no destination.
+/// Resolve the configured DSN. Empty/unset → no destination.
 fn resolve_dsn() -> Option<String> {
-    for key in SENTRY_DSN_ENVS {
-        if let Ok(dsn) = std::env::var(key) {
-            let trimmed = dsn.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
+    std::env::var(SENTRY_DSN_ENV)
+        .ok()
+        .map(|dsn| dsn.trim().to_string())
+        .filter(|dsn| !dsn.is_empty())
 }
 
 /// Replace the home-dir prefix in `s` with `~` so absolute paths never egress.

@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "vite/client"]
+  },
+  "include": [
+    "src/components/settings/GeneralConsumers.native-http.test.tsx",
+    "src/components/settings/privacy-gate-fresh-boot.ts",
+    "src/vite-env.d.ts"
+  ]
+}

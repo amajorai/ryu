@@ -1,6 +1,7 @@
 "use client";
 
 import { getMentionOnSelectItem } from "@platejs/mention";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { useMounted } from "@ryu/ui/hooks/use-mounted.ts";
 import {
 	type DocLinkItem,
@@ -145,6 +146,7 @@ export function MentionInputElement(
 		};
 	}, [search]);
 
+	const tl = useLiteralMessages();
 	const query = search.trim();
 	const hasExact = items.some(
 		(item) => item.title.toLowerCase() === query.toLowerCase()
@@ -191,7 +193,7 @@ export function MentionInputElement(
 								}
 								value={query}
 							>
-								{`Create "${query}"`}
+								{tl('Create "{query}"', { query })}
 							</InlineComboboxItem>
 						) : null}
 					</InlineComboboxGroup>

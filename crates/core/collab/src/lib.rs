@@ -20,6 +20,8 @@
 //!   (hibernation).
 //! - The [`CollabStore`]: rusqlite persistence (`~/.ryu/collab.db`) with an
 //!   append-only `doc_updates` log + a compacted `doc_snapshots` projection.
+//!   Update bytes, snapshots and the materialized source are sealed at rest
+//!   under the `collab.db` content key (see [`seal`]).
 //! - The self-framed [`DocSyncMessage`] wire protocol (1-byte tag + payload) that
 //!   rides `Frame::DocSync(Vec<u8>)`, plus the pure [`classify_doc_sync`] write-ACL
 //!   gate the Core `server::realtime_ws` transport applies to every inbound
@@ -58,10 +60,11 @@
 #![allow(dead_code)]
 
 pub mod projection;
+pub mod seal;
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
@@ -70,6 +73,8 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use ryu_crypto::content_sqlite::{self, StoreKeyState};
+use ryu_crypto::ContentCipher;
 use yrs::{
     updates::{decoder::Decode, encoder::Encode},
     Doc, ReadTxn, StateVector, Transact, Update,
@@ -290,11 +295,14 @@ pub struct Materialized {
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 
-/// Default on-disk location for the collaboration database (`~/.ryu/collab.db`).
+/// Default on-disk location for the collaboration database (`<data dir>/db/collab.db`).
 /// Kept separate from `spaces.db`/`conversations.db` so the CRDT log layer is
 /// isolated.
 fn default_db_path() -> Result<PathBuf> {
-    Ok(host()?.ryu_dir().join("collab.db"))
+    Ok(ryu_sidecar_runtime::layout::db_file(
+        &host()?.ryu_dir(),
+        "collab.db",
+    ))
 }
 
 fn now_millis() -> i64 {
@@ -305,42 +313,177 @@ fn now_millis() -> i64 {
 /// a compacted `doc_snapshots` projection. All methods are synchronous and
 /// serialize on a single connection `Mutex` (operations are short; never held
 /// across `.await`).
+///
+/// Content is sealed per value (see [`seal`]): every write seals, every read
+/// opens (legacy plaintext is accepted). A store sealed under a key this process
+/// does not hold refuses writes and leaves the data untouched.
 pub struct CollabStore {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
+    cipher: ContentCipher,
+    writable: bool,
+    unreadable: AtomicU64,
 }
 
 impl CollabStore {
-    /// Open (or create) the store at the default path (`~/.ryu/collab.db`).
+    /// Open (or create) the store at the default path (`~/.ryu/collab.db`). The
+    /// content key comes from the process's crypto host (Core installs it before
+    /// the store opens); legacy plaintext is sealed by a background pass.
     pub fn open_default() -> Result<Self> {
         Self::open(default_db_path()?)
     }
 
-    /// Open (or create) the store at a specific path.
+    /// Open (or create) the store at a specific path; legacy plaintext is sealed
+    /// by a background pass on its own connection.
     pub fn open(path: PathBuf) -> Result<Self> {
+        let cipher = ryu_crypto::content_cipher(seal::STORE).context("resolving the collab key")?;
+        Self::open_inner(path, cipher, true)
+    }
+
+    /// [`Self::open`] under an explicit content cipher, migrating legacy
+    /// plaintext before it returns (tests, tools).
+    pub fn open_with_cipher(path: PathBuf, cipher: ContentCipher) -> Result<Self> {
+        Self::open_inner(path, cipher, false)
+    }
+
+    fn open_inner(path: PathBuf, cipher: ContentCipher, background: bool) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating collab db dir {}", parent.display()))?;
         }
         let conn = Connection::open(&path)
             .with_context(|| format!("opening collab db {}", path.display()))?;
+        let store = Self::from_connection(conn, Some(&path), cipher)?;
+        if store.writable {
+            let key_state = {
+                let conn = store.lock();
+                content_sqlite::check_store_key(&conn, &store.cipher)?
+            };
+            if background {
+                let cipher = store.cipher.clone();
+                let thread_path = path.clone();
+                let spawned = std::thread::Builder::new()
+                    .name("collab-seal-migration".to_owned())
+                    .spawn(move || {
+                        if let Err(error) =
+                            Self::migrate_path(&thread_path, &cipher, &key_state, false)
+                        {
+                            tracing::warn!("collab: sealing legacy rows deferred: {error:#}");
+                        }
+                    });
+                if let Err(error) = spawned {
+                    tracing::warn!("collab: could not start the sealing pass: {error}");
+                }
+            } else {
+                Self::migrate_path(&path, &store.cipher, &key_state, true)?;
+            }
+        }
+        Ok(store)
+    }
+
+    fn migrate_path(
+        path: &Path,
+        cipher: &ContentCipher,
+        key_state: &StoreKeyState,
+        inline_vacuum: bool,
+    ) -> Result<seal::MigrationReport> {
+        let mut conn = Connection::open(path)
+            .with_context(|| format!("opening collab db {}", path.display()))?;
+        seal::migrate(&mut conn, Some(path), cipher, key_state, inline_vacuum)
+    }
+
+    /// Open an in-memory store (used by tests), keyed from the process.
+    pub fn open_in_memory() -> Result<Self> {
+        let cipher = ryu_crypto::content_cipher(seal::STORE).context("resolving the collab key")?;
+        Self::open_in_memory_with_cipher(cipher)
+    }
+
+    /// An in-memory store under an explicit content cipher.
+    pub fn open_in_memory_with_cipher(cipher: ContentCipher) -> Result<Self> {
+        let conn = Connection::open_in_memory().context("opening in-memory collab db")?;
+        Self::from_connection(conn, None, cipher)
+    }
+
+    fn from_connection(
+        conn: Connection,
+        path: Option<&Path>,
+        cipher: ContentCipher,
+    ) -> Result<Self> {
+        content_sqlite::enable_secure_delete(&conn)?;
+        conn.busy_timeout(std::time::Duration::from_secs(30))?;
         Self::init_schema(&conn)?;
+        let key_state = content_sqlite::check_store_key(&conn, &cipher)
+            .context("checking the collab store key")?;
+        let writable = key_state.writable();
+        if !writable {
+            tracing::error!(
+                "collab.db is sealed under a key this process does not hold; document edits \
+                 are refused and the data is left untouched"
+            );
+        } else if let Some(path) = path {
+            // A compaction a previous migration deferred runs now, before the
+            // store serves requests, when the store is small enough.
+            if let Err(error) = content_sqlite::run_pending_vacuum_gated(&conn, path, seal::STORE) {
+                tracing::warn!("collab: compaction deferred: {error:#}");
+            }
+        }
+        let compaction_owed = writable
+            && path.is_some()
+            && content_sqlite::compaction_owed(&conn, seal::STORE).unwrap_or(false);
+        let conn = Arc::new(Mutex::new(conn));
+        if let (true, Some(path)) = (compaction_owed, path) {
+            // Too large to compact while it opens: the background worker runs it
+            // later under this store's lock.
+            let weak = Arc::downgrade(&conn);
+            let path = path.to_path_buf();
+            content_sqlite::defer_compaction(
+                seal::STORE,
+                Box::new(move || {
+                    let conn = weak.upgrade()?;
+                    let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
+                    Some(content_sqlite::compact_deferred(&conn, &path, seal::STORE))
+                }),
+            );
+        }
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn,
+            cipher,
+            writable,
+            unreadable: AtomicU64::new(0),
         })
     }
 
-    /// Open an in-memory store (used by tests).
-    pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory().context("opening in-memory collab db")?;
-        Self::init_schema(&conn)?;
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+    /// Values that did not open on read (since this process opened the store).
+    /// Surfaced as a health item.
+    pub fn unreadable_rows(&self) -> u64 {
+        self.unreadable.load(Ordering::Relaxed)
+    }
+
+    /// False when the store was sealed under a key this process does not hold.
+    pub fn writable(&self) -> bool {
+        self.writable
+    }
+
+    fn ensure_writable(&self) -> Result<()> {
+        if self.writable {
+            Ok(())
+        } else {
+            Err(content_sqlite::mismatch_error(seal::STORE))
+        }
+    }
+
+    fn count_unreadable<T>(&self, result: Result<T>) -> Result<T> {
+        if let Err(error) = &result {
+            if ryu_crypto::content::is_content_seal_error(error) {
+                self.unreadable.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        result
     }
 
     fn init_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
              CREATE TABLE IF NOT EXISTS doc_updates (
                  doc_id  TEXT    NOT NULL,
                  seq     INTEGER NOT NULL,
@@ -352,7 +495,8 @@ impl CollabStore {
                  state_vector        BLOB NOT NULL,
                  snapshot            BLOB NOT NULL,
                  materialized_source TEXT,
-                 updated_at          INTEGER NOT NULL
+                 updated_at          INTEGER NOT NULL,
+                 seal_epoch          INTEGER
              );
              CREATE TABLE IF NOT EXISTS doc_seed_claims (
                  doc_id     TEXT PRIMARY KEY,
@@ -365,6 +509,26 @@ impl CollabStore {
 			 );",
         )
         .context("initializing collab schema")?;
+
+        // The epoch a snapshot row is sealed under (AAD). Rows written before
+        // sealing take the document's current epoch, which is the epoch they
+        // were written under (a reset deletes the row).
+        let has_seal_epoch = conn
+            .prepare("PRAGMA table_info(doc_snapshots)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|column| column.ok())
+            .any(|column| column == "seal_epoch");
+        if !has_seal_epoch {
+            conn.execute_batch("ALTER TABLE doc_snapshots ADD COLUMN seal_epoch INTEGER")
+                .context("adding the snapshot seal epoch")?;
+        }
+        conn.execute(
+            "UPDATE doc_snapshots SET seal_epoch = COALESCE(
+                 (SELECT epoch FROM doc_epochs e WHERE e.doc_id = doc_snapshots.doc_id), 0)
+             WHERE seal_epoch IS NULL",
+            [],
+        )
+        .context("recording snapshot seal epochs")?;
 
         // Upgrade stores created before claims were owner-scoped. Unowned rows
         // are legacy leftovers from a process that could not safely release a
@@ -390,49 +554,85 @@ impl CollabStore {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Load the persisted snapshot bytes for a doc, if any.
+    /// Load (and open) the persisted snapshot bytes for a doc, if any. A sealed
+    /// snapshot that does not open is an error, never an empty document.
     fn load_snapshot(&self, doc_id: &str) -> Result<Option<Vec<u8>>> {
-        let conn = self.lock();
-        let snap = conn
-            .query_row(
-                "SELECT snapshot FROM doc_snapshots WHERE doc_id = ?1",
+        let row = {
+            let conn = self.lock();
+            conn.query_row(
+                "SELECT snapshot, seal_epoch FROM doc_snapshots WHERE doc_id = ?1",
                 params![doc_id],
-                |row| row.get::<_, Vec<u8>>(0),
+                |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Option<i64>>(1)?)),
             )
             .optional()
-            .context("loading doc snapshot")?;
-        Ok(snap)
+            .context("loading doc snapshot")?
+        };
+        let Some((stored, epoch)) = row else {
+            return Ok(None);
+        };
+        let epoch = epoch.unwrap_or(0).to_string();
+        let opened = self
+            .count_unreadable(
+                self.cipher
+                    .open_bytes(&stored, &seal::snapshot_context(doc_id, &epoch)),
+            )
+            .with_context(|| format!("opening the snapshot of {doc_id}"))?;
+        Ok(Some(opened.value))
     }
 
-    /// Load the full append-only update log for a doc, ordered by `seq`.
+    /// Load (and open) the full append-only update log for a doc, ordered by
+    /// `seq`. An update that does not open is an error: replaying a log with a
+    /// hole would silently drop edits.
     fn load_updates(&self, doc_id: &str) -> Result<Vec<Vec<u8>>> {
-        let conn = self.lock();
-        let mut stmt = conn
-            .prepare("SELECT bytes FROM doc_updates WHERE doc_id = ?1 ORDER BY seq ASC")
-            .context("preparing update-log query")?;
-        let rows = stmt
-            .query_map(params![doc_id], |row| row.get::<_, Vec<u8>>(0))
-            .context("querying update log")?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row.context("reading update-log row")?);
+        let rows = {
+            let conn = self.lock();
+            let mut stmt = conn
+                .prepare("SELECT seq, bytes FROM doc_updates WHERE doc_id = ?1 ORDER BY seq ASC")
+                .context("preparing update-log query")?;
+            let rows = stmt
+                .query_map(params![doc_id], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })
+                .context("querying update log")?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .context("reading update-log row")?
+        };
+        let mut out = Vec::with_capacity(rows.len());
+        for (seq, stored) in rows {
+            let opened = self
+                .count_unreadable(
+                    self.cipher
+                        .open_bytes(&stored, &seal::update_context(doc_id, seq)),
+                )
+                .with_context(|| format!("opening update {seq} of {doc_id}"))?;
+            out.push(opened.value);
         }
         Ok(out)
     }
 
-    /// Atomically allocate the next `seq` for a doc AND append the update in ONE
-    /// statement, so two concurrent `apply_remote_update` calls for the SAME doc
-    /// can never read the same `MAX(seq)` and collide on the `(doc_id, seq)` primary
-    /// key. The `seq` is `COALESCE(MAX(seq)+1, 0)` computed inside the INSERT under
-    /// the single connection lock (a read-then-write race is impossible because the
-    /// read and the write are one SQL statement holding the same conn `Mutex`).
+    /// Atomically allocate the next `seq` for a doc AND append the update, so two
+    /// concurrent `apply_remote_update` calls for the SAME doc can never read the
+    /// same `MAX(seq)` and collide on the `(doc_id, seq)` primary key. The `seq`
+    /// is read, the update sealed under `(doc_id, seq)`, and the row inserted
+    /// while the single connection `Mutex` is held, so no other append can run in
+    /// between.
     fn append_next_update(&self, doc_id: &str, bytes: &[u8]) -> Result<()> {
+        self.ensure_writable()?;
         let conn = self.lock();
+        let seq: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(seq) + 1, 0) FROM doc_updates WHERE doc_id = ?1",
+                params![doc_id],
+                |row| row.get(0),
+            )
+            .context("allocating the next update seq")?;
+        let sealed = self
+            .cipher
+            .seal_bytes(bytes, &seal::update_context(doc_id, seq))
+            .context("sealing update")?;
         conn.execute(
-            "INSERT INTO doc_updates (doc_id, seq, bytes)
-             SELECT ?1, COALESCE(MAX(seq) + 1, 0), ?2
-             FROM doc_updates WHERE doc_id = ?1",
-            params![doc_id, bytes],
+            "INSERT INTO doc_updates (doc_id, seq, bytes) VALUES (?1, ?2, ?3)",
+            params![doc_id, seq, sealed],
         )
         .context("appending update to log")?;
         Ok(())
@@ -451,27 +651,56 @@ impl CollabStore {
         Ok(n)
     }
 
+    /// The document epoch inside an open transaction or connection.
+    fn epoch_in(conn: &Connection, doc_id: &str) -> Result<i64> {
+        Ok(conn
+            .query_row(
+                "SELECT epoch FROM doc_epochs WHERE doc_id = ?1",
+                params![doc_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .context("loading document epoch")?
+            .unwrap_or(0))
+    }
+
     /// Compaction write: store the merged `snapshot` + `state_vector` for a doc and
     /// delete the folded log rows, in one transaction. Safe to delete ALL log rows
     /// because the caller holds the per-doc engine lock (single writer — no
     /// concurrent appends). Touches only the snapshot/SV columns, leaving any
-    /// `materialized_source` intact (`ON CONFLICT` targets just these columns).
+    /// `materialized_source` intact (`ON CONFLICT` targets just these columns)
+    /// unless it was sealed under another epoch. The snapshot is sealed under
+    /// `(doc_id, epoch)`; this rewrite is also how legacy plaintext snapshots and
+    /// logs get sealed.
     fn write_snapshot_and_prune(
         &self,
         doc_id: &str,
         state_vector: &[u8],
         snapshot: &[u8],
     ) -> Result<()> {
+        self.ensure_writable()?;
         let mut conn = self.lock();
         let tx = conn.transaction().context("starting compaction tx")?;
+        let epoch = Self::epoch_in(&tx, doc_id)?;
+        let sealed = self
+            .cipher
+            .seal_bytes(
+                snapshot,
+                &seal::snapshot_context(doc_id, &epoch.to_string()),
+            )
+            .context("sealing snapshot")?;
         tx.execute(
-            "INSERT INTO doc_snapshots (doc_id, state_vector, snapshot, materialized_source, updated_at)
-             VALUES (?1, ?2, ?3, NULL, ?4)
+            "INSERT INTO doc_snapshots
+                 (doc_id, state_vector, snapshot, materialized_source, updated_at, seal_epoch)
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5)
              ON CONFLICT(doc_id) DO UPDATE SET
-                 state_vector = excluded.state_vector,
-                 snapshot     = excluded.snapshot,
-                 updated_at   = excluded.updated_at",
-            params![doc_id, state_vector, snapshot, now_millis()],
+                 state_vector        = excluded.state_vector,
+                 snapshot            = excluded.snapshot,
+                 materialized_source = CASE WHEN doc_snapshots.seal_epoch IS excluded.seal_epoch
+                                            THEN doc_snapshots.materialized_source END,
+                 updated_at          = excluded.updated_at,
+                 seal_epoch          = excluded.seal_epoch",
+            params![doc_id, state_vector, sealed, now_millis(), epoch],
         )
         .context("upserting doc snapshot")?;
         tx.execute("DELETE FROM doc_updates WHERE doc_id = ?1", params![doc_id])
@@ -481,9 +710,10 @@ impl CollabStore {
     }
 
     /// Materialize write: store the opaque snapshot + state vector AND the
-    /// best-effort `materialized_source` projection in one row. Does NOT prune the
-    /// log (materialize is a read-projection hook, not a compaction). `ON CONFLICT`
-    /// updates all three columns so it co-exists with [`Self::write_snapshot_and_prune`].
+    /// best-effort `materialized_source` projection in one row, both sealed under
+    /// `(doc_id, epoch)`. Does NOT prune the log (materialize is a
+    /// read-projection hook, not a compaction). `ON CONFLICT` updates all columns
+    /// so it co-exists with [`Self::write_snapshot_and_prune`].
     fn write_materialized(
         &self,
         doc_id: &str,
@@ -491,34 +721,73 @@ impl CollabStore {
         snapshot: &[u8],
         source: Option<&str>,
     ) -> Result<()> {
+        self.ensure_writable()?;
         let conn = self.lock();
+        let epoch = Self::epoch_in(&conn, doc_id)?;
+        let epoch_text = epoch.to_string();
+        let sealed_snapshot = self
+            .cipher
+            .seal_bytes(snapshot, &seal::snapshot_context(doc_id, &epoch_text))
+            .context("sealing snapshot")?;
+        let sealed_source = source
+            .map(|source| {
+                self.cipher
+                    .seal_text(source, &seal::source_context(doc_id, &epoch_text))
+            })
+            .transpose()
+            .context("sealing materialized source")?;
         conn.execute(
-            "INSERT INTO doc_snapshots (doc_id, state_vector, snapshot, materialized_source, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO doc_snapshots
+                 (doc_id, state_vector, snapshot, materialized_source, updated_at, seal_epoch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(doc_id) DO UPDATE SET
                  state_vector        = excluded.state_vector,
                  snapshot            = excluded.snapshot,
                  materialized_source = excluded.materialized_source,
-                 updated_at          = excluded.updated_at",
-            params![doc_id, state_vector, snapshot, source, now_millis()],
+                 updated_at          = excluded.updated_at,
+                 seal_epoch          = excluded.seal_epoch",
+            params![
+                doc_id,
+                state_vector,
+                sealed_snapshot,
+                sealed_source,
+                now_millis(),
+                epoch
+            ],
         )
         .context("upserting materialized snapshot")?;
         Ok(())
     }
 
-    /// Read back the stored `materialized_source` for a doc (diagnostic / test).
+    /// Read back (and open) the stored `materialized_source` for a doc
+    /// (diagnostic / test).
     fn load_materialized_source(&self, doc_id: &str) -> Result<Option<String>> {
-        let conn = self.lock();
-        let src = conn
-            .query_row(
-                "SELECT materialized_source FROM doc_snapshots WHERE doc_id = ?1",
+        let row = {
+            let conn = self.lock();
+            conn.query_row(
+                "SELECT materialized_source, seal_epoch FROM doc_snapshots WHERE doc_id = ?1",
                 params![doc_id],
-                |row| row.get::<_, Option<String>>(0),
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                    ))
+                },
             )
             .optional()
             .context("loading materialized source")?
-            .flatten();
-        Ok(src)
+        };
+        let Some((Some(stored), epoch)) = row else {
+            return Ok(None);
+        };
+        let epoch = epoch.unwrap_or(0).to_string();
+        let opened = self
+            .count_unreadable(
+                self.cipher
+                    .open_text(&stored, &seal::source_context(doc_id, &epoch)),
+            )
+            .with_context(|| format!("opening the materialized source of {doc_id}"))?;
+        Ok(Some(opened.value))
     }
 
     /// Atomically claim the one-shot right to seed `doc_id` from a client's local
@@ -1570,5 +1839,236 @@ mod tests {
             Some(source.as_str()),
             "the projection must be persisted, not just returned"
         );
+    }
+
+    // ── Encryption at rest ────────────────────────────────────────────────────
+
+    fn test_cipher(root: u8) -> ContentCipher {
+        ContentCipher::from_root(&[root; 32], seal::STORE)
+    }
+
+    fn file_contains(path: &Path, needle: &[u8]) -> bool {
+        std::fs::read(path)
+            .map(|bytes| bytes.windows(needle.len()).any(|w| w == needle))
+            .unwrap_or(false)
+    }
+
+    fn text_of(reg: &DocRegistry, doc_id: &str, name: &str) -> String {
+        let full = reg.diff_since(doc_id, &[]).unwrap();
+        let doc = Doc::new();
+        {
+            let mut txn = doc.transact_mut();
+            txn.apply_update(Update::decode_v1(&full).unwrap()).unwrap();
+        }
+        let text = doc.get_or_insert_text(name);
+        let value = text.get_string(&doc.transact());
+        value
+    }
+
+    #[test]
+    fn updates_snapshots_and_sources_are_sealed_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collab.db");
+        let store = Arc::new(CollabStore::open_with_cipher(path.clone(), test_cipher(7)).unwrap());
+        let reg = DocRegistry::with_compact_threshold(Arc::clone(&store), 1_000);
+        let doc_id = "doc-sealed";
+        let update = make_text_update("body", 0, "quillfeather-update", &StateVector::default());
+        reg.apply_remote_update(doc_id, &update).unwrap();
+        let raw: Vec<u8> = store
+            .lock()
+            .query_row("SELECT bytes FROM doc_updates", [], |row| row.get(0))
+            .unwrap();
+        assert!(raw.starts_with(b"RYU-CB01"));
+        reg.snapshot(doc_id).unwrap();
+        store
+            .write_materialized(doc_id, b"sv", &update, Some("quillfeather-source"))
+            .unwrap();
+        let update2 = make_text_update("other", 0, "quillfeather-log", &StateVector::default());
+        reg.apply_remote_update(doc_id, &update2).unwrap();
+        for file in [path.clone(), dir.path().join("collab.db-wal")] {
+            for needle in [
+                "quillfeather-update",
+                "quillfeather-source",
+                "quillfeather-log",
+            ] {
+                assert!(
+                    !file_contains(&file, needle.as_bytes()),
+                    "{needle} in {}",
+                    file.display()
+                );
+            }
+        }
+        assert_eq!(
+            store.load_materialized_source(doc_id).unwrap().as_deref(),
+            Some("quillfeather-source")
+        );
+        reg.flush_and_drop(doc_id).unwrap();
+        let fresh = DocRegistry::new(Arc::clone(&store));
+        assert_eq!(text_of(&fresh, doc_id, "body"), "quillfeather-update");
+        assert_eq!(text_of(&fresh, doc_id, "other"), "quillfeather-log");
+    }
+
+    #[test]
+    fn an_update_copied_to_another_seq_or_doc_does_not_open() {
+        let store = Arc::new(CollabStore::open_in_memory_with_cipher(test_cipher(7)).unwrap());
+        let reg = DocRegistry::with_compact_threshold(Arc::clone(&store), 1_000);
+        let u1 = make_text_update("a", 0, "one", &StateVector::default());
+        let u2 = make_text_update("b", 0, "two", &StateVector::default());
+        reg.apply_remote_update("doc-a", &u1).unwrap();
+        reg.apply_remote_update("doc-a", &u2).unwrap();
+        {
+            let conn = store.lock();
+            conn.execute(
+                "INSERT INTO doc_updates (doc_id, seq, bytes)
+                 SELECT 'doc-b', 0, bytes FROM doc_updates WHERE doc_id = 'doc-a' AND seq = 0",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE doc_updates SET bytes =
+                     (SELECT bytes FROM doc_updates WHERE doc_id = 'doc-a' AND seq = 0)
+                 WHERE doc_id = 'doc-a' AND seq = 1",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(
+            store.load_updates("doc-a").is_err(),
+            "a swapped seq must not open"
+        );
+        assert!(
+            store.load_updates("doc-b").is_err(),
+            "another doc's update must not open"
+        );
+        assert_eq!(store.unreadable_rows(), 2);
+    }
+
+    fn legacy_store(path: &Path, update: &[u8], snapshot: &[u8], source: &str) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE doc_updates (doc_id TEXT NOT NULL, seq INTEGER NOT NULL,
+                 bytes BLOB NOT NULL, PRIMARY KEY (doc_id, seq));
+             CREATE TABLE doc_snapshots (doc_id TEXT PRIMARY KEY, state_vector BLOB NOT NULL,
+                 snapshot BLOB NOT NULL, materialized_source TEXT, updated_at INTEGER NOT NULL);
+             CREATE TABLE doc_epochs (doc_id TEXT PRIMARY KEY, epoch INTEGER NOT NULL);",
+        )
+        .unwrap();
+        conn.execute("INSERT INTO doc_epochs VALUES ('legacy-doc', 3)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO doc_snapshots VALUES ('legacy-doc', X'00', ?1, ?2, 1)",
+            params![snapshot, source],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO doc_updates VALUES ('legacy-doc', 0, ?1)",
+            params![update],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn legacy_plaintext_reads_and_is_sealed_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collab.db");
+        let snapshot = make_text_update("body", 0, "legacy-snapshot-text", &StateVector::default());
+        let update = make_text_update("tail", 0, "legacy-update-text", &StateVector::default());
+        legacy_store(&path, &update, &snapshot, "legacy-source-text");
+
+        let store = Arc::new(CollabStore::open_with_cipher(path.clone(), test_cipher(7)).unwrap());
+        let raw: (Vec<u8>, Vec<u8>, String) = store
+            .lock()
+            .query_row(
+                "SELECT u.bytes, s.snapshot, s.materialized_source
+                 FROM doc_updates u JOIN doc_snapshots s USING (doc_id)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert!(raw.0.starts_with(b"RYU-CB01"));
+        assert!(raw.1.starts_with(b"RYU-CB01"));
+        assert!(raw.2.starts_with("encb:v1:"));
+        let reg = DocRegistry::new(Arc::clone(&store));
+        assert_eq!(reg.epoch("legacy-doc").unwrap(), 3);
+        assert_eq!(text_of(&reg, "legacy-doc", "body"), "legacy-snapshot-text");
+        assert_eq!(text_of(&reg, "legacy-doc", "tail"), "legacy-update-text");
+        assert_eq!(
+            store
+                .load_materialized_source("legacy-doc")
+                .unwrap()
+                .as_deref(),
+            Some("legacy-source-text")
+        );
+        drop(reg);
+        drop(store);
+        for file in [path.clone(), dir.path().join("collab.db-wal")] {
+            for needle in [
+                "legacy-snapshot-text",
+                "legacy-update-text",
+                "legacy-source-text",
+            ] {
+                assert!(
+                    !file_contains(&file, needle.as_bytes()),
+                    "{needle} in {}",
+                    file.display()
+                );
+            }
+        }
+        // A second open changes nothing.
+        let again = CollabStore::open_with_cipher(path.clone(), test_cipher(7)).unwrap();
+        let raw_again: (Vec<u8>, Vec<u8>, String) = again
+            .lock()
+            .query_row(
+                "SELECT u.bytes, s.snapshot, s.materialized_source
+                 FROM doc_updates u JOIN doc_snapshots s USING (doc_id)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(raw, raw_again);
+        content_sqlite::assert_all_open(
+            &again.lock(),
+            &test_cipher(7),
+            &seal::snapshot_plans().unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_store_sealed_under_another_key_refuses_edits_and_keeps_its_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collab.db");
+        {
+            let store =
+                Arc::new(CollabStore::open_with_cipher(path.clone(), test_cipher(7)).unwrap());
+            let reg = DocRegistry::new(store);
+            reg.apply_remote_update(
+                "doc",
+                &make_text_update("a", 0, "kept", &StateVector::default()),
+            )
+            .unwrap();
+        }
+        let store = Arc::new(CollabStore::open_with_cipher(path.clone(), test_cipher(9)).unwrap());
+        assert!(!store.writable());
+        assert!(store.append_next_update("doc", b"x").is_err());
+        assert_eq!(store.update_count("doc").unwrap(), 1);
+        assert!(store.load_updates("doc").is_err());
+    }
+
+    /// Timing note for the append budget (< 50 µs per update added): sealing a
+    /// typical keystroke-sized update is a few microseconds; printed, not
+    /// asserted, because debug builds and shared CI runners vary widely.
+    #[test]
+    fn append_seal_overhead_is_reported() {
+        let cipher = test_cipher(7);
+        let update = vec![1u8; 512];
+        let started = std::time::Instant::now();
+        for seq in 0..2_000 {
+            cipher
+                .seal_bytes(&update, &seal::update_context("doc", seq))
+                .unwrap();
+        }
+        let per_update = started.elapsed() / 2_000;
+        eprintln!("collab: sealing a 512-byte update took {per_update:?} on average");
     }
 }

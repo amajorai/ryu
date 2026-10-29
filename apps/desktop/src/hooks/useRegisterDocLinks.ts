@@ -1,7 +1,7 @@
 import {
 	type DocLinkItem,
 	setDocLinkProvider,
-} from "@ryu/ui/lib/editor-doc-links";
+} from "@ryu/ui/lib/editor-doc-links.ts";
 import { useEffect, useRef } from "react";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";

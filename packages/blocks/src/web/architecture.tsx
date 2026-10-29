@@ -861,7 +861,7 @@ function RailRow({
 }) {
 	return (
 		<div className="rounded-2xl bg-muted/50 p-4">
-			<p className="mb-2 font-medium text-[10px] text-muted-foreground uppercase tracking-widest">
+			<p className="type-compact mb-2 font-medium text-muted-foreground uppercase tracking-widest">
 				{label}
 			</p>
 			<div className="flex flex-wrap gap-1.5">
@@ -887,12 +887,12 @@ export function ArchitectureStacked() {
 			<div className="rounded-2xl bg-foreground p-5 text-background">
 				<div className="flex items-start justify-between gap-2">
 					<div>
-						<p className="font-medium text-[10px] text-background/60 uppercase tracking-widest">
+						<p className="type-compact font-medium text-background/60 uppercase tracking-widest">
 							Control
 						</p>
 						<h3 className="font-medium text-lg tracking-tight">Ryu Gateway</h3>
 					</div>
-					<span className="rounded-full border border-background/40 px-2 py-0.5 font-medium text-[10px] text-background/70">
+					<span className="type-compact rounded-full border border-background/40 px-2 py-0.5 font-medium text-background/70">
 						governance
 					</span>
 				</div>
@@ -902,7 +902,7 @@ export function ArchitectureStacked() {
 				<div className="mt-3 grid grid-cols-2 gap-1.5">
 					{GATEWAY_PILLS.map((pill) => (
 						<span
-							className="rounded-md bg-background px-2 py-1.5 text-center font-medium text-[11px] text-foreground"
+							className="type-caption rounded-md bg-background px-2 py-1.5 text-center font-medium text-foreground"
 							key={pill}
 						>
 							{pill}
@@ -914,7 +914,7 @@ export function ArchitectureStacked() {
 			<FlowConnector />
 
 			<div className="rounded-2xl border bg-card p-5">
-				<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-widest">
+				<p className="type-compact font-medium text-muted-foreground uppercase tracking-widest">
 					Orchestration
 				</p>
 				<h3 className="font-medium text-foreground text-lg tracking-tight">
@@ -926,7 +926,7 @@ export function ArchitectureStacked() {
 				<div className="mt-3 grid grid-cols-2 gap-1.5">
 					{CORE_PILLS.map((pill) => (
 						<span
-							className="rounded-md bg-muted px-2 py-1.5 text-center font-medium text-[11px] text-foreground"
+							className="type-caption rounded-md bg-muted px-2 py-1.5 text-center font-medium text-foreground"
 							key={pill}
 						>
 							{pill}

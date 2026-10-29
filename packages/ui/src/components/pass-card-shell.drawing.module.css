@@ -1,0 +1,15 @@
+.cardInteraction {
+	touch-action: var(--pass-card-shell-1-touch-action);
+	perspective: var(--pass-card-shell-1-perspective);
+}
+.cardSpin {
+	transform: rotateX(calc(var(--pass-card-shell-2-rotate-x) * 1deg))
+		rotateY(calc(var(--pass-card-shell-2-rotate-y) * 1deg));
+}
+.cardTilt {
+	transform: rotateX(calc(var(--pass-card-shell-3-rotate-x) * 1deg))
+		rotateY(calc(var(--pass-card-shell-3-rotate-y) * 1deg));
+}
+.cardGlare {
+	background: var(--pass-card-shell-4-background);
+}

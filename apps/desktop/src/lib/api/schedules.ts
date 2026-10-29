@@ -1,3 +1,4 @@
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/schedules.ts
 //
 // Typed client for Core's scheduled-jobs (heartbeat) endpoints. A scheduled job
@@ -13,6 +14,23 @@
 // JSON here to surface the exact Core validation message in the UI.
 
 import { type ApiTarget, authenticatedFetch, request } from "./client.ts";
+import { pluginValueSchema } from "./plugin-wire-values.ts";
+import {
+	type ExecRecordWire,
+	type JobWire,
+	type ScheduleBody,
+	type ScheduledAgentTargetBody,
+	type ScheduledJobCreateBody,
+	type ScheduledJobUpdateBody,
+	type ScheduledProviderAccountTargetBody,
+	type ScheduledTargetBody,
+	type ScheduleWire,
+	scheduledErrorResponseSchema,
+	scheduledJobResponseSchema,
+	scheduledJobsResponseSchema,
+	scheduledRunResponseSchema,
+	type TargetWire,
+} from "./schedule-wire-contracts.ts";
 
 /** How a job is scheduled: a cron expression or a fixed interval. */
 export type Schedule =
@@ -45,6 +63,19 @@ export type JobTarget =
 			prompt: string;
 	  };
 
+/**
+ * A ping pinned to one saved subscription account of a provider pool
+ * (`JobTarget::ProviderAccount`). Kept beside {@link JobTarget} rather than in
+ * it: generic schedule surfaces project it as an agent row, exactly as they do
+ * monitor and quest targets, and only the apps that create these read it.
+ */
+export interface ProviderAccountTarget {
+	accountId: string;
+	model: string;
+	prompt: string;
+	providerId: string;
+}
+
 /** Outcome of a single recorded job execution. */
 export type ExecOutcome = "success" | "failure";
 
@@ -59,6 +90,12 @@ export interface ExecRecord {
 
 /** A persisted scheduled job as returned by Core. */
 export interface ScheduledJob {
+	/**
+	 * Manifest id of the app whose job this is, for a job Core reconciles from
+	 * an app's `jobs.list` (`app_job` target). Attribute the row to the app with
+	 * this id, never with the job name (the app writes the name).
+	 */
+	appId: string | null;
 	createdAt: string;
 	enabled: boolean;
 	history: ExecRecord[];
@@ -72,13 +109,16 @@ export interface ScheduledJob {
 	 * is also what makes "turn the App off" stop its automations.
 	 */
 	ownerApp: string | null;
+	/** Set when the job pings one provider account; see {@link ProviderAccountTarget}. */
+	providerAccount?: ProviderAccountTarget | null;
 	requireApproval: boolean;
 	schedule: Schedule;
 	/**
-	 * True for Core's internal maintenance jobs (identity-vault health sweep,
-	 * continual-learning cycle) that are ensured at startup rather than created
-	 * by the user. Derived from the wire target type, so surfaces can hide them
-	 * by default without losing user-created automations.
+	 * True for jobs Core owns rather than the user: its maintenance jobs
+	 * (identity-vault health sweep, continual-learning cycle) and the jobs it
+	 * reconciles for apps (app jobs, legacy monitor/quest checks). Derived from
+	 * the wire target type, so surfaces can hide them by default without losing
+	 * user-created automations.
 	 */
 	system: boolean;
 	target: JobTarget;
@@ -91,6 +131,8 @@ export interface JobInput {
 	name: string;
 	/** Manifest id of the App creating this job; omit for Core/desktop jobs. */
 	ownerApp?: string | null;
+	/** Atomic canonical quick routine slot; ordinary jobs omit this field. */
+	quickRoutine?: boolean;
 	requireApproval?: boolean;
 	schedule: Schedule;
 	target: JobTarget;
@@ -107,55 +149,21 @@ export interface JobUpdateInput {
 
 // ── Wire shapes (snake_case, tagged unions exactly as Core serializes them) ──
 
-interface ScheduleWire {
-	expr?: string;
-	interval?: string;
-	kind: "cron" | "every";
-	tz?: string | null;
-}
-
-// Core also serializes internal targets ("monitor", "quest", "identity_health",
-// "learning_cycle") through this shape, so `type` stays an open string.
-interface TargetWire {
-	agent_id?: string;
-	conversation_id?: string | null;
-	input?: Record<string, string>;
-	model?: string | null;
-	prompt?: string;
-	type: string;
-	workflow_id?: string;
-}
-
 /**
- * Wire target types of Core's startup-ensured maintenance jobs
- * (`JobTarget::IdentityHealth` / `JobTarget::LearningCycle` in
- * `apps/core/src/scheduler/store.rs`). These are never user-created, so the
- * UI treats them as system jobs.
+ * Wire target types of the jobs Core owns (`JobTarget` in
+ * `apps/core/src/scheduler/store.rs`): its startup-ensured maintenance jobs
+ * (`identity_health` / `learning_cycle`), the app jobs it reconciles from an
+ * app's `jobs.list` (`app_job`), and the legacy per-app targets an older Core
+ * still serves (`monitor` / `quest`). None is user-created, so the UI treats
+ * them as system jobs.
  */
-const SYSTEM_TARGET_TYPES = new Set(["identity_health", "learning_cycle"]);
-
-interface ExecRecordWire {
-	error?: string | null;
-	finished_at: string;
-	outcome: ExecOutcome;
-	run_id?: string | null;
-	started_at: string;
-}
-
-interface JobWire {
-	created_at: string;
-	enabled?: boolean;
-	history?: ExecRecordWire[];
-	id: string;
-	last_outcome?: ExecOutcome | null;
-	last_run_at?: string | null;
-	name: string;
-	owner_app?: string | null;
-	require_approval?: boolean;
-	schedule: ScheduleWire;
-	target: TargetWire;
-	updated_at: string;
-}
+const SYSTEM_TARGET_TYPES = new Set([
+	"identity_health",
+	"learning_cycle",
+	"app_job",
+	"monitor",
+	"quest",
+]);
 
 function toSchedule(s: ScheduleWire): Schedule {
 	if (s.kind === "cron") {
@@ -181,6 +189,18 @@ function toTarget(t: TargetWire): JobTarget {
 	};
 }
 
+function toProviderAccount(t: TargetWire): ProviderAccountTarget | null {
+	if (t.type !== "provider_account") {
+		return null;
+	}
+	return {
+		providerId: t.provider_id ?? "",
+		accountId: t.account_id ?? "",
+		model: t.model ?? "",
+		prompt: t.prompt ?? "",
+	};
+}
+
 function toRecord(r: ExecRecordWire): ExecRecord {
 	return {
 		startedAt: r.started_at,
@@ -193,6 +213,7 @@ function toRecord(r: ExecRecordWire): ExecRecord {
 
 function toJob(j: JobWire): ScheduledJob {
 	return {
+		appId: j.target.type === "app_job" ? (j.target.plugin_id ?? null) : null,
 		id: j.id,
 		name: j.name,
 		schedule: toSchedule(j.schedule),
@@ -201,6 +222,7 @@ function toJob(j: JobWire): ScheduledJob {
 		enabled: j.enabled ?? true,
 		requireApproval: j.require_approval ?? false,
 		ownerApp: j.owner_app ?? null,
+		providerAccount: toProviderAccount(j.target),
 		createdAt: j.created_at,
 		updatedAt: j.updated_at,
 		lastRunAt: j.last_run_at ?? null,
@@ -209,7 +231,7 @@ function toJob(j: JobWire): ScheduledJob {
 	};
 }
 
-function toScheduleBody(s: Schedule): Record<string, unknown> {
+function toScheduleBody(s: Schedule): ScheduleBody {
 	if (s.kind === "cron") {
 		// Omitted rather than sent as null when absent, so a zoneless job's body
 		// is byte-identical to what it was before zones existed.
@@ -220,7 +242,7 @@ function toScheduleBody(s: Schedule): Record<string, unknown> {
 	return { kind: "every", interval: s.interval };
 }
 
-function toTargetBody(t: JobTarget): Record<string, unknown> {
+function toTargetBody(t: JobTarget): ScheduledTargetBody {
 	if (t.type === "workflow") {
 		return {
 			type: "workflow",
@@ -228,36 +250,56 @@ function toTargetBody(t: JobTarget): Record<string, unknown> {
 			input: t.input ?? {},
 		};
 	}
-	return t.model
-		? {
-				type: "agent",
-				agent_id: t.agentId,
-				...(t.conversationId ? { conversation_id: t.conversationId } : {}),
-				prompt: t.prompt,
-				model: t.model,
-			}
-		: {
-				type: "agent",
-				agent_id: t.agentId,
-				...(t.conversationId ? { conversation_id: t.conversationId } : {}),
-				prompt: t.prompt,
-			};
-}
-
-function toJobUpdateBody(input: JobUpdateInput): Record<string, unknown> {
-	return {
-		...(input.name === undefined ? {} : { name: input.name }),
-		...(input.schedule === undefined
-			? {}
-			: { schedule: toScheduleBody(input.schedule) }),
-		...(input.target === undefined
-			? {}
-			: { target: toTargetBody(input.target) }),
-		...(input.enabled === undefined ? {} : { enabled: input.enabled }),
-		...(input.requireApproval === undefined
-			? {}
-			: { require_approval: input.requireApproval }),
+	const conversationFields: Pick<ScheduledAgentTargetBody, "conversation_id"> =
+		{};
+	if (t.conversationId !== undefined) {
+		conversationFields.conversation_id = t.conversationId;
+	}
+	const body: ScheduledAgentTargetBody = {
+		type: "agent",
+		agent_id: t.agentId,
+		...conversationFields,
+		prompt: t.prompt,
 	};
+	if (t.model) {
+		body.model = t.model;
+	}
+	return body;
+}
+function toJobUpdateBody(input: JobUpdateInput): ScheduledJobUpdateBody {
+	const body: ScheduledJobUpdateBody = {};
+	if (input.name !== undefined) {
+		body.name = input.name;
+	}
+	if (input.schedule !== undefined) {
+		body.schedule = toScheduleBody(input.schedule);
+	}
+	if (input.target !== undefined) {
+		body.target = toTargetBody(input.target);
+	}
+	if (input.enabled !== undefined) {
+		body.enabled = input.enabled;
+	}
+	if (input.requireApproval !== undefined) {
+		body.require_approval = input.requireApproval;
+	}
+	return body;
+}
+function toJobCreateBody(input: JobInput): ScheduledJobCreateBody {
+	const body: ScheduledJobCreateBody = {
+		name: input.name,
+		schedule: toScheduleBody(input.schedule),
+		target: toTargetBody(input.target),
+		enabled: input.enabled,
+		require_approval: input.requireApproval ?? false,
+	};
+	if (input.quickRoutine !== undefined) {
+		body.quick_routine = input.quickRoutine;
+	}
+	if (input.ownerApp) {
+		body.owner_app = input.ownerApp;
+	}
+	return body;
 }
 
 /**
@@ -272,23 +314,43 @@ export async function runJobNow(
 	target: ApiTarget,
 	id: string
 ): Promise<string | null> {
-	const json = await request<{
-		error?: string;
-		run_id?: string | null;
-		success?: boolean;
-	}>(target, `/heartbeat/jobs/${encodeURIComponent(id)}/run`, {
-		method: "POST",
-	});
+	const json = scheduledRunResponseSchema.parse(
+		await request(
+			target,
+			`/heartbeat/jobs/${encodeURIComponent(id)}/run`,
+			{
+				method: "POST",
+			},
+			gatewayJsonValueSchema
+		)
+	);
 	if (json.success === false) {
 		throw new Error(json.error ?? "The job failed to run.");
 	}
 	return json.run_id ?? null;
 }
 
-/** List all scheduled jobs on the active node. */
+/** Parse and normalize a `{ jobs }` reply in Core's snake_case job shape (the
+ *  `/heartbeat/jobs` route and the `warmup.list` kernel operation). */
+export function toScheduledJobs(value: unknown): ScheduledJob[] {
+	return (scheduledJobsResponseSchema.parse(value).jobs ?? []).map(toJob);
+}
+
+/**
+ * List all scheduled jobs on the active node, including the jobs Core reconciles
+ * for apps (`include=app_jobs`; an older Core ignores the parameter). Pings
+ * pinned to one saved subscription account stay out: Warmup lists its own
+ * through `warmup.list`, and this view would show them as blank agent jobs.
+ */
 export async function fetchJobs(target: ApiTarget): Promise<ScheduledJob[]> {
-	const json = await request<{ jobs?: JobWire[] }>(target, "/heartbeat/jobs");
-	return (json.jobs ?? []).map(toJob);
+	return toScheduledJobs(
+		await request(
+			target,
+			"/heartbeat/jobs?include=app_jobs",
+			undefined,
+			gatewayJsonValueSchema
+		)
+	);
 }
 
 /**
@@ -304,25 +366,65 @@ export async function createJob(
 ): Promise<ScheduledJob> {
 	const resp = await authenticatedFetch(target, "/heartbeat/jobs", {
 		method: "POST",
-		body: JSON.stringify({
-			name: input.name,
-			schedule: toScheduleBody(input.schedule),
-			target: toTargetBody(input.target),
-			enabled: input.enabled,
-			require_approval: input.requireApproval ?? false,
-			...(input.ownerApp ? { owner_app: input.ownerApp } : {}),
-		}),
+		body: JSON.stringify(toJobCreateBody(input)),
 	});
 	const text = await resp.text();
-	const json = text ? JSON.parse(text) : {};
+	const json = pluginValueSchema.parse(text ? JSON.parse(text) : {});
 	if (!resp.ok) {
-		const message =
-			typeof json?.error === "string"
-				? json.error
-				: `Failed to create job (${resp.status})`;
+		const message = scheduledErrorResponseSchema.safeParse(json).success
+			? scheduledErrorResponseSchema.parse(json).error
+			: `Failed to create job (${resp.status})`;
 		throw new Error(message);
 	}
-	return toJob(json.job as JobWire);
+	return toJob(scheduledJobResponseSchema.parse(json).job);
+}
+
+/** Fields sent when creating a {@link ProviderAccountTarget} job. */
+export interface ProviderAccountJobInput {
+	enabled: boolean;
+	name: string;
+	ownerApp: string;
+	providerAccount: ProviderAccountTarget;
+	schedule: Schedule;
+}
+
+/**
+ * Create a job that pings one provider account. Core validates that the
+ * provider supports per-account pings and that the account is a saved login,
+ * and answers 400 with that message otherwise.
+ */
+export async function createProviderAccountJob(
+	target: ApiTarget,
+	input: ProviderAccountJobInput
+): Promise<ScheduledJob> {
+	const accountTarget: ScheduledProviderAccountTargetBody = {
+		type: "provider_account",
+		provider_id: input.providerAccount.providerId,
+		account_id: input.providerAccount.accountId,
+		prompt: input.providerAccount.prompt,
+		model: input.providerAccount.model,
+	};
+	const body: ScheduledJobCreateBody = {
+		name: input.name,
+		schedule: toScheduleBody(input.schedule),
+		target: accountTarget,
+		enabled: input.enabled,
+		require_approval: false,
+		owner_app: input.ownerApp,
+	};
+	const resp = await authenticatedFetch(target, "/heartbeat/jobs", {
+		method: "POST",
+		body: JSON.stringify(body),
+	});
+	const text = await resp.text();
+	const json = pluginValueSchema.parse(text ? JSON.parse(text) : {});
+	if (!resp.ok) {
+		const message = scheduledErrorResponseSchema.safeParse(json).success
+			? scheduledErrorResponseSchema.parse(json).error
+			: `Failed to create job (${resp.status})`;
+		throw new Error(message);
+	}
+	return toJob(scheduledJobResponseSchema.parse(json).job);
 }
 
 /** Update a saved routine and return Core's canonical record. */
@@ -340,20 +442,24 @@ export async function updateJob(
 		}
 	);
 	const text = await resp.text();
-	const json = text ? JSON.parse(text) : {};
+	const json = pluginValueSchema.parse(text ? JSON.parse(text) : {});
 	if (!resp.ok) {
-		const message =
-			typeof json?.error === "string"
-				? json.error
-				: `Failed to update job (${resp.status})`;
+		const message = scheduledErrorResponseSchema.safeParse(json).success
+			? scheduledErrorResponseSchema.parse(json).error
+			: `Failed to update job (${resp.status})`;
 		throw new Error(message);
 	}
-	return toJob(json.job as JobWire);
+	return toJob(scheduledJobResponseSchema.parse(json).job);
 }
 
 /** Delete a scheduled job by id. */
 export async function deleteJob(target: ApiTarget, id: string): Promise<void> {
-	await request<void>(target, `/heartbeat/jobs/${encodeURIComponent(id)}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/heartbeat/jobs/${encodeURIComponent(id)}`,
+		{
+			method: "DELETE",
+		},
+		gatewayJsonValueSchema
+	);
 }

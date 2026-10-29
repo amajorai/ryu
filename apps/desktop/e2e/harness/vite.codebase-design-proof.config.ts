@@ -9,6 +9,9 @@ export default defineConfig({
 	define: { "process.env": {} },
 	css: { postcss: { plugins: [tailwindcss()] } },
 	resolve: { alias: { "@": path.resolve(import.meta.dirname, "../..") } },
-	optimizeDeps: { entries: ["codebase-design-proof.html"] },
+	optimizeDeps: {
+		entries: ["codebase-design-proof.html"],
+		esbuildOptions: { target: "esnext" },
+	},
 	server: { host: "127.0.0.1", port: 5198, strictPort: true, watch: null },
 });

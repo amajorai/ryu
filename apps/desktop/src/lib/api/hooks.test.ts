@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
 import { parseHookInventory, updateHookOverride } from "./hooks.ts";
 
 describe("parseHookInventory", () => {
@@ -65,7 +66,7 @@ describe("updateHookOverride", () => {
 		const fakeFetch = Object.assign(
 			async (...args: Parameters<typeof fetch>) => {
 				const init = args[1];
-				body = typeof init?.body === "string" ? init.body : "";
+				body = z.string().catch("").parse(init?.body);
 				return new Response(JSON.stringify({ hooks: [] }), {
 					headers: { "content-type": "application/json" },
 					status: 200,
@@ -92,5 +93,67 @@ describe("updateHookOverride", () => {
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
+	});
+});
+
+describe("hook field normalization", () => {
+	const hook = {
+		effectiveEnabled: false,
+		enabled: false,
+		handler: { display: "Command", kind: "command" },
+		hookKey: "hook",
+		id: "id",
+		ownerId: "owner",
+		ownerName: "Owner",
+		phase: "pre",
+		priority: 0,
+		reviewRequired: false,
+		source: "config",
+		trusted: false,
+	};
+	it("keeps matcher JSON identity and optional override omission", () => {
+		const matcher = JSON.parse(
+			'{"__proto__":{"future":true},"future":[1,null]}'
+		);
+		const parsed = parseHookInventory({
+			hooks: [
+				{
+					...hook,
+					matcher,
+					localOverrides: {
+						node: { enabled: false, trusted: "invalid" },
+						user: [],
+					},
+					pluginEnabled: "invalid",
+				},
+			],
+		}).hooks[0];
+		expect(parsed?.matcher).toBe(matcher);
+		expect(parsed?.localOverrides).toEqual({ node: { enabled: false } });
+		expect(parsed?.pluginEnabled).toBe(true);
+		expect(Object.hasOwn(parsed?.handler ?? {}, "path")).toBe(false);
+	});
+	it("preserves error messages and validation order", () => {
+		expect(() =>
+			parseHookInventory({
+				hooks: [{ ...hook, source: "future", priority: 0.5 }],
+			})
+		).toThrow("invalid hook source");
+		expect(() =>
+			parseHookInventory({
+				hooks: [{ ...hook, priority: 0.5, effectiveEnabled: "invalid" }],
+			})
+		).toThrow("invalid hook priority");
+		expect(() =>
+			parseHookInventory({
+				hooks: [{ ...hook, effectiveEnabled: "invalid", handler: null }],
+			})
+		).toThrow("invalid hook effectiveEnabled");
+		expect(() => parseHookInventory({ hooks: [null] })).toThrow(
+			"invalid hook inventory item"
+		);
+		expect(() => parseHookInventory({ hooks: null })).toThrow(
+			"invalid hook inventory"
+		);
 	});
 });

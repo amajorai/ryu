@@ -11,9 +11,10 @@ import {
 	WorkflowCircle06Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { cn } from "@ryu/ui/lib/utils";
-import { format } from "date-fns";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import { eventClock } from "@/src/lib/calendar/display-days.ts";
 import type { CalendarEvent } from "@/src/lib/calendar/events.ts";
 
 /** Border/background tone reflecting an event's kind and outcome. */
@@ -26,12 +27,15 @@ export function eventTone(event: CalendarEvent): string {
 	return "border-l-primary bg-primary/10 text-foreground";
 }
 
-/** Short leading label for an event pill: a run count or the start time. */
+/**
+ * Short leading label for an event pill: a run count or the start time, read
+ * on the display time zone's clock.
+ */
 export function eventTime(event: CalendarEvent): string {
 	if (event.aggregateCount) {
 		return `${event.aggregateCount}×`;
 	}
-	return format(event.start, "HH:mm");
+	return eventClock(event.start);
 }
 
 /** Badge naming what an event's job runs: system job, agent, or workflow. */
@@ -43,7 +47,7 @@ function targetBadge(event: CalendarEvent) {
 		return <Badge variant="secondary">{event.agentId}</Badge>;
 	}
 	return (
-		<Badge className="gap-1" variant="secondary">
+		<Badge variant="secondary">
 			<HugeiconsIcon className="size-3" icon={WorkflowCircle06Icon} />
 			{event.workflowName ?? "Workflow"}
 		</Badge>
@@ -52,6 +56,7 @@ function targetBadge(event: CalendarEvent) {
 
 /** Full detail card for a single event (day panel + agenda list). */
 export function EventRow({ event }: { event: CalendarEvent }) {
+	const tl = useLiteralMessages();
 	let icon = Clock01Icon;
 	let iconColor = "text-primary";
 	if (event.kind === "past") {
@@ -70,17 +75,23 @@ export function EventRow({ event }: { event: CalendarEvent }) {
 					className={cn("size-4 shrink-0", iconColor)}
 					icon={icon}
 				/>
-				<span className="min-w-0 flex-1 truncate font-medium text-sm">
+				<span
+					className="min-w-0 flex-1 truncate font-medium text-sm"
+					data-ryu-i18n="off"
+					title={event.jobName}
+				>
 					{event.jobName}
 				</span>
 				<span className="shrink-0 text-muted-foreground text-xs tabular-nums">
 					{event.aggregateCount
-						? `${event.aggregateCount} runs`
-						: format(event.start, "HH:mm")}
+						? tl("{aggregateCount} runs", {
+								aggregateCount: event.aggregateCount,
+							})
+						: eventClock(event.start)}
 				</span>
 			</div>
 			<div className="flex flex-wrap items-center gap-1.5 pl-6">
-				<Badge className="gap-1" variant="secondary">
+				<Badge variant="secondary">
 					<HugeiconsIcon className="size-3" icon={Clock01Icon} />
 					{event.scheduleLabel}
 				</Badge>

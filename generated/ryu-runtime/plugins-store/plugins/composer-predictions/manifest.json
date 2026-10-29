@@ -1,0 +1,62 @@
+{
+  "tags": ["chat", "composer", "predictions", "autocomplete", "productivity"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/composer-predictions",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/composer-predictions",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/composer-predictions",
+  "name": "Composer Predictions",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Predicts your next message in your own voice after each reply, using a cheap side model. Press Tab to accept it into the composer; nothing is sent automatically.",
+  "tagline": "Your next message, already drafted",
+  "keywords": [
+    "chat",
+    "composer",
+    "predictions",
+    "autocomplete",
+    "next message"
+  ],
+  "category": "Productivity",
+  "icon": "quill-write-01",
+  "iconDither": { "from": 268, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "none" },
+    "mobile": { "support": "none" },
+    "extension": { "support": "none" },
+    "web": { "support": "full" },
+    "cli": { "support": "none" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "permission_grants": [],
+  "activation_events": ["*"],
+  "contributes": {
+    "settings_tabs": [
+      {
+        "id": "composer-predictions.settings",
+        "title": "Composer Predictions",
+        "scope": "node",
+        "fields": [
+          {
+            "type": "toggle",
+            "pref_key": "composer-predictions-enabled",
+            "label": "Predict my next message",
+            "description": "After each reply, show the message you would likely send next as ghost text. Press Tab to edit it.",
+            "default": true
+          },
+          {
+            "type": "model_picker",
+            "pref_key": "composer-predictions-model",
+            "label": "Prediction model",
+            "description": "Optional cheap, fast model for predictions. Empty uses the default side model, then the local engine."
+          }
+        ]
+      }
+    ]
+  }
+}

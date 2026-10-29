@@ -3,43 +3,32 @@ import { createRoot } from "react-dom/client";
 import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
 import "../../src/index.css";
+import agentGeneratedReferenceUrl from "./chat-rich-content-proof/agent-reference.png?inline";
+import briefCoverUrl from "./chat-rich-content-proof/brief-cover.png?inline";
+import finalSlideUrl from "./chat-rich-content-proof/final-slide.png?inline";
+import launchNotesUrl from "./chat-rich-content-proof/launch-notes.png?inline";
+import reviewGridUrl from "./chat-rich-content-proof/review-grid.png?inline";
+import runwayMapUrl from "./chat-rich-content-proof/runway-map.png?inline";
+import weeklyTemplateUrl from "./chat-rich-content-proof/weekly-template.png?inline";
 
 const agentReferenceUrl = new URL("./agent-reference.svg", window.location.href)
 	.href;
 
-function imageData(label: string, start: string, end: string): string {
-	const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="${start}"/><stop offset="1" stop-color="${end}"/></linearGradient></defs><rect width="640" height="420" rx="34" fill="url(#g)"/><circle cx="518" cy="100" r="138" fill="#fff" fill-opacity=".18"/><path d="M74 250c70-96 128-18 190-76 60-56 106 30 176-20 48-34 78-7 126 42" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="10"/><rect x="74" y="70" width="146" height="12" rx="6" fill="#fff" fill-opacity=".55"/><rect x="74" y="104" width="290" height="30" rx="15" fill="#fff" fill-opacity=".94"/><text x="74" y="354" fill="#fff" font-family="Inter, sans-serif" font-size="30" font-weight="700">${label}</text><text x="74" y="384" fill="#fff" fill-opacity=".72" font-family="Inter, sans-serif" font-size="15">Chat attachment preview</text></svg>`;
-	return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
+// Attached images reach the transcript as `data:image/png;base64,...` file
+// parts, the shape `fileToDataUrl` gives a locally attached file; `?inline`
+// makes Vite encode each PNG fixture that way. Shared media rendering admits
+// only raster image data URLs and refuses `data:image/svg+xml` (SVG is
+// scriptable), so an SVG data URL here renders as a file chip, not an image.
 const USER_IMAGES = [
-	{
-		filename: "brief-cover.svg",
-		url: imageData("Brief cover", "#172554", "#2563eb"),
-	},
-	{
-		filename: "weekly-template.svg",
-		url: imageData("Weekly template", "#3f1d5a", "#a21caf"),
-	},
-	{
-		filename: "runway-map.svg",
-		url: imageData("Runway map", "#134e4a", "#0f766e"),
-	},
-	{
-		filename: "launch-notes.svg",
-		url: imageData("Launch notes", "#7c2d12", "#ea580c"),
-	},
-	{
-		filename: "review-grid.svg",
-		url: imageData("Review grid", "#3b0764", "#7e22ce"),
-	},
-	{
-		filename: "final-slide.svg",
-		url: imageData("Final slide", "#164e63", "#0891b2"),
-	},
+	{ filename: "brief-cover.png", url: briefCoverUrl },
+	{ filename: "weekly-template.png", url: weeklyTemplateUrl },
+	{ filename: "runway-map.png", url: runwayMapUrl },
+	{ filename: "launch-notes.png", url: launchNotesUrl },
+	{ filename: "review-grid.png", url: reviewGridUrl },
+	{ filename: "final-slide.png", url: finalSlideUrl },
 ] as const;
 
-const USER_MESSAGE: UIMessage = {
+const USER_MESSAGE: UIMessage & { createdAt: string } = {
 	createdAt: "2026-08-29T18:52:00.000Z",
 	id: "rich-user",
 	parts: [
@@ -56,9 +45,9 @@ const USER_MESSAGE: UIMessage = {
 			type: "file",
 			url: "data:application/octet-stream;base64,AA==",
 		},
-		...USER_IMAGES.map((image) => ({
+		...USER_IMAGES.map<UIMessage["parts"][number]>((image) => ({
 			filename: image.filename,
-			mediaType: "image/svg+xml",
+			mediaType: "image/png",
 			type: "file",
 			url: image.url,
 		})),
@@ -73,7 +62,7 @@ const USER_MESSAGE: UIMessage = {
 		},
 	],
 	role: "user",
-} as unknown as UIMessage;
+};
 
 const MERMAID_FENCE = "```";
 const ASSISTANT_MARKDOWN = `Here is a structured first pass. The table and diagram keep their own controls, while the images remain vectors in the transcript.
@@ -94,27 +83,27 @@ ${MERMAID_FENCE}
 
 ![Agent visual reference](${agentReferenceUrl})`;
 
-const ASSISTANT_MESSAGE: UIMessage = {
+const ASSISTANT_MESSAGE: UIMessage & { createdAt: string } = {
 	createdAt: "2026-08-29T18:53:00.000Z",
 	id: "rich-assistant",
 	parts: [
 		{ text: ASSISTANT_MARKDOWN, type: "text" },
 		{
-			filename: "agent-reference.svg",
-			mediaType: "image/svg+xml",
+			filename: "agent-reference.png",
+			mediaType: "image/png",
 			type: "file",
-			url: imageData("Generated reference", "#172554", "#be123c"),
+			url: agentGeneratedReferenceUrl,
 		},
 	],
 	role: "assistant",
-} as unknown as UIMessage;
+};
 
 function Story() {
 	return (
 		<main className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-8">
 			<div className="mx-auto max-w-[980px] space-y-6">
 				<header className="space-y-2">
-					<p className="font-medium text-primary text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 						Rich chat content proof
 					</p>
 					<h1 className="font-semibold text-2xl tracking-tight">
@@ -143,7 +132,7 @@ function Story() {
 								images: USER_IMAGES.map((image, index) => ({
 									filename: image.filename,
 									id: `composer-image-${index}`,
-									mimeType: "image/svg+xml",
+									mimeType: "image/png",
 									url: image.url,
 								})),
 							}}
@@ -154,6 +143,7 @@ function Story() {
 							onBranch={() => undefined}
 							onEditMessage={() => undefined}
 							onSend={() => undefined}
+							onStop={() => undefined}
 							status="ready"
 						/>
 					</ChatDisplayPrefs>

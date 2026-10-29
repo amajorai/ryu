@@ -1,4 +1,4 @@
-//! Persisted experience buffer (`~/.ryu/experience.db`).
+//! Persisted experience buffer (`<data dir>/db/experience.db`).
 //!
 //! The system-of-record for the MetaClaw-style continual-learning loop: one row
 //! per captured (user, assistant) turn, optionally scored by a PRM judge. The
@@ -13,15 +13,35 @@
 //! - `base_model` records the model that produced the reply, for lineage — but a
 //!   retrain always derives a *fresh* LoRA from the original base, never from a
 //!   previous merge (avoids model collapse).
+//!
+//! Encryption at rest: `user_text` and `assistant_text` are sealed per row as
+//! `encb:v1:` under the `experience.db` content key, each bound to the row `id`
+//! and its column. Ids, conversation ids, rewards, outcomes and timestamps stay
+//! plaintext (the work queues filter and order on them). Legacy plaintext rows
+//! are sealed on open; reads skip and count a row that does not open.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
+use ryu_crypto::content_sqlite::{ColumnPlan, KeyKind};
+use ryu_crypto::{ContentCipher, ContentContext};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+
+use crate::seal::{StoreSeal, STORE};
+
+const USER_TEXT: &str = "experience.user_text";
+const ASSISTANT_TEXT: &str = "experience.assistant_text";
+
+fn column_plans() -> Result<Vec<ColumnPlan>> {
+    Ok(vec![
+        ColumnPlan::text("experience", "user_text", "id", KeyKind::Text)?,
+        ColumnPlan::text("experience", "assistant_text", "id", KeyKind::Text)?,
+    ])
+}
 
 /// One captured turn as the experience buffer records it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,32 +77,116 @@ pub struct Experience {
 #[derive(Clone)]
 pub struct ExperienceStore {
     conn: Arc<Mutex<Connection>>,
+    seal: StoreSeal,
 }
 
 impl ExperienceStore {
-    /// Open (creating if needed) the buffer at the default `<data_dir>/experience.db`.
+    /// Open (creating if needed) the buffer at the default `<data_dir>/db/experience.db`.
     /// The data dir is resolved via [`crate::data_dir`] (`init_data_dir`), so the
     /// crate has ZERO dependency on Core's `paths` module.
+    ///
+    /// Also deletes datasets an older build left in `state/learning/` (plaintext
+    /// copies of the buffer), once the buffer itself is sealed.
     pub fn open_default() -> Result<Self> {
-        Self::open(crate::data_dir().join("experience.db"))
+        let data_dir = crate::data_dir();
+        let store = Self::open(ryu_sidecar_runtime::layout::db_file(&data_dir, STORE))?;
+        purge_legacy_datasets(&data_dir);
+        Ok(store)
     }
 
+    /// Open the buffer at `path`; the content key comes from the process's
+    /// crypto host (Core's, or the standalone host the sidecar binary installs).
+    /// Fails closed without a key.
     pub fn open(path: PathBuf) -> Result<Self> {
+        let cipher =
+            ryu_crypto::content_cipher(STORE).context("resolving the experience buffer key")?;
+        Self::open_with_cipher(path, cipher)
+    }
+
+    /// [`Self::open`] under an explicit content cipher (tests, tools).
+    pub fn open_with_cipher(path: PathBuf, cipher: ContentCipher) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating db dir {}", parent.display()))?;
         }
-        let conn = Connection::open(&path)
+        let mut conn = Connection::open(&path)
             .with_context(|| format!("opening experience db {}", path.display()))?;
         Self::init_schema(&conn)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+        let seal = StoreSeal::prepare(&mut conn, Some(Path::new(&path)), cipher, &column_plans()?)
+            .context("sealing the experience buffer")?;
+        let conn = Arc::new(Mutex::new(conn));
+        seal.defer_compaction(&conn, Some(Path::new(&path)));
+        Ok(Self { conn, seal })
+    }
+
+    /// Rows skipped by reads because a sealed value did not open (since open).
+    pub fn unreadable_rows(&self) -> u64 {
+        self.seal.unreadable()
+    }
+
+    /// Open the sealed texts of a row read from disk; `None` (counted and
+    /// logged) when either does not open.
+    fn reveal(&self, mut row: Experience) -> Option<Experience> {
+        let user = self
+            .seal
+            .open(&row.user_text, &ContentContext::for_id(USER_TEXT, &row.id));
+        let assistant = self
+            .seal
+            .open(&row.assistant_text, &ContentContext::for_id(ASSISTANT_TEXT, &row.id));
+        match (user, assistant) {
+            (Ok(user), Ok(assistant)) => {
+                row.user_text = user;
+                row.assistant_text = assistant;
+                Some(row)
+            }
+            _ => {
+                self.seal.count_unreadable(1);
+                tracing::warn!(
+                    store = STORE,
+                    unreadable = self.seal.unreadable(),
+                    "experience buffer skipped a row that does not open"
+                );
+                None
+            }
+        }
+    }
+
+    fn collect(&self, rows: impl Iterator<Item = rusqlite::Result<Experience>>) -> Result<Vec<Experience>> {
+        let mut out = Vec::new();
+        for row in rows {
+            if let Some(row) = self.reveal(row?) {
+                out.push(row);
+            }
+        }
+        Ok(out)
+    }
+
+    fn collect_visible(
+        &self,
+        rows: impl Iterator<Item = rusqlite::Result<Experience>>,
+        limit: usize,
+        visible_conversation_ids: &HashSet<String>,
+    ) -> Result<Vec<Experience>> {
+        let mut visible = Vec::new();
+        for row in rows {
+            let row = row?;
+            if !visible_conversation_ids.contains(&row.conversation_id) {
+                continue;
+            }
+            if let Some(row) = self.reveal(row) {
+                visible.push(row);
+                if visible.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(visible)
     }
 
     fn init_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
              CREATE TABLE IF NOT EXISTS experience (
                  id               TEXT PRIMARY KEY,
                  conversation_id  TEXT NOT NULL,
@@ -111,6 +215,12 @@ impl ExperienceStore {
     /// Idempotent on `id`, so re-sweeping the same conversation is safe.
     /// Returns `true` when a new row was inserted.
     pub async fn record_if_absent(&self, exp: &Experience) -> Result<bool> {
+        let user_text = self
+            .seal
+            .seal(&exp.user_text, &ContentContext::for_id(USER_TEXT, &exp.id))?;
+        let assistant_text = self
+            .seal
+            .seal(&exp.assistant_text, &ContentContext::for_id(ASSISTANT_TEXT, &exp.id))?;
         let conn = self.conn.lock().await;
         let n = conn
             .execute(
@@ -122,8 +232,8 @@ impl ExperienceStore {
                     exp.id,
                     exp.conversation_id,
                     exp.agent_id,
-                    exp.user_text,
-                    exp.assistant_text,
+                    user_text,
+                    assistant_text,
                     exp.outcome,
                     exp.reward,
                     exp.base_model,
@@ -188,7 +298,7 @@ impl ExperienceStore {
              FROM experience ORDER BY created_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], Self::map_row)?;
-        collect(rows)
+        self.collect(rows)
     }
 
     /// Most recent rows belonging to a caller-visible conversation set.
@@ -208,17 +318,7 @@ impl ExperienceStore {
              FROM experience ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], Self::map_row)?;
-        let mut visible = Vec::new();
-        for row in rows {
-            let row = row?;
-            if visible_conversation_ids.contains(&row.conversation_id) {
-                visible.push(row);
-                if visible.len() >= limit {
-                    break;
-                }
-            }
-        }
-        Ok(visible)
+        self.collect_visible(rows, limit, visible_conversation_ids)
     }
 
     /// Captured-but-unscored, non-excluded rows — the PRM work queue.
@@ -232,7 +332,7 @@ impl ExperienceStore {
              ORDER BY created_at ASC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], Self::map_row)?;
-        collect(rows)
+        self.collect(rows)
     }
 
     /// Captured-but-unscored rows restricted to a caller-visible conversation set.
@@ -250,17 +350,7 @@ impl ExperienceStore {
              ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], Self::map_row)?;
-        let mut visible = Vec::new();
-        for row in rows {
-            let row = row?;
-            if visible_conversation_ids.contains(&row.conversation_id) {
-                visible.push(row);
-                if visible.len() >= limit {
-                    break;
-                }
-            }
-        }
-        Ok(visible)
+        self.collect_visible(rows, limit, visible_conversation_ids)
     }
 
     /// High-reward, non-excluded rows — the reward-filtered training set (RFT).
@@ -278,7 +368,7 @@ impl ExperienceStore {
              ORDER BY reward DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![min_reward, limit as i64], Self::map_row)?;
-        collect(rows)
+        self.collect(rows)
     }
 
     /// High-reward rows restricted to a caller-visible conversation set.
@@ -297,17 +387,7 @@ impl ExperienceStore {
              ORDER BY reward DESC",
         )?;
         let rows = stmt.query_map(params![min_reward], Self::map_row)?;
-        let mut visible = Vec::new();
-        for row in rows {
-            let row = row?;
-            if visible_conversation_ids.contains(&row.conversation_id) {
-                visible.push(row);
-                if visible.len() >= limit {
-                    break;
-                }
-            }
-        }
-        Ok(visible)
+        self.collect_visible(rows, limit, visible_conversation_ids)
     }
 
     /// `(total, scored, trainable_at_min)` counts for the buffer overview.
@@ -378,12 +458,23 @@ impl ExperienceStore {
     }
 }
 
-fn collect(rows: impl Iterator<Item = rusqlite::Result<Experience>>) -> Result<Vec<Experience>> {
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
+/// Delete `state/learning/dataset-*.jsonl` files an older build wrote (plaintext
+/// copies of buffer rows). Datasets are no longer written to disk: a retrain
+/// sends its samples inline.
+pub fn purge_legacy_datasets(data_dir: &Path) {
+    let dir = ryu_sidecar_runtime::layout::state_path(data_dir, "learning");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("dataset-") && name.ends_with(".jsonl") {
+            if let Err(error) = std::fs::remove_file(entry.path()) {
+                tracing::warn!(%error, "could not delete a legacy learning dataset");
+            }
+        }
     }
-    Ok(out)
 }
 
 #[cfg(test)]
@@ -411,6 +502,117 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ryu-exp-test-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         ExperienceStore::open(dir.join("experience.db")).expect("open")
+    }
+
+    fn test_cipher() -> ContentCipher {
+        ContentCipher::from_root(&[3u8; 32], STORE)
+    }
+
+    fn file_contains(path: &Path, needle: &str) -> bool {
+        std::fs::read(path)
+            .map(|bytes| bytes.windows(needle.len()).any(|w| w == needle.as_bytes()))
+            .unwrap_or(false)
+    }
+
+    fn raw_texts(path: &Path, id: &str) -> (String, String) {
+        let conn = Connection::open(path).unwrap();
+        conn.query_row(
+            "SELECT user_text, assistant_text FROM experience WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn texts_are_sealed_on_disk_and_open_on_read() {
+        let dir = tempfile_dir("sealed");
+        let path = dir.join("experience.db");
+        let store = ExperienceStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
+        let mut exp = sample("a", Some(0.9));
+        exp.user_text = "my-private-prompt-marker".into();
+        exp.assistant_text = "my-private-reply-marker".into();
+        store.record_if_absent(&exp).await.unwrap();
+
+        let (user, assistant) = raw_texts(&path, "a");
+        assert!(user.starts_with("encb:v1:") && assistant.starts_with("encb:v1:"));
+        for file in [path.clone(), dir.join("experience.db-wal")] {
+            assert!(!file_contains(&file, "my-private-prompt-marker"));
+            assert!(!file_contains(&file, "my-private-reply-marker"));
+        }
+        let rows = store.list_for_training(0.5, 10).await.unwrap();
+        assert_eq!(rows[0].user_text, "my-private-prompt-marker");
+        assert_eq!(rows[0].assistant_text, "my-private-reply-marker");
+    }
+
+    #[tokio::test]
+    async fn legacy_rows_are_sealed_once_and_still_read() {
+        let dir = tempfile_dir("legacy");
+        let path = dir.join("experience.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            ExperienceStore::init_schema(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO experience (id, conversation_id, user_text, assistant_text, outcome,
+                   skill_generation, excluded, created_at)
+                 VALUES ('old', 'conv-1', 'legacy-prompt-marker', 'legacy-reply-marker',
+                   'completed', 0, 0, '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+        let leftover = dir.join("state").join("learning");
+        std::fs::create_dir_all(&leftover).unwrap();
+        std::fs::write(leftover.join("dataset-1.jsonl"), "legacy-prompt-marker").unwrap();
+        std::fs::write(leftover.join("keep.txt"), "x").unwrap();
+
+        let store = ExperienceStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
+        purge_legacy_datasets(&dir);
+        assert!(!leftover.join("dataset-1.jsonl").exists());
+        assert!(leftover.join("keep.txt").exists());
+        let rows = store.list_unscored(10).await.unwrap();
+        assert_eq!(rows[0].user_text, "legacy-prompt-marker");
+        let sealed = raw_texts(&path, "old");
+        assert!(sealed.0.starts_with("encb:v1:"));
+        drop(store);
+        for file in [path.clone(), dir.join("experience.db-wal")] {
+            assert!(!file_contains(&file, "legacy-prompt-marker"));
+        }
+        let store = ExperienceStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
+        assert_eq!(raw_texts(&path, "old"), sealed, "second open is a no-op");
+        let conn = Connection::open(&path).unwrap();
+        ryu_crypto::content_sqlite::assert_all_open(&conn, &test_cipher(), &column_plans().unwrap())
+            .unwrap();
+        assert_eq!(store.list(10).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_text_swapped_between_rows_is_skipped_and_counted() {
+        let dir = tempfile_dir("swap");
+        let path = dir.join("experience.db");
+        let store = ExperienceStore::open_with_cipher(path.clone(), test_cipher()).unwrap();
+        store.record_if_absent(&sample("a", None)).await.unwrap();
+        store.record_if_absent(&sample("b", None)).await.unwrap();
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "UPDATE experience SET user_text = (SELECT user_text FROM experience WHERE id = 'a')
+                 WHERE id = 'b'",
+                [],
+            )
+            .unwrap();
+        }
+        let rows = store.list(10).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "a");
+        assert_eq!(store.unreadable_rows(), 1);
+    }
+
+    fn tempfile_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ryu-exp-seal-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[tokio::test]

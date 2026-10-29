@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Split, Tab, TabGroup } from "@/src/contexts/TabsContext.tsx";
 
 export interface CanvasRect {
@@ -38,13 +39,37 @@ interface CanvasRegion {
 	tabIds: string[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
+// Saved geometry is untrusted. Validate each member independently so one bad
+// rectangle never discards valid positions or resets another region.
+const savedNumber = z.number().optional().catch(undefined);
+const savedRectSchema = z
+	.object({
+		height: savedNumber,
+		width: savedNumber,
+		x: savedNumber,
+		y: savedNumber,
+	})
+	.catch({});
+const savedViewportSchema = z
+	.object({
+		x: savedNumber,
+		y: savedNumber,
+		zoom: savedNumber,
+	})
+	.catch({});
+const savedRectanglesSchema = z.record(z.string(), savedRectSchema).catch({});
+const savedCanvasSchema = z
+	.object({
+		groups: savedRectanglesSchema,
+		tabs: savedRectanglesSchema,
+		viewport: savedViewportSchema,
+	})
+	.catch({ groups: {}, tabs: {}, viewport: {} });
 
-function finiteNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value);
-}
+type SavedRect = z.output<typeof savedRectSchema>;
+type SavedViewport = z.output<typeof savedViewportSchema>;
+/** Input accepted by the actual persistence-boundary parser. */
+type SavedCanvasInput = Parameters<typeof savedCanvasSchema.parse>[0];
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
@@ -86,41 +111,36 @@ function regionRectAt(index: number, memberCount: number): CanvasRect {
 	};
 }
 
-function rectFromUnknown(
-	value: unknown,
+function rectFromSaved(
+	value: SavedRect | undefined,
 	fallback: CanvasRect,
 	maxWidth = TAB_CANVAS_MAX_WIDTH,
 	maxHeight = TAB_CANVAS_MAX_HEIGHT
 ): CanvasRect {
-	if (!isRecord(value)) {
+	if (!value) {
 		return fallback;
 	}
 	return {
-		height: finiteNumber(value.height)
-			? clamp(value.height, TAB_CANVAS_MIN_HEIGHT, maxHeight)
-			: fallback.height,
-		width: finiteNumber(value.width)
-			? clamp(value.width, TAB_CANVAS_MIN_WIDTH, maxWidth)
-			: fallback.width,
-		x: finiteNumber(value.x) ? value.x : fallback.x,
-		y: finiteNumber(value.y) ? value.y : fallback.y,
+		height:
+			value.height === undefined
+				? fallback.height
+				: clamp(value.height, TAB_CANVAS_MIN_HEIGHT, maxHeight),
+		width:
+			value.width === undefined
+				? fallback.width
+				: clamp(value.width, TAB_CANVAS_MIN_WIDTH, maxWidth),
+		x: value.x ?? fallback.x,
+		y: value.y ?? fallback.y,
 	};
 }
 
-function viewportFromUnknown(value: unknown): CanvasViewport {
-	if (!isRecord(value)) {
-		return { x: 0, y: 0, zoom: 1 };
-	}
+function viewportFromSaved(value: SavedViewport): CanvasViewport {
 	const zoom = value.zoom;
 	return {
-		x: finiteNumber(value.x) ? value.x : 0,
-		y: finiteNumber(value.y) ? value.y : 0,
-		zoom: finiteNumber(zoom) && zoom >= 0.2 && zoom <= 2 ? zoom : 1,
+		x: value.x ?? 0,
+		y: value.y ?? 0,
+		zoom: zoom !== undefined && zoom >= 0.2 && zoom <= 2 ? zoom : 1,
 	};
-}
-
-function recordsFromUnknown(value: unknown): Record<string, unknown> {
-	return isRecord(value) ? value : {};
 }
 
 function regionMemberships(
@@ -189,24 +209,24 @@ export function createInitialTabCanvasSnapshot(
 }
 
 export function reconcileTabCanvasSnapshot(
-	snapshot: unknown,
+	snapshot: SavedCanvasInput,
 	tabIds: string[],
 	regionIds: string[]
 ): TabCanvasSnapshot {
 	const base = defaultTabCanvasSnapshot();
-	const source = isRecord(snapshot) ? snapshot : {};
-	const sourceTabs = recordsFromUnknown(source.tabs);
-	const sourceGroups = recordsFromUnknown(source.groups);
+	const source = savedCanvasSchema.parse(snapshot);
+	const sourceTabs = source.tabs;
+	const sourceGroups = source.groups;
 
 	for (const [index, tabId] of tabIds.entries()) {
-		base.tabs[tabId] = rectFromUnknown(sourceTabs[tabId], tabRectAt(index));
+		base.tabs[tabId] = rectFromSaved(sourceTabs[tabId], tabRectAt(index));
 	}
 	for (const [index, regionId] of regionIds.entries()) {
-		base.groups[regionId] = rectFromUnknown(
+		base.groups[regionId] = rectFromSaved(
 			sourceGroups[regionId],
 			regionRectAt(index, 1)
 		);
 	}
-	base.viewport = viewportFromUnknown(source.viewport);
+	base.viewport = viewportFromSaved(source.viewport);
 	return base;
 }

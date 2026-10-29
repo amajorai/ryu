@@ -3,10 +3,9 @@ import {
 	type ChannelConfigView,
 	ChannelsView,
 	defaultBehaviorSettings,
-} from "@ryu/blocks/desktop/channels";
+} from "@ryu/blocks/desktop/channels.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import type { ContextType } from "react";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CreateAgentDialog } from "../../src/components/agents/CreateAgentDialog.tsx";
@@ -14,6 +13,7 @@ import { DestructiveConfirmDialog } from "../../src/components/ui/DestructiveCon
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { TabsContext } from "../../src/contexts/TabsContext.tsx";
 import { useCreateAgentDialog } from "../../src/store/useCreateAgentDialog.ts";
+import { createTabsProofContext } from "./tabs-proof-context.ts";
 import "../../src/index.css";
 
 const agents: AgentOption[] = [{ id: "default-agent", name: "Default agent" }];
@@ -35,10 +35,10 @@ const orphanedDiscord: ChannelConfigView = {
 	teamId: null,
 };
 
-const tabsContext = {
+const tabsContext = createTabsProofContext({
 	openTab: () => "proof-chat",
 	updateTabsIconWhere: () => undefined,
-} as unknown as NonNullable<ContextType<typeof TabsContext>>;
+});
 
 const queryClient = new QueryClient();
 
@@ -56,7 +56,7 @@ function Proof() {
 					<TabsContext.Provider value={tabsContext}>
 						<main className="min-h-screen bg-background text-foreground">
 							<div className="border-b px-8 py-5">
-								<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+								<p className="font-medium text-muted-foreground text-xs uppercase tracking-widest">
 									Production component proof
 								</p>
 								<h1 className="mt-2 font-semibold text-2xl tracking-tight">
@@ -106,5 +106,5 @@ function Proof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(<Proof />);
+createRoot(document.getElementById("root")!).render(<Proof />);
 document.body.dataset.harnessReady = "1";

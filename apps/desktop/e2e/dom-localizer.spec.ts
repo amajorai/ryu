@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import type {} from "./harness/dom-localizer-proof.tsx";
 
 test("localized mutations avoid translating stable siblings and retain language behavior", async ({
 	page,
@@ -7,20 +8,16 @@ test("localized mutations avoid translating stable siblings and retain language 
 }) => {
 	await page.goto("/dom-localizer-proof.html");
 	await expect(page.locator("#primary")).toHaveText("Translated alpha");
-	await page.evaluate(() => Reflect.get(window, "localizerProof").reset());
+	await page.evaluate(() => window.localizerProof.reset());
 	await page
 		.getByRole("button", { name: "Change literal", exact: true })
 		.click();
 	await expect(page.locator("#primary")).toHaveText("Translated beta");
-	expect(
-		await page.evaluate(() => Reflect.get(window, "localizerProof").calls())
-	).toBe(1);
-	expect(
-		await page.evaluate(() =>
-			Reflect.get(window, "localizerProof").stableVisits()
-		)
-	).toBe(0);
-	await page.evaluate(() => Reflect.get(window, "localizerProof").reset());
+	expect(await page.evaluate(() => window.localizerProof.calls())).toBe(1);
+	expect(await page.evaluate(() => window.localizerProof.stableVisits())).toBe(
+		0
+	);
+	await page.evaluate(() => window.localizerProof.reset());
 	await page
 		.getByRole("button", { name: "Change attribute", exact: true })
 		.click();
@@ -28,9 +25,7 @@ test("localized mutations avoid translating stable siblings and retain language 
 		"title",
 		"Translated beta"
 	);
-	expect(
-		await page.evaluate(() => Reflect.get(window, "localizerProof").calls())
-	).toBe(1);
+	expect(await page.evaluate(() => window.localizerProof.calls())).toBe(1);
 	await page.getByRole("button", { name: "Add subtree", exact: true }).click();
 	await expect(page.locator("#dynamic button")).toHaveText("Translated alpha");
 	await expect(page.locator("#dynamic button")).toHaveAttribute(
@@ -51,16 +46,14 @@ test("localized mutations avoid translating stable siblings and retain language 
 		.getByRole("button", { name: "Use source language", exact: true })
 		.click();
 	await expect(page.locator("#attribute")).toHaveText("Alpha label");
-	await page.evaluate(() => Reflect.get(window, "localizerProof").reset());
+	await page.evaluate(() => window.localizerProof.reset());
 	await page
 		.getByRole("button", { name: "Remove temporary node", exact: true })
 		.click();
 	await expect(page.getByText("Temporary label", { exact: true })).toHaveCount(
 		0
 	);
-	expect(
-		await page.evaluate(() => Reflect.get(window, "localizerProof").calls())
-	).toBe(0);
+	expect(await page.evaluate(() => window.localizerProof.calls())).toBe(0);
 	await page.screenshot({
 		path: path.resolve(
 			import.meta.dirname,
@@ -74,44 +67,30 @@ test("remote pack changes reject obsolete replies and refresh the same pack", as
 }) => {
 	await page.goto("/dom-localizer-proof.html?host");
 	await expect
-		.poll(() =>
-			page.evaluate(() => Reflect.get(window, "localizerProof").remoteCount())
-		)
+		.poll(() => page.evaluate(() => window.localizerProof.remoteCount()))
 		.toBe(1);
-	await page.evaluate(() =>
-		Reflect.get(window, "localizerProof").changeHost("remote-b")
-	);
+	await page.evaluate(() => window.localizerProof.changeHost("remote-b"));
 	await expect
-		.poll(() =>
-			page.evaluate(() => Reflect.get(window, "localizerProof").remoteCount())
-		)
+		.poll(() => page.evaluate(() => window.localizerProof.remoteCount()))
 		.toBe(2);
 	await page.evaluate(() =>
-		Reflect.get(window, "localizerProof").resolveRemote(1, "Fresh label")
+		window.localizerProof.resolveRemote(1, "Fresh label")
 	);
 	await expect(page.locator("#primary")).toHaveText("Fresh label");
 	await page.evaluate(() =>
-		Reflect.get(window, "localizerProof").resolveRemote(0, "Stale label")
+		window.localizerProof.resolveRemote(0, "Stale label")
 	);
 	await expect(page.locator("#primary")).toHaveText("Fresh label");
-	await page.evaluate(() =>
-		Reflect.get(window, "localizerProof").changeHost("remote-b")
+	await page.evaluate(() => window.localizerProof.changeHost("remote-b"));
+	expect(await page.evaluate(() => window.localizerProof.remoteCount())).toBe(
+		2
 	);
-	expect(
-		await page.evaluate(() =>
-			Reflect.get(window, "localizerProof").remoteCount()
-		)
-	).toBe(2);
-	await page.evaluate(() =>
-		Reflect.get(window, "localizerProof").changeHost("remote-b", "2")
-	);
+	await page.evaluate(() => window.localizerProof.changeHost("remote-b", "2"));
 	await expect
-		.poll(() =>
-			page.evaluate(() => Reflect.get(window, "localizerProof").remoteCount())
-		)
+		.poll(() => page.evaluate(() => window.localizerProof.remoteCount()))
 		.toBe(3);
 	await page.evaluate(() =>
-		Reflect.get(window, "localizerProof").resolveRemote(2, "Updated label")
+		window.localizerProof.resolveRemote(2, "Updated label")
 	);
 	await expect(page.locator("#primary")).toHaveText("Updated label");
 });

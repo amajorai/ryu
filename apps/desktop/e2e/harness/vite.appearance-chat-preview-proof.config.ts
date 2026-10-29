@@ -33,4 +33,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "appearance-chat-preview-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

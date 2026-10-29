@@ -198,7 +198,13 @@ pub fn read_thread(engine: &str, id: &str) -> Result<ImportedThread> {
             .unwrap_or_else(|| first_line_title(&messages)),
         cwd: meta.cwd,
         git_branch: meta.git_branch,
-        native_session_id: meta.native_session_id,
+        // Match Claude's listing contract: older transcripts omit sessionId,
+        // but their filename still supplies the native session UUID. A read
+        // must retain it so repeat imports find the same owned conversation.
+        native_session_id: meta.native_session_id.or_else(|| {
+            (format == HistoryFormat::ClaudeJsonl)
+                .then(|| id.rsplit('/').next().unwrap_or(id).to_owned())
+        }),
         message_count: messages.len(),
         updated_at,
     };

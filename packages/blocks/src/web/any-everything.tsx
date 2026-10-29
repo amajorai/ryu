@@ -10,7 +10,7 @@ const items = [
 	{ label: "Any OS", sub: "macOS, Windows, and Linux." },
 	{
 		label: "Any integration",
-		sub: "250+ tools via MCP, hundreds more via Composio.",
+		sub: "Configured MCP tools and authenticated app connections.",
 	},
 	{ label: "Any language", sub: "Build in whatever your team already uses." },
 ];
@@ -20,7 +20,6 @@ export default function AnyEverything() {
 		<section className="container mx-auto px-4 py-16 md:py-24">
 			<div className="mx-auto max-w-6xl">
 				<SectionHeading
-					eyebrow="Zero lock-in"
 					subtitle="Every layer is swappable. Never locked to one model or vendor."
 					title="Works with everything. Locked to nothing."
 				/>

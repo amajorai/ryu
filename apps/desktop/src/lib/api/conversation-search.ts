@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/conversation-search.ts
 //
 // Typed client for Core's exact + semantic chat-message search
@@ -33,20 +34,6 @@ export interface MessageSearchResult {
 	indexed: boolean;
 }
 
-interface RawHit {
-	content?: string;
-	conversation_id?: string;
-	created_at?: number;
-	message_id?: string;
-	role?: string;
-	score?: number;
-}
-
-interface RawResult {
-	hits?: RawHit[];
-	indexed?: boolean;
-}
-
 /**
  * Semantic search over past chat messages. Returns `{ hits: [], indexed: true }`
  * for an empty/whitespace query. Resolves to `null` on any transport failure
@@ -69,10 +56,11 @@ export async function searchConversations(
 			mode: "all",
 			q,
 		});
-		const raw = await request<RawResult>(
+		const raw = await request(
 			target,
 			`/api/conversations/search?${params}`,
-			{ signal }
+			{ signal },
+			rawResultResponseSchema
 		);
 		return {
 			indexed: raw.indexed ?? true,
@@ -89,3 +77,21 @@ export async function searchConversations(
 		return null;
 	}
 }
+
+const rawHitResponseSchema = z
+	.object({
+		content: z.string().optional(),
+		conversation_id: z.string().optional(),
+		created_at: z.number().optional(),
+		message_id: z.string().optional(),
+		role: z.string().optional(),
+		score: z.number().optional(),
+	})
+	.passthrough();
+
+const rawResultResponseSchema = z
+	.object({
+		hits: z.array(rawHitResponseSchema).optional(),
+		indexed: z.boolean().optional(),
+	})
+	.passthrough();

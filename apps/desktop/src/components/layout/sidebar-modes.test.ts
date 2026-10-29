@@ -140,4 +140,35 @@ describe("built-in modes", () => {
 			BUILTIN_SIDEBAR_MODES.filter((m) => m.sections === null).map((m) => m.key)
 		).toEqual(["sections", "tabbed"]);
 	});
+
+	it("offers All computers as a stacked mode over named sections", () => {
+		const computers = BUILTIN_SIDEBAR_MODES.find((m) => m.key === "computers");
+		expect(computers?.title).toBe("All computers");
+		expect(computers?.layout).toBe("stacked");
+		expect(computers?.sections).toEqual([
+			"tabs",
+			"pinned",
+			"projects",
+			"chats",
+		]);
+		const resolved = resolveSidebarMode(
+			"computers",
+			BUILTIN_SIDEBAR_MODES,
+			true
+		);
+		expect(resolved.mode.key).toBe("computers");
+		expect(resolved.stale).toBe(false);
+		// The default computer's sections follow the user's own order.
+		if (!computers) {
+			throw new Error("All computers descriptor is missing");
+		}
+		expect(
+			orderedSidebarModeSections(computers, [
+				"chats",
+				"projects",
+				"tabs",
+				"pinned",
+			])
+		).toEqual(["chats", "projects", "tabs", "pinned"]);
+	});
 });

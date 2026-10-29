@@ -1,0 +1,12 @@
+diff --git a/dist/node/chunks/config.js b/dist/node/chunks/config.js
+--- a/dist/node/chunks/config.js
++++ b/dist/node/chunks/config.js
+@@ -6673,7 +6673,7 @@ function n(n$2, i$1, o$1, f$1) {
+ 	}(f$1 || {}), a = i$1[l];
+ 	if (void 0 === a) {
+ 		let e$1, n$3, r$1, t$1;
+-		for (t$1 in i$1) n$3 && t$1.length < n$3.length || ("/" === t$1[t$1.length - 1] && l.startsWith(t$1) ? (u = l.substring(t$1.length), n$3 = t$1) : t$1.length > 1 && (r$1 = t$1.indexOf("*", 1), ~r$1 && (e$1 = RegExp("^" + t$1.substring(0, r$1) + "(.*)" + t$1.substring(1 + r$1) + "$").exec(l), e$1 && e$1[1] && (u = e$1[1], n$3 = t$1))));
++		for (t$1 in i$1) n$3 && t$1.length < n$3.length || ("/" === t$1[t$1.length - 1] && l.startsWith(t$1) ? (u = l.substring(t$1.length), n$3 = t$1) : t$1.length > 1 && (r$1 = t$1.indexOf("*", 1), ~r$1 && (e$1 = RegExp("^" + t$1.substring(0, r$1).replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + "(.*)" + t$1.substring(1 + r$1).replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + "$").exec(l), e$1 && e$1[1] && (u = e$1[1], n$3 = t$1))));
+ 		a = i$1[n$3];
+ 	}
+ 	return a || e(n$2, l), s = t(a, c), s || e(n$2, l, 1), u && function(e$1, n$3) {

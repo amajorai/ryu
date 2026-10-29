@@ -40,9 +40,9 @@ describe("parseVoicePrefs", () => {
 			false
 		);
 		expect(parseVoicePrefs(JSON.stringify({})).enabled).toBe(true);
-		expect(
-			parseVoicePrefs(JSON.stringify({ enabled: "no" as unknown })).enabled
-		).toBe(true);
+		expect(parseVoicePrefs(JSON.stringify({ enabled: "no" })).enabled).toBe(
+			true
+		);
 	});
 
 	it("coerces an unknown engine to parakeet and picks its bundled model", () => {
@@ -75,8 +75,8 @@ describe("parseVoicePrefs", () => {
 		expect(parseVoicePrefs(JSON.stringify({ shortcut: "   " })).shortcut).toBe(
 			DEFAULT_VOICE_SHORTCUT
 		);
-		expect(
-			parseVoicePrefs(JSON.stringify({ shortcut: 42 as unknown })).shortcut
-		).toBe(DEFAULT_VOICE_SHORTCUT);
+		expect(parseVoicePrefs(JSON.stringify({ shortcut: 42 })).shortcut).toBe(
+			DEFAULT_VOICE_SHORTCUT
+		);
 	});
 });

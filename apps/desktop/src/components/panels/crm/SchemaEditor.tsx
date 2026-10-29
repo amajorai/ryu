@@ -21,17 +21,17 @@ import {
 	PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { ColorPickerPopover } from "@ryu/ui/components/color-picker";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { ColorPickerPopover } from "@ryu/ui/components/color-picker.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
-import { Separator } from "@ryu/ui/components/separator";
+} from "@ryu/ui/components/native-select.tsx";
+import { Separator } from "@ryu/ui/components/separator.tsx";
 import { useState } from "react";
 import type {
 	CrmClient,
@@ -81,6 +81,26 @@ function slugify(name: string): string {
 		.slice(0, 48);
 }
 
+function uniqueOptionId(label: string, options: SelectOption[]): string {
+	const base = slugify(label);
+	if (!base) {
+		return "";
+	}
+
+	const taken = new Set(options.map((option) => option.id));
+	if (!taken.has(base)) {
+		return base;
+	}
+
+	for (let suffix = 2; ; suffix += 1) {
+		const suffixText = `_${suffix}`;
+		const candidate = `${base.slice(0, 48 - suffixText.length)}${suffixText}`;
+		if (!taken.has(candidate)) {
+			return candidate;
+		}
+	}
+}
+
 export function SchemaEditor({
 	client,
 	objects,
@@ -101,7 +121,7 @@ export function SchemaEditor({
 	const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
 	const [addingObject, setAddingObject] = useState(false);
 
-	const run = async (work: () => Promise<unknown>) => {
+	const run = async <TResult,>(work: () => Promise<TResult>) => {
 		setBusy(true);
 		setError(null);
 		try {
@@ -204,17 +224,17 @@ export function SchemaEditor({
 												<span className="font-medium text-sm">
 													{field.name}
 												</span>
-												<Badge className="font-normal" variant="secondary">
+												<Badge typography="normal" variant="secondary">
 													{FIELD_TYPES.find((t) => t.value === field.field_type)
 														?.label ?? field.field_type}
 												</Badge>
 												{field.is_system && (
-													<Badge className="font-normal" variant="outline">
+													<Badge typography="normal" variant="outline">
 														system
 													</Badge>
 												)}
 												{field.is_required && (
-													<Badge className="font-normal" variant="outline">
+													<Badge typography="normal" variant="outline">
 														required
 													</Badge>
 												)}
@@ -226,8 +246,8 @@ export function SchemaEditor({
 												<div className="mt-1 flex flex-wrap gap-1">
 													{(field.config?.options ?? []).map((option) => (
 														<Badge
-															className="font-normal"
 															key={option.id}
+															typography="normal"
 															variant="secondary"
 														>
 															{option.label}
@@ -451,7 +471,7 @@ function FieldForm({
 	);
 
 	const submit = () => {
-		const config: Record<string, unknown> = {};
+		const config: NonNullable<Field["config"]> = {};
 		if (needsOptions) {
 			config.options = options.map((option, index) => ({
 				...option,
@@ -496,7 +516,12 @@ function FieldForm({
 					<NativeSelect
 						disabled={typeLocked}
 						id="crm-field-type"
-						onChange={(event) => setFieldType(event.target.value as FieldType)}
+						onChange={(event) =>
+							setFieldType(
+								/* SAFETY: This NativeSelect renders only FIELD_TYPES values, whose owner type is FieldType. This is a native UI selection, not a decoder for arbitrary synthetic events. */ event
+									.target.value as FieldType
+							)
+						}
 						value={fieldType}
 					>
 						{FIELD_TYPES.map((type) => (
@@ -597,7 +622,7 @@ function FieldForm({
 										)
 									}
 									triggerAriaLabel={`Option ${option.label} colour`}
-									triggerClassName="h-9 w-14 shrink-0 p-1"
+									triggerClassName="h-9 w-14 shrink-0"
 									triggerShowValue={false}
 									value={option.color ?? "#888888"}
 								/>
@@ -660,7 +685,7 @@ function FieldForm({
 									setOptions((current) => [
 										...current,
 										{
-											id: slugify(optionDraft),
+											id: uniqueOptionId(optionDraft, current),
 											label: optionDraft.trim(),
 											position: current.length,
 										},

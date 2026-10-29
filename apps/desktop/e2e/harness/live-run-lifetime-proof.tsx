@@ -10,6 +10,7 @@ import { LiveActivityDock } from "../../src/components/live/LiveActivityDock.tsx
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { TabsProvider } from "../../src/contexts/TabsContext.tsx";
 import { type RunSummary, useRuns } from "../../src/hooks/useRuns.ts";
+import type { RunStreamFrame } from "../../src/lib/api/runStream.ts";
 import { useAgentRunLiveActivities } from "../../src/live/adapters/agent-runs.ts";
 import { useContributedLiveActivities } from "../../src/live/adapters/contributed.ts";
 import { useLiveActivityStore } from "../../src/store/useLiveActivityStore.ts";
@@ -47,7 +48,7 @@ const run: RunSummary = {
 	updated_at: 1,
 	worktree_path: null,
 };
-const emit = (data: unknown) =>
+const emit = (data: RunStreamFrame) =>
 	output?.enqueue(
 		new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`)
 	);

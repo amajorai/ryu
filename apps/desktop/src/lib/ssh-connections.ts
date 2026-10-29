@@ -1,3 +1,4 @@
+import { z } from "zod";
 export type SshAuthMode = "identity" | "none";
 
 export interface SshConnection {
@@ -12,9 +13,18 @@ export interface SshConnection {
 
 export const SSH_CONNECTIONS_STORAGE_KEY = "ryu:ssh-connections";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
+const sshStoredRecordSchema = z.object({
+	name: z.unknown().optional(),
+	host: z.unknown().optional(),
+	username: z.unknown().optional(),
+	id: z.unknown().optional(),
+	port: z.unknown().optional(),
+	auth: z.unknown().optional(),
+	identityFile: z.unknown().optional(),
+});
+const sshStoredRecordsSchema = z.array(z.unknown());
+const sshPortSchema = z.number().int().min(1).max(65_535);
+type SshStoredInput = Parameters<typeof sshStoredRecordSchema.parse>[0];
 
 function hasControlCharacters(value: string): boolean {
 	for (const character of value) {
@@ -26,75 +36,90 @@ function hasControlCharacters(value: string): boolean {
 	return false;
 }
 
-function cleanText(value: unknown, maxLength: number): string | null {
-	if (typeof value !== "string") {
+function cleanText(value: SshStoredInput, maxLength: number): string | null {
+	const parsed = z.string().safeParse(value);
+	if (!parsed.success) {
 		return null;
 	}
-	const text = value.trim();
+	const text = parsed.data.trim();
 	if (!text || text.length > maxLength || hasControlCharacters(text)) {
 		return null;
 	}
 	return text;
 }
 
-function safeToken(value: unknown, maxLength: number): string | null {
+function safeToken(value: SshStoredInput, maxLength: number): string | null {
 	const text = cleanText(value, maxLength);
 	return text && /^[A-Za-z0-9._:\-[\]]+$/.test(text) ? text : null;
 }
 
-function safeIdentityPath(value: unknown): string | null {
+function safeIdentityPath(value: SshStoredInput): string | null {
 	return cleanText(value, 4096);
 }
 
+/**
+ * The username is optional: absent, empty or whitespace-only means the profile
+ * has no username (""). Anything else must be a safe token, or the profile is
+ * refused.
+ */
+function optionalUsername(value: SshStoredInput): string | null {
+	if (value === undefined) {
+		return "";
+	}
+	const parsed = z.string().safeParse(value);
+	if (parsed.success && parsed.data.trim() === "") {
+		return "";
+	}
+	return safeToken(value, 120);
+}
+
 function connectionId(): string {
-	if (typeof crypto?.randomUUID === "function") {
+	if (z.function().safeParse(crypto?.randomUUID).success) {
 		return crypto.randomUUID();
 	}
 	return `ssh-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
 }
 
-export function normalizeSshConnection(raw: unknown): SshConnection | null {
-	if (!isRecord(raw)) {
+export function normalizeSshConnection(
+	raw: SshStoredInput
+): SshConnection | null {
+	const parsed = sshStoredRecordSchema.safeParse(raw);
+	if (!parsed.success) {
 		return null;
 	}
-	const name = cleanText(raw.name, 120);
-	const host = safeToken(raw.host, 255);
-	const username =
-		raw.username === undefined ? "" : safeToken(raw.username, 120);
-	const id = safeToken(raw.id, 120);
-	const port = typeof raw.port === "number" ? raw.port : Number(raw.port);
-	if (
-		!(name && host) ||
-		username === null ||
-		!Number.isInteger(port) ||
-		port < 1 ||
-		port > 65_535
-	) {
+	const metadata = parsed.data;
+	const name = cleanText(metadata.name, 120);
+	const host = safeToken(metadata.host, 255);
+	const username = optionalUsername(metadata.username);
+	const id = safeToken(metadata.id, 120);
+	const port = sshPortSchema.safeParse(Number(metadata.port));
+	if (!(name && host) || username === null || !port.success) {
 		return null;
 	}
-	const auth: SshAuthMode = raw.auth === "identity" ? "identity" : "none";
-	const identityFile = safeIdentityPath(raw.identityFile);
-	return {
-		auth,
-		host,
-		id: id ?? connectionId(),
-		...(identityFile ? { identityFile } : {}),
-		name,
-		port,
-		username,
-	};
+	const auth: SshAuthMode = metadata.auth === "identity" ? "identity" : "none";
+	const identityFile = safeIdentityPath(metadata.identityFile);
+	const identity: Pick<SshConnection, "auth" | "host" | "id" | "identityFile"> =
+		{
+			auth,
+			host,
+			id: id ?? connectionId(),
+		};
+	if (identityFile) {
+		identity.identityFile = identityFile;
+	}
+	return { ...identity, name, port: port.data, username };
 }
 
 export function loadSshConnections(): SshConnection[] {
 	try {
 		const raw = localStorage.getItem(SSH_CONNECTIONS_STORAGE_KEY);
-		const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-		if (!Array.isArray(parsed)) {
+		const parsed = sshStoredRecordsSchema.safeParse(raw ? JSON.parse(raw) : []);
+		if (!parsed.success) {
 			return [];
 		}
 		const seen = new Set<string>();
 		const connections: SshConnection[] = [];
-		for (const item of parsed) {
+		for (const item of parsed.data) {
 			const connection = normalizeSshConnection(item);
 			if (connection && !seen.has(connection.id)) {
 				seen.add(connection.id);

@@ -1,5 +1,6 @@
 import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
 import { iconCacheKey } from "@ryu/marketplace/catalog/icon-cache";
+import { z } from "zod";
 import type { AppInfo } from "@/src/lib/api/plugins.ts";
 import type { MentionSourceItem } from "@/src/lib/mentions/types.ts";
 
@@ -14,10 +15,12 @@ function safeFlatColor(value: string | undefined | null): string | undefined {
 function ditherAccent(
 	value: string | number | null | undefined
 ): string | undefined {
-	if (typeof value === "number" && Number.isFinite(value)) {
-		return `hsl(${Math.round(value) % 360} 72% 48%)`;
+	const hue = z.number().safeParse(value);
+	if (hue.success) {
+		return `hsl(${Math.round(hue.data) % 360} 72% 48%)`;
 	}
-	return safeFlatColor(typeof value === "string" ? value : undefined);
+	const color = z.string().safeParse(value);
+	return safeFlatColor(color.success ? color.data : undefined);
 }
 
 function appAccentColor(app: AppInfo): string | undefined {
@@ -41,7 +44,8 @@ export function appMentionVisual(
 		visualIcon: (
 			<AppIcon
 				cacheKey={iconCacheKey(app.id, app.installedVersion ?? app.version)}
-				className="size-3.5 shrink-0 rounded-[4px]"
+				className="size-3.5 shrink-0"
+				corners="mention"
 				dither={app.iconDither}
 				iconBackground={app.iconBackground}
 				iconId={app.icon}

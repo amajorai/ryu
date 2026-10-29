@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { managedDiscordInstallUrl, managedTelegramBotUrl } from "./channels";
+import {
+	managedDiscordInstallUrl,
+	managedTelegramBotUrl,
+} from "./channels.tsx";
 
 describe("managed channel action URLs", () => {
 	test("builds a Telegram bot deeplink from a display username", () => {

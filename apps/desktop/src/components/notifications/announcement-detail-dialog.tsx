@@ -54,14 +54,13 @@ export function AnnouncementDetailDialog({
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent
-				className="max-h-[min(90vh,48rem)] max-w-2xl overflow-y-auto p-0 sm:max-w-2xl"
+				appearance="announcement"
 				data-testid="announcement-detail-dialog"
-				overlayClassName="bg-black/55 backdrop-blur-sm"
 			>
 				<AnnouncementVisual
 					accent={announcement.color}
 					backgroundColors={announcement.blobColors}
-					className="min-h-[17rem] rounded-none sm:min-h-[20rem] sm:rounded-t-4xl"
+					className="min-h-[17rem] sm:min-h-[20rem]"
 					iconContent={appIcon}
 					iconId={usesAppIconTile ? null : announcement.visualIcon}
 					iconImageUrl={usesAppIconTile ? null : announcement.visualIconUrl}
@@ -70,21 +69,21 @@ export function AnnouncementDetailDialog({
 					visualCode={announcement.visualCode}
 				/>
 				<div className="flex flex-col gap-6 p-6 sm:p-8">
-					<DialogHeader className="gap-2 pr-8">
-						<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.18em]">
+					<DialogHeader purpose="marketplace-guide">
+						<p className="type-compact font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
 							Product update
 						</p>
-						<DialogTitle className="font-medium text-2xl tracking-tight sm:text-3xl">
+						<DialogTitle typography="marketplace-guide">
 							{announcement.title}
 						</DialogTitle>
 						{announcement.body ? (
-							<DialogDescription className="max-w-xl text-sm leading-6">
+							<DialogDescription className="max-w-xl">
 								{announcement.body}
 							</DialogDescription>
 						) : null}
 					</DialogHeader>
 
-					<DialogFooter className="flex-col-reverse justify-between gap-3 sm:flex-row sm:items-center">
+					<DialogFooter purpose="announcement-actions">
 						<p className="text-muted-foreground text-xs">
 							The latest updates from the Ryu team.
 						</p>

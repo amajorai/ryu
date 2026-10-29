@@ -1,6 +1,5 @@
 import { cn } from "@ryu/ui/lib/utils";
 import { ArrowUpRight } from "lucide-react";
-import type { Route } from "next";
 import Link from "next/link";
 import { AgentsVisual, GatewayVisual, MarketplaceVisual } from "./visuals.tsx";
 
@@ -16,15 +15,15 @@ const SURFACES = [
 	{
 		id: "bot",
 		Visual: AgentsVisual,
-		label: "Ryu Bot",
+		label: "Bot",
 		href: "/bot",
 		description: "Ask an agent to handle a task through chat.",
 	},
 	{
 		id: "console",
 		Visual: GatewayVisual,
-		label: "Ryu Console",
-		href: "/console",
+		label: "Agent",
+		href: "/agent",
 		description: "Manage agents, connected tools, permissions, and usage.",
 	},
 ] as const;
@@ -36,7 +35,7 @@ export function ProductSurfaceCards({ className }: { className?: string }) {
 				<Link
 					className="group block py-2 outline-offset-4 focus-visible:outline-2 focus-visible:outline-ring"
 					data-testid={`realm-card-${surface.id}`}
-					href={surface.href as Route}
+					href={surface.href}
 					key={surface.id}
 				>
 					<div

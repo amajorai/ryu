@@ -1,9 +1,11 @@
+import { z } from "zod";
+
 /**
  * The step-up ("confirm it's you") client, shared by every surface that can be
  * asked for a code: the website, the desktop app and the mobile app. The CLI
  * speaks the same three endpoints from Rust.
  *
- * Deliberately dependency-free and framework-free — no React, no env package, no
+ * Framework-free — no React, no env package, no
  * fetch wrapper. Each app differs only in where the API lives and how it proves
  * who it is (a cookie in the browser, a bearer token everywhere else), so those
  * are the two things it takes, and everything else is identical by construction
@@ -16,16 +18,25 @@
 /** Kept in step with STEP_UP_SCOPES in packages/auth/src/lib/step-up.ts. */
 export type StepUpScope =
 	| "account.merge"
+	| "account.security"
 	| "org.credentials"
 	| "org.delete"
 	| "org.features"
 	| "org.members"
+	| "org.security"
 	| "node.destroy"
 	| "billing"
-	| "platform.admin";
+	| "platform.admin"
+	| "session.confirm";
 
-/** How a code can be proven: authenticator app, emailed code, backup code. */
-export type StepUpMethod = "totp" | "otp" | "backup";
+/** How a step-up can be proven: a factor, password, or mailbox link. */
+export type StepUpMethod =
+	| "totp"
+	| "otp"
+	| "backup"
+	| "password"
+	| "magic-link";
+export type StepUpChallengeMethod = Extract<StepUpMethod, "otp" | "magic-link">;
 
 export interface StepUpStatus {
 	/** Plain-language description of what the code authorizes. */
@@ -41,6 +52,51 @@ export interface StepUpStatus {
 	/** How long a fresh proof lasts, in milliseconds. */
 	windowMs: number;
 }
+
+const stepUpScopeSchema = z.enum([
+	"account.merge",
+	"account.security",
+	"org.credentials",
+	"org.delete",
+	"org.features",
+	"org.members",
+	"org.security",
+	"node.destroy",
+	"billing",
+	"platform.admin",
+	"session.confirm",
+]);
+const stepUpMethodSchema = z.enum([
+	"totp",
+	"otp",
+	"backup",
+	"password",
+	"magic-link",
+]);
+const stepUpStatusSchema = z.object({
+	action: z.string(),
+	enrolmentRequired: z.boolean(),
+	methods: z.array(stepUpMethodSchema),
+	satisfied: z.boolean(),
+	scope: stepUpScopeSchema,
+	twoFactorEnabled: z.boolean(),
+	windowMs: z.number(),
+});
+interface StepUpRequestBody {
+	code?: string;
+	method: StepUpMethod;
+	scope: StepUpScope;
+}
+const stepUpErrorSchema = z.object({
+	message: z.unknown().optional(),
+	error: z.unknown().optional(),
+});
+const stepUpRequiredSchema = z.object({
+	error: z.union([
+		z.literal("STEP_UP_REQUIRED"),
+		z.object({ code: z.literal("STEP_UP_REQUIRED") }),
+	]),
+});
 
 /** The `error`/`code` value a gated endpoint returns when a step-up is missing. */
 export const STEP_UP_REQUIRED = "STEP_UP_REQUIRED";
@@ -70,8 +126,11 @@ export interface StepUpClientOptions {
 }
 
 export interface StepUpClient {
-	/** Email a fresh one-time code for `scope`. */
-	challenge: (scope: StepUpScope) => Promise<void>;
+	/** Email a fresh one-time code or verification link for `scope`. */
+	challenge: (
+		scope: StepUpScope,
+		method?: StepUpChallengeMethod
+	) => Promise<void>;
 	/** What this session would have to do to unlock `scope`. */
 	status: (scope: StepUpScope) => Promise<StepUpStatus>;
 	/** Prove a factor. Rejects with the server's reason when refused. */
@@ -80,6 +139,26 @@ export interface StepUpClient {
 		method: StepUpMethod;
 		scope: StepUpScope;
 	}) => Promise<void>;
+	/** Consume a one-click mailbox proof from the settings verification page. */
+	verifyMagicLink: (input: {
+		scope: StepUpScope;
+		token: string;
+	}) => Promise<void>;
+}
+
+/**
+ * A refused step-up request. `message` is the server's reason in the user's
+ * language; `status` lets a surface tell a wait (429, e.g. the one-minute email
+ * cooldown, whose message says how long) from a failure.
+ */
+export class StepUpRequestError extends Error {
+	readonly status: number;
+
+	constructor(message: string, status: number) {
+		super(message);
+		this.name = "StepUpRequestError";
+		this.status = status;
+	}
 }
 
 /** Longest error body treated as a message rather than a stray page dump. */
@@ -105,10 +184,14 @@ async function reasonFrom(res: Response): Promise<string> {
 		return fallback;
 	}
 	try {
-		const body = JSON.parse(trimmed) as { error?: unknown; message?: unknown };
-		const fromJson = body?.message ?? body?.error;
-		if (typeof fromJson === "string" && fromJson.trim()) {
-			return fromJson.trim();
+		const body = stepUpErrorSchema.safeParse(JSON.parse(trimmed));
+		if (body.success) {
+			const fromJson = z
+				.string()
+				.safeParse(body.data.message ?? body.data.error);
+			if (fromJson.success && fromJson.data.trim()) {
+				return fromJson.data.trim();
+			}
 		}
 	} catch {
 		// Plain text, handled below.
@@ -119,20 +202,34 @@ async function reasonFrom(res: Response): Promise<string> {
 	return trimmed;
 }
 
+async function refusal(res: Response): Promise<StepUpRequestError> {
+	return new StepUpRequestError(await reasonFrom(res), res.status);
+}
+
 export function createStepUpClient(options: StepUpClientOptions): StepUpClient {
-	const doFetch = options.fetch ?? globalThis.fetch;
+	// Resolve the global at call time: clients are created at module load, and
+	// anything that wraps `fetch` afterwards (instrumentation, test fixtures)
+	// must still see the requests.
+	const doFetch = (...args: Parameters<typeof fetch>): Promise<Response> =>
+		(options.fetch ?? globalThis.fetch)(...args);
 	const base = `${options.baseUrl.replace(/\/+$/, "")}/api/step-up`;
 
 	async function request(path: string, init?: RequestInit): Promise<Response> {
-		const extra = (await options.headers?.()) ?? {};
+		const headers = new Headers(await options.headers?.());
+		new Headers(init?.headers).forEach((value, name) =>
+			headers.set(name, value)
+		);
 		return await doFetch(`${base}${path}`, {
 			...init,
 			credentials: options.includeCredentials ? "include" : undefined,
-			headers: { ...extra, ...(init?.headers as Record<string, string>) },
+			headers,
 		});
 	}
 
-	async function post(path: string, body: unknown): Promise<Response> {
+	async function post(
+		path: string,
+		body: StepUpRequestBody
+	): Promise<Response> {
 		return await request(path, {
 			body: JSON.stringify(body),
 			headers: { "Content-Type": "application/json" },
@@ -141,23 +238,31 @@ export function createStepUpClient(options: StepUpClientOptions): StepUpClient {
 	}
 
 	return {
-		challenge: async (scope) => {
-			const res = await post("/challenge", { scope });
+		challenge: async (scope, method = "otp") => {
+			const res = await post("/challenge", { method, scope });
 			if (!res.ok) {
-				throw new Error(await reasonFrom(res));
+				throw await refusal(res);
 			}
 		},
 		status: async (scope) => {
 			const res = await request(`/status?scope=${encodeURIComponent(scope)}`);
 			if (!res.ok) {
-				throw new Error(await reasonFrom(res));
+				throw await refusal(res);
 			}
-			return (await res.json()) as StepUpStatus;
+			return stepUpStatusSchema.parse(await res.json());
+		},
+		verifyMagicLink: async ({ scope, token }) => {
+			const res = await request(
+				`/verify-link?scope=${encodeURIComponent(scope)}&token=${encodeURIComponent(token)}`
+			);
+			if (!res.ok) {
+				throw await refusal(res);
+			}
 		},
 		verify: async (input) => {
 			const res = await post("/verify", input);
 			if (!res.ok) {
-				throw new Error(await reasonFrom(res));
+				throw await refusal(res);
 			}
 		},
 	};
@@ -173,18 +278,10 @@ export function createStepUpClient(options: StepUpClientOptions): StepUpClient {
  * and drop the code, so a lapsed window there is detected by re-reading
  * `status()` rather than by this predicate.
  */
-export function isStepUpRequired(value: unknown): boolean {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-	const error = (value as { error?: unknown }).error;
-	if (typeof error === "string") {
-		return error === STEP_UP_REQUIRED;
-	}
-	if (error && typeof error === "object") {
-		return (error as { code?: unknown }).code === STEP_UP_REQUIRED;
-	}
-	return false;
+export function isStepUpRequired(
+	value: Parameters<typeof stepUpRequiredSchema.safeParse>[0]
+): boolean {
+	return stepUpRequiredSchema.safeParse(value).success;
 }
 
 /**
@@ -192,11 +289,13 @@ export function isStepUpRequired(value: unknown): boolean {
  * answers for it. One sentence, not two — the same shape as the subtitle on the
  * device-activation page every surface already shows.
  */
-const WHERE_THE_CODE_IS: Record<StepUpMethod, string> = {
+const WHERE_THE_CODE_IS = {
 	backup: "one of your backup codes",
+	"magic-link": "the verification link we emailed you",
 	otp: "the code we emailed you",
+	password: "your current password",
 	totp: "the code from your authenticator app",
-};
+} satisfies Record<StepUpMethod, string>;
 
 export function stepUpPromptLine(input: {
 	action: string;
@@ -220,20 +319,24 @@ export function stepUpPromptLine(input: {
  * matches it, because backup codes are the only way back into a staff account
  * whose authenticator is gone.
  */
-export const STEP_UP_CODE_LENGTH: Record<StepUpMethod, number> = {
+export const STEP_UP_CODE_LENGTH = {
 	backup: 11,
+	"magic-link": 0,
 	otp: 6,
+	password: 128,
 	totp: 6,
-};
+} satisfies Record<StepUpMethod, number>;
 
 /** True when this factor is free text rather than a fixed grid of slots. */
 export function isFreeTextCode(method: StepUpMethod): boolean {
-	return method === "backup";
+	return method === "backup" || method === "password";
 }
 
 /** Label for the button that switches to a given factor. */
-export const STEP_UP_METHOD_LABEL: Record<StepUpMethod, string> = {
+export const STEP_UP_METHOD_LABEL = {
 	backup: "Use a backup code",
+	"magic-link": "Email me a verification link",
 	otp: "Email me a code",
+	password: "Use your password",
 	totp: "Use my authenticator app",
-};
+} satisfies Record<StepUpMethod, string>;

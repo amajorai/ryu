@@ -4,24 +4,24 @@
 
 import type { SellerReportsState } from "@ryu/marketplace/host";
 import { useCallback, useState } from "react";
+import { z } from "zod";
 import {
 	fetchSellerReports,
 	hasMarketplaceAuth,
-	type MarketplaceError,
 	type MarketplaceReportView,
 	resolveReport,
 } from "@/src/lib/api/marketplace.ts";
 
-function toHostError(e: unknown): SellerReportsState["error"] {
-	const err = e as MarketplaceError;
-	if (err?.kind) {
-		return { kind: err.kind, message: err.message };
-	}
-	return {
-		kind: "unknown",
-		message: e instanceof Error ? e.message : "Could not load reports",
-	};
-}
+// Marketplace host errors expose only their classification and display text;
+// preserve future string classifications while validating both consumed fields.
+const toHostError = z
+	.union([
+		z.object({ kind: z.string().min(1), message: z.string() }),
+		z
+			.instanceof(Error)
+			.transform((error) => ({ kind: "unknown", message: error.message })),
+	])
+	.catch({ kind: "unknown", message: "Could not load reports" }).parse;
 
 export function useSellerReports(): SellerReportsState {
 	const [reports, setReports] = useState<MarketplaceReportView[]>([]);

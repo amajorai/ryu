@@ -7,8 +7,9 @@ import { GhostText } from "@ryu/ui/components/editor/ui/ghost-text.tsx";
 import { EDITOR_AI_UNCONFIGURED_ERROR } from "@ryu/ui/components/editor/use-chat.ts";
 import { getEditorAiConfig } from "@ryu/ui/lib/editor-ai.ts";
 import { generateText } from "ai";
-import type { TElement } from "platejs";
-
+import type { InferOptions } from "platejs";
+import { z } from "zod";
+import { isNativeText } from "../../../lib/native-primitive-observation.ts";
 import { MarkdownKit } from "./markdown-kit.tsx";
 
 // The copilot autocomplete system prompt. Kept here (not only in the request
@@ -29,6 +30,10 @@ Rules:
 // Cap the autocomplete to a short continuation — ghost text is a clause, not an
 // essay. Mirrors the maxOutputTokens the Plate reference API route uses.
 const COPILOT_MAX_TOKENS = 64;
+const copilotRequestSchema = z.object({
+	prompt: z.string().optional(),
+	system: z.string().optional(),
+});
 
 /**
  * Custom transport for the copilot completion. Routes the request through Ryu's
@@ -43,15 +48,21 @@ const COPILOT_MAX_TOKENS = 64;
  * ghost text is Tab-acceptable straight into the user's document, so inventing
  * one would silently write fiction into their file.
  */
-const copilotFetch = (async (_input, init) => {
+type CopilotFetch = NonNullable<
+	NonNullable<InferOptions<typeof CopilotPlugin>["completeOptions"]>["fetch"]
+>;
+
+const copilotFetch: (
+	...args: Parameters<CopilotFetch>
+) => ReturnType<CopilotFetch> = async (_input, init) => {
 	const aiCfg = getEditorAiConfig();
 
 	if (!(aiCfg.enabled && aiCfg.baseUrl && aiCfg.model)) {
 		throw new Error(EDITOR_AI_UNCONFIGURED_ERROR);
 	}
 
-	const raw = typeof init?.body === "string" ? init.body : "{}";
-	const body = JSON.parse(raw) as { prompt?: string; system?: string };
+	const raw = isNativeText(init?.body) ? init.body : "{}";
+	const body = copilotRequestSchema.parse(JSON.parse(raw));
 	const prompt = body.prompt ?? "";
 	const system = body.system ?? COPILOT_SYSTEM;
 
@@ -76,7 +87,7 @@ const copilotFetch = (async (_input, init) => {
 	});
 
 	return Response.json({ text: result.text });
-}) as typeof fetch;
+};
 
 export const CopilotKit = [
 	...MarkdownKit,
@@ -89,7 +100,8 @@ export const CopilotKit = [
 				body: {
 					system: COPILOT_SYSTEM,
 				},
-				fetch: copilotFetch,
+				// SAFETY: Plate callCompletionApi invokes this complete native fetch callable only; it never reads Bun's static preconnect member inherited by its global-fetch declaration.
+				fetch: copilotFetch as CopilotFetch,
 				// No onError handler: a failed completion must leave the ghost text
 				// empty. The plugin already records the error on its `error` option;
 				// there is nothing honest to show inline for a passive suggestion.
@@ -113,7 +125,7 @@ export const CopilotKit = [
 				}
 
 				const prompt = serializeMd(editor, {
-					value: [contextEntry[0] as TElement],
+					value: [contextEntry[0]],
 				});
 
 				return `Continue the text up to the next punctuation mark:

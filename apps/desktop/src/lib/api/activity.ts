@@ -3,39 +3,22 @@
 // Typed client for the Core activity API (`/api/activity/*`): the unified feed of
 // everything the node's modules emit (monitor alerts, quests, approvals,
 // meetings, runs, manual notes). Field names are snake_case to match Core's serde
-// shapes exactly. The live SSE stream lives in `activityStream.ts` and, following
-// the repo convention, uses fetch + ReadableStream (not EventSource) so the node
-// bearer token can ride as an `Authorization` header.
+// shapes exactly. The canonical SSE frame codec lives in `@ryuhq/core-client/activity`;
+// stream consumers use authenticated fetch so the selected node token is retained.
 
+import {
+	type ActivityInput,
+	type ActivityItem,
+	activityCreateReplySchema,
+	activityListReplySchema,
+} from "@ryuhq/core-client/activity.ts";
 import { type ApiTarget, request } from "./client.ts";
 
-export type ActivityLevel = "info" | "success" | "warning";
-
-/** One record in the activity feed (mirrors Core's `ActivityItem`). */
-export interface ActivityItem {
-	agent_id: string | null;
-	body: string | null;
-	created_at: number;
-	id: string;
-	kind: string;
-	level: ActivityLevel;
-	metadata: Record<string, unknown>;
-	session_id: string | null;
-	source: string;
-	title: string;
-}
-
-/** Body for `POST /api/activity`; `source` defaults to `"manual"` in Core. */
-export interface ActivityInput {
-	agent_id?: string | null;
-	body?: string | null;
-	kind: string;
-	level?: ActivityLevel;
-	metadata?: Record<string, unknown>;
-	session_id?: string | null;
-	source?: string;
-	title: string;
-}
+export type {
+	ActivityInput,
+	ActivityItem,
+	ActivityLevel,
+} from "@ryuhq/core-client/activity.ts";
 
 export interface ListActivityOptions {
 	before?: number;
@@ -55,7 +38,7 @@ export async function listActivity(
 	}
 	const query = params.toString();
 	const path = query ? `/api/activity?${query}` : "/api/activity";
-	const json = await request<{ items?: ActivityItem[] }>(target, path);
+	const json = await request(target, path, undefined, activityListReplySchema);
 	return json.items ?? [];
 }
 
@@ -63,10 +46,11 @@ export async function createActivity(
 	target: ApiTarget,
 	body: ActivityInput
 ): Promise<ActivityItem> {
-	const json = await request<{ item?: ActivityItem; error?: string }>(
+	const json = await request(
 		target,
 		"/api/activity",
-		{ method: "POST", body }
+		{ method: "POST", body },
+		activityCreateReplySchema
 	);
 	if (!json.item) {
 		throw new Error(json.error ?? "failed to create activity item");

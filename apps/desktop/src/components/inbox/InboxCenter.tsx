@@ -43,7 +43,7 @@ import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
 import {
 	NotificationStack,
 	type NotificationStackItem,
-} from "@ryu/ui/components/notification-stack";
+} from "@ryu/ui/components/notification-stack.tsx";
 import {
 	filterNotifications,
 	isArchivedNotification,
@@ -52,7 +52,7 @@ import {
 	NotificationFilterTabs,
 	notificationFilterLabel,
 } from "@ryu/ui/lib/notification-filters.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
+import { riskTagLabel } from "@ryuhq/protocol/interfaces";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { NotificationBell } from "@/components/ui/notification-bell.tsx";
@@ -65,13 +65,15 @@ import {
 	TrayHeader,
 	TrayIconAction,
 	TrayMorph,
+	type TrayPlacement,
+	TrayRefreshButton,
 	TrayRow,
 	TrayRowIcon,
 	TrayScroll,
 	TraySectionLabel,
 	trayMeta,
 } from "@/src/components/shell/TrayPopover.tsx";
-import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAnnouncementDialog } from "@/src/hooks/useAnnouncementDialog.ts";
 import { useAnnouncements } from "@/src/hooks/useAnnouncements.ts";
@@ -95,14 +97,14 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 
 /** A glyph per approval kind so the list scans by shape, not just by text. */
-const KIND_ICON: Record<ApprovalKind, IconSvgElement> = {
+const KIND_ICON = {
 	tool_call: Wrench01Icon,
 	workflow_gate: WorkflowCircle06Icon,
 	scheduled_run: Calendar04Icon,
 	trigger_run: ZapIcon,
 	skill_synthesis: SparklesIcon,
 	heal_fix: Pulse01Icon,
-};
+} satisfies Record<ApprovalKind, IconSvgElement>;
 
 /** Short "2m"/"3h"/"5d" stamp — the tray has no room for a full timestamp. */
 function shortAgo(value: string | null | undefined): string | null {
@@ -124,11 +126,6 @@ function shortAgo(value: string | null | undefined): string | null {
 		return `${Math.floor(delta / HOUR_MS)}h`;
 	}
 	return `${Math.floor(delta / DAY_MS)}d`;
-}
-
-/** Risk tags read as `network_access`; the meta line reads `network access`. */
-function tagLabel(tag: string): string {
-	return tag.replace(/[_-]+/g, " ");
 }
 
 function ApprovalRow({
@@ -164,7 +161,7 @@ function ApprovalRow({
 			// old red chips stacked a third line onto every risky row and turned the
 			// list into a wall of pink.
 			meta={trayMeta(
-				...approval.risk_tags.slice(0, 2).map(tagLabel),
+				...approval.risk_tags.slice(0, 2).map(riskTagLabel),
 				approval.summary
 			)}
 			onOpen={onOpen}
@@ -244,6 +241,7 @@ function NotificationTrayRow({
 						const action = archived
 							? notifications.unarchive(notification.id)
 							: notifications.archive(notification.id);
+						// useNotifications' mutation onError already toasts the failure.
 						action.catch(() => undefined);
 					}}
 				/>
@@ -251,15 +249,16 @@ function NotificationTrayRow({
 			icon={Notification01Icon}
 			iconNode={
 				app ? (
-					<span className="mt-px flex size-7 shrink-0 items-center justify-center rounded-[10px]">
+					<span className="mt-px flex size-7 shrink-0 items-center justify-center rounded-(--radius-inbox-app-icon)">
 						<AppIcon
-							className="size-7 rounded-[10px]"
+							className="size-7"
 							dither={app.iconDither}
 							iconBackground={app.iconBackground ?? undefined}
 							iconId={app.icon}
 							iconPadding={app.iconPadding}
 							iconUrl={app.iconUrl}
 							name={app.name}
+							presentation="inbox"
 							seedId={app.id}
 							size={14}
 						/>
@@ -278,16 +277,81 @@ function NotificationTrayRow({
 	);
 }
 
+type InboxDecisionResult = Promise<
+	| Awaited<ReturnType<ReturnType<typeof useApprovals>["approve"]>>
+	| Awaited<ReturnType<ReturnType<typeof useQuests>["acceptSuggestion"]>>
+	| undefined
+>;
+
+function DecisionStackActions({
+	busy,
+	confirmLabel,
+	declineLabel,
+	declineTone = "default",
+	onConfirm,
+	onDecline,
+	pendingLabel,
+}: {
+	busy: boolean;
+	confirmLabel: string;
+	declineLabel: string;
+	declineTone?: "default" | "danger";
+	onConfirm: () => InboxDecisionResult;
+	onDecline: () => InboxDecisionResult;
+	pendingLabel: string;
+}) {
+	const [pending, setPending] = useState(false);
+	const isPending = busy || pending;
+	const decide = (action: () => InboxDecisionResult) => {
+		setPending(true);
+		// The approval/quest hooks' mutation onError already toasts failures.
+		action()
+			.catch(() => undefined)
+			.finally(() => setPending(false));
+	};
+
+	if (isPending) {
+		return (
+			<span
+				aria-busy="true"
+				aria-label={pendingLabel}
+				className="type-caption relative z-20 flex h-6 items-center px-2 text-muted-foreground"
+				role="status"
+			>
+				Working…
+			</span>
+		);
+	}
+
+	return (
+		<span className="relative z-20 flex items-center gap-0.5">
+			<TrayIconAction
+				icon={Cancel01Icon}
+				label={declineLabel}
+				onClick={() => decide(onDecline)}
+				tone={declineTone}
+			/>
+			<TrayAction
+				label={confirmLabel}
+				onClick={() => decide(onConfirm)}
+				tone="success"
+			/>
+		</span>
+	);
+}
+
 export function InboxCenter({
 	layout = "split",
+	placement = "sidebar",
 	showAnnouncements = false,
 	showInbox = true,
 }: {
 	layout?: NotificationLayout;
+	placement?: TrayPlacement;
 	showAnnouncements?: boolean;
 	showInbox?: boolean;
 }) {
-	const { openTab } = useTabsContext();
+	const openTab = useTabSelector((state) => state.openTab);
 	const queryClient = useQueryClient();
 	const approvals = useApprovals();
 	const quests = useQuests();
@@ -316,10 +380,34 @@ export function InboxCenter({
 	// useQuests exposes no pending flag for accept/dismissSuggestion (only for
 	// judge/delete), so the row's spinner state is tracked here.
 	const [decidingQuest, setDecidingQuest] = useState<string | null>(null);
+	const [decidingApprovals, setDecidingApprovals] = useState<Set<string>>(
+		() => new Set()
+	);
 
-	const decideQuest = (id: string, run: (id: string) => Promise<unknown>) => {
+	const decideApproval = (
+		id: string,
+		run: ReturnType<typeof useApprovals>["approve"]
+	) => {
+		setDecidingApprovals((current) => new Set(current).add(id));
+		// The hook's mutation onError already toasts a failed decision.
+		return run(id)
+			.catch(() => undefined)
+			.finally(() => {
+				setDecidingApprovals((current) => {
+					const next = new Set(current);
+					next.delete(id);
+					return next;
+				});
+			});
+	};
+
+	const decideQuest = (
+		id: string,
+		run: ReturnType<typeof useQuests>["acceptSuggestion"]
+	) => {
 		setDecidingQuest(id);
-		run(id)
+		// The hook's mutation onError already toasts a failed decision.
+		return run(id)
 			.catch(() => undefined)
 			.finally(() =>
 				setDecidingQuest((current) => (current === id ? null : current))
@@ -427,57 +515,51 @@ export function InboxCenter({
 
 	const approvalStackItems: NotificationStackItem[] = pending
 		.slice(0, PREVIEW_LIMIT)
-		.map((approval) => ({
-			accent: approval.risk_tags.length > 0 ? "var(--destructive)" : undefined,
-			actions: (
-				<span className="relative z-20 flex items-center gap-0.5">
-					<TrayIconAction
-						icon={Cancel01Icon}
-						label="Reject"
-						onClick={() => {
-							approvals.reject(approval.id).catch(() => undefined);
-						}}
-						tone="danger"
+		.map((approval) => {
+			const busy =
+				approvals.deciding === approval.id ||
+				decidingApprovals.has(approval.id);
+			return {
+				accent:
+					approval.risk_tags.length > 0 ? "var(--destructive)" : undefined,
+				actions: (
+					<DecisionStackActions
+						busy={busy}
+						confirmLabel="Approve"
+						declineLabel="Reject"
+						declineTone="danger"
+						onConfirm={() => decideApproval(approval.id, approvals.approve)}
+						onDecline={() => decideApproval(approval.id, approvals.reject)}
+						pendingLabel="Approval decision pending"
 					/>
-					<TrayAction
-						busy={approvals.deciding === approval.id}
-						label="Approve"
-						onClick={() => {
-							approvals.approve(approval.id).catch(() => undefined);
-						}}
-						tone="success"
-					/>
-				</span>
-			),
-			ariaLabel: `Open ${approval.title} in the inbox`,
-			description: trayMeta(
-				...approval.risk_tags.slice(0, 2).map(tagLabel),
-				approval.summary
-			),
-			id: `approval:${approval.id}`,
-			leading: <TrayRowIcon icon={KIND_ICON[approval.kind] ?? Wrench01Icon} />,
-			onActivate: openInbox,
-			title: approval.title,
-			trailing: shortAgo(approval.created_at),
-		}));
+				),
+				ariaLabel: `Open ${approval.title} in the inbox`,
+				description: trayMeta(
+					...approval.risk_tags.slice(0, 2).map(riskTagLabel),
+					approval.summary
+				),
+				id: `approval:${approval.id}`,
+				leading: (
+					<TrayRowIcon icon={KIND_ICON[approval.kind] ?? Wrench01Icon} />
+				),
+				onActivate: openInbox,
+				title: approval.title,
+				trailing: shortAgo(approval.created_at),
+			};
+		});
 
 	const taskStackItems: NotificationStackItem[] = taskSuggestions
 		.slice(0, PREVIEW_LIMIT)
 		.map((quest) => ({
 			actions: (
-				<span className="relative z-20 flex items-center gap-0.5">
-					<TrayIconAction
-						icon={Cancel01Icon}
-						label="Not yet"
-						onClick={() => decideQuest(quest.id, quests.dismissSuggestion)}
-					/>
-					<TrayAction
-						busy={decidingQuest === quest.id}
-						label="Done"
-						onClick={() => decideQuest(quest.id, quests.acceptSuggestion)}
-						tone="success"
-					/>
-				</span>
+				<DecisionStackActions
+					busy={decidingQuest === quest.id}
+					confirmLabel="Done"
+					declineLabel="Not yet"
+					onConfirm={() => decideQuest(quest.id, quests.acceptSuggestion)}
+					onDecline={() => decideQuest(quest.id, quests.dismissSuggestion)}
+					pendingLabel="Task suggestion decision pending"
+				/>
 			),
 			ariaLabel: `Open ${quest.title} in the inbox`,
 			description: quest.suggestion?.reason,
@@ -503,6 +585,7 @@ export function InboxCenter({
 								const action = archived
 									? notifications.unarchive(notification.id)
 									: notifications.archive(notification.id);
+								// useNotifications' mutation onError already toasts the failure.
 								action.catch(() => undefined);
 							}}
 						/>
@@ -517,13 +600,14 @@ export function InboxCenter({
 				id: `notification:${notification.id}`,
 				leading: app ? (
 					<AppIcon
-						className="size-7 rounded-[10px]"
+						className="size-7"
 						dither={app.iconDither}
 						iconBackground={app.iconBackground ?? undefined}
 						iconId={app.icon}
 						iconPadding={app.iconPadding}
 						iconUrl={app.iconUrl}
 						name={app.name}
+						presentation="inbox"
 						seedId={app.id}
 						size={14}
 					/>
@@ -564,18 +648,20 @@ export function InboxCenter({
 					label="Notifications"
 					onOpenChange={setOpen}
 					open={open}
+					placement={placement}
 					renderTrigger={(triggerProps) => (
 						<NotificationBell
 							{...triggerProps}
-							className={cn(
-								"rounded-xl bg-transparent! text-muted-foreground! hover:bg-muted! hover:text-foreground!",
-								open && "bg-muted! text-foreground!"
-							)}
+							appearance={
+								placement === "menubar" ? "inbox-menubar" : "inbox-sidebar"
+							}
+							className=""
 							color="red"
 							count={totalCount}
+							expanded={open}
 							max={99}
-							size={40}
-							style={{ height: 28, width: 28 }}
+							size={placement === "menubar" ? 28 : 40}
+							style={undefined}
 						/>
 					)}
 				>
@@ -590,7 +676,7 @@ export function InboxCenter({
 						/>
 					) : null}
 					<NotificationStack
-						className="max-w-none"
+						className="min-h-[24rem] max-w-none"
 						collapsedLabel="Notifications"
 						defaultExpanded
 						emptyLabel="All caught up"
@@ -621,22 +707,29 @@ export function InboxCenter({
 				label={showAnnouncements ? "Notifications" : "Inbox"}
 				onOpenChange={setOpen}
 				open={open}
+				placement={placement}
 				renderTrigger={(triggerProps) => (
 					<NotificationBell
 						{...triggerProps}
-						className={cn(
-							"rounded-xl bg-transparent! text-muted-foreground! hover:bg-muted! hover:text-foreground!",
-							open && "bg-muted! text-foreground!"
-						)}
+						appearance={
+							placement === "menubar" ? "inbox-menubar" : "inbox-sidebar"
+						}
+						className=""
 						color="red"
 						count={totalCount}
+						expanded={open}
 						max={99}
-						size={40}
-						style={{ height: 28, width: 28 }}
+						size={placement === "menubar" ? 28 : 40}
+						style={undefined}
 					/>
 				)}
 			>
 				<TrayHeader
+					actions={
+						<TrayRefreshButton
+							onRefresh={() => queryClient.invalidateQueries()}
+						/>
+					}
 					count={totalCount}
 					status={status}
 					title={showAnnouncements ? "Notifications" : "Inbox"}
@@ -654,83 +747,88 @@ export function InboxCenter({
 				{pendingCount > 0 ||
 				previewNotifications.length > 0 ||
 				announcementCount > 0 ? (
-					<TrayScroll onRefresh={() => queryClient.invalidateQueries()}>
-						{pending.length > 0 && (
-							<>
-								<TraySectionLabel count={pending.length}>
-									Approvals
-								</TraySectionLabel>
-								{pending.slice(0, PREVIEW_LIMIT).map((approval) => (
-									<ApprovalRow
-										approval={approval}
-										busy={approvals.deciding === approval.id}
-										key={approval.id}
-										onApprove={() => {
-											approvals.approve(approval.id).catch(() => undefined);
-										}}
-										onOpen={openInbox}
-										onReject={() => {
-											approvals.reject(approval.id).catch(() => undefined);
-										}}
+					<>
+						<TrayScroll onRefresh={() => queryClient.invalidateQueries()}>
+							{pending.length > 0 && (
+								<>
+									<TraySectionLabel count={pending.length}>
+										Approvals
+									</TraySectionLabel>
+									{pending.slice(0, PREVIEW_LIMIT).map((approval) => (
+										<ApprovalRow
+											approval={approval}
+											busy={
+												approvals.deciding === approval.id ||
+												decidingApprovals.has(approval.id)
+											}
+											key={approval.id}
+											onApprove={() => {
+												decideApproval(approval.id, approvals.approve);
+											}}
+											onOpen={openInbox}
+											onReject={() => {
+												decideApproval(approval.id, approvals.reject);
+											}}
+										/>
+									))}
+								</>
+							)}
+							{taskSuggestions.length > 0 && (
+								<>
+									<TraySectionLabel count={taskSuggestions.length}>
+										Tasks
+									</TraySectionLabel>
+									{taskSuggestions.slice(0, PREVIEW_LIMIT).map((quest) => (
+										<SuggestionRow
+											busy={decidingQuest === quest.id}
+											key={quest.id}
+											onAccept={() =>
+												decideQuest(quest.id, quests.acceptSuggestion)
+											}
+											onDismiss={() =>
+												decideQuest(quest.id, quests.dismissSuggestion)
+											}
+											onOpen={openInbox}
+											quest={quest}
+										/>
+									))}
+								</>
+							)}
+							{previewNotifications.length > 0 && (
+								<>
+									<TraySectionLabel count={filteredNotificationCount}>
+										Notifications
+									</TraySectionLabel>
+									{previewNotifications.map((notification) => (
+										<NotificationTrayRow
+											appsById={appsById}
+											archived={isArchivedNotification(notification)}
+											key={notification.id}
+											notification={notification}
+											notifications={notifications}
+											onOpen={() => openNotification(notification)}
+										/>
+									))}
+								</>
+							)}
+							{showAnnouncements && announcementCount > 0 && (
+								<>
+									<TraySectionLabel count={announcementCount}>
+										Announcements
+									</TraySectionLabel>
+									<NotificationStack
+										className="max-w-none"
+										collapsedLabel="Announcements"
+										expandedLabel="Announcements"
+										items={announcementStackItems}
+										maxVisible={PREVIEW_LIMIT}
 									/>
-								))}
-							</>
-						)}
-						{taskSuggestions.length > 0 && (
-							<>
-								<TraySectionLabel count={taskSuggestions.length}>
-									Tasks
-								</TraySectionLabel>
-								{taskSuggestions.slice(0, PREVIEW_LIMIT).map((quest) => (
-									<SuggestionRow
-										busy={decidingQuest === quest.id}
-										key={quest.id}
-										onAccept={() =>
-											decideQuest(quest.id, quests.acceptSuggestion)
-										}
-										onDismiss={() =>
-											decideQuest(quest.id, quests.dismissSuggestion)
-										}
-										onOpen={openInbox}
-										quest={quest}
-									/>
-								))}
-							</>
-						)}
-						{previewNotifications.length > 0 && (
-							<>
-								<TraySectionLabel count={filteredNotificationCount}>
-									Notifications
-								</TraySectionLabel>
-								{previewNotifications.map((notification) => (
-									<NotificationTrayRow
-										appsById={appsById}
-										archived={isArchivedNotification(notification)}
-										key={notification.id}
-										notification={notification}
-										notifications={notifications}
-										onOpen={() => openNotification(notification)}
-									/>
-								))}
-							</>
-						)}
-						{showAnnouncements && announcementCount > 0 && (
-							<>
-								<TraySectionLabel count={announcementCount}>
-									Announcements
-								</TraySectionLabel>
-								<NotificationStack
-									className="max-w-none"
-									collapsedLabel="Announcements"
-									expandedLabel="Announcements"
-									items={announcementStackItems}
-									maxVisible={PREVIEW_LIMIT}
-								/>
-							</>
-						)}
+								</>
+							)}
+						</TrayScroll>
 						{hidden > 0 && (
 							<button
-								className="rounded-[18px] px-2.5 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+								className="type-caption rounded-(--radius-inbox-status) px-2.5 py-2 text-left text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
 								onClick={showInbox ? openInbox : () => setOpen(false)}
 								type="button"
 							>
@@ -738,7 +836,7 @@ export function InboxCenter({
 								{showInbox ? "the full inbox" : "announcements"}
 							</button>
 						)}
-					</TrayScroll>
+					</>
 				) : (
 					<TrayEmpty
 						description={

@@ -1,13 +1,11 @@
 // packages/marketplace/src/catalog/friendly.ts
 //
-// Pure, framework-free display helpers needed by the shared catalog badges
-// (chrome/catalog-badges.tsx) and the Skills catalog section. This is a SUBSET of
-// the desktop `apps/desktop/src/lib/catalog/friendly.ts` — only the badge/token/
-// size helpers those two moved surfaces reference, plus the skills-specific
-// `skillOrg` / `titleCase`. The desktop file stays the source of truth for the
-// model-catalog surfaces (Download Center, model pickers, ModelsCatalogSection)
-// that still live in the app; the Models decomposition follow-on consolidates the
-// two into this one. Nothing here hits the network or React.
+// Pure, framework-free display helpers for the shared catalog badges
+// (chrome/catalog-badges.tsx) and the Models and Skills catalog sections. This is
+// the single implementation of the catalog vocabulary: the desktop
+// `apps/desktop/src/lib/catalog/friendly.ts` re-exports it and adds only its
+// desktop-only surfaces (Download Center labels, model pickers, search
+// haystacks). Nothing here hits the network or React.
 
 import type { SkillCard } from "./types.ts";
 
@@ -191,7 +189,17 @@ export const CATALOG_TOKENS: CatalogToken[] = [
  * Friendly-mode overrides per token: a simpler label for non-technical users, or
  * `hidden` to drop purely-technical badges entirely.
  */
-const TOKEN_FRIENDLY: Record<string, { label?: string; hidden?: boolean }> = {
+interface FriendlyTokenPresentation {
+	hidden?: boolean;
+	label?: string;
+}
+
+/** Vocabulary overrides are optional for tokens supplied by newer catalogs. */
+interface FriendlyTokenOverrides {
+	[tokenId: string]: FriendlyTokenPresentation | undefined;
+}
+
+const TOKEN_FRIENDLY: FriendlyTokenOverrides = {
 	instruct: { label: "Chat-ready" },
 	base: { label: "Raw" },
 	moe: { label: "Efficient" },
@@ -639,7 +647,11 @@ export function ggufFileRole(filename: string): GgufRole | null {
 const MODALITY_ORDER: Modality[] = ["text", "image", "pdf", "video", "audio"];
 
 /** Pipeline tags that don't follow the `<in>-to-<out>` shape. */
-const FIXED_MODALITIES: Record<string, ModalityFlow> = {
+interface PipelineModalityLookup {
+	[pipelineTag: string]: ModalityFlow | undefined;
+}
+
+const FIXED_MODALITIES: PipelineModalityLookup = {
 	"text-generation": { inputs: ["text"], outputs: ["text"] },
 	"text2text-generation": { inputs: ["text"], outputs: ["text"] },
 	"fill-mask": { inputs: ["text"], outputs: ["text"] },

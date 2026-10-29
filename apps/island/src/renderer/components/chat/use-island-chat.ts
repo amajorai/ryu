@@ -23,7 +23,7 @@ import {
 	latestStreamedAcpConfig,
 	latestStreamedAcpMode,
 } from "@ryu/blocks/composer/streamed-parts";
-import type { ChatStatus, UIMessage } from "ai";
+import type { UIMessage } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	agentIdOrUndefined,
@@ -45,6 +45,12 @@ import { createIslandChatTransport } from "../../lib/island-chat-transport.ts";
 
 /** The plugin flag key Core's double-check turn-hook reads on the request body. */
 const DOUBLE_CHECK_FLAG = "io.ryu.double-check";
+
+/**
+ * Tells Core this surface shows generative UI as one live screen, so the model is
+ * told to render (and re-render) whole compact screens with `ui.render`.
+ */
+const GENERATIVE_UI_FLAG = "io.ryu.generative-ui";
 
 const OCR_LIMIT = 1200;
 
@@ -77,12 +83,8 @@ function getConversationId(): string {
 
 /** Concatenate an assistant message's text parts (for read-back). */
 function textOf(message: UIMessage): string {
-	return (message.parts ?? [])
-		.filter(
-			(part): part is { type: "text"; text: string } =>
-				(part as { type?: string }).type === "text" &&
-				typeof (part as { text?: unknown }).text === "string"
-		)
+	return message.parts
+		.filter((part) => part.type === "text")
 		.map((part) => part.text)
 		.join("");
 }
@@ -250,6 +252,7 @@ export function useIslandChat(options?: {
 					companion_source: true,
 					plugin_flags: {
 						[DOUBLE_CHECK_FLAG]: getDoubleCheckRef.current?.() ?? false,
+						[GENERATIVE_UI_FLAG]: true,
 					},
 					...getAcpPayloadRef.current?.(),
 				}),
@@ -380,7 +383,7 @@ export function useIslandChat(options?: {
 			sendMessage({
 				messageId,
 				parts: [{ type: "text", text: displayText }, ...fileParts],
-			} as Parameters<typeof sendMessage>[0]);
+			});
 		},
 		[sendMessage]
 	);
@@ -397,7 +400,7 @@ export function useIslandChat(options?: {
 		notes,
 		send,
 		sending,
-		status: status as ChatStatus,
+		status,
 		stop,
 	};
 }

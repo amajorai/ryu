@@ -1,3 +1,5 @@
+declare const window: Window;
+
 import { createRoot } from "react-dom/client";
 import PrivatePackageInstallDialog from "../../src/components/marketplace/PrivatePackageInstallDialog.tsx";
 import "../../src/index.css";
@@ -29,16 +31,16 @@ const PREVIEW = {
 
 const requests: Array<{ body: unknown; path: string }> = [];
 
-function json(body: unknown, status = 200): Response {
+function json<FixturePayload>(body: FixturePayload, status = 200): Response {
 	return new Response(JSON.stringify(body), {
 		headers: { "content-type": "application/json" },
 		status,
 	});
 }
 
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
 	const path = new URL(url, window.location.origin).pathname;
 	if (path.includes("/api/marketplace/share-codes/preview")) {
 		requests.push({ body: init?.body ?? null, path });
@@ -77,7 +79,7 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 		return Promise.resolve(json({ data: [] }));
 	}
 	return realFetch(input, init);
-}) as typeof fetch;
+};
 
 declare global {
 	interface Window {
@@ -92,7 +94,7 @@ function PrivatePackageShareStory() {
 		<main className="min-h-screen bg-background px-6 py-10 text-foreground sm:px-10">
 			<div className="mx-auto max-w-5xl">
 				<header className="mb-8">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-widest">
 						Marketplace · customer handoff
 					</p>
 					<h1 className="mt-2 font-semibold text-3xl tracking-tight">
@@ -126,6 +128,6 @@ function PrivatePackageShareStory() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<PrivatePackageShareStory />
 );

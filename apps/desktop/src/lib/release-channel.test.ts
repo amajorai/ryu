@@ -25,10 +25,13 @@ if (!GlobalRegistrator.isRegistered) {
 
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
+	AVAILABLE_RELEASE_CHANNELS,
 	DEFAULT_RELEASE_CHANNEL,
 	getReleaseChannel,
 	RELEASE_CHANNEL_KEY,
 	RELEASE_CHANNELS,
+	releaseChannelsFor,
+	resolveReleaseChannel,
 } from "./release-channel.ts";
 
 beforeEach(() => {
@@ -74,5 +77,32 @@ describe("RELEASE_CHANNELS metadata", () => {
 			expect(c.label.length).toBeGreaterThan(0);
 			expect(c.description.length).toBeGreaterThan(0);
 		}
+	});
+});
+
+describe("Ryu Bot channels", () => {
+	// The Bot updater has no nightly/canary feed and refuses those channels, so
+	// the picker must not offer them and a stored choice must not keep them.
+	test("the Bot picker offers beta and stable only", () => {
+		expect(releaseChannelsFor("bot").map((c) => c.channel)).toEqual([
+			"beta",
+			"stable",
+		]);
+		expect(releaseChannelsFor("build")).toEqual(RELEASE_CHANNELS);
+		expect(releaseChannelsFor("app")).toEqual(RELEASE_CHANNELS);
+	});
+
+	test("a stored nightly or canary choice falls back to stable in Bot", () => {
+		expect(resolveReleaseChannel("nightly", "bot")).toBe("stable");
+		expect(resolveReleaseChannel("canary", "bot")).toBe("stable");
+		expect(resolveReleaseChannel("beta", "bot")).toBe("beta");
+		expect(resolveReleaseChannel("nightly", "build")).toBe("nightly");
+		expect(resolveReleaseChannel("bogus", "build")).toBe(
+			DEFAULT_RELEASE_CHANNEL
+		);
+	});
+
+	test("this non-Bot test build offers every channel", () => {
+		expect(AVAILABLE_RELEASE_CHANNELS).toEqual(RELEASE_CHANNELS);
 	});
 });

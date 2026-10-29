@@ -8,8 +8,9 @@ import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
-} from "@ryu/ui/components/hover-card";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/hover-card.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useEffect, useRef, useState } from "react";
 import { useAgents } from "@/src/hooks/useAgents.ts";
@@ -102,10 +103,13 @@ export function SidebarChatMessages({
 
 	if (loading) {
 		return (
-			<p className="flex items-center gap-1.5 py-1 pl-8 text-muted-foreground text-xs">
-				<Spinner className="size-3" />
-				Loading messages…
-			</p>
+			<SkeletonRows
+				inset="navigation"
+				label="Loading messages…"
+				rows={2}
+				size="sm"
+				spacing="tight"
+			/>
 		);
 	}
 	if (entries.length === 0) {
@@ -119,17 +123,21 @@ export function SidebarChatMessages({
 				<li key={entry.id}>
 					<HoverCard>
 						<HoverCardTrigger
-							className="flex h-7 w-full items-center gap-2 rounded-md pr-2 pl-8 text-left transition-colors hover:bg-muted"
+							appearance="chat-navigation"
 							closeDelay={0}
 							delay={0}
 							onClick={() => onJump(entry.id, entry.title)}
+							render={
+								<button className="w-full rounded-md pr-2 pl-8 hover:bg-muted" />
+							}
 							type="button"
 						>
 							{agent ? (
 								<AgentAvatar
-									className="size-3 shrink-0 rounded-[2px] object-contain"
+									className="size-3 shrink-0 object-contain"
 									engine={engineForAgent(agent)}
 									glyph={agent.avatarGlyph}
+									presentation="compact"
 									size="12px"
 								/>
 							) : (
@@ -145,9 +153,10 @@ export function SidebarChatMessages({
 						{entry.description || entry.files.length > 0 ? (
 							<HoverCardContent
 								align="start"
-								className="w-72 max-w-[min(18rem,calc(100vw-2rem))] p-3"
+								className="w-72 max-w-[min(18rem,calc(100vw-2rem))]"
 								side="right"
 								sideOffset={10}
+								spacing="rail"
 							>
 								<div className="flex flex-col gap-2">
 									<p className="font-medium text-sm leading-snug">
@@ -157,14 +166,15 @@ export function SidebarChatMessages({
 										<div className="flex items-start gap-2">
 											<span className="mt-0.5 flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
 												<AgentAvatar
-													className="size-5 rounded-full object-cover"
+													className="size-5 object-cover"
 													engine={engineForAgent(agent)}
 													glyph={agent.avatarGlyph}
+													presentation="portrait"
 													size="20px"
 												/>
 											</span>
 											<div className="min-w-0 flex-1">
-												<p className="mb-0.5 text-[11px] text-muted-foreground">
+												<p className="type-caption mb-0.5 text-muted-foreground">
 													{agent.name}
 												</p>
 												<p className="line-clamp-4 text-muted-foreground text-xs leading-relaxed">
@@ -181,7 +191,7 @@ export function SidebarChatMessages({
 										<ul className="space-y-1 border-border/60 border-t pt-2">
 											{entry.files.slice(0, 4).map((file) => (
 												<li
-													className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-muted-foreground"
+													className="type-compact flex min-w-0 items-center gap-1.5 font-mono text-muted-foreground"
 													key={file}
 												>
 													<FileTypeIcon className="size-3.5" path={file} />
@@ -230,7 +240,7 @@ export function ChatRowSubAccordion({
 					icon={ArrowDown01Icon}
 				/>
 				<span className="font-medium">{label}</span>
-				{typeof count === "number" ? (
+				{isNativeNumber(count) ? (
 					<span className="text-muted-foreground/70 tabular-nums">
 						{formatCount(count) ?? "—"}
 					</span>

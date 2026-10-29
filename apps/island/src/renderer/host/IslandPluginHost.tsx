@@ -11,15 +11,19 @@
 //     (deny-safe: an empty approved list yields an empty capability set),
 //   - implements the privileged host services (listAgents projected to `{id,name}`;
 //     registerRoute scoped to this plugin's own surface; the 6 host-bridge services
-//     + runAgentStream via the island transport, keyed by `companion.pluginId`), and
+//     + runAgentStream via the island transport, keyed by `companion.pluginId`;
+//     media.recording through the shared in-document recorder and media.transcribe
+//     through Core with the user's Voice Recognition engine), and
 //   - wraps the frame in a visible "App" attribution header so it is never mistaken
 //     for system chrome.
 //
 // Renders nothing runnable unless the companion carries a UI bundle (`hasUi`).
 
-import type {
-	RyuCatalogModels,
-	RyuCatalogSnapshot,
+import {
+	ryuCatalogModelsSchema,
+	ryuCatalogSnapshotSchema,
+	ryuProviderUsageReadingSchema,
+	ryuSubscriptionsSchema,
 } from "@ryu/app-host/app-bridge";
 import {
 	COMPANION_THEME_MUTATION_ATTRIBUTES,
@@ -27,11 +31,11 @@ import {
 } from "@ryu/app-host/companion-theme";
 import { ExtensionHost } from "@ryu/app-host/ExtensionHost";
 import {
-	type BackgroundProcess,
+	backgroundProcessSchema,
 	type Capability,
-	type CryptoStatus,
 	capabilitiesFromGrants,
 	createI18nHostServices,
+	cryptoStatusSchema,
 	type HostServices,
 	validatePluginRoute,
 } from "@ryu/app-host/rpc";
@@ -39,13 +43,28 @@ import {
 	htmlCompanionSrcdoc,
 	thirdPartyPluginSrcdoc,
 } from "@ryu/app-host/third-party-plugin";
-import { useI18n } from "@ryu/i18n/react";
+import { browserRecordingHost } from "@ryu/blocks/companion/browser-recording";
+import { useI18n, useLiteralMessages } from "@ryu/i18n/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { z } from "zod";
 import type { PluginCompanion } from "../../shared/ipc.ts";
 import {
-	pluginHostInvoke,
-	pluginHostInvokeStream,
+	pluginHostInvoke as invokeHost,
+	pluginHostInvokeStream as invokeHostStream,
 } from "./island-plugin-host-invoke.ts";
+import {
+	createIslandTranscribeAudio,
+	islandTranscribeBridge,
+} from "./island-transcribe.ts";
+
+const agentListSchema = z.object({
+	agents: z.array(
+		z
+			.object({ id: z.string(), name: z.string().optional().catch(undefined) })
+			.nullable()
+			.catch(null)
+	),
+});
 
 /** Base64-encode a UTF-8 string (btoa is Latin-1 only). Inlines the plugin bundle
  *  into the sandboxed `srcdoc` so a body containing `</script>` cannot break the
@@ -61,7 +80,7 @@ function toBase64Utf8(input: string): string {
 
 type BundleState =
 	| { status: "loading" }
-	| { status: "ready"; code: string | null }
+	| { status: "ready"; code: string | null; coreGeneration: number }
 	| { status: "error" };
 
 export function IslandPluginHost({
@@ -70,15 +89,27 @@ export function IslandPluginHost({
 	companion: PluginCompanion;
 }) {
 	const i18n = useI18n();
+	const tl = useLiteralMessages();
+	// One microphone owner per host document, keyed by the owning plugin id (as on
+	// desktop). Unmounting stops this app's live capture; its pending clip stays
+	// with the shared recorder so a remount can still read or discard it.
+	useEffect(
+		() => () => browserRecordingHost.release(companion.pluginId),
+		[companion.pluginId]
+	);
 	const [connected, setConnected] = useState(false);
 	const [bundle, setBundle] = useState<BundleState>({ status: "loading" });
+	// Start locked, then refresh the node preference for this app mount. The island
+	// keeps its contribution list in memory, so a settings change from another
+	// surface must be re-read before this frame can open network access.
+	const [defaultCspEnforced, setDefaultCspEnforced] = useState(true);
 	// Keep a first-paint snapshot and a live copy of the shared Desktop appearance
 	// contract. The island is a separate Electron process, so its own root is the
 	// host for the null-origin Companion frame.
 	const [initialThemeTokens] = useState(readCompanionThemeTokens);
 	const [themeTokens, setThemeTokens] = useState(initialThemeTokens);
 	useEffect(() => {
-		if (typeof MutationObserver === "undefined") {
+		if (!("MutationObserver" in globalThis)) {
 			return;
 		}
 		const observer = new MutationObserver(() => {
@@ -90,6 +121,27 @@ export function IslandPluginHost({
 		});
 		return () => observer.disconnect();
 	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+		window.island.plugins
+			.contributions()
+			.then((result) => {
+				if (!result.available || cancelled) {
+					return;
+				}
+				const current = result.companions.find(
+					(candidate) => candidate.id === companion.id
+				);
+				if (current) {
+					setDefaultCspEnforced(current.defaultCspEnforced);
+				}
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, [companion.id]);
 
 	// Fetch the plugin's bundled code over IPC (the main process holds the token).
 	// Keyed by the OWNING plugin id (the store key), not the companion id.
@@ -104,8 +156,14 @@ export function IslandPluginHost({
 					return;
 				}
 				setBundle(
-					result.available
-						? { status: "ready", code: result.code }
+					result.available &&
+						result.coreGeneration !== undefined &&
+						result.coreGeneration === companion.coreGeneration
+						? {
+								status: "ready",
+								code: result.code,
+								coreGeneration: result.coreGeneration,
+							}
 						: { status: "error" }
 				);
 			})
@@ -120,15 +178,35 @@ export function IslandPluginHost({
 				.abortUiBundle(requestId)
 				.catch(() => undefined);
 		};
-	}, [companion.pluginId]);
+	}, [companion.pluginId, companion.coreGeneration]);
+
+	// Trusted host closure: sandbox RPC inputs cannot supply or replace this epoch.
+	const coreGeneration =
+		bundle.status === "ready" ? bundle.coreGeneration : undefined;
+	const pluginHostInvoke = useCallback(
+		(
+			pluginId: string,
+			method: string,
+			args: Parameters<typeof invokeHost>[2]
+		) => invokeHost(pluginId, method, args, coreGeneration),
+		[coreGeneration]
+	);
+	const pluginHostInvokeStream = useCallback(
+		(
+			pluginId: string,
+			input: Parameters<typeof invokeHostStream>[1],
+			options: { onChunk: (delta: string) => void; signal?: AbortSignal }
+		) => invokeHostStream(pluginId, input, { ...options, coreGeneration }),
+		[coreGeneration]
+	);
 
 	// One nonce per mount. Host-generated, never plugin/user input.
 	const nonce = useMemo(
 		() =>
-			typeof crypto?.randomUUID === "function"
+			"randomUUID" in crypto
 				? crypto.randomUUID()
 				: `nonce-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
-		[]
+		[defaultCspEnforced, coreGeneration]
 	);
 
 	// The granted set comes from the plugin's GATEWAY-APPROVED grants. DENY-SAFE: an
@@ -137,7 +215,7 @@ export function IslandPluginHost({
 		() => [...new Set(companion.approvedGrants)].sort().join(" "),
 		[companion.approvedGrants]
 	);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: grantsKey is the content hash of approvedGrants.
+	// grantsKey is the content hash of approvedGrants.
 	const granted = useMemo<ReadonlySet<Capability>>(
 		() => capabilitiesFromGrants(companion.approvedGrants),
 		[grantsKey]
@@ -153,31 +231,53 @@ export function IslandPluginHost({
 			...createI18nHostServices(i18n),
 			timelineTranscripts: (input) =>
 				window.island.shadow.getSpeechHistory(input),
+			// Generic companion media services (grants `media:transcribe` /
+			// `media:record`). Capture runs in this trusted main frame, the only
+			// frame Electron's permission handler lets open the microphone.
+			transcribeAudio: createIslandTranscribeAudio(islandTranscribeBridge),
+			mediaRecording: (input) =>
+				browserRecordingHost.call(companion.pluginId, input),
 			storageCompareAndSet: (input) =>
 				pluginHostInvoke(
 					companion.pluginId,
 					"storage.compareAndSet",
 					input
-				) as Promise<boolean>,
+				).then((raw) => z.boolean().parse(raw)),
 			listAgents: async () => {
-				const result = await window.island.core.agents();
-				if (!result.available) {
+				const result = await window.island.plugins.coreHttp({
+					coreGeneration,
+					method: "GET",
+					path: "/api/agents",
+				});
+				if (!result.ok) {
 					return [];
 				}
-				return result.agents.map((a) => ({ id: a.id, name: a.name }));
+				const parsed = agentListSchema.safeParse(result.data);
+				if (!parsed.success) {
+					return [];
+				}
+				return parsed.data.agents.flatMap((agent) =>
+					agent === null ? [] : [{ id: agent.id, name: agent.name ?? agent.id }]
+				);
 			},
 			catalogSnapshot: () =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"catalog.snapshot",
-					{}
-				) as Promise<RyuCatalogSnapshot>,
+				pluginHostInvoke(companion.pluginId, "catalog.snapshot", {}).then(
+					(raw) => ryuCatalogSnapshotSchema.parse(raw)
+				),
 			catalogModels: (input) =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"catalog.models",
-					input
-				) as Promise<RyuCatalogModels>,
+				pluginHostInvoke(companion.pluginId, "catalog.models", input).then(
+					(raw) => ryuCatalogModelsSchema.parse(raw)
+				),
+			// Subscription accounts (subscriptions:read) — Core-bridge verbs; Core
+			// also requires a verified node owner/admin caller.
+			subscriptionsList: (input) =>
+				pluginHostInvoke(companion.pluginId, "subscriptions.list", input).then(
+					(raw) => ryuSubscriptionsSchema.parse(raw)
+				),
+			subscriptionsUsage: (input) =>
+				pluginHostInvoke(companion.pluginId, "subscriptions.usage", input).then(
+					(raw) => ryuProviderUsageReadingSchema.parse(raw)
+				),
 			registerRoute: (claim) => {
 				if (!validatePluginRoute(companion.id, claim)) {
 					return Promise.reject(
@@ -187,37 +287,32 @@ export function IslandPluginHost({
 				return Promise.resolve({ path: claim.path });
 			},
 			modelComplete: (input) =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"model.complete",
-					input
-				) as Promise<string>,
+				pluginHostInvoke(companion.pluginId, "model.complete", input).then(
+					(raw) => z.string().parse(raw)
+				),
 			runAgent: (input) =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"agent.run",
-					input
-				) as Promise<string>,
+				pluginHostInvoke(companion.pluginId, "agent.run", input).then((raw) =>
+					z.string().parse(raw)
+				),
 			backgroundList: (input) =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"background.list",
-					input
-				) as Promise<BackgroundProcess[]>,
+				pluginHostInvoke(companion.pluginId, "background.list", input).then(
+					(raw) => z.array(backgroundProcessSchema).parse(raw)
+				),
 			backgroundStop: (input) =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"background.stop",
-					input
-				) as Promise<{
-					ok: boolean;
-					requested: boolean;
-					process_id: string;
-				}>,
+				pluginHostInvoke(companion.pluginId, "background.stop", input).then(
+					(raw) =>
+						z
+							.object({
+								ok: z.boolean(),
+								requested: z.boolean(),
+								process_id: z.string(),
+							})
+							.parse(raw)
+				),
 			storageGet: (input) =>
-				pluginHostInvoke(companion.pluginId, "storage.get", input) as Promise<
-					string | null
-				>,
+				pluginHostInvoke(companion.pluginId, "storage.get", input).then((raw) =>
+					z.string().nullable().parse(raw)
+				),
 			storageSet: async (input) => {
 				await pluginHostInvoke(companion.pluginId, "storage.set", input);
 			},
@@ -225,29 +320,23 @@ export function IslandPluginHost({
 				await pluginHostInvoke(companion.pluginId, "storage.delete", input);
 			},
 			storageKeys: (input) =>
-				pluginHostInvoke(companion.pluginId, "storage.keys", input) as Promise<
-					string[]
-				>,
+				pluginHostInvoke(companion.pluginId, "storage.keys", input).then(
+					(raw) => z.array(z.string()).parse(raw)
+				),
 			// Sealing under the app's own Core-derived key (grant `crypto:seal`).
 			// The key never reaches the frame, so these are host round-trips.
 			cryptoSeal: (input) =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"crypto.seal",
-					input
-				) as Promise<string>,
+				pluginHostInvoke(companion.pluginId, "crypto.seal", input).then((raw) =>
+					z.string().parse(raw)
+				),
 			cryptoOpen: (input) =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"crypto.open",
-					input
-				) as Promise<string>,
+				pluginHostInvoke(companion.pluginId, "crypto.open", input).then((raw) =>
+					z.string().parse(raw)
+				),
 			cryptoStatus: () =>
-				pluginHostInvoke(
-					companion.pluginId,
-					"crypto.status",
-					{}
-				) as Promise<CryptoStatus>,
+				pluginHostInvoke(companion.pluginId, "crypto.status", {}).then((raw) =>
+					cryptoStatusSchema.parse(raw)
+				),
 			runAgentStream: (input, emit, signal) =>
 				pluginHostInvokeStream(companion.pluginId, input, {
 					onChunk: emit,
@@ -275,12 +364,21 @@ export function IslandPluginHost({
 					}
 				}),
 		}),
-		[companion.id, companion.pluginId, i18n]
+		[
+			companion.id,
+			companion.pluginId,
+			i18n,
+			pluginHostInvoke,
+			pluginHostInvokeStream,
+			coreGeneration,
+		]
 	);
 
 	const srcdoc = useMemo(
 		() =>
-			bundle.status === "ready" && bundle.code
+			bundle.status === "ready" &&
+			bundle.coreGeneration === companion.coreGeneration &&
+			bundle.code
 				? /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(bundle.code)
 					? htmlCompanionSrcdoc(
 							nonce,
@@ -289,7 +387,8 @@ export function IslandPluginHost({
 							undefined,
 							undefined,
 							readCompanionThemeTokens(),
-							true
+							true,
+							{ enforceDefaultCsp: defaultCspEnforced }
 						)
 					: thirdPartyPluginSrcdoc(
 							nonce,
@@ -297,13 +396,18 @@ export function IslandPluginHost({
 							companion.id,
 							undefined,
 							readCompanionThemeTokens(),
-							true
+							true,
+							{ enforceDefaultCsp: defaultCspEnforced }
 						)
 				: null,
-		[bundle, nonce, companion.id]
+		[bundle, nonce, companion.id, companion.coreGeneration, defaultCspEnforced]
 	);
 
-	if (bundle.status === "loading") {
+	if (
+		bundle.status === "loading" ||
+		(bundle.status === "ready" &&
+			bundle.coreGeneration !== companion.coreGeneration)
+	) {
 		return (
 			<div className="flex h-full items-center justify-center p-6 text-muted-foreground text-sm">
 				Loading app…
@@ -325,7 +429,7 @@ export function IslandPluginHost({
 			    chrome. */}
 			<div className="flex items-center gap-2 border-border border-b bg-card px-3 py-2">
 				<span className="font-medium text-foreground text-sm">
-					App · {companion.label || companion.name}
+					{tl("App · {name}", { name: companion.label || companion.name })}
 				</span>
 				<span className="ml-auto text-muted-foreground text-xs">
 					{connected ? "sandboxed · connected" : "sandboxed · starting…"}
@@ -334,12 +438,13 @@ export function IslandPluginHost({
 			<div className="min-h-0 flex-1">
 				<ExtensionHost
 					granted={granted}
+					key={`${companion.pluginId}:${coreGeneration}`}
 					nonce={nonce}
 					onConnected={handleConnected}
 					services={services}
 					srcdoc={srcdoc}
 					themeTokens={themeTokens}
-					title={`App: ${companion.name}`}
+					title={tl("App: {name}", { name: companion.name })}
 				/>
 			</div>
 		</div>

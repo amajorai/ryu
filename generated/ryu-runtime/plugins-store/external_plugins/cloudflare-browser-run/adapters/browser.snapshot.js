@@ -2,7 +2,20 @@
 // Injected globals: `input`, `defaults`, `callTool`, and `callNamed`.
 // This flat fragment runs inside Core's generated async adapter IIFE.
 
-const url = typeof input.tab_id === "string" ? input.tab_id.trim() : "";
+// Decode the JSON input as a string without coercing numbers, arrays, or objects.
+function parseUrl(raw) {
+	if (typeof raw !== "string") {
+		throw new TypeError("Expected a string");
+	}
+	return raw.trim();
+}
+
+let url;
+try {
+	url = parseUrl(input.tab_id);
+} catch {
+	url = "";
+}
 if (!url) {
 	return { error: "tab_id is required; Cloudflare Browser Run uses the URL as the tab id" };
 }
@@ -22,8 +35,12 @@ try {
 	snapshot = { content: text ?? "" };
 }
 return {
+	// The capability projects page content, not arbitrary provider-owned fields.
+	// Preserve the complete response in raw and an opaque snapshot when it has no content.
+	content: snapshot?.content === undefined ? snapshot : snapshot.content,
+	// Keep the capability handle bound to the caller-selected URL even when a
+	// remote response includes fields with the same names.
 	tab_id: url,
 	url,
-	...(snapshot && typeof snapshot === "object" ? snapshot : { content: snapshot }),
 	raw,
 };

@@ -6,6 +6,11 @@ import { SidebarBrandBadge } from "../../src/components/layout/SidebarBrandBadge
 import { GeneralTab } from "../../src/components/settings/GeneralTab.tsx";
 import { AppSurfaceProvider } from "../../src/contexts/app-surface-context.tsx";
 import "../../src/index.css";
+import { useProductModeStore } from "../../src/lib/product-mode.ts";
+
+// OS is rollout-flagged (off by default) and this proof exercises it, so switch
+// it on as the app's flag sync (ProductModeAccessSync) would.
+useProductModeStore.getState().setOsAccess(true);
 
 const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
@@ -32,7 +37,7 @@ function ProofSurface() {
 								</p>
 							</div>
 							<div className="w-56 rounded-xl border bg-background p-2">
-								<p className="px-1.5 pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+								<p className="type-caption px-1.5 pb-1 font-medium text-muted-foreground uppercase tracking-wide">
 									Current realm
 								</p>
 								<SidebarBrandBadge canSwitchToConsole canSwitchToOs />

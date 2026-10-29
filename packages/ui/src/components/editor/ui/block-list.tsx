@@ -14,19 +14,14 @@ import {
 	useReadOnly,
 } from "platejs/react";
 import type React from "react";
+import type { CSSProperties as ReactCSSProperties } from "react";
+import editorStyles from "../editor-lint.module.css";
 
-const config: Record<
-	string,
-	{
-		Li: React.FC<PlateElementProps & { lineBreakBadge?: React.ReactNode }>;
-		Marker: React.FC<PlateElementProps>;
-	}
-> = {
-	todo: {
-		Li: TodoLi,
-		Marker: TodoMarker,
-	},
-};
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editorblockList1-list-style-type"?: string | number;
+}
+
+const config = new Map([["todo", { Li: TodoLi, Marker: TodoMarker }]]);
 
 export const BlockList: RenderNodeWrapper = (props) => {
 	if (!props.element.listStyleType) {
@@ -40,15 +35,20 @@ export const BlockList: RenderNodeWrapper = (props) => {
 };
 
 function List(props: PlateElementProps & { lineBreakBadge?: React.ReactNode }) {
+	// SAFETY: BlockList only renders List after the native isOrderedList guard identifies the list element.
+	// SAFETY: BlockList only renders List after the native isOrderedList guard identifies the list element.
 	const { listStart, listStyleType } = props.element as TListElement;
-	const { Li, Marker } = config[listStyleType] ?? {};
+	const { Li, Marker } = config.get(listStyleType) ?? {};
 	const List = isOrderedList(props.element) ? "ol" : "ul";
 
+	const editorblockList1Style: EditorVariableStyle = {
+		"--editorblockList1-list-style-type": listStyleType,
+	};
 	return (
 		<List
-			className="relative m-0 p-0"
+			className={cn("relative m-0 p-0", editorStyles.editorblockList1)}
 			start={listStart}
-			style={{ listStyleType }}
+			style={editorblockList1Style}
 		>
 			{Marker && <Marker {...props} />}
 			{Li ? (
@@ -88,8 +88,7 @@ function TodoLi(
 		<li
 			className={cn(
 				"list-none",
-				(props.element.checked as boolean) &&
-					"text-muted-foreground line-through"
+				!!props.element.checked && "text-muted-foreground line-through"
 			)}
 		>
 			{props.children}

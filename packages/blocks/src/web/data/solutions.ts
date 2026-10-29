@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { CtaLink } from "../sections.tsx";
 import sol_accounting from "./solutions/accounting.json" with { type: "json" };
 import sol_bookkeeping from "./solutions/bookkeeping.json" with {
@@ -63,34 +64,22 @@ import sol_translation from "./solutions/translation.json" with {
 
 /* Shared CTAs (mirror comparisons.ts / products.tsx) --------------- */
 
-export const EARLY_ACCESS: CtaLink = {
-	label: "Get Early Access",
-	href: "https://j14.notion.site/2940023f0e838023810ce36edf2e3893?pvs=105",
+export const EARLY_ACCESS = {
+	label: "Get early access",
+	href: "https://j14.notion.site/2940023f0e838023810ce36edf2e3893?pvs=105" as const,
 	external: true,
-};
-export const BOOK_DEMO: CtaLink = {
-	label: "Book a Demo",
+} satisfies CtaLink;
+export const BOOK_DEMO = {
+	label: "Book a demo",
 	href: "https://cal.com/amajor/ryu-demo",
 	external: true,
-};
-export const DOWNLOAD: CtaLink = { label: "Download", href: "/download" };
+} as const satisfies CtaLink;
+export const DOWNLOAD = {
+	label: "Download",
+	href: "/download" as const,
+} satisfies CtaLink;
 
 /* Types ------------------------------------------------------------ */
-
-export type SolutionCategory =
-	| "Sales & Marketing"
-	| "Finance & Risk"
-	| "Legal & Compliance"
-	| "People & Operations"
-	| "Language & Content"
-	| "Engineering & Product"
-	| "Industries";
-
-export interface SolutionHighlight {
-	description: string;
-	icon?: string;
-	title: string;
-}
 
 export interface SolutionUseCase {
 	description: string;
@@ -103,21 +92,13 @@ export interface SolutionFaq {
 }
 
 export interface Solution {
-	category: SolutionCategory;
-	ctaNote: string;
-	ctaSubtitle: string;
-	ctaTitle: string;
-	examplePrompts: string[];
 	faq: SolutionFaq[];
-	heroEyebrow: string;
-	heroSubtitle: string;
 	heroTitle: string;
-	highlights: SolutionHighlight[];
-	/** lucide-react icon name, resolved in components/solutions/sections.tsx */
+	/** lucide-react icon name, resolved in solutions-sections.tsx */
 	icon: string;
-	intro: string;
 	name: string;
-	navLabel: string;
+	/** Plural audience for roles named after a person ("paralegals"). */
+	pluralPhrase?: string;
 	slug: string;
 	tagline: string;
 	useCases: SolutionUseCase[];
@@ -125,54 +106,129 @@ export interface Solution {
 	visualKey: string;
 }
 
+const solutionFieldsSchema = z.object({
+	faq: z.array(z.object({ a: z.string(), q: z.string() })),
+	heroTitle: z.string(),
+	icon: z.string(),
+	name: z.string(),
+	pluralPhrase: z.string().optional(),
+	slug: z.string(),
+	tagline: z.string(),
+	useCases: z.array(z.object({ description: z.string(), title: z.string() })),
+	visualKey: z.string(),
+}) satisfies z.ZodType<Solution>;
+// Bundled content is validated at its import boundary; retain the original
+// JSON objects and nested arrays used by the static page catalog.
+const solutionRecordSchema = z.custom<Solution>(
+	(value) => solutionFieldsSchema.safeParse(value).success
+);
+const solutionRowsSchema = z.custom<Solution[]>(
+	(value) => z.array(solutionRecordSchema).safeParse(value).success
+);
+
 /* Data ------------------------------------------------------------- */
-/* Each role is a pure JSON file in src/data/solutions.               */
+/* Each role is a pure JSON file in ./solutions.                      */
 /* New entries are appended here once their JSON file exists.         */
 
-export const solutions: Solution[] = [
-	// Sales & Marketing
-	sol_sales as Solution,
-	sol_marketing as Solution,
-	sol_customer_support as Solution,
-	sol_customer_success as Solution,
-	sol_growth as Solution,
-	// Finance & Risk
-	sol_accounting as Solution,
-	sol_finance as Solution,
-	sol_insurance as Solution,
-	sol_tax as Solution,
-	sol_bookkeeping as Solution,
-	// Legal & Compliance
-	sol_legal as Solution,
-	sol_compliance as Solution,
-	sol_paralegal as Solution,
-	// People & Operations
-	sol_hr as Solution,
-	sol_recruiting as Solution,
-	sol_executive_assistant as Solution,
-	sol_operations as Solution,
-	sol_procurement as Solution,
-	// Language & Content
-	sol_translation as Solution,
-	sol_content_writing as Solution,
-	sol_copywriting as Solution,
-	sol_editing as Solution,
-	// Engineering & Product
-	sol_software_engineer as Solution,
-	sol_data_analyst as Solution,
-	sol_data_science as Solution,
-	sol_devops as Solution,
-	sol_qa as Solution,
-	sol_product_management as Solution,
-	sol_design as Solution,
-	sol_it_support as Solution,
-	// Industries
-	sol_real_estate as Solution,
-	sol_healthcare as Solution,
-	sol_education as Solution,
-	sol_consulting as Solution,
-	sol_research as Solution,
-];
+export const solutions = solutionRowsSchema.parse([
+	sol_sales,
+	sol_marketing,
+	sol_growth,
+	sol_customer_support,
+	sol_customer_success,
+	sol_content_writing,
+	sol_copywriting,
+	sol_editing,
+	sol_translation,
+	sol_finance,
+	sol_accounting,
+	sol_bookkeeping,
+	sol_tax,
+	sol_insurance,
+	sol_legal,
+	sol_paralegal,
+	sol_compliance,
+	sol_hr,
+	sol_recruiting,
+	sol_operations,
+	sol_executive_assistant,
+	sol_procurement,
+	sol_real_estate,
+	sol_healthcare,
+	sol_education,
+	sol_consulting,
+	sol_research,
+	sol_software_engineer,
+	sol_devops,
+	sol_qa,
+	sol_it_support,
+	sol_data_analyst,
+	sol_data_science,
+	sol_product_management,
+	sol_design,
+]);
+
+/* Groups (the /for index) ------------------------------------------ */
+
+export const SOLUTION_GROUPS = [
+	{
+		title: "Go-to-market",
+		slugs: [
+			"sales",
+			"marketing",
+			"growth",
+			"customer-support",
+			"customer-success",
+		],
+	},
+	{
+		title: "Writing",
+		slugs: ["content-writing", "copywriting", "editing", "translation"],
+	},
+	{
+		title: "Finance & Legal",
+		slugs: [
+			"finance",
+			"accounting",
+			"bookkeeping",
+			"tax",
+			"legal",
+			"paralegal",
+			"compliance",
+		],
+	},
+	{
+		title: "Operations & People",
+		slugs: [
+			"hr",
+			"recruiting",
+			"operations",
+			"executive-assistant",
+			"procurement",
+			"consulting",
+			"research",
+		],
+	},
+	{
+		title: "Engineering & Data",
+		slugs: [
+			"software-engineer",
+			"devops",
+			"qa",
+			"it-support",
+			"data-analyst",
+			"data-science",
+			"product-management",
+			"design",
+		],
+	},
+	{
+		title: "Industries",
+		slugs: ["healthcare", "real-estate", "education", "insurance"],
+	},
+] as const satisfies readonly { slugs: readonly string[]; title: string }[];
+
+export type SolutionGroupTitle = (typeof SOLUTION_GROUPS)[number]["title"];
 
 /* Helpers ---------------------------------------------------------- */
 
@@ -184,16 +240,37 @@ export function getSolution(slug: string): Solution | undefined {
 	return solutionMap[slug];
 }
 
-export const solutionCategories: SolutionCategory[] = [
-	"Sales & Marketing",
-	"Finance & Risk",
-	"Legal & Compliance",
-	"People & Operations",
-	"Language & Content",
-	"Engineering & Product",
-	"Industries",
-];
+/** The /for index groups, each resolved to its roles in display order. */
+export function solutionGroups(): {
+	solutions: Solution[];
+	title: SolutionGroupTitle;
+}[] {
+	return SOLUTION_GROUPS.map((group) => ({
+		title: group.title,
+		solutions: group.slugs.flatMap((slug) => {
+			const solution = solutionMap[slug];
+			return solution ? [solution] : [];
+		}),
+	}));
+}
 
-export function solutionsByCategory(category: SolutionCategory): Solution[] {
-	return solutions.filter((s) => s.category === category);
+/**
+ * The role name for use mid-sentence: lowercased, except acronyms and
+ * internally capitalised words ("IT Support" → "IT support", "DevOps").
+ */
+export function solutionPhrase(name: string): string {
+	return name
+		.split(" ")
+		.map((word) => (/[A-Z]/.test(word.slice(1)) ? word : word.toLowerCase()))
+		.join(" ");
+}
+
+/**
+ * Who the role page addresses mid-sentence: the authored plural for roles
+ * named after a person ("paralegals"), otherwise "<role> teams".
+ */
+export function solutionAudience(
+	solution: Pick<Solution, "name" | "pluralPhrase">
+): string {
+	return solution.pluralPhrase ?? `${solutionPhrase(solution.name)} teams`;
 }

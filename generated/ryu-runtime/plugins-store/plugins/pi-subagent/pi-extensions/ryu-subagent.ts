@@ -181,14 +181,15 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import type { Message } from "@earendil-works/pi-ai";
+import type { JsonObject, JsonValue, ToolCall } from "@earendil-works/pi-ai";
 import { contentText } from "@earendil-works/pi-ai";
 import type {
 	AgentToolResult,
 	ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
+import { Value } from "typebox/value";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -339,10 +340,9 @@ const UNSAFE_FILENAME_RE = /[^\w.-]+/g;
 /**
  * Allowed persona names. Both sides of this lookup are untrusted — the name is
  * chosen by the MODEL (`subagent_type`) and by whoever wrote the override JSON —
- * and personas live in a plain object, so `__proto__` as an override key would
- * reassign the map's prototype and `constructor` as a `subagent_type` would
- * resolve to a function that looks like a persona until `.systemPrompt` is read.
- * Restricting the alphabet closes both without a Map rewrite.
+ * and every dynamic persona is held in a native Map. Prototype-like names are
+ * ordinary entries, never prototype setters or inherited Object methods.
+ * Restricting the alphabet also keeps generated prompt filenames bounded.
  */
 const AGENT_NAME_RE = /^[\w.-]+$/;
 
@@ -365,11 +365,6 @@ function log(message: string): void {
 	}
 }
 
-/** Message of a thrown value, without assuming it is an Error. */
-function errorText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
-
 // ── Agent definitions ───────────────────────────────────────────────────────
 
 interface AgentConfig {
@@ -390,7 +385,7 @@ interface AgentConfig {
  * them on purpose: the upstream files pinned Claude model ids that do not
  * resolve against Ryu's gateway-pinned `models.json`.
  */
-const BUILTIN_AGENTS: Record<string, AgentConfig> = {
+const BUILTIN_AGENTS = {
 	scout: {
 		description:
 			"Fast codebase recon that returns compressed context for handoff to another agent",
@@ -509,7 +504,7 @@ const BUILTIN_AGENTS: Record<string, AgentConfig> = {
 			"Anything the main agent should know. If handing off to another agent, include the exact file paths changed and a short list of the key functions or types touched.",
 		].join("\n"),
 	},
-};
+} satisfies Record<string, AgentConfig>;
 
 // ── Override discovery ──────────────────────────────────────────────────────
 
@@ -535,30 +530,48 @@ function overridesPath(): string {
 
 /** One raw entry from the override file, before validation. */
 interface RawAgentOverride {
-	description?: unknown;
-	model?: unknown;
-	systemPrompt?: unknown;
-	tools?: unknown;
+	description?: JsonValue;
+	model?: JsonValue;
+	systemPrompt?: JsonValue;
+	tools?: JsonValue;
 }
 
+const OVERRIDE_TEXT = Type.String();
+const OVERRIDE_REGISTRY_INPUT = Type.Object({});
+const OVERRIDE_ENTRY_INPUT = Type.Union([
+	Type.Object({}),
+	Type.Array(Type.Unknown()),
+]);
+const DEFAULT_MODEL_PREFERENCE = Type.Object({
+	value: Type.Optional(Type.String()),
+});
+
 /** Non-empty trimmed string, or undefined. Rejects every other JSON type. */
-function optionalString(value: unknown): string | undefined {
-	if (typeof value !== "string") {
+function optionalString(value: JsonValue | undefined): string | undefined {
+	if (!Value.Check(OVERRIDE_TEXT, value)) {
 		return;
 	}
 	const trimmed = value.trim();
 	return trimmed ? trimmed : undefined;
 }
 
+/**
+ * An exact Pi tool name. The child's `--tools` flag gives other shapes a
+ * meaning since Pi 1.0.4/1.1: `*` is a pattern, a leading `+`/`-` adjusts the
+ * defaults instead of replacing them, and `,` separates entries. A persona's
+ * list is an allowlist, so only exact names reach the flag.
+ */
+const TOOL_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/;
+
 /** Normalize a `tools` value into a non-empty allowlist, or undefined. */
-function optionalTools(value: unknown): string[] | undefined {
+function optionalTools(value: JsonValue | undefined): string[] | undefined {
 	if (!Array.isArray(value)) {
 		return;
 	}
 	const tools: string[] = [];
 	for (const entry of value) {
 		const name = optionalString(entry);
-		if (name) {
+		if (name && TOOL_NAME_RE.test(name)) {
 			tools.push(name);
 		}
 	}
@@ -586,7 +599,10 @@ async function loadDefaultModel(): Promise<string | undefined> {
 		if (!response.ok) {
 			return;
 		}
-		const body = (await response.json()) as { value?: unknown };
+		const body: unknown = await response.json();
+		if (!Value.Check(DEFAULT_MODEL_PREFERENCE, body)) {
+			return;
+		}
 		return optionalString(body.value);
 	} catch {
 		return;
@@ -602,8 +618,8 @@ async function loadDefaultModel(): Promise<string | undefined> {
  * send the child, and silently registering an empty persona would look like it
  * worked. Patching an existing built-in may set any subset of the fields.
  */
-async function loadAgents(): Promise<Record<string, AgentConfig>> {
-	const agents: Record<string, AgentConfig> = { ...BUILTIN_AGENTS };
+async function loadAgents(): Promise<Map<string, AgentConfig>> {
+	const agents = new Map<string, AgentConfig>(Object.entries(BUILTIN_AGENTS));
 	const file = overridesPath();
 	let parsed: unknown;
 	try {
@@ -611,37 +627,39 @@ async function loadAgents(): Promise<Record<string, AgentConfig>> {
 	} catch (err) {
 		// The overwhelmingly common case is "no such file", which is the documented
 		// default and deserves no log line. Anything else is worth one.
-		if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
-			log(`ignoring ${file}: ${errorText(err)}`);
+		if (!(err instanceof Error && "code" in err && err.code === "ENOENT")) {
+			log(
+				`ignoring ${file}: ${err instanceof Error ? err.message : String(err)}`
+			);
 		}
 		return agents;
 	}
-	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+	if (!Value.Check(OVERRIDE_REGISTRY_INPUT, parsed)) {
 		log(`ignoring ${file}: expected a JSON object of agent-name -> config`);
 		return agents;
 	}
 
-	for (const [rawName, rawEntry] of Object.entries(
-		parsed as Record<string, unknown>
-	)) {
+	// SAFETY: JSON.parse is the only writer; the checks above establish a non-null, non-array JSON object.
+	for (const [rawName, rawEntry] of Object.entries(parsed as JsonObject)) {
 		const name = rawName.trim();
 		if (!AGENT_NAME_RE.test(name)) {
 			log(`ignoring override "${rawName}": name must match ${AGENT_NAME_RE}`);
 			continue;
 		}
-		if (!rawEntry || typeof rawEntry !== "object") {
+		if (!Value.Check(OVERRIDE_ENTRY_INPUT, rawEntry)) {
 			log(`ignoring override "${name}": not an object`);
 			continue;
 		}
+		// SAFETY: The check above establishes a non-null object; its override fields remain JSON values and are validated individually below.
 		const entry = rawEntry as RawAgentOverride;
-		const base = agents[name];
+		const base = agents.get(name);
 		const systemPrompt =
 			optionalString(entry.systemPrompt) ?? base?.systemPrompt;
 		if (!systemPrompt) {
 			log(`ignoring override "${name}": a new agent needs a systemPrompt`);
 			continue;
 		}
-		agents[name] = {
+		agents.set(name, {
 			description:
 				optionalString(entry.description) ??
 				base?.description ??
@@ -651,18 +669,28 @@ async function loadAgents(): Promise<Record<string, AgentConfig>> {
 			model: optionalString(entry.model) ?? base?.model,
 			systemPrompt,
 			tools: optionalTools(entry.tools) ?? base?.tools,
-		};
+		});
 	}
 	return agents;
 }
 
 /** Compact `name: description` listing for the tool description and errors. */
-function renderAgentList(agents: Record<string, AgentConfig>): string {
-	const names = Object.keys(agents).sort();
-	if (names.length === 0) {
+function renderAgentList(agents: ReadonlyMap<string, AgentConfig>): string {
+	const entries = [...agents.entries()].sort(([left], [right]) => {
+		if (left < right) {
+			return -1;
+		}
+		if (left > right) {
+			return 1;
+		}
+		return 0;
+	});
+	if (entries.length === 0) {
 		return "none";
 	}
-	return names.map((name) => `${name}: ${agents[name].description}`).join("; ");
+	return entries
+		.map(([name, agent]) => `${name}: ${agent.description}`)
+		.join("; ");
 }
 
 // ── Result + step accumulation ──────────────────────────────────────────────
@@ -688,7 +716,7 @@ interface UsageStats {
 interface RyuStep {
 	/** Stable suffix for Core's synthetic `<parent>:<id>` transaction id. */
 	id?: string;
-	input: Record<string, unknown>;
+	input: ToolCall["arguments"];
 	name: string;
 	output?: string;
 	status: "pending" | "completed" | "failed";
@@ -725,7 +753,7 @@ interface SingleResult {
 	errorMessage?: string;
 	/** -1 while still running; used by the parallel progress line. */
 	exitCode: number;
-	messages: Message[];
+	messages: ChildMessage[];
 	model?: string;
 	ryuSteps: RyuStep[];
 	stderr: string;
@@ -758,7 +786,7 @@ function emptyUsage(): UsageStats {
 }
 
 /** Last assistant text block — the child's final answer. */
-function getFinalOutput(messages: Message[]): string {
+function getFinalOutput(messages: ChildMessage[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const msg = messages[i];
 		if (msg.role !== "assistant") {
@@ -809,10 +837,13 @@ function truncateParallelOutput(output: string): string {
 }
 
 /** Per-field truncation of a recorded step's arguments — see the const's note. */
-function capStepInput(args: Record<string, unknown>): Record<string, unknown> {
-	const capped: Record<string, unknown> = {};
+function capStepInput(args: ToolCall["arguments"]): ToolCall["arguments"] {
+	const capped: ToolCall["arguments"] = {};
 	for (const [key, value] of Object.entries(args)) {
-		if (typeof value === "string" && value.length > RYU_STEP_INPUT_FIELD_CAP) {
+		if (
+			Value.Check(OVERRIDE_TEXT, value) &&
+			value.length > RYU_STEP_INPUT_FIELD_CAP
+		) {
 			capped[key] = `${value.slice(0, RYU_STEP_INPUT_FIELD_CAP)}…`;
 			continue;
 		}
@@ -835,6 +866,11 @@ function collectRyuSteps(results: SingleResult[]): RyuStep[] {
 	return steps;
 }
 
+interface GetPiInvocationResult {
+	args: string[];
+	command: string;
+}
+
 // ── Child process plumbing ──────────────────────────────────────────────────
 
 /**
@@ -848,7 +884,7 @@ function collectRyuSteps(results: SingleResult[]): RyuStep[] {
  * silent PATH resolution is exactly the kind of thing that would explain a
  * mysteriously different child later.
  */
-function getPiInvocation(args: string[]): { args: string[]; command: string } {
+function getPiInvocation(args: string[]): GetPiInvocationResult {
 	const currentScript = process.argv[1];
 	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
 	if (currentScript && !isBunVirtualScript && existsSync(currentScript)) {
@@ -888,14 +924,144 @@ async function writePromptToTempFile(
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
 /** One child NDJSON frame. Only the two fields this file consumes are typed. */
-interface ChildEvent {
-	message?: Message;
-	type?: string;
-}
+// These wire schemas admit the actual managed Pi message publishers. Check
+// returns the original parsed object: no coercion, cloning or field removal.
+const CHILD_JSON_VALUE = Type.Cyclic(
+	{
+		Value: Type.Union([
+			Type.Null(),
+			Type.Boolean(),
+			Type.Number(),
+			Type.String(),
+			Type.Array(Type.Ref("Value")),
+			Type.Record(Type.String(), Type.Ref("Value")),
+		]),
+	},
+	"Value"
+);
+const CHILD_JSON_OBJECT = Type.Record(Type.String(), CHILD_JSON_VALUE);
+const CHILD_TEXT = Type.Object({
+	type: Type.Literal("text"),
+	text: Type.String(),
+});
+const CHILD_IMAGE = Type.Object({
+	type: Type.Literal("image"),
+	data: Type.String(),
+	mimeType: Type.String(),
+});
+const CHILD_TEXT_CONTENT = Type.Union([
+	Type.String(),
+	Type.Array(Type.Union([CHILD_TEXT, CHILD_IMAGE])),
+]);
+const CHILD_USAGE = Type.Object({
+	input: Type.Number(),
+	output: Type.Number(),
+	cacheRead: Type.Number(),
+	cacheWrite: Type.Number(),
+	totalTokens: Type.Number(),
+	cost: Type.Object({
+		input: Type.Number(),
+		output: Type.Number(),
+		cacheRead: Type.Number(),
+		cacheWrite: Type.Number(),
+		total: Type.Number(),
+	}),
+});
+const CHILD_MESSAGE = Type.Union([
+	Type.Object({
+		role: Type.Literal("system"),
+		content: Type.String(),
+		timestamp: Type.Number(),
+	}),
+	Type.Object({
+		role: Type.Literal("user"),
+		content: CHILD_TEXT_CONTENT,
+		timestamp: Type.Number(),
+	}),
+	Type.Object({
+		role: Type.Literal("assistant"),
+		content: Type.Array(
+			Type.Union([
+				CHILD_TEXT,
+				Type.Object({
+					type: Type.Literal("thinking"),
+					thinking: Type.String(),
+				}),
+				Type.Object({
+					type: Type.Literal("toolCall"),
+					id: Type.String(),
+					name: Type.String(),
+					arguments: CHILD_JSON_OBJECT,
+				}),
+			])
+		),
+		api: Type.String(),
+		provider: Type.String(),
+		model: Type.String(),
+		usage: CHILD_USAGE,
+		stopReason: Type.Union([
+			Type.Literal("pending"),
+			Type.Literal("stop"),
+			Type.Literal("length"),
+			Type.Literal("toolUse"),
+			Type.Literal("error"),
+			Type.Literal("aborted"),
+			Type.Literal("deferred"),
+		]),
+		errorMessage: Type.Optional(Type.String()),
+		timestamp: Type.Number(),
+	}),
+	Type.Object({
+		role: Type.Literal("toolResult"),
+		toolCallId: Type.String(),
+		toolName: Type.String(),
+		content: Type.Array(Type.Union([CHILD_TEXT, CHILD_IMAGE])),
+		isError: Type.Boolean(),
+		timestamp: Type.Number(),
+	}),
+	Type.Object({
+		role: Type.Literal("bashExecution"),
+		command: Type.String(),
+		output: Type.String(),
+		exitCode: Type.Optional(Type.Number()),
+		cancelled: Type.Boolean(),
+		truncated: Type.Boolean(),
+		timestamp: Type.Number(),
+	}),
+	Type.Object({
+		role: Type.Literal("custom"),
+		customType: Type.String(),
+		content: CHILD_TEXT_CONTENT,
+		display: Type.Boolean(),
+		details: Type.Optional(CHILD_JSON_VALUE),
+		timestamp: Type.Number(),
+	}),
+	Type.Object({
+		role: Type.Literal("branchSummary"),
+		summary: Type.String(),
+		fromId: Type.Union([Type.String(), Type.Null()]),
+		timestamp: Type.Number(),
+	}),
+	Type.Object({
+		role: Type.Literal("compactionSummary"),
+		summary: Type.String(),
+		tokensBefore: Type.Number(),
+		timestamp: Type.Number(),
+	}),
+]);
+const CHILD_EVENT_INPUT = Type.Object({
+	type: Type.Optional(Type.String()),
+	message: Type.Optional(CHILD_MESSAGE),
+	// Pi 1.1+ `agent_settled`: true when the child's run was cancelled rather
+	// than finished. Older Pi omits it.
+	aborted: Type.Optional(Type.Boolean()),
+});
+type ChildMessage = Static<typeof CHILD_MESSAGE>;
+type ChildEvent = Static<typeof CHILD_EVENT_INPUT>;
 
 interface RunSingleAgentOptions {
 	agentName: string;
-	agents: Record<string, AgentConfig>;
+	agents: ReadonlyMap<string, AgentConfig>;
 	cwd: string | undefined;
 	defaultCwd: string;
 	lifecycleId: string;
@@ -932,10 +1098,9 @@ async function runSingleAgent(
 		signal,
 		task,
 	} = options;
-	const agent =
-		AGENT_NAME_RE.test(agentName) && Object.hasOwn(agents, agentName)
-			? agents[agentName]
-			: undefined;
+	const agent = AGENT_NAME_RE.test(agentName)
+		? agents.get(agentName)
+		: undefined;
 
 	if (!agent) {
 		const lifecycle = childLifecycleStep(lifecycleId, agentName, task, task);
@@ -985,7 +1150,11 @@ async function runSingleAgent(
 	const stepsById = new Map<string, RyuStep>();
 	let stepsCapped = false;
 
-	const recordToolCall = (id: string, name: string, args_: unknown): void => {
+	const recordToolCall = (
+		id: string,
+		name: string,
+		args_: ToolCall["arguments"] | null | undefined
+	): void => {
 		if (currentResult.ryuSteps.length >= MAX_RYU_STEPS) {
 			if (!stepsCapped) {
 				stepsCapped = true;
@@ -994,7 +1163,7 @@ async function runSingleAgent(
 			return;
 		}
 		const step: RyuStep = {
-			input: capStepInput((args_ ?? {}) as Record<string, unknown>),
+			input: capStepInput(args_ ?? {}),
 			name,
 			status: "pending",
 		};
@@ -1072,11 +1241,27 @@ async function runSingleAgent(
 				}
 				let event: ChildEvent;
 				try {
-					event = JSON.parse(line) as ChildEvent;
+					const parsed = JSON.parse(line);
+					if (!Value.Check(CHILD_EVENT_INPUT, parsed)) {
+						return;
+					}
+					event = parsed;
 				} catch {
 					// Not our frame (a stray log line). Skip it, do not fail the run.
 					return;
 				}
+				// A cancelled child can settle without a final assistant message
+				// carrying `stopReason: "aborted"` (for example mid tool call), which
+				// would otherwise read as a completed run (the last stop reason is then
+				// `toolUse`). A reported error stays the more specific outcome.
+				if (event.type === "agent_settled") {
+					if (event.aborted && currentResult.stopReason !== "error") {
+						currentResult.stopReason = "aborted";
+						emitUpdate();
+					}
+					return;
+				}
+
 				const message = event.message;
 				if (!message) {
 					return;
@@ -1149,7 +1334,10 @@ async function runSingleAgent(
 			});
 
 			proc.on("error", (err) => {
-				log(`spawn failed for "${agentName}": ${errorText(err)}`);
+				currentResult.errorMessage = `Failed to start subagent: ${err instanceof Error ? err.message : String(err)}`;
+				log(
+					`spawn failed for "${agentName}": ${err instanceof Error ? err.message : String(err)}`
+				);
 				resolve(1);
 			});
 

@@ -7,7 +7,7 @@ test("closed node menu does not fetch details and closing cancels pending detail
 	const errors: string[] = [];
 	page.on("pageerror", (error) => errors.push(error.message));
 	await page.goto("/node-selector-status-story.html?hold=1");
-	const trigger = page.getByRole("button", { name: /local/i });
+	const trigger = page.getByRole("button", { name: /Your computer/i });
 	await expect(trigger).toBeVisible();
 	await expect(trigger.locator('[data-slot="node-status-dot"]')).toHaveClass(
 		/bg-success/
@@ -32,7 +32,9 @@ test("closed node menu does not fetch details and closing cancels pending detail
 	await page.goto("/node-selector-status-story.html");
 	await expect(trigger).toBeVisible();
 	await trigger.click();
-	await expect(page.getByRole("menuitem", { name: /^Local/ })).toBeVisible();
+	await expect(
+		page.getByRole("menuitem", { name: /^Your computer/ })
+	).toBeVisible();
 	expect(errors).toEqual([]);
 	await page.screenshot({
 		path: path.resolve(

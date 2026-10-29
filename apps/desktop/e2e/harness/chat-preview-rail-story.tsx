@@ -31,7 +31,7 @@ function buildHistory(): UIMessage[] {
 					text: `Message ${index + 1}: inspect the preview rail overflow behavior and keep this jump target easy to identify.`,
 				},
 			],
-		} as unknown as UIMessage);
+		});
 		messages.push({
 			id: `rail-assistant-${index}`,
 			role: "assistant",
@@ -43,7 +43,7 @@ function buildHistory(): UIMessage[] {
 					),
 				},
 			],
-		} as unknown as UIMessage);
+		});
 	}
 	return messages;
 }

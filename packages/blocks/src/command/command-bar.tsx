@@ -1,4 +1,5 @@
 "use client";
+import styles from "./command-bar.module.css";
 
 // The command-bar shell, extracted as a prop-driven block.
 //
@@ -18,8 +19,9 @@ import type {
 	CommandAction,
 } from "@ryu/command/types";
 import { cn } from "@ryu/ui/lib/utils";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import type { KeyboardEvent, ReactNode } from "react";
+import { InputBar } from "../desktop/agent-elements/input-bar.tsx";
 
 export type CommandBarMode = "palette" | "chat";
 
@@ -155,73 +157,87 @@ export function CommandBar({
 		(stream ? undefined : seedStreaming || seedError ? "…" : undefined);
 
 	return (
-		<motion.div
-			animate={{ opacity: 1, scale: 1 }}
-			className={cn(
-				"flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-lg",
-				className
-			)}
-			initial={{ opacity: 0, scale: 0.985 }}
-			key={animateKey}
-			transition={{ duration: 0.16, ease: "easeOut" }}
-		>
-			<AnimatePresence initial={false} mode="wait">
-				{mode === "palette" ? (
-					<motion.div
-						animate={{ opacity: 1 }}
-						exit={{ opacity: 0 }}
-						initial={{ opacity: 0 }}
-						key="palette"
-						transition={{ duration: 0.1 }}
-					>
-						<CommandPalette
-							actions={actions}
-							autoFocus={autoFocus}
-							chrome="bare"
-							emptyLabel={emptyLabel}
-							onInputKeyDown={onInputKeyDown}
-							onSearchChange={onSearchChange}
-							placeholder={placeholder}
-							search={search}
-							shouldFilter={shouldFilter}
-						/>
-					</motion.div>
-				) : (
-					<motion.div
-						animate={{ opacity: 1 }}
-						className="flex flex-col"
-						exit={{ opacity: 0 }}
-						initial={{ opacity: 0 }}
-						key="chat"
-						style={{ height: 440 }}
-						transition={{ duration: 0.1 }}
-					>
-						<div className="flex items-center gap-2 border-border/50 border-b px-3 py-2">
-							<button
-								className="flex items-center gap-1 rounded-full px-2 py-1 text-muted-foreground text-xs hover:text-foreground"
-								onClick={onExit}
-								type="button"
-							>
-								<BackChevron />
-								Back
-							</button>
-							<span className="text-muted-foreground text-xs">
-								{agentLabel}
-							</span>
-						</div>
-						<ChatView
-							autoFocus={autoFocus}
-							className="min-h-0 flex-1"
-							greeting={greeting}
-							initialMessages={initialMessages}
-							initialPrompt={effectivePrompt}
-							onExit={onExit}
-							placeholder={chatPlaceholder}
-							stream={chatStream}
-						/>
-					</motion.div>
+		<MotionConfig reducedMotion="user">
+			<motion.div
+				animate={{ opacity: 1, scale: 1 }}
+				className={cn(
+					"flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-lg",
+					className
 				)}
-			</AnimatePresence>
-		</motion.div>
+				initial={{ opacity: 0, scale: 0.985 }}
+				key={animateKey}
+				transition={{ duration: 0.16, ease: "easeOut" }}
+			>
+				<AnimatePresence initial={false} mode="wait">
+					{mode === "palette" ? (
+						<motion.div
+							animate={{ opacity: 1 }}
+							exit={{ opacity: 0 }}
+							initial={{ opacity: 0 }}
+							key="palette"
+							transition={{ duration: 0.1 }}
+						>
+							<CommandPalette
+								actions={actions}
+								autoFocus={autoFocus}
+								chrome="bare"
+								emptyLabel={emptyLabel}
+								onInputKeyDown={onInputKeyDown}
+								onSearchChange={onSearchChange}
+								placeholder={placeholder}
+								search={search}
+								shouldFilter={shouldFilter}
+							/>
+						</motion.div>
+					) : (
+						<motion.div
+							animate={{ opacity: 1 }}
+							className={cn("flex flex-col", styles.chat)}
+							exit={{ opacity: 0 }}
+							initial={{ opacity: 0 }}
+							key="chat"
+							transition={{ duration: 0.1 }}
+						>
+							<div className="flex items-center gap-2 border-border/50 border-b px-3 py-2">
+								<button
+									className="flex items-center gap-1 rounded-full px-2 py-1 text-muted-foreground text-xs hover:text-foreground"
+									onClick={onExit}
+									type="button"
+								>
+									<BackChevron />
+									Back
+								</button>
+								<span className="text-muted-foreground text-xs">
+									{agentLabel}
+								</span>
+							</div>
+							<ChatView
+								autoFocus={autoFocus}
+								className="min-h-0 flex-1"
+								greeting={greeting}
+								initialMessages={initialMessages}
+								initialPrompt={effectivePrompt}
+								onExit={onExit}
+								placeholder={chatPlaceholder}
+								renderComposer={(composer) => (
+									<InputBar
+										autoFocus={composer.autoFocus}
+										compact
+										onChange={composer.onChange}
+										onSend={({ content }) => composer.onSend(content)}
+										onStop={composer.onStop}
+										onTextareaKeyDown={composer.onKeyDown}
+										placeholder={composer.placeholder}
+										status={composer.status}
+										value={composer.value}
+									/>
+								)}
+								stream={chatStream}
+							/>
+						</motion.div>
+					)}
+				</AnimatePresence>
+			</motion.div>
+		</MotionConfig>
 	);
 }

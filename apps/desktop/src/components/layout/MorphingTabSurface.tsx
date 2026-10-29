@@ -1,4 +1,6 @@
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { motion, useReducedMotion } from "framer-motion";
+import layoutStyles from "./MorphingTabSurface.module.css";
 
 const MORPHING_TAB_LAYOUT_ID = "desktop-titlebar-morphing-tab-surface";
 const MORPHING_TAB_TRANSITION = {
@@ -30,7 +32,10 @@ export function MorphingTabSurface({
 	return (
 		<motion.span
 			aria-hidden
-			className="pointer-events-none absolute -inset-x-1 -top-1 -bottom-2 z-0 rounded-t-[14px] bg-background shadow-[0_8px_0_var(--background)]"
+			className={cn(
+				"pointer-events-none absolute -inset-x-1 -top-1 -bottom-2 z-0 rounded-t-xl bg-background",
+				layoutStyles.authored1
+			)}
 			data-tab-surface="morphing"
 			layoutId={MORPHING_TAB_LAYOUT_ID}
 			transition={reduceMotion ? { duration: 0 } : MORPHING_TAB_TRANSITION}

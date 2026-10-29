@@ -1,6 +1,6 @@
 import path from "node:path";
 import { defineConfig, mergeConfig } from "vite";
-import harness from "./vite.harness.config";
+import harness from "./vite.harness.config.ts";
 export default mergeConfig(
 	harness,
 	defineConfig({

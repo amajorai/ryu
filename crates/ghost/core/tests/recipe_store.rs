@@ -1,7 +1,7 @@
 //! Integration tests for the JSON-file-backed recipe store.
 //!
 //! Every test uses `RecipeStore::open_at` against a fresh `tempfile::TempDir`, so
-//! the real `~/.ghost` / `GHOST_DATA_DIR` store is never read or written.
+//! the real `services/ghost` / `GHOST_DATA_DIR` store is never read or written.
 
 use std::collections::HashMap;
 

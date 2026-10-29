@@ -9,10 +9,12 @@ repository = "https://github.com/amajorai/ryu"
 # Versions are matched to apps/core/Cargo.toml so the in-process nest into Core's
 # axum router has no version skew. This crate has ZERO dependency on apps/core.
 [dependencies]
+# The data-dir layout (`db/`, `state/`, …) shared by every Ryu process.
+ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.0" }
 axum = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yml = "0.0.12"
+noyalib = { version = "0.0.58", default-features = false, features = ["std", "compat-serde-yaml"] }
 tracing = "0.1"
 dirs = "5"
 utoipa = { version = "5", features = ["axum_extras"] }

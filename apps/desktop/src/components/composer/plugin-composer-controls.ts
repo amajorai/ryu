@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // The data-driven half of the composer's plugin controls
 // (`contributes.composer_controls[]`).
 //
@@ -55,8 +56,8 @@ export interface PartitionedComposerControls {
 	toggles: KnownComposerControl[];
 }
 
-function isNonEmptyString(v: unknown): v is string {
-	return typeof v === "string" && v.length > 0;
+function isNonEmptyString(v: string | undefined): v is string {
+	return isNativeText(v) && v.length > 0;
 }
 
 /**
@@ -70,7 +71,7 @@ export function isKnownComposerControl(
 	control: PluginComposerControl
 ): control is KnownComposerControl {
 	const hasIdentity =
-		(COMPOSER_CONTROL_TYPES as readonly string[]).includes(control.type) &&
+		COMPOSER_CONTROL_TYPES.some((type) => type === control.type) &&
 		isNonEmptyString(control.id) &&
 		isNonEmptyString(control.flag) &&
 		isNonEmptyString(control.label) &&

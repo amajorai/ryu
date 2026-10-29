@@ -47,6 +47,10 @@
 // unsaturated colour is close to a no-op. That is why the rotation is on hue
 // alone and not a wholesale palette substitution.
 
+import {
+	isNativeNumber,
+	isNativeText,
+} from "../lib/native-primitive-observation.ts";
 import type { GradientDirection } from "./dither-kit/gradient.tsx";
 import { type DitherColor, PALETTE } from "./dither-kit/palette.ts";
 import {
@@ -110,8 +114,8 @@ export const bannerPresetById = (
  *  MUST be run through this before they reach a renderer: dither-kit's `fillOf`
  *  throws on an unknown palette name, and the same class of bug (a stale id
  *  reaching a paint path) is what crashes an editor on open. */
-export const isBannerPresetId = (value: unknown): value is string =>
-	typeof value === "string" && bannerPresetById(value) !== undefined;
+export const isBannerPresetId = <T>(value: T): value is T & string =>
+	isNativeText(value) && bannerPresetById(value) !== undefined;
 
 /** The four directions a dither wash can run in. Re-exported here so a picker
  *  that already imports this module does not need a second import for the one
@@ -187,7 +191,7 @@ const hexToHsl = (hex: string): Hsl | null => {
  *  resolves to the hue of its chart fill so a gradient preset and a dither wash
  *  painted "purple" are the same purple. */
 export const bannerColorHue = (color: BannerColor): number => {
-	if (typeof color === "number") {
+	if (isNativeNumber(color)) {
 		return ((color % 360) + 360) % 360;
 	}
 	const seed = PALETTE[color];

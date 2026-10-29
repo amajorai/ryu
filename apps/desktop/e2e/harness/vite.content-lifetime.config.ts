@@ -11,6 +11,8 @@ export default defineConfig({
 	optimizeDeps: {
 		entries: ["content-lifetime-proof.html"],
 		include: ["lucide-react"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		dedupe: ["react", "react-dom"],

@@ -17,6 +17,7 @@
  *  definition of "apply this preset".
  */
 
+import { z } from "zod";
 import {
 	equalSizes,
 	makeBranch,
@@ -164,6 +165,8 @@ export function buildPresetTree(
 	const queue = [...tabIds];
 	const walk = (node: PresetNode): SplitNode => {
 		if (node.type === "slot") {
+			// SAFETY: the slot-count check above guarantees one queued string for every
+			// leaf visited by this depth-first traversal.
 			return makeLeaf(queue.shift() as string);
 		}
 		return makeBranch(node.orientation, node.children.map(walk), [
@@ -228,27 +231,56 @@ const MAX_PRESET_SLOTS = 12;
 const MAX_PRESETS = 60;
 const MAX_NAME_LENGTH = 64;
 
-function parseNode(raw: unknown, depth: number): PresetNode | null {
-	if (!raw || typeof raw !== "object" || depth > 8) {
+const storedPresetNodeSchema = z.object({
+	type: z.enum(["slot", "branch"]),
+	path: z.unknown().optional(),
+	children: z.unknown().optional(),
+	orientation: z.unknown().optional(),
+	sizes: z.unknown().optional(),
+});
+const storedPresetSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	root: z.unknown().optional(),
+	createdAt: z.unknown().optional(),
+});
+const storedPresetArraySchema = z.array(z.unknown());
+const presetSizeSchema = z.number().positive();
+// The pure parser historically preserves any numeric creation time; JSON
+// persistence turns non-finite values into null before the next read.
+const presetCreationTimeSchema = z.union([
+	z.number(),
+	z.nan(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+type StoredPresetInput = Parameters<typeof storedPresetSchema.parse>[0];
+
+function parseNode(raw: StoredPresetInput, depth: number): PresetNode | null {
+	const parsed = storedPresetNodeSchema.safeParse(raw);
+	if (!parsed.success || depth > 8) {
 		return null;
 	}
-	const row = raw as Record<string, unknown>;
+	const row = parsed.data;
 	if (row.type === "slot") {
 		// A path is a route, never a filesystem path or a URL: anything that isn't
 		// an app route is dropped rather than rejected, so one bad slot degrades to
 		// an empty pane instead of losing the whole preset.
+		const decodedPath = z.string().safeParse(row.path);
 		const path =
-			typeof row.path === "string" &&
-			row.path.startsWith("/") &&
-			!row.path.startsWith("//")
-				? row.path
+			decodedPath.success &&
+			decodedPath.data.startsWith("/") &&
+			!decodedPath.data.startsWith("//")
+				? decodedPath.data
 				: undefined;
+
 		return makeSlot(path);
 	}
-	if (row.type !== "branch" || !Array.isArray(row.children)) {
+	const decodedChildren = storedPresetArraySchema.safeParse(row.children);
+	if (row.type !== "branch" || !decodedChildren.success) {
 		return null;
 	}
-	const children = row.children
+	const children = decodedChildren.data
 		.map((c) => parseNode(c, depth + 1))
 		.filter((c): c is PresetNode => !!c);
 	if (children.length < 2) {
@@ -256,10 +288,17 @@ function parseNode(raw: unknown, depth: number): PresetNode | null {
 	}
 	const orientation: SplitOrientation =
 		row.orientation === "rows" ? "rows" : "columns";
-	const rawSizes = Array.isArray(row.sizes) ? row.sizes : [];
-	const sizes = rawSizes.filter(
-		(s): s is number => typeof s === "number" && Number.isFinite(s) && s > 0
-	);
+	const rawSizes = storedPresetArraySchema.safeParse(row.sizes);
+	const sizes: number[] = [];
+	if (rawSizes.success) {
+		for (const size of rawSizes.data) {
+			const decoded = presetSizeSchema.safeParse(size);
+			if (decoded.success) {
+				sizes.push(decoded.data);
+			}
+		}
+	}
+
 	return makePresetBranch(
 		orientation,
 		children,
@@ -269,23 +308,23 @@ function parseNode(raw: unknown, depth: number): PresetNode | null {
 
 /** Validate whatever came out of storage (or off settings sync). Anything that
     isn't a well-formed, id-free, bounded preset is dropped. */
-export function parsePresets(raw: unknown): SplitPreset[] {
-	if (!Array.isArray(raw)) {
+export function parsePresets(raw: StoredPresetInput): SplitPreset[] {
+	const parsed = storedPresetArraySchema.safeParse(raw);
+	if (!parsed.success) {
 		return [];
 	}
 	const out: SplitPreset[] = [];
 	const seen = new Set<string>();
-	for (const entry of raw) {
+	for (const entry of parsed.data) {
 		if (out.length >= MAX_PRESETS) {
 			break;
 		}
-		if (!entry || typeof entry !== "object") {
+		const decoded = storedPresetSchema.safeParse(entry);
+		if (!decoded.success) {
 			continue;
 		}
-		const row = entry as Record<string, unknown>;
-		if (typeof row.id !== "string" || typeof row.name !== "string") {
-			continue;
-		}
+		const row = decoded.data;
+
 		if (seen.has(row.id) || row.id.startsWith("builtin:")) {
 			continue;
 		}
@@ -298,10 +337,11 @@ export function parsePresets(raw: unknown): SplitPreset[] {
 			continue;
 		}
 		seen.add(row.id);
+		const createdAt = presetCreationTimeSchema.safeParse(row.createdAt);
 		out.push({
 			id: row.id,
 			name: row.name.slice(0, MAX_NAME_LENGTH),
-			createdAt: typeof row.createdAt === "number" ? row.createdAt : 0,
+			createdAt: createdAt.success ? createdAt.data : 0,
 			root,
 		});
 	}

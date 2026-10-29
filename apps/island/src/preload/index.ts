@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
 import {
 	type AcpConfigResult,
 	type AgentsResult,
@@ -25,16 +25,17 @@ import {
 	type CoreStreamPartEvent,
 	type CoreToolCallRequest,
 	type CoreToolCallResult,
+	type CoreTranscribeOptions,
 	type CoreTranscribeResult,
 	type CursorPoint,
 	type DictationSubmitResult,
-	type DragStartPayload,
 	type EngineModelsResult,
 	type FeedbackRequest,
 	type FeedbackResult,
 	IPC,
 	type IslandApi,
 	type IslandAttachment,
+	type IslandMaterialContour,
 	type IslandMeetingEvent,
 	type IslandMeetingResult,
 	type IslandQuestEvent,
@@ -70,6 +71,17 @@ import {
 	type VoiceTarget,
 	WIN_CHANNELS,
 } from "../shared/ipc.ts";
+import type { IslandLanguageApi } from "../shared/language-selection.ts";
+import { LANGUAGE_SELECTION_CHANNEL } from "../shared/language-selection-channel.ts";
+import {
+	type IslandPlacement,
+	parsePlacementArg,
+	placementForZone,
+} from "../shared/placement.ts";
+import {
+	type ScreenSurfaceState,
+	SURFACE_CHANNELS,
+} from "../shared/screen-surface.ts";
 
 // Subscribe a renderer listener to an IPC event channel, returning an
 // unsubscribe function. The raw Electron `event` arg is stripped so the
@@ -78,18 +90,31 @@ function subscribe<T>(
 	channel: string,
 	listener: (payload: T) => void
 ): () => void {
-	const handler = (_event: unknown, payload: T): void => listener(payload);
+	const handler = (_event: IpcRendererEvent, payload: T): void =>
+		listener(payload);
 	ipcRenderer.on(channel, handler);
 	return () => ipcRenderer.removeListener(channel, handler);
 }
 
 const win: IslandWinApi = {
+	// Electron forwards mouse moves to a click-through window on macOS and
+	// Windows only (`IgnoreMouseEventsOptions.forward`).
+	forwardsMouseMoves: process.platform !== "linux",
 	setMouseCapture(capture: boolean): void {
 		const payload: SetMouseCapturePayload = { capture };
 		ipcRenderer.send(WIN_CHANNELS.setMouseCapture, payload);
 	},
-	dragStart(rect: DragStartPayload): void {
-		ipcRenderer.send(WIN_CHANNELS.dragStart, rect);
+	dragStart(): void {
+		ipcRenderer.send(WIN_CHANNELS.dragStart);
+	},
+	// Main seeds the placement on the command line so the very first frame is
+	// already aligned to the island's anchor; later changes arrive as events.
+	// The fallback mirrors the default dock (bottom-right).
+	initialPlacement: parsePlacementArg(process.argv, placementForZone(8)),
+	onPlacement: (listener: (placement: IslandPlacement) => void) =>
+		subscribe(WIN_CHANNELS.placement, listener),
+	placementApplied(placement: IslandPlacement): void {
+		ipcRenderer.send(WIN_CHANNELS.placementApplied, placement);
 	},
 	moveBy(dx: number, dy: number): void {
 		const payload: MoveByPayload = { dx, dy };
@@ -98,9 +123,22 @@ const win: IslandWinApi = {
 	dragEnd(): void {
 		ipcRenderer.send(WIN_CHANNELS.dragEnd);
 	},
-	setContentSize(width: number, height: number, expanded: boolean): void {
-		const payload: ContentSizePayload = { width, height, expanded };
+	setContentSize(
+		width: number,
+		height: number,
+		expanded: boolean,
+		contours: IslandMaterialContour[]
+	): void {
+		const payload: ContentSizePayload = {
+			width,
+			height,
+			expanded,
+			shapes: contours,
+		};
 		ipcRenderer.send(WIN_CHANNELS.setContentSize, payload);
+	},
+	setMaterialShapes: (contours: IslandMaterialContour[]): void => {
+		ipcRenderer.send(WIN_CHANNELS.setMaterialShapes, contours);
 	},
 };
 
@@ -108,6 +146,7 @@ const api: IslandApi = {
 	version: process.env.npm_package_version ?? "0.1.0",
 	win,
 	appearance: {
+		notch: () => ipcRenderer.invoke(IPC.appearance.notch),
 		get: (): Promise<string | null> => ipcRenderer.invoke(IPC.appearance.get),
 	},
 	core: {
@@ -135,9 +174,10 @@ const api: IslandApi = {
 			ipcRenderer.invoke(IPC.core.sidecarStart, name),
 		transcribe: (
 			audio: ArrayBuffer,
-			engine: string
+			engine: string,
+			options?: CoreTranscribeOptions
 		): Promise<CoreTranscribeResult> =>
-			ipcRenderer.invoke(IPC.core.transcribe, { audio, engine }),
+			ipcRenderer.invoke(IPC.core.transcribe, { audio, engine, options }),
 		agents: (): Promise<AgentsResult> => ipcRenderer.invoke(IPC.core.agents),
 		acpConfig: (agentId: string): Promise<AcpConfigResult> =>
 			ipcRenderer.invoke(IPC.core.acpConfig, agentId),
@@ -147,6 +187,8 @@ const api: IslandApi = {
 			ipcRenderer.invoke(IPC.core.conversations),
 	},
 	plugins: {
+		onSourceChanged: (listener: () => void): (() => void) =>
+			subscribe(IPC.plugins.sourceChanged, listener),
 		contributions: (): Promise<PluginContributionsResult> =>
 			ipcRenderer.invoke(IPC.plugins.contributions),
 		onShortcut: (listener: (id: string) => void): (() => void) =>
@@ -337,6 +379,14 @@ const api: IslandApi = {
 		onCursorMove: (listener: (point: CursorPoint) => void): (() => void) =>
 			subscribe(IPC.window.cursorMove, listener),
 	},
+	surface: {
+		show: (state: ScreenSurfaceState): void =>
+			ipcRenderer.send(SURFACE_CHANNELS.show, state),
+		onSubmit: (listener: (value: unknown) => void): (() => void) =>
+			subscribe(SURFACE_CHANNELS.submit, listener),
+		onDismiss: (listener: () => void): (() => void) =>
+			subscribe(SURFACE_CHANNELS.dismiss, listener),
+	},
 	update: {
 		getVersion: (): Promise<string> =>
 			ipcRenderer.invoke(IPC.update.getVersion),
@@ -355,3 +405,10 @@ const api: IslandApi = {
 };
 
 contextBridge.exposeInMainWorld("island", api);
+
+const languageApi: IslandLanguageApi = {
+	select: (packId: string | null): Promise<boolean> =>
+		ipcRenderer.invoke(LANGUAGE_SELECTION_CHANNEL, packId),
+};
+
+contextBridge.exposeInMainWorld("islandLanguage", languageApi);

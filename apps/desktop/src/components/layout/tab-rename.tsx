@@ -123,6 +123,7 @@ export function TabRenameInput({
 	}, []);
 	return (
 		<input
+			aria-label="Tab name"
 			className={cn(
 				"min-w-0 flex-1 rounded-sm bg-transparent font-medium outline-none ring-1 ring-primary/40 focus:ring-primary",
 				className

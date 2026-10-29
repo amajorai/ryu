@@ -1,3 +1,4 @@
+import { z } from "zod";
 export const ORGANIZATION_INVITATION_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 export interface InvitationPolicySnapshot {
@@ -13,13 +14,13 @@ export function normalizeInvitationEmail(value: string): string {
 	return value.trim().toLowerCase();
 }
 
-export function normalizeReferralTag(value: unknown): string | undefined {
-	if (typeof value !== "string") {
-		return undefined;
-	}
-	const tag = value.trim().replace(/^#/, "");
-	return tag ? tag.slice(0, 80) : undefined;
-}
+export const normalizeReferralTag = z
+	.string()
+	.catch("")
+	.transform((value) => {
+		const tag = value.trim().replace(/^#/, "");
+		return tag ? tag.slice(0, 80) : undefined;
+	}).parse;
 
 export function invitationPolicyDecision(
 	policy: InvitationPolicySnapshot | null | undefined,

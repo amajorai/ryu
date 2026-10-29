@@ -18,8 +18,8 @@ function WorktreeHandoffProof() {
 	return (
 		<main className="min-h-screen bg-background p-8 text-foreground">
 			<div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl grid-cols-[minmax(0,1fr)_20rem] gap-8">
-				<section className="flex flex-col justify-center rounded-[28px] border border-border/70 bg-card p-10 shadow-2xl">
-					<p className="font-heading font-semibold text-primary text-xs uppercase tracking-[0.18em]">
+				<section className="flex flex-col justify-center rounded-4xl border border-border/70 bg-card p-10 shadow-2xl">
+					<p className="font-heading font-semibold text-primary text-xs uppercase tracking-(--tracking-section)">
 						Ryu · Active chat
 					</p>
 					<h1 className="mt-3 font-heading font-semibold text-3xl tracking-tight">
@@ -33,7 +33,7 @@ function WorktreeHandoffProof() {
 						<div className="flex items-center justify-between gap-4">
 							<span className="font-medium text-sm">Current response</span>
 							<span
-								className="rounded-full bg-orange-500/10 px-2 py-1 text-orange-400 text-xs"
+								className="rounded-full bg-warning/10 px-2 py-1 text-warning text-xs"
 								data-testid="chat-state"
 							>
 								{chatRunning ? "Running" : "Interrupted"}
@@ -41,7 +41,7 @@ function WorktreeHandoffProof() {
 						</div>
 						{handedOffBranch ? (
 							<p
-								className="mt-3 rounded-lg bg-emerald-500/10 px-3 py-2 text-emerald-400 text-sm"
+								className="mt-3 rounded-lg bg-success/10 px-3 py-2 text-sm text-success"
 								data-testid="handoff-result"
 							>
 								Handed off to {handedOffBranch}
@@ -58,14 +58,14 @@ function WorktreeHandoffProof() {
 						<p className="font-medium text-foreground text-xs">
 							Pinned summary
 						</p>
-						<p className="mt-1 text-[11px] text-muted-foreground">
+						<p className="type-caption mt-1 text-muted-foreground">
 							What this chat is working in
 						</p>
 					</div>
 					<section className="p-3" data-testid="environment-section">
 						<div className="flex items-center justify-between gap-3">
 							<p className="font-medium text-foreground text-xs">Environment</p>
-							<span className="text-[11px] text-muted-foreground">
+							<span className="type-caption text-muted-foreground">
 								Expanded
 							</span>
 						</div>

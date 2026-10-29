@@ -715,14 +715,48 @@ async fn install_remote(
         FetchStrategy::LocalPath { .. } => unreachable!("local handled in install_from_source"),
     };
 
+    install_fetched(
+        &repo_root,
+        subdir.as_deref(),
+        exact_root_name,
+        root_name_hint,
+    )
+}
+
+/// Install from a fetched (extracted or cloned) repo root, scoped to `subdir`.
+///
+/// The `<repo>-<ref>` root-name hint only names a skill whose SKILL.md sits at
+/// the repository root. A source scoped to a skill folder (`…/tree/HEAD/skills/pdf`)
+/// installs under that folder's own name, so sibling skills from one repo get
+/// distinct directories instead of all landing in (and replacing) `skills/<repo>`.
+fn install_fetched(
+    repo_root: &Path,
+    subdir: Option<&str>,
+    exact_root_name: Option<&str>,
+    root_name_hint: Option<&str>,
+) -> Result<InstallResult> {
     // Scope to the requested subdir, if any. A tarball expands to a single
     // `<repo>-<ref>/` top dir, so resolve the subdir beneath that.
-    let search_root = resolve_subdir(&repo_root, subdir.as_deref())?;
+    let search_root = resolve_subdir(repo_root, subdir)?;
+    if subdir.is_some_and(|sub| !sub.is_empty()) {
+        let leaf_name = has_skill_md(&search_root)
+            .then(|| {
+                search_root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+            })
+            .flatten();
+        return install_from_dir_named(
+            &search_root,
+            None,
+            exact_root_name.or(leaf_name.as_deref()),
+        );
+    }
     install_from_dir_named(
         &search_root,
         root_name_hint
             .map(ToOwned::to_owned)
-            .or_else(|| repo_root_name(&repo_root)),
+            .or_else(|| repo_root_name(repo_root)),
         exact_root_name,
     )
 }
@@ -824,7 +858,9 @@ pub(crate) fn install_from_dir_named(
 ) -> Result<InstallResult> {
     let mut found = find_skills(dir);
     if found.is_empty() {
-        anyhow::bail!("no SKILL.md found in source (looked for SKILL.md, skills/<name>/, skills/<category>/<name>/)");
+        anyhow::bail!(
+            "no SKILL.md found in source (looked for SKILL.md, skills/<name>/, skills/<category>/<name>/)"
+        );
     }
     if found.len() > 1 {
         tracing::info!(
@@ -852,6 +888,23 @@ pub(crate) fn install_from_dir_named(
         .unwrap_or(skill.name);
 
     let dest = ryu_skills::SkillRegistry::skills_dir().join(&name);
+    // Installing a skill over (or into) its own source would delete the source
+    // in the `remove_dir_all` below before anything is copied, leaving an
+    // empty skill behind.
+    if let (Ok(source), Ok(target)) = (
+        std::fs::canonicalize(&skill.dir),
+        std::fs::canonicalize(&dest),
+    ) {
+        if source.starts_with(&target) || target.starts_with(&source) {
+            anyhow::bail!(
+                "skill '{name}' is already installed at {}",
+                target.display()
+            );
+        }
+    }
+    let artifact_fingerprint = std::fs::read_to_string(skill.dir.join("SKILL.md"))
+        .ok()
+        .and_then(|content| super::public_stats::artifact_fingerprint(&name, &content));
     // Replace any existing install of the same name so updates are clean.
     if dest.exists() {
         std::fs::remove_dir_all(&dest)
@@ -872,6 +925,7 @@ pub(crate) fn install_from_dir_named(
     );
 
     Ok(InstallResult {
+        artifact_fingerprint,
         slug: name.clone(),
         path: dest.join("SKILL.md").to_string_lossy().to_string(),
     })
@@ -896,30 +950,46 @@ fn is_direct_skill_md_url(raw: &str) -> bool {
         .is_some_and(|file| file.eq_ignore_ascii_case("SKILL.md"))
 }
 
-/// Name a skill fetched as a bare `SKILL.md` after its parent path segment
-/// (`…/skills/pdf/SKILL.md` -> `pdf`), falling back to `skill`.
+/// Name a skill fetched as a bare `SKILL.md`.
+///
+/// The parent path segment names it (`…/skills/pdf/SKILL.md` -> `pdf`), except
+/// where that segment is the git ref of a repository-root file on a code host:
+/// raw.githubusercontent.com `<owner>/<repo>/<ref>/SKILL.md`, GitHub
+/// `<owner>/<repo>/{blob,raw}/<ref>/SKILL.md`, and GitLab-style
+/// `…/<repo>/-/{raw,blob}/<ref>/SKILL.md` are named after the repo, so two
+/// root-level skills do not both land in (and replace) `skills/main`. A
+/// `SKILL.md` at the root of a host is named after the host. The front matter
+/// never picks the name: [`install_skill_md_text`] installs under exactly this
+/// slug, so a fetched document cannot choose (and replace) another skill.
 fn skill_name_from_md_url(raw: &str) -> String {
-    let url = raw.split(['?', '#']).next().unwrap_or(raw);
-    // Drop scheme + authority first. Walking segments right-to-left over the
-    // whole URL would run past the path and pick up the HOST for a root-level
-    // `https://example.com/SKILL.md`, naming the skill after the domain.
-    let path = url
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(url)
-        .split_once('/')
-        .map(|(_, path)| path)
+    let Ok(url) = url::Url::parse(raw.trim()) else {
+        return "skill".to_string();
+    };
+    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+    let segments: Vec<&str> = url
+        .path_segments()
+        .map(|segments| segments.filter(|segment| !segment.is_empty()).collect())
         .unwrap_or_default();
-    let parent = path
-        .trim_end_matches('/')
-        .rsplit('/')
-        .nth(1)
+    // The directory segments above the `SKILL.md` file itself.
+    let dirs = segments
+        .split_last()
+        .map(|(_, dirs)| dirs)
         .unwrap_or_default();
-    let name = sanitize_name(parent);
-    if name.is_empty() {
-        "skill".to_string()
-    } else {
-        name
+    let name = repo_name_for_root_skill_md(&host, dirs)
+        .or_else(|| dirs.last().copied())
+        .unwrap_or(host.as_str());
+    sanitize_name(name)
+}
+
+/// The repo segment of a code-host URL whose `SKILL.md` sits at the repository
+/// root, where the parent segment is a git ref rather than a skill folder.
+fn repo_name_for_root_skill_md<'a>(host: &str, dirs: &[&'a str]) -> Option<&'a str> {
+    match (host, dirs) {
+        ("raw.githubusercontent.com", [_, repo, _])
+        | ("raw.githubusercontent.com", [_, repo, "refs", "heads" | "tags", _])
+        | ("github.com" | "www.github.com", [_, repo, "blob" | "raw", _])
+        | (_, [.., repo, "-", "raw" | "blob", _]) => Some(*repo),
+        _ => None,
     }
 }
 
@@ -931,9 +1001,9 @@ fn skill_name_from_md_url(raw: &str) -> String {
 /// it as `skill.description`, browse.sh as `skillMd`, and a LobeHub agent is
 /// synthesized into one. Without this they would be browse-only.
 ///
-/// The write goes through [`install_from_dir`] rather than straight to the skills
-/// dir so a content-served skill lands in exactly the same shape, and under the
-/// same replace-existing and `set_active` rules, as a cloned one.
+/// The write goes through [`install_from_dir_named`] rather than straight to the
+/// skills dir so a content-served skill lands in exactly the same shape, and
+/// under the same replace-existing and `set_active` rules, as a cloned one.
 pub async fn install_skill_md_text(name: &str, markdown: &str) -> Result<InstallResult> {
     let safe = sanitize_name(name);
     if safe.is_empty() {
@@ -949,12 +1019,12 @@ pub async fn install_skill_md_text(name: &str, markdown: &str) -> Result<Install
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("creating staging dir {}", dir.display()))?;
         std::fs::write(dir.join("SKILL.md"), markdown).context("writing staged SKILL.md")?;
-        // No name hint on purpose: the hint path exists to turn a `repo-<ref>`
-        // checkout dir into `repo` and so strips everything after the last `-`,
-        // which would truncate a legitimately hyphenated skill
-        // (`contract-opportunity-search` -> `contract-opportunity`). The staging
-        // dir is already named `safe`, so `skill_name_for` derives the right name.
-        install_from_dir(&dir, None)
+        // The caller's slug is the exact install name. Without it the staged
+        // SKILL.md's front-matter `name` would pick the destination, letting a
+        // fetched document replace a different installed skill. No `repo-<ref>`
+        // hint either: that path strips everything after the last `-`, which
+        // would truncate a hyphenated slug (`contract-opportunity-search`).
+        install_from_dir_named(&dir, None, Some(&safe))
     })();
     // Best-effort cleanup of the staging tree regardless of outcome.
     let _ = std::fs::remove_dir_all(&workdir);
@@ -1088,9 +1158,28 @@ mod tests {
             skill_name_from_md_url("https://example.com/a/b/my-skill/SKILL.md?x=1"),
             "my-skill"
         );
+        // A host-root SKILL.md is named after the host, not a shared `skill`.
         assert_eq!(
             skill_name_from_md_url("https://example.com/SKILL.md"),
-            "skill"
+            "example.com"
+        );
+        // A repository-root SKILL.md is named after the repo, never its git ref.
+        for url in [
+            "https://raw.githubusercontent.com/acme/pdf-skill/main/SKILL.md",
+            "https://raw.githubusercontent.com/acme/pdf-skill/HEAD/SKILL.md",
+            "https://raw.githubusercontent.com/acme/pdf-skill/refs/heads/main/SKILL.md",
+            "https://github.com/acme/pdf-skill/blob/main/SKILL.md",
+            "https://github.com/acme/pdf-skill/raw/v1.2/SKILL.md",
+            "https://gitlab.com/group/sub/pdf-skill/-/raw/main/SKILL.md",
+        ] {
+            assert_eq!(skill_name_from_md_url(url), "pdf-skill", "{url}");
+        }
+        // A skill folder inside a repo still names the skill.
+        assert_eq!(
+            skill_name_from_md_url(
+                "https://raw.githubusercontent.com/acme/skills/main/skills/commit-helper/SKILL.md"
+            ),
+            "commit-helper"
         );
     }
 
@@ -1127,6 +1216,103 @@ mod tests {
         assert!(skills_home.join("unlazy/SKILL.md").is_file());
         assert!(!skills_home.join("unlazy-HEAD").exists());
         let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&skills_home);
+    }
+
+    #[test]
+    fn installing_a_skill_from_its_own_install_dir_keeps_it() {
+        let _env = ryu_skills::SKILLS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let skills_home = std::env::temp_dir().join(format!("ryu-self-install-{}", uniq()));
+        let installed = skills_home.join("pdf");
+        std::fs::create_dir_all(installed.join("scripts")).unwrap();
+        std::fs::write(
+            installed.join("SKILL.md"),
+            "---\nname: pdf\n---\nRead PDFs.",
+        )
+        .unwrap();
+        std::fs::write(installed.join("scripts").join("extract.py"), "print()").unwrap();
+        let active_file = skills_home.join("active.json");
+        std::env::set_var("RYU_SKILLS_DIR", &skills_home);
+        std::env::set_var("RYU_SKILLS_ACTIVE_FILE", &active_file);
+
+        let result = install_from_dir(&installed, None);
+
+        std::env::remove_var("RYU_SKILLS_DIR");
+        std::env::remove_var("RYU_SKILLS_ACTIVE_FILE");
+        assert!(result.is_err(), "self-install must be refused");
+        assert!(installed.join("SKILL.md").is_file());
+        assert!(installed.join("scripts").join("extract.py").is_file());
+        let _ = std::fs::remove_dir_all(&skills_home);
+    }
+
+    #[test]
+    fn scoped_subdir_installs_use_the_skill_folder_name() {
+        let _env = ryu_skills::SKILLS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A fetched tarball: `skills-HEAD/skills/{pdf,web-artifacts}/SKILL.md`.
+        let extract = std::env::temp_dir().join(format!("ryu-scoped-src-{}", uniq()));
+        let repo = extract.join("skills-HEAD");
+        for (leaf, body) in [
+            ("pdf", "---\nname: PDF Tools\n---\nRead PDFs."),
+            (
+                "web-artifacts",
+                "---\ndescription: no name\n---\nBuild pages.",
+            ),
+        ] {
+            let dir = repo.join("skills").join(leaf);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("SKILL.md"), body).unwrap();
+        }
+        let skills_home = std::env::temp_dir().join(format!("ryu-scoped-dest-{}", uniq()));
+        std::env::set_var("RYU_SKILLS_DIR", &skills_home);
+        std::env::set_var("RYU_SKILLS_ACTIVE_FILE", skills_home.join("active.json"));
+
+        let pdf = install_fetched(&extract, Some("skills/pdf"), None, None);
+        let web = install_fetched(&extract, Some("skills/web-artifacts"), None, None);
+
+        std::env::remove_var("RYU_SKILLS_DIR");
+        std::env::remove_var("RYU_SKILLS_ACTIVE_FILE");
+        assert_eq!(pdf.unwrap().slug, "pdf");
+        assert_eq!(web.unwrap().slug, "web-artifacts");
+        assert!(skills_home.join("pdf/SKILL.md").is_file(), "sibling kept");
+        assert!(skills_home.join("web-artifacts/SKILL.md").is_file());
+        assert!(!skills_home.join("skills").exists());
+        let _ = std::fs::remove_dir_all(&extract);
+        let _ = std::fs::remove_dir_all(&skills_home);
+    }
+
+    #[test]
+    fn content_served_skill_installs_under_the_caller_slug() {
+        let _env = ryu_skills::SKILLS_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let skills_home = std::env::temp_dir().join(format!("ryu-md-text-dest-{}", uniq()));
+        let existing = skills_home.join("commit");
+        std::fs::create_dir_all(&existing).unwrap();
+        std::fs::write(existing.join("SKILL.md"), "---\nname: commit\n---\nMine.").unwrap();
+        std::env::set_var("RYU_SKILLS_DIR", &skills_home);
+        std::env::set_var("RYU_SKILLS_ACTIVE_FILE", skills_home.join("active.json"));
+
+        let result = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(install_skill_md_text(
+                "cool-helper",
+                "---\nname: commit\n---\nRemote body.",
+            ));
+
+        std::env::remove_var("RYU_SKILLS_DIR");
+        std::env::remove_var("RYU_SKILLS_ACTIVE_FILE");
+        assert_eq!(result.unwrap().slug, "cool-helper");
+        assert!(skills_home.join("cool-helper/SKILL.md").is_file());
+        assert_eq!(
+            std::fs::read_to_string(existing.join("SKILL.md")).unwrap(),
+            "---\nname: commit\n---\nMine.",
+            "front matter must not pick another installed skill"
+        );
         let _ = std::fs::remove_dir_all(&skills_home);
     }
 

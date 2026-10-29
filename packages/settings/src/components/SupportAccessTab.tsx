@@ -1,15 +1,22 @@
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Label } from "@ryu/ui/components/label";
-import { Separator } from "@ryu/ui/components/separator";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Item, ItemActions, ItemTitle } from "@ryu/ui/components/item.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { LifeBuoy, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { settingsApi } from "../utils/api-client.ts";
+import {
+	SETTINGS_SECTION_HEADER_CLASS,
+	SettingsCard,
+	SettingsGroup,
+	SettingsSection,
+} from "./shared/settings-rows.tsx";
 
 // Least-privilege scopes the user can consent to. Labels are user-facing.
 const SCOPE_OPTIONS: { id: string; label: string; description: string }[] = [
@@ -73,7 +80,7 @@ export function SupportAccessTab() {
 			queryClient.invalidateQueries({ queryKey: ["support-access"] });
 			sileo.success({ title: "Support access granted" });
 		},
-		onError: (e: unknown) =>
+		onError: (e) =>
 			sileo.error({
 				title:
 					e instanceof Error ? e.message : "Failed to grant support access",
@@ -108,86 +115,105 @@ export function SupportAccessTab() {
 		);
 	};
 
+	const intro =
+		"Let Ryu support temporarily act on your account to help you. Off by default, scoped to what you choose, auto-expires within an hour, and revocable any time. Every support session is logged below.";
+
 	return (
 		<div className="space-y-6">
-			<div>
-				<h3 className="flex items-center gap-2 font-medium text-sm">
-					<LifeBuoy className="size-4" />
-					Support access
-				</h3>
-				<p className="mt-0.5 text-muted-foreground text-xs">
-					Let Ryu support temporarily act on your account to help you. Off by
-					default, scoped to what you choose, auto-expires within an hour, and
-					revocable any time. Every support session is logged below.
-				</p>
-			</div>
-
-			<Separator />
-
 			{isActive && grant ? (
-				<div className="space-y-3 rounded-lg border border-warning/40 bg-warning/5 p-4">
-					<div className="flex items-center gap-2">
-						<ShieldCheck className="size-4 text-status-warning" />
-						<p className="font-medium text-sm">Support access is active</p>
-						{grant.activeSession && (
-							<Badge className="text-xs" variant="secondary">
-								Session in progress
-							</Badge>
-						)}
-					</div>
-					<p className="text-muted-foreground text-xs">
-						Scopes: {grant.scopes.join(", ") || "none"}. Expires{" "}
-						{formatDistanceToNow(new Date(grant.expiresAt), {
-							addSuffix: true,
-						})}
-						.
-					</p>
-					<Button
-						disabled={revokeMutation.isPending}
-						onClick={() => revokeMutation.mutate()}
-						size="sm"
-						variant="destructive"
-					>
-						Revoke access now
-					</Button>
-				</div>
+				<SettingsSection caption={intro}>
+					<SettingsGroup>
+						<Item purpose="settings-row" size="sm">
+							<div className="flex w-full items-center justify-between gap-3">
+								<div className="flex min-w-0 flex-1 items-center gap-2">
+									<ShieldCheck className="size-4 shrink-0 text-status-warning" />
+									<ItemTitle typography="settings-label">
+										Support access is active
+									</ItemTitle>
+									{grant.activeSession && (
+										<Badge variant="secondary">Session in progress</Badge>
+									)}
+								</div>
+								<ItemActions className="shrink-0">
+									<Button
+										disabled={revokeMutation.isPending}
+										onClick={() => revokeMutation.mutate()}
+										size="sm"
+										variant="destructive"
+									>
+										Revoke access now
+									</Button>
+								</ItemActions>
+							</div>
+							<p className="text-muted-foreground text-xs leading-snug">
+								Scopes: {grant.scopes.join(", ") || "none"}. Expires{" "}
+								{formatDistanceToNow(new Date(grant.expiresAt), {
+									addSuffix: true,
+								})}
+								.
+							</p>
+						</Item>
+					</SettingsGroup>
+				</SettingsSection>
 			) : (
-				<div className="space-y-4">
-					<fieldset className="space-y-2">
-						<legend className="font-medium text-sm">
-							Choose what support can access
-						</legend>
-						{SCOPE_OPTIONS.map((scope) => (
-							<label
-								className="flex cursor-pointer items-start gap-3 rounded-md border p-3"
-								htmlFor={`scope-${scope.id}`}
-								key={scope.id}
+				<>
+					<SettingsSection
+						as="fieldset"
+						caption={intro}
+						className="min-w-0"
+						headerAction={
+							<Button
+								disabled={
+									grantMutation.isPending || selectedScopes.length === 0
+								}
+								onClick={() => grantMutation.mutate()}
+								size="sm"
 							>
-								<Checkbox
-									checked={selectedScopes.includes(scope.id)}
-									id={`scope-${scope.id}`}
-									onCheckedChange={(checked) =>
-										toggleScope(scope.id, checked === true)
-									}
-								/>
-								<span className="min-w-0">
-									<span className="block font-medium text-sm">
-										{scope.label}
-									</span>
-									<span className="block text-muted-foreground text-xs">
-										{scope.description}
-									</span>
-								</span>
-							</label>
-						))}
-					</fieldset>
+								Grant support access
+							</Button>
+						}
+						title="Choose what support can access"
+						titleId="support-access-scopes"
+					>
+						<SettingsGroup>
+							{SCOPE_OPTIONS.map((scope) => (
+								<Item
+									className="cursor-pointer"
+									key={scope.id}
+									purpose="settings-row"
+									render={<label htmlFor={`scope-${scope.id}`} />}
+									size="sm"
+								>
+									<div className="flex w-full items-center justify-between gap-3">
+										<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+											<ItemTitle typography="settings-label">
+												{scope.label}
+											</ItemTitle>
+											<span className="text-muted-foreground text-xs leading-snug">
+												{scope.description}
+											</span>
+										</div>
+										<Checkbox
+											checked={selectedScopes.includes(scope.id)}
+											id={`scope-${scope.id}`}
+											onCheckedChange={(checked) =>
+												toggleScope(scope.id, checked === true)
+											}
+										/>
+									</div>
+								</Item>
+							))}
+						</SettingsGroup>
+					</SettingsSection>
 
 					<div className="space-y-1.5">
-						<Label className="text-xs" htmlFor="support-note">
+						<Label
+							className={SETTINGS_SECTION_HEADER_CLASS}
+							htmlFor="support-note"
+						>
 							Note for support (optional)
 						</Label>
-						<textarea
-							className="min-h-16 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+						<Textarea
 							id="support-note"
 							maxLength={500}
 							onChange={(e) => setNote(e.target.value)}
@@ -195,51 +221,46 @@ export function SupportAccessTab() {
 							value={note}
 						/>
 					</div>
-
-					<Button
-						disabled={grantMutation.isPending || selectedScopes.length === 0}
-						onClick={() => grantMutation.mutate()}
-					>
-						Grant support access
-					</Button>
-				</div>
+				</>
 			)}
 
-			<Separator />
-
-			<div className="space-y-2">
-				<h4 className="font-medium text-sm">Support session log</h4>
+			<SettingsSection
+				as="section"
+				title="Support session log"
+				titleId="support-session-log"
+			>
 				{audit.length === 0 ? (
-					<p className="py-4 text-center text-muted-foreground text-sm">
-						No support sessions yet.
-					</p>
+					<SettingsCard>
+						<p className="text-muted-foreground text-sm">
+							No support sessions yet.
+						</p>
+					</SettingsCard>
 				) : (
-					<div className="space-y-2">
+					<SettingsGroup>
 						{audit.map((entry) => (
-							<div className="rounded-lg border p-3" key={entry.id}>
-								<div className="flex items-center justify-between gap-2">
-									<p className="font-medium text-sm">{entry.actorEmail}</p>
-									<Badge
-										className="text-xs"
-										variant={entry.endedAt ? "outline" : "secondary"}
-									>
+							<Item key={entry.id} purpose="settings-row" size="sm">
+								<div className="flex w-full items-center justify-between gap-3">
+									<ItemTitle typography="settings-label">
+										{entry.actorEmail}
+									</ItemTitle>
+									<Badge variant={entry.endedAt ? "outline" : "secondary"}>
 										{entry.endedAt ? (entry.endedReason ?? "ended") : "active"}
 									</Badge>
 								</div>
-								<p className="mt-1 text-muted-foreground text-xs">
-									{entry.reason}
-								</p>
-								<p className="mt-1 text-muted-foreground text-xs">
-									Scopes: {entry.scopes.join(", ") || "none"} ·{" "}
-									{formatDistanceToNow(new Date(entry.startedAt), {
-										addSuffix: true,
-									})}
-								</p>
-							</div>
+								<div className="space-y-0.5 text-muted-foreground text-xs leading-snug">
+									<p>{entry.reason}</p>
+									<p>
+										Scopes: {entry.scopes.join(", ") || "none"} ·{" "}
+										{formatDistanceToNow(new Date(entry.startedAt), {
+											addSuffix: true,
+										})}
+									</p>
+								</div>
+							</Item>
 						))}
-					</div>
+					</SettingsGroup>
 				)}
-			</div>
+			</SettingsSection>
 		</div>
 	);
 }

@@ -1,7 +1,17 @@
 import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Alert, AlertDescription, AlertTitle } from "@ryu/ui/components/alert";
-import { Button } from "@ryu/ui/components/button";
+import {
+	type TwoFactorActions,
+	type TwoFactorStep,
+	totpSetupKey,
+	useTwoFactorDialog,
+} from "@ryu/settings/hooks/useTwoFactorDialog";
+import {
+	Alert,
+	AlertDescription,
+	AlertTitle,
+} from "@ryu/ui/components/alert.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -10,21 +20,29 @@ import {
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { MorphIconSwap } from "@ryu/ui/components/morph-icon";
-import { OTPInput, type OTPStatus } from "@ryu/ui/components/motion/otp-input";
-import { ExpandableQRCode } from "@ryu/ui/components/qr-code";
-import { Separator } from "@ryu/ui/components/separator";
-import { TextSwap } from "@ryu/ui/components/text-swap";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { MorphIconSwap } from "@ryu/ui/components/morph-icon.tsx";
+import { OTPInput } from "@ryu/ui/components/motion/otp-input.tsx";
+import { ExpandableQRCode } from "@ryu/ui/components/qr-code.tsx";
+import { Separator } from "@ryu/ui/components/separator.tsx";
+import { TextSwap } from "@ryu/ui/components/text-swap.tsx";
 import { SPRING_PANEL } from "@ryu/ui/lib/ease.ts";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useState } from "react";
 import { sileo } from "sileo";
-import { authClient } from "@/lib/auth-client.ts";
+import { z } from "zod";
+import { authClient, storeSessionToken } from "@/lib/auth-client.ts";
 
-type Step = "password" | "qr" | "verify" | "backup" | "confirm" | "manage";
+const STEP_DIALOG_LABEL = {
+	password: "Enable Two-Factor Authentication",
+	qr: "Scan QR Code",
+	verify: "Verify Code",
+	backup: "Save Backup Codes",
+	confirm: "Confirm Your Backup Codes",
+	manage: "Manage Two-Factor Authentication",
+} satisfies Record<TwoFactorStep, string>;
 
 // Wallet-app morph: the panel springs to its new height as the active step
 // swaps, per beui.dev/components/motion/morphing-modal. This used to redeclare
@@ -33,14 +51,68 @@ type Step = "password" | "qr" | "verify" | "backup" | "confirm" | "manage";
 // shared token, which is also critically damped rather than overshoot-free by
 // accident.
 
-// Pulls the base32 secret out of the otpauth:// URI for manual entry.
-const TOTP_SECRET_RE = /secret=([^&]+)/;
+// Better Auth replaces the session when two-factor is turned on or off and
+// returns the replacement bearer in `set-auth-token`. The desktop signs every
+// request with its stored bearer, so it adopts the replacement before the
+// session is re-read; otherwise the revoked token signs the account out.
+const adoptRotatedSession = {
+	onSuccess: async (context: { response: Response }) => {
+		const rotated = context.response.headers.get("set-auth-token");
+		if (rotated) {
+			await storeSessionToken(rotated);
+		}
+	},
+};
 
-// Backup codes are shown as "XXXXX-XXXXX" but accepted case-insensitively and
-// with or without the hyphen, so both what is displayed and what the user types
-// are compared in a normalized form.
-const normalizeBackupCode = (code: string) =>
-	code.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+// The dialog's Better Auth calls; the shared flow toasts what they throw.
+const twoFactorActions: TwoFactorActions = {
+	enable: async (password) => {
+		const result = await authClient.twoFactor.enable({ password });
+		if (result.error) {
+			throw new Error(result.error.message);
+		}
+		if (result.data?.method !== "totp") {
+			throw new Error("Two-factor setup did not return a TOTP secret.");
+		}
+		// Enrollment mints the backup codes; verification only confirms the
+		// authenticator, so these are the codes shown after a valid code.
+		return {
+			backupCodes: result.data.backupCodes ?? [],
+			totpUri: result.data.totpURI,
+		};
+	},
+	verify: async (code) => {
+		const result = await authClient.twoFactor.verifyTotp({
+			code,
+			fetchOptions: adoptRotatedSession,
+		});
+		if (result.error) {
+			throw new Error(result.error.message);
+		}
+		return z
+			.object({ backupCodes: z.array(z.string()).optional() })
+			.nullish()
+			.parse(result.data)?.backupCodes;
+	},
+	disable: async (password) => {
+		const result = await authClient.twoFactor.disable({
+			password,
+			fetchOptions: adoptRotatedSession,
+		});
+		if (result.error) {
+			throw new Error(result.error.message);
+		}
+	},
+	regenerateBackupCodes: async (password) => {
+		const result = await authClient.twoFactor.generateBackupCodes({
+			password,
+		});
+		if (result.error) {
+			throw new Error(result.error.message);
+		}
+		return result.data?.backupCodes ?? [];
+	},
+};
 
 interface TwoFactorDialogProps {
 	isEnabled: boolean;
@@ -51,165 +123,31 @@ export function TwoFactorDialog({
 	isEnabled,
 	onStatusChange,
 }: TwoFactorDialogProps) {
-	const [open, setOpen] = useState(false);
+	const flow = useTwoFactorDialog({
+		actions: twoFactorActions,
+		isEnabled,
+		onStatusChange,
+	});
 	const reduce = useReducedMotion();
-	const [step, setStep] = useState<Step>(isEnabled ? "manage" : "password");
-	const [password, setPassword] = useState("");
-	const [totpUri, setTotpUri] = useState("");
-	const [backupCodes, setBackupCodes] = useState<string[]>([]);
-	const [otp, setOtp] = useState("");
-	const [otpStatus, setOtpStatus] = useState<OTPStatus>("idle");
-	const [confirmCode, setConfirmCode] = useState("");
-	const [confirmStatus, setConfirmStatus] = useState<OTPStatus>("idle");
-	// Set once a confirm attempt failed, so the backup view can show a "these
-	// codes are critical" banner the second time the codes are shown.
-	const [saveReminder, setSaveReminder] = useState(false);
-	const [isBusy, setIsBusy] = useState(false);
 	const [copiedAll, setCopiedAll] = useState(false);
-	const [showManualSetup, setShowManualSetup] = useState(false);
 
-	const handleOpenChange = (next: boolean) => {
-		setOpen(next);
-		if (!next) {
-			setStep(isEnabled ? "manage" : "password");
-			setPassword("");
-			setTotpUri("");
-			setBackupCodes([]);
-			setOtp("");
-			setOtpStatus("idle");
-			setConfirmCode("");
-			setConfirmStatus("idle");
-			setSaveReminder(false);
-			setShowManualSetup(false);
-		}
-	};
-
-	const handleEnable = async (e: React.FormEvent) => {
-		e.preventDefault();
-		setIsBusy(true);
+	const copyAllBackupCodes = async () => {
 		try {
-			const result = await authClient.twoFactor.enable({ password });
-			if (result.error) {
-				throw new Error(result.error.message);
-			}
-			if (result.data?.method !== "totp") {
-				throw new Error("Two-factor setup did not return a TOTP secret.");
-			}
-			setTotpUri(result.data.totpURI);
-			setStep("qr");
-		} catch (error) {
-			sileo.error({
-				title: error instanceof Error ? error.message : "Failed to enable 2FA",
-			});
-		} finally {
-			setIsBusy(false);
+			await navigator.clipboard.writeText(flow.backupCodes.join("\n"));
+			setCopiedAll(true);
+			setTimeout(() => setCopiedAll(false), 2000);
+		} catch {
+			sileo.error({ title: "Couldn't copy backup codes" });
 		}
 	};
 
-	const handleVerify = async (e: React.FormEvent) => {
-		e.preventDefault();
-		setIsBusy(true);
+	const copyAuthenticatorSetupKey = async () => {
 		try {
-			const result = await authClient.twoFactor.verifyTotp({ code: otp });
-			if (result.error) {
-				throw new Error(result.error.message);
-			}
-			const codes =
-				(result.data as { backupCodes?: string[] })?.backupCodes ?? [];
-			setBackupCodes(codes);
-			setConfirmCode("");
-			setConfirmStatus("idle");
-			setSaveReminder(false);
-			setStep("backup");
-			onStatusChange();
-		} catch (error) {
-			setOtpStatus("error");
-			sileo.error({
-				title: error instanceof Error ? error.message : "Invalid code",
-			});
-		} finally {
-			setIsBusy(false);
+			await navigator.clipboard.writeText(totpSetupKey(flow.totpUri));
+			sileo.success({ title: "Setup key copied" });
+		} catch {
+			sileo.error({ title: "Couldn't copy setup key" });
 		}
-	};
-
-	const handleDisable = async () => {
-		setIsBusy(true);
-		try {
-			const result = await authClient.twoFactor.disable({ password });
-			if (result.error) {
-				throw new Error(result.error.message);
-			}
-			sileo.success({ title: "Two-factor authentication disabled" });
-			onStatusChange();
-			handleOpenChange(false);
-		} catch (error) {
-			sileo.error({
-				title: error instanceof Error ? error.message : "Failed to disable 2FA",
-			});
-		} finally {
-			setIsBusy(false);
-		}
-	};
-
-	const handleRegenerateBackupCodes = async () => {
-		setIsBusy(true);
-		try {
-			const result = await authClient.twoFactor.generateBackupCodes({
-				password,
-			});
-			if (result.error) {
-				throw new Error(result.error.message);
-			}
-			const codes =
-				(result.data as { backupCodes?: string[] })?.backupCodes ?? [];
-			setBackupCodes(codes);
-			setConfirmCode("");
-			setConfirmStatus("idle");
-			setSaveReminder(false);
-			setStep("backup");
-		} catch (error) {
-			sileo.error({
-				title:
-					error instanceof Error
-						? error.message
-						: "Failed to regenerate backup codes",
-			});
-		} finally {
-			setIsBusy(false);
-		}
-	};
-
-	// Prove the user actually stored the codes before the dialog closes. Every
-	// entered code must match one of the freshly generated ones (hyphens and
-	// casing ignored). A miss bounces back to the codes with a save reminder.
-	const handleConfirmBackup = (e: React.FormEvent) => {
-		e.preventDefault();
-		const entered = normalizeBackupCode(confirmCode);
-		if (!entered) {
-			setConfirmStatus("error");
-			return;
-		}
-		const saved = new Set(backupCodes.map(normalizeBackupCode));
-		if (saved.has(entered)) {
-			sileo.success({ title: "Backup codes confirmed" });
-			handleOpenChange(false);
-			return;
-		}
-		setConfirmStatus("error");
-		setConfirmCode("");
-		setSaveReminder(true);
-		setStep("backup");
-		sileo.error({
-			title: "That code didn't match",
-			description:
-				"Save these backup codes somewhere safe — without them you can be locked out of your account if you lose your authenticator app.",
-		});
-	};
-
-	const copyAllBackupCodes = () => {
-		navigator.clipboard.writeText(backupCodes.join("\n"));
-		setCopiedAll(true);
-		setTimeout(() => setCopiedAll(false), 2000);
 	};
 
 	// Precomputed once per render so the JSX below stays declarative and the
@@ -233,12 +171,15 @@ export function TwoFactorDialog({
 			};
 
 	return (
-		<Dialog onOpenChange={handleOpenChange} open={open}>
+		<Dialog onOpenChange={flow.handleOpenChange} open={flow.open}>
 			<DialogTrigger render={<Button size="sm" variant="ghost" />}>
 				{isEnabled ? "Manage 2FA" : "Enable 2FA"}
 			</DialogTrigger>
 
-			<DialogContent className="overflow-hidden sm:max-w-[420px]">
+			<DialogContent
+				aria-label={STEP_DIALOG_LABEL[flow.step]}
+				className="overflow-hidden sm:max-w-[420px]"
+			>
 				<motion.div
 					className="grid"
 					layout={anim.layout}
@@ -252,10 +193,10 @@ export function TwoFactorDialog({
 							className="grid gap-4"
 							exit={anim.fade.exit}
 							initial={anim.fade.initial}
-							key={step}
+							key={flow.step}
 							transition={anim.view}
 						>
-							{step === "password" && (
+							{flow.step === "password" && (
 								<>
 									<DialogHeader>
 										<DialogTitle>Enable Two-Factor Authentication</DialogTitle>
@@ -263,35 +204,38 @@ export function TwoFactorDialog({
 											Enter your password to begin setting up 2FA.
 										</DialogDescription>
 									</DialogHeader>
-									<form className="space-y-4" onSubmit={handleEnable}>
+									<form className="space-y-4" onSubmit={flow.handleEnable}>
 										<div className="space-y-2">
 											<Label htmlFor="2fa-password">Password</Label>
 											<Input
 												autoComplete="current-password"
 												id="2fa-password"
-												onChange={(e) => setPassword(e.target.value)}
+												onChange={(e) => flow.setPassword(e.target.value)}
 												required
 												type="password"
-												value={password}
+												value={flow.password}
 											/>
 										</div>
 										<DialogFooter>
 											<Button
-												onClick={() => handleOpenChange(false)}
+												onClick={() => flow.handleOpenChange(false)}
 												type="button"
 												variant="ghost"
 											>
 												Cancel
 											</Button>
-											<Button disabled={isBusy || !password} type="submit">
-												{isBusy ? "Verifying…" : "Continue"}
+											<Button
+												disabled={flow.isBusy || !flow.password}
+												type="submit"
+											>
+												{flow.isBusy ? "Verifying…" : "Continue"}
 											</Button>
 										</DialogFooter>
 									</form>
 								</>
 							)}
 
-							{step === "qr" && (
+							{flow.step === "qr" && (
 								<>
 									<DialogHeader>
 										<DialogTitle>Scan QR Code</DialogTitle>
@@ -301,24 +245,25 @@ export function TwoFactorDialog({
 										</DialogDescription>
 									</DialogHeader>
 									<div className="flex flex-col items-center gap-4 py-2">
-										{totpUri && (
-											<ExpandableQRCode
-												containerClassName="border p-4"
-												size={180}
-												value={totpUri}
-											/>
+										{flow.totpUri && (
+											<div className="rounded-lg border p-1">
+												<ExpandableQRCode size={180} value={flow.totpUri} />
+											</div>
 										)}
 										<div className="w-full">
 											<Button
-												className="h-auto px-0 text-sm"
-												onClick={() => setShowManualSetup((shown) => !shown)}
+												className="h-auto"
+												onClick={() =>
+													flow.setShowManualSetup((shown) => !shown)
+												}
+												spacing="body-preview"
 												variant="link"
 											>
-												{showManualSetup
+												{flow.showManualSetup
 													? "Hide manual setup"
 													: "Can’t scan? Enter setup key manually"}
 											</Button>
-											{showManualSetup && (
+											{flow.showManualSetup && (
 												<div className="space-y-3 rounded-md border bg-muted/40 p-3">
 													<p className="text-muted-foreground text-xs">
 														In your authenticator app, choose{" "}
@@ -327,18 +272,14 @@ export function TwoFactorDialog({
 													<div className="flex items-center gap-2">
 														<Input
 															aria-label="Authenticator setup key"
-															className="bg-background font-mono text-xs"
 															readOnly
-															value={totpUri.match(TOTP_SECRET_RE)?.[1] ?? ""}
+															tone="background"
+															value={totpSetupKey(flow.totpUri)}
+															variant="code-caption"
 														/>
 														<Button
 															aria-label="Copy authenticator setup key"
-															onClick={() => {
-																navigator.clipboard.writeText(
-																	totpUri.match(TOTP_SECRET_RE)?.[1] ?? ""
-																);
-																sileo.success({ title: "Setup key copied" });
-															}}
+															onClick={copyAuthenticatorSetupKey}
 															size="icon"
 															variant="ghost"
 														>
@@ -353,7 +294,7 @@ export function TwoFactorDialog({
 															Show setup URL
 														</summary>
 														<code className="mt-2 block break-all rounded bg-background p-2">
-															{totpUri}
+															{flow.totpUri}
 														</code>
 													</details>
 												</div>
@@ -361,17 +302,20 @@ export function TwoFactorDialog({
 										</div>
 									</div>
 									<DialogFooter>
-										<Button onClick={() => setStep("password")} variant="ghost">
+										<Button
+											onClick={() => flow.setStep("password")}
+											variant="ghost"
+										>
 											Back
 										</Button>
-										<Button onClick={() => setStep("verify")}>
+										<Button onClick={() => flow.setStep("verify")}>
 											I've scanned it
 										</Button>
 									</DialogFooter>
 								</>
 							)}
 
-							{step === "verify" && (
+							{flow.step === "verify" && (
 								<>
 									<DialogHeader>
 										<DialogTitle>Verify Code</DialogTitle>
@@ -380,43 +324,38 @@ export function TwoFactorDialog({
 											confirm setup.
 										</DialogDescription>
 									</DialogHeader>
-									<form className="space-y-4" onSubmit={handleVerify}>
+									<form className="space-y-4" onSubmit={flow.handleVerify}>
 										<div className="flex justify-center py-2">
 											<OTPInput
 												aria-label="Authenticator app code"
 												autoFocus
-												disabled={isBusy}
+												disabled={flow.isBusy}
 												errorMessage="Invalid code. Try again."
-												onChange={(next) => {
-													setOtp(next);
-													if (otpStatus !== "idle") {
-														setOtpStatus("idle");
-													}
-												}}
-												status={otpStatus}
-												value={otp}
+												onChange={flow.changeOtp}
+												status={flow.otpStatus}
+												value={flow.otp}
 											/>
 										</div>
 										<DialogFooter>
 											<Button
-												onClick={() => setStep("qr")}
+												onClick={() => flow.setStep("qr")}
 												type="button"
 												variant="ghost"
 											>
 												Back
 											</Button>
 											<Button
-												disabled={isBusy || otp.length !== 6}
+												disabled={flow.isBusy || flow.otp.length !== 6}
 												type="submit"
 											>
-												{isBusy ? "Verifying…" : "Verify"}
+												{flow.isBusy ? "Verifying…" : "Verify"}
 											</Button>
 										</DialogFooter>
 									</form>
 								</>
 							)}
 
-							{step === "backup" && (
+							{flow.step === "backup" && (
 								<>
 									<DialogHeader>
 										<DialogTitle>Save Backup Codes</DialogTitle>
@@ -426,7 +365,7 @@ export function TwoFactorDialog({
 										</DialogDescription>
 									</DialogHeader>
 									<div className="space-y-3">
-										{saveReminder && (
+										{flow.saveReminder && (
 											<Alert variant="warning">
 												<AlertTitle>These codes are critical</AlertTitle>
 												<AlertDescription>
@@ -437,7 +376,7 @@ export function TwoFactorDialog({
 											</Alert>
 										)}
 										<div className="grid grid-cols-2 gap-1.5 rounded-lg bg-muted/50 p-4">
-											{backupCodes.map((code) => (
+											{flow.backupCodes.map((code) => (
 												<code
 													className="text-center font-mono text-sm tracking-wider"
 													key={code}
@@ -463,20 +402,14 @@ export function TwoFactorDialog({
 										</Button>
 									</div>
 									<DialogFooter>
-										<Button
-											onClick={() => {
-												setConfirmCode("");
-												setConfirmStatus("idle");
-												setStep("confirm");
-											}}
-										>
+										<Button onClick={flow.startConfirm}>
 											I&apos;ve saved them
 										</Button>
 									</DialogFooter>
 								</>
 							)}
 
-							{step === "confirm" && (
+							{flow.step === "confirm" && (
 								<>
 									<DialogHeader>
 										<DialogTitle>Confirm Your Backup Codes</DialogTitle>
@@ -486,27 +419,25 @@ export function TwoFactorDialog({
 											it&apos;s that important.
 										</DialogDescription>
 									</DialogHeader>
-									<form className="space-y-4" onSubmit={handleConfirmBackup}>
+									<form
+										className="space-y-4"
+										onSubmit={flow.handleConfirmBackup}
+									>
 										<div className="space-y-2">
 											<Label htmlFor="2fa-confirm-code">Backup code</Label>
 											<Input
-												aria-invalid={confirmStatus === "error"}
+												aria-invalid={flow.confirmStatus === "error"}
 												autoComplete="off"
 												autoFocus
-												className="font-mono"
-												disabled={isBusy}
+												disabled={flow.isBusy}
 												id="2fa-confirm-code"
-												onChange={(e) => {
-													setConfirmCode(e.target.value);
-													if (confirmStatus !== "idle") {
-														setConfirmStatus("idle");
-													}
-												}}
+												onChange={(e) => flow.changeConfirmCode(e.target.value)}
 												placeholder="XXXXX-XXXXX"
 												spellCheck={false}
-												value={confirmCode}
+												value={flow.confirmCode}
+												variant="code"
 											/>
-											{confirmStatus === "error" && (
+											{flow.confirmStatus === "error" && (
 												<p className="text-sm text-status-destructive">
 													That code doesn&apos;t match. Save the codes above —
 													without them you can be locked out of your account.
@@ -515,14 +446,14 @@ export function TwoFactorDialog({
 										</div>
 										<DialogFooter>
 											<Button
-												onClick={() => setStep("backup")}
+												onClick={() => flow.setStep("backup")}
 												type="button"
 												variant="ghost"
 											>
 												Back
 											</Button>
 											<Button
-												disabled={isBusy || !confirmCode.trim()}
+												disabled={flow.isBusy || !flow.confirmCode.trim()}
 												type="submit"
 											>
 												Confirm
@@ -532,7 +463,7 @@ export function TwoFactorDialog({
 								</>
 							)}
 
-							{step === "manage" && (
+							{flow.step === "manage" && (
 								<>
 									<DialogHeader>
 										<DialogTitle>Manage Two-Factor Authentication</DialogTitle>
@@ -548,33 +479,33 @@ export function TwoFactorDialog({
 											<Input
 												autoComplete="current-password"
 												id="2fa-manage-password"
-												onChange={(e) => setPassword(e.target.value)}
+												onChange={(e) => flow.setPassword(e.target.value)}
 												placeholder="Enter your password"
 												type="password"
-												value={password}
+												value={flow.password}
 											/>
 										</div>
 										<Separator />
 										<div className="flex flex-col gap-2">
 											<Button
-												disabled={isBusy || !password}
-												onClick={handleRegenerateBackupCodes}
+												disabled={flow.isBusy || !flow.password}
+												onClick={flow.handleRegenerateBackupCodes}
 												variant="ghost"
 											>
 												Regenerate Backup Codes
 											</Button>
 											<Button
-												disabled={isBusy || !password}
-												onClick={handleDisable}
+												disabled={flow.isBusy || !flow.password}
+												onClick={flow.handleDisable}
 												variant="destructive"
 											>
-												{isBusy ? "Disabling…" : "Disable 2FA"}
+												{flow.isBusy ? "Disabling…" : "Disable 2FA"}
 											</Button>
 										</div>
 									</div>
 									<DialogFooter>
 										<Button
-											onClick={() => handleOpenChange(false)}
+											onClick={() => flow.handleOpenChange(false)}
 											variant="ghost"
 										>
 											Close

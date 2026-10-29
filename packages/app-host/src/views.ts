@@ -13,6 +13,66 @@
 // in `ryu-kernel-contracts` (`Contributes::views` / `ViewContribution`); the `view` +
 // `spec` there are opaque, so a new kind added here needs no Core change.
 
+import { z } from "zod";
+
+/** JSON source rows keep optional fields absent when the wire value is unusable. */
+export const viewSourceRowSchema = z.record(
+	z.string(),
+	z.json().optional().catch(undefined)
+);
+export type ViewSourceRow = z.infer<typeof viewSourceRowSchema>;
+/** Body substitution preserves absent values until the host serializes JSON. */
+export type ViewTemplateValue =
+	| string
+	| number
+	| boolean
+	| null
+	| undefined
+	| ViewTemplateValue[]
+	| { [key: string]: ViewTemplateValue };
+const templateValueSchema: z.ZodType<ViewTemplateValue> = z.lazy(() =>
+	z.union([
+		z.string(),
+		z.number(),
+		z.boolean(),
+		z.null(),
+		z.undefined(),
+		z.array(templateValueSchema),
+		z.record(z.string(), templateValueSchema),
+	])
+);
+const templateValueBoundarySchema = z
+	.unknown()
+	.transform((value) => templateValueSchema.parse(value));
+// Only the envelope shape is checked here. Rows are decoded after applying the
+// scan bound, so a large response cannot trigger an eager array clone.
+const responseArraySchema = z.custom<unknown[]>(Array.isArray);
+const responseObjectSchema = z.record(z.string(), z.unknown());
+const objectEnvelopeSchema = z.custom<z.infer<typeof responseObjectSchema>>(
+	(value) => z.object({}).safeParse(value).success
+);
+const responseEnvelopeSchema = z.union([
+	responseArraySchema,
+	objectEnvelopeSchema,
+]);
+const responseBoundarySchema = z.unknown().transform((value) => {
+	const parsed = responseEnvelopeSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
+});
+const rowBoundarySchema = z.unknown().transform((value) => {
+	const parsed = viewSourceRowSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
+});
+const rowTextSchema = z.union([
+	z.union([z.string(), z.number(), z.boolean()]).transform(String),
+	z
+		.union([
+			z.array(templateValueSchema),
+			z.record(z.string(), templateValueSchema),
+		])
+		.transform((value) => JSON.stringify(value)),
+]);
+const positiveNumberSchema = z.number().finite().positive();
 /** The seven standardized view kinds — the patterns repeated across every CRUD
  *  companion page today, exposed once and host-rendered. */
 export const VIEW_KINDS = [
@@ -24,6 +84,8 @@ export const VIEW_KINDS = [
 	"empty-state",
 	"stat-card-row",
 ] as const;
+
+const viewKindSchema = z.enum(VIEW_KINDS);
 
 export type ViewKind = (typeof VIEW_KINDS)[number];
 
@@ -57,15 +119,17 @@ export const VIEW_SOURCE_LIMITS = Object.freeze({
 	minRefreshMs: 1000,
 });
 
-export function normalizeViewRefreshMs(value: unknown): number | null {
-	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+const refreshBoundarySchema = z.unknown().transform((value): number | null => {
+	const parsed = positiveNumberSchema.safeParse(value);
+	if (!parsed.success) {
 		return null;
 	}
 	return Math.min(
-		Math.max(Math.floor(value), VIEW_SOURCE_LIMITS.minRefreshMs),
+		Math.max(Math.floor(parsed.data), VIEW_SOURCE_LIMITS.minRefreshMs),
 		VIEW_SOURCE_LIMITS.maxRefreshMs
 	);
-}
+});
+export const normalizeViewRefreshMs = refreshBoundarySchema.parse;
 
 /**
  * A **declarative HTTP handler** for a {@link ViewAction} — the CRUD tier that
@@ -133,9 +197,9 @@ export interface ViewAction {
  */
 export interface ViewActionContext {
 	/** The selected/owning list or table item. */
-	item?: Record<string, unknown>;
+	item?: ViewSourceRow;
 	/** Collected form values, keyed by field id. */
-	values?: Record<string, unknown>;
+	values?: ViewSourceRow;
 	/** The owning view contribution id (set by the page/panel wrapper). */
 	viewId?: string;
 }
@@ -342,7 +406,7 @@ export interface ViewSourceMap {
  *  (the `{{item.<key>}}` templating base for actions fired on it). */
 export interface SourceItem {
 	item: ViewItem;
-	raw: Record<string, unknown>;
+	raw: ViewSourceRow;
 }
 
 /**
@@ -402,18 +466,19 @@ export const LIBRARY_VIEW_REGISTRY: readonly LibraryViewDefinition[] = [
 	{ kind: "custom", renderer: "custom" },
 ] as const;
 
-export function isKnownLibraryViewKind(kind: unknown): kind is LibraryViewKind {
-	return (
-		typeof kind === "string" &&
-		(LIBRARY_VIEW_KINDS as readonly string[]).includes(kind)
-	);
+const libraryViewKindSchema = z.enum(LIBRARY_VIEW_KINDS);
+export function isKnownLibraryViewKind<T>(
+	kind: T
+): kind is T & LibraryViewKind {
+	return libraryViewKindSchema.safeParse(kind).success;
 }
-
-export function libraryViewDefinition(
-	kind: unknown
-): LibraryViewDefinition | undefined {
-	return LIBRARY_VIEW_REGISTRY.find((entry) => entry.kind === kind);
-}
+const libraryViewDefinitionSchema = z.unknown().transform((kind) => {
+	const parsed = libraryViewKindSchema.safeParse(kind);
+	return parsed.success
+		? LIBRARY_VIEW_REGISTRY.find((entry) => entry.kind === parsed.data)
+		: undefined;
+});
+export const libraryViewDefinition = libraryViewDefinitionSchema.parse;
 
 /**
  * The opaque `spec` of a manifest `sidebar_sections` contribution (the Rust
@@ -807,7 +872,7 @@ export interface ViewContribution {
 	view: ViewKind | string;
 }
 
-// ── Templating + source mapping (pure, dependency-free) ───────────────────────
+// ── Templating + source mapping ───────────────────────
 
 /** `{{token}}` — `token` is a form-field id or `item.<key>`. */
 const TEMPLATE_TOKEN = /\{\{\s*([\w.-]+)\s*\}\}/g;
@@ -815,18 +880,22 @@ const TEMPLATE_TOKEN = /\{\{\s*([\w.-]+)\s*\}\}/g;
 /** Matches a string that is EXACTLY one template token (raw substitution). */
 const SOLE_TEMPLATE_TOKEN = /^\{\{\s*([\w.-]+)\s*\}\}$/;
 
-function resolveToken(token: string, ctx: ViewActionContext): unknown {
+function resolveToken(
+	token: string,
+	ctx: ViewActionContext
+): ViewTemplateValue {
 	if (token.startsWith("item.")) {
 		return ctx.item?.[token.slice("item.".length)];
 	}
 	return ctx.values?.[token];
 }
 
-function stringifyToken(value: unknown): string {
+function stringifyToken(value: ViewTemplateValue): string {
 	if (value === null || value === undefined) {
 		return "";
 	}
-	return typeof value === "object" ? JSON.stringify(value) : String(value);
+	const parsed = rowTextSchema.safeParse(value);
+	return parsed.success ? parsed.data : "";
 }
 
 /**
@@ -847,8 +916,13 @@ export function renderTemplate(
 
 /** Recursively template a JSON body: a string leaf that is exactly one token
  *  substitutes the RAW value (type-preserving); mixed strings interpolate. */
-function renderBody(body: unknown, ctx: ViewActionContext): unknown {
-	if (typeof body === "string") {
+function renderBody(
+	body: ViewTemplateValue,
+	ctx: ViewActionContext
+): ViewTemplateValue {
+	const string = z.string().safeParse(body);
+	if (string.success) {
+		const body = string.data;
 		const sole = SOLE_TEMPLATE_TOKEN.exec(body);
 		if (sole?.[1]) {
 			return resolveToken(sole[1], ctx);
@@ -858,9 +932,10 @@ function renderBody(body: unknown, ctx: ViewActionContext): unknown {
 	if (Array.isArray(body)) {
 		return body.map((entry) => renderBody(entry, ctx));
 	}
-	if (isRecord(body)) {
-		const out: Record<string, unknown> = {};
-		for (const [key, value] of Object.entries(body)) {
+	const object = z.record(z.string(), templateValueSchema).safeParse(body);
+	if (object.success) {
+		const out: { [key: string]: ViewTemplateValue } = {};
+		for (const [key, value] of Object.entries(object.data)) {
 			out[key] = renderBody(value, ctx);
 		}
 		return out;
@@ -936,13 +1011,11 @@ export function isCoreReadPath(path: string): boolean {
 	return !/^\/[^/]*@[^/]*(?:\/|$)/.test(decoded);
 }
 
-export function isViewSourceHttpMethod(
-	method: unknown
-): method is ViewSourceHttpMethod {
-	return (
-		typeof method === "string" &&
-		(VIEW_SOURCE_HTTP_METHODS as readonly string[]).includes(method)
-	);
+const sourceMethodSchema = z.enum(VIEW_SOURCE_HTTP_METHODS);
+export function isViewSourceHttpMethod<T>(
+	method: T
+): method is T & ViewSourceHttpMethod {
+	return sourceMethodSchema.safeParse(method).success;
 }
 
 /** Whether a server-tagged contribution may address `path` with the node bearer.
@@ -986,7 +1059,7 @@ export function contributionSourceRequest(
 
 /** A fully-rendered declarative HTTP action, ready for the host's fetch seam. */
 export interface RenderedActionHttp {
-	body?: unknown;
+	body?: ViewTemplateValue;
 	method: ViewActionHttpMethod;
 	path: string;
 }
@@ -1007,7 +1080,10 @@ export function renderActionHttp(
 	return {
 		method: http.method,
 		path,
-		body: http.body === undefined ? undefined : renderBody(http.body, ctx),
+		body:
+			http.body === undefined
+				? undefined
+				: renderBody(templateValueBoundarySchema.parse(http.body), ctx),
 	};
 }
 
@@ -1018,7 +1094,7 @@ export function renderContributionActionHttp(
 	http: ViewActionHttp,
 	ctx: ViewActionContext
 ): RenderedActionHttp {
-	if (!(VIEW_ACTION_HTTP_METHODS as readonly string[]).includes(http.method)) {
+	if (!z.enum(VIEW_ACTION_HTTP_METHODS).safeParse(http.method).success) {
 		throw new Error(
 			`declarative action method is not allowlisted: ${http.method}`
 		);
@@ -1033,7 +1109,7 @@ export function renderContributionActionHttp(
 }
 
 function rowText(
-	row: Record<string, unknown>,
+	row: ViewSourceRow,
 	key: string | undefined
 ): string | undefined {
 	if (!key) {
@@ -1043,7 +1119,8 @@ function rowText(
 	if (value === null || value === undefined) {
 		return undefined;
 	}
-	return typeof value === "object" ? JSON.stringify(value) : String(value);
+	const parsed = rowTextSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
 /** Split on either separator so a Windows path yields its basename too. */
@@ -1078,50 +1155,65 @@ function transformText(
 
 /** True when `row` satisfies every declared predicate. A filter whose key is
  *  absent from the row never matches — see {@link ViewSourceFilter}. */
+const sourceFilterSchema = z.object({
+	key: z.string(),
+	equals: z.unknown().optional(),
+	in: z.unknown().optional(),
+	notIn: z.unknown().optional(),
+});
+const sourceFiltersSchema = z.array(sourceFilterSchema);
 function rowMatchesFilters(
-	row: Record<string, unknown>,
+	row: ViewSourceRow,
 	filters: ViewSourceFilter[] | undefined
 ): boolean {
-	const candidate: unknown = filters;
-	if (candidate === undefined) {
+	if (filters === undefined) {
 		return true;
 	}
-	if (!Array.isArray(candidate)) {
+	const parsed = sourceFiltersSchema.safeParse(filters);
+	if (!parsed.success) {
 		return false;
 	}
-	return candidate.every((filter) => {
-		if (!isRecord(filter) || typeof filter.key !== "string") {
-			return false;
-		}
+	return parsed.data.every((filter) => {
 		const value = rowText(row, filter.key);
 		if (value === undefined) {
 			return false;
 		}
-		if (typeof filter.equals === "string") {
-			return value === filter.equals;
+		const equals = z.string().safeParse(filter.equals);
+		if (equals.success) {
+			return value === equals.data;
 		}
-		if (
-			Array.isArray(filter.in) &&
-			filter.in.every((item) => typeof item === "string")
-		) {
-			return filter.in.includes(value);
+		const included = z.array(z.string()).safeParse(filter.in);
+		if (included.success) {
+			return included.data.includes(value);
 		}
-		if (
-			Array.isArray(filter.notIn) &&
-			filter.notIn.every((item) => typeof item === "string")
-		) {
-			return !filter.notIn.includes(value);
+		const excluded = z.array(z.string()).safeParse(filter.notIn);
+		if (excluded.success) {
+			return !excluded.data.includes(value);
 		}
-		if (
-			filter.equals !== undefined ||
-			filter.in !== undefined ||
-			filter.notIn !== undefined
-		) {
-			return false;
-		}
-		// A filter naming only a key means "this field must be present".
-		return true;
+		return (
+			filter.equals === undefined &&
+			filter.in === undefined &&
+			filter.notIn === undefined
+		);
 	});
+}
+/** Select the array before validating rows, so one malformed optional value cannot discard its siblings. */
+function responseRows(
+	payload: z.input<typeof responseBoundarySchema>,
+	key?: string
+): unknown[] | null {
+	const envelope = responseBoundarySchema.parse(payload);
+	if (envelope === null) {
+		return null;
+	}
+	if (Array.isArray(envelope)) {
+		return envelope;
+	}
+	const candidate = key
+		? envelope[key]
+		: Object.values(envelope).find(Array.isArray);
+	const parsed = responseArraySchema.safeParse(candidate);
+	return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -1133,29 +1225,21 @@ function rowMatchesFilters(
  */
 export function sourceItemsFromResponse(
 	source: ViewSource,
-	payload: unknown
+	payload: z.input<typeof responseBoundarySchema>
 ): SourceItem[] {
-	let rows: unknown;
-	if (Array.isArray(payload)) {
-		rows = payload;
-	} else if (isRecord(payload)) {
-		rows = source.items
-			? payload[source.items]
-			: Object.values(payload).find((v) => Array.isArray(v));
-	}
-	if (!Array.isArray(rows)) {
+	const rows = responseRows(payload, source.items);
+	if (!rows) {
 		return [];
 	}
 	const map = source.map ?? {};
-	const limit =
-		typeof source.limit === "number" &&
-		Number.isFinite(source.limit) &&
-		source.limit > 0
-			? Math.min(Math.floor(source.limit), VIEW_SOURCE_LIMITS.maxRows)
-			: VIEW_SOURCE_LIMITS.defaultRows;
+	const parsedLimit = positiveNumberSchema.safeParse(source.limit);
+	const limit = parsedLimit.success
+		? Math.min(Math.floor(parsedLimit.data), VIEW_SOURCE_LIMITS.maxRows)
+		: VIEW_SOURCE_LIMITS.defaultRows;
 	const out: SourceItem[] = [];
-	for (const row of rows.slice(0, VIEW_SOURCE_LIMITS.maxScanRows)) {
-		if (!(isRecord(row) && rowMatchesFilters(row, source.filter))) {
+	for (const wireRow of rows.slice(0, VIEW_SOURCE_LIMITS.maxScanRows)) {
+		const row = rowBoundarySchema.parse(wireRow);
+		if (!(row && rowMatchesFilters(row, source.filter))) {
 			continue;
 		}
 		const id = rowText(row, map.id ?? "id");
@@ -1195,20 +1279,21 @@ export function sourceItemsFromResponse(
  */
 export function sourceTotalFromResponse(
 	source: ViewSource,
-	payload: unknown
+	payload: z.input<typeof responseBoundarySchema>
 ): number | null {
-	if (Array.isArray(payload)) {
+	const envelope = responseBoundarySchema.parse(payload);
+	if (envelope === null) {
+		return null;
+	}
+	if (Array.isArray(envelope)) {
 		if (
 			source.limit !== undefined &&
 			source.limit > 0 &&
-			payload.length >= source.limit
+			envelope.length >= source.limit
 		) {
 			return null;
 		}
-		return payload.length;
-	}
-	if (!isRecord(payload)) {
-		return null;
+		return envelope.length;
 	}
 
 	const keys = [
@@ -1219,21 +1304,20 @@ export function sourceTotalFromResponse(
 		"count",
 	].filter((key): key is string => Boolean(key));
 	for (const key of keys) {
-		const value = payload[key];
-		if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-			return Math.floor(value);
+		const value = envelope[key];
+		const parsed = z.number().finite().nonnegative().safeParse(value);
+		if (parsed.success) {
+			return Math.floor(parsed.data);
 		}
 	}
 
-	const cursor = payload.next_cursor ?? payload.nextCursor ?? payload.cursor;
+	const cursor = envelope.next_cursor ?? envelope.nextCursor ?? envelope.cursor;
 	if (cursor !== null && cursor !== undefined && cursor !== "") {
 		return null;
 	}
 
-	const rows = source.items
-		? payload[source.items]
-		: Object.values(payload).find((value) => Array.isArray(value));
-	if (!Array.isArray(rows)) {
+	const rows = responseRows(envelope, source.items);
+	if (!rows) {
 		return null;
 	}
 	if (
@@ -1257,13 +1341,13 @@ export interface StoreCatalogItem {
 	id: string;
 	/** True when the row itself reports the item is already installed. */
 	installed: boolean;
-	raw: Record<string, unknown>;
+	raw: ViewSourceRow;
 	sourceUrl?: string;
 	tags: string[];
 	title: string;
 }
 
-function rowStrings(row: Record<string, unknown>, key?: string): string[] {
+function rowStrings(row: ViewSourceRow, key?: string): string[] {
 	if (!key) {
 		return [];
 	}
@@ -1271,7 +1355,10 @@ function rowStrings(row: Record<string, unknown>, key?: string): string[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
-	return value.filter((v): v is string => typeof v === "string");
+	return value.flatMap((candidate) => {
+		const parsed = z.string().safeParse(candidate);
+		return parsed.success ? [parsed.data] : [];
+	});
 }
 
 /**
@@ -1287,24 +1374,18 @@ function rowStrings(row: Record<string, unknown>, key?: string): string[] {
  */
 export function storeItemsFromResponse(
 	spec: StoreTabSpec,
-	payload: unknown
+	payload: z.input<typeof responseBoundarySchema>
 ): StoreCatalogItem[] {
 	const source = spec.source;
-	let rows: unknown;
-	if (Array.isArray(payload)) {
-		rows = payload;
-	} else if (isRecord(payload)) {
-		rows = source?.items
-			? payload[source.items]
-			: Object.values(payload).find((v) => Array.isArray(v));
-	}
-	if (!Array.isArray(rows)) {
+	const rows = responseRows(payload, source?.items);
+	if (!rows) {
 		return [];
 	}
 	const map = spec.map ?? {};
 	const out: StoreCatalogItem[] = [];
-	for (const row of rows) {
-		if (!isRecord(row)) {
+	for (const wireRow of rows) {
+		const row = rowBoundarySchema.parse(wireRow);
+		if (!row) {
 			continue;
 		}
 		const id = rowText(row, map.id ?? "id");
@@ -1332,7 +1413,7 @@ export function storeItemsFromResponse(
 /** Read a contributed Store tab's authoritative total without counting its page. */
 export function storeTotalFromResponse(
 	spec: StoreTabSpec,
-	payload: unknown
+	payload: z.input<typeof responseBoundarySchema>
 ): number | null {
 	return spec.source ? sourceTotalFromResponse(spec.source, payload) : null;
 }
@@ -1351,24 +1432,39 @@ export interface StoreGraphEdge {
 	target: string;
 }
 
+/** A mapped graph shared by every Store detail renderer. */
+export interface StoreGraph {
+	edges: StoreGraphEdge[];
+	nodes: StoreGraphNode[];
+}
+
 /** Unwrap a detail response to the object the {@link StoreDetailSpec} describes:
  *  `spec.item` names the envelope key, absent means the payload itself. */
 export function storeDetailObject(
 	spec: StoreDetailSpec,
-	payload: unknown
-): unknown {
+	payload: z.input<typeof responseBoundarySchema>
+): ViewTemplateValue {
 	if (!spec.item) {
-		return payload;
+		const parsed = templateValueSchema.safeParse(payload);
+		return parsed.success ? parsed.data : undefined;
 	}
-	return isRecord(payload) ? payload[spec.item] : undefined;
+	return rowBoundarySchema.parse(payload)?.[spec.item];
 }
-
-function graphRows(payload: unknown, key: string): Record<string, unknown>[] {
-	const rows = isRecord(payload) ? payload[key] : undefined;
-	if (!Array.isArray(rows)) {
+function graphRows(
+	payload: z.input<typeof responseBoundarySchema>,
+	key: string
+): ViewSourceRow[] {
+	const envelope = responseBoundarySchema.parse(payload);
+	if (envelope === null || Array.isArray(envelope)) {
 		return [];
 	}
-	return rows.filter(isRecord);
+	const rows = responseRows(envelope, key);
+	return (
+		rows?.flatMap((row) => {
+			const parsed = rowBoundarySchema.parse(row);
+			return parsed === null ? [] : [parsed];
+		}) ?? []
+	);
 }
 
 /**
@@ -1381,8 +1477,8 @@ function graphRows(payload: unknown, key: string): Record<string, unknown>[] {
  */
 export function storeGraphFromResponse(
 	spec: StoreDetailGraphSpec,
-	payload: unknown
-): { edges: StoreGraphEdge[]; nodes: StoreGraphNode[] } {
+	payload: z.input<typeof responseBoundarySchema>
+): StoreGraph {
 	const idKey = spec.nodeId ?? "id";
 	const nodes: StoreGraphNode[] = [];
 	const seen = new Set<string>();
@@ -1465,7 +1561,7 @@ export function groupStoreItems(
 	return out.filter((g) => g.items.length > 0);
 }
 
-// ── Validation (pure, dependency-free) ────────────────────────────────────────
+// ── Validation ────────────────────────────────────────
 
 /** Result of {@link validateView}: `ok` plus a flat list of human-readable errors. */
 export interface ViewValidation {
@@ -1473,39 +1569,29 @@ export interface ViewValidation {
 	ok: boolean;
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-	return typeof v === "object" && v !== null;
+/** True when the untrusted discriminant belongs to the closed host vocabulary. */
+export function isKnownViewKind<T>(kind: T): kind is T & ViewKind {
+	return viewKindSchema.safeParse(kind).success;
 }
-
-/** True when `kind` is one of the seven known {@link VIEW_KINDS}. */
-export function isKnownViewKind(kind: unknown): kind is ViewKind {
-	return (
-		typeof kind === "string" && (VIEW_KINDS as readonly string[]).includes(kind)
-	);
-}
-
-/**
- * Structurally validate a value as a {@link ViewSpec}. This is the shared gate a
- * renderer runs before dispatch: it checks the `view` discriminant is known and that
- * the payload carries the required collection for that kind. It is deliberately shallow
- * (shape, not deep field types) — the renderers tolerate missing optional fields — so a
- * newer app targeting an older shell degrades to a known-kind empty view rather than a
- * crash.
- */
-export function validateView(value: unknown): ViewValidation {
-	const errors: string[] = [];
-	if (!isRecord(value)) {
+const viewEnvelopeSchema = z
+	.object({ view: z.unknown().optional() })
+	.passthrough();
+/** Validate the collections required by each known renderer without rejecting future fields. */
+const viewValidationSchema = z.unknown().transform((value): ViewValidation => {
+	const parsed = viewEnvelopeSchema.safeParse(value);
+	if (!parsed.success) {
 		return { ok: false, errors: ["view spec must be an object"] };
 	}
-	const kind = value.view;
+	const kind = parsed.data.view;
 	if (!isKnownViewKind(kind)) {
 		return {
 			ok: false,
 			errors: [`unknown view kind: ${JSON.stringify(kind)}`],
 		};
 	}
+	const errors: string[] = [];
 	const requireArray = (key: string) => {
-		if (!Array.isArray((value as Record<string, unknown>)[key])) {
+		if (!Array.isArray(parsed.data[key])) {
 			errors.push(`${kind}: "${key}" must be an array`);
 		}
 	};
@@ -1527,7 +1613,7 @@ export function validateView(value: unknown): ViewValidation {
 			requireArray("filters");
 			break;
 		case "empty-state":
-			if (typeof value.title !== "string" || value.title.length === 0) {
+			if (!z.string().min(1).safeParse(parsed.data.title).success) {
 				errors.push('empty-state: "title" must be a non-empty string');
 			}
 			break;
@@ -1538,7 +1624,179 @@ export function validateView(value: unknown): ViewValidation {
 			break;
 	}
 	return { ok: errors.length === 0, errors };
-}
+});
+export const validateView = viewValidationSchema.parse;
+
+const viewToneSchema = z.enum([
+	"neutral",
+	"success",
+	"warning",
+	"danger",
+	"info",
+]);
+const viewActionSchema = z.looseObject({
+	id: z.string(),
+	label: z.string(),
+	confirm: z.string().optional(),
+	icon: z.string().optional(),
+	intent: z.string().optional(),
+	payload: z.unknown().optional(),
+	style: z.enum(["primary", "default", "danger"]).optional(),
+	http: z
+		.looseObject({
+			method: z.enum(VIEW_ACTION_HTTP_METHODS),
+			path: z.string(),
+			body: z.unknown().optional(),
+		})
+		.optional(),
+});
+const viewBadgeSchema = z.looseObject({
+	label: z.string(),
+	tone: viewToneSchema.optional(),
+});
+const viewOptionSchema = z.looseObject({
+	label: z.string(),
+	value: z.string(),
+});
+const viewItemSchema = z.looseObject({
+	id: z.string(),
+	title: z.string(),
+	accessory: z.string().optional(),
+	actions: z.array(viewActionSchema).optional(),
+	avatar: z.string().optional(),
+	badges: z.array(viewBadgeSchema).optional(),
+	detail: z.string().optional(),
+	icon: z.string().optional(),
+	subtitle: z.string().optional(),
+});
+export const viewSourceSchema = z.looseObject({
+	filter: z
+		.array(
+			z.looseObject({
+				key: z.string(),
+				equals: z.string().optional(),
+				in: z.array(z.string()).optional(),
+				notIn: z.array(z.string()).optional(),
+			})
+		)
+		.optional(),
+	http: z.looseObject({
+		method: z.literal("GET").optional(),
+		path: z.string(),
+	}),
+	items: z.string().optional(),
+	limit: z.number().optional(),
+	refreshMs: z.number().optional(),
+	total: z.string().optional(),
+	map: z
+		.looseObject({
+			accessory: z.string().optional(),
+			avatar: z.string().optional(),
+			detail: z.string().optional(),
+			icon: z.string().optional(),
+			id: z.string().optional(),
+			subtitle: z.string().optional(),
+			subtitleTransform: z.enum(["basename", "humanize"]).optional(),
+			title: z.string().optional(),
+			titleFallback: z.string().optional(),
+		})
+		.optional(),
+});
+
+/** Validate renderer-owned fields while retaining forward-compatible public metadata. */
+export const viewSpecSchema = z.discriminatedUnion("view", [
+	z.looseObject({
+		view: z.literal("list-detail"),
+		items: z.array(viewItemSchema),
+		actions: z.array(viewActionSchema).optional(),
+		emptyText: z.string().optional(),
+		itemActions: z.array(viewActionSchema).optional(),
+		source: viewSourceSchema.optional(),
+	}),
+	z.looseObject({
+		view: z.literal("data-table"),
+		actions: z.array(viewActionSchema).optional(),
+		emptyText: z.string().optional(),
+		columns: z.array(
+			z.looseObject({
+				id: z.string(),
+				header: z.string(),
+				align: z.enum(["left", "center", "right"]).optional(),
+			})
+		),
+		rows: z.array(
+			z.looseObject({
+				id: z.string(),
+				cells: z.record(z.string(), z.union([z.string(), z.number()])),
+				actions: z.array(viewActionSchema).optional(),
+				badges: z.array(viewBadgeSchema).optional(),
+			})
+		),
+	}),
+	z.looseObject({
+		view: z.literal("form"),
+		actions: z.array(viewActionSchema).optional(),
+		submit: viewActionSchema.optional(),
+		fields: z.array(
+			z.looseObject({
+				id: z.string(),
+				label: z.string(),
+				type: z.enum(["text", "textarea", "number", "select", "switch"]),
+				options: z.array(viewOptionSchema).optional(),
+				placeholder: z.string().optional(),
+				required: z.boolean().optional(),
+				value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+			})
+		),
+	}),
+	z.looseObject({
+		view: z.literal("action-panel"),
+		actions: z.array(viewActionSchema),
+		title: z.string().optional(),
+	}),
+	z.looseObject({
+		view: z.literal("filter-bar"),
+		filters: z.array(
+			z.looseObject({
+				id: z.string(),
+				label: z.string(),
+				options: z.array(viewOptionSchema),
+				value: z.string().optional(),
+			})
+		),
+	}),
+	z.looseObject({
+		view: z.literal("empty-state"),
+		title: z.string(),
+		action: viewActionSchema.optional(),
+		description: z.string().optional(),
+		icon: z.string().optional(),
+	}),
+	z.looseObject({
+		view: z.literal("stat-card-row"),
+		stats: z.array(
+			z.looseObject({
+				id: z.string(),
+				label: z.string(),
+				value: z.union([z.string(), z.number()]),
+				delta: z.string().optional(),
+				tone: viewToneSchema.optional(),
+			})
+		),
+	}),
+]) satisfies z.ZodType<ViewSpec>;
+
+/** A transport envelope deliberately retains unknown and malformed JSON specs for renderer fallback. */
+export const rawViewContributionSchema = z.looseObject({
+	id: z.string(),
+	view: z.string(),
+	spec: z.json().optional(),
+	title: z.string().optional(),
+	plugin: z.string().optional(),
+	approved_grants: z.array(z.string()).optional(),
+	http_policy: z.json().optional(),
+});
+export type RawViewContribution = z.infer<typeof rawViewContributionSchema>;
 
 // ── The reference example: a "hello list-detail" spec ─────────────────────────
 

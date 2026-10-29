@@ -35,6 +35,7 @@ export type ApprovalCardAnswers = Record<string, ApprovalCardAnswer>;
 
 export interface ApprovalCardProps {
 	answers?: ApprovalCardAnswers;
+	appearance?: "default" | "docs";
 	approveLabel?: ReactNode;
 	children?: ReactNode;
 	className?: string;

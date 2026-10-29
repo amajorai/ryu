@@ -24,8 +24,8 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use super::{
-    clamp_percent, http_client, read_file, reason_for_status, retry_after_seconds, UsageMeter,
-    UsageSnapshot, UsageUnavailable, UsageValue, UsageValueKind, UsageWindow,
+    clamp_percent, read_file, reason_for_status, retry_after_seconds, vendor_http_client,
+    UsageMeter, UsageSnapshot, UsageUnavailable, UsageValue, UsageValueKind, UsageWindow,
 };
 
 /// The 5-hour session window, in seconds — reported to the client so it can label
@@ -257,7 +257,10 @@ async fn fetch_from_text(agent_id: &str, text: Option<String>) -> UsageSnapshot 
         oauth.rate_limit_tier.as_deref(),
     );
 
-    let resp = http_client()
+    let Ok(client) = vendor_http_client("claude") else {
+        return unavailable(UsageUnavailable::Error);
+    };
+    let resp = client
         .get(usage_url())
         .header("Authorization", format!("Bearer {}", access_token.trim()))
         .header("Accept", "application/json")

@@ -1,5 +1,6 @@
 import type { Tab } from "@/src/contexts/TabsContext.tsx";
 import type { Artifact } from "@/src/lib/artifacts.ts";
+import { invokeWhenReady } from "./tauri-ready.ts";
 
 /** Memory-only carriage between trusted Desktop renderers. Never stored in a
  * URL, preferences, or the previous-session snapshot. Native only transports
@@ -43,25 +44,32 @@ export function snapshotTab(tab: Tab): Tab {
 	};
 }
 
-declare global {
-	interface Window {
-		__RYU_TAB_TRANSFER__?: TabTransfer;
+let initialTransfer: TabTransfer | undefined;
+let initialization: Promise<void> | undefined;
+
+/** Claim native memory once, before Layout mounts. No private payload is embedded
+ * in persistent WebView scripts, page globals, or navigation URLs. */
+export function initializeTabTransfer(): Promise<void> {
+	if (!isDetachedTabWindow()) {
+		return Promise.resolve();
 	}
+	initialization ??= invokeWhenReady<TabTransfer | null>(
+		"claim_tab_transfer"
+	).then((transfer) => {
+		if (transfer?.version === 1 && transfer.tab?.id && transfer.tab.path) {
+			initialTransfer = transfer;
+		}
+	});
+	return initialization;
 }
 
 export function readTabTransfer(): TabTransfer | undefined {
-	if (typeof window === "undefined") {
-		return undefined;
-	}
-	const transfer = window.__RYU_TAB_TRANSFER__;
-	return transfer?.version === 1 && transfer.tab?.id && transfer.tab.path
-		? transfer
-		: undefined;
+	return initialTransfer;
 }
 
 export function isDetachedTabWindow(): boolean {
 	return (
-		typeof window !== "undefined" &&
+		globalThis.window !== undefined &&
 		new URLSearchParams(window.location.search).get("detached") === "1"
 	);
 }

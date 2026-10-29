@@ -2,7 +2,10 @@
 
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Calendar } from "@ryu/ui/components/calendar.tsx";
+import {
+	Calendar,
+	useCalendarLocalization,
+} from "@ryu/ui/components/calendar.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Command,
@@ -42,6 +45,13 @@ import {
 	getUrlHref,
 	parseLocalDate,
 } from "@ryu/ui/lib/data-grid.ts";
+import { isFormulaError } from "@ryu/ui/lib/data-grid-formula.ts";
+import { displayCivilDay } from "@ryu/ui/lib/display-civil-day.ts";
+import {
+	isNativeBoolean,
+	isNativeNumber,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
+import { useDisplayLocale } from "@ryu/ui/lib/timezone.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type {
 	DataGridCellProps,
@@ -50,8 +60,9 @@ import type {
 import { Check, Upload, X } from "lucide-react";
 import {
 	type ChangeEvent,
+	type ComponentProps,
+	type CSSProperties,
 	type DragEvent,
-	type FormEvent,
 	type KeyboardEvent,
 	type MouseEvent,
 	useCallback,
@@ -62,6 +73,10 @@ import {
 	useState,
 } from "react";
 import { toast } from "sonner";
+
+interface FileSkeletonStyle extends CSSProperties {
+	"--file-skeleton-width": string;
+}
 
 export function ShortTextCell<TData>({
 	cell,
@@ -76,6 +91,7 @@ export function ShortTextCell<TData>({
 	isActiveSearchMatch,
 	readOnly,
 }: DataGridCellProps<TData>) {
+	// SAFETY: This renderer is selected for the text cell schema; its column accessor returns a string.
 	const initialValue = cell.getValue() as string;
 	const [value, setValue] = useState(initialValue);
 	const cellRef = useRef<HTMLDivElement>(null);
@@ -100,10 +116,13 @@ export function ShortTextCell<TData>({
 		tableMeta?.onCellEditingStop?.();
 	}, [tableMeta, rowIndex, columnId, initialValue, readOnly]);
 
-	const onInput = useCallback((event: FormEvent<HTMLDivElement>) => {
-		const currentValue = event.currentTarget.textContent ?? "";
-		setValue(currentValue);
-	}, []);
+	const onInput = useCallback(
+		(event: Parameters<NonNullable<ComponentProps<"div">["onInput"]>>[0]) => {
+			const currentValue = event.currentTarget.textContent ?? "";
+			setValue(currentValue);
+		},
+		[]
+	);
 
 	const onWrapperKeyDown = useCallback(
 		(event: KeyboardEvent<HTMLDivElement>) => {
@@ -222,6 +241,60 @@ export function ShortTextCell<TData>({
 	);
 }
 
+/**
+ * A read-only computed value (formula column). It never enters edit mode;
+ * error results such as `#DIV/0!` render in the destructive color.
+ */
+export function FormulaCell<TData>({
+	cell,
+	tableMeta,
+	rowIndex,
+	columnId,
+	rowHeight,
+	isEditing,
+	isFocused,
+	isSelected,
+	isSearchMatch,
+	isActiveSearchMatch,
+}: DataGridCellProps<TData>) {
+	const value = cell.getValue();
+	const isError = isFormulaError(value);
+	let text = "";
+	if (isNativeBoolean(value)) {
+		text = value ? "TRUE" : "FALSE";
+	} else if (isNativeNumber(value)) {
+		text = value.toLocaleString(undefined, { maximumFractionDigits: 10 });
+	} else if (value !== null && value !== undefined) {
+		text = String(value);
+	}
+
+	return (
+		<DataGridCellWrapper<TData>
+			cell={cell}
+			columnId={columnId}
+			isActiveSearchMatch={isActiveSearchMatch}
+			isEditing={isEditing}
+			isFocused={isFocused}
+			isSearchMatch={isSearchMatch}
+			isSelected={isSelected}
+			readOnly
+			rowHeight={rowHeight}
+			rowIndex={rowIndex}
+			tableMeta={tableMeta}
+		>
+			<span
+				className={cn({
+					"block text-end tabular-nums": isNativeNumber(value),
+					"text-destructive": isError,
+				})}
+				data-slot="grid-cell-content"
+			>
+				{text}
+			</span>
+		</DataGridCellWrapper>
+	);
+}
+
 export function LongTextCell<TData>({
 	cell,
 	tableMeta,
@@ -235,6 +308,7 @@ export function LongTextCell<TData>({
 	isActiveSearchMatch,
 	readOnly,
 }: DataGridCellProps<TData>) {
+	// SAFETY: This renderer is selected for the text cell schema; its column accessor returns a string.
 	const initialValue = cell.getValue() as string;
 	const [value, setValue] = useState(initialValue ?? "");
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -406,7 +480,7 @@ export function LongTextCell<TData>({
 					onBlur={onBlur}
 					onChange={onChange}
 					onKeyDown={onKeyDown}
-					placeholder="Enter text..."
+					placeholder="Enter text…"
 					ref={textareaRef}
 					value={value}
 				/>
@@ -428,7 +502,7 @@ export function NumberCell<TData>({
 	isActiveSearchMatch,
 	readOnly,
 }: DataGridCellProps<TData>) {
-	const initialValue = cell.getValue() as number;
+	const initialValue = cell.getValue();
 	const [value, setValue] = useState(String(initialValue ?? ""));
 	const inputRef = useRef<HTMLInputElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -554,6 +628,7 @@ export function UrlCell<TData>({
 	isActiveSearchMatch,
 	readOnly,
 }: DataGridCellProps<TData>) {
+	// SAFETY: This renderer is selected for the text cell schema; its column accessor returns a string.
 	const initialValue = cell.getValue() as string;
 	const [value, setValue] = useState(initialValue ?? "");
 	const cellRef = useRef<HTMLDivElement>(null);
@@ -582,10 +657,13 @@ export function UrlCell<TData>({
 		tableMeta?.onCellEditingStop?.();
 	}, [tableMeta, rowIndex, columnId, initialValue, readOnly]);
 
-	const onInput = useCallback((event: FormEvent<HTMLDivElement>) => {
-		const currentValue = event.currentTarget.textContent ?? "";
-		setValue(currentValue);
-	}, []);
+	const onInput = useCallback(
+		(event: Parameters<NonNullable<ComponentProps<"div">["onInput"]>>[0]) => {
+			const currentValue = event.currentTarget.textContent ?? "";
+			setValue(currentValue);
+		},
+		[]
+	);
 
 	const onWrapperKeyDown = useCallback(
 		(event: KeyboardEvent<HTMLDivElement>) => {
@@ -770,7 +848,7 @@ export function CheckboxCell<TData>({
 	isActiveSearchMatch,
 	readOnly,
 }: Omit<DataGridCellProps<TData>, "isEditing">) {
-	const initialValue = cell.getValue() as boolean;
+	const initialValue = cell.getValue();
 	const [value, setValue] = useState(Boolean(initialValue));
 	const containerRef = useRef<HTMLDivElement>(null);
 
@@ -878,6 +956,7 @@ export function SelectCell<TData>({
 	isActiveSearchMatch,
 	readOnly,
 }: DataGridCellProps<TData>) {
+	// SAFETY: This renderer is selected for the optional text cell schema; missing values normalize to undefined.
 	const initialValue = (cell.getValue() ?? undefined) as string | undefined;
 
 	const [value, setValue] = useState(initialValue);
@@ -1035,6 +1114,7 @@ export function MultiSelectCell<TData>({
 	readOnly,
 }: DataGridCellProps<TData>) {
 	const cellValue = useMemo(() => {
+		// SAFETY: The multi-select column accessor supplies its schema-defined array of option strings.
 		const value = cell.getValue() as string[];
 		return value ?? [];
 	}, [cell]);
@@ -1262,7 +1342,7 @@ export function MultiSelectCell<TData>({
 									className="h-auto flex-1 p-0"
 									onKeyDown={onInputKeyDown}
 									onValueChange={setSearchValue}
-									placeholder="Search..."
+									placeholder="Search…"
 									ref={inputRef}
 									value={searchValue}
 								/>
@@ -1363,6 +1443,9 @@ export function DateCell<TData>({
 	isActiveSearchMatch,
 	readOnly,
 }: DataGridCellProps<TData>) {
+	const displayLocale = useDisplayLocale();
+	const calendarText = useCalendarLocalization(displayLocale);
+	// SAFETY: This renderer is selected for the text cell schema; its column accessor returns a string.
 	const initialValue = cell.getValue() as string;
 	const [value, setValue] = useState(initialValue ?? "");
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -1450,7 +1533,13 @@ export function DateCell<TData>({
 						<Calendar
 							autoFocus
 							captionLayout="dropdown"
-							defaultMonth={selectedDate ?? new Date()}
+							// An empty cell opens on today's month in the display zone, which is the
+							// computer's month only while the two zones share a date. DayPicker reads
+							// this once as the opening month, so it needs no subscription.
+							defaultMonth={selectedDate ?? displayCivilDay(Date.now())}
+							formatters={calendarText.formatters}
+							labels={calendarText.labels}
+							locale={calendarText.locale}
 							mode="single"
 							onSelect={onDateSelect}
 							selected={selectedDate}
@@ -1475,6 +1564,7 @@ export function FileCell<TData>({
 	isActiveSearchMatch,
 	readOnly,
 }: DataGridCellProps<TData>) {
+	// SAFETY: The file column accessor supplies schema-defined FileCellData records; absent values normalize to an empty list.
 	const cellValue = useMemo(
 		() => (cell.getValue() as FileCellData[]) ?? [],
 		[cell]
@@ -2091,17 +2181,20 @@ export function FileCell<TData>({
 														<FileIcon className="size-4 shrink-0 text-muted-foreground" />
 													)}
 													<div className="flex-1 overflow-hidden">
-														<p className="truncate text-sm">{file.name}</p>
+														<p className="truncate text-sm" title={file.name}>
+															{file.name}
+														</p>
 														<p className="text-muted-foreground text-xs">
 															{isFileUploading
-																? "Uploading..."
+																? "Uploading…"
 																: isFileDeleting
-																	? "Deleting..."
+																	? "Deleting…"
 																	: formatFileSize(file.size)}
 														</p>
 													</div>
 													<Button
-														className="size-5 rounded-sm"
+														aria-label={`Remove ${file.name}`}
+														className="relative size-5 rounded-sm after:absolute after:-inset-0.5 after:content-['']"
 														disabled={isPending}
 														onClick={() => removeFile(file.id)}
 														size="icon"
@@ -2129,15 +2222,16 @@ export function FileCell<TData>({
 				<div className="flex flex-wrap items-center gap-1 overflow-hidden">
 					{visibleFiles.map((file) => {
 						const isUploading = uploadingFiles.has(file.id);
+						const skeletonStyle: FileSkeletonStyle = {
+							"--file-skeleton-width": `${Math.min(file.name.length * 8 + 30, 100)}px`,
+						};
 
 						if (isUploading) {
 							return (
 								<Skeleton
-									className="h-5 shrink-0 px-1.5"
+									className="h-5 w-(--file-skeleton-width) shrink-0 px-1.5"
 									key={file.id}
-									style={{
-										width: `${Math.min(file.name.length * 8 + 30, 100)}px`,
-									}}
+									style={skeletonStyle}
 								/>
 							);
 						}

@@ -24,9 +24,9 @@ class FakeSocket {
 
 	binaryType = "";
 	onopen: (() => void) | null = null;
-	onmessage: ((event: unknown) => void) | null = null;
+	onmessage: ((event: MessageEvent) => void) | null = null;
 	onclose: ((event: { code: number }) => void) | null = null;
-	onerror: ((event: unknown) => void) | null = null;
+	onerror: ((event: Event) => void) | null = null;
 	readyState = 0;
 	sent: unknown[] = [];
 
@@ -34,7 +34,7 @@ class FakeSocket {
 		FakeSocket.instances.push(this);
 	}
 
-	send(data: unknown): void {
+	send(data: Parameters<WebSocket["send"]>[0]): void {
 		this.sent.push(data);
 	}
 
@@ -93,11 +93,19 @@ async function waitFor(
 describe("RyuYjsProvider reconnect", () => {
 	beforeEach(() => {
 		FakeSocket.instances = [];
-		(globalThis as { WebSocket: unknown }).WebSocket = FakeSocket;
+		Object.defineProperty(globalThis, "WebSocket", {
+			configurable: true,
+			writable: true,
+			value: FakeSocket,
+		});
 	});
 
 	afterEach(() => {
-		(globalThis as { WebSocket: unknown }).WebSocket = originalWebSocket;
+		Object.defineProperty(globalThis, "WebSocket", {
+			configurable: true,
+			writable: true,
+			value: originalWebSocket,
+		});
 	});
 
 	test("re-opens after the socket dies", async () => {

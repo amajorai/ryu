@@ -17,7 +17,6 @@ import {
 	renderContributionActionHttp,
 	renderTemplate,
 	type SidebarSectionSpec,
-	type StoreCatalogItem,
 	type StoreDetailGraphSpec,
 	type StoreTabSpec,
 	sourceItemsFromResponse,
@@ -28,6 +27,7 @@ import {
 	storeItemsFromResponse,
 	storeTotalFromResponse,
 	VIEW_KINDS,
+	VIEW_SOURCE_LIMITS,
 	type ViewSource,
 	type ViewSpec,
 	validateView,
@@ -76,7 +76,7 @@ describe("declarative view vocabulary", () => {
 	});
 
 	it("requires the collection each kind depends on", () => {
-		const cases: [ViewSpec["view"], Record<string, unknown>, string][] = [
+		const cases: [ViewSpec["view"], Record<string, string[]>, string][] = [
 			["list-detail", {}, "items"],
 			["data-table", { columns: [] }, "rows"],
 			["form", {}, "fields"],
@@ -352,6 +352,33 @@ describe("action templating", () => {
 });
 
 describe("source-fetched items", () => {
+	it("validates only the selected envelope and bounded row slice", () => {
+		const rows = [{ id: "visible", title: "Visible" }];
+		Object.defineProperty(rows, VIEW_SOURCE_LIMITS.maxScanRows, {
+			get() {
+				throw new Error("Row outside the scan bound was read");
+			},
+		});
+		const payload = { rows };
+		Object.defineProperty(payload, "unused", {
+			enumerable: true,
+			get() {
+				throw new Error("Unselected response property was read");
+			},
+		});
+		const source: ViewSource = {
+			http: { path: "/api/x" },
+			items: "rows",
+			limit: 1,
+		};
+		expect(
+			sourceItemsFromResponse(source, payload).map(({ item }) => item.id)
+		).toEqual(["visible"]);
+		expect(
+			sourceTotalFromResponse({ ...source, limit: undefined }, payload)
+		).toBe(rows.length);
+	});
+
 	const source: ViewSource = {
 		http: { path: "/api/quests" },
 		items: "quests",
@@ -771,7 +798,10 @@ describe("storeItemHaystack", () => {
 				author: "Anthropic",
 			},
 		]);
-		const hay = storeItemHaystack(spec, item as StoreCatalogItem);
+		if (!item) {
+			throw new Error("Expected mapped catalog item");
+		}
+		const hay = storeItemHaystack(spec, item);
 		for (const needle of [
 			"evaluator optimizer",
 			"draft then critique",

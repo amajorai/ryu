@@ -62,9 +62,12 @@ import {
 	CONTEXT_AUTO_COMPACT_PREF_KEY,
 	CONTEXT_COMPACT_EFFORT_PREF_KEY,
 	CONTEXT_COMPACT_MODEL_PREF_KEY,
+	CONTEXT_COMPACT_ON_CACHE_EXPIRE_PREF_KEY,
 	CONTEXT_DEFAULT_OUTPUT_RESERVE,
 	CONTEXT_MAX_OUTPUT_PREF_KEY,
 	CONTEXT_MAX_OUTPUT_RESERVE,
+	CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX,
+	CONTEXT_MAX_TOKENS_LOCAL_PREF_KEY,
 	CONTEXT_MAX_TOKENS_PREF_KEY,
 	CONTEXT_MIN_BUDGET_TOKENS,
 	CONTEXT_SKILLS_RESERVE,
@@ -77,18 +80,27 @@ import {
 	DEFAULT_CLAUDE_GATEWAY_ROUTING,
 	DEFAULT_CLOUD_AGENT_SELECTION_PREF_KEY,
 	DEFAULT_CODEX_GATEWAY_ROUTING,
+	DEFAULT_DIAGNOSTICS_CONTENT_MODE,
 	DEFAULT_GATEWAY_ROUTING,
 	DEFAULT_LOCAL_AGENT_SELECTION_PREF_KEY,
+	DIAGNOSTICS_OTLP_CONTENT_MODE_PREF_KEY,
 	defaultCloudAgentSelection,
 	defaultLocalAgentSelection,
 	EMPTY_AGENT_SELECTION,
 	formatContextBudget,
+	getScopedContextBudgetOverrides,
 	MANAGED_RYU_MODEL_ID,
 	MANAGED_RYU_PROVIDER_ID,
 	MAX_ISLAND_EDGE_OFFSET,
+	MEETING_DIARIZATION_MODEL_PREF_KEY,
+	MEETING_DIARIZATION_MODELS,
 	MIN_ISLAND_EDGE_OFFSET,
 	NODE_ROUTING_PREF_KEY,
+	NODE_ROUTING_PREFS_MAX_BYTES,
 	parseContextBudget,
+	parseContextHandoffPolicy,
+	parseDiagnosticsContentMode,
+	parseMeetingDiarizationModel,
 	parseNodeRoutingPreferences,
 	serializeNodeRoutingPreferences,
 	TOOL_RANKER_PREF_KEY,
@@ -209,11 +221,16 @@ function rustAnchor(
 }
 
 const SERVER_RS = "apps/core/src/server/mod.rs";
+const PRIVACY_RS = "apps/core/src/privacy.rs";
 const GATEWAY_RS = "apps/core/src/sidecar/gateway.rs";
 const CONTEXT_WINDOW_RS = "apps/core/src/sidecar/adapters/context_window.rs";
 // The ranker pref belongs to the extracted tool-registry crate, not to Core —
 // Core's MCP catalog and the skills tool both re-export it from there.
 const TOOL_REGISTRY_RS = "crates/core/tool-registry/src/lib.rs";
+const DIARIZATION_RS = "crates/core/diarization/src/lib.rs";
+const MEETINGS_API_RS = "apps-store/meetings/backend/src/api.rs";
+const DIARIZATION_PIPELINE_PY =
+	"apps-store/meetings/sidecar/ryu_diarize/pipeline.py";
 
 /** Owner of BOTH per-agent gates — the egress swap and the MCP tool bridge. */
 const AGENT_ROUTING_RS = "apps/core/src/agent_routing/mod.rs";
@@ -223,6 +240,19 @@ const gatewayRs = rustSource(GATEWAY_RS);
 const contextWindowRs = rustSource(CONTEXT_WINDOW_RS);
 const toolRegistryRs = rustSource(TOOL_REGISTRY_RS);
 const agentRoutingRs = rustSource(AGENT_ROUTING_RS);
+const diarizationRs = rustSource(DIARIZATION_RS);
+const meetingsApiRs = rustSource(MEETINGS_API_RS);
+const diarizationPipelinePy = rustSource(DIARIZATION_PIPELINE_PY);
+
+function pythonDiarizationModels(source: string): string[] {
+	const declaration = source.match(/SUPPORTED_MODELS\s*=\s*\(([^)]*)\)/);
+	if (!declaration?.[1]) {
+		throw new Error(
+			`model contract anchor missing in ${DIARIZATION_PIPELINE_PY}`
+		);
+	}
+	return [...declaration[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+}
 
 /**
  * The body of `pub fn NAME(...) -> ... { … }`, brace-matched, or throw.
@@ -259,6 +289,25 @@ function rustFnBody(source: string, name: string): string {
 }
 
 describe("preference keys mirror Core", () => {
+	it("uses the Meetings diarization model key and shared adapter ids", () => {
+		expect(MEETING_DIARIZATION_MODEL_PREF_KEY).toBe(
+			rustStrConst(meetingsApiRs, MEETINGS_API_RS, "DIARIZATION_MODEL_PREF")
+		);
+		expect(MEETING_DIARIZATION_MODELS).toEqual(["pyannote", "nemotron"]);
+		expect(diarizationRs).toContain('"pyannote" => Ok(Self::Pyannote)');
+		expect(diarizationRs).toContain('"nemotron" => Ok(Self::Nemotron)');
+		expect(pythonDiarizationModels(diarizationPipelinePy)).toEqual([
+			...MEETING_DIARIZATION_MODELS,
+		]);
+	});
+
+	it("uses pyannote when the saved speaker-model preference is unset or invalid", () => {
+		expect(parseMeetingDiarizationModel(null)).toBe("pyannote");
+		expect(parseMeetingDiarizationModel("unknown")).toBe("pyannote");
+		expect(parseMeetingDiarizationModel("nemotron")).toBe("nemotron");
+		expect(parseMeetingDiarizationModel(" nemotron ")).toBe("nemotron");
+	});
+
 	it("uses Core's atomic managed-routing preference key", () => {
 		expect(NODE_ROUTING_PREF_KEY).toBe(
 			rustStrConst(gatewayRs, GATEWAY_RS, "NODE_ROUTING_PREF_KEY")
@@ -274,7 +323,7 @@ describe("preference keys mirror Core", () => {
 		);
 	});
 
-	it("uses Core's five context-window keys", () => {
+	it("uses Core's six context-window keys", () => {
 		expect(CONTEXT_MAX_TOKENS_PREF_KEY).toBe(
 			rustStrConst(serverRs, SERVER_RS, "CONTEXT_MAX_TOKENS_PREF")
 		);
@@ -289,6 +338,18 @@ describe("preference keys mirror Core", () => {
 		);
 		expect(CONTEXT_COMPACT_EFFORT_PREF_KEY).toBe(
 			rustStrConst(serverRs, SERVER_RS, "CONTEXT_COMPACT_EFFORT_PREF")
+		);
+		expect(CONTEXT_COMPACT_ON_CACHE_EXPIRE_PREF_KEY).toBe(
+			rustStrConst(serverRs, SERVER_RS, "CONTEXT_COMPACT_ON_CACHE_EXPIRE_PREF")
+		);
+	});
+
+	it("uses Core's scoped context.max-tokens override keys", () => {
+		expect(CONTEXT_MAX_TOKENS_LOCAL_PREF_KEY).toBe(
+			rustStrConst(serverRs, SERVER_RS, "CONTEXT_MAX_TOKENS_LOCAL_PREF")
+		);
+		expect(CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX).toBe(
+			rustStrConst(serverRs, SERVER_RS, "CONTEXT_MAX_TOKENS_ENGINE_PREF_PREFIX")
 		);
 	});
 
@@ -377,6 +438,103 @@ describe("preference keys mirror Core", () => {
 	});
 });
 
+describe("OTLP content mode mirrors Core", () => {
+	// `diagnostics-otlp-content-mode` is the opt-in that lets exported spans carry
+	// prompts, responses and tool payloads. The Privacy page writes the raw string
+	// and Core's `ContentMode::parse` decides what it means, so a desktop parse
+	// that is looser than Core's would show "Metadata only" while the node exports
+	// content (or the reverse). Pinned to Core's own table and anchored to its
+	// Rust expressions so a Core-side rewrite fails here, naming the item.
+	const privacyRs = rustSource(PRIVACY_RS);
+
+	it("uses Core's preference key and canonical wire values", () => {
+		expect(DIAGNOSTICS_OTLP_CONTENT_MODE_PREF_KEY).toBe(
+			rustStrConst(
+				privacyRs,
+				PRIVACY_RS,
+				"DIAGNOSTICS_OTLP_CONTENT_MODE_PREF_KEY"
+			)
+		);
+		expect({
+			content: rustAnchor(
+				privacyRs,
+				PRIVACY_RS,
+				"pub fn as_str(self) -> &'static str",
+				'Self::Content => "content"'
+			),
+			metadataOnly: rustAnchor(
+				privacyRs,
+				PRIVACY_RS,
+				"pub fn as_str(self) -> &'static str",
+				'Self::MetadataOnly => "metadata_only"'
+			),
+		}).toEqual({ content: ANCHOR_PRESENT, metadataOnly: ANCHOR_PRESENT });
+	});
+
+	it("defaults to the variant Core marks as its default", () => {
+		expect(DEFAULT_DIAGNOSTICS_CONTENT_MODE).toBe("metadata_only");
+		expect(
+			rustAnchor(
+				privacyRs,
+				PRIVACY_RS,
+				"pub enum ContentMode",
+				"#[default] MetadataOnly,"
+			)
+		).toBe(ANCHOR_PRESENT);
+	});
+
+	it("opts in only on an explicit content or full, trimmed and case-insensitive", () => {
+		// The same table as `content_mode_parsing_is_opt_in_only` in privacy.rs.
+		expect(parseDiagnosticsContentMode("content")).toBe("content");
+		expect(parseDiagnosticsContentMode(" CONTENT ")).toBe("content");
+		expect(parseDiagnosticsContentMode("full")).toBe("content");
+		expect(parseDiagnosticsContentMode("\tFull\n")).toBe("content");
+		for (const value of [
+			null,
+			"",
+			"   ",
+			"metadata_only",
+			"true",
+			"garbage",
+			"contents",
+			"content-only",
+		]) {
+			expect({ value, mode: parseDiagnosticsContentMode(value) }).toEqual({
+				value,
+				mode: "metadata_only",
+			});
+		}
+	});
+
+	it("anchors the Rust parse to the expressions the table claims", () => {
+		const header = "pub fn parse(value: &str) -> Self";
+		expect({
+			normalizes: rustAnchor(
+				privacyRs,
+				PRIVACY_RS,
+				header,
+				"match value.trim().to_ascii_lowercase().as_str()"
+			),
+			optIn: rustAnchor(
+				privacyRs,
+				PRIVACY_RS,
+				header,
+				'"content" | "full" => Self::Content'
+			),
+			fallback: rustAnchor(
+				privacyRs,
+				PRIVACY_RS,
+				header,
+				"_ => Self::MetadataOnly"
+			),
+		}).toEqual({
+			normalizes: ANCHOR_PRESENT,
+			optIn: ANCHOR_PRESENT,
+			fallback: ANCHOR_PRESENT,
+		});
+	});
+});
+
 describe("local and cloud agent lanes", () => {
 	it("keeps the legacy default local-only", () => {
 		expect(agentLanePreferenceKey("local")).toBe(
@@ -420,6 +578,13 @@ describe("managed node-routing preferences", () => {
 						{ kind: "secret", name: "internal_id", regex: "id_[0-9]+" },
 					],
 				},
+				openrouter: {
+					allow_fallbacks: true,
+					data_collection: "deny",
+					sort: "throughput",
+					zdr: true,
+				},
+				openrouter_model_fallbacks: [" anthropic/claude-sonnet-4.6 "],
 			})
 		);
 		expect(prefs).toEqual({
@@ -429,7 +594,18 @@ describe("managed node-routing preferences", () => {
 					{ kind: "secret", name: "internal_id", regex: "id_[0-9]+" },
 				],
 			},
+			openrouter: {
+				allow_fallbacks: true,
+				data_collection: "deny",
+				sort: "throughput",
+				zdr: true,
+			},
+			openrouter_model_fallbacks: ["anthropic/claude-sonnet-4.6"],
 		});
+	});
+
+	it("keeps the serialized preference within Gateway's documented envelope", () => {
+		expect(NODE_ROUTING_PREFS_MAX_BYTES).toBe(3072);
 	});
 
 	it("treats malformed or unsafe pattern entries as empty preferences", () => {
@@ -442,10 +618,17 @@ describe("managed node-routing preferences", () => {
 					},
 				})
 			)
-		).toEqual({ fallback: ["anthropic"], firewall: null });
+		).toEqual({
+			fallback: ["anthropic"],
+			firewall: null,
+			openrouter: null,
+			openrouter_model_fallbacks: [],
+		});
 		expect(parseNodeRoutingPreferences("not-json")).toEqual({
 			fallback: [],
 			firewall: null,
+			openrouter: null,
+			openrouter_model_fallbacks: [],
 		});
 	});
 });
@@ -526,6 +709,20 @@ describe("coerceAutoRecallTopK", () => {
 				"let from_str = |s: &str| s.trim().parse::<usize>().ok().filter(|n| *n > 0);"
 			)
 		).toBe(ANCHOR_PRESENT);
+	});
+});
+
+describe("parseContextHandoffPolicy", () => {
+	it("defaults unset and unknown values to smaller-context like Core", () => {
+		expect(parseContextHandoffPolicy(null)).toBe("smaller-context");
+		expect(parseContextHandoffPolicy("bogus")).toBe("smaller-context");
+	});
+
+	it("accepts Core's literals and aliases", () => {
+		expect(parseContextHandoffPolicy(" OFF ")).toBe("off");
+		expect(parseContextHandoffPolicy("never")).toBe("off");
+		expect(parseContextHandoffPolicy("provider")).toBe("different-provider");
+		expect(parseContextHandoffPolicy("always")).toBe("always");
 	});
 });
 
@@ -786,9 +983,8 @@ describe("the anchor helpers fail for the right reasons", () => {
 //  - `parseContextBudget`         → `parse_context_budget`, usize. Mirrored.
 //  - `coerceContextOutputReserve` → `resolve_context_window`, usize. Mirrored.
 //  - `getSupportAccessLocalExpiry`→ `privacy.rs::support_access_local`, which is
-//    `s.trim().parse::<i64>()` — a SIGNED parse, a different grammar. `Number()`
-//    is looser than both; the divergence and why it is tolerated are documented
-//    on the function itself.
+//    `s.trim().parse::<i64>()` — a SIGNED parse with bounded integer grammar.
+//    Mirrored before conversion to Number; invalid values resolve to zero.
 //  - `getAgentAutoRouting`        → a JSON blob, whose `similarity_threshold` is
 //    an f64 on the gateway. Not a usize key at all.
 //  - `getIslandEdgeOffset`        → NO Rust consumer. The other end is the
@@ -953,5 +1149,88 @@ describe("the batched agent-flag writers target the key they are named for", () 
 		// If these ever became the same string the two tests above would both pass
 		// while the writers were interchangeable — the exact hazard, undetected.
 		expect(AGENT_TOOL_BRIDGE_PREF_KEY).not.toBe(AGENT_GATEWAY_ROUTING_PREF_KEY);
+	});
+});
+
+describe("getScopedContextBudgetOverrides", () => {
+	const target = { url: "http://127.0.0.1:7777", token: null, userJwt: null };
+	const PREFIX = "/api/preferences/";
+
+	/** Run `run` against a fake `/api/preferences/:key` store; returns the GET keys. */
+	async function withPrefs<T>(
+		stored: Record<string, string>,
+		run: () => Promise<T>
+	): Promise<{ read: string[]; result: T }> {
+		const original = globalThis.fetch;
+		const read: string[] = [];
+		globalThis.fetch = Object.assign(
+			(input: Parameters<typeof original>[0]) => {
+				const url = new URL(
+					typeof input === "string"
+						? input
+						: input instanceof URL
+							? input.href
+							: input.url
+				);
+				const key = decodeURIComponent(url.pathname.slice(PREFIX.length));
+				read.push(key);
+				const value = stored[key];
+				return Promise.resolve(
+					value === undefined
+						? Response.json({ error: "unset" }, { status: 404 })
+						: Response.json({ key, value })
+				);
+			},
+			{ preconnect: original.preconnect }
+		);
+		try {
+			return { read, result: await run() };
+		} finally {
+			globalThis.fetch = original;
+		}
+	}
+
+	it("reads only the local key when no engine ids are known", async () => {
+		const { read, result } = await withPrefs(
+			{ "context.max-tokens.local": " auto " },
+			() => getScopedContextBudgetOverrides(target)
+		);
+		expect(read).toEqual(["context.max-tokens.local"]);
+		expect(result).toEqual([
+			{ key: "context.max-tokens.local", value: "auto" },
+		]);
+	});
+
+	it("maps each distinct engine id to its per-engine key and ignores blank or unset values", async () => {
+		const { read, result } = await withPrefs(
+			{
+				"context.max-tokens.local": "   ",
+				"context.max-tokens.engine.llamacpp": "8192",
+				"context.max-tokens.engine.ollama": "",
+				"context.max-tokens.engine.mlx": "off",
+			},
+			() =>
+				getScopedContextBudgetOverrides(target, [
+					"llamacpp",
+					"ollama",
+					"llamacpp",
+					" ",
+					"mlx",
+					"vllm",
+				])
+		);
+		expect([...read].sort()).toEqual(
+			[
+				"context.max-tokens.local",
+				"context.max-tokens.engine.llamacpp",
+				"context.max-tokens.engine.ollama",
+				"context.max-tokens.engine.mlx",
+				"context.max-tokens.engine.vllm",
+			].sort()
+		);
+		expect(result).toEqual([
+			{ key: "context.max-tokens.engine.llamacpp", value: "8192" },
+			{ key: "context.max-tokens.engine.mlx", value: "off" },
+		]);
 	});
 });

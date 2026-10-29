@@ -60,12 +60,23 @@ const recent = (ctx.transcript || [])
 if (!recent.trim()) {
 	return { kind: "none" };
 }
-const raw = await host.sideModel({
-	system:
-		"You write a short, specific title for a chat conversation based on the recent turns. Reply with ONLY the title: 3 to 6 words, in the same language as the chat, no surrounding quotes, no trailing punctuation, no markdown. Do not answer the chat — only title it.",
-	prompt: recent,
-	model_pref_key: "auto-title-model",
-});
+let raw;
+try {
+	raw = await host.sideModel({
+		system:
+			"You write a short, specific title for a chat conversation based on the recent turns. Reply with ONLY the title: 3 to 6 words, in the same language as the chat, no surrounding quotes, no trailing punctuation, no markdown. Do not answer the chat — only title it.",
+		prompt: recent,
+		model_pref_key: "auto-title-model",
+	});
+} catch (e) {
+	host.log("chat-title: title generation failed", e);
+	// The user asked for this rename by name, so a model failure fails the run
+	// and its reason reaches them; the automatic pass stays silent.
+	if (forced) {
+		throw e;
+	}
+	return { kind: "none" };
+}
 if (!raw || !String(raw).trim()) {
 	return { kind: "none" };
 }

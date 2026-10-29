@@ -40,6 +40,7 @@
   ],
   "permission_grants": [
     "hook:run-agent",
+    "hook:run-agent:write",
     "storage:kv",
     "core:list_agents",
     "shell:integrate",

@@ -153,6 +153,10 @@ async fn run_automatic_review_tick(state: &ServerState) {
         );
         return;
     }
+    if super::memory_reflect::reflect_quiet_hours_active(state, hour).await {
+        tracing::debug!(hour, "Dream automatic review is in Reflect quiet hours");
+        return;
+    }
     match run_dream_review_inner(state, &None, "automatic").await {
         Ok(body) => {
             let proposal_count = body["review"]["proposals"].as_array().map_or(0, Vec::len);
@@ -194,16 +198,23 @@ pub(super) async fn get_dream_review(
         .await
         .unwrap_or(false);
     match pending_proposals(&state, &owner, include_sensitive).await {
-        Ok(proposals) => Json(review_body(
-            "manual",
-            &proposals,
-            if proposals.is_empty() {
-                None
-            } else {
-                Some("Chat-derived suggestions waiting for your review.")
-            },
-        ))
-        .into_response(),
+        Ok(proposals) => {
+            let mut body = review_body(
+                "manual",
+                &proposals,
+                if proposals.is_empty() {
+                    None
+                } else {
+                    Some("Chat-derived suggestions waiting for your review.")
+                },
+            );
+            // Sealed recall indexes search vectors from memory: report how much
+            // is hydrated and how many rows did not open, so degraded semantic
+            // recall is visible rather than silent. Counts only, no content.
+            body["recall_diagnostics"] =
+                crate::rag_host::recall_diagnostics(&state.retrieval, &state.conversations);
+            Json(body).into_response()
+        }
         Err(error) => super::json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -271,14 +282,21 @@ async fn run_dream_review_inner(
 
     let (model, effort) = resolve_dream_model(state).await;
     let (system, user) = dream_prompt(&sources);
-    let raw = super::call_side_model(state, &model, &effort, &system, &user)
-        .await
-        .map_err(|error| {
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("Dream model unavailable: {error}"),
-            )
-        })?;
+    let raw = super::call_side_model(
+        state,
+        &crate::sidecar::gateway::SidePurpose::MemoryDream,
+        &model,
+        &effort,
+        &system,
+        &user,
+    )
+    .await
+    .map_err(|error| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Dream model unavailable: {error}"),
+        )
+    })?;
     let output = parse_model_output(&raw).map_err(|error| {
         (
             StatusCode::BAD_GATEWAY,
@@ -606,7 +624,7 @@ async fn review_dream_proposal(
     {
         Ok(Some(reviewed)) => reviewed,
         Ok(None) => {
-            return super::json_error(StatusCode::NOT_FOUND, "proposal not found".to_owned())
+            return super::json_error(StatusCode::NOT_FOUND, "proposal not found".to_owned());
         }
         Err(error) => {
             return super::json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
@@ -809,10 +827,7 @@ async fn resolve_dream_model(state: &ServerState) -> (String, String) {
         .ok()
         .flatten()
         .unwrap_or_default();
-    (
-        crate::registry::DEFAULT_LOCAL_CHAT_MODEL_ID.to_owned(),
-        effort,
-    )
+    (crate::registry::local_chat_model_id(), effort)
 }
 
 fn parse_model_output(raw: &str) -> Result<DreamModelOutput, String> {
@@ -932,7 +947,7 @@ fn parse_bool(value: &str) -> bool {
     )
 }
 
-fn is_quiet_hour(hour: u8, start: u8, end: u8) -> bool {
+pub(super) fn is_quiet_hour(hour: u8, start: u8, end: u8) -> bool {
     if start == end {
         return false;
     }

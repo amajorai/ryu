@@ -27,4 +27,29 @@ describe("resolveRyuCorsOrigins", () => {
 		expect(origins).toContain("chrome-extension://custom");
 		expect(origins).not.toContain(DEFAULT_EXTENSION_ORIGIN);
 	});
+
+	it("does not trust the Expo Go or placeholder schemes outside development", () => {
+		for (const nodeEnv of ["production", "test", undefined]) {
+			for (const corsOrigin of ["https://ryuhq.com", undefined]) {
+				const origins = resolveRyuCorsOrigins({ corsOrigin, nodeEnv });
+				expect(origins.some((origin) => origin.startsWith("exp:"))).toBe(false);
+				expect(
+					origins.some((origin) => origin.startsWith("mybettertapp:"))
+				).toBe(false);
+				expect(origins).toContain("ryu://");
+			}
+		}
+	});
+
+	it("trusts the Expo Go scheme in development only", () => {
+		for (const corsOrigin of ["https://ryuhq.com", undefined]) {
+			const origins = resolveRyuCorsOrigins({
+				corsOrigin,
+				nodeEnv: "development",
+			});
+			expect(origins).toContain("exp://");
+			expect(origins).not.toContain("mybettertapp://");
+			expect(origins).toContain("ryu://");
+		}
+	});
 });

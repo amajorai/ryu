@@ -1,17 +1,17 @@
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { sileo } from "sileo";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { useActiveTargetGetter } from "@/src/hooks/useActiveNode.ts";
 import {
 	fetchIngressBackend,
 	INGRESS_URL_PREF,
@@ -30,8 +30,8 @@ import {
 	setPreference,
 } from "@/src/lib/api/preferences.ts";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
-import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
+import { ComposioBillingSettings } from "./ComposioBillingSettings.tsx";
 import {
 	type IngressToast,
 	ingressErrorDescription,
@@ -41,6 +41,7 @@ import {
 	offersOwnRelay,
 } from "./integrations-ingress.ts";
 import {
+	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -63,6 +64,7 @@ function raiseIngressToast(toast: IngressToast): void {
 }
 
 export function IntegrationsTab() {
+	const getTarget = useActiveTargetGetter();
 	const [hfToken, setHfTokenValue] = useState("");
 	const [aaKey, setAaKeyValue] = useState("");
 	const [aaMode, setAaModeValue] = useState<AaStatsMode>("cached");
@@ -89,6 +91,11 @@ export function IntegrationsTab() {
 	const [savedIngressUrl, setSavedIngressUrl] = useState("");
 	const [ingressUrlLoaded, setIngressUrlLoaded] = useState(false);
 	const [savingIngressUrl, setSavingIngressUrl] = useState(false);
+	// A failed read of the saved values. The fields they feed stay disabled (a
+	// save over a value that could not be read would silently replace it), so
+	// the failure has to be visible and retryable rather than a locked tab.
+	const [loadError, setLoadError] = useState(false);
+	const [reloadKey, setReloadKey] = useState(0);
 
 	const navigate = useNavigate();
 	const openGateway = useGatewayDialog((s) => s.openGateway);
@@ -99,19 +106,31 @@ export function IntegrationsTab() {
 
 	useEffect(() => {
 		let cancelled = false;
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		setLoadError(false);
+		// Every (re)load re-earns readiness: a retry whose read now fails must
+		// not leave the controls enabled over the previous attempt's values.
+		setLoaded(false);
+		setIngressUrlLoaded(false);
+		const target = getTarget();
+		const reportLoadError = () => {
+			if (!cancelled) {
+				setLoadError(true);
+			}
+		};
 		Promise.all([
 			getHfToken(target),
 			getAaApiKey(target),
 			getAaStatsMode(target),
-		]).then(([token, key, mode]) => {
-			if (!cancelled) {
-				setHfTokenValue(token);
-				setAaKeyValue(key);
-				setAaModeValue(mode);
-				setLoaded(true);
-			}
-		});
+		])
+			.then(([token, key, mode]) => {
+				if (!cancelled) {
+					setHfTokenValue(token);
+					setAaKeyValue(key);
+					setAaModeValue(mode);
+					setLoaded(true);
+				}
+			})
+			.catch(reportLoadError);
 		// Ingress backend is a soft dependency — an older Core 404s here, which
 		// we swallow and leave `ingressChoices` null so the section stays hidden.
 		fetchIngressBackend(target)
@@ -125,17 +144,21 @@ export function IntegrationsTab() {
 			.catch(() => {
 				// No ingress plane on this node — leave the section hidden.
 			});
-		getPreference(target, INGRESS_URL_PREF).then((val) => {
-			if (!cancelled) {
-				setIngressUrlValue(val ?? "");
-				setSavedIngressUrl(val ?? "");
-				setIngressUrlLoaded(true);
-			}
-		});
+		getPreference(target, INGRESS_URL_PREF)
+			.then((val) => {
+				if (!cancelled) {
+					setIngressUrlValue(val ?? "");
+					setSavedIngressUrl(val ?? "");
+					setIngressUrlLoaded(true);
+				}
+			})
+			.catch(reportLoadError);
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+		// `reloadKey` is load-bearing: the "Retry" button only bumps it, so without
+		// it the button is dead.
+	}, [reloadKey]);
 
 	const handleSelectIngress = async (kind: string | null) => {
 		if (!kind || kind === ingressBackend) {
@@ -144,7 +167,7 @@ export function IntegrationsTab() {
 		const previous = ingressBackend;
 		setIngressBackendValue(kind);
 		setSavingIngress(true);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		try {
 			await setIngressBackend(target, kind);
 			// Reaching here means Core's own-relay gate PASSED, so the "no public URL
@@ -174,67 +197,80 @@ export function IntegrationsTab() {
 	// ingress is built once at Core start, so this applies on the next restart.
 	const handleSaveIngressUrl = async () => {
 		setSavingIngressUrl(true);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
+		const target = getTarget();
 		const trimmed = ingressUrl.trim();
-		const ok = await setPreference(target, INGRESS_URL_PREF, trimmed);
-		setSavingIngressUrl(false);
-		if (!ok) {
+		try {
+			const ok = await setPreference(target, INGRESS_URL_PREF, trimmed);
+			if (!ok) {
+				sileo.error({ title: "Failed to save the public URL" });
+				return;
+			}
+			// Core stored the trimmed form, so that — not the raw input — is now the
+			// persisted value the selection gate will read.
+			setIngressUrlValue(trimmed);
+			setSavedIngressUrl(trimmed);
+			// No client-side URL validation on purpose: `own_relay_rejection` in Core is
+			// the single authority on what counts as usable, and a second copy here would
+			// drift from it. The cost is bounded but real, and not claimed away: while
+			// own-relay is NOT the active backend the pref is inert and Core refuses the
+			// eventual selection with the reason; while it IS active nothing re-validates
+			// a write (the gate runs only on the backend POST), so a bad value saved here
+			// surfaces at the next Core start. Closing that belongs in Core, on the pref
+			// write — not in a second copy of the rule.
+			raiseIngressToast(ingressUrlSavedToast(trimmed, ingressBackend));
+		} catch {
+			// Keep the previous saved value so the dirty marker leaves Save enabled.
 			sileo.error({ title: "Failed to save the public URL" });
-			return;
+		} finally {
+			setSavingIngressUrl(false);
 		}
-		// Core stored the trimmed form, so that — not the raw input — is now the
-		// persisted value the selection gate will read.
-		setIngressUrlValue(trimmed);
-		setSavedIngressUrl(trimmed);
-		// No client-side URL validation on purpose: `own_relay_rejection` in Core is
-		// the single authority on what counts as usable, and a second copy here would
-		// drift from it. The cost is bounded but real, and not claimed away: while
-		// own-relay is NOT the active backend the pref is inert and Core refuses the
-		// eventual selection with the reason; while it IS active nothing re-validates
-		// a write (the gate runs only on the backend POST), so a bad value saved here
-		// surfaces at the next Core start. Closing that belongs in Core, on the pref
-		// write — not in a second copy of the rule.
-		raiseIngressToast(ingressUrlSavedToast(trimmed, ingressBackend));
 	};
 
 	const handleToggleRealtime = async (live: boolean) => {
+		const previous = aaMode;
 		const next: AaStatsMode = live ? "realtime" : "cached";
 		setAaModeValue(next);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		const ok = await setAaStatsMode(target, next);
-		if (ok) {
+		const target = getTarget();
+		try {
+			await setAaStatsMode(target, next);
 			sileo.success({
 				title: live
 					? "Using live Artificial Analysis data"
 					: "Using cached data",
 			});
-		} else {
-			setAaModeValue(live ? "cached" : "realtime");
+		} catch {
+			setAaModeValue(previous);
 			sileo.error({ title: "Failed to update data mode" });
 		}
 	};
 
 	const handleSave = async () => {
 		setSaving(true);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		const ok = await setHfToken(target, hfToken);
-		setSaving(false);
-		if (ok) {
+		const target = getTarget();
+		const trimmed = hfToken.trim();
+		try {
+			await setHfToken(target, trimmed);
+			setHfTokenValue(trimmed);
 			sileo.success({ title: "Hugging Face token saved" });
-		} else {
+		} catch {
 			sileo.error({ title: "Failed to save Hugging Face token" });
+		} finally {
+			setSaving(false);
 		}
 	};
 
 	const handleSaveAa = async () => {
 		setSavingAa(true);
-		const target = toTarget(useNodeStore.getState().getActiveNode());
-		const ok = await setAaApiKey(target, aaKey);
-		setSavingAa(false);
-		if (ok) {
+		const target = getTarget();
+		const trimmed = aaKey.trim();
+		try {
+			await setAaApiKey(target, trimmed);
+			setAaKeyValue(trimmed);
 			sileo.success({ title: "Artificial Analysis key saved" });
-		} else {
+		} catch {
 			sileo.error({ title: "Failed to save Artificial Analysis key" });
+		} finally {
+			setSavingAa(false);
 		}
 	};
 
@@ -260,6 +296,24 @@ export function IntegrationsTab() {
 
 	return (
 		<div className="space-y-6">
+			{loadError ? (
+				<SettingsCard className="flex items-center justify-between gap-3">
+					<p className="text-muted-foreground text-sm" role="alert">
+						Couldn't read this node's saved integration settings. The fields
+						that depend on them stay locked so a save cannot replace values that
+						were not loaded.
+					</p>
+					<Button
+						aria-label="Retry loading integration settings"
+						onClick={() => setReloadKey((key) => key + 1)}
+						size="sm"
+						type="button"
+						variant="outline"
+					>
+						Retry
+					</Button>
+				</SettingsCard>
+			) : null}
 			<SettingsSection
 				caption="Add a Hugging Face access token to raise download rate limits and install gated models (the ones marked with a lock in the model catalog)."
 				title="Hugging Face"
@@ -268,12 +322,14 @@ export function IntegrationsTab() {
 					<SettingsItem title="Access token">
 						<div className="flex items-center gap-2">
 							<Input
+								aria-label="Hugging Face access token"
 								autoComplete="off"
-								className="h-8 flex-1 text-xs"
+								className="flex-1"
 								disabled={!loaded}
 								id="hf-token"
 								onChange={(e) => setHfTokenValue(e.target.value)}
 								placeholder="hf_…"
+								size="compact"
 								type="password"
 								value={hfToken}
 							/>
@@ -290,31 +346,29 @@ export function IntegrationsTab() {
 							Leave empty and save to remove it.
 						</p>
 					</SettingsItem>
+					<SettingsItem title="How to set this up">
+						<ol className="list-decimal space-y-1 pb-1 pl-4 text-muted-foreground text-xs">
+							<li>
+								Create a token at{" "}
+								<a
+									className="underline hover:text-foreground"
+									href="https://huggingface.co/settings/tokens"
+									rel="noopener noreferrer"
+									target="_blank"
+								>
+									huggingface.co/settings/tokens
+								</a>
+								. A <code>read</code> token is enough.
+							</li>
+							<li>Paste it above and click Save.</li>
+							<li>
+								For each gated model, open its Hugging Face page and accept the
+								model's terms first. A token alone does not unlock a gated
+								download.
+							</li>
+						</ol>
+					</SettingsItem>
 				</SettingsGroup>
-
-				<div className="mx-3 space-y-1.5 rounded-lg border border-dashed px-4 py-3 text-muted-foreground text-xs">
-					<p className="font-medium text-foreground">How to set this up</p>
-					<ol className="list-decimal space-y-1 pl-4">
-						<li>
-							Create a token at{" "}
-							<a
-								className="underline hover:text-foreground"
-								href="https://huggingface.co/settings/tokens"
-								rel="noopener noreferrer"
-								target="_blank"
-							>
-								huggingface.co/settings/tokens
-							</a>
-							. A <code>read</code> token is enough.
-						</li>
-						<li>Paste it above and click Save.</li>
-						<li>
-							For each gated model, open its Hugging Face page and accept the
-							model's terms first. A token alone does not unlock a gated
-							download.
-						</li>
-					</ol>
-				</div>
 			</SettingsSection>
 
 			<SettingsSection
@@ -325,12 +379,14 @@ export function IntegrationsTab() {
 					<SettingsItem title="API key">
 						<div className="flex items-center gap-2">
 							<Input
+								aria-label="Artificial Analysis API key"
 								autoComplete="off"
-								className="h-8 flex-1 text-xs"
+								className="flex-1"
 								disabled={!loaded}
 								id="aa-key"
 								onChange={(e) => setAaKeyValue(e.target.value)}
 								placeholder="aa-…"
+								size="compact"
 								type="password"
 								value={aaKey}
 							/>
@@ -347,9 +403,31 @@ export function IntegrationsTab() {
 							artificialanalysis.ai. Leave empty and save to remove it.
 						</p>
 					</SettingsItem>
+					<SettingsItem title="How to set this up">
+						<ol className="list-decimal space-y-1 pb-1 pl-4 text-muted-foreground text-xs">
+							<li>
+								Create a free key at{" "}
+								<a
+									className="underline hover:text-foreground"
+									href="https://artificialanalysis.ai/api-reference"
+									rel="noopener noreferrer"
+									target="_blank"
+								>
+									artificialanalysis.ai/api-reference
+								</a>
+								.
+							</li>
+							<li>Paste it above and click Save.</li>
+							<li>
+								Stats appear on model detail pages in the catalog when a model
+								matches an Artificial Analysis entry.
+							</li>
+						</ol>
+					</SettingsItem>
 					<SettingsItem
 						actions={
 							<Switch
+								aria-label="Use live Artificial Analysis data"
 								checked={aaMode === "realtime"}
 								disabled={!loaded}
 								id="aa-realtime"
@@ -360,73 +438,58 @@ export function IntegrationsTab() {
 						title="Live data"
 					/>
 				</SettingsGroup>
-
-				<div className="mx-3 space-y-1.5 rounded-lg border border-dashed px-4 py-3 text-muted-foreground text-xs">
-					<p className="font-medium text-foreground">How to set this up</p>
-					<ol className="list-decimal space-y-1 pl-4">
-						<li>
-							Create a free key at{" "}
-							<a
-								className="underline hover:text-foreground"
-								href="https://artificialanalysis.ai/api-reference"
-								rel="noopener noreferrer"
-								target="_blank"
-							>
-								artificialanalysis.ai/api-reference
-							</a>
-							.
-						</li>
-						<li>Paste it above and click Save.</li>
-						<li>
-							Stats appear on model detail pages in the catalog when a model
-							matches an Artificial Analysis entry.
-						</li>
-					</ol>
-				</div>
 			</SettingsSection>
 
 			<SettingsSection
 				caption="Composio powers agent connections (Gmail, GitHub, Slack, and 800+ apps). Its API key now lives with the other execution credentials in Gateway → API keys; browse and connect accounts in Marketplace → Connections."
 				title="Composio"
 			>
-				<div className="mx-3 space-y-1.5 rounded-lg border border-dashed px-4 py-3 text-muted-foreground text-xs">
-					<p className="font-medium text-foreground">
-						Moved to Gateway → API keys
-					</p>
-					<ol className="list-decimal space-y-1 pl-4">
-						<li>
-							Open this device's settings → API keys and paste your Composio API
-							key (create one at{" "}
-							<a
-								className="underline hover:text-foreground"
-								href="https://platform.composio.dev"
-								rel="noopener noreferrer"
-								target="_blank"
-							>
-								platform.composio.dev
-							</a>
-							).
-						</li>
-						<li>
-							Go to Marketplace → Connections to connect the apps you want
-							(Gmail, GitHub, …).
-						</li>
-						<li>
-							Open an agent in the editor → Connections to attach connected
-							toolkits, choosing all tools or specific ones.
-						</li>
-					</ol>
-					<div className="flex flex-wrap gap-2 pt-1">
-						<Button onClick={handleOpenGatewayKeys} size="sm" variant="ghost">
-							Open Gateway keys
-						</Button>
-						<Button onClick={handleOpenMarketplace} size="sm" variant="ghost">
-							Open Marketplace
-						</Button>
-					</div>
-				</div>
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Button onClick={handleOpenGatewayKeys} size="sm" variant="ghost">
+								Open Gateway keys
+							</Button>
+						}
+						title="Composio API key"
+					/>
+					<SettingsItem
+						actions={
+							<Button onClick={handleOpenMarketplace} size="sm" variant="ghost">
+								Open Marketplace
+							</Button>
+						}
+						title="Connected accounts"
+					/>
+					<SettingsItem title="How to set this up">
+						<ol className="list-decimal space-y-1 pb-1 pl-4 text-muted-foreground text-xs">
+							<li>
+								Open this device's settings → API keys and paste your Composio
+								API key (create one at{" "}
+								<a
+									className="underline hover:text-foreground"
+									href="https://platform.composio.dev"
+									rel="noopener noreferrer"
+									target="_blank"
+								>
+									platform.composio.dev
+								</a>
+								).
+							</li>
+							<li>
+								Go to Marketplace → Connections to connect the apps you want
+								(Gmail, GitHub, …).
+							</li>
+							<li>
+								Open an agent in the editor → Connections to attach connected
+								toolkits, choosing all tools or specific ones.
+							</li>
+						</ol>
+					</SettingsItem>
+				</SettingsGroup>
 			</SettingsSection>
 
+			<ComposioBillingSettings />
 			{ingressChoices && ingressChoices.length > 0 && (
 				<SettingsSection
 					caption="Choose how this node exposes a public URL to receive inbound webhooks (the Composio triggers above need one). The backend is built when the node starts, so a change applies after a restart."
@@ -444,7 +507,11 @@ export function IntegrationsTab() {
 									onValueChange={handleSelectIngress}
 									value={ingressBackend}
 								>
-									<SelectTrigger className="h-8 w-56 text-xs">
+									<SelectTrigger
+										appearance="gateway-action"
+										aria-label="Webhook ingress backend"
+										className="w-56"
+									>
 										<SelectValue placeholder="Select a backend" />
 									</SelectTrigger>
 									<SelectContent>
@@ -457,7 +524,7 @@ export function IntegrationsTab() {
 									</SelectContent>
 								</Select>
 							}
-							description="Applies on the next node restart. Ryu Relay is the managed default; Tailscale Funnel and Cloudflare Tunnel expose this node's own URL."
+							description="Applies on the next node restart. Ryu Relay is the managed default and needs you to be signed in; Tailscale Funnel and Cloudflare Tunnel expose this node's own URL."
 							title="Ingress backend"
 						/>
 						{/*
@@ -482,12 +549,14 @@ export function IntegrationsTab() {
 							<SettingsItem title="Self-hosted relay public URL">
 								<div className="flex items-center gap-2">
 									<Input
+										aria-label="Self-hosted relay public URL"
 										autoComplete="off"
-										className="h-8 flex-1 text-xs"
+										className="flex-1"
 										disabled={!ingressUrlLoaded}
 										id="ingress-url"
 										onChange={(e) => setIngressUrlValue(e.target.value)}
 										placeholder="https://ryu.example.com"
+										size="compact"
 										type="url"
 										value={ingressUrl}
 									/>

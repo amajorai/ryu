@@ -80,7 +80,8 @@ if (typed.indexOf("/plan-continue") === 0) {
 // on` deletes it rather than writing "on". So a present record, whatever it
 // holds, means stop; a garbled one stops too, because failing quiet is the right
 // direction for a feature that otherwise spends tokens on its own.
-if (await host.storage.get(convId)) {
+const storedOptOut = await host.storage.get(convId);
+if (storedOptOut !== null && storedOptOut !== undefined) {
 	return { kind: "none" };
 }
 

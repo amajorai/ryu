@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/predict.ts
 //
 // Typed client for Core's predictive-typing config (`/api/predict/config`). This
@@ -44,12 +46,31 @@ export const DEFAULT_PREDICT_CONFIG: PredictConfig = {
 };
 
 /** Read the predictive-typing config (defaults applied), or defaults on error. */
+const predictConfigResponseCodec: z.ZodType<PredictConfig> = z
+	.object({
+		agentId: z.string().optional(),
+		appAllowlist: z.array(z.string()),
+		debounceMs: z.number(),
+		effort: z.string(),
+		maxChars: z.number(),
+		model: z.string(),
+	})
+	.passthrough();
 export async function getPredictConfig(
-	target: ApiTarget
+	target: ApiTarget,
+	options: { fallbackOnError?: boolean } = {}
 ): Promise<PredictConfig> {
 	try {
-		return await request<PredictConfig>(target, "/api/predict/config");
-	} catch {
+		return await request<PredictConfig>(
+			target,
+			"/api/predict/config",
+			{},
+			predictConfigResponseCodec
+		);
+	} catch (error) {
+		if (options.fallbackOnError === false) {
+			throw error;
+		}
 		return { ...DEFAULT_PREDICT_CONFIG };
 	}
 }
@@ -60,10 +81,15 @@ export async function setPredictConfig(
 	config: PredictConfig
 ): Promise<boolean> {
 	try {
-		await request(target, "/api/predict/config", {
-			method: "PUT",
-			body: config,
-		});
+		await request(
+			target,
+			"/api/predict/config",
+			{
+				method: "PUT",
+				body: config,
+			},
+			gatewayJsonValueSchema
+		);
 		return true;
 	} catch {
 		return false;

@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "split-preset-settings-proof.spec.ts",
+    "harness/split-preset-settings-proof.tsx"
+  ]
+}

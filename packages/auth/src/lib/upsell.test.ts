@@ -122,6 +122,36 @@ describe("selectUpsellCards — investment lever (V1)", () => {
 });
 
 describe("selectUpsellCards — friction + desire stay silent until V2", () => {
+	it("does not upsell local features from historical locked attempts", () => {
+		const cards = selectUpsellCards(
+			{
+				...EMPTY,
+				gatedAttempts: {
+					"prompt-studio": 10,
+					evals: 10,
+					graphrag: 10,
+					"companion-overlay": 10,
+					"gateway-governance-ui": 10,
+				},
+			},
+			UPSELL_WEIGHTS,
+			NOW
+		);
+		expect(cards).toEqual([]);
+	});
+
+	it("ignores historical cap hits for unlimited agents, runs, and Spaces", () => {
+		const cards = selectUpsellCards(
+			{
+				...EMPTY,
+				capHits: { maxAgents: 10, maxConcurrentRuns: 10, maxSpaces: 10 },
+			},
+			UPSELL_WEIGHTS,
+			NOW
+		);
+		expect(cards).toEqual([]);
+	});
+
 	it("emits no friction/desire cards when the maps are empty", () => {
 		const cards = selectUpsellCards(
 			{ ...EMPTY, agentSeconds: 7200 },
@@ -135,8 +165,8 @@ describe("selectUpsellCards — friction + desire stay silent until V2", () => {
 		const snapshot: UsageSnapshot = {
 			...EMPTY,
 			agentSeconds: 7200, // investment: ~37.2
-			capHits: { maxConcurrentRuns: 4 }, // friction: 32
-			gatedAttempts: { "fine-tuning": 3 }, // desire: 36
+			capHits: { maxOpenTabs: 4 }, // friction: 32
+			gatedAttempts: { "managed-inference": 3 }, // desire: 36
 		};
 		const cards = selectUpsellCards(snapshot, UPSELL_WEIGHTS, NOW);
 		expect(cards).toHaveLength(3);
@@ -155,7 +185,7 @@ describe("selectUpsellCards — lever diversity", () => {
 			sessionCount: 1200,
 			agentSeconds: 7200,
 			requestCount: 1100,
-			capHits: { maxAgents: 2 }, // friction: 16 (below the investment trio)
+			capHits: { maxOpenTabs: 2 }, // friction: 16 (below the investment trio)
 		};
 		const cards = selectUpsellCards(snapshot, UPSELL_WEIGHTS, NOW);
 		expect(cards).toHaveLength(3);

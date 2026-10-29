@@ -66,6 +66,39 @@ export async function processAndUploadAvatar(
 	return processAndUploadOwnerAvatar("user", userId, imageBuffer, mimeType);
 }
 
+const ALLOWED_AVATAR_MIME_TYPES: readonly string[] = [
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+];
+const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
+
+/** A rejected avatar input: the caller's fault, never a storage failure. */
+export class AvatarValidationError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "AvatarValidationError";
+	}
+}
+
+/**
+ * Validate an avatar before anything is uploaded or deleted. A replace must
+ * check the new image first, so a rejected file can never cost the user the
+ * avatar they already have.
+ */
+export function assertValidAvatarInput(mimeType: string, size: number): void {
+	if (!ALLOWED_AVATAR_MIME_TYPES.includes(mimeType)) {
+		throw new AvatarValidationError(
+			"Invalid image type. Only JPEG, PNG, and WebP are allowed."
+		);
+	}
+	if (size > MAX_AVATAR_BYTES) {
+		throw new AvatarValidationError(
+			"File size too large. Maximum size is 10MB."
+		);
+	}
+}
+
 /** Owner-scoped upload. {@link processAndUploadAvatar} is the user-only alias. */
 export async function processAndUploadOwnerAvatar(
 	ownerType: AvatarOwnerType,
@@ -74,15 +107,7 @@ export async function processAndUploadOwnerAvatar(
 	mimeType: string
 ): Promise<ProcessedAvatar> {
 	const userId = ownerId;
-	if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) {
-		throw new Error(
-			"Invalid image type. Only JPEG, PNG, and WebP are allowed."
-		);
-	}
-
-	if (imageBuffer.length > 10 * 1024 * 1024) {
-		throw new Error("File size too large. Maximum size is 10MB.");
-	}
+	assertValidAvatarInput(mimeType, imageBuffer.length);
 
 	const originalSize = imageBuffer.length;
 	// Legacy user avatars live at `avatars/{userId}/…` — keep that exact prefix
@@ -103,7 +128,13 @@ export async function processAndUploadOwnerAvatar(
 
 	let totalCompressedSize = 0;
 
-	for (const [sizeName, width] of Object.entries(AVATAR_SIZES)) {
+	for (const sizeName of [
+		"small",
+		"medium",
+		"large",
+		"xlarge",
+	] satisfies (keyof AvatarUrls)[]) {
+		const width = AVATAR_SIZES[sizeName];
 		const processedBuffer = await sharp(imageBuffer)
 			.resize(width, width, {
 				fit: "cover",
@@ -114,7 +145,7 @@ export async function processAndUploadOwnerAvatar(
 
 		const key = `${baseKey}_${width}.webp`;
 		await uploadToS3(key, processedBuffer, "image/webp");
-		urls[sizeName as keyof AvatarUrls] = generatePublicUrl(key);
+		urls[sizeName] = generatePublicUrl(key);
 		totalCompressedSize += processedBuffer.length;
 	}
 
@@ -156,33 +187,59 @@ function generatePublicUrl(key: string): string {
 	return `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 }
 
+async function deleteAvatarObject(key: string): Promise<void> {
+	await s3Client.send(
+		new DeleteObjectCommand({ Bucket: STORAGE_BUCKET_NAME, Key: key })
+	);
+}
+
+/**
+ * Delete exactly one uploaded avatar set (every rendered width of `avatarId`).
+ * A replace calls this with the avatar it displaced, after the new one is
+ * stored and recorded, so concurrent uploads each remove only their own
+ * predecessor and the final `avatarId` always keeps its files. Best-effort:
+ * an id outside the user's legacy prefix is ignored, and failures are logged.
+ */
+export async function deleteAvatarSet(
+	userId: string,
+	avatarId: string | null | undefined
+): Promise<void> {
+	if (!avatarId?.startsWith(`avatars/${userId}/`)) {
+		return;
+	}
+	try {
+		for (const width of Object.values(AVATAR_SIZES)) {
+			await deleteAvatarObject(`${avatarId}_${width}.webp`);
+		}
+	} catch (error) {
+		console.warn(
+			`Failed to delete avatar ${avatarId} for user ${userId}:`,
+			error
+		);
+	}
+}
+
+/** Delete every avatar object under the user's prefix, across all list pages. */
 export async function deleteUserAvatarFiles(userId: string): Promise<void> {
 	try {
-		const listCommand = new ListObjectsV2Command({
-			Bucket: STORAGE_BUCKET_NAME,
-			Prefix: `avatars/${userId}/`,
-		});
-
-		const response = await s3Client.send(listCommand);
-
-		if (response.Contents && response.Contents.length > 0) {
-			const objectsToDelete = response.Contents.map((obj) => ({
-				Key: obj.Key!,
-			}));
-			const batchSize = 1000;
-
-			for (let i = 0; i < objectsToDelete.length; i += batchSize) {
-				const batch = objectsToDelete.slice(i, i + batchSize);
-				for (const obj of batch) {
-					await s3Client.send(
-						new DeleteObjectCommand({
-							Bucket: STORAGE_BUCKET_NAME,
-							Key: obj.Key,
-						})
-					);
+		let continuationToken: string | undefined;
+		do {
+			const response = await s3Client.send(
+				new ListObjectsV2Command({
+					Bucket: STORAGE_BUCKET_NAME,
+					ContinuationToken: continuationToken,
+					Prefix: `avatars/${userId}/`,
+				})
+			);
+			for (const object of response.Contents ?? []) {
+				if (object.Key) {
+					await deleteAvatarObject(object.Key);
 				}
 			}
-		}
+			continuationToken = response.IsTruncated
+				? response.NextContinuationToken
+				: undefined;
+		} while (continuationToken);
 	} catch (error) {
 		console.warn(`Failed to delete avatar files for user ${userId}:`, error);
 	}

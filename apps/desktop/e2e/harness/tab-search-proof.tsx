@@ -54,7 +54,7 @@ function ProofStory() {
 			<div className="mx-auto flex max-w-3xl flex-col gap-6">
 				<header className="flex flex-wrap items-start justify-between gap-4">
 					<div>
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							React verification artifact
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl tracking-tight">
@@ -67,7 +67,7 @@ function ProofStory() {
 						</p>
 					</div>
 					<div
-						className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 font-medium text-emerald-200 text-xs"
+						className="rounded-full border border-success/30 bg-success/10 px-3 py-1.5 font-medium text-success text-xs"
 						data-proof-status={proofPassed ? "pass" : "pending"}
 						data-testid="proof-status"
 					>

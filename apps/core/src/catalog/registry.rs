@@ -101,6 +101,26 @@ const SENTINEL_VERSIONS: &[&str] = &[
     "",
 ];
 
+/// Whether `latest` is a different build an update would deliver over
+/// `installed`.
+///
+/// Both are first stripped of a leading `v`: an installer that records `1.2.3`
+/// against a GitHub tag `v1.2.3` otherwise "differs" forever. Semver versions are
+/// ordered (so a stale or rolled-back upstream never reads as an update);
+/// anything else — llama.cpp's `b10218`, sd.cpp's `master-890-…` — can only be
+/// compared for equality.
+pub fn update_differs(installed: &str, latest: &str) -> bool {
+    let installed = installed.trim().trim_start_matches(['v', 'V']);
+    let latest = latest.trim().trim_start_matches(['v', 'V']);
+    match (
+        semver::Version::parse(installed),
+        semver::Version::parse(latest),
+    ) {
+        (Ok(_), Ok(_)) => crate::update::is_newer(installed, latest),
+        _ => installed != latest,
+    }
+}
+
 /// Whether `version` is a real version that may be compared against another.
 pub fn is_comparable_version(version: &str) -> bool {
     !SENTINEL_VERSIONS.contains(&version.trim())
@@ -114,6 +134,16 @@ pub fn is_comparable_version(version: &str) -> bool {
 pub fn required_platforms(name: &str) -> &'static [&'static str] {
     match name {
         "freetoken" => &["linux", "windows"],
+        // vLLM and SGLang ship Linux wheels only (CUDA/ROCm); `pip install` on
+        // Windows or macOS fails or builds a CPU toy, so they are Linux-gated.
+        "vllm" | "sglang" => &["linux"],
+        // stable-diffusion.cpp publishes prebuilt servers for exactly these three
+        // families (the Linux/macOS assets are arch-specific; see
+        // `sdcpp_platform_supported`).
+        "sdcpp" => &["linux", "macos", "windows"],
+        // whisper.cpp only publishes a prebuilt server for Windows; elsewhere the
+        // operator must place their own binary (see `whispercpp_supported`).
+        "whispercpp" => &["windows"],
         // MLX is Apple's array framework — Apple Silicon macOS only. The vision
         // (mlx-vlm), native mlx-serve, and oMLX engines build on the same
         // framework, so they share the platform label.
@@ -133,12 +163,65 @@ pub fn required_platforms(name: &str) -> &'static [&'static str] {
         // backed by hypervisors/secure-container runtimes that exist only on
         // Linux/macOS — never Windows. Display + node-support gate only.
         "microsandbox" | "opensandbox" => &["linux", "macos"],
+        // MXC is wired through its Windows process-container executor
+        // (`wxc-exec`) only. Display + node-support gate only.
+        "mxc" => &["windows"],
+        // Apptainer/Singularity is a Linux-only container runtime; the backend's
+        // own `singularity::detect()` refuses every other OS for the same reason.
+        "singularity" => &["linux"],
         _ => &[],
     }
 }
 
 fn freetoken_platform_supported(os: &str, arch: &str) -> bool {
     arch == "x86_64" && matches!(os, "linux" | "windows")
+}
+
+/// The OS/arch pairs that have a pinned stable-diffusion.cpp server archive in
+/// `sidecar/providers/sdcpp/downloader.rs`. Windows arm64, Intel macOS and
+/// Linux arm64 have none, so the install would fail mid-download.
+fn sdcpp_platform_supported(os: &str, arch: &str) -> bool {
+    matches!(
+        (os, arch),
+        ("windows", "x86_64") | ("macos", "aarch64") | ("linux", "x86_64")
+    )
+}
+
+/// vLLM / SGLang publish Linux wheels for x86_64 and aarch64 only.
+fn linux_python_engine_supported(os: &str, arch: &str) -> bool {
+    os == "linux" && matches!(arch, "x86_64" | "aarch64")
+}
+
+/// A plain-language sentence describing what `name` needs when this node can't
+/// run it, or `None` when it can. Clients show this verbatim instead of guessing
+/// from `platforms`, because several gates also depend on CPU architecture or the
+/// macOS version, which the OS-family list cannot express.
+pub fn platform_requirement(name: &str) -> Option<&'static str> {
+    if supported_on_node(name) {
+        return None;
+    }
+    Some(match name {
+        "mlx" | "mlx-vlm" | "omlx" => "Needs a Mac with Apple Silicon (M1 or newer).",
+        "mlx-serve" => "Needs a Mac with Apple Silicon running macOS 26.2 or newer.",
+        "apfel" => {
+            "Needs a Mac with Apple Silicon running macOS 26 or newer, with Apple Intelligence on."
+        }
+        "freetoken" => "Needs a 64-bit Intel/AMD (x86_64) PC running Linux or Windows.",
+        "vllm" | "sglang" => "Needs Linux (x86_64 or arm64), ideally with an NVIDIA GPU.",
+        "sdcpp" => {
+            "Needs Windows x64, Linux x86_64, or a Mac with Apple Silicon. On other \
+             machines place your own sd-server build in the engine folder."
+        }
+        "whispercpp" => {
+            "The prebuilt server is Windows-only. On macOS and Linux place your own \
+             whisper-server build in the engine folder, or use Parakeet."
+        }
+        "audiocpp" => "Needs macOS, Linux x86_64, or Windows x64.",
+        "microsandbox" | "opensandbox" => "Needs Linux or macOS.",
+        "mxc" => "Needs Windows.",
+        "singularity" => "Needs Linux.",
+        _ => "Not available on this computer's operating system or processor.",
+    })
 }
 
 /// Whether THIS Core node can actually install/run `name`, given its own OS and
@@ -171,6 +254,19 @@ pub fn supported_on_node(name: &str) -> bool {
         // x64/arm64 where listed, plus Linux x86_64. Keep this gate aligned
         // with the pinned downloader assets rather than claiming every Rust
         // target can run the runtime.
+        // A binary the operator placed themselves is honoured on any platform —
+        // the downloader skips fetching when it is already present.
+        "sdcpp" => {
+            sdcpp_platform_supported(std::env::consts::OS, std::env::consts::ARCH)
+                || crate::sidecar::providers::sdcpp::downloader::server_binary_path().exists()
+        }
+        "whispercpp" => {
+            cfg!(target_os = "windows")
+                || crate::sidecar::providers::whispercpp::downloader::server_binary_path().exists()
+        }
+        "vllm" | "sglang" => {
+            linux_python_engine_supported(std::env::consts::OS, std::env::consts::ARCH)
+        }
         "audiocpp" => {
             cfg!(any(
                 all(
@@ -263,7 +359,9 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             description: "Native binary · fast autonomous agent (default)",
             category: SidecarCategory::Agent,
             source: SidecarSource::Github {
-                repo: "ryu-org/zeroclaw",
+                // The repo the downloader installs from — "latest" must name what an
+                // update can actually deliver.
+                repo: "zeroclaw-labs/zeroclaw",
             },
             deprecated: false,
             recommended: true,
@@ -293,8 +391,10 @@ pub fn static_registry() -> Vec<CatalogEntry> {
         },
         // Spider is no longer a Ryu-managed sidecar: it became a declarative
         // `command` plugin (fixtures/spider.manifest.json) backed by a BYO `spider`
-        // CLI (`cargo install spider_cli`) reached via the command-tool allowlist,
-        // so it is not listed in the managed-sidecar install catalog.
+        // CLI (`cargo install spider_cli --version 2.53.9 --locked`, the release
+        // whose proxy handling the egress broker relies on) reached via the
+        // command-tool allowlist, so it is not listed in the managed-sidecar
+        // install catalog.
         CatalogEntry {
             name: "llmfit",
             display_name: "LLMFit",
@@ -312,7 +412,9 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             description: "Personal intelligence engine — screen capture & OCR",
             category: SidecarCategory::Tool,
             source: SidecarSource::Github {
-                repo: "ryu-org/shadow",
+                // The repo the downloader installs from — "latest" must name what an
+                // update can actually deliver.
+                repo: "amajorai/shadow",
             },
             deprecated: false,
             recommended: true,
@@ -323,7 +425,9 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             description: "MCP server — AI eyes and hands for any desktop app",
             category: SidecarCategory::Tool,
             source: SidecarSource::Github {
-                repo: "ryu-org/ghost",
+                // The repo the downloader installs from — "latest" must name what an
+                // update can actually deliver.
+                repo: "amajorai/ghost",
             },
             deprecated: false,
             recommended: true,
@@ -384,7 +488,7 @@ pub fn static_registry() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "mlx-vlm",
             display_name: "MLX (vision)",
-            description: "Apple Silicon inference · mlx-vlm · text + vision/omni · macOS (arm64) only · requires python ≥3.9",
+            description: "Apple Silicon inference · mlx-vlm · text + vision/omni · macOS (arm64) only · requires python ≥3.10",
             category: SidecarCategory::Provider,
             source: SidecarSource::Pip { package: "mlx-vlm" },
             deprecated: false,
@@ -425,6 +529,17 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             category: SidecarCategory::Provider,
             source: SidecarSource::Github {
                 repo: "lemonade-sdk/lemonade",
+            },
+            deprecated: false,
+            recommended: false,
+        },
+        CatalogEntry {
+            name: "magnitude",
+            display_name: "Magnitude",
+            description: "Connect to Magnitude · self-tuning kernels for Apple Silicon, NVIDIA, AMD, or CPU · OpenAI-compatible chat · install Magnitude and download models first at magnitude.dev",
+            category: SidecarCategory::Provider,
+            source: SidecarSource::Github {
+                repo: "magnitudedev/magnitude",
             },
             deprecated: false,
             recommended: false,
@@ -542,7 +657,7 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             recommended: false,
         },
         // Universal multi-engine TTS — a small Python sidecar
-        // (`apps-store/voice/sidecar`, provisioned into `~/.ryu/tts-sidecar` from
+        // (`apps-store/voice/sidecar`, provisioned into `<data dir>/engines/audio/ryutts` from
         // the wheel its satellite publishes) that fronts many TTS engines
         // (Kokoro, KittenTTS, Pocket TTS, …) behind one
         // contract. Consumed by `POST /api/voice/speak?engine=<id>`; the engine
@@ -563,7 +678,7 @@ pub fn static_registry() -> Vec<CatalogEntry> {
         CatalogEntry {
             name: "sdcpp",
             display_name: "Stable Diffusion (image + video)",
-            description: "Local text-to-image and text/image-to-video · stable-diffusion.cpp · GGUF · OpenAI-compatible · CPU-friendly (GPU recommended for video)",
+            description: "Local text-to-image and text/image-to-video · stable-diffusion.cpp · GGUF · OpenAI-compatible · picks an image model that fits this machine's memory and disk (GPU recommended for video)",
             category: SidecarCategory::Media,
             source: SidecarSource::Github {
                 repo: "leejet/stable-diffusion.cpp",
@@ -632,12 +747,50 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             deprecated: false,
             recommended: false,
         },
+        CatalogEntry {
+            name: "mxc",
+            display_name: "MXC (Windows process container)",
+            description: "Microsoft eXecution Container via wxc-exec · AppContainer process isolation · no admin setup · detect-only · Windows 11 only",
+            category: SidecarCategory::Sandbox,
+            source: SidecarSource::Github {
+                repo: "microsoft/mxc",
+            },
+            deprecated: false,
+            recommended: false,
+        },
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_differs_ignores_a_v_prefix_and_orders_semver() {
+        assert!(!update_differs("1.2.3", "v1.2.3"));
+        assert!(update_differs("1.2.3", "v1.3.0"));
+        // A rolled-back or stale upstream is not an update.
+        assert!(!update_differs("1.3.0", "1.2.9"));
+        // Non-semver tags compare for equality only.
+        assert!(update_differs("b10000", "b10218"));
+        assert!(!update_differs("b10218", "b10218"));
+    }
+
+    #[test]
+    fn github_entries_check_the_repo_their_downloader_installs_from() {
+        let repo_of = |name: &str| {
+            static_registry()
+                .into_iter()
+                .find(|entry| entry.name == name)
+                .and_then(|entry| match entry.source {
+                    SidecarSource::Github { repo } => Some(repo),
+                    _ => None,
+                })
+        };
+        assert_eq!(repo_of("zeroclaw"), Some("zeroclaw-labs/zeroclaw"));
+        assert_eq!(repo_of("ghost"), Some("amajorai/ghost"));
+        assert_eq!(repo_of("shadow"), Some("amajorai/shadow"));
+    }
 
     #[test]
     fn freetoken_platform_matrix_enforces_supported_operating_systems_and_architecture() {
@@ -659,18 +812,68 @@ mod tests {
     }
 
     #[test]
+    fn sdcpp_platform_matrix_matches_the_pinned_server_archives() {
+        for (os, arch, expected) in [
+            ("windows", "x86_64", true),
+            ("macos", "aarch64", true),
+            ("linux", "x86_64", true),
+            ("windows", "aarch64", false),
+            ("macos", "x86_64", false),
+            ("linux", "aarch64", false),
+            ("freebsd", "x86_64", false),
+        ] {
+            assert_eq!(sdcpp_platform_supported(os, arch), expected, "{os}/{arch}");
+        }
+    }
+
+    #[test]
+    fn vllm_and_sglang_are_linux_only() {
+        for (os, arch, expected) in [
+            ("linux", "x86_64", true),
+            ("linux", "aarch64", true),
+            ("windows", "x86_64", false),
+            ("macos", "aarch64", false),
+            ("macos", "x86_64", false),
+        ] {
+            assert_eq!(
+                linux_python_engine_supported(os, arch),
+                expected,
+                "{os}/{arch}"
+            );
+        }
+        assert_eq!(
+            supported_on_node("vllm"),
+            linux_python_engine_supported(std::env::consts::OS, std::env::consts::ARCH)
+        );
+    }
+
+    #[test]
+    fn platform_requirement_is_set_exactly_when_the_node_cannot_run_the_entry() {
+        for entry in static_registry() {
+            assert_eq!(
+                platform_requirement(entry.name).is_some(),
+                !supported_on_node(entry.name),
+                "{}",
+                entry.name
+            );
+        }
+        // Unconstrained engines never carry a requirement.
+        assert!(platform_requirement("llamacpp").is_none());
+    }
+
+    #[test]
     fn registry_has_correct_count() {
         let r = static_registry();
-        // 23 base entries + 4 sandbox backends (wasmtime, docker, microsandbox,
-        // opensandbox). The nano/pico/nemo/iron-claw + temporal + qmd rows were
-        // dropped and unsloth/docker-model-runner/apfel/mesh-llm added since the old count
+        // 23 base entries + 5 sandbox backends (wasmtime, docker, microsandbox,
+        // opensandbox, mxc). The nano/pico/nemo/iron-claw + temporal + qmd rows were
+        // dropped and unsloth/docker-model-runner/apfel/mesh-llm/magnitude added since the old count
         // of 30; `spider` then left the managed-sidecar catalog when it became a
         // BYO declarative `command` plugin, leaving the base count at 23 (its
         // sibling assertions in `registry_recommended_entries` and the tool count
         // moved with it — this one did not, hence the rebase). NOTE: this is a
         // global count over a shared tree — if a concurrent feature adds a catalog
         // row, rebase this number with it.
-        assert_eq!(r.len(), 30);
+        assert_eq!(r.len(), 32);
     }
 
     #[test]
@@ -735,6 +938,12 @@ mod tests {
     }
 
     #[test]
+    fn singularity_sandbox_is_linux_only() {
+        assert_eq!(required_platforms("singularity"), &["linux"]);
+        assert_eq!(supported_on_node("singularity"), cfg!(target_os = "linux"));
+    }
+
+    #[test]
     fn categories_are_correct() {
         let r = static_registry();
         let agents: Vec<_> = r
@@ -772,8 +981,8 @@ mod tests {
         assert_eq!(tools.len(), 5);
         // llamacpp, ollama, vllm, sglang, mlx, mlx-vlm, mlx-serve, omlx (Apple Silicon only),
         // docker-model-runner (adopt-only), apfel (Apple FM, Apple Silicon macOS 26+),
-        // mesh-llm (adopt-or-start), lemonade and llama-swap (externally managed).
-        assert_eq!(providers.len(), 14);
+        // mesh-llm (adopt-or-start), lemonade, magnitude and llama-swap (externally managed).
+        assert_eq!(providers.len(), 15);
         // whisper.cpp + audio.cpp + OuteTTS + Ryu TTS multi-engine sidecar
         // (parakeet is also a model, not a Store engine entry).
         assert_eq!(voice.len(), 4);
@@ -781,8 +990,8 @@ mod tests {
         // No embedding *engine* is a Store entry — the embeddings server is
         // backing infra (auto-started), not user-pickable.
         assert_eq!(embedding.len(), 0);
-        // wasmtime (built-in) + docker + microsandbox + opensandbox.
-        assert_eq!(sandbox.len(), 4);
+        // wasmtime (built-in) + docker + microsandbox + opensandbox + mxc.
+        assert_eq!(sandbox.len(), 5);
     }
 
     #[test]

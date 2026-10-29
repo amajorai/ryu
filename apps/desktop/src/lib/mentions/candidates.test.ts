@@ -60,7 +60,7 @@ describe("buildMentionGroups", () => {
 						visualIcon: "avatar",
 					},
 				],
-			} as MentionSources,
+			} satisfies MentionSources,
 			"",
 			["agent", "app", "plugin", "workflow", "user"]
 		);
@@ -165,6 +165,7 @@ describe("buildMentionGroups", () => {
 						description: "Canvas · Product brief",
 						id: "com.ryu.canvas:canvas:brief",
 						name: "Product brief",
+						ownerId: "com.ryu.canvas",
 						target: { path: "/spaces/space-1/app/canvas/brief" },
 					},
 				],
@@ -202,6 +203,7 @@ describe("buildMentionGroups", () => {
 				description: "Canvas · Product brief",
 				id: "com.ryu.canvas:canvas:brief",
 				label: "Product brief",
+				ownerId: "com.ryu.canvas",
 				target: { path: "/spaces/space-1/app/canvas/brief" },
 				icon: expect.anything(),
 			}

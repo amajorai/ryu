@@ -1,9 +1,11 @@
 import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
-import { Button } from "@ryu/ui/components/button";
-import { MorphIconSwap } from "@ryu/ui/components/morph-icon";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { MorphIconSwap } from "@ryu/ui/components/morph-icon.tsx";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { TitleTooltip } from "@/src/components/layout/overflow-tooltip.tsx";
+import previewStyles from "../settings-preview.module.css";
 
 /** How long the copied checkmark stays before reverting to the copy icon. */
 const COPIED_RESET_MS = 1500;
@@ -27,13 +29,14 @@ export function CopyableId({
 	label?: string;
 	value: string;
 }) {
+	const tl = useLiteralMessages();
 	const [copied, setCopied] = useState(false);
 
 	const copy = async () => {
 		try {
 			await navigator.clipboard.writeText(value);
 			setCopied(true);
-			sileo.success({ title: `Copied ${label}` });
+			sileo.success({ title: tl("Copied {label}", { label }) });
 			setTimeout(() => setCopied(false), COPIED_RESET_MS);
 		} catch {
 			sileo.error({ title: "Copy failed" });
@@ -42,15 +45,17 @@ export function CopyableId({
 
 	return (
 		<div
-			className={`group flex items-center justify-end gap-2 ${className ?? ""}`}
+			className={`group flex items-center justify-end gap-2 ${previewStyles.identifierGroup} ${className ?? ""}`}
 		>
 			<TitleTooltip content={value}>
-				<code className="max-w-[240px] select-all truncate rounded bg-muted px-2 py-1 font-mono text-muted-foreground text-xs transition-[filter] duration-150 [filter:blur(5px)] group-focus-within:[filter:blur(0)] group-hover:[filter:blur(0)]">
+				<code
+					className={`max-w-[240px] select-all truncate rounded bg-muted px-2 py-1 font-mono text-muted-foreground text-xs duration-150 ${previewStyles.identifier}`}
+				>
 					{value}
 				</code>
 			</TitleTooltip>
 			<Button
-				aria-label={`Copy ${label}`}
+				aria-label={tl("Copy {label}", { label })}
 				className="shrink-0"
 				onClick={copy}
 				size="icon"

@@ -6,7 +6,13 @@ import {
 	DialogDescription,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import {
+	isNativeFunction,
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useCallback, useMemo, useState } from "react";
+import { z } from "zod";
 import { PluginHostPanel } from "@/src/contributions/host/PluginHostPanel.tsx";
 import type { PluginCompanion } from "@/src/lib/api/plugins.ts";
 
@@ -32,23 +38,35 @@ interface DrawesomeSketchDialogProps {
 }
 
 function createMessageToken(): string {
-	if (typeof crypto.randomUUID === "function") {
+	if (isNativeFunction(crypto.randomUUID)) {
 		return crypto.randomUUID();
 	}
 	return `drawesome-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
+const sketchAttachmentSchema = z.object({
+	dataUrl: z.string(),
+	filename: z.string().optional().catch(undefined),
+	size: z.number().optional().catch(undefined),
+});
+const sketchMessageSchema = z.object({
+	kind: z.literal("ryu-drawesome-dialog"),
+	token: z.string(),
+	action: z.string(),
+	file: z.unknown().optional(),
+});
 
-function parseAttachment(value: unknown): DrawesomeSketchAttachment | null {
-	if (!isRecord(value)) {
+function parseAttachment<TValue>(
+	value: TValue
+): DrawesomeSketchAttachment | null {
+	const parsed = sketchAttachmentSchema.safeParse(value);
+	if (!parsed.success) {
 		return null;
 	}
-	const dataUrl = value.dataUrl;
+	const attachment = parsed.data;
+	const dataUrl = attachment.dataUrl;
 	if (
-		typeof dataUrl !== "string" ||
+		!isNativeText(dataUrl) ||
 		dataUrl.length > MAX_SKETCH_DATA_URL_LENGTH ||
 		!dataUrl.startsWith(PNG_DATA_URL_PREFIX) ||
 		!/^[A-Za-z0-9+/=]+$/.test(dataUrl.slice(PNG_DATA_URL_PREFIX.length))
@@ -56,15 +74,15 @@ function parseAttachment(value: unknown): DrawesomeSketchAttachment | null {
 		return null;
 	}
 	const filename =
-		typeof value.filename === "string" &&
-		/^[a-zA-Z0-9._-]{1,80}$/.test(value.filename)
-			? value.filename
+		isNativeText(attachment.filename) &&
+		/^[a-zA-Z0-9._-]{1,80}$/.test(attachment.filename)
+			? attachment.filename
 			: "sketch.png";
 	const size =
-		typeof value.size === "number" &&
-		Number.isSafeInteger(value.size) &&
-		value.size > 0
-			? value.size
+		isNativeNumber(attachment.size) &&
+		Number.isSafeInteger(attachment.size) &&
+		attachment.size > 0
+			? attachment.size
 			: Math.floor((dataUrl.length - PNG_DATA_URL_PREFIX.length) * 0.75);
 	return { dataUrl, filename, mimeType: "image/png", size };
 }
@@ -77,16 +95,23 @@ export function DrawesomeSketchDialog({
 	sourceImage,
 }: DrawesomeSketchDialogProps) {
 	const [messageToken] = useState(createMessageToken);
+	const handleRequestClose = useCallback(() => {
+		if (open) {
+			onOpenChange(false);
+		}
+	}, [open, onOpenChange]);
 	const mountContext = useMemo(
 		() => ({ mode: "sketch-dialog", token: messageToken, image: sourceImage }),
 		[messageToken, sourceImage]
 	);
 
 	const handleFrameMessage = useCallback(
-		(data: unknown) => {
-			if (!isRecord(data)) {
+		(message: Parameters<typeof sketchMessageSchema.safeParse>[0]) => {
+			const parsed = sketchMessageSchema.safeParse(message);
+			if (!parsed.success) {
 				return;
 			}
+			const data = parsed.data;
 			if (data.kind !== "ryu-drawesome-dialog" || data.token !== messageToken) {
 				return;
 			}
@@ -113,10 +138,7 @@ export function DrawesomeSketchDialog({
 
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent
-				className="h-[min(760px,calc(100dvh-2rem))] max-w-[min(860px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0"
-				mobileFullPage
-			>
+			<DialogContent appearance="sketch" mobileFullPage showCloseButton={false}>
 				<DialogTitle className="sr-only">Sketch</DialogTitle>
 				<DialogDescription className="sr-only">
 					Draw a visual reference and attach it to your next message.
@@ -126,6 +148,7 @@ export function DrawesomeSketchDialog({
 						companion={companion}
 						mountContext={mountContext}
 						onMessage={handleFrameMessage}
+						onRequestClose={handleRequestClose}
 					/>
 				</div>
 			</DialogContent>

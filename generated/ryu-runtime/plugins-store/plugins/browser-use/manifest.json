@@ -1,0 +1,102 @@
+{
+  "tags": ["browser", "automation", "browser-use", "web"],
+  "author": { "name": "Browser Use", "url": "https://browser-use.com" },
+  "repository": "https://github.com/browser-use/browser-use",
+  "homepage": "https://browser-use.com",
+  "privacyPolicyUrl": "https://browser-use.com/privacy-policy",
+  "termsOfServiceUrl": "https://browser-use.com/terms-of-service",
+  "license": "MIT",
+  "id": "@ryu/browser-use",
+  "name": "Browser Use",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "hidden": true,
+  "description": "Preview of Browser Use's open-source local browser as a provider for Ryu's swappable browser.control layer, over its official MCP server (`browser-use --mcp`). Not usable as the Browser layer yet: Ryu starts a fresh browser-use process for every tool call, and browser-use keeps its browser inside that process, so a tab opened by one call is gone by the next. It is hidden from the store while that is the case. The browseruse.* tools stay callable directly, but only a task that finishes within one call, such as retry_with_browser_use_agent, works that way. Launched from the pinned browser-use 0.13.11 package with uvx, with anonymous telemetry and cloud sync off; needs uv on PATH.",
+  "icon": "ai-browser",
+  "iconDither": { "from": 90, "to": "transparent", "direction": "down" },
+  "tagline": "Preview of Browser Use's local browser for Ryu",
+  "keywords": ["browser", "automation", "browser-use", "web"],
+  "category": "Browsers",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "full" },
+    "mobile": { "support": "full" },
+    "extension": { "support": "full" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "provides": [
+    {
+      "capability": "browser.control",
+      "version": "1.0.0",
+      "title": "Browser",
+      "grant": "browser:control",
+      "selectable": true,
+      "target": "local-machine",
+      "tools": {
+        "browser.navigate": {
+          "tool": "browseruse.browser_navigate",
+          "adapter": {
+            "tools": ["browseruse.browser_list_tabs"],
+            "code_file": "adapters/browser.navigate.js"
+          }
+        },
+        "browser.tabs": {
+          "tool": "browseruse.browser_list_tabs",
+          "adapter": { "code_file": "adapters/browser.tabs.js" }
+        },
+        "browser.snapshot": {
+          "tool": "browseruse.browser_get_state",
+          "adapter": {
+            "tools": ["browseruse.browser_switch_tab"],
+            "code_file": "adapters/browser.snapshot.js"
+          }
+        },
+        "browser.click": {
+          "tool": "browseruse.browser_click",
+          "adapter": {
+            "tools": ["browseruse.browser_switch_tab"],
+            "code_file": "adapters/browser.click.js"
+          }
+        },
+        "browser.type": {
+          "tool": "browseruse.browser_type",
+          "adapter": {
+            "tools": ["browseruse.browser_switch_tab"],
+            "code_file": "adapters/browser.type.js"
+          }
+        },
+        "browser.scroll": {
+          "tool": "browseruse.browser_scroll",
+          "adapter": {
+            "tools": ["browseruse.browser_switch_tab"],
+            "code_file": "adapters/browser.scroll.js"
+          }
+        },
+        "browser.screenshot": {
+          "tool": "browseruse.browser_screenshot",
+          "adapter": {
+            "tools": ["browseruse.browser_switch_tab"],
+            "code_file": "adapters/browser.screenshot.js"
+          }
+        }
+      }
+    }
+  ],
+  "permission_grants": ["mcp:server", "tool:execute"],
+  "mcp_servers": {
+    "browseruse": {
+      "command": "uvx",
+      "args": ["browser-use@0.13.11", "--mcp"],
+      "env": {
+        "ANONYMIZED_TELEMETRY": "false",
+        "BROWSER_USE_CLOUD_SYNC": "false"
+      },
+      "description": "Browser Use MCP server, launched via `uvx browser-use@0.13.11 --mcp` with anonymous telemetry and cloud sync off. Tools include browser_navigate, browser_click, browser_type, browser_get_state, browser_extract_content, browser_get_html, browser_screenshot, browser_scroll, tab management, session management, and retry_with_browser_use_agent. Unavailable until uv is installed and the pinned package can be fetched."
+    }
+  }
+}

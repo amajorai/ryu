@@ -12,8 +12,10 @@ import {
 	languagePackPackageTree,
 	PACKAGE_MANIFEST_FILE,
 	type PackageTree,
+	packageAllowsRemix,
 	packageDigest,
 	packageIsPublishable,
+	packageSummary,
 	packPackage,
 	parseGithubPackageReference,
 	readGithubPackage,
@@ -66,6 +68,47 @@ test("validates and canonicalizes the package envelope", () => {
 	expect(() =>
 		validatePackageManifest({ ...manifest, id: "../unsafe" })
 	).toThrow("unsupported characters");
+});
+
+test("packages are remixable by default and keep an explicit opt-out", () => {
+	const absent = validatePackageManifest(manifest);
+	expect(absent.allowRemix).toBeUndefined();
+	expect(packageAllowsRemix(absent)).toBe(true);
+	expect(packageSummary(tree()).allowRemix).toBe(true);
+
+	const optedOut = validatePackageManifest({ ...manifest, allowRemix: false });
+	expect(optedOut.allowRemix).toBe(false);
+	expect(packageAllowsRemix(optedOut)).toBe(false);
+	expect(
+		packageAllowsRemix(
+			validatePackageManifest({ ...manifest, allow_remix: false })
+		)
+	).toBe(false);
+	// A non-boolean is ignored rather than read as an opt-out.
+	expect(
+		packageAllowsRemix(
+			validatePackageManifest({ ...manifest, allowRemix: "no" })
+		)
+	).toBe(true);
+});
+
+test("a remix keeps its trimmed source credit and drops an incomplete one", () => {
+	const remix = validatePackageManifest({
+		...manifest,
+		remixedFrom: { id: " ryu/animator ", kind: "agent", version: "1.0.0" },
+	});
+	expect(remix.remixedFrom).toEqual({
+		id: "ryu/animator",
+		kind: "agent",
+		version: "1.0.0",
+	});
+	expect(
+		validatePackageManifest({ ...manifest, remixedFrom: { id: "ryu/x" } })
+			.remixedFrom
+	).toBeUndefined();
+	expect(
+		validatePackageManifest({ ...manifest, remixedFrom: "ryu/x" }).remixedFrom
+	).toBeUndefined();
 });
 
 test("language-pack trees validate, pack, and round-trip as data-only packages", () => {
@@ -153,7 +196,7 @@ test("folder and archive representations have the same package digest", async ()
 });
 
 test("local package trees enforce archive-equivalent file limits", () => {
-	const files: Record<string, Uint8Array> = { "agent.json": new Uint8Array() };
+	const files: PackageTree["files"] = { "agent.json": new Uint8Array() };
 	for (let index = 0; index < 2048; index += 1) {
 		files[`files/${index}.txt`] = new Uint8Array();
 	}
@@ -557,4 +600,81 @@ test("bounds direct GitHub package response bodies and compressed archives", asy
 	expect(() => unpackPackage(new Uint8Array(64 * 1024 * 1024 + 1))).toThrow(
 		"compressed limit"
 	);
+});
+
+test("validates secret envelope fields before handing them to native cryptography", () => {
+	const fixture = withEncryptedSecrets(tree(), { token: "private" }, "unlock");
+	const bytes = fixture.files["secrets.enc"];
+	expect(bytes).toBeDefined();
+	if (!bytes) {
+		throw new Error("Expected encrypted fixture");
+	}
+	const prefix = "RYU-SECRETS-V1\n";
+	const body = JSON.parse(new TextDecoder().decode(bytes).slice(prefix.length));
+	const malformed = new TextEncoder().encode(
+		prefix + JSON.stringify({ ...body, nonce: 7 })
+	);
+	expect(() => decryptSecrets(malformed, "unlock", fixture.manifest)).toThrow(
+		"Malformed package secret envelope"
+	);
+	const mismatched = new TextEncoder().encode(
+		prefix + JSON.stringify({ ...body, algorithm: "other", nonce: 7 })
+	);
+	expect(() => decryptSecrets(mismatched, "unlock", fixture.manifest)).toThrow(
+		"does not match the package manifest"
+	);
+});
+
+test("preserves canonical absent values, overflow numerics, and native empty objects", () => {
+	expect(canonicalJson(undefined)).toBeUndefined();
+	expect(
+		canonicalJson({
+			missing: undefined,
+			values: [undefined, Number.NaN, Number.POSITIVE_INFINITY],
+			empty: new Date(),
+		})
+	).toBe('{"empty":{},"values":[null,null,null]}');
+	const shared = { item: "same" };
+	expect(canonicalJson({ b: shared, a: shared })).toBe(
+		'{"a":{"item":"same"},"b":{"item":"same"}}'
+	);
+});
+
+test("retains own metadata keys and ordered manifest diagnostics", () => {
+	const metadata = JSON.parse(
+		'{"__proto__":{"safe":true},"future":{"label":"ok"}}'
+	);
+	const parsed = validatePackageManifest({
+		...manifest,
+		metadata,
+		source: { type: "github", repository: " owner/repo ", checksum: 12 },
+		security: {
+			containsSecrets: "true",
+			privateContent: true,
+			permissions: [" read "],
+		},
+	});
+	expect(Object.hasOwn(parsed.metadata ?? {}, "__proto__")).toBe(true);
+	expect(parsed.source).toEqual({ type: "github", repository: "owner/repo" });
+	expect(parsed.security).toEqual({
+		containsSecrets: false,
+		permissions: ["read"],
+		privateContent: true,
+		redacted: false,
+	});
+	try {
+		validatePackageManifest({
+			...manifest,
+			schemaVersion: 2,
+			kind: "bad",
+			id: "",
+			scopes: ["bad"],
+		});
+		throw new Error("invalid manifest was accepted");
+	} catch (error) {
+		if (!(error instanceof Error)) {
+			throw error;
+		}
+		expect(error.message).toBe("Invalid Ryu package (4 errors)");
+	}
 });

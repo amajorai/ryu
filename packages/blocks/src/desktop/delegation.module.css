@@ -1,0 +1,10 @@
+.caps {
+	gap: calc(var(--spacing) * 4);
+}
+.error {
+	border-color: var(--destructive);
+}
+.errorTitle,
+.errorDescription {
+	color: var(--status-destructive);
+}

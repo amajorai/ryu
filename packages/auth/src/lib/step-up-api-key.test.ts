@@ -3,6 +3,8 @@ import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { bearer, organization } from "better-auth/plugins";
+import { z } from "zod";
+import type { AuthFixtureDatabase } from "./auth-test-fixtures.ts";
 
 const grants: Array<{ sessionId: string; scope: string; expiresAt: Date }> = [];
 mock.module("@ryu/db/models/step-up.model", () => ({
@@ -27,6 +29,7 @@ mock.module("@ryu/db/models/step-up.model", () => ({
 	},
 }));
 mock.module("@ryu/email", () => ({
+	StepUpMagicLinkEmail: () => null,
 	StepUpOTPEmail: () => null,
 	sendEmail: async () => undefined,
 }));
@@ -38,7 +41,16 @@ beforeEach(() => {
 });
 
 async function fixture() {
-	const database: Record<string, Record<string, unknown>[]> = {
+	const database: Pick<
+		AuthFixtureDatabase,
+		| "user"
+		| "session"
+		| "account"
+		| "verification"
+		| "organization"
+		| "member"
+		| "apikey"
+	> = {
 		user: [],
 		session: [],
 		account: [],
@@ -74,7 +86,9 @@ async function fixture() {
 		},
 		asResponse: true,
 	});
-	const body = (await signup.json()) as { user: { id: string }; token: string };
+	const body = z
+		.object({ user: z.object({ id: z.string() }), token: z.string() })
+		.parse(await signup.json());
 	const cookie = signup.headers
 		.getSetCookie()
 		.map((value) => value.split(";")[0])
@@ -114,6 +128,51 @@ async function fixture() {
 		orgKey,
 		personalKey,
 		sessionId,
+		serverCreate: () =>
+			auth.api.createApiKey({
+				body: { configId: "default", userId: body.user.id, name: "Server" },
+			}),
+		serverUpdateOrgKey: () =>
+			auth.api.updateApiKey({
+				body: {
+					configId: "organization",
+					keyId: orgKey.id,
+					userId: body.user.id,
+					enabled: false,
+				},
+			}),
+		create: (transport: "cookie" | "bearer") =>
+			auth.handler(
+				new Request("http://localhost:3000/api/auth/api-key/create", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						origin: "http://localhost:3000",
+						...(transport === "bearer"
+							? { authorization: `Bearer ${body.token}` }
+							: { cookie }),
+					},
+					body: JSON.stringify({ name: "Stolen-session key" }),
+				})
+			),
+		read: (
+			action: "get" | "list",
+			query: Record<string, string>,
+			transport: "cookie" | "bearer" = "bearer"
+		) =>
+			auth.handler(
+				new Request(
+					`http://localhost:3000/api/auth/api-key/${action}?${new URLSearchParams(query)}`,
+					{
+						headers: {
+							origin: "http://localhost:3000",
+							...(transport === "bearer"
+								? { authorization: `Bearer ${body.token}` }
+								: { cookie }),
+						},
+					}
+				)
+			),
 		request: (
 			action: "delete" | "update",
 			keyId: string,
@@ -133,18 +192,20 @@ async function fixture() {
 					body: JSON.stringify({
 						keyId,
 						configId,
-						...(action === "update" ? { enabled: false } : {}),
+						enabled: action === "update" ? false : undefined,
 					}),
 				})
 			),
 	};
 }
 
-describe("native organization API key step-up", () => {
+describe("native organization API key mutations", () => {
 	for (const action of ["delete", "update"] as const) {
 		for (const transport of ["cookie", "bearer"] as const) {
-			it(`rejects ${transport} ${action} without proof and permits it with current proof`, async () => {
+			it(`refuses a ${transport} client ${action} of an org key even with current proof`, async () => {
 				const f = await fixture();
+				// Without proof, and with an org.credentials grant: the native endpoint
+				// skips the control plane's audit row and spend-cap cleanup either way.
 				const rejected = await f.request(
 					action,
 					f.orgKey.id,
@@ -152,81 +213,137 @@ describe("native organization API key step-up", () => {
 					transport
 				);
 				expect(rejected.status).toBe(403);
-				expect(await rejected.json()).toMatchObject({
-					code: "STEP_UP_REQUIRED",
-					scope: "org.credentials",
-				});
-				expect(
-					f.database.apikey.find((key) => key.id === f.orgKey.id)?.enabled
-				).toBe(true);
 				grants.push({
 					sessionId: f.sessionId,
 					scope: "org.credentials",
 					expiresAt: new Date(Date.now() + 60_000),
 				});
-				const accepted = await f.request(
+				const stillRejected = await f.request(
 					action,
 					f.orgKey.id,
 					"organization",
 					transport
 				);
-				expect(accepted.status).toBe(200);
-				const stored = f.database.apikey.find((key) => key.id === f.orgKey.id);
+				expect(stillRejected.status).toBe(403);
+				expect(await stillRejected.json()).toMatchObject({
+					message: "Use the organization API keys endpoint",
+				});
 				expect(
-					action === "delete" ? stored === undefined : stored?.enabled === false
+					f.database.apikey.find((key) => key.id === f.orgKey.id)?.enabled
 				).toBe(true);
 			});
 		}
-		it(`rejects expired, wrong-scope and another-session grants for ${action}`, async () => {
-			const f = await fixture();
-			grants.push(
-				{
-					sessionId: f.sessionId,
-					scope: "org.credentials",
-					expiresAt: new Date(Date.now() - 1000),
-				},
-				{
-					sessionId: f.sessionId,
-					scope: "billing",
-					expiresAt: new Date(Date.now() + 60_000),
-				},
-				{
-					sessionId: "other-session",
-					scope: "org.credentials",
-					expiresAt: new Date(Date.now() + 60_000),
-				}
-			);
-			expect(
-				(await f.request(action, f.orgKey.id, "organization")).status
-			).toBe(403);
-		});
-		it(`does not trust requested config or metadata when gating ${action}`, async () => {
-			const f = await fixture();
-			for (const configId of [undefined, "default", "organization"]) {
-				const response = await f.request(action, f.orgKey.id, configId);
-				expect(response.status).toBe(403);
-				expect(await response.json()).toMatchObject({
-					code: "STEP_UP_REQUIRED",
-				});
-			}
-			expect(
-				(await f.request(action, f.personalKey.id, "default")).status
-			).toBe(200);
-		});
-		it(`retains native organization ownership checks after proof for ${action}`, async () => {
+		it(`does not trust the requested config when refusing ${action}`, async () => {
 			const f = await fixture();
 			grants.push({
 				sessionId: f.sessionId,
 				scope: "org.credentials",
 				expiresAt: new Date(Date.now() + 60_000),
 			});
-			f.database.member.length = 0;
-			expect(
-				(await f.request(action, f.orgKey.id, "organization")).status
-			).toBe(403);
+			for (const configId of [undefined, "default", "organization"]) {
+				const response = await f.request(action, f.orgKey.id, configId);
+				expect(response.status).toBe(403);
+				expect(await response.json()).toMatchObject({
+					message: "Use the organization API keys endpoint",
+				});
+			}
 			expect(
 				f.database.apikey.find((key) => key.id === f.orgKey.id)?.enabled
 			).toBe(true);
 		});
+		it(`still lets a client ${action} its personal key`, async () => {
+			const f = await fixture();
+			expect(
+				(await f.request(action, f.personalKey.id, "default")).status
+			).toBe(200);
+		});
 	}
+
+	it("still lets a server call update an org key", async () => {
+		const f = await fixture();
+		await f.serverUpdateOrgKey();
+		expect(
+			f.database.apikey.find((key) => key.id === f.orgKey.id)?.enabled
+		).toBe(false);
+	});
+});
+
+describe("native organization API key reads", () => {
+	for (const transport of ["cookie", "bearer"] as const) {
+		it(`refuses a ${transport} client list of an org's keys`, async () => {
+			const f = await fixture();
+			for (const query of [
+				{ organizationId: "org-1" } as Record<string, string>,
+				{ organizationId: "org-1", configId: "organization" },
+			]) {
+				const response = await f.read("list", query, transport);
+				expect(response.status).toBe(403);
+				expect(await response.json()).toMatchObject({
+					message: "Use the organization API keys endpoint",
+				});
+			}
+		});
+
+		it(`hides an org key from a ${transport} client get`, async () => {
+			const f = await fixture();
+			for (const configId of ["organization", "default"]) {
+				const response = await f.read(
+					"get",
+					{ id: f.orgKey.id, configId },
+					transport
+				);
+				expect(response.status).toBe(404);
+				expect(await response.json()).toMatchObject({
+					code: "KEY_NOT_FOUND",
+				});
+			}
+		});
+	}
+
+	it("still lets a client list and get its personal keys", async () => {
+		const f = await fixture();
+		const list = await f.read("list", { configId: "default" });
+		expect(list.status).toBe(200);
+		const listed = z
+			.object({ apiKeys: z.array(z.object({ id: z.string() })) })
+			.parse(await list.json());
+		expect(listed.apiKeys.map((key) => key.id)).toEqual([f.personalKey.id]);
+		const get = await f.read("get", {
+			id: f.personalKey.id,
+			configId: "default",
+		});
+		expect(get.status).toBe(200);
+	});
+});
+
+describe("native API key creation", () => {
+	for (const transport of ["cookie", "bearer"] as const) {
+		it(`refuses a ${transport} client mint even with a current step-up`, async () => {
+			const f = await fixture();
+			const before = f.database.apikey.length;
+			// Without proof, and with an org.credentials grant: the native endpoint
+			// skips the control plane's scope clamp and audit row either way.
+			const rejected = await f.create(transport);
+			expect(rejected.status).toBe(403);
+			grants.push({
+				sessionId: f.sessionId,
+				scope: "org.credentials",
+				expiresAt: new Date(Date.now() + 60_000),
+			});
+			const stillRejected = await f.create(transport);
+			expect(stillRejected.status).toBe(403);
+			expect(await stillRejected.json()).toMatchObject({
+				message: "Create API keys from your account settings",
+			});
+			expect(f.database.apikey).toHaveLength(before);
+		});
+	}
+
+	it("still lets the control plane mint keys through a server call", async () => {
+		const f = await fixture();
+		const before = f.database.apikey.length;
+		const created = await f.serverCreate();
+		expect(created.key).toBeString();
+		expect(f.database.apikey).toHaveLength(before + 1);
+	});
 });

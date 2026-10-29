@@ -26,6 +26,39 @@ export function PlateEditor() {
 	);
 }
 
+/** A link wrapping one plain-text leaf. */
+const link = (text: string, url: string) => ({
+	children: [{ text }],
+	type: "a",
+	url,
+});
+
+/** A suggestion mark's metadata, keyed as `suggestion_<id>` on its leaf. */
+const suggestionMark = (
+	id: string,
+	type: "insert" | "remove",
+	userId: string
+) => ({ id, createdAt: Date.now(), type, userId });
+
+/** A comparison-table row: the feature, Plate's centered ✅, and Tiptap's offer. */
+const comparisonRow = (feature: string, tiptap: string) => ({
+	children: [
+		{ children: [{ children: [{ text: feature }], type: "p" }], type: "td" },
+		{
+			children: [
+				{
+					attributes: { align: "center" },
+					children: [{ text: "✅" }],
+					type: "p",
+				},
+			],
+			type: "td",
+		},
+		{ children: [{ children: [{ text: tiptap }], type: "p" }], type: "td" },
+	],
+	type: "tr",
+});
+
 const value = normalizeStaticValue([
 	{
 		children: [{ text: "Welcome to the Plate Playground!" }],
@@ -34,17 +67,13 @@ const value = normalizeStaticValue([
 	{
 		children: [
 			{ text: "Experience a modern rich-text editor built with " },
-			{ children: [{ text: "Slate" }], type: "a", url: "https://slatejs.org" },
+			link("Slate", "https://slatejs.org"),
 			{ text: " and " },
-			{ children: [{ text: "React" }], type: "a", url: "https://reactjs.org" },
+			link("React", "https://reactjs.org"),
 			{
 				text: ". This playground showcases just a part of Plate's capabilities. ",
 			},
-			{
-				children: [{ text: "Explore the documentation" }],
-				type: "a",
-				url: "/docs",
-			},
+			link("Explore the documentation", "/docs"),
 			{ text: " to discover more." },
 		],
 		type: "p",
@@ -61,12 +90,11 @@ const value = normalizeStaticValue([
 				children: [
 					{
 						suggestion: true,
-						suggestion_playground1: {
-							id: "playground1",
-							createdAt: Date.now(),
-							type: "insert",
-							userId: "alice",
-						},
+						suggestion_playground1: suggestionMark(
+							"playground1",
+							"insert",
+							"alice"
+						),
 						text: "suggestions",
 					},
 				],
@@ -75,33 +103,26 @@ const value = normalizeStaticValue([
 			},
 			{
 				suggestion: true,
-				suggestion_playground1: {
-					id: "playground1",
-					createdAt: Date.now(),
-					type: "insert",
-					userId: "alice",
-				},
+				suggestion_playground1: suggestionMark(
+					"playground1",
+					"insert",
+					"alice"
+				),
 				text: " ",
 			},
 			{
 				suggestion: true,
-				suggestion_playground1: {
-					id: "playground1",
-					createdAt: Date.now(),
-					type: "insert",
-					userId: "alice",
-				},
+				suggestion_playground1: suggestionMark(
+					"playground1",
+					"insert",
+					"alice"
+				),
 				text: "like this added text",
 			},
 			{ text: " or to " },
 			{
 				suggestion: true,
-				suggestion_playground2: {
-					id: "playground2",
-					createdAt: Date.now(),
-					type: "remove",
-					userId: "bob",
-				},
+				suggestion_playground2: suggestionMark("playground2", "remove", "bob"),
 				text: "mark text for removal",
 			},
 			{ text: ". Discuss changes using " },
@@ -122,12 +143,11 @@ const value = normalizeStaticValue([
 				comment: true,
 				comment_discussion2: true,
 				suggestion: true,
-				suggestion_playground3: {
-					id: "playground3",
-					createdAt: Date.now(),
-					type: "insert",
-					userId: "charlie",
-				},
+				suggestion_playground3: suggestionMark(
+					"playground3",
+					"insert",
+					"charlie"
+				),
 				text: "overlapping",
 			},
 			{ text: " annotations!" },
@@ -155,11 +175,7 @@ const value = normalizeStaticValue([
 	{
 		children: [
 			{ text: "Boost your productivity with integrated " },
-			{
-				children: [{ text: "AI SDK" }],
-				type: "a",
-				url: "/docs/ai",
-			},
+			link("AI SDK", "/docs/ai"),
 			{ text: ". Press " },
 			{ kbd: true, text: "⌘+J" },
 			{ text: " or " },
@@ -192,29 +208,13 @@ const value = normalizeStaticValue([
 	{
 		children: [
 			{ text: "Structure your content with " },
-			{
-				children: [{ text: "headings" }],
-				type: "a",
-				url: "/docs/heading",
-			},
+			link("headings", "/docs/heading"),
 			{ text: ", " },
-			{
-				children: [{ text: "lists" }],
-				type: "a",
-				url: "/docs/list",
-			},
+			link("lists", "/docs/list"),
 			{ text: ", and " },
-			{
-				children: [{ text: "quotes" }],
-				type: "a",
-				url: "/docs/blockquote",
-			},
+			link("quotes", "/docs/blockquote"),
 			{ text: ". Apply " },
-			{
-				children: [{ text: "marks" }],
-				type: "a",
-				url: "/docs/basic-marks",
-			},
+			link("marks", "/docs/basic-marks"),
 			{ text: " like " },
 			{ bold: true, text: "bold" },
 			{ text: ", " },
@@ -226,17 +226,9 @@ const value = normalizeStaticValue([
 			{ text: ", and " },
 			{ code: true, text: "code" },
 			{ text: ". Use " },
-			{
-				children: [{ text: "autoformatting" }],
-				type: "a",
-				url: "/docs/autoformat",
-			},
+			link("autoformatting", "/docs/autoformat"),
 			{ text: " for " },
-			{
-				children: [{ text: "Markdown" }],
-				type: "a",
-				url: "/docs/markdown",
-			},
+			link("Markdown", "/docs/markdown"),
 			{ text: "-like shortcuts (e.g., " },
 			{ kbd: true, text: "* " },
 			{ text: " for lists, " },
@@ -300,31 +292,15 @@ const value = normalizeStaticValue([
 	{
 		children: [
 			{ text: "Create " },
-			{
-				children: [{ text: "links" }],
-				type: "a",
-				url: "/docs/link",
-			},
+			link("links", "/docs/link"),
 			{ text: ", " },
-			{
-				children: [{ text: "@mention" }],
-				type: "a",
-				url: "/docs/mention",
-			},
+			link("@mention", "/docs/mention"),
 			{ text: " users like " },
 			{ children: [{ text: "" }], type: "mention", value: "Alice" },
 			{ text: ", or insert " },
-			{
-				children: [{ text: "emojis" }],
-				type: "a",
-				url: "/docs/emoji",
-			},
+			link("emojis", "/docs/emoji"),
 			{ text: " ✨. Use the " },
-			{
-				children: [{ text: "slash command" }],
-				type: "a",
-				url: "/docs/slash-command",
-			},
+			link("slash command", "/docs/slash-command"),
 			{ text: " (/) for quick access to elements." },
 		],
 		type: "p",
@@ -370,175 +346,13 @@ const value = normalizeStaticValue([
 				],
 				type: "tr",
 			},
-			{
-				children: [
-					{
-						children: [{ children: [{ text: "AI" }], type: "p" }],
-						type: "td",
-					},
-					{
-						children: [
-							{
-								attributes: { align: "center" },
-								children: [{ text: "✅" }],
-								type: "p",
-							},
-						],
-						type: "td",
-					},
-					{
-						children: [{ children: [{ text: "Paid Extension" }], type: "p" }],
-						type: "td",
-					},
-				],
-				type: "tr",
-			},
-			{
-				children: [
-					{
-						children: [{ children: [{ text: "Comments" }], type: "p" }],
-						type: "td",
-					},
-					{
-						children: [
-							{
-								attributes: { align: "center" },
-								children: [{ text: "✅" }],
-								type: "p",
-							},
-						],
-						type: "td",
-					},
-					{
-						children: [{ children: [{ text: "Paid Extension" }], type: "p" }],
-						type: "td",
-					},
-				],
-				type: "tr",
-			},
-			{
-				children: [
-					{
-						children: [{ children: [{ text: "Suggestions" }], type: "p" }],
-						type: "td",
-					},
-					{
-						children: [
-							{
-								attributes: { align: "center" },
-								children: [{ text: "✅" }],
-								type: "p",
-							},
-						],
-						type: "td",
-					},
-					{
-						children: [
-							{ children: [{ text: "Paid (Comments Pro)" }], type: "p" },
-						],
-						type: "td",
-					},
-				],
-				type: "tr",
-			},
-			{
-				children: [
-					{
-						children: [{ children: [{ text: "Emoji Picker" }], type: "p" }],
-						type: "td",
-					},
-					{
-						children: [
-							{
-								attributes: { align: "center" },
-								children: [{ text: "✅" }],
-								type: "p",
-							},
-						],
-						type: "td",
-					},
-					{
-						children: [{ children: [{ text: "Paid Extension" }], type: "p" }],
-						type: "td",
-					},
-				],
-				type: "tr",
-			},
-			{
-				children: [
-					{
-						children: [
-							{ children: [{ text: "Table of Contents" }], type: "p" },
-						],
-						type: "td",
-					},
-					{
-						children: [
-							{
-								attributes: { align: "center" },
-								children: [{ text: "✅" }],
-								type: "p",
-							},
-						],
-						type: "td",
-					},
-					{
-						children: [{ children: [{ text: "Paid Extension" }], type: "p" }],
-						type: "td",
-					},
-				],
-				type: "tr",
-			},
-			{
-				children: [
-					{
-						children: [{ children: [{ text: "Drag Handle" }], type: "p" }],
-						type: "td",
-					},
-					{
-						children: [
-							{
-								attributes: { align: "center" },
-								children: [{ text: "✅" }],
-								type: "p",
-							},
-						],
-						type: "td",
-					},
-					{
-						children: [{ children: [{ text: "Paid Extension" }], type: "p" }],
-						type: "td",
-					},
-				],
-				type: "tr",
-			},
-			{
-				children: [
-					{
-						children: [
-							{ children: [{ text: "Collaboration (Yjs)" }], type: "p" },
-						],
-						type: "td",
-					},
-					{
-						children: [
-							{
-								attributes: { align: "center" },
-								children: [{ text: "✅" }],
-								type: "p",
-							},
-						],
-						type: "td",
-					},
-					{
-						children: [
-							{ children: [{ text: "Hocuspocus (OSS/Paid)" }], type: "p" },
-						],
-						type: "td",
-					},
-				],
-				type: "tr",
-			},
+			comparisonRow("AI", "Paid Extension"),
+			comparisonRow("Comments", "Paid Extension"),
+			comparisonRow("Suggestions", "Paid (Comments Pro)"),
+			comparisonRow("Emoji Picker", "Paid Extension"),
+			comparisonRow("Table of Contents", "Paid Extension"),
+			comparisonRow("Drag Handle", "Paid Extension"),
+			comparisonRow("Collaboration (Yjs)", "Hocuspocus (OSS/Paid)"),
 		],
 		type: "table",
 	},
@@ -552,19 +366,11 @@ const value = normalizeStaticValue([
 			{
 				text: "Embed rich media like images directly in your content. Supports ",
 			},
-			{
-				children: [{ text: "Media uploads" }],
-				type: "a",
-				url: "/docs/media",
-			},
+			link("Media uploads", "/docs/media"),
 			{
 				text: " and ",
 			},
-			{
-				children: [{ text: "drag & drop" }],
-				type: "a",
-				url: "/docs/dnd",
-			},
+			link("drag & drop", "/docs/dnd"),
 			{
 				text: " for a smooth experience.",
 			},

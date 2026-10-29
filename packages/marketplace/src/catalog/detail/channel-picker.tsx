@@ -1,3 +1,4 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/detail/channel-picker.tsx
 //
 // The release-train selector shown beside a listing's install control.
@@ -17,6 +18,7 @@
 //     than served by the marketplace — can never be installed, so it is shown as
 //     context and never as a choice.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import {
 	Select,
@@ -55,7 +57,7 @@ export function useListingChannels(
 	fetchChannels:
 		| ((id: string, repo?: string | null) => Promise<CatalogChannel[]>)
 		| undefined
-): { channels: CatalogChannel[]; loading: boolean } {
+) {
 	const [channels, setChannels] = useState<CatalogChannel[]>([]);
 	const [loading, setLoading] = useState(false);
 
@@ -164,6 +166,7 @@ export function ChannelSwitchSummary({
 	/** The train being switched to. `null` is stable. */
 	target: string | null;
 }) {
+	const tl = useLiteralMessages();
 	const name = channelLabel(target ?? STABLE_CHANNEL);
 	const targetVersion =
 		channels.find((c) => c.channel === (target ?? STABLE_CHANNEL))?.version ??
@@ -173,20 +176,21 @@ export function ChannelSwitchSummary({
 		// A train with nothing published on it. Following it is still a legitimate
 		// choice — it is how you subscribe to a channel before its first build — but
 		// it must not read as "you will be updated to something".
-		return (
-			<>
-				Nothing is published on the {name} channel yet.{" "}
-				{installedVersion
-					? `You will stay on ${installedVersion}`
-					: "You will stay where you are"}{" "}
-				until a {name.toLowerCase()} build appears.
-			</>
-		);
+		const buildName = name.toLowerCase();
+		return installedVersion
+			? tl(
+					"Nothing is published on the {name} channel yet. You will stay on {installedVersion} until a {buildName} build appears.",
+					{ buildName, installedVersion, name }
+				)
+			: tl(
+					"Nothing is published on the {name} channel yet. You will stay where you are until a {buildName} build appears.",
+					{ buildName, name }
+				);
 	}
 
 	const delta =
 		installedVersion && comparePrecedence(targetVersion, installedVersion);
-	const goesBackwards = typeof delta === "number" && delta < 0;
+	const goesBackwards = isNativeNumber(delta) && delta < 0;
 
 	return (
 		<>
@@ -209,6 +213,7 @@ export function ChannelPicker({
 	value: string | null;
 	onChange: (channel: string | null) => void;
 }) {
+	const tl = useLiteralMessages();
 	const installable = channels.filter(
 		(c) => c.installable !== false || c.channel === STABLE_CHANNEL
 	);
@@ -231,7 +236,7 @@ export function ChannelPicker({
 				}
 				value={selected}
 			>
-				<SelectTrigger className="h-8 w-[9.5rem] text-sm" size="sm">
+				<SelectTrigger className="h-8 w-[9.5rem]" size="sm">
 					<SelectValue placeholder="Stable" />
 				</SelectTrigger>
 				<SelectContent>
@@ -251,8 +256,10 @@ export function ChannelPicker({
 				// Said plainly, because it is the one thing about prerelease trains
 				// people get wrong: a build here is not "the newest version", it is the
 				// newest version ON THIS TRAIN, and it may be older and less tested.
-				<Badge className="text-xs" variant="outline">
-					Pre-release{selectedVersion ? ` · ${selectedVersion}` : ""}
+				<Badge variant="outline">
+					{selectedVersion
+						? tl("Pre-release · {version}", { version: selectedVersion })
+						: "Pre-release"}
 				</Badge>
 			)}
 		</div>

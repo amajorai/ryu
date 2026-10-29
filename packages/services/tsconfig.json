@@ -1,0 +1,15 @@
+{
+  "extends": "@ryu/config/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@ryuhq/client": ["../client/src/index.ts"]
+    },
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": ["src/**/*", "test/**/*", "tsup.config.ts"]
+}

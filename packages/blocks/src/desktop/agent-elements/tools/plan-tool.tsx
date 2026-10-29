@@ -1,6 +1,6 @@
 import { ToolResult } from "@ryu/ui/components/agents/tool-result";
 import { Button } from "@ryu/ui/components/button";
-import { cn } from "@ryu/ui/lib/utils";
+import { isNativeFunction } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { memo, useState } from "react";
 import { Markdown } from "../markdown.tsx";
 import { areToolPropsEqual, getToolStatus } from "../utils/format-tool.ts";
@@ -62,13 +62,13 @@ export const PlanTool = memo(function PlanTool({
 			return;
 		}
 		setIsApproved(true);
-		if (typeof part.input?.onApprove === "function") {
+		if (isNativeFunction(part.input?.onApprove)) {
 			part.input.onApprove();
 		}
 	};
 
 	return (
-		<div className="an-tool-plan">
+		<div>
 			<ToolResult
 				collapseOnComplete={false}
 				defaultOpen={!isPending}
@@ -90,7 +90,7 @@ export const PlanTool = memo(function PlanTool({
 					) : (
 						<div className="flex items-center gap-2 border-border/60 border-t pt-2">
 							<Button
-								className={cn("h-7 px-2.5 text-xs")}
+								appearance="plan-approve"
 								disabled={isPending}
 								onClick={handleApprove}
 								size="sm"

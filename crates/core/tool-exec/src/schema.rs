@@ -5,7 +5,7 @@
 //! gateway search-based loop (P2, via `/v1/exec/tool kind=execute|resume`) and
 //! the ACP bridge (P3) surface the *same* defs so the model sees one consistent
 //! contract regardless of which path runs it. Pure data — no I/O, fully unit
-//! testable without a live Deno.
+//! testable without running the sandbox.
 
 use serde_json::{json, Value};
 

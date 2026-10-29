@@ -2,13 +2,15 @@ import { useEffect } from "react";
 import { type IslandState, useIslandState } from "../store/island-state.ts";
 
 /** Maps the number keys 0-4 to island states for manual verification. */
-const KEY_TO_STATE: Record<string, IslandState> = {
-	"0": "collapsed",
-	"1": "idle",
-	"2": "context",
-	"3": "suggestion",
-	"4": "expanded",
-};
+const KEY_TO_STATE = new Map(
+	Object.entries({
+		"0": "collapsed",
+		"1": "idle",
+		"2": "context",
+		"3": "suggestion",
+		"4": "expanded",
+	} satisfies Record<string, IslandState>)
+);
 
 /**
  * Dev-only keyboard switcher: press 0-4 to jump to a state, or Tab/Space to
@@ -21,7 +23,7 @@ export function useDevStateSwitcher(): void {
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent): void => {
-			const target = KEY_TO_STATE[event.key];
+			const target = KEY_TO_STATE.get(event.key);
 			if (target) {
 				event.preventDefault();
 				setState(target);

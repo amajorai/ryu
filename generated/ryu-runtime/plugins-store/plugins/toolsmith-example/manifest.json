@@ -1,18 +1,25 @@
 {
   "tags": ["developer-tools"],
-  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "author": {
+    "name": "Ryu",
+    "url": "https://ryuhq.com"
+  },
   "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/toolsmith-example",
   "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/toolsmith-example",
   "privacyPolicyUrl": "https://ryuhq.com/privacy",
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/toolsmith-example",
   "name": "toolsmith-example",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
-  "description": "Worked example for tools/toolsmith — a real, verified inline_deno tool. Not registered with Core and not shipped; it exists so the scaffold → verify pipeline has an end-to-end regression test.",
+  "description": "Worked example for tools/toolsmith — a real, verified inline_js tool. Not registered with Core and not shipped; it exists so the scaffold → verify pipeline has an end-to-end regression test.",
   "category": "Developer Tools",
   "icon": "puzzle",
-  "iconDither": { "from": 72, "to": "transparent", "direction": "down" },
+  "iconDither": {
+    "from": 72,
+    "to": "transparent",
+    "direction": "down"
+  },
   "hidden": true,
   "permission_grants": ["tool:execute"],
   "runnables": [
@@ -22,7 +29,7 @@
       "kind": "tool",
       "config": {
         "slug": "text_chunk",
-        "backend": "inline_deno",
+        "backend": "inline_js",
         "description": "Split a string into fixed-size chunks with optional overlap, returning each chunk with its start offset.",
         "input_schema": {
           "type": "object",
@@ -42,7 +49,7 @@
           },
           "required": ["text"]
         },
-        "code": "// Tool body for `text_chunk`, run in Core's Deno sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// with `input` (the call arguments) and `host` (the capability bridge) already\n// bound, and the body `return`s the tool's result. A top-level `return` is\n// therefore correct here and `export` is not.\n//\n// It is the worked example `tools/toolsmith` ships: a real tool, not a stub, so\n// the case table next to it demonstrates the boundaries worth pinning rather than\n// three variations on \"it works\".\n\nconst size = Number.isInteger(input.size) ? input.size : 512;\nconst overlap = Number.isInteger(input.overlap) ? input.overlap : 0;\n\nif (typeof input.text !== \"string\") {\n\tthrow new Error(\"text_chunk: 'text' is required and must be a string\");\n}\nif (size <= 0) {\n\tthrow new Error(`text_chunk: 'size' must be positive, got ${size}`);\n}\n// Guarded because `size - overlap <= 0` makes the cursor stop advancing and the\n// loop below never terminates. A tool that hangs the sandbox on a bad argument is\n// worse than one that rejects it: the caller gets a timeout with no reason.\nif (overlap < 0 || overlap >= size) {\n\tthrow new Error(\n\t\t`text_chunk: 'overlap' must be in [0, size), got ${overlap} with size ${size}`\n\t);\n}\n\nconst chunks = [];\nconst stride = size - overlap;\nfor (let start = 0; start < input.text.length; start += stride) {\n\tchunks.push({ start, text: input.text.slice(start, start + size) });\n}\n\n// An empty input yields ZERO chunks, not one empty chunk. The distinction is the\n// whole reason this is a case: a downstream embedder handed `[{text: \"\"}]` bills\n// for a vector of nothing and stores it as a real match.\nreturn { count: chunks.length, chunks };\n"
+        "code": "// Tool body for `text_chunk`, run in Core's JS sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// with `input` (the call arguments) and `host` (the capability bridge) already\n// bound, and the body `return`s the tool's result. A top-level `return` is\n// therefore correct here and `export` is not.\n//\n// It is the worked example `tools/toolsmith` ships: a real tool, not a stub, so\n// the case table next to it demonstrates the boundaries worth pinning rather than\n// three variations on \"it works\".\n\nconst size = Number.isInteger(input.size) ? input.size : 512;\nconst overlap = Number.isInteger(input.overlap) ? input.overlap : 0;\n\nconst primitiveStringAdmitted = (() => {\n\tconst raw = input.text;\n\ttry {\n\t\t// The native String brand operation accepts only string primitives or\n\t\t// boxed strings. Identity rejects boxes without coercing the raw value.\n\t\treturn String.prototype.valueOf.call(raw) === raw;\n\t} catch {\n\t\treturn false;\n\t}\n})();\nif (!primitiveStringAdmitted) {\n\tthrow new Error(\"text_chunk: 'text' is required and must be a string\");\n}\nif (size <= 0) {\n\tthrow new Error(`text_chunk: 'size' must be positive, got ${size}`);\n}\n// Guarded because `size - overlap <= 0` makes the cursor stop advancing and the\n// loop below never terminates. A tool that hangs the sandbox on a bad argument is\n// worse than one that rejects it: the caller gets a timeout with no reason.\nif (overlap < 0 || overlap >= size) {\n\tthrow new Error(\n\t\t`text_chunk: 'overlap' must be in [0, size), got ${overlap} with size ${size}`\n\t);\n}\n\nconst chunks = [];\nconst stride = size - overlap;\nfor (let start = 0; start < input.text.length; start += stride) {\n\tchunks.push({ start, text: input.text.slice(start, start + size) });\n}\n\n// An empty input yields ZERO chunks, not one empty chunk. The distinction is the\n// whole reason this is a case: a downstream embedder handed `[{text: \"\"}]` bills\n// for a vector of nothing and stores it as a real match.\nreturn { count: chunks.length, chunks };\n"
       }
     }
   ]

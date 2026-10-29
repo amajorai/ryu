@@ -16,6 +16,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
+use anyhow::Context as _;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -33,6 +34,10 @@ use uuid::Uuid;
 use x25519_dalek::{PublicKey as EncryptionPublicKey, StaticSecret};
 
 use crate::server::ServerState;
+
+mod host_status;
+#[cfg(test)]
+mod routes_test;
 
 const MAX_POLL_SECONDS: u64 = 25;
 const RETRY_SECONDS: u64 = 60;
@@ -59,6 +64,12 @@ struct FleetIdentity {
     snapshot_public_key: String,
     #[serde(default)]
     credential_updated_at: Option<DateTime<Utc>>,
+    /// A successor credential this node generated and saved before asking the
+    /// control plane to rotate to it. It survives a lost rotation reply, so the
+    /// node can confirm the successor instead of being locked out once the
+    /// control plane stops accepting the old bearer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_credential: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,41 +162,41 @@ struct FleetLocalStatus {
 }
 
 fn identity_path() -> PathBuf {
-    crate::paths::ryu_dir().join("fleet-identity.json")
+    crate::paths::state_path("fleet-identity.json")
 }
 
 fn pending_enrollment_path() -> PathBuf {
-    crate::paths::ryu_dir().join("fleet-enrollment-pending.json")
+    crate::paths::state_path("fleet-enrollment-pending.json")
 }
 
 fn enrolled_bundle_path() -> PathBuf {
-    crate::paths::ryu_dir().join("fleet-enrolled-node.json")
+    crate::paths::state_path("fleet-enrolled-node.json")
 }
 
 fn snapshot_path() -> PathBuf {
-    crate::paths::ryu_dir().join("fleet-desired.json")
+    crate::paths::state_path("fleet-desired.json")
 }
 
 fn status_path() -> PathBuf {
-    crate::paths::ryu_dir().join("fleet-status.json")
+    crate::paths::state_path("fleet-status.json")
 }
 
 fn enforcement_path() -> PathBuf {
-    crate::paths::ryu_dir().join("fleet-enforcement.json")
+    crate::paths::state_path("fleet-enforcement.json")
 }
 
 fn artifact_cache_dir() -> PathBuf {
-    crate::paths::ryu_dir().join("fleet-artifacts")
+    crate::paths::state_path("fleet-artifacts")
 }
 
 fn skill_blocks_path() -> PathBuf {
-    crate::paths::ryu_dir().join("fleet-skill-blocks.json")
+    crate::paths::state_path("fleet-skill-blocks.json")
 }
 
 const FLEET_SKILL_MARKER: &str = ".ryu-fleet-owner.json";
 
 fn legacy_instance_id() -> anyhow::Result<String> {
-    let path = crate::paths::ryu_dir().join("fleet-instance-id.json");
+    let path = crate::paths::state_path("fleet-instance-id.json");
     if let Ok(id) = load_json::<String>(&path) {
         if !id.trim().is_empty() {
             return Ok(id);
@@ -208,7 +219,42 @@ fn restrict_file(_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Fleet state files that hold credentials or private keys (the node credential,
+/// its Ed25519/X25519 private keys, the raw enrollment token, and the
+/// organization control and relay credentials). Their whole JSON body is sealed
+/// with the master key (`enc:v1:`); a plaintext file an older build wrote is
+/// read and sealed in place on its next load.
+const SEALED_STATE_FILES: [&str; 3] = [
+    "fleet-identity.json",
+    "fleet-enrollment-pending.json",
+    "fleet-enrolled-node.json",
+];
+
+fn is_sealed_state_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| SEALED_STATE_FILES.contains(&name))
+}
+
+/// The master-key cipher for fleet secrets. Fails closed: without a key no
+/// secret state is written and no sealed state is read.
+fn state_cipher() -> anyhow::Result<ryu_crypto::FieldCipher> {
+    crate::crypto_host::install();
+    ryu_crypto::global_cipher().context("loading the key that seals fleet credentials")
+}
+
+/// Write `value` as JSON through an owner-only temp file and an atomic rename.
+/// `secret` state is sealed before any byte reaches disk.
 fn atomic_json<T: Serialize>(path: &Path, value: &T, secret: bool) -> anyhow::Result<()> {
+    let mut body = serde_json::to_vec_pretty(value)?;
+    if secret {
+        let json = String::from_utf8(body).context("fleet state is not UTF-8")?;
+        body = state_cipher()?.seal(&json)?.into_bytes();
+    }
+    write_state_body(path, &body, secret)
+}
+
+fn write_state_body(path: &Path, body: &[u8], secret: bool) -> anyhow::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("state path has no parent"))?;
@@ -216,20 +262,39 @@ fn atomic_json<T: Serialize>(path: &Path, value: &T, secret: bool) -> anyhow::Re
     let mut temporary = tempfile::Builder::new()
         .prefix(".ryu-state-")
         .tempfile_in(parent)?;
-    serde_json::to_writer_pretty(temporary.as_file_mut(), value)?;
-    temporary.as_file_mut().write_all(b"\n")?;
-    temporary.as_file_mut().sync_all()?;
     if secret {
         restrict_file(temporary.path())?;
     }
+    temporary.as_file_mut().write_all(body)?;
+    temporary.as_file_mut().write_all(b"\n")?;
+    temporary.as_file_mut().sync_all()?;
     temporary
         .persist(path)
         .map_err(|error| anyhow::anyhow!(error.error))?;
     Ok(())
 }
 
+/// Read JSON state. A sealed body is opened with the master key (an error when
+/// the key is missing or wrong, never a silent default); a legacy plaintext
+/// body of a [`SEALED_STATE_FILES`] file is sealed in place once.
 fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> anyhow::Result<T> {
-    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+    let text = String::from_utf8(std::fs::read(path)?).context("fleet state is not UTF-8")?;
+    let body = text.trim();
+    if ryu_crypto::looks_sealed(body) {
+        let json = ryu_crypto::SecretSealer::open(&state_cipher()?, body)
+            .with_context(|| format!("opening sealed {}", path.display()))?;
+        return Ok(serde_json::from_str(&json)?);
+    }
+    let value = serde_json::from_str(&text)?;
+    if is_sealed_state_file(path) {
+        let resealed = state_cipher()
+            .and_then(|cipher| Ok(cipher.seal(body)?))
+            .and_then(|sealed| write_state_body(path, sealed.as_bytes(), true));
+        if let Err(error) = resealed {
+            tracing::warn!(path = %path.display(), "fleet: could not seal legacy state in place: {error:#}");
+        }
+    }
+    Ok(value)
 }
 
 fn load_fleet_identity_from(
@@ -248,6 +313,24 @@ fn load_fleet_identity_from(
 
 fn load_fleet_identity() -> anyhow::Result<FleetIdentity> {
     load_fleet_identity_from(&enrolled_bundle_path(), &identity_path())
+}
+
+/// The enrolled node's Ed25519 identity key, for signing statements this node
+/// publishes about itself (the A2A Agent Card). `None` when the node is not
+/// enrolled, enrollment is unacknowledged, or the stored key pair is
+/// inconsistent. Every other use of this key is domain-separated (enrollment
+/// claims are prefixed with [`ENROLLMENT_CLAIM_DOMAIN`]), so a JWS signing
+/// input, which is base64url text, can never collide with one.
+pub(crate) fn node_identity_signing_key() -> Option<SigningKey> {
+    node_identity_signing_key_from(&load_fleet_identity().ok()?)
+}
+
+fn node_identity_signing_key_from(identity: &FleetIdentity) -> Option<SigningKey> {
+    let private = decode_32_bytes(&identity.signing_private_key, "signingPrivateKey").ok()?;
+    let key = SigningKey::from_bytes(&private);
+    let published =
+        base64::engine::general_purpose::STANDARD.encode(key.verifying_key().as_bytes());
+    (published == identity.signing_public_key).then_some(key)
 }
 
 fn save_fleet_identity(identity: &FleetIdentity) -> anyhow::Result<()> {
@@ -333,6 +416,26 @@ fn enrolled_managed_fleet_from(path: &Path) -> Option<(String, String)> {
                 bundle.organization_binding.managed_fleet_url,
                 bundle.organization_binding.relay_credential,
             )
+        })
+}
+
+pub(crate) struct EnrolledDiagnosticsRelay {
+    pub(crate) control_plane_url: String,
+    pub(crate) relay_token: String,
+}
+
+/// The least-privilege relay credential and Ryu control-plane origin from an
+/// acknowledged enrollment. Unbound local installs have no Ryu telemetry path.
+pub(crate) fn enrolled_diagnostics_relay() -> Option<EnrolledDiagnosticsRelay> {
+    enrolled_diagnostics_relay_from(&enrolled_bundle_path())
+}
+
+fn enrolled_diagnostics_relay_from(path: &Path) -> Option<EnrolledDiagnosticsRelay> {
+    load_enrolled_bundle_from(path)
+        .filter(|bundle| bundle.acknowledged)
+        .map(|bundle| EnrolledDiagnosticsRelay {
+            control_plane_url: bundle.fleet_identity.control_plane_url,
+            relay_token: bundle.organization_binding.relay_credential,
         })
 }
 
@@ -1253,7 +1356,7 @@ struct DeleteMappingQuery {
 }
 
 fn mappings_path() -> PathBuf {
-    crate::paths::ryu_dir().join("org-project-mappings.json")
+    crate::paths::state_path("org-project-mappings.json")
 }
 
 fn load_from(path: &Path) -> anyhow::Result<Vec<ProjectMapping>> {
@@ -1492,6 +1595,7 @@ async fn enroll_node(
                 })),
             );
         }
+        crate::ryu_analytics::sync_gateway_relay_config();
         return enrollment_success(&bundle.fleet_identity);
     }
 
@@ -1586,6 +1690,7 @@ async fn enroll_node(
         );
     }
 
+    crate::ryu_analytics::sync_gateway_relay_config();
     enrollment_success(&identity)
 }
 
@@ -1808,6 +1913,7 @@ fn prepared_identity_and_bundle(
         encryption_public_key: pending.encryption_public_key.clone(),
         snapshot_public_key: enrolled.signing_public_key,
         credential_updated_at: Some(Utc::now()),
+        pending_credential: None,
     };
     let binding = enrolled
         .organization_binding
@@ -2040,6 +2146,7 @@ async fn adopt_legacy_gateway(state: &ServerState) -> anyhow::Result<bool> {
             encryption_public_key,
             snapshot_public_key: enrolled.signing_public_key,
             credential_updated_at: Some(Utc::now()),
+            pending_credential: None,
         },
         true,
     )?;
@@ -2070,6 +2177,7 @@ async fn report_observed(
             "mappedProjectIds": mapped_project_ids,
             "revision": revision,
             "status": status,
+            "uptimeSeconds": sysinfo::System::uptime(),
         }))
         .timeout(Duration::from_secs(15))
         .send()
@@ -2080,37 +2188,89 @@ async fn report_observed(
     Ok(())
 }
 
+/// A node credential in the shape the control plane mints: `rfn_` and 32
+/// random bytes as lowercase hex.
+fn generate_node_credential() -> String {
+    let mut bytes = [0_u8; 32];
+    rand::RngCore::fill_bytes(&mut OsRng, &mut bytes);
+    format!("rfn_{}", hex::encode(bytes))
+}
+
+async fn request_rotation(
+    client: &reqwest::Client,
+    control_plane_url: &str,
+    bearer: &str,
+    successor: &str,
+) -> anyhow::Result<reqwest::Response> {
+    Ok(client
+        .post(format!(
+            "{control_plane_url}/api/control-plane/nodes/me/rotate-credential"
+        ))
+        .bearer_auth(bearer)
+        .json(&json!({ "credential": successor }))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await?)
+}
+
 async fn rotate_credential_if_due(
     client: &reqwest::Client,
     identity: &mut FleetIdentity,
 ) -> anyhow::Result<()> {
-    let age = identity
-        .credential_updated_at
-        .map(|updated| Utc::now().signed_duration_since(updated))
-        .unwrap_or_else(|| chrono::Duration::days(2));
-    if age < chrono::Duration::days(1) {
-        return Ok(());
+    rotate_credential_with(client, identity, save_fleet_identity).await
+}
+
+/// Rotate the node credential once a day. Only the current bearer may rotate,
+/// so the successor is generated and saved first: when the reply is lost after
+/// the control plane commits, the next attempt confirms that same successor
+/// (with the old bearer during its grace window, or with the successor itself
+/// afterwards) instead of leaving the node with a bearer that no longer works.
+async fn rotate_credential_with(
+    client: &reqwest::Client,
+    identity: &mut FleetIdentity,
+    persist: impl Fn(&FleetIdentity) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let successor = match identity.pending_credential.clone() {
+        Some(successor) => successor,
+        None => {
+            let age = identity
+                .credential_updated_at
+                .map(|updated| Utc::now().signed_duration_since(updated))
+                .unwrap_or_else(|| chrono::Duration::days(2));
+            if age < chrono::Duration::days(1) {
+                return Ok(());
+            }
+            let successor = generate_node_credential();
+            identity.pending_credential = Some(successor.clone());
+            persist(identity)?;
+            successor
+        }
+    };
+    let mut response = request_rotation(
+        client,
+        &identity.control_plane_url,
+        &identity.credential,
+        &successor,
+    )
+    .await?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED && successor != identity.credential {
+        response =
+            request_rotation(client, &identity.control_plane_url, &successor, &successor).await?;
     }
-    let response = client
-        .post(format!(
-            "{}/api/control-plane/nodes/me/rotate-credential",
-            identity.control_plane_url
-        ))
-        .bearer_auth(&identity.credential)
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await?;
     if !response.status().is_success() {
         anyhow::bail!("credential rotation returned {}", response.status());
     }
     let body: Value = response.json().await?;
+    // A control plane that predates node-proposed successors ignores the
+    // proposal and mints its own; whichever it returns is the live one.
     identity.credential = body
         .get("credential")
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("credential rotation response is missing credential"))?
         .to_owned();
+    identity.pending_credential = None;
     identity.credential_updated_at = Some(Utc::now());
-    save_fleet_identity(identity)?;
+    persist(identity)?;
     Ok(())
 }
 
@@ -2118,7 +2278,12 @@ async fn reconcile_once(state: &ServerState) -> anyhow::Result<bool> {
     use anyhow::{anyhow, bail};
 
     let mut identity = load_fleet_identity()?;
-    rotate_credential_if_due(&state.client, &mut identity).await?;
+    // A failed rotation is retried on the next pass. The credential this node
+    // holds still decides whether the desired-state request below succeeds, and
+    // a revoked one surfaces there as "node credential was revoked".
+    if let Err(error) = rotate_credential_if_due(&state.client, &mut identity).await {
+        tracing::warn!("fleet: credential rotation failed; retrying next pass: {error}");
+    }
     let previous = load_json::<SignedSnapshot>(&snapshot_path()).ok();
     let previous_revision = previous
         .as_ref()
@@ -2143,6 +2308,10 @@ async fn reconcile_once(state: &ServerState) -> anyhow::Result<bool> {
             identity.control_plane_url
         ))
         .bearer_auth(&identity.credential)
+        .header(
+            "x-ryu-node-uptime-seconds",
+            sysinfo::System::uptime().to_string(),
+        )
         .query(&[
             ("after", after_revision),
             ("wait", MAX_POLL_SECONDS.to_string()),
@@ -2362,6 +2531,7 @@ pub fn managed_instruction_block(cwd: Option<&str>) -> Option<String> {
 }
 
 pub fn spawn_reconciler(state: ServerState) {
+    host_status::spawn_reporter(state.client.clone());
     tokio::spawn(async move {
         loop {
             if let Err(error) = recover_enrollment(&state.client).await {
@@ -2383,28 +2553,34 @@ pub fn spawn_reconciler(state: ServerState) {
                     }
                 }
             }
-            if load_fleet_identity().is_ok() {
-                if let Err(error) = reconcile_once(&state).await {
-                    let stale = cached_snapshot_is_stale();
-                    if stale {
-                        expire_managed_runtime(&state).await;
-                    }
-                    let status = if stale { "expired" } else { "offline-lkg" };
-                    let local = FleetLocalStatus {
-                        last_attempt_at: Some(Utc::now().to_rfc3339()),
-                        last_error: Some(error.to_string()),
-                        observed_revision: load_json::<FleetLocalStatus>(&status_path())
-                            .map(|item| item.observed_revision)
-                            .unwrap_or(0),
-                        stale,
-                        status: status.to_owned(),
-                    };
-                    if let Err(write_error) = atomic_json(&status_path(), &local, false) {
-                        tracing::warn!("fleet: could not persist failure status: {write_error}");
-                    }
-                    tracing::warn!("fleet: reconciliation failed: {error}");
-                    tokio::time::sleep(Duration::from_secs(RETRY_SECONDS)).await;
+            // An identity file that exists but cannot be read or parsed (or an
+            // enrollment still awaiting acknowledgement) must back off like every
+            // other failure here, or this loop spins with no await that sleeps.
+            if let Err(error) = load_fleet_identity() {
+                tracing::warn!("fleet: node identity is unusable; retrying: {error}");
+                tokio::time::sleep(Duration::from_secs(RETRY_SECONDS)).await;
+                continue;
+            }
+            if let Err(error) = reconcile_once(&state).await {
+                let stale = cached_snapshot_is_stale();
+                if stale {
+                    expire_managed_runtime(&state).await;
                 }
+                let status = if stale { "expired" } else { "offline-lkg" };
+                let local = FleetLocalStatus {
+                    last_attempt_at: Some(Utc::now().to_rfc3339()),
+                    last_error: Some(error.to_string()),
+                    observed_revision: load_json::<FleetLocalStatus>(&status_path())
+                        .map(|item| item.observed_revision)
+                        .unwrap_or(0),
+                    stale,
+                    status: status.to_owned(),
+                };
+                if let Err(write_error) = atomic_json(&status_path(), &local, false) {
+                    tracing::warn!("fleet: could not persist failure status: {write_error}");
+                }
+                tracing::warn!("fleet: reconciliation failed: {error}");
+                tokio::time::sleep(Duration::from_secs(RETRY_SECONDS)).await;
             }
         }
     });
@@ -2503,6 +2679,12 @@ async fn export_stack() -> (StatusCode, Json<Value>) {
             );
         }
     };
+    (StatusCode::OK, Json(stack_template(&snapshot)))
+}
+
+/// The portable stack template (`ryu.dev/stack-template/v1`) for a verified
+/// snapshot: its artifact assignments and rules, without node-local state.
+fn stack_template(snapshot: &SignedSnapshot) -> Value {
     let items = snapshot
         .payload
         .get("assignments")
@@ -2546,19 +2728,16 @@ async fn export_stack() -> (StatusCode, Json<Value>) {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    (
-        StatusCode::OK,
-        Json(json!({
-            "apiVersion": "ryu.dev/stack-template/v1",
-            "items": items,
-            "metadata": {
-                "exportedAt": Utc::now().to_rfc3339(),
-                "sourceRevision": snapshot.payload.get("revision"),
-            },
-            "projectAliases": [],
-            "rules": rules,
-        })),
-    )
+    json!({
+        "apiVersion": "ryu.dev/stack-template/v1",
+        "items": items,
+        "metadata": {
+            "exportedAt": Utc::now().to_rfc3339(),
+            "sourceRevision": snapshot.payload.get("revision"),
+        },
+        "projectAliases": [],
+        "rules": rules,
+    })
 }
 
 pub fn routes() -> Router<ServerState> {
@@ -2576,11 +2755,12 @@ pub fn routes() -> Router<ServerState> {
 mod tests {
     use super::{
         agent_allowed_by_assignments, atomic_json, canonicalize_json,
-        enrolled_control_plane_url_from, enrolled_control_token_from, enrolled_managed_fleet_from,
-        enrollment_claim_bytes, enrollment_claim_proof, enrollment_operation_lock,
-        enrollment_token_hash, fleet_skill_dir, load_enrolled_bundle_from,
-        load_fleet_identity_from, normalized_service_url, pending_attempt_for_request,
-        project_for_cwd, registration_refresh_required, valid_enrollment_token, validate_insert,
+        enrolled_control_plane_url_from, enrolled_control_token_from,
+        enrolled_diagnostics_relay_from, enrolled_managed_fleet_from, enrollment_claim_bytes,
+        enrollment_claim_proof, enrollment_operation_lock, enrollment_token_hash, fleet_skill_dir,
+        load_enrolled_bundle_from, load_fleet_identity_from, node_identity_signing_key_from,
+        normalized_service_url, pending_attempt_for_request, project_for_cwd,
+        registration_refresh_required, valid_enrollment_token, validate_insert,
         validate_organization_binding, verify_snapshot, EnrollResponse, EnrolledNodeBundle,
         EnrollmentOrganizationBinding, FleetIdentity, ProjectMapping, SignedSnapshot,
         ENROLLMENT_CLAIM_DOMAIN,
@@ -2678,6 +2858,7 @@ mod tests {
             encryption_public_key: String::new(),
             snapshot_public_key: public_key.clone(),
             credential_updated_at: None,
+            pending_credential: None,
         };
         (
             identity,
@@ -2687,6 +2868,22 @@ mod tests {
                 signature: base64::engine::general_purpose::STANDARD.encode(signature.to_bytes()),
             },
         )
+    }
+
+    #[test]
+    fn node_identity_signing_key_requires_a_consistent_key_pair() {
+        // The fixture's public key does not belong to its private key.
+        let mut stored = identity("org-1", "node-1");
+        assert!(node_identity_signing_key_from(&stored).is_none());
+        let key = SigningKey::from_bytes(&[1; 32]);
+        stored.signing_public_key =
+            base64::engine::general_purpose::STANDARD.encode(key.verifying_key().as_bytes());
+        assert_eq!(
+            node_identity_signing_key_from(&stored).map(|found| found.to_bytes()),
+            Some(key.to_bytes())
+        );
+        stored.signing_private_key = String::new();
+        assert!(node_identity_signing_key_from(&stored).is_none());
     }
 
     fn identity(organization_id: &str, node_id: &str) -> FleetIdentity {
@@ -2701,6 +2898,7 @@ mod tests {
             encryption_public_key: base64::engine::general_purpose::STANDARD.encode([4; 32]),
             snapshot_public_key: base64::engine::general_purpose::STANDARD.encode([5; 32]),
             credential_updated_at: None,
+            pending_credential: None,
         }
     }
 
@@ -2914,6 +3112,21 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_relay_is_available_only_after_self_hosted_enrollment_acknowledges() {
+        let directory = tempdir().expect("temporary state directory");
+        let path = directory.path().join("bundle.json");
+        atomic_json(&path, &bundle(false, "org-enrolled", "node-enrolled"), true)
+            .expect("prepared bundle");
+        assert!(enrolled_diagnostics_relay_from(&path).is_none());
+
+        atomic_json(&path, &bundle(true, "org-enrolled", "node-enrolled"), true)
+            .expect("acknowledged bundle");
+        let relay = enrolled_diagnostics_relay_from(&path).expect("acknowledged relay");
+        assert_eq!(relay.control_plane_url, "https://control.example");
+        assert_eq!(relay.relay_token, "rgw_relay");
+    }
+
+    #[test]
     fn unacknowledged_bundle_cannot_supply_control_plane_url() {
         let directory = tempdir().expect("temporary state directory");
         let path = directory.path().join("bundle.json");
@@ -2970,6 +3183,49 @@ mod tests {
     }
 
     #[test]
+    fn secret_fleet_state_is_sealed_on_disk_and_opens_on_load() {
+        let directory = tempdir().expect("temporary state directory");
+        let path = directory.path().join("fleet-enrolled-node.json");
+        atomic_json(&path, &bundle(true, "org-enrolled", "node-enrolled"), true)
+            .expect("sealed bundle");
+        let raw = std::fs::read_to_string(&path).expect("bundle bytes");
+        assert!(raw.trim().starts_with("enc:v1:"), "{raw}");
+        for secret in [
+            "rgw_control",
+            "rgw_relay",
+            "signingPrivateKey",
+            "credential",
+        ] {
+            assert!(!raw.contains(secret), "{secret} leaked: {raw}");
+        }
+        let loaded = load_enrolled_bundle_from(&path).expect("sealed bundle opens");
+        assert_eq!(
+            loaded.organization_binding.control_credential,
+            "rgw_control"
+        );
+        assert_eq!(loaded.organization_binding.relay_credential, "rgw_relay");
+    }
+
+    #[test]
+    fn legacy_plaintext_fleet_identity_loads_and_is_sealed_in_place() {
+        let directory = tempdir().expect("temporary state directory");
+        let path = directory.path().join("fleet-identity.json");
+        let legacy = identity("org-legacy", "node-legacy");
+        std::fs::write(&path, serde_json::to_vec_pretty(&legacy).unwrap()).expect("legacy file");
+        let loaded: FleetIdentity = super::load_json(&path).expect("legacy plaintext loads");
+        assert_eq!(loaded.credential, legacy.credential);
+        let raw = std::fs::read_to_string(&path).expect("identity bytes");
+        assert!(raw.trim().starts_with("enc:v1:"), "{raw}");
+        assert!(!raw.contains(&legacy.signing_private_key));
+        assert!(!raw.contains(&legacy.encryption_private_key));
+        let reloaded: FleetIdentity = super::load_json(&path).expect("sealed identity loads");
+        assert_eq!(reloaded.signing_private_key, legacy.signing_private_key);
+        // A sealed body that does not open is an error, never a default.
+        std::fs::write(&path, "enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
+        assert!(super::load_json::<FleetIdentity>(&path).is_err());
+    }
+
+    #[test]
     fn acknowledged_bundle_precedes_legacy_identity_without_breaking_legacy_loading() {
         let directory = tempdir().expect("temporary state directory");
         let bundle_path = directory.path().join("bundle.json");
@@ -2999,6 +3255,29 @@ mod tests {
         )
         .expect("unacknowledged bundle");
         assert!(load_fleet_identity_from(&bundle_path, &legacy_path).is_err());
+    }
+
+    /// The states that make the reconciler take its back-off branch: a legacy
+    /// identity file exists (so legacy adoption is skipped) but cannot be
+    /// loaded, and there is no acknowledged bundle to take precedence.
+    #[test]
+    fn unusable_legacy_identity_without_a_bundle_fails_to_load() {
+        let directory = tempdir().expect("temporary state directory");
+        let bundle_path = directory.path().join("bundle.json");
+        let legacy_path = directory.path().join("identity.json");
+        for corrupt in [&b"{not json"[..], &b"{\"nodeId\":\"partial\"}"[..]] {
+            std::fs::write(&legacy_path, corrupt).expect("corrupt legacy identity");
+            assert!(legacy_path.exists() && !bundle_path.exists());
+            assert!(load_fleet_identity_from(&bundle_path, &legacy_path).is_err());
+        }
+        // An acknowledged bundle still wins over the corrupt legacy file.
+        atomic_json(
+            &bundle_path,
+            &bundle(true, "org-enrolled", "node-enrolled"),
+            true,
+        )
+        .expect("enrolled bundle");
+        assert!(load_fleet_identity_from(&bundle_path, &legacy_path).is_ok());
     }
 
     #[test]
@@ -3036,5 +3315,252 @@ mod tests {
         let (identity, snapshot) =
             signed_snapshot("node-1", (Utc::now() + Duration::hours(1)).to_rfc3339());
         assert_eq!(verify_snapshot(&identity, &snapshot).expect("verified"), 4);
+    }
+}
+
+#[cfg(test)]
+mod credential_rotation_tests {
+    use super::{generate_node_credential, rotate_credential_with, FleetIdentity};
+    use axum::{
+        extract::State,
+        http::{HeaderMap, StatusCode},
+        routing::post,
+        Json, Router,
+    };
+    use base64::Engine;
+    use chrono::{Duration, Utc};
+    use serde_json::{json, Value};
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
+
+    const ORIGINAL: &str = "rfn_original";
+
+    /// The control plane's stored rotation state, with the same rules as
+    /// `POST /nodes/me/rotate-credential`: the current bearer, or the previous
+    /// one inside its grace window, authenticates; a proposal equal to the
+    /// current credential is confirmed unchanged; only the current bearer can
+    /// replace it.
+    #[derive(Default)]
+    struct ControlPlane {
+        current: String,
+        previous: Option<String>,
+        grace_open: bool,
+        lose_next_reply: bool,
+        requests: Vec<(String, String)>,
+    }
+
+    type Shared = Arc<Mutex<ControlPlane>>;
+
+    async fn rotate(
+        State(state): State<Shared>,
+        headers: HeaderMap,
+        Json(body): Json<Value>,
+    ) -> (StatusCode, Json<Value>) {
+        let bearer = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .unwrap_or_default()
+            .to_owned();
+        let proposed = body
+            .get("credential")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let mut plane = state.lock().unwrap();
+        plane.requests.push((bearer.clone(), proposed.clone()));
+        let authenticated = bearer == plane.current
+            || (plane.grace_open && plane.previous.as_deref() == Some(bearer.as_str()));
+        if !authenticated {
+            return (StatusCode::UNAUTHORIZED, Json(json!({})));
+        }
+        if proposed == plane.current {
+            return (StatusCode::OK, Json(json!({ "credential": proposed })));
+        }
+        if bearer != plane.current {
+            return (StatusCode::UNAUTHORIZED, Json(json!({})));
+        }
+        plane.previous = Some(std::mem::replace(&mut plane.current, proposed.clone()));
+        plane.grace_open = true;
+        if plane.lose_next_reply {
+            plane.lose_next_reply = false;
+            return (StatusCode::BAD_GATEWAY, Json(json!({})));
+        }
+        (StatusCode::OK, Json(json!({ "credential": proposed })))
+    }
+
+    async fn control_plane(plane: ControlPlane) -> (Shared, String) {
+        let state: Shared = Arc::new(Mutex::new(plane));
+        let app = Router::new()
+            .route(
+                "/api/control-plane/nodes/me/rotate-credential",
+                post(rotate),
+            )
+            .with_state(state.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (state, format!("http://{address}"))
+    }
+
+    fn client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
+    fn due_identity(control_plane_url: String) -> FleetIdentity {
+        let key = |byte: u8| base64::engine::general_purpose::STANDARD.encode([byte; 32]);
+        FleetIdentity {
+            control_plane_url,
+            credential: ORIGINAL.into(),
+            node_id: "node-1".into(),
+            organization_id: "org".into(),
+            signing_private_key: key(1),
+            signing_public_key: key(2),
+            encryption_private_key: key(3),
+            encryption_public_key: key(4),
+            snapshot_public_key: key(5),
+            credential_updated_at: Some(Utc::now() - Duration::days(2)),
+            pending_credential: None,
+        }
+    }
+
+    fn recorder() -> (
+        Arc<Mutex<Vec<FleetIdentity>>>,
+        impl Fn(&FleetIdentity) -> anyhow::Result<()>,
+    ) {
+        let saved = Arc::new(Mutex::new(Vec::new()));
+        let sink = saved.clone();
+        (saved, move |identity: &FleetIdentity| {
+            sink.lock().unwrap().push(identity.clone());
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn generated_successor_matches_the_control_plane_shape() {
+        let first = generate_node_credential();
+        let hex = first.strip_prefix("rfn_").expect("rfn_ prefix");
+        assert_eq!(hex.len(), 64);
+        assert!(hex
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
+        assert_ne!(first, generate_node_credential());
+    }
+
+    #[tokio::test]
+    async fn a_lost_reply_is_recovered_after_the_grace_window_closes() {
+        let (plane, url) = control_plane(ControlPlane {
+            current: ORIGINAL.into(),
+            lose_next_reply: true,
+            ..ControlPlane::default()
+        })
+        .await;
+        let (saved, persist) = recorder();
+        let mut identity = due_identity(url);
+
+        let lost = rotate_credential_with(&client(), &mut identity, &persist).await;
+        assert!(lost.is_err(), "a lost reply is reported");
+        let successor = identity
+            .pending_credential
+            .clone()
+            .expect("successor is kept for the retry");
+        assert_eq!(identity.credential, ORIGINAL);
+        assert_eq!(plane.lock().unwrap().current, successor);
+        // The successor reached disk before the request was sent.
+        {
+            let saved = saved.lock().unwrap();
+            assert_eq!(saved.len(), 1);
+            assert_eq!(saved[0].credential, ORIGINAL);
+            assert_eq!(
+                saved[0].pending_credential.as_deref(),
+                Some(successor.as_str())
+            );
+        }
+
+        // The old bearer stops working before the node retries.
+        plane.lock().unwrap().grace_open = false;
+        rotate_credential_with(&client(), &mut identity, &persist)
+            .await
+            .expect("the saved successor confirms itself");
+        assert_eq!(identity.credential, successor);
+        assert_eq!(identity.pending_credential, None);
+        let last = saved
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .expect("saved identity");
+        assert_eq!(last.credential, successor);
+        assert_eq!(last.pending_credential, None);
+        let plane = plane.lock().unwrap();
+        assert_eq!(plane.current, successor);
+        assert_eq!(plane.previous.as_deref(), Some(ORIGINAL));
+        assert_eq!(
+            plane.requests[1..],
+            [
+                (ORIGINAL.to_owned(), successor.clone()),
+                (successor.clone(), successor.clone()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_save_after_commit_is_confirmed_on_the_next_pass() {
+        let (plane, url) = control_plane(ControlPlane {
+            current: ORIGINAL.into(),
+            ..ControlPlane::default()
+        })
+        .await;
+        let saved: Arc<Mutex<Vec<FleetIdentity>>> = Arc::default();
+        let sink = saved.clone();
+        // The pending successor saves; writing the promoted identity fails.
+        let flaky = move |identity: &FleetIdentity| {
+            let mut saved = sink.lock().unwrap();
+            if !saved.is_empty() {
+                anyhow::bail!("disk full");
+            }
+            saved.push(identity.clone());
+            Ok(())
+        };
+        let mut identity = due_identity(url);
+        assert!(rotate_credential_with(&client(), &mut identity, &flaky)
+            .await
+            .is_err());
+
+        // What a restarted node loads: the old bearer plus the saved successor.
+        let mut reloaded = saved.lock().unwrap()[0].clone();
+        let successor = reloaded
+            .pending_credential
+            .clone()
+            .expect("saved successor");
+        assert_eq!(plane.lock().unwrap().current, successor);
+        let (_, persist) = recorder();
+        rotate_credential_with(&client(), &mut reloaded, &persist)
+            .await
+            .expect("the old bearer confirms the committed successor in its grace window");
+        assert_eq!(reloaded.credential, successor);
+        assert_eq!(reloaded.pending_credential, None);
+        let plane = plane.lock().unwrap();
+        assert_eq!(plane.current, successor);
+        assert_eq!(plane.previous.as_deref(), Some(ORIGINAL));
+        assert_eq!(plane.requests.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn rotation_is_skipped_until_the_credential_is_a_day_old() {
+        let (plane, url) = control_plane(ControlPlane {
+            current: ORIGINAL.into(),
+            ..ControlPlane::default()
+        })
+        .await;
+        let (saved, persist) = recorder();
+        let mut identity = due_identity(url);
+        identity.credential_updated_at = Some(Utc::now() - Duration::hours(1));
+        rotate_credential_with(&client(), &mut identity, &persist)
+            .await
+            .expect("nothing to do");
+        assert!(saved.lock().unwrap().is_empty());
+        assert!(plane.lock().unwrap().requests.is_empty());
+        assert_eq!(identity.credential, ORIGINAL);
     }
 }

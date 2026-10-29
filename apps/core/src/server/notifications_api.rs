@@ -21,9 +21,36 @@ use serde_json::json;
 
 use super::ServerState;
 use crate::identity_verify::VerifiedCaller;
+use crate::notify::{NotificationRow, NotifyStore};
 
 const DEFAULT_LIMIT: i64 = 50;
 const MAX_LIMIT: i64 = 200;
+
+fn is_connect_suggestion(source_app_id: Option<&str>) -> bool {
+    source_app_id == Some(crate::notify::ISLAND_CONNECT_SUGGESTION_SOURCE)
+}
+
+fn redact_connect_suggestion_fields(title: &mut String, body: &mut Option<String>) {
+    *title = crate::notify::CONNECT_SUGGESTION_PRIVACY_TITLE.to_owned();
+    *body = Some(crate::notify::CONNECT_SUGGESTION_PRIVACY_BODY.to_owned());
+}
+
+fn project_streaming_private_notifications(
+    mut notifications: Vec<crate::notify::store::NotificationRow>,
+    streaming_active: bool,
+) -> Vec<crate::notify::store::NotificationRow> {
+    if !streaming_active {
+        return notifications;
+    }
+    for notification in &mut notifications {
+        if is_connect_suggestion(notification.source_app_id.as_deref()) {
+            redact_connect_suggestion_fields(&mut notification.title, &mut notification.body);
+            notification.workflow_run_id = None;
+            notification.node_id = None;
+        }
+    }
+    notifications
+}
 
 /// Project the node-scoped notification roster into the compact shape the chat
 /// composer needs. The user id is the only durable identity; the other fields
@@ -99,6 +126,43 @@ fn resolve_viewer(
     }
 }
 
+type Reply = (StatusCode, Json<serde_json::Value>);
+
+fn error_reply(status: StatusCode, error: &str) -> Reply {
+    (status, Json(json!({ "error": error })))
+}
+
+fn store_not_ready() -> Reply {
+    error_reply(StatusCode::SERVICE_UNAVAILABLE, "notify store not ready")
+}
+
+/// Fetch notification `id` and authorize the caller against its recipient
+/// (`row.user_id`) BEFORE any mutation, so a cross-member id can never touch
+/// another recipient's inbox row. Yields the store, the row, and the
+/// authorized actor.
+async fn authorize_recipient(
+    caller: Option<VerifiedCaller>,
+    id: &str,
+) -> Result<(NotifyStore, NotificationRow, String), Reply> {
+    let Some(store) = crate::notify::global_store() else {
+        return Err(store_not_ready());
+    };
+    let Ok(Some(row)) = store.get_notification(id).await else {
+        return Err(error_reply(StatusCode::NOT_FOUND, "notification not found"));
+    };
+    let actor = resolve_viewer(caller, row.user_id.as_deref())
+        .map_err(|code| error_reply(code, "unauthorized"))?;
+    Ok((store, row, actor))
+}
+
+/// `{ ok: true }` once a recipient-gated mutation succeeds; a 500 otherwise.
+fn mutation_reply(result: anyhow::Result<bool>) -> Reply {
+    match result {
+        Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
+        Err(e) => error_reply(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
 /// `GET /api/notifications?user_id=..&limit=..` — a member's inbox, newest first.
 /// The feed served is always the verified caller's own (an org-bound node rejects
 /// an unauthenticated or mismatched request).
@@ -110,31 +174,89 @@ fn resolve_viewer(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn list_notifications(
-    State(state): State<ServerState>,
+    State(_state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
     Query(q): Query<ListQuery>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let viewer = match resolve_viewer(caller, q.user_id.as_deref()) {
         Ok(v) => v,
-        Err(code) => return (code, Json(json!({ "error": "unauthorized" }))),
+        Err(code) => return error_reply(code, "unauthorized"),
     };
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let Some(store) = crate::notify::global_store() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "notify store not ready" })),
-        );
+        return store_not_ready();
     };
-    let _ = &state;
     match store
         .list_notifications_for_user(&viewer, limit, q.archived)
         .await
     {
-        Ok(items) => (StatusCode::OK, Json(json!({ "notifications": items }))),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
+        Ok(items) => {
+            let items = project_streaming_private_notifications(
+                items,
+                crate::presence::streaming_privacy_active(),
+            );
+            (StatusCode::OK, Json(json!({ "notifications": items })))
+        }
+        Err(e) => error_reply(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod streaming_privacy_tests {
+    use super::project_streaming_private_notifications;
+    use crate::notify::store::NotificationRow;
+
+    fn notification(source_app_id: Option<&str>) -> NotificationRow {
+        NotificationRow {
+            id: "ntf_connect_sensitive-event".to_owned(),
+            user_id: Some("user-1".to_owned()),
+            title: "Password reset requested".to_owned(),
+            body: Some("Code 683474 is valid for 30 minutes".to_owned()),
+            level: "info".to_owned(),
+            workflow_run_id: Some("run-sensitive".to_owned()),
+            node_id: Some("private-node".to_owned()),
+            ack_required: false,
+            acked: false,
+            read_at: None,
+            created_at: "2026-09-29T00:00:00Z".to_owned(),
+            source_app_id: source_app_id.map(str::to_owned),
+            archived_at: None,
+        }
+    }
+
+    #[test]
+    fn streaming_masks_queued_connect_details_and_run_references() {
+        let projected = project_streaming_private_notifications(
+            vec![notification(Some(
+                crate::notify::ISLAND_CONNECT_SUGGESTION_SOURCE,
+            ))],
+            true,
+        );
+        let projected = &projected[0];
+        assert_eq!(
+            projected.title,
+            crate::notify::CONNECT_SUGGESTION_PRIVACY_TITLE
+        );
+        assert_eq!(
+            projected.body.as_deref(),
+            Some(crate::notify::CONNECT_SUGGESTION_PRIVACY_BODY)
+        );
+        assert_eq!(projected.workflow_run_id, None);
+        assert_eq!(projected.node_id, None);
+    }
+
+    #[test]
+    fn streaming_leaves_other_notifications_and_inactive_suggestions_unchanged() {
+        let connect = notification(Some(crate::notify::ISLAND_CONNECT_SUGGESTION_SOURCE));
+        let other = notification(Some("@ryu/approvals"));
+        let projected =
+            project_streaming_private_notifications(vec![connect.clone(), other.clone()], true);
+        assert_eq!(projected[1].title, other.title);
+        assert_eq!(projected[1].body, other.body);
+        assert_eq!(
+            project_streaming_private_notifications(vec![connect.clone()], false)[0].title,
+            connect.title
+        );
     }
 }
 
@@ -154,22 +276,16 @@ pub async fn mention_targets(
     Extension(caller): Extension<Option<VerifiedCaller>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let Some(caller) = caller else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "verified caller required" })),
-        );
+        return error_reply(StatusCode::UNAUTHORIZED, "verified caller required");
     };
     if caller.org_id.is_none() || crate::sidecar::control_plane::registered_org().is_none() {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": "organization roster unavailable" })),
-        );
+        return error_reply(StatusCode::FORBIDDEN, "organization roster unavailable");
     }
     match crate::sidecar::control_plane::resolve_notify_targets(&state.client, None).await {
         Ok(users) => (StatusCode::OK, Json(mention_targets_payload(users))),
-        Err(_) => (
+        Err(_) => error_reply(
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "organization roster unavailable" })),
+            "organization roster unavailable",
         ),
     }
 }
@@ -190,35 +306,13 @@ pub async fn mention_targets(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn read_notification(
-    State(state): State<ServerState>,
+    State(_state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(store) = crate::notify::global_store() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "notify store not ready" })),
-        );
-    };
-    let _ = &state;
-    let Ok(Some(row)) = store.get_notification(&id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "notification not found" })),
-        );
-    };
-
-    // Authorize the caller against the notification's recipient BEFORE mutating.
-    if let Err(code) = resolve_viewer(caller, row.user_id.as_deref()) {
-        return (code, Json(json!({ "error": "unauthorized" })));
-    }
-
-    match store.mark_notification_read(&id).await {
-        Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
+    match authorize_recipient(caller, &id).await {
+        Ok((store, _, _)) => mutation_reply(store.mark_notification_read(&id).await),
+        Err(reply) => reply,
     }
 }
 
@@ -238,34 +332,13 @@ pub async fn read_notification(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn archive_notification(
-    State(state): State<ServerState>,
+    State(_state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(store) = crate::notify::global_store() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "notify store not ready" })),
-        );
-    };
-    let _ = &state;
-    let Ok(Some(row)) = store.get_notification(&id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "notification not found" })),
-        );
-    };
-
-    if let Err(code) = resolve_viewer(caller, row.user_id.as_deref()) {
-        return (code, Json(json!({ "error": "unauthorized" })));
-    }
-
-    match store.mark_notification_archived(&id).await {
-        Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
+    match authorize_recipient(caller, &id).await {
+        Ok((store, _, _)) => mutation_reply(store.mark_notification_archived(&id).await),
+        Err(reply) => reply,
     }
 }
 
@@ -281,34 +354,13 @@ pub async fn archive_notification(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn unarchive_notification(
-    State(state): State<ServerState>,
+    State(_state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(store) = crate::notify::global_store() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "notify store not ready" })),
-        );
-    };
-    let _ = &state;
-    let Ok(Some(row)) = store.get_notification(&id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "notification not found" })),
-        );
-    };
-
-    if let Err(code) = resolve_viewer(caller, row.user_id.as_deref()) {
-        return (code, Json(json!({ "error": "unauthorized" })));
-    }
-
-    match store.mark_notification_unarchived(&id).await {
-        Ok(_) => (StatusCode::OK, Json(json!({ "ok": true }))),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
+    match authorize_recipient(caller, &id).await {
+        Ok((store, _, _)) => mutation_reply(store.mark_notification_unarchived(&id).await),
+        Err(reply) => reply,
     }
 }
 
@@ -331,48 +383,43 @@ pub async fn unarchive_notification(
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn ack_notification(
-    State(state): State<ServerState>,
+    State(_state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let Some(store) = crate::notify::global_store() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "notify store not ready" })),
-        );
-    };
-    let _ = &state;
-    let Ok(Some(row)) = store.get_notification(&id).await else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "notification not found" })),
-        );
+    let (store, row, actor) = match authorize_recipient(caller, &id).await {
+        Ok(authorized) => authorized,
+        Err(reply) => return reply,
     };
 
-    // Authorize the actor against the notification's recipient BEFORE any mutation.
-    let actor = match resolve_viewer(caller, row.user_id.as_deref()) {
-        Ok(a) => a,
-        Err(code) => return (code, Json(json!({ "error": "unauthorized" }))),
-    };
+    let gate = row.workflow_run_id.as_deref().filter(|_| row.ack_required);
+    // A run with concurrent gates routes one at a time. An ack for a gate that is
+    // not the routed one is refused before the row is marked acked, so the member
+    // can acknowledge it once its own gate is waiting.
+    if let Some(run_id) = gate {
+        if let Err(note) =
+            crate::workflow::notify_user::check_gate(run_id, row.node_id.as_deref()).await
+        {
+            return (
+                StatusCode::OK,
+                Json(json!({ "ok": true, "resumed": false, "note": note })),
+            );
+        }
+    }
 
     // Mark the inbox row acked (best-effort) now that the actor is authorized.
     let _ = store.mark_notification_acked(&id).await;
 
-    // Not a workflow gate → a plain read-style ack is all there is to do.
-    let Some(run_id) = row.workflow_run_id.as_deref() else {
+    // Not an ack-required workflow gate → a plain read-style ack is all there is
+    // to do.
+    let Some(run_id) = gate else {
         return (
             StatusCode::OK,
             Json(json!({ "ok": true, "resumed": false })),
         );
     };
-    if !row.ack_required {
-        return (
-            StatusCode::OK,
-            Json(json!({ "ok": true, "resumed": false })),
-        );
-    }
 
-    match crate::workflow::notify_user::ack_gate(run_id, &actor).await {
+    match crate::workflow::notify_user::ack_gate(run_id, &actor, row.node_id.as_deref()).await {
         Ok(outcome) => (
             StatusCode::OK,
             Json(json!({ "ok": true, "resumed": outcome.satisfied })),
@@ -414,12 +461,17 @@ pub async fn notifications_stream(
     let stream = futures_util::stream::unfold((rx, viewer), |(mut rx, user_id)| async move {
         loop {
             match rx.recv().await {
-                Ok(n) => {
+                Ok(mut n) => {
                     // Drop events addressed to a different member.
                     if let Some(target) = &n.target_user_id {
                         if target != &user_id {
                             continue;
                         }
+                    }
+                    if crate::presence::streaming_privacy_active()
+                        && is_connect_suggestion(n.source_app_id.as_deref())
+                    {
+                        redact_connect_suggestion_fields(&mut n.title, &mut n.body);
                     }
                     let data = serde_json::to_string(&n).unwrap_or_default();
                     return Some((Ok(Event::default().data(data)), (rx, user_id)));
@@ -449,6 +501,11 @@ pub struct PushTokenBody {
     /// specific person's phones. Omitted by anonymous / single-user nodes.
     #[serde(default)]
     pub user_id: Option<String>,
+    /// Whether this device wants an "agent finished" push when one of its
+    /// owner's conversations completes. Omitted by older app builds, which
+    /// leaves the stored choice unchanged (new rows default to off).
+    #[serde(default)]
+    pub run_finished: Option<bool>,
 }
 
 /// `POST /api/notifications/push-tokens` — register a mobile Expo push token.
@@ -466,28 +523,33 @@ pub async fn register_push_token(
     Json(body): Json<PushTokenBody>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let Some(store) = crate::notify::global_store() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "notify store not ready" })),
-        );
+        return store_not_ready();
     };
     let user_id = match resolve_push_token_owner(caller, body.user_id.as_deref()) {
         Ok(user_id) => user_id,
-        Err(code) => return (code, Json(json!({ "error": "unauthorized" }))),
+        Err(code) => return error_reply(code, "unauthorized"),
     };
     match store
         .register_push_token(&body.token, body.platform.as_deref(), user_id.as_deref())
         .await
     {
-        Ok(true) => (StatusCode::OK, Json(json!({ "ok": true }))),
-        Ok(false) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "error": "push token belongs to another member" })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
+        Ok(true) => match body.run_finished {
+            None => (StatusCode::OK, Json(json!({ "ok": true }))),
+            Some(enabled) => match store
+                .set_push_token_run_finished(&body.token, user_id.as_deref(), enabled)
+                .await
+            {
+                // Echoing the stored choice tells the app this node sends
+                // "agent finished" pushes, so it can skip its own local alert.
+                Ok(_) => (
+                    StatusCode::OK,
+                    Json(json!({ "ok": true, "run_finished": enabled })),
+                ),
+                Err(e) => error_reply(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+            },
+        },
+        Ok(false) => error_reply(StatusCode::CONFLICT, "push token belongs to another member"),
+        Err(e) => error_reply(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
@@ -506,21 +568,15 @@ pub async fn remove_push_token(
     Path(token): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     let Some(store) = crate::notify::global_store() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": "notify store not ready" })),
-        );
+        return store_not_ready();
     };
     let result = if let Some(caller) = caller {
         match resolve_viewer(Some(caller), None) {
             Ok(user_id) => store.remove_push_token_for_user(&token, &user_id).await,
-            Err(code) => return (code, Json(json!({ "error": "unauthorized" }))),
+            Err(code) => return error_reply(code, "unauthorized"),
         }
     } else if crate::sidecar::control_plane::registered_org().is_some() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "verified caller required" })),
-        );
+        return error_reply(StatusCode::UNAUTHORIZED, "verified caller required");
     } else {
         // An unbound node is the legacy single-user/local flow. There is no
         // second member whose token could be deleted there, so retain the
@@ -529,14 +585,8 @@ pub async fn remove_push_token(
     };
     match result {
         Ok(true) => (StatusCode::OK, Json(json!({ "ok": true }))),
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "token not found" })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        ),
+        Ok(false) => error_reply(StatusCode::NOT_FOUND, "token not found"),
+        Err(e) => error_reply(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
@@ -569,6 +619,7 @@ mod tests {
         VerifiedCaller {
             user_id: user_id.to_owned(),
             email: None,
+            email_verified: false,
             org_id: None,
             role: OrgRole::Member,
             teams: Vec::new(),

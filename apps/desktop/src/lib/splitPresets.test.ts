@@ -5,14 +5,12 @@ import {
 	makePresetBranch,
 	makeSlot,
 	PANE_CHOOSER_PATH,
-	type PresetBranch,
 	parsePresets,
 	presetFromSplit,
 	presetPinsRoutes,
 	presetSlotCount,
 	presetSlots,
 	presetSummary,
-	type SplitPreset,
 } from "./splitPresets.ts";
 import {
 	leafOrder,
@@ -59,18 +57,21 @@ describe("presetFromSplit", () => {
 		const preset = presetFromSplit(nested(), () => undefined);
 		expect(preset.orientation).toBe("columns");
 		expect(preset.sizes).toEqual([0.6, 0.4]);
-		const inner = preset.children[1] as PresetBranch;
+		const inner = preset.children[1];
+		if (inner?.type !== "branch") {
+			throw new Error("Expected nested branch");
+		}
 		expect(inner.orientation).toBe("rows");
 		expect(inner.sizes).toEqual([0.7, 0.3]);
 	});
 
 	it("remembers routes when asked, stripping query strings", () => {
-		const paths: Record<string, string> = {
-			a: "/library?section=chat",
-			b: "/chat",
-			c: PANE_CHOOSER_PATH,
-		};
-		const preset = presetFromSplit(nested(), (id) => paths[id], {
+		const paths = new Map([
+			["a", "/library?section=chat"],
+			["b", "/chat"],
+			["c", PANE_CHOOSER_PATH],
+		]);
+		const preset = presetFromSplit(nested(), (id) => paths.get(id), {
 			pinRoutes: true,
 		});
 		expect(presetSlots(preset).map((s) => s.path)).toEqual([
@@ -85,8 +86,13 @@ describe("presetFromSplit", () => {
 
 describe("presetSummary", () => {
 	it("names the axis of a flat shape", () => {
-		const byId = (id: string) =>
-			BUILTIN_PRESETS.find((p) => p.id === id) as SplitPreset;
+		const byId = (id: string) => {
+			const preset = BUILTIN_PRESETS.find((p) => p.id === id);
+			if (!preset) {
+				throw new Error(`Missing builtin preset ${id}`);
+			}
+			return preset;
+		};
 		expect(presetSummary(byId("builtin:side-by-side"))).toBe(
 			"2 panes · side by side"
 		);
@@ -94,8 +100,13 @@ describe("presetSummary", () => {
 	});
 
 	it("calls a nested shape tiled, not by its root axis", () => {
-		const byId = (id: string) =>
-			BUILTIN_PRESETS.find((p) => p.id === id) as SplitPreset;
+		const byId = (id: string) => {
+			const preset = BUILTIN_PRESETS.find((p) => p.id === id);
+			if (!preset) {
+				throw new Error(`Missing builtin preset ${id}`);
+			}
+			return preset;
+		};
 		// Both have a `columns` root, and neither is "side by side".
 		expect(presetSummary(byId("builtin:grid"))).toBe("4 panes · tiled");
 		expect(presetSummary(byId("builtin:main-and-two-stacked"))).toBe(
@@ -208,4 +219,47 @@ describe("parsePresets", () => {
 		);
 		expect(parsePresets([{ id: "p", name: "p", root: many }])).toEqual([]);
 	});
+});
+
+it("stored presets retain valid siblings, legacy size filtering, and bounded nesting", () => {
+	expect(
+		parsePresets([
+			{
+				id: "saved",
+				name: "n".repeat(80),
+				createdAt: "future",
+				root: {
+					type: "branch",
+					orientation: "future",
+					children: [
+						{ type: "slot", path: "/chat" },
+						null,
+						{ type: "slot", path: "//external" },
+					],
+					sizes: [1, false, 2],
+				},
+			},
+		])
+	).toEqual([
+		{
+			id: "saved",
+			name: "n".repeat(64),
+			createdAt: 0,
+			root: {
+				type: "branch",
+				orientation: "columns",
+				children: [{ type: "slot", path: "/chat" }, { type: "slot" }],
+				sizes: [1, 2],
+			},
+		},
+	]);
+	let root = makePresetBranch("columns", [makeSlot(), makeSlot()]);
+	for (let depth = 0; depth < 7; depth++) {
+		root = makePresetBranch("rows", [makeSlot(), root]);
+	}
+	expect(parsePresets([{ id: "nested", name: "Nested", root }])).toHaveLength(
+		1
+	);
+	root = makePresetBranch("rows", [makeSlot(), root]);
+	expect(parsePresets([{ id: "nested", name: "Nested", root }])).toEqual([]);
 });

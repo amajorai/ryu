@@ -5,38 +5,44 @@ export type WorkspaceFileKind =
 	| "spreadsheet"
 	| "unsupported";
 
-const MIME_KIND: Readonly<Record<string, WorkspaceFileKind>> = {
-	"application/pdf": "pdf",
-	"application/vnd.ms-excel.sheet.macroenabled.12": "spreadsheet",
-	"application/vnd.ms-powerpoint.presentation.macroenabled.12": "slides",
-	"application/vnd.openxmlformats-officedocument.presentationml.presentation":
+const MIME_KIND = new Map<string, WorkspaceFileKind>([
+	["application/pdf", "pdf"],
+	["application/vnd.ms-excel.sheet.macroenabled.12", "spreadsheet"],
+	["application/vnd.ms-powerpoint.presentation.macroenabled.12", "slides"],
+	[
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
 		"slides",
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+	],
+	[
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 		"spreadsheet",
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+	],
+	[
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 		"document",
-};
+	],
+]);
 
-const EXTENSION_KIND: Readonly<Record<string, WorkspaceFileKind>> = {
-	docx: "document",
-	pdf: "pdf",
-	pptm: "slides",
-	pptx: "slides",
-	xlsm: "spreadsheet",
-	xlsx: "spreadsheet",
-};
+const EXTENSION_KIND = new Map<string, WorkspaceFileKind>([
+	["docx", "document"],
+	["pdf", "pdf"],
+	["pptm", "slides"],
+	["pptx", "slides"],
+	["xlsm", "spreadsheet"],
+	["xlsx", "spreadsheet"],
+]);
 
 export function workspaceFileKind(
 	title: string,
 	mime: string | null | undefined
 ): WorkspaceFileKind {
 	const baseMime = mime?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-	const byMime = MIME_KIND[baseMime];
+	const byMime = MIME_KIND.get(baseMime);
 	if (byMime) {
 		return byMime;
 	}
 	const extension = title.trim().toLowerCase().split(".").pop() ?? "";
-	return EXTENSION_KIND[extension] ?? "unsupported";
+	return EXTENSION_KIND.get(extension) ?? "unsupported";
 }
 
 export function workspaceFileLabel(kind: WorkspaceFileKind): string {

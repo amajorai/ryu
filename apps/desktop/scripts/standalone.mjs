@@ -14,6 +14,46 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
+
+// Validate the fields this builder consumes while keeping the complete manifest
+// in the carriage. Optional string fields retain the existing fallback behavior.
+const manifestSchema = z.looseObject({
+	id: z.string().min(1),
+	name: z.string().catch(""),
+	runnables: z
+		.array(
+			z.looseObject({
+				kind: z.string(),
+				config: z
+					.looseObject({
+						ui_entry: z.string().optional().catch(undefined),
+					})
+					.nullish(),
+			})
+		)
+		.nullish(),
+	sidecars: z
+		.array(
+			z.looseObject({
+				name: z.string(),
+				process: z
+					.looseObject({
+						kind: z.string().optional(),
+						command: z.string().nullable().catch(null),
+					})
+					.nullish(),
+			})
+		)
+		.nullish(),
+});
+const packageSchema = z.object({
+	scripts: z
+		.object({
+			build: z.string().optional().catch(undefined),
+		})
+		.nullish(),
+});
 
 const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = resolve(desktopDir, "../..");
@@ -32,7 +72,7 @@ function readJson(path) {
 }
 
 function standaloneProductName(manifest) {
-	const name = typeof manifest.name === "string" ? manifest.name.trim() : "";
+	const name = manifest.name.trim();
 	return name || "Ryu App";
 }
 
@@ -85,7 +125,9 @@ function findAppDirectory(argument) {
 		if (!existsSync(manifestPath)) {
 			continue;
 		}
-		if (readJson(manifestPath).id === argument) {
+		if (
+			z.object({ id: z.string() }).parse(readJson(manifestPath)).id === argument
+		) {
 			return join(repoDir, "apps-store", appName);
 		}
 	}
@@ -112,7 +154,7 @@ function buildUiIfNeeded(appDir, manifest) {
 		(runnable) => runnable.kind === "companion"
 	);
 	const entry = companion?.config?.ui_entry;
-	if (typeof entry !== "string" || !entry.trim()) {
+	if (!entry?.trim()) {
 		return null;
 	}
 	const fixture = join(
@@ -135,9 +177,11 @@ function buildUiIfNeeded(appDir, manifest) {
 	let path = uiEntryPath(appDir, uiDir, entry);
 	if (!(path || uiDir)) {
 		const packagePath = join(appDir, "package.json");
-		const packageJson = existsSync(packagePath) ? readJson(packagePath) : null;
+		const packageJson = existsSync(packagePath)
+			? packageSchema.parse(readJson(packagePath))
+			: null;
 		const buildScript = packageJson?.scripts?.build;
-		if (typeof buildScript === "string") {
+		if (buildScript !== undefined) {
 			if (
 				existsSync(join(appDir, "bun.lock")) &&
 				!existsSync(join(appDir, "node_modules"))
@@ -167,11 +211,12 @@ function buildUiIfNeeded(appDir, manifest) {
 	}
 	if (!path && uiDir) {
 		const packagePath = join(uiDir, "package.json");
-		const packageJson = existsSync(packagePath) ? readJson(packagePath) : null;
+		const packageJson = existsSync(packagePath)
+			? packageSchema.parse(readJson(packagePath))
+			: null;
 		const buildScript = packageJson?.scripts?.build;
 		if (
-			typeof buildScript === "string" &&
-			buildScript.includes("vite") &&
+			buildScript?.includes("vite") &&
 			existsSync(join(uiDir, "bun.lock")) &&
 			!existsSync(join(uiDir, "node_modules", ".bin", "vite"))
 		) {
@@ -222,8 +267,7 @@ function buildEmbeddedSidecars(appDir, manifest) {
 	const resources = [];
 	for (const sidecar of manifest.sidecars ?? []) {
 		const processSpec = sidecar.process ?? {};
-		const command =
-			typeof processSpec.command === "string" ? processSpec.command : null;
+		const command = processSpec.command ?? null;
 		const backendManifest = join(appDir, "backend", "Cargo.toml");
 		if (processSpec.kind !== "local" || !command) {
 			resources.push({
@@ -256,13 +300,10 @@ function buildEmbeddedSidecars(appDir, manifest) {
 		} else {
 			const sidecarPackagePath = join(appDir, "sidecar", "package.json");
 			const sidecarPackage = existsSync(sidecarPackagePath)
-				? readJson(sidecarPackagePath)
+				? packageSchema.parse(readJson(sidecarPackagePath))
 				: null;
 			const buildScript = sidecarPackage?.scripts?.build;
-			if (
-				typeof buildScript === "string" &&
-				buildScript.includes("--compile")
-			) {
+			if (buildScript?.includes("--compile")) {
 				expectedEmbeddedSource = true;
 				const result = spawnSync("bun", ["run", "build"], {
 					cwd: dirname(sidecarPackagePath),
@@ -320,11 +361,12 @@ if (!appDir) {
 }
 
 const manifestPath = join(appDir, "manifest.json");
-const manifest = readJson(manifestPath);
+const rawManifest = readJson(manifestPath);
+const manifest = manifestSchema.parse(rawManifest);
 const uiCode = buildUiIfNeeded(appDir, manifest);
 const sidecars = buildEmbeddedSidecars(appDir, manifest);
 if (uiCode !== null) {
-	manifest.ui_code_sha256 = createHash("sha256")
+	rawManifest.ui_code_sha256 = createHash("sha256")
 		.update(uiCode, "utf8")
 		.digest("hex");
 }
@@ -337,9 +379,9 @@ writeFileSync(
 		{
 			schemaVersion: 1,
 			appId: manifest.id,
-			appName: manifest.name,
-			version: manifest.version,
-			manifest,
+			appName: rawManifest.name,
+			version: rawManifest.version,
+			manifest: rawManifest,
 			sidecars,
 			uiCode,
 		},
@@ -363,8 +405,6 @@ const env = {
 	RYU_STANDALONE_APP_ID: manifest.id,
 	RYU_STANDALONE_APP_BUNDLE: bundlePath,
 	VITE_RYU_PRODUCT: "app",
-	VITE_RYU_STANDALONE_APP_ID: manifest.id,
-	VITE_RYU_STANDALONE_APP_NAME: standaloneProductName(manifest),
 };
 const generatedConfigPath = writeStandaloneTauriConfig(manifest);
 let result;

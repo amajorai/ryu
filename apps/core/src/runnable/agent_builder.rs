@@ -23,11 +23,13 @@
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
-use crate::agents::{AgentStore, CreateAgent, PersonaSlot, UpdateAgent};
+use crate::agent_access::AgentAccountPolicy;
+use crate::agents::{AgentIdentityMode, AgentStore, CreateAgent, PersonaSlot, UpdateAgent};
 use crate::sidecar::mcp::RegistryTool;
 use ryu_teams_contracts::{Coordination, CreateTeam};
 
-use crate::teams_client::{TeamSink, TeamsClient};
+use crate::agent_teams::TeamSink;
+use crate::sidecar::capability_consumer::CapabilityConsumer;
 
 /// Reserved server name for the agent-builder tool provider. Must not contain
 /// `.` (the tool-id namespace separator).
@@ -76,7 +78,8 @@ pub fn tools() -> Vec<RegistryTool> {
             description: Some(
                 "Create a new custom agent record and return its id. Prefer editing the agent \
                  already being configured (configure_agent) when one exists. Required: name. \
-                 Optional: description, system_prompt (instructions), engine, tools, skills."
+                 Optional: description, system_prompt (instructions), engine, tools, skills, \
+                 identity_mode."
                     .to_owned(),
             ),
             input_schema: Some(create_agent_schema()),
@@ -154,6 +157,11 @@ fn create_agent_schema() -> Value {
             "engine": { "type": "string", "description": "Engine/runtime id, e.g. 'acp:pi'." },
             "tools": { "type": "array", "items": { "type": "string" }, "description": "Initial tool allowlist." },
             "skills": { "type": "array", "items": { "type": "string" }, "description": "Initial skill allowlist." },
+            "identity_mode": {
+                "type": "string",
+                "enum": ["managed", "individual", "mixed"],
+                "description": "Whose accounts the agent works with. 'managed' (default): acts as the user with the accounts they connected. 'individual': its own identity and accounts, never the user's. 'mixed': both. Which of the user's accounts it may use is set by the user in the agent's settings."
+            },
             "persona": {
                 "type": "object",
                 "description": "Initial persona and optional personality profile.",
@@ -210,20 +218,21 @@ pub async fn dispatch(
     tool: &str,
     arguments: Value,
     store: AgentStore,
-    teams_client: Option<TeamsClient>,
+    capabilities: Option<CapabilityConsumer>,
+    caller_policy: Option<&AgentAccountPolicy>,
 ) -> Result<Value> {
     match tool {
         "get_agent" => get_agent(arguments, store).await,
         "configure_agent" => configure_agent(arguments, store).await,
-        "create_agent" => create_agent(arguments, store).await,
+        "create_agent" => create_agent(arguments, store, caller_policy).await,
         "create_agent_team" => {
-            let teams = teams_client.ok_or_else(|| {
+            let teams = capabilities.ok_or_else(|| {
                 anyhow!(
-                    "create_agent_team called but the teams sidecar client is not \
-                     wired; call McpRegistry::with_teams_client at startup"
+                    "create_agent_team called but the capability consumer is not \
+                     wired; call McpRegistry::with_capabilities at startup"
                 )
             })?;
-            create_agent_team(arguments, store, &teams).await
+            create_agent_team(arguments, store, &teams, caller_policy).await
         }
         other => Err(anyhow!("unknown agent_builder tool: '{other}'")),
     }
@@ -365,8 +374,32 @@ async fn configure_agent(args: Value, store: AgentStore) -> Result<Value> {
     }))
 }
 
-async fn create_agent(args: Value, store: AgentStore) -> Result<Value> {
+/// The identity mode and allowlist a builder-created agent starts with. Only
+/// the mode is a builder field: an agent must never be able to grant accounts.
+/// An unrestricted caller's new agent starts unrestricted (the user narrows it
+/// in the agent's settings); a restricted caller's new agent inherits the
+/// caller's allowlist and may not reach more of the user's accounts than it.
+fn created_agent_access(
+    requested: Option<&str>,
+    caller_policy: Option<&AgentAccountPolicy>,
+) -> Result<(AgentIdentityMode, Option<Vec<String>>)> {
+    let requested = requested.map(str::parse::<AgentIdentityMode>).transpose()?;
+    match caller_policy {
+        Some(policy) => policy.for_created_agent(requested).map_err(|e| anyhow!(e)),
+        None => Ok((requested.unwrap_or_default(), None)),
+    }
+}
+
+async fn create_agent(
+    args: Value,
+    store: AgentStore,
+    caller_policy: Option<&AgentAccountPolicy>,
+) -> Result<Value> {
     let name = require_str(&args, "name")?;
+    let (identity_mode, account_access) = created_agent_access(
+        args.get("identity_mode").and_then(Value::as_str),
+        caller_policy,
+    )?;
     let input = CreateAgent {
         name: name.to_owned(),
         description: args["description"].as_str().map(str::to_owned),
@@ -374,6 +407,8 @@ async fn create_agent(args: Value, store: AgentStore) -> Result<Value> {
         engine: args["engine"].as_str().map(str::to_owned),
         tools: str_array(&args, "tools"),
         skills: str_array(&args, "skills"),
+        identity_mode,
+        account_access,
         persona: args
             .get("persona")
             .filter(|value| value.is_object())
@@ -401,6 +436,7 @@ async fn create_agent_team(
     args: Value,
     store: AgentStore,
     team_sink: &dyn TeamSink,
+    caller_policy: Option<&AgentAccountPolicy>,
 ) -> Result<Value> {
     let team_name = require_str(&args, "team_name")?.to_owned();
     let members = args["members"]
@@ -421,6 +457,7 @@ async fn create_agent_team(
         let name = member["name"]
             .as_str()
             .ok_or_else(|| anyhow!("member #{idx} is missing 'name'"))?;
+        let (identity_mode, account_access) = created_agent_access(None, caller_policy)?;
         let input = CreateAgent {
             name: name.to_owned(),
             description: member["description"].as_str().map(str::to_owned),
@@ -428,6 +465,8 @@ async fn create_agent_team(
             engine: member["engine"].as_str().map(str::to_owned),
             tools: str_array(member, "tools"),
             skills: str_array(member, "skills"),
+            identity_mode,
+            account_access,
             ..Default::default()
         };
         let created = store.create(input).await?;
@@ -729,6 +768,7 @@ mod tests {
         let res = create_agent(
             json!({ "name": "Fresh", "system_prompt": "Hi", "tools": ["x"] }),
             store.clone(),
+            None,
         )
         .await
         .unwrap();
@@ -736,6 +776,77 @@ mod tests {
         let rec = store.get(id).await.unwrap().unwrap();
         assert_eq!(rec.name, "Fresh");
         assert_eq!(rec.tools, vec!["x".to_owned()]);
+        assert_eq!(rec.identity_mode, AgentIdentityMode::Managed);
+        assert!(rec.account_access.is_none());
+    }
+
+    #[tokio::test]
+    async fn create_agent_sets_identity_mode_but_never_account_access() {
+        let store = store();
+        let res = create_agent(
+            json!({
+                "name": "Own identity",
+                "identity_mode": "individual",
+                // Not a builder field: an agent must not grant accounts.
+                "account_access": ["composio:ca_victim"],
+            }),
+            store.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+        let id = res["agent_id"].as_str().unwrap();
+        let rec = store.get(id).await.unwrap().unwrap();
+        assert_eq!(rec.identity_mode, AgentIdentityMode::Individual);
+        assert!(rec.account_access.is_none());
+
+        let err = create_agent(
+            json!({ "name": "Bad", "identity_mode": "owner" }),
+            store.clone(),
+            None,
+        )
+        .await
+        .expect_err("an unknown identity mode is rejected");
+        assert!(err.to_string().contains("identity mode"));
+    }
+
+    #[tokio::test]
+    async fn restricted_caller_creates_only_agents_within_its_access() {
+        let store = store();
+        let individual = AgentAccountPolicy::from_parts(AgentIdentityMode::Individual, None);
+        // Omitting the mode no longer defaults to an unrestricted managed agent.
+        let res = create_agent(json!({ "name": "Child" }), store.clone(), Some(&individual))
+            .await
+            .unwrap();
+        let rec = store
+            .get(res["agent_id"].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rec.identity_mode, AgentIdentityMode::Individual);
+        assert!(rec.account_access.is_none());
+        // Asking for the user's accounts explicitly is refused.
+        let err = create_agent(
+            json!({ "name": "Escalate", "identity_mode": "managed" }),
+            store.clone(),
+            Some(&individual),
+        )
+        .await
+        .expect_err("an own-identity agent cannot create one that acts as the user");
+        assert!(err.to_string().contains("limited"), "{err}");
+
+        let allowed = vec!["composio:ca_1".to_owned(), "agent:acc_own".to_owned()];
+        let managed = AgentAccountPolicy::from_parts(AgentIdentityMode::Managed, Some(&allowed));
+        let res = create_agent(json!({ "name": "Child" }), store.clone(), Some(&managed))
+            .await
+            .unwrap();
+        let rec = store
+            .get(res["agent_id"].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(rec.identity_mode, AgentIdentityMode::Managed);
+        assert_eq!(rec.account_access, Some(vec!["composio:ca_1".to_owned()]));
     }
 
     #[tokio::test]
@@ -755,6 +866,7 @@ mod tests {
             }),
             store.clone(),
             &teams,
+            None,
         )
         .await
         .unwrap();
@@ -788,6 +900,7 @@ mod tests {
             json!({ "team_name": "Empty", "members": [] }),
             store,
             &teams,
+            None,
         )
         .await
         .expect_err("empty members must fail");

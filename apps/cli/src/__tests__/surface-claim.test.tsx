@@ -7,12 +7,18 @@
 // real provider stack and the real router, not just at the helper level.
 
 import { afterEach, expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { AppRequestValue } from "@ryuhq/core-client/app-request-json";
+import { act } from "react";
+import { z } from "zod";
 import { ThemeProvider } from "@/components/ui/theme-provider.tsx";
 import { ChatIntentProvider } from "../core/ChatIntentContext.tsx";
 import { ContributionsProvider } from "../core/ContributionsContext.tsx";
 import { CoreProvider } from "../core/CoreContext.tsx";
 import { InputFocusProvider } from "../core/InputFocusContext.tsx";
+import { ProductModeProvider } from "../core/ProductModeContext.tsx";
 import { OverlayProvider } from "../overlays/OverlayHost.tsx";
 import { TerminalThemeProvider } from "../ui/TerminalThemeProvider.tsx";
 import { ryuTheme } from "../ui/theme.ts";
@@ -22,6 +28,7 @@ import {
 	useWorkspace,
 	WorkspaceProvider,
 } from "../workspace/WorkspaceContext.tsx";
+import { testRender } from "./cli-test-render.ts";
 
 const LOCAL_TARGET = { url: "http://127.0.0.1:7980", token: null };
 
@@ -48,31 +55,78 @@ const CLAIMING_PAYLOAD = {
 };
 
 const realFetch = globalThis.fetch;
+const fetchStringInputSchema = z.string({
+	error: "Expected a primitive fetch string",
+});
+function isStringFetchInput(
+	input: Parameters<typeof realFetch>[0]
+): input is string {
+	return fetchStringInputSchema.safeParse(input).success;
+}
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
+let testHome: string | null = null;
 let testSetup: Awaited<ReturnType<typeof testRender>> | null = null;
 let ws: ReturnType<typeof useWorkspace> | null = null;
 
-afterEach(() => {
+afterEach(async () => {
 	globalThis.fetch = realFetch;
-	testSetup?.renderer.destroy();
+	await act(async () => {
+		testSetup?.renderer.destroy();
+		await Promise.resolve();
+	});
 	testSetup = null;
 	ws = null;
+	if (testHome) {
+		rmSync(testHome, { force: true, recursive: true });
+		testHome = null;
+	}
+	if (originalHome === undefined) {
+		delete process.env.HOME;
+	} else {
+		process.env.HOME = originalHome;
+	}
+	if (originalUserProfile === undefined) {
+		delete process.env.USERPROFILE;
+	} else {
+		process.env.USERPROFILE = originalUserProfile;
+	}
 });
+
+function isolateHome(): void {
+	testHome = mkdtempSync(join(tmpdir(), "ryu-cli-surface-claim-"));
+	process.env.HOME = testHome;
+	delete process.env.USERPROFILE;
+}
 
 /** Answer the contributions endpoint with `payload`; every other Core read (the
  *  built-in surfaces' own fetches) resolves empty so nothing hangs. */
-function stubCore(payload: unknown): void {
-	globalThis.fetch = ((input: unknown) => {
-		const url = String(
-			typeof input === "string" ? input : (input as { url?: string }).url
-		);
-		const body = url.includes("/api/plugins/contributions") ? payload : {};
-		return Promise.resolve(
-			new Response(JSON.stringify(body), {
-				status: 200,
-				headers: { "content-type": "application/json" },
-			})
-		);
-	}) as typeof fetch;
+function stubCore(payload: AppRequestValue): void {
+	globalThis.fetch = Object.assign(
+		(input: Parameters<typeof realFetch>[0]) => {
+			// SAFETY: The native fetch input is string, Request, or URL. The parsed string branch
+			// excludes strings; this preserves the legacy optional opaque .url read on the
+			// remaining object, including undefined for ordinary URL (not its .href). No Request
+			// or business DTO is claimed; its raw inherited/getter value goes only to native String.
+			const url = String(
+				isStringFetchInput(input)
+					? input
+					: (
+							input as Exclude<Parameters<typeof realFetch>[0], string> & {
+								url?: unknown;
+							}
+						).url
+			);
+			const body = url.includes("/api/plugins/contributions") ? payload : {};
+			return Promise.resolve(
+				new Response(JSON.stringify(body), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				})
+			);
+		},
+		{ preconnect: realFetch.preconnect }
+	);
 }
 
 function Capture() {
@@ -91,10 +145,12 @@ function Harness() {
 								<ChatIntentProvider>
 									<WorkspaceProvider>
 										<OverlayProvider>
-											<Capture />
-											<box flexDirection="column" height="100%" width="100%">
-												<SplitView />
-											</box>
+											<ProductModeProvider>
+												<Capture />
+												<box flexDirection="column" height="100%" width="100%">
+													<SplitView />
+												</box>
+											</ProductModeProvider>
 										</OverlayProvider>
 									</WorkspaceProvider>
 								</ChatIntentProvider>
@@ -110,18 +166,23 @@ function Harness() {
 async function flush(
 	setup: Awaited<ReturnType<typeof testRender>>
 ): Promise<void> {
-	for (let i = 0; i < 4; i++) {
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		await setup.renderOnce();
+	for (let pass = 0; pass < 4; pass += 1) {
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			await setup.renderOnce();
+		});
 	}
 }
 
 test("a claiming contribution replaces the built-in Calendar body", async () => {
+	isolateHome();
 	stubCore(CLAIMING_PAYLOAD);
 	testSetup = await testRender(<Harness />, { width: 120, height: 30 });
 	await flush(testSetup);
 
-	ws?.openTab("/calendar");
+	await act(async () => {
+		ws?.openTab("/calendar");
+	});
 	await flush(testSetup);
 
 	const frame = testSetup.captureCharFrame();
@@ -134,6 +195,7 @@ test("a claiming contribution replaces the built-in Calendar body", async () => 
 });
 
 test("a claim whose spec cannot draw leaves the built-in Calendar body up", async () => {
+	isolateHome();
 	// `spec` is opaque to Core, so a manifest can declare a known kind without the
 	// collection it is made of. Handing the screen over anyway would replace a
 	// working agenda with an "unsupported view" line — the regression the claim
@@ -153,7 +215,9 @@ test("a claim whose spec cannot draw leaves the built-in Calendar body up", asyn
 	testSetup = await testRender(<Harness />, { width: 120, height: 30 });
 	await flush(testSetup);
 
-	ws?.openTab("/calendar");
+	await act(async () => {
+		ws?.openTab("/calendar");
+	});
 	await flush(testSetup);
 
 	const frame = testSetup.captureCharFrame();
@@ -163,11 +227,14 @@ test("a claim whose spec cannot draw leaves the built-in Calendar body up", asyn
 });
 
 test("with no claiming contribution the built-in Calendar body still renders", async () => {
+	isolateHome();
 	stubCore({ views: [] });
 	testSetup = await testRender(<Harness />, { width: 120, height: 30 });
 	await flush(testSetup);
 
-	ws?.openTab("/calendar");
+	await act(async () => {
+		ws?.openTab("/calendar");
+	});
 	await flush(testSetup);
 
 	const frame = testSetup.captureCharFrame();

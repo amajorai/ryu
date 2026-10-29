@@ -1,5 +1,7 @@
 // Plugin-specific marketplace scorecard rules.
 
+import { z } from "zod";
+
 import {
 	type DesignSystemSurface,
 	designSystemChecks,
@@ -68,17 +70,38 @@ const RESERVED_ID_PREFIXES = [
 
 /** True when the permission summary declares an unscoped capability — the shape
  * the breadth check treats as "asks for everything of this kind". */
-function isBroad(value: unknown): boolean {
+const permissionArraySchema = z.custom<unknown[]>(Array.isArray);
+const permissionObjectSchema = z.record(z.string(), z.unknown());
+// Keep the original key bag: decoding a record discards an own __proto__ key.
+const permissionObjectBoundarySchema = z.custom<
+	z.infer<typeof permissionObjectSchema>
+>((value) => permissionObjectSchema.safeParse(value).success);
+const broadPermissionSchema = z.unknown().transform((value) => {
 	if (value === true) {
 		return true;
 	}
-	if (value && typeof value === "object" && !Array.isArray(value)) {
-		return Object.values(value as Record<string, unknown>).some(
-			(v) => v === true || v === "*" || (Array.isArray(v) && v.includes("*"))
-		);
+	const record = permissionObjectBoundarySchema.safeParse(value);
+	if (record.success) {
+		return Object.values(record.data).some((permission) => {
+			const list = permissionArraySchema.safeParse(permission);
+			return (
+				permission === true ||
+				permission === "*" ||
+				(list.success && list.data.includes("*"))
+			);
+		});
 	}
-	return Array.isArray(value) && value.includes("*");
-}
+	const list = permissionArraySchema.safeParse(value);
+	return list.success && list.data.includes("*");
+});
+const isBroad = broadPermissionSchema.parse;
+// Match the existing numeric reports, including exceptional runtime numbers.
+const reportNumberSchema = z.union([
+	z.number(),
+	z.nan(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
 
 // ── Check families ──────────────────────────────────────────────────────────
 //
@@ -488,23 +511,24 @@ function maintenanceChecks(
 		);
 	}
 
-	if (typeof detail?.issuesEnabled === "boolean") {
+	const issuesEnabled = z.boolean().safeParse(detail?.issuesEnabled);
+	if (issuesEnabled.success) {
 		checks.push(
 			check(
 				"issue-tracker",
 				"maintenance",
 				"Accepts bug reports",
 				1,
-				detail.issuesEnabled ? "pass" : "warn",
-				detail.issuesEnabled
-					? `Issue tracker is open${typeof detail.openIssues === "number" ? ` (${detail.openIssues} open)` : ""}.`
+				issuesEnabled.data ? "pass" : "warn",
+				issuesEnabled.data
+					? `Issue tracker is open${reportNumberSchema.safeParse(detail?.openIssues).success ? ` (${detail?.openIssues} open)` : ""}.`
 					: "The issue tracker is turned off, so there is nowhere to report a bug."
 			)
 		);
 	}
 
 	const stars = detail?.stars ?? entry?.stars ?? null;
-	if (typeof stars === "number") {
+	if (reportNumberSchema.safeParse(stars).success && stars !== null) {
 		let status: CheckStatus = "warn";
 		if (stars >= WELL_ADOPTED_STARS) {
 			status = "pass";
@@ -586,7 +610,7 @@ function disclosureChecks(
 			isBroad(permissions.network) ? "network" : null,
 			isBroad(permissions.fs) ? "filesystem" : null,
 			isBroad(permissions.childProcess) ? "subprocesses" : null,
-		].filter(Boolean) as string[];
+		].filter((value) => value !== null);
 		checks.push(
 			broad.length === 0
 				? check(

@@ -1,3 +1,11 @@
+import type { CSSProperties } from "react";
+import crmStyles from "./crm-values.module.css";
+
+interface CrmDataStyle extends CSSProperties {
+	"--crm-color"?: string;
+	"--crm-share"?: string;
+}
+
 // The two cross-object reads: the task inbox and the pipeline report.
 //
 // Both are deliberately NOT per-object views. A follow-up you owe does not care
@@ -12,12 +20,13 @@
 
 import { Alert01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Skeleton } from "@ryu/ui/components/skeleton";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useState } from "react";
 import { formatCents } from "@/src/components/panels/crm/fields.tsx";
 import type {
@@ -43,6 +52,7 @@ export function Insights({
 	client: CrmClient;
 	onOpenRecord: (recordId: string) => void;
 }) {
+	const tl = useLiteralMessages();
 	const [window, setWindow] = useState<Window>("today");
 	const [tasks, setTasks] = useState<Activity[]>([]);
 	const [pipeline, setPipeline] = useState<PipelineReport | null>(null);
@@ -167,8 +177,8 @@ export function Insights({
 									<Checkbox
 										aria-label={
 											task.completed_at
-												? `Reopen ${task.title}`
-												: `Complete ${task.title}`
+												? tl("Reopen {taskTitle}", { taskTitle: task.title })
+												: tl("Complete {taskTitle}", { taskTitle: task.title })
 										}
 										checked={Boolean(task.completed_at)}
 										className="mt-0.5"
@@ -191,7 +201,9 @@ export function Insights({
 										</button>
 										{task.due_at && (
 											<div className="text-muted-foreground text-xs">
-												due {formatDateTime(task.due_at)}
+												{tl("due {dueDate}", {
+													dueDate: formatDateTime(task.due_at),
+												})}
 												{task.assignee ? ` · ${task.assignee}` : ""}
 											</div>
 										)}
@@ -200,7 +212,10 @@ export function Insights({
 							))}
 							{!loading && tasks.length === 0 && (
 								<li className="py-6 text-center text-muted-foreground text-sm">
-									Nothing {window === "overdue" ? "overdue" : `for ${window}`}.
+									{tl(
+										"Nothing {window, select, overdue {overdue} other {for {window}}}.",
+										{ window }
+									)}
 								</li>
 							)}
 						</ul>
@@ -223,50 +238,63 @@ export function Insights({
 							</span>
 						</div>
 						<ul className="space-y-1">
-							{pipeline.stages.map((stage) => (
-								<li key={stage.option_id}>
-									<div className="flex items-baseline justify-between gap-2 text-sm">
-										<span className="flex min-w-0 items-center gap-2">
-											{stage.color && (
-												<span
-													aria-hidden="true"
-													className="size-2 shrink-0 rounded-full"
-													style={{ backgroundColor: stage.color }}
-												/>
-											)}
-											<span className="truncate">{stage.label}</span>
-											{stage.is_won && (
-												<Badge className="font-normal" variant="secondary">
-													won
-												</Badge>
-											)}
-											{stage.is_lost && (
-												<Badge className="font-normal" variant="outline">
-													lost
-												</Badge>
-											)}
-										</span>
-										<span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
-											{stage.record_count} ·{" "}
-											{formatCents(stage.value_cents, pipeline.currency_code)}
-										</span>
-									</div>
-									{/* A share bar rather than a chart: one dimension, read at a
+							{pipeline.stages.map((stage) => {
+								const colorStyle: CrmDataStyle = {
+									"--crm-color": stage.color ?? undefined,
+								};
+								const shareStyle: CrmDataStyle = {
+									"--crm-share": `${Math.max(0, Math.min(100, stage.share * 100))}%`,
+								};
+								return (
+									<li key={stage.option_id}>
+										<div className="flex items-baseline justify-between gap-2 text-sm">
+											<span className="flex min-w-0 items-center gap-2">
+												{stage.color && (
+													<span
+														aria-hidden="true"
+														className={cn(
+															crmStyles.color,
+															"size-2 shrink-0 rounded-full"
+														)}
+														style={colorStyle}
+													/>
+												)}
+												<span className="truncate" title={stage.label}>
+													{stage.label}
+												</span>
+												{stage.is_won && (
+													<Badge typography="normal" variant="secondary">
+														won
+													</Badge>
+												)}
+												{stage.is_lost && (
+													<Badge typography="normal" variant="outline">
+														lost
+													</Badge>
+												)}
+											</span>
+											<span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
+												{stage.record_count} ·{" "}
+												{formatCents(stage.value_cents, pipeline.currency_code)}
+											</span>
+										</div>
+										{/* A share bar rather than a chart: one dimension, read at a
 									    glance, and no charting dependency for four rows. */}
-									<div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-muted">
-										<div
-											className="h-full bg-primary"
-											style={{
-												width: `${Math.max(0, Math.min(100, stage.share * 100))}%`,
-											}}
-										/>
-									</div>
-								</li>
-							))}
+										<div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-muted">
+											<div
+												className={cn(crmStyles.share, "h-full bg-primary")}
+												style={shareStyle}
+											/>
+										</div>
+									</li>
+								);
+							})}
 						</ul>
 						{pipeline.unassigned_count > 0 && (
 							<p className="mt-1 text-muted-foreground text-xs">
-								{pipeline.unassigned_count} with no stage set.
+								{tl("{unassignedCount} with no stage set.", {
+									unassignedCount: String(pipeline.unassigned_count),
+								})}
 							</p>
 						)}
 					</section>

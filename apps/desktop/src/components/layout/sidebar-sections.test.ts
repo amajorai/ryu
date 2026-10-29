@@ -13,6 +13,7 @@ import {
 	DEFAULT_SECTION_ORDER,
 	isSectionKey,
 	LEGACY_APP_SECTION_KEYS,
+	migrateLegacySectionKey,
 	migrateLegacySectionRecord,
 	migrateLegacySectionStorage,
 	reconcileSectionOrder,
@@ -199,6 +200,26 @@ describe("reconcileSectionOrder", () => {
 });
 
 describe("legacy app-section preferences", () => {
+	it("migrates only owned legacy names and preserves inherited or unknown names", () => {
+		expect(migrateLegacySectionKey("teams")).toBe(
+			LEGACY_APP_SECTION_KEYS.teams
+		);
+		expect(migrateLegacySectionKey("workflows")).toBe(
+			LEGACY_APP_SECTION_KEYS.workflows
+		);
+		for (const key of [
+			"constructor",
+			"toString",
+			"__proto__",
+			"hasOwnProperty",
+			"",
+			"unknown",
+			"plugin:@ryu/meetings:meetings",
+		]) {
+			expect(migrateLegacySectionKey(key)).toBe(key);
+		}
+	});
+
 	it("moves record preferences to dynamic keys and preserves newer values", () => {
 		expect(
 			migrateLegacySectionRecord({

@@ -22,26 +22,23 @@ const MODIFIER_SET = new Set<string>(MODIFIER_ORDER);
 const MODIFIER_ONLY_KEYS = new Set(["Control", "Shift", "Alt", "Meta", "OS"]);
 
 /** `KeyboardEvent.key` values whose canonical token differs from the raw key. */
-const NAMED_KEYS: Record<string, string> = {
-	" ": "Space",
-	Spacebar: "Space",
-	ArrowUp: "Up",
-	ArrowDown: "Down",
-	ArrowLeft: "Left",
-	ArrowRight: "Right",
-	Escape: "Esc",
-	Enter: "Enter",
-	Tab: "Tab",
-	Backspace: "Backspace",
-	Delete: "Delete",
-};
+const NAMED_KEYS = new Map<string, string>([
+	[" ", "Space"],
+	["Spacebar", "Space"],
+	["ArrowUp", "Up"],
+	["ArrowDown", "Down"],
+	["ArrowLeft", "Left"],
+	["ArrowRight", "Right"],
+	["Escape", "Esc"],
+	["Enter", "Enter"],
+	["Tab", "Tab"],
+	["Backspace", "Backspace"],
+	["Delete", "Delete"],
+]);
 
 /** True when the code is running on macOS (⌘ surfaces, ⌥/⇧ glyphs). */
 export function isMac(): boolean {
-	if (typeof navigator === "undefined") {
-		return false;
-	}
-	return /mac|iphone|ipad|ipod/i.test(navigator.userAgent);
+	return /mac|iphone|ipad|ipod/i.test(globalThis.navigator?.userAgent ?? "");
 }
 
 /** Canonical display token for a chord token, given the platform. */
@@ -63,8 +60,9 @@ function displayToken(token: string, mac: boolean): string {
 
 /** Normalize the "main" (non-modifier) key of a chord to its canonical form. */
 function normalizeMainKey(key: string): string {
-	if (NAMED_KEYS[key]) {
-		return NAMED_KEYS[key];
+	const namedKey = NAMED_KEYS.get(key);
+	if (namedKey) {
+		return namedKey;
 	}
 	return key.length === 1 ? key.toUpperCase() : key;
 }
@@ -90,7 +88,7 @@ export function normalizeChord(chord: Chord): Chord {
 			main = normalizeMainKey(part);
 		}
 	}
-	const parts = MODIFIER_ORDER.filter((m) => seen.has(m)) as string[];
+	const parts: string[] = MODIFIER_ORDER.filter((m) => seen.has(m));
 	if (main.length > 0) {
 		parts.push(main);
 	}
@@ -179,20 +177,20 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 // that format, so these converters let the desktop settings render and edit them
 // through the same chord model.
 
-const CHORD_TO_ELECTRON_KEY: Record<string, string> = {
-	Up: "Up",
-	Down: "Down",
-	Left: "Left",
-	Right: "Right",
-	Space: "Space",
-	Esc: "Esc",
-	Enter: "Return",
-};
+const CHORD_TO_ELECTRON_KEY = new Map<string, string>([
+	["Up", "Up"],
+	["Down", "Down"],
+	["Left", "Left"],
+	["Right", "Right"],
+	["Space", "Space"],
+	["Esc", "Esc"],
+	["Enter", "Return"],
+]);
 
-const ELECTRON_TO_CHORD_KEY: Record<string, string> = {
-	Return: "Enter",
-	Escape: "Esc",
-};
+const ELECTRON_TO_CHORD_KEY = new Map<string, string>([
+	["Return", "Enter"],
+	["Escape", "Esc"],
+]);
 
 /** Convert a canonical chord to an Electron/Tauri accelerator string. */
 export function toElectronAccelerator(chord: Chord): string {
@@ -205,7 +203,7 @@ export function toElectronAccelerator(chord: Chord): string {
 			if (token === "Ctrl") {
 				return "Control";
 			}
-			return CHORD_TO_ELECTRON_KEY[token] ?? token;
+			return CHORD_TO_ELECTRON_KEY.get(token) ?? token;
 		})
 		.join("+");
 }
@@ -222,7 +220,7 @@ export function chordFromElectron(accelerator: string): Chord {
 		if (token === "Control") {
 			return "Ctrl";
 		}
-		return ELECTRON_TO_CHORD_KEY[token] ?? token;
+		return ELECTRON_TO_CHORD_KEY.get(token) ?? token;
 	});
 	return normalizeChord(parts.join("+"));
 }

@@ -2,6 +2,34 @@ import { describe, expect, it } from "bun:test";
 import { extractPlans, planDocumentTitle } from "./plan-artifacts.ts";
 
 describe("extractPlans", () => {
+	it("keeps future tool payloads and live optional fields while filtering incomplete todos", () => {
+		const input = {
+			todos: [
+				null,
+				{
+					step: " Ship ",
+					status: "future-status",
+					metadata: { optional: undefined },
+				},
+				{ content: "", status: "completed" },
+			],
+			future: JSON.parse('{"__proto__":{"preserved":true}}'),
+		};
+		const parts = [
+			{
+				type: "tool-TodoWrite",
+				input,
+				output: undefined,
+				future: { optional: undefined },
+			},
+		];
+		const plans = extractPlans([{ id: " message ", parts, role: "assistant" }]);
+		expect(plans).toHaveLength(1);
+		expect(plans[0]?.key).toBe("message:0:part-0");
+		expect(plans[0]?.markdown).toContain("- [ ] Ship");
+		expect(parts[0]?.input).toBe(input);
+		expect(Object.hasOwn(input.future, "__proto__")).toBe(true);
+	});
 	it("keeps ACP, Pi, and update_plan snapshots with stable keys", () => {
 		const plans = extractPlans([
 			{

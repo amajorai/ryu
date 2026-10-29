@@ -1,5 +1,6 @@
 import { cn } from "@ryu/ui/lib/utils";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import styles from "./mockups.module.css";
 
 /**
  * Shared, design-system-native visual primitives for product pages.
@@ -22,7 +23,10 @@ export function MinimalCard({
 	contentClassName?: string;
 }) {
 	return (
-		<div className={cn("rounded-xl bg-muted/30", className)}>
+		<div
+			className={cn("rounded-xl bg-background", className)}
+			data-minimal-card
+		>
 			<div className={cn("p-4", contentClassName)}>{children}</div>
 		</div>
 	);
@@ -56,11 +60,12 @@ export function WindowFrame({
 	return (
 		<div
 			className={cn(
-				"overflow-hidden rounded-xl border border-border bg-card shadow-md backdrop-blur-sm",
+				"overflow-hidden rounded-xl border border-border bg-card",
 				className
 			)}
+			data-window-frame
 		>
-			<div className="flex items-center gap-3 border-border border-b bg-muted/60 px-3 py-2">
+			<div className="flex items-center gap-3 bg-muted/40 px-3 py-2">
 				<TrafficLights />
 				{title ? (
 					<span className="truncate font-medium text-muted-foreground text-xs">
@@ -87,14 +92,15 @@ export function BrowserFrame({
 	return (
 		<div
 			className={cn(
-				"overflow-hidden rounded-xl border border-border bg-card shadow-md backdrop-blur-sm",
+				"overflow-hidden rounded-xl border border-border bg-card",
 				className
 			)}
+			data-window-frame
 		>
-			<div className="flex items-center gap-3 border-border border-b bg-muted/60 px-3 py-2">
+			<div className="flex items-center gap-3 bg-muted/40 px-3 py-2">
 				<TrafficLights />
 				<div className="flex flex-1 items-center justify-center">
-					<span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md bg-background/60 px-3 py-1 font-mono text-[11px] text-muted-foreground">
+					<span className="type-caption inline-flex max-w-full items-center gap-1.5 truncate rounded-md bg-background/60 px-3 py-1 font-mono text-muted-foreground">
 						<LockGlyph />
 						{url}
 					</span>
@@ -149,7 +155,6 @@ interface TermLine {
 export function Terminal({
 	lines,
 	className,
-	title = "zsh - ryu",
 	children,
 }: {
 	lines: TermLine[];
@@ -160,7 +165,7 @@ export function Terminal({
 	return (
 		<MinimalCard
 			className={className}
-			contentClassName="bg-foreground/[0.03] font-mono text-[12.5px] leading-relaxed"
+			contentClassName="font-mono text-(length:--text-image-viewer-caption) leading-relaxed"
 		>
 			<div className="space-y-1">
 				{lines.map((line, i) => (
@@ -169,7 +174,6 @@ export function Terminal({
 							"flex gap-2",
 							line.muted ? "text-muted-foreground/70" : "text-foreground/80"
 						)}
-						// biome-ignore lint/suspicious/noArrayIndexKey: static script
 						key={i}
 					>
 						{line.prompt ? (
@@ -191,7 +195,6 @@ export function Terminal({
 
 export function CodePane({
 	code,
-	filename,
 	className,
 }: {
 	code: string;
@@ -202,12 +205,11 @@ export function CodePane({
 	return (
 		<MinimalCard
 			className={className}
-			contentClassName="overflow-x-auto bg-foreground/[0.03] font-mono text-[12.5px] leading-relaxed"
+			contentClassName="overflow-x-auto font-mono text-(length:--text-image-viewer-caption) leading-relaxed"
 		>
 			<pre className="text-foreground/80">
 				<code>
 					{lines.map((line, i) => (
-						// biome-ignore lint/suspicious/noArrayIndexKey: static code
 						<div className="flex gap-4" key={i}>
 							<span className="w-4 shrink-0 select-none text-right text-foreground/25">
 								{i + 1}
@@ -304,12 +306,23 @@ export function Wire({
 			<div className="h-px w-full bg-border" />
 			{delays.map((delay, i) => (
 				<div
-					className="absolute left-0 size-1.5 animate-flow-right rounded-full bg-foreground/60"
-					// biome-ignore lint/suspicious/noArrayIndexKey: static dots
+					className={cn(
+						"absolute left-0 size-1.5 rounded-full bg-foreground/60",
+						styles.flow_right,
+						styles.dynamic1
+					)}
 					key={i}
-					style={{ animationDelay: `${delay}s` }}
+					style={
+						{
+							"--blocks-animationDelay": `${delay}s`,
+						} satisfies PrivateStyle as PrivateStyle
+					}
 				/>
 			))}
 		</div>
 	);
+}
+
+interface PrivateStyle extends CSSProperties {
+	"--blocks-animationDelay"?: CSSProperties["animationDelay"];
 }

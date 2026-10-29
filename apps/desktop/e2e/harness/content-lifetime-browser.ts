@@ -1,6 +1,15 @@
-type Listener = (...args: unknown[]) => unknown;
-const settingsListeners = new Set<Listener>();
-const messageListeners = new Set<Listener>();
+interface AskResult {
+	answer: string;
+	model: string;
+	ok: boolean;
+}
+type MessageListener = (message: { type: string }) => void;
+type SettingsListener = (
+	changes: { ryu_browser_settings: { newValue: typeof settings } },
+	area: string
+) => void;
+const settingsListeners = new Set<SettingsListener>();
+const messageListeners = new Set<MessageListener>();
 const counts = { pushes: 0, saves: 0, health: 0, asks: 0, extracts: 0 };
 const settings = {
 	islandBridgeEnabled: true,
@@ -14,7 +23,7 @@ let releaseSettings: (() => void) | undefined;
 const waitingSettings = new Promise<void>((resolve) => {
 	releaseSettings = resolve;
 });
-const asks: ((value: unknown) => void)[] = [];
+const asks: ((value: AskResult) => void)[] = [];
 function publish() {
 	for (const [key, value] of Object.entries(counts)) {
 		document.documentElement.dataset[key] = String(value);
@@ -54,17 +63,16 @@ export const browser = {
 	runtime: {
 		id: "performance-extension",
 		onMessage: {
-			addListener: (listener: Listener) => {
+			addListener: (listener: MessageListener) => {
 				messageListeners.add(listener);
 				publish();
 			},
-			removeListener: (listener: Listener) => {
+			removeListener: (listener: MessageListener) => {
 				messageListeners.delete(listener);
 				publish();
 			},
 		},
-		sendMessage: async (input: unknown) => {
-			const message = input as { type: string; defaultMessage?: string };
+		sendMessage: async (message: { type: string; defaultMessage?: string }) => {
 			if (message.type === "ryu:i18n-translate") {
 				return { ok: true, value: message.defaultMessage };
 			}
@@ -86,7 +94,7 @@ export const browser = {
 			if (message.type === "ryu:ask") {
 				counts.asks++;
 				publish();
-				return new Promise((resolve) => asks.push(resolve));
+				return new Promise<AskResult>((resolve) => asks.push(resolve));
 			}
 			return { ok: true };
 		},
@@ -102,11 +110,11 @@ export const browser = {
 			set: async () => undefined,
 		},
 		onChanged: {
-			addListener: (listener: Listener) => {
+			addListener: (listener: SettingsListener) => {
 				settingsListeners.add(listener);
 				publish();
 			},
-			removeListener: (listener: Listener) => {
+			removeListener: (listener: SettingsListener) => {
 				settingsListeners.delete(listener);
 				publish();
 			},

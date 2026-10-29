@@ -27,7 +27,8 @@ export function RyuAssistantWidgetFrame({
 	className,
 	placement = "inline",
 }: RyuAssistantWidgetFrameProps) {
-	const Component = placement === "docked" ? "aside" : "div";
+	const isDocked = placement === "docked";
+	const Component = isDocked ? "aside" : "div";
 	return (
 		<Component
 			aria-label={ariaLabel}
@@ -37,8 +38,10 @@ export function RyuAssistantWidgetFrame({
 				placement !== "docked" && "w-full",
 				className
 			)}
+			data-lenis-prevent=""
 			data-placement={placement}
 			data-ryu-assistant-widget="true"
+			role={!isDocked && ariaLabel ? "region" : undefined}
 		>
 			{children}
 		</Component>
@@ -128,7 +131,7 @@ export function RyuAssistantRecentChats({
 			<div className="flex flex-col">
 				{items.slice(0, 4).map((item) => (
 					<button
-						className="flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-white/5"
+						className="flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-accent"
 						key={item.id}
 						onClick={() => onSelect(item.id)}
 						type="button"

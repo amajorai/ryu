@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -35,6 +36,7 @@ import {
 	usePluginContributionsQuery,
 } from "@/src/hooks/usePluginContributions.ts";
 import { useStandaloneApps } from "@/src/hooks/useStandaloneApps.ts";
+import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
 import PluginCompanionPage from "@/src/pages/PluginCompanionPage.tsx";
 
 function StartupState({
@@ -68,15 +70,18 @@ function UnavailableStandaloneApp({
 	appId: string;
 	description: string;
 }) {
+	const tl = useLiteralMessages();
 	return (
-		<Empty className="size-full bg-background">
+		<Empty appearance="standalone" className="size-full">
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
 					<OrbLogo size="28px" variant="outline" />
 				</EmptyMedia>
 				<EmptyTitle>Standalone app unavailable</EmptyTitle>
 				<EmptyDescription>
-					{description} The app and its data remain safe in Ryu.
+					{tl("{description} The app and its data remain safe in Ryu.", {
+						description,
+					})}
 				</EmptyDescription>
 			</EmptyHeader>
 			<EmptyContent>
@@ -98,10 +103,13 @@ function HostedStandaloneSurface({
 	companionId: string;
 	appName: string;
 }) {
+	const tl = useLiteralMessages();
 	const [navigation, setNavigation] = useState<StandaloneAppNavigation>({
 		target: pluginCompanionPath(companionId),
 	});
 	const [removeOpen, setRemoveOpen] = useState(false);
+	const [removeError, setRemoveError] = useState<string | null>(null);
+	const [removing, setRemoving] = useState(false);
 	const { closeStandaloneWindow, uninstall: uninstallStandalone } =
 		useStandaloneApps();
 
@@ -110,9 +118,20 @@ function HostedStandaloneSurface({
 	}, []);
 
 	const handleRemove = async () => {
-		await uninstallStandalone(appId);
-		setRemoveOpen(false);
-		await closeStandaloneWindow();
+		if (removing) {
+			return;
+		}
+		setRemoving(true);
+		setRemoveError(null);
+		try {
+			await uninstallStandalone(appId);
+			await closeStandaloneWindow();
+			setRemoveOpen(false);
+		} catch (cause) {
+			setRemoveError(cause instanceof Error ? cause.message : String(cause));
+		} finally {
+			setRemoving(false);
+		}
 	};
 
 	return (
@@ -121,7 +140,10 @@ function HostedStandaloneSurface({
 				<StandaloneAppSidebar
 					appId={appId}
 					onNavigate={handleNavigate}
-					onRequestRemove={() => setRemoveOpen(true)}
+					onRequestRemove={() => {
+						setRemoveError(null);
+						setRemoveOpen(true);
+					}}
 				/>
 				<SidebarInset>
 					<TabsProvider
@@ -140,22 +162,44 @@ function HostedStandaloneSurface({
 					</TabsProvider>
 				</SidebarInset>
 			</SidebarProvider>
-			<AlertDialog onOpenChange={setRemoveOpen} open={removeOpen}>
+			<AlertDialog
+				onOpenChange={(open) => {
+					if (!removing) {
+						setRemoveOpen(open);
+					}
+				}}
+				open={removeOpen}
+			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>Remove standalone app?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This closes this app-first window and removes its standalone
-							launcher. {appName} stays installed inside Ryu, and its data,
-							settings, and connections are not deleted.
+							{tl(
+								"This closes this app-first window and removes its standalone launcher. {appName} stays installed inside Ryu, and its data, settings, and connections are not deleted.",
+								{ appName }
+							)}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
+					{removeError ? (
+						<p className="text-sm text-status-destructive" role="alert">
+							{tl(
+								"{removeError} Try again to finish removing the standalone app.",
+								{
+									removeError,
+								}
+							)}
+						</p>
+					) : null}
 					<AlertDialogFooter>
-						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogCancel disabled={removing}>Cancel</AlertDialogCancel>
 						<AlertDialogAction
-							onClick={() => handleRemove().catch(() => undefined)}
+							disabled={removing}
+							onClick={(event) => {
+								event.preventDefault();
+								handleRemove().catch(() => undefined);
+							}}
 						>
-							Remove standalone app
+							{removing ? "Removing…" : "Remove standalone app"}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>
@@ -169,7 +213,8 @@ export default function HostedStandaloneAppEntry({ appId }: { appId: string }) {
 	usePluginContributionsLiveRefresh();
 	const { data, error, isLoading } = usePluginContributionsQuery();
 	const companion = data?.companions.find(
-		(candidate) => candidate.pluginId === appId && candidate.hasUi !== false
+		(candidate) =>
+			candidate.pluginId === appId && isNavigablePluginCompanion(candidate)
 	);
 
 	useEffect(() => {

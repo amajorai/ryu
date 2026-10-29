@@ -1,3 +1,7 @@
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 // packages/core-client/src/recipes.test.ts
 //
 // Tests for the ghost-recipes client. The load-bearing pure logic is
@@ -39,12 +43,25 @@ interface Captured {
 /** Stub fetch to return `bodyText` and capture the outgoing url + init. */
 function stubFetch(bodyText: string, status = 200): Captured {
 	const cap: Captured = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		cap.url = url;
 		cap.init = init;
 		return Promise.resolve(new Response(bodyText, { status }));
-	}) as typeof fetch;
+	});
 	return cap;
+}
+
+function nativeRecipe(name: string) {
+	return {
+		schema_version: 2,
+		name,
+		description: "Native",
+		app: null,
+		params: null,
+		preconditions: null,
+		steps: [],
+		on_failure: null,
+	};
 }
 
 const ev = (over: Partial<LearnedEvent>): LearnedEvent => ({
@@ -194,7 +211,19 @@ describe("draftRecipeFromEvents — per-event step mapping", () => {
 
 describe("recipes request unwrapping", () => {
 	test("listRecipes returns the array and defaults to [] when absent", async () => {
-		stubFetch(JSON.stringify({ recipes: [{ name: "a" }] }));
+		stubFetch(
+			JSON.stringify({
+				recipes: [
+					{
+						name: "a",
+						description: "Native",
+						app: null,
+						params: [],
+						step_count: 0,
+					},
+				],
+			})
+		);
 		expect(await listRecipes(target)).toEqual([
 			expect.objectContaining({ name: "a" }),
 		]);
@@ -203,14 +232,20 @@ describe("recipes request unwrapping", () => {
 	});
 
 	test("getRecipe URL-encodes the name and unwraps `recipe`", async () => {
-		const cap = stubFetch(JSON.stringify({ recipe: { name: "a/b" } }));
+		const cap = stubFetch(JSON.stringify({ recipe: nativeRecipe("a/b") }));
 		const r = await getRecipe(target, "a/b");
 		expect(r).toEqual(expect.objectContaining({ name: "a/b" }));
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/recipes/a%2Fb");
 	});
 
 	test("saveRecipe POSTs `{ recipe }` and returns the assigned name", async () => {
-		const cap = stubFetch(JSON.stringify({ name: "saved" }));
+		const cap = stubFetch(
+			JSON.stringify({
+				name: "saved",
+				saved: true,
+				recipe: nativeRecipe("saved"),
+			})
+		);
 		const name = await saveRecipe(target, {
 			schema_version: 2,
 			name: "x",
@@ -219,21 +254,30 @@ describe("recipes request unwrapping", () => {
 		});
 		expect(name).toBe("saved");
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			recipe: { schema_version: 2, name: "x", description: "d", steps: [] },
 		});
 	});
 
 	test("runRecipe POSTs the params and unwraps `result`", async () => {
 		const cap = stubFetch(
-			JSON.stringify({ result: { recipe_name: "x", success: true } })
+			JSON.stringify({
+				result: {
+					recipe_name: "x",
+					success: true,
+					steps_completed: 0,
+					total_steps: 0,
+					step_results: [],
+					error: null,
+				},
+			})
 		);
 		const res = await runRecipe(target, "my recipe", { q: "1" });
 		expect(res).toEqual(
 			expect.objectContaining({ recipe_name: "x", success: true })
 		);
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/recipes/my%20recipe/run");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			params: { q: "1" },
 		});
 	});

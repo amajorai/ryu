@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "vite/client"]
+  },
+  "include": [
+    "src/components/settings/GeneralTab.tsx",
+    "e2e/desktop-general-settings-proof.spec.ts",
+    "e2e/harness/desktop-general-settings-proof.tsx",
+    "e2e/desktop-general-settings-proof.playwright.config.ts",
+    "e2e/harness/vite.desktop-general-settings-proof.config.ts",
+    "e2e/desktop-general-static.playwright.config.ts",
+    "e2e/harness/vite.desktop-general-settings-static.config.ts"
+  ]
+}

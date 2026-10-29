@@ -13,10 +13,10 @@ import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronsUpDown } from "lucide-react";
-import { useSession } from "@/lib/auth-client.ts";
+import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
 import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 import {
-	ACTIVE_ORG_KEY,
+	activeOrgQueryKey,
 	hasOrgAuth,
 	listOrgs,
 	type OrgListEntry,
@@ -87,7 +87,7 @@ export function ServicesOrgSwitcher() {
 
 	const switchMutation = useMutation({
 		mutationFn: setActiveOrg,
-		onError: (error: unknown) =>
+		onError: (error) =>
 			toast.error({
 				title:
 					error instanceof Error ? error.message : "Couldn't switch workspace",
@@ -95,8 +95,13 @@ export function ServicesOrgSwitcher() {
 		onSuccess: async () => {
 			// 1. WHICH org, first and on its own. Until this lands, every org-keyed
 			//    query in the dialog is still mounted under the previous org's id.
+			//    Only THIS account's entry: another account's entry would be
+			//    looked up with this account's session token.
 			await appQueryClient
-				.refetchQueries({ queryKey: ACTIVE_ORG_KEY })
+				.refetchQueries({
+					exact: true,
+					queryKey: activeOrgQueryKey(getActiveUserId()),
+				})
 				.catch(() => undefined);
 
 			// 2. Everything org-scoped is now about a different org. See the note
@@ -162,8 +167,8 @@ export function ServicesOrgSwitcher() {
 		<div className="px-2 pb-1">
 			<DropdownMenu>
 				<DropdownMenuTrigger
-					className="flex w-full items-center gap-2 rounded-md border bg-background px-2 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-60"
 					disabled={switchMutation.isPending || orgs.length < 2}
+					variant="organization-picker"
 				>
 					{active ? (
 						<EntityAvatar
@@ -209,7 +214,9 @@ export function ServicesOrgSwitcher() {
 									size="sm"
 									{...avatarFor(org)}
 								/>
-								<span className="min-w-0 flex-1 truncate">{org.name}</span>
+								<span className="min-w-0 flex-1 truncate" title={org.name}>
+									{org.name}
+								</span>
 								{org.id === billingOrgId ? (
 									<PlanBadge plan={billingPlan} size="sm" />
 								) : null}

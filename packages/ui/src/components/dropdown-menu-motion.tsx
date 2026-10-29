@@ -9,6 +9,8 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { isNativeFunction } from "../lib/native-primitive-observation.ts";
+import styles from "./dropdown-menu-motion.module.css";
 
 type PopupRenderProps = React.ComponentPropsWithRef<"div">;
 
@@ -41,7 +43,7 @@ interface VerticalScrollEdges {
 }
 
 function assignRef<T>(ref: React.Ref<T> | undefined, value: T | null) {
-	if (typeof ref === "function") {
+	if (isNativeFunction(ref)) {
 		ref(value);
 		return;
 	}
@@ -67,7 +69,7 @@ export function dropdownOriginFor(
 						? "center"
 						: "left";
 
-	return `${verticalOrigin}-${horizontalOrigin}` as DropdownOrigin;
+	return `${verticalOrigin}-${horizontalOrigin}` satisfies DropdownOrigin;
 }
 
 export function dropdownMotionClassNames(
@@ -78,26 +80,6 @@ export function dropdownMotionClassNames(
 		return "t-dropdown is-closing";
 	}
 	return cn("t-dropdown", openReady && "is-open");
-}
-
-function scrollFadeStyle(
-	edges: VerticalScrollEdges
-): React.CSSProperties | undefined {
-	if (edges.top && edges.bottom) {
-		const mask =
-			"linear-gradient(to bottom, transparent 0, #000 1.5rem, #000 calc(100% - 1.5rem), transparent 100%)";
-		return { maskImage: mask, WebkitMaskImage: mask };
-	}
-	if (edges.bottom) {
-		const mask =
-			"linear-gradient(to bottom, #000 calc(100% - 1.5rem), transparent 100%)";
-		return { maskImage: mask, WebkitMaskImage: mask };
-	}
-	if (edges.top) {
-		const mask = "linear-gradient(to bottom, transparent 0, #000 1.5rem)";
-		return { maskImage: mask, WebkitMaskImage: mask };
-	}
-	return undefined;
 }
 
 function useVerticalScrollEdges(
@@ -140,7 +122,7 @@ function useVerticalScrollEdges(
 		element.addEventListener("scroll", measure, { passive: true });
 
 		const resizeObserver =
-			typeof ResizeObserver === "undefined"
+			globalThis.ResizeObserver === undefined
 				? null
 				: new ResizeObserver(measure);
 		resizeObserver?.observe(element);
@@ -149,7 +131,7 @@ function useVerticalScrollEdges(
 		}
 
 		const mutationObserver =
-			typeof MutationObserver === "undefined"
+			globalThis.MutationObserver === undefined
 				? null
 				: new MutationObserver(measure);
 		mutationObserver?.observe(element, {
@@ -198,15 +180,12 @@ export function renderDropdownPopup(
 
 function AnimatedDropdownPopup({
 	popupState: state,
-	...props
+	children,
+	className,
+	ref: forwardedRef,
+	style: forwardedStyle,
+	...elementProps
 }: PopupRenderProps & { popupState: PopupState }): React.ReactElement {
-	const {
-		children,
-		className,
-		ref: forwardedRef,
-		style: forwardedStyle,
-		...elementProps
-	} = props;
 	const popupRef = useRef<HTMLDivElement>(null);
 	const forwardedRefRef = useRef(forwardedRef);
 	const openReady = useDropdownOpenReady(state.open);
@@ -224,7 +203,11 @@ function AnimatedDropdownPopup({
 	return (
 		<div
 			{...elementProps}
-			className={cn(className, dropdownMotionClassNames(state.open, openReady))}
+			className={cn(
+				styles.popup,
+				className,
+				dropdownMotionClassNames(state.open, openReady)
+			)}
 			data-origin={dropdownOriginFor(state.side, state.align)}
 			data-scroll-edges={
 				scrollEdges.top && scrollEdges.bottom
@@ -236,10 +219,7 @@ function AnimatedDropdownPopup({
 							: "none"
 			}
 			ref={setPopupRef}
-			style={{
-				...forwardedStyle,
-				...scrollFadeStyle(scrollEdges),
-			}}
+			style={forwardedStyle}
 		>
 			{children}
 		</div>

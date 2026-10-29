@@ -25,7 +25,7 @@ export interface ConversationRunStatusMeta {
 	needsAttention: boolean;
 }
 
-const STATUS_META: Record<ConversationRunStatus, ConversationRunStatusMeta> = {
+const STATUS_META = {
 	running: {
 		label: "In progress",
 		description:
@@ -38,7 +38,7 @@ const STATUS_META: Record<ConversationRunStatus, ConversationRunStatusMeta> = {
 		label: "Needs input",
 		description:
 			"Waiting for your response. It will not continue automatically.",
-		dotClass: "bg-amber-500",
+		dotClass: "bg-warning",
 		isRunning: false,
 		needsAttention: true,
 	},
@@ -46,7 +46,7 @@ const STATUS_META: Record<ConversationRunStatus, ConversationRunStatusMeta> = {
 		label: "Interrupted",
 		description:
 			"Stopped when Ryu or its local engine restarted. The partial reply was saved; continue it manually.",
-		dotClass: "bg-amber-500",
+		dotClass: "bg-warning",
 		isRunning: false,
 		needsAttention: true,
 	},
@@ -65,7 +65,9 @@ const STATUS_META: Record<ConversationRunStatus, ConversationRunStatusMeta> = {
 		isRunning: false,
 		needsAttention: false,
 	},
-};
+} satisfies Record<ConversationRunStatus, ConversationRunStatusMeta>;
+
+const STATUS_BY_NAME = new Map(Object.entries(STATUS_META));
 
 /** Unknown future server statuses remain intelligible instead of looking done. */
 export function conversationRunStatusMeta(
@@ -75,7 +77,7 @@ export function conversationRunStatusMeta(
 		return null;
 	}
 	return (
-		STATUS_META[status as ConversationRunStatus] ?? {
+		STATUS_BY_NAME.get(status) ?? {
 			label: status.replaceAll("_", " "),
 			description: `Run status: ${status.replaceAll("_", " ")}.`,
 			dotClass: "bg-muted-foreground",

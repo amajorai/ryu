@@ -31,6 +31,18 @@ pub struct BackupOverview {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListQuery {
     space_id: Option<String>,
+    scope: Option<String>,
+}
+
+impl ListQuery {
+    fn resolved_scope(self) -> anyhow::Result<Option<BackupScope>> {
+        match (self.space_id, self.scope.as_deref()) {
+            (Some(space_id), None) => Ok(Some(BackupScope::Space { space_id })),
+            (None, Some("node")) => Ok(Some(BackupScope::Node)),
+            (None, None) => Ok(None),
+            _ => anyhow::bail!("Use scope=node or spaceId, not both"),
+        }
+    }
 }
 
 async fn authorize(state: &ServerState, caller: &Option<VerifiedCaller>) -> Result<(), Response> {
@@ -160,7 +172,7 @@ pub async fn test_destination(
     }
 }
 
-#[utoipa::path(get, path = "/api/backups/destinations/{id}/backups", tag = "Backups", summary = "Discover authenticated backups from S3, including on replacement nodes (nodes.manage)", params(("id" = String, Path), ("spaceId" = Option<String>, Query)), responses((status = 200, body = Vec<BackupRecord>), (status = 400, description = "Catalog unavailable, damaged or over 6000 objects; narrow destination prefix"), (status = 403, description = "Permission denied")))]
+#[utoipa::path(get, path = "/api/backups/destinations/{id}/backups", tag = "Backups", summary = "Discover authenticated backups from S3, including on replacement nodes (nodes.manage)", params(("id" = String, Path), ("spaceId" = Option<String>, Query), ("scope" = Option<String>, Query, description = "Use node for an isolated node catalog; omit scope and spaceId to browse all scopes")), responses((status = 200, body = Vec<BackupRecord>), (status = 400, description = "Catalog unavailable, damaged or over 2000 matching records; narrow the scope or destination prefix"), (status = 403, description = "Permission denied")))]
 pub async fn list_backups(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<VerifiedCaller>>,
@@ -171,13 +183,40 @@ pub async fn list_backups(
         return response;
     }
     let result = async {
+        let scope = query.resolved_scope()?;
         let (_, s3) = global().await?.destination(&id).await?;
-        let scope = query.space_id.map(|space_id| BackupScope::Space { space_id });
         s3.list(scope.as_ref()).await.map_err(|_| anyhow::anyhow!("Could not read the S3 backup catalog. Check connectivity, permissions and the recovery key."))
     }.await;
     match result {
         Ok(value) => Json(value).into_response(),
         Err(error) => failure(error),
+    }
+}
+
+#[cfg(test)]
+mod listing_scope_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_node_and_space_catalogs_are_isolated_while_unspecified_api_lists_all() {
+        let query: ListQuery = serde_json::from_value(json!({ "scope": "node" })).unwrap();
+        assert_eq!(query.resolved_scope().unwrap(), Some(BackupScope::Node));
+        let query: ListQuery = serde_json::from_value(json!({ "spaceId": "space-a" })).unwrap();
+        assert_eq!(
+            query.resolved_scope().unwrap(),
+            Some(BackupScope::Space {
+                space_id: "space-a".into()
+            })
+        );
+        let query: ListQuery = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(query.resolved_scope().unwrap(), None);
+        for value in [
+            json!({ "scope": "node", "spaceId": "space-a" }),
+            json!({ "scope": "app" }),
+        ] {
+            let query: ListQuery = serde_json::from_value(value).unwrap();
+            assert!(query.resolved_scope().is_err());
+        }
     }
 }
 
@@ -261,3 +300,49 @@ pub async fn operation(
         Err(error) => failure(error),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failure_response_limits_and_redacts_provider_details() {
+        let response = failure(
+            anyhow::anyhow!(
+                "credential=private-token and signed-url=https://s3.example/?sig=secret"
+            )
+            .context("S3 connection validation failed"),
+        );
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["code"], "backup_request_failed");
+        assert_eq!(body["error"], "S3 connection validation failed");
+        let rendered = body.to_string();
+        assert!(!rendered.contains("private-token"));
+        assert!(!rendered.contains("sig=secret"));
+
+        let long_error = failure(anyhow::anyhow!("x".repeat(400)));
+        let body = axum::body::to_bytes(long_error.into_body(), 4096)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["error"].as_str().unwrap().chars().count(), 320);
+    }
+
+    #[test]
+    fn backup_list_query_uses_camel_case_and_rejects_unknown_fields() {
+        let query: ListQuery = serde_json::from_value(json!({ "spaceId": "space-1" })).unwrap();
+        assert_eq!(query.space_id.as_deref(), Some("space-1"));
+
+        assert!(serde_json::from_value::<ListQuery>(json!({ "space_id": "space-1" })).is_err());
+        assert!(serde_json::from_value::<ListQuery>(json!({ "unknown": true })).is_err());
+    }
+}
+
+#[cfg(test)]
+#[path = "backups_routes_test.rs"]
+mod routes_test;

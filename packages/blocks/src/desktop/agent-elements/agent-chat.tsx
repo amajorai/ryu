@@ -1,13 +1,11 @@
 ﻿"use client";
 
-import {
-	AvatarConversationProvider,
-	resolveAvatarConversationState,
-} from "@ryu/ui/components/avatar-conversation.tsx";
+import { AvatarConversationProvider } from "@ryu/ui/components/avatar-conversation.tsx";
 import { Button } from "@ryu/ui/components/button";
 import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { useMediaQuery } from "@ryu/ui/hooks/use-mobile.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import {
 	type ReactNode,
 	useCallback,
@@ -25,12 +23,51 @@ import {
 	useChatDisplayPrefs,
 } from "./chat-display-prefs.tsx";
 import { deriveContextUsage } from "./context-usage.tsx";
+import {
+	ConversationActivityProvider,
+	describeConversationActivity,
+} from "./conversation-activity.ts";
 import { type SuggestionItem, Suggestions } from "./input/suggestions.tsx";
 import { InputBar } from "./input-bar.tsx";
 import { MessageList } from "./message-list.tsx";
+import {
+	answeredQuestionIds,
+	isAsyncQuestionPart,
+	isQuestionPartOpen,
+} from "./question/async-question.ts";
+import type {
+	QuestionAnswer,
+	QuestionConfig,
+} from "./question/question-prompt.tsx";
 import { ComposerQuotePreview } from "./quote.tsx";
+import {
+	latestSuggestedTask,
+	type SuggestedTask,
+} from "./tools/suggested-task.ts";
+import { SuggestedTaskCard } from "./tools/suggested-task-card.tsx";
 import type { AgentChatProps } from "./types.ts";
 import { useDeferredComposerPrompt } from "./use-deferred-question.ts";
+import type { RenderedMessage } from "./utils/native-sdk-observation.ts";
+
+export function appendDraftInsertion(draft: string, insertion: string): string {
+	const text = insertion.trim();
+	if (!text) {
+		return draft;
+	}
+	const existingDraft = draft.trimEnd();
+	return existingDraft ? `${existingDraft}\n\n${text}` : text;
+}
+
+export function mergeDraftSeedWithInsertions(
+	seed: string,
+	insertions: readonly string[]
+): string {
+	return insertions.reduce(appendDraftInsertion, seed);
+}
+
+/** Suggested-task cards dismissed this session, by tool call id. Module scope
+ *  so a chat that remounts (tab switch, split) keeps them dismissed. */
+const sessionDismissedTasks = new Set<string>();
 
 const CHAT_LAYOUT_TRANSITION = {
 	damping: 34,
@@ -55,6 +92,7 @@ export function AgentChat({
 	onBranch,
 	onAgentUiSubmit,
 	onEditMessage,
+	onRewindMessage,
 	onRegenerateMessage,
 	onRetryError,
 	onRetryGeneration,
@@ -92,6 +130,8 @@ export function AgentChat({
 	density,
 	composerDisabled,
 	composerFooter,
+	composerHeader,
+	composerPrediction,
 	voiceMode,
 	infoBar,
 	onComposerMenuSelect,
@@ -99,9 +139,12 @@ export function AgentChat({
 	currentUser,
 	seedDraft,
 	onSeedDraftConsumed,
+	draftInsertion,
+	onDraftInsertionConsumed,
 	onDraftChange,
 	suggestions,
 	followUps,
+	taskSuggestions,
 	emptyStatePosition = "default",
 	emptySuggestionsPlacement = "input",
 	emptySuggestionsPosition = "top",
@@ -109,6 +152,7 @@ export function AgentChat({
 	emptyStateFooter,
 	historyLoading,
 	historyError,
+	historyNotices,
 	hasOlderMessages,
 	loadingOlderMessages,
 	onLoadOlderMessages,
@@ -124,6 +168,7 @@ export function AgentChat({
 	statsPluginEnabled,
 	statsUsage,
 	statsModelName,
+	statsProviderHint,
 	onOpenContext,
 	draftControls,
 }: AgentChatProps) {
@@ -131,9 +176,14 @@ export function AgentChat({
 	const { animationsEnabled } = useChatDisplayPrefs();
 	const availability = useAgentAvailability();
 	const promptsPaused = availability !== "online";
-	const reduceMotion = !animationsEnabled || (useReducedMotion() ?? false);
+	const prefersReducedMotion = useMediaQuery(
+		"(prefers-reduced-motion: reduce)"
+	);
+	const reduceMotion = !animationsEnabled || prefersReducedMotion;
 	const [draft, setDraft] = useState("");
 	const draftTouchedRef = useRef(false);
+	const consumedDraftInsertionIdRef = useRef<number | null>(null);
+	const pendingDraftInsertionsRef = useRef<string[]>([]);
 	const setDraftFromUser = useCallback((nextDraft: string) => {
 		draftTouchedRef.current = true;
 		setDraft(nextDraft);
@@ -150,13 +200,37 @@ export function AgentChat({
 			seedDraft &&
 			seedDraft !== seededValueRef.current &&
 			!draftTouchedRef.current &&
-			draft.length === 0
+			(draft.length === 0 || pendingDraftInsertionsRef.current.length > 0)
 		) {
 			seededValueRef.current = seedDraft;
-			setDraft(seedDraft);
+			setDraft(
+				mergeDraftSeedWithInsertions(
+					seedDraft,
+					pendingDraftInsertionsRef.current
+				)
+			);
+			pendingDraftInsertionsRef.current = [];
 			onSeedDraftConsumed?.();
 		}
 	}, [draft, onSeedDraftConsumed, seedDraft]);
+
+	useEffect(() => {
+		if (
+			!draftInsertion ||
+			draftInsertion.id === consumedDraftInsertionIdRef.current
+		) {
+			return;
+		}
+		consumedDraftInsertionIdRef.current = draftInsertion.id;
+		const text = draftInsertion.text.trim();
+		if (text) {
+			if (!seededValueRef.current) {
+				pendingDraftInsertionsRef.current.push(text);
+			}
+			setDraft((current) => appendDraftInsertion(current, text));
+		}
+		onDraftInsertionConsumed?.(draftInsertion.id);
+	}, [draftInsertion, onDraftInsertionConsumed]);
 
 	// Observe the composer text for surfaces that persist it (the desktop keeps
 	// unsent text as a draft). A ref for the callback so a consumer passing an
@@ -174,9 +248,14 @@ export function AgentChat({
 	// derived from the latest turn's usage stats. The denominator prefers an
 	// ACP-reported window, else the model's `contextSize` (launch config /
 	// models.dev). Null (no meter) until a turn reports usage — it is live-only.
+	// The model/provider hints key the prompt-cache TTL when a part omits them.
 	const contextMeter = useMemo(
-		() => deriveContextUsage(messages, contextSize) ?? undefined,
-		[messages, contextSize]
+		() =>
+			deriveContextUsage(messages, contextSize, {
+				model: statsModelName,
+				provider: statsProviderHint,
+			}) ?? undefined,
+		[messages, contextSize, statsModelName, statsProviderHint]
 	);
 
 	// A failed request is shown as a synthetic trailing assistant message. Built
@@ -185,11 +264,19 @@ export function AgentChat({
 	// an error is on screen — which invalidates normalizeMessages /
 	// groupMessagesIntoTurns / the TOC continuously, and re-arms the pinned-message
 	// measuring effect every pass (the escalation path to React error #185).
+	const voiceMessages = voiceMode?.active ? voiceMode.messages : undefined;
+	const transcriptMessages = useMemo(
+		() =>
+			voiceMessages && voiceMessages.length > 0
+				? [...messages, ...voiceMessages]
+				: messages,
+		[messages, voiceMessages]
+	);
 	const listMessages = useMemo(
 		() =>
 			error
 				? [
-						...messages,
+						...transcriptMessages,
 						{
 							id: "agent-chat-error",
 							role: "assistant",
@@ -200,10 +287,10 @@ export function AgentChat({
 									message: error.message,
 								},
 							],
-						} as unknown as (typeof messages)[number],
+						} satisfies RenderedMessage,
 					]
-				: messages,
-		[error, messages]
+				: transcriptMessages,
+		[error, transcriptMessages]
 	);
 
 	// "Nothing in this thread" and "this thread has not arrived yet" are different
@@ -219,13 +306,37 @@ export function AgentChat({
 	// appended the optimistic user message yet. Leaving the empty layout mounted
 	// for that gap made the composer teleport only after the first stream frame.
 	const isEmpty =
-		!(error || isPlaceholder) && messages.length === 0 && !isStreaming;
+		!(error || isPlaceholder) &&
+		transcriptMessages.length === 0 &&
+		!isStreaming;
 	const isCenteredEmptyState = isEmpty && emptyStatePosition === "center";
 	// The placeholder replaces the transcript only while there is nothing to show;
 	// a re-fetch over an already-rendered thread must not blank it.
-	const showPlaceholder = isPlaceholder && !error && messages.length === 0;
+	const showPlaceholder =
+		isPlaceholder && !error && transcriptMessages.length === 0;
 
-	const pendingQuestion = findPendingQuestion(messages, questionTool);
+	// Cards answered in this session hide at once; the transcript marker (async)
+	// or the tool output (blocking) keeps them closed after a reload.
+	const [locallyAnsweredQuestions, setLocallyAnsweredQuestions] = useState<
+		ReadonlySet<string>
+	>(() => new Set());
+	const answeredQuestions = useMemo(() => {
+		const ids = answeredQuestionIds(messages);
+		for (const id of locallyAnsweredQuestions) {
+			ids.add(id);
+		}
+		return ids;
+	}, [messages, locallyAnsweredQuestions]);
+	const pendingQuestion = useMemo(
+		() => findPendingQuestion(messages, questionTool, answeredQuestions),
+		[messages, questionTool, answeredQuestions]
+	);
+	// Answers collected so far for a multi-question card. The card is submitted
+	// to the host once, with every answer, after its last question.
+	const [questionProgress, setQuestionProgress] = useState<{
+		answers: QuestionAnswer[];
+		id: string;
+	} | null>(null);
 	const {
 		markComposerActivity: markQuestionActivity,
 		markComposerIdle: markQuestionIdle,
@@ -271,13 +382,14 @@ export function AgentChat({
 
 	const emptySuggestionsNode = showEmptySuggestions ? (
 		<Suggestions
-			className={cn(
+			buttonSize="empty"
+			containerClassName={cn(
 				"w-full justify-center",
 				emptySuggestionsPosition === "top" ? "mb-3" : "mt-3",
 				suggestionConfig.className
 			)}
 			disabled={isStreaming}
-			itemClassName={cn("h-8 rounded-md px-3", suggestionConfig.itemClassName)}
+			itemClassName={suggestionConfig.itemClassName}
 			items={suggestionConfig.items}
 			onSelect={handleEmptySuggestionSelect}
 		/>
@@ -304,9 +416,56 @@ export function AgentChat({
 		showFollowUps && followUps ? (
 			<div className="shrink-0 px-3 pb-1">
 				<Suggestions
-					itemClassName="h-8 rounded-full px-3"
+					buttonSize="follow-up"
 					items={followUpItems}
 					onSelect={followUps.onSelect}
+				/>
+			</div>
+		) : null;
+
+	// Suggested next task (`tasks.suggest`): at most one card, for the newest
+	// finished turn only, under the same gates as the follow-up chips. Dismissed
+	// ids are remembered for the session so switching tabs does not bring a
+	// dismissed card back.
+	const [dismissedTasks, setDismissedTasks] = useState<ReadonlySet<string>>(
+		() => new Set(sessionDismissedTasks)
+	);
+	const dismissTask = useCallback((task: SuggestedTask) => {
+		sessionDismissedTasks.add(task.id);
+		setDismissedTasks((current) => new Set(current).add(task.id));
+	}, []);
+	const taskSuggestionsEnabled = taskSuggestions !== undefined;
+	const suggestedTask = useMemo(
+		() =>
+			taskSuggestionsEnabled
+				? latestSuggestedTask(messages, dismissedTasks)
+				: null,
+		[taskSuggestionsEnabled, messages, dismissedTasks]
+	);
+	const showSuggestedTask =
+		suggestedTask !== null &&
+		!(isCenteredEmptyState || error) &&
+		status !== "streaming" &&
+		status !== "submitted";
+	const suggestedTaskNode =
+		showSuggestedTask && taskSuggestions && suggestedTask ? (
+			<div className="flex shrink-0 justify-end px-3 pb-2">
+				<SuggestedTaskCard
+					canStartInWorktree={taskSuggestions.canStartInWorktree}
+					onDismiss={dismissTask}
+					onSaveDraft={
+						taskSuggestions.onSaveDraft
+							? async (task) => {
+									await taskSuggestions.onSaveDraft?.(task);
+									dismissTask(task);
+								}
+							: undefined
+					}
+					onStart={(task, mode) => {
+						dismissTask(task);
+						taskSuggestions.onStart(task, mode);
+					}}
+					task={suggestedTask}
 				/>
 			</div>
 		) : null;
@@ -318,9 +477,12 @@ export function AgentChat({
 			className={cn(classNames?.inputBar, isCenteredEmptyState && "px-0 pb-0")}
 			compact={density === "compact"}
 			composerHeader={
-				quote ? (
-					<ComposerQuotePreview onDismiss={onClearQuote} text={quote} />
-				) : undefined
+				<>
+					{quote ? (
+						<ComposerQuotePreview onDismiss={onClearQuote} text={quote} />
+					) : null}
+					{composerHeader}
+				</>
 			}
 			composerMenuGroups={composerMenuGroups}
 			composerPrompt={visibleComposerPrompt ?? undefined}
@@ -332,18 +494,20 @@ export function AgentChat({
 				infoBar ??
 				(promptsPaused
 					? {
-							description:
-								availability === "away"
-									? "Questions stay in the transcript until you’re back."
-									: "Prompts stay out of the composer until you switch back to Online.",
+							description: availabilityInfoDescription(availability),
 							title:
 								availability === "away"
 									? "Away mode"
-									: agentAvailabilityLabel(availability),
+									: availability === "gaming"
+										? "Gaming mode"
+										: availability === "streaming"
+											? "Streaming mode"
+											: agentAvailabilityLabel(availability),
 						}
 					: undefined)
 			}
 			isDragOver={attachments?.isDragOver}
+			liveCall={voiceMode?.active ? voiceMode.liveCall : undefined}
 			onAnnotateImage={attachments?.onAnnotateImage}
 			onAttach={attachments?.onAttach}
 			onChange={handleDraftChange}
@@ -359,34 +523,25 @@ export function AgentChat({
 			placeholderSuggestion={
 				(followUpItems[0] ?? suggestionConfig.items[0])?.label
 			}
+			prediction={
+				isCenteredEmptyState || error ? undefined : composerPrediction
+			}
 			questionBar={
 				visiblePendingQuestion
-					? {
-							id: visiblePendingQuestion.id,
-							questions: visiblePendingQuestion.questions,
-							questionIndex: visiblePendingQuestion.questionIndex,
-							totalQuestions: visiblePendingQuestion.totalQuestions,
-							onPreviousQuestion: visiblePendingQuestion.onPreviousQuestion,
-							onNextQuestion: visiblePendingQuestion.onNextQuestion,
-							submitLabel: visiblePendingQuestion.submitLabel,
-							skipLabel: visiblePendingQuestion.skipLabel,
-							allowSkip: visiblePendingQuestion.allowSkip,
-							onSubmit: (answer) => {
-								questionTool?.onAnswer?.({
-									toolCallId: visiblePendingQuestion.toolCallId,
-									question:
-										visiblePendingQuestion.questions[
-											visiblePendingQuestion.questionIndex
-												? visiblePendingQuestion.questionIndex - 1
-												: 0
-										],
-									answer,
-								});
-							},
-						}
+					? buildQuestionBar({
+							pending: visiblePendingQuestion,
+							progress: questionProgress,
+							questionTool,
+							setProgress: setQuestionProgress,
+							onComplete: (id) =>
+								setLocallyAnsweredQuestions((previous) => {
+									const next = new Set(previous);
+									next.add(id);
+									return next;
+								}),
+						})
 					: undefined
 			}
-			seamless={voiceMode?.active}
 			status={status}
 			suggestions={
 				showInputSuggestions
@@ -398,18 +553,11 @@ export function AgentChat({
 			value={draft}
 		/>
 	);
-	const voiceModeNode = voiceMode?.active
-		? voiceMode.render(inputBarNode)
-		: null;
-	const renderedComposer = voiceMode?.active ? null : inputBarNode;
 
 	let transcriptNode: ReactNode;
 	if (showPlaceholder) {
 		transcriptNode = (
-			<HistoryPlaceholder
-				className={classNames?.messageList}
-				error={historyError}
-			/>
+			<HistoryPlaceholder classNames={classNames} error={historyError} />
 		);
 	} else {
 		transcriptNode = (
@@ -420,7 +568,6 @@ export function AgentChat({
 				assistantName={assistantName}
 				assistantPlanningAvatars={assistantPlanningAvatars}
 				assistantTitle={assistantTitle}
-				className={classNames?.messageList}
 				classNames={classNames}
 				contextSize={contextSize}
 				conversationKey={conversationKey}
@@ -433,6 +580,7 @@ export function AgentChat({
 				// nothing on screen. It renders as a `Marker` after the last message
 				// (see MessageListProps.historyNotice).
 				historyNotice={historyNotice}
+				historyNotices={historyNotices}
 				initialScrollBehavior={initialScrollBehavior}
 				loadingOlderMessages={loadingOlderMessages}
 				mentionItems={mentionItems}
@@ -457,6 +605,7 @@ export function AgentChat({
 				onRetryError={onRetryError}
 				onRetryGeneration={onRetryGeneration}
 				onReviewFileEdits={onReviewFileEdits}
+				onRewindMessage={onRewindMessage}
 				onSelectVersion={onSelectVersion}
 				onSpeak={onSpeak}
 				onUndoFileEdits={onUndoFileEdits}
@@ -506,6 +655,7 @@ export function AgentChat({
 			layout={reduceMotion ? false : "position"}
 		>
 			{transcriptNode}
+			{suggestedTaskNode}
 			{followUpsNode}
 			{emptyStateFooterNode}
 		</motion.div>
@@ -542,7 +692,7 @@ export function AgentChat({
 					layout={!reduceMotion}
 					transition={reduceMotion ? { duration: 0 } : CHAT_LAYOUT_TRANSITION}
 				>
-					{renderedComposer}
+					{inputBarNode}
 				</motion.div>
 				{isCenteredEmptyState ? (
 					<>
@@ -577,22 +727,34 @@ export function AgentChat({
 			{chatStage}
 		</div>
 	);
+	// Stable identity: the provider memoises its merged prefs on `value`, so an
+	// inline `{ density }` re-rendered every transcript consumer on every chunk.
+	const densityPrefs = useMemo(
+		() => (density ? { density } : undefined),
+		[density]
+	);
+	const resolvedActivity = describeConversationActivity({
+		status,
+		error,
+		pendingQuestion: Boolean(visiblePendingQuestion),
+		messages,
+	});
+	// Keyed on the primitives so header consumers re-render when the activity
+	// changes, not on every streamed chunk.
+	const activity = useMemo(
+		() => ({ label: resolvedActivity.label, state: resolvedActivity.state }),
+		[resolvedActivity.label, resolvedActivity.state]
+	);
 	const chatSurface = (
-		<AvatarConversationProvider
-			state={resolveAvatarConversationState({
-				status,
-				error,
-				pendingQuestion: Boolean(visiblePendingQuestion),
-				messages,
-			})}
-		>
-			{chatNode}
-			{voiceModeNode}
+		<AvatarConversationProvider state={activity.state}>
+			<ConversationActivityProvider value={activity}>
+				{chatNode}
+			</ConversationActivityProvider>
 		</AvatarConversationProvider>
 	);
 
-	return density ? (
-		<ChatDisplayPrefsProvider value={{ density }}>
+	return densityPrefs ? (
+		<ChatDisplayPrefsProvider value={densityPrefs}>
 			{chatSurface}
 		</ChatDisplayPrefsProvider>
 	) : (
@@ -608,10 +770,10 @@ export function AgentChat({
  * the caller), so the tab never reads as dead.
  */
 function HistoryPlaceholder({
-	className,
+	classNames,
 	error,
 }: {
-	className?: string;
+	classNames?: AgentChatProps["classNames"];
 	error?: {
 		description?: string;
 		onRetry?: () => void;
@@ -623,7 +785,7 @@ function HistoryPlaceholder({
 			<div
 				className={cn(
 					"flex min-h-0 flex-1 items-center justify-center px-4 py-4",
-					className
+					classNames?.messageList
 				)}
 			>
 				<div className="max-w-[420px] text-center">
@@ -653,22 +815,22 @@ function HistoryPlaceholder({
 			aria-label="Loading conversation"
 			className={cn(
 				"flex min-h-0 flex-1 flex-col gap-6 overflow-hidden px-4 py-6",
-				className
+				classNames?.messageList
 			)}
 		>
 			<div className="flex justify-end">
-				<Skeleton className="h-9 w-[45%] rounded-2xl" />
+				<Skeleton className="h-9 w-[45%]" />
 			</div>
 			<div className="flex gap-3">
-				<Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+				<Skeleton className="h-7 w-7 shrink-0" radius="pill" />
 				<div className="flex w-full flex-col gap-2">
-					<Skeleton className="h-4 w-[85%] rounded-md" />
-					<Skeleton className="h-4 w-[70%] rounded-md" />
-					<Skeleton className="h-4 w-[45%] rounded-md" />
+					<Skeleton className="h-4 w-[85%]" radius="dense" />
+					<Skeleton className="h-4 w-[70%]" radius="dense" />
+					<Skeleton className="h-4 w-[45%]" radius="dense" />
 				</div>
 			</div>
 			<div className="flex justify-end">
-				<Skeleton className="h-9 w-[30%] rounded-2xl" />
+				<Skeleton className="h-9 w-[30%]" />
 			</div>
 		</output>
 	);
@@ -689,10 +851,119 @@ function resolveSuggestions(suggestions: AgentChatProps["suggestions"]) {
 	};
 }
 
-function findPendingQuestion(
+function availabilityInfoDescription(
+	availability: ReturnType<typeof useAgentAvailability>
+): string {
+	switch (availability) {
+		case "away":
+			return "Agents keep working. Their questions wait here until you’re back.";
+		case "gaming":
+			return "Agents keep working, questions wait, and local models stay unloaded while you play.";
+		case "streaming":
+			return "Agents keep working, questions wait, and connected-app suggestions stay generic while you stream.";
+		default:
+			return "Agents keep working. Prompts stay out of the composer until you switch back to Online.";
+	}
+}
+
+interface PendingQuestion {
+	allowSkip?: boolean;
+	async: boolean;
+	id: string;
+	question: QuestionConfig;
+	questions: QuestionConfig[];
+	skipLabel?: string;
+	submitLabel?: string;
+	toolCallId?: string;
+	totalQuestions: number;
+}
+
+/**
+ * Composer question bar for the pending card. Multi-question cards advance one
+ * question per submit (the bar id changes per step so the input bar re-opens),
+ * and the host receives every answer together once the last one is in.
+ */
+function buildQuestionBar({
+	pending,
+	progress,
+	questionTool,
+	setProgress,
+	onComplete,
+}: {
+	pending: PendingQuestion;
+	progress: { answers: QuestionAnswer[]; id: string } | null;
+	questionTool: AgentChatProps["questionTool"];
+	setProgress: (next: { answers: QuestionAnswer[]; id: string } | null) => void;
+	onComplete: (id: string) => void;
+}) {
+	const answered = progress?.id === pending.id ? progress.answers : [];
+	const step = Math.min(answered.length, pending.totalQuestions - 1);
+	return {
+		id: `${pending.id}#${step}`,
+		questions: pending.questions,
+		questionIndex: step + 1,
+		totalQuestions: pending.totalQuestions,
+		onPreviousQuestion: () => {
+			if (answered.length > 0) {
+				setProgress({ answers: answered.slice(0, -1), id: pending.id });
+			}
+		},
+		// Later questions open only after the current one is answered.
+		onNextQuestion: () => undefined,
+		submitLabel: pending.submitLabel,
+		skipLabel: pending.skipLabel,
+		allowSkip: pending.allowSkip,
+		onSubmit: (answer: QuestionAnswer) => {
+			questionTool?.onAnswer?.({
+				toolCallId: pending.toolCallId,
+				question: pending.questions[step] ?? pending.question,
+				answer,
+			});
+			const answers = [...answered, answer];
+			if (answers.length < pending.totalQuestions) {
+				setProgress({ answers, id: pending.id });
+				return;
+			}
+			setProgress(null);
+			if (questionTool?.onAnswers) {
+				onComplete(pending.id);
+				questionTool.onAnswers({
+					answers,
+					async: pending.async,
+					questions: pending.questions,
+					toolCallId: pending.toolCallId,
+				});
+			}
+		},
+	};
+}
+
+interface QuestionToolPartObservation {
+	input?: {
+		allowSkip?: boolean;
+		async?: unknown;
+		question?: QuestionConfig;
+		questions?: QuestionConfig[];
+		skipLabel?: string;
+		submitLabel?: string;
+	};
+	output?: unknown;
+	toolCallId?: string;
+	type?: string;
+}
+
+/**
+ * The newest Question card that still wants an answer. Async cards stay open
+ * anywhere in the transcript until answered, because the agent moved on without
+ * them. A blocking card only counts in the newest assistant message: an older
+ * one that never produced output belongs to an interrupted turn.
+ */
+export function findPendingQuestion(
 	messages: AgentChatProps["messages"],
-	questionTool: AgentChatProps["questionTool"]
-) {
+	questionTool: AgentChatProps["questionTool"],
+	answeredIds: ReadonlySet<string>
+): PendingQuestion | null {
+	let newestAssistant = true;
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const message = messages[i];
 		if (message?.role !== "assistant") {
@@ -700,52 +971,44 @@ function findPendingQuestion(
 		}
 		const parts = message.parts ?? [];
 		for (let p = parts.length - 1; p >= 0; p -= 1) {
-			const part = parts[p] as {
-				type?: string;
-				toolCallId?: string;
-				input?: {
-					questions?: import("./question/question-prompt").QuestionConfig[];
-					question?: import("./question/question-prompt").QuestionConfig;
-					questionIndex?: number;
-					totalQuestions?: number;
-					onPreviousQuestion?: () => void;
-					onNextQuestion?: () => void;
-					submitLabel?: string;
-					skipLabel?: string;
-					allowSkip?: boolean;
-				};
-				output?: {
-					answer?: import("./question/question-prompt").QuestionAnswer;
-				};
-			};
+			// SAFETY: This is only the live Question field observation for the SDK/Core
+			// part union. The tag and question existence checks below gate consumption;
+			// callbacks/output retain the native SDK producer contract unchanged.
+			const part = parts[p] as QuestionToolPartObservation;
 			if (part?.type !== "tool-Question") {
 				continue;
 			}
 			const input = part.input;
-			const questions = input?.questions ?? [];
-			const firstQuestion = questions[0] ?? input?.question;
+			const questions =
+				input?.questions ?? (input?.question ? [input.question] : []);
+			const firstQuestion = questions[0];
 			if (!firstQuestion) {
 				continue;
 			}
-			if (part.output?.answer) {
-				return null;
+			const isAsync = isAsyncQuestionPart(part);
+			if (!(isAsync || newestAssistant)) {
+				continue;
+			}
+			if (!isQuestionPartOpen(part, answeredIds)) {
+				continue;
+			}
+			const id = part.toolCallId ?? `question-${i}-${p}`;
+			if (answeredIds.has(id)) {
+				continue;
 			}
 			return {
-				id: part.toolCallId ?? `question-${i}-${p}`,
-				toolCallId: part.toolCallId,
-				questions,
-				question: firstQuestion,
-				questionIndex: input?.questionIndex,
-				totalQuestions:
-					input?.totalQuestions ??
-					(questions.length > 0 ? questions.length : undefined),
-				onPreviousQuestion: input?.onPreviousQuestion,
-				onNextQuestion: input?.onNextQuestion,
-				submitLabel: questionTool?.submitLabel ?? input?.submitLabel,
-				skipLabel: questionTool?.skipLabel ?? input?.skipLabel,
 				allowSkip: questionTool?.allowSkip ?? input?.allowSkip,
+				async: isAsync,
+				id,
+				question: firstQuestion,
+				questions,
+				skipLabel: questionTool?.skipLabel ?? input?.skipLabel,
+				submitLabel: questionTool?.submitLabel ?? input?.submitLabel,
+				toolCallId: part.toolCallId,
+				totalQuestions: questions.length,
 			};
 		}
+		newestAssistant = false;
 	}
 	return null;
 }

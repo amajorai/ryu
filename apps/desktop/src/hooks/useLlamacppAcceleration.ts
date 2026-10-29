@@ -74,10 +74,13 @@ export function useLlamacppAcceleration(): UseLlamacppAccelerationResult {
 				await setLlamacppAcceleration({ url, token, userJwt }, variant);
 				await reload();
 			} catch (e) {
-				setError(e instanceof Error ? e.message : "Could not switch the build");
+				const message =
+					e instanceof Error ? e.message : "Could not switch the build";
 				// Re-read so the UI shows what is actually installed rather than the
-				// choice that failed.
+				// choice that failed. Preserve the failed action's message after reload;
+				// reload clears its own prior error state while starting the read.
 				await reload().catch(() => undefined);
+				setError(message);
 			} finally {
 				setSwitching(false);
 			}

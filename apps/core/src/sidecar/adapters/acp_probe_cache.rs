@@ -177,6 +177,19 @@ pub fn cache_key(spawn_cmd: &str, selections: &BTreeMap<String, String>) -> Stri
     format!("{spawn_cmd}{KEY_SEP}{applied}")
 }
 
+/// Whether a key's spawn part belongs to `spawn_cmd`: the command itself, or
+/// the command plus a `\u{2}`-separated context the caller appended (a native
+/// account or managed-Pi secret digest), so invalidation clears every
+/// context's answer for that agent.
+fn probes_spawn_cmd(key_spawn: &str, spawn_cmd: &str) -> bool {
+    key_spawn
+        .strip_prefix(spawn_cmd)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(CONTEXT_SEP))
+}
+
+/// Separator between a spawn command and the context a caller appends to it.
+const CONTEXT_SEP: char = '\u{2}';
+
 /// The spawn command a cache key was built from — the part every
 /// binary-fingerprint and invalidation decision is about.
 fn spawn_cmd_of(key: &str) -> &str {
@@ -304,7 +317,7 @@ pub fn invalidate(spawn_cmd: &str) {
         };
         let stale: Vec<String> = map
             .keys()
-            .filter(|k| spawn_cmd_of(k) == spawn_cmd)
+            .filter(|k| probes_spawn_cmd(spawn_cmd_of(k), spawn_cmd))
             .cloned()
             .collect();
         if stale.is_empty() {
@@ -368,7 +381,7 @@ fn spawn_program(spawn_cmd: &str) -> Option<String> {
 // ── Persistence ──────────────────────────────────────────────────────────────
 
 fn cache_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("acp-probe-cache.json")
+    crate::paths::cache_path("acp-probe-cache.json")
 }
 
 fn load_from_disk() -> HashMap<String, Entry> {
@@ -470,17 +483,27 @@ mod tests {
         sel.insert("model".to_owned(), "xai/grok-4.6".to_owned());
         let bare = "invalidate-test-agent --acp";
         let keyed = cache_key(bare, &sel);
+        // The managed Pi and native agents key on a context after the command.
+        let with_context = cache_key(&format!("{bare}\u{2}pi-secrets:abc"), &sel);
         let other = "other-agent --acp";
+        let longer = "invalidate-test-agent --acp-v2";
         store(bare, Ok(&Value::Null));
         store(&keyed, Ok(&Value::Null));
+        store(&with_context, Ok(&Value::Null));
         store(other, Ok(&Value::Null));
+        store(longer, Ok(&Value::Null));
 
         invalidate(bare);
 
         let map = entries().lock().expect("cache lock");
         assert!(!map.contains_key(bare));
         assert!(!map.contains_key(&keyed));
+        assert!(!map.contains_key(&with_context));
         assert!(map.contains_key(other), "another agent must be untouched");
+        assert!(
+            map.contains_key(longer),
+            "a command that merely shares a prefix is untouched"
+        );
     }
 
     #[test]

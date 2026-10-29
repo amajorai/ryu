@@ -1,6 +1,7 @@
 import { Cancel01Icon, MailReply01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useEffect, useState } from "react";
 import type { QuickReplyRequest } from "@/src/store/useQuickReplyStore.ts";
@@ -17,6 +18,7 @@ export function QuickReplyComposer({
 	onSubmit,
 	request,
 }: QuickReplyComposerProps) {
+	const tl = useLiteralMessages();
 	const [draft, setDraft] = useState("");
 
 	useEffect(() => {
@@ -61,18 +63,21 @@ export function QuickReplyComposer({
 								/>
 								<span className="shrink-0 font-medium">Quick reply</span>
 								<span className="text-muted-foreground/70">to</span>
-								<span className="truncate text-muted-foreground">
+								<span
+									className="truncate text-muted-foreground"
+									title={request.title}
+								>
 									{request.title}
 								</span>
 							</div>
 							<Button
 								aria-label="Close quick reply"
-								className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+								className="size-7 shrink-0"
 								onClick={onClose}
 								size="icon"
 								title="Close quick reply"
 								type="button"
-								variant="ghost"
+								variant="ghost-muted"
 							>
 								<HugeiconsIcon className="size-3.5" icon={Cancel01Icon} />
 							</Button>
@@ -81,7 +86,7 @@ export function QuickReplyComposer({
 					onChange={setDraft}
 					onSend={({ content }) => onSubmit(content)}
 					onStop={() => undefined}
-					placeholder={`Reply to ${request.title}…`}
+					placeholder={tl("Reply to {title}…", { title: request.title })}
 					status="ready"
 					value={draft}
 				/>

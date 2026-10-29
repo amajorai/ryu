@@ -14,12 +14,13 @@
 // intent over the plugin-host IPC seam.
 //
 // The spec vocabulary is the single source of truth in `@ryu/app-host/views`, consumed
-// here as an `import type` only (zero runtime coupling — the island bundles no app-host
-// runtime). Source-FETCHING therefore lives in the island shell too; this renderer
+// here with the owner schemas that refine raw contribution specs. Source-fetching
+// lives in the island shell; this renderer
 // only receives the resolved rows via the `sourceItems` prop. One spec, two renderers
 // tuned to density.
 
 import type {
+	RawViewContribution,
 	SourceItem,
 	ViewAction,
 	ViewActionContext,
@@ -29,7 +30,11 @@ import type {
 	ViewSpec,
 	ViewTone,
 } from "@ryu/app-host/views";
-import { validateView } from "@ryu/app-host/views";
+import {
+	validateView,
+	viewSourceRowSchema,
+	viewSpecSchema,
+} from "@ryu/app-host/views";
 import { useState } from "react";
 
 /** Fires when a user activates an action row. The renderer supplies the ctx
@@ -40,13 +45,13 @@ export type IslandViewActionHandler = (
 	ctx: ViewActionContext
 ) => void;
 
-const TONE_DOT: Record<ViewTone, string> = {
+const TONE_DOT = {
 	neutral: "bg-white/40",
 	success: "bg-success",
 	warning: "bg-warning",
 	danger: "bg-destructive",
 	info: "bg-info",
-};
+} satisfies Record<ViewTone, string>;
 
 function ToneBadges({ badges }: { badges?: ViewBadge[] }) {
 	if (!badges || badges.length === 0) {
@@ -56,7 +61,7 @@ function ToneBadges({ badges }: { badges?: ViewBadge[] }) {
 		<span className="flex items-center gap-1">
 			{badges.map((b, i) => (
 				<span
-					className="flex items-center gap-1 text-[10px] text-white/50"
+					className="type-compact flex items-center gap-1 text-white/50"
 					key={`${b.label}-${i}`}
 				>
 					<span
@@ -146,15 +151,19 @@ function Row({
 		>
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
-					<span className="truncate text-sm text-white/90">{title}</span>
+					<span className="truncate text-sm text-white/90" title={title}>
+						{title}
+					</span>
 					<ToneBadges badges={badges} />
 				</div>
 				{subtitle ? (
-					<div className="truncate text-white/45 text-xs">{subtitle}</div>
+					<div className="truncate text-white/45 text-xs" title={subtitle}>
+						{subtitle}
+					</div>
 				) : null}
 			</div>
 			{accessory ? (
-				<span className="shrink-0 text-[10px] text-white/40">{accessory}</span>
+				<span className="type-compact shrink-0 text-white/40">{accessory}</span>
 			) : null}
 		</button>
 	);
@@ -167,9 +176,7 @@ function EmptyRow({ text }: { text: string }) {
 }
 
 /** A declared (non-source) item's fields as a `{{item.<key>}}` templating base. */
-function itemRecord(item: Record<string, unknown>): Record<string, unknown> {
-	return { ...item };
-}
+const itemRecord = viewSourceRowSchema.parse;
 
 function ListDetail({
 	spec,
@@ -275,15 +282,16 @@ function CompactField({
 	onChange,
 }: {
 	field: ViewField;
-	value: unknown;
-	onChange: (next: unknown) => void;
+	value: ViewField["value"];
+	onChange: (next: NonNullable<ViewField["value"]>) => void;
 }) {
 	if (field.type === "switch") {
 		const on = value === true;
 		return (
 			<button
+				aria-label={field.label}
 				aria-pressed={on}
-				className={`rounded-md px-2 py-0.5 text-xs ${
+				className={`rounded-md px-2 py-0.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${
 					on ? "bg-secondary text-white" : "text-white/50 hover:bg-muted"
 				}`}
 				onClick={() => onChange(!on)}
@@ -296,7 +304,8 @@ function CompactField({
 	if (field.type === "select") {
 		return (
 			<select
-				className="max-w-[10rem] rounded-md bg-muted px-1.5 py-0.5 text-white/80 text-xs outline-none"
+				aria-label={field.label}
+				className="max-w-[10rem] rounded-md bg-muted px-1.5 py-0.5 text-white/80 text-xs outline-none focus-visible:ring-1 focus-visible:ring-white/50"
 				onChange={(e) => onChange(e.target.value)}
 				value={String(value ?? "")}
 			>
@@ -310,7 +319,8 @@ function CompactField({
 	}
 	return (
 		<input
-			className="max-w-[10rem] rounded-md bg-muted px-1.5 py-0.5 text-white/80 text-xs outline-none placeholder:text-white/30"
+			aria-label={field.label}
+			className="max-w-[10rem] rounded-md bg-muted px-1.5 py-0.5 text-white/80 text-xs outline-none placeholder:text-white/30 focus-visible:ring-1 focus-visible:ring-white/50"
 			onChange={(e) =>
 				onChange(
 					field.type === "number" && e.target.value !== ""
@@ -325,8 +335,10 @@ function CompactField({
 	);
 }
 
-function initialFormValues(fields: ViewField[]): Record<string, unknown> {
-	const values: Record<string, unknown> = {};
+type CompactFormValues = Record<string, ViewField["value"]>;
+
+function initialFormValues(fields: ViewField[]) {
+	const values: CompactFormValues = {};
 	for (const field of fields) {
 		values[field.id] = field.value ?? (field.type === "switch" ? false : "");
 	}
@@ -341,11 +353,11 @@ function CompactForm({
 	onAction?: IslandViewActionHandler;
 }) {
 	// Controlled inputs: the collected values ARE the form-submit contract — the
-	// `Record<string,unknown>` handed to every action fired from this form.
-	const [values, setValues] = useState<Record<string, unknown>>(() =>
+	// typed field values handed to every action fired from this form.
+	const [values, setValues] = useState<CompactFormValues>(() =>
 		initialFormValues(spec.fields)
 	);
-	const setField = (id: string, next: unknown) =>
+	const setField = (id: string, next: NonNullable<ViewField["value"]>) =>
 		setValues((prev) => ({ ...prev, [id]: next }));
 	const entries: PanelEntry[] = [
 		...withCtx(spec.submit ? [spec.submit] : undefined, { values }),
@@ -391,23 +403,28 @@ function CompactForm({
  * So dispatch is gated on the shared [`validateView`] — the same gate the desktop
  * renderer runs (`apps/desktop/src/components/views/DeclarativeView.tsx`) — which checks
  * the discriminant AND that the payload carries the collection its kind requires. It is
- * deliberately shallow, so a newer app targeting an older shell degrades to a readable
- * row instead of crashing.
+ * followed by the owner schema before nested rendering, so a newer app targeting
+ * an older shell degrades to a readable row instead of crashing.
  */
 export function IslandDeclarativeView({
-	spec,
+	spec: rawSpec,
 	onAction,
 	sourceItems,
 }: {
-	spec: ViewSpec;
+	spec: ViewSpec | RawViewContribution["spec"];
 	onAction?: IslandViewActionHandler;
 	sourceItems?: SourceItem[] | null;
 }) {
-	const check = validateView(spec);
+	const check = validateView(rawSpec);
 	if (!check.ok) {
 		return <EmptyRow text={check.errors.join("; ")} />;
 	}
 
+	const parsed = viewSpecSchema.safeParse(rawSpec);
+	if (!parsed.success) {
+		return <EmptyRow text="Invalid view specification" />;
+	}
+	const spec = parsed.data;
 	switch (spec.view) {
 		case "list-detail":
 			return (
@@ -474,12 +491,12 @@ export function IslandDeclarativeView({
 				<div className="grid grid-cols-2 gap-1.5 p-2">
 					{spec.stats.map((stat) => (
 						<div className="rounded-lg bg-card px-2 py-1.5" key={stat.id}>
-							<div className="text-[10px] text-white/45">{stat.label}</div>
+							<div className="type-compact text-white/45">{stat.label}</div>
 							<div className="font-medium text-sm text-white/90">
 								{stat.value}
 							</div>
 							{stat.delta ? (
-								<div className="text-[10px] text-white/40">{stat.delta}</div>
+								<div className="type-compact text-white/40">{stat.delta}</div>
 							) : null}
 						</div>
 					))}
@@ -509,7 +526,7 @@ export function IslandViewPanel({
 	onAction,
 	sourceItems,
 }: {
-	view: ViewContribution;
+	view: ViewContribution | RawViewContribution;
 	onAction?: IslandViewActionHandler;
 	sourceItems?: SourceItem[] | null;
 }) {

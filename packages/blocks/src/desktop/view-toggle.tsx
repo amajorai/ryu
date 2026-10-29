@@ -12,11 +12,62 @@ import {
 	ListViewIcon,
 	SparklesIcon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 
 export type ViewMode = "grid" | "list" | "showcase";
 export type LibraryViewMode = ViewMode | "graph";
+
+/** Each mode's button. Only Showcase carries a `title` tooltip. */
+const VIEW_MODE_BUTTONS: Record<
+	LibraryViewMode,
+	{ icon: IconSvgElement; label: string; title?: string }
+> = {
+	graph: { icon: HierarchyIcon, label: "Relations view" },
+	grid: { icon: GridViewIcon, label: "Grid view" },
+	list: { icon: ListViewIcon, label: "List view" },
+	showcase: {
+		icon: SparklesIcon,
+		label: "Showcase view",
+		title: "Showcase view",
+	},
+};
+
+/** The segmented control both toggles render: one icon button per mode. */
+function ViewModeButtons<M extends LibraryViewMode>({
+	modes,
+	onChange,
+	value,
+}: {
+	modes: readonly M[];
+	onChange: (mode: M) => void;
+	value: M;
+}) {
+	return (
+		<div
+			className="inline-flex items-center gap-0.5 rounded-md border p-0.5"
+			data-slot="view-toggle"
+			data-view-mode={value}
+		>
+			{modes.map((mode) => {
+				const { icon, label, title } = VIEW_MODE_BUTTONS[mode];
+				return (
+					<Button
+						aria-label={label}
+						aria-pressed={value === mode}
+						key={mode}
+						onClick={() => onChange(mode)}
+						size="icon-sm"
+						title={title}
+						variant={value === mode ? "secondary" : "ghost"}
+					>
+						<HugeiconsIcon className="size-4" icon={icon} />
+					</Button>
+				);
+			})}
+		</div>
+	);
+}
 
 export function ViewToggle({
 	value,
@@ -27,44 +78,10 @@ export function ViewToggle({
 	value: ViewMode;
 	onChange: (mode: ViewMode) => void;
 }) {
-	return (
-		<div
-			className="inline-flex items-center gap-0.5 rounded-md border p-0.5"
-			data-slot="view-toggle"
-			data-view-mode={value}
-		>
-			<Button
-				aria-label="Grid view"
-				aria-pressed={value === "grid"}
-				onClick={() => onChange("grid")}
-				size="icon-sm"
-				variant={value === "grid" ? "secondary" : "ghost"}
-			>
-				<HugeiconsIcon className="size-4" icon={GridViewIcon} />
-			</Button>
-			<Button
-				aria-label="List view"
-				aria-pressed={value === "list"}
-				onClick={() => onChange("list")}
-				size="icon-sm"
-				variant={value === "list" ? "secondary" : "ghost"}
-			>
-				<HugeiconsIcon className="size-4" icon={ListViewIcon} />
-			</Button>
-			{showShowcase ? (
-				<Button
-					aria-label="Showcase view"
-					aria-pressed={value === "showcase"}
-					onClick={() => onChange("showcase")}
-					size="icon-sm"
-					title="Showcase view"
-					variant={value === "showcase" ? "secondary" : "ghost"}
-				>
-					<HugeiconsIcon className="size-4" icon={SparklesIcon} />
-				</Button>
-			) : null}
-		</div>
-	);
+	const modes: ViewMode[] = showShowcase
+		? ["grid", "list", "showcase"]
+		: ["grid", "list"];
+	return <ViewModeButtons modes={modes} onChange={onChange} value={value} />;
 }
 
 /** Library view switcher. Relations and Showcase are opt-in additions to the
@@ -80,53 +97,12 @@ export function LibraryViewToggle({
 	value: LibraryViewMode;
 	onChange: (mode: LibraryViewMode) => void;
 }) {
-	return (
-		<div
-			className="inline-flex items-center gap-0.5 rounded-md border p-0.5"
-			data-slot="view-toggle"
-			data-view-mode={value}
-		>
-			<Button
-				aria-label="Grid view"
-				aria-pressed={value === "grid"}
-				onClick={() => onChange("grid")}
-				size="icon-sm"
-				variant={value === "grid" ? "secondary" : "ghost"}
-			>
-				<HugeiconsIcon className="size-4" icon={GridViewIcon} />
-			</Button>
-			<Button
-				aria-label="List view"
-				aria-pressed={value === "list"}
-				onClick={() => onChange("list")}
-				size="icon-sm"
-				variant={value === "list" ? "secondary" : "ghost"}
-			>
-				<HugeiconsIcon className="size-4" icon={ListViewIcon} />
-			</Button>
-			{showShowcase ? (
-				<Button
-					aria-label="Showcase view"
-					aria-pressed={value === "showcase"}
-					onClick={() => onChange("showcase")}
-					size="icon-sm"
-					title="Showcase view"
-					variant={value === "showcase" ? "secondary" : "ghost"}
-				>
-					<HugeiconsIcon className="size-4" icon={SparklesIcon} />
-				</Button>
-			) : null}
-			{showGraph ? (
-				<Button
-					aria-label="Relations view"
-					aria-pressed={value === "graph"}
-					onClick={() => onChange("graph")}
-					size="icon-sm"
-					variant={value === "graph" ? "secondary" : "ghost"}
-				>
-					<HugeiconsIcon className="size-4" icon={HierarchyIcon} />
-				</Button>
-			) : null}
-		</div>
-	);
+	const modes: LibraryViewMode[] = ["grid", "list"];
+	if (showShowcase) {
+		modes.push("showcase");
+	}
+	if (showGraph) {
+		modes.push("graph");
+	}
+	return <ViewModeButtons modes={modes} onChange={onChange} value={value} />;
 }

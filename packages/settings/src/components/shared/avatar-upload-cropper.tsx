@@ -1,4 +1,4 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -6,12 +6,34 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Slider } from "@ryu/ui/components/slider";
-import { cn } from "@ryu/ui/lib/utils";
-import { useCallback, useEffect, useRef, useState } from "react";
+} from "@ryu/ui/components/dialog.tsx";
+import { Slider } from "@ryu/ui/components/slider.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import {
+	type CSSProperties,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { sileo } from "sileo";
+import { z } from "zod";
 import { useFileUpload } from "../../hooks/useFileUpload.ts";
+import { settingsApi } from "../../utils/api-client.ts";
+
+interface AvatarImageStyle extends CSSProperties {
+	"--avatar-image": string;
+}
+interface CropPreviewStyle extends CSSProperties {
+	"--crop-image": string;
+	"--crop-zoom": number;
+}
+interface CropAreaStyle extends CSSProperties {
+	"--crop-height": string;
+	"--crop-left": string;
+	"--crop-top": string;
+	"--crop-width": string;
+}
 
 // Define type for pixel crop area
 interface Area {
@@ -26,6 +48,10 @@ interface AvatarUploadCropperProps {
 	currentAvatarUrl?: string | null;
 	disabled?: boolean;
 	onUploadComplete?: () => void;
+	/** Removes the image for the owner that `upload` targets. When `upload` is
+	 *  retargeted without a matching `remove`, the remove button is hidden so it
+	 *  can never fall through to deleting the signed-in user's own avatar. */
+	remove?: () => Promise<void>;
 	/** Retarget the upload at a different owner (org / team). Defaults to the
 	 *  signed-in user. The cropping, validation, and toasts are identical. */
 	upload?: (file: File) => Promise<{ message?: string }>;
@@ -93,14 +119,21 @@ export function AvatarUploadCropper({
 	className,
 	disabled = false,
 	upload,
+	remove,
 }: AvatarUploadCropperProps) {
+	const removeImage = upload
+		? remove
+		: (remove ?? (() => settingsApi.profile.deleteAvatar()));
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+	// Reselecting the same file may produce an identical data URL but needs fresh crop bounds.
+	const [previewRevision, setPreviewRevision] = useState(0);
 	const [finalImageUrl, setFinalImageUrl] = useState<string | null>(null);
 	const [isDialogOpen, setIsDialogOpen] = useState(false);
 	const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
 	const [zoom, setZoom] = useState(1);
 	const [isDragging, setIsDragging] = useState(false);
+	const [isRemoving, setIsRemoving] = useState(false);
 
 	const { uploadAvatar, isUploading, validateFile } = useFileUpload();
 
@@ -119,8 +152,13 @@ export function AvatarUploadCropper({
 
 			const reader = new FileReader();
 			reader.onload = (e) => {
-				const url = e.target?.result as string;
-				setPreviewUrl(url);
+				const result = z.string().safeParse(e.target?.result);
+				if (!result.success) {
+					sileo.error({ title: "Failed to read file" });
+					return;
+				}
+				setPreviewUrl(result.data);
+				setPreviewRevision((revision) => revision + 1);
 				setIsDialogOpen(true);
 				setCroppedAreaPixels(null);
 				setZoom(1);
@@ -212,9 +250,14 @@ export function AvatarUploadCropper({
 		}
 	};
 
-	const handleRemoveFinalImage = () => {
-		if (finalImageUrl) {
-			// Only revoke if it's a blob URL (not the current avatar)
+	const handleRemoveFinalImage = async () => {
+		if (!(finalImageUrl && removeImage) || isRemoving || isUploading) {
+			return;
+		}
+
+		setIsRemoving(true);
+		try {
+			await removeImage();
 			if (
 				finalImageUrl !== currentAvatarUrl &&
 				finalImageUrl.startsWith("blob:")
@@ -222,18 +265,19 @@ export function AvatarUploadCropper({
 				URL.revokeObjectURL(finalImageUrl);
 			}
 			setFinalImageUrl(null);
-
-			// Delete from server if we had a custom avatar
-			if (currentAvatarUrl) {
-				try {
-					// Call delete avatar endpoint
-					sileo.success({ title: "Avatar deleted successfully" });
-					onUploadComplete?.();
-				} catch (error) {
-					console.error("Failed to delete avatar:", error);
-					sileo.error({ title: "Failed to delete avatar from server" });
-				}
-			}
+			onUploadComplete?.();
+			sileo.success({
+				title: upload ? "Image removed" : "Avatar deleted successfully",
+			});
+		} catch (error) {
+			sileo.error({
+				title:
+					error instanceof Error
+						? error.message
+						: "Failed to delete avatar from server",
+			});
+		} finally {
+			setIsRemoving(false);
 		}
 	};
 
@@ -276,7 +320,23 @@ export function AvatarUploadCropper({
 		return () => {
 			cancelled = true;
 		};
-	}, [previewUrl]);
+	}, [previewUrl, previewRevision]);
+
+	const avatarImageStyle: AvatarImageStyle = {
+		"--avatar-image": `url(${finalImageUrl})`,
+	};
+	const cropPreviewStyle: CropPreviewStyle = {
+		"--crop-image": `url(${previewUrl})`,
+		"--crop-zoom": zoom,
+	};
+	const cropAreaStyle: CropAreaStyle | undefined = croppedAreaPixels
+		? {
+				"--crop-left": `${croppedAreaPixels.x}px`,
+				"--crop-top": `${croppedAreaPixels.y}px`,
+				"--crop-width": `${croppedAreaPixels.width}px`,
+				"--crop-height": `${croppedAreaPixels.height}px`,
+			}
+		: undefined;
 
 	return (
 		<div className={cn("flex flex-col items-center gap-2", className)}>
@@ -284,9 +344,9 @@ export function AvatarUploadCropper({
 				{/* Drop area */}
 				<button
 					aria-label={finalImageUrl ? "Change image" : "Upload image"}
-					className="corner-squircle relative flex size-16 items-center justify-center overflow-hidden rounded-full border border-input border-dashed outline-none transition-colors hover:bg-accent/50 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-disabled:pointer-events-none has-disabled:opacity-50 data-[dragging=true]:bg-accent/50"
+					className="relative flex size-16 items-center justify-center overflow-hidden rounded-full border border-input border-dashed outline-none transition-colors hover:bg-accent/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 has-disabled:pointer-events-none has-disabled:opacity-50 data-[dragging=true]:bg-accent/50"
 					data-dragging={isDragging || undefined}
-					disabled={disabled || isUploading}
+					disabled={disabled || isUploading || isRemoving}
 					onClick={() => fileInputRef.current?.click()}
 					onDragEnter={(e) => {
 						e.preventDefault();
@@ -300,9 +360,9 @@ export function AvatarUploadCropper({
 					{finalImageUrl ? (
 						<div
 							aria-label={`${userName ?? "User"} avatar`}
-							className="size-full bg-center bg-cover"
+							className="bg-(image:--avatar-image) size-full bg-center bg-cover"
 							role="img"
-							style={{ backgroundImage: `url(${finalImageUrl})` }}
+							style={avatarImageStyle}
 						/>
 					) : (
 						<div className="flex size-full items-center justify-center bg-muted font-semibold text-foreground">
@@ -311,11 +371,11 @@ export function AvatarUploadCropper({
 					)}
 				</button>
 				{/* Remove button */}
-				{finalImageUrl && (
+				{finalImageUrl && removeImage && (
 					<Button
 						aria-label="Remove image"
-						className="absolute -top-1 -right-1 size-6 rounded-full border-2 border-background shadow-none focus-visible:border-background"
-						disabled={disabled || isUploading}
+						className="absolute -top-1 -right-1"
+						disabled={disabled || isUploading || isRemoving}
 						onClick={handleRemoveFinalImage}
 						size="icon"
 						type="button"
@@ -341,7 +401,7 @@ export function AvatarUploadCropper({
 					accept="image/jpeg,image/png,image/webp"
 					aria-label="Upload image file"
 					className="sr-only"
-					disabled={disabled || isUploading}
+					disabled={disabled || isUploading || isRemoving}
 					onChange={(e) => {
 						const file = e.target.files?.[0];
 						if (file) {
@@ -365,16 +425,16 @@ export function AvatarUploadCropper({
 				}}
 				open={isDialogOpen}
 			>
-				<DialogContent className="gap-0 p-0 sm:max-w-140 *:[button]:hidden">
+				<DialogContent className="sm:max-w-140" showCloseButton={false}>
 					<DialogDescription className="sr-only">
 						Crop image dialog
 					</DialogDescription>
-					<DialogHeader className="contents space-y-0 text-left">
-						<DialogTitle className="flex items-center justify-between border-b p-4 text-base">
+					<DialogHeader className="contents text-left">
+						<DialogTitle className="flex items-center justify-between">
 							<div className="flex items-center gap-2">
 								<Button
 									aria-label="Cancel"
-									className="-my-1 opacity-60"
+									className="-my-1"
 									onClick={() => setIsDialogOpen(false)}
 									size="icon"
 									type="button"
@@ -398,7 +458,11 @@ export function AvatarUploadCropper({
 								</Button>
 								<span>Crop image</span>
 							</div>
-							<Button autoFocus disabled={!previewUrl} onClick={handleApply}>
+							<Button
+								autoFocus
+								disabled={!(previewUrl && croppedAreaPixels)}
+								onClick={handleApply}
+							>
 								Apply
 							</Button>
 						</DialogTitle>
@@ -407,27 +471,19 @@ export function AvatarUploadCropper({
 						<div className="relative flex h-96 items-center justify-center overflow-hidden sm:h-120">
 							<div
 								aria-label="Crop preview"
-								className="size-full bg-center bg-contain bg-no-repeat"
+								className="bg-(image:--crop-image) size-full scale-(--crop-zoom) bg-center bg-contain bg-no-repeat"
 								role="img"
-								style={{
-									backgroundImage: `url(${previewUrl})`,
-									transform: `scale(${zoom})`,
-								}}
+								style={cropPreviewStyle}
 							/>
 							{croppedAreaPixels && (
 								<div
-									className="pointer-events-none absolute border-2 border-primary bg-primary/10"
-									style={{
-										left: croppedAreaPixels.x,
-										top: croppedAreaPixels.y,
-										width: croppedAreaPixels.width,
-										height: croppedAreaPixels.height,
-									}}
+									className="pointer-events-none absolute top-(--crop-top) left-(--crop-left) h-(--crop-height) w-(--crop-width) border-2 border-primary bg-primary/10"
+									style={cropAreaStyle}
 								/>
 							)}
 						</div>
 					)}
-					<DialogFooter className="border-t px-4 py-6">
+					<DialogFooter>
 						<div className="mx-auto flex w-full max-w-80 items-center gap-4">
 							<svg
 								aria-hidden="true"
@@ -478,7 +534,7 @@ export function AvatarUploadCropper({
 			{/* Upload progress indicator */}
 			{isUploading && (
 				<div className="animate-pulse text-muted-foreground text-sm">
-					Uploading avatar...
+					Uploading avatar…
 				</div>
 			)}
 		</div>

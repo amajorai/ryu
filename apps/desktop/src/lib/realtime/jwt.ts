@@ -16,7 +16,9 @@
 // refreshed before its `exp`. Returns `null` when signed out so a room can still
 // join anonymously (read-only / public access).
 
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { appRequestValueSchema } from "@ryuhq/core-client/app-request-json.ts";
+import { z } from "zod";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 
 /** Seconds of headroom before a JWT's `exp` at which we treat it as stale and
  * force a refresh, so a token never expires mid-connection. */
@@ -26,10 +28,24 @@ const REFRESH_MARGIN_SECONDS = 60;
  * short because Better-Auth's default JWT TTL is ~15 minutes. */
 const FALLBACK_TTL_SECONDS = 10 * 60;
 
+/** Upper bound on one token exchange. Every authenticated Core request awaits
+ * this JWT while building its headers, so a hung control plane must not stall
+ * local Core calls for longer than this. */
+const EXCHANGE_TIMEOUT_MS = 5000;
+
+/** How long a failed exchange is remembered for the same session generation. A
+ * revoked session or an auth outage otherwise turns every Core request into
+ * its own `/api/auth/token` call. A new sign-in (a different session token)
+ * or `clearRealtimeJwt()` retries immediately. */
+const FAILURE_BACKOFF_SECONDS = 30;
+
+interface SessionOwner {
+	readonly sessionToken: string;
+}
+
 interface CachedJwt {
-	/** The control-plane session token this JWT was minted from. Cache is
-	 * invalidated when the session token changes (sign-out / account switch). */
-	sessionToken: string;
+	/** Exact observed session generation that owns this minted JWT. */
+	owner: SessionOwner;
 	/** Unix epoch seconds at which this token should be considered stale. */
 	staleAtSeconds: number;
 	token: string;
@@ -38,18 +54,65 @@ interface CachedJwt {
 /** The Better-Auth jwt-plugin token endpoint (a GET; see the file header). */
 const TOKEN_ENDPOINT = `${BACKEND_URL.replace(/\/$/, "")}/api/auth/token`;
 
+let currentOwner: SessionOwner | null = null;
 let cached: CachedJwt | null = null;
-/** Single-flight guard: concurrent callers await one in-flight exchange. */
-let inFlight: Promise<string | null> | null = null;
+/** Same-owner callers share an exchange; retired owners keep no current slot. */
+interface InFlightJwt {
+	owner: SessionOwner;
+	promise: Promise<string | null>;
+}
+let inFlight: InFlightJwt | null = null;
+/** The last failed exchange, so callers stay anonymous until `retryAtSeconds`
+ * instead of re-hitting the token endpoint on every request. Owned by one
+ * session generation; a new generation starts without it. */
+let failedExchange: { owner: SessionOwner; retryAtSeconds: number } | null =
+	null;
 
 /** Read the control-plane session token, or `null` when signed out. */
 function readSessionToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		return null;
 	}
 }
+
+/** Observe token changes without treating a returned token as its old generation. */
+function observeSessionOwner(): SessionOwner | null {
+	const sessionToken = readSessionToken();
+	if (!sessionToken) {
+		currentOwner = null;
+		cached = null;
+		inFlight = null;
+		failedExchange = null;
+	} else if (currentOwner?.sessionToken !== sessionToken) {
+		currentOwner = { sessionToken };
+		cached = null;
+		inFlight = null;
+		failedExchange = null;
+	}
+	return currentOwner;
+}
+
+function isCurrentOwner(owner: SessionOwner): boolean {
+	return observeSessionOwner() === owner;
+}
+
+// JWT claims are native JSON. Only these three claims are consumed here; keep
+// their raw values until the individual claim is refined, including id/sub
+// precedence when a malformed id accompanies a valid subject.
+const jwtClaimsProjectionSchema = z.object({
+	exp: appRequestValueSchema.optional(),
+	id: appRequestValueSchema.optional(),
+	sub: appRequestValueSchema.optional(),
+});
+const jwtExpirationSchema = z.union([
+	z.number(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+const jwtSubjectSchema = z.string().min(1);
+const jwtTokenResponseSchema = z.object({ token: z.string() });
 
 /**
  * Decode a JWT payload (the middle segment is base64url-encoded JSON) without a
@@ -57,14 +120,17 @@ function readSessionToken(): string | null {
  * verification — it only reads claims a trusted caller already minted; Core
  * re-verifies the signature offline.
  */
-function readJwtClaims(token: string): Record<string, unknown> | null {
+function readJwtClaims(token: string) {
 	const segments = token.split(".");
 	if (segments.length < 2) {
 		return null;
 	}
 	try {
 		const base64 = segments[1].replace(/-/g, "+").replace(/_/g, "/");
-		return JSON.parse(atob(base64)) as Record<string, unknown>;
+		const parsed = jwtClaimsProjectionSchema.safeParse(
+			JSON.parse(atob(base64))
+		);
+		return parsed.success ? parsed.data : null;
 	} catch {
 		return null;
 	}
@@ -76,7 +142,8 @@ function readJwtClaims(token: string): Record<string, unknown> | null {
  */
 function readJwtExpSeconds(token: string): number | null {
 	const claims = readJwtClaims(token);
-	return claims && typeof claims.exp === "number" ? claims.exp : null;
+	const parsed = jwtExpirationSchema.safeParse(claims?.exp);
+	return parsed.success ? parsed.data : null;
 }
 
 function nowSeconds(): number {
@@ -84,27 +151,29 @@ function nowSeconds(): number {
 }
 
 /** Build the cache entry (token + computed stale-at) for a freshly-minted JWT. */
-function toCacheEntry(token: string, sessionToken: string): CachedJwt {
+function toCacheEntry(token: string, owner: SessionOwner): CachedJwt {
 	const exp = readJwtExpSeconds(token);
 	const staleAtSeconds =
 		exp === null
 			? nowSeconds() + FALLBACK_TTL_SECONDS
 			: exp - REFRESH_MARGIN_SECONDS;
-	return { token, sessionToken, staleAtSeconds };
+	return { token, owner, staleAtSeconds };
 }
 
 /** Hit `{BACKEND_URL}/api/auth/token` with the session bearer and return the
- * minted JWT, or `null` on any failure (the room falls back to anonymous). */
+ * minted JWT, or `null` on any failure or timeout (the room falls back to
+ * anonymous). */
 async function exchange(sessionToken: string): Promise<string | null> {
 	try {
 		const resp = await fetch(TOKEN_ENDPOINT, {
 			headers: { Authorization: `Bearer ${sessionToken}` },
+			signal: AbortSignal.timeout(EXCHANGE_TIMEOUT_MS),
 		});
 		if (!resp.ok) {
 			return null;
 		}
-		const body = (await resp.json()) as { token?: unknown };
-		return typeof body.token === "string" ? body.token : null;
+		const body = jwtTokenResponseSchema.safeParse(await resp.json());
+		return body.success ? body.data.token : null;
 	} catch {
 		return null;
 	}
@@ -113,33 +182,55 @@ async function exchange(sessionToken: string): Promise<string | null> {
 /**
  * Return a valid Core JWT for the current session, minting/refreshing as needed.
  * Returns `null` when signed out (anonymous join). Concurrent calls share one
- * in-flight exchange; the result is cached until shortly before it expires.
+ * in-flight exchange; the result is cached until shortly before it expires, and
+ * a failure is remembered for `FAILURE_BACKOFF_SECONDS` per session generation.
  */
 export async function getRealtimeJwt(): Promise<string | null> {
-	const sessionToken = readSessionToken();
-	if (!sessionToken) {
-		cached = null;
+	const owner = observeSessionOwner();
+	if (!owner) {
 		return null;
 	}
 	const fresh =
 		cached !== null &&
-		cached.sessionToken === sessionToken &&
+		cached.owner === owner &&
 		cached.staleAtSeconds > nowSeconds();
 	if (fresh && cached) {
 		return cached.token;
 	}
-	if (inFlight) {
-		return inFlight;
+	if (
+		failedExchange?.owner === owner &&
+		failedExchange.retryAtSeconds > nowSeconds()
+	) {
+		return null;
 	}
-	inFlight = (async () => {
-		const token = await exchange(sessionToken);
-		cached = token === null ? null : toCacheEntry(token, sessionToken);
-		return token;
-	})();
+	let flight = inFlight;
+	if (!flight || flight.owner !== owner) {
+		flight = {
+			owner,
+			promise: exchange(owner.sessionToken).then((token) => {
+				if (!isCurrentOwner(owner)) {
+					return null;
+				}
+				cached = token === null ? null : toCacheEntry(token, owner);
+				failedExchange =
+					token === null
+						? {
+								owner,
+								retryAtSeconds: nowSeconds() + FAILURE_BACKOFF_SECONDS,
+							}
+						: null;
+				return token;
+			}),
+		};
+		inFlight = flight;
+	}
 	try {
-		return await inFlight;
+		const token = await flight.promise;
+		return isCurrentOwner(owner) ? token : null;
 	} finally {
-		inFlight = null;
+		if (inFlight === flight) {
+			inFlight = null;
+		}
 	}
 }
 
@@ -153,8 +244,12 @@ export async function getRealtimeJwt(): Promise<string | null> {
  * from "someone else's" by comparing `author_user_id` against this value.
  */
 export async function getRealtimeUserId(): Promise<string | null> {
+	const owner = observeSessionOwner();
+	if (!owner) {
+		return null;
+	}
 	const token = await getRealtimeJwt();
-	if (!token) {
+	if (!(token && isCurrentOwner(owner))) {
 		return null;
 	}
 	const claims = readJwtClaims(token);
@@ -162,10 +257,23 @@ export async function getRealtimeUserId(): Promise<string | null> {
 		return null;
 	}
 	const id = claims.id ?? claims.sub;
-	return typeof id === "string" && id.length > 0 ? id : null;
+	const parsed = jwtSubjectSchema.safeParse(id);
+	return parsed.success ? parsed.data : null;
 }
 
-/** Drop the cached JWT (e.g. on explicit sign-out) so the next call re-mints. */
+/**
+ * Retire the current JWT generation and any failure backoff so the next call
+ * re-mints, e.g. on explicit sign-out or after an org switch: the token's
+ * signed `ryu_flags`/`ryu_flags_org` claims are evaluated for the session's
+ * active org at mint time, and Better Auth's `set-active` does not rotate the
+ * session token, so without this a node bound to the new org would keep
+ * receiving a claim made for the old one until the token goes stale. An
+ * exchange already in flight belongs to the retired generation, so its result
+ * is neither cached nor returned.
+ */
 export function clearRealtimeJwt(): void {
+	currentOwner = null;
 	cached = null;
+	inFlight = null;
+	failedExchange = null;
 }

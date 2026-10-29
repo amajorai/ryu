@@ -13,15 +13,16 @@ import {
 	Layout01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	ContextMenuItem,
 	ContextMenuSeparator,
 	ContextMenuSub,
 	ContextMenuSubContent,
 	ContextMenuSubTrigger,
-} from "@ryu/ui/components/context-menu";
+} from "@ryu/ui/components/context-menu.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -29,9 +30,9 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import { Fragment, useEffect, useState } from "react";
 import { create } from "zustand";
 import { type Split, useTabsContext } from "@/src/contexts/TabsContext.tsx";
@@ -79,10 +80,12 @@ export function SaveSplitPresetDialog() {
 	const split = splits.find((s) => s.id === splitId);
 	const [name, setName] = useState("");
 	const [pinRoutes, setPinRoutes] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 
 	// Re-seed each time the dialog opens on a split, not on every render.
 	useEffect(() => {
 		if (split) {
+			setError(null);
 			setName(
 				suggestName(
 					split,
@@ -93,7 +96,7 @@ export function SaveSplitPresetDialog() {
 		}
 		// `presets` is read only to avoid a duplicate suggestion; re-suggesting
 		// mid-edit would overwrite what the user is typing.
-		// biome-ignore lint/correctness/useExhaustiveDependencies: seed on open only
+		// seed on open only
 	}, [split?.id]);
 
 	const commit = () => {
@@ -101,8 +104,23 @@ export function SaveSplitPresetDialog() {
 			return;
 		}
 		const pathOf = (tabId: string) => tabs.find((t) => t.id === tabId)?.path;
-		savePreset(name, presetFromSplit(split.root, pathOf, { pinRoutes }));
-		close();
+		try {
+			const saved = savePreset(
+				name,
+				presetFromSplit(split.root, pathOf, { pinRoutes })
+			);
+			if (!saved) {
+				setError(
+					"The saved layout limit has been reached. Use an existing name to replace a layout, or delete a saved layout first."
+				);
+				return;
+			}
+			close();
+		} catch {
+			setError(
+				"Could not save this layout. Check available storage and try again."
+			);
+		}
 	};
 
 	return (
@@ -124,10 +142,15 @@ export function SaveSplitPresetDialog() {
 					</DialogDescription>
 				</DialogHeader>
 				<div className="flex flex-col gap-4">
+					{error && (
+						<p className="text-destructive text-sm" role="alert">
+							{error}
+						</p>
+					)}
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="split-preset-name">Name</Label>
 						<Input
-							// biome-ignore lint/a11y/noAutofocus: naming is the whole dialog
+							// naming is the whole dialog
 							autoFocus
 							id="split-preset-name"
 							onChange={(e) => setName(e.target.value)}
@@ -140,10 +163,7 @@ export function SaveSplitPresetDialog() {
 							value={name}
 						/>
 					</div>
-					<Label
-						className="flex items-start gap-3 font-normal"
-						htmlFor="split-preset-pin-routes"
-					>
+					<Label htmlFor="split-preset-pin-routes" spacing="split-choice">
 						<Checkbox
 							checked={pinRoutes}
 							id="split-preset-pin-routes"
@@ -186,6 +206,7 @@ export function SaveSplitPresetDialog() {
  *  tab out of the new tree — and `reconcileSplits` would graft it back onto the
  *  root flat, quietly mangling the nesting the preset was chosen for. */
 function ApplyPresetSubmenu({ split }: { split: Split | null }) {
+	const tl = useLiteralMessages();
 	const { applySplitPreset, applySplitPresetToNewTabs } = useTabsContext();
 	const presets = useSplitPresetStore((s) => s.presets);
 	const rows: SplitPreset[] = [...BUILTIN_PRESETS, ...presets];
@@ -212,11 +233,17 @@ function ApplyPresetSubmenu({ split }: { split: Split | null }) {
 								}
 							>
 								<span className="flex min-w-0 flex-col">
-									<span className="truncate">{preset.name}</span>
+									<span className="truncate" title={preset.name}>
+										{preset.name}
+									</span>
 									<span className="text-muted-foreground text-xs">
 										{retiles
-											? `Rearranges these ${paneIds.length} panes`
-											: `Opens ${presetSummary(preset)}`}
+											? tl("Rearranges these {paneCount} panes", {
+													paneCount: paneIds.length,
+												})
+											: tl("Opens {presetSummary}", {
+													presetSummary: presetSummary(preset),
+												})}
 									</span>
 								</span>
 							</ContextMenuItem>

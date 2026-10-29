@@ -1,3 +1,8 @@
+"use client";
+
+import type { CSSProperties } from "react";
+import visualStyles from "./marketplace-visual.module.css";
+
 // packages/marketplace/src/star-rating.tsx
 //
 // Small star-rating primitives for the Marketplace: a read-only `StarRating`
@@ -8,12 +13,14 @@
 // restrained sparkle acknowledgement, and a keyboard-complete radiogroup rather
 // than a row of unrelated pressed buttons.
 
-"use client";
-
+import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { Sparkles, Star, StarHalf } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Star, StarHalf } from "lucide-react";
 import { useRef, useState } from "react";
 
 const STAR_VALUES = [1, 2, 3, 4, 5] as const;
@@ -69,11 +76,22 @@ export function StarRating({
 	/** Render the numeric average before the stars. */
 	showValue?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const rounded = Math.round(value * 10) / 10;
+	const ratingStyle: RatingSizeStyle | undefined = isNativeNumber(size)
+		? { "--marketplace-size": `${size}px` }
+		: undefined;
 	const label =
 		count === undefined
-			? `Rated ${rounded} out of ${MAX_RATING}`
-			: `Rated ${rounded} out of ${MAX_RATING} from ${formatNumber(count)} reviews`;
+			? tl("Rated {rating} out of {maxRating}", {
+					maxRating: MAX_RATING,
+					rating: rounded,
+				})
+			: tl("Rated {rating} out of {maxRating} from {reviewCount} reviews", {
+					maxRating: MAX_RATING,
+					rating: rounded,
+					reviewCount: formatNumber(count),
+				});
 	return (
 		<span
 			aria-label={label}
@@ -88,13 +106,9 @@ export function StarRating({
 			<span aria-hidden="true" className="inline-flex items-center gap-0.5">
 				{STAR_VALUES.map((position) => (
 					<span
-						className={typeof size === "string" ? size : "size-4"}
+						className={isNativeText(size) ? size : visualStyles.size}
 						key={position}
-						style={
-							typeof size === "number"
-								? { height: size, width: size }
-								: undefined
-						}
+						style={ratingStyle}
 					>
 						<DisplayStar position={position} value={value} />
 					</span>
@@ -127,17 +141,15 @@ export function StarRatingInput({
 	allowClear?: boolean;
 	label?: string;
 }) {
+	const tl = useLiteralMessages();
 	const [hover, setHover] = useState<number | null>(null);
-	const [burst, setBurst] = useState(0);
 	const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-	const reduceMotion = useReducedMotion();
 	const active = hover ?? value;
 	const commit = (next: number) => {
 		if (disabled) {
 			return;
 		}
 		onChange(allowClear && next === value ? 0 : next);
-		setBurst((current) => current + 1);
 	};
 	const move = (position: number, direction: -1 | 1) => {
 		const next = Math.min(MAX_RATING, Math.max(1, position + direction));
@@ -159,9 +171,12 @@ export function StarRatingInput({
 					<span className="relative inline-flex" key={position}>
 						<button
 							aria-checked={value === position}
-							aria-label={`${position} star${position === 1 ? "" : "s"}`}
+							aria-label={tl(
+								"{position, plural, one {# star} other {# stars}}",
+								{ position }
+							)}
 							className={cn(
-								"rounded transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+								"rounded transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 motion-safe:hover:scale-110",
 								size
 							)}
 							disabled={disabled}
@@ -207,31 +222,18 @@ export function StarRatingInput({
 								)}
 							/>
 						</button>
-						<AnimatePresence>
-							{burst > 0 && value === position ? (
-								<motion.span
-									animate={
-										reduceMotion
-											? { opacity: 0 }
-											: { opacity: 0, scale: 1.7, y: -8 }
-									}
-									className="pointer-events-none absolute -top-1 -right-1 text-amber-400"
-									initial={
-										reduceMotion ? false : { opacity: 0.9, scale: 0.4, y: 0 }
-									}
-									key={`${position}-${burst}`}
-									transition={{ duration: reduceMotion ? 0 : 0.35 }}
-								>
-									<Sparkles aria-hidden="true" className="size-3" />
-								</motion.span>
-							) : null}
-						</AnimatePresence>
 					</span>
 				);
 			})}
 			<span aria-live="polite" className="sr-only">
-				{value > 0 ? `${value} out of 5 stars` : "No rating selected"}
+				{value > 0
+					? tl("{value} out of 5 stars", { value })
+					: "No rating selected"}
 			</span>
 		</div>
 	);
+}
+
+interface RatingSizeStyle extends CSSProperties {
+	"--marketplace-size": string;
 }

@@ -9,7 +9,7 @@
   "name": "Parallel Search",
   "version": "0.1.14",
   "stability": "experimental",
-  "description": "Web search and content extraction via Parallel (https://parallel.ai), exposed as three declarative HTTP tools. Provides the swappable `web.search` and `web.extract` layers, so selecting it in the layer picker re-points the stable `web.search` / `web.extract` tools at Parallel without changing what agents call. Search works with NO key through Parallel's public Search MCP endpoint; a BYOK Parallel API key unlocks the higher-limit REST API and extraction.",
+  "description": "Web search and content extraction via Parallel (https://parallel.ai), exposed as three HTTP tool runnables plus one capability adapter. Provides the swappable `web.search` and `web.extract` layers, so selecting it in the layer picker re-points the stable `web.search` / `web.extract` tools at Parallel without changing what agents call. Search works without a key through Parallel's public Search MCP endpoint; a BYOK Parallel API key unlocks the higher-limit REST API and extraction.",
   "iconUrl": "https://avatars.githubusercontent.com/u/210743255?v=4",
   "iconPadding": "md",
   "iconDither": { "from": 168, "to": "transparent", "direction": "down" },
@@ -64,8 +64,8 @@
             },
             "mode": {
               "type": "string",
-              "description": "Search preset. turbo is the fastest, basic is the low-latency agent-loop default used here, advanced does more retrieval and compression (Parallel's own default when omitted).",
-              "enum": ["turbo", "basic", "advanced"]
+              "description": "Search preset. turbo is the fastest, fast is the recommended sub-second mode, basic returns longer excerpts, and advanced does more retrieval and compression (Parallel's own default when omitted).",
+              "enum": ["turbo", "fast", "basic", "advanced"]
             },
             "max_chars_total": {
               "type": "integer",

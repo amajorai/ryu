@@ -17,16 +17,14 @@ export function setTitlebarHidden(hidden: boolean): void {
 
 /** Reposition Decorum's overlay and sync opacity with auto-hide tuck state. */
 export function applyDecorumChrome(): void {
-	const container = document.querySelector(
-		"[data-tauri-decorum-tb]"
-	) as HTMLElement | null;
+	const container = document.querySelector("[data-tauri-decorum-tb]");
 	const dragRegion = document.querySelector(
 		"[data-tauri-decorum-tb] [data-tauri-drag-region]"
-	) as HTMLElement | null;
+	);
 	if (dragRegion) {
 		dragRegion.remove();
 	}
-	if (!container) {
+	if (!(container instanceof HTMLElement)) {
 		return;
 	}
 

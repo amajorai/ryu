@@ -1,3 +1,18 @@
+import { spaceDatabaseQueryResultSchema } from "@ryu/app-host/rpc";
+import { asGlyphValue } from "@ryu/ui/components/glyph.ts";
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
+import {
+	databaseQueryColumnSchema,
+	databaseQueryEnvelopeSchema,
+	retrievalModeCancelWireSchema,
+	retrievalModeChangeWireSchema,
+	retrievalModeJobWireSchema,
+	retrievalModeStateSchema,
+	retrievalModeStatusWireSchema,
+	spaceFileUploadWireSchema,
+	spaceUploadErrorSchema,
+} from "./spaces-wire-contracts.ts";
 // apps/desktop/src/lib/api/spaces.ts
 //
 // Typed client for Core's Spaces / RAG endpoints (`/api/spaces`). A Space is a
@@ -17,6 +32,7 @@ import {
 	toResourceVisibility,
 } from "@/src/lib/resource-visibility.ts";
 import { type ApiTarget, apiUrl, request, requestHeaders } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 /**
  * Which retrieval algorithm a Space uses.
@@ -66,7 +82,7 @@ export interface Space {
 	 * - a **direct** search — {@link searchSpace} / `POST /api/spaces/:id/search`,
 	 *   which the Spaces search boxes and the `ryu_search_space` MCP tool hit;
 	 * - the **automatic recall** an agent performs on a normal chat turn.
-	 *   `RetrievalStore::retrieve` (`crates/core/rag/src/lib.rs`) delegates the
+	 *   `RetrievalStore::retrieve` (`crates/core/rag/src/store/retrieve.rs`) delegates the
 	 *   Spaces half of a recall back to `search_ext` through its `SpaceRecall` hook
 	 *   (implemented in `apps/core/src/rag_host.rs`), so an agent's Space allowlist
 	 *   is answered under each Space's own mode. It used to scan `retrieval.db`
@@ -291,6 +307,27 @@ export interface SpaceMatch {
 	 */
 	distance: number;
 	documentId: string;
+}
+
+export type SpaceDatabaseQueryValue =
+	| null
+	| boolean
+	| number
+	| string
+	| SpaceDatabaseQueryValue[]
+	| { [key: string]: SpaceDatabaseQueryValue };
+
+export interface SpaceDatabaseQuerySchemaColumn {
+	id: string;
+	label: string;
+	name: string;
+}
+
+export interface SpaceDatabaseQueryResult {
+	columns: string[];
+	rows: SpaceDatabaseQueryValue[][];
+	schema: SpaceDatabaseQuerySchemaColumn[];
+	truncated: boolean;
 }
 
 interface SpaceWire {
@@ -527,9 +564,14 @@ export async function fetchSpaces(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<Space[]> {
-	const json = await request<{ spaces?: SpaceWire[] }>(target, "/api/spaces", {
-		signal,
-	});
+	const json = await request<{ spaces?: SpaceWire[] }>(
+		target,
+		"/api/spaces",
+		{
+			signal,
+		},
+		listSpacesResponseCodec
+	);
 	return (json.spaces ?? []).map(toSpace);
 }
 
@@ -563,7 +605,7 @@ export async function createSpace(
 	retrievalMode?: RetrievalMode,
 	visibility?: ResourceVisibility
 ): Promise<CreatedSpace> {
-	const body: Record<string, unknown> = { name, description };
+	const body: CreateSpaceWireRequest = { name, description };
 	if (retrievalMode !== undefined) {
 		body.retrieval_mode = retrievalMode;
 	}
@@ -573,7 +615,8 @@ export async function createSpace(
 	const json = await request<{ id: string; retrieval_mode?: string }>(
 		target,
 		"/api/spaces",
-		{ method: "POST", body }
+		{ method: "POST", body },
+		responseCodec1
 	);
 	return { id: json.id, retrievalMode: toRetrievalMode(json.retrieval_mode) };
 }
@@ -585,13 +628,19 @@ export async function setSpaceVisibility(
 	visibility: ResourceVisibility,
 	teamId?: string | null
 ): Promise<void> {
-	await request(target, `/api/spaces/${encodeURIComponent(id)}/visibility`, {
-		method: "POST",
-		body: {
-			visibility,
-			...(visibility === "team" && teamId ? { team_id: teamId } : {}),
+	const body: SpaceVisibilityWireRequest = { visibility };
+	if (visibility === "team" && teamId) {
+		body.team_id = teamId;
+	}
+	await request(
+		target,
+		`/api/spaces/${encodeURIComponent(id)}/visibility`,
+		{
+			method: "POST",
+			body,
 		},
-	});
+		responseCodec2
+	);
 }
 
 /** Rename a user-created Space without touching its documents or retrieval index. */
@@ -600,10 +649,15 @@ export async function renameSpace(
 	id: string,
 	name: string
 ): Promise<void> {
-	await request(target, `/api/spaces/${id}/name`, {
-		method: "POST",
-		body: { name },
-	});
+	await request(
+		target,
+		`/api/spaces/${id}/name`,
+		{
+			method: "POST",
+			body: { name },
+		},
+		responseCodec3
+	);
 }
 
 /**
@@ -706,22 +760,9 @@ interface RetrievalModeChangeWire {
 	retrieval_mode?: string;
 }
 
-interface RetrievalModeJobWire {
-	cancel?: string;
-	job_id: string;
-	requested_mode?: string;
-	space_id: string;
-	status?: string;
-}
-
-interface RetrievalModeCancelWire {
-	cancelled: boolean;
-	finalizing?: boolean;
-}
-
 interface RetrievalModeStatusWire {
-	change?: RetrievalModeChangeWire;
-	error?: string;
+	change?: RetrievalModeChangeWire | null;
+	error?: string | null;
 	job_id: string;
 	processed_chunks?: number;
 	requested_mode?: string;
@@ -734,7 +775,9 @@ const RETRIEVAL_MODE_MAX_POLLS = 7200;
 
 class RetrievalModePollingTimeout extends Error {}
 
-function isRetrievalModeWire(value: unknown): value is RetrievalMode {
+function isRetrievalModeWire(
+	value: string | undefined
+): value is RetrievalMode {
 	return value === "vector" || value === "graph";
 }
 
@@ -742,8 +785,8 @@ function isLegacyRetrievalModeChange(json: RetrievalModeChangeWire): boolean {
 	return (
 		isRetrievalModeWire(json.retrieval_mode ?? json.mode) &&
 		isRetrievalModeWire(json.previous_retrieval_mode ?? json.previous) &&
-		typeof json.changed === "boolean" &&
-		typeof json.graph_rebuilt === "boolean"
+		json.changed !== undefined &&
+		json.graph_rebuilt !== undefined
 	);
 }
 
@@ -834,47 +877,64 @@ export async function setSpaceRetrievalMode(
 	options: SetRetrievalModeOptions = {}
 ): Promise<RetrievalModeChange> {
 	const encodedSpaceId = encodeURIComponent(id);
-	const json = await request<RetrievalModeChangeWire>(
-		target,
-		`/api/spaces/${encodedSpaceId}/retrieval-mode`,
-		{
-			method: "POST",
-			body: { retrieval_mode: mode },
-			// Core accepts this POST before it returns the job id. Do not let Stop
-			// interrupt that small handoff: an aborted fetch can otherwise leave an
-			// accepted rebuild running with no id for the cancellation path below.
-		}
+	const json = retrievalModeChangeWireSchema.parse(
+		await request(
+			target,
+			`/api/spaces/${encodedSpaceId}/retrieval-mode`,
+			{
+				method: "POST",
+				body: { retrieval_mode: mode },
+				// Core accepts this POST before it returns the job id. Do not let Stop
+				// interrupt that small handoff: an aborted fetch can otherwise leave an
+				// accepted rebuild running with no id for the cancellation path below.
+			},
+			retrievalModeChangeWireSchema
+		)
 	);
 	// Keep accepting a completed response for older Core nodes, but the current
 	// contract is 202 + a job id. The local Space mode is updated only after the
 	// status endpoint reports `completed` and includes the committed change.
-	if (typeof json.job_id !== "string") {
+	if (json.job_id === undefined) {
 		if (!isLegacyRetrievalModeChange(json)) {
 			throw new Error("Core returned an invalid retrieval-mode response.");
 		}
 		return toRetrievalModeChange(json);
 	}
-	const job = json as RetrievalModeJobWire;
-	if (job.job_id.trim() === "" || job.space_id !== id) {
+	const parsedJob = retrievalModeJobWireSchema.safeParse(json);
+	if (
+		!parsedJob.success ||
+		parsedJob.data.job_id.trim() === "" ||
+		parsedJob.data.space_id !== id
+	) {
 		throw new Error("Core returned a retrieval-mode job for the wrong Space.");
 	}
+	const job = parsedJob.data;
 	const statusPath = `/api/spaces/${encodedSpaceId}/retrieval-mode/status?job_id=${encodeURIComponent(job.job_id)}`;
 	const cancelPath = `/api/spaces/${encodedSpaceId}/retrieval-mode/cancel`;
 	const poll = async (signal?: AbortSignal): Promise<RetrievalModeChange> => {
 		for (let attempt = 0; attempt < RETRIEVAL_MODE_MAX_POLLS; attempt += 1) {
-			const status = await request<RetrievalModeStatusWire>(
-				target,
-				statusPath,
-				{
-					signal,
-				}
+			const status = retrievalModeStatusWireSchema.parse(
+				await request(
+					target,
+					statusPath,
+					{
+						signal,
+					},
+					retrievalModeStatusWireSchema
+				)
 			);
 			if (status.job_id !== job.job_id || status.space_id !== id) {
 				throw new Error(
 					"Core returned status for the wrong retrieval-mode job."
 				);
 			}
-			options.onProgress?.(toRetrievalModeProgress(status));
+			const progressState = retrievalModeStateSchema.safeParse(status.state);
+			if (!progressState.success) {
+				throw new Error("Core returned an unknown retrieval-mode job state.");
+			}
+			options.onProgress?.(
+				toRetrievalModeProgress({ ...status, state: progressState.data })
+			);
 			if (status.state === "completed") {
 				if (!status.change) {
 					throw new Error(
@@ -909,13 +969,16 @@ export async function setSpaceRetrievalMode(
 			error.name === "AbortError" &&
 			options.signal?.aborted;
 		if (abortedByCaller || error instanceof RetrievalModePollingTimeout) {
-			const cancellation = await request<RetrievalModeCancelWire>(
-				target,
-				cancelPath,
-				{
-					method: "POST",
-					body: { job_id: job.job_id },
-				}
+			const cancellation = retrievalModeCancelWireSchema.parse(
+				await request(
+					target,
+					cancelPath,
+					{
+						method: "POST",
+						body: { job_id: job.job_id },
+					},
+					retrievalModeCancelWireSchema
+				)
 			);
 			// An accepted cancellation is asynchronous too: Core may acknowledge the
 			// request before the worker reaches its terminal state. Keep observing the
@@ -943,7 +1006,8 @@ export async function deleteSpace(
 		`/api/spaces/${id}`,
 		{
 			method: "DELETE",
-		}
+		},
+		responseCodec4
 	);
 	return json?.removed ?? false;
 }
@@ -954,10 +1018,15 @@ export async function setSpaceIcon(
 	id: string,
 	icon: GlyphValue
 ): Promise<void> {
-	await request(target, `/api/spaces/${id}/icon`, {
-		method: "POST",
-		body: { icon },
-	});
+	await request(
+		target,
+		`/api/spaces/${id}/icon`,
+		{
+			method: "POST",
+			body: { icon },
+		},
+		responseCodec5
+	);
 }
 
 /** Set or clear a document's glyph without re-embedding the page. */
@@ -967,10 +1036,15 @@ export async function setDocumentIcon(
 	documentId: string,
 	icon: GlyphValue
 ): Promise<void> {
-	await request(target, `/api/spaces/${spaceId}/documents/${documentId}/icon`, {
-		method: "POST",
-		body: { icon },
-	});
+	await request(
+		target,
+		`/api/spaces/${spaceId}/documents/${documentId}/icon`,
+		{
+			method: "POST",
+			body: { icon },
+		},
+		responseCodec6
+	);
 }
 
 /** List the documents in a Space. */
@@ -982,7 +1056,8 @@ export async function fetchDocuments(
 	const json = await request<{ documents?: DocumentWire[] }>(
 		target,
 		`/api/spaces/${spaceId}/documents`,
-		{ signal }
+		{ signal },
+		listDocumentsResponseCodec
 	);
 	return (json.documents ?? []).map(toDocument);
 }
@@ -1002,7 +1077,8 @@ export async function searchSpaceDocuments(
 		const json = await request<{ hits?: SpaceLexicalHitWire[] }>(
 			target,
 			`/api/spaces/search?${params.toString()}`,
-			{ signal }
+			{ signal },
+			responseCodec7
 		);
 		return (json.hits ?? []).map((hit) => ({
 			createdAt: hit.created_at,
@@ -1074,7 +1150,8 @@ export async function ingestDocument(
 		{
 			method: "POST",
 			body: { title, content },
-		}
+		},
+		responseCodec8
 	);
 	return json.document_id;
 }
@@ -1138,7 +1215,8 @@ export async function createPage(
 	const json = await request<{ id: string }>(
 		target,
 		`/api/spaces/${spaceId}/pages`,
-		{ method: "POST", body: { title, parent_id: parentId } }
+		{ method: "POST", body: { title, parent_id: parentId } },
+		responseCodec9
 	);
 	return json.id;
 }
@@ -1155,7 +1233,8 @@ export async function createDatabase(
 	const json = await request<{ id: string }>(
 		target,
 		`/api/spaces/${spaceId}/databases`,
-		{ method: "POST", body: { title } }
+		{ method: "POST", body: { title } },
+		responseCodec10
 	);
 	return json.id;
 }
@@ -1173,7 +1252,8 @@ export async function createWhiteboard(
 	const json = await request<{ id: string }>(
 		target,
 		`/api/spaces/${spaceId}/whiteboards`,
-		{ method: "POST", body: { title } }
+		{ method: "POST", body: { title } },
+		responseCodec11
 	);
 	return json.id;
 }
@@ -1276,15 +1356,14 @@ export async function uploadSpaceFile(
 			if (xhr.status < 200 || xhr.status >= 300) {
 				let detail = `Upload failed (${xhr.status})`;
 				try {
-					const parsed = JSON.parse(xhr.responseText) as {
-						error?: string;
-						message?: string;
-					};
+					const parsed = spaceUploadErrorSchema.parse(
+						JSON.parse(xhr.responseText)
+					);
 					// `app_disabled` puts the actionable sentence in `message`; every
 					// other Core error puts it in `error`.
 					const said = parsed.message ?? parsed.error;
 					if (said) {
-						detail = said;
+						detail = String(said);
 					}
 				} catch {
 					// Non-JSON body — keep the status line.
@@ -1293,7 +1372,7 @@ export async function uploadSpaceFile(
 				return;
 			}
 			try {
-				resolve(JSON.parse(xhr.responseText));
+				resolve(spaceFileUploadWireSchema.parse(JSON.parse(xhr.responseText)));
 			} catch {
 				reject(
 					new Error("The node answered the upload with something not JSON.")
@@ -1350,10 +1429,15 @@ export async function replaceSpaceFileBlob(
 		id: string;
 		index?: FileIndexWire | null;
 		mime?: string;
-	}>(target, `/api/spaces/${spaceId}/documents/${documentId}/blob`, {
-		method: "PUT",
-		body: { data_base64: dataBase64, mime },
-	});
+	}>(
+		target,
+		`/api/spaces/${spaceId}/documents/${documentId}/blob`,
+		{
+			method: "PUT",
+			body: { data_base64: dataBase64, mime },
+		},
+		responseCodec12
+	);
 	return {
 		documentId: wire.id,
 		mime: wire.mime || mime,
@@ -1370,7 +1454,9 @@ export async function fetchDocument(
 ): Promise<SpaceDocumentContent> {
 	const json = await request<DocumentContentWire>(
 		target,
-		`/api/spaces/${spaceId}/documents/${documentId}`
+		`/api/spaces/${spaceId}/documents/${documentId}`,
+		undefined,
+		documentContentWireResponseCodec
 	);
 	return toDocumentContent(json);
 }
@@ -1387,22 +1473,19 @@ export async function updateDocument(
 	source: string,
 	guard?: { expectedRevision: number; operationId: string }
 ): Promise<DocumentWriteReceipt> {
+	const body: DocumentUpdateWireRequest = { title, source };
+	if (guard) {
+		body.expected_revision = guard.expectedRevision;
+		body.operation_id = guard.operationId;
+	}
 	const json = await request<{ result?: DocumentWriteReceiptWire }>(
 		target,
 		`/api/spaces/${spaceId}/documents/${documentId}`,
 		{
 			method: "PUT",
-			body: {
-				title,
-				source,
-				...(guard
-					? {
-							expected_revision: guard.expectedRevision,
-							operation_id: guard.operationId,
-						}
-					: {}),
-			},
-		}
+			body,
+		},
+		responseCodec13
 	);
 	return toDocumentWriteReceipt(json.result);
 }
@@ -1444,7 +1527,8 @@ export async function deleteDocument(
 	const json = await request<{ removed?: boolean }>(
 		target,
 		`/api/spaces/${spaceId}/documents/${documentId}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		responseCodec14
 	);
 	return json?.removed ?? false;
 }
@@ -1511,7 +1595,9 @@ export async function listDocumentVersions(
 ): Promise<DocumentVersionMeta[]> {
 	const json = await request<DocumentVersionMetaWire[]>(
 		target,
-		`/api/spaces/${spaceId}/documents/${documentId}/versions`
+		`/api/spaces/${spaceId}/documents/${documentId}/versions`,
+		undefined,
+		responseCodec15
 	);
 	return (json ?? []).map(toDocumentVersionMeta);
 }
@@ -1525,7 +1611,9 @@ export async function getDocumentVersion(
 ): Promise<string> {
 	const json = await request<DocumentVersionWire>(
 		target,
-		`/api/spaces/${spaceId}/documents/${documentId}/versions/${versionId}`
+		`/api/spaces/${spaceId}/documents/${documentId}/versions/${versionId}`,
+		undefined,
+		documentVersionWireResponseCodec
 	);
 	return json.source;
 }
@@ -1540,7 +1628,8 @@ export async function createDocumentVersion(
 	await request(
 		target,
 		`/api/spaces/${spaceId}/documents/${documentId}/versions`,
-		{ method: "POST", body: label ? { label } : {} }
+		{ method: "POST", body: label ? { label } : {} },
+		responseCodec16
 	);
 }
 
@@ -1563,7 +1652,8 @@ export async function restoreDocumentVersion(
 						operation_id: guard.operationId,
 					}
 				: undefined,
-		}
+		},
+		responseCodec17
 	);
 	return toDocumentWriteReceipt(json.result);
 }
@@ -1591,7 +1681,9 @@ export async function fetchReindexStatus(
 ): Promise<ReindexStatus> {
 	const json = await request<ReindexStatusWire>(
 		target,
-		"/api/embeddings/reindex/status"
+		"/api/embeddings/reindex/status",
+		undefined,
+		reindexStatusWireResponseCodec
 	);
 	return {
 		currentModel: json.current_model,
@@ -1604,18 +1696,26 @@ export async function fetchReindexStatus(
 
 /** Kick off a background reindex of all stale chunks. Returns immediately. */
 export async function triggerReindex(target: ApiTarget): Promise<void> {
-	await request(target, "/api/embeddings/reindex", { method: "POST" });
+	await request(
+		target,
+		"/api/embeddings/reindex",
+		{ method: "POST" },
+		responseCodec18
+	);
 }
 
 /** The embedding model Spaces currently uses. */
 export interface EmbeddingModel {
-	baseUrl: string;
+	/** Not published by Core's native `GET /api/embeddings/model` today. */
+	baseUrl?: string;
 	dims: number;
 	modelId: string;
 }
 
+// Core's native publisher (`EmbeddingModelInfo`) sends only model_id and dims;
+// base_url stays optional so a publisher that adds it is still read.
 interface EmbeddingModelWire {
-	base_url: string;
+	base_url?: string;
 	dims: number;
 	model_id: string;
 }
@@ -1626,7 +1726,9 @@ export async function fetchEmbeddingModel(
 ): Promise<EmbeddingModel> {
 	const json = await request<EmbeddingModelWire>(
 		target,
-		"/api/embeddings/model"
+		"/api/embeddings/model",
+		undefined,
+		embeddingModelWireResponseCodec
 	);
 	return { modelId: json.model_id, baseUrl: json.base_url, dims: json.dims };
 }
@@ -1643,7 +1745,7 @@ export async function setEmbeddingModel(
 	dims?: number,
 	provider?: string
 ): Promise<void> {
-	const body: Record<string, unknown> = { model_id: modelId };
+	const body: EmbeddingModelWireRequest = { model_id: modelId };
 	if (baseUrl !== undefined) {
 		body.base_url = baseUrl;
 	}
@@ -1653,7 +1755,12 @@ export async function setEmbeddingModel(
 	if (provider !== undefined) {
 		body.provider = provider;
 	}
-	await request(target, "/api/embeddings/model", { method: "POST", body });
+	await request(
+		target,
+		"/api/embeddings/model",
+		{ method: "POST", body },
+		responseCodec19
+	);
 }
 
 /**
@@ -1691,16 +1798,54 @@ export async function searchSpace(
 	query: string,
 	limit?: number
 ): Promise<SpaceMatch[]> {
-	const body: Record<string, unknown> = { query };
+	const body: SpaceSearchWireRequest = { query };
 	if (limit !== undefined) {
 		body.limit = limit;
 	}
 	const json = await request<{ matches?: MatchWire[] }>(
 		target,
-		`/api/spaces/${spaceId}/search`,
-		{ method: "POST", body }
+		`/api/spaces/${encodePathId(spaceId)}/search`,
+		{ method: "POST", body },
+		responseCodec20
 	);
 	return (json.matches ?? []).map(toMatch);
+}
+
+/** Run one read-only SQL query against the selected Space database document. */
+export async function querySpaceDatabase(
+	target: ApiTarget,
+	spaceId: string,
+	databaseId: string,
+	query: string,
+	parameters: SpaceDatabaseQueryValue[] = []
+): Promise<SpaceDatabaseQueryResult> {
+	const result = await request<unknown>(
+		target,
+		`/api/spaces/${encodeURIComponent(spaceId)}/databases/${encodeURIComponent(databaseId)}/query`,
+		{ method: "POST", body: { query, parameters } },
+		gatewayJsonValueSchema
+	);
+	const parsed = databaseQueryEnvelopeSchema.safeParse(result);
+	if (!parsed.success) {
+		throw new Error("Core returned an invalid database query response");
+	}
+	const schema = parsed.data.schema.map((candidate) => {
+		const column = databaseQueryColumnSchema.safeParse(candidate);
+		if (!column.success) {
+			throw new Error("Core returned an invalid database query schema");
+		}
+		return column.data;
+	});
+	const validated = spaceDatabaseQueryResultSchema.safeParse(result);
+	if (!validated.success) {
+		throw new Error("Core returned an invalid database query response");
+	}
+	return {
+		columns: validated.data.columns.slice(),
+		rows: validated.data.rows.map((row) => row.slice()),
+		schema,
+		truncated: validated.data.truncated,
+	};
 }
 
 // ── Wiki page-links: backlinks + graph ──────────────────────────────────────────
@@ -1795,7 +1940,9 @@ export async function fetchBacklinks(
 ): Promise<SpaceDocLink[]> {
 	const json = await request<{ backlinks?: DocLinkWire[] }>(
 		target,
-		`/api/spaces/${spaceId}/documents/${documentId}/backlinks`
+		`/api/spaces/${spaceId}/documents/${documentId}/backlinks`,
+		undefined,
+		responseCodec21
 	);
 	return (json.backlinks ?? []).map(toDocLink);
 }
@@ -1808,7 +1955,9 @@ export async function fetchDocumentLinks(
 ): Promise<SpaceDocLink[]> {
 	const json = await request<{ links?: DocLinkWire[] }>(
 		target,
-		`/api/spaces/${spaceId}/documents/${documentId}/links`
+		`/api/spaces/${spaceId}/documents/${documentId}/links`,
+		undefined,
+		responseCodec22
 	);
 	return (json.links ?? []).map(toDocLink);
 }
@@ -1820,13 +1969,278 @@ export async function fetchSpaceGraph(
 ): Promise<DocGraph> {
 	const json = await request<DocGraphWire>(
 		target,
-		`/api/spaces/${spaceId}/graph`
+		`/api/spaces/${spaceId}/graph`,
+		undefined,
+		docGraphWireResponseCodec
 	);
 	return toDocGraph(json);
 }
 
 /** The global document-link graph across every Space. */
 export async function fetchGlobalGraph(target: ApiTarget): Promise<DocGraph> {
-	const json = await request<DocGraphWire>(target, "/api/graph");
+	const json = await request<DocGraphWire>(
+		target,
+		"/api/graph",
+		undefined,
+		docGraphWireResponseCodec
+	);
 	return toDocGraph(json);
 }
+
+interface CreateSpaceWireRequest {
+	description: string | null;
+	name: string;
+	retrieval_mode?: RetrievalMode;
+	visibility?: ResourceVisibility;
+}
+
+interface SpaceVisibilityWireRequest {
+	team_id?: string;
+	visibility: ResourceVisibility;
+}
+
+interface DocumentUpdateWireRequest {
+	expected_revision?: number;
+	operation_id?: string;
+	source: string;
+	title: string;
+}
+
+interface EmbeddingModelWireRequest {
+	base_url?: string;
+	dims?: number;
+	model_id: string;
+	provider?: string;
+}
+
+interface SpaceSearchWireRequest {
+	limit?: number;
+	query: string;
+}
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const responseCodec1 = z
+	.object({ id: z.string(), retrieval_mode: z.string().optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec2 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);
+const responseCodec3 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);
+const responseCodec4 = z
+	.object({ removed: z.boolean().optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec5 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);
+const responseCodec6 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);
+const spaceLexicalHitWireResponseCodec = z
+	.object({
+		created_at: z.number(),
+		document_id: z.string(),
+		snippet: z.string(),
+		space_id: z.string(),
+		space_name: z.string(),
+		title: z.string(),
+		updated_at: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec7 = z
+	.object({ hits: z.array(spaceLexicalHitWireResponseCodec).optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec8 = z
+	.object({ document_id: z.string() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec9 = z
+	.object({ id: z.string() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec10 = z
+	.object({ id: z.string() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec11 = z
+	.object({ id: z.string() })
+	.catchall(gatewayJsonValueSchema);
+const fileIndexWireResponseCodec = z
+	.object({
+		message: z.union([z.string(), z.null()]).optional(),
+		state: z.union([z.string(), z.null()]).optional(),
+		warnings: z.union([z.array(z.string()), z.null()]).optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec12 = z
+	.object({
+		byte_size: z.number().optional(),
+		id: z.string(),
+		index: z.union([fileIndexWireResponseCodec, z.null()]).optional(),
+		mime: z.string().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const documentWriteReceiptWireResponseCodec = z
+	.object({
+		changed: z.boolean().optional(),
+		duplicate: z.boolean().optional(),
+		revision: z.number().optional(),
+		updated_at: z.number().optional(),
+		version_id: z.union([z.string(), z.null()]).optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec13 = z
+	.object({ result: documentWriteReceiptWireResponseCodec.optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec14 = z
+	.object({ removed: z.boolean().optional() })
+	.catchall(gatewayJsonValueSchema);
+const documentKindResponseCodec = z.union([
+	z.literal("page"),
+	z.literal("database"),
+	z.literal("whiteboard"),
+]);
+const documentVersionMetaWireResponseCodec = z
+	.object({
+		capture_type: z.string().optional(),
+		created_at: z.number(),
+		created_by: z.union([z.string(), z.null()]).optional(),
+		document_id: z.string(),
+		granularity: z.string().optional(),
+		id: z.string(),
+		kind: documentKindResponseCodec,
+		label: z.union([z.string(), z.null()]).optional(),
+		revision: z.number().optional(),
+		title: z.string(),
+		updated_at: z.number().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec15 = z.array(documentVersionMetaWireResponseCodec);
+const documentVersionWireResponseCodec = z.intersection(
+	documentVersionMetaWireResponseCodec,
+	z.object({ source: z.string() }).catchall(gatewayJsonValueSchema)
+);
+const responseCodec16 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);
+const responseCodec17 = z
+	.object({ result: documentWriteReceiptWireResponseCodec.optional() })
+	.catchall(gatewayJsonValueSchema);
+const reindexStatusWireResponseCodec = z
+	.object({
+		current_dims: z.number(),
+		current_model: z.string(),
+		pending_chunks: z.number(),
+		running: z.boolean(),
+		total_chunks: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec18 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);
+const embeddingModelWireResponseCodec = z
+	.object({
+		base_url: z.string().optional(),
+		dims: z.number(),
+		model_id: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec19 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);
+const matchWireResponseCodec = z
+	.object({
+		chunk_id: z.string(),
+		content: z.string(),
+		distance: z.number(),
+		document_id: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec20 = z
+	.object({ matches: z.array(matchWireResponseCodec).optional() })
+	.catchall(gatewayJsonValueSchema);
+const docLinkWireResponseCodec = z
+	.object({
+		dst_doc_id: z.union([z.string(), z.null()]),
+		dst_title: z.string(),
+		kind: z.string(),
+		snippet: z.string().optional(),
+		src_doc_id: z.string(),
+		src_title: z.string().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec21 = z
+	.object({ backlinks: z.array(docLinkWireResponseCodec).optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec22 = z
+	.object({ links: z.array(docLinkWireResponseCodec).optional() })
+	.catchall(gatewayJsonValueSchema);
+const docGraphEdgeResponseCodec = z
+	.object({ dst: z.string(), kind: z.string(), src: z.string() })
+	.catchall(gatewayJsonValueSchema);
+const docGraphWireResponseCodec = z
+	.object({
+		edges: z.array(docGraphEdgeResponseCodec),
+		nodes: z.array(
+			z
+				.object({
+					id: z.string(),
+					kind: z.string(),
+					pending: z.boolean(),
+					space_id: z.string(),
+					title: z.string(),
+				})
+				.catchall(gatewayJsonValueSchema)
+		),
+	})
+	.catchall(gatewayJsonValueSchema);
+
+const glyphValueResponseCodec = gatewayJsonValueSchema.transform(asGlyphValue);
+const spaceWireResponseCodec = z
+	.object({
+		created_at: z.number(),
+		description: z.string().nullable().optional(),
+		document_count: z.number(),
+		icon: glyphValueResponseCodec.optional(),
+		id: z.string(),
+		name: z.string(),
+		retrieval_mode: z.string().optional(),
+		system: z.boolean().optional(),
+		team_id: z.string().nullable().optional(),
+		updated_at: z.number(),
+		visibility: z.string().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const listSpacesResponseCodec = z
+	.object({ spaces: z.array(spaceWireResponseCodec).optional() })
+	.catchall(gatewayJsonValueSchema);
+const documentWireResponseCodec = z
+	.object({
+		byte_size: z.number().nullable().optional(),
+		chunk_count: z.number(),
+		created_at: z.number(),
+		icon: glyphValueResponseCodec.optional(),
+		id: z.string(),
+		index: fileIndexWireResponseCodec.nullable().optional(),
+		kind: z.string().optional(),
+		mime: z.string().nullable().optional(),
+		space_id: z.string(),
+		title: z.string(),
+		updated_at: z.number().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const listDocumentsResponseCodec = z
+	.object({ documents: z.array(documentWireResponseCodec).optional() })
+	.catchall(gatewayJsonValueSchema);
+
+const documentContentWireResponseCodec = z
+	.object({
+		chunk_count: z.number(),
+		created_at: z.number(),
+		icon: glyphValueResponseCodec.optional(),
+		id: z.string(),
+		kind: z.string().optional(),
+		source: z.string(),
+		space_id: z.string(),
+		title: z.string(),
+		updated_at: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);

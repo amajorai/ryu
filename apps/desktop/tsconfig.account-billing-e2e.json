@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/account-billing-coverage.playwright.config.ts",
+    "e2e/harness/vite.account-billing-coverage.config.ts",
+    "e2e/billing-tab-proof.spec.ts",
+    "e2e/teams-billing-settings-proof.spec.ts",
+    "e2e/profile-tab-settings-proof.spec.ts",
+    "e2e/harness/billing-tab-proof.tsx",
+    "e2e/harness/billing-tab-proof-native.ts",
+    "e2e/harness/teams-billing-settings-proof.tsx",
+    "e2e/harness/proof-auth-client.ts"
+  ]
+}

@@ -11,6 +11,11 @@ const CACHE_TTL_SECONDS: i64 = 3600; // 1 hour
 pub struct VersionCache {
     pub fetched_at: Option<DateTime<Utc>>,
     pub versions: HashMap<String, String>,
+    /// Per-key fetch times for entries refreshed one at a time (agent npm
+    /// packages). `fetched_at` covers the sidecar batch; these keys must not
+    /// touch it, or an agent lookup would mark the whole sidecar list fresh.
+    #[serde(default)]
+    pub entry_fetched_at: HashMap<String, DateTime<Utc>>,
 }
 
 impl VersionCache {
@@ -30,6 +35,23 @@ impl VersionCache {
 
     pub fn mark_fresh(&mut self) {
         self.fetched_at = Some(Utc::now());
+    }
+
+    /// A single-key entry that was fetched within the TTL.
+    pub fn get_fresh_entry(&self, name: &str) -> Option<&String> {
+        let fetched = self.entry_fetched_at.get(name)?;
+        if Utc::now() - *fetched < Duration::seconds(CACHE_TTL_SECONDS) {
+            self.versions.get(name)
+        } else {
+            None
+        }
+    }
+
+    /// Record a single-key entry with its own fetch time.
+    pub fn set_entry(&mut self, name: impl Into<String>, version: impl Into<String>) {
+        let name = name.into();
+        self.entry_fetched_at.insert(name.clone(), Utc::now());
+        self.versions.insert(name, version.into());
     }
 
     pub fn load() -> Self {
@@ -52,7 +74,7 @@ impl VersionCache {
 }
 
 fn cache_path() -> std::path::PathBuf {
-    crate::paths::ryu_dir().join("catalog-cache.json")
+    crate::paths::cache_path("catalog-cache.json")
 }
 
 #[cfg(test)]
@@ -78,6 +100,25 @@ mod tests {
         cache.set("zeroclaw", "v0.2.0");
         assert_eq!(cache.get("zeroclaw"), Some(&"v0.2.0".to_string()));
         assert_eq!(cache.get("ghost"), None);
+    }
+
+    #[test]
+    fn single_entries_keep_their_own_freshness() {
+        let mut cache = VersionCache::default();
+        cache.set_entry("agent:npm:x", "1.2.3");
+        assert_eq!(
+            cache.get_fresh_entry("agent:npm:x"),
+            Some(&"1.2.3".to_string())
+        );
+        assert!(
+            !cache.is_fresh(),
+            "an entry must not mark the sidecar batch fresh"
+        );
+        cache.entry_fetched_at.insert(
+            "agent:npm:x".to_string(),
+            Utc::now() - Duration::seconds(CACHE_TTL_SECONDS + 1),
+        );
+        assert_eq!(cache.get_fresh_entry("agent:npm:x"), None);
     }
 
     #[test]

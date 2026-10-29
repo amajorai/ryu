@@ -24,6 +24,8 @@ export default defineConfig({
 	optimizeDeps: {
 		include: ["lucide-react"],
 		entries: ["startup-performance-proof.html"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		alias: { "@": desktopRoot },

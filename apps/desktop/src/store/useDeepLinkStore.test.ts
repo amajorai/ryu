@@ -11,9 +11,8 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import type { DeepLinkIntent } from "@ryuhq/protocol/deep-link";
 import { useDeepLinkStore } from "./useDeepLinkStore.ts";
 
-// A minimal intent; the store treats it opaquely, so the exact shape only needs
-// to satisfy the type.
-const intent = { type: "open-models" } as unknown as DeepLinkIntent;
+// A complete protocol page intent; the store preserves its identity opaquely.
+const intent = { kind: "page", page: "models" } satisfies DeepLinkIntent;
 
 beforeEach(() => {
 	useDeepLinkStore.setState({ pending: null });

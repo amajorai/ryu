@@ -13,10 +13,11 @@
 
 import { Alert01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Skeleton } from "@ryu/ui/components/skeleton";
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useState } from "react";
 import {
 	formatValue,
@@ -39,6 +40,7 @@ export function Duplicates({
 	onOpenRecord: (recordId: string) => void;
 	subject: ObjectWithFields;
 }) {
+	const tl = useLiteralMessages();
 	const [groups, setGroups] = useState<DuplicateGroup[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -61,7 +63,7 @@ export function Duplicates({
 			return client
 				.findDuplicates(slug, signal)
 				.then((result) => setGroups(result.groups))
-				.catch((cause: unknown) => {
+				.catch((cause) => {
 					if (signal?.aborted) {
 						return;
 					}
@@ -131,7 +133,9 @@ export function Duplicates({
 			<header className="flex items-start justify-between gap-2 border-b px-4 py-3">
 				<div>
 					<h2 className="font-medium text-base capitalize">
-						Duplicate {subject.object.plural}
+						{tl("Duplicate {objectPlural}", {
+							objectPlural: subject.object.plural,
+						})}
 					</h2>
 					<p className="text-muted-foreground text-xs">
 						Merging keeps one record and folds the others into it. Their notes,
@@ -162,7 +166,9 @@ export function Duplicates({
 
 				{!loading && groups.length === 0 && (
 					<p className="py-10 text-center text-muted-foreground text-sm">
-						No duplicate {subject.object.plural} found.
+						{tl("No duplicate {objectPlural} found.", {
+							objectPlural: subject.object.plural,
+						})}
 					</p>
 				)}
 
@@ -174,16 +180,18 @@ export function Duplicates({
 					return (
 						<section
 							className="rounded-md border bg-card p-3"
-							// biome-ignore lint/suspicious/noArrayIndexKey: a duplicate group has no id of its own; the list is fully replaced on every rescan
+							// a duplicate group has no id of its own; the list is fully replaced on every rescan
 							key={`group-${index}`}
 						>
 							<div className="mb-2 flex items-center gap-2">
-								<Badge className="font-normal" variant="secondary">
-									{records.length} records
+								<Badge typography="normal" variant="secondary">
+									{tl("{recordCount} records", {
+										recordCount: String(records.length),
+									})}
 								</Badge>
 								{matchedOn && (
 									<span className="text-muted-foreground text-xs">
-										same {matchedOn.name}
+										{tl("same {fieldName}", { fieldName: matchedOn.name })}
 									</span>
 								)}
 							</div>
@@ -215,7 +223,13 @@ export function Duplicates({
 											>
 												<td className="p-1">
 													<input
-														aria-label={`Keep ${recordTitle(record.title, record.values, titleField)}`}
+														aria-label={tl("Keep {recordName}", {
+															recordName: recordTitle(
+																record.title,
+																record.values,
+																titleField
+															),
+														})}
 														checked={record.id === survivorId}
 														name={`survivor-${index}`}
 														onChange={() =>
@@ -231,6 +245,11 @@ export function Duplicates({
 													<button
 														className="truncate text-left hover:underline"
 														onClick={() => onOpenRecord(record.id)}
+														title={recordTitle(
+															record.title,
+															record.values,
+															titleField
+														)}
 														type="button"
 													>
 														{recordTitle(
@@ -265,7 +284,9 @@ export function Duplicates({
 								>
 									{busyGroup === index
 										? "Merging…"
-										: `Merge ${records.length - 1} into the kept record`}
+										: tl("Merge {mergeCount} into the kept record", {
+												mergeCount: String(records.length - 1),
+											})}
 								</Button>
 							</div>
 						</section>

@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["bun", "react", "react-dom"] },
+  "include": [
+    "src/lib/timezone.ts",
+    "src/lib/timezone.test.ts",
+    "src/lib/timezone-storage.failure.test.ts",
+    "src/lib/timezone-system-change.consumer.test.tsx",
+    "src/lib/sidebar/date-buckets.ts",
+    "src/lib/sidebar/date-buckets.test.ts",
+    "src/lib/grid-date-selected-locale.test.ts",
+    "src/lib/grid-date-mounted-locale.test.tsx",
+    "src/lib/display-day.consumer.test.tsx",
+    "e2e/time-dates-source-map.ts",
+    "e2e/time-dates-static.playwright.config.ts",
+    "e2e/harness/vite.time-dates.config.ts",
+    "e2e/time-dates.playwright.config.ts",
+    "e2e/timezone-picker-story.spec.ts",
+    "e2e/sidebar-mounted-midnight.spec.ts",
+    "../../packages/ui/src/lib/timezone.ts",
+    "../../packages/ui/src/lib/display-day.ts",
+    "../../packages/ui/src/lib/data-grid.ts",
+    "../../packages/ui/src/components/data-grid/data-grid-cell-variants.tsx"
+  ]
+}

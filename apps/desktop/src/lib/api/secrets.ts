@@ -9,7 +9,7 @@
 //                    localStorage.  Max ~2 500 bytes per entry (sufficient for any API key).
 //   Blockers:        keyring v4 requires Rust >= 1.88; project pins 1.77.2 — must upgrade
 //                    or relax rust-version before adopting v4.  No cross-device sync.
-import { invokeWhenReady } from "../tauri-ready.ts";
+import { invokeWhenReady, TauriUnavailableError } from "../tauri-ready.ts";
 
 /**
  * Write (or overwrite) a provider API key in the OS credential store.
@@ -31,3 +31,24 @@ export const getProviderKey = (provider: string): Promise<string | null> =>
  */
 export const deleteProviderKey = (provider: string): Promise<void> =>
 	invokeWhenReady("delete_provider_key", { provider });
+
+/** Mirror an already-persisted Gateway credential into the desktop keychain.
+ * Browser hosts use Core's saved credential and have no OS keychain bridge.
+ * A present desktop bridge's storage errors still propagate to the caller.
+ */
+export async function syncGatewayProviderKey(
+	provider: string,
+	key: string | null
+): Promise<void> {
+	try {
+		if (key === null) {
+			await deleteProviderKey(provider);
+		} else {
+			await setProviderKey(provider, key);
+		}
+	} catch (error) {
+		if (!(error instanceof TauriUnavailableError)) {
+			throw error;
+		}
+	}
+}

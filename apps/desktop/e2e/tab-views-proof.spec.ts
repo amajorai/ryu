@@ -12,6 +12,9 @@ test("proves live scroll cards and infinite canvas panes", async ({ page }) => {
 		}
 	});
 	page.on("pageerror", (error) => pageErrors.push(error.message));
+	// The full Chromium build requests /favicon.ico, which the harness does not
+	// serve; answer it so that request is not a console error.
+	await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204 }));
 
 	await page.goto("/tab-views-proof.html");
 	await expect(page.getByTestId("mode")).toHaveText("scroll");

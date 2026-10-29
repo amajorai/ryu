@@ -18,6 +18,10 @@
 // did, and the closing prose is what it thinks happened. Summarising those with
 // a second model would launder the one honest signal in the transcript.
 
+import { nativeSdkSchemaAdmits } from "@ryu/blocks/desktop/agent-elements/utils/native-sdk-admission.ts";
+import type { DynamicToolUIPart } from "ai";
+import { z } from "zod";
+
 /** A message part, typed loosely — we read the AI SDK fields we care about and
  *  ignore the rest, exactly as `CoworkContextPanel` does. */
 export interface MissionStreamPart {
@@ -168,25 +172,45 @@ export const PATH_KEYS = [
 
 // ── Small readers over untyped tool input ─────────────────────────────────────
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		return;
-	}
-	return value as Record<string, unknown>;
+/** These are native live SDK input observations, not decoded persistence DTOs.
+ * Only object representation and each consumed string slot are admitted at the
+ * original read stage; unrelated opaque metadata remains untouched. */
+export type MissionRawInput = DynamicToolUIPart["input"];
+const missionTextSchema = z.string();
+const missionCallableSchema = z.function();
+interface NativeMissionToolLookup {
+	readonly [key: string]: DynamicToolUIPart["input"];
 }
-
-function readString(source: unknown, key: string): string | undefined {
-	const record = asRecord(source);
-	const value = record?.[key];
-	if (typeof value !== "string") {
+function nativeMissionRecord(
+	value: MissionRawInput
+): NativeMissionToolLookup | undefined {
+	const receiver = new Object(value);
+	if (
+		receiver !== value ||
+		value === null ||
+		nativeSdkSchemaAdmits(missionCallableSchema, value) ||
+		Array.isArray(value)
+	) {
 		return;
 	}
+	// SAFETY: This is an erased native lookup view after the original object-only
+	// representation guard. Slots remain the opaque AI SDK input domain; it claims
+	// no full tool DTO or JSON values and performs no field enumeration/validation.
+	return value as NativeMissionToolLookup;
+}
+function readString(source: MissionRawInput, key: string): string | undefined {
+	const record = nativeMissionRecord(source);
+	const value = record?.[key];
+	if (!nativeSdkSchemaAdmits(missionTextSchema, value)) {
+		return;
+	}
+	// SAFETY: Cached scalar admission establishes this exact observed primitive
+	// string without user callbacks or formatting; original trim operation remains.
 	const trimmed = value.trim();
 	return trimmed.length > 0 ? trimmed : undefined;
 }
-
 export function firstString(
-	source: unknown,
+	source: MissionRawInput,
 	keys: string[]
 ): string | undefined {
 	for (const key of keys) {
@@ -199,7 +223,8 @@ export function firstString(
 }
 
 function partText(part: MissionStreamPart): string {
-	return typeof part.text === "string" ? part.text.trim() : "";
+	const parsed = z.string().safeParse(part.text);
+	return parsed.success ? parsed.data.trim() : "";
 }
 
 function clamp(text: string, max: number): string {
@@ -219,21 +244,22 @@ function baseName(path: string): string {
 // ── Part classification ───────────────────────────────────────────────────────
 
 export function isToolPart(part: MissionStreamPart): boolean {
+	const type = z.string().safeParse(part.type);
 	return (
 		part.type === DYNAMIC_TOOL_PART ||
-		(typeof part.type === "string" && part.type.startsWith(TOOL_PART_PREFIX))
+		(type.success && type.data.startsWith(TOOL_PART_PREFIX))
 	);
 }
 
 /** The tool's name, whether it arrived as `tool-<Name>` or a dynamic part. */
 export function toolNameOf(part: MissionStreamPart): string {
 	if (part.type === DYNAMIC_TOOL_PART) {
-		return typeof part.toolName === "string" && part.toolName.length > 0
-			? part.toolName
-			: "tool";
+		const name = z.string().min(1).safeParse(part.toolName);
+		return name.success ? name.data : "tool";
 	}
-	if (typeof part.type === "string" && part.type.startsWith(TOOL_PART_PREFIX)) {
-		return part.type.slice(TOOL_PART_PREFIX.length) || "tool";
+	const type = z.string().safeParse(part.type);
+	if (type.success && type.data.startsWith(TOOL_PART_PREFIX)) {
+		return type.data.slice(TOOL_PART_PREFIX.length) || "tool";
 	}
 	return "tool";
 }
@@ -260,8 +286,9 @@ function touchKindFor(tool: string): MissionTouchKind | undefined {
 	return;
 }
 
-function readTodos(input: unknown): MissionTodo[] {
-	const raw = asRecord(input)?.todos;
+function readTodos(input: MissionRawInput): MissionTodo[] {
+	const record = nativeMissionRecord(input);
+	const raw = record?.todos;
 	if (!Array.isArray(raw)) {
 		return [];
 	}
@@ -285,11 +312,11 @@ function readTodos(input: unknown): MissionTodo[] {
 
 /** A write beats a read for the same path: seeing a file then editing it is an
  *  edit, and showing both rows would double-count the same work. */
-const TOUCH_RANK: Record<MissionTouchKind, number> = {
+const TOUCH_RANK = {
 	read: 0,
 	edit: 1,
 	create: 2,
-};
+} satisfies Record<MissionTouchKind, number>;
 
 class TouchLedger {
 	private readonly byPath = new Map<string, MissionFileTouch>();
@@ -521,11 +548,7 @@ function splitTurns(messages: MissionStreamMessage[]): TurnDraft[] {
 /** The assistant's prose, split at the first tool call: what it said it was
  *  about to do (the rationale) versus what it reported afterwards (the
  *  outcome). A turn with no tool calls is all outcome — it only answered. */
-function splitProse(parts: MissionStreamPart[]): {
-	outcome: string;
-	rationale: string;
-	thinking: string;
-} {
+function splitProse(parts: MissionStreamPart[]) {
 	const before: string[] = [];
 	const after: string[] = [];
 	const thinking: string[] = [];

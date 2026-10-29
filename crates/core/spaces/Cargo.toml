@@ -1,6 +1,6 @@
 [package]
 name = "ryu-spaces"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Spaces primitive for Ryu: named document collections with a sqlite-vec (`vec0`) vector store, a content-addressed blob store, per-space embedder, and a GraphRAG (entity/relation) retrieval strategy. An extracted Core capability crate consumed in-process as a NON-optional path dependency; embedders/rerankers are injected as `ryu_rag` instances so the crate has ZERO dependency on apps/core — the model-registry-driven embedder choice, default `~/.ryu` paths, tenancy (`Tenancy`/`ResourceTenancy`) mapping, and preferences all stay Core-side (`apps/core/src/server/spaces.rs` shim)."
@@ -9,10 +9,12 @@ repository = "https://github.com/amajorai/ryu"
 # Versions are matched to apps/core/Cargo.toml so there is no version skew when
 # Core links this crate in-process. This crate has ZERO dependency on apps/core.
 [dependencies]
+# The data-dir layout (`db/`, `state/`, …) shared by every Ryu process.
+ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.0" }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
-rusqlite = { version = "0.40.0", features = ["bundled"] }
+rusqlite = { version = "0.40.0", features = ["bundled", "functions", "hooks", "limits"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -22,15 +24,20 @@ tracing = "0.1"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 zstd = "0.13"
-ryu-rag = { path = "../rag", version = "0.4.0" }
+ryu-rag = { path = "../rag", version = "0.5.0" }
 # The shared tenancy composition layer (`ResourceKey`). A pure-data contract
 # crate (serde/schemars/semver only) — NOT apps/core — so depending on it to
 # derive `DocOwner` keeps the "ZERO apps/core dependency" invariant intact.
-ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.4.0" }
-ryu-workspace = { path = "../workspace", version = "0.4.0" }
-ryu-backup = { path = "../backup", version = "0.4.0" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.5.0" }
+ryu-workspace = { path = "../workspace", version = "0.5.0" }
+ryu-backup = { path = "../backup", version = "0.5.0" }
 tempfile = "3"
-zip = "0.6"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# Phase-2 content sealing (encb:v1 / RYU-CB01 / blind indexes). No OS keychain
+# backend from this crate: Core links it through its own dependency.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["sqlite"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
+# Test builds only: lets unit tests construct sealing stores without a host.
+ryu-crypto = { path = "../crypto", version = "0.5.0", default-features = false, features = ["test-ephemeral-host"] }

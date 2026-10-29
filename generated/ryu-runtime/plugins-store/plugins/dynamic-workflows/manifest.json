@@ -11,8 +11,8 @@
   "id": "@ryu/dynamic-workflows",
   "name": "dynamic-workflows",
   "stability": "experimental",
-  "version": "0.1.14",
-  "description": "Run a validated, bounded fan-out of clean-context delegates.",
+  "version": "0.2.0",
+  "description": "Run bounded delegate fan-outs and durable workflow scripts that orchestrate sub-agents in code.",
   "icon": "workflow-circle-06",
   "iconDither": {
     "from": 232,
@@ -31,7 +31,7 @@
       "kind": "tool",
       "config": {
         "slug": "workflow.run",
-        "backend": "inline_deno",
+        "backend": "inline_js",
         "description": "Run several independent delegate tasks concurrently and return their results.",
         "timeout_secs": 600,
         "input_schema": {
@@ -88,7 +88,56 @@
           },
           "required": ["tasks"]
         },
-        "code": "// Tool body for `workflow.run`, run in Core's Deno sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// with `input` (the call arguments) and `host` (the capability bridge) already\n// bound, and the body `return`s the tool's result. A top-level `return` is\n// therefore correct here and `export` is not.\n//\n// It must be a PURE function of `input` plus whatever `host.*` returns: no\n// `Date.now()`, no `Math.random()`, no ambient clock or environment. Everything\n// variable arrives as an argument. `node tools/toolsmith/index.mjs verify`\n// enforces that both statically and by running every case twice.\n\nconst tasks = input && input.tasks;\nif (!Array.isArray(tasks) || tasks.length === 0 || tasks.length > 20) {\n\tthrow new Error(\"workflow.run: 'tasks' must contain 1-20 delegate tasks\");\n}\n\nconst presets = new Set([\"research\", \"code_read\", \"summarise\"]);\nconst ids = new Set();\nconst delegates = tasks.map((task, index) => {\n\tif (!task || typeof task !== \"object\" || Array.isArray(task)) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} must be an object`);\n\t}\n\tif (typeof task.task !== \"string\" || task.task.trim().length === 0) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} requires a non-empty 'task'`);\n\t}\n\tconst id = typeof task.id === \"string\" && task.id.trim().length > 0\n\t\t? task.id.trim()\n\t\t: `delegate-${index + 1}`;\n\tif (ids.has(id)) {\n\t\tthrow new Error(`workflow.run: duplicate task id '${id}'`);\n\t}\n\tids.add(id);\n\tif (task.agent_id !== undefined && (typeof task.agent_id !== \"string\" || task.agent_id.trim().length === 0)) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} 'agent_id' must be a non-empty string`);\n\t}\n\tif (task.preset !== undefined && !presets.has(task.preset)) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} has an unknown preset`);\n\t}\n\tif (task.tools !== undefined) {\n\t\tthrow new Error(\"workflow.run: inline delegates are prompt-only; use a registered agent_id for tools\");\n\t}\n\tconst delegate = {\n\t\tid,\n\t\ttask: task.task.trim(),\n\t\tpreset: task.preset ?? \"code_read\",\n\t};\n\tif (task.agent_id !== undefined) delegate.agent_id = task.agent_id.trim();\n\tif (task.system_prompt !== undefined || task.model !== undefined) {\n\t\tif (typeof task.system_prompt !== \"string\" || task.system_prompt.trim().length === 0) {\n\t\t\tthrow new Error(`workflow.run: task ${index + 1} 'system_prompt' must be non-empty`);\n\t\t}\n\t\tdelegate.inline = {\n\t\t\tsystem_prompt: task.system_prompt?.trim() ?? \"\",\n\t\t\t...(task.model === undefined ? {} : { model: task.model }),\n\t\t};\n\t}\n\treturn delegate;\n});\n\nconst caps = {};\nfor (const [key, minimum, maximum] of [[\"max_concurrent\", 1, 5], [\"wall_time_secs\", 5, 600], [\"max_tokens\", 1, 32768]]) {\n\tif (input[key] !== undefined && (!Number.isInteger(input[key]) || input[key] < minimum || input[key] > maximum)) {\n\t\tthrow new Error(`workflow.run: '${key}' must be an integer from ${minimum} to ${maximum}`);\n\t}\n\tif (input[key] !== undefined) caps[key] = input[key];\n}\n\nconst response = await host.runFanout({ delegates, caps });\nif (!response || response.ok !== true || !Array.isArray(response.results)) {\n\tthrow new Error(\"workflow.run: host.runFanout returned an invalid response\");\n}\nreturn { ok: true, count: response.results.length, results: response.results };\n"
+        "code": "// Tool body for `workflow.run`, run in Core's JS sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// with `input` (the call arguments) and `host` (the capability bridge) already\n// bound, and the body `return`s the tool's result. A top-level `return` is\n// therefore correct here and `export` is not.\n//\n// It must be a PURE function of `input` plus whatever `host.*` returns: no\n// `Date.now()`, no `Math.random()`, no ambient clock or environment. Everything\n// variable arrives as an argument. `node tools/toolsmith/index.mjs verify`\n// enforces that both statically and by running every case twice.\n\n// The host injects actual serde_json values. The native String brand\n// operation plus identity admits only primitive strings without coercion.\nfunction primitiveStringAdmitted(raw) {\n\ttry {\n\t\treturn String.prototype.valueOf.call(raw) === raw;\n\t} catch {\n\t\treturn false;\n\t}\n}\n\nconst tasks = input && input.tasks;\nif (!Array.isArray(tasks) || tasks.length === 0 || tasks.length > 20) {\n\tthrow new Error(\"workflow.run: 'tasks' must contain 1-20 delegate tasks\");\n}\n\nconst presets = new Set([\"research\", \"code_read\", \"summarise\"]);\nconst ids = new Set();\nconst delegates = tasks.map((task, index) => {\n\tif (!task || Object(task) !== task || Array.isArray(task)) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} must be an object`);\n\t}\n\tif (!primitiveStringAdmitted(task.task) || task.task.trim().length === 0) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} requires a non-empty 'task'`);\n\t}\n\tconst id = primitiveStringAdmitted(task.id) && task.id.trim().length > 0\n\t\t? task.id.trim()\n\t\t: `delegate-${index + 1}`;\n\tif (ids.has(id)) {\n\t\tthrow new Error(`workflow.run: duplicate task id '${id}'`);\n\t}\n\tids.add(id);\n\tif (task.agent_id !== undefined && (!primitiveStringAdmitted(task.agent_id) || task.agent_id.trim().length === 0)) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} 'agent_id' must be a non-empty string`);\n\t}\n\tif (task.preset !== undefined && !presets.has(task.preset)) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} has an unknown preset`);\n\t}\n\tif (\n\t\ttask.model !== undefined &&\n\t\t(!primitiveStringAdmitted(task.model) || task.model.trim().length === 0)\n\t) {\n\t\tthrow new Error(`workflow.run: task ${index + 1} 'model' must be a non-empty string`);\n\t}\n\tif (task.tools !== undefined) {\n\t\tthrow new Error(\"workflow.run: inline delegates are prompt-only; use a registered agent_id for tools\");\n\t}\n\tconst delegate = {\n\t\tid,\n\t\ttask: task.task.trim(),\n\t\tpreset: task.preset ?? \"code_read\",\n\t};\n\tif (task.agent_id !== undefined) delegate.agent_id = task.agent_id.trim();\n\tif (task.system_prompt !== undefined || task.model !== undefined) {\n\t\tif (!primitiveStringAdmitted(task.system_prompt) || task.system_prompt.trim().length === 0) {\n\t\t\tthrow new Error(`workflow.run: task ${index + 1} 'system_prompt' must be non-empty`);\n\t\t}\n\t\tdelegate.inline = {\n\t\t\tsystem_prompt: task.system_prompt?.trim() ?? \"\",\n\t\t\t...(task.model === undefined ? undefined : { model: task.model.trim() }),\n\t\t};\n\t}\n\treturn delegate;\n});\n\nconst caps = {};\nfor (const [key, minimum, maximum] of [[\"max_concurrent\", 1, 5], [\"wall_time_secs\", 5, 600], [\"max_tokens\", 1, 32768]]) {\n\tif (input[key] !== undefined && (!Number.isInteger(input[key]) || input[key] < minimum || input[key] > maximum)) {\n\t\tthrow new Error(`workflow.run: '${key}' must be an integer from ${minimum} to ${maximum}`);\n\t}\n\tif (input[key] !== undefined) caps[key] = input[key];\n}\n\nconst response = await host.runFanout({ delegates, caps });\nif (!response || response.ok !== true || !Array.isArray(response.results)) {\n\tthrow new Error(\"workflow.run: host.runFanout returned an invalid response\");\n}\nreturn { ok: true, count: response.results.length, results: response.results };\n"
+      }
+    },
+    {
+      "id": "tool-workflow.script",
+      "name": "workflow.script",
+      "kind": "tool",
+      "config": {
+        "slug": "workflow.script",
+        "backend": "inline_js",
+        "description": "Run a durable workflow script: JavaScript that orchestrates sub-agents. Helpers: agent(prompt, {label, preset, max_tokens, timeout_secs, schema, json}) resolves to the agent's text (or parsed JSON with schema/json); parallel([() => agent(...), ...]) runs thunks concurrently (a failed one yields null); pipeline(items, ...stages) streams each item through async stages; phase(title) labels progress; log(...) records notes; args holds the 'args' input. The body is an async function body: use await and return the result. Sub-agents run as the calling agent. Every finished agent() call is checkpointed: if Ryu restarts, a background task crashes, or a provider rate/usage/session limit is hit, the run resumes on its own and finished agents are not run again. The call waits up to wait_secs for the result; if the run is still going, call again with run_id to keep waiting. Calling again with the same script and args re-attaches to the same run instead of starting over.",
+        "timeout_secs": 600,
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "script": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 262144,
+              "description": "Async JavaScript body using agent(), parallel(), pipeline(), phase(), log(), and args."
+            },
+            "args": {
+              "description": "Any JSON value passed to the script as args."
+            },
+            "preset": {
+              "type": "string",
+              "enum": ["research", "code_read", "code_write", "summarise"],
+              "description": "Default sub-agent preset (research when omitted). code_write runs the calling agent with its tools."
+            },
+            "run_key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "Set to run the same script and args again as a separate run."
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Follow an existing run instead of starting one."
+            },
+            "wait_secs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 540,
+              "description": "How long to wait for the result (default 300)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "code": "// Tool body for `workflow.script`, run in Core's JS sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// with `input` (the call arguments) and `host` (the capability bridge) already\n// bound, and the body `return`s the tool's result. A top-level `return` is\n// therefore correct here and `export` is not.\n//\n// It must be a PURE function of `input` plus whatever `host.*` returns: no\n// `Date.now()`, no `Math.random()`, no ambient clock or environment. Everything\n// variable arrives as an argument. `node tools/toolsmith/index.mjs verify`\n// enforces that both statically and by running every case twice.\n//\n// The script itself never runs here: Core stores it as a durable workflow run\n// and executes it in its own sandbox, checkpointing every finished agent() call.\n\nfunction primitiveStringAdmitted(raw) {\n\ttry {\n\t\treturn String.prototype.valueOf.call(raw) === raw;\n\t} catch {\n\t\treturn false;\n\t}\n}\n\nconst MAX_SCRIPT_CHARS = 262_144;\nconst MAX_WAIT_SECS = 540;\nconst presets = new Set([\"research\", \"code_read\", \"code_write\", \"summarise\"]);\n\nconst args = input ?? {};\nconst waitSecs = args.wait_secs ?? 300;\nif (!Number.isInteger(waitSecs) || waitSecs < 0 || waitSecs > MAX_WAIT_SECS) {\n\tthrow new Error(\n\t\t`workflow.script: 'wait_secs' must be an integer from 0 to ${MAX_WAIT_SECS}`\n\t);\n}\n\nfunction describe(summary) {\n\tif (!summary || Object(summary) !== summary || !primitiveStringAdmitted(summary.run_id)) {\n\t\tthrow new Error(\"workflow.script: Core returned an invalid run summary\");\n\t}\n\tconst notes = {\n\t\trunning:\n\t\t\t\"Still running. Call workflow.script again with this run_id to keep waiting.\",\n\t\twaiting:\n\t\t\t\"Paused by a provider rate, usage, or session limit. It resumes on its own at resume_at; finished agents are kept.\",\n\t\tawaiting_input: \"Waiting for a person to respond before it can continue.\",\n\t\tfailed:\n\t\t\t\"Failed. Call workflow.script again with the same script and args to continue from the agents that already finished.\",\n\t\tcompleted: \"Finished.\",\n\t};\n\treturn { ...summary, note: notes[summary.status] ?? \"\" };\n}\n\nif (args.run_id !== undefined) {\n\tif (!primitiveStringAdmitted(args.run_id) || args.run_id.trim().length === 0) {\n\t\tthrow new Error(\"workflow.script: 'run_id' must be a non-empty string\");\n\t}\n\tif (args.script !== undefined) {\n\t\tthrow new Error(\"workflow.script: pass either 'script' or 'run_id', not both\");\n\t}\n\treturn describe(\n\t\tawait host.workflows.status({ run_id: args.run_id.trim(), wait_secs: waitSecs })\n\t);\n}\n\nif (!primitiveStringAdmitted(args.script) || args.script.trim().length === 0) {\n\tthrow new Error(\"workflow.script: 'script' must be a non-empty string\");\n}\nif (args.script.length > MAX_SCRIPT_CHARS) {\n\tthrow new Error(`workflow.script: 'script' exceeds ${MAX_SCRIPT_CHARS} characters`);\n}\nif (args.preset !== undefined && !presets.has(args.preset)) {\n\tthrow new Error(\"workflow.script: unknown 'preset'\");\n}\nif (\n\targs.run_key !== undefined &&\n\t(!primitiveStringAdmitted(args.run_key) ||\n\t\targs.run_key.trim().length === 0 ||\n\t\targs.run_key.length > 128)\n) {\n\tthrow new Error(\"workflow.script: 'run_key' must be 1-128 characters\");\n}\n\nconst request = {\n\tscript: args.script,\n\targs: args.args ?? null,\n\twait_secs: waitSecs,\n};\nif (args.preset !== undefined) request.preset = args.preset;\nif (args.run_key !== undefined) request.run_key = args.run_key.trim();\n\nreturn describe(await host.workflows.script(request));\n"
       }
     }
   ]

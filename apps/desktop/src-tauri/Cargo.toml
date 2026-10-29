@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -20,6 +20,15 @@ tauri-build = { version = "2.5.6", features = [] }
 dev-variant = []
 
 [dependencies]
+fs4 = "0.8.4"
+ryu-runtime-install = { path = "../../../crates/core/runtime-install" }
+# The data-dir layout (`layout::state_path`, `layout::secret_path`, …) shared with
+# Core, so Desktop reads and writes the same files Core does.
+ryu-sidecar-runtime = { path = "../../../crates/core/sidecar-runtime", features = ["peer-probe"] }
+# Seals the desktop's own stores (auth vault, license key, CLI-setup snapshots)
+# with a key held in the OS keychain (`desktop_seal.rs`). Default features keep
+# the keychain backend, the same `keyring` 3 the BYOK vault already links.
+ryu-crypto = { path = "../../../crates/core/crypto" }
 # `devtools` keeps Toggle DevTools / Inspect available when Developer Mode is
 # on in packaged builds (debug builds already enable the inspector).
 tauri = { version = "2.10.3", features = ["tray-icon", "macos-private-api", "image-png", "devtools"] }
@@ -43,6 +52,8 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 ghost-permissions = { path = "../../../crates/ghost/permissions" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml_edit = "0.22"
+ryu-gw-credentials = { path = "../../../crates/gateway/credentials" }
 sha2 = "0.10"
 hex = "0.4"
 log = "0.4"
@@ -51,6 +62,7 @@ base64 = "0.22"
 minisign-verify = "0.2"
 semver = "1"
 tempfile = "3"
+getrandom = "0.3"
 tokio = { version = "1", features = ["full"] }
 dirs = "5"
 which = "7"
@@ -59,6 +71,13 @@ futures = { version = "0.3", default-features = false, features = ["executor"] }
 tracing = "0.1"
 sysinfo = { version = "0.33", features = ["system"] }
 tauri-plugin-autostart = "2.5.1"
+jsonc-parser = { version = "0.27.0", features = ["cst", "serde"] }
+json5 = "0.4"
+serde_yaml = "0.9"
+chrono = "0.4"
+# OS notifications with the sender's avatar image (see `os_notifications.rs`);
+# the same backend tauri-plugin-notification uses, without dropping the image.
+notify-rust = "4.18"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }
@@ -70,6 +89,9 @@ windows = { version = "0.59", features = [
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemInformation",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }

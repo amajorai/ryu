@@ -31,7 +31,7 @@ export type CatalogRealm =
 	| "workflows";
 
 /** Realm → glyph. The tab nav and the card fallback both read from here. */
-export const REALM_ICONS: Record<CatalogRealm, IconSvgElement> = {
+export const REALM_ICONS = {
 	apps: Package01Icon,
 	plugins: PlugSocketIcon,
 	models: BrainIcon,
@@ -39,4 +39,4 @@ export const REALM_ICONS: Record<CatalogRealm, IconSvgElement> = {
 	mcp: ServerStack01Icon,
 	agents: Target01Icon,
 	workflows: WorkflowCircle06Icon,
-};
+} satisfies Record<CatalogRealm, IconSvgElement>;

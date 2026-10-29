@@ -2,9 +2,6 @@ import { expect, test } from "@playwright/test";
 
 test.describe.configure({ timeout: 90_000 });
 
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/Documents/Code/ryu/apps/desktop/artifacts/message-bubbles-a-major-pass-proof.png";
-
 test("proves grouped bubbles, compact actions, and pass access copy", async ({
 	page,
 }) => {
@@ -130,5 +127,8 @@ test("proves grouped bubbles, compact actions, and pass access copy", async ({
 	// proof frame shows both the ticket explanation and the compact toolbar.
 	await page.locator('[data-assistant-group-position="last"]').hover();
 
-	await page.screenshot({ fullPage: true, path: PROOF_SCREENSHOT });
+	await page.screenshot({
+		fullPage: true,
+		path: test.info().outputPath("message-bubbles-a-major-pass-proof.png"),
+	});
 });

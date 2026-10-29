@@ -5,8 +5,9 @@ import {
 	Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -14,9 +15,11 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group";
+} from "@ryu/ui/components/dialog.tsx";
+import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group.tsx";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { useEffect, useState } from "react";
+import { ApiError } from "@/src/lib/api/client.ts";
 import {
 	CONNECTION_ACCESS_OPTIONS,
 	type ConnectionAccessLevel,
@@ -40,6 +43,7 @@ export function ConnectionPermissionDialog({
 	onOpenChange: (open: boolean) => void;
 	open: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [selected, setSelected] = useState<ConnectionAccessLevel>(
 		normalizeConnectionAccessLevel(currentLevel)
 	);
@@ -62,9 +66,11 @@ export function ConnectionPermissionDialog({
 			onOpenChange(false);
 		} catch (cause) {
 			setError(
-				cause instanceof Error
-					? cause.message
-					: "The connection could not be started."
+				cause instanceof ApiError
+					? (cause.serverMessage ?? cause.message)
+					: cause instanceof Error
+						? cause.message
+						: "The connection could not be started."
 			);
 		} finally {
 			setSaving(false);
@@ -79,16 +85,20 @@ export function ConnectionPermissionDialog({
 				showCloseButton={!saving}
 			>
 				<DialogHeader>
-					<div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-[0.12em]">
+					<div className="flex items-center gap-2 text-muted-foreground text-xs uppercase tracking-widest">
 						<HugeiconsIcon className="size-4" icon={Shield01Icon} />
 						<span>Connection review</span>
 					</div>
 					<DialogTitle>
-						Review access before connecting {connectionName}
+						{tl("Review access before connecting {connectionName}", {
+							connectionName,
+						})}
 					</DialogTitle>
 					<DialogDescription>
-						Choose the maximum this {connectionType} account may do through Ryu.
-						You can change the choice the next time you reconnect.
+						{tl(
+							"Choose the maximum this {connectionType} account may do through Ryu. You can change the choice the next time you reconnect.",
+							{ connectionType }
+						)}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -109,9 +119,9 @@ export function ConnectionPermissionDialog({
 
 				<RadioGroup
 					aria-label="Connection access level"
-					className="flex flex-col gap-2"
+					className="flex flex-col"
 					onValueChange={(value) => {
-						if (typeof value === "string") {
+						if (isNativeText(value)) {
 							setSelected(normalizeConnectionAccessLevel(value));
 						}
 					}}
@@ -140,7 +150,7 @@ export function ConnectionPermissionDialog({
 									<span className="flex flex-wrap items-center gap-2 font-medium text-sm">
 										{option.label}
 										{option.id === DEFAULT_CONNECTION_ACCESS_LEVEL ? (
-											<Badge className="text-[10px]" variant="secondary">
+											<Badge size="compact" variant="secondary">
 												Default
 											</Badge>
 										) : null}

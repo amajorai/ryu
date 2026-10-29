@@ -1,0 +1,8 @@
+.grid {
+	grid-template-rows: var(--rail-rows);
+	grid-template-columns: var(--rail-columns);
+}
+.item {
+	width: var(--rail-width);
+	height: var(--rail-height);
+}

@@ -20,11 +20,66 @@
 //! parakeet model directory — are injected via the narrow [`SttHost`] trait. The crate has
 //! ZERO dependency on `apps/core` (mirrors `ryu-search`'s `SearchEmbedder` seam).
 
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use serde_json::{json, Value};
 
 pub mod parakeet;
+
+/// Per-engine request options for the multipart STT adapters. Engines that do
+/// not accept these request fields (currently the in-process Parakeet path)
+/// continue to use their own defaults. `extra` is a bounded raw field escape
+/// hatch for upstream options not represented here.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+pub struct TranscriptionConfig {
+    pub language: Option<String>,
+    pub translate: Option<bool>,
+    pub temperature: Option<f64>,
+    pub temperature_inc: Option<f64>,
+    pub best_of: Option<u32>,
+    pub beam_size: Option<u32>,
+    pub prompt: Option<String>,
+    pub no_context: Option<bool>,
+    pub suppress_nst: Option<bool>,
+    pub max_context: Option<i32>,
+    pub max_len: Option<u32>,
+    pub extra: BTreeMap<String, String>,
+}
+
+impl TranscriptionConfig {
+    fn multipart_fields(&self) -> Vec<(String, String)> {
+        let mut fields = Vec::new();
+        macro_rules! add {
+            ($key:literal, $value:expr) => {
+                if let Some(value) = $value {
+                    fields.push(($key.to_owned(), value.to_string()));
+                }
+            };
+        }
+        add!("language", self.language.as_deref());
+        add!("translate", self.translate);
+        add!("temperature", self.temperature);
+        add!("temperature_inc", self.temperature_inc);
+        add!("best_of", self.best_of);
+        add!("beam_size", self.beam_size);
+        add!("prompt", self.prompt.as_deref());
+        add!("no_context", self.no_context);
+        add!("suppress_nst", self.suppress_nst);
+        add!("max_context", self.max_context);
+        add!("max_len", self.max_len);
+        fields.extend(self.extra.iter().take(32).filter_map(|(key, value)| {
+            let key = key.trim();
+            let value = value.trim();
+            (!key.is_empty()
+                && key.len() <= 64
+                && value.len() <= 4096
+                && !matches!(key, "file" | "model"))
+            .then(|| (key.to_owned(), value.to_owned()))
+        }));
+        fields
+    }
+}
 
 /// Narrow host seam for the STT dispatch: the couplings the crate cannot own
 /// because they read Core config/paths (the whisper sidecar base-url, the Gateway
@@ -35,7 +90,8 @@ pub trait SttHost: Send + Sync {
     fn whisper_base_url(&self) -> String;
     /// Base URL of the local audio.cpp server (`{base}/v1/audio/transcriptions`).
     fn audio_cpp_base_url(&self) -> String {
-        "http://127.0.0.1:8086".to_string()
+        // Mirrors Core's `audiocpp::AUDIOCPP_PORT_BASE` (release profile).
+        "http://127.0.0.1:8091".to_string()
     }
     /// Model id declared in Ryu's generated audio.cpp server config.
     fn audio_cpp_stt_model(&self) -> String {
@@ -45,7 +101,8 @@ pub trait SttHost: Send + Sync {
     fn gateway_url(&self) -> String;
     /// The Gateway bearer token slot (never a raw provider API key).
     fn gateway_bearer(&self) -> Result<String, String>;
-    /// The extracted parakeet ONNX model directory (a `~/.ryu` path Core owns).
+    /// The extracted parakeet ONNX model directory
+    /// (`models/speech-to-text/parakeet/parakeet-tdt-0.6b-v3-int8`, which Core owns).
     fn parakeet_model_dir(&self) -> PathBuf;
 }
 
@@ -171,6 +228,31 @@ pub fn default_stt_engine() -> String {
     }
 }
 
+/// The STT engine ids this crate can route to. Anything else is a
+/// configuration error (a typo in a stored preference, `RYU_STT_ENGINE`, or a
+/// per-request selector), never a silent reroute to a different engine.
+pub const STT_ENGINES: &[&str] = &["parakeet", "whisper", "audiocpp", "gateway"];
+
+/// Resolve an STT engine selector: an explicit non-empty selector wins,
+/// otherwise the swappable cross-surface default. Unknown ids are refused with
+/// an error naming the valid choices (and logged), so a typo surfaces instead
+/// of quietly running whisper.cpp.
+pub fn resolve_stt_engine(engine: Option<&str>) -> Result<String, String> {
+    let engine = engine
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(default_stt_engine);
+    if STT_ENGINES.contains(&engine.as_str()) {
+        return Ok(engine);
+    }
+    tracing::warn!(engine = %engine, "unknown STT engine requested; refusing to fall back");
+    Err(format!(
+        "unknown STT engine '{engine}'; expected one of: {}",
+        STT_ENGINES.join(", ")
+    ))
+}
+
 /// Transcribe raw audio bytes to text. Routes to the in-process parakeet engine
 /// (the default — see [`default_stt_engine`]) or the whisper.cpp voice server
 /// (`engine == Some("whisper")`).
@@ -202,13 +284,31 @@ pub async fn transcribe_wav_detailed(
     filename: String,
     engine: Option<&str>,
 ) -> Result<Transcription, String> {
+    transcribe_wav_detailed_with_config(
+        client,
+        host,
+        bytes,
+        filename,
+        engine,
+        TranscriptionConfig::default(),
+    )
+    .await
+}
+
+/// Like [`transcribe_wav_detailed`] with node-wide request options for engines
+/// that accept multipart tuning fields (whisper.cpp and audio.cpp).
+pub async fn transcribe_wav_detailed_with_config(
+    client: &reqwest::Client,
+    host: &dyn SttHost,
+    bytes: Vec<u8>,
+    filename: String,
+    engine: Option<&str>,
+    config: TranscriptionConfig,
+) -> Result<Transcription, String> {
     // Resolve the engine: an explicit non-empty selector wins; otherwise fall
     // back to the swappable cross-surface default (parakeet where compiled in).
-    let engine = engine
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(default_stt_engine);
+    // An unknown id is an error, not a silent route to whisper.cpp.
+    let engine = resolve_stt_engine(engine)?;
 
     // Route to the in-process parakeet engine (default). Text only — no segments.
     //
@@ -237,7 +337,7 @@ pub async fn transcribe_wav_detailed(
     // `parse_audio_cpp_segments` normalizes those to the shared millisecond
     // clip contract.
     if engine == "audiocpp" {
-        return transcribe_via_audio_cpp(client, host, bytes, filename).await;
+        return transcribe_via_audio_cpp(client, host, bytes, filename, &config).await;
     }
 
     // Gateway-routed Whisper: the swappable cloud STT slot (default provider
@@ -245,10 +345,10 @@ pub async fn transcribe_wav_detailed(
     // per-attribute slot headers + a bearer to the Gateway — never a raw provider
     // key (CLAUDE.md §1: routing/measuring the model call is a Gateway concern).
     if engine == "gateway" {
-        return transcribe_via_gateway(client, host, bytes).await;
+        return transcribe_via_gateway(client, host, bytes, filename, &config).await;
     }
 
-    // Default: forward to whisper.cpp's `/inference` multipart endpoint. Request
+    // `whisper`: forward to whisper.cpp's `/inference` multipart endpoint. Request
     // `verbose_json` so the response carries per-segment timings (whisper.cpp
     // degrades to a plain `{ "text": ... }` when it can't, which parses to no
     // segments — never an error).
@@ -256,6 +356,10 @@ pub async fn transcribe_wav_detailed(
     let form = reqwest::multipart::Form::new()
         .part("file", part)
         .text("response_format", "verbose_json");
+    let form = config
+        .multipart_fields()
+        .into_iter()
+        .fold(form, |form, (key, value)| form.text(key, value));
 
     let url = format!("{}/inference", host.whisper_base_url());
     let resp = client
@@ -352,11 +456,22 @@ async fn transcribe_via_audio_cpp(
     host: &dyn SttHost,
     bytes: Vec<u8>,
     filename: String,
+    config: &TranscriptionConfig,
 ) -> Result<Transcription, String> {
     let part = reqwest::multipart::Part::bytes(bytes).file_name(filename);
     let form = reqwest::multipart::Form::new()
         .part("file", part)
         .text("model", host.audio_cpp_stt_model());
+    let form = config
+        .multipart_fields()
+        .into_iter()
+        .filter(|(key, _)| {
+            matches!(
+                key.as_str(),
+                "language" | "temperature" | "prompt" | "response_format"
+            ) || config.extra.contains_key(key)
+        })
+        .fold(form, |form, (key, value)| form.text(key, value));
     let base = host.audio_cpp_base_url();
     let url = format!("{}/v1/audio/transcriptions", base.trim_end_matches('/'));
     let response = client
@@ -394,70 +509,136 @@ async fn transcribe_via_audio_cpp(
     })
 }
 
+/// The subset of [`TranscriptionConfig`] the Gateway's strict OpenAI multipart
+/// accepts (`language`, `prompt`, `temperature`), bounded the way the Gateway
+/// validates them. A value the Gateway would reject is dropped here so a stale
+/// preference degrades to the provider default instead of failing every request.
+fn gateway_multipart_fields(config: &TranscriptionConfig) -> Vec<(&'static str, String)> {
+    let mut fields = Vec::new();
+    if let Some(language) = config
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|language| {
+            !language.is_empty()
+                && language.len() <= 32
+                && language
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphabetic() || byte == b'-')
+        })
+    {
+        fields.push(("language", language.to_owned()));
+    }
+    if let Some(prompt) = config
+        .prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty() && prompt.len() <= 4096)
+    {
+        fields.push(("prompt", prompt.to_owned()));
+    }
+    if let Some(temperature) = config
+        .temperature
+        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+    {
+        fields.push(("temperature", temperature.to_string()));
+    }
+    fields
+}
+
 /// Transcribe audio through the Gateway's `/v1/audio/transcriptions`, the
-/// swappable cloud STT slot. The audio is base64-encoded into a JSON body (Core
-/// carries no multipart to the Gateway) with the per-attribute slot headers that
-/// tell the Gateway which provider/model to route to. Bearer is the Gateway
-/// token slot — never a raw provider API key.
-///
-/// FLAG (whisper-gateway, pre-existing gap owned by `apps/gateway`, out of scope
-/// here): for true end-to-end the Gateway's OpenAI provider must re-multipart
-/// this base64 audio upstream — real Groq/OpenAI `/audio/transcriptions` need a
-/// multipart file, but `providers/openai.rs` currently forwards JSON verbatim.
-/// The Gateway owner must also point `modality_map[Stt]`/`base_url` at Groq. Until
-/// then, set `RYU_CLIP_STT_ENGINE=whisper` (local whisper.cpp) to ship without
-/// waiting — and captions-first means most YouTube ingests never hit Whisper.
+/// swappable cloud STT slot. Standard multipart carries the original audio;
+/// explicit slot pins are optional so node modality routing remains authoritative.
+/// The bearer authenticates Core to the Gateway, never to an upstream provider.
 async fn transcribe_via_gateway(
     client: &reqwest::Client,
     host: &dyn SttHost,
     bytes: Vec<u8>,
+    filename: String,
+    config: &TranscriptionConfig,
 ) -> Result<Transcription, String> {
-    use base64::Engine as _;
-
-    let audio_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    if bytes.is_empty() || bytes.len() > 25 * 1024 * 1024 {
+        return Err("gateway STT requires nonempty audio no larger than 25 MiB".to_owned());
+    }
+    if filename.is_empty()
+        || filename.len() > 200
+        || filename
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+    {
+        return Err("gateway STT requires a bounded leaf filename".to_owned());
+    }
 
     let provider = std::env::var("RYU_STT_GATEWAY_PROVIDER")
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "openai".to_string());
-    let model = std::env::var("RYU_STT_GATEWAY_MODEL")
+        .filter(|s| !s.is_empty());
+    let slot_model = std::env::var("RYU_STT_GATEWAY_MODEL")
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "whisper-large-v3".to_string());
+        .filter(|s| !s.is_empty());
+    let model = slot_model.clone().unwrap_or_else(|| {
+        if provider.as_deref() == Some("groq") {
+            "whisper-large-v3".to_owned()
+        } else if provider.as_deref() == Some("qwen") {
+            "qwen3-asr-flash".to_owned()
+        } else {
+            "whisper-1".to_owned()
+        }
+    });
 
     let base = host.gateway_url();
     let base = base.trim_end_matches('/');
     let url = format!("{base}/v1/audio/transcriptions");
     let bearer = host.gateway_bearer()?;
 
-    let payload = json!({
-        "model": model,
-        "file": audio_b64,
-        "response_format": "verbose_json",
-    });
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(filename);
+    let form = reqwest::multipart::Form::new()
+        .part("file", part)
+        .text("model", model.clone())
+        .text("response_format", "json");
+    let form = gateway_multipart_fields(config)
+        .into_iter()
+        .fold(form, |form, (key, value)| form.text(key, value));
 
-    let resp = client
-        .post(&url)
-        .bearer_auth(bearer)
-        .header("x-ryu-slot-stt-provider", &provider)
-        .header("x-ryu-slot-stt-model", &model)
-        .json(&payload)
+    let mut request = client.post(&url).bearer_auth(bearer);
+    if let Some(provider) = &provider {
+        request = request.header("x-ryu-slot-stt-provider", provider);
+    }
+    if let Some(model) = &slot_model {
+        request = request.header("x-ryu-slot-stt-model", model);
+    }
+    let mut resp = request
+        .multipart(form)
         .send()
         .await
-        .map_err(|e| format!("gateway STT unreachable at {url}: {e}"))?;
+        .map_err(|_| "gateway STT transport unavailable".to_owned())?;
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let detail = resp.text().await.unwrap_or_default();
-        return Err(format!("gateway STT returned {status}: {detail}"));
+        return Err(format!("gateway STT returned {status}"));
     }
 
-    let value: Value = resp
-        .json()
+    const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+    if resp
+        .content_length()
+        .is_some_and(|size| size > MAX_RESPONSE_BYTES as u64)
+    {
+        return Err("gateway STT response exceeds its size limit".to_owned());
+    }
+    let mut response_body = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
         .await
-        .map_err(|e| format!("could not parse gateway STT response: {e}"))?;
+        .map_err(|_| "gateway STT response unavailable".to_owned())?
+    {
+        if response_body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+            return Err("gateway STT response exceeds its size limit".to_owned());
+        }
+        response_body.extend_from_slice(&chunk);
+    }
+    let value: Value = serde_json::from_slice(&response_body)
+        .map_err(|_| "could not parse gateway STT response".to_owned())?;
     let text = value
         .get("text")
         .and_then(Value::as_str)
@@ -475,6 +656,30 @@ async fn transcribe_via_gateway(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcription_config_emits_typed_and_safe_raw_multipart_fields() {
+        let config = TranscriptionConfig {
+            language: Some("fr".to_owned()),
+            translate: Some(true),
+            temperature: Some(0.25),
+            extra: BTreeMap::from([
+                ("vad".to_owned(), "true".to_owned()),
+                ("file".to_owned(), "override.wav".to_owned()),
+                ("model".to_owned(), "other-model".to_owned()),
+            ]),
+            ..Default::default()
+        };
+        let fields = config.multipart_fields();
+        assert!(fields.contains(&("language".to_owned(), "fr".to_owned())));
+        assert!(fields.contains(&("translate".to_owned(), "true".to_owned())));
+        assert!(fields.contains(&("temperature".to_owned(), "0.25".to_owned())));
+        assert!(fields.contains(&("vad".to_owned(), "true".to_owned())));
+        assert!(!fields
+            .iter()
+            .any(|(key, _)| key == "file" || key == "model"));
+    }
+
     #[test]
     fn measured_words_are_normalized_without_guessing_timing() {
         let body = serde_json::json!({"segments":[{"words":[{"word":" Hello ","start":0.1,"end":0.42},{"word":"invalid","start":1.0,"end":0.5},{"word":"untimed"}]}]});
@@ -531,6 +736,52 @@ mod tests {
             Some(v) => std::env::set_var("RYU_STT_ENGINE", v),
             None => std::env::remove_var("RYU_STT_ENGINE"),
         }
+    }
+
+    #[test]
+    fn resolve_stt_engine_accepts_known_ids_and_refuses_typos() {
+        for engine in STT_ENGINES {
+            assert_eq!(resolve_stt_engine(Some(engine)).unwrap(), *engine);
+        }
+        assert_eq!(resolve_stt_engine(Some("  whisper ")).unwrap(), "whisper");
+        let error = resolve_stt_engine(Some("whsiper")).unwrap_err();
+        assert!(error.contains("unknown STT engine 'whsiper'"), "{error}");
+        assert!(
+            error.contains("parakeet, whisper, audiocpp, gateway"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_engine_errors_instead_of_routing_to_whisper() {
+        struct NoHost;
+        impl SttHost for NoHost {
+            fn whisper_base_url(&self) -> String {
+                panic!("an unknown engine must not reach whisper.cpp")
+            }
+            fn audio_cpp_base_url(&self) -> String {
+                panic!("an unknown engine must not reach audio.cpp")
+            }
+            fn gateway_url(&self) -> String {
+                panic!("an unknown engine must not reach the Gateway")
+            }
+            fn gateway_bearer(&self) -> Result<String, String> {
+                Err("unused".into())
+            }
+            fn parakeet_model_dir(&self) -> PathBuf {
+                PathBuf::new()
+            }
+        }
+        let error = transcribe_wav_detailed(
+            &reqwest::Client::new(),
+            &NoHost,
+            vec![0; 8],
+            "a.wav".into(),
+            Some("parakeat"),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("unknown STT engine 'parakeat'"), "{error}");
     }
 
     #[test]
@@ -646,6 +897,8 @@ mod tests {
         provider: Option<String>,
         model: Option<String>,
         authorization: Option<String>,
+        content_type: Option<String>,
+        body: Vec<u8>,
     }
 
     struct TestServer {
@@ -673,7 +926,7 @@ mod tests {
     async fn spawn_server(status: StatusCode, resp_body: &'static str) -> TestServer {
         let captured: Arc<Mutex<Vec<Captured>>> = Arc::new(Mutex::new(Vec::new()));
         let cap = captured.clone();
-        let app = Router::new().fallback(move |headers: HeaderMap, _body: String| {
+        let app = Router::new().fallback(move |headers: HeaderMap, body: axum::body::Bytes| {
             let cap = cap.clone();
             async move {
                 let get = |k: &str| {
@@ -686,6 +939,8 @@ mod tests {
                     provider: get("x-ryu-slot-stt-provider"),
                     model: get("x-ryu-slot-stt-model"),
                     authorization: get("authorization"),
+                    content_type: get("content-type"),
+                    body: body.to_vec(),
                 });
                 (status, resp_body)
             }
@@ -905,7 +1160,7 @@ mod tests {
     // ── Gateway engine ────────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn gateway_success_sends_default_slot_headers_and_bearer() {
+    async fn gateway_success_uses_multipart_without_overriding_node_routing() {
         let _g = env_guard();
         std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
         std::env::remove_var("RYU_STT_GATEWAY_MODEL");
@@ -923,7 +1178,7 @@ mod tests {
         let out = transcribe_wav_detailed(
             &client,
             &host,
-            b"a".to_vec(),
+            vec![0, 255, 1],
             "c.wav".to_string(),
             Some("gateway"),
         )
@@ -932,12 +1187,79 @@ mod tests {
         assert_eq!(out.text, "gw text");
         assert_eq!(out.segments.len(), 1);
         let cap = server.last();
-        assert_eq!(cap.provider.as_deref(), Some("openai"));
-        assert_eq!(cap.model.as_deref(), Some("whisper-large-v3"));
+        assert_eq!(cap.provider, None);
+        assert_eq!(cap.model, None);
+        assert!(cap
+            .content_type
+            .as_deref()
+            .unwrap()
+            .starts_with("multipart/form-data; boundary="));
+        assert!(cap.body.windows(3).any(|bytes| bytes == [0, 255, 1]));
+        let filename = b"filename=\"c.wav\"";
+        assert!(cap
+            .body
+            .windows(filename.len())
+            .any(|bytes| bytes == filename));
         assert_eq!(
             cap.authorization.as_deref(),
             Some("Bearer secret-slot-token")
         );
+    }
+
+    #[test]
+    fn gateway_fields_forward_only_values_the_gateway_accepts() {
+        let config = TranscriptionConfig {
+            language: Some(" fr ".to_owned()),
+            prompt: Some("Ryu, Parakeet".to_owned()),
+            temperature: Some(0.2),
+            translate: Some(true),
+            extra: BTreeMap::from([("vad".to_owned(), "true".to_owned())]),
+            ..Default::default()
+        };
+        assert_eq!(
+            gateway_multipart_fields(&config),
+            vec![
+                ("language", "fr".to_owned()),
+                ("prompt", "Ryu, Parakeet".to_owned()),
+                ("temperature", "0.2".to_owned()),
+            ]
+        );
+        let rejected = TranscriptionConfig {
+            language: Some("en_US".to_owned()),
+            prompt: Some("  ".to_owned()),
+            temperature: Some(1.5),
+            ..Default::default()
+        };
+        assert!(gateway_multipart_fields(&rejected).is_empty());
+    }
+
+    #[tokio::test]
+    async fn gateway_forwards_configured_language() {
+        let _g = env_guard();
+        std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
+        std::env::remove_var("RYU_STT_GATEWAY_MODEL");
+        let server = spawn_server(StatusCode::OK, r#"{"text":"bonjour"}"#).await;
+        let host = FakeHost {
+            gateway: server.url(),
+            ..FakeHost::default()
+        };
+        let config = TranscriptionConfig {
+            language: Some("fr".to_owned()),
+            ..Default::default()
+        };
+        let out = transcribe_wav_detailed_with_config(
+            &reqwest::Client::new(),
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("gateway"),
+            config,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "bonjour");
+        let body = String::from_utf8_lossy(&server.last().body).into_owned();
+        assert!(body.contains("name=\"language\"\r\n\r\nfr\r\n"), "{body}");
     }
 
     #[tokio::test]
@@ -1014,7 +1336,10 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.contains("gateway STT returned 401"), "got: {err}");
-        assert!(err.contains("bad key"), "got: {err}");
+        assert!(
+            !err.contains("bad key"),
+            "upstream details must stay private: {err}"
+        );
     }
 
     #[tokio::test]
@@ -1062,7 +1387,64 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("gateway STT unreachable"), "got: {err}");
+        assert_eq!(err, "gateway STT transport unavailable");
+    }
+
+    #[tokio::test]
+    async fn gateway_qwen_pin_uses_json_and_its_native_model() {
+        let _g = env_guard();
+        std::env::set_var("RYU_STT_GATEWAY_PROVIDER", "qwen");
+        std::env::remove_var("RYU_STT_GATEWAY_MODEL");
+        let server = spawn_server(StatusCode::OK, r#"{"text":"native"}"#).await;
+        let host = FakeHost {
+            gateway: server.url(),
+            ..FakeHost::default()
+        };
+        let out = transcribe_wav_detailed(
+            &reqwest::Client::new(),
+            &host,
+            b"a".to_vec(),
+            "clip.wav".to_owned(),
+            Some("gateway"),
+        )
+        .await
+        .unwrap();
+        std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
+        assert_eq!(out.text, "native");
+        assert!(out.segments.is_empty() && out.words.is_empty());
+        let captured = server.last();
+        assert_eq!(captured.provider.as_deref(), Some("qwen"));
+        assert_eq!(captured.model, None);
+        let body = String::from_utf8(captured.body).unwrap();
+        assert!(body.contains("qwen3-asr-flash"));
+        assert!(body.contains("name=\"response_format\"\r\n\r\njson"));
+        assert!(!body.contains("verbose_json"));
+    }
+
+    #[tokio::test]
+    async fn gateway_rejects_empty_audio_and_path_filenames_before_http() {
+        let server = spawn_server(StatusCode::OK, r#"{"text":"unused"}"#).await;
+        let host = FakeHost {
+            gateway: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        for (audio, filename) in [
+            (Vec::new(), "clip.wav"),
+            (vec![1], "../private.wav"),
+            (vec![1], "private\\clip.wav"),
+        ] {
+            assert!(transcribe_via_gateway(
+                &client,
+                &host,
+                audio,
+                filename.to_owned(),
+                &TranscriptionConfig::default()
+            )
+            .await
+            .is_err());
+        }
+        assert!(server.captured.lock().unwrap().is_empty());
     }
 
     // ── parakeet dispatch (feature off in `cargo test`) ───────────────────────

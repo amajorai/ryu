@@ -125,6 +125,10 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
+
+const MONITOR_TEXT_INPUT = Type.String();
+const MONITOR_NUMBER_INPUT = Type.Number();
 
 /** Prefix on every stderr line so Core's `acp_subprocess` log is greppable. */
 const LOG_PREFIX = "[ryu-monitor]";
@@ -194,11 +198,6 @@ const SUBAGENT_MARKER = "RYU_PI_SUBAGENT";
 
 // ── Small helpers ───────────────────────────────────────────────────────────
 
-/** Message of a thrown value, without assuming it is an Error. */
-function errorText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
-
 /**
  * The reason channel. Visible when Pi is run standalone; DISCARDED under Ryu,
  * because pi-acp sinks its child's stderr into a no-op handler (see the
@@ -231,8 +230,8 @@ function formatDuration(ms: number): string {
  * clamped rather than rejected so a model guessing wildly at units still gets
  * a working watch.
  */
-function clampTimeout(raw: unknown): number {
-	if (typeof raw !== "number" || !Number.isFinite(raw)) {
+function clampTimeout<Input>(raw: Input): number {
+	if (!(Value.Check(MONITOR_NUMBER_INPUT, raw) && Number.isFinite(raw))) {
 		return DEFAULT_TIMEOUT_MS;
 	}
 	return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, Math.round(raw)));
@@ -269,7 +268,7 @@ function compileUntil(raw: string | undefined): RegExp | undefined {
 		return re;
 	} catch (err) {
 		throw new Error(
-			`monitor: invalid \`until\` regex ${JSON.stringify(raw)}: ${errorText(err)}`
+			`monitor: invalid \`until\` regex ${JSON.stringify(raw)}: ${err instanceof Error ? err.message : String(err)}`
 		);
 	}
 }
@@ -307,7 +306,9 @@ function validateWsUrl(raw: string): string {
 	try {
 		parsed = new URL(url);
 	} catch (err) {
-		throw new Error(`monitor: invalid ws.url: ${errorText(err)}`);
+		throw new Error(
+			`monitor: invalid ws.url: ${err instanceof Error ? err.message : String(err)}`
+		);
 	}
 	if (parsed.username || parsed.password) {
 		throw new Error("monitor: ws.url must not embed credentials");
@@ -560,10 +561,12 @@ function startCommandWatch(config: CommandConfig, sink: LineSink): WatchHandle {
 	child.on("error", (err) => {
 		// A spawn failure (bad cwd, no shell) surfaces asynchronously; without a
 		// handler it is fatal to Pi. It becomes a visible line AND the outcome.
-		sink.push(`${LOG_PREFIX} spawn failed: ${errorText(err)}`);
+		sink.push(
+			`${LOG_PREFIX} spawn failed: ${err instanceof Error ? err.message : String(err)}`
+		);
 		settle({
 			ended: "error",
-			error: errorText(err),
+			error: err instanceof Error ? err.message : String(err),
 			exitCode: null,
 			exitSignal: null,
 		});
@@ -605,35 +608,14 @@ function startCommandWatch(config: CommandConfig, sink: LineSink): WatchHandle {
 // ── WebSocket source ────────────────────────────────────────────────────────
 
 /**
- * The subset of the DOM `WebSocket` surface this file uses, stated structurally
- * so the file compiles without a DOM lib. The runtime's real global satisfies
- * it (Node ≥ 21's undici WebSocket and Bun's both do).
+ * Borrow the runtime SDK's actual global WebSocket instance surface.
+ * The host contract is Node ≥ 21's undici WebSocket or Bun's global.
  */
-interface WsSocket {
-	close: (code?: number, reason?: string) => void;
-	onclose: ((event: { code?: number; reason?: string }) => void) | null;
-	onerror: ((event: unknown) => void) | null;
-	onmessage: ((event: { data: unknown }) => void) | null;
-	onopen: (() => void) | null;
-}
+type WsSocket = InstanceType<typeof globalThis.WebSocket>;
 
-type WsConstructor = new (
-	url: string,
-	protocols?: string[] | string
-) => WsSocket;
-
-function binarySize(data: unknown): number {
-	if (data && typeof data === "object") {
-		const candidate = data as { byteLength?: number; size?: number };
-		if (typeof candidate.byteLength === "number") {
-			return candidate.byteLength;
-		}
-		if (typeof candidate.size === "number") {
-			return candidate.size;
-		}
-	}
-	return 0;
-}
+// Availability admission observes the exact native function category used by
+// the prior host fallback; the constructor signature remains the real SDK's.
+const MONITOR_WS_FUNCTION = Type.Function([], Type.Unknown());
 
 /**
  * Watch a WebSocket feed: each text message becomes one line (even when it
@@ -661,8 +643,8 @@ function startWsWatch(
 		resolveDone(outcome);
 	};
 
-	const WsCtor = (globalThis as { WebSocket?: WsConstructor }).WebSocket;
-	if (typeof WsCtor !== "function") {
+	const WsCtor = globalThis.WebSocket;
+	if (!Value.Check(MONITOR_WS_FUNCTION, WsCtor)) {
 		settle({
 			ended: "error",
 			error:
@@ -688,7 +670,7 @@ function startWsWatch(
 	} catch (err) {
 		settle({
 			ended: "error",
-			error: errorText(err),
+			error: err instanceof Error ? err.message : String(err),
 			exitCode: null,
 			exitSignal: null,
 		});
@@ -719,7 +701,7 @@ function startWsWatch(
 			return;
 		}
 		const data = event.data;
-		if (typeof data === "string") {
+		if (Value.Check(MONITOR_TEXT_INPUT, data)) {
 			if (Buffer.byteLength(data, "utf8") > MAX_WS_MESSAGE_BYTES) {
 				sink.push(
 					`${LOG_PREFIX} message exceeded ${MAX_WS_MESSAGE_BYTES} bytes; ending the watch`
@@ -732,7 +714,13 @@ function startWsWatch(
 		}
 		// Binary frames are summarized, never passed through (same posture as
 		// Claude Code's monitor: a placeholder line instead of the payload).
-		sink.push(`[binary frame, ${binarySize(data)} bytes]`);
+		let bytes = 0;
+		if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+			bytes = data.byteLength;
+		} else if (data instanceof Blob) {
+			bytes = data.size;
+		}
+		sink.push(`[binary frame, ${bytes} bytes]`);
 	};
 	// An error is recorded, NOT terminal: undici always follows `onerror` with
 	// `onclose` (code 1006 for an abnormal closure), and `onclose` is the single
@@ -833,8 +821,11 @@ function buildDetails(monitorId: string, cfg: WatchConfig): MonitorDetails {
 /** Resolve a caller-supplied cwd against the session cwd, confirming it is a
  *  directory BEFORE spawning — a bad cwd otherwise surfaces as an async spawn
  *  error and the watch reports success for a process that never ran. */
-async function resolveCwd(raw: unknown, sessionCwd: string): Promise<string> {
-	const requested = typeof raw === "string" ? raw.trim() : "";
+async function resolveCwd<Input>(
+	raw: Input,
+	sessionCwd: string
+): Promise<string> {
+	const requested = Value.Check(MONITOR_TEXT_INPUT, raw) ? raw.trim() : "";
 	if (!requested) {
 		return sessionCwd;
 	}
@@ -994,12 +985,13 @@ export default function (pi: ExtensionAPI) {
 			// reason the model can read, before anything is spawned. The two
 			// branches below are deliberately shaped so TypeScript narrows
 			// `wsRaw` to defined in the WebSocket arm.
-			const command =
-				typeof params?.command === "string" ? params.command.trim() : "";
-			const wsRaw = params?.ws as
-				| { url?: unknown; protocols?: unknown }
-				| undefined;
-			const hasWs = Boolean(wsRaw && typeof wsRaw.url === "string");
+			const command = Value.Check(MONITOR_TEXT_INPUT, params?.command)
+				? params.command.trim()
+				: "";
+			const wsRaw = params?.ws;
+			const hasWs = Boolean(
+				wsRaw && Value.Check(MONITOR_TEXT_INPUT, wsRaw.url)
+			);
 			if (command && hasWs) {
 				throw new Error(
 					"monitor: pass exactly one source — pass `command` OR `ws.url`, not both."
@@ -1011,25 +1003,25 @@ export default function (pi: ExtensionAPI) {
 				);
 			}
 			const until = compileUntil(
-				typeof params?.until === "string" && params.until.trim()
+				Value.Check(MONITOR_TEXT_INPUT, params?.until) && params.until.trim()
 					? params.until.trim()
 					: undefined
 			);
 			const timeoutMs = clampTimeout(params?.timeout_ms);
-			const description =
-				typeof params?.description === "string"
-					? params.description.trim() || undefined
-					: undefined;
+			const description = Value.Check(MONITOR_TEXT_INPUT, params?.description)
+				? params.description.trim() || undefined
+				: undefined;
 
 			let cfg: WatchConfig;
 			if (command) {
 				const cwd = await resolveCwd(params?.cwd, ctx.cwd);
 				cfg = { type: "command", command, cwd, description, timeoutMs };
 			} else if (wsRaw) {
-				const wsUrl = validateWsUrl(wsRaw.url as string);
+				const wsUrl = validateWsUrl(wsRaw.url);
 				const protocols = Array.isArray(wsRaw?.protocols)
 					? wsRaw.protocols.filter(
-							(p): p is string => typeof p === "string" && p.length > 0
+							(p): p is string =>
+								Value.Check(MONITOR_TEXT_INPUT, p) && p.length > 0
 						)
 					: undefined;
 				cfg = {
@@ -1175,10 +1167,12 @@ async function runWatch(
 	};
 	if (signal) {
 		if (signal.aborted) {
-			abortHappened = true;
-		} else {
-			signal.addEventListener("abort", abortHandler, { once: true });
+			// A signal can be canceled before Pi enters the tool. Refuse before
+			// constructing the source: starting it here would still execute a command
+			// (or open a socket) and only report the cancellation after that effect.
+			throw new Error("Monitor was aborted");
 		}
+		signal.addEventListener("abort", abortHandler, { once: true });
 	}
 
 	const timeoutTimer = setTimeout(() => {

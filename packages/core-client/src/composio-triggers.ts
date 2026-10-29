@@ -6,6 +6,8 @@
 // agent. Note: delivery requires Core to be reachable at a public URL (Ryu
 // Cloud) or via a relay — local Core won't receive the webhook.
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
 
 /** An agent↔Composio-trigger subscription. */
@@ -15,23 +17,52 @@ export interface TriggerSubscription {
 	connectedAccountId: string;
 	createdAt: string;
 	id: string;
-	targetKind?: "agent" | "workflow";
+	/** Whether it watches an account connected to the agent's own identity. */
+	ownAccount: boolean;
+	targetKind?: string;
 	toolkit: string;
 	triggerSlug: string;
 	workflowId?: string;
 }
 
-interface SubscriptionWire {
-	agent_id: string;
-	composio_trigger_id?: string | null;
-	connected_account_id: string;
-	created_at: string;
-	id: string;
-	target_kind?: "agent" | "workflow";
-	toolkit: string;
-	trigger_slug: string;
-	workflow_id?: string | null;
+function connectResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
 }
+// Full native persisted TriggerSubscription. target_kind is Rust String;
+// the existing mapper retains its exact invalid-target error and legacy defaults.
+export const triggerSubscriptionResponseSchema = connectResponse(
+	z.object({
+		agent_id: z.string(),
+		composio_trigger_id: z.string().nullish(),
+		connected_account_id: z.string(),
+		created_at: z.string(),
+		id: z.string(),
+		own_account: z.boolean().optional(),
+		target_kind: z.string().optional(),
+		toolkit: z.string(),
+		trigger_slug: z.string(),
+		workflow_id: z.string().nullish(),
+	})
+);
+type SubscriptionWire = z.output<typeof triggerSubscriptionResponseSchema>;
+const triggerSubscriptionsResponseSchema = connectResponse(
+	z.object({
+		subscriptions: z.array(triggerSubscriptionResponseSchema).nullish(),
+	})
+);
+const triggerSubscriptionEnvelopeSchema = connectResponse(
+	z.object({
+		subscription: triggerSubscriptionResponseSchema,
+		connectTriggerId: z.string().optional(),
+	})
+);
+const triggerSubscriptionDeleteSchema = connectResponse(
+	z.object({ ok: z.boolean() })
+);
 
 function toSubscription(s: SubscriptionWire): TriggerSubscription {
 	if (
@@ -41,7 +72,7 @@ function toSubscription(s: SubscriptionWire): TriggerSubscription {
 	) {
 		throw new Error("Invalid Connect target kind");
 	}
-	return {
+	const subscription: TriggerSubscription = {
 		id: s.id,
 		agentId: s.agent_id,
 		toolkit: s.toolkit,
@@ -49,9 +80,15 @@ function toSubscription(s: SubscriptionWire): TriggerSubscription {
 		connectedAccountId: s.connected_account_id,
 		composioTriggerId: s.composio_trigger_id ?? null,
 		createdAt: s.created_at,
-		...(s.target_kind ? { targetKind: s.target_kind } : {}),
-		...(s.workflow_id ? { workflowId: s.workflow_id } : {}),
+		ownAccount: s.own_account === true,
 	};
+	if (s.target_kind) {
+		subscription.targetKind = s.target_kind;
+	}
+	if (s.workflow_id) {
+		subscription.workflowId = s.workflow_id;
+	}
+	return subscription;
 }
 
 export async function fetchWorkflowConnectBindings(
@@ -62,9 +99,13 @@ export async function fetchWorkflowConnectBindings(
 	if (!workflowId || workflowId.length > 256 || /\s/.test(workflowId)) {
 		throw new Error("Invalid Connect workflow binding");
 	}
-	const response = await transport<{ subscriptions?: SubscriptionWire[] }>(
-		target,
-		"/api/composio/trigger-subscriptions"
+	const response = triggerSubscriptionsResponseSchema.parse(
+		await transport(
+			target,
+			"/api/composio/trigger-subscriptions",
+			undefined,
+			appResponseValueSchema
+		)
 	);
 	return (response.subscriptions ?? [])
 		.map(toSubscription)
@@ -90,13 +131,19 @@ export async function bindWorkflowConnectTrigger(
 	) {
 		throw new Error("Invalid Connect workflow binding");
 	}
-	const result = await transport<{ subscription: SubscriptionWire }>(
-		target,
-		"/api/composio/targets",
-		{
-			method: "POST",
-			body: { connectTriggerId, target: { kind: "workflow", id: workflowId } },
-		}
+	const result = triggerSubscriptionEnvelopeSchema.parse(
+		await transport(
+			target,
+			"/api/composio/targets",
+			{
+				method: "POST",
+				body: {
+					connectTriggerId,
+					target: { kind: "workflow", id: workflowId },
+				},
+			},
+			appResponseValueSchema
+		)
 	);
 	const binding = toSubscription(result.subscription);
 	if (
@@ -112,9 +159,11 @@ export async function bindWorkflowConnectTrigger(
 export async function fetchTriggerSubscriptions(
 	target: ApiTarget
 ): Promise<TriggerSubscription[]> {
-	const json = await request<{ subscriptions?: SubscriptionWire[] }>(
+	const json = await request(
 		target,
-		"/api/composio/trigger-subscriptions"
+		"/api/composio/trigger-subscriptions",
+		{},
+		triggerSubscriptionsResponseSchema
 	);
 	return (json.subscriptions ?? []).map(toSubscription);
 }
@@ -122,6 +171,10 @@ export async function fetchTriggerSubscriptions(
 export interface SubscribeTriggerInput {
 	agentId: string;
 	connectedAccountId: string;
+	/** The account is connected to the agent's own identity, not yours. Core
+	 *  checks that it belongs to this agent and that its account access allows
+	 *  it. */
+	ownAccount?: boolean;
 	toolkit: string;
 	triggerSlug: string;
 }
@@ -130,7 +183,7 @@ export async function subscribeTrigger(
 	target: ApiTarget,
 	input: SubscribeTriggerInput
 ): Promise<TriggerSubscription> {
-	const json = await request<{ subscription: SubscriptionWire }>(
+	const json = await request(
 		target,
 		"/api/composio/triggers/subscribe",
 		{
@@ -140,8 +193,10 @@ export async function subscribeTrigger(
 				toolkit: input.toolkit,
 				trigger_slug: input.triggerSlug,
 				connected_account_id: input.connectedAccountId,
+				...(input.ownAccount ? { own_account: true } : {}),
 			},
-		}
+		},
+		triggerSubscriptionEnvelopeSchema
 	);
 	return toSubscription(json.subscription);
 }
@@ -150,10 +205,11 @@ export async function deleteTriggerSubscription(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(
+	await request(
 		target,
 		`/api/composio/trigger-subscriptions/${encodeURIComponent(id)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		triggerSubscriptionDeleteSchema
 	);
 }
 
@@ -171,10 +227,13 @@ export async function removeWorkflowConnectBinding(
 	if (!bindings.some((binding) => binding.id === bindingId)) {
 		throw new Error("Connect binding does not belong to this workflow");
 	}
-	await transport(
-		target,
-		`/api/composio/trigger-subscriptions/${encodeURIComponent(bindingId)}`,
-		{ method: "DELETE" }
+	triggerSubscriptionDeleteSchema.parse(
+		await transport(
+			target,
+			`/api/composio/trigger-subscriptions/${encodeURIComponent(bindingId)}`,
+			{ method: "DELETE" },
+			appResponseValueSchema
+		)
 	);
 }
 

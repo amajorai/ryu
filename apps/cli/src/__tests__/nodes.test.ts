@@ -9,11 +9,15 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
+	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import type { AppRequestValue } from "@ryuhq/core-client/app-request-json";
 import {
 	defaultConfig,
 	loadNodes,
@@ -22,31 +26,47 @@ import {
 	resolveActive,
 	setActive,
 } from "../core/nodes.ts";
+import { DEFAULT_CORE_URL } from "../core/target.ts";
 
 let tempHome = "";
-let savedHome: string | undefined;
-let savedUserProfile: string | undefined;
+// Every variable the data-dir resolver reads, so a caller's RYU_DIR, profile or
+// Storage pointer can never leak into (or out of) these tests.
+const ISOLATED_KEYS = [
+	"HOME",
+	"USERPROFILE",
+	"RYU_DIR",
+	"RYU_PROFILE",
+	"XDG_CONFIG_HOME",
+	"APPDATA",
+] as const;
+let saved: Partial<Record<(typeof ISOLATED_KEYS)[number], string>> = {};
 
 beforeEach(() => {
-	savedHome = process.env.HOME;
-	savedUserProfile = process.env.USERPROFILE;
+	saved = {};
+	for (const key of ISOLATED_KEYS) {
+		const value = process.env[key];
+		if (value !== undefined) {
+			saved[key] = value;
+		}
+		delete process.env[key];
+	}
 	tempHome = mkdtempSync(join(tmpdir(), "ryu-nodes-test-"));
 	// Set BOTH: nodesPath() reads USERPROFILE || HOME, and Windows short-circuits
 	// on USERPROFILE — setting only one would leak to the real home on the other OS.
 	process.env.HOME = tempHome;
 	process.env.USERPROFILE = tempHome;
+	process.env.XDG_CONFIG_HOME = join(tempHome, ".config");
+	process.env.APPDATA = join(tempHome, ".config");
 });
 
 afterEach(() => {
-	if (savedHome === undefined) {
-		delete process.env.HOME;
-	} else {
-		process.env.HOME = savedHome;
-	}
-	if (savedUserProfile === undefined) {
-		delete process.env.USERPROFILE;
-	} else {
-		process.env.USERPROFILE = savedUserProfile;
+	for (const key of ISOLATED_KEYS) {
+		const value = saved[key];
+		if (value === undefined) {
+			delete process.env[key];
+		} else {
+			process.env[key] = value;
+		}
 	}
 	if (tempHome && existsSync(tempHome)) {
 		rmSync(tempHome, { recursive: true, force: true });
@@ -57,7 +77,7 @@ afterEach(() => {
 
 test("nodesPath resolves under the redirected home (isolation guard)", () => {
 	// If this fails, every setActive test below would be writing the real ~/.ryu.
-	expect(nodesPath()).toBe(join(tempHome, ".ryu", "nodes.json"));
+	expect(nodesPath()).toBe(join(tempHome, ".ryu", "state", "nodes.json"));
 });
 
 // ── defaultConfig ───────────────────────────────────────────────────────────
@@ -67,7 +87,8 @@ test("defaultConfig synthesizes a single local node named 'local'", () => {
 	expect(cfg.default).toBe("local");
 	expect(cfg.nodes).toHaveLength(1);
 	expect(cfg.nodes[0]?.name).toBe("local");
-	expect(cfg.nodes[0]?.url).toBe("http://127.0.0.1:2049");
+	// This profile's Core port, like Desktop: never the retired :2049 default.
+	expect(cfg.nodes[0]?.url).toBe(DEFAULT_CORE_URL);
 	expect(cfg.nodes[0]?.token).toBeNull();
 });
 
@@ -92,19 +113,57 @@ test("loadNodes parses a valid config file", () => {
 	expect(cfg.nodes[1]?.token).toBe("secret");
 });
 
+test("loadNodes reads a saved `local` node at the retired :2049 default at this profile's port", () => {
+	writeConfig(nodesPath(), {
+		default: "local",
+		nodes: [
+			{ name: "local", url: "http://127.0.0.1:2049", token: null },
+			// Only the synthesized `local` node migrates; a user node keeps its URL.
+			{ name: "lab", url: "http://127.0.0.1:2049", token: null },
+		],
+	});
+	const cfg = loadNodes();
+	expect(cfg.nodes[0]?.url).toBe(DEFAULT_CORE_URL);
+	expect(cfg.nodes[1]?.url).toBe("http://127.0.0.1:2049");
+});
+
+test("loadNodes strips session-only managed-node credentials from disk records", () => {
+	writeConfig(nodesPath(), {
+		default: "cloud-prod",
+		nodes: [
+			{
+				name: "cloud-prod",
+				url: "https://cloud.example.test",
+				token: null,
+				userJwt: "stale-node-delegation",
+				managed: true,
+				orgId: "org-1",
+			},
+		],
+	});
+
+	expect(loadNodes().nodes).toEqual([
+		{
+			name: "cloud-prod",
+			url: "https://cloud.example.test",
+			token: null,
+		},
+	]);
+});
+
 test("loadNodes falls back to default when nodes is empty", () => {
 	writeConfig(nodesPath(), { default: "x", nodes: [] });
 	expect(loadNodes()).toEqual(defaultConfig());
 });
 
 test("loadNodes falls back to default when nodes is missing/not an array", () => {
-	writeConfig(nodesPath(), { default: "x" } as never);
+	writeConfig(nodesPath(), { default: "x" });
 	expect(loadNodes()).toEqual(defaultConfig());
 });
 
 test("loadNodes defaults `default` to 'local' when it is not a string", () => {
 	writeConfig(nodesPath(), {
-		default: 42 as never,
+		default: 42,
 		nodes: [{ name: "a", url: "http://a", token: null }],
 	});
 	const cfg = loadNodes();
@@ -129,6 +188,21 @@ test("nodeToTarget maps a node to an ApiTarget, coercing undefined token to null
 	expect(
 		nodeToTarget({ name: "n", url: "http://n:7980", token: null })
 	).toEqual({ url: "http://n:7980", token: null });
+	// The separate node-bound user delegation is attached only to discovered
+	// managed nodes. It never substitutes for or overwrites the node bearer.
+	expect(
+		nodeToTarget({
+			name: "cloud",
+			url: "https://cloud.example.test",
+			token: null,
+			userJwt: "node-audience-delegation",
+			managed: true,
+		})
+	).toEqual({
+		url: "https://cloud.example.test",
+		token: null,
+		userJwt: "node-audience-delegation",
+	});
 });
 
 // ── resolveActive ───────────────────────────────────────────────────────────
@@ -160,7 +234,7 @@ test("resolveActive falls back to a synthesized local node on an empty config", 
 	// empty nodes array) but is exercised when a caller passes one directly.
 	const node = resolveActive({ default: "x", nodes: [] });
 	expect(node.name).toBe("local");
-	expect(node.url).toBe("http://127.0.0.1:2049");
+	expect(node.url).toBe(DEFAULT_CORE_URL);
 });
 
 // ── setActive ───────────────────────────────────────────────────────────────
@@ -176,14 +250,32 @@ test("setActive persists a known node name and round-trips through loadNodes", (
 	setActive("prod");
 
 	// Isolation proof: the write landed under the temp home, not the real ~/.ryu.
-	expect(existsSync(join(tempHome, ".ryu", "nodes.json"))).toBe(true);
+	expect(existsSync(join(tempHome, ".ryu", "state", "nodes.json"))).toBe(true);
 	expect(loadNodes().default).toBe("prod");
+});
+
+test("setActive replaces nodes.json atomically with owner-only permissions", () => {
+	writeConfig(nodesPath(), {
+		default: "local",
+		nodes: [
+			{ name: "local", url: "http://l", token: null },
+			{ name: "prod", url: "http://p", token: "secret" },
+		],
+	});
+	setActive("prod");
+
+	// No staged temp file is left beside the registry after the rename.
+	expect(readdirSync(dirname(nodesPath()))).toEqual(["nodes.json"]);
+	if (process.platform !== "win32") {
+		expect(statSync(nodesPath()).mode & 0o777).toBe(0o600);
+	}
+	expect(loadNodes().nodes[1]?.token).toBe("secret");
 });
 
 test("setActive is a no-op for an unknown node name (file not written)", () => {
 	// No config file exists yet; setActive on an unknown name must not create one.
 	setActive("does-not-exist");
-	expect(existsSync(join(tempHome, ".ryu", "nodes.json"))).toBe(false);
+	expect(existsSync(join(tempHome, ".ryu", "state", "nodes.json"))).toBe(false);
 });
 
 test("setActive on unknown name leaves an existing config unchanged", () => {
@@ -197,15 +289,12 @@ test("setActive on unknown name leaves an existing config unchanged", () => {
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-function writeConfig(
-	path: string,
-	config: { default: string; nodes: unknown[] }
-): void {
+function writeConfig(path: string, config: AppRequestValue): void {
 	writeRaw(path, JSON.stringify(config, null, 2));
 }
 
 function writeRaw(path: string, contents: string): void {
-	mkdirSync(join(tempHome, ".ryu"), { recursive: true });
+	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, contents, "utf8");
 }
 
@@ -216,10 +305,46 @@ describe("nodes config", () => {
 		// the current (permissive) contract so a future tightening is a conscious change.
 		writeConfig(nodesPath(), {
 			default: "local",
-			nodes: [{ garbage: true } as never],
+			nodes: [{ garbage: true }],
 		});
 		const cfg = loadNodes();
 		expect(cfg.nodes).toHaveLength(1);
 		expect(cfg.default).toBe("local");
 	});
+});
+
+// ── Desktop-sealed tokens ───────────────────────────────────────────────────
+
+const SEALED = "enc:v1:AAECAwQFBgcICQoLsealed-by-desktop";
+
+test("a Desktop-sealed token is never used as a bearer and survives setActive", () => {
+	writeConfig(nodesPath(), {
+		default: "local",
+		nodes: [
+			{ name: "local", url: "http://l", token: null },
+			{ name: "prod", url: "http://p", token: SEALED },
+		],
+	});
+	const prod = loadNodes().nodes[1];
+	expect(prod?.token).toBeNull();
+	expect(prod?.sealedToken).toBe(SEALED);
+	if (!prod) {
+		throw new Error("missing node");
+	}
+	expect(nodeToTarget(prod, {})).toEqual({ url: "http://p", token: null });
+	// The operator's RYU_CORE_TOKEN stands in for a token the CLI cannot open.
+	expect(nodeToTarget(prod, { RYU_CORE_TOKEN: " op-token " })).toEqual({
+		url: "http://p",
+		token: "op-token",
+	});
+
+	setActive("prod");
+	const raw = JSON.parse(readFileSync(nodesPath(), "utf8"));
+	expect(raw.default).toBe("prod");
+	expect(raw.nodes[1]).toEqual({
+		name: "prod",
+		url: "http://p",
+		token: SEALED,
+	});
+	expect(raw.nodes[1]).not.toHaveProperty("sealedToken");
 });

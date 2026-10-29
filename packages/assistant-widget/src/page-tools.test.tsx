@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PageToolsPopover } from "./page-tools";
+import { PageToolsPopover } from "./page-tools.tsx";
+import type { WebMcpPageTool } from "./webmcp.ts";
 
 const tool = {
+	id: "https://docs.example\u0000read_page\u00000",
 	annotations: { readOnlyHint: true, untrustedContentHint: true },
 	description: "Read the current page.",
 	inputSchema: {
@@ -13,8 +15,9 @@ const tool = {
 		type: "object",
 	},
 	name: "read_page",
+	origin: "https://docs.example",
 	title: "Read a page",
-};
+} satisfies WebMcpPageTool;
 
 describe("PageToolsPopover", () => {
 	test("renders an explicit, accessible page-tool affordance", () => {

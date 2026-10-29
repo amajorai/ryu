@@ -18,17 +18,27 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import { Spinner } from "@ryu/ui/components/spinner";
+import { isBlockedFit, isSlowFit, SLOW_FIT_WARNING } from "./model-fit.ts";
 
-/** The five device-fit verdicts Core computes per model file. */
-export type ModelFit = "great" | "ok" | "partial" | "cpu" | "too_big" | string;
+/** The device-fit verdicts Core computes per model file (see `./model-fit.ts`). */
+export type ModelFit =
+	| "great"
+	| "ok"
+	| "partial"
+	| "cpu"
+	| "unknown"
+	| "too_big"
+	| "no_space"
+	| string;
 
 /** Tailwind classes + dot color for a device-fit verdict. Single source of truth
  *  for the fit color language across the real section and the storyboard. */
-export function fitStyle(fit: ModelFit): { className: string; dot: string } {
+export function fitStyle(fit: ModelFit) {
 	switch (fit) {
 		case "great":
 			return {
@@ -50,7 +60,9 @@ export function fitStyle(fit: ModelFit): { className: string; dot: string } {
 				className: "text-status-info",
 				dot: "bg-info",
 			};
+		// Both blocked verdicts share the destructive color: the install is refused.
 		case "too_big":
+		case "no_space":
 			return { className: "text-status-destructive", dot: "bg-destructive" };
 		default:
 			return {
@@ -101,8 +113,9 @@ export function ModelSearchHeader({
 					icon={Search01Icon}
 				/>
 				<Input
-					className="h-9 pl-9"
+					aria-label={placeholder}
 					defaultValue={onChange ? undefined : value}
+					leadingAdornment="default"
 					onChange={onChange ? (e) => onChange(e.target.value) : undefined}
 					placeholder={placeholder}
 					value={onChange ? value : undefined}
@@ -142,7 +155,9 @@ export function ModelListRow({
 			type="button"
 		>
 			<div className="flex items-center justify-between gap-2">
-				<span className="truncate font-medium text-sm">{model.repo}</span>
+				<span className="truncate font-medium text-sm" title={model.repo}>
+					{model.repo}
+				</span>
 				{model.installed ? (
 					<Badge variant="secondary">Added</Badge>
 				) : model.gated ? (
@@ -179,7 +194,8 @@ export function QuantFileRow({
 	file: QuantFileData;
 	onInstall?: () => void;
 }) {
-	const tooBig = file.fit === "too_big";
+	const tl = useLiteralMessages();
+	const blocked = isBlockedFit(file.fit);
 	let action: React.ReactNode;
 	if (file.state === "installing") {
 		action = (
@@ -196,7 +212,17 @@ export function QuantFileRow({
 		);
 	} else {
 		action = (
-			<Button disabled={tooBig} onClick={onInstall} size="sm" variant="ghost">
+			<Button
+				aria-label={
+					blocked
+						? tl("Add — {fitLabel}", { fitLabel: file.fitLabel })
+						: undefined
+				}
+				disabled={blocked}
+				onClick={onInstall}
+				size="sm"
+				variant="ghost"
+			>
 				<HugeiconsIcon className="size-4" icon={Download01Icon} />
 				Add
 			</Button>
@@ -212,6 +238,9 @@ export function QuantFileRow({
 				fit={file.fit}
 				label={file.fitLabel}
 			/>
+			{isSlowFit(file.fit) && file.state !== "installed" && (
+				<span className="text-status-warning text-xs">{SLOW_FIT_WARNING}</span>
+			)}
 			<div className="ml-auto">{action}</div>
 		</div>
 	);

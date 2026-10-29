@@ -59,7 +59,7 @@ pub enum OsKind {
 /// `gpu_count` defaults to `0`; when `gpu != None` and `gpu_count == 0` the
 /// Gateway treats it as `1` (see the cost math in the contract §4). Core does not
 /// re-derive cost — it only reports this spec.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SandboxSpec {
     /// Virtual CPU count.
     pub vcpu: u32,

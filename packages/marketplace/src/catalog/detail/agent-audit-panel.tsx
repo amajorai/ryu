@@ -1,3 +1,4 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { useRef, useState } from "react";
@@ -11,6 +12,7 @@ export function AgentAuditPanel({
 	onOpenConversation?: (id: string) => void;
 	runAudit: () => Promise<CatalogScanResult>;
 }) {
+	const tl = useLiteralMessages();
 	const [result, setResult] = useState<CatalogScanResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [running, setRunning] = useState(false);
@@ -70,7 +72,7 @@ export function AgentAuditPanel({
 					data-testid="catalog-scan-error"
 					role="alert"
 				>
-					Agent audit failed: {error}
+					{tl("Agent audit failed: {error}", { error })}
 				</p>
 			) : null}
 			{result ? (
@@ -103,17 +105,22 @@ export function AgentAuditPanel({
 						) : null}
 						{assessment ? (
 							<span className="text-muted-foreground text-xs">
-								{assessment.confidence} confidence
+								{tl("{confidence} confidence", {
+									confidence: assessment.confidence,
+								})}
 							</span>
 						) : null}
 					</div>
 					<p className="break-words text-muted-foreground text-xs">
-						{result.agentId}
-						{result.model ? ` · ${result.model}` : ""}
-						{result.auditedAt
-							? ` · ${new Date(result.auditedAt).toLocaleString()}`
-							: ""}
-						. Static results are unchanged.
+						{tl("{auditDetails}. Static results are unchanged.", {
+							auditDetails: `${result.agentId}${
+								result.model ? ` · ${result.model}` : ""
+							}${
+								result.auditedAt
+									? ` · ${new Date(result.auditedAt).toLocaleString()}`
+									: ""
+							}`,
+						})}
 					</p>
 					{assessment ? (
 						<>

@@ -12,13 +12,12 @@
 // the registration once on a fresh machine — see the effect below for why
 // onboarding is the right (and only) place for that.
 
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding";
-import { Button } from "@ryu/ui/components/button";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { toast } from "@ryu/ui/components/sileo";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import { Switch } from "@ryu/ui/components/switch";
+import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { invoke } from "@tauri-apps/api/core";
 import {
 	disable as disableAutostart,
@@ -26,6 +25,7 @@ import {
 	isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
 import { useEffect, useRef, useState } from "react";
+import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -176,7 +176,7 @@ export function PreferencesStep({
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						<RyuOnboardingAvatar />
 					</div>
 					<PageHeader
 						stagger={false}

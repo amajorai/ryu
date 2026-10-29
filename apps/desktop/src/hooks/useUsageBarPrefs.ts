@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/hooks/useUsageBarPrefs.ts
 //
 // Display preferences for the composer's subscription usage meters (the little
@@ -34,6 +35,15 @@ export interface UsageBarPrefs {
 	visible: boolean;
 }
 
+const storedPreferences = z.object({
+	barStyle: z.string().optional(),
+	mode: z.string().optional(),
+	showBar: z.boolean().nullish(),
+	showPercent: z.boolean().nullish(),
+	sidebar: z.boolean().nullish(),
+	visible: z.boolean().nullish(),
+});
+
 const STORAGE_KEY = "ryu:usage-bar-prefs";
 
 /** Sensible defaults: the meter shows a bar of percent-used, no inline number,
@@ -55,7 +65,7 @@ function readFromStorage(): UsageBarPrefs {
 		if (!stored) {
 			return DEFAULT_USAGE_BAR_PREFS;
 		}
-		const parsed = JSON.parse(stored) as Partial<UsageBarPrefs>;
+		const parsed = storedPreferences.parse(JSON.parse(stored));
 		return {
 			visible: parsed.visible ?? DEFAULT_USAGE_BAR_PREFS.visible,
 			showBar: parsed.showBar ?? DEFAULT_USAGE_BAR_PREFS.showBar,

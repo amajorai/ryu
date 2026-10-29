@@ -3,8 +3,6 @@ import { expect, test } from "@playwright/test";
 test.describe.configure({ timeout: 90_000 });
 
 const STORY_URL = "/fork-dialog-proof.html";
-const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/18/01a0133e-9094-7572-900b-0cbf214891a4/fork-dialog-proof.png";
 
 test("offers both fork destinations and records each selection", async ({
 	page,
@@ -34,5 +32,7 @@ test("offers both fork destinations and records each selection", async ({
 		page.getByRole("heading", { name: "Fork chat from here" })
 	).toBeVisible();
 	await page.waitForTimeout(400);
-	await page.screenshot({ path: PROOF_SCREENSHOT });
+	await page.screenshot({
+		path: test.info().outputPath("fork-dialog-proof.png"),
+	});
 });

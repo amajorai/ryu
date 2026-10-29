@@ -1,3 +1,4 @@
+import { createFetchFixture } from "./test-support/http-fixture.ts";
 // packages/core-client/src/events.test.ts
 //
 // Tests for streamDesktopNotifications: a fetch-based SSE reader that splits
@@ -25,7 +26,7 @@ const target: ApiTarget = {
 
 function streamOnce(chunks: string[], init?: ResponseInit): void {
 	const encoder = new TextEncoder();
-	globalThis.fetch = (() =>
+	globalThis.fetch = createFetchFixture(() =>
 		Promise.resolve(
 			new Response(
 				new ReadableStream<Uint8Array>({
@@ -38,7 +39,8 @@ function streamOnce(chunks: string[], init?: ResponseInit): void {
 				}),
 				init
 			)
-		)) as unknown as typeof fetch;
+		)
+	);
 }
 
 async function collect(chunks: string[]): Promise<DesktopNotification[]> {
@@ -65,6 +67,15 @@ describe("streamDesktopNotifications", () => {
 	test("skips a malformed frame and continues", async () => {
 		const seen = await collect(["data: {bad\n\n", 'data: {"title":"ok"}\n\n']);
 		expect(seen).toEqual([{ title: "ok" }]);
+	});
+
+	test("skips valid JSON without a notification contract and continues", async () => {
+		const seen = await collect([
+			'data: {"title":17}\n\n',
+			'data: {"body":"missing title"}\n\n',
+			'data: {"title":"ok","body":null}\n\n',
+		]);
+		expect(seen).toEqual([{ title: "ok", body: null }]);
 	});
 
 	test("ignores non-data lines within a frame", async () => {

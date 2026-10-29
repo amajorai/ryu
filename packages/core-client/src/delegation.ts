@@ -14,6 +14,8 @@
 // stays declarative. Base URL + bearer always come from the node store via the
 // shared client helpers.
 
+import { z } from "zod";
+
 import {
 	type ApiTarget,
 	apiUrl,
@@ -111,6 +113,38 @@ export type DelegateEvent =
 	| { event: "done"; results: DelegateResult[] }
 	| { event: "error"; error: string };
 
+const permissionPresetSchema = z.enum([
+	"research",
+	"code_read",
+	"code_write",
+	"summarise",
+]);
+const delegateResultSchema = z.object({
+	id: z.string(),
+	preset: permissionPresetSchema,
+	output: z.string().nullable(),
+	error: z.string().nullable(),
+	child_conversation_id: z.string().nullish(),
+});
+const delegateEventFieldsSchema = z.discriminatedUnion("event", [
+	z.object({
+		event: z.literal("started"),
+		id: z.string(),
+		preset: permissionPresetSchema,
+	}),
+	z.object({ event: z.literal("finished"), result: delegateResultSchema }),
+	z.object({
+		event: z.literal("done"),
+		results: z.array(delegateResultSchema),
+	}),
+	z.object({ event: z.literal("error"), error: z.string() }),
+]);
+// Validate every field published by Core while retaining the original decoded
+// event and result objects, including future metadata, for the callback.
+const delegateEventSchema = z.custom<
+	z.output<typeof delegateEventFieldsSchema>
+>((value) => delegateEventFieldsSchema.safeParse(value).success);
+
 /** Body for `POST /api/delegate/stream`. */
 export interface DelegateRequest {
 	caps?: DelegationCaps;
@@ -166,7 +200,7 @@ export async function streamDelegation(
 		}
 		const payload = dataLines.join("\n");
 		try {
-			onEvent(JSON.parse(payload) as DelegateEvent);
+			onEvent(delegateEventSchema.parse(JSON.parse(payload)));
 		} catch {
 			// Ignore malformed frames rather than aborting the whole stream.
 		}

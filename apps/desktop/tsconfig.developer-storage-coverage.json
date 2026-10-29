@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "src/components/settings/DeveloperTab.tsx",
+    "src/components/settings/DevMetricsPanel.tsx",
+    "src/components/settings/DangerZoneSettings.tsx",
+    "src/components/settings/BackupSettings.tsx",
+    "src/components/settings/StorageSettings.tsx",
+    "src/components/settings/SafeModeSettings.tsx",
+    "src/components/settings/DeveloperTab.coverage.native-http.test.tsx",
+    "src/components/settings/DevMetricsPanel.coverage.native-http.test.tsx",
+    "src/components/settings/DangerZoneSettings.coverage.native-http.test.tsx",
+    "src/components/settings/BackupSettings.coverage.native-http.test.tsx",
+    "src/components/settings/StorageSettings.coverage.native-http.test.tsx",
+    "src/components/settings/SafeModeSettings.coverage.native-http.test.tsx"
+  ]
+}

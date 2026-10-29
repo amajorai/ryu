@@ -19,8 +19,9 @@
 // So: await every call, drop the rows locally instead of waiting on the stream,
 // clear the durable log as part of "finished", and report a failure out loud.
 
-import { toast } from "@ryu/ui/components/sileo";
-import { useCallback, useState } from "react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { useCallback, useRef, useState } from "react";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	cancelDownload,
@@ -62,6 +63,9 @@ export function useDownloadBulkActions(
 	const getNode = useNodeStore((s) => s.getActiveNode);
 	const removeTask = useDownloadsStore((s) => s.removeTask);
 	const [pending, setPending] = useState(false);
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 
 	const run = useCallback(
 		async (
@@ -93,7 +97,10 @@ export function useDownloadBulkActions(
 					toast.error(
 						failed === picked.length
 							? "Couldn't clear those downloads."
-							: `Couldn't clear ${failed} of ${picked.length} downloads.`
+							: tlRef.current("Couldn't clear {failed} of {total} downloads.", {
+									failed: String(failed),
+									total: String(picked.length),
+								})
 					);
 				}
 			} catch {
@@ -127,7 +134,8 @@ export function useDownloadBulkActions(
 			run(tasks.filter(isUnfinishedTask), async (target, id) => {
 				// Cancel first — Core refuses to clear a row that is not terminal, and a
 				// bare clear on a downloading task is precisely the silent no-op this
-				// hook exists to remove.
+				// hook exists to remove. A failed cancel is tolerated: the clear below
+				// still runs, and its rejection is what `run` counts and reports.
 				await cancelDownload(target, id).catch(() => undefined);
 				await clearDownload(target, id);
 			}),

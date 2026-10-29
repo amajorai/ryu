@@ -1,0 +1,516 @@
+[
+  {
+    "name": "baseline only",
+    "baseline": ["list", "use"],
+    "policies": [],
+    "path": "default/API_KEY",
+    "expected": ["list", "use"]
+  },
+  {
+    "name": "allow adds read inside a folder",
+    "baseline": ["list", "use"],
+    "policies": [
+      {
+        "name": "reader",
+        "rules": [
+          {
+            "path": "staging/db/*",
+            "capabilities": ["read"]
+          }
+        ]
+      }
+    ],
+    "path": "staging/db/PASSWORD",
+    "expected": ["list", "use", "read"]
+  },
+  {
+    "name": "single star does not cross folders",
+    "baseline": [],
+    "policies": [
+      {
+        "name": "reader",
+        "rules": [
+          {
+            "path": "staging/*",
+            "capabilities": ["read"]
+          }
+        ]
+      }
+    ],
+    "path": "staging/db/PASSWORD",
+    "expected": []
+  },
+  {
+    "name": "double star crosses folders",
+    "baseline": [],
+    "policies": [
+      {
+        "name": "reader",
+        "rules": [
+          {
+            "path": "staging/**",
+            "capabilities": ["read", "list"]
+          }
+        ]
+      }
+    ],
+    "path": "staging/db/main/PASSWORD",
+    "expected": ["list", "read"]
+  },
+  {
+    "name": "explicit deny beats baseline",
+    "baseline": ["list", "use", "read", "write", "delete"],
+    "policies": [
+      {
+        "name": "freeze-prod",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["write", "delete"],
+            "deny": true
+          }
+        ]
+      }
+    ],
+    "path": "prod/STRIPE_KEY",
+    "expected": ["list", "use", "read"]
+  },
+  {
+    "name": "deny in one policy beats allow in another",
+    "baseline": [],
+    "policies": [
+      {
+        "name": "grant",
+        "rules": [
+          {
+            "path": "**",
+            "capabilities": ["read", "use"]
+          }
+        ]
+      },
+      {
+        "name": "block",
+        "rules": [
+          {
+            "path": "*/PAYMENTS_*",
+            "capabilities": ["read"],
+            "deny": true
+          }
+        ]
+      }
+    ],
+    "path": "prod/PAYMENTS_KEY",
+    "expected": ["use"]
+  },
+  {
+    "name": "question mark matches one character",
+    "baseline": [],
+    "policies": [
+      {
+        "name": "q",
+        "rules": [
+          {
+            "path": "default/KEY_?",
+            "capabilities": ["read"]
+          }
+        ]
+      }
+    ],
+    "path": "default/KEY_10",
+    "expected": []
+  },
+  {
+    "name": "user template grants own folder",
+    "baseline": [],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "own",
+        "rules": [
+          {
+            "path": "users/{{identity.user.id}}/**",
+            "capabilities": ["read", "write"]
+          }
+        ]
+      }
+    ],
+    "path": "users/alice/db/KEY",
+    "expected": ["read", "write"]
+  },
+  {
+    "name": "user template does not grant another user's folder",
+    "baseline": [],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "own",
+        "rules": [
+          {
+            "path": "users/{{identity.user.id}}/**",
+            "capabilities": ["read"]
+          }
+        ]
+      }
+    ],
+    "path": "users/bob/KEY",
+    "expected": []
+  },
+  {
+    "name": "unresolved allow template is dropped",
+    "baseline": ["list"],
+    "subjects": [],
+    "policies": [
+      {
+        "name": "own",
+        "rules": [
+          {
+            "path": "users/{{identity.user.id}}/**",
+            "capabilities": ["read"]
+          }
+        ]
+      }
+    ],
+    "path": "users/alice/KEY",
+    "expected": ["list"]
+  },
+  {
+    "name": "unsafe identity value is never substituted",
+    "baseline": [],
+    "subjects": ["user:*"],
+    "policies": [
+      {
+        "name": "own",
+        "rules": [
+          {
+            "path": "users/{{identity.user.id}}",
+            "capabilities": ["read"]
+          }
+        ]
+      }
+    ],
+    "path": "users/bob",
+    "expected": []
+  },
+  {
+    "name": "unresolved deny template widens",
+    "baseline": ["use"],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "m",
+        "rules": [
+          {
+            "path": "prod/{{identity.machine.id}}",
+            "capabilities": ["use"],
+            "deny": true
+          }
+        ]
+      }
+    ],
+    "path": "prod/KEY",
+    "expected": []
+  },
+  {
+    "name": "team template expands every team",
+    "baseline": [],
+    "subjects": ["team:t1", "team:t2"],
+    "policies": [
+      {
+        "name": "teams",
+        "rules": [
+          {
+            "path": "teams/{{identity.team.ids}}/*",
+            "capabilities": ["use"]
+          }
+        ]
+      }
+    ],
+    "path": "teams/t2/KEY",
+    "expected": ["use"]
+  },
+  {
+    "name": "parameters within constraints are allowed",
+    "baseline": [],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "w",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["write"],
+            "allowedParameters": {
+              "region": ["eu-*"],
+              "owner": ["{{identity.user.id}}"]
+            },
+            "deniedParameters": {
+              "region": ["eu-dev"]
+            },
+            "requiredParameters": ["owner"]
+          }
+        ]
+      }
+    ],
+    "path": "prod/KEY",
+    "expected": ["write"],
+    "parameters": {
+      "owner": "alice",
+      "region": "eu-west"
+    },
+    "expectedParametersAllowed": true
+  },
+  {
+    "name": "denied parameter value is refused",
+    "baseline": [],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "w",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["write"],
+            "allowedParameters": {
+              "*": []
+            },
+            "deniedParameters": {
+              "region": ["eu-dev"]
+            }
+          }
+        ]
+      }
+    ],
+    "path": "prod/KEY",
+    "expected": ["write"],
+    "parameters": {
+      "region": "eu-dev"
+    },
+    "expectedParametersAllowed": false
+  },
+  {
+    "name": "missing required parameter is refused",
+    "baseline": [],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "w",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["write"],
+            "requiredParameters": ["owner"]
+          }
+        ]
+      }
+    ],
+    "path": "prod/KEY",
+    "expected": ["write"],
+    "parameters": {
+      "region": "eu"
+    },
+    "expectedParametersAllowed": false
+  },
+  {
+    "name": "parameter outside allowed set is refused",
+    "baseline": [],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "w",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["write"],
+            "allowedParameters": {
+              "owner": ["{{identity.user.id}}"]
+            }
+          }
+        ]
+      }
+    ],
+    "path": "prod/KEY",
+    "expected": ["write"],
+    "parameters": {
+      "owner": "bob"
+    },
+    "expectedParametersAllowed": false
+  },
+  {
+    "name": "control group gates read on matching path",
+    "baseline": ["list"],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "gated",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["read"],
+            "controlGroup": {
+              "ttlSecs": 3600,
+              "factors": [
+                {
+                  "name": "sec",
+                  "approvers": ["team:sec"],
+                  "approvals": 1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "path": "prod/KEY",
+    "expected": ["list", "read"],
+    "expectedControlGroup": true,
+    "expectedControlGroupFactors": ["gated/0/sec"]
+  },
+  {
+    "name": "control group keeps same-named factors from every matching rule of one policy",
+    "baseline": ["list"],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "prod-access",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["read"],
+            "controlGroup": {
+              "factors": [
+                {
+                  "name": "approval",
+                  "approvers": ["team:leads"],
+                  "approvals": 1
+                }
+              ]
+            }
+          },
+          {
+            "path": "prod/payments/*",
+            "capabilities": ["read"],
+            "controlGroup": {
+              "factors": [
+                {
+                  "name": "approval",
+                  "approvers": ["user:cfo", "user:ceo"],
+                  "approvals": 2
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "path": "prod/payments/STRIPE_KEY",
+    "expected": ["list", "read"],
+    "expectedControlGroup": true,
+    "expectedControlGroupFactors": [
+      "prod-access/0/approval",
+      "prod-access/1/approval"
+    ]
+  },
+  {
+    "name": "control group collapses one policy reached through two bindings",
+    "baseline": ["list"],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "prod-access",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["read"],
+            "controlGroup": {
+              "factors": [
+                {
+                  "name": "approval",
+                  "approvers": ["team:leads"],
+                  "approvals": 1
+                }
+              ]
+            }
+          },
+          {
+            "path": "prod/payments/*",
+            "capabilities": ["read"],
+            "controlGroup": {
+              "factors": [
+                {
+                  "name": "approval",
+                  "approvers": ["user:cfo", "user:ceo"],
+                  "approvals": 2
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "prod-access",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["read"],
+            "controlGroup": {
+              "factors": [
+                {
+                  "name": "approval",
+                  "approvers": ["team:leads"],
+                  "approvals": 1
+                }
+              ]
+            }
+          },
+          {
+            "path": "prod/payments/*",
+            "capabilities": ["read"],
+            "controlGroup": {
+              "factors": [
+                {
+                  "name": "approval",
+                  "approvers": ["user:cfo", "user:ceo"],
+                  "approvals": 2
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "path": "prod/payments/STRIPE_KEY",
+    "expected": ["list", "read"],
+    "expectedControlGroup": true,
+    "expectedControlGroupFactors": [
+      "prod-access/0/approval",
+      "prod-access/1/approval"
+    ]
+  },
+  {
+    "name": "control group does not gate other paths",
+    "baseline": ["list"],
+    "subjects": ["user:alice"],
+    "policies": [
+      {
+        "name": "gated",
+        "rules": [
+          {
+            "path": "prod/**",
+            "capabilities": ["read"],
+            "controlGroup": {
+              "factors": [
+                {
+                  "name": "sec",
+                  "approvers": ["team:sec"]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "path": "dev/KEY",
+    "expected": ["list"],
+    "expectedControlGroup": false
+  }
+]

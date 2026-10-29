@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/desktop",
   "name": "Virtual Desktop",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "An interactive Linux virtual desktop for Ryu nodes. The app sidecar owns stable per-Bot screens on the shared node device and exposes them through Core's authenticated WebSocket proxy with mouse and keyboard input. Files and installed applications remain shared.",
   "keywords": ["desktop", "devices", "vnc", "stream", "remote", "computer-use"],
@@ -96,19 +96,6 @@
     }
   ],
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "desktop.chat",
-        "title": "Virtual Desktop widget",
-        "description": "Virtual Desktop chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["virtual desktop widget"],
-        "examples": ["Show me a virtual desktop widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "dock_panels": [
       {
         "id": "desktop",

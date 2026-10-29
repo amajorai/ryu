@@ -1,0 +1,32 @@
+.slice {
+	background-image: var(--pass-slice-fill);
+	border-radius: var(--pass-slice-radius);
+}
+.slicePlane {
+	transform: translateZ(var(--pass-slice-depth));
+}
+.ringPadding {
+	padding: var(--pass-ring-padding);
+}
+.face {
+	border-radius: var(--pass-face-radius);
+}
+.backdrop {
+	clip-path: inset(0 round var(--pass-face-radius));
+}
+.laminate {
+	background: linear-gradient(
+		115deg,
+		transparent 24%,
+		color-mix(in oklab, var(--primary) 32%, transparent) 44%,
+		transparent 58%,
+		color-mix(in oklab, var(--primary) 18%, transparent) 74%,
+		transparent 88%
+	);
+}
+.front {
+	transform: translateZ(var(--pass-face-depth));
+}
+.back {
+	transform: rotateY(180deg) translateZ(var(--pass-face-depth));
+}

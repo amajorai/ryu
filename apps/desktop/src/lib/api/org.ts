@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/org.ts
 //
 // Typed reads for the org (workspace) roster surface. Like teams-billing.ts,
@@ -13,7 +14,7 @@
 // Auth's organization plugin and are performed on the web `/organizations`
 // surface; the desktop links out for those.
 
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 
 export type OrgRole = "owner" | "admin" | "member" | "viewer" | null;
 
@@ -62,6 +63,8 @@ export const PERMISSIONS = [
 	"notifications.manage",
 	"mail.read",
 	"mail.manage",
+	"messaging.read",
+	"messaging.manage",
 	"teams.manage",
 	"projects.manage",
 	"registry.manage",
@@ -69,8 +72,11 @@ export const PERMISSIONS = [
 	"nodes.manage",
 	"members.manage",
 	"roles.manage",
+	"features.manage",
 	"billing.manage",
 	"audit.view",
+	"access.manage",
+	"data.manage",
 	"app.install",
 	"app.update",
 	"app.enable",
@@ -79,6 +85,8 @@ export const PERMISSIONS = [
 	"marketplace.view",
 	"marketplace.publish",
 	"marketplace.transfer",
+	"approvals.view",
+	"approvals.decide",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -93,7 +101,7 @@ export interface OrgRoleDef {
 
 function authToken(): string | null {
 	try {
-		return localStorage.getItem(TOKEN_KEY);
+		return getActiveToken();
 	} catch {
 		return null;
 	}
@@ -106,7 +114,7 @@ export function hasOrgAuth(): boolean {
 
 const BASE = `${BACKEND_URL.replace(/\/$/, "")}/api/control-plane`;
 
-async function get<T>(path: string): Promise<T> {
+async function get<T>(path: string, schema: z.ZodType<T>): Promise<T> {
 	const token = authToken();
 	const resp = await fetch(`${BASE}${path}`, {
 		headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -114,30 +122,63 @@ async function get<T>(path: string): Promise<T> {
 	if (!resp.ok) {
 		throw new Error(`Request failed: ${resp.status}`);
 	}
-	return (await resp.json()) as T;
+	return schema.parse(await resp.json());
 }
+
+const orgRoleSchema = z.enum(["owner", "admin", "member", "viewer"]).nullable();
+const orgsResponseSchema = z.object({
+	organizations: z.array(
+		z.object({
+			createdAt: z.string().optional(),
+			id: z.string(),
+			name: z.string(),
+			role: orgRoleSchema,
+			slug: z.string().optional(),
+		})
+	),
+});
+const orgMembersResponseSchema = z.object({
+	members: z.array(
+		z.object({
+			createdAt: z.string().optional(),
+			role: orgRoleSchema,
+			userId: z.string(),
+		})
+	),
+});
+const orgRolesResponseSchema = z.object({
+	roles: z.array(
+		z.object({
+			builtin: z.boolean(),
+			key: z.string(),
+			name: z.string(),
+			permissions: z.array(z.string()),
+		})
+	),
+});
 
 /** The organizations the signed-in user belongs to, with their role in each. */
 export async function fetchOrgs(): Promise<OrgSummary[]> {
-	const { organizations } = await get<{ organizations: OrgSummary[] }>("/orgs");
+	const { organizations } = await get("/orgs", orgsResponseSchema);
 	return organizations;
 }
 
 /** The member roster for an org. Any member may read it. */
 export async function fetchOrgMembers(orgId: string): Promise<OrgMember[]> {
-	const { members } = await get<{ members: OrgMember[] }>(
-		`/orgs/${encodeURIComponent(orgId)}/members`
+	const { members } = await get(
+		`/orgs/${encodeURIComponent(orgId)}/members`,
+		orgMembersResponseSchema
 	);
 	return members;
 }
 
 /** Body-carrying control-plane mutation (POST / PUT / DELETE) with the session
  * bearer. Mirrors {@link get} but for writes; parses an optional JSON reply. */
-async function send<T>(
+async function send(
 	method: "POST" | "PUT" | "DELETE",
 	path: string,
-	body?: unknown
-): Promise<T> {
+	body?: Parameters<typeof JSON.stringify>[0]
+): Promise<void> {
 	const token = authToken();
 	const headers: Record<string, string> = {};
 	if (token) {
@@ -155,7 +196,9 @@ async function send<T>(
 		throw new Error(`Request failed: ${resp.status}`);
 	}
 	const text = await resp.text();
-	return (text ? JSON.parse(text) : undefined) as T;
+	if (text) {
+		JSON.parse(text);
+	}
 }
 
 /**
@@ -164,8 +207,9 @@ async function send<T>(
  * roles. Any member may read this.
  */
 export async function listRoles(orgId: string): Promise<OrgRoleDef[]> {
-	const { roles } = await get<{ roles: OrgRoleDef[] }>(
-		`/orgs/${encodeURIComponent(orgId)}/roles`
+	const { roles } = await get(
+		`/orgs/${encodeURIComponent(orgId)}/roles`,
+		orgRolesResponseSchema
 	);
 	return roles;
 }
@@ -175,7 +219,7 @@ export async function createRole(
 	orgId: string,
 	role: { key: string; name: string; permissions: string[] }
 ): Promise<void> {
-	await send<unknown>("POST", `/orgs/${encodeURIComponent(orgId)}/roles`, role);
+	await send("POST", `/orgs/${encodeURIComponent(orgId)}/roles`, role);
 }
 
 /** Update a custom role's name / permissions. Requires `roles.manage`; the
@@ -185,7 +229,7 @@ export async function updateRole(
 	roleKey: string,
 	patch: { name: string; permissions: string[] }
 ): Promise<void> {
-	await send<unknown>(
+	await send(
 		"PUT",
 		`/orgs/${encodeURIComponent(orgId)}/roles/${encodeURIComponent(roleKey)}`,
 		patch
@@ -198,7 +242,7 @@ export async function deleteRole(
 	orgId: string,
 	roleKey: string
 ): Promise<void> {
-	await send<unknown>(
+	await send(
 		"DELETE",
 		`/orgs/${encodeURIComponent(orgId)}/roles/${encodeURIComponent(roleKey)}`
 	);
@@ -210,8 +254,9 @@ export async function getMemberRoles(
 	orgId: string,
 	userId: string
 ): Promise<string[]> {
-	const { roleKeys } = await get<{ roleKeys: string[] }>(
-		`/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}/roles`
+	const { roleKeys } = await get(
+		`/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}/roles`,
+		z.object({ roleKeys: z.array(z.string()) })
 	);
 	return roleKeys;
 }
@@ -222,7 +267,7 @@ export async function setMemberRoles(
 	userId: string,
 	roleKeys: string[]
 ): Promise<void> {
-	await send<unknown>(
+	await send(
 		"PUT",
 		`/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}/roles`,
 		{ roleKeys }
@@ -232,8 +277,9 @@ export async function setMemberRoles(
 /** The caller's own effective permissions in an org (built-in tier UNION every
  * custom role granted). Self-scoped; any signed-in member may read their own. */
 export async function fetchMyPermissions(orgId: string): Promise<string[]> {
-	const { permissions } = await get<{ permissions: string[] }>(
-		`/me/permissions?orgId=${encodeURIComponent(orgId)}`
+	const { permissions } = await get(
+		`/me/permissions?orgId=${encodeURIComponent(orgId)}`,
+		z.object({ permissions: z.array(z.string()) })
 	);
 	return permissions;
 }

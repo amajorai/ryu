@@ -1,6 +1,8 @@
 import { useCallback, useSyncExternalStore } from "react";
+import { z } from "zod";
 
 const TAB_VIEW_MODE_EVENT = "ryu:tab-view-mode-change";
+const storageEventSchema = z.object({ key: z.string().nullable() });
 
 export interface TabViewModeOptions<T extends string> {
 	defaultMode: T;
@@ -9,9 +11,11 @@ export interface TabViewModeOptions<T extends string> {
 	validModes: readonly T[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
+const storedModeValueSchema = z.string().optional().catch(undefined);
+const storedModesSchema = z.union([
+	z.record(z.string(), storedModeValueSchema),
+	z.array(storedModeValueSchema),
+]);
 
 function readStoredModes(storageKey: string): Record<string, string> | null {
 	try {
@@ -19,13 +23,13 @@ function readStoredModes(storageKey: string): Record<string, string> | null {
 		if (!raw) {
 			return null;
 		}
-		const parsed: unknown = JSON.parse(raw);
-		if (!isRecord(parsed)) {
+		const parsed = storedModesSchema.safeParse(JSON.parse(raw));
+		if (!parsed.success) {
 			return null;
 		}
 		return Object.fromEntries(
-			Object.entries(parsed).filter(
-				(entry): entry is [string, string] => typeof entry[1] === "string"
+			Object.entries(parsed.data).filter(
+				(entry): entry is [string, string] => entry[1] !== undefined
 			)
 		);
 	} catch {
@@ -45,7 +49,7 @@ export function readTabViewMode<T extends string>({
 		// Before per-tab preferences existed, this key held one plain mode. Treat it
 		// as a migration fallback so existing users keep their explicit choice.
 		const candidate = modes?.[tabKey] ?? (modes === null ? raw : null);
-		return validModes.includes(candidate as T) ? (candidate as T) : defaultMode;
+		return validModes.find((mode) => mode === candidate) ?? defaultMode;
 	} catch {
 		return defaultMode;
 	}
@@ -86,12 +90,16 @@ export function useTabViewMode<T extends string>({
 	);
 	const subscribe = useCallback(
 		(onChange: () => void) => {
-			if (typeof window === "undefined") {
+			if (!globalThis.window) {
 				return () => undefined;
 			}
 			const handleChange = (event: Event) => {
 				if (event.type === "storage") {
-					const key = (event as StorageEvent).key;
+					const parsed = storageEventSchema.safeParse(event);
+					if (!parsed.success) {
+						return;
+					}
+					const key = parsed.data.key;
 					if (key !== null && key !== storageKey) {
 						return;
 					}

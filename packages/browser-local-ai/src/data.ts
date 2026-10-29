@@ -1,5 +1,35 @@
-/** Browser-owned data. Origin isolation is supplied by the browser, not a site ID. */
-export function createBrowserStore(namespace: string) {
+import { z } from "zod";
+
+const browserRecordSchema = z.json();
+type BrowserRecord = z.infer<typeof browserRecordSchema>;
+
+export interface BrowserStore<RecordValue> {
+	delete(key: string): Promise<void>;
+	get(key: string): Promise<RecordValue | undefined>;
+	keys(): Promise<IDBValidKey[]>;
+	set(key: string, value: RecordValue): Promise<void>;
+}
+
+/** Browser-owned JSON data. Supply a schema for another structured record contract. */
+export function createBrowserStore(
+	namespace: string
+): BrowserStore<BrowserRecord>;
+export function createBrowserStore<RecordValue>(
+	namespace: string,
+	schema: z.ZodType<RecordValue>
+): BrowserStore<RecordValue>;
+export function createBrowserStore(
+	namespace: string,
+	schema: z.ZodType = browserRecordSchema
+) {
+	return createBrowserStoreWithSchema(namespace, schema);
+}
+
+/** Origin isolation is supplied by the browser, not a site ID. */
+function createBrowserStoreWithSchema<RecordValue>(
+	namespace: string,
+	schema: z.ZodType<RecordValue>
+): BrowserStore<RecordValue> {
 	if (!/^[a-zA-Z0-9_-]{1,64}$/.test(namespace)) {
 		throw new Error("Invalid storage namespace");
 	}
@@ -37,13 +67,21 @@ export function createBrowserStore(namespace: string) {
 		});
 	};
 	return {
-		get: (key: string): Promise<unknown> =>
-			transact("readonly", (store) => store.get(key)),
-		set: async (key: string, value: unknown) => {
-			if (key.length > 200 || JSON.stringify(value).length > 2_000_000) {
+		get: async (key: string): Promise<RecordValue | undefined> => {
+			const value = await transact<unknown>("readonly", (store) =>
+				store.get(key)
+			);
+			return value === undefined ? undefined : schema.parse(value);
+		},
+		set: async (key: string, value: RecordValue) => {
+			if (key.length > 200) {
 				throw new Error("Local record exceeds limit");
 			}
-			await transact("readwrite", (store) => store.put(value, key));
+			const record = schema.parse(value);
+			if (JSON.stringify(record).length > 2_000_000) {
+				throw new Error("Local record exceeds limit");
+			}
+			await transact("readwrite", (store) => store.put(record, key));
 		},
 		delete: async (key: string) => {
 			await transact("readwrite", (store) => store.delete(key));

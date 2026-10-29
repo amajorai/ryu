@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 
+use super::engine_child;
 use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 use crate::win_process::NoWindow;
 use process::default_port;
@@ -71,6 +72,19 @@ impl Default for MlxVlmManager {
     }
 }
 
+/// The model MLX-VLM binds at launch: explicit `with_model` > the user's
+/// active-model selection for this engine > `RYU_MLX_VLM_MODEL` > the default.
+/// Also answers which model a route that left `model` unset should request.
+pub(crate) async fn launch_model(explicit: Option<String>) -> String {
+    super::resolve_launch_model(
+        "mlx-vlm",
+        explicit,
+        "RYU_MLX_VLM_MODEL",
+        DEFAULT_MLX_VLM_MODEL,
+    )
+    .await
+}
+
 impl Sidecar for MlxVlmManager {
     fn name(&self) -> &'static str {
         "mlx-vlm"
@@ -87,6 +101,24 @@ impl Sidecar for MlxVlmManager {
         let running = Arc::clone(&self.running);
 
         Box::pin(async move {
+            // Never respawn a resident engine: storing a new child drops the
+            // serving one (spawned with kill_on_drop(false)), orphaning it with
+            // its port and GPU memory. A child still loading after an earlier
+            // readiness timeout is waited on again. Model switches stop first
+            // (restart_sidecar / set_active_local_engine).
+            if engine_child::held_child_is_running(&process) {
+                engine_child::wait_for_listener(
+                    &process,
+                    port,
+                    "MLX-VLM",
+                    engine_child::READY_TIMEOUT,
+                )
+                .await?;
+                running.store(true, Ordering::Relaxed);
+                tracing::info!("mlx-vlm already running — nothing to start");
+                return Ok(());
+            }
+
             // Node-gate: MLX-VLM only runs on Apple Silicon. Refuse here too (not
             // just at the install route) so the auto-start path can never spawn it
             // on an unsupported node.
@@ -96,14 +128,7 @@ impl Sidecar for MlxVlmManager {
             // selection when it targets MLX-VLM > `RYU_MLX_VLM_MODEL` env > a
             // sensible small default. The server cannot bind without one, so we
             // never error here. `with_model` stays first (documented contract).
-            let model = match model {
-                Some(m) => m,
-                None => match crate::model_catalog::active_model_ref_for_engine("mlx-vlm").await {
-                    Some(r) => r,
-                    None => std::env::var("RYU_MLX_VLM_MODEL")
-                        .unwrap_or_else(|_| DEFAULT_MLX_VLM_MODEL.to_string()),
-                },
-            };
+            let model = launch_model(model).await;
 
             installer::ensure_installed()
                 .await
@@ -123,22 +148,16 @@ impl Sidecar for MlxVlmManager {
                     crate::inference::LaunchConfig::default()
                 }
             };
-            let mut proc = MlxVlmProcess::new(python, model, port).with_launch(launch);
+            // Serve the installed snapshot from disk when there is one.
+            let weights = crate::sidecar::providers::python_engine_model(&model);
+            let mut proc = MlxVlmProcess::new(python, weights.model_arg, port).with_launch(launch);
             proc.start().await.context("spawning MLX-VLM process")?;
             *process.lock().unwrap() = Some(proc);
 
-            // Wait up to 120 s for the HTTP server to become reachable.
-            let addr = format!("127.0.0.1:{port}");
-            tokio::time::timeout(std::time::Duration::from_secs(120), async {
-                loop {
-                    if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                }
-            })
-            .await
-            .context("MLX-VLM did not start within 120 s")?;
+            // Ready once the HTTP server accepts connections while the child we
+            // just spawned is alive (never on a foreign listener on this port).
+            engine_child::wait_for_listener(&process, port, "MLX-VLM", engine_child::READY_TIMEOUT)
+                .await?;
 
             running.store(true, Ordering::Relaxed);
             tracing::info!("mlx-vlm started");
@@ -209,17 +228,52 @@ impl Sidecar for MlxVlmManager {
 
             crate::sidecar::remove_from_version_store(installer::VERSION_KEY);
 
-            if delete_data {
-                // mlx-vlm downloads models via HuggingFace Hub into
-                // ~/.cache/huggingface/hub. Removing ~/.cache/huggingface clears
-                // all downloaded model weights.
-                if let Some(home) = dirs::home_dir() {
-                    crate::sidecar::remove_dir(&home.join(".cache").join("huggingface")).await;
-                }
-            }
+            // `delete_data` deletes nothing outside Ryu, and nothing shared: the
+            // weights live in the catalog's `models/chat/snapshots/` (removed
+            // through the catalog) and the shared `models/hf` Hub cache that
+            // every Ryu Python runtime uses. Never `~/.cache/huggingface`.
+            let _ = delete_data;
 
             tracing::info!("mlx-vlm uninstalled");
             Ok(())
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// A second start (start-all, the services panel) while the engine is
+    /// resident keeps the serving child instead of spawning a competitor that
+    /// would replace, and so orphan, it. Returning before install also proves
+    /// no spawn path ran.
+    #[tokio::test]
+    async fn start_keeps_a_live_engine_instead_of_respawning() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mgr = MlxVlmManager::new().with_port(port);
+        let child = tokio::process::Command::new("/bin/sleep")
+            .arg("30")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn sleeping child fixture");
+        *mgr.process.lock().unwrap() = Some(MlxVlmProcess::from_child_for_test(child));
+        let pid = || {
+            mgr.process
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(MlxVlmProcess::pid)
+        };
+        let serving = pid();
+        assert!(serving.is_some());
+
+        mgr.start().await.expect("a live engine is already started");
+        assert_eq!(pid(), serving, "the serving child must not be replaced");
+        assert!(mgr.is_running());
+
+        mgr.stop().await.expect("stop the fixture child");
+        assert!(!mgr.is_running());
     }
 }

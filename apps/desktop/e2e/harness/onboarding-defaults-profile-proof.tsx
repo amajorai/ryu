@@ -3,11 +3,11 @@ import {
 	CheckmarkCircle02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { Switch } from "@ryu/ui/components/switch";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Logo as GhostOrb } from "@ryu/ui/components/logo.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
@@ -64,7 +64,7 @@ function LaneCard({
 						<p className="font-medium text-sm">{children}</p>
 						<p className="mt-1 text-muted-foreground text-xs">{label} lane</p>
 					</div>
-					<span className="rounded-full bg-emerald-500/10 px-2 py-1 text-emerald-600 text-xs dark:text-emerald-400">
+					<span className="rounded-full bg-success/10 px-2 py-1 text-success text-xs dark:text-success">
 						Configured
 					</span>
 				</div>
@@ -262,7 +262,7 @@ function ProfileStage() {
 								className={
 									index === 2 && !backgrounded
 										? "animate-pulse text-muted-foreground"
-										: "text-emerald-500"
+										: "text-success"
 								}
 								icon={CheckmarkCircle02Icon}
 								size={16}
@@ -278,7 +278,7 @@ function ProfileStage() {
 					))}
 				</div>
 			</SettingsCard>
-			<SettingsCard className="border-amber-500/30 bg-amber-500/5">
+			<SettingsCard className="border-warning/30 bg-warning/5">
 				<p className="font-medium text-sm">Local model note</p>
 				<p className="mt-1 text-muted-foreground text-xs">
 					Local models may produce a weaker initial setup. For the best result,
@@ -371,11 +371,12 @@ function ProofApp() {
 	);
 }
 
-const proofWindow = window as typeof window & {
-	__onboardingProofRoot?: ReturnType<typeof createRoot>;
-};
+const proofWindow =
+	/* SAFETY: This private optional __onboardingProofRoot holder is authored only by this module, which stores the complete native createRoot result and reuses it on later evaluation. The view preserves the browser Window and does not describe an external payload. */ window as typeof window & {
+		__onboardingProofRoot?: ReturnType<typeof createRoot>;
+	};
 const proofRoot =
 	proofWindow.__onboardingProofRoot ??
-	createRoot(document.getElementById("root") as HTMLElement);
+	createRoot(document.getElementById("root")!);
 proofWindow.__onboardingProofRoot = proofRoot;
 proofRoot.render(<ProofApp />);

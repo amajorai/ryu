@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { ReactionBucket } from "@/src/lib/api/reactions.ts";
-import { applyReactionDelta } from "./useMessageReactions.ts";
+import {
+	applyReactionDelta,
+	reactionFrameSchema,
+} from "./useMessageReactions.ts";
 
 const bucket = (
 	emoji: string,
@@ -110,5 +113,42 @@ describe("applyReactionDelta", () => {
 		const snapshot = structuredClone(before);
 		applyReactionDelta(before, "m1", "👍", "add", true);
 		expect(before).toEqual(snapshot);
+	});
+});
+
+test("reaction frames require a supported operation and nonempty message and emoji", () => {
+	const valid = {
+		type: "reaction",
+		message_id: "m1",
+		emoji: "👍",
+		op: "add",
+		user_id: "ada",
+	} satisfies ReturnType<typeof reactionFrameSchema.parse>;
+	expect(reactionFrameSchema.parse(valid)).toEqual(valid);
+	expect(
+		reactionFrameSchema.safeParse({ ...valid, op: "future" }).success
+	).toBe(false);
+	expect(
+		reactionFrameSchema.safeParse({ ...valid, message_id: "" }).success
+	).toBe(false);
+	expect(reactionFrameSchema.safeParse({ ...valid, emoji: [] }).success).toBe(
+		false
+	);
+});
+
+test("reaction frames keep optional user attribution tolerant", () => {
+	expect(
+		reactionFrameSchema.parse({
+			type: "reaction",
+			message_id: "m1",
+			emoji: "👍",
+			op: "remove",
+			user_id: false,
+		})
+	).toMatchObject({
+		message_id: "m1",
+		emoji: "👍",
+		op: "remove",
+		user_id: undefined,
 	});
 });

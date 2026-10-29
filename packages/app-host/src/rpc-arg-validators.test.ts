@@ -56,7 +56,10 @@ import {
 	asSkillUpdateArg,
 	asSkillVersionRefArg,
 	asSocialRequestArg,
+	asSpacesDatabaseArg,
 	asSpacesListArg,
+	asSpacesQueryDatabaseArg,
+	asSpacesUpdateDatabaseArg,
 	asSubtitlesRequestArg,
 	asSuggestionFeedbackArg,
 	asTemplateInstallArg,
@@ -99,12 +102,7 @@ describe("Chat Broadcast send validator", () => {
 // without multiplying identical variants.
 
 describe("single-required-string validators reject the empty/missing/wrong-type paths", () => {
-	const cases: {
-		name: string;
-		fn: (d: unknown) => unknown;
-		field: string;
-		good: Record<string, unknown>;
-	}[] = [
+	const cases = [
 		{
 			name: "asSpacesListArg",
 			fn: asSpacesListArg,
@@ -315,6 +313,14 @@ describe("optional-field validators: present kept, wrong-type rejects whole arg,
 		});
 		expect(asMediaVideoArg({ prompt: "" })).toBeNull(); // empty prompt rejected
 		expect(asMediaVideoArg({ prompt: "p", provider: 9 })).toBeNull(); // wrong-type optional → whole null
+		// Reference inputs follow the same tri-state: absent omitted, valid kept,
+		// wrong-typed rejects the whole arg (never forwarded half-validated).
+		expect(
+			asMediaVideoArg({ prompt: "p", duration_s: 5, input_video: undefined })
+		).toEqual({ prompt: "p", duration_s: 5 });
+		expect(asMediaVideoArg({ prompt: "p", duration_s: "5" })).toBeNull();
+		expect(asMediaVideoArg({ prompt: "p", input_audio: 7 })).toBeNull();
+		expect(asMediaVideoArg({ prompt: "p", provider_input: null })).toBeNull();
 		expect(asMediaVideoArg(null)).toBeNull();
 	});
 
@@ -333,6 +339,14 @@ describe("optional-field validators: present kept, wrong-type rejects whole arg,
 		expect(asMediaTranscribeArg({ audio: "a", detailed: "true" })).toBeNull();
 		expect(asMediaTranscribeArg({ audio: "" })).toBeNull();
 		expect(asMediaTranscribeArg({ audio: "a", filename: 5 })).toBeNull();
+		expect(asMediaTranscribeArg({ audio: "a", language: "pt-BR" })).toEqual({
+			audio: "a",
+			language: "pt-BR",
+		});
+		// A malformed hint is dropped instead of reaching the transcribe URL.
+		expect(
+			asMediaTranscribeArg({ audio: "a", language: "en&engine=x" })
+		).toEqual({ audio: "a" });
 	});
 
 	it("asMonitorListLimitArg drops absent limit, rejects negative/non-finite", () => {
@@ -432,7 +446,9 @@ describe("optional-arg validators always return a well-formed object", () => {
 	});
 
 	it("asActivityScoreArg requires and bounds a completed response", () => {
-		expect(asActivityScoreArg({ response: "done", agent_id: " agent-1 " })).toEqual({
+		expect(
+			asActivityScoreArg({ response: "done", agent_id: " agent-1 " })
+		).toEqual({
 			agent_id: "agent-1",
 			response: "done",
 		});
@@ -441,6 +457,38 @@ describe("optional-arg validators always return a well-formed object", () => {
 		});
 		expect(asActivityScoreArg({})).toBeNull();
 		expect(asActivityScoreArg({ response: "x".repeat(1_000_001) })).toBeNull();
+	});
+
+	it("activity scoring preserves actual JSON projections and rejects unserializable required output", () => {
+		const response = JSON.parse(
+			'{"__proto__":{"text":"done"},"nested":[true,null,1]}'
+		);
+		const metadata = JSON.parse('{"__proto__":{"source":"trace"}}');
+		const assertions = [
+			{ kind: "future-core-check", value: { additive: true } },
+		];
+		const context = [{ future: "retained" }];
+		const parsed = asActivityScoreArg({
+			response,
+			metadata,
+			assertions,
+			context,
+		});
+		expect(parsed?.response).toBe(response);
+		expect(parsed?.metadata).toBe(metadata);
+		expect(parsed?.assertions).toBe(assertions);
+		expect(parsed?.context).toBe(context);
+		expect(Object.hasOwn(parsed?.metadata ?? {}, "__proto__")).toBe(true);
+		expect(asActivityScoreArg({ response: undefined })).toBeNull();
+		expect(asActivityScoreArg({ response: () => "unserializable" })).toBeNull();
+		const circular = {};
+		Object.assign(circular, { self: circular });
+		expect(asActivityScoreArg({ response: circular })).toBeNull();
+		const invalid = Object.fromEntries([["__proto__", () => "invalid"]]);
+		expect(asActivityScoreArg({ response: invalid })).toBeNull();
+		expect(asActivityScoreArg({ response: "done", metadata: invalid })).toEqual(
+			{ response: "done" }
+		);
 	});
 
 	it("asMeetingStartArg picks only valid string fields, dropping the rest", () => {
@@ -1129,5 +1177,98 @@ describe("asBlueprintRequestArg", () => {
 			asBlueprintRequestArg({ path: "/plans", method: "PATCH" })
 		).toBeNull();
 		expect(asBlueprintRequestArg({ path: "/plans", method: "get" })).toBeNull();
+	});
+});
+
+describe("Spaces database validators", () => {
+	it("rejects cyclic and oversized parameters before descending beyond JSON bounds", () => {
+		const request = {
+			database_id: "db-1",
+			query: "SELECT 1",
+			space_id: "space-1",
+		};
+		let nested: string | object = "leaf";
+		for (let depth = 0; depth < 16; depth += 1) {
+			nested = [nested];
+		}
+		expect(
+			asSpacesQueryDatabaseArg({ ...request, parameters: [nested] })
+		).not.toBeNull();
+		expect(
+			asSpacesQueryDatabaseArg({ ...request, parameters: [[nested]] })
+		).toBeNull();
+		const cyclicObject = {};
+		Object.defineProperty(cyclicObject, "self", {
+			value: cyclicObject,
+			enumerable: true,
+		});
+		expect(
+			asSpacesQueryDatabaseArg({ ...request, parameters: [cyclicObject] })
+		).toBeNull();
+		expect(
+			asSpacesQueryDatabaseArg({
+				...request,
+				parameters: [Array.from({ length: 10_001 }, () => 0)],
+			})
+		).toBeNull();
+		expect(
+			asSpacesQueryDatabaseArg({
+				...request,
+				parameters: Array.from({ length: 65 }, () => 0),
+			})
+		).toBeNull();
+	});
+
+	it("requires an explicit Space and database id", () => {
+		expect(
+			asSpacesDatabaseArg({ space_id: "space-1", database_id: "db-1" })
+		).toEqual({
+			space_id: "space-1",
+			database_id: "db-1",
+		});
+		expect(asSpacesDatabaseArg({ database_id: "db-1" })).toBeNull();
+	});
+
+	it("bounds SQL and validates JSON parameters", () => {
+		expect(
+			asSpacesQueryDatabaseArg({
+				space_id: "space-1",
+				database_id: "db-1",
+				query: "SELECT key FROM data WHERE owner = ?",
+				parameters: ["owner-1"],
+			})
+		).toEqual({
+			space_id: "space-1",
+			database_id: "db-1",
+			query: "SELECT key FROM data WHERE owner = ?",
+			parameters: ["owner-1"],
+		});
+		expect(
+			asSpacesQueryDatabaseArg({
+				space_id: "space-1",
+				database_id: "db-1",
+				query: "SELECT key FROM data",
+				parameters: [() => "not JSON"],
+			})
+		).toBeNull();
+	});
+
+	it("requires a revision and bounded source on database writes", () => {
+		expect(
+			asSpacesUpdateDatabaseArg({
+				space_id: "space-1",
+				database_id: "db-1",
+				expected_revision: 4,
+				source: '{"columns":[],"rows":[]}',
+			})?.expected_revision
+		).toBe(4);
+		expect(
+			asSpacesUpdateDatabaseArg({
+				space_id: "space-1",
+				database_id: "db-1",
+				expected_revision: -1,
+				source: "{}",
+			})
+		).toBeNull();
 	});
 });

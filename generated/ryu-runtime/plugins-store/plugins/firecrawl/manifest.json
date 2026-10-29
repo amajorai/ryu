@@ -84,6 +84,14 @@
             "url": {
               "type": "string",
               "description": "The URL of the page to scrape."
+            },
+            "formats": {
+              "type": "array",
+              "description": "Output formats to return (default markdown). `html` returns cleaned HTML.",
+              "items": {
+                "type": "string",
+                "enum": ["markdown", "html"]
+              }
             }
           },
           "required": ["url"]

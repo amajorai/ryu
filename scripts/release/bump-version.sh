@@ -131,6 +131,13 @@ for f in bindings/python/pyproject.toml bindings/python/README.md bindings/cshar
     s{(ryu-sdk(?:==| --version )?)\Q$o\E}{$1$n}g;' "$f"
   log "  $f -> $NEW"
 done
+# The ryu_sdk.services User-Agent version (test_the_user_agent_version_matches_pyproject
+# pins it to pyproject.toml).
+f=bindings/python/ryu_sdk/services/_runtime/constants.py
+if [[ -f "$f" ]]; then
+  perl -0777 -pi -e 'my ($o,$n)=($ENV{OLD},$ENV{NEW}); s/^SDK_VERSION = "\Q$o\E"/SDK_VERSION = "$n"/mg;' "$f"
+  log "  $f -> $NEW"
+fi
 
 # 4) tauri.conf.json — the desktop tag driver.
 log "tauri.conf.json (desktop tag driver)"
@@ -176,36 +183,23 @@ if changed:
 PY
 done < <(git ls-files '*Cargo.lock')
 
-# 7b) VITE_APP_VERSION in the committed .env.production files.
+# 7b) VITE_APP_VERSION in the committed .env.production files (and the
+#     Codespaces playground webapp build's .env.playground).
 #
 # Vite INLINES this into the shipped bundle, so it is what the desktop/webapp
 # actually DISPLAY as their version. It was missed by every previous bump and
 # had drifted to 0.0.3 while the real train was 0.0.6 — users downloaded
 # "0.0.6" and saw 0.0.3. Kept in lockstep here so it can never drift again.
-for f in apps/desktop/.env.production apps/webapp/.env.production; do
+for f in apps/desktop/.env.production apps/webapp/.env.production apps/webapp/.env.playground; do
   [[ -f "$f" ]] || continue
   perl -0777 -pi -e 'my $n=$ENV{NEW}; s/^VITE_APP_VERSION=.*$/VITE_APP_VERSION=$n/m;' "$f"
   log "  $f -> $NEW"
 done
 
-# 7c) fumadocs docs version — the docs site labels the current URL space
-# with /docs/<v>/... while keeping only one live deployment.
-#
-# Three sites carry the literal train version and none of them is a manifest, so
-# nothing above catches them:
-#   - src/lib/docs-version.ts  DOCS_VERSION, the single source the whole site
-#     derives /docs/<v>/... paths from (docsPath / versionedDocsHref).
-#   - next.config.mjs          the bare-/docs redirect target.
-#   - README.md                the prose statement of the current release.
-# Miss these and the mirrored ryu-docs satellite keeps serving the OLD version's
-# URLs after the train has moved. Only these three files are touched, so the
-# literal-version replace cannot hit unrelated prose elsewhere in the site.
-log "fumadocs docs version (DOCS_VERSION + /docs redirect + README)"
-for f in apps/fumadocs/src/lib/docs-version.ts apps/fumadocs/next.config.mjs apps/fumadocs/README.md; do
-  [[ -f "$f" ]] || continue
-  perl -0777 -pi -e 'my ($o,$n)=($ENV{OLD},$ENV{NEW}); s/\Q$o\E/$n/g;' "$f"
-  log "  $f -> $NEW"
-done
+# 7c) fumadocs needs no bump: the docs site publishes only the current release
+# at unversioned URLs (/docs/...), so no docs file carries the train version.
+# Links from older releases that still name one (/docs/<v>/...) are redirected
+# by apps/fumadocs/next.config.mjs, which matches any version-shaped segment.
 
 # 8) Validate the root workspace lock still resolves against the bumped manifests.
 if command -v cargo >/dev/null 2>&1; then
@@ -224,4 +218,4 @@ fi
 log "Bump complete: $OLD -> $NEW. Changed files:"
 git diff --stat -- $(git ls-files '*Cargo.toml' '*Cargo.lock' '*package.json' '*tauri.conf.json' 'packages/create-ryu-app/index.ts' 'packages/create-ryu-app/index.test.ts') | tail -1
 printf '\nReview with: git diff --stat\n'
-printf 'Then sync bun.lock: bun install   (bun 1.3.14, matches CI)\n'
+printf 'Then sync bun.lock: bun install   (bun 1.4.4, matches CI)\n'

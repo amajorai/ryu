@@ -33,7 +33,9 @@ describe("createComposerDirectory", () => {
 			{ id: "settings:agent:ryu", kind: "agent", label: "Ryu" },
 		]);
 
-		directory.onSelect(directory.groups[0].items[0]);
+		const selection = directory.groups[0]?.items[0];
+		if (!selection) throw new Error("Projected agent selection is missing");
+		directory.onSelect(selection);
 		expect(changes).toEqual(["ryu"]);
 	});
 

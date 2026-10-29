@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/node-auth.ts
 //
 // Whether a given Core NODE holds an auth token — which is a different question
@@ -30,9 +32,22 @@ export async function getNodeAuthState(
 	target: ApiTarget
 ): Promise<NodeAuthState> {
 	try {
-		const data = await request<AuthStatusWire>(target, "/api/auth/status");
+		const data = await request<AuthStatusWire>(
+			target,
+			"/api/auth/status",
+			undefined,
+			authStatusWireResponseCodec
+		);
 		return data.authenticated === true ? "authenticated" : "signed-out";
 	} catch {
 		return null;
 	}
 }
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const authStatusWireResponseCodec = z
+	.object({
+		authenticated: z.boolean().optional(),
+		pending: z.boolean().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);

@@ -1,6 +1,7 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/chrome/store-list-header.tsx
 //
-// Moved from apps/desktop/src/components/store/StoreListHeader.tsx. Fixed chrome
+// Formerly apps/desktop/src/components/store/StoreListHeader.tsx (since removed). Fixed chrome
 // at the top of the store's left list column: pill section tabs plus an optional
 // search field. Unlike the desktop original it reads the chrome context via the
 // NON-throwing accessor, so when no provider is mounted (web) it simply renders
@@ -30,7 +31,7 @@ export default function StoreListHeader({
 		<div className="flex shrink-0 flex-col gap-2.5 border-border/60 border-b p-3">
 			{chrome ? (
 				<Tabs onValueChange={chrome.onSelect} value={chrome.active}>
-					<TabsList className="h-auto max-h-40 flex-wrap gap-1" variant="pills">
+					<TabsList layout="catalog-sections" variant="pills">
 						{chrome.sections.map((section, index) => {
 							const prev = index > 0 ? chrome.sections[index - 1] : undefined;
 							const showDivider = Boolean(
@@ -45,11 +46,11 @@ export default function StoreListHeader({
 										/>
 									) : null}
 									<TabsTrigger
-										className="gap-1.5 px-2.5 py-1 text-xs"
+										density="catalog"
 										title={section.label}
 										value={section.value}
 									>
-										{typeof section.icon === "string" ? (
+										{isNativeText(section.icon) ? (
 											<Icon
 												className="size-3.5"
 												icon={section.icon}
@@ -58,7 +59,9 @@ export default function StoreListHeader({
 										) : (
 											<HugeiconsIcon className="size-3.5" icon={section.icon} />
 										)}
-										<span className="truncate">{section.label}</span>
+										<span className="truncate" title={section.label}>
+											{section.label}
+										</span>
 									</TabsTrigger>
 								</Fragment>
 							);
@@ -73,9 +76,11 @@ export default function StoreListHeader({
 						icon={Search01Icon}
 					/>
 					<Input
-						className="h-8 pl-8 text-sm"
+						aria-label={search.placeholder ?? "Search"}
+						leadingAdornment="compact"
 						onChange={(e) => search.onChange(e.target.value)}
 						placeholder={search.placeholder ?? "Search…"}
+						size="settings-search"
 						value={search.value}
 					/>
 				</div>

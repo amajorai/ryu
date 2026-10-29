@@ -50,7 +50,7 @@ export function useConfirmDialog() {
 			new Promise<boolean>((resolve) => {
 				if (
 					!pending.current &&
-					typeof document !== "undefined" &&
+					globalThis.document !== undefined &&
 					document.activeElement instanceof HTMLElement
 				) {
 					focusTarget.current = document.activeElement;

@@ -1,4 +1,4 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { Plus } from "lucide-react";
 import type { DbColumn, DbRow } from "@/src/lib/realtime/yjs-database.ts";
 import { RowCard } from "./RowCard.tsx";
@@ -19,7 +19,7 @@ export function GalleryView({
 	rows: DbRow[];
 	readOnly: boolean;
 	onOpenRow: (row: DbRow) => void;
-	createRow: (values?: Record<string, unknown>) => void;
+	createRow: (values?: DbRow) => void;
 }) {
 	return (
 		<div className="scroll-fade h-full overflow-y-auto p-4">
@@ -34,9 +34,9 @@ export function GalleryView({
 				))}
 				{!readOnly && (
 					<Button
-						className="h-full min-h-24 justify-center border border-dashed text-muted-foreground"
+						className="h-full min-h-24 justify-center"
 						onClick={() => createRow()}
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						<Plus className="size-4" />
 						New

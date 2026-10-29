@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Hand the global "Ask Ryu" panel over to a page's builder while that page is
 // the focused tab. A builder page (agent edit, workflows) calls this with the
 // target it's building + the wiring to resolve/refresh it; the panel then acts
@@ -42,6 +43,9 @@ export interface AssistantBuilderInput {
 	targetId: string | null;
 	/** Human name of the target, for the header + empty-state copy. */
 	targetName: string;
+	/** What an app-defined surface's conversation is about; a new value starts a
+	 *  separate thread. See the store's `thread` doc. */
+	thread?: string;
 	/** Tool ids to name in the preamble. Advisory — see the store's doc comment. */
 	tools?: string[];
 }
@@ -92,6 +96,7 @@ export function useAssistantBuilder(input: AssistantBuilderInput | null): void {
 	const description = input?.description;
 	const dock = input?.dock;
 	const preamble = input?.preamble;
+	const thread = input?.thread;
 	const toolsKey = JSON.stringify(input?.tools ?? []);
 	const promptsKey = JSON.stringify(input?.prompts ?? []);
 	const descriptor = useMemo(
@@ -100,10 +105,11 @@ export function useAssistantBuilder(input: AssistantBuilderInput | null): void {
 			description,
 			dock,
 			preamble,
-			tools: JSON.parse(toolsKey) as string[],
-			prompts: JSON.parse(promptsKey) as string[],
+			thread,
+			tools: z.array(z.string()).parse(JSON.parse(toolsKey)),
+			prompts: z.array(z.string()).parse(JSON.parse(promptsKey)),
 		}),
-		[label, description, dock, preamble, toolsKey, promptsKey]
+		[label, description, dock, preamble, thread, toolsKey, promptsKey]
 	);
 	const fieldsRef = useRef({ targetId, targetName, snapshot, descriptor });
 	fieldsRef.current = { targetId, targetName, snapshot, descriptor };

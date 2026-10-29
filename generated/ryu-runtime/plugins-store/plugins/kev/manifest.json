@@ -1,0 +1,116 @@
+{
+  "id": "@ryu/kev",
+  "name": "Kev Decision Models",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Connect Ryu's Decision Models layer to a running local Kev System One server. Ryu does not download Kev weights or start the model server.",
+  "tagline": "Local typed decisions with Kev",
+  "homepage": "https://github.com/jaredpalmer/kev",
+  "license": "Apache-2.0",
+  "category": "Models",
+  "keywords": [
+    "decision models",
+    "classification",
+    "kev",
+    "system one",
+    "local"
+  ],
+  "tags": ["models", "decision", "classification", "kev", "systemone", "local"],
+  "icon": "ai-brain-01",
+  "iconDither": { "from": 240, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-kev-predict",
+      "name": "Kev Predict",
+      "kind": "tool",
+      "config": {
+        "slug": "kev.predict",
+        "backend": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:8009/v1/systemone",
+        "fail_open": false,
+        "unwrap_body": true,
+        "body_defaults": { "model": "kev-latest" },
+        "description": "Run typed yes/no, choice, or score questions against the Kev model already served on this node. Returns probabilities, not prose.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "description": "The text, JSON object, or list to evaluate.",
+              "oneOf": [
+                { "type": "string" },
+                { "type": "object" },
+                { "type": "array" }
+              ]
+            },
+            "questions": {
+              "type": "object",
+              "description": "Question ids mapped to typed `noul`, `choice`, or `score` definitions.",
+              "minProperties": 1,
+              "maxProperties": 64,
+              "additionalProperties": { "type": "object" }
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional System One model alias. Defaults to `kev-latest`, which selects the checkpoint loaded by the local Kev server."
+            }
+          },
+          "required": ["state", "questions"]
+        }
+      }
+    },
+    {
+      "id": "tool-kev-models",
+      "name": "Kev Models",
+      "kind": "tool",
+      "config": {
+        "slug": "kev.models",
+        "backend": "http",
+        "method": "GET",
+        "url": "http://127.0.0.1:8009/v1/models",
+        "fail_open": false,
+        "unwrap_body": true,
+        "description": "List model details from the Kev server running on this node.",
+        "input_schema": { "type": "object", "properties": {} }
+      }
+    }
+  ],
+  "provides": [
+    {
+      "capability": "decision.typed",
+      "version": "1.0.0",
+      "title": "Typed Decisions",
+      "selectable": true,
+      "layerKind": "decision-model",
+      "tools": {
+        "decision.predict": { "tool": "kev.predict" }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:127.0.0.1"],
+  "permission_levels": [
+    {
+      "id": "kev.view",
+      "label": "View Kev model availability",
+      "description": "List model details from the local Kev server.",
+      "implies": []
+    },
+    {
+      "id": "kev.predict",
+      "label": "Run local Kev decisions",
+      "description": "Send bounded state and typed questions to the Kev server on this node.",
+      "implies": ["kev.view"]
+    }
+  ]
+}

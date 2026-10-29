@@ -18,7 +18,7 @@ describe("pickRecommendedQuant", () => {
 			sizeHuman: "1 KB",
 			url: "https://example.com/f.gguf",
 			...over,
-		}) as import("./api/models.ts").ModelFile;
+		}) satisfies import("./api/models.ts").ModelFile;
 
 	it("prefers the best device fit", () => {
 		const best = pickRecommendedQuant([
@@ -58,6 +58,24 @@ describe("pickRecommendedQuant", () => {
 		]);
 		// No great/ok present → partial is the best of what's left.
 		expect(best?.filename).toBe("partial.gguf");
+	});
+
+	it("ranks blocked verdicts last: unknown > too_big > no_space", () => {
+		expect(
+			pickRecommendedQuant([
+				file({ filename: "no_space.gguf", fit: "no_space", sizeBytes: 1 }),
+				file({ filename: "too_big.gguf", fit: "too_big", sizeBytes: 2 }),
+				file({ filename: "unknown.gguf", fit: "unknown", sizeBytes: 3 }),
+			])?.filename
+		).toBe("unknown.gguf");
+		// When every quant is blocked the least-bad one is returned; callers gate
+		// the install on `isBlockedFit`.
+		expect(
+			pickRecommendedQuant([
+				file({ filename: "no_space.gguf", fit: "no_space", sizeBytes: 1 }),
+				file({ filename: "too_big.gguf", fit: "too_big", sizeBytes: 2 }),
+			])?.filename
+		).toBe("too_big.gguf");
 	});
 
 	it("treats a null sizeBytes as +Infinity so a sized quant wins the tie", () => {

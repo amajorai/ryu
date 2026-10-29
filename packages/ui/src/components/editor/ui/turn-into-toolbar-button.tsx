@@ -1,5 +1,4 @@
 "use client";
-
 import {
 	getBlockType,
 	setBlockType,
@@ -10,6 +9,7 @@ import {
 	DropdownMenuRadioItem,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/editor/ui/dropdown-menu.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	ChevronRightIcon,
 	Code2,
@@ -27,11 +27,10 @@ import {
 	QuoteIcon,
 	SquareIcon,
 } from "lucide-react";
-import type { TElement } from "platejs";
 import { KEYS } from "platejs";
 import { useEditorRef, useSelectionFragmentProp } from "platejs/react";
 import { type ComponentProps, useMemo, useState } from "react";
-
+import { TOOLBAR_CLICK_OUTSIDE_MARKER } from "../interaction-markers.ts";
 import { ToolbarButton, ToolbarMenuGroup } from "./toolbar.tsx";
 
 export const turnIntoItems = [
@@ -141,7 +140,7 @@ export function TurnIntoToolbarButton(
 
 	const value = useSelectionFragmentProp({
 		defaultValue: KEYS.p,
-		getProp: (node) => getBlockType(node as TElement),
+		getProp: (node) => getBlockType(node),
 	});
 	const selectedItem = useMemo(
 		() =>
@@ -167,7 +166,7 @@ export function TurnIntoToolbarButton(
 
 			<DropdownMenuContent
 				align="start"
-				className="ignore-click-outside/toolbar min-w-0"
+				className={cn(TOOLBAR_CLICK_OUTSIDE_MARKER, "min-w-0")}
 				onCloseAutoFocus={(e) => {
 					e.preventDefault();
 					editor.tf.focus();

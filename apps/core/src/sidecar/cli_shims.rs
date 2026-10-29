@@ -16,8 +16,10 @@
 //! **Credentials stay host-side.** The shim reads `$RYU_EXT_TOKEN` from its
 //! runtime env and sends it as the bearer; the token literal is NEVER written
 //! into a script file (env-reference only), so the on-disk shims carry no
-//! secret and passing tokens on argv is avoided entirely (the wave-2 child-env
-//! scrubbers protect the child env). Core injects `RYU_EXT_TOKEN` /
+//! secret and passing tokens on argv is avoided entirely: curl receives the
+//! bearer as a `--config` line from stdin (POSIX `printf` builtin) or from a
+//! per-call temp file (Windows `echo` builtin), never as a `-H` argument (the
+//! wave-2 child-env scrubbers protect the child env). Core injects `RYU_EXT_TOKEN` /
 //! `RYU_EXT_PLUGIN_ID` / `RYU_CORE_PORT` at spawn and prepends the shim dir to
 //! the child's `PATH`.
 //!
@@ -116,9 +118,11 @@ url="http://127.0.0.1:${{{core_port}}}/api/host/capability/${{cap}}"
 tmp="$(mktemp "${{TMPDIR:-/tmp}}/ryu-cap.XXXXXX")" || exit 1
 trap 'rm -f "$tmp"' EXIT
 
-code="$(curl -sS -o "$tmp" -w '%{{http_code}}' \
+# The bearer reaches curl as a config line on stdin, written by the printf
+# builtin, so it never appears on any process's argv (`ps`, /proc/<pid>/cmdline).
+code="$(printf 'header = "authorization: Bearer %s"\n' "${{RYU_EXT_TOKEN}}" |
+  curl --config - -sS -o "$tmp" -w '%{{http_code}}' \
   -X POST "$url" \
-  -H "authorization: Bearer ${{RYU_EXT_TOKEN}}" \
   -H "{hdr_plugin}: ${{RYU_EXT_PLUGIN_ID}}" \
   -H 'content-type: application/json' \
   --data-binary "$body")" || exit 1
@@ -158,11 +162,16 @@ if \"%RYU_EXT_TOKEN%\"==\"\" (echo ryu-cap: RYU_EXT_TOKEN is not set 1>&2 & exit
 if \"%RYU_EXT_PLUGIN_ID%\"==\"\" (echo ryu-cap: RYU_EXT_PLUGIN_ID is not set 1>&2 & exit /b 2)\r\n\
 set \"URL=http://127.0.0.1:%{core_port}%/api/host/capability/%CAP%\"\r\n\
 set \"TMP=%TEMP%\\ryu-cap-%RANDOM%%RANDOM%.json\"\r\n\
+set \"HDR=%TEMP%\\ryu-cap-%RANDOM%%RANDOM%.cfg\"\r\n\
 if not \"%~1\"==\"\" (set \"PAYLOAD=%~1\") else (set /p PAYLOAD=)\r\n\
 if not \"%OP%\"==\"\" (set \"BODY={{\"\"op\"\":\"\"%OP%\"\",\"\"input\"\":%PAYLOAD%}}\") else (set \"BODY=%PAYLOAD%\")\r\n\
-for /f \"usebackq delims=\" %%C in (`curl -sS -o \"%TMP%\" -w \"%%{{http_code}}\" -X POST \"%URL%\" -H \"authorization: Bearer %RYU_EXT_TOKEN%\" -H \"{hdr_plugin}: %RYU_EXT_PLUGIN_ID%\" -H \"content-type: application/json\" --data-binary \"%BODY%\"`) do set \"CODE=%%C\"\r\n\
+REM The bearer reaches curl through a config file written by the echo builtin,\r\n\
+REM never on a command line (where any local user could read it).\r\n\
+>\"%HDR%\" echo header = \"authorization: Bearer %RYU_EXT_TOKEN%\"\r\n\
+for /f \"usebackq delims=\" %%C in (`curl --config \"%HDR%\" -sS -o \"%TMP%\" -w \"%%{{http_code}}\" -X POST \"%URL%\" -H \"{hdr_plugin}: %RYU_EXT_PLUGIN_ID%\" -H \"content-type: application/json\" --data-binary \"%BODY%\"`) do set \"CODE=%%C\"\r\n\
 if exist \"%TMP%\" type \"%TMP%\"\r\n\
 if exist \"%TMP%\" del \"%TMP%\" >nul 2>&1\r\n\
+if exist \"%HDR%\" del \"%HDR%\" >nul 2>&1\r\n\
 if \"%CODE:~0,1%\"==\"2\" (exit /b 0) else (exit /b 1)\r\n",
         core_port = ENV_CORE_PORT,
         hdr_plugin = crate::sidecar::ext_proxy::HDR_PLUGIN_ID,
@@ -220,14 +229,17 @@ fn alias_pairs(declared: &[String]) -> Vec<(&'static str, &'static str)> {
 /// The **program names** [`materialize`] writes for `declared` — the `ryu-cap`
 /// multiplexer plus one convenience alias per declared known-capability verb, in
 /// the same stable order. These are the base names a sandboxed caller invokes on
-/// PATH (`ryu-cap`, `ryu-rag-retrieve`, …); the Deno PTC lowering passes them as a
-/// scoped `--allow-run=<names>` allow-list (Deno matches the spawned program NAME,
-/// not a directory), so the sandbox may spawn only the generated shims.
+/// PATH (`ryu-cap`, `ryu-rag-retrieve`, …); the JS sandbox receives them as its
+/// `childProcess.run` allow-list (bare program NAMES, never paths), so the
+/// sandbox may start only the generated shims.
 ///
 /// Base names, no extension: on Windows the on-disk files carry `.cmd`, but a
-/// caller invokes them by base name (PATHEXT resolves the file), which is what
-/// Deno's allow-run matches. (The `.cmd`-exact form is a documented Windows
-/// follow-up should a caller ever spawn with the literal extension.)
+/// caller invokes them by base name, which is what the allow-list matches. Rust's
+/// process spawning ignores PATHEXT, so the JS sandbox resolves an allow-listed
+/// base name through the child's `PATH` + `PATHEXT` itself before spawning
+/// (`spawn_target` in `crates/core/tool-exec/src/js_backend.rs`). (The
+/// `.cmd`-exact form is a documented Windows follow-up should a caller ever spawn
+/// with the literal extension.)
 pub fn shim_names(declared: &[String]) -> Vec<String> {
     let mut names = vec![MUX_NAME.to_owned()];
     for (cap, verb) in alias_pairs(declared) {
@@ -333,7 +345,14 @@ mod tests {
         // Golden invariants: env-referenced token (never a literal), the exact
         // broker path + plugin-id header, and a nonzero exit on non-2xx.
         assert!(s.starts_with("#!/bin/sh"));
-        assert!(s.contains("Bearer ${RYU_EXT_TOKEN}"));
+        assert!(
+            s.contains(r#"printf 'header = "authorization: Bearer %s"\n' "${RYU_EXT_TOKEN}" |"#)
+        );
+        assert!(s.contains("curl --config - "));
+        // The token is referenced exactly once, on the stdin config line, and
+        // never as a curl `-H` argument (argv is world-readable via `ps`).
+        assert_eq!(s.matches("${RYU_EXT_TOKEN}").count(), 1);
+        assert!(!s.contains("-H \"authorization"));
         assert!(s.contains("x-ryu-plugin-id: ${RYU_EXT_PLUGIN_ID}"));
         assert!(s.contains("/api/host/capability/${cap}"));
         assert!(s.contains("${RYU_CORE_PORT}"));
@@ -351,7 +370,11 @@ mod tests {
         assert!(s.starts_with("@echo off"));
         // `%%{http_code}` in-file reaches curl as `%{http_code}`.
         assert!(s.contains("%%{http_code}"));
-        assert!(s.contains("authorization: Bearer %RYU_EXT_TOKEN%"));
+        assert!(s.contains(r#">"%HDR%" echo header = "authorization: Bearer %RYU_EXT_TOKEN%""#));
+        assert!(s.contains(r#"curl --config "%HDR%""#));
+        assert!(s.contains(r#"del "%HDR%""#));
+        // Never a curl `-H` argument: argv is readable by other local users.
+        assert!(!s.contains(r#"-H "authorization"#));
         assert!(s.contains("x-ryu-plugin-id: %RYU_EXT_PLUGIN_ID%"));
         assert!(s.contains("/api/host/capability/%CAP%"));
         // CRLF line endings for cmd.exe.

@@ -3,7 +3,7 @@
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import { Send } from "lucide-react";
-import type { ChangeEvent, FormEvent, ReactNode, RefObject } from "react";
+import type { ChangeEvent, ReactNode, RefObject, SubmitEvent } from "react";
 
 export interface AiPlaygroundMessagePart {
 	text?: string;
@@ -26,7 +26,7 @@ export interface AiPlaygroundProps {
 	/** Composer change handler. */
 	onInputChange?: (e: ChangeEvent<HTMLInputElement>) => void;
 	/** Submit handler. */
-	onSubmit?: (e: FormEvent<HTMLFormElement>) => void;
+	onSubmit?: (e: SubmitEvent<HTMLFormElement>) => void;
 	/**
 	 * Renderer for a text part. The live page renders Streamdown here; the
 	 * storyboard passes a plain text renderer.
@@ -105,15 +105,21 @@ export default function AiPlayground({
 				onSubmit={onSubmit}
 			>
 				<Input
+					aria-label="Message"
 					autoComplete="off"
 					className="flex-1"
 					name="prompt"
 					onChange={onInputChange}
-					placeholder="Type your message..."
+					placeholder="Type your message…"
 					value={input}
 				/>
-				<Button size="icon" type="submit">
-					<Send size={18} />
+				<Button
+					aria-label="Send message"
+					size="icon"
+					type="submit"
+					variant="mono"
+				>
+					<Send aria-hidden="true" size={18} />
 				</Button>
 			</form>
 		</div>

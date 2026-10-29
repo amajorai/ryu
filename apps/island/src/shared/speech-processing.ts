@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Shared preference contract for the node-local Speech Processing layer.
 //
 // The desktop writes this JSON blob to Core and the Island reads it when a
@@ -43,14 +44,16 @@ export const DEFAULT_SPEECH_PROCESSING_PREFS: SpeechProcessingPrefs = {
 	styling: "semi-formal",
 };
 
-function isSpeechProcessingEngine(
-	value: unknown
-): value is SpeechProcessingEngine {
-	return (
-		typeof value === "string" &&
-		SPEECH_PROCESSING_ENGINE_VALUES.includes(value as SpeechProcessingEngine)
-	);
-}
+const speechProcessingPrefsSchema = z
+	.object({
+		context: z.enum(["general", "email"]).catch("general"),
+		engine: z.enum(["s1-mini"]).catch("s1-mini"),
+		structure: z.enum(["prose", "lists"]).catch("prose"),
+		styling: z
+			.enum(["casual", "semi-casual", "semi-formal", "formal"])
+			.catch("semi-formal"),
+	})
+	.catch(DEFAULT_SPEECH_PROCESSING_PREFS);
 
 /** Parse a stored Speech Processing preference without trusting its JSON. */
 export function parseSpeechProcessingPrefs(
@@ -60,27 +63,7 @@ export function parseSpeechProcessingPrefs(
 		return DEFAULT_SPEECH_PROCESSING_PREFS;
 	}
 	try {
-		const parsed = JSON.parse(raw) as Partial<SpeechProcessingPrefs>;
-		return {
-			context:
-				parsed.context === "email"
-					? "email"
-					: DEFAULT_SPEECH_PROCESSING_PREFS.context,
-			engine: isSpeechProcessingEngine(parsed.engine)
-				? parsed.engine
-				: DEFAULT_SPEECH_PROCESSING_PREFS.engine,
-			structure:
-				parsed.structure === "lists"
-					? "lists"
-					: DEFAULT_SPEECH_PROCESSING_PREFS.structure,
-			styling:
-				parsed.styling === "casual" ||
-				parsed.styling === "semi-casual" ||
-				parsed.styling === "formal" ||
-				parsed.styling === "semi-formal"
-					? parsed.styling
-					: DEFAULT_SPEECH_PROCESSING_PREFS.styling,
-		};
+		return speechProcessingPrefsSchema.parse(JSON.parse(raw));
 	} catch {
 		return DEFAULT_SPEECH_PROCESSING_PREFS;
 	}

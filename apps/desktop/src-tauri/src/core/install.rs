@@ -66,7 +66,11 @@ fn app_version(app: &AppHandle) -> String {
 /// `~/.ryu/bin/<bin_name>.version`. Records which app version installed it so a
 /// later launch can detect and replace a stale binary.
 fn version_marker_path(bin_name: &str) -> Option<PathBuf> {
-    install_path(bin_name).map(|p| p.with_extension("version"))
+    install_path(bin_name).map(|path| {
+        let mut marker = path.into_os_string();
+        marker.push(".version");
+        PathBuf::from(marker)
+    })
 }
 
 /// Whether the managed `~/.ryu/bin/<bin>` was installed by the currently-running
@@ -134,6 +138,11 @@ const GATEWAY: SidecarBinary = SidecarBinary {
     bin_name: "ryu-gateway",
     env_var: "RYU_GATEWAY_BIN",
 };
+const CLI: SidecarBinary = SidecarBinary {
+    asset_base: "ryu-cli",
+    bin_name: "ryu-cli",
+    env_var: "RYU_CLI_BIN",
+};
 // NOTE: the per-app opt-in sidecar consts (MAIL/TEAMS/RESEARCH/… ) and the
 // `OPTIONAL_SIDECARS` boot-prefetch that used to live here have been REMOVED. The
 // desktop no longer downloads app bins up-front; Core now fetches each app's
@@ -178,7 +187,19 @@ fn install_path(bin_name: &str) -> Option<PathBuf> {
     } else {
         bin_name.to_string()
     };
-    Some(crate::profile::ryu_home_dir().join("bin").join(file))
+    let root = ryu_sidecar_runtime::layout::bin_dir(&crate::profile::ryu_home_dir());
+    ryu_runtime_install::RuntimeGenerations::new(root)
+        .active_dir()
+        .ok()
+        .map(|directory| directory.join(file))
+}
+
+pub(crate) fn managed_core_path() -> Option<PathBuf> {
+    install_path(CORE.bin_name).filter(|path| path.is_file())
+}
+
+pub(crate) fn managed_gateway_path() -> Option<PathBuf> {
+    install_path(GATEWAY.bin_name).filter(|path| path.is_file())
 }
 
 /// Whether `spec` already resolves to a real file — mirroring how Core resolves it
@@ -199,10 +220,9 @@ fn resolved_installed_path(spec: &SidecarBinary, expected_version: &str) -> Opti
     //    marker matches the running app: a binary left over from an older app
     //    version is treated as absent so it is re-downloaded (and NOT rescued by
     //    the PATH check below, since ~/.ryu/bin is on PATH — this branch returns).
-    if let Some(p) = install_path(spec.bin_name) {
-        if p.exists() {
-            return installed_version_matches(spec.bin_name, expected_version).then_some(p);
-        }
+    let p = install_path(spec.bin_name)?;
+    if p.exists() {
+        return installed_version_matches(spec.bin_name, expected_version).then_some(p);
     }
     // 3. Anywhere else on PATH — an external install we don't manage; respect it.
     //    EXCEPT another profile's install: `~/.ryu/bin` and `~/.ryu-dev/bin` are both
@@ -213,6 +233,11 @@ fn resolved_installed_path(spec: &SidecarBinary, expected_version: &str) -> Opti
     which::which(spec.bin_name)
         .ok()
         .filter(|hit| !crate::profile::is_foreign_profile_bin(hit))
+        .filter(|hit| {
+            !hit.starts_with(ryu_sidecar_runtime::layout::bin_dir(
+                &crate::profile::ryu_home_dir(),
+            ))
+        })
 }
 
 fn is_installed(spec: &SidecarBinary, expected_version: &str) -> bool {
@@ -241,13 +266,24 @@ fn forward_installer_event(app: &AppHandle, line: &str) {
 /// supervised and its stdout streamed without introducing a mutable network
 /// script. The installer owns Core, Gateway, and CLI installation; Desktop starts
 /// Core itself afterwards so it retains the child handle and owns shutdown.
-async fn run_unified_installer(app: &AppHandle) -> Result<(), String> {
+async fn run_unified_installer(
+    app: &AppHandle,
+    install_dir: &std::path::Path,
+    expected: &str,
+) -> Result<(), String> {
     let suffix = if cfg!(windows) { ".ps1" } else { ".sh" };
     let mut script_file = tempfile::Builder::new()
         .prefix("ryu-installer-")
         .suffix(suffix)
         .tempfile()
         .map_err(|e| format!("create temporary installer script: {e}"))?;
+    // Windows PowerShell 5 otherwise interprets the UTF-8 script as its ANSI
+    // code page. PowerShell 7 accepts the same BOM without changing semantics.
+    if cfg!(windows) {
+        script_file
+            .write_all(&[0xef, 0xbb, 0xbf])
+            .map_err(|error| format!("write installer encoding marker: {error}"))?;
+    }
     script_file
         .write_all(bundled_install_script())
         .map_err(|e| format!("write temporary installer script: {e}"))?;
@@ -273,24 +309,32 @@ async fn run_unified_installer(app: &AppHandle) -> Result<(), String> {
         ]);
         command.arg(script_path.as_os_str());
         command
+            .arg("-ReleaseBase")
+            .arg(crate::distribution::release_base(app)?);
+        command
     } else {
         let mut command = tokio::process::Command::new("sh");
         command.arg(script_path.as_os_str());
         command
+            .arg("--release-base")
+            .arg(crate::distribution::release_base(app)?);
+        command
     };
 
-    let install_dir = crate::profile::ryu_home_dir().join("bin");
     let core_bind = format!("127.0.0.1:{}", crate::profile::core_port());
     let core_url = crate::profile::core_base_url();
-    let core_log = crate::profile::ryu_home_dir().join("ryu-core.log");
+    let core_log =
+        ryu_sidecar_runtime::layout::logs_dir(&crate::profile::ryu_home_dir()).join("ryu-core.log");
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("RYU_INSTALL_DIR", install_dir)
+        .env("RYU_VERSION", release_tag_for_version(expected)?)
+        .env("RYU_SKIP_CHECKSUM", "0")
         .env("RYU_NO_MODIFY_PATH", "1")
         .env("RYU_PROGRESS_FORMAT", "json")
-        .env("RYU_INSTALL_MARKER", app_version(app))
+        .env("RYU_INSTALL_MARKER", expected)
         // Desktop must own the Core child. If the installer starts it detached,
         // RyuCoreProcess observes a healthy port but has no handle to stop on Quit.
         .env("RYU_START_CORE", DESKTOP_INSTALLER_START_CORE)
@@ -301,6 +345,7 @@ async fn run_unified_installer(app: &AppHandle) -> Result<(), String> {
         .no_window();
 
     let mut child = command
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("start canonical installer: {e}"))?;
     let stdout = child
@@ -368,9 +413,203 @@ async fn run_unified_installer(app: &AppHandle) -> Result<(), String> {
 /// installer run; otherwise the bundled script is the only binary installer used
 /// by Desktop. Core is deliberately started later by `RyuCoreProcess`, which owns
 /// its handle and shutdown lifecycle.
+static STACK_INSTALL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PreparedStack {
+    version: String,
+    directory: PathBuf,
+    digests: [String; 3],
+}
+
+fn stack_digests(directory: &std::path::Path) -> Result<[String; 3], String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut digests = [String::new(), String::new(), String::new()];
+    for (index, spec) in [&CORE, &GATEWAY, &CLI].into_iter().enumerate() {
+        let file = if cfg!(windows) {
+            format!("{}.exe", spec.bin_name)
+        } else {
+            spec.bin_name.to_owned()
+        };
+        let mut input =
+            std::fs::File::open(directory.join(file)).map_err(|error| error.to_string())?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0_u8; 65536];
+        loop {
+            let count = input.read(&mut buffer).map_err(|error| error.to_string())?;
+            if count == 0 {
+                break;
+            }
+            hash.update(&buffer[..count]);
+        }
+        digests[index] = hex::encode(hash.finalize());
+    }
+    Ok(digests)
+}
+
+/// `bin/` under the target build's profile DEFAULT data dir (`~/.ryu<sfx>`).
+/// Deliberately not pointer-resolved: an unscoped update prepares the runtime
+/// for the profile the new version activates, not for the running one.
+fn default_runtime_root(home: PathBuf, version: &str) -> PathBuf {
+    let profile = crate::profile::profile_for_version(version).unwrap_or("release");
+    ryu_sidecar_runtime::layout::bin_dir(
+        &home.join(format!(".ryu{}", crate::profile::suffix_of(profile))),
+    )
+}
+
+fn runtime_root_for_version(version: &str) -> PathBuf {
+    let overridden = ["RYU_DIR", crate::profile::RYU_PROFILE_ENV]
+        .iter()
+        .any(|key| std::env::var(key).is_ok_and(|value| !value.trim().is_empty()));
+    if overridden || cfg!(feature = "dev-variant") {
+        return ryu_sidecar_runtime::layout::bin_dir(&crate::profile::ryu_home_dir());
+    }
+    default_runtime_root(
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+        version,
+    )
+}
+
+pub(crate) fn has_prepared_runtime() -> bool {
+    runtime_root_for_version(env!("CARGO_PKG_VERSION"))
+        .join("prepared-stack.json")
+        .is_file()
+}
+
+/// Every build, canary and nightly included, uploads its binaries to its own
+/// `v<version>` tag; the rolling `canary`/`nightly` tags are deleted by CI. The
+/// semver parse doubles as the path-traversal guard for the download URL.
+fn release_tag_for_version(expected: &str) -> Result<String, String> {
+    let version = semver::Version::parse(expected).map_err(|error| error.to_string())?;
+    Ok(format!("v{version}"))
+}
+
+async fn validate_release_stack(directory: &std::path::Path, expected: &str) -> Result<(), String> {
+    for spec in [&CORE, &GATEWAY, &CLI] {
+        let file = if cfg!(windows) {
+            format!("{}.exe", spec.bin_name)
+        } else {
+            spec.bin_name.to_owned()
+        };
+        let candidate = directory.join(&file);
+        let marker = directory.join(format!("{file}.version"));
+        if !candidate.is_file()
+            || std::fs::metadata(&candidate)
+                .map_err(|error| error.to_string())?
+                .len()
+                == 0
+            || std::fs::read_to_string(marker)
+                .map_err(|error| error.to_string())?
+                .trim()
+                != expected
+        {
+            return Err(format!(
+                "{} failed staged release validation; the previous stack is unchanged",
+                spec.bin_name
+            ));
+        }
+        let mut probe = tokio::process::Command::new(&candidate);
+        probe
+            .arg("--version")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .no_window();
+        let output = tokio::time::timeout(std::time::Duration::from_secs(15), probe.output())
+            .await
+            .map_err(|_| format!("{} version check timed out", spec.bin_name))?
+            .map_err(|error| error.to_string())?;
+        if !output.status.success()
+            || std::str::from_utf8(&output.stdout)
+                .ok()
+                .and_then(|value| value.split_whitespace().last())
+                != Some(expected)
+        {
+            return Err(format!(
+                "{} does not report v{expected}; refusing a mixed runtime release",
+                spec.bin_name
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn prepare_release_stack_locked(app: &AppHandle, expected: &str) -> Result<PathBuf, String> {
+    release_tag_for_version(expected)?;
+    let root = runtime_root_for_version(expected);
+    let generations = ryu_runtime_install::RuntimeGenerations::new(root.clone());
+    let marker = root.join("prepared-stack.json");
+    if let Some(prepared) = std::fs::read(&marker)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<PreparedStack>(&bytes).ok())
+    {
+        if prepared.version == expected {
+            if let Ok(directory) = generations.prepared_dir(&prepared.directory) {
+                if stack_digests(&directory).ok().as_ref() == Some(&prepared.digests)
+                    && validate_release_stack(&directory, expected).await.is_ok()
+                {
+                    return Ok(directory);
+                }
+            }
+        }
+    }
+    let staged = generations.stage().map_err(|error| error.to_string())?;
+    run_unified_installer(app, staged.path(), expected).await?;
+    validate_release_stack(staged.path(), expected).await?;
+    let directory = staged.keep();
+    let mut file = tempfile::NamedTempFile::new_in(&root).map_err(|error| error.to_string())?;
+    let prepared = PreparedStack {
+        version: expected.to_owned(),
+        directory: directory.clone(),
+        digests: stack_digests(&directory)?,
+    };
+    file.write_all(&serde_json::to_vec(&prepared).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    file.as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
+    file.persist(marker)
+        .map_err(|error| error.error.to_string())?;
+    tracing::info!(version = %expected, directory = %directory.display(), "complete runtime release prepared; active stack unchanged");
+    Ok(directory)
+}
+
+/// Prepare all managed binaries before the app installer can exit this process.
+pub(crate) async fn prepare_app_runtime(app: &AppHandle, expected: &str) -> Result<(), String> {
+    if cfg!(debug_assertions)
+        || !(crate::nodes::default_node_is_local() || managed_core_path().is_some())
+    {
+        return Ok(());
+    }
+    let _guard = STACK_INSTALL.lock().await;
+    prepare_release_stack_locked(app, expected)
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn prepared_core_for_update(
+    app: &AppHandle,
+    expected: &str,
+) -> Result<Option<PathBuf>, String> {
+    if !(crate::nodes::default_node_is_local() || managed_core_path().is_some()) {
+        return Ok(None);
+    }
+    let _guard = STACK_INSTALL.lock().await;
+    let directory = prepare_release_stack_locked(app, expected).await?;
+    Ok(Some(directory.join(if cfg!(windows) {
+        "ryu-core.exe"
+    } else {
+        "ryu-core"
+    })))
+}
+
 pub async fn ensure_unified_installed(app: &AppHandle) -> Result<PathBuf, String> {
+    let _guard = STACK_INSTALL.lock().await;
     let expected = app_version(app);
-    if !is_installed(&CORE, &expected) || !is_installed(&GATEWAY, &expected) {
+    if !is_installed(&CORE, &expected)
+        || !is_installed(&GATEWAY, &expected)
+        || !is_installed(&CLI, &expected)
+    {
         let _ = app.emit(
             "installer-progress",
             serde_json::json!({
@@ -381,7 +620,14 @@ pub async fn ensure_unified_installed(app: &AppHandle) -> Result<PathBuf, String
                 "percent": 0,
             }),
         );
-        run_unified_installer(app).await?;
+        let generations = ryu_runtime_install::RuntimeGenerations::new(
+            ryu_sidecar_runtime::layout::bin_dir(&crate::profile::ryu_home_dir()),
+        );
+        let directory = prepare_release_stack_locked(app, &expected).await?;
+        let directory = generations
+            .activate_prepared(&directory)
+            .map_err(|error| error.to_string())?;
+        tracing::info!(version = %expected, directory = %directory.display(), "Core/Gateway/CLI release transaction committed");
     }
     // Return the path that actually satisfied resolution. An operator-provided
     // RYU_CORE_BIN or external PATH hit must not be rewritten to a nonexistent
@@ -576,9 +822,9 @@ pub async fn ensure_gateway_installed(app: &AppHandle) -> Result<PathBuf, String
 //
 // Island is NOT a `SidecarBinary`: its release assets follow electron-builder's
 // naming, not the `<base>-<slug>[.exe]` scheme every single-file sidecar shares,
-// and it installs into its OWN directory (`~/.ryu/island/`, kept apart from the
-// `~/.ryu/bin/` sidecars so the bundle — a whole `.app` on macOS — never mingles
-// with the flat command binaries). So it gets a dedicated resolver + installer +
+// and it installs into its OWN directory (`<data dir>/bin/island/`, kept apart
+// from the flat `bin/` sidecars so the bundle — a whole `.app` on macOS — never
+// mingles with the command binaries). So it gets a dedicated resolver + installer +
 // launcher below rather than an entry in the sidecar tables.
 //
 // The tray already drives an *already-running* island through its loopback
@@ -588,14 +834,14 @@ pub async fn ensure_gateway_installed(app: &AppHandle) -> Result<PathBuf, String
 // `apps/island/src/main/index.ts`), so a redundant `launch_island` on a restart
 // where island is already up self-exits — the launch path can stay unconditional.
 
-/// The dedicated install directory for Island: `~/.ryu/island/`. Separate from the
-/// `~/.ryu/bin/` sidecars because the Electron bundle is more than one file (a whole
+/// The dedicated install directory for Island: `<data dir>/bin/island/`. A
+/// subfolder of `bin/` because the Electron bundle is more than one file (a whole
 /// `.app` tree on macOS) and should not clutter the flat command-binary dir.
 fn island_dir() -> Option<PathBuf> {
-    Some(crate::profile::ryu_home_dir().join("island"))
+    Some(ryu_sidecar_runtime::layout::bin_dir(&crate::profile::ryu_home_dir()).join("island"))
 }
 
-/// The installed Island launch target under `~/.ryu/island/`:
+/// The installed Island launch target under `<data dir>/bin/island/`:
 ///   - Windows: `ryu-island.exe` (the renamed portable single-exe)
 ///   - Linux:   `ryu-island.AppImage`
 ///   - macOS:   `Ryu Island.app` (a bundle *directory*, launched via `open`)
@@ -611,7 +857,7 @@ fn island_install_path() -> Option<PathBuf> {
     Some(dir.join(file))
 }
 
-/// Version marker for the installed Island bundle: `~/.ryu/island/.version`. Mirrors
+/// Version marker for the installed Island bundle: `<data dir>/bin/island/.version`. Mirrors
 /// the sidecar markers — records which app version installed it so a later launch can
 /// re-download after the app self-updates and leaves a stale bundle behind.
 fn island_version_marker() -> Option<PathBuf> {
@@ -699,7 +945,7 @@ async fn ensure_island_via_core(expected: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Ensure the Island companion is installed under `~/.ryu/island/`. Current Core
+/// Ensure the Island companion is installed under `<data dir>/bin/island/`. Current Core
 /// handles the artifact through the global DownloadCenter (#456), including resume,
 /// verification, progress, and atomic materialization. Desktop deliberately has no
 /// second downloader: a missing endpoint is an actionable compatibility error rather
@@ -789,6 +1035,119 @@ mod tests {
     #[test]
     fn desktop_installer_leaves_core_startup_to_the_process_manager() {
         assert_eq!(DESKTOP_INSTALLER_START_CORE, "0");
+    }
+
+    #[test]
+    fn release_sources_are_pinned_and_rolling_builds_require_version_validation() {
+        assert_eq!(release_tag_for_version("0.4.1").unwrap(), "v0.4.1");
+        assert_eq!(
+            release_tag_for_version("0.4.1-canary.123").unwrap(),
+            "v0.4.1-canary.123"
+        );
+        assert_eq!(
+            release_tag_for_version("0.4.1-nightly.123").unwrap(),
+            "v0.4.1-nightly.123"
+        );
+        assert!(release_tag_for_version("../../foreign").is_err());
+    }
+
+    #[test]
+    fn preparation_uses_the_profile_of_the_target_build() {
+        let home = PathBuf::from("home");
+        assert_eq!(
+            default_runtime_root(home.clone(), "0.4.1"),
+            home.join(".ryu/bin")
+        );
+        assert_eq!(
+            default_runtime_root(home.clone(), "0.4.1-canary.123"),
+            home.join(".ryu-canary/bin")
+        );
+        assert_eq!(
+            default_runtime_root(home.clone(), "0.4.1-nightly.123"),
+            home.join(".ryu-nightly/bin")
+        );
+    }
+
+    #[tokio::test]
+    async fn executable_validation_rejects_partial_and_mixed_sets_before_activation() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("fixture.rs");
+        std::fs::write(&source, r#"fn main() {
+            let exe = std::env::current_exe().unwrap();
+            let name = exe.file_name().unwrap().to_string_lossy();
+            let version = std::fs::read_to_string(exe.with_file_name(format!("{name}.reported-version"))).unwrap();
+            println!("{name} {}", version.trim());
+        }"#).unwrap();
+        let fixture = root.path().join(if cfg!(windows) {
+            "fixture.exe"
+        } else {
+            "fixture"
+        });
+        let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let built = std::process::Command::new(compiler)
+            .arg(&source)
+            .arg("--crate-name")
+            .arg("update_fixture")
+            .arg("-o")
+            .arg(&fixture)
+            .no_window()
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let store = ryu_runtime_install::RuntimeGenerations::new(root.path().join("runtime"));
+        let old = store.stage().unwrap();
+        let old = store.activate(old).unwrap();
+        let candidate = store.stage().unwrap();
+        for spec in [&CORE, &GATEWAY, &CLI] {
+            let name = if cfg!(windows) {
+                format!("{}.exe", spec.bin_name)
+            } else {
+                spec.bin_name.to_owned()
+            };
+            std::fs::copy(&fixture, candidate.path().join(&name)).unwrap();
+            std::fs::write(candidate.path().join(format!("{name}.version")), "0.4.1").unwrap();
+            std::fs::write(
+                candidate.path().join(format!("{name}.reported-version")),
+                "0.4.1",
+            )
+            .unwrap();
+        }
+        validate_release_stack(candidate.path(), "0.4.1")
+            .await
+            .unwrap();
+        let trusted = stack_digests(candidate.path()).unwrap();
+        let gateway = if cfg!(windows) {
+            "ryu-gateway.exe"
+        } else {
+            "ryu-gateway"
+        };
+        let gateway_path = candidate.path().join(gateway);
+        std::fs::write(
+            candidate.path().join(format!("{gateway}.reported-version")),
+            "0.4.0",
+        )
+        .unwrap();
+        assert!(validate_release_stack(candidate.path(), "0.4.1")
+            .await
+            .is_err());
+        assert_eq!(store.active_dir().unwrap(), old);
+        // Byte corruption must fail the cache check even if its version marker
+        // and executable's reported version remain unchanged.
+        let original = std::fs::read(&gateway_path).unwrap();
+        let mut changed = original.clone();
+        changed.push(0);
+        std::fs::write(&gateway_path, changed).unwrap();
+        assert_ne!(stack_digests(candidate.path()).unwrap(), trusted);
+        std::fs::write(&gateway_path, original).unwrap();
+        std::fs::remove_file(candidate.path().join(format!("{gateway}.version"))).unwrap();
+        assert!(validate_release_stack(candidate.path(), "0.4.1")
+            .await
+            .is_err());
+        assert_eq!(store.active_dir().unwrap(), old);
     }
 
     #[test]

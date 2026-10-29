@@ -1,12 +1,37 @@
 {
-  "name": "mcp",
-  "private": true,
-  "version": "0.4.0",
+  "name": "@ryuhq/mcp",
+  "version": "0.5.0",
   "type": "module",
+  "description": "Stdio MCP bridge that exposes a running Ryu Core node to Claude Code, Codex, Claude Desktop, Cursor, and any other MCP host",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amajorai/ryu",
+    "directory": "apps/mcp"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "ryu",
+    "mcp",
+    "model-context-protocol",
+    "local-ai",
+    "agents"
+  ],
   "bin": {
-    "ryu-mcp": "./src/index.ts"
+    "ryu-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
+    "build": "bun run clean && bun build src/index.ts --outdir dist --target node --external @modelcontextprotocol/server --external zod",
+    "clean": "rm -rf dist",
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
     "test": "bun test",
@@ -14,12 +39,12 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "@ryuhq/core-client": "workspace:*",
-    "zod": "4.3.6"
+    "@modelcontextprotocol/server": "2.3.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@ryu/config": "workspace:*",
+    "@ryuhq/core-client": "workspace:*",
     "typescript": "^5"
   }
 }

@@ -1,0 +1,57 @@
+@layer utilities {
+	.classic-theme-icon__clip-shape {
+		transition: none;
+	}
+
+	.classic-theme-icon__circle {
+		transform-origin: center;
+		transform-box: fill-box;
+	}
+
+	.classic-theme-icon__ray {
+		transform-origin: center;
+		transform-box: view-box;
+	}
+
+	.dark .classic-theme-icon__clip-shape {
+		d: path("M0 2h13a1 1 0 0010 10v14H0Z");
+	}
+
+	.dark .classic-theme-icon__circle {
+		transform: scale(1.7);
+	}
+
+	.dark .classic-theme-icon__ray {
+		opacity: 0;
+		transform: scale(0);
+	}
+
+	@supports not (d: path("M0 0")) {
+		.dark .classic-theme-icon__clip-shape {
+			translate: -13px 2px;
+		}
+	}
+
+	@media (prefers-reduced-motion: no-preference) {
+		.classic-theme-icon__clip-shape {
+			transition-delay: 60ms;
+			transition-duration: 400ms;
+			transition-property: d, translate;
+		}
+
+		.classic-theme-icon__circle {
+			transition: transform 400ms ease-in-out;
+		}
+
+		.classic-theme-icon__ray {
+			transition:
+				transform 400ms ease-in-out,
+				opacity 400ms ease-in-out;
+			transition-delay: 60ms;
+		}
+
+		.dark .classic-theme-icon__ray {
+			transition-delay: 0ms;
+		}
+	}
+}

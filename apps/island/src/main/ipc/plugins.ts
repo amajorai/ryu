@@ -11,9 +11,16 @@ import {
 	IPC,
 	type PluginCoreHttpRequest,
 	type PluginHostInvokeRequest,
+	type PluginHostStreamChunkEvent,
+	type PluginHostStreamEndEvent,
 	type PluginHostStreamStartRequest,
 } from "../../shared/ipc.ts";
 import {
+	coreConfigGeneration,
+	onCoreConfigChange,
+} from "../services/config.ts";
+import {
+	abortAllPluginHostStreams,
 	abortPluginHostStream,
 	type HostStreamSink,
 	pluginContributions,
@@ -21,7 +28,6 @@ import {
 	pluginHostInvoke,
 	startPluginHostStream,
 } from "../services/plugin-host.ts";
-
 import {
 	abortUiBundleRead,
 	readUiBundle,
@@ -35,12 +41,46 @@ import {
 export function registerPluginsIpc(
 	getWindow: () => BrowserWindow | null
 ): void {
-	ipcMain.handle(IPC.plugins.contributions, () => pluginContributions());
+	onCoreConfigChange(() => {
+		abortAllPluginHostStreams();
+		const win = getWindow();
+		if (win && !win.isDestroyed()) {
+			win.webContents.send(IPC.plugins.sourceChanged);
+		}
+	});
+	ipcMain.handle(IPC.plugins.contributions, async () => {
+		const generation = coreConfigGeneration();
+		const result = await pluginContributions();
+		if (generation !== coreConfigGeneration()) {
+			return { available: false, reason: "Core configuration changed" };
+		}
+		return result.available
+			? {
+					...result,
+					companions: result.companions.map((companion) => ({
+						...companion,
+						coreGeneration: generation,
+					})),
+					views: result.views.map((view) => ({
+						...view,
+						coreGeneration: generation,
+					})),
+				}
+			: result;
+	});
 
 	ipcMain.handle(
 		IPC.plugins.uiBundle,
-		(event, pluginId: string, requestId?: string) =>
-			readUiBundle(event.sender, pluginId, requestId)
+		async (event, pluginId: string, requestId?: string) => {
+			const generation = coreConfigGeneration();
+			const result = await readUiBundle(event.sender, pluginId, requestId);
+			if (generation !== coreConfigGeneration()) {
+				return { available: false, reason: "Core configuration changed" };
+			}
+			return result.available
+				? { ...result, coreGeneration: generation }
+				: result;
+		}
 	);
 	ipcMain.handle(IPC.plugins.uiBundleAbort, (event, requestId: string) =>
 		abortUiBundleRead(event.sender.id, requestId)
@@ -48,18 +88,48 @@ export function registerPluginsIpc(
 
 	ipcMain.handle(
 		IPC.plugins.hostInvoke,
-		(_event, req: PluginHostInvokeRequest) =>
-			pluginHostInvoke(req.pluginId, req.method, req.args)
+		async (_event, req: PluginHostInvokeRequest) => {
+			if (req.coreGeneration !== coreConfigGeneration()) {
+				return {
+					ok: false,
+					code: "denied",
+					message: "Core configuration changed",
+				};
+			}
+			const result = await pluginHostInvoke(req.pluginId, req.method, req.args);
+			return req.coreGeneration === coreConfigGeneration()
+				? result
+				: { ok: false, code: "denied", message: "Core configuration changed" };
+		}
 	);
 
-	ipcMain.handle(IPC.plugins.coreHttp, (_event, req: PluginCoreHttpRequest) =>
-		pluginCoreHttp(req)
+	ipcMain.handle(
+		IPC.plugins.coreHttp,
+		async (_event, req: PluginCoreHttpRequest) => {
+			if (req.coreGeneration !== coreConfigGeneration()) {
+				return {
+					ok: false,
+					code: "denied",
+					message: "Core configuration changed",
+				};
+			}
+			const result = await pluginCoreHttp(req);
+			return req.coreGeneration === coreConfigGeneration()
+				? result
+				: { ok: false, code: "denied", message: "Core configuration changed" };
+		}
 	);
 
 	ipcMain.handle(
 		IPC.plugins.hostStreamStart,
 		(_event, req: PluginHostStreamStartRequest) => {
-			const send = (channel: string, payload: unknown): void => {
+			if (req.coreGeneration !== coreConfigGeneration()) {
+				throw new Error("Core configuration changed");
+			}
+			const send = (
+				channel: string,
+				payload: PluginHostStreamChunkEvent | PluginHostStreamEndEvent
+			): void => {
 				const win = getWindow();
 				if (win && !win.isDestroyed()) {
 					win.webContents.send(channel, payload);
@@ -67,6 +137,9 @@ export function registerPluginsIpc(
 			};
 			const sink: HostStreamSink = {
 				chunk(delta) {
+					if (req.coreGeneration !== coreConfigGeneration()) {
+						return;
+					}
 					send(IPC.plugins.hostStreamChunk, {
 						streamId: handle.streamId,
 						delta,

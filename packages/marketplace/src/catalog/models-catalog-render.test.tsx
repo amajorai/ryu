@@ -22,8 +22,8 @@ import ModelsCatalogSection, {
 import type { ModelCard, ModelCatalogState, ModelDetail } from "./types.ts";
 
 const MOCK_INSTALL: CatalogInstall = {
-	InstallButton: ({ children }) => (
-		<button data-testid="install-button" type="button">
+	InstallButton: ({ children, disabled }) => (
+		<button data-testid="install-button" disabled={disabled} type="button">
 			{children}
 		</button>
 	),
@@ -144,8 +144,7 @@ function makeHost(
 		},
 		useModelCatalog: () => state,
 		useActiveNode: () => ({ url: "", token: null }),
-		usePersistedToggle: (_k: string, d: boolean) =>
-			[d, () => undefined] as [boolean, (v: boolean) => void],
+		usePersistedToggle: (_k: string, d: boolean) => [d, () => undefined],
 		installSidecar: () => Promise.resolve(),
 		estimateLlmfit: () =>
 			Promise.resolve({
@@ -157,7 +156,16 @@ function makeHost(
 				tps: null,
 			}),
 		useInstalledModels: () => [],
-		ActiveModelControl: () => null,
+		ActiveModelControl: ({ chatCapable = false, format, repoId }) => (
+			<button
+				data-format={format}
+				data-model-action={chatCapable ? "chat" : "runtime"}
+				data-model-id={repoId}
+				type="button"
+			>
+				{chatCapable ? "Chat with this model" : "Use this model"}
+			</button>
+		),
 		fitStyle: () => ({ className: "", dot: "" }),
 	};
 }
@@ -317,6 +325,43 @@ describe("ModelsCatalogSection — detail panel", () => {
 		);
 		expect(html).toContain("detail exploded");
 	});
+
+	test("puts the installed model's chat action next to the device-fit summary", () => {
+		const markup = render(
+			makeModelsState({
+				detail: makeDetail({
+					card: makeModel({ id: "google/gemma-4b", installed: true }),
+				}),
+				selectedId: "google/gemma-4b",
+			})
+		);
+
+		expect(markup).toContain("Run in chat");
+		expect(markup).toContain('data-model-action="chat"');
+		expect(markup.indexOf("Run in chat")).toBeLessThan(
+			markup.indexOf("Download options")
+		);
+	});
+
+	test("keeps non-chat models on their runtime action and hides fine-tuning", () => {
+		const markup = render(
+			makeModelsState({
+				detail: makeDetail({
+					card: makeModel({
+						id: "black-forest-labs/flux",
+						installed: true,
+						pipelineTag: "text-to-image",
+					}),
+				}),
+				selectedId: "black-forest-labs/flux",
+			})
+		);
+
+		expect(markup).toContain("Use this model");
+		expect(markup).toContain('data-model-action="runtime"');
+		expect(markup).not.toContain("Run in chat");
+		expect(markup).not.toContain("Fine-tune this model");
+	});
 });
 
 describe("ModelsCatalogSection — quant download picker", () => {
@@ -413,6 +458,144 @@ describe("ModelsCatalogSection — quant download picker", () => {
 		]);
 		expect(html).toContain('value="gemma-4b-Q4_K_M.gguf"');
 		expect(html).toContain("Recommended for your PC");
+	});
+
+	test("never preselects a blocked quant while one that fits exists", () => {
+		const html = renderDetail([
+			{
+				filename: "gemma-4b-F16.gguf",
+				fit: "no_space",
+				fitLabel: "Not enough free disk space to download it",
+				installed: false,
+				quant: "F16",
+				sizeBytes: 1_000_000_000,
+				sizeHuman: "1 GB",
+			},
+			{
+				filename: "gemma-4b-Q4_K_M.gguf",
+				fit: "unknown",
+				fitLabel: "Can't check your device",
+				installed: false,
+				quant: "Q4_K_M",
+				sizeBytes: 2_500_000_000,
+				sizeHuman: "2.5 GB",
+			},
+		]);
+		expect(html).toContain('value="gemma-4b-Q4_K_M.gguf"');
+		expect(html).not.toMatch(/data-testid="install-button" disabled/);
+	});
+
+	test("disables Add with the device numbers when every quant is too big", () => {
+		const html = renderDetail(
+			[
+				{
+					filename: "gemma-4b-F16.gguf",
+					fit: "too_big",
+					fitLabel: "Too large for your device's memory",
+					installed: false,
+					quant: "F16",
+					sizeBytes: 10_000_000_000,
+					sizeHuman: "10 GB",
+				},
+			],
+			{
+				device: {
+					gpuName: null,
+					os: "linux",
+					ramHuman: "8 GB",
+					unifiedMemory: false,
+					vramBytes: null,
+					vramHuman: "",
+				},
+			}
+		);
+		expect(html).toMatch(/data-testid="install-button" disabled/);
+		expect(html).toContain("This device has 8 GB of RAM.");
+		expect(html).not.toContain("Recommended for your PC");
+	});
+
+	test("explains a no-space verdict with the free disk", () => {
+		const html = renderDetail(
+			[
+				{
+					filename: "gemma-4b-Q4_K_M.gguf",
+					fit: "no_space",
+					fitLabel: "Not enough free disk space to download it",
+					installed: false,
+					quant: "Q4_K_M",
+					sizeBytes: 2_500_000_000,
+					sizeHuman: "2.5 GB",
+				},
+			],
+			{
+				device: {
+					diskFreeHuman: "1.2 GB",
+					gpuName: null,
+					os: "linux",
+					ramHuman: "64 GB",
+					unifiedMemory: false,
+					vramBytes: null,
+					vramHuman: "",
+				},
+			}
+		);
+		expect(html).toMatch(/data-testid="install-button" disabled/);
+		expect(html).toContain("Only 1.2 GB is free on the models drive.");
+		expect(html).toContain("1.2 GB free disk");
+	});
+
+	test("keeps a slow quant installable but warns it may be slow", () => {
+		const html = renderDetail([
+			{
+				filename: "gemma-4b-Q4_K_M.gguf",
+				fit: "cpu",
+				fitLabel: "Runs on your CPU only — may be slow",
+				installed: false,
+				quant: "Q4_K_M",
+				sizeBytes: 2_500_000_000,
+				sizeHuman: "2.5 GB",
+			},
+		]);
+		expect(html).not.toMatch(/data-testid="install-button" disabled/);
+		expect(html).toContain("May be slow on this device");
+	});
+
+	const snapshotDevice = {
+		gpuName: "RTX 4090",
+		os: "linux",
+		ramHuman: "64 GB",
+		unifiedMemory: false,
+		vramBytes: 24_000_000_000,
+		vramHuman: "24 GB",
+	};
+
+	test("disables a snapshot install whose repo verdict is blocked", () => {
+		// A current Core reports the node's free disk (even as null).
+		const html = renderDetail([], {
+			card: makeModel({ format: "safetensors" }),
+			device: { ...snapshotDevice, diskFreeBytes: 500_000_000_000 },
+			format: "safetensors",
+			repoFit: "too_big",
+			repoFitLabel: "Too large for your device's memory",
+		});
+		expect(html).toMatch(/data-testid="install-button" disabled/);
+		expect(html).toContain(
+			"This device has 64 GB of RAM and 24 GB of GPU memory."
+		);
+	});
+
+	test("an older Core's soft too_big keeps the snapshot installable with a warning", () => {
+		// An older Core sends no disk numbers and still installs a too_big repo.
+		const html = renderDetail([], {
+			card: makeModel({ format: "safetensors" }),
+			device: snapshotDevice,
+			format: "safetensors",
+			repoFit: "too_big",
+			repoFitLabel: "May not fit",
+		});
+		expect(html).not.toMatch(/data-testid="install-button" disabled/);
+		expect(html).toContain("May be slow on this device");
+		expect(html).not.toContain("You can't add it on this device");
 	});
 
 	test("does not offer an importance matrix as a model quant", () => {

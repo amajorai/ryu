@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/chrome/store-shelf.tsx
 //
 // A browse shelf with a deliberately small first impression. Shelves show eight
@@ -5,6 +6,7 @@
 // category heading remains a separate navigation affordance, so users can either
 // skim a shelf in place or move to the reusable full category view.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Children, type ReactNode, useState } from "react";
 import { StoreCardGrid } from "./store-catalog-layout.tsx";
@@ -39,6 +41,7 @@ export default function StoreShelf<T>({
 	/** Shelf title. */
 	title: ReactNode;
 }) {
+	const tl = useLiteralMessages();
 	const [visibleCount, setVisibleCount] = useState(() =>
 		Math.max(1, initialSize)
 	);
@@ -54,7 +57,11 @@ export default function StoreShelf<T>({
 				action={trailing}
 				description={description}
 				onOpen={onOpenCategory}
-				openLabel={`Open ${typeof title === "string" ? title : "category"}`}
+				openLabel={
+					isNativeText(title)
+						? tl("Open {title}", { title: String(title) })
+						: tl("Open category")
+				}
 			>
 				{title}
 			</StoreShelfHeading>
@@ -67,10 +74,9 @@ export default function StoreShelf<T>({
 				<div className="flex justify-center pt-3">
 					<Button
 						aria-expanded={visibleCount > Math.max(1, initialSize)}
-						className="text-muted-foreground hover:text-foreground"
 						onClick={() => setVisibleCount(nextCount)}
 						size="sm"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						Show more
 					</Button>

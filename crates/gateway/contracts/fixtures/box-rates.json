@@ -1,0 +1,19 @@
+{
+  "description": "Ryu Box customer rates (founder sign-off 2026-10-20, docs/box-per-session-desktop.md §11 and §18). Every Box price reads these numbers: the Gateway's default GATEWAY_CREDITS_SANDBOX_SIZE_RATES (apps/gateway/src/config.rs) and its per-start minimum, Core's session Box credit pre-flight, SERVICE_RATES.box and PUBLISHED_PRICING.box, the control plane's settlement and core-tenant reconciliation, and the Box service's usage report and fallback-loss revenue. Each side has a test that reads this file, so a rate changed on one side fails until every other side follows.",
+  "approvedOn": "2026-10-20",
+  "sizeMicroUsdPerHour": {
+    "small": 25000,
+    "default": 40000,
+    "large": 70000
+  },
+  "minimumSecondsPerStart": 300,
+  "roundingSeconds": 60,
+  "storage": {
+    "microUsdPerGibMonth": 50000,
+    "monthDays": 30,
+    "includedGibPerOrg": {
+      "trial": 10,
+      "paid": 25
+    }
+  }
+}

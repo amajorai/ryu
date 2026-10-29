@@ -478,6 +478,7 @@ impl RecommendationModelAdapter<'_> {
         let system = "You are Ryu's Marketplace recommendation adapter. Rank only the supplied catalog references. Return safe derived reasons and never request or reveal private user context, memory text, credentials, or connection payloads.";
         match super::call_side_model(
             self.state,
+            &crate::sidecar::gateway::SidePurpose::Recommendations,
             &model.0,
             &model.1,
             system,
@@ -612,15 +613,41 @@ pub async fn get(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Query(query): Query<RefreshQuery>,
-) -> Json<RecommendationResponse> {
-    Json(load(&state, &caller, query.refresh).await)
+) -> Response {
+    if let Err(status) = super::enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::MARKETPLACE_VIEW,
+    )
+    .await
+    {
+        return (
+            status,
+            Json(json!({ "error": "Marketplace view permission is required" })),
+        )
+            .into_response();
+    }
+    Json(load(&state, &caller, query.refresh).await).into_response()
 }
 
 pub async fn refresh(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
-) -> Json<RecommendationResponse> {
-    Json(load(&state, &caller, true).await)
+) -> Response {
+    if let Err(status) = super::enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::MARKETPLACE_VIEW,
+    )
+    .await
+    {
+        return (
+            status,
+            Json(json!({ "error": "Marketplace view permission is required" })),
+        )
+            .into_response();
+    }
+    Json(load(&state, &caller, true).await).into_response()
 }
 
 pub async fn set_preference(
@@ -628,6 +655,19 @@ pub async fn set_preference(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<PreferenceBody>,
 ) -> Response {
+    if let Err(status) = super::enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::MARKETPLACE_VIEW,
+    )
+    .await
+    {
+        return (
+            status,
+            Json(json!({ "error": "Marketplace view permission is required" })),
+        )
+            .into_response();
+    }
     let scope = user_scope(&caller);
     match state
         .preferences
@@ -670,6 +710,115 @@ mod tests {
         CatalogReference,
     };
     use serde_json::json;
+
+    fn caller(user_id: &str, org_id: &str) -> Option<crate::identity_verify::VerifiedCaller> {
+        Some(crate::identity_verify::VerifiedCaller {
+            user_id: user_id.to_owned(),
+            email: None,
+            email_verified: false,
+            org_id: Some(org_id.to_owned()),
+            role: crate::identity_verify::OrgRole::Member,
+            teams: Vec::new(),
+        })
+    }
+
+    fn registered_node(
+        scope: crate::sidecar::control_plane::NodeScope,
+        owner_user_id: Option<&str>,
+    ) -> crate::sidecar::control_plane::RegisteredNode {
+        use crate::sidecar::control_plane::{RegisteredNode, RegisteredOrg};
+        RegisteredNode {
+            org: RegisteredOrg {
+                id: "org-1".to_owned(),
+                name: "Org".to_owned(),
+                slug: None,
+            },
+            node_id: "node-1".to_owned(),
+            scope,
+            team_id: None,
+            owner_user_id: owner_user_id.map(str::to_owned),
+        }
+    }
+
+    /// Drive all three handlers as `caller`, returning each status. The web
+    /// portal reaches these with the node token as the primary bearer, so the
+    /// attached verified identity is the only thing that can scope them.
+    async fn statuses(
+        state: &crate::server::ServerState,
+        caller: &Option<crate::identity_verify::VerifiedCaller>,
+    ) -> [axum::http::StatusCode; 3] {
+        use axum::extract::{Query, State};
+        use axum::{Extension, Json};
+        let get = super::get(
+            State(state.clone()),
+            Extension(caller.clone()),
+            Query(super::RefreshQuery { refresh: true }),
+        )
+        .await
+        .status();
+        let refresh = super::refresh(State(state.clone()), Extension(caller.clone()))
+            .await
+            .status();
+        let preference = super::set_preference(
+            State(state.clone()),
+            Extension(caller.clone()),
+            Json(super::PreferenceBody { hidden: true }),
+        )
+        .await
+        .status();
+        [get, refresh, preference]
+    }
+
+    async fn stored_preference(
+        state: &crate::server::ServerState,
+        caller: &Option<crate::identity_verify::VerifiedCaller>,
+    ) -> Option<String> {
+        state
+            .preferences
+            .get(&super::preference_key(&super::user_scope(caller)))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn recommendations_refuse_callers_outside_the_node_scope() {
+        use crate::sidecar::control_plane::{with_test_node_binding, NodeScope};
+        use axum::http::StatusCode;
+        const FORBIDDEN: [StatusCode; 3] = [StatusCode::FORBIDDEN; 3];
+        let directory = tempfile::tempdir().unwrap();
+        let state = crate::server::isolated_plugin_hook_test_state(directory.path());
+
+        // Organization-bound node: an approved portal account from another org.
+        with_test_node_binding(true, Some(registered_node(NodeScope::Org, None)), async {
+            let outsider = caller("outsider", "org-2");
+            assert_eq!(statuses(&state, &outsider).await, FORBIDDEN);
+            assert_eq!(stored_preference(&state, &outsider).await, None);
+            assert_eq!(statuses(&state, &None).await, FORBIDDEN);
+
+            let member = caller("member", "org-1");
+            assert_eq!(statuses(&state, &member).await, [StatusCode::OK; 3]);
+            assert_eq!(
+                stored_preference(&state, &member).await.as_deref(),
+                Some("true")
+            );
+        })
+        .await;
+
+        // Personal node: a colleague from the owner's own org is still not the owner.
+        with_test_node_binding(
+            true,
+            Some(registered_node(NodeScope::Personal, Some("owner"))),
+            async {
+                let colleague = caller("colleague", "org-1");
+                assert_eq!(statuses(&state, &colleague).await, FORBIDDEN);
+                assert_eq!(stored_preference(&state, &colleague).await, None);
+
+                let owner = caller("owner", "org-1");
+                assert_eq!(statuses(&state, &owner).await, [StatusCode::OK; 3]);
+            },
+        )
+        .await;
+    }
 
     #[test]
     fn cadence_is_closed_and_defaults_weekly() {

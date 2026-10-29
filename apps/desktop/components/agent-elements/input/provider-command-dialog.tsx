@@ -2,13 +2,14 @@
 
 import { ArrowLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Command,
 	CommandDialog,
 	CommandInput,
 	CommandItem,
 	CommandList,
-} from "@ryu/ui/components/command";
+} from "@ryu/ui/components/command.tsx";
 import {
 	cloneElement,
 	createContext,
@@ -51,6 +52,7 @@ export function ProviderCommandDialog({
 }: ProviderCommandDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [pages, setPages] = useState<ProviderCommandPage[]>([]);
+	const tl = useLiteralMessages();
 	const page = pages.at(-1) ?? null;
 	const close = () => {
 		setPages([]);
@@ -92,7 +94,9 @@ export function ProviderCommandDialog({
 									strokeWidth={2}
 								/>
 								<span className="truncate">
-									Back to {pages.at(-2)?.title ?? title}
+									{tl("Back to {pageTitle}", {
+										pageTitle: pages.at(-2)?.title ?? title,
+									})}
 								</span>
 							</CommandItem>
 						)}

@@ -1,12 +1,14 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ImageLightbox } from "@ryu/blocks/desktop/agent-elements/image-lightbox";
+import { ImageLightbox } from "@ryu/blocks/desktop/agent-elements/image-lightbox.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -16,6 +18,7 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import { z } from "zod";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import {
 	clearMediaSource,
@@ -65,6 +68,7 @@ function LiveMediaLightbox({
 	originRef,
 	source,
 }: LiveMediaLightboxProps) {
+	const tl = useLiteralMessages();
 	const reduced = useReducedMotion();
 	const [mounted, setMounted] = useState(false);
 	const [origin, setOrigin] = useState<DOMRect | null>(null);
@@ -76,7 +80,12 @@ function LiveMediaLightbox({
 		}
 	}, [open, originRef]);
 
-	if (!mounted || typeof document === "undefined") {
+	if (!mounted || globalThis.document === undefined) {
+		return null;
+	}
+	const safeVideoUrl = safeMediaUrl(source.videoUrl);
+	const safePosterUrl = safeMediaUrl(source.posterUrl);
+	if (!safeVideoUrl) {
 		return null;
 	}
 
@@ -102,16 +111,17 @@ function LiveMediaLightbox({
 			open={open}
 		>
 			<DialogContent
+				appearance="media-lightbox"
 				aria-describedby={undefined}
-				className="z-[81] flex w-fit max-w-[calc(100vw-2rem)] items-center justify-center overflow-hidden bg-black p-0 sm:max-w-[calc(100vw-6rem)]"
 				data-media-lightbox="true"
 				data-media-lightbox-kind="recording"
 				finalFocus={originRef}
 				mobileFullPage
-				overlayClassName="z-[80]"
 				showCloseButton={false}
 			>
-				<DialogTitle className="sr-only">{source.title} fullscreen</DialogTitle>
+				<DialogTitle className="sr-only">
+					{tl("{title} fullscreen", { title: source.title })}
+				</DialogTitle>
 				<motion.div
 					animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
 					className="relative flex max-h-full max-w-full items-center justify-center overflow-hidden"
@@ -128,8 +138,8 @@ function LiveMediaLightbox({
 						className="max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] object-contain sm:max-h-[calc(100vh-6rem)] sm:max-w-[calc(100vw-6rem)]"
 						controls
 						playsInline
-						poster={source.posterUrl}
-						src={source.videoUrl}
+						poster={safePosterUrl ?? undefined}
+						src={safeVideoUrl}
 					/>
 					<Button
 						aria-label="Close fullscreen media"
@@ -153,12 +163,16 @@ export function MediaPipDock() {
 	const [lightboxOpen, setLightboxOpen] = useState(false);
 	const [pipError, setPipError] = useState<string | null>(null);
 	const originRef = useRef<HTMLButtonElement>(null);
+	const tl = useLiteralMessages();
 
 	useAgentBrowserStream();
 
 	useEffect(() => {
 		const onRecording = (event: Event) => {
-			const next = mediaRecordingSource((event as CustomEvent).detail);
+			if (!(event instanceof CustomEvent)) {
+				return;
+			}
+			const next = mediaRecordingSource(event.detail);
 			if (next) {
 				publishMediaSource(next);
 			}
@@ -187,9 +201,11 @@ export function MediaPipDock() {
 		return null;
 	}
 
-	const imageUrl = source.imageUrl ?? source.posterUrl;
-	const isVideo = Boolean(source.videoUrl);
-	const previewLabel = `${source.title} live preview`;
+	const imageUrl = safeMediaUrl(source.imageUrl ?? source.posterUrl);
+	const videoUrl = safeMediaUrl(source.videoUrl);
+	const posterUrl = safeMediaUrl(source.posterUrl);
+	const isVideo = Boolean(videoUrl);
+	const previewLabel = tl("{title} live preview", { title: source.title });
 
 	return (
 		<>
@@ -203,7 +219,7 @@ export function MediaPipDock() {
 					initial={{ opacity: 0, y: 18 }}
 				>
 					<button
-						aria-label={`Expand ${previewLabel}`}
+						aria-label={tl("Expand {previewLabel}", { previewLabel })}
 						className="group relative block aspect-video w-full overflow-hidden bg-black/80 text-left"
 						data-media-pip-preview="true"
 						onClick={() => setLightboxOpen(true)}
@@ -218,11 +234,11 @@ export function MediaPipDock() {
 								loop
 								muted
 								playsInline
-								poster={source.posterUrl}
-								src={source.videoUrl}
+								poster={posterUrl ?? undefined}
+								src={videoUrl ?? undefined}
 							/>
 						) : imageUrl ? (
-							// biome-ignore lint/performance/noImgElement: live frames are data URLs, not static assets.
+							// live frames are data URLs, not static assets.
 							<img
 								alt={previewLabel}
 								className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
@@ -233,19 +249,25 @@ export function MediaPipDock() {
 								Waiting for media…
 							</div>
 						)}
-						<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/80 to-transparent px-3 pt-5 pb-2 text-white">
-							<span className="truncate text-[11px]">
+						<div className="scrim-t pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between px-3 pt-4 pb-2 text-white">
+							<span
+								className="type-caption truncate"
+								title={sourceKindLabel(source)}
+							>
 								{sourceKindLabel(source)}
 							</span>
-							<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-success" />
+							<span className="size-1.5 shrink-0 rounded-full bg-success motion-safe:animate-pulse" />
 						</div>
 					</button>
 					<div className="flex items-center gap-2 px-3 py-2.5">
 						<div className="min-w-0 flex-1">
-							<p className="truncate font-medium text-foreground text-xs">
+							<p
+								className="truncate font-medium text-foreground text-xs"
+								title={source.title}
+							>
 								{source.title}
 							</p>
-							<p className="truncate text-[11px] text-muted-foreground">
+							<p className="type-caption truncate text-muted-foreground">
 								{isVideo
 									? "Recording is ready"
 									: source.kind === "recording"
@@ -255,9 +277,10 @@ export function MediaPipDock() {
 						</div>
 						{canUseNativeShell ? (
 							<Button
-								className="h-7 px-2 text-[11px]"
 								data-media-pip-open="true"
 								onClick={openPip}
+								size="dense"
+								typography="caption"
 								variant="secondary"
 							>
 								Open PiP
@@ -265,7 +288,7 @@ export function MediaPipDock() {
 						) : null}
 					</div>
 					{pipError && (
-						<p className="px-3 pb-2 text-[10px] text-status-destructive">
+						<p className="type-compact px-3 pb-2 text-status-destructive">
 							{pipError}
 						</p>
 					)}
@@ -291,22 +314,18 @@ export function MediaPipDock() {
 	);
 }
 
-interface AgentBrowserStreamStatus {
-	connected: boolean;
-	enabled: boolean;
-	port: number | null;
-	screencasting: boolean;
-}
+// Mirrors the serialized AgentBrowserStreamStatus command result: native bools and an optional u16 port.
+const agentBrowserStreamStatusSchema = z.object({
+	connected: z.boolean(),
+	enabled: z.boolean(),
+	port: z.number().int().min(0).max(65_535).nullable(),
+	screencasting: z.boolean(),
+});
 
-function isAgentBrowserFrame(
-	value: unknown
-): value is { data: string; type: "frame" } {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-	const candidate = value as Record<string, unknown>;
-	return candidate.type === "frame" && typeof candidate.data === "string";
-}
+const agentBrowserFrameSchema = z.object({
+	type: z.literal("frame"),
+	data: z.string(),
+});
 
 /** Bridges the documented Agent Browser localhost stream into the same media
  * source used by the Browser and Virtual Desktop dock panels. It is fail-soft:
@@ -324,9 +343,9 @@ function useAgentBrowserStream(): void {
 			if (disposed || socketRef.current) {
 				return;
 			}
-			const status = await invokeWhenReady<AgentBrowserStreamStatus>(
-				"agent_browser_stream_status"
-			).catch(() => null);
+			const status = await invokeWhenReady("agent_browser_stream_status")
+				.then((value) => agentBrowserStreamStatusSchema.parse(value))
+				.catch(() => null);
 			if (disposed || !status?.enabled || !status.port) {
 				return;
 			}
@@ -337,8 +356,10 @@ function useAgentBrowserStream(): void {
 			});
 			socket.addEventListener("message", (event) => {
 				try {
-					const message: unknown = JSON.parse(String(event.data));
-					if (!isAgentBrowserFrame(message)) {
+					const decoded = agentBrowserFrameSchema.safeParse(
+						JSON.parse(String(event.data))
+					);
+					if (!decoded.success) {
 						return;
 					}
 					const current = getMediaSourceSnapshot();
@@ -351,7 +372,7 @@ function useAgentBrowserStream(): void {
 					}
 					publishMediaSource({
 						id: "agent-browser:active",
-						imageUrl: `data:image/jpeg;base64,${message.data}`,
+						imageUrl: `data:image/jpeg;base64,${decoded.data.data}`,
 						kind: "agent-browser",
 						title: "Agent Browser",
 					});
@@ -392,6 +413,10 @@ export function MediaPipWindow() {
 	const close = () => {
 		invokeWhenReady("close_media_pip").catch(() => undefined);
 	};
+	const videoUrl = safeMediaUrl(source?.videoUrl);
+	const posterUrl = safeMediaUrl(source?.posterUrl);
+	const imageUrl = safeMediaUrl(source?.imageUrl);
+	const sourceTitle = source?.title ?? "Live media";
 
 	return (
 		<div
@@ -402,7 +427,7 @@ export function MediaPipWindow() {
 				className="flex h-9 shrink-0 items-center gap-2 border-border/60 border-b bg-sidebar/90 px-3"
 				data-tauri-drag-region
 			>
-				<span className="size-1.5 animate-pulse rounded-full bg-success" />
+				<span className="size-1.5 rounded-full bg-success motion-safe:animate-pulse" />
 				<span className="min-w-0 flex-1 truncate font-medium text-xs">
 					{source?.title ?? "Live media"}
 				</span>
@@ -421,24 +446,24 @@ export function MediaPipWindow() {
 					!source && "grid place-items-center p-5"
 				)}
 			>
-				{source?.videoUrl ? (
+				{videoUrl ? (
 					<video
-						aria-label={source.title}
+						aria-label={sourceTitle}
 						autoPlay
 						className="h-full w-full object-contain"
 						controls
 						loop
 						muted
 						playsInline
-						poster={source.posterUrl}
-						src={source.videoUrl}
+						poster={posterUrl ?? undefined}
+						src={videoUrl}
 					/>
-				) : source?.imageUrl ? (
-					// biome-ignore lint/performance/noImgElement: live frame data URLs are not static assets.
+				) : imageUrl ? (
+					// live frame data URLs are not static assets.
 					<img
-						alt={source.title}
+						alt={sourceTitle}
 						className="h-full w-full object-contain"
-						src={source.imageUrl}
+						src={imageUrl}
 					/>
 				) : (
 					<p className="text-center text-muted-foreground text-xs">

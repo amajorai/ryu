@@ -13,6 +13,7 @@
 // `SectionKey` type, so there is no import cycle.
 
 import { useEffect, useState } from "react";
+import { z } from "zod";
 import { track } from "@/src/lib/analytics.ts";
 
 /** localStorage key holding the JSON array of hidden sidebar section keys. */
@@ -150,6 +151,9 @@ export const TOGGLEABLE_FEATURES: FeatureDef[] = [
 	},
 ];
 
+// Local writers serialize string sets; synced storage still needs admission.
+const hiddenKeysSchema = z.array(z.string());
+
 function featureSurface(key: string): FeatureSurface {
 	return (
 		TOGGLEABLE_FEATURES.find((feature) => feature.key === key)?.surface ??
@@ -161,7 +165,9 @@ function featureSurface(key: string): FeatureSurface {
 export function loadHiddenSections(): Set<string> {
 	try {
 		const stored = localStorage.getItem(SECTION_HIDDEN_KEY);
-		return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
+		return stored
+			? new Set(hiddenKeysSchema.parse(JSON.parse(stored)))
+			: new Set();
 	} catch {
 		return new Set();
 	}
@@ -190,7 +196,7 @@ export function seedDefaultHiddenSections(): void {
 	try {
 		const seededRaw = localStorage.getItem(HIDDEN_SEEDED_KEY);
 		const seeded = new Set<string>(
-			seededRaw ? (JSON.parse(seededRaw) as string[]) : []
+			seededRaw ? hiddenKeysSchema.parse(JSON.parse(seededRaw)) : []
 		);
 		const toSeed = DEFAULT_HIDDEN_SECTIONS.filter((k) => !seeded.has(k));
 		if (toSeed.length === 0) {
@@ -214,7 +220,9 @@ seedDefaultHiddenSections();
 export function loadHiddenChrome(): Set<string> {
 	try {
 		const stored = localStorage.getItem(CHROME_HIDDEN_KEY);
-		return stored ? new Set(JSON.parse(stored) as string[]) : new Set();
+		return stored
+			? new Set(hiddenKeysSchema.parse(JSON.parse(stored)))
+			: new Set();
 	} catch {
 		return new Set();
 	}
@@ -238,7 +246,7 @@ export function seedDefaultHiddenChrome(): void {
 	try {
 		const seededRaw = localStorage.getItem(CHROME_HIDDEN_SEEDED_KEY);
 		const seeded = new Set<string>(
-			seededRaw ? (JSON.parse(seededRaw) as string[]) : []
+			seededRaw ? hiddenKeysSchema.parse(JSON.parse(seededRaw)) : []
 		);
 		const toSeed = DEFAULT_HIDDEN_CHROME.filter((k) => !seeded.has(k));
 		if (toSeed.length === 0) {
@@ -300,10 +308,7 @@ export function setFeatureEnabled(key: string, enabled: boolean) {
  * Subscribe to feature visibility. Stays in sync across surfaces via the change
  * event (same tab) and the `storage` event (other windows).
  */
-export function useFeatureToggles(): {
-	isEnabled: (key: string) => boolean;
-	setEnabled: (key: string, enabled: boolean) => void;
-} {
+export function useFeatureToggles() {
 	const [revision, setRevision] = useState(0);
 
 	useEffect(() => {
@@ -325,5 +330,8 @@ export function useFeatureToggles(): {
 			setFeatureEnabled(key, enabled);
 			setRevision((value) => value + 1);
 		},
+	} satisfies {
+		isEnabled: typeof isFeatureEnabled;
+		setEnabled: typeof setFeatureEnabled;
 	};
 }

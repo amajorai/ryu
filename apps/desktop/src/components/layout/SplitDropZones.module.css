@@ -1,0 +1,13 @@
+.authored1 {
+	transition-property: background-color, left, opacity, top, width, height;
+}
+.authored2 {
+	transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.preview {
+	top: var(--preview-top);
+	left: var(--preview-left);
+	width: var(--preview-width);
+	height: var(--preview-height);
+}

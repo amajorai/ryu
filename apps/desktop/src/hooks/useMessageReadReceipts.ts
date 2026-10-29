@@ -7,6 +7,7 @@ import {
 import type {
 	MessageReadReceipt,
 	MessageReadReceiptUser,
+	ReadReceiptFrameInput,
 } from "@/src/lib/read-receipts.ts";
 import {
 	mergeReadReceipts,
@@ -16,7 +17,7 @@ import { useActiveNode } from "./useActiveNode.ts";
 
 export interface UseMessageReadReceiptsResult {
 	/** Apply a `conversation.readReceipt` realtime frame. */
-	applyRealtimeFrame: (data: unknown) => void;
+	applyRealtimeFrame: (data: ReadReceiptFrameInput) => void;
 	/** Read markers grouped by message id, in durable read order. */
 	byMessage: ReadonlyMap<string, MessageReadReceipt[]>;
 	/** Queue one visible message for a debounced, idempotent acknowledgement. */
@@ -162,7 +163,7 @@ export function useMessageReadReceipts(
 	);
 
 	const applyRealtimeFrame = useCallback(
-		(data: unknown) => {
+		(data: ReadReceiptFrameInput) => {
 			const receipt = readReceiptFromFrame(data, conversationIdRef.current);
 			if (receipt) {
 				merge([receipt]);

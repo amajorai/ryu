@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Switch } from "@ryu/ui/components/switch";
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
 import { cn } from "@ryu/ui/lib/utils";
@@ -28,14 +29,15 @@ interface PreviewProps {
 export function ToolAccessPreview({ compact = false }: PreviewProps) {
 	const [enabled, setEnabled] = useState<string[]>(["Gmail", "Notion"]);
 	const [model, setModel] = useState("Claude");
+	const tl = useLiteralMessages();
 
 	return (
 		<div
 			className={cn(
-				"relative overflow-hidden rounded-[1.5rem] text-foreground",
+				"relative overflow-hidden bg-card/75 text-foreground",
 				compact
-					? "min-h-[13rem] bg-background p-4 sm:p-5"
-					: "bg-background p-6 md:p-8"
+					? "h-full w-full bg-muted/65 p-5 pb-16"
+					: "rounded-(--radius-os-window) p-6 ring-1 ring-border/45 md:p-8"
 			)}
 			data-testid="tool-access-preview"
 		>
@@ -63,20 +65,20 @@ export function ToolAccessPreview({ compact = false }: PreviewProps) {
 					compact ? "mt-3 grid grid-cols-2 gap-2" : "mt-8 space-y-3"
 				)}
 			>
-				{TOOLS.map(({ name, Icon }) => (
+				{TOOLS.map(({ name, Icon: ToolIcon }) => (
 					<div
 						className={cn(
 							"flex min-w-0 items-center",
 							compact
-								? "showcase-loop animate-tool-float gap-2 rounded-2xl bg-card/70 px-2.5 py-2 ring-1 ring-border/50"
+								? "gap-2 border-foreground/10 border-b px-0 py-3"
 								: "gap-4 rounded-xl bg-muted/40 p-4"
 						)}
 						key={name}
 					>
-						<Icon
+						<ToolIcon
 							aria-hidden="true"
 							className={cn(
-								"shrink-0 text-primary",
+								"shrink-0 text-muted-foreground",
 								compact ? "size-4" : "size-5"
 							)}
 							strokeWidth={1.5}
@@ -108,8 +110,10 @@ export function ToolAccessPreview({ compact = false }: PreviewProps) {
 					compact ? "mt-3 text-xs" : "mt-6 text-sm"
 				)}
 			>
-				{enabled.length} {enabled.length === 1 ? "tool" : "tools"} available to{" "}
-				{model}
+				{tl(
+					"{toolCount, plural, one {# tool} other {# tools}} available to {model}",
+					{ toolCount: enabled.length, model }
+				)}
 			</p>
 		</div>
 	);
@@ -118,14 +122,54 @@ export function ToolAccessPreview({ compact = false }: PreviewProps) {
 export function DeploymentPreview({ compact = false }: PreviewProps) {
 	const [mode, setMode] = useState("cloud");
 	const hosted = mode === "cloud";
+	if (compact) {
+		return (
+			<div
+				className="relative h-full w-full overflow-hidden bg-muted/65 p-5 pb-16 text-foreground"
+				data-testid="deployment-preview"
+			>
+				<Tabs onValueChange={setMode} value={mode}>
+					<TabsList manageLayout={false}>
+						<TabsTrigger value="cloud">Cloud</TabsTrigger>
+						<TabsTrigger value="self-hosted">Self-hosted</TabsTrigger>
+					</TabsList>
+				</Tabs>
+				<div className="mt-8 grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-xs">
+					<div className="flex min-w-0 items-center gap-2">
+						<Laptop
+							aria-hidden="true"
+							className="size-5 shrink-0 text-muted-foreground"
+						/>
+						<span>Team</span>
+					</div>
+					<ArrowRight
+						aria-hidden="true"
+						className="size-4 text-muted-foreground"
+					/>
+					<div className="flex min-w-0 items-center gap-2">
+						<Server
+							aria-hidden="true"
+							className="size-5 shrink-0 text-muted-foreground"
+						/>
+						<span className="truncate font-medium">
+							{hosted ? "Ryu Cloud" : "Your server"}
+						</span>
+					</div>
+				</div>
+				<div className="mt-8 h-px bg-foreground/10" />
+				<div className="type-compact mt-3 flex justify-between gap-3 text-muted-foreground">
+					<span>Agents</span>
+					<span>Tools</span>
+					<span>Workflows</span>
+				</div>
+			</div>
+		);
+	}
 
 	return (
 		<div
 			className={cn(
-				"relative overflow-hidden rounded-[1.5rem] text-foreground",
-				compact
-					? "min-h-[13rem] bg-background p-4 sm:p-5"
-					: "bg-background p-6 md:p-8"
+				"relative overflow-hidden rounded-(--radius-os-window) bg-card/75 p-6 text-foreground ring-1 ring-border/45 md:p-8"
 			)}
 			data-testid="deployment-preview"
 		>
@@ -147,7 +191,7 @@ export function DeploymentPreview({ compact = false }: PreviewProps) {
 					className={cn(
 						"flex min-w-0 items-center",
 						compact
-							? "showcase-loop flex-1 animate-tool-float gap-2 rounded-2xl bg-card/70 p-3 ring-1 ring-border/50"
+							? "flex-1 gap-2 rounded-xl bg-background/60 p-3"
 							: "w-full gap-4 rounded-xl bg-muted/40 p-4"
 					)}
 				>
@@ -168,7 +212,7 @@ export function DeploymentPreview({ compact = false }: PreviewProps) {
 				/>
 				<div
 					className={cn(
-						"min-w-0 rounded-2xl bg-background ring-1 ring-border/50",
+						"min-w-0 rounded-xl bg-background/60",
 						compact ? "flex-1 p-3" : "w-full p-6"
 					)}
 				>
@@ -187,7 +231,7 @@ export function DeploymentPreview({ compact = false }: PreviewProps) {
 					<div className="mt-3 grid grid-cols-3 gap-1.5">
 						{["Agents", "Tools", "Workflows"].map((name) => (
 							<span
-								className="truncate rounded-lg bg-background px-1.5 py-2 text-center text-[11px]"
+								className="type-caption truncate rounded-lg bg-background px-1.5 py-2 text-center"
 								key={name}
 							>
 								{name}

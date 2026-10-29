@@ -1,0 +1,313 @@
+{
+  "version": 1,
+  "description": "Golden cases for the capability taxonomy rules. `validation` cases run validate_taxonomy over a small inline taxonomy and list every expected issue as {code, subject} (compared as a sorted set). `resolve` and `comparison` cases run against the built-in capability-taxonomy-v1.json. Rust (tests/capability_taxonomy_fixture.rs) and TypeScript (packages/protocol/src/capability-taxonomy.test.ts) assert the same expectations.",
+  "validation": [
+    {
+      "name": "a well-formed taxonomy has no issues",
+      "taxonomy": {
+        "version": 1,
+        "description": "ok",
+        "platforms": [
+          {
+            "id": "web",
+            "name": "Web",
+            "description": "The web.",
+            "status": "promoted",
+            "addedOn": "2026-10-20"
+          }
+        ],
+        "capabilities": [
+          {
+            "id": "web.search",
+            "name": "Search the web",
+            "description": "Search.",
+            "status": "promoted",
+            "comparison": "capability",
+            "platforms": ["web"],
+            "verbs": ["web.search"],
+            "addedOn": "2026-10-20"
+          },
+          {
+            "id": "web.find",
+            "name": "Find pages",
+            "description": "Old name for search.",
+            "status": "retired",
+            "comparison": "capability",
+            "platforms": ["web"],
+            "successor": "web.search",
+            "addedOn": "2026-10-01"
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "the same job named two ways is a duplicate meaning",
+      "taxonomy": {
+        "version": 1,
+        "description": "dup",
+        "platforms": [
+          {
+            "id": "web",
+            "name": "Web",
+            "description": "The web.",
+            "status": "promoted",
+            "addedOn": "2026-10-20"
+          }
+        ],
+        "capabilities": [
+          {
+            "id": "web.search",
+            "name": "Search the web",
+            "description": "Search.",
+            "status": "promoted",
+            "comparison": "capability",
+            "platforms": ["web"],
+            "addedOn": "2026-10-20"
+          },
+          {
+            "id": "search.web",
+            "name": "Web searches",
+            "description": "Look things up.",
+            "status": "proposed",
+            "comparison": "capability",
+            "platforms": ["web"],
+            "addedOn": "2026-10-20"
+          }
+        ]
+      },
+      "issues": [{ "code": "duplicate_meaning", "subject": "search.web" }]
+    },
+    {
+      "name": "ids, aliases, verbs and descriptions must be unique",
+      "taxonomy": {
+        "version": 1,
+        "description": "collisions",
+        "platforms": [
+          {
+            "id": "web",
+            "name": "Web",
+            "description": "The web.",
+            "status": "promoted",
+            "addedOn": "2026-10-20"
+          },
+          {
+            "id": "web",
+            "name": "Web again",
+            "description": "Again.",
+            "status": "promoted",
+            "addedOn": "2026-10-20"
+          }
+        ],
+        "capabilities": [
+          {
+            "id": "web.extract",
+            "name": "Extract a page",
+            "description": "Read one page.",
+            "status": "promoted",
+            "comparison": "capability",
+            "platforms": ["web"],
+            "verbs": ["web.extract"],
+            "aliases": ["web.fetch"],
+            "addedOn": "2026-10-20"
+          },
+          {
+            "id": "web.fetch",
+            "name": "Download a document",
+            "description": "Read one page.",
+            "status": "promoted",
+            "comparison": "capability",
+            "platforms": ["web"],
+            "verbs": ["web.extract"],
+            "addedOn": "2026-10-20"
+          },
+          {
+            "id": "web.extract",
+            "name": "Pull text",
+            "description": "Pull text out.",
+            "status": "proposed",
+            "comparison": "capability",
+            "platforms": ["web"],
+            "addedOn": "2026-10-20"
+          }
+        ]
+      },
+      "issues": [
+        { "code": "duplicate_platform", "subject": "web" },
+        { "code": "duplicate_alias", "subject": "web.fetch" },
+        { "code": "duplicate_description", "subject": "web.fetch" },
+        { "code": "duplicate_verb", "subject": "web.extract" },
+        { "code": "duplicate_id", "subject": "web.extract" }
+      ]
+    },
+    {
+      "name": "grammar, dates, platforms, successors and verb status are checked",
+      "taxonomy": {
+        "version": 1,
+        "description": "bad",
+        "platforms": [
+          {
+            "id": "Web",
+            "name": "Web",
+            "description": "The web.",
+            "status": "promoted",
+            "addedOn": "2026-10-20"
+          },
+          {
+            "id": "github",
+            "name": "GitHub",
+            "description": "Code host.",
+            "status": "retired",
+            "addedOn": "20 Oct 2026"
+          }
+        ],
+        "capabilities": [
+          {
+            "id": "Search",
+            "name": "Search everything",
+            "description": "Search all.",
+            "status": "promoted",
+            "comparison": "capability",
+            "platforms": ["web"],
+            "addedOn": "2026-10-20"
+          },
+          {
+            "id": "issue.create",
+            "name": "File an issue",
+            "description": "Open an issue.",
+            "status": "proposed",
+            "comparison": "capability",
+            "platforms": [],
+            "verbs": ["issue.create"],
+            "successor": "issue.open",
+            "addedOn": "2026-02-30"
+          },
+          {
+            "id": "issue.open",
+            "name": "",
+            "description": "Open an issue, new name.",
+            "status": "retired",
+            "comparison": "capability",
+            "platforms": ["github"],
+            "addedOn": "2026-10-20"
+          },
+          {
+            "id": "issue.close",
+            "name": "Close an issue",
+            "description": "Close it.",
+            "status": "retired",
+            "comparison": "capability",
+            "platforms": ["github"],
+            "successor": "issue.open",
+            "addedOn": "2026-10-20"
+          }
+        ]
+      },
+      "issues": [
+        { "code": "invalid_platform_id", "subject": "Web" },
+        { "code": "invalid_date", "subject": "github" },
+        { "code": "invalid_id", "subject": "Search" },
+        { "code": "unknown_platform", "subject": "Search" },
+        { "code": "no_platforms", "subject": "issue.create" },
+        { "code": "verb_not_promoted", "subject": "issue.create" },
+        { "code": "successor_not_allowed", "subject": "issue.create" },
+        { "code": "invalid_date", "subject": "issue.create" },
+        { "code": "empty_text", "subject": "issue.open" },
+        { "code": "missing_successor", "subject": "issue.open" },
+        { "code": "invalid_successor", "subject": "issue.close" }
+      ]
+    },
+    {
+      "name": "an unsupported version is refused",
+      "taxonomy": {
+        "version": 2,
+        "description": "future",
+        "platforms": [],
+        "capabilities": []
+      },
+      "issues": [{ "code": "unsupported_version", "subject": "2" }]
+    }
+  ],
+  "resolve": [
+    {
+      "name": "a canonical id resolves to itself",
+      "id": "web.search",
+      "expected": "web.search"
+    },
+    {
+      "name": "an alias resolves to its capability",
+      "id": "web.fetch",
+      "expected": "web.extract"
+    },
+    {
+      "name": "an unknown id does not resolve",
+      "id": "web.teleport",
+      "expected": null
+    }
+  ],
+  "comparison": [
+    {
+      "name": "a promoted capability on its platform keys the comparison row",
+      "platform": "web",
+      "capability": "web.search",
+      "model": null,
+      "expected": { "key": "web/web.search" }
+    },
+    {
+      "name": "an alias keys the canonical row",
+      "platform": "web",
+      "capability": "web.fetch",
+      "model": null,
+      "expected": { "key": "web/web.extract" }
+    },
+    {
+      "name": "a proposed capability is not compared until promoted",
+      "platform": "github",
+      "capability": "issue.create",
+      "model": null,
+      "expected": { "error": "capability_not_promoted" }
+    },
+    {
+      "name": "a capability on a platform it does not list is refused",
+      "platform": "github",
+      "capability": "web.search",
+      "model": null,
+      "expected": { "error": "platform_not_allowed" }
+    },
+    {
+      "name": "an unknown capability is refused",
+      "platform": "web",
+      "capability": "web.teleport",
+      "model": null,
+      "expected": { "error": "unknown_capability" }
+    },
+    {
+      "name": "a model on a capability-level row is refused",
+      "platform": "web",
+      "capability": "web.search",
+      "model": "exa-auto",
+      "expected": { "error": "model_not_allowed" }
+    },
+    {
+      "name": "the per-model rule is checked before promotion (missing model)",
+      "platform": "generative-media",
+      "capability": "image.generate",
+      "model": null,
+      "expected": { "error": "model_required" }
+    },
+    {
+      "name": "a malformed model id is refused",
+      "platform": "generative-media",
+      "capability": "image.generate",
+      "model": "flux pro",
+      "expected": { "error": "invalid_model" }
+    },
+    {
+      "name": "a per-model capability with a model is still gated on promotion",
+      "platform": "generative-media",
+      "capability": "image.generate",
+      "model": "black-forest-labs/flux-1.1-pro",
+      "expected": { "error": "capability_not_promoted" }
+    }
+  ]
+}

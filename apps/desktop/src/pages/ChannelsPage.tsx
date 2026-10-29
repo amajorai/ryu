@@ -11,7 +11,8 @@ import {
 	ChannelsView,
 	type ChannelType,
 	defaultReactionLearningSettings,
-} from "@ryu/blocks/desktop/channels";
+} from "@ryu/blocks/desktop/channels.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useState } from "react";
 import { DestructiveConfirmDialog } from "@/src/components/ui/DestructiveConfirmDialog.tsx";
@@ -20,7 +21,11 @@ import { useChannels } from "@/src/hooks/useChannels.ts";
 import { useCanManagePermission } from "@/src/hooks/useGatewayConfigurable.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import { useTeams } from "@/src/hooks/useTeams.ts";
-import type { ChannelConfig } from "@/src/lib/api/channels.ts";
+import {
+	type ChannelConfig,
+	type ChannelInput,
+	channelPlatformOptionsSchema,
+} from "@/src/lib/api/channels.ts";
 
 function toView(
 	c: ChannelConfig,
@@ -110,6 +115,7 @@ export default function ChannelsPage({
 	initialSelectedId?: string | null;
 	initialChannelType?: ChannelType;
 }) {
+	const tl = useLiteralMessages();
 	const { channels, loading, error, authed, create, update, remove } =
 		useChannels();
 	const { agents } = useAgents();
@@ -141,25 +147,32 @@ export default function ChannelsPage({
 					agentId: payload.agentId,
 					teamId: payload.teamId,
 					groupReplyMode: payload.groupReplyMode,
-					platformOptions: payload.platformOptions,
+					platformOptions: channelPlatformOptionsSchema.parse(
+						payload.platformOptions
+					),
 					model: payload.model,
 					systemPrompt: payload.systemPrompt,
 					enabled: payload.enabled,
 					...behaviorFields(payload),
 				});
 			} else if (ctx.id) {
-				await update(ctx.id, {
-					name: payload.name,
-					...(hasSecrets ? { secrets: payload.secrets } : {}),
+				const input: Partial<ChannelInput> = { name: payload.name };
+				if (hasSecrets) {
+					input.secrets = payload.secrets;
+				}
+				Object.assign(input, {
 					agentId: payload.agentId,
 					teamId: payload.teamId,
 					groupReplyMode: payload.groupReplyMode,
-					platformOptions: payload.platformOptions,
+					platformOptions: channelPlatformOptionsSchema.parse(
+						payload.platformOptions
+					),
 					model: payload.model,
 					systemPrompt: payload.systemPrompt,
 					enabled: payload.enabled,
 					...behaviorFields(payload),
 				});
+				await update(ctx.id, input);
 			}
 			return true;
 		} catch {
@@ -244,7 +257,11 @@ export default function ChannelsPage({
 						history.
 					</p>
 				}
-				label={`Delete ${pendingDelete?.name ?? "this channel"}`}
+				label={
+					pendingDelete
+						? tl("Delete {channelName}", { channelName: pendingDelete.name })
+						: tl("Delete this channel")
+				}
 				onConfirm={confirmDelete}
 				onOpenChange={(open) => {
 					if (!(open || deleting)) {
@@ -252,7 +269,11 @@ export default function ChannelsPage({
 					}
 				}}
 				open={pendingDeleteId !== null}
-				title={`Delete ${pendingDelete?.name ?? "this channel"}?`}
+				title={
+					pendingDelete
+						? tl("Delete {channelName}?", { channelName: pendingDelete.name })
+						: tl("Delete this channel?")
+				}
 			/>
 		</div>
 	);

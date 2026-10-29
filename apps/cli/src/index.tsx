@@ -4,17 +4,28 @@
 //
 // We disable exitOnCtrlC so the shell can route Ctrl+C through renderer.destroy()
 // (the only correct way to quit - process.exit() leaves the terminal in raw mode
-// with the alternate screen still active). The active Core node is resolved once
-// from the environment (RYU_CORE_URL / RYU_CORE_TOKEN) and handed to the provider.
+// with the alternate screen still active). The Core node is resolved once
+// (`--node`, else RYU_CORE_URL / RYU_CORE_TOKEN, else the saved active node; see
+// core/nodeTarget.ts) and handed to the provider.
 
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { setSurfaceProvider } from "@ryuhq/core-client/client";
+import { type ApiTarget, setSurfaceProvider } from "@ryuhq/core-client/client";
 import { App } from "./App.tsx";
-import { isInteractive, runCli } from "./cli/dispatch.ts";
+import { requiresWaitlistAccess } from "./cli/access.ts";
+import { isInteractive, parseArgs, runCli } from "./cli/dispatch.ts";
 import { ensureCoreRunning } from "./core/bootstrap.ts";
+import { herdrReporter } from "./core/herdr.ts";
+import { installCliIdentity } from "./core/identity.ts";
+import { resolveNodeTarget } from "./core/nodeTarget.ts";
 import { reportCliReferralEvent } from "./core/quest-events.ts";
-import { buildTarget } from "./core/target.ts";
+import {
+	runCliAutoUpdate,
+	startCliAutoUpdate,
+	startCliAutoUpdateWorker,
+} from "./core/self-update.ts";
+import { buildInteractiveTarget, buildTarget } from "./core/target.ts";
+import { resolveCliWaitlistAccess } from "./core/waitlist.ts";
 
 // Declare the calling surface once, at entry, so EVERY core-client request carries
 // `X-Ryu-Surface: cli` (makeHeaders reads the provider). Core filters the plugin
@@ -28,11 +39,40 @@ setSurfaceProvider(() => "cli");
 // if Core is already up or the target is remote), then mount the shell. This is the
 // bare `ryu` / `ryu tui` path — unchanged from before the CLI dispatcher.
 const bootInteractive = async (): Promise<void> => {
-	const target = buildTarget();
+	const node = parseArgs(process.argv.slice(2)).flags.node;
+	const target = buildInteractiveTarget(node);
 	await ensureCoreRunning(target);
+	// Identify the signed-in user to shared nodes before the first request.
+	await installCliIdentity(target, { keepFresh: true });
+	void startCliAutoUpdate(target).catch(() => undefined);
 	void reportCliReferralEvent(target);
-	const renderer = await createCliRenderer({ exitOnCtrlC: false });
-	createRoot(renderer).render(<App target={target} />);
+	const renderer = await createCliRenderer({
+		exitOnCtrlC: false,
+		onDestroy: () => {
+			if (herdrReporter) {
+				void herdrReporter.release().finally(() => process.exit(0));
+			} else {
+				process.exit(0);
+			}
+		},
+	});
+	const quit = () => {
+		// A signal quits too: hand the terminal its own title back first.
+		renderer.setTerminalTitle("");
+		if (herdrReporter) {
+			void herdrReporter.release().finally(() => renderer.destroy());
+		} else {
+			renderer.destroy();
+		}
+	};
+	process.once("SIGTERM", quit);
+	process.once("SIGINT", quit);
+	herdrReporter?.update(
+		Symbol("shell"),
+		{ focused: false, state: "idle" },
+		target.url
+	);
+	createRoot(renderer).render(<App persistLayout target={target} />);
 };
 
 // argv dispatch (the gh/docker shape). A recognized subcommand runs non-interactively
@@ -40,16 +80,59 @@ const bootInteractive = async (): Promise<void> => {
 // the interactive path, one-shot commands do NOT auto-spawn a local Core — they talk
 // to whatever node is configured and fail with a clear error if it is unreachable.
 const argv = process.argv.slice(2);
-if (isInteractive(argv)) {
+
+async function runOneShotWithAccessGate(): Promise<number> {
+	const target = buildTarget();
+	if (requiresWaitlistAccess(argv)) {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 10_000);
+		const access = await resolveCliWaitlistAccess(target, controller.signal);
+		clearTimeout(timeout);
+		if (access !== "approved") {
+			const message =
+				access === "unauthenticated"
+					? "Sign in first with `ryu-cli login`."
+					: access === "pending"
+						? "Your account is still on the waitlist."
+						: "Ryu could not verify waitlist access. Try again when the control plane is reachable.";
+			process.stderr.write(`${message}\n`);
+			return 1;
+		}
+	}
+	return runCli(argv);
+}
+
+/** The node the background update worker reports against: `--node` resolved
+ *  through the saved registry (a name is not a URL), else the env target. An
+ *  unknown `--node` falls back here; the command itself reports the error. */
+function updateWorkerTarget(nodeRef: string | null): ApiTarget {
+	if (!nodeRef) {
+		return buildTarget();
+	}
+	try {
+		return resolveNodeTarget(nodeRef);
+	} catch {
+		return buildTarget();
+	}
+}
+
+if (argv.length === 1 && argv[0] === "--internal-cli-update") {
+	runCliAutoUpdate(buildTarget())
+		.then(() => process.exit(0))
+		.catch(() => process.exit(0));
+} else if (isInteractive(argv)) {
 	bootInteractive().catch((err) => {
-		process.stderr.write(`ryu failed to start: ${String(err)}\n`);
+		void herdrReporter?.release();
+		process.stderr.write(`ryu-cli failed to start: ${String(err)}\n`);
 		process.exitCode = 1;
 	});
 } else {
+	startCliAutoUpdateWorker(updateWorkerTarget(parseArgs(argv).flags.node));
 	// Keep the process alive until the best-effort event has had a chance to
-	// leave the CLI, while still allowing unauthenticated commands to proceed.
-	reportCliReferralEvent(buildTarget())
-		.then(() => runCli(argv))
+	// leave the CLI, while the access-free auth/local commands remain available.
+	installCliIdentity(buildTarget())
+		.then(() => reportCliReferralEvent(buildTarget()))
+		.then(() => runOneShotWithAccessGate())
 		.then((code) => process.exit(code))
 		.catch((err) => {
 			process.stderr.write(`ryu: ${String(err)}\n`);

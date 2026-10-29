@@ -1,6 +1,6 @@
 import { LibraryIcon, WorkflowCircle06Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -8,12 +8,12 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
+} from "@ryu/ui/components/empty.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
 import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
-import { Input } from "@ryu/ui/components/input";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	type MarkdownCollab,
@@ -34,6 +34,10 @@ import {
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAssistantPageContext } from "@/src/hooks/useAssistantPageContext.ts";
 import { useRegisterDocLinks } from "@/src/hooks/useRegisterDocLinks.ts";
+import {
+	managedDelegationFor,
+	mayAttachAccountJwt,
+} from "@/src/lib/api/client.ts";
 import {
 	createDocumentVersion,
 	getDocumentVersion,
@@ -74,12 +78,12 @@ function cursorColorFor(seed: string): string {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-const SAVE_LABEL: Record<SaveState, string> = {
+const SAVE_LABEL = {
 	idle: "",
 	saving: "Saving…",
 	saved: "Saved",
 	error: "Saved on this device",
-};
+} satisfies Record<SaveState, string>;
 
 /**
  * A Notion-style page editor: loads a Space document's Markdown, edits it in the
@@ -236,14 +240,18 @@ export default function SpaceDocEditorPage({
 		if (!(collabReady && doc)) {
 			return;
 		}
+		const target = { token: nodeToken, url: nodeUrl, userJwt: nodeUserJwt };
 		return {
 			documentId,
-			jwt,
+			// The account JWT only goes to a node with a token or managed
+			// delegation, reached over HTTPS or on this machine. Otherwise keep
+			// the node's own managed delegation rather than stripping it.
+			jwt: mayAttachAccountJwt(target) ? jwt : managedDelegationFor(target),
 			onReset: () => {
 				void handleRemoteReset();
 			},
 			onSyncedChange: handleSyncedChange,
-			target: { token: nodeToken, url: nodeUrl, userJwt: nodeUserJwt },
+			target,
 			user: cursorUser,
 		};
 	}, [
@@ -336,14 +344,31 @@ export default function SpaceDocEditorPage({
 		titleRef,
 	});
 
+	const documentVersionScope = useMemo(
+		() => ({}),
+		[nodeToken, nodeUrl, nodeUserJwt, spaceId, documentId]
+	);
+	const activeDocumentVersionScope = useRef(documentVersionScope);
+	activeDocumentVersionScope.current = documentVersionScope;
+	const documentVersionMounted = useRef(true);
+	useEffect(() => {
+		documentVersionMounted.current = true;
+		return () => {
+			documentVersionMounted.current = false;
+		};
+	}, []);
+
 	// Server-backed page version history (snapshot / diff / restore).
-	const versionSource = useMemo<VersionSource>(() => {
+	const versionSource = useMemo<
+		VersionSource<Awaited<ReturnType<typeof restoreDocumentVersion>>, void>
+	>(() => {
 		const target = {
 			token: nodeToken,
 			url: nodeUrl,
 			userJwt: nodeUserJwt,
 		};
 		return {
+			scope: documentVersionScope,
 			list: () =>
 				listDocumentVersions(target, spaceId, documentId).then((vs) =>
 					vs.map((v) => ({
@@ -363,23 +388,49 @@ export default function SpaceDocEditorPage({
 					timerRef.current = null;
 				}
 				await flush();
+				if (
+					!documentVersionMounted.current ||
+					activeDocumentVersionScope.current !== documentVersionScope
+				) {
+					return;
+				}
 				await createDocumentVersion(target, spaceId, documentId, label);
 			},
 			restore: (versionId) =>
 				restoreDocumentVersion(target, spaceId, documentId, versionId),
 		};
-	}, [nodeToken, nodeUrl, nodeUserJwt, spaceId, documentId, flush]);
+	}, [
+		nodeToken,
+		nodeUrl,
+		nodeUserJwt,
+		spaceId,
+		documentId,
+		flush,
+		documentVersionScope,
+	]);
 
 	// After a restore, re-fetch the document and re-mount the editor so the
 	// restored content is shown (the flush timer is cleared to avoid clobbering it
 	// with a stale in-flight draft).
 	const handleRestored = useCallback(async () => {
+		if (
+			!documentVersionMounted.current ||
+			activeDocumentVersionScope.current !== documentVersionScope
+		) {
+			return;
+		}
 		if (timerRef.current) {
 			clearTimeout(timerRef.current);
 			timerRef.current = null;
 		}
 		try {
 			const restored = await getDocument(spaceId, documentId);
+			if (
+				!documentVersionMounted.current ||
+				activeDocumentVersionScope.current !== documentVersionScope
+			) {
+				return;
+			}
 			setDoc(restored);
 			setTitle(restored.title);
 			titleRef.current = restored.title;
@@ -388,9 +439,15 @@ export default function SpaceDocEditorPage({
 			setSaveState("saved");
 			toast.success("Version restored");
 		} catch {
+			if (
+				!documentVersionMounted.current ||
+				activeDocumentVersionScope.current !== documentVersionScope
+			) {
+				return;
+			}
 			toast.error("Restored on the server, but couldn't reload the page");
 		}
-	}, [getDocument, spaceId, documentId]);
+	}, [getDocument, spaceId, documentId, documentVersionScope]);
 
 	if (loadFailed) {
 		return (
@@ -418,11 +475,7 @@ export default function SpaceDocEditorPage({
 	// editor, so it can be created collaboratively in one shot (the Yjs provider
 	// is fixed at editor-creation time and cannot be attached afterwards).
 	if (!(doc && collabReady)) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	return (
@@ -443,9 +496,9 @@ export default function SpaceDocEditorPage({
 				</button>
 				<Input
 					aria-label="Page title"
-					className="h-8 border-none bg-transparent px-0 font-medium text-base shadow-none focus-visible:ring-0"
 					onChange={(e) => handleTitleChange(e.target.value)}
 					placeholder="Untitled"
+					purpose="space-title"
 					value={title}
 				/>
 				<span className="shrink-0 text-muted-foreground text-xs">
@@ -475,6 +528,7 @@ export default function SpaceDocEditorPage({
 					initialMarkdown={doc.source}
 					key={`${documentId}:${reloadNonce}`}
 					onChangeMarkdown={handleMarkdownChange}
+					toolbar="two-row"
 				/>
 			</div>
 			<BacklinksPanel documentId={documentId} spaceId={spaceId} />

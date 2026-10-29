@@ -1,0 +1,49 @@
+{
+  "tags": ["wiki", "knowledge", "research", "spaces", "notes", "rag"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/llm-wiki",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/llm-wiki",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/llm-wiki",
+  "name": "LLM Wiki",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "category": "Knowledge & Memory",
+  "description": "Build and maintain an interlinked research wiki in a user-owned Ryu Space. The bundled skill orients from existing documents, captures source provenance, preserves contradictions, and files durable syntheses without using a private filesystem wiki.",
+  "tagline": "Compound research in a Ryu Space",
+  "keywords": [
+    "wiki",
+    "knowledge base",
+    "research",
+    "Ryu Spaces",
+    "provenance",
+    "notes"
+  ],
+  "icon": "book-open-01",
+  "iconDither": { "from": 208, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "skill-llm-wiki",
+      "name": "LLM Wiki",
+      "kind": "skill",
+      "config": { "skill_id": "llm-wiki" }
+    }
+  ],
+  "requires": {
+    "apps": [{ "id": "@ryu/spaces" }],
+    "grants": ["spaces:docs"]
+  },
+  "permission_grants": ["spaces:docs"]
+}

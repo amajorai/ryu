@@ -1,16 +1,10 @@
 import { cn } from "@ryu/ui/lib/utils.ts";
-import {
-	type CSSProperties,
-	useCallback,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DashboardGrid } from "@/src/components/dashboard/DashboardGrid.tsx";
 import { SplitDropZones } from "@/src/components/layout/SplitDropZones.tsx";
 import {
-	computeSplitLayout,
+	computeCenterGroupLayout,
 	type PaneRect,
 	paneRectPx,
 } from "@/src/components/layout/SplitView.tsx";
@@ -19,17 +13,17 @@ import {
 	useTabDnd,
 	useTabDragProps,
 } from "@/src/components/layout/tabDnd.tsx";
-import type { Split, Tab } from "@/src/contexts/TabsContext.tsx";
+import type { Tab, TabsContextValue } from "@/src/contexts/TabsContext.tsx";
 import { TabsContext } from "@/src/contexts/TabsContext.tsx";
 import type { Widget } from "@/src/lib/api/dashboard.ts";
 import {
-	directionBefore,
-	directionOrientation,
-	makeBranch,
-	makeLeaf,
-	type SplitDirection,
-} from "@/src/lib/splitTree.ts";
+	DesktopWorkbenchProvider,
+	useDesktopWorkbench,
+} from "@/src/workbench/DesktopWorkbenchContext.tsx";
+import proofStyles from "./dashboard-tabs-motion-proof.module.css";
+import type {} from "./proof-css-custom-properties.d.ts";
 import "../../src/index.css";
+import "./dashboard-tabs-motion-proof.css";
 
 const WIDGETS: Widget[] = [
 	{
@@ -83,7 +77,7 @@ function DraggableTab({ tab }: { tab: Tab }) {
 		<button
 			{...dragHandlers}
 			className={cn(
-				"rounded-full border px-3 py-1.5 font-medium text-xs transition-[opacity,transform,box-shadow] duration-150",
+				"rounded-full border px-3 py-1.5 font-medium text-xs transition-all duration-150",
 				dnd.draggingId === tab.id
 					? "scale-[0.97] opacity-40 shadow-lg"
 					: "bg-card hover:bg-muted"
@@ -96,12 +90,29 @@ function DraggableTab({ tab }: { tab: Tab }) {
 	);
 }
 
-function DemoPane({ tab, style }: { tab: Tab; style: CSSProperties }) {
+interface PaneGeometry {
+	height: string;
+	left: string;
+	paneWidth: string;
+	top: string;
+	width: string;
+}
+
+function DemoPane({ tab, geometry }: { tab: Tab; geometry: PaneGeometry }) {
 	return (
 		<section
-			className="absolute overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm transition-[left,top,width,height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]"
+			className={cn(
+				proofStyles.pane,
+				"absolute z-1 overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm duration-200 ease-out"
+			)}
 			data-testid={`pane-tab-${tab.id.slice(-1)}`}
-			style={style}
+			style={{
+				"--proof-pane-height": geometry.height,
+				"--proof-pane-left": geometry.left,
+				"--proof-pane-top": geometry.top,
+				"--proof-pane-width": geometry.width,
+				"--proof-pane-pixel-width": geometry.paneWidth,
+			}}
 		>
 			<div className="flex h-12 items-center gap-2 border-b bg-muted/30 px-4">
 				<span className="size-2 rounded-full bg-primary" />
@@ -119,33 +130,32 @@ function DemoPane({ tab, style }: { tab: Tab; style: CSSProperties }) {
 function splitPaneStyle(
 	rect: PaneRect,
 	container: { height: number; width: number }
-): CSSProperties {
+): PaneGeometry {
 	const px = paneRectPx(rect, container);
 	return {
 		height: `calc(${(rect.height.frac * 100).toFixed(4)}% - ${rect.top.frac === 0 ? 48 : 0}px)`,
 		left: `${rect.left.frac * 100}%`,
 		top: `calc(${rect.top.frac * 100}% + ${rect.top.frac === 0 ? 48 : 0}px)`,
 		width: `${rect.width.frac * 100}%`,
-		zIndex: 1,
 		// Keep the helper's pixel calculation live in the proof so the same
 		// pane geometry used by SplitDropZones is exercised.
-		"--proof-pane-width": `${px.width}px`,
+		paneWidth: `${px.width}px`,
 	};
 }
 
 function SplitMotionSurface({
-	status,
-	splits,
 	surfaceRef,
-	tabs,
 }: {
-	status: string;
-	splits: Split[];
 	surfaceRef: { current: HTMLDivElement | null };
-	tabs: Tab[];
 }) {
 	const dnd = useTabDnd();
-	const layout = splits[0] ? computeSplitLayout(splits[0].root) : null;
+	const { state } = useDesktopWorkbench();
+	const layout = computeCenterGroupLayout(state.centerTree);
+	const centerGroups = state.groups.filter(
+		(group) => group.region === "center"
+	);
+	const status = centerGroups.length > 1 ? "Two panes" : "One pane";
+	const tabs = INITIAL_TABS;
 	const size = surfaceRef.current?.getBoundingClientRect();
 	const container = size
 		? { height: size.height, width: size.width }
@@ -171,29 +181,23 @@ function SplitMotionSurface({
 				data-testid="split-demo-surface"
 				ref={surfaceRef}
 			>
-				{layout ? (
-					tabs
-						.filter((tab) => layout.panes.has(tab.id))
-						.map((tab) => (
-							<DemoPane
-								key={tab.id}
-								style={splitPaneStyle(layout.panes.get(tab.id)!, container)}
-								tab={tab}
-							/>
-						))
-				) : (
-					<DemoPane
-						style={{
-							height: "calc(100% - 48px)",
-							left: 0,
-							top: 48,
-							width: "100%",
-							zIndex: 1,
-						}}
-						tab={tabs[1]}
-					/>
-				)}
-				<SplitDropZones containerRef={surfaceRef} />
+				{centerGroups.map((group) => {
+					const tab = tabs.find(
+						(candidate) => candidate.id === group.activeItemId
+					);
+					const rect = layout.panes.get(group.id);
+					if (!(tab && rect)) {
+						return null;
+					}
+					return (
+						<DemoPane
+							geometry={splitPaneStyle(rect, container)}
+							key={group.id}
+							tab={tab}
+						/>
+					);
+				})}
+				<SplitDropZones />
 			</div>
 			<p className="text-muted-foreground text-xs" data-testid="split-status">
 				{status}
@@ -203,65 +207,78 @@ function SplitMotionSurface({
 }
 
 function SplitMotionDemo() {
-	const [tabs, setTabs] = useState(INITIAL_TABS);
-	const [splits, setSplits] = useState<Split[]>([]);
-	const [activeTabId, setActiveTabId] = useState("tab-b");
-	const [status, setStatus] = useState("One pane");
+	const { dispatch, state } = useDesktopWorkbench();
 	const surfaceRef = useRef<HTMLDivElement>(null);
-
-	const splitPane = useCallback(
-		(sourceTabId: string, targetTabId: string, direction: SplitDirection) => {
-			const splitId = "proof-split";
-			const sourceFirst = directionBefore(direction);
-			const root = makeBranch(
-				directionOrientation(direction),
-				sourceFirst
-					? [makeLeaf(sourceTabId), makeLeaf(targetTabId)]
-					: [makeLeaf(targetTabId), makeLeaf(sourceTabId)]
-			);
-			setTabs((current) =>
-				current.map((tab) =>
-					tab.id === sourceTabId || tab.id === targetTabId
-						? { ...tab, splitId }
-						: tab
-				)
-			);
-			setSplits([
-				{ collapsed: false, color: "blue", id: splitId, name: "Review", root },
-			]);
-			setActiveTabId(sourceTabId);
-			setStatus("Two panes");
-		},
-		[]
-	);
-
+	useEffect(() => {
+		if (state.items.some((item) => item.id === "tab-a")) {
+			return;
+		}
+		const centerGroup = state.groups.find((group) => group.region === "center");
+		if (!centerGroup) {
+			throw new Error("Proof workbench has no center group");
+		}
+		for (const tab of INITIAL_TABS) {
+			dispatch({
+				type: "item/open",
+				groupId: centerGroup.id,
+				item: {
+					id: tab.id,
+					title: tab.title,
+					closable: true,
+					duplicable: false,
+					pinned: false,
+					preferredRegion: "center",
+					scope: { kind: "window" },
+					source: { kind: "route", path: tab.path },
+				},
+			});
+		}
+	}, [dispatch, state.groups, state.items]);
 	const contextValue = useMemo(
 		() =>
 			({
-				activeTabId,
+				tabs: INITIAL_TABS,
+				activeTabId: "tab-b",
 				moveTab: () => undefined,
-				removeFromSplit: () => undefined,
-				splitPane,
-				splits,
-				swapSplitPanes: () => undefined,
-				tabs,
-			}) as never,
-		[activeTabId, splitPane, splits, tabs]
+				closeTab: () => undefined,
+				prepareTabForWorkbenchSplit: () => undefined,
+			}) satisfies Pick<
+				TabsContextValue,
+				| "tabs"
+				| "activeTabId"
+				| "moveTab"
+				| "closeTab"
+				| "prepareTabForWorkbenchSplit"
+			>,
+		[]
 	);
-
+	// SAFETY: This fixture supplies exactly the tab actions used by the real drag
+	// provider. Pane membership and splitting run through the real workbench.
 	return (
-		<TabsContext.Provider value={contextValue}>
+		<TabsContext.Provider value={contextValue as TabsContextValue}>
 			<TabDndProvider>
-				<SplitMotionSurface
-					splits={splits}
-					status={status}
-					surfaceRef={surfaceRef}
-					tabs={tabs}
-				/>
+				<SplitMotionSurface surfaceRef={surfaceRef} />
 			</TabDndProvider>
 		</TabsContext.Provider>
 	);
 }
+
+// Keep fixture persistence isolated from the user's desktop and reset on reload.
+const proofValues = new Map<string, string>();
+const proofStorage: Storage = {
+	get length() {
+		return proofValues.size;
+	},
+	clear: () => proofValues.clear(),
+	getItem: (key) => proofValues.get(key) ?? null,
+	key: (index) => [...proofValues.keys()][index] ?? null,
+	removeItem: (key) => {
+		proofValues.delete(key);
+	},
+	setItem: (key, value) => {
+		proofValues.set(key, value);
+	},
+};
 
 function ProofApp() {
 	const [saved, setSaved] = useState(
@@ -269,12 +286,9 @@ function ProofApp() {
 	);
 	return (
 		<div className="min-h-screen bg-background p-6 text-foreground">
-			<style>
-				{"html, body { overflow: auto !important; height: auto !important; }"}
-			</style>
 			<div className="mx-auto flex max-w-6xl flex-col gap-6">
 				<header>
-					<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.18em]">
+					<p className="type-compact font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
 						Ryu interaction proof
 					</p>
 					<h1 className="mt-1 font-semibold text-2xl tracking-tight">
@@ -328,4 +342,8 @@ function ProofApp() {
 	);
 }
 
-createRoot(document.getElementById("root")!).render(<ProofApp />);
+createRoot(document.getElementById("root")!).render(
+	<DesktopWorkbenchProvider storage={proofStorage}>
+		<ProofApp />
+	</DesktopWorkbenchProvider>
+);

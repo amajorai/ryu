@@ -7,6 +7,7 @@ import {
 	Globe02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -14,16 +15,18 @@ import {
 	AlertDialogContent,
 	AlertDialogDescription,
 	AlertDialogFooter,
-	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@ryu/ui/components/alert-dialog.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	createContext,
 	type ReactNode,
 	useCallback,
 	useContext,
+	useMemo,
 	useState,
 } from "react";
+import styles from "./full-access-warning.module.css";
 
 export interface FullAccessSelectionItem {
 	description?: string | null;
@@ -132,6 +135,7 @@ export function FullAccessSelectionProvider({
 		[]
 	);
 
+	const selection = useMemo(() => ({ request }), [request]);
 	const cancel = useCallback(() => setPending(null), []);
 	const confirm = useCallback(() => {
 		if (!pending) {
@@ -142,7 +146,7 @@ export function FullAccessSelectionProvider({
 	}, [pending]);
 
 	return (
-		<FullAccessSelectionContext.Provider value={{ request }}>
+		<FullAccessSelectionContext.Provider value={selection}>
 			{children}
 			<FullAccessWarningDialog
 				agentName={agentName}
@@ -193,16 +197,31 @@ export function FullAccessWarningDialog({
 	onOpenChange,
 	open,
 }: FullAccessWarningDialogProps) {
-	const subject = agentName?.trim() || "This ACP agent";
+	const tl = useLiteralMessages();
+	const subject = agentName?.trim() || tl("This ACP agent");
 
 	return (
 		<AlertDialog onOpenChange={onOpenChange} open={open}>
 			<AlertDialogContent
-				className="gap-4 rounded-3xl p-5 sm:max-w-[520px]"
+				className="sm:max-w-[520px]"
+				render={<div className={styles.content} />}
 				size="default"
 			>
-				<AlertDialogHeader className="gap-3">
-					<AlertDialogTitle className="flex items-center gap-2 text-lg">
+				<div
+					className={cn(
+						"grid grid-rows-[auto_1fr] place-items-center text-center sm:place-items-start sm:text-start",
+						styles.header
+					)}
+					data-slot="alert-dialog-header"
+				>
+					<AlertDialogTitle
+						className="flex items-center"
+						render={(props) => (
+							<h2 {...props} className={cn(props.className, styles.title)}>
+								{props.children}
+							</h2>
+						)}
+					>
 						<HugeiconsIcon
 							className="size-4 text-status-warning"
 							icon={Alert02Icon}
@@ -210,12 +229,16 @@ export function FullAccessWarningDialog({
 						/>
 						<span>Turn on Full Access?</span>
 					</AlertDialogTitle>
-					<AlertDialogDescription className="text-left leading-relaxed">
-						{subject} will be able to run commands, use the internet, and create
-						and edit files anywhere on this computer without your permission.
-						This includes but is not limited to:
+					<AlertDialogDescription
+						className="text-left"
+						render={<p className={styles.description} />}
+					>
+						{tl(
+							"{subject} will be able to run commands, use the internet, and create and edit files anywhere on this computer without your permission. This includes but is not limited to:",
+							{ subject }
+						)}
 					</AlertDialogDescription>
-				</AlertDialogHeader>
+				</div>
 
 				<div className="overflow-hidden rounded-2xl bg-muted/70 px-4">
 					{CAPABILITIES.map(({ description, icon, title }) => (
@@ -235,7 +258,10 @@ export function FullAccessWarningDialog({
 					))}
 				</div>
 
-				<AlertDialogDescription className="text-left leading-relaxed">
+				<AlertDialogDescription
+					className="text-left"
+					render={<p className={styles.description} />}
+				>
 					This comes with risks like loss or exposure of sensitive data and
 					prompt injection. You can turn this off.{" "}
 					<a
@@ -252,7 +278,7 @@ export function FullAccessWarningDialog({
 					<AlertDialogAction
 						aria-label={
 							modeName
-								? `Confirm ${modeName} full access`
+								? tl("Confirm {modeName} full access", { modeName })
 								: "Confirm full access"
 						}
 						onClick={onConfirm}

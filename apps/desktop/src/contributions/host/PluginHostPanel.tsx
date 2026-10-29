@@ -1,3 +1,80 @@
+import {
+	ryuCatalogModelsSchema,
+	ryuCatalogSnapshotSchema,
+	ryuProviderUsageReadingSchema,
+	ryuSubscriptionsSchema,
+} from "@ryu/app-host/app-bridge";
+import {
+	activityAuditResponseSchema,
+	activityEvalResponseSchema,
+	activityPruneResponseSchema,
+	activityRecordSchema,
+	activityRedteamResponseSchema,
+	activityScoreResponseSchema,
+	activityTraceImportRecordSchema,
+	activityTraceResponseSchema,
+	appBackupMethodSchema,
+	appBackupResponseSchema,
+	approvalRecordSchema,
+	backgroundProcessSchema,
+	calendarAgentRecordSchema,
+	calendarJobRecordSchema,
+	calendarWorkflowRecordSchema,
+	chatConversationSummarySchema,
+	chatSendResultSchema,
+	cryptoStatusSchema,
+	learningConfigSchema,
+	learningExperienceListSchema,
+	learningHealingStatusSchema,
+	mailInboxSchema,
+	mailMessageSchema,
+	meetingRecordSchema,
+	meetingTranscriptSchema,
+	notificationRecordSchema,
+	proactiveSuggestionRecordSchema,
+	questJudgeResultSchema,
+	questRecordSchema,
+	rpcJsonResponseSchema,
+	skillSourceRecordSchema,
+	skillVersionRecordsSchema,
+	skillWriteRecordSchema,
+	spaceDatabaseQueryResultSchema,
+	spaceDocumentWriteResultSchema,
+	timelineEventRecordSchema,
+	timelineJournalRecordSchema,
+	warmupDetectionSchema,
+	workflowAgentsRecordsSchema,
+	workflowAppsRecordsSchema,
+	workflowComposioResponseSchema,
+	workflowConnectBindingRecordSchema,
+	workflowConnectBindingRecordsSchema,
+	workflowHookEventsRecordsSchema,
+	workflowMcpRecordSchema,
+	workflowNotifyTargetsRecordsSchema,
+	workflowSchedulesRecordsSchema,
+	workflowSkillsRecordsSchema,
+	workflowWebhookRecordSchema,
+} from "@ryu/app-host/rpc";
+import { z } from "zod";
+import { createCompanionTranscribeAudio } from "./companion-voice-engine.ts";
+import { sendCompanionMail } from "./mail-send-service.ts";
+import { createCompanionMediaServices } from "./media-host-services.ts";
+import {
+	activityScoreInputSchema,
+	backgroundStopResponseSchema,
+	mailProviderInputSchema,
+	meetingSourceInputSchema,
+	notificationSendResponseSchema,
+	parseCompanionCommands,
+	parseCompanionEventChannels,
+	parseCompanionTabIcons,
+	questCaptureInputSchema,
+	questKindInputSchema,
+	questWriteInputSchema,
+	spaceDatabaseResponseSchema,
+	spaceDocumentResponseSchema,
+	spaceDocumentSummarySchema,
+} from "./node-response-contracts.ts";
 // Mounts a THIRD-PARTY plugin's bundled UI through the extension host, inside the
 // null-origin sandboxed iframe, gated by the plugin's GATEWAY-APPROVED grants.
 //
@@ -17,42 +94,39 @@
 // actually carries a UI bundle.
 
 import { PlugSocketIcon } from "@hugeicons/core-free-icons";
-import { bindWorkflowConnectTrigger, fetchWorkflowConnectBindings, removeWorkflowConnectBinding } from "@/src/lib/api/workflow-connect.ts";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type {
-	RyuCatalogModels,
-	RyuCatalogSnapshot,
-} from "@ryu/app-host/app-bridge";
+import { checkAppBundle } from "@ryu/app-host/app-bundle";
+import { appRequestService } from "@ryu/app-host/app-request-target";
 import {
 	COMPANION_THEME_MUTATION_ATTRIBUTES,
 	readCompanionThemeTokens,
 } from "@ryu/app-host/companion-theme";
-import { ExtensionHost } from "@ryu/app-host/ExtensionHost";
 import {
-	type ActivityRecord,
+	APP_DOWNLOAD_GRANT,
+	type ExtensionFrameMessage,
+	ExtensionHost,
+	shouldEnableCompanionFormEvents,
+} from "@ryu/app-host/ExtensionHost";
+import {
+	finetuneServicesViaAppRequest,
+	finetuneStreamPath,
+} from "@ryu/app-host/finetune-compat";
+import { useModelContextStore } from "@ryu/app-host/model-context";
+import {
+	assertOpenedFileUri,
+	type OpenedFileAccess,
+} from "@ryu/app-host/opened-file";
+import { ghostRecipesViaAppMount } from "@ryu/app-host/recipes-compat";
+import {
 	type ActivityScoreInput,
-	type ApprovalRecord,
-	type BackgroundProcess,
-	type CalendarAgentRecord,
-	type CalendarJobRecord,
-	type CalendarWorkflowRecord,
 	type Capability,
-	type ChatConversationSummary,
-	type ChatSendResult,
-	type CryptoStatus,
 	capabilitiesFromGrants,
 	createI18nHostServices,
+	type HostPush,
 	type HostServices,
 	isShellSafeRoute,
-	type MailInbox,
-	type MailMessage,
-	type MeetingRecord,
-	type NotificationRecord,
-	type ProactiveSuggestionRecord,
-	type QuestRecord,
 	type UploadFileResult,
 	validatePluginRoute,
-	type WarmupDetectionRecord,
 } from "@ryu/app-host/rpc";
 import {
 	htmlCompanionSrcdoc,
@@ -62,9 +136,10 @@ import {
 	createScopedToastHost,
 	createSileoToastRenderer,
 } from "@ryu/app-host/toast-host";
-import { browserRecordingHost } from "@ryu/blocks/companion/browser-recording";
+import { voiceAudioDataUrl } from "@ryu/app-host/voice-services";
+import { browserRecordingHost } from "@ryu/blocks/companion/browser-recording.ts";
 import { useI18n } from "@ryu/i18n/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -72,12 +147,12 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
+} from "@ryu/ui/components/empty.tsx";
 import { asGlyphValue } from "@ryu/ui/components/glyph.ts";
-import { iconToUrl } from "@ryu/ui/components/icon";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { RealtimeConnection } from "@ryuhq/core-client/realtime";
+import { iconToUrl } from "@ryu/ui/components/icon.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { RealtimeConnection } from "@ryuhq/core-client/realtime.ts";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
@@ -85,6 +160,7 @@ import { openExternal } from "@/lib/tauri-bridge.ts";
 import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import {
 	useCurrentTabId,
+	useIsActiveTab,
 	useTabSelector,
 } from "@/src/contexts/TabsContext.tsx";
 import { waitForApplicationRealtime } from "@/src/contributions/host/application-realtime-lifetime.ts";
@@ -99,6 +175,7 @@ import {
 	useActiveNodeGetter,
 } from "@/src/hooks/useActiveNode.ts";
 import { subscribeFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
+import { useUserAvailability } from "@/src/hooks/useUserAvailability.ts";
 import { listActivity } from "@/src/lib/api/activity.ts";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
 import { ownAppRequest } from "@/src/lib/api/app-request.ts";
@@ -113,7 +190,11 @@ import {
 	listChatBroadcastConversations,
 	sendChatBroadcastTurn,
 } from "@/src/lib/api/chat-broadcast.ts";
-import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
+import {
+	type ApiTarget,
+	realtimeJwtForTarget,
+	toTarget,
+} from "@/src/lib/api/client.ts";
 import {
 	fetchComposioConnections,
 	fetchComposioStatus,
@@ -133,7 +214,6 @@ import {
 	scoreGatewayOutput,
 } from "@/src/lib/api/gateway.ts";
 import { getHealingStatus } from "@/src/lib/api/healing.ts";
-import { generateImage as apiGenerateImage } from "@/src/lib/api/images.ts";
 import { getLearningConfig, listExperience } from "@/src/lib/api/learn.ts";
 import {
 	createInbox,
@@ -142,7 +222,6 @@ import {
 	listMessages,
 	mailRequest,
 	rotateInboundSecret,
-	sendMessage,
 } from "@/src/lib/api/mail.ts";
 import { fetchMcpServers, fetchMcpTools } from "@/src/lib/api/mcp.ts";
 import {
@@ -173,17 +252,20 @@ import {
 	listMentionTargetUsers,
 	listNotifications,
 	markNotificationRead,
+	redactConnectSuggestionNotifications,
 	unarchiveNotification,
 } from "@/src/lib/api/notifications.ts";
 import {
 	fetchApps,
 	fetchPluginUiBundle,
 	getPluginContributions,
+	installCompanionAppBundle,
+	ownAppEventStream,
 	type PluginCompanion,
-	pluginFinetuneStream,
 	pluginHostInvoke,
 	pluginHostInvokeStream,
 } from "@/src/lib/api/plugins.ts";
+import { getVoiceInputPrefs } from "@/src/lib/api/preferences.ts";
 import {
 	createPromptSuite,
 	importPromptTrace,
@@ -201,7 +283,6 @@ import {
 	judgeQuest,
 	listQuests,
 	pinQuest,
-	type QuestInput,
 	setScratchpad,
 	updateQuest,
 	useQuest,
@@ -209,7 +290,6 @@ import {
 import { reasoningRequest } from "@/src/lib/api/reasoning.ts";
 import {
 	getRecordingStatus,
-	listRecipes,
 	startRecording,
 	stopRecording,
 } from "@/src/lib/api/recipes.ts";
@@ -218,9 +298,9 @@ import { fetchRunTrace } from "@/src/lib/api/runs.ts";
 import { safeActionsRequest } from "@/src/lib/api/safe-actions.ts";
 import { fetchJobs } from "@/src/lib/api/schedules.ts";
 import {
-	frameUrl,
 	getJournal,
 	getProactiveInbox,
+	getShadowFrame,
 	getSpeechHistory,
 	getTimeline,
 	postFeedback,
@@ -243,11 +323,11 @@ import {
 import { subtitlesRequest } from "@/src/lib/api/subtitles.ts";
 import { tuitionRequest } from "@/src/lib/api/tuition.ts";
 import { fileToDataUrl, uploadUserFile } from "@/src/lib/api/uploads.ts";
-import { generateVideo as apiGenerateVideo } from "@/src/lib/api/video.ts";
 import {
 	speakText as apiSpeakText,
 	transcribeAudio as apiTranscribeAudio,
 	transcribeAudioDetailed as apiTranscribeAudioDetailed,
+	installTtsEngine as installTtsEngineApi,
 	listTtsEngines,
 } from "@/src/lib/api/voice.ts";
 import {
@@ -257,11 +337,19 @@ import {
 	runWarmupJobNow,
 } from "@/src/lib/api/warmup.ts";
 import {
-	fetchWebhookIngressStatus,
-	fetchWebhookSecret,
 	fetchWebhooks,
-	setWebhookSecret,
+	readWebhookSecret,
+	toWebhookIngressStatus,
+	toWebhookRegistry,
+	webhookIngressStatusWireSchema,
+	webhookRegistryWireSchema,
+	writeWebhookSecret,
 } from "@/src/lib/api/webhooks.ts";
+import {
+	bindWorkflowConnectTrigger,
+	fetchWorkflowConnectBindings,
+	removeWorkflowConnectBinding,
+} from "@/src/lib/api/workflow-connect.ts";
 import {
 	createWorkflow,
 	createWorkflowVersion,
@@ -279,12 +367,16 @@ import {
 	runWorkflow,
 } from "@/src/lib/api/workflows.ts";
 import { createScheduledAgentWorkflow } from "@/src/lib/automations.ts";
-import { getRealtimeJwt } from "@/src/lib/realtime/jwt.ts";
 import {
 	enrichTimelineJournal,
 	sanitizeTimelineEvents,
 } from "@/src/lib/timeline-app-icons.ts";
-import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
+import { getUserAvailabilitySnapshot } from "@/src/lib/user-availability.ts";
+import {
+	type AssistantBuilderSession,
+	type PageContextItem,
+	useAssistantStore,
+} from "@/src/store/useAssistantStore.ts";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 
 const PLUGIN_TOAST_RENDERER = createSileoToastRenderer(toast);
@@ -399,7 +491,7 @@ function pickFiles(opts?: {
 /** Fetch the Shadow keyframe at `tsMicros` and return it as a `data:` URL (the
  *  timeline companion's frame, blocked from a direct `<img src>` by the frame CSP
  *  `img-src data: blob:`). The shell (unsandboxed) reaches device-local Shadow
- *  through the LOCAL Core's `/api/shadow` proxy (`frameUrl` — Shadow's own HTTP
+ *  through the LOCAL Core's `/api/shadow` proxy (`getShadowFrame` — Shadow's own HTTP
  *  surface is bearer-gated and 403s browser requests; the `shadow.ts` INVARIANT
  *  still holds: never the per-tab node).
  *  Resolves to `null` when no keyframe exists near that moment (Shadow 404s), so the
@@ -407,13 +499,11 @@ function pickFiles(opts?: {
  *  page's `<img onError>` fallback. */
 async function fetchFrameDataUrl(tsMicros: number): Promise<string | null> {
 	try {
-		const resp = await fetch(frameUrl(tsMicros), {
-			headers: { Accept: "image/*" },
-		});
-		if (!resp.ok) {
+		const frame = await getShadowFrame(tsMicros);
+		if (!frame) {
 			return null;
 		}
-		return await blobToDataUrl(await resp.blob());
+		return await blobToDataUrl(frame);
 	} catch {
 		return null;
 	}
@@ -488,13 +578,6 @@ async function resolveAppIconTile(
 	return tile;
 }
 
-/** Decode a `data:` URL back to a Blob (for STT upload). `fetch` on a data URL is
- *  synchronous-ish and stays in the trusted context. */
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-	const resp = await fetch(dataUrl);
-	return await resp.blob();
-}
-
 /** The node event-stream channels a `shell.eventsSubscribe` call may request (grant
  *  `shell:integrate`). A companion's requested set is intersected with this — an
  *  unknown channel is silently dropped. Mirrors the `EventChannel` union. */
@@ -513,7 +596,7 @@ const SHELL_EVENT_CHANNELS: readonly EventChannel[] = [
  *  the surface's current theme. Returns only the tokens the host actually resolves
  *  (a blank value is skipped, so the companion falls back to its own default for
  *  that token). Runs in the trusted webview (getComputedStyle on the host root). */
-function readHostThemeTokens(): Record<string, string> {
+function readHostThemeTokens(): ReturnType<typeof readCompanionThemeTokens> {
 	return readCompanionThemeTokens(undefined, {
 		includeStoredPreferences: true,
 	});
@@ -585,14 +668,20 @@ export function PluginHostPanel({
 	companion,
 	mountContext,
 	onMessage,
+	onRequestClose,
+	fileAccess,
 }: {
 	companion: PluginCompanion;
 	/** Optional host-supplied context baked into the frame as `window.ryu.context`
 	 *  (e.g. `{ spaceId, docId }` when the app is opened as a Space document). */
 	mountContext?: unknown;
 	/** Optional messages emitted by this companion's sandboxed frame. */
-	onMessage?: (data: unknown) => void;
+	onMessage?: (data: ExtensionFrameMessage) => void;
+	/** Supplied only by the host-owned dialog that contains this frame. */
+	onRequestClose?: () => void;
+	fileAccess?: OpenedFileAccess;
 }) {
+	const closeOnEscape = onRequestClose !== undefined;
 	const node = useActiveNode();
 	const getActiveNode = useActiveNodeGetter();
 	useEffect(
@@ -614,7 +703,7 @@ export function PluginHostPanel({
 	const [initialThemeTokens] = useState(readHostThemeTokens);
 	const [themeTokens, setThemeTokens] = useState(initialThemeTokens);
 	useEffect(() => {
-		if (typeof MutationObserver === "undefined") {
+		if (globalThis.MutationObserver === undefined) {
 			return;
 		}
 		const observer = new MutationObserver(() => {
@@ -649,6 +738,7 @@ export function PluginHostPanel({
 	// Notifications section: the per-user feed is scoped by user id, but the sandboxed
 	// frame has no Better Auth session, so the host reads it (the session query, falling
 	// back to the local account vault) exactly as the deleted `useNotifications` hook did.
+	const { streamingPrivacyActive } = useUserAvailability();
 	const { data: session } = useSession();
 	const meId = session?.user?.id ?? getActiveUserId() ?? null;
 	const target = useMemo(
@@ -689,6 +779,12 @@ export function PluginHostPanel({
 	// listener is rebuilt in step with the document it is waiting on.
 	const [attempt, setAttempt] = useState(0);
 	const grantsKey = [...new Set(companion.approvedGrants)].sort().join(" ");
+	// The approved grants as a content-stable list (same set ⇒ same array), for
+	// host services that check a specific grant (the cross-app `app.request`).
+	const approvedGrantList = useMemo(
+		() => (grantsKey ? grantsKey.split(" ") : []),
+		[grantsKey]
+	);
 	const documentScope = JSON.stringify([
 		node.url,
 		node.token,
@@ -696,18 +792,19 @@ export function PluginHostPanel({
 		companion.id,
 		mountContext ?? null,
 		companion.csp ?? null,
+		companion.defaultCspEnforced,
 	]);
 	// One nonce per document and authorization scope. Cosmetic renders keep it stable.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: code and serialized scope deliberately reset the document handshake.
+	// code and serialized scope deliberately reset the document handshake.
 	const nonce = useMemo(
 		() =>
-			typeof crypto?.randomUUID === "function"
-				? crypto.randomUUID()
-				: `nonce-${attempt}-${Date.now()}-${Math.round(Math.random() * 1e9)}`,
+			globalThis.crypto?.randomUUID === undefined
+				? `nonce-${attempt}-${Date.now()}-${Math.round(Math.random() * 1e9)}`
+				: crypto.randomUUID(),
 		[attempt, grantsKey, code, documentScope]
 	);
 	const connected = connectedNonce === nonce;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: document replacement owns realtime connection cleanup.
+	// document replacement owns realtime connection cleanup.
 	useEffect(() => {
 		const lifetime = new AbortController();
 		realtimeLifetimeRef.current = lifetime;
@@ -742,9 +839,12 @@ export function PluginHostPanel({
 	const cooldownLeftMs = Math.max(0, cooldownUntil - now);
 	const cooldownSeconds = Math.ceil(cooldownLeftMs / 1000);
 	const mediaPermission =
-		companion.pluginId === "@ryu/canvas" || companion.pluginId === "@ryu/slides"
-			? `${companion.pluginId.slice("@ryu/".length)}.generate`
-			: undefined;
+		companion.pluginId === "@ryu/voice"
+			? "voice.studio.generate"
+			: companion.pluginId === "@ryu/canvas" ||
+					companion.pluginId === "@ryu/slides"
+				? `${companion.pluginId.slice("@ryu/".length)}.generate`
+				: undefined;
 	useEffect(() => {
 		if (cooldownLeftMs <= 0) {
 			return;
@@ -776,16 +876,72 @@ export function PluginHostPanel({
 	// equal-but-new `approvedGrants` array — would silently kill the bridge of every
 	// open app the first time the window is refocused. Same set ⇒ same Set ⇒ no
 	// teardown.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: grantsKey is the content hash of approvedGrants.
-	const granted = useMemo<ReadonlySet<Capability>>(
-		() => capabilitiesFromGrants(companion.approvedGrants),
-		[grantsKey]
-	);
+	// grantsKey is the content hash of approvedGrants.
+	const granted = useMemo<ReadonlySet<Capability>>(() => {
+		const capabilities = new Set(
+			capabilitiesFromGrants(companion.approvedGrants)
+		);
+		if (fileAccess) {
+			capabilities.add("file.access");
+		}
+		return capabilities;
+	}, [grantsKey, fileAccess]);
+	const filePushRef = useRef<((message: HostPush) => void) | null>(null);
+	useEffect(() => {
+		if (!fileAccess || connectedNonce !== nonce) {
+			return;
+		}
+		let stopped = false;
+		let revision: string | undefined;
+		let inFlight = false;
+		const refresh = async () => {
+			if (stopped || inFlight) {
+				return;
+			}
+			inFlight = true;
+			try {
+				const snapshot = await fileAccess.read();
+				if (!stopped && snapshot.revision !== revision) {
+					revision = snapshot.revision;
+					filePushRef.current?.({
+						kind: "ryu-widget-set-globals",
+						globals: {
+							openedFile: {
+								uri: fileAccess.uri,
+								name: fileAccess.name,
+								editable: fileAccess.editable,
+								revision,
+							},
+						},
+					});
+				}
+			} catch {
+				// The reader surfaces errors on its next scoped read; polling never fabricates content.
+			} finally {
+				inFlight = false;
+			}
+		};
+		void refresh();
+		const timer = setInterval(() => void refresh(), 1000);
+		return () => {
+			stopped = true;
+			clearInterval(timer);
+		};
+	}, [fileAccess, connectedNonce, nonce]);
 
 	// This app's assistant-context slice + takeover token. Scoped to the plugin id
 	// so two companions of the same app share one slice (they are one app to the
 	// user) while different apps stay isolated.
-	const assistantOwner = `plugin:${companion.pluginId}`;
+	const assistantOwner = `plugin:${companion.pluginId}:${companion.id}:${nonce}`;
+	const modelContext = useModelContextStore(
+		(store) => store.entries[assistantOwner]?.state ?? null
+	);
+	useEffect(() => {
+		filePushRef.current?.({
+			kind: "ryu-widget-set-globals",
+			globals: { modelContext },
+		});
+	}, [modelContext]);
 	const toastHost = useMemo(
 		() =>
 			createScopedToastHost({
@@ -797,12 +953,46 @@ export function PluginHostPanel({
 
 	useEffect(() => () => toastHost.dispose(), [toastHost]);
 
+	// What this app last asked the assistant to hold. The store only carries it
+	// while this panel's tab is focused: inactive tabs stay mounted (hidden), and
+	// a background app must not keep its context or takeover on whatever page the
+	// user is now looking at. Focus returning re-applies the app's last state.
+	const isActiveTab = useIsActiveTab();
+	const isActiveTabRef = useRef(isActiveTab);
+	isActiveTabRef.current = isActiveTab;
+	const assistantContextRef = useRef<PageContextItem[]>([]);
+	const assistantSurfaceRef = useRef<AssistantBuilderSession | null>(null);
+	// A new frame document (retry/reload changes the nonce, and so the owner) has
+	// published nothing yet: forget the previous document's context and surface
+	// so they are never replayed under the new owner. Declared before the focus
+	// effect below so it runs first.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset at the owner boundary
+	useEffect(() => {
+		assistantContextRef.current = [];
+		assistantSurfaceRef.current = null;
+	}, [assistantOwner]);
+	useEffect(() => {
+		const assistant = useAssistantStore.getState();
+		if (!isActiveTab) {
+			assistant.clearContextOwner(assistantOwner);
+			assistant.clearBuilder(assistantOwner);
+			return;
+		}
+		if (assistantContextRef.current.length > 0) {
+			assistant.publishContext(assistantOwner, assistantContextRef.current);
+		}
+		if (assistantSurfaceRef.current) {
+			assistant.registerBuilder(assistantSurfaceRef.current);
+		}
+	}, [isActiveTab, assistantOwner]);
+
 	// A closed page is not "what the user is looking at". Drop this app's slice and
 	// its takeover when the panel unmounts — an app that crashed or was navigated
 	// away from must not keep steering the assistant.
 	useEffect(() => {
 		return () => {
 			const assistant = useAssistantStore.getState();
+			useModelContextStore.getState().clear(assistantOwner);
 			assistant.clearContextOwner(assistantOwner);
 			assistant.clearBuilder(assistantOwner);
 		};
@@ -814,6 +1004,36 @@ export function PluginHostPanel({
 	const services = useMemo<HostServices>(
 		() => ({
 			...createI18nHostServices(i18n),
+			requestClose: onRequestClose ? async () => onRequestClose() : undefined,
+			getGlobals: async () => ({
+				modelContext: useModelContextStore
+					.getState()
+					.get("assistant", assistantOwner),
+				locale: i18n.locale,
+			}),
+			getModelContext: () =>
+				useModelContextStore.getState().get("assistant", assistantOwner),
+			updateModelContext: async (input) => {
+				const state = useModelContextStore
+					.getState()
+					.update("assistant", assistantOwner, input);
+				return state;
+			},
+			readOpenedFile: fileAccess
+				? async ({ uri }) => await assertOpenedFileUri(fileAccess, uri).read()
+				: undefined,
+			writeOpenedFile: fileAccess?.editable
+				? async (input) => {
+						const access = assertOpenedFileUri(fileAccess, input.uri);
+						if (input.text !== undefined && access.write) {
+							return await access.write(input.text, input.expectedRevision);
+						}
+						if (input.blob !== undefined && access.writeBlob) {
+							return await access.writeBlob(input.blob, input.expectedRevision);
+						}
+						throw new Error("This file representation is read-only");
+					}
+				: undefined,
 			openExternal: ({ href }) => openExternal(href),
 			uiToastDismiss: (input) => toastHost.dismiss(input),
 			uiToastShow: (input) => toastHost.show(input),
@@ -826,19 +1046,29 @@ export function PluginHostPanel({
 			// app and the page under it) never clobber each other. Nothing is readable
 			// back — this is a write-only channel into the assistant's prompt.
 			assistantPublishContext: async ({ items }) => {
-				useAssistantStore.getState().publishContext(
-					assistantOwner,
-					// `source` is stamped HERE, by the shell, from the companion's real
-					// name — never taken from the app's own payload, which could claim
-					// to be anything.
-					items.map((i) => ({ ...i, source: companion.name }))
-				);
+				// `source` is stamped HERE, by the shell, from the companion's real
+				// name — never taken from the app's own payload, which could claim
+				// to be anything.
+				// Ids are namespaced by this app's owner key, so an app cannot collide
+				// with (or remove) another publisher's chip, or mimic the shell's own
+				// `tab:` chip, by choosing its ids.
+				assistantContextRef.current = items.map((i) => ({
+					...i,
+					id: `${assistantOwner}:${i.id}`,
+					source: companion.name,
+				}));
+				if (isActiveTabRef.current) {
+					useAssistantStore
+						.getState()
+						.publishContext(assistantOwner, assistantContextRef.current);
+				}
 			},
 			assistantClearContext: async () => {
+				assistantContextRef.current = [];
 				useAssistantStore.getState().clearContextOwner(assistantOwner);
 			},
 			assistantRegisterSurface: async (surface) => {
-				useAssistantStore.getState().registerBuilder({
+				assistantSurfaceRef.current = {
 					conversationId: assistantOwner,
 					// An app-defined kind, so `buildBuilderPreamble` uses the surface's
 					// own `preamble` instead of a built-in builder's instructions.
@@ -847,6 +1077,7 @@ export function PluginHostPanel({
 					description: surface.description,
 					preamble: surface.preamble,
 					prompts: surface.prompts,
+					thread: surface.thread,
 					tools: surface.tools,
 					// Registering must not pop the panel open — see the store's `dock` doc.
 					dock: false,
@@ -855,12 +1086,26 @@ export function PluginHostPanel({
 					targetName: surface.label,
 					resolveId: () => Promise.resolve(companion.id),
 					onChanged: () => undefined,
-				});
+				};
+				if (isActiveTabRef.current) {
+					useAssistantStore
+						.getState()
+						.registerBuilder(assistantSurfaceRef.current);
+				}
 			},
 			assistantClearSurface: async () => {
+				assistantSurfaceRef.current = null;
 				useAssistantStore.getState().clearBuilder(assistantOwner);
 			},
 			assistantOpen: async ({ mode, prompt }) => {
+				// Only the focused app may open (or ask) the assistant; a background
+				// tab's late call would otherwise pop it over another page and spend a
+				// turn under that page's context.
+				if (!isActiveTabRef.current) {
+					throw new Error(
+						"assistant.open is only available while the app is focused"
+					);
+				}
 				useAssistantStore.getState().open(mode);
 				if (prompt) {
 					// Asking on the user's behalf is a real turn on their budget, and it
@@ -907,67 +1152,81 @@ export function PluginHostPanel({
 			// (`bridge_path_for`: model.complete→host.sideModel, storage.get→
 			// host.storage_get, …); args are forwarded verbatim (already validated in
 			// rpc.ts). The host holds the node token; the frame never does.
-			modelComplete: (input) =>
-				pluginHostInvoke(
-					toTarget(node),
-					companion.pluginId,
-					"model.complete",
-					input
-				) as Promise<string>,
 			catalogSnapshot: () =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"catalog.snapshot",
 					{}
-				) as Promise<RyuCatalogSnapshot>,
+				).then(ryuCatalogSnapshotSchema.parse),
 			catalogModels: (input) =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"catalog.models",
 					input
-				) as Promise<RyuCatalogModels>,
+				).then(ryuCatalogModelsSchema.parse),
+			// Subscription accounts (subscriptions:read) — Core-bridge verbs; Core
+			// also requires a verified node owner/admin caller.
+			subscriptionsList: (input) =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"subscriptions.list",
+					input
+				).then(ryuSubscriptionsSchema.parse),
+			subscriptionsUsage: (input) =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"subscriptions.usage",
+					input
+				).then(ryuProviderUsageReadingSchema.parse),
 			chatListConversations: () =>
-				listChatBroadcastConversations(toTarget(node)) as Promise<
-					ChatConversationSummary[]
-				>,
+				listChatBroadcastConversations(toTarget(node)).then(
+					z.array(chatConversationSummarySchema).parse
+				),
 			chatSend: (input) =>
-				sendChatBroadcastTurn(toTarget(node), input) as Promise<ChatSendResult>,
+				sendChatBroadcastTurn(toTarget(node), input).then(
+					chatSendResultSchema.parse
+				),
 			runAgent: (input) =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"agent.run",
 					input
-				) as Promise<string>,
+				).then(z.string().parse),
 			backgroundList: (input) =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"background.list",
 					input
-				) as Promise<BackgroundProcess[]>,
+				).then(z.array(backgroundProcessSchema).parse),
 			backgroundStop: (input) =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"background.stop",
 					input
-				) as Promise<{
-					ok: boolean;
-					requested: boolean;
-					process_id: string;
-				}>,
-			backupsRequest: (method, input) =>
-				pluginHostInvoke(toTarget(node), companion.pluginId, method, input),
+				).then(backgroundStopResponseSchema.parse),
+			backupsRequest: (method, input) => {
+				const backupMethod = appBackupMethodSchema.parse(method);
+				return pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					backupMethod,
+					input
+				).then(appBackupResponseSchema(backupMethod).parse);
+			},
 			storageGet: (input) =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"storage.get",
 					input
-				) as Promise<string | null>,
+				).then(z.string().nullable().parse),
 			storageSet: async (input) => {
 				await pluginHostInvoke(
 					toTarget(node),
@@ -990,7 +1249,7 @@ export function PluginHostPanel({
 					companion.pluginId,
 					"storage.keys",
 					input
-				) as Promise<string[]>,
+				).then(z.array(z.string()).parse),
 			// Sealing: the app hands over plaintext and gets back an opaque envelope.
 			// The key is derived per app inside Core and never crosses to the frame,
 			// so these are host round-trips rather than a local crypto helper.
@@ -1000,21 +1259,21 @@ export function PluginHostPanel({
 					companion.pluginId,
 					"crypto.seal",
 					input
-				) as Promise<string>,
+				).then(z.string().parse),
 			cryptoOpen: (input) =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"crypto.open",
 					input
-				) as Promise<string>,
+				).then(z.string().parse),
 			cryptoStatus: () =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"crypto.status",
 					{}
-				) as Promise<CryptoStatus>,
+				).then(cryptoStatusSchema.parse),
 			// Streaming agent.run: reply text arrives token-by-token via `emit`; the
 			// SSE fetch is aborted when `signal` fires (frame cancel).
 			runAgentStream: (input, emit, signal) =>
@@ -1031,7 +1290,7 @@ export function PluginHostPanel({
 					companion.pluginId,
 					"spaces.ensureSpace",
 					input
-				) as Promise<string>,
+				).then(z.string().parse),
 			spacesSearch: async (input) => {
 				const matches = await searchSpace(
 					toTarget(node),
@@ -1053,19 +1312,14 @@ export function PluginHostPanel({
 					companion.pluginId,
 					"spaces.createDoc",
 					input
-				) as Promise<string>,
+				).then(z.string().parse),
 			spacesGetDoc: (input) =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"spaces.getDoc",
 					input
-				) as Promise<{
-					id: string;
-					title: string;
-					source: string;
-					kind: string;
-				} | null>,
+				).then(spaceDocumentResponseSchema.parse),
 			spacesUpdateDoc: async (input) => {
 				await pluginHostInvoke(
 					toTarget(node),
@@ -1080,7 +1334,7 @@ export function PluginHostPanel({
 					companion.pluginId,
 					"spaces.listDocs",
 					input
-				) as Promise<{ id: string; title: string; updated_at: number }[]>,
+				).then(z.array(spaceDocumentSummarySchema).parse),
 			spacesDeleteDoc: async (input) => {
 				await pluginHostInvoke(
 					toTarget(node),
@@ -1089,38 +1343,63 @@ export function PluginHostPanel({
 					input
 				);
 			},
+			spacesCreateDatabase: (input) =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"spaces.createDatabase",
+					input
+				).then(z.string().parse),
+			spacesListDatabases: (input) =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"spaces.listDatabases",
+					input
+				).then(z.array(spaceDocumentSummarySchema).parse),
+			spacesGetDatabase: (input) =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"spaces.getDatabase",
+					input
+				).then(spaceDatabaseResponseSchema.parse),
+			spacesUpdateDatabase: (input) =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"spaces.updateDatabase",
+					input
+				).then(spaceDocumentWriteResultSchema.parse),
+			spacesQueryDatabase: (input) =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"spaces.queryDatabase",
+					input
+				).then(spaceDatabaseQueryResultSchema.parse),
+			spacesDeleteDatabase: async (input) => {
+				await pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"spaces.deleteDatabase",
+					input
+				);
+			},
 			// Media services — host-direct governed fetches (same pattern as
 			// listAgents: the host holds the node token and calls the Gateway-governed
 			// Core media endpoints). Every result is normalized to a `data:` URL so the
 			// CSP-locked frame (img/media-src data: blob: only) can render it.
-			generateImage: async (input) => {
-				const urls = await apiGenerateImage(toTarget(node), input.prompt, {
-					appId: mediaPermission ? companion.pluginId : undefined,
-					appPermission: mediaPermission,
-					count: input.count,
-					size: input.size,
-					provider: input.provider,
-					model: input.model,
-					requestId: input.request_id,
-					inputImages: input.input_images,
-				});
-				return await Promise.all(urls.map(inlineToDataUrl));
-			},
-			generateVideo: async (input) => {
-				const clips = await apiGenerateVideo(toTarget(node), input.prompt, {
-					appId: mediaPermission ? companion.pluginId : undefined,
-					appPermission: mediaPermission,
-					provider: input.provider,
-					model: input.model,
-					requestId: input.request_id,
-				});
-				return await Promise.all(
-					clips.map(async (c) => ({
-						url: await inlineToDataUrl(c.url),
-						mediaType: c.mediaType,
-					}))
-				);
-			},
+			// Image, video and audio generation plus `model.complete` (with vision
+			// images) forward every validated field to Core unchanged; see
+			// media-host-services.ts.
+			...createCompanionMediaServices({
+				appId: mediaPermission ? companion.pluginId : undefined,
+				appPermission: mediaPermission,
+				inline: inlineToDataUrl,
+				pluginId: companion.pluginId,
+				target: toTarget(node),
+			}),
 			ttsSpeak: async (input) => {
 				const blob = await apiSpeakText(toTarget(node), input.text, {
 					appId: mediaPermission ? companion.pluginId : undefined,
@@ -1130,19 +1409,36 @@ export function PluginHostPanel({
 					speed: input.speed,
 					language: input.language,
 					requestId: input.request_id,
+					referenceAudioDataUrl: input.reference_audio_data_url,
+					seed: input.seed,
+					instruct: input.instruct,
+					referenceText: input.reference_text,
+					effects: input.effects,
+					normalize: input.normalize,
+					format: input.format,
 				});
-				return await blobToDataUrl(blob);
+				// The shared encoder keeps the served MIME and the bridge byte cap.
+				return await voiceAudioDataUrl(blob);
 			},
-			transcribeAudio: async (input) => {
-				const blob = await dataUrlToBlob(input.audio);
-				const transcribe = input.detailed
-					? apiTranscribeAudioDetailed
-					: apiTranscribeAudio;
-				return await transcribe(
-					toTarget(node),
-					blob,
-					input.filename ?? "recording.wav"
-				);
+			// Same engine as first-party voice input: the user's Voice Recognition
+			// choice (its default when unset), or Core's default only when the
+			// preference cannot be read. Only `data:` URLs are accepted. A
+			// companion-supplied `language` hint is forwarded to Core unchanged.
+			transcribeAudio: (input) => {
+				const target = toTarget(node);
+				return createCompanionTranscribeAudio({
+					readPrefs: () => getVoiceInputPrefs(target),
+					transcribe: (blob, filename, engine) =>
+						apiTranscribeAudio(target, blob, filename, engine, input.language),
+					transcribeDetailed: (blob, filename, engine) =>
+						apiTranscribeAudioDetailed(
+							target,
+							blob,
+							filename,
+							engine,
+							input.language
+						),
+				})(input);
 			},
 			mediaRecording: (input) =>
 				browserRecordingHost.call(companion.pluginId, input),
@@ -1178,6 +1474,11 @@ export function PluginHostPanel({
 			},
 			listEngineModels: () => fetchEngineModels(toTarget(node)),
 			listTtsEngines: () => listTtsEngines(toTarget(node)),
+			installTtsEngine: (input) =>
+				installTtsEngineApi(toTarget(node), input.engine, {
+					appId: companion.pluginId,
+					appPermission: "voice.models.manage",
+				}),
 			// GIF search via Core's proxy (holds the provider key). Inline the preview
 			// + full clip to data URLs so the CSP-locked frame can render/insert them.
 			searchGifs: async ({ query }) => {
@@ -1220,63 +1521,22 @@ export function PluginHostPanel({
 					results,
 				};
 			},
-			// Fine-tune runs — the @ryu/finetune app drives Core's orchestration +
-			// durable job store through the governed bridge (host holds the node token).
-			// Unary calls forward verbatim; live progress streams over finetuneStream.
-			finetuneCapability: () =>
-				pluginHostInvoke(
-					toTarget(node),
-					companion.pluginId,
-					"finetune.capability",
-					{}
-				),
-			finetuneStart: (input) =>
-				pluginHostInvoke(
-					toTarget(node),
-					companion.pluginId,
-					"finetune.start",
-					input
-				),
-			finetuneList: () =>
-				pluginHostInvoke(
-					toTarget(node),
-					companion.pluginId,
-					"finetune.list",
-					{}
-				),
-			finetuneGet: (input) =>
-				pluginHostInvoke(
-					toTarget(node),
-					companion.pluginId,
-					"finetune.get",
-					input
-				),
-			finetuneCancel: (input) =>
-				pluginHostInvoke(
-					toTarget(node),
-					companion.pluginId,
-					"finetune.cancel",
-					input
-				),
-			finetuneAdapters: () =>
-				pluginHostInvoke(
-					toTarget(node),
-					companion.pluginId,
-					"finetune.adapters",
-					{}
-				),
-			finetuneMerge: (input) =>
-				pluginHostInvoke(
-					toTarget(node),
-					companion.pluginId,
-					"finetune.merge",
-					input
-				),
+			// Fine-tune runs — the legacy `finetune.*` host-API verbs. Core no longer
+			// bridges them: each is the same request onto the companion's OWN sidecar
+			// through the generic ext-proxy (the host derives the plugin id), and the
+			// progress stream reads that sidecar's SSE route the same way.
+			...finetuneServicesViaAppRequest((input) =>
+				ownAppRequest(toTarget(node), companion.pluginId, input).then(
+					rpcJsonResponseSchema.parse
+				)
+			),
 			finetuneStream: (input, emit, signal) =>
-				pluginFinetuneStream(toTarget(node), companion.pluginId, input.id, {
-					onFrame: emit,
-					signal,
-				}),
+				ownAppEventStream(
+					toTarget(node),
+					companion.pluginId,
+					finetuneStreamPath(input.id),
+					{ onFrame: emit, signal }
+				),
 			// Website monitors — the @ryu/monitors companion drives Core's
 			// `/api/monitors/*` orchestration. Called DIRECTLY (the media pattern), not
 			// via the PluginHookBridge: `/api/monitors/*` already exists and is gated on
@@ -1310,8 +1570,13 @@ export function PluginHostPanel({
 				listWorkflowVersions(toTarget(node), id),
 			workflowsVersionGet: ({ id, versionId }) =>
 				getWorkflowVersionDefinition(toTarget(node), id, versionId),
-			workflowsVersionCreate: async ({ id, label }) => {
-				await createWorkflowVersion(toTarget(node), id, label);
+			workflowsVersionCreate: async ({ id, label, expectedRevision }) => {
+				await createWorkflowVersion(
+					toTarget(node),
+					id,
+					label,
+					expectedRevision
+				);
 			},
 			workflowsVersionRestore: ({ id, versionId }) =>
 				restoreWorkflowVersion(toTarget(node), id, versionId),
@@ -1331,7 +1596,9 @@ export function PluginHostPanel({
 				const endpoint = registry.endpoints.find(
 					(e) => e.kind === "workflow" && (e.workflowId === id || e.id === id)
 				);
-				return { url: endpoint?.publicUrl ?? "" };
+				return workflowWebhookRecordSchema.parse({
+					url: endpoint?.publicUrl ?? "",
+				});
 			},
 			// run + run-state (workflows:runstate)
 			workflowsRun: ({ id, input, dryRun }) =>
@@ -1340,51 +1607,103 @@ export function PluginHostPanel({
 			workflowsResume: ({ runId, payload }) =>
 				resumeWorkflow(toTarget(node), runId, payload),
 			// node-config catalog pickers (workflows:catalogs) — read-only projections
-			workflowsAgents: () => fetchAgents(toTarget(node)),
-			workflowsApps: () => fetchApps(toTarget(node)),
-			workflowsMcp: async () => ({
-				servers: await fetchMcpServers(toTarget(node)),
-				tools: await fetchMcpTools(toTarget(node)),
-			}),
-			workflowsSkills: () => listSkills(toTarget(node)),
-			workflowsSchedules: () => fetchJobs(toTarget(node)),
-			workflowsNotifyTargets: () => listMentionTargetUsers(toTarget(node)),
+			workflowsAgents: () =>
+				fetchAgents(toTarget(node)).then(workflowAgentsRecordsSchema.parse),
+			workflowsApps: () =>
+				fetchApps(toTarget(node)).then(workflowAppsRecordsSchema.parse),
+			workflowsMcp: async () =>
+				workflowMcpRecordSchema.parse({
+					servers: await fetchMcpServers(toTarget(node)),
+					tools: await fetchMcpTools(toTarget(node)),
+				}),
+			workflowsSkills: () =>
+				listSkills(toTarget(node)).then(workflowSkillsRecordsSchema.parse),
+			workflowsSchedules: () =>
+				fetchJobs(toTarget(node)).then(workflowSchedulesRecordsSchema.parse),
+			workflowsNotifyTargets: () =>
+				listMentionTargetUsers(toTarget(node)).then(
+					workflowNotifyTargetsRecordsSchema.parse
+				),
 			// The app-event catalog behind the `event` trigger's picker. Served from
 			// the same contributions endpoint the shell already reads, narrowed to the
 			// one family the canvas needs.
 			workflowsHookEvents: async () =>
-				(await getPluginContributions(toTarget(node))).hook_events,
-			workflowsConnectBindings: ({id}) => fetchWorkflowConnectBindings(toTarget(node), id),
-			workflowsBindConnectTrigger: ({id,connectTriggerId}) => bindWorkflowConnectTrigger(toTarget(node), id, connectTriggerId),
-			workflowsRemoveConnectBinding: ({id,bindingId}) => removeWorkflowConnectBinding(toTarget(node), id, bindingId),
+				workflowHookEventsRecordsSchema.parse(
+					(await getPluginContributions(toTarget(node))).hook_events
+				),
+			workflowsConnectBindings: ({ id }) =>
+				fetchWorkflowConnectBindings(toTarget(node), id).then(
+					workflowConnectBindingRecordsSchema.parse
+				),
+			workflowsBindConnectTrigger: ({ id, connectTriggerId }) =>
+				bindWorkflowConnectTrigger(toTarget(node), id, connectTriggerId).then(
+					workflowConnectBindingRecordSchema.parse
+				),
+			workflowsRemoveConnectBinding: ({ id, bindingId }) =>
+				removeWorkflowConnectBinding(toTarget(node), id, bindingId),
 			workflowsComposio: ({ kind, toolkit }) => {
 				switch (kind) {
 					case "status":
-						return fetchComposioStatus(toTarget(node));
+						return fetchComposioStatus(toTarget(node)).then(
+							workflowComposioResponseSchema("status").parse
+						);
 					case "toolkits":
-						return fetchComposioToolkits(toTarget(node));
+						return fetchComposioToolkits(toTarget(node)).then(
+							workflowComposioResponseSchema("toolkits").parse
+						);
 					case "triggers":
-						return fetchComposioTriggers(toTarget(node), toolkit ?? "");
+						return fetchComposioTriggers(toTarget(node), toolkit ?? "").then(
+							workflowComposioResponseSchema("triggers").parse
+						);
 					default:
-						return fetchComposioConnections(toTarget(node), toolkit ?? "");
+						return fetchComposioConnections(toTarget(node), toolkit ?? "").then(
+							workflowComposioResponseSchema("connections").parse
+						);
 				}
 			},
-			// ghost record→replay (ghost:record)
-			ghostRecipes: () => listRecipes(toTarget(node)),
+			// ghost record→replay (ghost:record). The legacy `ghost.recipes` list verb
+			// is served from the Recipes app's list route through the generic
+			// ext-proxy forwarder; current Workflows bundles call
+			// `app.request({ app: "@ryu/recipes" })` (grant `app:http:@ryu/recipes`).
+			...ghostRecipesViaAppMount((pluginId, input, signal) =>
+				ownAppRequest(toTarget(node), pluginId, { ...input, signal }).then(
+					rpcJsonResponseSchema.parse
+				)
+			),
 			ghostRecordStart: ({ task }) => startRecording(toTarget(node), task),
 			ghostRecordStatus: () => getRecordingStatus(toTarget(node)),
 			ghostRecordStop: () => stopRecording(toTarget(node)),
 			// Inbound webhook registry + protected secret management — the
 			// @ryu/webhooks companion uses explicit secret reads/writes while the host
 			// keeps the node token out of the sandboxed frame (webhooks:crud).
-			webhooksList: () => fetchWebhooks(toTarget(node)),
-			webhooksIngressStatus: () => fetchWebhookIngressStatus(toTarget(node)),
+			// All four go through Core's app host bridge. The registry reads are the
+			// `webhooks.list` / `webhooks.ingressStatus` kernel operations, so Core
+			// checks the app's approved grant. The secret verbs are bridge-only
+			// user-aware methods: Core checks the app's approved grant AND the
+			// signed-in user's own workflow-edit / Gateway-configure permission. Only
+			// an older Core that lacks the methods gets the host-direct fallback.
+			webhooksList: () =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"webhooks.list",
+					{}
+				).then((value) =>
+					toWebhookRegistry(webhookRegistryWireSchema.parse(value))
+				),
+			webhooksIngressStatus: () =>
+				pluginHostInvoke(
+					toTarget(node),
+					companion.pluginId,
+					"webhooks.ingressStatus",
+					{}
+				).then((value) =>
+					toWebhookIngressStatus(webhookIngressStatusWireSchema.parse(value))
+				),
 			webhooksSecretGet: ({ id }) =>
-				fetchWebhookSecret(toTarget(node), id).then((secret) => ({ secret })),
+				readWebhookSecret(toTarget(node), companion.pluginId, id),
 			webhooksSecretSet: ({ id, secret }) =>
-				setWebhookSecret(toTarget(node), id, secret).then((value) => ({
-					secret: value,
-				})),
+				writeWebhookSecret(toTarget(node), companion.pluginId, id, secret),
 			// Quests — the @ryu/quests companion drives Core's `/api/quests/*`
 			// auto-detecting-todo orchestration. Host-direct (the monitors pattern): the
 			// host holds the node token and calls the existing `/api/quests/*` client,
@@ -1392,59 +1711,45 @@ export function PluginHostPanel({
 			questsList: (input) =>
 				listQuests(
 					toTarget(node),
-					input?.kind as Parameters<typeof listQuests>[1]
-				) as unknown as Promise<QuestRecord[]>,
+					questKindInputSchema.optional().parse(input?.kind)
+				).then(z.array(questRecordSchema).parse),
 			questsCapture: (input) =>
-				captureQuest(
-					toTarget(node),
-					input as unknown as Parameters<typeof captureQuest>[1]
-				) as unknown as Promise<QuestRecord>,
+				captureQuest(toTarget(node), questCaptureInputSchema.parse(input)).then(
+					questRecordSchema.parse
+				),
 			questsUse: ({ id, complete }) =>
-				useQuest(
-					toTarget(node),
-					id,
-					complete
-				) as unknown as Promise<QuestRecord>,
+				useQuest(toTarget(node), id, complete).then(questRecordSchema.parse),
 			questsPin: ({ id, pinned }) =>
-				pinQuest(
-					toTarget(node),
-					id,
-					pinned ?? true
-				) as unknown as Promise<QuestRecord>,
+				pinQuest(toTarget(node), id, pinned ?? true).then(
+					questRecordSchema.parse
+				),
 			questsScratchpad: () => getScratchpad(toTarget(node)),
 			questsSetScratchpad: ({ text }) => setScratchpad(toTarget(node), text),
 			questsCreate: (input) =>
-				createQuest(
-					toTarget(node),
-					input as unknown as QuestInput
-				) as unknown as Promise<QuestRecord>,
+				createQuest(toTarget(node), questWriteInputSchema.parse(input)).then(
+					questRecordSchema.parse
+				),
 			questsUpdate: ({ id, input }) =>
 				updateQuest(
 					toTarget(node),
 					id,
-					input as unknown as QuestInput
-				) as unknown as Promise<QuestRecord>,
+					questWriteInputSchema.parse(input)
+				).then(questRecordSchema.parse),
 			questsDelete: async ({ id }) => {
 				await deleteQuest(toTarget(node), id);
 			},
 			questsComplete: ({ id }) =>
-				completeQuest(toTarget(node), id) as unknown as Promise<QuestRecord>,
+				completeQuest(toTarget(node), id).then(questRecordSchema.parse),
 			questsDismiss: ({ id }) =>
-				dismissQuest(toTarget(node), id) as unknown as Promise<QuestRecord>,
+				dismissQuest(toTarget(node), id).then(questRecordSchema.parse),
 			questsAcceptSuggestion: ({ id }) =>
-				acceptQuestSuggestion(
-					toTarget(node),
-					id
-				) as unknown as Promise<QuestRecord>,
+				acceptQuestSuggestion(toTarget(node), id).then(questRecordSchema.parse),
 			questsDismissSuggestion: ({ id }) =>
-				dismissQuestSuggestion(
-					toTarget(node),
-					id
-				) as unknown as Promise<QuestRecord>,
+				dismissQuestSuggestion(toTarget(node), id).then(
+					questRecordSchema.parse
+				),
 			questsJudge: ({ id }) =>
-				judgeQuest(toTarget(node), id) as unknown as Promise<
-					Record<string, unknown>
-				>,
+				judgeQuest(toTarget(node), id).then(questJudgeResultSchema.parse),
 			// Shell navigation: open Settings at the Quests (detection) tab. Not a Core
 			// call — the companion's gear reaches the shell SettingsDialog through here.
 			questsOpenDetectionSettings: () => openGateway("app:@ryu/quests"),
@@ -1453,9 +1758,9 @@ export function PluginHostPanel({
 			// token and calls the existing `/api/activity` read, forwarding Core's
 			// snake_case items verbatim over the bridge (activity:read).
 			activityList: ({ limit }) =>
-				listActivity(toTarget(node), { limit }) as unknown as Promise<
-					ActivityRecord[]
-				>,
+				listActivity(toTarget(node), { limit }).then(
+					z.array(activityRecordSchema).parse
+				),
 			activityAudit: async ({
 				agent_id,
 				event_type,
@@ -1467,39 +1772,48 @@ export function PluginHostPanel({
 				until,
 				widget_instance_id,
 			}) =>
-				(await fetchGatewayAudit(toTarget(node), {
-					agentId: agent_id,
-					eventType: event_type,
-					errorsOnly: errors_only,
-					from,
-					limit,
-					model,
-					provider,
-					until,
-					widgetInstanceId: widget_instance_id,
-				})) as unknown as Record<string, unknown>,
+				activityAuditResponseSchema.parse(
+					await fetchGatewayAudit(toTarget(node), {
+						agentId: agent_id,
+						eventType: event_type,
+						errorsOnly: errors_only,
+						from,
+						limit,
+						model,
+						provider,
+						until,
+						widgetInstanceId: widget_instance_id,
+					})
+				),
 			activityPrune: async () =>
-				(await pruneGatewayAudit(toTarget(node))) as Record<string, unknown>,
+				activityPruneResponseSchema.parse(
+					await pruneGatewayAudit(toTarget(node))
+				),
 			activityScore: async (input: ActivityScoreInput) =>
-				(await scoreGatewayOutput(
-					toTarget(node),
-					input as Parameters<typeof scoreGatewayOutput>[1]
-				)) as unknown as Record<string, unknown>,
+				activityScoreResponseSchema.parse(
+					await scoreGatewayOutput(
+						toTarget(node),
+						activityScoreInputSchema.parse(input)
+					)
+				),
 			activityTrace: async ({ run_id }) =>
-				({ spans: await fetchRunTrace(toTarget(node), run_id) }) as Record<
-					string,
-					unknown
-				>,
+				activityTraceResponseSchema.parse({
+					spans: await fetchRunTrace(toTarget(node), run_id),
+				}),
 			activityRedteam: async ({ agent_id, model }) =>
-				(await runGatewayRedTeam(toTarget(node), {
-					agent_id,
-					model,
-				})) as unknown as Record<string, unknown>,
+				activityRedteamResponseSchema.parse(
+					await runGatewayRedTeam(toTarget(node), {
+						agent_id,
+						model,
+					})
+				),
 			activityEval: async ({ agent_id, model }) =>
-				(await runGatewayEvals(toTarget(node), {
-					agent_id,
-					model,
-				})) as unknown as Record<string, unknown>,
+				activityEvalResponseSchema.parse(
+					await runGatewayEvals(toTarget(node), {
+						agent_id,
+						model,
+					})
+				),
 			activityImportTrace: async ({ agent_id, run_id, suite_id }) => {
 				const target = toTarget(node);
 				const suite = suite_id
@@ -1523,11 +1837,9 @@ export function PluginHostPanel({
 									name: "Agent regression suite",
 								})
 							).suite;
-				return (await importPromptTrace(
-					target,
-					resolvedSuite.id,
-					run_id
-				)) as unknown as Record<string, unknown>;
+				return activityTraceImportRecordSchema.parse(
+					await importPromptTrace(target, resolvedSuite.id, run_id)
+				);
 			},
 			// Shell navigation: open the chat tab for an item's session. Not a Core call —
 			// the extracted page opened it via `useTabsContext().openTab` (same call here).
@@ -1541,14 +1853,19 @@ export function PluginHostPanel({
 			// blob:). `openReview`/`openSettings` are shell-navigation verbs mirroring the
 			// desktop page's `navigate("/review")`/`navigate("/settings")`.
 			timelineList: async ({ rangeMinutes }) =>
-				sanitizeTimelineEvents(await getTimeline(rangeMinutes)) as unknown as
-					| Record<string, unknown>[]
-					| null,
+				z
+					.array(timelineEventRecordSchema)
+					.nullable()
+					.parse(sanitizeTimelineEvents(await getTimeline(rangeMinutes))),
 			timelineTranscripts: getSpeechHistory,
 			timelineJournal: async ({ rangeMinutes, narrate }) =>
-				enrichTimelineJournal(
-					await getJournal(rangeMinutes, { narrate })
-				) as unknown as Record<string, unknown> | null,
+				timelineJournalRecordSchema
+					.nullable()
+					.parse(
+						await enrichTimelineJournal(
+							await getJournal(rangeMinutes, { narrate })
+						)
+					),
 			timelineFrame: ({ tsMicros }) => fetchFrameDataUrl(tsMicros),
 			timelineOpenReview: () => openTab("/review", { title: "Weekly review" }),
 			timelineOpenSettings: () => openTab("/settings"),
@@ -1559,11 +1876,11 @@ export function PluginHostPanel({
 			// `ryu-mail` sidecar), forwarding Core's shapes verbatim over the bridge
 			// (mail:crud). The extracted `AgentInboxesPage` used these same clients.
 			mailList: () =>
-				listInboxes(toTarget(node)) as unknown as Promise<MailInbox[]>,
+				listInboxes(toTarget(node)).then(z.array(mailInboxSchema).parse),
 			mailMessages: ({ inboxId }) =>
-				listMessages(toTarget(node), inboxId) as unknown as Promise<
-					MailMessage[]
-				>,
+				listMessages(toTarget(node), inboxId).then(
+					z.array(mailMessageSchema).parse
+				),
 			mailCreate: (input) =>
 				createInbox(toTarget(node), {
 					name: input.name,
@@ -1571,50 +1888,15 @@ export function PluginHostPanel({
 					client_id: input.clientId,
 					metadata: input.metadata,
 					pod_id: input.podId,
-					provider: input.provider as "webhook" | "imap" | undefined,
-				}) as unknown as Promise<MailInbox>,
+					provider: mailProviderInputSchema.parse(input.provider),
+				}).then(mailInboxSchema.parse),
 			mailDelete: async ({ id }) => {
 				await deleteInbox(toTarget(node), id);
 			},
 			mailRotateSecret: ({ id }) => rotateInboundSecret(toTarget(node), id),
-			mailSend: ({
-				attachments,
-				bcc,
-				cc,
-				clientId,
-				headers,
-				html,
-				inboxId,
-				inReplyTo,
-				labels,
-				references,
-				replyTo,
-				subject,
-				text,
-				trackOpens,
-				to,
-			}) =>
-				sendMessage(toTarget(node), inboxId, {
-					attachments: attachments as Parameters<
-						typeof sendMessage
-					>[2]["attachments"],
-					bcc,
-					cc,
-					clientId,
-					headers,
-					html,
-					inReplyTo,
-					labels,
-					references: Array.isArray(references)
-						? references.join(" ")
-						: references,
-					replyTo,
-					subject,
-					text,
-					trackOpens,
-					to,
-				}) as unknown as Promise<MailMessage>,
-			mailRequest: (input) => mailRequest(toTarget(node), input),
+			mailSend: (input) => sendCompanionMail(toTarget(node), input),
+			mailRequest: (input) =>
+				mailRequest(toTarget(node), input).then(rpcJsonResponseSchema.parse),
 			// The inbound forwarder URL is derived from the node URL (the desktop page
 			// built it client-side); the host owns node.url, the sandboxed frame does
 			// not (the workflowsWebhook precedent).
@@ -1630,35 +1912,35 @@ export function PluginHostPanel({
 			// the SAME `createScheduledAgentWorkflow` routine composite the desktop dialog ran, so
 			// Core's validation error (bad cron/interval) propagates as the thrown message.
 			calendarJobs: () =>
-				fetchJobs(toTarget(node)) as unknown as Promise<CalendarJobRecord[]>,
+				fetchJobs(toTarget(node)).then(z.array(calendarJobRecordSchema).parse),
 			calendarWorkflows: () =>
-				fetchWorkflows(toTarget(node)) as unknown as Promise<
-					CalendarWorkflowRecord[]
-				>,
+				fetchWorkflows(toTarget(node)).then(
+					z.array(calendarWorkflowRecordSchema).parse
+				),
 			calendarAgents: () =>
-				fetchAgents(toTarget(node)) as unknown as Promise<
-					CalendarAgentRecord[]
-				>,
+				fetchAgents(toTarget(node)).then(
+					z.array(calendarAgentRecordSchema).parse
+				),
 			calendarCreateAutomation: (args) =>
 				createScheduledAgentWorkflow(toTarget(node), args),
 			// Warmup — the @ryu/warmup companion keeps subscription usage windows
-			// open by scheduling a keep-alive ping per agent. Host-direct (the monitors
-			// pattern): the host holds the node token and drives `/api/agents` (+ its
-			// `/usage` and `/acp-config` reads) and `/heartbeat/jobs`, forwarding Core's
-			// shapes verbatim over the bridge (warmup:crud). Both mutating verbs are
-			// scoped to jobs stamped `ownerApp: @ryu/warmup`, so the grant can never
-			// reach an automation another app or Core owns.
+			// open by scheduling a keep-alive ping per agent. Each verb goes through
+			// Core's app host bridge to the `warmup.*` kernel operation of the same
+			// name, so Core checks the app's approved grant (warmup:crud) and the
+			// signed-in user's agent permissions, and scopes every job to the calling
+			// app: the grant can never reach an automation another app or Core owns.
 			warmupDetect: () =>
-				detectWarmupAgents(toTarget(node)) as unknown as Promise<{
-					agents: WarmupDetectionRecord["agents"];
-					tz: WarmupDetectionRecord["tz"];
-				}>,
+				detectWarmupAgents(toTarget(node), companion.pluginId).then(
+					warmupDetectionSchema.parse
+				),
 			warmupList: () =>
-				listWarmupJobs(toTarget(node)) as unknown as Promise<
-					CalendarJobRecord[]
-				>,
-			warmupApply: (jobs) => applyWarmupJobs(toTarget(node), jobs),
-			warmupRunNow: ({ jobId }) => runWarmupJobNow(toTarget(node), jobId),
+				listWarmupJobs(toTarget(node), companion.pluginId).then(
+					z.array(calendarJobRecordSchema).parse
+				),
+			warmupApply: (jobs) =>
+				applyWarmupJobs(toTarget(node), companion.pluginId, jobs),
+			warmupRunNow: (ping) =>
+				runWarmupJobNow(toTarget(node), companion.pluginId, ping),
 			// Learning — the @ryu/learning companion renders the read-only
 			// continual-learning surface. Host-direct (the monitors pattern): the host
 			// holds the node token and calls the existing `/api/learn/config` (config),
@@ -1667,17 +1949,13 @@ export function PluginHostPanel({
 			// All READ-ONLY — the skill approvals + heal inbox stay in the Inbox, the
 			// opt-ins in Privacy settings.
 			learningConfig: () =>
-				getLearningConfig(toTarget(node)) as unknown as Promise<
-					Record<string, unknown>
-				>,
+				getLearningConfig(toTarget(node)).then(learningConfigSchema.parse),
 			learningExperience: () =>
-				listExperience(toTarget(node)) as unknown as Promise<
-					Record<string, unknown>
-				>,
+				listExperience(toTarget(node)).then(learningExperienceListSchema.parse),
 			learningHealing: () =>
-				getHealingStatus(toTarget(node)) as unknown as Promise<
-					Record<string, unknown>
-				>,
+				getHealingStatus(toTarget(node)).then(
+					learningHealingStatusSchema.parse
+				),
 			// Inbox / Approvals — the @ryu/approvals companion renders the unified
 			// inbox. Host-direct (the monitors pattern): the host holds the node token
 			// and calls the existing `/api/approvals/*` (approve/reject),
@@ -1687,30 +1965,35 @@ export function PluginHostPanel({
 			// task check-off reuses the `quests*` services above (the app also holds
 			// quests:crud). `suggestionsOpenInChat` is a shell-navigation verb.
 			approvalsList: () =>
-				listApprovals(toTarget(node)) as unknown as Promise<ApprovalRecord[]>,
+				listApprovals(toTarget(node)).then(z.array(approvalRecordSchema).parse),
 			approvalsApprove: ({ id, note }) =>
-				approveApproval(
-					toTarget(node),
-					id,
-					note
-				) as unknown as Promise<ApprovalRecord>,
+				approveApproval(toTarget(node), id, note).then(
+					approvalRecordSchema.parse
+				),
 			approvalsReject: ({ id, note }) =>
-				rejectApproval(
-					toTarget(node),
-					id,
-					note
-				) as unknown as Promise<ApprovalRecord>,
-			notificationsList: ({ archived }: { archived?: boolean } = {}) =>
-				(meId
-					? listNotifications(toTarget(node), meId, undefined, archived)
-					: Promise.resolve([])) as unknown as Promise<NotificationRecord[]>,
+				rejectApproval(toTarget(node), id, note).then(
+					approvalRecordSchema.parse
+				),
+			notificationsList: async ({ archived }: { archived?: boolean } = {}) => {
+				const notifications = meId
+					? await listNotifications(toTarget(node), meId, undefined, archived)
+					: [];
+				return z
+					.array(notificationRecordSchema)
+					.parse(
+						redactConnectSuggestionNotifications(
+							notifications,
+							getUserAvailabilitySnapshot().streamingPrivacyActive
+						)
+					);
+			},
 			notificationsSend: (input) =>
 				pluginHostInvoke(
 					toTarget(node),
 					companion.pluginId,
 					"notifications.send",
 					input
-				) as Promise<{ notification_id: string; target_user_id: string }>,
+				).then(notificationSendResponseSchema.parse),
 			notificationsMarkRead: ({ id }) =>
 				markNotificationRead(toTarget(node), id),
 			notificationsAck: ({ id }) => ackNotification(toTarget(node), id),
@@ -1727,7 +2010,9 @@ export function PluginHostPanel({
 				return Object.fromEntries(tiles);
 			},
 			suggestionsList: () =>
-				getProactiveInbox() as unknown as Promise<ProactiveSuggestionRecord[]>,
+				getProactiveInbox().then(
+					z.array(proactiveSuggestionRecordSchema).parse
+				),
 			suggestionsFeedback: ({ kind, suggestion_type }) =>
 				postFeedback({ kind, suggestion_type }),
 			suggestionsOpenInChat: ({ prompt }) =>
@@ -1746,31 +2031,24 @@ export function PluginHostPanel({
 			// `null` on cancel. `open`/`openNotes`/`openList` are shell-navigation verbs
 			// mirroring the extracted page's `useTabsContext().openTab`.
 			meetingsList: () =>
-				listMeetings(toTarget(node)) as unknown as Promise<MeetingRecord[]>,
+				listMeetings(toTarget(node)).then(z.array(meetingRecordSchema).parse),
 			meetingsTranscript: ({ id }) =>
-				getTranscript(toTarget(node), id) as unknown as Promise<
-					Record<string, unknown>
-				>,
+				getTranscript(toTarget(node), id).then(meetingTranscriptSchema.parse),
 			meetingsStart: (input) =>
 				startMeeting(toTarget(node), {
-					source: input.source as "manual" | "auto" | undefined,
+					source: meetingSourceInputSchema.parse(input.source),
 					app: input.app,
 					title: input.title,
-				}) as unknown as Promise<MeetingRecord>,
+				}).then(meetingRecordSchema.parse),
 			meetingsFinalize: ({ id }) =>
-				finalizeMeeting(
-					toTarget(node),
-					id
-				) as unknown as Promise<MeetingRecord>,
+				finalizeMeeting(toTarget(node), id).then(meetingRecordSchema.parse),
 			meetingsDelete: async ({ id }) => {
 				await deleteMeeting(toTarget(node), id);
 			},
 			meetingsRename: ({ id, title }) =>
-				renameMeeting(
-					toTarget(node),
-					id,
-					title
-				) as unknown as Promise<MeetingRecord>,
+				renameMeeting(toTarget(node), id, title).then(
+					meetingRecordSchema.parse
+				),
 			meetingsSetIcon: async ({ id, icon }) => {
 				const updated = await setMeetingIcon(toTarget(node), id, icon);
 				const glyph = asGlyphValue(icon) ?? null;
@@ -1780,16 +2058,18 @@ export function PluginHostPanel({
 						t.path.startsWith(`/meetings/${id}?`),
 					glyph
 				);
-				return updated as unknown as MeetingRecord;
+				return meetingRecordSchema.parse(updated);
 			},
 			meetingsImport: async () => {
 				const file = await pickAudioFile();
 				if (!file) {
 					return null;
 				}
-				return importMeeting(toTarget(node), file, {
-					title: file.name,
-				}) as unknown as MeetingRecord;
+				return meetingRecordSchema.parse(
+					await importMeeting(toTarget(node), file, {
+						title: file.name,
+					})
+				);
 			},
 			meetingsOpen: ({ id, title }) =>
 				openTab(`/meetings/${id}`, { title: title ?? "Meeting" }),
@@ -1817,7 +2097,8 @@ export function PluginHostPanel({
 			// `open`/`openList` are shell-navigation verbs. `/social` resolves through the
 			// generic companion-alias route, and `/social/:id` through the pattern that
 			// bakes the post id into the frame as `window.ryu.context.postId`.
-			socialRequest: (input) => socialRequest(toTarget(node), input),
+			socialRequest: (input) =>
+				socialRequest(toTarget(node), input).then(rpcJsonResponseSchema.parse),
 
 			// Subtitles — the @ryu/subtitles companion picks a video, queues a local
 			// transcription + translation job, and reads the cue list back. Same ONE-verb
@@ -1834,7 +2115,10 @@ export function PluginHostPanel({
 			//
 			// No navigation verb: the companion is the whole surface, and `/subtitles` +
 			// `/subtitles/:id` resolve through the generic companion-alias routes.
-			subtitlesRequest: (input) => subtitlesRequest(toTarget(node), input),
+			subtitlesRequest: (input) =>
+				subtitlesRequest(toTarget(node), input).then(
+					rpcJsonResponseSchema.parse
+				),
 			// Automated Reasoning — the @ryu/reasoning companion authors formal policies
 			// and runs the solver playground. Same one-forwarder shape as Outpost, and
 			// the same security note applies: `reasoningRequest` in `lib/api/reasoning.ts`
@@ -1843,8 +2127,21 @@ export function PluginHostPanel({
 			// `..` blocklist), and `rpc.ts`'s `asReasoningRequestArg` applies the identical
 			// rules one layer earlier. There is no `open` verb because the companion is the
 			// whole surface — it never navigates the shell.
-			reasoningRequest: (input) => reasoningRequest(toTarget(node), input),
-			safeActionsRequest: (input) => safeActionsRequest(toTarget(node), input),
+			reasoningRequest: (input) =>
+				reasoningRequest(toTarget(node), input).then(
+					rpcJsonResponseSchema.parse
+				),
+			// Safe Actions — the @ryu/safe-actions companion reviews tool plans. The
+			// call goes through Core's app host bridge (`safeActions.request`): Core
+			// checks the app's approved grant (safe-actions:manage) AND the signed-in
+			// user's Safe Actions role, and records that user as the reviewer of an
+			// approval or denial. `safeActionsRequest` keeps the mount check as a
+			// first layer and falls back host-direct only on an older Core that
+			// lacks the method.
+			safeActionsRequest: (input) =>
+				safeActionsRequest(toTarget(node), companion.pluginId, input).then(
+					rpcJsonResponseSchema.parse
+				),
 			// Deep Read — the @ryu/rlm companion loads a corpus, browses its outline,
 			// asks questions of it and reads run traces. Same one-forwarder shape as
 			// Reasoning, and the same security note applies: `rlmRequest` in
@@ -1853,14 +2150,17 @@ export function PluginHostPanel({
 			// literal `..` blocklist), and `rpc.ts`'s `asRlmRequestArg` applies the
 			// identical rules one layer earlier. No `open` verb: the companion is the whole
 			// surface.
-			rlmRequest: (input) => rlmRequest(toTarget(node), input),
+			rlmRequest: (input) =>
+				rlmRequest(toTarget(node), input).then(rpcJsonResponseSchema.parse),
 			// Tuition and Wire: the same one-forwarder shape, and the same security note
 			// — each `*Request` re-validates the frame-chosen sub-path against its own
 			// mount before building a URL, independently of the check `@ryu/app-host/rpc`
 			// already ran. Two layers on purpose: either alone would be the only thing
 			// between a sandboxed frame and the node's credentials.
-			tuitionRequest: (input) => tuitionRequest(toTarget(node), input),
-			newsRequest: (input) => newsRequest(toTarget(node), input),
+			tuitionRequest: (input) =>
+				tuitionRequest(toTarget(node), input).then(rpcJsonResponseSchema.parse),
+			newsRequest: (input) =>
+				newsRequest(toTarget(node), input).then(rpcJsonResponseSchema.parse),
 			// Blueprint — the @ryu/blueprint companion renders a plan an agent published
 			// and records the reviewer's annotations and verdict. Same one-forwarder shape
 			// again, and the same security note, with one twist worth spelling out: the
@@ -1871,11 +2171,24 @@ export function PluginHostPanel({
 			// a literal `..` blocklist) and `rpc.ts`'s `asBlueprintRequestArg` one layer
 			// earlier are both load-bearing. No `open` verb: the review surface is the
 			// companion, so it never navigates the shell.
-			blueprintRequest: (input) => blueprintRequest(toTarget(node), input),
-			// Generic companion → OWN sidecar forwarder. The plugin id is host-owned;
-			// the frame can choose only the relative path/method/body.
-			appRequest: (input, signal) =>
-				ownAppRequest(toTarget(node), companion.pluginId, { ...input, signal }),
+			blueprintRequest: (input) =>
+				blueprintRequest(toTarget(node), input).then(
+					rpcJsonResponseSchema.parse
+				),
+			// Generic companion → sidecar forwarder. Own sidecar by default (grant
+			// `app:http`); another app's only with the reviewed per-target grant
+			// `app:http:<app>`, checked against the APPROVED grants. Plugin ids are
+			// host-owned; the frame chooses only the relative path/method/body, which
+			// stays confined to the target's `/api/ext/<id>` mount.
+			appRequest: appRequestService({
+				approvedGrants: approvedGrantList,
+				callerId: companion.pluginId,
+				forward: (pluginId, input, signal) =>
+					ownAppRequest(toTarget(node), pluginId, {
+						...input,
+						signal,
+					}).then(rpcJsonResponseSchema.parse),
+			}),
 			// Generic application-room realtime. The node target, node bearer and
 			// user JWT remain in this trusted host; only the opaque join result crosses
 			// the RPC boundary into the null-origin companion.
@@ -1884,7 +2197,10 @@ export function PluginHostPanel({
 				if (!signal || signal.aborted) {
 					throw new Error("companion document is closed");
 				}
-				const jwt = await waitForApplicationRealtime(getRealtimeJwt(), signal);
+				const jwt = await waitForApplicationRealtime(
+					realtimeJwtForTarget(toTarget(node)),
+					signal
+				);
 				if (signal.aborted) {
 					throw new Error("companion document is closed");
 				}
@@ -2013,6 +2329,24 @@ export function PluginHostPanel({
 					title: title ?? "Outpost",
 				}),
 			socialOpenList: () => openTab("/social", { title: "Outpost" }),
+			// App installation — a builder app (the @ryu/app-studio companion) installs
+			// the companion-only app it made. The bundle is checked against THIS
+			// companion's own id (`com.local.<segment>.*`, companion runnable only,
+			// reviewed grants) before Core's generic install-bundle sink sees it; Core
+			// leaves a new install disabled until the user enables it (plugins:install).
+			appsInstallBundle: async (value) => {
+				const check = checkAppBundle(companion.pluginId, value);
+				if (!check.ok) {
+					throw new Error(check.error);
+				}
+				await installCompanionAppBundle(toTarget(node), check.bundle);
+				return {
+					id: check.bundle.id,
+					installed: true,
+					updated: check.bundle.update === true,
+					version: check.bundle.version,
+				};
+			},
 			// Skill authoring — the @ryu/skill-editor companion authors a user-owned
 			// Agent Skill (SKILL.md). Host-direct (the monitors pattern): the host holds the
 			// node token and calls the existing `skills.ts` authoring client (createSkill/
@@ -2022,9 +2356,7 @@ export function PluginHostPanel({
 			// shell-navigation verb: it renames the companion's own tab (the desktop page's
 			// `updateTabTitle(currentTabId, …)`).
 			skillsGetSource: ({ id }) =>
-				getSkillSource(toTarget(node), id) as unknown as Promise<
-					Record<string, unknown>
-				>,
+				getSkillSource(toTarget(node), id).then(skillSourceRecordSchema.parse),
 			skillsCreate: (input) =>
 				createSkill(toTarget(node), {
 					name: input.name,
@@ -2032,7 +2364,7 @@ export function PluginHostPanel({
 					description: input.description ?? null,
 					allowedTools: input.allowedTools ?? [],
 					alwaysOn: input.alwaysOn ?? false,
-				}) as unknown as Promise<Record<string, unknown>>,
+				}).then(skillWriteRecordSchema.parse),
 			skillsUpdate: ({ id, name, body, description, allowedTools, alwaysOn }) =>
 				updateSkill(toTarget(node), id, {
 					name,
@@ -2040,11 +2372,11 @@ export function PluginHostPanel({
 					description: description ?? null,
 					allowedTools: allowedTools ?? [],
 					alwaysOn: alwaysOn ?? false,
-				}) as unknown as Promise<Record<string, unknown>>,
+				}).then(skillWriteRecordSchema.parse),
 			skillsListVersions: ({ id }) =>
-				listSkillVersions(toTarget(node), id) as unknown as Promise<
-					Record<string, unknown>[]
-				>,
+				listSkillVersions(toTarget(node), id).then(
+					skillVersionRecordsSchema.parse
+				),
 			skillsVersionSource: ({ id, versionId }) =>
 				getSkillVersionSource(toTarget(node), id, versionId),
 			skillsSnapshot: async ({ id, label }) => {
@@ -2145,17 +2477,9 @@ export function PluginHostPanel({
 				}),
 			shellRegisterCommand: (input, emit, signal) =>
 				new Promise<void>((resolve) => {
-					const raw = Array.isArray((input as { commands?: unknown }).commands)
-						? ((input as { commands: unknown[] }).commands as Record<
-								string,
-								unknown
-							>[])
-						: [];
+					const raw = parseCompanionCommands(input);
 					const disposers: (() => void)[] = [];
 					for (const c of raw) {
-						if (!c || typeof c.id !== "string" || typeof c.title !== "string") {
-							continue;
-						}
 						const commandId = c.id;
 						const entry: CommandEntry = {
 							// Namespace the palette id so a companion can neither collide with
@@ -2163,10 +2487,10 @@ export function PluginHostPanel({
 							id: `plugin:${companion.pluginId}:${commandId}`,
 							title: c.title,
 							group:
-								typeof c.group === "string"
-									? c.group
-									: companion.label || companion.name,
-							keywords: typeof c.keywords === "string" ? c.keywords : undefined,
+								c.group === undefined
+									? companion.label || companion.name
+									: c.group,
+							keywords: c.keywords === undefined ? undefined : c.keywords,
 							// Invocation is pushed back to the frame (which owns the handler);
 							// emit the ORIGINAL id the frame registered.
 							run: () => {
@@ -2193,34 +2517,19 @@ export function PluginHostPanel({
 				}),
 			shellRegisterTabIcon: (input, _emit, signal) =>
 				new Promise<void>((resolve) => {
-					const raw = Array.isArray((input as { icons?: unknown }).icons)
-						? ((input as { icons: unknown[] }).icons as Record<
-								string,
-								unknown
-							>[])
-						: [];
+					const raw = parseCompanionTabIcons(input);
 					const disposers: (() => void)[] = [];
-					for (const [i, entry] of raw.entries()) {
-						if (
-							!entry ||
-							typeof entry.pathPrefix !== "string" ||
-							entry.pathPrefix.length === 0 ||
-							typeof entry.icon !== "string" ||
-							entry.icon.length === 0
-						) {
-							continue;
-						}
+					for (const entry of raw) {
 						disposers.push(
 							registerTabIcon({
-								id: `plugin:${companion.pluginId}:tab-icon:${i}:${entry.pathPrefix}`,
+								id: `plugin:${companion.pluginId}:tab-icon:${entry.index}:${entry.pathPrefix}`,
 								pathPrefix: entry.pathPrefix,
 								pathIncludes:
-									typeof entry.pathIncludes === "string"
-										? entry.pathIncludes
-										: undefined,
+									entry.pathIncludes === undefined
+										? undefined
+										: entry.pathIncludes,
 								icon: entry.icon,
-								priority:
-									typeof entry.priority === "number" ? entry.priority : 30,
+								priority: entry.priority === undefined ? 30 : entry.priority,
 							})
 						);
 					}
@@ -2238,11 +2547,7 @@ export function PluginHostPanel({
 				}),
 			shellEventsSubscribe: (input, emit, signal) =>
 				new Promise<void>((resolve) => {
-					const requested = Array.isArray(
-						(input as { channels?: unknown }).channels
-					)
-						? ((input as { channels: unknown[] }).channels as unknown[])
-						: [];
+					const requested = parseCompanionEventChannels(input);
 					const allowed = SHELL_EVENT_CHANNELS.filter((ch) =>
 						requested.includes(ch)
 					);
@@ -2274,6 +2579,7 @@ export function PluginHostPanel({
 			companion.id,
 			companion.name,
 			companion.pluginId,
+			approvedGrantList,
 			assistantOwner,
 			openGateway,
 			openTab,
@@ -2284,9 +2590,16 @@ export function PluginHostPanel({
 			getActiveNode,
 			i18n,
 			toastHost,
+			onRequestClose,
+			fileAccess,
 		]
 	);
 
+	const isHtmlBundle = Boolean(code && /^\s*<(?:!doctype|html)\b/i.test(code));
+	const allowForms = shouldEnableCompanionFormEvents(
+		companion.firstParty === true,
+		isHtmlBundle
+	);
 	const srcdoc = useMemo(() => {
 		if (!code) {
 			return null;
@@ -2297,7 +2610,7 @@ export function PluginHostPanel({
 		// Content-sniff the fetched bundle so the panel needs no extra plumbing: a
 		// `ui_format:"html"` companion's ui_code always starts with a doctype/<html>,
 		// while a Path A ESM module never does.
-		if (/^\s*<(?:!doctype|html)\b/i.test(code)) {
+		if (isHtmlBundle) {
 			return htmlCompanionSrcdoc(
 				nonce,
 				code,
@@ -2305,7 +2618,8 @@ export function PluginHostPanel({
 				mountContext,
 				companion.csp,
 				initialThemeTokens,
-				true
+				true,
+				{ enforceDefaultCsp: companion.defaultCspEnforced, closeOnEscape }
 			);
 		}
 		return thirdPartyPluginSrcdoc(
@@ -2314,13 +2628,17 @@ export function PluginHostPanel({
 			companion.id,
 			mountContext,
 			initialThemeTokens,
-			true
+			true,
+			{ enforceDefaultCsp: companion.defaultCspEnforced, closeOnEscape }
 		);
 	}, [
 		code,
+		isHtmlBundle,
 		nonce,
 		companion.id,
 		companion.csp,
+		companion.defaultCspEnforced,
+		closeOnEscape,
 		mountContext,
 		initialThemeTokens,
 	]);
@@ -2375,12 +2693,16 @@ export function PluginHostPanel({
 		>
 			<div className="min-h-0 flex-1">
 				<ExtensionHost
+					allowDownloads={companion.approvedGrants.includes(APP_DOWNLOAD_GRANT)}
+					allowForms={allowForms}
 					granted={granted}
 					nonce={nonce}
 					onConnected={() => setConnectedNonce(nonce)}
 					onMessage={onMessage}
+					pushRef={filePushRef}
 					services={services}
 					srcdoc={srcdoc}
+					streamingPrivacyActive={streamingPrivacyActive}
 					themeTokens={themeTokens}
 					title={`Plugin: ${companion.name}`}
 				/>

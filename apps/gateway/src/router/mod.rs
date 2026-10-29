@@ -35,7 +35,7 @@ impl ModelRouter {
     pub fn new(config: RoutingConfig) -> Self {
         // Lower the config value-types to the crate's string-keyed views once.
         // The built-in prefix table is owned by the crate (zero-config brain).
-        let model_map = config
+        let mut model_map: std::collections::HashMap<String, (String, Option<String>)> = config
             .model_map
             .iter()
             .map(|(k, m)| {
@@ -45,6 +45,14 @@ impl ModelRouter {
                 )
             })
             .collect();
+        model_map
+            .entry("edge-tts".to_owned())
+            .or_insert_with(|| ("edge-tts".to_owned(), None));
+        for id in ["google-tts", "google-translate-tts", "polly"] {
+            model_map
+                .entry(id.to_owned())
+                .or_insert_with(|| (id.to_owned(), None));
+        }
         let modality_map = config
             .modality_map
             .iter()
@@ -55,9 +63,33 @@ impl ModelRouter {
                 )
             })
             .collect();
+        let mut builtin_prefixes: Vec<_> = ryu_gw_credentials::SDK_PROVIDERS
+            .iter()
+            .map(|descriptor| {
+                (
+                    format!("{}::", descriptor.kind),
+                    descriptor.provider_id.to_owned(),
+                )
+            })
+            .collect();
+        for (namespace, id) in [
+            ("zai_coding", "genai-zai"),
+            ("baidu-coding-openai", "genai-baidu"),
+            ("baidu-coding-anthropic", "genai-baidu"),
+        ] {
+            builtin_prefixes.push((format!("{namespace}::"), id.to_owned()));
+        }
+        builtin_prefixes.push(("edge-tts::".to_owned(), "edge-tts".to_owned()));
+        builtin_prefixes.push(("google-tts::".to_owned(), "google-tts".to_owned()));
+        builtin_prefixes.push((
+            "google-translate-tts::".to_owned(),
+            "google-translate-tts".to_owned(),
+        ));
+        builtin_prefixes.push(("polly::".to_owned(), "polly".to_owned()));
+        builtin_prefixes.extend(ryu_gw_router::builtin_prefixes());
         let tables = ryu_gw_router::RoutingTables {
             model_map,
-            builtin_prefixes: ryu_gw_router::builtin_prefixes(),
+            builtin_prefixes,
             default_provider: config.default_provider.as_str().to_string(),
             modality_map,
             fallback_chain: config
@@ -120,6 +152,28 @@ impl ModelRouter {
             provider: ProviderId::from(provider),
             model: requested_model.to_string(),
         })
+    }
+
+    /// [`Self::route`] plus the precedence step that produced it, so the routing
+    /// layer can tell an explicit target from the default-provider catch-all.
+    pub fn route_with_source(
+        &self,
+        requested_model: &str,
+    ) -> (RouteDecision, ryu_gw_router::RouteSource) {
+        let (provider, model, source) = self.tables.route_with_source(requested_model);
+        (
+            RouteDecision {
+                provider: ProviderId::from(provider),
+                model,
+            },
+            source,
+        )
+    }
+
+    /// Whether a per-agent slot or a static `modality_map` entry answers this
+    /// modality before ordinary model routing does.
+    fn modality_is_pinned(&self, modality: &Modality, slot_provider: Option<&ProviderId>) -> bool {
+        slot_provider.is_some() || self.tables.modality_map.contains_key(modality.as_str())
     }
 
     /// Determine which provider and model name to use for a given request model string.
@@ -219,6 +273,22 @@ pub fn builtin_model_list() -> Vec<serde_json::Value> {
         // pattern to target a specific model via OpenRouter.
         json!({"id": "openrouter/auto", "object": "model", "created": now, "owned_by": "openrouter"}),
         json!({"id": "openrouter/pareto-code", "object": "model", "created": now, "owned_by": "openrouter"}),
+        // Gemini's native image models are served through the `genai` image
+        // adapter. They appear only when that provider is configured.
+        json!({"id": "gemini-2.5-flash-image", "object": "model", "created": now, "owned_by": "genai", "modality": "image"}),
+        json!({"id": "gemini-3.1-flash-image", "object": "model", "created": now, "owned_by": "genai", "modality": "image"}),
+        // AssemblyAI prerecorded transcription is a separate STT route.
+        json!({"id": "universal-3-pro", "object": "model", "created": now, "owned_by": "assemblyai", "modality": "stt"}),
+        json!({"id": "universal-2", "object": "model", "created": now, "owned_by": "assemblyai", "modality": "stt"}),
+        json!({"id": "qwen-plus", "object": "model", "created": now, "owned_by": "qwen", "modality": "chat"}),
+        json!({"id": "qwen3-asr-flash", "object": "model", "created": now, "owned_by": "qwen", "modality": "stt"}),
+        json!({"id": "inworld-tts-2", "object": "model", "created": now, "owned_by": "inworld", "modality": "tts"}),
+        json!({"id": "inworld-tts-2-flash", "object": "model", "created": now, "owned_by": "inworld", "modality": "tts"}),
+        // Anonymous consumer TTS, exposed only when explicitly registered.
+        json!({"id":"edge-tts","object":"model","created":now,"owned_by":"edge-tts","modality":"tts"}),
+        json!({"id":"google-tts","object":"model","created":now,"owned_by":"google-tts","modality":"tts"}),
+        json!({"id":"google-translate-tts","object":"model","created":now,"owned_by":"google-translate-tts","modality":"tts"}),
+        json!({"id":"polly","object":"model","created":now,"owned_by":"polly","modality":"tts"}),
         // Local
         json!({"id": "llama3.2:latest", "object": "model", "created": now, "owned_by": "local"}),
         json!({"id": "mistral:latest", "object": "model", "created": now, "owned_by": "local"}),
@@ -229,6 +299,15 @@ pub fn builtin_model_list() -> Vec<serde_json::Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn edge_tts_exact_and_qualified_voice_routes_preserve_native_voice() {
+        let router = super::ModelRouter::new(crate::config::RoutingConfig::default());
+        for model in ["edge-tts", "edge-tts::en-US-AriaNeural"] {
+            let route = router.route_modality(&crate::config::Modality::Tts, model);
+            assert_eq!(route.provider.as_str(), "edge-tts");
+            assert_eq!(route.model, model);
+        }
+    }
     use super::*;
     use crate::config::{EvalRoutingConfig, ModalityMapping, ProviderKind};
     use std::collections::HashMap;
@@ -292,10 +371,13 @@ mod tests {
 
     fn ab_router(explore_ratio: f32) -> ModelRouter {
         let config = RoutingConfig {
+            web: Default::default(),
+            web_pools: Default::default(),
             default_provider: ProviderKind::OpenAi.into(),
             model_map: HashMap::new(),
             fallback_chain: Vec::new(),
             provider_tiers: HashMap::new(),
+            provider_pools: HashMap::new(),
             eval_routing: EvalRoutingConfig {
                 enabled: true,
                 candidates: vec![ProviderKind::OpenAi.into(), ProviderKind::Anthropic.into()],
@@ -317,7 +399,7 @@ mod tests {
     fn apple_foundationmodel_routes_to_local() {
         // Apple Foundation Models are served on-device by Core's `apfel` local
         // engine, so the built-in prefix must send this exact id to the Local
-        // provider (which forwards to LOCAL_LLM_URL → apfel:11434).
+        // provider (which forwards to LOCAL_LLM_URL → apfel's own loopback port).
         let router = ModelRouter::new(RoutingConfig::default());
         let decision = router.route("apple-foundationmodel");
         assert_eq!(decision.provider, ProviderKind::Local);
@@ -412,6 +494,49 @@ mod tests {
         assert_eq!(decision.model, "gemini-2.5-pro");
     }
 
+    #[test]
+    fn sdk_namespaces_and_coding_aliases_keep_native_routes_distinct() {
+        let router = ModelRouter::new(RoutingConfig::default());
+        for (model, owner) in [
+            ("openai::gpt-4o", "genai-openai"),
+            ("groq::llama-3.3-70b-versatile", "genai-groq"),
+            ("zai_coding::glm-4.7", "genai-zai"),
+            ("baidu-coding-openai::ernie-4.5", "genai-baidu"),
+            ("baidu-coding-anthropic::ernie-4.5", "genai-baidu"),
+        ] {
+            let decision = router.route(model);
+            assert_eq!(decision.provider.as_str(), owner);
+            assert_eq!(decision.model, model);
+        }
+        assert_eq!(router.route("gpt-4o").provider.as_str(), "openai");
+        assert_eq!(
+            router.route("claude-sonnet-4-5").provider.as_str(),
+            "anthropic"
+        );
+        assert_eq!(router.route("gemini-2.5-pro").provider.as_str(), "genai");
+    }
+
+    #[test]
+    fn sdk_namespace_operator_mappings_win() {
+        for pattern in ["groq::llama-3.3-70b-versatile", "groq::"] {
+            let mut config = RoutingConfig::default();
+            config.model_map.insert(
+                pattern.to_owned(),
+                crate::config::ModelMapping {
+                    provider: crate::config::ProviderId::from("custom-owner"),
+                    provider_model: None,
+                },
+            );
+            assert_eq!(
+                ModelRouter::new(config)
+                    .route("groq::llama-3.3-70b-versatile")
+                    .provider
+                    .as_str(),
+                "custom-owner"
+            );
+        }
+    }
+
     // ─── Modality routing tests ───────────────────────────────────────────────
 
     fn router_with_modality_map() -> ModelRouter {
@@ -438,10 +563,13 @@ mod tests {
             },
         );
         let config = RoutingConfig {
+            web: Default::default(),
+            web_pools: Default::default(),
             default_provider: ProviderKind::Local.into(),
             model_map: HashMap::new(),
             fallback_chain: Vec::new(),
             provider_tiers: HashMap::new(),
+            provider_pools: HashMap::new(),
             eval_routing: EvalRoutingConfig::default(),
             modality_map,
             smart_routing: Default::default(),
@@ -503,10 +631,13 @@ mod tests {
             },
         );
         let router = ModelRouter::new(RoutingConfig {
+            web: Default::default(),
+            web_pools: Default::default(),
             default_provider: ProviderKind::Local.into(),
             model_map: HashMap::new(),
             fallback_chain: Vec::new(),
             provider_tiers: HashMap::new(),
+            provider_pools: HashMap::new(),
             eval_routing: EvalRoutingConfig::default(),
             modality_map,
             smart_routing: Default::default(),
@@ -580,6 +711,131 @@ impl RouterBackend for ModelRouter {
     }
 }
 
+/// Provider ids the current provider generation registered, shared by every
+/// [`UpstreamRouter`] of one registry. `None` until the provider runtime
+/// publishes its set (unit-built registries), which keeps builtin prefixes on
+/// their vendor exactly as the built-in router does.
+pub type RegisteredProviders =
+    std::sync::Arc<std::sync::RwLock<Option<std::collections::HashSet<String>>>>;
+
+/// The routing layer bound to one upstream router (OpenRouter, LiteLLM, or the
+/// node's local engine).
+///
+/// It is the built-in [`ModelRouter`] with the upstream taking what nothing
+/// more specific claims. Resolution, first match wins:
+///
+/// 1. An operator `model_map` entry (exact or prefix) — including entries keyed
+///    under `router/`.
+/// 2. `router/<model>` — the router-neutral namespace — goes to this upstream,
+///    with the model rewritten to the id the upstream expects
+///    ([`ryu_gw_router::upstream_router_wire_model`]).
+/// 3. A builtin prefix (`claude-` → Anthropic, `openrouter/` → OpenRouter,
+///    `llama` → local) keeps its provider when that provider is registered;
+///    when it is not, this upstream serves the id verbatim, so a router's own
+///    aliases such as `gpt-4o` reach it on a node without an OpenAI key.
+/// 4. Anything else — the step that would fall through to `default_provider`,
+///    e.g. `anthropic/claude-sonnet-4` — goes to this upstream verbatim.
+///
+/// Modality slots, fallback tiers and eval routing are answered by the shared
+/// built-in router, except that `router/` ids never enter eval A/B routing.
+/// Selecting the layer is a live swap (`backends.router`); no provider is
+/// rebuilt.
+pub struct UpstreamRouter {
+    upstream: ProviderId,
+    builtin: std::sync::Arc<ModelRouter>,
+    registered: RegisteredProviders,
+}
+
+impl UpstreamRouter {
+    pub fn new(
+        upstream: impl Into<ProviderId>,
+        builtin: std::sync::Arc<ModelRouter>,
+        registered: RegisteredProviders,
+    ) -> Self {
+        Self {
+            upstream: upstream.into(),
+            builtin,
+            registered,
+        }
+    }
+
+    /// `false` only when the published provider set is known and lacks `id`.
+    fn provider_may_serve(&self, id: &ProviderId) -> bool {
+        let guard = match self.registered.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard
+            .as_ref()
+            .is_none_or(|registered| registered.contains(id.as_str()))
+    }
+
+    fn upstream_decision(&self, model: String) -> RouteDecision {
+        RouteDecision {
+            provider: self.upstream.clone(),
+            model,
+        }
+    }
+}
+
+impl RouterBackend for UpstreamRouter {
+    fn route(&self, requested_model: &str) -> RouteDecision {
+        let (decision, source) = self.builtin.route_with_source(requested_model);
+        if source == ryu_gw_router::RouteSource::ModelMap {
+            return decision;
+        }
+        if let Some(model) = ryu_gw_router::strip_upstream_router_prefix(requested_model) {
+            return self.upstream_decision(ryu_gw_router::upstream_router_wire_model(
+                self.upstream.as_str(),
+                model,
+            ));
+        }
+        match source {
+            ryu_gw_router::RouteSource::BuiltinPrefix | ryu_gw_router::RouteSource::CreditPool
+                if self.provider_may_serve(&decision.provider) =>
+            {
+                decision
+            }
+            _ => self.upstream_decision(decision.model),
+        }
+    }
+
+    fn route_modality_with_slot(
+        &self,
+        modality: &Modality,
+        requested_model: &str,
+        slot_provider: Option<&ProviderId>,
+        slot_model: Option<&str>,
+    ) -> RouteDecision {
+        if self.builtin.modality_is_pinned(modality, slot_provider) {
+            return self.builtin.route_modality_with_slot(
+                modality,
+                requested_model,
+                slot_provider,
+                slot_model,
+            );
+        }
+        RouterBackend::route(self, requested_model)
+    }
+
+    fn fallback_chain(&self, primary: &ProviderId) -> Vec<ProviderId> {
+        self.builtin.fallback_chain(primary)
+    }
+
+    fn eval_route(
+        &self,
+        requested_model: &str,
+        score_of: &dyn Fn(&ProviderId) -> Option<f32>,
+    ) -> Option<RouteDecision> {
+        // A router-neutral id names this layer's upstream; an A/B candidate
+        // would receive the literal `router/` id and reject it.
+        if ryu_gw_router::strip_upstream_router_prefix(requested_model).is_some() {
+            return None;
+        }
+        self.builtin.eval_route(requested_model, score_of)
+    }
+}
+
 /// Id-keyed registry over [`RouterBackend`] implementations with a live-swap
 /// discipline, matching [`crate::budget::BudgetRegistry`]. The built-in
 /// [`ModelRouter`] is registered under [`RouterRegistry::BUILTIN`] and active by
@@ -593,6 +849,7 @@ impl RouterBackend for ModelRouter {
 /// `ModelRouter` field.
 pub struct RouterRegistry {
     inner: std::sync::RwLock<RouterRegistryInner>,
+    registered: RegisteredProviders,
 }
 
 struct RouterRegistryInner {
@@ -608,19 +865,50 @@ impl RouterRegistry {
 
     /// Build the registry from config, registering a fresh built-in
     /// [`ModelRouter`] as the default active backend.
+    ///
+    /// Every upstream router in [`ryu_gw_router::UPSTREAM_ROUTER_IDS`] is also
+    /// registered, sharing the same built-in tables, so the routing layer can be
+    /// swapped live with `backends.router`. Registration does not require the
+    /// upstream's credentials: a selected router whose provider is not configured
+    /// misses the provider registry and takes the ordinary provider-unavailable
+    /// path, exactly like a `default_provider` naming an absent provider.
     pub fn new(config: RoutingConfig) -> Self {
-        let builtin: std::sync::Arc<dyn RouterBackend> =
-            std::sync::Arc::new(ModelRouter::new(config));
+        let model_router = std::sync::Arc::new(ModelRouter::new(config));
+        let registered: RegisteredProviders = Default::default();
+        let builtin: std::sync::Arc<dyn RouterBackend> = model_router.clone();
         let mut backends = std::collections::HashMap::new();
+        let mut order = vec![Self::BUILTIN.to_string()];
         backends.insert(Self::BUILTIN.to_string(), std::sync::Arc::clone(&builtin));
+        for upstream in ryu_gw_router::UPSTREAM_ROUTER_IDS {
+            let backend: std::sync::Arc<dyn RouterBackend> =
+                std::sync::Arc::new(UpstreamRouter::new(
+                    *upstream,
+                    std::sync::Arc::clone(&model_router),
+                    std::sync::Arc::clone(&registered),
+                ));
+            backends.insert((*upstream).to_string(), backend);
+            order.push((*upstream).to_string());
+        }
         Self {
             inner: std::sync::RwLock::new(RouterRegistryInner {
                 backends,
-                order: vec![Self::BUILTIN.to_string()],
+                order,
                 active_id: Self::BUILTIN.to_string(),
                 active: builtin,
             }),
+            registered,
         }
+    }
+
+    /// Publish the provider ids the current provider generation registered, so
+    /// an upstream routing layer can take builtin-prefix ids whose vendor is
+    /// absent. Called by the provider runtime whenever it publishes.
+    pub fn set_registered_providers(&self, providers: impl IntoIterator<Item = String>) {
+        let mut guard = match self.registered.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard = Some(providers.into_iter().collect());
     }
 
     /// Clone the active backend out under a brief read lock (recovering from a
@@ -761,7 +1049,15 @@ mod router_registry_tests {
     fn builtin_is_the_default_active_backend() {
         let reg = RouterRegistry::new(RoutingConfig::default());
         assert_eq!(reg.active_id(), RouterRegistry::BUILTIN);
-        assert_eq!(reg.available(), vec![RouterRegistry::BUILTIN.to_string()]);
+        assert_eq!(
+            reg.available(),
+            vec![
+                RouterRegistry::BUILTIN.to_string(),
+                "openrouter".to_string(),
+                "litellm".to_string(),
+                "local".to_string(),
+            ]
+        );
         // The built-in routes a claude- model to Anthropic via the inherent method.
         assert_eq!(
             reg.route("claude-sonnet-4-5").provider,
@@ -790,5 +1086,172 @@ mod router_registry_tests {
         // Unknown id is a no-op keeping the current active backend.
         assert!(!reg.set_active("nope"));
         assert_eq!(reg.active_id(), "stub");
+    }
+
+    fn routing_with_pin() -> RoutingConfig {
+        let mut config = RoutingConfig::default();
+        config.model_map.insert(
+            "house-model".to_string(),
+            crate::config::ModelMapping {
+                provider: ProviderId::from("anthropic"),
+                provider_model: Some("claude-sonnet-4-5".to_string()),
+            },
+        );
+        config
+    }
+
+    #[test]
+    fn builtin_layer_keeps_router_neutral_ids_on_the_default_provider() {
+        let reg = RouterRegistry::new(RoutingConfig::default());
+        let decision = reg.route("anthropic/claude-sonnet-4");
+        assert_eq!(decision.provider.as_str(), "openai");
+        assert_eq!(decision.model, "anthropic/claude-sonnet-4");
+    }
+
+    #[test]
+    fn swapping_the_routing_layer_repoints_router_neutral_and_catch_all_ids() {
+        let reg = RouterRegistry::new(routing_with_pin());
+
+        assert!(reg.set_active("openrouter"));
+        let auto = reg.route("router/auto");
+        assert_eq!(
+            (auto.provider.as_str(), auto.model.as_str()),
+            ("openrouter", "openrouter/auto")
+        );
+        let unmatched = reg.route("anthropic/claude-sonnet-4");
+        assert_eq!(
+            (unmatched.provider.as_str(), unmatched.model.as_str()),
+            ("openrouter", "anthropic/claude-sonnet-4")
+        );
+
+        // A live swap to LiteLLM re-points the same ids with no rebuild.
+        assert!(reg.set_active("litellm"));
+        let auto = reg.route("router/auto");
+        assert_eq!(
+            (auto.provider.as_str(), auto.model.as_str()),
+            ("litellm", "auto")
+        );
+        let routed = reg.route("router/anthropic/claude-sonnet-4");
+        assert_eq!(
+            (routed.provider.as_str(), routed.model.as_str()),
+            ("litellm", "anthropic/claude-sonnet-4")
+        );
+        assert_eq!(
+            reg.route("anthropic/claude-sonnet-4").provider.as_str(),
+            "litellm"
+        );
+
+        assert!(reg.set_active("local"));
+        assert_eq!(reg.route("router/qwen3:8b").provider.as_str(), "local");
+        assert_eq!(reg.route("router/qwen3:8b").model, "qwen3:8b");
+    }
+
+    #[test]
+    fn upstream_layer_preserves_pins_vendor_prefixes_and_other_routers() {
+        let reg = RouterRegistry::new(routing_with_pin());
+        assert!(reg.set_active("litellm"));
+
+        let pinned = reg.route("house-model");
+        assert_eq!(
+            (pinned.provider.as_str(), pinned.model.as_str()),
+            ("anthropic", "claude-sonnet-4-5")
+        );
+        assert_eq!(
+            reg.route("claude-sonnet-4-5").provider.as_str(),
+            "anthropic"
+        );
+        assert_eq!(reg.route("llama3.2").provider.as_str(), "local");
+        // Naming another router explicitly still reaches that router.
+        let explicit = reg.route("openrouter/auto");
+        assert_eq!(
+            (explicit.provider.as_str(), explicit.model.as_str()),
+            ("openrouter", "openrouter/auto")
+        );
+    }
+
+    #[test]
+    fn model_map_entries_under_the_router_namespace_outrank_the_upstream() {
+        let mut config = RoutingConfig::default();
+        config.model_map.insert(
+            "router/fast".to_string(),
+            crate::config::ModelMapping {
+                provider: ProviderId::from("anthropic"),
+                provider_model: Some("claude-haiku-4-5".to_string()),
+            },
+        );
+        let reg = RouterRegistry::new(config);
+        assert!(reg.set_active("litellm"));
+        let pinned = reg.route("router/fast");
+        assert_eq!(
+            (pinned.provider.as_str(), pinned.model.as_str()),
+            ("anthropic", "claude-haiku-4-5")
+        );
+        assert_eq!(reg.route("router/slow").provider.as_str(), "litellm");
+    }
+
+    #[test]
+    fn builtin_prefixes_fall_to_the_upstream_when_their_vendor_is_unregistered() {
+        let reg = RouterRegistry::new(RoutingConfig::default());
+        reg.set_registered_providers(["litellm".to_string(), "anthropic".to_string()]);
+        assert!(reg.set_active("litellm"));
+
+        // LiteLLM serves its own `gpt-4o` alias on a node without an OpenAI key…
+        let alias = reg.route("gpt-4o");
+        assert_eq!(
+            (alias.provider.as_str(), alias.model.as_str()),
+            ("litellm", "gpt-4o")
+        );
+        // …while a configured vendor keeps its prefix.
+        assert_eq!(
+            reg.route("claude-sonnet-4-5").provider.as_str(),
+            "anthropic"
+        );
+
+        // The built-in layer is unaffected by the published set.
+        assert!(reg.set_active(RouterRegistry::BUILTIN));
+        assert_eq!(reg.route("gpt-4o").provider.as_str(), "openai");
+    }
+
+    #[test]
+    fn router_neutral_ids_never_enter_eval_routing() {
+        let mut config = RoutingConfig::default();
+        config.eval_routing = crate::config::EvalRoutingConfig {
+            enabled: true,
+            candidates: vec![ProviderId::from("openai"), ProviderId::from("anthropic")],
+            explore_ratio: 0.0,
+        };
+        let reg = RouterRegistry::new(config);
+        assert!(reg.set_active("openrouter"));
+        assert!(reg.eval_route("router/auto", |_| None).is_none());
+        assert!(reg.eval_route("gpt-4o", |_| None).is_some());
+    }
+
+    #[test]
+    fn upstream_layer_honours_modality_pins_before_delegating() {
+        let mut config = RoutingConfig::default();
+        config.modality_map.insert(
+            Modality::Image,
+            crate::config::ModalityMapping {
+                provider: ProviderId::from("fal"),
+                model: None,
+            },
+        );
+        let reg = RouterRegistry::new(config);
+        assert!(reg.set_active("litellm"));
+
+        let image = reg.route_modality_with_slot(&Modality::Image, "router/flux", None, None);
+        assert_eq!(image.provider.as_str(), "fal");
+        let slot = reg.route_modality_with_slot(
+            &Modality::Tts,
+            "tts-1",
+            Some(&ProviderId::from("openai")),
+            None,
+        );
+        assert_eq!(slot.provider.as_str(), "openai");
+        let stt = reg.route_modality_with_slot(&Modality::Stt, "router/whisper-large", None, None);
+        assert_eq!(
+            (stt.provider.as_str(), stt.model.as_str()),
+            ("litellm", "whisper-large")
+        );
     }
 }

@@ -5,6 +5,8 @@ node_modules
 
 # Build outputs
 dist
+# Codespaces playground webapp build (apps/webapp `build:playground`)
+dist-playground
 build
 *.tsbuildinfo
 
@@ -86,9 +88,14 @@ opensrc/
 .ryu-worktrees/
 .claude/worktrees/
 
+# Personal Claude Code settings (shared rules live in .claude/settings.json)
+.claude/settings.local.json
+
 # Local agent/test scratch, worktrees, and proof captures
 /.codex-tmp/
-/.tmp/
+.tmp/
+# Security-test runtime data (master key, relay key, agents.db)
+/.tmp-security-test-data/
 /.worktrees/
 /.artifacts/
 /artifacts/
@@ -100,12 +107,14 @@ opensrc/
 /apps/desktop/e2e/harness/dist-*/
 /apps/web/e2e/harness/dist-*/
 /apps/desktop/e2e/harness/media-proof-dist/
+/apps/desktop/e2e/harness/image-editor-proof-dist/
 /apps/desktop/e2e/harness/.proof-screenshot.cjs
 /apps/desktop/e2e/harness/*proof*.png
 /apps/desktop/e2e/*proof.png
 /apps/desktop/apps/desktop/e2e/harness/*proof.png
 /apps/fumadocs/artifacts/
 /apps/fumadocs/.next-*/
+/apps/web/.next-*/
 /apps/fumadocs/ste-*-proof.png
 /apps/web/artifacts/
 /docs/proof/*.png
@@ -147,3 +156,29 @@ nul
 # Playwright output written at the repo root (apps/desktop/.gitignore only covers
 # the copy under that app).
 test-results/
+
+# Local runtime state, command history, and standalone scratch build outputs.
+.audit/
+/no/
+/rtk/
+/task/recovery-release-proof-target/
+/task/recovery-unix-check-target/
+/task/execution-lifecycle-target/
+/docs/proof/provider-pools/native-1791110746219/data/
+/docs/proof/provider-pools/native-1791110746219/gateway-relay.key
+/apps/web/e2e/harness/.vite-invite-lookup-proof/
+.vite-*/
+/docs/proof/**/.playwright-artifacts-*/
+/docs/proof/**/.last-run.json
+/docs/proof/**/trace.zip
+/docs/proof/**/*.trace
+/docs/proof/**/*.network
+/docs/proof/**/*.har
+/docs/proof/**/*.app/
+
+# Separate local project and its generated export archive.
+/reset-planner-site/
+/reset-planner-site.tar.gz
+
+# Stray local Python installs (e.g. the Windows py manager writing into apps/core)
+apps/core/Python/

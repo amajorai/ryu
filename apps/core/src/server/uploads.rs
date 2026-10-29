@@ -269,10 +269,25 @@ pub const SPACE_FILE_BODY_LIMIT: BodyLimit = BodyLimit {
     encoding: BodyEncoding::Base64Json,
 };
 
+/// `POST /api/documents/parse` — raw bytes for extraction (the SDK's document
+/// loaders and the composer seam). Its ceiling is [`crate::document_parse::MAX_PARSE_BYTES`],
+/// which is [`MAX_UPLOAD_BYTES`] by design: a document only reaches a parser by
+/// being something the node would accept as an upload.
+pub const DOCUMENT_PARSE_BODY_LIMIT: BodyLimit = BodyLimit {
+    route: "POST /api/documents/parse",
+    max_body_bytes: crate::document_parse::MAX_PARSE_BYTES,
+    max_file_bytes: crate::document_parse::MAX_PARSE_BYTES,
+    encoding: BodyEncoding::Raw,
+};
+
 /// Every route that accepts a file, in the order a limits panel would list them.
 /// [`upload_limits`] serves this, so a route added without a row here is a route the
 /// user cannot be told about.
-pub const FILE_ROUTE_LIMITS: [BodyLimit; 2] = [UPLOADS_BODY_LIMIT, SPACE_FILE_BODY_LIMIT];
+pub const FILE_ROUTE_LIMITS: [BodyLimit; 3] = [
+    UPLOADS_BODY_LIMIT,
+    SPACE_FILE_BODY_LIMIT,
+    DOCUMENT_PARSE_BODY_LIMIT,
+];
 
 /// `GET /api/uploads/limits` — the upload ceilings this node compiles in.
 ///
@@ -883,7 +898,8 @@ mod tests {
         let served = upload_limits().await.0;
         assert_eq!(served["max_file_bytes"], MAX_UPLOAD_BYTES);
         assert_eq!(served["uniform"], true);
-        assert_eq!(served["routes"].as_array().unwrap().len(), 2);
+        assert_eq!(served["routes"].as_array().unwrap().len(), 3);
+        assert_eq!(served["routes"][2]["route"], "POST /api/documents/parse");
         // The per-route detail is served even while uniform, so a client that wants to
         // say "and this one carries it base64" never has to guess.
         assert_eq!(served["routes"][1]["route"], "POST /api/spaces/:id/files");

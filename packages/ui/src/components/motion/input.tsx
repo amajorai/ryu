@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	AnimatePresence,
 	animate,
@@ -16,6 +16,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { isNativeText } from "../../lib/native-primitive-observation.ts";
 
 export interface InputClassNames {
 	errorMessage?: string;
@@ -80,7 +81,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 	const fieldRef = useRef<HTMLDivElement>(null);
 
 	const hasError = Boolean(error);
-	const errorMessage = typeof error === "string" ? error : null;
+	const errorMessage = isNativeText(error) ? error : null;
 
 	// Right edge shows the success check, otherwise the caller's right icon.
 	const rightSlot = success ? null : rightIcon;
@@ -122,7 +123,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 				className={cn(
 					"relative h-11 overflow-hidden rounded-full border transition-colors duration-200",
 					"border-border",
-					focused && !hasError && "border-foreground/40 ring-2 ring-ring/40",
+					focused && !hasError && "border-foreground/40 ring-2 ring-ring",
 					hasError && "border-destructive ring-2 ring-destructive/25",
 					disabled && "opacity-60",
 					classNames?.field

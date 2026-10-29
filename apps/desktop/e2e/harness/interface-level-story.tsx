@@ -1,3 +1,4 @@
+import proofStyles from "./interface-level-story.module.css";
 // Standalone browser story for the REAL `InterfaceLevelMenuItem` — the account
 // menu's inline Interface mode switch — mounted inside a real account-shaped
 // `DropdownMenu`.
@@ -17,7 +18,7 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { InterfaceLevelMenuItem } from "../../src/components/layout/InterfaceLevelMenuItem.tsx";
@@ -67,7 +68,7 @@ function StoredPrefs() {
 
 function Story() {
 	return (
-		<div style={{ padding: 40 }}>
+		<div className={proofStyles.fixture1}>
 			<DropdownMenu>
 				<DropdownMenuTrigger>Account</DropdownMenuTrigger>
 				<DropdownMenuContent className="min-w-64">

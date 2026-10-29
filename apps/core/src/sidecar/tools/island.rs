@@ -22,7 +22,7 @@ const VERSION_MARKER: &str = ".version";
 const VERSION_STORE_KEY: &str = "island";
 
 fn install_dir() -> PathBuf {
-    crate::paths::ryu_dir().join("island")
+    crate::paths::bin_dir().join("island")
 }
 
 fn version_path() -> PathBuf {

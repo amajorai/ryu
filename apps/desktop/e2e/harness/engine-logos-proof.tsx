@@ -2,15 +2,15 @@
 import { LayerIcon } from "@hugeicons/core-free-icons";
 import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
 import { engineLogoProps } from "@ryu/marketplace/catalog/engine-logos";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import SidebarLibrarySection from "../../src/components/library/SidebarLibrarySection";
-import EnginesCatalogSection from "../../src/components/store/EnginesCatalogSection";
-import { useNodeStore } from "../../src/store/useNodeStore";
-import catalog from "./engine-logos-catalog.json";
+import SidebarLibrarySection from "../../src/components/library/SidebarLibrarySection.tsx";
+import EnginesCatalogSection from "../../src/components/store/EnginesCatalogSection.tsx";
+import { useNodeStore } from "../../src/store/useNodeStore.ts";
+import catalog from "./engine-logos-catalog.json" with { type: "json" };
 import "../../src/index.css";
 
 const node = {
@@ -70,8 +70,7 @@ function Proof() {
 					</Button>
 				</nav>
 				<section
-					className="mx-auto h-[calc(100vh-65px)] overflow-auto p-4"
-					style={{ maxWidth: narrow ? 375 : 1200 }}
+					className={`mx-auto h-[calc(100vh-65px)] overflow-auto p-4 ${narrow ? "max-w-93.75" : "max-w-300"}`}
 				>
 					{surface === "marketplace" ? (
 						<EnginesCatalogSection />

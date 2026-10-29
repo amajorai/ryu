@@ -1,4 +1,4 @@
-import { SpacesView } from "@ryu/blocks/desktop/spaces";
+import { SpacesView } from "@ryu/blocks/desktop/spaces.tsx";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 

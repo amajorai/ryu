@@ -1,7 +1,6 @@
 import { CallIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	IconArrowUp,
 	IconMicrophone,
@@ -50,8 +49,6 @@ export interface SendButtonProps {
 	voiceMode?: SendButtonVoiceMode;
 }
 
-const CIRCLE = "size-7 rounded-full disabled:opacity-100";
-
 export function SendButton({
 	state,
 	onClick,
@@ -65,11 +62,8 @@ export function SendButton({
 	if (isStreaming) {
 		return (
 			<Button
+				appearance="composer-stop"
 				aria-label="Stop"
-				className={cn(
-					CIRCLE,
-					"bg-foreground text-background hover:bg-foreground/90"
-				)}
 				onClick={onClick}
 				size="icon"
 				type="button"
@@ -85,11 +79,8 @@ export function SendButton({
 	if (voiceMode && !isTyping) {
 		return (
 			<Button
+				appearance="composer-call"
 				aria-label="Start voice call"
-				className={cn(
-					CIRCLE,
-					"bg-primary text-primary-foreground hover:bg-primary/90"
-				)}
 				disabled={voiceMode.disabled}
 				onClick={voiceMode.onStart}
 				size="icon"
@@ -107,11 +98,8 @@ export function SendButton({
 		if (voice.isRecording) {
 			return (
 				<Button
+					appearance="composer-recording"
 					aria-label="Stop recording"
-					className={cn(
-						CIRCLE,
-						"bg-destructive text-destructive-foreground hover:bg-destructive/90"
-					)}
 					onClick={voice.onStop}
 					size="icon"
 					title="Stop recording"
@@ -124,8 +112,8 @@ export function SendButton({
 		if (voice.isTranscribing) {
 			return (
 				<Button
+					appearance="composer-pending"
 					aria-label="Transcribing"
-					className={cn(CIRCLE, "bg-muted text-muted-foreground")}
 					loading
 					size="icon"
 					title="Transcribing…"
@@ -135,8 +123,8 @@ export function SendButton({
 		}
 		return (
 			<Button
+				appearance="composer-dictation"
 				aria-label="Start voice input"
-				className={cn(CIRCLE, "bg-muted text-foreground hover:bg-muted/70")}
 				disabled={voice.disabled}
 				onClick={voice.onStart}
 				size="icon"
@@ -151,13 +139,8 @@ export function SendButton({
 	// Send: bright when there's text to send, muted+disabled when empty (no voice).
 	return (
 		<Button
+			appearance={isTyping ? "composer-send" : "composer-pending"}
 			aria-label="Send"
-			className={cn(
-				CIRCLE,
-				isTyping
-					? "bg-primary text-primary-foreground"
-					: "bg-muted text-muted-foreground"
-			)}
 			disabled={!isTyping}
 			onClick={onClick}
 			size="icon"

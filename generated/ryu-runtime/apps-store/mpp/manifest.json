@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/mpp",
   "name": "Payments",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Developer Tools",
   "description": "Discover services that speak the Machine Payments Protocol, review exact Tempo testnet charges, enforce per-request and daily budgets, make explicitly approved paid requests, and keep a local receipt ledger. Signing keys use Ryu's per-app encrypted custody and never enter chat, app state, logs, or receipt records.",
@@ -293,19 +293,6 @@
         "target": "/plugin/app__mpp-companion",
         "context": { "tab": "receipts" },
         "order": 32
-      }
-    ],
-    "chat_widget_templates": [
-      {
-        "id": "mpp.chat",
-        "title": "Payments widget",
-        "description": "Payments chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["payments widget"],
-        "examples": ["Show me a payments widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
       }
     ]
   },

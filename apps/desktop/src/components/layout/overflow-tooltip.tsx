@@ -5,9 +5,8 @@ import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import {
-	type CSSProperties,
 	type ReactElement,
 	type ReactNode,
 	useCallback,
@@ -18,16 +17,11 @@ import {
 import { cn } from "@/lib/utils.ts";
 import { usePrefersReducedMotion } from "@/src/hooks/usePrefersReducedMotion.ts";
 import { AnimatedTitle } from "./animated-title.tsx";
+import layoutStyles from "./overflow-tooltip.module.css";
 
 // Fades the trailing edge of an overflowing label into transparency instead of
 // cutting it with an ellipsis — the text dissolves into the background. Only
 // applied while the label is actually clipped, so short labels stay crisp.
-const FADE_GRADIENT =
-	"linear-gradient(to right, #000 calc(100% - 2.5rem), transparent)";
-const FADE_STYLE: CSSProperties = {
-	maskImage: FADE_GRADIENT,
-	WebkitMaskImage: FADE_GRADIENT,
-};
 
 // The clipping line. `block` is load-bearing: a bare <span> whose parent is not
 // a flex container stays inline, and an inline non-replaced box reports
@@ -43,8 +37,10 @@ const INNER_CLASS = "inline-block max-w-none align-bottom";
 // Streaming/loading treatment (see agent-ui.css). It lives on the INNER span so
 // the clip box keeps its fade mask: `background-clip: text` and the mask compose
 // instead of fighting.
-const SHIMMER_CLASS =
-	"an-text-shimmer an-text-shimmer--active [animation-duration:2s]";
+const SHIMMER_CLASS = cn(
+	"an-text-shimmer an-text-shimmer--active",
+	layoutStyles.authored1
+);
 /** Adds the desktop tooltip treatment without adding a layout wrapper. */
 export function TitleTooltip({
 	children,
@@ -140,9 +136,8 @@ export function FadeLabel({
 
 	return (
 		<span
-			className={cn(CLIP_CLASS, className)}
+			className={cn(CLIP_CLASS, className, clipped && layoutStyles.fade)}
 			ref={clipRef}
-			style={clipped ? FADE_STYLE : undefined}
 		>
 			<span
 				className={cn(INNER_CLASS, shimmer && motionEnabled && SHIMMER_CLASS)}
@@ -206,9 +201,12 @@ export function OverflowTooltip({
 			<TooltipTrigger
 				render={
 					<span
-						className={fade ? cn(CLIP_CLASS, className) : className}
+						className={
+							fade
+								? cn(CLIP_CLASS, className, clipped && layoutStyles.fade)
+								: className
+						}
 						ref={clipRef}
-						style={fade && clipped ? FADE_STYLE : undefined}
 					>
 						{fade ? (
 							<span

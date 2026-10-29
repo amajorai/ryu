@@ -2,6 +2,7 @@
 
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
+import type { CatalogItem as NativeCatalogItem } from "@ryuhq/core-client/catalog.ts";
 import {
 	AlertCircle,
 	AlertTriangle,
@@ -22,7 +23,7 @@ export interface SidecarRowData {
 	description?: string;
 	displayName: string;
 	hasUpdate?: boolean;
-	installState: "installed" | "installing" | "failed" | "not_installed";
+	installState: NativeCatalogItem["install_state"];
 	name: string;
 	running: boolean;
 }
@@ -114,7 +115,7 @@ export function SidecarRow({
 					<span className="text-muted-foreground text-xs">Installing…</span>
 				) : isFailed ? (
 					<Button
-						className="h-7 px-2 text-status-warning hover:text-status-warning"
+						appearance="service-retry"
 						disabled={busy}
 						onClick={() => onAction?.("install")}
 						size="sm"
@@ -128,7 +129,7 @@ export function SidecarRow({
 						<>
 							{hasUpdate ? (
 								<Button
-									className="h-7 px-2 text-status-info hover:text-status-info"
+									appearance="service-update"
 									disabled={busy}
 									onClick={() => onAction?.("install")}
 									size="sm"
@@ -141,7 +142,7 @@ export function SidecarRow({
 							{entry.running ? (
 								<>
 									<Button
-										className="h-7 px-2"
+										appearance="service-action"
 										disabled={busy}
 										onClick={() => onAction?.("stop")}
 										size="sm"
@@ -151,7 +152,7 @@ export function SidecarRow({
 										Stop
 									</Button>
 									<Button
-										className="h-7 px-2"
+										appearance="service-action"
 										disabled={busy}
 										onClick={() => onAction?.("restart")}
 										size="sm"
@@ -163,7 +164,7 @@ export function SidecarRow({
 								</>
 							) : (
 								<Button
-									className="h-7 px-2"
+									appearance="service-action"
 									disabled={busy}
 									onClick={() => onAction?.("start")}
 									size="sm"
@@ -177,7 +178,7 @@ export function SidecarRow({
 					) : null
 				) : (
 					<Button
-						className="h-7 px-2"
+						appearance="service-action"
 						disabled={busy}
 						onClick={() => onAction?.("install")}
 						size="sm"

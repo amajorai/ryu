@@ -1,12 +1,14 @@
 /* @jsxImportSource @opentui/react */
+
 import { expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
+import { KeyEvent } from "@opentui/core";
 import { act } from "react";
 import { ThemeProvider } from "../../components/ui/theme-provider.tsx";
 import { startAccountPolling } from "../core/account-polling.ts";
 import { CoreProvider } from "../core/CoreContext.tsx";
 import { AccountTab } from "../tabs/account.tsx";
 import { ToastProvider } from "../ui/toast.tsx";
+import { testRender } from "./cli-test-render.ts";
 
 async function until(predicate: () => boolean) {
 	const deadline = Date.now() + 3000;
@@ -123,20 +125,22 @@ for (const phase of ["startup", "status"] as const) {
 				await Bun.sleep(30);
 			});
 			await act(async () => {
-				(
-					setup.renderer as unknown as {
-						keyInput: { emit: (event: string, data: unknown) => void };
-					}
-				).keyInput.emit("keypress", {
-					name: "l",
-					sequence: "l",
-					shift: false,
-					ctrl: false,
-					meta: false,
-					option: false,
-					eventType: "press",
-					repeated: false,
-				});
+				setup.renderer.keyInput.emit(
+					"keypress",
+					new KeyEvent({
+						name: "l",
+						sequence: "l",
+						shift: false,
+						ctrl: false,
+						meta: false,
+						option: false,
+						eventType: "press",
+						repeated: false,
+						number: false,
+						raw: "l",
+						source: "raw",
+					})
+				);
 			});
 			await act(async () => {
 				await until(() =>

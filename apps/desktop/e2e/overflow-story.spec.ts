@@ -1,11 +1,12 @@
 // Real-browser spec for the sidebar overflow popover story (`e2e/harness/
 // overflow-story.{html,tsx}`), which mounts the REAL `SectionOverflowPopover`
-// exported from `src/components/layout/AppSidebar.tsx` with 55 mock rows. This is
+// from `src/components/layout/sidebar-section-overflow.tsx` (re-exported by
+// `AppSidebar.tsx`) with 55 mock rows. This is
 // the "sidebar renders" slice of the desktop shell that IS reachable in isolation:
 // the popover is a self-contained, prop-driven component (client-side search +
 // in-memory windowing), so no Core, Tauri, or seed data is needed.
 //
-// The component's contract (from AppSidebar.tsx):
+// The component's contract (from sidebar-section-overflow.tsx):
 //   • trigger reads "Show <remaining> more" (story: remaining = 55 - 10 = 45);
 //   • opening resets the query and autofocuses the search field;
 //   • the search input filters by case-insensitive substring of `getSearchText`;

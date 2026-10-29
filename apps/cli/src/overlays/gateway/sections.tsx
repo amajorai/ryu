@@ -8,6 +8,7 @@
 
 import type { ReactNode } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
+import { tf } from "../../i18n/translate.ts";
 import type { RawStatus } from "./status.ts";
 import {
 	apiKeyNames,
@@ -135,7 +136,9 @@ export function OverviewPanel({ raw }: { raw: RawStatus }) {
 				<Caption>
 					{providers.length === 0
 						? "No providers reported."
-						: `${providers.length} provider${providers.length === 1 ? "" : "s"}`}
+						: tf("{count, plural, one {# provider} other {# providers}}", {
+								count: providers.length,
+							})}
 				</Caption>
 				{providers.map((name) => (
 					<Row key={name} label="provider">
@@ -254,7 +257,7 @@ export function KeysPanel({ raw }: { raw: RawStatus }) {
 			<SectionTitle>Keys</SectionTitle>
 			<Caption>
 				Gateway API keys are redacted — only names are shown. Issue or revoke
-				keys in the web dashboard.
+				keys in Console on the web.
 			</Caption>
 			<Indicator
 				danger={!requireAuth}

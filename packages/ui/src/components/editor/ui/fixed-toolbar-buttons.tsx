@@ -60,12 +60,14 @@ import { ToolbarGroup } from "./toolbar.tsx";
 import { TurnIntoToolbarButton } from "./turn-into-toolbar-button.tsx";
 
 export function FixedToolbarButtons({
+	expandedLayout = "nested",
 	placement = "fixed",
-}: Pick<NestedOverflowToolbarProps, "placement"> = {}) {
+}: Pick<NestedOverflowToolbarProps, "expandedLayout" | "placement"> = {}) {
 	const readOnly = useEditorReadOnly();
+	const wrapCategoryTools = expandedLayout === "grid";
 
 	const reviewControls = (
-		<ToolbarGroup>
+		<ToolbarGroup wrap={wrapCategoryTools}>
 			<MarkToolbarButton nodeType={KEYS.highlight} tooltip="Highlight">
 				<HighlighterIcon />
 			</MarkToolbarButton>
@@ -82,7 +84,7 @@ export function FixedToolbarButtons({
 					? [
 							{
 								content: (
-									<ToolbarGroup>
+									<ToolbarGroup wrap={wrapCategoryTools}>
 										<MarkToolbarButton
 											nodeType={KEYS.highlight}
 											tooltip="Highlight"
@@ -100,7 +102,7 @@ export function FixedToolbarButtons({
 					: [
 							{
 								content: (
-									<ToolbarGroup>
+									<ToolbarGroup wrap={wrapCategoryTools}>
 										<ExportToolbarButton>
 											<ArrowUpToLineIcon />
 										</ExportToolbarButton>
@@ -113,7 +115,7 @@ export function FixedToolbarButtons({
 							},
 							{
 								content: (
-									<ToolbarGroup>
+									<ToolbarGroup wrap={wrapCategoryTools}>
 										<InsertToolbarButton />
 										<TurnIntoToolbarButton />
 										<FontSizeToolbarButton />
@@ -125,21 +127,25 @@ export function FixedToolbarButtons({
 							},
 							{
 								content: (
-									<ToolbarGroup>
-										<MarkToolbarButton
-											aria-label="Bold (⌘+B)"
-											nodeType={KEYS.bold}
-											tooltip="Bold (⌘+B)"
-										>
-											<BoldIcon />
-										</MarkToolbarButton>
-										<MarkToolbarButton
-											aria-label="Italic (⌘+I)"
-											nodeType={KEYS.italic}
-											tooltip="Italic (⌘+I)"
-										>
-											<ItalicIcon />
-										</MarkToolbarButton>
+									<ToolbarGroup wrap={wrapCategoryTools}>
+										{expandedLayout !== "grid" && (
+											<MarkToolbarButton
+												aria-label="Bold (⌘+B)"
+												nodeType={KEYS.bold}
+												tooltip="Bold (⌘+B)"
+											>
+												<BoldIcon />
+											</MarkToolbarButton>
+										)}
+										{expandedLayout !== "grid" && (
+											<MarkToolbarButton
+												aria-label="Italic (⌘+I)"
+												nodeType={KEYS.italic}
+												tooltip="Italic (⌘+I)"
+											>
+												<ItalicIcon />
+											</MarkToolbarButton>
+										)}
 										<MarkToolbarButton
 											aria-label="Underline (⌘+U)"
 											nodeType={KEYS.underline}
@@ -181,7 +187,7 @@ export function FixedToolbarButtons({
 							},
 							{
 								content: (
-									<ToolbarGroup>
+									<ToolbarGroup wrap={wrapCategoryTools}>
 										<AlignToolbarButton />
 										<NumberedListToolbarButton />
 										<BulletedListToolbarButton />
@@ -198,7 +204,7 @@ export function FixedToolbarButtons({
 							},
 							{
 								content: (
-									<ToolbarGroup>
+									<ToolbarGroup wrap={wrapCategoryTools}>
 										<LinkToolbarButton />
 										<TableToolbarButton />
 										<EmojiToolbarButton />
@@ -220,7 +226,7 @@ export function FixedToolbarButtons({
 							},
 							{
 								content: (
-									<ToolbarGroup>
+									<ToolbarGroup wrap={wrapCategoryTools}>
 										<MoreToolbarButton />
 									</ToolbarGroup>
 								),
@@ -230,6 +236,7 @@ export function FixedToolbarButtons({
 							},
 						]
 			}
+			expandedLayout={expandedLayout}
 			placement={placement}
 			primary={
 				readOnly ? (
@@ -242,6 +249,16 @@ export function FixedToolbarButtons({
 							<UndoToolbarButton />
 							<RedoToolbarButton />
 						</ToolbarGroup>
+						{expandedLayout === "grid" ? (
+							<ToolbarGroup>
+								<MarkToolbarButton nodeType={KEYS.bold} tooltip="Bold">
+									<BoldIcon />
+								</MarkToolbarButton>
+								<MarkToolbarButton nodeType={KEYS.italic} tooltip="Italic">
+									<ItalicIcon />
+								</MarkToolbarButton>
+							</ToolbarGroup>
+						) : null}
 						<ToolbarGroup>
 							<AIToolbarButton tooltip="AI commands">
 								<WandSparklesIcon />

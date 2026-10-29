@@ -2,8 +2,8 @@ import {
 	type SpaceDocumentRow,
 	type SpaceMatchRow,
 	SpacesView,
-} from "@ryu/blocks/desktop/spaces";
-import { Badge } from "@ryu/ui/components/badge";
+} from "@ryu/blocks/desktop/spaces.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ApiTarget } from "../../src/lib/api/client.ts";
@@ -313,6 +313,4 @@ function LiveGraphRagProof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
-	<LiveGraphRagProof />
-);
+createRoot(document.getElementById("root")!).render(<LiveGraphRagProof />);

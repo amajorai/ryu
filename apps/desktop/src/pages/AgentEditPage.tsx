@@ -1,16 +1,19 @@
 import { LockedIcon, Rocket01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { AgentBannerPreferenceStore } from "@ryu/blocks/desktop/agent-banner-dialog.tsx";
 import {
 	AgentByoaView,
 	AgentIntegrationsView,
 	AgentSettingsForm,
+	type ComposioAccountOption,
 	type SlotOption,
 } from "@ryu/blocks/desktop/agent-edit.tsx";
+import { promptEditCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
 import {
 	type AgentIntegrationSnippetLang,
 	buildAgentIntegrationSnippet,
 	buildGitHubActionsSnippet,
-} from "@ryu/blocks/desktop/agent-integration-snippets";
+} from "@ryu/blocks/desktop/agent-integration-snippets.ts";
 import {
 	ScorecardBadge,
 	ScorecardPanel,
@@ -19,12 +22,11 @@ import {
 	type AgentHealthInput,
 	runAgentScorecard,
 } from "@ryu/marketplace/catalog/scorecard";
+import { getMarketplaceBackdrops } from "@ryu/ui/components/backdrop/marketplace-backdrops.ts";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
-import { Label } from "@ryu/ui/components/label.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { StatusBadge } from "@ryu/ui/components/status-badge.tsx";
 import { composeRules, parseRules } from "@ryuhq/protocol/agent-rules";
 import { useQuery } from "@tanstack/react-query";
@@ -32,52 +34,78 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { WEB_URL } from "@/lib/app-urls.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { AcpAgentSettingsPanel } from "@/src/components/agents/AcpAgentSettingsPanel.tsx";
 import { AcpSessionControls } from "@/src/components/agents/AcpSessionControls.tsx";
+import { AgentAccountAccessPanel } from "@/src/components/agents/AgentAccountAccessPanel.tsx";
 import { AgentBudgetPanel } from "@/src/components/agents/AgentBudgetPanel.tsx";
 import { AgentCalendarView } from "@/src/components/agents/AgentCalendarView.tsx";
 import { AgentCapabilitiesPanel } from "@/src/components/agents/AgentCapabilitiesPanel.tsx";
 import { AgentChannelsSection } from "@/src/components/agents/AgentChannelsSection.tsx";
+import { AgentEmailAliasSection } from "@/src/components/agents/AgentEmailAliasSection.tsx";
 import { AgentEvalsView } from "@/src/components/agents/AgentEvalsView.tsx";
 import { AgentExecutionPolicyPanel } from "@/src/components/agents/AgentExecutionPolicyPanel.tsx";
+import { AgentGoalPanel } from "@/src/components/agents/AgentGoalPanel.tsx";
+import {
+	AgentIdentityModePicker,
+	AgentRemotePeerIdentityNote,
+	identityModeAccountWarning,
+	isRemotePeerEngine,
+	modeHasOwnAccounts,
+	modeUsesYourAccounts,
+} from "@/src/components/agents/AgentIdentityModePicker.tsx";
 import { AgentImageField } from "@/src/components/agents/AgentImageField.tsx";
 import { AgentLanyardCard } from "@/src/components/agents/AgentLanyardCard.tsx";
+import {
+	AgentLaunchWarning,
+	agentIsConfined,
+	agentModelsLimited,
+	MANAGED_PI_NOTE,
+	RYU_ENGINE_ID,
+} from "@/src/components/agents/AgentLaunchWarning.tsx";
 import { AgentObservabilityView } from "@/src/components/agents/AgentObservabilityView.tsx";
+import { AgentOptimizationsView } from "@/src/components/agents/AgentOptimizationsView.tsx";
 import { AgentPassportPanel } from "@/src/components/agents/AgentPassportPanel.tsx";
+import { AgentPendingIdentityModeNotice } from "@/src/components/agents/AgentPendingIdentityModeNotice.tsx";
+import { AgentRoutePoolEditor } from "@/src/components/agents/AgentRoutePoolEditor.tsx";
 import { AgentRoutinesPanel } from "@/src/components/agents/AgentRoutinesPanel.tsx";
 import { AgentRunHistoryView } from "@/src/components/agents/AgentRunHistoryView.tsx";
 import { AgentSetupComposer } from "@/src/components/agents/AgentSetupComposer.tsx";
 import { AgentSmartRouteOverride } from "@/src/components/agents/AgentSmartRouteOverride.tsx";
 import { AgentVersionHistoryPanel } from "@/src/components/agents/AgentVersionHistoryPanel.tsx";
+import {
+	pausedTriggerIds,
+	savedModeHasOwnApps,
+} from "@/src/components/agents/agent-account-keys.ts";
 import { ClaudeGatewayConfig } from "@/src/components/agents/ClaudeGatewayConfig.tsx";
 import { CodexGatewayConfig } from "@/src/components/agents/CodexGatewayConfig.tsx";
 import { GatewayRoutingConfig } from "@/src/components/agents/GatewayRoutingConfig.tsx";
 import { OrchestrationPanel } from "@/src/components/agents/OrchestrationPanel.tsx";
 import { RulesAgentEditPanel } from "@/src/components/agents/RulesAgentEditPanel.tsx";
 import { RyuPiConfig } from "@/src/components/agents/RyuPiConfig.tsx";
-import { AdvancedInferenceSection } from "@/src/components/inference/AdvancedInferenceSection.tsx";
-import { ModelLaunchConfigSection } from "@/src/components/inference/ModelLaunchConfigSection.tsx";
+import {
+	type PromptCacheConfirmation,
+	PromptCacheConfirmDialog,
+} from "@/src/components/chat/PromptCacheConfirmDialog.tsx";
 import { PublishDialog } from "@/src/components/marketplace/PublishDialog.tsx";
 import { PromptStudio } from "@/src/components/PromptStudio.tsx";
-import {
-	SettingsCard,
-	SettingsSection,
-} from "@/src/components/settings/shared/settings-items.tsx";
+import { SettingsSection } from "@/src/components/settings/shared/settings-items.tsx";
 import type { VersionSource } from "@/src/components/versioning/VersionHistory.tsx";
-import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
 import { useTabSelector } from "@/src/contexts/TabsContext.tsx";
 import { useTitleBar } from "@/src/contexts/TitleBarContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import { useAgentLaunchCheck } from "@/src/hooks/useAgentLaunchCheck.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { useAssistantBuilder } from "@/src/hooks/useAssistantBuilder.ts";
 import {
+	useAgentComposioConnections,
 	useComposioActions,
+	useComposioConnections,
 	useComposioStatus,
 	useComposioToolkits,
 	useComposioTriggers,
 } from "@/src/hooks/useComposioCatalog.ts";
-import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
-import { useIdentities } from "@/src/hooks/useIdentities.ts";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
+import { useResponseModeConfirm } from "@/src/hooks/useResponseModeConfirm.tsx";
 import {
 	encodeSkillAllowlist,
 	encodeToolAllowlist,
@@ -97,6 +125,7 @@ import {
 } from "@/src/lib/api/agent-rules.ts";
 import {
 	type Agent,
+	type AgentIdentityMode,
 	type AgentLifecycleStatus,
 	type AgentSafetyProfile,
 	type AgentTools,
@@ -107,10 +136,11 @@ import {
 	getAgentVersionSource,
 	listAgentVersions,
 	restoreAgentVersion,
+	updateAgentAccountSettings,
 	updateAgentPosture,
 } from "@/src/lib/api/agents.ts";
 import { runCatalogScan } from "@/src/lib/api/catalog-scan.ts";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { type ApiTarget, apiUrl } from "@/src/lib/api/client.ts";
 import {
 	deleteTriggerSubscription,
 	fetchTriggerSubscriptions,
@@ -123,10 +153,10 @@ import {
 	generateGatewayKey,
 	registerByoaKey,
 } from "@/src/lib/api/gateway.ts";
-import { isLocalEngine, type SamplingConfig } from "@/src/lib/api/inference.ts";
+import type { SamplingConfig } from "@/src/lib/api/inference.ts";
 import { fetchMcpTools } from "@/src/lib/api/mcp.ts";
-import { getActiveModel } from "@/src/lib/api/models.ts";
 import { listOutputStyles } from "@/src/lib/api/output-styles.ts";
+import { getPreference, setPreference } from "@/src/lib/api/preferences.ts";
 import { type InstalledSkill, listSkills } from "@/src/lib/api/skills.ts";
 import { fetchSpaces } from "@/src/lib/api/spaces.ts";
 import {
@@ -134,7 +164,14 @@ import {
 	phraseToSchedule,
 	type SchedulePhrase,
 } from "@/src/lib/automations.ts";
-import { friendlyModelDisplay } from "@/src/lib/catalog/friendly.ts";
+import { usePluginBackgrounds } from "@/src/lib/plugin-backgrounds.ts";
+import {
+	setProductMode,
+	useProductMode,
+	useProductModeStore,
+} from "@/src/lib/product-mode.ts";
+import { promptLayerChanges } from "@/src/lib/prompt-layer-changes.ts";
+import { installWallpaper } from "@/src/lib/wallpaper-library.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
 
 // ── BYOA panel ────────────────────────────────────────────────────────────────
@@ -254,7 +291,7 @@ function openIntegrationDocs(): void {
 	).catch(() => undefined);
 }
 
-function IntegrationsPanel({ target, agentId }: IntegrationsPanelProps) {
+export function IntegrationsPanel({ target, agentId }: IntegrationsPanelProps) {
 	const [lang, setLang] = useState<AgentIntegrationSnippetLang>("typescript");
 	const [copied, setCopied] = useState(false);
 
@@ -318,14 +355,17 @@ const TONE_OPTIONS: { value: ToneOption; label: string }[] = [
 const AGENT_OWN_VOICE_PROFILE = "__agent_own_voice__";
 
 // ── Fallback tool list (used when GET /api/mcp/tools returns empty) ───────────
+// Core's agent allowlist matches a tool id, bare tool name, or owning server, so
+// the fallback offers built-in server names that always resolve.
 
 const FALLBACK_TOOLS = [
-	"search",
-	"semantic_search",
-	"web_browse",
-	"code_execute",
-	"file_read",
-	"file_write",
+	"web",
+	"web_fetch",
+	"browser",
+	"memory",
+	"spaces",
+	"artifact",
+	"sandbox",
 ];
 
 // Schedule phrase → workflow conversion lives in `lib/automations.ts` (shared
@@ -415,12 +455,56 @@ function isHighImpactTool(toolName: string): boolean {
 	return HIGH_IMPACT_TOOL_RE.test(toolName);
 }
 
+interface AgentPostureResource {
+	endpoint: string;
+	listeners: Set<() => void>;
+	pending: Promise<void> | null;
+	settledScope: object | null;
+}
+// An in-flight write belongs to the physical record, independent of editor or
+// query-client lifetime. Rendering and publication still belong to recordScope.
+const agentPostureResources = new Map<string, AgentPostureResource>();
+function postureResourceFor(
+	target: ApiTarget,
+	id: string | null
+): AgentPostureResource | null {
+	if (!(id && target.url.replace(/\/+$/, ""))) {
+		return null;
+	}
+	const endpoint = apiUrl(target, `/api/agents/${encodeURIComponent(id)}`);
+	let resource = agentPostureResources.get(endpoint);
+	if (!resource) {
+		resource = {
+			endpoint,
+			pending: null,
+			settledScope: null,
+			listeners: new Set(),
+		};
+		agentPostureResources.set(endpoint, resource);
+	}
+	return resource;
+}
+
+function releasePostureResource(resource: AgentPostureResource) {
+	if (
+		!resource.pending &&
+		resource.listeners.size === 0 &&
+		agentPostureResources.get(resource.endpoint) === resource
+	) {
+		agentPostureResources.delete(resource.endpoint);
+	}
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
 export default function AgentEditPage({
 	agentIdProp,
+	initialSettingId,
 	onClose,
 }: {
 	agentIdProp?: string;
+	/** Open on this setting (an agent-settings index id, such as Account access
+	 *  after adding a Store Agent Template). */
+	initialSettingId?: string;
 	onClose?: () => void;
 }) {
 	const { agentId: routeAgentId } = useParams<{ agentId: string }>();
@@ -440,6 +524,10 @@ export default function AgentEditPage({
 	}, [onClose, navigate]);
 	const isNew = agentId === "new" || !agentId;
 	const { agents, activeEngine, loading, create, reload, update } = useAgents();
+	// Bot gets the essentials-only editor; Agent and OS get every tab.
+	const productMode = useProductMode();
+	const simpleEditor = productMode === "bot";
+	const consoleAccess = useProductModeStore((state) => state.consoleAccess);
 
 	const activeNode = useActiveNode();
 	const projectCwd = useWorkspaceStore((state) => state.folder);
@@ -450,7 +538,44 @@ export default function AgentEditPage({
 			token: activeNode.token,
 			userJwt: activeNode.userJwt ?? null,
 		}),
-		[activeNode.url, activeNode.token]
+		[activeNode.url, activeNode.token, activeNode.userJwt]
+	);
+	// Each actual authority/agent transition gets a new opaque identity, including
+	// A→B→A. Equivalent node snapshots retain the current unsaved draft.
+	const recordScope = useMemo(() => ({}), [agentId, isNew, target]);
+	const editorMounted = useRef(true);
+	useEffect(() => {
+		editorMounted.current = true;
+		return () => {
+			editorMounted.current = false;
+		};
+	}, []);
+	const activeRecordScope = useRef(recordScope);
+	activeRecordScope.current = recordScope;
+	const loadedRecordScope = useRef<object | null>(null);
+	const recordReadGeneration = useRef(0);
+	const posturePendingScope = useRef<object | null>(null);
+	const pluginBackgrounds = usePluginBackgrounds();
+	const marketplaceWallpapers = useMemo(
+		() => getMarketplaceBackdrops(pluginBackgrounds),
+		[pluginBackgrounds]
+	);
+	const agentBannerPreferenceStore = useMemo<AgentBannerPreferenceStore>(
+		() => ({
+			get: (agentId) =>
+				getPreference(
+					target,
+					`ryu.agent-banner.v1:${encodeURIComponent(agentId)}`
+				),
+			set: async (agentId, value) => {
+				await setPreference(
+					target,
+					`ryu.agent-banner.v1:${encodeURIComponent(agentId)}`,
+					value
+				);
+			},
+		}),
+		[target]
 	);
 	const personalityProfilesQuery = useQuery({
 		queryKey: ["agent-personality-profiles", target.url, target.token],
@@ -506,6 +631,13 @@ export default function AgentEditPage({
 	const [agentTitle, setAgentTitle] = useState("");
 	const [description, setDescription] = useState("");
 	const [systemPrompt, setSystemPrompt] = useState("");
+	const [promptEditConfirmation, setPromptEditConfirmation] =
+		useState<PromptCacheConfirmation | null>(null);
+	const promptEditConfirmed = useRef(false);
+	// Opening the advanced editor moves Ryu Work to Console, which switches the
+	// response mode in every Ryu assistant thread's system prompt.
+	const { confirmLevelChange, dialog: responseModeDialog } =
+		useResponseModeConfirm();
 	const [chatModel, setChatModel] = useState("");
 	const [agentModel, setAgentModel] = useState("");
 	const [agentModelEngine, setAgentModelEngine] = useState<string | null>(null);
@@ -523,15 +655,30 @@ export default function AgentEditPage({
 	// Free-text ACP command shown when the "Custom ACP command…" engine is picked.
 	const [acpCommand, setAcpCommand] = useState("");
 	const [existing, setExisting] = useState<Agent | null>(null);
+	const [dismissingPendingMode, setDismissingPendingMode] = useState(false);
 	const [lifecycleStatus, setLifecycleStatus] =
 		useState<AgentLifecycleStatus>("trial");
 	const [safetyProfile, setSafetyProfile] =
 		useState<AgentSafetyProfile>("read_only");
 	const [postureSaving, setPostureSaving] = useState(false);
-	const [postureError, setPostureError] = useState<string | null>(null);
+	const [postureError, setPostureError] = useState<{
+		scope: object;
+		message: string;
+		readRetry: boolean;
+	} | null>(null);
+	const postureLoadedScope = useRef<object | null>(null);
+	const effectiveAgentId = isNew ? draftId : (agentId ?? null);
+	const postureEndpoint = useMemo(
+		() =>
+			effectiveAgentId && target.url.replace(/\/+$/, "")
+				? apiUrl(target, `/api/agents/${encodeURIComponent(effectiveAgentId)}`)
+				: null,
+		[target, effectiveAgentId]
+	);
 	const [agentToolsData, setAgentToolsData] = useState<AgentTools | null>(null);
 	const [recordLoading, setRecordLoading] = useState(!isNew);
-	const [saving, setSaving] = useState(false);
+	const [savingScope, setSavingScope] = useState<object | null>(null);
+	const saving = savingScope === recordScope;
 	const [formError, setFormError] = useState<string | null>(null);
 	const [hydrated, setHydrated] = useState(false);
 	// Marketplace publish dialog (Phase 5a). Only offered for a saved, custom
@@ -581,34 +728,6 @@ export default function AgentEditPage({
 	const [orchestrator, setOrchestrator] = useState(true);
 	const [canCreateAgents, setCanCreateAgents] = useState(false);
 
-	// ── Engine / hardware launch config (only for local-engine agents) ───────────
-	// The launch flags are keyed by the model the local engine actually serves —
-	// the active served model — matching what Core resolves at spawn time. We only
-	// surface the editor when this agent's Chat runtime is a local one we can tune.
-	const [friendly] = useFriendlyMode();
-	const localEngineSelected = isLocalEngine(chatModel);
-	const activeModelQuery = useQuery({
-		queryKey: ["models", "active", target.url, chatModel],
-		queryFn: () => getActiveModel(target),
-		enabled: localEngineSelected,
-	});
-	const launchModelId =
-		activeModelQuery.data?.active || activeModelQuery.data?.default || "";
-	const rawLaunchModelName = activeModelQuery.data?.repoId ?? launchModelId;
-	// The served-model name is a raw HF repo slug (e.g. "unsloth/gemma-4-12B-it-GGUF")
-	// or a served-file stem that may embed a quant. In friendly mode show the
-	// readable name + friendly compression (never "Q4_K_M"); the raw id + quant
-	// explanation stays available on hover.
-	const launchModelDisplay = rawLaunchModelName
-		? friendlyModelDisplay(rawLaunchModelName)
-		: null;
-	const launchModelName =
-		friendly && launchModelDisplay
-			? launchModelDisplay.label
-			: rawLaunchModelName;
-	const launchModelTitle =
-		friendly && launchModelDisplay ? launchModelDisplay.tooltip : undefined;
-
 	// ── Rules state (folded into the system prompt on save) ──────────────────────
 	const [rules, setRules] = useState<string[]>([]);
 
@@ -627,6 +746,13 @@ export default function AgentEditPage({
 	const [selectedIdentities, setSelectedIdentities] = useState<Set<string>>(
 		new Set()
 	);
+
+	// ── Identity mode + account allowlist ────────────────────────────────────────
+	// `managed` with a `null` allowlist is Core's legacy default: the agent acts
+	// as the user with every account they connected. Both save with the form.
+	const [identityMode, setIdentityMode] =
+		useState<AgentIdentityMode>("managed");
+	const [accountAccess, setAccountAccess] = useState<string[] | null>(null);
 
 	// ── Memory / Spaces slot state ───────────────────────────────────────────────
 	// `memorySpaceIds`: Space ids the agent may read (empty = none injected).
@@ -649,10 +775,6 @@ export default function AgentEditPage({
 
 	// ── Coming-soon attribute slots (collapsed by default) ───────────────────────
 
-	// Prompt Studio remains an optional core capability; app-provided automation
-	// schedules are available without a plan gate.
-	const { canUse } = useEntitlementContext();
-
 	// ── Schedule/trigger state ───────────────────────────────────────────────────
 	const [scheduleEnabled, setScheduleEnabled] = useState(false);
 	const [schedulePhrase, setSchedulePhrase] = useState<SchedulePhrase>("daily");
@@ -664,9 +786,88 @@ export default function AgentEditPage({
 	// ── Composio browse (gateway-route actions) ──────────────────────────────────
 	const composioStatus = useComposioStatus();
 	const composioConfigured = composioStatus.data?.configured ?? false;
+	const composioThroughConnect =
+		composioStatus.data?.executionOwner === "connect";
 	const composioToolkitsQuery = useComposioToolkits(composioConfigured);
 	const composioActionsQuery = useComposioActions(composioToolkit);
 	const composioTriggersQuery = useComposioTriggers(composioToolkit);
+	const composioConnectionsQuery = useComposioConnections(
+		"",
+		composioConfigured
+	);
+	// The identity mode Core holds for this agent. Core keeps apps on an
+	// agent's own identity only once it is saved as Its own identity or Both
+	// (it answers 409 for one saved as Acts as you), so an unsaved switch offers
+	// none until it is saved.
+	const savedIdentityMode = existing?.identityMode ?? null;
+	const ownAppsAvailable =
+		modeHasOwnAccounts(identityMode) && savedModeHasOwnApps(savedIdentityMode);
+	// The apps connected to this agent's own identity (Its own identity or
+	// Both). Core answers 501 when a Connect service does not enable agent
+	// accounts.
+	const ownComposioConnectionsQuery = useAgentComposioConnections(
+		isNew ? null : (agentId ?? null),
+		ownAppsAvailable && composioConfigured && !isNew
+	);
+	// Accounts an event trigger may watch: the user's connected accounts that
+	// this agent may use, and the active apps connected to its own identity
+	// that its account access allows (only once the saved mode has them). A
+	// limit narrows each to the ticked ones. Core re-checks both on subscribe
+	// and on every event.
+	const composioAccountOptions = useMemo<ComposioAccountOption[]>(() => {
+		const labelOf = (connection: {
+			active: boolean;
+			id: string;
+			status: string;
+			toolkit: string;
+		}) =>
+			`${connection.toolkit} · ${connection.active ? "Active" : connection.status.toLowerCase() || "inactive"} · ${connection.id}`;
+		const yours = modeUsesYourAccounts(identityMode)
+			? (composioConnectionsQuery.data ?? []).filter(
+					(connection) =>
+						accountAccess === null ||
+						accountAccess.includes(`composio:${connection.id}`)
+				)
+			: [];
+		// A Connect service has no triggers on an agent's own apps (Core
+		// answers 501), so none are offered there.
+		const own =
+			ownAppsAvailable && !composioThroughConnect
+				? (ownComposioConnectionsQuery.data?.connections ?? []).filter(
+						(connection) =>
+							connection.active &&
+							(accountAccess === null ||
+								accountAccess.includes(`agent-composio:${connection.id}`))
+					)
+				: [];
+		// Name the owner only when the agent may watch both kinds.
+		const both = yours.length > 0 && own.length > 0;
+		return [
+			...yours.map(
+				(connection): ComposioAccountOption => ({
+					id: connection.id,
+					label: labelOf(connection),
+					owner: both ? "you" : undefined,
+					toolkit: connection.toolkit,
+				})
+			),
+			...own.map(
+				(connection): ComposioAccountOption => ({
+					id: connection.id,
+					label: labelOf(connection),
+					owner: "agent",
+					toolkit: connection.toolkit,
+				})
+			),
+		];
+	}, [
+		composioThroughConnect,
+		accountAccess,
+		composioConnectionsQuery.data,
+		identityMode,
+		ownAppsAvailable,
+		ownComposioConnectionsQuery.data,
+	]);
 
 	// ── Composio event-trigger subscriptions for this agent ──────────────────────
 	const [triggerSubs, setTriggerSubs] = useState<TriggerSubscription[]>([]);
@@ -750,11 +951,15 @@ export default function AgentEditPage({
 		setSubscribing(true);
 		setTriggerError(null);
 		try {
+			const accountId = connectedAccountId.trim();
 			await subscribeTrigger(target, {
 				agentId,
 				toolkit: composioToolkit,
 				triggerSlug,
-				connectedAccountId: connectedAccountId.trim(),
+				connectedAccountId: accountId,
+				ownAccount:
+					composioAccountOptions.find((option) => option.id === accountId)
+						?.owner === "agent",
 			});
 			setTriggerSlug("");
 			setConnectedAccountId("");
@@ -813,11 +1018,16 @@ export default function AgentEditPage({
 	// a late catalog refresh never overwrites a user's edits.
 	useEffect(() => {
 		capabilitiesHydratedRef.current = false;
-	}, [agentId, isNew]);
+		loadedRecordScope.current = null;
+		setExisting(null);
+		setHydrated(false);
+		setPostureError(null);
+	}, [recordScope]);
 
 	useEffect(() => {
 		if (
 			capabilitiesHydratedRef.current ||
+			(!isNew && loadedRecordScope.current !== recordScope) ||
 			toolsLoading ||
 			skillsLoading ||
 			!(isNew || existing)
@@ -834,6 +1044,7 @@ export default function AgentEditPage({
 	}, [
 		availableSkills,
 		availableTools,
+		recordScope,
 		existing,
 		isNew,
 		skillsLoading,
@@ -854,34 +1065,160 @@ export default function AgentEditPage({
 	}, [target]);
 
 	// ── Load agent record for edits ──────────────────────────────────────────────
-	const loadRecord = useCallback(async () => {
-		if (isNew || !agentId) {
-			return;
-		}
-		setRecordLoading(true);
-		setFormError(null);
-		try {
-			const [record, toolList] = await Promise.all([
-				fetchAgent(target, agentId),
-				fetchAgentTools(target, agentId).catch(() => null),
-			]);
-			setExisting(record);
-			setAgentToolsData(toolList);
-		} catch (e) {
-			setFormError(e instanceof Error ? e.message : "Failed to load agent");
-		} finally {
-			setRecordLoading(false);
-		}
-	}, [agentId, isNew, target]);
+	const loadRecord = useCallback(
+		async (reconcilePosture = false) => {
+			if (isNew || !agentId) {
+				return;
+			}
+			const generation = ++recordReadGeneration.current;
+			if (reconcilePosture) {
+				postureLoadedScope.current = null;
+				setPostureError(null);
+			}
+			setRecordLoading(true);
+			setFormError(null);
+			try {
+				const [record, toolList] = await Promise.all([
+					fetchAgent(target, agentId),
+					fetchAgentTools(target, agentId).catch(() => null),
+				]);
+				if (
+					!editorMounted.current ||
+					activeRecordScope.current !== recordScope ||
+					recordReadGeneration.current !== generation
+				) {
+					return;
+				}
+				loadedRecordScope.current = recordScope;
+				postureLoadedScope.current = recordScope;
+				if (reconcilePosture) {
+					setPostureError(null);
+				}
+				setExisting(record);
+				setLifecycleStatus(record.lifecycleStatus);
+				setSafetyProfile(record.safetyProfile);
+				if (record.lifecycleStatus !== "active") {
+					setScheduleEnabled(false);
+				}
+				setAgentToolsData(toolList);
+			} catch (e) {
+				if (
+					!editorMounted.current ||
+					activeRecordScope.current !== recordScope ||
+					recordReadGeneration.current !== generation
+				) {
+					return;
+				}
+				const message = e instanceof Error ? e.message : "Failed to load agent";
+				setFormError(message);
+				if (reconcilePosture) {
+					setPostureError({ scope: recordScope, message, readRetry: true });
+				}
+			} finally {
+				if (
+					editorMounted.current &&
+					activeRecordScope.current === recordScope &&
+					recordReadGeneration.current === generation
+				) {
+					setRecordLoading(false);
+				}
+			}
+		},
+		[agentId, isNew, target, recordScope]
+	);
 
 	useEffect(() => {
 		loadRecord();
 	}, [loadRecord]);
 
-	// ── Hydrate form from loaded record ──────────────────────────────────────────
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
 	useEffect(() => {
-		if (hydrated || loading) {
+		const postureResource = postureResourceFor(target, effectiveAgentId);
+		if (!postureResource) {
+			posturePendingScope.current = null;
+			setPostureSaving(false);
+			return;
+		}
+		let observedPending = false;
+		const current = () =>
+			editorMounted.current && activeRecordScope.current === recordScope;
+		const observe = () => {
+			if (!current()) {
+				return;
+			}
+			const pending = Boolean(postureResource.pending);
+			if (observedPending && !pending) {
+				observedPending = false;
+				if (postureResource.settledScope === recordScope) {
+					posturePendingScope.current = null;
+					setPostureSaving(false);
+					return;
+				}
+				posturePendingScope.current = recordScope;
+				setPostureSaving(true);
+				// A retired owner may have changed the physical record. Read with
+				// this editor's current authority before enabling another write.
+				void loadRecord(true).finally(() => {
+					if (current() && !postureResource.pending) {
+						posturePendingScope.current = null;
+						setPostureSaving(false);
+					}
+				});
+				return;
+			}
+			observedPending = pending;
+			posturePendingScope.current = pending ? recordScope : null;
+			setPostureSaving(pending);
+		};
+		postureResource.listeners.add(observe);
+		observe();
+		return () => {
+			postureResource.listeners.delete(observe);
+			releasePostureResource(postureResource);
+		};
+	}, [loadRecord, target, effectiveAgentId, recordScope]);
+
+	const retryPostureRead = useCallback(async () => {
+		const postureResource = postureEndpoint
+			? agentPostureResources.get(postureEndpoint)
+			: null;
+		const current = () =>
+			editorMounted.current && activeRecordScope.current === recordScope;
+		if (
+			!current() ||
+			postureResource?.pending ||
+			posturePendingScope.current === recordScope
+		) {
+			return;
+		}
+		posturePendingScope.current = recordScope;
+		setPostureSaving(true);
+		await loadRecord(true);
+		if (current() && !postureResource?.pending) {
+			posturePendingScope.current = null;
+			setPostureSaving(false);
+		}
+	}, [loadRecord, postureEndpoint, recordScope]);
+
+	// An applied optimization changed the saved record (model or tools) behind
+	// the form. Re-hydrate from the server so a later Save cannot write the
+	// stale values back over it.
+	const reloadAfterOptimization = useCallback(async () => {
+		// Clear the capability latch first: its effect re-runs when the new record
+		// lands. The form latch is cleared after, so it re-hydrates from that record.
+		capabilitiesHydratedRef.current = false;
+		await loadRecord();
+		setHydrated(false);
+		await reload();
+	}, [loadRecord, reload]);
+
+	// ── Hydrate form from loaded record ──────────────────────────────────────────
+	// legacy component
+	useEffect(() => {
+		if (
+			hydrated ||
+			loading ||
+			(!isNew && loadedRecordScope.current !== recordScope)
+		) {
 			return;
 		}
 		if (existing) {
@@ -909,6 +1246,8 @@ export default function AgentEditPage({
 			setAgentModelEngine(existing.chatModel?.engine ?? null);
 			setSelectedComposio(new Set(existing.composioActions ?? []));
 			setSelectedIdentities(new Set(existing.identityProfileIds ?? []));
+			setIdentityMode(existing.identityMode);
+			setAccountAccess(existing.accountAccess);
 			// Memory / Spaces slot round-trips from the record. Empty read_levels
 			// stays empty here (the "all personal levels" default is applied by Core).
 			setMemorySpaceIds(new Set(existing.memory?.space_ids ?? []));
@@ -953,7 +1292,14 @@ export default function AgentEditPage({
 			}
 			setHydrated(true);
 		}
-	}, [existing, isNew, installedAgentEngineOptions, loading, hydrated]);
+	}, [
+		existing,
+		isNew,
+		installedAgentEngineOptions,
+		loading,
+		hydrated,
+		recordScope,
+	]);
 
 	const isBuiltIn = existing?.builtIn ?? false;
 	const isLocked = existing?.locked ?? false;
@@ -1036,8 +1382,19 @@ export default function AgentEditPage({
 	};
 
 	// ── Save handler ─────────────────────────────────────────────────────────────
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
+	// legacy component
 	const handleSave = async () => {
+		if (!editorMounted.current || activeRecordScope.current !== recordScope) {
+			return;
+		}
+		if (
+			(postureEndpoint &&
+				agentPostureResources.get(postureEndpoint)?.pending) ||
+			posturePendingScope.current === recordScope ||
+			(!isNew && postureLoadedScope.current !== recordScope)
+		) {
+			return;
+		}
 		if (!name.trim()) {
 			setFormError("Name is required");
 			return;
@@ -1060,7 +1417,53 @@ export default function AgentEditPage({
 			setFormError("This agent is locked. Unlock it before saving changes.");
 			return;
 		}
-		setSaving(true);
+		// Instructions, name, tone, output style and skills are all part of the
+		// system prompt Core assembles for this bot, so changing any of them on a
+		// saved bot is a one-time prompt-cache miss for each of its threads. Ask
+		// first; `promptEditConfirmed` carries the user's "Apply now" back in.
+		if (existing && !promptEditConfirmed.current) {
+			const warning = promptEditCacheWarning(
+				promptLayerChanges(existing, {
+					displayName: personaDisplayName,
+					outputStyleId:
+						personalityProfileId === AGENT_OWN_VOICE_PROFILE
+							? null
+							: personalityProfileId.trim() || null,
+					skills: savedSkills,
+					systemPrompt:
+						(agentEditPanels.length > 0
+							? systemPrompt.trim()
+							: composeRules(systemPrompt, rules).trim()) || null,
+					tone: (() => {
+						const value =
+							tone === "custom" ? customTone.trim() || "neutral" : tone;
+						return value === "neutral" ? null : value;
+					})(),
+				}),
+				"bot"
+			);
+			if (warning) {
+				setPromptEditConfirmation(warning);
+				return;
+			}
+		}
+		promptEditConfirmed.current = false;
+		const current = () =>
+			editorMounted.current && activeRecordScope.current === recordScope;
+		const fullResource = postureResourceFor(target, effectiveAgentId);
+		let releaseFull = () => {};
+		const fullPending = new Promise<void>((resolve) => {
+			releaseFull = resolve;
+		});
+		if (fullResource) {
+			// Full AgentInput carries safety_profile, so it owns the same node barrier.
+			fullResource.pending = fullPending;
+			++recordReadGeneration.current;
+			for (const listener of fullResource.listeners) {
+				listener();
+			}
+		}
+		setSavingScope(recordScope);
 		setFormError(null);
 
 		const nextVersion = existing?.version
@@ -1094,6 +1497,9 @@ export default function AgentEditPage({
 			composioActions: Array.from(selectedComposio),
 			skills: savedSkills,
 			identityProfileIds: Array.from(selectedIdentities),
+			identityMode,
+			// `null` is sent as-is: it is how an unrestricted agent stays unrestricted.
+			accountAccess,
 			version: nextVersion,
 			// Persona fields — passed through; Core stores them when the field exists.
 			// The three avatar sources are mutually exclusive: only the active one
@@ -1130,10 +1536,32 @@ export default function AgentEditPage({
 			let savedId: string;
 			if (targetId) {
 				const updated = await update(targetId, input);
+				if (!current()) {
+					return;
+				}
 				savedId = updated.id;
-				setExisting(updated);
+				// The save response carries no app identity: keep the request the
+				// user has not settled, and clear it once this save accepted it.
+				const pendingMode = existing?.appIdentity?.pendingMode ?? null;
+				setExisting({
+					...updated,
+					appIdentity:
+						existing?.appIdentity && pendingMode !== null
+							? {
+									appMode:
+										identityMode === pendingMode
+											? pendingMode
+											: existing.appIdentity.appMode,
+									pendingMode:
+										identityMode === pendingMode ? null : pendingMode,
+								}
+							: existing?.appIdentity,
+				});
 			} else {
 				const created = await create(input);
+				if (!current()) {
+					return;
+				}
 				savedId = created.id;
 				setDraftId(savedId);
 				setExisting(created);
@@ -1147,6 +1575,9 @@ export default function AgentEditPage({
 					lifecycleStatus: "draft",
 					safetyProfile,
 				});
+				if (!current()) {
+					return;
+				}
 				setExisting(drafted);
 			} else if (lifecycleStatus === "trial" && existing === null) {
 				setLifecycleStatus("trial");
@@ -1166,6 +1597,9 @@ export default function AgentEditPage({
 						)
 					)
 				);
+				if (!current()) {
+					return;
+				}
 				if (ruleWrites.some((ok) => !ok)) {
 					setFormError(
 						"Agent created, but its rules could not be saved. Check the node and try again."
@@ -1196,6 +1630,9 @@ export default function AgentEditPage({
 				}
 			}
 
+			if (!current()) {
+				return;
+			}
 			if (
 				isNew &&
 				lifecycleStatus !== "draft" &&
@@ -1208,58 +1645,124 @@ export default function AgentEditPage({
 				goBack();
 			}
 		} catch (e) {
-			setFormError(e instanceof Error ? e.message : "Failed to save agent");
+			if (current()) {
+				setFormError(e instanceof Error ? e.message : "Failed to save agent");
+			}
 		} finally {
-			setSaving(false);
+			setSavingScope((scope) => (scope === recordScope ? null : scope));
+			if (fullResource?.pending === fullPending) {
+				fullResource.settledScope = current() ? recordScope : null;
+				fullResource.pending = null;
+			}
+			releaseFull();
+			if (fullResource) {
+				for (const listener of fullResource.listeners) {
+					listener();
+				}
+				releasePostureResource(fullResource);
+			}
 		}
 	};
 
 	// Publish is offered only for a saved, custom agent (built-ins are Ryu's; a
 	// brand-new unsaved agent has no record to package yet).
-	const canPublish = !(isNew || isBuiltIn) && Boolean(agentId);
+	const canPublish = !(isNew || isBuiltIn || simpleEditor) && Boolean(agentId);
 
 	// The id the builder chat edits: the existing agent, or a draft (lazily
 	// created on first builder message for brand-new agents).
-	const effectiveAgentId = isNew ? draftId : (agentId ?? null);
-
 	const savePosture = useCallback(
 		async (posture: {
 			lifecycleStatus?: AgentLifecycleStatus;
 			safetyProfile?: AgentSafetyProfile;
 		}) => {
-			if (posture.lifecycleStatus !== undefined) {
-				setLifecycleStatus(posture.lifecycleStatus);
-				if (posture.lifecycleStatus !== "active") {
-					setScheduleEnabled(false);
-				}
-			}
-			if (posture.safetyProfile !== undefined) {
-				setSafetyProfile(posture.safetyProfile);
-			}
-			setPostureError(null);
-			if (!effectiveAgentId) {
+			const current = () =>
+				editorMounted.current && activeRecordScope.current === recordScope;
+			if (
+				!current() ||
+				(!isNew && postureLoadedScope.current !== recordScope)
+			) {
 				return;
 			}
+			if (!effectiveAgentId) {
+				// New unsaved agents have a local draft; saved agents retain their
+				// acknowledged posture until the node accepts the sparse write.
+				if (posture.lifecycleStatus !== undefined) {
+					setLifecycleStatus(posture.lifecycleStatus);
+					if (posture.lifecycleStatus !== "active") {
+						setScheduleEnabled(false);
+					}
+				}
+				if (posture.safetyProfile !== undefined) {
+					setSafetyProfile(posture.safetyProfile);
+				}
+				setPostureError(null);
+				return;
+			}
+			const postureResource = postureResourceFor(target, effectiveAgentId);
+			if (
+				!postureResource ||
+				postureResource.pending ||
+				posturePendingScope.current === recordScope
+			) {
+				return;
+			}
+			let release = () => {};
+			const pending = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			postureResource.pending = pending;
+			posturePendingScope.current = recordScope;
+			++recordReadGeneration.current;
 			setPostureSaving(true);
+			setPostureError(null);
+			for (const listener of postureResource.listeners) {
+				listener();
+			}
 			try {
 				const updated = await updateAgentPosture(
 					target,
 					effectiveAgentId,
 					posture
 				);
+				if (!current()) {
+					return;
+				}
 				setExisting(updated);
 				setLifecycleStatus(updated.lifecycleStatus);
 				setSafetyProfile(updated.safetyProfile);
+				if (updated.lifecycleStatus !== "active") {
+					setScheduleEnabled(false);
+				}
 				await reload();
 			} catch (error) {
-				setPostureError(
-					error instanceof Error ? error.message : "Could not update lifecycle"
-				);
+				if (!current()) {
+					return;
+				}
+				setPostureError({
+					scope: recordScope,
+					message:
+						error instanceof Error
+							? error.message
+							: "Could not update lifecycle",
+					readRetry: false,
+				});
 			} finally {
-				setPostureSaving(false);
+				if (current()) {
+					posturePendingScope.current = null;
+					setPostureSaving(false);
+				}
+				if (postureResource.pending === pending) {
+					postureResource.settledScope = current() ? recordScope : null;
+					postureResource.pending = null;
+				}
+				release();
+				for (const listener of postureResource.listeners) {
+					listener();
+				}
+				releasePostureResource(postureResource);
 			}
 		},
-		[effectiveAgentId, reload, target]
+		[effectiveAgentId, isNew, recordScope, reload, target]
 	);
 
 	// Lazily ensure a real record exists so the builder chat has something to
@@ -1298,6 +1801,8 @@ export default function AgentEditPage({
 				composioActions: Array.from(selectedComposio),
 				skills: savedSkills,
 				identityProfileIds: Array.from(selectedIdentities),
+				identityMode,
+				accountAccess,
 				persona: {
 					display_name: personaDisplayName.trim() || null,
 					output_style_id:
@@ -1340,6 +1845,8 @@ export default function AgentEditPage({
 		selectedComposio,
 		savedSkills,
 		selectedIdentities,
+		identityMode,
+		accountAccess,
 		personaDisplayName,
 		personalityProfileId,
 		tone,
@@ -1371,11 +1878,15 @@ export default function AgentEditPage({
 	// Complete agent-definition history. Prompt Studio owns prompt-only snapshots;
 	// this source covers the persisted agent record so model, capabilities, safety,
 	// persona, and instructions can be compared and restored together.
-	const agentVersionSource = useMemo<VersionSource | null>(() => {
+	const agentVersionSource = useMemo<VersionSource<
+		Awaited<ReturnType<typeof restoreAgentVersion>>,
+		Awaited<ReturnType<typeof createAgentVersion>>
+	> | null>(() => {
 		if (isNew || !agentId) {
 			return null;
 		}
 		return {
+			scope: recordScope,
 			getValue: (versionId) =>
 				getAgentVersionSource(target, agentId, versionId),
 			list: async () =>
@@ -1388,26 +1899,36 @@ export default function AgentEditPage({
 			restore: (versionId) => restoreAgentVersion(target, agentId, versionId),
 			snapshot: (label) => createAgentVersion(target, agentId, label),
 		};
-	}, [agentId, isNew, target]);
+	}, [agentId, isNew, target, recordScope]);
 
 	const handleAgentVersionRestored = useCallback(async () => {
 		if (!agentId) {
 			return;
 		}
 		try {
+			if (!editorMounted.current || activeRecordScope.current !== recordScope) {
+				return;
+			}
 			const restored = await fetchAgent(target, agentId);
+			if (!editorMounted.current || activeRecordScope.current !== recordScope) {
+				return;
+			}
+			loadedRecordScope.current = recordScope;
 			setExisting(restored);
 			capabilitiesHydratedRef.current = false;
 			setHydrated(false);
 			setFormError(null);
 		} catch (error) {
+			if (!editorMounted.current || activeRecordScope.current !== recordScope) {
+				return;
+			}
 			setFormError(
 				error instanceof Error
 					? `Version restored, but the editor could not reload: ${error.message}`
 					: "Version restored, but the editor could not reload"
 			);
 		}
-	}, [agentId, target]);
+	}, [agentId, target, recordScope]);
 
 	const currentAgentVersionValue =
 		existing?.source ??
@@ -1429,6 +1950,7 @@ export default function AgentEditPage({
 				tools: savedTools,
 				skills: savedSkills,
 				composioActions: Array.from(selectedComposio),
+				identityMode,
 				tone,
 				personalityProfile:
 					personalityProfileId === AGENT_OWN_VOICE_PROFILE
@@ -1446,6 +1968,7 @@ export default function AgentEditPage({
 			savedTools,
 			savedSkills,
 			selectedComposio,
+			identityMode,
 			tone,
 			personalityProfileId,
 		]
@@ -1476,7 +1999,7 @@ export default function AgentEditPage({
 				    padlocks side by side said nothing about which was which. */}
 				{isBuiltIn ? <StatusBadge kind="builtin" /> : null}
 				{isLocked && !isBuiltIn ? (
-					<Badge className="gap-1" variant="secondary">
+					<Badge variant="secondary">
 						<HugeiconsIcon className="size-3" icon={LockedIcon} />
 						Locked
 					</Badge>
@@ -1500,14 +2023,6 @@ export default function AgentEditPage({
 		targetId: effectiveAgentId,
 		targetName: name,
 	});
-
-	if ((loading || recordLoading) && !hydrated) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
-	}
 
 	// Merge MCP tools from the loaded agent record with the available tools list
 	// so tools already on the agent show up even if the MCP endpoint returned empty.
@@ -1541,6 +2056,105 @@ export default function AgentEditPage({
 					: "missing"
 				: "ready"
 		: "missing";
+	// Event triggers whose events Core would skip under the identity and
+	// account access on screen (the same check it makes on every event). Each
+	// is marked paused; the ones that fire today are counted in the warning.
+	const pausedTriggers = new Set(
+		pausedTriggerIds(identityMode, accountAccess, triggerSubs)
+	);
+	const savedPausedTriggers = existing
+		? new Set(
+				pausedTriggerIds(
+					existing.identityMode,
+					existing.accountAccess,
+					triggerSubs
+				)
+			)
+		: pausedTriggers;
+	const stoppingTriggerCount = [...pausedTriggers].filter(
+		(id) => !savedPausedTriggers.has(id)
+	).length;
+	const triggerRows = triggerSubs.map((sub) => ({
+		...sub,
+		paused: pausedTriggers.has(sub.id),
+	}));
+	// Shown under the Identity cards when the chosen mode switches off accounts
+	// that are selected right now, or stops triggers that fire today. The
+	// selection is kept for switching back.
+	// A mode a newer version of this app's agent asked for. Core keeps the saved
+	// mode until the user accepts it (by saving the agent with it) or dismisses it.
+	const pendingIdentityMode = existing?.appIdentity?.pendingMode ?? null;
+	const keepCurrentIdentityMode = async () => {
+		if (!(agentId && existing) || dismissingPendingMode) {
+			return;
+		}
+		const recordScope = activeRecordScope.current;
+		setDismissingPendingMode(true);
+		try {
+			await updateAgentAccountSettings(target, agentId, {
+				dismissPendingIdentityMode: true,
+			});
+			if (editorMounted.current && activeRecordScope.current === recordScope) {
+				setIdentityMode(existing.identityMode);
+				setExisting((previous) =>
+					previous?.appIdentity
+						? {
+								...previous,
+								appIdentity: {
+									appMode:
+										previous.appIdentity.pendingMode ??
+										previous.appIdentity.appMode,
+									pendingMode: null,
+								},
+							}
+						: previous
+				);
+			}
+		} catch {
+			if (editorMounted.current) {
+				setFormError("Couldn't dismiss the identity request. Try again.");
+			}
+		} finally {
+			if (editorMounted.current) {
+				setDismissingPendingMode(false);
+			}
+		}
+	};
+	const identityModeWarning = identityModeAccountWarning(
+		identityMode,
+		accountAccess,
+		selectedIdentities.size,
+		stoppingTriggerCount
+	);
+	// The engine as it would be saved, and Core's answer for whether it starts
+	// under the identity and account access on screen (`useAgentLaunchCheck`).
+	const launchEngine =
+		chatModel === ACP_CUSTOM_ENGINE
+			? `${ACP_EXEC_PREFIX}${acpCommand.trim()}`
+			: chatModel || null;
+	const launch = useAgentLaunchCheck({
+		accountAccess,
+		agentId: effectiveAgentId,
+		engine: launchEngine,
+		identityMode,
+	});
+	// A remote A2A peer runs on another node under that node's accounts, so the
+	// editor shows a note instead of the identity choice and account access, and
+	// saves the record's identity and access unchanged.
+	const remotePeer = isRemotePeerEngine(launchEngine);
+	const agentConfined = agentIsConfined(identityMode, accountAccess);
+	// Core's refusal for a limited agent, when its engine won't start.
+	const limitedLaunchRefusal = agentConfined
+		? (launch.check?.reason ?? null)
+		: null;
+	// Shown in the Codex and custom-agent routing settings of a limited agent:
+	// those switches decide whether its engine may start at all. Claude Code's
+	// switch does not (it always calls Anthropic itself), so its settings show
+	// only Core's refusal.
+	const limitedRoutingNotice = agentConfined
+		? (limitedLaunchRefusal ??
+			"This agent's account access is limited, so this routing decides whether its engine may start. Ryu checks again before every start.")
+		: null;
 	const agentHealthInput = useMemo<AgentHealthInput>(
 		() => ({
 			access: {
@@ -1621,6 +2235,13 @@ export default function AgentEditPage({
 		[agentHealthInput]
 	);
 
+	// Keep all hooks above this loading guard. Existing agents begin with both
+	// roster and record loading, so returning before the derived health memos
+	// below used to change the hook count when the first request completed.
+	if ((loading || recordLoading) && !hydrated) {
+		return <SkeletonRows rows={6} spacing="library" />;
+	}
+
 	// Save stays disabled until an engine exists to run the agent. Explain the
 	// dead end on-screen instead of leaving the button silently greyed out.
 	const saveBlockedReason = saveBlockedMessage(
@@ -1668,6 +2289,22 @@ export default function AgentEditPage({
 					/>
 				) : null}
 				<AgentSettingsForm
+					accountAccessPanel={
+						remotePeer ? null : (
+							<AgentAccountAccessPanel
+								accountAccess={accountAccess}
+								agentId={effectiveAgentId}
+								disabled={isLocked}
+								engine={launchEngine}
+								identityMode={identityMode}
+								launchNoticesShownElsewhere={simpleEditor}
+								onAccountAccessChange={setAccountAccess}
+								onToggleIdentity={toggleIdentity}
+								savedIdentityMode={savedIdentityMode}
+								selectedIdentities={selectedIdentities}
+							/>
+						)
+					}
 					acpCommand={acpCommand}
 					acpSessionPanel={
 						!isNew && effectiveAgentId ? (
@@ -1675,12 +2312,13 @@ export default function AgentEditPage({
 						) : null
 					}
 					advancedInference={
-						<AdvancedInferenceSection
-							disabled={isLocked}
-							localEngine={isLocalEngine(chatModel)}
-							onChange={setSampling}
-							value={sampling}
-						/>
+						<SettingsSection caption="Engine launch options and sampling defaults apply across agents.">
+							<p className="text-muted-foreground text-sm leading-relaxed">
+								Choose Store → Engines, select the runtime, then edit its
+								Advanced configuration. Request-level overrides remain available
+								to the chat caller.
+							</p>
+						</SettingsSection>
 					}
 					agentIcon={
 						<AgentImageField
@@ -1695,6 +2333,10 @@ export default function AgentEditPage({
 							agents={agents}
 							disabled={isLocked}
 							engine={chatModel}
+							engineNote={
+								launch.check?.runsOnManagedPi ? MANAGED_PI_NOTE : null
+							}
+							identityMode={identityMode}
 							instructions={systemPrompt}
 							model={agentModel}
 							modelEngine={agentModelEngine}
@@ -1705,6 +2347,10 @@ export default function AgentEditPage({
 						/>
 					}
 					agentTitle={agentTitle}
+					bannerAgentId={effectiveAgentId ?? undefined}
+					bannerPreferenceStore={
+						effectiveAgentId ? agentBannerPreferenceStore : undefined
+					}
 					budgetPanel={
 						!isNew && effectiveAgentId ? (
 							<AgentBudgetPanel
@@ -1718,24 +2364,17 @@ export default function AgentEditPage({
 					}
 					capabilitiesPanel={
 						<>
-							<AgentExecutionPolicyPanel
-								disabled={isLocked}
-								isNew={isNew}
-								lifecycleStatus={lifecycleStatus}
-								onLifecycleStatusChange={(status) =>
-									savePosture({ lifecycleStatus: status })
-								}
-								onSafetyProfileChange={(profile) =>
-									savePosture({ safetyProfile: profile })
-								}
-								postureError={postureError}
-								postureSaving={postureSaving}
-								safetyProfile={safetyProfile}
-							/>
 							{effectiveAgentId ? (
 								<AgentCapabilitiesPanel
 									agentId={effectiveAgentId}
 									disabled={isLocked}
+								/>
+							) : null}
+							{!isNew && effectiveAgentId && effectiveAgentId !== "ryu" ? (
+								<AcpAgentSettingsPanel
+									agentId={effectiveAgentId}
+									disabled={isLocked}
+									limitedOnManagedPi={launch.check?.runsOnManagedPi ?? false}
 								/>
 							) : null}
 							<OrchestrationPanel
@@ -1747,15 +2386,31 @@ export default function AgentEditPage({
 							/>
 						</>
 					}
-					channelsPanel={<AgentChannelsSection agentId={effectiveAgentId} />}
+					channelsPanel={
+						<>
+							<AgentChannelsSection agentId={effectiveAgentId} />
+							<AgentEmailAliasSection
+								agentId={isNew ? null : effectiveAgentId}
+							/>
+						</>
+					}
 					chatModel={chatModel}
 					chatSlotDisabled={
 						isLocked || (isBuiltIn && installedAgentEngineOptions.length === 0)
 					}
 					claudeConfig={
-						agentId === "acp:claude" ? <ClaudeGatewayConfig /> : null
+						agentId === "acp:claude" ? (
+							<ClaudeGatewayConfig limitedNotice={limitedLaunchRefusal} />
+						) : null
 					}
-					codexConfig={agentId === "acp:codex" ? <CodexGatewayConfig /> : null}
+					codexConfig={
+						agentId === "acp:codex" ? (
+							<CodexGatewayConfig limitedNotice={limitedRoutingNotice} />
+						) : null
+					}
+					composioAccounts={
+						composioConfigured ? composioAccountOptions : undefined
+					}
 					composioActions={composioActionsQuery.data ?? []}
 					composioActionsLoading={composioActionsQuery.isLoading}
 					composioConfigured={composioConfigured}
@@ -1783,19 +2438,68 @@ export default function AgentEditPage({
 						isNew ? null : (
 							<AgentEvalsView
 								agentId={agentId ?? null}
-								defaultModel={chatModel}
+								defaultModel={agentModel}
 								target={target}
 							/>
 						)
 					}
+					executionPolicyPanel={
+						<AgentExecutionPolicyPanel
+							disabled={
+								isLocked ||
+								(!isNew && postureLoadedScope.current !== recordScope)
+							}
+							isNew={isNew}
+							lifecycleStatus={lifecycleStatus}
+							onLifecycleStatusChange={(status) =>
+								savePosture({ lifecycleStatus: status })
+							}
+							onPostureRetry={
+								postureError?.scope === recordScope && postureError.readRetry
+									? retryPostureRead
+									: undefined
+							}
+							onSafetyProfileChange={(profile) =>
+								savePosture({ safetyProfile: profile })
+							}
+							postureError={
+								postureError?.scope === recordScope
+									? postureError.message
+									: null
+							}
+							postureSaving={
+								Boolean(
+									postureEndpoint &&
+										agentPostureResources.get(postureEndpoint)?.pending
+								) ||
+								(postureSaving && posturePendingScope.current === recordScope)
+							}
+							safetyProfile={safetyProfile}
+						/>
+					}
 					formError={formError ?? saveBlockedReason}
 					gatewayRoutingConfig={
-						!isNew && agentId && chatModel === ACP_CUSTOM_ENGINE ? (
+						!isNew && agentId ? (
 							<div className="flex flex-col gap-6">
-								<GatewayRoutingConfig agentId={agentId} />
+								{chatModel === ACP_CUSTOM_ENGINE ? (
+									<GatewayRoutingConfig
+										agentId={agentId}
+										limitedNotice={limitedRoutingNotice}
+									/>
+								) : null}
 								<AgentSmartRouteOverride agentId={agentId} />
+								<AgentRoutePoolEditor agentId={agentId} />
 							</div>
 						) : null
+					}
+					goalPanel={
+						isNew || !effectiveAgentId ? null : (
+							<AgentGoalPanel
+								agentId={effectiveAgentId}
+								disabled={isLocked}
+								target={target}
+							/>
+						)
 					}
 					healthBadge={<ScorecardBadge scorecard={agentHealthScorecard} />}
 					healthPanel={
@@ -1830,13 +2534,57 @@ export default function AgentEditPage({
 					historyPanel={
 						isNew || !agentId ? null : <AgentRunHistoryView agentId={agentId} />
 					}
-					identityPanel={
-						<IdentityPanel
-							disabled={isLocked}
-							onToggle={toggleIdentity}
-							selected={selectedIdentities}
-						/>
+					identityModePanel={
+						remotePeer ? (
+							<AgentRemotePeerIdentityNote />
+						) : (
+							<div className="flex flex-col gap-3">
+								{pendingIdentityMode && existing ? (
+									<AgentPendingIdentityModeNotice
+										busy={dismissingPendingMode || savingScope !== null}
+										disabled={isLocked}
+										keptMode={existing.identityMode}
+										onAccept={setIdentityMode}
+										onKeepCurrent={() => void keepCurrentIdentityMode()}
+										pendingMode={pendingIdentityMode}
+										selectedMode={identityMode}
+									/>
+								) : null}
+								<AgentIdentityModePicker
+									disabled={isLocked}
+									onChange={setIdentityMode}
+									value={identityMode}
+								/>
+								{identityModeWarning ? (
+									<p
+										className="px-3.5 text-status-warning text-xs leading-snug"
+										role="status"
+									>
+										{identityModeWarning}
+									</p>
+								) : null}
+								<AgentLaunchWarning
+									check={launch.check}
+									disabled={isLocked}
+									engine={launchEngine}
+									modelsLimited={agentModelsLimited(
+										identityMode,
+										accountAccess
+									)}
+									onUseRyu={
+										isBuiltIn
+											? undefined
+											: () => {
+													setChatModel(RYU_ENGINE_ID);
+													setAgentModel("");
+													setAgentModelEngine(null);
+												}
+									}
+								/>
+							</div>
+						)
 					}
+					initialSettingId={initialSettingId}
 					integrationsPanel={
 						isNew || !agentId ? null : (
 							<IntegrationsPanel agentId={agentId} target={target} />
@@ -1845,15 +2593,7 @@ export default function AgentEditPage({
 					isBuiltIn={isBuiltIn}
 					isLocked={isLocked}
 					isNew={isNew}
-					launchConfig={
-						localEngineSelected && launchModelId ? (
-							<ModelLaunchConfigSection
-								modelId={launchModelId}
-								subtitle={launchModelName}
-								subtitleTitle={launchModelTitle}
-							/>
-						) : null
-					}
+					marketplaceWallpapers={marketplaceWallpapers}
 					memoryReadLevels={memoryReadLevels}
 					memorySpaceIds={memorySpaceIds}
 					memoryWriteEnabled={memoryWriteEnabled}
@@ -1862,7 +2602,7 @@ export default function AgentEditPage({
 						isNew || !agentId ? null : (
 							<AgentObservabilityView
 								agentId={agentId}
-								defaultModel={agentModel || chatModel || "gpt-4o-mini"}
+								defaultModel={agentModel}
 								onOpenRun={(conversationId) =>
 									openTab("/chat", { conversationId })
 								}
@@ -1885,8 +2625,15 @@ export default function AgentEditPage({
 					onDailyTimeChange={setDailyTime}
 					onDeleteTrigger={handleDeleteTrigger}
 					onDescriptionChange={setDescription}
+					onInstallWallpaper={(wallpaper) => installWallpaper(wallpaper.id)}
 					onMemoryWriteEnabledChange={setMemoryWriteEnabled}
 					onNameChange={setName}
+					onOpenAdvanced={
+						simpleEditor && consoleAccess
+							? () =>
+									confirmLevelChange("expert", () => setProductMode("console"))
+							: undefined
+					}
 					onPersonaDisplayNameChange={setPersonaDisplayName}
 					onPersonalityProfileChange={setPersonalityProfileId}
 					onRemoveRule={(index) =>
@@ -1905,7 +2652,21 @@ export default function AgentEditPage({
 						}
 						setScheduleEnabled(next);
 					}}
-					onSchedulePhraseChange={(v) => setSchedulePhrase(v as SchedulePhrase)}
+					onSchedulePhraseChange={(value) => {
+						const options: SchedulePhrase[] = [
+							"everyminute",
+							"hourly",
+							"daily",
+							"weekdays",
+							"weekends",
+							"weekly",
+							"custom",
+						];
+						const selected = options.find((option) => option === value);
+						if (selected) {
+							setSchedulePhrase(selected);
+						}
+					}}
 					onSelectAllComposio={selectAllComposio}
 					onSubscribeTrigger={() => handleSubscribeTrigger()}
 					onToggleComposio={toggleComposio}
@@ -1913,10 +2674,28 @@ export default function AgentEditPage({
 					onToggleMemorySpace={toggleMemorySpace}
 					onToggleSkill={toggleSkill}
 					onToggleTool={toggleTool}
-					onToneChange={(v) => setTone(v as ToneOption)}
+					onToneChange={(value) => {
+						const selected = TONE_OPTIONS.find(
+							(option) => option.value === value
+						);
+						if (selected) {
+							setTone(selected.value);
+						}
+					}}
 					onTriggerSlugChange={setTriggerSlug}
 					onWeeklyDayChange={setWeeklyDay}
 					onWeeklyTimeChange={setWeeklyTime}
+					optimizationsPanel={
+						isNew || !agentId ? null : (
+							<AgentOptimizationsView
+								agentId={agentId}
+								disabled={isLocked}
+								onApplied={reloadAfterOptimization}
+								target={target}
+							/>
+						)
+					}
+					ownAccountsAllowed={modeHasOwnAccounts(identityMode)}
 					passportPanel={
 						isNew || !effectiveAgentId || !existing ? null : (
 							<AgentPassportPanel
@@ -1932,7 +2711,7 @@ export default function AgentEditPage({
 					piConfig={agentId === "ryu" ? <RyuPiConfig /> : null}
 					preview={previewProps}
 					promptStudioPanel={
-						isNew || !canUse("prompt-studio") ? null : (
+						isNew ? null : (
 							<PromptStudio
 								agentId={agentId ?? null}
 								engine={chatModel}
@@ -1968,6 +2747,12 @@ export default function AgentEditPage({
 							: null
 					}
 					saveDisabled={
+						Boolean(
+							postureEndpoint &&
+								agentPostureResources.get(postureEndpoint)?.pending
+						) ||
+						posturePendingScope.current === recordScope ||
+						(!isNew && postureLoadedScope.current !== recordScope) ||
 						saving ||
 						installedAgentEngineOptions.length === 0 ||
 						selectedUninstalledAgent ||
@@ -1980,7 +2765,8 @@ export default function AgentEditPage({
 					selectedSkills={selectedSkills}
 					selectedTools={selectedTools}
 					showAcpCommand={chatModel === ACP_CUSTOM_ENGINE}
-					showComposioTriggers={composioConfigured && !isNew}
+					showComposioTriggers={composioConfigured && !isNew && !simpleEditor}
+					simple={simpleEditor}
 					skills={availableSkills}
 					skillsLoading={skillsLoading}
 					spaces={availableSpaces}
@@ -1992,7 +2778,7 @@ export default function AgentEditPage({
 					toolsLoading={toolsLoading}
 					triggerError={triggerError}
 					triggerSlug={triggerSlug}
-					triggerSubs={triggerSubs}
+					triggerSubs={triggerRows}
 					versionHistoryPanel={
 						agentVersionSource ? (
 							<AgentVersionHistoryPanel
@@ -2007,71 +2793,16 @@ export default function AgentEditPage({
 					weeklyTime={weeklyTime}
 				/>
 			</div>
+			<PromptCacheConfirmDialog
+				confirmation={promptEditConfirmation}
+				onApply={() => {
+					setPromptEditConfirmation(null);
+					promptEditConfirmed.current = true;
+					handleSave().catch(() => undefined);
+				}}
+				onCancel={() => setPromptEditConfirmation(null)}
+			/>
+			{responseModeDialog}
 		</div>
-	);
-}
-
-/** Per-agent Identity Vault profile picker. Options come from the connections the
- *  user created on the Identities page (a profile exists only once a connection
- *  carries it). Empty selection = the agent is bound to no profiles. */
-function IdentityPanel({
-	selected,
-	onToggle,
-	disabled,
-}: {
-	selected: Set<string>;
-	onToggle: (profileId: string) => void;
-	disabled: boolean;
-}) {
-	const { profileIds, loading } = useIdentities();
-
-	return (
-		<SettingsSection
-			caption="Bind Identity Vault profiles so this agent acts as a logged-in user on their connected domains. Leave all unchecked to bind no profiles. Create connections on the Identities page. Credentials are encrypted and never sent to the model."
-			headerAction={
-				selected.size > 0 ? (
-					<Badge variant="secondary">{selected.size}</Badge>
-				) : undefined
-			}
-			title="Identities"
-		>
-			<SettingsCard className="flex flex-col gap-3">
-				{loading ? (
-					<div className="flex items-center gap-2 text-muted-foreground text-xs">
-						<Spinner className="size-3" />
-						Loading profiles…
-					</div>
-				) : null}
-				{!loading && profileIds.length === 0 ? (
-					<p className="text-muted-foreground text-sm">
-						No identity profiles yet. Create a connection on the Identities page
-						to define one.
-					</p>
-				) : null}
-				{!loading && profileIds.length > 0 ? (
-					<div className="flex flex-col gap-2">
-						{profileIds.map((profileId) => {
-							const checkId = `identity-${profileId}`;
-							return (
-								<div className="flex items-start gap-3" key={profileId}>
-									<Checkbox
-										checked={selected.has(profileId)}
-										disabled={disabled}
-										id={checkId}
-										onCheckedChange={() => onToggle(profileId)}
-									/>
-									<Label
-										className="cursor-pointer font-normal text-sm"
-										htmlFor={checkId}
-									>
-										<span className="font-medium">{profileId}</span>
-									</Label>
-								</div>
-							);
-						})}
-					</div>
-				) : null}
-			</SettingsCard>
-		</SettingsSection>
 	);
 }

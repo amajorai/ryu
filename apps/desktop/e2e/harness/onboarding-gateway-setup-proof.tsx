@@ -12,12 +12,7 @@ const target = { token: null, url: "http://127.0.0.1:7980" };
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
-	const url =
-		typeof input === "string"
-			? input
-			: input instanceof URL
-				? input.toString()
-				: input.url;
+	const url = input instanceof Request ? input.url : String(input);
 	if (url.endsWith("/api/channels/managed-bot/pair")) {
 		return Response.json({
 			deep_link: "https://t.me/ryu_manager?start=mb_proof",
@@ -61,6 +56,7 @@ function profileProps(onContinue: () => void) {
 		defaultProviderIds: [],
 		freeCloud: false,
 		importing: false,
+		// SAFETY: The authored profile literal is an actual OnboardingSetupKind member used by this mounted fixture; no external runtime kind is coerced.
 		kind: "profile" as OnboardingSetupKind,
 		localSelection: EMPTY_AGENT_SELECTION,
 		onBackgroundProfile: () => undefined,
@@ -97,7 +93,7 @@ function Proof() {
 	return (
 		<main className="min-h-screen bg-background p-6 text-foreground">
 			<div className="mx-auto max-w-[1500px]">
-				<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+				<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 					Onboarding · React verification artifact
 				</p>
 				<h1 className="mt-3 font-semibold text-3xl">
@@ -151,4 +147,4 @@ function Proof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(<Proof />);
+createRoot(document.getElementById("root")!).render(<Proof />);

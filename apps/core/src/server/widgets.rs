@@ -506,10 +506,17 @@ async fn send_exec_tool(
 
     let mut req = client
         .post(&endpoint)
-        .timeout(Duration::from_secs(30))
+        .timeout(tool_forward_timeout(session_id))
         .json(&payload);
     if let Some(tok) = token {
         req = req.bearer_auth(tok);
+    }
+    // Nest the Gateway's exec spans (and Core's own dispatch behind it) under
+    // the calling tool span. No-op without an exportable context.
+    let mut trace_headers = reqwest::header::HeaderMap::new();
+    crate::telemetry::propagation::inject_current(&mut trace_headers);
+    if !trace_headers.is_empty() {
+        req = req.headers(trace_headers);
     }
 
     match req.send().await {
@@ -569,6 +576,16 @@ async fn send_exec_tool(
             }
         }
     }
+}
+
+fn tool_forward_timeout(conversation_id: &str) -> Duration {
+    // Scoped calls can wait for a human form answer for five minutes. Keep
+    // network/provider overhead bounded without extending detached calls.
+    Duration::from_secs(if conversation_id.trim().is_empty() {
+        30
+    } else {
+        360
+    })
 }
 
 fn allow_gateway_fallback() -> bool {
@@ -753,7 +770,7 @@ const WIDGET_STATE_MAX_BYTES: usize = 64 * 1024;
 /// Maximum number of nested JSON containers retained for a widget state.
 const WIDGET_STATE_MAX_DEPTH: usize = 32;
 
-fn validate_widget_state(state: &Value) -> Result<(), &'static str> {
+pub(crate) fn validate_widget_state(state: &Value) -> Result<(), &'static str> {
     let serialized = serde_json::to_vec(state).map_err(|_| "widget state is not valid JSON")?;
     if serialized.len() > WIDGET_STATE_MAX_BYTES {
         return Err("widget state exceeds the maximum serialized size");
@@ -830,6 +847,8 @@ pub async fn widget_state(
 //      targets even if an allowlist entry names one, and pins the resolved address.
 //   4. a content-type allowlist (image/font/audio/video only) + size cap +
 //      timeout, and every fetch is exec-audited so the Gateway sees the egress.
+//   5. every proxied response carries a sandboxing CSP, so an asset opened as a
+//      top-level document (e.g. a scripted SVG) never runs script in Core's origin.
 
 /// Max bytes proxied for a single asset (fail-closed above this).
 const WIDGET_ASSET_MAX_BYTES: usize = 25 * 1024 * 1024;
@@ -998,6 +1017,22 @@ pub async fn widget_asset(
     //    *` is REQUIRED: a null-origin frame's cross-origin `@font-face` fetch is
     //    CORS-gated and silently fails without it (images are no-cors, so ACAO is a
     //    harmless no-op for them). `nosniff` + a modest cache round it out.
+    widget_asset_response(content_type, bytes)
+}
+
+/// CSP on every proxied widget asset. The bytes are upstream-chosen and served
+/// from Core's origin on the public router, and the type gate admits scriptable
+/// `image/svg+xml`, so a top-level navigation to the asset must not become a
+/// live document: `sandbox` (no `allow-*`) disables script and gives it an opaque
+/// origin, and `default-src 'none'` blocks every fetch. The `data:` image/font
+/// and inline-style allowances mirror the widget frame's own passive-asset CSP so
+/// an SVG rendered as `<img>` (where some engines apply this header) keeps its
+/// embedded images, fonts, and styles; none of them is a script or network channel.
+const WIDGET_ASSET_CSP: &str =
+    "default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; sandbox";
+
+/// The 200 response for a proxied widget asset (step 9 of [`widget_asset`]).
+fn widget_asset_response(content_type: String, bytes: Vec<u8>) -> axum::response::Response {
     (
         StatusCode::OK,
         [
@@ -1008,6 +1043,7 @@ pub async fn widget_asset(
                 HeaderName::from_static("x-content-type-options"),
                 "nosniff".to_owned(),
             ),
+            (header::CONTENT_SECURITY_POLICY, WIDGET_ASSET_CSP.to_owned()),
         ],
         bytes,
     )
@@ -1193,6 +1229,22 @@ mod asset_proxy_tests {
         validate_widget_state, WIDGET_STATE_MAX_BYTES, WIDGET_STATE_MAX_DEPTH,
     };
     use serde_json::{json, Value};
+
+    #[test]
+    fn scoped_tool_forwards_allow_form_waits_without_extending_detached_calls() {
+        assert_eq!(
+            super::tool_forward_timeout("conversation"),
+            std::time::Duration::from_secs(360)
+        );
+        assert_eq!(
+            super::tool_forward_timeout(""),
+            std::time::Duration::from_secs(30)
+        );
+        assert_eq!(
+            super::tool_forward_timeout("  "),
+            std::time::Duration::from_secs(30)
+        );
+    }
 
     #[test]
     fn normalize_accepts_public_hosts_rejects_wildcards_and_bare_labels() {
@@ -1469,6 +1521,62 @@ mod asset_proxy_tests {
         assert!(!content_type_is_allowed("application/json"));
         assert!(!content_type_is_allowed(""));
         assert!(!content_type_is_allowed("text/html; charset=utf-8"));
+    }
+
+    /// The proxy is public on Core's origin and relays scriptable `image/svg+xml`,
+    /// so every 200 must carry a sandboxing CSP: `sandbox` with no `allow-*` token
+    /// (no script, opaque origin) and `default-src 'none'` with no script/connect
+    /// widening. The passive-subresource headers the widget frame relies on stay
+    /// exactly as they were.
+    #[test]
+    fn asset_response_is_csp_sandboxed_for_every_proxied_type() {
+        use super::widget_asset_response;
+        use axum::http::header;
+
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#;
+        for content_type in [
+            "image/svg+xml",
+            "image/svg+xml; charset=utf-8",
+            "image/png",
+            "font/woff2",
+            "video/mp4",
+            "application/octet-stream",
+        ] {
+            let resp = widget_asset_response(content_type.to_owned(), svg.to_vec());
+            assert_eq!(resp.status(), StatusCode::OK);
+            let headers = resp.headers();
+            let csp = headers
+                .get(header::CONTENT_SECURITY_POLICY)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_else(|| panic!("{content_type}: asset response must set a CSP"));
+            let directives: Vec<&str> = csp.split(';').map(str::trim).collect();
+            assert!(directives.contains(&"sandbox"), "{content_type}: {csp}");
+            assert!(
+                directives.contains(&"default-src 'none'"),
+                "{content_type}: {csp}"
+            );
+            assert!(!csp.contains("allow-"), "{content_type}: {csp}");
+            assert!(
+                !directives
+                    .iter()
+                    .any(|d| d.starts_with("script-src") || d.starts_with("connect-src")),
+                "{content_type}: {csp}"
+            );
+
+            assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), content_type);
+            assert_eq!(
+                headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(),
+                "*"
+            );
+            assert_eq!(
+                headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+                "nosniff"
+            );
+            assert_eq!(
+                headers.get(header::CACHE_CONTROL).unwrap(),
+                "public, max-age=3600"
+            );
+        }
     }
 
     fn mint(store: &WidgetInstanceStore, may_send_follow_up: bool) -> WidgetInstance {

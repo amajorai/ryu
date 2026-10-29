@@ -1,0 +1,679 @@
+{
+  "protocolVersion": "ryu.managed-agents.v1",
+  "inputs": {
+    "createAgent": {
+      "name": "Support triage",
+      "description": null,
+      "model": "claude-opus-5-5",
+      "instructions": "You triage support tickets.",
+      "reasoningEffort": "medium",
+      "tools": [
+        {
+          "type": "builtin",
+          "name": "web_search",
+          "allowedDomains": ["docs.example.com"]
+        },
+        {
+          "type": "custom",
+          "name": "lookup_order",
+          "description": "Find an order by id",
+          "inputSchema": {
+            "type": "object",
+            "properties": { "orderId": { "type": "string" } },
+            "required": ["orderId"]
+          }
+        }
+      ],
+      "mcpServers": [
+        {
+          "name": "tickets",
+          "url": "https://mcp.example.com/mcp",
+          "allowedTools": null
+        }
+      ],
+      "metadata": { "team": "support" }
+    },
+    "updateAgent": {
+      "expectedVersion": 1,
+      "instructions": "You triage support tickets and suggest a priority.",
+      "reasoningEffort": null,
+      "metadata": { "team": "support", "owner": null }
+    },
+    "createEnvironment": {
+      "anthropic": {
+        "name": "claude-prod",
+        "description": null,
+        "backend": "anthropic",
+        "credential": {
+          "source": "byok",
+          "credentialId": "mcred_f82a3a00752b694f4bc2a7f40bb14448"
+        },
+        "config": {
+          "networking": {
+            "type": "limited",
+            "allowedHosts": ["api.example.com"],
+            "allowPackageManagers": true,
+            "allowMcpServers": true
+          },
+          "packages": {
+            "apt": [],
+            "cargo": [],
+            "gem": [],
+            "go": [],
+            "npm": [],
+            "pip": ["pandas"]
+          }
+        }
+      },
+      "openai": {
+        "name": "openai-prod",
+        "backend": "openai",
+        "credential": { "source": "platform" }
+      },
+      "gemini": {
+        "name": "gemini-prod",
+        "description": "Gemini with a narrow allowlist",
+        "backend": "gemini",
+        "credential": { "source": "platform" },
+        "config": {
+          "network": {
+            "type": "allowlist",
+            "domains": ["*.example.com", "api.example.org"]
+          },
+          "maxTotalTokens": 200000
+        }
+      },
+      "ryu_node": {
+        "name": "office-node",
+        "backend": "ryu_node",
+        "credential": { "source": "none" },
+        "config": { "nodeId": "4f0c2a9e-6d4b-4f1e-9a63-2b8f0d7c5e11" }
+      },
+      "ryu_serverless": {
+        "name": "serverless-preview",
+        "backend": "ryu_serverless"
+      }
+    },
+    "updateEnvironment": {
+      "expectedRevision": 1,
+      "name": "claude-prod-2",
+      "config": {
+        "networking": { "type": "limited", "allowedHosts": ["api.example.com"] }
+      }
+    },
+    "createCredential": {
+      "provider": "anthropic",
+      "label": "Production key",
+      "apiKey": "sk-ant-example-0000000000000000"
+    },
+    "rotateCredential": {
+      "apiKey": "sk-ant-example-1111111111111111"
+    },
+    "createSession": {
+      "agentId": "magt_99d6c3da89ede61e1136eda4c3586ae5",
+      "agentVersion": 3,
+      "environmentId": "menv_297797c5c1da7ff84a99ac4f7e6a89ae",
+      "title": "Ticket 1234",
+      "metadata": { "ticket": "1234" },
+      "budget": { "maxCostMicroUsd": 2000000 },
+      "initialEvents": [
+        {
+          "type": "user.message",
+          "content": [{ "type": "text", "text": "Summarize ticket 1234" }]
+        }
+      ]
+    },
+    "updateSession": {
+      "title": "Ticket 1234 (escalated)",
+      "metadata": { "ticket": null, "priority": "high" }
+    },
+    "sendEvents": {
+      "messages": {
+        "events": [
+          {
+            "type": "user.message",
+            "content": [
+              { "type": "text", "text": "What is the weather in Oslo?" }
+            ]
+          }
+        ]
+      },
+      "interrupt": {
+        "events": [{ "type": "user.interrupt" }]
+      },
+      "customToolResults": {
+        "events": [
+          {
+            "type": "user.custom_tool_result",
+            "toolUseId": "mtool_282960f9254fdec6c49291a498e6ca78",
+            "content": [{ "type": "text", "text": "4°C, rain" }],
+            "isError": false
+          }
+        ]
+      }
+    },
+    "cancelSession": {
+      "reason": "No longer needed"
+    }
+  },
+  "responses": {
+    "agent": {
+      "id": "magt_99d6c3da89ede61e1136eda4c3586ae5",
+      "version": 3,
+      "name": "Support triage",
+      "description": null,
+      "model": "claude-opus-5-5",
+      "instructions": "You triage support tickets.",
+      "tools": [
+        {
+          "type": "builtin",
+          "name": "web_search",
+          "allowedDomains": ["docs.example.com"]
+        },
+        {
+          "type": "custom",
+          "name": "lookup_order",
+          "description": "Find an order by id",
+          "inputSchema": {
+            "type": "object",
+            "properties": { "orderId": { "type": "string" } },
+            "required": ["orderId"]
+          }
+        }
+      ],
+      "mcpServers": [
+        {
+          "name": "tickets",
+          "url": "https://mcp.example.com/mcp",
+          "allowedTools": null
+        }
+      ],
+      "reasoningEffort": "medium",
+      "metadata": { "team": "support" },
+      "archivedAt": null,
+      "createdAt": "2026-10-10T12:00:00.000Z",
+      "updatedAt": "2026-10-10T12:30:00.000Z"
+    },
+    "agentVersion": {
+      "agentId": "magt_99d6c3da89ede61e1136eda4c3586ae5",
+      "version": 3,
+      "name": "Support triage",
+      "description": null,
+      "model": "claude-opus-5-5",
+      "instructions": "You triage support tickets.",
+      "tools": [
+        {
+          "type": "builtin",
+          "name": "web_search",
+          "allowedDomains": ["docs.example.com"]
+        }
+      ],
+      "mcpServers": [],
+      "reasoningEffort": "medium",
+      "metadata": { "team": "support" },
+      "createdAt": "2026-10-10T12:30:00.000Z"
+    },
+    "agentList": {
+      "data": [
+        {
+          "id": "magt_99d6c3da89ede61e1136eda4c3586ae5",
+          "version": 3,
+          "name": "Support triage",
+          "description": null,
+          "model": "claude-opus-5-5",
+          "instructions": null,
+          "tools": [],
+          "mcpServers": [],
+          "reasoningEffort": null,
+          "metadata": {},
+          "archivedAt": null,
+          "createdAt": "2026-10-10T12:00:00.000Z",
+          "updatedAt": "2026-10-10T12:30:00.000Z"
+        }
+      ],
+      "nextCursor": "eyJ0IjoxNzkxNjM3MjAwMDAwLCJpZCI6Im1hZ3RfOTlkNmMzZGE4OWVkZTYxZTExMzZlZGE0YzM1ODZhZTUifQ"
+    },
+    "environments": {
+      "anthropic": {
+        "id": "menv_297797c5c1da7ff84a99ac4f7e6a89ae",
+        "name": "claude-prod",
+        "description": null,
+        "backend": "anthropic",
+        "credential": {
+          "source": "byok",
+          "credentialId": "mcred_f82a3a00752b694f4bc2a7f40bb14448"
+        },
+        "config": {
+          "networking": {
+            "type": "limited",
+            "allowedHosts": ["api.example.com"],
+            "allowPackageManagers": true,
+            "allowMcpServers": true
+          },
+          "packages": {
+            "apt": [],
+            "cargo": [],
+            "gem": [],
+            "go": [],
+            "npm": [],
+            "pip": ["pandas"]
+          }
+        },
+        "revision": 2,
+        "archivedAt": null,
+        "createdAt": "2026-10-10T12:00:00.000Z",
+        "updatedAt": "2026-10-10T12:10:00.000Z"
+      },
+      "openai": {
+        "id": "menv_c931b190b287081d6cd5979d6eb6019e",
+        "name": "openai-prod",
+        "description": null,
+        "backend": "openai",
+        "credential": { "source": "platform" },
+        "config": {
+          "mode": "responses",
+          "codeExecutionTool": "code_interpreter",
+          "container": {
+            "memoryLimit": "4g",
+            "network": { "type": "disabled" }
+          },
+          "maxToolCalls": null,
+          "vectorStoreIds": []
+        },
+        "revision": 1,
+        "archivedAt": null,
+        "createdAt": "2026-10-10T12:00:00.000Z",
+        "updatedAt": "2026-10-10T12:00:00.000Z"
+      },
+      "gemini": {
+        "id": "menv_bdfd59d1c5cf433ad16e14831c274a0f",
+        "name": "gemini-prod",
+        "description": "Gemini with a narrow allowlist",
+        "backend": "gemini",
+        "credential": { "source": "platform" },
+        "config": {
+          "agent": "antigravity-preview-09-2026",
+          "network": {
+            "type": "allowlist",
+            "domains": ["*.example.com", "api.example.org"]
+          },
+          "maxTotalTokens": 200000
+        },
+        "revision": 1,
+        "archivedAt": null,
+        "createdAt": "2026-10-10T12:00:00.000Z",
+        "updatedAt": "2026-10-10T12:00:00.000Z"
+      },
+      "ryu_node": {
+        "id": "menv_c48ce52e4fccc6f12fad0a94a036e3d6",
+        "name": "office-node",
+        "description": null,
+        "backend": "ryu_node",
+        "credential": { "source": "none" },
+        "config": {
+          "nodeId": "4f0c2a9e-6d4b-4f1e-9a63-2b8f0d7c5e11",
+          "timeoutSeconds": 60,
+          "runAsUserId": "6720a3c1f0e1d2c3b4a59687"
+        },
+        "revision": 1,
+        "archivedAt": null,
+        "createdAt": "2026-10-10T12:00:00.000Z",
+        "updatedAt": "2026-10-10T12:00:00.000Z"
+      },
+      "ryu_serverless": {
+        "id": "menv_726bafce455850785a20deb6a7267dcb",
+        "name": "serverless-preview",
+        "description": null,
+        "backend": "ryu_serverless",
+        "credential": { "source": "none" },
+        "config": {},
+        "revision": 1,
+        "archivedAt": "2026-10-10T13:00:00.000Z",
+        "createdAt": "2026-10-10T12:00:00.000Z",
+        "updatedAt": "2026-10-10T13:00:00.000Z"
+      }
+    },
+    "credential": {
+      "id": "mcred_f82a3a00752b694f4bc2a7f40bb14448",
+      "provider": "anthropic",
+      "label": "Production key",
+      "keyHint": "0000",
+      "fingerprint": "3f1c9a0b5d7e2f48",
+      "createdAt": "2026-10-10T11:00:00.000Z",
+      "updatedAt": "2026-10-10T11:00:00.000Z",
+      "revokedAt": null
+    },
+    "session": {
+      "id": "msess_f134fbee29b73487eafbf568809a051d",
+      "agentId": "magt_99d6c3da89ede61e1136eda4c3586ae5",
+      "agentVersion": 3,
+      "environmentId": "menv_297797c5c1da7ff84a99ac4f7e6a89ae",
+      "environmentRevision": 2,
+      "backend": "anthropic",
+      "title": "Ticket 1234",
+      "metadata": { "ticket": "1234" },
+      "status": "idle",
+      "stopReason": "requires_action",
+      "pendingToolUseIds": ["mtool_282960f9254fdec6c49291a498e6ca78"],
+      "lastError": null,
+      "headSeq": 8,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 340,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 2048,
+        "reasoningTokens": 0,
+        "webSearchRequests": 1,
+        "activeSeconds": 12.5,
+        "listCostMicroUsd": 21000
+      },
+      "billedMicroUsd": 21000,
+      "budget": { "maxCostMicroUsd": 2000000 },
+      "closing": null,
+      "createdAt": "2026-10-10T12:00:00.000Z",
+      "updatedAt": "2026-10-10T12:00:20.000Z",
+      "startedAt": "2026-10-10T12:00:03.000Z",
+      "endedAt": null
+    },
+    "events": [
+      {
+        "id": "mevt_c21dcfad15ebc2eb24876a7c59e5f305",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 1,
+        "createdAt": "2026-10-10T12:00:00.000Z",
+        "type": "session.status",
+        "status": "pending",
+        "stopReason": null,
+        "pendingToolUseIds": [],
+        "detail": "provisioning",
+        "inputSeq": null
+      },
+      {
+        "id": "mevt_af5e4af0106b7cc309399ea373ad9819",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 2,
+        "createdAt": "2026-10-10T12:00:00.001Z",
+        "type": "user.message",
+        "content": [{ "type": "text", "text": "What is the weather in Oslo?" }]
+      },
+      {
+        "id": "mevt_5dcd9b1bab7179d7dea73300bdd218da",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 3,
+        "createdAt": "2026-10-10T12:00:03.000Z",
+        "type": "session.status",
+        "status": "running",
+        "stopReason": null,
+        "pendingToolUseIds": [],
+        "detail": null,
+        "inputSeq": 2
+      },
+      {
+        "id": "mevt_c3417458bf7e042797020650119581b8",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 4,
+        "createdAt": "2026-10-10T12:00:05.000Z",
+        "type": "agent.tool_use",
+        "toolUseId": "mtool_fef283329845543d126588f65f3a3e71",
+        "name": "web_search",
+        "input": { "query": "Oslo weather" },
+        "inputTruncated": false,
+        "source": "builtin",
+        "server": null
+      },
+      {
+        "id": "mevt_f97518cf25ca38d948f5cf174ae5a743",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 5,
+        "createdAt": "2026-10-10T12:00:07.000Z",
+        "type": "agent.tool_result",
+        "toolUseId": "mtool_fef283329845543d126588f65f3a3e71",
+        "content": [{ "type": "text", "text": "Forecast: rain, 4°C." }],
+        "isError": false,
+        "truncated": false
+      },
+      {
+        "id": "mevt_6fa99c94e3714328706a73606ac4cb9d",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 6,
+        "createdAt": "2026-10-10T12:00:09.000Z",
+        "type": "agent.custom_tool_use",
+        "toolUseId": "mtool_282960f9254fdec6c49291a498e6ca78",
+        "name": "get_weather",
+        "input": { "location": "Oslo" }
+      },
+      {
+        "id": "mevt_4936e6162c22d17d4bc64f8962170e1b",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 7,
+        "createdAt": "2026-10-10T12:00:10.000Z",
+        "type": "session.usage",
+        "cumulative": {
+          "inputTokens": 1200,
+          "outputTokens": 340,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 2048,
+          "reasoningTokens": 0,
+          "webSearchRequests": 1,
+          "activeSeconds": 12.5,
+          "listCostMicroUsd": 21000
+        },
+        "delta": {
+          "inputTokens": 1200,
+          "outputTokens": 340,
+          "cacheReadInputTokens": 0,
+          "cacheWriteInputTokens": 2048,
+          "reasoningTokens": 0,
+          "webSearchRequests": 1,
+          "activeSeconds": 12.5,
+          "listCostMicroUsd": 21000
+        },
+        "billing": { "mode": "platform", "amountMicroUsd": 21000 }
+      },
+      {
+        "id": "mevt_89cdde7850dc3590eb4278889573a619",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 8,
+        "createdAt": "2026-10-10T12:00:10.001Z",
+        "type": "session.status",
+        "status": "idle",
+        "stopReason": "requires_action",
+        "pendingToolUseIds": ["mtool_282960f9254fdec6c49291a498e6ca78"],
+        "detail": null,
+        "inputSeq": 2
+      },
+      {
+        "id": "mevt_ed13795e5bbcaae24e3266b1279f8374",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 9,
+        "createdAt": "2026-10-10T12:00:20.000Z",
+        "type": "user.custom_tool_result",
+        "toolUseId": "mtool_282960f9254fdec6c49291a498e6ca78",
+        "content": [{ "type": "text", "text": "4°C, rain" }],
+        "isError": false
+      },
+      {
+        "id": "mevt_1824bc137eeb9ec5ba69b30a8b33539e",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 10,
+        "createdAt": "2026-10-10T12:00:21.000Z",
+        "type": "session.status",
+        "status": "running",
+        "stopReason": null,
+        "pendingToolUseIds": [],
+        "detail": null,
+        "inputSeq": 9
+      },
+      {
+        "id": "mevt_7cd288a6aa7855c32e45f7a6e43b55b1",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 11,
+        "createdAt": "2026-10-10T12:00:23.000Z",
+        "type": "session.error",
+        "code": "mcp_connection_failed",
+        "message": "The model provider could not connect to an MCP server.",
+        "retryable": true,
+        "source": "vendor",
+        "details": {
+          "vendorCode": "mcp_connection_failed_error",
+          "mcpServer": "tickets"
+        }
+      },
+      {
+        "id": "mevt_f18f6f668b35b9e9b35edb8974e637eb",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 12,
+        "createdAt": "2026-10-10T12:00:25.000Z",
+        "type": "agent.message",
+        "content": [
+          { "type": "text", "text": "It is 4°C and raining in Oslo." },
+          { "type": "redacted" }
+        ]
+      },
+      {
+        "id": "mevt_6aa68b28d15d4c1b9ae4b4f0c3c5a5da",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 13,
+        "createdAt": "2026-10-10T12:00:26.000Z",
+        "type": "session.usage",
+        "cumulative": {
+          "inputTokens": 2600,
+          "outputTokens": 410,
+          "cacheReadInputTokens": 2048,
+          "cacheWriteInputTokens": 2048,
+          "reasoningTokens": 0,
+          "webSearchRequests": 1,
+          "activeSeconds": 18,
+          "listCostMicroUsd": 43000
+        },
+        "delta": {
+          "inputTokens": 1400,
+          "outputTokens": 70,
+          "cacheReadInputTokens": 2048,
+          "cacheWriteInputTokens": 0,
+          "reasoningTokens": 0,
+          "webSearchRequests": 0,
+          "activeSeconds": 5.5,
+          "listCostMicroUsd": 22000
+        },
+        "billing": { "mode": "platform", "amountMicroUsd": 22000 }
+      },
+      {
+        "id": "mevt_e5c32edb4836731b12b1738e56443e3d",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 14,
+        "createdAt": "2026-10-10T12:00:26.001Z",
+        "type": "session.status",
+        "status": "idle",
+        "stopReason": "end_turn",
+        "pendingToolUseIds": [],
+        "detail": null,
+        "inputSeq": 9
+      },
+      {
+        "id": "mevt_9b1f0c2a7d6e4f3b8a5c1d0e2f4a6b8c",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 15,
+        "createdAt": "2026-10-10T12:00:40.000Z",
+        "type": "agent.tool_approval_request",
+        "toolUseId": "mtool_5d2c8e1f0a9b4c7d6e3f2a1b0c9d8e7f",
+        "name": "bash",
+        "source": "builtin",
+        "server": null,
+        "expiresAt": "2026-10-10T12:10:40.000Z"
+      },
+      {
+        "id": "mevt_0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 16,
+        "createdAt": "2026-10-10T12:00:50.000Z",
+        "type": "user.tool_approval",
+        "toolUseId": "mtool_5d2c8e1f0a9b4c7d6e3f2a1b0c9d8e7f",
+        "decision": "deny",
+        "message": "Do not run shell commands on this ticket."
+      },
+      {
+        "id": "mevt_ed39a9876a5e1f2323280cd01bc18673",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 17,
+        "createdAt": "2026-10-10T12:01:00.000Z",
+        "type": "user.interrupt"
+      },
+      {
+        "id": "mevt_28a8430b8d5d1f961a3111f3fd9037f5",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 18,
+        "createdAt": "2026-10-10T12:02:00.000Z",
+        "type": "session.status",
+        "status": "completed",
+        "stopReason": "end_turn",
+        "pendingToolUseIds": [],
+        "detail": null,
+        "inputSeq": 17
+      }
+    ],
+    "reservedEvents": [
+      {
+        "id": "mevt_f538a1fc2ed73e2869a7f461c3952878",
+        "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+        "seq": 17,
+        "createdAt": "2026-10-10T12:02:00.001Z",
+        "type": "agent.message.delta",
+        "messageKey": "msg_1",
+        "index": 0,
+        "text": "It is"
+      }
+    ],
+    "unknownEvent": {
+      "id": "mevt_d7f06d3424edf83000fa95990d8861db",
+      "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+      "seq": 18,
+      "createdAt": "2026-10-10T12:02:00.002Z",
+      "type": "agent.thinking",
+      "summary": "A future event type that v1 clients ignore."
+    },
+    "eventList": {
+      "data": [
+        {
+          "id": "mevt_c21dcfad15ebc2eb24876a7c59e5f305",
+          "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+          "seq": 1,
+          "createdAt": "2026-10-10T12:00:00.000Z",
+          "type": "session.status",
+          "status": "pending",
+          "stopReason": null,
+          "pendingToolUseIds": [],
+          "detail": "provisioning",
+          "inputSeq": null
+        },
+        {
+          "id": "mevt_af5e4af0106b7cc309399ea373ad9819",
+          "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+          "seq": 2,
+          "createdAt": "2026-10-10T12:00:00.001Z",
+          "type": "user.message",
+          "content": [
+            { "type": "text", "text": "What is the weather in Oslo?" }
+          ]
+        }
+      ],
+      "hasMore": true,
+      "nextAfter": 2,
+      "headSeq": 18
+    },
+    "streamEnd": {
+      "sessionId": "msess_f134fbee29b73487eafbf568809a051d",
+      "status": "completed",
+      "headSeq": 18,
+      "reason": "terminal"
+    },
+    "errorBody": {
+      "error": {
+        "code": "version_conflict",
+        "message": "agent version 3 is not the latest (4)",
+        "requestId": "req_6560026397b928c09cb55aa71c2732a5",
+        "details": { "latestVersion": 4 }
+      }
+    }
+  }
+}

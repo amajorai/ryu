@@ -59,28 +59,30 @@ const INITIAL_VERSIONS: VersionMeta[] = [
 	},
 ];
 
-const INITIAL_SOURCES: Record<string, string> = {
-	"named-review": `# Launch plan
+const INITIAL_SOURCES = new Map<string, string>(
+	Object.entries({
+		"named-review": `# Launch plan
 
 ## Rollout
 - Beta release
 - 500 seats
 
 Owner: Mina`,
-	"automatic-latest": `# Launch plan
+		"automatic-latest": `# Launch plan
 
 ## Rollout
 - General availability
 - 750 seats
 
 Owner: Mina`,
-	"automatic-hourly": `# Launch plan
+		"automatic-hourly": `# Launch plan
 
 ## Rollout
 - Private beta
 - 200 seats`,
-	baseline: "# Launch plan\n\nFirst outline.",
-};
+		baseline: "# Launch plan\n\nFirst outline.",
+	})
+);
 
 function Story() {
 	const [current, setCurrent] = useState(INITIAL_CURRENT);
@@ -90,16 +92,13 @@ function Story() {
 
 	const source = useMemo(
 		() => ({
-			getValue: async (versionId: string) => sources[versionId] ?? "",
+			getValue: async (versionId: string) => sources.get(versionId) ?? "",
 			list: async () => versions,
 			restore: async (versionId: string) => {
-				const restored = sources[versionId] ?? current;
+				const restored = sources.get(versionId) ?? current;
 				const guardId = `guard-${Date.now()}`;
 				const now = Date.now();
-				setSources((existing) => ({
-					...existing,
-					[guardId]: current,
-				}));
+				setSources((existing) => new Map(existing).set(guardId, current));
 				setVersions((existing) => [
 					{
 						captureType: "restore_guard",
@@ -119,7 +118,7 @@ function Story() {
 			snapshot: async (label?: string) => {
 				const id = `named-${Date.now()}`;
 				const now = Date.now();
-				setSources((existing) => ({ ...existing, [id]: current }));
+				setSources((existing) => new Map(existing).set(id, current));
 				setVersions((existing) => [
 					{
 						captureType: "named",

@@ -11,12 +11,13 @@
 // companion overlay window has no provider, so it gates with its own inline
 // locked panel rather than this badge.
 
-import { PlanBadge } from "@ryu/ui/components/plan-badge";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { PlanBadge } from "@ryu/ui/components/plan-badge.tsx";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
 
@@ -30,6 +31,7 @@ interface ProLockedBadgeProps {
 /** Clickable "Pro" pill marking a locked feature; opens the upgrade paywall. */
 export function ProLockedBadge({ feature, className }: ProLockedBadgeProps) {
 	const { requestUpgrade } = useEntitlementContext();
+	const tl = useLiteralMessages();
 	return (
 		<Tooltip>
 			<TooltipTrigger
@@ -43,7 +45,9 @@ export function ProLockedBadge({ feature, className }: ProLockedBadgeProps) {
 					</button>
 				}
 			/>
-			<TooltipContent>Upgrade to Pro to use {feature}</TooltipContent>
+			<TooltipContent>
+				{tl("Upgrade to Pro to use {feature}", { feature })}
+			</TooltipContent>
 		</Tooltip>
 	);
 }

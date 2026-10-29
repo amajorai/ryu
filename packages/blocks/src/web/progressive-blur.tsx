@@ -1,4 +1,7 @@
 "use client";
+import { cn } from "@ryu/ui/lib/utils";
+import type { CSSProperties } from "react";
+import styles from "./progressive-blur.module.css";
 
 interface ProgressiveBlurProps {
 	backgroundColor?: string;
@@ -22,21 +25,27 @@ export function ProgressiveBlur({
 
 	return (
 		<div
-			className={`pointer-events-none absolute left-0 w-full select-none ${className}`}
-			style={{
-				[isTop ? "top" : "bottom"]: 0,
-				height,
-				background: isTop
-					? `linear-gradient(to top, transparent, ${bgColor})`
-					: `linear-gradient(to bottom, transparent, ${bgColor})`,
-				maskImage: isTop
-					? "linear-gradient(to bottom, black 50%, transparent)"
-					: "linear-gradient(to top, black 50%, transparent)",
-				WebkitBackdropFilter: `blur(${blurAmount})`,
-				backdropFilter: `blur(${blurAmount})`,
-				WebkitUserSelect: "none",
-				userSelect: "none",
-			}}
+			className={cn(
+				"pointer-events-none absolute left-0 w-full select-none",
+				styles.blur,
+				isTop ? styles.top : styles.bottom,
+				className
+			)}
+			style={
+				{
+					"--blur-height": height,
+					"--blur-background": isTop
+						? `linear-gradient(to top, transparent, ${bgColor})`
+						: `linear-gradient(to bottom, transparent, ${bgColor})`,
+					"--blur-amount": blurAmount,
+				} satisfies BlurStyle as BlurStyle
+			}
 		/>
 	);
+}
+
+interface BlurStyle extends CSSProperties {
+	"--blur-amount": string;
+	"--blur-background": string;
+	"--blur-height": string;
 }

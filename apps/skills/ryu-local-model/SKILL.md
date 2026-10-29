@@ -34,7 +34,7 @@ Each card carries `compatible`, `needsEngine`, params, context length, and tags 
 curl -s "http://127.0.0.1:7980/api/models/catalog/detail?id=<repo_id>&format=gguf"
 ```
 
-This returns each downloadable GGUF file with a fit verdict (`too_big`, `cpu`, `partial`, `ok`, `great`, or `unknown`), human size, and quant label, computed against the node's detected hardware. Prefer `ok` or `great` for a responsive local experience.
+This returns each downloadable GGUF file with a fit verdict (`too_big`, `no_space`, `cpu`, `partial`, `ok`, `great`, or `unknown`), human size, and quant label, computed against the node's detected hardware and free disk. Prefer `ok` or `great` for a responsive local experience. A `too_big` file does not fit memory and a `no_space` file does not fit free disk; neither can be installed.
 
 ## Install a model file
 
@@ -45,6 +45,8 @@ curl -s -X POST http://127.0.0.1:7980/api/models/catalog/install \
   -H 'content-type: application/json' \
   -d '{"id":"<repo_id>","file":"<filename.gguf>","format":"gguf"}'
 ```
+
+Core refuses a `too_big` or `no_space` file with HTTP 422 before it downloads anything. The body carries `code` (`model_too_large` when the file does not fit memory, `insufficient_disk` when it does not fit free disk, with Ryu keeping a 2 GB reserve), `verdict`, `sizeBytes`, and a plain-language `message` with the numbers. Do not retry the same file. Pick a smaller quant whose verdict is `ok`, `great`, `partial` or `cpu`, or free disk space and try again.
 
 To remove a downloaded file:
 

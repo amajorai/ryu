@@ -1,3 +1,6 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { CSSProperties } from "react";
+import visualStyles from "../../marketplace-visual.module.css";
 // packages/marketplace/src/catalog/chrome/dither-banner.tsx
 //
 // The listing hero's background wash. Extracted out of `apps-catalog-section.tsx`
@@ -87,7 +90,7 @@ import {
 } from "@ryu/ui/components/dither-kit/gradient.tsx";
 import {
 	AnimatedGradient,
-	type AnimatedGradientConfig,
+	type AnimatedGradientInputConfig,
 	type AnimatedGradientPreset,
 	DEFAULT_ANIMATED_GRADIENT_PRESET,
 	isAnimatedGradientPreset,
@@ -105,13 +108,12 @@ import { normalizeDither } from "./dither.ts";
 /** The icon tile inside the hero washes in the OPPOSITE direction to the banner
  *  behind it, so the two do not blend into one flat field — the tile has to read
  *  as a tile sitting on the hero, not as a hole in it. */
-export const OPPOSITE_DIRECTION: Record<GradientDirection, GradientDirection> =
-	{
-		up: "down",
-		down: "up",
-		left: "right",
-		right: "left",
-	};
+export const OPPOSITE_DIRECTION = {
+	up: "down",
+	down: "up",
+	left: "right",
+	right: "left",
+} satisfies Record<GradientDirection, GradientDirection>;
 
 /** The grain overlay's defaults, which are what `style: "dither"` has always
  *  painted. `noise` only moves them. */
@@ -138,14 +140,14 @@ function resolveNoise(banner?: CatalogBanner | null): ResolvedNoise | null {
 		return null;
 	}
 	const rawOpacity =
-		typeof declared?.opacity === "number" && Number.isFinite(declared.opacity)
+		isNativeNumber(declared?.opacity) && Number.isFinite(declared.opacity)
 			? Math.min(100, Math.max(0, declared.opacity))
 			: DEFAULT_NOISE_OPACITY;
 	if (rawOpacity === 0) {
 		return null;
 	}
 	const scale =
-		typeof declared?.scale === "number" && Number.isFinite(declared.scale)
+		isNativeNumber(declared?.scale) && Number.isFinite(declared.scale)
 			? Math.min(MAX_NOISE_SCALE, Math.max(MIN_NOISE_SCALE, declared.scale))
 			: 1;
 	return {
@@ -156,7 +158,7 @@ function resolveNoise(banner?: CatalogBanner | null): ResolvedNoise | null {
 }
 
 interface ResolvedGradient {
-	config: AnimatedGradientConfig;
+	config: AnimatedGradientInputConfig;
 	preset: AnimatedGradientPreset;
 }
 
@@ -181,7 +183,7 @@ function resolveGradient(
 		? declared.preset
 		: DEFAULT_ANIMATED_GRADIENT_PRESET;
 	const { preset: _dropped, ...config } = declared;
-	return { config: config as AnimatedGradientConfig, preset };
+	return { config, preset };
 }
 
 export default function DitherBanner({
@@ -251,14 +253,21 @@ export default function DitherBanner({
 		cssBackground = fallback ?? undefined;
 	}
 
+	const backgroundStyle: BannerPaintStyle | undefined = cssBackground
+		? { "--marketplace-background": cssBackground }
+		: undefined;
+	const noiseStyle: BannerNoiseStyle | undefined = noise
+		? { "--marketplace-opacity": noise.opacity }
+		: undefined;
 	return (
 		<div
 			aria-hidden="true"
 			className={cn(
 				"absolute inset-0",
+				cssBackground ? visualStyles.background : undefined,
 				cssBackground || imageUrl || gradient ? undefined : "bg-muted"
 			)}
-			style={cssBackground ? { background: cssBackground } : undefined}
+			style={backgroundStyle}
 		>
 			{gradient ? (
 				<AnimatedGradient
@@ -279,9 +288,12 @@ export default function DitherBanner({
 			) : null}
 			{noise ? (
 				<svg
-					className="absolute inset-0 size-full mix-blend-overlay"
+					className={cn(
+						"absolute inset-0 size-full mix-blend-overlay",
+						visualStyles.opacity
+					)}
 					preserveAspectRatio="none"
-					style={{ opacity: noise.opacity }}
+					style={noiseStyle}
 				>
 					<title>Dither texture</title>
 					<filter id={filterId}>
@@ -298,4 +310,11 @@ export default function DitherBanner({
 			) : null}
 		</div>
 	);
+}
+
+interface BannerPaintStyle extends CSSProperties {
+	"--marketplace-background": string;
+}
+interface BannerNoiseStyle extends CSSProperties {
+	"--marketplace-opacity": number;
 }

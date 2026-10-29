@@ -1,3 +1,4 @@
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 const STORY_URL = "/stats-plugin-proof.html";
@@ -21,7 +22,7 @@ test("renders the extracted provider-neutral session stats strip", async ({
 
 test("opens the full stats breakdown and settings controls", async ({
 	page,
-}, testInfo) => {
+}) => {
 	await page.goto(STORY_URL);
 	await page.getByTestId("stats-turns").hover();
 
@@ -67,8 +68,11 @@ test("opens the full stats breakdown and settings controls", async ({
 	await page.locator("#stats-reset-timer-mode").selectOption("progress");
 	await expect(details).toContainText("elapsed");
 
+	await page.setViewportSize({ width: 1280, height: 1200 });
 	await page.screenshot({
-		fullPage: true,
-		path: testInfo.outputPath("stats-plugin-proof.png"),
+		path: path.resolve(
+			import.meta.dirname,
+			"../../../docs/proof/prompt-cache/session-stats.png"
+		),
 	});
 });

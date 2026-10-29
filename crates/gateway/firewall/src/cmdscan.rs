@@ -8,11 +8,13 @@
 //! deterministic and unit-testable. The env var (`RYU_EXEC_APPROVAL_MODE`) is
 //! parsed at the HTTP handler boundary only (see `tools::exec::exec_scan`).
 //!
-//! Two regex sets are compiled ONCE at call time from static tables (never in a
-//! loop): a small HARDLINE set that always denies regardless of mode, and a
+//! Two regex sets are compiled once per process from static tables and cached:
+//! a small HARDLINE set that always denies regardless of mode, and a
 //! larger PATTERN set whose severities drive the manual/smart escalation. The
 //! shared permanent-deletion classifier runs before both sets' mode handling.
 //! All patterns are plain top-level regex literals.
+
+use std::sync::OnceLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -130,7 +132,7 @@ pub fn scan_command(backend: &str, command: &str, mode: ApprovalMode) -> ScanVer
 /// Scan a command with the permanent-deletion guard enabled unconditionally.
 pub fn scan_command_with_policy(backend: &str, command: &str, mode: ApprovalMode) -> ScanVerdict {
     // 1. Hardline blocklist — always denies.
-    for (name, re) in build_hardline() {
+    for (name, re) in hardline() {
         if re.is_match(command) {
             return ScanVerdict {
                 decision: Decision::Deny,
@@ -173,6 +175,19 @@ pub fn scan_command_with_policy(backend: &str, command: &str, mode: ApprovalMode
         return permanent_delete_verdict(rule);
     }
 
+    if let Some(pattern) = package_supply_chain_violation(command) {
+        return ScanVerdict {
+            decision: Decision::Deny,
+            reason: Some(format!("hardline blocklist: {pattern}")),
+            findings: vec![Finding {
+                pattern: pattern.to_string(),
+                category: "package_supply_chain".to_string(),
+                severity: Severity::Critical,
+            }],
+            managed_rule: None,
+        };
+    }
+
     // 2. Off mode: nothing beyond the hardline/permanent-deletion blocks is
     // enforced.
     if mode == ApprovalMode::Off {
@@ -186,12 +201,21 @@ pub fn scan_command_with_policy(backend: &str, command: &str, mode: ApprovalMode
 
     // 3. Collect all risk-pattern matches.
     let mut findings: Vec<Finding> = Vec::new();
-    for (name, category, severity, re) in build_patterns() {
+    if runs_on_host(backend) {
+        if let Some(pattern) = workspace_code_execution(command) {
+            findings.push(Finding {
+                pattern: pattern.to_owned(),
+                category: "untrusted_code_exec".to_owned(),
+                severity: Severity::Medium,
+            });
+        }
+    }
+    for (name, category, severity, re) in patterns() {
         if re.is_match(command) {
             findings.push(Finding {
-                pattern: name.to_string(),
-                category: category.to_string(),
-                severity,
+                pattern: (*name).to_string(),
+                category: (*category).to_string(),
+                severity: *severity,
             });
         }
     }
@@ -295,6 +319,394 @@ fn split_shell_segments(command: &str) -> Option<Vec<Vec<String>>> {
     Some(segments)
 }
 
+fn command_basename(value: &str) -> &str {
+    value
+        .rsplit(|character| character == '/' || character == '\\')
+        .next()
+        .unwrap_or(value)
+}
+
+fn is_env_assignment(token: &str) -> bool {
+    let Some((name, _)) = token.split_once('=') else {
+        return false;
+    };
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+fn has_numeric_suffix(value: &str, separator: &str) -> bool {
+    value
+        .rsplit_once(separator)
+        .map(|(_, suffix)| {
+            !suffix.is_empty()
+                && suffix
+                    .chars()
+                    .next()
+                    .is_some_and(|character| character.is_ascii_digit())
+                && suffix.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || ".-_+".contains(character)
+                })
+        })
+        .unwrap_or(false)
+}
+
+fn npm_spec_is_pinned(spec: &str) -> bool {
+    let Some(at) = spec.rfind('@') else {
+        return false;
+    };
+    at > 0
+        && spec[at + 1..]
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_digit())
+}
+
+fn python_spec_is_pinned(spec: &str) -> bool {
+    has_numeric_suffix(spec, "==")
+}
+
+fn go_spec_is_pinned(spec: &str) -> bool {
+    let Some((_, suffix)) = spec.rsplit_once('@') else {
+        return false;
+    };
+    suffix
+        .strip_prefix('v')
+        .or(Some(suffix))
+        .is_some_and(|version| {
+            version
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_digit())
+        })
+}
+
+/// Deny package-manager commands that let an agent turn an untrusted document's
+/// bare install snippet into arbitrary code execution. A pinned package is not
+/// automatically trusted, but it removes the mutable-name/unclaimed-package
+/// class; catalog installs add the stronger registry-ownership check.
+fn package_supply_chain_violation(command: &str) -> Option<&'static str> {
+    let segments = split_shell_segments(command)?;
+    for tokens in segments {
+        let mut index = 0;
+        while index < tokens.len() && is_env_assignment(&tokens[index]) {
+            index += 1;
+        }
+        if index >= tokens.len() {
+            continue;
+        }
+        let executable = command_basename(&tokens[index]).to_ascii_lowercase();
+        let args = &tokens[index + 1..];
+
+        if matches!(executable.as_str(), "npx" | "bunx" | "pnpx" | "uvx")
+            && !args
+                .iter()
+                .any(|arg| arg == "--no-install" || arg == "--offline")
+        {
+            let package = args.iter().find(|arg| {
+                !arg.starts_with('-') && *arg != "--" && *arg != "exec" && *arg != "run"
+            });
+            let pinned = package.is_some_and(|package| {
+                if executable == "uvx" {
+                    python_spec_is_pinned(package)
+                } else {
+                    npm_spec_is_pinned(package)
+                }
+            });
+            if !pinned {
+                return Some("unpinned_package_install");
+            }
+        }
+
+        if matches!(executable.as_str(), "npm" | "pnpm" | "yarn") {
+            let subcommand_position = args.iter().position(|arg| {
+                matches!(arg.as_str(), "install" | "i" | "add" | "exec" | "x" | "dlx")
+            });
+            if let Some(position) = subcommand_position {
+                let package_args: Vec<&str> = args[position + 1..]
+                    .iter()
+                    .filter(|arg| !arg.starts_with('-'))
+                    .map(String::as_str)
+                    .collect();
+                if package_args.is_empty()
+                    || package_args.iter().any(|arg| !npm_spec_is_pinned(arg))
+                {
+                    return Some("unpinned_package_install");
+                }
+            }
+        }
+
+        let pip_args = if matches!(executable.as_str(), "pip" | "pip3") {
+            Some(args)
+        } else if matches!(executable.as_str(), "python" | "python3" | "py") {
+            args.windows(2)
+                .position(|window| window[0] == "-m" && window[1] == "pip")
+                .map(|position| &args[position + 2..])
+        } else {
+            None
+        };
+        if let Some(pip_args) = pip_args {
+            if pip_args.iter().any(|arg| *arg == "install")
+                && !pip_args.iter().any(|arg| *arg == "--require-hashes")
+            {
+                let position = pip_args
+                    .iter()
+                    .position(|arg| *arg == "install")
+                    .unwrap_or(0);
+                let package_args: Vec<&str> = pip_args[position + 1..]
+                    .iter()
+                    .filter(|arg| !arg.starts_with('-'))
+                    .map(String::as_str)
+                    .collect();
+                if package_args.is_empty()
+                    || package_args.iter().any(|arg| !python_spec_is_pinned(arg))
+                {
+                    return Some("unpinned_package_install");
+                }
+            }
+        }
+
+        if executable == "cargo" && args.iter().any(|arg| *arg == "install") {
+            let versioned = args
+                .iter()
+                .position(|arg| *arg == "--version")
+                .and_then(|position| args.get(position + 1))
+                .is_some_and(|version| {
+                    version
+                        .chars()
+                        .next()
+                        .is_some_and(|character| character.is_ascii_digit())
+                });
+            if !versioned {
+                return Some("unpinned_package_install");
+            }
+        }
+
+        if executable == "go" && args.iter().any(|arg| *arg == "install") {
+            let position = args.iter().position(|arg| *arg == "install").unwrap_or(0);
+            if !args[position + 1..]
+                .iter()
+                .any(|arg| go_spec_is_pinned(arg))
+            {
+                return Some("unpinned_package_install");
+            }
+        }
+
+        if executable == "gem" && args.iter().any(|arg| *arg == "install") {
+            let versioned = args
+                .iter()
+                .position(|arg| *arg == "-v" || *arg == "--version")
+                .and_then(|position| args.get(position + 1))
+                .is_some_and(|version| {
+                    version
+                        .chars()
+                        .next()
+                        .is_some_and(|character| character.is_ascii_digit())
+                });
+            if !versioned {
+                return Some("unpinned_package_install");
+            }
+        }
+
+        if executable == "docker" && args.iter().any(|arg| *arg == "run") {
+            let image = args
+                .iter()
+                .skip_while(|arg| **arg != "run")
+                .skip(1)
+                .find(|arg| !arg.starts_with('-'));
+            if image.is_none_or(|image| !image.contains("@sha256:")) {
+                return Some("unpinned_package_install");
+            }
+        }
+    }
+    None
+}
+
+/// Backends whose commands execute directly on the user's machine. Isolated
+/// backends (Deno, WASI, containers) and free-text scans (app prompts, widget
+/// follow-ups) are excluded: running a script there is either contained or not
+/// a command at all.
+fn runs_on_host(backend: &str) -> bool {
+    matches!(backend, "acp" | "local" | "shell" | "bash" | "host")
+}
+
+/// Wrappers that run their remaining argv as the real command, with the number
+/// of positional operands each takes before that command (`timeout 10 cmd`).
+fn exec_wrapper_operands(executable: &str) -> Option<usize> {
+    match executable {
+        "sudo" | "doas" | "env" | "nohup" | "time" | "exec" | "command" | "nice" | "stdbuf"
+        | "xargs" => Some(0),
+        "timeout" => Some(1),
+        _ => None,
+    }
+}
+
+/// Wrapper options that consume the following token (`sudo -u root`).
+fn wrapper_option_takes_value(executable: &str, option: &str) -> bool {
+    match executable {
+        "sudo" | "doas" => matches!(option, "-u" | "-g" | "-C" | "-h" | "-p" | "-r" | "-t"),
+        "env" => matches!(option, "-u" | "-C" | "-S"),
+        "nice" => option == "-n",
+        "timeout" => matches!(option, "-s" | "-k" | "--signal" | "--kill-after"),
+        "xargs" => matches!(
+            option,
+            "-I" | "-n" | "-P" | "-L" | "-d" | "-E" | "-a" | "-s"
+        ),
+        _ => false,
+    }
+}
+
+/// Install prefixes for system and package-manager binaries. A command spelled
+/// with one of these absolute paths is a known tool, not repository content.
+const SYSTEM_BINARY_PREFIXES: &[&str] = &[
+    "/bin/",
+    "/sbin/",
+    "/usr/bin/",
+    "/usr/sbin/",
+    "/usr/local/bin/",
+    "/usr/local/sbin/",
+    "/opt/homebrew/bin/",
+    "/opt/homebrew/sbin/",
+    "/nix/",
+    "/run/current-system/",
+    "/System/",
+    "/Library/Apple/",
+];
+
+/// Shells whose first non-option argument is a script file to run.
+fn is_script_shell(executable: &str) -> bool {
+    matches!(
+        executable,
+        "bash" | "sh" | "zsh" | "dash" | "ksh" | "mksh" | "fish" | "ash"
+    )
+}
+
+/// What a shell invocation runs: an inline command string (`bash -lc '…'`), a
+/// script file (`bash ./x.sh`), or nothing scannable (interactive / stdin).
+enum ShellTarget<'a> {
+    Inline(&'a str),
+    Script,
+    None,
+}
+
+fn shell_target(args: &[String]) -> ShellTarget<'_> {
+    let mut index = 0;
+    while let Some(arg) = args.get(index) {
+        index += 1;
+        if arg == "--" {
+            return if args.get(index).is_some() {
+                ShellTarget::Script
+            } else {
+                ShellTarget::None
+            };
+        }
+        if arg == "-o" || arg == "+o" || arg == "-O" || arg == "+O" {
+            index += 1;
+            continue;
+        }
+        if let Some(flags) = arg
+            .strip_prefix('-')
+            .filter(|flags| !flags.starts_with('-'))
+        {
+            if flags.contains('c') {
+                return args
+                    .get(index)
+                    .map_or(ShellTarget::None, |inline| ShellTarget::Inline(inline));
+            }
+            if flags.contains('s') {
+                return ShellTarget::None;
+            }
+            continue;
+        }
+        if arg.starts_with('-') || arg.starts_with('+') {
+            continue;
+        }
+        return ShellTarget::Script;
+    }
+    ShellTarget::None
+}
+
+/// Detect a command that runs a script or binary by path — the shape a
+/// malicious README uses to turn "please run the setup/security script" into
+/// arbitrary code execution (`./security.sh`, `bash scripts/check.sh`,
+/// `source ./env.sh`, `vendor/bin/tool`). Such content came from whatever
+/// repository the agent is working in, so it needs a human decision even
+/// though no individual token looks dangerous.
+///
+/// Interpreter invocations (`python app.py`, `node build.js`) and build tools
+/// (`make`, `cargo test`, `npm test`) also run repository code, but flagging
+/// them would make every ordinary development turn ask; workspace trust and
+/// the agent OS sandbox cover that class. Inline shell strings
+/// (`bash -lc '…'`, the form Codex wraps every command in) are scanned
+/// recursively rather than flagged wholesale.
+fn workspace_code_execution(command: &str) -> Option<&'static str> {
+    workspace_code_execution_at_depth(command, 0)
+}
+
+fn workspace_code_execution_at_depth(command: &str, depth: u8) -> Option<&'static str> {
+    if depth > 4 {
+        return None;
+    }
+    let segments = split_shell_segments(command)?;
+    for tokens in segments {
+        let mut index = 0;
+        loop {
+            while index < tokens.len() && is_env_assignment(&tokens[index]) {
+                index += 1;
+            }
+            let Some(token) = tokens.get(index) else {
+                break;
+            };
+            if token.contains('/') {
+                break;
+            }
+            let wrapper = command_basename(token);
+            let Some(operands) = exec_wrapper_operands(wrapper) else {
+                break;
+            };
+            index += 1;
+            while let Some(option) = tokens.get(index).filter(|option| option.starts_with('-')) {
+                index += if wrapper_option_takes_value(wrapper, option) {
+                    2
+                } else {
+                    1
+                };
+            }
+            index += operands;
+        }
+        let Some(program) = tokens.get(index) else {
+            continue;
+        };
+        let args = &tokens[index + 1..];
+
+        if (program.contains('/') || program.contains('\\'))
+            && !SYSTEM_BINARY_PREFIXES
+                .iter()
+                .any(|prefix| program.starts_with(prefix))
+        {
+            return Some("workspace_program_exec");
+        }
+
+        let executable = command_basename(program);
+        if matches!(executable, "source" | ".") && !args.is_empty() {
+            return Some("workspace_script_source");
+        }
+        if is_script_shell(executable) {
+            match shell_target(args) {
+                ShellTarget::Script => return Some("workspace_script_exec"),
+                ShellTarget::Inline(inline) => {
+                    if let Some(pattern) = workspace_code_execution_at_depth(inline, depth + 1) {
+                        return Some(pattern);
+                    }
+                }
+                ShellTarget::None => {}
+            }
+        }
+    }
+    None
+}
+
 fn rule_matches(
     rule: &ManagedCommandRule,
     backend: &str,
@@ -329,12 +741,15 @@ pub fn scan_command_with_rules_policy(
     rules: &[ManagedCommandRule],
     project_id: Option<&str>,
 ) -> ScanVerdict {
+    // With no managed rules this is a plain scan: it already runs the hardline,
+    // permanent-deletion and supply-chain checks first, so the `Off` pre-scan
+    // below would only repeat them.
+    if rules.is_empty() {
+        return scan_command_with_policy(backend, command, mode);
+    }
     let hardline = scan_command_with_policy(backend, command, ApprovalMode::Off);
     if hardline.decision == Decision::Deny {
         return hardline;
-    }
-    if rules.is_empty() {
-        return scan_command_with_policy(backend, command, mode);
     }
     let Some(segments) = split_shell_segments(command) else {
         return ScanVerdict {
@@ -417,7 +832,7 @@ fn severity_rank(s: Severity) -> u8 {
 }
 
 /// Compile a `(name, pattern)` table into `(name, Regex)`, dropping (and
-/// logging) any entry that fails to compile. Never called in a hot loop.
+/// logging) any entry that fails to compile. Runs once per table per process.
 fn compile_named(raw: &[(&'static str, &str)]) -> Vec<(&'static str, Regex)> {
     raw.iter()
         .filter_map(|(name, pat)| match Regex::new(pat) {
@@ -488,6 +903,11 @@ fn rm_root_recursive_force(command: &str) -> bool {
 /// HARDLINE blocklist: unconditional deny. Kept small and high-precision so a
 /// benign command never trips it. Patterns are anchored with sufficient context
 /// that a non-root recursive `rm` (a mere risk PATTERN) is NOT caught here.
+fn hardline() -> &'static [(&'static str, Regex)] {
+    static HARDLINE: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
+    HARDLINE.get_or_init(build_hardline)
+}
+
 fn build_hardline() -> Vec<(&'static str, Regex)> {
     // `rm -rf /` (and -fr, extra flags, sudo) targeting the filesystem root:
     // the trailing `\s/(\s|$)` requires the slash to be root, so
@@ -520,7 +940,12 @@ fn build_hardline() -> Vec<(&'static str, Regex)> {
 
 /// PATTERN set (~40 entries). Each is `(name, category, severity, regex)`.
 /// A match escalates in `Manual`; `Smart` uses the max severity. Compiled once
-/// per call from a static table (never inside a loop).
+/// per process and cached.
+fn patterns() -> &'static [(&'static str, &'static str, Severity, Regex)] {
+    static PATTERNS: OnceLock<Vec<(&'static str, &'static str, Severity, Regex)>> = OnceLock::new();
+    PATTERNS.get_or_init(build_patterns)
+}
+
 fn build_patterns() -> Vec<(&'static str, &'static str, Severity, Regex)> {
     use Severity::{Critical, High, Low, Medium};
     let raw: &[(&'static str, &'static str, Severity, &str)] = &[
@@ -1022,6 +1447,41 @@ mod tests {
         assert_eq!(v.findings[0].category, "permanent_deletion");
     }
 
+    #[test]
+    fn unpinned_package_commands_are_hardline_denied() {
+        for command in [
+            "pip install company-sdk",
+            "python -m pip install company-sdk",
+            "npx -y company-fix-auth",
+            "npm install company-sdk",
+            "docker run company/image:latest",
+        ] {
+            let verdict = scan_command("acp", command, ApprovalMode::Off);
+            assert_eq!(verdict.decision, Decision::Deny, "{command}: {verdict:?}");
+            assert_eq!(
+                verdict.findings[0].pattern, "unpinned_package_install",
+                "{command}: {verdict:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pinned_package_commands_are_not_blocked_by_supply_chain_hardline() {
+        for command in [
+            "pip install company-sdk==1.2.3",
+            "npx -y @scope/company-fix@1.2.3",
+            "npm install company-sdk@1.2.3",
+            "docker run company/image@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        ] {
+            let verdict = scan_command("acp", command, ApprovalMode::Off);
+            assert_ne!(
+                verdict.findings.first().map(|finding| finding.pattern.as_str()),
+                Some("unpinned_package_install"),
+                "{command}: {verdict:?}"
+            );
+        }
+    }
+
     // ── Database (SQL) governance — Claw Patrol parity ────────────────────────
 
     #[test]
@@ -1248,5 +1708,75 @@ mod tests {
             None,
         );
         assert_eq!(verdict.decision, Decision::ApprovalRequired);
+    }
+
+    #[test]
+    fn readme_script_execution_requires_approval_in_every_scanning_mode() {
+        for command in [
+            "./security.sh",
+            "bash security.sh",
+            "sh -x ./scripts/check.sh",
+            "source ./env.sh",
+            ". .venv/bin/activate",
+            "chmod +x security.sh && ./security.sh",
+            "cd geopy && bash security.sh",
+            "sudo -u root ./bin/payload",
+            "timeout 30 ./security.sh",
+            "FOO=1 env -i tools/run",
+            "bash -lc 'cd repo && ./security.sh'",
+            "/home/user/repo/security.sh --fast",
+        ] {
+            for mode in [ApprovalMode::Manual, ApprovalMode::Smart] {
+                let verdict = scan_command("acp", command, mode);
+                assert_eq!(
+                    verdict.decision,
+                    Decision::ApprovalRequired,
+                    "{command:?} under {mode:?}: {verdict:?}"
+                );
+                assert!(verdict
+                    .findings
+                    .iter()
+                    .any(|finding| finding.category == "untrusted_code_exec"));
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_tooling_is_not_treated_as_workspace_code() {
+        for command in [
+            "ls -la",
+            "git status",
+            "cargo test -p ryu-core",
+            "bash -lc 'git diff --stat'",
+            "/usr/bin/git log --oneline",
+            "/opt/homebrew/bin/rg TODO src/",
+            "cat ./README.md",
+            "grep -rn security.sh .",
+            "sed -n 1,20p scripts/check.sh",
+            "bash",
+            "sh -s < /dev/null",
+        ] {
+            let verdict = scan_command("acp", command, ApprovalMode::Manual);
+            assert!(
+                !verdict
+                    .findings
+                    .iter()
+                    .any(|finding| finding.category == "untrusted_code_exec"),
+                "{command:?}: {verdict:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_code_rule_only_applies_to_host_backends() {
+        for backend in ["deno", "docker", "wasm", "widget-followup", "app-send"] {
+            let verdict = scan_command(backend, "./security.sh", ApprovalMode::Manual);
+            assert_eq!(verdict.decision, Decision::Allow, "{backend}: {verdict:?}");
+        }
+        assert_eq!(
+            scan_command("acp", "./security.sh", ApprovalMode::Off).decision,
+            Decision::Allow,
+            "Off keeps its documented meaning"
+        );
     }
 }

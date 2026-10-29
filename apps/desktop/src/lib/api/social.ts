@@ -20,6 +20,9 @@
 
 import {
 	type AppRequestMethod,
+	type AppRequestValue,
+	type AppResponseValue,
+	type MountedAppPathInput,
 	mountedAppRequest,
 	resolveMountedAppPath,
 } from "./app-request.ts";
@@ -43,7 +46,7 @@ export type SocialMethod = "DELETE" | "GET" | "PATCH" | "POST";
 
 export interface SocialRequestInput {
 	/** JSON body. Omit for GET/DELETE. */
-	body?: unknown;
+	body?: AppRequestValue;
 	/** Defaults to `"GET"`. */
 	method?: SocialMethod;
 	/** Path RELATIVE to `/api/social`, leading slash included, query string and all. */
@@ -84,7 +87,7 @@ export interface SocialRequestInput {
  * containment, then return the NORMALIZED path — never the frame's raw string —
  * so the host and the parser can never disagree again about what was requested.
  */
-export function resolveSocialPath(path: unknown): string | null {
+export function resolveSocialPath(path: MountedAppPathInput): string | null {
 	return resolveMountedAppPath(SOCIAL_MOUNT, path);
 }
 
@@ -98,7 +101,7 @@ export function resolveSocialPath(path: unknown): string | null {
 export async function socialRequest(
 	target: ApiTarget,
 	input: SocialRequestInput
-): Promise<unknown> {
+): Promise<AppResponseValue> {
 	return await mountedAppRequest(target, input, {
 		allowedMethods: ALLOWED_METHODS,
 		invalidMethodMessage: (method) =>

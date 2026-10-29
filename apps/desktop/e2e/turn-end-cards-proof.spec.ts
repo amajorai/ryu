@@ -104,9 +104,11 @@ test("expands the full file list and keeps file actions wired", async ({
 		"Opened apps/desktop/src/pages/ChatPage.tsx"
 	);
 
+	// The turn-end card opens under the inline row's id (`artifact-<toolCallId>`),
+	// so it shares that row's saved page state and panel/tab.
 	await page.getByRole("button", { name: "Open in tab" }).click();
 	await expect(page.getByTestId("action-state")).toHaveText(
-		"Opened artifact turn-end-user-artifact-7 in tab"
+		"Opened artifact artifact-turn-end-proof-7 in tab"
 	);
 });
 

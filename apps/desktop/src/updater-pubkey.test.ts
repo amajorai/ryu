@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 
 // The updater pubkey baked into `tauri.conf.json` MUST be the public half of the
 // minisign key that CI signs releases with (`TAURI_SIGNING_PRIVATE_KEY` on the
@@ -22,9 +23,15 @@ const DESKTOP_ROOT = join(import.meta.dir, "..");
 
 describe("updater signing key", () => {
 	it("conf pubkey is the committed public half of the CI signing key", () => {
-		const conf = JSON.parse(
-			readFileSync(join(DESKTOP_ROOT, "src-tauri/tauri.conf.json"), "utf8")
-		) as { plugins: { updater: { pubkey: string } } };
+		const conf = z
+			.object({
+				plugins: z.object({ updater: z.object({ pubkey: z.string() }) }),
+			})
+			.parse(
+				JSON.parse(
+					readFileSync(join(DESKTOP_ROOT, "src-tauri/tauri.conf.json"), "utf8")
+				)
+			);
 		const committed = readFileSync(
 			join(DESKTOP_ROOT, ".tauri/ryu-updater.key.pub"),
 			"utf8"

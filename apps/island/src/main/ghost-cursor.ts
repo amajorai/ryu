@@ -16,146 +16,27 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { app, BrowserWindow, type Display, screen } from "electron";
-import type { GhostCursorEvent } from "./control-protocol.ts";
-
-const GHOST_CURSOR_OPACITY = 0.68;
+import type {
+	GhostCursorEvent,
+	GhostCursorIdentity,
+} from "./control-protocol.ts";
+import { ghostCursorHueFor } from "./control-protocol.ts";
+import OVERLAY_HTML from "./ghost-cursor-overlay.html?raw";
 
 // Self-contained overlay document. Exposes one global the main process calls:
-//   window.__ghost(phase, x, y, hue, intent) -- x/y are overlay-window-local px;
-//   hue is 0-360 and intent is a short, human-readable action label.
+//   window.__ghost(phase, x, y, hue, intent, identity) -- x/y are overlay-window-local px;
+//   hue is 0-360, intent is a short action label, and identity is host-supplied
+//   agent/session display metadata.
 // The sprite CSS-transitions its transform, so setting the target position eases the
 // cursor there for free. A `down` phase spawns a click ripple; every event resets a
-// short idle fade. The intent chip makes the agent's next action legible without
-// touching the user's real pointer or blocking the target.
-const OVERLAY_HTML = `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8" />
-<style>
-  html, body {
-    margin: 0; padding: 0; width: 100%; height: 100%;
-    overflow: hidden; background: transparent;
-    font-family: system-ui, -apple-system, sans-serif;
-    user-select: none; cursor: default; pointer-events: none;
-  }
-  #cursor {
-    position: absolute; top: 0; left: 0;
-    transform: translate(-100px, -100px);
-    transition: transform .2s cubic-bezier(.22,.61,.36,1), opacity .42s ease;
-    opacity: 0; will-change: transform, opacity;
-  }
-  #pointer {
-    position: absolute; left: 0; top: 0;
-    transform-origin: 3px 3px;
-    transition: transform .16s ease;
-  }
-  #pointer svg {
-    display: block; width: 22px; height: 26px;
-    overflow: visible;
-    filter: drop-shadow(0 2px 3px rgba(0,0,0,.28));
-  }
-  #pointer path {
-    fill: rgba(248,250,252,.98);
-    stroke: rgba(15,23,42,.9);
-    stroke-width: 1.2;
-    stroke-linejoin: round;
-  }
-  #cursor.pressing #pointer { transform: scale(.86); }
-  /* The short intent chip floating beside the cursor. */
-  #label {
-    position: absolute; left: 40px; top: -18px;
-    display: inline-flex; align-items: center; gap: 6px;
-    max-width: 260px; box-sizing: border-box;
-    padding: 5px 9px 5px 7px; border: 1px solid rgba(255,255,255,.16);
-    border-radius: 999px;
-    color: #fff; white-space: nowrap; overflow: hidden;
-    font-size: 11px; font-weight: 500; line-height: 1.25;
-    text-overflow: ellipsis;
-    background: rgba(15, 23, 42, .88);
-    box-shadow: 0 3px 12px rgba(0,0,0,.28);
-    backdrop-filter: blur(10px);
-  }
-  #label::before {
-    content: ''; flex: 0 0 auto; width: 6px; height: 6px;
-    border-radius: 50%; background: hsl(var(--hue, 210), 90%, 62%);
-    box-shadow: 0 0 0 2px hsl(var(--hue, 210), 90%, 62%, .16);
-  }
-  #label.flip-x { left: auto; right: 40px; }
-  #label.flip-y { top: auto; bottom: -18px; }
-  .ripple {
-    position: absolute; border-radius: 50%;
-    border: 2px solid hsl(var(--hue, 210), 90%, 62%);
-    transform: translate(-50%, -50%) scale(.2); opacity: .9;
-    animation: rip .5s ease-out forwards; pointer-events: none;
-  }
-  @keyframes rip {
-    to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
-  }
-</style>
-</head>
-<body>
-  <div id="cursor">
-    <div id="pointer" aria-hidden="true">
-      <svg viewBox="0 0 27 31" aria-hidden="true">
-        <path d="M2 1L21 13.5L13.3 14.8L17.2 24L13.7 25.4L9.7 16.2L3.7 20.2Z" />
-      </svg>
-    </div>
-    <div id="label">Working</div>
-  </div>
-  <script>
-    var cursor = document.getElementById('cursor');
-    var label = document.getElementById('label');
-    var fadeTimer = null;
-    var hasPosition = false;
-    function ripple(x, y, hue) {
-      var r = document.createElement('div');
-      r.className = 'ripple';
-      r.style.left = x + 'px';
-      r.style.top = y + 'px';
-      r.style.width = '34px';
-      r.style.height = '34px';
-      r.style.setProperty('--hue', hue);
-      document.body.appendChild(r);
-      setTimeout(function () { r.remove(); }, 520);
-    }
-    function positionLabel(x, y) {
-      label.classList.toggle('flip-x', x > window.innerWidth - 300);
-      label.classList.toggle('flip-y', y < 32);
-    }
-    function ghost(phase, x, y, hue, intent) {
-      cursor.style.setProperty('--hue', hue);
-      label.textContent = intent || 'Working';
-      // Reposition for pointer-bearing phases. A typed event may carry a real
-      // target, while legacy sidecars use (0, 0) and should keep the last point.
-      var hasTarget = phase === 'move' || phase === 'down' || phase === 'up' ||
-        phase === 'scroll' || (phase === 'type' && (x !== 0 || y !== 0));
-      if (hasTarget) {
-        hasPosition = true;
-        cursor.style.transform = 'translate(' + x + 'px, ' + y + 'px)';
-        positionLabel(x, y);
-      }
-      if (!hasPosition) { return; }
-      // Keep the marker visibly distinct from the user's physical pointer.
-      cursor.style.opacity = String(${GHOST_CURSOR_OPACITY});
-      cursor.classList.toggle('pressing', phase === 'down');
-      if (phase === 'down') { ripple(x, y, hue); }
-      if (fadeTimer) { clearTimeout(fadeTimer); }
-      // Keep the action legible long enough to read, then let the compositor fade
-      // it rather than leaving a permanent second cursor on the desktop.
-      fadeTimer = setTimeout(function () {
-        cursor.style.opacity = '0';
-        cursor.classList.remove('pressing');
-      }, 2400);
-    }
-    window.__ghost = ghost;
-  </script>
-</body>
-</html>`;
+// short idle fade. The identity chip moves with the pointer and the agent keeps a
+// stable color across tool-process restarts when Ryu supplies its identity.
 
 let overlay: BrowserWindow | null = null;
 let ready = false;
 /** Events that arrived before the page finished loading; flushed on ready. */
 const pending: Array<{
+	identity?: GhostCursorIdentity;
 	intent: string;
 	phase: string;
 	x: number;
@@ -175,15 +56,6 @@ function overlayHtmlPath(): string {
 	mkdirSync(dirname(file), { recursive: true });
 	writeFileSync(file, OVERLAY_HTML, "utf8");
 	return file;
-}
-
-/** Stable 0-359 hue from an agent id so each agent gets a recognisable colour. */
-function hueForAgent(agent: string): number {
-	let hash = 0;
-	for (let i = 0; i < agent.length; i++) {
-		hash = (hash * 31 + agent.charCodeAt(i)) | 0;
-	}
-	return Math.abs(hash) % 360;
 }
 
 /** Create (or reuse) the overlay window sized to `display`, loading its HTML once. */
@@ -224,7 +96,7 @@ function ensureOverlay(display: Display): BrowserWindow {
 	win.webContents.once("did-finish-load", () => {
 		ready = true;
 		for (const ev of pending.splice(0)) {
-			forward(win, ev.phase, ev.x, ev.y, ev.hue, ev.intent);
+			forward(win, ev.phase, ev.x, ev.y, ev.hue, ev.intent, ev.identity);
 		}
 		if (!win.isDestroyed()) {
 			win.showInactive();
@@ -250,14 +122,15 @@ function forward(
 	x: number,
 	y: number,
 	hue: number,
-	intent: string
+	intent: string,
+	identity?: GhostCursorIdentity
 ): void {
 	if (win.isDestroyed()) {
 		return;
 	}
 	win.webContents
 		.executeJavaScript(
-			`window.__ghost(${JSON.stringify(phase)},${x},${y},${hue},${JSON.stringify(intent)})`
+			`window.__ghost(${JSON.stringify(phase)},${x},${y},${hue},${JSON.stringify(intent)},${JSON.stringify(identity ?? null)})`
 		)
 		.catch(() => {
 			// Ignore: the window may be tearing down between events.
@@ -292,11 +165,20 @@ export function pushGhostCursorEvent(event: GhostCursorEvent): void {
 		}
 		const localX = point.x - display.bounds.x;
 		const localY = point.y - display.bounds.y;
-		const hue = hueForAgent(event.agent || "0");
+		const hue = ghostCursorHueFor(event.identity, event.agent);
 		if (ready) {
-			forward(win, event.phase, localX, localY, hue, event.intent);
+			forward(
+				win,
+				event.phase,
+				localX,
+				localY,
+				hue,
+				event.intent,
+				event.identity
+			);
 		} else {
 			pending.push({
+				identity: event.identity,
 				intent: event.intent,
 				phase: event.phase,
 				x: localX,

@@ -40,6 +40,8 @@ pub(crate) struct ToolUsageBody {
     pub tool_calls: u64,
     #[serde(default)]
     pub task_label: Option<String>,
+    #[serde(default)]
+    pub composio_usage: Option<ryu_channel_contracts::composio_billing::ComposioUsage>,
 }
 
 impl ToolUsageBody {
@@ -111,6 +113,7 @@ pub(crate) async fn host_tool_usage_record(
         request_id: body.request_id,
         tool_calls: body.tool_calls,
         task_label: body.task_label,
+        composio_usage: body.composio_usage,
     };
 
     match crate::sidecar::gateway::record_external_tool_charge(&state.client, &org.id, charge).await
@@ -140,6 +143,7 @@ mod tests {
             request_id: "social:call-1".to_owned(),
             tool_calls: 1,
             task_label: Some("Outpost X post".to_owned()),
+            composio_usage: None,
         }
     }
 

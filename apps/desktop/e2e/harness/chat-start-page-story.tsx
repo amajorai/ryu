@@ -1,3 +1,4 @@
+import proofStyles from "./chat-start-page-story.module.css";
 // Standalone browser story for the EMPTY chat start page carrying the app
 // launchpad in its `emptyStateFooter` slot — the real `AgentChat`, mounted the way
 // `ChatPage` mounts it (`emptyStatePosition="center"`, no messages).
@@ -95,12 +96,17 @@ const ITEMS: LaunchpadItem[] = [
  *  the composer factory's provider tree. Only its HEIGHT matters to what this story
  *  tests, and 170px is what the real one occupies. Without it the column never
  *  overflows a short pane, which is precisely the case under test. */
+declare module "react" {
+	interface CSSProperties {
+		"--chat-pane-height"?: string;
+	}
+}
+
 function HeaderStandIn() {
 	return (
 		<div
-			className="flex flex-col items-center justify-end gap-2 pb-4"
+			className={`${proofStyles.headerStandIn} flex flex-col items-center justify-end gap-2 pb-4`}
 			data-testid="header-standin"
-			style={{ height: 170 }}
 		>
 			<div className="size-12 rounded-full bg-muted" />
 			<div className="font-medium text-lg">What are we doing?</div>
@@ -121,21 +127,14 @@ function Pane({
 	withLaunchpad: boolean;
 }) {
 	return (
-		<section style={{ marginBottom: 32 }}>
-			<h2
-				style={{
-					fontSize: 12,
-					marginBottom: 8,
-					opacity: 0.6,
-					fontFamily: "system-ui, sans-serif",
-				}}
-			>
+		<section className={proofStyles.fixture1}>
+			<h2 className={proofStyles.fixture2}>
 				{label} — {height}px
 			</h2>
 			<div
-				className="flex min-h-0 flex-col overflow-hidden rounded-lg border"
+				className={`${proofStyles.paneHeight} flex min-h-0 flex-col overflow-hidden rounded-lg border`}
 				data-testid={testId}
-				style={{ height }}
+				style={{ "--chat-pane-height": `${height}px` }}
 			>
 				<ChatDisplayPrefs>
 					<AgentChat
@@ -167,7 +166,7 @@ function Pane({
 
 function Story() {
 	return (
-		<div style={{ padding: 24 }}>
+		<div className={proofStyles.fixture3}>
 			<Pane
 				height={640}
 				label="Tall pane, with launchpad"

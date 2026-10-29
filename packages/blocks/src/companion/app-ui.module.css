@@ -1,0 +1,79 @@
+/* The canonical Companion role stylesheet remains @ryu/ui/app-ui.css. */
+.actions {
+	composes: ryu-app-actions from global;
+}
+.detail {
+	composes: ryu-app-detail from global;
+}
+.empty {
+	composes: ryu-app-empty from global;
+}
+.emptyActions {
+	composes: ryu-app-empty__actions from global;
+}
+.emptyDescription {
+	composes: ryu-app-empty__description from global;
+}
+.emptyTitle {
+	composes: ryu-app-empty__title from global;
+}
+.field {
+	composes: ryu-app-field from global;
+}
+.fieldDescription {
+	composes: ryu-app-field__description from global;
+}
+.fieldLabel {
+	composes: ryu-app-field__label from global;
+}
+.form {
+	composes: ryu-app-form from global;
+}
+.list {
+	composes: ryu-app-list from global;
+}
+.listItem {
+	composes: ryu-app-list__item from global;
+}
+.listItemAccessories {
+	composes: ryu-app-list__item-accessories from global;
+}
+.listItemContent {
+	composes: ryu-app-list__item-content from global;
+}
+.listItemIcon {
+	composes: ryu-app-list__item-icon from global;
+}
+.listItemSubtitle {
+	composes: ryu-app-list__item-subtitle from global;
+}
+.listItemTitle {
+	composes: ryu-app-list__item-title from global;
+}
+.listSection {
+	composes: ryu-app-list__section from global;
+}
+.listSectionTitle {
+	composes: ryu-app-list__section-title from global;
+}
+.main {
+	composes: ryu-app-main from global;
+}
+.section {
+	composes: ryu-app-section from global;
+}
+.sectionHeading {
+	composes: ryu-app-section__heading from global;
+}
+.shell {
+	composes: ryu-app-shell from global;
+}
+.toolbar {
+	composes: ryu-app-toolbar from global;
+}
+.toolbarActions {
+	composes: ryu-app-toolbar__actions from global;
+}
+.toolbarTitle {
+	composes: ryu-app-toolbar__title from global;
+}

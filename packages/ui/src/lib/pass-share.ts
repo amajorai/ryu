@@ -11,6 +11,8 @@
 // Kept free of React imports so `apps/web`'s server-rendered `/pass` page can
 // use it without pulling a client component into its module graph.
 
+import { z } from "zod";
+
 /**
  * The shareable image's pixel size — 16:9, not the 1200x630 the rest of the
  * site's cards use, because this one is meant to be pasted into a post as a
@@ -21,6 +23,20 @@
  * drag takumi's native binding into a page render for one number.
  */
 export const PASS_OG_SIZE = { width: 1200, height: 675 } as const;
+
+// Queue values preserve the full native number domain, including stored nonfinite counts.
+const queueNumberSchema = z.union([
+	z.number(),
+	z.nan(),
+	z.literal(Number.POSITIVE_INFINITY),
+	z.literal(Number.NEGATIVE_INFINITY),
+]);
+
+export function isPassQueueNumber(
+	value: Parameters<typeof queueNumberSchema.safeParse>[0]
+): value is number {
+	return queueNumberSchema.safeParse(value).success;
+}
 
 export interface PassShareFacts {
 	/** Sign-up time (ISO). The live card formats it; so does the raster. */
@@ -47,7 +63,7 @@ export function passShareParams(facts: PassShareFacts): URLSearchParams {
 	if (facts.username) {
 		params.set("username", facts.username);
 	}
-	if (typeof facts.position === "number") {
+	if (isPassQueueNumber(facts.position)) {
 		params.set("position", String(facts.position));
 	}
 	if (facts.joined) {

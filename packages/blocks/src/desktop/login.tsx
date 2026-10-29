@@ -16,6 +16,7 @@
 
 import { CheckmarkCircle02Icon, Copy01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { MessageValuesInput } from "@ryu/i18n/core";
 import { useOptionalI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -27,12 +28,14 @@ import {
 	DialogTitle,
 } from "@ryu/ui/components/dialog";
 import { Logo as GhostOrb } from "@ryu/ui/components/logo";
+import { OTPCodeDisplay } from "@ryu/ui/components/motion/otp-input";
 import { PageHeader } from "@ryu/ui/components/page-header";
 import { toast } from "@ryu/ui/components/sileo";
 import { Spinner } from "@ryu/ui/components/spinner";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
 import { cn } from "@ryu/ui/lib/utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { WorkspacePreview } from "./workspace-preview.tsx";
 
 export type LocalCoreSetupState =
 	| { phase: "downloading" }
@@ -70,17 +73,16 @@ export interface LoginViewProps {
 	polling?: boolean;
 	/** The user code to enter on the verification page. */
 	userCode?: string | null;
+	/** Full verification URL, including the prefilled device code. */
+	verificationUri?: string | null;
 	/** When set, the device-auth flow is in progress (shows the code panel). */
 	waiting?: boolean;
 }
 
 function useLoginText() {
 	const i18n = useOptionalI18n();
-	return (
-		id: string,
-		fallback: string,
-		values?: Record<string, unknown>
-	): string => i18n?.t(id, values, fallback) ?? fallback;
+	return (id: string, fallback: string, values?: MessageValuesInput): string =>
+		i18n?.t(id, values, fallback) ?? fallback;
 }
 
 function SetupStatus({
@@ -203,53 +205,15 @@ function LocalCoreSetupDialog({
 	);
 }
 
-/** The device code, click-to-copy. The code is deliberately not selectable text:
- *  one click copies it, the trailing icon morphs from copy to check, and a toast
- *  confirms. */
+/** The device code in the shared read-only OTP treatment. */
 function DeviceCode({ userCode }: { userCode: string }) {
-	const [copied, setCopied] = useState(false);
 	const t = useLoginText();
 
-	const copy = async () => {
-		try {
-			await navigator.clipboard.writeText(userCode);
-			setCopied(true);
-			toast.success(t("login.copied", "Copied to clipboard"));
-			setTimeout(() => setCopied(false), 2000);
-		} catch {
-			// Clipboard unavailable; the code stays visible for manual entry.
-		}
-	};
-
 	return (
-		<button
-			aria-label={t("login.copy-device-code", "Copy device code")}
-			className="group flex items-center gap-3 rounded-xl bg-muted/40 px-8 py-4 transition-colors hover:bg-muted/60"
-			onClick={copy}
-			type="button"
-		>
-			<span className="font-medium font-mono text-3xl tracking-[0.2em]">
-				{userCode}
-			</span>
-			<span className="relative inline-flex size-5 shrink-0 items-center justify-center">
-				<HugeiconsIcon
-					className={cn(
-						"absolute text-muted-foreground transition-[transform,opacity,color] duration-200 group-hover:text-foreground",
-						copied ? "scale-50 opacity-0" : "scale-100 opacity-100"
-					)}
-					icon={Copy01Icon}
-					size={18}
-				/>
-				<HugeiconsIcon
-					className={cn(
-						"absolute text-status-success transition-[transform,opacity] duration-200",
-						copied ? "scale-100 opacity-100" : "scale-50 opacity-0"
-					)}
-					icon={CheckmarkCircle02Icon}
-					size={18}
-				/>
-			</span>
-		</button>
+		<OTPCodeDisplay
+			aria-label={t("login.device-sign-in-code", "Device sign-in code")}
+			code={userCode}
+		/>
 	);
 }
 
@@ -258,23 +222,82 @@ function DeviceCode({ userCode }: { userCode: string }) {
  *  it in a `max-w-xs` group so it matches the start screen's button width. */
 function DeviceAuthAction({
 	hasVerificationUri,
+	verificationUri,
 	onOpenVerification,
-}: Pick<LoginViewProps, "hasVerificationUri" | "onOpenVerification">) {
+}: Pick<
+	LoginViewProps,
+	"hasVerificationUri" | "verificationUri" | "onOpenVerification"
+>) {
 	const t = useLoginText();
+	const [copiedUri, setCopiedUri] = useState<string | null>(null);
 
-	if (!hasVerificationUri) {
+	if (!(hasVerificationUri || verificationUri)) {
 		return null;
 	}
+
+	const copyVerificationLink = async () => {
+		if (!verificationUri) {
+			return;
+		}
+		try {
+			await navigator.clipboard.writeText(verificationUri);
+			setCopiedUri(verificationUri);
+			toast.success(t("login.sign-in-link-copied", "Sign-in link copied"));
+		} catch {
+			toast.error(
+				t("login.copy-sign-in-link-failed", "Couldn't copy the sign-in link")
+			);
+		}
+	};
+
 	return (
-		<Button
-			className="w-full"
-			onClick={onOpenVerification}
-			size="lg"
-			variant="mono"
-		>
-			{t("login.open", "Open")}
-		</Button>
+		<div className="flex w-full flex-col gap-2">
+			{hasVerificationUri ? (
+				<Button
+					className="w-full"
+					onClick={onOpenVerification}
+					size="lg"
+					variant="mono"
+				>
+					{t("login.open", "Open")}
+				</Button>
+			) : null}
+			{verificationUri ? (
+				<Button
+					className="w-full"
+					onClick={copyVerificationLink}
+					size="lg"
+					variant="outline"
+				>
+					<HugeiconsIcon
+						icon={
+							copiedUri === verificationUri ? CheckmarkCircle02Icon : Copy01Icon
+						}
+						size={18}
+					/>
+					{copiedUri === verificationUri
+						? t("login.sign-in-link-copied", "Sign-in link copied")
+						: t("login.copy-sign-in-link", "Copy sign-in link")}
+				</Button>
+			) : null}
+		</div>
 	);
+}
+
+function DeviceAuthCancel({ onCancel }: Pick<LoginViewProps, "onCancel">) {
+	const t = useLoginText();
+	const [visible, setVisible] = useState(false);
+
+	useEffect(() => {
+		const timer = setTimeout(() => setVisible(true), 3000);
+		return () => clearTimeout(timer);
+	}, []);
+
+	return visible ? (
+		<Button onClick={onCancel} size="sm" type="button" variant="ghost">
+			{t("common.cancel", "Cancel")}
+		</Button>
+	) : null;
 }
 
 export function LoginView({
@@ -284,6 +307,7 @@ export function LoginView({
 	waiting,
 	userCode,
 	hasVerificationUri,
+	verificationUri,
 	polling,
 	onSignIn,
 	onOpenVerification,
@@ -297,13 +321,14 @@ export function LoginView({
 	onUseCloud,
 }: LoginViewProps) {
 	const t = useLoginText();
+	const [previewOpen, setPreviewOpen] = useState(true);
 
 	return (
 		// The empty area around the centered column is the start page's window
 		// drag handle on macOS — the interactive children (buttons) override it,
 		// so only the background drags the window.
 		<div
-			className="flex h-full w-full flex-col items-center justify-center gap-8 p-8"
+			className="flex h-full w-full flex-col items-center justify-center gap-8 overflow-y-auto p-8"
 			data-tauri-drag-region="true"
 		>
 			<LocalCoreSetupDialog
@@ -366,15 +391,10 @@ export function LoginView({
 							<DeviceAuthAction
 								hasVerificationUri={hasVerificationUri}
 								onOpenVerification={onOpenVerification}
+								verificationUri={verificationUri}
 							/>
 
-							<button
-								className="text-xs underline underline-offset-2"
-								onClick={onCancel}
-								type="button"
-							>
-								{t("common.cancel", "Cancel")}
-							</button>
+							<DeviceAuthCancel onCancel={onCancel} />
 						</div>
 					</>
 				) : (
@@ -388,6 +408,9 @@ export function LoginView({
 							title={t("login.title", "Hey, I'm Ryu")}
 						/>
 
+						{previewOpen ? (
+							<WorkspacePreview onContinue={() => setPreviewOpen(false)} />
+						) : null}
 						<div className="flex w-full max-w-xs flex-col items-center gap-3">
 							{/* Sign-in runs directly against Better Auth (device flow), so it
 							    no longer waits on Core — the button is always enabled. Core

@@ -18,6 +18,13 @@ import { type ComponentProps, type ReactNode, useState } from "react";
 
 import { ToolbarButton } from "./toolbar.tsx";
 
+type ModeToolbarState = "editing" | "suggestion" | "viewing";
+
+interface ModeToolbarItem {
+	icon: ReactNode;
+	label: string;
+}
+
 export function ModeToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 	const editor = useEditorRef();
 	const readOnly = useEditorReadOnly();
@@ -25,7 +32,7 @@ export function ModeToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 
 	const isSuggesting = usePluginOption(SuggestionPlugin, "isSuggesting");
 
-	let value = "editing";
+	let value: ModeToolbarState = "editing";
 
 	if (readOnly) {
 		value = "viewing";
@@ -35,7 +42,7 @@ export function ModeToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 		value = "suggestion";
 	}
 
-	const item: Record<string, { icon: ReactNode; label: string }> = {
+	const item = {
 		editing: {
 			icon: <PenIcon />,
 			label: "Editing",
@@ -48,7 +55,7 @@ export function ModeToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 			icon: <EyeIcon />,
 			label: "Viewing",
 		},
-	};
+	} satisfies Record<ModeToolbarState, ModeToolbarItem>;
 	const activeItem = item[value] ?? item.editing!;
 
 	return (

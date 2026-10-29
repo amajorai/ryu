@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": [
+    "src/lib/realtime/jwt.ts",
+    "src/lib/realtime/jwt.test.ts",
+    "src/lib/realtime/jwt.owner.native-http.test.ts",
+    "lib/auth-client.ts"
+  ]
+}

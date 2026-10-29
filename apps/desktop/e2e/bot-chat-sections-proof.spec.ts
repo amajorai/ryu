@@ -24,7 +24,7 @@ test("creates, assigns, reorders, sorts, and deletes local chat sections", async
 	page,
 }) => {
 	await page.goto(STORY_URL);
-	await expect(page.getByText("Unorganized", { exact: true })).toBeVisible();
+	await expect(section(page, "unorganized")).toBeVisible();
 	await expect(chatRow(page, "Newer follow-up")).toBeVisible();
 
 	await page.getByRole("button", { name: "New section" }).click();
@@ -59,6 +59,13 @@ test("creates, assigns, reorders, sorts, and deletes local chat sections", async
 	await expect(section(page, "unorganized")).not.toContainText(
 		"Newer follow-up"
 	);
+	const sectionHeader = section(page, sectionId).locator(
+		"button[draggable='true']"
+	);
+	await sectionHeader.click();
+	await expect(section(page, sectionId)).not.toContainText("Newer follow-up");
+	await sectionHeader.click();
+	await expect(section(page, sectionId)).toContainText("Newer follow-up");
 
 	const beforeReorder = await sectionOrder(page);
 	await section(page, sectionId)
@@ -90,4 +97,63 @@ test("creates, assigns, reorders, sorts, and deletes local chat sections", async
 		0
 	);
 	await expect(section(page, "unorganized")).toContainText("Newer follow-up");
+});
+
+async function createSection(page: Page, name: string) {
+	await page.getByRole("button", { name: "New section" }).click();
+	await page.getByRole("textbox", { name: "Section name" }).fill(name);
+	await page.getByRole("button", { name: "Create section" }).click();
+	const created = page
+		.locator('[data-testid^="bot-chat-section-section-"]')
+		.filter({ hasText: name })
+		.last();
+	await expect(created).toBeVisible();
+	const id = await created.getAttribute("data-subsection-key");
+	expect(id).toMatch(/^section-/);
+	return id ?? "";
+}
+
+function header(page: Page, id: string) {
+	return section(page, id).locator("button[draggable='true']").first();
+}
+
+test("nests a section inside another by dropping on its header, then lifts it back out", async ({
+	page,
+}) => {
+	await page.goto(STORY_URL);
+	const work = await createSection(page, "Work");
+	const clients = await createSection(page, "Clients");
+
+	// Dropping on the middle of a header moves the section inside it.
+	await header(page, clients).dragTo(header(page, work));
+	await expect(
+		page
+			.getByTestId(`bot-chat-section-children-${work}`)
+			.getByTestId(`bot-chat-section-${clients}`)
+	).toBeVisible();
+
+	// The nesting persists across reloads.
+	await page.goto("/bot-chat-sections-proof.html");
+	await expect(
+		page
+			.getByTestId(`bot-chat-section-children-${work}`)
+			.getByTestId(`bot-chat-section-${clients}`)
+	).toBeVisible();
+
+	// A parent cannot be dropped into its own child.
+	await header(page, work).dragTo(header(page, clients));
+	await expect(
+		page.getByTestId(`bot-chat-section-children-${clients}`)
+	).toHaveCount(0);
+
+	// The keyboard-reachable menu moves it back to the top level.
+	await section(page, clients)
+		.getByRole("button", { name: "Clients options" })
+		.click();
+	await page.getByRole("menuitem", { name: "Move section to" }).click();
+	await page.getByRole("menuitem", { name: "Top level" }).click();
+	await expect(
+		page.getByTestId(`bot-chat-section-children-${work}`)
+	).toHaveCount(0);
+	await expect(section(page, clients)).toBeVisible();
 });

@@ -31,15 +31,13 @@ describe("parseIslandTtsPrefs", () => {
 		expect(parseIslandTtsPrefs(JSON.stringify({ engine: "" })).engine).toBe(
 			DEFAULT_ISLAND_TTS_ENGINE
 		);
-		expect(
-			parseIslandTtsPrefs(JSON.stringify({ engine: 5 as unknown })).engine
-		).toBe(DEFAULT_ISLAND_TTS_ENGINE);
+		expect(parseIslandTtsPrefs(JSON.stringify({ engine: 5 })).engine).toBe(
+			DEFAULT_ISLAND_TTS_ENGINE
+		);
 	});
 
 	it("defaults voice to empty (engine default) when absent or non-string", () => {
 		expect(parseIslandTtsPrefs(JSON.stringify({})).voice).toBe("");
-		expect(
-			parseIslandTtsPrefs(JSON.stringify({ voice: 7 as unknown })).voice
-		).toBe("");
+		expect(parseIslandTtsPrefs(JSON.stringify({ voice: 7 })).voice).toBe("");
 	});
 });

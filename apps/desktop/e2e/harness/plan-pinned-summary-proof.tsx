@@ -60,10 +60,14 @@ function Story() {
 		null
 	);
 
+	const surfaceStyle: CSSProperties & { "--proof-accent": string } = {
+		"--proof-accent": "var(--primary)",
+	};
+
 	return (
 		<div
 			className="flex h-screen flex-col bg-background text-foreground"
-			style={{ "--proof-accent": "#8b5cf6" } as CSSProperties}
+			style={surfaceStyle}
 		>
 			<header className="flex shrink-0 items-center justify-between border-border/60 border-b px-6 py-4">
 				<div>

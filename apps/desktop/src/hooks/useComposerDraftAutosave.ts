@@ -76,6 +76,23 @@ interface PendingDraftWrite {
 }
 
 /**
+ * Whether this composer keeps drafts: the Drafts app is on and the chat is not
+ * temporary.
+ *
+ * The Drafts lookup is a hook, so it runs on every render whatever `persist` says.
+ * Short-circuiting it (`persist !== false && useAppShellPath(...)`) skips it while a
+ * chat is temporary, which changes the page's hook order the moment "Temporary chat"
+ * is turned on and crashes the page.
+ */
+export function useComposerDraftsEnabled(
+	context: ComposerDraftContext
+): boolean {
+	const draftsAppEnabled =
+		useAppShellPath(DRAFTS_PLUGIN_ID, DRAFTS_BUTTON_ID) !== null;
+	return context.persist !== false && draftsAppEnabled;
+}
+
+/**
  * Returns the `onDraftChange` handler to hand to `AgentChat`.
  *
  * A no-op that still returns a stable callback when the app is disabled, so the
@@ -85,9 +102,7 @@ export function useComposerDraftAutosave(
 	context: ComposerDraftContext
 ): (draft: string) => void {
 	const node = useActiveNode();
-	const enabled =
-		context.persist !== false &&
-		useAppShellPath(DRAFTS_PLUGIN_ID, DRAFTS_BUTTON_ID) !== null;
+	const enabled = useComposerDraftsEnabled(context);
 	const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const settings = useRef<{ at: number; enabled: boolean; min: number } | null>(
 		null
@@ -229,9 +244,7 @@ export function useComposerDraftRestore(
 	context: ComposerDraftContext
 ): string | undefined {
 	const node = useActiveNode();
-	const enabled =
-		context.persist !== false &&
-		useAppShellPath(DRAFTS_PLUGIN_ID, DRAFTS_BUTTON_ID) !== null;
+	const enabled = useComposerDraftsEnabled(context);
 	const [restoredDraft, setRestoredDraft] = useState<string | undefined>();
 	const conversationId = context.conversationId;
 

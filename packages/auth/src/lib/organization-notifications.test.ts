@@ -61,10 +61,8 @@ beforeAll(() => {
 			},
 		},
 	}));
-	mock.module("@ryu/db/models/organization-feature-control.model", () => ({
-		OrganizationFeatureControl: {
-			find: () => ({ limit: async () => [] }),
-		},
+	mock.module("./organization-feature-values.ts", () => ({
+		resolveOrganizationFeatureValues: async () => new Map(),
 	}));
 	mock.module("@ryu/db/models/organization-notification.model", () => ({
 		isOrganizationNotificationEnabled: () => Promise.resolve(enabled),
@@ -93,7 +91,11 @@ beforeAll(() => {
 		shouldStoreUserNotificationInApp: () => Promise.resolve(true),
 	}));
 	mock.module("@ryu/email", () => ({
-		OrganizationActivityEmail: (props: Record<string, unknown>) => props,
+		OrganizationActivityEmail: (
+			props: Parameters<
+				typeof import("@ryu/email").OrganizationActivityEmail
+			>[0]
+		) => props,
 		sendEmail: async (input: { subject: string; to: string }) => {
 			sent.push(input);
 			return { data: null, success: true };

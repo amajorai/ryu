@@ -1,0 +1,20 @@
+/* Agent profile artwork: generated tiles and fades are authored here. */
+.dither {
+	background-image: var(--agent-profile-dither-image);
+	background-position: 0 0;
+	background-size: var(--agent-profile-dither-size);
+	opacity: 0.38;
+	-webkit-mask-image: radial-gradient(
+		circle at 50% 50%,
+		black var(--agent-profile-dither-fade),
+		transparent 100%
+	);
+	mask-image: radial-gradient(
+		circle at 50% 50%,
+		black var(--agent-profile-dither-fade),
+		transparent 100%
+	);
+}
+.banner {
+	composes: base from "./agent-banner-dialog.module.css";
+}

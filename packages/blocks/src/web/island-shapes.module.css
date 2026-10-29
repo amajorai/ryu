@@ -1,0 +1,59 @@
+.dynamic1.dynamic1 {
+	gap: var(--blocks-gap);
+	margin-top: var(--blocks-marginTop);
+	margin-left: var(--blocks-marginLeft);
+}
+.dynamic4.dynamic4 {
+	height: var(--blocks-height);
+}
+
+.siriBorder::after {
+	position: absolute;
+	inset: 0;
+	z-index: 2;
+	padding: 1.5px;
+	pointer-events: none;
+	content: "";
+	background: radial-gradient(
+		130% 150% at 50% 118%,
+		rgba(255, 255, 255, 0.9) 0%,
+		rgba(255, 255, 255, 0.45) 28%,
+		rgba(255, 255, 255, 0.12) 48%,
+		transparent 64%
+	);
+	border-radius: inherit;
+	-webkit-mask:
+		linear-gradient(#000 0 0) content-box,
+		linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+}
+.zoneOverlay {
+	opacity: 0;
+	transition: opacity 0.14s ease;
+}
+.zoneOverlay[data-shown="true"] {
+	opacity: 1;
+}
+.zoneBackdrop {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.4);
+}
+.zoneGhost {
+	position: absolute;
+	box-sizing: border-box;
+	background: rgba(255, 255, 255, 0.04);
+	border: 1.5px dashed rgba(255, 255, 255, 0.35);
+	transition:
+		border-color 0.12s ease,
+		background 0.12s ease,
+		box-shadow 0.12s ease;
+}
+.zoneGhost[data-active="true"] {
+	background: rgba(130, 175, 255, 0.18);
+	border: 2px solid rgba(255, 255, 255, 0.95);
+	box-shadow:
+		0 0 0 1px rgba(8, 10, 16, 0.3),
+		0 10px 44px rgba(60, 110, 220, 0.5);
+}

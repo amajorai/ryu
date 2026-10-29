@@ -4,20 +4,20 @@ import {
 	type VersionSource,
 } from "@/src/components/versioning/VersionHistory.tsx";
 
-interface AgentVersionHistoryPanelProps {
+interface AgentVersionHistoryPanelProps<TRestoreResult, TSnapshotResult> {
 	currentValue: string;
 	disabled?: boolean;
 	onRestored?: () => void;
-	source: VersionSource;
+	source: VersionSource<TRestoreResult, TSnapshotResult>;
 }
 
 /** Complete Core-owned agent-definition history used by the editor's Versions tab. */
-export function AgentVersionHistoryPanel({
+export function AgentVersionHistoryPanel<TRestoreResult, TSnapshotResult>({
 	currentValue,
 	disabled = false,
 	onRestored,
 	source,
-}: AgentVersionHistoryPanelProps) {
+}: AgentVersionHistoryPanelProps<TRestoreResult, TSnapshotResult>) {
 	return (
 		<SettingsSection
 			caption="Saved checkpoints include the agent's model, tools, safety posture, persona, and instructions. Runs, credentials, and provider state are never part of a version."

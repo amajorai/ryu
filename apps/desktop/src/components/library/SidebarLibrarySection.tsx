@@ -6,11 +6,12 @@ import {
 	type LibraryCardData,
 	LibraryEmpty,
 	LibraryGrid,
-} from "@ryu/blocks/desktop/library";
+} from "@ryu/blocks/desktop/library.tsx";
 import type {
 	LibraryViewMode,
 	ViewMode,
-} from "@ryu/blocks/desktop/view-toggle";
+} from "@ryu/blocks/desktop/view-toggle.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { BookCard } from "@ryu/ui/components/book-card.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { type ReactNode, useMemo } from "react";
@@ -68,6 +69,7 @@ export default function SidebarLibrarySection({
 	variant?: "cards" | "books";
 	view: LibraryViewMode;
 }) {
+	const tl = useLiteralMessages();
 	const visible = useMemo(() => {
 		const needle = query.trim().toLowerCase();
 		if (!needle) {
@@ -96,7 +98,7 @@ export default function SidebarLibrarySection({
 				description={
 					query
 						? "Nothing matches your search."
-						: `${label} has nothing in it yet.`
+						: tl("{label} has nothing in it yet.", { label })
 				}
 				icon={icon}
 				title={query ? "No results" : "Nothing yet"}
@@ -131,10 +133,12 @@ export default function SidebarLibrarySection({
 							/>
 						</div>
 						{item.secondaryAction ? (
-							<SecondaryActionButton
-								action={item.secondaryAction}
-								className="absolute -top-2 -right-2 z-10 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-							/>
+							<span className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+								<SecondaryActionButton
+									action={item.secondaryAction}
+									className="absolute -top-2 -right-2 z-10"
+								/>
+							</span>
 						) : null}
 					</div>
 				))}
@@ -158,10 +162,12 @@ export default function SidebarLibrarySection({
 					<div className="group relative" key={item.id}>
 						<LibraryCard item={card} onOpen={item.onOpen} view={standardView} />
 						{item.secondaryAction ? (
-							<SecondaryActionButton
-								action={item.secondaryAction}
-								className="absolute top-2 right-10 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-							/>
+							<span className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+								<SecondaryActionButton
+									action={item.secondaryAction}
+									className="absolute top-2 right-10"
+								/>
+							</span>
 						) : null}
 					</div>
 				);

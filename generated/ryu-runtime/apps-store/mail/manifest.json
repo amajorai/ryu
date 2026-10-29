@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/mail",
   "name": "Mail",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "Agent Inboxes — email as a service for agents. Runs the out-of-process ryu-mail sidecar; Core proxies /api/mail/* to it. Its sandboxed companion and developer clients cover inboxes, messages, threads, attachments, drafts, scheduling, labels, webhooks, delivery events, lists, pods, and domains through the mail:crud bridge/API.",
   "keywords": ["email", "inbox", "communication", "agents"],
@@ -49,7 +49,7 @@
         "command_env": "RYU_MAIL_BIN",
         "port_env": "RYU_MAIL_PORT"
       },
-      "host_api": { "grants": ["mail:crud"] },
+      "host_api": { "grants": ["mail:crud", "crypto:seal"] },
       "port": 7996,
       "health_path": "/health",
       "http": {
@@ -189,7 +189,7 @@
           {
             "path": "/inboxes/:id/drafts",
             "method": "POST",
-            "permission": "mail.manage"
+            "permission": "mail.send"
           },
           {
             "path": "/inboxes/:id/drafts/:draft_id",
@@ -199,7 +199,7 @@
           {
             "path": "/inboxes/:id/drafts/:draft_id",
             "method": "PATCH",
-            "permission": "mail.manage"
+            "permission": "mail.send"
           },
           {
             "path": "/inboxes/:id/drafts/:draft_id",
@@ -387,12 +387,12 @@
     {
       "id": "mail.send",
       "label": "Can send",
-      "description": "Compose, reply, forward, schedule, and send mail from an agent inbox, which leaves this node and reaches real recipients. Grant this level separately from read access."
+      "description": "Compose and edit drafts, reply, forward, schedule, and send mail from an agent inbox, which leaves this node and reaches real recipients. A draft with a send time is a scheduled send, so writing drafts needs this level. Grant it separately from read access."
     },
     {
       "id": "mail.manage",
       "label": "Can manage mail",
-      "description": "Create and configure inboxes, drafts, webhooks, labels, lists, pods, and domains. Grant send access separately."
+      "description": "Create and configure inboxes, webhooks, labels, lists, pods, and domains, and delete drafts. Writing drafts needs send access, which is granted separately."
     }
   ],
   "companion": {
@@ -400,19 +400,6 @@
     "icon": "mail-01"
   },
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "mail.chat",
-        "title": "Mail widget",
-        "description": "Mail chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["mail widget"],
-        "examples": ["Show me a mail widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "sidebar_sections": [
       {
         "id": "inboxes",
@@ -443,7 +430,7 @@
       {
         "id": "@ryu/mail#message.received",
         "title": "Email received",
-        "description": "An inbound message was accepted and stored. Fires once per accepted POST to the inbound webhook, after the per-inbox HMAC verified and the row was written — so a forwarder that retries the same message fires this again. The payload is metadata only; fetch the body with GET /api/mail/messages/:id.",
+        "description": "An inbound message was accepted and stored. Fires once per accepted POST to the inbound webhook, after the per-inbox HMAC verified and the row was written. A forwarder retry with the same Message-ID or identical raw bytes is deduplicated and does not fire this again. The payload is metadata only; fetch the body with GET /api/mail/messages/:id.",
         "payload_example": {
           "messageId": "0f6d2a1c-3b44-4f0e-9a77-8c1e2d5b6f90",
           "inboxId": "8b3c1f5e-9d24-4a7b-b1c6-2e0f7a4d3c88",

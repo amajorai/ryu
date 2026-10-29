@@ -16,6 +16,7 @@ import {
 	usePluginContributions,
 } from "@/src/hooks/usePluginContributions.ts";
 import { triggerGlobalRefresh } from "@/src/lib/core-refresh.ts";
+import { isNavigablePluginCompanion } from "@/src/lib/plugin-companion-navigation.ts";
 import { STANDALONE_APP_NAME } from "@/src/lib/product.ts";
 import PluginCompanionPage from "@/src/pages/PluginCompanionPage.tsx";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
@@ -52,7 +53,7 @@ function withTimeout<T>(
 				clearTimeout(timer);
 				resolve(value);
 			},
-			(error: unknown) => {
+			(error) => {
 				clearTimeout(timer);
 				reject(error);
 			}
@@ -113,7 +114,7 @@ function StandaloneBootstrap({
 			}
 		}
 
-		bootstrap().catch((cause: unknown) => {
+		bootstrap().catch((cause) => {
 			if (active) {
 				setError(cause instanceof Error ? cause.message : String(cause));
 				setPhase("error");
@@ -126,7 +127,8 @@ function StandaloneBootstrap({
 
 	useEffect(() => {
 		const companionId = companions.find(
-			(companion) => companion.pluginId === appId
+			(companion) =>
+				companion.pluginId === appId && isNavigablePluginCompanion(companion)
 		)?.id;
 		if (companionId) {
 			onCompanionReady(companionId);

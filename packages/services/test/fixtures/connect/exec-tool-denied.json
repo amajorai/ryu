@@ -1,0 +1,13 @@
+{
+  "status": 403,
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_2e887aab53824006b584bd5b9c7b5d4e"
+  },
+  "body": {
+    "code": "tool_denied",
+    "error": "The tool or account is not granted to this tenant",
+    "ok": false
+  }
+}

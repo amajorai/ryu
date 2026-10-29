@@ -1,15 +1,21 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PROOF_URL = "http://127.0.0.1:5180/";
+const PROOF_URL = "http://127.0.0.1:5698/";
 
 export default defineConfig({
 	testDir: ".",
-	testMatch: /voice-mode-call-proof\.spec\.ts/,
+	testMatch: /voice-(mode-call|call-history)-proof\.spec\.ts/,
 	fullyParallel: false,
 	retries: 0,
 	reporter: "list",
 	use: {
 		baseURL: PROOF_URL,
+		launchOptions: {
+			args: [
+				"--use-fake-ui-for-media-stream",
+				"--use-fake-device-for-media-stream",
+			],
+		},
 		trace: "retain-on-failure",
 	},
 	projects: [

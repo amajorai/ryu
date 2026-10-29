@@ -5,7 +5,12 @@ use tauri::Manager;
 use tokio::sync::oneshot;
 
 #[derive(Default)]
-pub struct TabTransfers(Mutex<HashMap<String, oneshot::Sender<()>>>);
+pub struct TabTransfers(Mutex<HashMap<String, PendingTransfer>>);
+
+struct PendingTransfer {
+    ready: oneshot::Sender<()>,
+    payload: Option<serde_json::Value>,
+}
 
 /// Any error after allocating a destination releases it as well as its waiter.
 pub struct TransferWindowGuard {
@@ -38,13 +43,33 @@ impl Drop for TransferWindowGuard {
 }
 
 impl TabTransfers {
-    pub fn begin(&self, label: &str) -> Result<oneshot::Receiver<()>, String> {
+    pub fn begin(
+        &self,
+        label: &str,
+        payload: serde_json::Value,
+    ) -> Result<oneshot::Receiver<()>, String> {
+        validate_transfer(&payload)?;
         let (sender, receiver) = oneshot::channel();
         self.0
             .lock()
             .map_err(|_| "tab transfer lock poisoned")?
-            .insert(label.to_owned(), sender);
+            .insert(
+                label.to_owned(),
+                PendingTransfer {
+                    ready: sender,
+                    payload: Some(payload),
+                },
+            );
         Ok(receiver)
+    }
+
+    fn claim(&self, label: &str) -> Result<Option<serde_json::Value>, String> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|_| "tab transfer lock poisoned")?
+            .get_mut(label)
+            .and_then(|pending| pending.payload.take()))
     }
 
     pub fn remove(&self, label: &str) {
@@ -54,16 +79,47 @@ impl TabTransfers {
     }
 
     fn ready(&self, label: &str) -> Result<(), String> {
-        if let Some(sender) = self
-            .0
-            .lock()
-            .map_err(|_| "tab transfer lock poisoned")?
-            .remove(label)
+        let mut pending = self.0.lock().map_err(|_| "tab transfer lock poisoned")?;
+        if pending
+            .get(label)
+            .is_some_and(|transfer| transfer.payload.is_some())
         {
-            let _ = sender.send(());
+            return Err("The destination has not claimed its tab transfer".into());
+        }
+        if let Some(transfer) = pending.remove(label) {
+            let _ = transfer.ready.send(());
         }
         Ok(())
     }
+}
+
+/// Bound to the same fixed shell URL used by open_tab_window, never a URL supplied
+/// by the renderer or an opaque JavaScript origin.
+pub fn is_shell_navigation(url: &tauri::Url) -> bool {
+    let (scheme, host, port) = if cfg!(debug_assertions) {
+        ("http", "localhost", Some(5173))
+    } else if cfg!(target_os = "windows") || cfg!(target_os = "android") {
+        ("http", "tauri.localhost", None)
+    } else {
+        ("tauri", "localhost", None)
+    };
+    url.scheme() == scheme
+        && url.host_str() == Some(host)
+        && url.port() == port
+        && url.username().is_empty()
+        && url.password().is_none()
+}
+
+#[tauri::command]
+pub fn claim_tab_transfer(
+    window: tauri::WebviewWindow,
+    transfers: tauri::State<'_, TabTransfers>,
+) -> Result<Option<serde_json::Value>, String> {
+    if !is_shell_navigation(&window.url().map_err(|error| error.to_string())?) {
+        return Err("Tab transfers are available only to the app shell".into());
+    }
+    // Tauri supplies the invoking window; JSON cannot select another destination.
+    transfers.claim(window.label())
 }
 
 #[tauri::command]
@@ -90,7 +146,7 @@ pub async fn wait_for_renderer(
     Ok(())
 }
 
-pub fn initialization_script(transfer: &serde_json::Value) -> Result<String, String> {
+pub fn validate_transfer(transfer: &serde_json::Value) -> Result<(), String> {
     if transfer.get("version").and_then(|v| v.as_u64()) != Some(1)
         || transfer
             .pointer("/tab/id")
@@ -107,11 +163,7 @@ pub fn initialization_script(transfer: &serde_json::Value) -> Result<String, Str
     if json.len() > 16 * 1024 * 1024 {
         return Err("This tab's unsaved content is too large to move into another window.".into());
     }
-    // JSON inside a JSON string is data, including __proto__ and script text.
-    let quoted = serde_json::to_string(&json).map_err(|e| e.to_string())?;
-    Ok(format!(
-        "if (window === window.top) {{ window.__RYU_TAB_TRANSFER__ = JSON.parse({quoted}); }}"
-    ))
+    Ok(())
 }
 
 pub fn outside_window(
@@ -257,12 +309,16 @@ mod tests {
     #[tokio::test]
     async fn only_the_destination_can_acknowledge_and_repeated_ack_is_harmless() {
         let transfers = TabTransfers::default();
-        let mut receiver = transfers.begin("tab-1").unwrap();
+        let mut receiver = transfers.begin("tab-1", transfer()).unwrap();
         transfers.ready("main").unwrap();
         assert_eq!(
             receiver.try_recv(),
             Err(oneshot::error::TryRecvError::Empty)
         );
+        assert!(transfers.ready("tab-1").is_err());
+        assert!(transfers.claim("main").unwrap().is_none());
+        assert_eq!(transfers.claim("tab-1").unwrap(), Some(transfer()));
+        assert!(transfers.claim("tab-1").unwrap().is_none());
         transfers.ready("tab-1").unwrap();
         receiver.await.unwrap();
         transfers.ready("tab-1").unwrap();
@@ -271,22 +327,69 @@ mod tests {
     #[tokio::test]
     async fn cancelling_a_transfer_releases_its_waiter() {
         let transfers = TabTransfers::default();
-        let receiver = transfers.begin("tab-1").unwrap();
+        let receiver = transfers.begin("tab-1", transfer()).unwrap();
         transfers.remove("tab-1");
         assert!(receiver.await.is_err());
+        assert!(transfers.claim("tab-1").unwrap().is_none());
     }
 
     #[test]
     fn transfer_requires_version_and_internal_tab_path() {
-        assert!(initialization_script(&serde_json::json!({"version": 2})).is_err());
-        assert!(initialization_script(
+        assert!(validate_transfer(&serde_json::json!({"version": 2})).is_err());
+        assert!(validate_transfer(
             &serde_json::json!({"version": 1, "tab": {"id": "x", "path": "//evil.test"}})
         )
         .is_err());
         let value = serde_json::json!({"version": 1, "tab": {"id": "x", "path": "/chat", "initialPrompt": "</script>\n'quoted'"}});
-        assert!(initialization_script(&value)
-            .unwrap()
-            .contains("JSON.parse("));
+        assert!(validate_transfer(&value).is_ok());
+    }
+
+    fn transfer() -> serde_json::Value {
+        serde_json::json!({"version": 1, "tab": {"id": "x", "path": "/chat", "initialPrompt": "private draft"}})
+    }
+
+    #[test]
+    fn detached_navigation_preserves_shell_and_denies_external_and_opaque_urls() {
+        let shell = if cfg!(debug_assertions) {
+            "http://localhost:5173"
+        } else if cfg!(target_os = "windows") || cfg!(target_os = "android") {
+            "http://tauri.localhost"
+        } else {
+            "tauri://localhost"
+        };
+        for suffix in ["/", "/index.html?detached=1", "/chat#message"] {
+            assert!(is_shell_navigation(
+                &format!("{shell}{suffix}").parse().unwrap()
+            ));
+        }
+        for url in [
+            "HTTPS://attacker.example/",
+            "http://localhost:5174/",
+            "http://localhost.attacker.example:5173/",
+            "http://attacker@localhost:5173/",
+            "data:text/html,attack",
+            "about:blank",
+            "file:///index.html",
+            "https://tauri.localhost/",
+            "tauri://attacker/",
+        ] {
+            assert!(
+                !is_shell_navigation(&url.parse().unwrap()),
+                "accepted {url}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn each_destination_has_a_separate_single_use_payload() {
+        let transfers = TabTransfers::default();
+        let _first = transfers.begin("tab-1", transfer()).unwrap();
+        let mut other = transfer();
+        other["tab"]["initialPrompt"] = serde_json::json!("other private draft");
+        let _second = transfers.begin("tab-2", other.clone()).unwrap();
+        assert_eq!(transfers.claim("tab-1").unwrap(), Some(transfer()));
+        assert_eq!(transfers.claim("tab-2").unwrap(), Some(other));
+        assert!(transfers.claim("tab-1").unwrap().is_none());
     }
 
     #[test]

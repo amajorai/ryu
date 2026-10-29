@@ -53,14 +53,14 @@ export default function ExtensionSettings({
 	appearance,
 	billing,
 }: ExtensionSettingsProps) {
-	const content: Record<ExtensionSettingsTab, ReactNode> = {
+	const content = {
 		profile,
 		account,
 		connections,
 		sessions,
 		appearance,
 		billing,
-	};
+	} satisfies Record<ExtensionSettingsTab, ReactNode>;
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">

@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = "http://127.0.0.1:5199/";
+const baseURL = "http://127.0.0.1:5250/";
 
 export default defineConfig({
 	testDir: ".",
@@ -14,7 +14,7 @@ export default defineConfig({
 	webServer: {
 		command: "bunx vite --config vite.mesh-auto-install-proof.config.ts",
 		url: baseURL,
-		reuseExistingServer: false,
+		reuseExistingServer: true,
 		timeout: 120_000,
 	},
 });

@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "meetings-settings-proof.playwright.config.ts",
+    "meetings-settings-proof.spec.ts",
+    "harness/meetings-settings-proof.tsx",
+    "harness/vite.meetings-settings-proof.config.ts"
+  ]
+}

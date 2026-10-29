@@ -1,7 +1,8 @@
 //! Provider-facing video-job value types.
 //!
 //! Job-based (async) generation — cloud video runs for minutes — returns a
-//! [`VideoJob`] handle from [`crate::Provider::submit_video`] / `poll_video`
+//! [`VideoJob`] snapshot from [`crate::Provider::submit_video_bound`] or
+//! [`crate::VideoPollOrigin::poll`]
 //! instead of blocking the request. The gateway-side `MediaJob`/`MediaJobStore`
 //! (the request-scoped tracking + polling loop + tenant isolation) stay in
 //! `apps/gateway/src/jobs.rs`; only the provider-produced value types live here
@@ -41,10 +42,10 @@ impl JobStatus {
 }
 
 /// A provider-normalized snapshot of a video job, returned by
-/// [`crate::Provider::submit_video`] / `poll_video`. The gateway stores
-/// `provider_ref` so it can re-poll, and surfaces `output`/`error` to the client
+/// [`crate::Provider::submit_video_bound`] or [`crate::VideoPollOrigin::poll`].
+/// The private polling origin retains `provider_ref`, while the gateway surfaces `output`/`error`
 /// in a stable OpenAI-ish shape.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct VideoJob {
     /// The provider's own id / poll handle (Replicate prediction id, Fal
     /// status URL, …). Opaque to the gateway; used only to re-poll.
@@ -57,10 +58,35 @@ pub struct VideoJob {
     pub error: Option<String>,
 }
 
+impl std::fmt::Debug for VideoJob {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("VideoJob")
+            .field("status", &self.status)
+            .field("has_output", &self.output.is_some())
+            .field("has_error", &self.error.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn debug_omits_private_poll_references_and_payloads() {
+        let job = VideoJob {
+            provider_ref: "private-poll-reference".into(),
+            status: JobStatus::Queued,
+            output: Some(json!({"private":"private-output"})),
+            error: Some("private-error".into()),
+        };
+        let debug = format!("{job:?}");
+        for value in ["private-poll-reference", "private-output", "private-error"] {
+            assert!(!debug.contains(value));
+        }
+    }
 
     #[test]
     fn as_str_covers_every_variant() {

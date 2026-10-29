@@ -24,6 +24,14 @@
       }
     },
     {
+      "name": "an exact-size input produces one complete window",
+      "input": { "text": "abcd", "size": 4 },
+      "expect": {
+        "count": 1,
+        "chunks": [{ "start": 0, "text": "abcd" }]
+      }
+    },
+    {
       "name": "overlap re-reads the tail of the previous window",
       "input": { "text": "abcdefg", "size": 4, "overlap": 2 },
       "expect": {
@@ -33,6 +41,18 @@
           { "start": 2, "text": "cdef" },
           { "start": 4, "text": "efg" },
           { "start": 6, "text": "g" }
+        ]
+      }
+    },
+    {
+      "name": "the largest valid overlap advances by one character",
+      "input": { "text": "abc", "size": 3, "overlap": 2 },
+      "expect": {
+        "count": 3,
+        "chunks": [
+          { "start": 0, "text": "abc" },
+          { "start": 1, "text": "bc" },
+          { "start": 2, "text": "c" }
         ]
       }
     },
@@ -47,6 +67,11 @@
       "expectError": "'overlap' must be in \\[0, size\\)"
     },
     {
+      "name": "rejects a negative overlap",
+      "input": { "text": "abc", "size": 3, "overlap": -1 },
+      "expectError": "'overlap' must be in \\[0, size\\)"
+    },
+    {
       "name": "rejects a non-string text instead of stringifying it",
       "input": { "text": 42 },
       "expectError": "'text' is required"
@@ -54,6 +79,11 @@
     {
       "name": "rejects a zero size",
       "input": { "text": "abc", "size": 0 },
+      "expectError": "'size' must be positive"
+    },
+    {
+      "name": "rejects a negative size",
+      "input": { "text": "abc", "size": -1 },
       "expectError": "'size' must be positive"
     }
   ]

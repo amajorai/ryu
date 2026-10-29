@@ -10,6 +10,7 @@
 //
 // No telemetry; purely local storage. Disabled by default per CLAUDE.md.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useEffect, useState } from "react";
 import type { CaptureControl } from "@/src/lib/api/shadow.ts";
@@ -123,6 +124,7 @@ export default function ConsentSettings({
 	onConsentChange,
 	onPausedChange,
 }: ConsentSettingsProps) {
+	const tl = useLiteralMessages();
 	const [consent, setConsent] = useState<CompanionConsent>(CONSENT_DEFAULTS);
 	const [paused, setPaused] = useState(false);
 	const [allowlistRaw, setAllowlistRaw] = useState("");
@@ -196,7 +198,7 @@ export default function ConsentSettings({
 
 	if (!ready) {
 		return (
-			<div className="animate-pulse px-4 py-3 text-muted-foreground text-xs">
+			<div className="animate-skeleton px-4 py-3 text-muted-foreground text-xs">
 				Loading consent settings…
 			</div>
 		);
@@ -249,8 +251,13 @@ export default function ConsentSettings({
 					Comma-separated list of app names. Leave empty to allow all apps.
 					{allowlist.length > 0 && (
 						<span className="ml-1 font-medium text-foreground">
-							Active ({formatCount(allowlist.length) ?? "—"} app
-							{allowlist.length === 1 ? "" : "s"}).
+							{tl(
+								"Active ({appCount, plural, one {{appLabel} app} other {{appLabel} apps}}).",
+								{
+									appCount: allowlist.length,
+									appLabel: formatCount(allowlist.length) ?? "—",
+								}
+							)}
 						</span>
 					)}
 				</p>

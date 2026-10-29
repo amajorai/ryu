@@ -4,10 +4,20 @@ import { SquareLock01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useState } from "react";
+import styles from "./core.module.css";
 import { landingSurfaceCardFlexXlClass } from "./landing-card-tones.ts";
 import { SectionTitle } from "./section-title.tsx";
+
+interface CoreVariables extends CSSProperties {
+	"--core-delay"?: string;
+	"--core-duration"?: string;
+	"--core-height"?: string;
+	"--core-left"?: string;
+	"--core-top"?: string;
+	"--core-width"?: string;
+}
 
 function SecurityViz() {
 	const threats = [
@@ -24,17 +34,29 @@ function SecurityViz() {
 						const threat = threats.find((t) => t.row * 12 + t.col === i);
 						return (
 							<div
-								className={`h-2 w-2 rounded-full ${threat ? "animate-threat-resolve bg-destructive" : "bg-foreground/20"}`}
-								// biome-ignore lint/suspicious/noArrayIndexKey: static grid
+								className={cn(
+									`h-2 w-2 rounded-full ${threat ? `${styles.threatResolve} bg-destructive` : "bg-foreground/20"}`,
+									styles.variables
+								)}
 								key={i}
-								style={threat ? { animationDelay: threat.delay } : undefined}
+								style={
+									threat
+										? ({
+												"--core-delay": threat.delay,
+											} satisfies CoreVariables as CoreVariables)
+										: undefined
+								}
 							/>
 						);
 					})}
 				</div>
-				<div className="absolute inset-x-0 top-0 h-px animate-scan-sweep bg-foreground/30" />
+				<div
+					className={`absolute inset-x-0 top-0 h-px ${styles.scanSweep} bg-foreground/30`}
+				/>
 			</div>
-			<p className="animate-threat-resolve text-foreground/30 text-xs tracking-widest">
+			<p
+				className={`${styles.threatResolve} text-foreground/30 text-xs tracking-widest`}
+			>
 				SCANNING
 			</p>
 		</div>
@@ -50,25 +72,41 @@ function RouterViz() {
 			<div className="relative flex min-h-6 flex-1 flex-col items-center">
 				<div className="h-full w-px bg-border" />
 				{[0, 0.3, 0.6].map((delay, i) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: static dots
 					<div
-						className="absolute h-1.5 w-1.5 animate-flow-down rounded-full bg-foreground/60"
+						className={cn(
+							`absolute h-1.5 w-1.5 ${styles.flowDown} rounded-full bg-foreground/60`,
+							styles.variables
+						)}
 						key={i}
-						style={{ animationDelay: `${delay}s`, top: "30%" }}
+						style={
+							{
+								"--core-delay": `${delay}s`,
+								"--core-top": "30%",
+							} satisfies CoreVariables as CoreVariables
+						}
 					/>
 				))}
 			</div>
-			<div className="flex-shrink-0 animate-node-pulse rounded-full bg-foreground px-3 py-1 font-medium text-background text-xs">
+			<div
+				className={`flex-shrink-0 ${styles.nodePulse} rounded-full bg-foreground px-3 py-1 font-medium text-background text-xs`}
+			>
 				RYU
 			</div>
 			<div className="relative flex min-h-6 flex-1 flex-col items-center">
 				<div className="h-full w-px bg-border" />
 				{[0.2, 0.5, 0.8].map((delay, i) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: static dots
 					<div
-						className="absolute h-1.5 w-1.5 animate-flow-down rounded-full bg-foreground/60"
+						className={cn(
+							`absolute h-1.5 w-1.5 ${styles.flowDown} rounded-full bg-foreground/60`,
+							styles.variables
+						)}
 						key={i}
-						style={{ animationDelay: `${delay}s`, top: "50%" }}
+						style={
+							{
+								"--core-delay": `${delay}s`,
+								"--core-top": "50%",
+							} satisfies CoreVariables as CoreVariables
+						}
 					/>
 				))}
 			</div>
@@ -92,9 +130,16 @@ function McpViz() {
 		<div className="flex flex-1 flex-wrap gap-2">
 			{tools.map((tool, i) => (
 				<span
-					className="inline-flex animate-tool-float items-center rounded-full bg-foreground/8 px-2.5 py-1 text-foreground/70 text-xs"
+					className={cn(
+						`inline-flex ${styles.toolFloat} items-center rounded-full bg-foreground/8 px-2.5 py-1 text-foreground/70 text-xs`,
+						styles.variables
+					)}
 					key={tool}
-					style={{ animationDelay: `${i * 0.33}s` }}
+					style={
+						{
+							"--core-delay": `${i * 0.33}s`,
+						} satisfies CoreVariables as CoreVariables
+					}
 				>
 					{tool}
 				</span>
@@ -125,25 +170,36 @@ function MemoryViz() {
 					</svg>
 				</div>
 				{[0, 0.4, 0.8].map((delay, i) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: static bars
 					<div
-						className="h-1.5 animate-chunk-appear rounded-full bg-foreground/20"
+						className={cn(
+							`h-1.5 ${styles.chunkAppear} rounded-full bg-foreground/20`,
+							styles.variables
+						)}
 						key={i}
-						style={{
-							animationDelay: `${delay}s`,
-							width: i === 0 ? "4rem" : i === 1 ? "3rem" : "3.5rem",
-						}}
+						style={
+							{
+								"--core-delay": `${delay}s`,
+								"--core-width": i === 0 ? "4rem" : i === 1 ? "3rem" : "3.5rem",
+							} satisfies CoreVariables as CoreVariables
+						}
 					/>
 				))}
 			</div>
 			<div className="relative flex flex-1 items-center justify-center">
 				<div className="h-2 w-2 rounded-full bg-foreground/60" />
 				{durations.map((dur, i) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: static orbits
 					<div
-						className="absolute h-1.5 w-1.5 animate-vec-orbit rounded-full bg-foreground/40"
+						className={cn(
+							`absolute h-1.5 w-1.5 ${styles.vecOrbit} rounded-full bg-foreground/40`,
+							styles.variables
+						)}
 						key={i}
-						style={{ animationDuration: dur, animationDelay: `${i * 0.5}s` }}
+						style={
+							{
+								"--core-duration": dur,
+								"--core-delay": `${i * 0.5}s`,
+							} satisfies CoreVariables as CoreVariables
+						}
 					/>
 				))}
 			</div>
@@ -169,10 +225,17 @@ function CostViz() {
 				<span className="font-medium text-foreground text-sm">$50.00</span>
 			</div>
 			<div className="relative h-2 overflow-hidden rounded-full bg-muted/50">
-				<div className="h-full animate-budget-fill rounded-full bg-foreground/70" />
 				<div
-					className="absolute top-0 h-full w-px bg-destructive/70"
-					style={{ left: "78%" }}
+					className={`h-full ${styles.budgetFill} rounded-full bg-foreground/70`}
+				/>
+				<div
+					className={cn(
+						"absolute top-0 h-full w-px bg-destructive/70",
+						styles.variables
+					)}
+					style={
+						{ "--core-left": "78%" } satisfies CoreVariables as CoreVariables
+					}
 				/>
 			</div>
 			<div className="flex justify-between text-muted-foreground/50 text-xs">
@@ -194,15 +257,22 @@ function VaultViz() {
 	return (
 		<div className="relative flex flex-1 items-center gap-4">
 			<HugeiconsIcon
-				className="h-5 w-5 shrink-0 animate-node-pulse text-foreground"
+				className={`h-5 w-5 shrink-0 ${styles.nodePulse} text-foreground`}
 				icon={SquareLock01Icon}
 			/>
 			<div className="flex flex-1 flex-col gap-2">
 				{rows.map((row, i) => (
 					<div
-						className="flex animate-chunk-appear items-center gap-2"
+						className={cn(
+							`flex ${styles.chunkAppear} items-center gap-2`,
+							styles.variables
+						)}
 						key={row}
-						style={{ animationDelay: `${i * 0.4}s` }}
+						style={
+							{
+								"--core-delay": `${i * 0.4}s`,
+							} satisfies CoreVariables as CoreVariables
+						}
 					>
 						<span className="h-1.5 w-1.5 rounded-full bg-foreground/60" />
 						<span className="font-mono text-foreground/50 text-xs">{row}</span>
@@ -224,13 +294,17 @@ function WorkflowViz() {
 			>
 				{[0, 1, 2, 3].map((i) => (
 					<line
-						className="animate-edge-trace"
+						className={cn(`${styles.edgeTrace}`, styles.variables)}
 						key={`edge-${i}`}
 						stroke="currentColor"
 						strokeDasharray="80"
 						strokeOpacity="0.3"
 						strokeWidth="1"
-						style={{ animationDelay: `${i * 0.5}s` }}
+						style={
+							{
+								"--core-delay": `${i * 0.5}s`,
+							} satisfies CoreVariables as CoreVariables
+						}
 						x1={`${(i / 4) * 100 + 10}%`}
 						x2={`${((i + 1) / 4) * 100}%`}
 						y1="50%"
@@ -241,9 +315,16 @@ function WorkflowViz() {
 			<div className="flex w-full items-center gap-1">
 				{nodes.map((node, i) => (
 					<div
-						className="min-w-0 flex-1 animate-node-pulse truncate rounded-md bg-foreground/8 px-1.5 py-1 text-center text-[10px] text-foreground/80"
+						className={cn(
+							`type-compact min-w-0 flex-1 ${styles.nodePulse} truncate rounded-md bg-foreground/8 px-1.5 py-1 text-center text-foreground/80`,
+							styles.variables
+						)}
 						key={node}
-						style={{ animationDelay: `${i * 0.5}s` }}
+						style={
+							{
+								"--core-delay": `${i * 0.5}s`,
+							} satisfies CoreVariables as CoreVariables
+						}
 					>
 						{node}
 					</div>
@@ -263,9 +344,16 @@ function DlpViz() {
 		<div className="flex flex-1 flex-col justify-center gap-2.5">
 			{fields.map((field) => (
 				<div
-					className="flex animate-chunk-appear items-center justify-between gap-3 rounded-md bg-foreground/5 px-3 py-2 font-mono text-xs"
+					className={cn(
+						`flex ${styles.chunkAppear} items-center justify-between gap-3 rounded-md bg-foreground/5 px-3 py-2 font-mono text-xs`,
+						styles.variables
+					)}
 					key={field.label}
-					style={{ animationDelay: field.delay }}
+					style={
+						{
+							"--core-delay": field.delay,
+						} satisfies CoreVariables as CoreVariables
+					}
 				>
 					<span className="text-foreground/40">{field.label}</span>
 					<span className="text-foreground/70">{field.value}</span>
@@ -285,9 +373,16 @@ function AuditViz() {
 		<div className="flex flex-1 flex-col justify-center gap-2">
 			{events.map((event, i) => (
 				<div
-					className="flex animate-chunk-appear items-center gap-2"
+					className={cn(
+						`flex ${styles.chunkAppear} items-center gap-2`,
+						styles.variables
+					)}
 					key={event}
-					style={{ animationDelay: `${i * 0.35}s` }}
+					style={
+						{
+							"--core-delay": `${i * 0.35}s`,
+						} satisfies CoreVariables as CoreVariables
+					}
 				>
 					<span className="h-1.5 w-1.5 rounded-full bg-foreground/60" />
 					<span className="truncate font-mono text-foreground/50 text-xs">
@@ -321,7 +416,6 @@ function CacheViz() {
 				{Array.from({ length: 8 }).map((_, i) => (
 					<div
 						className={`h-6 rounded-sm transition-colors duration-500 ${hit && i < 5 ? "bg-foreground/50" : "bg-foreground/15"}`}
-						// biome-ignore lint/suspicious/noArrayIndexKey: static grid
 						key={i}
 					/>
 				))}
@@ -338,20 +432,33 @@ function MediaViz() {
 			<div className="grid grid-cols-4 gap-1">
 				{tiles.map((_, i) => (
 					<div
-						className="h-3 w-3 animate-chunk-appear rounded-sm bg-foreground/25"
-						// biome-ignore lint/suspicious/noArrayIndexKey: static tile grid
+						className={cn(
+							`h-3 w-3 ${styles.chunkAppear} rounded-sm bg-foreground/25`,
+							styles.variables
+						)}
 						key={i}
-						style={{ animationDelay: `${i * 0.06}s` }}
+						style={
+							{
+								"--core-delay": `${i * 0.06}s`,
+							} satisfies CoreVariables as CoreVariables
+						}
 					/>
 				))}
 			</div>
 			<div className="flex flex-1 items-center gap-0.5">
 				{bars.map((h, i) => (
 					<span
-						className="w-1 animate-node-pulse rounded-full bg-foreground/40"
-						// biome-ignore lint/suspicious/noArrayIndexKey: static waveform
+						className={cn(
+							`w-1 ${styles.nodePulse} rounded-full bg-foreground/40`,
+							styles.variables
+						)}
 						key={i}
-						style={{ height: `${h}px`, animationDelay: `${i * 0.12}s` }}
+						style={
+							{
+								"--core-height": `${h}px`,
+								"--core-delay": `${i * 0.12}s`,
+							} satisfies CoreVariables as CoreVariables
+						}
 					/>
 				))}
 			</div>
@@ -387,7 +494,8 @@ const cards: {
 	{
 		viz: <McpViz />,
 		title: "MCP Registry",
-		description: "250+ tools, zero wiring. Connect any agent to any service.",
+		description:
+			"Connect supported agents to configured MCP tools and services.",
 	},
 	{
 		viz: <MemoryViz />,

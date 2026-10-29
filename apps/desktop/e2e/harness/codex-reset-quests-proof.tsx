@@ -1,16 +1,16 @@
 // Real Quests component and local sidecar; only the host transport is adapted.
 import { markCompanionAppRoot } from "@ryu/app-host/companion-theme";
-import { RyuAppShell } from "@ryu/blocks/companion/app-ui";
+import { RyuAppShell } from "@ryu/blocks/companion/app-ui.tsx";
 import { createRoot } from "react-dom/client";
 import { Quests } from "../../../../apps-store/quests/ui/src/Quests.tsx";
 import type { RyuQuests } from "../../../../apps-store/quests/ui/src/ryu.d.ts";
 import "../../../../apps-store/quests/ui/src/tailwind.css";
 
-async function request(path = "", method = "GET", body?: unknown) {
+async function request<Body>(path = "", method = "GET", body?: Body) {
 	const response = await fetch(`/api/quests${path}`, {
 		method,
 		headers: { "Content-Type": "application/json" },
-		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+		...(body === undefined ? undefined : { body: JSON.stringify(body) }),
 	});
 	const data = await response.json();
 	if (!response.ok || data.error) {
@@ -18,7 +18,7 @@ async function request(path = "", method = "GET", body?: unknown) {
 	}
 	return data;
 }
-const item = async (path: string, body?: unknown) =>
+const item = async <Body,>(path: string, body?: Body) =>
 	(await request(path, "POST", body)).quest;
 const quests: RyuQuests = {
 	list: async () => (await request()).quests,

@@ -1,3 +1,4 @@
+import type { UIMessage } from "ai";
 import { create } from "zustand";
 
 /**
@@ -65,8 +66,8 @@ interface ContextSlice {
  * are the two built-in builders (their preambles ship in `builderPreamble.ts`);
  * any other string is an **app-defined** surface, which must carry its own
  * `preamble`. Deliberately an open union — a closed enum here is exactly what
- * forced `DashboardBuilderChat` to grow a second chat pane rather than drive the
- * one global assistant.
+ * once forced Home's dashboard builder to grow a second chat pane rather than
+ * drive the one global assistant (it now registers a `dashboard` surface).
  */
 export type AssistantBuilderKind = "agent" | "workflow" | (string & {});
 
@@ -126,6 +127,11 @@ export interface AssistantBuilderSession {
 	/** Human name of the target, for the header + empty-state copy. */
 	targetName: string;
 	/**
+	 * What an app-defined surface's conversation is about (e.g. one pull
+	 * request). A new value starts a separate thread; an earlier one resumes.
+	 */
+	thread?: string;
+	/**
 	 * Tool ids this surface wants the assistant to reach for. **Advisory**: Core's
 	 * chat stream takes no per-request tool allowlist, so these are named in the
 	 * preamble ("use these tools"), not enforced. Real enforcement stays where it
@@ -139,6 +145,13 @@ export interface AssistantBuilderSession {
 export type AssistantSurfaceSession = AssistantBuilderSession;
 
 const MODE_KEY = "ryu:assistant-mode";
+
+/** Session-memory bounds for app-surface threads (never persisted to Core). */
+const MAX_SURFACE_THREADS = 12;
+const MAX_SURFACE_THREAD_MESSAGES = 80;
+/** Session-memory bounds for answered tool-permission requests. */
+const MAX_PERMISSION_SCOPES = 24;
+const MAX_PERMISSIONS_PER_SCOPE = 64;
 
 /** The last non-closed mode, so reopening restores the user's last layout. */
 function loadLastMode(): "floating" | "sidebar" {
@@ -187,6 +200,13 @@ interface AssistantState {
 	conversationId: string | null;
 	/** Drop all context for now (chip "x"); re-offered on the next page change. */
 	dismissContext: () => void;
+	/**
+	 * Record that the user answered a tool-permission request in `scope` (the
+	 * conversation + target the request came from). Kept here, not in the panel,
+	 * so closing Ask Ryu or switching surface threads never re-shows a prompt
+	 * Core already resolved.
+	 */
+	markPermissionResolved: (scope: string, requestId: string) => void;
 	/** Closed, or open in one of the two layouts. */
 	mode: AssistantMode;
 	/** Start a fresh assistant thread (clears the conversation + un-dismisses). */
@@ -215,16 +235,34 @@ interface AssistantState {
 	 * sidebar, so opening a builder page shows the builder docked by default.
 	 */
 	registerBuilder: (session: AssistantBuilderSession) => void;
+	/**
+	 * Ids the user removed with a chip's "x". A publisher re-publishing its slice
+	 * (a diff finishing loading, a live board refreshing) must not bring them
+	 * back. Cleared with the rest of the context choices: on a page change
+	 * (`restoreContext`) and on a new conversation.
+	 */
+	removedContextIds: string[];
 	/** Remove one published context item by id. */
 	removePageContext: (id: string) => void;
+	/** Answered permission request ids per scope, for this desktop session. */
+	resolvedPermissions: Record<string, string[]>;
 	/** Bring context back after a dismiss (the "Add page" affordance). */
 	restoreContext: () => void;
+	/** Remember an app-surface thread for this desktop session. */
+	saveSurfaceThread: (threadId: string, messages: UIMessage[]) => void;
 	/** Set (or clear) this conversation's id — used on first send + hand-off. */
 	setConversationId: (id: string | null) => void;
 	/** Switch between floating and sidebar without closing. */
 	setLayout: (mode: "floating" | "sidebar") => void;
 	/** Queue (or clear, with `null`) the app-asked prompt the panel sends on mount. */
 	setPendingPrompt: (prompt: string | null) => void;
+	/**
+	 * App-surface threads kept in memory so closing and reopening Ask Ryu (which
+	 * unmounts the panel) resumes them. Surface turns are `persist: false` — they
+	 * carry the app's injected instructions — so they are never written to Core
+	 * history; this is the only place they live, and only until the app quits.
+	 */
+	surfaceThreads: Record<string, UIMessage[]>;
 	/** Patch the live builder fields (id/name/snapshot) without re-docking. */
 	updateBuilder: (patch: Partial<AssistantBuilderSession>) => void;
 }
@@ -258,10 +296,41 @@ export const useAssistantStore = create<AssistantState>((set) => ({
 	mode: "closed",
 	conversationId: null,
 	pageContext: [],
+	removedContextIds: [],
 	contextOwners: [],
 	contextDismissed: false,
 	pendingPrompt: null,
 	builder: null,
+	surfaceThreads: {},
+	resolvedPermissions: {},
+
+	markPermissionResolved: (scope, requestId) =>
+		set((s) => {
+			const { [scope]: previous = [], ...others } = s.resolvedPermissions;
+			if (previous.includes(requestId)) {
+				return {};
+			}
+			const kept = Object.entries(others).slice(-(MAX_PERMISSION_SCOPES - 1));
+			return {
+				resolvedPermissions: {
+					...Object.fromEntries(kept),
+					[scope]: [...previous, requestId].slice(-MAX_PERMISSIONS_PER_SCOPE),
+				},
+			};
+		}),
+
+	saveSurfaceThread: (threadId, messages) =>
+		set((s) => {
+			// Re-inserting moves the thread to the end, so the oldest drop first.
+			const { [threadId]: _previous, ...others } = s.surfaceThreads;
+			const kept = Object.entries(others).slice(-(MAX_SURFACE_THREADS - 1));
+			return {
+				surfaceThreads: {
+					...Object.fromEntries(kept),
+					[threadId]: messages.slice(-MAX_SURFACE_THREAD_MESSAGES),
+				},
+			};
+		}),
 
 	open: (mode) =>
 		set(() => {
@@ -277,10 +346,16 @@ export const useAssistantStore = create<AssistantState>((set) => ({
 		}),
 	setConversationId: (id) => set({ conversationId: id }),
 	setPendingPrompt: (prompt) => set({ pendingPrompt: prompt }),
-	newConversation: () => set({ conversationId: null, contextDismissed: false }),
+	newConversation: () =>
+		set({
+			conversationId: null,
+			contextDismissed: false,
+			removedContextIds: [],
+		}),
 	publishContext: (owner, items) =>
 		set((s) => {
-			const contextOwners = withOwner(s.contextOwners, owner, items);
+			const visible = items.filter((c) => !s.removedContextIds.includes(c.id));
+			const contextOwners = withOwner(s.contextOwners, owner, visible);
 			return { contextOwners, pageContext: flatten(contextOwners) };
 		}),
 	clearContextOwner: (owner) =>
@@ -295,10 +370,14 @@ export const useAssistantStore = create<AssistantState>((set) => ({
 			const contextOwners = s.contextOwners
 				.map((o) => ({ ...o, items: o.items.filter((c) => c.id !== id) }))
 				.filter((o) => o.items.length > 0);
-			return { contextOwners, pageContext: flatten(contextOwners) };
+			return {
+				contextOwners,
+				pageContext: flatten(contextOwners),
+				removedContextIds: [...s.removedContextIds, id].slice(-64),
+			};
 		}),
 	dismissContext: () => set({ contextDismissed: true }),
-	restoreContext: () => set({ contextDismissed: false }),
+	restoreContext: () => set({ contextDismissed: false, removedContextIds: [] }),
 
 	registerBuilder: (session) =>
 		set((s) => {

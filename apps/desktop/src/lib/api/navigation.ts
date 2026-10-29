@@ -6,16 +6,14 @@
 
 import type { ApiTarget } from "./client.ts";
 import { streamChannel } from "./eventStream.ts";
+import {
+	type NavigationLegacyRequest,
+	navigationLegacySchema,
+} from "./navigation-wire-contracts.ts";
 
-export type NavigationKind = "tab" | "panel" | "browser";
+export type NavigationKind = "browser" | "interface" | "panel" | "tab";
 
-export interface NavigationRequest {
-	force_new?: boolean;
-	kind?: NavigationKind;
-	plugin_id?: string;
-	target: string;
-	target_user_id?: string;
-}
+export type NavigationRequest = NavigationLegacyRequest;
 
 /** Subscribe to user-scoped shell navigation requests. */
 export function streamNavigationRequests(
@@ -27,14 +25,12 @@ export function streamNavigationRequests(
 		target,
 		"navigation",
 		(data) => {
-			if (
-				typeof data === "object" &&
-				data !== null &&
-				typeof (data as { target?: unknown }).target === "string"
-			) {
-				onRequest(data as NavigationRequest);
+			const request = navigationLegacySchema.safeParse(data);
+			if (request.success) {
+				onRequest(request.data);
 			}
 		},
-		signal
+		signal,
+		navigationLegacySchema
 	);
 }

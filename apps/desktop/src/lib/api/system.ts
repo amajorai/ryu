@@ -1,3 +1,14 @@
+import {
+	type SystemInfo,
+	sidecarRunningMap,
+	sidecarStatusResponseSchema,
+	systemHealthResponseSchema,
+	systemInfoFromWire,
+	systemInfoResponseSchema,
+	systemStatusResponseSchema,
+} from "@ryuhq/core-client/system.ts";
+
+import { z } from "zod";
 // apps/desktop/src/lib/api/system.ts
 //
 // Typed client for Core's health and sidecar-status endpoints. Backs the
@@ -51,14 +62,16 @@ export async function fetchSystemStatus(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<SystemStatusSnapshot> {
-	const w = await request<SystemStatusWire>(target, "/api/system/status", {
-		signal,
-		skipUserJwt: true,
-	});
-	const sidecars: Record<string, boolean> = {};
-	for (const s of w.sidecars ?? []) {
-		sidecars[s.name] = s.running;
-	}
+	const w = await request<SystemStatusWire>(
+		target,
+		"/api/system/status",
+		{
+			signal,
+			skipUserJwt: true,
+		},
+		systemStatusResponseSchema
+	);
+	const sidecars = sidecarRunningMap(w.sidecars);
 	// Mesh disabled (enabled:false) or absent → null (neutral), matching the
 	// per-probe semantics the status spine relied on.
 	const meshRaw = w.mesh ?? null;
@@ -82,7 +95,16 @@ export async function fetchHealth(
 		status?: string;
 		version?: string;
 		capabilities?: string[];
-	}>(target, "/api/health", { signal, skipUserJwt: true });
+	}>(
+		target,
+		"/api/health",
+		{
+			signal,
+			skipUserJwt: true,
+			skipAuthentication: true,
+		},
+		systemHealthResponseSchema
+	);
 	return {
 		status: json.status ?? "ok",
 		version: json.version ?? null,
@@ -90,90 +112,25 @@ export async function fetchHealth(
 	};
 }
 
-/**
- * Live hardware snapshot for a node (CPU/RAM/disk/GPU). Mirrors Core's
- * `SystemInfo` (`GET /api/system/info`). The numbers describe whichever machine
- * the {@link ApiTarget} points at, so the node selector can show per-node specs.
- */
-export interface SystemInfo {
-	cpuCores: number | null;
-	cpuName: string | null;
-	diskHuman: string;
-	gpuName: string | null;
-	hostname: string | null;
-	/** True when this node is a managed (Ryu Cloud) node, pre-provisioned with
-	 * provider creds + the credits hook so end users do zero setup (A4 / #501). */
-	managed: boolean;
-	/** Org this managed node is bound to (after control-plane registration). */
-	orgId: string | null;
-	orgName: string | null;
-	os: string;
-	physicalCores: number | null;
-	ramHuman: string;
-	totalDiskBytes: number | null;
-	totalRamBytes: number | null;
-	unifiedMemory: boolean;
-	usedDiskBytes: number | null;
-	usedDiskHuman: string;
-	usedRamBytes: number | null;
-	usedRamHuman: string;
-	vramBytes: number | null;
-	vramHuman: string;
-}
-
-interface SystemInfoWire {
-	cpu_cores?: number | null;
-	cpu_name?: string | null;
-	disk_human?: string;
-	gpu_name?: string | null;
-	hostname?: string | null;
-	managed?: boolean;
-	org_id?: string | null;
-	org_name?: string | null;
-	os?: string;
-	physical_cores?: number | null;
-	ram_human?: string;
-	total_disk_bytes?: number | null;
-	total_ram_bytes?: number | null;
-	unified_memory?: boolean;
-	used_disk_bytes?: number | null;
-	used_disk_human?: string;
-	used_ram_bytes?: number | null;
-	used_ram_human?: string;
-	vram_bytes?: number | null;
-	vram_human?: string;
-}
+/** Live per-node CPU/RAM/disk/GPU snapshot (`GET /api/system/info`). */
+export type { SystemInfo };
 
 /** Fetch the node's live CPU/RAM/disk/GPU snapshot. */
 export async function fetchSystemInfo(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<SystemInfo> {
-	const w = await request<SystemInfoWire>(target, "/api/system/info", {
-		signal,
-	});
-	return {
-		hostname: w.hostname ?? null,
-		os: w.os ?? "",
-		cpuName: w.cpu_name ?? null,
-		cpuCores: w.cpu_cores ?? null,
-		physicalCores: w.physical_cores ?? null,
-		totalRamBytes: w.total_ram_bytes ?? null,
-		usedRamBytes: w.used_ram_bytes ?? null,
-		ramHuman: w.ram_human ?? "",
-		usedRamHuman: w.used_ram_human ?? "",
-		totalDiskBytes: w.total_disk_bytes ?? null,
-		usedDiskBytes: w.used_disk_bytes ?? null,
-		diskHuman: w.disk_human ?? "",
-		usedDiskHuman: w.used_disk_human ?? "",
-		vramBytes: w.vram_bytes ?? null,
-		vramHuman: w.vram_human ?? "",
-		gpuName: w.gpu_name ?? null,
-		unifiedMemory: w.unified_memory ?? false,
-		managed: w.managed ?? false,
-		orgId: w.org_id ?? null,
-		orgName: w.org_name ?? null,
-	};
+	return systemInfoFromWire(
+		await request(
+			target,
+			"/api/system/info",
+			{
+				signal,
+				skipUserJwt: true,
+			},
+			systemInfoResponseSchema
+		)
+	);
 }
 
 /**
@@ -186,7 +143,8 @@ export async function restartGateway(target: ApiTarget): Promise<boolean> {
 	const json = await request<{ success?: boolean }>(
 		target,
 		"/api/gateway/restart",
-		{ method: "POST" }
+		{ method: "POST" },
+		z.object({ success: z.boolean().optional() }).passthrough()
 	);
 	return json.success === true;
 }
@@ -200,10 +158,11 @@ export async function fetchSidecarStatus(
 ): Promise<Record<string, boolean>> {
 	const json = await request<{
 		sidecars?: { name: string; running: boolean }[];
-	}>(target, "/api/sidecar/status");
-	const map: Record<string, boolean> = {};
-	for (const s of json.sidecars ?? []) {
-		map[s.name] = s.running;
-	}
-	return map;
+	}>(
+		target,
+		"/api/sidecar/status",
+		{ skipUserJwt: true },
+		sidecarStatusResponseSchema
+	);
+	return sidecarRunningMap(json.sidecars);
 }

@@ -1,15 +1,17 @@
-import { Toaster } from "@ryu/ui/components/sileo";
+import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { createRoot } from "react-dom/client";
 import { NodeAccessSettings } from "../../src/components/settings/NodeAccessSettings.tsx";
 import "../../src/index.css";
 
-Object.defineProperty(window, "__TAURI_INTERNALS__", {
-	configurable: true,
-	value: {
-		invoke: async () => ({ source: "file", token: "owner-proof-token" }),
-		transformCallback: () => 0,
-	},
-});
+if (!new URLSearchParams(window.location.search).has("browser")) {
+	Object.defineProperty(window, "__TAURI_INTERNALS__", {
+		configurable: true,
+		value: {
+			invoke: async () => ({ source: "file", token: "owner-proof-token" }),
+			transformCallback: () => 0,
+		},
+	});
+}
 
 function ProofArtifact() {
 	return (
@@ -17,7 +19,7 @@ function ProofArtifact() {
 			<div className="mx-auto max-w-6xl">
 				<header className="mb-6 flex items-start justify-between gap-6">
 					<div>
-						<p className="font-semibold text-primary text-xs tracking-[0.22em]">
+						<p className="font-semibold text-primary text-xs tracking-section">
 							RYU · DEVICES &amp; ACCESS
 						</p>
 						<h1 className="mt-2 font-semibold text-3xl">Scoped node access</h1>
@@ -27,7 +29,7 @@ function ProofArtifact() {
 							token.
 						</p>
 					</div>
-					<div className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 font-semibold text-emerald-400 text-xs tracking-wider">
+					<div className="rounded-full border border-success/40 bg-success/10 px-3 py-2 font-semibold text-success text-xs tracking-wider">
 						OWNER VERIFIED
 					</div>
 				</header>

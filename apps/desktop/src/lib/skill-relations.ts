@@ -73,20 +73,26 @@ function isEnabledSkill(skill: SkillRelationSkill): boolean {
 export function resolveAgentSkillIds(
 	agentSkills: readonly string[] | null,
 	skills: readonly SkillRelationSkill[]
-): { ids: string[]; scope: SkillAgentScope } {
+) {
 	const enabledIds = skills.filter(isEnabledSkill).map((skill) => skill.id);
 	if (agentSkills === null || agentSkills.length === 0) {
-		return { ids: enabledIds, scope: "all-enabled" };
+		return { ids: enabledIds, scope: "all-enabled" } satisfies {
+			ids: string[];
+			scope: SkillAgentScope;
+		};
 	}
 	if (agentSkills.includes(NO_AGENT_CAPABILITIES)) {
-		return { ids: [], scope: "none" };
+		return { ids: [], scope: "none" } satisfies {
+			ids: string[];
+			scope: SkillAgentScope;
+		};
 	}
 
 	const allowed = new Set(agentSkills);
 	return {
 		ids: enabledIds.filter((id) => allowed.has(id)),
 		scope: "allowlist",
-	};
+	} satisfies { ids: string[]; scope: SkillAgentScope };
 }
 
 function usageCountFor(

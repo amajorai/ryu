@@ -1,6 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import type { PluginValue } from "../src/lib/api/plugin-wire-values.ts";
+import {
+	coreProofRosterSchema,
+	coreProofStateSchema,
+} from "./core-live-proof.contracts.ts";
 
 test("agent picker renders a live populated Core roster", async ({
 	page,
@@ -12,10 +17,9 @@ test("agent picker renders a live populated Core roster", async ({
 			"Set RYU_PERF_CORE_STATE to an isolated populated Core state file."
 		);
 	}
-	const state = JSON.parse(await readFile(statePath, "utf8")) as {
-		port: number;
-		dataDir: string;
-	};
+	const state = coreProofStateSchema.parse(
+		JSON.parse(await readFile(statePath, "utf8"))
+	);
 	const token = await readFile(
 		path.join(state.dataDir, ".performance-token"),
 		"utf8"
@@ -36,28 +40,30 @@ test("agent picker renders a live populated Core roster", async ({
 				{ headers: { authorization: `Bearer ${token}` } }
 			);
 			expect(response.status()).toBe(200);
-			agents = ((await response.json()) as { agents: unknown[] }).agents.length;
+			agents = coreProofRosterSchema.parse(await response.json()).agents.length;
 			await route.fulfill({ response });
 			await response.dispose();
 			return;
 		}
-		const payloads: Record<string, unknown> = {
-			"/api/mcp/servers": {
-				servers: [
-					{
-						name: "Workspace",
-						command: "fixture",
-						enabled: true,
-						available: true,
-						transport: "stdio",
-					},
-				],
-			},
-			"/api/mcp/tools": { tools: [] },
-			"/api/apps": { apps: [] },
-			"/api/identities": { profiles: [] },
-		};
-		await route.fulfill({ json: payloads[url.pathname] ?? {} });
+		const payloads = new Map<string, PluginValue>(
+			Object.entries<PluginValue>({
+				"/api/mcp/servers": {
+					servers: [
+						{
+							name: "Workspace",
+							command: "fixture",
+							enabled: true,
+							available: true,
+							transport: "stdio",
+						},
+					],
+				},
+				"/api/mcp/tools": { tools: [] },
+				"/api/apps": { apps: [] },
+				"/api/identities": { profiles: [] },
+			})
+		);
+		await route.fulfill({ json: payloads.get(url.pathname) ?? {} });
 	});
 	await page.goto("/mcp-performance-proof.html");
 	await expect.poll(() => agents).toBeGreaterThanOrEqual(250);

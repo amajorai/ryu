@@ -41,6 +41,44 @@ use serde_json::{json, Value};
 /// path's `COMPOSIO_ENTITY_ID` so browse-connect and execute share one entity.
 const ENTITY_ENV: &str = "COMPOSIO_ENTITY_ID";
 
+/// An agent's own Composio entity for one owner (embedded mode). It is
+/// distinct from every user entity and scoped to the owner, so users who share
+/// one agent record never share its accounts.
+pub fn agent_entity(owner: &str, agent_id: &str) -> String {
+    format!("agent:{owner}:{agent_id}")
+}
+
+/// Whose Composio accounts a call manages: a user's (the entity fallback
+/// applies to `None`), or one agent's own accounts for its owner.
+///
+/// Embedded mode runs an agent as its own entity, [`agent_entity`]. The
+/// Connect service selects the owner's tenant credential and names the agent
+/// explicitly (`agentId`); an entity string is never sent to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subject<'a> {
+    User(Option<&'a str>),
+    Agent { owner: &'a str, agent_id: &'a str },
+}
+
+impl<'a> Subject<'a> {
+    /// The Composio user an embedded call runs as (`None`: the default entity).
+    pub fn embedded_user(&self) -> Option<String> {
+        match self {
+            Self::User(user_id) => user_id.map(str::to_owned),
+            Self::Agent { owner, agent_id } => Some(agent_entity(owner, agent_id)),
+        }
+    }
+
+    /// `(user_id, agent)` for the Connect service: the user whose tenant
+    /// credential is used, and the agent whose own account is meant.
+    pub fn service_parts(&self) -> (Option<&'a str>, Option<&'a str>) {
+        match *self {
+            Self::User(user_id) => (user_id, None),
+            Self::Agent { owner, agent_id } => (Some(owner), Some(agent_id)),
+        }
+    }
+}
+
 /// Resolve the Composio entity (end-user id) for connect/list. A verified caller
 /// is preferred on a shared node; the env override or `"default"` remains the
 /// fallback for a local single-principal Core.
@@ -150,6 +188,34 @@ async fn post_json(client: &Client, path: &str, body: &Value) -> Result<Value> {
     Ok(parsed)
 }
 
+/// DELETE `{v3}{path}` with the user's Composio key. An empty response body
+/// parses as `null`.
+async fn delete_json(client: &Client, path: &str) -> Result<Value> {
+    let key =
+        crate::auth::key().ok_or_else(|| anyhow!("Composio API key not set (Gateway → Keys)"))?;
+    let url = format!("{}{}", connect_base_url()?, path);
+    let resp = no_redirect_client(client)
+        .delete(&url)
+        .header("x-api-key", key)
+        .header("accept", "application/json")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| anyhow!("Composio request failed: {e}"))?;
+    let status = resp.status();
+    let parsed: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        let msg = parsed
+            .get("error")
+            .and_then(Value::as_str)
+            .or_else(|| parsed.get("message").and_then(Value::as_str))
+            .map(str::to_string)
+            .unwrap_or_else(|| parsed.to_string());
+        return Err(anyhow!("Composio API {status}: {msg}"));
+    }
+    Ok(parsed)
+}
+
 /// First non-empty string among `keys`, also checking a nested `meta` object —
 /// matches [`crate::composio_catalog`]'s tolerance for shape drift.
 fn str_field(item: &Value, keys: &[&str]) -> Option<String> {
@@ -222,10 +288,21 @@ pub async fn list_connections(
     toolkit: &str,
     user_id: Option<&str>,
 ) -> Result<Value> {
-    if let Some(result) = crate::service::list_connections(toolkit, user_id).await {
+    list_connections_for(client, toolkit, Subject::User(user_id)).await
+}
+
+/// [`list_connections`] for a user's or an agent's own accounts.
+pub async fn list_connections_for(
+    client: &Client,
+    toolkit: &str,
+    subject: Subject<'_>,
+) -> Result<Value> {
+    let (user_id, agent) = subject.service_parts();
+    if let Some(result) = crate::service::list_connections_as(toolkit, user_id, agent).await {
         return result;
     }
-    let entity = resolve_entity(user_id);
+    let embedded = subject.embedded_user();
+    let entity = resolve_entity(embedded.as_deref());
     let raw = get_json(
         client,
         "/connected_accounts",
@@ -288,16 +365,22 @@ async fn ensure_auth_config(client: &Client, toolkit: &str) -> Result<String> {
 /// `{ connection_id, redirect_url, status }` — the caller opens `redirect_url`
 /// in the browser and polls [`connection_status`] until `active`.
 pub async fn initiate(client: &Client, toolkit: &str, user_id: Option<&str>) -> Result<Value> {
+    initiate_for(client, toolkit, Subject::User(user_id)).await
+}
+
+/// [`initiate`] for a user's or an agent's own accounts.
+pub async fn initiate_for(client: &Client, toolkit: &str, subject: Subject<'_>) -> Result<Value> {
     if toolkit.trim().is_empty() {
         return Err(anyhow!("toolkit is required to connect"));
     }
-    if let Some(result) = crate::service::initiate(toolkit, user_id).await {
+    let (user_id, agent) = subject.service_parts();
+    if let Some(result) = crate::service::initiate_as(toolkit, user_id, agent).await {
         return result;
     }
     let auth_config_id = ensure_auth_config(client, toolkit).await?;
     let body = json!({
         "auth_config_id": auth_config_id,
-        "user_id": resolve_entity(user_id),
+        "user_id": resolve_entity(subject.embedded_user().as_deref()),
     });
     let resp = post_json(client, "/connected_accounts/link", &body).await?;
     // The redirect URL and connection id can appear at the top level or nested
@@ -348,6 +431,85 @@ pub async fn connection_status(client: &Client, id: &str) -> Result<Value> {
         normalized["id"] = json!(id);
     }
     Ok(normalized)
+}
+
+/// The row for connection `id` in a [`list_connections`] response, or `None`
+/// when it is not in that list. Ownership is decided from the entity's own
+/// listing, never from [`connection_status`], which reads any account by id.
+pub fn find_listed_connection(listed: &Value, id: &str) -> Option<Value> {
+    let id = id.trim();
+    if id.is_empty() {
+        return None;
+    }
+    listed
+        .get("data")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|row| row.get("id").and_then(Value::as_str) == Some(id))
+        .cloned()
+}
+
+/// One connected account of the entity `user_id`, or `None` when that entity
+/// does not own it.
+pub async fn owned_connection(
+    client: &Client,
+    id: &str,
+    user_id: Option<&str>,
+) -> Result<Option<Value>> {
+    owned_connection_for(client, id, Subject::User(user_id)).await
+}
+
+/// [`owned_connection`] for a user's or an agent's own accounts.
+pub async fn owned_connection_for(
+    client: &Client,
+    id: &str,
+    subject: Subject<'_>,
+) -> Result<Option<Value>> {
+    let listed = list_connections_for(client, "", subject).await?;
+    Ok(find_listed_connection(&listed, id))
+}
+
+/// Delete one connected account. Callers check ownership first with
+/// [`owned_connection`]. Not available with the Connect service, which owns
+/// its tenants' accounts.
+pub async fn delete_connection(client: &Client, id: &str) -> Result<()> {
+    if crate::service::is_configured() {
+        return Err(anyhow!(
+            "disconnecting an account is not available with Connect service mode"
+        ));
+    }
+    delete_embedded(client, id).await
+}
+
+/// Delete one account of `subject`. Callers check ownership first with
+/// [`owned_connection_for`]. With the Connect service only an agent's own
+/// account can be removed: Connect revokes it, and it must be `id`.
+pub async fn delete_connection_for(client: &Client, id: &str, subject: Subject<'_>) -> Result<()> {
+    match subject {
+        Subject::Agent { owner, agent_id } if crate::service::is_configured() => {
+            let revoked = crate::service::revoke_agent(agent_id, Some(owner))
+                .await
+                .unwrap_or_else(|| Err(anyhow!("Connect is not configured")))?;
+            if revoked != id.trim() {
+                return Err(anyhow!("Connect revoked a different account"));
+            }
+            Ok(())
+        }
+        _ => delete_connection(client, id).await,
+    }
+}
+
+async fn delete_embedded(client: &Client, id: &str) -> Result<()> {
+    let id = id.trim();
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(anyhow!("a valid connection id is required"));
+    }
+    delete_json(client, &format!("/connected_accounts/{id}")).await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -511,5 +673,96 @@ mod tests {
             .await
             .expect_err("empty id must error before any HTTP");
         assert!(err.to_string().contains("connection id is required"));
+    }
+
+    #[test]
+    fn owned_connection_rejects_foreign_id() {
+        let listed = json!({ "object": "list", "data": [
+            { "id": "ca_own", "toolkit": "gmail", "status": "ACTIVE", "active": true },
+        ]});
+        assert_eq!(
+            find_listed_connection(&listed, "ca_own").map(|row| row["toolkit"].clone()),
+            Some(json!("gmail"))
+        );
+        assert_eq!(find_listed_connection(&listed, "ca_other"), None);
+        assert_eq!(find_listed_connection(&listed, " "), None);
+        assert_eq!(find_listed_connection(&json!({}), "ca_own"), None);
+    }
+
+    #[test]
+    fn delete_connection_refuses_in_service_mode_and_bad_ids() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var_os("RYU_CONNECT_URL");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        let client = Client::new();
+        std::env::set_var("RYU_CONNECT_URL", "https://connect.invalid");
+        let refused = runtime
+            .block_on(delete_connection(&client, "ca_1"))
+            .expect_err("service mode must refuse");
+        assert!(refused.to_string().contains("Connect service mode"));
+        std::env::remove_var("RYU_CONNECT_URL");
+        for bad in ["", "  ", "ca/../x", "ca?x=1"] {
+            let error = runtime
+                .block_on(delete_connection(&client, bad))
+                .expect_err("malformed id must be refused");
+            assert!(error.to_string().contains("valid connection id"), "{bad}");
+        }
+        match prev {
+            Some(v) => std::env::set_var("RYU_CONNECT_URL", v),
+            None => std::env::remove_var("RYU_CONNECT_URL"),
+        }
+    }
+
+    #[test]
+    fn subjects_split_into_embedded_entities_and_connect_parts() {
+        let agent = Subject::Agent {
+            owner: "u1",
+            agent_id: "agent_1",
+        };
+        assert_eq!(agent.embedded_user().as_deref(), Some("agent:u1:agent_1"));
+        assert_eq!(agent.service_parts(), (Some("u1"), Some("agent_1")));
+        let user = Subject::User(Some("u1"));
+        assert_eq!(user.embedded_user().as_deref(), Some("u1"));
+        assert_eq!(user.service_parts(), (Some("u1"), None));
+        assert_eq!(Subject::User(None).embedded_user(), None);
+    }
+
+    #[test]
+    fn agent_accounts_are_revoked_through_connect_and_user_accounts_are_not() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var_os("RYU_CONNECT_URL");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let client = Client::new();
+        std::env::set_var("RYU_CONNECT_URL", "https://connect.invalid");
+        // A user's own account is still never disconnected in service mode.
+        let refused = runtime
+            .block_on(delete_connection_for(
+                &client,
+                "ca_1",
+                Subject::User(Some("u1")),
+            ))
+            .expect_err("service mode must refuse");
+        assert!(refused.to_string().contains("Connect service mode"));
+        // An agent's goes to Connect's revoke, which refuses a bad id first.
+        let refused = runtime
+            .block_on(delete_connection_for(
+                &client,
+                "ca_1",
+                Subject::Agent {
+                    owner: "u1",
+                    agent_id: "a:b",
+                },
+            ))
+            .expect_err("bad agent id");
+        assert_eq!(refused.to_string(), "Invalid agent account id");
+        match prev {
+            Some(v) => std::env::set_var("RYU_CONNECT_URL", v),
+            None => std::env::remove_var("RYU_CONNECT_URL"),
+        }
     }
 }

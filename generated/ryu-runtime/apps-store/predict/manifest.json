@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/predict",
   "name": "Autocomplete",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "Inline ghost-text autocomplete in any text field on your machine, accepted with Tab. A small companion reads the caret context and asks Core for a completion, and every prediction is routed through the Gateway — so no model id, Gateway URL, or policy ever lives in the companion process. Windows-first.",
   "tagline": "Ghost-text autocomplete in every text field",
@@ -63,19 +63,6 @@
     }
   ],
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "predict.chat",
-        "title": "Autocomplete widget",
-        "description": "Autocomplete chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["autocomplete widget"],
-        "examples": ["Show me a autocomplete widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "settings_tabs": [
       {
         "id": "predict.settings",

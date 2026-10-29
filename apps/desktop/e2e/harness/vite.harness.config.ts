@@ -35,12 +35,20 @@ export default defineConfig({
 		"process.env": {},
 	},
 	root: harnessDir,
+	optimizeDeps: {
+		entries: ["os-desktop-surface-proof.html"],
+		include: ["react", "react-dom", "react-dom/client"],
+		noDiscovery: false,
+		// Match the app's target for dependencies that ship top-level await.
+		esbuildOptions: { target: "chrome105" },
+	},
 	// Reuse the desktop's bundled logos and other offline assets so visual proof
 	// pages exercise the same product marks as the real webview instead of showing
 	// broken-image placeholders from the harness root.
 	publicDir: path.resolve(desktopRoot, "public"),
 	clearScreen: false,
 	resolve: {
+		dedupe: ["react", "react-dom"],
 		alias: {
 			"@": desktopRoot,
 		},
@@ -57,6 +65,10 @@ export default defineConfig({
 		rollupOptions: {
 			input: {
 				index: path.resolve(harnessDir, "index.html"),
+				customAppCspSettingsProof: path.resolve(
+					harnessDir,
+					"custom-app-csp-settings-proof.html"
+				),
 				tauriUpdatePredownloadProof: path.resolve(
 					harnessDir,
 					"tauri-update-predownload-proof.html"
@@ -98,7 +110,6 @@ export default defineConfig({
 					harnessDir,
 					"agent-routines-proof.html"
 				),
-				answerNowProof: path.resolve(harnessDir, "answer-now-proof.html"),
 				agentMessage: path.resolve(harnessDir, "agent-message-story.html"),
 				agentConversationBranchProof: path.resolve(
 					harnessDir,
@@ -368,6 +379,10 @@ export default defineConfig({
 				gatewayGovernanceProof: path.resolve(
 					harnessDir,
 					"gateway-governance-proof.html"
+				),
+				coordinatorWorktreeDefaultProof: path.resolve(
+					harnessDir,
+					"coordinator-worktree-default-proof.html"
 				),
 				skillRelationsStory: path.resolve(
 					harnessDir,

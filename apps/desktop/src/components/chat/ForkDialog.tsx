@@ -46,8 +46,10 @@ function ForkDestinationRow({
 				strokeWidth={1.7}
 			/>
 			<span className="min-w-0 flex-1">
-				<span className="block font-medium text-[15px] leading-5">{title}</span>
-				<span className="mt-0.5 block text-[13px] text-muted-foreground leading-5">
+				<span className="text-(length:--text-comfortable) block font-medium leading-5">
+					{title}
+				</span>
+				<span className="text-(length:--text-detail) mt-0.5 block text-muted-foreground leading-5">
 					{description}
 				</span>
 			</span>
@@ -66,12 +68,9 @@ export function ForkDialog({
 }) {
 	return (
 		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent
-				className="gap-4 px-4 py-7 sm:max-w-[31.5rem]"
-				showCloseButton={false}
-			>
-				<DialogHeader className="px-2 pt-1">
-					<DialogTitle className="text-xl leading-7">
+			<DialogContent appearance="workflow-fork" showCloseButton={false}>
+				<DialogHeader purpose="workflow-fork">
+					<DialogTitle typography="explanation">
 						Fork chat from here
 					</DialogTitle>
 					<DialogDescription className="sr-only">

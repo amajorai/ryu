@@ -1,7 +1,6 @@
-import { Spinner } from "@ryu/ui/components/spinner";
-import { cn } from "@ryu/ui/lib/utils";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
-	type ComponentType,
 	type CSSProperties,
 	createElement,
 	Suspense,
@@ -17,10 +16,18 @@ import {
 	generateAgentBadge,
 } from "@/src/lib/agent-badge.ts";
 
-// Fill the wrapper's height (set on the container) instead of the default 100vh.
-const FILL_HEIGHT = { "--lanyard-height": "100%" } as CSSProperties;
+interface LanyardFillStyle extends CSSProperties {
+	"--lanyard-height": string;
+}
 
-type LanyardComponent = ComponentType<Record<string, unknown>>;
+// Fill the wrapper's height (set on the container) instead of the default 100vh.
+const FILL_HEIGHT =
+	/* SAFETY: ReactDOM forwards these exact custom properties with style.setProperty; the complete LanyardFillStyle producer checks all standard CSS fields and app slots, which React CSSProperties omits. */ {
+		"--lanyard-height": "100%",
+	} satisfies LanyardFillStyle as CSSProperties;
+
+type LanyardComponent =
+	typeof import("@ryu/ui/components/lanyard/Lanyard.tsx").default;
 
 function renderLanyard(
 	root: Root,
@@ -146,12 +153,12 @@ export function AgentLanyardCard({
 			mountElRef.current = mountEl;
 			const root = createRoot(mountEl);
 			rootRef.current = root;
-			import("@ryu/ui/components/lanyard/Lanyard")
+			import("@ryu/ui/components/lanyard/Lanyard.tsx")
 				.then((mod) => {
 					if (rootRef.current !== root) {
 						return; // torn down before the chunk arrived
 					}
-					lanyardRef.current = mod.default as unknown as LanyardComponent;
+					lanyardRef.current = mod.default;
 					const imgs = imagesRef.current;
 					if (imgs) {
 						renderLanyard(root, lanyardRef.current, imgs);

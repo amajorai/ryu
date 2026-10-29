@@ -1,6 +1,6 @@
 [package]
 name = "ryu-vault"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Identity Vault primitive for Ryu: the crypto-sealed per-domain credential store (SQLite `IdentityStore` with the `enc:v1:` envelope via ryu-crypto, never-in-logs `SealedState`/`SecretState` newtypes), the swappable `CredentialSource` capture/rotation seam (`ManualImport` default + per-domain `CredentialSourceRegistry`), and the staleness health-sweep engine. An extracted Core capability crate; in-process by default (function-call hot path, no IPC) and consumed as a NON-optional path dependency. The one kernel coupling — the `~/.ryu` data dir — is inverted as an `IdentityStore::open(dir)` constructor parameter (single construction site), and sealing routes through `ryu_crypto::global_cipher`, so this crate has ZERO dependency on apps/core. Identity GOVERNANCE (the Gateway grant+audit read chokepoint, tool-call consult, elicitation) stays kernel-side in apps/core."
@@ -9,13 +9,15 @@ repository = "https://github.com/amajorai/ryu"
 # Versions are matched to apps/core/Cargo.toml so there is no version skew when
 # Core links this crate in-process. This crate has ZERO dependency on apps/core.
 [dependencies]
+# The data-dir layout (`db/`, `state/`, …) shared by every Ryu process.
+ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.0" }
 base64 = "0.22"
 rand = "0.8"
 sha2 = "0.10"
 url = "2"
 utoipa = "5"
 reqwest = { version = "0.12", features = ["json"] }
-ryu-egress = { path = "../egress", version = "0.4.0" }
+ryu-egress = { path = "../egress", version = "0.5.0" }
 anyhow = "1"
 chrono = "0.4"
 humantime = "2"
@@ -26,7 +28,7 @@ tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "time"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
-ryu-crypto = { path = "../crypto", version = "0.4.0" }
+ryu-crypto = { path = "../crypto", version = "0.5.0" }
 
 [features]
 # Exposes the in-memory store + deterministic cipher seeding to downstream test

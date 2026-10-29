@@ -1,14 +1,13 @@
-import { exportToDocx, importDocx } from "@platejs/docx-io";
-import { BaseEditorKit } from "@ryu/ui/components/editor/editor-base-kit.tsx";
+import { importDocx } from "@platejs/docx-io";
 import { EditorKit } from "@ryu/ui/components/editor/editor-kit.tsx";
-import { DocxExportKit } from "@ryu/ui/components/editor/plugins/docx-export-kit.tsx";
+import { exportEditorDocx } from "@ryu/ui/components/editor/lib/export-editor-docx.ts";
 import {
 	Editor,
 	EditorContainer,
 } from "@ryu/ui/components/editor/ui/editor.tsx";
 import { FixedToolbar } from "@ryu/ui/components/editor/ui/fixed-toolbar.tsx";
 import { FixedToolbarButtons } from "@ryu/ui/components/editor/ui/fixed-toolbar-buttons.tsx";
-import { type SlatePlugin, setValue, type Value } from "platejs";
+import { setValue, type Value } from "platejs";
 import { Plate, usePlateEditor } from "platejs/react";
 import {
 	forwardRef,
@@ -46,11 +45,12 @@ export const DocxEditor = forwardRef<FileEditorHandle, DocxEditorProps>(
 					if (cancelled) {
 						return;
 					}
+					// SAFETY: importDocx returns validated Slate nodes from the native DOCX importer.
 					setValue(editor, result.nodes as Value);
 					importing.current = false;
 					setReady(true);
 				})
-				.catch((error: unknown) => {
+				.catch((error) => {
 					if (cancelled) {
 						return;
 					}
@@ -68,13 +68,7 @@ export const DocxEditor = forwardRef<FileEditorHandle, DocxEditorProps>(
 		useImperativeHandle(
 			ref,
 			() => ({
-				exportFile: () =>
-					exportToDocx(editor.children, {
-						editorPlugins: [
-							...BaseEditorKit,
-							...DocxExportKit,
-						] as SlatePlugin[],
-					}),
+				exportFile: () => exportEditorDocx(editor.children),
 			}),
 			[editor]
 		);

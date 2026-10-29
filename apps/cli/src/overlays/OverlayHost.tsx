@@ -2,7 +2,7 @@
 // OverlayHost + OverlayProvider - the modal layer for the shell. One overlay is
 // open at a time, keyed by id; the provider exposes openOverlay/closeOverlay and
 // the current id, and the host renders the open overlay's registered body inside
-// a centered, bordered panel with a title bar.
+// the shared Modal (dimmed backdrop, centred bordered panel, scrolling body).
 //
 // While an overlay is open it claims raw character input (InputFocusContext) so
 // the shell suppresses its plain-key globals, and Esc closes it. Bodies own their
@@ -18,8 +18,8 @@ import {
 	useMemo,
 	useState,
 } from "react";
-import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { useSetInputFocused } from "../core/InputFocusContext.tsx";
+import { useSetOverlayOpen } from "../core/InputFocusContext.tsx";
+import { Modal } from "../ui/Modal.tsx";
 import { resolveOverlay } from "./registry.ts";
 
 interface OverlayContextValue {
@@ -30,6 +30,8 @@ interface OverlayContextValue {
 	/** Open an overlay by id (registry id, e.g. "settings"). */
 	openOverlay: (id: string) => void;
 }
+
+const PANEL_MAX_WIDTH = 120;
 
 const OverlayContext = createContext<OverlayContextValue | null>(null);
 
@@ -59,14 +61,14 @@ export function useOverlay(): OverlayContextValue {
  * overlay is open. */
 export function OverlayHost() {
 	const { openId, closeOverlay } = useOverlay();
-	const theme = useTheme();
-	const setInputFocused = useSetInputFocused();
+	const setOverlayOpen = useSetOverlayOpen();
 
-	// Claim raw input while open so shell plain-key globals stay quiet.
+	// Claim raw input while open so shell plain-key globals stay quiet. This is
+	// its own flag, so closing never clobbers a surface's setInputFocused claim.
 	useEffect(() => {
-		setInputFocused(openId !== null);
-		return () => setInputFocused(false);
-	}, [openId, setInputFocused]);
+		setOverlayOpen(openId !== null);
+		return () => setOverlayOpen(false);
+	}, [openId, setOverlayOpen]);
 
 	useKeyboard((key) => {
 		if (openId && key.name === "escape") {
@@ -83,38 +85,13 @@ export function OverlayHost() {
 	}
 	const Body = overlay.Body;
 	return (
-		<box
-			alignItems="center"
-			height="100%"
-			justifyContent="center"
-			position="absolute"
-			width="100%"
+		<Modal
+			onClose={closeOverlay}
+			title={overlay.title}
+			width={PANEL_MAX_WIDTH}
+			zIndex={40}
 		>
-			<box
-				backgroundColor={theme.colors.background}
-				borderColor={theme.colors.focusRing}
-				borderStyle="rounded"
-				flexDirection="column"
-				minWidth={48}
-				padding={1}
-			>
-				<box
-					borderColor={theme.colors.border}
-					borderStyle="single"
-					flexDirection="row"
-					justifyContent="space-between"
-					paddingLeft={1}
-					paddingRight={1}
-				>
-					<text fg={theme.colors.primary}>
-						<b>{overlay.title}</b>
-					</text>
-					<text fg={theme.colors.mutedForeground}>Esc close</text>
-				</box>
-				<box flexDirection="column" paddingTop={1}>
-					<Body close={closeOverlay} id={openId} />
-				</box>
-			</box>
-		</box>
+			<Body close={closeOverlay} id={openId} />
+		</Modal>
 	);
 }

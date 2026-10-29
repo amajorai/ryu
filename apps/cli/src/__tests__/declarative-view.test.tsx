@@ -6,25 +6,42 @@
 // command row, Enter = primary, y/n confirm gate, silent while unfocused).
 
 import { afterEach, expect, test } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
 import { act, type ReactNode } from "react";
+import { TextInput } from "@/components/ui/text-input.tsx";
 import { ThemeProvider } from "@/components/ui/theme-provider.tsx";
-import { InputFocusProvider } from "../core/InputFocusContext.tsx";
-import type { ViewAction, ViewActionContext, ViewSpec } from "../core/views.ts";
+import {
+	InputFocusProvider,
+	useInputFocused,
+} from "../core/InputFocusContext.tsx";
+import type {
+	RawViewSpec,
+	ViewAction,
+	ViewActionContext,
+	ViewSpec,
+} from "../core/views.ts";
 import { DeclarativeView } from "../ui/DeclarativeView.tsx";
 import { ryuTheme } from "../ui/theme.ts";
+import { testRender } from "./cli-test-render.ts";
 
 let testSetup: Awaited<ReturnType<typeof testRender>> | null = null;
+let inputFocused = false;
+
+function CaptureInputFocus() {
+	inputFocused = useInputFocused();
+	return null;
+}
 
 afterEach(() => {
 	testSetup?.renderer.destroy();
 	testSetup = null;
+	inputFocused = false;
 });
 
 function Harness({ children }: { children: ReactNode }) {
 	return (
 		<ThemeProvider theme={ryuTheme}>
 			<InputFocusProvider>
+				<CaptureInputFocus />
 				<box flexDirection="column" height="100%" width="100%">
 					{children}
 				</box>
@@ -42,14 +59,16 @@ async function press(
 			setup.mockInput.pressEnter();
 		} else if (name === "space") {
 			setup.mockInput.pressKey(" ");
+		} else if (name === "left" || name === "right") {
+			setup.mockInput.pressArrow(name);
 		} else {
 			setup.mockInput.pressKey(name);
 		}
 	});
 	await act(async () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		await setup.renderOnce();
 	});
+	await setup.renderOnce();
 }
 
 const LIST_SPEC: ViewSpec = {
@@ -112,6 +131,31 @@ test("a digit fires the nth action with the selected row as the item context", a
 	expect(fired).toHaveLength(1);
 	expect(fired[0]?.action.id).toBe("complete");
 	expect(fired[0]?.ctx.item?.id).toBe("two");
+});
+
+test("Alt+digit is left to the shell's jump-to-tab and fires no action", async () => {
+	const fired: string[] = [];
+	testSetup = await testRender(
+		<Harness>
+			<DeclarativeView
+				focused={true}
+				onAction={(action) => fired.push(action.id)}
+				spec={LIST_SPEC}
+			/>
+		</Harness>,
+		{ width: 120, height: 20 }
+	);
+	await testSetup.renderOnce();
+	const setup = testSetup;
+	await act(async () => {
+		setup.mockInput.pressKey("1", { meta: true });
+	});
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	});
+	expect(fired).toEqual([]);
+	await press(setup, "1");
+	expect(fired).toEqual(["complete"]);
 });
 
 test("Enter fires the primary action; an unfocused view ignores keys entirely", async () => {
@@ -294,13 +338,115 @@ test("a form spec toggles a switch with space and submits the collected values",
 	expect(fired[0]?.values).toEqual({ name: "nightly", enabled: true });
 });
 
+test("a form select cycles its choices in either direction and submits the selection", async () => {
+	const fired: ViewActionContext[] = [];
+	testSetup = await testRender(
+		<Harness>
+			<DeclarativeView
+				focused={true}
+				onAction={(_action, ctx) => fired.push(ctx)}
+				spec={{
+					view: "form",
+					fields: [
+						{
+							id: "mode",
+							label: "Mode",
+							type: "select",
+							value: "compact",
+							options: [
+								{ label: "Compact", value: "compact" },
+								{ label: "Expanded", value: "expanded" },
+							],
+						},
+					],
+					submit: { id: "save", label: "Save", style: "primary" },
+				}}
+			/>
+		</Harness>,
+		{ width: 100, height: 16 }
+	);
+	await testSetup.renderOnce();
+	expect(testSetup.captureCharFrame()).toContain("compact");
+
+	await press(testSetup, "right");
+	expect(testSetup.captureCharFrame()).toContain("expanded");
+	await press(testSetup, "left");
+	expect(testSetup.captureCharFrame()).toContain("compact");
+	await press(testSetup, "return");
+
+	expect(fired).toHaveLength(1);
+	expect(fired[0]?.values).toEqual({ mode: "compact" });
+});
+
+test("editing a form text field commits the typed value before the primary action", async () => {
+	const fired: ViewActionContext[] = [];
+	testSetup = await testRender(
+		<Harness>
+			<DeclarativeView
+				focused={true}
+				onAction={(_action, ctx) => fired.push(ctx)}
+				spec={{
+					view: "form",
+					fields: [
+						{ id: "name", label: "Name", type: "text", value: "nightly" },
+					],
+					submit: { id: "save", label: "Save", style: "primary" },
+				}}
+			/>
+		</Harness>,
+		{ width: 100, height: 16 }
+	);
+	await testSetup.renderOnce();
+
+	await press(testSetup, "e");
+	for (let pass = 0; pass < 20 && !inputFocused; pass += 1) {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await testSetup.renderOnce();
+	}
+	expect(inputFocused).toBe(true);
+	for (let character = 0; character < "nightly".length; character += 1) {
+		await press(testSetup, "right");
+	}
+	await press(testSetup, "x");
+	expect(testSetup.captureCharFrame()).toContain("nightlyx");
+	await press(testSetup, "return");
+	expect(testSetup.captureCharFrame()).toContain("nightlyx");
+
+	await press(testSetup, "return");
+	expect(fired).toHaveLength(1);
+	expect(fired[0]?.values).toEqual({ name: "nightlyx" });
+});
+
+test("the shared terminal TextInput accepts characters and submits its value", async () => {
+	let submitted = "";
+	testSetup = await testRender(
+		<Harness>
+			<TextInput
+				bordered={false}
+				onSubmit={(value) => {
+					submitted = value;
+				}}
+				placeholder="Type here"
+				width={32}
+			/>
+		</Harness>,
+		{ width: 80, height: 12 }
+	);
+	await testSetup.renderOnce();
+	for (const character of "hello") {
+		await press(testSetup, character);
+	}
+	await press(testSetup, "return");
+	expect(submitted).toBe("hello");
+});
+
 test("an unknown view kind degrades to a readable line instead of crashing", async () => {
 	testSetup = await testRender(
 		<Harness>
 			{/* A kind from a newer app than this shell — Core forwards it verbatim. */}
 			<DeclarativeView
 				focused={true}
-				spec={{ view: "kanban-board", lanes: [] } as unknown as ViewSpec}
+				spec={{ view: "kanban-board", lanes: [] }}
 			/>
 		</Harness>,
 		{ width: 120, height: 12 }
@@ -316,7 +462,8 @@ test("an unknown view kind degrades to a readable line instead of crashing", asy
 // the renderer assumes those arrays exist, and a terminal has no per-pane error
 // boundary — an unguarded `spec.items.map` takes the whole shell down through the
 // root boundary. Each entry below crashed before `validateView` gated the renderer.
-const MALFORMED_SPECS: [string, unknown][] = [
+type MalformedSpecFixture = [name: string, spec: RawViewSpec];
+const MALFORMED_SPECS: MalformedSpecFixture[] = [
 	["list-detail without items", { view: "list-detail" }],
 	["data-table without columns", { view: "data-table", rows: [] }],
 	["data-table without rows", { view: "data-table", columns: [] }],
@@ -331,7 +478,7 @@ for (const [name, spec] of MALFORMED_SPECS) {
 	test(`a malformed spec (${name}) degrades to a readable line instead of crashing`, async () => {
 		testSetup = await testRender(
 			<Harness>
-				<DeclarativeView focused={true} spec={spec as ViewSpec} />
+				<DeclarativeView focused={true} spec={spec} />
 			</Harness>,
 			{ width: 120, height: 12 }
 		);

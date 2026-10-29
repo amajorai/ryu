@@ -1,3 +1,4 @@
+import { z } from "zod";
 // Voice-mode canvas widgets: pull renderable UI-component specs out of the
 // assistant's streamed text and turn them into the same `Widget` shape the
 // dashboard grid renders. The assistant emits a fenced block —
@@ -32,6 +33,9 @@ export interface VoiceWidget {
 // Fenced ```ryu-widget … ``` blocks. `s` so `.` spans newlines; global to sweep
 // every block in the accumulated caption. Top-level regex (never built in a loop).
 const WIDGET_BLOCK = /```ryu-widget\s+([\s\S]*?)```/g;
+const voiceWidgetInputSchema = widgetInputSchema.extend({
+	data: z.unknown().optional(),
+});
 const PLACEHOLDER_LAYOUT = { x: 0, y: 0, w: 4, h: 4 } as const;
 
 /**
@@ -70,13 +74,12 @@ function parseBlock(raw: string, index: number): VoiceWidget | null {
 	} catch {
 		return null;
 	}
-	const parsed = widgetInputSchema.safeParse(json);
+	const parsed = voiceWidgetInputSchema.safeParse(json);
 	if (!(parsed.success && isRenderableKind(parsed.data.kind))) {
 		return null;
 	}
-	// The inline data rides on `data` (not part of the input schema); read it off
-	// the raw object so the static widget has a value to render.
-	const data = (json as { data?: unknown }).data;
+	// Validate inline data alongside the dashboard widget contract.
+	const data = parsed.data.data;
 	const widget: Widget = {
 		id: `voice-widget-${index}`,
 		dashboard_id: "voice",

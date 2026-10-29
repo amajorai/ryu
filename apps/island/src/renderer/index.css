@@ -43,6 +43,13 @@
 	}
 }
 
+/* Native NSGlassEffectView/Acrylic already samples the desktop behind the
+   Island, so the web layer must not stack its own SVG backdrop filter on top. */
+.island-native-backdrop {
+	-webkit-backdrop-filter: none !important;
+	backdrop-filter: none !important;
+}
+
 /* Scrollbars: the desktop's ScrollArea look (packages/ui scroll-area.tsx) — a
    fat, fully-rounded `bg-border` pill that floats inside a transparent track.
    The 2px transparent border + background-clip:padding-box give the inset/
@@ -105,4 +112,27 @@
 		linear-gradient(#000 0 0);
 	-webkit-mask-composite: xor;
 	mask-composite: exclude;
+}
+
+@utility island-gap {
+	gap: var(--island-gap);
+}
+@utility island-row-offset {
+	margin-left: var(--island-row-offset);
+}
+@utility island-stack-offset {
+	margin-top: var(--island-stack-offset);
+}
+@utility island-surface-width {
+	width: var(--island-surface-width);
+}
+@utility island-surface-height {
+	height: var(--island-surface-height);
+}
+@utility island-surface-radius {
+	border-radius: var(--island-surface-radius);
+}
+
+@utility island-stack-layer {
+	z-index: var(--island-stack-layer);
 }

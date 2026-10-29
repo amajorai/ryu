@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "sites-companion-proof.playwright.config.ts",
+    "sites-companion-proof.spec.ts",
+    "sites-companion-proof.host.ts",
+    "harness/sites-companion-proof.tsx",
+    "harness/sites-companion-sidecar.ts",
+    "harness/sites-companion-proof.types.ts",
+    "harness/vite.sites-companion-proof.config.ts"
+  ]
+}

@@ -51,7 +51,7 @@ test("matches the commit and push dialog reference options", async ({
 	).toHaveCount(0);
 	await page.screenshot({
 		fullPage: true,
-		path: "/Users/jiawei/Documents/Code/ryu/apps/desktop/test-results/git-remote-sync-no-stop-proof.png",
+		path: test.info().outputPath("git-remote-sync-no-stop-proof.png"),
 	});
 	await page.reload();
 	await expect(
@@ -135,7 +135,7 @@ test("shows the GitHub PR and CI rollup in the environment and chat hover", asyn
 
 	await page.screenshot({
 		fullPage: true,
-		path: "/Users/jiawei/Documents/Code/ryu/apps/desktop/test-results/git-pull-sync-proof.png",
+		path: test.info().outputPath("git-pull-sync-proof.png"),
 	});
 });
 

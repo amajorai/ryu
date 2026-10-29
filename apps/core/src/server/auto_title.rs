@@ -26,6 +26,7 @@
 use serde_json::json;
 
 use crate::sidecar::active_engine::{is_local_engine, local_engine_url, ActiveEngineStore};
+use crate::sidecar::gateway::{log_side_usage, side_call_headers, SidePurpose, PRIORITY_HEADER};
 
 /// Preference: override the model used to auto-name chats. When set (non-empty),
 /// the title call routes through the Gateway with this model id. When unset, the
@@ -64,6 +65,28 @@ pub async fn generate_meeting_title(
     } else {
         Some(title)
     }
+}
+
+/// On-demand chat rename. Background chat titling remains owned by chat-title.
+pub async fn retitle_conversation(state: &super::ServerState, id: &str) -> Option<String> {
+    let first = state
+        .conversations
+        .get_first_user_message(id)
+        .await
+        .ok()
+        .flatten()?;
+    if first.trim().chars().count() < 3 {
+        return None;
+    }
+    let input: String = first.trim().chars().take(MAX_INPUT_CHARS).collect();
+    let raw = generate(&state.preferences, &state.client,
+        "Write a short, specific title for this conversation. Reply with only 3 to 6 words in the same language, without quotes, punctuation or markdown.", &input).await?;
+    let title = sanitize_title(&raw);
+    if title.is_empty() {
+        return None;
+    }
+    state.conversations.force_set_title(id, &title).await.ok()?;
+    Some(title)
 }
 
 /// Produce a raw title string for `user_input`. Default: the resident local
@@ -112,6 +135,7 @@ async fn local_title(client: &reqwest::Client, system: &str, user_input: &str) -
         system,
         user_input,
         None,
+        &[(PRIORITY_HEADER, "background".to_owned())],
     )
     .await?;
     extract_content(&body)
@@ -126,10 +150,10 @@ async fn gateway_title(
     system: &str,
     user_input: &str,
 ) -> Option<String> {
-    use crate::sidecar::gateway::{gateway_core_token, gateway_url};
+    use crate::sidecar::gateway::{gateway_inference_token, gateway_url};
     let base = gateway_url();
     let base = base.trim_end_matches('/');
-    let token = gateway_core_token();
+    let token = gateway_inference_token();
     let body = post_completion(
         client,
         &format!("{base}/v1/chat/completions"),
@@ -138,14 +162,18 @@ async fn gateway_title(
         system,
         user_input,
         token.as_deref(),
+        &side_call_headers(&SidePurpose::AutoTitle),
     )
     .await?;
+    log_side_usage(&SidePurpose::AutoTitle, model, &body);
     extract_content(&body)
 }
 
 /// Shared non-streaming chat-completion POST. `bearer` is the Gateway token (only
-/// the Gateway path needs auth); the `x-ryu-priority: background` header is
-/// harmless to a local engine and lets the Gateway de-prioritize the call.
+/// the Gateway path needs auth). `headers` carries the Gateway's side-call
+/// attribution (purpose, `background` priority); the local engine
+/// gets only the priority, which it ignores.
+#[allow(clippy::too_many_arguments)]
 async fn post_completion(
     client: &reqwest::Client,
     url: &str,
@@ -154,6 +182,7 @@ async fn post_completion(
     system: &str,
     user_input: &str,
     bearer: Option<&str>,
+    headers: &[(&'static str, String)],
 ) -> Option<serde_json::Value> {
     let mut payload = json!({
         "model": model,
@@ -170,8 +199,10 @@ async fn post_completion(
     let mut req = client
         .post(url)
         .timeout(std::time::Duration::from_secs(30))
-        .header("x-ryu-priority", "background")
         .json(&payload);
+    for (name, value) in headers {
+        req = req.header(*name, value);
+    }
     if let Some(t) = bearer {
         req = req.bearer_auth(t);
     }

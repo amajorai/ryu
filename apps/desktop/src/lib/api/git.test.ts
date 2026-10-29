@@ -12,12 +12,17 @@
 // Both are asserted here against a stubbed `fetch` — no Core required.
 
 import { afterEach, describe, expect, it } from "bun:test";
+import { z } from "zod";
 import {
 	applyWorktree,
 	checkoutBranch,
 	commitPush,
 	createPullRequest,
+	fetchGitBranches,
 	fetchGitFileDiff,
+	fetchGitStatus,
+	fetchWorktreeDiff,
+	fetchWorktreeStatus,
 	initializeGit,
 	isPullRequestBranch,
 	pullGit,
@@ -27,7 +32,7 @@ import {
 import {
 	cloneProjectFolder,
 	createProjectFolder,
-	githubRepositoryName,
+	gitRepositoryName,
 } from "./workspace.ts";
 
 const TARGET = { url: "http://127.0.0.1:7980", token: "node-token" };
@@ -54,19 +59,20 @@ describe("pull-request branch eligibility", () => {
 
 /** Stub `fetch` with a fixed response, capturing the request init it received. */
 
-function stubFetch(response: Response): {
+interface CapturedGitRequest {
 	init: RequestInit | undefined;
 	url: string | undefined;
-} {
-	const captured: { init: RequestInit | undefined; url: string | undefined } = {
-		init: undefined,
-		url: undefined,
-	};
-	globalThis.fetch = ((url: string, init?: RequestInit) => {
-		captured.url = url;
-		captured.init = init;
-		return Promise.resolve(response);
-	}) as typeof fetch;
+}
+function stubFetch(response: Response): CapturedGitRequest {
+	const captured: CapturedGitRequest = { init: undefined, url: undefined };
+	globalThis.fetch = Object.assign(
+		async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+			captured.url = String(input);
+			captured.init = init;
+			return response;
+		},
+		{ preconnect: realFetch.preconnect }
+	);
 	return captured;
 }
 
@@ -268,17 +274,38 @@ describe("git client request headers", () => {
 		]);
 	});
 
-	it("derives a folder name from HTTPS and SSH GitHub URLs", () => {
-		expect(githubRepositoryName("https://github.com/owner/project.git")).toBe(
+	it("derives folder names from GitHub, GitLab, Azure DevOps, and custom URLs", () => {
+		expect(gitRepositoryName("https://github.com/owner/project.git")).toBe(
 			"project"
 		);
-		expect(githubRepositoryName("git@github.com:owner/project.git")).toBe(
+		expect(gitRepositoryName("git@github.com:owner/project.git")).toBe(
 			"project"
 		);
-		expect(githubRepositoryName("ssh://git@github.com/owner/project")).toBe(
+		expect(gitRepositoryName("ssh://git@github.com/owner/project")).toBe(
 			"project"
 		);
-		expect(githubRepositoryName("https://gitlab.com/owner/project")).toBeNull();
+		expect(
+			gitRepositoryName("https://gitlab.com/group/subgroup/frontend.git")
+		).toBe("frontend");
+		expect(
+			gitRepositoryName(
+				"https://dev.azure.com/acme/platform/_git/agent-runtime"
+			)
+		).toBe("agent-runtime");
+		expect(
+			gitRepositoryName(
+				"ssh://git@ssh.dev.azure.com/v3/acme/platform/agent-runtime"
+			)
+		).toBe("agent-runtime");
+		expect(
+			gitRepositoryName("https://git.example.test:8443/team/custom.git")
+		).toBe("custom");
+		expect(gitRepositoryName("git@git.example.test:team/custom.git")).toBe(
+			"custom"
+		);
+		expect(
+			gitRepositoryName("http://git.example.test/team/custom.git")
+		).toBeNull();
 	});
 
 	it("clones a project through the active node and preserves the response path", async () => {
@@ -430,8 +457,9 @@ describe("git client error bodies", () => {
 			thrown = e;
 		}
 		expect(thrown).toBeInstanceOf(Error);
-		expect((thrown as Error).name).toBe("Error");
-		expect((thrown as Error).message).toContain("Expected request");
+		const parsedError = z.instanceof(Error).parse(thrown);
+		expect(parsedError.name).toBe("Error");
+		expect(parsedError.message).toContain("Expected request");
 	});
 
 	it("keeps the 409 conflicted-file list applyWorktree's caller needs", async () => {
@@ -453,4 +481,70 @@ describe("git client error bodies", () => {
 			expect(result.conflicted_files).toEqual(["a.ts", "b.ts"]);
 		}
 	});
+});
+
+it("legacy git status and worktree envelopes retain their nullish defaults", async () => {
+	for (const body of [
+		{},
+		{ is_repo: false },
+		{ is_repo: true, branch: null, ahead: null, behind: null, dirty: null },
+	]) {
+		stubFetch(Response.json(body));
+		const status = await fetchGitStatus(TARGET, "/repo");
+		expect(status.branch).toBeNull();
+		expect(status.ahead).toBe(0);
+		expect(status.dirty).toBe(false);
+	}
+	stubFetch(Response.json({ is_repo: true, current: null, branches: null }));
+	expect(await fetchGitBranches(TARGET, "/repo")).toEqual({
+		is_repo: true,
+		current: null,
+		branches: [],
+	});
+	stubFetch(
+		Response.json({
+			active: true,
+			path: "/worktree",
+			branch: null,
+			has_changes: null,
+			changed_files: null,
+		})
+	);
+	expect(await fetchWorktreeStatus(TARGET, "run")).toEqual({
+		active: true,
+		path: "/worktree",
+		branch: null,
+		has_changes: false,
+		changed_files: 0,
+	});
+	stubFetch(
+		Response.json({ files: null, has_changes: null, unified_diff: null })
+	);
+	expect(await fetchWorktreeDiff(TARGET, "run")).toEqual({
+		files: [],
+		has_changes: false,
+		unified_diff: "",
+	});
+});
+it("complete git diff records reject malformed leaf types and preserve conflict fallback", async () => {
+	stubFetch(Response.json({ patch: "patch", paths: ["a", 1] }));
+	await expect(fetchGitFileDiff(TARGET, "/repo", ["a"])).rejects.toThrow(
+		"invalid file diff response"
+	);
+	stubFetch(
+		Response.json({
+			files: [{ path: "a", kind: "modified", additions: 1 }],
+			has_changes: true,
+			unified_diff: "patch",
+		})
+	);
+	expect(await fetchWorktreeDiff(TARGET, "run")).toEqual({
+		files: [],
+		has_changes: false,
+		unified_diff: "",
+	});
+	stubFetch(new Response("conflict without JSON", { status: 409 }));
+	expect(
+		await applyWorktree(TARGET, "run", { message: "Apply", mode: "merge" })
+	).toEqual({ success: false, error: "merge_conflict", conflicted_files: [] });
 });

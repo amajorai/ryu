@@ -2,6 +2,7 @@
 
 import { formatCount as formatSharedCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
+import styles from "./github-stars.module.css";
 import { GITHUB_SVGL, SvglIcon } from "./svgl-icon.tsx";
 
 export interface GitHubStarsProps {
@@ -26,8 +27,10 @@ export function GitHubStars({
 		<span className={cn("inline-flex items-center gap-1", className)}>
 			<SvglIcon className="size-4" spec={GITHUB_SVGL} />
 			<span
-				className="text-[0.8125rem]/none text-muted-foreground tabular-nums"
-				style={{ textBox: "trim-end cap alphabetic" }}
+				className={cn(
+					"text-(length:--text-detail)/none text-muted-foreground tabular-nums",
+					styles.dynamic1
+				)}
 			>
 				{formatCompactCount(stargazersCount, locales)}
 			</span>

@@ -5,6 +5,7 @@ import { RadicalIcon } from "lucide-react";
 import type { TEquationElement } from "platejs";
 import type { SlateElementProps } from "platejs/static";
 import { SlateElement } from "platejs/static";
+import "../docx-nodes.css";
 
 export function EquationElementStatic(
 	props: SlateElementProps<TEquationElement>
@@ -81,7 +82,7 @@ export function InlineEquationElementStatic(
 					"h-6",
 					inlineSuggestionVariants(),
 					props.element.texExpression.length === 0 &&
-						"text-muted-foreground after:bg-neutral-500/10"
+						"text-muted-foreground after:bg-muted-foreground/10"
 				)}
 			>
 				<span
@@ -109,7 +110,7 @@ export function EquationElementDocx(
 	if (!element.texExpression || element.texExpression.length === 0) {
 		return (
 			<SlateElement {...props}>
-				<p style={{ color: "#888", fontStyle: "italic" }}>[Empty equation]</p>
+				<p data-docx-style="editorequationNodeStatic1">[Empty equation]</p>
 				{props.children}
 			</SlateElement>
 		);
@@ -117,16 +118,7 @@ export function EquationElementDocx(
 
 	return (
 		<SlateElement {...props}>
-			<p
-				style={{
-					fontFamily: "Cambria Math, Arial, sans-serif",
-					fontSize: "12pt",
-					margin: "8pt 0",
-					textAlign: "center",
-				}}
-			>
-				{element.texExpression}
-			</p>
+			<p data-docx-style="editorequationNodeStatic2">{element.texExpression}</p>
 			{props.children}
 		</SlateElement>
 	);
@@ -144,7 +136,7 @@ export function InlineEquationElementDocx(
 	if (!element.texExpression || element.texExpression.length === 0) {
 		return (
 			<SlateElement {...props} as="span">
-				<span style={{ color: "#888", fontStyle: "italic" }}>[equation]</span>
+				<span data-docx-style="editorequationNodeStatic3">[equation]</span>
 				{props.children}
 			</SlateElement>
 		);
@@ -152,11 +144,7 @@ export function InlineEquationElementDocx(
 
 	return (
 		<SlateElement {...props} as="span">
-			<span
-				style={{
-					fontFamily: "Cambria Math, Arial, sans-serif",
-				}}
-			>
+			<span data-docx-style="editorequationNodeStatic4">
 				{element.texExpression}
 			</span>
 			{props.children}

@@ -1,7 +1,7 @@
 "use client";
 
-import { TextMorph } from "@ryu/ui/components/text-morph";
-import { EASE_OUT_CSS } from "@ryu/ui/lib/ease";
+import { TextMorph } from "@ryu/ui/components/text-morph.tsx";
+import { EASE_OUT_CSS } from "@ryu/ui/lib/ease.ts";
 
 /**
  * Backwards-compatible text-state swap backed by the shared Torph morph.

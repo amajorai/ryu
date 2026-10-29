@@ -1,0 +1,15 @@
+{
+  "provider": "anthropic-credits",
+  "status": 403,
+  "expectRow": null,
+  "provenance": "negative control: the documented 403 envelope, which also means a key without access to a model, so it is never read as a safety signal",
+  "source": "https://platform.claude.com/docs/en/api/errors",
+  "body": {
+    "type": "error",
+    "error": {
+      "type": "permission_error",
+      "message": "RYU_TEST_FIXTURE permission denied"
+    },
+    "request_id": "req_ryu_test_fixture"
+  }
+}

@@ -16,6 +16,8 @@ export default defineConfig({
 	clearScreen: false,
 	optimizeDeps: {
 		entries: ["fork-dialog-proof.html"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		alias: {

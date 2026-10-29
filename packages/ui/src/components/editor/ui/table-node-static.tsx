@@ -1,9 +1,19 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { CSSProperties as ReactCSSProperties } from "react";
+import "../docx-nodes.css";
 import { BaseTablePlugin } from "@platejs/table";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { TTableCellElement, TTableElement } from "platejs";
 import type { SlateElementProps } from "platejs/static";
 import { SlateElement } from "platejs/static";
-import type * as React from "react";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--cellBackground"?: string;
+	"--cellMaxWidth"?: string;
+	"--cellMinWidth"?: string;
+	"--editortableNodeStatic1-padding-left"?: string | number;
+	"--editortableNodeStatic3-min-height"?: string | number;
+}
 
 export function TableElementStatic({
 	children,
@@ -12,16 +22,25 @@ export function TableElementStatic({
 	const { disableMarginLeft } = props.editor.getOptions(BaseTablePlugin);
 	const marginLeft = disableMarginLeft ? 0 : props.element.marginLeft;
 
+	const editortableNodeStatic1Style: EditorVariableStyle = {
+		"--editortableNodeStatic1-padding-left": isNativeNumber(marginLeft)
+			? `${marginLeft}px`
+			: marginLeft,
+	};
 	return (
 		<SlateElement
 			{...props}
-			className="overflow-x-auto py-5"
-			style={{ paddingLeft: marginLeft }}
+			attributes={{
+				...props.attributes,
+				"data-docx-style": "editortableNodeStatic1",
+			}}
+			className={"overflow-x-auto py-5"}
+			style={editortableNodeStatic1Style}
 		>
 			<div className="group/table relative w-fit">
 				<table
-					className="ms-px me-0 table h-px table-fixed border-collapse"
-					style={{ borderCollapse: "collapse", width: "100%" }}
+					className={"ms-px me-0 table h-px table-fixed border-collapse"}
+					data-docx-style="editortableNodeStatic2"
 				>
 					<tbody className="min-w-full">{children}</tbody>
 				</table>
@@ -50,6 +69,16 @@ export function TableCellElementStatic({
 	const { minHeight, width } = api.table.getCellSize({ element });
 	const borders = api.table.getCellBorders({ element });
 
+	const editortableNodeStatic3Style: EditorVariableStyle = {
+		"--editortableNodeStatic3-min-height": isNativeNumber(minHeight)
+			? `${minHeight}px`
+			: minHeight,
+	};
+	const cellStyle: EditorVariableStyle = {
+		"--cellBackground": element.background,
+		"--cellMinWidth": `${width || 120}px`,
+		"--cellMaxWidth": `${width || 240}px`,
+	};
 	return (
 		<SlateElement
 			{...props}
@@ -58,9 +87,10 @@ export function TableCellElementStatic({
 				...props.attributes,
 				colSpan: api.table.getColSpan(element),
 				rowSpan: api.table.getRowSpan(element),
+				"data-docx-cell": "true",
 			}}
 			className={cn(
-				"h-full overflow-visible border-none bg-background p-0",
+				"h-full min-w-(--cellMinWidth) max-w-(--cellMaxWidth) overflow-visible border-none bg-background p-0",
 				element.background ? "bg-(--cellBackground)" : "bg-background",
 				isHeader && "text-start font-normal *:m-0",
 				"before:size-full",
@@ -73,17 +103,12 @@ export function TableCellElementStatic({
 						borders.top?.size && "before:border-t before:border-t-border"
 					)
 			)}
-			style={
-				{
-					"--cellBackground": element.background,
-					maxWidth: width || 240,
-					minWidth: width || 120,
-				} as React.CSSProperties
-			}
+			style={cellStyle}
 		>
 			<div
-				className="relative z-20 box-border h-full px-4 py-2"
-				style={{ minHeight }}
+				className={"relative z-20 box-border h-full px-4 py-2"}
+				data-docx-style="editortableNodeStatic3"
+				style={editortableNodeStatic3Style}
 			>
 				{props.children}
 			</div>

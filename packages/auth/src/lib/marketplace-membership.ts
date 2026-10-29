@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { PLANS, type PlanId } from "./plans.ts";
 
 const MAX_MARKETPLACE_MEMBERSHIP_PRICE_MINOR = 99_999_999;
@@ -103,26 +104,30 @@ export function isMarketplaceMembershipListingEligible(
 		model === "subscription" ||
 		model === "bounded_updates";
 	const amountMinor = listing.pricing?.amountMinor;
-	const currency =
-		typeof listing.pricing?.currency === "string"
-			? listing.pricing.currency.trim().toLowerCase()
-			: listing.pricing?.currency == null
-				? "usd"
-				: "";
-	const validPrice =
-		typeof amountMinor === "number" &&
-		Number.isSafeInteger(amountMinor) &&
-		amountMinor > 0 &&
-		amountMinor <= MAX_MARKETPLACE_MEMBERSHIP_PRICE_MINOR;
+	const currency = z
+		.string()
+		.trim()
+		.toLowerCase()
+		.nullish()
+		.transform((value) => value ?? "usd")
+		.catch("")
+		.parse(listing.pricing?.currency);
+	const validPrice = z
+		.number()
+		.int()
+		.positive()
+		.max(MAX_MARKETPLACE_MEMBERSHIP_PRICE_MINOR)
+		.safeParse(amountMinor).success;
 	const validSubscriptionInterval =
 		model !== "subscription" ||
 		listing.pricing?.interval === undefined ||
 		listing.pricing.interval === "month" ||
 		listing.pricing.interval === "year";
-	const sellerOrgId =
-		typeof listing.pricing?.sellerOrgId === "string"
-			? listing.pricing.sellerOrgId.trim()
-			: "";
+	const sellerOrgId = z
+		.string()
+		.trim()
+		.catch("")
+		.parse(listing.pricing?.sellerOrgId);
 	return Boolean(
 		listing.status === "live" &&
 			listing.kind === "app" &&
@@ -206,7 +211,8 @@ export function allocateMarketplaceMembershipPool(
 		: 0;
 	const publisherPoolMinor = Math.min(
 		invoiceMinor,
-		Number.isSafeInteger(input.publisherPoolMinor) &&
+		input.publisherPoolMinor !== undefined &&
+			Number.isSafeInteger(input.publisherPoolMinor) &&
 			input.publisherPoolMinor >= 0
 			? input.publisherPoolMinor
 			: Math.floor((invoiceMinor * publisherShareBps) / 10_000)
@@ -264,6 +270,9 @@ export function allocateMarketplaceMembershipPool(
 		for (let index = 1; index < uniqueApps.length; index += 1) {
 			const candidate = uniqueApps[index];
 			const current = uniqueApps[heaviestIndex];
+			if (!(candidate && current)) {
+				continue;
+			}
 			if (
 				candidate.multiplier > current.multiplier ||
 				(candidate.multiplier === current.multiplier &&

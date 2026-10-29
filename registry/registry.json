@@ -223,7 +223,7 @@
       "id": "@ryu/spider",
       "name": "Spider",
       "version": "0.1.14",
-      "description": "High-performance web crawling and content extraction via the Spider CLI (https://spider.cloud), exposed as a declarative `command` tool that shells out to the locally-installed `spider` binary. No API key.",
+      "description": "Web crawling and content extraction via the local Spider CLI (https://spider.cloud), declared as a command tool with no API key. Core runs the CLI behind a per-call loopback egress proxy that screens and IP-pins every connection the crawler opens, refusing private, loopback, link-local and cloud-metadata targets and ports other than 80 and 443.",
       "source": "builtin",
       "kinds": [
         "tool"
@@ -480,7 +480,8 @@
         "tool"
       ],
       "permission_grants": [
-        "tool:http-egress:api.tavily.com"
+        "tool:http-egress:api.tavily.com",
+        "tool:execute"
       ],
       "built_in": true,
       "tags": [
@@ -649,7 +650,7 @@
       "id": "@ryu/headroom",
       "name": "Headroom Compression",
       "version": "0.1.14",
-      "description": "Context compression (chopratejas/headroom): compress tool outputs, logs, files, and RAG chunks. 60-95% fewer tokens, reversible retrieval. Requires headroom-ai[mcp].",
+      "description": "Context compression using chopratejas/headroom for Gateway-routed requests. Token savings and answer quality depend on the workload and configuration. Requires headroom-ai[mcp].",
       "source": "builtin",
       "kinds": [
         "policy"
@@ -700,7 +701,7 @@
         "to": "transparent",
         "direction": "down"
       },
-      "tagline": "Compress noisy context down to a fraction of its tokens",
+      "tagline": "Compress context for Gateway-routed requests",
       "category": "Developer Tools",
       "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/headroom",
       "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/headroom",
@@ -812,6 +813,91 @@
           "selectable": true,
           "verbs": [
             "web.crawl"
+          ]
+        }
+      ],
+      "developer": "Ryu",
+      "stability": "experimental"
+    },
+    {
+      "id": "@ryu/jina-reader",
+      "name": "Jina Reader",
+      "version": "0.1.0",
+      "description": "Direct page extraction through Jina Reader. Provides the swappable web.extract layer and works with or without a Jina API key; a key raises the upstream rate limit.",
+      "source": "builtin",
+      "kinds": [
+        "tool"
+      ],
+      "permission_grants": [
+        "tool:http-egress:r.jina.ai",
+        "tool:execute"
+      ],
+      "built_in": true,
+      "tags": [
+        "web",
+        "extract",
+        "reader"
+      ],
+      "type": "plugin",
+      "surface_support": [
+        {
+          "surface": "core",
+          "support": "full"
+        },
+        {
+          "surface": "desktop",
+          "support": "full"
+        },
+        {
+          "surface": "island",
+          "support": "limited"
+        },
+        {
+          "surface": "mobile",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "extension",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "web",
+          "support": "full",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "cli",
+          "support": "full"
+        }
+      ],
+      "icon": "book-search",
+      "icon_dither": {
+        "from": 190,
+        "to": "transparent",
+        "direction": "down"
+      },
+      "tagline": "Read web pages as clean text for agents",
+      "category": "Search",
+      "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/jina-reader",
+      "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/jina-reader",
+      "keywords": [
+        "web",
+        "extract",
+        "reader",
+        "Jina"
+      ],
+      "privacy_policy_url": "https://ryuhq.com/privacy",
+      "terms_of_service_url": "https://ryuhq.com/terms",
+      "layers": [
+        {
+          "capability": "web.extract",
+          "title": "Extract",
+          "toolkit": true,
+          "selectable": true,
+          "verbs": [
+            "web.extract"
           ]
         }
       ],
@@ -1349,7 +1435,8 @@
         "tool"
       ],
       "permission_grants": [
-        "tool:http-egress:127.0.0.1"
+        "tool:http-egress:127.0.0.1",
+        "tool:execute"
       ],
       "built_in": true,
       "tags": [
@@ -1498,6 +1585,227 @@
         "stylometry",
         "connections",
         "personalization"
+      ],
+      "privacy_policy_url": "https://ryuhq.com/privacy",
+      "terms_of_service_url": "https://ryuhq.com/terms",
+      "developer": "Ryu",
+      "stability": "experimental"
+    },
+    {
+      "id": "@ryu/is-agentic",
+      "name": "Is Agentic",
+      "version": "0.1.0",
+      "description": "Read the latest completed Is Agentic (https://is-agentic.com) agent-readiness report for a public website: a 0-100 score split into essential, recommended and bonus checks, plus every failing check with its evidence and recommended fix. Read-only, keyless, and never starts a scan.",
+      "source": "builtin",
+      "kinds": [
+        "tool"
+      ],
+      "permission_grants": [
+        "tool:http-egress:is-agentic.com"
+      ],
+      "built_in": true,
+      "tags": [
+        "agent-readiness",
+        "web",
+        "audit"
+      ],
+      "type": "plugin",
+      "surface_support": [
+        {
+          "surface": "core",
+          "support": "full"
+        },
+        {
+          "surface": "desktop",
+          "support": "full"
+        },
+        {
+          "surface": "island",
+          "support": "limited"
+        },
+        {
+          "surface": "mobile",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "extension",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "web",
+          "support": "full",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "cli",
+          "support": "full"
+        }
+      ],
+      "icon": "checkmark-badge-01",
+      "icon_dither": {
+        "from": 160,
+        "to": "transparent",
+        "direction": "down"
+      },
+      "tagline": "Agent-readiness reports from is-agentic.com",
+      "category": "Developer Tools",
+      "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/is-agentic",
+      "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/is-agentic",
+      "keywords": [
+        "agent readiness",
+        "agentic web",
+        "audit",
+        "Is Agentic"
+      ],
+      "privacy_policy_url": "https://ryuhq.com/privacy",
+      "terms_of_service_url": "https://ryuhq.com/terms",
+      "developer": "Ryu",
+      "stability": "experimental"
+    },
+    {
+      "id": "@ryu/isitagentready",
+      "name": "Is It Agent Ready?",
+      "version": "0.1.0",
+      "description": "Scan a public website with Is Your Site Agent-Ready? (https://isitagentready.com): a live check of robots.txt and AI bot rules, sitemaps, Link headers, Markdown negotiation, MCP and A2A cards, Agent Skills, WebMCP, OAuth discovery and agent commerce protocols, scored as a readiness level from 0 (Not Ready) to 5 (Agent-Native). Keyless.",
+      "source": "builtin",
+      "kinds": [
+        "tool"
+      ],
+      "permission_grants": [
+        "tool:http-egress:isitagentready.com"
+      ],
+      "built_in": true,
+      "tags": [
+        "agent-readiness",
+        "web",
+        "audit"
+      ],
+      "type": "plugin",
+      "surface_support": [
+        {
+          "surface": "core",
+          "support": "full"
+        },
+        {
+          "surface": "desktop",
+          "support": "full"
+        },
+        {
+          "surface": "island",
+          "support": "limited"
+        },
+        {
+          "surface": "mobile",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "extension",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "web",
+          "support": "full",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "cli",
+          "support": "full"
+        }
+      ],
+      "icon": "ai-scan",
+      "icon_dither": {
+        "from": 25,
+        "to": "transparent",
+        "direction": "down"
+      },
+      "tagline": "Live agent-readiness scans from isitagentready.com",
+      "category": "Developer Tools",
+      "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/isitagentready",
+      "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/isitagentready",
+      "keywords": [
+        "agent readiness",
+        "agentic web",
+        "audit",
+        "robots.txt",
+        "MCP"
+      ],
+      "privacy_policy_url": "https://ryuhq.com/privacy",
+      "terms_of_service_url": "https://ryuhq.com/terms",
+      "developer": "Ryu",
+      "stability": "experimental"
+    },
+    {
+      "id": "@ryu/ora",
+      "name": "ora",
+      "version": "0.1.0",
+      "description": "Agent-readiness scoring from ora (https://ora.ai): look up or run a 0-100 score and A-F grade for a domain or MCP server, re-run selected checks after a fix, browse the check catalog, discover agent-ready products by intent, and draft a domain's agent discovery files. Read-only and keyless.",
+      "source": "builtin",
+      "kinds": [
+        "tool"
+      ],
+      "permission_grants": [
+        "tool:http-egress:ora.ai"
+      ],
+      "built_in": true,
+      "tags": [
+        "agent-readiness",
+        "web",
+        "audit"
+      ],
+      "type": "plugin",
+      "surface_support": [
+        {
+          "surface": "core",
+          "support": "full"
+        },
+        {
+          "surface": "desktop",
+          "support": "full"
+        },
+        {
+          "surface": "island",
+          "support": "limited"
+        },
+        {
+          "surface": "mobile",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "extension",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "web",
+          "support": "full",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "cli",
+          "support": "full"
+        }
+      ],
+      "icon": "dashboard-speed-01",
+      "icon_dither": {
+        "from": 270,
+        "to": "transparent",
+        "direction": "down"
+      },
+      "tagline": "Agent-readiness scores and fixes from ora.ai",
+      "category": "Developer Tools",
+      "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/ora",
+      "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/ora",
+      "keywords": [
+        "agent readiness",
+        "agentic web",
+        "audit",
+        "ora",
+        "MCP"
       ],
       "privacy_policy_url": "https://ryuhq.com/privacy",
       "terms_of_service_url": "https://ryuhq.com/terms",

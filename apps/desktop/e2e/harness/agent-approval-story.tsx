@@ -21,8 +21,8 @@
 // HARNESS LIMIT: motion/react transitions are asserted as end state, not as
 // intermediate frames.
 
-import { BashToolTerminalCard } from "@ryu/blocks/desktop/agent-elements/tools/bash-tool";
-import { McpTool } from "@ryu/blocks/desktop/agent-elements/tools/mcp-tool";
+import { BashToolTerminalCard } from "@ryu/blocks/desktop/agent-elements/tools/bash-tool.tsx";
+import { McpTool } from "@ryu/blocks/desktop/agent-elements/tools/mcp-tool.tsx";
 import { createRoot } from "react-dom/client";
 import { PermissionPrompt } from "../../src/components/chat/PermissionPrompt.tsx";
 import "../../src/index.css";

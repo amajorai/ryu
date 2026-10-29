@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "vite/client"]
+  },
+  "include": [
+    "src/hooks/usePluginShortcutOverrides.ts",
+    "src/hooks/usePluginShortcutOverrides.http.test.tsx",
+    "src/lib/app-update-preparation.ts",
+    "src/lib/app-update-preparation.test.ts",
+    "src/hooks/useApps.ts",
+    "src/hooks/useApps.http.test.tsx"
+  ]
+}

@@ -18,20 +18,24 @@ import {
 	type EvalCaseRow,
 	type EvalStat,
 	type EvaluatorResultRow,
-} from "@ryu/blocks/desktop/agent-edit";
-import { EvaluatorCatalog } from "@ryu/blocks/desktop/evaluator-catalog";
-import { Checkbox } from "@ryu/ui/components/checkbox";
+} from "@ryu/blocks/desktop/agent-edit.tsx";
+import { EvaluatorCatalog } from "@ryu/blocks/desktop/evaluator-catalog.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ProLockedBadge } from "@/src/components/billing/ProLockedBadge.tsx";
+import { AnnotationQueuesPanel } from "@/src/components/agents/AnnotationQueuesPanel.tsx";
 import {
 	splitOfflineSelection,
-	toCatalogItem,
+	toOfflineCatalogItem,
 } from "@/src/components/evaluators/catalog-utils.ts";
 import {
 	EvaluatorEditorDialog,
 	type EvaluatorEditorMode,
 } from "@/src/components/evaluators/EvaluatorEditorDialog.tsx";
-import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
+import {
+	NO_DEFAULT_MODEL_INPUT_HINT,
+	useNodeDefaultModel,
+} from "@/src/hooks/useNodeDefaultModel.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type AuditEntry,
@@ -48,7 +52,10 @@ import { formatTime } from "@/src/lib/timezone.ts";
 export interface AgentEvalsViewProps {
 	/** Agent the evals are scoped to (forwarded for per-agent budget tracking). */
 	agentId: string | null;
-	/** The agent's chat model — the default model to evaluate. */
+	/**
+	 * The agent's own model id, when it names one. Blank → the node's configured
+	 * default model (see `useNodeDefaultModel`).
+	 */
 	defaultModel: string;
 	/** Core API target (url + token). */
 	target: ApiTarget;
@@ -73,9 +80,11 @@ export function AgentEvalsView({
 	defaultModel,
 	target,
 }: AgentEvalsViewProps) {
-	const { canUse } = useEntitlementContext();
+	const tl = useLiteralMessages();
 	// ── Eval runner state ──────────────────────────────────────────────────────
-	const [model, setModel] = useState(defaultModel || "gpt-4o-mini");
+	const nodeDefault = useNodeDefaultModel(target);
+	const initialModel = defaultModel.trim() || nodeDefault.model;
+	const [model, setModel] = useState(initialModel);
 	const [running, setRunning] = useState(false);
 	const [result, setResult] = useState<EvalRunResult | null>(null);
 	const [runError, setRunError] = useState<string | null>(null);
@@ -93,11 +102,18 @@ export function AgentEvalsView({
 	const [reloadKey, setReloadKey] = useState(0);
 	const [deletingId, setDeletingId] = useState<string | null>(null);
 
+	// Follow the agent's model, or the node default once it resolves, until the
+	// user types their own model id.
+	const modelEditedRef = useRef(false);
 	useEffect(() => {
-		if (defaultModel) {
-			setModel(defaultModel);
+		if (!modelEditedRef.current) {
+			setModel(initialModel);
 		}
-	}, [defaultModel]);
+	}, [initialModel]);
+	const onModelChange = useCallback((next: string) => {
+		modelEditedRef.current = true;
+		setModel(next);
+	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -109,7 +125,7 @@ export function AgentEvalsView({
 					setCatalogError(null);
 				}
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				if (!cancelled) {
 					setCatalogError(
 						e instanceof Error ? e.message : "Failed to load evaluator catalog"
@@ -126,7 +142,10 @@ export function AgentEvalsView({
 		};
 	}, [target, reloadKey]);
 
-	const catalogItems = useMemo(() => catalog.map(toCatalogItem), [catalog]);
+	const catalogItems = useMemo(
+		() => catalog.map(toOfflineCatalogItem),
+		[catalog]
+	);
 	const customSet = useMemo(() => catalog.filter((e) => !e.builtin), [catalog]);
 	const allIds = useMemo(() => catalog.map((e) => e.id), [catalog]);
 	const nameById = useMemo(
@@ -203,8 +222,20 @@ export function AgentEvalsView({
 					value: pct(agg.mean_overall),
 					tone: scoreTone(agg.mean_overall),
 				},
-				{ label: "Policy pass", value: pct(agg.policy_pass_rate) },
-				{ label: "Mean latency", value: `${Math.round(agg.mean_latency)} ms` },
+				{
+					label: "Policy pass",
+					value:
+						agg.policy_available_cases === 0
+							? "N/A"
+							: pct(agg.policy_pass_rate),
+				},
+				{
+					label: "Mean latency",
+					value:
+						agg.latency_available_cases === 0
+							? "N/A"
+							: `${Math.round(agg.mean_latency)} ms`,
+				},
 				{ label: "Cases", value: String(agg.total_cases) },
 			]
 		: [];
@@ -256,8 +287,8 @@ export function AgentEvalsView({
 	};
 
 	// Delete a custom (builtin=false) evaluator from the catalog where it renders.
-	// Persists the trimmed custom set via updateGatewayConfig + restartGateway, then
-	// refetches. Also drops the id from the current selection so a deleted code
+	// Persists the trimmed custom set via updateGatewayConfig (the gateway applies
+	// it live; older gateways are restarted), then refetches. Also drops the id from the current selection so a deleted code
 	// evaluator's stale id is never re-sent as a registry id on the next run.
 	const deleteCustom = async (id: string) => {
 		setDeletingId(id);
@@ -281,23 +312,6 @@ export function AgentEvalsView({
 		}
 	};
 
-	// Band-2 gate (free-tier plan): offline eval runs are a Pro feature. Show the
-	// surface locked with an upsell rather than hiding it. Placed after every hook.
-	if (!canUse("evals")) {
-		return (
-			<div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-8 text-center">
-				<div className="flex items-center gap-2">
-					<span className="font-medium text-sm">Agent evals</span>
-					<ProLockedBadge feature="evals" />
-				</div>
-				<p className="max-w-sm text-muted-foreground text-xs">
-					Score this agent on latency, token efficiency, and policy-pass across
-					a dataset. Offline evals are a Pro feature — upgrade to run them.
-				</p>
-			</div>
-		);
-	}
-
 	const catalogNode = (
 		<EvaluatorCatalog
 			disabled={deletingId !== null}
@@ -313,7 +327,7 @@ export function AgentEvalsView({
 			onSearchChange={setSearch}
 			renderControl={(item) => (
 				<Checkbox
-					aria-label={`Select ${item.name}`}
+					aria-label={tl("Select {name}", { name: item.name })}
 					checked={selected.has(item.id)}
 					onCheckedChange={(c) => toggleSelected(item.id, c === true)}
 				/>
@@ -332,7 +346,12 @@ export function AgentEvalsView({
 				historyLoading={historyLoading}
 				historyReachable={reachable}
 				model={model}
-				onModelChange={setModel}
+				modelHint={
+					model.trim() || nodeDefault.loading
+						? null
+						: NO_DEFAULT_MODEL_INPUT_HINT
+				}
+				onModelChange={onModelChange}
 				onReloadHistory={() => {
 					loadHistory().catch(() => undefined);
 				}}
@@ -343,6 +362,9 @@ export function AgentEvalsView({
 				running={running}
 				stats={stats}
 			/>
+			{agentId ? (
+				<AnnotationQueuesPanel agentId={agentId} target={target} />
+			) : null}
 			<EvaluatorEditorDialog
 				existingCustom={customSet}
 				existingIds={allIds}

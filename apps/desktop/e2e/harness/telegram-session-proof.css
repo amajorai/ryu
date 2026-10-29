@@ -1,0 +1,15 @@
+@import "tailwindcss" source(none);
+@import "@ryu/ui/companion-theme.css";
+@source "../../../webapp/src/telegram/TelegramLaunchGate.tsx";
+@source "./telegram-session-proof.tsx";
+@source "../../../../packages/ui/src/components";
+
+html,
+body,
+#root {
+	height: 100%;
+	margin: 0;
+}
+body {
+	font-family: var(--font-sans);
+}

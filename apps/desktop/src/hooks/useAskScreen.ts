@@ -9,12 +9,14 @@
 // prompt templates are intentionally literal — they describe user intent, not
 // provider/model config, so this is not a "hardcoded model" violation.
 
-import { useCallback, useRef, useState } from "react";
-import { chatHeaders, chatStreamUrl } from "@/src/lib/api/chat.ts";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { cancelChat, chatHeaders, chatStreamUrl } from "@/src/lib/api/chat.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { ShadowContext } from "@/src/lib/api/shadow.ts";
 import { responseModeForInterface } from "@/src/lib/chat-routing.ts";
 import { readInterfaceLevel } from "@/src/lib/interface-level.ts";
+import { readUiMessageText } from "@/src/lib/ui-message-text-stream.ts";
 import {
 	neutralize,
 	stripTemplateTokens,
@@ -44,11 +46,7 @@ export interface AskScreenState {
  * markers) and the prompt carries the notice so the model treats it as data,
  * never as instructions.
  */
-function untrustedCtx(ctx: ShadowContext | null): {
-	app: string;
-	selection: string | undefined;
-	screenText: string | undefined;
-} {
+function untrustedCtx(ctx: ShadowContext | null) {
 	return {
 		app: stripTemplateTokens(ctx?.active_app ?? "the current window"),
 		selection: ctx?.selected_text?.trim() || undefined,
@@ -90,51 +88,11 @@ function translatePrompt(ctx: ShadowContext | null): string {
 }
 
 /** Distinct prompt templates for each intent. */
-const PROMPT_TEMPLATES: Record<
-	AskIntent,
-	(ctx: ShadowContext | null) => string
-> = {
+const PROMPT_TEMPLATES = {
 	explain: explainPrompt,
 	summarize: summarizePrompt,
 	translate: translatePrompt,
-};
-
-// ---------------------------------------------------------------------------
-// Stream reader helper (module-level to reduce callback complexity)
-// ---------------------------------------------------------------------------
-
-type SetState = (updater: (prev: AskScreenState) => AskScreenState) => void;
-
-/** Read an AI SDK Vercel stream and accumulate text deltas into state. */
-async function readAiStream(
-	reader: ReadableStreamDefaultReader<Uint8Array>,
-	setState: SetState
-): Promise<string> {
-	const decoder = new TextDecoder();
-	let accumulated = "";
-
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) {
-			break;
-		}
-		const chunk = decoder.decode(value, { stream: true });
-		// The AI SDK stream emits lines like `0:"token"` for text deltas.
-		for (const line of chunk.split("\n")) {
-			const trimmed = line.trim();
-			if (trimmed.startsWith("0:")) {
-				try {
-					const token = JSON.parse(trimmed.slice(2)) as string;
-					accumulated += token;
-					setState((prev) => ({ ...prev, answer: accumulated }));
-				} catch {
-					// Non-JSON lines (e.g. metadata chunks) are safe to skip.
-				}
-			}
-		}
-	}
-	return accumulated;
-}
+} satisfies Record<AskIntent, (ctx: ShadowContext | null) => string>;
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -153,11 +111,35 @@ export function useAskScreen(target: ApiTarget) {
 		error: null,
 	});
 
+	const tl = useLiteralMessages();
+	const tlRef = useRef(tl);
+	tlRef.current = tl;
 	const abortRef = useRef<AbortController | null>(null);
+	// The Core turn of the answer still streaming. Core keeps a turn running after
+	// its request is aborted, so discarding an answer must also cancel it there.
+	const liveTurnRef = useRef<{
+		conversationId: string;
+		target: ApiTarget;
+	} | null>(null);
+	const stopInFlight = useCallback(() => {
+		abortRef.current?.abort();
+		const live = liveTurnRef.current;
+		liveTurnRef.current = null;
+		if (live) {
+			cancelChat(live.target, live.conversationId).catch(() => {
+				// No live turn, or Core is unreachable; the abort above still stands.
+			});
+		}
+	}, []);
+	useEffect(() => {
+		stopInFlight();
+		setState({ loading: false, answer: null, error: null });
+		return stopInFlight;
+	}, [stopInFlight, target.url, target.token, target.userJwt]);
 
 	const ask = useCallback(
 		async (intent: AskIntent, context: ShadowContext | null) => {
-			abortRef.current?.abort();
+			stopInFlight();
 			const controller = new AbortController();
 			abortRef.current = controller;
 
@@ -167,6 +149,13 @@ export function useAskScreen(target: ApiTarget) {
 			// A transient conversation_id scoped to this invocation only — not
 			// registered in the sidebar or persisted across restarts.
 			const conversationId = `companion-${crypto.randomUUID()}`;
+			const liveTurn = { conversationId, target };
+			liveTurnRef.current = liveTurn;
+			const settle = () => {
+				if (liveTurnRef.current === liveTurn) {
+					liveTurnRef.current = null;
+				}
+			};
 
 			try {
 				const resp = await fetch(chatStreamUrl(target), {
@@ -189,18 +178,23 @@ export function useAskScreen(target: ApiTarget) {
 					signal: controller.signal,
 				});
 
+				if (controller.signal.aborted) {
+					return;
+				}
 				if (!resp.ok) {
 					const text = await resp.text().catch(() => resp.statusText);
 					setState({
 						loading: false,
 						answer: null,
-						error: `Core returned ${resp.status}: ${text}`,
+						error: tlRef.current("Core returned {status}: {text}", {
+							status: resp.status,
+							text,
+						}),
 					});
 					return;
 				}
 
-				const reader = resp.body?.getReader();
-				if (!reader) {
+				if (!resp.body) {
 					setState({
 						loading: false,
 						answer: null,
@@ -209,28 +203,43 @@ export function useAskScreen(target: ApiTarget) {
 					return;
 				}
 
-				const accumulated = await readAiStream(reader, setState);
-				setState({ loading: false, answer: accumulated || null, error: null });
+				const { text, error } = await readUiMessageText(
+					resp.body,
+					(partial) => {
+						if (!controller.signal.aborted) {
+							setState((prev) => ({ ...prev, answer: partial }));
+						}
+					}
+				);
+				if (controller.signal.aborted) {
+					return;
+				}
+				settle();
+				// An empty answer is reported, never shown as nothing at all.
+				setState({
+					loading: false,
+					answer: text || null,
+					error: error ?? (text ? null : "Core returned an empty answer."),
+				});
 			} catch (err) {
-				if ((err as { name?: string }).name === "AbortError") {
-					setState({ loading: false, answer: null, error: null });
+				if (controller.signal.aborted) {
 					return;
 				}
 				const message = err instanceof Error ? err.message : String(err);
 				setState({
 					loading: false,
 					answer: null,
-					error: `Request failed: ${message}`,
+					error: tlRef.current("Request failed: {message}", { message }),
 				});
 			}
 		},
-		[target]
+		[stopInFlight, target]
 	);
 
 	const reset = useCallback(() => {
-		abortRef.current?.abort();
+		stopInFlight();
 		setState({ loading: false, answer: null, error: null });
-	}, []);
+	}, [stopInFlight]);
 
 	return { ...state, ask, reset };
 }

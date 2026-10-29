@@ -9,13 +9,18 @@ import {
 } from "../../src/contexts/TabsContext.tsx";
 import type { RouteTab } from "../../src/contributions/registry.ts";
 import { contributionRegistry } from "../../src/contributions/registry.ts";
+import { useProductModeStore } from "../../src/lib/product-mode.ts";
 import "../../src/index.css";
+
+// Ryu Bot answers every non-chat route with a "belongs in Ryu Build" notice, so
+// the proof opts into Console the way the app's access sync would.
+useProductModeStore.setState({ consoleAccess: true, requestedMode: "console" });
 
 const BOOT_NOW = 1_000_000;
 
 type MemoryClockWindow = Window & { __ryuMemoryNow: number };
 
-const proofJson = (body: unknown) =>
+const proofJson = <FixturePayload,>(body: FixturePayload) =>
 	new Response(JSON.stringify(body), {
 		headers: { "Content-Type": "application/json" },
 		status: 200,
@@ -23,7 +28,7 @@ const proofJson = (body: unknown) =>
 
 const nativeFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
-	const url = typeof input === "string" ? input : input.toString();
+	const url = input instanceof Request ? input.url : String(input);
 	if (
 		url.endsWith("/api/preferences/entitlement-active") ||
 		url.endsWith("/api/preferences/managed-inference-entitled")
@@ -41,7 +46,7 @@ contributionRegistry.registerRoute({
 	test: { startsWith: "/thread-memory/" },
 	render: (tab: RouteTab) => (
 		<div className="flex size-full flex-col gap-4 overflow-auto bg-muted/20 p-6">
-			<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
+			<p className="type-compact font-medium text-muted-foreground uppercase tracking-(--tracking-section)">
 				Mounted thread route
 			</p>
 			<h2 className="font-semibold text-foreground text-xl">{tab.path}</h2>
@@ -73,7 +78,9 @@ function MemoryStatus() {
 function Story() {
 	const [advanced, setAdvanced] = useState(false);
 	const advanceClock = () => {
-		(window as MemoryClockWindow).__ryuMemoryNow = BOOT_NOW + 11 * 60_000;
+		/* SAFETY: The owning proof HTML initializes this private numeric clock before this module, and this callback writes only the authored numeric timestamp expression. */ (
+			window as MemoryClockWindow
+		).__ryuMemoryNow = BOOT_NOW + 11 * 60_000;
 		setAdvanced(true);
 	};
 
@@ -84,7 +91,7 @@ function Story() {
 					<main className="min-h-screen bg-background p-6 text-foreground">
 						<header className="mx-auto mb-5 flex max-w-5xl flex-wrap items-end justify-between gap-4">
 							<div>
-								<p className="font-medium text-primary text-xs uppercase tracking-[0.16em]">
+								<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 									Ryu Desktop · thread memory
 								</p>
 								<h1 className="mt-1 font-semibold text-2xl tracking-tight">

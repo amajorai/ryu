@@ -1,0 +1,6 @@
+.agentMenuTrigger {
+	border-radius: calc(var(--spacing) * 1);
+}
+.agentMenuTrigger:hover {
+	background-color: var(--accent);
+}

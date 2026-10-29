@@ -234,6 +234,31 @@ describe("runScorecard", () => {
 		expect(statusOf(card, "permission-breadth")).toBe("pass");
 	});
 
+	test("keeps broad-permission scoring shallow across arbitrary manifest keys", () => {
+		for (const fixture of [
+			{ value: true, status: "warn" },
+			{ value: JSON.parse('{"__proto__":true}'), status: "warn" },
+			{ value: ["https://example.com", "*"], status: "warn" },
+			{ value: { futurePermission: true }, status: "warn" },
+			{ value: { futurePermission: "*" }, status: "warn" },
+			{ value: { futurePermission: ["*"] }, status: "warn" },
+			{ value: { futurePermission: { nested: true } }, status: "pass" },
+			{ value: { futurePermission: false }, status: "pass" },
+			{ value: [true], status: "pass" },
+			{ value: "*", status: "pass" },
+			{ value: null, status: "pass" },
+		] as const) {
+			const card = runScorecard(
+				entry(),
+				healthyDetail({
+					permissions: { declared: true, network: fixture.value },
+				}),
+				NOW
+			);
+			expect(statusOf(card, "permission-breadth")).toBe(fixture.status);
+		}
+	});
+
 	test("an unauthenticated sidecar route is flagged", () => {
 		const card = runScorecard(
 			entry(),

@@ -1,6 +1,8 @@
 "use client";
 
 import { Button } from "@ryu/ui/components/button";
+import { imageViewerControlClasses } from "@ryu/ui/components/button-variants.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	IconChevronLeft,
@@ -14,9 +16,14 @@ import {
 import {
 	AnimatePresence,
 	animate,
+	buildTransform,
+	type MotionStyle,
+	type MotionValue,
 	motion,
+	type TargetAndTransition,
 	useMotionValue,
 	useReducedMotion,
+	useTransform,
 } from "motion/react";
 import {
 	useCallback,
@@ -96,8 +103,22 @@ const SLOP = 8;
 const NEAR_HOME = 1.02;
 const SNAP_HOME = 1.05;
 
-const CHROME_BUTTON =
-	"grid size-9 place-items-center rounded-full border border-white/10 bg-black/50 text-white outline-none backdrop-blur-sm transition-[border-color,background-color,color] duration-150 hover:border-white/25 hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-white/60";
+/** Motion supports CSS variable bindings; these owner contracts declare the numeric
+ * spring carriers absent from React's closed CSSProperties key set. */
+interface ImageViewerFlightStyle extends MotionStyle {
+	"--image-viewer-flight-opacity": MotionValue<number>;
+	"--image-viewer-flight-scale": MotionValue<number>;
+	"--image-viewer-flight-transform": MotionValue<string>;
+	"--image-viewer-flight-x": MotionValue<number>;
+	"--image-viewer-flight-y": MotionValue<number>;
+}
+interface ImageViewerContentStyle extends MotionStyle {
+	"--image-viewer-content-radius": MotionValue<number>;
+	"--image-viewer-content-scale": MotionValue<number>;
+	"--image-viewer-content-transform": MotionValue<string>;
+	"--image-viewer-content-x": MotionValue<number>;
+	"--image-viewer-content-y": MotionValue<number>;
+}
 
 interface Spring {
 	damping: number;
@@ -359,7 +380,10 @@ function useLightbox<
 				return;
 			}
 			const content = contentRef.current;
-			onContent.current = content ? content.contains(e.target as Node) : false;
+			onContent.current =
+				content && e.target instanceof Node
+					? content.contains(e.target)
+					: false;
 			e.currentTarget.setPointerCapture?.(e.pointerId);
 			drag.current = {
 				id: e.pointerId,
@@ -475,6 +499,7 @@ function Stage({
 	const [loaded, setLoaded] = useState(false);
 	const [size, setSize] = useState<{ w: number; h: number } | null>(null);
 	const landedRef = useRef(false);
+	const releaseBodyLockRef = useRef<(() => void) | null>(null);
 
 	const currentImage = images[currentIndex] ?? images[0];
 	const hasMultipleImages = images.length > 1;
@@ -498,6 +523,29 @@ function Stage({
 		reset,
 		zoomAt,
 	} = useLightbox({ maxScale, onDismiss: onClose });
+
+	// Keep Motion's native transform formatting and the same numeric spring values.
+	const flightTransform = useTransform(() =>
+		buildTransform({ x: fx.get(), y: fy.get(), scale: fs.get() }, {})
+	);
+	const contentTransform = useTransform(() =>
+		buildTransform({ x: x.get(), y: y.get(), scale: scale.get() }, {})
+	);
+
+	const flightStyle: ImageViewerFlightStyle = {
+		"--image-viewer-flight-x": fx,
+		"--image-viewer-flight-y": fy,
+		"--image-viewer-flight-scale": fs,
+		"--image-viewer-flight-transform": flightTransform,
+		"--image-viewer-flight-opacity": fo,
+	};
+	const contentStyle: ImageViewerContentStyle = {
+		"--image-viewer-content-x": x,
+		"--image-viewer-content-y": y,
+		"--image-viewer-content-scale": scale,
+		"--image-viewer-content-transform": contentTransform,
+		"--image-viewer-content-radius": fr,
+	};
 
 	const shellRef = useRef<HTMLDivElement>(null);
 	const zoomCeiling = Math.max(1.1, maxScale);
@@ -583,17 +631,20 @@ function Stage({
 		return () => runs.forEach((r) => r.stop());
 	}, [fo, fr, fs, fx, fy, landing, loaded, reduced]);
 
-	const away = useCallback(() => {
+	const away = useCallback((): TargetAndTransition => {
 		if (reduced) {
-			return { opacity: 0, transition: { duration: 0.12 } };
+			return {
+				"--image-viewer-flight-opacity": 0,
+				transition: { duration: 0.12 },
+			};
 		}
 		const d = landing();
 		animate(fr, d.r, HOME);
 		return {
-			x: d.dx,
-			y: d.dy,
-			scale: d.s,
-			opacity: d.o,
+			"--image-viewer-flight-x": d.dx,
+			"--image-viewer-flight-y": d.dy,
+			"--image-viewer-flight-scale": d.s,
+			"--image-viewer-flight-opacity": d.o,
 			filter: "blur(4px)",
 			transition: HOME,
 		};
@@ -601,9 +652,9 @@ function Stage({
 
 	const unwind = useCallback(
 		() => ({
-			x: 0,
-			y: 0,
-			scale: 1,
+			"--image-viewer-content-x": 0,
+			"--image-viewer-content-y": 0,
+			"--image-viewer-content-scale": 1,
 			transition: reduced ? { duration: 0 } : HOME,
 		}),
 		[reduced]
@@ -625,11 +676,23 @@ function Stage({
 			body.style.paddingRight = `${base + gap}px`;
 		}
 		frame?.focus({ preventScroll: true });
-		return () => {
+		let released = false;
+		const release = () => {
+			if (released) {
+				return;
+			}
+			released = true;
 			body.style.overflow = overflow;
 			body.style.paddingRight = padding;
 			if (previous?.isConnected) {
 				previous.focus({ preventScroll: true });
+			}
+		};
+		releaseBodyLockRef.current = release;
+		return () => {
+			release();
+			if (releaseBodyLockRef.current === release) {
+				releaseBodyLockRef.current = null;
 			}
 		};
 	}, [frameRef]);
@@ -689,7 +752,8 @@ function Stage({
 		return () => shell.removeEventListener("keydown", onKeyDown);
 	}, [goToNext, goToPrevious, hasMultipleImages, onClose, zoomed]);
 
-	if (!currentImage) {
+	const safeCurrentUrl = currentImage ? safeMediaUrl(currentImage.url) : null;
+	if (!(currentImage && safeCurrentUrl)) {
 		return null;
 	}
 
@@ -717,22 +781,21 @@ function Stage({
 			<div
 				aria-describedby={hintId}
 				aria-labelledby={titleId}
-				className={`absolute inset-0 select-none overflow-hidden outline-none focus-visible:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.4)] ${
+				className={`image-viewer-no-callout focus-visible:image-viewer-focus-ring absolute inset-0 touch-none select-none overflow-hidden outline-none ${
 					zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"
 				}`}
 				data-lightbox-focus="1"
 				ref={frameRef}
 				role="group"
-				style={{ touchAction: "none", WebkitTouchCallout: "none" }}
 				tabIndex={-1}
 				{...bind}
 			>
 				<motion.div
 					animate={{ filter: "blur(0px)" }}
-					className="absolute inset-0 flex items-center justify-center p-4 pb-32 sm:p-14 sm:pb-32"
+					className="image-viewer-flight absolute inset-0 flex items-center justify-center p-4 pb-32 sm:p-14 sm:pb-32"
 					exit="away"
 					initial={reduced ? false : { filter: "blur(6px)" }}
-					style={{ x: fx, y: fy, scale: fs, opacity: fo }}
+					style={flightStyle}
 					transition={
 						reduced
 							? { duration: 0 }
@@ -742,7 +805,7 @@ function Stage({
 				>
 					<motion.img
 						alt={filename}
-						className="max-h-full max-w-full object-contain"
+						className="image-viewer-content max-h-full max-w-full object-contain"
 						draggable={false}
 						exit="away"
 						height={size?.h}
@@ -755,8 +818,8 @@ function Stage({
 							setLoaded(true);
 						}}
 						ref={contentRef}
-						src={currentImage.url}
-						style={{ x, y, scale, borderRadius: fr }}
+						src={safeCurrentUrl}
+						style={contentStyle}
 						variants={{ away: unwind }}
 						width={size?.w}
 					/>
@@ -772,10 +835,13 @@ function Stage({
 				<div className="pointer-events-auto flex items-center gap-2">
 					{onAnnotate ? (
 						<Button
+							appearance="image-viewer"
 							aria-label={`Annotate ${filename}`}
-							className={CHROME_BUTTON}
 							data-lightbox-focus="1"
 							onClick={() => {
+								// Release before the editor acquires its own modal lock. The
+								// exit animation must not restore styles over that new owner.
+								releaseBodyLockRef.current?.();
 								onAnnotate(currentImage);
 								onClose();
 							}}
@@ -783,29 +849,29 @@ function Stage({
 							type="button"
 							variant="ghost"
 						>
-							<IconPencil className="size-[15px]" />
+							<IconPencil className="size-image-viewer-icon" />
 						</Button>
 					) : null}
 					<a
 						aria-label={`Download ${filename}`}
-						className={CHROME_BUTTON}
+						className={imageViewerControlClasses}
 						data-lightbox-focus="1"
 						download={filename}
-						href={currentImage.url}
+						href={safeCurrentUrl}
 						rel="noopener noreferrer"
 					>
-						<IconDownload className="size-[15px]" />
+						<IconDownload className="size-image-viewer-icon" />
 					</a>
 					<Button
+						appearance="image-viewer"
 						aria-label="Close"
-						className={CHROME_BUTTON}
 						data-lightbox-focus="1"
 						onClick={onClose}
 						size="icon"
 						type="button"
 						variant="ghost"
 					>
-						<IconX className="size-[15px]" />
+						<IconX className="size-image-viewer-icon" />
 					</Button>
 				</div>
 			</motion.div>
@@ -815,9 +881,10 @@ function Stage({
 						<div className="flex items-center gap-2">
 							{images.map((_, idx) => (
 								<button
+									aria-current={idx === currentIndex ? "true" : undefined}
 									aria-label={`Go to image ${idx + 1}`}
 									className={cn(
-										"size-2 rounded-full transition-all",
+										"relative size-2 rounded-full outline-none transition-[scale,background-color] after:absolute after:-inset-2 focus-visible:ring-2 focus-visible:ring-white/70 motion-reduce:transition-none",
 										idx === currentIndex
 											? "scale-125 bg-white"
 											: "bg-white/40 hover:bg-white/60"
@@ -838,15 +905,16 @@ function Stage({
 					</div>
 				)}
 				<p
-					className="pointer-events-auto max-w-[80vw] truncate rounded-full border border-white/10 bg-black/50 px-3 py-1.5 text-[12.5px] text-white/90 backdrop-blur-sm sm:max-w-[32rem]"
+					className="type-image-viewer-caption pointer-events-auto max-w-[80vw] truncate rounded-full border border-white/10 bg-black/50 px-3 py-1.5 text-white/90 backdrop-blur-sm sm:max-w-[32rem]"
 					id={titleId}
+					title={filename}
 				>
 					{filename}
 				</p>
 				<div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/10 bg-black/50 p-1 backdrop-blur-sm">
 					<Button
+						appearance="image-viewer"
 						aria-label="Zoom out"
-						className={CHROME_BUTTON}
 						data-lightbox-focus="1"
 						disabled={zoom <= 1.01}
 						onClick={() => adjustZoom(-CONTROL_ZOOM_STEP)}
@@ -854,7 +922,7 @@ function Stage({
 						type="button"
 						variant="ghost"
 					>
-						<IconMinus className="size-[15px]" />
+						<IconMinus className="size-image-viewer-icon" />
 					</Button>
 					<span
 						aria-live="polite"
@@ -863,8 +931,8 @@ function Stage({
 						{Math.round(zoom * 100)}%
 					</span>
 					<Button
+						appearance="image-viewer"
 						aria-label="Zoom in"
-						className={CHROME_BUTTON}
 						data-lightbox-focus="1"
 						disabled={zoom >= zoomCeiling - 0.01}
 						onClick={() => adjustZoom(CONTROL_ZOOM_STEP)}
@@ -872,7 +940,7 @@ function Stage({
 						type="button"
 						variant="ghost"
 					>
-						<IconPlus className="size-[15px]" />
+						<IconPlus className="size-image-viewer-icon" />
 					</Button>
 				</div>
 			</div>
@@ -880,11 +948,9 @@ function Stage({
 			{hasMultipleImages && (
 				<>
 					<Button
+						appearance="image-viewer"
 						aria-label="Previous image (←)"
-						className={cn(
-							CHROME_BUTTON,
-							"pointer-events-auto absolute top-1/2 left-3 z-10 -translate-y-1/2 sm:left-4"
-						)}
+						className="pointer-events-auto absolute top-1/2 left-3 z-10 -translate-y-1/2 sm:left-4"
 						data-lightbox-focus="1"
 						onClick={goToPrevious}
 						size="icon"
@@ -894,11 +960,9 @@ function Stage({
 						<IconChevronLeft className="size-6" />
 					</Button>
 					<Button
+						appearance="image-viewer"
 						aria-label="Next image (→)"
-						className={cn(
-							CHROME_BUTTON,
-							"pointer-events-auto absolute top-1/2 right-3 z-10 -translate-y-1/2 sm:right-4"
-						)}
+						className="pointer-events-auto absolute top-1/2 right-3 z-10 -translate-y-1/2 sm:right-4"
 						data-lightbox-focus="1"
 						onClick={goToNext}
 						size="icon"
@@ -929,7 +993,7 @@ export function ImageLightbox(props: ImageLightboxProps) {
 		setMounted(true);
 	}, []);
 
-	if (typeof document === "undefined") {
+	if (globalThis.document === undefined) {
 		return null;
 	}
 	if (!mounted) {

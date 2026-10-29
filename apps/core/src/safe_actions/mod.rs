@@ -493,6 +493,13 @@ impl SafeActionsService {
             .get_submission(id)
             .await?
             .ok_or_else(|| anyhow!("review '{id}' not found"))?;
+        if decision.expected_plan_hash.is_empty()
+            || decision.expected_plan_hash != submission.report.bindings.plan_hash
+        {
+            return Err(anyhow!(
+                "review plan binding does not match the persisted submission"
+            ));
+        }
         if submission.status == "approved" {
             return self.execute(submission).await;
         }
@@ -561,6 +568,13 @@ impl SafeActionsService {
             .get_submission(id)
             .await?
             .ok_or_else(|| anyhow!("review '{id}' not found"))?;
+        if decision.expected_plan_hash.is_empty()
+            || decision.expected_plan_hash != submission.report.bindings.plan_hash
+        {
+            return Err(anyhow!(
+                "review plan binding does not match the persisted submission"
+            ));
+        }
         submission.status = "denied_by_reviewer".to_owned();
         submission.review_note = decision.note;
         submission.reviewed_by = Some(reviewed_by);
@@ -574,6 +588,76 @@ impl SafeActionsService {
             return Err(anyhow!("review '{id}' was already decided"));
         }
         Ok(json!({"review": submission, "status": "denied_by_reviewer"}))
+    }
+}
+
+/// The fixed plan and report behind [`SafeActionsService::insert_test_pending_review`].
+#[cfg(test)]
+fn test_pending_review_plan() -> (ToolPlan, ryu_safe_actions::VerificationReport) {
+    let plan = ToolPlan {
+        schema_version: ryu_safe_actions::TOOL_PLAN_SCHEMA_VERSION,
+        root: PlanNode::Call {
+            id: "send".to_owned(),
+            tool: "mail.send".to_owned(),
+            arguments: PlanValue::Literal { value: json!({}) },
+        },
+    };
+    let report = ryu_safe_actions::verify(&VerifierInput {
+        plan: plan.clone(),
+        policy: Policy::default(),
+        catalog: Vec::new(),
+        agent_revision: "agent-revision".to_owned(),
+    });
+    (plan, report)
+}
+
+/// The plan hash a reviewer is shown for every test pending review, which a
+/// decision must echo back as `expected_plan_hash`.
+#[cfg(test)]
+pub(crate) fn test_pending_review_plan_hash() -> String {
+    test_pending_review_plan().1.bindings.plan_hash
+}
+
+#[cfg(test)]
+impl SafeActionsService {
+    /// Persist a `pending_review` submission with no executable plan behind it,
+    /// for authorization tests of the review routes. Returns its id.
+    pub(crate) async fn insert_test_pending_review(&self) -> String {
+        let (plan, report) = test_pending_review_plan();
+        let id = Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = SubmissionRecord {
+            id: id.clone(),
+            submission_key: id.clone(),
+            agent_id: "agent-1".to_owned(),
+            agent_revision: "agent-revision".to_owned(),
+            policy_id: "policy-1".to_owned(),
+            host_conversation_id: None,
+            plan,
+            report,
+            certificate: None,
+            status: "pending_review".to_owned(),
+            review_note: None,
+            reviewed_by: None,
+            reviewed_at: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        self.store
+            .insert_submission(&record)
+            .await
+            .expect("insert a test submission")
+            .id
+    }
+
+    /// `(status, reviewed_by)` of one submission, for tests.
+    pub(crate) async fn test_review_state(&self, id: &str) -> Option<(String, Option<String>)> {
+        self.store
+            .get_submission(id)
+            .await
+            .ok()
+            .flatten()
+            .map(|submission| (submission.status, submission.reviewed_by))
     }
 }
 
@@ -1905,6 +1989,7 @@ mod tests {
         crate::identity_verify::VerifiedCaller {
             user_id: "operator-1".to_owned(),
             email: None,
+            email_verified: false,
             org_id: org_id.map(str::to_owned),
             role,
             teams: Vec::new(),
@@ -2336,11 +2421,39 @@ mod tests {
             .and_then(Value::as_str)
             .unwrap()
             .to_owned();
+        let plan_hash = pending
+            .pointer("/submission/report/bindings/plan_hash")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned();
+        let mismatched = service
+            .approve(
+                &submission_id,
+                ReviewDecisionInput {
+                    note: None,
+                    expected_plan_hash: "hash-from-another-visible-review".to_owned(),
+                },
+                "operator-1".to_owned(),
+            )
+            .await
+            .unwrap_err();
+        assert!(mismatched.to_string().contains("plan binding"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            store
+                .get_submission(&submission_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "pending_review"
+        );
         let completed = service
             .approve(
                 &submission_id,
                 ReviewDecisionInput {
                     note: Some("verified test approval".to_owned()),
+                    expected_plan_hash: plan_hash,
                 },
                 "operator-1".to_owned(),
             )
@@ -2376,10 +2489,18 @@ mod tests {
             .pointer("/submission/id")
             .and_then(Value::as_str)
             .unwrap();
+        let auth_plan_hash = auth_pending
+            .pointer("/submission/report/bindings/plan_hash")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned();
         let auth_blocked = service
             .approve(
                 auth_submission_id,
-                ReviewDecisionInput { note: None },
+                ReviewDecisionInput {
+                    note: None,
+                    expected_plan_hash: auth_plan_hash,
+                },
                 "operator-1".to_owned(),
             )
             .await

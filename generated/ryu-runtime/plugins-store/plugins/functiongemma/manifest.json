@@ -1,0 +1,140 @@
+{
+  "id": "@ryu/functiongemma",
+  "name": "FunctionGemma Local Planner",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Run Google's license-gated FunctionGemma 270M model locally as a selectable Shadow computer-use planner. Ryu downloads a pinned Hugging Face snapshot using the user's Hugging Face token; the user must first accept Google's Gemma terms.",
+  "tagline": "Local function-calling for Shadow",
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://huggingface.co/google/functiongemma-270m-it",
+  "homepage": "https://huggingface.co/google/functiongemma-270m-it",
+  "license": "Gemma",
+  "category": "Models",
+  "icon": "ai-brain-01",
+  "iconDither": { "from": 240, "to": "transparent", "direction": "down" },
+  "tags": [
+    "models",
+    "huggingface",
+    "local",
+    "computer-use",
+    "function-calling",
+    "gemma"
+  ],
+  "keywords": [
+    "models",
+    "huggingface",
+    "local",
+    "computer-use",
+    "function-calling",
+    "gemma"
+  ],
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-functiongemma-status",
+      "name": "FunctionGemma Status",
+      "kind": "tool",
+      "config": {
+        "slug": "functiongemma.status",
+        "backend": "http",
+        "method": "GET",
+        "url": "core:/api/ext/@ryu/functiongemma/capability",
+        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Check whether the pinned FunctionGemma model files and local inference runtime are available.",
+        "input_schema": { "type": "object", "properties": {} }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:127.0.0.1"],
+  "permission_levels": [
+    {
+      "id": "functiongemma.view",
+      "label": "Can view local model status",
+      "description": "See whether the pinned FunctionGemma model and runtime are ready."
+    },
+    {
+      "id": "functiongemma.predict",
+      "label": "Can run local computer-use decisions",
+      "description": "Run a bounded local function-calling pass over Shadow's current action choices.",
+      "implies": ["functiongemma.view"]
+    }
+  ],
+  "sidecars": [
+    {
+      "name": "functiongemma",
+      "port": 8112,
+      "health_path": "/health",
+      "lazy": false,
+      "idle_stop_secs": 1800,
+      "process": {
+        "kind": "python",
+        "entry": "ryu_functiongemma",
+        "port_env": "RYU_FUNCTIONGEMMA_PORT",
+        "python_version": "3.11",
+        "pyproject_extra": "server",
+        "source": { "url": "", "format": "directory", "path": "sidecar" },
+        "model_snapshots": [
+          {
+            "source": "hf:google/functiongemma-270m-it",
+            "revision": "f54f8715e2b205f72c350f6efa748fd29fa19d98",
+            "dest_under_runtime": "models/functiongemma",
+            "files": [
+              "added_tokens.json",
+              "chat_template.jinja",
+              "config.json",
+              "generation_config.json",
+              "model.safetensors",
+              "special_tokens_map.json",
+              "tokenizer.json",
+              "tokenizer.model",
+              "tokenizer_config.json"
+            ]
+          }
+        ],
+        "env": {
+          "RYU_FUNCTIONGEMMA_HOST": "127.0.0.1",
+          "RYU_FUNCTIONGEMMA_MODEL_ROOT": "${RYU_RUNTIME_DIR}/models/functiongemma",
+          "HF_HOME": "${RYU_MODELS_DIR}/hf",
+          "HF_HUB_DISABLE_TELEMETRY": "1",
+          "HF_HUB_OFFLINE": "1",
+          "TRANSFORMERS_OFFLINE": "1",
+          "USE_TF": "0"
+        }
+      },
+      "http": {
+        "max_body_bytes": 131072,
+        "routes": [
+          { "path": "/health" },
+          { "path": "/capability", "permission": "functiongemma.view" },
+          {
+            "path": "/computer-use",
+            "method": "POST",
+            "permission": "functiongemma.predict"
+          }
+        ]
+      }
+    }
+  ],
+  "contributes": {
+    "computer_use_planners": [
+      {
+        "id": "functiongemma.base",
+        "label": "FunctionGemma · 270M",
+        "model_id": "google/functiongemma-270m-it",
+        "description": "Google's base 270M function-calling model; experimental for general desktop actions."
+      }
+    ]
+  }
+}

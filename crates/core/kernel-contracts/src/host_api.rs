@@ -52,7 +52,7 @@ use serde::Serialize;
 /// `1.y` (y ≥ x) kernel unchanged. The `ryu-plugin-ready` handshake carries this
 /// value as `hostApiVersion`; the host accepts a missing value (legacy) this
 /// major and only annotates it (no rejection).
-pub const HOST_API_VERSION: &str = "1.15.0";
+pub const HOST_API_VERSION: &str = "1.20.0";
 
 /// One method in the host↔plugin RPC surface — the row type of the single-sourced
 /// `method → capability → grant` table.
@@ -98,6 +98,22 @@ const fn m(
 /// `METHOD_CAPABILITY` (148 methods) and the Rust bridge's `view.action`
 /// (Rust-only). Serialised to `schemas/host-api.json` for the TS host to consume.
 pub const HOST_API_METHODS: &[HostApiMethod] = &[
+    m("files.read", "file.access", None, false, true),
+    m("files.write", "file.access", None, false, true),
+    m(
+        "authorization.issue",
+        "authorization.defer",
+        Some("authorization:defer"),
+        false,
+        false,
+    ),
+    m(
+        "authorization.check",
+        "authorization.defer",
+        Some("authorization:defer"),
+        false,
+        false,
+    ),
     // Verified current caller only; no caller-chosen identity or roster lookup.
     m(
         "identity.current",
@@ -261,9 +277,17 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
     ),
     m("widget.setState", "widget.state", None, false, true),
     m("widget.getGlobals", "widget.state", None, false, true),
-    // Generic companion → own-sidecar HTTP. The trusted host derives the target
-    // from the owning plugin id and Core's ext-proxy still enforces the manifest
-    // route allowlist, so the frame supplies only a relative path/method/body.
+    // Generic companion → sidecar HTTP. The trusted host derives the target from
+    // the owning plugin id and Core's ext-proxy still enforces the manifest route
+    // allowlist, so the frame supplies only a relative path/method/body.
+    //
+    // 1.18 (additive): an optional `app` names ANOTHER app's sidecar. The host
+    // then requires the reviewed per-target grant `app:http:<app id>` (a concrete
+    // scoped id, each one on the Gateway allowlist) from the approved set instead
+    // of `app:http`, which keeps covering only the caller's own sidecar. Holding a
+    // per-target grant unlocks this verb's capability; the host's target check is
+    // what confines it to that one app, and the path stays inside that app's
+    // `/api/ext/<app id>` mount.
     m("app.request", "app.http", Some("app:http"), false, true),
     // Generic application-room realtime. The trusted host owns the node token
     // and WebSocket URL; the companion receives only an opaque room connection.
@@ -322,6 +346,13 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
     // precision. Nothing here reads: an app can only ever describe itself.
     m(
         "assistant.publishContext",
+        "assistant.context",
+        Some("assistant:context"),
+        false,
+        true,
+    ),
+    m(
+        "ui.updateModelContext",
         "assistant.context",
         Some("assistant:context"),
         false,
@@ -445,7 +476,7 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
     ),
     // Conversation title write for turn-hook plugins (chat-title auto-rename).
     // `mode: "auto"` respects `title_custom`; `mode: "custom"` locks the title.
-    // Rust-bridge-only (`ts_host = false`): Deno turn hooks reach it via
+    // Rust-bridge-only (`ts_host = false`): sandboxed turn hooks reach it via
     // `PluginHookBridge`; it is not a TS app-host RPC.
     m(
         "conversation.setTitle",
@@ -484,6 +515,27 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         false,
         false,
     ),
+    // Owner-tier subscription inventory: every subscription provider with its
+    // saved accounts (labels may be email addresses) and cache-first per-account
+    // usage readings. Core additionally requires a verified node owner/admin
+    // caller; credentials, tokens and credential revisions never cross. Exposed
+    // to Companion frames and sidecars, so `ts_host = true`.
+    // `subscriptions:pin` is a RESERVED grant name for future turn-level account
+    // pinning; it deliberately has no row here and no Gateway allowlist entry.
+    m(
+        "subscriptions.list",
+        "subscriptions.read",
+        Some("subscriptions:read"),
+        false,
+        true,
+    ),
+    m(
+        "subscriptions.usage",
+        "subscriptions.read",
+        Some("subscriptions:read"),
+        false,
+        true,
+    ),
     // Read the Gateway-owned live charged-spend counters and configured caps.
     // Rust-bridge-only: Core keeps the Gateway admin credential out of app and
     // Companion processes and returns only the redacted budget snapshot.
@@ -494,12 +546,12 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         false,
         false,
     ),
-    // Read redacted Gateway audit rows for provider receipts and usage review.
-    // Rust-bridge-only: Core keeps the Gateway admin credential out of apps.
+    // Administrative audit records span callers and may include commands/errors.
+    // Separate grant approval and verified node administrator authority are required.
     m(
         "gateway.audit",
         "gateway.audit",
-        Some("usage:read"),
+        Some("usage:audit"),
         false,
         false,
     ),
@@ -549,6 +601,27 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         false,
         true,
     ),
+    m(
+        "execution.pause",
+        "execution.control",
+        Some("execution:control"),
+        false,
+        false,
+    ),
+    m(
+        "execution.resume",
+        "execution.control",
+        Some("execution:control"),
+        false,
+        false,
+    ),
+    m(
+        "execution.status",
+        "execution.control",
+        Some("execution:control"),
+        false,
+        false,
+    ),
     // Get-or-create a user-owned Space by NAME. Companion hosts implement this
     // host-directly with the authenticated Spaces API; headless hooks still use the
     // Rust bridge path. Keeping one method name lets both surfaces share the contract.
@@ -594,6 +667,50 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         false,
         true,
     ),
+    // Native Space databases are a distinct grant from app-owned documents:
+    // callers can create and update database documents, and run bounded read-only SQL.
+    m(
+        "spaces.createDatabase",
+        "spaces.database",
+        Some("spaces:database"),
+        false,
+        true,
+    ),
+    m(
+        "spaces.listDatabases",
+        "spaces.database",
+        Some("spaces:database"),
+        false,
+        true,
+    ),
+    m(
+        "spaces.getDatabase",
+        "spaces.database",
+        Some("spaces:database"),
+        false,
+        true,
+    ),
+    m(
+        "spaces.updateDatabase",
+        "spaces.database",
+        Some("spaces:database"),
+        false,
+        true,
+    ),
+    m(
+        "spaces.queryDatabase",
+        "spaces.database",
+        Some("spaces:database"),
+        false,
+        true,
+    ),
+    m(
+        "spaces.deleteDatabase",
+        "spaces.database",
+        Some("spaces:database"),
+        false,
+        true,
+    ),
     // Direct semantic retrieval through the authenticated Spaces/RAG endpoint. The
     // companion host owns the token and forwards only the bounded query; Core still
     // enforces Space visibility and tenancy on the underlying route.
@@ -619,9 +736,30 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         true,
     ),
     m(
+        "media.audio",
+        "media.generate",
+        Some("media:generate"),
+        false,
+        true,
+    ),
+    m(
         "media.tts",
         "media.generate",
         Some("media:generate"),
+        false,
+        true,
+    ),
+    m(
+        "media.ttsEngines",
+        "media.generate",
+        Some("media:generate"),
+        false,
+        true,
+    ),
+    m(
+        "media.ttsEngineInstall",
+        "voice.models.manage",
+        Some("voice:models:manage"),
         false,
         true,
     ),
@@ -1020,6 +1158,10 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         false,
         true,
     ),
+    // The two signing-secret methods are user-aware and bridge-only, never
+    // kernel-capability rows: Core's app host bridge dispatches them with the
+    // verified signed-in user, whose own workflow-edit / Gateway-configure
+    // permission is checked on top of this grant.
     m(
         "webhooks.secretGet",
         "webhooks.crud",
@@ -1393,6 +1535,13 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         true,
     ),
     m(
+        "notifications.appIcons",
+        "approvals.crud",
+        Some("approvals:crud"),
+        false,
+        true,
+    ),
+    m(
         "notifications.markRead",
         "approvals.crud",
         Some("approvals:crud"),
@@ -1401,6 +1550,20 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
     ),
     m(
         "notifications.ack",
+        "approvals.crud",
+        Some("approvals:crud"),
+        false,
+        true,
+    ),
+    m(
+        "notifications.archive",
+        "approvals.crud",
+        Some("approvals:crud"),
+        false,
+        true,
+    ),
+    m(
+        "notifications.unarchive",
         "approvals.crud",
         Some("approvals:crud"),
         false,
@@ -1565,8 +1728,11 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         true,
     ),
     // Safe Actions is a Core-owned protected surface. The sandboxed Companion can
-    // supply only a relative sub-path and a closed HTTP verb; the trusted desktop
-    // host fixes the mount at `/api/tools/plans` and keeps the node token.
+    // supply only a relative sub-path and a closed HTTP verb. Core's app host
+    // bridge dispatches it (user-aware and bridge-only, never a kernel-capability
+    // row): Core re-validates the path under the fixed `/api/tools/plans` mount and
+    // runs it with the verified signed-in user, whose Safe Actions role is checked
+    // on top of this grant and who is recorded as the reviewer.
     m(
         "safeActions.request",
         "safe-actions.manage",
@@ -1682,6 +1848,20 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         "skills.setTitle",
         "skills.crud",
         Some("skills:crud"),
+        false,
+        true,
+    ),
+    // Install (or update) a companion-only app bundle that the calling app built,
+    // e.g. App Studio's drag-and-drop output. Host-direct: the desktop host
+    // validates the bundle (companion runnables only, no sidecar/backend/MCP/hooks,
+    // id namespaced `com.local.<caller-segment>.*`) and posts it to Core's generic
+    // install-bundle sink, which leaves the app installed but DISABLED, so the
+    // user still reviews its grants when they enable it. Same grant the sidecar
+    // `plugins.installBundle` kernel capability uses.
+    m(
+        "apps.installBundle",
+        "plugins.install",
+        Some("plugins:install"),
         false,
         true,
     ),
@@ -1819,8 +1999,16 @@ mod tests {
         assert_eq!(grant_for("crypto.open"), Some("crypto:seal"));
         assert_eq!(grant_for("crypto.status"), Some("crypto:seal"));
         assert_eq!(grant_for("spaces.createDoc"), Some("spaces:docs"));
+        assert_eq!(grant_for("spaces.queryDatabase"), Some("spaces:database"));
+        assert_eq!(grant_for("spaces.deleteDatabase"), Some("spaces:database"));
         assert_eq!(grant_for("finetune.stream"), Some("finetune:runs"));
         assert_eq!(grant_for("view.action"), Some("views:actions"));
+        assert_eq!(grant_for("subscriptions.list"), Some("subscriptions:read"));
+        assert_eq!(grant_for("subscriptions.usage"), Some("subscriptions:read"));
+        // Reserved name only: no method may require the pin grant yet.
+        assert!(HOST_API_METHODS
+            .iter()
+            .all(|e| e.grant != Some("subscriptions:pin")));
         // Local host caps carry no Gateway grant.
         assert_eq!(grant_for("widget.setState"), None);
         assert_eq!(grant_for("ui.requestClose"), None);

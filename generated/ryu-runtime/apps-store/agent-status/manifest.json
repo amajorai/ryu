@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/agent-status",
   "name": "Agent Status",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "Splits your agent runs across three sidebar sections — Working, Needs input and Done — each row showing the project it belongs to.",
   "tagline": "See which agents are working, stuck, or done",
@@ -29,19 +29,6 @@
   "runnables": [],
   "permission_grants": ["ui:declarative-http"],
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "agent-status.chat",
-        "title": "Agent Status widget",
-        "description": "Agent Status chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["agent status widget"],
-        "examples": ["Show me a agent status widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "live_activities": [
       {
         "id": "working",

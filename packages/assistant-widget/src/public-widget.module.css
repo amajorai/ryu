@@ -1,0 +1,10 @@
+.inline {
+	height: 620px;
+}
+/* Hosts with a fixed bottom bar set --ryu-assistant-launcher-lift so the
+   launcher (and the panel it opens into) clears that bar. */
+.launcher {
+	right: 1rem;
+	bottom: calc(1rem + var(--ryu-assistant-launcher-lift, 0px));
+	z-index: 1000000001;
+}

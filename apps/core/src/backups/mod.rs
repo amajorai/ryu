@@ -8,7 +8,7 @@ pub use store::BackupService;
 
 use std::{
     fs::File,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -25,6 +25,69 @@ use store::{StoredDestination, StoredOperation};
 
 pub const MAX_APP_BYTES: usize = 8 * 1024 * 1024;
 const RECOVERY_FILE: &str = ".ryu-backup-recovery.json";
+/// `tmp/<owner>` scratch for backup and restore staging. It sits inside the data
+/// dir (never the shared system temp dir), is owner-only, is skipped by node
+/// snapshots (top-level `tmp`), and is emptied when the service opens so a crash
+/// mid-job cannot leave staging behind.
+const STAGING_OWNER: &str = "backups";
+
+pub(crate) fn staging_root(root: &Path) -> PathBuf {
+    ryu_sidecar_runtime::layout::tmp_dir_for(root, STAGING_OWNER)
+}
+
+/// A private (`0700`) per-job directory under [`staging_root`]. It holds only
+/// ciphertext (`snapshot.ryubak`) and, briefly, SQLite snapshot copies; the
+/// plaintext archive itself lives in an anonymous file (see [`plaintext_scratch`]).
+fn stage_dir(root: &Path, prefix: &str) -> Result<tempfile::TempDir> {
+    let parent = staging_root(root);
+    ryu_backup::archive::private_directory(&parent)?;
+    let stage = tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir_in(&parent)?;
+    ryu_backup::archive::private_directory(stage.path())?;
+    Ok(stage)
+}
+
+/// An anonymous, already-unlinked file for a plaintext archive: it has no path
+/// another process can open, and the OS reclaims it when the handle closes,
+/// including when Core is killed mid-job.
+fn plaintext_scratch(stage: &Path) -> Result<File> {
+    Ok(tempfile::tempfile_in(stage)?)
+}
+
+/// Remove staging a previous process left behind (crash, kill or power loss):
+/// everything under [`staging_root`] and any half-extracted `.ryu-restore-*`
+/// directory under `state/backups/recovered`. Runs once, before any job starts.
+pub(crate) fn sweep_stale_staging(root: &Path) {
+    let staging = staging_root(root);
+    if let Ok(entries) = std::fs::read_dir(&staging) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let removed = if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            if let Err(error) = removed {
+                tracing::warn!(path = %path.display(), "could not remove stale backup staging: {error}");
+            }
+        }
+    }
+    let recovered = store::state_dir(root).join("recovered");
+    if let Ok(entries) = std::fs::read_dir(&recovered) {
+        for entry in entries.flatten() {
+            let is_partial = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(".ryu-restore-"));
+            if is_partial && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                if let Err(error) = std::fs::remove_dir_all(entry.path()) {
+                    tracing::warn!("could not remove a partial recovery directory: {error}");
+                }
+            }
+        }
+    }
+}
 
 pub fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
@@ -458,13 +521,16 @@ impl BackupService {
                     service
                         .set_operation(&job.id, |job| job.status = "running".into())
                         .await?;
-                    let stage = tempfile::Builder::new().prefix("ryu-backup-").tempdir()?;
-                    let archive = stage.path().join("snapshot.zip");
-                    service
+                    let stage = stage_dir(&service.root, "ryu-backup-")?;
+                    // The plaintext archive never gets a name: it is written to an
+                    // anonymous file and dropped as soon as it is encrypted, before
+                    // the (possibly long) upload starts.
+                    let archive = service
                         .snapshot(
                             &state,
                             &job.scope,
-                            archive.clone(),
+                            plaintext_scratch(stage.path())?,
+                            stage.path().to_path_buf(),
                             payload,
                             s3.recovery_key(),
                         )
@@ -473,9 +539,10 @@ impl BackupService {
                     let output = encrypted.clone();
                     let key = *s3.recovery_key();
                     tokio::task::spawn_blocking(move || {
-                        let input = File::open(archive)?;
+                        let mut input = archive;
+                        input.rewind()?;
                         let length = input.metadata()?.len();
-                        encryption::encrypt(input, File::create(output)?, length, &key)
+                        encryption::encrypt(&mut input, File::create(output)?, length, &key)
                     })
                     .await??;
                     let file = encrypted.clone();
@@ -490,7 +557,7 @@ impl BackupService {
                         created_at: job.created_at.clone(),
                         bytes: std::fs::metadata(&encrypted)?.len(),
                         sha256,
-                        object_key: s3.object_key(&job.id)?,
+                        object_key: s3.scoped_object_key(&job.id, &job.scope)?,
                     };
                     s3.upload(&encrypted, &record)
                         .await
@@ -544,38 +611,47 @@ impl BackupService {
         Ok(operation)
     }
 
+    /// Write the scope's plaintext archive into `output` (an anonymous file) and
+    /// return it. `scratch` is the job's private stage, used only for transient
+    /// SQLite snapshot copies.
     async fn snapshot(
         &self,
         state: &ServerState,
         scope: &BackupScope,
-        output: PathBuf,
+        output: File,
+        scratch: PathBuf,
         payload: Option<Vec<u8>>,
         recovery_key: &[u8; 32],
-    ) -> Result<()> {
+    ) -> Result<File> {
         match scope {
             BackupScope::Node => {
                 let root = self.root.clone();
-                let recovery = ryu_crypto::seal_backup_master_key(&ryu_crypto::FieldCipher::new(
-                    recovery_key,
-                ))?;
+                let recovery_cipher = ryu_crypto::FieldCipher::new(recovery_key);
+                let recovery = ryu_crypto::seal_backup_master_key(&recovery_cipher)?;
+                // The current AND the retired keys: data still sealed under a
+                // retired key (resealed lazily) must open after a restore.
+                let key_bundle = ryu_crypto::custody::seal_key_bundle(&recovery_cipher)?;
                 tokio::task::spawn_blocking(move || {
-                    ryu_backup::archive::snapshot_tree(&root, &output, node_excluded)?;
-                    let mut zip = zip::ZipWriter::new_append(
-                        std::fs::OpenOptions::new()
-                            .read(true)
-                            .write(true)
-                            .open(output)?,
+                    let mut zip = zip::ZipWriter::new(output);
+                    ryu_backup::archive::snapshot_tree_into(
+                        &root,
+                        &mut zip,
+                        &scratch,
+                        node_excluded,
                     )?;
                     zip.start_file(
                         RECOVERY_FILE,
-                        zip::write::FileOptions::default().unix_permissions(0o600),
+                        zip::write::SimpleFileOptions::default().unix_permissions(0o600),
                     )?;
                     serde_json::to_writer(
                         &mut zip,
-                        &json!({ "version": 1, "sealedMasterKey": recovery }),
+                        &json!({
+                            "version": 2,
+                            "sealedMasterKey": recovery,
+                            "sealedKeyBundle": key_bundle,
+                        }),
                     )?;
-                    zip.finish()?.sync_all()?;
-                    Ok(())
+                    Ok(zip.finish()?)
                 })
                 .await?
             }
@@ -592,16 +668,15 @@ impl BackupService {
             BackupScope::App { .. } => {
                 let payload = payload.context("App snapshot payload is required")?;
                 tokio::task::spawn_blocking(move || {
-                    let mut zip = zip::ZipWriter::new(File::create(output)?);
+                    let mut zip = zip::ZipWriter::new(output);
                     zip.start_file(
                         "app.json",
-                        zip::write::FileOptions::default()
+                        zip::write::SimpleFileOptions::default()
                             .compression_method(zip::CompressionMethod::Deflated)
                             .unix_permissions(0o600),
                     )?;
                     zip.write_all(&payload)?;
-                    zip.finish()?.sync_all()?;
-                    Ok(())
+                    Ok(zip.finish()?)
                 })
                 .await?
             }
@@ -672,13 +747,18 @@ impl BackupService {
             let result: Result<Value> = async {
                 let _permit = service.work.acquire().await?;
                 service.set_operation(&job.id, |op| op.status = "running".into()).await?;
-                let stage = tempfile::Builder::new().prefix("ryu-recovery-").tempdir()?;
+                let stage = stage_dir(&service.root, "ryu-recovery-")?;
                 let encrypted = stage.path().join("snapshot.ryubak");
                 s3.download(&record, &encrypted).await.context("Backup download or checksum verification failed")?;
-                let archive = stage.path().join("snapshot.zip");
-                let output = archive.clone();
+                // Decrypt into an anonymous file, never a named plaintext zip.
+                let mut archive = plaintext_scratch(stage.path())?;
                 let key = *s3.recovery_key();
-                tokio::task::spawn_blocking(move || encryption::decrypt(File::open(encrypted)?, File::create(output)?, &key)).await??;
+                let archive = tokio::task::spawn_blocking(move || {
+                    encryption::decrypt(File::open(&encrypted)?, &mut archive, &key)?;
+                    std::fs::remove_file(&encrypted)?;
+                    archive.rewind()?;
+                    Ok::<_, anyhow::Error>(archive)
+                }).await??;
                 match &record.scope {
                     BackupScope::Space { .. } => {
                         let id = state.spaces.restore_backup(archive, owner, None).await?;
@@ -688,27 +768,19 @@ impl BackupService {
                         Ok(json!({ "spaceId": id, "needsReindex": index_result.is_err() }))
                     }
                     BackupScope::Node => {
-                        let recovery_parent = service.root.join("backups/recovered");
+                        let recovery_parent = store::state_dir(&service.root).join("recovered");
                         ryu_backup::archive::private_directory(&recovery_parent)?;
                         let destination = recovery_parent.join(&job.id);
                         let path = destination.clone();
                         tokio::task::spawn_blocking(move || {
-                            ryu_backup::archive::restore_tree(&archive, &path)?;
+                            ryu_backup::archive::restore_tree_from(archive, &path)?;
                             let recovery: Value = serde_json::from_slice(&std::fs::read(path.join(RECOVERY_FILE))?)?;
-                            let sealed = recovery.get("sealedMasterKey").and_then(Value::as_str).context("Backup is missing its master recovery key")?;
-                            ensure!(ryu_crypto::FieldCipher::is_sealed(sealed), "Invalid master recovery key");
-                            let master = ryu_crypto::FieldCipher::new(&key).open(sealed)?;
-                            encryption::parse_key(&master)?;
-                            let mut key_file = tempfile::NamedTempFile::new_in(&path)?;
-                            key_file.write_all(master.as_bytes())?;
-                            key_file.as_file().sync_all()?;
-                            key_file.persist(path.join("master.key"))?;
-                            Ok::<_, anyhow::Error>(())
+                            install_recovered_keys(&path, &recovery, &key)
                         }).await??;
                         Ok(json!({ "recoveryPath": destination, "restartRequired": true, "keychainMode": "off" }))
                     }
                     BackupScope::App { .. } => tokio::task::spawn_blocking(move || {
-                        let mut zip = zip::ZipArchive::new(File::open(archive)?)?;
+                        let mut zip = zip::ZipArchive::new(archive)?;
                         let mut entry = zip.by_name("app.json")?;
                         ensure!(entry.size() <= MAX_APP_BYTES as u64, "App snapshot exceeds 8 MiB");
                         let mut bytes = Vec::new();
@@ -758,17 +830,16 @@ impl BackupService {
             matches!(scope, BackupScope::App { .. }) && &record.scope == scope,
             "Backup does not belong to this app and tenant"
         );
-        let stage = tempfile::Builder::new()
-            .prefix("ryu-app-recovery-")
-            .tempdir()?;
+        let stage = stage_dir(&self.root, "ryu-app-recovery-")?;
         let encrypted = stage.path().join("snapshot.ryubak");
         s3.download(&record, &encrypted)
             .await
             .context("App backup download verification failed")?;
         let key = *s3.recovery_key();
         tokio::task::spawn_blocking(move || {
-            let mut archive = tempfile::tempfile()?;
+            let mut archive = plaintext_scratch(stage.path())?;
             encryption::decrypt(File::open(encrypted)?, &mut archive, &key)?;
+            archive.rewind()?;
             let mut zip = zip::ZipArchive::new(archive)?;
             let mut entry = zip.by_name("app.json")?;
             ensure!(
@@ -788,17 +859,65 @@ impl BackupService {
     }
 }
 
+/// Write the recovered node's keys into its folder. The recovered folder boots
+/// in file-key custody (the documented `RYU_KEYCHAIN=off` command), so every
+/// key is written owner-only (0600 in a 0700 dir), the same protection as any
+/// file-fallback node. A recovery file with a key bundle (version 2) restores
+/// the current key and every retired key, and rewrites the retired-key index
+/// in file custody; an older one carries only the master key.
+fn install_recovered_keys(path: &Path, recovery: &Value, key: &[u8; 32]) -> Result<()> {
+    let cipher = ryu_crypto::FieldCipher::new(key);
+    if let Some(sealed) = recovery.get("sealedKeyBundle").and_then(Value::as_str) {
+        ensure!(
+            ryu_crypto::FieldCipher::is_sealed(sealed),
+            "Invalid key recovery bundle"
+        );
+        let (current, retired) = ryu_crypto::custody::open_key_bundle(&cipher, sealed)?;
+        ryu_backup::archive::private_directory(&ryu_sidecar_runtime::layout::secrets_dir(path))?;
+        return ryu_crypto::custody::install_file_custody(path, &current, &retired);
+    }
+    let sealed = recovery
+        .get("sealedMasterKey")
+        .and_then(Value::as_str)
+        .context("Backup is missing its master recovery key")?;
+    ensure!(
+        ryu_crypto::FieldCipher::is_sealed(sealed),
+        "Invalid master recovery key"
+    );
+    let master = cipher.open(sealed)?;
+    encryption::parse_key(&master)?;
+    let secrets = ryu_sidecar_runtime::layout::secrets_dir(path);
+    ryu_backup::archive::private_directory(&secrets)?;
+    let mut key_file = tempfile::NamedTempFile::new_in(&secrets)?;
+    key_file.write_all(master.as_bytes())?;
+    key_file.as_file().sync_all()?;
+    key_file.persist(ryu_sidecar_runtime::layout::secret_path(path, "master.key"))?;
+    Ok(())
+}
+
+/// Data-dir-relative paths a node snapshot never carries: the backup state
+/// itself, chat rewind snapshots (they copy project files keyed by local folder
+/// paths, so they are machine-local, like a cache), and the key custody files
+/// (the master key travels sealed inside the recovery file instead).
+const NODE_EXCLUDED_PATHS: &[&str] = &[
+    "state/backups",
+    "state/chat-checkpoints",
+    "secrets/master.key",
+    "secrets/memory.key",
+];
+
 fn node_excluded(path: &Path) -> bool {
     let name = path
         .file_name()
         .and_then(|v| v.to_str())
         .unwrap_or_default();
+    let rel = path.to_string_lossy().replace('\\', "/");
     crate::data_path::is_backup_excluded(path)
+        || NODE_EXCLUDED_PATHS.contains(&rel.as_str())
         || (path.components().count() == 1
             && matches!(
                 name,
-                "backups"
-                    | "cache"
+                "cache"
                     | "caches"
                     | "logs"
                     | "tmp"
@@ -807,8 +926,6 @@ fn node_excluded(path: &Path) -> bool {
                     | "venvs"
                     | "engines"
                     | "bin"
-                    | "master.key"
-                    | "memory.key"
                     | RECOVERY_FILE
             ))
         || matches!(name, "node_modules" | ".venv" | "venv" | "__pycache__")

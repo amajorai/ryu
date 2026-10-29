@@ -1,5 +1,9 @@
-import type { ChatStatus, UIMessage } from "ai";
+import type { RyuJsonValue } from "@ryu/app-host/rpc";
+import { isNativeObjectLike } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { ChatStatus, DynamicToolUIPart, UIMessage } from "ai";
 import type React from "react";
+import { z } from "zod";
+import type { AgentUI } from "./agent-ui/agent-ui.tsx";
 import type { AnswerNowControl } from "./answer-now.ts";
 import type { GoalCompletion } from "./goal-message.ts";
 import type {
@@ -7,6 +11,7 @@ import type {
 	ComposerMenuItem,
 } from "./input/composer-menu.tsx";
 import type { SuggestionItem } from "./input/suggestions.tsx";
+import type { InputBarProps } from "./input-bar.tsx";
 import type { LinkPreviewResolvers } from "./link-preview.tsx";
 import type { MemoryCitation } from "./memory-citations.ts";
 import type { MessageReactionBucket } from "./message-reactions.tsx";
@@ -16,7 +21,11 @@ import type {
 	QuestionConfig,
 } from "./question/question-prompt.tsx";
 import type { StatsUsageSnapshot } from "./stats-model.ts";
+import type { SuggestedTask } from "./tools/suggested-task.ts";
+import type { SuggestedTaskStartMode } from "./tools/suggested-task-card.tsx";
 import type { FileEditUndoPlan } from "./turn-end-cards.ts";
+import { nativeSdkSchemaAdmits } from "./utils/native-sdk-admission.ts";
+import type { WorkflowResumeHandler } from "./workflow-run-part.tsx";
 
 export type InputSuggestions =
 	| SuggestionItem[]
@@ -26,7 +35,9 @@ export type InputSuggestions =
 			itemClassName?: string;
 	  };
 
-export type AgentUiSubmit = (value: unknown) => void | Promise<void>;
+export type AgentUiSubmit = NonNullable<
+	React.ComponentProps<typeof AgentUI>["onSubmit"]
+>;
 
 export interface MentionItem {
 	/** Accent used for the inline token when the mention belongs to an app. */
@@ -60,7 +71,7 @@ export interface ChatClassNames {
 }
 
 export interface CustomToolRendererProps {
-	input: Record<string, unknown>;
+	input: DynamicToolUIPart["input"];
 	name: string;
 	output: unknown | undefined;
 	status: "pending" | "streaming" | "success" | "error";
@@ -93,12 +104,13 @@ export interface WidgetCsp {
  *  `_meta`, and maps Apps-SDK names (`structuredContent -> toolOutput`, etc.). */
 export interface WidgetAvailableData {
 	approvedGrants: string[];
+	conversationId?: string | null;
 	displayMode?: "inline" | "fullscreen" | "pip";
 	initialWidgetState?: unknown;
 	instanceId: string;
-	invoked?: string;
-	invoking?: string;
-	maxHeight?: number;
+	invoked?: string | null;
+	invoking?: string | null;
+	maxHeight?: number | null;
 	serverId: string;
 	templateUri: string;
 	toolCallId: string;
@@ -125,27 +137,50 @@ export interface WidgetMessageAttribution {
 	widget_instance_id: string;
 }
 
+const widgetNativeTextSchema = z.string();
+interface NativeWidgetAttributionLookup {
+	readonly metadata?: UIMessage["metadata"];
+	readonly originServer?: UIMessage["metadata"];
+	readonly source?: UIMessage["metadata"];
+	readonly widgetInstanceId?: UIMessage["metadata"];
+}
+interface NativeWidgetMetadataLookup {
+	readonly origin_server?: UIMessage["metadata"];
+	readonly source?: UIMessage["metadata"];
+	readonly widget_instance_id?: UIMessage["metadata"];
+}
+const widgetMetadataObjectSchema = z.custom<NativeWidgetMetadataLookup | null>(
+	(value) => {
+		if (value === null) {
+			return true;
+		}
+		return isNativeObjectLike(value);
+	}
+);
+function widgetHasText(value: UIMessage["metadata"]): value is string {
+	return nativeSdkSchemaAdmits(widgetNativeTextSchema, value);
+}
 /** Read the server-verified widget provenance carried by a user message. */
-export function getWidgetMessageAttribution(
-	message: UIMessage
-): WidgetMessageAttribution | null {
-	const value = message as UIMessage & {
-		metadata?: unknown;
-		originServer?: unknown;
-		source?: unknown;
-		widgetInstanceId?: unknown;
-	};
+export function getWidgetMessageAttribution<
+	Message extends Pick<UIMessage, "metadata">,
+>(message: Message): WidgetMessageAttribution | null {
+	// SAFETY: UIMessage metadata and host legacy fields are opaque SDK values.
+	// This erased lookup view asserts no field presence/type or full wire DTO;
+	// it keeps the original lazy native property reads and getter receivers.
+	const value = message as Message & NativeWidgetAttributionLookup;
+	// SAFETY: The existing native object/null guards own their individual reads; metadata is intentionally read again so live getters stay live. This optional lookup view keeps every field opaque until the scalar provenance checks below, with no decoded DTO claim.
 	const metadata =
-		typeof value.metadata === "object" && value.metadata !== null
-			? (value.metadata as Record<string, unknown>)
+		nativeSdkSchemaAdmits(widgetMetadataObjectSchema, value.metadata) &&
+		value.metadata !== null
+			? (value.metadata as NativeWidgetMetadataLookup)
 			: null;
 	const source = metadata?.source ?? value.source;
 	const instanceId = metadata?.widget_instance_id ?? value.widgetInstanceId;
 	const originServer = metadata?.origin_server ?? value.originServer;
 	if (
 		source !== "widget" ||
-		typeof instanceId !== "string" ||
-		typeof originServer !== "string" ||
+		!widgetHasText(instanceId) ||
+		!widgetHasText(originServer) ||
 		instanceId.length === 0 ||
 		originServer.length === 0
 	) {
@@ -159,7 +194,9 @@ export function getWidgetMessageAttribution(
 }
 
 /** Stable comparison key used to keep widget labels inside their own run. */
-export function widgetMessageProvenanceKey(message: UIMessage): string | null {
+export function widgetMessageProvenanceKey<
+	Message extends Pick<UIMessage, "metadata">,
+>(message: Message): string | null {
 	const attribution = getWidgetMessageAttribution(message);
 	return attribution
 		? `${attribution.source}:${attribution.origin_server}:${attribution.widget_instance_id}`
@@ -174,12 +211,7 @@ export type WidgetRendererComponent = React.ComponentType<{
 }>;
 
 export interface ChatSlots {
-	InputBar: React.ComponentType<{
-		onSend: (message: { role: "user"; content: string }) => void;
-		status: ChatStatus;
-		onStop: () => void;
-		[key: string]: unknown;
-	}>;
+	InputBar: React.ComponentType<InputBarProps>;
 	ToolRenderer: React.ComponentType<{
 		agentMessageContext?: AgentMessageContext;
 		part: {
@@ -236,15 +268,18 @@ export interface ChatSlots {
 }
 
 /**
- * Replaces the normal composer with a voice-mode surface while a live call is
- * active. The surface receives the exact composer node AgentChat owns, so draft
- * state and send behavior stay shared with the regular chat path.
+ * Morphs the composer into a live voice call while one is active. AgentChat
+ * hands `liveCall` to its own InputBar, so the call takes the text field's
+ * place (keeping the "+" menu) and the draft survives until the call ends.
+ * `messages` are the call's live turns, appended to the transcript so the
+ * conversation reads as normal chat while the call runs.
  */
 export type ChatVoiceMode =
 	| { active: false }
 	| {
 			active: true;
-			render: (composer: React.ReactNode) => React.ReactNode;
+			liveCall: NonNullable<InputBarProps["liveCall"]>;
+			messages?: UIMessage[];
 	  };
 
 export interface ModelOption {
@@ -257,7 +292,7 @@ export interface ModelOption {
  *  (`contributes.message_actions`), resolved by the shell and passed in
  *  presentationally. Blocks never fetches the contributions feed. */
 export interface ContributedMessageAction {
-	args?: Record<string, unknown>;
+	args?: Record<string, RyuJsonValue>;
 	capability?: string;
 	icon?: string;
 	id: string;
@@ -278,7 +313,7 @@ export interface ContributedMessageAction {
  * plugin (`contributes.selection_actions`). Blocks renders the declaration and
  * forwards the selected text; the host owns dispatch. */
 export interface ContributedSelectionAction {
-	args?: Record<string, unknown>;
+	args?: Record<string, RyuJsonValue>;
 	capability?: string;
 	icon?: string;
 	id: string;
@@ -296,6 +331,8 @@ export interface MessageActionContext {
 
 /** The plain text a contributed selection action receives. */
 export interface SelectionActionContext {
+	/** What the user typed into the selection's annotate box, when anything. */
+	note?: string;
 	text: string;
 }
 
@@ -357,8 +394,14 @@ export interface AgentChatProps {
 	composerDisabled?: boolean;
 	/** Small host-owned action strip rendered below the shared composer. */
 	composerFooter?: React.ReactNode;
+	/** Host-owned context attachments shown above the editable composer. */
+	composerHeader?: React.ReactNode;
 	/** Searchable directory rows shared by the composer `+` menu and `@` tokens. */
 	composerMenuGroups?: ComposerMenuGroup[];
+	/** The user's predicted next message (Composer Predictions plugin), shown
+	 * as Tab-to-accept ghost text once a turn settles. Accepting only fills the
+	 * draft; it is never sent automatically. */
+	composerPrediction?: string;
 	/** An active human-input card that temporarily replaces this chat's composer. */
 	composerPrompt?: {
 		content: React.ReactNode;
@@ -384,6 +427,8 @@ export interface AgentChatProps {
 	density?: "comfortable" | "compact";
 	/** Project-scoped saved drafts exposed by the host composer. */
 	draftControls?: import("./input-bar.tsx").ComposerDraftControls;
+	/** Append one host-provided text block to the composer without sending it. */
+	draftInsertion?: { id: number; text: string };
 	/** Rendered below the composer in the centered empty state (e.g. a recent
 	 * chats list, Codex-style). Ignored once the thread has messages. */
 	emptyStateFooter?: React.ReactNode;
@@ -434,6 +479,12 @@ export interface AgentChatProps {
 			onClick: () => void;
 		}[];
 	};
+	/** Durable thread events rendered as separator markers after the transcript. */
+	historyNotices?: {
+		id: string;
+		title: string;
+		description?: string;
+	}[];
 	/** Compact host-owned notice rendered inside the composer frame. */
 	infoBar?: import("./input-bar.tsx").InputBarInfoBar;
 	initialScrollBehavior?: "bottom" | "top";
@@ -486,6 +537,8 @@ export interface AgentChatProps {
 	 * still OWNS the text; the callback only observes it. Debounce on your side —
 	 * this fires per keystroke. */
 	onDraftChange?: (draft: string) => void;
+	/** Clear a one-shot draft insertion after the composer applies it. */
+	onDraftInsertionConsumed?: (id: number) => void;
 	/** Edit a previously-sent user message into a new version (ChatGPT/Claude-style
 	 * branching); receives the message id and the new text. When omitted, no edit
 	 * affordance is shown. */
@@ -509,9 +562,10 @@ export interface AgentChatProps {
 	/** Open a resolved @ mention through the host's navigation surface. */
 	onOpenMention?: (item: MentionItem) => void;
 	/** Quote a text selection in a message. When provided, selecting message text
-	 * surfaces a floating "Quote" button; clicking it calls this with the selected
-	 * plain text (the surface stashes it as the pending `quote`). */
-	onQuote?: (text: string) => void;
+	 * surfaces a floating annotate box whose "Quote" action calls this with the
+	 * selected plain text and the typed note, if any (the surface stashes the text
+	 * as the pending `quote` and may seed the composer with the note). */
+	onQuote?: (text: string, note?: string) => void;
 	/** Regenerate an assistant reply as a new version; receives the assistant
 	 * message id. When omitted, no regenerate button is shown. */
 	onRegenerateMessage?: (messageId: string) => void;
@@ -532,6 +586,10 @@ export interface AgentChatProps {
 	) => void;
 	/** Review current changes only in files touched by the completed turn. */
 	onReviewFileEdits?: (paths: string[]) => void;
+	/** Rewind code and/or conversation to just before a user message (Claude
+	 * Code-style checkpoints); receives the message id and its text. When
+	 * omitted, no rewind affordance is shown. */
+	onRewindMessage?: (messageId: string, text: string) => void;
 	/** Called after a seed has been applied so a host can clear its one-shot value. */
 	onSeedDraftConsumed?: () => void;
 	/** Switch the active version at a branch point; receives the target version's
@@ -547,7 +605,7 @@ export interface AgentChatProps {
 	onUndoFileEdits?: (plan: FileEditUndoPlan) => Promise<void>;
 	/** Resume a workflow suspended at a human-input gate. The host owns the
 	 *  Core-backed API; blocks only renders and forwards the response payload. */
-	onWorkflowResume?: (runId: string, payload: string) => Promise<unknown>;
+	onWorkflowResume?: WorkflowResumeHandler;
 	/** Lazy metadata/file loaders used by link hover previews. */
 	previewResolvers?: LinkPreviewResolvers;
 
@@ -559,6 +617,18 @@ export interface AgentChatProps {
 			toolCallId?: string;
 			question: QuestionConfig;
 			answer: QuestionAnswer;
+		}) => void;
+		/**
+		 * Every answer for one Question card, once its last question is answered.
+		 * `async` cards did not block their turn: the host delivers their answers
+		 * as a user message (see `formatAsyncQuestionAnswer`) rather than to the
+		 * tool call. Supplying this also hides the card as soon as it is answered.
+		 */
+		onAnswers?: (payload: {
+			answers: QuestionAnswer[];
+			async: boolean;
+			questions: QuestionConfig[];
+			toolCallId?: string;
 		}) => void;
 	};
 	/** Pending quote shown inside the composer, above the textarea. The surface
@@ -580,11 +650,23 @@ export interface AgentChatProps {
 	statsModelName?: string;
 	/** Enabled-plugin gate for the host-rendered session statistics feature. */
 	statsPluginEnabled?: boolean;
+	/** Provider or agent id keying the prompt-cache TTL when a turn's usage omits one. */
+	statsProviderHint?: string;
 	/** Active provider's normalized subscription usage, when Core exposes it. */
 	statsUsage?: StatsUsageSnapshot | null;
 	status: ChatStatus;
 	style?: React.CSSProperties;
 	suggestions?: InputSuggestions;
+	/** Host actions for the built-in suggested next task (`tasks.suggest`). When
+	 * set, the newest finished turn's suggestion, if it made one, shows as a card
+	 * above the composer. Most turns make none, so usually nothing shows. */
+	taskSuggestions?: {
+		canStartInWorktree?: boolean;
+		/** Absent when the Drafts app is unavailable; the card then hides the
+		 * Save to Drafts button. */
+		onSaveDraft?: (task: SuggestedTask) => Promise<void>;
+		onStart: (task: SuggestedTask, mode: SuggestedTaskStartMode) => void;
+	};
 	toolRenderers?: Record<string, React.ComponentType<CustomToolRendererProps>>;
 	/** Version-pager data keyed by message id: how many versions exist at this
 	 * branch point, which is active, and the ordered sibling ids to step through. */

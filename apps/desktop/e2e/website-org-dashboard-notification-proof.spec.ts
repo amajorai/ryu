@@ -24,6 +24,8 @@ test("proves the org dashboard Inbox bell rolls its unread count", async ({
 		fullPage: true,
 		path:
 			process.env.RYU_WEB_PROOF_SCREENSHOT ??
-			"/private/tmp/ryu-website-org-dashboard-notification-proof.png",
+			test
+				.info()
+				.outputPath("ryu-website-org-dashboard-notification-proof.png"),
 	});
 });

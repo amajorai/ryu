@@ -1,3 +1,5 @@
+import { promptEditCacheWarning } from "@ryu/blocks/desktop/agent-elements/prompt-cache.ts";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	createContext,
 	type ReactNode,
@@ -9,6 +11,10 @@ import {
 	useState,
 } from "react";
 import { sileo } from "sileo";
+import {
+	type PromptCacheConfirmation,
+	PromptCacheConfirmDialog,
+} from "@/src/components/chat/PromptCacheConfirmDialog.tsx";
 import { useActiveNodeGetter } from "@/src/hooks/useActiveNode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -25,13 +31,27 @@ import {
 	type SkillTargetChoice,
 	SkillTargetDialog,
 } from "./SkillTargetDialog.tsx";
+import { skillDisplayName, skillSetChangeLabels } from "./skill-set-change.ts";
 
 export interface SkillDistributionFlow {
+	/**
+	 * Ask before a change to the node's enabled skill set (enable, disable,
+	 * install). Core folds that set into the system prompt of every thread that
+	 * loads skills, so the change resets each one's prompt cache once. Resolves
+	 * true at once when no skill is named, false when the user cancels.
+	 */
+	confirmSkillSetChange(skillNames: readonly string[]): Promise<boolean>;
 	distributeInstalledSkill(
-		skillId: string
+		skillId: string,
+		target?: ApiTarget
 	): Promise<SkillDistributionResult | null>;
+	/** Install a catalog skill after the prompt-cache confirmation; null when cancelled. */
 	installCatalogSkill(input: {
 		id: string;
+		/** Display name for the confirmation; the id's last segment otherwise. */
+		name?: string;
+		/** The caller already asked with `confirmSkillSetChange`; do not ask again. */
+		promptCacheConfirmed?: boolean;
 		source?: string;
 		target?: ApiTarget;
 	}): Promise<SkillInstallResult | null>;
@@ -98,6 +118,7 @@ function targetDisplayName(targetId: string, snapshot?: SkillTargetsSnapshot) {
 
 export function distributionNotices(
 	result: SkillDistributionResult,
+	tl: LiteralMessage,
 	snapshot?: SkillTargetsSnapshot
 ): DistributionNotice[] {
 	if (result.targets.length === 0) {
@@ -116,7 +137,10 @@ export function distributionNotices(
 	if (successful.length > 0) {
 		notices.push({
 			kind: "success",
-			text: `Installed in Ryu. Added to ${successful.length} ${successful.length === 1 ? "agent" : "agents"}.`,
+			text: tl(
+				"Installed in Ryu. Added to {agentCount, plural, one {# agent} other {# agents}}.",
+				{ agentCount: successful.length }
+			),
 		});
 	}
 	for (const target of result.targets) {
@@ -124,12 +148,14 @@ export function distributionNotices(
 		if (target.status === "conflict") {
 			notices.push({
 				kind: "error",
-				text: `${name} has a different copy. Ryu left it unchanged.`,
+				text: tl("{name} has a different copy. Ryu left it unchanged.", {
+					name,
+				}),
 			});
 		} else if (target.status === "failed") {
 			notices.push({
 				kind: "error",
-				text: `Installed in Ryu. ${name} could not be updated.`,
+				text: tl("Installed in Ryu. {name} could not be updated.", { name }),
 			});
 		}
 	}
@@ -142,12 +168,36 @@ const SkillDistributionContext = createContext<SkillDistributionFlow | null>(
 
 export function useSkillDistributionFlow(): SkillDistributionFlow {
 	const value = useContext(SkillDistributionContext);
-	if (!value) {
+	const getActiveNode = useActiveNodeGetter();
+	const callerFlow = useMemo<SkillDistributionFlow | null>(() => {
+		if (!value) {
+			return null;
+		}
+		const callerTarget = (): ApiTarget => {
+			const node = getActiveNode();
+			return {
+				url: node.url,
+				token: node.token ?? null,
+				userJwt: node.userJwt ?? null,
+			};
+		};
+		return {
+			confirmSkillSetChange: value.confirmSkillSetChange,
+			installCatalogSkill: (input) =>
+				value.installCatalogSkill({
+					...input,
+					target: input.target ?? callerTarget(),
+				}),
+			distributeInstalledSkill: (skillId, target) =>
+				value.distributeInstalledSkill(skillId, target ?? callerTarget()),
+		};
+	}, [value, getActiveNode]);
+	if (!callerFlow) {
 		throw new Error(
 			"useSkillDistributionFlow must be used within SkillDistributionProvider"
 		);
 	}
-	return value;
+	return callerFlow;
 }
 
 export function SkillDistributionProvider({
@@ -155,7 +205,13 @@ export function SkillDistributionProvider({
 	services = productionServices,
 }: SkillDistributionProviderProps) {
 	const getActiveNode = useActiveNodeGetter();
+	const tl = useLiteralMessages();
 	const [dialog, setDialog] = useState<DialogState | null>(null);
+	const [cacheConfirmation, setCacheConfirmation] =
+		useState<PromptCacheConfirmation | null>(null);
+	const pendingCacheConfirmRef = useRef<((apply: boolean) => void) | null>(
+		null
+	);
 	const [announcements, setAnnouncements] = useState<string[]>([]);
 	const pendingSelectionRef = useRef<PendingSelection | null>(null);
 	const openingRef = useRef(false);
@@ -173,7 +229,7 @@ export function SkillDistributionProvider({
 
 	const announce = useCallback(
 		(result: SkillDistributionResult, snapshot?: SkillTargetsSnapshot) => {
-			const notices = distributionNotices(result, snapshot);
+			const notices = distributionNotices(result, tl, snapshot);
 			setAnnouncements(notices.map((notice) => notice.text));
 			for (const notice of notices) {
 				if (notice.kind === "error") {
@@ -183,7 +239,7 @@ export function SkillDistributionProvider({
 				}
 			}
 		},
-		[]
+		[tl]
 	);
 
 	const requestChoice = useCallback(
@@ -255,22 +311,64 @@ export function SkillDistributionProvider({
 			cancelTargetFetchesRef.current.clear();
 			pendingSelectionRef.current?.resolve(null);
 			pendingSelectionRef.current = null;
+			pendingCacheConfirmRef.current?.(false);
+			pendingCacheConfirmRef.current = null;
 		};
+	}, []);
+
+	const confirmSkillSetChange = useCallback<
+		SkillDistributionFlow["confirmSkillSetChange"]
+	>((skillNames) => {
+		const warning = promptEditCacheWarning(
+			skillSetChangeLabels(skillNames),
+			"skill-threads"
+		);
+		if (!warning) {
+			return Promise.resolve(true);
+		}
+		// The dialog is modal, so a second request can only come from code; it
+		// must not replace the question the user is answering.
+		if (pendingCacheConfirmRef.current || !mountedRef.current) {
+			return Promise.resolve(false);
+		}
+		return new Promise<boolean>((resolve) => {
+			pendingCacheConfirmRef.current = resolve;
+			setCacheConfirmation(warning);
+		});
+	}, []);
+
+	const closeCacheConfirmation = useCallback((apply: boolean) => {
+		const pending = pendingCacheConfirmRef.current;
+		pendingCacheConfirmRef.current = null;
+		setCacheConfirmation(null);
+		pending?.(apply);
 	}, []);
 
 	const installCatalogSkill = useCallback<
 		SkillDistributionFlow["installCatalogSkill"]
 	>(
 		async (input) => {
-			const { target: explicitTarget, ...catalogInput } = input;
+			const {
+				name,
+				promptCacheConfirmed,
+				target: explicitTarget,
+				...catalogInput
+			} = input;
+			const target = explicitTarget ?? activeTarget();
+			// Installing activates the skill, which changes the skills block of
+			// every thread that loads skills.
+			const confirmed =
+				promptCacheConfirmed === true ||
+				(await confirmSkillSetChange([
+					skillDisplayName(catalogInput.id, name),
+				]));
+			if (!confirmed) {
+				return null;
+			}
 			try {
-				const result = await services.install(
-					explicitTarget ?? activeTarget(),
-					catalogInput,
-					{
-						promptForTargets: true,
-					}
-				);
+				const result = await services.install(target, catalogInput, {
+					promptForTargets: true,
+				});
 				if (result.distribution) {
 					announce(result.distribution);
 				}
@@ -281,10 +379,8 @@ export function SkillDistributionProvider({
 				}
 			}
 
-			// The node may have changed while the precondition request was in flight.
-			// Open and retry against one fresh target so the dialog never describes a
-			// different computer from the one receiving the explicit selection.
-			const target = explicitTarget ?? activeTarget();
+			// Keep the invoking node and credentials through the precondition,
+			// selection dialog, and retry even if the active tab changes.
 			const selected = await requestChoice(target, "Install");
 			if (!selected) {
 				return null;
@@ -299,14 +395,14 @@ export function SkillDistributionProvider({
 			}
 			return result;
 		},
-		[activeTarget, announce, requestChoice, services]
+		[activeTarget, announce, confirmSkillSetChange, requestChoice, services]
 	);
 
 	const distributeInstalledSkill = useCallback<
 		SkillDistributionFlow["distributeInstalledSkill"]
 	>(
-		async (skillId) => {
-			const target = activeTarget();
+		async (skillId, explicitTarget) => {
+			const target = explicitTarget ?? activeTarget();
 			const selected = await requestChoice(target, "Export");
 			if (!selected) {
 				return null;
@@ -323,8 +419,12 @@ export function SkillDistributionProvider({
 	);
 
 	const flow = useMemo<SkillDistributionFlow>(
-		() => ({ distributeInstalledSkill, installCatalogSkill }),
-		[distributeInstalledSkill, installCatalogSkill]
+		() => ({
+			confirmSkillSetChange,
+			distributeInstalledSkill,
+			installCatalogSkill,
+		}),
+		[confirmSkillSetChange, distributeInstalledSkill, installCatalogSkill]
 	);
 
 	return (
@@ -347,6 +447,11 @@ export function SkillDistributionProvider({
 				onConfirm={(choice) => closeDialog(choice)}
 				open={dialog !== null}
 				targets={dialog?.snapshot.targets ?? []}
+			/>
+			<PromptCacheConfirmDialog
+				confirmation={cacheConfirmation}
+				onApply={() => closeCacheConfirmation(true)}
+				onCancel={() => closeCacheConfirmation(false)}
 			/>
 		</SkillDistributionContext.Provider>
 	);

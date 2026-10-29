@@ -1,0 +1,89 @@
+{
+  "tags": ["automation", "desktop", "computer-use", "macos"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/codex-computer-use",
+  "homepage": "https://github.com/tmustier/codex-computer-use-mcp",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "license": "MIT",
+  "id": "@ryu/codex-computer-use",
+  "name": "Codex Computer Use",
+  "version": "0.1.14",
+  "stability": "experimental",
+  "description": "Drives OpenAI's signed Codex Computer Use engine, the one the ChatGPT macOS app installs, as an optional provider for Ryu's swappable computer.control layer. Actions go to one target app in the background, through its accessibility tree and screenshots, without moving your cursor. Launched from the pinned, unofficial `codex-computer-use-mcp@0.5.2` stdio bridge. Requires macOS, Node.js 22+, and the ChatGPT app with Computer Use set up; Ryu does not install ChatGPT. Unofficial: a ChatGPT update can break it.",
+  "icon": "cursor-01",
+  "iconDither": { "from": 160, "to": "transparent", "direction": "down" },
+  "tagline": "Let agents use OpenAI's Codex computer-use engine",
+  "keywords": ["automation", "desktop", "computer-use", "codex", "macos"],
+  "category": "Automation",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "provides": [
+    {
+      "capability": "computer.control",
+      "version": "1.0.0",
+      "title": "Computer",
+      "selectable": true,
+      "target": "local-machine",
+      "tools": {
+        "computer.capture": {
+          "tool": "codex_cu.get_app_state",
+          "arg_defaults": { "app": "pref:codex-computer-use.app" },
+          "adapter": { "code_file": "adapters/computer.capture.js" }
+        },
+        "computer.click": {
+          "tool": "codex_cu.click",
+          "arg_defaults": { "app": "pref:codex-computer-use.app" },
+          "adapter": { "code_file": "adapters/computer.click.js" }
+        },
+        "computer.type": {
+          "tool": "codex_cu.type_text",
+          "arg_defaults": { "app": "pref:codex-computer-use.app" },
+          "adapter": { "code_file": "adapters/computer.type.js" }
+        },
+        "computer.key": {
+          "tool": "codex_cu.press_key",
+          "arg_defaults": { "app": "pref:codex-computer-use.app" },
+          "adapter": { "code_file": "adapters/computer.key.js" }
+        }
+      }
+    }
+  ],
+  "permission_grants": ["mcp:codex_cu", "tool:execute"],
+  "contributes": {
+    "settings_tabs": [
+      {
+        "id": "codex-computer-use.settings",
+        "title": "Codex Computer Use",
+        "scope": "node",
+        "fields": [
+          {
+            "type": "text",
+            "pref_key": "codex-computer-use.app",
+            "label": "Target app",
+            "description": "The app the computer.* verbs act on: an app name, full app path, or bundle identifier, for example `Calculator` or `com.apple.TextEdit`. The Codex engine works on one app at a time, and Ryu's canonical verbs do not name an app, so they need a target. Until you set one, every verb fails and asks for it. To work across several apps in one task, call the `codex_cu.*` tools directly; each takes its own `app`.",
+            "placeholder": "Calculator",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "mcp_servers": {
+    "codex_cu": {
+      "command": "npx",
+      "args": ["-y", "codex-computer-use-mcp@0.5.2"],
+      "description": "Unofficial stdio bridge to the Codex Computer Use engine that the ChatGPT macOS app installs. It exposes the ten official methods as typed tools (list_apps, get_app_state, click, perform_secondary_action, set_value, select_text, scroll, drag, press_key, type_text) plus computer_use_status. It only runs OpenAI-signed binaries (Team ID 2DC432GLL2) and runs no model of its own. Requires macOS, Node.js 22+, and the ChatGPT app with Computer Use set up; Screen Recording and Accessibility permissions still apply."
+    }
+  }
+}

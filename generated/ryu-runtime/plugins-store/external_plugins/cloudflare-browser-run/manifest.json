@@ -3,6 +3,7 @@
   "id": "@ryu/cloudflare-browser-run",
   "name": "Cloudflare Browser Run",
   "version": "0.1.0",
+  "stability": "experimental",
   "external": true,
   "description": "Hosted Browser Run quick actions over Cloudflare's remote OAuth MCP server. Adds URL-scoped navigate, snapshot, and screenshot verbs to Ryu's swappable browser.control layer; the full Browser Run MCP tool set remains available under cloudflare.*.",
   "tagline": "Hosted browser automation on Cloudflare's edge",

@@ -75,9 +75,3 @@ export const BASE_CLOUD_TIER: CloudTier = {
 		"Local models on the node's CPU",
 	],
 };
-
-/**
- * Single-entry array shape so existing `find(...)` callers stay valid (paid
- * instances are dynamic now — see the module header).
- */
-export const CLOUD_TIERS: readonly CloudTier[] = [BASE_CLOUD_TIER];

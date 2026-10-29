@@ -1,4 +1,4 @@
-import { Spinner } from "@ryu/ui/components/spinner";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { getChatTabBusySpeed } from "../../src/lib/chat-tab-busy-speed.ts";
@@ -84,7 +84,7 @@ function Story() {
 					className="overflow-hidden rounded-2xl border bg-card shadow-sm"
 				>
 					<div className="border-border/70 border-b px-4 py-4">
-						<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 							Sidebar chats
 						</p>
 						<h1 className="mt-1 font-semibold text-xl tracking-tight">
@@ -103,7 +103,7 @@ function Story() {
 					className="rounded-2xl border bg-card p-6 shadow-sm"
 					data-testid="spinner-speed-proof"
 				>
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.16em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Completed task proof
 					</p>
 					<h2 className="mt-1 font-semibold text-xl tracking-tight">

@@ -14,13 +14,18 @@
 // `banner.background` / `banner.colors` land in a CSS background, which is a
 // different sink with a different worst case.
 
-/** Return `u` only when it parses as an http(s) URL, else null. */
-export function safeHttpUrl(u?: string | null): string | null {
-	if (!u) {
+import { z } from "zod";
+
+const publisherUrlSchema = z.string();
+
+/** Parse a publisher field at the DOM boundary, admitting only http(s) URLs. */
+const httpUrlSchema = z.unknown().transform((value): string | null => {
+	const input = publisherUrlSchema.safeParse(value);
+	if (!(input.success && input.data)) {
 		return null;
 	}
 	try {
-		const parsed = new URL(u);
+		const parsed = new URL(input.data);
 		if (parsed.protocol === "http:" || parsed.protocol === "https:") {
 			return parsed.toString();
 		}
@@ -28,7 +33,10 @@ export function safeHttpUrl(u?: string | null): string | null {
 	} catch {
 		return null;
 	}
-}
+});
+
+/** Return a normalized http(s) URL, or null for any unsupported publisher input. */
+export const safeHttpUrl = httpUrlSchema.parse;
 
 /** CSS value functions that make the browser FETCH something. These are what the
  *  guard below is for, and the list is deliberately short — see its doc. */

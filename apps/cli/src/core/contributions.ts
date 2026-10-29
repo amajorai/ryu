@@ -30,9 +30,20 @@
 //      that happens to name a view `"tasks"` silently hijack the built-in Tasks
 //      screen. The namespaced token has to be typed on purpose.
 
-import { type ApiTarget, apiUrl, makeHeaders } from "@ryuhq/core-client/client";
-import type { ViewSpec } from "./views.ts";
-import { isKnownViewKind, validateView } from "./views.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "@ryuhq/core-client/client";
+import { z } from "zod";
+import type { RawViewSpec } from "./views.ts";
+import {
+	isKnownViewKind,
+	rawViewSpecSchema,
+	validateView,
+	viewSpecSchema,
+} from "./views.ts";
 
 /** One plugin-contributed declarative view, tagged with its owning plugin id.
  *  Mirrors Core's `ViewContribution` plus the `plugin` field the contributions
@@ -41,69 +52,332 @@ export interface ContributedView {
 	id: string;
 	/** Owning plugin id (e.g. `com.acme.tracker`). Empty when Core did not tag it. */
 	plugin: string;
-	spec?: ViewSpec;
+	spec?: RawViewSpec;
 	title?: string;
 	/** The vocabulary member this view renders as. Kept as a plain string: Core
 	 *  passes unknown kinds through, and the renderer degrades readably. */
 	view: string;
 }
 
-/** Wire shape of one `views[]` entry of `GET /api/plugins/contributions`. */
-interface ContributedViewWire {
-	id?: unknown;
-	plugin?: unknown;
-	spec?: unknown;
-	title?: unknown;
-	view?: unknown;
+/** A slash command advertised by an enabled plugin or imported user prompt. */
+export interface ContributedSlashCommand {
+	args: SlashCommandArgument[];
+	body?: string;
+	description: string;
+	hint?: string;
+	name: string;
+	plugin: string;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-	typeof v === "object" && v !== null;
+export interface SlashCommandOption {
+	description?: string;
+	label: string;
+	value: string;
+}
 
-/** Narrow one wire entry, or null when it is unusable (no id / no kind). The
- *  `spec` is trusted structurally only as far as its own `view` discriminant: the
- *  renderer switches on that and falls back for anything it does not know. */
-function toContributedView(wire: ContributedViewWire): ContributedView | null {
-	if (typeof wire.id !== "string" || wire.id.length === 0) {
-		return null;
-	}
-	const kind = typeof wire.view === "string" ? wire.view : undefined;
+export interface SlashCommandCustomOption {
+	description?: string;
+	label: string;
+}
+
+export interface SlashCommandArgument {
+	custom?: SlashCommandCustomOption;
+	description?: string;
+	name: string;
+	options: SlashCommandOption[];
+}
+
+export interface AgentSlashCommand {
+	description: string;
+	hint?: string;
+	name: string;
+}
+
+export interface ContributedContent {
+	commands: ContributedSlashCommand[];
+	views: ContributedView[];
+}
+
+const nonEmptyTextSchema = z.string().trim().min(1);
+const viewWireSchema = z.object({
+	id: z.string().min(1),
+	plugin: z.string().catch(""),
+	spec: z.json().optional().catch(undefined),
+	title: z.string().optional().catch(undefined),
+	view: z.string().optional().catch(undefined),
+});
+const commandWireSchema = z.object({
+	command: z.string(),
+	args: z.unknown().optional(),
+	parameters: z.unknown().optional(),
+	body: z.string().optional().catch(undefined),
+	description: z.string().catch(""),
+	hint: z.string().optional().catch(undefined),
+	plugin: z.string().catch(""),
+});
+const contributionsSchema = z.object({
+	views: z
+		.array(viewWireSchema.nullable().catch(null))
+		.optional()
+		.catch(undefined),
+	slash_commands: z
+		.array(commandWireSchema.nullable().catch(null))
+		.optional()
+		.catch(undefined),
+});
+const commandArgumentSchema = z.object({
+	name: z.unknown().optional(),
+	label: z.unknown().optional(),
+	id: z.unknown().optional(),
+	options: z.unknown().optional(),
+	choices: z.unknown().optional(),
+	values: z.unknown().optional(),
+	custom: z.unknown().optional(),
+	allow_custom: z.unknown().optional(),
+	allowCustom: z.unknown().optional(),
+	description: z.unknown().optional(),
+});
+const commandArgumentsSchema = z.array(
+	commandArgumentSchema.nullable().catch(null)
+);
+const commandOptionSchema = z.object({
+	value: z.unknown().optional(),
+	id: z.unknown().optional(),
+	name: z.unknown().optional(),
+	label: z.unknown().optional(),
+	description: z.unknown().optional(),
+});
+const commandOptionsSchema = z.array(z.unknown());
+const customOptionSchema = z.object({
+	label: z.unknown().optional(),
+	description: z.unknown().optional(),
+});
+const customFlagSchema = z.union([z.literal(true), z.literal("true")]);
+const acpCommandsSchema = z.object({
+	commands: z.array(
+		z
+			.object({
+				name: z.unknown().optional(),
+				description: z.unknown().optional(),
+				hint: z.unknown().optional(),
+			})
+			.nullable()
+			.catch(null)
+	),
+});
+
+function nonEmptyString(
+	value: Parameters<typeof nonEmptyTextSchema.safeParse>[0]
+): string | null {
+	const parsed = nonEmptyTextSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
+}
+
+/** Keep the route envelope for a known malformed spec; its renderer degrades readably. */
+function toContributedView(
+	wire: z.infer<typeof viewWireSchema>
+): ContributedView | null {
+	const parsedSpec = rawViewSpecSchema.safeParse(wire.spec);
 	const spec =
-		isRecord(wire.spec) && isKnownViewKind(wire.spec.view)
-			? (wire.spec as unknown as ViewSpec)
+		parsedSpec.success && isKnownViewKind(parsedSpec.data.view)
+			? parsedSpec.data
 			: undefined;
-	if (!(kind || spec)) {
+	const kind = wire.view ?? spec?.view;
+	if (!kind) {
 		return null;
 	}
 	return {
 		id: wire.id,
-		plugin: typeof wire.plugin === "string" ? wire.plugin : "",
-		title: typeof wire.title === "string" ? wire.title : undefined,
-		view: kind ?? spec?.view ?? "",
+		plugin: wire.plugin,
+		title: wire.title,
+		view: kind,
 		spec,
 	};
 }
 
-/** Project a raw contributions payload to the views the terminal can render.
- *  Exported for the tests; {@link fetchContributedViews} is the normal entry. */
-export function contributedViewsFromResponse(
-	payload: unknown
-): ContributedView[] {
-	const raw = isRecord(payload) ? payload.views : undefined;
-	if (!Array.isArray(raw)) {
+function toContributedSlashCommand(
+	wire: z.infer<typeof commandWireSchema>
+): ContributedSlashCommand | null {
+	const name = wire.command.trim().replace(/^\//, "");
+	if (!/^[\w-]+$/.test(name)) {
+		return null;
+	}
+	const body = wire.body?.trim() ? wire.body : undefined;
+	const plugin = wire.plugin.trim();
+	if (!(plugin || body)) {
+		return null;
+	}
+	const command: ContributedSlashCommand = {
+		args: readCommandArguments(wire.args ?? wire.parameters),
+		description: wire.description.trim(),
+		name,
+		plugin,
+	};
+	if (body) {
+		command.body = body;
+	}
+	const hint = wire.hint?.trim();
+	if (hint) {
+		command.hint = hint;
+	}
+	return command;
+}
+
+/** ACP updates replace the complete advertised command set; malformed events do not clear it. */
+export function acpSlashCommandsFromData(
+	value: Parameters<typeof acpCommandsSchema.safeParse>[0]
+): AgentSlashCommand[] | null {
+	const parsed = acpCommandsSchema.safeParse(value);
+	if (!parsed.success) {
+		return null;
+	}
+	return parsed.data.commands.flatMap((entry) => {
+		if (entry === null) {
+			return [];
+		}
+		const name = nonEmptyString(entry.name)?.replace(/^\/+/, "");
+		if (!(name && /^[\w-]+$/.test(name))) {
+			return [];
+		}
+		const command: AgentSlashCommand = {
+			description: nonEmptyString(entry.description) ?? "",
+			name,
+		};
+		const hint = nonEmptyString(entry.hint);
+		if (hint) {
+			command.hint = hint;
+		}
+		return [command];
+	});
+}
+
+function readCommandOption(
+	value: Parameters<typeof commandOptionSchema.safeParse>[0]
+): SlashCommandOption | null {
+	const text = nonEmptyString(value);
+	if (text) {
+		return { label: text, value: text };
+	}
+	const parsed = commandOptionSchema.safeParse(value);
+	if (!parsed.success) {
+		return null;
+	}
+	const raw = parsed.data;
+	const optionValue = nonEmptyString(raw.value ?? raw.id ?? raw.name);
+	if (!optionValue) {
+		return null;
+	}
+	const option: SlashCommandOption = {
+		label: nonEmptyString(raw.label ?? raw.name ?? raw.value) ?? optionValue,
+		value: optionValue,
+	};
+	const description = nonEmptyString(raw.description);
+	if (description) {
+		option.description = description;
+	}
+	return option;
+}
+
+function readCustomOption(
+	value: Parameters<typeof customOptionSchema.safeParse>[0]
+): SlashCommandCustomOption | undefined {
+	if (customFlagSchema.safeParse(value).success) {
+		return {
+			description: "Type a value that is not in the registered options.",
+			label: "Use a custom value",
+		};
+	}
+	const parsed = customOptionSchema.safeParse(value);
+	if (!parsed.success) {
+		return undefined;
+	}
+	return {
+		description:
+			nonEmptyString(parsed.data.description) ??
+			"Type a value that is not in the registered options.",
+		label: nonEmptyString(parsed.data.label) ?? "Use a custom value",
+	};
+}
+
+function readCommandArguments(
+	value: Parameters<typeof commandArgumentsSchema.safeParse>[0]
+): SlashCommandArgument[] {
+	const parsed = commandArgumentsSchema.safeParse(value);
+	if (!parsed.success) {
 		return [];
 	}
-	const out: ContributedView[] = [];
-	for (const entry of raw) {
-		if (!isRecord(entry)) {
-			continue;
+	return parsed.data.flatMap((argument, index) => {
+		if (argument === null) {
+			return [];
 		}
-		const view = toContributedView(entry as ContributedViewWire);
-		if (view) {
-			out.push(view);
+		const rawOptions = commandOptionsSchema.safeParse(
+			argument.options ?? argument.choices ?? argument.values
+		);
+		const result: SlashCommandArgument = {
+			name:
+				nonEmptyString(argument.name ?? argument.label ?? argument.id) ??
+				`Argument ${index + 1}`,
+			options: rawOptions.success
+				? rawOptions.data.flatMap((value) => {
+						const option = readCommandOption(value);
+						return option ? [option] : [];
+					})
+				: [],
+		};
+		const custom = readCustomOption(
+			argument.custom ?? argument.allow_custom ?? argument.allowCustom
+		);
+		if (custom) {
+			result.custom = custom;
 		}
+		const description = nonEmptyString(argument.description);
+		if (description) {
+			result.description = description;
+		}
+		return [result];
+	});
+}
+
+/** Parse raw Core response rows individually so one malformed plugin does not blank the feed. */
+export function contributedViewsFromResponse(
+	payload: Parameters<typeof contributionsSchema.safeParse>[0]
+): ContributedView[] {
+	const parsed = contributionsSchema.safeParse(payload);
+	if (!parsed.success) {
+		return [];
 	}
-	return out;
+	return (parsed.data.views ?? []).flatMap((entry) => {
+		if (entry === null) {
+			return [];
+		}
+		const view = toContributedView(entry);
+		return view ? [view] : [];
+	});
+}
+
+export function contributedSlashCommandsFromResponse(
+	payload: Parameters<typeof contributionsSchema.safeParse>[0]
+): ContributedSlashCommand[] {
+	const parsed = contributionsSchema.safeParse(payload);
+	if (!parsed.success) {
+		return [];
+	}
+	return (parsed.data.slash_commands ?? []).flatMap((entry) => {
+		if (entry === null) {
+			return [];
+		}
+		const command = toContributedSlashCommand(entry);
+		return command ? [command] : [];
+	});
+}
+
+export function contributedContentFromResponse(
+	payload: Parameters<typeof contributionsSchema.safeParse>[0]
+): ContributedContent {
+	return {
+		commands: contributedSlashCommandsFromResponse(payload),
+		views: contributedViewsFromResponse(payload),
+	};
 }
 
 /** GET /api/plugins/contributions -> the enabled plugins' declarative views.
@@ -115,14 +389,25 @@ export async function fetchContributedViews(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<ContributedView[]> {
-	const resp = await fetch(apiUrl(target, "/api/plugins/contributions"), {
-		headers: makeHeaders(target.token),
-		signal,
-	});
+	return (await fetchContributedContent(target, signal)).views;
+}
+
+/** Fetch the enabled, CLI-targeted plugin contributions from Core once. */
+export async function fetchContributedContent(
+	target: ApiTarget,
+	signal?: AbortSignal
+): Promise<ContributedContent> {
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/plugins/contributions"),
+		{
+			headers: makeHeaders(target.token, target.userJwt),
+			signal,
+		}
+	);
 	if (!resp.ok) {
 		throw new Error(`/api/plugins/contributions failed: ${resp.status}`);
 	}
-	return contributedViewsFromResponse(await resp.json());
+	return contributedContentFromResponse(await resp.json());
 }
 
 /** The route a contributed view is navigable at. Both segments are encoded so an
@@ -169,5 +454,10 @@ export function viewClaimingSurface(
 	surfaceId: string
 ): ContributedView | undefined {
 	const token = surfaceClaimToken(surfaceId);
-	return views.find((view) => view.id === token && validateView(view.spec).ok);
+	return views.find(
+		(view) =>
+			view.id === token &&
+			validateView(view.spec).ok &&
+			viewSpecSchema.safeParse(view.spec).success
+	);
 }

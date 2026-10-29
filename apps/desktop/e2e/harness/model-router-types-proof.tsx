@@ -1,15 +1,14 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import { SmartRoutingCard } from "../../src/components/gateway/GatewayDialog.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import type { ApiTarget } from "../../src/lib/api/client.ts";
-import type {
-	GatewayConfigPatch,
-	GatewayRoutingConfig,
-	SmartRoutingConfig,
-} from "../../src/lib/api/gateway.ts";
+import type { SmartRoutingConfig } from "../../src/lib/api/gateway.ts";
 import type { PiCatalog } from "../../src/lib/api/pi-config.ts";
+import { gatewayRoutingProofSchema } from "./gateway-proof-contracts.ts";
 import "../../src/index.css";
 
 const TARGET: ApiTarget = {
@@ -53,14 +52,15 @@ const ROUTING: SmartRoutingConfig = {
 	timeout_ms: 4000,
 };
 
-let routing: GatewayRoutingConfig = {
+let routing = gatewayRoutingProofSchema.parse({
 	default_provider: "openai",
 	model_map: {},
 	fallback_chain: [],
 	smart_routing: ROUTING,
-};
+});
 
 const CATALOG: PiCatalog = {
+	thinkingLevels: [],
 	apiTypes: ["openai-completions"],
 	providers: [
 		{
@@ -99,7 +99,7 @@ const CATALOG: PiCatalog = {
 	],
 };
 
-function jsonResponse(value: unknown): Response {
+function jsonResponse<FixturePayload>(value: FixturePayload): Response {
 	return new Response(JSON.stringify(value), {
 		headers: { "content-type": "application/json" },
 		status: 200,
@@ -108,19 +108,14 @@ function jsonResponse(value: unknown): Response {
 
 function installGatewayMock(): void {
 	window.fetch = async (input, init) => {
-		const rawUrl =
-			typeof input === "string"
-				? input
-				: input instanceof URL
-					? input.toString()
-					: input.url;
+		const rawUrl = input instanceof Request ? input.url : String(input);
 		const path = new URL(rawUrl, window.location.href).pathname;
 
 		if (path.endsWith("/api/gateway/config")) {
 			if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-				const patch = JSON.parse(
-					typeof init.body === "string" ? init.body : "{}"
-				) as GatewayConfigPatch;
+				const patch = z
+					.object({ routing: gatewayRoutingProofSchema.optional() })
+					.parse(JSON.parse(isNativeText(init?.body) ? init.body : "{}"));
 				if (patch.routing) {
 					routing = patch.routing;
 				}
@@ -176,42 +171,44 @@ function ProofArtifact() {
 	return (
 		<EntitlementProvider>
 			<QueryClientProvider client={queryClient}>
-				<main className="dark min-h-screen bg-[#09090b] px-8 py-8 text-[#f4f4f5]">
+				<main className="dark min-h-screen bg-background px-8 py-8 text-foreground">
 					<div className="mx-auto max-w-4xl">
 						<header className="mb-6 flex items-start justify-between gap-5">
 							<div>
-								<div className="text-[#c4b5fd] text-xs tracking-[1.4px]">
+								<div className="text-primary text-xs tracking-eyebrow">
 									RYU · LIVE REACT PROOF
 								</div>
 								<h1 className="mt-2 font-semibold text-3xl">
 									Model router types
 								</h1>
-								<p className="mt-2 max-w-2xl text-[#a1a1aa] text-base leading-6">
+								<p className="mt-2 max-w-2xl text-base text-muted-foreground leading-6">
 									Gateway Plane A chooses a model, then the normal provider,
 									governance, budget, and audit path continues.
 								</p>
 							</div>
-							<div className="rounded-full border border-[#245c3e] bg-[#123022] px-3 py-2 font-semibold text-[#86efac] text-[11px] tracking-wide">
+							<div className="type-caption rounded-full border border-success/30 bg-success/10 px-3 py-2 font-semibold text-success tracking-wide">
 								VERIFIED · ROUTING
 							</div>
 						</header>
 
-						<section className="rounded-2xl border border-[#27272a] bg-[#111113] p-5">
-							<div className="mb-5 flex items-center justify-between border-[#27272a] border-b pb-4">
+						<section className="rounded-2xl border border-border bg-card p-5">
+							<div className="mb-5 flex items-center justify-between border-border border-b pb-4">
 								<div>
-									<div className="text-[#a1a1aa] text-[11px] uppercase tracking-wide">
+									<div className="type-caption text-muted-foreground uppercase tracking-wide">
 										Gateway · Routing
 									</div>
 									<div className="mt-1 font-medium text-lg">Smart routing</div>
 								</div>
-								<span className="rounded-full border border-[#3f3f46] px-2 py-1 text-[#a1a1aa] text-xs">
+								<span className="rounded-full border border-border px-2 py-1 text-muted-foreground text-xs">
 									Live client surface
 								</span>
 							</div>
 							<SmartRoutingCard canConfigure reachable target={TARGET} />
 						</section>
 
-						<p className="mt-4 font-mono text-[#a1a1aa] text-xs">{status}</p>
+						<p className="mt-4 font-mono text-muted-foreground text-xs">
+							{status}
+						</p>
 					</div>
 				</main>
 			</QueryClientProvider>

@@ -1,9 +1,10 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 
@@ -12,7 +13,29 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 function createStreamMock() {
 	const signals: AbortSignal[] = [];
 	const stream = mock(
-		async (_target: unknown, _onEvent: unknown, signal?: AbortSignal) => {
+		async (
+			_target: Parameters<
+				typeof import("@/src/lib/api/approvals.ts").streamApprovalEvents
+			>[0],
+			_onEvent:
+				| Parameters<
+						typeof import("@/src/lib/api/approvals.ts").streamApprovalEvents
+				  >[1]
+				| Parameters<
+						typeof import("@/src/lib/api/downloads.ts").streamDownloads
+				  >[1]
+				| Parameters<
+						typeof import("@/src/lib/api/quests.ts").streamQuestEvents
+				  >[1]
+				| Parameters<
+						typeof import("@/src/lib/api/monitors.ts").streamMonitorAlerts
+				  >[1]
+				| Parameters<
+						typeof import("@/src/lib/api/events.ts").streamDesktopNotifications
+				  >[1],
+			signal?: AbortSignal,
+			_onResync?: () => void
+		) => {
 			if (!signal) {
 				throw new Error("Expected the hook to own an abort signal");
 			}
@@ -44,17 +67,17 @@ mock.module("@/src/lib/api/events.ts", () => ({
 	streamDesktopNotifications: desktopNotifications.stream,
 }));
 
-const invalidateQueries = mock(async () => undefined);
-mock.module("@tanstack/react-query", () => ({
-	useQueryClient: () => ({ invalidateQueries }),
-}));
-mock.module("@ryu/ui/components/sileo", () => ({
-	toast: {
-		error: mock(),
-		info: mock(),
-		success: mock(),
-	},
-}));
+// A real client rather than a partial react-query mock: the hooks' shared node
+// helpers load modules that need the rest of the library. Its invalidation is
+// spied on so resync refetches can be asserted.
+const queryClient = new QueryClient();
+const invalidateQueries = spyOn(queryClient, "invalidateQueries");
+const toast = {
+	error: mock(),
+	info: mock(),
+	success: mock(),
+};
+mock.module("@ryu/ui/components/sileo", () => ({ toast }));
 
 const node = { token: "node-token", url: "https://node.example" };
 mock.module("./useActiveNode.ts", () => ({
@@ -114,15 +137,17 @@ describe("multiplexed event hook lifecycle", () => {
 		const root = createRoot(container);
 
 		await act(async () => {
-			root.render(<Harness />);
+			root.render(
+				<QueryClientProvider client={queryClient}>
+					<Harness />
+				</QueryClientProvider>
+			);
 			await Promise.resolve();
 		});
 
 		for (const { signals, stream } of streams) {
 			expect(stream).toHaveBeenCalledTimes(1);
-			expect(stream.mock.calls[0]?.[0]).toEqual(
-				stream === downloads.stream ? node : { ...node, userJwt: null }
-			);
+			expect(stream.mock.calls[0]?.[0]).toEqual({ ...node, userJwt: null });
 			expect(signals).toHaveLength(1);
 			expect(signals[0]?.aborted).toBe(false);
 		}
@@ -133,6 +158,24 @@ describe("multiplexed event hook lifecycle", () => {
 		for (const { stream } of streams) {
 			expect(stream).toHaveBeenCalledTimes(1);
 		}
+
+		// A reconnect of the shared stream refetches each feed's queries without a
+		// toast, since events from while it was down are never replayed.
+		for (const [{ stream }, queryKey] of [
+			[approval, ["approvals"]],
+			[quests, ["quests"]],
+			[monitors, ["monitors"]],
+		] as const) {
+			const onResync = stream.mock.calls[0]?.[3];
+			expect(onResync).toBeInstanceOf(Function);
+			invalidateQueries.mockClear();
+			onResync?.();
+			expect(invalidateQueries).toHaveBeenCalledTimes(1);
+			expect(invalidateQueries).toHaveBeenCalledWith({ queryKey });
+		}
+		expect(toast.info).not.toHaveBeenCalled();
+		expect(toast.success).not.toHaveBeenCalled();
+		expect(toast.error).not.toHaveBeenCalled();
 
 		await act(async () => {
 			root.unmount();

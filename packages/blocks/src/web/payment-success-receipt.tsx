@@ -2,8 +2,10 @@
 
 import { SuccessCheck } from "@ryu/ui/components/success-check";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import { useReducedMotion } from "motion/react";
 import type { HTMLAttributes, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import styles from "./payment-success-receipt.module.css";
 
 export type PaymentSuccessKind =
 	| "payment"
@@ -25,7 +27,7 @@ interface PaymentSuccessCopy {
 	title: string;
 }
 
-const PAYMENT_SUCCESS_COPY: Record<PaymentSuccessKind, PaymentSuccessCopy> = {
+const PAYMENT_SUCCESS_COPY = {
 	cloud: {
 		detailLabel: "Cloud purchase",
 		detailValue: "Payment received",
@@ -104,7 +106,7 @@ const PAYMENT_SUCCESS_COPY: Record<PaymentSuccessKind, PaymentSuccessCopy> = {
 		nextValue: "Upgraded",
 		title: "Upgrade complete",
 	},
-};
+} satisfies Record<PaymentSuccessKind, PaymentSuccessCopy>;
 
 function hashValue(value: string): number {
 	let hash = 2_166_136_261;
@@ -207,28 +209,11 @@ function Barcode({ value }: { value: string }) {
 					/>
 				))}
 			</svg>
-			<p className="font-mono text-[0.65rem] text-muted-foreground tracking-[0.28em]">
+			<p
+				className={cn(styles.barcodeNumber, "font-mono text-muted-foreground")}
+			>
 				{receiptNumberFor(value)}
 			</p>
-		</div>
-	);
-}
-
-function PrintLine({
-	children,
-	delay,
-}: {
-	children: ReactNode;
-	delay: number;
-}) {
-	return (
-		<div
-			className="payment-success-receipt-line"
-			style={{
-				animationDelay: `${delay}s`,
-			}}
-		>
-			{children}
 		</div>
 	);
 }
@@ -257,11 +242,10 @@ export interface PaymentSuccessReceiptProps
 }
 
 /**
- * A reusable post-payment receipt. The paper prints top-to-bottom so the
- * confirmation feels like a physical receipt arriving, while the receipt
- * details remain useful for plan activations, upgrades, and credit top-ups.
- * Provider checkout ids are used only as a deterministic seed; raw ids are not
- * shown to customers.
+ * Post-payment confirmation adapted from dqnamo's receipt printer:
+ * https://www.dqnamo.com/experiments/receipt-printer
+ * Feeds a single paper receipt through a printer slot. Provider checkout ids
+ * remain deterministic seeds and are never printed directly.
  */
 export function PaymentSuccessReceipt({
 	amount,
@@ -306,168 +290,128 @@ export function PaymentSuccessReceipt({
 			data-testid="payment-success-receipt"
 			{...props}
 		>
-			<style>{`
-				@keyframes ryu-payment-receipt-card-in {
-					from {
-						opacity: 0;
-						transform: translateY(22px) scale(0.98) rotate(-1.2deg);
-					}
-					to {
-						opacity: 1;
-						transform: translateY(0) scale(1) rotate(0deg);
-					}
-				}
-				@keyframes ryu-payment-receipt-line-in {
-					from {
-						clip-path: inset(0 0 100% 0);
-						filter: blur(3px);
-						opacity: 0;
-						transform: translateY(6px);
-					}
-					to {
-						clip-path: inset(0 0 0% 0);
-						filter: blur(0);
-						opacity: 1;
-						transform: translateY(0);
-					}
-				}
-				.payment-success-receipt-card {
-					animation: ryu-payment-receipt-card-in 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
-				}
-				.payment-success-receipt-line {
-					animation: ryu-payment-receipt-line-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
-				}
-				@media (prefers-reduced-motion: reduce) {
-					.payment-success-receipt-card,
-					.payment-success-receipt-line {
-						animation: none !important;
-						clip-path: inset(0 0 0% 0) !important;
-						filter: none !important;
-						opacity: 1 !important;
-						transform: none !important;
-					}
-				}
-			`}</style>
-			<div className="payment-success-receipt-card relative w-full max-w-lg">
-				<div
-					aria-hidden="true"
-					className="absolute top-1/2 -left-3 z-10 size-6 -translate-y-1/2 rounded-full bg-background sm:-left-4 sm:size-8"
-				/>
-				<div
-					aria-hidden="true"
-					className="absolute top-1/2 -right-3 z-10 size-6 -translate-y-1/2 rounded-full bg-background sm:-right-4 sm:size-8"
-				/>
-
-				<div className="overflow-hidden rounded-[2rem] border border-border/70 bg-card text-card-foreground shadow-2xl shadow-foreground/10">
-					<div className="border-border/70 border-b border-dashed px-6 py-4 sm:px-9">
-						<PrintLine delay={0.12}>
-							<div className="flex items-center justify-between gap-4 font-mono text-[0.65rem] text-muted-foreground uppercase tracking-[0.18em]">
-								<span>{copy.eyebrow}</span>
-								<span className="text-status-success">● paid</span>
-							</div>
-						</PrintLine>
+			<PaymentReceiptPrinter
+				amountLabel={amountLabel}
+				key={`${kind}-${seedValue}`}
+				title={copy.title}
+			>
+				<article aria-label="Payment receipt" className={styles.paper}>
+					<div className="flex items-center justify-between gap-3 text-muted-foreground text-xs">
+						<span>{copy.eyebrow}</span>
+						<span className="shrink-0 text-status-success">● paid</span>
 					</div>
-
-					<div className="px-6 pt-8 pb-7 text-center sm:px-9 sm:pt-10">
-						<PrintLine delay={0.2}>
-							<div className="mx-auto flex size-16 items-center justify-center rounded-full bg-success/12 text-status-success ring-8 ring-success/5 sm:size-20">
-								{icon ?? <SuccessCheck className="size-9 sm:size-10" />}
-							</div>
-						</PrintLine>
-						<PrintLine delay={0.28}>
-							<h1 className="mt-6 font-heading font-medium text-3xl tracking-tight sm:text-4xl">
-								{copy.title}
-							</h1>
-						</PrintLine>
-						<PrintLine delay={0.36}>
-							<p className="mx-auto mt-2 max-w-sm text-muted-foreground text-sm leading-6 sm:text-base">
-								{copy.description}
-							</p>
-						</PrintLine>
+					<div className="py-6 text-center">
+						<div className="mx-auto mb-3 flex size-8 items-center justify-center text-status-success">
+							{icon ?? <SuccessCheck className="size-8" />}
+						</div>
+						<h1 className="font-medium text-xl tracking-tight">{copy.title}</h1>
+						<p className="mt-2 text-muted-foreground text-xs leading-5">
+							{copy.description}
+						</p>
 					</div>
-
-					<div className="space-y-6 px-6 pb-8 sm:px-9 sm:pb-10">
-						<DashedLine />
-
-						<PrintLine delay={0.46}>
-							<div className="grid grid-cols-2 gap-5">
-								<div className="min-w-0">
-									<p className="text-[0.65rem] text-muted-foreground uppercase tracking-[0.16em]">
-										Receipt
-									</p>
-									<p className="mt-1 truncate font-medium font-mono text-sm">
-										{receiptNumber}
-									</p>
-								</div>
-								<div className="text-right">
-									<p className="text-[0.65rem] text-muted-foreground uppercase tracking-[0.16em]">
-										Status
-									</p>
-									<p className="mt-1 font-medium text-sm text-status-success">
-										Paid
-									</p>
-								</div>
-							</div>
-						</PrintLine>
-
+					<DashedLine />
+					<dl className={styles.details}>
+						<ReceiptDetail label={copy.detailLabel} value={copy.detailValue} />
 						{amountLabel ? (
-							<PrintLine delay={0.54}>
-								<div className="flex items-baseline justify-between gap-4">
-									<p className="text-[0.65rem] text-muted-foreground uppercase tracking-[0.16em]">
-										Amount
-									</p>
-									<p className="font-heading font-medium text-2xl">
-										{amountLabel}
-									</p>
-								</div>
-							</PrintLine>
+							<ReceiptDetail label="Total paid" value={amountLabel} />
 						) : null}
-
-						<PrintLine delay={amountLabel ? 0.62 : 0.54}>
-							<div className="grid grid-cols-2 gap-5 rounded-2xl bg-muted/55 p-4">
-								<div className="min-w-0">
-									<p className="text-[0.65rem] text-muted-foreground uppercase tracking-[0.16em]">
-										{copy.detailLabel}
-									</p>
-									<p className="mt-1 truncate font-medium text-sm">
-										{copy.detailValue}
-									</p>
-								</div>
-								<div className="min-w-0 text-right">
-									<p className="text-[0.65rem] text-muted-foreground uppercase tracking-[0.16em]">
-										Payment method
-									</p>
-									<p className="mt-1 truncate font-mono text-sm">
-										{paymentMethod}
-									</p>
-								</div>
-							</div>
-						</PrintLine>
-
-						<PrintLine delay={amountLabel ? 0.7 : 0.62}>
-							<div className="flex items-baseline justify-between gap-4">
-								<p className="text-[0.65rem] text-muted-foreground uppercase tracking-[0.16em]">
-									{copy.nextLabel}
-								</p>
-								<p className="font-medium text-sm">{copy.nextValue}</p>
-							</div>
-						</PrintLine>
-
+						<ReceiptDetail label="Receipt" value={receiptNumber} />
+						<ReceiptDetail label="Status" value="Paid" />
+						<ReceiptDetail label="Payment method" value={paymentMethod} />
+						<ReceiptDetail
+							label={kind === "subscription" ? "Team credits" : copy.nextLabel}
+							value={copy.nextValue}
+						/>
+						{kind === "subscription" ? (
+							<ReceiptDetail label="Credits" value="Included" />
+						) : null}
 						{issuedLabel ? (
-							<PrintLine delay={amountLabel ? 0.78 : 0.7}>
-								<p className="text-center text-muted-foreground text-xs">
-									Issued {issuedLabel}
-								</p>
-							</PrintLine>
+							<ReceiptDetail label="Issued" value={issuedLabel} />
 						) : null}
+					</dl>
+					<DashedLine />
+					<div className="pt-5">
+						<Barcode value={barcodeSeed} />
+					</div>
+				</article>
+			</PaymentReceiptPrinter>
+		</div>
+	);
+}
 
-						<DashedLine />
-						<PrintLine delay={amountLabel ? 0.86 : 0.78}>
-							<Barcode value={barcodeSeed} />
-						</PrintLine>
+function ReceiptDetail({ label, value }: { label: string; value: string }) {
+	return (
+		<div className={styles.detail}>
+			<dt className="text-muted-foreground">{label}</dt>
+			<dd className="text-right font-medium">{value}</dd>
+		</div>
+	);
+}
+
+function PaymentReceiptPrinter({
+	amountLabel,
+	children,
+	title,
+}: {
+	amountLabel: string | null;
+	children: ReactNode;
+	title: string;
+}) {
+	const reduceMotion = useReducedMotion();
+	const [printing, setPrinting] = useState(true);
+	const stage = printing && !reduceMotion ? "printing" : "complete";
+
+	useEffect(() => {
+		if (reduceMotion) {
+			return;
+		}
+		const timer = setTimeout(() => setPrinting(false), 1750);
+		return () => clearTimeout(timer);
+	}, [reduceMotion]);
+
+	return (
+		<section
+			aria-label="Receipt printer"
+			className={styles.printer}
+			data-stage={stage}
+		>
+			<div className={styles.machine}>
+				<div className={styles.header}>
+					<span className="font-medium font-mono text-xs tracking-widest">
+						RYU
+					</span>
+					<span aria-hidden="true" className={styles.indicator} />
+				</div>
+				<div className={styles.screen}>
+					<p className="font-medium text-sm">{title}</p>
+					{amountLabel ? (
+						<div className="mt-3 flex items-center justify-between gap-4 text-sm">
+							<span className="opacity-60">Total paid</span>
+							<span className="font-mono">{amountLabel}</span>
+						</div>
+					) : null}
+					<div
+						aria-live="polite"
+						className="mt-4 flex items-center gap-2 text-xs"
+						role="status"
+					>
+						<span aria-hidden="true" className={styles.statusIcon}>
+							{stage === "complete" ? (
+								<SuccessCheck className="size-4" />
+							) : (
+								<span className={styles.spinner} />
+							)}
+						</span>
+						<span>
+							{stage === "complete" ? "Receipt ready" : "Printing your receipt"}
+						</span>
 					</div>
 				</div>
+				<div aria-hidden="true" className={styles.slot} />
 			</div>
-		</div>
+			<div className={styles.output}>
+				<div className={styles.feed}>{children}</div>
+			</div>
+		</section>
 	);
 }

@@ -93,20 +93,16 @@ pub struct DirectArchiveDist {
     /// Path inside the extracted archive root (e.g. `./goose`, `./bin/devin`).
     pub cmd: String,
     pub args: Vec<String>,
-    /// `~/.ryu/agents/<id>` — full archive is extracted here; spawn uses `cmd`.
+    /// `<data dir>/runtimes/acp-agents/<id>` — full archive is extracted here; spawn uses `cmd`.
     pub install_dir: PathBuf,
 }
 
 fn cache_path() -> PathBuf {
-    crate::paths::ryu_dir()
-        .join("cache")
-        .join("acp-registry.json")
+    crate::paths::cache_path("acp-registry.json")
 }
 
 fn cache_meta_path() -> PathBuf {
-    crate::paths::ryu_dir()
-        .join("cache")
-        .join("acp-registry.fetched")
+    crate::paths::cache_path("acp-registry.fetched")
 }
 
 fn cache_age_secs() -> Option<u64> {
@@ -231,7 +227,7 @@ async fn fetch_remote() -> Result<RegistryFile> {
 /// next boot is fresh. Only the pure-sync path blocks on a fresh fetch.
 pub fn load_registry_agents() -> Vec<RegistryAgent> {
     let stale = cache_age_secs().is_none_or(|age| age > CACHE_MAX_AGE_SECS);
-    if stale {
+    if stale && !crate::offline_test_bootstrap::is_active() {
         match tokio::runtime::Handle::try_current() {
             // Inside a Tokio runtime: never block on the network here. Refresh
             // in the background and fall through to the disk cache.
@@ -423,14 +419,12 @@ pub fn direct_archive_for_agent(agent: &RegistryAgent) -> Option<DirectArchiveDi
         archive_url: spec.archive.clone(),
         cmd: spec.cmd.clone(),
         args: spec.args.clone(),
-        install_dir: crate::sidecar::download_manager::ryu_dir()
-            .join("agents")
-            .join(&agent.id),
+        install_dir: crate::paths::runtime_dir("acp-agents").join(&agent.id),
     })
 }
 
 /// Registry ids overridden by curated first-class entries in `AcpAgentRegistry`.
-pub const CURATED_OVERRIDE_IDS: &[&str] = &["claude-acp", "codex-acp", "gemini", "pi-acp"];
+pub const CURATED_OVERRIDE_IDS: &[&str] = &["claude-acp", "codex-acp", "gemini", "pi-acp", "kiro"];
 
 /// Spawn metadata derived from a registry agent row.
 #[derive(Debug, Clone)]
@@ -828,7 +822,7 @@ mod tests {
         let dist = direct_archive_for_agent(&agent).expect("host platform present");
         assert_eq!(dist.registry_id, "goose");
         assert!(dist.archive_url.ends_with(".tar.gz"));
-        assert!(dist.install_dir.ends_with("agents/goose"));
+        assert!(dist.install_dir.ends_with("runtimes/acp-agents/goose"));
 
         // The spawn command joins the resolved binary path with its args, and the
         // relative "./goose" is stripped of the leading "./".
@@ -987,6 +981,7 @@ mod tests {
     fn curated_override_ids_are_the_first_class_four() {
         assert!(CURATED_OVERRIDE_IDS.contains(&"claude-acp"));
         assert!(CURATED_OVERRIDE_IDS.contains(&"pi-acp"));
-        assert_eq!(CURATED_OVERRIDE_IDS.len(), 4);
+        assert!(CURATED_OVERRIDE_IDS.contains(&"kiro"));
+        assert_eq!(CURATED_OVERRIDE_IDS.len(), 5);
     }
 }

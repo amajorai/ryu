@@ -19,7 +19,7 @@ import {
 // `Anchor` part, but its `Positioner` accepts an `anchor` prop — so we bridge
 // the two through context: `PopoverAnchor` registers the anchor, and
 // `PopoverContent` forwards it to the Positioner.
-type AnchorValue = Element | { current: Element | null } | null;
+type AnchorValue = Element | { current: Element | null | undefined } | null;
 
 const PopoverAnchorContext = createContext<{
 	anchor: AnchorValue;
@@ -73,7 +73,7 @@ function PopoverAnchor({
 	children,
 	...props
 }: {
-	virtualRef?: { current: Element | null };
+	virtualRef?: { current: Element | null | undefined };
 	className?: string;
 	children?: ReactNode;
 } & ComponentProps<"span">) {
@@ -140,14 +140,20 @@ function PopoverContent({
 			<PopoverPrimitive.Positioner
 				align={align}
 				alignOffset={alignOffset}
-				anchor={ctx?.anchor ?? undefined}
+				anchor={
+					// SAFETY: Base UI's actual positioning resolver forwards a ref's
+					// missing current value as an absent reference. Its declared ref
+					// slot omits undefined; preserve the native ref object/payload.
+					(ctx?.anchor ??
+						undefined) as PopoverPrimitive.Positioner.Props["anchor"]
+				}
 				className="isolate z-50"
 				side={side}
 				sideOffset={sideOffset}
 			>
 				<PopoverPrimitive.Popup
 					className={cn(
-						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 z-50 flex w-72 origin-(--transform-origin) flex-col gap-4 rounded-3xl bg-popover p-4 text-popover-foreground text-sm shadow-lg outline-hidden duration-100 data-closed:animate-out data-open:animate-in",
+						"data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-start-2 data-[side=inline-start]:slide-in-from-end-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:fade-in-0 data-open:zoom-in-95 data-closed:fade-out-0 data-closed:zoom-out-95 corner-squircle z-50 flex w-72 origin-(--transform-origin) flex-col gap-4 rounded-3xl bg-popover p-4 text-popover-foreground text-sm shadow-lg outline-hidden duration-100 data-closed:animate-out data-open:animate-in",
 						className
 					)}
 					data-slot="popover-content"

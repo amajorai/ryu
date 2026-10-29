@@ -1,6 +1,6 @@
 [package]
 name = "ryu-crypto"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Encryption-at-rest primitive for Ryu: the FieldCipher (ChaCha20-Poly1305 AEAD with a self-describing `enc:v1:` field envelope + legacy-plaintext passthrough) and the swappable master-key custody ladder (env → OS keychain → file fallback, with legacy memory-key migration). An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the session/chat loop and long-term memory encrypt every row unconditionally). The two kernel couplings — the profile-scoped keychain suffix and the `~/.ryu` data dir — invert through the narrow `CryptoHost` trait so this crate has ZERO dependency on apps/core; the local-key→KMS swap story lives on the internal `Keychain` port."
@@ -18,18 +18,64 @@ hex = "0.4"
 # workspace lock, so this adds an edge, not a new dependency tree.
 hkdf = "0.12"
 rand = "0.8"
+# `SealedString` (de)serializes sealed config fields.
+serde = { version = "1", features = ["derive"] }
+# The data-dir layout: the file-fallback keys live under `secrets/`.
+ryu-sidecar-runtime = { path = "../sidecar-runtime", version = "0.5.0" }
 sha2 = "0.10"
 tracing = "0.1"
 tempfile = "3"
+# Phase-2 content sealing (`content`, `blind_index`, `sealed_file`, `sealed_log`,
+# `vector_index`). All already resolve in the workspace lock.
+# The shared term tokenizer: NFKC + Unicode general categories (L/M/N).
+unicode-normalization = "0.1"
+unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
+# In-memory vector index stores f16 vectors.
+half = "2"
+# Free-space checks before sealing a file in place or vacuuming a store.
+fs4 = "0.8.4"
+serde_json = "1"
+# `content_sqlite` (feature `sqlite`): the per-value migration helper for SQLite
+# stores. Optional so satellites and the Gateway that need no migration do not
+# link SQLite through this crate.
+rusqlite = { version = "0.40.0", features = ["bundled"], optional = true }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[features]
+# The OS keychain backend for master-key custody. ON by default, so every custody
+# consumer (Core, Passport, vault, memory, a2a, ...) keeps keychain-first
+# resolution unchanged. A consumer that only needs `hmac_sha256_hex` and never
+# resolves the master key (ryu-composio, and through it the standalone Gateway)
+# turns defaults off so its build does not link `keyring` -> `dbus` ->
+# `libdbus-sys`, which needs the libdbus-1 development headers on Linux. Without
+# this feature, master-key resolution fails closed unless `RYU_MASTER_KEY` is set
+# or `RYU_KEYCHAIN=off` explicitly selects the file key.
+default = ["os-keychain"]
+os-keychain = ["dep:keyring"]
+# `content_sqlite`: state table, cursor-paginated migration, freelist scrub.
+sqlite = ["dep:rusqlite"]
+# `plugin_keys::sql`: the `ryu_seal`/`ryu_open` SQL functions app satellites
+# register on their SQLite stores (needs rusqlite's `functions`). The
+# `plugin_keys::sql` tests compile only with it, so test this crate on its own
+# with `--no-default-features --features sqlite-functions`.
+sqlite-functions = ["sqlite", "rusqlite/functions"]
+# TEST BUILDS ONLY (enable it from `[dev-dependencies]`, never `[dependencies]`):
+# with no `CryptoHost` installed and `debug_assertions` on, `content_cipher`
+# uses a process-ephemeral random root (never persisted, logged at error) so
+# kernel-crate unit tests that construct sealing stores work without a host.
+test-ephemeral-host = []
 
 # OS keychain for the at-rest master key. Per-platform native backend so the key
 # lives outside ~/.ryu: Windows Credential Manager, macOS Keychain, Linux Secret
 # Service. Falls back to a file key when absent.
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", features = ["windows-native"] }
+keyring = { version = "3", features = ["windows-native"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
+keyring = { version = "3", features = ["apple-native"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"], optional = true }

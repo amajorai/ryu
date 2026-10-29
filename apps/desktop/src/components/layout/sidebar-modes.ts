@@ -67,6 +67,14 @@ export interface SidebarModeDescriptor {
  *  otherwise-unassigned conversations reachable below the roster. */
 export const AGENT_MODE_SECTIONS: SectionKey[] = ["agents", "chats"];
 
+/** The default computer's sections in the built-in "All computers" mode. */
+export const COMPUTERS_MODE_SECTIONS: SectionKey[] = [
+	"tabs",
+	"pinned",
+	"projects",
+	"chats",
+];
+
 /**
  * The shell's own modes, in the order they are offered.
  *
@@ -93,17 +101,26 @@ export const BUILTIN_SIDEBAR_MODES: SidebarModeDescriptor[] = [
 		key: "agent",
 		title: "Agents view",
 		description:
-			"Show agents with their direct threads inline, with other chats below.",
+			"Show agents with their direct threads inline, then your Projects, Chats and own sections.",
 		layout: "stacked",
 		sections: AGENT_MODE_SECTIONS,
 		defaultSection: "agents",
+	},
+	{
+		// The default computer's group shows these sections; every other
+		// computer's group is drawn by `AllComputersSidebar` from its own list.
+		key: "computers",
+		title: "All computers",
+		description: "Threads from every computer, grouped by computer",
+		layout: "stacked",
+		sections: COMPUTERS_MODE_SECTIONS,
 	},
 ];
 
 /** The default arrangement — the built-in Bot mode. */
 export const DEFAULT_SIDEBAR_MODE_DESCRIPTOR =
 	BUILTIN_SIDEBAR_MODES.find((mode) => mode.key === "agent") ??
-	(BUILTIN_SIDEBAR_MODES[0] as SidebarModeDescriptor);
+	BUILTIN_SIDEBAR_MODES[0];
 
 /**
  * Resolve the display order for a mode's named sections.
@@ -159,8 +176,10 @@ export function contributedSidebarModes(
 				(b.order ?? Number.MAX_SAFE_INTEGER)
 		)
 		.map((mode) => {
+			// SAFETY: The local resolves predicate retains only authored built-in section keys or keys supplied by the typed available SectionKey list. Native filter keeps exactly those original strings.
 			const sections = (mode.sections ?? []).filter(resolves) as SectionKey[];
 			const declaredDefault = mode.default_section;
+			// SAFETY: The defaultSection conditional compares the unchanged candidate with the already resolved SectionKey list. Its first cast only adapts includes; its second cast is reached only after that native membership comparison succeeds.
 			return {
 				key: `plugin:${mode.plugin}:${mode.id}`,
 				title: mode.title,
@@ -199,7 +218,7 @@ export function resolveSidebarMode(
 	stored: string,
 	modes: readonly SidebarModeDescriptor[],
 	contributionsSettled: boolean
-): { mode: SidebarModeDescriptor; stale: boolean } {
+) {
 	const found = modes.find((m) => m.key === stored);
 	if (found) {
 		return { mode: found, stale: false };

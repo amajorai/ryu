@@ -39,9 +39,14 @@ async fn ensure_api_server_enabled() -> anyhow::Result<()> {
         return Ok(());
     };
     let env_path = home.join(".hermes").join(".env");
-    let content = tokio::fs::read_to_string(&env_path)
-        .await
-        .unwrap_or_default();
+    // Only a missing file starts empty: treating any other read failure (a
+    // permission error, invalid UTF-8) as empty would rewrite the user's .env
+    // with just our one line, discarding their keys.
+    let content = match tokio::fs::read_to_string(&env_path).await {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
     if content.contains("API_SERVER_ENABLED=true") {
         return Ok(());
     }
@@ -63,7 +68,13 @@ async fn ensure_api_server_enabled() -> anyhow::Result<()> {
     } else {
         format!("{}\nAPI_SERVER_ENABLED=true\n", content.trim_end())
     };
-    tokio::fs::write(&env_path, updated).await?;
+    // Atomic: this file holds the user's Hermes API keys; a torn rewrite
+    // would lose them.
+    tokio::task::spawn_blocking(move || {
+        crate::atomic_file::write_atomic(&env_path, updated.as_bytes())
+    })
+    .await
+    .map_err(std::io::Error::other)??;
     Ok(())
 }
 

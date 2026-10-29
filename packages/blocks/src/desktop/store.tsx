@@ -1,4 +1,6 @@
 "use client";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import styles from "./store.module.css";
 
 // Presentational layer of the desktop Store. The live Store shell
 // (`apps/desktop/src/pages/StorePage.tsx`) and the Agents catalog section
@@ -37,6 +39,7 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs.tsx";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 
@@ -85,7 +88,7 @@ function SectionTabIcon({
 			<span className="flex size-4 shrink-0 items-center">{iconNode}</span>
 		);
 	}
-	if (typeof icon === "string") {
+	if (isNativeText(icon)) {
 		return <Icon className="shrink-0" icon={icon} size={16} />;
 	}
 	if (!Array.isArray(icon)) {
@@ -138,9 +141,11 @@ export function StoreSectionTabs({
 	active,
 	onSelect = noop,
 	className,
+	inset,
 }: {
 	active: string;
 	className?: string;
+	inset?: "store-sections" | "library-sections";
 	onSelect?: (value: string) => void;
 	sections: StoreSectionTab[];
 }) {
@@ -149,6 +154,7 @@ export function StoreSectionTabs({
 	return (
 		<Tabs
 			className={cn("w-full min-w-0", className)}
+			inset={inset}
 			onValueChange={(value) => onSelect(String(value))}
 			value={active}
 		>
@@ -170,7 +176,11 @@ export function StoreSectionTabs({
 									className="mx-1 h-4 w-px shrink-0 self-center bg-border"
 								/>
 							) : null}
-							<TabsTrigger className="shrink-0 gap-1.5" value={s.value}>
+							<TabsTrigger
+								className="shrink-0"
+								spacing="store-section"
+								value={s.value}
+							>
 								<SectionTabIcon icon={s.icon} iconNode={s.iconNode} />
 								<span className="whitespace-nowrap">
 									{i18n?.t(`marketplace.section.${s.value}`, {}, s.label) ??
@@ -264,7 +274,6 @@ export function StoreGlobalSearch({
 				{value ? (
 					<Button
 						aria-label="Clear search"
-						className="shrink-0"
 						onClick={() => onChange("")}
 						size="sm"
 						variant="ghost"
@@ -322,6 +331,8 @@ export function StoreSearchButton({
 			}
 		};
 		const onPointer = (e: MouseEvent) => {
+			// SAFETY: this Document mousedown listener receives native DOM-node targets,
+			// the same-realm native Node receiver accepted by contains.
 			if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
 				setOpen(false);
 			}
@@ -338,9 +349,9 @@ export function StoreSearchButton({
 		<div className={cn("flex items-center", className)} ref={rootRef}>
 			<Button
 				aria-label="Search"
-				className="gap-1.5"
 				onClick={() => setOpen((prev) => !prev)}
 				size="sm"
+				spacing="regular"
 				variant={expanded ? "secondary" : "ghost"}
 			>
 				<HugeiconsIcon className="size-3.5" icon={Search01Icon} />
@@ -348,19 +359,22 @@ export function StoreSearchButton({
 			</Button>
 			<div
 				className={cn(
-					"grid transition-[grid-template-columns] duration-200 ease-out",
+					"grid duration-200 ease-out",
+					styles.panel,
 					expanded ? "grid-cols-[1fr]" : "grid-cols-[0fr]"
 				)}
 			>
 				<div className="min-w-0 overflow-hidden">
 					<Input
 						aria-hidden={!expanded}
-						className="h-8 w-56 max-w-[40vw] border-none bg-transparent shadow-none focus-visible:ring-0"
+						aria-label={localizedPlaceholder}
+						className="w-56 max-w-[40vw]"
 						onChange={(e) => onChange(e.target.value)}
 						placeholder={localizedPlaceholder}
 						ref={inputRef}
 						tabIndex={expanded ? 0 : -1}
 						value={value}
+						variant="store-search"
 					/>
 				</div>
 			</div>
@@ -522,13 +536,14 @@ function StoreCardLogo({
 	iconUrl?: string | null;
 	name: string;
 }) {
-	if (iconUrl) {
+	const safeIconUrl = safeMediaUrl(iconUrl);
+	if (safeIconUrl) {
 		return (
 			<img
 				alt={`${name} logo`}
 				className="size-9 shrink-0 rounded-lg border border-border object-cover"
 				loading="lazy"
-				src={iconUrl}
+				src={safeIconUrl}
 			/>
 		);
 	}
@@ -586,7 +601,9 @@ export function StoreCatalogCard({
 				<div className="flex min-w-0 items-center gap-2.5">
 					<StoreCardLogo iconUrl={item.iconUrl} name={item.name} />
 					<div className="min-w-0">
-						<span className="block truncate font-medium">{item.name}</span>
+						<span className="block truncate font-medium" title={item.name}>
+							{item.name}
+						</span>
 						<StoreCardRating
 							average={item.ratingAverage}
 							count={item.ratingCount}
@@ -621,9 +638,9 @@ export function StoreLoadingGrid({ count = 4 }: { count?: number }) {
 					className="space-y-3 rounded-xl border border-border bg-card p-4"
 					key={i}
 				>
-					<div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
-					<div className="h-3 w-3/4 animate-pulse rounded bg-muted/60" />
-					<div className="h-7 w-20 animate-pulse rounded bg-muted/60" />
+					<div className="h-4 w-1/2 rounded bg-muted motion-safe:animate-pulse" />
+					<div className="h-3 w-3/4 rounded bg-muted/60 motion-safe:animate-pulse" />
+					<div className="h-7 w-20 rounded bg-muted/60 motion-safe:animate-pulse" />
 				</div>
 			))}
 		</div>

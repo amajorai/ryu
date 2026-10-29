@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
+import { createFetchFixture } from "../../test-fixtures/native-fetch-fixture.ts";
 import {
 	DEFAULT_SPEECH_PROCESSING_PREFS,
 	parseSpeechProcessingPrefs,
@@ -44,15 +46,28 @@ describe("processSpeechText", () => {
 	it("posts to the dedicated Core cleanup route", async () => {
 		const originalFetch = globalThis.fetch;
 		let requestUrl = "";
-		let requestBody: Record<string, unknown> = {};
-		globalThis.fetch = (async (input, init) => {
-			requestUrl = String(input);
-			requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-			return new Response(JSON.stringify({ text: "Send the report Friday." }), {
-				status: 200,
-				headers: { "content-type": "application/json" },
-			});
-		}) as typeof fetch;
+		const bodySchema = z.object({
+			text: z.string(),
+			engine: z.string(),
+			styling: z.string(),
+			structure: z.string(),
+			context: z.string(),
+		});
+		let requestBody: z.output<typeof bodySchema> | undefined;
+		globalThis.fetch = createFetchFixture(
+			originalFetch,
+			async (input, init) => {
+				requestUrl = String(input);
+				requestBody = bodySchema.parse(JSON.parse(String(init?.body)));
+				return new Response(
+					JSON.stringify({ text: "Send the report Friday." }),
+					{
+						status: 200,
+						headers: { "content-type": "application/json" },
+					}
+				);
+			}
+		);
 
 		try {
 			const options: SpeechProcessingOptions = {

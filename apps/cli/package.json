@@ -1,10 +1,9 @@
 {
   "name": "cli",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "bin": {
-    "ryu": "./src/index.tsx",
     "ryu-cli": "./src/index.tsx"
   },
   "scripts": {
@@ -13,16 +12,21 @@
     "check": "tsc --noEmit",
     "check-types": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "bun test --max-concurrency=1",
+    "test": "bun run scripts/test-isolated.ts",
     "vendor:termcn": "bun run scripts/vendor-termcn.ts"
   },
   "dependencies": {
     "@opentui/core": "^0.4.2",
     "@opentui/react": "^0.4.2",
+    "@ryu/i18n": "workspace:*",
     "@ryu/portable-packages": "workspace:*",
+    "@ryu/workbench": "workspace:*",
     "@ryuhq/core-client": "workspace:*",
+    "@ryuhq/protocol": "workspace:*",
+    "@ryuhq/services-cli": "workspace:*",
     "cli-spinners": "^3.4.0",
-    "react": "^19.2.0"
+    "react": "^19.2.0",
+    "zod": "catalog:"
   },
   "optionalDependencies": {
     "@opentui/core-darwin-arm64": "0.4.2",
@@ -35,7 +39,10 @@
     "@opentui/core-win32-x64": "0.4.2"
   },
   "devDependencies": {
+    "@ryu/ui": "workspace:*",
+    "@types/node": "^24.10.0",
     "@ryu/config": "workspace:*",
+    "@ryuhq/protocol": "workspace:*",
     "@types/bun": "catalog:",
     "@types/react": "^19.2.0",
     "react-devtools-core": "^7.0.1",

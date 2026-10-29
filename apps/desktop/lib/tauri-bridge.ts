@@ -103,7 +103,7 @@ export async function openStandaloneAppWindow(opts: {
 	appId: string;
 	title: string;
 }): Promise<void> {
-	if (!isTauriReady() && typeof window !== "undefined") {
+	if (!isTauriReady() && globalThis.window) {
 		const url = new URL(window.location.href);
 		url.pathname = "/";
 		url.search = new URLSearchParams({
@@ -124,7 +124,7 @@ export async function openStandaloneAppWindow(opts: {
 
 /** Close the current app-first window without changing app lifecycle. */
 export async function closeCurrentWindow(): Promise<void> {
-	if (!isTauriReady() && typeof window !== "undefined") {
+	if (!isTauriReady() && globalThis.window) {
 		window.close();
 		return;
 	}

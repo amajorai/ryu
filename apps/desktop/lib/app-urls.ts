@@ -6,6 +6,5 @@ export const BACKEND_URL =
 export const FRONTEND_URL =
 	import.meta.env.VITE_APP_FRONTEND_URL ?? "http://localhost:3001";
 
-/** In-app links to the web dashboard (gateway, connections, onboarding). */
-export const WEB_URL =
-	import.meta.env.VITE_APP_WEB_URL ?? "http://localhost:3001";
+/** In-app links to the web dashboard (gateway, connections, onboarding): the same origin. */
+export const WEB_URL = FRONTEND_URL;

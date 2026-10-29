@@ -32,6 +32,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runsLimitedOnManagedPi, runsOnRyuEngine } from "../agent-engine.ts";
 import {
 	type AgentEgress,
 	applyToolBridgePlan,
@@ -771,7 +772,7 @@ describe("the tool bridge's two terms, mirrored from Core", () => {
 		).toBe(PRESENT);
 	});
 
-	it("that extension is never installed for the user's own Pi", () => {
+	it("ships through managed spawn paths and defaults to an isolated directory", () => {
 		// Which is exactly why `acp:pi` gets NEITHER path, and why this view says so
 		// where a user would look instead of letting them find out when a tool call
 		// silently never happens.
@@ -782,8 +783,9 @@ describe("the tool bridge's two terms, mirrored from Core", () => {
 		// failure mode this file's helper exists to avoid.
 		//
 		// Two facts, together sufficient. (a) the extension is written under
-		// `config_dir()`, which resolves to Ryu's own `~/.ryu/pi-agent`, never the
-		// user's `~/.pi`; (b) the function that ships it runs only from the flagship
+		// `config_dir()`, whose runtime admission helper defaults to Ryu's own
+		// `~/.ryu/runtimes/pi-agent` (an explicit managed-root override can change it);
+		// (b) the function that ships it runs only from the flagship
 		// spawn paths — both `ensure_managed_defaults()` call sites in the adapters
 		// are `ryu`-prefixed, and bare `acp:pi` (`pi_acp_cmd_gated`) is not among
 		// them.
@@ -791,7 +793,13 @@ describe("the tool bridge's two terms, mirrored from Core", () => {
 		expect(
 			anchor(
 				PI_CONFIG_RS,
-				'crate::sidecar::download_manager::ryu_dir().join("pi-agent")'
+				"crate::required_update_runtime::pi_config_root( &crate::sidecar::download_manager::ryu_dir(), &crate::paths::config_dir(), )"
+			)
+		).toBe(PRESENT);
+		expect(
+			anchor(
+				"apps/core/src/required_update_runtime.rs",
+				'.unwrap_or_else(|| ryu_sidecar_runtime::layout::runtime_dir(data, "pi-agent"));'
 			)
 		).toBe(PRESENT);
 
@@ -965,6 +973,144 @@ describe("who has a tool control, which is NOT who has an egress control", () =>
 			expect(row.tools.mechanism).toBe("not-acp");
 			expect(row.tools.control).toBeNull();
 		}
+	});
+});
+
+describe("a built-in bot on Ryu's engine is the flagship's route, not an engine's", () => {
+	// Core's own catalog lists `jay-jr` as an ordinary ACP entry (transport acp,
+	// gatewayBypass false). Without its own branch the classifier would land on
+	// the generic base-URL switch and the MCP-bridge switch, neither of which
+	// Core reads for it.
+	const JAY_CATALOG = [...CATALOG, entry({ id: "jay-jr" })];
+	const jay = (over: Partial<EgressPrefs> = {}): AgentEgress =>
+		classifyAgentEgress(
+			{ id: "jay-jr", name: "Jay Jr.", engine: "jay-jr", flagship: false },
+			JAY_CATALOG,
+			prefs(over)
+		);
+
+	it("mirrors Core's id set and its agent_route branch", () => {
+		expect(runsOnRyuEngine("jay-jr")).toBe(true);
+		expect(runsOnRyuEngine("patrol")).toBe(true);
+		expect(runsOnRyuEngine("ryu")).toBe(false);
+		expect(runsOnRyuEngine("acp:pi")).toBe(false);
+		expect(
+			anchor(
+				"apps/core/src/agents/jay_jr.rs",
+				'pub const AGENT_ID: &str = "jay-jr";'
+			)
+		).toBe(PRESENT);
+		expect(
+			anchor(
+				"apps/core/src/agents/jay_jr.rs",
+				"pub fn runs_on_ryu_engine(agent_id: &str) -> bool { agent_id == AGENT_ID }"
+			)
+		).toBe(PRESENT);
+		expect(
+			anchor(
+				"apps/core/src/agents/patrol.rs",
+				'pub const AGENT_ID: &str = "patrol";'
+			)
+		).toBe(PRESENT);
+		expect(
+			anchor(
+				"apps/core/src/agents/mod.rs",
+				"pub fn runs_on_ryu_engine(agent_id: &str) -> bool { jay_jr::runs_on_ryu_engine(agent_id) || patrol::is_patrol(agent_id) }"
+			)
+		).toBe(PRESENT);
+		expect(
+			anchor(
+				"apps/core/src/sidecar/adapters/mod.rs",
+				'agent_id.filter(|id| *id == "ryu" || crate::agents::runs_on_ryu_engine(id))'
+			)
+		).toBe(PRESENT);
+	});
+
+	it("follows the managed Pi's routing with no switch, in both directions", () => {
+		const governed = jay();
+		expect(governed.mechanism).toBe("pi-provider");
+		expect(governed.governed).toBe(true);
+		expect(governed.control).toBeNull();
+		expect(governed.detail).toContain("Ryu agent's model settings");
+
+		// The case the generic switch would have lied about: the managed Pi set
+		// to the user's own provider key sends this bot's calls direct too.
+		const direct = jay({ piRouting: "direct", agents: { "jay-jr": true } });
+		expect(direct.governed).toBe(false);
+		expect(direct.control).toBeNull();
+	});
+
+	it("gets Ryu's tools from the Pi extension, scoped, with no bridge switch", () => {
+		const row = jay({ tools: { "jay-jr": false } });
+		expect(row.tools.mechanism).toBe("pi-extension");
+		expect(row.tools.enabled).toBe(true);
+		expect(row.tools.control).toBeNull();
+		expect(row.tools.detail).toContain(
+			"limited to the tools this agent allows"
+		);
+		// And the bulk action skips it rather than writing a preference Core
+		// never reads for it.
+		const plan = planEnableToolsForAll(summarizeAgentEgress([row]));
+		expect(plan.changes).toHaveLength(0);
+		expect(plan.skipped.map((skip) => skip.agentId)).toEqual(["jay-jr"]);
+	});
+});
+
+describe("a limited custom agent on the Ryu engine runs Ryu's managed Pi", () => {
+	const custom = (
+		modelsLimited: boolean,
+		over: Partial<EgressPrefs> = {}
+	): AgentEgress =>
+		classifyAgentEgress(
+			{
+				id: "agent-a",
+				name: "Agent A",
+				engine: "acp:pi",
+				flagship: false,
+				modelsLimited,
+			},
+			CATALOG,
+			prefs(over)
+		);
+
+	it("mirrors Core's predicate and its agent_route branch", () => {
+		expect(runsLimitedOnManagedPi("agent-a", "acp:pi", true)).toBe(true);
+		expect(runsLimitedOnManagedPi("agent-a", "acp:pi", false)).toBe(false);
+		expect(runsLimitedOnManagedPi("acp:pi", "acp:pi", true)).toBe(false);
+		expect(runsLimitedOnManagedPi("jay-jr", "acp:pi", true)).toBe(false);
+		expect(runsLimitedOnManagedPi("agent-a", "acp:claude", true)).toBe(false);
+		expect(
+			anchor(
+				"apps/core/src/sidecar/adapters/mod.rs",
+				".filter(|id| crate::agents::runs_limited_on_managed_pi(id, engine, provider_access))"
+			)
+		).toBe(PRESENT);
+	});
+
+	it("follows the managed Pi's routing and gets its scoped extension tools", () => {
+		const row = custom(true);
+		expect(row.mechanism).toBe("pi-provider");
+		expect(row.governed).toBe(true);
+		expect(row.control).toBeNull();
+		expect(row.tools.mechanism).toBe("pi-extension");
+		expect(row.tools.detail).toContain(
+			"limited to the tools this agent allows"
+		);
+		expect(custom(true, { piRouting: "direct" }).governed).toBe(false);
+	});
+
+	it("leaves an unrestricted one on your own Pi, as before", () => {
+		const limited = custom(true);
+		const unrestricted = custom(false);
+		expect(unrestricted.mechanism).not.toBe(limited.mechanism);
+		expect(unrestricted.tools.mechanism).not.toBe("pi-extension");
+		expect(unrestricted).toEqual(
+			classifyAgentEgress(
+				{ id: "agent-a", name: "Agent A", engine: "acp:pi", flagship: false },
+				CATALOG,
+				prefs({})
+			)
+		);
 	});
 });
 

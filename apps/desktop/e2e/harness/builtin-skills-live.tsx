@@ -1,7 +1,7 @@
 // Live proof: the shipping Library component reads the actual ryu-skills API.
 // Run an isolated registry/API on 127.0.0.1:18943; no skill fixtures are used.
 import { PotionIcon } from "@hugeicons/core-free-icons";
-import { Input } from "@ryu/ui/components/input";
+import { Input } from "@ryu/ui/components/input.tsx";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import SidebarLibrarySection from "../../src/components/library/SidebarLibrarySection.tsx";
@@ -22,7 +22,7 @@ function BuiltinSkillsLive() {
 				const result: { skills: InstalledSkill[] } = await response.json();
 				setSkills(result.skills);
 			})
-			.catch((reason: unknown) => {
+			.catch((reason) => {
 				if (!controller.signal.aborted) {
 					setError(String(reason));
 				}

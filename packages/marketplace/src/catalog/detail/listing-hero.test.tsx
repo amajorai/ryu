@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // Card and hero share icon identity and material. The detail hero adds elevation,
 // never a second icon tile. Banner behavior is independent of icon material.
 
@@ -7,7 +8,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import AppIcon from "../chrome/app-icon.tsx";
 import DitherBanner from "../chrome/dither-banner.tsx";
 import { safeCssBackground } from "../safe-url.ts";
-import { ListingHero } from "./listing-detail-shell.tsx";
+import {
+	LISTING_HERO_NO_ART_BACKGROUND,
+	ListingHero,
+} from "./listing-detail-shell.tsx";
 
 /** The standard wash every packaged manifest declares: covers the near end of the
  *  square and dissolves to whatever is behind the far end. */
@@ -32,6 +36,7 @@ describe("native layered icon identity", () => {
 		for (const html of [card, hero]) {
 			expect(html).toContain('data-app-icon="layered"');
 			expect(html).not.toContain("mask-image");
+			expect(html).not.toContain("ryu-registered-icon");
 			expect(html).not.toContain("background-image");
 			expect(html).not.toContain("ring-white");
 		}
@@ -64,21 +69,78 @@ describe("ListingHero", () => {
 		);
 		expect(occurrences(html, 'data-app-icon="layered"')).toBe(1);
 		expect(html).not.toContain("mask-image");
+		expect(html).not.toContain("ryu-registered-icon");
 	});
 	test("retains custom fallback content", () => {
 		const html = renderToStaticMarkup(
 			<ListingHero
-				icon={<span className="custom-mark">E</span>}
+				icon={<span data-testid="custom-mark">E</span>}
 				name="Example"
 			/>
 		);
-		expect(html).toContain("custom-mark");
+		expect(html).toContain('data-testid="custom-mark">E</span>');
 	});
-	test("keeps the banner scrim for a white title", () => {
+	test("keeps the banner scrim and feathers into the detail body", () => {
 		const html = renderToStaticMarkup(
 			<ListingHero banner={{ background: "#ffffff" }} name="Example" />
 		);
-		expect(html).toContain("from-black/75");
+		expect(html).toContain('data-testid="listing-hero-scrim"');
+		const css = readFileSync(
+			new URL("../../marketplace-visual.module.css", import.meta.url),
+			"utf8"
+		);
+		expect(css).toContain("rgb(0 0 0 / 68%)");
+		expect(css).toContain("var(--background)");
+	});
+	test("titles a dialog hero with an h2 and a page hero with an h1", () => {
+		const dialog = renderToStaticMarkup(<ListingHero name="Example" />);
+		expect(dialog).toContain("<h2");
+		expect(dialog).not.toContain("<h1");
+		const page = renderToStaticMarkup(
+			<ListingHero name="Example" titleAs="h1" />
+		);
+		expect(page).toContain("<h1");
+		expect(page).not.toContain("<h2");
+	});
+	test("an art-less hero paints the dark default under its white copy", () => {
+		// `bg-muted` is near-white in light theme; the title and tagline are fixed
+		// white in both themes.
+		const html = renderToStaticMarkup(<ListingHero name="Example" />);
+		expect(html).toContain(
+			`--marketplace-background:${LISTING_HERO_NO_ART_BACKGROUND}`
+		);
+		expect(html).not.toContain('class="absolute inset-0 bg-muted"');
+	});
+	test("a caller's own background still outranks the dark default", () => {
+		const html = renderToStaticMarkup(
+			<ListingHero iconBackground="#123456" name="Example" />
+		);
+		expect(html).toContain("--marketplace-background:#123456");
+		expect(html).not.toContain(LISTING_HERO_NO_ART_BACKGROUND);
+	});
+	test("a banner image paints over the dark default", () => {
+		const html = renderToStaticMarkup(
+			<ListingHero
+				banner={{ imageUrl: "https://cdn.test/banner.png" }}
+				name="Example"
+			/>
+		);
+		expect(html).toContain('src="https://cdn.test/banner.png"');
+		expect(html).toContain(LISTING_HERO_NO_ART_BACKGROUND);
+	});
+	test("below sm the title keeps its own line and the actions wrap under it", () => {
+		const html = renderToStaticMarkup(
+			<ListingHero
+				actions={<button type="button">Get</button>}
+				name="Example"
+			/>
+		);
+		expect(html).toMatch(/class="[^"]*\bflex-wrap\b[^"]*\bsm:flex-nowrap\b/);
+		expect(html).toMatch(/<h2 class="[^"]*\bbasis-full\b[^"]*\bsm:basis-0\b/);
+		// A minimum height, not a fixed one, so the wrapped stack grows the band
+		// instead of clipping the name off its top.
+		expect(html).toContain("min-h-56");
+		expect(html).not.toMatch(/[\s"]h-56\b/);
 	});
 });
 
@@ -92,7 +154,7 @@ describe("DitherBanner — an item-declared banner outranks the derived wash", (
 		const html = renderToStaticMarkup(
 			<DitherBanner banner={{ background: "#0099ff" }} dither={DISSOLVING} />
 		);
-		expect(html).toContain("background:#0099ff");
+		expect(html).toContain("--marketplace-background:#0099ff");
 		expect(html).not.toContain("canvas");
 	});
 
@@ -103,7 +165,7 @@ describe("DitherBanner — an item-declared banner outranks the derived wash", (
 				fallback="#ff00ff"
 			/>
 		);
-		expect(html).toContain("background:#0099ff");
+		expect(html).toContain("--marketplace-background:#0099ff");
 		expect(html).not.toContain("linear-gradient");
 	});
 
@@ -116,7 +178,7 @@ describe("DitherBanner — an item-declared banner outranks the derived wash", (
 		);
 		expect(html).toContain('src="https://cdn.test/b.png"');
 		expect(html).toContain("object-cover");
-		expect(html).toContain("background:#0099ff");
+		expect(html).toContain("--marketplace-background:#0099ff");
 		expect(html).not.toContain("canvas");
 	});
 
@@ -238,7 +300,7 @@ describe("DitherBanner — the animated gradient degrades to a static paint", ()
 			<DitherBanner banner={{ ...ANIMATED, noise: { opacity: 50 } }} />
 		);
 		expect(html).toContain("feTurbulence");
-		expect(html).toContain("opacity:0.5");
+		expect(html).toContain("--marketplace-opacity:0.5");
 		// A declared zero means "no grain", not "grain at the default".
 		const none = renderToStaticMarkup(
 			<DitherBanner banner={{ ...ANIMATED, noise: { opacity: 0 } }} />

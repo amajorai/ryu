@@ -36,6 +36,7 @@ import {
 	contextReadAllowed,
 	engineAllowed,
 	normalizeConsent,
+	proactiveAllowed,
 } from "./consent-logic.ts";
 
 const CONSENT_FILE = "island-consent.json";
@@ -52,11 +53,11 @@ export function getConsent(): ConsentState {
 	if (cached) {
 		return cached;
 	}
-	let parsed: Partial<ConsentState> = {};
+	let parsed: Parameters<typeof normalizeConsent>[0] = {};
 	try {
 		const path = consentPath();
 		if (existsSync(path)) {
-			parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ConsentState>;
+			parsed = JSON.parse(readFileSync(path, "utf8"));
 		}
 	} catch {
 		parsed = {};
@@ -123,4 +124,9 @@ export function isContextReadAllowed(): boolean {
  */
 export function shouldRunEngine(): boolean {
 	return engineAllowed(getConsent());
+}
+
+/** Gate notification-based suggestions without requiring screen-context consent. */
+export function shouldRunProactiveEngine(): boolean {
+	return proactiveAllowed(getConsent());
 }

@@ -1,0 +1,356 @@
+.fixture1 {
+	display: flex;
+	flex-direction: column;
+	gap: 13px;
+	padding: 18px;
+	background: #111113;
+	border: 1px solid #27272a;
+	border-radius: 16px;
+}
+
+.fixture2 {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.fixture3 {
+	font-size: 11px;
+	color: #c4b5fd;
+	text-transform: uppercase;
+	letter-spacing: 1.1px;
+}
+
+.fixture4 {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 11px;
+	color: #a1a1aa;
+}
+
+.fixture5 {
+	padding: 15px;
+	color: #333;
+	background: #fafafa;
+	border-radius: 11px;
+}
+
+.fixture6 {
+	font-size: 16px;
+	font-weight: 700;
+}
+
+.fixture7 {
+	margin: 9px 0 12px;
+	font-size: 13px;
+	line-height: 1.55;
+}
+
+.fixture8 {
+	font-size: 13px;
+	color: #2754c5;
+	text-decoration: underline;
+}
+
+.fixture9 {
+	margin-top: 12px;
+	font-size: 10px;
+	color: #898989;
+}
+
+.fixture10 {
+	display: flex;
+	flex-direction: column;
+	grid-column: 1 / -1;
+	gap: 13px;
+	padding: 18px;
+	background: #111113;
+	border: 1px solid #c4b5fd;
+	border-radius: 16px;
+}
+
+.fixture11 {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.fixture12 {
+	font-size: 11px;
+	color: #c4b5fd;
+	text-transform: uppercase;
+	letter-spacing: 1.1px;
+}
+
+.fixture13 {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 11px;
+	color: #a1a1aa;
+}
+
+.fixture14 {
+	padding: 15px;
+	color: #333;
+	background: #fafafa;
+	border-radius: 11px;
+}
+
+.fixture15 {
+	font-size: 16px;
+	font-weight: 700;
+}
+
+.fixture16 {
+	margin: 9px 0 12px;
+	font-size: 13px;
+	line-height: 1.55;
+}
+
+.fixture17 {
+	font-size: 13px;
+	color: #2754c5;
+	text-decoration: underline;
+}
+
+.fixture18 {
+	margin-top: 12px;
+	font-size: 10px;
+	color: #898989;
+}
+
+.fixture19 {
+	padding: 20px;
+	margin-bottom: 16px;
+	background: #111113;
+	border: 1px solid #c4b5fd;
+	border-radius: 18px;
+}
+
+.fixture20 {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.fixture21 {
+	font-size: 11px;
+	color: #c4b5fd;
+	letter-spacing: 1px;
+}
+
+.fixture22 {
+	margin-top: 5px;
+	font-size: 19px;
+	font-weight: 700;
+}
+
+.fixture23 {
+	margin: 8px 0 0;
+	font-size: 13px;
+	line-height: 1.5;
+	color: #a1a1aa;
+}
+
+.fixture24 {
+	margin-top: 16px;
+	font-size: 12px;
+	color: #a1a1aa;
+}
+
+.fixture25 {
+	display: grid;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.fixture26 {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	justify-content: space-between;
+	padding: 12px 13px;
+	background: #18181b;
+	border: 1px solid #27272a;
+	border-radius: 11px;
+}
+
+.fixture27 {
+	font-size: 14px;
+	font-weight: 650;
+}
+
+.fixture28 {
+	margin-top: 3px;
+	font-size: 11px;
+	color: #a1a1aa;
+}
+
+.fixture29 {
+	box-sizing: border-box;
+	min-height: 100vh;
+	padding: 32px 24px 56px;
+	font-family:
+		-apple-system,
+		BlinkMacSystemFont,
+		Segoe UI,
+		sans-serif;
+	color: #f4f4f5;
+	background: #09090b;
+}
+
+.fixture30 {
+	max-width: 1100px;
+	margin: 0 auto;
+}
+
+.fixture31 {
+	margin-bottom: 24px;
+}
+
+.fixture32 {
+	font-size: 12px;
+	color: #c4b5fd;
+	letter-spacing: 1.4px;
+}
+
+.fixture33 {
+	display: flex;
+	gap: 14px;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.fixture34 {
+	margin: 8px 0 0;
+	font-size: 34px;
+	letter-spacing: -1.2px;
+}
+
+.fixture35 {
+	max-width: 790px;
+	margin: 10px 0 0;
+	font-size: 15px;
+	line-height: 1.55;
+	color: #a1a1aa;
+}
+
+.fixture36 {
+	padding: 20px;
+	margin-bottom: 16px;
+	background: #111113;
+	border: 1px solid #27272a;
+	border-radius: 18px;
+}
+
+.fixture37 {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.fixture38 {
+	font-size: 11px;
+	color: #a1a1aa;
+	letter-spacing: 1px;
+}
+
+.fixture39 {
+	margin-top: 5px;
+	font-size: 17px;
+	font-weight: 650;
+}
+
+.fixture40 {
+	padding: 9px 12px;
+	color: #f4f4f5;
+	cursor: pointer;
+	background: #18181b;
+	border: 1px solid #27272a;
+	border-radius: 9px;
+}
+
+.fixture41 {
+	margin-top: 12px;
+	font-size: 13px;
+	color: #a1a1aa;
+}
+
+.fixture42 {
+	margin-top: 8px;
+	font-size: 13px;
+	color: #86efac;
+}
+
+.fixture43 {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+	gap: 12px;
+}
+
+.fixture44 {
+	display: flex;
+	grid-column: 1 / -1;
+	gap: 8px;
+	margin-top: 4px;
+}
+
+.dynamicFixture1 {
+	padding: var(--fixture-value-8);
+	font-size: var(--fixture-value-5);
+	font-weight: var(--fixture-value-6);
+	color: var(--fixture-value-4);
+	letter-spacing: var(--fixture-value-7);
+	white-space: var(--fixture-value-9);
+	background: var(--fixture-value-1);
+	border: var(--fixture-value-2);
+	border-radius: var(--fixture-value-3);
+}
+
+.dynamicFixture2 {
+	min-width: var(--fixture-value-17);
+	padding: var(--fixture-value-18);
+	font-size: var(--fixture-value-15);
+	font-weight: var(--fixture-value-16);
+	color: var(--fixture-value-13);
+	cursor: var(--fixture-value-14);
+	background: var(--fixture-value-10);
+	border: var(--fixture-value-11);
+	border-radius: var(--fixture-value-12);
+}
+
+.dynamicFixture3 {
+	padding: var(--fixture-value-24);
+	color: var(--fixture-value-22);
+	cursor: var(--fixture-value-23);
+	background: var(--fixture-value-19);
+	border: var(--fixture-value-20);
+	border-radius: var(--fixture-value-21);
+}
+
+.dynamicFixture4 {
+	padding: var(--fixture-value-30);
+	color: var(--fixture-value-28);
+	cursor: var(--fixture-value-29);
+	background: var(--fixture-value-25);
+	border: var(--fixture-value-26);
+	border-radius: var(--fixture-value-27);
+}
+
+:root {
+	--billing-transactional-emails-proof-color-1: #123022;
+	--billing-transactional-emails-proof-color-2: #33270c;
+	--billing-transactional-emails-proof-color-3: #245c3e;
+	--billing-transactional-emails-proof-color-4: #765b16;
+	--billing-transactional-emails-proof-color-5: #86efac;
+	--billing-transactional-emails-proof-color-6: #fcd34d;
+	--billing-transactional-emails-proof-color-7: #c4b5fd;
+	--billing-transactional-emails-proof-color-8: #18181b;
+	--billing-transactional-emails-proof-color-9: #27272a;
+	--billing-transactional-emails-proof-color-10: #17121f;
+	--billing-transactional-emails-proof-color-11: #f4f4f5;
+}

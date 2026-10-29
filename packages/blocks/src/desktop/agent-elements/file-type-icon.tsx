@@ -23,57 +23,75 @@ const resolver = createFileTreeIconResolver(COMPLETE_ICONS);
 const spriteSheet = getBuiltInSpriteSheet("complete");
 const symbolCache = new Map<string, string>();
 
-const SPECIAL_FILE_ICONS: Record<
+// Resolve authored names only; prototype member names use the normal fallback.
+const SPECIAL_FILE_ICONS = new Map<
 	string,
 	{ className: string; icon: IconSvgElement }
-> = {
-	"7z": { className: "text-amber-500", icon: FileArchiveIcon },
-	csv: { className: "text-emerald-600 dark:text-emerald-400", icon: Xls01Icon },
-	doc: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
-	docx: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
-	gif: {
-		className: "text-violet-600 dark:text-violet-400",
-		icon: FileImageIcon,
-	},
-	jpeg: {
-		className: "text-violet-600 dark:text-violet-400",
-		icon: FileImageIcon,
-	},
-	jpg: {
-		className: "text-violet-600 dark:text-violet-400",
-		icon: FileImageIcon,
-	},
-	m4a: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
-	mkv: { className: "text-rose-600 dark:text-rose-400", icon: FileVideoIcon },
-	mp3: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
-	mp4: { className: "text-rose-600 dark:text-rose-400", icon: FileVideoIcon },
-	odt: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
-	pdf: { className: "text-red-500", icon: Pdf01Icon },
-	png: {
-		className: "text-violet-600 dark:text-violet-400",
-		icon: FileImageIcon,
-	},
-	ppt: { className: "text-orange-600 dark:text-orange-400", icon: Ppt01Icon },
-	pptx: { className: "text-orange-600 dark:text-orange-400", icon: Ppt01Icon },
-	rtf: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
-	rar: { className: "text-amber-500", icon: FileArchiveIcon },
-	svg: {
-		className: "text-violet-600 dark:text-violet-400",
-		icon: FileImageIcon,
-	},
-	tsv: { className: "text-emerald-600 dark:text-emerald-400", icon: Xls01Icon },
-	wav: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
-	webm: { className: "text-rose-600 dark:text-rose-400", icon: FileVideoIcon },
-	webp: {
-		className: "text-violet-600 dark:text-violet-400",
-		icon: FileImageIcon,
-	},
-	xls: { className: "text-emerald-600 dark:text-emerald-400", icon: Xls01Icon },
-	xlsx: {
-		className: "text-emerald-600 dark:text-emerald-400",
-		icon: Xls01Icon,
-	},
-};
+>(
+	Object.entries({
+		"7z": { className: "text-amber-500", icon: FileArchiveIcon },
+		csv: {
+			className: "text-emerald-600 dark:text-emerald-400",
+			icon: Xls01Icon,
+		},
+		doc: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
+		docx: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
+		gif: {
+			className: "text-violet-600 dark:text-violet-400",
+			icon: FileImageIcon,
+		},
+		jpeg: {
+			className: "text-violet-600 dark:text-violet-400",
+			icon: FileImageIcon,
+		},
+		jpg: {
+			className: "text-violet-600 dark:text-violet-400",
+			icon: FileImageIcon,
+		},
+		m4a: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
+		mkv: { className: "text-rose-600 dark:text-rose-400", icon: FileVideoIcon },
+		mp3: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
+		mp4: { className: "text-rose-600 dark:text-rose-400", icon: FileVideoIcon },
+		odt: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
+		pdf: { className: "text-red-500", icon: Pdf01Icon },
+		png: {
+			className: "text-violet-600 dark:text-violet-400",
+			icon: FileImageIcon,
+		},
+		ppt: { className: "text-orange-600 dark:text-orange-400", icon: Ppt01Icon },
+		pptx: {
+			className: "text-orange-600 dark:text-orange-400",
+			icon: Ppt01Icon,
+		},
+		rtf: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
+		rar: { className: "text-amber-500", icon: FileArchiveIcon },
+		svg: {
+			className: "text-violet-600 dark:text-violet-400",
+			icon: FileImageIcon,
+		},
+		tsv: {
+			className: "text-emerald-600 dark:text-emerald-400",
+			icon: Xls01Icon,
+		},
+		wav: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
+		webm: {
+			className: "text-rose-600 dark:text-rose-400",
+			icon: FileVideoIcon,
+		},
+		webp: {
+			className: "text-violet-600 dark:text-violet-400",
+			icon: FileImageIcon,
+		},
+		xls: {
+			className: "text-emerald-600 dark:text-emerald-400",
+			icon: Xls01Icon,
+		},
+		xlsx: {
+			className: "text-emerald-600 dark:text-emerald-400",
+			icon: Xls01Icon,
+		},
+	} satisfies Record<string, { className: string; icon: IconSvgElement }>)
+);
 
 function getScopedSymbol(name: string, scopedName: string): string {
 	const cached = symbolCache.get(name);
@@ -113,7 +131,7 @@ export function FileTypeIcon({
 			.split(/[./\\]/)
 			.pop()
 			?.toLowerCase() ?? "";
-	const special = SPECIAL_FILE_ICONS[extension];
+	const special = SPECIAL_FILE_ICONS.get(extension);
 	if (special) {
 		return (
 			<HugeiconsIcon

@@ -34,6 +34,10 @@ pub const ENTITLEMENT_ACTIVE_PREF_KEY: &str = "entitlement-active";
 /// Core-owned profile bootstrap. Unlike the autonomy flag, this defaults OFF:
 /// a free or headless node must never start a paid-only profile job.
 pub const MANAGED_INFERENCE_ENTITLED_PREF_KEY: &str = "managed-inference-entitled";
+/// The env var every manifest sidecar receives: `1` when the member's plan drops
+/// the "Powered by Ryu" badge from the public pages the app serves (published
+/// sites, forms, boards). See [`branding_removable`].
+pub const BRANDING_REMOVABLE_ENV: &str = "RYU_BRANDING_REMOVABLE";
 
 /// In-process flag, populated from preferences. Defaults to `true` (active): a
 /// node with no signal must run automations normally (headless / OSS Core / a
@@ -71,6 +75,16 @@ pub fn managed_inference_entitled() -> bool {
     MANAGED_INFERENCE_ENTITLED.load(Ordering::Relaxed)
 }
 
+/// Whether the member's plan drops the "Powered by Ryu" badge. The plans that may
+/// are exactly the paid subscription plans that carry managed inference — the
+/// plan catalog test `branding removal tracks managed inference` in
+/// `packages/auth/src/lib/plans.test.ts` holds the two together — so this reads
+/// the flag the desktop already pushes rather than a second one. Defaults OFF
+/// with it: a free, trial or headless node stays branded.
+pub fn branding_removable() -> bool {
+    managed_inference_entitled()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +106,11 @@ mod tests {
         assert!(!is_active());
         // Restore the default-ON state so other tests are unaffected.
         set_active("true");
+    }
+
+    #[test]
+    fn branding_follows_the_paid_managed_inference_flag() {
+        // Read-only: the flag is process-global and other tests set it.
+        assert_eq!(branding_removable(), managed_inference_entitled());
     }
 }

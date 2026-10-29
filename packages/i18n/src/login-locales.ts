@@ -32,6 +32,11 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "Descargar de nuevo",
 		"login.open-core-downloads": "Abrir descargas de Core",
 		"login.copied": "Copiado al portapapeles",
+		"login.device-sign-in-code": "Código de inicio de sesión del dispositivo",
+		"login.copy-sign-in-link": "Copiar enlace de inicio de sesión",
+		"login.sign-in-link-copied": "Enlace de inicio de sesión copiado",
+		"login.copy-sign-in-link-failed":
+			"No se pudo copiar el enlace de inicio de sesión",
 	},
 	fr: {
 		"login.title": "Bonjour, je suis Ryu",
@@ -62,6 +67,11 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "Télécharger à nouveau",
 		"login.open-core-downloads": "Ouvrir les téléchargements de Core",
 		"login.copied": "Copié dans le presse-papiers",
+		"login.device-sign-in-code": "Code de connexion de l'appareil",
+		"login.copy-sign-in-link": "Copier le lien de connexion",
+		"login.sign-in-link-copied": "Lien de connexion copié",
+		"login.copy-sign-in-link-failed":
+			"Impossible de copier le lien de connexion",
 	},
 	de: {
 		"login.title": "Hey, ich bin Ryu",
@@ -90,6 +100,11 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "Erneut herunterladen",
 		"login.open-core-downloads": "Core-Downloads öffnen",
 		"login.copied": "In die Zwischenablage kopiert",
+		"login.device-sign-in-code": "Anmeldecode des Geräts",
+		"login.copy-sign-in-link": "Anmeldelink kopieren",
+		"login.sign-in-link-copied": "Anmeldelink kopiert",
+		"login.copy-sign-in-link-failed":
+			"Der Anmeldelink konnte nicht kopiert werden",
 	},
 	"pt-BR": {
 		"login.title": "Olá, eu sou o Ryu",
@@ -118,6 +133,10 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "Baixar novamente",
 		"login.open-core-downloads": "Abrir downloads do Core",
 		"login.copied": "Copiado para a área de transferência",
+		"login.device-sign-in-code": "Código de login do dispositivo",
+		"login.copy-sign-in-link": "Copiar link de login",
+		"login.sign-in-link-copied": "Link de login copiado",
+		"login.copy-sign-in-link-failed": "Não foi possível copiar o link de login",
 	},
 	ja: {
 		"login.title": "こんにちは、Ryuです",
@@ -146,6 +165,11 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "もう一度ダウンロード",
 		"login.open-core-downloads": "Coreのダウンロードを開く",
 		"login.copied": "クリップボードにコピーしました",
+		"login.device-sign-in-code": "デバイスのサインインコード",
+		"login.copy-sign-in-link": "サインインリンクをコピー",
+		"login.sign-in-link-copied": "サインインリンクをコピーしました",
+		"login.copy-sign-in-link-failed":
+			"サインインリンクをコピーできませんでした",
 	},
 	"zh-CN": {
 		"login.title": "嗨，我是 Ryu",
@@ -174,6 +198,10 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "再次下载",
 		"login.open-core-downloads": "打开 Core 下载",
 		"login.copied": "已复制到剪贴板",
+		"login.device-sign-in-code": "设备登录代码",
+		"login.copy-sign-in-link": "复制登录链接",
+		"login.sign-in-link-copied": "已复制登录链接",
+		"login.copy-sign-in-link-failed": "无法复制登录链接",
 	},
 	it: {
 		"login.title": "Ciao, sono Ryu",
@@ -203,6 +231,10 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "Scarica di nuovo",
 		"login.open-core-downloads": "Apri i download di Core",
 		"login.copied": "Copiato negli appunti",
+		"login.device-sign-in-code": "Codice di accesso del dispositivo",
+		"login.copy-sign-in-link": "Copia link di accesso",
+		"login.sign-in-link-copied": "Link di accesso copiato",
+		"login.copy-sign-in-link-failed": "Impossibile copiare il link di accesso",
 	},
 	ko: {
 		"login.title": "안녕하세요, Ryu입니다",
@@ -231,6 +263,10 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "다시 다운로드",
 		"login.open-core-downloads": "Core 다운로드 열기",
 		"login.copied": "클립보드에 복사됨",
+		"login.device-sign-in-code": "기기 로그인 코드",
+		"login.copy-sign-in-link": "로그인 링크 복사",
+		"login.sign-in-link-copied": "로그인 링크를 복사했습니다",
+		"login.copy-sign-in-link-failed": "로그인 링크를 복사할 수 없습니다",
 	},
 	hi: {
 		"login.title": "नमस्ते, मैं Ryu हूँ",
@@ -259,6 +295,10 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "फिर से डाउनलोड करें",
 		"login.open-core-downloads": "Core डाउनलोड खोलें",
 		"login.copied": "क्लिपबोर्ड पर कॉपी किया गया",
+		"login.device-sign-in-code": "डिवाइस साइन-इन कोड",
+		"login.copy-sign-in-link": "साइन-इन लिंक कॉपी करें",
+		"login.sign-in-link-copied": "साइन-इन लिंक कॉपी किया गया",
+		"login.copy-sign-in-link-failed": "साइन-इन लिंक कॉपी नहीं किया जा सका",
 	},
 	ru: {
 		"login.title": "Привет, я Ryu",
@@ -287,6 +327,10 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "Загрузить снова",
 		"login.open-core-downloads": "Открыть загрузки Core",
 		"login.copied": "Скопировано в буфер обмена",
+		"login.device-sign-in-code": "Код входа устройства",
+		"login.copy-sign-in-link": "Скопировать ссылку для входа",
+		"login.sign-in-link-copied": "Ссылка для входа скопирована",
+		"login.copy-sign-in-link-failed": "Не удалось скопировать ссылку для входа",
 	},
 	ar: {
 		"login.title": "مرحبًا، أنا Ryu",
@@ -315,6 +359,10 @@ const LOGIN_MESSAGES = {
 		"login.download-again": "تنزيل مرة أخرى",
 		"login.open-core-downloads": "فتح تنزيلات Core",
 		"login.copied": "تم النسخ إلى الحافظة",
+		"login.device-sign-in-code": "رمز تسجيل دخول الجهاز",
+		"login.copy-sign-in-link": "نسخ رابط تسجيل الدخول",
+		"login.sign-in-link-copied": "تم نسخ رابط تسجيل الدخول",
+		"login.copy-sign-in-link-failed": "تعذّر نسخ رابط تسجيل الدخول",
 	},
 } satisfies Record<string, LoginMessages>;
 

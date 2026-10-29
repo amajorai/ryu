@@ -1,3 +1,7 @@
+import {
+	uploadErrorViewSchema,
+	uploadLegacyViewSchema,
+} from "./upload-wire-contracts.ts";
 // packages/core-client/src/uploads.ts
 //
 // User file uploads → Core's Uploads system space (`POST /api/uploads`). Shared
@@ -18,15 +22,6 @@ export interface UploadObject {
 	id: string;
 	size: number;
 	spaceId: string;
-	url: string;
-}
-
-interface UploadWire {
-	content_type?: string;
-	file_name?: string;
-	id: string;
-	size?: number;
-	space_id?: string;
 	url: string;
 }
 
@@ -54,14 +49,14 @@ export async function uploadUserFile(
 	if (!res.ok) {
 		let detail = "";
 		try {
-			const err = (await res.json()) as { error?: string };
+			const err = uploadErrorViewSchema.parse(await res.json());
 			detail = err.error ? `: ${err.error}` : "";
 		} catch {
 			// ignore
 		}
 		throw new Error(`Upload failed (${res.status})${detail}`);
 	}
-	const data = (await res.json()) as UploadWire;
+	const data = uploadLegacyViewSchema.parse(await res.json());
 	return {
 		id: data.id,
 		spaceId: data.space_id ?? "",

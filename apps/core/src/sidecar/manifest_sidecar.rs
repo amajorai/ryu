@@ -44,6 +44,15 @@ pub const GRANT_SIDECAR_PROCESS: &str = "sidecar:process";
 /// How long to wait on a health-check HTTP request before treating it as down.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Shared client for sidecar health probes. The monitor polls every sidecar
+/// every 30s and `await_healthy` polls from 25ms on a lazy wake, so a client per
+/// probe rebuilt the TLS config and dropped the loopback connection each time.
+/// The timeout is set on each request.
+fn health_probe_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
+
 /// The Core preference key that gates the experimental extension-host runtime
 /// (`kind: "node"` sidecars) — i.e. spawning a plugin's own BACKEND process.
 /// **Default OFF**, and Core-only: the desktop once had a same-named localStorage
@@ -147,11 +156,25 @@ fn resolve_node_runtime(explicit: Option<&str>) -> anyhow::Result<String> {
 /// only `bun` is an npm `bun.cmd`. Left alone deliberately: it is a separate,
 /// not pre-installed code path (the experimental node extension host) and needs its own
 /// test, not a drive-by.
+///
+/// # Unix: only executable files count
+///
+/// A regular file without any execute bit (a stray `env` text file in
+/// `~/.local/bin`, say) is skipped, exactly as `execvp` would skip it and keep
+/// walking `PATH`. Accepting it would report a program as installed, and then
+/// resolve to a path that cannot spawn, while a real executable later on `PATH`
+/// is ignored.
 pub(crate) fn which_on_path(program: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
+    which_in_path(&path, program)
+}
+
+/// [`which_on_path`] over an explicit `PATH` value, so the lookup rules are
+/// testable without mutating the process-global environment.
+fn which_in_path(path: &std::ffi::OsStr, program: &str) -> Option<PathBuf> {
+    for dir in std::env::split_paths(path) {
         let direct = dir.join(program);
-        if direct.is_file() {
+        if is_spawnable_file(&direct) {
             return Some(direct);
         }
         #[cfg(windows)]
@@ -165,11 +188,31 @@ pub(crate) fn which_on_path(program: &str) -> Option<PathBuf> {
     None
 }
 
+/// A `PATH` candidate a spawn could actually execute: a regular file, and on
+/// unix one with at least one execute bit set.
+fn is_spawnable_file(path: &std::path::Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
 /// Where a bare, Ryu-managed `command` lands on this host: `<data dir>/bin/<command>`
 /// (`.exe` appended on Windows).
 ///
 /// Profile-aware by construction — `download_manager::bin_dir()` is
-/// `paths::ryu_dir().join("bin")`, so a `RYU_PROFILE=dev` stack resolves
+/// `layout::bin_dir(&paths::ryu_dir())`, so a `RYU_PROFILE=dev` stack resolves
 /// `~/.ryu-dev/bin` and never collides with a release stack.
 ///
 /// This is only the **path computation**, deliberately: [`ensure_local_sidecar_present`]
@@ -185,9 +228,9 @@ pub(crate) fn managed_bin_path(command: &str) -> PathBuf {
 
 /// The full loaded manifest for `plugin_id` (built-in or user-installed), or `None`
 /// when absent. Reads at spawn (rare) so it is never stale — the same pattern
-/// [`declared_permissions_for`] / [`declared_capabilities_for`] use.
+/// Runtime loading preserves installed bytes for opt-in catalog packages.
 fn owning_manifest(plugin_id: &str) -> Option<crate::plugin_manifest::PluginManifest> {
-    crate::plugin_manifest::PluginManifestLoader::load()
+    crate::plugin_manifest::PluginManifestLoader::load_runtime()
         .into_iter()
         .find(|m| m.id == plugin_id)
 }
@@ -297,7 +340,7 @@ pub fn namespaced_name(plugin_id: &str, local_name: &str) -> String {
 // plugin can still DECLARE a `PermissionSet`, and it is load-bearing to (a) record
 // what was declared and (b) warn loudly that the declaration is recorded-but-
 // UNENFORCED for a native process, so the honesty of the deny-by-default story is
-// visible rather than silently false. The sandbox-backed lanes (Deno PTC, wasmtime/
+// visible rather than silently false. The sandbox-backed lanes (JS sandbox, wasmtime/
 // Docker) DO enforce the same set — see `run_sandboxed_with_permissions` and
 // `SandboxCapabilities::from_permissions`.
 //
@@ -367,7 +410,7 @@ fn record_native_permissions(name: &str, plugin_id: &str) {
         // A native process is unsandboxed this wave: any declared set is narrower
         // than the process's real OS access, so the declaration cannot be honoured
         // here. Warn loudly (structured) rather than let the deny-by-default story
-        // be silently false. The Deno PTC + wasmtime/Docker lanes DO enforce it.
+        // be silently false. The JS sandbox + wasmtime/Docker lanes DO enforce it.
         tracing::warn!(
             target: "ryu::permissions",
             sidecar = %name,
@@ -375,7 +418,9 @@ fn record_native_permissions(name: &str, plugin_id: &str) {
             enforced = false,
             "native manifest sidecar declares a runtime permission set that is \
              RECORDED BUT NOT OS-ENFORCED this wave — the process runs unsandboxed \
-             with full host access (followup: OS-level sandboxing for native sidecars)"
+             with full host access; only conservative Unix rlimits (no core dumps, \
+             capped open files) are applied, plus the separate filesystem confinement of \
+             the RYU_SIDECAR_SANDBOX setting when it is set to enforce"
         );
     }
     if let Ok(mut record) = native_permission_record().lock() {
@@ -611,6 +656,7 @@ fn crash_record() -> &'static std::sync::Mutex<std::collections::HashMap<String,
 
 /// Record that `name`'s process died on its own, and why. Idempotent (overwrites).
 pub(crate) fn record_crash_reason(name: &str, reason: &str) {
+    let reason = &crate::sidecar::os_isolation::annotate_crash_reason(name, reason);
     tracing::error!(sidecar = %name, "app sidecar process exited unexpectedly: {reason}");
     if let Ok(mut record) = crash_record().lock() {
         record.insert(name.to_owned(), reason.to_owned());
@@ -959,7 +1005,8 @@ impl ManifestSidecar {
     /// `<plugins_dir>/<plugin_id>` — where this plugin's `bin/` and `runtime/`
     /// directories live, namespaced so two plugins never collide.
     fn plugin_dir(&self) -> PathBuf {
-        crate::plugin_manifest::PluginManifestLoader::plugins_dir().join(&self.plugin_id)
+        crate::plugin_manifest::PluginManifestLoader::plugins_dir()
+            .join(crate::plugin_manifest::plugin_dir_name(&self.plugin_id))
     }
 
     /// The profile-aware bind/proxy port for this sidecar: `profile::port(spec.port)`
@@ -987,6 +1034,40 @@ impl ManifestSidecar {
     }
 }
 
+/// Resolve only explicit plugin-scoped credential references before reserved runtime values.
+pub(crate) async fn resolve_declared_env(
+    env: &mut BTreeMap<String, String>,
+    plugin_id: &str,
+    spec: Option<&SidecarSpec>,
+) {
+    // Bind privilege to the loaded manifest and the process declaration being
+    // launched, including when a queued sidecar outlives a manifest update.
+    let manifest = owning_manifest(plugin_id)
+        .filter(|manifest| spec.is_some_and(|spec| manifest.sidecars.contains(spec)));
+    let references: Vec<(String, String)> = env
+        .iter()
+        .filter(|(_, value)| value.starts_with("env:"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    for (key, source) in references {
+        match crate::tool_exec::resolve_sidecar_env_source(
+            plugin_id,
+            &source,
+            crate::plugin_secrets::global(),
+            manifest.as_ref(),
+        )
+        .await
+        {
+            Some(value) => {
+                env.insert(key, value);
+            }
+            None => {
+                env.remove(&key);
+            }
+        }
+    }
+}
+
 /// The env vars Core injects into every manifest sidecar at spawn so it can (a)
 /// authenticate the loopback caller as "came through Core" (`RYU_EXT_TOKEN`) and (b)
 /// name itself on the host-API callback (`RYU_EXT_PLUGIN_ID`). Layered over the
@@ -996,6 +1077,7 @@ fn inject_ext_env(
     env: &mut BTreeMap<String, String>,
     plugin_id: &str,
     token: &str,
+    seal: bool,
 ) -> anyhow::Result<()> {
     env.insert(
         crate::sidecar::ext_proxy::ENV_EXT_TOKEN.to_owned(),
@@ -1013,22 +1095,148 @@ fn inject_ext_env(
         "RYU_GATEWAY_TOKEN".to_owned(),
         crate::sidecar::gateway::gateway_bearer()?,
     );
-    // Co-location guarantee: pass Core's data dir so a sidecar that persists state
-    // (e.g. ryu-mail's mail.db) lands under the SAME `RYU_DIR` Core uses, honoring
-    // its `RYU_DIR`-env-first paths rule. Reserved (applied last).
-    env.insert(
-        "RYU_DIR".to_owned(),
-        crate::paths::ryu_dir().to_string_lossy().into_owned(),
-    );
+    // Co-location guarantee: pass Core's data dir so a sidecar resolves the SAME
+    // `RYU_DIR` Core uses. Reserved (applied last).
+    let ryu_dir = crate::paths::ryu_dir();
+    env.insert("RYU_DIR".to_owned(), ryu_dir.to_string_lossy().into_owned());
+    inject_data_layout_env(env, &ryu_dir, plugin_id);
     // Core's own (profile-shifted) loopback port, so a sidecar that reaches BACK into
     // Core over a host callback (e.g. ryu-monitors' Spider fetch + alert fan-out) knows
     // where Core listens. Reserved + always applied here — `inject_shim_env` also sets
-    // it, but only on the best-effort cap-shim path, so setting it unconditionally
-    // guarantees it is present even when no shims materialize. `entry().or_insert`
-    // keeps the shim path from overriding it.
-    env.entry(crate::sidecar::cli_shims::ENV_CORE_PORT.to_owned())
-        .or_insert_with(crate::sidecar::cli_shims::core_port_string);
+    // it, but only on the best-effort cap-shim path. Always replace manifest
+    // values here; the later shim injection uses the same authoritative port.
+    env.insert(
+        crate::sidecar::cli_shims::ENV_CORE_PORT.to_owned(),
+        crate::sidecar::cli_shims::core_port_string(),
+    );
+    // Whether the member's plan drops the "Powered by Ryu" badge on the public
+    // pages an app serves. Reserved, so a manifest can never unbrand itself.
+    env.insert(
+        crate::entitlement::BRANDING_REMOVABLE_ENV.to_owned(),
+        if crate::entitlement::branding_removable() {
+            "1"
+        } else {
+            "0"
+        }
+        .to_owned(),
+    );
+    inject_seal_env(env, plugin_id, seal);
     Ok(())
+}
+
+/// The host-API grant a sidecar declares to receive its sealing subkey: the same
+/// `crypto:seal` that gates `host.crypto.seal`/`open` for the plugin's id, so
+/// the env delivery adds no authority the grant does not already name.
+const SEAL_GRANT: &str = "crypto:seal";
+
+/// Whether this sidecar opted in to at-rest sealing by declaring
+/// [`SEAL_GRANT`] in its `host_api.grants`. Only such a sidecar gets
+/// `RYU_SEAL_KEY`; every other sidecar (and so every child process it spawns:
+/// experiment code, ffmpeg, `gh`, Chromium) never sees key material.
+fn seals_at_rest(spec: &SidecarSpec) -> bool {
+    spec.host_api
+        .as_ref()
+        .is_some_and(|host_api| host_api.grants.iter().any(|grant| grant == SEAL_GRANT))
+}
+
+/// Deliver the plugin's at-rest sealing subkey (`RYU_SEAL_KEY` +
+/// `RYU_SEAL_SCOPE=plugin:<canonical id>`), derived from Core's master key by
+/// HKDF, so the sidecar seals its own credentials (`encp:v1:`) without ever
+/// holding the master key. Only when `seal` ([`seals_at_rest`]); otherwise the
+/// sidecar gets no key. Reserved either way: any manifest-declared value is
+/// dropped first, so a manifest cannot hand its child another plugin's scope or
+/// a master key. When Core cannot resolve its master key the sidecar starts
+/// without a key and its secret writes fail closed.
+fn inject_seal_env(env: &mut BTreeMap<String, String>, plugin_id: &str, seal: bool) {
+    for name in ryu_crypto::SEAL_ENV_VARS {
+        env.remove(name);
+    }
+    if !seal {
+        return;
+    }
+    let canonical = crate::plugin_manifest::canonical_plugin_id(plugin_id);
+    match ryu_crypto::plugin_child_env(canonical) {
+        Ok(entries) => env.extend(entries),
+        Err(error) => {
+            tracing::warn!(plugin = %plugin_id, "no seal key for the sidecar: {error}");
+        }
+    }
+}
+
+/// Inject the data-dir layout every plugin sidecar persists into:
+///
+/// - `RYU_PLUGIN_DATA_DIR` = `<data dir>/plugin-data/<dir>` — the plugin's own data
+///   (dbs, prefs, media), created here and deleted by uninstall-with-data;
+/// - `RYU_MODELS_DIR` = `<data dir>/models` — the shared weights root;
+/// - `HF_HOME` / `TORCH_HOME` default to the shared `models/hf` / `models/torch`
+///   caches unless the manifest set them, so Hub downloads never land in
+///   `~/.cache/huggingface` or a per-plugin copy.
+///
+/// The first two are reserved (Core's value always wins).
+fn inject_data_layout_env(env: &mut BTreeMap<String, String>, ryu_dir: &Path, plugin_id: &str) {
+    use ryu_sidecar_runtime::layout;
+    let plugin_data = layout::plugin_data_dir(ryu_dir, plugin_id);
+    if let Err(error) = std::fs::create_dir_all(&plugin_data) {
+        tracing::warn!(
+            plugin = %plugin_id,
+            dir = %plugin_data.display(),
+            "creating the plugin data dir failed: {error}"
+        );
+    }
+    env.insert(
+        layout::RYU_PLUGIN_DATA_DIR_ENV.to_owned(),
+        plugin_data.to_string_lossy().into_owned(),
+    );
+    env.insert(
+        layout::RYU_MODELS_DIR_ENV.to_owned(),
+        layout::models_root(ryu_dir).to_string_lossy().into_owned(),
+    );
+    // Brotli floor (CVE-2026-111497) for any `pip install` the sidecar runs itself
+    // (e.g. the voice sidecar's engine installer). Reserved: Core's value wins.
+    if let Some((name, value)) = crate::sidecar::external_runtime::pip_constraint_env() {
+        env.insert(name, value);
+    }
+    env.entry("HF_HOME".to_owned())
+        .or_insert_with(|| layout::hf_home(ryu_dir).to_string_lossy().into_owned());
+    env.entry("TORCH_HOME".to_owned())
+        .or_insert_with(|| layout::torch_home(ryu_dir).to_string_lossy().into_owned());
+}
+
+/// Expand the data-dir tokens a manifest may use in a sidecar's declared env:
+/// `${RYU_DIR}`, `${RYU_PLUGIN_DATA_DIR}`, `${RYU_MODELS_DIR}`, `${RYU_PLUGIN_DIR}`
+/// and (Python runtimes only) `${RYU_RUNTIME_DIR}`.
+fn expand_manifest_env(
+    declared: &BTreeMap<String, String>,
+    plugin_id: &str,
+    plugin_dir: &Path,
+    runtime_dir: Option<&Path>,
+) -> BTreeMap<String, String> {
+    use ryu_sidecar_runtime::layout;
+    let ryu_dir = crate::paths::ryu_dir();
+    let tokens = [
+        // Each token is a complete `${…}` (closing brace included), so no token is
+        // a prefix of another and replacement order does not matter.
+        (
+            "${RYU_PLUGIN_DATA_DIR}",
+            layout::plugin_data_dir(&ryu_dir, plugin_id),
+        ),
+        ("${RYU_MODELS_DIR}", layout::models_root(&ryu_dir)),
+        ("${RYU_PLUGIN_DIR}", plugin_dir.to_path_buf()),
+        ("${RYU_DIR}", ryu_dir.clone()),
+    ];
+    declared
+        .iter()
+        .map(|(key, value)| {
+            let mut expanded = value.clone();
+            for (token, path) in &tokens {
+                expanded = expanded.replace(token, &path.to_string_lossy());
+            }
+            if let Some(runtime_dir) = runtime_dir {
+                expanded = expanded.replace("${RYU_RUNTIME_DIR}", &runtime_dir.to_string_lossy());
+            }
+            (key.clone(), expanded)
+        })
+        .collect()
 }
 
 /// Inject the Shadow API bearer (`SHADOW_API_TOKEN`) so a sidecar that dials the
@@ -1040,11 +1248,26 @@ fn inject_ext_env(
 /// `api_token`), so spawn and clients always agree. The token is injected
 /// deliberately for sidecars that need direct Shadow access; it is never
 /// obtained through ambient environment inheritance.
-fn inject_shadow_env(env: &mut BTreeMap<String, String>, plugin_id: &str) {
+///
+/// Handing the token to these first-party children is safe; sending it on is
+/// gated. Both sidecars attach it only through
+/// `ryu_sidecar_runtime::peer_proof::send_with_verified_bearer`, which first
+/// makes the listener on Shadow's port prove it holds the token — the same peer
+/// proof Core's own Shadow clients use (`shadow::verified_api_token`).
+///
+/// Unless an operator exported `SHADOW_API_TOKEN`, the token file's path is
+/// injected too (`SHADOW_API_TOKEN_FILE`), so the sidecars follow a rotation.
+fn inject_shadow_env(env: &mut BTreeMap<String, String>, plugin_id: &str, spec: &SidecarSpec) {
     if !matches!(
         plugin_id,
         "@ryu/clips" | "clips" | "@ryu/meetings" | "meetings"
     ) {
+        return;
+    }
+    if !owning_manifest(plugin_id).is_some_and(|manifest| {
+        manifest.sidecars.contains(spec)
+            && crate::plugins::builtins::is_exact_compiled_manifest(&manifest)
+    }) {
         return;
     }
     if env.contains_key("SHADOW_API_TOKEN") {
@@ -1056,10 +1279,71 @@ fn inject_shadow_env(env: &mut BTreeMap<String, String>, plugin_id: &str) {
     {
         Ok(token) => {
             env.insert("SHADOW_API_TOKEN".to_owned(), token);
+            // Core rotates the token file when it finds an unverified listener
+            // on Shadow's port, possibly after this child was spawned. The path
+            // lets the child read the current token on each call instead of
+            // keeping a stale copy. Older sidecars ignore it and use the value.
+            if let Some(path) = crate::sidecar::tools::shadow::api_token_file() {
+                env.insert(
+                    "SHADOW_API_TOKEN_FILE".to_owned(),
+                    path.to_string_lossy().into_owned(),
+                );
+            }
         }
         Err(e) => tracing::warn!(
             "manifest sidecar: could not prepare the Shadow API token (direct Shadow calls will fail closed): {e}"
         ),
+    }
+}
+
+/// The manifest-declared env value that requests the node's egress proxy URL
+/// (see [`inject_egress_route_env`]). Deliberately NOT a generic
+/// [`expand_manifest_env`] token: the URL carries a proxy credential.
+const EGRESS_PROXY_URL_REQUEST: &str = "${RYU_EGRESS_PROXY_URL}";
+
+/// Point a sidecar that requests it at the node's credentialed egress proxy, so
+/// its traffic follows "Route traffic through this computer" (see
+/// `crate::local_egress`). A sidecar opts in by declaring
+/// `"RYU_EGRESS_PROXY_URL": "${RYU_EGRESS_PROXY_URL}"` in its env (the browser
+/// app does). Runs after [`expand_manifest_env`] on every spawn path. Only an
+/// exact compiled built-in manifest receives the URL, and only on nodes that run
+/// the entry side; any other declarer gets the key removed, so neither the
+/// credential nor the unexpanded placeholder ever reaches the child.
+fn inject_egress_route_env(
+    env: &mut BTreeMap<String, String>,
+    plugin_id: &str,
+    spec: &SidecarSpec,
+) {
+    if env
+        .get(crate::local_egress::BROWSER_PROXY_ENV)
+        .map(String::as_str)
+        != Some(EGRESS_PROXY_URL_REQUEST)
+    {
+        return;
+    }
+    let trusted = owning_manifest(plugin_id).is_some_and(|manifest| {
+        manifest.sidecars.contains(spec)
+            && crate::plugins::builtins::is_exact_compiled_manifest(&manifest)
+    });
+    let url = if trusted {
+        crate::local_egress::entry::browser_proxy_url()
+    } else {
+        None
+    };
+    apply_egress_route_request(env, trusted, url);
+}
+
+/// Resolve a declared egress-proxy request (the caller has already matched the
+/// placeholder): always drop it, then insert the real URL only for a trusted
+/// manifest on a node that has one.
+fn apply_egress_route_request(
+    env: &mut BTreeMap<String, String>,
+    trusted: bool,
+    url: Option<String>,
+) {
+    env.remove(crate::local_egress::BROWSER_PROXY_ENV);
+    if let Some(url) = url.filter(|_| trusted) {
+        env.insert(crate::local_egress::BROWSER_PROXY_ENV.to_owned(), url);
     }
 }
 
@@ -1195,7 +1479,7 @@ async fn ensure_binary(
     let sha = bin.sha256.clone().filter(|s| !s.is_empty());
     let community = owning_manifest(plugin_id)
         .map(|manifest| crate::plugins::builtins::tier_for_manifest(&manifest))
-        .unwrap_or_else(|| crate::plugins::builtins::tier_for(plugin_id))
+        .unwrap_or(crate::plugin_manifest::PluginTier::Community)
         == crate::plugin_manifest::PluginTier::Community;
     if community && sha.is_none() {
         return Err(anyhow::anyhow!(
@@ -1344,6 +1628,61 @@ async fn fetch_release_sha256(url: &str) -> Option<String> {
     }
 }
 
+/// The ordered release bases a `Local` sidecar asset (single file or bundle) is
+/// fetched from. `override_base` is `RYU_SIDECAR_RELEASE_BASE` when set, and then it is
+/// the only base. Otherwise the running Core's OWN release comes first: the installed
+/// file is stamped with Core's version, so it must come from that release train. A
+/// `releases/latest` asset is the newest STABLE one, a different train for a
+/// nightly/beta Core and a newer, possibly incompatible build for a Core that has not
+/// updated yet, and the version marker would then hide the mismatch for good. `latest`
+/// stays only as the fallback for a build whose own release does not publish the asset
+/// (a locally built version).
+///
+/// Pure, and shared by [`resolve_local_sidecar_program`] and
+/// [`resolve_local_sidecar_bundle`] through [`select_release_asset`], so the two
+/// install paths cannot drift onto different trains again.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+fn sidecar_release_bases(override_base: Option<String>) -> Vec<String> {
+    match override_base {
+        Some(base) => vec![base],
+        None => vec![
+            crate::update::own_release_download_base(),
+            format!(
+                "https://github.com/{}/releases/latest/download",
+                crate::update::RYU_REPO
+            ),
+        ],
+    }
+}
+
+/// Walk [`sidecar_release_bases`] in order and return `(url, sha256)` for the first
+/// base whose `<base>/<asset>` passes [`screen_https`] and publishes a trusted
+/// sibling `.sha256`. Executable sidecars and bundles both require that digest, so a
+/// base without one is skipped rather than installed unverified. The error names
+/// the last reason, for the recorded missing-binary message.
+#[cfg(not(debug_assertions))]
+async fn select_release_asset(command: &str, asset: &str) -> Result<(String, String), String> {
+    let bases = sidecar_release_bases(std::env::var("RYU_SIDECAR_RELEASE_BASE").ok());
+    let mut last_error: Option<String> = None;
+    for base in &bases {
+        let url = format!("{base}/{asset}");
+        if let Err(e) = screen_https(&url).await {
+            tracing::warn!("app sidecar '{command}': refusing download url {url}: {e}");
+            last_error = Some(format!("refused download url {url}: {e}"));
+            continue;
+        }
+        if let Some(sha256) = fetch_release_sha256(&url).await {
+            return Ok((url, sha256));
+        }
+        last_error = Some(format!(
+            "app sidecar '{command}' has no trusted .sha256 for {url}; refusing to install"
+        ));
+    }
+    Err(last_error.unwrap_or_else(|| {
+        format!("app sidecar '{command}' has no release base to fetch {asset} from")
+    }))
+}
+
 /// Download-on-enable for a `Local`-kind managed sidecar (the apps-store app bins:
 /// `ryu-mail`, `ryu-meetings`, …). A `Local` sidecar declares only a bare
 /// `command` and assumes the binary is already on the host — historically the
@@ -1362,7 +1701,7 @@ async fn fetch_release_sha256(url: &str) -> Option<String> {
 ///   3. Otherwise, in a release build, download
 ///      `<base>/<command>-<os>-<arch>[.exe]` from the release hub into
 ///      `~/.ryu/bin/<command>[.exe]` and use that. `<base>` defaults to this repo's
-///      `releases/latest/download` and is overridable via `RYU_SIDECAR_RELEASE_BASE`
+///      own release (`releases/download/v<version>`, falling back to `releases/latest/download`) and is overridable via `RYU_SIDECAR_RELEASE_BASE`
 ///      (mirrors the ghost/shadow `RYU_*_RELEASE_URL` seam). The `<os>-<arch>` slug
 ///      is `update::platform_tag()`, byte-identical to the release workflow's asset
 ///      suffix (`macos-aarch64` / `linux-x86_64` / `windows-x86_64`).
@@ -1389,11 +1728,27 @@ async fn ensure_local_sidecar_present(
     plugin_id: &str,
     resolved_program: String,
     command: &str,
+    bundle: Option<&crate::plugin_manifest::schema::LocalBundleSpec>,
     downloads: &crate::downloads::DownloadCenter,
     mcp: Option<&McpRegistration>,
 ) -> String {
-    let program =
-        resolve_local_sidecar_program(name, plugin_id, resolved_program, command, downloads).await;
+    let program = match bundle {
+        Some(bundle) => {
+            resolve_local_sidecar_bundle(
+                name,
+                plugin_id,
+                resolved_program,
+                command,
+                bundle,
+                downloads,
+            )
+            .await
+        }
+        None => {
+            resolve_local_sidecar_program(name, plugin_id, resolved_program, command, downloads)
+                .await
+        }
+    };
     // The binary may have JUST become resolvable (installed above, or found already
     // installed). Tell the MCP registry, which re-probes and picks up any declaration it
     // had to skip. Unconditional — the re-probe is the authority, so a resolution that
@@ -1464,21 +1819,12 @@ async fn resolve_local_sidecar_program(
     let mut download_error: Option<String> = None;
     #[cfg(not(debug_assertions))]
     {
-        let base = std::env::var("RYU_SIDECAR_RELEASE_BASE").unwrap_or_else(|_| {
-            format!(
-                "https://github.com/{}/releases/latest/download",
-                crate::update::RYU_REPO
-            )
-        });
-        let asset = expected_asset.clone();
-        let url = format!("{base}/{asset}");
-        if let Err(e) = screen_https(&url).await {
-            tracing::warn!("app sidecar '{command}': refusing download url {url}: {e}");
-            download_error = Some(format!("refused download url {url}: {e}"));
-        } else {
-            // Executable sidecars require a trusted sibling digest. DownloadCenter
-            // also verifies it again while streaming/resuming the artifact.
-            if let Some(sha256) = fetch_release_sha256(&url).await {
+        // The running Core's OWN release first, `latest` only as the fallback — see
+        // [`sidecar_release_bases`] for why; the bundle path shares the same helper.
+        match select_release_asset(command, &expected_asset).await {
+            Ok((url, sha256)) => {
+                // Executable sidecars require a trusted sibling digest. DownloadCenter
+                // also verifies it again while streaming/resuming the artifact.
                 match downloads
                     .download_blocking(crate::downloads::DownloadSpec {
                         kind: crate::downloads::DownloadKind::Other,
@@ -1503,11 +1849,8 @@ async fn resolve_local_sidecar_program(
                         download_error = Some(format!("download from {url} failed: {e}"));
                     }
                 }
-            } else {
-                download_error = Some(format!(
-                    "app sidecar '{command}' has no trusted .sha256 for {asset}; refusing to install"
-                ));
             }
+            Err(e) => download_error = Some(e),
         }
     }
 
@@ -1538,6 +1881,159 @@ async fn resolve_local_sidecar_program(
     };
     record_missing_sidecar_binary(name, plugin_id, command, &expected_asset, reason);
     resolved_program
+}
+
+/// Where a `Local` sidecar's **bundle** (see `LocalProcessSpec::bundles`) is
+/// installed: `<data dir>/bin/<command>.d/`. A sibling of [`managed_bin_path`], so the
+/// single-file and bundle forms of one command never share a path.
+pub(crate) fn managed_bundle_dir(command: &str) -> PathBuf {
+    crate::sidecar::download_manager::bin_dir().join(format!("{command}.d"))
+}
+
+/// The bundle half of [`ensure_local_sidecar_present`], used on a host whose
+/// `platform_tag()` is listed in the sidecar's `bundles`. Same resolution order and
+/// the same best-effort / recorded-failure contract as
+/// [`resolve_local_sidecar_program`]:
+///   1. an existing `command_env` override (or any resolved program file) wins;
+///   2. an installed bundle under [`managed_bundle_dir`] whose version marker matches
+///      the running Core → its entrypoint;
+///   3. release builds only: download `<command>-<platform_tag>.<format>` with its
+///      REQUIRED sibling `.sha256` from the same ordered bases as the single-file path
+///      (Core's own release, then `releases/latest`; see [`sidecar_release_bases`]),
+///      then verify + safely extract + atomically install it
+///      ([`crate::sidecar::bundle_install::install_bundle`]) and return the
+///      entrypoint;
+///   4. otherwise record the missing asset (named exactly as CI must publish it) and
+///      return the original program so the spawn fails loudly.
+async fn resolve_local_sidecar_bundle(
+    name: &str,
+    plugin_id: &str,
+    resolved_program: String,
+    command: &str,
+    bundle: &crate::plugin_manifest::schema::LocalBundleSpec,
+    #[cfg_attr(debug_assertions, allow(unused_variables))]
+    downloads: &crate::downloads::DownloadCenter,
+) -> String {
+    if std::path::Path::new(&resolved_program).is_file() {
+        clear_missing_sidecar_binary(name);
+        return resolved_program;
+    }
+
+    let dir = managed_bundle_dir(command);
+    let current = crate::update::current_version();
+    if let Some(exe) =
+        crate::sidecar::bundle_install::installed_entrypoint(&dir, &bundle.entrypoint, &current)
+    {
+        clear_missing_sidecar_binary(name);
+        return exe.to_string_lossy().into_owned();
+    }
+
+    let expected_asset = format!(
+        "{command}-{}.{}",
+        crate::update::platform_tag(),
+        bundle.format
+    );
+
+    #[cfg_attr(debug_assertions, allow(unused_mut))]
+    let mut download_error: Option<String> = None;
+    #[cfg(not(debug_assertions))]
+    {
+        // Same base order as the single-file path (own release, then `latest`): the
+        // installed bundle is stamped with Core's version below, so it must come from
+        // Core's own release train whenever that release publishes the asset.
+        download_error = Some(match select_release_asset(command, &expected_asset).await {
+            Ok((url, sha256)) => {
+                match install_local_bundle_from_release(
+                    &url, &sha256, &dir, bundle, &current, downloads,
+                )
+                .await
+                {
+                    Ok(exe) => {
+                        clear_missing_sidecar_binary(name);
+                        return exe.to_string_lossy().into_owned();
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "app sidecar '{command}': bundle install from {url} failed: {e}"
+                        );
+                        format!("bundle install from {url} failed: {e}")
+                    }
+                }
+            }
+            Err(e) => e,
+        });
+    }
+
+    if which_on_path(command).is_some() {
+        clear_missing_sidecar_binary(name);
+        return resolved_program;
+    }
+    let reason = match download_error {
+        Some(err) => format!(
+            "'{expected_asset}' could not be installed into {} — {err}. If the release \
+             publishes no asset by that exact name for this platform, no host can ever \
+             install this sidecar.",
+            dir.display()
+        ),
+        None => format!(
+            "'{command}' is not on PATH, no bundle is installed in {}, and no \
+             `command_env` override points at it. A dev build never fetches release \
+             assets — build the sidecar locally or set its `command_env`; a release build \
+             would install '{expected_asset}'.",
+            dir.display()
+        ),
+    };
+    record_missing_sidecar_binary(name, plugin_id, command, &expected_asset, reason);
+    resolved_program
+}
+
+/// Download a bundle release asset and install it into `dir`. `url` and its trusted
+/// `sha256` come from [`select_release_asset`], which already screened the URL and
+/// required the sibling checksum. The archive is staged next to the install dir and
+/// removed afterwards either way.
+#[cfg(not(debug_assertions))]
+async fn install_local_bundle_from_release(
+    url: &str,
+    sha256: &str,
+    dir: &Path,
+    bundle: &crate::plugin_manifest::schema::LocalBundleSpec,
+    version: &str,
+    downloads: &crate::downloads::DownloadCenter,
+) -> anyhow::Result<PathBuf> {
+    let sha256 = sha256.to_owned();
+    let archive = dir.with_extension(format!("download.{}", bundle.format));
+    let fetched = downloads
+        .download_blocking(crate::downloads::DownloadSpec {
+            kind: crate::downloads::DownloadKind::Other,
+            role: crate::downloads::DownloadRole::Plugin,
+            label: format!("app sidecar bundle: {url}"),
+            url: url.to_owned(),
+            dest: archive.clone(),
+            sha256: Some(sha256.clone()),
+            version_record: None,
+        })
+        .await;
+    let result = match fetched {
+        Ok(path) => {
+            let dir = dir.to_owned();
+            let entrypoint = bundle.entrypoint.clone();
+            let version = version.to_owned();
+            tokio::task::spawn_blocking(move || {
+                crate::sidecar::bundle_install::install_bundle(
+                    &path,
+                    &sha256,
+                    &dir,
+                    &entrypoint,
+                    &version,
+                )
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("bundle install task panicked: {e}"))?
+        }
+        Err(e) => Err(e),
+    };
+    let _ = tokio::fs::remove_file(&archive).await;
+    result
 }
 
 /// The managed-bin **ready notifier**: re-run the owning plugin's MCP-server
@@ -2103,6 +2599,18 @@ pub(crate) async fn remove_local_sidecar_binaries(
         if env_override.is_some() {
             continue;
         }
+        // A bundle install (`bundles`) lives in its own directory; remove it whole.
+        // `remove_dir_all` does not follow the bundle's internal symlinks.
+        let bundle_dir = managed_bundle_dir(&local.command);
+        if !local.bundles.is_empty() && bundle_dir.is_dir() {
+            if let Err(e) = tokio::fs::remove_dir_all(&bundle_dir).await {
+                tracing::warn!(
+                    plugin = %manifest.id,
+                    "uninstall: failed to remove app sidecar bundle {}: {e}",
+                    bundle_dir.display()
+                );
+            }
+        }
         let dest = managed_bin_path(&local.command);
         // Drop the version marker alongside the bin (best-effort; harmless if absent).
         let _ = tokio::fs::remove_file(dest.with_extension("version")).await;
@@ -2128,14 +2636,53 @@ pub(crate) async fn remove_local_sidecar_binaries(
 /// its explicit manifest/Core contract. Native sidecars are powerful host
 /// processes, but they must never receive Core's owner token or master/provider
 /// secrets merely through ambient environment inheritance.
+///
+/// OS isolation is decided here, per launch
+/// ([`crate::sidecar::os_isolation::prepare_launch`]). With the default `off`
+/// mode (and in `audit`) the spawn is exactly the limited clean-env spawn; only
+/// `enforce` routes through the isolated variant, and a failure there names the
+/// sandbox and the setting that controls it.
 async fn spawn(
     handle: &ProcessHandle,
     program: &str,
     args: &[String],
     env: &BTreeMap<String, String>,
+    launch: &LaunchIdentity<'_>,
 ) -> anyhow::Result<()> {
     let env: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    handle.start_path_with_clean_env(program, args, &env).await
+    let isolation = crate::sidecar::os_isolation::prepare_launch(
+        launch.name,
+        launch.plugin_id,
+        launch.spec,
+        launch.plugin_dir,
+        program,
+        args,
+    )
+    .await?;
+    if !isolation.is_active() {
+        return handle
+            .start_path_with_clean_env_limited(program, args, &env)
+            .await;
+    }
+    handle
+        .start_path_with_clean_env_isolated(&env, &isolation)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(crate::sidecar::os_isolation::enforce_failure_message(
+                launch.name,
+                isolation.status(),
+                launch.spec,
+                &e
+            ))
+        })
+}
+
+/// What [`spawn`] needs to decide a launch's OS isolation.
+struct LaunchIdentity<'a> {
+    name: &'a str,
+    plugin_id: &'a str,
+    spec: &'a SidecarSpec,
+    plugin_dir: &'a Path,
 }
 
 /// Spawn a program with a MINIMAL env — the child does NOT inherit Core's
@@ -2148,9 +2695,9 @@ async fn spawn_clean(
     program: &str,
     args: &[String],
     env: &BTreeMap<String, String>,
+    launch: &LaunchIdentity<'_>,
 ) -> anyhow::Result<()> {
-    let env: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    handle.start_path_with_clean_env(program, args, &env).await
+    spawn(handle, program, args, env, launch).await
 }
 
 impl Sidecar for ManifestSidecar {
@@ -2184,16 +2731,24 @@ impl Sidecar for ManifestSidecar {
             // caller surfaces the start error, and leaving the *previous* death's
             // reason on the status plane would attribute the wrong cause to it.
             clear_crash_reason(&name);
+            let launch = LaunchIdentity {
+                name: &name,
+                plugin_id: &plugin_id,
+                spec: &spec,
+                plugin_dir: &plugin_dir,
+            };
             match &spec.process {
                 SidecarProcess::Binary(bin) => {
                     let exe = ensure_binary(&plugin_id, bin, &plugin_dir, &downloads).await?;
                     // Layer the reserved ext-loader env over the manifest's own env
                     // (applied last so a manifest can't override the injected secret).
                     let mut env = bin.env.clone();
-                    inject_ext_env(&mut env, &plugin_id, &ext_token)?;
-                    inject_shadow_env(&mut env, &plugin_id);
+                    resolve_declared_env(&mut env, &plugin_id, Some(&spec)).await;
+                    inject_ext_env(&mut env, &plugin_id, &ext_token, seals_at_rest(&spec))?;
+                    inject_shadow_env(&mut env, &plugin_id, &spec);
+                    inject_egress_route_env(&mut env, &plugin_id, &spec);
                     inject_cap_shims(&mut env, &plugin_id, &plugin_dir).await;
-                    spawn(&handle, &exe.to_string_lossy(), &bin.args, &env).await?;
+                    spawn(&handle, &exe.to_string_lossy(), &bin.args, &env, &launch).await?;
                 }
                 SidecarProcess::Local(local) => {
                     // A sibling-Ryu binary (e.g. `ryu-mail`). An optional
@@ -2218,16 +2773,21 @@ impl Sidecar for ManifestSidecar {
                     // registry, which had to skip them at enable time (the download had
                     // not happened yet — for a lazy sidecar, this is the first time it
                     // ever runs).
+                    // A platform listed in `bundles` installs an archived bundle (e.g. a
+                    // macOS `.app`) and spawns its declared entrypoint instead of the
+                    // single-file asset; every other platform is unchanged.
+                    let bundle = local.bundles.get(&crate::update::platform_tag());
                     let program = ensure_local_sidecar_present(
                         &name,
                         &plugin_id,
                         program,
                         &local.command,
+                        bundle,
                         &downloads,
                         mcp.as_ref(),
                     )
                     .await;
-                    let mut env = local.env.clone();
+                    let mut env = expand_manifest_env(&local.env, &plugin_id, &plugin_dir, None);
                     // Tell the child which port to bind, profile-shifted, so it binds
                     // the SAME port Core health-checks + proxies to (effective_port).
                     if let Some(port_env) = &local.port_env {
@@ -2236,10 +2796,12 @@ impl Sidecar for ManifestSidecar {
                             crate::profile::port(spec.port).to_string(),
                         );
                     }
-                    inject_ext_env(&mut env, &plugin_id, &ext_token)?;
-                    inject_shadow_env(&mut env, &plugin_id);
+                    resolve_declared_env(&mut env, &plugin_id, Some(&spec)).await;
+                    inject_ext_env(&mut env, &plugin_id, &ext_token, seals_at_rest(&spec))?;
+                    inject_shadow_env(&mut env, &plugin_id, &spec);
+                    inject_egress_route_env(&mut env, &plugin_id, &spec);
                     inject_cap_shims(&mut env, &plugin_id, &plugin_dir).await;
-                    spawn(&handle, &program, &local.args, &env).await?;
+                    spawn(&handle, &program, &local.args, &env, &launch).await?;
                 }
                 SidecarProcess::Python(rt) => {
                     // Reuse the external-runtime provisioner (venv + pip + assets),
@@ -2247,19 +2809,18 @@ impl Sidecar for ManifestSidecar {
                     // per-sidecar dir so two python sidecars in one plugin don't share
                     // a venv.
                     let dir = plugin_dir.join("runtime").join(&spec.name);
-                    let python = crate::sidecar::external_runtime::provision(rt, &dir, &downloads)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("python provisioning failed: {e}"))?;
+                    let python = crate::sidecar::external_runtime::provision_with_package_root(
+                        rt,
+                        &dir,
+                        &downloads,
+                        &plugin_dir,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("python provisioning failed: {e}"))?;
                     let args = vec!["-m".to_owned(), rt.entry.clone()];
-                    // Layer the manifest-declared env, expanding `${RYU_DIR}` so a
-                    // runtime can target Core-owned cache/output paths portably.
-                    let ryu_dir = crate::paths::ryu_dir();
-                    let ryu_dir_str = ryu_dir.to_string_lossy();
-                    let mut env: BTreeMap<String, String> = rt
-                        .env
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.replace("${RYU_DIR}", &ryu_dir_str)))
-                        .collect();
+                    // Layer the manifest-declared env, expanding the data-dir tokens
+                    // so a runtime can target its plugin data / shared models portably.
+                    let mut env = expand_manifest_env(&rt.env, &plugin_id, &plugin_dir, Some(&dir));
                     // Same profile-aware bind port as the Local path: inject the
                     // shifted port so the child binds what Core health-checks/proxies.
                     if let Some(port_env) = &rt.port_env {
@@ -2268,10 +2829,12 @@ impl Sidecar for ManifestSidecar {
                             crate::profile::port(spec.port).to_string(),
                         );
                     }
-                    inject_ext_env(&mut env, &plugin_id, &ext_token)?;
-                    inject_shadow_env(&mut env, &plugin_id);
+                    resolve_declared_env(&mut env, &plugin_id, Some(&spec)).await;
+                    inject_ext_env(&mut env, &plugin_id, &ext_token, seals_at_rest(&spec))?;
+                    inject_shadow_env(&mut env, &plugin_id, &spec);
+                    inject_egress_route_env(&mut env, &plugin_id, &spec);
                     inject_cap_shims(&mut env, &plugin_id, &plugin_dir).await;
-                    spawn(&handle, &python.to_string_lossy(), &args, &env).await?;
+                    spawn(&handle, &python.to_string_lossy(), &args, &env, &launch).await?;
                 }
                 SidecarProcess::Node(node) => {
                     // Extension host (RFC Option B): run the plugin's JS backend under
@@ -2298,7 +2861,8 @@ impl Sidecar for ManifestSidecar {
                     // Env: reserved ext-loader vars + cap shims (which set RYU_CORE_PORT
                     // for the host-RPC callback) + the host bootstrap contract.
                     let mut env: BTreeMap<String, String> = BTreeMap::new();
-                    inject_ext_env(&mut env, &plugin_id, &ext_token)?;
+                    resolve_declared_env(&mut env, &plugin_id, Some(&spec)).await;
+                    inject_ext_env(&mut env, &plugin_id, &ext_token, seals_at_rest(&spec))?;
                     inject_cap_shims(&mut env, &plugin_id, &plugin_dir).await;
                     env.insert(
                         "RYU_HOST_ENTRY".to_owned(),
@@ -2347,7 +2911,7 @@ impl Sidecar for ManifestSidecar {
                     );
                     let args = vec![bootstrap.to_string_lossy().into_owned()];
                     // Node backends get a scrubbed/minimal env (never Core's secrets).
-                    spawn_clean(&handle, &runtime, &args, &env).await?;
+                    spawn_clean(&handle, &runtime, &args, &env, &launch).await?;
                 }
             }
             tracing::info!("manifest sidecar '{name}' started");
@@ -2444,11 +3008,13 @@ impl Sidecar for ManifestSidecar {
                 },
                 None => None,
             };
-            let client = match reqwest::Client::builder().timeout(HEALTH_TIMEOUT).build() {
-                Ok(c) => c,
-                Err(e) => return HealthStatus::Degraded(format!("client build failed: {e}")),
-            };
-            match client.get(&url).bearer_auth(&token).send().await {
+            match health_probe_client()
+                .get(&url)
+                .timeout(HEALTH_TIMEOUT)
+                .bearer_auth(&token)
+                .send()
+                .await
+            {
                 Ok(resp) if resp.status().is_success() => {
                     // Healthy means the endpoint is actually serving, so this is the
                     // first moment it is safe to publish as a selectable provider.
@@ -2502,6 +3068,8 @@ impl Sidecar for ManifestSidecar {
     fn uninstall(&self, delete_data: bool) -> BoxFuture<anyhow::Result<()>> {
         let handle = self.handle.clone();
         let plugin_dir = self.plugin_dir();
+        let plugin_data_dir =
+            ryu_sidecar_runtime::layout::plugin_data_dir(&crate::paths::ryu_dir(), &self.plugin_id);
         let local = self.spec.name.clone();
         let name = self.name.clone();
         Box::pin(async move {
@@ -2511,6 +3079,9 @@ impl Sidecar for ManifestSidecar {
             crate::sidecar::remove_dir(&plugin_dir.join("bin")).await;
             if delete_data {
                 crate::sidecar::remove_dir(&plugin_dir.join("runtime").join(&local)).await;
+                // The app's own data (dbs, prefs, media, caches) lives in
+                // `plugin-data/<dir>`, shared by all of the plugin's sidecars.
+                crate::sidecar::remove_dir(&plugin_data_dir).await;
             }
             tracing::info!("manifest sidecar '{name}' uninstalled");
             Ok(())
@@ -2519,1575 +3090,5 @@ impl Sidecar for ManifestSidecar {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::plugin_manifest::schema::ExternalRuntimeConfig;
-    use crate::plugin_manifest::PluginTier;
-
-    fn binary_spec() -> SidecarSpec {
-        SidecarSpec {
-            name: "engine".to_owned(),
-            process: SidecarProcess::Binary(BinarySpec {
-                url: "https://example.com/dl/my-engine".to_owned(),
-                sha256: None,
-                version: "1.2.3".to_owned(),
-                archive: None,
-                binary_name: None,
-                args: vec!["--port".to_owned(), "9099".to_owned()],
-                env: BTreeMap::new(),
-            }),
-            port: 9099,
-            health_path: "/health".to_owned(),
-            http: None,
-            host_api: None,
-            lazy: false,
-            idle_stop_secs: None,
-            provides_provider: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn ensure_binary_refuses_community_sidecar_without_sha256() {
-        // A Community-tier plugin (anything not in CORE_PLUGINS) with a Binary
-        // sidecar and no sha256 must fail closed BEFORE any network/disk work.
-        let SidecarProcess::Binary(bin) = &binary_spec().process else {
-            panic!("binary_spec is a Binary process");
-        };
-        assert!(bin.sha256.is_none());
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-        let err = ensure_binary(
-            "com.example.community-tool",
-            bin,
-            Path::new("/nonexistent/plugins/com.example.community-tool"),
-            &downloads,
-        )
-        .await
-        .expect_err("must refuse an unverifiable community binary");
-        assert!(err.to_string().contains("no sha256"), "got: {err}");
-    }
-
-    #[test]
-    fn namespaced_name_joins_plugin_and_local() {
-        assert_eq!(
-            namespaced_name("com.acme.tool", "engine"),
-            "com.acme.tool/engine"
-        );
-    }
-
-    /// The `provides_provider` block a bridge manifest ships (see
-    /// `examples/auth-bridge/build.mjs`) deserializes and yields the loopback baseUrl
-    /// Core registers. Pins the on-the-wire field names so the example cannot silently
-    /// drift from the Rust contract.
-    #[test]
-    fn provides_provider_deserializes_from_manifest_json() {
-        let spec: SidecarSpec = serde_json::from_str(
-            r#"{
-                "name": "bridge",
-                "process": { "kind": "node", "entry": "./backend.js" },
-                "port": 7997,
-                "health_path": "/health",
-                "provides_provider": {
-                    "id": "chatgpt-bridge",
-                    "label": "ChatGPT (subscription bridge)",
-                    "api": "openai-completions",
-                    "base_path": "/v1",
-                    "models": ["gpt-5", "gpt-5-codex"]
-                }
-            }"#,
-        )
-        .expect("bridge manifest should deserialize");
-
-        let provider = spec.provides_provider.expect("provides_provider present");
-        assert_eq!(provider.id, "chatgpt-bridge");
-        assert_eq!(provider.effective_api(), "openai-completions");
-        assert_eq!(provider.base_url(7997), "http://127.0.0.1:7997/v1");
-        assert_eq!(provider.models.len(), 2);
-    }
-
-    /// Omitting the block leaves the sidecar a non-provider, and the optional
-    /// sub-fields fall back to their documented defaults.
-    #[test]
-    fn provides_provider_is_optional_with_defaults() {
-        let spec: SidecarSpec = serde_json::from_str(
-            r#"{
-                "name": "plain",
-                "process": { "kind": "node", "entry": "./x.js" },
-                "port": 7001
-            }"#,
-        )
-        .expect("manifest without provides_provider should deserialize");
-        assert!(spec.provides_provider.is_none());
-
-        let minimal: ProviderRegistrationSpec =
-            serde_json::from_str(r#"{ "id": "some-bridge" }"#).expect("minimal spec");
-        assert_eq!(minimal.effective_api(), "openai-completions");
-        assert_eq!(minimal.base_url(9000), "http://127.0.0.1:9000/v1");
-        assert!(minimal.models.is_empty());
-    }
-
-    #[test]
-    fn health_url_is_loopback() {
-        assert_eq!(health_url(9099, "/health"), "http://127.0.0.1:9099/health");
-        assert_eq!(
-            health_url(8080, "/v1/ping"),
-            "http://127.0.0.1:8080/v1/ping"
-        );
-    }
-
-    #[test]
-    fn sidecar_name_is_namespaced() {
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-        let sc = ManifestSidecar::new("com.acme.tool".to_owned(), binary_spec(), downloads);
-        assert_eq!(sc.name(), "com.acme.tool/engine");
-        assert!(!sc.is_required());
-        assert!(!sc.is_running());
-        assert_eq!(sc.pid(), None);
-        assert_eq!(sc.port(), Some(crate::profile::port(9099)));
-    }
-
-    #[test]
-    fn version_dir_is_namespaced() {
-        let bin = BinarySpec {
-            url: "https://example.com/dl/my-engine".to_owned(),
-            sha256: None,
-            version: "1.2.3".to_owned(),
-            archive: None,
-            binary_name: None,
-            args: vec![],
-            env: BTreeMap::new(),
-        };
-        let dir = version_dir(Path::new("/plugins/acme"), &bin);
-        assert_eq!(dir, Path::new("/plugins/acme").join("bin").join("1.2.3"));
-        assert_eq!(
-            dir.join(url_filename(&bin.url).unwrap()),
-            Path::new("/plugins/acme")
-                .join("bin")
-                .join("1.2.3")
-                .join("my-engine")
-        );
-    }
-
-    #[test]
-    fn url_filename_rejects_url_without_filename() {
-        assert!(url_filename("https://example.com/dl/").is_err());
-        assert_eq!(
-            url_filename("https://example.com/a/b/tool").unwrap(),
-            "tool"
-        );
-    }
-
-    #[test]
-    fn core_tier_always_runs() {
-        assert!(may_run_sidecar(PluginTier::Core, &[]));
-        assert!(may_run_sidecar(
-            PluginTier::Core,
-            &["unrelated:grant".to_owned()]
-        ));
-    }
-
-    #[test]
-    fn community_tier_needs_approved_grant() {
-        assert!(!may_run_sidecar(PluginTier::Community, &[]));
-        assert!(!may_run_sidecar(
-            PluginTier::Community,
-            &["mcp:web_search".to_owned()]
-        ));
-        assert!(may_run_sidecar(
-            PluginTier::Community,
-            &[GRANT_SIDECAR_PROCESS.to_owned()]
-        ));
-    }
-
-    #[test]
-    fn python_flavor_builds() {
-        let spec = SidecarSpec {
-            name: "tts".to_owned(),
-            process: SidecarProcess::Python(ExternalRuntimeConfig {
-                kind: "python".to_owned(),
-                entry: "ryu_tts".to_owned(),
-                ..Default::default()
-            }),
-            port: 8085,
-            health_path: "/health".to_owned(),
-            http: None,
-            host_api: None,
-            lazy: false,
-            idle_stop_secs: None,
-            provides_provider: None,
-        };
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-        let sc = ManifestSidecar::new("com.acme.voice".to_owned(), spec, downloads);
-        assert_eq!(sc.name(), "com.acme.voice/tts");
-        assert_eq!(
-            sc.health_url(),
-            format!("http://127.0.0.1:{}/health", crate::profile::port(8085))
-        );
-    }
-
-    /// **Defect 3.** `lazy: true` + `provides_provider` is an unsatisfiable pair, so
-    /// the provider declaration wins and the sidecar starts eagerly.
-    ///
-    /// Without the coercion, the boot purge of stale sidecar-owned `models.json`
-    /// entries is permanently fatal to such a sidecar: the entry is dropped, nothing
-    /// starts the process (Pi dials `baseUrl` directly and never traverses the proxy
-    /// that is a lazy sidecar's only wake trigger), so the Healthy edge that would
-    /// re-register the provider never happens.
-    #[test]
-    fn provider_declaring_sidecar_starts_eagerly_even_when_lazy() {
-        let provider = ProviderRegistrationSpec {
-            id: "acme-bridge".to_owned(),
-            label: Some("Acme Bridge".to_owned()),
-            api: None,
-            base_path: None,
-            models: vec!["acme-1".to_owned()],
-        };
-
-        // Plain lazy sidecar: still lazy. The coercion must be narrow.
-        let mut spec = binary_spec();
-        spec.lazy = true;
-        assert!(
-            !starts_eagerly(&spec),
-            "a lazy sidecar with no provider keeps wake-on-demand"
-        );
-        assert!(may_idle_stop(&spec));
-
-        // The documented third-party auth-bridge shape — coerced to eager.
-        spec.provides_provider = Some(provider.clone());
-        assert!(
-            starts_eagerly(&spec),
-            "provides_provider must force an eager start; nothing can ever wake it"
-        );
-        assert!(
-            !may_idle_stop(&spec),
-            "and it must not be scaled to zero either — the model would vanish from \
-             Pi's picker until a wake that never comes"
-        );
-
-        // An eager provider sidecar is unaffected (it was already eager).
-        spec.lazy = false;
-        assert!(starts_eagerly(&spec));
-
-        // No provider, not lazy: eager, and idle-stop stays available.
-        let plain = binary_spec();
-        assert!(starts_eagerly(&plain));
-        assert!(may_idle_stop(&plain));
-    }
-
-    /// **Defect 3's wiring**, as opposed to its predicate. The test above proves
-    /// `starts_eagerly` computes the right answer; it says nothing about whether the
-    /// enable path ever asks. The whole regression is one token wide — flipping
-    /// `apply_sidecars`' gate from `!starts_eagerly(spec)` back to `spec.lazy` restores
-    /// defect 3 in full and leaves every other test in this crate green, because they
-    /// all call the predicate directly.
-    ///
-    /// The call site is asserted against the source text rather than by calling
-    /// `apply_sidecars`, which takes a whole `ServerState` (a SQLite plugin store, an
-    /// MCP registry, an ACP agent registry, …) that no unit test can stand up. The
-    /// comparison is whitespace-insensitive so rustfmt rewrapping cannot fail it, and
-    /// it pins the branch STRUCTURE — gate first, then the register-only arm, then the
-    /// eager `register_and_start` — so a gate that merely mentions `starts_eagerly`
-    /// somewhere decorative while still branching on `spec.lazy` does not pass.
-    #[test]
-    fn apply_sidecars_gates_the_register_only_branch_on_starts_eagerly() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/server/mod.rs");
-        let src = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let squished: String = src.chars().filter(|c| !c.is_whitespace()).collect();
-
-        let gate = squished
-            .find("if!crate::sidecar::manifest_sidecar::starts_eagerly(spec){")
-            .expect(
-                "apply_sidecars must gate the register-only (lazy) arm on \
-                 `starts_eagerly(spec)`, not on `spec.lazy`: a sidecar that declares \
-                 `provides_provider` can never be woken (Pi dials its baseUrl directly, \
-                 never the ext proxy), so leaving it lazy means the boot purge drops its \
-                 provider row and nothing ever re-registers it",
-            );
-        // Deliberately matched on the call NAME only, not its argument list: the arms
-        // themselves are ordinary code other work rewrites, and this test must fail for
-        // the gate flipping and nothing else.
-        let rest = &squished[gate..];
-        let register_only = rest
-            .find("manager.register(")
-            .expect("the register-only arm still registers without starting");
-        let eager = rest
-            .find("manager.register_and_start(")
-            .expect("the eager arm still starts");
-        assert!(
-            register_only < eager,
-            "the register-only arm must be the one the `starts_eagerly` gate guards; a \
-             gate that falls through to `register_and_start` first is not the branch \
-             defect 3 is about"
-        );
-    }
-
-    /// The `models.json` row for `id`, read straight off disk — the persisted form Pi
-    /// actually loads, not an in-memory projection of it.
-    fn provider_row(id: &str) -> Option<serde_json::Value> {
-        let raw =
-            std::fs::read_to_string(crate::pi_config::config_dir().join("models.json")).ok()?;
-        let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
-        json.get("providers")?.get(id).cloned()
-    }
-
-    /// **The crash lane.** `deregister_provider` had exactly one caller —
-    /// [`ManifestSidecar::stop`] — and a crashed child runs no teardown at all, so the
-    /// provider row outlived the process that justified it: a selectable model whose
-    /// `baseUrl` is the loopback port the crash just freed and whose `apiKey` is this
-    /// plugin's minted ext token. Pi dials that `baseUrl` DIRECTLY, so the ext proxy's
-    /// registration gate and the manager's `forward_target` refusal are both out of the
-    /// path — the first local process to bind the vacated port is handed the credential
-    /// and every inference request body, and nothing takes the row away until the next
-    /// boot's `purge_sidecar_providers`.
-    ///
-    /// Reverting `on_crash_detected` (here or its call in
-    /// `SidecarManager::note_crash_if_exited`) fails this.
-    #[tokio::test]
-    async fn crash_teardown_drops_the_provider_row_and_its_credential() {
-        let _guard = crate::pi_config::lock_pi_config_test_env();
-        let dir = std::env::temp_dir().join(format!("ryu-crash-provider-{}", uuid::Uuid::new_v4()));
-        std::env::set_var("RYU_PI_AGENT_DIR", &dir);
-
-        let provider = ProviderRegistrationSpec {
-            id: "acme-crash-bridge".to_owned(),
-            label: Some("Acme Crash Bridge".to_owned()),
-            api: None,
-            base_path: None,
-            models: vec!["acme-1".to_owned()],
-        };
-        let mut spec = binary_spec();
-        spec.provides_provider = Some(provider.clone());
-        let sc = ManifestSidecar::new(
-            "com.acme.crashbridge".to_owned(),
-            spec,
-            crate::downloads::DownloadCenter::with_default_client(),
-        );
-
-        // The Healthy edge that publishes it — exactly what the health monitor does.
-        register_provider_once(
-            &sc.plugin_id,
-            &provider,
-            sc.effective_port(),
-            "ext-tok-crash",
-            &sc.provider_registered,
-        );
-        let row = provider_row(&provider.id).expect("a healthy sidecar publishes its provider");
-        assert_eq!(
-            row["apiKey"], "ext-tok-crash",
-            "the row carries the plugin's minted ext token — that is the credential at \
-             stake, not just a dangling URL"
-        );
-
-        // The child dies on its own. `stop()` is never called on this path; this hook
-        // is the only teardown a crash gets.
-        sc.on_crash_detected();
-
-        assert!(
-            provider_row(&provider.id).is_none(),
-            "a crashed sidecar's provider row must be gone: it points Pi at a port this \
-             process no longer holds, with the plugin's ext token as the apiKey"
-        );
-        // Idempotent and panic-free: the monitor may see the same corpse again, and a
-        // later stop() runs the same teardown.
-        sc.on_crash_detected();
-        sc.stop().await.unwrap();
-        assert!(provider_row(&provider.id).is_none());
-
-        std::env::remove_var("RYU_PI_AGENT_DIR");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A sidecar that declares no provider has nothing to release, and the crash hook
-    /// must stay a cheap no-op for it — the monitor calls this on every detected exit.
-    #[test]
-    fn crash_teardown_is_a_noop_without_a_declared_provider() {
-        let sc = ManifestSidecar::new(
-            "com.acme.plain".to_owned(),
-            binary_spec(),
-            crate::downloads::DownloadCenter::with_default_client(),
-        );
-        // No pi-config lock, no temp dir, no models.json: if this touched disk at all it
-        // would be reaching into the developer's real config from a unit test.
-        sc.on_crash_detected();
-    }
-
-    #[test]
-    fn is_truthy_accepts_common_flag_forms() {
-        for on in ["1", "true", "TRUE", "on", " On "] {
-            assert!(is_truthy(on), "{on:?} should be truthy");
-        }
-        for off in ["0", "false", "off", "", "no"] {
-            assert!(!is_truthy(off), "{off:?} should be falsy");
-        }
-    }
-
-    #[test]
-    fn resolve_node_runtime_rejects_missing_explicit() {
-        // An explicit runtime that is not on PATH is a clean error, not a fallback.
-        let err = resolve_node_runtime(Some("definitely-not-a-real-runtime-xyz"))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("not found on PATH"), "{err}");
-    }
-
-    #[test]
-    fn which_on_path_finds_a_known_program() {
-        // `sh` on unix / `cmd` on windows is always present — proves the lookup works.
-        #[cfg(unix)]
-        assert!(which_on_path("sh").is_some());
-        #[cfg(windows)]
-        assert!(which_on_path("cmd").is_some());
-        assert!(which_on_path("definitely-not-a-real-program-xyz").is_none());
-    }
-
-    fn tmp_plugin_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ryu-node-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn manifest_with_backend(
-        code: &str,
-        sha: Option<&str>,
-    ) -> crate::plugin_manifest::PluginManifest {
-        crate::plugin_manifest::PluginManifest {
-            id: "com.test.node".to_owned(),
-            name: "Node".to_owned(),
-            version: "1.0.0".to_owned(),
-            backend_code: Some(code.to_owned()),
-            backend_sha256: sha.map(str::to_owned),
-            ..Default::default()
-        }
-    }
-
-    #[tokio::test]
-    async fn prepare_node_backend_writes_and_verifies_hash() {
-        let dir = tmp_plugin_dir();
-        let code = "export function activate(){}";
-        use sha2::{Digest, Sha256};
-        let sha = hex::encode(Sha256::digest(code.as_bytes()));
-        let manifest = manifest_with_backend(code, Some(&sha));
-
-        let entry = prepare_node_backend(&dir, "backend.mjs", Some(&manifest))
-            .await
-            .expect("valid backend materializes");
-        assert_eq!(entry, dir.join("backend.mjs"));
-        assert_eq!(std::fs::read_to_string(&entry).unwrap(), code);
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[tokio::test]
-    async fn prepare_node_backend_refuses_on_hash_mismatch() {
-        let dir = tmp_plugin_dir();
-        let manifest = manifest_with_backend("export function activate(){}", Some("deadbeef"));
-        let err = prepare_node_backend(&dir, "backend.mjs", Some(&manifest))
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("hash mismatch"), "{err}");
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[tokio::test]
-    async fn prepare_node_backend_refuses_when_absent() {
-        let dir = tmp_plugin_dir();
-        // No backend_code and no on-disk file → refuse (nothing to run).
-        let manifest = crate::plugin_manifest::PluginManifest {
-            id: "com.test.node".to_owned(),
-            name: "Node".to_owned(),
-            version: "1.0.0".to_owned(),
-            ..Default::default()
-        };
-        let err = prepare_node_backend(&dir, "backend.mjs", Some(&manifest))
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("not found"), "{err}");
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[tokio::test]
-    async fn write_host_bootstrap_is_dependency_free() {
-        let dir = tmp_plugin_dir();
-        let path = write_host_bootstrap(&dir).await.unwrap();
-        let src = std::fs::read_to_string(&path).unwrap();
-        // The bootstrap must stay importable on stock node AND bun — node builtins only.
-        assert!(src.contains("node:http"));
-        assert!(src.contains("activate"));
-        assert!(
-            !src.contains("require("),
-            "bootstrap must be ESM, no CJS require"
-        );
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn native_permission_record_surfaces_report() {
-        // Recording a native sidecar's posture makes it appear in the status-plane
-        // reader with `enforced:false` (honest v1 — declared but not OS-enforced).
-        // No manifest on disk in the test env → `declared: None`, which is fine: the
-        // seam (record → reader) is what this asserts.
-        let name = format!("com.test.perm-{}/worker", uuid::Uuid::new_v4());
-        record_native_permissions(&name, "com.test.perm");
-        let reports = native_sidecar_permission_reports();
-        let found = reports
-            .iter()
-            .find(|r| r.name == name)
-            .expect("recorded sidecar appears in the report");
-        assert_eq!(found.plugin_id, "com.test.perm");
-        assert!(
-            !found.enforced,
-            "native sidecars are never OS-enforced in v1"
-        );
-        // Serializes for the future status wire.
-        let value = serde_json::to_value(found).unwrap();
-        assert_eq!(value["enforced"], serde_json::json!(false));
-        assert_eq!(value["name"], serde_json::json!(name));
-    }
-
-    // ── Missing app-sidecar binary: recorded + surfaced, never swallowed ──────────
-
-    /// A `Local` sidecar spec for a command that cannot exist on any host.
-    fn local_spec(command: &str) -> SidecarSpec {
-        SidecarSpec {
-            name: "worker".to_owned(),
-            process: SidecarProcess::Local(crate::plugin_manifest::schema::LocalProcessSpec {
-                command: command.to_owned(),
-                command_env: None,
-                port_env: None,
-                args: vec![],
-                env: BTreeMap::new(),
-            }),
-            port: 9098,
-            health_path: "/health".to_owned(),
-            http: None,
-            host_api: None,
-            lazy: false,
-            idle_stop_secs: None,
-            provides_provider: None,
-        }
-    }
-
-    /// The 404-swallowing case, which is what left `@ryu/browser` showing a
-    /// permanent "502 sidecar unreachable": when nothing resolves the command, the
-    /// reason is RECORDED (not just warned) and it names the exact release asset this
-    /// platform needs, so an operator can diff it against what CI publishes.
-    #[tokio::test]
-    async fn missing_local_sidecar_binary_is_recorded_with_the_expected_release_asset() {
-        let command = format!("ryu-test-absent-{}", uuid::Uuid::new_v4());
-        let name = format!("com.test.absent/{command}");
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-
-        // Falls through to the bare command (the spawn stays the authoritative
-        // resolver — this hook never turns an optional sidecar into a boot failure).
-        let program = ensure_local_sidecar_present(
-            &name,
-            "com.test.absent",
-            command.clone(),
-            &command,
-            &downloads,
-            None,
-        )
-        .await;
-        assert_eq!(program, command);
-
-        let reports = missing_sidecar_binary_reports();
-        let found = reports
-            .iter()
-            .find(|r| r.name == name)
-            .expect("an unresolvable command must be recorded, not swallowed");
-        assert_eq!(found.plugin_id, "com.test.absent");
-        assert_eq!(found.command, command);
-        // The asset-name contract: `<command>-<os>-<arch>[.exe]`, byte-identical to
-        // what the release workflow must publish. A mismatch here IS the bug class
-        // this record exists to expose (ryu-browser ships `-mac-arm64.dmg`).
-        let ext = if cfg!(windows) { ".exe" } else { "" };
-        assert_eq!(
-            found.expected_asset,
-            format!("{command}-{}{ext}", crate::update::platform_tag())
-        );
-        assert!(!found.reason.is_empty(), "a record must carry its reason");
-        // Serializes for the status wire (the `/api/sidecar/status` seam).
-        let value = serde_json::to_value(found).unwrap();
-        assert_eq!(value["name"], serde_json::json!(name));
-        assert_eq!(
-            value["expected_asset"],
-            serde_json::json!(found.expected_asset)
-        );
-
-        clear_missing_sidecar_binary(&name);
-    }
-
-    /// A record must never outlive the problem: once the binary resolves (a later
-    /// install, or a `command_env` override pointing at a dev build) the entry is
-    /// dropped, so a healed sidecar stops reporting "binary not installed" forever.
-    #[tokio::test]
-    async fn resolved_local_sidecar_binary_clears_a_stale_missing_record() {
-        let name = format!("com.test.healed-{}/worker", uuid::Uuid::new_v4());
-        record_missing_sidecar_binary(
-            &name,
-            "com.test.healed",
-            "ryu-healed",
-            "ryu-healed-macos-aarch64",
-            "stale".to_owned(),
-        );
-        assert!(missing_sidecar_binary_reason(&name).is_some());
-
-        // An existing file at the resolved program path is step 1 of the resolution
-        // order (an env override or an already-installed bin).
-        let existing = std::env::temp_dir().join(format!("ryu-healed-{}", uuid::Uuid::new_v4()));
-        std::fs::write(&existing, b"#!/bin/sh\n").unwrap();
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-        let program = ensure_local_sidecar_present(
-            &name,
-            "com.test.healed",
-            existing.to_string_lossy().into_owned(),
-            "ryu-healed",
-            &downloads,
-            None,
-        )
-        .await;
-
-        assert_eq!(program, existing.to_string_lossy());
-        assert!(
-            missing_sidecar_binary_reason(&name).is_none(),
-            "a resolved binary must clear its stale missing-binary record"
-        );
-        std::fs::remove_file(&existing).ok();
-    }
-
-    // ── the managed-bin ready notifier ────────────────────────────────────────────
-
-    /// A uniquely-named slot in the Ryu-managed bin dir: reserved (absent) first, so a
-    /// test can assert the enable-time skip, then `install()`ed to make the binary land.
-    /// Removed on `Drop`.
-    ///
-    /// Writes into the process's ACTUAL data dir (`~/.ryu/bin`, or the profile variant)
-    /// rather than redirecting it: `paths::ryu_dir()` is a `OnceLock` resolved on first
-    /// use, so setting `RYU_DIR` from a test would take effect or not depending on which
-    /// sibling test ran first. A uuid-suffixed name cannot collide with a real installed
-    /// binary, and it is never spawned.
-    struct ManagedBinSlot {
-        command: String,
-        path: PathBuf,
-    }
-
-    impl ManagedBinSlot {
-        fn reserve() -> Self {
-            let command = format!("ryu-test-notify-{}", uuid::Uuid::new_v4());
-            let path = managed_bin_path(&command);
-            assert!(
-                which_on_path(&command).is_none(),
-                "precondition: a uuid-named command is not on PATH"
-            );
-            assert!(!path.is_file(), "precondition: the slot starts empty");
-            Self { command, path }
-        }
-
-        /// The binary lands — deliberately WITHOUT the `<command>.version` marker
-        /// `ensure_local_sidecar_present` demands before it reuses a bin. The marker is
-        /// download-lifecycle policy; the MCP resolver rung only asks "is there a file
-        /// here", so this is also the dev-box shape (a locally built binary).
-        fn install(&self) {
-            std::fs::create_dir_all(self.path.parent().expect("bin dir has a parent"))
-                .expect("create the managed bin dir");
-            std::fs::write(&self.path, b"").expect("write the managed bin");
-        }
-    }
-
-    impl Drop for ManagedBinSlot {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-
-    /// A manifest declaring exactly one `mcp_servers` entry whose `command` is the bare
-    /// name of a Ryu-managed binary — the shape the managed-bin resolver rung exists for
-    /// (no `command_env` for anything to seed).
-    fn manifest_declaring_mcp_server(
-        plugin_id: &str,
-        server: &str,
-        command: &str,
-    ) -> crate::plugin_manifest::PluginManifest {
-        let mut mcp_servers = BTreeMap::new();
-        mcp_servers.insert(
-            server.to_owned(),
-            crate::plugin_manifest::McpServerDecl {
-                command: Some(command.to_owned()),
-                command_env: None,
-                args: vec![],
-                env: BTreeMap::new(),
-                description: None,
-                enabled: true,
-                ..Default::default()
-            },
-        );
-        crate::plugin_manifest::PluginManifest {
-            id: plugin_id.to_owned(),
-            name: "Notifier Test".to_owned(),
-            version: "1.0.0".to_owned(),
-            mcp_servers,
-            ..Default::default()
-        }
-    }
-
-    /// The whole point of the notifier: at enable the binary is not there yet, so the
-    /// declaration is skipped and nothing remembers it — and then the sidecar's binary
-    /// lands and the server registers itself, with no restart.
-    ///
-    /// Both halves are asserted in one test on purpose: the skip is the precondition
-    /// that makes the registration meaningful. Without it, a host where the command
-    /// happened to resolve would pass while proving nothing.
-    ///
-    /// The discriminator is the stored ABSOLUTE path, not mere presence: Ryu's installer
-    /// puts `<data dir>/bin` on the user's `PATH`, so on some hosts a bare name also
-    /// resolves through the plain-`PATH` rung, which stores the name verbatim. Only the
-    /// managed-bin rung can produce the absolute path.
-    #[tokio::test]
-    async fn a_landed_managed_binary_registers_the_plugins_mcp_server() {
-        let slot = ManagedBinSlot::reserve();
-        let plugin_id = format!("com.test.notify-{}", uuid::Uuid::new_v4());
-        let server = format!("notify-srv-{}", uuid::Uuid::new_v4());
-        let sidecar_name = namespaced_name(&plugin_id, "worker");
-
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let manifest = Arc::new(manifest_declaring_mcp_server(
-            &plugin_id,
-            &server,
-            &slot.command,
-        ));
-
-        // 1. Enable time, reproduced exactly: `activate_plugin` registers the manifest's
-        //    servers while `apply_sidecars` is still fetching the binary. Nothing to
-        //    spawn, so the declaration is skipped — and a skip is remembered nowhere.
-        let at_enable = crate::sidecar::mcp::register_manifest_mcp_servers(
-            &registry,
-            &manifest,
-            PluginTier::Core,
-            &[],
-        );
-        assert!(
-            at_enable.is_empty() && !registry.contains_server(&server),
-            "precondition: with no binary on disk the declaration must be skipped"
-        );
-
-        // 2. The binary lands — the event this notifier exists to observe.
-        slot.install();
-
-        let registration = McpRegistration {
-            registry: Arc::clone(&registry),
-            manifest: Arc::clone(&manifest),
-            tier: PluginTier::Core,
-            approved_grants: Vec::new(),
-            runtime: None,
-        };
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-        let program = ensure_local_sidecar_present(
-            &sidecar_name,
-            &plugin_id,
-            slot.command.clone(),
-            &slot.command,
-            &downloads,
-            Some(&registration),
-        )
-        .await;
-
-        // 3. Registered, from the real `ManifestSidecar` code path. Note the resolver
-        //    that matters is the MCP one, not this function's: with no `.version` marker
-        //    the sidecar resolution still falls through to the bare command, and the
-        //    server registers anyway.
-        assert_eq!(program, slot.command);
-        assert!(
-            registry.contains_server(&server),
-            "a binary landing must register the declaration the enable pass skipped"
-        );
-        let summary = registry
-            .server_summaries()
-            .into_iter()
-            .find(|s| s.name == server)
-            .expect("the registered server must be listed");
-        assert_eq!(
-            summary.command,
-            slot.path.to_string_lossy(),
-            "the stored command must be the absolute managed-bin path, not the bare name"
-        );
-
-        // 4. Cost control: a lazy sidecar wakes over and over, and `register_server`
-        //    rebuilds the server map + clears the tool cache. Once every declared name is
-        //    registered the notifier must do nothing at all.
-        assert!(
-            notify_managed_binary_ready(&registration).await.is_empty(),
-            "a wake with nothing left to register must not touch the registry"
-        );
-
-        clear_missing_sidecar_binary(&sidecar_name);
-    }
-
-    /// The skip-if-nothing-to-do guard must key on OWNERSHIP, not on "is this name known
-    /// to the registry". Core reserves a set of built-in server names
-    /// (`threads`, `research`, the capability facade, …) that `contains_server` answers
-    /// `true` for whether or not anything is registered — while a plugin registration by
-    /// that name is real work, because it overlays the built-in in `rebuild_servers`.
-    ///
-    /// Guarding on `contains_server` would therefore switch this notifier off
-    /// *permanently*, and silently, for exactly the apps that are taking a name Core
-    /// still reserves — which is the shape of every in-flight severance of a built-in
-    /// Core MCP module out to its own app. Hence `plugin_server_owner`.
-    #[tokio::test]
-    async fn a_name_core_merely_reserves_does_not_suppress_the_notifier() {
-        let slot = ManagedBinSlot::reserve();
-        slot.install();
-        let plugin_id = format!("com.test.reserved-{}", uuid::Uuid::new_v4());
-        // Any reserved built-in name works; `threads` stands in for whichever Core
-        // module an app is in the middle of taking over.
-        let server = crate::sidecar::mcp::threads::SERVER_NAME;
-        let sidecar_name = namespaced_name(&plugin_id, "worker");
-
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        assert!(
-            registry.contains_server(server),
-            "precondition: the name is reserved even though nothing is registered"
-        );
-        assert!(
-            registry.plugin_server_owner(server).is_none(),
-            "precondition: but no PLUGIN owns it, so a registration would change something"
-        );
-
-        let registration = McpRegistration {
-            registry: Arc::clone(&registry),
-            manifest: Arc::new(manifest_declaring_mcp_server(
-                &plugin_id,
-                server,
-                &slot.command,
-            )),
-            tier: PluginTier::Core,
-            approved_grants: Vec::new(),
-            runtime: None,
-        };
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-        let _ = ensure_local_sidecar_present(
-            &sidecar_name,
-            &plugin_id,
-            slot.command.clone(),
-            &slot.command,
-            &downloads,
-            Some(&registration),
-        )
-        .await;
-
-        assert_eq!(
-            registry.plugin_server_owner(server).as_deref(),
-            Some(plugin_id.as_str()),
-            "a reserved-but-unowned name must not short-circuit the notifier"
-        );
-        // And now that it IS owned, the guard does its job on the next wake.
-        assert!(
-            notify_managed_binary_ready(&registration).await.is_empty(),
-            "once owned, a wake must not touch the registry"
-        );
-
-        clear_missing_sidecar_binary(&sidecar_name);
-    }
-
-    /// The notifier is the SAME gated door, asked twice — not a second, ungated one. A
-    /// Community-tier plugin without the approved `mcp:server` grant registers nothing
-    /// when its binary lands, exactly as it registered nothing at enable.
-    ///
-    /// This is the property that matters most here: the notifier fires from a code path
-    /// (a sidecar start / lazy wake) that has no gate of its own, so if it re-derived
-    /// "which declarations now resolve" instead of re-running
-    /// `register_manifest_mcp_servers`, a `~/.ryu/plugins` manifest could reach
-    /// `Command::new` just by shipping a binary.
-    #[tokio::test]
-    async fn the_notifier_does_not_bypass_the_tier_and_grant_gate() {
-        let slot = ManagedBinSlot::reserve();
-        slot.install();
-        let plugin_id = format!("com.test.ungated-{}", uuid::Uuid::new_v4());
-        let server = format!("ungated-srv-{}", uuid::Uuid::new_v4());
-        let sidecar_name = namespaced_name(&plugin_id, "worker");
-
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let registration = McpRegistration {
-            registry: Arc::clone(&registry),
-            manifest: Arc::new(manifest_declaring_mcp_server(
-                &plugin_id,
-                &server,
-                &slot.command,
-            )),
-            tier: PluginTier::Community,
-            approved_grants: Vec::new(),
-            runtime: None,
-        };
-
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-        let _ = ensure_local_sidecar_present(
-            &sidecar_name,
-            &plugin_id,
-            slot.command.clone(),
-            &slot.command,
-            &downloads,
-            Some(&registration),
-        )
-        .await;
-
-        assert!(
-            !registry.contains_server(&server),
-            "a Community-tier plugin without the approved grant must register nothing, \
-             even though its binary is now installed and resolvable"
-        );
-        // And the grant is what unlocks it — so the skip above is the gate, not a
-        // resolution failure that would make this test vacuous.
-        let granted = McpRegistration {
-            approved_grants: vec![crate::sidecar::mcp::GRANT_MCP_SERVER.to_owned()],
-            ..registration
-        };
-        assert_eq!(
-            notify_managed_binary_ready(&granted).await,
-            vec![server.clone()],
-            "with the grant approved, the same landing registers the server"
-        );
-
-        clear_missing_sidecar_binary(&sidecar_name);
-    }
-
-    /// The surfaced half: `health_check` reports the recorded reason through
-    /// [`HealthStatus::Unhealthy`] — the reason channel that already exists — so a
-    /// stopped sidecar reads as "binary not installed", not the indistinguishable
-    /// "process not running" a crash and a lazy scale-to-zero also produce.
-    #[tokio::test]
-    async fn health_check_says_binary_not_installed_rather_than_process_not_running() {
-        let downloads = crate::downloads::DownloadCenter::with_default_client();
-        let plugin_id = format!("com.test.nobin-{}", uuid::Uuid::new_v4());
-        let sc = ManifestSidecar::new(plugin_id.clone(), local_spec("ryu-test-nobin"), downloads);
-        let name = sc.name().to_owned();
-
-        // No record yet: a not-running sidecar (crashed, or lazily scaled to zero) must
-        // NOT be reported as a missing binary — that would be a lie about the cause.
-        assert!(!sc.is_running());
-        let before = sc.health_check().await;
-        let HealthStatus::Unhealthy(msg) = before else {
-            panic!("a stopped sidecar is Unhealthy");
-        };
-        assert_eq!(msg, "process not running");
-
-        record_missing_sidecar_binary(
-            &name,
-            &plugin_id,
-            "ryu-test-nobin",
-            "ryu-test-nobin-macos-aarch64",
-            "not published for this platform".to_owned(),
-        );
-        let after = sc.health_check().await;
-        let HealthStatus::Unhealthy(msg) = after else {
-            panic!("a sidecar with no binary is Unhealthy");
-        };
-        assert!(
-            msg.starts_with("binary not installed: "),
-            "health must carry the missing-binary reason, got: {msg}"
-        );
-        assert!(msg.contains("not published for this platform"), "{msg}");
-
-        clear_missing_sidecar_binary(&name);
-    }
-
-    // ── The ext-API fetch hook ────────────────────────────────────────────────
-
-    /// A one-shot loopback server that counts connections and answers every request
-    /// with a bare 404 — the shape of a real sidecar that serves no OpenAPI document,
-    /// which is the case the latch has to terminate on. Returns its port plus the
-    /// live hit counter.
-    ///
-    /// A real socket rather than a mock because the thing under test is precisely
-    /// whether a SECOND fetch happens: a fake that records calls to a trait would be
-    /// asserting about the fake's own bookkeeping, not about the hook's behaviour.
-    fn spawn_counting_probe() -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
-        spawn_probe(ProbeReply::Status(404))
-    }
-
-    /// What a [`spawn_probe`] listener answers with. Each variant is a classification
-    /// the fetch hook has to get right, and each one is a different code path out of
-    /// `import_openapi` — which is why they share one listener instead of three.
-    #[derive(Clone, Copy)]
-    enum ProbeReply {
-        /// A bare status with an empty body (404 ⇒ definitive, 503 ⇒ transient).
-        Status(u16),
-        /// A 200 whose body is `bytes` long — used to cross
-        /// [`EXT_API_SPEC_MAX_BYTES`]. The declared `content-length` is deliberately a
-        /// LIE (it claims a small body), so passing this test proves the *streaming*
-        /// total is what bounds the read, not the header pre-check a hostile or buggy
-        /// server controls.
-        OversizedBody { bytes: usize },
-    }
-
-    /// A loopback server that counts connections and answers every request the same
-    /// way. Returns its port plus the live hit counter.
-    fn spawn_probe(reply: ProbeReply) -> (u16, Arc<std::sync::atomic::AtomicUsize>) {
-        use std::sync::atomic::AtomicUsize;
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-        let port = listener.local_addr().expect("addr").port();
-        listener.set_nonblocking(true).expect("nonblocking");
-        let hits = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&hits);
-        if let ProbeReply::OversizedBody { bytes } = reply {
-            tokio::spawn(async move {
-                let listener = tokio::net::TcpListener::from_std(listener).expect("into tokio");
-                loop {
-                    let Ok((mut sock, _)) = listener.accept().await else {
-                        return;
-                    };
-                    counter.fetch_add(1, Ordering::SeqCst);
-                    let mut buf = [0u8; 2048];
-                    let _ = sock.read(&mut buf).await;
-                    // Chunked, so the client cannot pre-empt on `content-length` — the
-                    // read has to be stopped by the running total or not at all.
-                    let _ = sock
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
-                              transfer-encoding: chunked\r\nconnection: close\r\n\r\n",
-                        )
-                        .await;
-                    // 64 KB of filler per chunk; the JSON is never valid, which is fine
-                    // — the cap must trip long before anything tries to parse it.
-                    let chunk = vec![b'x'; 64 * 1024];
-                    let header = format!("{:x}\r\n", chunk.len());
-                    let mut sent = 0usize;
-                    while sent < bytes {
-                        if sock.write_all(header.as_bytes()).await.is_err()
-                            || sock.write_all(&chunk).await.is_err()
-                            || sock.write_all(b"\r\n").await.is_err()
-                        {
-                            break;
-                        }
-                        sent += chunk.len();
-                    }
-                    let _ = sock.write_all(b"0\r\n\r\n").await;
-                    let _ = sock.shutdown().await;
-                }
-            });
-            return (port, hits);
-        }
-        let ProbeReply::Status(status) = reply else {
-            unreachable!("the oversized arm returned above");
-        };
-        tokio::spawn(async move {
-            let listener = tokio::net::TcpListener::from_std(listener).expect("into tokio");
-            loop {
-                let Ok((mut sock, _)) = listener.accept().await else {
-                    return;
-                };
-                counter.fetch_add(1, Ordering::SeqCst);
-                // Drain the request line/headers first: answering into an unread
-                // socket makes some clients report a connection reset instead of the
-                // status, which would misclassify a definitive 404 as transient.
-                let mut buf = [0u8; 2048];
-                let _ = sock.read(&mut buf).await;
-                let resp = format!(
-                    "HTTP/1.1 {status} Status\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-                );
-                let _ = sock.write_all(resp.as_bytes()).await;
-                let _ = sock.shutdown().await;
-            }
-        });
-        (port, hits)
-    }
-
-    /// The default hook fixture: plugin `@ryu/probe`, its `worker` sidecar, no live
-    /// manifest store (so [`OpenApiImport::lowering_inputs`] falls back to the
-    /// snapshot, which is the shape every pre-existing test asserts against).
-    fn probe_import(registry: &Arc<crate::sidecar::mcp::McpRegistry>) -> OpenApiImport {
-        probe_import_named(registry, "@ryu/probe", "worker")
-    }
-
-    fn probe_import_named(
-        registry: &Arc<crate::sidecar::mcp::McpRegistry>,
-        plugin_id: &str,
-        sidecar: &str,
-    ) -> OpenApiImport {
-        OpenApiImport {
-            registry: Arc::clone(registry),
-            plugin_id: plugin_id.to_owned(),
-            sidecar_name: sidecar.to_owned(),
-            sidecar_key: namespaced_name(plugin_id, sidecar),
-            manifests: None,
-            upstream_mount: "/api".to_owned(),
-            declared_routes: Vec::new(),
-            client: reqwest::Client::new(),
-            runtime: None,
-        }
-    }
-
-    /// A stranded claim is permanent and silent: the flag stays `true`, nothing was
-    /// stored so `has_ext_api_routes` stays `false`, and every later Healthy edge
-    /// spawns a task that loses the CAS and returns. The app then derives zero tools
-    /// for the life of the process with nothing in the log to say why. Releasing from
-    /// `Drop` rather than a trailing store is what makes an unwind survivable.
-    #[test]
-    fn claim_guard_releases_on_unwind() {
-        let latch = Arc::new(AtomicBool::new(true));
-        let escaped = std::panic::catch_unwind({
-            let latch = Arc::clone(&latch);
-            move || {
-                let _claim = ClaimGuard(latch);
-                panic!("lowering blew up");
-            }
-        });
-        assert!(escaped.is_err(), "the panic must actually have unwound");
-        assert!(
-            !latch.load(Ordering::SeqCst),
-            "an unwind must still release the claim, or the app never derives again"
-        );
-    }
-
-    /// The re-wake guard. A `lazy` sidecar with `idle_stop_secs` crosses the Healthy
-    /// edge on every wake, so an unlatched hook would refetch and reparse the same
-    /// document for the life of the node.
-    ///
-    /// This also pins the half that makes termination possible at all: a definitive
-    /// "no spec here" answer is RECORDED (as zero routes), not merely skipped. If it
-    /// were skipped, `has_ext_api_routes` would stay false and every one of the ~40
-    /// apps that serve no OpenAPI document would be re-probed twice a minute forever.
-    #[tokio::test]
-    async fn import_is_latched_and_does_not_refetch_on_rewake() {
-        let (port, hits) = spawn_counting_probe();
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let latch = Arc::new(AtomicBool::new(false));
-
-        import_openapi_once(probe_import(&registry), port, Arc::clone(&latch)).await;
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            2,
-            "the first Healthy edge tries the root, then the mount-prefixed form"
-        );
-        assert!(
-            registry.has_ext_api_routes("@ryu/probe"),
-            "a definitive answer must be recorded even when it derives nothing"
-        );
-
-        import_openapi_once(probe_import(&registry), port, Arc::clone(&latch)).await;
-        assert_eq!(hits.load(Ordering::SeqCst), 2, "a re-wake must not refetch");
-    }
-
-    /// The ROOT is tried first. `http.mount` says where the sidecar nests its routes,
-    /// not where its server is rooted — the spec's own paths already carry the mount
-    /// (which is why `ext_api::lower` strips it), so an app nesting at `/api/crm`
-    /// still publishes its schema at `/openapi.json`. Getting this backwards 404s
-    /// every app that has a mount, and — because a 404 is definitive — latches it at
-    /// zero derived tools for the life of the process.
-    #[test]
-    fn openapi_is_probed_at_the_root_before_the_mount() {
-        assert_eq!(
-            openapi_doc_urls("http://127.0.0.1:8009", "/api/crm"),
-            vec![
-                "http://127.0.0.1:8009/openapi.json".to_owned(),
-                "http://127.0.0.1:8009/api/crm/openapi.json".to_owned(),
-            ]
-        );
-        // No mount ⇒ one candidate, not a duplicate of the same URL.
-        assert_eq!(
-            openapi_doc_urls("http://127.0.0.1:8009", ""),
-            vec!["http://127.0.0.1:8009/openapi.json".to_owned()]
-        );
-    }
-
-    /// …and the latch is re-armable, which is the whole reason it lives in the
-    /// REGISTRY rather than in this struct. `deactivate_plugin` and
-    /// `update_app_handler` both clear the rows without rebuilding the sidecar object;
-    /// a local done-flag would make those clears permanent (zero derived tools until
-    /// the next process restart) instead of a re-lower request.
-    #[tokio::test]
-    async fn clearing_the_registry_re_arms_the_import() {
-        let (port, hits) = spawn_counting_probe();
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let latch = Arc::new(AtomicBool::new(false));
-
-        import_openapi_once(probe_import(&registry), port, Arc::clone(&latch)).await;
-        let after_first = hits.load(Ordering::SeqCst);
-        assert!(after_first > 0);
-
-        registry.clear_ext_api_routes("@ryu/probe");
-        import_openapi_once(probe_import(&registry), port, latch).await;
-        assert!(
-            hits.load(Ordering::SeqCst) > after_first,
-            "clearing the registry must let the next Healthy edge re-lower"
-        );
-    }
-
-    /// A 404 is the app's real answer about this URL, so it stays DEFINITIVE: the ~40
-    /// shipped apps that publish no OpenAPI document must be recorded as "nothing to
-    /// derive" and never probed again, or every one of them pays two requests per
-    /// health poll for the life of the node.
-    ///
-    /// The counterpart to `server_error_status_is_transient_and_retries` below — the
-    /// two together are the whole content of the status split, and asserting only one
-    /// of them would pass under a classifier that treats everything the same way.
-    #[tokio::test]
-    async fn not_found_is_definitive() {
-        let (port, hits) = spawn_probe(ProbeReply::Status(404));
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let latch = Arc::new(AtomicBool::new(false));
-        let import = probe_import(&registry);
-        let key = import.sidecar_key.clone();
-
-        import_openapi_once(import, port, Arc::clone(&latch)).await;
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            2,
-            "a 4xx at the root must still try the mount-prefixed candidate"
-        );
-        assert!(
-            registry.has_ext_api_routes_for_sidecar(&key),
-            "a 404 from every candidate is an answer, and must be recorded"
-        );
-
-        import_openapi_once(probe_import(&registry), port, latch).await;
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            2,
-            "and it must never be re-asked"
-        );
-    }
-
-    /// 401/403 stay DEFINITIVE, and that is a deliberate call rather than a gap in the
-    /// list. "The bearer was rejected" is a stable property of how the sidecar is
-    /// configured, not a hiccup — treating it as transient would put every
-    /// auth-misconfigured app into a permanent two-requests-per-30s loop that nothing
-    /// ever breaks, since the token Core presents does not change by being re-sent.
-    ///
-    /// Pinned separately because it is the plausible wrong edit: "the token must have
-    /// rotated, so retry" reads reasonable and would leave the suite green. The INFO
-    /// line on the definitive branch carries the status precisely so an operator can
-    /// tell this case apart from a 404 without a retry loop to make it obvious.
-    #[tokio::test]
-    async fn unauthorized_is_definitive_not_a_retry_loop() {
-        let (port, hits) = spawn_probe(ProbeReply::Status(401));
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let latch = Arc::new(AtomicBool::new(false));
-        let import = probe_import(&registry);
-        let key = import.sidecar_key.clone();
-
-        import_openapi_once(import, port, Arc::clone(&latch)).await;
-        assert!(
-            registry.has_ext_api_routes_for_sidecar(&key),
-            "a rejected bearer is an answer about the app, not a transport hiccup"
-        );
-        let after_first = hits.load(Ordering::SeqCst);
-
-        import_openapi_once(probe_import(&registry), port, latch).await;
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            after_first,
-            "…so it must never be re-asked"
-        );
-    }
-
-    /// A 5xx is the sidecar failing, not answering — and the Healthy edge fires at
-    /// exactly the moment a sidecar is most likely to be mid-boot (health route up,
-    /// the rest of the router not yet mounted, workers still forking). Recording that
-    /// as "this app serves no OpenAPI document" would latch the app at zero derived
-    /// tools for the life of the process, on nothing but a slow start.
-    ///
-    /// Also pins the no-second-candidate rule: a 503 at the root says nothing about
-    /// the mount, so retrying the mount would only add load to a sidecar that is
-    /// already shedding it. One hit per attempt, not two.
-    #[tokio::test]
-    async fn server_error_status_is_transient_and_retries() {
-        let (port, hits) = spawn_probe(ProbeReply::Status(503));
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let latch = Arc::new(AtomicBool::new(false));
-        let import = probe_import(&registry);
-        let key = import.sidecar_key.clone();
-
-        import_openapi_once(import, port, Arc::clone(&latch)).await;
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            1,
-            "a transient status must abort the candidate walk, not double the load"
-        );
-        assert!(
-            !registry.has_ext_api_routes_for_sidecar(&key),
-            "a 503 must store NOTHING, or the retry can never happen"
-        );
-
-        // The next Healthy edge (30s later in production; immediately here) re-asks.
-        import_openapi_once(probe_import(&registry), port, latch).await;
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            2,
-            "the sidecar that was briefly 503 must get another chance"
-        );
-    }
-
-    /// Unbounded consumption: the only bound on this fetch used to be the 10s timeout,
-    /// and 10 seconds of loopback is gigabytes — buffered into a `Vec` and then handed
-    /// to a JSON parser.
-    ///
-    /// Two properties in one test, because either alone is a false pass:
-    ///
-    /// 1. The read is *stopped* — the probe streams far more than
-    ///    [`EXT_API_SPEC_MAX_BYTES`] under a chunked encoding with no honest
-    ///    `content-length`, so only the running total can stop it.
-    /// 2. The refusal is *definitive*. A transient classification here would be worse
-    ///    than no cap at all: every 30s health poll would re-download the same
-    ///    oversized document forever, turning a one-shot memory spike into a permanent
-    ///    bandwidth loop.
-    #[tokio::test]
-    async fn oversized_spec_body_is_refused_and_not_retried() {
-        let over = (EXT_API_SPEC_MAX_BYTES as usize) + 512 * 1024;
-        let (port, hits) = spawn_probe(ProbeReply::OversizedBody { bytes: over });
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let latch = Arc::new(AtomicBool::new(false));
-        let import = probe_import(&registry);
-        let key = import.sidecar_key.clone();
-
-        import_openapi_once(import, port, Arc::clone(&latch)).await;
-        let after_first = hits.load(Ordering::SeqCst);
-        assert_eq!(
-            after_first, 1,
-            "the first candidate answered 200, so the walk stops there"
-        );
-        assert!(
-            registry.has_ext_api_routes_for_sidecar(&key),
-            "an over-cap body must be recorded as a definitive zero-tool result"
-        );
-
-        import_openapi_once(probe_import(&registry), port, latch).await;
-        assert_eq!(
-            hits.load(Ordering::SeqCst),
-            after_first,
-            "…and must NOT be re-downloaded on the next Healthy edge"
-        );
-    }
-
-    /// The direct unit on the cap, so a regression is attributed to the reader rather
-    /// than to the hook around it — and so the `content-length` pre-check is pinned
-    /// independently of the streaming total the test above exercises.
-    #[tokio::test]
-    async fn a_lying_content_length_cannot_bypass_the_spec_cap() {
-        // A server may under-declare (or omit) `content-length`; the pre-check is an
-        // early-out, never the bound.
-        let over = (EXT_API_SPEC_MAX_BYTES as usize) + 512 * 1024;
-        let (port, _hits) = spawn_probe(ProbeReply::OversizedBody { bytes: over });
-        let resp = reqwest::Client::new()
-            .get(format!("http://127.0.0.1:{port}/openapi.json"))
-            .send()
-            .await
-            .expect("the probe answers");
-        assert!(
-            resp.content_length()
-                .is_none_or(|l| l <= EXT_API_SPEC_MAX_BYTES),
-            "precondition: the header must not be what trips the cap"
-        );
-        assert!(
-            matches!(
-                read_capped_spec_body(resp, "probe").await,
-                SpecBody::TooLarge
-            ),
-            "the streaming total is the bound"
-        );
-    }
-
-    /// One derived row, shaped enough to be stored and counted. The registry never
-    /// inspects anything but `id`/`plugin_id` on the paths under test here.
-    fn derived_row(id: &str, plugin: &str) -> crate::ext_api::ExtApiRoute {
-        crate::ext_api::ExtApiRoute {
-            id: id.to_owned(),
-            plugin_id: plugin.to_owned(),
-            method: "GET".to_owned(),
-            url: format!("core:/api/ext/{plugin}/thing"),
-            name: "Do the thing".to_owned(),
-            description: None,
-            header_params: vec![],
-            input_schema: serde_json::json!({ "type": "object", "properties": {} }),
-        }
-    }
-
-    /// **FIX 3.** The hook is armed per SIDECAR while the store used to be keyed per
-    /// PLUGIN, so a manifest with two `http` sidecars had its second lowering silently
-    /// overwrite the first — and, worse, the plugin-scoped latch then answered "already
-    /// lowered" for the second sidecar before it ever ran, making the winner a function
-    /// of health-poll ordering.
-    ///
-    /// Both halves are asserted, because they fail independently:
-    ///
-    /// - the LATCH half, end-to-end through `import_openapi_once`: sidecar B must
-    ///   actually go and fetch after sidecar A has finished;
-    /// - the STORE half: A's rows must still be there once B has stored its own.
-    ///
-    /// Latent today only because exactly one shipped manifest (`finetune`) declares two
-    /// sidecars and its second happens to carry no `http` block. That is a coincidence,
-    /// not a guarantee, and the failure it would produce is invisible.
-    #[tokio::test]
-    async fn two_http_sidecars_on_one_plugin_do_not_overwrite_each_other() {
-        let (port, hits) = spawn_counting_probe();
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-
-        let alpha = probe_import_named(&registry, "@ryu/twin", "alpha");
-        let beta = probe_import_named(&registry, "@ryu/twin", "beta");
-        let (alpha_key, beta_key) = (alpha.sidecar_key.clone(), beta.sidecar_key.clone());
-        assert_ne!(alpha_key, beta_key, "the two sidecars must key differently");
-
-        import_openapi_once(alpha, port, Arc::new(AtomicBool::new(false))).await;
-        let after_alpha = hits.load(Ordering::SeqCst);
-        assert!(after_alpha > 0, "the first sidecar fetched");
-
-        import_openapi_once(beta, port, Arc::new(AtomicBool::new(false))).await;
-        assert!(
-            hits.load(Ordering::SeqCst) > after_alpha,
-            "the SECOND sidecar of the same plugin must still fetch its own document — \
-             a plugin-scoped latch would have skipped it forever"
-        );
-        assert!(registry.has_ext_api_routes_for_sidecar(&alpha_key));
-        assert!(registry.has_ext_api_routes_for_sidecar(&beta_key));
-
-        // The store half: two sidecars' rows coexist instead of the later replacing
-        // the earlier.
-        registry.set_ext_api_routes_for_sidecar(
-            "@ryu/twin",
-            &alpha_key,
-            vec![derived_row("ryu_ext.ryu_twin.get_alpha", "@ryu/twin")],
-        );
-        registry.set_ext_api_routes_for_sidecar(
-            "@ryu/twin",
-            &beta_key,
-            vec![derived_row("ryu_ext.ryu_twin.get_beta", "@ryu/twin")],
-        );
-        assert!(
-            registry
-                .describe("ryu_ext.ryu_twin.get_alpha")
-                .await
-                .is_some(),
-            "the first sidecar's rows must survive the second's lowering"
-        );
-        assert!(registry
-            .describe("ryu_ext.ryu_twin.get_beta")
-            .await
-            .is_some());
-    }
-
-    /// …and the plugin-scoped clear must reach BOTH of them. `deactivate_plugin` and
-    /// `update_app_handler` know only the plugin id, so a sidecar-keyed store with a
-    /// `map.remove(plugin_id)` clear would leave the second sidecar's rows searchable
-    /// and callable for an app the user just disabled — tools that the ext-proxy then
-    /// refuses at the hop, i.e. tools that can only fail.
-    ///
-    /// The look-alike plugin is the other half of the keying invariant: ownership
-    /// requires a `/` boundary, so disabling `@ryu/twin` must not strip `@ryu/twin-x`.
-    #[tokio::test]
-    async fn deactivate_clears_every_sidecar_for_the_plugin() {
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-        let alpha = namespaced_name("@ryu/twin", "alpha");
-        let beta = namespaced_name("@ryu/twin", "beta");
-        let neighbour = namespaced_name("@ryu/twin-x", "alpha");
-
-        registry.set_ext_api_routes_for_sidecar(
-            "@ryu/twin",
-            &alpha,
-            vec![derived_row("ryu_ext.ryu_twin.get_alpha", "@ryu/twin")],
-        );
-        // A zero-route entry is still an entry — it is what makes the latch terminate,
-        // so a clear that only removed non-empty ones would re-arm nothing.
-        registry.set_ext_api_routes_for_sidecar("@ryu/twin", &beta, vec![]);
-        registry.set_ext_api_routes_for_sidecar(
-            "@ryu/twin-x",
-            &neighbour,
-            vec![derived_row("ryu_ext.ryu_twin_x.get_alpha", "@ryu/twin-x")],
-        );
-
-        registry.clear_ext_api_routes("@ryu/twin");
-
-        assert!(
-            !registry.has_ext_api_routes_for_sidecar(&alpha),
-            "the clear must reach the first sidecar"
-        );
-        assert!(
-            !registry.has_ext_api_routes_for_sidecar(&beta),
-            "…and the second, including one that lowered to zero rows"
-        );
-        assert!(
-            !registry.has_ext_api_routes("@ryu/twin"),
-            "the plugin-scoped read model must agree, so a re-enable re-lowers"
-        );
-        assert!(
-            registry.has_ext_api_routes_for_sidecar(&neighbour),
-            "a plugin whose id merely PREFIXES the cleared one must be untouched"
-        );
-        assert!(
-            registry
-                .describe("ryu_ext.ryu_twin_x.get_alpha")
-                .await
-                .is_some(),
-            "…and its rows must still dispatch"
-        );
-    }
-
-    /// **FIX 4.** An in-place app update rewrites the manifest without re-running
-    /// `apply_sidecars`: it reloads `state.app_manifests` and clears the derived rows,
-    /// leaving the next Healthy edge to re-lower. If the lowering inputs were the
-    /// arm-time snapshot, that re-lowering would intersect the NEW spec against the OLD
-    /// declared routes and strip the OLD mount — deriving tools for paths the update
-    /// withdrew (which then 404 at the proxy) while silently dropping the ones it added.
-    ///
-    /// So the inputs are a live read, with the snapshot as the fallback. All three
-    /// branches are pinned here, because each fails differently: no store at all (test
-    /// and CLI contexts), a store that does not know this sidecar (uninstalled or
-    /// renamed mid-fetch), and the hit that is the whole point.
-    #[tokio::test]
-    async fn lowering_inputs_are_read_live_from_the_updated_manifest() {
-        let registry = Arc::new(crate::sidecar::mcp::McpRegistry::empty());
-
-        // No store wired ⇒ the arm-time snapshot, unchanged.
-        let bare = probe_import_named(&registry, "@ryu/updated", "worker");
-        assert_eq!(
-            bare.lowering_inputs().await,
-            ("/api".to_owned(), Vec::new()),
-            "with no manifest store the snapshot must still be used"
-        );
-
-        // The manifest as it looks AFTER an update: a different mount, different routes.
-        let mut spec = binary_spec();
-        spec.name = "worker".to_owned();
-        spec.http = Some(
-            serde_json::from_value(serde_json::json!({
-                "mount": "/api/new/",
-                "routes": [{ "path": "/added" }],
-            }))
-            .expect("the http fixture must match HttpProxySpec"),
-        );
-        let manifest = crate::plugin_manifest::PluginManifest {
-            id: "@ryu/updated".to_owned(),
-            name: "Updated".to_owned(),
-            version: "2.0.0".to_owned(),
-            sidecars: vec![spec],
-            ..Default::default()
-        };
-        let store = Arc::new(tokio::sync::RwLock::new(vec![manifest]));
-
-        let live = OpenApiImport {
-            manifests: Some(Arc::clone(&store)),
-            ..probe_import_named(&registry, "@ryu/updated", "worker")
-        };
-        let (mount, routes) = live.lowering_inputs().await;
-        assert_eq!(mount, "/api/new");
-        assert_eq!(
-            routes
-                .iter()
-                .map(|route| route.path.as_str())
-                .collect::<Vec<_>>(),
-            ["/added"]
-        );
-
-        // A sidecar the live manifest does not describe (renamed, or the app was
-        // uninstalled mid-fetch) falls back rather than lowering against nothing.
-        let renamed = OpenApiImport {
-            manifests: Some(store),
-            ..probe_import_named(&registry, "@ryu/updated", "gone")
-        };
-        assert_eq!(
-            renamed.lowering_inputs().await,
-            ("/api".to_owned(), Vec::new()),
-            "a miss must fall back to the snapshot, not to an empty declaration set"
-        );
-    }
-}
+#[path = "manifest_sidecar_tests.rs"]
+mod tests;

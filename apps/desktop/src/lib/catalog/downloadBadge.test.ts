@@ -18,6 +18,9 @@ describe("downloadBadge", () => {
 		expect(
 			downloadBadge("classifier_model", "model", "gemma-270m")?.label
 		).toBe("Classifier");
+		expect(
+			downloadBadge("plugin_model", "model", "Cactus-Compute/needle3")?.label
+		).toBe("Local model");
 	});
 
 	it("distinguishes speech, voice and image weights from their engines", () => {

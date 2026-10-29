@@ -231,6 +231,24 @@ impl PluginRuntime {
         })
     }
 
+    /// Admit new external work without waiting behind a lifecycle writer.
+    /// A tool that calls back into Core must not wait for a disable operation
+    /// that is itself waiting for the outer tool to release its read lease.
+    pub fn try_acquire(&self, plugin_id: &str) -> Option<PluginWorkLease> {
+        let slot = self.existing_slot(plugin_id)?;
+        let guard = Arc::clone(&slot.state).try_read_owned().ok()?;
+        if !guard.active {
+            return None;
+        }
+        Some(PluginWorkLease {
+            generation: RuntimeGeneration {
+                plugin_id: plugin_id.to_owned(),
+                number: guard.generation,
+            },
+            guard,
+        })
+    }
+
     /// Acquire a work lease only for `generation`, rejecting a newer or retired
     /// generation even when the same plugin id has since been re-enabled.
     pub async fn acquire_generation(

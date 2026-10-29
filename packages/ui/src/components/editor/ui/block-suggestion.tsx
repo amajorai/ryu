@@ -137,7 +137,7 @@ export function BlockSuggestionCard({
 									(text, index) => (
 										<Fragment key={index}>
 											<div
-												className="flex items-start gap-2 text-brand/80"
+												className="flex items-start gap-2 text-primary/80"
 												key={index}
 											>
 												<span className="text-sm">with:</span>

@@ -1,4 +1,7 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
 import { type ApiTarget, request } from "./client.ts";
+import type { GatewayJsonValue } from "./gateway-json-contracts.ts";
 
 export type SpaceImportStatus = "pending" | "running" | "completed" | "failed";
 
@@ -19,7 +22,11 @@ export interface SpaceImportRecord {
 	resultDocuments: SpaceImportResultDocument[];
 	sourceFormat: string;
 	sourceName: string;
-	sourceType: "file" | "composio";
+	/**
+	 * `connector` imports (Notion, Google Drive, Confluence, GitHub, web URLs)
+	 * carry the provider name in `sourceFormat`.
+	 */
+	sourceType: "file" | "composio" | "connector";
 	spaceId: string;
 	status: SpaceImportStatus;
 	updatedAt: number;
@@ -44,7 +51,7 @@ interface ImportRecordWire {
 
 export interface ComposioImportRequest {
 	action: string;
-	arguments: Record<string, unknown>;
+	arguments: Record<string, GatewayJsonValue>;
 	destinationKind: "auto" | "page" | "database";
 	title?: string;
 	toolkit: string;
@@ -76,7 +83,7 @@ function fileDataBase64(file: File): Promise<string> {
 			reject(reader.error ?? new Error("Could not read file"));
 		reader.onload = () => {
 			const result = reader.result;
-			if (typeof result !== "string") {
+			if (!isNativeText(result)) {
 				reject(new Error("Could not encode file"));
 				return;
 			}
@@ -86,13 +93,59 @@ function fileDataBase64(file: File): Promise<string> {
 	});
 }
 
+const spaceImportResultDocumentResponseCodec: z.ZodType<SpaceImportResultDocument> =
+	z
+		.object({
+			id: z.string(),
+			kind: z.union([z.literal("page"), z.literal("database")]),
+			title: z.string(),
+		})
+		.passthrough();
+const importRecordWireResponseCodec: z.ZodType<ImportRecordWire> = z
+	.object({
+		byte_size: z.number(),
+		completed_at: z.union([z.number(), z.null()]).optional(),
+		created_at: z.number(),
+		destination_kind: z.union([
+			z.literal("auto"),
+			z.literal("page"),
+			z.literal("database"),
+			z.literal("mixed"),
+		]),
+		id: z.string(),
+		item_count: z.number(),
+		message: z.union([z.string(), z.null()]).optional(),
+		result_documents: z
+			.array(spaceImportResultDocumentResponseCodec)
+			.optional(),
+		source_format: z.string(),
+		source_name: z.string(),
+		source_type: z.union([
+			z.literal("file"),
+			z.literal("composio"),
+			z.literal("connector"),
+		]),
+		space_id: z.string(),
+		status: z.union([
+			z.literal("pending"),
+			z.literal("running"),
+			z.literal("completed"),
+			z.literal("failed"),
+		]),
+		updated_at: z.number(),
+	})
+	.passthrough();
 export async function fetchSpaceImports(
 	target: ApiTarget,
 	spaceId: string
 ): Promise<SpaceImportRecord[]> {
 	const result = await request<{ imports?: ImportRecordWire[] }>(
 		target,
-		`/api/spaces/${encodeURIComponent(spaceId)}/imports`
+		`/api/spaces/${encodeURIComponent(spaceId)}/imports`,
+		{},
+		z
+			.object({ imports: z.array(importRecordWireResponseCodec).optional() })
+			.passthrough()
 	);
 	return (result.imports ?? []).map(fromWire);
 }
@@ -113,7 +166,8 @@ export async function createSpaceFileImport(
 				mime: file.type || "application/octet-stream",
 				data_base64: dataBase64,
 			},
-		}
+		},
+		z.object({ import: importRecordWireResponseCodec }).passthrough()
 	);
 	return fromWire(result.import);
 }
@@ -135,7 +189,8 @@ export async function createSpaceComposioImport(
 				destination_kind: input.destinationKind,
 				title: input.title,
 			},
-		}
+		},
+		z.object({ import: importRecordWireResponseCodec }).passthrough()
 	);
 	return fromWire(result.import);
 }

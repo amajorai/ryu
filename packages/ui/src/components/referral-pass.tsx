@@ -1,5 +1,12 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
+import {
+	SENSITIVE_MASK,
+	SensitiveRevealButton,
+	useSensitiveValue,
+} from "@ryu/ui/components/sensitive-value.tsx";
+
 import { Logo } from "./logo.tsx";
 import { PassCardShell, type PassEdge } from "./pass-card-shell.tsx";
 import { PassQrBack } from "./pass-qr-back.tsx";
@@ -84,16 +91,10 @@ export interface ReferralPassProps {
 function ReferralStat({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="flex min-w-0 flex-col">
-			<span
-				className="truncate font-medium font-mono tabular-nums leading-none"
-				style={{ fontSize: `${REFERRAL_STAT_VALUE_PX}px` }}
-			>
+			<span className="truncate font-medium font-mono text-[20px] tabular-nums leading-none">
 				{value}
 			</span>
-			<span
-				className="truncate text-muted-foreground"
-				style={{ fontSize: `${REFERRAL_META_PX}px` }}
-			>
+			<span className="truncate text-[12px] text-muted-foreground">
 				{label}
 			</span>
 		</div>
@@ -112,7 +113,9 @@ export function ReferralPass({
 	still = false,
 }: ReferralPassProps) {
 	const trimmedCode = code?.trim() ?? "";
+	const { revealed, toggle } = useSensitiveValue(code);
 	const name = holder?.trim() ?? "";
+	const tl = useLiteralMessages();
 	// Seeded off the CODE, so the card is the member's own colour and two people
 	// never hold the same one. Falls back to a stable literal rather than a fresh
 	// value per render, which would rehash the backdrop on every paint for nothing.
@@ -124,6 +127,8 @@ export function ReferralPass({
 				<PassQrBack
 					caption="Scan to share"
 					metalTheme={metalTheme}
+					onRevealToggle={toggle}
+					revealed={revealed}
 					seed={seed}
 					value={referralUrl}
 				/>
@@ -154,7 +159,7 @@ export function ReferralPass({
 						<Logo size="20px" variant="outline" />
 						<span className="font-medium text-sm">Ryu</span>
 					</span>
-					<span className="text-[11px] text-muted-foreground uppercase tracking-widest">
+					<span className="type-caption text-muted-foreground uppercase tracking-widest">
 						Invite
 					</span>
 				</div>
@@ -169,8 +174,15 @@ export function ReferralPass({
 						{/* An em dash rather than "Generating…": the hero of a card is not
 						    a status line, and a spinner word set at 48px reads as the card
 						    being broken rather than as the code being on its way. */}
-						{trimmedCode || "—"}
+						{trimmedCode ? (revealed ? trimmedCode : SENSITIVE_MASK) : "—"}
 					</AutoFitText>
+					{trimmedCode ? (
+						<SensitiveRevealButton
+							label="referral code and QR"
+							onToggle={toggle}
+							revealed={revealed}
+						/>
+					) : null}
 					{name ? (
 						<AutoFitText
 							className="text-muted-foreground"
@@ -178,7 +190,7 @@ export function ReferralPass({
 							minPx={REFERRAL_HOLDER_MIN_PX}
 							stepPx={REFERRAL_FIT_STEP_PX}
 						>
-							{`Invited by ${name}`}
+							{tl("Invited by {name}", { name })}
 						</AutoFitText>
 					) : null}
 				</div>

@@ -1,4 +1,9 @@
 "use client";
+import { z } from "zod";
+import {
+	isNativeFunction,
+	isNativeText,
+} from "../lib/native-primitive-observation.ts";
 
 // svgl.app brand marks, resolved by id — the colour half of the icon story.
 //
@@ -36,8 +41,8 @@ export function svglLibraryUrl(slug: string): string {
 }
 
 /** True for an id this module owns (`svgl:brave`). */
-export function isSvglIcon(icon: string | null | undefined): boolean {
-	return typeof icon === "string" && icon.trim().startsWith(SVGL_PREFIX);
+export function isSvglIcon(icon: string | null | undefined): icon is string {
+	return isNativeText(icon) && icon.trim().startsWith(SVGL_PREFIX);
 }
 
 /**
@@ -54,7 +59,7 @@ export function parseSvglIcon(
 	if (!isSvglIcon(icon)) {
 		return null;
 	}
-	const body = (icon as string).trim().slice(SVGL_PREFIX.length);
+	const body = icon.trim().slice(SVGL_PREFIX.length);
 	const [light, dark] = body.split("|", 2).map((s) => s.trim());
 	if (!isSafeSlug(light)) {
 		return null;
@@ -65,17 +70,29 @@ export function parseSvglIcon(
 const SAFE_SLUG = /^[a-z0-9][a-z0-9._-]*$/i;
 
 function isSafeSlug(value: string | undefined): value is string {
-	return Boolean(value) && SAFE_SLUG.test(value as string);
+	return Boolean(value) && SAFE_SLUG.test(value!);
 }
 
 // ---------------------------------------------------------------------------
 // The svgl index: one lazy fetch per session, shared by every card.
 // ---------------------------------------------------------------------------
 
-interface SvglApiEntry {
-	route?: string | { dark?: string; light?: string };
-	title?: string;
-}
+// Only the native JSON fields consumed to choose a brand route are projected;
+// this does not validate or describe the complete SVGL provider response.
+const svglRouteSelectionSchema = z.object({
+	route: z
+		.union([
+			z.string(),
+			z.object({
+				dark: z.string().nullish(),
+				light: z.string().nullish(),
+			}),
+		])
+		.nullish(),
+	title: z.string().nullish(),
+});
+const svglRouteIndexSchema = z.array(svglRouteSelectionSchema);
+type SvglApiEntry = z.infer<typeof svglRouteSelectionSchema>;
 
 let index: Map<string, SvglRoute> | null = null;
 let inFlight: Promise<void> | null = null;
@@ -98,11 +115,11 @@ function buildIndex(entries: SvglApiEntry[]): Map<string, SvglRoute> {
 	const map = new Map<string, SvglRoute>();
 	for (const entry of entries) {
 		const route = entry.route;
-		let light: string | undefined;
+		let light: string | null | undefined;
 		let dark: string | null = null;
-		if (typeof route === "string") {
+		if (isNativeText(route)) {
 			light = route;
-		} else if (route && typeof route === "object") {
+		} else if (route) {
 			light = route.light;
 			dark = route.dark ?? null;
 		}
@@ -127,15 +144,18 @@ function buildIndex(entries: SvglApiEntry[]): Map<string, SvglRoute> {
 
 /** Fetch the index once. Failure is silent and permanent for the session: every
  *  `svgl:` id still resolves through {@link svglLibraryUrl}, so a card shows the
- *  brand's light mark rather than nothing. */
+ *  brand's light mark rather than nothing. Malformed consumed route/title fields
+ *  reject the index as a whole and use the same silent light-mark fallback. */
 function ensureIndex(): void {
-	if (index || inFlight || typeof fetch !== "function") {
+	if (index || inFlight || !isNativeFunction(globalThis.fetch)) {
 		return;
 	}
 	inFlight = fetch(SVGL_API)
 		.then((res) => (res.ok ? res.json() : []))
-		.then((json: unknown) => {
-			index = buildIndex(Array.isArray(json) ? (json as SvglApiEntry[]) : []);
+		.then((json) => {
+			index = buildIndex(
+				Array.isArray(json) ? svglRouteIndexSchema.parse(json) : []
+			);
 		})
 		.catch(() => {
 			index = new Map();

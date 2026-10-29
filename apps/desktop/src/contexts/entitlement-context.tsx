@@ -44,6 +44,7 @@ interface EntitlementContextValue {
 	ready: boolean;
 	/** Re-resolve the verdict (after sign-in / purchase). */
 	refresh: () => Promise<void>;
+	requestDesktopLicense: () => void;
 	/** Open the paywall (a gated call site invokes this on a blocked action). */
 	requestUpgrade: () => void;
 	/** The resolved verdict, or null until ready. */
@@ -57,6 +58,9 @@ export function EntitlementProvider({ children }: { children: ReactNode }) {
 	// The detailed checkout modal. A gated call site opens it via
 	// `requestUpgrade()`; there is no whole-app block — the shell always renders.
 	const [paywallOpen, setPaywallOpen] = useState(false);
+	const [paywallIntent, setPaywallIntent] = useState<"general" | "tabs">(
+		"general"
+	);
 	// The soft launch nudge. Opened by the show-cadence effect below with the
 	// pre-fetched, non-empty pitch cards so it never flashes an empty state.
 	const [upsellOpen, setUpsellOpen] = useState(false);
@@ -65,7 +69,14 @@ export function EntitlementProvider({ children }: { children: ReactNode }) {
 	// verdict re-resolves on sign-in / license entry (refresh()).
 	const cadenceCheckedRef = useRef(false);
 
-	const requestUpgrade = useCallback(() => setPaywallOpen(true), []);
+	const requestUpgrade = useCallback(() => {
+		setPaywallIntent("general");
+		setPaywallOpen(true);
+	}, []);
+	const requestDesktopLicense = useCallback(() => {
+		setPaywallIntent("tabs");
+		setPaywallOpen(true);
+	}, []);
 
 	// Launch show-cadence: for free/locked (non-paying) users only, show the soft
 	// upsell when the trial just expired (never shown before) OR it has been >= 7
@@ -109,10 +120,18 @@ export function EntitlementProvider({ children }: { children: ReactNode }) {
 
 	return (
 		<EntitlementContext.Provider
-			value={{ ready, verdict, canUse, requestUpgrade, refresh }}
+			value={{
+				ready,
+				verdict,
+				canUse,
+				requestUpgrade,
+				requestDesktopLicense,
+				refresh,
+			}}
 		>
 			{children}
 			<PaywallModal
+				intent={paywallIntent}
 				onApplyLicenseKey={applyLicenseKey}
 				onOpenChange={setPaywallOpen}
 				open={paywallOpen}

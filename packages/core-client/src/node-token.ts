@@ -1,7 +1,7 @@
 // Resolve the bearer a LOCAL surface should present to its own Core node.
 //
 // Core mints a node-admittance token on first boot and persists it at
-// `<ryu_home>/node-auth.token` (see `apps/core/src/node_token.rs`). Before that,
+// `<data dir>/secrets/node-auth.token` (see `apps/core/src/node_token.rs`). Before that,
 // a default install ran with no token at all and Core's `require_auth` let every
 // request through — so any process on the machine could drive the whole local
 // API. Now that a token exists, a surface that does not present it gets a 401.
@@ -16,28 +16,17 @@
 // local file at all and pair with the node explicitly instead.
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 
-/**
- * The Ryu data directory, mirroring `apps/core/src/paths.rs`. `RYU_DIR` is the
- * Core-level relocation override; `RYU_HOME` remains the JS client's explicit
- * compatibility override. Without either, profiles use `~/.ryu-<profile>` so a
- * dev stack never reads the installed release node's token.
- */
-export function ryuHomeDir(): string {
-	const explicit = process.env.RYU_DIR?.trim() || process.env.RYU_HOME?.trim();
-	if (explicit) {
-		return explicit;
-	}
-	const profile = (process.env.RYU_PROFILE ?? "").trim().toLowerCase();
-	const suffix = profile && profile !== "release" ? `-${profile}` : "";
-	return join(homedir(), `.ryu${suffix}`);
-}
+import { type DataDirEnvironment, ryuHomeDir, secretPath } from "./data-dir.ts";
 
-/** Path to the token Core mints. */
-export function nodeAuthTokenPath(): string {
-	return join(ryuHomeDir(), "node-auth.token");
+// Re-exported so existing callers keep one import for "where is Core's data".
+export { ryuHomeDir } from "./data-dir.ts";
+
+/** Path to the token Core mints: `<data dir>/secrets/node-auth.token`. */
+export function nodeAuthTokenPath(
+	env: DataDirEnvironment = process.env
+): string {
+	return secretPath(ryuHomeDir(env), "node-auth.token");
 }
 
 /**
@@ -77,7 +66,7 @@ export function isLocalCoreUrl(url: string): boolean {
  *      itself prefers, and spawned children inherit it. Under the shared-fleet
  *      convention the same value is installed on every node, so it is valid to
  *      send to a remote node too.
- *   3. `<ryu_home>/node-auth.token` — the token Core MINTED for itself. This one
+ *   3. `<data dir>/secrets/node-auth.token` — the token Core MINTED for itself. This one
  *      is machine-local, so it is only used when `coreUrl` is local.
  *
  * That last gate is the security-relevant one. `RYU_CORE_URL` is operator- (or
@@ -99,13 +88,26 @@ export function resolveLocalNodeToken(coreUrl?: string): string | null {
 	if (inherited) {
 		return inherited;
 	}
+	return readMintedNodeToken(coreUrl);
+}
+
+/**
+ * Only the third tier of {@link resolveLocalNodeToken}: the token Core minted in
+ * the data directory `env` names, and only when `coreUrl` is this machine.
+ * For a caller that must not pick up `RYU_CORE_TOKEN` (which may be a REMOTE
+ * node's token), such as the CLI's identity broker for a remote target.
+ */
+export function readMintedNodeToken(
+	coreUrl: string | undefined,
+	env: DataDirEnvironment = process.env
+): string | null {
 	// Fail closed: with no URL to check, never risk sending the minted token to
 	// something that is not this machine.
 	if (coreUrl === undefined || !isLocalCoreUrl(coreUrl)) {
 		return null;
 	}
 	try {
-		const raw = readFileSync(nodeAuthTokenPath(), "utf8").trim();
+		const raw = readFileSync(nodeAuthTokenPath(env), "utf8").trim();
 		return raw || null;
 	} catch {
 		return null;

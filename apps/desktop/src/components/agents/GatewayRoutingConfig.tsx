@@ -36,7 +36,7 @@
 // reuses `classifyToolBridge`, the one function that mirrors both of Core's terms,
 // instead of reading the preference directly and hoping.
 
-import { GatewayRoutingConfigView } from "@ryu/blocks/desktop/agent-edit";
+import { GatewayRoutingConfigView } from "@ryu/blocks/desktop/agent-edit.tsx";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useEffect, useState } from "react";
@@ -60,7 +60,14 @@ import {
 } from "@/src/lib/api/preferences.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
-export function GatewayRoutingConfig({ agentId }: { agentId: string }) {
+export function GatewayRoutingConfig({
+	agentId,
+	limitedNotice = null,
+}: {
+	agentId: string;
+	/** Shown when the agent's account access is limited. */
+	limitedNotice?: string | null;
+}) {
 	const [enabled, setEnabled] = useState(true);
 	const [loaded, setLoaded] = useState(false);
 	const [tools, setTools] = useState<AgentToolBridge | null>(null);
@@ -85,7 +92,11 @@ export function GatewayRoutingConfig({ agentId }: { agentId: string }) {
 			// guessing a control into existence.
 			fetchAgent(target, agentId).catch(() => null),
 			getAgentToolBridgeMap(target).catch(
-				() => ({}) as Record<string, boolean>
+				() =>
+					/* SAFETY: The failure fallback is this freshly authored empty object, so it has no entries that could violate the boolean map contract. */ ({}) as Record<
+						string,
+						boolean
+					>
 			),
 		]).then(([record, toolMap]) => {
 			if (cancelled || !record) {
@@ -199,6 +210,7 @@ export function GatewayRoutingConfig({ agentId }: { agentId: string }) {
 			) : null}
 			<GatewayRoutingConfigView
 				enabled={enabled}
+				limitedNotice={limitedNotice}
 				loaded={loaded}
 				onToggle={handleToggle}
 			/>

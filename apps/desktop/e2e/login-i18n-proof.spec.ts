@@ -2,6 +2,47 @@ import { expect, test } from "@playwright/test";
 
 test.describe.configure({ timeout: 120_000 });
 
+test("delays the compact cancel action for each desktop sign-in attempt", async ({
+	page,
+}, testInfo) => {
+	await page.clock.install({ time: new Date("2030-01-01T00:00:00Z") });
+	await page.setViewportSize({ height: 900, width: 900 });
+	await page.goto("/login-i18n-proof.html");
+	await page.clock.pauseAt(new Date("2030-01-01T00:10:00Z"));
+	const start = page.getByRole("button", { name: "Comenzar", exact: true });
+	const cancel = page.getByRole("button", { name: "Cancelar", exact: true });
+	await start.click();
+	await expect(cancel).toHaveCount(0);
+	await page.clock.runFor(2999);
+	await expect(cancel).toHaveCount(0);
+	await page.clock.runFor(1);
+	await expect(cancel).toBeVisible();
+	await expect(cancel).toHaveClass(/hover:bg-muted hover:text-foreground/);
+	await expect(cancel).toHaveClass(/h-8/);
+	const cancelBox = await cancel.boundingBox();
+	const openBox = await page
+		.getByRole("button", { name: "Abrir", exact: true })
+		.boundingBox();
+	expect(cancelBox).not.toBeNull();
+	expect(openBox).not.toBeNull();
+	if (cancelBox && openBox) {
+		expect(cancelBox.width).toBeLessThan(openBox.width / 2);
+		expect(
+			Math.abs(
+				cancelBox.x + cancelBox.width / 2 - openBox.x - openBox.width / 2
+			)
+		).toBeLessThan(1);
+	}
+	await page.screenshot({
+		path: testInfo.outputPath("desktop-login-cancel.png"),
+	});
+	await cancel.click();
+	await start.click();
+	await expect(cancel).toHaveCount(0);
+	await page.clock.runFor(3000);
+	await expect(cancel).toBeVisible();
+});
+
 test("localizes the desktop welcome surface and switches to Arabic RTL", async ({
 	page,
 }, testInfo) => {

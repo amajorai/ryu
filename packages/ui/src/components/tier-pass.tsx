@@ -45,11 +45,10 @@ export const TIER_LABEL_MIN_PX = 26;
 export const TIER_HOLDER_MAX_PX = 18;
 export const TIER_HOLDER_MIN_PX = 12;
 /**
- * The footer fields. Both sizes are constants applied as inline `fontSize`
- * rather than one constant and one Tailwind class, because `pass-studio`'s tier
- * painter reproduces this footer from these numbers — a size that lived only in
- * a class would leave the painter guessing, which is the exact drift
- * `paint.ts`'s "no independent constants" rule exists to stop.
+ * The footer fields. `pass-studio`'s tier painter reproduces this footer from
+ * these numbers, so `TierStat`'s `text-[20px]` / `text-[12px]` classes must
+ * stay equal to them — the drift `paint.ts`'s "no independent constants" rule
+ * exists to stop. Tailwind needs literal class names, so change both together.
  */
 export const TIER_STAT_VALUE_PX = 20;
 export const TIER_META_PX = 12;
@@ -166,16 +165,10 @@ export interface TierPassProps {
 function TierStat({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="flex min-w-0 flex-col">
-			<span
-				className="truncate font-medium leading-none"
-				style={{ fontSize: `${TIER_STAT_VALUE_PX}px` }}
-			>
+			<span className="truncate font-medium text-[20px] leading-none">
 				{value}
 			</span>
-			<span
-				className="truncate text-muted-foreground"
-				style={{ fontSize: `${TIER_META_PX}px` }}
-			>
+			<span className="truncate text-[12px] text-muted-foreground">
 				{label}
 			</span>
 		</div>

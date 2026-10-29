@@ -38,4 +38,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "connection-status-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

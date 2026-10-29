@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { isVoiceEngine, VOICE_ENGINES } from "@/src/lib/api/preferences.ts";
 
 describe("voice engines", () => {
@@ -25,7 +26,7 @@ describe("voice engines", () => {
 			if (engine.engine === "gateway") {
 				expect(engine.sidecar).toBeNull();
 			} else {
-				expect(typeof engine.sidecar).toBe("string");
+				expect(z.string().safeParse(engine.sidecar).success).toBe(true);
 			}
 		}
 	});

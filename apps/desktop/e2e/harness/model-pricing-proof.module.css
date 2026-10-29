@@ -1,0 +1,228 @@
+.fixture1 {
+	box-sizing: border-box;
+	min-height: 100vh;
+	padding: 36px 24px 52px;
+	font-family:
+		-apple-system,
+		BlinkMacSystemFont,
+		Segoe UI,
+		sans-serif;
+	color: #f4f4f5;
+	background: #09090b;
+}
+
+.fixture2 {
+	max-width: 1040px;
+	margin: 0 auto;
+}
+
+.fixture3 {
+	display: flex;
+	gap: 20px;
+	align-items: start;
+	justify-content: space-between;
+	margin-bottom: 28px;
+}
+
+.fixture4 {
+	font-size: 12px;
+	color: #c4b5fd;
+	letter-spacing: 1.4px;
+}
+
+.fixture5 {
+	margin: 7px 0 0;
+	font-size: 34px;
+	letter-spacing: -1.2px;
+}
+
+.fixture6 {
+	max-width: 700px;
+	margin: 12px 0 0;
+	font-size: 16px;
+	line-height: 1.55;
+	color: #a1a1aa;
+}
+
+.fixture7 {
+	padding: 9px 12px;
+	font-size: 11px;
+	font-weight: 800;
+	color: #86efac;
+	letter-spacing: 1px;
+	white-space: nowrap;
+	background: #123022;
+	border: 1px solid #245c3e;
+	border-radius: 999px;
+}
+
+.fixture8 {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(280px, 0.78fr);
+	gap: 18px;
+}
+
+.fixture9 {
+	padding: 18px;
+	background: #111113;
+	border: 1px solid #27272a;
+	border-radius: 14px;
+}
+
+.fixture10 {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 14px;
+}
+
+.fixture11 {
+	font-size: 12px;
+	color: #a1a1aa;
+}
+
+.fixture12 {
+	margin-top: 4px;
+	font-size: 17px;
+	font-weight: 650;
+}
+
+.fixture13 {
+	padding: 6px 9px;
+	font-size: 11px;
+	font-weight: 700;
+	color: #c4b5fd;
+	background: #251f3d;
+	border: 1px solid #584a8c;
+	border-radius: 999px;
+}
+
+.fixture14 {
+	display: grid;
+	gap: 8px;
+}
+
+.fixture15 {
+	min-width: 0;
+}
+
+.fixture16 {
+	display: block;
+	font-size: 14px;
+}
+
+.fixture17 {
+	display: block;
+	margin-top: 4px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-family: ui-monospace, SFMono-Regular, monospace;
+	font-size: 11px;
+	color: #a1a1aa;
+	white-space: nowrap;
+}
+
+.fixture18 {
+	font-size: 12px;
+	color: #86efac;
+	white-space: nowrap;
+}
+
+.fixture19 {
+	margin: 14px 0 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: #a1a1aa;
+}
+
+.fixture20 {
+	padding: 18px;
+	background: #111113;
+	border: 1px solid #27272a;
+	border-radius: 14px;
+}
+
+.fixture21 {
+	margin-bottom: 12px;
+	font-size: 12px;
+	color: #a1a1aa;
+}
+
+.fixture22 {
+	padding: 14px;
+	background: #0d0d0f;
+	border-radius: 10px;
+}
+
+.fixture23 {
+	padding: 18px;
+	margin-top: 18px;
+	background: #111113;
+	border: 1px solid #27272a;
+	border-radius: 14px;
+}
+
+.fixture24 {
+	font-size: 12px;
+	color: #a1a1aa;
+}
+
+.fixture25 {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 10px;
+	margin-top: 12px;
+}
+
+.fixture26 {
+	padding: 13px;
+	background: #18181b;
+	border: 1px solid #27272a;
+	border-radius: 10px;
+}
+
+.fixture27 {
+	font-size: 11px;
+	color: #a1a1aa;
+}
+
+.fixture28 {
+	margin-top: 7px;
+	font-size: 19px;
+	font-weight: 700;
+}
+
+.fixture29 {
+	margin-top: 5px;
+	font-size: 11px;
+	color: #a1a1aa;
+}
+
+.fixture30 {
+	padding-top: 12px;
+	margin-top: 15px;
+	font-family: ui-monospace, SFMono-Regular, monospace;
+	font-size: 11px;
+	color: #a1a1aa;
+	border-top: 1px solid #27272a;
+}
+
+.modelRow {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	justify-content: space-between;
+	width: 100%;
+	padding: 12px 13px;
+	font: inherit;
+	color: var(--foreground);
+	text-align: left;
+	cursor: pointer;
+	background: var(--muted);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+}
+.modelRow[aria-pressed="true"] {
+	background: color-mix(in oklab, var(--primary) 15%, var(--card));
+	border-color: var(--primary);
+}

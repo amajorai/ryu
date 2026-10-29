@@ -18,6 +18,9 @@ export default mergeConfig(base, {
 			]
 		: [],
 	cacheDir: "/tmp/ryu-node-menu-performance-cache",
-	optimizeDeps: { entries: ["node-selector-status-story.html"] },
+	optimizeDeps: {
+		entries: ["node-selector-status-story.html"],
+		esbuildOptions: { target: "esnext" },
+	},
 	server: { port: 5214, strictPort: true, watch: null, hmr: false },
 });

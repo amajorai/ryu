@@ -1,0 +1,15 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	.frame {
+		border-radius: calc(var(--radius-4xl) + 2px);
+	}
+	.border {
+		border-radius: inherit;
+	}
+}
+
+.border {
+	background-image: var(--plan-border-gradient);
+}

@@ -1,11 +1,24 @@
 "use client";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import type { MotionStyle } from "motion/react";
+import type { CSSProperties } from "react";
+import css from "./todo-list.module.css";
+
+interface Inline1Style extends MotionStyle {
+	"--todo-list-1-transform-origin"?: MotionStyle["transformOrigin"];
+}
+interface Inline2Style extends CSSProperties {
+	"--todo-list-2-max-height"?: CSSProperties["maxHeight"];
+}
+
+import { isNativeFunction } from "../../lib/native-primitive-observation.ts";
 
 // beui.dev/components/agents/todo-list
 
-import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure";
-import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll";
-import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
+import { ActionSwapRollText } from "@ryu/ui/components/motion/action-swap-roll.tsx";
+import { EASE_OUT, SPRING_LAYOUT, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { ChevronDown, ListTodo } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -118,6 +131,9 @@ function TodoStatusIcon({
 	const normalizedProgress =
 		progress === undefined ? 0.68 : Math.min(100, Math.max(0, progress)) / 100;
 
+	const inline1Style: Inline1Style = {
+		"--todo-list-1-transform-origin": "12px 12px",
+	};
 	return (
 		<motion.svg
 			animate={false}
@@ -155,6 +171,7 @@ function TodoStatusIcon({
 							? 360
 							: -90,
 				}}
+				className={css.inline1}
 				cx="12"
 				cy="12"
 				fill="none"
@@ -164,7 +181,7 @@ function TodoStatusIcon({
 				stroke="currentColor"
 				strokeLinecap="round"
 				strokeWidth="2"
-				style={{ transformOrigin: "12px 12px" }}
+				style={inline1Style}
 				transition={
 					status === "in-progress" && progress === undefined && !reduce
 						? {
@@ -224,6 +241,7 @@ export function TodoList({
 	maxHeight = 248,
 	className,
 }: TodoListProps) {
+	const tl = useLiteralMessages();
 	const reduce = useReducedMotion() ?? false;
 	const baseId = useId();
 	const triggerId = `${baseId}-trigger`;
@@ -266,7 +284,7 @@ export function TodoList({
 			if (viewport.scrollHeight <= viewport.clientHeight) {
 				return;
 			}
-			if (typeof viewport.scrollTo === "function") {
+			if (isNativeFunction(viewport.scrollTo)) {
 				viewport.scrollTo({
 					top: viewport.scrollHeight,
 					behavior: reduce ? "auto" : "smooth",
@@ -278,6 +296,10 @@ export function TodoList({
 		return () => cancelAnimationFrame(frame);
 	}, [itemCount, reduce]);
 
+	const inline2Style: Inline2Style = {
+		"--todo-list-2-max-height":
+			maxHeight === undefined ? undefined : `${maxHeight}px`,
+	};
 	return (
 		<section
 			aria-label="Agent task list"
@@ -305,7 +327,10 @@ export function TodoList({
 					)}
 				>
 					<span className="sr-only">
-						{completed} of {items.length} tasks completed
+						{tl("{completed} of {total} tasks completed", {
+							completed,
+							total: items.length,
+						})}
 					</span>
 					<span aria-hidden="true" className="inline-flex">
 						<ActionSwapRollText value={String(completed)}>
@@ -332,9 +357,12 @@ export function TodoList({
 				role="region"
 			>
 				<div
-					className="scroll-fade scrollbar-hide overflow-y-auto px-2 pb-2"
+					className={[
+						css.inline2,
+						"scroll-fade scrollbar-hide overflow-y-auto px-2 pb-2",
+					].join(" ")}
 					ref={viewportRef}
-					style={{ maxHeight }}
+					style={inline2Style}
 				>
 					{items.length ? (
 						<ol aria-live="polite" className="space-y-0">

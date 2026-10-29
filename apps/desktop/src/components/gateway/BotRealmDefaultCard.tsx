@@ -40,7 +40,7 @@ export function BotRealmDefaultCard({
 		<div data-testid={managed ? "bot-realm-default-card" : undefined}>
 			<SettingsCard className="space-y-4">
 				<div className="flex flex-col gap-1.5">
-					<Label className="text-muted-foreground text-xs">
+					<Label size="compact" tone="muted">
 						{managed ? "Bot realm default" : "Default cloud agent"}
 					</Label>
 					{loaded ? (
@@ -62,7 +62,7 @@ export function BotRealmDefaultCard({
 					)}
 					<p className="text-muted-foreground text-xs">
 						{managed
-							? "Console owners and admins can choose the provider and model for every Bot chat on this managed node. When no custom value is saved, Bot uses Auto cloud and lets Ryu select the model."
+							? "Organization owners and admins can choose the provider and model for every Bot chat on this managed node. When no custom value is saved, Bot uses Auto cloud and lets Ryu select the model."
 							: "Normal interactive chats use this lane when set. Paid onboarding starts with Ryu on managed OpenRouter; free users can choose a configured BYOK provider or leave this unset."}
 					</p>
 				</div>

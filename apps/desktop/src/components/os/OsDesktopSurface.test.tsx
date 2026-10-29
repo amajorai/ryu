@@ -1,12 +1,15 @@
 import { expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-	OS_APPS,
-	OsDesktopSurface,
-	resolveOsApp,
-} from "./OsDesktopSurface.tsx";
 
-test("Ryu OS exposes the dock and App Launcher entry point", () => {
+if (!GlobalRegistrator.isRegistered) {
+	GlobalRegistrator.register();
+}
+const { OS_APPS, OsDesktopSurface, resolveOsApp } = await import(
+	"./OsDesktopSurface.tsx"
+);
+
+test("OS exposes the dock and App Launcher entry point", () => {
 	const html = renderToStaticMarkup(
 		<OsDesktopSurface
 			activeWindowId="chat-window"
@@ -28,7 +31,6 @@ test("Ryu OS exposes the dock and App Launcher entry point", () => {
 	expect(html).toContain('data-testid="ryu-os-dock"');
 	expect(html).not.toContain("rgba(143,123,242");
 	expect(html).not.toContain("rgba(45,212,191");
-	expect(html).toContain("bg-success");
 	const menubar =
 		html.match(/<div[^>]*data-testid="ryu-os-menubar"[^>]*>/)?.[0] ?? "";
 	expect(menubar).toContain("bg-transparent");
@@ -43,7 +45,7 @@ test("Ryu OS exposes the dock and App Launcher entry point", () => {
 	expect(OS_APPS.every((app) => app.iconBackground == null)).toBe(true);
 	expect(OS_APPS.every((app) => app.iconId)).toBe(true);
 	expect(html).toContain('data-app-icon="layered"');
-	expect(html).toContain("ryu--mission-control-dark.png");
+	expect(html).toContain("data:image/svg+xml");
 	for (const app of OS_APPS) {
 		expect(html).toContain(`data-testid="os-dock-${app.id}"`);
 	}
@@ -82,7 +84,7 @@ test("OS app tiles use manifest presentation when an app record is available", (
 	expect(resolved.iconUrl).toBe("https://cdn.example.test/manifest-icon.png");
 });
 
-test("dock and launcher both render canonical package artwork without an installed record", () => {
+test("dock and launcher use shared icon plates when no manifest artwork is available", () => {
 	const html = renderToStaticMarkup(
 		<OsDesktopSurface
 			activeWindowId=""
@@ -92,8 +94,12 @@ test("dock and launcher both render canonical package artwork without an install
 			windows={[]}
 		/>
 	);
-	expect(html).toContain("ryu--mission-control-dark.png");
-	expect(html).toContain("ryu--mission-control-light.png");
+	expect(html).toContain('data-app-icon="fallback"');
+	// The shared plate's vector material reaches the catalog icon's owned
+	// stylesheet through its custom property rather than an inline background.
+	expect(html).toContain(
+		"--catalog-icon-material:url(&quot;data:image/svg+xml"
+	);
 	expect(html).toContain("Customize desktop");
 	expect(html).toContain('data-testid="os-home-clock"');
 });

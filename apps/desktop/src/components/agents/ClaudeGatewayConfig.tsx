@@ -9,7 +9,7 @@
 // the user's subscription OAuth still authenticates the call. The gateway forwards
 // that bearer upstream to Anthropic unchanged, applying request-side DLP + audit.
 
-import { ClaudeGatewayConfigView } from "@ryu/blocks/desktop/agent-edit";
+import { ClaudeGatewayConfigView } from "@ryu/blocks/desktop/agent-edit.tsx";
 import { useEffect, useState } from "react";
 import { sileo } from "sileo";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -19,7 +19,12 @@ import {
 } from "@/src/lib/api/preferences.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
-export function ClaudeGatewayConfig() {
+export function ClaudeGatewayConfig({
+	limitedNotice = null,
+}: {
+	/** Shown when the agent's account access is limited. */
+	limitedNotice?: string | null;
+} = {}) {
 	const [enabled, setEnabled] = useState(true);
 	const [loaded, setLoaded] = useState(false);
 
@@ -59,6 +64,7 @@ export function ClaudeGatewayConfig() {
 	return (
 		<ClaudeGatewayConfigView
 			enabled={enabled}
+			limitedNotice={limitedNotice}
 			loaded={loaded}
 			onToggle={handleToggle}
 		/>

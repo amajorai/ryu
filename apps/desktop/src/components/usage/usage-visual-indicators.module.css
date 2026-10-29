@@ -1,0 +1,18 @@
+.sourceColor {
+	background: var(--usage-source-color);
+}
+
+.remainingWidth {
+	width: var(--usage-remaining-width);
+}
+
+/* Share of today's headroom the current pace consumes before the window resets. */
+.projectedConsumption {
+	left: var(--usage-projected-left);
+	width: var(--usage-projected-width);
+	background-image: repeating-linear-gradient(
+		-45deg,
+		color-mix(in oklab, var(--background) 55%, transparent) 0 3px,
+		transparent 3px 6px
+	);
+}

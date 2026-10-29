@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/plugin-secrets.ts
 //
 // Typed client for a plugin's WRITE-ONLY secret store (`/api/plugins/:id/secrets`).
@@ -38,10 +40,6 @@ export interface PluginSecretState {
 	shadowed_by_env?: boolean;
 	/** Unix millis of the last write, when the store recorded one. */
 	updated_at?: number;
-}
-
-interface PluginSecretsResponse {
-	secrets?: PluginSecretState[];
 }
 
 /**
@@ -86,9 +84,11 @@ export async function listPluginSecrets(
 	target: ApiTarget,
 	pluginId: string
 ): Promise<PluginSecretState[]> {
-	const resp = await request<PluginSecretsResponse>(
+	const resp = await request(
 		target,
-		`/api/plugins/${encodeURIComponent(pluginId)}/secrets`
+		`/api/plugins/${encodeURIComponent(pluginId)}/secrets`,
+		undefined,
+		pluginSecretsResponseSchema
 	);
 	return resp?.secrets ?? [];
 }
@@ -121,8 +121,8 @@ export async function getPluginSecretState(
  * the plugin may use (400) — as "check your connection and try again", which sends
  * the user to fix the wrong thing. Neither is transient and neither is retryable.
  */
-export function describeSecretFailure(
-	error: unknown,
+export function describeSecretFailure<TError>(
+	error: TError,
 	fallback: string
 ): string {
 	const message =
@@ -154,10 +154,11 @@ export async function setPluginSecret(
 	key: string,
 	value: string
 ): Promise<void> {
-	await request<{ ok?: boolean }>(
+	await request(
 		target,
 		`/api/plugins/${encodeURIComponent(pluginId)}/secrets/${encodeURIComponent(key)}`,
-		{ method: "PUT", body: { value } }
+		{ method: "PUT", body: { value } },
+		gatewayJsonValueSchema
 	);
 }
 
@@ -167,9 +168,24 @@ export async function clearPluginSecret(
 	pluginId: string,
 	key: string
 ): Promise<void> {
-	await request<{ ok?: boolean }>(
+	await request(
 		target,
 		`/api/plugins/${encodeURIComponent(pluginId)}/secrets/${encodeURIComponent(key)}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		gatewayJsonValueSchema
 	);
 }
+
+const pluginSecretStateResponseSchema = z
+	.object({
+		key: z.string(),
+		readable: z.boolean().optional(),
+		set: z.boolean(),
+		shadowed_by_env: z.boolean().optional(),
+		updated_at: z.number().optional(),
+	})
+	.passthrough();
+
+const pluginSecretsResponseSchema = z
+	.object({ secrets: z.array(pluginSecretStateResponseSchema).optional() })
+	.passthrough();

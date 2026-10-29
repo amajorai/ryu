@@ -24,6 +24,7 @@ describe("parseStackTrace", () => {
 	it("handles anonymous frames without a function name", () => {
 		const trace = "Error: boom\n    at /app/x.js:3:7";
 		const [frame] = parseStackTrace(trace).frames;
+		if (!frame) throw new Error("Expected parsed stack frame");
 		expect(frame.fn).toBe("");
 		expect(frame.file).toBe("/app/x.js");
 		expect(frame.line).toBe(3);
@@ -55,6 +56,7 @@ describe("parseStackTrace", () => {
 
 	it("leaves line/col undefined for a location without them", () => {
 		const [frame] = parseStackTrace("Error: e\n    at nowhere").frames;
+		if (!frame) throw new Error("Expected parsed stack frame");
 		expect(frame.file).toBe("nowhere");
 		expect(frame.line).toBeUndefined();
 		expect(frame.col).toBeUndefined();

@@ -1,3 +1,5 @@
+import type { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
+import type { z } from "zod";
 // Unit tests for the sidebar data layer (sidebar/data.ts) — loadSidebarData fans
 // out to six Core endpoints, maps each to the uniform SidebarItem shape, and
 // buckets conversations into projects / chats / pinned / archived with a
@@ -19,18 +21,22 @@ afterEach(() => {
 	globalThis.fetch = realFetch;
 });
 
-interface RouteOverrides {
-	agents?: unknown;
-	conversations?: unknown;
-	/** Endpoints (by key) that should answer 500 instead of their payload. */
-	fail?: string[];
-	meetings?: unknown;
-	spaces?: unknown;
-	teams?: unknown;
-	workflows?: unknown;
+interface RoutePayloads {
+	[endpoint: string]: z.infer<typeof appResponseValueSchema>;
 }
 
-const DEFAULTS: Record<string, unknown> = {
+interface RouteOverrides extends RoutePayloads {
+	agents?: z.infer<typeof appResponseValueSchema>;
+	conversations?: z.infer<typeof appResponseValueSchema>;
+	/** Endpoints (by key) that should answer 500 instead of their payload. */
+	fail?: string[];
+	meetings?: z.infer<typeof appResponseValueSchema>;
+	spaces?: z.infer<typeof appResponseValueSchema>;
+	teams?: z.infer<typeof appResponseValueSchema>;
+	workflows?: z.infer<typeof appResponseValueSchema>;
+}
+
+const DEFAULTS: RoutePayloads = {
 	agents: { agents: [] },
 	teams: { teams: [] },
 	spaces: { spaces: [] },
@@ -64,19 +70,19 @@ function routeKey(pathname: string): string {
 
 function server(overrides: RouteOverrides = {}): void {
 	const fail = new Set(overrides.fail ?? []);
-	globalThis.fetch = ((url: string | URL) => {
-		const key = routeKey(new URL(String(url)).pathname);
-		if (fail.has(key)) {
-			return Promise.resolve(new Response("err", { status: 500 }));
-		}
-		const payload =
-			key in overrides
-				? (overrides as Record<string, unknown>)[key]
-				: DEFAULTS[key];
-		return Promise.resolve(
-			new Response(JSON.stringify(payload ?? {}), { status: 200 })
-		);
-	}) as unknown as typeof fetch;
+	globalThis.fetch = Object.assign(
+		(url: Parameters<typeof realFetch>[0]) => {
+			const key = routeKey(new URL(String(url)).pathname);
+			if (fail.has(key)) {
+				return Promise.resolve(new Response("err", { status: 500 }));
+			}
+			const payload = key in overrides ? overrides[key] : DEFAULTS[key];
+			return Promise.resolve(
+				new Response(JSON.stringify(payload ?? {}), { status: 200 })
+			);
+		},
+		{ preconnect: realFetch.preconnect }
+	);
 }
 
 // ── typed-source mapping ─────────────────────────────────────────────────────
@@ -85,8 +91,31 @@ test("maps each typed source to its SidebarItem shape (id/label/path/badge)", as
 	server({
 		agents: { agents: [{ id: "ag1", name: "Researcher" }] },
 		teams: { teams: [{ id: "tm1", name: "Ops" }] },
-		spaces: { spaces: [{ id: "sp1", name: "Docs", document_count: 12 }] },
-		meetings: { meetings: [{ id: "mt1", title: "Standup" }] },
+		spaces: {
+			spaces: [
+				{
+					id: "sp1",
+					name: "Docs",
+					document_count: 12,
+					created_at: 0,
+					updated_at: 0,
+				},
+			],
+		},
+		meetings: {
+			meetings: [
+				{
+					id: "mt1",
+					title: "Standup",
+					source: "manual",
+					status: "done",
+					started_at: "2026-01-01T09:00:00Z",
+					participants: [],
+					created_at: "2026-01-01T09:00:00Z",
+					updated_at: "2026-01-01T09:30:00Z",
+				},
+			],
+		},
 		workflows: { workflows: [{ id: "wf1", name: "Nightly" }] },
 	});
 	const data = await loadSidebarData(target);
@@ -107,7 +136,11 @@ test("maps each typed source to its SidebarItem shape (id/label/path/badge)", as
 });
 
 test("a space with no document_count omits the badge", async () => {
-	server({ spaces: { spaces: [{ id: "sp2", name: "Empty" }] } });
+	server({
+		spaces: {
+			spaces: [{ id: "sp2", name: "Empty", created_at: 0, updated_at: 0 }],
+		},
+	});
 	const data = await loadSidebarData(target);
 	expect(data.spaces[0].badge).toBeUndefined();
 });

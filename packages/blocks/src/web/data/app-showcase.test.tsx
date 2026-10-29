@@ -2,30 +2,36 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
+import { z } from "zod";
 import { AppShowcaseDetail, AppShowcaseGallery } from "../app-showcase.tsx";
 import { appShowcases } from "./app-showcase.tsx";
 
-interface ManifestIdentity {
-	id?: string;
-	name?: string;
-	tagline?: string;
-}
+// Test-owned identity projection consumed by the three original matchers.
+// This deliberately makes no claim about the complete plugin manifest DTO.
+const manifestIdentitySchema = z.object({
+	id: z.string().optional(),
+	name: z.string().optional(),
+	tagline: z.string().optional(),
+});
 
-const manifestPaths: Record<string, string> = {
-	"@ryu/calendar": "apps-store/calendar/manifest.json",
-	"@ryu/canvas": "apps-store/canvas/manifest.json",
-	"@ryu/dashboards": "apps-store/dashboards/manifest.json",
-	"@ryu/sites": "apps-store/sites/manifest.json",
-	"@ryu/slides": "apps-store/slides/manifest.json",
-	"@ryu/spaces": "apps/core/src/plugin_manifest/fixtures/spaces.manifest.json",
-	"@ryu/video-studio": "apps-store/video-studio/manifest.json",
-};
+const manifestPaths = new Map(
+	Object.entries({
+		"@ryu/calendar": "apps-store/calendar/manifest.json",
+		"@ryu/canvas": "apps-store/canvas/manifest.json",
+		"@ryu/dashboards": "apps-store/dashboards/manifest.json",
+		"@ryu/sites": "apps-store/sites/manifest.json",
+		"@ryu/slides": "apps-store/slides/manifest.json",
+		"@ryu/spaces":
+			"apps/core/src/plugin_manifest/fixtures/spaces.manifest.json",
+		"@ryu/video-studio": "apps-store/video-studio/manifest.json",
+	})
+);
 
-function readManifest(relativePath: string): ManifestIdentity {
+function readManifest(relativePath: string) {
 	const root = join(import.meta.dir, "../../../../../");
-	return JSON.parse(
-		readFileSync(join(root, relativePath), "utf8")
-	) as ManifestIdentity;
+	return manifestIdentitySchema.parse(
+		JSON.parse(readFileSync(join(root, relativePath), "utf8"))
+	);
 }
 
 test("the showcase projection stays aligned with first-party manifest identity", () => {
@@ -35,8 +41,11 @@ test("the showcase projection stays aligned with first-party manifest identity",
 	);
 
 	for (const app of appShowcases) {
-		const manifestPath = manifestPaths[app.manifestId];
+		const manifestPath = manifestPaths.get(app.manifestId);
 		expect(manifestPath).toBeDefined();
+		if (manifestPath === undefined) {
+			throw new Error(`Missing manifest fixture for ${app.manifestId}`);
+		}
 		const manifest = readManifest(manifestPath);
 		expect(manifest.id).toBe(app.manifestId);
 		expect(manifest.name).toBe(app.name);

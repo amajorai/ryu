@@ -1,0 +1,9 @@
+.notificationCard {
+	z-index: var(--notification-stack-1-z-index);
+	grid-row: var(--notification-stack-1-grid-row);
+	grid-column: var(--notification-stack-1-grid-column);
+}
+.notificationAccent {
+	border-left-color: var(--notification-stack-1-border-left-color);
+	border-left-width: 2px;
+}

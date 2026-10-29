@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/social",
   "name": "Outpost",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Productivity",
   "description": "A publishing command center for every social account you run: compose once, tailor per platform, queue it on a calendar, and let the node publish while you are away. Scheduled posts, a retrying publish queue, a unified reply inbox, engagement history, and reusable post templates — all in one local SQLite database the node owns.",
@@ -50,7 +50,7 @@
         "port_env": "RYU_SOCIAL_PORT"
       },
       "host_api": {
-        "grants": ["tools.invoke"]
+        "grants": ["tools.invoke", "crypto:seal"]
       },
       "port": 8005,
       "health_path": "/health",
@@ -198,12 +198,37 @@
             "method": "DELETE",
             "permission": "social.publish"
           },
+          {
+            "path": "/media/import",
+            "method": "POST",
+            "permission": "social.publish"
+          },
+          {
+            "path": "/media/import/:id/chunks",
+            "method": "POST",
+            "permission": "social.publish"
+          },
+          {
+            "path": "/media/import/:id/finish",
+            "method": "POST",
+            "permission": "social.publish"
+          },
+          {
+            "path": "/media/import/:id",
+            "method": "DELETE",
+            "permission": "social.publish"
+          },
           { "path": "/activity", "method": "GET", "permission": "social.view" },
           { "path": "/settings", "method": "GET", "permission": "social.view" },
           {
             "path": "/settings",
             "method": "PATCH",
             "permission": "social.publish"
+          },
+          {
+            "path": "/node-settings",
+            "method": "PATCH",
+            "permission": "social.manage-node"
           },
           { "path": "/platforms", "permission": "social.view" }
         ]
@@ -230,6 +255,12 @@
       "label": "Can publish",
       "description": "Schedule, publish, and cancel posts, and reply from the inbox — everything here goes out publicly under the connected accounts, in this workspace's name.",
       "implies": ["social.view"]
+    },
+    {
+      "id": "social.manage-node",
+      "label": "Can manage node settings",
+      "description": "Change Outpost settings shared by every workspace on this node — inbox polling, engagement refresh, quiet hours, the analytics time offset, default platforms — and replace the stored direct-account credentials.",
+      "implies": ["social.publish"]
     }
   ],
   "companion": {

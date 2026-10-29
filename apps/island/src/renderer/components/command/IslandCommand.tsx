@@ -15,6 +15,7 @@ import { CommandBar as CommandBarShell } from "@ryu/blocks/command/command-bar";
 // map's resolvable set). We only use `route`/`SmartIntent`, not the component.
 import { route, type SmartIntent } from "@ryu/blocks/extension/smart-bar";
 import type { CommandAction } from "@ryu/command/types";
+import { type LiteralMessage, useLiteralMessages } from "@ryu/i18n/react";
 import {
 	type KeyboardEvent,
 	useCallback,
@@ -37,19 +38,19 @@ function newConversationId(): string {
 const MAX_RECENT = 6;
 
 /** A readable row title for a smart-bar intent (Dia/Chrome-style suggestion). */
-function intentTitle(intent: SmartIntent): string {
+function intentTitle(intent: SmartIntent, tl: LiteralMessage): string {
 	switch (intent.kind) {
 		case "navigate":
 		case "bang":
 		case "mention":
 			return intent.label;
 		case "search":
-			return `Search the web for "${intent.query}"`;
+			return tl('Search the web for "{query}"', { query: intent.query });
 		case "skill":
 			return intent.name ? `Run /${intent.name}` : "Pick a skill";
 		default:
 			return intent.prompt.trim().length > 0
-				? `Ask Ryu: "${intent.prompt}"`
+				? tl('Ask Ryu: "{prompt}"', { prompt: intent.prompt })
 				: "Ask Ryu…";
 	}
 }
@@ -105,6 +106,7 @@ function matchesQuery(haystack: string, query: string): boolean {
 
 export function IslandCommand() {
 	const setState = useIslandState((store) => store.setState);
+	const tl = useLiteralMessages();
 
 	const [mode, setMode] = useState<Mode>("palette");
 	const [search, setSearch] = useState("");
@@ -202,7 +204,7 @@ export function IslandCommand() {
 				items.push({
 					id: `intent-${index}`,
 					group: "Suggestions",
-					title: intentTitle(intent),
+					title: intentTitle(intent, tl),
 					trailing: intentHint(intent),
 					value: `intent-${index}`,
 					onSelect: () => runIntent(intent),
@@ -255,7 +257,7 @@ export function IslandCommand() {
 		});
 
 		return items;
-	}, [search, agents, conversations, startChat, runIntent]);
+	}, [search, agents, conversations, startChat, runIntent, tl]);
 
 	const onPaletteKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
 		if (event.key === "Escape") {

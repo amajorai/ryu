@@ -161,7 +161,7 @@ pub(crate) async fn host_email_send(
     let (plugin_id, _) = match authenticate_sidecar(&state, &headers).await {
         Ok(value) => value,
         Err((status, message)) => {
-            return (status, Json(json!({ "error": message }))).into_response()
+            return (status, Json(json!({ "error": message }))).into_response();
         }
     };
     if plugin_id != "@ryu/mail" {
@@ -199,7 +199,7 @@ pub(crate) async fn host_email_send(
     let attachments = match attachments {
         Ok(value) => value,
         Err(error) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response();
         }
     };
     let message = ryu_email_send::OutboundEmail {
@@ -237,7 +237,7 @@ pub(crate) async fn host_email_status(
     let (plugin_id, _) = match authenticate_sidecar(&state, &headers).await {
         Ok(value) => value,
         Err((status, message)) => {
-            return (status, Json(json!({ "error": message }))).into_response()
+            return (status, Json(json!({ "error": message }))).into_response();
         }
     };
     if plugin_id != "@ryu/mail" {

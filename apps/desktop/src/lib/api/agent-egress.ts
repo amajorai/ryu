@@ -1,3 +1,8 @@
+import { isNativeBoolean } from "@ryu/ui/lib/native-primitive-observation.ts";
+import {
+	runsLimitedOnManagedPi,
+	runsOnRyuEngine,
+} from "@/src/lib/agent-engine.ts";
 // apps/desktop/src/lib/api/agent-egress.ts
 //
 // ONE honest answer to "is this agent's model traffic governed?", per installed
@@ -83,6 +88,7 @@ import {
 	fetchAgents,
 } from "./agents.ts";
 import type { ApiTarget } from "./client.ts";
+import { CORE_LOCAL_ENGINES } from "./local-engines.ts";
 import { fetchPiConfig } from "./pi-config.ts";
 import {
 	DEFAULT_AGENT_GATEWAY_ROUTING,
@@ -99,34 +105,14 @@ import {
 } from "./preferences.ts";
 
 /**
- * Local inference engines, mirroring Core's `LOCAL_ENGINES`
- * (`apps/core/src/sidecar/active_engine.rs`). An agent bound to one of these
- * resolves to `AgentRoute::LocalEngine` — a loopback URL on this machine, which
- * never reaches the gateway *and* never reaches a provider. Reporting it as
+ * Local inference engines (Core's `LOCAL_ENGINES`, mirrored in
+ * `local-engines.ts`). An agent bound to one of these resolves to
+ * `AgentRoute::LocalEngine` — a loopback URL on this machine, which never
+ * reaches the gateway *and* never reaches a provider. Reporting it as
  * "not governed" alongside a Claude Code that is shipping tokens to Anthropic
  * would be the same word for two very different facts, so it gets its own state.
- *
- * Deliberately NOT reusing `inference.ts`'s `LOCAL_ENGINES`: that set is the
- * narrower "engines whose endpoint accepts the non-standard sampler fields"
- * (it omits mlx/omlx/apfel/docker-model-runner), and it strips an `acp:` prefix
- * that Core's routing check does not. Keep this list in sync with Core's.
  */
-const LOCAL_ENGINES: ReadonlySet<string> = new Set([
-	"llamacpp",
-	"ollama",
-	"lemonade",
-	"llama-swap",
-	"freetoken",
-	"vllm",
-	"sglang",
-	"mlx",
-	"mlx-vlm",
-	"mlx-serve",
-	"omlx",
-	"docker-model-runner",
-	"apfel",
-	"mesh-llm",
-]);
+const LOCAL_ENGINES: ReadonlySet<string> = new Set(CORE_LOCAL_ENGINES);
 
 /** Registry ids Core routes through a dedicated, format-specific mechanism. */
 const CLAUDE_ID = "acp:claude";
@@ -308,7 +294,10 @@ function runsPiAcp(
 	flagship: boolean,
 	entry: AgentCatalogEntry | null
 ): boolean {
-	if (flagship || agentId === "ryu") {
+	// A built-in bot on Ryu's engine (Jay Jr.) is routed by AGENT id to the same
+	// managed Pi as the flagship (`agent_route` checks it before the engine), so
+	// its spawn is the flagship's pi-acp bridge whatever its catalog entry says.
+	if (flagship || agentId === "ryu" || runsOnRyuEngine(agentId)) {
 		return true;
 	}
 	if (engine.startsWith("acp-exec:")) {
@@ -343,7 +332,7 @@ function storedToolBridge(
 	tools: Record<string, boolean>
 ): boolean {
 	const stored = tools[agentId];
-	return typeof stored === "boolean" ? stored : DEFAULT_AGENT_TOOL_BRIDGE;
+	return isNativeBoolean(stored) ? stored : DEFAULT_AGENT_TOOL_BRIDGE;
 }
 
 /**
@@ -366,9 +355,23 @@ export function classifyToolBridge(
 	const flagship = agent.flagship || agent.id === "ryu";
 
 	if (runsPiAcp(agent.id, engine, flagship, entry)) {
+		// A built-in bot on Ryu's engine runs the same managed Pi, so it gets
+		// Ryu's tools through the same extension — but only the ones its own
+		// allowlist names, and none of Pi's built-in shell or file tools (Core
+		// starts that Pi with only the brokered Ryu tools active).
+		if (!flagship && runsOnManagedPiAsItself(agent)) {
+			return {
+				mechanism: "pi-extension",
+				enabled: true,
+				control: null,
+				takesEffect: null,
+				detail:
+					"Runs on the Ryu agent's engine and gets Ryu's tools from the same Pi extension, limited to the tools this agent allows. There is nothing to turn on here.",
+			};
+		}
 		// The flagship still HAS Ryu's tools — via a different mechanism entirely.
 		// `pi_config::ensure_pi_mcp_extension` ships `ryu-mcp.ts` into the MANAGED
-		// config dir (`~/.ryu/pi-agent/extensions/`), and that extension POSTs to
+		// config dir (`~/.ryu/runtimes/pi-agent/extensions/`), and that extension POSTs to
 		// Core's HTTP tool API. Saying "no tools" here would be false in the most
 		// damaging possible place: the default agent, on every fresh install.
 		if (flagship) {
@@ -515,7 +518,22 @@ export interface EgressAgentInput {
 	/** True only for the flagship `ryu` agent (Core sets `recommended` for it). */
 	flagship: boolean;
 	id: string;
+	/**
+	 * Whether the agent's model providers are limited: an account-access list,
+	 * or only its own identity (Core's `user_provider_access`). A custom agent
+	 * on the "Ryu" engine (`acp:pi`) then runs on Ryu's managed Pi under its
+	 * own identity ({@link runsLimitedOnManagedPi}). Missing means unrestricted.
+	 */
+	modelsLimited?: boolean;
 	name: string;
+}
+
+/** Whether Core routes `agent` to Ryu's managed Pi under its own identity. */
+function runsOnManagedPiAsItself(agent: EgressAgentInput): boolean {
+	return (
+		runsOnRyuEngine(agent.id) ||
+		runsLimitedOnManagedPi(agent.id, agent.engine, agent.modelsLimited === true)
+	);
 }
 
 /**
@@ -605,6 +623,31 @@ function classifyEgressLayer(
 			detail: governed
 				? `Runs Ryu's managed Pi with the gateway on top — every model call is filtered, budgeted and logged. ${PI_POINTER}`
 				: `Ryu's managed Pi is set to a direct provider, so its model calls go straight to that provider. ${PI_POINTER}`,
+		};
+	}
+
+	// 1b. A built-in bot on Ryu's engine (Jay Jr.). `agent_route` sends it to the
+	//     same `ryu_agent_route_with_user_jwt` as the flagship, BEFORE any engine
+	//     lookup, and that route decides gateway routing only from
+	//     `pi_config::is_gateway_routing()`. The per-agent `agent-gateway-routing`
+	//     switch is never read for it, so offering one would be a dead control —
+	//     and defaulting it to "governed" would be false whenever the managed Pi is
+	//     set to a direct provider. A custom agent on the "Ryu" engine whose
+	//     model providers are limited takes the same route
+	//     (`agents::runs_limited_on_managed_pi`).
+	if (runsOnManagedPiAsItself(agent)) {
+		const governed = prefs.piRouting !== "direct";
+		return {
+			...base,
+			mechanism: "pi-provider",
+			governed,
+			control: null,
+			bestEffort: false,
+			credentialNote: null,
+			takesEffect: TAKES_EFFECT_AGENT,
+			detail: governed
+				? `Runs on the Ryu agent's managed Pi with the gateway on top — every model call is filtered, budgeted and logged under this agent's own name. ${PI_POINTER}`
+				: `Runs on the Ryu agent's managed Pi, which is set to a direct provider, so its model calls go straight to that provider. ${PI_POINTER}`,
 		};
 	}
 
@@ -981,21 +1024,27 @@ export async function fetchEgressPrefs(
  * outright. Neither is what Core's router matches on, so: built-ins use their
  * id (which IS the registry id), and custom rows are re-read through
  * `GET /api/agents/:id`, whose record carries the engine the picker saved
- * (`acp:claude`, `acp-exec:<cmd>`, …).
+ * (`acp:claude`, `acp-exec:<cmd>`, …). The same record says whether the
+ * agent's model providers are limited, which moves a custom `acp:pi` agent
+ * onto Ryu's managed Pi.
  */
 async function canonicalEngine(
 	target: ApiTarget,
 	agent: AgentSummary
-): Promise<string | null> {
+): Promise<{ engine: string | null; modelsLimited: boolean }> {
 	if (agent.builtIn) {
-		return agent.id;
+		return { engine: agent.id, modelsLimited: false };
 	}
 	try {
 		const record = await fetchAgent(target, agent.id);
-		return record.engine;
+		return {
+			engine: record.engine,
+			modelsLimited:
+				record.accountAccess !== null || record.identityMode === "individual",
+		};
 	} catch {
 		// A record we cannot read is honestly unknown, not "direct".
-		return null;
+		return { engine: null, modelsLimited: false };
 	}
 }
 
@@ -1005,7 +1054,7 @@ export async function loadAgentEgress(
 ): Promise<AgentEgressView> {
 	const [agents, catalog, prefs] = await Promise.all([
 		fetchAgents(target),
-		fetchAgentCatalog(target).catch(() => [] as AgentCatalogEntry[]),
+		fetchAgentCatalog(target).catch(() => []),
 		fetchEgressPrefs(target),
 	]);
 	const engines = await Promise.all(
@@ -1016,8 +1065,9 @@ export async function loadAgentEgress(
 			{
 				id: agent.id,
 				name: agent.name,
-				engine: engines[index],
+				engine: engines[index]?.engine ?? null,
 				flagship: agent.recommended,
+				modelsLimited: engines[index]?.modelsLimited ?? false,
 			},
 			catalog,
 			prefs

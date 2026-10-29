@@ -26,6 +26,17 @@ import { useReducedMotion } from "motion/react";
 import { Children, type CSSProperties, type ReactNode } from "react";
 import { cn } from "../lib/utils.ts";
 
+interface TextMarqueeStyle extends CSSProperties {
+	"--count"?: number;
+	"--delay"?: string;
+	"--destination"?: string;
+	"--duration"?: string;
+	"--index"?: number;
+	"--marquee-height"?: string;
+	"--origin"?: string;
+	"--speed"?: number;
+}
+
 interface TextMarqueeProps {
 	/** Exactly one element per row of the reel. */
 	children: ReactNode[];
@@ -47,6 +58,7 @@ export function TextMarquee({
 }: TextMarqueeProps) {
 	const reduceMotion = useReducedMotion();
 	const count = Children.count(children);
+	const windowStyle: TextMarqueeStyle = { "--marquee-height": `${height}px` };
 
 	// Reduced motion: a static, clipped column. The rows are stacked in reading
 	// order instead of offset by `--origin`, so the first `height / 40` names
@@ -59,8 +71,8 @@ export function TextMarquee({
 						<div className="relative size-auto whitespace-pre">{prefix}</div>
 					) : null}
 					<div
-						className="t-text-marquee-mask relative w-auto overflow-hidden"
-						style={{ height: `${height}px` }}
+						className="t-text-marquee-mask relative h-[var(--marquee-height)] w-auto overflow-hidden"
+						style={windowStyle}
 					>
 						{Children.toArray(children)}
 					</div>
@@ -69,6 +81,7 @@ export function TextMarquee({
 		);
 	}
 
+	const reelStyle: TextMarqueeStyle = { "--count": count, "--speed": speed };
 	return (
 		<div className={cn("relative flex", className)}>
 			<div className="relative flex h-min w-min flex-row items-center gap-1 overflow-hidden">
@@ -76,39 +89,29 @@ export function TextMarquee({
 					<div className="relative size-auto whitespace-pre">{prefix}</div>
 				) : null}
 				<div
-					className="t-text-marquee-mask relative w-auto overflow-hidden"
-					style={{ height: `${height}px` }}
+					className="t-text-marquee-mask relative h-[var(--marquee-height)] w-auto overflow-hidden"
+					style={windowStyle}
 				>
-					<div
-						className="relative h-full"
-						style={
-							{
-								"--count": count,
-								"--speed": speed,
-							} as CSSProperties
-						}
-					>
-						{Children.map(children, (child, index) => (
-							<div
-								className="flex h-10 items-center"
-								key={index}
-								style={
-									{
-										"--index": index,
-										"--origin": "calc((var(--count) - var(--index)) * 100%)",
-										"--destination": "calc((var(--index) + 1) * -100%)",
-										"--duration": `calc(var(--speed) * ${count}s)`,
-										"--delay":
-											"calc((var(--duration) / var(--count)) * var(--index) - var(--duration))",
-										translate: "0 var(--origin)",
-										animation:
-											"t-text-marquee var(--duration) var(--delay) infinite linear",
-									} as CSSProperties
-								}
-							>
-								{child}
-							</div>
-						))}
+					<div className="relative h-full" style={reelStyle}>
+						{Children.map(children, (child, index) => {
+							const rowStyle: TextMarqueeStyle = {
+								"--index": index,
+								"--origin": "calc((var(--count) - var(--index)) * 100%)",
+								"--destination": "calc((var(--index) + 1) * -100%)",
+								"--duration": `calc(var(--speed) * ${count}s)`,
+								"--delay":
+									"calc((var(--duration) / var(--count)) * var(--index) - var(--duration))",
+							};
+							return (
+								<div
+									className="flex h-10 items-center [animation:t-text-marquee_var(--duration)_var(--delay)_infinite_linear] [translate:0_var(--origin)]"
+									key={index}
+									style={rowStyle}
+								>
+									{child}
+								</div>
+							);
+						})}
 					</div>
 				</div>
 			</div>

@@ -7,6 +7,7 @@ const harnessDir = path.resolve(import.meta.dirname);
 const desktopRoot = path.resolve(harnessDir, "../..");
 
 export default defineConfig({
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 	plugins: [react()],
 	css: {
 		postcss: {

@@ -12,17 +12,17 @@ import { useApprovals } from "@/src/hooks/useApprovals.ts";
 import type { ApprovalRequest } from "@/src/lib/api/approvals.ts";
 import { useLiveActivityStore } from "@/src/store/useLiveActivityStore.ts";
 
-const KIND_LABELS: Record<string, string> = {
-	tool_call: "Tool call",
-	workflow_gate: "Workflow gate",
-	scheduled_run: "Scheduled run",
-	trigger_run: "Trigger run",
-	skill_synthesis: "Skill synthesis",
-	heal_fix: "Heal fix",
-};
+const KIND_LABELS = new Map<string, string>([
+	["tool_call", "Tool call"],
+	["workflow_gate", "Workflow gate"],
+	["scheduled_run", "Scheduled run"],
+	["trigger_run", "Trigger run"],
+	["skill_synthesis", "Skill synthesis"],
+	["heal_fix", "Heal fix"],
+]);
 
 function approvalToActivity(request: ApprovalRequest): LiveActivity {
-	const kindLabel = KIND_LABELS[request.kind] ?? request.kind;
+	const kindLabel = KIND_LABELS.get(request.kind) ?? request.kind;
 	const detail =
 		request.summary || (request.title === kindLabel ? "" : request.title);
 	return {

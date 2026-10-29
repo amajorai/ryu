@@ -11,6 +11,13 @@ export const env = createEnv({
 		// in real use; the default only works on simulators/emulators on the host.
 		EXPO_PUBLIC_CORE_URL: z.url().default("http://localhost:7980"),
 	},
-	runtimeEnv: process.env,
+	// Expo only inlines public variables when they are accessed by their static
+	// property names. Passing the whole process.env object leaves these values
+	// undefined in the release JavaScript bundle and makes native startup fail.
+	runtimeEnv: {
+		EXPO_PUBLIC_SERVER_URL: process.env.EXPO_PUBLIC_SERVER_URL,
+		EXPO_PUBLIC_WEB_URL: process.env.EXPO_PUBLIC_WEB_URL,
+		EXPO_PUBLIC_CORE_URL: process.env.EXPO_PUBLIC_CORE_URL,
+	},
 	emptyStringAsUndefined: true,
 });

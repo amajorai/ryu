@@ -70,7 +70,7 @@ function Proof() {
 		<main className="min-h-screen bg-background p-8 text-foreground">
 			<div className="mx-auto flex max-w-5xl flex-col gap-6">
 				<header className="flex flex-col gap-2">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Desktop UI proof
 					</p>
 					<h1 className="font-semibold text-2xl tracking-tight">

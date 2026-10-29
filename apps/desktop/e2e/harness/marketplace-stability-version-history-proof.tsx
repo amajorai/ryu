@@ -212,7 +212,5 @@ function ProofPage() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
-	<ProofPage />
-);
+createRoot(document.getElementById("root")!).render(<ProofPage />);
 document.body.dataset.harnessReady = "1";

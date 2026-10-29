@@ -1,3 +1,12 @@
+import type { CSSProperties } from "react";
+import crmStyles from "./crm-values.module.css";
+
+interface CrmDataStyle extends CSSProperties {
+	"--crm-color"?: string;
+	"--crm-share"?: string;
+}
+
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 // The kanban board: records grouped into columns by a select/status field.
 //
 // The column set comes from the FIELD's declared options, not from the values that
@@ -13,9 +22,10 @@
 
 import { Alert01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Skeleton } from "@ryu/ui/components/skeleton";
-import { cn } from "@ryu/ui/lib/utils";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	formatCents,
@@ -52,6 +62,7 @@ export function BoardView({
 	subject: ObjectWithFields;
 	view: View;
 }) {
+	const tl = useLiteralMessages();
 	const [records, setRecords] = useState<CrmRecord[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -110,7 +121,7 @@ export function BoardView({
 					signal
 				)
 				.then((page) => setRecords(page.items))
-				.catch((cause: unknown) => {
+				.catch((cause) => {
 					if (signal?.aborted) {
 						return;
 					}
@@ -146,7 +157,7 @@ export function BoardView({
 			const total = valueField
 				? items.reduce((sum, record) => {
 						const cents = record.values?.[valueField.slug];
-						return sum + (typeof cents === "number" ? cents : 0);
+						return sum + (isNativeNumber(cents) ? cents : 0);
 					}, 0)
 				: 0;
 			return { items, option, total };
@@ -200,8 +211,10 @@ export function BoardView({
 	if (!groupField) {
 		return (
 			<div className="flex h-full items-center justify-center p-6 text-center text-muted-foreground text-sm">
-				A board needs a select or status field to group by, and{" "}
-				{subject.object.plural} has none yet. Add one in the schema editor.
+				{tl(
+					"A board needs a select or status field to group by, and {objectPlural} has none yet. Add one in the schema editor.",
+					{ objectPlural: subject.object.plural }
+				)}
 			</div>
 		);
 	}
@@ -219,8 +232,11 @@ export function BoardView({
 			<div className="scroll-fade-x flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
 				{columns.map(({ items, option, total }) => {
 					const colour = "color" in option ? option.color : undefined;
+					const colorStyle: CrmDataStyle = {
+						"--crm-color": colour ?? undefined,
+					};
 					return (
-						// biome-ignore lint/a11y/noStaticElementInteractions: a drop zone is a region, and every card it holds is independently reachable by keyboard
+						// a drop zone is a region, and every card it holds is independently reachable by keyboard
 						<section
 							aria-label={`${option.label} — ${items.length} ${
 								items.length === 1
@@ -251,11 +267,17 @@ export function BoardView({
 									{colour && (
 										<span
 											aria-hidden="true"
-											className="size-2 shrink-0 rounded-full"
-											style={{ backgroundColor: colour }}
+											className={cn(
+												crmStyles.color,
+												"size-2 shrink-0 rounded-full"
+											)}
+											style={colorStyle}
 										/>
 									)}
-									<span className="truncate font-medium text-sm">
+									<span
+										className="truncate font-medium text-sm"
+										title={option.label}
+									>
 										{option.label}
 									</span>
 								</div>
@@ -268,7 +290,7 @@ export function BoardView({
 											)}
 										</span>
 									)}
-									<Badge className="font-normal" variant="secondary">
+									<Badge typography="normal" variant="secondary">
 										{items.length}
 									</Badge>
 								</div>
@@ -279,7 +301,7 @@ export function BoardView({
 									<Skeleton className="h-16 w-full" />
 								) : (
 									items.map((record) => (
-										// biome-ignore lint/a11y/noStaticElementInteractions: the draggable wrapper carries the drag handlers; the button inside is the keyboard-reachable control
+										// the draggable wrapper carries the drag handlers; the button inside is the keyboard-reachable control
 										<div
 											className={cn(
 												"rounded-md border bg-card p-2 shadow-sm",
@@ -298,7 +320,14 @@ export function BoardView({
 												onClick={() => onOpenRecord(record.id)}
 												type="button"
 											>
-												<div className="truncate font-medium text-sm hover:underline">
+												<div
+													className="truncate font-medium text-sm hover:underline"
+													title={recordTitle(
+														record.title,
+														record.values,
+														titleField
+													)}
+												>
 													{recordTitle(record.title, record.values, titleField)}
 												</div>
 											</button>

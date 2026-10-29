@@ -94,7 +94,10 @@ export function PaneChooserPage() {
 									className="size-5 shrink-0 text-muted-foreground group-hover:text-foreground"
 									icon={route.icon}
 								/>
-								<span className="truncate font-medium text-sm">
+								<span
+									className="truncate font-medium text-sm"
+									title={route.label}
+								>
 									{route.label}
 								</span>
 							</button>
@@ -115,10 +118,16 @@ export function PaneChooserPage() {
 									onClick={() => replacePaneTab(tabId, tab.id)}
 									type="button"
 								>
-									<span className="min-w-0 flex-1 truncate text-sm">
+									<span
+										className="min-w-0 flex-1 truncate text-sm"
+										title={tab.title}
+									>
 										{tab.title}
 									</span>
-									<span className="shrink-0 truncate text-muted-foreground text-xs">
+									<span
+										className="shrink-0 truncate text-muted-foreground text-xs"
+										title={tab.path}
+									>
 										{tab.path}
 									</span>
 								</button>

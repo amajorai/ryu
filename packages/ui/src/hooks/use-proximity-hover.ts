@@ -202,7 +202,7 @@ export function useProximityHover<T extends HTMLElement>(
 	// stale. Coalesced through the same rAF as register/unregister.
 	useEffect(() => {
 		const container = containerRef.current;
-		if (!container || typeof ResizeObserver === "undefined") {
+		if (!container || globalThis.ResizeObserver === undefined) {
 			return;
 		}
 		const ro = new ResizeObserver(() => {

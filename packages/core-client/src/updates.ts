@@ -3,7 +3,45 @@
 // uses the Web Store. Keeping the verdict shape here prevents browser clients
 // from drifting as Core adds fields.
 
+import { z } from "zod";
+import { appResponseValueSchema } from "./app-request-json.ts";
 import { type ApiTarget, request } from "./client.ts";
+
+function updateResponse<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appResponseValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+export const updateReleaseAssetResponseSchema = updateResponse(
+	z.object({
+		kind: z.string(),
+		name: z.string(),
+		size: z.number(),
+		url: z.string(),
+	})
+);
+// All native UpdateCheck fields plus the native fail-open publisher's error.
+// Older verdicts predate the additive cutoff/tag/timestamp metadata.
+export const updateCheckResponseSchema = updateResponse(
+	z.object({
+		asset: updateReleaseAssetResponseSchema.nullable(),
+		channel: z.string(),
+		current: z.string(),
+		cutoff_unresolved: z.boolean().optional(),
+		cutoff_waived_for_security: z.boolean().optional(),
+		error: z.string().nullish(),
+		html_url: z.string().nullable(),
+		latest: z.string(),
+		latest_unrestricted: z.string().optional(),
+		notes: z.string().nullable(),
+		published_at: z.string().nullish(),
+		restricted_by_cutoff: z.boolean().optional(),
+		tag: z.string().nullish(),
+		update_available: z.boolean(),
+	})
+);
 
 export interface UpdateReleaseAsset {
 	kind: string;
@@ -37,7 +75,11 @@ export interface FetchUpdateCheckOptions {
 /** True when a verdict is a failed check rather than a clean no-update result. */
 export function updateCheckFailed(verdict: UpdateCheck): boolean {
 	return (
-		Boolean(verdict.error) || !(verdict.update_available || verdict.latest)
+		Boolean(verdict.error) ||
+		// A placeholder `latest` (= `current`) when no release fell inside the
+		// caller's updates window — not a clean "up to date".
+		verdict.cutoff_unresolved === true ||
+		!(verdict.update_available || verdict.latest)
 	);
 }
 
@@ -56,9 +98,14 @@ export async function fetchUpdateCheck(
 	}
 	const suffix = params.toString() ? `?${params.toString()}` : "";
 	try {
-		return await request<UpdateCheck>(target, `/api/update/check${suffix}`, {
-			signal: options?.signal,
-		});
+		return await request(
+			target,
+			`/api/update/check${suffix}`,
+			{
+				signal: options?.signal,
+			},
+			updateCheckResponseSchema
+		);
 	} catch (error) {
 		return {
 			asset: null,

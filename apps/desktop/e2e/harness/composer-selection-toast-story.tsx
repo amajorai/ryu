@@ -46,7 +46,10 @@ function Story() {
 						className="h-9 rounded-md border border-border bg-background px-3 text-sm"
 						data-testid="apply-mode"
 						onChange={(event) =>
-							setMode(event.target.value as ComposerSelectionApplyMode)
+							setMode(
+								/* SAFETY: This authored native select renders precisely next-turn and next-user-message, the actual ComposerSelectionApplyMode choices. This fixture forwards a genuine rendered selection, not an arbitrary synthetic-event contract. */ event
+									.target.value as ComposerSelectionApplyMode
+							)
 						}
 						value={mode}
 					>

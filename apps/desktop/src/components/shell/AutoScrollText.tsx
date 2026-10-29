@@ -2,7 +2,7 @@ import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
-} from "@ryu/ui/components/tooltip";
+} from "@ryu/ui/components/tooltip.tsx";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils.ts";
 

@@ -1,11 +1,13 @@
 import {
 	Add01Icon,
+	AlertCircleIcon,
 	ArrowDown01Icon,
 	ArrowUp01Icon,
 	CheckmarkCircle02Icon,
 	Delete01Icon,
 	Download01Icon,
 	PencilEdit01Icon,
+	Search01Icon,
 	SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -378,6 +380,7 @@ export default function SkillsCatalogSection({
 							setFriendly={setFriendly}
 							setInstalledOnly={setInstalledOnly}
 							setSort={setSort}
+							showInstalledOnly={host.install !== null}
 							sort={sort}
 							sources={sources}
 						/>
@@ -449,6 +452,7 @@ function SkillsFilterPanel({
 	setFriendly,
 	installedOnly,
 	setInstalledOnly,
+	showInstalledOnly,
 	onCreate,
 	canAuthor,
 	chips,
@@ -467,6 +471,7 @@ function SkillsFilterPanel({
 	setFriendly: (v: boolean) => void;
 	installedOnly: boolean;
 	setInstalledOnly: (v: boolean) => void;
+	showInstalledOnly: boolean;
 	onCreate: () => void;
 	canAuthor: boolean;
 	chips: ActiveChip[];
@@ -481,12 +486,12 @@ function SkillsFilterPanel({
 							New skill
 						</Button>
 					) : null}
-					<Select
+					<Select<SkillSort>
 						items={SORT_OPTIONS}
-						onValueChange={(v) => setSort(v as SkillSort)}
+						onValueChange={(v) => setSort(v)}
 						value={sort}
 					>
-						<SelectTrigger className="h-8 w-[150px] text-sm" size="sm">
+						<SelectTrigger className="h-8 w-[150px]" size="sm">
 							<SelectValue placeholder="Sort" />
 						</SelectTrigger>
 						<SelectContent>
@@ -517,17 +522,19 @@ function SkillsFilterPanel({
 							Friendly names
 						</label>
 					</div>
-					<div className="flex items-center gap-2">
-						<Switch
-							aria-label="Show only installed skills"
-							checked={installedOnly}
-							id="skills-installed-only"
-							onCheckedChange={setInstalledOnly}
-						/>
-						<label className="cursor-pointer" htmlFor="skills-installed-only">
-							Added only
-						</label>
-					</div>
+					{showInstalledOnly ? (
+						<div className="flex items-center gap-2">
+							<Switch
+								aria-label="Show only installed skills"
+								checked={installedOnly}
+								id="skills-installed-only"
+								onCheckedChange={setInstalledOnly}
+							/>
+							<label className="cursor-pointer" htmlFor="skills-installed-only">
+								Added only
+							</label>
+						</div>
+					) : null}
 				</div>
 			</div>
 			<FilterChipBar chips={chips} />
@@ -605,7 +612,10 @@ function SkillSourcePicker({
 				<Tooltip>
 					<TooltipTrigger
 						render={
-							<PopoverTrigger className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground">
+							<PopoverTrigger
+								className="inline-flex h-8 items-center"
+								variant="marketplace-add"
+							>
 								<HugeiconsIcon className="size-4" icon={Add01Icon} />
 								Add marketplace
 							</PopoverTrigger>
@@ -635,7 +645,12 @@ function SkillSourcePicker({
 										key={source.id}
 									>
 										<div className="min-w-0 flex-1">
-											<p className="truncate text-sm">{source.displayName}</p>
+											<p
+												className="truncate text-sm"
+												title={source.displayName}
+											>
+												{source.displayName}
+											</p>
 											<p className="text-muted-foreground text-xs">
 												{manageable
 													? "Custom marketplace"
@@ -891,10 +906,10 @@ function SkillList({
 	}
 	if (error) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={SparklesIcon} />
+						<HugeiconsIcon icon={AlertCircleIcon} />
 					</EmptyMedia>
 					<EmptyTitle>Couldn&apos;t load skills</EmptyTitle>
 					<EmptyDescription>{error}</EmptyDescription>
@@ -909,10 +924,10 @@ function SkillList({
 	}
 	if (skills.length === 0) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={SparklesIcon} />
+						<HugeiconsIcon icon={Search01Icon} />
 					</EmptyMedia>
 					<EmptyTitle>No skills found</EmptyTitle>
 					<EmptyDescription>Try a different search.</EmptyDescription>
@@ -940,8 +955,11 @@ function SkillList({
 			) : (
 				<StoreCardGrid>{skills.map(renderCard)}</StoreCardGrid>
 			)}
+			{/* Paging is a synchronous client-side reveal, so there is no in-flight
+			    flag: the grown row count is what releases the sentinel's latch. */}
 			<InfiniteSentinel
 				hasMore={hasNextPage}
+				itemCount={skills.length}
 				loading={false}
 				onLoadMore={fetchNextPage}
 				root={scrollEl}
@@ -1238,7 +1256,7 @@ function skillStatItems({
 		formatDateLabel(metadata.githubPushedAt)
 			? {
 					label: "Last push",
-					value: formatDateLabel(metadata.githubPushedAt) as string,
+					value: formatDateLabel(metadata.githubPushedAt),
 				}
 			: null,
 		metadata.firstSeen
@@ -1280,13 +1298,13 @@ function SkillDetailAside({
 		formatDateLabel(metadata.githubCreatedAt)
 			? {
 					label: "Created",
-					value: formatDateLabel(metadata.githubCreatedAt) as string,
+					value: formatDateLabel(metadata.githubCreatedAt),
 				}
 			: null,
 		formatDateLabel(metadata.githubUpdatedAt)
 			? {
 					label: "Updated",
-					value: formatDateLabel(metadata.githubUpdatedAt) as string,
+					value: formatDateLabel(metadata.githubUpdatedAt),
 				}
 			: null,
 	];
@@ -1401,7 +1419,7 @@ function SkillDetailAction({
 					Edit
 				</Button>
 			) : null}
-			<Badge className="gap-1" variant="secondary">
+			<Badge variant="secondary">
 				<HugeiconsIcon
 					className="size-3.5 text-status-success"
 					icon={CheckmarkCircle02Icon}
@@ -1421,8 +1439,10 @@ function SkillDetailAction({
 						}}
 					/>
 					<Label
-						className="cursor-pointer text-muted-foreground text-xs"
+						className="cursor-pointer"
 						htmlFor={`skill-enabled-${card.id}`}
+						size="compact"
+						tone="muted"
 					>
 						{skillEnabled ? "Enabled" : "Disabled"}
 					</Label>
@@ -1618,13 +1638,7 @@ function SkillFileTree({
 		search: true,
 	});
 
-	return (
-		<FileTree
-			className="h-full w-full"
-			model={model}
-			style={{ height: "100%" }}
-		/>
-	);
+	return <FileTree className="h-full w-full" model={model} />;
 }
 
 function SkillFileContent({

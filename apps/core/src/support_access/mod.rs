@@ -218,7 +218,7 @@ pub struct SupportAccessStore {
 }
 
 fn default_db_path() -> PathBuf {
-    crate::paths::ryu_dir().join("support-access-audit.db")
+    crate::paths::db_path("support-access-audit.db")
 }
 
 impl SupportAccessStore {

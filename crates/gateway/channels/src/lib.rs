@@ -63,6 +63,9 @@ use crate::commands::ChannelCommand;
 use crate::media::{Attachment, VoiceDelivery, VoiceReplyMode};
 use crate::pairing::{AccessPolicy, Decision, DeliveryClaim, DmPolicy, GroupPolicy, PairingStore};
 use crate::status::StatusReporter;
+pub use ryu_channel_contracts::{
+    ChannelActionEvent, InteractiveAction, InteractiveButton, InteractiveLayout, InteractiveMarkup,
+};
 
 // ─── Channel-layer configuration (transport-adapter shapes) ─────────────────
 //
@@ -198,8 +201,9 @@ pub struct CommonChannelConfig {
     pub rich_text: bool,
     /// Stream partial output where the platform supports drafts.
     pub streaming: bool,
-    /// Add a lightweight lifecycle reaction while a turn is running and when it
-    /// completes. Platforms that cannot react simply ignore the capability.
+    /// Show 👀 while a turn is running (taken back once it finishes) and ❌ when
+    /// it fails. Platforms that cannot react simply ignore the capability. The
+    /// agent's own reaction is mirrored regardless; see [`finish_reactions`].
     pub lifecycle_reactions: bool,
     /// Send Ryu's first plain-language welcome without waiting for a user message.
     /// This is intentionally opt-in: a target is required and the shared access
@@ -483,6 +487,10 @@ pub struct ChannelCaps {
     pub attachments: bool,
     /// Emoji reactions can be placed on a message.
     pub reactions: bool,
+    /// The platform can display normal-message quick replies.
+    pub reply_keyboards: bool,
+    /// The platform can display attached callback or URL buttons.
+    pub inline_buttons: bool,
 }
 
 /// An inbound message received from a channel, normalised across providers.
@@ -511,6 +519,8 @@ pub struct InboundMessage {
     pub is_group: bool,
     /// Media the user attached.
     pub attachments: Vec<Attachment>,
+    /// A typed button action; quick replies remain ordinary text messages.
+    pub channel_action: Option<ChannelActionEvent>,
 }
 
 impl InboundMessage {
@@ -569,6 +579,57 @@ pub struct ChannelRunResult {
     pub reply: String,
     pub assistant_message_id: Option<String>,
     pub assistant_message_ids: Vec<String>,
+    pub interactive_markup: Option<InteractiveMarkup>,
+    /// Emojis the agent reacted to the user's message with (`agents.react`),
+    /// oldest first. Mirrored onto the provider message that started the turn.
+    pub agent_reactions: Vec<String>,
+}
+
+/// Lifecycle reaction placed while a turn is running.
+pub const WORKING_REACTION: &str = "👀";
+
+/// Lifecycle reaction placed when a turn fails.
+pub const FAILED_REACTION: &str = "❌";
+
+/// Whether a finishing reaction step adds or takes back an emoji.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReactionOp {
+    Add,
+    Remove,
+}
+
+/// The reaction steps that close a turn on the provider message that started it.
+///
+/// Mirrors how people (and other chat assistants) react: the working 👀 is taken
+/// back once the answer is there, the agent's own `agents.react` choice is what
+/// stays, and only a failure is marked. A successful turn the agent chose not to
+/// react to ends with no reaction at all — the reply is the acknowledgement, and
+/// a ✅ on every message would drown out the reactions that carry meaning.
+///
+/// The agent's reactions are mirrored regardless of `lifecycle_reactions`: they
+/// are part of the agent's answer, not the transport's progress signal.
+pub fn finish_reactions<'a>(
+    lifecycle_reactions: bool,
+    run_succeeded: bool,
+    agent_reactions: &'a [String],
+) -> Vec<(ReactionOp, &'a str)> {
+    let mut steps = Vec::new();
+    let agent_placed_working = agent_reactions
+        .iter()
+        .any(|emoji| emoji == WORKING_REACTION);
+    if lifecycle_reactions && !agent_placed_working {
+        steps.push((ReactionOp::Remove, WORKING_REACTION));
+    }
+    if run_succeeded {
+        steps.extend(
+            agent_reactions
+                .iter()
+                .map(|emoji| (ReactionOp::Add, emoji.as_str())),
+        );
+    } else if lifecycle_reactions {
+        steps.push((ReactionOp::Add, FAILED_REACTION));
+    }
+    steps
 }
 
 /// Outcome of one normalized inbound turn.
@@ -599,6 +660,26 @@ fn delivery_retry_delay(attempt: u32) -> Duration {
         _ => Duration::from_secs(5),
     }
 }
+
+/// Upper bound for one Core-routed agent turn (`POST /api/channels/run`).
+///
+/// Overrides the shared HTTP client's 60 s timeout: an agent turn with web
+/// search and several model rounds routinely takes longer, and cutting it off
+/// makes the user see an error while Core finishes (and bills) a reply nobody
+/// fetches. It must stay below Core's 15-minute stale channel-turn reclaim
+/// (`claim_channel_turn` in `apps/core/src/server/conversations.rs`) and the
+/// 30-minute delivery lease in [`pairing`], so a slow turn never outlives
+/// either claim.
+const CORE_TURN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+const _: () = assert!(
+    CORE_TURN_TIMEOUT.as_secs() > 60 && CORE_TURN_TIMEOUT.as_secs() < 15 * 60,
+    "CORE_TURN_TIMEOUT must exceed the shared 60 s client timeout and stay below Core's 15-minute reclaim"
+);
+
+/// Chat reply when a Core-routed turn fails. Deliberately generic; the cause is
+/// logged with the internal URL that a transport error would otherwise expose.
+const CORE_TURN_FAILED_REPLY: &str = "Sorry, something went wrong while running that request.";
 
 impl ChannelRuntime {
     pub fn new(
@@ -657,23 +738,20 @@ impl ChannelRuntime {
         text: &str,
         author_name: Option<&str>,
         idempotency_key: Option<&str>,
+        channel_action: Option<&ChannelActionEvent>,
     ) -> anyhow::Result<ChannelRunResult> {
-        let url = format!(
-            "{}/api/channels/run",
-            self.cfg.core_url.trim_end_matches('/')
-        );
+        let payload = json!({
+            "conversation_id": conversation_id,
+            "channel_id": self.cfg.channel_id,
+            "agent_id": self.cfg.agent_id,
+            "team_id": self.cfg.team_id,
+            "text": text,
+            "author_name": author_name,
+            "idempotencyKey": idempotency_key,
+            "channelAction": channel_action,
+        });
         let resp = self
-            .http
-            .post(&url)
-            .json(&json!({
-                "conversation_id": conversation_id,
-                "channel_id": self.cfg.channel_id,
-                "agent_id": self.cfg.agent_id,
-                "team_id": self.cfg.team_id,
-                "text": text,
-                "author_name": author_name,
-                "idempotencyKey": idempotency_key,
-            }))
+            .core_run_request(&payload)
             .send()
             .await?
             .error_for_status()?;
@@ -696,11 +774,41 @@ impl ChannelRuntime {
             })
             .filter(|ids| !ids.is_empty())
             .unwrap_or_else(|| assistant_message_id.clone().into_iter().collect());
+        // Older Cores omit the field; that only means there is nothing to mirror.
+        let agent_reactions = body["agentReactions"]
+            .as_array()
+            .map(|emojis| {
+                emojis
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|emoji| !emoji.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(ChannelRunResult {
             reply: body["reply"].as_str().unwrap_or("").to_owned(),
             assistant_message_id,
             assistant_message_ids,
+            agent_reactions,
+            interactive_markup: body
+                .get("interactiveMarkup")
+                .filter(|value| !value.is_null())
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()?,
         })
+    }
+
+    /// The `POST /api/channels/run` request for one turn, with the per-turn
+    /// [`CORE_TURN_TIMEOUT`] in place of the shared client's shorter default.
+    fn core_run_request(&self, payload: &Value) -> reqwest::RequestBuilder {
+        let url = format!(
+            "{}/api/channels/run",
+            self.cfg.core_url.trim_end_matches('/')
+        );
+        self.http.post(url).timeout(CORE_TURN_TIMEOUT).json(payload)
     }
 
     /// Bind provider message ids to the Core assistant row that produced them.
@@ -916,6 +1024,18 @@ pub trait Channel: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Send a reply with channel-neutral buttons when the platform supports
+    /// their layout. Text-only adapters use the same reply text as a fallback.
+    async fn send_reply_with_markup(
+        &self,
+        chat_id: &str,
+        text: &str,
+        rich_text: bool,
+        _markup: Option<&InteractiveMarkup>,
+    ) -> anyhow::Result<Vec<String>> {
+        self.send_reply(chat_id, text, rich_text).await
+    }
+
     /// Run the channel's inbound loop until the process exits. Each inbound
     /// message should be passed to [`handle_turn`].
     async fn run(self: Arc<Self>, host: Arc<dyn ChannelHost>) -> anyhow::Result<()>;
@@ -984,6 +1104,17 @@ pub trait Channel: Send + Sync {
     /// Place an emoji reaction on a message. Used to acknowledge receipt without
     /// adding a message to the conversation.
     async fn react(&self, _chat_id: &str, _message_id: &str, _emoji: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Take back a reaction this bot placed with [`Channel::react`]. Clears the
+    /// working 👀 once a turn finishes so it never lingers beside the answer.
+    async fn remove_reaction(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _emoji: &str,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -1406,7 +1537,6 @@ async fn run_proactive_opening<C: Channel + 'static>(channel: Arc<C>) {
     if !runtime.already_admitted(channel.name(), &admission).await {
         warn!(
             channel = channel.name(),
-            target = %target,
             "proactive opening target is not admitted; no message sent"
         );
         return;
@@ -1460,7 +1590,6 @@ async fn run_proactive_opening<C: Channel + 'static>(channel: Arc<C>) {
         if body["status"].as_str() != Some("completed") {
             info!(
                 channel = channel.name(),
-                target = %target,
                 "proactive opening was already delivered; no duplicate sent"
             );
             return;
@@ -1479,7 +1608,7 @@ async fn run_proactive_opening<C: Channel + 'static>(channel: Arc<C>) {
         if let Err(err) = channel.send_message(&target, reply).await {
             warn!(channel = channel.name(), %err, "proactive opening was generated but could not be delivered");
         } else {
-            info!(channel = channel.name(), target = %target, "proactive opening delivered");
+            info!(channel = channel.name(), "proactive opening delivered");
         }
         return;
     }
@@ -1532,7 +1661,6 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
         Decision::Deny => {
             warn!(
                 channel = platform,
-                chat_id = %message.chat_id,
                 is_group = message.is_group,
                 "channel inbound refused by access policy"
             );
@@ -1541,7 +1669,6 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
         Decision::Challenge(code) | Decision::Pending(code) => {
             info!(
                 channel = platform,
-                chat_id = %message.chat_id,
                 "channel inbound held for pairing approval"
             );
             if let Err(err) = channel
@@ -1568,7 +1695,9 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
     // best-effort so a missing reactions scope never blocks the actual answer.
     if runtime.cfg.lifecycle_reactions && channel.caps().reactions {
         if let Some(message_id) = message.message_id.as_deref() {
-            let _ = channel.react(&message.chat_id, message_id, "👀").await;
+            let _ = channel
+                .react(&message.chat_id, message_id, WORKING_REACTION)
+                .await;
         }
     }
 
@@ -1603,7 +1732,6 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
 
     info!(
         channel = platform,
-        chat_id = %conversation_id,
         voice = message.is_voice(),
         "channel inbound message received"
     );
@@ -1612,6 +1740,8 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
     //    persists, governance stays on path), else the legacy gateway pipeline.
     let mut run_succeeded = true;
     let mut assistant_message_ids = Vec::new();
+    let mut interactive_markup = None;
+    let mut agent_reactions = Vec::new();
     let reply = if runtime.routes_via_core() {
         match runtime
             .run_via_core(
@@ -1619,21 +1749,28 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
                 &message.text,
                 message.author_name.as_deref(),
                 delivery_id,
+                message.channel_action.as_ref(),
             )
             .await
         {
             Ok(result) if !result.reply.is_empty() => {
                 assistant_message_ids = result.assistant_message_ids;
+                interactive_markup = result.interactive_markup;
+                agent_reactions = result.agent_reactions;
                 result.reply
             }
             Ok(result) => {
                 assistant_message_ids = result.assistant_message_ids;
+                interactive_markup = result.interactive_markup;
+                agent_reactions = result.agent_reactions;
                 "(no response)".to_string()
             }
             Err(err) => {
                 run_succeeded = false;
+                // The full error stays in the log: reqwest's `Display` carries
+                // the internal Core URL, which chat users must not see.
                 warn!(channel = platform, %err, "channel Core session run failed");
-                format!("Sorry, something went wrong: {err}")
+                CORE_TURN_FAILED_REPLY.to_owned()
             }
         }
     } else {
@@ -1650,14 +1787,18 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
 
     // 7. Deliver. Rich text when the platform and the operator both want it.
     let sent = channel
-        .send_reply(&platform_target, &reply, runtime.cfg.rich_text)
+        .send_reply_with_markup(
+            &platform_target,
+            &reply,
+            runtime.cfg.rich_text,
+            interactive_markup.as_ref(),
+        )
         .await;
     let provider_message_ids = match sent {
         Ok(ids) => ids,
         Err(err) => {
             warn!(
                 channel = platform,
-                chat_id = %conversation_id,
                 %err,
                 "failed to deliver channel reply"
             );
@@ -1675,10 +1816,22 @@ pub async fn handle_turn_with_delivery<C: Channel + 'static>(
             .await;
     }
 
-    if runtime.cfg.lifecycle_reactions && channel.caps().reactions {
+    if channel.caps().reactions {
         if let Some(message_id) = message.message_id.as_deref() {
-            let emoji = if run_succeeded { "✅" } else { "❌" };
-            let _ = channel.react(&message.chat_id, message_id, emoji).await;
+            for (op, emoji) in finish_reactions(
+                runtime.cfg.lifecycle_reactions,
+                run_succeeded,
+                &agent_reactions,
+            ) {
+                let _ = match op {
+                    ReactionOp::Add => channel.react(&message.chat_id, message_id, emoji).await,
+                    ReactionOp::Remove => {
+                        channel
+                            .remove_reaction(&message.chat_id, message_id, emoji)
+                            .await
+                    }
+                };
+            }
         }
     }
 
@@ -2192,6 +2345,33 @@ mod tests {
     }
 
     #[test]
+    fn core_turn_request_outlives_the_shared_client_timeout() {
+        let shared_client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .unwrap();
+        let runtime = ChannelRuntime::new(
+            shared_client,
+            CommonChannelConfig {
+                channel_id: Some("bot-a".to_owned()),
+                ..Default::default()
+            },
+            PairingStore::ephemeral(),
+            None,
+        );
+        let request = runtime
+            .core_run_request(&json!({ "conversation_id": "chat-1" }))
+            .build()
+            .unwrap();
+        assert_eq!(request.url().path(), "/api/channels/run");
+        assert_eq!(
+            request.timeout(),
+            Some(&CORE_TURN_TIMEOUT),
+            "a slow agent turn must not be cut at the shared client's 60 s timeout"
+        );
+    }
+
+    #[test]
     fn store_backed_channel_sessions_are_namespaced_per_bot() {
         let runtime = ChannelRuntime::new(
             reqwest::Client::new(),
@@ -2245,5 +2425,59 @@ mod tests {
 
         std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS");
         std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM");
+    }
+}
+
+#[cfg(test)]
+mod finish_reaction_tests {
+    use super::{finish_reactions, ReactionOp};
+
+    fn owned(emojis: &[&str]) -> Vec<String> {
+        emojis.iter().map(|emoji| (*emoji).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_agent_reaction_replaces_the_working_marker() {
+        let agent = owned(&["👍"]);
+        assert_eq!(
+            finish_reactions(true, true, &agent),
+            vec![(ReactionOp::Remove, "👀"), (ReactionOp::Add, "👍")]
+        );
+    }
+
+    #[test]
+    fn a_turn_the_agent_did_not_react_to_ends_with_no_reaction() {
+        assert_eq!(
+            finish_reactions(true, true, &[]),
+            vec![(ReactionOp::Remove, "👀")]
+        );
+    }
+
+    #[test]
+    fn a_failed_turn_is_marked() {
+        assert_eq!(
+            finish_reactions(true, false, &[]),
+            vec![(ReactionOp::Remove, "👀"), (ReactionOp::Add, "❌")]
+        );
+    }
+
+    #[test]
+    fn agent_reactions_mirror_even_with_lifecycle_reactions_off() {
+        let agent = owned(&["🙏", "🎉"]);
+        assert_eq!(
+            finish_reactions(false, true, &agent),
+            vec![(ReactionOp::Add, "🙏"), (ReactionOp::Add, "🎉")]
+        );
+        assert!(finish_reactions(false, true, &[]).is_empty());
+        assert!(finish_reactions(false, false, &[]).is_empty());
+    }
+
+    #[test]
+    fn an_agent_that_chose_the_working_emoji_keeps_it() {
+        let agent = owned(&["👀"]);
+        assert_eq!(
+            finish_reactions(true, true, &agent),
+            vec![(ReactionOp::Add, "👀")]
+        );
     }
 }

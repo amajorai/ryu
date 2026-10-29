@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "settings": {
+    "node": {
+      "name": "my-ryu-node",
+      "corsOrigins": ["http://localhost:3001", "http://localhost:5175"]
+    },
+    "models": {
+      "defaultAgent": "ryu",
+      "defaultLlm": {
+        "model": "gpt-4o-mini",
+        "baseUrl": "https://api.openai.com"
+      },
+      "fallbackLlm": { "model": "gemma2" },
+      "embedding": { "model": "nomic-embed-text-v1.5" }
+    },
+    "rag": {
+      "strategy": "vector",
+      "autoRecall": { "enabled": true, "topK": 5 }
+    },
+    "agent": { "egressSsrfGuard": true },
+    "acp": { "gatewayInject": true },
+    "chat": { "checkpointMaxAgeDays": 30 },
+    "codex": { "transcriptMaxAgeDays": 30 },
+    "sandbox": { "backend": "wasmtime" },
+    "voice": { "ttsEngine": "kokoro" },
+    "skills": { "disclosure": "progressive" }
+  }
+}

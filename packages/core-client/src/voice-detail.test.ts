@@ -65,6 +65,17 @@ test("detailed transcription preserves Core timestamps and caller identity", asy
 	expect(await transcribeAudio(target, new Blob(["audio"]))).toBe(
 		"Hello world"
 	);
+	await transcribeAudioDetailed(
+		target,
+		new Blob(["audio"]),
+		"voice.wav",
+		"whisper",
+		"auto"
+	);
+	// An explicit auto-detect is forwarded so it overrides a saved language.
+	expect(calls.at(-1)?.url).toBe(
+		"https://node.example/api/voice/transcribe?engine=whisper&language=auto"
+	);
 });
 test("transcription parsing rejects malformed segment time and keeps text-only engines", () => {
 	expect(parseTranscriptionDetail({ text: "Words" })).toEqual({

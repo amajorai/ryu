@@ -23,7 +23,7 @@ function ShelfChevron() {
 	return (
 		<span
 			aria-hidden="true"
-			className="t-learn-chevron inline-flex text-muted-foreground transition-transform duration-350 ease-out group-hover:translate-x-0.5 motion-reduce:transition-none"
+			className="inline-flex text-muted-foreground transition-transform duration-350 ease-out motion-safe:group-hover:translate-x-0.5 motion-reduce:transition-none"
 		>
 			<svg fill="none" height="16" viewBox="0 0 16 16" width="16">
 				<path

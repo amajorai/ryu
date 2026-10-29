@@ -4,6 +4,11 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import type { CSSProperties } from "react";
 import { SectionTitle, sectionSubtitleClass } from "./sections.tsx";
 import { StaggerLines } from "./stagger-lines.tsx";
+import styles from "./works-with.module.css";
+
+interface ToolMaskStyle extends CSSProperties {
+	"--tool-mask": string;
+}
 
 interface Tool {
 	href: string;
@@ -34,20 +39,6 @@ const MARQUEE_ITEMS = [
 	...Array.from({ length: MARQUEE_REPEAT }, () => TOOLS).flat(),
 ];
 
-function maskStyle(logo: string): CSSProperties {
-	const url = `url(/logos/${logo}.svg)`;
-	return {
-		maskImage: url,
-		WebkitMaskImage: url,
-		maskRepeat: "no-repeat",
-		WebkitMaskRepeat: "no-repeat",
-		maskPosition: "center",
-		WebkitMaskPosition: "center",
-		maskSize: "contain",
-		WebkitMaskSize: "contain",
-	};
-}
-
 function Pill({ tool }: { tool: Tool }) {
 	return (
 		<a
@@ -59,8 +50,12 @@ function Pill({ tool }: { tool: Tool }) {
 			{tool.logo ? (
 				<span
 					aria-hidden="true"
-					className="size-5 shrink-0 bg-foreground/70"
-					style={maskStyle(tool.logo)}
+					className={`${styles.logo} size-5 shrink-0 bg-foreground/70`}
+					style={
+						{
+							"--tool-mask": `url(/logos/${tool.logo}.svg)`,
+						} satisfies ToolMaskStyle as ToolMaskStyle
+					}
 				/>
 			) : null}
 			<span className="whitespace-nowrap font-medium text-foreground/75 text-sm">
@@ -83,10 +78,11 @@ export default function WorksWith() {
 				</StaggerLines>
 			</div>
 
-			<div className="group relative mt-10 w-full overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_4%,black_96%,transparent)]">
-				<div className="flex w-max animate-marquee gap-3 group-hover:[animation-play-state:paused]">
+			<div
+				className={`${styles.viewport} group relative mt-10 w-full overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_4%,black_96%,transparent)]`}
+			>
+				<div className={`${styles.track} flex w-max gap-3`}>
 					{MARQUEE_ITEMS.map((tool, i) => (
-						// biome-ignore lint/suspicious/noArrayIndexKey: duplicated static marquee list
 						<Pill key={`${tool.name}-${i}`} tool={tool} />
 					))}
 				</div>

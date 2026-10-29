@@ -1,85 +1,48 @@
 {
   "slug": "sales",
   "name": "Sales",
-  "navLabel": "Sales",
-  "category": "Sales & Marketing",
   "icon": "TrendingUp",
-  "tagline": "Research accounts and draft outreach using your connected CRM, email, and calendar.",
-  "heroEyebrow": "Ryu for Sales",
+  "tagline": "Use your connected CRM, or Ryu's local CRM app, to research accounts and draft outreach.",
   "heroTitle": "Ryu for sales",
-  "heroSubtitle": "Research accounts and draft outreach using your connected CRM, email, and calendar.",
-  "visualKey": "ConnectionsVisual",
-  "intro": "Reps lose hours to research, follow-ups, and data entry. Ryu agents connect to the apps your deals live in through Connections, so they can read an account, draft the next touch, and update the record, taking real actions instead of just suggesting them.",
-  "highlights": [
-    {
-      "title": "Acts in your stack",
-      "description": "Connect Gmail, Outlook, Salesforce, HubSpot, and Slack so agents can read, draft, and update where you already work.",
-      "icon": "Plug"
-    },
-    {
-      "title": "Personalized at scale",
-      "description": "Research each account and write outreach that sounds like you, grounded in real signals, not generic templates.",
-      "icon": "Sparkles"
-    },
-    {
-      "title": "CRM stays current",
-      "description": "Agents log calls, update stages, and fill fields after every interaction, so the pipeline reflects reality.",
-      "icon": "Bot"
-    },
-    {
-      "title": "Your data, governed",
-      "description": "Every call passes the Gateway: budgets keep cost predictable and the audit trail shows what was sent.",
-      "icon": "Eye"
-    }
-  ],
+  "visualKey": "WorkflowRunFigure",
   "useCases": [
     {
       "title": "Account research",
-      "description": "Pull a one-page brief on a prospect: news, funding, tech stack, and a hook, before you ever pick up the phone."
+      "description": "Pull a one-page brief on a prospect from the web and your CRM."
     },
     {
       "title": "Personalized outreach",
-      "description": "Draft first-touch emails and follow-up sequences tailored to each account, in your voice and ready to send."
+      "description": "Draft first-touch emails and follow-ups for each account, ready for your review."
     },
     {
-      "title": "Call prep & recaps",
-      "description": "Generate a pre-call brief, then turn the recording or notes into a recap, next steps, and a CRM update."
+      "title": "Call prep and recaps",
+      "description": "Prepare a pre-call brief, then turn your notes into a recap and next steps."
     },
     {
       "title": "CRM hygiene",
-      "description": "Update deal stages, log activities, and fill missing fields automatically after every meeting and email."
+      "description": "Update deal stages and log activities after meetings."
     },
     {
       "title": "Inbox triage",
-      "description": "Sort and prioritize inbound replies, draft responses, and surface the deals that need you today."
+      "description": "Sort inbound replies, draft responses, and flag the deals that need you."
     },
     {
-      "title": "Proposals & quotes",
-      "description": "Assemble tailored proposals and pricing from your templates and the account's context in minutes."
+      "title": "Proposals and quotes",
+      "description": "Assemble proposals from your templates and account context."
     }
-  ],
-  "examplePrompts": [
-    "Research this account and give me a one-page brief with a personalized opener for the VP of Eng.",
-    "Draft a 4-email follow-up sequence for the deal that went quiet after the demo.",
-    "Summarize this call recording into next steps and update the opportunity in HubSpot.",
-    "Triage my inbox and list the five replies most likely to be ready to buy.",
-    "Build a proposal for this prospect from our standard deck and their stated requirements."
   ],
   "faq": [
     {
       "q": "Which CRMs and tools does it connect to?",
-      "a": "Through Connections (powered by Composio) agents reach Salesforce, HubSpot, Gmail, Outlook, Slack, calendars, and hundreds more. Authenticate once and the agent can act, with tokens held in the Gateway's vault."
+      "a": "Agents reach Salesforce, HubSpot, Gmail, Outlook, Slack, and calendars through connected accounts. You sign in once through Composio; tokens stay with Composio, not the agent."
     },
     {
-      "q": "Will outreach sound generic?",
-      "a": "No. Agents research each account and write in your voice from real signals. You review and send, so you stay in control of every message that goes out."
+      "q": "How do I keep outreach on-brand?",
+      "a": "Agents draft from each account's research and the examples you give them. You review and send, so every message that goes out is yours."
     },
     {
       "q": "Can I control what an agent is allowed to do?",
-      "a": "Yes. You allowlist tools per agent and the Gateway governs every action with budgets and a full audit trail, so an agent only does what you permit."
+      "a": "Yes. Choose which connected tools an agent may use, and require approval before it sends. Run history shows what ran; not every external action is logged."
     }
-  ],
-  "ctaTitle": "Spend your day selling, not typing.",
-  "ctaSubtitle": "Let agents handle the research and admin while you close, all wired into the stack you already use.",
-  "ctaNote": "CRM connected · In your voice · Gateway-governed"
+  ]
 }

@@ -7,19 +7,22 @@
 // directive. That is why a top-level `return` is correct here, and why
 // plugins-store/*/*/hooks is excluded from Biome — a module parser rejects it.
 
-const rev = ctx.transcript.slice().reverse();
+const messages = Array.isArray(ctx.transcript) ? ctx.transcript : [];
+const rev = messages.slice().reverse();
 const lastUser = rev.find((m) => m.role === "user");
-const cmd = lastUser ? (lastUser.content || "").trim() : "";
+const cmd = lastUser && parsePrimitiveText(lastUser.content) !== undefined
+	? lastUser.content.trim()
+	: "";
 const onDemand = cmd === "/advisor" || cmd.indexOf("/advisor ") === 0;
 const toggled = !!(ctx.flags && ctx.flags["@ryu/advisor"]);
 if (!onDemand && !toggled) {
 	return { kind: "none" };
 }
-if (!ctx.transcript || ctx.transcript.length === 0) {
+if (messages.length === 0) {
 	return { kind: "none" };
 }
-const transcript = ctx.transcript
-	.map((m) => m.role + ": " + m.content)
+const transcript = messages
+	.map((m) => m.role + ": " + String(m.content ?? ""))
 	.join("\n\n");
 const focus = onDemand && cmd.length > 8 ? cmd.slice(9).trim() : "";
 const system =
@@ -47,3 +50,14 @@ if (onDemand) {
 	};
 }
 return { kind: "note", text: "Advisor: " + advice.trim() };
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}

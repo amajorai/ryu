@@ -1,10 +1,13 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { SubscriptionUsageDashboard } from "../../src/components/usage/SubscriptionUsageDashboard.tsx";
 import { IsActiveTabProvider } from "../../src/contexts/TabsContext.tsx";
+import { useActiveNode } from "../../src/hooks/useActiveNode.ts";
+import { useSubscriptionCostUsage } from "../../src/hooks/useSubscriptionCostUsage.ts";
 import { useSubscriptionUsage } from "../../src/hooks/useSubscriptionUsage.ts";
+import { toTarget } from "../../src/lib/api/client.ts";
 import type { PiCatalog } from "../../src/lib/api/pi-config.ts";
 import { useNodeStore } from "../../src/store/useNodeStore.ts";
 import "../../src/index.css";
@@ -18,12 +21,20 @@ useNodeStore.setState({
 const client = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
-const catalog = {
+const catalog: PiCatalog = {
+	apiTypes: [],
+	thinkingLevels: [],
 	providers: [
 		{
 			id: "codex",
 			label: "ChatGPT",
 			authKind: "subscription",
+			api: "",
+			authEnv: "",
+			configured: true,
+			custom: false,
+			routing: "direct",
+			suggestedModels: [],
 			managed: false,
 			accounts: [
 				{
@@ -32,19 +43,60 @@ const catalog = {
 					kind: "oauth",
 					active: true,
 				},
+				{
+					accountId: "work",
+					label: "Work",
+					kind: "oauth",
+					active: true,
+				},
+			],
+		},
+		{
+			id: "claude",
+			label: "Claude",
+			authKind: "subscription",
+			api: "",
+			authEnv: "",
+			configured: true,
+			custom: false,
+			routing: "direct",
+			suggestedModels: [],
+			managed: false,
+			accounts: [
+				{
+					accountId: "team",
+					label: "Work",
+					kind: "oauth",
+					active: true,
+				},
 			],
 		},
 	],
-} as unknown as PiCatalog;
+};
 
 function Usage() {
 	const usage = useSubscriptionUsage(catalog);
+	const node = useActiveNode();
+	const target = useMemo(
+		() => toTarget(node),
+		[node.token, node.url, node.userJwt]
+	);
+	const costUsage = useSubscriptionCostUsage(target);
 	return (
 		<SubscriptionUsageDashboard
 			accounts={usage.accounts}
 			catalogLoading={false}
-			onRefresh={usage.refresh}
-			refreshing={usage.refreshing}
+			costTrackingError={costUsage.trackingError}
+			costTrackingUpdating={costUsage.trackingUpdating}
+			costUsage={costUsage.usage}
+			costUsageError={costUsage.error}
+			costUsageLoading={costUsage.loading}
+			onRefresh={() => {
+				usage.refresh();
+				costUsage.refresh();
+			}}
+			onSetCostTracking={costUsage.setTrackingEnabled}
+			refreshing={usage.refreshing || costUsage.refreshing}
 		/>
 	);
 }

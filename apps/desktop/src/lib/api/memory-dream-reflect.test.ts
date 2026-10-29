@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
 	acceptMemoryProposal,
+	enableUsageReview,
 	getDreamReview,
 	getMemoryGraph,
 	getMemorySettings,
 	getReflectDashboard,
+	getReflectSettings,
+	isUsageReviewDisabled,
 	rejectMemoryProposal,
 	runDreamReview,
 	setMemorySettings,
@@ -13,7 +16,7 @@ import {
 const target = { token: null, url: "http://node.test" };
 const nativeFetch = globalThis.fetch;
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse<TFixture>(body: TFixture): Response {
 	return new Response(JSON.stringify(body), {
 		headers: { "content-type": "application/json" },
 		status: 200,
@@ -198,5 +201,56 @@ describe("Dream and Reflect memory clients", () => {
 			"Active days",
 		]);
 		expect(dashboard.topics[0].name).toBe("Planning");
+	});
+
+	it("recognizes the usage-review-disabled refusal and can turn review on", async () => {
+		const calls: Array<{ body: string; method: string; url: string }> = [];
+		globalThis.fetch = Object.assign(
+			async (
+				input: Parameters<typeof fetch>[0],
+				init?: Parameters<typeof fetch>[1]
+			) => {
+				const url = String(input);
+				calls.push({
+					body: String(init?.body ?? ""),
+					method: init?.method ?? "GET",
+					url,
+				});
+				if (url.includes("/api/memory/reflect?")) {
+					return new Response(
+						JSON.stringify({
+							error: "usage_review_disabled",
+							message:
+								"Enable usage review in /api/usage-review/settings first",
+						}),
+						{ status: 403 }
+					);
+				}
+				return jsonResponse({ enabled: true, excluded_conversation_ids: [] });
+			},
+			{ preconnect: nativeFetch.preconnect }
+		);
+
+		const refusal = await getReflectDashboard(target, "7d").catch(
+			(error: unknown) => error
+		);
+		expect(isUsageReviewDisabled(refusal)).toBe(true);
+		expect(isUsageReviewDisabled(new Error("offline"))).toBe(false);
+
+		expect(await enableUsageReview(target)).toBe(true);
+		const enable = calls.at(-1);
+		expect(enable?.url).toBe("http://node.test/api/usage-review/settings");
+		expect(enable?.method).toBe("PUT");
+		expect(JSON.parse(enable?.body ?? "{}")).toEqual({ enabled: true });
+	});
+
+	it("defaults break nudges off like Core", async () => {
+		globalThis.fetch = Object.assign(
+			async () => jsonResponse({ settings: {} }),
+			{ preconnect: nativeFetch.preconnect }
+		);
+
+		const settings = await getReflectSettings(target);
+		expect(settings.breakNudges).toBe(false);
 	});
 });

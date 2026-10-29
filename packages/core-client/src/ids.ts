@@ -1,6 +1,6 @@
 /** UUIDs for stored resources, including sandboxed WebViews without randomUUID. */
 export function createResourceId(): string {
-	if (typeof globalThis.crypto?.randomUUID === "function") {
+	if (globalThis.crypto?.randomUUID) {
 		return globalThis.crypto.randomUUID();
 	}
 	if (!globalThis.crypto?.getRandomValues) {

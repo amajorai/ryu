@@ -1,3 +1,4 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/store/useConversationFlagsStore.ts
 //
 // Pin / archive / unread flags for conversations, in ONE module-level store.
@@ -22,16 +23,22 @@ import {
 	setConversationPinned,
 } from "@/src/lib/api/conversation-flags.ts";
 import { stopConversation } from "@/src/lib/chat-stop-registry.ts";
+import {
+	parseStoredConversationCounts,
+	parseStoredConversationIds,
+} from "./conversation-flags-storage.ts";
 import { useNodeStore } from "./useNodeStore.ts";
 
 const UNREAD_KEY = "ryu:unread-convs";
+const UNREAD_MESSAGE_COUNTS_KEY = "ryu:unread-message-counts";
+const LAST_MESSAGE_COUNTS_KEY = "ryu:last-message-counts";
 const PINNED_KEY = "ryu:pinned-convs";
 const ARCHIVED_KEY = "ryu:archived-convs";
 
 function loadIdSet(key: string): Set<string> {
 	try {
 		const stored = localStorage.getItem(key);
-		return stored ? new Set(JSON.parse(stored)) : new Set();
+		return parseStoredConversationIds(stored);
 	} catch {
 		return new Set();
 	}
@@ -45,22 +52,48 @@ function saveIdSet(key: string, ids: Set<string>) {
 	}
 }
 
+function loadMessageCountMap(key: string): Map<string, number> {
+	try {
+		return parseStoredConversationCounts(localStorage.getItem(key));
+	} catch {
+		return new Map();
+	}
+}
+
+function saveMessageCountMap(key: string, counts: Map<string, number>) {
+	try {
+		localStorage.setItem(key, JSON.stringify([...counts]));
+	} catch {
+		// best-effort
+	}
+}
+
+function isValidMessageCount(value: number | undefined): value is number {
+	return isNativeNumber(value) && Number.isSafeInteger(value) && value >= 0;
+}
+
 /** The active node's API target, resolved at call time (never captured). */
 function activeTarget() {
 	return toTarget(useNodeStore.getState().getActiveNode());
 }
 
 interface ConversationFlagsState {
-	addUnread: (ids: string[]) => void;
 	archivedIds: Set<string>;
+	lastObservedMessageCounts: Map<string, number>;
 	markRead: (id: string) => void;
 	markUnread: (id: string) => void;
 	/** Union server-backed pin/archive state into the local sets (never removes). */
 	mergeServerFlags: (input: { archived: string[]; pinned: string[] }) => void;
+	/** Track per-conversation message totals and unread deltas from the last read. */
+	observeMessageCounts: (
+		conversations: readonly { id: string; messageCount?: number }[],
+		activeConversationId: string | null
+	) => void;
 	pinnedIds: Set<string>;
 	toggleArchive: (id: string) => void;
 	togglePin: (id: string) => void;
 	unreadIds: Set<string>;
+	unreadMessageCounts: Map<string, number>;
 }
 
 /** Union `ids` into the persisted set at `key`, returning the same set if unchanged. */
@@ -79,8 +112,10 @@ function unionInto(prev: Set<string>, key: string, ids: string[]): Set<string> {
 export const useConversationFlagsStore = create<ConversationFlagsState>(
 	(set, get) => ({
 		archivedIds: loadIdSet(ARCHIVED_KEY),
+		lastObservedMessageCounts: loadMessageCountMap(LAST_MESSAGE_COUNTS_KEY),
 		pinnedIds: loadIdSet(PINNED_KEY),
 		unreadIds: loadIdSet(UNREAD_KEY),
+		unreadMessageCounts: loadMessageCountMap(UNREAD_MESSAGE_COUNTS_KEY),
 
 		togglePin: (id) => {
 			const next = !get().pinnedIds.has(id);
@@ -117,13 +152,16 @@ export const useConversationFlagsStore = create<ConversationFlagsState>(
 
 		markRead: (id) =>
 			set((state) => {
-				if (!state.unreadIds.has(id)) {
+				if (!(state.unreadIds.has(id) || state.unreadMessageCounts.has(id))) {
 					return state;
 				}
 				const ids = new Set(state.unreadIds);
 				ids.delete(id);
+				const counts = new Map(state.unreadMessageCounts);
+				counts.delete(id);
 				saveIdSet(UNREAD_KEY, ids);
-				return { unreadIds: ids };
+				saveMessageCountMap(UNREAD_MESSAGE_COUNTS_KEY, counts);
+				return { unreadIds: ids, unreadMessageCounts: counts };
 			}),
 
 		markUnread: (id) =>
@@ -133,14 +171,88 @@ export const useConversationFlagsStore = create<ConversationFlagsState>(
 				}
 				const ids = new Set(state.unreadIds);
 				ids.add(id);
+				const counts = new Map(state.unreadMessageCounts);
+				counts.set(id, 1);
 				saveIdSet(UNREAD_KEY, ids);
-				return { unreadIds: ids };
+				saveMessageCountMap(UNREAD_MESSAGE_COUNTS_KEY, counts);
+				return { unreadIds: ids, unreadMessageCounts: counts };
 			}),
 
-		addUnread: (ids) =>
+		observeMessageCounts: (conversations, activeConversationId) =>
 			set((state) => {
-				const next = unionInto(state.unreadIds, UNREAD_KEY, ids);
-				return next === state.unreadIds ? state : { unreadIds: next };
+				let lastObservedMessageCounts: Map<string, number> | undefined;
+				let unreadIds: Set<string> | undefined;
+				let unreadMessageCounts: Map<string, number> | undefined;
+				const currentMessageCounts = () =>
+					lastObservedMessageCounts ?? state.lastObservedMessageCounts;
+				const currentUnreadIds = () => unreadIds ?? state.unreadIds;
+				const currentUnreadCounts = () =>
+					unreadMessageCounts ?? state.unreadMessageCounts;
+
+				for (const conversation of conversations) {
+					const { id, messageCount } = conversation;
+					if (!(id && isValidMessageCount(messageCount))) {
+						continue;
+					}
+
+					const previousCount = currentMessageCounts().get(id);
+					if (previousCount === undefined || previousCount !== messageCount) {
+						lastObservedMessageCounts ??= new Map(
+							state.lastObservedMessageCounts
+						);
+						lastObservedMessageCounts.set(id, messageCount);
+					}
+
+					if (id === activeConversationId) {
+						if (currentUnreadIds().has(id) || currentUnreadCounts().has(id)) {
+							unreadIds ??= new Set(state.unreadIds);
+							unreadMessageCounts ??= new Map(state.unreadMessageCounts);
+							unreadIds.delete(id);
+							unreadMessageCounts.delete(id);
+						}
+						continue;
+					}
+
+					if (
+						previousCount !== undefined &&
+						messageCount > previousCount &&
+						id !== activeConversationId
+					) {
+						const wasUnread = currentUnreadIds().has(id);
+						unreadIds ??= new Set(state.unreadIds);
+						unreadIds.add(id);
+						unreadMessageCounts ??= new Map(state.unreadMessageCounts);
+						const previousUnreadCount = wasUnread
+							? (currentUnreadCounts().get(id) ?? 1)
+							: 0;
+						unreadMessageCounts.set(
+							id,
+							previousUnreadCount + (messageCount - previousCount)
+						);
+					}
+				}
+
+				if (!(lastObservedMessageCounts || unreadIds || unreadMessageCounts)) {
+					return state;
+				}
+				if (lastObservedMessageCounts) {
+					saveMessageCountMap(
+						LAST_MESSAGE_COUNTS_KEY,
+						lastObservedMessageCounts
+					);
+				}
+				if (unreadIds) {
+					saveIdSet(UNREAD_KEY, unreadIds);
+				}
+				if (unreadMessageCounts) {
+					saveMessageCountMap(UNREAD_MESSAGE_COUNTS_KEY, unreadMessageCounts);
+				}
+				return {
+					lastObservedMessageCounts:
+						lastObservedMessageCounts ?? state.lastObservedMessageCounts,
+					unreadIds: unreadIds ?? state.unreadIds,
+					unreadMessageCounts: unreadMessageCounts ?? state.unreadMessageCounts,
+				};
 			}),
 
 		mergeServerFlags: ({ pinned, archived }) =>

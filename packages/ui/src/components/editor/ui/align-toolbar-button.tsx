@@ -14,6 +14,7 @@ import {
 	AlignJustifyIcon,
 	AlignLeftIcon,
 	AlignRightIcon,
+	type LucideIcon,
 } from "lucide-react";
 import { useEditorPlugin, useSelectionFragmentProp } from "platejs/react";
 import { type ComponentProps, useState } from "react";
@@ -37,7 +38,7 @@ const items = [
 		icon: AlignJustifyIcon,
 		value: "justify",
 	},
-];
+] satisfies Array<{ icon: LucideIcon; value: Alignment }>;
 
 export function AlignToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 	const { editor, tf } = useEditorPlugin(TextAlignPlugin);
@@ -62,7 +63,11 @@ export function AlignToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 			<DropdownMenuContent align="start" className="min-w-0">
 				<DropdownMenuRadioGroup
 					onValueChange={(value) => {
-						tf.textAlign.setNodes(value as Alignment);
+						const item = items.find((item) => item.value === value);
+						if (!item) {
+							return;
+						}
+						tf.textAlign.setNodes(item.value);
 						editor.tf.focus();
 					}}
 					value={value}

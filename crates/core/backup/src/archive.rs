@@ -4,7 +4,7 @@
 use std::{
     collections::HashSet,
     fs::File,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Component, Path},
     time::{Duration, Instant},
 };
@@ -14,7 +14,7 @@ use rusqlite::{
     backup::{Backup, StepResult},
     Connection, OpenFlags,
 };
-use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
+use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 pub const MAX_ENTRIES: usize = 1_000_000;
 pub const MAX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
@@ -60,14 +60,41 @@ fn sqlite_snapshot(source: &Path, target: &Path) -> Result<()> {
 }
 
 /// `exclude` is supplied by the owning host; no satellite names live here.
+///
+/// Writes a plaintext zip at `output`. Hosts that hold credentials in the tree
+/// should prefer [`snapshot_tree_into`] with an anonymous temporary file and a
+/// private scratch directory, so no named plaintext copy outlives the process.
 pub fn snapshot_tree(root: &Path, output: &Path, exclude: impl Fn(&Path) -> bool) -> Result<u64> {
-    let root = root.canonicalize()?;
+    let canonical = root.canonicalize()?;
     ensure!(
-        !output.starts_with(&root),
+        !output.starts_with(&canonical),
         "Backup output must be outside the source tree"
     );
-    let temporary = tempfile::tempdir()?;
+    let scratch = tempfile::tempdir()?;
     let mut zip = ZipWriter::new(File::create(output)?);
+    let total = snapshot_tree_into(root, &mut zip, scratch.path(), exclude)?;
+    zip.finish()?.sync_all()?;
+    Ok(total)
+}
+
+/// Zip `root` into an open writer (for example an anonymous `tempfile::tempfile_in`
+/// file, which has no name and is reclaimed by the OS even if the process dies).
+/// SQLite databases are first copied with the online backup API into a private
+/// (`0700`) directory created inside `scratch`; each copy is deleted as soon as it
+/// has been zipped and the directory is removed on return. The caller owns
+/// `finish()` so it can append further entries.
+pub fn snapshot_tree_into<W: Write + Seek>(
+    root: &Path,
+    zip: &mut ZipWriter<W>,
+    scratch: &Path,
+    exclude: impl Fn(&Path) -> bool,
+) -> Result<u64> {
+    let root = root.canonicalize()?;
+    private_directory(scratch)?;
+    let temporary = tempfile::Builder::new()
+        .prefix(".ryu-sqlite-")
+        .tempdir_in(scratch)?;
+    private_directory(temporary.path())?;
     let mut stack = vec![root.clone()];
     let mut count = 0usize;
     let mut names = HashSet::new();
@@ -130,12 +157,12 @@ pub fn snapshot_tree(root: &Path, output: &Path, exclude: impl Fn(&Path) -> bool
             ensure!(total <= MAX_ARCHIVE_BYTES, "Backup exceeds 1 TiB");
             zip.start_file(
                 name,
-                FileOptions::default()
+                SimpleFileOptions::default()
                     .compression_method(CompressionMethod::Deflated)
                     .unix_permissions(0o600)
                     .large_file(true),
             )?;
-            let actual = std::io::copy(&mut File::open(copied)?, &mut zip)?;
+            let actual = std::io::copy(&mut File::open(copied)?, zip)?;
             let after = std::fs::metadata(copied)?;
             ensure!(
                 actual == before.len()
@@ -148,7 +175,6 @@ pub fn snapshot_tree(root: &Path, output: &Path, exclude: impl Fn(&Path) -> bool
             }
         }
     }
-    zip.finish()?.sync_all()?;
     Ok(total)
 }
 
@@ -170,6 +196,12 @@ pub fn safe_path(name: &str) -> Result<&Path> {
 /// Always restore to a new directory. Extraction is private and disposable until
 /// every CRC, path and size has been checked; no partial result is published.
 pub fn restore_tree(archive: &Path, destination: &Path) -> Result<()> {
+    restore_tree_from(File::open(archive)?, destination)
+}
+
+/// [`restore_tree`] from an open archive, so a host can decrypt into an
+/// anonymous temporary file instead of a named plaintext `snapshot.zip`.
+pub fn restore_tree_from<R: Read + Seek>(archive: R, destination: &Path) -> Result<()> {
     ensure!(
         !destination.try_exists()?,
         "Recovery directory already exists"
@@ -185,13 +217,13 @@ pub fn restore_tree(archive: &Path, destination: &Path) -> Result<()> {
         .prefix(".ryu-restore-")
         .tempdir_in(parent)?;
     private_directory(staging.path())?;
-    let mut zip = ZipArchive::new(File::open(archive)?)?;
+    let mut zip = ZipArchive::new(archive)?;
     ensure!(zip.len() <= MAX_ENTRIES, "Too many backup entries");
     let mut seen = HashSet::new();
     let mut total = 0u64;
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index)?;
-        let name = entry.name().trim_end_matches('/').to_owned();
+        let name = entry.name()?.trim_end_matches('/').to_owned();
         let relative = safe_path(&name)?;
         ensure!(seen.insert(name.clone()), "Duplicate backup path");
         ensure!(
@@ -268,13 +300,48 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_into_an_anonymous_file_leaves_no_named_plaintext() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data");
+        private_directory(&root).unwrap();
+        let db = Connection::open(root.join("prefs.db")).unwrap();
+        db.execute_batch("CREATE TABLE p(v); INSERT INTO p VALUES ('sk-live-raw-credential');")
+            .unwrap();
+        drop(db);
+        let scratch = temp.path().join("scratch");
+        let mut zip = ZipWriter::new(tempfile::tempfile().unwrap());
+        snapshot_tree_into(&root, &mut zip, &scratch, |_| false).unwrap();
+        let mut archive = zip.finish().unwrap();
+        // The scratch dir is private and holds no leftover SQLite copy.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&scratch).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+        assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+        archive.rewind().unwrap();
+        let target = temp.path().join("recovery");
+        restore_tree_from(archive, &target).unwrap();
+        let restored = Connection::open(target.join("prefs.db")).unwrap();
+        assert_eq!(
+            restored
+                .query_row("SELECT v FROM p", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "sk-live-raw-credential"
+        );
+    }
+
+    #[test]
     fn unsafe_archive_never_publishes_partial_recovery() {
         let temp = tempfile::tempdir().unwrap();
         let archive = temp.path().join("bad.zip");
         let mut zip = ZipWriter::new(File::create(&archive).unwrap());
-        zip.start_file("ok.txt", FileOptions::default()).unwrap();
+        zip.start_file("ok.txt", SimpleFileOptions::default())
+            .unwrap();
         zip.write_all(b"safe").unwrap();
-        zip.start_file("../escape", FileOptions::default()).unwrap();
+        zip.start_file("../escape", SimpleFileOptions::default())
+            .unwrap();
         zip.write_all(b"unsafe").unwrap();
         zip.finish().unwrap();
         let target = temp.path().join("recovery");

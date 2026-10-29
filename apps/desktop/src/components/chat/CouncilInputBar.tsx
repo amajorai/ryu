@@ -34,6 +34,11 @@ import {
 	readDraggedChatReference,
 } from "@/src/lib/chat-reference-drag.ts";
 import {
+	appendToComposerValue,
+	CHAT_COMPOSER_INSERT_EVENT,
+	type ChatComposerInsertDetail,
+} from "@/src/lib/file-annotations.ts";
+import {
 	applyMention,
 	buildMentionGroups,
 	CHAT_MENTION_KINDS,
@@ -184,6 +189,8 @@ export function CouncilInputBar({
 			return;
 		}
 		const handleChatReferenceDrop = (event: Event) => {
+			// SAFETY: ChatPage publishes this named event only after readDraggedChatReference
+			// returns its full id/label owner; DOM EventListener erases that detail type.
 			insertChatReference((event as CustomEvent<DraggedChatReference>).detail);
 		};
 		window.addEventListener("ryu:chat-reference-drop", handleChatReferenceDrop);
@@ -193,6 +200,30 @@ export function CouncilInputBar({
 				handleChatReferenceDrop
 			);
 	}, [insertChatReference, isActiveTab]);
+	// Quoted context from the dock (file viewer notes) lands in the visible
+	// tab's draft for the user to finish, rather than being sent on their behalf.
+	useEffect(() => {
+		if (!(isActiveTab && onChange)) {
+			return;
+		}
+		const handleComposerInsert = (event: Event) => {
+			if (event.defaultPrevented) {
+				return;
+			}
+			// SAFETY: requestChatComposerInsert is this event's only publisher and
+			// always attaches a ChatComposerInsertDetail.
+			const { text } = (event as CustomEvent<ChatComposerInsertDetail>).detail;
+			event.preventDefault();
+			onChange(appendToComposerValue(value ?? "", text));
+			textareaWrapRef.current?.querySelector("textarea")?.focus();
+		};
+		window.addEventListener(CHAT_COMPOSER_INSERT_EVENT, handleComposerInsert);
+		return () =>
+			window.removeEventListener(
+				CHAT_COMPOSER_INSERT_EVENT,
+				handleComposerInsert
+			);
+	}, [isActiveTab, onChange, value]);
 
 	// Grouped "@" candidates for the current fragment (empty when the menu is
 	// closed). Recomputed per keystroke; buildMentionGroups is pure.
@@ -486,7 +517,7 @@ export function CouncilInputBar({
 		>
 			{chatWidgetTemplates.length > 0 && (
 				<div className="mx-auto mb-2 flex w-full max-w-[880px] flex-wrap items-center gap-1.5 px-3">
-					<span className="text-[11px] text-muted-foreground">
+					<span className="type-caption text-muted-foreground">
 						Available widgets
 					</span>
 					{chatWidgetTemplates.map((template) => {

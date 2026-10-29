@@ -1,9 +1,31 @@
+import { z } from "zod";
+import { jsonResponseDocumentSchema } from "./json-values.ts";
+
 // Route validation for capability-gated host navigation.
 
 export interface RouteClaim {
 	path: string;
 	title: string;
 }
+
+export const routeClaimSchema = z.object({
+	path: z.string(),
+	title: z.string(),
+});
+/** Every production host returns the registered path after its existing own-route gate. */
+const routeRegistrationFieldsSchema = z.object({ path: z.string() });
+export const routeRegistrationRecordSchema = z.custom<
+	z.output<typeof routeRegistrationFieldsSchema>
+>(
+	(value) =>
+		jsonResponseDocumentSchema.safeParse(value).success &&
+		routeRegistrationFieldsSchema.safeParse(value).success
+);
+export type RouteRegistrationRecord = z.output<
+	typeof routeRegistrationRecordSchema
+>;
+
+const shellRouteSchema = z.string();
 
 /**
  * The anti-phishing gate (invariant #6). A plugin may claim ONLY its own,
@@ -20,7 +42,7 @@ export function validatePluginRoute(
 	pluginId: string,
 	claim: RouteClaim
 ): boolean {
-	if (typeof claim.path !== "string" || typeof claim.title !== "string") {
+	if (!routeClaimSchema.safeParse(claim).success) {
 		return false;
 	}
 	// The one legal surface: this plugin's own exact route. `encodeURIComponent`
@@ -62,7 +84,8 @@ export const SHELL_SAFE_ROUTE_PREFIXES = [
  * because only THIS plugin's `ownPluginPath` is passed.
  */
 export function isShellSafeRoute(path: string, ownPluginPath: string): boolean {
-	if (typeof path !== "string" || !path.startsWith("/")) {
+	const parsed = shellRouteSchema.safeParse(path);
+	if (!(parsed.success && parsed.data.startsWith("/"))) {
 		return false;
 	}
 	if (path === ownPluginPath || path.startsWith(`${ownPluginPath}/`)) {

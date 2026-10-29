@@ -1,0 +1,936 @@
+{
+  "version": 1,
+  "description": "Shared browse cases (Treg parity B8): input entries and the exact /catalog/* views the control plane serves for them. packages/protocol/src/tool-catalog-browse.test.ts builds them; apps/core/src/treg_catalog.rs parses the expected views to prove Core's Integrations Store reads Ryu's catalog unchanged.",
+  "input": {
+    "entries": [
+      {
+        "capability": "web.search",
+        "docsUrl": "https://example.invalid/exa.search.auto",
+        "endpoint": "exa.search.auto",
+        "model": null,
+        "paidRoutingAllowed": true,
+        "platform": "web",
+        "price": {
+          "endpoint": "exa.search.auto",
+          "provider": "exa",
+          "source": "ryu",
+          "platform": "web",
+          "capability": "web.search",
+          "price": {
+            "type": "metered",
+            "unit": "USD",
+            "components": [
+              {
+                "rule": "per_call",
+                "microAmount": 7000000,
+                "per": 1000
+              },
+              {
+                "rule": "per_unit",
+                "meter": "results_over_10",
+                "microAmount": 1000000,
+                "per": 1000
+              }
+            ]
+          },
+          "provenance": "vendor_page",
+          "confidence": "high",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://exa.ai/pricing",
+          "note": "Base price covers up to 10 results; each result above 10 is metered as results_over_10."
+        },
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "curated",
+        "title": "Exa search (auto)",
+        "toolkit": null,
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "method": "docs_page",
+          "verifiedOn": "2026-10-21"
+        }
+      },
+      {
+        "capability": "web.search",
+        "docsUrl": "https://example.invalid/exa.search.fast",
+        "endpoint": "exa.search.fast",
+        "model": null,
+        "paidRoutingAllowed": false,
+        "platform": "web",
+        "price": {
+          "endpoint": "exa.search.fast",
+          "provider": "exa",
+          "source": "ryu",
+          "platform": "web",
+          "capability": "web.search",
+          "price": {
+            "type": "metered",
+            "unit": "USD",
+            "components": [
+              {
+                "rule": "per_call",
+                "microAmount": 7000000,
+                "per": 1000
+              },
+              {
+                "rule": "per_unit",
+                "meter": "results_over_10",
+                "microAmount": 1000000,
+                "per": 1000
+              }
+            ]
+          },
+          "provenance": "vendor_page",
+          "confidence": "high",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://exa.ai/pricing",
+          "note": "Base price covers up to 10 results; each result above 10 is metered as results_over_10."
+        },
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "curated",
+        "title": "Exa search (fast)",
+        "toolkit": null,
+        "verification": {
+          "state": "drifted",
+          "checkedOn": "2026-10-21",
+          "method": "docs_page",
+          "verifiedOn": "2026-10-20",
+          "reason": "Fast search is no longer listed"
+        }
+      },
+      {
+        "capability": "web.search",
+        "docsUrl": "https://example.invalid/tavily.search.basic",
+        "endpoint": "tavily.search.basic",
+        "model": null,
+        "paidRoutingAllowed": true,
+        "platform": "web",
+        "price": {
+          "endpoint": "tavily.search.basic",
+          "provider": "tavily",
+          "source": "ryu",
+          "platform": "web",
+          "capability": "web.search",
+          "price": {
+            "type": "metered",
+            "unit": "tavily_credit",
+            "components": [
+              {
+                "rule": "per_call",
+                "microAmount": 1000000,
+                "per": 1
+              }
+            ]
+          },
+          "provenance": "vendor_page",
+          "confidence": "high",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://docs.tavily.com/documentation/api-credits",
+          "note": "One API credit per request."
+        },
+        "provider": "tavily",
+        "source": "ryu",
+        "tier": "curated",
+        "title": "Tavily search (basic)",
+        "toolkit": null,
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "method": "docs_page",
+          "verifiedOn": "2026-10-21"
+        }
+      },
+      {
+        "capability": "web.search",
+        "docsUrl": "https://example.invalid/brave.web_search",
+        "endpoint": "brave.web_search",
+        "model": null,
+        "paidRoutingAllowed": true,
+        "platform": "web",
+        "price": {
+          "endpoint": "brave.web_search",
+          "provider": "brave",
+          "source": "ryu",
+          "platform": "web",
+          "capability": "web.search",
+          "price": {
+            "type": "metered",
+            "unit": "USD",
+            "components": [
+              {
+                "rule": "per_call",
+                "microAmount": 5000000,
+                "per": 1000
+              }
+            ]
+          },
+          "provenance": "vendor_page",
+          "confidence": "high",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://brave.com/search/api/",
+          "note": "Search plan."
+        },
+        "provider": "brave",
+        "source": "ryu",
+        "tier": "curated",
+        "title": "Brave web search",
+        "toolkit": null,
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "method": "docs_page",
+          "verifiedOn": "2026-10-21"
+        }
+      },
+      {
+        "capability": "web.extract",
+        "docsUrl": "https://example.invalid/exa.contents.text",
+        "endpoint": "exa.contents.text",
+        "model": null,
+        "paidRoutingAllowed": false,
+        "platform": "web",
+        "price": {
+          "endpoint": "exa.contents.text",
+          "provider": "exa",
+          "source": "ryu",
+          "platform": "web",
+          "capability": "web.extract",
+          "price": {
+            "type": "metered",
+            "unit": "USD",
+            "components": [
+              {
+                "rule": "per_unit",
+                "meter": "pages",
+                "microAmount": 1000000,
+                "per": 1000
+              }
+            ]
+          },
+          "provenance": "vendor_page",
+          "confidence": "high",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://exa.ai/pricing",
+          "note": "Text content only; each further content type (highlights, summary) is billed per page again."
+        },
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "curated",
+        "title": "Exa contents (text)",
+        "toolkit": null,
+        "verification": {
+          "state": "unverified",
+          "checkedOn": "2026-10-21"
+        }
+      },
+      {
+        "capability": "issue.get",
+        "docsUrl": "https://example.invalid/github.GITHUB_GET_AN_ISSUE",
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "model": null,
+        "paidRoutingAllowed": true,
+        "platform": "github",
+        "price": {
+          "endpoint": "github.GITHUB_GET_AN_ISSUE",
+          "provider": "github",
+          "source": "ryu",
+          "platform": "github",
+          "capability": "issue.get",
+          "price": {
+            "type": "free"
+          },
+          "provenance": "vendor_page",
+          "confidence": "medium",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+          "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+        },
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "title": "Get an issue",
+        "toolkit": "github",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "method": "docs_page",
+          "verifiedOn": "2026-10-21"
+        }
+      },
+      {
+        "capability": "issue.list",
+        "docsUrl": "https://example.invalid/github.GITHUB_LIST_REPOSITORY_ISSUES",
+        "endpoint": "github.GITHUB_LIST_REPOSITORY_ISSUES",
+        "model": null,
+        "paidRoutingAllowed": false,
+        "platform": "github",
+        "price": {
+          "endpoint": "github.GITHUB_LIST_REPOSITORY_ISSUES",
+          "provider": "github",
+          "source": "ryu",
+          "platform": "github",
+          "capability": "issue.list",
+          "price": {
+            "type": "free"
+          },
+          "provenance": "vendor_page",
+          "confidence": "medium",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+          "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+        },
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "title": "List repository issues",
+        "toolkit": "github",
+        "verification": {
+          "state": "retired",
+          "checkedOn": "2026-10-21",
+          "successor": "github.GITHUB_GET_AN_ISSUE"
+        }
+      }
+    ],
+    "generatedAt": "2026-10-21T12:00:00.000Z",
+    "usdRates": [
+      {
+        "unit": "tavily_credit",
+        "kind": "vendor_credit",
+        "microUsd": 8000,
+        "per": 1,
+        "provenance": "vendor_page",
+        "confidence": "high",
+        "checkedOn": "2026-10-20",
+        "sourceUrl": "https://docs.tavily.com/documentation/api-credits",
+        "note": "Pay-as-you-go price per credit; plan credits cost less and are not used for quoting."
+      }
+    ],
+    "version": 4,
+    "reliability": {
+      "brave.web_search": {
+        "failures": 1,
+        "lastFailure": "timeout",
+        "lastFailureAt": "2026-10-20T08:00:00.000Z",
+        "lastSuccessAt": "2026-10-21T08:00:00.000Z",
+        "p50Ms": 250,
+        "p95Ms": 1000,
+        "samples": 20,
+        "sources": {
+          "connect": 12,
+          "gateway": 8
+        },
+        "successRate": 0.95,
+        "sufficient": true,
+        "windowDays": 7
+      }
+    }
+  },
+  "expected": {
+    "platforms": {
+      "generated_at": "2026-10-21T12:00:00.000Z",
+      "platforms": [
+        {
+          "capabilities": 1,
+          "endpoints": 1,
+          "label": "GitHub",
+          "price_from": {
+            "basis": "one_call",
+            "checked_on": "2026-10-20",
+            "confidence": "medium",
+            "currency": "USD",
+            "free": true,
+            "metered_by": [],
+            "per": 1,
+            "provenance": "vendor_page",
+            "source": "ryu",
+            "source_url": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+            "unit": "call",
+            "usd": 0,
+            "value": 0
+          },
+          "providers": ["github"],
+          "slug": "github",
+          "source": "ryu",
+          "summary": "GitHub repositories, issues and accounts.",
+          "verified_endpoints": 1
+        },
+        {
+          "capabilities": 2,
+          "endpoints": 5,
+          "label": "Public web",
+          "price_from": {
+            "basis": "one_call",
+            "checked_on": "2026-10-20",
+            "confidence": "high",
+            "currency": "USD",
+            "free": false,
+            "metered_by": [],
+            "per": 1,
+            "provenance": "vendor_page",
+            "source": "ryu",
+            "source_url": "https://brave.com/search/api/",
+            "unit": "call",
+            "usd": 0.005,
+            "value": 0.005
+          },
+          "providers": ["brave", "exa", "tavily"],
+          "slug": "web",
+          "source": "ryu",
+          "summary": "Pages and search results on the open internet.",
+          "verified_endpoints": 3
+        }
+      ],
+      "source": "ryu",
+      "type": "ryu.tool_catalog.platforms",
+      "version": 4
+    },
+    "platformWeb": {
+      "capabilities": 2,
+      "endpoints": 5,
+      "label": "Public web",
+      "price_from": {
+        "basis": "one_call",
+        "checked_on": "2026-10-20",
+        "confidence": "high",
+        "currency": "USD",
+        "free": false,
+        "metered_by": [],
+        "per": 1,
+        "provenance": "vendor_page",
+        "source": "ryu",
+        "source_url": "https://brave.com/search/api/",
+        "unit": "call",
+        "usd": 0.005,
+        "value": 0.005
+      },
+      "providers": ["brave", "exa", "tavily"],
+      "slug": "web",
+      "source": "ryu",
+      "summary": "Pages and search results on the open internet.",
+      "verified_endpoints": 3,
+      "domains": [
+        {
+          "id": "web",
+          "label": "Web",
+          "rows": [
+            {
+              "capability": "web.extract",
+              "capability_name": "Extract a page",
+              "cheapest_endpoint": null,
+              "compared": true,
+              "comparison_key": "web/web.extract",
+              "endpoints": [
+                {
+                  "capability": "web/web.extract",
+                  "capability_id": "web.extract",
+                  "capability_name": "Extract a page",
+                  "cost": {
+                    "basis": "usage",
+                    "checked_on": "2026-10-20",
+                    "confidence": "high",
+                    "currency": "USD",
+                    "free": false,
+                    "metered_by": ["pages"],
+                    "per": 1,
+                    "provenance": "vendor_page",
+                    "source": "ryu",
+                    "source_url": "https://exa.ai/pricing",
+                    "unit": "call",
+                    "usd": null,
+                    "value": null
+                  },
+                  "docs_url": "https://example.invalid/exa.contents.text",
+                  "id": "exa.contents.text",
+                  "model": null,
+                  "name": "Exa contents (text)",
+                  "paid_routing_allowed": false,
+                  "platform": "web",
+                  "platform_blocked": null,
+                  "platform_eligible": true,
+                  "provider": "exa",
+                  "provider_display": "Exa",
+                  "reliability": null,
+                  "reviews": null,
+                  "source": "ryu",
+                  "summary": "Return the readable content of one web page.",
+                  "tier": "curated",
+                  "toolkit": null,
+                  "verification": {
+                    "checked_on": "2026-10-21",
+                    "method": null,
+                    "state": "unverified",
+                    "successor": null,
+                    "verified_on": null
+                  },
+                  "operation": null,
+                  "spec": null
+                }
+              ],
+              "model": null
+            },
+            {
+              "capability": "web.search",
+              "capability_name": "Search the web",
+              "cheapest_endpoint": "brave.web_search",
+              "compared": true,
+              "comparison_key": "web/web.search",
+              "endpoints": [
+                {
+                  "capability": "web/web.search",
+                  "capability_id": "web.search",
+                  "capability_name": "Search the web",
+                  "cost": {
+                    "basis": "one_call",
+                    "checked_on": "2026-10-20",
+                    "confidence": "high",
+                    "currency": "USD",
+                    "free": false,
+                    "metered_by": [],
+                    "per": 1,
+                    "provenance": "vendor_page",
+                    "source": "ryu",
+                    "source_url": "https://brave.com/search/api/",
+                    "unit": "call",
+                    "usd": 0.005,
+                    "value": 0.005
+                  },
+                  "docs_url": "https://example.invalid/brave.web_search",
+                  "id": "brave.web_search",
+                  "model": null,
+                  "name": "Brave web search",
+                  "paid_routing_allowed": true,
+                  "platform": "web",
+                  "platform_blocked": null,
+                  "platform_eligible": true,
+                  "provider": "brave",
+                  "provider_display": "Brave",
+                  "reliability": {
+                    "failures": 1,
+                    "lastFailure": "timeout",
+                    "lastFailureAt": "2026-10-20T08:00:00.000Z",
+                    "lastSuccessAt": "2026-10-21T08:00:00.000Z",
+                    "p50Ms": 250,
+                    "p95Ms": 1000,
+                    "samples": 20,
+                    "sources": {
+                      "connect": 12,
+                      "gateway": 8
+                    },
+                    "successRate": 0.95,
+                    "sufficient": true,
+                    "windowDays": 7
+                  },
+                  "reviews": null,
+                  "source": "ryu",
+                  "summary": "Return ranked web results (title, URL, snippet) for a query.",
+                  "tier": "curated",
+                  "toolkit": null,
+                  "verification": {
+                    "checked_on": "2026-10-21",
+                    "method": "docs_page",
+                    "state": "verified",
+                    "successor": null,
+                    "verified_on": "2026-10-21"
+                  },
+                  "operation": null,
+                  "spec": null
+                },
+                {
+                  "capability": "web/web.search",
+                  "capability_id": "web.search",
+                  "capability_name": "Search the web",
+                  "cost": {
+                    "basis": "base_call",
+                    "checked_on": "2026-10-20",
+                    "confidence": "high",
+                    "currency": "USD",
+                    "free": false,
+                    "metered_by": ["results_over_10"],
+                    "per": 1,
+                    "provenance": "vendor_page",
+                    "source": "ryu",
+                    "source_url": "https://exa.ai/pricing",
+                    "unit": "call",
+                    "usd": 0.007,
+                    "value": 0.007
+                  },
+                  "docs_url": "https://example.invalid/exa.search.auto",
+                  "id": "exa.search.auto",
+                  "model": null,
+                  "name": "Exa search (auto)",
+                  "paid_routing_allowed": true,
+                  "platform": "web",
+                  "platform_blocked": null,
+                  "platform_eligible": true,
+                  "provider": "exa",
+                  "provider_display": "Exa",
+                  "reliability": null,
+                  "reviews": null,
+                  "source": "ryu",
+                  "summary": "Return ranked web results (title, URL, snippet) for a query.",
+                  "tier": "curated",
+                  "toolkit": null,
+                  "verification": {
+                    "checked_on": "2026-10-21",
+                    "method": "docs_page",
+                    "state": "verified",
+                    "successor": null,
+                    "verified_on": "2026-10-21"
+                  },
+                  "operation": null,
+                  "spec": null
+                },
+                {
+                  "capability": "web/web.search",
+                  "capability_id": "web.search",
+                  "capability_name": "Search the web",
+                  "cost": {
+                    "basis": "one_call",
+                    "checked_on": "2026-10-20",
+                    "confidence": "high",
+                    "currency": "tavily_credit",
+                    "free": false,
+                    "metered_by": [],
+                    "per": 1,
+                    "provenance": "vendor_page",
+                    "source": "ryu",
+                    "source_url": "https://docs.tavily.com/documentation/api-credits",
+                    "unit": "call",
+                    "usd": 0.008,
+                    "value": 1
+                  },
+                  "docs_url": "https://example.invalid/tavily.search.basic",
+                  "id": "tavily.search.basic",
+                  "model": null,
+                  "name": "Tavily search (basic)",
+                  "paid_routing_allowed": true,
+                  "platform": "web",
+                  "platform_blocked": null,
+                  "platform_eligible": true,
+                  "provider": "tavily",
+                  "provider_display": "Tavily",
+                  "reliability": null,
+                  "reviews": null,
+                  "source": "ryu",
+                  "summary": "Return ranked web results (title, URL, snippet) for a query.",
+                  "tier": "curated",
+                  "toolkit": null,
+                  "verification": {
+                    "checked_on": "2026-10-21",
+                    "method": "docs_page",
+                    "state": "verified",
+                    "successor": null,
+                    "verified_on": "2026-10-21"
+                  },
+                  "operation": null,
+                  "spec": null
+                },
+                {
+                  "capability": "web/web.search",
+                  "capability_id": "web.search",
+                  "capability_name": "Search the web",
+                  "cost": {
+                    "basis": "base_call",
+                    "checked_on": "2026-10-20",
+                    "confidence": "high",
+                    "currency": "USD",
+                    "free": false,
+                    "metered_by": ["results_over_10"],
+                    "per": 1,
+                    "provenance": "vendor_page",
+                    "source": "ryu",
+                    "source_url": "https://exa.ai/pricing",
+                    "unit": "call",
+                    "usd": 0.007,
+                    "value": 0.007
+                  },
+                  "docs_url": "https://example.invalid/exa.search.fast",
+                  "id": "exa.search.fast",
+                  "model": null,
+                  "name": "Exa search (fast)",
+                  "paid_routing_allowed": false,
+                  "platform": "web",
+                  "platform_blocked": "Ryu's latest check found this endpoint no longer matches the vendor's published docs or prices; paid calls are paused until it is re-checked.",
+                  "platform_eligible": false,
+                  "provider": "exa",
+                  "provider_display": "Exa",
+                  "reliability": null,
+                  "reviews": null,
+                  "source": "ryu",
+                  "summary": "Return ranked web results (title, URL, snippet) for a query.",
+                  "tier": "curated",
+                  "toolkit": null,
+                  "verification": {
+                    "checked_on": "2026-10-21",
+                    "method": "docs_page",
+                    "state": "drifted",
+                    "successor": null,
+                    "verified_on": "2026-10-20"
+                  },
+                  "operation": null,
+                  "spec": null
+                }
+              ],
+              "model": null
+            }
+          ]
+        }
+      ],
+      "generated_at": "2026-10-21T12:00:00.000Z",
+      "type": "ryu.tool_catalog.platform",
+      "version": 4
+    },
+    "platformGithub": {
+      "capabilities": 1,
+      "endpoints": 1,
+      "label": "GitHub",
+      "price_from": {
+        "basis": "one_call",
+        "checked_on": "2026-10-20",
+        "confidence": "medium",
+        "currency": "USD",
+        "free": true,
+        "metered_by": [],
+        "per": 1,
+        "provenance": "vendor_page",
+        "source": "ryu",
+        "source_url": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+        "unit": "call",
+        "usd": 0,
+        "value": 0
+      },
+      "providers": ["github"],
+      "slug": "github",
+      "source": "ryu",
+      "summary": "GitHub repositories, issues and accounts.",
+      "verified_endpoints": 1,
+      "domains": [
+        {
+          "id": "issue",
+          "label": "Issue",
+          "rows": [
+            {
+              "capability": "issue.get",
+              "capability_name": "Read an issue",
+              "cheapest_endpoint": "github.GITHUB_GET_AN_ISSUE",
+              "compared": false,
+              "comparison_key": null,
+              "endpoints": [
+                {
+                  "capability": "github/issue.get",
+                  "capability_id": "issue.get",
+                  "capability_name": "Read an issue",
+                  "cost": {
+                    "basis": "one_call",
+                    "checked_on": "2026-10-20",
+                    "confidence": "medium",
+                    "currency": "USD",
+                    "free": true,
+                    "metered_by": [],
+                    "per": 1,
+                    "provenance": "vendor_page",
+                    "source": "ryu",
+                    "source_url": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+                    "unit": "call",
+                    "usd": 0,
+                    "value": 0
+                  },
+                  "docs_url": "https://example.invalid/github.GITHUB_GET_AN_ISSUE",
+                  "id": "github.GITHUB_GET_AN_ISSUE",
+                  "model": null,
+                  "name": "Get an issue",
+                  "paid_routing_allowed": true,
+                  "platform": "github",
+                  "platform_blocked": null,
+                  "platform_eligible": true,
+                  "provider": "github",
+                  "provider_display": "GitHub",
+                  "reliability": null,
+                  "reviews": null,
+                  "source": "ryu",
+                  "summary": "Return one issue by its number or id.",
+                  "tier": "curated",
+                  "toolkit": "github",
+                  "verification": {
+                    "checked_on": "2026-10-21",
+                    "method": "docs_page",
+                    "state": "verified",
+                    "successor": null,
+                    "verified_on": "2026-10-21"
+                  },
+                  "operation": null,
+                  "spec": null
+                }
+              ],
+              "model": null
+            }
+          ]
+        }
+      ],
+      "generated_at": "2026-10-21T12:00:00.000Z",
+      "type": "ryu.tool_catalog.platform",
+      "version": 4
+    },
+    "endpointRetired": {
+      "endpoint": {
+        "capability": "github/issue.list",
+        "capability_id": "issue.list",
+        "capability_name": "List a project's issues",
+        "cost": {
+          "basis": "one_call",
+          "checked_on": "2026-10-20",
+          "confidence": "medium",
+          "currency": "USD",
+          "free": true,
+          "metered_by": [],
+          "per": 1,
+          "provenance": "vendor_page",
+          "source": "ryu",
+          "source_url": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+          "unit": "call",
+          "usd": 0,
+          "value": 0
+        },
+        "docs_url": "https://example.invalid/github.GITHUB_LIST_REPOSITORY_ISSUES",
+        "id": "github.GITHUB_LIST_REPOSITORY_ISSUES",
+        "model": null,
+        "name": "List repository issues",
+        "paid_routing_allowed": false,
+        "platform": "github",
+        "platform_blocked": "Retired; use github.GITHUB_GET_AN_ISSUE.",
+        "platform_eligible": false,
+        "provider": "github",
+        "provider_display": "GitHub",
+        "reliability": null,
+        "reviews": null,
+        "source": "ryu",
+        "summary": "List the issues filed against one repository or project.",
+        "tier": "curated",
+        "toolkit": "github",
+        "verification": {
+          "checked_on": "2026-10-21",
+          "method": null,
+          "state": "retired",
+          "successor": "github.GITHUB_GET_AN_ISSUE",
+          "verified_on": null
+        },
+        "price": {
+          "endpoint": "github.GITHUB_LIST_REPOSITORY_ISSUES",
+          "provider": "github",
+          "source": "ryu",
+          "platform": "github",
+          "capability": "issue.list",
+          "price": {
+            "type": "free"
+          },
+          "provenance": "vendor_page",
+          "confidence": "medium",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+          "note": "GitHub REST, served natively by Connect. The vendor page states rate limits and no per-request charge."
+        },
+        "siblings": [],
+        "operation": null,
+        "spec": null
+      },
+      "generated_at": "2026-10-21T12:00:00.000Z",
+      "type": "ryu.tool_catalog.endpoint",
+      "version": 4
+    },
+    "endpointBrave": {
+      "endpoint": {
+        "capability": "web/web.search",
+        "capability_id": "web.search",
+        "capability_name": "Search the web",
+        "cost": {
+          "basis": "one_call",
+          "checked_on": "2026-10-20",
+          "confidence": "high",
+          "currency": "USD",
+          "free": false,
+          "metered_by": [],
+          "per": 1,
+          "provenance": "vendor_page",
+          "source": "ryu",
+          "source_url": "https://brave.com/search/api/",
+          "unit": "call",
+          "usd": 0.005,
+          "value": 0.005
+        },
+        "docs_url": "https://example.invalid/brave.web_search",
+        "id": "brave.web_search",
+        "model": null,
+        "name": "Brave web search",
+        "paid_routing_allowed": true,
+        "platform": "web",
+        "platform_blocked": null,
+        "platform_eligible": true,
+        "provider": "brave",
+        "provider_display": "Brave",
+        "reliability": {
+          "failures": 1,
+          "lastFailure": "timeout",
+          "lastFailureAt": "2026-10-20T08:00:00.000Z",
+          "lastSuccessAt": "2026-10-21T08:00:00.000Z",
+          "p50Ms": 250,
+          "p95Ms": 1000,
+          "samples": 20,
+          "sources": {
+            "connect": 12,
+            "gateway": 8
+          },
+          "successRate": 0.95,
+          "sufficient": true,
+          "windowDays": 7
+        },
+        "reviews": null,
+        "source": "ryu",
+        "summary": "Return ranked web results (title, URL, snippet) for a query.",
+        "tier": "curated",
+        "toolkit": null,
+        "verification": {
+          "checked_on": "2026-10-21",
+          "method": "docs_page",
+          "state": "verified",
+          "successor": null,
+          "verified_on": "2026-10-21"
+        },
+        "price": {
+          "endpoint": "brave.web_search",
+          "provider": "brave",
+          "source": "ryu",
+          "platform": "web",
+          "capability": "web.search",
+          "price": {
+            "type": "metered",
+            "unit": "USD",
+            "components": [
+              {
+                "rule": "per_call",
+                "microAmount": 5000000,
+                "per": 1000
+              }
+            ]
+          },
+          "provenance": "vendor_page",
+          "confidence": "high",
+          "checkedOn": "2026-10-20",
+          "sourceUrl": "https://brave.com/search/api/",
+          "note": "Search plan."
+        },
+        "siblings": [
+          "exa.search.auto",
+          "tavily.search.basic",
+          "exa.search.fast"
+        ],
+        "operation": null,
+        "spec": null
+      },
+      "generated_at": "2026-10-21T12:00:00.000Z",
+      "type": "ryu.tool_catalog.endpoint",
+      "version": 4
+    }
+  }
+}

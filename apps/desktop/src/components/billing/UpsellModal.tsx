@@ -19,7 +19,7 @@
 import { SparklesIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UpsellCard } from "@ryu/auth/lib/upsell";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -27,7 +27,7 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
+} from "@ryu/ui/components/dialog.tsx";
 import { useEffect, useRef } from "react";
 import { markUpsellConverted, markUpsellShown } from "@/src/lib/api/upsell.ts";
 

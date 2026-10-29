@@ -29,8 +29,20 @@ import {
 	Upload04Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import { type DragEvent, type ReactNode, useId, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type DragEvent,
+	type ReactNode,
+	useId,
+	useRef,
+	useState,
+} from "react";
+
+interface UploadProgressStyle extends CSSProperties {
+	"--upload-progress": string;
+}
 
 /** Where a queued file has got to. `pending` is queued-but-not-started. */
 export type FileUploadStatus = "error" | "pending" | "success" | "uploading";
@@ -46,6 +58,8 @@ export interface FileUploadItem {
 	note?: ReactNode;
 	/** `0`–`1`, or `null` for "in flight, fraction unknown" (indeterminate). */
 	progress?: number | null;
+	/** Whether an error can be retried unchanged. Omitted keeps Retry available. */
+	retryable?: boolean;
 	/** Bytes. Omitted renders no size. */
 	size?: number;
 	status: FileUploadStatus;
@@ -100,6 +114,7 @@ function FileUploadRow({
 	onRemove?: (item: FileUploadItem) => void;
 	onRetry?: (item: FileUploadItem) => void;
 }) {
+	const tl = useLiteralMessages();
 	const inFlight = item.status === "uploading";
 	// Base UI reads `null` as indeterminate, which is exactly the distinction
 	// `progress: null` carries — so it maps straight through rather than being
@@ -109,6 +124,9 @@ function FileUploadRow({
 			? null
 			: Math.round(item.progress * 100);
 
+	const progressStyle: UploadProgressStyle = {
+		"--upload-progress": `${value}%`,
+	};
 	return (
 		<li
 			className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2"
@@ -140,8 +158,8 @@ function FileUploadRow({
 								<span aria-hidden="true" className="t-progress-marquee" />
 							) : (
 								<div
-									className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none"
-									style={{ width: `${value}%` }}
+									className="h-full w-(--upload-progress) rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none"
+									style={progressStyle}
 								/>
 							)}
 						</Progress.Track>
@@ -154,9 +172,9 @@ function FileUploadRow({
 					<span className="text-muted-foreground text-xs">{item.note}</span>
 				) : null}
 			</div>
-			{item.status === "error" && onRetry ? (
+			{item.status === "error" && item.retryable !== false && onRetry ? (
 				<button
-					aria-label={`Retry ${item.name}`}
+					aria-label={tl("Retry {name}", { name: item.name })}
 					className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground motion-reduce:transition-none"
 					onClick={() => onRetry(item)}
 					type="button"
@@ -166,7 +184,7 @@ function FileUploadRow({
 			) : null}
 			{onRemove ? (
 				<button
-					aria-label={`Remove ${item.name}`}
+					aria-label={tl("Remove {name}", { name: item.name })}
 					className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground motion-reduce:transition-none"
 					// Removing mid-flight would leave the transfer running with nothing
 					// rendering it, so the row keeps its file until the owner settles it.
@@ -251,7 +269,12 @@ export function FileUpload({
 				// zone, which would flicker the highlight off and on across the icon and
 				// the two lines of copy. Only a leave that actually exits the zone counts.
 				onDragLeave={(e) => {
-					if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+					if (
+						!(
+							e.relatedTarget instanceof Node &&
+							e.currentTarget.contains(e.relatedTarget)
+						)
+					) {
 						setDragging(false);
 					}
 				}}

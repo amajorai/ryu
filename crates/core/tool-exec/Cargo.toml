@@ -1,19 +1,21 @@
 [package]
 name = "ryu-tool-exec"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "The programmatic-tool-calling (PTC) code-execution sandbox primitive for Ryu: Deno-subprocess backend with deny-by-default permissions, real process isolation, tool-call bridging back to the host, and exec budgets. Part of the Ryu monorepo (github.com/amajorai/ryu)."
+description = "The programmatic-tool-calling (PTC) code-execution sandbox primitive for Ryu: QuickJS (Javy) compiled to WebAssembly and run in-process by Wasmtime, with no filesystem/network/env access, tool-call bridging back to the host, and exec budgets. Part of the Ryu monorepo (github.com/amajorai/ryu)."
 repository = "https://github.com/amajorai/ryu"
 
-# `tool-exec-deno` is the default backend (Deno on PATH — no crate dep). The
-# secure-exec backend is off-by-default (Linux + bun). With NO feature the crate
-# still compiles: the types + `CodeExecutor::Unavailable` are always present, so
-# a lean Core build (and gate #3) links a sandbox-less but valid tool-exec.
+# `js-sandbox` (default) builds the JavaScript sandbox: the committed QuickJS
+# guest (`assets/ryu_js_guest.wasm`, built from `guest/` by
+# `tools/build-js-guest.sh`) run in-process by Wasmtime. The blob sits in
+# `assets/` because `guest/` is a nested package, which `cargo package` always
+# leaves out of the `.crate`. With NO feature the crate still compiles: the
+# types + `CodeExecutor::Unavailable` are always present, so a lean Core build
+# links a sandbox-less but valid tool-exec.
 [features]
-default = ["tool-exec-deno"]
-tool-exec-deno = []
-tool-exec-securexec = []
+default = ["js-sandbox"]
+js-sandbox = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:futures-util"]
 
 # Versions are matched to apps/core/Cargo.toml so there is no version skew when
 # Core links this crate in-process. This crate has ZERO dependency on apps/core.
@@ -21,12 +23,21 @@ tool-exec-securexec = []
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# The unified permission grammar (PermissionSet) this backend lowers to Deno
-# `--allow-*` flags. A leaf contract crate (serde/schemars/semver only) so there
+# The unified permission grammar (PermissionSet) the sandbox enforces. A leaf contract crate (serde/schemars/semver only) so there
 # is no dependency cycle, and it carries ZERO dependency on apps/core.
-ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.4.0" }
+ryu-kernel-contracts = { path = "../kernel-contracts", version = "0.5.0" }
 tokio = { version = "1", features = ["io-util", "process", "time", "rt", "macros", "sync"] }
 uuid = { version = "1", features = ["v4"] }
+# The JavaScript sandbox (feature `js-sandbox`). Same wasmtime major as
+# ryu-sandbox / apps/core so the workspace links one copy.
+wasmtime = { version = "48.0.7", optional = true }
+wasmtime-wasi = { version = "48.0.7", features = ["p1"], optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["std"], optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+# Pins the committed guest blob to `assets/ryu_js_guest.wasm.sha256` in a test.
+sha2 = "0.10"

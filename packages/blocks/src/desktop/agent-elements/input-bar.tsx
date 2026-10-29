@@ -4,6 +4,10 @@ import { PatchDiff } from "@pierre/diffs/react";
 import { Button } from "@ryu/ui/components/button";
 import { ComposerEditor } from "@ryu/ui/components/editor/composer-editor.tsx";
 import {
+	exportMentionMarkdown,
+	importMentionMarkdown,
+} from "@ryu/ui/components/editor/composer-mention-markdown.ts";
+import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
@@ -14,20 +18,24 @@ import {
 	PopoverTrigger,
 } from "@ryu/ui/components/popover";
 import { Wave } from "@ryu/ui/components/wave";
-import { SPRING_MORPH } from "@ryu/ui/lib/ease";
+import { useMediaQuery } from "@ryu/ui/hooks/use-mobile.ts";
+import { EASE_OUT, SPRING_MORPH } from "@ryu/ui/lib/ease";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
+import { safeMediaUrl } from "@ryu/ui/lib/safe-media-url.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ChatStatus } from "ai";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import type { ReactNode } from "react";
 import {
 	memo,
 	useCallback,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
+import styles from "./input-bar.module.css";
 
 /**
  * Bars in the full-width recording waveform that replaces the textarea while the
@@ -92,20 +100,35 @@ const DEFAULT_INPUT_CONFIG: InputConfig = {
 /** Stable fallback so the voice hook can be called unconditionally. */
 const noopTranscribe = async (): Promise<string> => "";
 
+/** Stable empty lists so attachment-derived memos don't churn every render. */
+const NO_ATTACHED_IMAGES: AttachedImage[] = [];
+const NO_ATTACHED_FILES: AttachedFile[] = [];
+
 import {
 	IconBookmark,
 	IconChevronDown,
 	IconChevronUp,
 	IconCircle,
 	IconCircleCheck,
+	IconFile,
 	IconGhost2,
 	IconLoader2,
 	IconMessageCircleQuestion,
+	IconPhoto,
 	IconWorld,
 	IconX,
 } from "@tabler/icons-react";
 import { useChatDisplayPrefs } from "./chat-display-prefs.tsx";
-import { resolveComposerKeyAction } from "./composer-send-shortcut.ts";
+import {
+	appendAttachmentMentions,
+	attachmentMentionItem,
+	labelComposerAttachments,
+	remapAttachmentMentions,
+} from "./composer-attachment-mentions.ts";
+import {
+	isImeComposingKeyEvent,
+	resolveComposerKeyAction,
+} from "./composer-send-shortcut.ts";
 import type { ContextUsage } from "./context-usage.tsx";
 import { FileTypeIcon } from "./file-type-icon.tsx";
 import { hasComposerInput } from "./input/composer-input.ts";
@@ -124,6 +147,7 @@ import type {
 } from "./input/goal-plus-button.tsx";
 import { useInputTyping } from "./input/input-typing.tsx";
 import { type SuggestionItem, Suggestions } from "./input/suggestions.tsx";
+import { useDraftSave } from "./input/use-draft-save.ts";
 import { findMentionAt } from "./mention-format.ts";
 import { MentionToken } from "./mention-token.tsx";
 import type {
@@ -133,10 +157,11 @@ import type {
 import { QuestionPrompt } from "./question/question-prompt.tsx";
 import { QueueBar, type QueueBarProps } from "./queue/queue-bar.tsx";
 import type { MentionItem } from "./types.ts";
+import { useComposerTokenDrag } from "./use-composer-token-drag.ts";
 import { useVoiceRecorder } from "./useVoiceRecorder.ts";
 
 const useSafeLayoutEffect =
-	typeof window === "undefined" ? useEffect : useLayoutEffect;
+	globalThis.window === undefined ? useEffect : useLayoutEffect;
 
 export interface AttachedImage {
 	filename: string;
@@ -154,8 +179,8 @@ export interface ComposerDraftItem {
 export interface ComposerDraftControls {
 	items: ComposerDraftItem[];
 	onDelete: (id: string) => void;
-	onInsert: (text: string) => void;
-	onSave: (text: string) => void;
+	onInsert?: (text: string) => void;
+	onSave: (text: string) => Promise<void> | void;
 }
 
 /** Explicit promotion action for a temporary chat that is currently in memory. */
@@ -300,6 +325,15 @@ export interface InputBarProps {
 
 	/** Content rendered on the left of the toolbar, next to the attachment button. */
 	leftActions?: React.ReactNode;
+	/**
+	 * A live call (realtime voice mode) that morphs into the composer while it is
+	 * active. The text field and trailing send/model cluster are replaced by the
+	 * call row, the "+" menu stays, and the draft is kept for when the call ends.
+	 * While a composer prompt (question or permission) is up, a compact call row
+	 * with `content` and `actions` stays under the prompt so the call can still
+	 * be muted, interrupted, or ended.
+	 */
+	liveCall?: ComposerLiveCall;
 	/** Resolved @ mentions used to paint the live composer preview. */
 	mentionItems?: MentionItem[];
 	onAnnotateImage?: (image: {
@@ -355,6 +389,12 @@ export interface InputBarProps {
 	 * the toolbar's `GoalPlusButton`.
 	 */
 	pluginControls?: PluginComposerControlRow[];
+	/**
+	 * The user's predicted next message (Composer Predictions). Rendered as
+	 * Tab-to-accept ghost text in the empty composer even without a prompt list,
+	 * and preferred over `placeholderSuggestion`. Never sent automatically.
+	 */
+	prediction?: string;
 
 	questionBar?: {
 		id: string;
@@ -390,6 +430,8 @@ export interface InputBarProps {
 		  };
 	/** Save the client-held temporary transcript as a normal conversation. */
 	temporaryChatSaveControls?: TemporaryChatSaveControls;
+	/** Accessible name for the plain textarea in compact host surfaces. */
+	textareaAriaLabel?: string;
 	/** Live todo list and file edits derived from the current user turn. */
 	turnProgress?: InputBarTurnProgress;
 
@@ -435,6 +477,21 @@ export interface InputBarProps {
 	workspaceBar?: React.ReactNode;
 }
 
+/** The call surface rendered inside the composer card by `InputBarProps.liveCall`. */
+export interface ComposerLiveCall {
+	/** Call controls that replace the trailing model selector and send button. */
+	actions: React.ReactNode;
+	/** Call identity, timer, and live caption, in place of the text field. */
+	content: React.ReactNode;
+	/**
+	 * Wraps the composer card while the call is live, e.g. in the voice glow
+	 * that lights the card's bottom edge. Receives the card element unchanged.
+	 */
+	frame?: (card: React.ReactNode) => React.ReactNode;
+	/** Optional panel above the call row inside the card (e.g. assistant cards). */
+	header?: React.ReactNode;
+}
+
 export interface InputBarTurnProgress {
 	deletions: number;
 	files: {
@@ -465,7 +522,9 @@ function TurnProgressFile({
 			type="button"
 		>
 			<FileTypeIcon className="size-4 shrink-0" path={file.path} />
-			<span className="min-w-0 flex-1 truncate">{file.path}</span>
+			<span className="min-w-0 flex-1 truncate" title={file.path}>
+				{file.path}
+			</span>
 			<span className="text-status-success tabular-nums">
 				+{formatNumber(file.insertions)}
 			</span>
@@ -482,7 +541,8 @@ function TurnProgressFile({
 			<HoverCardTrigger closeDelay={120} delay={160} render={row} />
 			<HoverCardContent
 				align="start"
-				className="w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border-border/70 bg-popover/95 p-2 shadow-xl backdrop-blur-xl"
+				appearance="composer-preview"
+				className="w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-hidden"
 				side="top"
 				sideOffset={8}
 			>
@@ -504,19 +564,20 @@ function TurnProgressFile({
 	);
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
 export const InputBar = memo(function InputBar({
 	onSend,
 	status,
 	onStop,
 	placeholder,
+	textareaAriaLabel,
 	placeholderSuggestion,
+	prediction,
 	className,
 	onAttach,
 	onAnnotateImage,
 	onSketch,
-	attachedImages = [],
-	attachedFiles = [],
+	attachedImages = NO_ATTACHED_IMAGES,
+	attachedFiles = NO_ATTACHED_FILES,
 	changeSummary,
 	turnProgress,
 	onRemoveImage,
@@ -542,6 +603,7 @@ export const InputBar = memo(function InputBar({
 	queueBar,
 	enableQueue,
 	leftActions,
+	liveCall,
 	rightActions,
 	draftControls,
 	seamless,
@@ -556,7 +618,7 @@ export const InputBar = memo(function InputBar({
 	workspaceBar,
 	composerHeader,
 	composerMenuGroups,
-	mentionItems,
+	mentionItems: hostMentionItems,
 	onComposerMenuSelect,
 	onHeightChange,
 	onTextareaKeyDown,
@@ -569,6 +631,10 @@ export const InputBar = memo(function InputBar({
 	);
 	const [questionBarIndex, setQuestionBarIndex] = useState(1);
 	const [suggestionIndex, setSuggestionIndex] = useState(-1);
+	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	const richEditorRef = useRef<HTMLDivElement>(null);
+	const { animationsEnabled, composerSendShortcut, markdownComposer } =
+		useChatDisplayPrefs();
 	const isControlled = controlledValue !== undefined;
 	const input = isControlled ? controlledValue : internalInput;
 	const setInput = useCallback(
@@ -581,8 +647,119 @@ export const InputBar = memo(function InputBar({
 		},
 		[isControlled, controlledOnChange]
 	);
-	const textareaRef = useRef<HTMLTextAreaElement>(null);
-	const richEditorRef = useRef<HTMLDivElement>(null);
+	// Staged attachments are mentionable too: `@image-1`, `@file-1`, … resolve
+	// to chips (with the image's own thumbnail) alongside the host's directory.
+	const attachmentLabels = useMemo(
+		() => labelComposerAttachments(attachedImages, attachedFiles),
+		[attachedImages, attachedFiles]
+	);
+	const mentionItems = useMemo((): MentionItem[] | undefined => {
+		if (attachmentLabels.length === 0) {
+			return hostMentionItems;
+		}
+		const attachmentItems = attachmentLabels.map((attachment) => {
+			const thumbnail = attachment.url ? safeMediaUrl(attachment.url) : null;
+			return {
+				...attachmentMentionItem(attachment),
+				icon:
+					attachment.kind === "image" ? (
+						<IconPhoto className="size-3.5" />
+					) : (
+						<IconFile className="size-3.5" />
+					),
+				visualIcon: thumbnail ? (
+					<img
+						alt=""
+						className="size-3.5 rounded-[3px] object-cover"
+						draggable={false}
+						height={14}
+						src={thumbnail}
+						width={14}
+					/>
+				) : undefined,
+			};
+		});
+		return [...attachmentItems, ...(hostMentionItems ?? [])];
+	}, [attachmentLabels, hostMentionItems]);
+	// Each newly staged attachment appends its token to the end of the draft;
+	// removing one drops its token and renumbers the rest so every token keeps
+	// pointing at the same file. Seeded with the mount-time list so a remount
+	// never re-appends tokens the user already deleted.
+	const inputRef = useRef(input);
+	inputRef.current = input;
+	const previousAttachmentLabelsRef = useRef(attachmentLabels);
+	useEffect(() => {
+		const previous = previousAttachmentLabelsRef.current;
+		if (previous === attachmentLabels) {
+			return;
+		}
+		previousAttachmentLabelsRef.current = attachmentLabels;
+		const current = inputRef.current;
+		const previousIds = new Set(previous.map((item) => item.id));
+		const next = appendAttachmentMentions(
+			remapAttachmentMentions(current, previous, attachmentLabels),
+			attachmentLabels.filter((item) => !previousIds.has(item.id))
+		);
+		if (next !== current) {
+			inputRef.current = next;
+			setInput(next);
+		}
+	}, [attachmentLabels, setInput]);
+	const draftSave = useDraftSave(input, setInput, draftControls?.onSave);
+	const handleComposerPaste = useCallback(
+		(event: React.ClipboardEvent<HTMLElement>) => {
+			onPaste?.(event);
+			if (event.defaultPrevented || markdownComposer) {
+				return;
+			}
+			const pastedText = event.clipboardData.getData("text/plain");
+			const normalizedText = importMentionMarkdown(
+				pastedText,
+				mentionItems ?? []
+			);
+			if (normalizedText === pastedText) {
+				return;
+			}
+			const textarea = event.currentTarget;
+			if (!(textarea instanceof HTMLTextAreaElement)) {
+				return;
+			}
+			event.preventDefault();
+			const start = textarea.selectionStart;
+			const end = textarea.selectionEnd;
+			const next = `${input.slice(0, start)}${normalizedText}${input.slice(end)}`;
+			setInput(next);
+			const caret = start + normalizedText.length;
+			requestAnimationFrame(() => {
+				if (textareaRef.current === textarea) {
+					textarea.focus();
+					textarea.setSelectionRange(caret, caret);
+				}
+			});
+		},
+		[input, markdownComposer, mentionItems, onPaste, setInput]
+	);
+	const handleComposerCopy = useCallback(
+		(event: React.ClipboardEvent<HTMLElement>) => {
+			if (markdownComposer) {
+				return;
+			}
+			const textarea = event.currentTarget;
+			if (!(textarea instanceof HTMLTextAreaElement)) {
+				return;
+			}
+			const selectedText = input.slice(
+				textarea.selectionStart,
+				textarea.selectionEnd
+			);
+			const markdown = exportMentionMarkdown(selectedText, mentionItems ?? []);
+			if (markdown !== selectedText) {
+				event.preventDefault();
+				event.clipboardData.setData("text/plain", markdown);
+			}
+		},
+		[input, markdownComposer, mentionItems]
+	);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const compactTextareaWidthRef = useRef<number | null>(null);
 	const [isCompactTextareaMultiline, setIsCompactTextareaMultiline] =
@@ -592,8 +769,6 @@ export const InputBar = memo(function InputBar({
 	);
 	const config = DEFAULT_INPUT_CONFIG;
 	const [isExpanded, setIsExpanded] = useState(false);
-	const { animationsEnabled, composerSendShortcut, markdownComposer } =
-		useChatDisplayPrefs();
 	const isCompactSingleRow = Boolean(
 		compact && !isCompactTextareaMultiline && !isExpanded && !markdownComposer
 	);
@@ -604,7 +779,10 @@ export const InputBar = memo(function InputBar({
 		}
 		textareaRef.current?.focus();
 	}, [markdownComposer]);
-	const reduceMotion = !animationsEnabled || (useReducedMotion() ?? false);
+	const prefersReducedMotion = useMediaQuery(
+		"(prefers-reduced-motion: reduce)"
+	);
+	const reduceMotion = !animationsEnabled || prefersReducedMotion;
 	const composerTransition = reduceMotion ? { duration: 0 } : SPRING_MORPH;
 
 	useEffect(() => {
@@ -617,7 +795,7 @@ export const InputBar = memo(function InputBar({
 		}
 		const report = () => onHeightChange(element.offsetHeight);
 		report();
-		if (typeof ResizeObserver === "undefined") {
+		if (globalThis.ResizeObserver === undefined) {
 			return;
 		}
 		const observer = new ResizeObserver(report);
@@ -743,42 +921,51 @@ export const InputBar = memo(function InputBar({
 
 	const showAttach = Boolean(onAttach);
 
-	// Auto-resize textarea
+	// Auto-resize textarea. `measureTextareaRef` holds the latest measurement and
+	// `measuredTextareaWidthRef` the width it measured at, so the pane observer
+	// below can repeat it without adding dependencies here.
+	const measureTextareaRef = useRef<() => void>(() => undefined);
+	const measuredTextareaWidthRef = useRef(0);
 	useSafeLayoutEffect(() => {
-		if (markdownComposer) {
-			setIsCompactTextareaMultiline(false);
-			return;
-		}
-		const el = textareaRef.current;
-		if (!el) {
-			return;
-		}
-		const maxHeight = isExpanded ? 360 : 120;
-		const minHeight = isExpanded ? 280 : 0;
-		el.style.height = "0";
-		const nextHeight = Math.min(
-			Math.max(el.scrollHeight, minHeight),
-			maxHeight
-		);
-		el.style.height = `${nextHeight}px`;
-		el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
-		el.style.overflowX = "hidden";
-
-		if (!compact) {
-			setIsCompactTextareaMultiline(false);
-			return;
-		}
-		const renderedWidth = el.getBoundingClientRect().width;
-		if (isCompactSingleRow && renderedWidth > 0) {
-			compactTextareaWidthRef.current = renderedWidth;
-		}
-		const compactWidth = compactTextareaWidthRef.current;
-		if (compactWidth && compactWidth > 0) {
-			const nextMultiline = textareaWrapsAtWidth(el, input, compactWidth);
-			setIsCompactTextareaMultiline((current) =>
-				current === nextMultiline ? current : nextMultiline
+		const measure = () => {
+			if (markdownComposer) {
+				setIsCompactTextareaMultiline(false);
+				return;
+			}
+			const el = textareaRef.current;
+			if (!el) {
+				return;
+			}
+			const maxHeight = isExpanded ? 360 : 120;
+			const minHeight = isExpanded ? 280 : 0;
+			el.style.height = "0";
+			const nextHeight = Math.min(
+				Math.max(el.scrollHeight, minHeight),
+				maxHeight
 			);
-		}
+			el.style.height = `${nextHeight}px`;
+			el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+			el.style.overflowX = "hidden";
+			const renderedWidth = el.getBoundingClientRect().width;
+			measuredTextareaWidthRef.current = renderedWidth;
+
+			if (!compact) {
+				setIsCompactTextareaMultiline(false);
+				return;
+			}
+			if (isCompactSingleRow && renderedWidth > 0) {
+				compactTextareaWidthRef.current = renderedWidth;
+			}
+			const compactWidth = compactTextareaWidthRef.current;
+			if (compactWidth && compactWidth > 0) {
+				const nextMultiline = textareaWrapsAtWidth(el, input, compactWidth);
+				setIsCompactTextareaMultiline((current) =>
+					current === nextMultiline ? current : nextMultiline
+				);
+			}
+		};
+		measureTextareaRef.current = measure;
+		measure();
 		// Re-measure on every value change so the textarea grows/shrinks with its
 		// content (one row by default, expanding up to the 120px cap, or the
 		// roomier expanded cap). Without
@@ -787,6 +974,41 @@ export const InputBar = memo(function InputBar({
 		// and the composer went back to a permanently one-line box — `input` is
 		// load-bearing, not a lint artefact.
 	}, [compact, input, isCompactSingleRow, isExpanded, markdownComposer]);
+
+	// The measurement above reads 0 whenever the composer is not rendered: a
+	// retained tab mounts through a detached portal container and is parked
+	// under `display: none` while another tab is focused. None of its
+	// dependencies change when the tab is revealed, so it would keep a 0px
+	// textarea. Watch the always-mounted composer root and repeat the
+	// measurement when the textarea's rendered width no longer matches the
+	// width it was measured at: hidden to shown, or a pane resize that re-wraps
+	// the draft. Height-only changes (including the ones this measurement
+	// causes) are ignored, and the work runs in the next frame so it never
+	// resizes an observed element inside the observer callback.
+	useEffect(() => {
+		const root = containerRef.current;
+		if (!root || globalThis.ResizeObserver === undefined) {
+			return;
+		}
+		let frame = 0;
+		const observer = new ResizeObserver(() => {
+			const textarea = textareaRef.current;
+			if (
+				!textarea ||
+				textarea.getBoundingClientRect().width ===
+					measuredTextareaWidthRef.current
+			) {
+				return;
+			}
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(() => measureTextareaRef.current());
+		});
+		observer.observe(root);
+		return () => {
+			cancelAnimationFrame(frame);
+			observer.disconnect();
+		};
+	}, []);
 
 	useEffect(() => {
 		if (!autoFocus) {
@@ -856,9 +1078,8 @@ export const InputBar = memo(function InputBar({
 		<div
 			aria-live={isDestructiveInfoBar ? undefined : "polite"}
 			className={cn(
-				"flex h-[34px] w-full items-center justify-between gap-3 px-3",
-				"overflow-hidden transition-[max-height,opacity] duration-150 ease-out",
-				isInfoBarOpen ? "max-h-[34px] opacity-100" : "max-h-0 opacity-0",
+				styles.infoBar,
+				isInfoBarOpen ? styles.infoBarOpen : styles.infoBarClosed,
 				infoBarPosition === "top" ? "rounded-t-2xl" : "rounded-b-2xl"
 			)}
 			data-position={infoBarPosition}
@@ -891,7 +1112,7 @@ export const InputBar = memo(function InputBar({
 			<div className="flex shrink-0 items-center gap-1">
 				{infoBarData.actions?.map((action) => (
 					<Button
-						className="h-6 px-2 text-xs"
+						appearance="composer-info-action"
 						key={action.label}
 						onClick={action.onClick}
 						size="sm"
@@ -903,7 +1124,7 @@ export const InputBar = memo(function InputBar({
 				))}
 				{infoBarData.action && (
 					<Button
-						className="h-6 px-2 text-xs"
+						appearance="composer-info-action"
 						onClick={infoBarData.action.onClick}
 						size="sm"
 						type="button"
@@ -913,13 +1134,13 @@ export const InputBar = memo(function InputBar({
 				)}
 				{infoBarData.onClose && (
 					<Button
-						aria-label="Close"
-						className={cn(
-							"size-6 shrink-0",
+						appearance={
 							isDestructiveInfoBar
-								? "text-status-destructive/70 hover:text-status-destructive"
-								: "text-muted-foreground/70 hover:text-foreground"
-						)}
+								? "composer-info-dismiss-destructive"
+								: "composer-info-dismiss"
+						}
+						aria-label="Close"
+						className="size-6 shrink-0"
 						onClick={handleInfoBarClose}
 						size="icon"
 						type="button"
@@ -956,7 +1177,7 @@ export const InputBar = memo(function InputBar({
 	// saved. Neutral styling (no bg/border of its own) so it shows the frame color
 	// like the other bars — the ghost icon + copy carry the signal.
 	const ghostBarNode = ghost ? (
-		<div className="flex h-[34px] min-w-0 items-center gap-2 rounded-t-2xl px-3 text-[12px] text-muted-foreground">
+		<div className="flex h-[34px] min-w-0 items-center gap-2 rounded-t-2xl px-3 text-muted-foreground text-xs">
 			<IconGhost2 className="size-3.5 shrink-0" />
 			<span className="shrink-0 font-medium text-foreground">
 				Temporary chat
@@ -966,12 +1187,12 @@ export const InputBar = memo(function InputBar({
 			</span>
 			{temporaryChatSaveControls ? (
 				<Button
+					appearance="composer-save-temporary"
 					aria-label={
 						temporaryChatSaveControls.saving
 							? "Saving temporary chat"
 							: "Save temporary chat"
 					}
-					className="h-7 shrink-0 gap-1.5 px-2 text-xs"
 					disabled={
 						temporaryChatSaveControls.disabled ||
 						temporaryChatSaveControls.saving
@@ -1049,7 +1270,7 @@ export const InputBar = memo(function InputBar({
 	const questionBarNode =
 		shouldShowQuestionBar && activeQuestion ? (
 			<div
-				className="w-full overflow-hidden rounded-[1.25rem] border border-border/70 bg-background/80"
+				className="w-full overflow-hidden rounded-(--radius-os-icon-launcher) border border-border/70 bg-background/80"
 				data-composer-prompt="question"
 			>
 				<div className="flex h-7 items-center justify-between border-border border-b px-3 text-muted-foreground text-xs">
@@ -1061,9 +1282,10 @@ export const InputBar = memo(function InputBar({
 						<div className="inline-flex items-center gap-1">
 							<Button
 								aria-label="Previous question"
-								className="size-5 rounded-sm"
+								className="size-5"
 								disabled={!canGoPrev}
 								onClick={handleQuestionPrevious}
+								radius="small"
 								size="icon"
 								type="button"
 								variant="ghost"
@@ -1075,9 +1297,10 @@ export const InputBar = memo(function InputBar({
 							</span>
 							<Button
 								aria-label="Next question"
-								className="size-5 rounded-sm"
+								className="size-5"
 								disabled={!canGoNext}
 								onClick={handleQuestionNext}
+								radius="small"
 								size="icon"
 								type="button"
 								variant="ghost"
@@ -1123,6 +1346,11 @@ export const InputBar = memo(function InputBar({
 			if (e.defaultPrevented) {
 				return;
 			}
+			// Enter/Tab/Arrow/Escape during an IME composition belong to the
+			// candidate window, not the composer (CJK input would send early).
+			if (isImeComposingKeyEvent(e.nativeEvent)) {
+				return;
+			}
 			if (markdownComposer) {
 				const target = e.target;
 				const richEditor = richEditorRef.current;
@@ -1138,13 +1366,14 @@ export const InputBar = memo(function InputBar({
 			const promptItems = Array.isArray(suggestions)
 				? suggestions
 				: (suggestions?.items ?? []);
+			const ghostSuggestion = prediction || placeholderSuggestion;
 			if (
 				!(input.trim() || isStreaming) &&
 				e.key === "Tab" &&
-				placeholderSuggestion
+				ghostSuggestion
 			) {
 				e.preventDefault();
-				setInput(placeholderSuggestion);
+				setInput(ghostSuggestion);
 				return;
 			}
 			if (
@@ -1195,6 +1424,8 @@ export const InputBar = memo(function InputBar({
 			isStreaming,
 			markdownComposer,
 			onTextareaKeyDown,
+			placeholderSuggestion,
+			prediction,
 			setInput,
 			suggestionIndex,
 			suggestions,
@@ -1206,11 +1437,16 @@ export const InputBar = memo(function InputBar({
 		: (suggestions?.items ?? []);
 	const showComposerSuggestions =
 		composerSuggestions.length > 0 && !hasInput && !isStreaming;
-	const showPlaceholderSuggestion = Boolean(
-		showComposerSuggestions && placeholderSuggestion && suggestionIndex < 0
-	);
+	const ghostSuggestion = prediction || placeholderSuggestion;
+	// A prediction stands on its own; a placeholder prompt only previews a list.
+	const showPlaceholderSuggestion =
+		!(hasInput || isStreaming) &&
+		suggestionIndex < 0 &&
+		(Boolean(prediction) ||
+			(showComposerSuggestions && Boolean(placeholderSuggestion)));
 	const showContextItems =
 		hasContextItems && config.attachmentPreviewStyle !== "hidden";
+	const safeTypingAnimationImage = safeMediaUrl(typingAnimation?.image);
 	const imageDisplayMode =
 		config.attachmentPreviewStyle === "thumbnail" ? "image-only" : "chip";
 	const effectiveChangeSummary = turnProgress
@@ -1230,7 +1466,8 @@ export const InputBar = memo(function InputBar({
 
 	const handleContainerClick = useCallback(
 		(e: React.MouseEvent) => {
-			const target = e.target as HTMLElement;
+			// SAFETY: This callback is the native motion.div click handler below; React DOM normalizes text-node click targets to their parent Element and retains SVG targets. Only Element.closest is used here, so no HTMLElement-specific fields are claimed.
+			const target = e.target as Element;
 			// Portaled menus/popovers (agent picker search, etc.) still bubble through
 			// the React tree into this container. Skip any interactive control so a
 			// click on the picker's search field cannot yank focus back to the prompt.
@@ -1269,9 +1506,63 @@ export const InputBar = memo(function InputBar({
 		},
 		[disabled, focusComposer, isStreaming, markdownComposer, setInput]
 	);
+	const composerPreviewRef = useRef<HTMLDivElement>(null);
+	const tokenDrag = useComposerTokenDrag({
+		enabled: !disabled,
+		input,
+		overlayRef: composerPreviewRef,
+		setInput,
+		textareaRef,
+	});
+	const draggingTokenStart = tokenDrag.draggingStart;
+	const tokenDropGap = tokenDrag.dropGap;
 	const renderComposerPreview = useCallback((): ReactNode[] => {
 		const parts: ReactNode[] = [];
 		let cursor = 0;
+		// While a chip is dragged, the text after its landing spot slides aside
+		// to open a chip-wide gap there (the textarea's own text is transparent,
+		// so only this overlay reflows).
+		let gapPending = tokenDropGap !== null;
+		const pushGapAt = (position: number) => {
+			if (!(gapPending && tokenDropGap?.index === position)) {
+				return;
+			}
+			gapPending = false;
+			parts.push(
+				<motion.span
+					animate={{ width: tokenDropGap.width }}
+					aria-hidden="true"
+					className="inline-block h-[1em] align-[-0.125em]"
+					data-slot="composer-token-drop-gap"
+					initial={{ width: 0 }}
+					key={`gap-${position}`}
+					transition={
+						reduceMotion ? { duration: 0 } : { duration: 0.18, ease: EASE_OUT }
+					}
+				/>
+			);
+		};
+		// Text runs and chips carry their draft offsets so a dragged chip can be
+		// hit-tested and dropped by measuring this overlay's layout.
+		const pushRun = (start: number, end: number) => {
+			if (end > start) {
+				parts.push(
+					<span data-composer-text-start={start} key={`text-${start}`}>
+						{input.slice(start, end)}
+					</span>
+				);
+			}
+		};
+		const pushText = (start: number, end: number) => {
+			const gapIndex = tokenDropGap?.index ?? -1;
+			if (gapPending && gapIndex >= start && gapIndex < end) {
+				pushRun(start, gapIndex);
+				pushGapAt(gapIndex);
+				pushRun(gapIndex, end);
+				return;
+			}
+			pushRun(start, end);
+		};
 		for (let index = 0; index < input.length; index += 1) {
 			const mention = findMentionAt(input, index, mentionItems);
 			const isUrl =
@@ -1289,13 +1580,24 @@ export const InputBar = memo(function InputBar({
 						}
 						return urlEnd;
 					})();
-			parts.push(input.slice(cursor, index));
+			pushText(cursor, index);
+			pushGapAt(index);
 			const token = input.slice(index, end);
 			parts.push(
 				mention?.item ? (
-					<MentionToken item={mention.item} key={`${index}-${token}`}>
-						{mention.item.label}
-					</MentionToken>
+					<span
+						className={cn(
+							"transition-opacity",
+							draggingTokenStart === index && "opacity-40"
+						)}
+						data-composer-token-end={end}
+						data-composer-token-start={index}
+						key={`${index}-${token}`}
+					>
+						<MentionToken item={mention.item}>
+							{mention.item.label}
+						</MentionToken>
+					</span>
 				) : (
 					<span className="font-medium text-primary" key={`${index}-${token}`}>
 						<IconWorld
@@ -1309,27 +1611,26 @@ export const InputBar = memo(function InputBar({
 			cursor = end;
 			index = end - 1;
 		}
-		if (cursor < input.length) {
-			parts.push(input.slice(cursor));
-		}
+		pushText(cursor, input.length);
+		pushGapAt(input.length);
 		return parts;
-	}, [input, mentionItems]);
+	}, [draggingTokenStart, input, mentionItems, reduceMotion, tokenDropGap]);
 
 	const suggestionItems = Array.isArray(suggestions)
 		? suggestions
 		: (suggestions?.items ?? []);
-	const suggestionsClassName = Array.isArray(suggestions)
+	const suggestionsContainerClassName = Array.isArray(suggestions)
 		? undefined
 		: suggestions?.className;
-	const suggestionItemClassName = Array.isArray(suggestions)
+	const suggestionButtonClassName = Array.isArray(suggestions)
 		? undefined
 		: suggestions?.itemClassName;
 	const handleRichChange = useCallback(
 		(next: string) => {
 			setSuggestionIndex(-1);
-			setInput(next);
+			setInput(importMentionMarkdown(next, mentionItems ?? []));
 		},
-		[setInput]
+		[mentionItems, setInput]
 	);
 	const renderRichMention = useCallback(
 		(label: string, item?: MentionItem) => (
@@ -1351,19 +1652,21 @@ export const InputBar = memo(function InputBar({
 	let inputContent: React.ReactNode;
 	if (isTyping) {
 		inputContent = (
-			<div className="w-full text-[14px] text-muted-foreground leading-[1.6]">
+			<div className="w-full text-muted-foreground text-sm leading-relaxed">
 				<span>{displayedText}</span>
-				<span className="ml-px inline-block h-[1em] w-[2px] animate-an-blink bg-foreground align-text-bottom" />
+				<span className={styles.caret} />
 			</div>
 		);
 	} else if (isRecording) {
 		inputContent = (
-			<Wave
-				aria-label="Recording"
-				barCount={RECORDING_WAVE_BARS}
-				className="h-6 w-full text-primary"
-				levels={voiceLevels}
-			/>
+			<span className="flex h-6 w-full text-primary">
+				<Wave
+					aria-label="Recording"
+					barCount={RECORDING_WAVE_BARS}
+					className="h-6 w-full"
+					levels={voiceLevels}
+				/>
+			</span>
 		);
 	} else if (markdownComposer) {
 		inputContent = (
@@ -1375,8 +1678,12 @@ export const InputBar = memo(function InputBar({
 					mentionItems={mentionItems}
 					mentionRenderer={renderRichMention}
 					onChange={handleRichChange}
-					onPaste={onPaste}
-					placeholder={effectivePlaceholder}
+					onPaste={handleComposerPaste}
+					placeholder={
+						showPlaceholderSuggestion && prediction
+							? prediction
+							: effectivePlaceholder
+					}
 				/>
 			</div>
 		);
@@ -1386,11 +1693,11 @@ export const InputBar = memo(function InputBar({
 				{showPlaceholderSuggestion && (
 					<div
 						aria-hidden="true"
-						className="pointer-events-none absolute inset-x-0 top-0 z-10 truncate text-[14px] text-muted-foreground/60 leading-[1.6]"
+						className="pointer-events-none absolute inset-x-0 top-0 z-10 truncate text-muted-foreground/60 text-sm leading-relaxed"
 						data-slot="composer-placeholder-suggestion"
 					>
-						{placeholderSuggestion}
-						<span className="ml-2 rounded-md border border-border/60 bg-background/50 px-1.5 py-0.5 text-[10px]">
+						{ghostSuggestion}
+						<span className="type-compact ml-2 rounded-md border border-border/60 bg-background/50 px-1.5 py-0.5">
 							Tab
 						</span>
 					</div>
@@ -1415,14 +1722,16 @@ export const InputBar = memo(function InputBar({
 				{input && (
 					<div
 						aria-hidden="true"
-						className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words text-[14px] text-foreground leading-[1.6]"
+						className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words text-foreground text-sm leading-relaxed"
+						ref={composerPreviewRef}
 					>
 						{renderComposerPreview()}
 					</div>
 				)}
 				<textarea
+					aria-label={textareaAriaLabel}
 					className={cn(
-						"relative w-full resize-none border-0 bg-transparent text-[14px] text-transparent leading-[1.6] caret-foreground outline-none placeholder:text-muted-foreground",
+						"relative w-full resize-none border-0 bg-transparent text-sm text-transparent leading-relaxed caret-foreground outline-none placeholder:text-muted-foreground",
 						"overflow-hidden",
 						showPlaceholderSuggestion && "placeholder:text-transparent",
 						disabled && "cursor-not-allowed opacity-50"
@@ -1432,8 +1741,10 @@ export const InputBar = memo(function InputBar({
 						setSuggestionIndex(-1);
 						setInput(e.target.value);
 					}}
+					onCopy={handleComposerCopy}
 					onKeyDown={handleKeyDown}
-					onPaste={onPaste}
+					onPaste={handleComposerPaste}
+					{...tokenDrag.handlers}
 					placeholder={effectivePlaceholder}
 					ref={textareaRef}
 					rows={1}
@@ -1447,7 +1758,14 @@ export const InputBar = memo(function InputBar({
 	// topology around that slot when a compact draft reaches a second visible line,
 	// allowing the shared layout transition to morph the card instead of replacing
 	// the textarea and controls with a new subtree.
-	const composerEditor = (
+	const composerEditor = liveCall ? (
+		<div
+			className="flex min-h-10 min-w-0 flex-1 items-center"
+			data-slot="composer-live-call"
+		>
+			{liveCall.content}
+		</div>
+	) : (
 		<div
 			className={cn(
 				"w-full",
@@ -1462,7 +1780,9 @@ export const InputBar = memo(function InputBar({
 		</div>
 	);
 	const shouldRenderToolbar = Boolean(
-		compact ||
+		liveCall ||
+			compact ||
+			draftControls ||
 			leftActions ||
 			rightActions ||
 			showAttach ||
@@ -1502,6 +1822,7 @@ export const InputBar = memo(function InputBar({
 			isStreaming={isStreaming}
 			isTranscribing={isTranscribing}
 			leftActions={leftActions}
+			liveCallActions={liveCall?.actions}
 			motionEnabled={!reduceMotion}
 			onAttach={onAttach}
 			onDirectorySelect={(item) => {
@@ -1544,7 +1865,7 @@ export const InputBar = memo(function InputBar({
 									</Button>
 								}
 							/>
-							<PopoverContent align="end" className="w-80 p-2">
+							<PopoverContent align="end" className="w-80" spacing="inset">
 								<div className="mb-1 px-2 py-1 font-medium text-sm">Drafts</div>
 								{draftControls.items.length === 0 ? (
 									<div className="px-2 py-3 text-muted-foreground text-sm">
@@ -1558,14 +1879,19 @@ export const InputBar = memo(function InputBar({
 										>
 											<button
 												className="min-w-0 flex-1 truncate text-left text-sm"
-												onClick={() => draftControls.onInsert(item.text)}
+												onClick={() => {
+													(draftControls.onInsert ?? setInput)(item.text);
+													focusComposer();
+												}}
+												title={item.preview}
 												type="button"
 											>
 												{item.preview}
 											</button>
 											<Button
+												appearance="composer-draft-delete"
 												aria-label={`Delete ${item.preview}`}
-												className="size-7 opacity-0 group-hover:opacity-100"
+												className="size-7"
 												onClick={() => draftControls.onDelete(item.id)}
 												size="icon"
 												variant="ghost"
@@ -1580,17 +1906,19 @@ export const InputBar = memo(function InputBar({
 					)}
 					{draftControls && (
 						<Button
-							aria-label="Save draft"
+							aria-busy={draftSave.saving}
+							aria-label={draftSave.saving ? "Saving draft" : "Save draft"}
 							className="size-8"
-							disabled={!hasInput}
-							onClick={() => {
-								draftControls.onSave(input);
-								setInput("");
-							}}
+							disabled={disabled || !input.trim() || draftSave.saving}
+							onClick={() => void draftSave.save()}
 							size="icon"
 							variant="ghost"
 						>
-							<IconBookmark className="size-4" />
+							{draftSave.saving ? (
+								<IconLoader2 className="size-4 animate-spin" />
+							) : (
+								<IconBookmark className="size-4" />
+							)}
 						</Button>
 					)}
 					{rightActions}
@@ -1603,15 +1931,40 @@ export const InputBar = memo(function InputBar({
 		/>
 	);
 
+	// A composer prompt (pending question, permission request) takes the input
+	// branch's place, and with it the toolbar that carries the call controls. The
+	// call must stay endable while the prompt is answerable, so the prompt branch
+	// keeps a compact call row (status, errors, Mute/Interrupt/End) under it.
+	const liveCallPromptRow =
+		liveCall && activeComposerPrompt ? (
+			<div
+				className="flex min-w-0 items-center gap-2 px-2 pt-1.5 pb-2"
+				data-slot="composer-live-call-row"
+			>
+				<div
+					className="flex min-h-10 min-w-0 flex-1 items-center"
+					data-slot="composer-live-call"
+				>
+					{liveCall.content}
+				</div>
+				<div
+					className="flex shrink-0 items-center gap-1"
+					data-slot="composer-live-call-actions"
+				>
+					{liveCall.actions}
+				</div>
+			</div>
+		) : null;
+
 	const renderComposerSuggestions = (expanded: boolean) =>
-		suggestionItems.length > 0 && !activeComposerPrompt ? (
+		suggestionItems.length > 0 && !activeComposerPrompt && !liveCall ? (
 			<Suggestions
-				className={cn(
+				containerClassName={cn(
 					expanded ? "mt-2 px-1" : "mt-4 px-3",
-					suggestionsClassName
+					suggestionsContainerClassName
 				)}
 				disabled={disabled || isStreaming}
-				itemClassName={suggestionItemClassName}
+				itemClassName={suggestionButtonClassName}
 				items={suggestionItems}
 				onSelect={handleSuggestionSelect}
 			/>
@@ -1620,13 +1973,13 @@ export const InputBar = memo(function InputBar({
 	const renderComposerSurface = (expanded: boolean) => (
 		<motion.div
 			className={cn(
-				"composer-container relative cursor-text",
+				styles.composer,
 				seamless
 					? "bg-transparent"
 					: "rounded-2xl border border-border/60 bg-card shadow-sm",
 				expanded && !seamless && "border-border/80 shadow-md",
 				isDragOver && "ring-2 ring-primary ring-inset",
-				ghost && "ring-1 ring-violet-500/70"
+				ghost && "ring-1 ring-primary/70"
 			)}
 			initial={false}
 			layout={!reduceMotion}
@@ -1636,7 +1989,7 @@ export const InputBar = memo(function InputBar({
 			{expanded && (
 				<Button
 					aria-label="Collapse composer"
-					className="absolute top-2.5 right-2.5 z-10 size-7 text-muted-foreground hover:text-foreground"
+					className="absolute top-2.5 right-2.5 z-10 size-7"
 					onClick={(event) => {
 						event.stopPropagation();
 						setIsExpanded(false);
@@ -1644,7 +1997,7 @@ export const InputBar = memo(function InputBar({
 					size="icon"
 					title="Collapse composer"
 					type="button"
-					variant="ghost"
+					variant="ghost-muted"
 				>
 					<IconX className="size-4" />
 				</Button>
@@ -1660,6 +2013,7 @@ export const InputBar = memo(function InputBar({
 						transition={{ duration: reduceMotion ? 0 : 0.2 }}
 					>
 						{activeComposerPrompt.content}
+						{liveCallPromptRow}
 					</motion.div>
 				) : (
 					<motion.div
@@ -1673,17 +2027,18 @@ export const InputBar = memo(function InputBar({
 					>
 						{/* Composer header (e.g. pending quote preview), above the chips. */}
 						{composerHeader}
+						{liveCall?.header}
 						{/* Context items (attached images/files) */}
 						<div
 							className={cn(
-								"grid grid-rows-[0fr] transition-[grid-template-rows] duration-200 ease-out",
-								showContextItems && "grid-rows-[1fr]"
+								styles.attachments,
+								showContextItems && styles.attachmentsOpen
 							)}
 						>
 							<div className="overflow-hidden">
 								{showContextItems && (
 									<div
-										className="flex flex-wrap items-center gap-[6px] px-2.5 pt-2.5 pb-0.5"
+										className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2.5 pb-0.5"
 										data-slot="composer-attachments"
 									>
 										{attachedImages.map((img) => (
@@ -1721,20 +2076,25 @@ export const InputBar = memo(function InputBar({
 						</div>
 
 						{/* Typing animation image */}
-						{isTyping && typingAnimation?.image && showImage && (
+						{isTyping && safeTypingAnimationImage && showImage && (
 							<div className="flex flex-wrap gap-2 px-3 pt-3">
 								<div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md">
-									{/* biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: dynamic remote logo URL */}
+									{}
 									<img
 										alt=""
 										className="h-full w-full object-cover"
-										src={typingAnimation.image}
+										src={safeTypingAnimationImage}
 									/>
 								</div>
 							</div>
 						)}
 
 						{shouldRenderToolbar ? composerToolbar : composerEditor}
+						{draftSave.error && (
+							<p className="px-3 pb-2 text-destructive text-sm" role="alert">
+								{draftSave.error}
+							</p>
+						)}
 					</motion.div>
 				)}
 			</AnimatePresence>
@@ -1746,14 +2106,17 @@ export const InputBar = memo(function InputBar({
 			<motion.div
 				className={cn(
 					"mx-auto w-full",
-					isExpanded ? "max-w-[980px]" : "max-w-[880px]"
+					// Expanded composition keeps the existing extra 100px of room.
+					isExpanded
+						? "max-w-[calc(var(--an-max-width,880px)_+_100px)]"
+						: "max-w-[var(--an-max-width,880px)]"
 				)}
 				transition={composerTransition}
 			>
 				{showTurnProgress ? (
 					<div
 						aria-live="polite"
-						className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-[13px]"
+						className="type-detail mb-2 flex flex-wrap items-center justify-center gap-1.5"
 					>
 						{turnProgress?.todos ? (
 							<Popover>
@@ -1767,16 +2130,18 @@ export const InputBar = memo(function InputBar({
 									}
 								>
 									<IconLoader2 className="size-3.5 text-primary" />
-									<span>
+									<span className="tabular-nums">
 										Step {turnProgress.todos.current} of{" "}
 										{turnProgress.todos.total}
 									</span>
 								</PopoverTrigger>
 								<PopoverContent
 									align="center"
-									className="max-h-80 w-[min(24rem,calc(100vw-2rem))] gap-0 overflow-y-auto rounded-2xl p-2"
+									className="max-h-80 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto"
+									corners="rounded"
 									side="top"
 									sideOffset={8}
+									spacing="menu"
 								>
 									{turnProgress.todos.items.map((item, index) => {
 										const TodoIcon =
@@ -1822,19 +2187,21 @@ export const InputBar = memo(function InputBar({
 										{formatNumber(effectiveChangeSummary.files)} file
 										{effectiveChangeSummary.files === 1 ? "" : "s"} changed
 									</span>
-									<span className="font-medium text-status-success">
+									<span className="font-medium text-status-success tabular-nums">
 										+{formatNumber(effectiveChangeSummary.insertions)}
 									</span>
-									<span className="font-medium text-status-destructive">
+									<span className="font-medium text-status-destructive tabular-nums">
 										-{formatNumber(effectiveChangeSummary.deletions)}
 									</span>
 								</PopoverTrigger>
 								{turnProgress?.files.length ? (
 									<PopoverContent
 										align="center"
-										className="max-h-80 w-[min(24rem,calc(100vw-2rem))] gap-0 overflow-y-auto rounded-2xl p-1.5"
+										className="max-h-80 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto"
+										corners="rounded"
 										side="top"
 										sideOffset={8}
+										spacing="dense-menu"
 									>
 										{turnProgress.files.map((file) => (
 											<TurnProgressFile file={file} key={file.path} />
@@ -1859,7 +2226,9 @@ export const InputBar = memo(function InputBar({
 					{ghostBarNode}
 					{infoBarPosition === "top" && infoBarNode}
 					{queueBarNode}
-					{renderComposerSurface(isExpanded)}
+					{liveCall?.frame
+						? liveCall.frame(renderComposerSurface(isExpanded))
+						: renderComposerSurface(isExpanded)}
 					{renderComposerSuggestions(isExpanded)}
 					{infoBarPosition === "bottom" && infoBarNode}
 					{/* Action bar (project ▸ branch ▸ worktree): full-width footer inside

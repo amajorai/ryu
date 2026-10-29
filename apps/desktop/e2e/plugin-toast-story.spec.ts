@@ -15,10 +15,10 @@ test("app/plugin toast bridge renders, updates, and dismisses a Sileo toast", as
 	await page.getByTestId("update-plugin-toast").click();
 	await expect(page.getByText("Plugin finished")).toBeVisible();
 	await expect(page.getByText("Plugin connected")).toHaveCount(0);
-
-	const proofPath =
-		"C:/Users/jiawei/.codex/visualizations/2026/08/22/01a029b3-4e42-76f1-a620-3303d8545b50/plugin-toast-proof.png";
-	await page.screenshot({ path: proofPath, fullPage: true });
+	await page.screenshot({
+		path: test.info().outputPath("plugin-toast-proof.png"),
+		fullPage: true,
+	});
 
 	await page.getByTestId("dismiss-plugin-toast").click();
 	await expect(page.getByText("Plugin finished")).toHaveCount(0);

@@ -75,7 +75,7 @@ async function pref(key) {
 	try {
 		const v = await host.getPreference({ key: key });
 		return v == null ? "" : String(v).trim();
-	} catch (e) {
+	} catch  {
 		return "";
 	}
 }

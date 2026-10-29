@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
 // apps/desktop/src/components/panels/CoworkContextPanel.tsx
 //
 // The "Cowork" context rail (Codex / Claude-cowork style). A read-only summary of
@@ -49,7 +51,7 @@ import {
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { FileTypeIcon } from "@ryu/blocks/desktop/agent-elements/file-type-icon.tsx";
-import { TextShimmer } from "@ryu/blocks/desktop/agent-elements/text-shimmer";
+import { TextShimmer } from "@ryu/blocks/desktop/agent-elements/text-shimmer.tsx";
 import {
 	formatToolDuration,
 	readToolTiming,
@@ -57,8 +59,18 @@ import {
 	useToolElapsed,
 } from "@ryu/blocks/desktop/agent-elements/tools/tool-timing.tsx";
 import { extractCitations } from "@ryu/blocks/desktop/agent-elements/utils/citations.ts";
-import { formatCount } from "@ryu/ui/lib/number-format";
-import { cn } from "@ryu/ui/lib/utils";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { formatCount } from "@ryu/ui/lib/number-format.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { UIMessage } from "ai";
 import {
 	type ReactNode,
@@ -85,8 +97,9 @@ import type { BtwEntry } from "@/src/lib/api/btw.ts";
 import { deleteBtw, listBtw } from "@/src/lib/api/btw.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { FileSummary } from "@/src/lib/api/git.ts";
-import type { Artifact, ArtifactKind } from "@/src/lib/artifacts.ts";
-import { extractArtifacts } from "@/src/lib/artifacts.ts";
+import type { ArtifactKind } from "@/src/lib/artifacts.ts";
+import { extractArtifacts } from "@/src/lib/live-artifact-extractor.ts";
+import type { ArtifactView } from "@/src/lib/live-artifacts.ts";
 import {
 	firstString,
 	PATH_KEYS,
@@ -96,9 +109,19 @@ import type { PlanArtifact } from "@/src/lib/plan-artifacts.ts";
 import { compactAge } from "@/src/lib/time.ts";
 import { deriveTodoProgress } from "@/src/lib/todo-progress.ts";
 
+const toolPayloadSchema = z.record(z.string(), z.json());
+function readToolPayload<TValue>(value: TValue) {
+	const parsed = toolPayloadSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
+}
+
 // ── Message-stream shapes (loose, mirroring the AI SDK parts we read) ──────────
 
 interface StreamPart {
+	callProviderMetadata?: Extract<
+		UIMessage["parts"][number],
+		{ type: "dynamic-tool" }
+	>["callProviderMetadata"];
 	/** File-part fields used by user attachments. */
 	contentType?: string;
 	fileName?: string;
@@ -145,7 +168,7 @@ export interface CoworkContextPanelProps {
 	 * Open a detected rendered/canvas artifact (html/svg/mermaid/large code block)
 	 * in the right panel's ArtifactRenderer.
 	 */
-	onOpenArtifact?: (artifact: Artifact) => void;
+	onOpenArtifact?: (artifact: ArtifactView) => void;
 	/** Reopen a persisted side chat (the host shows it in the btw overlay). */
 	onOpenSideChat?: (entry: BtwEntry) => void;
 	/** Open the complete Sources list in its own workspace tab. */
@@ -176,7 +199,7 @@ export interface CoworkContextPanelProps {
 function isToolPart(part: StreamPart): boolean {
 	return (
 		part.type === "dynamic-tool" ||
-		(typeof part.type === "string" && part.type.startsWith("tool-"))
+		(isNativeText(part.type) && part.type.startsWith("tool-"))
 	);
 }
 
@@ -212,8 +235,8 @@ const CHAT_ATTACHMENTS_SOURCE = {
 	icon: File01Icon,
 } as const;
 
-function nonEmptyString(value: unknown): string | undefined {
-	return typeof value === "string" && value.length > 0 ? value : undefined;
+function nonEmptyString<TValue>(value: TValue): string | undefined {
+	return isNativeText(value) && value.length > 0 ? value : undefined;
 }
 
 // Tool-name sets, not part types: a tool arrives either as `tool-<Name>` or as a
@@ -440,16 +463,16 @@ function clampItem(text: string): string {
 }
 
 /** A file the user supplied with a chat turn, read from the same wire shapes the transcript renders. */
-function attachmentItem(
-	value: unknown,
+function attachmentItem<TValue>(
+	value: TValue,
 	id: string,
 	fallbackNumber: number,
 	legacy = false
 ): SourceItem | null {
-	if (typeof value !== "object" || value === null) {
+	const part = readToolPayload(value);
+	if (!part) {
 		return null;
 	}
-	const part = value as Record<string, unknown>;
 	if (
 		!legacy &&
 		part.type !== "file" &&
@@ -504,15 +527,15 @@ function sourceForTool(tool: string): Omit<DerivedSource, "items"> | null {
 	return parseSourceTool(tool)?.source ?? null;
 }
 
-function firstToolArgument(input: unknown): string | undefined {
+function firstToolArgument<TInput>(input: TInput): string | undefined {
 	const direct = firstString(input, TOOL_ARGUMENT_KEYS);
 	if (direct) {
 		return direct;
 	}
-	if (typeof input !== "object" || input === null || Array.isArray(input)) {
+	const record = readToolPayload(input);
+	if (!record) {
 		return undefined;
 	}
-	const record = input as Record<string, unknown>;
 	for (const key of ["arguments", "args", "params", "payload"]) {
 		const nested = firstString(record[key], TOOL_ARGUMENT_KEYS);
 		if (nested) {
@@ -798,19 +821,19 @@ export function subagentTaskTitle({
 }
 
 /** Best-effort text extraction from a tool part's loose input/output shapes. */
-function partText(value: unknown): string {
+function partText<TValue>(value: TValue): string {
 	if (value == null) {
 		return "";
 	}
-	if (typeof value === "string") {
+	if (isNativeText(value)) {
 		return value;
 	}
 	if (Array.isArray(value)) {
 		return value.map(partText).filter(Boolean).join("\n");
 	}
-	if (typeof value === "object") {
-		const obj = value as Record<string, unknown>;
-		if (typeof obj.text === "string") {
+	const obj = readToolPayload(value);
+	if (obj) {
+		if (isNativeText(obj.text)) {
 			return obj.text;
 		}
 		if (obj.content !== undefined) {
@@ -819,7 +842,7 @@ function partText(value: unknown): string {
 		if (obj.output !== undefined) {
 			return partText(obj.output);
 		}
-		if (typeof obj.result === "string") {
+		if (isNativeText(obj.result)) {
 			return obj.result;
 		}
 	}
@@ -829,7 +852,7 @@ function partText(value: unknown): string {
 /** Drop the `<parentTaskId>:` prefix so a nested tool renders as a top-level row. */
 function stripParentPrefix(part: StreamPart): StreamPart {
 	const id = part.toolCallId;
-	if (typeof id === "string" && id.includes(":")) {
+	if (isNativeText(id) && id.includes(":")) {
 		return { ...part, toolCallId: id.slice(id.indexOf(":") + 1) };
 	}
 	return part;
@@ -851,7 +874,7 @@ function groupSubagentParts(
 	const output = new Map<string, string>();
 	for (const part of allParts) {
 		const id = part.toolCallId;
-		if (typeof id !== "string" || !id.includes(":")) {
+		if (!(isNativeText(id) && id.includes(":"))) {
 			continue;
 		}
 		const parent = id.slice(0, id.indexOf(":"));
@@ -891,11 +914,10 @@ function latestActivity(nested: StreamPart[]): string {
 	if (!last) {
 		return "Working…";
 	}
-	const name =
-		typeof last.type === "string"
-			? last.type.replace(TOOL_PREFIX_RE, "")
-			: "tool";
-	const input = last.input as Record<string, unknown> | undefined;
+	const name = isNativeText(last.type)
+		? last.type.replace(TOOL_PREFIX_RE, "")
+		: "tool";
+	const input = readToolPayload(last.input);
 	const detail =
 		input?.file_path ??
 		input?.command ??
@@ -904,28 +926,22 @@ function latestActivity(nested: StreamPart[]): string {
 		input?.path ??
 		input?.description;
 	const detailStr =
-		typeof detail === "string" && detail ? ` ${shortenDetail(detail)}` : "";
+		isNativeText(detail) && detail ? ` ${shortenDetail(detail)}` : "";
 	return `${name}${detailStr}`;
 }
 
-function lineCount(value: unknown): number {
-	return typeof value === "string" && value.length > 0
-		? value.split("\n").length
-		: 0;
+function lineCount<TValue>(value: TValue): number {
+	return isNativeText(value) && value.length > 0 ? value.split("\n").length : 0;
 }
 
 /** Best-effort per-agent diff stats from the same tool payloads used for activity. */
-function nestedChanges(nested: StreamPart[]): {
-	deletions: number;
-	insertions: number;
-} {
+function nestedChanges(nested: StreamPart[]) {
 	let insertions = 0;
 	let deletions = 0;
 	for (const part of nested) {
-		const input = (part.input ?? {}) as Record<string, unknown>;
-		const output = (part.output ?? {}) as Record<string, unknown>;
-		const diffStats =
-			typeof output.diffStats === "string" ? output.diffStats : "";
+		const input = readToolPayload(part.input) ?? {};
+		const output = readToolPayload(part.output) ?? {};
+		const diffStats = isNativeText(output.diffStats) ? output.diffStats : "";
 		const added = /\+(\d+)/.exec(diffStats)?.[1];
 		const removed = /-(\d+)/.exec(diffStats)?.[1];
 		if (added || removed) {
@@ -933,7 +949,7 @@ function nestedChanges(nested: StreamPart[]): {
 			deletions += Number(removed ?? 0);
 			continue;
 		}
-		const patch = typeof input.patch === "string" ? input.patch : "";
+		const patch = isNativeText(input.patch) ? input.patch : "";
 		if (patch) {
 			for (const line of patch.split("\n")) {
 				if (line.startsWith("+") && !line.startsWith("+++")) {
@@ -956,11 +972,11 @@ function toSubagentSummary(
 	task: StreamPart,
 	grouped: SubagentParts
 ): SubagentSummary {
-	const id = task.toolCallId as string;
-	const input =
-		typeof task.input === "object" && task.input !== null
-			? (task.input as Record<string, unknown>)
-			: undefined;
+	const id = task.toolCallId;
+	if (!id) {
+		throw new Error("Subagent task requires a tool call id");
+	}
+	const input = readToolPayload(task.input);
 	const subtitle = nonEmptyString(input?.description)?.trim() ?? "";
 	const taskPrompt = nonEmptyString(input?.prompt)?.trim() ?? "";
 	const status: SubagentSummary["status"] =
@@ -980,14 +996,15 @@ function toSubagentSummary(
 	if (outputText) {
 		assistantParts.push({ type: "text", text: outputText });
 	}
-	const transcript = [
-		{
-			id: `${id}:prompt`,
-			role: "user",
-			parts: [{ type: "text", text: prompt }],
-		},
-		{ id: `${id}:result`, role: "assistant", parts: assistantParts },
-	] as unknown as UIMessage[];
+	const transcript =
+		/* SAFETY: These literal transcript messages own string ids and user/assistant roles; nested entries retain the original SDK tool parts grouped by checked task id. */ [
+			{
+				id: `${id}:prompt`,
+				role: "user",
+				parts: [{ type: "text", text: prompt }],
+			},
+			{ id: `${id}:result`, role: "assistant", parts: assistantParts },
+		] as UIMessage[];
 
 	return {
 		changes: nestedChanges(nested),
@@ -1015,15 +1032,17 @@ export function extractSubagents(messages: StreamMessage[]): SubagentSummary[] {
 
 	const tasks = allParts.filter(
 		(p) =>
-			typeof p.type === "string" &&
+			isNativeText(p.type) &&
 			SUBAGENT_PART_TYPES.has(p.type) &&
-			typeof p.toolCallId === "string"
+			isNativeText(p.toolCallId)
 	);
 	if (tasks.length === 0) {
 		return [];
 	}
 
-	const taskIds = new Set(tasks.map((t) => t.toolCallId as string));
+	const taskIds = new Set(
+		tasks.flatMap((task) => (task.toolCallId ? [task.toolCallId] : []))
+	);
 	const grouped = groupSubagentParts(allParts, taskIds);
 	return tasks.map((task) => toSubagentSummary(task, grouped));
 }
@@ -1059,12 +1078,17 @@ function SubagentsList({
 							<SubagentAvatar className="size-5 shrink-0" seed={sub.id} />
 							<span className="flex min-w-0 flex-1 flex-col">
 								<span className="flex min-w-0 items-center gap-1.5">
-									<span className="truncate text-foreground">{sub.title}</span>
+									<span className="truncate text-foreground" title={sub.title}>
+										{sub.title}
+									</span>
 									{/* Only a REAL `subagent_type` earns a chip. An untyped spawn
 									    leaves `label` empty rather than printing "Agent" under a
 									    section already titled "Subagents". */}
 									{sub.label && (
-										<span className="shrink-0 truncate text-[10px] text-muted-foreground/70">
+										<span
+											className="type-compact shrink-0 truncate text-muted-foreground/70"
+											title={sub.label}
+										>
 											{sub.label}
 										</span>
 									)}
@@ -1073,18 +1097,21 @@ function SubagentsList({
 									<TextShimmer
 										as="span"
 										className="truncate text-muted-foreground"
-										duration={2.4}
+										duration={0.9}
 									>
 										{secondary}
 									</TextShimmer>
 								) : secondary ? (
-									<span className="truncate text-muted-foreground">
+									<span
+										className="truncate text-muted-foreground"
+										title={secondary}
+									>
 										{secondary}
 									</span>
 								) : null}
 							</span>
 							{(sub.changes.insertions > 0 || sub.changes.deletions > 0) && (
-								<span className="flex shrink-0 items-center gap-1 font-medium text-[11px] tabular-nums">
+								<span className="type-caption flex shrink-0 items-center gap-1 font-medium tabular-nums">
 									{sub.changes.insertions > 0 && (
 										<span className="text-status-success dark:text-status-success/90">
 											+{formatCount(sub.changes.insertions)}
@@ -1099,7 +1126,7 @@ function SubagentsList({
 							)}
 							{sub.status === "running" && (
 								<span
-									className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary"
+									className="size-1.5 shrink-0 rounded-full bg-primary motion-safe:animate-pulse"
 									title="Running"
 								/>
 							)}
@@ -1129,7 +1156,7 @@ export function SubagentActivityChips({
 	}
 
 	return (
-		<div className="scrollbar-none flex min-w-0 items-center gap-1.5 overflow-x-auto px-4 py-2">
+		<div className="flex min-w-0 items-center gap-1.5 overflow-x-auto px-4 py-2">
 			{subagents.map((subagent) => (
 				<button
 					aria-label={`Open ${subagent.title} subagent task`}
@@ -1146,7 +1173,7 @@ export function SubagentActivityChips({
 					{subagent.status === "running" && (
 						<span
 							aria-hidden
-							className="size-1.5 animate-pulse rounded-full bg-primary"
+							className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse"
 						/>
 					)}
 				</button>
@@ -1164,7 +1191,7 @@ export function SubagentActivityChips({
 // these are renderable payloads found in the assistant's own message text
 // (extractArtifacts), opened in a sandboxed ArtifactRenderer in the right panel.
 
-const ARTIFACT_KIND_ICON: Record<ArtifactKind, IconSvgElement> = {
+const ARTIFACT_KIND_ICON = {
 	html: BrowserIcon,
 	svg: Image02Icon,
 	mermaid: Flowchart01Icon,
@@ -1172,9 +1199,9 @@ const ARTIFACT_KIND_ICON: Record<ArtifactKind, IconSvgElement> = {
 	file: File01Icon,
 	space: FolderOpenIcon,
 	database: DatabaseIcon,
-};
+} satisfies Record<ArtifactKind, IconSvgElement>;
 
-const ARTIFACT_KIND_LABEL: Record<ArtifactKind, string> = {
+const ARTIFACT_KIND_LABEL = {
 	html: "HTML",
 	svg: "SVG",
 	mermaid: "Diagram",
@@ -1182,16 +1209,16 @@ const ARTIFACT_KIND_LABEL: Record<ArtifactKind, string> = {
 	file: "File",
 	space: "Space",
 	database: "Database",
-};
+} satisfies Record<ArtifactKind, string>;
 
 function RenderedArtifactsList({
 	artifacts,
 	onOpen,
 	limit,
 }: {
-	artifacts: Artifact[];
+	artifacts: ArtifactView[];
 	limit?: number;
-	onOpen?: (artifact: Artifact) => void;
+	onOpen?: (artifact: ArtifactView) => void;
 }) {
 	const shown = limit === undefined ? artifacts : artifacts.slice(0, limit);
 	const overflow = artifacts.length - shown.length;
@@ -1210,7 +1237,10 @@ function RenderedArtifactsList({
 								icon={ARTIFACT_KIND_ICON[artifact.kind]}
 							/>
 						</span>
-						<span className="min-w-0 flex-1 truncate text-foreground">
+						<span
+							className="min-w-0 flex-1 truncate text-foreground"
+							title={artifact.title}
+						>
 							{artifact.title}
 						</span>
 						<span className={PANEL_ROW_BADGE}>
@@ -1228,7 +1258,7 @@ function PlansList({
 	plans,
 	onOpen,
 }: {
-	onOpen?: (artifact: Artifact) => void;
+	onOpen?: (artifact: ArtifactView) => void;
 	plans: PlanArtifact[];
 }) {
 	return (
@@ -1246,7 +1276,9 @@ function PlansList({
 							<HugeiconsIcon className="size-3.5" icon={File01Icon} />
 						</span>
 						<span className="flex min-w-0 flex-1 flex-col">
-							<span className="truncate text-foreground">{plan.title}</span>
+							<span className="truncate text-foreground" title={plan.title}>
+								{plan.title}
+							</span>
 							<span className="truncate text-muted-foreground">
 								{plan.sourceLabel} ·{" "}
 								{plan.error
@@ -1319,7 +1351,7 @@ const PANEL_ROW_STATIC =
 const PANEL_ROW_ICON =
 	"grid size-5 shrink-0 place-items-center text-muted-foreground";
 const PANEL_ROW_BADGE =
-	"shrink-0 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums";
+	"shrink-0 rounded-full bg-muted px-1.5 type-compact text-muted-foreground tabular-nums";
 
 export function SectionTitle({
 	count,
@@ -1367,7 +1399,7 @@ function OverflowRow({
 				type="button"
 			>
 				<span>{copy}</span>
-				<span className="ml-auto text-[10px]">View all</span>
+				<span className="type-compact ml-auto">View all</span>
 			</button>
 		</li>
 	);
@@ -1396,7 +1428,7 @@ function TodoStatusDot({
 			<span
 				className={cn(
 					"mt-px flex size-3.5 shrink-0 items-center justify-center rounded-full border-2 border-primary",
-					pulse && "animate-pulse"
+					pulse && "motion-safe:animate-pulse"
 				)}
 			/>
 		);
@@ -1462,7 +1494,10 @@ function FileRow({ file }: { file: FileSummary }) {
 				className="size-3.5 shrink-0 text-muted-foreground"
 				icon={File01Icon}
 			/>
-			<span className="min-w-0 flex-1 truncate text-foreground">
+			<span
+				className="min-w-0 flex-1 truncate text-foreground"
+				title={filename}
+			>
 				{filename}
 			</span>
 		</div>
@@ -1496,9 +1531,13 @@ function SourceItemRow({ item }: { item: SourceItem }) {
 				{icon}
 			</span>
 			<span className="flex min-w-0 flex-1 flex-col">
-				<span className="truncate text-foreground">{item.label}</span>
+				<span className="truncate text-foreground" title={item.label}>
+					{item.label}
+				</span>
 				{item.detail && item.detail !== item.label && (
-					<span className="truncate text-muted-foreground">{item.detail}</span>
+					<span className="truncate text-muted-foreground" title={item.detail}>
+						{item.detail}
+					</span>
 				)}
 			</span>
 		</>
@@ -1549,7 +1588,10 @@ function SourceGroup({
 				<span aria-hidden className={PANEL_ROW_ICON}>
 					<HugeiconsIcon className="size-3.5" icon={source.icon} />
 				</span>
-				<span className="min-w-0 flex-1 truncate text-foreground">
+				<span
+					className="min-w-0 flex-1 truncate text-foreground"
+					title={source.label}
+				>
 					{source.label}
 				</span>
 			</li>
@@ -1568,7 +1610,10 @@ function SourceGroup({
 				<span aria-hidden className={PANEL_ROW_ICON}>
 					<HugeiconsIcon className="size-3.5" icon={source.icon} />
 				</span>
-				<span className="min-w-0 flex-1 truncate text-foreground">
+				<span
+					className="min-w-0 flex-1 truncate text-foreground"
+					title={source.label}
+				>
 					{source.label}
 				</span>
 				<span className={PANEL_ROW_BADGE}>{source.items.length}</span>
@@ -1689,7 +1734,7 @@ function SubagentRosterRow({
 		<li>
 			<button
 				aria-label={`Open ${subagent.title}`}
-				className="flex min-h-14 w-full min-w-0 items-start gap-3 rounded-lg px-1 py-2 text-left transition-[background-color,transform] duration-150 hover:bg-muted/50 active:scale-[0.99] motion-reduce:transition-none"
+				className="flex min-h-14 w-full min-w-0 items-start gap-3 rounded-lg px-1 py-2 text-left transition-colors duration-150 hover:bg-muted/50 active:scale-[0.99] motion-reduce:transition-none"
 				onClick={() => onOpen(subagent)}
 				type="button"
 			>
@@ -1699,11 +1744,17 @@ function SubagentRosterRow({
 					seed={subagent.id}
 				/>
 				<span className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<span className="truncate font-medium text-foreground text-sm">
+					<span
+						className="truncate font-medium text-foreground text-sm"
+						title={subagent.title}
+					>
 						{subagent.title}
 					</span>
 					{state && (
-						<span className="truncate text-muted-foreground text-xs">
+						<span
+							className="truncate text-muted-foreground text-xs"
+							title={state}
+						>
 							{state}
 						</span>
 					)}
@@ -1727,9 +1778,7 @@ function SubagentTranscript({
 }) {
 	const running = subagent.status === "running";
 	const messages = useMemo(() => {
-		const last = subagent.transcript.at(-1) as
-			| { parts?: unknown[] }
-			| undefined;
+		const last = subagent.transcript.at(-1);
 		return (last?.parts?.length ?? 0) === 0
 			? subagent.transcript.slice(0, -1)
 			: subagent.transcript;
@@ -1741,14 +1790,17 @@ function SubagentTranscript({
 			<div className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3">
 				<button
 					aria-label="Back to subagents"
-					className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-muted hover:text-foreground active:scale-95 motion-reduce:transition-none"
+					className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground active:scale-95 motion-reduce:transition-none"
 					onClick={onBack}
 					type="button"
 				>
 					<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
 				</button>
 				<SubagentAvatar animate={false} className="size-5" seed={subagent.id} />
-				<h2 className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">
+				<h2
+					className="min-w-0 flex-1 truncate font-medium text-foreground text-sm"
+					title={subagent.title}
+				>
 					{subagent.title}
 				</h2>
 			</div>
@@ -1917,51 +1969,98 @@ export function SourcesWorkspacePanel({
 
 function SideChatsList({
 	entries,
+	deletingIds,
 	onOpen,
 	onDelete,
 	limit,
 }: {
 	entries: BtwEntry[];
+	deletingIds: string[];
 	limit?: number;
 	onDelete: (id: string) => void;
 	onOpen?: (entry: BtwEntry) => void;
 }) {
+	const [pendingDelete, setPendingDelete] = useState<BtwEntry | null>(null);
 	const shown = limit === undefined ? entries : entries.slice(0, limit);
 	const overflow = entries.length - shown.length;
 	return (
-		<ul className="flex flex-col gap-0.5">
-			{shown.map((entry) => (
-				<li className="group/side flex items-center gap-1" key={entry.id}>
-					<button
-						className={cn(PANEL_ROW, "w-auto flex-1")}
-						onClick={() => onOpen?.(entry)}
-						type="button"
-					>
-						<span aria-hidden className={PANEL_ROW_ICON}>
-							<HugeiconsIcon className="size-3.5" icon={MessageQuestionIcon} />
-						</span>
-						<span className="min-w-0 flex-1 truncate text-foreground">
-							{entry.question}
-						</span>
-						<span className={PANEL_ROW_BADGE}>
-							{compactAge(entry.created_at)}
-						</span>
-					</button>
-					<button
-						aria-label="Delete side chat"
-						className="flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-accent group-hover/side:opacity-100"
-						onClick={() => onDelete(entry.id)}
-						type="button"
-					>
-						<HugeiconsIcon
-							className="size-3 text-muted-foreground"
-							icon={Delete01Icon}
-						/>
-					</button>
-				</li>
-			))}
-			{overflow > 0 && <OverflowRow count={overflow} label="side chats" />}
-		</ul>
+		<>
+			<ul className="flex flex-col gap-0.5">
+				{shown.map((entry) => (
+					<li className="group/side flex items-center gap-1" key={entry.id}>
+						<button
+							className={cn(PANEL_ROW, "w-auto flex-1")}
+							onClick={() => onOpen?.(entry)}
+							type="button"
+						>
+							<span aria-hidden className={PANEL_ROW_ICON}>
+								<HugeiconsIcon
+									className="size-3.5"
+									icon={MessageQuestionIcon}
+								/>
+							</span>
+							<span
+								className="min-w-0 flex-1 truncate text-foreground"
+								title={entry.question}
+							>
+								{entry.question}
+							</span>
+							<span className={PANEL_ROW_BADGE}>
+								{compactAge(entry.created_at)}
+							</span>
+						</button>
+						<button
+							aria-label="Delete side chat"
+							className="relative flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity after:absolute after:-inset-0.5 hover:bg-accent focus-visible:opacity-100 group-hover/side:opacity-100"
+							disabled={deletingIds.includes(entry.id)}
+							onClick={() => setPendingDelete(entry)}
+							type="button"
+						>
+							<HugeiconsIcon
+								className="size-3 text-muted-foreground"
+								icon={Delete01Icon}
+							/>
+						</button>
+					</li>
+				))}
+				{overflow > 0 && <OverflowRow count={overflow} label="side chats" />}
+			</ul>
+			<AlertDialog
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingDelete(null);
+					}
+				}}
+				open={pendingDelete !== null}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete this side chat?</AlertDialogTitle>
+						<AlertDialogDescription>
+							{pendingDelete
+								? `"${pendingDelete.question.slice(0, 120)}${
+										pendingDelete.question.length > 120 ? "…" : ""
+									}" and its answer will be permanently deleted.`
+								: ""}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={() => {
+								if (pendingDelete) {
+									onDelete(pendingDelete.id);
+								}
+								setPendingDelete(null);
+							}}
+							variant="destructive"
+						>
+							Delete side chat
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+		</>
 	);
 }
 
@@ -2010,6 +2109,23 @@ export function CoworkContextPanel({
 	// Side chats (persisted /btw asides) — lifted here so the section can hide
 	// itself entirely when there are none.
 	const [sideChats, setSideChats] = useState<BtwEntry[]>([]);
+	const [sideChatListError, setSideChatListError] = useState(false);
+	const [sideChatRetryKey, setSideChatRetryKey] = useState(0);
+	const [deletingSideChatIds, setDeletingSideChatIds] = useState<string[]>([]);
+	const [sideChatDeleteError, setSideChatDeleteError] = useState<string | null>(
+		null
+	);
+	const sideChatScope = JSON.stringify([
+		target.url,
+		target.token,
+		target.userJwt,
+		runId,
+		sideChatsEnabled,
+	]);
+	const sideChatScopeRef = useRef(sideChatScope);
+	sideChatScopeRef.current = sideChatScope;
+	const pendingSideChatDeletes = useRef(new Set<string>());
+	const sideChatMutationRevision = useRef(0);
 
 	const targetUrlRef = useRef(target);
 	targetUrlRef.current = target;
@@ -2025,30 +2141,78 @@ export function CoworkContextPanel({
 	}, [runId, chatStatus]);
 
 	useEffect(() => {
+		setSideChats([]);
+		setSideChatListError(false);
+		setDeletingSideChatIds([]);
+		setSideChatDeleteError(null);
+	}, [sideChatScope]);
+
+	useEffect(() => {
 		if (!(sideChatsEnabled && runId)) {
 			setSideChats([]);
 			return;
 		}
 		const controller = new AbortController();
+		const mutationRevision = sideChatMutationRevision.current;
+		setSideChatListError(false);
 		listBtw(targetUrlRef.current, runId, controller.signal)
 			.then((list) => {
-				if (!controller.signal.aborted) {
+				if (
+					!controller.signal.aborted &&
+					sideChatMutationRevision.current === mutationRevision
+				) {
 					setSideChats(list);
 				}
 			})
 			.catch(() => {
-				/* treated as "no side chats" */
+				if (
+					!controller.signal.aborted &&
+					sideChatMutationRevision.current === mutationRevision
+				) {
+					setSideChatListError(true);
+				}
 			});
 		return () => controller.abort();
 		// `sideChatsRefreshKey` is bumped by the composer after a `/btw` aside is
 		// persisted; without it the new aside never appears until the run changes.
-	}, [runId, sideChatsEnabled, sideChatsRefreshKey]);
+	}, [
+		runId,
+		sideChatsEnabled,
+		sideChatsRefreshKey,
+		sideChatRetryKey,
+		target.url,
+		target.token,
+		target.userJwt,
+	]);
 
-	const handleDeleteSideChat = useCallback((id: string) => {
-		setSideChats((prev) => prev.filter((e) => e.id !== id));
-		deleteBtw(targetUrlRef.current, id).catch(() => {
-			/* leave the optimistic removal; a refetch restores it if needed */
-		});
+	const handleDeleteSideChat = useCallback(async (id: string) => {
+		const scope = sideChatScopeRef.current;
+		const pendingKey = `${scope}:${id}`;
+		if (pendingSideChatDeletes.current.has(pendingKey)) {
+			return;
+		}
+		pendingSideChatDeletes.current.add(pendingKey);
+		setDeletingSideChatIds((previous) => [...previous, id]);
+		setSideChatDeleteError(null);
+		try {
+			await deleteBtw(targetUrlRef.current, id);
+			if (sideChatScopeRef.current === scope) {
+				sideChatMutationRevision.current += 1;
+				setSideChatListError(false);
+				setSideChats((previous) => previous.filter((entry) => entry.id !== id));
+			}
+		} catch {
+			if (sideChatScopeRef.current === scope) {
+				setSideChatDeleteError("Could not delete side chat. Try again.");
+			}
+		} finally {
+			pendingSideChatDeletes.current.delete(pendingKey);
+			if (sideChatScopeRef.current === scope) {
+				setDeletingSideChatIds((previous) =>
+					previous.filter((pendingId) => pendingId !== id)
+				);
+			}
+		}
 	}, []);
 
 	// One accordion for the whole panel. `leadingItems` (the pinned card's
@@ -2180,18 +2344,42 @@ export function CoworkContextPanel({
 		});
 	}
 
-	if (sideChatsEnabled && runId && sideChats.length > 0) {
+	if (
+		sideChatsEnabled &&
+		runId &&
+		(sideChats.length > 0 || sideChatListError)
+	) {
 		items.push({
 			id: "side-chats",
 			icon: summary ? undefined : <SectionIcon icon={MessageQuestionIcon} />,
 			title: <SectionTitle count={sideChats.length} title="Side chats" />,
 			description: (
-				<SideChatsList
-					entries={sideChats}
-					limit={maxItemsPerSection}
-					onDelete={handleDeleteSideChat}
-					onOpen={onOpenSideChat}
-				/>
+				<div>
+					<SideChatsList
+						deletingIds={deletingSideChatIds}
+						entries={sideChats}
+						limit={maxItemsPerSection}
+						onDelete={handleDeleteSideChat}
+						onOpen={onOpenSideChat}
+					/>
+					{sideChatListError && (
+						<div className="px-2 py-1 text-xs">
+							<p role="alert">Could not load side chats.</p>
+							<button
+								className="rounded-md px-2 py-1 text-muted-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+								onClick={() => setSideChatRetryKey((key) => key + 1)}
+								type="button"
+							>
+								Retry side chats
+							</button>
+						</div>
+					)}
+					{sideChatDeleteError && (
+						<p className="px-2 py-1 text-destructive text-xs" role="alert">
+							{sideChatDeleteError}
+						</p>
+					)}
+				</div>
 			),
 		});
 	}
@@ -2199,6 +2387,23 @@ export function CoworkContextPanel({
 	if (items.length === 0) {
 		return null;
 	}
+
+	const accordionClasses =
+		variant === "summary"
+			? {
+					root: "rounded-3xl border border-border/70 bg-card p-1 [&>div]:!mt-0 [&>div+div]:border-border/60 [&>div+div]:border-t",
+					item: "!w-full !rounded-none !bg-transparent",
+					trigger:
+						"min-h-11 min-w-0 flex-1 rounded-2xl px-2 py-2 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+					icon: "h-6 w-6",
+					title: "truncate",
+					content: "px-0",
+					description: "pb-1",
+				}
+			: {
+					item: "border border-border/60",
+					title: "truncate",
+				};
 
 	return (
 		<div
@@ -2215,23 +2420,7 @@ export function CoworkContextPanel({
 				// own scale (the subsection rows are `text-xs`, DiffReviewPane and the
 				// progress/file lists `text-sm`), so a panel-wide `text-sm` here would
 				// only fight them.
-				classNames={
-					variant === "summary"
-						? {
-								root: "rounded-3xl border border-border/70 bg-card/95 p-1 shadow-xl shadow-black/10 backdrop-blur-xl [&>div]:!mt-0 [&>div+div]:border-border/60 [&>div+div]:border-t",
-								item: "!w-full !rounded-none !bg-transparent",
-								trigger:
-									"min-h-11 min-w-0 flex-1 rounded-2xl px-2 py-2 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
-								icon: "h-6 w-6",
-								title: "truncate",
-								content: "px-0",
-								description: "pb-1",
-							}
-						: {
-								item: "border border-border/60",
-								title: "truncate",
-							}
-				}
+				classNames={accordionClasses}
 				defaultValue={items[0]?.id ?? null}
 				items={items}
 			/>

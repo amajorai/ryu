@@ -1,2 +1,3 @@
-export * from "./catalog";
-export * from "./runtime";
+export * from "./catalog.ts";
+export * from "./image-runtime.ts";
+export * from "./runtime.ts";

@@ -11,7 +11,7 @@ describe("NotificationBell", () => {
 		expect(html).toContain('data-slot="notification-bell"');
 		expect(html).toContain('role="status"');
 		expect(html).toContain("Notifications, 12 unread");
-		expect(html).toContain("#FF3B30");
+		expect(html).toContain("bg-destructive");
 	});
 
 	test("does not render a count badge when the inbox is empty", () => {
@@ -19,6 +19,6 @@ describe("NotificationBell", () => {
 
 		expect(html).toContain("Notifications");
 		expect(html).not.toContain("Notifications, 0 unread");
-		expect(html).not.toContain("#FF3B30");
+		expect(html).not.toContain("bg-destructive");
 	});
 });

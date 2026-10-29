@@ -4,7 +4,7 @@ import {
 	FloppyDiskIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -12,9 +12,9 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/empty.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	lazy,
 	Suspense,
@@ -61,9 +61,7 @@ const PdfViewer = lazy(loadPdfViewer);
 const SlidesEditor = lazy(loadSlidesEditor);
 const SpreadsheetEditor = lazy(loadSpreadsheetEditor);
 
-function preloadEditor(
-	kind: ReturnType<typeof workspaceFileKind>
-): Promise<unknown> {
+function preloadEditor(kind: ReturnType<typeof workspaceFileKind>) {
 	switch (kind) {
 		case "document":
 			return loadDocxEditor();
@@ -146,7 +144,7 @@ export default function SpaceFileViewerPage({
 					updateTabTitle(tabId, document.title || "Untitled file");
 				}
 			})
-			.catch((cause: unknown) => {
+			.catch((cause) => {
 				if (!controller.signal.aborted) {
 					setError(
 						cause instanceof Error
@@ -235,11 +233,7 @@ export default function SpaceFileViewerPage({
 	}
 
 	if (!loaded) {
-		return (
-			<div className="grid h-full place-items-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	const kind = workspaceFileKind(loaded.document.title, loaded.mime);
@@ -254,7 +248,10 @@ export default function SpaceFileViewerPage({
 					icon={File01Icon}
 				/>
 				<div className="min-w-0 flex-1">
-					<h1 className="truncate font-medium text-sm">
+					<h1
+						className="truncate font-medium text-sm"
+						title={loaded.document.title}
+					>
 						{loaded.document.title}
 					</h1>
 					<p className="text-muted-foreground text-xs">
@@ -282,13 +279,7 @@ export default function SpaceFileViewerPage({
 					</Button>
 				) : null}
 			</header>
-			<Suspense
-				fallback={
-					<div className="grid min-h-0 flex-1 place-items-center">
-						<Spinner />
-					</div>
-				}
-			>
+			<Suspense fallback={<SkeletonRows rows={6} spacing="library" />}>
 				{kind === "pdf" ? (
 					<PdfViewer bytes={loaded.bytes} onLoadError={handleEditorError} />
 				) : null}

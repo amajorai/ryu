@@ -28,7 +28,7 @@ if (!id || start.success === false || start.error || start.available === false) 
 	return { raw: start };
 }
 const one = (v) => (Array.isArray(v) && v.length === 1 ? v[0] : v);
-const shape = (st, complete) => ({
+const crawlResponse = (st, complete) => ({
 	status: (st && st.status) || "unknown",
 	complete,
 	total: st && st.total,
@@ -56,9 +56,9 @@ for (;;) {
 		(st.data !== undefined && !Array.isArray(st.data))) {
 		return { raw: st };
 	}
-	if (status === "completed") return shape(st, true);
-	if (status === "failed" || status === "cancelled") return shape(st, false);
-	if (Date.now() - started > BUDGET_MS) return shape(st, false);
+	if (status === "completed") return crawlResponse(st, true);
+	if (status === "failed" || status === "cancelled") return crawlResponse(st, false);
+	if (Date.now() - started > BUDGET_MS) return crawlResponse(st, false);
 	await new Promise((r) => setTimeout(r, delay));
 	delay = Math.min(delay * 2, 4000);
 }

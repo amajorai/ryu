@@ -50,7 +50,7 @@ function installStorage(impl?: Partial<Storage>) {
 			return map.size;
 		},
 		...impl,
-	} as Storage;
+	} satisfies Storage;
 	Object.defineProperty(globalThis, "localStorage", {
 		configurable: true,
 		writable: true,

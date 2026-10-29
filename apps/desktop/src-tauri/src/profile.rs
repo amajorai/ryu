@@ -222,17 +222,52 @@ pub fn suffix() -> String {
     suffix_of(&name())
 }
 
-/// The Ryu data/home dir for this profile: `~/.ryu` release, `~/.ryu-dev` dev.
-pub fn ryu_home_dir() -> PathBuf {
-    if let Ok(value) = std::env::var("RYU_DIR") {
-        let path = PathBuf::from(value);
-        if !path.as_os_str().is_empty() {
-            return path;
-        }
-    }
+/// The profile's DEFAULT data dir (`~/.ryu` release, `~/.ryu-dev` dev), ignoring
+/// `RYU_DIR` and the Storage pointer. Only for callers that deliberately want the
+/// unrelocated default of a named profile; everything else uses [`ryu_home_dir`].
+pub fn default_data_dir_of(profile: &str) -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(format!(".ryu{}", suffix()))
+        .join(format!(".ryu{}", suffix_of(profile)))
+}
+
+/// The data dir `profile` resolves to, exactly like Core: a non-empty
+/// `override_dir` (the `RYU_DIR` value) > the Storage pointer
+/// (`<config>/ryu<sfx>/data-path.json`) > `~/.ryu<sfx>`.
+///
+/// A pointer that cannot be read or parsed makes Core refuse to start; Desktop
+/// logs it and uses the profile default rather than inventing a third location.
+pub fn resolve_data_dir_of(profile: &str, override_dir: Option<std::ffi::OsString>) -> PathBuf {
+    let paths = match ryu_runtime_install::data_paths::DataPaths::for_profile(
+        profile,
+        dirs::home_dir(),
+        dirs::config_dir(),
+    ) {
+        Ok(paths) => paths,
+        Err(_) => {
+            return override_dir
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| default_data_dir_of(profile))
+        }
+    };
+    paths
+        .resolve_data_dir(override_dir)
+        .unwrap_or_else(|error| {
+            tracing::warn!(
+                pointer = %paths.pointer_path.display(),
+                %error,
+                "Storage pointer is unreadable; using the profile default data dir"
+            );
+            paths.default_data_dir.clone()
+        })
+}
+
+/// The Ryu data dir for the active profile, resolved exactly like Core:
+/// `RYU_DIR` > Storage pointer > `~/.ryu<sfx>` (`~/.ryu` release, `~/.ryu-dev`
+/// dev). Not cached: a Storage relocation rewrites the pointer at runtime.
+pub fn ryu_home_dir() -> PathBuf {
+    resolve_data_dir_of(&name(), std::env::var_os("RYU_DIR"))
 }
 
 /// True when `candidate` is `<home>/.ryu<suffix>/bin/<exe>` for a Ryu profile home

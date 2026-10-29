@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import SidebarLibrarySection from "./SidebarLibrarySection.tsx";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 
@@ -88,9 +88,9 @@ describe("SidebarLibrarySection", () => {
 		});
 
 		expect(container.textContent).toContain(item.name);
-		expect(
-			container.querySelector('[class*="[container-type:inline-size]"]')
-		).not.toBeNull();
+		expect(container.querySelector('[role="button"]')).not.toBeNull();
+		expect(container.querySelector('[data-slot="book-card"]')).not.toBeNull();
+		expect(container.querySelector('[data-slot="card"]')).toBeNull();
 
 		act(() => {
 			root.render(

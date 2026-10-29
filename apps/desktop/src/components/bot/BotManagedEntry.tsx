@@ -1,14 +1,14 @@
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardFooter,
 	CardHeader,
-} from "@ryu/ui/components/card";
-import { Logo } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { useCallback, useEffect, useState } from "react";
+} from "@ryu/ui/components/card.tsx";
+import { Logo } from "@ryu/ui/components/logo.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { WEB_URL } from "@/lib/app-urls.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
@@ -16,7 +16,7 @@ import Layout from "@/src/components/layout/Layout.tsx";
 import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
-	EMPTY_AGENT_SELECTION,
+	type AgentSelection,
 	getLaneAgentSelection,
 	setLaneAgentSelection,
 } from "@/src/lib/api/preferences.ts";
@@ -25,27 +25,51 @@ import {
 	type BotManagedEntryState,
 	resolveBotCloudSelection,
 	resolveBotManagedEntryState,
+	resolveBotManagedNode,
 } from "./bot-managed-entry-state.ts";
 
 const PROVISIONING_POLL_MS = 5000;
+const SELECTION_FIELDS = [
+	"agent_id",
+	"provider",
+	"model",
+	"thinking_level",
+	"effort",
+	"access_mode",
+] as const satisfies readonly (keyof AgentSelection)[];
+function workspaceKey(node: {
+	name: string;
+	url: string;
+	token: string | null;
+	userJwt?: string | null;
+}) {
+	return JSON.stringify([
+		node.name,
+		node.url,
+		node.token,
+		node.userJwt ?? null,
+	]);
+}
 
 function BotEntryCard({
 	busy,
+	error,
 	onRetry,
 	state,
 }: {
 	busy: boolean;
+	error: string | null;
 	onRetry: () => void;
 	state: Exclude<BotManagedEntryState, "ready">;
 }) {
 	const subscribe = state === "subscribe";
 	const checking = state === "checking-subscription";
 	return (
-		<Card className="w-full max-w-md border-border/70 shadow-xl">
-			<CardHeader className="items-center gap-4 text-center">
+		<Card className="w-full max-w-md">
+			<CardHeader appearance="bot-entry">
 				<Logo size="48px" variant="outline" />
 				<PageHeader
-					className="text-center [&>h1]:text-2xl [&>p]:text-base"
+					className="text-center"
 					stagger={false}
 					subtitle={
 						checking
@@ -54,18 +78,25 @@ function BotEntryCard({
 								? "A Ryu subscription includes your managed Bot workspace."
 								: "Ryu is preparing your managed Bot workspace."
 					}
-					title="Ryu Bot"
+					title="Bot"
 				/>
 			</CardHeader>
-			<CardContent className="flex justify-center px-6 pb-6">
-				{checking ? (
+			<CardContent inset="bot-entry">
+				{error ? (
+					<p
+						className="text-center text-sm text-status-destructive"
+						role="alert"
+					>
+						{error}
+					</p>
+				) : checking ? (
 					<div className="flex items-center gap-2 text-muted-foreground text-sm">
 						<Spinner /> Checking your subscription…
 					</div>
 				) : subscribe ? (
 					<p className="max-w-sm text-center text-muted-foreground text-sm leading-relaxed">
 						Subscribe once and Ryu manages the models, device, and
-						infrastructure for you. There is no provider setup in Ryu Bot.
+						infrastructure for you. There is no provider setup in Bot.
 					</p>
 				) : (
 					<div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -73,7 +104,11 @@ function BotEntryCard({
 					</div>
 				)}
 			</CardContent>
-			<CardFooter className="justify-center gap-2 border-border/60 border-t px-6 py-4">
+			<CardFooter
+				appearance="bot-entry"
+				className="justify-center"
+				spacing="actions"
+			>
 				{subscribe ? (
 					<Button
 						data-testid="bot-subscribe"
@@ -111,54 +146,111 @@ export function BotManagedEntry() {
 		refresh,
 	} = useCreditsWallet();
 	const hydrateCloudNodes = useNodeStore((state) => state.hydrateCloudNodes);
-	const managedNode = useNodeStore((state) =>
-		state.cloudNodes.find((node) => node.managed)
-	);
+	const managedNode = useNodeStore(resolveBotManagedNode);
 	const [state, setState] = useState<BotManagedEntryState>(
 		"checking-subscription"
 	);
 	const [busy, setBusy] = useState(false);
+	const [confirmationError, setConfirmationError] = useState<string | null>(
+		null
+	);
+	const confirmedWorkspace = useRef<string | null>(null);
+	const adoptionInFlight = useRef(false);
+	const adoptionGeneration = useRef(0);
+	useEffect(
+		() => () => {
+			adoptionGeneration.current++;
+		},
+		[]
+	);
 
 	const adoptManagedWorkspace = useCallback(async () => {
-		if (resolvingSubscription || !entitlement?.managedInference) {
+		if (
+			resolvingSubscription ||
+			!entitlement?.managedInference ||
+			adoptionInFlight.current
+		) {
 			return;
 		}
 		setBusy(true);
+		const generation = adoptionGeneration.current;
+		adoptionInFlight.current = true;
+		setConfirmationError(null);
 		setState("provisioning");
-		await hydrateCloudNodes().catch(() => undefined);
-		const node = useNodeStore
-			.getState()
-			.cloudNodes.find((candidate) => candidate.managed);
-		if (!node) {
-			setBusy(false);
-			return;
-		}
+		try {
+			await hydrateCloudNodes().catch(() => undefined);
+			const node = resolveBotManagedNode(useNodeStore.getState());
+			if (!node) {
+				return;
+			}
+			const isCurrent = () => {
+				const latest = resolveBotManagedNode(useNodeStore.getState());
+				return (
+					generation === adoptionGeneration.current &&
+					latest !== undefined &&
+					workspaceKey(latest) === workspaceKey(node)
+				);
+			};
+			if (!isCurrent()) {
+				return;
+			}
 
-		// Bot adopts the managed node in memory only. The Build product owns the
-		// user's durable local-node list; writing a cloud node into that file would
-		// make a zero-setup product mutate the power-user product's configuration.
-		useNodeStore.setState((current) => ({
-			defaultNode: node.name,
-			nodes: current.nodes.some((candidate) => candidate.name === node.name)
-				? current.nodes
-				: [...current.nodes, node],
-		}));
-		// This is the existing shared managed provider seam. Bot does not expose a
-		// picker, BYOK key, or routing toggle. Console owners/admins can configure
-		// the managed node's cloud lane, so preserve that value and seed the
-		// subscription's Auto cloud default only when the lane is unset.
-		const target = toTarget(node);
-		const currentSelection = await getLaneAgentSelection(target, "cloud").catch(
-			() => EMPTY_AGENT_SELECTION
-		);
-		const resolved = resolveBotCloudSelection(currentSelection);
-		if (resolved.shouldPersist) {
-			await setLaneAgentSelection(target, "cloud", resolved.selection).catch(
-				() => false
+			// Bot adopts the managed node in memory only. The Build product owns the
+			// user's durable local-node list; writing a cloud node into that file would
+			// make a zero-setup product mutate the power-user product's configuration.
+			useNodeStore.setState((current) => ({
+				defaultNode: node.name,
+				nodes: current.nodes.some((candidate) => candidate.name === node.name)
+					? current.nodes
+					: [...current.nodes, node],
+			}));
+			// This is the existing shared managed provider seam. Bot does not expose a
+			// picker, BYOK key, or routing toggle. Console owners/admins can configure
+			// the managed node's cloud lane, so preserve that value and seed the
+			// subscription's Auto cloud default only when the lane is unset.
+			const target = toTarget(node);
+			const currentSelection = await getLaneAgentSelection(target, "cloud");
+			if (!isCurrent()) {
+				return;
+			}
+			const resolved = resolveBotCloudSelection(currentSelection);
+			if (resolved.shouldPersist) {
+				const saved = await setLaneAgentSelection(
+					target,
+					"cloud",
+					resolved.selection
+				);
+				const persisted = await getLaneAgentSelection(target, "cloud");
+				if (!isCurrent()) {
+					return;
+				}
+				if (
+					!(
+						saved &&
+						SELECTION_FIELDS.every(
+							(field) => persisted[field] === resolved.selection[field]
+						)
+					)
+				) {
+					throw new Error("Managed cloud selection was not persisted");
+				}
+			}
+			confirmedWorkspace.current = workspaceKey(node);
+			setState("ready");
+		} catch {
+			if (generation !== adoptionGeneration.current) {
+				return;
+			}
+			setConfirmationError(
+				"Couldn't confirm your managed workspace. Refresh workspace to try again."
 			);
+			setState("provisioning");
+		} finally {
+			adoptionInFlight.current = false;
+			if (generation === adoptionGeneration.current) {
+				setBusy(false);
+			}
 		}
-		setBusy(false);
-		setState("ready");
 	}, [entitlement?.managedInference, hydrateCloudNodes, resolvingSubscription]);
 
 	useEffect(() => {
@@ -167,13 +259,23 @@ export function BotManagedEntry() {
 			managedInference: entitlement?.managedInference === true,
 			resolvingSubscription,
 		});
-		setState(next);
-		if (next === "provisioning") {
-			adoptManagedWorkspace().catch(() => {
-				setBusy(false);
-				setState("provisioning");
-			});
+		if (next === "checking-subscription" || next === "subscribe") {
+			adoptionGeneration.current++;
+			setBusy(false);
+			confirmedWorkspace.current = null;
+			setConfirmationError(null);
+			setState(next);
+			return;
 		}
+		if (
+			managedNode &&
+			confirmedWorkspace.current === workspaceKey(managedNode)
+		) {
+			setState("ready");
+			return;
+		}
+		setState("provisioning");
+		adoptManagedWorkspace().catch(() => undefined);
 	}, [
 		adoptManagedWorkspace,
 		entitlement?.managedInference,
@@ -182,16 +284,29 @@ export function BotManagedEntry() {
 	]);
 
 	useEffect(() => {
-		if (state !== "provisioning" || !entitlement?.managedInference) {
+		if (
+			state !== "provisioning" ||
+			!entitlement?.managedInference ||
+			confirmationError
+		) {
 			return;
 		}
 		const timer = setInterval(() => {
 			adoptManagedWorkspace().catch(() => undefined);
 		}, PROVISIONING_POLL_MS);
 		return () => clearInterval(timer);
-	}, [adoptManagedWorkspace, entitlement?.managedInference, state]);
+	}, [
+		adoptManagedWorkspace,
+		confirmationError,
+		entitlement?.managedInference,
+		state,
+	]);
 
-	if (state === "ready") {
+	if (
+		state === "ready" &&
+		managedNode &&
+		confirmedWorkspace.current === workspaceKey(managedNode)
+	) {
 		return (
 			<MemoryRouter initialEntries={["/chat"]}>
 				<Routes>
@@ -209,6 +324,7 @@ export function BotManagedEntry() {
 		>
 			<BotEntryCard
 				busy={busy}
+				error={confirmationError}
 				onRetry={() => {
 					if (state === "subscribe") {
 						refresh().catch(() => undefined);
@@ -216,7 +332,7 @@ export function BotManagedEntry() {
 					}
 					adoptManagedWorkspace().catch(() => undefined);
 				}}
-				state={state}
+				state={state === "ready" ? "provisioning" : state}
 			/>
 		</div>
 	);

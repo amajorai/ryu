@@ -1,13 +1,37 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // Typed client for the Gateway's agent-root import/export sync surface.
 
 import { type ApiTarget, request } from "./client.ts";
-import type {
-	ImportItemKind,
-	ImportOutcome,
-	ImportSelection,
+import {
+	type ImportItemKind,
+	type ImportOutcome,
+	type ImportSelection,
+	importItemKindSchema,
 } from "./import.ts";
 
-export type SyncProvider = "claude" | "codex" | "cursor" | "other";
+/**
+ * Every provider Core's `normalize_provider` accepts
+ * (`apps/core/src/server/agent_sync.rs`). The one list the {@link SyncProvider}
+ * type and the provider response codec are derived from, so a provider added
+ * here is readable on every profile and scan response without a second edit.
+ */
+export const SYNC_PROVIDERS = [
+	"claude",
+	"codex",
+	"cursor",
+	"openclaw",
+	"hermes",
+	"muse",
+	"mastra",
+	"langchain",
+	"persona",
+	"chatgpt",
+	"claude-ai",
+	"other",
+] as const;
+
+export type SyncProvider = (typeof SYNC_PROVIDERS)[number];
 
 export interface AgentSyncProfile {
 	conflictCount: number;
@@ -192,7 +216,9 @@ export function listAgentSyncProfiles(
 ): Promise<{ profiles: AgentSyncProfile[] }> {
 	return request<{ profiles?: AgentSyncProfile[] }>(
 		target,
-		"/api/agent-sync/profiles"
+		"/api/agent-sync/profiles",
+		undefined,
+		responseCodec1
 	).then((body) => ({ profiles: body.profiles ?? [] }));
 }
 
@@ -200,19 +226,29 @@ export function saveAgentSyncProfile(
 	target: ApiTarget,
 	input: AgentSyncProfileInput
 ): Promise<AgentSyncProfile> {
-	return request<AgentSyncProfile>(target, "/api/agent-sync/profiles", {
-		method: "POST",
-		body: input,
-	});
+	return request<AgentSyncProfile>(
+		target,
+		"/api/agent-sync/profiles",
+		{
+			method: "POST",
+			body: input,
+		},
+		agentSyncProfileResponseCodec
+	);
 }
 
 export async function deleteAgentSyncProfile(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/agent-sync/profiles/${encodeURIComponent(id)}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/api/agent-sync/profiles/${encodeURIComponent(id)}`,
+		{
+			method: "DELETE",
+		},
+		responseCodec2
+	);
 }
 
 export function scanAgentSyncRoot(
@@ -220,10 +256,15 @@ export function scanAgentSyncRoot(
 	path: string,
 	provider?: SyncProvider
 ): Promise<AgentSyncScan> {
-	return request<AgentSyncScan>(target, "/api/agent-sync/scan", {
-		method: "POST",
-		body: { path, provider },
-	});
+	return request<AgentSyncScan>(
+		target,
+		"/api/agent-sync/scan",
+		{
+			method: "POST",
+			body: { path, provider },
+		},
+		agentSyncScanResponseCodec
+	);
 }
 
 export async function importAgentSyncThread(
@@ -242,14 +283,19 @@ export async function importAgentSyncThread(
 		dry_run?: boolean;
 		messages_added?: number;
 		would_create?: boolean;
-	}>(target, "/api/agent-sync/threads/import", {
-		method: "POST",
-		body: {
-			agentId: input.agentId,
-			dryRun: input.dryRun ?? false,
-			threadId: input.threadId,
+	}>(
+		target,
+		"/api/agent-sync/threads/import",
+		{
+			method: "POST",
+			body: {
+				agentId: input.agentId,
+				dryRun: input.dryRun ?? false,
+				threadId: input.threadId,
+			},
 		},
-	});
+		responseCodec3
+	);
 	return {
 		alreadyImported: body.already_imported ?? false,
 		conversationId: body.conversation_id ?? null,
@@ -277,15 +323,20 @@ export async function importAgentSyncItems(
 		profileId?: string;
 		results?: ImportOutcomeWire[];
 		skipped?: number;
-	}>(target, "/api/agent-sync/import", {
-		method: "POST",
-		body: {
-			dryRun: input.dryRun ?? false,
-			items: input.items,
-			path: input.path,
-			profileId: input.profileId,
+	}>(
+		target,
+		"/api/agent-sync/import",
+		{
+			method: "POST",
+			body: {
+				dryRun: input.dryRun ?? false,
+				items: input.items,
+				path: input.path,
+				profileId: input.profileId,
+			},
 		},
-	});
+		responseCodec4
+	);
 	return toImportResult(body);
 }
 
@@ -300,33 +351,48 @@ export function exportAgentSyncBundle(
 		profileId?: string;
 	}
 ): Promise<AgentSyncExportResult> {
-	return request<AgentSyncExportResult>(target, "/api/agent-sync/export", {
-		method: "POST",
-		body: {
-			destination: input.destination,
-			dryRun: input.dryRun ?? false,
-			includeAgents: input.includeAgents ?? true,
-			includeConversations: input.includeConversations ?? true,
-			includeSkills: input.includeSkills ?? true,
-			profileId: input.profileId,
+	return request<AgentSyncExportResult>(
+		target,
+		"/api/agent-sync/export",
+		{
+			method: "POST",
+			body: {
+				destination: input.destination,
+				dryRun: input.dryRun ?? false,
+				includeAgents: input.includeAgents ?? true,
+				includeConversations: input.includeConversations ?? true,
+				includeSkills: input.includeSkills ?? true,
+				profileId: input.profileId,
+			},
 		},
-	});
+		agentSyncExportResultResponseCodec
+	);
 }
 
 export function resumeAgentSyncAcpSession(
 	target: ApiTarget,
 	conversationId: string
 ): Promise<AgentSyncResumeResult> {
-	return request<AgentSyncResumeResult>(target, "/api/agent-sync/acp/resume", {
-		method: "POST",
-		body: { conversationId },
-	});
+	return request<AgentSyncResumeResult>(
+		target,
+		"/api/agent-sync/acp/resume",
+		{
+			method: "POST",
+			body: { conversationId },
+		},
+		agentSyncResumeResultResponseCodec
+	);
 }
 
 export function getAgentSyncStatus(
 	target: ApiTarget
 ): Promise<AgentSyncStatus> {
-	return request<AgentSyncStatus>(target, "/api/agent-sync/status");
+	return request<AgentSyncStatus>(
+		target,
+		"/api/agent-sync/status",
+		undefined,
+		agentSyncStatusResponseCodec
+	);
 }
 
 export function resolveAgentSyncConflict(
@@ -349,6 +415,181 @@ export function resolveAgentSyncConflict(
 				profileId: input.profileId,
 				resolution: input.resolution,
 			},
-		}
+		},
+		responseCodec5
 	);
 }
+
+// Response codecs validate the consumed native DTO fields and retain JSON extension fields.
+const syncProviderResponseCodec = z.enum(SYNC_PROVIDERS);
+const agentSyncProfileResponseCodec = z
+	.object({
+		conflictCount: z.number(),
+		exportEnabled: z.boolean(),
+		id: z.string(),
+		importEnabled: z.boolean(),
+		lastOperationId: z.union([z.string(), z.null()]),
+		provider: syncProviderResponseCodec,
+		root: z.string(),
+		status: z.string(),
+		updatedAt: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec1 = z
+	.object({ profiles: z.array(agentSyncProfileResponseCodec).optional() })
+	.catchall(gatewayJsonValueSchema);
+const responseCodec2 = gatewayJsonValueSchema
+	.optional()
+	.transform(() => undefined);
+const agentSyncCapabilitiesResponseCodec = z
+	.object({
+		acpLoadResume: z.union([z.boolean(), z.null()]),
+		nativeConversationExport: z.boolean(),
+		nativeThreads: z.boolean(),
+		note: z.union([z.string(), z.null()]),
+		portableBundle: z.boolean(),
+		setupImport: z.boolean(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const agentSyncScanItemResponseCodec = z
+	.object({
+		already_exists: z.boolean().optional(),
+		detail: z.string().optional(),
+		id: z.string(),
+		kind: importItemKindSchema,
+		title: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const nativeThreadResponseCodec = z
+	.object({
+		cwd: z.string().optional(),
+		engine: z.string(),
+		git_branch: z.string().optional(),
+		id: z.string(),
+		message_count: z.number(),
+		native_session_id: z.string().optional(),
+		title: z.string(),
+		updated_at: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const agentSyncScanResponseCodec = z
+	.object({
+		agentId: z.union([z.string(), z.null()]),
+		capabilities: agentSyncCapabilitiesResponseCodec,
+		items: z.array(agentSyncScanItemResponseCodec),
+		provider: syncProviderResponseCodec,
+		root: z.string(),
+		threads: z.array(nativeThreadResponseCodec),
+		warnings: z.array(z.string()),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec3 = z
+	.object({
+		already_imported: z.boolean().optional(),
+		conversation_id: z.string().optional(),
+		dry_run: z.boolean().optional(),
+		messages_added: z.number().optional(),
+		would_create: z.boolean().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const importOutcomeWireResponseCodec = z
+	.object({
+		already_exists: z.boolean().optional(),
+		detail: z.string().optional(),
+		folder_path: z.string().optional(),
+		id: z.string(),
+		kind: importItemKindSchema,
+		status: z.union([
+			z.literal("imported"),
+			z.literal("skipped"),
+			z.literal("failed"),
+		]),
+		title: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec4 = z
+	.object({
+		conflicts: z.number().optional(),
+		dryRun: z.boolean().optional(),
+		failed: z.number().optional(),
+		imported: z.number().optional(),
+		operationId: z.string().optional(),
+		profileId: z.string().optional(),
+		results: z.array(importOutcomeWireResponseCodec).optional(),
+		skipped: z.number().optional(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const acpResumeStatusResponseCodec = z
+	.object({
+		agentId: z.union([z.string(), z.null()]),
+		conversationId: z.string(),
+		mode: z.string(),
+		reason: z.string(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const agentSyncExportResultResponseCodec = z
+	.object({
+		acpResume: z.array(acpResumeStatusResponseCodec),
+		agents: z.number(),
+		bundleHash: z.string(),
+		bundlePath: z.string(),
+		conflicts: z.number(),
+		conversations: z.number(),
+		destination: z.string(),
+		dryRun: z.boolean(),
+		messages: z.number(),
+		operationId: z.string(),
+		profileId: z.union([z.string(), z.null()]),
+		projectedFiles: z.number(),
+		skills: z.number(),
+		warnings: z.array(z.string()),
+	})
+	.catchall(gatewayJsonValueSchema);
+const agentSyncResumeResultResponseCodec = z
+	.object({
+		agentId: z.union([z.string(), z.null()]),
+		conversationId: z.string(),
+		mode: z.string(),
+		nativeSessionId: z.union([z.string(), z.null()]),
+		reason: z.string(),
+		response: gatewayJsonValueSchema,
+	})
+	.catchall(gatewayJsonValueSchema);
+const agentSyncBindingResponseCodec = z
+	.object({
+		agentId: z.string(),
+		capabilities: gatewayJsonValueSchema,
+		conversationId: z.string(),
+		engine: z.string(),
+		nativeSessionId: z.string(),
+		nodeId: z.string(),
+		updatedAt: z.number(),
+		workingDirectory: z.union([z.string(), z.null()]),
+	})
+	.catchall(gatewayJsonValueSchema);
+const agentSyncItemStatusResponseCodec = z
+	.object({
+		conflict: gatewayJsonValueSchema,
+		generatedHash: z.union([z.string(), z.null()]),
+		kind: z.string(),
+		operationId: z.union([z.string(), z.null()]),
+		profileId: z.string(),
+		revision: z.number(),
+		sourceHash: z.union([z.string(), z.null()]),
+		sourceId: z.string(),
+		state: z.string(),
+		updatedAt: z.number(),
+	})
+	.catchall(gatewayJsonValueSchema);
+const agentSyncStatusResponseCodec = z
+	.object({
+		activeOperations: z.number(),
+		bindings: z.array(agentSyncBindingResponseCodec),
+		items: z.array(agentSyncItemStatusResponseCodec),
+		nodeId: z.string(),
+		profiles: z.array(agentSyncProfileResponseCodec),
+	})
+	.catchall(gatewayJsonValueSchema);
+const responseCodec5 = z
+	.object({ resolved: z.boolean() })
+	.catchall(gatewayJsonValueSchema);

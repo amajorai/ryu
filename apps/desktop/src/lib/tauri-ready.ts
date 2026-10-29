@@ -44,6 +44,19 @@ import {
 	listen as tauriListen,
 	type UnlistenFn,
 } from "@tauri-apps/api/event";
+import { z } from "zod";
+
+// Readiness concerns these two native capabilities, not the rest of Window or
+// the injected bridge. Both are necessary for invoke and event subscriptions.
+const bridgeWindowSchema = z.object({
+	__TAURI_INTERNALS__: z.object({
+		invoke: z.function(),
+		transformCallback: z.function(),
+	}),
+});
+const missingWindowSchema = z.undefined();
+const bridgeTypeErrorSchema = z.instanceof(TypeError);
+type BridgeFailureInput = Parameters<typeof bridgeTypeErrorSchema.parse>[0];
 
 /** How long to wait for `window.__TAURI_INTERNALS__` before giving up. Injection
  *  is normally sub-frame; this is generous for a slow cold start and short enough
@@ -74,21 +87,7 @@ export class TauriUnavailableError extends Error {
  *  free, so it is safe to re-check on every call — that is what lets a LATE
  *  bridge still work after the gate has already returned a negative verdict. */
 export function isTauriReady(): boolean {
-	if (typeof window === "undefined") {
-		return false;
-	}
-	const internals = (
-		window as Window & {
-			__TAURI_INTERNALS__?: {
-				invoke?: unknown;
-				transformCallback?: unknown;
-			};
-		}
-	).__TAURI_INTERNALS__;
-	return (
-		typeof internals?.invoke === "function" &&
-		typeof internals.transformCallback === "function"
-	);
+	return bridgeWindowSchema.safeParse(globalThis.window).success;
 }
 
 /** The memoized negative wait. Only ever holds a pending/false-resolved promise:
@@ -104,7 +103,7 @@ export function whenTauriReady(): Promise<boolean> {
 	if (isTauriReady()) {
 		return Promise.resolve(true);
 	}
-	if (typeof window === "undefined") {
+	if (missingWindowSchema.safeParse(globalThis.window).success) {
 		return Promise.resolve(false);
 	}
 	if (!pendingGate) {
@@ -138,8 +137,8 @@ export function whenTauriReady(): Promise<boolean> {
  * the webapp shim's own `Error("… is not supported on web")` — from being
  * mistaken for one and retried.
  */
-function isBridgeMissingFailure(error: unknown): boolean {
-	return error instanceof TypeError && !isTauriReady();
+function isBridgeMissingFailure(error: BridgeFailureInput): boolean {
+	return bridgeTypeErrorSchema.safeParse(error).success && !isTauriReady();
 }
 
 /**
@@ -242,6 +241,19 @@ export async function withTauri<T>(
 		}
 		return await work();
 	}
+}
+
+/**
+ * Did this call fail because no desktop backend exists here at all? True for a
+ * {@link TauriUnavailableError}, and for the `ReferenceError` a runtime with no
+ * `window` (unit tests under Bun) throws before any bridge check can run. A
+ * failure while the bridge is present is a real command error and returns false.
+ */
+export function isNoDesktopBackend(error: unknown): boolean {
+	return (
+		error instanceof TauriUnavailableError ||
+		(error instanceof ReferenceError && !isTauriReady())
+	);
 }
 
 /** Test-only: forget the memoized negative verdict so a fresh wait can run. */

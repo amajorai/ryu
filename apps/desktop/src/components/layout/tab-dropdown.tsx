@@ -1,5 +1,6 @@
 import { ArrowDown01Icon, Message01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Command,
 	CommandEmpty,
@@ -20,6 +21,7 @@ import {
 	TabSearchRow,
 	type TabSearchTab,
 } from "@/src/components/layout/tab-search-dialog.tsx";
+import layoutStyles from "./tab-dropdown.module.css";
 
 export interface TabDropdownProps {
 	activateTab: (id: string) => void;
@@ -37,6 +39,7 @@ export function TabDropdown({
 	closeTab,
 	tabs,
 }: TabDropdownProps) {
+	const tl = useLiteralMessages();
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
 	const activeTab = tabs.find((tab) => tab.id === activeTabId);
@@ -55,7 +58,10 @@ export function TabDropdown({
 					<button
 						aria-label="Open tabs"
 						className={cn(
-							"group/tab-dropdown flex min-w-0 max-w-[min(24rem,50vw)] items-center gap-1.5 rounded-3xl border-0 bg-transparent px-2.5 py-1.5 text-muted-foreground text-sm shadow-none outline-none transition-[background-color,color] duration-150 ease-out hover:bg-muted/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+							cn(
+								"group/tab-dropdown flex min-w-0 max-w-[min(24rem,50vw)] items-center gap-1.5 rounded-3xl border-0 bg-transparent px-2.5 py-1.5 text-muted-foreground text-sm shadow-none outline-none duration-150 ease-out hover:bg-muted/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30",
+								layoutStyles.authored1
+							)
 						)}
 						data-tab-dropdown-trigger
 						data-tauri-drag-region={false}
@@ -82,8 +88,9 @@ export function TabDropdown({
 			/>
 			<PopoverContent
 				align="start"
-				className="w-[min(28rem,calc(100vw-2rem))] p-0"
+				className="w-[min(28rem,calc(100vw-2rem))]"
 				data-tab-dropdown-menu
+				spacing="flush"
 			>
 				<Command>
 					<CommandInput
@@ -93,10 +100,15 @@ export function TabDropdown({
 						placeholder="Search open tabs…"
 						value={query}
 					/>
-					<CommandList className="max-h-[min(60vh,28rem)] p-1">
+					<CommandList className="max-h-[min(60vh,28rem)]">
 						<CommandEmpty>No open tabs match your search.</CommandEmpty>
 						<CommandGroup
-							heading={`${tabs.length} open tab${tabs.length === 1 ? "" : "s"}`}
+							heading={tl(
+								"{count, plural, one {# open tab} other {# open tabs}}",
+								{
+									count: tabs.length,
+								}
+							)}
 						>
 							{tabs.map((tab) => (
 								<TabSearchRow

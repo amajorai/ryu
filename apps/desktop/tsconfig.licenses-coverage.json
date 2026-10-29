@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "vite/client"]
+  },
+  "include": [
+    "src/components/settings/OpenSourceLicensesSettings.tsx",
+    "e2e/license-reader-proof.spec.ts",
+    "e2e/license-reader-proof.playwright.config.ts",
+    "e2e/harness/license-reader-proof/harness.tsx",
+    "e2e/harness/license-reader-proof/vite.config.ts"
+  ]
+}

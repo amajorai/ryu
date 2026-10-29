@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
 // apps/desktop/src/lib/api/managed-nodes.ts
 //
 // Typed client for the org's managed (Ryu Cloud) nodes (A4 / #501).
@@ -16,7 +18,7 @@
 // older server without the route all degrade to an empty list (never an error),
 // so the NodeSelector keeps its local + LAN + mesh nodes regardless.
 
-import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import { BACKEND_URL, getActiveToken } from "@/lib/auth-client.ts";
 
 /** One managed node the active org can reach, as returned by the control plane. */
 export interface ManagedNode {
@@ -47,10 +49,9 @@ export interface ManagedNode {
 	/** Publicly-reachable Core base URL the node advertised on registration. */
 	url: string;
 	/**
-	 * Short-lived Better Auth user JWT for the selected managed node. The
-	 * control plane returns one at the response-envelope level; this client
-	 * copies it onto each node so request construction stays local. It is
-	 * distinct from a self-hosted node bearer and is never persisted as one.
+	 * Short-lived delegation scoped to this managed node. The wire field retains
+	 * its historical name, but the control plane now returns one credential per
+	 * node rather than a reusable account JWT shared across the response.
 	 */
 	userJwt: string | null;
 }
@@ -66,7 +67,7 @@ const NODES_URL = `${BACKEND_URL.replace(/\/$/, "")}/api/control-plane/nodes`;
 export async function fetchManagedNodes(): Promise<ManagedNode[] | null> {
 	let token: string | null = null;
 	try {
-		token = localStorage.getItem(TOKEN_KEY);
+		token = getActiveToken();
 	} catch {
 		// No storage available — treat as signed out.
 	}
@@ -81,29 +82,49 @@ export async function fetchManagedNodes(): Promise<ManagedNode[] | null> {
 		if (!resp.ok) {
 			return null;
 		}
-		const json = (await resp.json()) as {
-			nodes?: Array<ManagedNode & { token?: string | null }>;
-			token?: string | null;
-			userJwt?: string | null;
-		};
+		const json = z
+			.object({
+				nodes: z
+					.array(
+						z
+							.object({
+								id: z.string(),
+								lastSeenAt: z.string().nullable(),
+								name: z.string(),
+								orgId: z.string(),
+								orgName: z.string().nullable(),
+								ownerUserId: z.string().nullish(),
+								scope: z.enum(["org", "team", "personal"]).optional(),
+								serverId: z.string().nullish(),
+								teamId: z.string().nullish(),
+								url: z.string(),
+								userJwt: z.string().nullish().catch(undefined),
+								token: z.string().nullish().catch(undefined),
+							})
+							.catchall(z.json())
+					)
+					.optional()
+					.catch([]),
+				token: z.string().nullish().catch(undefined),
+				userJwt: z.string().nullish().catch(undefined),
+			})
+			.parse(await resp.json());
 		const list = Array.isArray(json.nodes) ? json.nodes : [];
-		// New responses name this credential explicitly. Read the old `token`
-		// spelling for one release so an older control plane still hydrates, but
-		// never expose that ambiguous name in the desktop model.
-		const shared =
-			typeof json.userJwt === "string"
-				? json.userJwt
-				: typeof json.token === "string"
-					? json.token
-					: null;
+		// The per-node `userJwt` field now carries a node-bound delegation for
+		// compatibility with the existing Desktop model. Read the old `token`
+		// spelling only when talking to an older control plane.
+		const shared = isNativeText(json.userJwt)
+			? json.userJwt
+			: isNativeText(json.token)
+				? json.token
+				: null;
 		return list.map(({ token: legacyToken, ...node }) => ({
 			...node,
-			userJwt:
-				typeof node.userJwt === "string"
-					? node.userJwt
-					: typeof legacyToken === "string"
-						? legacyToken
-						: shared,
+			userJwt: isNativeText(node.userJwt)
+				? node.userJwt
+				: isNativeText(legacyToken)
+					? legacyToken
+					: shared,
 		}));
 	} catch {
 		// Server unreachable / offline — degrade to no managed nodes.

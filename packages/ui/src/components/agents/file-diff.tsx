@@ -1,4 +1,12 @@
 "use client";
+import type { CSSProperties } from "react";
+import css from "./file-diff.module.css";
+
+interface Inline1Style extends CSSProperties {
+	"--file-diff-1-max-height"?: CSSProperties["maxHeight"];
+}
+
+import { isNativeFunction } from "../../lib/native-primitive-observation.ts";
 
 // beui.dev/components/agents/file-diff
 
@@ -6,11 +14,11 @@ import {
 	type AgentCodeLanguage,
 	AgentCodeLine,
 	useAgentCodeTokens,
-} from "@ryu/ui/components/agents/agent-code";
-import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure";
-import { SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease";
+} from "@ryu/ui/components/agents/agent-code.tsx";
+import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
+import { SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Check,
 	ChevronDown,
@@ -154,7 +162,7 @@ export function FileDiff({
 			if (viewport.scrollHeight <= viewport.clientHeight) {
 				return;
 			}
-			if (typeof viewport.scrollTo === "function") {
+			if (isNativeFunction(viewport.scrollTo)) {
 				viewport.scrollTo({
 					top: viewport.scrollHeight,
 					behavior: reduce ? "auto" : "smooth",
@@ -180,6 +188,10 @@ export function FileDiff({
 		copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
 	}, [copyText, onCopy]);
 
+	const inline1Style: Inline1Style = {
+		"--file-diff-1-max-height":
+			maxHeight === undefined ? undefined : `${maxHeight}px`,
+	};
 	return (
 		<div
 			aria-busy={streaming}
@@ -234,10 +246,12 @@ export function FileDiff({
 					<div className="overflow-hidden rounded-xl bg-muted/80">
 						<div
 							aria-live="polite"
-							className="scrollbar-hide overflow-auto"
+							className={[css.inline1, "scrollbar-hide overflow-auto"].join(
+								" "
+							)}
 							data-slot="file-diff-viewport"
 							ref={viewportRef}
-							style={{ maxHeight }}
+							style={inline1Style}
 						>
 							<div className="font-mono text-xs leading-5">
 								<span className="sr-only">File changes</span>

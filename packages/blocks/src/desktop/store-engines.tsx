@@ -1,4 +1,5 @@
 "use client";
+import type { CatalogItem } from "@ryuhq/core-client/catalog";
 
 // Presentational layer of the desktop Store → Engines section. The live app
 // (`apps/desktop/src/components/store/EnginesCatalogSection.tsx`) is a thin
@@ -22,6 +23,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { InstallProgressButton } from "@ryu/blocks/desktop/install-button";
 import type { ViewMode } from "@ryu/blocks/desktop/view-toggle";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -43,11 +45,7 @@ import { Spinner } from "@ryu/ui/components/spinner";
 import { Switch } from "@ryu/ui/components/switch";
 import type { ReactNode } from "react";
 
-export type EngineInstallState =
-	| "installed"
-	| "installing"
-	| "failed"
-	| "not_installed";
+export type EngineInstallState = CatalogItem["install_state"];
 
 export type EnginePendingKind = "install" | "uninstall" | "toggle";
 
@@ -102,9 +100,12 @@ export function EngineGrid({
 }
 
 export function EmptyGroupHint({ label }: { label: string }) {
+	const tl = useLiteralMessages();
 	return (
 		<p className="text-muted-foreground text-sm">
-			No {label.toLowerCase()} engines available yet.
+			{tl("No {engineGroup} engines available yet.", {
+				engineGroup: label.toLowerCase(),
+			})}
 		</p>
 	);
 }
@@ -146,7 +147,9 @@ export function EngineCardShell({
 				/>
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 					<div className="flex items-center gap-2">
-						<span className="truncate font-medium text-sm">{displayName}</span>
+						<span className="truncate font-medium text-sm" title={displayName}>
+							{displayName}
+						</span>
 						{installStateBadge(installState)}
 						{statusBadge}
 					</div>
@@ -165,19 +168,19 @@ export function EngineCardShell({
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle className="flex items-center justify-between gap-2">
+				<CardTitle className="justify-between" layout="badge-row">
 					<span className="flex items-center gap-2">
 						<HugeiconsIcon className="size-4 opacity-70" icon={LayerIcon} />
 						{displayName}
 					</span>
 					{toggle}
 				</CardTitle>
-				<CardDescription className="flex items-center gap-2">
+				<CardDescription layout="legend">
 					{installStateBadge(installState)}
 					{statusBadge}
 				</CardDescription>
 			</CardHeader>
-			<CardContent className="flex flex-col gap-3">
+			<CardContent layout="stack">
 				<p className="line-clamp-2 text-muted-foreground text-sm">
 					{description}
 				</p>
@@ -218,7 +221,7 @@ export function EngineInstallButton({
 			<div className="flex items-center gap-2">
 				{hasUpdate ? (
 					<Button
-						className="text-primary hover:text-primary"
+						appearance="store-engine-update"
 						disabled={busy}
 						loading={pending === "install"}
 						onClick={onInstall}

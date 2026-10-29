@@ -5,6 +5,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import { IconCheck, IconChevronDown, IconCopy } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
@@ -16,11 +17,11 @@ export async function writeClipboardPayload(
 	values: Record<string, ClipboardValue>,
 	fallbackText?: string
 ): Promise<void> {
-	if (typeof navigator === "undefined" || !navigator.clipboard) {
+	if (globalThis.navigator === undefined || !navigator.clipboard) {
 		throw new Error("Clipboard API not available");
 	}
 
-	if (navigator.clipboard.write && typeof ClipboardItem !== "undefined") {
+	if (navigator.clipboard.write && globalThis.ClipboardItem !== undefined) {
 		const blobs: Record<string, Blob> = {};
 		for (const [mimeType, value] of Object.entries(values)) {
 			blobs[mimeType] =
@@ -31,7 +32,7 @@ export async function writeClipboardPayload(
 	}
 
 	const text = fallbackText ?? values["text/plain"];
-	if (typeof text !== "string" || !navigator.clipboard.writeText) {
+	if (!(isNativeText(text) && navigator.clipboard.writeText)) {
 		throw new Error("Clipboard API not available");
 	}
 	await navigator.clipboard.writeText(text);
@@ -90,11 +91,9 @@ export function CopyFormatMenu({
 			<DropdownMenuTrigger
 				render={
 					<Button
+						appearance="clipboard-format-copy"
 						aria-label={ariaLabel}
-						className={cn(
-							"h-7 gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:text-foreground",
-							className
-						)}
+						className={cn(className)}
 						data-copy-state={failed ? "error" : copied ? "copied" : "idle"}
 						data-testid={dataTestId}
 						title={failed ? "Copy failed" : ariaLabel}

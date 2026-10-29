@@ -8,6 +8,7 @@
 // hits a node and no swap leaks into the shared-process smoke tests.
 
 import { afterEach, expect, test } from "bun:test";
+import type { AppResponseValue } from "@ryuhq/core-client/app-request-json";
 import type { ApiTarget } from "@ryuhq/core-client/client";
 import {
 	type FeatureListConfig,
@@ -22,19 +23,37 @@ afterEach(() => {
 	globalThis.fetch = realFetch;
 });
 
-// Serve one JSON payload; capture the URL + headers the reader built.
-function serve(
-	payload: unknown,
-	status = 200
-): { url: () => string; auth: () => string | undefined } {
+/** Only the raw optional property observed by this legacy fixture. A Headers
+ * instance or tuple array need not own Authorization; no header normalization
+ * or business/header record contract is claimed. */
+interface LegacyAuthorizationObservation {
+	Authorization?: unknown;
+}
+
+// Serve one JSON transport payload; capture the URL + raw header slot.
+function serve(payload: AppResponseValue, status = 200) {
 	let capturedUrl = "";
-	let capturedAuth: string | undefined;
-	globalThis.fetch = ((url: string | URL, init?: RequestInit) => {
-		capturedUrl = String(url);
-		capturedAuth = (init?.headers as Record<string, string> | undefined)
-			?.Authorization;
-		return Promise.resolve(new Response(JSON.stringify(payload), { status }));
-	}) as unknown as typeof fetch;
+	let capturedAuth: LegacyAuthorizationObservation["Authorization"];
+	globalThis.fetch = Object.assign(
+		(
+			url: Parameters<typeof realFetch>[0],
+			init?: Parameters<typeof realFetch>[1]
+		) => {
+			capturedUrl = String(url);
+			// SAFETY: this declaration observes only the original optional raw property.
+			// All native HeadersInit carriers support JavaScript property access; Headers
+			// instances and tuple arrays intentionally yield undefined when the slot is
+			// absent. The value remains opaque; no string or full header DTO is claimed.
+			capturedAuth = (
+				init?.headers as LegacyAuthorizationObservation | undefined
+			)?.Authorization;
+			return Promise.resolve(new Response(JSON.stringify(payload), { status }));
+		},
+		{
+			preconnect: (...args: Parameters<typeof realFetch.preconnect>) =>
+				realFetch.preconnect(...args),
+		}
+	);
 	return { url: () => capturedUrl, auth: () => capturedAuth };
 }
 

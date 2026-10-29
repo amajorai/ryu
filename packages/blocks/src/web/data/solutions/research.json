@@ -1,37 +1,10 @@
 {
   "slug": "research",
   "name": "Research",
-  "navLabel": "Research",
-  "category": "Industries",
   "icon": "Microscope",
   "tagline": "Find information in your source material, extract data, and prepare cited summaries for review.",
-  "heroEyebrow": "Ryu for Research",
   "heroTitle": "Ryu for research",
-  "heroSubtitle": "Find information in your source material, extract data, and prepare cited summaries for review.",
   "visualKey": "CoreVisual",
-  "intro": "Research is bottlenecked by literature review, data extraction, and repetitive analysis, while unpublished results demand discretion. Ryu grounds agents in your own corpus so answers cite sources, runs locally so sensitive data stays on-device, and chains steps into reproducible Workflows you can rerun. It assists the researcher; you verify every claim.",
-  "highlights": [
-    {
-      "title": "Cites every source",
-      "description": "Spaces and RAG ground answers in your own paper corpus and datasets, pointing back to the exact passage.",
-      "icon": "Sparkles"
-    },
-    {
-      "title": "Reproducible workflows",
-      "description": "Chain extraction, analysis, and summary into a Workflow you can rerun on new inputs and schedule.",
-      "icon": "RefreshCw"
-    },
-    {
-      "title": "Sensitive data on-device",
-      "description": "Run a local model with no telemetry, so unpublished results and confidential datasets stay on your machine.",
-      "icon": "Shield"
-    },
-    {
-      "title": "Right model per step",
-      "description": "Route a cheap local model for bulk screening and a frontier model for careful synthesis, no lock-in.",
-      "icon": "Shield"
-    }
-  ],
   "useCases": [
     {
       "title": "Literature screening",
@@ -42,12 +15,12 @@
       "description": "Pull methods, sample sizes, and results from papers into a structured table for a review or meta-analysis."
     },
     {
-      "title": "Corpus Q&A",
+      "title": "Library questions",
       "description": "Ask questions across your reference library and get answers that cite the specific paper and section."
     },
     {
       "title": "Analysis pipelines",
-      "description": "Chain a Workflow that ingests data, runs the analysis tools, and drafts a summary of what the results show."
+      "description": "Build a workflow that loads data, runs your analysis tools, and summarizes the results."
     },
     {
       "title": "Manuscript drafting",
@@ -55,31 +28,21 @@
     },
     {
       "title": "Grant and proposal support",
-      "description": "Draft specific-aims and background sections grounded in your prior work and the literature, for your revision."
+      "description": "Draft specific-aims and background sections based on your prior work and the literature, for your revision."
     }
-  ],
-  "examplePrompts": [
-    "Screen these 40 abstracts against my inclusion criteria and list which to read in full and why.",
-    "Extract sample size, method, and primary outcome from each paper in this Space into a table.",
-    "What does the literature in my corpus say about this mechanism? Cite the papers.",
-    "Build a workflow that ingests this dataset, runs the analysis, and drafts a results summary.",
-    "Draft a related-work section comparing these five cited papers to my approach."
   ],
   "faq": [
     {
       "q": "Will answers be traceable to sources?",
-      "a": "Yes. Ground agents on your paper corpus and datasets with Spaces and RAG. Every answer cites the specific source so you can verify it before it enters a manuscript or report."
+      "a": "Yes. Add your papers and datasets to a Space. Every answer cites the source so you can verify it before it enters a manuscript or report."
     },
     {
       "q": "Is unpublished data kept private?",
-      "a": "Ryu is local-first with no telemetry, so unpublished results and confidential datasets can stay entirely on your machine. When you route to a cloud model the Gateway redacts sensitive data and logs every call."
+      "a": "Yes. With a local model, unpublished results and datasets stay on your machine. For cloud models, Gateway rules can block or redact personal data and log each call. Analytics and crash reports are on by default and can be turned off."
     },
     {
       "q": "Can I reproduce an analysis later?",
-      "a": "Yes. Capture the steps as a Workflow that chains tools and agents, then rerun it on new inputs or schedule it. The Gateway audit trail records what ran, which keeps the pipeline accountable."
+      "a": "Yes. Capture the steps as a Workflow that chains tools and agents, then rerun it on new inputs or schedule it. Workflow history shows each run, and the Gateway audit trail records the model calls it routed."
     }
-  ],
-  "ctaTitle": "Spend more time on discovery.",
-  "ctaSubtitle": "Screen, extract, and analyze faster with every answer cited and sensitive data on-device.",
-  "ctaNote": "Source-cited · Local-first · Reproducible workflows"
+  ]
 }

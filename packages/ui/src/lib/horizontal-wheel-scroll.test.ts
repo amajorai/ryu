@@ -8,6 +8,7 @@ import {
 } from "./horizontal-wheel-scroll.ts";
 
 type TestElement = HorizontalWheelElement & { overflowX: string };
+const overflowValues = new WeakMap<HorizontalWheelElement, string>();
 
 function element(overrides: Partial<TestElement> = {}): TestElement {
 	let scrollLeft = overrides.scrollLeft ?? 0;
@@ -31,6 +32,7 @@ function element(overrides: Partial<TestElement> = {}): TestElement {
 			);
 		},
 	});
+	overflowValues.set(result, result.overflowX);
 	return result;
 }
 
@@ -55,7 +57,7 @@ function wheelEvent(
 
 function handler() {
 	return createHorizontalWheelHandler(
-		(candidate) => (candidate as TestElement).overflowX
+		(candidate) => overflowValues.get(candidate) ?? ""
 	);
 }
 
@@ -179,7 +181,7 @@ describe("horizontal wheel scrolling", () => {
 			removeEventListener() {
 				removed += 1;
 			},
-		} as unknown as Document;
+		};
 
 		const cleanup = installHorizontalWheelScrolling(documentLike);
 		const duplicateCleanup = installHorizontalWheelScrolling(documentLike);

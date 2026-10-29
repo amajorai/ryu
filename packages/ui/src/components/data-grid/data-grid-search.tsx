@@ -207,7 +207,7 @@ function DataGridSearchImpl({
 					onCompositionEnd={onCompositionEnd}
 					onCompositionStart={onCompositionStart}
 					onKeyDown={onKeyDown}
-					placeholder="Find in table..."
+					placeholder="Find in table…"
 					ref={inputRef}
 					spellCheck={false}
 				/>
@@ -247,7 +247,7 @@ function DataGridSearchImpl({
 			</div>
 			<div className="flex items-center gap-1 whitespace-nowrap text-muted-foreground text-xs">
 				{searchMatches.length > 0 ? (
-					<span>
+					<span className="tabular-nums">
 						{matchIndex + 1} of {searchMatches.length}
 					</span>
 				) : hasQuery ? (

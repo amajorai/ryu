@@ -5,10 +5,10 @@
 import {
 	AgentCode,
 	type AgentCodeLanguage,
-} from "@ryu/ui/components/agents/agent-code";
-import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure";
-import { EASE_OUT, SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/agents/agent-code.tsx";
+import { AgentDisclosure } from "@ryu/ui/components/agents/agent-disclosure.tsx";
+import { EASE_OUT, SPRING_PRESS, SPRING_SWAP } from "@ryu/ui/lib/ease.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	Check,
 	ChevronDown,
@@ -75,7 +75,7 @@ export interface ToolApprovalProps {
 	tool: ReactNode;
 }
 
-const STATUS_COPY: Record<ToolApprovalStatus, string> = {
+const STATUS_COPY = {
 	pending: "Approval required",
 	approving: "Approving",
 	approved: "Approved",
@@ -83,7 +83,7 @@ const STATUS_COPY: Record<ToolApprovalStatus, string> = {
 	running: "Running",
 	complete: "Completed",
 	error: "Failed",
-};
+} satisfies Record<ToolApprovalStatus, string>;
 
 const PENDING_BADGE = "border-warning/30 bg-warning/10 text-status-warning";
 const BUSY_BADGE = "border-info/30 bg-info/10 text-status-info";
@@ -104,16 +104,13 @@ function getStatusBadgeClass(status: ToolApprovalStatus) {
 	return BAD_BADGE;
 }
 
-const CHOICE_TONE_CLASS: Record<
-	NonNullable<ToolApprovalChoice["tone"]>,
-	string
-> = {
+const CHOICE_TONE_CLASS = {
 	primary:
 		"bg-foreground text-background focus-visible:ring-offset-2 hover:bg-foreground/90",
 	secondary:
 		"border border-border/60 bg-background text-foreground hover:bg-muted",
 	ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
-};
+} satisfies Record<NonNullable<ToolApprovalChoice["tone"]>, string>;
 
 function StatusIcon({
 	status,
@@ -277,7 +274,7 @@ export function ToolApproval({
 						</div>
 						<span
 							className={cn(
-								"shrink-0 rounded-full border px-2 py-0.5 font-medium text-[11px] transition-colors",
+								"type-caption shrink-0 rounded-full border px-2 py-0.5 font-medium transition-colors",
 								getStatusBadgeClass(status)
 							)}
 						>

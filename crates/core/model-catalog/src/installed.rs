@@ -2,9 +2,9 @@
 //! an "Installed" badge and an installed-only filter without re-deriving the
 //! mapping from bare filenames on disk.
 //!
-//! Backed by `~/.ryu/installed-models.json`. Each record links a downloaded GGUF
-//! file (stored at `~/.ryu/models/<stem>.gguf` by the shared [`GgufDownloader`])
-//! back to its Hugging Face repo id and original filename. The on-disk GGUF is
+//! Backed by `<data dir>/state/installed-models.json`. Each record links a
+//! downloaded GGUF file (stored at `<data dir>/models/chat/<stem>.gguf` by the
+//! catalog install path) back to its Hugging Face repo id and original filename. The on-disk GGUF is
 //! still the source of truth for "is it really there"; this index just records
 //! provenance so the catalog UI can group files under their model card.
 
@@ -14,11 +14,13 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use ryu_model_format::{engines_for_format, ModelFormat};
+use ryu_sidecar_runtime::layout::{self, Modality};
 
 /// One downloaded model's provenance record. A record is either a single GGUF
-/// file (`format = Gguf`, lives at `~/.ryu/models/<stem>.gguf`) or a multi-file
-/// repo snapshot (`format = Safetensors | Mlx`, lives in the directory
-/// `~/.ryu/models/<stem>/`, where `stem` is the slugified repo id).
+/// file (`format = Gguf`, lives at `models/chat/<stem>.gguf` — or, for the
+/// bundled defaults, `models/embedding/` / `models/rerank/`) or a multi-file repo
+/// snapshot (`format = Safetensors | Mlx`, lives in the directory
+/// `models/chat/snapshots/<stem>/`, where `stem` is the slugified repo id).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledModel {
     /// Hugging Face repo id, e.g. `"unsloth/gemma-4-E2B-it-GGUF"`.
@@ -26,8 +28,8 @@ pub struct InstalledModel {
     /// For GGUF: the original filename within the repo. For a snapshot: the repo
     /// id (there is no single file to name).
     pub filename: String,
-    /// Local key. GGUF: file stem under `~/.ryu/models/<stem>.gguf`. Snapshot:
-    /// the slugified repo id, used as the directory `~/.ryu/models/<stem>/`.
+    /// Local key. GGUF: file stem (`models/chat/<stem>.gguf`). Snapshot: the
+    /// slugified repo id, used as the directory `models/chat/snapshots/<stem>/`.
     pub stem: String,
     /// Size in bytes when known (summed across shards for a snapshot).
     pub size_bytes: Option<u64>,
@@ -38,7 +40,7 @@ pub struct InstalledModel {
     pub format: ModelFormat,
     /// For a GGUF vision model: the original filename of the multimodal
     /// projector (`mmproj-*.gguf`) auto-installed alongside the weights, stored
-    /// on disk at [`mmproj_file_path`] (`~/.ryu/models/<stem>.mmproj.gguf`).
+    /// on disk at [`mmproj_file_path`] (`models/chat/<stem>.mmproj.gguf`).
     /// `None` for text-only models. Informational/provenance only — the launch
     /// path resolves the adapter by the on-disk convention so a vision model
     /// loads its projector even when this field is absent (legacy records).
@@ -63,9 +65,9 @@ pub struct ActiveModel {
     pub engine: String,
     /// Weight format of the selected model.
     pub format: ModelFormat,
-    /// GGUF: the local stem (resolves to `~/.ryu/models/<stem>.gguf`).
+    /// GGUF: the local stem (resolves via [`model_file_path`]).
     /// Snapshot: the HF repo id (the engine resolves it from
-    /// `~/.ryu/models/<slug>/`).
+    /// `models/chat/snapshots/<slug>/`, see [`present_snapshot_dir`]).
     pub r#ref: String,
 }
 
@@ -77,11 +79,30 @@ struct InstalledModelsFile {
 }
 
 fn store_path() -> PathBuf {
-    crate::ryu_dir().join("installed-models.json")
+    layout::state_path(&crate::ryu_dir(), "installed-models.json")
 }
 
-fn models_dir() -> PathBuf {
-    crate::ryu_dir().join("models")
+/// `<data dir>/models/chat` — where catalog GGUF installs (and their vision
+/// adapters) land.
+pub fn chat_models_dir() -> PathBuf {
+    layout::models_dir(&crate::ryu_dir(), Modality::Chat)
+}
+
+/// The modality folders whose GGUFs the catalog lists as installed models: chat
+/// models, plus the bundled default embedding and reranker models (which the
+/// installed view deliberately shows under their Hugging Face repo). Speech,
+/// image, video, VAD and other weights live in their own `models/<modality>/`
+/// folders and are never scanned, so they can never surface as a chat card.
+pub const CATALOG_GGUF_MODALITIES: [Modality; 3] =
+    [Modality::Chat, Modality::Embedding, Modality::Rerank];
+
+/// The directories [`CATALOG_GGUF_MODALITIES`] name, in lookup order.
+pub fn catalog_gguf_dirs() -> Vec<PathBuf> {
+    let root = crate::ryu_dir();
+    CATALOG_GGUF_MODALITIES
+        .iter()
+        .map(|m| layout::models_dir(&root, *m))
+        .collect()
 }
 
 /// Load every recorded install whose GGUF still exists on disk. Records whose
@@ -125,6 +146,15 @@ pub fn installed_repo_ids() -> std::collections::HashSet<String> {
 pub fn record(model: InstalledModel) -> anyhow::Result<()> {
     let path = store_path();
     ryu_json_store::mutate(&path, move |file: &mut InstalledModelsFile| {
+        let mut model = model;
+        // An unknown size never erases a known one: update detection compares
+        // against the recorded size and skips a model that has none.
+        if model.size_bytes.is_none() {
+            model.size_bytes = file
+                .models
+                .get(&model.stem)
+                .and_then(|previous| previous.size_bytes);
+        }
         file.models.insert(model.stem.clone(), model);
         Ok(())
     })
@@ -144,34 +174,58 @@ pub fn record(model: InstalledModel) -> anyhow::Result<()> {
 pub const ACTIVE_MODEL_PREF: &str = "local-chat-model";
 
 /// Preferences-KV key holding the user-selected active diffusion model. The
-/// value is the plain local stem of a GGUF diffusion file installed at
-/// `~/.ryu/models/<stem>.gguf`. When set, `sd-server` is started with this
+/// value is the plain local stem of a GGUF diffusion file — the engine looks for
+/// it in its own `models/image/` and `models/video/` folders, then in
+/// `models/chat/` (a diffusion GGUF installed through the catalog). When set, `sd-server` is started with this
 /// model instead of the default bundled one. Mirrors [`ACTIVE_MODEL_PREF`] for
 /// the chat-engine swap but is independent of it — a diffusion model does not
 /// enter the `LOCAL_ENGINES` swap pool (sd-server runs alongside a chat engine).
 pub const ACTIVE_DIFFUSION_MODEL_PREF: &str = "local-diffusion-model";
 
-/// Absolute path of an installed GGUF given its local stem
-/// (`~/.ryu/models/<stem>.gguf`). Mirrors the layout the shared
-/// `GgufDownloader` writes to.
+/// Absolute path of an installed GGUF given its local stem: the first of
+/// [`catalog_gguf_dirs`] that holds `<stem>.gguf`, or `models/chat/<stem>.gguf`
+/// (where a catalog install writes it) when none does.
 pub fn model_file_path(stem: &str) -> PathBuf {
-    models_dir().join(format!("{stem}.gguf"))
+    let file = format!("{stem}.gguf");
+    catalog_gguf_dirs()
+        .into_iter()
+        .map(|dir| dir.join(&file))
+        .find(|p| p.exists())
+        .unwrap_or_else(|| chat_models_dir().join(file))
 }
 
 /// Absolute path of the multimodal projector ("vision adapter") that pairs with
-/// the installed GGUF at this `stem` (`~/.ryu/models/<stem>.mmproj.gguf`). The
+/// the installed GGUF at this `stem` (`models/chat/<stem>.mmproj.gguf`). The
 /// adapter is stored beside its model under a deterministic name so the launch
 /// path can find it without consulting the provenance index — the binding is
 /// the filename, not a JSON field. A text-only model simply has no file here.
 pub fn mmproj_file_path(stem: &str) -> PathBuf {
-    models_dir().join(format!("{stem}.mmproj.gguf"))
+    chat_models_dir().join(format!("{stem}.mmproj.gguf"))
 }
 
 /// Absolute path of an installed repo snapshot's directory
-/// (`~/.ryu/models/<slug>/`), where `slug` is the slugified repo id (also the
-/// record's `stem`). vLLM/sglang/MLX engines serve weights from here.
+/// (`models/chat/snapshots/<slug>/`), where `slug` is the slugified repo id
+/// (also the record's `stem`). vLLM/SGLang/MLX engines serve weights from here.
 pub fn model_snapshot_dir(slug: &str) -> PathBuf {
-    models_dir().join(slug)
+    layout::chat_snapshots_dir(&crate::ryu_dir()).join(slug)
+}
+
+/// The local snapshot directory for a snapshot model ref — an HF repo id (the
+/// form an [`ActiveModel`] carries) or its slug — when that snapshot is
+/// installed and non-empty. Python engines pass this local path as their model
+/// argument instead of the repo id, so they serve the installed copy rather than
+/// re-downloading it from the Hub. `None` for anything not installed (the engine
+/// then falls back to the repo id).
+pub fn present_snapshot_dir(model_ref: &str) -> Option<PathBuf> {
+    let trimmed = model_ref.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let dir = model_snapshot_dir(&slugify_repo(trimmed));
+    let non_empty = std::fs::read_dir(&dir)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false);
+    non_empty.then_some(dir)
 }
 
 /// Turn an HF repo id (`owner/name`) into a filesystem-safe directory slug.
@@ -431,6 +485,33 @@ mod tests {
         assert_eq!(active.r#ref, repo);
 
         remove(&slug).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stores_live_in_their_layout_dirs() {
+        crate::ensure_test_host();
+        assert!(store_path().ends_with("state/installed-models.json"));
+        assert!(model_file_path("layout-probe-unique-b5")
+            .ends_with("models/chat/layout-probe-unique-b5.gguf"));
+        assert!(mmproj_file_path("x").ends_with("models/chat/x.mmproj.gguf"));
+        assert!(model_snapshot_dir("acme_x").ends_with("models/chat/snapshots/acme_x"));
+    }
+
+    #[test]
+    fn present_snapshot_dir_resolves_repo_ids_only_when_installed() {
+        crate::ensure_test_host();
+        let repo = "acme/present-snap-unique-b6";
+        assert!(present_snapshot_dir(repo).is_none());
+        let dir = model_snapshot_dir(&slugify_repo(repo));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(
+            present_snapshot_dir(repo).is_none(),
+            "empty dir is not installed"
+        );
+        std::fs::write(dir.join("config.json"), b"{}").unwrap();
+        assert_eq!(present_snapshot_dir(repo).as_deref(), Some(dir.as_path()));
+        assert!(present_snapshot_dir("  ").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

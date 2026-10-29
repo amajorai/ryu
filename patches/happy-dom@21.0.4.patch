@@ -1,0 +1,20 @@
+diff --git a/lib/animation/Animation.js b/lib/animation/Animation.js
+index bbfe3f4e32b215c356b3dbeceac0e726855c3163..de1474d8c53edc82a242beb30cdde68c5180e13f 100644
+--- a/lib/animation/Animation.js
++++ b/lib/animation/Animation.js
+@@ -191,10 +191,14 @@ export default class Animation extends EventTarget {
+      * @returns Finished promise.
+      */
+     #createFinishedPromise() {
+-        return new Promise((resolve, reject) => {
++        const finished = new Promise((resolve, reject) => {
+             this.#resolveFinished = resolve;
+             this.#rejectFinished = reject;
+         });
++        // A browser never reports an unhandled rejection for cancel(); mark the
++        // promise handled so it stays rejected for callers that await it.
++        finished.catch(() => undefined);
++        return finished;
+     }
+     /**
+      * Schedules the finish of the animation.

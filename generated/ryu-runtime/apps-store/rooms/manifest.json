@@ -100,7 +100,7 @@
         ]
       },
       "host_api": {
-        "grants": ["hook:side-model", "app:realtime"]
+        "grants": ["hook:side-model", "app:realtime", "crypto:seal"]
       }
     }
   ],

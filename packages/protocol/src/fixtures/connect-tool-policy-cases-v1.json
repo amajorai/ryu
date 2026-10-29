@@ -1,0 +1,899 @@
+{
+  "version": 1,
+  "policy": {
+    "tenantId": "org_acme",
+    "pins": [
+      {
+        "teamId": null,
+        "tool": "composio.GITHUB_CREATE_AN_ISSUE",
+        "version": "ryu-native-1"
+      },
+      {
+        "teamId": "team_ops",
+        "tool": "composio.GITHUB_CREATE_AN_ISSUE",
+        "version": "20250909_00"
+      },
+      {
+        "teamId": "team_ops",
+        "tool": "composio.LINEAR_CREATE_ISSUE",
+        "version": null
+      },
+      {
+        "teamId": null,
+        "tool": "search.web",
+        "version": null
+      }
+    ],
+    "deny": [
+      {
+        "id": "dny_slackall01",
+        "teamId": null,
+        "tool": "composio.SLACK_*",
+        "host": null,
+        "path": null,
+        "methods": [],
+        "reason": "No Slack from agents"
+      },
+      {
+        "id": "dny_opsgithub1",
+        "teamId": "team_ops",
+        "tool": "composio.GITHUB_DELETE_A_REPOSITORY",
+        "host": null,
+        "path": null,
+        "methods": [],
+        "reason": null
+      },
+      {
+        "id": "dny_ghdelete01",
+        "teamId": null,
+        "tool": null,
+        "host": "api.github.com",
+        "path": "/repos/*",
+        "methods": ["DELETE"],
+        "reason": "No deletes"
+      },
+      {
+        "id": "dny_admin00001",
+        "teamId": "team_ops",
+        "tool": null,
+        "host": "*.example.com",
+        "path": "/admin*",
+        "methods": [],
+        "reason": null
+      },
+      {
+        "id": "dny_allexa0001",
+        "teamId": null,
+        "tool": null,
+        "host": "api.exa.ai",
+        "path": null,
+        "methods": [],
+        "reason": null
+      }
+    ]
+  },
+  "lifecycle": [
+    {
+      "tool": "composio.GITHUB_GET_AN_ISSUE",
+      "state": "deprecated",
+      "successor": "composio.GITHUB_GET_ISSUE",
+      "sunsetAt": "2027-01-31",
+      "note": "Use the new issue reader"
+    },
+    {
+      "tool": "composio.GITHUB_OLD_SEARCH",
+      "state": "retired",
+      "successor": "composio.GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS",
+      "sunsetAt": null,
+      "note": null
+    },
+    {
+      "tool": "composio.LINEAR_CREATE_ISSUE",
+      "state": "preview",
+      "successor": null,
+      "sunsetAt": null,
+      "note": null
+    },
+    {
+      "tool": "composio.SLACK_SEND_MESSAGE",
+      "state": "stable",
+      "successor": null,
+      "sunsetAt": null,
+      "note": null
+    }
+  ],
+  "validation": [
+    {
+      "name": "the shared policy is valid",
+      "kind": "tenant",
+      "value": "$policy",
+      "problem": null
+    },
+    {
+      "name": "the shared lifecycle is valid",
+      "kind": "lifecycle",
+      "value": "$lifecycle",
+      "problem": null
+    },
+    {
+      "name": "a rule with both a tool and a host is refused",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_both000001",
+            "teamId": null,
+            "tool": "composio.X",
+            "host": "api.example.com",
+            "path": null,
+            "methods": [],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "exactly one of tool or host"
+    },
+    {
+      "name": "a rule with neither a tool nor a host is refused",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_none000001",
+            "teamId": null,
+            "tool": null,
+            "host": null,
+            "path": null,
+            "methods": [],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "exactly one of tool or host"
+    },
+    {
+      "name": "a path without a host is refused",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_path000001",
+            "teamId": null,
+            "tool": "composio.X",
+            "host": null,
+            "path": "/a",
+            "methods": [],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "path and methods need a host"
+    },
+    {
+      "name": "duplicate methods are refused",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_meth000001",
+            "teamId": null,
+            "tool": null,
+            "host": "api.example.com",
+            "path": null,
+            "methods": ["GET", "GET"],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "duplicate method"
+    },
+    {
+      "name": "duplicate rule ids are refused",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_same000001",
+            "teamId": null,
+            "tool": "composio.X",
+            "host": null,
+            "path": null,
+            "methods": [],
+            "reason": null
+          },
+          {
+            "id": "dny_same000001",
+            "teamId": null,
+            "tool": "composio.Y",
+            "host": null,
+            "path": null,
+            "methods": [],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "duplicate deny rule"
+    },
+    {
+      "name": "two pins for one tool in one scope are refused",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [
+          {
+            "teamId": "team_a",
+            "tool": "composio.X",
+            "version": "1"
+          },
+          {
+            "teamId": "team_a",
+            "tool": "composio.X",
+            "version": "2"
+          }
+        ],
+        "deny": []
+      },
+      "problem": "duplicate pin"
+    },
+    {
+      "name": "an org pin and a team pin for one tool are allowed",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [
+          {
+            "teamId": null,
+            "tool": "composio.X",
+            "version": "1"
+          },
+          {
+            "teamId": "team_a",
+            "tool": "composio.X",
+            "version": "2"
+          }
+        ],
+        "deny": []
+      },
+      "problem": null
+    },
+    {
+      "name": "a bare star tool pattern is refused by shape",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_star000001",
+            "teamId": null,
+            "tool": "*",
+            "host": null,
+            "path": null,
+            "methods": [],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "shape"
+    },
+    {
+      "name": "a host with a port is refused by shape",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_port000001",
+            "teamId": null,
+            "tool": null,
+            "host": "api.example.com:443",
+            "path": null,
+            "methods": [],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "shape"
+    },
+    {
+      "name": "an uppercase host is refused by shape",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_case000001",
+            "teamId": null,
+            "tool": null,
+            "host": "API.example.com",
+            "path": null,
+            "methods": [],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "shape"
+    },
+    {
+      "name": "a relative path glob is refused by shape",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [
+          {
+            "id": "dny_rel0000001",
+            "teamId": null,
+            "tool": null,
+            "host": "api.example.com",
+            "path": "repos/*",
+            "methods": [],
+            "reason": null
+          }
+        ]
+      },
+      "problem": "shape"
+    },
+    {
+      "name": "a tenant outside the organization namespace is refused by shape",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "acme",
+        "pins": [],
+        "deny": []
+      },
+      "problem": "shape"
+    },
+    {
+      "name": "tag budgets with a daily and a monthly window for one tag are allowed",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [],
+        "tagBudgets": {
+          "asOf": "2026-10-21T12:00:00.000Z",
+          "countedSince": "2026-10-21T11:00:00.000Z",
+          "budgets": [
+            {
+              "id": "tbg_aaaaaaaa",
+              "tag": "eu",
+              "window": "daily",
+              "limitMicroUsd": 5000,
+              "action": "block",
+              "spentMicroUsd": 1200,
+              "windowStart": "2026-10-21T00:00:00.000Z"
+            },
+            {
+              "id": "tbg_bbbbbbbb",
+              "tag": "eu",
+              "window": "monthly",
+              "limitMicroUsd": 5000,
+              "action": "block",
+              "spentMicroUsd": 1200,
+              "windowStart": "2026-10-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "problem": null
+    },
+    {
+      "name": "two daily tag budgets for one tag are refused",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [],
+        "tagBudgets": {
+          "asOf": "2026-10-21T12:00:00.000Z",
+          "countedSince": "2026-10-21T11:00:00.000Z",
+          "budgets": [
+            {
+              "id": "tbg_aaaaaaaa",
+              "tag": "eu",
+              "window": "daily",
+              "limitMicroUsd": 5000,
+              "action": "block",
+              "spentMicroUsd": 1200,
+              "windowStart": "2026-10-21T00:00:00.000Z"
+            },
+            {
+              "id": "tbg_bbbbbbbb",
+              "tag": "eu",
+              "window": "daily",
+              "limitMicroUsd": 5000,
+              "action": "block",
+              "spentMicroUsd": 1200,
+              "windowStart": "2026-10-21T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "problem": "duplicate daily budget"
+    },
+    {
+      "name": "a weekly tag budget is refused by shape",
+      "kind": "tenant",
+      "value": {
+        "tenantId": "org_acme",
+        "pins": [],
+        "deny": [],
+        "tagBudgets": {
+          "asOf": "2026-10-21T12:00:00.000Z",
+          "countedSince": "2026-10-21T11:00:00.000Z",
+          "budgets": [
+            {
+              "id": "tbg_aaaaaaaa",
+              "tag": "eu",
+              "window": "weekly",
+              "limitMicroUsd": 5000,
+              "action": "block",
+              "spentMicroUsd": 1200,
+              "windowStart": "2026-10-01T00:00:00.000Z"
+            }
+          ]
+        }
+      },
+      "problem": "shape"
+    },
+    {
+      "name": "duplicate lifecycle entries are refused",
+      "kind": "lifecycle",
+      "value": [
+        {
+          "tool": "composio.X",
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null,
+          "note": null
+        },
+        {
+          "tool": "composio.X",
+          "state": "retired",
+          "successor": null,
+          "sunsetAt": null,
+          "note": null
+        }
+      ],
+      "problem": "duplicate lifecycle entry"
+    },
+    {
+      "name": "a stable tool cannot name a successor",
+      "kind": "lifecycle",
+      "value": [
+        {
+          "tool": "composio.X",
+          "state": "stable",
+          "successor": "composio.Y",
+          "sunsetAt": null,
+          "note": null
+        }
+      ],
+      "problem": "only a deprecated or retired tool names a successor"
+    },
+    {
+      "name": "a tool cannot succeed itself",
+      "kind": "lifecycle",
+      "value": [
+        {
+          "tool": "composio.X",
+          "state": "retired",
+          "successor": "composio.X",
+          "sunsetAt": null,
+          "note": null
+        }
+      ],
+      "problem": "cannot succeed itself"
+    },
+    {
+      "name": "a retired successor is refused",
+      "kind": "lifecycle",
+      "value": [
+        {
+          "tool": "composio.X",
+          "state": "deprecated",
+          "successor": "composio.Y",
+          "sunsetAt": null,
+          "note": null
+        },
+        {
+          "tool": "composio.Y",
+          "state": "retired",
+          "successor": null,
+          "sunsetAt": null,
+          "note": null
+        }
+      ],
+      "problem": "is retired"
+    },
+    {
+      "name": "only a deprecated tool has a sunset date",
+      "kind": "lifecycle",
+      "value": [
+        {
+          "tool": "composio.X",
+          "state": "retired",
+          "successor": null,
+          "sunsetAt": "2027-01-01",
+          "note": null
+        }
+      ],
+      "problem": "only a deprecated tool has a sunset date"
+    },
+    {
+      "name": "an unknown lifecycle state is refused by shape",
+      "kind": "lifecycle",
+      "value": [
+        {
+          "tool": "composio.X",
+          "state": "beta",
+          "successor": null,
+          "sunsetAt": null,
+          "note": null
+        }
+      ],
+      "problem": "shape"
+    }
+  ],
+  "tools": [
+    {
+      "name": "a tool with no entry and no policy is stable and allowed",
+      "input": {
+        "tool": "composio.GITHUB_LIST_REPOSITORY_ISSUES",
+        "teamId": null,
+        "version": "ryu-native-1"
+      },
+      "expected": {
+        "listed": true,
+        "lifecycle": {
+          "note": null,
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": null,
+        "refusal": null,
+        "rule": null
+      }
+    },
+    {
+      "name": "a retired tool is refused and hidden",
+      "input": {
+        "tool": "composio.GITHUB_OLD_SEARCH",
+        "teamId": null,
+        "version": "ryu-native-1"
+      },
+      "expected": {
+        "listed": false,
+        "lifecycle": {
+          "note": null,
+          "state": "retired",
+          "successor": "composio.GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS",
+          "sunsetAt": null
+        },
+        "pin": null,
+        "refusal": "tool_retired",
+        "rule": null
+      }
+    },
+    {
+      "name": "a deprecated tool stays callable and carries its successor and sunset",
+      "input": {
+        "tool": "composio.GITHUB_GET_AN_ISSUE",
+        "teamId": null,
+        "version": "ryu-native-1"
+      },
+      "expected": {
+        "listed": true,
+        "lifecycle": {
+          "note": "Use the new issue reader",
+          "state": "deprecated",
+          "successor": "composio.GITHUB_GET_ISSUE",
+          "sunsetAt": "2027-01-31"
+        },
+        "pin": null,
+        "refusal": null,
+        "rule": null
+      }
+    },
+    {
+      "name": "a prefix tool rule hides and refuses every matching tool even when stable",
+      "input": {
+        "tool": "composio.SLACK_SEND_MESSAGE",
+        "teamId": "team_ops",
+        "version": null
+      },
+      "expected": {
+        "listed": false,
+        "lifecycle": {
+          "note": null,
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": null,
+        "refusal": "tool_denied_by_policy",
+        "rule": "dny_slackall01"
+      }
+    },
+    {
+      "name": "a team rule applies to that team",
+      "input": {
+        "tool": "composio.GITHUB_DELETE_A_REPOSITORY",
+        "teamId": "team_ops",
+        "version": "ryu-native-1"
+      },
+      "expected": {
+        "listed": false,
+        "lifecycle": {
+          "note": null,
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": null,
+        "refusal": "tool_denied_by_policy",
+        "rule": "dny_opsgithub1"
+      }
+    },
+    {
+      "name": "a team rule does not apply to another team or to a caller without a team",
+      "input": {
+        "tool": "composio.GITHUB_DELETE_A_REPOSITORY",
+        "teamId": null,
+        "version": "ryu-native-1"
+      },
+      "expected": {
+        "listed": true,
+        "lifecycle": {
+          "note": null,
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": null,
+        "refusal": null,
+        "rule": null
+      }
+    },
+    {
+      "name": "a preview tool without a pin is hidden and refused",
+      "input": {
+        "tool": "composio.LINEAR_CREATE_ISSUE",
+        "teamId": "team_web",
+        "version": null
+      },
+      "expected": {
+        "listed": false,
+        "lifecycle": {
+          "note": null,
+          "state": "preview",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": null,
+        "refusal": "tool_preview_not_pinned",
+        "rule": null
+      }
+    },
+    {
+      "name": "a team pin opts its team into a preview tool",
+      "input": {
+        "tool": "composio.LINEAR_CREATE_ISSUE",
+        "teamId": "team_ops",
+        "version": null
+      },
+      "expected": {
+        "listed": true,
+        "lifecycle": {
+          "note": null,
+          "state": "preview",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": {
+          "satisfied": true,
+          "scope": "team",
+          "version": null
+        },
+        "refusal": null,
+        "rule": null
+      }
+    },
+    {
+      "name": "an org pin that matches the served version is satisfied",
+      "input": {
+        "tool": "composio.GITHUB_CREATE_AN_ISSUE",
+        "teamId": null,
+        "version": "ryu-native-1"
+      },
+      "expected": {
+        "listed": true,
+        "lifecycle": {
+          "note": null,
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": {
+          "satisfied": true,
+          "scope": "org",
+          "version": "ryu-native-1"
+        },
+        "refusal": null,
+        "rule": null
+      }
+    },
+    {
+      "name": "a team pin wins over the org pin and refuses another served version",
+      "input": {
+        "tool": "composio.GITHUB_CREATE_AN_ISSUE",
+        "teamId": "team_ops",
+        "version": "ryu-native-1"
+      },
+      "expected": {
+        "listed": true,
+        "lifecycle": {
+          "note": null,
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": {
+          "satisfied": false,
+          "scope": "team",
+          "version": "20250909_00"
+        },
+        "refusal": "tool_version_mismatch",
+        "rule": null
+      }
+    },
+    {
+      "name": "a version pin is unsatisfied when Connect cannot name the served version",
+      "input": {
+        "tool": "composio.GITHUB_CREATE_AN_ISSUE",
+        "teamId": null,
+        "version": null
+      },
+      "expected": {
+        "listed": true,
+        "lifecycle": {
+          "note": null,
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": {
+          "satisfied": false,
+          "scope": "org",
+          "version": "ryu-native-1"
+        },
+        "refusal": "tool_version_mismatch",
+        "rule": null
+      }
+    },
+    {
+      "name": "a version-free pin is satisfied by any served version",
+      "input": {
+        "tool": "search.web",
+        "teamId": "team_ops",
+        "version": null
+      },
+      "expected": {
+        "listed": true,
+        "lifecycle": {
+          "note": null,
+          "state": "stable",
+          "successor": null,
+          "sunsetAt": null
+        },
+        "pin": {
+          "satisfied": true,
+          "scope": "org",
+          "version": null
+        },
+        "refusal": null,
+        "rule": null
+      }
+    }
+  ],
+  "urls": [
+    {
+      "name": "a method-scoped rule refuses its method",
+      "teamId": null,
+      "method": "DELETE",
+      "url": "https://api.github.com/repos/acme/site",
+      "rule": "dny_ghdelete01"
+    },
+    {
+      "name": "a method-scoped rule lets other methods through",
+      "teamId": null,
+      "method": "get",
+      "url": "https://api.github.com/repos/acme/site",
+      "rule": null
+    },
+    {
+      "name": "a path glob does not match outside its prefix",
+      "teamId": null,
+      "method": "DELETE",
+      "url": "https://api.github.com/user/repos",
+      "rule": null
+    },
+    {
+      "name": "an encoded spelling of a denied path is denied",
+      "teamId": null,
+      "method": "DELETE",
+      "url": "https://api.github.com/%72epos/acme/site",
+      "rule": "dny_ghdelete01"
+    },
+    {
+      "name": "a host match ignores case and a trailing dot",
+      "teamId": null,
+      "method": "DELETE",
+      "url": "https://API.GitHub.com./repos/acme/site",
+      "rule": "dny_ghdelete01"
+    },
+    {
+      "name": "a wildcard host matches a subdomain for its team",
+      "teamId": "team_ops",
+      "method": "POST",
+      "url": "https://tenant.example.com/admin/users",
+      "rule": "dny_admin00001"
+    },
+    {
+      "name": "a wildcard host does not match the apex",
+      "teamId": "team_ops",
+      "method": "POST",
+      "url": "https://example.com/admin/users",
+      "rule": null
+    },
+    {
+      "name": "a wildcard host does not match a lookalike",
+      "teamId": "team_ops",
+      "method": "POST",
+      "url": "https://evilexample.com/admin/users",
+      "rule": null
+    },
+    {
+      "name": "a team URL rule does not apply to another team",
+      "teamId": "team_web",
+      "method": "POST",
+      "url": "https://tenant.example.com/admin/users",
+      "rule": null
+    },
+    {
+      "name": "a host-only rule refuses every path and method",
+      "teamId": "team_web",
+      "method": "POST",
+      "url": "https://api.exa.ai/search",
+      "rule": "dny_allexa0001"
+    },
+    {
+      "name": "a GitHub path rule matches any letter case",
+      "teamId": null,
+      "method": "DELETE",
+      "url": "https://api.github.com/REPOS/Acme/Site",
+      "rule": "dny_ghdelete01"
+    },
+    {
+      "name": "other hosts match path rules in their exact case",
+      "teamId": "team_ops",
+      "method": "GET",
+      "url": "https://app.example.com/ADMIN/users",
+      "rule": null
+    }
+  ]
+}

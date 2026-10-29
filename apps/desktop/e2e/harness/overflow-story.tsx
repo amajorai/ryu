@@ -1,3 +1,4 @@
+import proofStyles from "./overflow-story.module.css";
 // Standalone browser story for the REAL SectionOverflowPopover (the "search
 // overflow in a popover" sidebar mode). Mounts the actual exported component
 // with mock items so its search + infinite-scroll windowing can be driven in a
@@ -23,8 +24,8 @@ const items: MockItem[] = Array.from({ length: TOTAL }, (_, i) => ({
 
 function Story() {
 	return (
-		<div style={{ padding: 40 }}>
-			<div style={{ width: 240 }}>
+		<div className={proofStyles.fixture1}>
+			<div className={proofStyles.fixture2}>
 				<SectionOverflowPopover<MockItem>
 					overflow={{
 						getSearchText: (it) => it.name,

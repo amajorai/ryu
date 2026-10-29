@@ -6,21 +6,21 @@
 // can prompt "looks done — mark it?" when Core detects a finished task. Like the
 // other Core clients here, every method degrades gracefully and never rejects.
 
-import type {
-	IslandQuest,
-	IslandQuestEvent,
-	IslandQuestResult,
-} from "../../shared/ipc.ts";
+import { z } from "zod";
+import type { IslandQuestEvent, IslandQuestResult } from "../../shared/ipc.ts";
+import { questEventSchema, questResponseSchema } from "./activity-contract.ts";
 import { coreHeaders, loadConfig } from "./config.ts";
 import { waitForReconnect } from "./reconnect-delay.ts";
 import { withResponseDeadline } from "./response-deadline.ts";
+import { readSseFrames, sseDataLines } from "./sse-reader.ts";
 
 /** Reconnect delay for the quest event stream. */
 const RECONNECT_DELAY_MS = 3000;
 /** Timeout for one-shot accept/dismiss requests. */
 const ACTION_TIMEOUT_MS = 10_000;
 
-function reasonFromError(error: unknown): string {
+const failureSchema = z.instanceof(Error).catch(new Error("unreachable"));
+function reasonFromError(error: z.infer<typeof failureSchema>): string {
 	if (error instanceof Error) {
 		return error.message;
 	}
@@ -42,7 +42,7 @@ async function postQuestAction(
 				if (!resp.ok) {
 					return { available: false, reason: `core responded ${resp.status}` };
 				}
-				const data = (await resp.json()) as { quest?: IslandQuest };
+				const data = questResponseSchema.parse(await resp.json());
 				if (!data.quest) {
 					return { available: false, reason: "no quest returned" };
 				}
@@ -50,7 +50,10 @@ async function postQuestAction(
 			}
 		);
 	} catch (error) {
-		return { available: false, reason: reasonFromError(error) };
+		return {
+			available: false,
+			reason: reasonFromError(failureSchema.parse(error)),
+		};
 	}
 }
 
@@ -89,9 +92,6 @@ export function subscribeQuestEvents(
 	run().catch(() => undefined);
 }
 
-const SSE_FRAME_SEPARATOR = "\n\n";
-const DATA_PREFIX = "data:";
-
 async function pumpEventStream(
 	onEvent: (event: IslandQuestEvent) => void,
 	signal: AbortSignal
@@ -106,37 +106,19 @@ async function pumpEventStream(
 		await resp.body?.cancel();
 		throw new Error(`core responded ${resp.status}`);
 	}
-	const reader = resp.body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-	try {
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) {
+	await readSseFrames(
+		resp.body,
+		(frame) => {
+			const data = sseDataLines(frame).join("\n");
+			if (!data) {
 				return;
 			}
-			buffer += decoder.decode(value, { stream: true });
-			let sep = buffer.indexOf(SSE_FRAME_SEPARATOR);
-			while (sep !== -1 && !signal.aborted) {
-				const frame = buffer.slice(0, sep);
-				const data = frame
-					.split("\n")
-					.filter((line) => line.startsWith(DATA_PREFIX))
-					.map((line) => line.slice(DATA_PREFIX.length).trim())
-					.join("\n");
-				if (data) {
-					try {
-						onEvent(JSON.parse(data) as IslandQuestEvent);
-					} catch {
-						// Ignore malformed frames; the next event self-heals the feed.
-					}
-				}
-				buffer = buffer.slice(sep + SSE_FRAME_SEPARATOR.length);
-				sep = buffer.indexOf(SSE_FRAME_SEPARATOR);
+			try {
+				onEvent(questEventSchema.parse(JSON.parse(data)));
+			} catch {
+				// Ignore malformed frames; the next event self-heals the feed.
 			}
-		}
-	} finally {
-		await reader.cancel().catch(() => undefined);
-		reader.releaseLock();
-	}
+		},
+		signal
+	);
 }

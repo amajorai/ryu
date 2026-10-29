@@ -31,7 +31,7 @@ const WORD_RE = /\S+/g;
 function titleCaseAppName(value: string): string {
 	return value.replace(
 		WORD_RE,
-		(word) => word[0].toUpperCase() + word.slice(1)
+		(word) => word.charAt(0).toUpperCase() + word.slice(1)
 	);
 }
 
@@ -58,7 +58,7 @@ export function ContextPill({
 				<span
 					className={`relative flex size-2 shrink-0 ${wrap ? "mt-1.5" : ""}`}
 				>
-					<span className="absolute inline-flex size-full animate-ping rounded-full bg-info opacity-70" />
+					<span className="absolute inline-flex size-full rounded-full bg-info opacity-70 motion-safe:animate-ping" />
 					<span className="relative inline-flex size-2 rounded-full bg-info" />
 				</span>
 				<span

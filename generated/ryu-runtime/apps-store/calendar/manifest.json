@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/calendar",
   "name": "Calendar",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Productivity",
   "description": "The scheduled-runs calendar: every agent and workflow scheduled job projected onto Month, Week, Day, and Agenda views — past runs from history, upcoming runs from cron/interval — with a New automation dialog that schedules an agent.",
@@ -59,17 +59,12 @@
     "icon": "calendar-04"
   },
   "contributes": {
-    "chat_widget_templates": [
+    "agent_profile_tabs": [
       {
-        "id": "calendar.chat",
-        "title": "Calendar widget",
-        "description": "Calendar chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["calendar widget"],
-        "examples": ["Show me a calendar widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
+        "id": "calendar",
+        "title": "Calendar",
+        "icon": "calendar-04",
+        "companion": "calendar-companion"
       }
     ]
   }

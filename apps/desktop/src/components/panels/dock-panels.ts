@@ -1,3 +1,8 @@
+import { z } from "zod";
+import type {
+	PersistedDockTabKind,
+	WorkspaceSessionTab,
+} from "@/src/lib/workspace-session.ts";
 // The data-driven half of the workspace docks: turning an enabled app's
 // `contributes.dock_panels[]` entries into dock tabs.
 //
@@ -15,6 +20,7 @@
 // `WorkspacePanels.tsx`, which owns the native component registry.
 
 import { DOCK_PANEL_KINDS, type DockPanelKind } from "@ryu/app-host/views";
+import type { WorkbenchRegion } from "@ryu/workbench/model";
 import type { PluginDockPanel } from "@/src/lib/api/plugins.ts";
 
 /** One of the two workspace docks a panel can be offered in. `"both"` is a
@@ -24,19 +30,23 @@ export type DockSide = "bottom" | "right";
 /** Panels the SHELL owns. Not apps: they render shell infrastructure (a terminal,
  *  the diff of the open folder, the current run's cowork context …) and are
  *  always offered, contributions or not. */
-export type BuiltinTabKind =
-	| "terminal"
-	| "codereview"
-	| "files"
-	| "gitgraph"
-	| "cowork"
-	| "sources"
-	| "subagents"
-	| "subagent"
-	| "artifact"
-	| "inspector"
-	| "context"
-	| "mission";
+const builtinDockTabKindSchema = z.enum([
+	"terminal",
+	"codereview",
+	"files",
+	"gitgraph",
+	"cowork",
+	"sources",
+	"subagents",
+	"subagent",
+	"artifact",
+	"inspector",
+	"context",
+	"mission",
+	"agent-activity",
+	"box-screen",
+]);
+export type BuiltinTabKind = z.infer<typeof builtinDockTabKindSchema>;
 
 /** A contributed panel's tab kind: the `plugin:<pluginId>:<panelId>` key minted
  *  by {@link pluginDockPanelKey}. Kept as a template-literal type so a tab kind
@@ -60,6 +70,25 @@ export type RouteTabKind = `route:${string}`;
 
 /** What a dock tab is: a shell-owned panel, an app-contributed one, or a page. */
 export type DockTabKind = BuiltinTabKind | PluginTabKind | RouteTabKind;
+
+const dockTabKindSchema = z.union([
+	builtinDockTabKindSchema,
+	z.templateLiteral(["plugin:", z.string()]),
+	z.templateLiteral(["route:", z.string()]),
+]);
+export interface RestoredDockTabKind {
+	kind: DockTabKind | "unavailable";
+	persistedKind?: PersistedDockTabKind;
+}
+/** Keep unknown saved identifiers intact while using an unavailable renderer. */
+export function restoreDockTabKind(
+	persistedKind: PersistedDockTabKind
+): RestoredDockTabKind {
+	const parsed = dockTabKindSchema.safeParse(persistedKind);
+	return parsed.success
+		? { kind: parsed.data }
+		: { kind: "unavailable", persistedKind };
+}
 
 /** True when the tab is an app-contributed panel rather than a built-in. */
 export function isPluginTabKind(kind: DockTabKind): kind is PluginTabKind {
@@ -134,7 +163,8 @@ export function isPinnableDockTabKind(kind: DockTabKind): boolean {
 	// the Store shows the same thing in every chat of the folder — so it pins like
 	// a terminal. The one page that carries per-chat state is `/chat`, and it
 	// carries its OWN (its conversation id), not the host chat's, so sharing the
-	// live instance across the folder is still correct.
+	// live instance across the folder is still correct. Agent activity is also
+	// conversation-local because the selected chat agent supplies its contents.
 	if (isRouteTabKind(kind)) {
 		return true;
 	}
@@ -176,13 +206,28 @@ export function nativeDockPanelKey(panel: {
  *  member (a newer Core, a hand-written manifest) must degrade to a placeholder,
  *  never crash the dock — the same forward-compatibility rule the contract states. */
 export function isKnownDockPanelKind(panel: string): panel is DockPanelKind {
-	return (DOCK_PANEL_KINDS as readonly string[]).includes(panel);
+	return z.enum(DOCK_PANEL_KINDS).safeParse(panel).success;
 }
 
-/** Whether a contributed panel is offered in `side`. Mirrors the Rust
+/** The workbench region where a contributed panel prefers to open. `"both"`
+ *  retains its legacy bottom/right offering through {@link panelDocksIn}, so its
+ *  deterministic single-region preference is bottom. Unknown wire values also
+ *  fall back to bottom rather than making the panel unreachable. */
+export function panelPreferredRegion(panel: PluginDockPanel): WorkbenchRegion {
+	const placement: string = panel.placement;
+	if (placement === "left" || placement === "center" || placement === "right") {
+		return placement;
+	}
+	return "bottom";
+}
+
+/** Whether a contributed panel is offered in a legacy `side`. Mirrors the Rust
  *  `DockPanelPlacement::docks()` fan-out, and is LENIENT for the same reason its
  *  deserializer is: a placement this build has never heard of falls back to the
- *  bottom dock rather than making the panel unreachable. */
+ *  bottom dock rather than making the panel unreachable.
+ *
+ * @deprecated Use {@link panelPreferredRegion} with the workbench source registry.
+ */
 export function panelDocksIn(panel: PluginDockPanel, side: DockSide): boolean {
 	const placement: string = panel.placement;
 	if (placement === "both") {
@@ -219,6 +264,11 @@ function compareContributions(
  *  `"both"` fanned out) and `order`. Entries missing the identity fields Core is
  *  supposed to tag (`plugin`) are dropped: without an owner there is no tab key,
  *  no native registry lookup and no capability owner. */
+const dockPanelIdentitySchema = z.object({
+	plugin: z.string().min(1),
+	id: z.string().min(1),
+});
+
 export function dockPanelsFor(
 	panels: PluginDockPanel[],
 	side: DockSide
@@ -226,11 +276,7 @@ export function dockPanelsFor(
 	return panels
 		.filter(
 			(p) =>
-				typeof p.plugin === "string" &&
-				p.plugin.length > 0 &&
-				typeof p.id === "string" &&
-				p.id.length > 0 &&
-				panelDocksIn(p, side)
+				dockPanelIdentitySchema.safeParse(p).success && panelDocksIn(p, side)
 		)
 		.sort(compareContributions);
 }
@@ -249,4 +295,30 @@ export function findDockPanel(
 		return;
 	}
 	return panels.find((p) => p.plugin && p.id && dockTabKind(p) === kind);
+}
+
+export interface DockTabPersistence extends RestoredDockTabKind {
+	label: string;
+	persistedTab?: WorkspaceSessionTab;
+	pinned?: boolean;
+	projectHosted?: boolean;
+	uid: string;
+}
+/** Save an unavailable tab without erasing its original kind or project metadata. */
+export function serializeRestoredDockTab(
+	tab: DockTabPersistence
+): WorkspaceSessionTab {
+	const descriptor: WorkspaceSessionTab = {
+		...tab.persistedTab,
+		kind: tab.persistedKind ?? tab.kind,
+		label: tab.label,
+		uid: tab.uid,
+	};
+	if (tab.projectHosted) {
+		descriptor.project = true;
+		if (tab.pinned) {
+			descriptor.pinned = true;
+		}
+	}
+	return descriptor;
 }

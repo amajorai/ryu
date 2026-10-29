@@ -1,0 +1,418 @@
+{
+  "version": 1,
+  "headers": [
+    { "name": "absent", "raw": null, "expected": { "ok": true, "tags": [] } },
+    { "name": "blank", "raw": "   ", "expected": { "ok": true, "tags": [] } },
+    {
+      "name": "two tags trimmed and sorted",
+      "raw": " eu ,checkout-agent",
+      "expected": { "ok": true, "tags": ["checkout-agent", "eu"] }
+    },
+    {
+      "name": "upper case is lowercased",
+      "raw": "Team.Ops",
+      "expected": { "ok": true, "tags": ["team.ops"] }
+    },
+    {
+      "name": "duplicates collapse",
+      "raw": "eu,EU, eu",
+      "expected": { "ok": true, "tags": ["eu"] }
+    },
+    {
+      "name": "colon and underscore allowed",
+      "raw": "run:42,job_7",
+      "expected": { "ok": true, "tags": ["job_7", "run:42"] }
+    },
+    {
+      "name": "empty item refused",
+      "raw": "a,,b",
+      "expected": { "ok": false, "problem": "empty_tag" }
+    },
+    {
+      "name": "trailing comma refused",
+      "raw": "a,",
+      "expected": { "ok": false, "problem": "empty_tag" }
+    },
+    {
+      "name": "space inside a tag refused",
+      "raw": "checkout agent",
+      "expected": { "ok": false, "problem": "invalid_tag" }
+    },
+    {
+      "name": "leading punctuation refused",
+      "raw": "-eu",
+      "expected": { "ok": false, "problem": "invalid_tag" }
+    },
+    {
+      "name": "non-ascii refused",
+      "raw": "café",
+      "expected": { "ok": false, "problem": "invalid_tag" }
+    },
+    {
+      "name": "sixty-four characters accepted",
+      "raw": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": {
+        "ok": true,
+        "tags": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      }
+    },
+    {
+      "name": "sixty-five characters refused",
+      "raw": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": { "ok": false, "problem": "invalid_tag" }
+    },
+    {
+      "name": "eight tags accepted",
+      "raw": "a,b,c,d,e,f,g,h",
+      "expected": {
+        "ok": true,
+        "tags": ["a", "b", "c", "d", "e", "f", "g", "h"]
+      }
+    },
+    {
+      "name": "nine tags refused",
+      "raw": "a,b,c,d,e,f,g,h,i",
+      "expected": { "ok": false, "problem": "too_many" }
+    },
+    {
+      "name": "nine items that collapse to eight accepted",
+      "raw": "a,b,c,d,e,f,g,h,a",
+      "expected": {
+        "ok": true,
+        "tags": ["a", "b", "c", "d", "e", "f", "g", "h"]
+      }
+    }
+  ],
+  "longHeader": {
+    "length": 601,
+    "expected": { "ok": false, "problem": "too_long" }
+  },
+  "validation": [
+    {
+      "name": "two windows for one tag",
+      "budgets": [
+        { "id": "tbg_aaaaaaaa", "tag": "eu", "window": "daily" },
+        { "id": "tbg_bbbbbbbb", "tag": "eu", "window": "monthly" }
+      ],
+      "problem": null
+    },
+    {
+      "name": "duplicate id",
+      "budgets": [
+        { "id": "tbg_aaaaaaaa", "tag": "eu", "window": "daily" },
+        { "id": "tbg_aaaaaaaa", "tag": "us", "window": "daily" }
+      ],
+      "problem": "duplicate tag budget"
+    },
+    {
+      "name": "duplicate tag and window",
+      "budgets": [
+        { "id": "tbg_aaaaaaaa", "tag": "eu", "window": "daily" },
+        { "id": "tbg_bbbbbbbb", "tag": "eu", "window": "daily" }
+      ],
+      "problem": "duplicate daily budget"
+    }
+  ],
+  "windows": [
+    {
+      "window": "daily",
+      "now": "2026-10-21T13:45:00.000Z",
+      "start": "2026-10-21T00:00:00.000Z",
+      "end": "2026-10-22T00:00:00.000Z"
+    },
+    {
+      "window": "monthly",
+      "now": "2026-10-21T13:45:00.000Z",
+      "start": "2026-10-01T00:00:00.000Z",
+      "end": "2026-11-01T00:00:00.000Z"
+    },
+    {
+      "window": "monthly",
+      "now": "2026-12-31T23:59:59.000Z",
+      "start": "2026-12-01T00:00:00.000Z",
+      "end": "2027-01-01T00:00:00.000Z"
+    },
+    {
+      "window": "daily",
+      "now": "2028-02-29T00:00:00.000Z",
+      "start": "2028-02-29T00:00:00.000Z",
+      "end": "2028-03-01T00:00:00.000Z"
+    }
+  ],
+  "basis": [
+    {
+      "name": "snapshot in the current window counts",
+      "budget": {
+        "window": "monthly",
+        "windowStart": "2026-10-01T00:00:00.000Z",
+        "spentMicroUsd": 5000
+      },
+      "countedSince": "2026-10-21T12:00:00.000Z",
+      "now": "2026-10-21T13:45:00.000Z",
+      "expected": {
+        "snapshotMicroUsd": 5000,
+        "localFrom": "2026-10-21T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "a rolled-over window drops the snapshot",
+      "budget": {
+        "window": "daily",
+        "windowStart": "2026-10-20T00:00:00.000Z",
+        "spentMicroUsd": 5000
+      },
+      "countedSince": "2026-10-20T23:00:00.000Z",
+      "now": "2026-10-21T00:30:00.000Z",
+      "expected": {
+        "snapshotMicroUsd": 0,
+        "localFrom": "2026-10-21T00:00:00.000Z"
+      }
+    },
+    {
+      "name": "countedSince before the window counts from the window start",
+      "budget": {
+        "window": "daily",
+        "windowStart": "2026-10-21T00:00:00.000Z",
+        "spentMicroUsd": 0
+      },
+      "countedSince": "2026-10-01T00:00:00.000Z",
+      "now": "2026-10-21T13:45:00.000Z",
+      "expected": {
+        "snapshotMicroUsd": 0,
+        "localFrom": "2026-10-21T00:00:00.000Z"
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "name": "untagged call is never counted",
+      "tags": [],
+      "estimateMicroUsd": 500,
+      "budgets": [
+        {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 0,
+          "usedMicroUsd": 0
+        }
+      ],
+      "expected": { "blocked": null, "alerts": [] }
+    },
+    {
+      "name": "room left admits",
+      "tags": ["eu"],
+      "estimateMicroUsd": 500,
+      "budgets": [
+        {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 1000,
+          "usedMicroUsd": 500
+        }
+      ],
+      "expected": { "blocked": null, "alerts": [] }
+    },
+    {
+      "name": "estimate that would pass the limit refuses",
+      "tags": ["eu"],
+      "estimateMicroUsd": 501,
+      "budgets": [
+        {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 1000,
+          "usedMicroUsd": 500
+        }
+      ],
+      "expected": {
+        "blocked": {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 1000,
+          "usedMicroUsd": 500
+        },
+        "alerts": []
+      }
+    },
+    {
+      "name": "unknown estimate refuses only at the limit",
+      "tags": ["eu"],
+      "estimateMicroUsd": 0,
+      "budgets": [
+        {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 1000,
+          "usedMicroUsd": 999
+        },
+        {
+          "id": "tbg_bbbbbbbb",
+          "tag": "us",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 1000,
+          "usedMicroUsd": 1000
+        }
+      ],
+      "expected": { "blocked": null, "alerts": [] }
+    },
+    {
+      "name": "zero limit blocks every charged call",
+      "tags": ["eu"],
+      "estimateMicroUsd": 0,
+      "budgets": [
+        {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "monthly",
+          "action": "block",
+          "limitMicroUsd": 0,
+          "usedMicroUsd": 0
+        }
+      ],
+      "expected": {
+        "blocked": {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "monthly",
+          "action": "block",
+          "limitMicroUsd": 0,
+          "usedMicroUsd": 0
+        },
+        "alerts": []
+      }
+    },
+    {
+      "name": "alert budget never refuses and is reported",
+      "tags": ["eu", "checkout"],
+      "estimateMicroUsd": 100,
+      "budgets": [
+        {
+          "id": "tbg_cccccccc",
+          "tag": "checkout",
+          "window": "daily",
+          "action": "alert",
+          "limitMicroUsd": 50,
+          "usedMicroUsd": 0
+        },
+        {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "daily",
+          "action": "alert",
+          "limitMicroUsd": 10,
+          "usedMicroUsd": 20
+        }
+      ],
+      "expected": {
+        "blocked": null,
+        "alerts": [
+          {
+            "id": "tbg_aaaaaaaa",
+            "tag": "eu",
+            "window": "daily",
+            "action": "alert",
+            "limitMicroUsd": 10,
+            "usedMicroUsd": 20
+          },
+          {
+            "id": "tbg_cccccccc",
+            "tag": "checkout",
+            "window": "daily",
+            "action": "alert",
+            "limitMicroUsd": 50,
+            "usedMicroUsd": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "the reached block budget with least room wins",
+      "tags": ["eu", "checkout"],
+      "estimateMicroUsd": 400,
+      "budgets": [
+        {
+          "id": "tbg_aaaaaaaa",
+          "tag": "eu",
+          "window": "monthly",
+          "action": "block",
+          "limitMicroUsd": 1000,
+          "usedMicroUsd": 700
+        },
+        {
+          "id": "tbg_bbbbbbbb",
+          "tag": "checkout",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 300,
+          "usedMicroUsd": 200
+        },
+        {
+          "id": "tbg_dddddddd",
+          "tag": "checkout",
+          "window": "monthly",
+          "action": "block",
+          "limitMicroUsd": 9000,
+          "usedMicroUsd": 0
+        }
+      ],
+      "expected": {
+        "blocked": {
+          "id": "tbg_bbbbbbbb",
+          "tag": "checkout",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 300,
+          "usedMicroUsd": 200
+        },
+        "alerts": []
+      }
+    },
+    {
+      "name": "equal room breaks ties by id in code-unit order",
+      "tags": ["eu", "us"],
+      "estimateMicroUsd": 10,
+      "budgets": [
+        {
+          "id": "tbg_b0000000",
+          "tag": "us",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 5,
+          "usedMicroUsd": 5
+        },
+        {
+          "id": "tbg_a0000000",
+          "tag": "eu",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 5,
+          "usedMicroUsd": 5
+        }
+      ],
+      "expected": {
+        "blocked": {
+          "id": "tbg_a0000000",
+          "tag": "eu",
+          "window": "daily",
+          "action": "block",
+          "limitMicroUsd": 5,
+          "usedMicroUsd": 5
+        },
+        "alerts": []
+      }
+    }
+  ]
+}

@@ -6,7 +6,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { type ReactNode, Suspense, useState } from "react";
 
 /** Defer the first mount, then retain dialog state between later openings. */
@@ -33,16 +33,14 @@ export function DeferredSettingsDialog({
 		<Suspense
 			fallback={
 				<Dialog onOpenChange={onOpenChange} open={open}>
-					<DialogContent className="!w-[85vw] !max-w-7xl max-md:!w-screen max-md:!max-w-none h-[85vh] max-md:h-[100dvh] max-md:rounded-none">
+					<DialogContent appearance="deferred-settings">
 						<DialogHeader className="sr-only">
 							<DialogTitle>{t("settings.title", {}, title)}</DialogTitle>
 							<DialogDescription>
 								{t("settings.loading", {}, "Opening settings")}
 							</DialogDescription>
 						</DialogHeader>
-						<div className="grid size-full place-items-center">
-							<Spinner />
-						</div>
+						<SkeletonRows rows={6} spacing="library" />
 					</DialogContent>
 				</Dialog>
 			}

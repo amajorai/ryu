@@ -2,14 +2,13 @@ import {
 	InputBar,
 	type InputBarProps,
 } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
-import type { ChatVoiceMode } from "@ryu/blocks/desktop/agent-elements/types.ts";
 import type { ChatStatus, UIMessage } from "ai";
 import { ThemeProvider } from "next-themes";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentChat } from "../../components/agent-elements/agent-chat.tsx";
 import { ChatDisplayPrefs } from "../../src/components/chat/ChatDisplayPrefsProvider.tsx";
-import { VoiceModeSurface } from "../../src/components/voice/VoiceModeSurface.tsx";
+import { useVoiceLiveCall } from "../../src/components/voice/VoiceCallComposer.tsx";
 import type { VoiceMode } from "../../src/hooks/useVoiceMode.ts";
 import "../../src/index.css";
 
@@ -39,7 +38,7 @@ function message(
 		id,
 		parts: [{ text, type: "text" }],
 		role,
-	} as unknown as UIMessage;
+	};
 }
 
 function ProofInputBar(props: InputBarProps) {
@@ -72,12 +71,12 @@ function Proof() {
 
 	const voice: VoiceMode = {
 		agentName: "Ryu Assistant",
-		active: true,
+		active: voiceActive,
 		caption: "",
 		error: null,
 		elapsedSeconds,
 		interrupt: () => undefined,
-		levels: muted ? new Array(24).fill(0) : LEVELS,
+		levels: muted ? Array.from({ length: 24 }, () => 0) : LEVELS,
 		muted,
 		phase: "listening",
 		start: () => undefined,
@@ -86,14 +85,7 @@ function Proof() {
 		transcript: "",
 		turns: TURNS,
 	};
-	const voiceMode: ChatVoiceMode = voiceActive
-		? {
-				active: true,
-				render: (composer: ReactNode) => (
-					<VoiceModeSurface composer={composer} voice={voice} />
-				),
-			}
-		: { active: false };
+	const voiceMode = useVoiceLiveCall(voice);
 	const handleSend = useCallback((next: { content: string; role: "user" }) => {
 		setMessages([message("proof-user", "user", next.content)]);
 		setStatus("ready");
@@ -108,6 +100,7 @@ function Proof() {
 						: ""}
 				</output>
 				<AgentChat
+					attachments={{ onAttach: () => undefined }}
 					messages={messages}
 					onSend={handleSend}
 					onStop={() => setStatus("ready")}
@@ -120,7 +113,7 @@ function Proof() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
 		<Proof />
 	</ThemeProvider>

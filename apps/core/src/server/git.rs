@@ -16,6 +16,8 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::identity_verify::permissions;
+
 /// A `Json<T>` body extractor whose REJECTIONS are JSON too.
 ///
 /// Every hand-written exit in these handlers answers
@@ -55,12 +57,57 @@ fn json_rejection_response(rejection: &JsonRejection) -> Response {
         .into_response()
 }
 
+/// `(status, {"success":false,"error":<error>})`, the envelope every git exit uses.
+fn git_failure(status: StatusCode, error: impl Into<String>) -> Response {
+    (
+        status,
+        Json(json!({ "success": false, "error": error.into() })),
+    )
+        .into_response()
+}
+
+/// A worker-thread join failure: logged as `<op>: join error: …`, answered as 500.
+fn join_failure(op: &str, error: impl std::fmt::Display) -> Response {
+    tracing::error!("{op}: join error: {error}");
+    git_failure(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+}
+
+/// 403 `insufficient permissions: <permission>` unless `caller` holds `permission`.
+async fn require_permission(
+    state: &crate::server::ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    permission: &str,
+) -> Result<(), Response> {
+    crate::server::enforce_permission(state, caller, permission)
+        .await
+        .map_err(|_| {
+            git_failure(
+                StatusCode::FORBIDDEN,
+                format!("insufficient permissions: {permission}"),
+            )
+        })
+}
+
+/// 400 unless `cwd` is non-empty and names an existing directory.
+fn require_cwd_dir(cwd: &str) -> Result<(), Response> {
+    if cwd.is_empty() {
+        return Err(git_failure(StatusCode::BAD_REQUEST, "cwd is required"));
+    }
+    if !Path::new(cwd).is_dir() {
+        return Err(git_failure(
+            StatusCode::BAD_REQUEST,
+            "cwd is not a directory",
+        ));
+    }
+    Ok(())
+}
+
 // The git engine (everything that shells `git`) lives in the `ryu-workspace`
 // crate; these handlers are the thin axum surface over it.
 use ryu_workspace::git::{
-    checkout_branch, clone_repository, create_branch, create_pull_request, initialize_repository,
-    list_branches, query_file_diff, query_git_state, reverse_text_edits, run_git_action,
-    run_git_remote_action, ReverseEditsOutcome, TextReplacement,
+    checkout_branch, clone_public_repository, create_branch, create_pull_request,
+    initialize_repository, list_branches, query_file_diff, query_git_state, reverse_text_edits,
+    run_git_action, run_git_remote_action, ReverseEditsOutcome, TextReplacement,
 };
 
 const MAX_FILE_REVIEW_PATHS: usize = 64;
@@ -154,50 +201,21 @@ fn default_include_unstaged() -> bool {
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn git_init(JsonBody(body): JsonBody<GitInitBody>) -> axum::response::Response {
-    if body.cwd.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is required" })),
-        )
-            .into_response();
+    if let Err(response) = require_cwd_dir(&body.cwd) {
+        return response;
     }
-
-    let path = Path::new(&body.cwd);
-    if !path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is not a directory" })),
-        )
-            .into_response();
-    }
-
     let cwd = match canonical_remote_workspace(&body.cwd) {
         Ok(path) => path.to_string_lossy().into_owned(),
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "success": false, "error": error })),
-            )
-                .into_response();
+            return git_failure(StatusCode::BAD_REQUEST, error);
         }
     };
     let result = tokio::task::spawn_blocking(move || initialize_repository(&cwd)).await;
 
     match result {
         Ok(Ok(outcome)) => Json(json!(outcome)).into_response(),
-        Ok(Err(msg)) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "success": false, "error": msg })),
-        )
-            .into_response(),
-        Err(error) => {
-            tracing::error!("git_init: join error: {error}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "success": false, "error": "internal error" })),
-            )
-                .into_response()
-        }
+        Ok(Err(msg)) => git_failure(StatusCode::CONFLICT, msg),
+        Err(error) => join_failure("git_init", error),
     }
 }
 
@@ -206,22 +224,8 @@ pub(crate) async fn git_init_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitInitBody>,
 ) -> axum::response::Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.edit"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     git_init(JsonBody(body)).await
 }
@@ -291,35 +295,16 @@ fn validated_replacements(plan: ReverseEditPlanBody) -> Result<Vec<TextReplaceme
 )]
 pub async fn git_file_diff(JsonBody(body): JsonBody<GitFileDiffBody>) -> Response {
     if body.cwd.is_empty() || !Path::new(&body.cwd).is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd must be a directory" })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, "cwd must be a directory");
     }
     if let Err(error) = validate_review_paths(&body.paths) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": error })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, error);
     }
     let GitFileDiffBody { cwd, paths } = body;
     match tokio::task::spawn_blocking(move || query_file_diff(&cwd, &paths)).await {
         Ok(Ok(diff)) => Json(json!(diff)).into_response(),
-        Ok(Err(error)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": error })),
-        )
-            .into_response(),
-        Err(error) => {
-            tracing::error!("git_file_diff: join error: {error}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "success": false, "error": "internal error" })),
-            )
-                .into_response()
-        }
+        Ok(Err(error)) => git_failure(StatusCode::BAD_REQUEST, error),
+        Err(error) => join_failure("git_file_diff", error),
     }
 }
 
@@ -328,22 +313,8 @@ pub(crate) async fn git_file_diff_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitFileDiffBody>,
 ) -> Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_VIEW,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.view"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_VIEW).await {
+        return denied;
     }
     git_file_diff(JsonBody(body)).await
 }
@@ -362,20 +333,12 @@ pub(crate) async fn git_file_diff_authorized(
 )]
 pub async fn git_reverse_edits(JsonBody(body): JsonBody<GitReverseEditsBody>) -> Response {
     if body.cwd.is_empty() || !Path::new(&body.cwd).is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd must be a directory" })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, "cwd must be a directory");
     }
     let replacements = match validated_replacements(body.plan) {
         Ok(replacements) => replacements,
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "success": false, "error": error })),
-            )
-                .into_response()
+            return git_failure(StatusCode::BAD_REQUEST, error);
         }
     };
     let cwd = body.cwd;
@@ -386,19 +349,8 @@ pub async fn git_reverse_edits(JsonBody(body): JsonBody<GitReverseEditsBody>) ->
         Ok(Ok(outcome @ ReverseEditsOutcome::Conflict { .. })) => {
             (StatusCode::CONFLICT, Json(json!(outcome))).into_response()
         }
-        Ok(Err(error)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": error })),
-        )
-            .into_response(),
-        Err(error) => {
-            tracing::error!("git_reverse_edits: join error: {error}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "success": false, "error": "internal error" })),
-            )
-                .into_response()
-        }
+        Ok(Err(error)) => git_failure(StatusCode::BAD_REQUEST, error),
+        Err(error) => join_failure("git_reverse_edits", error),
     }
 }
 
@@ -407,22 +359,8 @@ pub(crate) async fn git_reverse_edits_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitReverseEditsBody>,
 ) -> Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.edit"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     git_reverse_edits(JsonBody(body)).await
 }
@@ -546,20 +484,12 @@ pub async fn git_branches(
 )]
 pub async fn git_checkout(JsonBody(body): JsonBody<GitCheckoutBody>) -> axum::response::Response {
     if body.cwd.is_empty() || body.branch.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd and branch are required" })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, "cwd and branch are required");
     }
 
     let path = Path::new(&body.cwd);
     if !path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is not a directory" })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, "cwd is not a directory");
     }
 
     let GitCheckoutBody { cwd, branch } = body;
@@ -567,19 +497,8 @@ pub async fn git_checkout(JsonBody(body): JsonBody<GitCheckoutBody>) -> axum::re
 
     match result {
         Ok(Ok(branch)) => Json(json!({ "success": true, "branch": branch })).into_response(),
-        Ok(Err(msg)) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "success": false, "error": msg })),
-        )
-            .into_response(),
-        Err(e) => {
-            tracing::error!("git_checkout: join error: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "success": false, "error": "internal error" })),
-            )
-                .into_response()
-        }
+        Ok(Err(msg)) => git_failure(StatusCode::CONFLICT, msg),
+        Err(e) => join_failure("git_checkout", e),
     }
 }
 
@@ -588,22 +507,8 @@ pub(crate) async fn git_checkout_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitCheckoutBody>,
 ) -> axum::response::Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.edit"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     git_checkout(JsonBody(body)).await
 }
@@ -627,20 +532,12 @@ pub async fn git_create_branch(
     JsonBody(body): JsonBody<GitCheckoutBody>,
 ) -> axum::response::Response {
     if body.cwd.is_empty() || body.branch.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd and branch are required" })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, "cwd and branch are required");
     }
 
     let path = Path::new(&body.cwd);
     if !path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is not a directory" })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, "cwd is not a directory");
     }
 
     let GitCheckoutBody { cwd, branch } = body;
@@ -648,19 +545,8 @@ pub async fn git_create_branch(
 
     match result {
         Ok(Ok(branch)) => Json(json!({ "success": true, "branch": branch })).into_response(),
-        Ok(Err(msg)) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "success": false, "error": msg })),
-        )
-            .into_response(),
-        Err(e) => {
-            tracing::error!("git_create_branch: join error: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "success": false, "error": "internal error" })),
-            )
-                .into_response()
-        }
+        Ok(Err(msg)) => git_failure(StatusCode::CONFLICT, msg),
+        Err(e) => join_failure("git_create_branch", e),
     }
 }
 
@@ -669,22 +555,8 @@ pub(crate) async fn git_create_branch_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitCheckoutBody>,
 ) -> axum::response::Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.edit"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     git_create_branch(JsonBody(body)).await
 }
@@ -706,23 +578,9 @@ pub(crate) async fn git_create_branch_authorized(
 pub async fn git_commit_push(
     JsonBody(body): JsonBody<GitCommitPushBody>,
 ) -> axum::response::Response {
-    if body.cwd.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is required" })),
-        )
-            .into_response();
+    if let Err(response) = require_cwd_dir(&body.cwd) {
+        return response;
     }
-
-    let path = Path::new(&body.cwd);
-    if !path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is not a directory" })),
-        )
-            .into_response();
-    }
-
     let GitCommitPushBody {
         cwd,
         message,
@@ -731,11 +589,7 @@ pub async fn git_commit_push(
     } = body;
     let action = action.unwrap_or_else(|| "commit-push".to_string());
     if !matches!(action.as_str(), "commit" | "commit-push" | "push") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "invalid git action" })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, "invalid git action");
     }
     let message = message
         .map(|m| m.trim().to_string())
@@ -749,19 +603,8 @@ pub async fn git_commit_push(
 
     match result {
         Ok(Ok(outcome)) => Json(json!(outcome)).into_response(),
-        Ok(Err(msg)) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "success": false, "error": msg })),
-        )
-            .into_response(),
-        Err(e) => {
-            tracing::error!("git_commit_push: join error: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "success": false, "error": "internal error" })),
-            )
-                .into_response()
-        }
+        Ok(Err(msg)) => git_failure(StatusCode::CONFLICT, msg),
+        Err(e) => join_failure("git_commit_push", e),
     }
 }
 
@@ -770,22 +613,8 @@ pub(crate) async fn git_commit_push_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitCommitPushBody>,
 ) -> axum::response::Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.edit"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     git_commit_push(JsonBody(body)).await
 }
@@ -795,38 +624,17 @@ async fn git_remote(
     action: &'static str,
     operation_name: &'static str,
 ) -> axum::response::Response {
-    if body.cwd.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is required" })),
-        )
-            .into_response();
-    }
-
-    let raw_path = Path::new(&body.cwd);
-    if !raw_path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is not a directory" })),
-        )
-            .into_response();
+    if let Err(response) = require_cwd_dir(&body.cwd) {
+        return response;
     }
     let path = match canonical_remote_workspace(&body.cwd) {
         Ok(path) => path,
         Err(error) => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(json!({ "success": false, "error": error })),
-            )
-                .into_response();
+            return git_failure(StatusCode::FORBIDDEN, error);
         }
     };
     if !path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is not a directory" })),
-        )
-            .into_response();
+        return git_failure(StatusCode::BAD_REQUEST, "cwd is not a directory");
     }
 
     let cwd = path.to_string_lossy().into_owned();
@@ -834,19 +642,8 @@ async fn git_remote(
 
     match result {
         Ok(Ok(outcome)) => Json(json!(outcome)).into_response(),
-        Ok(Err(msg)) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "success": false, "error": msg })),
-        )
-            .into_response(),
-        Err(error) => {
-            tracing::error!("{operation_name}: join error: {error}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "success": false, "error": "internal error" })),
-            )
-                .into_response()
-        }
+        Ok(Err(msg)) => git_failure(StatusCode::CONFLICT, msg),
+        Err(error) => join_failure(operation_name, error),
     }
 }
 
@@ -855,7 +652,7 @@ async fn git_remote(
 /// route's node bearer admits the request; `agent.edit` above is the shared-node
 /// user/resource gate. Canonicalizing before the check closes symlink and `..`
 /// escapes.
-fn canonical_remote_workspace(raw: &str) -> Result<std::path::PathBuf, String> {
+pub(crate) fn canonical_remote_workspace(raw: &str) -> Result<std::path::PathBuf, String> {
     let path = std::fs::canonicalize(raw)
         .map_err(|_| "cwd could not be resolved on the node".to_string())?;
     let home = dirs::home_dir().ok_or_else(|| "node home directory is unavailable".to_string())?;
@@ -887,22 +684,8 @@ pub(crate) async fn git_pull_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitRemoteBody>,
 ) -> axum::response::Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.edit"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     git_remote(body, "pull", "git_pull").await
 }
@@ -928,22 +711,8 @@ pub(crate) async fn git_sync_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitRemoteBody>,
 ) -> axum::response::Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.edit"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     git_remote(body, "sync", "git_sync").await
 }
@@ -963,31 +732,13 @@ pub(crate) async fn git_sync_authorized(
 pub async fn git_pull_request(
     JsonBody(body): JsonBody<GitPullRequestBody>,
 ) -> axum::response::Response {
-    if body.cwd.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is required" })),
-        )
-            .into_response();
+    if let Err(response) = require_cwd_dir(&body.cwd) {
+        return response;
     }
-
-    let path = Path::new(&body.cwd);
-    if !path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "success": false, "error": "cwd is not a directory" })),
-        )
-            .into_response();
-    }
-
     let cwd = match canonical_remote_workspace(&body.cwd) {
         Ok(path) => path.to_string_lossy().into_owned(),
         Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "success": false, "error": error })),
-            )
-                .into_response();
+            return git_failure(StatusCode::BAD_REQUEST, error);
         }
     };
 
@@ -1013,19 +764,8 @@ pub async fn git_pull_request(
 
     match result {
         Ok(Ok(outcome)) => Json(json!(outcome)).into_response(),
-        Ok(Err(msg)) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "success": false, "error": msg })),
-        )
-            .into_response(),
-        Err(e) => {
-            tracing::error!("git_pull_request: join error: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "success": false, "error": "internal error" })),
-            )
-                .into_response()
-        }
+        Ok(Err(msg)) => git_failure(StatusCode::CONFLICT, msg),
+        Err(e) => join_failure("git_pull_request", e),
     }
 }
 
@@ -1034,22 +774,8 @@ pub(crate) async fn git_pull_request_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<GitPullRequestBody>,
 ) -> axum::response::Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "success": false,
-                "error": "insufficient permissions: agent.edit"
-            })),
-        )
-            .into_response();
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     git_pull_request(JsonBody(body)).await
 }
@@ -1061,165 +787,208 @@ pub struct NewFolderBody {
     name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CloneFolderBody {
-    /// GitHub HTTPS or SSH clone URL.
+    /// HTTPS or SSH clone URL for a public Git host such as GitHub, GitLab,
+    /// Azure DevOps, or a custom host. Credentials must be configured on the node.
     url: String,
     /// Optional destination folder name. Defaults to the repository name.
     #[serde(default)]
     name: Option<String>,
 }
 
-#[derive(Clone, Copy)]
-enum GithubCloneTransport {
-    Https,
-    Ssh,
+pub(crate) struct GitCloneSource {
+    pub(crate) repository_name: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
 }
 
-fn github_repository_name_from_path(path: &str) -> Result<String, String> {
-    let segments: Vec<&str> = path
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect();
-    if segments.len() != 2 {
-        return Err("GitHub URL must include exactly owner/repository".to_string());
+fn git_repository_name_from_path(path: &str, host: &str) -> Result<String, String> {
+    let path = path.trim_matches('/');
+    if path.is_empty() {
+        return Err("Repository URL must include a repository path".to_string());
     }
-    for segment in &segments {
-        if segment == &"."
-            || segment == &".."
-            || segment
-                .chars()
-                .any(|character| !(character.is_ascii_alphanumeric() || ".-_".contains(character)))
-        {
-            return Err("GitHub URL contains an invalid repository path".to_string());
-        }
+    let segments: Vec<&str> = path.split('/').collect();
+    if segments.iter().any(|segment| {
+        segment.is_empty()
+            || *segment == "."
+            || *segment == ".."
+            || segment.chars().any(char::is_control)
+    }) {
+        return Err("Repository URL contains an invalid path".to_string());
     }
-    let repository = segments[1].strip_suffix(".git").unwrap_or(segments[1]);
-    if repository.is_empty() {
-        return Err("GitHub URL must include a repository name".to_string());
+    if matches!(
+        host.to_ascii_lowercase().as_str(),
+        "github.com" | "www.github.com"
+    ) && segments.len() != 2
+    {
+        return Err("GitHub clone URLs must identify exactly one repository".to_string());
+    }
+
+    let repository = segments.last().copied().unwrap_or_default();
+    let repository = repository.strip_suffix(".git").unwrap_or(repository);
+    if repository.is_empty() || repository == "." || repository == ".." {
+        return Err("Repository URL must include a repository name".to_string());
     }
     Ok(repository.to_string())
 }
 
-/// Accept the two GitHub clone forms the picker documents: HTTPS and SSH.
-/// Rejecting other hosts keeps this endpoint from becoming a generic outbound
-/// Git transport, while the separate SSH form still lets a remote node use its
-/// configured `~/.ssh` keys for private repositories.
-fn parse_github_clone_url(raw: &str) -> Result<(String, GithubCloneTransport), String> {
+/// Accept credential-free HTTPS and standard Git-user SSH clone URLs from any
+/// Git host. The caller screens the extracted host before starting Git so this
+/// authenticated clone endpoint cannot target local or cloud-metadata services.
+pub(crate) fn parse_git_clone_url(raw: &str) -> Result<GitCloneSource, String> {
     let source = raw.trim();
     if source.is_empty() {
-        return Err("A GitHub repository URL is required".to_string());
+        return Err("A repository URL is required".to_string());
     }
     if source.len() > 2048 || source.chars().any(char::is_control) {
-        return Err("That GitHub URL is not valid".to_string());
+        return Err("That repository URL is not valid".to_string());
     }
 
-    if let Some(path) = source.strip_prefix("git@github.com:") {
-        return github_repository_name_from_path(path)
-            .map(|name| (name, GithubCloneTransport::Ssh));
+    if let Some(scp_source) = source.strip_prefix("git@") {
+        let (raw_host, path) = scp_source
+            .split_once(':')
+            .ok_or_else(|| "Use a Git HTTPS URL or an SSH clone URL".to_string())?;
+        if raw_host.is_empty()
+            || raw_host
+                .chars()
+                .any(|character| matches!(character, '/' | '@' | '?' | '#'))
+            || path.contains('?')
+            || path.contains('#')
+        {
+            return Err("That SSH clone URL is not valid".to_string());
+        }
+        let host = url::Host::parse(raw_host)
+            .map_err(|_| "That SSH clone host is not valid".to_string())?
+            .to_string();
+        let repository_name = git_repository_name_from_path(path, &host)?;
+        return Ok(GitCloneSource {
+            repository_name,
+            host,
+            port: 22,
+        });
     }
 
     let parsed = url::Url::parse(source).map_err(|_| {
-        "Use a GitHub HTTPS URL or an SSH URL such as git@github.com:owner/repo.git".to_string()
+        "Use a Git HTTPS URL or an SSH clone URL such as git@example.com:group/repo.git".to_string()
     })?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "GitHub URL has no host".to_string())?;
-    let transport = match parsed.scheme() {
-        "https"
-            if host.eq_ignore_ascii_case("github.com")
-                || host.eq_ignore_ascii_case("www.github.com") =>
-        {
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("Git clone URLs cannot contain a query or fragment".to_string());
+    }
+    let default_port = match parsed.scheme() {
+        "https" => {
             if !parsed.username().is_empty() || parsed.password().is_some() {
-                return Err("GitHub HTTPS URLs cannot contain credentials".to_string());
+                return Err("HTTPS clone URLs cannot contain credentials".to_string());
             }
-            if parsed.port().is_some_and(|port| port != 443) {
-                return Err("GitHub HTTPS URLs must use port 443".to_string());
-            }
-            GithubCloneTransport::Https
+            443
         }
-        "ssh" if host.eq_ignore_ascii_case("github.com") => {
-            if parsed.username() != "git"
-                || parsed.password().is_some()
-                || parsed.port().is_some_and(|port| port != 22)
-            {
-                return Err("GitHub SSH URLs must use the git user and port 22".to_string());
+        "ssh" => {
+            if parsed.username() != "git" || parsed.password().is_some() {
+                return Err("SSH clone URLs must use the git user without a password".to_string());
             }
-            GithubCloneTransport::Ssh
+            22
         }
         _ => {
-            return Err("Only GitHub HTTPS and SSH clone URLs are supported".to_string());
+            return Err("Only HTTPS and SSH Git clone URLs are supported".to_string());
         }
     };
-    if parsed.query().is_some() || parsed.fragment().is_some() {
-        return Err("GitHub clone URLs cannot contain a query or fragment".to_string());
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Repository URL has no host".to_string())?;
+    let host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host)
+        .to_string();
+    let port = parsed.port().unwrap_or(default_port);
+    if port == 0 {
+        return Err("Git clone URLs must use a valid port".to_string());
     }
     let path = parsed
         .path_segments()
         .map(|segments| segments.collect::<Vec<_>>().join("/"))
         .unwrap_or_default();
-    github_repository_name_from_path(&path).map(|name| (name, transport))
+    let repository_name = git_repository_name_from_path(&path, &host)?;
+    Ok(GitCloneSource {
+        repository_name,
+        host,
+        port,
+    })
 }
 
-fn clone_error(status: StatusCode, error: impl Into<String>) -> axum::response::Response {
-    (
-        status,
-        Json(json!({ "success": false, "error": error.into() })),
-    )
-        .into_response()
+/// `host:port:addr[,addr]` for Git's `http.curloptResolve`, pinning the clone
+/// to the addresses the SSRF screen approved so Git cannot re-resolve the
+/// host to a different (local) target. IP-literal hosts need no pinning.
+fn git_clone_pinned_resolve(
+    source: &GitCloneSource,
+    approved: &[std::net::SocketAddr],
+) -> Option<String> {
+    let literal = source.host.trim_start_matches('[').trim_end_matches(']');
+    if literal.parse::<std::net::IpAddr>().is_ok() || approved.is_empty() {
+        return None;
+    }
+    let addresses = approved
+        .iter()
+        .map(|address| match address.ip() {
+            std::net::IpAddr::V4(ip) => ip.to_string(),
+            std::net::IpAddr::V6(ip) => format!("[{ip}]"),
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!("{}:{}:{addresses}", source.host, source.port))
 }
 
 /// `POST /api/workspace/clone` `{ url, name? }`
 ///
-/// Clone a GitHub repository into `~/Documents/Ryu/<name>` on the node serving
-/// this request. SSH URLs run on that node, so its existing SSH config and keys
-/// are used; no private key crosses the desktop boundary. The destination is
+/// Clone an HTTPS or SSH repository from GitHub, GitLab, Azure DevOps, or a
+/// custom public Git host into `~/Documents/Ryu/<name>` on the node serving this
+/// request. HTTPS credentials and SSH keys stay configured on that node; no
+/// provider credential crosses the desktop boundary. The destination is
 /// registered by the desktop only after this operation returns successfully.
 #[utoipa::path(
     post,
     path = "/api/workspace/clone",
     tag = "Git",
-    summary = "Clone a GitHub repository into a project folder",
-    request_body = serde_json::Value,
+    summary = "Clone a Git repository into a project folder",
+    description = "Accepts credential-free HTTPS or SSH clone URLs from GitHub, GitLab, Azure DevOps, and custom public Git hosts. Configure HTTPS credentials or SSH keys on the active node. Local, private, loopback, and cloud-metadata host addresses are rejected.",
+    request_body = CloneFolderBody,
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn clone_project_folder(
     JsonBody(body): JsonBody<CloneFolderBody>,
 ) -> axum::response::Response {
     let url = body.url.trim().to_string();
-    let (repository_name, transport) = match parse_github_clone_url(&url) {
+    let source = match parse_git_clone_url(&url) {
         Ok(parsed) => parsed,
-        Err(error) => return clone_error(StatusCode::BAD_REQUEST, error),
+        Err(error) => return git_failure(StatusCode::BAD_REQUEST, error),
     };
     let name = body
         .name
         .as_deref()
         .map(str::trim)
         .filter(|name| !name.is_empty())
-        .unwrap_or(&repository_name)
+        .unwrap_or(&source.repository_name)
         .to_string();
     if let Err(error) = validate_folder_name(&name) {
-        return clone_error(StatusCode::BAD_REQUEST, error);
+        return git_failure(StatusCode::BAD_REQUEST, error);
     }
 
-    let port = match transport {
-        GithubCloneTransport::Https => 443,
-        GithubCloneTransport::Ssh => 22,
+    let approved = match crate::server::resolve_guarded_host(&source.host, source.port).await {
+        Ok(approved) => approved,
+        Err(error) => return git_failure(StatusCode::BAD_GATEWAY, error),
     };
-    if let Err(error) = crate::server::resolve_guarded_host("github.com", port).await {
-        return clone_error(StatusCode::BAD_GATEWAY, error);
-    }
+    let pinned_resolve = git_clone_pinned_resolve(&source, &approved);
 
     let Some(docs) = dirs::document_dir() else {
-        return clone_error(
+        return git_failure(
             StatusCode::INTERNAL_SERVER_ERROR,
             "could not resolve the Documents directory",
         );
     };
     let projects_root = docs.join("Ryu");
     if let Err(error) = std::fs::create_dir_all(&projects_root) {
-        return clone_error(
+        return git_failure(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to create the project folder: {error}"),
         );
@@ -1227,19 +996,21 @@ pub async fn clone_project_folder(
     let root_string = projects_root.to_string_lossy().into_owned();
     let projects_root = match canonical_remote_workspace(&root_string) {
         Ok(root) => root,
-        Err(error) => return clone_error(StatusCode::FORBIDDEN, error),
+        Err(error) => return git_failure(StatusCode::FORBIDDEN, error),
     };
     let destination = projects_root.join(&name);
     if std::fs::symlink_metadata(&destination).is_ok() {
-        return clone_error(
+        return git_failure(
             StatusCode::CONFLICT,
             format!("A project folder named \"{name}\" already exists"),
         );
     }
 
     let clone_destination = destination.clone();
-    let result =
-        tokio::task::spawn_blocking(move || clone_repository(&url, &clone_destination)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        clone_public_repository(&url, &clone_destination, pinned_resolve.as_deref())
+    })
+    .await;
     match result {
         Ok(Ok(())) => Json(json!({
             "success": true,
@@ -1247,11 +1018,8 @@ pub async fn clone_project_folder(
             "path": destination.to_string_lossy(),
         }))
         .into_response(),
-        Ok(Err(error)) => clone_error(StatusCode::CONFLICT, error),
-        Err(error) => {
-            tracing::error!("clone_project_folder: join error: {error}");
-            clone_error(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
-        }
+        Ok(Err(error)) => git_failure(StatusCode::CONFLICT, error),
+        Err(error) => join_failure("clone_project_folder", error),
     }
 }
 
@@ -1260,18 +1028,8 @@ pub(crate) async fn clone_project_folder_authorized(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     JsonBody(body): JsonBody<CloneFolderBody>,
 ) -> axum::response::Response {
-    if crate::server::enforce_permission(
-        &state,
-        &caller,
-        crate::identity_verify::permissions::AGENT_EDIT,
-    )
-    .await
-    .is_err()
-    {
-        return clone_error(
-            StatusCode::FORBIDDEN,
-            "insufficient permissions: agent.edit",
-        );
+    if let Err(denied) = require_permission(&state, &caller, permissions::AGENT_EDIT).await {
+        return denied;
     }
     clone_project_folder(JsonBody(body)).await
 }
@@ -1489,7 +1247,7 @@ pub async fn list_directory(Query(q): Query<ListDirQuery>) -> axum::response::Re
 }
 
 /// Validate a project-folder name is a single, safe path segment.
-fn validate_folder_name(name: &str) -> Result<(), String> {
+pub(crate) fn validate_folder_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("A folder name is required".to_string());
     }
@@ -1529,24 +1287,113 @@ mod tests {
     }
 
     #[test]
-    fn github_clone_url_accepts_https_and_ssh() {
-        let (https_name, _) =
-            parse_github_clone_url("https://github.com/amajorai/ryu.git").unwrap();
-        assert_eq!(https_name, "ryu");
+    fn git_clone_url_accepts_github_gitlab_azure_and_custom_hosts() {
+        let cases = [
+            (
+                "https://github.com/amajorai/ryu.git",
+                "ryu",
+                "github.com",
+                443,
+            ),
+            (
+                "https://gitlab.com/group/subgroup/web-app.git",
+                "web-app",
+                "gitlab.com",
+                443,
+            ),
+            (
+                "https://dev.azure.com/acme/platform/_git/agent-runtime",
+                "agent-runtime",
+                "dev.azure.com",
+                443,
+            ),
+            (
+                "ssh://git@ssh.dev.azure.com/v3/acme/platform/agent-runtime",
+                "agent-runtime",
+                "ssh.dev.azure.com",
+                22,
+            ),
+            (
+                "https://git.example.test:8443/team/repository.git",
+                "repository",
+                "git.example.test",
+                8443,
+            ),
+            (
+                "git@git.example.test:team/repository.git",
+                "repository",
+                "git.example.test",
+                22,
+            ),
+            (
+                "ssh://git@git.example.test:2222/team/repository.git",
+                "repository",
+                "git.example.test",
+                2222,
+            ),
+        ];
 
-        let (scp_name, _) = parse_github_clone_url("git@github.com:amajorai/ryu.git").unwrap();
-        assert_eq!(scp_name, "ryu");
-
-        let (ssh_name, _) = parse_github_clone_url("ssh://git@github.com/amajorai/ryu").unwrap();
-        assert_eq!(ssh_name, "ryu");
+        for (url, repository_name, host, port) in cases {
+            let parsed = parse_git_clone_url(url).unwrap();
+            assert_eq!(parsed.repository_name, repository_name, "{url}");
+            assert_eq!(parsed.host, host, "{url}");
+            assert_eq!(parsed.port, port, "{url}");
+        }
     }
 
     #[test]
-    fn github_clone_url_rejects_other_hosts_and_extra_paths() {
-        assert!(parse_github_clone_url("https://gitlab.com/org/repo").is_err());
-        assert!(parse_github_clone_url("https://github.com/org/repo/tree/main").is_err());
-        assert!(parse_github_clone_url("https://token@github.com/org/repo").is_err());
-        assert!(parse_github_clone_url("ssh://root@github.com/org/repo").is_err());
+    fn git_clone_pins_the_screened_addresses() {
+        let source = parse_git_clone_url("https://git.example.test/team/repository.git").unwrap();
+        let approved = [
+            "93.184.216.34:443".parse().unwrap(),
+            "[2606:2800:220:1::248]:443".parse().unwrap(),
+        ];
+        assert_eq!(
+            git_clone_pinned_resolve(&source, &approved).as_deref(),
+            Some("git.example.test:443:93.184.216.34,[2606:2800:220:1::248]")
+        );
+        let literal = parse_git_clone_url("https://93.184.216.34/team/repository.git").unwrap();
+        assert_eq!(git_clone_pinned_resolve(&literal, &approved[..1]), None);
+    }
+
+    #[test]
+    fn git_clone_url_rejects_unsafe_or_unsupported_forms() {
+        for url in [
+            "",
+            "owner/repository",
+            "file:///tmp/repository",
+            "http://git.example.test/team/repository",
+            "https://token@git.example.test/team/repository",
+            "https://git.example.test/team/repository?token=secret",
+            "https://git.example.test/team/repository#fragment",
+            "ssh://root@git.example.test/team/repository",
+            "ssh://git:password@git.example.test/team/repository",
+            "git@/team/repository",
+            "git@git.example.test:team/../repository",
+            "https://github.com/org/repository/tree/main",
+        ] {
+            assert!(
+                parse_git_clone_url(url).is_err(),
+                "accepted unsafe URL: {url}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn git_clone_host_screen_rejects_private_and_metadata_targets() {
+        for host in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "169.254.169.254",
+            "metadata.google.internal",
+        ] {
+            assert!(
+                crate::server::resolve_guarded_host(host, 443)
+                    .await
+                    .is_err(),
+                "allowed blocked Git host {host}"
+            );
+        }
     }
 
     async fn body_json(resp: axum::response::Response) -> (StatusCode, serde_json::Value) {

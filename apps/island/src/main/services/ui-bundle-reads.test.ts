@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdir,
+	mkdtemp,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,6 +39,11 @@ test("IPC bundle request owners cancel independently and release destruction lis
 		},
 	});
 	try {
+		await symlink(
+			join(import.meta.dirname, "../../../node_modules"),
+			join(root, "node_modules"),
+			"dir"
+		);
 		const services = join(root, "main/services");
 		await mkdir(services, { recursive: true });
 		await mkdir(join(root, "main/ipc"));
@@ -40,13 +52,16 @@ test("IPC bundle request owners cancel independently and release destruction lis
 			join(import.meta.dirname, "../ipc/plugins.ts"),
 			join(root, "main/ipc/plugins.ts")
 		);
-		await copyFile(
-			join(import.meta.dirname, "../../shared/ipc.ts"),
-			join(root, "shared/ipc.ts")
-		);
+		for (const name of ["ipc.ts", "host-json.ts"]) {
+			await copyFile(
+				join(import.meta.dirname, "../../shared", name),
+				join(root, "shared", name)
+			);
+		}
 		for (const name of [
 			"ui-bundle-reads.ts",
 			"plugin-host.ts",
+			"plugin-host-contract.ts",
 			"response-deadline.ts",
 			"sse.ts",
 		]) {
@@ -55,7 +70,7 @@ test("IPC bundle request owners cancel independently and release destruction lis
 		const base = server.url.toString().replace(/\/$/, "");
 		await writeFile(
 			join(services, "config.ts"),
-			`export const coreHeaders=()=>({});export const loadConfig=()=>({coreBaseUrl:${JSON.stringify(base)}});`
+			`export const onCoreConfigChange=()=>()=>{};export const coreConfigGeneration=()=>0;export const coreHeaders=()=>({});export const loadConfig=()=>({coreBaseUrl:${JSON.stringify(base)}});`
 		);
 		await writeFile(
 			join(root, "run.ts"),
@@ -90,8 +105,16 @@ process.stdout.write(JSON.stringify({duplicate,firstResult,secondResult,afterFir
 		expect(result.secondResult.available).toBe(false);
 		expect(result.afterFirst.closed).toEqual(["/api/plugins/a/ui-bundle"]);
 		expect(result.bListeners).toBe(1);
-		expect(result.normal).toEqual({ available: true, code: "fixture" });
-		expect(result.legacy).toEqual({ available: true, code: "fixture" });
+		expect(result.normal).toEqual({
+			available: true,
+			code: "fixture",
+			coreGeneration: 0,
+		});
+		expect(result.legacy).toEqual({
+			available: true,
+			code: "fixture",
+			coreGeneration: 0,
+		});
 		expect(result.listeners).toBe(0);
 	} finally {
 		server.stop(true);

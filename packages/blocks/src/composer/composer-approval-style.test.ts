@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { approvalModeStyle } from "./composer-approval-style.ts";
 import type { ComposerSettingItem } from "./composer-settings-menu.tsx";
 
@@ -80,6 +81,6 @@ describe("approvalModeStyle", () => {
 	it("returns a decoration carrying both an icon and a className", () => {
 		const deco = approvalModeStyle(item({ id: "plan" }));
 		expect(deco?.icon).toBeDefined();
-		expect(typeof deco?.className).toBe("string");
+		expect(isNativeText(deco?.className)).toBe(true);
 	});
 });

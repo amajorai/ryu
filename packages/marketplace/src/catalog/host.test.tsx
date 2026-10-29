@@ -25,8 +25,7 @@ function stubHost(over: Partial<CatalogHost> = {}): CatalogHost {
 			throw new Error("unused");
 		},
 		useActiveNode: () => ({ url: "", token: null }),
-		usePersistedToggle: (_k: string, d: boolean) =>
-			[d, () => undefined] as [boolean, (v: boolean) => void],
+		usePersistedToggle: (_k: string, d: boolean) => [d, () => undefined],
 		installSidecar: () => Promise.resolve(),
 		estimateLlmfit: () =>
 			Promise.resolve({

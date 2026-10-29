@@ -1,0 +1,8 @@
+[data-announcement-accent] {
+	color: var(--announcement-accent);
+	background-color: color-mix(
+		in srgb,
+		var(--announcement-accent) 18%,
+		transparent
+	);
+}

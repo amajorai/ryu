@@ -4,6 +4,8 @@ import {
 	CREDIT_POOL_IDS,
 	CREDIT_POOLS,
 	isCreditPoolId,
+	isOwnSupplyPool,
+	OWN_SUPPLY_POOLS,
 	poolForGatewayProvider,
 } from "./credit-pools.ts";
 
@@ -57,16 +59,25 @@ describe("CREDIT_POOLS", () => {
 
 	it("carries the donated ceilings, with 0 meaning uncapped", () => {
 		expect(CREDIT_POOLS.cloudflare.budgetCeilingMicroUsd).toBe(10_000_000_000);
-		expect(CREDIT_POOLS.bedrock.budgetCeilingMicroUsd).toBe(8_000_000_000);
+		expect(CREDIT_POOLS.bedrock.budgetCeilingMicroUsd).toBe(10_000_000_000);
+		expect(CREDIT_POOLS.vertex.budgetCeilingMicroUsd).toBe(2_500_000_000);
+		expect(CREDIT_POOLS["openai-credits"].budgetCeilingMicroUsd).toBe(
+			1_000_000_000
+		);
+		expect(CREDIT_POOLS["anthropic-credits"].budgetCeilingMicroUsd).toBe(
+			3_000_000_000
+		);
 		expect(CREDIT_POOLS.openrouter.budgetCeilingMicroUsd).toBe(0);
 	});
 
-	it("caps the donated pools whose real figure is not in yet", () => {
-		// 0 is UNCAPPED, and a donated pool with no ceiling has no brake at all:
-		// `reservePoolBudget` would issue grants against an allowance nobody has
-		// measured. The placeholder must stay non-zero until the operator raises
-		// the STORED row to the real number.
-		for (const pool of [CREDIT_POOLS.vertex, CREDIT_POOLS["openai-credits"]]) {
+	it("caps every frontier pool Ryu holds credit for", () => {
+		// 0 is UNCAPPED, and a held pool with no ceiling has no brake at all:
+		// `reservePoolBudget` would issue grants against an unmeasured allowance.
+		for (const pool of [
+			CREDIT_POOLS.vertex,
+			CREDIT_POOLS["openai-credits"],
+			CREDIT_POOLS["anthropic-credits"],
+		]) {
 			expect(pool.budgetCeilingMicroUsd).toBeGreaterThan(0);
 			expect(pool.tier).toBe("frontier");
 			expect(pool.visible).toBe(true);
@@ -91,6 +102,9 @@ describe("poolForGatewayProvider", () => {
 		expect(poolForGatewayProvider("openrouter")).toBe("openrouter");
 		expect(poolForGatewayProvider("vertex")).toBe("vertex");
 		expect(poolForGatewayProvider("openai-credits")).toBe("openai-credits");
+		expect(poolForGatewayProvider("anthropic-credits")).toBe(
+			"anthropic-credits"
+		);
 	});
 
 	it("returns null for an untagged provider instead of guessing", () => {
@@ -127,5 +141,21 @@ describe("isCreditPoolId", () => {
 		// Inherited object members are not pool ids.
 		expect(isCreditPoolId("toString")).toBe(false);
 		expect(isCreditPoolId("constructor")).toBe(false);
+	});
+});
+
+describe("isOwnSupplyPool", () => {
+	it("is every pool but the retail pass-through, and nothing unknown", () => {
+		expect(OWN_SUPPLY_POOLS.map((pool) => pool.id)).toEqual([
+			"cloudflare",
+			"bedrock",
+			"vertex",
+			"openai-credits",
+			"anthropic-credits",
+		]);
+		expect(isOwnSupplyPool("openrouter")).toBe(false);
+		expect(isOwnSupplyPool("openai")).toBe(false);
+		expect(isOwnSupplyPool(null)).toBe(false);
+		expect(isOwnSupplyPool(undefined)).toBe(false);
 	});
 });

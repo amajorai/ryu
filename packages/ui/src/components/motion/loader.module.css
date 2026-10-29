@@ -1,0 +1,11 @@
+.parts {
+	gap: var(--loader-gap);
+}
+.part {
+	width: var(--loader-part-width);
+	height: var(--loader-part-height);
+}
+.ascii {
+	font-size: var(--loader-font-size);
+	line-height: 1;
+}

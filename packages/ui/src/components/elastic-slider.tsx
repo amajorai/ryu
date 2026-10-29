@@ -4,18 +4,30 @@ import { useControllableState } from "@ryu/ui/hooks/use-controllable-state.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	animate,
+	type MotionStyle,
+	type MotionValue,
 	motion,
 	useMotionValue,
 	useReducedMotion,
 	useTransform,
 } from "motion/react";
 import {
+	type CSSProperties,
 	useCallback,
 	useEffect,
 	useLayoutEffect,
 	useRef,
 	useState,
 } from "react";
+
+interface SliderMotionStyle extends MotionStyle {
+	"--slider-left"?: MotionValue<string>;
+	"--slider-width"?: MotionValue<string>;
+	"--slider-x"?: MotionValue<string>;
+}
+interface SliderMarkStyle extends CSSProperties {
+	"--slider-left": string;
+}
 
 // Drag detection & rubber band
 const CLICK_THRESHOLD = 3;
@@ -217,6 +229,11 @@ export function ElasticSlider({
 
 	const handlePointerDown = useCallback((e: React.PointerEvent) => {
 		e.preventDefault();
+		// SAFETY: This native pointer handler belongs to the controlled HTML div
+		// track; every rendered descendant is an HTML div/span, and React DOM
+		// normalizes text targets to their parent element before dispatch. The
+		// original target receives pointer capture, preserving receiver semantics.
+		// This scopes genuine DOM dispatch, not manually injected event targets.
 		(e.target as HTMLElement).setPointerCapture(e.pointerId);
 
 		pointerDownPos.current = { x: e.clientX, y: e.clientY };
@@ -458,6 +475,13 @@ export function ElasticSlider({
 	const hashMarkPct = (i: number) =>
 		discreteSteps <= 10 ? (((i + 1) * step) / (max - min)) * 100 : (i + 1) * 10;
 
+	const rubberXPx = useTransform(rubberX, (value) => `${value}px`);
+	const trackStyle: SliderMotionStyle = {
+		"--slider-width": rubberWidth,
+		"--slider-x": rubberXPx,
+	};
+	const fillStyle: SliderMotionStyle = { "--slider-width": fillWidth };
+	const handleStyle: SliderMotionStyle = { "--slider-left": handleLeft };
 	return (
 		<div
 			className={cn(
@@ -483,8 +507,8 @@ export function ElasticSlider({
 				aria-valuenow={value}
 				aria-valuetext={displayValue}
 				className={cn(
-					"group/elastic-slider absolute inset-0 cursor-pointer touch-none select-none overflow-hidden rounded-(--elastic-slider-radius) bg-(--elastic-slider-bg) outline-none",
-					"data-[focus-visible=true]:ring-2 data-[focus-visible=true]:ring-ring/50 data-[focus-visible=true]:ring-offset-1 data-[focus-visible=true]:ring-offset-background"
+					"group/elastic-slider absolute inset-0 w-(--slider-width) cursor-pointer touch-none select-none overflow-hidden rounded-(--elastic-slider-radius) bg-(--elastic-slider-bg) outline-none [transform:translateX(var(--slider-x))]",
+					"data-[focus-visible=true]:ring-2 data-[focus-visible=true]:ring-ring data-[focus-visible=true]:ring-offset-1 data-[focus-visible=true]:ring-offset-background"
 				)}
 				data-active={isActive}
 				data-focus-visible={keyboardFocusRing}
@@ -499,7 +523,7 @@ export function ElasticSlider({
 				onPointerUp={handlePointerUp}
 				ref={trackRef}
 				role="slider"
-				style={{ width: rubberWidth, x: rubberX }}
+				style={trackStyle}
 				tabIndex={0}
 			>
 				<div
@@ -507,27 +531,31 @@ export function ElasticSlider({
 					className="pointer-events-none absolute inset-0"
 					data-slot="elastic-slider-hash-marks"
 				>
-					{Array.from({ length: hashMarkCount }, (_, i) => (
-						<div
-							className={cn(
-								"absolute top-1/2 h-2 w-px -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors duration-200",
-								"bg-transparent group-data-[active=true]/elastic-slider:bg-(--elastic-slider-hash)"
-							)}
-							// biome-ignore lint/suspicious/noArrayIndexKey: static hash marks have no stable identity
-							key={i}
-							style={{ left: `${hashMarkPct(i)}%` }}
-						/>
-					))}
+					{Array.from({ length: hashMarkCount }, (_, i) => {
+						const markStyle: SliderMarkStyle = {
+							"--slider-left": `${hashMarkPct(i)}%`,
+						};
+						return (
+							<div
+								className={cn(
+									"absolute top-1/2 left-(--slider-left) h-2 w-px -translate-x-1/2 -translate-y-1/2 rounded-full transition-colors duration-200",
+									"bg-transparent group-data-[active=true]/elastic-slider:bg-(--elastic-slider-hash)"
+								)}
+								key={i}
+								style={markStyle}
+							/>
+						);
+					})}
 				</div>
 
 				<motion.div
 					aria-hidden="true"
 					className={cn(
-						"pointer-events-none absolute inset-y-0 left-0 transition-colors",
+						"pointer-events-none absolute inset-y-0 left-0 w-(--slider-width) transition-colors",
 						"bg-(--elastic-slider-fill) group-data-[active=true]/elastic-slider:bg-(--elastic-slider-fill-active)"
 					)}
 					data-slot="elastic-slider-fill"
-					style={{ width: fillWidth }}
+					style={fillStyle}
 				/>
 
 				<motion.div
@@ -537,9 +565,9 @@ export function ElasticSlider({
 						scaleY: isActive && valueDodge ? 0.75 : 1,
 					}}
 					aria-hidden="true"
-					className="pointer-events-none absolute top-1/2 h-5 w-1 rounded-full bg-(--elastic-slider-handle)"
+					className="pointer-events-none absolute top-1/2 left-(--slider-left) h-5 w-1 -translate-y-1/2 rounded-full bg-(--elastic-slider-handle)"
 					data-slot="elastic-slider-handle"
-					style={{ left: handleLeft, y: "-50%" }}
+					style={handleStyle}
 					transition={
 						shouldReduceMotion
 							? { duration: 0 }

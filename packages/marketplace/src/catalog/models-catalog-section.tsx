@@ -1,5 +1,6 @@
 import {
 	AiBrain01Icon,
+	Alert02Icon,
 	BrainIcon,
 	CheckmarkCircle02Icon,
 	CpuIcon,
@@ -14,6 +15,14 @@ import {
 	TextWrapIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	fitBlockReason,
+	isBlockedFit,
+	isBlockedRepoFit,
+	isSlowFit,
+	pickBestFit,
+	SLOW_FIT_WARNING,
+} from "@ryu/blocks/desktop/model-fit.ts";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -92,16 +101,16 @@ import {
 } from "./friendly.ts";
 import { type CatalogInstallButtonProps, useCatalogHost } from "./host.tsx";
 import { useSyncInstalledOnly } from "./installed-filter.tsx";
-import type {
-	FitVerdict,
-	LlmFitEstimate,
-	ModelCard,
-	ModelCatalogSource,
-	ModelCategory,
-	ModelDetail,
-	ModelFile,
-	ModelFormat,
-	ModelSort,
+import {
+	type LlmFitEstimate,
+	MODEL_CATEGORY_OPTIONS,
+	type ModelCard,
+	type ModelCatalogSource,
+	type ModelCategory,
+	type ModelDetail,
+	type ModelFile,
+	type ModelFormat,
+	type ModelSort,
 } from "./types.ts";
 import { useFriendlyMode } from "./use-friendly-mode.ts";
 
@@ -182,17 +191,6 @@ const FORMAT_OPTIONS: { value: ModelFormat; label: string }[] = [
 	{ value: "gguf", label: "Runs anywhere (GGUF)" },
 	{ value: "safetensors", label: "Full quality (Safetensors)" },
 	{ value: "mlx", label: "Apple Silicon (MLX)" },
-];
-
-/** Friendly category labels for the task filter (maps to a HF pipeline tag). */
-const CATEGORY_OPTIONS: { value: ModelCategory; label: string }[] = [
-	{ value: "all", label: "All categories" },
-	{ value: "chat", label: "Chat / text" },
-	{ value: "vision", label: "Vision" },
-	{ value: "embedding", label: "Embedding" },
-	{ value: "reranker", label: "Reranker" },
-	{ value: "stt", label: "Voice Recognition" },
-	{ value: "tts", label: "Audio" },
 ];
 
 /** Largest-first calendar units for relative-time formatting (ms per unit). */
@@ -279,8 +277,13 @@ export function formatParams(n: number | null): string | null {
 
 /** Multi-line hardware summary for the detail overview. */
 export function deviceSummaryLines(device: ModelDetail["device"]): string[] {
+	// Free disk decides whether a download can land at all, so it closes every
+	// summary (when Core reports it).
+	const disk = device.diskFreeHuman
+		? [`${device.diskFreeHuman} free disk`]
+		: [];
 	if (device.unifiedMemory && device.ramHuman) {
-		return [`${device.ramHuman} unified memory`];
+		return [`${device.ramHuman} unified memory`, ...disk];
 	}
 	const lines: string[] = [];
 	if (device.gpuName) {
@@ -293,9 +296,95 @@ export function deviceSummaryLines(device: ModelDetail["device"]): string[] {
 		lines.push(`${device.ramHuman} system RAM`);
 	}
 	if (lines.length === 0) {
-		return [device.os || "unknown hardware"];
+		return [device.os || "unknown hardware", ...disk];
 	}
-	return lines;
+	return [...lines, ...disk];
+}
+
+/**
+ * The install verdict line under a model file or snapshot: the full refusal
+ * reason (with this device's numbers) when the verdict blocks the install, an
+ * amber "may be slow" warning when it runs on the CPU or only partly on the GPU,
+ * and nothing otherwise. Core computes the verdict for the node that serves it.
+ */
+function FitInstallNotice({
+	blocking: blockingProp,
+	device,
+	fit,
+	label,
+}: {
+	/** False when the verdict reads as blocked but this node still installs it
+	 *  (an older Core's soft `too_big`): shown as a warning. */
+	blocking?: boolean;
+	device: ModelDetail["device"];
+	fit: string;
+	label: string;
+}) {
+	const blocking = blockingProp ?? isBlockedFit(fit);
+	const reason = blocking ? fitBlockReason(fit, label, device) : null;
+	if (reason) {
+		return (
+			<p
+				className="flex items-start gap-1.5 text-status-destructive text-xs"
+				role="note"
+			>
+				<HugeiconsIcon
+					aria-hidden="true"
+					className="mt-px size-3.5 shrink-0"
+					icon={Alert02Icon}
+				/>
+				<span>{reason} You can't add it on this device.</span>
+			</p>
+		);
+	}
+	if (isSlowFit(fit) || (isBlockedFit(fit) && !blocking)) {
+		return (
+			<p
+				className="flex items-center gap-1.5 text-status-warning text-xs"
+				role="note"
+			>
+				<HugeiconsIcon
+					aria-hidden="true"
+					className="size-3.5 shrink-0"
+					icon={Alert02Icon}
+				/>
+				{SLOW_FIT_WARNING}
+			</p>
+		);
+	}
+	return null;
+}
+
+/**
+ * Run an install and keep its failure message for display. The host's install
+ * layer rejects with Core's plain-language reason (e.g. the 422 "won't fit"
+ * refusal when the detail was stale), which used to be swallowed silently.
+ */
+function useInstallAttempt() {
+	const [error, setError] = useState<string | null>(null);
+	const attempt = useCallback((run: () => Promise<void>) => {
+		setError(null);
+		run().catch((err: unknown) => {
+			setError(
+				err instanceof Error && err.message
+					? err.message
+					: "Couldn't add this model."
+			);
+		});
+	}, []);
+	return { attempt, error };
+}
+
+/** The last install failure, announced to assistive tech. */
+function InstallErrorNote({ message }: { message: string | null }) {
+	if (!message) {
+		return null;
+	}
+	return (
+		<p className="text-status-destructive text-xs" role="alert">
+			{message}
+		</p>
+	);
 }
 
 /**
@@ -545,10 +634,7 @@ function TagFilterDropdown({
 						<HugeiconsIcon className="size-4" icon={TAG_ICON} />
 						Tags
 						{count > 0 && (
-							<Badge
-								className="ml-1 h-4 px-1.5 text-[10px]"
-								variant="secondary"
-							>
+							<Badge className="ml-1" size="download-label" variant="secondary">
 								{formatCount(count)}
 							</Badge>
 						)}
@@ -650,7 +736,7 @@ export function ModelsFilterPanel({
 							}}
 							value={activeSource}
 						>
-							<SelectTrigger className="h-8 w-[150px] text-sm" size="sm">
+							<SelectTrigger className="h-8 w-[150px]" size="sm">
 								<SelectValue placeholder="Source" />
 							</SelectTrigger>
 							<SelectContent>
@@ -664,17 +750,17 @@ export function ModelsFilterPanel({
 					)}
 					{/* Category narrows by Hugging Face task. Local models carry no
 					    task metadata, so it's disabled in the installed-only view. */}
-					<Select
+					<Select<ModelCategory>
 						disabled={installedOnly}
-						items={CATEGORY_OPTIONS}
-						onValueChange={(v) => setCategory(v as ModelCategory)}
+						items={MODEL_CATEGORY_OPTIONS}
+						onValueChange={(v) => setCategory(v)}
 						value={category}
 					>
-						<SelectTrigger className="h-8 w-[160px] text-sm" size="sm">
+						<SelectTrigger className="h-8 w-[160px]" size="sm">
 							<SelectValue placeholder="All categories" />
 						</SelectTrigger>
-						<SelectContent>
-							{CATEGORY_OPTIONS.map((opt) => (
+						<SelectContent searchable searchPlaceholder="Filter model types…">
+							{MODEL_CATEGORY_OPTIONS.map((opt) => (
 								<SelectItem key={opt.value} value={opt.value}>
 									{opt.label}
 								</SelectItem>
@@ -683,12 +769,12 @@ export function ModelsFilterPanel({
 					</Select>
 					{/* Weight-format facet — picks which engine family's models the
 					    catalog lists. Incompatible models still appear, annotated. */}
-					<Select
+					<Select<ModelFormat>
 						items={FORMAT_OPTIONS}
-						onValueChange={(v) => v && setFormat(v as ModelFormat)}
+						onValueChange={(v) => v && setFormat(v)}
 						value={format}
 					>
-						<SelectTrigger className="h-8 w-[170px] text-sm" size="sm">
+						<SelectTrigger className="h-8 w-[170px]" size="sm">
 							<SelectValue placeholder="Format" />
 						</SelectTrigger>
 						<SelectContent>
@@ -699,12 +785,12 @@ export function ModelsFilterPanel({
 							))}
 						</SelectContent>
 					</Select>
-					<Select
+					<Select<ModelSort>
 						items={SORT_OPTIONS}
-						onValueChange={(v) => v && setSort(v as ModelSort)}
+						onValueChange={(v) => v && setSort(v)}
 						value={sort}
 					>
-						<SelectTrigger className="h-8 w-[140px] text-sm" size="sm">
+						<SelectTrigger className="h-8 w-[140px]" size="sm">
 							<SelectValue placeholder="Sort" />
 						</SelectTrigger>
 						<SelectContent>
@@ -806,7 +892,7 @@ function ModelList({
 	}
 	if (error) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={BrainIcon} />
@@ -824,7 +910,7 @@ function ModelList({
 	}
 	if (models.length === 0) {
 		return (
-			<Empty className="h-full p-6">
+			<Empty className="h-full" inset="dense">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={BrainIcon} />
@@ -889,7 +975,7 @@ function ModelList({
 										</div>
 									</div>
 									{(updatedAgo || publishedAgo) && (
-										<div className="flex shrink-0 flex-col items-end justify-center gap-0.5 text-right text-[11px] text-muted-foreground leading-4">
+										<div className="type-caption flex shrink-0 flex-col items-end justify-center gap-0.5 text-right text-muted-foreground leading-4">
 											{publishedAgo && (
 												<ModelDateLine
 													date={formatDate(m.createdAt)}
@@ -914,10 +1000,7 @@ function ModelList({
 									tags={m.tags}
 								/>
 								{!m.compatible && (
-									<Badge
-										className="border-warning/30 bg-warning/5 text-status-warning"
-										variant="outline"
-									>
+									<Badge appearance="challenge-warning" variant="outline">
 										{m.format === "mlx"
 											? "macOS only"
 											: `Needs ${m.needsEngine ?? "another engine"}`}
@@ -1045,7 +1128,7 @@ function ModelDetailHeader({
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">
 					{card.gated && (
-						<Badge className="gap-1" variant="secondary">
+						<Badge variant="secondary">
 							<HugeiconsIcon
 								className="size-3.5 text-status-warning"
 								icon={SquareLock01Icon}
@@ -1054,7 +1137,7 @@ function ModelDetailHeader({
 						</Badge>
 					)}
 					{card.installed && (
-						<Badge className="gap-1" variant="secondary">
+						<Badge variant="secondary">
 							<HugeiconsIcon
 								className="size-3.5 text-status-success"
 								icon={CheckmarkCircle02Icon}
@@ -1253,14 +1336,12 @@ function LlmfitEstimateBlock({
 	const [busy, setBusy] = useState<"idle" | "loading" | "installing">("idle");
 	const [result, setResult] = useState<LlmFitEstimate | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const target = { url: node.url, token: node.token };
-
 	const run = async () => {
 		setBusy("loading");
 		setError(null);
 		try {
 			setResult(
-				await host.estimateLlmfit(target, repo, {
+				await host.estimateLlmfit(node, repo, {
 					context: context ?? undefined,
 					quant: quant ?? undefined,
 				})
@@ -1276,7 +1357,12 @@ function LlmfitEstimateBlock({
 		setBusy("installing");
 		setError(null);
 		try {
-			await host.installSidecar(node.url, node.token, "llmfit");
+			await host.installSidecar(
+				node.url,
+				node.token,
+				"llmfit",
+				node.userJwt ?? null
+			);
 			setResult(null);
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Couldn't add this model");
@@ -1374,6 +1460,16 @@ function LlmfitEstimateBlock({
 	);
 }
 
+function modelCanChat(card: ModelCard): boolean {
+	const searchable = [card.pipelineTag, ...card.tags]
+		.filter(Boolean)
+		.join(" ")
+		.toLowerCase();
+	return /(text-generation|text2text-generation|conversational|image-text-to-text|visual-question-answering|document-question-answering)/.test(
+		searchable
+	);
+}
+
 /**
  * Fine-tuned variants of the selected model: merged GGUFs recorded against it as
  * their base. They are installed (servable by stem), so each can be set as the
@@ -1401,14 +1497,21 @@ function FinetunedVariants({ baseId }: { baseId: string }) {
 					>
 						<div className="min-w-0">
 							<div className="flex items-center gap-2">
-								<p className="truncate font-medium text-sm">{m.stem}</p>
+								<p className="truncate font-medium text-sm" title={m.stem}>
+									{m.stem}
+								</p>
 								<Badge variant="secondary">Fine-tuned</Badge>
 							</div>
 							<p className="truncate text-muted-foreground text-xs">
 								Fine-tuned from {m.finetuneBase}
 							</p>
 						</div>
-						<ActiveModelControl repoId={m.stem} />
+						<ActiveModelControl
+							chatCapable
+							format="gguf"
+							modelName={m.stem}
+							repoId={m.stem}
+						/>
 					</li>
 				))}
 			</ul>
@@ -1496,12 +1599,14 @@ function ModelDetailPanel({
 		readme,
 		format,
 		repoSizeBytes,
+		repoFit,
 		repoFitLabel,
 	} = detail;
 	const modelFiles = files.filter((file) => isModelGgufFile(file.filename));
 	const recommendedLlmfitFile =
 		pickRecommendedFile(modelFiles.filter((file) => !file.installed)) ??
 		pickRecommendedFile(modelFiles);
+	const chatCapable = modelCanChat(card);
 
 	return (
 		<div className="flex flex-col gap-6 p-4">
@@ -1528,9 +1633,67 @@ function ModelDetailPanel({
 			<ModelSpecsRow card={card} />
 			<ModelOverviewGrid card={card} device={device} />
 
+			{/* Keep the first useful action beside the device-fit summary. */}
+			{installLayer && card.installed && (
+				<section className="flex items-center justify-between gap-3 rounded-xl border bg-card/50 px-4 py-3">
+					<div className="min-w-0">
+						<p className="font-medium text-sm">
+							{chatCapable ? "Run in chat" : "Use this model"}
+						</p>
+						<p className="text-muted-foreground text-xs">
+							{chatCapable
+								? "Ryu will select a compatible engine, install it if needed, and open a chat with this model."
+								: "Select this installed model for its local runtime."}
+						</p>
+					</div>
+					<ActiveModelControl
+						chatCapable={chatCapable}
+						format={format}
+						modelName={
+							friendly ? friendlyModelName(card.name, card.tags) : card.name
+						}
+						repoId={card.id}
+					/>
+				</section>
+			)}
+
+			{/* GGUF: per-quant file picker. Snapshot formats (safetensors/MLX):
+			    one repository install. Keep download and quant choice near the fit
+			    summary so the first-run path is visible without scrolling past details. */}
+			{installLayer &&
+				(format === "gguf" ? (
+					<FileSections
+						device={device}
+						files={files}
+						fitStyle={host.fitStyle}
+						friendly={friendly}
+						InstallButton={installLayer.InstallButton}
+						install={install}
+						installing={installing}
+						uninstall={uninstall}
+						uninstalling={uninstalling}
+					/>
+				) : (
+					<SnapshotInstall
+						card={card}
+						device={device}
+						InstallButton={installLayer.InstallButton}
+						installed={card.installed}
+						installing={installingSnapshot}
+						onInstall={installSnapshot}
+						repoFit={repoFit ?? ""}
+						repoFitLabel={repoFitLabel}
+						repoSizeBytes={repoSizeBytes}
+					/>
+				))}
+
 			{installLayer && (
 				<LlmfitEstimateBlock
 					context={card.contextLength}
+					// Keyed by model: a cached detail skips the spinner, so without a
+					// remount one model's estimate (or a late in-flight one) showed
+					// under the next.
+					key={card.id}
 					quant={recommendedLlmfitFile?.quant ?? null}
 					repo={card.id}
 				/>
@@ -1565,22 +1728,9 @@ function ModelDetailPanel({
 				</section>
 			)}
 
-			{/* Switch the local engine to serve this model (when installed). */}
-			{installLayer && card.installed && (
-				<section className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-4 py-3">
-					<div className="min-w-0">
-						<p className="font-medium text-sm">Active model</p>
-						<p className="text-muted-foreground text-xs">
-							Serve this model from the local engine.
-						</p>
-					</div>
-					<ActiveModelControl repoId={card.id} />
-				</section>
-			)}
-
 			{/* Adapt this model to your own data with a LoRA fine-tune (Unsloth).
 			    Opens the Fine-tune page. Install-capable surfaces with a shell only. */}
-			{installLayer && host.navigate && (
+			{installLayer && host.navigate && chatCapable && (
 				<section className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-4 py-3">
 					<div className="min-w-0">
 						<p className="font-medium text-sm">Fine-tune this model</p>
@@ -1603,9 +1753,9 @@ function ModelDetailPanel({
 
 			{/* Vision model: the matching projector installs automatically. */}
 			{vision && (
-				<section className="flex gap-2 rounded-lg border border-violet-500/30 bg-violet-500/5 px-4 py-3 text-muted-foreground text-xs">
+				<section className="flex gap-2 rounded-lg border bg-muted/50 px-4 py-3 text-muted-foreground text-xs">
 					<HugeiconsIcon
-						className="mt-0.5 size-4 shrink-0 text-violet-500"
+						className="mt-0.5 size-4 shrink-0 text-status-info"
 						icon={AiBrain01Icon}
 					/>
 					<p>
@@ -1616,33 +1766,6 @@ function ModelDetailPanel({
 					</p>
 				</section>
 			)}
-
-			{/* GGUF: per-quant file picker. Snapshot formats (safetensors/MLX):
-			    a single repo install. Install-capable surfaces only. */}
-			{installLayer &&
-				(format === "gguf" ? (
-					<FileSections
-						deviceOs={device.os}
-						files={files}
-						fitStyle={host.fitStyle}
-						friendly={friendly}
-						InstallButton={installLayer.InstallButton}
-						install={install}
-						installing={installing}
-						uninstall={uninstall}
-						uninstalling={uninstalling}
-					/>
-				) : (
-					<SnapshotInstall
-						card={card}
-						InstallButton={installLayer.InstallButton}
-						installed={card.installed}
-						installing={installingSnapshot}
-						onInstall={installSnapshot}
-						repoFitLabel={repoFitLabel}
-						repoSizeBytes={repoSizeBytes}
-					/>
-				))}
 
 			{/* README */}
 			{readme && (
@@ -1773,7 +1896,7 @@ function InstalledButton({
 	}
 	return (
 		<Button
-			className="shrink-0 gap-1"
+			className="shrink-0"
 			loading={busy}
 			onBlur={() => setArmed(false)}
 			onClick={onUninstall}
@@ -1810,26 +1933,33 @@ function formatRepoSize(bytes: number | null): string {
  * Snapshot install block for safetensors / MLX models — a single "install the
  * whole repo" action (no per-quant picker). Shows the repo size + a conservative
  * fit label, and gates the button when no engine for this format is runnable on
- * the node.
+ * the node or when the repo would not fit its memory or free disk.
  */
 function SnapshotInstall({
 	card,
+	device,
 	installed,
 	installing,
 	onInstall,
 	repoSizeBytes,
+	repoFit,
 	repoFitLabel,
 	InstallButton,
 }: {
 	card: ModelCard;
+	device: ModelDetail["device"];
 	installed: boolean;
 	installing: boolean;
 	onInstall: () => Promise<void>;
 	repoSizeBytes: number | null;
+	repoFit: string;
 	repoFitLabel: string;
 	InstallButton: InstallButton;
 }) {
-	const blocked = !card.compatible;
+	const incompatible = !card.compatible;
+	const blockedByFit = isBlockedRepoFit(repoFit, device);
+	const blocked = incompatible || blockedByFit;
+	const { attempt, error } = useInstallAttempt();
 	return (
 		<section className="flex flex-col gap-3">
 			<h3 className="font-medium text-sm">
@@ -1838,13 +1968,30 @@ function SnapshotInstall({
 			<div className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-4 py-3">
 				<div className="min-w-0">
 					<p className="font-medium text-sm">{formatRepoSize(repoSizeBytes)}</p>
-					<p className="text-muted-foreground text-xs">
-						{blocked
-							? card.format === "mlx"
+					{incompatible ? (
+						<p className="text-muted-foreground text-xs">
+							{card.format === "mlx"
 								? "Requires MLX (Apple Silicon) — not available on this computer."
-								: `Requires ${card.needsEngine ?? "another engine"} — not available on this computer.`
-							: repoFitLabel || "Adds the full model repository."}
-					</p>
+								: `Requires ${card.needsEngine ?? "another engine"} — not available on this computer.`}
+						</p>
+					) : (
+						<>
+							{/* The blocked notice leads with the fit label itself. */}
+							{!(blockedByFit && !installed) && (
+								<p className="text-muted-foreground text-xs">
+									{repoFitLabel || "Adds the full model repository."}
+								</p>
+							)}
+							{!installed && (
+								<FitInstallNotice
+									blocking={blockedByFit}
+									device={device}
+									fit={repoFit}
+									label={repoFitLabel}
+								/>
+							)}
+						</>
+					)}
 				</div>
 				{installed ? (
 					<Badge variant="secondary">
@@ -1858,7 +2005,9 @@ function SnapshotInstall({
 						idleVariant="ghost"
 						installing={installing}
 						onClick={() => {
-							onInstall().catch(() => undefined);
+							if (!blocked) {
+								attempt(onInstall);
+							}
 						}}
 						// Snapshot downloads label as "<repo_id> (<file>)" — match on the id.
 						progress={{ kinds: ["model"], name: card.id }}
@@ -1868,13 +2017,15 @@ function SnapshotInstall({
 					</InstallButton>
 				)}
 			</div>
+			<InstallErrorNote message={error} />
 		</section>
 	);
 }
 
 interface FileSectionsProps {
-	/** Detected OS (e.g. "macos", "windows", "linux") for the recommendation badge. */
-	deviceOs: string;
+	/** The serving node's hardware: its OS picks the recommendation badge and its
+	 *  RAM / free disk explain a blocked install. */
+	device: ModelDetail["device"];
 	files: ModelFile[];
 	fitStyle: FitStyle;
 	friendly: boolean;
@@ -1884,16 +2035,6 @@ interface FileSectionsProps {
 	uninstall: (file: string) => Promise<void>;
 	uninstalling: string | null;
 }
-
-/** Device-fit rank for the recommended-quant pick — lower is a better fit. */
-const FIT_RANK: Record<FitVerdict, number> = {
-	great: 0,
-	ok: 1,
-	partial: 2,
-	cpu: 3,
-	too_big: 4,
-	unknown: 5,
-};
 
 /** Badge text for the recommended quant, matched to the detected OS. */
 function recommendedBadgeText(os: string): string {
@@ -1909,25 +2050,13 @@ function recommendedBadgeText(os: string): string {
 /**
  * Pick the quantization to preselect in the download dropdown: the best device
  * fit, breaking ties toward the smaller file (more likely to actually run).
- * `null` only when there are no files at all. Mirrors the desktop deep-link
+ * Blocked quants rank last (shared `FIT_RANK`), so one is picked only when none
+ * fits. `null` only when there are no files at all. Mirrors the desktop deep-link
  * recommendation (`pickRecommendedQuant`) minus its installed-file preference —
  * the picker only ever lists not-installed downloads.
  */
 function pickRecommendedFile(files: ModelFile[]): ModelFile | null {
-	return files
-		.filter((file) => isModelGgufFile(file.filename))
-		.reduce<ModelFile | null>((best, f) => {
-			if (!best) {
-				return f;
-			}
-			const fitDelta = (FIT_RANK[f.fit] ?? 9) - (FIT_RANK[best.fit] ?? 9);
-			if (fitDelta !== 0) {
-				return fitDelta < 0 ? f : best;
-			}
-			const fSize = f.sizeBytes ?? Number.POSITIVE_INFINITY;
-			const bestSize = best.sizeBytes ?? Number.POSITIVE_INFINITY;
-			return fSize < bestSize ? f : best;
-		}, null);
+	return pickBestFit(files.filter((file) => isModelGgufFile(file.filename)));
 }
 
 /**
@@ -1940,7 +2069,7 @@ function pickRecommendedFile(files: ModelFile[]): ModelFile | null {
 function QuantizationPicker({
 	files,
 	friendly,
-	deviceOs,
+	device,
 	install,
 	installing,
 	InstallButton,
@@ -1948,7 +2077,7 @@ function QuantizationPicker({
 }: {
 	files: ModelFile[];
 	friendly: boolean;
-	deviceOs: string;
+	device: ModelDetail["device"];
 	install: (file: string) => Promise<void>;
 	installing: string | null;
 	InstallButton: InstallButton;
@@ -1958,24 +2087,37 @@ function QuantizationPicker({
 	const recommendedFilename = recommended?.filename ?? null;
 	const [selected, setSelected] = useState<string | null>(recommendedFilename);
 
-	// A different model (or a post-install file list) means a new recommendation:
-	// reset the dropdown to it.
+	// Preserve an explicitly selected quant while it is present or its download is
+	// pending. A successful install removes it from `files`, at which point the
+	// picker falls back to the best remaining recommendation; a failed install
+	// restores it without changing the user's retry target.
 	useEffect(() => {
+		if (
+			selected !== null &&
+			(files.some((file) => file.filename === selected) ||
+				installing === selected)
+		) {
+			return;
+		}
 		setSelected(recommendedFilename);
-	}, [recommendedFilename]);
+	}, [files, installing, recommendedFilename, selected]);
 
 	const selectedFile =
 		files.find((f) => f.filename === selected) ?? recommended ?? null;
-	const isRecommended = selectedFile?.filename === recommendedFilename;
+	// A blocked quant is never "recommended", even when it is the only option.
+	const isRecommended =
+		selectedFile?.filename === recommendedFilename &&
+		!isBlockedFit(selectedFile.fit);
 	const fit = selectedFile ? fitStyle(selectedFile.fit) : null;
 	const compression = selectedFile ? friendlyQuant(selectedFile.quant) : null;
-	const tooBig = selectedFile?.fit === "too_big";
+	const blocked = selectedFile ? isBlockedFit(selectedFile.fit) : false;
 	const isInstalling =
 		selectedFile !== null && installing === selectedFile.filename;
 
+	const { attempt, error: installError } = useInstallAttempt();
 	const installSelected = () => {
-		if (selectedFile) {
-			install(selectedFile.filename).catch(() => undefined);
+		if (selectedFile && !blocked) {
+			attempt(() => install(selectedFile.filename));
 		}
 	};
 
@@ -2009,7 +2151,7 @@ function QuantizationPicker({
 			<div className="flex items-center justify-between gap-2">
 				<h3 className="font-medium text-sm">Download options</h3>
 				{isRecommended && (
-					<Badge variant="secondary">{recommendedBadgeText(deviceOs)}</Badge>
+					<Badge variant="secondary">{recommendedBadgeText(device.os)}</Badge>
 				)}
 			</div>
 			<div className="flex items-center gap-2">
@@ -2046,14 +2188,18 @@ function QuantizationPicker({
 												quality={fComp.quality}
 											/>
 										)}
-										<span className="truncate">{fLabel}</span>
+										<span className="truncate" title={fLabel}>
+											{fLabel}
+										</span>
 										{friendly && f.quant && (
 											<span className="shrink-0 text-muted-foreground text-xs">
 												{f.quant}
 											</span>
 										)}
 										<span className="ml-auto shrink-0 text-muted-foreground text-xs">
-											{f.sizeHuman}
+											{isBlockedFit(f.fit)
+												? `${f.sizeHuman} · won't fit`
+												: f.sizeHuman}
 										</span>
 									</span>
 								</SelectItem>
@@ -2061,47 +2207,36 @@ function QuantizationPicker({
 						})}
 					</SelectContent>
 				</Select>
-				{selectedFile &&
-					(tooBig ? (
-						<Tooltip>
-							<TooltipTrigger
-								render={
-									<InstallButton
-										idleVariant="outline"
-										installing={isInstalling}
-										onClick={installSelected}
-										progress={{
-											kinds: ["model"],
-											name: selectedFile.filename,
-										}}
-									>
-										<HugeiconsIcon className="size-4" icon={Download01Icon} />
-										Add
-									</InstallButton>
-								}
-							/>
-							<TooltipContent>
-								This may not fit in your device's memory
-							</TooltipContent>
-						</Tooltip>
-					) : (
-						<InstallButton
-							idleVariant="outline"
-							installing={isInstalling}
-							onClick={installSelected}
-							progress={{ kinds: ["model"], name: selectedFile.filename }}
-						>
-							<HugeiconsIcon className="size-4" icon={Download01Icon} />
-							Add
-						</InstallButton>
-					))}
+				{selectedFile && (
+					// Blocked quants keep the button visible but disabled; the reason
+					// renders as text right below so it reaches keyboard and screen
+					// reader users too (a tooltip on a disabled button would not).
+					<InstallButton
+						disabled={blocked}
+						idleVariant="outline"
+						installing={isInstalling}
+						onClick={installSelected}
+						progress={{ kinds: ["model"], name: selectedFile.filename }}
+					>
+						<HugeiconsIcon className="size-4" icon={Download01Icon} />
+						Add
+					</InstallButton>
+				)}
 			</div>
-			{selectedFile && fit && (
+			{selectedFile && fit && !blocked && (
 				<div className={`flex items-center gap-1.5 text-xs ${fit.className}`}>
 					<span className={`size-1.5 rounded-full ${fit.dot}`} />
 					{selectedFile.fitLabel}
 				</div>
 			)}
+			{selectedFile && (
+				<FitInstallNotice
+					device={device}
+					fit={selectedFile.fit}
+					label={selectedFile.fitLabel}
+				/>
+			)}
+			<InstallErrorNote message={installError} />
 		</section>
 	);
 }
@@ -2118,7 +2253,7 @@ function QuantizationPicker({
 function FileSections({
 	files,
 	friendly,
-	deviceOs,
+	device,
 	install,
 	installing,
 	uninstall,
@@ -2147,6 +2282,7 @@ function FileSections({
 		const role = ggufFileRole(f.filename);
 		return (
 			<FileRow
+				device={device}
 				file={f}
 				fitStyle={fitStyle}
 				friendly={friendly}
@@ -2182,7 +2318,7 @@ function FileSections({
 			)}
 			{downloads.length > 0 && (
 				<QuantizationPicker
-					deviceOs={deviceOs}
+					device={device}
 					files={downloads}
 					fitStyle={fitStyle}
 					friendly={friendly}
@@ -2230,6 +2366,7 @@ function QualityMeter({ quality, label }: { quality: number; label: string }) {
 }
 
 function FileRow({
+	device,
 	file,
 	install,
 	installing,
@@ -2240,6 +2377,7 @@ function FileRow({
 	InstallButton,
 	fitStyle,
 }: {
+	device: ModelDetail["device"];
 	file: ModelFile;
 	install: (file: string) => Promise<void>;
 	installing: string | null;
@@ -2253,10 +2391,13 @@ function FileRow({
 	const fit = fitStyle(file.fit);
 	const isInstalling = installing === file.filename;
 	const isUninstalling = uninstalling === file.filename;
-	const tooBig = file.fit === "too_big";
+	const blocked = isBlockedFit(file.fit);
 	const compression = friendlyQuant(file.quant);
+	const { attempt, error: installError } = useInstallAttempt();
 	const handleInstall = () => {
-		install(file.filename).catch(() => undefined);
+		if (!blocked) {
+			attempt(() => install(file.filename));
+		}
 	};
 	const handleUninstall = () => {
 		uninstall(file.filename).catch(() => undefined);
@@ -2300,7 +2441,8 @@ function FileRow({
 
 	const installButton = (
 		<InstallButton
-			idleVariant={tooBig ? "outline" : "ghost"}
+			disabled={blocked}
+			idleVariant={blocked ? "outline" : "ghost"}
 			installing={isInstalling}
 			onClick={handleInstall}
 			progress={{ kinds: ["model"], name: file.filename }}
@@ -2321,22 +2463,28 @@ function FileRow({
 						</span>
 					)}
 				</div>
-				<div
-					className={`mt-0.5 flex items-center gap-1.5 text-xs ${fit.className}`}
-				>
-					<span className={`size-1.5 rounded-full ${fit.dot}`} />
-					{file.fitLabel}
-				</div>
+				{/* A blocked file's notice below already leads with its fit label. */}
+				{!(blocked && !file.installed) && (
+					<div
+						className={`mt-0.5 flex items-center gap-1.5 text-xs ${fit.className}`}
+					>
+						<span className={`size-1.5 rounded-full ${fit.dot}`} />
+						{file.fitLabel}
+					</div>
+				)}
+				{!file.installed && (
+					<div className="mt-0.5">
+						<FitInstallNotice
+							device={device}
+							fit={file.fit}
+							label={file.fitLabel}
+						/>
+						<InstallErrorNote message={installError} />
+					</div>
+				)}
 			</div>
 			{file.installed ? (
 				<InstalledButton busy={isUninstalling} onUninstall={handleUninstall} />
-			) : tooBig ? (
-				<Tooltip>
-					<TooltipTrigger render={installButton} />
-					<TooltipContent>
-						This may not fit in your device's memory
-					</TooltipContent>
-				</Tooltip>
 			) : (
 				installButton
 			)}

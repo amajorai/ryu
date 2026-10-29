@@ -33,6 +33,8 @@ import { Card } from "@/components/ui/card.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../core/CoreContext.tsx";
 import { useInputFocused } from "../core/InputFocusContext.tsx";
+import { humanizeError, nativeErrorMessage } from "../core/native-errors.ts";
+import { tf } from "../i18n/translate.ts";
 import { ErrorView } from "../ui/ErrorView.tsx";
 import { Loading } from "../ui/Loading.tsx";
 import { useToast } from "../ui/toast.tsx";
@@ -54,10 +56,6 @@ function isActiveEngine(engine: Engine, active: ActiveEngine): boolean {
 
 function truncateDescription(desc: string): string {
 	return desc.length > DESC_MAX ? `${desc.slice(0, DESC_HEAD)}…` : desc;
-}
-
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 const emptyActive: ActiveEngine = {
@@ -97,11 +95,11 @@ export function EnginesTab({ active }: TabProps) {
 				setIndex((i) => (list.length === 0 ? 0 : Math.min(i, list.length - 1)));
 				setLoaded(true);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (reqRef.current !== reqId) {
 					return;
 				}
-				setError(errText(err));
+				setError(nativeErrorMessage(err));
 				setLoaded(true);
 			})
 			.finally(() => {
@@ -131,8 +129,8 @@ export function EnginesTab({ active }: TabProps) {
 			.then((swap) => {
 				notify(
 					swap.unchanged
-						? `${engine.name} already active`
-						: `Activated ${engine.name}`,
+						? tf("{name} already active", { name: engine.name })
+						: tf("Activated {name}", { name: engine.name }),
 					"success"
 				);
 				if (!swap.gatewayRefreshed) {
@@ -141,8 +139,11 @@ export function EnginesTab({ active }: TabProps) {
 				// Refresh so the active marker updates immediately.
 				runLoad();
 			})
-			.catch((err: unknown) =>
-				notify(`activate failed: ${errText(err)}`, "error")
+			.catch((err) =>
+				notify(
+					tf("activate failed: {error}", { error: nativeErrorMessage(err) }),
+					"error"
+				)
 			);
 	}, [engines, index, target, notify, runLoad]);
 
@@ -165,7 +166,9 @@ export function EnginesTab({ active }: TabProps) {
 		return <Loading label="Loading engines…" />;
 	}
 	if (error) {
-		return <ErrorView message={error} />;
+		return (
+			<ErrorView message={humanizeError(error, { url: target.url })} onRetry />
+		);
 	}
 
 	const activeName = activeEngine.active ?? "";
@@ -265,7 +268,7 @@ function EngineRow({
 
 	return (
 		<box flexDirection="row" gap={1}>
-			<text fg={selected ? theme.colors.primary : theme.colors.muted}>
+			<text fg={selected ? theme.colors.primary : theme.colors.mutedForeground}>
 				{selected ? "›" : " "}
 			</text>
 			<text fg={statusColor}>{statusIcon}</text>

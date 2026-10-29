@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // packages/marketplace/src/catalog/chrome/dither.ts
 //
 // Validation for the untrusted `icon_dither` spec a catalog entry carries, shared
@@ -15,17 +16,24 @@ import {
 	type DitherColor,
 	isDitherColor,
 } from "@ryu/ui/components/dither-kit/palette.ts";
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
 import type { CardDither } from "../types.ts";
 
 /** The four gradient directions dither-kit accepts. */
 const DIRECTIONS: GradientDirection[] = ["up", "down", "left", "right"];
 
+function isGradientDirection(
+	value: CardDither["direction"]
+): value is GradientDirection {
+	return DIRECTIONS.some((direction) => direction === value);
+}
+
 /** Normalize ONE untrusted colour token to a dither-kit `PixelColor`: a finite hue
  *  number, or a known palette-colour name. Anything else (typo'd name, NaN, object)
  *  → null, so a malformed remote card never reaches `fillOf`, which throws on an
  *  unknown name. */
-function normalizeColor(value: unknown): DitherColor | number | null {
-	if (typeof value === "number" && Number.isFinite(value)) {
+function normalizeColor<T>(value: T): DitherColor | number | null {
+	if (isNativeNumber(value) && Number.isFinite(value)) {
 		return value;
 	}
 	if (isDitherColor(value)) {
@@ -75,7 +83,7 @@ export function opaqueDither(dither: SafeDither | null): SafeDither | null {
 	if (!(dither && ditherDissolves(dither))) {
 		return dither;
 	}
-	if (typeof dither.from !== "number") {
+	if (!isNativeNumber(dither.from)) {
 		return dither;
 	}
 	return { ...dither, to: (dither.from + TWO_TONE_SPREAD) % 360 };
@@ -102,11 +110,8 @@ export function normalizeDither(dither?: CardDither | null): SafeDither | null {
 			safe.to = to;
 		}
 	}
-	if (
-		typeof dither.direction === "string" &&
-		DIRECTIONS.includes(dither.direction as GradientDirection)
-	) {
-		safe.direction = dither.direction as GradientDirection;
+	if (isNativeText(dither.direction) && isGradientDirection(dither.direction)) {
+		safe.direction = dither.direction;
 	}
 	return safe;
 }

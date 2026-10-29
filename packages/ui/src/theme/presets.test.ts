@@ -20,6 +20,7 @@ import {
 	type ThemeVariant,
 	variantToCustomTokens,
 } from "./presets.ts";
+import { colorContrastRatio } from "./ring.ts";
 
 describe("THEME_VARIANTS / default ids", () => {
 	test("the two default ids resolve to real built-in variants of the right mode", () => {
@@ -142,6 +143,51 @@ describe("customTokensToVariant / variantToCustomTokens", () => {
 		expect(v.tokens["--primary-foreground"]).toBe("#ffffff");
 	});
 
+	test("pale primary gets a darker ring that clears 3:1 on every surface", () => {
+		const v = customTokensToVariant("i", "l", "light", {
+			...tokens,
+			primary: "#80cbc4",
+		});
+		const ring = v.tokens["--ring"] ?? "";
+		expect(ring).not.toBe("#80cbc4");
+		expect(v.tokens["--sidebar-ring"]).toBe(ring);
+		expect(v.tokens["--primary"]).toBe("#80cbc4");
+		for (const surface of [
+			"--background",
+			"--card",
+			"--popover",
+			"--sidebar",
+		]) {
+			expect(
+				colorContrastRatio(ring, v.tokens[surface] ?? "") ?? 0
+			).toBeGreaterThanOrEqual(3);
+		}
+	});
+
+	test("dark primary in dark mode gets a lighter ring", () => {
+		const v = customTokensToVariant("i", "d", "dark", {
+			...tokens,
+			background: "#18181b",
+			sidebar: "#27272a",
+			primary: "#1e3a8a",
+		});
+		const ring = v.tokens["--ring"] ?? "";
+		expect(ring).not.toBe("#1e3a8a");
+		expect(colorContrastRatio(ring, "#27272a") ?? 0).toBeGreaterThanOrEqual(3);
+	});
+
+	test("a passing primary is the ring; an explicit ring token wins", () => {
+		const passing = customTokensToVariant("i", "l", "light", tokens);
+		expect(passing.tokens["--ring"]).toBe(tokens.primary);
+		const explicit = customTokensToVariant("i", "l", "light", {
+			...tokens,
+			primary: "#80cbc4",
+			ring: "#80cbc4",
+		});
+		expect(explicit.tokens["--ring"]).toBe("#80cbc4");
+		expect(explicit.tokens["--sidebar-ring"]).toBe("#80cbc4");
+	});
+
 	test("round-trips all seven fields losslessly (variant -> tokens -> variant)", () => {
 		const v = customTokensToVariant("i", "l", "light", tokens);
 		expect(variantToCustomTokens(v)).toEqual(tokens);
@@ -176,7 +222,7 @@ describe("customTokensToVariant / variantToCustomTokens", () => {
 // particular, Codex is BLUE (#3A83F7), not the old #10A37F OpenAI green, and
 // Claude's accent is the confirmed clay #D97757.
 describe("well-known third-party presets", () => {
-	const ACCENTS: Record<string, { light?: string; dark?: string }> = {
+	const ACCENTS = {
 		codex: { light: "#2c67c5", dark: "#3a83f7" },
 		claude: { light: "#d97757", dark: "#d97757" },
 		tokyo: { light: "#2e7de9", dark: "#7aa2f7" },
@@ -413,6 +459,7 @@ describe("Ryu brand colour", () => {
 				expect(variant).toBeDefined();
 				const value = variant?.tokens[token];
 				expect(value).toBeDefined();
+				// SAFETY: The preceding toBeDefined assertion excludes undefined from this captured string token.
 				expect(oklchToHex(value as string)).toBe(BRAND);
 			});
 		}

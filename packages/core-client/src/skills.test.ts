@@ -1,3 +1,7 @@
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 // packages/core-client/src/skills.test.ts
 //
 // Tests for the skills-catalog client. Coverage centers on the wire→camel mapping
@@ -48,11 +52,11 @@ interface Captured {
 
 function stub(bodyText: string, status = 200): Captured {
 	const cap: Captured = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		cap.url = url;
 		cap.init = init;
 		return Promise.resolve(new Response(bodyText, { status }));
-	}) as typeof fetch;
+	});
 	return cap;
 }
 
@@ -156,9 +160,9 @@ describe("installSkill — buyer token + error envelope", () => {
 		);
 		const out = await installSkill(target, "id1");
 		expect(out).toEqual({ slug: "s", path: "/p", distribution: null });
-		const h = cap.init?.headers as Record<string, string>;
-		expect(h["X-Ryu-Buyer-Token"]).toBe("sess-42");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({ id: "id1" });
+		const h = new Headers(cap.init?.headers);
+		expect(h.get("X-Ryu-Buyer-Token")).toBe("sess-42");
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({ id: "id1" });
 	});
 
 	test("sends an explicit remembered target selection", async () => {
@@ -176,7 +180,7 @@ describe("installSkill — buyer token + error envelope", () => {
 			rememberTargetIds: true,
 		});
 
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			id: "demo",
 			promptForTargets: true,
 			targetIds: ["codex", "cursor"],
@@ -194,7 +198,7 @@ describe("installSkill — buyer token + error envelope", () => {
 			promptForTargets: true,
 		});
 
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			id: "owner/repo/demo",
 			source: "private-registry",
 			promptForTargets: true,
@@ -222,8 +226,8 @@ describe("installSkill — buyer token + error envelope", () => {
 			JSON.stringify({ success: true, result: { slug: "s", path: "/p" } })
 		);
 		await installSkill(target, "id1");
-		const h = cap.init?.headers as Record<string, string>;
-		expect(h["X-Ryu-Buyer-Token"]).toBeUndefined();
+		const h = new Headers(cap.init?.headers);
+		expect(h.has("X-Ryu-Buyer-Token")).toBe(false);
 	});
 
 	test("throws the server error when success === false", async () => {
@@ -271,7 +275,7 @@ describe("skill targets", () => {
 			await saveSkillTargetPreferences(target, ["codex", "cursor"])
 		).toEqual(snapshot);
 		expect(cap.init?.method).toBe("PUT");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			targetIds: ["codex", "cursor"],
 		});
 	});
@@ -296,7 +300,7 @@ describe("skill targets", () => {
 			"http://127.0.0.1:7980/api/skills/owner%2Fdemo/distribute"
 		);
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			targetIds: [],
 			rememberTargetIds: false,
 		});
@@ -344,7 +348,7 @@ describe("setSkillActive", () => {
 		await setSkillActive(target, "a", false);
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/skills/activate");
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			id: "a",
 			active: false,
 		});
@@ -395,7 +399,7 @@ describe("catalog sources", () => {
 		const cap = stub("{}");
 		await selectSkillSource(target, "c");
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/catalog/sources/select");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			kind: "skill",
 			id: "c",
 		});
@@ -408,7 +412,7 @@ describe("marketplace management", () => {
 		await removeMarketplaceSource(target, "mine");
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/catalog/sources");
 		expect(cap.init?.method).toBe("DELETE");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			kind: "skill",
 			id: "mine",
 		});
@@ -419,7 +423,7 @@ describe("marketplace management", () => {
 		await reorderMarketplaceSource(target, "mine", "down");
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/catalog/sources/reorder");
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			kind: "skill",
 			id: "mine",
 			direction: "down",
@@ -435,7 +439,7 @@ describe("addMarketplaceSource — error envelope", () => {
 			displayName: "Mine",
 			baseUrl: "https://repo",
 		});
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			kind: "skill",
 			id: "m",
 			display_name: "Mine",

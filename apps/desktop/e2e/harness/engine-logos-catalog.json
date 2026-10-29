@@ -231,7 +231,7 @@
       "display_name": "Stable Diffusion (image + video)",
       "install_state": "installed",
       "installed_version": "fixture",
-      "latest_version": "master-700-c2df4e1",
+      "latest_version": "master-890-74988b2",
       "name": "sdcpp",
       "platforms": [],
       "recommended": false,

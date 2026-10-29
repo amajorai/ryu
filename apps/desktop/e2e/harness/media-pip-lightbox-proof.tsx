@@ -7,20 +7,20 @@ import {
 	publishMediaSource,
 } from "../../src/lib/media-pip.ts";
 import "../../src/index.css";
+import styles from "./media-pip-lightbox-proof.module.css";
 
 function frame(label: string, start: string, end: string): string {
-	return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="${start}"/><stop offset="1" stop-color="${end}"/></linearGradient></defs><rect width="960" height="540" fill="url(#g)"/><circle cx="780" cy="120" r="180" fill="#ffffff" fill-opacity=".12"/><rect x="64" y="72" width="210" height="10" rx="5" fill="#ffffff" fill-opacity=".5"/><rect x="64" y="108" width="420" height="24" rx="12" fill="#ffffff" fill-opacity=".9"/><rect x="64" y="164" width="310" height="12" rx="6" fill="#ffffff" fill-opacity=".42"/><text x="64" y="430" fill="#ffffff" font-family="Inter, sans-serif" font-size="42" font-weight="700">${label}</text><text x="64" y="474" fill="#ffffff" fill-opacity=".7" font-family="Inter, sans-serif" font-size="20">Sample media frame</text></svg>`)}`;
+	return URL.createObjectURL(
+		new Blob(
+			[
+				`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="${start}"/><stop offset="1" stop-color="${end}"/></linearGradient></defs><rect width="960" height="540" fill="url(#g)"/><circle cx="780" cy="120" r="180" fill="#ffffff" fill-opacity=".12"/><rect x="64" y="72" width="210" height="10" rx="5" fill="#ffffff" fill-opacity=".5"/><rect x="64" y="108" width="420" height="24" rx="12" fill="#ffffff" fill-opacity=".9"/><rect x="64" y="164" width="310" height="12" rx="6" fill="#ffffff" fill-opacity=".42"/><text x="64" y="430" fill="#ffffff" font-family="Inter, sans-serif" font-size="42" font-weight="700">${label}</text><text x="64" y="474" fill="#ffffff" fill-opacity=".7" font-family="Inter, sans-serif" font-size="20">Sample media frame</text></svg>`,
+			],
+			{ type: "image/svg+xml" }
+		)
+	);
 }
 
-const SOURCES: Record<
-	"browser" | "desktop" | "recording",
-	{
-		end: string;
-		kind: MediaSourceKind;
-		start: string;
-		title: string;
-	}
-> = {
+const SOURCES = {
 	browser: {
 		end: "#2563eb",
 		kind: "browser",
@@ -39,7 +39,15 @@ const SOURCES: Record<
 		start: "#7c2d12",
 		title: "Evidence recording",
 	},
-};
+} satisfies Record<
+	"browser" | "desktop" | "recording",
+	{
+		end: string;
+		kind: MediaSourceKind;
+		start: string;
+		title: string;
+	}
+>;
 
 async function sampleRecording(): Promise<string> {
 	const canvas = document.createElement("canvas");
@@ -89,14 +97,19 @@ function Proof() {
 	useEffect(() => {
 		let cancelled = false;
 		let videoUrl: string | undefined;
-		const publish = (recordingUrl?: string) =>
-			publishMediaSource({
+		const imageUrl = frame(source.title, source.start, source.end);
+		const publish = (recordingUrl?: string) => {
+			const draft: Parameters<typeof publishMediaSource>[0] = {
 				id: `proof:${active}`,
-				imageUrl: frame(source.title, source.start, source.end),
+				imageUrl,
 				kind: source.kind,
 				title: source.title,
-				...(recordingUrl ? { videoUrl: recordingUrl } : {}),
-			});
+			};
+			if (recordingUrl) {
+				draft.videoUrl = recordingUrl;
+			}
+			publishMediaSource(draft);
+		};
 		if (source.kind === "recording") {
 			void sampleRecording().then((url) => {
 				videoUrl = url;
@@ -115,20 +128,23 @@ function Proof() {
 				URL.revokeObjectURL(videoUrl);
 			}
 			clearMediaSource(`proof:${active}`);
+			URL.revokeObjectURL(imageUrl);
 		};
 	}, [active, source]);
 
 	return (
-		<main className="min-h-screen bg-[#09111f] px-6 py-10 text-white sm:px-10">
+		<main
+			className={`${styles.page} min-h-screen px-6 py-10 text-white sm:px-10`}
+		>
 			<div className="mx-auto max-w-5xl space-y-8">
 				<header className="max-w-2xl space-y-3">
-					<p className="font-semibold text-cyan-300 text-xs uppercase tracking-[0.22em]">
+					<p className={`${styles.eyebrow} font-semibold text-xs uppercase`}>
 						Media UI verification · sample frames
 					</p>
 					<h1 className="font-semibold text-4xl tracking-tight">
 						One picture-in-picture surface for every active tab
 					</h1>
-					<p className="text-slate-300 text-sm leading-6">
+					<p className={`${styles.secondary} text-sm leading-6`}>
 						Browser frames, remote-node VNC frames, and evidence recordings
 						share the same dock. Selecting the thumbnail opens the existing
 						morphing lightbox.
@@ -140,7 +156,7 @@ function Proof() {
 						<div>
 							<p className="font-medium text-lg">Active source</p>
 							<p
-								className="mt-1 text-slate-400 text-sm"
+								className={`${styles.muted} mt-1 text-sm`}
 								data-testid="proof-active-source"
 							>
 								{source.title}
@@ -151,25 +167,23 @@ function Proof() {
 							className="flex flex-wrap gap-2"
 							role="group"
 						>
-							{(Object.keys(SOURCES) as Array<keyof typeof SOURCES>).map(
-								(key) => (
-									<button
-										className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${active === key ? "border-cyan-300 bg-cyan-300/15 text-cyan-100" : "border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"}`}
-										data-testid={`source-${key}`}
-										key={key}
-										onClick={() => setActive(key)}
-										type="button"
-									>
-										{key}
-									</button>
-								)
-							)}
+							{Object.values(SOURCES).map(({ kind: key }) => (
+								<button
+									className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${active === key ? styles.selectedSource : `${styles.secondary} border-white/10 bg-white/[0.04] hover:bg-white/[0.08]`}`}
+									data-testid={`source-${key}`}
+									key={key}
+									onClick={() => setActive(key)}
+									type="button"
+								>
+									{key}
+								</button>
+							))}
 						</div>
 					</div>
 					<div className="mt-6 grid min-h-[280px] place-items-center rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
 						<div className="max-w-md space-y-2">
 							<p className="font-medium text-xl">Use the floating dock</p>
-							<p className="text-slate-400 text-sm leading-6">
+							<p className={`${styles.muted} text-sm leading-6`}>
 								The native OS PiP action appears in the bottom-right corner when
 								a live source is active. Click its frame to test the
 								small-to-large lightbox transition.

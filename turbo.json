@@ -9,6 +9,7 @@
     "NEXT_PUBLIC_CORE_URL",
     "DATABASE_URL",
     "ADMIN_EMAILS",
+    "RYU_PLATFORM_ADMIN_USER_IDS",
     "RYU_FEATURE_FLAGS"
   ],
   "tasks": {

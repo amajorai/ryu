@@ -1,5 +1,9 @@
-import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar";
-import { cn } from "@ryu/ui/lib/utils";
+import { DitherAvatar } from "@ryu/ui/components/dither-kit/avatar.tsx";
+import {
+	type PanelIconPresentation,
+	panelIconPresentationClasses,
+} from "@ryu/ui/components/icon.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 
 // Deterministic, offline avatar identity for subagents (Task/Agent spawns).
@@ -17,7 +21,7 @@ import type { ReactNode } from "react";
 function hashString(value: string): number {
 	let hash = 0;
 	for (let i = 0; i < value.length; i++) {
-		// biome-ignore lint/suspicious/noBitwiseOperators: standard 32-bit string hash
+		// standard 32-bit string hash
 		hash = (Math.imul(hash, 31) + value.charCodeAt(i)) >>> 0;
 	}
 	return hash;
@@ -95,6 +99,7 @@ export function Identicon({
 export function SubagentAvatar({
 	seed,
 	className,
+	presentation,
 	animate = true,
 }: {
 	/** Pass `false` where the avatar remounts constantly (a dock tab strip
@@ -102,6 +107,7 @@ export function SubagentAvatar({
 	 *  entrance on each mount, which reads as flicker rather than as polish. */
 	animate?: boolean;
 	className?: string;
+	presentation?: PanelIconPresentation;
 	seed: string;
 }) {
 	return (
@@ -112,6 +118,7 @@ export function SubagentAvatar({
 			aria-hidden="true"
 			className={cn(
 				"flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted",
+				panelIconPresentationClasses(presentation),
 				className
 			)}
 		>

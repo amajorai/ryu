@@ -19,7 +19,7 @@
 // than the running app. Same division of labour as `CheckForUpdateOptions.clamp`
 // — the node supplies facts, the client owns the facts about itself.
 
-import { channelOf } from "@ryuhq/core-client/node-compat";
+import { channelOf } from "@ryuhq/core-client/node-compat.ts";
 import type { UpdateCheck } from "@/src/lib/api/update.ts";
 
 /**
@@ -111,8 +111,10 @@ function comparePrerelease(a: string[], b: string[]): number {
 	}
 	const shared = Math.min(a.length, b.length);
 	for (let i = 0; i < shared; i += 1) {
-		const left = a[i] as string;
-		const right = b[i] as string;
+		// SAFETY: This private helper receives only parse()'s fresh dense split arrays; i is below both lengths and neither array is mutated.
+		const left = a[i];
+		// SAFETY: b is the other fresh parse() split array; the same min-length loop bound proves this slot is a string.
+		const right = b[i];
 		const leftNumeric = NUMERIC.test(left);
 		const rightNumeric = NUMERIC.test(right);
 		if (leftNumeric && rightNumeric) {
@@ -155,8 +157,10 @@ export function isNewerVersion(current: string, latest: string): boolean {
 		return true;
 	}
 	for (let i = 0; i < 3; i += 1) {
-		const left = a.core[i] as number;
-		const right = b.core[i] as number;
+		// SAFETY: parse() pushes numeric components and pads this private fresh array to exactly three entries; i is 0, 1, or 2.
+		const left = a.core[i];
+		// SAFETY: b is the other successful private parse() result with exactly three numeric entries; no mutation precedes this indexed read.
+		const right = b.core[i];
 		if (left !== right) {
 			return right > left;
 		}

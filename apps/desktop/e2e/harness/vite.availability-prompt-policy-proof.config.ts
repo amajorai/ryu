@@ -38,4 +38,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "availability-prompt-policy-story.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

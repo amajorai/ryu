@@ -20,7 +20,13 @@
 import { useKeyboard } from "@opentui/react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
-import { useSetInputFocused } from "../../core/InputFocusContext.tsx";
+import {
+	useSetInputFocused,
+	useShellKeyboardCaptured,
+} from "../../core/InputFocusContext.tsx";
+import { HINT, hintText } from "../../core/keymap.ts";
+import { useOverlay } from "../../overlays/OverlayHost.tsx";
+import { displayWidth, truncateLabel } from "../../sidebar/rows.ts";
 import { AgentsTab } from "../../tabs/agents.tsx";
 import { AppsTab } from "../../tabs/apps.tsx";
 import { EnginesTab } from "../../tabs/engines.tsx";
@@ -28,7 +34,14 @@ import { ModelsTab } from "../../tabs/models.tsx";
 import { PluginsTab } from "../../tabs/plugins.tsx";
 import { SkillsTab } from "../../tabs/skills.tsx";
 import { ToolsTab } from "../../tabs/tools.tsx";
+import { ConfirmClaimContext } from "../../ui/ConfirmPrompt.tsx";
 import type { SurfaceModule, SurfaceProps } from "../../workspace/router.ts";
+import {
+	leadingOverflowLabel,
+	MAX_TAB_LABEL,
+	trailingOverflowLabel,
+	visibleTabWindow,
+} from "../../workspace/tabStripLayout.ts";
 import { useWorkspace } from "../../workspace/WorkspaceContext.tsx";
 import { FinetunePanel } from "./Finetune.tsx";
 import { StoreSearch } from "./StoreSearch.tsx";
@@ -53,6 +66,8 @@ function pathForPane(
 function StoreSurface({ active, paneId }: SurfaceProps) {
 	const theme = useTheme();
 	const { panes, tabs, focusedPaneId } = useWorkspace();
+	const shellKeyboardCaptured = useShellKeyboardCaptured();
+	const { openId: externalOverlayId } = useOverlay();
 	const setInputFocused = useSetInputFocused();
 
 	// Decide the section once from the opening path (desktop parity); the tab-row
@@ -62,12 +77,19 @@ function StoreSurface({ active, paneId }: SurfaceProps) {
 	);
 	const [query, setQuery] = useState("");
 	const [searchFocused, setSearchFocused] = useState(false);
+	// A section's destructive-action ConfirmPrompt is open: it owns ←/→ (button
+	// focus) and every plain key, so the Store must not switch sections or open
+	// search underneath it (that would silently drop the pending prompt).
+	const [confirmOpen, setConfirmOpen] = useState(false);
 
 	const focused = active && focusedPaneId === paneId;
 	const hasQuery = query.trim().length > 0;
-	const searchInputActive = focused && searchFocused;
-	const contentActive = focused && !searchFocused && !hasQuery;
-	const searchResultsActive = focused && !searchFocused && hasQuery;
+	const keyboardCaptured = shellKeyboardCaptured || externalOverlayId !== null;
+	const searchInputActive = focused && searchFocused && !keyboardCaptured;
+	const contentActive =
+		focused && !searchFocused && !hasQuery && !keyboardCaptured;
+	const searchResultsActive =
+		focused && !searchFocused && hasQuery && !keyboardCaptured;
 
 	// Claim raw input while the search box is focused so the mounted section and the
 	// shell's plain-key globals stay quiet.
@@ -93,7 +115,7 @@ function StoreSurface({ active, paneId }: SurfaceProps) {
 	};
 
 	useKeyboard((key) => {
-		if (!focused) {
+		if (!focused || keyboardCaptured || confirmOpen) {
 			return;
 		}
 		if (searchFocused) {
@@ -105,6 +127,10 @@ function StoreSurface({ active, paneId }: SurfaceProps) {
 			) {
 				setSearchFocused(false);
 			}
+			return;
+		}
+		if (key.ctrl || key.meta || key.option) {
+			// Chords are the shell's (Alt+←/→ moves between panes).
 			return;
 		}
 		if (key.name === "/" || key.sequence === "/") {
@@ -126,7 +152,7 @@ function StoreSurface({ active, paneId }: SurfaceProps) {
 				query={query}
 				theme={theme}
 			/>
-			<SectionTabRow active={section} theme={theme} />
+			<SectionTabRow active={section} onSelect={openRealm} theme={theme} />
 			<box flexDirection="column" flexGrow={1}>
 				{hasQuery ? (
 					<StoreSearch
@@ -135,7 +161,9 @@ function StoreSurface({ active, paneId }: SurfaceProps) {
 						query={query}
 					/>
 				) : (
-					<SectionContent active={contentActive} section={section} />
+					<ConfirmClaimContext.Provider value={setConfirmOpen}>
+						<SectionContent active={contentActive} section={section} />
+					</ConfirmClaimContext.Provider>
 				)}
 			</box>
 			<HintLine hasQuery={hasQuery} theme={theme} />
@@ -169,7 +197,8 @@ function SearchBar({
 			<input
 				cursorColor={theme.colors.primary}
 				focused={focused}
-				onChange={onChange}
+				focusedTextColor={theme.colors.foreground}
+				onInput={onChange}
 				placeholder="Search the whole store — models, skills, MCP, plugins…"
 				placeholderColor={theme.colors.mutedForeground}
 				textColor={theme.colors.foreground}
@@ -181,24 +210,92 @@ function SearchBar({
 
 function SectionTabRow({
 	active,
+	onSelect,
 	theme,
 }: {
 	active: StoreSection;
+	onSelect: (section: StoreSection) => void;
 	theme: ThemeValue;
 }) {
+	// One row that never wraps: every label is padded " label " so the active
+	// fill does not shift its neighbours, and a click switches the section. When
+	// the pane is too narrow for every label, a window around the active section
+	// is shown with "‹ +N" / "+M ›" markers (click one to step that way).
+	const [rowWidth, setRowWidth] = useState<number | null>(null);
+	const labels = STORE_SECTIONS.map((meta) =>
+		truncateLabel(meta.label, MAX_TAB_LABEL)
+	);
+	const activeIndex = Math.max(
+		0,
+		STORE_SECTIONS.findIndex((meta) => meta.id === active)
+	);
+	const { start, end } = visibleTabWindow(
+		labels.map((label) => displayWidth(` ${label} `)),
+		activeIndex,
+		rowWidth ?? Number.POSITIVE_INFINITY,
+		0
+	);
+	const selectAt = (index: number) => () => {
+		const meta = STORE_SECTIONS[index];
+		if (meta) {
+			onSelect(meta.id);
+		}
+	};
 	return (
-		<box flexDirection="row" gap={2} paddingLeft={1} paddingTop={1}>
-			{STORE_SECTIONS.map((meta) => {
+		<box
+			flexDirection="row"
+			flexShrink={0}
+			flexWrap="no-wrap"
+			onSizeChange={function measure(this: { width: number }) {
+				setRowWidth(this.width);
+			}}
+			overflow="hidden"
+			paddingTop={1}
+		>
+			{start > 0 ? (
+				<text
+					fg={theme.colors.mutedForeground}
+					flexShrink={0}
+					onMouseDown={selectAt(start - 1)}
+					wrapMode="none"
+				>
+					{leadingOverflowLabel(start)}
+				</text>
+			) : null}
+			{STORE_SECTIONS.slice(start, end).map((meta, offset) => {
 				const isActive = meta.id === active;
+				const label = labels[start + offset] ?? meta.label;
 				return (
-					<text
-						fg={isActive ? theme.colors.primary : theme.colors.mutedForeground}
+					<box
+						backgroundColor={isActive ? theme.colors.selection : undefined}
+						flexShrink={0}
 						key={meta.id}
+						onMouseDown={() => onSelect(meta.id)}
 					>
-						{isActive ? <b>{meta.label}</b> : meta.label}
-					</text>
+						<text
+							fg={
+								isActive
+									? theme.colors.selectionForeground
+									: theme.colors.mutedForeground
+							}
+							wrapMode="none"
+						>
+							{" "}
+							{isActive ? <b>{label}</b> : label}{" "}
+						</text>
+					</box>
 				);
 			})}
+			{end < STORE_SECTIONS.length ? (
+				<text
+					fg={theme.colors.mutedForeground}
+					flexShrink={0}
+					onMouseDown={selectAt(end)}
+					wrapMode="none"
+				>
+					{trailingOverflowLabel(STORE_SECTIONS.length - end)}
+				</text>
+			) : null}
 		</box>
 	);
 }
@@ -234,6 +331,21 @@ function SectionContent({
 	return <FinetunePanel active={active} />;
 }
 
+// The Store's one hint line, in the shared HINT vocabulary.
+const SEARCH_HINT = hintText([
+	HINT.search,
+	HINT.move,
+	{ keys: "Enter", label: "open realm" },
+	HINT.refresh,
+]);
+const BROWSE_HINT = hintText([
+	HINT.search,
+	{ keys: "←→", label: "sections" },
+	HINT.move,
+	{ keys: "Enter/a", label: "act" },
+	HINT.refresh,
+]);
+
 function HintLine({
 	hasQuery,
 	theme,
@@ -241,9 +353,7 @@ function HintLine({
 	hasQuery: boolean;
 	theme: ThemeValue;
 }) {
-	const hint = hasQuery
-		? "/ search · j/k move · enter open realm · r refresh"
-		: "/ search · ←→ sections · j/k move · enter/a act · r refresh";
+	const hint = hasQuery ? SEARCH_HINT : BROWSE_HINT;
 	return (
 		<box paddingLeft={1} paddingTop={1}>
 			<text fg={theme.colors.mutedForeground}>{hint}</text>

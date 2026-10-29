@@ -1,0 +1,236 @@
+@import "./payment-success-receipt-animations.css";
+
+.printer {
+	--printer-shadow: var(--foreground);
+	--receipt-paper: var(--card);
+	--receipt-ink: var(--card-foreground);
+	--receipt-muted: var(--muted-foreground);
+	--receipt-border: var(--border);
+	position: relative;
+	width: 100%;
+	max-width: 24rem;
+	isolation: isolate;
+}
+.machine {
+	position: relative;
+	z-index: 1;
+	padding: 0.75rem 0.75rem 2rem;
+	overflow: hidden;
+	color: var(--background);
+	background: color-mix(in oklab, var(--foreground) 88%, var(--background));
+	border: 1px solid
+		color-mix(in oklab, var(--foreground) 80%, var(--background));
+	border-radius: 1.5rem;
+	box-shadow:
+		0 20px 36px -20px
+		color-mix(in oklab, var(--printer-shadow) 55%, transparent),
+		inset 0 1px 0 color-mix(in oklab, var(--background) 20%, transparent),
+		inset 0 -1px 0 var(--printer-shadow);
+}
+.header {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	height: 2.75rem;
+	padding: 0.5rem;
+}
+.indicator {
+	width: 0.375rem;
+	height: 0.375rem;
+	background: var(--status-success);
+	border-radius: 50%;
+	box-shadow: 0 0 8px
+		color-mix(in oklab, var(--status-success) 50%, transparent);
+}
+.screen {
+	position: relative;
+	z-index: 1;
+	padding: 1rem;
+	background: var(--foreground);
+	border-radius: 0.75rem;
+	box-shadow: inset 0 0 24px 4px
+		color-mix(in oklab, var(--background) 8%, transparent);
+}
+.statusIcon {
+	display: grid;
+	place-items: center;
+	width: 1rem;
+	height: 1rem;
+	color: var(--status-success);
+}
+.spinner {
+	width: 0.875rem;
+	height: 0.875rem;
+	border: 2px solid currentColor;
+	border-right-color: transparent;
+	border-radius: 50%;
+	animation: ryu-receipt-spinner 800ms linear infinite;
+}
+.slot {
+	position: absolute;
+	right: 1.5rem;
+	bottom: 0.75rem;
+	left: 1.5rem;
+	height: 0.5rem;
+	background: var(--foreground);
+	border-radius: 0.25rem;
+	box-shadow: inset 0 2px 4px
+		color-mix(in oklab, var(--background) 12%, transparent);
+}
+.output {
+	position: relative;
+	z-index: 2;
+	width: calc(80% + 3rem);
+	max-width: 100%;
+	padding: 0 1.5rem 1.5rem;
+	margin: -1rem auto 0;
+	overflow: hidden;
+}
+.output::after {
+	position: absolute;
+	top: -0.25rem;
+	right: 1.5rem;
+	left: 1.5rem;
+	z-index: 2;
+	height: 0.5rem;
+	pointer-events: none;
+	content: "";
+	background: color-mix(in oklab, var(--printer-shadow) 75%, transparent);
+	filter: blur(6px);
+}
+.feed {
+	filter: drop-shadow(
+		0 8px 12px color-mix(in oklab, var(--printer-shadow) 15%, transparent)
+	);
+	animation: ryu-receipt-feed 1750ms linear both;
+}
+.paper {
+	--foreground: var(--receipt-ink);
+	--muted-foreground: var(--receipt-muted);
+	--border: var(--receipt-border);
+	--receipt-teeth:
+		98.75% 100%, 97.5% calc(100% - 4px), 96.25% 100%, 95.0% calc(100% - 4px), 93.75% 100%, 92.5% calc(
+			100% -
+			4px
+		), 91.25% 100%, 90.0% calc(100% - 4px), 88.75% 100%, 87.5% calc(100% - 4px), 86.25% 100%, 85.0% calc(
+			100% -
+			4px
+		), 83.75% 100%, 82.5% calc(100% - 4px), 81.25% 100%, 80.0% calc(100% - 4px), 78.75% 100%, 77.5% calc(
+			100% -
+			4px
+		), 76.25% 100%, 75.0% calc(100% - 4px), 73.75% 100%, 72.5% calc(100% - 4px), 71.25% 100%, 70.0% calc(
+			100% -
+			4px
+		), 68.75% 100%, 67.5% calc(100% - 4px), 66.25% 100%, 65.0% calc(100% - 4px), 63.75% 100%, 62.5% calc(
+			100% -
+			4px
+		), 61.25% 100%, 60.0% calc(100% - 4px), 58.75% 100%, 57.5% calc(100% - 4px), 56.25% 100%, 55.0% calc(
+			100% -
+			4px
+		), 53.75% 100%, 52.5% calc(100% - 4px), 51.25% 100%, 50.0% calc(100% - 4px), 48.75% 100%, 47.5% calc(
+			100% -
+			4px
+		), 46.25% 100%, 45.0% calc(100% - 4px), 43.75% 100%, 42.5% calc(100% - 4px), 41.25% 100%, 40.0% calc(
+			100% -
+			4px
+		), 38.75% 100%, 37.5% calc(100% - 4px), 36.25% 100%, 35.0% calc(100% - 4px), 33.75% 100%, 32.5% calc(
+			100% -
+			4px
+		), 31.25% 100%, 30.0% calc(100% - 4px), 28.75% 100%, 27.5% calc(100% - 4px), 26.25% 100%, 25.0% calc(
+			100% -
+			4px
+		), 23.75% 100%, 22.5% calc(100% - 4px), 21.25% 100%, 20.0% calc(100% - 4px), 18.75% 100%, 17.5% calc(
+			100% -
+			4px
+		), 16.25% 100%, 15.0% calc(100% - 4px), 13.75% 100%, 12.5% calc(100% - 4px), 11.25% 100%, 10.0% calc(
+			100% -
+			4px
+		), 8.75% 100%, 7.5% calc(100% - 4px), 6.25% 100%, 5.0% calc(100% - 4px), 3.75% 100%, 2.5% calc(
+			100% -
+			4px
+		), 1.25% 100%, 0.0% calc(100% - 4px);
+	position: relative;
+	min-height: 20rem;
+	padding: 1.75rem 1.5rem 2rem;
+	font-family: var(--font-mono);
+	color: var(--receipt-ink);
+	background-color: var(--receipt-paper);
+	background-image: repeating-linear-gradient(
+		0deg,
+		transparent,
+		transparent 2px,
+		color-mix(in oklab, var(--foreground) 2%, transparent) 3px
+	);
+	clip-path: polygon(0 0, 100% 0, 100% calc(100% - 4px), var(--receipt-teeth));
+}
+.details {
+	display: grid;
+	gap: 0.75rem;
+	padding: 1.25rem 0;
+	font-size: 0.75rem;
+	line-height: 1.5;
+}
+.detail {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+	gap: 1rem;
+	overflow-wrap: anywhere;
+}
+.barcodeNumber {
+	font-size: 0.65rem;
+	letter-spacing: 0.28em;
+}
+@media (prefers-reduced-motion: reduce) {
+	.feed,
+	.spinner {
+		transform: none;
+		animation: none;
+	}
+}
+@media print {
+	.machine {
+		display: none;
+	}
+	.output {
+		width: 100%;
+		padding: 0;
+		margin: 0;
+		overflow: visible;
+	}
+	.output::after {
+		display: none;
+	}
+	.feed {
+		filter: none;
+		transform: none;
+		animation: none;
+	}
+}
+
+:where([class~="dark"]) .machine {
+	color: var(--foreground);
+	background: var(--muted);
+	border-color: var(--border);
+}
+:where([class~="dark"]) .screen,
+:where([class~="dark"]) .slot {
+	background: var(--background);
+}
+
+:where([class~="dark"]) .printer {
+	--printer-shadow: var(--background);
+	--receipt-paper: var(--foreground);
+	--receipt-ink: var(--background);
+	--receipt-muted: color-mix(
+		in oklab,
+		var(--background) 65%,
+		var(--foreground)
+	);
+	--receipt-border: color-mix(
+		in oklab,
+		var(--background) 15%,
+		var(--foreground)
+	);
+}

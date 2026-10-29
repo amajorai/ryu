@@ -1,0 +1,56 @@
+{
+  "tags": ["agent-readiness", "web", "audit"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/is-agentic",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/is-agentic",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/is-agentic",
+  "name": "Is Agentic",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Read the latest completed Is Agentic (https://is-agentic.com) agent-readiness report for a public website: a 0-100 score split into essential, recommended and bonus checks, plus every failing check with its evidence and recommended fix. Read-only, keyless, and never starts a scan.",
+  "icon": "checkmark-badge-01",
+  "iconDither": { "from": 160, "to": "transparent", "direction": "down" },
+  "tagline": "Agent-readiness reports from is-agentic.com",
+  "keywords": ["agent readiness", "agentic web", "audit", "Is Agentic"],
+  "category": "Developer Tools",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-is-agentic-report",
+      "name": "Is Agentic Report",
+      "kind": "tool",
+      "config": {
+        "slug": "is_agentic.report",
+        "backend": "http",
+        "method": "GET",
+        "url": "https://is-agentic.com/api/v1/report",
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Get the latest completed Is Agentic agent-readiness report for a public website. Returns `score` (0-100), `score_label`, `score_breakdown` (essential / recommended / bonus), and `issues`, each with `tier`, `result`, `details` and `recommendation`. Start with failed essential issues. This tool never starts a scan: when no report exists the response is a 404 problem body (`code: report_not_found`) whose `resolution` names the https://is-agentic.com/scan/<domain> page that starts one.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Public website to look up, as a bare domain (vercel.com) or an HTTP or HTTPS URL."
+            }
+          },
+          "required": ["url"]
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:http-egress:is-agentic.com"]
+}

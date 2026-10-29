@@ -1,15 +1,16 @@
 import { Delete01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
-import { Switch } from "@ryu/ui/components/switch";
-import { Textarea } from "@ryu/ui/components/textarea";
+} from "@ryu/ui/components/native-select.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import {
 	SettingsCard,
 	SettingsSection,
@@ -52,6 +53,7 @@ export function AgentSchedulesPanel({
 	schedules,
 	upgradeRequired = false,
 }: AgentSchedulesPanelProps) {
+	const tl = useLiteralMessages();
 	const update = (index: number, patch: Partial<AgentScheduleDraft>) => {
 		onChange(
 			schedules.map((schedule, currentIndex) =>
@@ -123,12 +125,20 @@ export function AgentSchedulesPanel({
 										onChange={(event) =>
 											update(index, { name: event.target.value })
 										}
-										placeholder={`Schedule ${index + 1}`}
+										placeholder={tl("Schedule {number}", {
+											number: String(index + 1),
+										})}
 										value={entry.name}
 									/>
 								</div>
 								<Button
-									aria-label={`Remove ${entry.name || `schedule ${index + 1}`}`}
+									aria-label={
+										entry.name
+											? tl("Remove {name}", { name: entry.name })
+											: tl("Remove schedule {number}", {
+													number: String(index + 1),
+												})
+									}
 									disabled={disabled}
 									onClick={() =>
 										onChange(
@@ -156,7 +166,8 @@ export function AgentSchedulesPanel({
 										onChange={(event) =>
 											updateSchedule(
 												index,
-												event.target.value as "cron" | "every"
+												/* SAFETY: This authored NativeSelect offers only the cron and every schedule kinds. This is a native UI selection, not a decoder for arbitrary synthetic events. */ event
+													.target.value as "cron" | "every"
 											)
 										}
 										value={entry.schedule.kind}
@@ -176,7 +187,7 @@ export function AgentSchedulesPanel({
 											: "Interval"}
 									</Label>
 									<Input
-										className="mt-1.5 font-mono"
+										className="mt-1.5"
 										disabled={disabled}
 										id={`agent-schedule-value-${entry.id}`}
 										onChange={(event) => {
@@ -195,6 +206,7 @@ export function AgentSchedulesPanel({
 											entry.schedule.kind === "cron" ? "0 9 * * 1-5" : "1h"
 										}
 										value={scheduleValue(entry.schedule)}
+										variant="code"
 									/>
 								</div>
 							</div>

@@ -4,11 +4,12 @@
  * Kept free of JSX and `@ryu/ui` imports on purpose: this is the part with real
  * logic (which file a given machine should get), so it has to be unit-testable
  * without a React or design-system resolver — same shape as `island-snap.ts`.
- * The presentational `download.tsx` re-exports everything here.
+ * The presentational `download.tsx` re-exports everything here; OS/arch
+ * detection lives in `download-platform.ts` and is re-exported from here.
  */
+import type { DownloadArch, DownloadOS } from "./download-platform.ts";
 
-export type DownloadOS = "macos" | "windows" | "linux";
-export type DownloadArch = "intel" | "arm";
+export * from "./download-platform.ts";
 
 export interface ReleaseAsset {
 	browser_download_url: string;
@@ -28,88 +29,12 @@ export interface Release {
 
 export const GITHUB_RELEASES_REPO = "amajorai/ryu";
 export const RELEASES_PAGE = `https://github.com/${GITHUB_RELEASES_REPO}/releases`;
-export const RELEASES_API = `https://api.github.com/repos/${GITHUB_RELEASES_REPO}/releases`;
+// `per_page=100`: GitHub's default page is 30, and the rolling nightly/canary
+// trains keep ~26 prereleases between them, which can push every stable release
+// off a default page and leave the download rows with nothing to link.
+export const RELEASES_API = `https://api.github.com/repos/${GITHUB_RELEASES_REPO}/releases?per_page=100`;
 export const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_RELEASES_REPO}/releases/latest`;
 export const GITHUB_REPO = `https://github.com/${GITHUB_RELEASES_REPO}`;
-
-/** Detect the visitor's desktop platform without making module evaluation browser-only. */
-export function detectDownloadOS(): DownloadOS {
-	if (typeof window === "undefined") {
-		return "macos";
-	}
-	const userAgent = window.navigator.userAgent.toLowerCase();
-	const platform = window.navigator.platform.toLowerCase();
-	if (
-		userAgent.includes("mac") ||
-		userAgent.includes("iphone") ||
-		userAgent.includes("ipad") ||
-		platform.includes("mac")
-	) {
-		return "macos";
-	}
-	if (userAgent.includes("win") || platform.includes("win")) {
-		return "windows";
-	}
-	if (
-		userAgent.includes("linux") ||
-		platform.includes("linux") ||
-		userAgent.includes("x11")
-	) {
-		return "linux";
-	}
-	return "macos";
-}
-
-/** Resolve architecture signals, preferring the browser's explicit CPU value. */
-export function classifyDownloadArch(
-	userAgent: string,
-	highEntropyArchitecture?: string | null
-): DownloadArch {
-	const architecture = highEntropyArchitecture?.toLowerCase() ?? "";
-	const normalizedUserAgent = userAgent.toLowerCase();
-	return architecture.includes("arm") ||
-		normalizedUserAgent.includes("arm") ||
-		normalizedUserAgent.includes("aarch64")
-		? "arm"
-		: "intel";
-}
-
-/** Detect the visitor's processor architecture, defaulting to Intel-compatible builds. */
-export function detectDownloadArch(): DownloadArch {
-	if (typeof window === "undefined") {
-		return "intel";
-	}
-	return classifyDownloadArch(window.navigator.userAgent);
-}
-
-/**
- * Chromium deliberately reports Apple-silicon Macs as `MacIntel` in its normal
- * user agent. Use its high-entropy architecture signal when available, while
- * retaining the synchronous detector as the Safari/Firefox fallback.
- */
-export async function detectDownloadArchAsync(): Promise<DownloadArch> {
-	if (typeof window === "undefined") {
-		return "intel";
-	}
-	const browserNavigator = window.navigator as Navigator & {
-		userAgentData?: {
-			getHighEntropyValues?: (
-				hints: string[]
-			) => Promise<{ architecture?: string }>;
-		};
-	};
-	try {
-		const values = await browserNavigator.userAgentData?.getHighEntropyValues?.(
-			["architecture"]
-		);
-		return classifyDownloadArch(
-			browserNavigator.userAgent,
-			values?.architecture
-		);
-	} catch {
-		return detectDownloadArch();
-	}
-}
 
 /**
  * Filenames of the desktop installer, per platform and architecture.
@@ -118,10 +43,7 @@ export async function detectDownloadArchAsync(): Promise<DownloadArch> {
  * the resolver returns null for those and the UI says "Not available" rather
  * than offering a link to a page with nothing on it.
  */
-export const PLATFORM_ASSET_PATTERNS: Record<
-	DownloadOS,
-	Record<DownloadArch, RegExp[]>
-> = {
+export const PLATFORM_ASSET_PATTERNS = {
 	macos: {
 		arm: [/aarch64\.dmg$/i, /_aarch64\.dmg$/i],
 		intel: [/x64\.dmg$/i, /_x64\.dmg$/i],
@@ -134,7 +56,7 @@ export const PLATFORM_ASSET_PATTERNS: Record<
 		arm: [/aarch64\.AppImage$/i, /arm64\.AppImage$/i, /arm64\.deb$/i],
 		intel: [/amd64\.AppImage$/i, /amd64\.deb$/i, /x86_64\.rpm$/i],
 	},
-};
+} satisfies Record<DownloadOS, Record<DownloadArch, RegExp[]>>;
 
 /**
  * Filenames for the standalone headless Core binary. These are deliberately
@@ -142,10 +64,7 @@ export const PLATFORM_ASSET_PATTERNS: Record<
  * both products, and a browser download must never hand someone the desktop
  * app when they asked for the local runtime only.
  */
-export const CORE_ASSET_PATTERNS: Record<
-	DownloadOS,
-	Record<DownloadArch, RegExp[]>
-> = {
+export const CORE_ASSET_PATTERNS = {
 	macos: {
 		arm: [/^ryu-core-macos-aarch64(?:\.exe)?$/i],
 		intel: [/^ryu-core-macos-x86_64(?:\.exe)?$/i],
@@ -158,7 +77,23 @@ export const CORE_ASSET_PATTERNS: Record<
 		arm: [/^ryu-core-linux-aarch64$/i],
 		intel: [/^ryu-core-linux-x86_64$/i],
 	},
-};
+} satisfies Record<DownloadOS, Record<DownloadArch, RegExp[]>>;
+
+/** Resolve only the complete declared platform keys; retain the raw regex arrays. */
+function patternsForPlatform(
+	catalogue: Record<DownloadOS, Record<DownloadArch, RegExp[]>>,
+	platformId: string,
+	arch: DownloadArch
+) {
+	switch (platformId) {
+		case "macos":
+		case "windows":
+		case "linux":
+			return catalogue[platformId]?.[arch] ?? null;
+		default:
+			return null;
+	}
+}
 
 export function findCoreReleaseAsset(
 	release: Release,
@@ -168,8 +103,7 @@ export function findCoreReleaseAsset(
 	if (!release.assets?.length) {
 		return null;
 	}
-	const patterns =
-		CORE_ASSET_PATTERNS[platformId as DownloadOS]?.[arch] ?? null;
+	const patterns = patternsForPlatform(CORE_ASSET_PATTERNS, platformId, arch);
 	if (!patterns) {
 		return null;
 	}
@@ -219,8 +153,41 @@ export function findCoreReleaseWithAsset(
  */
 const NON_DESKTOP_ASSET_RE = /^ryu-(island|browser|cli|core|gateway)[-_]/i;
 
+/**
+ * The standalone Ryu Bot build ships its own installers on the same release
+ * (productName "Ryu Bot", stored by GitHub as `Ryu.Bot_<version>_…`). They carry
+ * the same platform suffixes as Ryu's, so without this the site could hand out
+ * the Bot installer as "the" desktop download.
+ */
+const RYU_BOT_ASSET_RE = /^Ryu[._ -]Bot[._ -]/i;
+
 export function isDesktopAsset(name: string): boolean {
-	return !NON_DESKTOP_ASSET_RE.test(name);
+	return !(NON_DESKTOP_ASSET_RE.test(name) || RYU_BOT_ASSET_RE.test(name));
+}
+
+function matchesCatalogue(
+	catalogue: Record<DownloadOS, Record<DownloadArch, RegExp[]>>,
+	name: string
+): boolean {
+	return Object.values(catalogue).some((byArch) =>
+		Object.values(byArch).some((patterns) =>
+			patterns.some((pattern) => pattern.test(name))
+		)
+	);
+}
+
+/**
+ * Whether any resolver in this module could ever hand the asset out: a desktop
+ * installer or a standalone Core binary. The site's same-origin releases route
+ * keeps only these, which is most of why its payload is a small fraction of
+ * GitHub's (signatures, updater manifests and companion apps never reach a
+ * download row).
+ */
+export function isLinkableReleaseAsset(name: string): boolean {
+	return (
+		(isDesktopAsset(name) && matchesCatalogue(PLATFORM_ASSET_PATTERNS, name)) ||
+		matchesCatalogue(CORE_ASSET_PATTERNS, name)
+	);
 }
 
 export function findReleaseAsset(
@@ -231,8 +198,11 @@ export function findReleaseAsset(
 	if (!release.assets?.length) {
 		return null;
 	}
-	const patterns =
-		PLATFORM_ASSET_PATTERNS[platformId as DownloadOS]?.[arch] ?? null;
+	const patterns = patternsForPlatform(
+		PLATFORM_ASSET_PATTERNS,
+		platformId,
+		arch
+	);
 	if (!patterns) {
 		return null;
 	}
@@ -431,13 +401,8 @@ export async function fetchReleasesWithRetry(
 				}
 				return [];
 			}
-			// If rate limited, wait and retry
-			if (response.status === 403 || response.status === 429) {
-				const delay = baseDelay * 2 ** attempt;
-				await new Promise((resolve) => setTimeout(resolve, delay));
-				continue;
-			}
-			// Other errors, don't retry
+			// Rate limits (403/429) reset on the hour, so a few seconds of backoff
+			// cannot outlast them; fall back to the releases page immediately.
 			return [];
 		} catch {
 			// Network error, retry with backoff
@@ -448,6 +413,40 @@ export async function fetchReleasesWithRetry(
 		}
 	}
 	return [];
+}
+
+/**
+ * The website's same-origin, CDN-cached copy of the releases list
+ * (`apps/web/src/app/api/releases/route.ts`): non-draft releases in the same
+ * `Release` shape, trimmed to the assets `isLinkableReleaseAsset` accepts.
+ */
+export const RELEASES_ROUTE = "/api/releases";
+
+/**
+ * Ask the page's own origin for the trimmed releases list. `null` means "not
+ * answered here" — another origin without the route (desktop, storyboard, the
+ * Vite proof harness), an SPA fallback page, or the route failing upstream — and
+ * the caller then asks GitHub directly, exactly as before the route existed.
+ */
+async function fetchSiteReleases(): Promise<Release[] | null> {
+	const protocol = globalThis.location?.protocol;
+	if (protocol !== "https:" && protocol !== "http:") {
+		return null;
+	}
+	try {
+		const response = await fetch(RELEASES_ROUTE, {
+			headers: { Accept: "application/json" },
+		});
+		if (!response.ok) {
+			return null;
+		}
+		const data: unknown = await response.json();
+		// SAFETY: the route serialises `Release` rows it validated server side;
+		// anything that is not an array (an HTML fallback page) is rejected here.
+		return Array.isArray(data) ? (data as Release[]) : null;
+	} catch {
+		return null;
+	}
 }
 
 let releasesPromise: Promise<Release[]> | null = null;
@@ -461,10 +460,16 @@ let releasesPromise: Promise<Release[]> | null = null;
  * hour per IP; past that every row silently degrades to the releases page,
  * which looks exactly like the menu being broken. One in-flight promise, cached
  * for the life of the document, keeps a page view at a single request.
+ *
+ * On the website that request is the same-origin `RELEASES_ROUTE` (a few KB,
+ * cached at the edge) instead of GitHub's ~0.5 MB `per_page=100` listing; any
+ * other origin, or a failing route, falls back to GitHub directly.
  */
 export function loadReleases(): Promise<Release[]> {
 	if (!releasesPromise) {
-		releasesPromise = fetchReleasesWithRetry().catch(() => []);
+		releasesPromise = fetchSiteReleases()
+			.then((siteReleases) => siteReleases ?? fetchReleasesWithRetry())
+			.catch(() => []);
 	}
 	return releasesPromise;
 }
@@ -472,21 +477,4 @@ export function loadReleases(): Promise<Release[]> {
 /** Test seam: drop the cached fetch so the next `loadReleases()` refetches. */
 export function resetReleasesCache() {
 	releasesPromise = null;
-}
-
-export function archLabel(platformId: string, arch: DownloadArch) {
-	if (platformId === "macos") {
-		return arch === "arm" ? "Apple Silicon" : "Intel";
-	}
-	return arch === "arm" ? "ARM64" : "x64";
-}
-
-export function osName(os: DownloadOS) {
-	if (os === "windows") {
-		return "Windows";
-	}
-	if (os === "linux") {
-		return "Linux";
-	}
-	return "macOS";
 }

@@ -83,11 +83,31 @@ If `tailscale status` shows an online node, skip install. Read the hostname from
 
 Use HTTP. Do not add HTTPS unless the user asks.
 
-If Tailscale is not installed, install it:
+If Tailscale is not installed, install it from Tailscale's signed package repository. Do not pipe a remote script into a shell. On Debian or Ubuntu (and derivatives such as Linux Mint or Pop!_OS), use the upstream distribution and codename, not the derivative's own. Stop on any failed download so an empty keyring is never installed:
 
 ```
-curl -fsSL https://tailscale.com/install.sh | sudo sh
+set -eo pipefail
+. /etc/os-release
+case " $ID $ID_LIKE " in
+  *" ubuntu "*) D=ubuntu; C=${UBUNTU_CODENAME:-$VERSION_CODENAME} ;;
+  *" debian "*) D=debian; C=${VERSION_CODENAME:?no release codename in /etc/os-release (Debian testing or sid): stop and ask the user} ;;
+  *) echo "unsupported distribution" >&2; exit 1 ;;
+esac
+curl -fsSL "https://pkgs.tailscale.com/stable/$D/$C.noarmor.gpg" | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+curl -fsSL "https://pkgs.tailscale.com/stable/$D/$C.tailscale-keyring.list" | sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+sudo apt-get update && sudo apt-get install -y tailscale
 ```
+
+If a download fails with 404, remove the empty files it left (`/usr/share/keyrings/tailscale-archive-keyring.gpg` and `/etc/apt/sources.list.d/tailscale.list`) and tell the user the distribution is not supported by Tailscale's repository.
+
+On macOS, install the Tailscale app from the Mac App Store or tailscale.com, or use Homebrew and start the daemon, which the formula does not do by itself:
+
+```
+brew install tailscale
+sudo brew services start tailscale
+```
+
+On Fedora, RHEL or CentOS, use `sudo dnf config-manager --add-repo https://pkgs.tailscale.com/stable/fedora/tailscale.repo && sudo dnf install -y tailscale && sudo systemctl enable --now tailscaled`. On any other system, stop and ask the user which package manager to use. After any install, make sure `tailscaled` is running before the next step; `tailscale up` fails with "failed to connect to local tailscaled" otherwise.
 
 Then start the node with a short hostname:
 

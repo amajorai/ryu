@@ -191,7 +191,7 @@ test.describe("composer + menu — real InputBar in isolation", () => {
 	}) => {
 		await page.goto(STORY_URL);
 		await page.evaluate(() => localStorage.removeItem("ryu:composer-pins"));
-		const mount = page.getByTestId("minimal");
+		page.getByTestId("minimal");
 
 		await plusIn(page, "minimal").click();
 		await page.getByRole("button", { name: "Pin Calendar" }).click();

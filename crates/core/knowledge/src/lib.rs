@@ -36,9 +36,9 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use noyalib::compat::serde_yaml::Value as YamlValue;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_yml::Value as YamlValue;
 
 /// The OKF specification version this module targets.
 pub const OKF_VERSION: &str = "0.1";
@@ -136,13 +136,13 @@ fn scalar_to_string(value: YamlValue) -> Option<String> {
 
 /// Pull a scalar-valued key out of a mapping, removing it. Non-scalar values are
 /// dropped (treated as absent) so malformed optional fields are tolerated.
-fn take_string(map: &mut serde_yml::Mapping, key: &str) -> Option<String> {
+fn take_string(map: &mut noyalib::compat::serde_yaml::Mapping, key: &str) -> Option<String> {
     map.remove(key).and_then(scalar_to_string)
 }
 
 /// Pull a `tags` list out of a mapping. Accepts a sequence of strings, or a
 /// single string (coerced to a one-element list). Non-string entries are skipped.
-fn take_tags(map: &mut serde_yml::Mapping) -> Vec<String> {
+fn take_tags(map: &mut noyalib::compat::serde_yaml::Mapping) -> Vec<String> {
     match map.remove("tags") {
         Some(YamlValue::Sequence(seq)) => seq
             .into_iter()
@@ -158,13 +158,13 @@ fn take_tags(map: &mut serde_yml::Mapping) -> Vec<String> {
 
 /// Parse a YAML frontmatter block into a mapping. An empty/null block yields an
 /// empty mapping. Returns `Err` only when the YAML is syntactically invalid.
-fn parse_mapping(yaml: &str) -> Result<serde_yml::Mapping, String> {
+fn parse_mapping(yaml: &str) -> Result<noyalib::compat::serde_yaml::Mapping, String> {
     if yaml.trim().is_empty() {
-        return Ok(serde_yml::Mapping::new());
+        return Ok(noyalib::compat::serde_yaml::Mapping::new());
     }
-    match serde_yml::from_str::<YamlValue>(yaml) {
+    match noyalib::compat::serde_yaml::from_str::<YamlValue>(yaml) {
         Ok(YamlValue::Mapping(m)) => Ok(m),
-        Ok(YamlValue::Null) => Ok(serde_yml::Mapping::new()),
+        Ok(YamlValue::Null) => Ok(noyalib::compat::serde_yaml::Mapping::new()),
         Ok(_) => Err("frontmatter is not a YAML mapping".to_owned()),
         Err(e) => Err(format!("invalid YAML frontmatter: {e}")),
     }
@@ -228,10 +228,8 @@ impl Concept {
 
         // Everything left over is preserved as `extra`.
         let mut extra = BTreeMap::new();
-        for (k, v) in map {
-            if let YamlValue::String(key) = k {
-                extra.insert(key, v);
-            }
+        for (key, v) in map {
+            extra.insert(key, v);
         }
 
         let links = extract_links(&body);
@@ -254,11 +252,8 @@ impl Concept {
     /// `type`, `title`, `description`, `resource`, `tags`, `timestamp`, then
     /// `extra` keys (sorted). Optional fields that are `None`/empty are omitted.
     pub fn to_markdown(&self) -> String {
-        let mut map = serde_yml::Mapping::new();
-        map.insert(
-            YamlValue::String("type".to_owned()),
-            YamlValue::String(self.type_.clone()),
-        );
+        let mut map = noyalib::compat::serde_yaml::Mapping::new();
+        map.insert("type".to_owned(), YamlValue::String(self.type_.clone()));
         insert_opt(&mut map, "title", self.title.as_deref());
         insert_opt(&mut map, "description", self.description.as_deref());
         insert_opt(&mut map, "resource", self.resource.as_deref());
@@ -268,30 +263,33 @@ impl Concept {
                 .iter()
                 .map(|t| YamlValue::String(t.clone()))
                 .collect();
-            map.insert(
-                YamlValue::String("tags".to_owned()),
-                YamlValue::Sequence(seq),
-            );
+            map.insert("tags".to_owned(), YamlValue::Sequence(seq));
         }
         insert_opt(&mut map, "timestamp", self.timestamp.as_deref());
         for (k, v) in &self.extra {
-            map.insert(YamlValue::String(k.clone()), v.clone());
+            map.insert(k.clone(), v.clone());
         }
 
-        let yaml = serde_yml::to_string(&YamlValue::Mapping(map)).unwrap_or_else(|_| String::new());
-        // `serde_yml::to_string` already ends with a newline.
-        format!("---\n{yaml}---\n{}", self.body)
+        format!("---\n{}---\n{}", yaml_block(map), self.body)
     }
 }
 
+/// Render a frontmatter mapping as YAML that always ends with a newline, so the
+/// closing `---` fence starts its own line (noyalib's serde_yaml shim omits the final one).
+fn yaml_block(map: noyalib::compat::serde_yaml::Mapping) -> String {
+    let mut yaml =
+        noyalib::compat::serde_yaml::to_string(&YamlValue::Mapping(map)).unwrap_or_default();
+    if !yaml.ends_with('\n') {
+        yaml.push('\n');
+    }
+    yaml
+}
+
 /// Insert an optional string key into a mapping when present and non-empty.
-fn insert_opt(map: &mut serde_yml::Mapping, key: &str, value: Option<&str>) {
+fn insert_opt(map: &mut noyalib::compat::serde_yaml::Mapping, key: &str, value: Option<&str>) {
     if let Some(v) = value {
         if !v.is_empty() {
-            map.insert(
-                YamlValue::String(key.to_owned()),
-                YamlValue::String(v.to_owned()),
-            );
+            map.insert(key.to_owned(), YamlValue::String(v.to_owned()));
         }
     }
 }
@@ -328,10 +326,8 @@ impl IndexDoc {
         let description = take_string(&mut map, "description");
 
         let mut extra = BTreeMap::new();
-        for (k, v) in map {
-            if let YamlValue::String(key) = k {
-                extra.insert(key, v);
-            }
+        for (key, v) in map {
+            extra.insert(key, v);
         }
 
         Self {
@@ -345,19 +341,15 @@ impl IndexDoc {
 
     /// Serialize back to `index.md` markdown.
     pub fn to_markdown(&self) -> String {
-        let mut map = serde_yml::Mapping::new();
+        let mut map = noyalib::compat::serde_yaml::Mapping::new();
         let version = self.okf_version.as_deref().unwrap_or(OKF_VERSION);
-        map.insert(
-            YamlValue::String("okf".to_owned()),
-            YamlValue::String(version.to_owned()),
-        );
+        map.insert("okf".to_owned(), YamlValue::String(version.to_owned()));
         insert_opt(&mut map, "title", self.title.as_deref());
         insert_opt(&mut map, "description", self.description.as_deref());
         for (k, v) in &self.extra {
-            map.insert(YamlValue::String(k.clone()), v.clone());
+            map.insert(k.clone(), v.clone());
         }
-        let yaml = serde_yml::to_string(&YamlValue::Mapping(map)).unwrap_or_else(|_| String::new());
-        format!("---\n{yaml}---\n{}", self.body)
+        format!("---\n{}---\n{}", yaml_block(map), self.body)
     }
 }
 

@@ -1,3 +1,67 @@
+import { z } from "zod";
+import {
+	artifactObservationFromInput,
+	type NativeArtifactObservation,
+} from "../native-artifact-observation.ts";
+import { turnEndValueSchema } from "../turn-end-wire.ts";
+import { nativeSdkSchemaAdmits } from "../utils/native-sdk-admission.ts";
+
+const nativeTextSchema = z.string();
+
+import {
+	type NativeSdkValue,
+	nativeSdkObjectSchema,
+	nativeSdkReceiverSchema,
+} from "../utils/native-sdk-observation.ts";
+
+interface NativeArtifactFields {
+	artifact?: NativeSdkValue;
+	available?: NativeSdkValue;
+	content?: NativeSdkValue;
+	id?: NativeSdkValue;
+	kind?: NativeSdkValue;
+	mime?: NativeSdkValue;
+	ok?: NativeSdkValue;
+	space_id?: NativeSdkValue;
+	title?: NativeSdkValue;
+	url?: NativeSdkValue;
+}
+const artifactCarrierSchema = z.custom<NativeArtifactFields>((value) =>
+	nativeSdkSchemaAdmits(nativeSdkObjectSchema, value)
+);
+const artifactInputSchema = z.custom<NativeArtifactFields>((value) =>
+	nativeSdkSchemaAdmits(nativeSdkReceiverSchema, value)
+);
+function isTurnEndText(value: NativeSdkValue): value is string {
+	return nativeSdkSchemaAdmits(nativeTextSchema, value);
+}
+
+const hostArtifactFieldsSchema = z.object({
+	actions: z
+		.array(
+			z.object({
+				id: z.string(),
+				label: z.string(),
+				tone: z.enum(["primary", "secondary", "ghost"]).optional(),
+			})
+		)
+		.optional(),
+	content: z.string().optional(),
+	docId: z.string().optional(),
+	filePath: z.string().optional(),
+	kind: z.string().optional(),
+	language: z.string().optional(),
+	mime: z.string().optional(),
+	spaceId: z.string().optional(),
+	title: z.string().optional(),
+	url: z.string().optional(),
+});
+export const hostArtifactTransportSchema = z.custom<HostArtifact>(
+	(value) =>
+		turnEndValueSchema.safeParse(value).success &&
+		hostArtifactFieldsSchema.safeParse(value).success
+);
+
 import type { HostArtifact } from "../artifact-host-context.tsx";
 
 /**
@@ -8,48 +72,45 @@ import type { HostArtifact } from "../artifact-host-context.tsx";
 
 /** Extract the `artifact` object out of a part's input — either a bare
  *  `artifact` key or the payload itself. Defensive against missing/loose shapes. */
-export function artifactFromInput(input: unknown): HostArtifact | null {
-	const value = input as Record<string, unknown> | null | undefined;
-	if (!value || typeof value !== "object") {
-		return null;
-	}
-	const nested = value.artifact;
-	if (nested && typeof nested === "object") {
-		return nested as HostArtifact;
-	}
-	if (value.kind || value.content || value.title || value.url) {
-		return value as HostArtifact;
-	}
-	return null;
+/** Live SDK selection is a lazy consumed observation; the complete HostArtifact
+ * codec above is reserved for real transport, not transcript object admission. */
+export function artifactFromInput(
+	input: NativeSdkValue
+): NativeArtifactObservation | null {
+	return artifactObservationFromInput(input);
 }
 
 /** The `artifact.create` tool writes a file into a Space; its RESULT carries the
  *  doc identity + blob URL but not the title (that lived in the input). Rebuild a
  *  display payload from the two, so the card keeps the file name. */
 export function artifactFromCreateResult(
-	input: Record<string, unknown> | undefined,
-	output: Record<string, unknown> | undefined
+	rawInput: NativeSdkValue,
+	rawOutput: NativeSdkValue
 ): HostArtifact | null {
-	if (!output || typeof output !== "object") {
+	const outputResult = artifactCarrierSchema.safeParse(rawOutput);
+	if (!outputResult.success) {
 		return null;
 	}
+	const output = outputResult.data;
+	const inputResult = artifactInputSchema.safeParse(rawInput);
+	const input = inputResult.success ? inputResult.data : undefined;
 	if (output.ok === false || output.available === false) {
 		return null;
 	}
-	const mime = typeof output.mime === "string" ? output.mime : undefined;
-	const url = typeof output.url === "string" ? output.url : undefined;
+	const mime = isTurnEndText(output.mime) ? output.mime : undefined;
+	const url = isTurnEndText(output.url) ? output.url : undefined;
 	if (!url) {
 		return null;
 	}
 	return {
 		title:
-			typeof input?.title === "string" && input.title.trim()
+			isTurnEndText(input?.title) && input.title.trim()
 				? input.title
 				: undefined,
 		mime,
 		url,
-		spaceId: typeof output.space_id === "string" ? output.space_id : undefined,
-		docId: typeof output.id === "string" ? output.id : undefined,
+		spaceId: isTurnEndText(output.space_id) ? output.space_id : undefined,
+		docId: isTurnEndText(output.id) ? output.id : undefined,
 	};
 }
 

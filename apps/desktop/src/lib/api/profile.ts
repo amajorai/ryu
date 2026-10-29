@@ -1,3 +1,5 @@
+import { marketplaceWallpaperSelectionSchema } from "@ryuhq/protocol/marketplace-wallpaper";
+import { z } from "zod";
 // Desktop client for the profile/stats control plane (packages/api routers/
 // profile.ts, mounted at /api/profile/me/*). Talks to the control-plane server
 // (BACKEND_URL, :3000) with the stored Better Auth bearer token — the same auth
@@ -5,7 +7,12 @@
 // contributions heatmap, the stat cards, and the unlockable-features grid. The
 // public "Ryu Wrapped" share card lives on the web app (FRONTEND_URL/wrapped/:userId).
 
-import { BACKEND_URL, FRONTEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
+import type { MarketplaceWallpaperSelection } from "@ryuhq/protocol/marketplace-wallpaper";
+import {
+	BACKEND_URL,
+	FRONTEND_URL,
+	getActiveToken,
+} from "@/lib/auth-client.ts";
 
 export interface ProfileTotals {
 	agentSeconds: number;
@@ -17,6 +24,7 @@ export interface ProfileTotals {
 }
 
 export interface ProfileMe {
+	bannerWallpaper?: MarketplaceWallpaperSelection | null;
 	displayUsername?: string | null;
 	image: string | null;
 	joinedAt: string;
@@ -40,6 +48,8 @@ export interface UsageDayFeatures {
 }
 
 export interface UsageDay {
+	/** Streak-active day (newer servers only). */
+	active?: boolean;
 	byFeature: UsageDayFeatures;
 	count: number;
 	day: string;
@@ -47,6 +57,9 @@ export interface UsageDay {
 }
 
 export interface UsageDailyResponse {
+	/** Every streak-active day in range, including days with no usage row
+	 * (newer servers only). */
+	activeDays?: string[];
 	days: UsageDay[];
 }
 
@@ -101,32 +114,177 @@ export interface UnlockResult {
 	unlocked: string[];
 }
 
-function authHeaders(): Record<string, string> {
-	const token = localStorage.getItem(TOKEN_KEY);
+function authHeaders(capturedToken?: string | null) {
+	const token = capturedToken === undefined ? getActiveToken() : capturedToken;
 	if (!token) {
 		throw new Error("Sign in to view your stats.");
 	}
-	return { Authorization: `Bearer ${token}` };
+	return { Authorization: `Bearer ${token}` } satisfies NonNullable<
+		RequestInit["headers"]
+	>;
 }
 
 // Cap every control-plane read so a stalled backend surfaces as an error the UI
 // can retry, rather than a request (and its spinner) that hangs forever.
 const REQUEST_TIMEOUT_MS = 15_000;
 
-async function getJson<T>(path: string): Promise<T> {
+async function getJson<T>(
+	path: string,
+	schema: z.ZodType<T>,
+	capturedToken?: string | null
+): Promise<T> {
 	const resp = await fetch(`${BACKEND_URL}${path}`, {
-		headers: authHeaders(),
+		headers: authHeaders(capturedToken),
 		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 	});
 	if (!resp.ok) {
 		throw new Error(`Request failed (${resp.status})`);
 	}
-	return (await resp.json()) as T;
+	return schema.parse(await resp.json());
 }
+
+const profileTotalsSchema = z.object({
+	agentSeconds: z.number(),
+	costMicroUsd: z.number(),
+	inputTokens: z.number(),
+	outputTokens: z.number(),
+	requestCount: z.number(),
+	sessionCount: z.number(),
+});
+const streakSchema = z.object({ current: z.number(), longest: z.number() });
+const profileMeSchema = z.object({
+	bannerWallpaper: marketplaceWallpaperSelectionSchema.nullish(),
+	displayUsername: z.string().nullish(),
+	image: z.string().nullable(),
+	joinedAt: z.string(),
+	level: z.number(),
+	name: z
+		.string()
+		.nullable()
+		.transform((value) => value ?? ""),
+	plan: z.string(),
+	pointsBalance: z.number(),
+	profileVisibility: z.enum(["public", "private"]),
+	streak: streakSchema,
+	totals: profileTotalsSchema,
+	userId: z.string(),
+	username: z.string().nullish(),
+	xp: z.number(),
+});
+const usageDaySchema = z.object({
+	active: z.boolean().optional(),
+	byFeature: z.object({
+		agent: z.number().optional(),
+		chat: z.number().optional(),
+		island: z.number().optional(),
+		predict: z.object({ accepted: z.number(), shown: z.number() }).optional(),
+	}),
+	count: z.number(),
+	day: z.string(),
+	tokens: z.number(),
+});
+const usageDailyResponseSchema = z.object({
+	activeDays: z.array(z.string()).optional(),
+	days: z.array(usageDaySchema),
+});
+const countedIdSchema = z.object({ count: z.number(), id: z.string() });
+const profileStatsSchema = z.object({
+	byFeatureTotals: z.object({
+		agentSeconds: z.number(),
+		chat: z.number(),
+		island: z.number(),
+		predictAccepted: z.number(),
+	}),
+	insights: z.object({
+		activeDays: z.number(),
+		averageRequestsPerActiveDay: z.number(),
+		averageTokensPerActiveDay: z.number(),
+		favoriteModel: z.string().nullable(),
+		peakDay: z.object({ day: z.string(), tokens: z.number() }).nullable(),
+		peakHourUtc: z.string().nullable(),
+		topModels: z.array(countedIdSchema),
+		topPlugins: z.array(countedIdSchema),
+		topSkills: z.array(countedIdSchema),
+		transport: z.object({
+			acp: z.number(),
+			gateway: z.number(),
+			openAiCompat: z.number(),
+			other: z.number(),
+		}),
+	}),
+	totals: profileTotalsSchema,
+});
+const profileUnlocksSchema = z.object({
+	catalog: z.array(
+		z.object({
+			autoUnlockAtLevel: z.number().optional(),
+			description: z.string(),
+			icon: z.string().optional(),
+			key: z.string(),
+			pointsCost: z.number().optional(),
+			requiresPlan: z.array(z.string()).optional(),
+			tier: z.enum(["default", "progressive", "paid"]),
+			title: z.string(),
+		})
+	),
+	unlocked: z.array(z.string()),
+});
+const unlockResultSchema = z.object({
+	ok: z.boolean(),
+	pointsBalance: z.number(),
+	unlocked: z.array(z.string()),
+});
+const agentProfileSchema = z.object({
+	agentId: z.string(),
+	hiredAt: z.string(),
+	lastActiveDay: z.string(),
+	level: z.number(),
+	streak: streakSchema,
+	totals: profileTotalsSchema,
+	xp: z.number(),
+});
+const agentUsageDailyResponseSchema = z.object({
+	days: z.array(
+		z.object({ count: z.number(), day: z.string(), tokens: z.number() })
+	),
+});
 
 /** The signed-in user's profile summary (level, streak, lifetime totals). */
 export const fetchProfileMe = (): Promise<ProfileMe> =>
-	getJson<ProfileMe>("/api/profile/me/profile");
+	getJson("/api/profile/me/profile", profileMeSchema);
+
+/** Keep a pending banner operation bound to its initiating account. */
+export const fetchProfileMeWithToken = (
+	capturedToken: string | null
+): Promise<ProfileMe> =>
+	getJson("/api/profile/me/profile", profileMeSchema, capturedToken);
+
+export async function updateProfileBannerWallpaper(
+	bannerWallpaper: MarketplaceWallpaperSelection | null,
+	capturedToken?: string | null
+): Promise<{
+	ok: boolean;
+	bannerWallpaper: MarketplaceWallpaperSelection | null;
+}> {
+	const resp = await fetch(`${BACKEND_URL}/api/profile/me/banner-wallpaper`, {
+		method: "PATCH",
+		headers: {
+			...authHeaders(capturedToken),
+			"Content-Type": "application/json",
+		},
+		signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+		body: JSON.stringify({ bannerWallpaper }),
+	});
+	if (!resp.ok) {
+		throw new Error(`Request failed (${resp.status})`);
+	}
+	return z
+		.object({
+			ok: z.boolean(),
+			bannerWallpaper: marketplaceWallpaperSelectionSchema.nullable(),
+		})
+		.parse(await resp.json());
+}
 
 /** Per-day usage between two YYYY-MM-DD dates, for the contributions heatmap. */
 export function fetchUsageDaily(
@@ -135,17 +293,18 @@ export function fetchUsageDaily(
 ): Promise<UsageDailyResponse> {
 	const params = new URLSearchParams({ from, to });
 	return getJson<UsageDailyResponse>(
-		`/api/profile/me/usage/daily?${params.toString()}`
+		`/api/profile/me/usage/daily?${params.toString()}`,
+		usageDailyResponseSchema
 	);
 }
 
 /** Lifetime totals broken down by feature. */
 export const fetchProfileStats = (): Promise<ProfileStats> =>
-	getJson<ProfileStats>("/api/profile/me/stats");
+	getJson("/api/profile/me/stats", profileStatsSchema);
 
 /** The unlockable-feature catalog plus which keys the caller has unlocked. */
 export const fetchProfileUnlocks = (): Promise<ProfileUnlocks> =>
-	getJson<ProfileUnlocks>("/api/profile/me/unlocks");
+	getJson("/api/profile/me/unlocks", profileUnlocksSchema);
 
 /** Spend points to unlock a feature. Throws with the server message on 4xx. */
 export async function unlockFeature(key: string): Promise<UnlockResult> {
@@ -158,10 +317,13 @@ export async function unlockFeature(key: string): Promise<UnlockResult> {
 		}
 	);
 	if (!resp.ok) {
-		const body = (await resp.json().catch(() => ({}))) as { message?: string };
+		const body = z
+			.object({ message: z.string().optional().catch(undefined) })
+			.catch({})
+			.parse(await resp.json().catch(() => ({})));
 		throw new Error(body.message ?? `Failed to unlock (${resp.status})`);
 	}
-	return (await resp.json()) as UnlockResult;
+	return unlockResultSchema.parse(await resp.json());
 }
 
 /** The public "Ryu Wrapped" share card for a user, served by the web app. */
@@ -204,12 +366,16 @@ export interface AgentUsageDailyResponse {
 
 /** Usage stats for every agent the signed-in user has employed. */
 export const fetchTeamAgents = (): Promise<TeamAgentsResponse> =>
-	getJson<TeamAgentsResponse>("/api/profile/me/agents");
+	getJson(
+		"/api/profile/me/agents",
+		z.object({ agents: z.array(agentProfileSchema) })
+	);
 
 /** Usage stats for a single agent (zeros if it has no usage yet). */
 export const fetchAgentProfile = (agentId: string): Promise<AgentProfile> =>
 	getJson<AgentProfile>(
-		`/api/profile/me/agents/${encodeURIComponent(agentId)}`
+		`/api/profile/me/agents/${encodeURIComponent(agentId)}`,
+		agentProfileSchema
 	);
 
 /** Per-day usage for one agent between two YYYY-MM-DD dates, for its heatmap. */
@@ -220,6 +386,7 @@ export function fetchAgentUsageDaily(
 ): Promise<AgentUsageDailyResponse> {
 	const params = new URLSearchParams({ from, to });
 	return getJson<AgentUsageDailyResponse>(
-		`/api/profile/me/agents/${encodeURIComponent(agentId)}/usage/daily?${params.toString()}`
+		`/api/profile/me/agents/${encodeURIComponent(agentId)}/usage/daily?${params.toString()}`,
+		agentUsageDailyResponseSchema
 	);
 }

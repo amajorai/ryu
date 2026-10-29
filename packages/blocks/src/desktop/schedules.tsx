@@ -117,13 +117,15 @@ export interface CreateSchedulePayload {
 		| { type: "workflow"; workflowId: string; input: Record<string, string> };
 }
 
-export interface SchedulesViewProps {
+/** Each handler owns its fulfilled result; this view only awaits completion.
+ * The default keeps the original unparameterized props ABI broad. */
+export interface SchedulesViewProps<Result = unknown> {
 	agents: AgentOption[];
 	agentsLoading?: boolean;
 	error?: string | null;
 	jobs: ScheduleRow[];
 	loading?: boolean;
-	onCreate?: (payload: CreateSchedulePayload) => Promise<unknown>;
+	onCreate?: (payload: CreateSchedulePayload) => Promise<Result>;
 	onDelete?: (id: string) => void;
 	onRetry?: () => void;
 	/** Stable clock for previews/tests; live callers can omit it to use now. */
@@ -208,14 +210,14 @@ const TARGET_OPTIONS: { value: TargetKind; label: string }[] = [
 
 // ── Create dialog ─────────────────────────────────────────────────────────────
 
-function CreateAutomationDialog({
+function CreateAutomationDialog<Result>({
 	onCreate,
 	agents,
 	agentsLoading,
 	workflows,
 	workflowsLoading,
 }: {
-	onCreate?: (payload: CreateSchedulePayload) => Promise<unknown>;
+	onCreate?: (payload: CreateSchedulePayload) => Promise<Result>;
 	agents: AgentOption[];
 	agentsLoading?: boolean;
 	workflows: WorkflowOption[];
@@ -314,12 +316,12 @@ function CreateAutomationDialog({
 
 					<div className="space-y-2">
 						<Label>Run</Label>
-						<Select
+						<Select<TargetKind>
 							items={TARGET_OPTIONS}
-							onValueChange={(v) => v && setTargetKind(v as TargetKind)}
+							onValueChange={(v) => v && setTargetKind(v)}
 							value={targetKind}
 						>
-							<SelectTrigger>
+							<SelectTrigger aria-label="Run">
 								<SelectValue placeholder="Pick what to run" />
 							</SelectTrigger>
 							<SelectContent>
@@ -409,15 +411,15 @@ function CreateAutomationDialog({
 
 					<div className="space-y-2">
 						<Label>Schedule</Label>
-						<Select
+						<Select<PhrasedKind>
 							items={PHRASE_OPTIONS.map((opt) => ({
 								value: opt.kind,
 								label: opt.label,
 							}))}
-							onValueChange={(v) => v && setPhraseKind(v as PhrasedKind)}
+							onValueChange={(v) => v && setPhraseKind(v)}
 							value={phraseKind}
 						>
-							<SelectTrigger>
+							<SelectTrigger aria-label="Schedule">
 								<SelectValue placeholder="Choose a schedule" />
 							</SelectTrigger>
 							<SelectContent>
@@ -446,7 +448,6 @@ function CreateAutomationDialog({
 								</SelectTrigger>
 								<SelectContent>
 									{Array.from({ length: 24 }, (_, i) => (
-										// biome-ignore lint/suspicious/noArrayIndexKey: hours are a fixed 0-23 range
 										<SelectItem key={i} value={String(i)}>
 											{formatHour(i)}
 										</SelectItem>
@@ -472,7 +473,6 @@ function CreateAutomationDialog({
 								</SelectTrigger>
 								<SelectContent>
 									{DAYS_OF_WEEK.map((day, i) => (
-										// biome-ignore lint/suspicious/noArrayIndexKey: weekdays are a fixed 0-6 range
 										<SelectItem key={i} value={String(i)}>
 											{day}
 										</SelectItem>
@@ -527,7 +527,7 @@ function CreateAutomationDialog({
 function OutcomeBadge({ outcome }: { outcome: ScheduleOutcome }) {
 	if (outcome === "success") {
 		return (
-			<Badge className="gap-1" variant="secondary">
+			<Badge variant="secondary">
 				<HugeiconsIcon
 					className="size-3 text-status-success"
 					icon={CheckmarkCircle02Icon}
@@ -537,7 +537,7 @@ function OutcomeBadge({ outcome }: { outcome: ScheduleOutcome }) {
 		);
 	}
 	return (
-		<Badge className="gap-1" variant="destructive">
+		<Badge variant="destructive">
 			<HugeiconsIcon className="size-3" icon={CancelCircleIcon} />
 			Failed
 		</Badge>
@@ -562,19 +562,19 @@ function JobCard({
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle className="flex items-center gap-2 text-base">
+				<CardTitle layout="badge-row">
 					<HugeiconsIcon className="size-4 opacity-70" icon={ZapIcon} />
 					{job.name}
 				</CardTitle>
-				<CardDescription className="flex flex-wrap items-center gap-2">
-					<Badge className="gap-1" variant="secondary">
+				<CardDescription className="flex-wrap" layout="legend">
+					<Badge variant="secondary">
 						<HugeiconsIcon className="size-3" icon={Clock01Icon} />
 						{job.scheduleLabel}
 					</Badge>
 					{job.agentId ? (
 						<Badge variant="secondary">{job.agentId}</Badge>
 					) : (
-						<Badge className="gap-1" variant="secondary">
+						<Badge variant="secondary">
 							<HugeiconsIcon className="size-3" icon={WorkflowCircle06Icon} />
 							{job.workflowName ?? "Workflow"}
 						</Badge>
@@ -582,7 +582,7 @@ function JobCard({
 					{job.enabled ? null : <Badge variant="secondary">disabled</Badge>}
 				</CardDescription>
 			</CardHeader>
-			<CardContent className="flex flex-col gap-3">
+			<CardContent layout="stack">
 				<div className="flex items-center gap-2 text-sm">
 					{job.lastOutcome ? <OutcomeBadge outcome={job.lastOutcome} /> : null}
 					<span className="text-muted-foreground">
@@ -625,7 +625,7 @@ function JobCard({
 	);
 }
 
-export function SchedulesView({
+export function SchedulesView<Result>({
 	loading,
 	error,
 	jobs,
@@ -637,7 +637,7 @@ export function SchedulesView({
 	onDelete,
 	onRetry,
 	timelineEndAt,
-}: SchedulesViewProps) {
+}: SchedulesViewProps<Result>) {
 	if (loading) {
 		return (
 			<div className="flex h-full items-center justify-center">

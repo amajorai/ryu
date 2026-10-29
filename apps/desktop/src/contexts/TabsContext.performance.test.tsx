@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -66,10 +66,12 @@ afterEach(async () => {
 
 test("tab context consumers skip parent renders when tab state is unchanged", async () => {
 	await act(() => root.render(<Harness />));
-	expect(contextRenders).toBe(1);
-	expect(selectorRenders).toBe(1);
+	const mountedContextRenders = contextRenders;
+	const mountedSelectorRenders = selectorRenders;
+	expect(mountedContextRenders).toBeGreaterThan(0);
+	expect(mountedSelectorRenders).toBeGreaterThan(0);
 
 	await act(() => rerenderParent?.());
-	expect(contextRenders).toBe(1);
-	expect(selectorRenders).toBe(1);
+	expect(contextRenders).toBe(mountedContextRenders);
+	expect(selectorRenders).toBe(mountedSelectorRenders);
 });

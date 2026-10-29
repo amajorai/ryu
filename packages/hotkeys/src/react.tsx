@@ -35,8 +35,12 @@ import {
 export interface HotkeyStorage {
 	/** Load the saved overrides (empty object when none). */
 	load(): Promise<Overrides>;
-	/** Persist the full overrides map. */
-	save(overrides: Overrides): Promise<void>;
+	/**
+	 * Persist the full overrides map. `previous` is the map this edit was made
+	 * on (the provider's state when the user acted), so a store can tell the
+	 * overrides the user actually changed from ones the editor merely carried.
+	 */
+	save(overrides: Overrides, previous?: Overrides): Promise<void>;
 	/** Optional: notify when overrides change elsewhere (other window/process). */
 	subscribe?(onChange: (overrides: Overrides) => void): () => void;
 }
@@ -138,11 +142,11 @@ export function HotkeysProvider({
 		};
 	}, [storage]);
 
-	// Persist and apply a new overrides map.
+	// Persist and apply a new overrides map derived from `previous`.
 	const commit = useCallback(
-		(next: Overrides) => {
+		(next: Overrides, previous: Overrides) => {
 			setOverrides(next);
-			storage?.save(next).catch(() => {
+			storage?.save(next, previous).catch(() => {
 				// Best-effort; the in-memory state still reflects the change.
 			});
 		},
@@ -151,7 +155,7 @@ export function HotkeysProvider({
 
 	const setOverride = useCallback(
 		(id: string, chord: Chord | null) => {
-			commit({ ...overrides, [id]: chord });
+			commit({ ...overrides, [id]: chord }, overrides);
 		},
 		[commit, overrides]
 	);
@@ -163,14 +167,14 @@ export function HotkeysProvider({
 			}
 			const next = { ...overrides };
 			delete next[id];
-			commit(next);
+			commit(next, overrides);
 		},
 		[commit, overrides]
 	);
 
 	const resetAll = useCallback(() => {
-		commit({});
-	}, [commit]);
+		commit({}, overrides);
+	}, [commit, overrides]);
 
 	const registerHandler = useCallback((id: string, entry: HandlerEntry) => {
 		handlersRef.current.set(id, entry);
@@ -282,6 +286,48 @@ export function useHotkey(
 			allowInInput,
 		});
 	}, [id, enabled, allowInInput, registerHandler]);
+}
+
+/**
+ * {@link useHotkey} for a component that may render outside a provider (an
+ * isolated preview or test). Inside one it binds exactly like `useHotkey`, so
+ * the action keeps a single owner and the provider's one dispatcher; outside
+ * one it is inert instead of throwing.
+ */
+export function useOptionalHotkey(
+	id: string,
+	handler: (e: KeyboardEvent) => void,
+	options?: UseHotkeyOptions
+): void {
+	const context = useContext(HotkeysContext);
+	const registerHandler = context?.registerHandler;
+	const binding = context?.bindings.get(id) ?? null;
+	const handlerRef = useRef(handler);
+	handlerRef.current = handler;
+
+	const enabled = options?.enabled ?? true;
+	const allowInInput =
+		options?.allowInInput ?? (binding ? chordHasModifier(binding) : true);
+
+	useEffect(() => {
+		if (!registerHandler) {
+			return;
+		}
+		return registerHandler(id, {
+			handler: (e) => handlerRef.current(e),
+			enabled,
+			allowInInput,
+		});
+	}, [id, enabled, allowInInput, registerHandler]);
+}
+
+/**
+ * Observe an action's effective binding without registering a global handler.
+ * Contextual controls are inert outside a provider or when the action is cleared.
+ */
+export function useOptionalHotkeyBinding(id: string): Chord | null {
+	const context = useContext(HotkeysContext);
+	return context?.bindings.get(id) ?? null;
 }
 
 /** Admin surface for the settings table: read + mutate all bindings. */

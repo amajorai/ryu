@@ -7,10 +7,15 @@
 // Core as `model` on the chat stream body so the routing layer can honour it
 // when the transport supports a model override.
 
+import { appRequestValueSchema } from "@ryuhq/core-client/app-request-json.ts";
 import type { ModelOption } from "@/components/agent-elements/types.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import {
+	modelSelectionSnapshotSchema,
+	selectedModelIdSchema,
+} from "./model-selection-contracts.ts";
 
-const ENGINE_MODELS_FALLBACK: Record<string, ModelOption[]> = {
+const ENGINE_MODEL_OPTIONS = {
 	claude: [
 		{ id: "opus", name: "Opus" },
 		{ id: "sonnet", name: "Sonnet" },
@@ -33,12 +38,17 @@ const ENGINE_MODELS_FALLBACK: Record<string, ModelOption[]> = {
 	// picker mirrors the `local` list. Keep in sync with Core's
 	// `engine_model_catalog()`.
 	ryu: [{ id: "gemma-4-e2b-it", name: "Gemma 4 E2B" }],
-};
+} satisfies Record<string, ModelOption[]>;
+const ENGINE_MODELS_FALLBACK = new Map(Object.entries(ENGINE_MODEL_OPTIONS));
+type ModelPickerAgent = Pick<
+	AgentSummary,
+	"builtIn" | "engine" | "id" | "model"
+>;
 
 /** Resolve the engine id an agent is bound to ("acp:claude" → "claude"). */
 function resolveEngine(
 	agentId: string | null,
-	agents: AgentSummary[]
+	agents: ModelPickerAgent[]
 ): string | null {
 	if (!agentId) {
 		return null;
@@ -62,17 +72,19 @@ function resolveEngine(
  * then the agent's own bound model (single option), then a generic "Auto" entry. */
 export function modelsForAgent(
 	agentId: string | null,
-	agents: AgentSummary[],
+	agents: ModelPickerAgent[],
 	catalog?: Record<string, ModelOption[]>
 ): ModelOption[] {
 	const engine = resolveEngine(agentId, agents);
 	if (engine) {
-		const fromCore = catalog?.[engine];
+		const fromCore =
+			catalog && Object.hasOwn(catalog, engine) ? catalog[engine] : undefined;
 		if (fromCore && fromCore.length > 0) {
 			return fromCore;
 		}
-		if (ENGINE_MODELS_FALLBACK[engine]) {
-			return ENGINE_MODELS_FALLBACK[engine];
+		const fallback = ENGINE_MODELS_FALLBACK.get(engine);
+		if (fallback) {
+			return fallback;
 		}
 	}
 	const agent = agentId ? agents.find((a) => a.id === agentId) : undefined;
@@ -84,10 +96,10 @@ export function modelsForAgent(
 
 const SELECTION_KEY = "ryu_agent_model_selection";
 
-function readSelections(): Record<string, string> {
+function readStoredSelections() {
 	try {
 		const raw = localStorage.getItem(SELECTION_KEY);
-		return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+		return raw ? appRequestValueSchema.parse(JSON.parse(raw)) : {};
 	} catch {
 		return {};
 	}
@@ -98,12 +110,18 @@ export function getAgentModel(agentId: string | null): string | null {
 	if (!agentId) {
 		return null;
 	}
-	return readSelections()[agentId] ?? null;
+	const selections = modelSelectionSnapshotSchema.safeParse(
+		readStoredSelections()
+	).data;
+	const selection = Object.entries(selections ?? {}).find(
+		([id]) => id === agentId
+	)?.[1];
+	return selectedModelIdSchema.safeParse(selection).data ?? null;
 }
 
 /** Persist the model picked for this agent so the choice survives restarts. */
 export function setAgentModel(agentId: string, modelId: string): void {
-	const selections = readSelections();
-	selections[agentId] = modelId;
+	const selections = modelSelectionSnapshotSchema.parse(readStoredSelections());
+	Reflect.set(selections, agentId, modelId);
 	localStorage.setItem(SELECTION_KEY, JSON.stringify(selections));
 }

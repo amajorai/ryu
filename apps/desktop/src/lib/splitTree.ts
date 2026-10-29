@@ -259,8 +259,12 @@ export function insertLeaf(
 		return { ...node, children, sizes: renormalizeSizes(sizes) };
 	}
 	if (idx !== -1) {
+		const target = node.children[idx];
+		if (target?.type !== "leaf") {
+			return node;
+		}
 		const children = [...node.children];
-		children[idx] = pairFor(node.children[idx] as SplitLeaf);
+		children[idx] = pairFor(target);
 		return { ...node, children };
 	}
 	return {

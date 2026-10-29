@@ -21,8 +21,12 @@ workflow-secret lookup, mesh funnel, auth token, data dir) invert through the
 The backend is a swappable `Ingress` enum selected by the `webhook.ingress.backend`
 pref (`IngressKind`, kebab-case wire form), default `RyuRelay`:
 
-- **RyuRelay** — the managed default: outbound SSE push (no inbound port).
-- **TailscaleFunnel** — via `ryu-mesh`'s `ensure_funnel`.
+- **RyuRelay** — the managed default: outbound SSE push (no inbound port). After a relay
+  token rotation it registers again, republishes the public URL, and resumes from its cursor.
+- **TailscaleFunnel** — via `ryu-mesh`'s `ensure_funnel`. Publishes only the webhook paths
+  (`FUNNEL_PUBLIC_MOUNTS`: the Composio webhook and `/api/workflows/` for per-workflow
+  webhooks), never Core's whole port, and is torn down when the mesh daemon stops or the
+  ingress is not the Funnel.
 - **Cloudflared** — a quick tunnel subprocess.
 - **OwnRelay** — BYO public base URL (`RYU_WEBHOOK_INGRESS_URL` env override, else the
   `webhook.ingress.url` pref).

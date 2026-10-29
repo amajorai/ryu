@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/gateway-specs-a-coverage.playwright.config.ts",
+    "e2e/harness/vite.gateway-specs-a-coverage.config.ts",
+    "e2e/harness/gateway-modality-routing-proof.tsx",
+    "e2e/harness/gateway-byok-integration-proof.tsx",
+    "e2e/harness/gateway-byok-integration-proof.secrets.ts",
+    "e2e/harness/gateway-project-environments-proof.mock.ts",
+    "e2e/harness/gateway-evals-health-proof.mock.ts"
+  ]
+}

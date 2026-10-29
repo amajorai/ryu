@@ -75,7 +75,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								disabled={!mergeState.canMerge}
-								onSelect={() => {
+								onClick={() => {
 									tf.table.merge();
 									editor.tf.focus();
 								}}
@@ -86,7 +86,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								disabled={!mergeState.canSplit}
-								onSelect={() => {
+								onClick={() => {
 									tf.table.split();
 									editor.tf.focus();
 								}}
@@ -109,7 +109,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								disabled={!tableSelected}
-								onSelect={() => {
+								onClick={() => {
 									tf.insert.tableRow({ before: true });
 									editor.tf.focus();
 								}}
@@ -120,7 +120,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								disabled={!tableSelected}
-								onSelect={() => {
+								onClick={() => {
 									tf.insert.tableRow();
 									editor.tf.focus();
 								}}
@@ -131,7 +131,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								disabled={!tableSelected}
-								onSelect={() => {
+								onClick={() => {
 									tf.remove.tableRow();
 									editor.tf.focus();
 								}}
@@ -154,7 +154,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								disabled={!tableSelected}
-								onSelect={() => {
+								onClick={() => {
 									tf.insert.tableColumn({ before: true });
 									editor.tf.focus();
 								}}
@@ -165,7 +165,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								disabled={!tableSelected}
-								onSelect={() => {
+								onClick={() => {
 									tf.insert.tableColumn();
 									editor.tf.focus();
 								}}
@@ -176,7 +176,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 							<DropdownMenuItem
 								className="min-w-[180px]"
 								disabled={!tableSelected}
-								onSelect={() => {
+								onClick={() => {
 									tf.remove.tableColumn();
 									editor.tf.focus();
 								}}
@@ -190,7 +190,7 @@ export function TableToolbarButton(props: ComponentProps<typeof DropdownMenu>) {
 					<DropdownMenuItem
 						className="min-w-[180px]"
 						disabled={!tableSelected}
-						onSelect={() => {
+						onClick={() => {
 							tf.remove.table();
 							editor.tf.focus();
 						}}

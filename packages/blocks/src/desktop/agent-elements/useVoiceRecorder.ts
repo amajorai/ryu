@@ -1,10 +1,10 @@
-import { downsample, encodeWav } from "../../companion/audio-pcm.ts";
-// apps/desktop/src/hooks/useVoiceRecorder.ts
+// packages/blocks/src/desktop/agent-elements/useVoiceRecorder.ts
 //
 // Microphone capture for voice input. Records from the user's chosen default mic
-// (lib/audio/devices.ts), drives a live scrolling waveform off an AnalyserNode, and
+// (voice-devices.ts), drives a live scrolling waveform off an AnalyserNode, and
 // on stop encodes 16 kHz mono PCM WAV — the format whisper-server decodes — then
-// uploads it to Core (lib/api/voice.ts) and hands back the transcript.
+// uploads it to Core (desktop: lib/api/voice.ts) and hands back the transcript.
+// Desktop re-exports this hook from apps/desktop/src/hooks/useVoiceRecorder.ts.
 //
 // We deliberately capture raw PCM via the Web Audio graph (not MediaRecorder):
 // MediaRecorder yields webm/opus in WebView2, which the bundled whisper.cpp build
@@ -12,6 +12,7 @@ import { downsample, encodeWav } from "../../companion/audio-pcm.ts";
 // need for the waveform, so there is one capture path, not two.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { downsample, encodeWav } from "../../companion/audio-pcm.ts";
 import { getDefaultMicId } from "./voice-devices.ts";
 
 export type RecorderState = "idle" | "recording" | "transcribing";
@@ -49,7 +50,9 @@ interface UseVoiceRecorder {
 	stop: () => void;
 }
 
-const SILENT_LEVELS = new Array<number>(BAR_COUNT).fill(0);
+const silentLevelSlots: number[] = [];
+silentLevelSlots.length = BAR_COUNT;
+const SILENT_LEVELS = silentLevelSlots.fill(0);
 
 /** RMS loudness (0..1) of one time-domain frame — a single point on the timeline. */
 function computeAmplitude(data: Uint8Array): number {
@@ -78,6 +81,11 @@ export function useVoiceRecorder({
 	const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 	const chunksRef = useRef<Float32Array[]>([]);
 	const rafRef = useRef<number | null>(null);
+	// A start awaits getUserMedia; cancel/unmount bump the generation so a stream
+	// that resolves afterwards is released instead of attached, and the
+	// in-flight flag stops a double-click from opening a second capture.
+	const startGenerationRef = useRef(0);
+	const startingRef = useRef(false);
 	// Keep the latest callbacks reachable without re-creating start/stop.
 	const onTranscriptRef = useRef(onTranscript);
 	onTranscriptRef.current = onTranscript;
@@ -130,16 +138,29 @@ export function useVoiceRecorder({
 	}, []);
 
 	const start = useCallback(async () => {
+		if (startingRef.current || streamRef.current) {
+			return;
+		}
 		setError(null);
 		if (!navigator.mediaDevices?.getUserMedia) {
 			setError("Microphone is not available in this environment.");
 			return;
 		}
+		startingRef.current = true;
+		startGenerationRef.current += 1;
+		const generation = startGenerationRef.current;
 		try {
 			const micId = getDefaultMicId();
 			const stream = await navigator.mediaDevices.getUserMedia({
 				audio: micId ? { deviceId: { exact: micId } } : true,
 			});
+			if (generation !== startGenerationRef.current) {
+				// Cancelled or unmounted while the device was opening.
+				for (const track of stream.getTracks()) {
+					track.stop();
+				}
+				return;
+			}
 			streamRef.current = stream;
 
 			const ctx = new AudioContext();
@@ -191,11 +212,18 @@ export function useVoiceRecorder({
 
 			setState("recording");
 		} catch {
+			if (generation !== startGenerationRef.current) {
+				return;
+			}
 			teardown();
 			setState("idle");
 			setError(
 				"Could not access the microphone. Check the selected device and OS permissions."
 			);
+		} finally {
+			if (generation === startGenerationRef.current) {
+				startingRef.current = false;
+			}
 		}
 	}, [teardown]);
 
@@ -218,7 +246,7 @@ export function useVoiceRecorder({
 					onTranscriptRef.current(text);
 				}
 			})
-			.catch((e: unknown) => {
+			.catch((e) => {
 				setError(e instanceof Error ? e.message : "Transcription failed.");
 			})
 			.finally(() => {
@@ -227,6 +255,8 @@ export function useVoiceRecorder({
 	}, [state, teardown]);
 
 	const cancel = useCallback(() => {
+		startGenerationRef.current += 1;
+		startingRef.current = false;
 		teardown();
 		setState("idle");
 		setError(null);
@@ -239,6 +269,8 @@ export function useVoiceRecorder({
 	// Release the mic if the component unmounts mid-recording.
 	useEffect(() => {
 		return () => {
+			startGenerationRef.current += 1;
+			startingRef.current = false;
 			teardown();
 		};
 	}, [teardown]);

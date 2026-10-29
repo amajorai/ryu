@@ -7,7 +7,7 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/canvas",
   "name": "Canvas",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "stability": "experimental",
   "description": "A node board for generative media: wire up image, video, chat, text-to-speech, speech-to-text, upload, and note nodes, search attributed Openverse or node-configured Unsplash images, then run the graph through Ryu's media and agent bridges. Each board persists as a Space document, so it stays editable, shareable, and searchable.",
   "tagline": "Wire up media, sourced images, and agents",
@@ -92,19 +92,6 @@
     "icon": "ai-image"
   },
   "contributes": {
-    "chat_widget_templates": [
-      {
-        "id": "canvas.chat",
-        "title": "Canvas widget",
-        "description": "Canvas chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["canvas widget"],
-        "examples": ["Show me a canvas widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
-      }
-    ],
     "sidebar_sections": [
       {
         "id": "canvas",

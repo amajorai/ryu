@@ -1,4 +1,6 @@
-use std::{fmt, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, fmt, net::SocketAddr, time::Duration};
+
+use ed25519_dalek::VerifyingKey;
 
 use futures_util::StreamExt;
 use reqwest::{
@@ -16,6 +18,10 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
+    card_signing::{
+        card_signatures, decode_protected_header, ed25519_keys_from_jwks,
+        verify_agent_card_signatures, CardSignatureStatus, KeyResolution, MAX_CARD_SIGNATURES,
+    },
     protocol::{
         methods, AgentCard, AuthenticationInfo, CancelTaskRequest,
         DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
@@ -718,11 +724,37 @@ fn push_authorization_value(
     Ok(Some(value))
 }
 
+/// A remote Agent Card plus the outcome of checking its `signatures`.
+#[derive(Clone, Debug)]
+pub struct DiscoveredAgentCard {
+    pub card: AgentCard,
+    /// The card JSON exactly as received (signatures are verified over it).
+    pub raw: Value,
+    pub signature: CardSignatureStatus,
+}
+
 pub async fn discover_agent_card(
     card_or_base_url: &str,
     endpoint_policy: EndpointPolicy,
     limits: ClientLimits,
 ) -> Result<AgentCard, ClientError> {
+    discover_verified_agent_card(card_or_base_url, endpoint_policy, limits, false)
+        .await
+        .map(|discovered| discovered.card)
+}
+
+/// Fetch, validate, and signature-check a remote Agent Card.
+///
+/// A card with a signature that is malformed, names a key its JWKS does not
+/// publish, or does not match the card content is rejected. An unsigned card,
+/// or one whose key cannot be fetched, is accepted with that status unless
+/// `require_verified_signature` is set.
+pub async fn discover_verified_agent_card(
+    card_or_base_url: &str,
+    endpoint_policy: EndpointPolicy,
+    limits: ClientLimits,
+    require_verified_signature: bool,
+) -> Result<DiscoveredAgentCard, ClientError> {
     let mut current = validate_endpoint(card_or_base_url, endpoint_policy)?;
     if !current.path().ends_with(".json") {
         current.set_path("/.well-known/agent-card.json");
@@ -763,12 +795,109 @@ pub async fn discover_agent_card(
         current = next;
     }
     let response = final_response.ok_or(ClientError::TooManyRedirects)?;
-    let mut card_limits = limits;
+    let mut card_limits = limits.clone();
     card_limits.max_response_bytes = card_limits.max_response_bytes.min(MAX_AGENT_CARD_BYTES);
     let bytes = ensure_success(response, &card_limits).await?;
-    let card: AgentCard = serde_json::from_slice(&bytes).map_err(protocol_error)?;
+    let raw: Value = serde_json::from_slice(&bytes).map_err(protocol_error)?;
+    let card: AgentCard = serde_json::from_value(raw.clone()).map_err(protocol_error)?;
     validate_agent_card(&card, endpoint_policy)?;
-    Ok(card)
+    let signature = check_card_signatures(&raw, &origin, endpoint_policy, &limits).await;
+    if let CardSignatureStatus::Invalid { reason } = &signature {
+        return Err(ClientError::InvalidAgentCard(format!(
+            "signature verification failed: {reason}"
+        )));
+    }
+    if require_verified_signature && !signature.is_verified() {
+        return Err(ClientError::InvalidAgentCard(
+            "a verified Agent Card signature is required".to_owned(),
+        ));
+    }
+    Ok(DiscoveredAgentCard {
+        card,
+        raw,
+        signature,
+    })
+}
+
+/// Distinct JWKS URLs fetched per card. Ryu's own cards name one.
+const MAX_CARD_JWKS_FETCHES: usize = 2;
+const MAX_JWKS_BYTES: usize = 64 * 1024;
+
+/// Resolve each signature's `jku` and verify the card.
+///
+/// A `jku` is honoured only on the card's own origin: the HTTPS origin that
+/// served the card is the authority the key is bound to, so a signature cannot
+/// borrow trust from a key set hosted elsewhere.
+async fn check_card_signatures(
+    raw: &Value,
+    card_origin: &Origin,
+    endpoint_policy: EndpointPolicy,
+    limits: &ClientLimits,
+) -> CardSignatureStatus {
+    let Ok(signatures) = card_signatures(raw) else {
+        return verify_agent_card_signatures(raw, |_| KeyResolution::NotPublished);
+    };
+    let mut key_sets: HashMap<String, Result<Vec<(String, VerifyingKey)>, String>> = HashMap::new();
+    for entry in signatures.iter().take(MAX_CARD_SIGNATURES) {
+        let Some(jku) = decode_protected_header(entry).and_then(|header| header.jku) else {
+            continue;
+        };
+        if key_sets.contains_key(&jku) || key_sets.len() >= MAX_CARD_JWKS_FETCHES {
+            continue;
+        }
+        let keys = fetch_card_jwks(&jku, card_origin, endpoint_policy, limits).await;
+        key_sets.insert(jku, keys);
+    }
+    verify_agent_card_signatures(raw, |header| {
+        let Some(jku) = header.jku.as_deref() else {
+            return KeyResolution::Unavailable(
+                "signature names no jku and no trusted key is configured".to_owned(),
+            );
+        };
+        match key_sets.get(jku) {
+            None => KeyResolution::Unavailable("signature key set was not fetched".to_owned()),
+            Some(Err(reason)) => KeyResolution::Unavailable(reason.clone()),
+            Some(Ok(keys)) => header
+                .kid
+                .as_deref()
+                .and_then(|kid| keys.iter().find(|(candidate, _)| candidate == kid))
+                .map_or(KeyResolution::NotPublished, |(_, key)| {
+                    KeyResolution::Found(*key)
+                }),
+        }
+    })
+}
+
+async fn fetch_card_jwks(
+    jku: &str,
+    card_origin: &Origin,
+    endpoint_policy: EndpointPolicy,
+    limits: &ClientLimits,
+) -> Result<Vec<(String, VerifyingKey)>, String> {
+    let url = validate_endpoint(jku, endpoint_policy)
+        .map_err(|_| "signature jku is not an allowed URL".to_owned())?;
+    if Origin::from_url(&url).ok().as_ref() != Some(card_origin) {
+        return Err("signature jku is not on the Agent Card's origin".to_owned());
+    }
+    let unavailable = || "signature key set could not be fetched".to_owned();
+    let client = pinned_client(&url, endpoint_policy, limits)
+        .await
+        .map_err(|_| unavailable())?;
+    let response = client
+        .get(url)
+        .header(ACCEPT, "application/jwk-set+json, application/json")
+        .send()
+        .await
+        .map_err(|_| unavailable())?;
+    if !response.status().is_success() {
+        return Err(unavailable());
+    }
+    let bytes = read_bounded(response, MAX_JWKS_BYTES)
+        .await
+        .map_err(|_| unavailable())?;
+    let jwks: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "signature key set is not JSON".to_owned())?;
+    Ok(ed25519_keys_from_jwks(&jwks))
 }
 
 pub fn validate_agent_card(
@@ -1241,6 +1370,159 @@ mod tests {
         .expect("discover redirected card");
         assert_eq!(discovered.name, "Reference agent");
         server.join().expect("reference server thread");
+    }
+
+    /// Serve `requests` HTTP/1.1 requests on loopback, answering each by path.
+    fn serve_paths(
+        listener: TcpListener,
+        routes: HashMap<String, String>,
+        requests: usize,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            for _ in 0..requests {
+                let (mut socket, _) = listener.accept().expect("accept reference request");
+                let mut request = [0_u8; 2_048];
+                let read = socket.read(&mut request).expect("read reference request");
+                let head = String::from_utf8_lossy(&request[..read]);
+                let path = head.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                let response = routes.get(&path).map_or_else(
+                    || "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned(),
+                    |body| {
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                    },
+                );
+                socket
+                    .write_all(response.as_bytes())
+                    .expect("write reference response");
+            }
+        })
+    }
+
+    fn loopback_policy() -> EndpointPolicy {
+        EndpointPolicy {
+            allow_loopback_http: true,
+        }
+    }
+
+    fn signed_card_body(
+        address: SocketAddr,
+        key: &ed25519_dalek::SigningKey,
+        tamper: bool,
+    ) -> String {
+        let mut card = card(vec![AgentInterface::new(
+            "https://peer.example.com/a2a",
+            TRANSPORT_PROTOCOL_JSONRPC,
+        )]);
+        let jku = format!("http://{address}/jwks.json");
+        card.signatures = Some(vec![
+            crate::sign_agent_card(&card, key, Some(&jku)).expect("sign card")
+        ]);
+        if tamper {
+            card.description = "Tampered after signing".to_owned();
+        }
+        serde_json::to_string(&card).expect("serialize Agent Card")
+    }
+
+    #[tokio::test]
+    async fn signed_cards_verify_against_the_same_origin_jwks() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind reference server");
+        let address = listener.local_addr().expect("reference address");
+        let routes = HashMap::from([
+            (
+                "/.well-known/agent-card.json".to_owned(),
+                signed_card_body(address, &key, false),
+            ),
+            (
+                "/jwks.json".to_owned(),
+                crate::card_signing::ed25519_jwks(&[key.verifying_key()]).to_string(),
+            ),
+        ]);
+        let server = serve_paths(listener, routes, 2);
+        let discovered = discover_verified_agent_card(
+            &format!("http://{address}"),
+            loopback_policy(),
+            ClientLimits::default(),
+            true,
+        )
+        .await
+        .expect("discover signed card");
+        assert_eq!(
+            discovered.signature,
+            CardSignatureStatus::Verified {
+                kid: crate::card_signing::ed25519_jwk_thumbprint(&key.verifying_key()),
+                jku: Some(format!("http://{address}/jwks.json")),
+            }
+        );
+        server.join().expect("reference server thread");
+    }
+
+    #[tokio::test]
+    async fn tampered_or_wrong_key_cards_are_rejected_at_discovery() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+        let other = ed25519_dalek::SigningKey::from_bytes(&[10; 32]);
+        for (tamper, published) in [(true, key.verifying_key()), (false, other.verifying_key())] {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind reference server");
+            let address = listener.local_addr().expect("reference address");
+            let routes = HashMap::from([
+                (
+                    "/.well-known/agent-card.json".to_owned(),
+                    signed_card_body(address, &key, tamper),
+                ),
+                (
+                    "/jwks.json".to_owned(),
+                    crate::card_signing::ed25519_jwks(&[published]).to_string(),
+                ),
+            ]);
+            let server = serve_paths(listener, routes, 2);
+            let error = discover_verified_agent_card(
+                &format!("http://{address}"),
+                loopback_policy(),
+                ClientLimits::default(),
+                false,
+            )
+            .await
+            .expect_err("invalid signature must be rejected");
+            assert!(
+                matches!(&error, ClientError::InvalidAgentCard(reason) if reason.contains("signature verification failed")),
+                "{error}"
+            );
+            server.join().expect("reference server thread");
+        }
+    }
+
+    #[tokio::test]
+    async fn unsigned_cards_are_accepted_unless_signatures_are_required() {
+        let body = serde_json::to_string(&card(vec![AgentInterface::new(
+            "https://peer.example.com/a2a",
+            TRANSPORT_PROTOCOL_JSONRPC,
+        )]))
+        .expect("serialize Agent Card");
+        for require in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind reference server");
+            let address = listener.local_addr().expect("reference address");
+            let routes = HashMap::from([("/.well-known/agent-card.json".to_owned(), body.clone())]);
+            let server = serve_paths(listener, routes, 1);
+            let result = discover_verified_agent_card(
+                &format!("http://{address}"),
+                loopback_policy(),
+                ClientLimits::default(),
+                require,
+            )
+            .await;
+            if require {
+                assert!(matches!(result, Err(ClientError::InvalidAgentCard(_))));
+            } else {
+                assert_eq!(
+                    result.expect("unsigned card").signature,
+                    CardSignatureStatus::Unsigned
+                );
+            }
+            server.join().expect("reference server thread");
+        }
     }
 
     #[test]

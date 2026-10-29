@@ -16,7 +16,7 @@
 // HARNESS LIMIT: this asserts the box geometry (capped and scrollable vs. not).
 // Syntax highlighting and the copy button are the plugin's, not ours.
 
-import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
+import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
 import { createRoot } from "react-dom/client";
 import { Markdown } from "../../components/agent-elements/markdown.tsx";
 import "../../src/index.css";

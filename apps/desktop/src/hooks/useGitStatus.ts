@@ -91,6 +91,11 @@ export function gitStatusKey(cwd: string | null): [string, string] {
 	return ["git-status", cwd ? canonicalCwd(cwd) : ""];
 }
 
+export interface GitStatusResult {
+	isLoading: boolean;
+	status: GitStatus;
+}
+
 /**
  * Live git status for `cwd`, shared across every component that asks for the
  * same folder: TanStack Query dedupes concurrent mounts onto one in-flight
@@ -103,7 +108,7 @@ export function gitStatusKey(cwd: string | null): [string, string] {
 export function useGitStatus(
 	target: ApiTarget,
 	cwd: string | null
-): { isLoading: boolean; status: GitStatus } {
+): GitStatusResult {
 	const { data, isLoading } = useQuery({
 		queryKey: [
 			...gitStatusKey(cwd),

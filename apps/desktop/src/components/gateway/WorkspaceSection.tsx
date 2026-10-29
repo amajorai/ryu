@@ -6,9 +6,9 @@ import {
 	UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Checkbox } from "@ryu/ui/components/checkbox";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -17,22 +17,23 @@ import {
 	DialogHeader,
 	DialogTitle,
 	DialogTrigger,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
-} from "@ryu/ui/components/popover";
+} from "@ryu/ui/components/popover.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import {
 	Table,
 	TableBody,
@@ -40,15 +41,22 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
-} from "@ryu/ui/components/table";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+} from "@ryu/ui/components/table.tsx";
+import {
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { FRONTEND_URL, useSession } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { CopyableId } from "@/src/components/settings/shared/CopyableId.tsx";
 import {
+	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -87,12 +95,12 @@ const ROLES_MANAGE: Permission = "roles.manage";
 const NO_ACTIVE_TEAM = "__no_active_team__";
 
 /** Rank so the roster reads owner → admin → member → viewer. */
-const ROLE_RANK: Record<Exclude<OrgRole, null>, number> = {
+const ROLE_RANK = {
 	owner: 0,
 	admin: 1,
 	member: 2,
 	viewer: 3,
-};
+} satisfies Record<Exclude<OrgRole, null>, number>;
 
 function roleBadgeVariant(role: OrgRole): "default" | "secondary" | "outline" {
 	if (role === "owner") {
@@ -106,7 +114,7 @@ function roleBadgeVariant(role: OrgRole): "default" | "secondary" | "outline" {
 
 function RoleBadge({ role }: { role: OrgRole }) {
 	return (
-		<Badge className="text-xs capitalize" variant={roleBadgeVariant(role)}>
+		<Badge casing="capitalized" variant={roleBadgeVariant(role)}>
 			{role ?? "member"}
 		</Badge>
 	);
@@ -136,7 +144,7 @@ function RoleFormDialog({
 	trigger: ReactElement;
 	mode: "create" | "edit";
 	initial?: RoleFormValues;
-	onSubmit: (values: RoleFormValues) => Promise<void>;
+	onSubmit: (values: RoleFormValues) => Promise<boolean>;
 }) {
 	const empty: RoleFormValues = { key: "", name: "", permissions: [] };
 	const [open, setOpen] = useState(false);
@@ -145,6 +153,9 @@ function RoleFormDialog({
 	const [err, setErr] = useState<string | null>(null);
 
 	const handleOpenChange = (next: boolean) => {
+		if (!next && saving) {
+			return;
+		}
 		if (next) {
 			setValues(initial ?? empty);
 			setErr(null);
@@ -175,7 +186,14 @@ function RoleFormDialog({
 		setSaving(true);
 		setErr(null);
 		try {
-			await onSubmit({ key, name, permissions: values.permissions });
+			const saved = await onSubmit({
+				key,
+				name,
+				permissions: values.permissions,
+			});
+			if (saved === false) {
+				return;
+			}
 			setOpen(false);
 		} catch (e) {
 			setErr(e instanceof Error ? e.message : "Failed to save role.");
@@ -187,7 +205,7 @@ function RoleFormDialog({
 	return (
 		<Dialog onOpenChange={handleOpenChange} open={open}>
 			<DialogTrigger render={trigger} />
-			<DialogContent>
+			<DialogContent showCloseButton={!saving}>
 				<DialogHeader>
 					<DialogTitle>
 						{mode === "create" ? "New custom role" : `Edit ${values.name}`}
@@ -201,6 +219,7 @@ function RoleFormDialog({
 					<div className="flex flex-col gap-1.5">
 						<Label htmlFor="role-name">Name</Label>
 						<Input
+							disabled={saving}
 							id="role-name"
 							onChange={(e) =>
 								setValues((v) => ({ ...v, name: e.target.value }))
@@ -213,6 +232,7 @@ function RoleFormDialog({
 						<div className="flex flex-col gap-1.5">
 							<Label htmlFor="role-key">Key</Label>
 							<Input
+								disabled={saving}
 								id="role-key"
 								onChange={(e) =>
 									setValues((v) => ({ ...v, key: e.target.value }))
@@ -236,6 +256,7 @@ function RoleFormDialog({
 								>
 									<Checkbox
 										checked={values.permissions.includes(perm)}
+										disabled={saving}
 										onCheckedChange={(checked) =>
 											togglePermission(perm, checked === true)
 										}
@@ -277,10 +298,12 @@ function RolesMatrix({
 	orgId,
 	roles,
 	canManage,
+	stepUp,
 }: {
 	orgId: string;
 	roles: OrgRoleDef[];
 	canManage: boolean;
+	stepUp: ReturnType<typeof useStepUp>;
 }) {
 	const queryClient = useQueryClient();
 	const invalidate = () =>
@@ -292,7 +315,7 @@ function RolesMatrix({
 			await invalidate();
 			sileo.success({ title: "Role created" });
 		},
-		onError: (e: unknown) => {
+		onError: (e) => {
 			sileo.error({
 				title: e instanceof Error ? e.message : "Failed to create role",
 			});
@@ -309,7 +332,7 @@ function RolesMatrix({
 			await invalidate();
 			sileo.success({ title: "Role updated" });
 		},
-		onError: (e: unknown) => {
+		onError: (e) => {
 			sileo.error({
 				title: e instanceof Error ? e.message : "Failed to update role",
 			});
@@ -325,7 +348,7 @@ function RolesMatrix({
 			});
 			sileo.success({ title: "Role deleted" });
 		},
-		onError: (e: unknown) => {
+		onError: (e) => {
 			sileo.error({
 				title: e instanceof Error ? e.message : "Failed to delete role",
 			});
@@ -339,7 +362,11 @@ function RolesMatrix({
 				canManage ? (
 					<RoleFormDialog
 						mode="create"
-						onSubmit={(values) => createMutation.mutateAsync(values)}
+						onSubmit={async (values) =>
+							(await stepUp.guard("org.members", () =>
+								createMutation.mutateAsync(values)
+							)) !== null
+						}
 						trigger={
 							<Button size="sm" variant="ghost">
 								<HugeiconsIcon className="size-4" icon={Add01Icon} />
@@ -351,11 +378,11 @@ function RolesMatrix({
 			}
 			title="Roles"
 		>
-			<div className="px-3">
+			<SettingsCard className="px-2 py-1">
 				<Table>
 					<TableHeader>
 						<TableRow>
-							<TableHead className="sticky left-0 bg-background">
+							<TableHead className="sticky left-0" presentation="permission">
 								Permission
 							</TableHead>
 							{roles.map((role) => (
@@ -364,7 +391,7 @@ function RolesMatrix({
 										<span className="flex items-center gap-1">
 											{role.name}
 											{role.builtin ? (
-												<Badge className="text-[10px]" variant="outline">
+												<Badge size="compact" variant="outline">
 													built-in
 												</Badge>
 											) : null}
@@ -378,8 +405,10 @@ function RolesMatrix({
 														permissions: role.permissions,
 													}}
 													mode="edit"
-													onSubmit={(values) =>
-														updateMutation.mutateAsync(values)
+													onSubmit={async (values) =>
+														(await stepUp.guard("org.members", () =>
+															updateMutation.mutateAsync(values)
+														)) !== null
 													}
 													trigger={
 														<Button
@@ -397,7 +426,13 @@ function RolesMatrix({
 												<Button
 													aria-label={`Delete ${role.name}`}
 													disabled={deleteMutation.isPending}
-													onClick={() => deleteMutation.mutate(role.key)}
+													onClick={() =>
+														void stepUp
+															.guard("org.members", () =>
+																deleteMutation.mutateAsync(role.key)
+															)
+															.catch(() => undefined)
+													}
 													size="icon"
 													variant="ghost"
 												>
@@ -416,7 +451,7 @@ function RolesMatrix({
 					<TableBody>
 						{PERMISSIONS.map((perm) => (
 							<TableRow key={perm}>
-								<TableCell className="sticky left-0 bg-background font-mono text-muted-foreground text-xs">
+								<TableCell className="sticky left-0" presentation="permission">
 									{perm}
 								</TableCell>
 								{roles.map((role) => (
@@ -433,7 +468,7 @@ function RolesMatrix({
 						))}
 					</TableBody>
 				</Table>
-			</div>
+			</SettingsCard>
 		</SettingsSection>
 	);
 }
@@ -449,11 +484,13 @@ function MemberRolesControl({
 	userId,
 	customRoles,
 	canManage,
+	stepUp,
 }: {
 	orgId: string;
 	userId: string;
 	customRoles: OrgRoleDef[];
 	canManage: boolean;
+	stepUp: ReturnType<typeof useStepUp>;
 }) {
 	const queryClient = useQueryClient();
 	const assignedQuery = useQuery({
@@ -470,7 +507,7 @@ function MemberRolesControl({
 				queryKey: ["workspace-member-roles", orgId, userId],
 			});
 		},
-		onError: (e: unknown) => {
+		onError: (e) => {
 			sileo.error({
 				title: e instanceof Error ? e.message : "Failed to update assignment",
 			});
@@ -481,7 +518,9 @@ function MemberRolesControl({
 		const next = checked
 			? [...assigned, roleKey]
 			: assigned.filter((k) => k !== roleKey);
-		setMutation.mutate(next);
+		void stepUp
+			.guard("org.members", () => setMutation.mutateAsync(next))
+			.catch(() => undefined);
 	};
 
 	if (customRoles.length === 0) {
@@ -493,7 +532,7 @@ function MemberRolesControl({
 	return (
 		<div className="flex items-center gap-1.5">
 			{assignedRoles.map((r) => (
-				<Badge className="text-xs" key={r.key} variant="secondary">
+				<Badge key={r.key} variant="secondary">
 					{r.name}
 				</Badge>
 			))}
@@ -510,26 +549,77 @@ function MemberRolesControl({
 					<PopoverContent align="end" className="w-64">
 						<div className="flex flex-col gap-1">
 							<p className="px-1 pb-1 font-medium text-sm">Custom roles</p>
-							{customRoles.map((r) => (
-								<label
-									className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"
-									key={r.key}
-								>
-									<Checkbox
-										checked={assigned.includes(r.key)}
-										disabled={setMutation.isPending}
-										onCheckedChange={(checked) =>
-											toggle(r.key, checked === true)
-										}
-									/>
-									<span>{r.name}</span>
-								</label>
-							))}
+							{assignedQuery.isLoading ? (
+								<div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground text-sm">
+									<Spinner className="size-3.5" />
+									Loading assigned roles…
+								</div>
+							) : assignedQuery.isError ? (
+								<div className="space-y-2 px-2 py-1.5">
+									<p className="text-sm text-status-destructive" role="alert">
+										Couldn’t load this member’s custom roles.
+									</p>
+									<Button
+										onClick={() => void assignedQuery.refetch()}
+										size="sm"
+										variant="outline"
+									>
+										Retry assigned roles
+									</Button>
+								</div>
+							) : (
+								customRoles.map((r) => (
+									<label
+										className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"
+										key={r.key}
+									>
+										<Checkbox
+											checked={assigned.includes(r.key)}
+											disabled={setMutation.isPending}
+											onCheckedChange={(checked) =>
+												toggle(r.key, checked === true)
+											}
+										/>
+										<span>{r.name}</span>
+									</label>
+								))
+							)}
 						</div>
 					</PopoverContent>
 				</Popover>
 			) : null}
 		</div>
+	);
+}
+
+/**
+ * A failed read as one row: a plain sentence and its Retry button, inside the
+ * section's card. The raw failure message stays on the `title` attribute.
+ */
+function LoadErrorRow({
+	detail,
+	message,
+	onRetry,
+	retryLabel,
+}: {
+	detail?: string;
+	message: string;
+	onRetry: () => void;
+	retryLabel: string;
+}) {
+	return (
+		<SettingsItem
+			actions={
+				<Button onClick={onRetry} size="sm" variant="outline">
+					{retryLabel}
+				</Button>
+			}
+			title={
+				<span role="alert" title={detail}>
+					{message}
+				</span>
+			}
+		/>
 	);
 }
 
@@ -552,6 +642,7 @@ export function WorkspaceSection() {
 	const { data: session } = useSession();
 	const userId = session?.user?.id ?? null;
 	const authed = hasOrgAuth();
+	const stepUp = useStepUp();
 
 	const orgsQuery = useQuery({
 		enabled: authed,
@@ -580,30 +671,42 @@ export function WorkspaceSection() {
 	const membersQuery = useQuery({
 		enabled: authed && Boolean(orgId),
 		queryKey: ["workspace-members", orgId],
-		queryFn: () => fetchOrgMembers(orgId as string),
+		queryFn:
+			orgId === null || orgId === undefined
+				? skipToken
+				: () => fetchOrgMembers(orgId),
 	});
 
 	const rolesQuery = useQuery({
 		enabled: authed && Boolean(orgId),
 		queryKey: ["workspace-roles", orgId],
-		queryFn: () => listRoles(orgId as string),
+		queryFn:
+			orgId === null || orgId === undefined
+				? skipToken
+				: () => listRoles(orgId),
 	});
 
 	const permissionsQuery = useQuery({
 		enabled: authed && Boolean(orgId),
 		queryKey: ["workspace-my-permissions", orgId],
-		queryFn: () => fetchMyPermissions(orgId as string),
+		queryFn:
+			orgId === null || orgId === undefined
+				? skipToken
+				: () => fetchMyPermissions(orgId),
 	});
 
 	const teamsQuery = useQuery({
 		enabled: authed && Boolean(orgId),
 		queryKey: ["workspace-org-teams", orgId],
-		queryFn: () => listMyOrganizationTeams(orgId as string),
+		queryFn:
+			orgId === null || orgId === undefined
+				? skipToken
+				: () => listMyOrganizationTeams(orgId),
 	});
 
 	const activeTeamMutation = useMutation({
 		mutationFn: setActiveTeam,
-		onError: (error: unknown) =>
+		onError: (error) =>
 			sileo.error({
 				title: error instanceof Error ? error.message : "Couldn't switch team",
 			}),
@@ -624,9 +727,9 @@ export function WorkspaceSection() {
 	if (!authed) {
 		return (
 			<SettingsSection title="Workspace">
-				<p className="px-3 text-muted-foreground text-sm">
+				<SettingsCard className="text-center text-muted-foreground text-sm">
 					Sign in to view this workspace and its members.
-				</p>
+				</SettingsCard>
 			</SettingsSection>
 		);
 	}
@@ -634,15 +737,29 @@ export function WorkspaceSection() {
 	if (orgsQuery.isLoading) {
 		return (
 			<SettingsSection title="Workspace">
-				<div className="flex h-24 items-center justify-center">
-					<Spinner className="size-4" />
-				</div>
+				<SettingsCard>
+					<SkeletonRows spacing="spacious" />
+				</SettingsCard>
+			</SettingsSection>
+		);
+	}
+
+	if (orgsQuery.isError) {
+		return (
+			<SettingsSection title="Workspace">
+				<LoadErrorRow
+					detail={orgsQuery.error.message}
+					message="Couldn’t load your organizations."
+					onRetry={() => void orgsQuery.refetch()}
+					retryLabel="Retry organization list"
+				/>
 			</SettingsSection>
 		);
 	}
 
 	return (
 		<div className="space-y-6">
+			{stepUp.dialog}
 			<SettingsSection
 				caption="The organization that shares this node. Its members and their roles govern who can manage the workspace."
 				title="Workspace"
@@ -677,43 +794,61 @@ export function WorkspaceSection() {
 					{activeOrg ? (
 						<SettingsItem
 							actions={
-								<Select
-									disabled={
-										teamsQuery.isLoading ||
-										teams.length === 0 ||
-										activeTeamMutation.isPending
-									}
-									items={[
-										{ label: "No active team", value: NO_ACTIVE_TEAM },
-										...teams.map((team) => ({
-											label: team.name,
-											value: team.id,
-										})),
-									]}
-									onValueChange={(value) => {
-										activeTeamMutation.mutate(
-											value === NO_ACTIVE_TEAM ? null : value
-										);
-									}}
-									value={selectedTeamId}
-								>
-									<SelectTrigger
-										aria-label="Active team"
-										className="h-8 w-48 text-sm"
+								teamsQuery.isError ? (
+									<div className="flex flex-col items-end gap-2">
+										<p
+											className="text-right text-status-destructive text-xs"
+											role="alert"
+										>
+											Couldn’t load teams.
+										</p>
+										<Button
+											onClick={() => void teamsQuery.refetch()}
+											size="sm"
+											variant="outline"
+										>
+											Retry teams
+										</Button>
+									</div>
+								) : (
+									<Select
+										disabled={
+											teamsQuery.isLoading ||
+											teams.length === 0 ||
+											activeTeamMutation.isPending
+										}
+										items={[
+											{ label: "No active team", value: NO_ACTIVE_TEAM },
+											...teams.map((team) => ({
+												label: team.name,
+												value: team.id,
+											})),
+										]}
+										onValueChange={(value) => {
+											activeTeamMutation.mutate(
+												value === NO_ACTIVE_TEAM ? null : value
+											);
+										}}
+										value={selectedTeamId}
 									>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value={NO_ACTIVE_TEAM}>
-											No active team
-										</SelectItem>
-										{teams.map((team) => (
-											<SelectItem key={team.id} value={team.id}>
-												{team.name}
+										<SelectTrigger
+											aria-label="Active team"
+											className="h-8 w-48"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value={NO_ACTIVE_TEAM}>
+												No active team
 											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
+											{teams.map((team) => (
+												<SelectItem key={team.id} value={team.id}>
+													{team.name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								)
 							}
 							description="Persisted by Better Auth for team-aware organization requests."
 							title="Active team"
@@ -737,11 +872,34 @@ export function WorkspaceSection() {
 					title="Members"
 				>
 					{membersQuery.isLoading ? (
-						<div className="flex h-16 items-center justify-center">
-							<Spinner className="size-4" />
-						</div>
+						<SettingsCard>
+							<SkeletonRows spacing="spacious" />
+						</SettingsCard>
+					) : membersQuery.isError ? (
+						<LoadErrorRow
+							detail={membersQuery.error.message}
+							message="Couldn’t load workspace members."
+							onRetry={() => void membersQuery.refetch()}
+							retryLabel="Retry member list"
+						/>
 					) : (
 						<SettingsGroup>
+							{permissionsQuery.isError ? (
+								<LoadErrorRow
+									message="Couldn’t load workspace permissions. Role editing is paused."
+									onRetry={() => void permissionsQuery.refetch()}
+									retryLabel="Retry permissions"
+								/>
+							) : null}
+							{members.length === 0 ? (
+								<SettingsItem
+									title={
+										<span className="text-muted-foreground">
+											No members yet.
+										</span>
+									}
+								/>
+							) : null}
 							{members.map((m) => (
 								<SettingsItem
 									actions={
@@ -750,20 +908,18 @@ export function WorkspaceSection() {
 												canManage={canManageRoles}
 												customRoles={customRoles}
 												orgId={orgId}
+												stepUp={stepUp}
 												userId={m.userId}
 											/>
 											<RoleBadge role={m.role} />
 										</div>
 									}
-									description={m.userId}
 									key={m.userId}
 									title={
 										<span className="flex items-center gap-2">
 											{m.userId}
 											{m.userId === userId ? (
-												<Badge className="text-xs" variant="outline">
-													You
-												</Badge>
+												<Badge variant="outline">You</Badge>
 											) : null}
 										</span>
 									}
@@ -792,12 +948,26 @@ export function WorkspaceSection() {
 			{activeOrg && orgId ? (
 				rolesQuery.isLoading ? (
 					<SettingsSection title="Roles">
-						<div className="flex h-16 items-center justify-center">
-							<Spinner className="size-4" />
-						</div>
+						<SettingsCard>
+							<SkeletonRows spacing="spacious" />
+						</SettingsCard>
+					</SettingsSection>
+				) : rolesQuery.isError ? (
+					<SettingsSection title="Roles">
+						<LoadErrorRow
+							detail={rolesQuery.error.message}
+							message="Couldn’t load workspace roles."
+							onRetry={() => void rolesQuery.refetch()}
+							retryLabel="Retry roles"
+						/>
 					</SettingsSection>
 				) : (
-					<RolesMatrix canManage={canManageRoles} orgId={orgId} roles={roles} />
+					<RolesMatrix
+						canManage={canManageRoles}
+						orgId={orgId}
+						roles={roles}
+						stepUp={stepUp}
+					/>
 				)
 			) : null}
 
@@ -809,8 +979,12 @@ export function WorkspaceSection() {
 					<SettingsGroup>
 						{otherOrgs.map((org) => (
 							<SettingsItem
-								actions={<CopyableId label="organization ID" value={org.id} />}
-								description={`You are ${org.role ?? "a member"}.`}
+								actions={
+									<span className="flex items-center gap-2">
+										<RoleBadge role={org.role} />
+										<CopyableId label="organization ID" value={org.id} />
+									</span>
+								}
 								key={org.id}
 								title={org.name}
 							/>

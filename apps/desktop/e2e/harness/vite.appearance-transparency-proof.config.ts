@@ -19,6 +19,8 @@ export default defineConfig({
 	clearScreen: false,
 	optimizeDeps: {
 		entries: ["appearance-transparency-proof.html"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		alias: { "@": desktopRoot },

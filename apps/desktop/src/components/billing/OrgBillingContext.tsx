@@ -1,5 +1,8 @@
 import { PlanBadge, type PlanTier } from "@ryu/ui/components/plan-badge.tsx";
-import { Building2 } from "lucide-react";
+import {
+	SettingsGroup,
+	SettingsItem,
+} from "@/src/components/settings/shared/settings-items.tsx";
 import { useOrgBillingStatus } from "@/src/hooks/useOrgBillingStatus.ts";
 
 export interface OrgBillingContextViewProps {
@@ -10,7 +13,14 @@ export interface OrgBillingContextViewProps {
 	plan: PlanTier | null;
 }
 
-/** Presentational form used by the live app and the end-to-end proof artifact. */
+/**
+ * Presentational form used by the live app and the end-to-end proof artifact.
+ *
+ * One grouped settings row — the label on the left, the organization and its
+ * plan as the row's value — with the description as the card's footer caption.
+ * Not a bordered or tinted banner: inside a settings pane that read as a box
+ * above the cards instead of one of them.
+ */
 export function OrgBillingContextView({
 	compact = false,
 	description = "Managed inference uses this organization’s shared credit wallet.",
@@ -19,31 +29,28 @@ export function OrgBillingContextView({
 	plan,
 }: OrgBillingContextViewProps) {
 	return (
-		<div
-			className={
-				compact
-					? "flex items-center gap-2 rounded-lg bg-muted/35 px-3 py-2"
-					: "flex items-center gap-3 rounded-xl border bg-card px-4 py-3"
-			}
-			data-testid="org-billing-context"
-		>
-			<span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-				<Building2 className="size-4" />
-			</span>
-			<div className="min-w-0 flex-1">
-				<p className="text-muted-foreground text-xs">{label}</p>
-				<p className="truncate font-medium text-sm">
-					{organizationName ?? "No organization selected"}
-				</p>
-				{description ? (
-					<p className="mt-0.5 text-muted-foreground text-xs">{description}</p>
-				) : null}
-			</div>
-			<PlanBadge
-				className="shrink-0"
-				plan={plan}
-				size={compact ? "sm" : "md"}
-			/>
+		<div data-testid="org-billing-context">
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<span className="flex min-w-0 items-center gap-2">
+							<span
+								className="max-w-[16rem] truncate text-muted-foreground text-sm"
+								title={organizationName ?? "No organization selected"}
+							>
+								{organizationName ?? "No organization selected"}
+							</span>
+							<PlanBadge
+								className="shrink-0"
+								plan={plan}
+								size={compact ? "sm" : "md"}
+							/>
+						</span>
+					}
+					description={description || undefined}
+					title={label}
+				/>
+			</SettingsGroup>
 		</div>
 	);
 }

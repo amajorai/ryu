@@ -1,4 +1,6 @@
 "use client";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import styles from "./shell.module.css";
 
 // The Ryu desktop window chrome. Built on the SAME real `@ryu/ui` Sidebar
 // primitives, real `Logo`, and HugeIcons the live app's `AppSidebar` uses
@@ -154,7 +156,7 @@ function NavButton({
  *  and a "+" add button revealed on section hover. */
 function Section({ label, children }: { label: string; children: ReactNode }) {
 	return (
-		<SidebarGroup className="group/section py-1">
+		<SidebarGroup className="group/section" spacing="compact">
 			<div className="relative flex items-center">
 				<div className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground text-xs">
 					<span className="min-w-0 truncate">{label}</span>
@@ -170,7 +172,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 				</div>
 			</div>
 			<SidebarGroupContent>
-				<SidebarMenu className="gap-0.5">{children}</SidebarMenu>
+				<SidebarMenu>{children}</SidebarMenu>
 			</SidebarGroupContent>
 		</SidebarGroup>
 	);
@@ -181,8 +183,9 @@ function LogoRow({ name }: { name: string }) {
 		<SidebarMenuItem>
 			<SidebarMenuButton className="h-8">
 				<RyuLogo
-					className="shrink-0 text-foreground"
+					className="shrink-0"
 					size="16px"
+					tone="foreground"
 					variant="outline"
 				/>
 				<span className="truncate">{name}</span>
@@ -220,7 +223,13 @@ function MeetingRow({
 				/>
 				<span className="min-w-0 flex-1 truncate">{name}</span>
 				{recording ? (
-					<span className="size-2 shrink-0 animate-pulse rounded-full bg-destructive" />
+					<>
+						<span
+							aria-hidden="true"
+							className="size-2 shrink-0 rounded-full bg-destructive motion-safe:animate-pulse"
+						/>
+						<span className="sr-only">Recording</span>
+					</>
 				) : null}
 			</SidebarMenuButton>
 		</SidebarMenuItem>
@@ -246,7 +255,7 @@ function BotModeAgentRow({
 				<span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
 					<span className="flex min-w-0 items-center gap-2">
 						<span className="min-w-0 flex-1 truncate text-sm">{name}</span>
-						<span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
 							{stamp}
 						</span>
 					</span>
@@ -256,13 +265,13 @@ function BotModeAgentRow({
 				</span>
 			</button>
 			<div className="relative ml-7 border-sidebar-border/70 border-l pl-2">
-				<div className="px-2 py-1 text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
+				<div className="type-compact px-2 py-1 text-muted-foreground uppercase tracking-(--tracking-eyebrow)">
 					Threads
 				</div>
-				<SidebarMenu className="gap-0.5">
+				<SidebarMenu>
 					{threads.map((thread) => (
 						<SidebarMenuItem key={thread}>
-							<SidebarMenuButton className="h-8 gap-2 text-xs">
+							<SidebarMenuButton className="h-8" purpose="showcase-thread">
 								<HugeiconsIcon
 									className="size-3.5 text-muted-foreground"
 									icon={GitBranchIcon}
@@ -295,7 +304,7 @@ function TrustModeAiRow({
 				<span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
 					<span className="flex min-w-0 items-center gap-2">
 						<span className="min-w-0 flex-1 truncate text-sm">{name}</span>
-						<span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+						<span className="type-compact shrink-0 text-muted-foreground tabular-nums">
 							{stamp}
 						</span>
 					</span>
@@ -350,13 +359,13 @@ function TrustModeSidebarContent() {
 
 				<div className="scroll-fade no-scrollbar min-h-0 flex-1 overflow-auto px-2 pt-2">
 					{activeTab === "ai" ? (
-						<SidebarMenu className="gap-0.5">
+						<SidebarMenu>
 							{TRUST_MODE_AI.map((item) => (
 								<TrustModeAiRow key={item.id} {...item} />
 							))}
 						</SidebarMenu>
 					) : (
-						<SidebarMenu className="gap-0.5">
+						<SidebarMenu>
 							{TRUST_MODE_HISTORY.map((title) => (
 								<TrustModeHistoryRow key={title} title={title} />
 							))}
@@ -389,7 +398,7 @@ function NodeSelectorPill() {
 	return (
 		<span className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-0.5 text-xs">
 			<span className="size-1.5 shrink-0 rounded-full bg-success" />
-			<span className="text-foreground">Local</span>
+			<span className="text-foreground">Your computer</span>
 			<HugeiconsIcon
 				className="size-3 text-muted-foreground"
 				icon={ArrowDown01Icon}
@@ -414,8 +423,11 @@ export function DesktopShell({
 	navItems,
 	activeNav,
 	onNavSelect,
+	sidebarContent,
 }: {
 	children: ReactNode;
+	/** Replace the sidebar's section list (the landing demos supply their own). */
+	sidebarContent?: ReactNode;
 	/** Kept for call-site compatibility; the real sidebar has no flat-nav highlight. */
 	active?: string;
 	sidebarMode?: "default" | "bot" | "trust";
@@ -435,18 +447,25 @@ export function DesktopShell({
 	return (
 		<SidebarProvider className="size-full min-h-0">
 			<Sidebar
-				className="h-full bg-transparent p-2"
+				appearance="showcase-frame"
+				className="h-full"
 				collapsible="none"
 				variant="floating"
 			>
 				{/* The floating panel: mirrors the primitive's `sidebar-inner` so this
 				    reads as `variant="floating"` despite `collapsible="none"`. */}
-				<div className="ryu-chrome-shadow inset-shadow-sm flex size-full flex-col rounded-3xl border border-background bg-sidebar drop-shadow-2xl dark:bg-sidebar/50">
-					<SidebarHeader className="pt-3 pb-0">
+				<div
+					className={cn(
+						styles.chromeShadow,
+						"inset-shadow-sm flex size-full flex-col rounded-3xl border border-background bg-sidebar drop-shadow-2xl dark:bg-sidebar/50"
+					)}
+				>
+					<SidebarHeader spacing="showcase">
 						<div className="flex items-center gap-2 px-2 pb-1">
 							<RyuLogo
-								className="shrink-0 text-foreground"
+								className="shrink-0"
 								size="20px"
+								tone="foreground"
 								variant="outline"
 							/>
 							<NodeSelectorPill />
@@ -465,8 +484,12 @@ export function DesktopShell({
 						</SidebarMenu>
 					</SidebarHeader>
 
-					<SidebarContent className="scroll-fade pt-2">
-						{sidebarMode === "bot" ? (
+					<SidebarContent spacing="compact">
+						{sidebarContent ? (
+							<div className="scroll-fade no-scrollbar min-h-0 flex-1 overflow-auto px-2">
+								{sidebarContent}
+							</div>
+						) : sidebarMode === "bot" ? (
 							<BotModeSidebarContent />
 						) : sidebarMode === "trust" ? (
 							<TrustModeSidebarContent />
@@ -525,7 +548,7 @@ export function DesktopShell({
 					<SidebarFooter>
 						<SidebarMenu>
 							<SidebarMenuItem>
-								<SidebarMenuButton className="h-11 gap-2">
+								<SidebarMenuButton className="h-11">
 									<Avatar className="size-7">
 										<AvatarFallback>JW</AvatarFallback>
 									</Avatar>

@@ -1,3 +1,5 @@
+declare const window: Window;
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { createRoot } from "react-dom/client";
@@ -6,6 +8,13 @@ import { NodeOrganizationBindingCard } from "../../src/components/gateway/NodeOr
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import { TabsProvider } from "../../src/contexts/TabsContext.tsx";
 import { LOCAL_FALLBACK, useNodeStore } from "../../src/store/useNodeStore.ts";
+import {
+	type BindingRequest,
+	bindingInputStringSchema,
+	bindingRequestBody,
+	bindingRequestsSchema,
+} from "../node-binding-proof.contracts.ts";
+import styles from "./node-organization-binding-proof.module.css";
 import "../../src/index.css";
 
 const LONG_ORGANIZATION_NAME =
@@ -24,7 +33,10 @@ const defaultOrganizations = [
 	},
 ];
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse<FixturePayload>(
+	body: FixturePayload,
+	status = 200
+): Response {
 	return new Response(JSON.stringify(body), {
 		headers: { "Content-Type": "application/json" },
 		status,
@@ -33,14 +45,30 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 localStorage.setItem(TOKEN_KEY, "proof-session");
 let permissionAttempts = 0;
+const REQUESTS_KEY = "proof:binding-requests";
+function requests(): BindingRequest[] {
+	return bindingRequestsSchema.parse(
+		JSON.parse(sessionStorage.getItem(REQUESTS_KEY) ?? "[]")
+	);
+}
+window.__nodeBindingProof = { requests };
 
 window.fetch = async (input, init) => {
-	const url =
-		typeof input === "string"
-			? input
-			: input instanceof Request
-				? input.url
-				: input.toString();
+	const inputString = bindingInputStringSchema.safeParse(input);
+	const url = inputString.success
+		? inputString.data
+		: input instanceof Request
+			? input.url
+			: input.toString();
+	const captured = requests();
+	captured.push({
+		authorization: new Headers(init?.headers).get("authorization"),
+		body: bindingRequestBody(init),
+		method: init?.method ?? "GET",
+		path: new URL(url, window.location.href).pathname,
+		query: new URL(url, window.location.href).search,
+	});
+	sessionStorage.setItem(REQUESTS_KEY, JSON.stringify(captured));
 	if (url.endsWith("/api/auth/token")) {
 		return jsonResponse({}, 401);
 	}
@@ -77,6 +105,19 @@ window.fetch = async (input, init) => {
 			});
 		}
 		return jsonResponse({ enrolled: false, status: {} });
+	}
+	// Issuing an enrollment code asks for an `org.credentials` step-up; this
+	// proof covers the binding itself, so the window is already open.
+	if (url.includes("/api/step-up/status")) {
+		return jsonResponse({
+			action: "change or reveal access keys and shared secrets",
+			enrolmentRequired: false,
+			methods: ["totp"],
+			satisfied: true,
+			scope: "org.credentials",
+			twoFactorEnabled: true,
+			windowMs: 600_000,
+		});
 	}
 	if (url.includes("/nodes/enrollment-tokens")) {
 		return jsonResponse({
@@ -128,7 +169,9 @@ function Proof() {
 						<main className="min-h-screen bg-background px-8 py-10 text-foreground">
 							<div className="mx-auto flex max-w-3xl flex-col gap-8">
 								<header className="flex flex-col gap-2">
-									<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+									<p
+										className={`font-medium text-muted-foreground text-xs uppercase ${styles.eyebrow}`}
+									>
 										Ryu · Self-hosted Core
 									</p>
 									<h1 className="font-heading text-3xl tracking-tight">

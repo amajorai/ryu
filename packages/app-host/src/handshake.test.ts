@@ -6,8 +6,12 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+	APP_DOWNLOAD_GRANT,
 	handshakeHostApiVersion,
 	IFRAME_SANDBOX,
+	sandboxForCompanion,
+	sandboxForDownloads,
+	shouldEnableCompanionFormEvents,
 	shouldTransferPort,
 } from "./ExtensionHost.tsx";
 import { examplePluginSrcdoc } from "./example-plugin.ts";
@@ -196,9 +200,69 @@ describe("iframe sandbox is locked down", () => {
 		expect(IFRAME_SANDBOX).not.toContain("allow-same-origin");
 	});
 
-	it("never enables popups, top-navigation, or forms", () => {
-		expect(IFRAME_SANDBOX).not.toContain("allow-popups");
-		expect(IFRAME_SANDBOX).not.toContain("allow-top-navigation");
-		expect(IFRAME_SANDBOX).not.toContain("allow-forms");
+	it("enables downloads only for the separately approved app grant", () => {
+		expect(APP_DOWNLOAD_GRANT).toBe("files:download");
+		expect(sandboxForDownloads(false)).toBe("allow-scripts");
+		expect(sandboxForDownloads(true)).toBe("allow-scripts allow-downloads");
+	});
+
+	it("keeps forms, popups, and top-navigation disabled by default", () => {
+		for (const allowDownloads of [false, true]) {
+			const sandbox = sandboxForDownloads(allowDownloads);
+			expect(sandbox).not.toContain("allow-same-origin");
+			expect(sandbox).not.toContain("allow-popups");
+			expect(sandbox).not.toContain("allow-top-navigation");
+			expect(sandbox).not.toContain("allow-forms");
+		}
+	});
+
+	it("allows forms only for an opted-in document with form-action none", () => {
+		const appHtml = "<!doctype html><html><body><form></form></body></html>";
+		const srcdoc = htmlCompanionSrcdoc(NONCE, appHtml, "@ryu/mail");
+		expect(srcdoc).toContain("connect-src 'none'");
+		expect(srcdoc).toContain("form-action 'none'");
+		expect(sandboxForCompanion({ srcdoc })).toBe("allow-scripts");
+		expect(sandboxForCompanion({ allowForms: true, srcdoc })).toBe(
+			"allow-scripts allow-forms"
+		);
+		expect(
+			sandboxForCompanion({
+				allowDownloads: true,
+				allowForms: true,
+				srcdoc,
+			})
+		).toBe("allow-scripts allow-forms allow-downloads");
+	});
+
+	it("refuses the forms opt-in unless both network and form actions are blocked", () => {
+		for (const srcdoc of [
+			"<html><body><form></form></body></html>",
+			"<meta http-equiv=\"Content-Security-Policy\" content=\"connect-src 'none'; form-action 'self'\">",
+			'<meta http-equiv="Content-Security-Policy" content="connect-src https://api.example; form-action \'none\'">',
+		]) {
+			expect(sandboxForCompanion({ allowForms: true, srcdoc })).toBe(
+				"allow-scripts"
+			);
+		}
+	});
+
+	it("opts in only for first-party compiled HTML bundles", () => {
+		expect(shouldEnableCompanionFormEvents(true, true)).toBe(true);
+		expect(shouldEnableCompanionFormEvents(true, false)).toBe(false);
+		expect(shouldEnableCompanionFormEvents(false, true)).toBe(false);
+		expect(shouldEnableCompanionFormEvents(false, false)).toBe(false);
+	});
+
+	it("never adds same-origin, popup, or top-navigation permissions with form events", () => {
+		const srcdoc = htmlCompanionSrcdoc(
+			NONCE,
+			"<!doctype html><html><body><form></form></body></html>",
+			"@ryu/mail"
+		);
+		const sandbox = sandboxForCompanion({ allowForms: true, srcdoc });
+		expect(sandbox).toContain("allow-forms");
+		expect(sandbox).not.toContain("allow-same-origin");
+		expect(sandbox).not.toContain("allow-popups");
+		expect(sandbox).not.toContain("allow-top-navigation");
 	});
 });

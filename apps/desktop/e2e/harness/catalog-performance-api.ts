@@ -2,15 +2,21 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
 import type { Plugin } from "vite";
+import { z } from "zod";
 
-async function readJson(
-	request: IncomingMessage
-): Promise<Record<string, unknown>> {
+const catalogWriteSchema = z.object({
+	name: z.string().optional(),
+	data_base64: z.string().optional(),
+});
+
+async function readJson(request: IncomingMessage) {
 	const chunks: Buffer[] = [];
 	for await (const chunk of request) {
 		chunks.push(Buffer.from(chunk));
 	}
-	return JSON.parse(Buffer.concat(chunks).toString() || "{}");
+	return catalogWriteSchema.parse(
+		JSON.parse(Buffer.concat(chunks).toString() || "{}")
+	);
 }
 const documents = [
 	{
@@ -54,7 +60,8 @@ export function catalogPerformanceApi(): Plugin {
 					return;
 				}
 				response.setHeader("Content-Type", "application/json");
-				const send = (body: unknown) => response.end(JSON.stringify(body));
+				const send = <FixturePayload>(body: FixturePayload) =>
+					response.end(JSON.stringify(body));
 				if (url === "/proof-reset") {
 					catalogReads = 0;
 					polls = 0;

@@ -9,9 +9,9 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use super::{binary_path, stt_model_path, tts_model_path, tts_voice_path};
+use super::{binary_path, engine_install_dir, stt_model_path, tts_model_path, tts_voice_path};
 use crate::sidecar::download_manager::{
-    compute_sha256, extract_binary_with_libs, ryu_dir, VersionStore,
+    compute_sha256, extract_binary_with_libs_from, tmp_dir, VersionStore,
 };
 
 /// Ryu's pinned audio.cpp release. Update this together with the asset hashes
@@ -179,9 +179,7 @@ impl AudioCppDownloader {
         }
 
         let asset = binary_asset()?;
-        let archive_dest = ryu_dir()
-            .join("tmp")
-            .join(format!("audiocpp-{TARGET_VERSION}.archive"));
+        let archive_dest = tmp_dir().join(format!("audiocpp-{TARGET_VERSION}.archive"));
         let archive_path = downloads
             .download_blocking(crate::downloads::DownloadSpec {
                 kind: crate::downloads::DownloadKind::Voice,
@@ -194,14 +192,13 @@ impl AudioCppDownloader {
             })
             .await
             .context("downloading audio.cpp runtime archive")?;
-        let archive = tokio::fs::read(&archive_path)
-            .await
-            .context("reading downloaded audio.cpp runtime archive")?;
+        // Streamed from disk rather than read whole into memory first.
+        let archive = std::io::BufReader::new(
+            std::fs::File::open(&archive_path)
+                .context("opening downloaded audio.cpp runtime archive")?,
+        );
 
-        let destination = dest
-            .parent()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| ryu_dir().join("bin").join("audiocpp"));
+        let destination = dest.parent().map_or_else(engine_install_dir, PathBuf::from);
         let staging = destination
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
@@ -220,8 +217,8 @@ impl AudioCppDownloader {
             .to_string();
         let staging_for_extract = staging.clone();
         let extracted = match tokio::task::spawn_blocking(move || {
-            extract_binary_with_libs(
-                &archive,
+            extract_binary_with_libs_from(
+                archive,
                 &binary_name,
                 &staging_for_extract,
                 asset.archive_is_zip,

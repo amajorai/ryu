@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /** Shared resource visibility vocabulary for the desktop shell. */
 export type ResourceVisibility = "org" | "private" | "team";
 export type ResourceVisibilityGroup = "private" | "team";
@@ -26,7 +28,9 @@ export interface VisibilityChangeRequest extends VisibilityDragPayload {
 }
 
 /** Tolerant read-side parsing keeps an older Core from blanking the sidebar. */
-export function toResourceVisibility(value: unknown): ResourceVisibility {
+export function toResourceVisibility(
+	value: string | null | undefined
+): ResourceVisibility {
 	return value === "org" || value === "team" ? value : "private";
 }
 
@@ -64,7 +68,9 @@ export function resourceVisibilityForGroup(
 }
 
 /** Organization owners inherit admin authority for visibility changes. */
-export function isOrganizationAdminRole(role: unknown): boolean {
+export function isOrganizationAdminRole(
+	role: string | null | undefined
+): boolean {
 	return role === "admin" || role === "owner";
 }
 
@@ -74,6 +80,13 @@ export function serializeVisibilityDragPayload(
 	return JSON.stringify(payload);
 }
 
+const visibilityDragPayloadSchema = z.object({
+	from: z.enum(["private", "team"]),
+	id: z.string(),
+	name: z.string(),
+	resourceType: z.enum(["chat", "space"]),
+});
+
 /** Parse untrusted DataTransfer text at the browser boundary. */
 export function parseVisibilityDragPayload(
 	value: string | null | undefined
@@ -82,25 +95,8 @@ export function parseVisibilityDragPayload(
 		return null;
 	}
 	try {
-		const parsed: unknown = JSON.parse(value);
-		if (!parsed || typeof parsed !== "object") {
-			return null;
-		}
-		const candidate = parsed as Record<string, unknown>;
-		if (
-			typeof candidate.id !== "string" ||
-			typeof candidate.name !== "string" ||
-			(candidate.from !== "private" && candidate.from !== "team") ||
-			(candidate.resourceType !== "chat" && candidate.resourceType !== "space")
-		) {
-			return null;
-		}
-		return {
-			from: candidate.from,
-			id: candidate.id,
-			name: candidate.name,
-			resourceType: candidate.resourceType,
-		};
+		const parsed = visibilityDragPayloadSchema.safeParse(JSON.parse(value));
+		return parsed.success ? parsed.data : null;
 	} catch {
 		return null;
 	}

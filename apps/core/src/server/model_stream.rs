@@ -98,10 +98,17 @@ async fn open_gateway_stream(
             base.trim_end_matches('/')
         ))
         .json(&payload);
+    // Tagged so app streams show up apart from chat turns in the Gateway audit
+    // log. Streamed usage arrives in the frames themselves, so it is not
+    // parsed here.
+    outbound = crate::sidecar::gateway::with_side_call_headers(
+        outbound,
+        &crate::sidecar::gateway::SidePurpose::AppModelStream,
+    );
     if let Some(provider) = request.provider.as_deref() {
         outbound = outbound.header("x-ryu-slot-chat-provider", provider);
     }
-    if let Some(token) = crate::sidecar::gateway::gateway_core_token() {
+    if let Some(token) = crate::sidecar::gateway::gateway_inference_token() {
         outbound = outbound.bearer_auth(token);
     }
     let response = outbound.send().await.map_err(|_| GatewayError {

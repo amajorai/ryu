@@ -61,7 +61,6 @@ import {
 	useRef,
 	useState,
 } from "react";
-
 import { Editor, EditorContainer } from "./editor.tsx";
 
 export interface TComment {
@@ -257,11 +256,11 @@ export function Comment(props: {
 			</div>
 
 			{isFirst && showDocumentContent && (
-				<div className="relative mt-1 flex ps-[32px] text-sm text-subtle-foreground">
+				<div className="relative mt-1 flex ps-[32px] text-muted-foreground text-sm">
 					{discussionLength > 1 && (
 						<div className="absolute start-3 top-[5px] h-full w-0.5 shrink-0 bg-muted" />
 					)}
-					<div className="my-px w-0.5 shrink-0 bg-highlight" />
+					<div className="ryu-editor-comment-accent my-px w-0.5 shrink-0" />
 					{documentContent && <div className="ms-2">{documentContent}</div>}
 				</div>
 			)}
@@ -281,6 +280,7 @@ export function Comment(props: {
 						{isEditing && (
 							<div className="ms-auto flex shrink-0 gap-1">
 								<Button
+									aria-label="Cancel"
 									className="size-[28px]"
 									onClick={(e: MouseEvent<HTMLButtonElement>) => {
 										e.stopPropagation();
@@ -295,6 +295,7 @@ export function Comment(props: {
 								</Button>
 
 								<Button
+									aria-label="Save"
 									onClick={(e: MouseEvent<HTMLButtonElement>) => {
 										e.stopPropagation();
 										onSave();
@@ -302,7 +303,7 @@ export function Comment(props: {
 									size="icon"
 									variant="ghost"
 								>
-									<div className="flex size-5 shrink-0 items-center justify-center rounded-[50%] bg-brand">
+									<div className="flex size-5 shrink-0 items-center justify-center rounded-[50%] bg-primary">
 										<CheckIcon className="size-3 stroke-[3px] text-background" />
 									</div>
 								</Button>
@@ -389,10 +390,7 @@ function CommentMoreDropdown(props: {
 			<DropdownMenuTrigger
 				onClick={(e) => e.stopPropagation()}
 				render={
-					<Button
-						className={cn("h-6 p-1 text-muted-foreground")}
-						variant="ghost"
-					/>
+					<Button className={"h-6 p-1 text-muted-foreground"} variant="ghost" />
 				}
 			>
 				<MoreHorizontalIcon className="size-4" />
@@ -608,11 +606,12 @@ export function CommentCreateForm({
 									onAddComment();
 								}
 							}}
-							placeholder="Reply..."
+							placeholder="Reply…"
 							variant="comment"
 						/>
 
 						<Button
+							aria-label="Add comment"
 							className="absolute end-0.5 bottom-0.5 ms-auto size-6 shrink-0"
 							disabled={commentContent.trim().length === 0}
 							onClick={(e) => {

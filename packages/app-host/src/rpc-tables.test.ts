@@ -1,3 +1,4 @@
+import type { RouteClaim } from "./rpc.ts";
 // Lockstep guard: the METHOD_CAPABILITY / GRANT_CAPABILITY / STREAMING_METHODS
 // maps in `rpc.ts` are now DERIVED at module load from the blessed host-API table
 // (`crates/ryu-kernel-contracts/schemas/host-api.json`). This test pins the derived
@@ -32,7 +33,9 @@ test("registers targeted Inbox notifications as a separate capability", () => {
 //    single-source refactor (git HEAD~ of rpc.ts). Do NOT regenerate these from
 //    the JSON — their whole job is to be an INDEPENDENT copy. ──────────────────
 
-const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
+const OLD_METHOD_CAPABILITY = {
+	"files.read": "file.access",
+	"files.write": "file.access",
 	"backups.destinations": "backups.app",
 	"backups.create": "backups.app",
 	"backups.list": "backups.app",
@@ -95,10 +98,19 @@ const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
 	"spaces.updateDoc": "spaces.docs",
 	"spaces.listDocs": "spaces.docs",
 	"spaces.deleteDoc": "spaces.docs",
+	"spaces.createDatabase": "spaces.database",
+	"spaces.listDatabases": "spaces.database",
+	"spaces.getDatabase": "spaces.database",
+	"spaces.updateDatabase": "spaces.database",
+	"spaces.queryDatabase": "spaces.database",
+	"spaces.deleteDatabase": "spaces.database",
 	"spaces.search": "spaces.docs",
 	"media.image": "media.generate",
 	"media.video": "media.generate",
+	"media.audio": "media.generate",
 	"media.tts": "media.generate",
+	"media.ttsEngines": "media.generate",
+	"media.ttsEngineInstall": "voice.models.manage",
 	"media.transcribe": "media.transcribe",
 	"media.recording": "media.recording",
 	"registry.engineModels": "core.listAgents",
@@ -204,6 +216,8 @@ const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
 	"warmup.list": "warmup.crud",
 	"warmup.apply": "warmup.crud",
 	"warmup.runNow": "warmup.crud",
+	"subscriptions.list": "subscriptions.read",
+	"subscriptions.usage": "subscriptions.read",
 	"learning.config": "learning.crud",
 	"learning.experience": "learning.crud",
 	"learning.healing": "learning.crud",
@@ -211,8 +225,11 @@ const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
 	"approvals.approve": "approvals.crud",
 	"approvals.reject": "approvals.crud",
 	"notifications.list": "approvals.crud",
+	"notifications.appIcons": "approvals.crud",
 	"notifications.markRead": "approvals.crud",
 	"notifications.ack": "approvals.crud",
+	"notifications.archive": "approvals.crud",
+	"notifications.unarchive": "approvals.crud",
 	"notifications.send": "notifications.send",
 	"suggestions.list": "approvals.crud",
 	"suggestions.feedback": "approvals.crud",
@@ -263,6 +280,8 @@ const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
 	"skills.restore": "skills.crud",
 	"skills.distribute": "skills.crud",
 	"skills.setTitle": "skills.crud",
+	// A builder app installs only the companion-only app it made (`app-bundle.ts`).
+	"apps.installBundle": "plugins.install",
 	"shell.openTab": "shell.integrate",
 	"shell.themeSubscribe": "shell.integrate",
 	// Host display preferences (the "Friendly names" toggle today). Same capability
@@ -276,13 +295,14 @@ const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
 	// page context to the one global "Ask Ryu" surface and may take it over while
 	// its own page is open. One capability for the whole family.
 	"assistant.publishContext": "assistant.context",
+	"ui.updateModelContext": "assistant.context",
 	"assistant.clearContext": "assistant.context",
 	"assistant.registerSurface": "assistant.context",
 	"assistant.clearSurface": "assistant.context",
 	"assistant.open": "assistant.context",
-};
+} satisfies Record<string, Capability>;
 
-const OLD_GRANT_CAPABILITY: Record<string, Capability> = {
+const OLD_GRANT_CAPABILITY = {
 	"backups:app": "backups.app",
 	"native:haptics": "native.haptics",
 	"native:notifications": "native.notifications",
@@ -300,7 +320,9 @@ const OLD_GRANT_CAPABILITY: Record<string, Capability> = {
 	"storage:kv": "storage.kv",
 	"crypto:seal": "crypto.seal",
 	"spaces:docs": "spaces.docs",
+	"spaces:database": "spaces.database",
 	"media:generate": "media.generate",
+	"voice:models:manage": "voice.models.manage",
 	"media:transcribe": "media.transcribe",
 	"media:record": "media.recording",
 	"finetune:runs": "finetune.runs",
@@ -320,6 +342,7 @@ const OLD_GRANT_CAPABILITY: Record<string, Capability> = {
 	"mail:crud": "mail.crud",
 	"calendar:crud": "calendar.crud",
 	"warmup:crud": "warmup.crud",
+	"subscriptions:read": "subscriptions.read",
 	"learning:crud": "learning.crud",
 	"approvals:crud": "approvals.crud",
 	"notifications:send-to-user": "notifications.send",
@@ -333,9 +356,10 @@ const OLD_GRANT_CAPABILITY: Record<string, Capability> = {
 	"subtitles:crud": "subtitles.crud",
 	"blueprint:review": "blueprint.review",
 	"skills:crud": "skills.crud",
+	"plugins:install": "plugins.install",
 	"shell:integrate": "shell.integrate",
 	"assistant:context": "assistant.context",
-};
+} satisfies Record<string, Capability>;
 
 const OLD_STREAMING_METHODS: readonly string[] = [
 	"agent.run.stream",
@@ -355,11 +379,7 @@ const OLD_STREAMING_METHODS: readonly string[] = [
 function diffMap(
 	derived: Record<string, Capability>,
 	fixture: Record<string, Capability>
-): {
-	derivedKeys: string[];
-	fixtureKeys: string[];
-	valueMismatches: string[];
-} {
+) {
 	const derivedKeys = Object.keys(derived).sort();
 	const fixtureKeys = Object.keys(fixture).sort();
 	const valueMismatches = fixtureKeys.filter(
@@ -403,8 +423,14 @@ describe("rpc tables derive from the blessed host-API contract (lockstep)", () =
 	});
 
 	test("the contract version is a non-empty semver-shaped string", () => {
-		expect(typeof HOST_API_VERSION).toBe("string");
 		expect(HOST_API_VERSION).toMatch(/^\d+\.\d+\.\d+/);
+	});
+});
+
+describe("monitor provider usage methods removed from the host contract", () => {
+	test("usage reads stay unavailable unless the shared API contract declares them", () => {
+		expect(METHOD_CAPABILITY["monitors.usageProviders"]).toBeUndefined();
+		expect(METHOD_CAPABILITY["monitors.usageQuery"]).toBeUndefined();
 	});
 });
 
@@ -415,7 +441,8 @@ describe("skills.distribute RPC", () => {
 		const received: string[] = [];
 		const services: HostServices = {
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 			skillsDistribute: ({ id }) => {
 				received.push(id);
 				return Promise.resolve();
@@ -433,7 +460,8 @@ describe("skills.distribute RPC", () => {
 			let called = false;
 			const services: HostServices = {
 				listAgents: () => Promise.resolve([]),
-				registerRoute: () => Promise.resolve(null),
+				registerRoute: (claim: RouteClaim) =>
+					Promise.resolve({ path: claim.path }),
 				skillsDistribute: () => {
 					called = true;
 					return Promise.resolve();
@@ -445,10 +473,18 @@ describe("skills.distribute RPC", () => {
 				[input],
 				granted,
 				services
-			).catch((reason: unknown) => reason);
+			).catch((reason) => {
+				if (!(reason instanceof CodedRpcError)) {
+					throw reason;
+				}
+				return reason;
+			});
 
 			expect(error).toBeInstanceOf(CodedRpcError);
-			expect((error as CodedRpcError).code).toBe("invalid_args");
+			if (!(error instanceof CodedRpcError)) {
+				throw new Error("Expected coded RPC rejection");
+			}
+			expect(error.code).toBe("invalid_args");
 			expect(called).toBe(false);
 		});
 	}
@@ -465,7 +501,8 @@ describe("i18n RPC", () => {
 				return "localized";
 			},
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 		};
 
 		await expect(
@@ -499,7 +536,8 @@ describe("i18n RPC", () => {
 				return "should not run";
 			},
 			listAgents: () => Promise.resolve([]),
-			registerRoute: () => Promise.resolve(null),
+			registerRoute: (claim: RouteClaim) =>
+				Promise.resolve({ path: claim.path }),
 		};
 
 		const error = await dispatchRpc(
@@ -513,10 +551,18 @@ describe("i18n RPC", () => {
 			],
 			granted,
 			services
-		).catch((reason: unknown) => reason);
+		).catch((reason) => {
+			if (!(reason instanceof CodedRpcError)) {
+				throw reason;
+			}
+			return reason;
+		});
 
 		expect(error).toBeInstanceOf(CodedRpcError);
-		expect((error as CodedRpcError).code).toBe("invalid_args");
+		if (!(error instanceof CodedRpcError)) {
+			throw new Error("Expected coded RPC rejection");
+		}
+		expect(error.code).toBe("invalid_args");
 		expect(called).toBe(false);
 	});
 });

@@ -36,8 +36,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::sidecar::download_manager::{
-    bin_dir, build_http_client, extract_binary_with_libs, fetch_sibling_sha256, ryu_dir,
-    sha256_sibling_url, VersionStore,
+    bin_dir, build_http_client, extract_binary_with_libs, fetch_sibling_sha256, sha256_sibling_url,
+    VersionStore,
 };
 
 /// The upstream release this Core installs, pinned at compile time.
@@ -217,7 +217,28 @@ fn ryu_release_base() -> String {
     super::env_bin(RYU_RELEASE_BASE_ENV).unwrap_or_else(|| DEFAULT_RYU_RELEASE_BASE.to_owned())
 }
 
+/// The release bases to try for the version-named mesh assets, in order.
+///
+/// The asset names carry Tailscale's version, and each Ryu release publishes
+/// only its own pin. `releases/latest` therefore stops serving this Core's pin
+/// the moment a later release bumps it, so the running Core's OWN release comes
+/// first; `latest` stays as the fallback for a build whose release does not
+/// exist (a locally built version). An operator override is used alone.
+fn ryu_release_bases() -> Vec<String> {
+    if let Some(base) = super::env_bin(RYU_RELEASE_BASE_ENV) {
+        return vec![base];
+    }
+    vec![
+        crate::update::own_release_download_base(),
+        DEFAULT_RYU_RELEASE_BASE.to_owned(),
+    ]
+}
+
 fn ryu_asset_url(binary: &str, platform: &str) -> String {
+    ryu_asset_url_in(&ryu_release_base(), binary, platform)
+}
+
+fn ryu_asset_url_in(base: &str, binary: &str, platform: &str) -> String {
     let extension = if platform.starts_with("windows-") {
         ".exe"
     } else {
@@ -225,7 +246,7 @@ fn ryu_asset_url(binary: &str, platform: &str) -> String {
     };
     format!(
         "{}/{}-{TAILSCALE_TARGET_VERSION}-{platform}{extension}",
-        ryu_release_base().trim_end_matches('/'),
+        base.trim_end_matches('/'),
         binary
     )
 }
@@ -382,7 +403,7 @@ impl TailscaleDownloader {
         // result is a checksum mismatch nobody can explain.
         let is_zip = url.ends_with(".zip");
         let archive_ext = if is_zip { "zip" } else { "tgz" };
-        let archive_dest = ryu_dir().join("tmp").join(if is_override {
+        let archive_dest = crate::sidecar::download_manager::tmp_dir().join(if is_override {
             format!("tailscale-override.{archive_ext}")
         } else {
             format!("tailscale-{TAILSCALE_TARGET_VERSION}.{archive_ext}")
@@ -488,16 +509,23 @@ impl TailscaleDownloader {
         })?;
 
         for binary in [DAEMON_BIN, CLI_BIN] {
-            let url = ryu_asset_url(binary, platform);
-            let checksum = fetch_sibling_sha256(&self.client, &url)
-                .await
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "no usable checksum published for the Ryu Tailscale asset at {}",
-                        sha256_sibling_url(&url)
-                    )
-                })?;
-            let temporary = ryu_dir().join("tmp").join(format!(
+            // The first base that publishes this asset's checksum is the one
+            // that publishes the asset.
+            let mut resolved = None;
+            for base in ryu_release_bases() {
+                let url = ryu_asset_url_in(&base, binary, platform);
+                if let Some(checksum) = fetch_sibling_sha256(&self.client, &url).await {
+                    resolved = Some((url, checksum));
+                    break;
+                }
+            }
+            let (url, checksum) = resolved.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no usable checksum published for the Ryu Tailscale asset at {}",
+                    sha256_sibling_url(&ryu_asset_url(binary, platform))
+                )
+            })?;
+            let temporary = crate::sidecar::download_manager::tmp_dir().join(format!(
                 "tailscale-{TAILSCALE_TARGET_VERSION}-{platform}-{binary}.download"
             ));
             let downloaded = downloads
@@ -817,6 +845,26 @@ mod tests {
     }
 
     #[test]
+    fn mesh_assets_come_from_this_cores_own_release_first() {
+        if super::super::env_bin(RYU_RELEASE_BASE_ENV).is_some() {
+            return; // an operator override is used alone
+        }
+        assert_eq!(
+            ryu_release_bases(),
+            vec![
+                crate::update::own_release_download_base(),
+                DEFAULT_RYU_RELEASE_BASE.to_owned(),
+            ]
+        );
+        assert!(
+            crate::update::own_release_download_base().ends_with(&format!(
+                "/releases/download/v{}",
+                crate::update::current_version()
+            ))
+        );
+    }
+
+    #[test]
     fn clean_host_release_asset_names_keep_windows_extensions() {
         assert_eq!(
             ryu_asset_url("tailscaled", "macos-arm64"),
@@ -849,5 +897,71 @@ mod tests {
         // the CLI as its daemon.
         assert_ne!(DAEMON_BIN, CLI_BIN);
         assert!(DAEMON_BIN.starts_with(CLI_BIN), "the trap this guards");
+    }
+
+    /// Every `tailscale`/`tailscaled` version that release.yml's `mesh-clients` job builds
+    /// or lists must be the version this Core pins. The version is written in several
+    /// places there (the clone tag, the two `build_dist.sh` outputs, the publish-time asset
+    /// list); a bump that misses one ships assets the downloader cannot find.
+    #[test]
+    fn release_workflow_builds_the_pinned_tailscale_version() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.github/workflows/release.yml");
+        // The public overlay carries no private workflows; there is nothing to compare.
+        let Ok(workflow) = std::fs::read_to_string(&path) else {
+            eprintln!("skipping: {} is not present", path.display());
+            return;
+        };
+
+        // `TAILSCALE_VERSION: '<v>'`: the tag the job clones.
+        let mut found = Vec::new();
+        for line in workflow.lines() {
+            if let Some(rest) = line.trim().strip_prefix("TAILSCALE_VERSION:") {
+                found.push((
+                    "TAILSCALE_VERSION".to_owned(),
+                    rest.trim().trim_matches(['\'', '"']).to_owned(),
+                ));
+            }
+        }
+        // `tailscale-<v>-<suffix>` and `tailscaled-<v>-<suffix>` asset names.
+        for name in ["tailscaled-", "tailscale-"] {
+            let mut rest = workflow.as_str();
+            while let Some(at) = rest.find(name) {
+                let after = &rest[at + name.len()..];
+                let version: String = after
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '.')
+                    .collect();
+                // Only `<name><digits.digits.digits>-` is a versioned asset; skip prose
+                // like `tailscale-source` and a trailing `tailscaled-` inside `tailscaled-1`.
+                if version.split('.').count() == 3
+                    && after[version.len()..].starts_with('-')
+                    && version.split('.').all(|part| !part.is_empty())
+                {
+                    found.push((format!("{name}{version}-..."), version));
+                }
+                rest = after;
+            }
+        }
+
+        let named_in_assets = found
+            .iter()
+            .filter(|(label, _)| label != "TAILSCALE_VERSION")
+            .count();
+        assert!(
+            found.iter().any(|(label, _)| label == "TAILSCALE_VERSION"),
+            "release.yml no longer sets TAILSCALE_VERSION; update this test with the job"
+        );
+        assert!(
+            named_in_assets >= 2,
+            "expected versioned tailscale asset names in release.yml, found {named_in_assets}"
+        );
+        for (label, version) in &found {
+            assert_eq!(
+                version, TAILSCALE_TARGET_VERSION,
+                "release.yml names tailscale {version} at `{label}` but TAILSCALE_TARGET_VERSION \
+                 is {TAILSCALE_TARGET_VERSION}: bump every occurrence together"
+            );
+        }
     }
 }

@@ -13,19 +13,29 @@
 import {
 	FullAccessSelectionProvider,
 	useFullAccessSelectionGuard,
-} from "@ryu/blocks/composer/full-access-warning";
-import { Button } from "@ryu/ui/components/button";
-import { RangeSlider } from "@ryu/ui/components/motion/range-slider";
+} from "@ryu/blocks/composer/full-access-warning.tsx";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { RangeSlider } from "@ryu/ui/components/motion/range-slider.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/select.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useState } from "react";
 import type { ComposerSettingsSection } from "@/components/agent-elements/input/composer-settings-menu.tsx";
 import { useComposerAcpSections } from "@/components/agent-elements/input/use-composer-acp-sections.ts";
@@ -33,7 +43,11 @@ import { useAcpConfig } from "@/src/hooks/useAcpConfig.ts";
 import { useAcpSessions } from "@/src/hooks/useAcpSessions.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
-import { authenticateAgent, logoutAgent } from "@/src/lib/api/acp.ts";
+import {
+	acpAuthAwaitsVerification,
+	authenticateAgent,
+	logoutAgent,
+} from "@/src/lib/api/acp.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { LEVEL_RAMP_CLASS, levelFillColor } from "@/src/lib/level-ramp.ts";
 import { formatDateTime } from "@/src/lib/timezone.ts";
@@ -42,7 +56,7 @@ import {
 	SettingsSection,
 } from "../settings/shared/settings-items.tsx";
 
-function errMessage(e: unknown, fallback: string): string {
+function errMessage<TError>(e: TError, fallback: string): string {
 	return e instanceof Error ? e.message : fallback;
 }
 
@@ -112,7 +126,7 @@ function AcpOptionRow({ section }: { section: ComposerSettingsSection }) {
 					{section.items.map((item, i) => (
 						<span
 							className={cn(
-								"flex-1 truncate text-[10px] leading-none",
+								"type-compact flex-1 truncate leading-none",
 								i === 0 && "text-left",
 								i === section.items.length - 1 && "text-right",
 								i > 0 && i < section.items.length - 1 && "text-center",
@@ -216,9 +230,8 @@ function AcpSessionOptionsSection({ agentId }: { agentId: string }) {
 				caption="Asking the agent which models and modes it supports…"
 				title="Session defaults"
 			>
-				<SettingsCard className="flex items-center gap-2">
-					<Spinner className="size-4" />
-					<span className="text-muted-foreground text-sm">Detecting…</span>
+				<SettingsCard>
+					<SkeletonRows label="Detecting…" rows={2} />
 				</SettingsCard>
 			</SettingsSection>
 		);
@@ -289,11 +302,12 @@ function AcpAuthSection({ agentId }: { agentId: string }) {
 			);
 			if (res.authenticated && res.verified) {
 				toast.success({ title: `Signed in with ${methodName}` });
-			} else if (res.authenticated) {
+			} else if (res.authenticated || acpAuthAwaitsVerification(res)) {
 				// Unverified: Core had no credential to check this agent against, so
 				// all that is known is that the agent accepted the request. Agents do
 				// advertise methods that accept it and log nobody in, so this must not
-				// be worded as a completed sign-in.
+				// be worded as a completed sign-in. Current Core reports this as
+				// `verificationRequired`; an older node sent `authenticated` unverified.
 				toast.info({
 					title: `${methodName} ran`,
 					description:
@@ -371,6 +385,10 @@ function AcpSessionsSection({ agentId }: { agentId: string }) {
 	// than a second probe of the agent.
 	const { config } = useAcpConfig(agentId);
 	const [pendingId, setPendingId] = useState<string | null>(null);
+	const [confirmTarget, setConfirmTarget] = useState<{
+		label: string;
+		sessionId: string;
+	} | null>(null);
 
 	// Nothing to show for agents that don't persist sessions (the common case).
 	if (loading || !data || data.unsupported || data.sessions.length === 0) {
@@ -425,7 +443,10 @@ function AcpSessionsSection({ agentId }: { agentId: string }) {
 							key={session.sessionId}
 						>
 							<div className="flex min-w-0 flex-col gap-0.5">
-								<span className="truncate font-medium text-sm">
+								<span
+									className="truncate font-medium text-sm"
+									title={session.title || session.sessionId}
+								>
 									{session.title || session.sessionId}
 								</span>
 								{subtext ? (
@@ -439,8 +460,15 @@ function AcpSessionsSection({ agentId }: { agentId: string }) {
 							    hunt for the setting that would enable it. */}
 							{canDelete ? (
 								<Button
+									aria-label={`Delete session ${session.title || session.sessionId}`}
+									className="text-status-destructive"
 									disabled={busy}
-									onClick={() => handleDelete(session.sessionId)}
+									onClick={() =>
+										setConfirmTarget({
+											label: session.title || session.sessionId,
+											sessionId: session.sessionId,
+										})
+									}
 									size="sm"
 									variant="ghost"
 								>
@@ -451,6 +479,39 @@ function AcpSessionsSection({ agentId }: { agentId: string }) {
 					);
 				})}
 			</SettingsCard>
+			<AlertDialog
+				onOpenChange={(open) => {
+					if (!open) {
+						setConfirmTarget(null);
+					}
+				}}
+				open={confirmTarget !== null}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete this session?</AlertDialogTitle>
+						<AlertDialogDescription>
+							{confirmTarget
+								? `"${confirmTarget.label}" will be removed from the agent's own store. This cannot be undone.`
+								: ""}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={() => {
+								if (confirmTarget) {
+									void handleDelete(confirmTarget.sessionId);
+								}
+								setConfirmTarget(null);
+							}}
+							variant="destructive"
+						>
+							Delete session
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</SettingsSection>
 	);
 }

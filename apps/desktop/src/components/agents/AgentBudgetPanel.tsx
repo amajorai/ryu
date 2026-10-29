@@ -1,8 +1,9 @@
 import { Delete01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BudgetRuleFields } from "@/src/components/gateway/BudgetRuleFields.tsx";
 import {
@@ -19,7 +20,7 @@ import {
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useGatewayConfigurable } from "@/src/hooks/useGatewayConfigurable.ts";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { ApiError, toTarget } from "@/src/lib/api/client.ts";
 import {
 	type BudgetRule,
 	type BudgetSpend,
@@ -38,6 +39,7 @@ export function AgentBudgetPanel({
 	agentId: string;
 	disabled?: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const node = useActiveNode();
 	const target = useMemo(
 		() => toTarget(node),
@@ -64,9 +66,11 @@ export function AgentBudgetPanel({
 			setForm(budgetRuleToForm(agentId, nextRule));
 		} catch (cause) {
 			setError(
-				cause instanceof Error
-					? cause.message
-					: "Gateway budget configuration is unavailable."
+				cause instanceof ApiError && cause.serverMessage
+					? cause.serverMessage
+					: cause instanceof Error
+						? cause.message
+						: "Gateway budget configuration is unavailable."
 			);
 		} finally {
 			setLoading(false);
@@ -87,14 +91,22 @@ export function AgentBudgetPanel({
 	}, [loadConfig]);
 
 	useEffect(() => {
+		// Core serves live spend only to callers who hold gateway.configure, so
+		// polling without it would just repeat a refused request every few
+		// seconds. The note below explains the missing readout instead.
+		if (!canConfigure) {
+			setSpend(null);
+			return;
+		}
 		loadSpend().catch(() => undefined);
 		const timer = setInterval(() => {
 			loadSpend().catch(() => undefined);
 		}, SPEND_POLL_MS);
 		return () => clearInterval(timer);
-	}, [loadSpend]);
+	}, [canConfigure, loadSpend]);
 
 	const handleSave = async () => {
+		setSaved(false);
 		if (budgetUsdToMicroUsd(form.limitUsd) === null) {
 			setError(
 				"Spend cap must be a non-negative USD amount (up to 6 decimals)."
@@ -109,6 +121,7 @@ export function AgentBudgetPanel({
 			const nextRule = budgetFormToRule(form);
 			await updateGatewayConfig(target, {
 				budgets: withAgentBudget(config.budgets, agentId, nextRule),
+				expectedRevision: config.configRevision ?? undefined,
 			});
 			setRule(nextRule);
 			setForm(budgetRuleToForm(agentId, nextRule));
@@ -116,7 +129,11 @@ export function AgentBudgetPanel({
 			await loadSpend();
 		} catch (cause) {
 			setError(
-				cause instanceof Error ? cause.message : "Failed to save agent budget."
+				cause instanceof ApiError && cause.serverMessage
+					? cause.serverMessage
+					: cause instanceof Error
+						? cause.message
+						: "Failed to save agent budget."
 			);
 		} finally {
 			setSaving(false);
@@ -134,6 +151,7 @@ export function AgentBudgetPanel({
 			const config = await fetchGatewayConfig(target);
 			await updateGatewayConfig(target, {
 				budgets: withAgentBudget(config.budgets, agentId, null),
+				expectedRevision: config.configRevision ?? undefined,
 			});
 			setRule(null);
 			setForm(budgetRuleToForm(agentId));
@@ -141,9 +159,11 @@ export function AgentBudgetPanel({
 			setSaved(true);
 		} catch (cause) {
 			setError(
-				cause instanceof Error
-					? cause.message
-					: "Failed to remove agent budget."
+				cause instanceof ApiError && cause.serverMessage
+					? cause.serverMessage
+					: cause instanceof Error
+						? cause.message
+						: "Failed to remove agent budget."
 			);
 		} finally {
 			setSaving(false);
@@ -160,10 +180,7 @@ export function AgentBudgetPanel({
 			title="Budget"
 		>
 			{loading ? (
-				<div className="flex items-center gap-2 text-muted-foreground text-sm">
-					<Spinner className="size-4" />
-					Loading budget…
-				</div>
+				<SkeletonRows label="Loading budget…" spacing="comfortable" />
 			) : (
 				<SettingsCard className="flex flex-col gap-4">
 					<div className="flex flex-wrap items-start justify-between gap-3">
@@ -171,16 +188,23 @@ export function AgentBudgetPanel({
 							<p className="font-medium text-sm">This agent's Gateway budget</p>
 							<p className="text-muted-foreground text-xs">
 								{rule
-									? `${formatBudgetUsd(rule.limit)} spend cap · ${ACTION_LABELS[rule.action]}`
+									? tl("{limit} spend cap · {action}", {
+											action: tl(ACTION_LABELS[rule.action]),
+											limit: formatBudgetUsd(rule.limit),
+										})
 									: "No cap configured yet."}
 							</p>
 						</div>
 						{spend?.reachable && rule ? (
 							<Badge variant="secondary">
-								Live spend: {formatBudgetUsd(spent)}
 								{configuredLimit > 0
-									? ` / ${formatBudgetUsd(configuredLimit)}`
-									: ""}{" "}
+									? tl("Live spend: {spent} / {limit}", {
+											limit: formatBudgetUsd(configuredLimit),
+											spent: formatBudgetUsd(spent),
+										})
+									: tl("Live spend: {spent}", {
+											spent: formatBudgetUsd(spent),
+										})}{" "}
 							</Badge>
 						) : null}
 					</div>
@@ -218,11 +242,13 @@ export function AgentBudgetPanel({
 					{canConfigure ? null : (
 						<p className="text-muted-foreground text-xs">
 							You need the <span className="font-mono">gateway.configure</span>{" "}
-							permission to change this rule.
+							permission to change this rule or see its live spend.
 						</p>
 					)}
 					{error ? (
-						<p className="text-sm text-status-destructive">{error}</p>
+						<p className="text-sm text-status-destructive" role="alert">
+							{error}
+						</p>
 					) : null}
 					{saved ? (
 						<p className="text-muted-foreground text-xs">

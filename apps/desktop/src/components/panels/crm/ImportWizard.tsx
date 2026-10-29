@@ -15,13 +15,14 @@
 
 import { Alert01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Label } from "@ryu/ui/components/label";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import {
 	NativeSelect,
 	NativeSelectOption,
-} from "@ryu/ui/components/native-select";
+} from "@ryu/ui/components/native-select.tsx";
 import {
 	Table,
 	TableBody,
@@ -29,7 +30,7 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
-} from "@ryu/ui/components/table";
+} from "@ryu/ui/components/table.tsx";
 import { formatNumber } from "@ryu/ui/lib/number-format.ts";
 import { useCallback, useState } from "react";
 import type {
@@ -57,6 +58,7 @@ export function ImportWizard({
 	onDone: () => void;
 	subject: ObjectWithFields;
 }) {
+	const tl = useLiteralMessages();
 	const [step, setStep] = useState<Step>("upload");
 	const [job, setJob] = useState<ImportJob | null>(null);
 	const [mappings, setMappings] = useState<ImportMapping[]>([]);
@@ -147,7 +149,9 @@ export function ImportWizard({
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="border-b px-4 py-3">
 				<h2 className="font-medium text-base">
-					Import {subject.object.plural}
+					{tl("Import {objectPlural}", {
+						objectPlural: subject.object.plural,
+					})}
 				</h2>
 				<p className="text-muted-foreground text-xs">
 					Nothing is written until you apply. The dry run tells you exactly what
@@ -189,8 +193,10 @@ export function ImportWizard({
 				{step === "map" && job && (
 					<div className="space-y-4">
 						<div className="text-muted-foreground text-xs">
-							{formatNumber(job.row_count)} rows ·{" "}
-							{formatNumber(job.columns.length)} columns
+							{tl("{rowCount} rows · {columnCount} columns", {
+								columnCount: formatNumber(job.columns.length),
+								rowCount: formatNumber(job.row_count),
+							})}
 							{job.filename ? ` · ${job.filename}` : ""}
 						</div>
 
@@ -210,15 +216,17 @@ export function ImportWizard({
 										);
 										return (
 											<TableRow key={column.index}>
-												<TableCell className="font-medium">
+												<TableCell presentation="row-header">
 													{column.name}
 												</TableCell>
-												<TableCell className="text-muted-foreground text-xs">
+												<TableCell presentation="metadata">
 													{column.samples.slice(0, 3).join(", ") || "—"}
 												</TableCell>
 												<TableCell>
 													<NativeSelect
-														aria-label={`Import column ${column.name} as`}
+														aria-label={tl("Import column {columnName} as", {
+															columnName: column.name,
+														})}
 														onChange={(event) => {
 															const value = event.target.value;
 															setMappings((current) =>
@@ -300,7 +308,9 @@ export function ImportWizard({
 						{preview.unmapped_columns &&
 							preview.unmapped_columns.length > 0 && (
 								<p className="text-muted-foreground text-xs">
-									Not imported: {preview.unmapped_columns.join(", ")}
+									{tl("Not imported: {columnNames}", {
+										columnNames: preview.unmapped_columns.join(", "),
+									})}
 								</p>
 							)}
 
@@ -308,7 +318,7 @@ export function ImportWizard({
 							<div>
 								<h3 className="mb-1 font-medium text-sm">
 									Conflicts{" "}
-									<Badge className="font-normal" variant="secondary">
+									<Badge typography="normal" variant="secondary">
 										{preview.conflicts.length}
 									</Badge>
 								</h3>
@@ -331,11 +341,11 @@ export function ImportWizard({
 												<TableRow
 													key={`${conflict.row_index}-${conflict.field_id}`}
 												>
-													<TableCell className="tabular-nums">
+													<TableCell presentation="numeric">
 														{conflict.row_index + 1}
 													</TableCell>
 													<TableCell>{conflict.field_slug}</TableCell>
-													<TableCell className="text-muted-foreground">
+													<TableCell presentation="muted">
 														{String(conflict.existing ?? "—")}
 													</TableCell>
 													<TableCell>
@@ -368,7 +378,11 @@ export function ImportWizard({
 							<Button disabled={busy} onClick={() => void runApply()} size="sm">
 								{busy
 									? "Importing…"
-									: `Import ${preview.create_count + preview.update_count} rows`}
+									: tl("Import {rowCount} rows", {
+											rowCount: String(
+												preview.create_count + preview.update_count
+											),
+										})}
 							</Button>
 						</div>
 					</div>

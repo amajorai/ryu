@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { ToolUIPart } from "ai";
 import { formatToolDuration, readToolTiming } from "./tool-timing.tsx";
 
 describe("formatToolDuration", () => {
@@ -36,7 +37,9 @@ describe("formatToolDuration", () => {
 });
 
 /** A part shaped the way the AI SDK lands Core's `providerMetadata`. */
-function stampedPart(ryu: Record<string, unknown>) {
+function stampedPart(
+	ryu: NonNullable<ToolUIPart["callProviderMetadata"]>[string]
+) {
 	return { type: "tool-Bash", callProviderMetadata: { ryu } };
 }
 

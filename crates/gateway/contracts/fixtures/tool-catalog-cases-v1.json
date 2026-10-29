@@ -1,0 +1,2014 @@
+{
+  "version": 1,
+  "description": "Golden cases for the curated tool catalog contract (Treg parity B3), asserted by ryu_gw_contracts::tool_catalog and @ryuhq/protocol/tool-catalog. validation lists an entry and the sorted codes it breaks on its own; transitions apply one verification result; select merges a Ryu and a Treg entry under a precedence; paidRouting names an entry and the built-in price row it is paired with (null for none). catalogChecks validate the named entries together as one catalog (built-in taxonomy and prices); beside lists the generated entries that may sit beside curated ones (curated wins on a shared endpoint id or provider operation).",
+  "validation": [
+    {
+      "name": "a valid unverified entry",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "a valid verified entry",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21",
+          "method": "docs_page"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "a valid drifted entry keeps its last pass",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "drifted",
+          "checkedOn": "2026-10-22",
+          "verifiedOn": "2026-10-21",
+          "method": "docs_page",
+          "reason": "marker gone"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": []
+    },
+    {
+      "name": "a valid retired entry may have no probes",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "retired",
+          "reason": "vendor withdrew it",
+          "successor": "github.GITHUB_LIST_REPOSITORY_ISSUES"
+        },
+        "probes": []
+      },
+      "issues": []
+    },
+    {
+      "name": "verified needs both dates",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "method": "docs_page",
+          "verifiedOn": "2026-10-21"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["verified_without_date"]
+    },
+    {
+      "name": "a pass date needs its method",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["verified_without_method"]
+    },
+    {
+      "name": "verified cannot postdate the last check",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-20",
+          "verifiedOn": "2026-10-21",
+          "method": "docs_page"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["verified_after_checked"]
+    },
+    {
+      "name": "verified carries no reason",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21",
+          "method": "docs_page",
+          "reason": "x"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["reason_not_allowed"]
+    },
+    {
+      "name": "drift needs a reason and a date",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "drifted"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["drifted_without_date", "drifted_without_reason"]
+    },
+    {
+      "name": "retirement needs a reason",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "retired",
+          "reason": " "
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["retired_without_reason"]
+    },
+    {
+      "name": "only a retired entry names a successor",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified",
+          "successor": "github.GITHUB_LIST_REPOSITORY_ISSUES"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["successor_not_retired"]
+    },
+    {
+      "name": "a live entry needs a probe",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": []
+      },
+      "issues": ["no_probes"]
+    },
+    {
+      "name": "dates must be calendar dates",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-02-30",
+        "verification": {
+          "state": "drifted",
+          "checkedOn": "2026-13-01",
+          "reason": "x"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["invalid_checked_on", "invalid_docs_checked_on"]
+    },
+    {
+      "name": "the endpoint belongs to its provider",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["endpoint_provider_mismatch"]
+    },
+    {
+      "name": "a curated entry names its capability and platform",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["missing_taxonomy_ref"]
+    },
+    {
+      "name": "docs and probe URLs are HTTPS",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "http://docs.github.com/x",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "ftp://x",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["invalid_docs_url", "invalid_probe_url"]
+    },
+    {
+      "name": "markers are trimmed and at least three characters",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/x",
+            "expect": ["ab"]
+          }
+        ]
+      },
+      "issues": ["invalid_expect"]
+    },
+    {
+      "name": "a docs probe needs a marker",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/x",
+            "expect": []
+          }
+        ]
+      },
+      "issues": ["invalid_expect"]
+    },
+    {
+      "name": "a credential must be on the verifier allowlist",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.github.com/user",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["login"],
+            "estimatedMicroUsd": 0,
+            "credential": {
+              "env": "RYU_DB_MASTER_KEY",
+              "header": "Authorization",
+              "scheme": "bearer"
+            }
+          }
+        ]
+      },
+      "issues": ["unknown_credential"]
+    },
+    {
+      "name": "a credential goes only to its own host",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://collector.example/user",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["login"],
+            "estimatedMicroUsd": 0,
+            "credential": {
+              "env": "RYU_VERIFY_GITHUB_TOKEN",
+              "header": "Authorization",
+              "scheme": "bearer"
+            }
+          }
+        ]
+      },
+      "issues": ["credential_host_mismatch"]
+    },
+    {
+      "name": "a paid probe needs a credential",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.example.com/x",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["login"],
+            "estimatedMicroUsd": 10
+          }
+        ]
+      },
+      "issues": ["paid_probe_without_credential"]
+    },
+    {
+      "name": "expected status is a 2xx",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.github.com/user",
+            "expectStatus": 404,
+            "expectJson": "object",
+            "expectKeys": ["login"],
+            "estimatedMicroUsd": 0,
+            "credential": {
+              "env": "RYU_VERIFY_GITHUB_TOKEN",
+              "header": "Authorization",
+              "scheme": "bearer"
+            }
+          }
+        ]
+      },
+      "issues": ["invalid_expect_status"]
+    },
+    {
+      "name": "a GET has no body",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.github.com/user",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["login"],
+            "estimatedMicroUsd": 0,
+            "credential": {
+              "env": "RYU_VERIFY_GITHUB_TOKEN",
+              "header": "Authorization",
+              "scheme": "bearer"
+            },
+            "body": {
+              "q": "x"
+            }
+          }
+        ]
+      },
+      "issues": ["body_on_get"]
+    },
+    {
+      "name": "the recorded method needs a probe that can prove it",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21",
+          "method": "live_free"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["method_without_probe"]
+    },
+    {
+      "name": "at most four probes",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          },
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          },
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          },
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          },
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ]
+      },
+      "issues": ["too_many_probes"]
+    },
+    {
+      "name": "a generated entry may omit its capability and platform",
+      "entry": {
+        "endpoint": "exa.findsimilar",
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "generated",
+        "title": "Find similar links",
+        "docsUrl": "https://specs.vendor.example/openapi.yaml",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://specs.vendor.example/openapi.yaml",
+            "expect": ["/findSimilar"]
+          }
+        ],
+        "operation": {
+          "method": "POST",
+          "path": "/findSimilar"
+        },
+        "spec": {
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "checkedOn": "2026-10-21",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+        }
+      },
+      "issues": []
+    },
+    {
+      "name": "a generated entry names its spec and operation",
+      "entry": {
+        "endpoint": "exa.findsimilar",
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "generated",
+        "title": "Find similar links",
+        "docsUrl": "https://specs.vendor.example/openapi.yaml",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://specs.vendor.example/openapi.yaml",
+            "expect": ["/findSimilar"]
+          }
+        ]
+      },
+      "issues": ["generated_without_operation", "generated_without_spec"]
+    },
+    {
+      "name": "only a generated entry names a spec",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ],
+        "spec": {
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "checkedOn": "2026-10-21",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+        }
+      },
+      "issues": ["spec_not_allowed"]
+    },
+    {
+      "name": "any entry may name the operation it describes",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://docs.github.com/en/rest/issues/issues",
+            "expect": ["Get an issue"]
+          }
+        ],
+        "operation": {
+          "method": "GET",
+          "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+        }
+      },
+      "issues": []
+    },
+    {
+      "name": "spec and operation fields are checked",
+      "entry": {
+        "endpoint": "exa.findsimilar",
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "generated",
+        "title": "Find similar links",
+        "docsUrl": "https://specs.vendor.example/openapi.yaml",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://specs.vendor.example/openapi.yaml",
+            "expect": ["/findSimilar"]
+          }
+        ],
+        "operation": {
+          "method": "POST",
+          "path": "/findSimilar?x=1"
+        },
+        "spec": {
+          "url": "http://specs.vendor.example/openapi.yaml",
+          "checkedOn": "2026-13-01",
+          "sha256": "ABC"
+        }
+      },
+      "issues": [
+        "invalid_operation",
+        "invalid_spec_checked_on",
+        "invalid_spec_sha256",
+        "invalid_spec_url"
+      ]
+    },
+    {
+      "name": "an operation path is a path template, not a URL",
+      "entry": {
+        "endpoint": "exa.findsimilar",
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "generated",
+        "title": "Find similar links",
+        "docsUrl": "https://specs.vendor.example/openapi.yaml",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://specs.vendor.example/openapi.yaml",
+            "expect": ["/findSimilar"]
+          }
+        ],
+        "operation": {
+          "method": "GET",
+          "path": "search"
+        },
+        "spec": {
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "checkedOn": "2026-10-21",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+        }
+      },
+      "issues": ["invalid_operation"]
+    },
+    {
+      "name": "a generated entry never carries half a taxonomy reference",
+      "entry": {
+        "endpoint": "exa.findsimilar",
+        "provider": "exa",
+        "source": "ryu",
+        "tier": "generated",
+        "title": "Find similar links",
+        "docsUrl": "https://specs.vendor.example/openapi.yaml",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "unverified"
+        },
+        "probes": [
+          {
+            "kind": "docs_page",
+            "url": "https://specs.vendor.example/openapi.yaml",
+            "expect": ["/findSimilar"]
+          }
+        ],
+        "operation": {
+          "method": "POST",
+          "path": "/findSimilar"
+        },
+        "spec": {
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "checkedOn": "2026-10-21",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        "platform": "web"
+      },
+      "issues": ["missing_taxonomy_ref"]
+    },
+    {
+      "name": "a free route on a credential-free live GET is valid",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21",
+          "method": "live_free"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.github.com/repos/octocat/Hello-World/issues/1",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["number"],
+            "estimatedMicroUsd": 0
+          }
+        ],
+        "operation": {
+          "method": "GET",
+          "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+        },
+        "freeRoute": {
+          "baseUrl": "https://api.github.com"
+        }
+      },
+      "issues": []
+    },
+    {
+      "name": "a free route needs a GET operation",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21",
+          "method": "live_free"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.github.com/repos/octocat/Hello-World/issues/1",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["number"],
+            "estimatedMicroUsd": 0
+          }
+        ],
+        "operation": {
+          "method": "POST",
+          "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+        },
+        "freeRoute": {
+          "baseUrl": "https://api.github.com"
+        }
+      },
+      "issues": ["free_route_not_get"]
+    },
+    {
+      "name": "a free route is verified without a credential",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21",
+          "method": "live_free"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.github.com/repos/octocat/Hello-World/issues/1",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["number"],
+            "estimatedMicroUsd": 0,
+            "credential": {
+              "env": "RYU_VERIFY_GITHUB_TOKEN",
+              "header": "authorization",
+              "scheme": "bearer"
+            }
+          }
+        ],
+        "operation": {
+          "method": "GET",
+          "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+        },
+        "freeRoute": {
+          "baseUrl": "https://api.github.com"
+        }
+      },
+      "issues": [
+        "free_route_credentialed_probe",
+        "free_route_without_free_probe"
+      ]
+    },
+    {
+      "name": "a free route base is HTTPS",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "curated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21",
+          "method": "live_free"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.github.com/repos/octocat/Hello-World/issues/1",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["number"],
+            "estimatedMicroUsd": 0
+          }
+        ],
+        "operation": {
+          "method": "GET",
+          "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+        },
+        "freeRoute": {
+          "baseUrl": "http://api.github.com"
+        }
+      },
+      "issues": ["invalid_free_route_url"]
+    },
+    {
+      "name": "only a curated entry may be a free route",
+      "entry": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "provider": "github",
+        "source": "ryu",
+        "tier": "generated",
+        "toolkit": "github",
+        "platform": "github",
+        "capability": "issue.get",
+        "title": "Get an issue",
+        "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+        "docsCheckedOn": "2026-10-21",
+        "verification": {
+          "state": "verified",
+          "checkedOn": "2026-10-21",
+          "verifiedOn": "2026-10-21",
+          "method": "live_free"
+        },
+        "probes": [
+          {
+            "kind": "http",
+            "method": "GET",
+            "url": "https://api.github.com/repos/octocat/Hello-World/issues/1",
+            "expectStatus": 200,
+            "expectJson": "object",
+            "expectKeys": ["number"],
+            "estimatedMicroUsd": 0
+          }
+        ],
+        "operation": {
+          "method": "GET",
+          "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+        },
+        "freeRoute": {
+          "baseUrl": "https://api.github.com"
+        },
+        "spec": {
+          "url": "https://example.com/spec.json",
+          "checkedOn": "2026-10-21",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "issues": ["free_route_not_curated"]
+    }
+  ],
+  "transitions": [
+    {
+      "name": "a pass verifies an unverified entry",
+      "current": {
+        "state": "unverified"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "pass",
+        "ranOn": "2026-10-21",
+        "method": "docs_page"
+      },
+      "expected": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "changed": true
+    },
+    {
+      "name": "a pass clears drift",
+      "current": {
+        "state": "drifted",
+        "checkedOn": "2026-10-20",
+        "reason": "marker gone",
+        "verifiedOn": "2026-10-01",
+        "method": "live_free"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "pass",
+        "ranOn": "2026-10-21",
+        "method": "live_paid"
+      },
+      "expected": {
+        "checkedOn": "2026-10-21",
+        "method": "live_paid",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "changed": true
+    },
+    {
+      "name": "a mismatch drifts a verified entry and keeps its last pass",
+      "current": {
+        "state": "verified",
+        "checkedOn": "2026-10-20",
+        "verifiedOn": "2026-10-20",
+        "method": "docs_page"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "mismatch",
+        "ranOn": "2026-10-21",
+        "reason": " marker gone "
+      },
+      "expected": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "reason": "marker gone",
+        "state": "drifted",
+        "verifiedOn": "2026-10-20"
+      },
+      "changed": true
+    },
+    {
+      "name": "a mismatch drifts an unverified entry",
+      "current": {
+        "state": "unverified"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "mismatch",
+        "ranOn": "2026-10-21",
+        "reason": "endpoint answered 404"
+      },
+      "expected": {
+        "checkedOn": "2026-10-21",
+        "reason": "endpoint answered 404",
+        "state": "drifted"
+      },
+      "changed": true
+    },
+    {
+      "name": "an error is not a verdict",
+      "current": {
+        "state": "verified",
+        "checkedOn": "2026-10-20",
+        "verifiedOn": "2026-10-20",
+        "method": "docs_page"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "error",
+        "ranOn": "2026-10-21",
+        "reason": "timed out"
+      },
+      "expected": {
+        "state": "verified",
+        "checkedOn": "2026-10-20",
+        "verifiedOn": "2026-10-20",
+        "method": "docs_page"
+      },
+      "changed": false
+    },
+    {
+      "name": "a skip is not a verdict",
+      "current": {
+        "state": "unverified"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "skipped",
+        "ranOn": "2026-10-21",
+        "reason": "budget"
+      },
+      "expected": {
+        "state": "unverified"
+      },
+      "changed": false
+    },
+    {
+      "name": "a retired entry never changes",
+      "current": {
+        "state": "retired",
+        "reason": "withdrawn"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "pass",
+        "ranOn": "2026-10-21",
+        "method": "docs_page"
+      },
+      "expected": {
+        "state": "retired",
+        "reason": "withdrawn"
+      },
+      "changed": false
+    },
+    {
+      "name": "a stale result cannot undo a newer verdict",
+      "current": {
+        "state": "drifted",
+        "checkedOn": "2026-10-22",
+        "reason": "marker gone"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "pass",
+        "ranOn": "2026-10-21",
+        "method": "docs_page"
+      },
+      "expected": {
+        "state": "drifted",
+        "checkedOn": "2026-10-22",
+        "reason": "marker gone"
+      },
+      "changed": false
+    },
+    {
+      "name": "a pass without a method is invalid and ignored",
+      "current": {
+        "state": "unverified"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "pass",
+        "ranOn": "2026-10-21"
+      },
+      "expected": {
+        "state": "unverified"
+      },
+      "changed": false
+    },
+    {
+      "name": "the same pass again changes nothing",
+      "current": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "result": {
+        "endpoint": "github.GITHUB_GET_AN_ISSUE",
+        "outcome": "pass",
+        "ranOn": "2026-10-21",
+        "method": "docs_page"
+      },
+      "expected": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "changed": false
+    }
+  ],
+  "entries": {
+    "ryu_verified": {
+      "endpoint": "github.GITHUB_GET_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.get",
+      "title": "Get an issue",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "verified",
+        "checkedOn": "2026-10-21",
+        "verifiedOn": "2026-10-21",
+        "method": "docs_page"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/issues",
+          "expect": ["Get an issue"]
+        }
+      ]
+    },
+    "ryu_unverified": {
+      "endpoint": "github.GITHUB_GET_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.get",
+      "title": "Get an issue",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/issues",
+          "expect": ["Get an issue"]
+        }
+      ]
+    },
+    "ryu_drifted": {
+      "endpoint": "github.GITHUB_GET_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.get",
+      "title": "Get an issue",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "drifted",
+        "checkedOn": "2026-10-21",
+        "reason": "marker gone"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/issues",
+          "expect": ["Get an issue"]
+        }
+      ]
+    },
+    "treg": {
+      "endpoint": "github.GITHUB_GET_AN_ISSUE",
+      "provider": "github",
+      "source": "treg",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.get",
+      "title": "Get an issue",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://docs.github.com/en/rest/issues/issues",
+          "expect": ["Get an issue"]
+        }
+      ]
+    },
+    "generated_unverified": {
+      "endpoint": "exa.findsimilar",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Find similar links",
+      "docsUrl": "https://specs.vendor.example/openapi.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "expect": ["/findSimilar"]
+        }
+      ],
+      "operation": {
+        "method": "POST",
+        "path": "/findSimilar"
+      },
+      "spec": {
+        "url": "https://specs.vendor.example/openapi.yaml",
+        "checkedOn": "2026-10-21",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+      }
+    },
+    "generated_verified": {
+      "endpoint": "exa.findsimilar",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Find similar links",
+      "docsUrl": "https://specs.vendor.example/openapi.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "verified",
+        "checkedOn": "2026-10-21",
+        "verifiedOn": "2026-10-21",
+        "method": "docs_page"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "expect": ["/findSimilar"]
+        }
+      ],
+      "operation": {
+        "method": "POST",
+        "path": "/findSimilar"
+      },
+      "spec": {
+        "url": "https://specs.vendor.example/openapi.yaml",
+        "checkedOn": "2026-10-21",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+      }
+    },
+    "curated_exa_auto": {
+      "endpoint": "exa.search.auto",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.search",
+      "title": "Exa search (auto)",
+      "docsUrl": "https://docs.exa.ai/reference/search",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://exa.ai/pricing",
+          "expect": [
+            "Auto Search",
+            "Base price, with up to 10 results (per 1k requests) $4 $7",
+            "Cost per additional result above 10 (per 1k requests) $1"
+          ]
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "url": "https://api.exa.ai/search",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["results"],
+          "estimatedMicroUsd": 7000,
+          "credential": {
+            "env": "RYU_VERIFY_EXA_KEY",
+            "header": "x-api-key",
+            "scheme": "raw"
+          },
+          "body": {
+            "query": "capability taxonomy for agent tools",
+            "type": "auto",
+            "numResults": 1
+          }
+        }
+      ],
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      }
+    },
+    "curated_exa_instant": {
+      "endpoint": "exa.search.instant",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "curated",
+      "platform": "web",
+      "capability": "web.search",
+      "title": "Exa search (instant)",
+      "docsUrl": "https://docs.exa.ai/reference/search",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "checkedOn": "2026-10-21",
+        "method": "docs_page",
+        "state": "verified",
+        "verifiedOn": "2026-10-21"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://exa.ai/pricing",
+          "expect": [
+            "Lite Search",
+            "Base price, with up to 10 results (per 1k requests) $4"
+          ]
+        },
+        {
+          "kind": "http",
+          "method": "POST",
+          "url": "https://api.exa.ai/search",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["results"],
+          "estimatedMicroUsd": 4000,
+          "credential": {
+            "env": "RYU_VERIFY_EXA_KEY",
+            "header": "x-api-key",
+            "scheme": "raw"
+          },
+          "body": {
+            "query": "capability taxonomy for agent tools",
+            "type": "instant",
+            "numResults": 1
+          }
+        }
+      ],
+      "note": "Exa's search reference marks `instant` legacy (use lite) and prices it as Lite Search.",
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      }
+    },
+    "generated_exa_search": {
+      "endpoint": "exa.search",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Search",
+      "docsUrl": "https://specs.vendor.example/openapi.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "expect": ["/search"]
+        }
+      ],
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      },
+      "spec": {
+        "url": "https://specs.vendor.example/openapi.yaml",
+        "checkedOn": "2026-10-21",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+      }
+    },
+    "generated_exa_search_retired": {
+      "endpoint": "exa.search",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Search",
+      "docsUrl": "https://specs.vendor.example/openapi.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "retired",
+        "reason": "no longer in the vendor's published spec"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "expect": ["/search"]
+        }
+      ],
+      "operation": {
+        "method": "POST",
+        "path": "/search"
+      },
+      "spec": {
+        "url": "https://specs.vendor.example/openapi.yaml",
+        "checkedOn": "2026-10-21",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+      }
+    },
+    "generated_same_endpoint": {
+      "endpoint": "exa.search.auto",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Search (auto)",
+      "docsUrl": "https://specs.vendor.example/openapi.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "unverified"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "expect": ["/search/auto"]
+        }
+      ],
+      "operation": {
+        "method": "GET",
+        "path": "/search/auto"
+      },
+      "spec": {
+        "url": "https://specs.vendor.example/openapi.yaml",
+        "checkedOn": "2026-10-21",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+      }
+    },
+    "generated_priced_verified": {
+      "endpoint": "exa.search.auto",
+      "provider": "exa",
+      "source": "ryu",
+      "tier": "generated",
+      "title": "Search (auto)",
+      "docsUrl": "https://specs.vendor.example/openapi.yaml",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "verified",
+        "checkedOn": "2026-10-21",
+        "verifiedOn": "2026-10-21",
+        "method": "docs_page"
+      },
+      "probes": [
+        {
+          "kind": "docs_page",
+          "url": "https://specs.vendor.example/openapi.yaml",
+          "expect": ["/search/auto"]
+        }
+      ],
+      "operation": {
+        "method": "GET",
+        "path": "/search/auto"
+      },
+      "spec": {
+        "url": "https://specs.vendor.example/openapi.yaml",
+        "checkedOn": "2026-10-21",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+      }
+    },
+    "free_route_live": {
+      "endpoint": "github.GITHUB_GET_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.get",
+      "title": "Get an issue",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "verified",
+        "checkedOn": "2026-10-21",
+        "verifiedOn": "2026-10-21",
+        "method": "live_free"
+      },
+      "probes": [
+        {
+          "kind": "http",
+          "method": "GET",
+          "url": "https://api.github.com/repos/octocat/Hello-World/issues/1",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["number"],
+          "estimatedMicroUsd": 0
+        }
+      ],
+      "operation": {
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+      },
+      "freeRoute": {
+        "baseUrl": "https://api.github.com"
+      }
+    },
+    "free_route_docs_only": {
+      "endpoint": "github.GITHUB_GET_AN_ISSUE",
+      "provider": "github",
+      "source": "ryu",
+      "tier": "curated",
+      "toolkit": "github",
+      "platform": "github",
+      "capability": "issue.get",
+      "title": "Get an issue",
+      "docsUrl": "https://docs.github.com/en/rest/issues/issues#get-an-issue",
+      "docsCheckedOn": "2026-10-21",
+      "verification": {
+        "state": "verified",
+        "checkedOn": "2026-10-21",
+        "verifiedOn": "2026-10-21",
+        "method": "docs_page"
+      },
+      "probes": [
+        {
+          "kind": "http",
+          "method": "GET",
+          "url": "https://api.github.com/repos/octocat/Hello-World/issues/1",
+          "expectStatus": 200,
+          "expectJson": "object",
+          "expectKeys": ["number"],
+          "estimatedMicroUsd": 0
+        }
+      ],
+      "operation": {
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/issues/{issue_number}"
+      },
+      "freeRoute": {
+        "baseUrl": "https://api.github.com"
+      }
+    }
+  },
+  "select": [
+    {
+      "name": "verified first: Ryu's verified entry wins",
+      "precedence": "ryu_verified_first",
+      "ryu": "ryu_verified",
+      "treg": "treg",
+      "expected": "ryu_verified"
+    },
+    {
+      "name": "verified first: Treg wins over unverified Ryu",
+      "precedence": "ryu_verified_first",
+      "ryu": "ryu_unverified",
+      "treg": "treg",
+      "expected": "treg"
+    },
+    {
+      "name": "verified first: Treg wins over drifted Ryu",
+      "precedence": "ryu_verified_first",
+      "ryu": "ryu_drifted",
+      "treg": "treg",
+      "expected": "treg"
+    },
+    {
+      "name": "verified first: unverified Ryu without Treg",
+      "precedence": "ryu_verified_first",
+      "ryu": "ryu_unverified",
+      "treg": null,
+      "expected": "ryu_unverified"
+    },
+    {
+      "name": "treg first",
+      "precedence": "treg_first",
+      "ryu": "ryu_verified",
+      "treg": "treg",
+      "expected": "treg"
+    },
+    {
+      "name": "treg first falls back to Ryu",
+      "precedence": "treg_first",
+      "ryu": "ryu_verified",
+      "treg": null,
+      "expected": "ryu_verified"
+    },
+    {
+      "name": "ryu only",
+      "precedence": "ryu_only",
+      "ryu": null,
+      "treg": "treg",
+      "expected": null
+    },
+    {
+      "name": "treg only",
+      "precedence": "treg_only",
+      "ryu": "ryu_verified",
+      "treg": null,
+      "expected": null
+    }
+  ],
+  "paidRouting": [
+    {
+      "name": "a verified entry with a verified free price",
+      "entry": "ryu_verified",
+      "price": "github.GITHUB_GET_AN_ISSUE",
+      "allowed": true
+    },
+    {
+      "name": "an unverified entry refuses",
+      "entry": "ryu_unverified",
+      "price": "github.GITHUB_GET_AN_ISSUE",
+      "allowed": false
+    },
+    {
+      "name": "a drifted entry refuses",
+      "entry": "ryu_drifted",
+      "price": "github.GITHUB_GET_AN_ISSUE",
+      "allowed": false
+    },
+    {
+      "name": "a missing price refuses",
+      "entry": "ryu_verified",
+      "price": null,
+      "allowed": false
+    },
+    {
+      "name": "another endpoint's price refuses",
+      "entry": "ryu_verified",
+      "price": "github.GITHUB_CREATE_AN_ISSUE",
+      "allowed": false
+    },
+    {
+      "name": "a verified generated entry without a price refuses",
+      "entry": "generated_verified",
+      "price": null,
+      "allowed": false
+    },
+    {
+      "name": "a generated entry never borrows another endpoint's price",
+      "entry": "generated_verified",
+      "price": "exa.search.auto",
+      "allowed": false
+    },
+    {
+      "name": "a generated entry a docs check verified never routes a paid call, even with its own endpoint's price",
+      "entry": "generated_priced_verified",
+      "price": "exa.search.auto",
+      "allowed": false
+    },
+    {
+      "name": "the curated entry for that endpoint and price does",
+      "entry": "curated_exa_auto",
+      "price": "exa.search.auto",
+      "allowed": true
+    }
+  ],
+  "catalogChecks": [
+    {
+      "name": "a generated entry needs no price and no taxonomy reference",
+      "entries": ["generated_unverified"],
+      "issues": []
+    },
+    {
+      "name": "curated body variants may share an operation",
+      "entries": ["curated_exa_auto", "curated_exa_instant"],
+      "issues": []
+    },
+    {
+      "name": "a generated entry may not repeat a live entry's operation",
+      "entries": ["curated_exa_auto", "generated_exa_search"],
+      "issues": [
+        {
+          "code": "duplicate_operation",
+          "subject": "exa.search"
+        }
+      ]
+    },
+    {
+      "name": "a retired generated entry collides with nothing",
+      "entries": ["curated_exa_auto", "generated_exa_search_retired"],
+      "issues": []
+    },
+    {
+      "name": "a curated entry still needs its price",
+      "entries": ["generated_unverified", "ryu_unverified"],
+      "issues": []
+    },
+    {
+      "name": "a price row joined to a generated entry is refused",
+      "entries": ["generated_same_endpoint"],
+      "issues": [
+        {
+          "code": "generated_priced",
+          "subject": "exa.search.auto"
+        }
+      ]
+    }
+  ],
+  "beside": [
+    {
+      "name": "curated wins on a shared operation",
+      "curated": ["curated_exa_auto"],
+      "generated": ["generated_exa_search", "generated_unverified"],
+      "expected": ["exa.findsimilar"]
+    },
+    {
+      "name": "curated wins on a shared endpoint id",
+      "curated": ["curated_exa_auto"],
+      "generated": ["generated_same_endpoint", "generated_unverified"],
+      "expected": ["exa.findsimilar"]
+    },
+    {
+      "name": "nothing curated keeps every generated entry",
+      "curated": [],
+      "generated": ["generated_exa_search", "generated_unverified"],
+      "expected": ["exa.search", "exa.findsimilar"]
+    }
+  ],
+  "freeRoute": [
+    {
+      "name": "a live-verified free route with a free price is served",
+      "entry": "free_route_live",
+      "price": "github.GITHUB_GET_AN_ISSUE",
+      "allowed": true
+    },
+    {
+      "name": "a free route without a price is not served",
+      "entry": "free_route_live",
+      "price": null,
+      "allowed": false
+    },
+    {
+      "name": "a free route on a metered price is not served",
+      "entry": "free_route_live",
+      "price": "brave.web_search",
+      "allowed": false
+    },
+    {
+      "name": "a free route verified only on its docs page is not served",
+      "entry": "free_route_docs_only",
+      "price": "github.GITHUB_GET_AN_ISSUE",
+      "allowed": false
+    },
+    {
+      "name": "an entry without a free route is never served without a key",
+      "entry": "ryu_verified",
+      "price": "github.GITHUB_GET_AN_ISSUE",
+      "allowed": false
+    }
+  ]
+}

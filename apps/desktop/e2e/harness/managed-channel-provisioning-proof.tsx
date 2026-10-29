@@ -2,7 +2,7 @@ import {
 	type ChannelConfigView,
 	ChannelsView,
 	defaultBehaviorSettings,
-} from "@ryu/blocks/desktop/channels";
+} from "@ryu/blocks/desktop/channels.tsx";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 
@@ -46,10 +46,10 @@ const managedDiscord: ChannelConfigView = {
 	teamId: null,
 };
 
-createRoot(document.querySelector("#root") as HTMLElement).render(
+createRoot(document.querySelector<HTMLElement>("#root")!).render(
 	<main className="min-h-screen bg-background text-foreground">
 		<header className="border-b px-8 py-6">
-			<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+			<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 				Managed node provisioning proof
 			</p>
 			<h1 className="mt-2 font-semibold text-2xl tracking-tight">

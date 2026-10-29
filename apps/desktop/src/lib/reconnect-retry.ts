@@ -1,9 +1,16 @@
+import { z } from "zod";
 import type { RunSummary } from "@/src/hooks/useRuns.ts";
 import { type ApiTarget, apiUrl, makeHeaders } from "./api/client.ts";
+import {
+	runSnapshotInputSchema,
+	runSummarySchema,
+} from "./api/run-wire-contracts.ts";
 
 export const RECONNECT_RETRY_PLUGIN_ID = "@ryu/reconnect-retry";
 export const RECONNECT_RETRY_FEATURE_KIND = "reconnect-retry";
 export const CHAT_RETRY_STARTED_EVENT = "ryu:chat-retry-started";
+export const CHAT_RECOVERY_STOP_EVENT = "ryu:chat-recovery-stop";
+export const CHAT_TURN_STARTED_EVENT = "ryu:chat-turn-started";
 
 export const RECONNECT_RETRY_TTL_MS = 30 * 60 * 1000;
 export const RECONNECT_RETRY_MAX_ATTEMPTS = 1;
@@ -19,24 +26,101 @@ export interface RetrySelection {
 	retry: RetryCandidate[];
 }
 
+export interface StoppedConversation {
+	capturedAt: number;
+	conversationId: string;
+}
+
+const stoppedHistorySchema = z.array(z.unknown());
+type StoppedHistoryInput = Parameters<typeof stoppedHistorySchema.parse>[0];
+const stoppedConversationSchema = z.object({
+	conversationId: z.string().refine((id) => id.trim().length > 0),
+	capturedAt: z.number(),
+}) satisfies z.ZodType<StoppedConversation>;
+const retryCandidateSchema = stoppedConversationSchema.extend({
+	attempts: z.number().refine((value) => Number.isInteger(value) && value >= 0),
+}) satisfies z.ZodType<RetryCandidate>;
+// Saved queues historically reject a null row as a whole; invalid non-null rows
+// are individually skipped. Keep that durable fallback while decoding records.
+const savedRetryQueueSchema = z.array(
+	z.unknown().refine((value) => value !== null && value !== undefined)
+);
+
+export function normalizeStoppedConversations(
+	value: StoppedHistoryInput,
+	now = Date.now()
+): StoppedConversation[] {
+	const history = stoppedHistorySchema.safeParse(value);
+	if (!history.success) {
+		return [];
+	}
+	const records = new Map<string, StoppedConversation>();
+	for (const entry of history.data) {
+		const parsed = stoppedConversationSchema.safeParse(entry);
+		if (
+			!parsed.success ||
+			parsed.data.capturedAt > now ||
+			now - parsed.data.capturedAt > RECONNECT_RETRY_TTL_MS
+		) {
+			continue;
+		}
+		const record = parsed.data;
+		const previous = records.get(record.conversationId);
+		if (!previous || previous.capturedAt < record.capturedAt) {
+			records.set(record.conversationId, {
+				conversationId: record.conversationId,
+				capturedAt: record.capturedAt,
+			});
+		}
+	}
+	return [...records.values()];
+}
+
+/** Null means storage is unavailable, so the hook retains its memory fallback. */
+export function loadStoppedConversations(
+	storageKey: string
+): StoppedConversation[] | null {
+	try {
+		const raw = localStorage.getItem(`${storageKey}:stopped`);
+		return raw ? normalizeStoppedConversations(JSON.parse(raw)) : [];
+	} catch {
+		return null;
+	}
+}
+
+export function saveStoppedConversations(
+	storageKey: string,
+	records: readonly StoppedConversation[]
+): boolean {
+	try {
+		const normalized = normalizeStoppedConversations(records);
+		if (normalized.length === 0) {
+			localStorage.removeItem(`${storageKey}:stopped`);
+		} else {
+			localStorage.setItem(`${storageKey}:stopped`, JSON.stringify(normalized));
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /** Keep only safe, recent candidate records from local storage. */
 export function normalizeRetryCandidates(
 	candidates: readonly RetryCandidate[],
 	now = Date.now()
 ): RetryCandidate[] {
 	const byConversation = new Map<string, RetryCandidate>();
-	for (const candidate of candidates) {
+	for (const value of candidates) {
+		const parsed = retryCandidateSchema.safeParse(value);
 		if (
-			typeof candidate.conversationId !== "string" ||
-			candidate.conversationId.trim().length === 0 ||
-			!Number.isFinite(candidate.capturedAt) ||
-			candidate.capturedAt > now ||
-			now - candidate.capturedAt > RECONNECT_RETRY_TTL_MS ||
-			!Number.isInteger(candidate.attempts) ||
-			candidate.attempts < 0
+			!parsed.success ||
+			parsed.data.capturedAt > now ||
+			now - parsed.data.capturedAt > RECONNECT_RETRY_TTL_MS
 		) {
 			continue;
 		}
+		const candidate = parsed.data;
 		const previous = byConversation.get(candidate.conversationId);
 		if (!previous || candidate.capturedAt > previous.capturedAt) {
 			byConversation.set(candidate.conversationId, {
@@ -121,10 +205,15 @@ export function loadRetryCandidates(storageKey: string): RetryCandidate[] {
 		if (!raw) {
 			return [];
 		}
-		const parsed: unknown = JSON.parse(raw);
-		return Array.isArray(parsed)
-			? normalizeRetryCandidates(parsed as RetryCandidate[])
-			: [];
+		const parsed = savedRetryQueueSchema.safeParse(JSON.parse(raw));
+		if (!parsed.success) {
+			return [];
+		}
+		const candidates = parsed.data.flatMap((value) => {
+			const candidate = retryCandidateSchema.safeParse(value);
+			return candidate.success ? [candidate.data] : [];
+		});
+		return normalizeRetryCandidates(candidates);
 	} catch {
 		return [];
 	}
@@ -152,12 +241,14 @@ export async function fetchRuns(target: ApiTarget): Promise<RunSummary[]> {
 	if (!response.ok) {
 		throw new Error(`run snapshot failed: ${response.status}`);
 	}
-	const payload: unknown = await response.json();
-	if (typeof payload !== "object" || payload === null) {
+	const payload = runSnapshotInputSchema.safeParse(await response.json());
+	if (!payload.success) {
 		return [];
 	}
-	const runs = (payload as { runs?: unknown }).runs;
-	return Array.isArray(runs) ? (runs as RunSummary[]) : [];
+	return (payload.data.runs ?? []).flatMap((value) => {
+		const run = runSummarySchema.safeParse(value);
+		return run.success ? [run.data] : [];
+	});
 }
 
 export async function retryConversation(

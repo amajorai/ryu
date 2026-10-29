@@ -1,6 +1,6 @@
 import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -8,9 +8,9 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { toast } from "@ryu/ui/components/sileo";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/empty.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownEditor } from "@/src/components/editor/MarkdownEditor.tsx";
 import { useAssistantPageContext } from "@/src/hooks/useAssistantPageContext.ts";
@@ -27,12 +27,12 @@ const ASSISTANT_CONTEXT_CAP = 4000;
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-const SAVE_LABEL: Record<SaveState, string> = {
+const SAVE_LABEL = {
 	idle: "",
 	saving: "Saving…",
 	saved: "Saved",
 	error: "Save failed",
-};
+} satisfies Record<SaveState, string>;
 
 /**
  * Opens a markdown file from the active project folder in the full Plate editor
@@ -47,12 +47,16 @@ export default function FileEditorPage({ filePath }: { filePath: string }) {
 	const [saveState, setSaveState] = useState<SaveState>("idle");
 
 	const markdownRef = useRef("");
+	const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+	const currentFileRef = useRef(filePath);
+	currentFileRef.current = filePath;
 	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
 		setError(null);
 		setInitial(null);
+		setSaveState("idle");
 		readProjectFile(filePath)
 			.then((text) => {
 				if (cancelled) {
@@ -85,19 +89,36 @@ export default function FileEditorPage({ filePath }: { filePath: string }) {
 		)
 	);
 
-	const flush = useCallback(async () => {
-		setSaveState("saving");
-		try {
-			await writeProjectFile(filePath, markdownRef.current);
-			setSaveState("saved");
-		} catch (e) {
-			setSaveState("error");
-			console.error("Failed to save file", e);
-			toast.error("Couldn't save your changes", {
-				description:
-					"Something went wrong writing this file. Please try again.",
-			});
+	const flush = useCallback(() => {
+		// Capture both at enqueue time: navigation may load another file while an
+		// older write is still running. Serialize writes so late disk responses
+		// cannot put an earlier edit back over the latest markdown.
+		const path = filePath;
+		const markdown = markdownRef.current;
+		const isCurrent = () =>
+			currentFileRef.current === path && markdownRef.current === markdown;
+		if (currentFileRef.current === path) {
+			setSaveState("saving");
 		}
+		const save = saveQueueRef.current.then(async () => {
+			try {
+				await writeProjectFile(path, markdown);
+				if (isCurrent()) {
+					setSaveState("saved");
+				}
+			} catch (e) {
+				if (isCurrent()) {
+					setSaveState("error");
+				}
+				console.error("Failed to save file", e);
+				toast.error("Couldn't save your changes", {
+					description:
+						"Something went wrong writing this file. Please try again.",
+				});
+			}
+		});
+		saveQueueRef.current = save;
+		return save;
 	}, [filePath]);
 
 	const scheduleSave = useCallback(() => {
@@ -115,6 +136,7 @@ export default function FileEditorPage({ filePath }: { filePath: string }) {
 		() => () => {
 			if (timerRef.current) {
 				clearTimeout(timerRef.current);
+				timerRef.current = null;
 				flush().catch(() => undefined);
 			}
 		},
@@ -149,11 +171,7 @@ export default function FileEditorPage({ filePath }: { filePath: string }) {
 	}
 
 	if (initial === null) {
-		return (
-			<div className="flex h-full items-center justify-center">
-				<Spinner />
-			</div>
-		);
+		return <SkeletonRows rows={6} spacing="library" />;
 	}
 
 	return (
@@ -163,7 +181,10 @@ export default function FileEditorPage({ filePath }: { filePath: string }) {
 					className="size-4 shrink-0 opacity-70"
 					icon={File01Icon}
 				/>
-				<span className="min-w-0 flex-1 truncate font-medium text-sm">
+				<span
+					className="min-w-0 flex-1 truncate font-medium text-sm"
+					title={basename(filePath)}
+				>
 					{basename(filePath)}
 				</span>
 				{saveState === "error" ? (

@@ -1,3 +1,20 @@
+import {
+	type AvatarAccessory,
+	type AvatarStyle,
+	parseAvatarContributions,
+} from "@ryu/ui/components/avatar-parts.ts";
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
+import {
+	type PluginDocument,
+	type PluginValue,
+	pluginBooleanField,
+	pluginDocumentSchema,
+	pluginRecord,
+	pluginStringField,
+	pluginValueSchema,
+} from "./plugin-wire-values.ts";
+
 // apps/desktop/src/lib/api/plugins.ts
 //
 // Typed client for Core's Plugin lifecycle endpoints (`/api/plugins`). A Plugin
@@ -9,60 +26,132 @@
 // the client-side view exposed to React components. The internal symbol names
 // (App*, fetchApps, etc.) are kept stable to limit churn across importers.
 
+import type { AppBundle } from "@ryu/app-host/app-bundle";
 import type { LiveActivityContribution } from "@ryu/app-host/live-activity";
 import type { StandaloneAppBundle } from "@ryu/app-host/standalone";
-import type {
-	DockPanelSpec,
-	SidebarSectionSpec,
-	StoreTabSpec,
-	ViewContribution,
-	ViewSource,
-} from "@ryu/app-host/views";
+import type { RawViewContribution, ViewSource } from "@ryu/app-host/views";
 import type {
 	CardDither,
 	CardThemePreview,
 	CatalogBanner,
+	CatalogChannel,
+	CatalogDeprecation,
 	CatalogExtensionSummary,
 	CatalogImplementationSummary,
 	CatalogLayer,
 	CatalogSurfaceSupport,
 	DesignSystemEvidence,
+	VersionSnapshot,
 } from "@ryu/marketplace/catalog/types";
+import type {
+	AppLifecycleAction,
+	AppRecord,
+	AppRequires,
+	AppUninstallResult,
+	DependencyError,
+	Surface,
+} from "@ryuhq/core-client/plugins.ts";
+import {
+	type InterfaceDescriptor,
+	parseInterfaceContributions,
+} from "@ryuhq/protocol/interfaces";
+import { resolveOwnAppPath } from "./app-request.ts";
 import {
 	type ApiTarget,
 	authenticatedFetch,
+	buyerTokenHeader,
 	identityHeaders,
 	makeHeaders,
 	request,
 } from "./client.ts";
+import {
+	hasControlCharacters,
+	isValidPluginId,
+	type PluginBackground,
+	parsePluginBackgrounds,
+} from "./plugin-contribution-boundary.ts";
+import {
+	appLifecyclePreviewResponseSchema,
+	appRecordEnvelopeSchema,
+	appsEnvelopeSchema,
+	evalsOverviewSchema,
+	grantsEnvelopeSchema,
+	parsePluginResponse,
+	pluginDoctorReportResponseSchema,
+	pluginEvalRunResultResponseSchema,
+	uninstallEnvelopeSchema,
+} from "./plugins-app-response-contracts.ts";
+import {
+	catalogBrowseSchema,
+	catalogDetailWireSchema,
+	engineConcurrencyWireSchema,
+	hostArgumentsSchema,
+	hostErrorCodeSchema,
+	hostResponseSchema,
+	hostStreamFrameSchema,
+	nativeErrorStatusSchema,
+	sidecarsEnvelopeSchema,
+	uiBundleSchema,
+} from "./plugins-catalog-response-contracts.ts";
+import { pluginContributionsWireSchema } from "./plugins-contribution-response-contracts.ts";
+import {
+	type APP_LIFECYCLE_PERMISSIONS,
+	appLifecycleCapabilitiesResponseCodec,
+	responseCodec1,
+	responseCodec2,
+	responseCodec3,
+	responseCodec4,
+	sidecarLifecyclePreviewResponseCodec,
+	versionSnapshotResponseCodec,
+} from "./plugins-response-codecs.ts";
+
+export type {
+	AppDependency,
+	AppLifecycleAction,
+	AppRecord,
+	AppRequires,
+	AppUninstallResult,
+	DependencyError,
+	Surface,
+} from "@ryuhq/core-client/plugins.ts";
+export { pluginThemeResponseSchema } from "./plugins-contribution-response-contracts.ts";
+export { APP_LIFECYCLE_PERMISSIONS } from "./plugins-response-codecs.ts";
 
 // ── Wire types (Rust/serde shape) ────────────────────────────────────────────
 
-interface RunnableEntryWire {
-	config?: unknown;
+export interface RunnableEntryWire {
+	config?: PluginValue;
 	id: string;
 	kind: string;
 	name: string;
 	/** Publisher identity mark from the control plane. */
 	publisher_trust?: "gold" | "blue" | "dotted" | null;
-	publisher_trust_source?: "ryu_staff" | "stripe_connect" | "none" | null;
+	publisher_trust_source?:
+		| "ryu_staff"
+		| "paid_plan"
+		| "stripe_connect"
+		| "none"
+		| null;
 }
+
+/** Manifest parsing preserves Core's explicit unknown-surface sentinel. */
+export type ManifestTarget = Surface | "unknown";
 
 /** One plugin-to-plugin dependency edge. Mirrors Core's `AppDependency`
  *  (`apps/core/src/plugin_manifest/mod.rs`). `min_version` is snake_case on the
  *  wire (Core declares no serde rename) and is a MINIMUM: `"1.2.0"` = `">=1.2.0"`. */
-interface AppDependencyWire {
+export interface AppDependencyWire {
 	id: string;
 	min_version?: string | null;
 }
 
 /** The `requires` block. Mirrors Core's `Requires`. Absent = no dependencies. */
-interface RequiresWire {
+export interface RequiresWire {
 	apps?: AppDependencyWire[];
 	grants?: string[];
 }
 
-interface AppManifestWire {
+export interface AppManifestWire {
 	/** Primary brand accent from the manifest (`accentColor`). */
 	accentColor?: string | null;
 	/** Grants approved on the last successful enable, injected by `list_apps` from
@@ -80,6 +169,9 @@ interface AppManifestWire {
 		icon?: string | null;
 		shortcut?: string | null;
 	} | null;
+	/** Normalised deprecation notice (Core rewrites the manifest's three shapes
+	 *  into this one). Absent = current. */
+	deprecated?: CatalogDeprecation | null;
 	/** Long plaintext/markdown description. */
 	description?: string | null;
 	developer?: string | null;
@@ -110,6 +202,7 @@ interface AppManifestWire {
 		}
 	>;
 	name: string;
+	optional_permission_grants?: string[];
 	permission_grants: string[];
 	/** Plugin-to-plugin dependencies. Absent (`skip_serializing_if`) = none. */
 	requires?: RequiresWire | null;
@@ -124,17 +217,19 @@ interface AppManifestWire {
 	suppressed_by_safe_mode?: boolean;
 	/** Display-only per-surface support levels from Core. */
 	surface_support?: CatalogSurfaceSupport[];
+	/** Core refuses to uninstall it (`is_uninstall_protected`): the "System" label. */
+	system?: boolean;
 	/** Short one-line pitch shown under the name. */
 	tagline?: string | null;
 	/** Host surfaces the plugin runs on. Absent/empty = EVERY surface. */
-	targets?: Surface[];
+	targets?: ManifestTarget[];
 	/** Core-derived provenance tier. Never infer this from the manifest id. */
-	tier?: AppTier | null;
+	tier?: PluginValue;
 	version: string;
 	windows_first: boolean;
 }
 
-interface AppRecordWire {
+export interface AppRecordWire {
 	approved_grants: string[];
 	created_at: string | null;
 	enabled: boolean;
@@ -156,43 +251,19 @@ export function isCoreAppTier(
 }
 
 /** Parse Core's provenance field without ever treating an unknown value as Core. */
-export function appTierFromWire(value: unknown): AppTier | null {
-	return value === "core" || value === "community" ? value : null;
+const appTierSchema = z.enum(["core", "community"]);
+export function appTierFromWire(
+	value: Parameters<typeof appTierSchema.parse>[0]
+): AppTier | null {
+	const parsed = appTierSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
 }
 
 export interface RunnableEntry {
-	config: unknown;
+	config: PluginValue;
 	id: string;
 	kind: string;
 	name: string;
-}
-
-/** The eight host surfaces a plugin may target. These are Core's `Surface` enum
- *  tokens verbatim (`#[serde(rename_all = "kebab-case")]`) — also the vocabulary
- *  of the `x-ryu-surface` request header Core filters `GET /api/plugins` on. */
-export type Surface =
-	| "gateway"
-	| "core"
-	| "desktop"
-	| "island"
-	| "mobile"
-	| "extension"
-	| "web"
-	| "cli";
-
-/** One plugin-to-plugin dependency, client-side view. `minVersion` is a MINIMUM
- *  (a bare `"1.2.0"` means `">=1.2.0"`), null when the plugin pinned no floor. */
-export interface AppDependency {
-	id: string;
-	minVersion: string | null;
-}
-
-/** A plugin's declared dependencies, client-side view. */
-export interface AppRequires {
-	/** Plugins that must be enabled first (Core auto-enables them in order). */
-	apps: AppDependency[];
-	/** Grants implied by those dependencies (declaration only). */
-	grants: string[];
 }
 
 /** The manifest's PRESENTATIONAL fields — what makes an installed app look like
@@ -209,6 +280,8 @@ export interface AppPresentation {
 	accentColor?: string | null;
 	/** Free-text store category ("Productivity", …). */
 	category: string | null;
+	/** Deprecation notice; null = current. Renders the "Deprecated" badge. */
+	deprecated: CatalogDeprecation | null;
 	/** Long plaintext/markdown description — the detail body, not the card line. */
 	description: string | null;
 	external: boolean;
@@ -267,6 +340,8 @@ export interface AppInfo extends AppPresentation {
 	/** Remote MCP servers whose OAuth lifecycle is owned by Core. */
 	mcpOAuthServers: McpOAuthServerDeclaration[];
 	name: string;
+	/** Off until explicitly approved; these never block ordinary app enable. */
+	optionalPermissionGrants?: string[];
 	permissionGrants: string[];
 	/** Declared dependencies. `null` = none (the common case). */
 	requires: AppRequires | null;
@@ -279,8 +354,12 @@ export interface AppInfo extends AppPresentation {
 	suppressedBySafeMode: boolean;
 	/** Per-surface support levels from Core's catalog projection. */
 	surfaceSupport: CatalogSurfaceSupport[];
+	/** Core refuses to uninstall it, so it is labelled "System" and offers no
+	 *  Remove control. Stamped by Core from the same predicate that refuses the
+	 *  uninstall (`is_uninstall_protected`), so label and protection agree. */
+	system: boolean;
 	/** Host surfaces this plugin runs on. **Empty = every surface**, never "none". */
-	targets: Surface[];
+	targets: ManifestTarget[];
 	/** Core-derived provenance. Missing/unknown values are not first-party. */
 	tier: AppTier | null;
 	version: string;
@@ -292,23 +371,6 @@ export interface McpOAuthServerDeclaration {
 	name: string;
 	resource: string;
 }
-
-export interface AppRecord {
-	approvedGrants: string[];
-	createdAt: string | null;
-	enabled: boolean;
-	id: string;
-	updatedAt: string | null;
-	version: string;
-}
-
-export const APP_LIFECYCLE_PERMISSIONS = [
-	"app.install",
-	"app.update",
-	"app.enable",
-	"app.disable",
-	"app.uninstall",
-] as const;
 
 export type AppLifecyclePermission = (typeof APP_LIFECYCLE_PERMISSIONS)[number];
 
@@ -329,7 +391,7 @@ export interface PluginDoctorFinding {
 	category: string;
 	checkId: string;
 	detail: string;
-	evidence?: unknown;
+	evidence?: PluginValue;
 	pluginId: string;
 	recommendedAction: string;
 	severity: "error" | "warning" | "info" | string;
@@ -477,78 +539,14 @@ export interface AppToggleResult extends AppRecord {
 	notice?: string;
 }
 
-/** Result of `POST /api/plugins/:id/uninstall`. The success body carries NO `app`
- *  record (unlike enable/disable) — it reports the removed id, any plugins disabled
- *  as part of the uninstall (the target, plus its dependents under `?cascade=true`),
- *  and the same `externallyManaged`/`notice` gateway truth. */
-export interface AppUninstallResult {
-	disabled: string[];
-	externallyManaged?: boolean;
-	notice?: string;
-	removed: string;
-	success: boolean;
-}
-
-export type AppLifecycleAction =
-	| "install"
-	| "enable"
-	| "disable"
-	| "uninstall"
-	| "update";
-
 export interface AppLifecyclePreview {
 	action: AppLifecycleAction;
 	dryRun: true;
 	success: boolean;
-	[key: string]: unknown;
+	[key: string]: PluginValue | undefined;
 }
 
 // ── Error shape returned by lifecycle endpoints ───────────────────────────────
-
-/** A typed dependency-graph failure, mirrored from Core's `DependencyError`
- *  (`apps/core/src/plugins/graph.rs`). Serde-tagged on `code` (snake_case), so the
- *  UI renders "Disable Meetings, Whiteboard first" from the ids — never by
- *  string-parsing a prose message. Returned as `dependency_error` in the 409 body
- *  of `POST /api/plugins/:id/{enable,disable}`. */
-export type DependencyError =
-	| { code: "not_installed"; plugin: string }
-	| { code: "self_dependency"; plugin: string }
-	| {
-			code: "missing_dependency";
-			plugin: string;
-			dependency: string;
-			required: string | null;
-	  }
-	| {
-			code: "version_mismatch";
-			plugin: string;
-			dependency: string;
-			required: string;
-			installed: string;
-	  }
-	| {
-			code: "invalid_version_req";
-			plugin: string;
-			dependency: string;
-			requirement: string;
-			reason: string;
-	  }
-	| { code: "cycle"; cycle: string[] }
-	| { code: "blocked_by_dependents"; plugin: string; dependents: string[] }
-	| {
-			/** An UPDATE was refused because it would break an installed dependent.
-			 *  The reverse of `version_mismatch`: the offending version is NOT
-			 *  installed yet, so it is reported as `incoming`, never `installed`. */
-			code: "dependent_version_mismatch";
-			/** The installed dependent that would be left broken. */
-			plugin: string;
-			/** The plugin being updated. */
-			dependency: string;
-			/** The requirement `plugin` declares, as written. */
-			required: string;
-			/** The version `dependency` would be moved to. */
-			incoming: string;
-	  };
 
 /** Structured error from enable/disable — used to surface Gateway denial,
  *  unreachability, or an unsatisfiable dependency graph via the UI without
@@ -604,14 +602,49 @@ export function describeDependencyError(
 	}
 }
 
-/** Narrow an unknown JSON value to a {@link DependencyError}. Anything without a
- *  string `code` is not one. */
-function toDependencyError(value: unknown): DependencyError | null {
-	if (typeof value !== "object" || value === null) {
-		return null;
-	}
-	const code = (value as { code?: unknown }).code;
-	return typeof code === "string" ? (value as DependencyError) : null;
+/** Complete dependency-graph refusal serialized by Core's native enum. */
+export const dependencyErrorSchema = z.discriminatedUnion("code", [
+	z.object({ code: z.literal("not_installed"), plugin: z.string() }),
+	z.object({ code: z.literal("self_dependency"), plugin: z.string() }),
+	z.object({
+		code: z.literal("missing_dependency"),
+		plugin: z.string(),
+		dependency: z.string(),
+		required: z.string().nullable(),
+	}),
+	z.object({
+		code: z.literal("version_mismatch"),
+		plugin: z.string(),
+		dependency: z.string(),
+		required: z.string(),
+		installed: z.string(),
+	}),
+	z.object({
+		code: z.literal("invalid_version_req"),
+		plugin: z.string(),
+		dependency: z.string(),
+		requirement: z.string(),
+		reason: z.string(),
+	}),
+	z.object({ code: z.literal("cycle"), cycle: z.array(z.string()) }),
+	z.object({
+		code: z.literal("blocked_by_dependents"),
+		plugin: z.string(),
+		dependents: z.array(z.string()),
+	}),
+	z.object({
+		code: z.literal("dependent_version_mismatch"),
+		plugin: z.string(),
+		dependency: z.string(),
+		required: z.string(),
+		incoming: z.string(),
+	}),
+]) satisfies z.ZodType<DependencyError>;
+function toDependencyError(
+	value: Parameters<typeof dependencyErrorSchema.parse>[0]
+): DependencyError | null {
+	const parsed = dependencyErrorSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
 }
 
 // ── Mappers ───────────────────────────────────────────────────────────────────
@@ -644,6 +677,7 @@ function toAppInfo(w: AppManifestWire): AppInfo {
 		installedVersion: w.installed_version,
 		localOnly: w.local_only ?? false,
 		mandatory: w.mandatory ?? false,
+		system: w.system ?? false,
 		mcpOAuthServers: Object.entries(w.mcp_servers ?? {}).flatMap(
 			([name, server]) =>
 				server.auth?.type === "oauth" && server.url
@@ -658,6 +692,7 @@ function toAppInfo(w: AppManifestWire): AppInfo {
 		),
 		name: w.name,
 		permissionGrants: w.permission_grants,
+		optionalPermissionGrants: w.optional_permission_grants ?? [],
 		requires: w.requires
 			? {
 					apps: (w.requires.apps ?? []).map((d) => ({
@@ -675,6 +710,7 @@ function toAppInfo(w: AppManifestWire): AppInfo {
 		})),
 		sidecarName: w.sidecar_name ?? null,
 		stability: w.stability ?? null,
+		deprecated: w.deprecated ?? null,
 		surfaceSupport: w.surface_support ?? [],
 		suppressedBySafeMode: w.suppressed_by_safe_mode ?? false,
 		tagline: w.tagline ?? null,
@@ -707,21 +743,19 @@ async function parseLifecycleError(
 	resp: Response,
 	path: string
 ): Promise<AppLifecycleError> {
-	let body: Record<string, unknown> = {};
+	let body: PluginDocument = {};
 	try {
 		const text = await resp.text();
-		body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+		body = text ? pluginDocumentSchema.parse(JSON.parse(text)) : {};
 	} catch {
 		// ignore parse errors
 	}
 
 	const status = resp.status;
 	const rawMessage =
-		typeof body.message === "string"
-			? body.message
-			: typeof body.error === "string"
-				? body.error
-				: `${path} failed: ${status}`;
+		pluginStringField(body.message) ??
+		pluginStringField(body.error) ??
+		`${path} failed: ${status}`;
 
 	const grantsDenied = status === 403;
 	const gatewayUnreachable = status === 503;
@@ -736,16 +770,21 @@ async function parseLifecycleError(
 		// Id-only sentence here; `useApps` re-renders it with display NAMES once the
 		// app list is in scope ("Disable Meetings, Whiteboard first").
 		message = describeDependencyError(dependencyError);
+	} else if (
+		status === 409 &&
+		pluginStringField(pluginRecord(body.dependency_error)?.code) !== undefined
+	) {
+		message = "This change conflicts with the current plugin dependencies.";
 	} else if (grantsDenied) {
-		const denied = Array.isArray(body.denied_grants)
-			? (body.denied_grants as string[]).join(", ")
-			: null;
+		const parsedDenied = z
+			.array(pluginValueSchema)
+			.safeParse(body.denied_grants);
+		const denied = parsedDenied.success ? parsedDenied.data.join(", ") : null;
 		message = denied
 			? `Gateway denied grants: ${denied}`
 			: "Gateway denied one or more permission grants.";
 	} else if (gatewayUnreachable) {
-		const reason =
-			typeof body.reason === "string" ? body.reason : "gateway unreachable";
+		const reason = pluginStringField(body.reason) ?? "gateway unreachable";
 		message = `Gateway unreachable (fail-closed): ${reason}`;
 	}
 
@@ -774,7 +813,7 @@ export async function fetchApps(
 	if (!resp.ok) {
 		throw new Error(`/api/plugins failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as { apps?: AppManifestWire[] };
+	const json = parsePluginResponse(appsEnvelopeSchema, await resp.json());
 	return (json.apps ?? []).map(toAppInfo);
 }
 
@@ -786,7 +825,9 @@ export async function fetchAppLifecycleCapabilities(
 ): Promise<AppLifecycleCapabilities> {
 	return request<AppLifecycleCapabilities>(
 		target,
-		"/api/plugins/lifecycle-capabilities"
+		"/api/plugins/lifecycle-capabilities",
+		undefined,
+		appLifecycleCapabilitiesResponseCodec
 	);
 }
 
@@ -840,7 +881,10 @@ export async function previewAppLifecycle(
 		const err = await parseLifecycleError(resp, path);
 		throw Object.assign(new Error(err.message), err);
 	}
-	return (await resp.json()) as AppLifecyclePreview;
+	return parsePluginResponse(
+		appLifecyclePreviewResponseSchema,
+		await resp.json()
+	);
 }
 
 /** Run the read-only Core loader/lifecycle doctor for installed apps/plugins. */
@@ -863,7 +907,10 @@ export async function fetchPluginDoctor(
 	if (!resp.ok) {
 		throw new Error(`/api/plugins/doctor failed: ${resp.status}`);
 	}
-	return (await resp.json()) as PluginDoctorReport;
+	return parsePluginResponse(
+		pluginDoctorReportResponseSchema,
+		await resp.json()
+	);
 }
 
 /** Inspect the Claude-compatible package eval suite without executing it. */
@@ -882,11 +929,7 @@ export async function fetchPluginEvals(
 	if (!resp.ok) {
 		throw new Error(`/api/plugins/evals failed: ${resp.status}`);
 	}
-	return (await resp.json()) as
-		| PluginEvalOverview
-		| {
-				plugins: PluginEvalOverview[];
-		  };
+	return parsePluginResponse(evalsOverviewSchema, await resp.json());
 }
 
 /** Run an installed plugin/app eval suite through Core's normal agent path. */
@@ -902,20 +945,15 @@ export async function runPluginEvals(
 		},
 		body: JSON.stringify(input),
 	});
-	const payload: unknown = await resp.json().catch(() => null);
+	const payload = await resp.json().catch(() => null);
 	if (!resp.ok) {
-		const message =
-			typeof payload === "object" && payload !== null
-				? (payload as { message?: unknown; error?: { message?: unknown } })
-						.error?.message
-				: undefined;
+		const error = pluginRecord(pluginRecord(payload)?.error);
 		throw new Error(
-			typeof message === "string"
-				? message
-				: `/api/plugins/evals/run failed: ${resp.status}`
+			pluginStringField(error?.message) ??
+				`/api/plugins/evals/run failed: ${resp.status}`
 		);
 	}
-	return payload as PluginEvalRunResult;
+	return parsePluginResponse(pluginEvalRunResultResponseSchema, payload);
 }
 
 /**
@@ -962,7 +1000,7 @@ export interface PluginHookEvent {
 	/** Fully-qualified event id: `<owning plugin id>#<event name>`. This exact string
 	 *  is what a workflow's `event` trigger or a hook's `on` must name. */
 	id: string;
-	payload_example?: Record<string, unknown>;
+	payload_example?: PluginDocument;
 	/** The owning plugin id, stamped server-side. */
 	plugin?: string;
 	title: string;
@@ -972,7 +1010,16 @@ export interface PluginHookEvent {
  * stamps `plugin`; the remaining vocabulary belongs to the desktop surface. */
 export interface PluginChatFeature {
 	plugin?: string;
-	[key: string]: unknown;
+	[key: string]: PluginValue | undefined;
+}
+
+/** A local planner model advertised by an enabled plugin. */
+export interface PluginComputerUsePlanner {
+	description?: string;
+	id: string;
+	label: string;
+	model_id: string;
+	plugin: string;
 }
 
 export interface PluginContributions {
@@ -980,6 +1027,16 @@ export interface PluginContributions {
 	 * the desktop shell only by their declared type; the owning plugin id is
 	 * provenance, never a routing switch. */
 	agent_edit_panels: PluginAgentEditPanel[];
+	/** Agent profile tabs supplied by enabled plugins; each embeds one of the
+	 * owning plugin's companions scoped to the profiled agent. */
+	agent_profile_tabs?: PluginAgentProfileTab[];
+	/** Data-only avatar accessories enabled plugins contribute for the Ryu ghost
+	 *  or for an avatar style (`contributes.avatar_accessories`). */
+	avatar_accessories: AvatarAccessory[];
+	/** Data-only avatar styles enabled plugins contribute (`contributes.avatar_styles`). */
+	avatar_styles: AvatarStyle[];
+	/** Data-only desktop wallpaper variants contributed by enabled plugins. */
+	backgrounds: PluginBackground[];
 	/** Messaging-channel adapters an enabled plugin makes available. */
 	channels: PluginChannel[];
 	/** Host-rendered chat feature declarations, tagged with their owning plugin. */
@@ -988,6 +1045,8 @@ export interface PluginContributions {
 	/** Companion surfaces (overlay/sidebar panels) an enabled plugin declares. */
 	companions: PluginCompanion[];
 	composer_controls: PluginComposerControl[];
+	/** Local model adapters for Shadow's computer-use planner. */
+	computer_use_planners: PluginComputerUsePlanner[];
 	/** Context-menu rows enabled plugins contribute (`contributes.context_menu_items`),
 	 *  tagged with `plugin`. The declarative replacement for hardcoded shell menu
 	 *  rows like "Make a skill from this chat". */
@@ -997,14 +1056,19 @@ export interface PluginContributions {
 	 *  replacement for create rows the shell used to hardcode for apps that may
 	 *  not even be installed. */
 	create_actions: PluginCreateAction[];
-	/** App-registered workspace dock panels (bottom/right dock tabs), tagged with
+	/** App-registered workbench tabs with preferred opening regions, tagged with
 	 *  `plugin`. The declarative replacement for the shell's closed `TabKind` union. */
 	dock_panels: PluginDockPanel[];
+	file_handlers?: PluginFileHandler[];
 	/** App events enabled apps EMIT (`contributes.hook_events`), tagged with the
 	 *  owning `plugin` id. The provider half of the hook system, whose consumer half
 	 *  is {@link PluginContributions.turn_hooks}: this is the catalog a user picks
 	 *  from when subscribing a workflow or a hook to "when X happens". */
 	hook_events: PluginHookEvent[];
+	/** Data-only Marketplace interfaces (`contributes.interfaces`) from enabled
+	 *  plugins, validated into {@link InterfaceDescriptor}s at this boundary. Each
+	 *  names a host-owned workspace renderer plus bounded params; none ships code. */
+	interfaces: InterfaceDescriptor[];
 	/** Live activities contributed by enabled plugins (`contributes.live_activities`),
 	 *  tagged with `plugin`. Each is a {@link LiveActivityContribution} the desktop's
 	 *  "Dynamic Island" dock renders from a declared safe Core-relative path. */
@@ -1020,7 +1084,7 @@ export interface PluginContributions {
 	/** Floating text-selection toolbar actions enabled plugins contribute
 	 *  (`contributes.selection_actions`), tagged with `plugin`. */
 	selection_actions: PluginSelectionAction[];
-	settings_tabs: Record<string, unknown>[];
+	settings_tabs: PluginDocument[];
 	/** App-registered sidebar buttons (single nav rows), tagged with `plugin`. */
 	sidebar_buttons: PluginSidebarButton[];
 	/** App-registered sidebar MODES (named arrangements of the whole sidebar),
@@ -1028,7 +1092,7 @@ export interface PluginContributions {
 	sidebar_modes: PluginSidebarMode[];
 	/** App-registered sidebar sections (header + live list), tagged with `plugin`. */
 	sidebar_sections: PluginSidebarSection[];
-	slash_commands: Record<string, unknown>[];
+	slash_commands: PluginDocument[];
 	/** App-registered marketplace tabs, tagged with `plugin` + the app's
 	 *  install/enable state. The ONE family Core serves for disabled and
 	 *  not-installed apps too — see {@link PluginStoreTab}. */
@@ -1038,7 +1102,7 @@ export interface PluginContributions {
 	 *  installed theme and a built-in one are the same object by the time the
 	 *  Appearance picker renders them. */
 	themes: PluginTheme[];
-	turn_hooks: Record<string, unknown>[];
+	turn_hooks: PluginDocument[];
 	/** Declarative views (the Raycast tier) contributed by enabled plugins. Each is a
 	 *  {@link ViewContribution} the desktop/island renderer maps to native components,
 	 *  tagged server-side with its owning `plugin` id. */
@@ -1046,6 +1110,17 @@ export interface PluginContributions {
 	/** Enabled apps that render interactive cards inline in chat (status only —
 	 *  the widget bindings themselves are Core-interpreted and not served here). */
 	widget_apps: PluginWidgetApp[];
+}
+
+/** A tab contributed to the agent profile panel (`contributes.agent_profile_tabs[]`).
+ *  The host mounts `companion` with `{ surface: "agent-profile", agentId }`. */
+export interface PluginAgentProfileTab {
+	companion: string;
+	icon?: string;
+	id: string;
+	order?: number;
+	plugin: string;
+	title: string;
 }
 
 /** A panel contributed to the per-agent editor. */
@@ -1064,13 +1139,13 @@ export interface PluginSidebarSection {
 	/** Gateway-approved grants for the owning enabled app, added by Core. */
 	approved_grants?: string[];
 	/** Core-stamped declarative HTTP authority. */
-	http_policy?: unknown;
+	http_policy?: PluginValue;
 	icon?: string;
 	id: string;
 	order?: number;
 	/** The owning plugin's manifest id (added by Core's contributions endpoint). */
 	plugin: string;
-	spec?: SidebarSectionSpec;
+	spec?: PluginValue;
 	title: string;
 }
 
@@ -1166,13 +1241,13 @@ export interface PluginStoreTab {
 	/** Nav cluster key (`discover` | `catalog` | `community` | `manage` | `account`). */
 	group?: string;
 	/** Core-stamped declarative HTTP authority. */
-	http_policy?: unknown;
+	http_policy?: PluginValue;
 	icon?: string;
 	id: string;
 	order?: number;
 	/** The owning plugin's manifest id (added by Core's contributions endpoint). */
 	plugin: string;
-	spec?: StoreTabSpec;
+	spec?: PluginValue;
 	subtitle?: string;
 	title: string;
 	/** Named first-party renderer; gated by plugin id, never by this string. */
@@ -1183,7 +1258,7 @@ export interface PluginStoreTab {
  *  tagged with its owning `plugin`. A single nav row that opens `target`. */
 export interface PluginSidebarButton {
 	/** Optional app context passed when the button opens the owning Companion. */
-	context?: Record<string, unknown>;
+	context?: PluginDocument;
 	icon?: string;
 	id: string;
 	order?: number;
@@ -1198,35 +1273,54 @@ export interface PluginSidebarButton {
  *  with its owning `plugin`. Shape-identical to the shared `@ryu/app-host/views`
  *  {@link ViewContribution} — re-exported here so contributions consumers need only
  *  the plugins API. */
-export type PluginView = ViewContribution;
+export type PluginView = RawViewContribution;
 
 /** A live-activity contribution as served by Core (`contributes.live_activities[]`),
  *  tagged with its owning `plugin`. Shape-identical to the shared
  *  `@ryu/app-host/live-activity` {@link LiveActivityContribution} — re-exported here
  *  so contributions consumers need only the plugins API. */
-export type PluginLiveActivity = LiveActivityContribution;
+export type PluginLiveActivity = Omit<
+	LiveActivityContribution,
+	"spec" | "http_policy"
+> & { spec?: PluginValue; http_policy?: PluginValue };
 
-/** Which dock a {@link PluginDockPanel} opens in. Mirrors the Rust
- *  `DockPanelPlacement`; `"both"` offers the panel in each dock's new-tab menu. */
-export type PluginDockPlacement = "bottom" | "right" | "both";
+/** The preferred opening region for a {@link PluginDockPanel}. Mirrors the Rust
+ *  `DockPanelPlacement`; the preference never restricts later movement, while
+ *  `"both"` retains the legacy bottom/right offering. */
+export type PluginDockPlacement =
+	| "bottom"
+	| "right"
+	| "left"
+	| "center"
+	| "both";
 
-/** An app-registered workspace dock panel as served by Core
+/** An app-registered workspace workbench tab as served by Core
  *  (`contributes.dock_panels[]`), tagged with its owning `plugin`.
  *
  *  `panel` is the render-mode discriminant (the `DockPanelKind` vocabulary — `"companion"`,
  *  `"view"`, `"native"`) and stays a bare string so a member this build predates is
  *  still delivered; the renderer must ignore what it does not know. `spec` carries the
  *  mode's payload ({@link DockPanelSpec}). */
+export interface PluginFileHandler {
+	companion: string;
+	editable: boolean;
+	extensions: string[];
+	id: string;
+	plugin: string;
+	title: string;
+}
+
 export interface PluginDockPanel {
 	icon?: string;
 	id: string;
 	order?: number;
 	/** Render mode: `"companion"` | `"view"` | `"native"` | a newer member. */
 	panel: string;
+	/** Preferred opening region; the user may move the tab afterward. */
 	placement: PluginDockPlacement;
 	/** The owning plugin's manifest id (added by Core's contributions endpoint). */
 	plugin: string;
-	spec?: DockPanelSpec;
+	spec?: PluginValue;
 	title: string;
 }
 
@@ -1261,7 +1355,7 @@ export interface PluginComposerControlOption {
  */
 export interface PluginComposerControl {
 	/** Arguments passed alongside `capability` by an `action` control. */
-	args?: Record<string, unknown>;
+	args?: PluginDocument;
 	/** Capability an `action` control dispatches through the owning plugin's granted
 	 *  capability seam. Never inline code, and never a capability it wasn't granted. */
 	capability?: string;
@@ -1274,7 +1368,7 @@ export interface PluginComposerControl {
 	 *  its live value, and an `action` marks its dispatch so the turn hook sees it. */
 	flag: string;
 	/** Core-stamped declarative HTTP authority. */
-	http_policy?: unknown;
+	http_policy?: PluginValue;
 	icon?: string;
 	id: string;
 	label: string;
@@ -1308,12 +1402,12 @@ export interface PluginChannel {
  *  messages the action attaches to (`"assistant"` | `"user"` | `"any"`).
  */
 export interface PluginMessageAction {
-	args?: Record<string, unknown>;
+	args?: PluginDocument;
 	/** Capability the shell invokes when the action fires, through the owning
 	 *  plugin's granted capability seam (never inline code). */
 	capability?: string;
 	/** Core-stamped declarative HTTP authority. */
-	http_policy?: unknown;
+	http_policy?: PluginValue;
 	icon?: string;
 	id: string;
 	kind: string;
@@ -1337,7 +1431,7 @@ export interface PluginMessageAction {
 /** A text-selection toolbar action an enabled plugin contributes
  * (`contributes.selection_actions`), tagged with its owning `plugin`. */
 export interface PluginSelectionAction {
-	args?: Record<string, unknown>;
+	args?: PluginDocument;
 	/** Optional capability for plugin-owned dispatch. Host-owned actions may use
 	 * an opaque `args.dispatch` bridge instead. */
 	capability?: string;
@@ -1359,7 +1453,7 @@ export interface PluginSelectionAction {
  */
 export interface PluginContextMenuItem {
 	anchor: string;
-	args?: Record<string, unknown>;
+	args?: PluginDocument;
 	/** Capability the shell invokes when the row is clicked, through the owning
 	 *  plugin's granted capability seam. */
 	capability?: string;
@@ -1380,7 +1474,7 @@ export interface PluginContextMenuItem {
  *  declares neither.
  */
 export interface PluginCreateAction {
-	args?: Record<string, unknown>;
+	args?: PluginDocument;
 	/** Capability invoked when the row is clicked, through the owning plugin's
 	 *  granted capability seam. */
 	capability?: string;
@@ -1419,11 +1513,19 @@ export interface PluginCompanion {
 	approvedGrants: string[];
 	/** Per-app CSP allowlist from the manifest (undefined = the default locked CSP). */
 	csp?: PluginCompanionCsp;
+	/** Whether to inject the restricted default CSP when this app has no trusted declaration. */
+	defaultCspEnforced: boolean;
+	/** Core-derived provenance: true only for a manifest compiled into the binary. */
+	firstParty?: boolean;
 	hasUi: boolean;
 	icon?: string;
 	id: string;
 	label: string;
+	/** External MCP App entrypoint, opened through Core's governed dispatcher. */
+	mcpToolId?: string;
 	name: string;
+	/** Contextual MCP entrypoints keep a route but do not become global launch targets. */
+	navigationVisible?: boolean;
 	/** The owning plugin's manifest id (the PluginStore key). The UI bundle is
 	 *  keyed by this, NOT by the companion id (`app__<runnable id>`). */
 	pluginId: string;
@@ -1431,31 +1533,42 @@ export interface PluginCompanion {
 }
 
 /** Wire shape of a companion (snake_case from Rust serde). */
-interface PluginCompanionWire {
+export interface PluginCompanionWire {
 	approved_grants?: string[];
 	csp?: {
 		connect_domains?: string[];
 		resource_domains?: string[];
 	} | null;
+	default_csp_enforced?: boolean;
+	first_party?: boolean;
 	has_ui?: boolean;
 	icon?: string;
 	id: string;
 	label: string;
+	mcpToolId?: string;
 	name: string;
+	navigationVisible?: boolean;
 	plugin_id?: string;
 	shortcut?: string;
 }
 
 function toPluginCompanion(w: PluginCompanionWire): PluginCompanion {
 	return {
+		navigationVisible: pluginBooleanField(w.navigationVisible),
+		mcpToolId:
+			w.mcpToolId !== undefined && w.mcpToolId.length <= 512
+				? w.mcpToolId
+				: undefined,
 		id: w.id,
 		name: w.name,
+		firstParty: w.first_party ?? false,
 		label: w.label,
 		icon: w.icon,
 		shortcut: w.shortcut,
 		pluginId: w.plugin_id ?? "",
 		approvedGrants: w.approved_grants ?? [],
 		hasUi: w.has_ui ?? false,
+		defaultCspEnforced: pluginBooleanField(w.default_csp_enforced) ?? true,
 		csp: w.csp
 			? {
 					connectDomains: w.csp.connect_domains ?? [],
@@ -1463,6 +1576,50 @@ function toPluginCompanion(w: PluginCompanionWire): PluginCompanion {
 				}
 			: undefined,
 	};
+}
+
+const plannerTextSchema = z
+	.string()
+	.refine((value) => !hasControlCharacters(value));
+const pluginComputerUsePlannerSchema = z
+	.object({
+		description: plannerTextSchema.max(512).optional(),
+		id: z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,127}$/),
+		label: plannerTextSchema
+			.max(128)
+			.refine((value) => value.trim().length > 0),
+		model_id: plannerTextSchema
+			.max(256)
+			.refine((value) => value.trim().length > 0),
+		plugin: z.string().refine(isValidPluginId),
+	})
+	.catchall(pluginValueSchema) satisfies z.ZodType<PluginComputerUsePlanner>;
+function isPluginComputerUsePlanner(
+	value: Parameters<typeof pluginComputerUsePlannerSchema.parse>[0]
+): value is PluginComputerUsePlanner {
+	return pluginComputerUsePlannerSchema.safeParse(value).success;
+}
+
+export function parsePluginComputerUsePlanners(
+	value: Parameters<typeof pluginComputerUsePlannerSchema.parse>[0]
+): PluginComputerUsePlanner[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const seen = new Set<string>();
+	const planners: PluginComputerUsePlanner[] = [];
+	for (const entry of value) {
+		if (!isPluginComputerUsePlanner(entry)) {
+			continue;
+		}
+		const key = `${entry.plugin}\u001f${entry.id}`;
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		planners.push(entry);
+	}
+	return planners;
 }
 
 export async function getPluginContributions(
@@ -1480,13 +1637,27 @@ export async function getPluginContributions(
 	if (!resp.ok) {
 		throw new Error(`/api/plugins/contributions failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as Partial<
-		Omit<PluginContributions, "companions">
-	> & { companions?: PluginCompanionWire[] };
+	const json = parsePluginResponse(
+		pluginContributionsWireSchema,
+		await resp.json()
+	);
+	const computerUsePlanners = parsePluginComputerUsePlanners(
+		json.computer_use_planners
+	);
+	const backgrounds = parsePluginBackgrounds(json.backgrounds);
+	const avatars = parseAvatarContributions(
+		json.avatar_accessories,
+		json.avatar_styles
+	);
+	const interfaces = parseInterfaceContributions(json.interfaces);
 	return {
 		agent_edit_panels: json.agent_edit_panels ?? [],
+		agent_profile_tabs: json.agent_profile_tabs ?? [],
+		avatar_accessories: avatars.accessories,
+		avatar_styles: avatars.styles,
 		composer_controls: json.composer_controls ?? [],
 		chat_features: json.chat_features ?? [],
+		computer_use_planners: computerUsePlanners,
 		chat_widget_templates: json.chat_widget_templates ?? [],
 		settings_tabs: json.settings_tabs ?? [],
 		message_actions: json.message_actions ?? [],
@@ -1502,7 +1673,10 @@ export async function getPluginContributions(
 		sidebar_modes: json.sidebar_modes ?? [],
 		sidebar_buttons: json.sidebar_buttons ?? [],
 		themes: json.themes ?? [],
+		backgrounds,
+		interfaces,
 		dock_panels: json.dock_panels ?? [],
+		file_handlers: json.fileHandlers ?? json.file_handlers ?? [],
 		live_activities: json.live_activities ?? [],
 		store_tabs: json.store_tabs ?? [],
 		channels: json.channels ?? [],
@@ -1541,8 +1715,8 @@ export async function fetchPluginUiBundle(
 	if (!resp.ok) {
 		throw new Error(`/api/plugins/${id}/ui-bundle failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as { code?: string };
-	return typeof json.code === "string" ? json.code : null;
+	const json = parsePluginResponse(uiBundleSchema, await resp.json());
+	return json.code ?? null;
 }
 
 /** A closed error code the app host-bridge surfaces to a companion frame. Mirrors
@@ -1562,6 +1736,40 @@ export class PluginHostError extends Error {
 		super(message);
 		this.code = code;
 		this.name = "PluginHostError";
+	}
+}
+
+/** The exact reply Core's app host bridge gives for a method it does not know
+ *  (`plugin_bridge_api::plugin_bridge_dispatch`, pinned by its
+ *  `unknown_method_reply_is_pinned` test). */
+export function unknownHostMethodMessage(method: string): string {
+	return `unknown host method '${method}'`;
+}
+
+/**
+ * Run a host-bridge call, falling back to `legacyCall` ONLY when Core is too old
+ * to know `method`: a {@link PluginHostError} with code `invalid_args` and exactly
+ * Core's unknown-method message. Every other failure (`denied`, `not_found`,
+ * `server_error`, any other `invalid_args`) is re-thrown without the legacy call,
+ * so a newer Core's grant or user-permission refusal never fails open to a
+ * host-direct route.
+ */
+export async function withLegacyBridgeFallback<T>(
+	method: string,
+	bridgeCall: () => Promise<T>,
+	legacyCall: () => Promise<T>
+): Promise<T> {
+	try {
+		return await bridgeCall();
+	} catch (error) {
+		if (
+			error instanceof PluginHostError &&
+			error.code === "invalid_args" &&
+			error.message === unknownHostMethodMessage(method)
+		) {
+			return await legacyCall();
+		}
+		throw error;
 	}
 }
 
@@ -1597,8 +1805,8 @@ export async function pluginHostInvoke(
 	target: ApiTarget,
 	pluginId: string,
 	method: string,
-	args: unknown
-): Promise<unknown> {
+	args: Parameters<typeof hostArgumentsSchema.parse>[0]
+): Promise<PluginValue | undefined> {
 	let resp: Response;
 	try {
 		resp = await authenticatedFetch(
@@ -1607,7 +1815,7 @@ export async function pluginHostInvoke(
 			{
 				method: "POST",
 				headers: makeHeaders(target.token, target.userJwt),
-				body: JSON.stringify({ method, args }),
+				body: JSON.stringify({ method, args: hostArgumentsSchema.parse(args) }),
 			}
 		);
 	} catch (e) {
@@ -1620,23 +1828,22 @@ export async function pluginHostInvoke(
 		let code = codeForStatus(resp.status);
 		let message = `host bridge ${method} failed: ${resp.status}`;
 		try {
-			const body = (await resp.json()) as {
-				error?: { code?: string; message?: string };
-			};
-			if (body.error) {
-				if (typeof body.error.message === "string") {
-					message = body.error.message;
-				}
-				if (typeof body.error.code === "string") {
-					code = body.error.code as PluginHostErrorCode;
-				}
+			const body = pluginRecord(await resp.json());
+			const error = pluginRecord(body?.error);
+			const errorMessage = pluginStringField(error?.message);
+			if (errorMessage !== undefined) {
+				message = errorMessage;
+			}
+			const errorCode = hostErrorCodeSchema.safeParse(error?.code);
+			if (errorCode.success) {
+				code = errorCode.data;
 			}
 		} catch {
 			// Non-JSON error body: keep the status-derived code + message.
 		}
 		throw new PluginHostError(code, message);
 	}
-	const json = (await resp.json()) as { result?: unknown };
+	const json = parsePluginResponse(hostResponseSchema, await resp.json());
 	return json.result;
 }
 
@@ -1651,7 +1858,7 @@ export async function pluginHostInvoke(
 export async function pluginHostInvokeStream(
 	target: ApiTarget,
 	pluginId: string,
-	input: unknown,
+	input: Parameters<typeof hostArgumentsSchema.parse>[0],
 	opts: { onChunk: (delta: string) => void; signal?: AbortSignal }
 ): Promise<void> {
 	let resp: Response;
@@ -1662,7 +1869,10 @@ export async function pluginHostInvokeStream(
 			{
 				method: "POST",
 				headers: makeHeaders(target.token, target.userJwt),
-				body: JSON.stringify({ method: "agent.run", args: input }),
+				body: JSON.stringify({
+					method: "agent.run",
+					args: hostArgumentsSchema.parse(input),
+				}),
 				signal: opts.signal,
 			}
 		);
@@ -1700,21 +1910,23 @@ export async function pluginHostInvokeStream(
 					return;
 				}
 				if (data !== null && data.length > 0) {
-					let parsed: { type?: string; delta?: string; errorText?: string };
-					try {
-						parsed = JSON.parse(data);
-					} catch {
-						parsed = {};
-					}
+					const parsed = (() => {
+						try {
+							return hostStreamFrameSchema.safeParse(JSON.parse(data));
+						} catch {
+							return hostStreamFrameSchema.safeParse({});
+						}
+					})();
+					const frameValue = parsed.success ? parsed.data : {};
 					if (
-						parsed.type === "text-delta" &&
-						typeof parsed.delta === "string"
+						frameValue.type === "text-delta" &&
+						frameValue.delta !== undefined
 					) {
-						opts.onChunk(parsed.delta);
-					} else if (parsed.type === "error") {
+						opts.onChunk(frameValue.delta);
+					} else if (frameValue.type === "error") {
 						throw new PluginHostError(
 							"server_error",
-							parsed.errorText ?? "agent stream error"
+							frameValue.errorText ?? "agent stream error"
 						);
 					}
 				}
@@ -1732,44 +1944,44 @@ export async function pluginHostInvokeStream(
 }
 
 /**
- * `POST /api/plugins/:id/host/stream` (method `finetune.stream`) — subscribe to a
- * fine-tune run's live progress SSE for the `@ryu/finetune` app. Unlike
- * {@link pluginHostInvokeStream} (which parses the chat reply stream), this forwards
- * each raw SSE `data:` payload VERBATIM to `onFrame` — the sidecar's progress frames
- * (`snapshot`/`progress`/`state`/`end`, each a JSON object with step/loss/state). The
- * app parses them. Resolves when the stream closes; `signal` aborts the fetch.
+ * `GET /api/ext/<plugin id><path>` — read an SSE route on the calling companion's
+ * OWN sidecar through the generic ext-proxy and forward each raw `data:` payload
+ * VERBATIM to `onFrame`. The plugin id is host-owned; `path` is relative to the
+ * sidecar's mount and validated against it before any credential is attached.
+ * Serves the `finetune.stream` host-API verb (the sidecar's
+ * `/api/finetune/:id/stream` progress frames), which Core no longer bridges.
+ * Resolves when the stream closes; `signal` aborts the fetch.
  */
-export async function pluginFinetuneStream(
+export async function ownAppEventStream(
 	target: ApiTarget,
 	pluginId: string,
-	jobId: string,
+	path: string,
 	opts: { onFrame: (data: string) => void; signal?: AbortSignal }
 ): Promise<void> {
+	const resolved = resolveOwnAppPath(pluginId, path);
+	if (!resolved) {
+		throw new PluginHostError(
+			"invalid_args",
+			"Refusing an app stream outside its own sidecar mount."
+		);
+	}
 	let resp: Response;
 	try {
-		resp = await authenticatedFetch(
-			target,
-			`/api/plugins/${encodeURIComponent(pluginId)}/host/stream`,
-			{
-				method: "POST",
-				headers: makeHeaders(target.token, target.userJwt),
-				body: JSON.stringify({
-					method: "finetune.stream",
-					args: { id: jobId },
-				}),
-				signal: opts.signal,
-			}
-		);
+		resp = await authenticatedFetch(target, resolved, {
+			method: "GET",
+			headers: makeHeaders(target.token, target.userJwt),
+			signal: opts.signal,
+		});
 	} catch (e) {
 		throw new PluginHostError(
 			"server_error",
-			e instanceof Error ? e.message : "finetune stream unreachable"
+			e instanceof Error ? e.message : "app stream unreachable"
 		);
 	}
 	if (!(resp.ok && resp.body)) {
 		throw new PluginHostError(
 			codeForStatus(resp.status),
-			`finetune stream ${jobId} failed: ${resp.status}`
+			`app stream ${path} failed: ${resp.status}`
 		);
 	}
 
@@ -1858,7 +2070,7 @@ export async function installApp(
 		const err = await parseLifecycleError(resp, `/api/plugins/${id}/install`);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as { app: AppRecordWire };
+	const json = parsePluginResponse(appRecordEnvelopeSchema, await resp.json());
 	return toAppRecord(json.app);
 }
 
@@ -1870,15 +2082,34 @@ export async function installStandaloneAppBundle(
 	bundle: StandaloneAppBundle,
 	options: { skipUserJwt?: boolean } = {}
 ): Promise<void> {
-	const manifest = {
-		...bundle.manifest,
-		...(bundle.uiCode === null ? {} : { ui_code: bundle.uiCode }),
-	};
+	const manifest = { ...pluginDocumentSchema.parse(bundle.manifest) };
+	if (bundle.uiCode !== null) {
+		manifest.ui_code = bundle.uiCode;
+	}
 	const resp = await authenticatedFetch(target, "/api/plugins/install-bundle", {
 		method: "POST",
 		headers: makeHeaders(target.token, target.userJwt),
 		body: JSON.stringify(manifest),
 		skipUserJwt: options.skipUserJwt,
+	});
+	if (!resp.ok) {
+		const err = await parseLifecycleError(resp, "/api/plugins/install-bundle");
+		throw Object.assign(new Error(err.message), err);
+	}
+}
+
+/** Install or update a companion-only app that a builder app made (the
+ * `apps.installBundle` bridge). The caller has already narrowed the bundle with
+ * `checkAppBundle`; Core still validates the manifest and leaves a new install
+ * disabled, so the user reviews its grants when enabling it. */
+export async function installCompanionAppBundle(
+	target: ApiTarget,
+	bundle: AppBundle
+): Promise<void> {
+	const resp = await authenticatedFetch(target, "/api/plugins/install-bundle", {
+		method: "POST",
+		headers: makeHeaders(target.token, target.userJwt),
+		body: JSON.stringify(bundle),
 	});
 	if (!resp.ok) {
 		const err = await parseLifecycleError(resp, "/api/plugins/install-bundle");
@@ -1905,10 +2136,9 @@ export async function installStandaloneApp(
 		}
 		throw new Error(`Ryu Core did not register ${id} after built-in install.`);
 	} catch (cause) {
-		const status =
-			cause instanceof Error && "status" in cause
-				? (cause as Error & { status?: unknown }).status
-				: undefined;
+		const parsedStatus =
+			cause instanceof Error ? nativeErrorStatusSchema.safeParse(cause) : null;
+		const status = parsedStatus?.success ? parsedStatus.data.status : undefined;
 		if (status !== 404) {
 			throw cause;
 		}
@@ -1952,7 +2182,7 @@ export async function updateInstalledPlugin(
 		const err = await parseLifecycleError(resp, `/api/plugins/${id}/update`);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as { app: AppRecordWire };
+	const json = parsePluginResponse(appRecordEnvelopeSchema, await resp.json());
 	return toAppRecord(json.app);
 }
 
@@ -1978,7 +2208,7 @@ export async function updateInstalledPluginAtVersion(
 		const err = await parseLifecycleError(resp, `/api/plugins/${id}/update`);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as { app: AppRecordWire };
+	const json = parsePluginResponse(appRecordEnvelopeSchema, await resp.json());
 	return toAppRecord(json.app);
 }
 
@@ -1998,7 +2228,12 @@ export async function enableApp(
 		`/api/plugins/${encodedId}/enable`,
 		{
 			method: "POST",
-			headers: makeHeaders(target.token, target.userJwt),
+			// A paid Marketplace plugin re-checks its license with the signed-in
+			// account on enable; loopback Core targets only (see buyerTokenHeader).
+			headers: {
+				...makeHeaders(target.token, target.userJwt),
+				...buyerTokenHeader(target),
+			},
 			skipUserJwt: options.skipUserJwt,
 		}
 	);
@@ -2006,11 +2241,7 @@ export async function enableApp(
 		const err = await parseLifecycleError(resp, `/api/plugins/${id}/enable`);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as {
-		app: AppRecordWire;
-		externally_managed?: boolean;
-		notice?: string;
-	};
+	const json = parsePluginResponse(appRecordEnvelopeSchema, await resp.json());
 	return {
 		...toAppRecord(json.app),
 		externallyManaged: json.externally_managed,
@@ -2041,7 +2272,7 @@ export async function setPluginGrants(
 		const err = await parseLifecycleError(resp, `/api/plugins/${id}/grants`);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as { approved_grants?: string[] };
+	const json = parsePluginResponse(grantsEnvelopeSchema, await resp.json());
 	return json.approved_grants ?? [];
 }
 
@@ -2068,11 +2299,7 @@ export async function disableApp(
 		const err = await parseLifecycleError(resp, `/api/plugins/${id}/disable`);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as {
-		app: AppRecordWire;
-		externally_managed?: boolean;
-		notice?: string;
-	};
+	const json = parsePluginResponse(appRecordEnvelopeSchema, await resp.json());
 	return {
 		...toAppRecord(json.app),
 		externallyManaged: json.externally_managed,
@@ -2087,11 +2314,14 @@ export async function disableApp(
  *  {@link DependencyError}); pass `{ cascade: true }` to disable the whole dependent
  *  chain first, then remove. The refusal is a typed {@link AppLifecycleError}
  *  (`Object.assign`ed onto the thrown Error), so callers branch on `dependencyError`
- *  vs a plain message exactly as the disable path does. */
+ *  vs a plain message exactly as the disable path does.
+ *
+ *  Core always deletes the app's saved secrets. Its key-value storage is kept
+ *  unless `deleteStorage` is set (sent as `{ "delete_storage": true }`). */
 export async function uninstallApp(
 	target: ApiTarget,
 	id: string,
-	options?: { cascade?: boolean }
+	options?: { cascade?: boolean; deleteStorage?: boolean }
 ): Promise<AppUninstallResult> {
 	const encodedId = encodeURIComponent(id);
 	const path = options?.cascade
@@ -2100,18 +2330,15 @@ export async function uninstallApp(
 	const resp = await authenticatedFetch(target, path, {
 		method: "POST",
 		headers: makeHeaders(target.token, target.userJwt),
+		...(options?.deleteStorage
+			? { body: JSON.stringify({ delete_storage: true }) }
+			: {}),
 	});
 	if (!resp.ok) {
 		const err = await parseLifecycleError(resp, `/api/plugins/${id}/uninstall`);
 		throw Object.assign(new Error(err.message), err);
 	}
-	const json = (await resp.json()) as {
-		disabled?: string[];
-		externally_managed?: boolean;
-		notice?: string;
-		removed?: string;
-		success?: boolean;
-	};
+	const json = parsePluginResponse(uninstallEnvelopeSchema, await resp.json());
 	return {
 		success: json.success ?? true,
 		removed: json.removed ?? id,
@@ -2144,6 +2371,9 @@ export interface CatalogEntry {
 	/** Ids of separate plugins this app ships as a logical bundle. */
 	bundles?: string[] | null;
 	capabilities?: string[];
+	/** Which marketplace this row was browsed from. Stamped by Core only in the
+	 *  all-marketplaces view (`?source=all`); absent when one source is browsed. */
+	catalog_source_id?: string;
 	/** Store category label (e.g. "Productivity"). */
 	category?: string | null;
 	description: string;
@@ -2158,7 +2388,7 @@ export interface CatalogEntry {
 	example_prompts?: string[];
 	external?: boolean;
 	/** Redacted GitHub repository/release provenance. */
-	github_source?: Record<string, unknown> | null;
+	github_source?: PluginDocument | null;
 	homepage?: string | null;
 	/** Icon-primitive glyph id painted inside the tile. Declared here as well as on
 	 *  `@ryu/marketplace`'s `CatalogEntry` because it is on the same wire and the
@@ -2184,6 +2414,11 @@ export interface CatalogEntry {
 	/** Server-derived A Major Pass inclusion marker for catalog presentation. */
 	membership_included?: boolean;
 	name: string;
+	/** The publishing organization's identity is verified by Ryu (server-derived).
+	 *  A separate axis from `reviewed` and from signature verification. */
+	org_verified?: boolean;
+	/** The verified org's tier ("official", "partner", …); a qualifier only. */
+	org_verified_tier?: string | null;
 	/** Who listed this and how vetted it is. `"community"` = discovered
 	 *  automatically from a public GitHub topic and NOT reviewed by Ryu; absent
 	 *  = first-party. MUST stay snake_case — this is the exact key Core's
@@ -2207,6 +2442,9 @@ export interface CatalogEntry {
 	privacy_policy_url?: string | null;
 	/** Which discovery source produced this listing (e.g. `"github-topic"`). */
 	provenance?: string | null;
+	/** Publisher identity mark. An unrecognized wire value parses as absent
+	 *  rather than failing the whole catalog page. */
+	publisher_trust?: "gold" | "blue" | "dotted" | null;
 	/** Denormalized rating aggregate (0–5 mean + count), so a card and the detail
 	 *  header show stars without loading the review list. Absent = unrated. */
 	rating_average?: number | null;
@@ -2252,7 +2490,9 @@ export async function fetchAppsCatalog(
 ): Promise<CatalogEntry[]> {
 	const data = await request<{ entries?: CatalogEntry[] }>(
 		target,
-		"/api/plugins/catalog"
+		"/api/plugins/catalog",
+		undefined,
+		responseCodec1
 	);
 	return data.entries ?? [];
 }
@@ -2297,7 +2537,7 @@ export async function fetchPluginSources(
 	const json = await request<{
 		active?: string;
 		sources?: SourceWire[];
-	}>(target, "/api/catalog/sources?kind=plugin");
+	}>(target, "/api/catalog/sources?kind=plugin", undefined, responseCodec2);
 	return {
 		active: json.active ?? "",
 		sources: (json.sources ?? []).map(toPluginSource),
@@ -2309,10 +2549,15 @@ export async function selectPluginSource(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request<unknown>(target, "/api/catalog/sources/select", {
-		method: "POST",
-		body: { kind: "plugin", id },
-	});
+	await request<unknown>(
+		target,
+		"/api/catalog/sources/select",
+		{
+			method: "POST",
+			body: { kind: "plugin", id },
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /** Parameters for adding a custom Claude plugin marketplace as a plugin source. */
@@ -2338,7 +2583,8 @@ export async function addMarketplaceSource(
 				display_name: params.displayName,
 				base_url: params.baseUrl,
 			},
-		}
+		},
+		responseCodec3
 	);
 	if (json.ok === false) {
 		throw new Error(json.error ?? "Failed to add marketplace");
@@ -2392,20 +2638,20 @@ export async function searchPluginCatalog(
 	if (params.source) {
 		q.set("source", params.source);
 	}
-	const json = await request<{
-		app_total?: number | null;
-		entries?: CatalogEntry[];
-		next_cursor?: string | null;
-		note?: string | null;
-		plugin_total?: number | null;
-		total?: number | null;
-		total_count?: number | null;
-	}>(target, `/api/plugins/catalog/browse?${q.toString()}`);
+	const json = parsePluginResponse(
+		catalogBrowseSchema,
+		await request(
+			target,
+			`/api/plugins/catalog/browse?${q.toString()}`,
+			undefined,
+			catalogBrowseSchema
+		)
+	);
 	return {
 		appTotal: json.app_total ?? null,
 		entries: json.entries ?? [],
 		nextCursor: json.next_cursor ?? null,
-		note: typeof json.note === "string" ? json.note : null,
+		note: json.note ?? null,
 		pluginTotal: json.plugin_total ?? null,
 		total: json.total ?? json.total_count ?? null,
 	};
@@ -2477,19 +2723,19 @@ export async function fetchPluginCatalogDetail(
 	if (source) {
 		q.set("source", source);
 	}
-	const detail = await request<
-		Omit<PluginCatalogDetail, "author"> & { author?: unknown }
-	>(target, `/api/plugins/catalog/detail?${q.toString()}`);
-	const rawAuthor = detail.author;
+	const detail = parsePluginResponse(
+		catalogDetailWireSchema,
+		await request(
+			target,
+			`/api/plugins/catalog/detail?${q.toString()}`,
+			undefined,
+			catalogDetailWireSchema
+		)
+	);
 	const author =
-		typeof rawAuthor === "string"
-			? rawAuthor
-			: rawAuthor &&
-					typeof rawAuthor === "object" &&
-					!Array.isArray(rawAuthor) &&
-					typeof (rawAuthor as { name?: unknown }).name === "string"
-				? (rawAuthor as { name: string }).name
-				: null;
+		pluginStringField(detail.author) ??
+		pluginStringField(pluginRecord(detail.author)?.name) ??
+		null;
 	return { ...detail, author };
 }
 
@@ -2506,12 +2752,15 @@ export async function fetchPluginVersionDetail(
 	target: ApiTarget,
 	repo: string,
 	tag: string
-): Promise<import("@ryu/marketplace/catalog/types").VersionSnapshot | null> {
+): Promise<VersionSnapshot | null> {
 	const q = new URLSearchParams({ repo, tag });
 	try {
-		return await request<
-			import("@ryu/marketplace/catalog/types").VersionSnapshot
-		>(target, `/api/plugins/catalog/version-detail?${q.toString()}`);
+		return await request<VersionSnapshot>(
+			target,
+			`/api/plugins/catalog/version-detail?${q.toString()}`,
+			undefined,
+			versionSnapshotResponseCodec
+		);
 	} catch {
 		return null;
 	}
@@ -2532,15 +2781,20 @@ export async function fetchPluginChannels(
 	target: ApiTarget,
 	id: string,
 	repo?: string | null
-): Promise<import("@ryu/marketplace/catalog/types").CatalogChannel[]> {
+): Promise<CatalogChannel[]> {
 	const q = new URLSearchParams({ id });
 	if (repo) {
 		q.set("repo", repo);
 	}
 	try {
 		const body = await request<{
-			channels?: import("@ryu/marketplace/catalog/types").CatalogChannel[];
-		}>(target, `/api/plugins/catalog/channels?${q.toString()}`);
+			channels?: CatalogChannel[];
+		}>(
+			target,
+			`/api/plugins/catalog/channels?${q.toString()}`,
+			undefined,
+			responseCodec4
+		);
 		return body.channels ?? [];
 	} catch {
 		return [];
@@ -2646,9 +2900,7 @@ export async function fetchSidecarStatus(
 	if (!resp.ok) {
 		throw new Error(`/api/sidecar/status failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as {
-		sidecars?: Array<{ name: string; running: boolean }>;
-	};
+	const json = parsePluginResponse(sidecarsEnvelopeSchema, await resp.json());
 	const map: Record<string, boolean> = {};
 	for (const s of json.sidecars ?? []) {
 		map[s.name] = s.running;
@@ -2664,6 +2916,23 @@ export interface SidecarDetail {
 	memoryBytes: number | null;
 	pid: number | null;
 	running: boolean;
+	/** OS isolation recorded at the sidecar's last start; null for built-in
+	 *  sidecars, never-started ones, and older nodes that do not report it. */
+	sandbox: SidecarSandboxStatus | null;
+}
+
+/** OS isolation of an app sidecar process, as Core applied it at start. */
+export interface SidecarSandboxStatus {
+	/** The platform mechanism: `landlock`, `seatbelt`, `job_object`, or `none`. */
+	backend: string;
+	/** Why the status is what it is when Core fell back (e.g. no Landlock). */
+	detail: string | null;
+	/** Whether a restriction is actually applied to the process. */
+	enforced: boolean;
+	/** Whether filesystem access is actually confined. */
+	fsRestricted: boolean;
+	/** Effective mode after combining the node setting and the manifest. */
+	mode: "audit" | "enforce" | "off";
 }
 
 /** `GET /api/sidecar/status`, but keeping the per-engine resource fields the
@@ -2680,15 +2949,7 @@ export async function fetchSidecarDetails(
 	if (!resp.ok) {
 		throw new Error(`/api/sidecar/status failed: ${resp.status}`);
 	}
-	const json = (await resp.json()) as {
-		sidecars?: Array<{
-			name: string;
-			running: boolean;
-			pid?: number;
-			memory_bytes?: number;
-			cpu_percent?: number;
-		}>;
-	};
+	const json = parsePluginResponse(sidecarsEnvelopeSchema, await resp.json());
 	const map: Record<string, SidecarDetail> = {};
 	for (const s of json.sidecars ?? []) {
 		map[s.name] = {
@@ -2696,6 +2957,15 @@ export async function fetchSidecarDetails(
 			pid: s.pid ?? null,
 			memoryBytes: s.memory_bytes ?? null,
 			cpuPercent: s.cpu_percent ?? null,
+			sandbox: s.sandbox
+				? {
+						mode: s.sandbox.mode,
+						backend: s.sandbox.backend,
+						enforced: s.sandbox.enforced,
+						fsRestricted: s.sandbox.fs_restricted,
+						detail: s.sandbox.detail ?? null,
+					}
+				: null,
 		};
 	}
 	return map;
@@ -2729,18 +2999,10 @@ export async function fetchEngineConcurrency(
 	if (!resp.ok) {
 		return null;
 	}
-	const json = (await resp.json()) as {
-		admission?: {
-			gates?: Array<{
-				in_flight: number;
-				max_in_flight: number;
-				queued: number;
-				queued_interactive: number;
-			}>;
-		};
-		engine_busy_slots?: number | null;
-		engine_total_slots?: number | null;
-	};
+	const json = parsePluginResponse(
+		engineConcurrencyWireSchema,
+		await resp.json()
+	);
 	const gate = json.admission?.gates?.[0];
 	if (!gate && json.engine_busy_slots == null) {
 		return null;
@@ -2775,7 +3037,7 @@ export interface SidecarLifecyclePreview {
 	dryRun: true;
 	name: string;
 	success: boolean;
-	[key: string]: unknown;
+	[key: string]: PluginValue | undefined;
 }
 
 export function previewSidecarInstall(
@@ -2785,7 +3047,8 @@ export function previewSidecarInstall(
 	return request<SidecarLifecyclePreview>(
 		target,
 		`/api/setup/${encodeURIComponent(name)}/install?dryRun=true`,
-		{ method: "POST" }
+		{ method: "POST" },
+		sidecarLifecyclePreviewResponseCodec
 	);
 }
 
@@ -2798,7 +3061,8 @@ export function previewSidecarUninstall(
 	return request<SidecarLifecyclePreview>(
 		target,
 		`/api/setup/${encodeURIComponent(name)}/${route}?dryRun=true`,
-		{ method: "POST" }
+		{ method: "POST" },
+		sidecarLifecyclePreviewResponseCodec
 	);
 }
 

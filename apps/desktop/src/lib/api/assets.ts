@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
 // apps/desktop/src/lib/api/assets.ts
 //
 // Client for the shared asset picker: searchable icons, brand logos, and GIFs.
@@ -77,6 +79,9 @@ export interface ImageHit {
 export interface ImageSearchResponse {
 	configured: boolean;
 	error?: string;
+	/** Whether another page is likely available (older nodes omit it). */
+	has_more?: boolean;
+	page?: number;
 	provider: ImageProvider;
 	results: ImageHit[];
 }
@@ -135,12 +140,13 @@ export async function searchIcons(
 	if (!resp.ok) {
 		throw new Error(`icon search failed: ${resp.status}`);
 	}
-	const data = (await resp.json()) as {
-		icons?: string[];
-		// The collection endpoint returns `{ uncategorized: string[], categories }`.
-		uncategorized?: string[];
-		categories?: Record<string, string[]>;
-	};
+	const data = z
+		.object({
+			icons: z.array(z.string()).optional(),
+			uncategorized: z.array(z.string()).optional(),
+			categories: z.record(z.string(), z.array(z.string())).optional(),
+		})
+		.parse(await resp.json());
 	let ids: string[];
 	if (q) {
 		ids = data.icons ?? [];
@@ -188,16 +194,24 @@ export async function searchLogos(query: string): Promise<LogoHit[]> {
 		throw new Error(`logo search failed: ${resp.status}`);
 	}
 	// The search endpoint 404s when nothing matches; treat as empty.
-	const data = (await resp.json().catch(() => [])) as Array<{
-		title: string;
-		route: string | { light: string; dark: string };
-	}>;
-	if (!Array.isArray(data)) {
+	const parsed = z
+		.array(
+			z.object({
+				title: z.string(),
+				route: z.union([
+					z.string(),
+					z.object({ light: z.string(), dark: z.string() }),
+				]),
+			})
+		)
+		.safeParse(await resp.json().catch(() => []));
+	if (!parsed.success) {
 		return [];
 	}
+	const data = parsed.data;
 	return data.map((item) => ({
 		title: item.title,
-		svgUrl: typeof item.route === "string" ? item.route : item.route.light,
+		svgUrl: isNativeText(item.route) ? item.route : item.route.light,
 	}));
 }
 
@@ -217,9 +231,11 @@ export async function searchGifs(
 	limit = 24
 ): Promise<GifSearchResponse> {
 	const q = encodeURIComponent(query.trim());
-	return await request<GifSearchResponse>(
+	return await request(
 		target,
-		`/api/gifs/search?q=${q}&limit=${limit}`
+		`/api/gifs/search?q=${q}&limit=${limit}`,
+		undefined,
+		gifSearchResponseSchema
 	);
 }
 
@@ -228,15 +244,65 @@ export async function searchImages(
 	target: ApiTarget,
 	provider: ImageProvider,
 	query: string,
-	limit = 16
+	limit = 16,
+	page = 1
 ): Promise<ImageSearchResponse> {
 	const params = new URLSearchParams({
 		provider,
 		q: query.trim(),
 		limit: String(limit),
+		page: String(page),
 	});
-	return await request<ImageSearchResponse>(
+	return await request(
 		target,
-		`/api/assets/images/search?${params.toString()}`
+		`/api/assets/images/search?${params.toString()}`,
+		undefined,
+		imageSearchResponseSchema
 	);
 }
+
+const gifHitResponseSchema = z
+	.object({
+		height: z.number(),
+		id: z.string(),
+		preview_url: z.string(),
+		title: z.string(),
+		url: z.string(),
+		width: z.number(),
+	})
+	.passthrough();
+
+const gifSearchResponseSchema = z
+	.object({
+		configured: z.boolean(),
+		error: z.string().optional(),
+		provider: z.string(),
+		results: z.array(gifHitResponseSchema),
+	})
+	.passthrough();
+
+const imageHitResponseSchema = z
+	.object({
+		attribution: z.string(),
+		height: z.number(),
+		id: z.string(),
+		license_url: z.union([z.null(), z.string()]).optional(),
+		preview_url: z.string(),
+		rights: z.string(),
+		source_url: z.string(),
+		title: z.string(),
+		url: z.string(),
+		width: z.number(),
+	})
+	.passthrough();
+
+const imageSearchResponseSchema = z
+	.object({
+		configured: z.boolean(),
+		error: z.string().optional(),
+		has_more: z.boolean().optional(),
+		page: z.number().optional(),
+		provider: z.union([z.literal("openverse"), z.literal("unsplash")]),
+		results: z.array(imageHitResponseSchema),
+	})
+	.passthrough();

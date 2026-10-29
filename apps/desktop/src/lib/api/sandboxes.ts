@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/sandboxes.ts
 //
 // Typed client for the sandboxes currently running on a node
@@ -16,6 +18,32 @@
 // empty list, which shows "No sandboxes running").
 
 import { type ApiTarget, request } from "./client.ts";
+
+const specResponseSchema = z.looseObject({
+	gpu: z.union([z.null(), z.string()]).optional(),
+	mem_gib: z.union([z.null(), z.number()]).optional(),
+	os: z.union([z.null(), z.string()]).optional(),
+	vcpu: z.union([z.null(), z.number()]).optional(),
+});
+const sandboxesResponseSchema = z.looseObject({
+	elapsed_seconds: z.number().optional(),
+	org_id: z.union([z.null(), z.string()]).optional(),
+	run_id: z.string().optional(),
+	spec: z.union([z.null(), specResponseSchema]).optional(),
+});
+const rawResponseSchema = z.looseObject({
+	sandboxes: z.array(sandboxesResponseSchema).optional(),
+});
+const rawResponseSchema2 = z.looseObject({
+	backend: z.string().optional(),
+	run_id: z.string().optional(),
+	workspace_id: z.string().optional(),
+});
+const rawResponseSchema3 = z.looseObject({
+	exit_code: z.number().optional(),
+	stderr: z.string().optional(),
+	stdout: z.string().optional(),
+});
 
 /** Resource shape a sandbox was provisioned with (normalized to camelCase). */
 export interface SandboxSpec {
@@ -56,10 +84,6 @@ interface RawSandboxRun {
 	spec?: RawSandboxSpec | null;
 }
 
-interface RawSandboxes {
-	sandboxes?: RawSandboxRun[];
-}
-
 function normalizeSpec(raw: RawSandboxSpec | null | undefined): SandboxSpec {
 	return {
 		vcpu: raw?.vcpu ?? null,
@@ -89,7 +113,12 @@ export async function fetchNodeSandboxes(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<SandboxRun[]> {
-	const raw = await request<RawSandboxes>(target, "/api/sandboxes", { signal });
+	const raw = await request(
+		target,
+		"/api/sandboxes",
+		{ signal },
+		rawResponseSchema
+	);
 	return Array.isArray(raw.sandboxes) ? raw.sandboxes.map(normalizeRun) : [];
 }
 
@@ -119,18 +148,6 @@ export interface SandboxExecResult {
 	stdout: string;
 }
 
-interface RawCreatedSandbox {
-	backend?: string;
-	run_id?: string;
-	workspace_id?: string;
-}
-
-interface RawSandboxExecResult {
-	exit_code?: number;
-	stderr?: string;
-	stdout?: string;
-}
-
 /**
  * Create a persistent sandbox on a node (`POST /api/sandboxes`).
  *
@@ -146,10 +163,15 @@ export async function createSandbox(
 		opts?.budgetMicroUsd === undefined
 			? {}
 			: { budget_micro_usd: opts.budgetMicroUsd };
-	const raw = await request<RawCreatedSandbox>(target, "/api/sandboxes", {
-		method: "POST",
-		body,
-	});
+	const raw = await request(
+		target,
+		"/api/sandboxes",
+		{
+			method: "POST",
+			body,
+		},
+		rawResponseSchema2
+	);
 	return {
 		backend: raw.backend ?? "unknown",
 		runId: raw.run_id ?? "",
@@ -166,7 +188,7 @@ export async function execSandbox(
 	runId: string,
 	req: { args?: string[]; command: string; timeoutSecs?: number }
 ): Promise<SandboxExecResult> {
-	const raw = await request<RawSandboxExecResult>(
+	const raw = await request(
 		target,
 		`/api/sandboxes/${encodeURIComponent(runId)}/exec`,
 		{
@@ -176,7 +198,8 @@ export async function execSandbox(
 				args: req.args ?? [],
 				timeout_secs: req.timeoutSecs,
 			},
-		}
+		},
+		rawResponseSchema3
 	);
 	return {
 		exitCode: raw.exit_code ?? 0,
@@ -193,7 +216,12 @@ export async function destroySandbox(
 	target: ApiTarget,
 	runId: string
 ): Promise<void> {
-	await request<void>(target, `/api/sandboxes/${encodeURIComponent(runId)}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/api/sandboxes/${encodeURIComponent(runId)}`,
+		{
+			method: "DELETE",
+		},
+		gatewayJsonValueSchema
+	);
 }

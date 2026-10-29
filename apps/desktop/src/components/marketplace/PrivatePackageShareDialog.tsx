@@ -5,8 +5,9 @@ import {
 	Key01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { marketplaceBrowseKindLabel } from "@ryu/marketplace/catalog/chrome/marketplace-sections";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -14,16 +15,16 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
+} from "@ryu/ui/components/select.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { useCallback, useEffect, useState } from "react";
 import { sileo } from "sileo";
 import {
@@ -57,6 +58,7 @@ export default function PrivatePackageShareDialog({
 	onClose: () => void;
 	open: boolean;
 }) {
+	const tl = useLiteralMessages();
 	const [kind, setKind] = useState<MarketplaceKind>("workflow");
 	const [id, setId] = useState("");
 	const [label, setLabel] = useState("");
@@ -91,8 +93,8 @@ export default function PrivatePackageShareDialog({
 
 	const handleCreate = async () => {
 		const packageId = id.trim();
-		const redemptions = Number.parseInt(maxRedemptions, 10);
-		const days = Number.parseInt(expiresInDays, 10);
+		const redemptions = Number(maxRedemptions);
+		const days = Number(expiresInDays);
 		if (!packageId) {
 			setError(
 				"Enter the package id exactly as it appears in the Marketplace."
@@ -197,7 +199,7 @@ export default function PrivatePackageShareDialog({
 		>
 			<DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
 				<DialogHeader>
-					<DialogTitle className="flex items-center gap-2">
+					<DialogTitle layout="inline">
 						<HugeiconsIcon className="size-4 text-primary" icon={Key01Icon} />
 						Create a private package code
 					</DialogTitle>
@@ -217,7 +219,7 @@ export default function PrivatePackageShareDialog({
 								/>
 								Code ready
 							</div>
-							<p className="break-all font-medium font-mono text-2xl tracking-[0.18em]">
+							<p className="break-all font-medium font-mono text-2xl tracking-(--tracking-section)">
 								{result.code}
 							</p>
 							<Button
@@ -240,16 +242,24 @@ export default function PrivatePackageShareDialog({
 								{result.customerOrganizationId
 									? "This code is bound to the customer organization."
 									: "Anyone with this code can redeem it."}{" "}
-								It expires{" "}
-								{result.expiresAt ? formatDate(result.expiresAt) : "soon"} and
-								allows {result.maxRedemptions} redemption
-								{result.maxRedemptions === 1 ? "" : "s"}.
+								{tl(
+									"It expires {expiresAt} and allows {maxRedemptions, plural, one {{redemptionCount} redemption} other {{redemptionCount} redemptions}}.",
+									{
+										expiresAt: result.expiresAt
+											? formatDate(result.expiresAt)
+											: tl("soon"),
+										maxRedemptions: result.maxRedemptions,
+										redemptionCount: String(result.maxRedemptions),
+									}
+								)}
 							</span>
 						</div>
 						{error ? (
-							<p className="text-sm text-status-destructive">{error}</p>
+							<p className="text-sm text-status-destructive" role="alert">
+								{error}
+							</p>
 						) : null}
-						<DialogFooter className="gap-2">
+						<DialogFooter>
 							<Button
 								disabled={revoking || Boolean(result.revokedAt)}
 								onClick={() => void revokeCode()}
@@ -266,17 +276,14 @@ export default function PrivatePackageShareDialog({
 						<div className="grid gap-3 sm:grid-cols-[10rem_1fr]">
 							<label className="space-y-1.5" htmlFor="share-code-kind">
 								<span className="font-medium text-sm">Package type</span>
-								<Select
+								<Select<MarketplaceKind>
 									items={SHAREABLE_KINDS.map((value) => ({
 										label: marketplaceBrowseKindLabel(value),
 										value,
 									}))}
 									onValueChange={(value) => {
-										if (
-											value &&
-											SHAREABLE_KINDS.includes(value as MarketplaceKind)
-										) {
-											setKind(value as MarketplaceKind);
+										if (value && SHAREABLE_KINDS.includes(value)) {
+											setKind(value);
 										}
 									}}
 									value={kind}
@@ -395,7 +402,9 @@ export default function PrivatePackageShareDialog({
 							</label>
 						</div>
 						{error ? (
-							<p className="text-sm text-status-destructive">{error}</p>
+							<p className="text-sm text-status-destructive" role="alert">
+								{error}
+							</p>
 						) : null}
 						<DialogFooter>
 							<Button onClick={onClose} variant="ghost">

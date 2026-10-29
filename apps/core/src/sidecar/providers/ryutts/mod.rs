@@ -46,7 +46,8 @@ pub fn default_tts_engine() -> String {
 }
 
 /// Loopback port the TTS sidecar binds to. Distinct from llama.cpp (8080),
-/// embeddings (8081), mlx (8082), sd (8083), mlx-vlm (8084), and whisper (8090).
+/// embeddings (8081), rerank (8082), classify (8083), mlx-vlm (8084), whisper
+/// (8090), and sd (8101).
 pub const TTS_PORT: u16 = 8085;
 fn tts_address() -> String {
     format!("127.0.0.1:{}", crate::profile::port(TTS_PORT))
@@ -71,24 +72,33 @@ pub fn bearer() -> String {
 }
 
 /// Core-managed Hugging Face cache the sidecar's engines download models into.
-/// We point the sidecar's `HF_HOME` here so every model's bytes live under
-/// `~/.ryu` (Core-owned) instead of the user's default `~/.cache/huggingface`,
-/// and so Core's catalog can detect installed models. Overridable via
-/// `RYU_TTS_HF_HOME`.
+/// We point the sidecar's `HF_HOME` at the data dir's shared `models/hf` so every
+/// model's bytes live in the Ryu data dir instead of the user's default
+/// `~/.cache/huggingface`, and so Core's catalog can detect installed models.
+/// Overridable via `RYU_TTS_HF_HOME`.
 pub fn hf_home_dir() -> std::path::PathBuf {
     if let Ok(dir) = std::env::var("RYU_TTS_HF_HOME") {
         return std::path::PathBuf::from(dir);
     }
-    crate::paths::ryu_dir().join("models").join("hf")
+    ryu_sidecar_runtime::layout::hf_home(&crate::paths::ryu_dir())
+}
+
+/// Ryu's own install location for the `ryu_tts` runtime (wheel + venv):
+/// `<data dir>/engines/audio/ryutts`.
+pub fn default_sidecar_dir() -> std::path::PathBuf {
+    crate::sidecar::download_manager::engine_dir(
+        ryu_sidecar_runtime::layout::EngineGroup::Audio,
+        "ryutts",
+    )
 }
 
 /// Directory holding the `ryu_tts` package. Overridable via `RYU_TTS_DIR`;
-/// defaults to the install location `~/.ryu/tts-sidecar`.
+/// defaults to [`default_sidecar_dir`].
 pub fn sidecar_dir() -> std::path::PathBuf {
     if let Ok(dir) = std::env::var("RYU_TTS_DIR") {
         return std::path::PathBuf::from(dir);
     }
-    crate::paths::ryu_dir().join("tts-sidecar")
+    default_sidecar_dir()
 }
 
 /// The published `ryu_tts` wheel Core provisions the sidecar from, and the
@@ -175,7 +185,7 @@ async fn resolve_python() -> Option<String> {
 /// reused, so this is a cheap no-op on every boot after the first.
 ///
 /// **Where the code comes from.** This used to bail with `Ok(false)` whenever
-/// `~/.ryu/tts-sidecar` did not exist — which was *always*, on every real install:
+/// the sidecar dir did not exist — which was *always*, on every real install:
 /// nothing has ever created that directory. The `ryu_tts` package lives at
 /// `apps-store/voice/sidecar`, reachable only from a repo checkout via
 /// `bun run dev:tts`, and the voice manifest declares no runnable, so the generic
@@ -366,6 +376,12 @@ impl Sidecar for RyuTtsManager {
         let adopted_external = Arc::clone(&self.adopted_external);
         let client = self.client.clone();
         Box::pin(async move {
+            // Our own child is already up: nothing to start. Without this guard the
+            // reachability probe below would record our child as an adopted external
+            // server, and the next stop() would leave it running.
+            if process.is_running() {
+                return Ok(());
+            }
             // Adopt an already-running sidecar (e.g. `bun run dev:tts`) instead of
             // spawning a competitor that would fail to bind the port.
             if Self::server_reachable(&client).await {
@@ -400,7 +416,7 @@ impl Sidecar for RyuTtsManager {
             // create — huggingface_hub also creates it on first use.
             let hf_home = hf_home_dir();
             let _ = std::fs::create_dir_all(&hf_home);
-            let env: Vec<(String, String)> = vec![
+            let core_env: Vec<(String, String)> = vec![
                 // Make `ryu_tts` importable without depending on the cwd.
                 ("PYTHONPATH".into(), dir.to_string_lossy().to_string()),
                 ("RYU_TTS_HOST".into(), "127.0.0.1".into()),
@@ -423,6 +439,10 @@ impl Sidecar for RyuTtsManager {
                     kokoro::voices_path().to_string_lossy().to_string(),
                 ),
             ];
+            // Saved engine launch settings are environment only: the sidecar has
+            // no command line, so raw args are never forwarded.
+            let launch = super::engine_launch_config("ryutts").await;
+            let env = spawn_env(core_env, &launch);
             let args: Vec<String> = vec!["-m".into(), "ryu_tts".into()];
             process
                 .start_path_with_env(&program, &args, &env)
@@ -505,7 +525,13 @@ impl Sidecar for RyuTtsManager {
         Box::pin(async move {
             crate::sidecar::remove_from_version_store("ryutts");
             if delete_data {
-                tracing::info!("ryutts delete_data: leaving the sidecar dir intact");
+                // Ryu-owned dirs only: the runtime's venv (unless the operator
+                // pointed `RYU_TTS_DIR` elsewhere) and the Kokoro weights. The
+                // shared `models/hf` cache is used by other runtimes and stays.
+                if std::env::var_os("RYU_TTS_DIR").is_none() {
+                    crate::sidecar::remove_dir(&default_sidecar_dir()).await;
+                }
+                crate::sidecar::remove_dir(&kokoro::models_dir()).await;
             }
             tracing::info!("ryutts uninstalled");
             Ok(())
@@ -574,4 +600,64 @@ pub async fn install_model(
         anyhow::bail!("Ryu Audio model install failed ({status}): {err}");
     }
     Ok(body)
+}
+
+/// Environment Core sets for the sidecar (plus the Hugging Face token, which
+/// stays out of plain launch preferences). Saved options cannot override them.
+const MANAGED_ENV: &[&str] = &[
+    "PYTHONPATH",
+    "RYU_TTS_HOST",
+    "RYU_TTS_PORT",
+    crate::sidecar::ext_proxy::ENV_EXT_TOKEN,
+    "HF_HOME",
+    "HF_TOKEN",
+    "RYU_KOKORO_MODEL",
+    "RYU_KOKORO_VOICES",
+];
+
+/// Saved native environment first (minus managed names and anything already in
+/// Core's environment), then Core's own variables, which win when applied in
+/// order.
+fn spawn_env(
+    core_env: Vec<(String, String)>,
+    launch: &crate::inference::LaunchConfig,
+) -> Vec<(String, String)> {
+    let mut env = super::native_env_for_spawn("ryutts", launch, MANAGED_ENV);
+    env.extend(core_env);
+    env
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_environment_precedes_and_never_replaces_core_variables() {
+        let launch = crate::inference::LaunchConfig {
+            native: serde_json::json!({ "hf_hub_disable_telemetry": true })
+                .as_object()
+                .cloned()
+                .unwrap(),
+            extra_args: vec!["--ignored".to_owned()],
+            ..Default::default()
+        };
+        let core = vec![("HF_HOME".to_owned(), "/ryu/models/hf".to_owned())];
+        let env = spawn_env(core, &launch);
+        assert_eq!(
+            env.last(),
+            Some(&("HF_HOME".to_owned(), "/ryu/models/hf".to_owned()))
+        );
+        assert!(!env.iter().any(|(name, _)| name == "--ignored"));
+        if std::env::var_os("HF_HUB_DISABLE_TELEMETRY").is_none() {
+            assert_eq!(
+                env[0],
+                ("HF_HUB_DISABLE_TELEMETRY".to_owned(), "1".to_owned())
+            );
+        }
+        for name in MANAGED_ENV {
+            assert!(!crate::inference::native_options("ryutts")
+                .iter()
+                .any(|o| o.target == crate::inference::NativeTarget::Env(name)));
+        }
+    }
 }

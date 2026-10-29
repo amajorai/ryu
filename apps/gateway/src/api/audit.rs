@@ -49,6 +49,8 @@ pub struct AuditQueryParams {
     pub widget_instance_id: Option<String>,
     /// Filter by event discriminator, including `control_change`.
     pub event_type: Option<String>,
+    /// Filter by the verified user id Core forwarded for the call.
+    pub user_id: Option<String>,
 }
 
 /// Query-string parameters accepted by `GET /v1/audit/usage`.
@@ -60,6 +62,9 @@ pub struct AuditUsageQueryParams {
     pub until: String,
     pub provider: Option<String>,
     pub model: Option<String>,
+    /// Restrict the rollup to one background-feature purpose (`x-ryu-purpose`).
+    #[serde(default)]
+    pub purpose: Option<String>,
 }
 
 /// Body accepted by `POST /v1/audit/control`. The gateway derives the actor
@@ -199,6 +204,7 @@ pub async fn query_audit(
         agent_id: params.agent_id,
         widget_instance_id: params.widget_instance_id,
         event_type: params.event_type,
+        user_id: params.user_id,
         id_after: None,
     };
 
@@ -224,6 +230,11 @@ pub async fn query_audit(
             );
             let raw_cost_micro_usd: Option<u64> = if source != "managed" {
                 None
+            } else if e.event_type == "service_call" {
+                // Service costs cannot be reconstructed from model/token prices.
+                // A missing stored provider amount stays unknown; the safe usage
+                // metadata separately preserves estimate/source provenance.
+                e.provider_cost_micro_usd
             } else {
                 e.provider_cost_micro_usd.or_else(|| {
                     (per_1k > 0)
@@ -298,6 +309,7 @@ pub async fn query_audit_usage(
         timestamp_until: params.until,
         provider: params.provider,
         model: params.model,
+        purpose: params.purpose,
     };
     let mut events = state.audit.usage_rollup(&query).map_err(|error| {
         GatewayError::Internal(anyhow::anyhow!("audit usage query failed: {error}"))
@@ -423,6 +435,13 @@ fn usage_source_for_provider(
     managed_node: bool,
 ) -> &'static str {
     let base_provider = provider.split(':').next().unwrap_or(provider);
+    if let Some(descriptor) = ryu_gw_credentials::sdk_provider_by_id(base_provider) {
+        return if descriptor.auth_kind == ryu_gw_credentials::SdkAuthKind::NoAuth {
+            "self_hosted"
+        } else {
+            "byok"
+        };
+    }
     match base_provider {
         "local" | "ollama" | "llamacpp" | "lmstudio" | "vllm" => "local",
         "openrouter" => {
@@ -433,7 +452,7 @@ fn usage_source_for_provider(
             }
         }
         "openai" | "anthropic" | "genai" => "byok",
-        "cloudflare" | "bedrock" | "vertex" | "openai-credits"
+        "cloudflare" | "bedrock" | "vertex" | "openai-credits" | "anthropic-credits"
             if managed_inference || managed_node =>
         {
             "managed"
@@ -469,6 +488,9 @@ struct WidgetBucket {
     count: u32,
 }
 
+/// Map size at which expired widget buckets are swept (see `try_consume`).
+const WIDGET_BUCKET_SWEEP_THRESHOLD: usize = 4096;
+
 #[derive(Default)]
 struct WidgetRateLimiter {
     buckets: DashMap<String, WidgetBucket>,
@@ -481,6 +503,15 @@ impl WidgetRateLimiter {
     fn try_consume(&self, key: String, max_per_min: u32) -> bool {
         if max_per_min == 0 {
             return true;
+        }
+        // Every rendered widget instance mints a fresh key, so without a sweep
+        // the process-global map grows for the life of the gateway. A bucket
+        // whose window has elapsed carries no state (it would reset on next
+        // use), so dropping it is lossless. Swept before taking the entry ref:
+        // `retain` locks every shard and would deadlock against a held ref.
+        if self.buckets.len() >= WIDGET_BUCKET_SWEEP_THRESHOLD {
+            self.buckets
+                .retain(|_, bucket| bucket.window_start.elapsed() < Duration::from_secs(60));
         }
         let mut bucket = self.buckets.entry(key).or_insert_with(|| WidgetBucket {
             window_start: Instant::now(),
@@ -624,6 +655,12 @@ pub async fn ingest_exec_audit(
     if !is_trusted {
         return Err(GatewayError::Unauthorized(
             "Exec audit ingest requires a trusted-forwarder or master key.".to_string(),
+        ));
+    }
+
+    if body.event_type.as_deref() == Some("service_call") {
+        return Err(GatewayError::BadRequest(
+            "service audit events must be recorded by the Gateway service pipeline".to_owned(),
         ));
     }
 
@@ -778,8 +815,8 @@ mod tests {
     use super::{
         check_exec_budget, estimate_cost_micro_usd, ingest_exec_audit, query_audit,
         query_audit_usage, usage_source_for_provider, widget_call_allowed, widget_followup_allowed,
-        AuditQueryParams, AuditUsageQueryParams, ExecAuditBody, ExecBudgetCheckBody,
-        WidgetRateLimiter,
+        AuditQueryParams, AuditUsageQueryParams, ExecAuditBody, ExecBudgetCheckBody, WidgetBucket,
+        WidgetRateLimiter, WIDGET_BUCKET_SWEEP_THRESHOLD,
     };
     use crate::audit::{AuditLogger, AuditQuery, AuditRecord};
     use crate::config::{
@@ -821,6 +858,7 @@ mod tests {
             token_budget_total: None,
             downgrade_to: None,
             trusted_forwarder: true,
+            allowed_operations: vec![crate::config::ApiKeyOperation::Inference],
         }
     }
 
@@ -894,6 +932,29 @@ mod tests {
     }
 
     #[test]
+    fn widget_buckets_with_elapsed_windows_are_swept() {
+        let limiter = WidgetRateLimiter::default();
+        let Some(expired) =
+            std::time::Instant::now().checked_sub(std::time::Duration::from_secs(120))
+        else {
+            return;
+        };
+        for index in 0..WIDGET_BUCKET_SWEEP_THRESHOLD {
+            limiter.buckets.insert(
+                format!("call:stale-{index}"),
+                WidgetBucket {
+                    window_start: expired,
+                    count: 1,
+                },
+            );
+        }
+        assert!(limiter.try_consume("call:live".to_string(), 2));
+        assert_eq!(limiter.buckets.len(), 1, "only the live bucket remains");
+        assert!(limiter.try_consume("call:live".to_string(), 2));
+        assert!(!limiter.try_consume("call:live".to_string(), 2));
+    }
+
+    #[test]
     fn widget_call_and_followup_allowed_bypass_when_disabled() {
         let mut cfg = crate::config::WidgetConfig::default();
         cfg.enabled = false;
@@ -962,6 +1023,18 @@ mod tests {
             .expect("trusted forwarder may ingest");
         assert_eq!(body["ok"], true);
         // A credential read is a distinct event and must NOT count against exec budget.
+        assert_eq!(state.exec_budget.current_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn service_event_cannot_be_forged_through_exec_ingest_or_drain_sandbox_quota() {
+        let state = state_with(false);
+        let mut body = exec_body();
+        body.event_type = Some("service_call".into());
+        assert!(matches!(
+            ingest_exec_audit(State(Arc::clone(&state)), bearer("sk-core"), Json(body)).await,
+            Err(GatewayError::BadRequest(_))
+        ));
         assert_eq!(state.exec_budget.current_count(), 0);
     }
 
@@ -1161,17 +1234,25 @@ mod tests {
         let state = state_with_credits(true, true);
         // Log one model_call row, then let the background writer flush.
         state.log_audit(AuditRecord {
+            key_id: None,
             request_id: "r1".to_string(),
             api_key: "sk-master".to_string(),
             user_name: None,
             org_id: None,
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "openai-credits".to_string(),
             model: "gpt-4o".to_string(),
             input_tokens: 1000,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: Some("injected".to_owned()),
+            prompt_cache_read_tokens: Some(900),
+            prompt_cache_write_tokens: Some(100),
+            cache_write_1h_tokens: None,
             latency_ms: 5,
             eval_score: None,
             error: None,
@@ -1180,6 +1261,7 @@ mod tests {
             user_id: None,
             agent_id: None,
             feature: None,
+            purpose: None,
             managed_inference: true,
             provider_cost_micro_usd: None,
             event_type: crate::audit::EventType::ModelCall,
@@ -1204,23 +1286,34 @@ mod tests {
         assert_eq!(body["count"], 1);
         // Derived cost at the default 2000/1k rate: 1000 tokens ⇒ 2000 micro-USD.
         assert_eq!(body["entries"][0]["cost_micro_usd"], 2000);
+        assert_eq!(body["entries"][0]["prompt_cache_outcome"], "injected");
+        assert_eq!(body["entries"][0]["prompt_cache_read_tokens"], 900);
+        assert_eq!(body["entries"][0]["prompt_cache_write_tokens"], 100);
     }
 
     #[tokio::test]
     async fn query_audit_usage_returns_exact_rollup_cost_and_counts() {
         let state = state_with_credits(true, true);
         let mut record = AuditRecord {
+            key_id: None,
             request_id: "usage-reported".to_owned(),
             api_key: "sk-master".to_owned(),
             user_name: None,
             org_id: Some("org-1".to_owned()),
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "openrouter".to_owned(),
             model: "gpt-5".to_owned(),
             input_tokens: 100,
             output_tokens: 50,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            cache_write_1h_tokens: None,
             latency_ms: 25,
             eval_score: None,
             error: None,
@@ -1234,6 +1327,7 @@ mod tests {
             user_id: Some("member-1".to_owned()),
             agent_id: None,
             feature: Some("chat".to_owned()),
+            purpose: None,
             managed_inference: true,
             provider_cost_micro_usd: Some(1_250),
             widget_instance_id: None,
@@ -1256,6 +1350,7 @@ mod tests {
                 until: (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
                 provider: Some("openrouter".to_owned()),
                 model: Some("gpt-5".to_owned()),
+                purpose: None,
             }),
         )
         .await
@@ -1272,6 +1367,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn query_audit_usage_filters_by_purpose_and_reports_cache_tokens() {
+        let state = state_with(true);
+        let mut record = AuditRecord {
+            key_id: None,
+            request_id: "foreground".to_owned(),
+            api_key: "sk-master".to_owned(),
+            user_name: None,
+            org_id: None,
+            team_id: None,
+            team_ids: None,
+            project_id: None,
+            provider: "anthropic".to_owned(),
+            model: "claude".to_owned(),
+            input_tokens: 10,
+            output_tokens: 1,
+            cache_read_tokens: Some(5),
+            cache_write_tokens: None,
+            cache_write_1h_tokens: None,
+            cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            latency_ms: 5,
+            eval_score: None,
+            error: None,
+            skill_ids: None,
+            session_id: None,
+            event_type: crate::audit::EventType::ModelCall,
+            backend: None,
+            command: None,
+            duration_ms: None,
+            exit_code: None,
+            user_id: None,
+            agent_id: None,
+            feature: Some("chat".to_owned()),
+            purpose: None,
+            managed_inference: false,
+            provider_cost_micro_usd: None,
+            widget_instance_id: None,
+        };
+        state.log_audit(record.clone());
+        record.request_id = "compaction".to_owned();
+        record.purpose = Some("compaction".to_owned());
+        record.cache_read_tokens = Some(800);
+        record.cache_write_tokens = Some(120);
+        state.log_audit(record);
+        wait_for_audit_entries(&state, 2).await;
+
+        let Json(body) = query_audit_usage(
+            State(state),
+            loopback(),
+            bearer("sk-master"),
+            Query(AuditUsageQueryParams {
+                from: (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339(),
+                until: (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+                provider: None,
+                model: None,
+                purpose: Some("compaction".to_owned()),
+            }),
+        )
+        .await
+        .expect("usage rollup");
+
+        assert_eq!(body["events"].as_array().map(Vec::len), Some(1));
+        let event = &body["events"][0];
+        assert_eq!(event["purpose"], "compaction");
+        assert_eq!(event["feature"], "chat");
+        assert_eq!(event["cacheReadTokens"], 800);
+        assert_eq!(event["cacheWriteTokens"], 120);
+    }
+
+    #[tokio::test]
     async fn query_audit_usage_rejects_ranges_over_400_days() {
         let result = query_audit_usage(
             State(state_with(true)),
@@ -1282,6 +1449,7 @@ mod tests {
                 until: "2026-03-01T00:00:00Z".to_owned(),
                 provider: None,
                 model: None,
+                purpose: None,
             }),
         )
         .await;
@@ -1297,17 +1465,25 @@ mod tests {
             .credits
             .markup_bps = 2000;
         state.log_audit(AuditRecord {
+            key_id: None,
             request_id: "marked-up-provider".to_string(),
             api_key: "sk-master".to_string(),
             user_name: None,
             org_id: Some("org-1".to_string()),
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "acme".to_string(),
             model: "gpt-4o".to_string(),
             input_tokens: 1000,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            cache_write_1h_tokens: None,
             latency_ms: 5,
             eval_score: None,
             error: None,
@@ -1316,6 +1492,7 @@ mod tests {
             user_id: None,
             agent_id: None,
             feature: None,
+            purpose: None,
             managed_inference: true,
             provider_cost_micro_usd: Some(1000),
             event_type: crate::audit::EventType::ModelCall,
@@ -1352,17 +1529,25 @@ mod tests {
             },
         );
         state.log_audit(AuditRecord {
+            key_id: None,
             request_id: "managed-openrouter".to_string(),
             api_key: "sk-master".to_string(),
             user_name: None,
             org_id: Some("org-1".to_string()),
             team_id: None,
+            team_ids: None,
             project_id: None,
             provider: "openrouter".to_string(),
             model: "openai/gpt-5.6-sol".to_string(),
             input_tokens: 1000,
             output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             cache_hit: false,
+            prompt_cache_outcome: None,
+            prompt_cache_read_tokens: None,
+            prompt_cache_write_tokens: None,
+            cache_write_1h_tokens: None,
             latency_ms: 5,
             eval_score: None,
             error: None,
@@ -1371,6 +1556,7 @@ mod tests {
             user_id: None,
             agent_id: None,
             feature: None,
+            purpose: None,
             managed_inference: true,
             provider_cost_micro_usd: Some(1250),
             event_type: crate::audit::EventType::ModelCall,
@@ -1412,6 +1598,19 @@ mod tests {
 
     #[test]
     fn usage_source_keeps_non_credit_traffic_distinct() {
+        assert_eq!(usage_source_for_provider("genai-groq", false, true), "byok");
+        assert_eq!(
+            usage_source_for_provider("genai-vertex", false, true),
+            "byok"
+        );
+        assert_eq!(
+            usage_source_for_provider("genai-ollama", false, true),
+            "self_hosted"
+        );
+        assert_eq!(
+            usage_source_for_provider("genai-unknown", false, false),
+            "self_hosted"
+        );
         assert_eq!(usage_source_for_provider("local", false, true), "local");
         assert_eq!(usage_source_for_provider("ollama", false, true), "local");
         assert_eq!(usage_source_for_provider("openai", false, true), "byok");
@@ -1434,3 +1633,11 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "audit_prune_tests.rs"]
+mod prune_tests;
+
+#[cfg(test)]
+#[path = "audit_control_tests.rs"]
+mod control_tests;

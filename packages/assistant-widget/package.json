@@ -1,34 +1,41 @@
 {
   "name": "@ryu/assistant-widget",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./browser-context": "./src/browser-context.ts",
     "./chat": "./src/chat.tsx",
     "./core-chat": "./src/core-chat.tsx",
     "./docs-assistant": "./src/docs-assistant.ts",
     "./iframe": "./src/iframe.tsx",
     "./morph": "./src/morph.tsx",
-    "./surface": "./src/surface.tsx"
+    "./skin": "./src/skin.ts",
+    "./surface": "./src/surface.tsx",
+    "./guest-route": "./src/guest-route.ts",
+    "./webmcp-api": "./src/webmcp-api.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
-    "test": "bun test src"
+    "test": "bun test --isolate src"
   },
   "dependencies": {
     "@ai-sdk/react": "catalog:",
     "@ryu/blocks": "workspace:*",
     "@ryu/browser-local-ai": "workspace:*",
     "@ryu/ui": "workspace:*",
+    "@ryuhq/protocol": "workspace:*",
     "ai": "catalog:",
     "lucide-react": "catalog:",
-    "motion": "^12.38.0"
+    "motion": "^12.38.0",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "react": "^19",
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^21.0.4",
     "@ryu/config": "workspace:*",
     "@types/bun": "catalog:",
     "@types/react": "^19.2.10",

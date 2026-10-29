@@ -33,12 +33,12 @@ function GitEnvironmentProof() {
 
 	return (
 		<main
-			className="dark min-h-screen bg-[#09090b] px-6 py-10 text-foreground sm:px-10"
+			className="dark min-h-screen bg-background px-6 py-10 text-foreground sm:px-10"
 			data-testid="git-environment-proof"
 		>
 			<div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
 				<header className="max-w-2xl space-y-3">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Pinned Environment · Git workflow
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight sm:text-4xl">
@@ -54,7 +54,7 @@ function GitEnvironmentProof() {
 				<div className="grid items-start gap-6 lg:grid-cols-[minmax(0,390px)_minmax(0,1fr)]">
 					<section
 						aria-label="Pinned Environment summary"
-						className="rounded-[28px] border border-white/10 bg-[#151517] p-4 shadow-2xl shadow-black/20"
+						className="rounded-3xl border border-white/10 bg-card p-4 shadow-2xl shadow-black/20"
 						data-testid="environment-card"
 					>
 						<div className="flex items-center justify-between px-2 pb-3">
@@ -62,11 +62,11 @@ function GitEnvironmentProof() {
 								<p className="font-medium text-sm">Environment</p>
 								<p className="mt-0.5 text-muted-foreground text-xs">Ryu Work</p>
 							</div>
-							<span className="rounded-full bg-emerald-400/10 px-2.5 py-1 font-medium text-emerald-300 text-xs">
+							<span className="rounded-full bg-success/10 px-2.5 py-1 font-medium text-success text-xs">
 								{localGitReady ? "Git ready" : "Local folder"}
 							</span>
 						</div>
-						<div className="overflow-hidden rounded-2xl border border-white/10 bg-[#0f0f11]">
+						<div className="overflow-hidden rounded-2xl border border-white/10 bg-background">
 							<div className="flex items-center gap-3 border-white/10 border-b px-3.5 py-3">
 								<span className="grid size-7 place-items-center rounded-lg bg-white/5 text-muted-foreground">
 									<span className="text-sm">⌁</span>
@@ -86,10 +86,10 @@ function GitEnvironmentProof() {
 										<span className="min-w-0 flex-1 truncate">
 											feature/compare
 										</span>
-										<span className="text-emerald-300 text-xs">+16,604</span>
+										<span className="text-success text-xs">+16,604</span>
 									</div>
 									<div className="flex items-center gap-3 border-white/10 border-b px-3.5 py-3 text-sm">
-										<span className="grid size-4 place-items-center rounded-full border border-white/50 text-[9px] text-muted-foreground">
+										<span className="type-micro grid size-4 place-items-center rounded-full border border-white/50 text-muted-foreground">
 											↳
 										</span>
 										<span className="min-w-0 flex-1 truncate">
@@ -132,7 +132,7 @@ function GitEnvironmentProof() {
 						</div>
 					</section>
 
-					<section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
+					<section className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
 						<p className="font-medium text-sm">What the flow does</p>
 						<div className="mt-5 grid gap-3 sm:grid-cols-3">
 							{[
@@ -184,6 +184,8 @@ function GitEnvironmentProof() {
 		</main>
 	);
 }
+
+document.documentElement.classList.add("dark");
 
 const root = document.getElementById("root");
 if (root) {

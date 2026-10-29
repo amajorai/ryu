@@ -96,10 +96,10 @@ const DENIED = [
 			"the body is a fragment — `return` its result instead of exporting it",
 	},
 	{
-		pattern: /\bDeno\s*\./,
-		what: "the Deno global",
+		pattern: /\bchildProcess\s*\./,
+		what: "the childProcess global",
 		instead:
-			"the sandbox runs with no permissions; anything Deno.* would reach is denied at the flag level",
+			"a self-built tool must not start processes — reach the outside world through host/callTool",
 	},
 ];
 

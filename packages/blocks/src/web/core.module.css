@@ -1,0 +1,203 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	/* Ryu Landing Animations (shared @ryu/blocks) */
+
+	@keyframes scan-sweep {
+		0% {
+			transform: translateY(-100%);
+			opacity: 0;
+		}
+		10% {
+			opacity: 1;
+		}
+		90% {
+			opacity: 1;
+		}
+		100% {
+			transform: translateY(100%);
+			opacity: 0;
+		}
+	}
+	@keyframes threat-resolve {
+		0%,
+		40% {
+			opacity: 1;
+		}
+		60%,
+		100% {
+			opacity: 0.2;
+		}
+	}
+	@keyframes tool-float {
+		0% {
+			opacity: 0;
+			transform: translateY(8px);
+		}
+		20% {
+			opacity: 1;
+			transform: translateY(0);
+		}
+		80% {
+			opacity: 1;
+			transform: translateY(0);
+		}
+		100% {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+	}
+	@keyframes chunk-appear {
+		0% {
+			opacity: 0;
+			transform: scaleX(0);
+			transform-origin: left;
+		}
+		30% {
+			opacity: 1;
+			transform: scaleX(1);
+		}
+		70% {
+			opacity: 1;
+		}
+		100% {
+			opacity: 0.2;
+		}
+	}
+	@keyframes vec-orbit {
+		0% {
+			transform: rotate(0deg) translateX(20px) rotate(0deg);
+		}
+		100% {
+			transform: rotate(360deg) translateX(20px) rotate(-360deg);
+		}
+	}
+	@keyframes budget-fill {
+		0% {
+			width: 0%;
+		}
+		60% {
+			width: 78%;
+		}
+		80% {
+			width: 78%;
+		}
+		100% {
+			width: 0%;
+		}
+	}
+	@keyframes edge-trace {
+		0% {
+			stroke-dashoffset: 80;
+			opacity: 0;
+		}
+		30% {
+			opacity: 1;
+		}
+		70% {
+			stroke-dashoffset: 0;
+			opacity: 1;
+		}
+		100% {
+			stroke-dashoffset: 0;
+			opacity: 0.15;
+		}
+	}
+	@keyframes node-pulse {
+		0%,
+		100% {
+			box-shadow: 0 0 0 0 transparent;
+		}
+		50% {
+			box-shadow: 0 0 0 5px
+				color-mix(in oklch, var(--foreground) 20%, transparent);
+		}
+	}
+
+	@keyframes flow-down {
+		0% {
+			transform: translateY(-8px);
+			opacity: 0;
+		}
+		20% {
+			opacity: 1;
+		}
+		80% {
+			opacity: 1;
+		}
+		100% {
+			transform: translateY(8px);
+			opacity: 0;
+		}
+	}
+
+	.scanSweep {
+		animation: scan-sweep 3s ease-in-out infinite;
+	}
+	.threatResolve {
+		animation: threat-resolve 2.4s ease-in-out infinite;
+	}
+	.toolFloat {
+		animation: tool-float 2s ease-in-out infinite;
+	}
+	.chunkAppear {
+		animation: chunk-appear 2s ease-in-out infinite;
+	}
+	.vecOrbit {
+		animation: vec-orbit 4s linear infinite;
+	}
+	.budgetFill {
+		animation: budget-fill 3s ease-in-out infinite;
+	}
+	.edgeTrace {
+		animation: edge-trace 3s ease-in-out infinite;
+	}
+	.nodePulse {
+		animation: node-pulse 2s ease-in-out infinite;
+	}
+	.flowDown {
+		animation: flow-down 1.2s ease-in-out infinite;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.scanSweep,
+		.threatResolve,
+		.toolFloat,
+		.chunkAppear,
+		.vecOrbit,
+		.budgetFill,
+		.edgeTrace,
+		.nodePulse,
+		.flowDown {
+			animation: none;
+		}
+		.budgetFill {
+			width: 78%;
+		}
+	}
+}
+
+.variables {
+	animation-delay: var(--core-delay, 0s);
+}
+
+.variables[style*="--core-duration:"] {
+	animation-duration: var(--core-duration);
+}
+
+.variables[style*="--core-width:"] {
+	width: var(--core-width);
+}
+
+.variables[style*="--core-height:"] {
+	height: var(--core-height);
+}
+
+.variables[style*="--core-left:"] {
+	left: var(--core-left);
+}
+
+.variables[style*="--core-top:"] {
+	top: var(--core-top);
+}

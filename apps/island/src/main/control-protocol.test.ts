@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { IncomingMessage } from "node:http";
 import {
+	ghostCursorHueFor,
 	isControlAction,
 	isJsonRequest,
 	isTrustedLocalRequest,
@@ -13,8 +14,10 @@ import {
 // Electron, sockets, or ghost-cursor overlay. Mirrors the browser sidecar's
 // control.test.ts.
 
-function reqWith(headers: Record<string, string | undefined>): IncomingMessage {
-	return { headers } as unknown as IncomingMessage;
+function reqWith(
+	headers: Record<string, string | undefined>
+): Pick<IncomingMessage, "headers"> {
+	return { headers };
 }
 
 describe("resolveControlPort", () => {
@@ -23,41 +26,27 @@ describe("resolveControlPort", () => {
 			resolveControlPort({
 				ISLAND_CONTROL_PORT: "9999",
 				RYU_PROFILE: "dev",
-			} as NodeJS.ProcessEnv)
+			})
 		).toBe(9999);
 	});
 
 	it("shifts the base by +1000 in the dev profile", () => {
-		expect(
-			resolveControlPort({ RYU_PROFILE: "dev" } as NodeJS.ProcessEnv)
-		).toBe(8989);
+		expect(resolveControlPort({ RYU_PROFILE: "dev" })).toBe(8989);
 		// Case-insensitive + trimmed.
-		expect(
-			resolveControlPort({ RYU_PROFILE: "  DEV  " } as NodeJS.ProcessEnv)
-		).toBe(8989);
+		expect(resolveControlPort({ RYU_PROFILE: "  DEV  " })).toBe(8989);
 	});
 
 	it("uses the release base for release/empty/other profiles", () => {
-		expect(resolveControlPort({} as NodeJS.ProcessEnv)).toBe(7989);
-		expect(
-			resolveControlPort({ RYU_PROFILE: "release" } as NodeJS.ProcessEnv)
-		).toBe(7989);
+		expect(resolveControlPort({})).toBe(7989);
+		expect(resolveControlPort({ RYU_PROFILE: "release" })).toBe(7989);
 		// A non-dev profile name is not treated as dev.
-		expect(
-			resolveControlPort({ RYU_PROFILE: "auditsmoke" } as NodeJS.ProcessEnv)
-		).toBe(7989);
+		expect(resolveControlPort({ RYU_PROFILE: "auditsmoke" })).toBe(7989);
 	});
 
 	it("ignores a non-numeric or non-positive explicit port", () => {
-		expect(
-			resolveControlPort({ ISLAND_CONTROL_PORT: "abc" } as NodeJS.ProcessEnv)
-		).toBe(7989);
-		expect(
-			resolveControlPort({ ISLAND_CONTROL_PORT: "0" } as NodeJS.ProcessEnv)
-		).toBe(7989);
-		expect(
-			resolveControlPort({ ISLAND_CONTROL_PORT: "-5" } as NodeJS.ProcessEnv)
-		).toBe(7989);
+		expect(resolveControlPort({ ISLAND_CONTROL_PORT: "abc" })).toBe(7989);
+		expect(resolveControlPort({ ISLAND_CONTROL_PORT: "0" })).toBe(7989);
+		expect(resolveControlPort({ ISLAND_CONTROL_PORT: "-5" })).toBe(7989);
 	});
 });
 
@@ -145,6 +134,14 @@ describe("isJsonRequest", () => {
 });
 
 describe("parseGhostCursorEvent", () => {
+	it("keeps an agent color stable across short-lived Ghost processes", () => {
+		const identity = { agentId: "@ryu/codex", agentName: "Codex" };
+		const hue = ghostCursorHueFor(identity, "pid-1");
+		expect(ghostCursorHueFor(identity, "pid-2")).toBe(hue);
+		expect(hue).toBeGreaterThanOrEqual(0);
+		expect(hue).toBeLessThan(360);
+	});
+
 	it("parses a well-formed event and threads in the agent id", () => {
 		const event = parseGhostCursorEvent(
 			JSON.stringify({
@@ -207,13 +204,64 @@ describe("parseGhostCursorEvent", () => {
 		expect(longIntent?.intent.endsWith("…")).toBe(true);
 	});
 
+	it("preserves bounded agent/session identity and accepts safe avatar images", () => {
+		const event = parseGhostCursorEvent(
+			JSON.stringify({
+				phase: "move",
+				x: 12,
+				y: 24,
+				identity: {
+					agentId: "@ryu/codex",
+					agentName: "Codex",
+					agentTitle: "Software engineer",
+					sessionTitle: "x".repeat(180),
+					avatarUrl: "data:image/png;base64,AA==",
+					avatarEmoji: "🦊",
+				},
+			}),
+			"1"
+		);
+
+		expect(event?.identity).toEqual({
+			agentId: "@ryu/codex",
+			agentName: "Codex",
+			agentTitle: "Software engineer",
+			sessionTitle: "x".repeat(160),
+			avatarUrl: "data:image/png;base64,AA==",
+			avatarEmoji: "🦊",
+		});
+	});
+
+	it("drops unsafe avatar URLs from local cursor events", () => {
+		const event = parseGhostCursorEvent(
+			JSON.stringify({
+				phase: "move",
+				x: 12,
+				y: 24,
+				identity: {
+					agentName: "Codex",
+					avatarUrl: "javascript:alert(1)",
+				},
+			}),
+			"1"
+		);
+		expect(event?.identity).toEqual({ agentName: "Codex" });
+	});
+
 	it("accepts every known phase", () => {
-		for (const phase of ["move", "down", "up", "type", "scroll", "done"]) {
+		for (const phase of [
+			"move",
+			"down",
+			"up",
+			"type",
+			"scroll",
+			"done",
+		] as const) {
 			const event = parseGhostCursorEvent(
 				JSON.stringify({ phase, x: 0, y: 0 }),
 				"1"
 			);
-			expect(event?.phase).toBe(phase as never);
+			expect(event?.phase).toBe(phase);
 		}
 	});
 

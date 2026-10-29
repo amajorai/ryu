@@ -37,8 +37,8 @@ export const env = createEnv({
 		NEXT_PUBLIC_POSTHOG_KEY: z.string().optional(),
 		NEXT_PUBLIC_POSTHOG_HOST: z.url().default("https://eu.i.posthog.com"),
 		// Sentry crash reporting for the browser bundle (P3 crash tier). Optional:
-		// unset ⇒ the client Sentry init is a graceful no-op (no vendor wired). The
-		// server/edge runtimes may also read SENTRY_DSN/RYU_SENTRY_DSN directly.
+		// unset ⇒ the client Sentry init is a graceful no-op (no vendor wired). It is
+		// the one web DSN: the server/edge runtimes read the same build-time value.
 		NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
 	},
 	runtimeEnv: {

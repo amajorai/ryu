@@ -3,13 +3,24 @@
  * (agents, project folders, spaces, pages, meetings, …).
  *
  * The canonical kinds are `avatar` | `icon` | `emoji` | `dicebear`. Agents also
- * allow the `expressive` ghost avatar and legacy `dither` gradient. Hosts pick
+ * allow the `expressive` ghost avatar, marketplace `avatar_style` looks (see
+ * avatar-parts.ts), and the legacy `dither` gradient. Hosts pick
  * an allowlist via
  * {@link GLYPH_PRESETS} so every surface offers the same options consistently.
  */
 
 import type { GradientDirection } from "@ryu/ui/components/dither-kit/gradient.tsx";
-import type { DitherColor } from "@ryu/ui/components/dither-kit/palette.ts";
+import {
+	type DitherColor,
+	isDitherColor,
+} from "@ryu/ui/components/dither-kit/palette.ts";
+import { z } from "zod";
+import {
+	isNativeObjectLike,
+	isNativeObjectReceiver,
+	isNativeText,
+} from "../lib/native-primitive-observation.ts";
+import { isContributedPartId } from "./avatar-parts.ts";
 import { type GhostAvatarSpec, parseGhostAvatar } from "./ghost-avatar.ts";
 
 /** Every glyph kind the primitive understands. */
@@ -19,6 +30,7 @@ export type GlyphKind =
 	| "emoji"
 	| "dicebear"
 	| "expressive"
+	| "avatar_style"
 	| "dither";
 
 /** Dither-gradient payload (agent-only / legacy). */
@@ -41,8 +53,22 @@ export type GlyphValue =
 	| { kind: "emoji"; emoji: string; dither?: GlyphDitherValue }
 	| { kind: "dicebear"; style: string; seed: string }
 	| (GhostAvatarSpec & { kind: "expressive" })
+	| GlyphAvatarStyleValue
 	| { kind: "dither"; dither: GlyphDitherValue }
 	| null;
+
+/**
+ * An avatar drawn from a plugin-contributed style. `parts` maps a region id to a
+ * style option id, `none`, or a contributed accessory id; unpicked regions come
+ * from `seed`. Renders the surface fallback when the style's plugin is off.
+ */
+export interface GlyphAvatarStyleValue {
+	kind: "avatar_style";
+	palette?: string;
+	parts?: Record<string, string>;
+	seed: string;
+	style: string;
+}
 
 /** Dither payload when present — standalone dither, or icon/emoji background. */
 export function glyphDitherOf(value: GlyphValue): GlyphDitherValue | undefined {
@@ -71,8 +97,9 @@ export const GLYPH_PRESETS = {
 		"dicebear",
 	] as const satisfies readonly GlyphKind[],
 	/**
-	 * Agent persona avatars — the shared four plus expressive ghost faces and
-	 * the legacy dither gradient so existing agent personas remain editable.
+	 * Agent persona avatars — the shared four plus expressive ghost faces,
+	 * marketplace avatar styles, and the legacy dither gradient so existing
+	 * agent personas remain editable.
 	 */
 	agent: [
 		"avatar",
@@ -80,6 +107,7 @@ export const GLYPH_PRESETS = {
 		"emoji",
 		"dicebear",
 		"expressive",
+		"avatar_style",
 		"dither",
 	] as const satisfies readonly GlyphKind[],
 } as const;
@@ -90,8 +118,9 @@ export type GlyphPresetName = keyof typeof GLYPH_PRESETS;
 export function resolveGlyphKinds(
 	allowed: readonly GlyphKind[] | GlyphPresetName
 ): readonly GlyphKind[] {
-	if (typeof allowed === "string") {
-		return GLYPH_PRESETS[allowed];
+	if (isNativeText(allowed)) {
+		const preset: GlyphPresetName = allowed;
+		return GLYPH_PRESETS[preset];
 	}
 	return allowed;
 }
@@ -160,17 +189,22 @@ export const DEFAULT_DICEBEAR_STYLE: DicebearStyle = "notionists";
 /** DiceBear HTTP API major version (matches existing discussion-kit mocks). */
 export const DICEBEAR_API_VERSION = "9.x";
 
+const DICEBEAR_STYLE_SET: ReadonlySet<string> = new Set(DICEBEAR_STYLES);
+
 /** Build a DiceBear SVG URL for an `<img src>`. */
 export function dicebearUrl(
 	style: string,
 	seed: string,
 	opts: { size?: number } = {}
 ): string {
-	const params = new URLSearchParams({ seed: seed || "ryu" });
+	const params = new URLSearchParams({ seed: seed.slice(0, 256) || "ryu" });
+	const safeStyle = DICEBEAR_STYLE_SET.has(style)
+		? style
+		: DEFAULT_DICEBEAR_STYLE;
 	if (opts.size) {
 		params.set("size", String(opts.size));
 	}
-	return `https://api.dicebear.com/${DICEBEAR_API_VERSION}/${style}/svg?${params}`;
+	return `https://api.dicebear.com/${DICEBEAR_API_VERSION}/${safeStyle}/svg?${params}`;
 }
 
 /** Human label for a DiceBear style id (`notionists-neutral` → `Notionists Neutral`). */
@@ -198,6 +232,13 @@ export const GLYPH_ICON_COLORS: { label: string; value: string | undefined }[] =
 		{ label: "Black", value: "#111827" },
 	];
 
+export function isGlyphIconColor<T>(value: T): value is T & string {
+	return (
+		isNativeText(value) &&
+		GLYPH_ICON_COLORS.some((swatch) => swatch.value === value)
+	);
+}
+
 const ICONIFY_API = "https://api.iconify.design";
 
 /** A single Iconify search hit. */
@@ -206,12 +247,19 @@ export interface GlyphIconHit {
 	previewUrl: string;
 }
 
+/** Restrict a remote icon id to one collection and one icon name. */
+export function iconifyPath(iconId: string): string | null {
+	const candidate = iconId.includes(":") ? iconId : `hugeicons:${iconId}`;
+	const match = /^([a-z0-9_-]+):([a-z0-9_-]+)$/iu.exec(candidate);
+	return match ? `${match[1]}/${match[2]}` : null;
+}
+
 /** Build an Iconify SVG URL, optionally tinted. */
 export function glyphIconSvgUrl(
 	id: string,
 	opts: { color?: string; size?: number } = {}
 ): string {
-	const path = id.replace(":", "/");
+	const path = iconifyPath(id) ?? "hugeicons/question-mark";
 	const params = new URLSearchParams();
 	if (opts.color) {
 		params.set("color", opts.color);
@@ -224,9 +272,39 @@ export function glyphIconSvgUrl(
 	return `${ICONIFY_API}/${path}.svg${qs ? `?${qs}` : ""}`;
 }
 
+// These are consumed JSON projections of the two actual Iconify endpoints,
+// not a declaration of the entire provider response. Search never validates
+// collection-only fields or unrelated additive provider metadata.
+const iconifySearchProjection = z.object({
+	icons: z.array(z.string()).nullish(),
+});
+const iconifyCollectionProjection = z.object({
+	uncategorized: z.array(z.string()).nullish(),
+	categories: z.preprocess(
+		(value) => {
+			if (value === undefined || value === null) {
+				return [];
+			}
+			if (isNativeObjectLike(value)) {
+				// SAFETY: the native Lodash object-like observation proves a non-null
+				// object operand for Object.values, not the category entries' shapes.
+				// The following complete array parser validates every consumed entry.
+				// Observe own values before parsing so valid JSON keys such as __proto__
+				// are retained rather than dropped by a record-result constructor.
+				return Object.values(value as object);
+			}
+			return value;
+		},
+		z.array(z.array(z.string()))
+	),
+});
+
 /**
  * Search Iconify across all collections. Empty query returns a Lucide starter
  * set so the grid isn't blank on first open.
+ * Rejects malformed consumed response fields with a validation error; missing
+ * or null optional lists retain their empty-list fallback. Unrelated provider
+ * metadata is not validated, and valid icon order/duplicates are preserved.
  */
 export async function searchGlyphIcons(
 	query: string,
@@ -240,15 +318,13 @@ export async function searchGlyphIcons(
 	if (!resp.ok) {
 		throw new Error(`icon search failed: ${resp.status}`);
 	}
-	const data = (await resp.json()) as {
-		icons?: string[];
-		uncategorized?: string[];
-		categories?: Record<string, string[]>;
-	};
+
 	let ids: string[];
 	if (q) {
+		const data = iconifySearchProjection.parse(await resp.json());
 		ids = data.icons ?? [];
 	} else {
+		const data = iconifyCollectionProjection.parse(await resp.json());
 		const names = [
 			...(data.uncategorized ?? []),
 			...Object.values(data.categories ?? {}).flat(),
@@ -271,14 +347,17 @@ export function randomDicebearSeed(): string {
 	return out;
 }
 
-const GLYPH_KINDS = new Set<GlyphKind>([
-	"avatar",
-	"icon",
-	"emoji",
-	"dicebear",
-	"expressive",
-	"dither",
-]);
+function isGlyphKind<T>(value: T): value is T & GlyphKind {
+	return (
+		value === "avatar" ||
+		value === "icon" ||
+		value === "emoji" ||
+		value === "dicebear" ||
+		value === "expressive" ||
+		value === "avatar_style" ||
+		value === "dither"
+	);
+}
 
 /**
  * Narrow unknown JSON (sidebar `row.raw.icon`, `shell.openTab` opts, …) to a
@@ -286,23 +365,172 @@ const GLYPH_KINDS = new Set<GlyphKind>([
  * recognisable glyph shape so callers can leave an existing tab icon untouched.
  * Explicit `null` means "no custom glyph" and is a valid {@link GlyphValue}.
  */
-export function asGlyphValue(data: unknown): GlyphValue | undefined {
-	if (data === undefined) {
+const glyphRecordInputSchema = z
+	.object({
+		kind: z.unknown().optional(),
+		dataUrl: z.unknown().optional(),
+		id: z.unknown().optional(),
+		color: z.unknown().optional(),
+		dither: z.unknown().optional(),
+		emoji: z.unknown().optional(),
+		style: z.unknown().optional(),
+		seed: z.unknown().optional(),
+	})
+	.passthrough();
+
+const glyphInputSchema = z
+	.unknown()
+	.transform((input): GlyphValue | undefined => {
+		const parsed = glyphRecordInputSchema.safeParse(input);
+		if (input === undefined) {
+			return undefined;
+		}
+		if (input === null) {
+			return null;
+		}
+		if (!(parsed.success && Object.hasOwn(parsed.data, "kind"))) {
+			return undefined;
+		}
+		const data = parsed.data;
+		const kind = data.kind;
+		if (!isGlyphKind(kind)) {
+			return undefined;
+		}
+		if (kind === "expressive") {
+			const ghost = parseGhostAvatar(data);
+			return ghost ? { ...ghost, kind: "expressive" } : undefined;
+		}
+		if (kind === "avatar") {
+			return isNativeText(data.dataUrl)
+				? { kind, dataUrl: data.dataUrl }
+				: undefined;
+		}
+		if (kind === "icon") {
+			if (!(isNativeText(data.id) && data.id.trim()) || data.id.length > 200) {
+				return undefined;
+			}
+			const color = isGlyphIconColor(data.color) ? data.color : undefined;
+			const dither = parseGlyphDither(data.dither);
+			return {
+				kind,
+				id: data.id,
+				...(color ? { color } : undefined),
+				...(dither ? { dither } : undefined),
+			};
+		}
+		if (kind === "emoji") {
+			if (
+				!(isNativeText(data.emoji) && data.emoji.trim()) ||
+				data.emoji.length > 32
+			) {
+				return undefined;
+			}
+			const dither = parseGlyphDither(data.dither);
+			return { kind, emoji: data.emoji, ...(dither ? { dither } : undefined) };
+		}
+		if (kind === "dicebear") {
+			if (!(isNativeText(data.style) && isNativeText(data.seed))) {
+				return undefined;
+			}
+			return {
+				kind,
+				style: DICEBEAR_STYLE_SET.has(data.style)
+					? data.style
+					: DEFAULT_DICEBEAR_STYLE,
+				seed: data.seed.slice(0, 256),
+			};
+		}
+		if (kind === "avatar_style") {
+			return parseGlyphAvatarStyle(data);
+		}
+		if (kind === "dither") {
+			const dither = parseGlyphDither(data.dither);
+			return dither ? { kind, dither } : undefined;
+		}
+		return undefined;
+	});
+
+/** Normalize raw persisted values through the owning input schema. */
+export function asGlyphValue(
+	data: z.input<typeof glyphInputSchema>
+): GlyphValue | undefined {
+	return glyphInputSchema.parse(data);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return (
+		isNativeObjectReceiver(value) && value !== null && !Array.isArray(value)
+	);
+}
+
+const AVATAR_STYLE_PART_KEY = /^[a-z0-9][a-z0-9._-]{0,47}$/;
+
+function parseGlyphAvatarStyle(
+	data: Record<string, unknown>
+): GlyphAvatarStyleValue | undefined {
+	if (!(isContributedPartId(data.style) && isNativeText(data.seed))) {
 		return undefined;
 	}
-	if (data === null) {
-		return null;
+	const value: GlyphAvatarStyleValue = {
+		kind: "avatar_style",
+		style: data.style,
+		seed: data.seed.slice(0, 256),
+	};
+	if (isNativeText(data.palette) && AVATAR_STYLE_PART_KEY.test(data.palette)) {
+		value.palette = data.palette;
 	}
-	if (typeof data !== "object" || !("kind" in data)) {
-		return undefined;
+	if (isRecord(data.parts)) {
+		const parts: Record<string, string> = {};
+		for (const [region, pick] of Object.entries(data.parts).slice(0, 16)) {
+			if (
+				AVATAR_STYLE_PART_KEY.test(region) &&
+				isNativeText(pick) &&
+				(AVATAR_STYLE_PART_KEY.test(pick) || isContributedPartId(pick))
+			) {
+				parts[region] = pick;
+			}
+		}
+		if (Object.keys(parts).length) {
+			value.parts = parts;
+		}
 	}
-	const kind = (data as { kind: unknown }).kind;
-	if (typeof kind !== "string" || !GLYPH_KINDS.has(kind as GlyphKind)) {
-		return undefined;
-	}
-	if (kind === "expressive") {
-		const ghost = parseGhostAvatar(data);
-		return ghost ? { ...ghost, kind: "expressive" } : undefined;
-	}
-	return data as GlyphValue;
+	return value;
+}
+
+const glyphDitherInputSchema = z
+	.unknown()
+	.transform((value): GlyphDitherValue | undefined => {
+		if (
+			!(
+				isNativeObjectReceiver(value) &&
+				value !== null &&
+				!Array.isArray(value) &&
+				"from" in value &&
+				"direction" in value &&
+				"to" in value &&
+				isDitherColor(value.from)
+			)
+		) {
+			return undefined;
+		}
+		const direction =
+			value.direction === "down" ||
+			value.direction === "left" ||
+			value.direction === "right"
+				? value.direction
+				: value.direction === "up"
+					? value.direction
+					: null;
+		if (!direction) {
+			return undefined;
+		}
+		const to =
+			value.to === null ? null : isDitherColor(value.to) ? value.to : undefined;
+		return to === undefined ? undefined : { direction, from: value.from, to };
+	});
+
+function parseGlyphDither(
+	value: z.input<typeof glyphDitherInputSchema>
+): GlyphDitherValue | undefined {
+	return glyphDitherInputSchema.parse(value);
 }

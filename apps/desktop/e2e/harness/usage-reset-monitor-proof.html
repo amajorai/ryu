@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Monitors provider reset proof</title>
+	</head>
+	<body>
+		<div id="ryu-plugin-root"></div>
+		<script>
+			const now = Date.now();
+			const fixtureWindows = [
+				{
+					targetId: "window:Session::18000",
+					label: "Session",
+					window: "5h",
+					windowSeconds: 18000,
+					scope: "account",
+					model: null,
+					usedPercent: 47,
+					remainingPercent: 53,
+					resetsAt: new Date(now + 3 * 60 * 60 * 1000).toISOString(),
+				},
+				{
+					targetId: "window:Weekly::604800",
+					label: "Weekly",
+					window: "7d",
+					windowSeconds: 604800,
+					scope: "account",
+					model: null,
+					usedPercent: 51,
+					remainingPercent: 49,
+					resetsAt: new Date(now + 5 * 24 * 60 * 60 * 1000).toISOString(),
+				},
+			];
+			const fixtureProviders = [
+				{
+					providerId: "acp:codex",
+					label: "Codex (fixture account)",
+					kind: "subscription",
+				},
+			];
+			const monitors = [];
+			window.ryu = {
+				context: null,
+				monitors: {
+					list: async () => monitors,
+					get: async ({ id }) => monitors.find((monitor) => monitor.id === id),
+					create: async (input) => {
+						const monitor = {
+							...input,
+							id: "fixture-reset-watch",
+							created_at: new Date().toISOString(),
+							updated_at: new Date().toISOString(),
+							last_check_at: null,
+							last_status: null,
+							last_value: null,
+						};
+						monitors.push(monitor);
+						return monitor;
+					},
+					update: async ({ id, input }) => {
+						const monitor = monitors.find((candidate) => candidate.id === id);
+						Object.assign(monitor, input, { updated_at: new Date().toISOString() });
+						return monitor;
+					},
+					delete: async ({ id }) => {
+						const index = monitors.findIndex((monitor) => monitor.id === id);
+						if (index >= 0) monitors.splice(index, 1);
+					},
+					run: async () => "ok",
+					snapshots: async () => [],
+					alerts: async () => [],
+					usageProviders: async () => fixtureProviders,
+					usageQuery: async ({ providerId }) => ({
+						providerId,
+						available: true,
+						plan: "Plus",
+						reason: null,
+						windows: fixtureWindows,
+						meters: [
+							{
+								label: "Rate limit resets",
+								expiresAt: ["2026-10-01T00:00:00Z"],
+								resetsAt: null,
+								values: [
+									{
+										targetId: "meter:Rate limit resets:count:available",
+										number: 3,
+										kind: "count",
+										unit: "available",
+										resetsAt: null,
+									},
+								],
+							},
+						],
+					}),
+				},
+			};
+		</script>
+		<script type="module" src="./usage-reset-monitor-proof.tsx"></script>
+	</body>
+</html>

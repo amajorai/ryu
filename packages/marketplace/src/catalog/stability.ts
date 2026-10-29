@@ -12,15 +12,17 @@
  *  published index precisely so a new tier can ship without a client release, and
  *  dropping an unrecognised value would defeat that. Same tolerance the surface
  *  labels settled on. */
-const KNOWN: Record<string, string> = {
-	alpha: "Alpha",
-	beta: "Beta",
-	canary: "Canary",
-	experimental: "Experimental",
-	nightly: "Nightly",
-	prerelease: "Pre-release",
-	rc: "Release candidate",
-};
+const KNOWN = new Map(
+	Object.entries({
+		alpha: "Alpha",
+		beta: "Beta",
+		canary: "Canary",
+		experimental: "Experimental",
+		nightly: "Nightly",
+		prerelease: "Pre-release",
+		rc: "Release candidate",
+	})
+);
 
 /** `null` when the listing is finished — absent, empty, or explicitly stable.
  *  Callers render nothing for `null`, so a stable listing never sprouts a badge. */
@@ -31,7 +33,7 @@ export function stabilityLabel(
 	if (!raw || raw === "stable") {
 		return null;
 	}
-	return KNOWN[raw] ?? raw.charAt(0).toUpperCase() + raw.slice(1);
+	return KNOWN.get(raw) ?? raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
 /** Whether a listing should be hidden by the default stable-only catalog view.

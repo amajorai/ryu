@@ -1,0 +1,181 @@
+.canvas {
+	--proof-mention-canvas: #0b1020;
+	background-color: var(--proof-mention-canvas);
+}
+
+.transcriptBorder {
+	--proof-mention-transcript-border: color-mix(
+		in oklab,
+		oklch(78.5% 0.115 274.713) 20%,
+		transparent
+	);
+	border-color: var(--proof-mention-transcript-border);
+}
+
+.transcriptSurface {
+	--proof-mention-transcript-surface: color-mix(
+		in oklab,
+		oklch(78.5% 0.115 274.713) 6%,
+		transparent
+	);
+	background-color: var(--proof-mention-transcript-surface);
+}
+
+.mutedText {
+	--proof-mention-muted-text: oklch(70.4% 0.04 256.788);
+	color: var(--proof-mention-muted-text);
+}
+
+.verifiedSurface {
+	--proof-mention-verified-surface: color-mix(
+		in oklab,
+		oklch(76.5% 0.177 163.223) 15%,
+		transparent
+	);
+	background-color: var(--proof-mention-verified-surface);
+}
+
+.verifiedText {
+	--proof-mention-verified-text: oklch(84.5% 0.143 164.978);
+	color: var(--proof-mention-verified-text);
+}
+
+.pendingSurface {
+	--proof-mention-pending-surface: color-mix(
+		in oklab,
+		oklch(82.8% 0.189 84.429) 15%,
+		transparent
+	);
+	background-color: var(--proof-mention-pending-surface);
+}
+
+.pendingText {
+	--proof-mention-pending-text: oklch(92.4% 0.12 95.746);
+	color: var(--proof-mention-pending-text);
+}
+
+.transcriptBubble {
+	--proof-mention-transcript-bubble: color-mix(
+		in oklab,
+		oklch(12.9% 0.042 264.695) 60%,
+		transparent
+	);
+	background-color: var(--proof-mention-transcript-bubble);
+}
+
+.accentText {
+	--proof-mention-accent-text: oklch(87% 0.065 274.039);
+	color: var(--proof-mention-accent-text);
+}
+
+.secondaryText {
+	--proof-mention-secondary-text: oklch(86.9% 0.022 252.894);
+	color: var(--proof-mention-secondary-text);
+}
+
+.composerSurface {
+	--proof-mention-composer-surface: color-mix(
+		in oklab,
+		oklch(12.9% 0.042 264.695) 70%,
+		transparent
+	);
+	background-color: var(--proof-mention-composer-surface);
+}
+
+.primaryText {
+	--proof-mention-primary-text: oklch(92.9% 0.013 255.508);
+	color: var(--proof-mention-primary-text);
+}
+
+.composerFocus {
+	--proof-mention-composer-focus: color-mix(
+		in oklab,
+		oklch(78.5% 0.115 274.713) 50%,
+		transparent
+	);
+	--tw-ring-color: var(--proof-mention-composer-focus);
+}
+
+.placeholderText::placeholder {
+	--proof-mention-placeholder-text: oklch(44.6% 0.043 257.281);
+	color: var(--proof-mention-placeholder-text);
+}
+
+.neutralBadge {
+	--proof-mention-neutral-badge: color-mix(
+		in oklab,
+		oklch(70.4% 0.04 256.788) 10%,
+		transparent
+	);
+	background-color: var(--proof-mention-neutral-badge);
+}
+
+.actionSurface {
+	--proof-mention-action-surface: color-mix(
+		in oklab,
+		oklch(67.3% 0.182 276.935) 15%,
+		transparent
+	);
+	background-color: var(--proof-mention-action-surface);
+}
+
+.actionHover:hover {
+	--proof-mention-action-hover: color-mix(
+		in oklab,
+		oklch(67.3% 0.182 276.935) 25%,
+		transparent
+	);
+	background-color: var(--proof-mention-action-hover);
+}
+
+.metadataText {
+	--proof-mention-metadata-text: oklch(55.4% 0.046 257.417);
+	color: var(--proof-mention-metadata-text);
+}
+
+.titleAccent {
+	--proof-mention-title-accent: oklch(78.5% 0.115 274.713);
+	color: var(--proof-mention-title-accent);
+}
+
+.verifiedBorder {
+	--proof-mention-verified-border: color-mix(
+		in oklab,
+		oklch(76.5% 0.177 163.223) 30%,
+		transparent
+	);
+	border-color: var(--proof-mention-verified-border);
+}
+
+.verifiedSummary {
+	--proof-mention-verified-summary: color-mix(
+		in oklab,
+		oklch(76.5% 0.177 163.223) 10%,
+		transparent
+	);
+	background-color: var(--proof-mention-verified-summary);
+}
+
+.verifiedDetail {
+	--proof-mention-verified-detail: color-mix(
+		in oklab,
+		oklch(90.5% 0.093 164.15) 70%,
+		transparent
+	);
+	color: var(--proof-mention-verified-detail);
+}
+
+.sectionTracking {
+	--proof-mention-section-tracking: 0.16em;
+	letter-spacing: var(--proof-mention-section-tracking);
+}
+
+.titleTracking {
+	--proof-mention-title-tracking: 0.2em;
+	letter-spacing: var(--proof-mention-title-tracking);
+}
+
+.appIcon {
+	background-color: var(--proof-app-color);
+	border-radius: 4px;
+}

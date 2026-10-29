@@ -1,6 +1,6 @@
 "use client";
 
-import { ChatDisplayPrefsProvider as Provider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
+import { ChatDisplayPrefsProvider as Provider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useComposerSendShortcut } from "@/src/hooks/useComposerSendShortcut.ts";

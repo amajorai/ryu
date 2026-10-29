@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/connections.ts
 //
 // Typed client for Core's connected-client presence surface
@@ -12,6 +13,22 @@
 // allowed to see what". See apps/core/src/connections for the full rationale.
 
 import { type ApiTarget, request } from "./client.ts";
+
+const dataResponseSchema = z.looseObject({
+	client_id: z.string().optional(),
+	client_label: z.union([z.null(), z.string()]).optional(),
+	first_seen: z.number().optional(),
+	last_seen: z.number().optional(),
+	surface: z.union([z.null(), z.string()]).optional(),
+	user_id: z.union([z.null(), z.string()]).optional(),
+	user_name: z.union([z.null(), z.string()]).optional(),
+});
+const rawResponseSchema = z.looseObject({
+	client_count: z.number().optional(),
+	data: z.array(dataResponseSchema).optional(),
+	ttl_secs: z.number().optional(),
+	user_count: z.number().optional(),
+});
 
 /** One currently-connected client (normalized to camelCase). */
 export interface ConnectedClient {
@@ -54,13 +71,6 @@ interface RawClient {
 	user_name?: string | null;
 }
 
-interface RawConnections {
-	client_count?: number;
-	data?: RawClient[];
-	ttl_secs?: number;
-	user_count?: number;
-}
-
 function normalizeClient(raw: RawClient): ConnectedClient {
 	return {
 		userId: raw.user_id ?? null,
@@ -83,9 +93,14 @@ export async function fetchConnections(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<ConnectionsSnapshot> {
-	const raw = await request<RawConnections>(target, "/api/connections", {
-		signal,
-	});
+	const raw = await request(
+		target,
+		"/api/connections",
+		{
+			signal,
+		},
+		rawResponseSchema
+	);
 	return {
 		clients: (raw.data ?? []).map(normalizeClient),
 		clientCount: raw.client_count ?? 0,

@@ -5,8 +5,8 @@
 // theme blob under the `theme` preference key, and this service reads it and
 // subscribes to Core's SSE change stream. The main process treats the blob as
 // an opaque JSON string — all parsing/applying happens in the renderer with
-// `@ryu/ui/theme` (which cannot run here because main externalizes workspace
-// deps and `@ryu/ui` ships TypeScript source).
+// `@ryu/ui/theme` (which stays out of main: the main bundle inlines workspace
+// packages and `@ryu/ui` is renderer UI code).
 
 import { subscribePreferenceChanges } from "./preference-stream.ts";
 import { getPreferenceRaw } from "./preferences.ts";

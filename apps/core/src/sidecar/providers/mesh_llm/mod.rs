@@ -75,6 +75,12 @@ impl Sidecar for MeshLlmManager {
         let adopted_external = Arc::clone(&self.adopted_external);
         let client = self.client.clone();
         Box::pin(async move {
+            // Our own child is already up: nothing to start. Without this guard the
+            // reachability probe below would record our child as an adopted external
+            // server, and the next stop() would leave it running.
+            if process.is_running() {
+                return Ok(());
+            }
             if Self::server_reachable(&client).await {
                 adopted_external.store(true, Ordering::Relaxed);
                 tracing::info!(
@@ -89,17 +95,27 @@ impl Sidecar for MeshLlmManager {
                 .await
                 .context("installing or resolving Mesh LLM")?;
             let port = crate::profile::port(DEFAULT_PORT).to_string();
-            tracing::info!(binary = %binary, %port, "starting Mesh LLM in headless serve mode");
+            let launch = super::engine_launch_config("mesh-llm").await;
+            let mut args = vec![
+                "serve".to_string(),
+                "--headless".to_string(),
+                "--port".to_string(),
+                port.clone(),
+            ];
+            // Typed context/parallel/draft, native options, then raw args with
+            // Core-owned binding and lifecycle flags removed.
+            args.extend(launch_args(&launch));
+            let env = super::native_env_for_spawn("mesh-llm", &launch, &[]);
+            // Log counts only: invite-token and keystore paths are user data.
+            tracing::info!(
+                binary = %binary,
+                %port,
+                args = args.len(),
+                env = env.len(),
+                "starting Mesh LLM in headless serve mode"
+            );
             process
-                .start_path_with_args(
-                    &binary,
-                    &[
-                        "serve".to_string(),
-                        "--headless".to_string(),
-                        "--port".to_string(),
-                        port,
-                    ],
-                )
+                .start_path_with_env(&binary, &args, &env)
                 .await
                 .context("spawning Mesh LLM")?;
 
@@ -169,9 +185,77 @@ impl Sidecar for MeshLlmManager {
     }
 }
 
+/// Raw-arg flags Core owns that take a value: the API port and bind address,
+/// and the management console port.
+const MANAGED_VALUE_FLAGS: &[&str] = &["--port", "--host", "--bind-ip", "--console"];
+/// Bare raw-arg tokens Core owns: the serve subcommand and headless mode, plus
+/// flags that rebind to every interface, self-update the binary underneath
+/// Core, or switch away from serving.
+const MANAGED_BARE_FLAGS: &[&str] = &[
+    "serve",
+    "--headless",
+    "--listen-all",
+    "--auto-update",
+    "--client",
+];
+
+/// Saved launch settings as arguments after `serve --headless --port <p>`.
+fn launch_args(launch: &crate::inference::LaunchConfig) -> Vec<String> {
+    super::launch_args_with_filtered_raw(
+        launch,
+        crate::inference::Engine::MeshLlm,
+        MANAGED_VALUE_FLAGS,
+        MANAGED_BARE_FLAGS,
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{models_url, DEFAULT_PORT, ENGINE_NAME};
+    use super::{launch_args, models_url, DEFAULT_PORT, ENGINE_NAME};
+
+    #[test]
+    fn launch_settings_emit_typed_native_then_filtered_raw_args() {
+        let launch = crate::inference::LaunchConfig {
+            ctx_size: Some(8192),
+            native: serde_json::json!({
+                "mesh_split": true,
+                "mesh_kv_cache_disk": "auto",
+                "mesh_name": "serve",
+                "mesh_analytics": false,
+            })
+            .as_object()
+            .cloned()
+            .unwrap(),
+            extra_args: [
+                "--listen-all",
+                "--port",
+                "1",
+                "--publish",
+                "serve",
+                "--console=9",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            ..Default::default()
+        };
+        assert_eq!(
+            launch_args(&launch),
+            vec![
+                "--ctx-size",
+                "8192",
+                "--split",
+                "--kv-cache-disk",
+                "auto",
+                "--mesh-name",
+                "serve",
+                "--publish"
+            ]
+        );
+        assert_eq!(
+            crate::inference::native_env("mesh-llm", &launch.native),
+            vec![("MESH_LLM_ANALYTICS".to_owned(), "0".to_owned())]
+        );
+    }
 
     #[test]
     fn engine_name_and_default_port_are_stable() {

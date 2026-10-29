@@ -28,19 +28,19 @@ Add it to the agent's `mcpServers` config:
 }
 ```
 
-After `bun install` you can use the `ryu-mcp` bin instead of the file path. On connect, the client receives the canonical tool list via `tools/list` - that handshake is the source of truth for exact names and argument schemas.
+Once `@ryuhq/mcp` is published to npm, `"command": "bunx", "args": ["@ryuhq/mcp"]` replaces the file path and needs no checkout. (The package's `ryu-mcp` bin points at the built `dist/index.js`, so inside the repo run the source as above or `bun run build` in `apps/mcp` first.) On connect, the client receives the canonical tool list via `tools/list` - that handshake is the source of truth for exact names and argument schemas.
 
 ## Sign in (optional)
 
-`ryu-mcp` signs in with the same OAuth 2.0 Device Authorization Grant the desktop, mobile, and CLI clients use, through Core's proxy. Run the subcommands directly (not the stdio server):
+`ryu-mcp` signs in with the same OAuth 2.0 Device Authorization Grant the desktop, mobile, and CLI clients use, directly against the Ryu control plane. Run the subcommands directly (not the stdio server):
 
 ```bash
-ryu-mcp login     # opens the browser, polls Core, stores the bearer in ~/.ryu/auth.json
+ryu-mcp login     # opens the browser, polls the control plane, stores the session in <data dir>/secrets/mcp-auth.json
 ryu-mcp whoami    # prints the signed-in user
 ryu-mcp logout    # clears the credential
 ```
 
-`~/.ryu/auth.json` is shared with the desktop and CLI, so one sign-in covers them all (single sign-on). The third env var, `RYU_AUTH_URL` (default `http://localhost:3000`), points at the control plane and is only used by these subcommands and `ryu_whoami`. Sign-in identifies the user to the control plane; it does not change what the node tools can do (those still use `RYU_CORE_TOKEN`).
+The session file is this bridge's own (`RYU_MCP_AUTH_FILE` overrides the path); it is separate from the account the desktop and CLI sign in to through Core, so sign in here even if those are signed in. The third env var, `RYU_AUTH_URL` (default `https://api.ryuhq.com`, or `http://localhost:3000` under `RYU_PROFILE=dev`), points at the control plane and is only used by these subcommands and `ryu_whoami`. Sign-in identifies the user to the control plane; it does not change what the node tools can do (those still use `RYU_CORE_TOKEN`).
 
 ## Tools
 

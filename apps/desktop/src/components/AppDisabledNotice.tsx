@@ -8,7 +8,7 @@
 
 import { PackageIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Empty,
 	EmptyContent,
@@ -16,8 +16,8 @@ import {
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { toast } from "@ryu/ui/components/sileo";
+} from "@ryu/ui/components/empty.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useState } from "react";
 import { useApps } from "@/src/hooks/useApps.ts";
 
@@ -43,7 +43,13 @@ export function AppDisabledNotice({
 		try {
 			// `toggle` handles its own refusal reporting; enabling auto-enables any
 			// dependencies (e.g. Meetings pulls in Spaces) in order.
-			await toggle(app, true);
+			const outcome = await toggle(app, true);
+			if (!outcome.success) {
+				toast.error("Couldn't enable this app", {
+					description: outcome.error,
+				});
+				return;
+			}
 			onEnabled?.();
 		} catch (e) {
 			toast.error("Couldn't enable this app", {

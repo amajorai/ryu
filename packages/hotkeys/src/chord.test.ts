@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+	type ChordKeyboardEvent,
 	chordFromElectron,
 	chordHasModifier,
 	chordMatches,
@@ -11,8 +12,14 @@ import {
 } from "./chord.ts";
 import { findConflicts, resolveBinding } from "./registry.ts";
 
-const key = (init: Partial<KeyboardEvent>): KeyboardEvent =>
-	init as unknown as KeyboardEvent;
+const key = (init: Partial<ChordKeyboardEvent>): ChordKeyboardEvent => ({
+	altKey: false,
+	ctrlKey: false,
+	key: "",
+	metaKey: false,
+	shiftKey: false,
+	...init,
+});
 
 describe("normalizeChord", () => {
 	it("reorders modifiers and upper-cases the main key", () => {

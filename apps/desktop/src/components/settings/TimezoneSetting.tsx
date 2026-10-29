@@ -11,6 +11,7 @@
 
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	Combobox,
 	ComboboxContent,
@@ -20,8 +21,8 @@ import {
 	ComboboxList,
 	ComboboxTrigger,
 	ComboboxValue,
-} from "@ryu/ui/components/combobox";
-import { InputGroupAddon } from "@ryu/ui/components/input-group";
+} from "@ryu/ui/components/combobox.tsx";
+import { InputGroupAddon } from "@ryu/ui/components/input-group.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTimezone } from "@/src/hooks/useTimezone.ts";
 import {
@@ -37,8 +38,6 @@ import {
 } from "./shared/settings-items.tsx";
 
 /** The trigger has to read as one of the Selects it sits beside in this tab. */
-const TRIGGER_CLASS =
-	"flex h-8 w-64 items-center justify-between gap-1.5 whitespace-nowrap rounded-3xl border border-transparent bg-input/50 px-3 text-sm outline-none transition-[color,box-shadow,background-color] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50";
 
 const PREVIEW_OPTIONS: Intl.DateTimeFormatOptions = {
 	weekday: "short",
@@ -51,6 +50,7 @@ const PREVIEW_OPTIONS: Intl.DateTimeFormatOptions = {
 const PREVIEW_TICK_MS = 30_000;
 
 export function TimezoneSetting() {
+	const tl = useLiteralMessages();
 	const [timezone, setTimezone] = useTimezone();
 	// The preview is a clock, so it has to move on its own as well as when the
 	// zone changes — otherwise it goes stale the moment the tab is left open.
@@ -126,7 +126,7 @@ export function TimezoneSetting() {
 							onValueChange={handleChange}
 							value={timezone}
 						>
-							<ComboboxTrigger className={TRIGGER_CLASS}>
+							<ComboboxTrigger className="w-64" purpose="timezone-select">
 								<ComboboxValue placeholder="Select time zone" />
 							</ComboboxTrigger>
 							<ComboboxContent aria-label="Select time zone">
@@ -157,7 +157,7 @@ export function TimezoneSetting() {
 							</ComboboxContent>
 						</Combobox>
 					}
-					description={`Timestamps currently read ${preview}.`}
+					description={tl("Timestamps currently read {preview}.", { preview })}
 					title="Time zone"
 				/>
 			</SettingsGroup>

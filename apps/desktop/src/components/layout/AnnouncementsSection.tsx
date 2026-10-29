@@ -1,6 +1,6 @@
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { NotificationStack } from "@ryu/ui/components/notification-stack";
+import { NotificationStack } from "@ryu/ui/components/notification-stack.tsx";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { AnnouncementDetailDialog } from "@/src/components/notifications/announcement-detail-dialog.tsx";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
@@ -64,12 +64,12 @@ export function AnnouncementsSection() {
 		>
 			{unreadCount > 0 && (
 				<div className="flex items-center gap-2 px-1">
-					<span className="rounded-full bg-primary/15 px-1.5 py-0.5 font-medium text-[10px] text-primary tabular-nums">
+					<span className="type-compact rounded-full bg-primary/15 px-1.5 py-0.5 font-medium text-primary tabular-nums">
 						{unreadCount}
 					</span>
 					<div className="flex-1" />
 					<button
-						className="flex items-center gap-0.5 rounded-md px-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+						className="type-compact flex items-center gap-0.5 rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
 						onClick={() => markAllAnnouncementsRead(announcements, markRead)}
 						title="Mark all announcements as read"
 						type="button"

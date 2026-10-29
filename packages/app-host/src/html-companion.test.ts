@@ -7,7 +7,12 @@
 // shape, the egress lock, and the ordering guarantee without a webview.
 
 import { describe, expect, it } from "bun:test";
-import { htmlCompanionSrcdoc } from "./third-party-plugin.ts";
+import { runInThisContext } from "node:vm";
+import {
+	htmlCompanionSrcdoc,
+	RPC_ARGS_SCRIPT,
+	thirdPartyPluginSrcdoc,
+} from "./third-party-plugin.ts";
 
 const NONCE = "host-nonce-abc";
 const PLUGIN_ID = "@ryu/whiteboard";
@@ -45,6 +50,62 @@ describe("htmlCompanionSrcdoc", () => {
 		expect(out).toContain('"spaceId"');
 		expect(out).toContain('"docId"');
 		expect(out).toContain(NONCE);
+	});
+
+	it("marshals RPC arguments with JSON member semantics in both companion bootstraps", () => {
+		const pathA = thirdPartyPluginSrcdoc(NONCE, "", PLUGIN_ID);
+		for (const srcdoc of [out, pathA]) {
+			expect(srcdoc).toContain("function rpcArgs(value)");
+			expect(srcdoc).not.toContain("args: args || []");
+			expect(srcdoc.match(/args: rpcArgs\(args \|\| \[\]\)/g)).toHaveLength(2);
+		}
+		const rpcArgs: (value: unknown) => unknown = runInThisContext(
+			`(function () {${RPC_ARGS_SCRIPT}\nreturn rpcArgs; })()`
+		);
+		const blob = new Blob(["frame bytes"]);
+		const prototypeKey = JSON.parse('{"__proto__":{"kept":true}}');
+		const marshalled = rpcArgs([
+			{
+				body: { account_id: undefined, nested: [{ skip: undefined, x: 1 }] },
+				method: "POST",
+				path: "/inbox/refresh",
+			},
+			blob,
+			prototypeKey,
+		]);
+		expect(JSON.stringify(marshalled)).toBe(
+			'[{"body":{"nested":[{"x":1}]},"method":"POST","path":"/inbox/refresh"},{},{"__proto__":{"kept":true}}]'
+		);
+		const [request, file, prototypeEntry] = marshalled as [
+			{ body: Record<string, unknown> },
+			Blob,
+			Record<string, unknown>,
+		];
+		expect(Object.hasOwn(request.body, "account_id")).toBe(false);
+		expect(file).toBe(blob);
+		expect(Object.getPrototypeOf(prototypeEntry)).toBe(Object.prototype);
+		expect(Object.hasOwn(prototypeEntry, "__proto__")).toBe(true);
+	});
+
+	it("mediates trusted _blank links through the host in both companion bootstraps", () => {
+		const pathA = thirdPartyPluginSrcdoc(NONCE, "", PLUGIN_ID);
+		for (const srcdoc of [out, pathA]) {
+			expect(srcdoc).toContain('document.addEventListener("click"');
+			expect(srcdoc).toContain("!event.isTrusted");
+			expect(srcdoc).toContain(
+				'call("ui.openExternal", [{ href: destination.href }])'
+			);
+			expect(srcdoc).toContain('destination.protocol !== "https:"');
+			expect(srcdoc).toContain('destination.protocol !== "http:"');
+		}
+	});
+
+	it("forwards Approvals icon and archive actions through the governed bridge", () => {
+		for (const method of ["appIcons", "archive", "unarchive"]) {
+			expect(out).toContain(
+				`${method}: function (a) { return call("notifications.${method}", [a || {}]); }`
+			);
+		}
 	});
 
 	it("adds compatibility aliases to the initial theme snapshot", () => {
@@ -101,6 +162,43 @@ describe("htmlCompanionSrcdoc", () => {
 		expect(out).toContain("img-src data: blob:");
 		// No remote code / network beyond assets.
 		expect(out).not.toContain("connect-src *");
+	});
+
+	it("omits the default policy only when Core disables it for a custom app", () => {
+		const unlockedHtml = htmlCompanionSrcdoc(
+			NONCE,
+			APP_HTML,
+			PLUGIN_ID,
+			undefined,
+			undefined,
+			undefined,
+			false,
+			{ enforceDefaultCsp: false }
+		);
+		const declaredPolicyHtml = htmlCompanionSrcdoc(
+			NONCE,
+			APP_HTML,
+			PLUGIN_ID,
+			undefined,
+			{ connectDomains: ["https://api.example.com"], resourceDomains: [] },
+			undefined,
+			false,
+			{ enforceDefaultCsp: false }
+		);
+		const unlockedEsm = thirdPartyPluginSrcdoc(
+			NONCE,
+			"Y29uc29sZS5sb2coJ2hpJyk=",
+			PLUGIN_ID,
+			undefined,
+			undefined,
+			false,
+			{ enforceDefaultCsp: false }
+		);
+
+		expect(unlockedHtml).not.toContain("Content-Security-Policy");
+		expect(declaredPolicyHtml).toContain("Content-Security-Policy");
+		expect(declaredPolicyHtml).toContain("connect-src https://api.example.com");
+		expect(unlockedEsm).not.toContain("Content-Security-Policy");
 	});
 
 	it("injects the CSP + bridge BEFORE the app's deferred module script", () => {

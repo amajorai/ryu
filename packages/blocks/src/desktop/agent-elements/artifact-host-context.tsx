@@ -1,5 +1,6 @@
 import type React from "react";
 import { createContext, useContext } from "react";
+import type { NativeArtifactObservation } from "./native-artifact-observation.ts";
 
 /**
  * A serializable artifact as the agent's tool delivers it (`artifact.render` /
@@ -37,13 +38,19 @@ export interface ArtifactHostValue {
 	/** Resolve a created artifact's content by fetching its blob URL (uses the
 	 *  host's node target). Returns null when the artifact carries no URL or the
 	 *  fetch failed — the surface then shows the download/open affordance. */
-	fetchContent(payload: HostArtifact, id: string): Promise<string | null>;
+	fetchContent(
+		payload: NativeArtifactObservation,
+		id: string
+	): Promise<string | null>;
 	/** Open the artifact in the workspace's right dock (a dedicated artifact tab). */
-	openInPanel(payload: HostArtifact, id: string): void;
+	openInPanel(payload: NativeArtifactObservation, id: string): void;
 	/** Open the artifact as its own window (workspace) tab. */
-	openInTab(payload: HostArtifact, id: string): void;
+	openInTab(payload: NativeArtifactObservation, id: string): void;
 	/** The concrete artifact card, injected by apps/desktop. */
-	Renderer: React.ComponentType<{ artifact: HostArtifact; id: string }>;
+	Renderer: React.ComponentType<{
+		artifact: NativeArtifactObservation;
+		id: string;
+	}>;
 	/** Send a follow-up user turn to the conversation (used by approval-style
 	 *  artifact actions — the user's choice becomes the agent's next prompt). */
 	submitFollowUp(text: string): void;
@@ -58,3 +65,5 @@ export { ArtifactHostContext };
 export function useArtifactHost(): ArtifactHostValue | null {
 	return useContext(ArtifactHostContext);
 }
+
+export type { NativeArtifactObservation } from "./native-artifact-observation.ts";

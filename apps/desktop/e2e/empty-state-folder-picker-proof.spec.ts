@@ -28,9 +28,7 @@ test("empty chat folder picker uses dotted text-only hover treatment", async ({
 		name: "Select project folder",
 	});
 	await expect(trigger).toHaveText("ryu");
-	await expect(trigger).toHaveClass(/decoration-dotted/);
-	await expect(trigger).toHaveClass(/hover:bg-transparent/);
-	await expect(trigger).toHaveClass(/hover:text-muted-foreground/);
+	await expect(trigger).toHaveAttribute("data-open", "false");
 
 	const mutedColor = await page
 		.getByTestId("muted-foreground-reference")

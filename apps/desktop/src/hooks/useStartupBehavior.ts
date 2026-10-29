@@ -17,7 +17,7 @@ const KEY = "ryu_startup_behavior";
 const VALUES: StartupBehavior[] = ["empty", "home", "chat", "restore"];
 
 function isStartupBehavior(value: string | null): value is StartupBehavior {
-	return value !== null && (VALUES as string[]).includes(value);
+	return VALUES.some((candidate) => candidate === value);
 }
 
 /** The persisted startup behavior, defaulting to `empty` — a clean, no-tabs

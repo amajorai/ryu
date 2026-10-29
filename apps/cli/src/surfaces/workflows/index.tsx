@@ -1,3 +1,4 @@
+import { nativeErrorMessage as errText } from "../../core/native-errors.ts";
 /* @jsxImportSource @opentui/react */
 // Workflows surface (/workflows) - the desktop Workflows page, terminal edition.
 // The desktop WorkflowsPage is a React Flow canvas editor; there is no canvas in
@@ -18,7 +19,7 @@
 // text input elsewhere owns raw input).
 
 import type { KeyEvent } from "@opentui/core";
-import { useKeyboard } from "@opentui/react";
+import { useKeyboard, useRenderer } from "@opentui/react";
 import {
 	fetchWorkflows,
 	getWorkflowRun,
@@ -29,6 +30,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Card } from "@/components/ui/card.tsx";
+import { Divider } from "@/components/ui/divider.tsx";
 import { StatusMessage } from "@/components/ui/status-message.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
@@ -50,10 +52,6 @@ interface RunInfo {
 	outputLines: string[];
 	runId: string;
 	status: string;
-}
-
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 function WorkflowsSurface({ active, paneId }: SurfaceProps) {
@@ -184,7 +182,7 @@ function WorkflowsSurface({ active, paneId }: SurfaceProps) {
 				});
 				setRunLoading(false);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (
 					!lifetimeRef.current ||
 					targetRef.current !== target ||
@@ -234,7 +232,7 @@ function WorkflowsSurface({ active, paneId }: SurfaceProps) {
 						outputLines: outputToLines(next.output),
 					});
 				})
-				.catch((err: unknown) => {
+				.catch((err) => {
 					if (
 						!(disposed || controller.signal.aborted) &&
 						epoch === runEpoch.current
@@ -341,6 +339,7 @@ function WorkflowsBody({
 	workflows: Workflow[];
 }) {
 	const theme = useTheme();
+	const renderer = useRenderer();
 
 	if (workflows.length === 0) {
 		return (
@@ -359,7 +358,14 @@ function WorkflowsBody({
 					<WorkflowList index={index} workflows={workflows} />
 				</Card>
 			</box>
-			<box flexBasis={0} flexGrow={3}>
+			<box flexShrink={0} marginRight={1}>
+				<Divider
+					color={theme.colors.border}
+					height={Math.max(1, renderer.height - 8)}
+					orientation="vertical"
+				/>
+			</box>
+			<box flexBasis={0} flexGrow={3} paddingLeft={1}>
 				<Card title="run status">
 					<RunStatusPane
 						confirmPending={confirmPending}
@@ -389,7 +395,9 @@ function WorkflowList({
 				return (
 					<box flexDirection="column" key={wf.id} marginBottom={1}>
 						<box flexDirection="row" gap={1}>
-							<text fg={isSel ? theme.colors.primary : theme.colors.muted}>
+							<text
+								fg={isSel ? theme.colors.primary : theme.colors.mutedForeground}
+							>
 								{isSel ? "›" : " "}
 							</text>
 							<text fg={isSel ? theme.colors.accent : theme.colors.foreground}>
@@ -440,7 +448,11 @@ function WorkflowMeta({ workflow }: { workflow: Workflow }) {
 	const theme = useTheme();
 	return (
 		<box flexDirection="column">
-			<MetaRow label="id" value={workflow.id} valueColor={theme.colors.muted} />
+			<MetaRow
+				label="id"
+				value={workflow.id}
+				valueColor={theme.colors.mutedForeground}
+			/>
 			<box flexDirection="row" gap={1}>
 				<text fg={theme.colors.mutedForeground}>name</text>
 				<text fg={theme.colors.foreground}>
@@ -451,7 +463,7 @@ function WorkflowMeta({ workflow }: { workflow: Workflow }) {
 				<MetaRow
 					label="desc"
 					value={workflow.description}
-					valueColor={theme.colors.muted}
+					valueColor={theme.colors.mutedForeground}
 				/>
 			) : null}
 		</box>
@@ -519,7 +531,11 @@ function RunResult({ run }: { run: RunInfo }) {
 	const outputLines = run.outputLines.slice(0, MAX_OUTPUT_LINES);
 	return (
 		<box flexDirection="column">
-			<MetaRow label="run" value={run.runId} valueColor={theme.colors.muted} />
+			<MetaRow
+				label="run"
+				value={run.runId}
+				valueColor={theme.colors.mutedForeground}
+			/>
 			<box flexDirection="row" gap={1}>
 				<text fg={theme.colors.mutedForeground}>state</text>
 				<RunStateBadge status={run.status} />

@@ -28,14 +28,13 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import { getAgentModel, modelsForAgent, setAgentModel } from "./models.ts";
 
-const agent = (over: Partial<AgentSummary>): AgentSummary =>
-	({
-		builtIn: false,
-		engine: null,
-		id: "custom-1",
-		model: null,
-		...over,
-	}) as AgentSummary;
+const agent = (over: Partial<AgentSummary>) => ({
+	builtIn: false,
+	engine: null,
+	id: "custom-1",
+	model: null,
+	...over,
+});
 
 beforeEach(() => {
 	localStorage.clear();
@@ -68,6 +67,18 @@ describe("modelsForAgent — engine resolution", () => {
 });
 
 describe("modelsForAgent — precedence ladder", () => {
+	test("reads only owned engine rows while retaining valid future engine names", () => {
+		for (const engine of ["constructor", "__proto__", "toString"]) {
+			expect(modelsForAgent(engine, [], {})).toEqual([
+				{ id: "auto", name: "Auto" },
+			]);
+		}
+		const futureOptions = [{ id: "future-model", name: "Future model" }];
+		expect(
+			modelsForAgent("constructor", [], { constructor: futureOptions })
+		).toBe(futureOptions);
+	});
+
 	test("prefers a non-empty Core catalog over the offline fallback", () => {
 		const catalog = { claude: [{ id: "opus-4.8", name: "Opus 4.8" }] };
 		const models = modelsForAgent("acp:claude", [], catalog);
@@ -99,6 +110,41 @@ describe("modelsForAgent — precedence ladder", () => {
 });
 
 describe("agent model persistence", () => {
+	test("retains unknown stored rows and own prototype metadata while adding a model choice", () => {
+		const stored =
+			'{"agent-a":"model-a","future":{"__proto__":{"retained":true},"revision":2},"bad-choice":false,"__proto__":{"stored":true}}';
+		localStorage.setItem("ryu_agent_model_selection", stored);
+		expect(getAgentModel("bad-choice")).toBeNull();
+		expect(getAgentModel("agent-a")).toBe("model-a");
+		expect(localStorage.getItem("ryu_agent_model_selection")).toBe(stored);
+		setAgentModel("agent-b", "model-b");
+		expect(
+			JSON.parse(localStorage.getItem("ryu_agent_model_selection") ?? "null")
+		).toEqual({ ...JSON.parse(stored), "agent-b": "model-b" });
+		expect(getAgentModel("agent-b")).toBe("model-b");
+	});
+
+	test("keeps old array snapshots and their unrelated unsupported entries on update", () => {
+		localStorage.setItem(
+			"ryu_agent_model_selection",
+			'["first",{"future":true},null]'
+		);
+		expect(getAgentModel("0")).toBe("first");
+		expect(getAgentModel("1")).toBeNull();
+		setAgentModel("0", "replacement");
+		expect(localStorage.getItem("ryu_agent_model_selection")).toBe(
+			'["replacement",{"future":true},null]'
+		);
+	});
+
+	test("retains unsupported scalar snapshots instead of overwriting them when a choice is saved", () => {
+		for (const stored of ["null", "false", "42", '"future snapshot"']) {
+			localStorage.setItem("ryu_agent_model_selection", stored);
+			expect(getAgentModel("agent-a")).toBeNull();
+			expect(() => setAgentModel("agent-a", "model-a")).toThrow();
+			expect(localStorage.getItem("ryu_agent_model_selection")).toBe(stored);
+		}
+	});
 	test("round-trips a per-agent model selection", () => {
 		setAgentModel("agent-a", "opus");
 		expect(getAgentModel("agent-a")).toBe("opus");

@@ -1,10 +1,13 @@
 import { File01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo } from "react";
+import { useArtifactHost } from "../artifact-host-context.tsx";
+import type { NativeArtifactObservation } from "../native-artifact-observation.ts";
 import {
-	type HostArtifact,
-	useArtifactHost,
-} from "../artifact-host-context.tsx";
+	NativeArtifactGenericTool,
+	nativeArtifactReactChild,
+} from "../utils/native-artifact-render-abi.ts";
+import type { NativeSdkValue } from "../utils/native-sdk-observation.ts";
 import {
 	artifactFromCreateResult,
 	artifactFromInput,
@@ -33,8 +36,8 @@ export interface ArtifactToolProps {
 	/** Stable id for the artifact, derived from the tool call id upstream. */
 	id: string;
 	part: {
-		input?: unknown;
-		output?: unknown;
+		input?: NativeSdkValue;
+		output?: NativeSdkValue;
 		state?: string;
 		type?: string;
 	};
@@ -47,8 +50,8 @@ export function ArtifactTool({ id, part }: ArtifactToolProps) {
 		// `artifact.create` delivers the payload in its RESULT (the tool wrote the
 		// file); `artifact.render` delivers it in its INPUT. Read both, preferring
 		// the created-file shape when it has arrived.
-		const input = part.input as Record<string, unknown> | undefined;
-		const output = part.output as Record<string, unknown> | undefined;
+		const input = part.input;
+		const output = part.output;
 		if (isCreate) {
 			const created = artifactFromCreateResult(input, output);
 			if (created) {
@@ -72,7 +75,10 @@ export function ArtifactTool({ id, part }: ArtifactToolProps) {
 		// No desktop host (island / storyboard / extension): a plain, inert row —
 		// the payload is still visible through the default tool output.
 		return (
-			<GenericTool isPending={false} title={artifact.title ?? "Artifact"} />
+			<NativeArtifactGenericTool
+				isPending={false}
+				title={artifact.title ?? "Artifact"}
+			/>
 		);
 	}
 
@@ -84,7 +90,7 @@ export function ArtifactTool({ id, part }: ArtifactToolProps) {
 export function ArtifactRowHint({
 	artifact,
 }: {
-	artifact: HostArtifact | null;
+	artifact: NativeArtifactObservation | null;
 }) {
 	return (
 		<div className="flex items-center gap-2 px-3 py-2 text-xs">
@@ -94,7 +100,7 @@ export function ArtifactRowHint({
 				icon={File01Icon}
 			/>
 			<span className="min-w-0 flex-1 truncate text-foreground">
-				{artifact?.title ?? "Artifact"}
+				{nativeArtifactReactChild(artifact?.title ?? "Artifact")}
 			</span>
 		</div>
 	);

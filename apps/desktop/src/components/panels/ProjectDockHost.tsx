@@ -1,9 +1,10 @@
 // apps/desktop/src/components/panels/ProjectDockHost.tsx
 //
 // Mounts once under Layout. Keeps project dock tab content alive across chat
-// switches and portals it into the focused chat's dock slot.
+// switches and portals it into the focused chat's dock slot. Stands down while
+// the workbench frame is mounted: its Right/Bottom panes host these tools.
 
-import { type ReactNode, useCallback, useState } from "react";
+import { type ReactNode, useCallback, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import {
@@ -11,6 +12,7 @@ import {
 	useProjectDockStore,
 } from "@/src/store/useProjectDockStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import { useWorkbenchDocksActive } from "@/src/workbench/workbench-dock-bridge.tsx";
 import {
 	ProjectDockSlotsProvider,
 	useProjectDockSlots,
@@ -31,6 +33,16 @@ export function ProjectDockHost({ children }: { children: ReactNode }) {
 }
 
 function ProjectDockPortals() {
+	// The workbench frame hosts project tools as its own tabs; running these
+	// too would start hidden duplicate terminals.
+	const workbenchHostsDocks = useWorkbenchDocksActive();
+	if (workbenchHostsDocks) {
+		return null;
+	}
+	return <LegacyProjectDockPortals />;
+}
+
+function LegacyProjectDockPortals() {
 	const folder = useWorkspaceStore((s) => s.folder);
 	const tabs = useProjectDockStore((s) =>
 		folder
@@ -70,10 +82,25 @@ function HostedProjectTab({
 	tab: ProjectDockTab;
 }) {
 	const [fallbackEl, setFallbackEl] = useState<HTMLDivElement | null>(null);
+	const [portalEl, setPortalEl] = useState<HTMLDivElement | null>(null);
 	const setFallbackRef = useCallback((element: HTMLDivElement | null) => {
 		setFallbackEl((previous) => (previous === element ? previous : element));
 	}, []);
-	const target = slot ?? fallbackEl;
+	useLayoutEffect(() => {
+		if (!fallbackEl) {
+			return;
+		}
+		const element = fallbackEl.ownerDocument.createElement("div");
+		element.className = "h-full min-h-0";
+		setPortalEl(element);
+		return () => element.remove();
+	}, [fallbackEl]);
+	useLayoutEffect(() => {
+		if (portalEl) {
+			(slot ?? fallbackEl)?.appendChild(portalEl);
+		}
+	}, [fallbackEl, portalEl, slot]);
+	const target = portalEl;
 
 	const content = (
 		<ProjectDockTabContent

@@ -1,9 +1,9 @@
 import { getProduct } from "./data/products.tsx";
 import ProductLandingPage from "./product-landing-page.tsx";
 
-/** Public entry point for the Ryu Console landing surface. */
+/** Public entry point for the Agent landing surface. */
 export default function ConsoleLanding() {
-	const product = getProduct("console");
+	const product = getProduct("agent");
 	if (!product) {
 		return null;
 	}

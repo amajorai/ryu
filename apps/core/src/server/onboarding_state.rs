@@ -542,6 +542,7 @@ mod tests {
         crate::identity_verify::VerifiedCaller {
             user_id: user_id.to_owned(),
             email: None,
+            email_verified: false,
             org_id: Some("org-1".to_owned()),
             role: crate::identity_verify::OrgRole::Admin,
             teams: Vec::new(),
@@ -571,16 +572,21 @@ mod tests {
             None,
         );
         assert_eq!(view["configured"], false);
-        assert_eq!(view["selectedPackIds"].as_array().unwrap().len(), 20);
-        assert_eq!(view["options"].as_array().unwrap().len(), 20);
-        assert!(!view["options"]
-            .as_array()
-            .unwrap()
+        let selected_pack_ids = view["selectedPackIds"].as_array().unwrap();
+        let options = view["options"].as_array().unwrap();
+        assert_eq!(selected_pack_ids.len(), options.len());
+        assert!(options
             .iter()
-            .any(|option| option["id"]
+            .any(|option| option["id"] == "jakubkrehel/skills"));
+        assert!(selected_pack_ids
+            .iter()
+            .any(|id| id.as_str() == Some("jakubkrehel/skills")));
+        assert!(!view["options"].as_array().unwrap().iter().any(|option| {
+            option["id"]
                 .as_str()
                 .unwrap_or_default()
-                .starts_with("ryu-")));
+                .starts_with("ryu-")
+        }));
         assert!(view["builtInNotice"].as_str().unwrap().contains("built-in"));
     }
 
@@ -644,3 +650,7 @@ mod tests {
         assert!(!caller_in_node_scope(&node, &caller("admin")));
     }
 }
+
+#[cfg(test)]
+#[path = "onboarding_state_routes_test.rs"]
+mod routes_test;

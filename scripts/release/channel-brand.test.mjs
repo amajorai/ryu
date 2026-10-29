@@ -17,7 +17,30 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { channelOfVersion, labelFor } from "./channel-brand.mjs";
+import {
+	applyProfileIdentity,
+	channelOfVersion,
+	labelFor,
+} from "./channel-brand.mjs";
+
+test("each channel bundle owns only its profile scheme and app identity", () => {
+	for (const channel of ["stable", "dev", "beta", "nightly", "canary"]) {
+		const profile = channel === "stable" ? "release" : channel;
+		const scheme = channel === "stable" ? "ryu" : `ryu-${channel}`;
+		const config = applyProfileIdentity(
+			{ plugins: { updater: { pubkey: "keep" } } },
+			channel
+		);
+		assert.equal(
+			config.identifier,
+			profile === "release"
+				? "ai.amajor.ryu.desktop"
+				: `ai.amajor.ryu.desktop.${profile}`
+		);
+		assert.deepEqual(config.plugins["deep-link"].desktop.schemes, [scheme]);
+		assert.equal(config.plugins.updater.pubkey, "keep");
+	}
+});
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");

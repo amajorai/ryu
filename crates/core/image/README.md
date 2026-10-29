@@ -1,7 +1,7 @@
 # ryu-image
 
-Image-generation modality primitive for Ryu: `generate(prompt) -> image` behind a
-swappable engine seam.
+Image-generation modality primitive for Ryu: local or Gateway-routed image
+generation and image-to-image edits behind a swappable engine seam.
 
 ## Role in the decomposition
 
@@ -24,9 +24,20 @@ lazy-starting the sd.cpp sidecar) inject via the narrow `ImageHost` trait.
 
 ## Swap seam
 
-- **stable-diffusion.cpp** — local default (lazy-started sidecar).
+- **stable-diffusion.cpp** — local default (lazy-started sidecar), with text-to-image
+  routed through `/v1/images/generations` and inline image edits through
+  `/sdapi/v1/img2img`.
 - **OpenRouter / Replicate / fal** — cloud providers, routed through the Gateway's
   `/v1/images/generations`, selected by the request `"provider"` field.
+
+## Local image editing
+
+Ryu's editor sends one inline `input_images` data URL, an optional `input_mask`,
+and a `WIDTHxHEIGHT` size. Core validates that image inputs are local inline raster
+data, adapts the request to stable-diffusion.cpp's img2img JSON contract, and
+normalizes the returned `images` field to the shared `data[].b64_json` response.
+The desktop's default resize engine is local; Gateway generation is an explicit
+alternate.
 
 ## Consumed as
 

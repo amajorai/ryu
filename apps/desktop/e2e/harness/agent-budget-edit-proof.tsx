@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { AgentBudgetPanel } from "../../src/components/agents/AgentBudgetPanel.tsx";
@@ -13,7 +14,7 @@ const budgetRule = {
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
-	const url = typeof input === "string" ? input : input.url;
+	const url = isNativeText(input) ? input : input.url;
 	if (init?.method === "PUT" && url.includes("/api/gateway/config")) {
 		return new Response(JSON.stringify({ ok: true }), {
 			headers: { "Content-Type": "application/json" },
@@ -53,12 +54,12 @@ const queryClient = new QueryClient({
 	defaultOptions: { queries: { retry: false } },
 });
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<QueryClientProvider client={queryClient}>
 		<main className="min-h-screen bg-background p-8 text-foreground">
 			<div className="mx-auto flex max-w-3xl flex-col gap-6">
 				<header>
-					<p className="font-medium text-primary text-sm uppercase tracking-[0.18em]">
+					<p className="font-medium text-primary text-sm uppercase tracking-(--tracking-section)">
 						Agent editor
 					</p>
 					<h1 className="mt-2 font-semibold text-3xl tracking-tight">

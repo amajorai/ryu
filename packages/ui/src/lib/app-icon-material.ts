@@ -1,24 +1,30 @@
 import type { CSSProperties } from "react";
+import { z } from "zod";
 
 /** Shared by live tiles and the PNG exporter. Existing iconDither colors remain
  * the identity source; banners can still use their original dither treatment. */
-const HUES: Record<string, number> = {
-	green: 145,
-	blue: 212,
-	purple: 263,
-	pink: 322,
-	orange: 30,
-	red: 0,
-	grey: 240,
-};
+const HUES = new Map([
+	["green", 145],
+	["blue", 212],
+	["purple", 263],
+	["pink", 322],
+	["orange", 30],
+	["red", 0],
+	["grey", 240],
+]);
 
-export function normalizeIconHue(value: unknown): number | null {
-	if (typeof value === "number" && Number.isFinite(value)) {
-		return ((value % 360) + 360) % 360;
+const iconHueDegreesSchema = z.number().finite();
+const iconHueTokenSchema = z.string();
+
+export function normalizeIconHue(
+	value: Parameters<typeof iconHueDegreesSchema.safeParse>[0]
+): number | null {
+	const degrees = iconHueDegreesSchema.safeParse(value);
+	if (degrees.success) {
+		return ((degrees.data % 360) + 360) % 360;
 	}
-	return typeof value === "string" && Object.hasOwn(HUES, value)
-		? (HUES[value] ?? null)
-		: null;
+	const token = iconHueTokenSchema.safeParse(value);
+	return token.success ? (HUES.get(token.data) ?? null) : null;
 }
 
 export function iconSeedHue(seed: string): number {

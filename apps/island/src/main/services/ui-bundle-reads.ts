@@ -1,10 +1,12 @@
+import { z } from "zod";
 import type { PluginUiBundleResult } from "../../shared/ipc.ts";
+import { coreConfigGeneration } from "./config.ts";
 import { pluginUiBundle } from "./plugin-host.ts";
 
 interface ReadOwner {
 	id: number;
-	once(event: "destroyed", listener: () => void): unknown;
-	removeListener(event: "destroyed", listener: () => void): unknown;
+	once(event: "destroyed", listener: () => void): void;
+	removeListener(event: "destroyed", listener: () => void): void;
 }
 interface OwnerReads {
 	destroyed: () => void;
@@ -18,6 +20,16 @@ interface CachedUiBundle {
 	value: PluginUiBundleResult;
 }
 const uiBundleCache = new Map<string, CachedUiBundle>();
+let cacheGeneration = -1;
+
+function currentGeneration(): number {
+	const generation = coreConfigGeneration();
+	if (generation !== cacheGeneration) {
+		uiBundleCache.clear();
+		cacheGeneration = generation;
+	}
+	return generation;
+}
 
 function cachedUiBundle(pluginId: string): PluginUiBundleResult | undefined {
 	const entry = uiBundleCache.get(pluginId);
@@ -31,13 +43,21 @@ function cachedUiBundle(pluginId: string): PluginUiBundleResult | undefined {
 	return entry.value;
 }
 
-function rememberUiBundle(pluginId: string, value: PluginUiBundleResult): void {
-	if (value.available && typeof value.code === "string") {
+function rememberUiBundle(
+	pluginId: string,
+	value: PluginUiBundleResult,
+	generation: number
+): PluginUiBundleResult {
+	if (currentGeneration() !== generation) {
+		return { available: false, reason: "Core configuration changed" };
+	}
+	if (value.available && value.code !== null) {
 		uiBundleCache.set(pluginId, {
 			expiresAt: Date.now() + UI_BUNDLE_CACHE_MS,
 			value,
 		});
 	}
+	return value;
 }
 
 /** Cancellation is scoped to the IPC sender, never another window's request. */
@@ -50,20 +70,16 @@ export async function readUiBundle(
 	pluginId: string,
 	requestId?: string
 ): Promise<PluginUiBundleResult> {
+	const generation = currentGeneration();
 	if (requestId === undefined) {
 		const cached = cachedUiBundle(pluginId);
 		if (cached) {
 			return cached;
 		}
 		const value = await pluginUiBundle(pluginId);
-		rememberUiBundle(pluginId, value);
-		return value;
+		return rememberUiBundle(pluginId, value, generation);
 	}
-	if (
-		typeof requestId !== "string" ||
-		requestId.length === 0 ||
-		requestId.length > 128
-	) {
+	if (!z.string().min(1).max(128).safeParse(requestId).success) {
 		return { available: false, reason: "invalid request id" };
 	}
 	const cached = cachedUiBundle(pluginId);
@@ -90,8 +106,7 @@ export async function readUiBundle(
 	entry.reads.set(requestId, controller);
 	try {
 		const value = await pluginUiBundle(pluginId, controller.signal);
-		rememberUiBundle(pluginId, value);
-		return value;
+		return rememberUiBundle(pluginId, value, generation);
 	} finally {
 		entry.reads.delete(requestId);
 		if (entry.reads.size === 0) {

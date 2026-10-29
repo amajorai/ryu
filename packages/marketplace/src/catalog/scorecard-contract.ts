@@ -45,6 +45,7 @@ export type ScorecardGrade = "A" | "B" | "C" | "D" | "F";
 export type ScorecardRulesetVersion =
 	| "agent-config-1"
 	| "design-system-1"
+	| "marketplace-publish-1"
 	| "marketplace-plugin-1"
 	| "marketplace-plugin-2"
 	| "marketplace-skill-1";
@@ -78,7 +79,7 @@ const CATEGORY_ORDER: ScorecardCategory[] = [
 	"errors",
 ];
 
-export const CATEGORY_LABELS: Record<ScorecardCategory, string> = {
+export const CATEGORY_LABELS = {
 	capabilities: "Capabilities",
 	configuration: "Configuration",
 	"design-system": "Ryu design system",
@@ -90,9 +91,9 @@ export const CATEGORY_LABELS: Record<ScorecardCategory, string> = {
 	review: "Review & provenance",
 	runtime: "Runtime",
 	safety: "Safety",
-};
+} satisfies Record<ScorecardCategory, string>;
 
-export const CATEGORY_DESCRIPTIONS: Record<ScorecardCategory, string> = {
+export const CATEGORY_DESCRIPTIONS = {
 	capabilities: "Whether access, tools, skills, and memory fit the job.",
 	configuration: "Whether the agent has a clear identity and instructions.",
 	"design-system":
@@ -105,14 +106,14 @@ export const CATEGORY_DESCRIPTIONS: Record<ScorecardCategory, string> = {
 	review: "Who published it and who checked it.",
 	runtime: "Whether the selected runtime and model can start.",
 	safety: "Whether execution posture matches the access it has.",
-};
+} satisfies Record<ScorecardCategory, string>;
 
-const STATUS_POINTS: Record<CheckStatus, number> = {
+const STATUS_POINTS = {
 	fail: 0,
 	pass: 1,
 	unknown: 0,
 	warn: 0.5,
-};
+} satisfies Record<CheckStatus, number>;
 
 /** Weighted points a check contributes. `unknown` never reaches here — it is
  * filtered out of both the numerator and the denominator. */

@@ -1,8 +1,8 @@
-import type { ComposerSendShortcut } from "@ryu/blocks/desktop/agent-elements/composer-send-shortcut";
+import type { ComposerSendShortcut } from "@ryu/blocks/desktop/agent-elements/composer-send-shortcut.ts";
 import { useCallback, useSyncExternalStore } from "react";
 import { registerSetting } from "@/src/lib/settings-registry.ts";
 
-export type { ComposerSendShortcut } from "@ryu/blocks/desktop/agent-elements/composer-send-shortcut";
+export type { ComposerSendShortcut } from "@ryu/blocks/desktop/agent-elements/composer-send-shortcut.ts";
 
 export const COMPOSER_SEND_SHORTCUT_KEY = "ryu:composer-send-shortcut";
 
@@ -25,11 +25,15 @@ const VALID_COMPOSER_SEND_SHORTCUTS = new Set<ComposerSendShortcut>([
 
 const listeners = new Set<() => void>();
 
-function isComposerSendShortcut(value: unknown): value is ComposerSendShortcut {
-	return (
-		typeof value === "string" &&
-		VALID_COMPOSER_SEND_SHORTCUTS.has(value as ComposerSendShortcut)
-	);
+function isComposerSendShortcut(
+	value: string | null
+): value is ComposerSendShortcut {
+	for (const candidate of VALID_COMPOSER_SEND_SHORTCUTS) {
+		if (candidate === value) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function readMode(): ComposerSendShortcut {
@@ -50,12 +54,12 @@ function subscribe(callback: () => void): () => void {
 			callback();
 		}
 	};
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.addEventListener("storage", onStorage);
 	}
 	return () => {
 		listeners.delete(callback);
-		if (typeof window !== "undefined") {
+		if (globalThis.window !== undefined) {
 			window.removeEventListener("storage", onStorage);
 		}
 	};

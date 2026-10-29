@@ -12,9 +12,14 @@
     ]
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["ryu-dev"]
+      }
+    },
     "updater": {
       "endpoints": [
-        "https://github.com/amajorai/ryu/releases/latest/download/latest-nightly.json"
+        "https://github.com/amajorai/ryu/releases/download/nightly/latest-nightly.json"
       ]
     }
   },

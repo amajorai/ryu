@@ -9,14 +9,14 @@
 // `openTab("/artifact/...")`.
 
 import { create } from "zustand";
-import type { Artifact } from "@/src/lib/artifacts.ts";
+import type { ArtifactView } from "@/src/lib/live-artifacts.ts";
 
 interface ArtifactStoreState {
 	/** Artifacts by id, most-recently-put wins (a re-render of the same artifact
 	 *  replaces rather than stacks). */
-	artifacts: Record<string, Artifact>;
-	get: (id: string) => Artifact | undefined;
-	put: (artifact: Artifact) => void;
+	artifacts: Record<string, ArtifactView>;
+	get: (id: string) => ArtifactView | undefined;
+	put: (artifact: ArtifactView) => void;
 }
 
 export const useArtifactStore = create<ArtifactStoreState>((set, get) => ({

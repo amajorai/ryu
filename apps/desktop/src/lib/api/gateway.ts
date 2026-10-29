@@ -1,3 +1,4 @@
+import { appJsonValueSchema } from "@ryuhq/core-client/app-request-json.ts";
 // apps/desktop/src/lib/api/gateway.ts
 //
 // Typed client for the Gateway observability surface, surfaced through Core's
@@ -5,61 +6,86 @@
 // /health and /metrics and returns a combined snapshot, or a clear down state
 // (`reachable: false`) when the gateway is unreachable while Core is still up.
 
-import { type ApiTarget, apiUrl, request, requestHeaders } from "./client.ts";
+import type { RyuJsonValue } from "@ryu/app-host/rpc";
+import type {
+	AssertionResult,
+	BudgetChargeInclusion,
+	EvalMessage,
+	GatewayAuditFilters,
+	GatewayCacheMetrics,
+	GatewayCoreProviderView,
+	GatewayFirewallPolicy,
+	GatewayHealth,
+	GatewayLocalProviderView,
+	GatewayProviderMetrics,
+	GatewayRequestMetrics,
+	GatewayTokenMetrics,
+	ModelRouterType,
+	ProviderCircuitState,
+	RedTeamStrategyResult,
+	RouteStrategy,
+	SmartRule,
+	StagePicker,
+} from "@ryuhq/core-client/gateway.ts";
+import { z } from "zod";
+import {
+	ApiError,
+	type ApiTarget,
+	apiUrl,
+	request,
+	requestHeaders,
+} from "./client.ts";
+import {
+	rawStatusResponseSchema5,
+	rawStatusResponseSchema6,
+	rawStatusResponseSchema7,
+	rawStatusResponseSchema8,
+} from "./gateway-audit-response-contracts.ts";
+import {
+	type GatewayJsonValue,
+	gatewayJsonValueSchema,
+} from "./gateway-json-contracts.ts";
+import {
+	fetchClassifyWeightsPresentResponseSchema0,
+	rawStatusResponseSchema9,
+} from "./gateway-redteam-response-contracts.ts";
+import {
+	fetchClassifyWeightsPresentResponseSchema,
+	fetchEvaluatorsResponseSchema,
+	gatewayDoctorFixResultResponseSchema,
+	gatewayDoctorReportResponseSchema,
+	gatewayProviderEditResultResponseSchema,
+	rawStatusResponseSchema,
+	retainValidatedResponse,
+	updateGatewayConfigResponseSchema,
+} from "./gateway-status-response-contracts.ts";
+import {
+	gatewayTrafficUnavailableSchema,
+	parseTrafficFrame,
+} from "./gateway-traffic-contracts.ts";
+import { gatewayUsageWireSchema } from "./gateway-usage-contracts.ts";
 import { restartGateway } from "./system.ts";
 
-/** Gateway `/health` payload (status, version, providers, auth flag). */
-export interface GatewayHealth {
-	authRequired: boolean;
-	providers: string[];
-	status: string;
-	version: string | null;
-}
-
-/** Request counters reported by gateway `/metrics`. */
-export interface GatewayRequestMetrics {
-	budgetDowngraded: number;
-	budgetExceeded: number;
-	budgetNotified: number;
-	budgetRestricted: number;
-	errors: number;
-	firewallBlocked: number;
-	rateLimited: number;
-	total: number;
-}
-
-/** Cache counters and derived hit rate (0..1). */
-export interface GatewayCacheMetrics {
-	exactHits: number;
-	hitRate: number;
-	misses: number;
-	semanticHits: number;
-}
-
-/** Token usage totals. */
-export interface GatewayTokenMetrics {
-	input: number;
-	output: number;
-}
-
-/** Per-provider request / error counters. */
-export interface GatewayProviderMetrics {
-	errors: Record<string, number>;
-	requests: Record<string, number>;
-}
-
-/**
- * Circuit-breaker state snapshot for a single provider.
- * `circuit` is one of `"closed"` | `"open"` | `"half_open"`.
- */
-export interface ProviderCircuitState {
-	/** `"closed"` (healthy), `"open"` (tripped), or `"half_open"` (probe). */
-	circuit: "closed" | "open" | "half_open";
-	/** Consecutive failures recorded while the circuit was Closed. */
-	consecutiveFailures: number;
-	/** Seconds since the circuit opened. `null` when the circuit is not Open. */
-	openForSecs: number | null;
-}
+export type {
+	AssertionResult,
+	BudgetChargeInclusion,
+	EvalMessage,
+	GatewayAuditFilters,
+	GatewayCacheMetrics,
+	GatewayCoreProviderView,
+	GatewayFirewallPolicy,
+	GatewayHealth,
+	GatewayLocalProviderView,
+	GatewayProviderMetrics,
+	GatewayRequestMetrics,
+	GatewayTokenMetrics,
+	ModelRouterType,
+	ProviderCircuitState,
+	RedTeamStrategyResult,
+	RouteStrategy,
+	SmartRule,
+	StagePicker,
+} from "@ryuhq/core-client/gateway.ts";
 
 /**
  * Live upstream quota / rate-limit snapshot for one provider, as folded into
@@ -168,7 +194,7 @@ interface RawMetrics {
 	tokens?: { input?: number; output?: number };
 }
 
-interface RawStatus {
+export interface RawStatus {
 	health?: RawHealth | null;
 	metrics?: RawMetrics | null;
 	reachable?: boolean;
@@ -232,7 +258,7 @@ function normalizeMetrics(
 
 function normalizeProviderQuota(
 	raw: Record<string, RawProviderQuota> | undefined
-): Record<string, ProviderQuota> {
+): GatewayMetrics["providerQuota"] {
 	if (!raw) {
 		return {};
 	}
@@ -262,7 +288,7 @@ function normalizeCircuit(
 
 function normalizeProviderHealth(
 	raw: Record<string, RawProviderCircuitState> | undefined
-): Record<string, ProviderCircuitState> {
+): GatewayMetrics["providerHealth"] {
 	if (!raw) {
 		return {};
 	}
@@ -288,9 +314,14 @@ export async function fetchGatewayStatus(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<GatewayStatus> {
-	const json = await request<RawStatus>(target, "/api/gateway/status", {
-		signal,
-	});
+	const json = await request<RawStatus>(
+		target,
+		"/api/gateway/status",
+		{
+			signal,
+		},
+		rawStatusResponseSchema
+	);
 	return {
 		reachable: json.reachable ?? false,
 		url: json.url ?? null,
@@ -308,49 +339,89 @@ export async function fetchGatewayStatus(
 export interface GatewayProviderView {
 	api_key: string;
 	/**
-	 * Number of extra account keys configured for round-robin rotation (the keys
-	 * themselves stay redacted). Set via the provider's `*_API_KEYS` env var, not
-	 * via PUT — provider credentials are environment-variable-only by design.
+	 * Number of configured account keys (primary plus extras) for rotation. Key
+	 * values stay redacted. Local Core can add/remove accounts without reading
+	 * them back; standalone Gateways can also use `*_API_KEYS` or `api_keys`.
 	 * Older gateways omit the field (treat `undefined` as 0).
 	 */
 	api_key_count?: number;
 	base_url: string;
 }
 
-/** Local provider view (no api_key). */
-export interface GatewayLocalProviderView {
-	base_url: string;
-}
-
-/** Core provider view (url + whether a token is set). */
-export interface GatewayCoreProviderView {
-	base_url: string;
-	has_token: boolean;
-}
-
 /**
  * Redacted view of the genai multi-provider backend. Lists only the adapter
  * kinds that have a configured key (e.g. "gemini"); key values are never sent.
  */
+export type GatewaySdkContext =
+	| { kind: "default" }
+	| { kind: "vertex"; project: string; location: string }
+	| { kind: "bedrock_api"; region: string }
+	| { kind: "ollama"; base_url: string };
+
+export interface GatewaySdkProviderView {
+	account_count: number;
+	account_scope: ByokProvider;
+	accounts: { id: string; source: "stored" | "environment" | "fleet" }[];
+	activation_error?: string | null;
+	auth_kind: "api_key" | "bearer_token" | "no_auth";
+	brand: string;
+	configured: boolean;
+	context?: GatewaySdkContext | null;
+	context_kind: GatewaySdkContext["kind"];
+	kind: string;
+	label: string;
+	operations: ("chat" | "stream" | "image")[];
+	provider_id: string;
+}
+
 export interface GatewayGenAiProviderView {
+	gemini_account_count?: number;
 	keys: string[];
+	sdk_providers?: GatewaySdkProviderView[];
 }
 
 /** Redacted provider config from GET /v1/config. */
+export type GatewayAccountStrategy =
+	| "round_robin"
+	| "quota_first"
+	| "fill_first"
+	| "reset_first";
+
 export interface GatewayProvidersConfig {
+	accountDrainThresholds?: Record<string, number>;
+	accountStrategies?: Record<string, GatewayAccountStrategy>;
+	accounts?: Record<string, GatewayProviderAccount[]>;
 	anthropic: GatewayProviderView | null;
+	assemblyai?: GatewayProviderView | null;
+	bfl?: GatewayProviderView | null;
+	cohere?: GatewayProviderView | null;
+	compatible?: Record<string, GatewayProviderView>;
 	core: GatewayCoreProviderView | null;
+	deepgram?: GatewayProviderView | null;
+	elevenlabs?: GatewayProviderView | null;
+	fal?: GatewayProviderView | null;
 	genai: GatewayGenAiProviderView | null;
+	google_tts?: { account_count: number; mode: string } | null;
+	inworld?: GatewayProviderView | null;
 	local: GatewayLocalProviderView | null;
+	minimax?: GatewayProviderView | null;
+	modal?: GatewayProviderView | null;
 	openai: GatewayProviderView | null;
 	openrouter: GatewayProviderView | null;
+	polly?: { account_count: number; mode: string; region: string } | null;
+	recraft?: GatewayProviderView | null;
+	replicate?: GatewayProviderView | null;
+	runway?: GatewayProviderView | null;
+	stability?: GatewayProviderView | null;
+	topaz?: GatewayProviderView | null;
 }
 
 /**
  * The provider kinds the gateway supports.
  * Values are lowercase strings matching the gateway's serde(rename_all = "lowercase").
  * `genai` is the multi-provider backend that serves native-format providers
- * (currently Gemini) that aren't covered by the OpenAI-compatible passthroughs.
+ * (currently Gemini). The remaining direct chat-capable compatible backends are
+ * separate registry IDs. Speech-only and embedding-only IDs are excluded.
  */
 export type ProviderKind =
 	| "openai"
@@ -358,11 +429,16 @@ export type ProviderKind =
 	| "local"
 	| "openrouter"
 	| "core"
-	| "genai";
+	| "genai"
+	| "mistral"
+	| "huggingface"
+	| "nvidia"
+	| "together"
+	| "fireworks";
 
 /** A single model-to-provider mapping entry. */
 export interface ModelMapping {
-	provider: ProviderKind;
+	provider: string;
 	/** If set, rewrite the model name before forwarding to the provider. */
 	provider_model?: string | null;
 }
@@ -378,7 +454,14 @@ export interface ModelMapping {
  * deserializes to nothing and the setting is silently ignored, which is the
  * whole defect class this editor exists to close.
  */
-export const MODALITIES = ["chat", "image", "tts", "stt", "video"] as const;
+export const MODALITIES = [
+	"chat",
+	"image",
+	"tts",
+	"stt",
+	"video",
+	"audio",
+] as const;
 
 /** One of {@link MODALITIES}. */
 export type Modality = (typeof MODALITIES)[number];
@@ -430,40 +513,21 @@ export interface EvalRoutingConfig {
 	explore_ratio: number;
 }
 
-/**
- * How the matching rule is chosen for a smart-routing decision. Shared vocabulary
- * across both routing planes (model routing here, agent routing in Core):
- * - `llm`: a cheap classifier model reads the message and picks a rule.
- * - `embedding`: embed rule descriptions + the query, cosine-nearest above a threshold.
- * - `keyword`: case-insensitive significant-word match; zero cost, zero network.
- */
-export type RouteStrategy = "llm" | "embedding" | "keyword";
-
-/** Top-level Gateway model-router algorithms inspired by NeMo Switchyard. */
-export type ModelRouterType =
-	| "llm_classifier"
-	| "passthrough"
-	| "random"
-	| "stage_router"
-	| "escalation";
-
-export type StagePicker = "capable_first" | "efficient_first";
-
-export const MODEL_ROUTER_TYPE_LABELS: Record<ModelRouterType, string> = {
+export const MODEL_ROUTER_TYPE_LABELS = {
 	llm_classifier: "LLM classifier",
 	passthrough: "Passthrough",
 	random: "Weighted random",
 	stage_router: "Stage router",
 	escalation: "Escalation",
-};
+} satisfies Record<ModelRouterType, string>;
 
-export const MODEL_ROUTER_TYPE_DESCRIPTIONS: Record<ModelRouterType, string> = {
+export const MODEL_ROUTER_TYPE_DESCRIPTIONS = {
 	llm_classifier: "match request rules by model, meaning, or words",
 	passthrough: "keep the model requested by the caller",
 	random: "split traffic across target models for experiments",
 	stage_router: "use recent tool and progress signals per turn",
 	escalation: "judge the trajectory and latch hard sessions upward",
-};
+} satisfies Record<ModelRouterType, string>;
 
 /**
  * The ONE naming of the three smart-routing strategies, in both vocabularies.
@@ -488,32 +552,29 @@ export const MODEL_ROUTER_TYPE_DESCRIPTIONS: Record<ModelRouterType, string> = {
  * facts that decide this setting for most people, so the friendly copy keeps them
  * rather than trading them for a shorter sentence.
  */
-export const ROUTE_STRATEGY_LABELS: Record<RouteStrategy, string> = {
+export const ROUTE_STRATEGY_LABELS = {
 	llm: "LLM classifier",
 	embedding: "Embedding",
 	keyword: "Keyword",
-};
+} satisfies Record<RouteStrategy, string>;
 
-export const ROUTE_STRATEGY_FRIENDLY_LABELS: Record<RouteStrategy, string> = {
+export const ROUTE_STRATEGY_FRIENDLY_LABELS = {
 	llm: "Let a model decide",
 	embedding: "Match on meaning",
 	keyword: "Match on words",
-};
+} satisfies Record<RouteStrategy, string>;
 
-export const ROUTE_STRATEGY_DESCRIPTIONS: Record<RouteStrategy, string> = {
+export const ROUTE_STRATEGY_DESCRIPTIONS = {
 	llm: "a cheap model reads the message and picks a rule",
 	embedding: "cosine-match rule text against the message",
 	keyword: "case-insensitive word match, zero cost",
-};
+} satisfies Record<RouteStrategy, string>;
 
-export const ROUTE_STRATEGY_FRIENDLY_DESCRIPTIONS: Record<
-	RouteStrategy,
-	string
-> = {
+export const ROUTE_STRATEGY_FRIENDLY_DESCRIPTIONS = {
 	llm: "a small, cheap model reads the message and picks the rule that fits",
 	embedding: "compares what the message means with what each rule describes",
 	keyword: "looks for the rule's words in the message; free and instant",
-};
+} satisfies Record<RouteStrategy, string>;
 
 /**
  * The label + description pair for each strategy in the caller's current mode.
@@ -537,16 +598,6 @@ export function routeStrategyCopy(friendly: boolean): {
 			};
 }
 
-/** A single smart-routing rule: a plain-language condition + target model. */
-export interface SmartRule {
-	/** Natural-language condition, e.g. "writing or refactoring code". */
-	description: string;
-	/** Model to route matching requests to (resolved via the router). */
-	model: string;
-	/** Relative traffic weight for the `random` router; defaults to 1. */
-	weight?: number;
-}
-
 /**
  * Gateway Plane A model routing ("custom routing instructions"). When enabled,
  * the selected `router_type` picks or preserves a target model before normal
@@ -554,6 +605,31 @@ export interface SmartRule {
  * requested model. Takes effect after the gateway restarts.
  */
 export interface SmartRoutingConfig {
+	/**
+	 * Per-agent pools keyed by agent id. Each narrows this node's pool for that
+	 * agent's requests (OpenAI-compatible and gateway-routed ACP agents alike).
+	 * Read from the global config only. Older gateways omit this field.
+	 */
+	agent_pools?: Record<string, RoutePool>;
+	/**
+	 * Per-agent routing overrides keyed by agent id: a whole config that
+	 * replaces this one for that agent's requests (OpenAI-compatible and
+	 * gateway-routed ACP agents alike). Read from the global config only.
+	 * Older gateways omit this field.
+	 */
+	agent_routes?: Record<string, SmartRoutingConfig>;
+	/**
+	 * Model pool: case-insensitive globs (`*` wildcard) a routed target must
+	 * match, e.g. `["*claude*", "gpt-*"]`. Empty ⇒ any model. Older gateways
+	 * omit this field.
+	 */
+	allowed_models?: string[];
+	/**
+	 * Provider pool: provider ids (`anthropic`, `openrouter`, a compatible
+	 * endpoint id, `core` for Core-hosted agents, …) a routed target may resolve
+	 * to. Empty ⇒ any provider. Older gateways omit this field.
+	 */
+	allowed_providers?: string[];
 	/** Classify once per conversation and reuse the decision. Default true. */
 	cache_by_session: boolean;
 	/** The cheap model used to classify each request (any routable model id). */
@@ -605,16 +681,190 @@ export interface SmartRoutingConfig {
  * provider's own routing (e.g. OpenRouter's openrouter/auto) and determines
  * which provider a request is sent to based on the requested model name.
  */
+export const PROVIDER_POOL_STRATEGIES = [
+	"priority",
+	"round_robin",
+	"weighted_round_robin",
+	"random",
+	"least_used",
+	"weighted",
+	"fill_first",
+	"p2c",
+	"strict_random",
+	"cost_optimized",
+	"headroom",
+	"reset_window",
+	"reset_aware",
+	"context_relay",
+	"context_optimized",
+	"cache_optimized",
+	"lkgp",
+	"auto",
+	"fusion",
+	"pipeline",
+	"quota_weighted",
+] as const;
+
+export type ProviderPoolStrategy = (typeof PROVIDER_POOL_STRATEGIES)[number];
+
+export const LEGACY_PROVIDER_POOL_STRATEGIES: readonly ProviderPoolStrategy[] =
+	["priority", "round_robin", "weighted_round_robin", "random", "least_used"];
+
+export function supportedProviderPoolStrategies(
+	supported?: readonly ProviderPoolStrategy[]
+): readonly ProviderPoolStrategy[] {
+	return supported === undefined ? LEGACY_PROVIDER_POOL_STRATEGIES : supported;
+}
+
+export interface PoolExecutionConfig {
+	grace_ms: number;
+	leg_timeout_ms: number;
+	max_output_bytes: number;
+	quorum: number;
+	total_timeout_ms: number;
+}
+
+export const DEFAULT_POOL_EXECUTION: PoolExecutionConfig = {
+	leg_timeout_ms: 30_000,
+	total_timeout_ms: 120_000,
+	max_output_bytes: 262_144,
+	quorum: 2,
+	grace_ms: 250,
+};
+
+export const DEFAULT_POOL_AUTO_WEIGHTS = {
+	quota: 0.1429,
+	health: 0.1605,
+	cost_inv: 0.1429,
+	latency_inv: 0.1143,
+	task_fit: 0.0762,
+	stability: 0.0476,
+	tier_priority: 0.0476,
+	tier_affinity: 0.0476,
+	specificity_match: 0.0476,
+	context_affinity: 0.0476,
+	cache_affinity: 0,
+	session_availability: 0.0476,
+	reset_window_affinity: 0,
+	connection_density: 0.0476,
+	quality: 0.03,
+	reliability: 0,
+};
+
+export type AutoScoringWeights = typeof DEFAULT_POOL_AUTO_WEIGHTS;
+
+export interface GatewayProviderPool {
+	auto_weights?: Partial<AutoScoringWeights> | null;
+	execution?: PoolExecutionConfig;
+	judge?: { provider: string; model: string } | null;
+	members: {
+		provider: string;
+		model: string;
+		priority: number;
+		weight: number;
+		enabled: boolean;
+		last_resort?: boolean;
+		context_tokens?: number | null;
+	}[];
+	sticky_limit?: number;
+	strategy: ProviderPoolStrategy;
+	wait_for_cooldown_ms?: number;
+}
+
+/** UI boundary validation mirrors the bounded canonical pool config. */
+export function providerPoolSettingsError(
+	pool: GatewayProviderPool
+): string | null {
+	if (pool.auto_weights != null) {
+		const values = Object.values(pool.auto_weights);
+		if (
+			values.some(
+				(value) => !Number.isFinite(value) || value < 0 || value > 1000
+			) ||
+			values.reduce((total, value) => total + value, 0) <= 0
+		) {
+			return "Auto weights must be finite values from 0–1,000 with a positive total. Unset configured fields count as zero.";
+		}
+	}
+	if (
+		new Set(
+			pool.members.map((member) =>
+				JSON.stringify([member.provider, member.model.trim()])
+			)
+		).size !== pool.members.length
+	) {
+		return "Each exact provider/model target can appear only once in a pool.";
+	}
+	for (const member of pool.members) {
+		if (
+			member.context_tokens != null &&
+			(!Number.isInteger(member.context_tokens) ||
+				member.context_tokens < 1 ||
+				member.context_tokens > 2_000_000)
+		) {
+			return "Model context capacity must be 1–2,000,000 tokens, or blank when unknown.";
+		}
+	}
+	if (pool.strategy !== "fusion" && pool.strategy !== "pipeline") {
+		return null;
+	}
+	const limits = pool.execution ?? DEFAULT_POOL_EXECUTION;
+	const boundedFields: readonly [number, number, number][] = [
+		[limits.leg_timeout_ms, 1, 30_000],
+		[limits.total_timeout_ms, 1, 120_000],
+		[limits.max_output_bytes, 1, 262_144],
+		[limits.quorum, 1, 8],
+		[limits.grace_ms, 0, 5000],
+	];
+	for (const [value, minimum, maximum] of boundedFields) {
+		if (!Number.isInteger(value) || value < minimum || value > maximum) {
+			return "Execution limits exceed the supported bounds.";
+		}
+	}
+	if (limits.total_timeout_ms < limits.leg_timeout_ms) {
+		return "Total timeout must be at least the per-target timeout.";
+	}
+	if (pool.members.filter((member) => member.enabled).length > 8) {
+		return "Fusion and pipeline support at most eight enabled targets.";
+	}
+	if (
+		pool.strategy === "fusion" &&
+		(!pool.judge?.provider ||
+			pool.judge.provider.startsWith("pool:") ||
+			!pool.judge.model.trim())
+	) {
+		return "Fusion needs a connected judge provider and its exact model ID.";
+	}
+	if (
+		pool.judge &&
+		(new TextEncoder().encode(pool.judge.model).length > 256 ||
+			Array.from(pool.judge.model).some((character) => {
+				const code = character.charCodeAt(0);
+				return code < 32 || (code >= 127 && code <= 159);
+			}))
+	) {
+		return "The judge model must be a valid exact upstream model ID, up to 256 characters.";
+	}
+	return null;
+}
+
 export interface GatewayRoutingConfig {
-	/** Provider to use when no model-map entry matches. */
-	default_provider: ProviderKind;
+	/**
+	 * Provider to use when no model-map entry matches. An OPEN `ProviderId`
+	 * registry id (gateway `RoutingView`), not the closed {@link ProviderKind}
+	 * union — `modal`, `replicate`, `fal` and custom providers are valid.
+	 */
+	default_provider: string;
 	/**
 	 * Eval-driven (A/B) routing. Optional on the wire — a gateway whose
 	 * `RoutingView` predates this field omits it. Round-trip only; no editor.
 	 */
 	eval_routing?: EvalRoutingConfig;
-	/** Ordered fallback chain used when the primary provider is unavailable. */
-	fallback_chain: ProviderKind[];
+	/**
+	 * Ordered fallback chain used when the primary provider is unavailable.
+	 * Open `ProviderId` registry ids, like {@link default_provider}.
+	 */
+	fallback_chain: string[];
 	/**
 	 * Per-modality provider/model overrides, consulted BEFORE the model map for
 	 * any non-chat request (`crates/gateway/router/src/lib.rs::route_modality`).
@@ -634,6 +884,8 @@ export interface GatewayRoutingConfig {
 	modality_map?: Partial<Record<Modality, ModalityMapping>>;
 	/** Static model-to-provider mappings (exact or prefix match). */
 	model_map: Record<string, ModelMapping>;
+	/** Named direct-provider pools; round-tripped even before the pool editor ships. */
+	provider_pools?: Record<string, GatewayProviderPool>;
 	/**
 	 * Per-provider cost tier used to order the fallback chain: 0 = subscription,
 	 * 1 = cheap, 2 = free. Keyed by provider kind. Absent providers default to
@@ -645,16 +897,13 @@ export interface GatewayRoutingConfig {
 	smart_routing?: SmartRoutingConfig;
 }
 
-/** The three policy values the gateway firewall accepts (snake_case wire form). */
-export type GatewayFirewallPolicy = "block" | "warn_and_continue" | "sanitize";
-
 /**
  * The alert tiers, ASCENDING in severity — the wire form of the gateway's
  * `AlertTier` (`crates/gateway/contracts/src/lib.rs`, `rename_all = "lowercase"`,
  * so these are the variant names lowercased).
  *
  * Order is load-bearing, not cosmetic. The gateway takes the `max` tier across
- * every rule a request matched (`pipeline/mod.rs`, `max_tier`) before it stamps
+ * every rule a request matched (`pipeline/budget.rs`, `max_tier`) before it stamps
  * the alert header, and the Rust enum derives `Ord` from its declaration order
  * for exactly that reason. A UI that offered these in a different order would
  * still save correct values, but the mirror test below compares this array to the
@@ -889,15 +1138,14 @@ export function classifyTierCannotServeModel(
  * cannot serve — the `reason` clause each card composes its own consequence
  * onto (the inspector allows the turn; smart routing keeps the requested model).
  */
-export const CLASSIFY_TIER_COPY: Record<
-	Exclude<ClassifyTierState, "unknown">,
-	{ badge: string; hint: string; reason?: string }
-> = {
+export const CLASSIFY_TIER_COPY = {
 	running: {
+		reason: undefined,
 		badge: "Local classifier running",
 		hint: "Gemma 3 270M is loaded on this node — classification costs nothing and leaves no data.",
 	},
 	idle: {
+		reason: undefined,
 		badge: "Local classifier ready",
 		hint: "Gemma 3 270M is downloaded on this node; it starts on the first classification.",
 	},
@@ -931,7 +1179,10 @@ export const CLASSIFY_TIER_COPY: Record<
 		hint: "This node's Core does not provide the local classify tier — pick a hosted model instead.",
 		reason: "this node's Core does not provide that tier",
 	},
-};
+} satisfies Record<
+	Exclude<ClassifyTierState, "unknown">,
+	{ badge: string; hint: string; reason?: string }
+>;
 
 /**
  * Whether the classify tier's WEIGHTS are on this node's disk.
@@ -977,7 +1228,8 @@ export async function fetchClassifyWeightsPresent(
 	const json = await request<{ models?: { stem?: string }[] }>(
 		target,
 		"/api/models/installed",
-		{ signal }
+		{ signal },
+		fetchClassifyWeightsPresentResponseSchema
 	);
 	return (json.models ?? []).some((m) => m.stem === CLASSIFY_MODEL_ID);
 }
@@ -1231,7 +1483,8 @@ export async function fetchEvaluators(
 	const raw = await request<{ evaluators?: Evaluator[] }>(
 		target,
 		"/api/gateway/evaluators",
-		{ signal }
+		{ signal },
+		fetchEvaluatorsResponseSchema
 	);
 	return raw.evaluators ?? [];
 }
@@ -1290,6 +1543,14 @@ export interface GatewayFirewallConfig {
  * `custom_patterns` are appended (union, never replace); `locked_fields` freeze
  * a field so a narrower scope can only tighten it. Wire keys are snake_case.
  */
+/** The desktop's fail-soft config view also supports an omitted legacy firewall. */
+export interface GatewayFirewallView extends Partial<GatewayFirewallConfig> {
+	alert: GatewayAlertTier;
+	custom_patterns: CustomPattern[];
+	inspector: InspectorConfig;
+	locked_fields: string[];
+}
+
 export interface GatewayFirewallOverlay {
 	/**
 	 * Per-scope alert tier. `null`/`undefined` inherits the broader scope's tier.
@@ -1309,7 +1570,7 @@ export interface GatewayFirewallOverlay {
 	 * dial, so it starts unlocked.
 	 *
 	 * COVERAGE — partial, and the boundary is NOT inbound-vs-outbound. Enumerated
-	 * from the `firewall_policy_alert` call sites in `apps/gateway/src/pipeline/mod.rs`:
+	 * from the `firewall_policy_alert` call sites across `apps/gateway/src/pipeline/`:
 	 *
 	 * - Scope-aware, via `state.resolved_scanner(ctx)` → `scanner.config()`:
 	 *   `pre_process` (inbound text), `apply_inline_input_evaluators`, and
@@ -1322,7 +1583,7 @@ export interface GatewayFirewallOverlay {
 	 *
 	 * So UI copy must not promise that an org/agent tier governs image or video
 	 * requests, nor that it is powerless on outbound. Only the node scope covers
-	 * all six sites. Widening the three is a `pipeline/mod.rs` change.
+	 * all six sites. Widening the three is a `pipeline/` change.
 	 */
 	alert?: GatewayAlertTier | null;
 	custom_patterns?: CustomPattern[];
@@ -1349,13 +1610,6 @@ export interface GatewayFirewallOverlay {
  * Values are lowercase strings matching the gateway's serde(rename_all = "lowercase").
  */
 export type BudgetAction = "notify" | "downgrade" | "restrict" | "stop";
-
-/** Charged work categories that a budget rule includes. */
-export interface BudgetChargeInclusion {
-	media: boolean;
-	model: boolean;
-	tools: boolean;
-}
 
 export const DEFAULT_BUDGET_INCLUSION: BudgetChargeInclusion = {
 	model: true,
@@ -1444,10 +1698,7 @@ export function buildBudgetRule(input: BudgetRuleInput): BudgetRule {
 		rule.downgrade_to = downgradeTo;
 	}
 	if (input.action === "restrict" && input.restrictMaxTokens != null) {
-		const raw =
-			typeof input.restrictMaxTokens === "string"
-				? input.restrictMaxTokens.trim()
-				: input.restrictMaxTokens;
+		const raw = String(input.restrictMaxTokens).trim();
 		if (raw !== "") {
 			const cap = Number(raw);
 			if (Number.isInteger(cap) && cap > 0) {
@@ -1514,16 +1765,39 @@ export const DEFAULT_SESSION_BUDGET: BudgetRule = {
 	restrict_max_tokens: 256,
 };
 
+export interface GatewayEgressConfig {
+	assignments: Record<string, string>;
+	pools: Record<
+		string,
+		{
+			include_direct: boolean;
+			direct_fallback_only?: boolean;
+			endpoints: {
+				id: string;
+				url: string;
+				enabled: boolean;
+				priority?: number;
+				username_env: string | null;
+				password_env: string | null;
+			}[];
+		}
+	>;
+}
+
 /** Full redacted config returned by GET /v1/config (via Core proxy). */
 export interface GatewayConfig {
 	acp: GatewayAcpConfig;
+	appliedProviderRevision?: string | null;
 	auth: GatewayAuthConfig;
 	budgets: GatewayBudgetConfig;
 	/** Node-wide computer-use policy. */
 	computer_use: GatewayComputerUseConfig;
+	configRevision?: string | null;
 	/** Static policy drift projection retained for older Gateway clients. */
 	drift?: GatewayDriftWarning[];
-	firewall: GatewayFirewallConfig;
+	/** Explicit outbound proxy pools. Older Gateways omit this section. */
+	egress?: GatewayEgressConfig;
+	firewall: GatewayFirewallView;
 	/**
 	 * Gateway-local standalone-desktop per-agent firewall overlay store (the leaf
 	 * scope of the node → org → agent cascade), keyed by agent id. `{}` on a fresh
@@ -1543,18 +1817,33 @@ export interface GatewayConfig {
 	};
 	/** Resolved pipeline stages currently running in the gateway process. */
 	pipeline_stages?: string[];
+	providerEpoch?: { boot: string; sequence: number } | null;
 	providers: GatewayProvidersConfig;
 	routing: GatewayRoutingConfig;
+	/** Explicit strategy support; absent on older nodes, not equivalent to empty. */
+	strategyCapabilities?: {
+		chat: ProviderPoolStrategy[];
+		web: ProviderPoolStrategy[];
+	};
 	/** Redacted tool-loop config returned by newer Gateways. */
 	tools?: GatewayToolsConfig;
+	webServiceSchema?: 1;
 }
 
 /** Persisted policy for computer-use providers attached to one node. */
 export interface GatewayComputerUseConfig {
 	/** Whether Ghost may request the platform's locked-session path. */
 	locked_use: boolean;
+	/**
+	 * Stored permission for features that use a hardware security key connected
+	 * to this node. No current feature reads it. Absent on Gateways that predate
+	 * the field.
+	 */
+	security_key?: boolean;
 }
 
+// `security_key` stays absent: a Gateway that sends no `computer_use` section
+// predates the field, and the settings row treats absence as unsupported.
 export const DEFAULT_GATEWAY_COMPUTER_USE: GatewayComputerUseConfig = {
 	locked_use: false,
 };
@@ -1587,7 +1876,7 @@ export type GatewayAcpSettings = Pick<
 >;
 
 export const DEFAULT_GATEWAY_ACP: GatewayAcpConfig = {
-	idle_timeout_minutes: 10,
+	idle_timeout_minutes: 5,
 	max_parallel_agents: null,
 	keep_computer_awake: true,
 };
@@ -1645,12 +1934,21 @@ export interface GatewayDoctorFixResult {
 	report: GatewayDoctorReport;
 }
 
+/** Gateway's config.rs ToolProfile serialization, including its defaulted lists. */
+export interface GatewayToolProfile {
+	allow: string[];
+	deny: string[];
+	unrestricted: boolean;
+}
+
 export interface GatewayToolsConfig {
-	always_on: unknown[];
+	always_on: RyuJsonValue[];
 	describe_top_n: number;
 	enabled: boolean;
 	max_rounds: number;
-	profiles: Record<string, unknown>;
+	/** Concurrent read-only tool calls per model step; absent on older Gateways. */
+	parallel_reads?: number;
+	profiles: Record<string, GatewayToolProfile>;
 }
 
 /**
@@ -1659,15 +1957,20 @@ export interface GatewayToolsConfig {
  * visible at creation time (returned by the generate helper, never by GET).
  */
 export interface GatewayApiKey {
+	allowed_operations?: GatewayClientOperation[];
 	/** Always `"***"` in GET responses. */
 	key: string;
 	/** Human-readable label, e.g. "OpenClaw BYOA". */
 	name: string;
 	org_id?: string | null;
+	/** Read-only metadata for a bootstrapped relay that cannot be revoked here. */
+	system_relay?: boolean;
 	team_id?: string | null;
 	/** When true, the gateway honors `x-ryu-agent-id` for per-agent budgets. */
 	trusted_forwarder: boolean;
 }
+
+export type GatewayClientOperation = "inference" | "web_search" | "web_fetch";
 
 /** The auth section of the gateway config (read-only view). */
 export interface GatewayAuthConfig {
@@ -1692,7 +1995,10 @@ export interface GatewayConfigPatch {
 	 * overrides that built-in. Takes effect after a gateway restart.
 	 */
 	custom_evaluators?: Evaluator[];
-	firewall?: GatewayFirewallConfig;
+	/** Full replacement. Validated and applied after Gateway restarts. */
+	egress?: GatewayEgressConfig;
+	expectedRevision?: string;
+	firewall?: Partial<GatewayFirewallConfig>;
 	/**
 	 * Full replacement of the gateway-local per-agent overlay store. Any agent id
 	 * absent from this map is REMOVED, so always send the complete map (read from
@@ -1708,6 +2014,12 @@ export interface GatewayConfigPatch {
 		cadence: "daily" | "weekly" | "monthly";
 		enabled: boolean;
 	};
+	providerAccountDrainThresholds?: Record<string, number>;
+	providerAccountPolicies?: Record<
+		string,
+		Record<string, Omit<GatewayProviderAccount, "id">>
+	>;
+	providerAccountStrategies?: Record<string, GatewayAccountStrategy>;
 	/**
 	 * Ryu's user-level routing config (persisted; takes effect after gateway restart).
 	 * Runs before any upstream provider routing — this is the governance layer. PUT
@@ -1740,7 +2052,43 @@ export const DEFAULT_SMART_ROUTING: SmartRoutingConfig = {
 	default_model: null,
 	cache_by_session: true,
 	timeout_ms: 4000,
+	allowed_models: [],
+	allowed_providers: [],
+	agent_pools: {},
+	agent_routes: {},
 };
+
+/**
+ * The auto-routing pool: which models and providers automatic model routing may
+ * pick. Both lists must match; an empty list does not constrain. The gateway's
+ * global `smart_routing` pool is the ceiling and a per-agent pool
+ * (`smart_routing.agent_pools`) can only narrow it.
+ */
+export interface RoutePool {
+	allowed_models: string[];
+	allowed_providers: string[];
+}
+
+/** Split a comma- or newline-separated pool field into trimmed, unique entries. */
+export function parsePoolList(text: string): string[] {
+	const entries = text
+		.split(/[\n,]/)
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+	return [...new Set(entries)];
+}
+
+/** Render a pool list back into its editable comma-separated form. */
+export function formatPoolList(entries: readonly string[] | undefined): string {
+	return (entries ?? []).join(", ");
+}
+
+/** Whether a pool constrains nothing. */
+export function isOpenRoutePool(pool: RoutePool): boolean {
+	return (
+		pool.allowed_models.length === 0 && pool.allowed_providers.length === 0
+	);
+}
 
 /**
  * Shape used only when a 2xx arrives with no `routing` section at all. It
@@ -1865,19 +2213,95 @@ export function withModalityMapping(
 	modality: Modality,
 	mapping: { model?: string; provider: string } | null
 ): GatewayRoutingConfig {
-	const next: Partial<Record<Modality, ModalityMapping>> = {
-		...(routing.modality_map ?? {}),
+	const next: GatewayRoutingConfig["modality_map"] = {
+		...routing.modality_map,
 	};
 	if (mapping === null) {
 		delete next[modality];
 	} else {
 		const model = mapping.model?.trim() ?? "";
-		next[modality] = {
-			provider: mapping.provider.trim(),
-			...(model ? { model } : {}),
-		};
+		const entry: ModalityMapping = { provider: mapping.provider.trim() };
+		if (model) {
+			entry.model = model;
+		}
+		next[modality] = entry;
 	}
 	return { ...routing, modality_map: next };
+}
+
+/**
+ * Rebuild the routing card's draft-plus-Save edits onto a FRESH routing read.
+ * `PUT /v1/config { routing }` replaces the whole section, and the card's draft
+ * is loaded once, so sending it as-is would revert whatever another surface
+ * saved in the meantime (Smart Routing, eval routing, cost tiers, model map).
+ *
+ * Only what the draft changed relative to `base` (the copy it was loaded from)
+ * is applied: the default provider, the fallback chain, and individual provider
+ * tiers. Everything else, including unknown future keys, comes from `fresh`.
+ */
+export function withRoutingDraftEdits(
+	fresh: GatewayRoutingConfig,
+	base: GatewayRoutingConfig,
+	draft: GatewayRoutingConfig
+): GatewayRoutingConfig {
+	const next: GatewayRoutingConfig = { ...fresh };
+	if (draft.default_provider !== base.default_provider) {
+		next.default_provider = draft.default_provider;
+	}
+	const chainChanged =
+		draft.fallback_chain.length !== base.fallback_chain.length ||
+		draft.fallback_chain.some(
+			(provider, index) => provider !== base.fallback_chain[index]
+		);
+	if (chainChanged) {
+		next.fallback_chain = [...draft.fallback_chain];
+	}
+	const tierEdits = Object.entries(draft.provider_tiers ?? {}).filter(
+		([provider, tier]) => base.provider_tiers?.[provider] !== tier
+	);
+	if (tierEdits.length > 0) {
+		next.provider_tiers = {
+			...fresh.provider_tiers,
+			...Object.fromEntries(tierEdits),
+		};
+	}
+	return next;
+}
+
+/** JSON with object keys sorted, so map order from the gateway never matters. */
+function canonicalJson(value: unknown): string {
+	return JSON.stringify(value, (_key, inner: unknown) =>
+		inner && typeof inner === "object" && !Array.isArray(inner)
+			? Object.fromEntries(
+					Object.entries(inner).sort(([a], [b]) => a.localeCompare(b))
+				)
+			: inner
+	);
+}
+
+/**
+ * Whether `fresh` still holds the guardrail sections `base` was loaded with.
+ * The Guardrails Save replaces `firewall` and both overlay stores wholesale, so
+ * only a change to those is a real conflict for it. The config revision covers
+ * the whole file and also moves for unrelated saves (a provider key, routing),
+ * which must not throw away a guardrails draft.
+ */
+export function sameGuardrailSections(
+	base: GatewayConfig,
+	fresh: GatewayConfig
+): boolean {
+	return (
+		canonicalJson([
+			base.firewall,
+			base.firewall_org_overlays,
+			base.firewall_agent_overlays,
+		]) ===
+		canonicalJson([
+			fresh.firewall,
+			fresh.firewall_org_overlays,
+			fresh.firewall_agent_overlays,
+		])
+	);
 }
 
 /**
@@ -1890,9 +2314,14 @@ export async function fetchGatewayConfig(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<GatewayConfig> {
-	const raw = await request<GatewayConfig>(target, "/api/gateway/config", {
-		signal,
-	});
+	const raw = await request(
+		target,
+		"/api/gateway/config",
+		{
+			signal,
+		},
+		gatewayConfigResponseSchema
+	);
 	const routing = raw.routing ?? DEFAULT_ROUTING;
 	const budgets = raw.budgets ?? { users: {}, agents: {}, session: undefined };
 	const acp = raw.acp ?? DEFAULT_GATEWAY_ACP;
@@ -1900,7 +2329,7 @@ export async function fetchGatewayConfig(
 	// Guard the shared path: a 2xx always carries `firewall`, but this function
 	// backs several cards (budgets/keys/routing), so never let a missing section
 	// throw and take them all down.
-	const firewall = raw.firewall ?? ({} as GatewayFirewallConfig);
+	const firewall: Partial<GatewayFirewallConfig> = raw.firewall ?? {};
 	return {
 		...raw,
 		acp,
@@ -1939,9 +2368,14 @@ export async function fetchGatewayDoctor(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<GatewayDoctorReport> {
-	return request<GatewayDoctorReport>(target, "/api/gateway/doctor", {
-		signal,
-	});
+	return request<GatewayDoctorReport>(
+		target,
+		"/api/gateway/doctor",
+		{
+			signal,
+		},
+		gatewayDoctorReportResponseSchema
+	);
 }
 
 /** Preview or apply Gateway-owned safe Doctor fixes through Core. */
@@ -1949,10 +2383,15 @@ export async function fixGatewayDoctor(
 	target: ApiTarget,
 	dryRun: boolean
 ): Promise<GatewayDoctorFixResult> {
-	return request<GatewayDoctorFixResult>(target, "/api/gateway/doctor/fix", {
-		body: { dryRun },
-		method: "POST",
-	});
+	return request<GatewayDoctorFixResult>(
+		target,
+		"/api/gateway/doctor/fix",
+		{
+			body: { dryRun },
+			method: "POST",
+		},
+		gatewayDoctorFixResultResponseSchema
+	);
 }
 
 /**
@@ -1972,14 +2411,14 @@ export async function fixGatewayDoctor(
  * without the key would otherwise throw inside a save handler.
  */
 function withResolvedInspectorModel<
-	T extends { inspector?: InspectorConfig | null },
+	T extends { inspector?: Partial<InspectorConfig> | null },
 >(section: T): T {
 	const inspector = section.inspector;
 	if (!inspector) {
 		return section;
 	}
-	const model =
-		typeof inspector.model === "string" ? inspector.model.trim() : "";
+	const parsedModel = z.string().safeParse(inspector.model);
+	const model = parsedModel.success ? parsedModel.data.trim() : "";
 	if (model !== "") {
 		return section;
 	}
@@ -2041,9 +2480,16 @@ function withResolvedOverlayStore(
  * unchanged (by identity), and no input object is ever mutated — these patches are
  * React draft state.
  */
-export function withResolvedInspectorModels(
-	patch: GatewayConfigPatch
-): GatewayConfigPatch {
+/** Legacy draft inputs may omit inspector fields before Gateway deserialization. */
+export type GatewayConfigPatchInput = Omit<GatewayConfigPatch, "firewall"> & {
+	firewall?: Omit<Partial<GatewayFirewallConfig>, "inspector"> & {
+		inspector?: Partial<InspectorConfig>;
+	};
+};
+
+export function withResolvedInspectorModels<T extends GatewayConfigPatchInput>(
+	patch: T
+): T {
 	const firewall = patch.firewall
 		? withResolvedInspectorModel(patch.firewall)
 		: undefined;
@@ -2062,12 +2508,17 @@ export function withResolvedInspectorModels(
 	if (!changed) {
 		return patch;
 	}
-	return {
-		...patch,
-		...(firewall ? { firewall } : {}),
-		...(orgOverlays ? { firewall_org_overlays: orgOverlays } : {}),
-		...(agentOverlays ? { firewall_agent_overlays: agentOverlays } : {}),
-	};
+	const resolved = { ...patch };
+	if (firewall) {
+		resolved.firewall = firewall;
+	}
+	if (orgOverlays) {
+		resolved.firewall_org_overlays = orgOverlays;
+	}
+	if (agentOverlays) {
+		resolved.firewall_agent_overlays = agentOverlays;
+	}
+	return resolved;
 }
 
 /**
@@ -2088,11 +2539,163 @@ export async function updateGatewayConfig(
 	patch: GatewayConfigPatch,
 	signal?: AbortSignal
 ): Promise<{ ok: boolean }> {
-	return request<{ ok: boolean }>(target, "/api/gateway/config", {
-		method: "PUT",
-		body: withResolvedInspectorModels(patch),
-		signal,
+	return request<{ ok: boolean }>(
+		target,
+		"/api/gateway/config",
+		{
+			method: "PUT",
+			body: withResolvedInspectorModels(patch),
+			signal,
+		},
+		updateGatewayConfigResponseSchema
+	);
+}
+
+/** Thrown when the gateway does not report `routing.smart_routing`. */
+export class SmartRoutingUnavailableError extends Error {
+	constructor() {
+		super(
+			"This gateway does not report smart routing, so it has no routing pools."
+		);
+		this.name = "SmartRoutingUnavailableError";
+	}
+}
+
+/** One agent's routing pool from the gateway config, or null when it has none. */
+export async function fetchAgentRoutePool(
+	target: ApiTarget,
+	agentId: string
+): Promise<RoutePool | null> {
+	const cfg = await fetchGatewayConfig(target);
+	if (!routingViewIncludesSmartRouting(cfg.routing)) {
+		throw new SmartRoutingUnavailableError();
+	}
+	return cfg.routing.smart_routing?.agent_pools?.[agentId] ?? null;
+}
+
+/**
+ * Set (or clear, for null or an open pool) one agent's routing pool. Reads the
+ * current routing and writes it back whole with only this agent's entry
+ * changed, because `PUT /v1/config` replaces the routing section wholesale.
+ * Refuses when the gateway does not serve `smart_routing`, so a fabricated
+ * default can never overwrite a hand-written config.
+ */
+export async function saveAgentRoutePool(
+	target: ApiTarget,
+	agentId: string,
+	pool: RoutePool | null
+): Promise<void> {
+	await updateSmartRouting(target, (current) => {
+		const agentPools = { ...(current.agent_pools ?? {}) };
+		if (pool === null || isOpenRoutePool(pool)) {
+			delete agentPools[agentId];
+		} else {
+			agentPools[agentId] = pool;
+		}
+		return { ...current, agent_pools: agentPools };
 	});
+}
+
+/**
+ * One agent's stored routing override (`smart_routing.agent_routes`), or null
+ * when it routes with the node's smart routing.
+ */
+export async function fetchAgentRouteOverride(
+	target: ApiTarget,
+	agentId: string
+): Promise<SmartRoutingConfig | null> {
+	const cfg = await fetchGatewayConfig(target);
+	if (!routingViewIncludesSmartRouting(cfg.routing)) {
+		throw new SmartRoutingUnavailableError();
+	}
+	return cfg.routing.smart_routing?.agent_routes?.[agentId] ?? null;
+}
+
+/**
+ * Set (or clear, for null) one agent's stored routing override. The gateway
+ * applies it to every request attributed to the agent, ACP agents included.
+ * Same read-merge-write and refusal rules as {@link saveAgentRoutePool}.
+ */
+export async function saveAgentRouteOverride(
+	target: ApiTarget,
+	agentId: string,
+	config: SmartRoutingConfig | null
+): Promise<void> {
+	await updateSmartRouting(target, (current) => {
+		const agentRoutes = { ...(current.agent_routes ?? {}) };
+		if (config === null) {
+			delete agentRoutes[agentId];
+		} else {
+			// An override's own per-agent maps are ignored by the gateway; keep
+			// them off the wire so the stored entry stays small.
+			const { agent_pools: _pools, agent_routes: _routes, ...own } = config;
+			agentRoutes[agentId] = own;
+		}
+		return { ...current, agent_routes: agentRoutes };
+	});
+}
+
+/** Attempts per save before a revision conflict is surfaced to the caller. */
+const SMART_ROUTING_SAVE_ATTEMPTS = 3;
+
+/** Tail of the in-flight smart-routing saves, per gateway target. */
+const smartRoutingSaveQueues = new Map<string, Promise<void>>();
+
+/**
+ * Read the gateway config, apply `mutate` to `routing.smart_routing`, and write
+ * the whole routing section back (`PUT /v1/config` replaces it wholesale).
+ * Refuses when the gateway does not serve `smart_routing`, so a fabricated
+ * default can never overwrite a hand-written config.
+ *
+ * Lost updates are prevented two ways. Saves to the same target run one after
+ * another, each reading the config the previous one wrote. Every write also
+ * carries the read's `expectedRevision`, so a write that lands in between
+ * (another window, or the Gateway dialog's own revision-checked save) makes the
+ * gateway answer 409; `mutate` only changes this caller's entry, so it is
+ * re-applied to a fresh read instead of overwriting the other change.
+ */
+function updateSmartRouting(
+	target: ApiTarget,
+	mutate: (current: SmartRoutingConfig) => SmartRoutingConfig
+): Promise<void> {
+	const key = target.url;
+	const previous = smartRoutingSaveQueues.get(key) ?? Promise.resolve();
+	const run = previous
+		.catch(() => undefined)
+		.then(() => writeSmartRouting(target, mutate));
+	const tail = run.catch(() => undefined);
+	smartRoutingSaveQueues.set(key, tail);
+	tail.then(() => {
+		if (smartRoutingSaveQueues.get(key) === tail) {
+			smartRoutingSaveQueues.delete(key);
+		}
+	});
+	return run;
+}
+
+async function writeSmartRouting(
+	target: ApiTarget,
+	mutate: (current: SmartRoutingConfig) => SmartRoutingConfig
+): Promise<void> {
+	for (let attempt = 1; ; attempt++) {
+		const cfg = await fetchGatewayConfig(target);
+		const current = cfg.routing.smart_routing;
+		if (!(routingViewIncludesSmartRouting(cfg.routing) && current)) {
+			throw new SmartRoutingUnavailableError();
+		}
+		try {
+			await updateGatewayConfig(target, {
+				routing: { ...cfg.routing, smart_routing: mutate(current) },
+				expectedRevision: cfg.configRevision ?? undefined,
+			});
+			return;
+		} catch (error) {
+			const conflict = error instanceof ApiError && error.status === 409;
+			if (!conflict || attempt >= SMART_ROUTING_SAVE_ATTEMPTS) {
+				throw error;
+			}
+		}
+	}
 }
 
 /**
@@ -2110,15 +2713,30 @@ export async function saveCustomEvaluators(
 	customEvaluators: Evaluator[],
 	signal?: AbortSignal
 ): Promise<void> {
-	await updateGatewayConfig(
+	const result = await updateGatewayConfig(
 		target,
 		{ custom_evaluators: customEvaluators },
 		signal
 	);
-	// Restart is load-bearing: the gateway reads custom_evaluators once at
-	// startup, so a saved evaluator stays invisible until the process respawns.
+	// Current gateways apply custom evaluators live and report
+	// `applied.restartRequired: false`. An older gateway that omits the receipt
+	// still reads them only at startup, so it is restarted as before.
 	// restartGateway never throws for the externally-managed / failure cases.
-	await restartGateway(target);
+	if (configUpdateNeedsRestart(result)) {
+		await restartGateway(target);
+	}
+}
+
+/** Whether a `PUT /api/gateway/config` receipt asks for a gateway restart. */
+export function configUpdateNeedsRestart(receipt: object): boolean {
+	if (!("applied" in receipt)) {
+		return true;
+	}
+	const applied = receipt.applied;
+	if (typeof applied !== "object" || applied === null) {
+		return true;
+	}
+	return !("restartRequired" in applied) || applied.restartRequired !== false;
 }
 
 /**
@@ -2161,19 +2779,218 @@ export async function deleteCustomEvaluator(
 // "gemini" is a BYOK slug rather than a gateway ProviderKind: the key is stored
 // in the genai backend's nested keys table ([providers.genai].keys.gemini) by
 // Core, so the gemini key flows to the `genai` provider.
-export type ByokProvider = "openai" | "anthropic" | "openrouter" | "gemini";
+export type ByokProvider =
+	| "openai"
+	| "anthropic"
+	| "openrouter"
+	| "gemini"
+	| "voyage"
+	| "jina"
+	| "mistral"
+	| "huggingface"
+	| "nvidia"
+	| "together"
+	| "fireworks"
+	| "qwen"
+	| "cohere"
+	| "deepgram"
+	| "assemblyai"
+	| "elevenlabs"
+	| "inworld"
+	| "modal"
+	| "replicate"
+	| "fal"
+	| "recraft"
+	| "stability"
+	| "bfl"
+	| "minimax"
+	| "runway"
+	| "topaz"
+	| `genai-${string}`;
+
+export interface GatewayProviderAccount {
+	drainThresholdPercent?: number | null;
+	enabled: boolean;
+	id: string;
+	name: string;
+	priority: number;
+	source?: "stored" | "environment" | "fleet";
+}
+
+export type GatewayProviderApplication =
+	| {
+			status: "applied" | "already_applied";
+			requestedRevision: string;
+			appliedRevision: string;
+			epoch: { boot: string; sequence: number };
+	  }
+	| { status: "superseded"; requestedRevision: string; currentRevision: string }
+	| {
+			status: "failed";
+			requestedRevision: string;
+			activeRevision?: string | null;
+			code: string;
+	  }
+	| { status: "offline" | "unmanaged"; requestedRevision: string };
+
+export interface GatewayProviderEditResult {
+	accountsApplied?: boolean;
+	configRevision?: string;
+	gateway_application?: GatewayProviderApplication;
+	gateway_outcome?: string;
+	gateway_restarted: boolean;
+	persisted?: boolean;
+	success: boolean;
+}
+
+export function applySavedGatewayProviderConnections(
+	target: ApiTarget,
+	revision: string
+): Promise<GatewayProviderEditResult> {
+	return request<GatewayProviderEditResult>(
+		target,
+		"/api/gateway/providers/apply",
+		{
+			method: "POST",
+			body: { revision },
+		},
+		gatewayProviderEditResultResponseSchema
+	);
+}
+
+export async function configureGatewayProviderAccount(
+	target: ApiTarget,
+	provider: ByokProvider,
+	account: GatewayProviderAccount,
+	expectedRevision?: string
+): Promise<void> {
+	const result = await request<GatewayProviderEditResult>(
+		target,
+		"/api/gateway/providers",
+		{
+			method: "PUT",
+			body: {
+				provider,
+				account_action: "configure",
+				expectedRevision,
+				accountId: account.id,
+				accountPolicy: {
+					drain_threshold_percent: account.drainThresholdPercent ?? null,
+					name: account.name,
+					enabled: account.enabled,
+					priority: account.priority,
+				},
+			},
+		},
+		gatewayProviderEditResultResponseSchema
+	);
+	requireGatewayProviderReload(result);
+}
+
+export async function setGatewaySdkConnection(
+	target: ApiTarget,
+	provider: ByokProvider,
+	options: {
+		apiKey?: string;
+		context?: GatewaySdkContext;
+		allowEnvironment?: boolean;
+		accountId?: string;
+		expectedRevision?: string;
+	}
+): Promise<void> {
+	const result = await request<GatewayProviderEditResult>(
+		target,
+		"/api/gateway/providers",
+		{
+			method: "PUT",
+			body: {
+				provider,
+				account_action: options.accountId ? "replace" : "set",
+				api_key: options.apiKey,
+				sdkContext: options.context,
+				allowEnvironment: options.allowEnvironment,
+				accountId: options.accountId,
+				expectedRevision: options.expectedRevision,
+			},
+		},
+		gatewayProviderEditResultResponseSchema
+	);
+	requireGatewayProviderReload(result);
+}
+
+export function requireGatewayProviderReload(
+	result: GatewayProviderEditResult
+): void {
+	const application = result.gateway_application;
+	if (application) {
+		switch (application.status) {
+			case "applied":
+			case "already_applied":
+				if (
+					application.requestedRevision !== application.appliedRevision ||
+					(result.configRevision &&
+						result.configRevision !== application.appliedRevision)
+				) {
+					throw new Error(
+						"Connection saved, but Gateway acknowledged a different configuration. Refresh the node before editing again."
+					);
+				}
+				return;
+			case "superseded":
+				throw new Error(
+					"Connection saved, but a newer configuration replaced it. Refresh the node before editing again."
+				);
+			case "offline":
+				throw new Error(
+					"Connection saved. Start your Gateway and refresh the node to apply it."
+				);
+			case "unmanaged":
+				throw new Error(
+					"Connection saved. Restart your externally managed Gateway to apply it."
+				);
+			case "failed":
+				throw new Error(
+					"Connection saved, but Gateway could not apply it. Refresh the node and check its status before retrying."
+				);
+			default: {
+				const exhaustive: never = application;
+				void exhaustive;
+				throw new Error(
+					"Gateway returned an unknown application result. Refresh the node before editing again."
+				);
+			}
+		}
+	}
+	if (result.gateway_restarted || result.accountsApplied) {
+		return;
+	}
+	if (result.gateway_outcome === "unmanaged") {
+		throw new Error(
+			"Connection saved. Restart your externally managed Gateway to apply it."
+		);
+	}
+	throw new Error(
+		"Connection saved, but Gateway restart did not finish. Check its status before retrying."
+	);
+}
 
 /** Set (or overwrite) a provider API key in the gateway config. */
 export async function setGatewayProvider(
 	target: ApiTarget,
 	provider: ByokProvider,
 	apiKey: string,
-	signal?: AbortSignal
-): Promise<{ success: boolean; gateway_restarted: boolean }> {
-	return request<{ success: boolean; gateway_restarted: boolean }>(
+	signal?: AbortSignal,
+	expectedRevision?: string
+): Promise<GatewayProviderEditResult> {
+	return request<GatewayProviderEditResult>(
 		target,
 		"/api/gateway/providers",
-		{ method: "PUT", body: { provider, api_key: apiKey }, signal }
+		{
+			method: "PUT",
+			body: { provider, api_key: apiKey, expectedRevision },
+			signal,
+		},
+		gatewayProviderEditResultResponseSchema
 	);
 }
 
@@ -2181,12 +2998,90 @@ export async function setGatewayProvider(
 export async function clearGatewayProvider(
 	target: ApiTarget,
 	provider: ByokProvider,
-	signal?: AbortSignal
-): Promise<{ success: boolean; gateway_restarted: boolean }> {
-	return request<{ success: boolean; gateway_restarted: boolean }>(
+	signal?: AbortSignal,
+	expectedRevision?: string
+): Promise<GatewayProviderEditResult> {
+	return request<GatewayProviderEditResult>(
 		target,
 		"/api/gateway/providers",
-		{ method: "PUT", body: { provider, api_key: null }, signal }
+		{
+			method: "PUT",
+			body: { provider, api_key: null, expectedRevision },
+			signal,
+		},
+		gatewayProviderEditResultResponseSchema
+	);
+}
+
+/** Replace the stored credential identified by its stable account ID. */
+export function replaceGatewayProviderAccount(
+	target: ApiTarget,
+	provider: ByokProvider,
+	accountId: string,
+	apiKey: string,
+	expectedRevision?: string
+): Promise<GatewayProviderEditResult> {
+	return request<GatewayProviderEditResult>(
+		target,
+		"/api/gateway/providers",
+		{
+			method: "PUT",
+			body: {
+				provider,
+				account_action: "replace",
+				accountId,
+				api_key: apiKey,
+				expectedRevision,
+			},
+		},
+		gatewayProviderEditResultResponseSchema
+	);
+}
+
+/** Add another credential to a provider's Gateway rotation set. */
+export async function addGatewayProviderAccount(
+	target: ApiTarget,
+	provider: ByokProvider,
+	apiKey: string,
+	expectedRevision?: string
+): Promise<GatewayProviderEditResult> {
+	return request<GatewayProviderEditResult>(
+		target,
+		"/api/gateway/providers",
+		{
+			method: "PUT",
+			body: {
+				provider,
+				api_key: apiKey,
+				account_action: "add",
+				expectedRevision,
+			},
+		},
+		gatewayProviderEditResultResponseSchema
+	);
+}
+
+/** Remove one credential by its index in the redacted Gateway account list. */
+export async function removeGatewayProviderAccount(
+	target: ApiTarget,
+	provider: ByokProvider,
+	accountIndex: number,
+	accountId?: string,
+	expectedRevision?: string
+): Promise<GatewayProviderEditResult> {
+	return request<GatewayProviderEditResult>(
+		target,
+		"/api/gateway/providers",
+		{
+			method: "PUT",
+			body: {
+				provider,
+				account_action: "remove",
+				expectedRevision,
+				...(accountId ? { accountId } : { account_index: accountIndex }),
+			},
+		},
+		gatewayProviderEditResultResponseSchema
 	);
 }
 
@@ -2234,7 +3129,10 @@ export async function registerByoaKey(
 	const existingKeys = cfg.auth?.api_keys ?? [];
 	const filtered = existingKeys.filter((k) => k.name !== entry.name);
 	const next = [...filtered, entry];
-	return updateGatewayConfig(target, { auth: { api_keys: next } });
+	return updateGatewayConfig(target, {
+		auth: { api_keys: next },
+		expectedRevision: cfg.configRevision ?? undefined,
+	});
 }
 
 /**
@@ -2246,7 +3144,10 @@ export async function removeByoaKey(
 ): Promise<{ ok: boolean }> {
 	const cfg = await fetchGatewayConfig(target);
 	const next = (cfg.auth?.api_keys ?? []).filter((k) => k.name !== name);
-	return updateGatewayConfig(target, { auth: { api_keys: next } });
+	return updateGatewayConfig(target, {
+		auth: { api_keys: next },
+		expectedRevision: cfg.configRevision ?? undefined,
+	});
 }
 
 // ── Live traffic (SSE via Core proxy) ────────────────────────────────────────
@@ -2263,26 +3164,73 @@ export interface TrafficEvent {
 	api_key: string;
 	/** Whether the gateway's own response cache answered. */
 	cache_hit: boolean;
+	command?: string | null;
+	/** A hosted credential id, truncated to its prefix. */
+	credential_id_prefix?: string | null;
+	/** Whose credential the request spent (`node_operator`, `ryu_vault`, ...). */
+	credential_origin?: string | null;
+	custody?: string | null;
 	/** Error message, when the request failed. */
 	error: string | null;
 	/** Event type — "model_call" for LLM calls. */
 	event_type: string;
 	/** Input tokens billed (0 on error). */
 	input_tokens: number;
+	/**
+	 * Which row of the request this is. This and the other optional verdict
+	 * feed fields (spec 07.2) are absent on older gateways.
+	 */
+	kind?: "completion" | "verdict" | "cache_hit" | "failure";
 	/** Wall-clock latency in milliseconds. */
 	latency_ms: number;
-	/** Model name as seen by the gateway. */
-	model: string;
+	/** Model name, absent for a direct service call. */
+	model: string | null;
+	org_id?: string | null;
 	/** Output tokens billed (0 on error). */
 	output_tokens: number;
 	/** Provider that served the request (e.g. "openai", "anthropic"). */
 	provider: string;
+	provider_cost_micro_usd?: number | null;
 	/** Gateway-internal request id. */
 	request_id: string;
+	/** The matched route template, never the raw path. */
+	route?: string | null;
+	/** Strictly increasing per gateway process; dedupes a reconnect replay. */
+	seq?: number;
+	service_usage?: {
+		requests: number;
+		documents: number;
+		provider_credits: number | null;
+		cost_source:
+			| "provider_reported"
+			| "configured_estimate"
+			| "unpriced"
+			| "unsettled";
+		cost_is_estimate: boolean;
+	} | null;
 	/** Core session/conversation id, when tagged. */
 	session_id: string | null;
+	stage_latency_ms?: { screen: number | null; upstream: number | null } | null;
+	/** HTTP status the client received, when known. */
+	status?: number | null;
+	team_ids?: string[] | null;
 	/** ISO-8601 timestamp when the event was published. */
 	ts: string;
+	/** What the deciding layer did. Names layers and codes, never text. */
+	verdict?: TrafficVerdict | null;
+}
+
+/** The redacted verdict summary on a traffic event (spec 00.6). */
+export interface TrafficVerdict {
+	action: "allow" | "warn" | "sanitize" | "block";
+	categories: string[];
+	code?: string | null;
+	decided_by: string;
+	/** Why the screener ran in a reduced mode, when it did. */
+	degraded?: string | null;
+	detector_ids: string[];
+	evaluator_ids: string[];
+	event_id?: string | null;
 }
 
 /**
@@ -2292,12 +3240,18 @@ export interface TrafficEvent {
  * down when the last subscriber unsubscribes. On gateway-down Core returns a
  * short `{ reachable: false }` JSON body instead of an SSE stream; the
  * subscription surfaces it as an error and closes (the caller reconnects via
- * its own retry loop).
+ * its own retry loop). A non-2xx answer also reports its HTTP `status`, so a
+ * caller can stop retrying a permission refusal (403) that a reconnect cannot
+ * change. `onOpen` fires once the stream is open, before any row arrives.
+ * `onEnd` fires when the stream closes cleanly (a gateway restart), so a
+ * caller that dedupes the replay can reconnect.
  */
 export function subscribeGatewayTraffic(
 	target: ApiTarget,
 	onEvent: (event: TrafficEvent) => void,
-	onError?: (message: string) => void
+	onError?: (message: string, detail?: { status: number }) => void,
+	onEnd?: () => void,
+	onOpen?: () => void
 ): () => void {
 	const url = apiUrl(target, "/api/gateway/traffic");
 	const controller = new AbortController();
@@ -2308,7 +3262,9 @@ export function subscribeGatewayTraffic(
 				signal: controller.signal,
 			});
 			if (!resp.ok) {
-				onError?.(`traffic feed returned ${resp.status}`);
+				onError?.(`traffic feed returned ${resp.status}`, {
+					status: resp.status,
+				});
 				return;
 			}
 			const contentType = resp.headers.get("content-type") ?? "";
@@ -2318,10 +3274,9 @@ export function subscribeGatewayTraffic(
 				const text = await resp.text().catch(() => "");
 				let message = "traffic feed unavailable";
 				try {
-					const parsed = JSON.parse(text) as {
-						error?: unknown;
-						reachable?: boolean;
-					};
+					const parsed = gatewayTrafficUnavailableSchema.parse(
+						JSON.parse(text)
+					);
 					if (parsed.error) {
 						message = `traffic feed: ${String(parsed.error)}`;
 					} else if (parsed.reachable === false) {
@@ -2339,6 +3294,7 @@ export function subscribeGatewayTraffic(
 				onError?.("traffic feed: no response body");
 				return;
 			}
+			onOpen?.();
 			const decoder = new TextDecoder();
 			let buffer = "";
 			try {
@@ -2356,25 +3312,18 @@ export function subscribeGatewayTraffic(
 						}
 						const frame = buffer.slice(0, idx);
 						buffer = buffer.slice(idx + 2);
-						const dataLine = frame
-							.split("\n")
-							.find((l) => l.startsWith("data:"))
-							?.slice(5)
-							.trim();
-						if (!dataLine || dataLine === "[DONE]") {
-							continue;
-						}
-						try {
-							const parsed = JSON.parse(dataLine) as TrafficEvent;
+						const parsed = parseTrafficFrame(frame);
+						if (parsed) {
 							onEvent(parsed);
-						} catch {
-							// Malformed frame — skip; the stream continues.
 						}
 					}
 				}
 			} finally {
 				await reader.cancel().catch(() => undefined);
 				reader.releaseLock();
+			}
+			if (!controller.signal.aborted) {
+				onEnd?.();
 			}
 		} catch (error) {
 			if (controller.signal.aborted) {
@@ -2406,6 +3355,10 @@ export interface AuditEntry {
 	api_key: string | null;
 	/** Gateway backend that performed an execution or control operation. */
 	backend: string | null;
+	/** Prompt tokens read from the provider cache, when reported upstream. */
+	cache_read_tokens?: number | null;
+	/** Prompt tokens written to the provider cache, when reported upstream. */
+	cache_write_tokens?: number | null;
 	/** Tool/command or control action, when applicable. */
 	command: string | null;
 	/**
@@ -2434,8 +3387,19 @@ export interface AuditEntry {
 	model: string | null;
 	/** Number of output tokens billed. */
 	output_tokens: number | null;
+	/** Gateway's provider prompt-cache policy result, when available. */
+	prompt_cache_outcome: string | null;
+	/** Provider-reported input tokens read from prompt cache; null means unreported. */
+	prompt_cache_read_tokens: number | null;
+	/** Provider-reported input tokens written to prompt cache; null means unreported. */
+	prompt_cache_write_tokens: number | null;
 	/** Provider used for the request (e.g. "openai", "anthropic"). */
 	provider: string | null;
+	/**
+	 * Background work tag (`x-ryu-purpose`). `null` for foreground or untagged
+	 * rows; absent from older Gateways that do not record it.
+	 */
+	purpose?: string | null;
 	/** Request correlation id carried by the gateway audit row. */
 	request_id: string;
 	/** Core session/conversation id for per-run correlation. */
@@ -2462,33 +3426,21 @@ export interface GatewayAuditResponse {
 	reachable: boolean;
 }
 
-/** Filters accepted by fetchGatewayAudit. */
-export interface GatewayAuditFilters {
-	/** Filter by the stable agent id attached by Core. */
-	agentId?: string;
-	/** Return only entries that have an error. */
-	errorsOnly?: boolean;
-	/** Filter by event discriminator (model_call, exec_call, and so on). */
-	eventType?: string;
-	/** Inclusive ISO timestamp lower bound. */
-	from?: string;
-	/** Maximum number of entries to return (gateway default: 100). */
-	limit?: number;
-	/** Filter by model provider. */
-	model?: string;
-	/** Filter by upstream provider. */
-	provider?: string;
-	/** Filter by Core session/conversation id. */
-	sessionId?: string;
-	/** Exclusive ISO timestamp upper bound. */
-	until?: string;
-	/** Filter by rendered widget instance correlation. */
-	widgetInstanceId?: string;
-}
+/**
+ * Core's `GET /api/gateway/audit` body. Core omits `count` on its
+ * gateway-down / audit-disabled fallback; fetchGatewayAudit defaults it.
+ */
+export type GatewayAuditWireResponse = Omit<GatewayAuditResponse, "count"> & {
+	count?: number;
+};
 
 /** One server-owned 15-minute usage aggregate. */
 export interface GatewayUsageRollupEvent {
 	agentSeconds: number;
+	/** Prompt tokens read from the provider cache; absent from older Gateways. */
+	cacheReadTokens?: number;
+	/** Prompt tokens written to the provider cache; absent from older Gateways. */
+	cacheWriteTokens?: number;
 	costMicroUsd: number | null;
 	errorCount: number;
 	feature: string | null;
@@ -2500,6 +3452,11 @@ export interface GatewayUsageRollupEvent {
 	nodeId: string | null;
 	outputTokens: number;
 	provider: string;
+	/**
+	 * Background work tag (`x-ryu-purpose`), `null` for foreground or untagged
+	 * calls, and absent from older Gateways.
+	 */
+	purpose?: string | null;
 	requestCount: number;
 	source: "byok" | "local" | "managed" | "self_hosted" | "unknown";
 	timestamp: string;
@@ -2526,93 +3483,26 @@ export interface GatewayUsageRollupFilters {
 	until: string;
 }
 
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNullableString(value: unknown): value is string | null {
-	return value === null || typeof value === "string";
-}
-
-function isNonNegativeInteger(value: unknown): value is number {
-	return Number.isSafeInteger(value) && typeof value === "number" && value >= 0;
-}
-
-function isNonNegativeNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function isUsageSource(
-	value: unknown
-): value is GatewayUsageRollupEvent["source"] {
-	return (
-		value === "byok" ||
-		value === "local" ||
-		value === "managed" ||
-		value === "self_hosted" ||
-		value === "unknown"
-	);
-}
-
-function isGatewayUsageRollupEvent(
-	value: unknown
-): value is GatewayUsageRollupEvent {
-	if (!isUnknownRecord(value)) {
-		return false;
-	}
-	return (
-		typeof value.timestamp === "string" &&
-		Number.isFinite(Date.parse(value.timestamp)) &&
-		typeof value.provider === "string" &&
-		typeof value.model === "string" &&
-		isNullableString(value.memberId) &&
-		isNullableString(value.nodeId) &&
-		isNullableString(value.feature) &&
-		isUsageSource(value.source) &&
-		isNonNegativeInteger(value.inputTokens) &&
-		isNonNegativeInteger(value.outputTokens) &&
-		isNonNegativeInteger(value.requestCount) &&
-		isNonNegativeInteger(value.errorCount) &&
-		isNonNegativeInteger(value.latencyTotalMs) &&
-		isNonNegativeInteger(value.latencySamples) &&
-		isNonNegativeNumber(value.agentSeconds) &&
-		(value.costMicroUsd === null || isNonNegativeInteger(value.costMicroUsd))
-	);
-}
-
-/**
- * Parse an untrusted canonical usage response at the HTTP boundary.
- *
- * Exported because the control-plane organization endpoint uses the same wire
- * contract as the local gateway endpoint.
- */
+/** Parse the canonical usage wire contract while preserving each event's identity. */
 export function parseGatewayUsageRollupResponse(
-	value: unknown
+	value: Parameters<typeof gatewayUsageWireSchema.parse>[0]
 ): GatewayUsageRollupResponse {
-	if (
-		!isUnknownRecord(value) ||
-		value.kind !== "rollup" ||
-		value.bucketSeconds !== 900 ||
-		!Array.isArray(value.events) ||
-		(value.reachable !== undefined && typeof value.reachable !== "boolean") ||
-		(value.status !== undefined && !isNonNegativeInteger(value.status))
-	) {
+	const parsed = gatewayUsageWireSchema.safeParse(value);
+	if (!parsed.success) {
 		throw new Error("Gateway usage rollup response was malformed.");
 	}
-	const events: GatewayUsageRollupEvent[] = [];
-	for (const event of value.events) {
-		if (!isGatewayUsageRollupEvent(event)) {
-			throw new Error("Gateway usage rollup response was malformed.");
-		}
-		events.push(event);
-	}
-	return {
+	const response: GatewayUsageRollupResponse = {
 		bucketSeconds: 900,
-		events,
+		events: parsed.data.events,
 		kind: "rollup",
-		...(value.reachable === undefined ? {} : { reachable: value.reachable }),
-		...(value.status === undefined ? {} : { status: value.status }),
 	};
+	if (parsed.data.reachable !== undefined) {
+		response.reachable = parsed.data.reachable;
+	}
+	if (parsed.data.status !== undefined) {
+		response.status = parsed.data.status;
+	}
+	return response;
 }
 
 /**
@@ -2659,7 +3549,12 @@ export async function fetchGatewayAudit(
 		qs.set("widget_instance_id", filters.widgetInstanceId);
 	}
 	const path = qs.size > 0 ? `/api/gateway/audit?${qs}` : "/api/gateway/audit";
-	const raw = await request<GatewayAuditResponse>(target, path, { signal });
+	const raw = await request<GatewayAuditWireResponse>(
+		target,
+		path,
+		{ signal },
+		rawStatusResponseSchema5
+	);
 	return {
 		reachable: raw.reachable ?? false,
 		entries: raw.entries ?? [],
@@ -2683,10 +3578,11 @@ export async function fetchGatewayUsageRollup(
 	if (filters.model) {
 		query.set("model", filters.model);
 	}
-	const value = await request<unknown>(
+	const value = await request(
 		target,
 		`/api/gateway/audit/usage?${query}`,
-		{ signal }
+		{ signal },
+		gatewayJsonValueSchema
 	);
 	return parseGatewayUsageRollupResponse(value);
 }
@@ -2728,6 +3624,14 @@ export interface BudgetSpend {
 	users: Record<string, number>;
 }
 
+/**
+ * Core's `GET /api/gateway/budget/spend` body. Core sends `limits: {}` on its
+ * gateway-down / non-2xx fallback; fetchBudgetSpend fills each member.
+ */
+export type BudgetSpendWireResponse = Omit<BudgetSpend, "limits"> & {
+	limits?: Partial<BudgetSpendLimits>;
+};
+
 /** Optional single-id filters for fetchBudgetSpend. */
 export interface BudgetSpendFilters {
 	/** Narrow the agents map to a single agent id. */
@@ -2764,7 +3668,12 @@ export async function fetchBudgetSpend(
 		qs.size > 0
 			? `/api/gateway/budget/spend?${qs}`
 			: "/api/gateway/budget/spend";
-	const raw = await request<BudgetSpend>(target, path, { signal });
+	const raw = await request<BudgetSpendWireResponse>(
+		target,
+		path,
+		{ signal },
+		rawStatusResponseSchema6
+	);
 	return {
 		reachable: raw.reachable ?? false,
 		currency: raw.currency ?? "USD",
@@ -2772,7 +3681,11 @@ export async function fetchBudgetSpend(
 		users: raw.users ?? {},
 		agents: raw.agents ?? {},
 		sessions: raw.sessions ?? {},
-		limits: raw.limits ?? { users: {}, agents: {}, session: 0 },
+		limits: {
+			users: raw.limits?.users ?? {},
+			agents: raw.limits?.agents ?? {},
+			session: raw.limits?.session ?? 0,
+		},
 	};
 }
 
@@ -2783,7 +3696,12 @@ export async function pruneGatewayAudit(target: ApiTarget): Promise<{
 	max_rows?: number | null;
 	retention_days?: number | null;
 }> {
-	return await request(target, "/api/gateway/audit/prune", { method: "POST" });
+	return await request(
+		target,
+		"/api/gateway/audit/prune",
+		{ method: "POST" },
+		rawStatusResponseSchema7
+	);
 }
 
 // ── Eval dataset runner (M4 / #180) ──────────────────────────────────────────
@@ -2794,7 +3712,7 @@ export async function pruneGatewayAudit(target: ApiTarget): Promise<{
 
 /** Promptfoo-compatible per-assertion controls. */
 export interface AssertionOptions {
-	config?: Record<string, unknown>;
+	config?: Record<string, GatewayJsonValue>;
 	metric?: string;
 	not?: boolean;
 	provider?: string;
@@ -2846,20 +3764,6 @@ export type Assertion =
 	| { kind: "context_faithfulness"; options?: AssertionOptions; rubric: string }
 	| { kind: "answer_relevance"; options?: AssertionOptions; rubric: string };
 
-/** Result of evaluating one assertion against a response. */
-export interface AssertionResult {
-	/** Human-readable explanation (matched text, regex error, judge verdict, …). */
-	detail: string;
-	/** False when a runtime/judge prerequisite was unavailable. */
-	executed?: boolean;
-	/** The assertion kind as the snake_case wire tag ("contains", "llm_judge", …). */
-	kind: string;
-	/** Whether this assertion passed. */
-	pass: boolean;
-	/** Confidence/quality in [0,1]. Deterministic kinds emit 1.0/0.0. */
-	score: number;
-}
-
 /** A single case in an eval dataset. */
 export interface EvalDatasetCase {
 	/** Assertions to evaluate against this case's response. */
@@ -2884,7 +3788,7 @@ export interface EvalDatasetCase {
 	/** Optional ordered chat turns; when present the gateway replays these. */
 	messages?: EvalMessage[];
 	/** Case metadata preserved in results and exports. */
-	metadata?: Record<string, unknown>;
+	metadata?: Record<string, GatewayJsonValue>;
 	/** Promptfoo-compatible per-case prompt/output options. */
 	options?: {
 		cache?: boolean;
@@ -2898,20 +3802,21 @@ export interface EvalDatasetCase {
 	prompt: string;
 	/** Optional per-case provider/model target. */
 	provider?: string;
+	/** Exact provider-reported row cost in micro-USD when the response omits it. */
+	provider_cost_micro_usd?: number;
+	/** Externally measured operation turnaround in milliseconds. */
+	provider_latency_ms?: number;
 	/** Precomputed provider output; skips a live provider call. */
 	provider_output?: unknown;
+	provider_output_policy_pass?: boolean;
+	/** Source label for a precomputed provider response. */
+	provider_output_provider?: string;
 	/** Optional per-case provider/model alternatives. */
 	providers?: string[];
 	/** Promptfoo-style threshold for the mean assertion score (0..1). */
 	threshold?: number;
 	/** Per-case {{var}} substitutions (prompt, system prompt, assertions). */
-	vars?: Record<string, unknown>;
-}
-
-/** One ordered chat turn in a Promptfoo-compatible case. */
-export interface EvalMessage {
-	content: string;
-	role: "assistant" | "system" | "user";
+	vars?: Record<string, GatewayJsonValue>;
 }
 
 /** Per-case scores returned by the gateway eval runner. */
@@ -2935,14 +3840,16 @@ export interface EvalCaseScore {
 	evaluators?: EvaluatorScore[];
 	id?: string;
 	input_tokens?: number;
+	latency_available?: boolean;
 	latency_ms?: number;
 	/** 1.0 = instant, 0.0 = at/beyond max_latency_ms. */
 	latency_score: number;
-	metadata?: Record<string, unknown>;
+	metadata?: Record<string, RyuJsonValue>;
 	model?: string;
 	output_tokens?: number;
 	/** Weighted aggregate for this case. Range [0, 1]. */
 	overall: number;
+	policy_available?: boolean;
 	/** Whether the request passed all firewall/policy checks. */
 	policy_pass: boolean;
 	prompt: string;
@@ -2956,7 +3863,7 @@ export interface EvalCaseScore {
 	/** Ratio output/input tokens clamped to [0,1]. */
 	token_efficiency: number;
 	total_tokens?: number;
-	vars?: Record<string, unknown>;
+	vars?: Record<string, RyuJsonValue>;
 }
 
 /** Aggregate summary across all eval cases. */
@@ -2968,12 +3875,14 @@ export interface EvalRunAggregate {
 	 * `executedCount`) even though the parent key is snake_case.
 	 */
 	evaluators?: Record<string, EvaluatorAggregate>;
+	latency_available_cases?: number;
 	mean_latency: number;
 	/** Mean overall score across all cases. Range [0, 1]. */
 	mean_overall: number;
 	/** Mean substring match across cases that had an expected value. null when none did. */
 	mean_substring_match: number | null;
 	mean_token_efficiency: number;
+	policy_available_cases?: number;
 	/** Fraction of cases where policy_pass was true. Range [0, 1]. */
 	policy_pass_rate: number;
 	total_cases: number;
@@ -3001,15 +3910,6 @@ export interface EvalRunResult {
 	run_id?: string;
 	started_at?: string;
 	tags?: Record<string, string>;
-}
-
-/** One bounded local security probe in a red-team campaign. */
-export interface RedTeamStrategyResult {
-	detail: string;
-	evaluator: string;
-	id: string;
-	name: string;
-	protected: boolean;
 }
 
 /** Response from POST /api/gateway/redteam/run (via Core's proxy). */
@@ -3043,7 +3943,7 @@ export interface RunEvalsRequest {
 	cache?: boolean;
 	/**
 	 * Custom Code evaluators. Pulled out by the Core proxy and run locally
-	 * (Deno for JS, sandbox for Python); their scores are merged into each
+	 * (Core's JS sandbox for JS, the sandbox backend for Python); their scores are merged into each
 	 * case's `evaluators` list. Their ids do NOT need to appear in `evaluators`.
 	 */
 	code_evaluators?: CodeEvaluatorSpec[];
@@ -3110,11 +4010,16 @@ export async function runGatewayEvals(
 	req: RunEvalsRequest = {},
 	signal?: AbortSignal
 ): Promise<EvalRunResult> {
-	return await request<EvalRunResult>(target, "/api/gateway/evals/run", {
-		method: "POST",
-		body: req,
-		signal,
-	});
+	return await request<EvalRunResult>(
+		target,
+		"/api/gateway/evals/run",
+		{
+			method: "POST",
+			body: gatewayJsonValueSchema.parse(req),
+			signal,
+		},
+		rawStatusResponseSchema8
+	);
 }
 
 /** Score a completed production output without replaying its provider call. */
@@ -3129,20 +4034,26 @@ export async function scoreGatewayOutput(
 		expected?: string;
 		id?: string;
 		latency_ms?: number;
-		metadata?: Record<string, unknown>;
+		metadata?: Record<string, GatewayJsonValue>;
 		model?: string;
+		policy_pass?: boolean;
 		prompt?: string;
 		response: unknown;
 		threshold?: number;
-		vars?: Record<string, unknown>;
+		vars?: Record<string, GatewayJsonValue>;
 	},
 	signal?: AbortSignal
 ): Promise<{ kind: "online_score"; score: EvalCaseScore; scored_at: string }> {
-	return await request(target, "/api/gateway/evals/score", {
-		method: "POST",
-		body: input,
-		signal,
-	});
+	return await request(
+		target,
+		"/api/gateway/evals/score",
+		{
+			method: "POST",
+			body: gatewayJsonValueSchema.parse(input),
+			signal,
+		},
+		rawStatusResponseSchema9
+	);
 }
 
 /**
@@ -3159,9 +4070,1132 @@ export async function runGatewayRedTeam(
 	},
 	signal?: AbortSignal
 ): Promise<RedTeamRunResult> {
-	return await request<RedTeamRunResult>(target, "/api/gateway/redteam/run", {
-		method: "POST",
-		body: input,
-		signal,
-	});
+	return await request<RedTeamRunResult>(
+		target,
+		"/api/gateway/redteam/run",
+		{
+			method: "POST",
+			body: gatewayJsonValueSchema.parse(input),
+			signal,
+		},
+		fetchClassifyWeightsPresentResponseSchema0
+	);
 }
+
+const gatewayConfigResponseSchema = retainValidatedResponse(
+	z
+		.object({
+			acp: z
+				.object({
+					active_agents: z.number().optional(),
+					auto_max_parallel_agents: z.number().optional(),
+					effective_max_parallel_agents: z.number().optional(),
+					hardware: z
+						.object({
+							cpu_cores: z.number(),
+							physical_cores: z.number(),
+							total_ram_bytes: z.number(),
+						})
+						.passthrough()
+						.optional(),
+					idle_timeout_minutes: z.number(),
+					keep_computer_awake: z.boolean(),
+					max_parallel_agents: z.union([z.number(), z.null()]),
+				})
+				.passthrough()
+				.nullish(),
+			appliedProviderRevision: z.union([z.string(), z.null()]).optional(),
+			auth: z
+				.object({
+					api_keys: z.array(
+						z
+							.object({
+								allowed_operations: z
+									.array(
+										z.union([
+											z.literal("inference"),
+											z.literal("web_search"),
+											z.literal("web_fetch"),
+										])
+									)
+									.optional(),
+								key: z.string(),
+								name: z.string(),
+								org_id: z.union([z.string(), z.null()]).optional(),
+								system_relay: z.boolean().optional(),
+								team_id: z.union([z.string(), z.null()]).optional(),
+								trusted_forwarder: z.boolean(),
+							})
+							.passthrough()
+					),
+					require_auth: z.boolean(),
+				})
+				.passthrough(),
+			budgets: z
+				.object({
+					agents: z.record(
+						z.string(),
+						z
+							.object({
+								action: z.union([
+									z.literal("notify"),
+									z.literal("downgrade"),
+									z.literal("restrict"),
+									z.literal("stop"),
+								]),
+								alert: z.enum(ALERT_TIERS).optional(),
+								downgrade_to: z.union([z.string(), z.null()]).optional(),
+								include: z
+									.object({
+										media: z.boolean(),
+										model: z.boolean(),
+										tools: z.boolean(),
+									})
+									.passthrough()
+									.optional(),
+								limit: z.number(),
+								restrict_max_tokens: z.number().optional(),
+							})
+							.passthrough()
+					),
+					session: z
+						.object({
+							action: z.union([
+								z.literal("notify"),
+								z.literal("downgrade"),
+								z.literal("restrict"),
+								z.literal("stop"),
+							]),
+							alert: z.enum(ALERT_TIERS).optional(),
+							downgrade_to: z.union([z.string(), z.null()]).optional(),
+							include: z
+								.object({
+									media: z.boolean(),
+									model: z.boolean(),
+									tools: z.boolean(),
+								})
+								.passthrough()
+								.optional(),
+							limit: z.number(),
+							restrict_max_tokens: z.number().optional(),
+						})
+						.passthrough(),
+					users: z.record(
+						z.string(),
+						z
+							.object({
+								action: z.union([
+									z.literal("notify"),
+									z.literal("downgrade"),
+									z.literal("restrict"),
+									z.literal("stop"),
+								]),
+								alert: z.enum(ALERT_TIERS).optional(),
+								downgrade_to: z.union([z.string(), z.null()]).optional(),
+								include: z
+									.object({
+										media: z.boolean(),
+										model: z.boolean(),
+										tools: z.boolean(),
+									})
+									.passthrough()
+									.optional(),
+								limit: z.number(),
+								restrict_max_tokens: z.number().optional(),
+							})
+							.passthrough()
+					),
+				})
+				.passthrough()
+				.partial()
+				.nullish(),
+			computer_use: z
+				.object({
+					locked_use: z.boolean(),
+					security_key: z.boolean().optional(),
+				})
+				.passthrough()
+				.nullish(),
+			configRevision: z.union([z.string(), z.null()]).optional(),
+			drift: z
+				.array(
+					z
+						.object({
+							code: z.string(),
+							message: z.string(),
+							severity: z.union([
+								z.literal("high"),
+								z.literal("medium"),
+								z.string(),
+							]),
+						})
+						.passthrough()
+				)
+				.optional(),
+			egress: z
+				.object({
+					assignments: z.record(z.string(), z.string()),
+					pools: z.record(
+						z.string(),
+						z
+							.object({
+								include_direct: z.boolean(),
+								direct_fallback_only: z.boolean().optional(),
+								endpoints: z.array(
+									z
+										.object({
+											id: z.string(),
+											url: z.string(),
+											enabled: z.boolean(),
+											priority: z.number().optional(),
+											username_env: z.union([z.string(), z.null()]),
+											password_env: z.union([z.string(), z.null()]),
+										})
+										.passthrough()
+								),
+							})
+							.passthrough()
+					),
+				})
+				.passthrough()
+				.optional(),
+			firewall: z
+				.intersection(
+					z
+						.object({
+							alert: z.enum(ALERT_TIERS).optional(),
+							custom_patterns: z
+								.array(
+									z
+										.object({
+											kind: z.union([
+												z.literal("pii"),
+												z.literal("secret"),
+												z.literal("prompt_injection"),
+											]),
+											name: z.string(),
+											regex: z.string(),
+										})
+										.passthrough()
+								)
+								.optional(),
+							enabled: z.boolean().optional(),
+							evaluators: z
+								.array(
+									z
+										.object({
+											enabled: z.boolean(),
+											id: z.string(),
+											inlineAction: z
+												.union([
+													z.union([
+														z.literal("block"),
+														z.literal("warn_and_continue"),
+														z.literal("sanitize"),
+													]),
+													z.null(),
+												])
+												.optional(),
+											locked: z.boolean().optional(),
+											offline: z
+												.union([
+													z
+														.object({
+															judgeModel: z
+																.union([z.string(), z.null()])
+																.optional(),
+															threshold: z.number(),
+														})
+														.passthrough(),
+													z.null(),
+												])
+												.optional(),
+										})
+										.passthrough()
+								)
+								.optional(),
+							inspector: z
+								.object({
+									action: z.union([
+										z.literal("block"),
+										z.literal("warn_and_continue"),
+										z.literal("sanitize"),
+									]),
+									enabled: z.boolean(),
+									min_chars: z.number(),
+									mode: z.union([
+										z.literal("injection"),
+										z.literal("dlp"),
+										z.literal("both"),
+									]),
+									model: z.string(),
+									timeout_ms: z.number(),
+								})
+								.passthrough()
+								.optional(),
+							locked_fields: z.array(z.string()).optional(),
+							log_detections: z.boolean().optional(),
+							policy: z
+								.union([
+									z.literal("block"),
+									z.literal("warn_and_continue"),
+									z.literal("sanitize"),
+								])
+								.optional(),
+							redact_pii: z.boolean().optional(),
+							redact_secrets: z.boolean().optional(),
+							scan_inbound: z.boolean().optional(),
+							scan_outbound: z.boolean().optional(),
+							wrap_untrusted_tool_results: z.boolean().optional(),
+						})
+						.passthrough(),
+					z
+						.object({
+							alert: z.enum(ALERT_TIERS),
+							custom_patterns: z.array(
+								z
+									.object({
+										kind: z.union([
+											z.literal("pii"),
+											z.literal("secret"),
+											z.literal("prompt_injection"),
+										]),
+										name: z.string(),
+										regex: z.string(),
+									})
+									.passthrough()
+							),
+							inspector: z
+								.object({
+									action: z.union([
+										z.literal("block"),
+										z.literal("warn_and_continue"),
+										z.literal("sanitize"),
+									]),
+									enabled: z.boolean(),
+									min_chars: z.number(),
+									mode: z.union([
+										z.literal("injection"),
+										z.literal("dlp"),
+										z.literal("both"),
+									]),
+									model: z.string(),
+									timeout_ms: z.number(),
+								})
+								.passthrough(),
+							locked_fields: z.array(z.string()),
+						})
+						.passthrough()
+						.partial()
+				)
+				.nullish(),
+			firewall_agent_overlays: z
+				.record(
+					z.string(),
+					z
+						.object({
+							alert: z.union([z.enum(ALERT_TIERS), z.null()]).optional(),
+							custom_patterns: z
+								.array(
+									z
+										.object({
+											kind: z.union([
+												z.literal("pii"),
+												z.literal("secret"),
+												z.literal("prompt_injection"),
+											]),
+											name: z.string(),
+											regex: z.string(),
+										})
+										.passthrough()
+								)
+								.optional(),
+							enabled: z.union([z.boolean(), z.null()]).optional(),
+							evaluators: z
+								.array(
+									z
+										.object({
+											enabled: z.boolean(),
+											id: z.string(),
+											inlineAction: z
+												.union([
+													z.union([
+														z.literal("block"),
+														z.literal("warn_and_continue"),
+														z.literal("sanitize"),
+													]),
+													z.null(),
+												])
+												.optional(),
+											locked: z.boolean().optional(),
+											offline: z
+												.union([
+													z
+														.object({
+															judgeModel: z
+																.union([z.string(), z.null()])
+																.optional(),
+															threshold: z.number(),
+														})
+														.passthrough(),
+													z.null(),
+												])
+												.optional(),
+										})
+										.passthrough()
+								)
+								.optional(),
+							inspector: z
+								.union([
+									z
+										.object({
+											action: z.union([
+												z.literal("block"),
+												z.literal("warn_and_continue"),
+												z.literal("sanitize"),
+											]),
+											enabled: z.boolean(),
+											min_chars: z.number(),
+											mode: z.union([
+												z.literal("injection"),
+												z.literal("dlp"),
+												z.literal("both"),
+											]),
+											model: z.string(),
+											timeout_ms: z.number(),
+										})
+										.passthrough(),
+									z.null(),
+								])
+								.optional(),
+							locked_fields: z.array(z.string()).optional(),
+							log_detections: z.union([z.boolean(), z.null()]).optional(),
+							policy: z
+								.union([
+									z.union([
+										z.literal("block"),
+										z.literal("warn_and_continue"),
+										z.literal("sanitize"),
+									]),
+									z.null(),
+								])
+								.optional(),
+							redact_pii: z.union([z.boolean(), z.null()]).optional(),
+							redact_secrets: z.union([z.boolean(), z.null()]).optional(),
+							scan_inbound: z.union([z.boolean(), z.null()]).optional(),
+							scan_outbound: z.union([z.boolean(), z.null()]).optional(),
+							wrap_untrusted_tool_results: z
+								.union([z.boolean(), z.null()])
+								.optional(),
+						})
+						.passthrough()
+				)
+				.nullish(),
+			firewall_org_overlays: z
+				.record(
+					z.string(),
+					z
+						.object({
+							alert: z.union([z.enum(ALERT_TIERS), z.null()]).optional(),
+							custom_patterns: z
+								.array(
+									z
+										.object({
+											kind: z.union([
+												z.literal("pii"),
+												z.literal("secret"),
+												z.literal("prompt_injection"),
+											]),
+											name: z.string(),
+											regex: z.string(),
+										})
+										.passthrough()
+								)
+								.optional(),
+							enabled: z.union([z.boolean(), z.null()]).optional(),
+							evaluators: z
+								.array(
+									z
+										.object({
+											enabled: z.boolean(),
+											id: z.string(),
+											inlineAction: z
+												.union([
+													z.union([
+														z.literal("block"),
+														z.literal("warn_and_continue"),
+														z.literal("sanitize"),
+													]),
+													z.null(),
+												])
+												.optional(),
+											locked: z.boolean().optional(),
+											offline: z
+												.union([
+													z
+														.object({
+															judgeModel: z
+																.union([z.string(), z.null()])
+																.optional(),
+															threshold: z.number(),
+														})
+														.passthrough(),
+													z.null(),
+												])
+												.optional(),
+										})
+										.passthrough()
+								)
+								.optional(),
+							inspector: z
+								.union([
+									z
+										.object({
+											action: z.union([
+												z.literal("block"),
+												z.literal("warn_and_continue"),
+												z.literal("sanitize"),
+											]),
+											enabled: z.boolean(),
+											min_chars: z.number(),
+											mode: z.union([
+												z.literal("injection"),
+												z.literal("dlp"),
+												z.literal("both"),
+											]),
+											model: z.string(),
+											timeout_ms: z.number(),
+										})
+										.passthrough(),
+									z.null(),
+								])
+								.optional(),
+							locked_fields: z.array(z.string()).optional(),
+							log_detections: z.union([z.boolean(), z.null()]).optional(),
+							policy: z
+								.union([
+									z.union([
+										z.literal("block"),
+										z.literal("warn_and_continue"),
+										z.literal("sanitize"),
+									]),
+									z.null(),
+								])
+								.optional(),
+							redact_pii: z.union([z.boolean(), z.null()]).optional(),
+							redact_secrets: z.union([z.boolean(), z.null()]).optional(),
+							scan_inbound: z.union([z.boolean(), z.null()]).optional(),
+							scan_outbound: z.union([z.boolean(), z.null()]).optional(),
+							wrap_untrusted_tool_results: z
+								.union([z.boolean(), z.null()])
+								.optional(),
+						})
+						.passthrough()
+				)
+				.nullish(),
+			marketplace_recommendations: z
+				.object({
+					cadence: z.union([
+						z.literal("daily"),
+						z.literal("weekly"),
+						z.literal("monthly"),
+					]),
+					enabled: z.boolean(),
+				})
+				.passthrough()
+				.optional(),
+			pipeline_stages: z.array(z.string()).optional(),
+			providerEpoch: z
+				.union([
+					z.object({ boot: z.string(), sequence: z.number() }).passthrough(),
+					z.null(),
+				])
+				.optional(),
+			providers: z
+				.object({
+					accountDrainThresholds: z.record(z.string(), z.number()).optional(),
+					accountStrategies: z
+						.record(
+							z.string(),
+							z.union([
+								z.literal("round_robin"),
+								z.literal("quota_first"),
+								z.literal("fill_first"),
+								z.literal("reset_first"),
+							])
+						)
+						.optional(),
+					accounts: z
+						.record(
+							z.string(),
+							z.array(
+								z
+									.object({
+										drainThresholdPercent: z
+											.union([z.number(), z.null()])
+											.optional(),
+										enabled: z.boolean(),
+										id: z.string(),
+										name: z.string(),
+										priority: z.number(),
+										source: z
+											.union([
+												z.literal("stored"),
+												z.literal("environment"),
+												z.literal("fleet"),
+											])
+											.optional(),
+									})
+									.passthrough()
+							)
+						)
+						.optional(),
+					anthropic: z.union([
+						z
+							.object({
+								api_key: z.string(),
+								api_key_count: z.number().optional(),
+								base_url: z.string(),
+							})
+							.passthrough(),
+						z.null(),
+					]),
+					assemblyai: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					bfl: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					cohere: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					compatible: z
+						.record(
+							z.string(),
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough()
+						)
+						.optional(),
+					core: z.union([
+						z
+							.object({ base_url: z.string(), has_token: z.boolean() })
+							.passthrough(),
+						z.null(),
+					]),
+					deepgram: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					elevenlabs: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					fal: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					genai: z.union([
+						z
+							.object({
+								gemini_account_count: z.number().optional(),
+								keys: z.array(z.string()),
+								sdk_providers: z
+									.array(
+										z
+											.object({
+												account_count: z.number(),
+												account_scope: z.union([
+													z.literal("openai"),
+													z.literal("anthropic"),
+													z.literal("openrouter"),
+													z.literal("gemini"),
+													z.literal("voyage"),
+													z.literal("jina"),
+													z.literal("mistral"),
+													z.literal("huggingface"),
+													z.literal("nvidia"),
+													z.literal("together"),
+													z.literal("fireworks"),
+													z.literal("qwen"),
+													z.literal("cohere"),
+													z.literal("deepgram"),
+													z.literal("assemblyai"),
+													z.literal("elevenlabs"),
+													z.literal("inworld"),
+													z.literal("modal"),
+													z.literal("replicate"),
+													z.literal("fal"),
+													z.literal("recraft"),
+													z.literal("stability"),
+													z.literal("bfl"),
+													z.literal("minimax"),
+													z.literal("runway"),
+													z.literal("topaz"),
+													z.templateLiteral(["genai-", z.string()]),
+												]),
+												accounts: z.array(
+													z
+														.object({
+															id: z.string(),
+															source: z.union([
+																z.literal("stored"),
+																z.literal("environment"),
+																z.literal("fleet"),
+															]),
+														})
+														.passthrough()
+												),
+												activation_error: z
+													.union([z.string(), z.null()])
+													.optional(),
+												auth_kind: z.union([
+													z.literal("api_key"),
+													z.literal("bearer_token"),
+													z.literal("no_auth"),
+												]),
+												brand: z.string(),
+												configured: z.boolean(),
+												context: z
+													.union([
+														z.union([
+															z
+																.object({ kind: z.literal("default") })
+																.passthrough(),
+															z
+																.object({
+																	kind: z.literal("vertex"),
+																	project: z.string(),
+																	location: z.string(),
+																})
+																.passthrough(),
+															z
+																.object({
+																	kind: z.literal("bedrock_api"),
+																	region: z.string(),
+																})
+																.passthrough(),
+															z
+																.object({
+																	kind: z.literal("ollama"),
+																	base_url: z.string(),
+																})
+																.passthrough(),
+														]),
+														z.null(),
+													])
+													.optional(),
+												context_kind: z.union([
+													z.literal("default"),
+													z.literal("vertex"),
+													z.literal("bedrock_api"),
+													z.literal("ollama"),
+												]),
+												kind: z.string(),
+												label: z.string(),
+												operations: z.array(
+													z.union([
+														z.literal("chat"),
+														z.literal("stream"),
+														z.literal("image"),
+													])
+												),
+												provider_id: z.string(),
+											})
+											.passthrough()
+									)
+									.optional(),
+							})
+							.passthrough(),
+						z.null(),
+					]),
+					google_tts: z
+						.union([
+							z
+								.object({ account_count: z.number(), mode: z.string() })
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					inworld: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					local: z.union([
+						z.object({ base_url: z.string() }).passthrough(),
+						z.null(),
+					]),
+					minimax: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					modal: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					openai: z.union([
+						z
+							.object({
+								api_key: z.string(),
+								api_key_count: z.number().optional(),
+								base_url: z.string(),
+							})
+							.passthrough(),
+						z.null(),
+					]),
+					openrouter: z.union([
+						z
+							.object({
+								api_key: z.string(),
+								api_key_count: z.number().optional(),
+								base_url: z.string(),
+							})
+							.passthrough(),
+						z.null(),
+					]),
+					polly: z
+						.union([
+							z
+								.object({
+									account_count: z.number(),
+									mode: z.string(),
+									region: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					recraft: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					replicate: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					runway: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					stability: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+					topaz: z
+						.union([
+							z
+								.object({
+									api_key: z.string(),
+									api_key_count: z.number().optional(),
+									base_url: z.string(),
+								})
+								.passthrough(),
+							z.null(),
+						])
+						.optional(),
+				})
+				.passthrough(),
+			routing: z
+				.object({
+					// Open `ProviderId` registry ids (gateway `RoutingView`), not the closed
+					// `ProviderKind` union: `modal`, `replicate`, `fal` and custom providers
+					// are valid routing targets.
+					default_provider: z.string(),
+					eval_routing: z
+						.object({
+							candidates: z.array(z.string()),
+							enabled: z.boolean(),
+							explore_ratio: z.number(),
+						})
+						.passthrough()
+						.optional(),
+					fallback_chain: z.array(z.string()),
+					modality_map: z
+						.partialRecord(
+							z.enum(MODALITIES),
+							z
+								.object({
+									model: z.union([z.string(), z.null()]).optional(),
+									provider: z.string(),
+								})
+								.passthrough()
+						)
+						.optional(),
+					model_map: z.record(
+						z.string(),
+						z
+							.object({
+								provider: z.string(),
+								provider_model: z.union([z.string(), z.null()]).optional(),
+							})
+							.passthrough()
+					),
+					provider_pools: z
+						.record(
+							z.string(),
+							z
+								.object({
+									auto_weights: z
+										.union([
+											z
+												.object({
+													quota: z.number(),
+													health: z.number(),
+													cost_inv: z.number(),
+													latency_inv: z.number(),
+													task_fit: z.number(),
+													stability: z.number(),
+													tier_priority: z.number(),
+													tier_affinity: z.number(),
+													specificity_match: z.number(),
+													context_affinity: z.number(),
+													cache_affinity: z.number(),
+													session_availability: z.number(),
+													reset_window_affinity: z.number(),
+													connection_density: z.number(),
+													quality: z.number(),
+													reliability: z.number(),
+												})
+												.passthrough()
+												.partial(),
+											z.null(),
+										])
+										.optional(),
+									execution: z
+										.object({
+											grace_ms: z.number(),
+											leg_timeout_ms: z.number(),
+											max_output_bytes: z.number(),
+											quorum: z.number(),
+											total_timeout_ms: z.number(),
+										})
+										.passthrough()
+										.optional(),
+									judge: z
+										.union([
+											z
+												.object({ provider: z.string(), model: z.string() })
+												.passthrough(),
+											z.null(),
+										])
+										.optional(),
+									members: z.array(
+										z
+											.object({
+												provider: z.string(),
+												model: z.string(),
+												priority: z.number(),
+												weight: z.number(),
+												enabled: z.boolean(),
+												last_resort: z.boolean().optional(),
+												context_tokens: z
+													.union([z.number(), z.null()])
+													.optional(),
+											})
+											.passthrough()
+									),
+									sticky_limit: z.number().optional(),
+									strategy: z.enum(PROVIDER_POOL_STRATEGIES),
+									wait_for_cooldown_ms: z.number().optional(),
+								})
+								.passthrough()
+						)
+						.optional(),
+					provider_tiers: z.record(z.string(), z.number()).optional(),
+					smart_routing: z
+						.object({
+							cache_by_session: z.boolean(),
+							classifier_model: z.string(),
+							default_model: z.union([z.string(), z.null()]).optional(),
+							embedding_model: z.string(),
+							enabled: z.boolean(),
+							escalation_confirmations: z.number().optional(),
+							escalation_judge_model: z.string().optional(),
+							escalation_message_chars: z.number().optional(),
+							escalation_recent_message_window: z.number().optional(),
+							escalation_strong_model: z.string().optional(),
+							escalation_weak_model: z.string().optional(),
+							random_seed: z.union([z.number(), z.null()]).optional(),
+							router_type: z
+								.union([
+									z.literal("llm_classifier"),
+									z.literal("passthrough"),
+									z.literal("random"),
+									z.literal("stage_router"),
+									z.literal("escalation"),
+								])
+								.optional(),
+							rules: z.array(
+								z
+									.object({
+										description: z.string(),
+										model: z.string(),
+										weight: z.number().optional(),
+									})
+									.passthrough()
+							),
+							similarity_threshold: z.number(),
+							stage_capable_model: z.string().optional(),
+							stage_confidence_threshold: z.number().optional(),
+							stage_efficient_model: z.string().optional(),
+							stage_picker: z
+								.union([
+									z.literal("capable_first"),
+									z.literal("efficient_first"),
+								])
+								.optional(),
+							stage_recent_message_window: z.number().optional(),
+							strategy: z.union([
+								z.literal("llm"),
+								z.literal("embedding"),
+								z.literal("keyword"),
+							]),
+							timeout_ms: z.number(),
+						})
+						.passthrough()
+						.optional(),
+				})
+				.passthrough()
+				.nullish(),
+			strategyCapabilities: z
+				.object({
+					chat: z.array(z.enum(PROVIDER_POOL_STRATEGIES)),
+					web: z.array(z.enum(PROVIDER_POOL_STRATEGIES)),
+				})
+				.passthrough()
+				.optional(),
+			tools: z
+				.object({
+					always_on: z.array(appJsonValueSchema),
+					describe_top_n: z.number(),
+					enabled: z.boolean(),
+					max_rounds: z.number(),
+					parallel_reads: z.number().optional(),
+					profiles: z.record(
+						z.string(),
+						z
+							.object({
+								allow: z.array(z.string()),
+								deny: z.array(z.string()),
+								unrestricted: z.boolean(),
+							})
+							.passthrough()
+					),
+				})
+				.passthrough()
+				.optional(),
+			webServiceSchema: z.literal(1).optional(),
+		})
+		.passthrough()
+);

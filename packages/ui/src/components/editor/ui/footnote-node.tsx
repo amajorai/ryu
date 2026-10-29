@@ -40,6 +40,10 @@ import {
 } from "platejs/react";
 import { type CSSProperties, useCallback, useState } from "react";
 
+interface FootnoteNavigationStyle extends CSSProperties {
+	"--plate-nav-feedback-duration"?: string | undefined;
+}
+
 const NUMERIC_FOOTNOTE_QUERY = /^\d+$/;
 
 const getNavigationAttributes = (
@@ -56,11 +60,11 @@ const getNavigationAttributes = (
 		: undefined,
 	"data-nav-target": navigationHighlight ? "true" : undefined,
 	style: {
-		...(attributes.style as CSSProperties | undefined),
+		...attributes.style,
 		["--plate-nav-feedback-duration" as const]: navigationHighlight
 			? `${navigationHighlight.duration}ms`
 			: undefined,
-	} as CSSProperties,
+	} satisfies FootnoteNavigationStyle,
 });
 
 const getFootnotePreviewLabel = (text?: string) => {
@@ -210,7 +214,7 @@ export function FootnoteReferenceElement(
 								</div>
 							) : (
 								<Button
-									className="h-6 rounded-xs px-2 text-[11px]"
+									className="type-caption h-6 rounded-xs px-2"
 									onMouseDown={(event) => {
 										event.preventDefault();
 										event.stopPropagation();
@@ -373,7 +377,7 @@ export function FootnoteDefinitionElement(
 					>
 						{duplicateReplacementIdentifier && path ? (
 							<Button
-								className="h-6 rounded-xs border-warning/40 px-2 text-[11px] text-status-warning hover:bg-warning/10 hover:text-status-warning"
+								className="type-caption h-6 rounded-xs border-warning/40 px-2 text-status-warning hover:bg-warning/10 hover:text-status-warning"
 								onClick={(event) => {
 									event.preventDefault();
 									event.stopPropagation();
@@ -473,7 +477,7 @@ export function FootnoteInputElement(props: PlateElementProps) {
 									<span className="font-mono text-muted-foreground">
 										[^{proposedIdentifier}]
 									</span>
-									<span className="truncate">: New footnote...</span>
+									<span className="truncate">: New footnote…</span>
 								</span>
 							</InlineComboboxItem>
 						) : null}

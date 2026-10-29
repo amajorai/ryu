@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { AuditEntry } from "@/src/lib/api/gateway.ts";
 import type {
 	OrganizationAuditEntry,
@@ -27,29 +28,31 @@ export interface PassportActivityRow {
 	timestamp: string;
 }
 
-const ACTION_LABELS: Record<string, string> = {
-	"agent.auth.account-remove": "Agent account removed",
-	"agent.auth.account-switch": "Agent account switched",
-	"agent.auth.login": "Agent authenticated",
-	"agent.auth.logout": "Agent signed out",
-	"agent.capabilities.update": "Agent capabilities changed",
-	"agent.create": "Agent created",
-	"agent.delete": "Agent deleted",
-	"agent.import": "Agent imported",
-	"agent.migrate": "Agent migrated",
-	"agent.prompt-version.create": "Prompt version saved",
-	"agent.prompt-version.restore": "Prompt version restored",
-	"agent.published.install": "Published agent installed",
-	"agent.runtime.update": "Agent runtime updated",
-	"agent.session.delete": "Agent session deleted",
-	"agent.session.load": "Agent session loaded",
-	"agent.setup.import": "Agent setup imported",
-	"agent.thread.import": "Agent thread imported",
-	"agent.update": "Agent configuration changed",
-	"gateway.doctor.fix": "Gateway safety fix applied",
-	"gateway.restart": "Gateway restarted",
-	"policy.update": "Policy updated",
-};
+const ACTION_LABELS = new Map(
+	Object.entries({
+		"agent.auth.account-remove": "Agent account removed",
+		"agent.auth.account-switch": "Agent account switched",
+		"agent.auth.login": "Agent authenticated",
+		"agent.auth.logout": "Agent signed out",
+		"agent.capabilities.update": "Agent capabilities changed",
+		"agent.create": "Agent created",
+		"agent.delete": "Agent deleted",
+		"agent.import": "Agent imported",
+		"agent.migrate": "Agent migrated",
+		"agent.prompt-version.create": "Prompt version saved",
+		"agent.prompt-version.restore": "Prompt version restored",
+		"agent.published.install": "Published agent installed",
+		"agent.runtime.update": "Agent runtime updated",
+		"agent.session.delete": "Agent session deleted",
+		"agent.session.load": "Agent session loaded",
+		"agent.setup.import": "Agent setup imported",
+		"agent.thread.import": "Agent thread imported",
+		"agent.update": "Agent configuration changed",
+		"gateway.doctor.fix": "Gateway safety fix applied",
+		"gateway.restart": "Gateway restarted",
+		"policy.update": "Policy updated",
+	})
+);
 
 function actionKey(action: string): string {
 	return action.split(":", 1)[0]?.trim() ?? action;
@@ -57,7 +60,7 @@ function actionKey(action: string): string {
 
 export function passportActionLabel(action: string): string {
 	const key = actionKey(action);
-	const known = ACTION_LABELS[key];
+	const known = ACTION_LABELS.get(key);
 	if (known) {
 		return known;
 	}
@@ -106,7 +109,7 @@ function detailsFromGateway(entry: {
 	feature: string | null;
 	inputTokens: number;
 	latencyMs: number;
-	model: string;
+	model?: string | null;
 	outputTokens: number;
 	provider: string;
 }): string {
@@ -138,6 +141,13 @@ function detailsFromGateway(entry: {
 	return parts.join(" · ") || "No additional metadata";
 }
 
+const controlDetailBooleanSchema = z.boolean();
+const controlDetailScalarSchema = z.union([
+	z.string(),
+	z.number(),
+	controlDetailBooleanSchema,
+]);
+
 function detailsFromControl(entry: OrganizationAuditEntry): string {
 	const parts: string[] = [];
 	if (entry.feature) {
@@ -147,11 +157,14 @@ function detailsFromControl(entry: OrganizationAuditEntry): string {
 		if (value === null || value === undefined) {
 			continue;
 		}
-		if (typeof value === "string" || typeof value === "number") {
-			parts.push(`${key}: ${value}`);
-		} else if (typeof value === "boolean") {
-			parts.push(`${key}: ${value ? "yes" : "no"}`);
+		const printable = controlDetailScalarSchema.safeParse(value);
+		if (!printable.success) {
+			continue;
 		}
+		const boolean = controlDetailBooleanSchema.safeParse(printable.data);
+		parts.push(
+			`${key}: ${boolean.success ? (boolean.data ? "yes" : "no") : String(printable.data)}`
+		);
 	}
 	if (entry.error) {
 		parts.push(`error: ${entry.error}`);

@@ -65,6 +65,7 @@ const MUST_NEVER_SYNC = [
 	"ryu_default_microphone",
 	"ryu_default_speaker",
 	"ryu_session_tabs",
+	"ryu_workbench_layout_v2",
 	"ryu_pinned_dock_tabs",
 	"ryu_client_id",
 	"ryu:analytics-install-id",
@@ -73,6 +74,9 @@ const MUST_NEVER_SYNC = [
 	"ryu:pinned-convs",
 	"ryu:unread-convs",
 	"ryu:auto-imported-thread-ids",
+	// Sealed with this device's key (content-seal.ts)
+	"ryu:bot-feed-engagement:v1",
+	"prompt-studio-tests:agent-1",
 	"ryu_picker_recents",
 	"ryu_desktop_onboarding_complete",
 	"ryu_onboarding_complete",

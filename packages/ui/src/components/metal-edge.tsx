@@ -1,9 +1,26 @@
 "use client";
 
 import { MetalFx } from "metal-fx";
+import type { CSSProperties } from "react";
 import { type ReactNode, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { isNativeNumber } from "../lib/native-primitive-observation.ts";
 import { cn } from "../lib/utils.ts";
+import drawingStyles from "./metal-edge.drawing.module.css";
+
+interface EdgeRailStyle extends CSSProperties {
+	"--metal-edge-1-height"?: string | undefined;
+	"--metal-edge-1-width"?: string | undefined;
+}
+interface EdgeRingStyle extends CSSProperties {
+	"--metal-edge-2-padding"?: string | undefined;
+}
+interface PlainRingStyle extends CSSProperties {
+	"--metal-edge-3-padding"?: string | undefined;
+}
+function drawingLength(value: CSSProperties["width"]): string | undefined {
+	return isNativeNumber(value) ? `${value}px` : value;
+}
 
 /**
  * The metal edge — one tuning of `metal-fx` (metal.jakubantalik.com), shared by
@@ -77,7 +94,7 @@ const METAL_WARMUP_MS = 1400;
 let keepAliveRoot: Root | null = null;
 
 function ensureKeepAlive(): void {
-	if (keepAliveRoot || typeof document === "undefined") {
+	if (keepAliveRoot || globalThis.document === undefined) {
 		return;
 	}
 	const host = document.createElement("div");
@@ -87,6 +104,10 @@ function ensureKeepAlive(): void {
 		"position:fixed;left:0;bottom:0;width:8px;height:6px;opacity:0.01;pointer-events:none;z-index:0";
 	document.body.appendChild(host);
 	keepAliveRoot = createRoot(host);
+	const edgeRailStyle: EdgeRailStyle = {
+		"--metal-edge-1-height": drawingLength(4),
+		"--metal-edge-1-width": drawingLength(6),
+	};
 	keepAliveRoot.render(
 		<MetalFx
 			borderRadius={2}
@@ -96,7 +117,7 @@ function ensureKeepAlive(): void {
 			theme="dark"
 			variant="button"
 		>
-			<div style={{ height: 4, width: 6 }} />
+			<div className={drawingStyles.edgeRail} style={edgeRailStyle} />
 		</MetalFx>
 	);
 }
@@ -186,11 +207,17 @@ export function MetalEdge({
 	// Before the ring exists the gutter is still drawn, so nothing shifts when it
 	// arrives — only the band goes from empty to chrome.
 	if (!mounted) {
+		const edgeRingStyle: EdgeRingStyle = {
+			"--metal-edge-2-padding": drawingLength(`${ringPx}px`),
+		};
 		return (
 			<div className={cn("w-full", className)}>
 				<div
-					className="flex h-full w-full flex-col text-foreground"
-					style={{ padding: `${ringPx}px` }}
+					className={cn(
+						"flex h-full w-full flex-col text-foreground",
+						drawingStyles.edgeRing
+					)}
+					style={edgeRingStyle}
 				>
 					{children}
 				</div>
@@ -198,6 +225,9 @@ export function MetalEdge({
 		);
 	}
 
+	const plainRingStyle: PlainRingStyle = {
+		"--metal-edge-3-padding": drawingLength(`${ringPx}px`),
+	};
 	return (
 		<MetalFx
 			borderRadius={borderRadius}
@@ -268,8 +298,11 @@ export function MetalEdge({
 			    field read as empty: the text was there, in white, on a pale fill.
 			    Children that set their own `text-*` still win. */}
 			<div
-				className="flex h-full w-full flex-col text-foreground"
-				style={{ padding: `${ringPx}px` }}
+				className={cn(
+					"flex h-full w-full flex-col text-foreground",
+					drawingStyles.plainRing
+				)}
+				style={plainRingStyle}
 			>
 				{children}
 			</div>

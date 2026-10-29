@@ -99,3 +99,80 @@ test("node extension host forwards async response chunks incrementally", async (
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+test("node extension host preserves native stream receivers and status accessor reads", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "ryu-host-reader-test-"));
+	const entry = join(dir, "backend.mjs");
+	await writeFile(
+		entry,
+		`export function activate(ctx) {
+		if (this !== undefined) throw new Error("activation receiver changed");
+		ctx.http.onRequest(() => {
+			let statusReads = 0;
+			let readerReads = 0;
+			const stream = {
+				get getReader() {
+					readerReads++;
+					return function () {
+						if (this !== stream) throw new Error("stream receiver changed");
+						let sent = false;
+						const reader = {
+							async read() {
+								if (this !== reader) throw new Error("reader receiver changed");
+								if (sent) return {done:true};
+								sent = true;
+								return {done:false,value: String(statusReads) + ":" + String(readerReads)};
+							},
+							releaseLock() {
+								if (this !== reader) throw new Error("lock receiver changed");
+								process.stderr.write("reader lock released\\n");
+							}
+						};
+						return reader;
+					};
+				}
+			};
+			return {get status() {statusReads++;return statusReads === 1 ? 201 : 202;}, stream};
+		});
+	}`,
+		"utf8"
+	);
+	const port = 49_500 + Math.floor(Math.random() * 500);
+	const child = spawn(process.execPath, [BOOTSTRAP.pathname], {
+		env: {
+			...process.env,
+			RYU_HOST_ENTRY: entry,
+			RYU_HOST_PORT: String(port),
+			RYU_EXT_PLUGIN_ID: "com.test.reader",
+			RYU_EXT_TOKEN: "test-token",
+		},
+		stdio: ["ignore", "ignore", "pipe"],
+	});
+	let stderr = "";
+	child.stderr?.on("data", (chunk) => {
+		stderr += chunk.toString();
+	});
+	try {
+		await waitForHealthy(port);
+		const denied = await fetch(`http://127.0.0.1:${port}/reader`);
+		assert.equal(denied.status, 401);
+		const response = await fetch(`http://127.0.0.1:${port}/reader`, {
+			headers: { authorization: "Bearer test-token" },
+		});
+		assert.equal(response.status, 202);
+		assert.equal(await response.text(), "2:2");
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		assert.match(stderr, /reader lock released/);
+	} finally {
+		child.kill("SIGTERM");
+		await Promise.race([
+			once(child, "exit"),
+			new Promise((resolve) => setTimeout(resolve, 500)),
+		]);
+		if (child.exitCode === null) {
+			child.kill("SIGKILL");
+			await once(child, "exit").catch(() => undefined);
+		}
+		await rm(dir, { recursive: true, force: true });
+	}
+});

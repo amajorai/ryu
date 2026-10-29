@@ -19,9 +19,7 @@ describe("normalizeConsentBlob", () => {
 		expect(normalizeConsentBlob({ chat: false }).chat).toBe(false);
 		expect(normalizeConsentBlob({ chat: true }).chat).toBe(true);
 		// Anything non-false keeps chat on.
-		expect(
-			normalizeConsentBlob({ chat: "no" as unknown as boolean }).chat
-		).toBe(true);
+		expect(normalizeConsentBlob({ chat: "no" }).chat).toBe(true);
 	});
 
 	it("keeps true/false tri-states and coerces everything else to null", () => {
@@ -31,8 +29,8 @@ describe("normalizeConsentBlob", () => {
 		);
 		expect(
 			normalizeConsentBlob({
-				contextRead: "yes" as unknown as boolean,
-				proactive: 1 as unknown as boolean,
+				contextRead: "yes",
+				proactive: 1,
 			})
 		).toEqual({ chat: true, contextRead: null, proactive: null });
 	});

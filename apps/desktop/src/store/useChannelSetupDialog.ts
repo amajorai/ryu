@@ -1,4 +1,4 @@
-import type { ChannelType } from "@ryu/blocks/desktop/channels";
+import type { ChannelType } from "@ryu/blocks/desktop/channels.tsx";
 import { create } from "zustand";
 
 export interface ChannelSetupRequest {

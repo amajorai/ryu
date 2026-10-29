@@ -51,35 +51,35 @@ export function microUsdToBudgetInput(microUsd: number): string {
 	return `${whole}.${String(fraction).padStart(6, "0").replace(/0+$/, "")}`;
 }
 
-export const ACTION_LABELS: Record<BudgetAction, string> = {
+export const ACTION_LABELS = {
 	notify: "Notify",
 	downgrade: "Downgrade",
 	restrict: "Restrict",
 	stop: "Stop (402)",
-};
+} satisfies Record<BudgetAction, string>;
 
-export const ACTION_DESCRIPTIONS: Record<BudgetAction, string> = {
+export const ACTION_DESCRIPTIONS = {
 	notify: "Allow but flag in metrics",
 	downgrade: "Switch to a cheaper model",
 	restrict: "Cap max_tokens and strip tools",
 	stop: "Reject with 402 budget_exceeded",
-};
+} satisfies Record<BudgetAction, string>;
 
 /** Short tier names, for inline summaries. */
-export const ALERT_TIER_LABELS: Record<GatewayAlertTier, string> = {
+export const ALERT_TIER_LABELS = {
 	silent: "Silent",
 	warn: "Warn",
 	fanout: "Fanout",
 	email: "Email",
-};
+} satisfies Record<GatewayAlertTier, string>;
 
 /** What each tier delivers, as a mid-sentence clause. */
-export const ALERT_TIER_DESCRIPTIONS: Record<GatewayAlertTier, string> = {
+export const ALERT_TIER_DESCRIPTIONS = {
 	silent: "No notification (default)",
 	warn: "In-app notification only",
 	fanout: "Webhook, Telegram, and mobile push",
 	email: "Email recipients only (instead of the fan-out channels)",
-};
+} satisfies Record<GatewayAlertTier, string>;
 
 /** `Label — clause` options, ascending in severity. */
 export const ALERT_TIER_OPTIONS: {
@@ -147,6 +147,6 @@ export function budgetRuleToForm(
 					downgrade_to: rule.downgrade_to ?? "",
 					restrict_max_tokens: String(rule.restrict_max_tokens ?? 256),
 				}
-			: {}),
+			: undefined),
 	};
 }

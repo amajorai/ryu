@@ -90,7 +90,7 @@ pub(crate) async fn host_egress_fetch(
                 axum::http::StatusCode::BAD_REQUEST,
                 Json(json!({ "error": message })),
             )
-                .into_response()
+                .into_response();
         }
     };
     let request_body = match body.body_base64 {
@@ -101,14 +101,14 @@ pub(crate) async fn host_egress_fetch(
                     axum::http::StatusCode::PAYLOAD_TOO_LARGE,
                     Json(json!({ "error": "request body is too large" })),
                 )
-                    .into_response()
+                    .into_response();
             }
             Err(_) => {
                 return (
                     axum::http::StatusCode::BAD_REQUEST,
                     Json(json!({ "error": "request body is not valid base64" })),
                 )
-                    .into_response()
+                    .into_response();
             }
         },
         None => None,

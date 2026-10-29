@@ -1,3 +1,13 @@
+// Type-only: the Island's sandboxed preload imports this module at runtime (for
+// `IPC`), and a sandboxed preload cannot `require` a package such as `zod`.
+import type { z } from "zod";
+import type { IslandSurfaceHostApi } from "./screen-surface.ts";
+
+/** JSON values carried across the Island IPC boundary. */
+export type IslandIpcValue = z.infer<ReturnType<typeof z.json>>;
+
+import type { NotchGeometry } from "./notch.ts";
+import type { IslandPlacement } from "./placement.ts";
 // Shared IPC type contract between the Electron main process and the renderer.
 //
 // U1 introduces the window-control channels (`win:*`) used by the morphing
@@ -10,12 +20,12 @@
 // file is the single source of truth for the channel names and payload shapes on
 // each side.
 
-import type { ViewContribution } from "@ryu/app-host/views";
+import type { RawViewContribution } from "@ryu/app-host/views";
 import type { LanguagePack } from "@ryu/i18n/core";
 
 // ── Window control (U1) ──────────────────────────────────────────────────────
 
-/** IPC channel names for window control. Renderer -> main, all fire-and-forget. */
+/** IPC channel names for window control. Fire-and-forget, renderer -> main unless noted. */
 export const WIN_CHANNELS = {
 	/**
 	 * Toggle whether the window captures mouse events. When `false` the window is
@@ -26,6 +36,8 @@ export const WIN_CHANNELS = {
 	/**
 	 * Begin a drag gesture: main shows the snap-zone overlay for the active
 	 * display. Sent on the first real pointer move so a plain click never snaps.
+	 * Main already knows the island footprint (from `setContentSize`), so the
+	 * gesture carries no geometry.
 	 */
 	dragStart: "win:dragStart",
 	/** Move the window by a pointer delta (manual drag of the pill region). */
@@ -33,12 +45,25 @@ export const WIN_CHANNELS = {
 	/** Snap to the nearest zone, persist, and hide the overlay when a drag ends. */
 	dragEnd: "win:dragEnd",
 	/**
-	 * Resize the window to wrap the visible island footprint, anchored at its
-	 * top-center. Only acted on in the `acrylic` appearance, where the window is
-	 * the island (a native OS material fills the whole window rectangle); the
-	 * `translucent` window stays at its fixed oversized panel size.
+	 * Report the visible island footprint. Main pins it to the island's anchor
+	 * (see `shared/placement.ts`) and shifts it to stay on-screen. In
+	 * native-material modes the window is resized to it and the accompanying
+	 * shapes clip the OS backdrop to each painted Island surface; the
+	 * `translucent` window keeps its fixed oversized size and only moves.
 	 */
 	setContentSize: "win:setContentSize",
+	/** Follow in-flight shape animations without resizing the native window. */
+	setMaterialShapes: "win:setMaterialShapes",
+	/**
+	 * Main -> renderer: the island's placement changed (it was docked somewhere
+	 * else), so the renderer must align its group to the new anchor corner.
+	 */
+	placement: "win:placement",
+	/**
+	 * Renderer -> main: the renderer has laid out a placement, so main can move
+	 * the fixed-size translucent window to match without a misaligned frame.
+	 */
+	placementApplied: "win:placementApplied",
 } as const;
 
 /** Payload for `win:setMouseCapture`. */
@@ -47,35 +72,27 @@ export interface SetMouseCapturePayload {
 	capture: boolean;
 }
 
-/**
- * Payload for `win:dragStart`: the visible island shape's bounds relative to the
- * window's content origin (CSS px, which equals DIP for the frameless window).
- * Main combines these with the window position so snapping aligns the *visible*
- * pill to a zone, not the oversized transparent window around it.
- */
-export interface DragStartPayload {
-	height: number;
-	width: number;
-	x: number;
-	y: number;
-}
-
 /** Payload for `win:moveBy`: a relative pixel delta from the drag pointer move. */
 export interface MoveByPayload {
 	dx: number;
 	dy: number;
 }
 
+/** A visible rounded Island surface, relative to the material window. */
+export interface IslandMaterialContour {
+	height: number;
+	radius: number;
+	width: number;
+	x: number;
+	y: number;
+}
+
 /** Payload for `win:setContentSize`: the visible island footprint in CSS px. */
 export interface ContentSizePayload {
-	/**
-	 * Whether this footprint is the expanded panel. The main process anchors an
-	 * expanded panel to the resting island and keeps it on-screen (flips upward at
-	 * the bottom edge, clamps at the sides), then restores the resting position on
-	 * collapse.
-	 */
+	/** Whether this footprint is the expanded panel. */
 	expanded: boolean;
 	height: number;
+	shapes: IslandMaterialContour[];
 	width: number;
 }
 
@@ -83,17 +100,36 @@ export interface ContentSizePayload {
 export interface IslandWinApi {
 	/** Signal drag completion so main snaps to a zone + persists the position. */
 	dragEnd(): void;
-	/** Signal drag start (with the island's rect) so main shows the snap overlay. */
-	dragStart(rect: DragStartPayload): void;
+	/** Signal drag start so main shows the snap overlay. */
+	dragStart(): void;
+	/**
+	 * Whether a click-through window still receives mouse moves (Electron's
+	 * `forward` option): true on macOS and Windows, false on Linux. Where it is
+	 * false the renderer never sees `pointerenter` while click-through, so it
+	 * hit-tests the polled cursor ({@link IslandWindowApi.onCursorMove}) instead.
+	 */
+	readonly forwardsMouseMoves: boolean;
+	/** Placement the window was created with (before any `onPlacement` event). */
+	initialPlacement: IslandPlacement;
 	/** Move the window by a relative delta during a manual drag. */
 	moveBy(dx: number, dy: number): void;
+	/** Subscribe to placement changes; returns an unsubscribe function. */
+	onPlacement(listener: (placement: IslandPlacement) => void): () => void;
+	/** Acknowledge that `placement` is now laid out (see `placementApplied`). */
+	placementApplied(placement: IslandPlacement): void;
 	/**
-	 * Report the visible island footprint (and whether it is the expanded panel)
-	 * so the main process can keep the island on-screen: the material window is
-	 * resized to the footprint, and an expanded panel in either appearance is
-	 * anchored to the resting island and clamped/flipped to stay on the display.
+	 * Report the visible island footprint (and whether it is the expanded panel).
+	 * Main pins it to the island's anchor and shifts it to stay on the display;
+	 * the material window is resized to the footprint.
 	 */
-	setContentSize(width: number, height: number, expanded: boolean): void;
+	setContentSize(
+		width: number,
+		height: number,
+		expanded: boolean,
+		contours: IslandMaterialContour[]
+	): void;
+	/** Clip the native backdrop to the shapes currently painted by the renderer. */
+	setMaterialShapes: (contours: IslandMaterialContour[]) => void;
 	/** Enable/disable mouse capture on the window (click-through toggle). */
 	setMouseCapture(capture: boolean): void;
 }
@@ -240,7 +276,7 @@ export interface PluginNotePart {
 /** Any unrecognized part still carries a string `type` discriminator. */
 export interface OtherPart {
 	type: string;
-	[key: string]: unknown;
+	[key: string]: IslandIpcValue;
 }
 
 export type CoreStreamPart =
@@ -299,7 +335,7 @@ export type CoreCompletionsResult =
 export interface CoreToolCallRequest {
 	/** Required by Core to resolve the per-agent allowlist. */
 	agent_id: string;
-	arguments: Record<string, unknown>;
+	arguments: Record<string, IslandIpcValue>;
 	tool: string;
 }
 
@@ -314,11 +350,26 @@ export interface CoreTranscribeRequest {
 	audio: ArrayBuffer;
 	/** Transcription engine (`"whisper"` | `"audiocpp"` | `"parakeet"`), the `?engine=` value. */
 	engine: string;
+	/** Optional transcription request options (see {@link CoreTranscribeOptions}). */
+	options?: CoreTranscribeOptions;
+}
+
+/** Optional per-request transcription options. */
+export interface CoreTranscribeOptions {
+	/** Also return Core's timed segments/words (`detail`). */
+	detailed?: boolean;
+	/** Multipart filename for the upload; defaults to `audio.wav`. */
+	filename?: string;
 }
 
 /** Result of a transcription request. Never rejects to the renderer. */
 export type CoreTranscribeResult =
-	| { available: true; text: string }
+	| {
+			available: true;
+			text: string;
+			/** Timed segments/words, present only when `detailed` was requested. */
+			detail?: import("@ryuhq/core-client/voice").TranscriptionDetail;
+	  }
 	| { available: false; reason: string };
 
 /** Request for Core's node-local Speech Processing cleanup stage. */
@@ -446,6 +497,8 @@ export type SidecarStartResult =
  *  companion `id`). */
 export interface PluginCompanion {
 	approvedGrants: string[];
+	coreGeneration?: number;
+	defaultCspEnforced: boolean;
 	hasUi: boolean;
 	icon: string | null;
 	id: string;
@@ -460,7 +513,7 @@ export interface PluginCompanion {
  *  {@link ViewContribution} — the island renders it host-side with
  *  `@ryu/blocks/island`'s `IslandViewPanel` (the Raycast tier, island idiom), exactly
  *  as the desktop renders the SAME spec full-size. Mirrors the desktop `PluginView`. */
-export type PluginView = ViewContribution;
+export type PluginView = RawViewContribution & { coreGeneration?: number };
 
 /** Result of the enabled-plugin contributions probe
  *  (`GET /api/plugins/contributions`). Never rejects to the renderer. Carries both the
@@ -472,7 +525,7 @@ export type PluginContributionsResult =
 /** Result of a plugin UI-bundle fetch (`GET /api/plugins/:id/ui-bundle`). `code`
  *  is null when the plugin has no bundle / is not enabled (Core answers 404). */
 export type PluginUiBundleResult =
-	| { available: true; code: string | null }
+	| { available: true; code: string | null; coreGeneration?: number }
 	| { available: false; reason: string };
 
 /** The closed error code the app host-bridge surfaces to a companion frame.
@@ -489,6 +542,7 @@ export type PluginHostErrorCode =
  *  `storage.*`); `args` is forwarded verbatim (already validated in `rpc.ts`). */
 export interface PluginHostInvokeRequest {
 	args: unknown;
+	coreGeneration?: number;
 	method: string;
 	pluginId: string;
 }
@@ -507,6 +561,7 @@ export type PluginHostInvokeResult =
  *  BEFORE this hop (`@ryu/app-host/views` `renderActionHttp`). */
 export interface PluginCoreHttpRequest {
 	body?: unknown;
+	coreGeneration?: number;
 	method: string;
 	path: string;
 }
@@ -519,6 +574,7 @@ export type PluginCoreHttpResult =
 
 /** Body to start a streaming host-bridge `agent.run` (renderer → main). */
 export interface PluginHostStreamStartRequest {
+	coreGeneration?: number;
 	input: unknown;
 	pluginId: string;
 }
@@ -564,6 +620,7 @@ export interface IslandPluginsApi {
 		listener: (event: PluginHostStreamEndEvent) => void
 	): () => void;
 	onShortcut(listener: (id: string) => void): () => void;
+	onSourceChanged(listener: () => void): () => void;
 	/** Start a streaming host-bridge `agent.run`. Chunks arrive on the
 	 *  `plugins:hostStreamChunk` event and a terminal `plugins:hostStreamEnd`
 	 *  event fires when the stream closes. */
@@ -678,7 +735,7 @@ export interface ProactiveSuggestion {
 	created_at: number;
 	disposition: SuggestionDisposition;
 	id: string;
-	metadata: Record<string, unknown>;
+	metadata: Record<string, IslandIpcValue>;
 	suggestion_type: string;
 	title: string;
 }
@@ -734,7 +791,10 @@ export type CaptureControlResult =
 // ── Suggestion engine (U3) ───────────────────────────────────────────────────
 
 /** Where a surfaced suggestion came from. */
-export type SuggestionSource = "local_model" | "shadow_proactive";
+export type SuggestionSource =
+	| "local_model"
+	| "shadow_proactive"
+	| "connect_event";
 
 /** A suggestion surfaced to the renderer by the engine. */
 export interface IslandSuggestion {
@@ -750,7 +810,7 @@ export interface IslandSuggestion {
 	id: string;
 	/** Origin of the suggestion. */
 	source: SuggestionSource;
-	/** Shadow `suggestion_type` when sourced from `/proactive`; else "context". */
+	/** Source-specific category; `context` for screen suggestions. */
 	suggestionType: string;
 	/** Short headline. */
 	title: string;
@@ -943,6 +1003,7 @@ export interface IslandSettingsPatch {
 export const IPC = {
 	appearance: {
 		get: "appearance:get",
+		notch: "appearance:notch",
 	},
 	consent: {
 		get: "consent:get",
@@ -985,6 +1046,7 @@ export const IPC = {
 	// process (CORS); the renderer's sandboxed-iframe host reaches Core only via
 	// these channels. `hostStreamChunk`/`hostStreamEnd` are main → renderer events.
 	plugins: {
+		sourceChanged: "plugins:sourceChanged",
 		contributions: "plugins:contributions",
 		uiBundle: "plugins:uiBundle",
 		uiBundleAbort: "plugins:uiBundleAbort",
@@ -1125,8 +1187,13 @@ export interface IslandCoreApi {
 	sidecarStart(name: string): Promise<SidecarStartResult>;
 	/** Read sidecar statuses. Never rejects. */
 	sidecarStatus(): Promise<SidecarStatusResult>;
-	/** Transcribe captured WAV audio with the given engine. Never rejects. */
-	transcribe(audio: ArrayBuffer, engine: string): Promise<CoreTranscribeResult>;
+	/** Transcribe captured WAV audio with the given engine. Never rejects. An
+	 *  empty engine lets Core choose its default. */
+	transcribe(
+		audio: ArrayBuffer,
+		engine: string,
+		options?: CoreTranscribeOptions
+	): Promise<CoreTranscribeResult>;
 }
 
 /**
@@ -1314,15 +1381,17 @@ export interface IslandThemeApi {
 }
 
 /**
- * Appearance methods exposed to the renderer. The value is the raw JSON string
- * of the shared island-appearance blob persisted in Core. The renderer reads it
- * on mount to pick its shape styling and (in the acrylic window) to report its
- * footprint; a change in the *window mode* recreates + reloads the window, so a
- * one-shot read on mount always reflects the current mode.
+ * Appearance methods exposed to the renderer. The value is an island-appearance
+ * JSON blob naming the Background main built the live window in (which can lag
+ * Core's value while a rebuild is pending). The renderer reads it on mount to
+ * pick its shape styling and (in the acrylic window) to report its footprint; a
+ * change in the *window mode* recreates + reloads the window, so a one-shot read
+ * on mount always reflects the current mode.
  */
 export interface IslandAppearanceApi {
-	/** Read the current appearance blob (raw JSON), or `null` if unset. */
+	/** Read the built window's appearance blob (JSON); `null` is read as the default. */
 	get(): Promise<string | null>;
+	notch(): Promise<NotchGeometry | null>;
 }
 
 /**
@@ -1436,6 +1505,8 @@ export interface IslandApi {
 	settings: IslandSettingsApi;
 	shadow: IslandShadowApi;
 	suggestions: IslandSuggestionsApi;
+	/** Drive the on-screen generative UI window (`shared/screen-surface.ts`). */
+	surface: IslandSurfaceHostApi;
 	system: IslandSystemApi;
 	theme: IslandThemeApi;
 	tts: IslandTtsApi;

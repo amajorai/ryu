@@ -1,4 +1,4 @@
-import { createWorkflowConnectClient } from "@ryuhq/core-client/composio-triggers";
+import { createWorkflowConnectClient } from "@ryuhq/core-client/composio-triggers.ts";
 import { request } from "./client.ts";
 
 // Keep Desktop's refreshing JWT/header transport; domain parsing stays shared.

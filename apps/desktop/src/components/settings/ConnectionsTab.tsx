@@ -7,11 +7,16 @@ import {
 	Unlink01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { SettingsIconTile } from "@ryu/blocks/desktop/settings-nav.tsx";
 import {
 	ACCOUNT_LINKING_PROVIDERS,
 	type LinkedAccountProvider,
 } from "@ryu/blocks/web/linked-account-providers.ts";
-import { DISCORD_SVGL, SvglIcon } from "@ryu/blocks/web/svgl-icon.tsx";
+import {
+	DISCORD_SVGL,
+	GITHUB_SVGL,
+	SvglIcon,
+} from "@ryu/blocks/web/svgl-icon.tsx";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -22,9 +27,9 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 	AlertDialogTrigger,
-} from "@ryu/ui/components/alert-dialog";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -32,26 +37,26 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import {
 	Tabs,
 	TabsContent,
 	TabsList,
 	TabsTrigger,
-} from "@ryu/ui/components/tabs";
+} from "@ryu/ui/components/tabs.tsx";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Github } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { WEB_URL } from "@/lib/app-urls.ts";
 import { authClient } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { ConnectDeviceQR } from "@/src/components/devices/ConnectDeviceQR.tsx";
+import { CloudSyncSection } from "@/src/components/settings/CloudSyncSection.tsx";
 import { NodeAccessSettings } from "@/src/components/settings/NodeAccessSettings.tsx";
+
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import {
 	type ApiTarget,
@@ -62,15 +67,6 @@ import {
 	type ConnectedClient,
 	fetchConnections,
 } from "@/src/lib/api/connections.ts";
-import {
-	getNodeAuthState,
-	type NodeAuthState,
-} from "@/src/lib/api/node-auth.ts";
-import {
-	DEFAULT_CLOUD_SYNC,
-	getCloudSyncEnabled,
-	setCloudSyncEnabled,
-} from "@/src/lib/api/preferences.ts";
 import {
 	connectionDisplayName,
 	connectionSurfaceMeta,
@@ -95,95 +91,39 @@ import {
 } from "./shared/settings-items.tsx";
 
 /**
- * The cross-device sync switch (M10). Writes Core's `cloud-sync-enabled` pref on
- * the ACTIVE node; Core's sync loop re-reads it every tick, so a flip takes effect
- * without a restart (`apps/core/src/server/sync.rs`).
- *
- * Two truths the copy must not paper over:
- *  - the loop also needs the NODE to be signed in (it no-ops as `Unauthenticated`
- *    otherwise), so we read the node's own auth status — not this window's session;
- *  - `RYU_SYNC_ENABLED` in the node's environment overrides the pref, so OFF here
- *    does not prove sync is off on a node that sets it.
+ * A list row's title: leading tile, the name, and an optional muted detail line
+ * under it. Use `detail` when the row's secondary text belongs inside the card;
+ * rows whose secondary text is an iOS footer pass it as `description` instead.
  */
-function CloudSyncSection() {
-	const activeNode = useActiveNode();
-	// Depend on the PRIMITIVES, not the node object: `getActiveNode` rebuilds its
-	// result whenever the node list is re-decorated, and a fresh object each render
-	// would refire the load effect — which opens with `setLoaded(false)`, so the
-	// switch would flicker disabled and refetch on every render. Same reasoning as
-	// PrivacySettings.
-	const target: ApiTarget = useMemo(
-		() => toTarget(activeNode),
-		[activeNode.url, activeNode.token]
-	);
-
-	const [enabled, setEnabled] = useState(DEFAULT_CLOUD_SYNC);
-	const [nodeAuth, setNodeAuth] = useState<NodeAuthState>(null);
-	const [loaded, setLoaded] = useState(false);
-
-	useEffect(() => {
-		let cancelled = false;
-		setLoaded(false);
-		Promise.all([getCloudSyncEnabled(target), getNodeAuthState(target)]).then(
-			([syncOn, auth]) => {
-				if (cancelled) {
-					return;
-				}
-				setEnabled(syncOn);
-				setNodeAuth(auth);
-				setLoaded(true);
-			}
-		);
-		return () => {
-			cancelled = true;
-		};
-	}, [target]);
-
-	const handleToggle = useCallback(
-		async (next: boolean) => {
-			setEnabled(next); // optimistic
-			const ok = await setCloudSyncEnabled(target, next);
-			if (!ok) {
-				// The write never landed — revert so the switch never shows a choice
-				// that wasn't saved.
-				setEnabled(!next);
-				sileo.error({
-					title: "Couldn't save your sync choice",
-					description: "Check your connection to this node and try again.",
-				});
-			}
-		},
-		[target]
-	);
-
-	// Fail OPEN on an unreadable status: only a node we KNOW is signed out blocks
-	// the switch, so an unreachable/older Core never locks the control.
-	const signedOut = nodeAuth === "signed-out";
-	const description = signedOut
-		? "Sign in on this node to sync across devices. Until then, syncing stays paused even when this is on."
-		: "Off by default. When on, this node mirrors your chats and editable Spaces documents to your Ryu account so your other devices can pick them up. Binary file attachments stay local. Takes effect within a minute, with no restart.";
-
+function RowTitle({
+	detail,
+	leading,
+	name,
+}: {
+	detail?: ReactNode;
+	leading: ReactNode;
+	name: ReactNode;
+}) {
 	return (
-		<SettingsSection
-			caption="Keep chats and Spaces documents in step across the devices signed in to your account. Everything stays on this device until you turn this on."
-			title="Cross-device sync"
-		>
-			<SettingsGroup>
-				<SettingsItem
-					actions={
-						<Switch
-							aria-label="Sync my chats and Spaces across devices"
-							checked={enabled}
-							disabled={!loaded || signedOut}
-							id="cloud-sync-enabled"
-							onCheckedChange={handleToggle}
-						/>
-					}
-					description={description}
-					title="Sync my chats and Spaces across devices"
-				/>
-			</SettingsGroup>
-		</SettingsSection>
+		<span className="flex min-w-0 items-center gap-2.5">
+			{leading}
+			<span className="min-w-0 flex-1">
+				<span
+					className="block truncate"
+					title={typeof name === "string" ? name : undefined}
+				>
+					{name}
+				</span>
+				{detail ? (
+					<span
+						className="mt-0.5 block truncate text-muted-foreground text-xs"
+						title={typeof detail === "string" ? detail : undefined}
+					>
+						{detail}
+					</span>
+				) : null}
+			</span>
+		</span>
 	);
 }
 
@@ -209,28 +149,13 @@ function ConnectedDeviceRow({
 	return (
 		<SettingsItem
 			actions={self ? <Badge variant="secondary">This device</Badge> : null}
-			description={
-				<span className="flex items-center gap-1.5">
-					<span>{surface.label}</span>
-					<span aria-hidden>·</span>
-					<span>{relativeLastSeen(client.lastSeen)}</span>
-				</span>
-			}
 			key={client.clientId}
 			title={
-				<span className="flex min-w-0 items-center gap-3">
-					<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-background">
-						<HugeiconsIcon className="size-4" icon={surface.icon} />
-					</span>
-					<span className="min-w-0 flex-1">
-						<span className="block truncate">
-							{connectionDisplayName(client)}
-						</span>
-						<span className="mt-0.5 block truncate text-muted-foreground text-xs">
-							{surface.label} · {relativeLastSeen(client.lastSeen)}
-						</span>
-					</span>
-				</span>
+				<RowTitle
+					detail={`${surface.label} · ${relativeLastSeen(client.lastSeen)}`}
+					leading={<SettingsIconTile icon={surface.icon} tint="blue" />}
+					name={connectionDisplayName(client)}
+				/>
 			}
 		/>
 	);
@@ -257,20 +182,33 @@ export function ConnectedDevicesSection() {
 			title="Connected devices"
 		>
 			{query.isLoading ? (
-				<div className="flex items-center gap-2 px-3 text-muted-foreground text-sm">
-					<Spinner className="size-4" />
-					Checking connected devices…
-				</div>
+				<SkeletonRows label="Checking connected devices…" spacing="panel" />
 			) : null}
 			{query.error ? (
-				<p className="px-3 text-muted-foreground text-sm">
-					Connected-device presence is unavailable on this node.
-				</p>
+				<SettingsCard className="flex items-center justify-between gap-3">
+					<p
+						className="text-muted-foreground text-sm"
+						title={query.error.message}
+					>
+						Connected-device presence is unavailable on this node.
+					</p>
+					<Button
+						aria-label="Retry connected device presence"
+						disabled={query.isFetching}
+						onClick={() => void query.refetch()}
+						size="sm"
+						variant="outline"
+					>
+						{query.isFetching ? "Retrying…" : "Retry"}
+					</Button>
+				</SettingsCard>
 			) : null}
 			{query.data && query.data.clients.length === 0 ? (
-				<p className="px-3 text-muted-foreground text-sm">
-					No other devices have connected recently.
-				</p>
+				<SettingsCard>
+					<p className="text-center text-muted-foreground text-sm">
+						No other devices have connected recently.
+					</p>
+				</SettingsCard>
 			) : null}
 			{query.data && query.data.clients.length > 0 ? (
 				<SettingsGroup>
@@ -352,12 +290,12 @@ function RemoteNodeDialog({
 						<Input
 							autoCapitalize="off"
 							autoCorrect="off"
-							className="font-mono text-xs"
 							disabled={saving}
 							id="remote-node-url"
 							onChange={(event) => setUrl(event.target.value)}
 							placeholder="https://server.example.com:7980"
 							value={url}
+							variant="code-caption"
 						/>
 					</div>
 					<div className="space-y-1.5">
@@ -365,13 +303,13 @@ function RemoteNodeDialog({
 						<Input
 							autoCapitalize="off"
 							autoCorrect="off"
-							className="font-mono text-xs"
 							disabled={saving}
 							id="remote-node-token"
 							onChange={(event) => setToken(event.target.value)}
 							placeholder="Paste a node token when required"
 							type="password"
 							value={token}
+							variant="code-caption"
 						/>
 					</div>
 					{error ? (
@@ -441,6 +379,12 @@ function RemoteNodesSection() {
 		<>
 			<SettingsSection
 				caption="Remote projects run on a connected Ryu node. The node keeps its files, Git credentials, and agent runtime; this device stores only its connection details."
+				headerAction={
+					<Button onClick={() => setAddOpen(true)} size="sm" variant="ghost">
+						<HugeiconsIcon className="size-4" icon={Add01Icon} />
+						Add remote
+					</Button>
+				}
 				title="Remote nodes"
 			>
 				{remoteNodes.length > 0 ? (
@@ -473,21 +417,19 @@ function RemoteNodesSection() {
 										</div>
 									}
 									description={
-										<span className="font-mono text-[11px]">{node.url}</span>
+										<span className="type-caption font-mono">{node.url}</span>
 									}
 									key={node.name}
 									title={
-										<span className="flex min-w-0 items-center gap-3">
-											<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-background">
-												<HugeiconsIcon
-													className="size-4"
+										<RowTitle
+											leading={
+												<SettingsIconTile
 													icon={CloudServerIcon}
+													tint="indigo"
 												/>
-											</span>
-											<span className="min-w-0 flex-1 truncate">
-												{node.name}
-											</span>
-										</span>
+											}
+											name={node.name}
+										/>
 									}
 								/>
 							);
@@ -495,29 +437,12 @@ function RemoteNodesSection() {
 					</SettingsGroup>
 				) : (
 					<SettingsCard>
-						<div className="flex flex-col items-center gap-3 py-6 text-center">
-							<HugeiconsIcon
-								className="size-7 text-muted-foreground/60"
-								icon={CloudServerIcon}
-							/>
-							<div>
-								<p className="font-medium text-sm">No remote nodes yet</p>
-								<p className="mt-1 text-muted-foreground text-xs">
-									Add a node to browse and work on another machine.
-								</p>
-							</div>
-						</div>
+						<p className="text-center text-muted-foreground text-sm">
+							No remote nodes yet. Add a node to browse and work on another
+							machine.
+						</p>
 					</SettingsCard>
 				)}
-				<Button
-					className="mt-3"
-					onClick={() => setAddOpen(true)}
-					size="sm"
-					variant="ghost"
-				>
-					<HugeiconsIcon className="mr-2 size-4" icon={Add01Icon} />
-					Add remote
-				</Button>
 			</SettingsSection>
 			<RemoteNodeDialog onOpenChange={setAddOpen} open={addOpen} />
 		</>
@@ -612,11 +537,11 @@ function SshConnectionDialog({
 						<Input
 							autoCapitalize="off"
 							autoCorrect="off"
-							className="font-mono text-xs"
 							id="ssh-connection-host"
 							onChange={(event) => setHost(event.target.value)}
 							placeholder="host.com or user@host.com"
 							value={host}
+							variant="code-caption"
 						/>
 					</div>
 					<div className="grid grid-cols-2 gap-3">
@@ -625,22 +550,22 @@ function SshConnectionDialog({
 							<Input
 								autoCapitalize="off"
 								autoCorrect="off"
-								className="font-mono text-xs"
 								id="ssh-connection-user"
 								onChange={(event) => setUsername(event.target.value)}
 								placeholder="Optional"
 								value={username}
+								variant="code-caption"
 							/>
 						</div>
 						<div className="space-y-1.5">
 							<Label htmlFor="ssh-connection-port">SSH port</Label>
 							<Input
-								className="font-mono text-xs"
 								id="ssh-connection-port"
 								inputMode="numeric"
 								onChange={(event) => setPort(event.target.value)}
 								placeholder="22"
 								value={port}
+								variant="code-caption"
 							/>
 						</div>
 					</div>
@@ -679,11 +604,11 @@ function SshConnectionDialog({
 							<Input
 								autoCapitalize="off"
 								autoCorrect="off"
-								className="font-mono text-xs"
 								id="ssh-connection-identity"
 								onChange={(event) => setIdentityFile(event.target.value)}
 								placeholder="~/.ssh/id_ed25519"
 								value={identityFile}
+								variant="code-caption"
 							/>
 						</div>
 					) : null}
@@ -746,6 +671,12 @@ function SshConnectionsSection() {
 		<>
 			<SettingsSection
 				caption="These profiles stay on this device and contain only connection metadata. Private keys remain in the identity-file location you choose."
+				headerAction={
+					<Button onClick={openAdd} size="sm" variant="ghost">
+						<HugeiconsIcon className="size-4" icon={Add01Icon} />
+						Add manually
+					</Button>
+				}
 				title="SSH connections from this device"
 			>
 				{connections.length > 0 ? (
@@ -772,7 +703,7 @@ function SshConnectionsSection() {
 									</div>
 								}
 								description={
-									<span className="flex min-w-0 flex-wrap gap-x-1.5 gap-y-0.5 font-mono text-[11px]">
+									<span className="type-caption flex min-w-0 flex-wrap gap-x-1.5 gap-y-0.5 font-mono">
 										<span>
 											{connection.username
 												? `${connection.username}@${connection.host}`
@@ -789,38 +720,22 @@ function SshConnectionsSection() {
 								}
 								key={connection.id}
 								title={
-									<span className="flex min-w-0 items-center gap-3">
-										<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-background">
-											<HugeiconsIcon className="size-4" icon={Link01Icon} />
-										</span>
-										<span className="min-w-0 flex-1 truncate">
-											{connection.name}
-										</span>
-									</span>
+									<RowTitle
+										leading={<SettingsIconTile icon={Link01Icon} tint="gray" />}
+										name={connection.name}
+									/>
 								}
 							/>
 						))}
 					</SettingsGroup>
 				) : (
 					<SettingsCard>
-						<div className="flex flex-col items-center gap-3 py-6 text-center">
-							<HugeiconsIcon
-								className="size-7 text-muted-foreground/60"
-								icon={Link01Icon}
-							/>
-							<div>
-								<p className="font-medium text-sm">No SSH connections yet</p>
-								<p className="mt-1 text-muted-foreground text-xs">
-									Add a profile for a host you use from this device.
-								</p>
-							</div>
-						</div>
+						<p className="text-center text-muted-foreground text-sm">
+							No SSH connections yet. Add a profile for a host you use from this
+							device.
+						</p>
 					</SettingsCard>
 				)}
-				<Button className="mt-3" onClick={openAdd} size="sm" variant="ghost">
-					<HugeiconsIcon className="mr-2 size-4" icon={Add01Icon} />
-					Add manually
-				</Button>
 			</SettingsSection>
 			<SshConnectionDialog
 				connection={editing}
@@ -832,12 +747,9 @@ function SshConnectionsSection() {
 	);
 }
 
-interface AccountInfo {
-	accountId: string;
-	createdAt: Date;
-	id: string;
-	providerId: string;
-}
+type AccountInfo = NonNullable<
+	Awaited<ReturnType<typeof authClient.listAccounts>>["data"]
+>[number];
 
 export function ConnectionsTab() {
 	const queryClient = useQueryClient();
@@ -853,7 +765,7 @@ export function ConnectionsTab() {
 			if (result.error) {
 				throw new Error(result.error.message);
 			}
-			return (result.data as unknown as AccountInfo[] | null) ?? [];
+			return result.data ?? [];
 		},
 	});
 
@@ -867,12 +779,13 @@ export function ConnectionsTab() {
 			const result = await authClient.linkSocial({
 				provider,
 				callbackURL: callbackUrl,
+				disableRedirect: true,
 			});
 			if (result.error) {
 				throw new Error(result.error.message);
 			}
 			// Open in browser for OAuth flow
-			const url = (result.data as { url?: string } | null)?.url;
+			const url = result.data?.url;
 			if (url) {
 				await openExternal(url);
 				sileo.success({
@@ -926,11 +839,7 @@ export function ConnectionsTab() {
 	};
 
 	if (isLoading) {
-		return (
-			<div className="flex items-center justify-center py-8">
-				<Spinner className="size-5" />
-			</div>
-		);
+		return <SkeletonRows spacing="section" />;
 	}
 
 	return (
@@ -939,29 +848,23 @@ export function ConnectionsTab() {
 			className="space-y-6"
 			data-testid="connections-hub"
 		>
-			<div>
-				<p className="font-mono text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
-					Connections
-				</p>
-				<h2 className="mt-2 font-medium text-2xl tracking-tight">
-					One place for every machine
-				</h2>
-				<p className="mt-1 max-w-xl text-muted-foreground text-sm">
-					Choose where projects run, approve devices, and keep SSH hosts close
-					at hand.
-				</p>
-			</div>
 			<Tabs defaultValue="this-device">
-				<TabsList className="w-full justify-start" variant="text">
+				<TabsList
+					aria-label="Connection scope"
+					className="grid w-full grid-cols-3"
+					manageLayout={false}
+					persistLayout={false}
+					variant="segmented"
+				>
 					<TabsTrigger value="this-device">Control this device</TabsTrigger>
 					<TabsTrigger value="other-devices">Control other devices</TabsTrigger>
 					<TabsTrigger value="ssh">SSH</TabsTrigger>
 				</TabsList>
-				<TabsContent className="space-y-6" value="this-device">
+				<TabsContent spacing="comfortable" value="this-device">
 					<NodeAccessSettings />
 					<ConnectedDevicesSection />
 					<SettingsSection
-						caption="Link individual social identities to this Ryu account. Social sign-in remains Google-only."
+						caption="Link individual social identities to this Ryu account. Social sign-in remains Google-only. Telegram Login is organization/channel-level, so it is not included here."
 						title="Linked accounts"
 					>
 						<SettingsGroup>
@@ -979,6 +882,7 @@ export function ConnectionsTab() {
 													<AlertDialogTrigger
 														render={
 															<Button
+																aria-label={`Unlink ${provider.label} account`}
 																disabled={unlinkingProvider !== null}
 																size="sm"
 																variant="ghost"
@@ -1017,6 +921,7 @@ export function ConnectionsTab() {
 												</AlertDialog>
 											) : (
 												<Button
+													aria-label={`Link ${provider.label} account`}
 													disabled={
 														linkingProvider !== null ||
 														unlinkingProvider !== null
@@ -1035,50 +940,49 @@ export function ConnectionsTab() {
 												</Button>
 											)
 										}
-										description={account ? "Connected" : provider.description}
 										key={provider.id}
 										title={
-											<span className="flex items-center gap-3">
-												<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-background">
-													{provider.id === "google" ? (
-														<HugeiconsIcon
-															className="size-4"
-															icon={GoogleIcon}
-														/>
-													) : provider.id === "github" ? (
-														<Github className="size-4" />
-													) : (
-														<SvglIcon size={16} spec={DISCORD_SVGL} />
-													)}
-												</span>
-												{provider.label}
-											</span>
+											<RowTitle
+												detail={account ? "Connected" : provider.description}
+												leading={
+													<span
+														aria-hidden="true"
+														className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-background"
+													>
+														{provider.id === "google" ? (
+															<HugeiconsIcon
+																className="size-4"
+																icon={GoogleIcon}
+															/>
+														) : provider.id === "github" ? (
+															<SvglIcon size={16} spec={GITHUB_SVGL} />
+														) : (
+															<SvglIcon size={16} spec={DISCORD_SVGL} />
+														)}
+													</span>
+												}
+												name={provider.label}
+											/>
 										}
 									/>
 								);
 							})}
 						</SettingsGroup>
-						<p className="px-3 text-muted-foreground text-xs">
-							Telegram Login is organization/channel-level, so it is not
-							included here.
-						</p>
 					</SettingsSection>
 					<SettingsSection
 						caption="Scan the QR code with the Ryu mobile app to connect your phone to this device."
 						title="Connect a phone"
 					>
-						<SettingsGroup>
-							<div className="px-4 py-4">
-								<ConnectDeviceQR />
-							</div>
-						</SettingsGroup>
+						<SettingsCard>
+							<ConnectDeviceQR />
+						</SettingsCard>
 					</SettingsSection>
 					<CloudSyncSection />
 				</TabsContent>
-				<TabsContent className="space-y-6" value="other-devices">
+				<TabsContent spacing="comfortable" value="other-devices">
 					<RemoteNodesSection />
 				</TabsContent>
-				<TabsContent className="space-y-6" value="ssh">
+				<TabsContent spacing="comfortable" value="ssh">
 					<SshConnectionsSection />
 				</TabsContent>
 			</Tabs>

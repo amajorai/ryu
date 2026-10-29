@@ -33,6 +33,7 @@ use std::{
     },
 };
 
+use ryu_sidecar_runtime::layout;
 use serde::{Deserialize, Serialize};
 
 pub mod api;
@@ -56,40 +57,32 @@ pub static SKILLS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // ── Data-dir seam (inverts `apps/core`'s `paths::ryu_dir()`) ─────────────────────
 //
-// Skills keep three kinds of Ryu-local state OUT of the shared skills dir: the
-// activation set (`skills-active.json`), managed source history (`source-history/`),
-// and the one-time legacy migration source (`~/.ryu/skills`). All of those live
-// under Ryu's own data folder, which Core owns and can relocate. Rather than depend on
-// `apps/core`, the crate reads the folder from a process-global set once at startup
-// by Core (`ryu_skills::set_data_dir(paths::ryu_dir())`), mirroring how the moved
-// `ryu_quests` engine is published via a `OnceLock`. When unset (crate-isolated
-// unit tests) it falls back to the same default Core computes: `$RYU_DIR` or
-// `~/.ryu`.
+// Skills keep Ryu-local state OUT of the shared skills dir: the activation set
+// (`state/skills-active.json`), version snapshots (`state/skill-versions/`) and
+// managed source history (`files/source-history/`). All of those live under
+// Ryu's own data folder, which Core owns and can relocate. Rather than depend on
+// `apps/core`, the crate reads the folder from a process-global set once at
+// startup by Core (`ryu_skills::set_data_dir(paths::ryu_dir())`), mirroring how
+// the moved `ryu_quests` engine is published via a `OnceLock`. When unset it falls
+// back to the same pointer- and profile-aware resolution every Ryu process uses
+// (`ryu_sidecar_runtime::ryu_dir`).
 
 static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Publish the Ryu data folder. Idempotent; a second call is ignored. Core calls
-/// this at startup **before** [`SkillRegistry::load`] so seeding + legacy migration
-/// resolve against the real (possibly relocated) `~/.ryu`, not the fallback.
+/// this at startup **before** [`SkillRegistry::load`] so seeding resolves against
+/// the real (possibly relocated) data dir, not the fallback.
 pub fn set_data_dir(dir: PathBuf) {
     let _ = DATA_DIR.set(dir);
 }
 
-/// The Ryu data folder. The value Core published, or — when unset — the same
-/// default Core would compute (`$RYU_DIR`, else the OS home's `.ryu`).
+/// The Ryu data folder. The value Core published, or — when unset — the shared
+/// resolver's answer (`RYU_DIR`, the Storage pointer, then the profile default).
 fn data_dir() -> PathBuf {
-    if let Some(d) = DATA_DIR.get() {
-        return d.clone();
-    }
-    if let Some(v) = std::env::var_os("RYU_DIR") {
-        let p = PathBuf::from(v);
-        if !p.as_os_str().is_empty() {
-            return p;
-        }
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".ryu")
+    DATA_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(ryu_sidecar_runtime::ryu_dir)
 }
 
 pub(crate) fn ryu_data_dir() -> PathBuf {
@@ -343,7 +336,7 @@ pub fn parse_skill_md(id: &str, content: &str) -> Result<SkillRecord, String> {
     // Split on the opening `---` delimiter.
     let (front_raw, body) = split_front_matter(content)?;
 
-    let fm: SkillFrontMatter = serde_yml::from_str(&front_raw)
+    let fm: SkillFrontMatter = noyalib::compat::serde_yaml::from_str(&front_raw)
         .map_err(|e| format!("YAML parse error in skill '{id}': {e}"))?;
 
     if fm.name.is_empty() {
@@ -427,11 +420,6 @@ fn agents_skills_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".agents")
         .join("skills")
-}
-
-/// The legacy flat skills directory Ryu used before standardizing: `~/.ryu/skills`.
-fn legacy_skills_dir() -> PathBuf {
-    crate::ryu_data_dir().join("skills")
 }
 
 /// A skill discovered on disk: its stable id and the path to its `SKILL.md`.
@@ -667,7 +655,7 @@ fn active_set_path() -> PathBuf {
     if let Some(p) = std::env::var_os("RYU_SKILLS_ACTIVE_FILE") {
         return PathBuf::from(p);
     }
-    crate::ryu_data_dir().join("skills-active.json")
+    layout::state_path(&crate::ryu_data_dir(), "skills-active.json")
 }
 
 /// Load the set of active skill ids (those injected on the default route).
@@ -718,87 +706,22 @@ pub fn set_active(id: &str, active: bool) {
     }
 }
 
-/// On first run after standardizing on the shared dir, seed the activation set
-/// from catalog provenance (skills installed *through Ryu*) plus anything still in
-/// the legacy flat dir — so previously-installed skills stay active without
+/// On first run, seed the activation set from catalog provenance (skills
+/// installed *through Ryu*) — so previously-installed skills stay active without
 /// auto-activating the dozens of skills other tools may have placed in the shared
 /// dir. A no-op once the set file exists.
 fn ensure_active_set_seeded() {
     if active_set_path().exists() {
         return;
     }
-    let provenance = crate::ryu_data_dir().join("skills-catalog-installed.json");
-    let mut set: HashSet<String> = std::fs::read_to_string(&provenance)
+    let provenance = layout::state_path(&crate::ryu_data_dir(), "skills-catalog-installed.json");
+    let set: HashSet<String> = std::fs::read_to_string(&provenance)
         .ok()
         .and_then(|s| serde_json::from_str::<std::collections::HashMap<String, String>>(&s).ok())
         .map(|m| m.into_keys().collect())
         .unwrap_or_default();
-    for found in scan_skill_dir(&legacy_skills_dir()) {
-        set.insert(found.id);
-    }
     if let Err(error) = save_active_set(&set) {
         tracing::error!(error = %error, "seeding skill activation store failed");
-    }
-}
-
-/// One-time, best-effort migration of legacy flat skills from `~/.ryu/skills/*.md`
-/// into the universal `~/.claude/skills/<id>/SKILL.md` layout, so every skill lives
-/// in the one standard location agents already read.
-///
-/// Additive and idempotent: it never overwrites an existing skill and never
-/// deletes the source (the legacy file stays as a backup). Skipped entirely when
-/// `RYU_SKILLS_DIR` is set, since that is an explicit override the user owns.
-fn migrate_legacy_skills() {
-    if std::env::var_os("RYU_SKILLS_DIR").is_some() {
-        return;
-    }
-    let legacy = legacy_skills_dir();
-    let dest_root = default_skills_dir();
-    let Ok(entries) = std::fs::read_dir(&legacy) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().map(|s| s.to_string_lossy().to_string()) else {
-            continue;
-        };
-        if stem.is_empty() {
-            continue;
-        }
-        // Legacy sibling docs were stored flat as `<id>__<name>.md`; map them back
-        // into the skill's own directory as `<name>.md`. The base skill becomes
-        // `<id>/SKILL.md`.
-        let (skill_id, dest_name) = match stem.split_once("__") {
-            Some((base, rest)) => (base.to_string(), format!("{rest}.md")),
-            None => (stem.clone(), "SKILL.md".to_string()),
-        };
-        let dest_dir = dest_root.join(&skill_id);
-        let dest = dest_dir.join(&dest_name);
-        if dest.exists() {
-            continue;
-        }
-        if std::fs::create_dir_all(&dest_dir).is_err() {
-            continue;
-        }
-        match std::fs::copy(&path, &dest) {
-            Ok(_) => {
-                tracing::info!(
-                    "migrated legacy skill {} -> {}",
-                    path.display(),
-                    dest.display()
-                );
-                // A migrated skill was a Ryu skill — keep it active by default.
-                if dest_name == "SKILL.md" {
-                    set_active(&skill_id, true);
-                }
-            }
-            Err(e) => {
-                tracing::warn!("migrating legacy skill {} failed: {e}", path.display());
-            }
-        }
     }
 }
 
@@ -806,8 +729,8 @@ fn migrate_legacy_skills() {
 
 /// Registry of installed agent skills.
 ///
-/// Skills are loaded from `~/.ryu/skills/*.md` (env-overridable via
-/// `RYU_SKILLS_DIR`). The registry is write-locked during hot-reload so reads
+/// Skills are loaded from `~/.claude/skills/` (env-overridable via
+/// `RYU_SKILLS_DIR`) plus the vendor-neutral `~/.agents/skills/`. The registry is write-locked during hot-reload so reads
 /// during a chat turn are always consistent.
 ///
 /// Core-vs-Gateway: the registry decides *which skills apply* (Core). Whether the
@@ -848,12 +771,9 @@ impl SkillRegistry {
     ///
     /// Mirrors [`crate::plugin_manifest::PluginManifestLoader`]'s pattern: built-in
     /// embedded first-party defaults, then user skills from `RYU_SKILLS_DIR` or the
-    /// universal `~/.claude/skills/` directory. A one-time, best-effort migration
-    /// lifts any legacy `~/.ryu/skills/*.md` files into the standard layout first
-    /// so every skill ends up in one place.
+    /// universal `~/.claude/skills/` directory.
     pub fn load() -> Self {
         ensure_active_set_seeded();
-        migrate_legacy_skills();
         builtin::install_defaults();
         let registry = Self::empty();
         registry.reload();

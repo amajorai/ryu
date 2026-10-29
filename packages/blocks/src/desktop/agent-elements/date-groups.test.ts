@@ -1,3 +1,4 @@
+import { requireTestValue } from "../test-required.ts";
 // packages/blocks/src/desktop/agent-elements/date-groups.test.ts
 //
 // The grouper decides where a separator is DRAWN, so its edge cases are all
@@ -80,8 +81,8 @@ describe("groupTurnsByDay", () => {
 		setTimezonePreference("UTC");
 		const groups = groupTurnsByDay([turnAt("2026-03-04T10:00:00.000Z")]);
 		expect(groups).toHaveLength(1);
-		expect(groups[0].startIndex).toBe(0);
-		expect(groups[0].dayKey).not.toBeNull();
+		expect(requireTestValue(groups[0], "day group 0").startIndex).toBe(0);
+		expect(requireTestValue(groups[0], "day group 0").dayKey).not.toBeNull();
 	});
 
 	it("opens a group at each day change and only there", () => {
@@ -130,8 +131,8 @@ describe("groupTurnsByDay", () => {
 			turnAt("2026-03-04T10:00:00.000Z"),
 		]);
 		expect(groups.map((g) => g.startIndex)).toEqual([0, 1]);
-		expect(groups[0].dayKey).toBeNull();
-		expect(groups[1].dayKey).not.toBeNull();
+		expect(requireTestValue(groups[0], "day group 0").dayKey).toBeNull();
+		expect(requireTestValue(groups[1], "day group 1").dayKey).not.toBeNull();
 		expect([...separatorKeyByTurnIndex(groups).keys()]).toEqual([1]);
 	});
 
@@ -143,7 +144,9 @@ describe("groupTurnsByDay", () => {
 			turnAt("2026-03-04T18:00:00.000Z"),
 		]);
 		expect(groups).toHaveLength(1);
-		expect(dayKeyAtTurnIndex(groups, 1)).toBe(groups[0].dayKey);
+		expect(dayKeyAtTurnIndex(groups, 1)).toBe(
+			requireTestValue(groups[0], "day group 0").dayKey
+		);
 	});
 
 	it("keeps a non-monotonic merged transcript in order, repeating a date", () => {
@@ -157,7 +160,9 @@ describe("groupTurnsByDay", () => {
 			turnAt("2026-03-04T11:00:00.000Z"),
 		]);
 		expect(groups.map((g) => g.startIndex)).toEqual([0, 1, 2]);
-		expect(groups[2].dayKey).toBe(groups[0].dayKey);
+		expect(requireTestValue(groups[2], "day group 2").dayKey).toBe(
+			requireTestValue(groups[0], "day group 0").dayKey
+		);
 	});
 
 	it("keeps a whole imported ACP thread in one group", () => {
@@ -252,4 +257,32 @@ describe("dayKeyAtTurnIndex", () => {
 		expect(dayKeyAtTurnIndex([{ dayKey: null, startIndex: 0 }], 4)).toBeNull();
 		expect(dayKeyAtTurnIndex([], 0)).toBeNull();
 	});
+});
+
+describe("transition-day transcript separators", () => {
+	for (const day of [
+		{
+			name: "spring",
+			before: "2026-03-08T06:30:00Z",
+			after: "2026-03-08T16:00:00Z",
+			start: "2026-03-08T05:00:00Z",
+		},
+		{
+			name: "autumn",
+			before: "2026-11-01T04:30:00Z",
+			after: "2026-11-01T17:00:00Z",
+			start: "2026-11-01T04:00:00Z",
+		},
+	]) {
+		it(`keeps New York's ${day.name} transition-day turns under one separator`, () => {
+			setTimezonePreference("America/New_York");
+			const beforeTransition = turnAt(day.before);
+			const afterTransition = turnAt(day.after);
+			expect(dayKeyOf(beforeTransition)).toBe(String(Date.parse(day.start)));
+			expect(dayKeyOf(afterTransition)).toBe(String(Date.parse(day.start)));
+			expect(groupTurnsByDay([beforeTransition, afterTransition])).toEqual([
+				{ dayKey: String(Date.parse(day.start)), startIndex: 0 },
+			]);
+		});
+	}
 });

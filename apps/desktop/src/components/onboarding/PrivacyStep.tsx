@@ -14,29 +14,21 @@
 // PrivacySettings: no analytics SDK, crash reporter, or OTLP exporter is wired
 // here.
 
-import {
-	Alert01Icon,
-	Clock01Icon,
-	Settings01Icon,
-	Shield01Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding";
-import { Button } from "@ryu/ui/components/button";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { toast } from "@ryu/ui/components/sileo";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import { Switch } from "@ryu/ui/components/switch";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { PageHeader } from "@ryu/ui/components/page-header.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { RyuOnboardingAvatar } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
 import {
 	acknowledgePrivacyDisclosure,
 	PRIVACY_DOCS_PATH,
 } from "@/src/components/settings/privacy-disclosure-state.ts";
 import {
-	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 } from "@/src/components/settings/shared/settings-items.tsx";
@@ -54,27 +46,6 @@ import {
 	setProductAnalyticsEnabled,
 } from "@/src/lib/api/preferences.ts";
 import { setCrashReportingEnabled } from "@/src/lib/crash.ts";
-
-const FINAL_ONBOARDING_NOTICES = [
-	{
-		description:
-			"With your approval, agents can send messages, update connected apps, and take actions on your behalf. Review each request before it runs.",
-		icon: Shield01Icon,
-		title: "Can take actions for you",
-	},
-	{
-		description:
-			"Active turns, scheduled workflows, and approved background runs can keep going after you close the window. Follow their status and stop them from Ryu.",
-		icon: Clock01Icon,
-		title: "Can keep working in the background",
-	},
-	{
-		description:
-			"Choose which apps to connect, what each agent can access, and which actions require your approval in Settings.",
-		icon: Settings01Icon,
-		title: "You stay in control",
-	},
-] as const;
 
 interface PrivacyStepProps {
 	/** Onboarding is finishing; the step locks so the user can't double-submit. */
@@ -101,8 +72,48 @@ export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 	const [crashReports, setCrashReports] = useState(true);
 	const [diagnosticsExport, setDiagnosticsExport] = useState(false);
 
+	const [readyTarget, setReadyTarget] = useState<ApiTarget | null>(null);
+	const [loadError, setLoadError] = useState<string | null>(null);
+	const [loadAttempt, setLoadAttempt] = useState(0);
+	const [saving, setSaving] = useState(false);
+	type Choice = "analytics" | "community" | "crashes" | "export";
+	const [failedWrite, setFailedWrite] = useState<{
+		choice: Choice;
+		next: boolean;
+	} | null>(null);
+	const acknowledged = useRef({
+		analytics: true,
+		community: true,
+		crashes: true,
+		export: false,
+	});
+	const currentTarget = useRef(target);
+	currentTarget.current = target;
+	const mounted = useRef(false);
+	const pending = useRef<object | null>(null);
+	const ready = useRef<ApiTarget | null>(null);
+	const busyRef = useRef(busy);
+	busyRef.current = busy;
+	const failed = useRef<typeof failedWrite>(null);
+
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			ready.current = null;
+			pending.current = null;
+		};
+	}, []);
+
 	useEffect(() => {
 		let cancelled = false;
+		ready.current = null;
+		pending.current = null;
+		failed.current = null;
+		setReadyTarget(null);
+		setSaving(false);
+		setFailedWrite(null);
+		setLoadError(null);
 		Promise.all([
 			getProductAnalyticsEnabled(target),
 			getCommunityStatsEnabled(target),
@@ -110,98 +121,133 @@ export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 			getDiagnosticsExportEnabled(target),
 		])
 			.then(([analytics, community, crashes, exportOn]) => {
-				if (cancelled) {
+				if (cancelled || !mounted.current || currentTarget.current !== target) {
 					return;
 				}
+				acknowledged.current = {
+					analytics,
+					community,
+					crashes,
+					export: exportOn,
+				};
 				setProductAnalytics(analytics);
 				setCommunityStats(community);
-				// Seed the runtime gates from the canonical Core prefs so the
-				// in-memory flags + localStorage mirrors agree with what the user
-				// chose (mirrors PrivacySettings).
-				setAnalyticsEnabled(analytics);
 				setCrashReports(crashes);
-				setCrashReportingEnabled(crashes);
 				setDiagnosticsExport(exportOn);
+				setAnalyticsEnabled(analytics);
+				setCrashReportingEnabled(crashes);
+				ready.current = target;
+				setReadyTarget(target);
 			})
 			.catch(() => {
-				// Leave the §6 defaults if Core's preferences can't be read yet.
+				if (cancelled || !mounted.current || currentTarget.current !== target) {
+					return;
+				}
+				setLoadError(
+					"Couldn't load your privacy choices. Check your connection and retry."
+				);
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [target]);
+	}, [target, loadAttempt]);
 
+	const saveChoice = useCallback(
+		async (choice: Choice, next: boolean, retry = false) => {
+			if (
+				!mounted.current ||
+				currentTarget.current !== target ||
+				ready.current !== target ||
+				pending.current ||
+				busyRef.current ||
+				(failed.current && !retry)
+			) {
+				return;
+			}
+			const operation = {};
+			pending.current = operation;
+			setSaving(true);
+			failed.current = null;
+			setFailedWrite(null);
+			const previous = acknowledged.current[choice];
+			const setters = {
+				analytics: setProductAnalytics,
+				community: setCommunityStats,
+				crashes: setCrashReports,
+				export: setDiagnosticsExport,
+			};
+			const writes = {
+				analytics: setProductAnalyticsEnabled,
+				community: setCommunityStatsEnabled,
+				crashes: setCrashReportsEnabled,
+				export: setDiagnosticsExportEnabled,
+			};
+			const titles = {
+				analytics: "Couldn't save your analytics choice",
+				community: "Couldn't save your community-stats choice",
+				crashes: "Couldn't save your crash-report choice",
+				export: "Couldn't save your diagnostics-export choice",
+			};
+			const apply = (value: boolean) => {
+				setters[choice](value);
+				// Opt-out stops the live gate immediately, before Core acknowledges.
+				if (choice === "analytics") {
+					setAnalyticsEnabled(value);
+				}
+				if (choice === "crashes") {
+					setCrashReportingEnabled(value);
+				}
+			};
+			const current = () =>
+				mounted.current &&
+				currentTarget.current === target &&
+				pending.current === operation;
+			apply(next);
+			try {
+				await writes[choice](target, next);
+				if (current()) {
+					acknowledged.current[choice] = next;
+				}
+			} catch {
+				if (!current()) {
+					return;
+				}
+				apply(previous);
+				const receipt = { choice, next };
+				failed.current = receipt;
+				setFailedWrite(receipt);
+				toast.error({
+					title: titles[choice],
+					description:
+						"Your previous choice is restored. Check your connection and retry saving.",
+				});
+			} finally {
+				if (current()) {
+					pending.current = null;
+					setSaving(false);
+				}
+			}
+		},
+		[target]
+	);
 	const handleProductAnalytics = useCallback(
-		async (next: boolean) => {
-			setProductAnalytics(next);
-			// Flip the live gate immediately so toggling off stops egress without
-			// waiting on the async Core write.
-			setAnalyticsEnabled(next);
-			try {
-				await setProductAnalyticsEnabled(target, next);
-			} catch {
-				setProductAnalytics(!next);
-				setAnalyticsEnabled(!next);
-				toast.error({
-					title: "Couldn't save your analytics choice",
-					description: "Check your connection and try again.",
-				});
-			}
-		},
-		[target]
+		(next: boolean) => saveChoice("analytics", next),
+		[saveChoice]
 	);
-
 	const handleCommunityStats = useCallback(
-		async (next: boolean) => {
-			setCommunityStats(next);
-			try {
-				await setCommunityStatsEnabled(target, next);
-			} catch {
-				setCommunityStats(!next);
-				toast.error({
-					title: "Couldn't save your community-stats choice",
-					description: "Check your connection and try again.",
-				});
-			}
-		},
-		[target]
+		(next: boolean) => saveChoice("community", next),
+		[saveChoice]
 	);
-
 	const handleCrashReports = useCallback(
-		async (next: boolean) => {
-			setCrashReports(next);
-			// Flip the live runtime gate immediately so toggling off stops egress
-			// without waiting on the async Core write.
-			setCrashReportingEnabled(next);
-			try {
-				await setCrashReportsEnabled(target, next);
-			} catch {
-				setCrashReports(!next);
-				setCrashReportingEnabled(!next);
-				toast.error({
-					title: "Couldn't save your crash-report choice",
-					description: "Check your connection and try again.",
-				});
-			}
-		},
-		[target]
+		(next: boolean) => saveChoice("crashes", next),
+		[saveChoice]
 	);
-
 	const handleDiagnosticsExport = useCallback(
-		async (next: boolean) => {
-			setDiagnosticsExport(next);
-			try {
-				await setDiagnosticsExportEnabled(target, next);
-			} catch {
-				setDiagnosticsExport(!next);
-				toast.error({
-					title: "Couldn't save your diagnostics-export choice",
-					description: "Check your connection and try again.",
-				});
-			}
-		},
-		[target]
+		(next: boolean) => saveChoice("export", next),
+		[saveChoice]
 	);
+	const locked =
+		busy || readyTarget !== target || saving || failedWrite !== null;
 
 	// Open the published privacy/data page in the browser so the reference is a
 	// real, followable link rather than a dead file path.
@@ -212,9 +258,18 @@ export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 	}, []);
 
 	const handleContinue = useCallback(() => {
+		if (
+			busyRef.current ||
+			ready.current !== target ||
+			currentTarget.current !== target ||
+			pending.current ||
+			failed.current
+		) {
+			return;
+		}
 		acknowledgePrivacyDisclosure();
 		onContinue();
-	}, [onContinue]);
+	}, [onContinue, target]);
 
 	return (
 		// Mirrors the shared OnboardingShell: the outer box owns the scroll and the
@@ -227,132 +282,148 @@ export function PrivacyStep({ busy = false, onContinue }: PrivacyStepProps) {
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						<RyuOnboardingAvatar />
 					</div>
 					<PageHeader
 						stagger={false}
-						subtitle="Ryu works with your approval and keeps you in control."
-						title="A few things to know"
+						subtitle="Change these choices any time in Settings."
+						title="Your privacy choices"
 					/>
 				</StaggerReveal>
 
-				{/* The content picks the cascade back up where the header left it, so
-				    the notice, the toggles and the Continue row arrive one after
-				    another instead of as one block. Outside the reveal above on
-				    purpose: revealing this column there AND its rows here would apply
-				    the travel and the blur twice to the same rows. */}
+				{/* Keep consent choices together in one compact section. */}
 				<div
 					className="flex w-full max-w-lg flex-col gap-6"
 					data-testid="onboarding-final-step"
 				>
 					<StaggerReveal startDelay={ONBOARDING_CONTENT_DELAY_MS} wrap>
 						<div className="flex flex-col gap-5">
-							{FINAL_ONBOARDING_NOTICES.map((notice) => (
-								<div className="flex items-start gap-3" key={notice.title}>
-									<HugeiconsIcon
-										className="mt-0.5 size-5 shrink-0 opacity-80"
-										icon={notice.icon}
-									/>
-									<div className="min-w-0 space-y-1">
-										<p className="font-medium text-sm">{notice.title}</p>
-										<p className="text-muted-foreground text-xs leading-relaxed">
-											{notice.description}
-										</p>
-									</div>
+							{loadError ? (
+								<div
+									className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"
+									role="alert"
+								>
+									<p className="text-sm">{loadError}</p>
+									<Button
+										className="mt-2"
+										onClick={() => {
+											ready.current = null;
+											setReadyTarget(null);
+											setLoadError(null);
+											setLoadAttempt((attempt) => attempt + 1);
+										}}
+										size="sm"
+										variant="outline"
+									>
+										Retry
+									</Button>
 								</div>
-							))}
-
-							<SettingsCard className="flex flex-col gap-2.5 border-primary/40">
-								<div className="flex items-start gap-2.5">
-									<HugeiconsIcon
-										className="mt-0.5 size-4 shrink-0 opacity-70"
-										icon={Alert01Icon}
-									/>
-									<div className="space-y-1.5">
-										<p className="font-medium text-sm">
-											How Ryu handles your data
-										</p>
-										<p className="text-muted-foreground text-xs leading-relaxed">
-											Ryu is local-first and encrypted by default. Anonymous,
-											content-free product analytics and crash reports are on by
-											default so we can fix what breaks and improve the app.
-											They never include your prompts, conversations, files, or
-											any agent content, and they use a random install ID that
-											is not linked to your account. Local traces and
-											diagnostics stay on your device unless you turn on
-											diagnostics export. Content used by a model or connected
-											app follows that service's own terms and privacy policy.
-											You can change these choices any time in Settings →
-											Privacy.{" "}
-											<button
-												className="text-primary underline underline-offset-2"
-												onClick={openDocs}
-												type="button"
-											>
-												Read the full privacy &amp; data breakdown
-											</button>
-											.
-										</p>
-									</div>
-								</div>
-							</SettingsCard>
-
-							<div className="space-y-2">
-								<p className="font-medium text-sm">
-									Choose your privacy settings
+							) : readyTarget === target ? null : (
+								<p aria-live="polite" className="text-muted-foreground text-sm">
+									Loading privacy choices…
 								</p>
+							)}
+							{failedWrite ? (
+								<div
+									className="rounded-lg border border-destructive/30 bg-destructive/5 p-3"
+									role="alert"
+								>
+									<p className="text-sm">
+										Couldn't save your privacy choice. Your previous choice is
+										restored.
+									</p>
+									<Button
+										className="mt-2"
+										disabled={busy || saving}
+										onClick={() =>
+											void saveChoice(
+												failedWrite.choice,
+												failedWrite.next,
+												true
+											)
+										}
+										size="sm"
+										variant="outline"
+									>
+										Retry saving
+									</Button>
+								</div>
+							) : null}
+							{saving ? (
+								<p aria-live="polite" className="text-muted-foreground text-sm">
+									Saving privacy choice…
+								</p>
+							) : null}
+
+							<div>
 								<SettingsGroup>
 									<SettingsItem
 										actions={
 											<Switch
+												aria-label="Product analytics"
 												checked={productAnalytics}
+												disabled={locked}
 												id="onboarding-product-analytics"
 												onCheckedChange={handleProductAnalytics}
 											/>
 										}
-										description="Anonymous usage events help us improve Ryu. They never include prompts, conversations, files, or agent content."
+										description="Anonymous product events; no prompts or agent content."
 										title="Product analytics"
 									/>
 									<SettingsItem
 										actions={
 											<Switch
+												aria-label="Community stats"
 												checked={communityStats}
+												disabled={locked}
 												id="onboarding-community-stats"
 												onCheckedChange={handleCommunityStats}
 											/>
 										}
-										description="Anonymous, aggregate token-savings stats for the community leaderboard."
+										description="Anonymous token-savings totals for the community."
 										title="Community stats"
 									/>
 									<SettingsItem
 										actions={
 											<Switch
+												aria-label="Crash reports"
 												checked={crashReports}
+												disabled={locked}
 												id="onboarding-crash-reports"
 												onCheckedChange={handleCrashReports}
 											/>
 										}
-										description="Scrubbed crash and error stacks so we can fix what fails. No prompts or content."
+										description="Scrubbed error stacks; no prompts or content."
 										title="Crash reports"
 									/>
 									<SettingsItem
 										actions={
 											<Switch
+												aria-label="Diagnostics export"
 												checked={diagnosticsExport}
+												disabled={locked}
 												id="onboarding-diagnostics-export"
 												onCheckedChange={handleDiagnosticsExport}
 											/>
 										}
-										description="Export local run-trace and audit records over OTLP to an endpoint you choose in Settings. Off by default."
+										description="Off by default. With an endpoint set, redacted traces go there. The same opt-in sends a small Core/Gateway summary from Ryu Cloud-enrolled nodes to Ryu Axiom."
 										title="Diagnostics export"
 									/>
 								</SettingsGroup>
 							</div>
 
-							<div className="flex items-center justify-end">
+							<div className="flex items-center justify-end gap-3">
+								<Button
+									data-testid="onboarding-privacy-details"
+									onClick={openDocs}
+									size="lg"
+									variant="ghost"
+								>
+									Full privacy details
+								</Button>
 								<Button
 									data-testid="onboarding-final-continue"
-									disabled={busy}
+									disabled={locked}
 									onClick={handleContinue}
 									size="lg"
 									variant="mono"

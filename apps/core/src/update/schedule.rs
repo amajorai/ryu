@@ -31,7 +31,7 @@ const QUIET_HOUR: u32 = 3;
 const MIN_LEAD_MINUTES: i64 = 15;
 
 fn schedule_path() -> PathBuf {
-    crate::paths::ryu_dir().join("pending-update.json")
+    crate::paths::state_path("pending-update.json")
 }
 
 /// An update the user asked to have installed later.
@@ -136,7 +136,7 @@ pub fn set_pending(asset: ReleaseAsset, version: String) -> std::io::Result<Pend
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, serde_json::to_vec_pretty(&pending)?)?;
+    crate::atomic_file::write_atomic(&path, &serde_json::to_vec_pretty(&pending)?)?;
     Ok(pending)
 }
 
@@ -234,5 +234,124 @@ mod tests {
         let raw = ":Europe/Berlin";
         let zone = raw.trim().trim_start_matches(':').trim();
         assert_eq!(zone, "Europe/Berlin");
+    }
+
+    #[test]
+    fn deferred_update_survives_reopen_refusal_and_retry() {
+        const CASE: &str = "RYU_DEFERRED_UPDATE_PROOF_PHASE";
+        if let Ok(phase) = std::env::var(CASE) {
+            let path = schedule_path();
+            let asset = |version: &str| ReleaseAsset {
+                name: format!("ryu-{version}.tar.gz"),
+                url: format!("https://updates.example.invalid/{version}/ryu.tar.gz"),
+                kind: "archive".to_string(),
+                size: 1234,
+            };
+            match phase.as_str() {
+                "create" => {
+                    let saved = set_pending(asset("first"), "first".into()).unwrap();
+                    assert_eq!(
+                        serde_json::to_value(get_pending().unwrap()).unwrap(),
+                        serde_json::to_value(saved).unwrap()
+                    );
+                    std::fs::write(path.parent().unwrap().join("unrelated.txt"), b"keep me")
+                        .unwrap();
+                }
+                "reopen-replace" => {
+                    let reopened = get_pending().expect("fresh process must read prior decision");
+                    assert_eq!(reopened.version, "first");
+                    assert_eq!(reopened.asset.url, asset("first").url);
+                    let saved = set_pending(asset("second"), "second".into()).unwrap();
+                    assert_eq!(
+                        serde_json::to_value(get_pending().unwrap()).unwrap(),
+                        serde_json::to_value(saved).unwrap()
+                    );
+                }
+                "reopen-due-cancel" => {
+                    let saved = get_pending().unwrap();
+                    assert_eq!(saved.version, "second");
+                    assert_eq!(saved.asset.name, asset("second").name);
+                    assert!(due_at(saved.scheduled_for - ChronoDuration::nanoseconds(1)).is_none());
+                    assert_eq!(
+                        due_at(saved.scheduled_for).unwrap().asset.url,
+                        saved.asset.url
+                    );
+                    clear_pending().unwrap();
+                    clear_pending().unwrap();
+                    assert!(get_pending().is_none());
+                    assert!(!path.exists());
+                    assert_eq!(
+                        std::fs::read(path.parent().unwrap().join("unrelated.txt")).unwrap(),
+                        b"keep me"
+                    );
+                }
+                "corrupt-repair" => {
+                    std::fs::write(&path, b"{invalid schedule JSON").unwrap();
+                    assert!(get_pending().is_none());
+                    assert!(due_at(Utc::now() + ChronoDuration::days(100)).is_none());
+                    set_pending(asset("repaired"), "repaired".into()).unwrap();
+                    assert_eq!(get_pending().unwrap().version, "repaired");
+                }
+                "refuse-retry" => {
+                    assert_eq!(get_pending().unwrap().version, "repaired");
+                    clear_pending().unwrap();
+                    std::fs::create_dir(&path).unwrap();
+                    std::fs::write(path.join("owned-sentinel"), b"unchanged").unwrap();
+                    assert!(set_pending(asset("refused"), "refused".into()).is_err());
+                    assert_eq!(
+                        std::fs::read(path.join("owned-sentinel")).unwrap(),
+                        b"unchanged"
+                    );
+                    assert!(path.is_dir());
+                    std::fs::remove_dir_all(&path).unwrap();
+                    set_pending(asset("retry"), "retry".into()).unwrap();
+                }
+                "final-reopen" => {
+                    let saved = get_pending().unwrap();
+                    assert_eq!(saved.version, "retry");
+                    assert_eq!(saved.asset.url, asset("retry").url);
+                    assert_eq!(saved.asset.size, 1234);
+                    assert_eq!(
+                        std::fs::read(path.parent().unwrap().join("unrelated.txt")).unwrap(),
+                        b"keep me"
+                    );
+                }
+                _ => panic!("unknown owned schedule phase"),
+            }
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        for phase in [
+            "create",
+            "reopen-replace",
+            "reopen-due-cancel",
+            "corrupt-repair",
+            "refuse-retry",
+            "final-reopen",
+        ] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "update::schedule::tests::deferred_update_survives_reopen_refusal_and_retry",
+                    "--nocapture",
+                ])
+                .env(CASE, phase)
+                .env("RYU_DIR", root.path())
+                .env("RYU_PROFILE", "dev")
+                .env("RYU_KEYCHAIN", "off")
+                .env("TZ", "UTC")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "actual schedule phase {phase} failed:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"),
+                "owned child must execute its exact test"
+            );
+        }
     }
 }

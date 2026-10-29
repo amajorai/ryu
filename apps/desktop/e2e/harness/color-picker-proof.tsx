@@ -3,7 +3,7 @@ import {
 	RyuAppSection,
 	RyuAppShell,
 	RyuAppToolbar,
-} from "@ryu/blocks/companion/app-ui";
+} from "@ryu/blocks/companion/app-ui.tsx";
 import {
 	ColorPicker,
 	ColorPickerContent,
@@ -46,9 +46,10 @@ function AppearanceColorControl({
 				value={value}
 			>
 				<ColorPickerTrigger
+					appearance="hex-control"
 					aria-label={`${label} color`}
-					className="flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center rounded-md border border-border px-2 font-mono text-xs transition-opacity hover:opacity-90"
-					style={{ backgroundColor: value, color: "#ffffff" }}
+					className="min-w-0 flex-1"
+					palette={{ fillHex: value, foregroundHex: "#ffffff" }}
 				>
 					{value}
 				</ColorPickerTrigger>

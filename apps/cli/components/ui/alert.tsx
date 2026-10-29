@@ -6,107 +6,107 @@ import { useTheme } from "@/components/ui/theme-provider";
 
 export type AlertVariant = "success" | "error" | "warning" | "info";
 
-const ICONS: Record<AlertVariant, string> = {
-  error: "✗",
-  info: "ℹ",
-  success: "✓",
-  warning: "⚠",
-};
+const ICONS = {
+	error: "✗",
+	info: "ℹ",
+	success: "✓",
+	warning: "⚠",
+} satisfies Record<AlertVariant, string>;
 
 export interface AlertProps {
-  variant?: AlertVariant;
-  title?: string;
-  children?: ReactNode;
-  icon?: string;
-  bordered?: boolean;
-  borderStyle?:
-    | "single"
-    | "double"
-    | "round"
-    | "bold"
-    | "singleDouble"
-    | "doubleSingle"
-    | "classic";
-  color?: string;
-  paddingX?: number;
-  paddingY?: number;
+	variant?: AlertVariant;
+	title?: string;
+	children?: ReactNode;
+	icon?: string;
+	bordered?: boolean;
+	borderStyle?:
+		| "single"
+		| "double"
+		| "round"
+		| "bold"
+		| "singleDouble"
+		| "doubleSingle"
+		| "classic";
+	color?: string;
+	paddingX?: number;
+	paddingY?: number;
 }
 
 export const Alert = ({
-  variant = "info",
-  title,
-  children,
-  icon,
-  bordered = true,
-  borderStyle,
-  color,
-  paddingX = 1,
-  paddingY = 0,
+	variant = "info",
+	title,
+	children,
+	icon,
+	bordered = true,
+	borderStyle,
+	color,
+	paddingX = 1,
+	paddingY = 0,
 }: AlertProps) => {
-  const theme = useTheme();
+	const theme = useTheme();
 
-  const variantColor =
-    color ??
-    (() => {
-      switch (variant) {
-        case "success": {
-          return theme.colors.success;
-        }
-        case "error": {
-          return theme.colors.error;
-        }
-        case "warning": {
-          return theme.colors.warning;
-        }
-        default: {
-          return theme.colors.info;
-        }
-      }
-    })();
+	const variantColor =
+		color ??
+		(() => {
+			switch (variant) {
+				case "success": {
+					return theme.colors.success;
+				}
+				case "error": {
+					return theme.colors.error;
+				}
+				case "warning": {
+					return theme.colors.warning;
+				}
+				default: {
+					return theme.colors.info;
+				}
+			}
+		})();
 
-  const resolvedIcon = icon ?? ICONS[variant];
+	const resolvedIcon = icon ?? ICONS[variant];
 
-  const inner = (
-    <>
-      <box gap={1}>
-        <text fg={variantColor}>
-          <b>{resolvedIcon}</b>
-        </text>
-        {title && (
-          <text fg={variantColor}>
-            <b>{title}</b>
-          </text>
-        )}
-      </box>
-      {children && <text>{children}</text>}
-    </>
-  );
+	const inner = (
+		<>
+			<box gap={1}>
+				<text fg={variantColor}>
+					<b>{resolvedIcon}</b>
+				</text>
+				{title && (
+					<text fg={variantColor}>
+						<b>{title}</b>
+					</text>
+				)}
+			</box>
+			{children && <text>{children}</text>}
+		</>
+	);
 
-  if (!bordered) {
-    return (
-      <box
-        flexDirection="column"
-        paddingBottom={paddingY}
-        paddingLeft={paddingX}
-        paddingRight={paddingX}
-        paddingTop={paddingY}
-      >
-        {inner}
-      </box>
-    );
-  }
+	if (!bordered) {
+		return (
+			<box
+				flexDirection="column"
+				paddingBottom={paddingY}
+				paddingLeft={paddingX}
+				paddingRight={paddingX}
+				paddingTop={paddingY}
+			>
+				{inner}
+			</box>
+		);
+	}
 
-  return (
-    <box
-      borderColor={variantColor}
-      borderStyle={borderStyle ?? theme.border.style}
-      flexDirection="column"
-      paddingBottom={paddingY}
-      paddingLeft={paddingX}
-      paddingRight={paddingX}
-      paddingTop={paddingY}
-    >
-      {inner}
-    </box>
-  );
+	return (
+		<box
+			borderColor={variantColor}
+			borderStyle={borderStyle ?? theme.border.style}
+			flexDirection="column"
+			paddingBottom={paddingY}
+			paddingLeft={paddingX}
+			paddingRight={paddingX}
+			paddingTop={paddingY}
+		>
+			{inner}
+		</box>
+	);
 };

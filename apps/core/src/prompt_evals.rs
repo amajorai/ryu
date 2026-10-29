@@ -1,17 +1,63 @@
 //! Core-owned persistence for Prompt Studio suites, runs, versions, and human
 //! review. Provider execution remains Gateway-owned; this module stores the
 //! reproducible input/output envelope around that execution.
+//!
+//! Encryption at rest: suite and version `config` (system prompts, test inputs),
+//! run `request`/`result` (full model outputs) and review `comment` are sealed per
+//! value as `encb:v1:` under the `prompt-evals.db` content key, each bound to its
+//! row id and column (reviews: `run_id` + `result_key`). Names, labels, scores
+//! and timestamps stay plaintext for listing. Legacy rows are sealed on open; a
+//! value that does not open is an error on a get and skipped (counted) in a list.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use ryu_crypto::content_sqlite::{ColumnPlan, KeyKind};
+use ryu_crypto::{ContentCipher, ContentContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
-use crate::sidecar::download_manager::ryu_dir;
+use crate::activity::sealed_store::{core_cipher, StoreSeal};
+
+/// Registered store name (content-key input; never rename).
+const STORE: &str = "prompt-evals.db";
+const SUITE_CONFIG: &str = "prompt_suites.config";
+const VERSION_CONFIG: &str = "prompt_suite_versions.config";
+const RUN_REQUEST: &str = "prompt_runs.request";
+const RUN_RESULT: &str = "prompt_runs.result";
+const REVIEW_COMMENT: &str = "prompt_reviews.comment";
+
+fn column_plans() -> Result<Vec<ColumnPlan>> {
+    Ok(vec![
+        ColumnPlan::text("prompt_suites", "config", "id", KeyKind::Text)?,
+        ColumnPlan::text("prompt_suite_versions", "config", "id", KeyKind::Text)?,
+        ColumnPlan::text("prompt_runs", "request", "id", KeyKind::Text)?,
+        ColumnPlan::text("prompt_runs", "result", "id", KeyKind::Text)?,
+    ])
+}
+
+fn review_context(run_id: &str, result_key: &str) -> ContentContext {
+    ContentContext::new(REVIEW_COMMENT)
+        .with("run_id", run_id)
+        .with("result_key", result_key)
+}
+
+/// A `prompt_suites` row as stored (config still sealed).
+type RawSuite = (String, String, String, String, i64, i64);
+
+fn raw_suite(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawSuite> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+    ))
+}
 
 const MAX_SUITE_VERSIONS: i64 = 50;
 const MAX_SUITE_CASES: usize = 10_000;
@@ -75,12 +121,13 @@ pub struct PromptReview {
 #[derive(Clone)]
 pub struct PromptEvalStore {
     conn: std::sync::Arc<Mutex<Connection>>,
+    seal: StoreSeal,
 }
 
 static GLOBAL: OnceLock<PromptEvalStore> = OnceLock::new();
 
 fn db_path() -> PathBuf {
-    ryu_dir().join("prompt-evals.db")
+    crate::paths::db_path("prompt-evals.db")
 }
 
 fn now_millis() -> i64 {
@@ -93,24 +140,75 @@ fn new_id(prefix: &str) -> String {
 
 impl PromptEvalStore {
     pub fn open() -> Result<Self> {
-        let path = db_path();
+        Self::open_at(db_path(), core_cipher(STORE)?)
+    }
+
+    /// Open the store at `path` under an explicit content cipher (tests).
+    pub fn open_at(path: PathBuf, cipher: ContentCipher) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).context("creating prompt eval data dir")?;
         }
-        let conn = Connection::open(&path)
+        let mut conn = Connection::open(&path)
             .with_context(|| format!("opening prompt eval database at {}", path.display()))?;
         Self::migrate(&conn)?;
-        Ok(Self {
-            conn: std::sync::Arc::new(Mutex::new(conn)),
-        })
+        let seal = Self::seal_store(&mut conn, Some(&path), cipher)?;
+        let conn = std::sync::Arc::new(Mutex::new(conn));
+        seal.defer_compaction(&conn, Some(&path));
+        Ok(Self { conn, seal })
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
+        let mut conn = Connection::open_in_memory()?;
         Self::migrate(&conn)?;
+        let seal = Self::seal_store(&mut conn, None, core_cipher(STORE)?)?;
         Ok(Self {
             conn: std::sync::Arc::new(Mutex::new(conn)),
+            seal,
+        })
+    }
+
+    fn seal_store(
+        conn: &mut Connection,
+        db_path: Option<&Path>,
+        cipher: ContentCipher,
+    ) -> Result<StoreSeal> {
+        let seal = StoreSeal::prepare(conn, db_path, cipher, &column_plans()?)
+            .context("sealing the prompt eval store")?;
+        if seal.writable() && seal_legacy_review_comments(conn, &seal)? > 0 {
+            seal.finish(conn, db_path);
+        }
+        Ok(seal)
+    }
+
+    /// Values list reads skipped because they did not open (since open).
+    pub fn unreadable_rows(&self) -> u64 {
+        self.seal.unreadable()
+    }
+
+    fn seal_json(&self, value: &Value, purpose: &str, id: &str) -> Result<String> {
+        self.seal.seal(
+            &serde_json::to_string(value)?,
+            &ContentContext::for_id(purpose, id),
+        )
+    }
+
+    fn open_json(&self, stored: &str, purpose: &str, id: &str) -> Result<Value> {
+        let json = self
+            .seal
+            .open(stored, &ContentContext::for_id(purpose, id))?;
+        serde_json::from_str(&json).with_context(|| format!("decoding {purpose} of {id}"))
+    }
+
+    fn suite_from_raw(&self, raw: RawSuite) -> Result<PromptSuiteRecord> {
+        let (id, agent_id, name, config, created_at, updated_at) = raw;
+        Ok(PromptSuiteRecord {
+            config: self.open_json(&config, SUITE_CONFIG, &id)?,
+            id,
+            agent_id,
+            name,
+            created_at,
+            updated_at,
         })
     }
 
@@ -182,7 +280,7 @@ impl PromptEvalStore {
         if name.is_empty() {
             anyhow::bail!("prompt suite name is required");
         }
-        let config_json = serde_json::to_string(config)?;
+        let config_json = self.seal_json(config, SUITE_CONFIG, &id)?;
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO prompt_suites (id, agent_id, name, config, created_at, updated_at)
@@ -200,27 +298,39 @@ impl PromptEvalStore {
     }
 
     pub async fn list_suites(&self, agent_id: &str) -> Result<Vec<PromptSuiteRecord>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT id, agent_id, name, config, created_at, updated_at
-             FROM prompt_suites WHERE agent_id = ?1 ORDER BY updated_at DESC, id DESC",
-        )?;
-        let rows = stmt
-            .query_map(params![agent_id], |row| decode_suite_row(row))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
+        let rows = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT id, agent_id, name, config, created_at, updated_at
+                 FROM prompt_suites WHERE agent_id = ?1 ORDER BY updated_at DESC, id DESC",
+            )?;
+            let rows = stmt.query_map(params![agent_id], raw_suite)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut suites = Vec::with_capacity(rows.len());
+        let mut skipped = 0u64;
+        for raw in rows {
+            match self.suite_from_raw(raw) {
+                Ok(suite) => suites.push(suite),
+                Err(_) => skipped += 1,
+            }
+        }
+        self.seal.count_unreadable(skipped);
+        Ok(suites)
     }
 
     pub async fn get_suite(&self, suite_id: &str) -> Result<Option<PromptSuiteRecord>> {
-        let conn = self.conn.lock().await;
-        conn.query_row(
-            "SELECT id, agent_id, name, config, created_at, updated_at
-             FROM prompt_suites WHERE id = ?1",
-            params![suite_id],
-            decode_suite_row,
-        )
-        .optional()
-        .map_err(Into::into)
+        let raw = {
+            let conn = self.conn.lock().await;
+            conn.query_row(
+                "SELECT id, agent_id, name, config, created_at, updated_at
+                 FROM prompt_suites WHERE id = ?1",
+                params![suite_id],
+                raw_suite,
+            )
+            .optional()?
+        };
+        raw.map(|raw| self.suite_from_raw(raw)).transpose()
     }
 
     pub async fn update_suite(
@@ -234,7 +344,7 @@ impl PromptEvalStore {
             anyhow::bail!("prompt suite name is required");
         }
         let now = now_millis();
-        let config_json = serde_json::to_string(config)?;
+        let config_json = self.seal_json(config, SUITE_CONFIG, suite_id)?;
         let conn = self.conn.lock().await;
         let changed = conn.execute(
             "UPDATE prompt_suites SET name = ?1, config = ?2, updated_at = ?3 WHERE id = ?4",
@@ -281,12 +391,13 @@ impl PromptEvalStore {
                     "SELECT id, agent_id, name, config, created_at, updated_at
                      FROM prompt_suites WHERE id = ?1",
                     params![suite_id],
-                    decode_suite_row,
+                    raw_suite,
                 )
                 .optional()?;
             let Some(suite) = suite else {
                 return Ok(None);
             };
+            let suite = self.suite_from_raw(suite)?;
 
             let mut config = suite.config.clone();
             let object = config
@@ -314,17 +425,23 @@ impl PromptEvalStore {
             let now = now_millis();
             conn.execute(
                 "UPDATE prompt_suites SET config = ?1, updated_at = ?2 WHERE id = ?3",
-                params![serde_json::to_string(&config)?, now, suite_id],
+                params![
+                    self.seal_json(&config, SUITE_CONFIG, suite_id)?,
+                    now,
+                    suite_id
+                ],
             )?;
             let updated = conn
                 .query_row(
                     "SELECT id, agent_id, name, config, created_at, updated_at
                      FROM prompt_suites WHERE id = ?1",
                     params![suite_id],
-                    decode_suite_row,
+                    raw_suite,
                 )
                 .optional()?;
-            Ok(updated.map(|suite| (suite, true)))
+            updated
+                .map(|suite| self.suite_from_raw(suite).map(|suite| (suite, true)))
+                .transpose()
         })();
         match result {
             Ok(value) => {
@@ -385,17 +502,12 @@ impl PromptEvalStore {
         };
         let id = new_id("psv");
         let now = now_millis();
+        let config = self.seal_json(&suite.config, VERSION_CONFIG, &id)?;
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO prompt_suite_versions (id, suite_id, config, label, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                id,
-                suite_id,
-                serde_json::to_string(&suite.config)?,
-                label,
-                now
-            ],
+            params![id, suite_id, config, label, now],
         )?;
         conn.execute(
             "DELETE FROM prompt_suite_versions
@@ -437,24 +549,34 @@ impl PromptEvalStore {
         suite_id: &str,
         version_id: &str,
     ) -> Result<Option<PromptSuiteVersion>> {
-        let conn = self.conn.lock().await;
-        conn.query_row(
-            "SELECT id, suite_id, config, label, created_at FROM prompt_suite_versions
-             WHERE id = ?1 AND suite_id = ?2",
-            params![version_id, suite_id],
-            |row| {
-                let raw: String = row.get(2)?;
-                Ok(PromptSuiteVersion {
-                    config: serde_json::from_str(&raw).unwrap_or(Value::Null),
-                    created_at: row.get(4)?,
-                    id: row.get(0)?,
-                    label: row.get(3)?,
-                    suite_id: row.get(1)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(Into::into)
+        let raw = {
+            let conn = self.conn.lock().await;
+            conn.query_row(
+                "SELECT id, suite_id, config, label, created_at FROM prompt_suite_versions
+                 WHERE id = ?1 AND suite_id = ?2",
+                params![version_id, suite_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .optional()?
+        };
+        raw.map(|(id, suite_id, config, label, created_at)| {
+            Ok(PromptSuiteVersion {
+                config: self.open_json(&config, VERSION_CONFIG, &id)?,
+                created_at,
+                id,
+                label,
+                suite_id,
+            })
+        })
+        .transpose()
     }
 
     pub async fn restore_version(
@@ -487,6 +609,8 @@ impl PromptEvalStore {
         }
         let id = new_id("pr");
         let now = now_millis();
+        let request = self.seal_json(request, RUN_REQUEST, &id)?;
+        let result = self.seal_json(result, RUN_RESULT, &id)?;
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO prompt_runs (id, suite_id, name, request, result, created_at)
@@ -499,8 +623,8 @@ impl PromptEvalStore {
                 } else {
                     name.trim()
                 },
-                serde_json::to_string(request)?,
-                serde_json::to_string(result)?,
+                request,
+                result,
                 now
             ],
         )?;
@@ -536,26 +660,36 @@ impl PromptEvalStore {
     }
 
     pub async fn get_run(&self, suite_id: &str, run_id: &str) -> Result<Option<PromptRun>> {
-        let conn = self.conn.lock().await;
-        conn.query_row(
-            "SELECT id, suite_id, name, request, result, created_at FROM prompt_runs
-             WHERE id = ?1 AND suite_id = ?2",
-            params![run_id, suite_id],
-            |row| {
-                let request: String = row.get(3)?;
-                let result: String = row.get(4)?;
-                Ok(PromptRun {
-                    created_at: row.get(5)?,
-                    id: row.get(0)?,
-                    name: row.get(2)?,
-                    request: serde_json::from_str(&request).unwrap_or(Value::Null),
-                    result: serde_json::from_str(&result).unwrap_or(Value::Null),
-                    suite_id: row.get(1)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(Into::into)
+        let raw = {
+            let conn = self.conn.lock().await;
+            conn.query_row(
+                "SELECT id, suite_id, name, request, result, created_at FROM prompt_runs
+                 WHERE id = ?1 AND suite_id = ?2",
+                params![run_id, suite_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .optional()?
+        };
+        raw.map(|(id, suite_id, name, request, result, created_at)| {
+            Ok(PromptRun {
+                request: self.open_json(&request, RUN_REQUEST, &id)?,
+                result: self.open_json(&result, RUN_RESULT, &id)?,
+                created_at,
+                id,
+                name,
+                suite_id,
+            })
+        })
+        .transpose()
     }
 
     pub async fn rename_run(
@@ -630,6 +764,10 @@ impl PromptEvalStore {
 
     pub async fn save_review(&self, review: &PromptReview) -> Result<PromptReview> {
         let now = now_millis();
+        let comment = self.seal.seal_opt(
+            review.comment.as_deref(),
+            &review_context(&review.run_id, &review.result_key),
+        )?;
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO prompt_reviews
@@ -646,7 +784,7 @@ impl PromptEvalStore {
                 review.result_key,
                 review.pass.map(i64::from),
                 review.score,
-                review.comment,
+                comment,
                 i64::from(review.highlighted),
                 now
             ],
@@ -658,13 +796,13 @@ impl PromptEvalStore {
     }
 
     pub async fn list_reviews(&self, run_id: &str) -> Result<Vec<PromptReview>> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT run_id, result_key, pass, score, comment, highlighted, updated_at
-             FROM prompt_reviews WHERE run_id = ?1 ORDER BY result_key",
-        )?;
-        let rows = stmt
-            .query_map(params![run_id], |row| {
+        let rows = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT run_id, result_key, pass, score, comment, highlighted, updated_at
+                 FROM prompt_reviews WHERE run_id = ?1 ORDER BY result_key",
+            )?;
+            let rows = stmt.query_map(params![run_id], |row| {
                 Ok(PromptReview {
                     run_id: row.get(0)?,
                     result_key: row.get(1)?,
@@ -674,27 +812,305 @@ impl PromptEvalStore {
                     highlighted: row.get::<_, i64>(5)? != 0,
                     updated_at: row.get(6)?,
                 })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut reviews = Vec::with_capacity(rows.len());
+        let mut skipped = 0u64;
+        for mut review in rows {
+            let context = review_context(&review.run_id, &review.result_key);
+            match self.seal.open_opt(review.comment.as_deref(), &context) {
+                Ok(comment) => {
+                    review.comment = comment;
+                    reviews.push(review);
+                }
+                Err(_) => skipped += 1,
+            }
+        }
+        self.seal.count_unreadable(skipped);
+        Ok(reviews)
     }
 }
 
-fn decode_suite_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PromptSuiteRecord> {
-    let raw: String = row.get(3)?;
-    Ok(PromptSuiteRecord {
-        id: row.get(0)?,
-        agent_id: row.get(1)?,
-        name: row.get(2)?,
-        config: serde_json::from_str(&raw).unwrap_or(Value::Null),
-        created_at: row.get(4)?,
-        updated_at: row.get(5)?,
-    })
+/// Seal legacy plaintext review comments and reseal comments sealed under a
+/// retired key. `prompt_reviews` is keyed by `(run_id, result_key)`, so it is
+/// walked here (every non-empty row, one transaction; the table is small)
+/// instead of by the single-key cursor migration. Compare-and-swap on the
+/// stored value; idempotent. A comment that does not open is left as it is.
+/// Returns how many values were rewritten.
+fn seal_legacy_review_comments(conn: &mut Connection, seal: &StoreSeal) -> Result<u64> {
+    let transaction = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let rows = {
+        let mut stmt = transaction.prepare(
+            "SELECT run_id, result_key, comment FROM prompt_reviews
+             WHERE comment IS NOT NULL AND comment != ''",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut sealed = 0u64;
+    for (run_id, result_key, comment) in rows {
+        let Ok(Some(value)) =
+            seal.reseal_if_needed(&comment, &review_context(&run_id, &result_key))
+        else {
+            continue;
+        };
+        sealed += transaction.execute(
+            "UPDATE prompt_reviews SET comment = ?1
+             WHERE run_id = ?2 AND result_key = ?3 AND comment IS ?4",
+            params![value, run_id, result_key, comment],
+        )? as u64;
+    }
+    transaction.commit()?;
+    Ok(sealed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_cipher() -> ContentCipher {
+        ContentCipher::from_root(&[17u8; 32], STORE)
+    }
+
+    fn file_contains(path: &Path, needle: &str) -> bool {
+        std::fs::read(path)
+            .map(|bytes| bytes.windows(needle.len()).any(|w| w == needle.as_bytes()))
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn every_content_column_is_sealed_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prompt-evals.db");
+        let store = PromptEvalStore::open_at(path.clone(), test_cipher()).unwrap();
+        let suite = store
+            .create_suite(
+                "agent-1",
+                "Suite",
+                &serde_json::json!({"prompts": ["system-prompt-marker"]}),
+            )
+            .await
+            .unwrap();
+        store.snapshot_suite(&suite.id, Some("v1")).await.unwrap();
+        let run = store
+            .save_run(
+                &suite.id,
+                "run",
+                &serde_json::json!({"input": "request-marker"}),
+                &serde_json::json!({"output": "result-marker"}),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .save_review(&PromptReview {
+                comment: Some("comment-marker".to_owned()),
+                highlighted: false,
+                pass: None,
+                result_key: "k".to_owned(),
+                run_id: run.id.clone(),
+                score: None,
+                updated_at: 0,
+            })
+            .await
+            .unwrap();
+        for file in [path.clone(), dir.path().join("prompt-evals.db-wal")] {
+            for marker in [
+                "system-prompt-marker",
+                "request-marker",
+                "result-marker",
+                "comment-marker",
+            ] {
+                assert!(
+                    !file_contains(&file, marker),
+                    "{marker} in {}",
+                    file.display()
+                );
+            }
+        }
+        let got = store.get_run(&suite.id, &run.id).await.unwrap().unwrap();
+        assert_eq!(got.result["output"], "result-marker");
+        assert_eq!(
+            store.list_reviews(&run.id).await.unwrap()[0]
+                .comment
+                .as_deref(),
+            Some("comment-marker")
+        );
+        let conn = Connection::open(&path).unwrap();
+        ryu_crypto::content_sqlite::assert_all_open(
+            &conn,
+            &test_cipher(),
+            &column_plans().unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_rows_are_sealed_once_and_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prompt-evals.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            PromptEvalStore::migrate(&conn).unwrap();
+            conn.execute_batch(
+                r#"INSERT INTO prompt_suites VALUES ('ps_1', 'agent-1', 'S', '{"tests":["legacy-config-marker"]}', 1, 1);
+                   INSERT INTO prompt_suite_versions VALUES ('psv_1', 'ps_1', '{"v":"legacy-version-marker"}', NULL, 1);
+                   INSERT INTO prompt_runs VALUES ('pr_1', 'ps_1', 'r', '{"q":"legacy-request-marker"}', '{"a":"legacy-result-marker"}', 1);
+                   INSERT INTO prompt_reviews VALUES ('pr_1', 'k', NULL, NULL, 'legacy-comment-marker', 0, 1);"#,
+            )
+            .unwrap();
+        }
+        let store = PromptEvalStore::open_at(path.clone(), test_cipher()).unwrap();
+        assert_eq!(
+            store.get_suite("ps_1").await.unwrap().unwrap().config["tests"][0],
+            "legacy-config-marker"
+        );
+        assert_eq!(
+            store
+                .get_version("ps_1", "psv_1")
+                .await
+                .unwrap()
+                .unwrap()
+                .config["v"],
+            "legacy-version-marker"
+        );
+        assert_eq!(
+            store
+                .get_run("ps_1", "pr_1")
+                .await
+                .unwrap()
+                .unwrap()
+                .request["q"],
+            "legacy-request-marker"
+        );
+        assert_eq!(
+            store.list_reviews("pr_1").await.unwrap()[0]
+                .comment
+                .as_deref(),
+            Some("legacy-comment-marker")
+        );
+        drop(store);
+        for file in [path.clone(), dir.path().join("prompt-evals.db-wal")] {
+            for marker in [
+                "legacy-config-marker",
+                "legacy-version-marker",
+                "legacy-request-marker",
+                "legacy-result-marker",
+                "legacy-comment-marker",
+            ] {
+                assert!(
+                    !file_contains(&file, marker),
+                    "{marker} in {}",
+                    file.display()
+                );
+            }
+        }
+        let snapshot = |path: &Path| -> Vec<String> {
+            let conn = Connection::open(path).unwrap();
+            conn.query_row(
+                "SELECT s.config, v.config, r.request, r.result, w.comment
+                 FROM prompt_suites s, prompt_suite_versions v, prompt_runs r, prompt_reviews w",
+                [],
+                |row| Ok((0..5).map(|i| row.get::<_, String>(i).unwrap()).collect()),
+            )
+            .unwrap()
+        };
+        let first = snapshot(&path);
+        assert!(first.iter().all(|value| value.starts_with("encb:v1:")));
+        let _store = PromptEvalStore::open_at(path.clone(), test_cipher()).unwrap();
+        assert_eq!(snapshot(&path), first, "second open is a no-op");
+    }
+
+    #[tokio::test]
+    async fn a_key_adoption_reseals_every_value_including_review_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prompt-evals.db");
+        let root_a = [17u8; 32];
+        let root_b = [23u8; 32];
+        let run_id = {
+            let store =
+                PromptEvalStore::open_at(path.clone(), ContentCipher::from_root(&root_a, STORE))
+                    .unwrap();
+            let suite = store
+                .create_suite("agent-1", "S", &serde_json::json!({"a": 1}))
+                .await
+                .unwrap();
+            let run = store
+                .save_run(
+                    &suite.id,
+                    "r",
+                    &serde_json::json!({"q": 1}),
+                    &serde_json::json!({"a": 2}),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            store
+                .save_review(&PromptReview {
+                    comment: Some("rotated-comment".to_owned()),
+                    highlighted: false,
+                    pass: None,
+                    result_key: "k".to_owned(),
+                    run_id: run.id.clone(),
+                    score: None,
+                    updated_at: 0,
+                })
+                .await
+                .unwrap();
+            run.id
+        };
+        // Adopt root B, keeping A as a retired key.
+        let rotated = ContentCipher::from_root(&root_b, STORE).with_retired_roots(&[root_a]);
+        drop(PromptEvalStore::open_at(path.clone(), rotated).unwrap());
+        // Every value now opens under B alone.
+        let only_b = ContentCipher::from_root(&root_b, STORE);
+        let conn = Connection::open(&path).unwrap();
+        ryu_crypto::content_sqlite::assert_all_open(&conn, &only_b, &column_plans().unwrap())
+            .unwrap();
+        drop(conn);
+        let store = PromptEvalStore::open_at(path.clone(), only_b).unwrap();
+        assert_eq!(
+            store.list_reviews(&run_id).await.unwrap()[0]
+                .comment
+                .as_deref(),
+            Some("rotated-comment")
+        );
+        assert_eq!(store.unreadable_rows(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_config_copied_to_another_suite_is_an_error_not_null() {
+        let store = PromptEvalStore::open_in_memory().unwrap();
+        let a = store
+            .create_suite("agent-1", "A", &serde_json::json!({"a": 1}))
+            .await
+            .unwrap();
+        let b = store
+            .create_suite("agent-1", "B", &serde_json::json!({"b": 2}))
+            .await
+            .unwrap();
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "UPDATE prompt_suites SET config = (SELECT config FROM prompt_suites WHERE id = ?1)
+                 WHERE id = ?2",
+                params![a.id, b.id],
+            )
+            .unwrap();
+        }
+        assert!(store.get_suite(&b.id).await.is_err());
+        let listed = store.list_suites("agent-1").await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, a.id);
+        assert_eq!(store.unreadable_rows(), 1);
+    }
 
     #[tokio::test]
     async fn suite_version_run_and_review_roundtrip() {

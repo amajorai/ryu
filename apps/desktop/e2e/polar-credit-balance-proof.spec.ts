@@ -1,8 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
 const STORY_URL = "/polar-credit-balance-proof.html";
-const PROOF_PATH =
-	"/Users/jiawei/Documents/Code/ryu/apps/desktop/artifacts/polar-credit-balance-proof.png";
 
 interface RuntimeIssues {
 	consoleErrors: string[];
@@ -62,5 +60,8 @@ test("shows the Polar aggregate and provider-specific allocation", async ({
 		"provider-specific allocation"
 	);
 	expectCleanRuntime(issues);
-	await page.screenshot({ fullPage: true, path: PROOF_PATH });
+	await page.screenshot({
+		fullPage: true,
+		path: test.info().outputPath("polar-credit-balance-proof.png"),
+	});
 });

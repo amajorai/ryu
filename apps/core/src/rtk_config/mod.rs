@@ -69,10 +69,9 @@ pub fn rtk_bin_path() -> Option<PathBuf> {
     } else {
         "rtk"
     };
-    let paths = std::env::var_os("PATH")?;
-    std::env::split_paths(&paths)
-        .map(|dir| dir.join(exe))
-        .find(|candidate| candidate.exists())
+    // Shared `PATH` walk: skips directories and (on unix) non-executable files,
+    // so a stray non-executable `rtk` cannot shadow a real one later on `PATH`.
+    crate::sidecar::manifest_sidecar::which_on_path(exe)
 }
 
 /// True when an `rtk` binary is resolvable (the auto-wrap availability check).

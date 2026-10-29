@@ -7,10 +7,11 @@
 // data as Agent edit → Tools / Memory & Spaces; this panel is the compact surface
 // for feature settings that need cross-allow without leaving the page.
 
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Label } from "@ryu/ui/components/label";
-import { toast } from "@ryu/ui/components/sileo";
-import { Switch } from "@ryu/ui/components/switch";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import {
@@ -40,19 +41,19 @@ import {
 } from "./shared/settings-items.tsx";
 
 /** Friendly titles for well-known MCP server / tool-prefix groups. */
-const APP_GROUP_LABELS: Record<string, string> = {
-	ghost: "Ghost (type / paste / hotkeys)",
-	shadow: "Shadow (screen capture)",
-	spaces: "Spaces (docs & pages)",
-	browser: "Browser",
-	meetings: "Meetings",
-	mail: "Mail",
-	spider: "Spider (web crawl)",
-	agentbrowser: "Agent Browser",
-	rtk: "RTK",
-	memory: "Memory",
-	chat: "Chat / conversations",
-};
+const APP_GROUP_LABELS = new Map<string, string>([
+	["ghost", "Ghost (type / paste / hotkeys)"],
+	["shadow", "Shadow (screen capture)"],
+	["spaces", "Spaces (docs & pages)"],
+	["browser", "Browser"],
+	["meetings", "Meetings"],
+	["mail", "Mail"],
+	["spider", "Spider (web crawl)"],
+	["agentbrowser", "Agent Browser"],
+	["rtk", "RTK"],
+	["memory", "Memory"],
+	["chat", "Chat / conversations"],
+]);
 
 export interface AgentAccessPanelProps {
 	agentId: string;
@@ -72,7 +73,7 @@ function toolGroupKey(tool: McpTool): string {
 }
 
 function groupLabel(key: string): string {
-	return APP_GROUP_LABELS[key] ?? key;
+	return APP_GROUP_LABELS.get(key) ?? key;
 }
 
 function toInput(agent: Agent, patch: Partial<AgentInput>): AgentInput {
@@ -113,6 +114,7 @@ const DEFAULT_MEMORY_LEVELS: MemoryScope[] = [
  * edit uses), so dictation/ask and chat share one source of truth.
  */
 export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
+	const tl = useLiteralMessages();
 	const [friendly] = useFriendlyMode();
 	const scopeLabels = memoryScopeLabels(friendly);
 	const [agent, setAgent] = useState<Agent | null>(null);
@@ -126,8 +128,8 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 		try {
 			const [nextAgent, nextSpaces, nextTools] = await Promise.all([
 				fetchAgent(target, agentId),
-				fetchSpaces(target).catch(() => [] as Space[]),
-				fetchMcpTools(target).catch(() => [] as McpTool[]),
+				fetchSpaces(target).catch(() => []),
+				fetchMcpTools(target).catch(() => []),
 			]);
 			setAgent(nextAgent);
 			setSpaces(nextSpaces);
@@ -183,7 +185,9 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 		const levels =
 			stored.length > 0
 				? stored.filter((l): l is MemoryScope =>
-						MEMORY_SCOPES.includes(l as MemoryScope)
+						MEMORY_SCOPES.includes(
+							/* SAFETY: This assertion adapts includes to the unchanged incoming string. The actual MEMORY_SCOPES comparison, not the assertion, establishes membership for the filter predicate. */ l as MemoryScope
+						)
 					)
 				: DEFAULT_MEMORY_LEVELS;
 		return new Set(levels);
@@ -358,10 +362,7 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 											id={checkId}
 											onCheckedChange={() => toggleSpace(space.id)}
 										/>
-										<Label
-											className="cursor-pointer font-normal text-sm"
-											htmlFor={checkId}
-										>
+										<Label htmlFor={checkId} variant="agent-choice">
 											{space.name}
 										</Label>
 									</div>
@@ -390,10 +391,7 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 										id={checkId}
 										onCheckedChange={() => toggleLevel(level)}
 									/>
-									<Label
-										className="cursor-pointer font-normal text-sm"
-										htmlFor={checkId}
-									>
+									<Label htmlFor={checkId} variant="agent-choice">
 										{scopeLabels[level]}
 									</Label>
 								</div>
@@ -417,7 +415,9 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 							<SettingsItem
 								actions={
 									<Switch
-										aria-label={`Allow ${groupLabel(key)}`}
+										aria-label={tl("Allow {appName}", {
+											appName: groupLabel(key),
+										})}
 										checked={on || partial}
 										disabled={saving}
 										onCheckedChange={(v) => toggleGroup(groupTools, v)}
@@ -425,8 +425,16 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 								}
 								description={
 									partial
-										? `${groupTools.filter((t) => selectedTools.has(t.id)).length} of ${groupTools.length} tools allowed`
-										: `${groupTools.length} tool${groupTools.length === 1 ? "" : "s"} from this app`
+										? tl("{allowedCount} of {totalCount} tools allowed", {
+												allowedCount: groupTools.filter((t) =>
+													selectedTools.has(t.id)
+												).length,
+												totalCount: groupTools.length,
+											})
+										: tl(
+												"{count, plural, one {# tool} other {# tools}} from this app",
+												{ count: groupTools.length }
+											)
 								}
 								key={key}
 								title={groupLabel(key)}

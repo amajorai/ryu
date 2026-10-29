@@ -1,5 +1,6 @@
-import { cn } from "@ryu/ui/lib/utils";
-import { useState } from "react";
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import { type CSSProperties, useState } from "react";
 import {
 	AgentLogo,
 	engineForAgent,
@@ -40,13 +41,19 @@ function SvglLogo({
 	className?: string;
 	size: string;
 }) {
-	const style = { width: size, height: size };
-	if (typeof spec === "string") {
+	const style: CSSProperties & { "--agent-logo-size": string } = {
+		"--agent-logo-size": size,
+	};
+	if (isNativeText(spec)) {
 		return (
-			// biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: bundled logo asset
+			// bundled logo asset
 			<img
 				alt={alt}
-				className={cn(className, "shrink-0 object-contain")}
+				className={cn(
+					className,
+					"shrink-0 object-contain",
+					"size-(--agent-logo-size)"
+				)}
 				draggable={false}
 				src={svglUrl(spec)}
 				style={style}
@@ -55,18 +62,26 @@ function SvglLogo({
 	}
 	return (
 		<>
-			{/* biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: bundled logo asset */}
+			{/* bundled logo asset */}
 			<img
 				alt={alt}
-				className={cn(className, "block shrink-0 object-contain dark:hidden")}
+				className={cn(
+					className,
+					"block shrink-0 object-contain dark:hidden",
+					"size-(--agent-logo-size)"
+				)}
 				draggable={false}
 				src={svglUrl(spec.light)}
 				style={style}
 			/>
-			{/* biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: bundled logo asset */}
+			{/* bundled logo asset */}
 			<img
 				alt={alt}
-				className={cn(className, "hidden shrink-0 object-contain dark:block")}
+				className={cn(
+					className,
+					"hidden shrink-0 object-contain dark:block",
+					"size-(--agent-logo-size)"
+				)}
 				draggable={false}
 				src={svglUrl(spec.dark)}
 				style={style}
@@ -151,18 +166,25 @@ function AcpBrandLogo({
 	size: string;
 }) {
 	const [failed, setFailed] = useState(false);
+	const style: CSSProperties & { "--agent-logo-size": string } = {
+		"--agent-logo-size": size,
+	};
 	if (failed) {
 		return <AgentLogo className={className} engine={engine} size={size} />;
 	}
 	return (
-		// biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: bundled logo asset
+		// bundled logo asset
 		<img
 			alt={alt}
-			className={cn(className, "shrink-0 object-contain dark:invert")}
+			className={cn(
+				className,
+				"shrink-0 object-contain dark:invert",
+				"size-(--agent-logo-size)"
+			)}
 			draggable={false}
 			onError={() => setFailed(true)}
 			src={`/assets/logos/acp/${registryId}.svg`}
-			style={{ width: size, height: size }}
+			style={style}
 		/>
 	);
 }

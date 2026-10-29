@@ -1,0 +1,14 @@
+.layer {
+	z-index: var(--particle-layer);
+}
+.particle {
+	left: var(--particle-left);
+	font-size: var(--particle-size);
+	opacity: var(--particle-opacity);
+	animation-duration: var(--particle-duration);
+	animation-delay: var(--particle-delay);
+}
+.colored {
+	color: var(--particle-color);
+	text-shadow: 0 0 1px var(--ryu-seasonal-glow);
+}

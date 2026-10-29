@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/mesh.ts
 //
 // Typed client for Core's private-network status surface (`GET /api/mesh/status`,
@@ -33,16 +35,23 @@ export interface MeshPeer {
 	tailscaleIps: string[];
 }
 
-/** Normalized private-network status (Contract 6). */
+/** Normalized network-tunnel status (Contract 6). */
 export interface MeshStatus {
-	/** `"tailscale"` | `"headscale"` | `"tailcat"` | null. */
+	/**
+	 * `"tailscale"` | `"headscale"` | `"tailcat"` | `"cloudflared"` |
+	 * `"opentunnel"` | `"plugin"` | null.
+	 */
 	backend: string | null;
+	/** Why the selected backend is not running, when the provider said so. */
+	backendError: string | null;
 	/** Raw `BackendState` passthrough (e.g. "Running", "NeedsLogin"). */
 	backendState: string;
+	/** The public Cloudflare Quick Tunnel URL, or null when Cloudflared is inactive. */
+	cloudflaredUrl: string | null;
 	/** Control-plane server URL, when known. */
 	controlServer: string | null;
 	/**
-	 * Mesh opted-in at all. Core's `ryu_mesh::is_enabled()` reads the `RYU_MESH_ENABLED`
+	 * Tunnel toolkit opted-in at all. Core's `ryu_mesh::is_enabled()` reads the `RYU_MESH_ENABLED`
 	 * env var (wins when set) OR the `mesh-enabled` pref, which this client's
 	 * {@link setMeshEnabled} writes via `POST /api/mesh/config` (the Gateway →
 	 * Integrations toggle). Defaults to `false` in {@link normalizeMeshStatus} so an
@@ -53,15 +62,26 @@ export interface MeshStatus {
 	magicDnsName: string | null;
 	/** Peer nodes on the tailnet. */
 	peers: MeshPeer[];
+	/** The public URL of a running public tunnel (Cloudflared, OpenTunnel, plugin). */
+	publicUrl: string | null;
 	/** Selected network provider is live. Equal to `up`. */
 	reachable: boolean;
-	/** The short-lived Tailcat connection address, or null for mesh backends. */
+	/** The short-lived Tailcat connection address, or null for other backends. */
 	tailcatAddress: string | null;
 	/** This node's Tailscale IPs. */
 	tailscaleIps: string[];
+	/** The plugin serving `network.tunnel` when the backend is `"plugin"`. */
+	tunnelProvider: MeshTunnelProvider | null;
 }
 
-// ── Raw wire shapes (snake_case, as Core emits) ───────────────────────────────
+/** The app behind a plugin tunnel. */
+export interface MeshTunnelProvider {
+	id: string;
+	name: string;
+}
+
+// ── Raw wire shapes as Core emits ──────────────────────────────────────────────
+// Legacy fields remain snake_case; newly added fields use camelCase.
 
 interface RawPeer {
 	host_or_dns?: string;
@@ -75,13 +95,17 @@ interface RawPeer {
 export interface RawMeshStatus {
 	backend?: string | null;
 	backend_state?: string;
+	backendError?: string | null;
+	cloudflaredUrl?: string | null;
 	control_server?: string | null;
 	enabled?: boolean;
 	magic_dns_name?: string | null;
 	peers?: RawPeer[];
+	publicUrl?: string | null;
 	reachable?: boolean;
 	tailcat_address?: string | null;
 	tailscale_ips?: string[];
+	tunnelProvider?: MeshTunnelProvider | null;
 	up?: boolean;
 	webhook_ingress_mode?: string | null;
 }
@@ -108,6 +132,11 @@ export function normalizeMeshStatus(raw: RawMeshStatus): MeshStatus {
 		magicDnsName: raw.magic_dns_name ?? null,
 		tailscaleIps: raw.tailscale_ips ?? [],
 		tailcatAddress: raw.tailcat_address ?? null,
+		cloudflaredUrl: raw.cloudflaredUrl ?? null,
+		// Older Cores only report the Cloudflare URL.
+		publicUrl: raw.publicUrl ?? raw.cloudflaredUrl ?? null,
+		tunnelProvider: raw.tunnelProvider ?? null,
+		backendError: raw.backendError ?? null,
 		peers: (raw.peers ?? []).map(normalizePeer),
 	};
 }
@@ -123,9 +152,14 @@ export async function fetchMeshStatus(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<MeshStatus> {
-	const raw = await request<RawMeshStatus>(target, "/api/mesh/status", {
-		signal,
-	});
+	const raw = await request(
+		target,
+		"/api/mesh/status",
+		{
+			signal,
+		},
+		rawMeshStatusResponseSchema
+	);
 	return normalizeMeshStatus(raw);
 }
 
@@ -144,13 +178,13 @@ export async function fetchMeshInstallStatus(
 	target: ApiTarget,
 	backend: MeshBackend
 ): Promise<MeshInstallStatus> {
-	const name = backend === MESH_BACKEND_TAILCAT ? "tailcat" : "tailscale";
-	const raw = await request<{
-		status?: {
-			error?: string;
-			state?: MeshInstallStatus["state"];
-		};
-	}>(target, `/api/setup/status/${name}`);
+	const name = meshInstallKey(backend);
+	const raw = await request(
+		target,
+		`/api/setup/status/${name}`,
+		undefined,
+		fetchMeshInstallStatusResponseSchema
+	);
 	const state = raw.status?.state;
 	return {
 		error: raw.status?.error ?? null,
@@ -202,24 +236,7 @@ export async function setMeshEnabled(
 	target: ApiTarget,
 	enabled: boolean
 ): Promise<SetMeshEnabledResult> {
-	const raw = await request<
-		RawMeshStatus & {
-			can_install?: boolean;
-			installing?: boolean;
-			missing_binaries?: string[];
-			start_error?: string | null;
-		}
-	>(target, "/api/mesh/config", { method: "POST", body: { enabled } });
-	return {
-		startError: raw.start_error ?? null,
-		// All three ride WITH `start_error` and are absent on a clean enable, so
-		// they default to the "nothing is wrong" reading rather than to `false`
-		// meaning "cannot install".
-		installing: raw.installing ?? false,
-		canInstall: raw.can_install ?? false,
-		missingBinaries: raw.missing_binaries ?? [],
-		status: normalizeMeshStatus(raw),
-	};
+	return await postMeshConfig(target, { enabled });
 }
 
 /**
@@ -233,19 +250,25 @@ export async function setMeshBackend(
 	backend: MeshBackend,
 	enabled: boolean
 ): Promise<SetMeshEnabledResult> {
-	const raw = await request<
-		RawMeshStatus & {
-			can_install?: boolean;
-			installing?: boolean;
-			missing_binaries?: string[];
-			start_error?: string | null;
-		}
-	>(target, "/api/mesh/config", {
-		method: "POST",
-		body: { backend, enabled },
-	});
+	return await postMeshConfig(target, { backend, enabled });
+}
+
+/** `POST /api/mesh/config`, normalized to a {@link SetMeshEnabledResult}. */
+async function postMeshConfig(
+	target: ApiTarget,
+	body: { backend?: MeshBackend; enabled: boolean }
+): Promise<SetMeshEnabledResult> {
+	const raw = await request(
+		target,
+		"/api/mesh/config",
+		{ method: "POST", body },
+		meshConfigResponseSchema
+	);
 	return {
 		startError: raw.start_error ?? null,
+		// All three ride WITH `start_error` and are absent on a clean enable, so
+		// they default to the "nothing is wrong" reading rather than to `false`
+		// meaning "cannot install".
 		installing: raw.installing ?? false,
 		canInstall: raw.can_install ?? false,
 		missingBinaries: raw.missing_binaries ?? [],
@@ -255,7 +278,7 @@ export async function setMeshBackend(
 
 // ── Network backend (`mesh-backend` pref) ─────────────────────────────────────
 //
-// Which private-network backend this node uses. A SETTING, distinct from
+// Which tunnel backend this node uses. A SETTING, distinct from
 // `MeshStatus.backend`, which is derived from provider status once connected —
 // before a node has ever started there is nothing to derive, so the picker reads
 // this instead.
@@ -266,11 +289,48 @@ export const MESH_BACKEND_HEADSCALE = "headscale";
 export const MESH_BACKEND_TAILSCALE = "tailscale";
 /** Tailcat's short-lived point-to-point connection. */
 export const MESH_BACKEND_TAILCAT = "tailcat";
+/** Cloudflare's temporary public Quick Tunnel. */
+export const MESH_BACKEND_CLOUDFLARED = "cloudflared";
+/** OpenTunnel's stable, locally TLS-terminated public hostname (macOS/Linux). */
+export const MESH_BACKEND_OPENTUNNEL = "opentunnel";
+/** The bound `network.tunnel` plugin adapter. */
+export const MESH_BACKEND_PLUGIN = "plugin";
 
 export type MeshBackend =
 	| typeof MESH_BACKEND_HEADSCALE
 	| typeof MESH_BACKEND_TAILSCALE
-	| typeof MESH_BACKEND_TAILCAT;
+	| typeof MESH_BACKEND_TAILCAT
+	| typeof MESH_BACKEND_CLOUDFLARED
+	| typeof MESH_BACKEND_OPENTUNNEL
+	| typeof MESH_BACKEND_PLUGIN;
+
+/** The capability a plugin tunnel adapter provides (Core's `TUNNEL_CAPABILITY`). */
+export const TUNNEL_CAPABILITY = "network.tunnel";
+
+/** Backends that publish a public URL rather than joining a private network. */
+export function isPublicTunnelBackend(backend: MeshBackend): boolean {
+	return (
+		backend === MESH_BACKEND_CLOUDFLARED ||
+		backend === MESH_BACKEND_OPENTUNNEL ||
+		backend === MESH_BACKEND_PLUGIN
+	);
+}
+
+/** The Core setup-status key for the selected backend's client. */
+export function meshInstallKey(backend: MeshBackend): string {
+	switch (backend) {
+		case MESH_BACKEND_TAILCAT:
+			return "tailcat";
+		case MESH_BACKEND_CLOUDFLARED:
+			return "cloudflared";
+		case MESH_BACKEND_OPENTUNNEL:
+			return "opentunnel";
+		case MESH_BACKEND_PLUGIN:
+			return "tunnel-plugin";
+		default:
+			return "tailscale";
+	}
+}
 
 /** The `mesh-backend` pref key, mirroring `MESH_BACKEND_PREF_KEY` in Core. */
 export const MESH_BACKEND_PREF = "mesh-backend";
@@ -293,6 +353,12 @@ export function parseMeshBackend(
 			return MESH_BACKEND_TAILSCALE;
 		case MESH_BACKEND_TAILCAT:
 			return MESH_BACKEND_TAILCAT;
+		case MESH_BACKEND_CLOUDFLARED:
+			return MESH_BACKEND_CLOUDFLARED;
+		case MESH_BACKEND_OPENTUNNEL:
+			return MESH_BACKEND_OPENTUNNEL;
+		case MESH_BACKEND_PLUGIN:
+			return MESH_BACKEND_PLUGIN;
 		default:
 			return legacyLoginServer?.trim()
 				? MESH_BACKEND_HEADSCALE
@@ -364,14 +430,6 @@ interface RawMeshPeerEntry {
 	url?: string;
 }
 
-interface RawMeshPeersResponse {
-	bearer_source?: string;
-	enabled?: boolean;
-	note?: string | null;
-	peers?: RawMeshPeerEntry[];
-	reachable?: boolean;
-}
-
 function normalizePeerEntry(raw: RawMeshPeerEntry): MeshPeerEntry {
 	return {
 		name: raw.name ?? "",
@@ -399,9 +457,14 @@ export async function fetchMeshPeers(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<MeshPeersResult> {
-	const raw = await request<RawMeshPeersResponse>(target, "/api/mesh/peers", {
-		signal,
-	});
+	const raw = await request(
+		target,
+		"/api/mesh/peers",
+		{
+			signal,
+		},
+		rawMeshPeersResponseSchema
+	);
 	return {
 		enabled: raw.enabled ?? false,
 		reachable: raw.reachable ?? false,
@@ -429,12 +492,6 @@ export interface WebhookIngressStatus {
 	up: boolean;
 }
 
-interface RawWebhookIngressStatus {
-	kind?: string;
-	public_url?: string | null;
-	up?: boolean;
-}
-
 /**
  * Fetch webhook-ingress status. Soft dependency: Core always answers HTTP 200,
  * with `up:false` when no public URL is resolved — so callers gate the ingress
@@ -445,10 +502,11 @@ export async function fetchWebhookIngressStatus(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<WebhookIngressStatus> {
-	const raw = await request<RawWebhookIngressStatus>(
+	const raw = await request(
 		target,
 		"/api/webhook-ingress/status",
-		{ signal }
+		{ signal },
+		rawWebhookIngressStatusResponseSchema
 	);
 	return {
 		kind: raw.kind ?? "",
@@ -467,12 +525,6 @@ export interface IngressBackendConfig {
 	backend: string;
 	/** The built-in default kind, shown as a hint in the picker. */
 	default: string;
-}
-
-interface RawIngressBackendConfig {
-	available?: string[];
-	backend?: string;
-	default?: string;
 }
 
 /**
@@ -514,12 +566,14 @@ export function isOwnRelayKind(kind: string): boolean {
  * fell through to {@link ingressLabel}'s title-caser, rendering "Own-relay" —
  * proof the own-relay path had never been exercised end to end.
  */
-export const INGRESS_LABELS: Record<string, string> = {
+export const INGRESS_LABELS = {
 	"ryu-relay": "Ryu Relay (managed)",
 	"tailscale-funnel": "Tailscale Funnel",
 	cloudflared: "Cloudflare Tunnel",
 	"own-relay": "Self-hosted relay",
 };
+
+const ingressLabels = new Map(Object.entries(INGRESS_LABELS));
 
 /**
  * Label for an ingress backend kind. Falls back to a title-cased form for any
@@ -529,7 +583,7 @@ export const INGRESS_LABELS: Record<string, string> = {
  * multi-word kind render with a stray hyphen.
  */
 export function ingressLabel(kind: string): string {
-	const known = INGRESS_LABELS[kind];
+	const known = ingressLabels.get(kind);
 	if (known) {
 		return known;
 	}
@@ -549,10 +603,11 @@ export async function fetchIngressBackend(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<IngressBackendConfig> {
-	const raw = await request<RawIngressBackendConfig>(
+	const raw = await request(
 		target,
 		"/api/webhook-ingress/backend",
-		{ signal }
+		{ signal },
+		rawIngressBackendConfigResponseSchema
 	);
 	return {
 		backend: raw.backend ?? "",
@@ -586,9 +641,112 @@ export async function setIngressBackend(
 	target: ApiTarget,
 	backend: string
 ): Promise<void> {
-	await request<{ ok?: boolean; backend?: string }>(
+	await request(
 		target,
 		"/api/webhook-ingress/backend",
-		{ method: "POST", body: { backend } }
+		{ method: "POST", body: { backend } },
+		gatewayJsonValueSchema
 	);
 }
+
+const rawPeerResponseSchema = z
+	.object({
+		host_or_dns: z.string().optional(),
+		magic_dns_name: z.string().optional(),
+		name: z.string().optional(),
+		online: z.boolean().optional(),
+		os: z.string().optional(),
+		tailscale_ips: z.array(z.string()).optional(),
+	})
+	.passthrough();
+
+const meshTunnelProviderResponseSchema = z
+	.object({ id: z.string(), name: z.string() })
+	.passthrough();
+
+const rawMeshStatusResponseSchema = z
+	.object({
+		backend: z.union([z.null(), z.string()]).optional(),
+		backend_state: z.string().optional(),
+		backendError: z.union([z.null(), z.string()]).optional(),
+		cloudflaredUrl: z.union([z.null(), z.string()]).optional(),
+		control_server: z.union([z.null(), z.string()]).optional(),
+		enabled: z.boolean().optional(),
+		magic_dns_name: z.union([z.null(), z.string()]).optional(),
+		peers: z.array(rawPeerResponseSchema).optional(),
+		publicUrl: z.union([z.null(), z.string()]).optional(),
+		reachable: z.boolean().optional(),
+		tailcat_address: z.union([z.null(), z.string()]).optional(),
+		tailscale_ips: z.array(z.string()).optional(),
+		tunnelProvider: z
+			.union([z.null(), meshTunnelProviderResponseSchema])
+			.optional(),
+		up: z.boolean().optional(),
+		webhook_ingress_mode: z.union([z.null(), z.string()]).optional(),
+	})
+	.passthrough();
+
+const fetchMeshInstallStatusResponseStatusSchema = z
+	.object({
+		error: z.string().optional(),
+		state: z
+			.union([
+				z.literal("failed"),
+				z.literal("installed"),
+				z.literal("installing"),
+				z.literal("not_installed"),
+			])
+			.optional(),
+	})
+	.passthrough();
+
+const fetchMeshInstallStatusResponseSchema = z
+	.object({ status: fetchMeshInstallStatusResponseStatusSchema.optional() })
+	.passthrough();
+
+const meshConfigResponseSchema = rawMeshStatusResponseSchema.extend({
+	can_install: z.boolean().optional(),
+	installing: z.boolean().optional(),
+	missing_binaries: z.array(z.string()).optional(),
+	start_error: z.union([z.null(), z.string()]).optional(),
+});
+
+const rawMeshPeerEntryResponseSchema = z
+	.object({
+		bearer: z.union([z.null(), z.string()]).optional(),
+		bearer_available: z.boolean().optional(),
+		host_or_dns: z.string().optional(),
+		magic_dns_name: z.string().optional(),
+		name: z.string().optional(),
+		online: z.boolean().optional(),
+		os: z.string().optional(),
+		port: z.number().optional(),
+		url: z.string().optional(),
+	})
+	.passthrough();
+
+const rawMeshPeersResponseSchema = z
+	.object({
+		bearer_source: z.string().optional(),
+		enabled: z.boolean().optional(),
+		note: z.union([z.null(), z.string()]).optional(),
+		peers: z.array(rawMeshPeerEntryResponseSchema).optional(),
+		reachable: z.boolean().optional(),
+	})
+	.passthrough();
+
+const rawWebhookIngressStatusResponseSchema = z
+	.object({
+		kind: z.string().optional(),
+		public_url: z.union([z.null(), z.string()]).optional(),
+		up: z.boolean().optional(),
+	})
+	.passthrough();
+
+const rawIngressBackendConfigResponseSchema = z
+	.object({
+		available: z.array(z.string()).optional(),
+		backend: z.string().optional(),
+		default: z.string().optional(),
+	})
+	.passthrough();

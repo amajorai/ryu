@@ -502,6 +502,9 @@ pub fn builtin_catalog() -> Vec<Evaluator> {
     ];
 
     apply_polarity_and_enforcement(&mut catalog);
+    for evaluator in &mut catalog {
+        evaluator.gate_unavailable_capabilities();
+    }
     catalog
 }
 
@@ -592,6 +595,27 @@ mod tests {
             );
             if offline_only {
                 assert!(!e.capabilities.inline, "{} must not be inline", e.id);
+            }
+        }
+    }
+    #[test]
+    fn unavailable_catalog_entries_do_not_advertise_execution() {
+        for evaluator in builtin_catalog() {
+            if matches!(
+                evaluator.impl_,
+                EvaluatorImpl::Code { .. } | EvaluatorImpl::Builtin { .. }
+            ) || matches!(
+                evaluator.target,
+                EvaluatorTarget::Image | EvaluatorTarget::Audio
+            ) {
+                assert!(!evaluator.capabilities.inline, "{}", evaluator.id);
+                assert!(!evaluator.capabilities.offline, "{}", evaluator.id);
+                assert!(
+                    evaluator.inline.is_none() && evaluator.offline.is_none(),
+                    "{}",
+                    evaluator.id
+                );
+                assert!(!evaluator.enforced, "{}", evaluator.id);
             }
         }
     }

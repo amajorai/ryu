@@ -53,3 +53,16 @@ export function safeHref(raw: string): string | null {
 		}
 	}
 }
+
+/** Return a mailto destination for a plain address, never an injected header. */
+export function safeMailtoHref(raw: string): string | null {
+	const email = raw.trim();
+	if (
+		!email ||
+		/[\r\n?#;,<>\s]/u.test(email) ||
+		!/^[a-z0-9.!#$%&'*+/=^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/iu.test(email)
+	) {
+		return null;
+	}
+	return `mailto:${email}`;
+}

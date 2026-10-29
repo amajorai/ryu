@@ -1,0 +1,3 @@
+.groups {
+	grid-template-columns: repeat(var(--workbench-group-count), minmax(0, 1fr));
+}

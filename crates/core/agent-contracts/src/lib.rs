@@ -189,6 +189,53 @@ pub struct HarnessSession {
     pub updated_at: String,
 }
 
+/// What a session does when a new run is requested while another run is
+/// active ("double-texting").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MultitaskStrategy {
+    /// Refuse the new run with a conflict while a run is active or queued.
+    #[default]
+    Reject,
+    /// Persist the new run in the session's ordered queue. It starts when every
+    /// run ahead of it has finished, including across a Core restart.
+    Enqueue,
+    /// Stop the active run at its next cancellation point, keep its partial
+    /// transcript, then start the new run ahead of any queued runs.
+    Interrupt,
+    /// Stop the active run, remove the turns it wrote from the transcript, then
+    /// start the new run ahead of any queued runs.
+    Rollback,
+}
+
+impl MultitaskStrategy {
+    /// Stable wire/storage spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reject => "reject",
+            Self::Enqueue => "enqueue",
+            Self::Interrupt => "interrupt",
+            Self::Rollback => "rollback",
+        }
+    }
+
+    /// Parse a persisted value. Unknown values fall back to the default
+    /// (reject), which never displaces or reorders another run.
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "enqueue" => Self::Enqueue,
+            "interrupt" => Self::Interrupt,
+            "rollback" => Self::Rollback,
+            _ => Self::Reject,
+        }
+    }
+
+    /// Whether the new run displaces the active run instead of waiting for it.
+    pub const fn preempts(self) -> bool {
+        matches!(self, Self::Interrupt | Self::Rollback)
+    }
+}
+
 /// Request to start or resume a run inside a session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -203,6 +250,10 @@ pub struct StartRunRequest {
     pub execution_profile: Option<ExecutionProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_run_id: Option<String>,
+    /// Behavior when the session already has an active run. Omitted means
+    /// [`MultitaskStrategy::Reject`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multitask_strategy: Option<MultitaskStrategy>,
 }
 
 fn empty_object() -> serde_json::Value {
@@ -234,6 +285,10 @@ pub struct HarnessRun {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<serde_json::Value>,
+    /// The double-texting strategy the run was submitted with, when one other
+    /// than the default was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multitask_strategy: Option<MultitaskStrategy>,
 }
 
 /// One choice offered by a runtime for an interactive approval request.
@@ -256,6 +311,15 @@ pub struct ApprovalOption {
     rename_all_fields = "camelCase"
 )]
 pub enum RunEvent {
+    /// The run was accepted behind an active run and waits in the session's
+    /// durable queue. `position` is 1-based at the time of queueing; a later
+    /// `run_started` marks dispatch.
+    RunQueued {
+        position: u32,
+        strategy: MultitaskStrategy,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_run_id: Option<String>,
+    },
     RunStarted {
         execution_profile: ExecutionProfile,
     },
@@ -429,11 +493,43 @@ mod tests {
                 ..ExecutionProfile::default()
             }),
             resume_run_id: None,
+            multitask_strategy: None,
         };
         assert_eq!(
             validate_start_request(&request),
             Err("worktree_isolation requires the worktree execution profile")
         );
+    }
+
+    #[test]
+    fn multitask_strategy_defaults_to_reject_and_round_trips() {
+        let request: StartRunRequest =
+            serde_json::from_value(serde_json::json!({ "input": {} })).expect("deserialize");
+        assert_eq!(request.multitask_strategy, None);
+        let request: StartRunRequest = serde_json::from_value(serde_json::json!({
+            "input": {},
+            "multitaskStrategy": "rollback",
+        }))
+        .expect("deserialize");
+        assert_eq!(
+            request.multitask_strategy,
+            Some(MultitaskStrategy::Rollback)
+        );
+        assert!(MultitaskStrategy::Rollback.preempts());
+        assert!(!MultitaskStrategy::Enqueue.preempts());
+        assert_eq!(
+            MultitaskStrategy::from_str("future"),
+            MultitaskStrategy::Reject
+        );
+        let queued = serde_json::to_value(RunEvent::RunQueued {
+            position: 2,
+            strategy: MultitaskStrategy::Enqueue,
+            active_run_id: Some("run_1".to_owned()),
+        })
+        .expect("serialize");
+        assert_eq!(queued["type"], "run_queued");
+        assert_eq!(queued["activeRunId"], "run_1");
+        assert_eq!(queued["strategy"], "enqueue");
     }
 
     #[test]
@@ -449,6 +545,7 @@ mod tests {
             idempotency_key: None,
             execution_profile: None,
             resume_run_id: None,
+            multitask_strategy: None,
         };
         assert_eq!(
             validate_start_request(&request),

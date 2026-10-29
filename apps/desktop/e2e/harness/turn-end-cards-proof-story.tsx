@@ -5,7 +5,7 @@ import {
 	ArtifactHostContext,
 	type ArtifactHostValue,
 } from "@ryu/blocks/desktop/agent-elements/artifact-host-context.tsx";
-import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs";
+import { ChatDisplayPrefsProvider } from "@ryu/blocks/desktop/agent-elements/chat-display-prefs.tsx";
 import type {
 	FileEditsTurnEndCard,
 	FileEditUndoPlan,
@@ -120,7 +120,7 @@ const messages: UIMessage[] = [
 			},
 		],
 		role: "user",
-	} as unknown as UIMessage,
+	},
 	{
 		id: "turn-end-assistant",
 		parts: [
@@ -134,6 +134,8 @@ const messages: UIMessage[] = [
 					new_string: "ready\nverified",
 					old_string: "draft",
 				},
+				output: null,
+				toolCallId: "turn-end-proof-1",
 				state: "output-available",
 				type: "tool-Edit",
 			},
@@ -142,6 +144,8 @@ const messages: UIMessage[] = [
 					content: "release\nnotes",
 					file_path: "docs/release-notes.md",
 				},
+				output: null,
+				toolCallId: "turn-end-proof-2",
 				state: "output-available",
 				type: "tool-Write",
 			},
@@ -152,6 +156,8 @@ const messages: UIMessage[] = [
 					new_string: "new\nline\nproof",
 					old_string: "old\nline",
 				},
+				output: null,
+				toolCallId: "turn-end-proof-3",
 				state: "output-available",
 				type: "tool-Edit",
 			},
@@ -160,6 +166,8 @@ const messages: UIMessage[] = [
 					patch:
 						"*** Begin Patch\n*** Add File: apps/core/src/sidecar/mcp/README.md\n+end-of-turn proof\n*** End Patch",
 				},
+				output: null,
+				toolCallId: "turn-end-proof-4",
 				state: "output-available",
 				type: "dynamic-tool",
 				toolName: "apply_patch",
@@ -170,6 +178,8 @@ const messages: UIMessage[] = [
 					spec: releaseSpec,
 					title: "JSON mention card",
 				},
+				output: null,
+				toolCallId: "turn-end-proof-5",
 				state: "output-available",
 				type: "tool-ui.render",
 			},
@@ -180,6 +190,8 @@ const messages: UIMessage[] = [
 					spec: a2uiEndOfTurnSpec,
 					title: "A2UI end-of-turn card",
 				},
+				output: null,
+				toolCallId: "turn-end-proof-6",
 				state: "output-available",
 				type: "tool-ui.render",
 			},
@@ -193,12 +205,14 @@ const messages: UIMessage[] = [
 					},
 					placement: "turn-end",
 				},
+				output: null,
+				toolCallId: "turn-end-proof-7",
 				state: "output-available",
 				type: "tool-artifact.render",
 			},
 		],
 		role: "assistant",
-	} as unknown as UIMessage,
+	},
 ];
 
 const singleFileCard: FileEditsTurnEndCard = {
@@ -236,7 +250,7 @@ function Story() {
 			<header className="border-border/70 border-b bg-background/90 px-6 py-5 backdrop-blur">
 				<div className="mx-auto flex max-w-4xl items-end justify-between gap-4">
 					<div>
-						<p className="font-semibold text-primary text-xs uppercase tracking-[0.18em]">
+						<p className="font-semibold text-primary text-xs uppercase tracking-(--tracking-section)">
 							Chat history proof
 						</p>
 						<h1 className="mt-1 font-semibold text-2xl tracking-tight">

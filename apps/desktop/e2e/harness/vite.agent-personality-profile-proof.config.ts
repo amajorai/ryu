@@ -35,4 +35,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "agent-personality-profile-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

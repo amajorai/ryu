@@ -13,8 +13,9 @@ import {
 	SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { DESKTOP_TRIAL_LABEL } from "@ryu/auth/lib/plans";
-import { Button } from "@ryu/ui/components/button";
+import { DESKTOP_TRIAL_LABEL, planLimit } from "@ryu/auth/lib/plans";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -22,9 +23,9 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { TextSwap } from "@ryu/ui/components/text-swap";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { TextSwap } from "@ryu/ui/components/text-swap.tsx";
 import { useState } from "react";
 import { sileo } from "sileo";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
@@ -33,6 +34,7 @@ import type { LicenseValidateResult } from "@/src/lib/api/billing.ts";
 import { LicenseValidateError } from "@/src/lib/api/billing.ts";
 
 interface PaywallModalProps {
+	intent?: "general" | "tabs";
 	/** Validate + persist a license key; resolves to the validate result. */
 	onApplyLicenseKey: (key: string) => Promise<LicenseValidateResult>;
 	onOpenChange: (open: boolean) => void;
@@ -41,9 +43,11 @@ interface PaywallModalProps {
 
 export function PaywallModal({
 	open,
+	intent = "general",
 	onOpenChange,
 	onApplyLicenseKey,
 }: PaywallModalProps) {
+	const tl = useLiteralMessages();
 	const [key, setKey] = useState("");
 	const [validating, setValidating] = useState(false);
 
@@ -56,7 +60,9 @@ export function PaywallModal({
 		try {
 			const result = await onApplyLicenseKey(trimmed);
 			if (result.active) {
-				sileo.success({ title: "License activated. Pro features unlocked." });
+				sileo.success({
+					title: "Desktop license activated. Tab limit lifted.",
+				});
 				onOpenChange(false);
 			} else {
 				sileo.error({
@@ -75,7 +81,9 @@ export function PaywallModal({
 	};
 
 	const handleSubscribe = () => {
-		openExternal(`${FRONTEND_URL.replace(/\/$/, "")}/pricing`).catch(() => {
+		openExternal(
+			`${FRONTEND_URL.replace(/\/$/, "")}/pricing${intent === "tabs" ? "?audience=individual#plans" : ""}`
+		).catch(() => {
 			sileo.error({ title: "Could not open the pricing page." });
 		});
 	};
@@ -102,11 +110,21 @@ export function PaywallModal({
 							icon={SparklesIcon}
 							strokeWidth={2}
 						/>
-						<DialogTitle>Your {DESKTOP_TRIAL_LABEL} has ended</DialogTitle>
+						<DialogTitle>
+							{intent === "tabs"
+								? "Open more tabs with a desktop license"
+								: tl("Your {trialLabel} has ended", {
+										trialLabel: DESKTOP_TRIAL_LABEL,
+									})}
+						</DialogTitle>
 					</div>
 					<DialogDescription>
-						Basic local chat stays free. Unlock Pro features and Ryu-managed
-						inference with a subscription or a desktop license key.
+						{intent === "tabs"
+							? tl(
+									"The free desktop supports {tabLimit} open tabs. A desktop license unlocks unlimited tabs. Your existing tabs stay available.",
+									{ tabLimit: String(planLimit(null, "maxOpenTabs")) }
+								)
+							: "Local desktop features stay free. A desktop license unlocks unlimited tabs; a subscription covers Ryu-managed inference."}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -114,6 +132,7 @@ export function PaywallModal({
 					<span className="font-medium text-sm">Have a license key?</span>
 					<div className="flex items-center gap-2">
 						<Input
+							aria-label="License key"
 							autoComplete="off"
 							className="flex-1"
 							disabled={validating}
@@ -132,17 +151,24 @@ export function PaywallModal({
 								handleValidate().catch(() => undefined);
 							}}
 						>
-							<TextSwap>{validating ? "Checking..." : "Activate"}</TextSwap>
+							<TextSwap>{validating ? "Checking…" : "Activate"}</TextSwap>
 						</Button>
 					</div>
 				</div>
 
 				<ul className="flex flex-col gap-1.5 text-muted-foreground text-sm">
-					{[
-						"Ryu-managed inference (no API keys needed)",
-						"Cloud sync across devices",
-						"Pro agents, teams, and gateway controls",
-					].map((feature) => (
+					{(intent === "tabs"
+						? [
+								"Unlimited open tabs",
+								"Run work on your own hardware or with your own provider",
+								"One-time desktop purchase; managed AI and hosting are separate",
+							]
+						: [
+								"Unlimited tabs with a desktop license",
+								"Ryu-managed inference with a subscription",
+								"Choose the plan that fits where your work runs",
+							]
+					).map((feature) => (
 						<li className="flex items-center gap-2" key={feature}>
 							<HugeiconsIcon
 								className="text-status-success"
@@ -170,10 +196,12 @@ export function PaywallModal({
 						type="button"
 						variant="ghost"
 					>
-						Continue with free chat
+						{intent === "tabs"
+							? "Keep my current tabs"
+							: "Continue with free chat"}
 					</Button>
 					<Button onClick={handleSubscribe} type="button">
-						See plans
+						{intent === "tabs" ? "Get desktop license" : "See plans"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

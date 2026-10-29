@@ -19,6 +19,8 @@ export default defineConfig({
 	clearScreen: false,
 	optimizeDeps: {
 		entries: ["open-source-licenses-proof.html"],
+
+		esbuildOptions: { target: "esnext" },
 	},
 	resolve: {
 		alias: { "@": desktopRoot },

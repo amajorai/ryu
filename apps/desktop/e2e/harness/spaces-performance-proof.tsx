@@ -15,6 +15,7 @@ import { useMentionableResources } from "@/src/hooks/useMentionableResources.ts"
 import { queryClient } from "@/src/lib/query-client.ts";
 import SpacesPage from "@/src/pages/SpacesPage.tsx";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
+import proofStyles from "./spaces-performance-proof.module.css";
 import "../../src/index.css";
 useNodeStore.setState({
 	nodes: [
@@ -77,7 +78,7 @@ function Shell() {
 			) : location.search.includes("previews") ? (
 				<div className="p-8">
 					{location.search.includes("offscreen") && (
-						<div aria-hidden="true" style={{ height: 1800 }} />
+						<div aria-hidden="true" className={proofStyles.fixture1} />
 					)}
 					{spaces.map((space) => (
 						<SpaceProjectFolder

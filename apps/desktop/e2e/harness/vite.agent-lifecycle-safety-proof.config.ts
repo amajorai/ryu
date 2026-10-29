@@ -32,4 +32,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "agent-lifecycle-safety-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

@@ -1,5 +1,5 @@
-// Dispatch-layer tests for the `ryu node` subcommand (cli/commands.ts nodeCommand).
-// It reads/writes the local ~/.ryu/nodes.json store, so every test redirects HOME +
+// Dispatch-layer tests for the `ryu node` subcommand (cli/builtins/session.ts nodeCommand).
+// It reads/writes the local ~/.ryu/state/nodes.json store, so every test redirects HOME +
 // USERPROFILE to a fresh temp dir — the same isolation the nodes.ts unit tests use —
 // and never touches the real home. The CoreApi is unused by this command (it is a
 // purely local store), so a rejecting stub proves no network call is made.
@@ -13,9 +13,30 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import type { ApiTarget } from "@ryuhq/core-client/client";
+import { z } from "zod";
 import { runCli } from "../cli/dispatch.ts";
 import type { CliIO, CoreApi } from "../cli/types.ts";
+import { type NodesConfig, nodesPath } from "../core/nodes.ts";
+
+const nodeListOutputSchema = z.looseObject({
+	active: z.string(),
+	nodes: z.array(
+		z.looseObject({
+			name: z.string(),
+			url: z.string(),
+			token: z.string().nullable(),
+			mesh: z
+				.looseObject({
+					socks5: z.string(),
+					magic_dns_name: z.string().nullable().optional(),
+				})
+				.nullable()
+				.optional(),
+		})
+	),
+});
 
 let tempHome = "";
 let savedHome: string | undefined;
@@ -45,15 +66,15 @@ afterEach(() => {
 	}
 });
 
-function makeIo(): { io: CliIO; out: () => string; err: () => string } {
+function makeIo() {
 	let outBuf = "";
 	let errBuf = "";
 	return {
 		io: {
-			out: (s) => {
+			out: (s: Parameters<CliIO["out"]>[0]) => {
 				outBuf += s;
 			},
-			err: (s) => {
+			err: (s: Parameters<CliIO["err"]>[0]) => {
 				errBuf += s;
 			},
 		},
@@ -80,16 +101,15 @@ function noNetworkApi(): CoreApi {
 	};
 }
 
-function seedNodes(config: {
-	default: string;
-	nodes: { name: string; url: string; token: string | null }[];
-}): void {
-	mkdirSync(join(tempHome, ".ryu"), { recursive: true });
-	writeFileSync(
-		join(tempHome, ".ryu", "nodes.json"),
-		JSON.stringify(config, null, 2),
-		"utf8"
-	);
+/** Seed the registry where the command reads it (`<data dir>/state/nodes.json`
+ *  under the temp home), so the test follows the shared data-dir layout. */
+function seedNodes(config: NodesConfig): void {
+	const path = nodesPath();
+	if (!path.startsWith(tempHome)) {
+		throw new Error(`nodes.json resolved outside the temp home: ${path}`);
+	}
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify(config, null, 2), "utf8");
 }
 
 // ── node ls ─────────────────────────────────────────────────────────────────
@@ -125,12 +145,12 @@ test("`node ls --json` emits the active name and the node list", async () => {
 		api: noNetworkApi(),
 	});
 	expect(code).toBe(0);
-	const parsed = JSON.parse(cap.out()) as {
-		active: string;
-		nodes: { name: string }[];
-	};
+	const parsed = nodeListOutputSchema.parse(JSON.parse(cap.out()));
 	expect(parsed.active).toBe("prod");
 	expect(parsed.nodes).toHaveLength(2);
+	// A saved node token is never printed, only that one exists.
+	expect(cap.out()).not.toContain('"t"');
+	expect(parsed.nodes.map((node) => node.token)).toEqual([null, "••••••"]);
 });
 
 test("`node ls` with no config file falls back to the synthesized local node", async () => {
@@ -166,7 +186,9 @@ test("`node use <name>` switches the active node and persists it", async () => {
 		io: reread.io,
 		api: noNetworkApi(),
 	});
-	expect((JSON.parse(reread.out()) as { active: string }).active).toBe("prod");
+	expect(nodeListOutputSchema.parse(JSON.parse(reread.out())).active).toBe(
+		"prod"
+	);
 });
 
 test("`node use <url>` matches a node by its url", async () => {
@@ -220,4 +242,126 @@ test("`node <garbage>` subcommand is a usage error (exit 2)", async () => {
 	});
 	expect(code).toBe(2);
 	expect(cap.err()).toContain("Usage");
+});
+
+// ── target resolution reads the saved registry ──────────────────────────────
+
+/** A CoreApi that records the target each `fetchApps` call is sent to. */
+function recordingApi(): { api: CoreApi; targets: ApiTarget[] } {
+	const targets: ApiTarget[] = [];
+	return {
+		targets,
+		api: {
+			...noNetworkApi(),
+			fetchApps: (target) => {
+				targets.push(target);
+				return Promise.resolve([]);
+			},
+		},
+	};
+}
+
+/** Run `fn` with RYU_CORE_URL / RYU_CORE_TOKEN unset, restoring them after. */
+async function withoutCoreEnv(fn: () => Promise<void>): Promise<void> {
+	const savedUrl = process.env.RYU_CORE_URL;
+	const savedToken = process.env.RYU_CORE_TOKEN;
+	delete process.env.RYU_CORE_URL;
+	delete process.env.RYU_CORE_TOKEN;
+	try {
+		await fn();
+	} finally {
+		for (const [key, value] of [
+			["RYU_CORE_URL", savedUrl],
+			["RYU_CORE_TOKEN", savedToken],
+		] as const) {
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		}
+	}
+}
+
+const PROD_NODES: NodesConfig = {
+	default: "local",
+	nodes: [
+		{ name: "local", url: "http://127.0.0.1:7980", token: null },
+		{ name: "prod", url: "https://prod.example.test", token: "prod-secret" },
+	],
+};
+
+test("after `node use prod`, a one-shot command targets prod with its saved token", async () => {
+	await withoutCoreEnv(async () => {
+		seedNodes(PROD_NODES);
+		await runCli(["node", "use", "prod"], {
+			io: makeIo().io,
+			api: noNetworkApi(),
+		});
+		const recorder = recordingApi();
+		const code = await runCli(["list", "--json"], {
+			io: makeIo().io,
+			api: recorder.api,
+		});
+		expect(code).toBe(0);
+		expect(recorder.targets).toEqual([
+			{ url: "https://prod.example.test", token: "prod-secret" },
+		]);
+	});
+});
+
+test("`--node <name>` targets that saved node for one command without changing the active node", async () => {
+	await withoutCoreEnv(async () => {
+		seedNodes(PROD_NODES);
+		const recorder = recordingApi();
+		const code = await runCli(["--node", "prod", "list", "--json"], {
+			io: makeIo().io,
+			api: recorder.api,
+		});
+		expect(code).toBe(0);
+		expect(recorder.targets[0]).toEqual({
+			url: "https://prod.example.test",
+			token: "prod-secret",
+		});
+		const listing = makeIo();
+		await runCli(["node", "ls", "--json"], {
+			io: listing.io,
+			api: noNetworkApi(),
+		});
+		expect(nodeListOutputSchema.parse(JSON.parse(listing.out())).active).toBe(
+			"local"
+		);
+	});
+});
+
+test("RYU_CORE_URL still overrides the saved active node", async () => {
+	await withoutCoreEnv(async () => {
+		seedNodes({ ...PROD_NODES, default: "prod" });
+		process.env.RYU_CORE_URL = "http://env-node.example.test:7980";
+		const recorder = recordingApi();
+		await runCli(["list", "--json"], {
+			io: makeIo().io,
+			api: recorder.api,
+		});
+		expect(recorder.targets[0]).toEqual({
+			url: "http://env-node.example.test:7980",
+			token: null,
+		});
+	});
+});
+
+test("`--node <unknown name>` is a usage error that names the saved nodes and makes no call", async () => {
+	await withoutCoreEnv(async () => {
+		seedNodes(PROD_NODES);
+		const cap = makeIo();
+		const recorder = recordingApi();
+		const code = await runCli(["--node", "staging", "list"], {
+			io: cap.io,
+			api: recorder.api,
+		});
+		expect(code).toBe(2);
+		expect(cap.err()).toContain("No saved node named or at 'staging'");
+		expect(cap.err()).toContain("local, prod");
+		expect(recorder.targets).toEqual([]);
+	});
 });

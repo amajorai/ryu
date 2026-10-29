@@ -1,3 +1,14 @@
+import type { CSSProperties } from "react";
+import { cn } from "../lib/utils.ts";
+
+import styles from "./progressive-blur.module.css";
+
+interface ProgressiveBlurDrawingStyle extends CSSProperties {
+	"--progressive-blur-background"?: string;
+	"--progressive-blur-filter"?: string;
+	"--progressive-blur-height"?: string;
+}
+
 export interface ProgressiveBlurProps {
 	backgroundColor?: string;
 	blurAmount?: string;
@@ -34,34 +45,36 @@ export function ProgressiveBlur({
 	// Track the active theme by default: `--background` is set per-preset on
 	// <html>, so this resolves (and re-resolves live) to the current theme color.
 	const bgColor = backgroundColor ?? "var(--background)";
+	const surfaceStyle: ProgressiveBlurDrawingStyle = {
+		"--progressive-blur-height": height,
+		"--progressive-blur-background": isTop
+			? `linear-gradient(to top, transparent, ${bgColor})`
+			: `linear-gradient(to bottom, transparent, ${bgColor})`,
+	};
+	const layerClasses = isTop
+		? [styles.topEighth, styles.topQuarter, styles.topHalf, styles.topFull]
+		: [
+				styles.bottomEighth,
+				styles.bottomQuarter,
+				styles.bottomHalf,
+				styles.bottomFull,
+			];
 
 	return (
 		<div
-			className={`pointer-events-none absolute left-0 w-full select-none ${className}`}
-			style={{
-				[isTop ? "top" : "bottom"]: 0,
-				height,
-				background: isTop
-					? `linear-gradient(to top, transparent, ${bgColor})`
-					: `linear-gradient(to bottom, transparent, ${bgColor})`,
-				WebkitUserSelect: "none",
-				userSelect: "none",
-			}}
+			className={`pointer-events-none absolute left-0 w-full select-none ${styles.surface} ${isTop ? styles.topSurface : styles.bottomSurface} ${className}`}
+			style={surfaceStyle}
 		>
 			{[0.125, 0.25, 0.5, 1].map((strength, index) => {
-				const mask = `linear-gradient(${isTop ? "to bottom" : "to top"}, black ${85 - index * 15}%, transparent ${100 - index * 10}%)`;
+				const layerStyle: ProgressiveBlurDrawingStyle = {
+					"--progressive-blur-filter": `blur(calc(${blurAmount} * ${strength}))`,
+				};
 				return (
 					<div
 						aria-hidden
+						className={cn(layerClasses[index], styles.layer)}
 						key={strength}
-						style={{
-							position: "absolute",
-							inset: 0,
-							maskImage: mask,
-							WebkitMaskImage: mask,
-							backdropFilter: `blur(calc(${blurAmount} * ${strength}))`,
-							WebkitBackdropFilter: `blur(calc(${blurAmount} * ${strength}))`,
-						}}
+						style={layerStyle}
 					/>
 				);
 			})}

@@ -1,4 +1,7 @@
-import type { RnpResumeResultV0 } from "@ryuhq/protocol/continuity";
+import type {
+	RnpResumeResultV0,
+	RnpWorkspaceResumeResultV0,
+} from "@ryuhq/protocol/continuity";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ContinueOnNodeDialog } from "../../src/components/chat/ContinueOnNodeDialog.tsx";
@@ -24,13 +27,14 @@ function Story() {
 	const [completed, setCompleted] = useState<{
 		node: Node;
 		result: RnpResumeResultV0;
+		workspace?: RnpWorkspaceResumeResultV0;
 	} | null>(null);
 
 	return (
 		<main className="min-h-screen bg-background px-8 py-10 text-foreground">
 			<div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-5xl items-center justify-center">
 				<section className="w-full max-w-xl rounded-3xl border bg-card p-7 shadow-2xl">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Ryu node continuity
 					</p>
 					<h1 className="mt-3 font-semibold text-2xl tracking-tight">
@@ -43,16 +47,24 @@ function Story() {
 
 					{completed ? (
 						<div
-							className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5"
+							className="mt-6 rounded-2xl border border-success/30 bg-success/10 p-5"
 							data-testid="handoff-complete"
 						>
-							<p className="font-medium text-emerald-300 text-sm">
+							<p className="font-medium text-sm text-success">
 								Conversation continued on {completed.node.name}
 							</p>
 							<p className="mt-2 text-muted-foreground text-sm">
 								{completed.result.imported.messages} messages and{" "}
 								{completed.result.imported.contextItems} context note imported.
 							</p>
+							{completed.workspace ? (
+								<p
+									className="mt-2 text-muted-foreground text-sm"
+									data-testid="handoff-workspace"
+								>
+									Working tree on {completed.workspace.branch}
+								</p>
+							) : null}
 						</div>
 					) : null}
 
@@ -71,7 +83,9 @@ function Story() {
 				conversationId="conversation-proof"
 				conversationTitle="Research handoff"
 				nodes={nodes}
-				onCompleted={(node, result) => setCompleted({ node, result })}
+				onCompleted={(node, result, workspace) =>
+					setCompleted({ node, result, workspace })
+				}
 				onOpenChange={setDialogOpen}
 				open={dialogOpen}
 				sourceNode={nodes[0]}

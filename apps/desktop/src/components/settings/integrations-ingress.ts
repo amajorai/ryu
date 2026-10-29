@@ -171,7 +171,9 @@ export function ingressUrlSavedToast(
  * the 400 names the pref and the env var to set, and the 409 (env pins the node to
  * own-relay) names the variable to unset.
  */
-export function ingressErrorDescription(error: unknown): string | undefined {
+export function ingressErrorDescription<TError>(
+	error: TError
+): string | undefined {
 	if (error instanceof ApiError) {
 		const server = error.serverMessage?.trim();
 		if (server) {

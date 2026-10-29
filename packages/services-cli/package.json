@@ -1,0 +1,49 @@
+{
+  "name": "@ryuhq/services-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ryu-services: a command line and stdio MCP server for Ryu's standalone services",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amajorai/ryu-sdk",
+    "directory": "packages/services-cli"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "ryu-services": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsup",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "@ryuhq/services": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@types/bun": "catalog:",
+    "tsup": "^8.5.0",
+    "typescript": "^5"
+  }
+}

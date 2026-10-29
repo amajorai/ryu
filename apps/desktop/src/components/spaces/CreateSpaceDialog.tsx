@@ -4,8 +4,9 @@ import {
 	type SpaceRetrievalMode,
 	type SpaceVisibility,
 	SpaceVisibilityChoice,
-} from "@ryu/blocks/desktop/spaces";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/blocks/desktop/spaces.tsx";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
 	DialogContent,
@@ -13,12 +14,12 @@ import {
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-} from "@ryu/ui/components/dialog";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { toast } from "@ryu/ui/components/sileo";
+} from "@ryu/ui/components/dialog.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useFriendlyMode } from "@ryu/ui/hooks/use-friendly-mode.ts";
-import { type ChangeEvent, type FormEvent, useState } from "react";
+import { type ChangeEvent, type SubmitEvent, useState } from "react";
 
 /**
  * What the picker shows before the user touches it. `"vector"` is Core's shipped
@@ -73,6 +74,7 @@ export function CreateSpaceDialog({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [friendly] = useFriendlyMode();
+	const tl = useLiteralMessages();
 
 	const reset = () => {
 		setName("");
@@ -82,7 +84,7 @@ export function CreateSpaceDialog({
 		setError(null);
 	};
 
-	const handleSubmit = async (e: FormEvent) => {
+	const handleSubmit = async (e: SubmitEvent) => {
 		e.preventDefault();
 		if (!name.trim()) {
 			return;
@@ -102,12 +104,18 @@ export function CreateSpaceDialog({
 			// user with a wrong belief about the Space they just made.
 			const shown = mode ?? DEFAULT_MODE;
 			if (created !== null && created !== shown) {
+				const retrievalMode = retrievalModeLabel(created, friendly);
 				toast.info({
 					// A fixed slot id: repeated creates on such a node should replace
 					// this notice, not stack identical copies of it.
 					id: "space-retrieval-mode-default",
-					title: `Created with ${retrievalModeLabel(created, friendly)} retrieval`,
-					description: `This node's default retrieval mode is ${retrievalModeLabel(created, friendly)}. You can change it in the space's Retrieval settings.`,
+					title: tl("Created with {retrievalMode} retrieval", {
+						retrievalMode,
+					}),
+					description: tl(
+						"This node's default retrieval mode is {retrievalMode}. You can change it in the space's Retrieval settings.",
+						{ retrievalMode }
+					),
 				});
 			}
 			reset();

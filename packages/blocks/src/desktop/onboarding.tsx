@@ -1,4 +1,11 @@
 "use client";
+import { cn } from "@ryu/ui/lib/utils.ts";
+import type { CSSProperties } from "react";
+import styles from "./onboarding.module.css";
+
+interface OnboardingProgressStyle extends CSSProperties {
+	"--onboarding-progress": string;
+}
 
 // Presentational layer of the desktop Onboarding wizard. The live app
 // (`apps/desktop/src/pages/OnboardingPage.tsx`) is a thin container that polls
@@ -13,8 +20,11 @@
 
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
+import type { GlyphValue } from "@ryu/ui/components/glyph.ts";
+import { GlyphDisplay } from "@ryu/ui/components/glyph-display.tsx";
 import { Input } from "@ryu/ui/components/input";
 import { Label } from "@ryu/ui/components/label";
 import { Logo as GhostOrb } from "@ryu/ui/components/logo";
@@ -26,7 +36,7 @@ import {
 import { TextSwap } from "@ryu/ui/components/text-swap";
 import { MetalFx } from "metal-fx";
 import { useTheme } from "next-themes";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 /** A detectable CLI agent as the picker needs it. Mirrors the container's
  *  `AgentCatalogEntry` (only the fields the view renders). */
@@ -77,6 +87,8 @@ export type OnboardingStep =
 /** Login-style PageHeader copy for each step. The container maps its phase
  *  onto `title` + optional `subtitle` (rotating loading lines use subtitle). */
 export interface OnboardingViewProps {
+	/** Custom default-agent avatar selected earlier in this first-run flow. */
+	agentAvatarGlyph?: GlyphValue;
 	/** Agents found on the user's system (detected on PATH), shown under the
 	 *  "Found on your system" header on the `agents` step and pre-selected. */
 	agents?: OnboardingAgentOption[];
@@ -185,7 +197,7 @@ export interface OnboardingViewProps {
 
 /**
  * Where a step's content picks the cascade back up. The shell's own reveal
- * spends two slots — the orb, then the header — so the first content line lands
+ * spends two slots — the avatar, then the header — so the first content line lands
  * on slot three and every line under it keeps the same 40ms rhythm. Exported
  * because the desktop-only steps (theme / preferences / privacy) mirror this
  * shell rather than rendering through it, and a second hand-picked delay there
@@ -196,8 +208,10 @@ export const ONBOARDING_CONTENT_DELAY_MS = 2 * STAGGER_STEP_MS;
 function OnboardingShell({
 	title,
 	subtitle,
+	avatarGlyph,
 	children,
 }: {
+	avatarGlyph?: GlyphValue;
 	title: string;
 	subtitle?: string;
 	children?: ReactNode;
@@ -222,7 +236,16 @@ function OnboardingShell({
 			>
 				<StaggerReveal>
 					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
+						{avatarGlyph ? (
+							<GlyphDisplay
+								alt="Your agent avatar"
+								corners="circle"
+								size={50}
+								value={avatarGlyph}
+							/>
+						) : (
+							<GhostOrb size="50px" variant="outline" />
+						)}
 					</div>
 					{/* Same title + muted subtitle stack as LoginView's PageHeader.
 				    TextSwap keeps rotating loading lines from hard-cutting. */}
@@ -246,72 +269,41 @@ function OnboardingShell({
 	);
 }
 
-/** Soft ceiling for the fake crawl so a long wait never claims "almost done"
- *  (and so the next phase jump still reads as forward motion). */
-function progressCrawlCeiling(floor: number): number {
-	if (floor >= 90) {
-		return 98;
-	}
-	if (floor >= 50) {
-		return 88;
-	}
-	return 50;
-}
-
-const PROGRESS_CRAWL_MS = 3500;
-
-/** Progress bar shown on the auto-advancing steps. The phase-derived percentage
- *  is the floor; a +1 crawl every few seconds inches toward a soft ceiling so
- *  the bar never looks frozen during long waits (local install can take minutes).
- *  A continuously-sweeping marquee (`t-progress-marquee`) rides inside the fill
- *  for extra motion. The marquee is clipped to the filled portion only. `done`
- *  pins to 100% and drops the motion. Styling mirrors the shared Progress
- *  track/indicator (`h-3`, `rounded-full`, `bg-muted`/`bg-primary`). */
+/** Progress bar for auto-advancing steps. It shows reported progress when known
+ *  and an indeterminate indicator while a phase has no numeric progress. `done`
+ *  pins to 100%. The slim muted track and foreground fill match the onboarding
+ *  mono buttons in both themes. */
 function ProgressBar({ value, done }: { value?: number; done?: boolean }) {
-	const floor = Math.max(0, Math.min(100, value ?? 0));
-	const [display, setDisplay] = useState(floor);
-
-	// Snap up when the phase advances past where the crawl has reached.
-	useEffect(() => {
-		setDisplay((prev) => Math.max(prev, floor));
-	}, [floor]);
-
-	// Fake crawl: +1 every few seconds, capped below the next phase jump.
-	useEffect(() => {
-		if (done) {
-			return;
-		}
-		const ceiling = progressCrawlCeiling(floor);
-		const id = setInterval(() => {
-			setDisplay((prev) => {
-				if (prev >= ceiling) {
-					return prev;
-				}
-				return Math.min(ceiling, prev + 1);
-			});
-		}, PROGRESS_CRAWL_MS);
-		return () => clearInterval(id);
-	}, [done, floor]);
-
-	const pct = done ? 100 : display;
+	const pct = done
+		? 100
+		: value === undefined
+			? null
+			: Math.max(0, Math.min(100, value));
 	return (
 		<div className="flex w-60 flex-col gap-1.5">
 			<div
 				aria-label="Setting up"
 				aria-valuemax={100}
 				aria-valuemin={0}
-				aria-valuenow={Math.round(pct)}
-				className="t-progress-track relative h-3 w-full overflow-hidden rounded-full bg-muted"
+				aria-valuenow={pct === null ? undefined : Math.round(pct)}
+				className="relative h-1 w-full overflow-hidden rounded-full bg-muted"
 				role="progressbar"
 			>
-				<div
-					className="relative h-full overflow-hidden rounded-full bg-primary transition-[width] duration-700 ease-out"
-					style={{ width: `${pct}%` }}
-				>
-					{done ? null : (
-						<span aria-hidden="true" className="t-progress-marquee" />
-					)}
-				</div>
+				{pct === null ? (
+					<span aria-hidden="true" className="t-progress-marquee" />
+				) : (
+					<div
+						className={cn(
+							"h-full rounded-full bg-foreground duration-300 ease-out",
+							styles.progress
+						)}
+						style={
+							{
+								"--onboarding-progress": `${pct}%`,
+							} satisfies OnboardingProgressStyle as OnboardingProgressStyle
+						}
+					/>
+				)}
 			</div>
 		</div>
 	);
@@ -356,14 +348,13 @@ function AgentRow({
 						</span>
 					) : null}
 					<span className="font-medium">{agent.name}</span>
-					{agent.detected ? (
-						<Badge className="text-xs" variant="secondary">
-							Found
-						</Badge>
-					) : null}
+					{agent.detected ? <Badge variant="secondary">Found</Badge> : null}
 				</span>
 				{agent.description ? (
-					<span className="block truncate text-muted-foreground text-sm">
+					<span
+						className="block truncate text-muted-foreground text-sm"
+						title={agent.description}
+					>
 						{agent.description}
 					</span>
 				) : null}
@@ -524,9 +515,7 @@ function SkillPackRow({
 			<span className="min-w-0 flex-1">
 				<span className="flex flex-wrap items-center gap-2">
 					<span className="font-medium">{pack.name}</span>
-					<Badge className="text-xs" variant="secondary">
-						Recommended
-					</Badge>
+					<Badge variant="secondary">Recommended</Badge>
 				</span>
 				<span className="mt-1 block text-muted-foreground text-sm leading-relaxed">
 					{pack.description}
@@ -798,7 +787,8 @@ function ChooseStep({
 	// snaps the label to the theme's foreground (black in light mode) on hover.
 	const managedButton = (
 		<Button
-			className={isManagedUpsell ? "hover:!text-inherit w-full" : "w-full"}
+			appearance={isManagedUpsell ? "managed-shader" : undefined}
+			className="w-full"
 			disabled={managedBusy || managedLoading}
 			onClick={onChooseManaged}
 			size="lg"
@@ -950,17 +940,15 @@ function ChooseStep({
 }
 
 function CardHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
+	const localizedTitle = useLocalizedText(title, { literal: true });
 	return (
 		<div className="space-y-1">
 			<p className="font-medium text-muted-foreground text-xs uppercase tracking-wider">
 				{eyebrow}
 			</p>
-			<PageHeader
-				as="h2"
-				stagger={false}
-				title={title}
-				titleClassName="font-medium text-lg"
-			/>
+			<div className="space-y-1 text-left">
+				<h2 className={styles.welcomeTitle}>{localizedTitle}</h2>
+			</div>
 		</div>
 	);
 }
@@ -1116,7 +1104,7 @@ function MicStep({
 }
 
 export function OnboardingView(props: OnboardingViewProps) {
-	const { step, title, subtitle } = props;
+	const { agentAvatarGlyph, step, title, subtitle } = props;
 
 	// Agents step: when we detected installs, lead with that — otherwise a
 	// generic pick-your-agents prompt. Overrides the container's default copy.
@@ -1140,7 +1128,11 @@ export function OnboardingView(props: OnboardingViewProps) {
 
 	if (step === "choose") {
 		return (
-			<OnboardingShell subtitle={headerSubtitle} title={headerTitle}>
+			<OnboardingShell
+				avatarGlyph={agentAvatarGlyph}
+				subtitle={headerSubtitle}
+				title={headerTitle}
+			>
 				<ChooseStep {...props} />
 			</OnboardingShell>
 		);
@@ -1148,7 +1140,11 @@ export function OnboardingView(props: OnboardingViewProps) {
 
 	if (step === "connect") {
 		return (
-			<OnboardingShell subtitle={headerSubtitle} title={headerTitle}>
+			<OnboardingShell
+				avatarGlyph={agentAvatarGlyph}
+				subtitle={headerSubtitle}
+				title={headerTitle}
+			>
 				<ConnectStep {...props} />
 			</OnboardingShell>
 		);
@@ -1156,7 +1152,11 @@ export function OnboardingView(props: OnboardingViewProps) {
 
 	if (step === "agents") {
 		return (
-			<OnboardingShell subtitle={headerSubtitle} title={headerTitle}>
+			<OnboardingShell
+				avatarGlyph={agentAvatarGlyph}
+				subtitle={headerSubtitle}
+				title={headerTitle}
+			>
 				<AgentPicker {...props} />
 			</OnboardingShell>
 		);
@@ -1164,7 +1164,11 @@ export function OnboardingView(props: OnboardingViewProps) {
 
 	if (step === "skills") {
 		return (
-			<OnboardingShell subtitle={headerSubtitle} title={headerTitle}>
+			<OnboardingShell
+				avatarGlyph={agentAvatarGlyph}
+				subtitle={headerSubtitle}
+				title={headerTitle}
+			>
 				<SkillPackPicker {...props} />
 			</OnboardingShell>
 		);
@@ -1172,7 +1176,11 @@ export function OnboardingView(props: OnboardingViewProps) {
 
 	if (step === "features") {
 		return (
-			<OnboardingShell subtitle={headerSubtitle} title={headerTitle}>
+			<OnboardingShell
+				avatarGlyph={agentAvatarGlyph}
+				subtitle={headerSubtitle}
+				title={headerTitle}
+			>
 				<FeatureStep {...props} />
 			</OnboardingShell>
 		);
@@ -1180,7 +1188,11 @@ export function OnboardingView(props: OnboardingViewProps) {
 
 	if (step === "mic") {
 		return (
-			<OnboardingShell subtitle={headerSubtitle} title={headerTitle}>
+			<OnboardingShell
+				avatarGlyph={agentAvatarGlyph}
+				subtitle={headerSubtitle}
+				title={headerTitle}
+			>
 				<MicStep {...props} />
 			</OnboardingShell>
 		);
@@ -1190,7 +1202,11 @@ export function OnboardingView(props: OnboardingViewProps) {
 	// shell no longer reveals its children, so the bar needs its own reveal or it
 	// would be the one thing on screen that hard-cuts in.
 	return (
-		<OnboardingShell subtitle={headerSubtitle} title={headerTitle}>
+		<OnboardingShell
+			avatarGlyph={agentAvatarGlyph}
+			subtitle={headerSubtitle}
+			title={headerTitle}
+		>
 			<StaggerReveal startDelay={ONBOARDING_CONTENT_DELAY_MS} wrap>
 				<ProgressBar done={step === "done"} value={props.progress} />
 			</StaggerReveal>

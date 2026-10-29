@@ -29,9 +29,9 @@ import type {
 	CatalogEntry,
 	PluginCatalogDetail,
 } from "@ryu/marketplace/catalog/types";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { StatusBadge } from "@ryu/ui/components/status-badge";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { StatusBadge } from "@ryu/ui/components/status-badge.tsx";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 
@@ -149,11 +149,7 @@ function Story() {
 								<div className="flex flex-wrap gap-1">
 									{["browser", "automation", "headless", "chromium"].map(
 										(tag) => (
-											<Badge
-												className="font-normal text-xs"
-												key={tag}
-												variant="outline"
-											>
+											<Badge key={tag} typography="normal" variant="outline">
 												{tag}
 											</Badge>
 										)
@@ -208,9 +204,7 @@ function Story() {
 									    theme — `secondary` is a near-black plate in dark mode and
 									    disappears into the dither, which is exactly the failure
 									    the ghost variant had. */}
-									<Button className="shadow-sm" size="sm">
-										Add
-									</Button>
+									<Button size="sm">Add</Button>
 									<span className="rounded-full bg-white/15 px-2 py-1 text-white/85 backdrop-blur-sm">
 										♥
 									</span>

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
-if (typeof document === "undefined") {
+if (globalThis.document === undefined) {
 	GlobalRegistrator.register();
 }
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -20,6 +20,8 @@ mock.module("@/src/hooks/useActiveNode.ts", () => ({
 	useActiveNode: () => node,
 }));
 mock.module("@/src/lib/api/composio.ts", () => ({
+	disconnectAgentComposioConnection: async () => undefined,
+	fetchAgentComposioConnections: async () => ({}),
 	fetchComposioActions: async () => [],
 	fetchComposioConnections: async () => [],
 	fetchComposioStatus: async () => {
@@ -28,6 +30,10 @@ mock.module("@/src/lib/api/composio.ts", () => ({
 	},
 	fetchComposioToolkits: async () => [],
 	fetchComposioTriggers: async () => [],
+	initiateAgentComposioConnection: async () => ({
+		connectionId: "agent-connection",
+		redirectUrl: "https://example.test/connect",
+	}),
 	initiateComposioConnection: async () => ({
 		connectionId: "connection",
 		redirectUrl: "https://example.test/connect",

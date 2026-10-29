@@ -3,11 +3,16 @@
 import { useDraggable } from "@platejs/dnd";
 import { Image, ImagePlugin, useMediaState } from "@platejs/media/react";
 import { ResizableProvider, useResizableValue } from "@platejs/resizable";
+import {
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { TImageElement } from "platejs";
 import type { PlateElementProps } from "platejs/react";
 import { PlateElement, withHOC } from "platejs/react";
-
+import type { CSSProperties as ReactCSSProperties } from "react";
+import editorStyles from "../editor-lint.module.css";
 import { Caption, CaptionTextarea } from "./caption.tsx";
 import { MediaToolbar } from "./media-toolbar.tsx";
 import {
@@ -15,6 +20,10 @@ import {
 	Resizable,
 	ResizeHandle,
 } from "./resize-handle.tsx";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editormediaImageNode1-width"?: string | number;
+}
 
 export const ImageElement = withHOC(
 	ResizableProvider,
@@ -26,6 +35,11 @@ export const ImageElement = withHOC(
 			element: props.element,
 		});
 
+		const editormediaImageNode1Style: EditorVariableStyle = {
+			"--editormediaImageNode1-width": isNativeNumber(width)
+				? `${width}px`
+				: width,
+		};
 		return (
 			<MediaToolbar plugin={ImagePlugin}>
 				<PlateElement {...props} className="py-2.5">
@@ -43,7 +57,11 @@ export const ImageElement = withHOC(
 							/>
 							<div>
 								<Image
-									alt={props.attributes.alt as string | undefined}
+									alt={
+										isNativeText(props.attributes.alt)
+											? props.attributes.alt
+											: undefined
+									}
 									className={cn(
 										"block w-full max-w-full cursor-pointer object-cover px-0",
 										"rounded-sm",
@@ -61,12 +79,16 @@ export const ImageElement = withHOC(
 							/>
 						</Resizable>
 
-						<Caption align={align} style={{ width }}>
+						<Caption
+							align={align}
+							className={editorStyles.editormediaImageNode1}
+							style={editormediaImageNode1Style}
+						>
 							<CaptionTextarea
 								onFocus={(e) => {
 									e.preventDefault();
 								}}
-								placeholder="Write a caption..."
+								placeholder="Write a caption…"
 								readOnly={readOnly}
 							/>
 						</Caption>

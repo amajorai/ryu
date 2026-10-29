@@ -22,10 +22,18 @@ import type { SettingsEntry } from "./settings-index.ts";
 let pending: SettingsEntry | null = null;
 
 /**
+ * The reveal a content pane claimed and is still polling for. A pane can
+ * claim before the section's body renders (the Gateway dialog shows a skeleton
+ * until its status loads), so a sub-paged body that mounts later still has to
+ * learn which page to open while the poll is running.
+ */
+let revealing: SettingsEntry | null = null;
+
+/**
  * Panes that need to know a reveal was requested BEFORE it is consumed.
  *
  * A pane split into sub-pages has to open the right one first: the row is not in
- * the DOM until it does, and {@link revealSettingWhenReady} gives up after two
+ * the DOM until it does, and {@link revealSettingWhenReady} gives up after five
  * seconds of polling. Consuming here would race the content pane for the same
  * one-shot request, so these listeners only ever peek.
  */
@@ -40,11 +48,15 @@ export function requestSettingReveal(entry: SettingsEntry): void {
 }
 
 /**
- * Read the pending reveal for `section` WITHOUT consuming it. For a sub-paged
- * pane deciding which page to open; the content pane still consumes it.
+ * Read the pending reveal for `section` WITHOUT consuming it, or else the one
+ * a content pane is still polling for. For a sub-paged pane deciding which
+ * page to open; the content pane still consumes it.
  */
 export function peekSettingReveal(section: string): SettingsEntry | null {
-	return pending && pending.section === section ? pending : null;
+	if (pending?.section === section) {
+		return pending;
+	}
+	return revealing?.section === section ? revealing : null;
 }
 
 /** Subscribe to reveal requests. Returns an unsubscribe function. */
@@ -73,6 +85,7 @@ export function consumeSettingReveal(section: string): SettingsEntry | null {
 /** Drop any pending reveal (the dialog closed, the user navigated away). */
 export function clearSettingReveal(): void {
 	pending = null;
+	revealing = null;
 }
 
 /** Normalized text of a node, for comparing against an indexed label. */
@@ -147,12 +160,19 @@ export function flashSetting(el: HTMLElement): void {
 	);
 }
 
-/** How long to keep looking for a row that has not mounted yet. */
-const REVEAL_TIMEOUT_MS = 2000;
+/**
+ * How long to keep looking for a row that has not mounted yet. Long enough for
+ * a pane that fetches before it renders its body (the Gateway dialog's status)
+ * and then opens the row's sub-page.
+ */
+const REVEAL_TIMEOUT_MS = 5000;
 
 /**
  * Poll for the entry's element until it exists or the deadline passes, then
  * scroll + flash it. Returns a cancel function (call it on unmount).
+ *
+ * While it polls, {@link peekSettingReveal} still reports the entry, so a
+ * sub-paged body that renders after the claim opens the right page.
  *
  * `requestAnimationFrame` rather than an interval: it stops on its own while the
  * window is backgrounded, and it lines the scroll up with a paint.
@@ -165,16 +185,24 @@ export function revealSettingWhenReady(
 	const deadline = now() + REVEAL_TIMEOUT_MS;
 	let frame = 0;
 	let cancelled = false;
+	revealing = entry;
+	const settle = () => {
+		if (revealing === entry) {
+			revealing = null;
+		}
+	};
 	const tick = () => {
 		if (cancelled) {
 			return;
 		}
 		const el = findSettingElement(entry, root);
 		if (el) {
+			settle();
 			flashSetting(el);
 			return;
 		}
 		if (now() >= deadline) {
+			settle();
 			return;
 		}
 		frame = requestAnimationFrame(tick);
@@ -183,5 +211,6 @@ export function revealSettingWhenReady(
 	return () => {
 		cancelled = true;
 		cancelAnimationFrame(frame);
+		settle();
 	};
 }

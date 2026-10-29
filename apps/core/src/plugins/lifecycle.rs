@@ -253,7 +253,7 @@ pub async fn install_app(store: &PluginStore, manifest: &PluginManifest) -> Resu
     // arrived without an observed source, and says so by passing `None` — which
     // reads as untrusted, not as trusted-by-default. The catalog install path
     // calls `install_app_with_provenance` with what it actually saw.
-    let provenance = if crate::plugins::builtins::is_compiled_in_manifest(&manifest.id) {
+    let provenance = if crate::plugins::builtins::is_exact_compiled_manifest(manifest) {
         Some(crate::plugins::isolation::PluginProvenance::builtin())
     } else {
         None
@@ -327,7 +327,10 @@ pub async fn install_app_with_provenance(
         .await
         .map_err(|e| anyhow::anyhow!("install failed: {e}"))?;
 
-    if let Some(ui_code) = super::seed::compiled_in_ui_code(&manifest.id) {
+    if let Some(ui_code) = crate::plugins::builtins::is_exact_compiled_manifest(manifest)
+        .then(|| super::seed::compiled_in_ui_code(&manifest.id))
+        .flatten()
+    {
         match store.set_ui_code(&manifest.id, Some(ui_code)).await {
             Ok(_) => tracing::info!(
                 "install '{}': attached its compiled-in companion bundle ({} bytes)",
@@ -535,6 +538,23 @@ async fn enable_app_inner(
             continue;
         }
 
+        // A locally revoked plugin (or revoked installed version) never enables,
+        // whether it is the target or an auto-enabled dependency.
+        let installed_version = records
+            .iter()
+            .find(|r| r.id == *id)
+            .map_or("", |r| r.version.as_str());
+        if let Some(entry) = store
+            .revocation_for(id, installed_version)
+            .await
+            .map_err(EnableError::Other)?
+        {
+            return Err(EnableError::Other(anyhow::anyhow!(
+                "plugin '{id}' is revoked on this node ('{entry}'); remove the revocation \
+                 before enabling it"
+            )));
+        }
+
         // The target uses the caller's manifest; a dependency uses its own.
         let dep_manifest: &PluginManifest = if is_target {
             manifest
@@ -565,9 +585,42 @@ async fn enable_app_inner(
             });
         }
 
+        let mut approved = validation.approved;
+        if let Some(previous) = records.iter().find(|record| record.id == dep_manifest.id) {
+            let mut optional: Vec<String> = dep_manifest
+                .optional_permission_grants
+                .iter()
+                .filter(|grant| {
+                    previous.approved_grants.contains(grant)
+                        && !dep_manifest.permission_grants.contains(grant)
+                })
+                .cloned()
+                .collect();
+            optional.sort();
+            optional.dedup();
+            if !optional.is_empty() {
+                // Only an existing explicit approval can be reconsidered here.
+                // Optional denial/unavailability cannot block ordinary app enable.
+                match validate_grants_via_gateway(
+                    &optional,
+                    &dep_manifest.id,
+                    gateway_base_url,
+                    gateway_token,
+                    http_client,
+                )
+                .await
+                {
+                    Ok(optional_validation) => approved.extend(optional_validation.approved),
+                    Err(error) => {
+                        tracing::warn!(%error, "optional app permissions unavailable; leaving them off")
+                    }
+                }
+            }
+        }
+
         pending.push(Pending {
             id: dep_manifest.id.clone(),
-            approved: validation.approved,
+            approved,
             is_target,
         });
     }
@@ -693,6 +746,7 @@ pub async fn set_app_grants(
     let declared: std::collections::HashSet<&str> = manifest
         .permission_grants
         .iter()
+        .chain(&manifest.optional_permission_grants)
         .map(String::as_str)
         .collect();
     for grant in desired {
@@ -1184,12 +1238,15 @@ pub fn plan_update(
 ///
 /// - Refuses a downgrade (new < installed) unless `force = true` ([`plan_update`]).
 /// - Same version: no-op, returns the current record (no write).
-/// - Otherwise: `set_version` THEN `set_ui_code`. `set_version` leaves the
-///   `enabled` bit and `approved_grants` untouched, so a disabled app stays
-///   disabled and an enabled app keeps its grants — the update never silently
-///   (re-)enables. The `ui_code` is replaced with whatever the verified descriptor
-///   carried (`None` for a manifest-only / unsigned version, which correctly clears
-///   any stale bundled code).
+/// - Otherwise: one [`PluginStore::apply_update`] write commits the new version,
+///   the grants reconciled against the new manifest, and the `ui_code` together,
+///   so a failure or crash part-way cannot leave the new version recorded over
+///   the old code (which would make every retry a same-version no-op). The
+///   `enabled` bit is untouched, so a disabled app stays disabled and the update
+///   never silently (re-)enables; approved grants survive unless the new manifest
+///   no longer declares them. The `ui_code` is replaced with whatever the verified
+///   descriptor carried (`None` for a manifest-only / unsigned version, which
+///   correctly clears any stale bundled code).
 ///
 /// Does NOT enable a disabled app; the caller runs [`enable_app`] afterwards if it
 /// wants the new version active.
@@ -1212,11 +1269,14 @@ pub async fn update_app(
         UpdatePlan::Proceed => {}
     }
 
-    // Bump the version (this also confirms the row still exists), then reconcile
-    // persisted approvals against the new manifest before replacing the bundled
-    // UI code. A removed declaration revokes the old capability immediately.
-    let mut updated = store
-        .set_version(&manifest.id, &manifest.version)
+    // Reconcile persisted approvals against the new manifest: a removed
+    // declaration revokes the old capability immediately. Grants are rewritten
+    // only when something was revoked, as before.
+    let reconciled_grants = manifest.approved_permission_grants(&record.approved_grants);
+    let grants_update = (reconciled_grants.len() != record.approved_grants.len())
+        .then_some(reconciled_grants.as_slice());
+    store
+        .apply_update(&manifest.id, &manifest.version, grants_update, ui_code)
         .await
         .map_err(UpdateError::Other)?
         .ok_or_else(|| {
@@ -1224,35 +1284,7 @@ pub async fn update_app(
                 "app '{}' disappeared during update",
                 manifest.id
             ))
-        })?;
-    let reconciled_grants: Vec<String> = record
-        .approved_grants
-        .iter()
-        .filter(|grant| {
-            manifest
-                .permission_grants
-                .iter()
-                .any(|declared| declared == *grant)
         })
-        .cloned()
-        .collect();
-    if reconciled_grants.len() != record.approved_grants.len() {
-        updated = store
-            .set_approved_grants(&manifest.id, &reconciled_grants)
-            .await
-            .map_err(UpdateError::Other)?
-            .ok_or_else(|| {
-                UpdateError::Other(anyhow::anyhow!(
-                    "app '{}' disappeared while reconciling grants",
-                    manifest.id
-                ))
-            })?;
-    }
-    store
-        .set_ui_code(&manifest.id, ui_code)
-        .await
-        .map_err(UpdateError::Other)?;
-    Ok(updated)
 }
 
 /// Plan which **new** dependencies an update must install.
@@ -1455,7 +1487,8 @@ fn is_stub_mode() -> bool {
 /// grant that ends in "a process the manifest chose gets executed" belongs here too
 /// — that is the membership rule for this list, not the specific three.
 fn stub_may_approve(grant: &str) -> bool {
-    !(cfg!(not(debug_assertions)) && is_arbitrary_code_execution_grant(grant))
+    grant != "usage:audit"
+        && !(cfg!(not(debug_assertions)) && is_arbitrary_code_execution_grant(grant))
 }
 
 /// The membership rule behind [`stub_may_approve`], split out so it is testable on
@@ -1487,6 +1520,12 @@ mod tests {
     use crate::plugin_manifest::schema::RunnableEntry;
     use crate::plugin_manifest::PluginManifest;
     use crate::runnable::RunnableKind;
+
+    #[test]
+    fn administrative_audit_requires_explicit_validation_even_with_the_stub() {
+        assert!(!stub_may_approve("usage:audit"));
+        assert!(stub_may_approve("usage:read"));
+    }
 
     /// Pins the arbitrary-code-execution set the release-build stub seam refuses.
     ///
@@ -1566,7 +1605,167 @@ mod tests {
         PluginStore::open_in_memory().unwrap()
     }
 
+    #[tokio::test]
+    async fn optional_audit_keeps_enable_available_and_requires_explicit_persisted_approval() {
+        let _env = stub_grants_guard();
+        let previous_stub = std::env::var(ENV_STUB_GRANTS).ok();
+        std::env::remove_var(ENV_STUB_GRANTS);
+        let allow_audit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let handler_state = allow_audit.clone();
+        let router = axum::Router::new().route("/v1/grants/validate", axum::routing::post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+            let allow_audit = handler_state.clone();
+            async move {
+                let requested: Vec<String> = serde_json::from_value(body["grants"].clone()).expect("requested grants");
+                let (approved, denied): (Vec<_>, Vec<_>) = requested.into_iter().partition(|grant| grant != "usage:audit" || allow_audit.load(std::sync::atomic::Ordering::SeqCst));
+                axum::Json(json!({ "all_approved": denied.is_empty(), "approved": approved, "denied": denied }))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("local policy broker");
+        let base = format!(
+            "http://{}",
+            listener.local_addr().expect("listener address")
+        );
+        let server =
+            tokio::spawn(
+                async move { axum::serve(listener, router).await.expect("broker server") },
+            );
+        let directory = tempfile::tempdir().expect("temporary store");
+        let path = directory.path().join("plugins.db");
+        let store = PluginStore::open_at(&path).expect("store");
+        let mut manifest = crate::plugin_manifest::PluginManifestLoader::load_install_catalog()
+            .into_iter()
+            .find(|manifest| manifest.id == "@ryu/video-studio")
+            .expect("actual Video Studio manifest");
+        // The grant sets come from the shipped manifest itself.
+        let shipped: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../generated/ryu-runtime/apps-store/video-studio/manifest.json"
+        ))
+        .expect("Video Studio manifest JSON");
+        let shipped_grants = |key: &str| -> Vec<String> {
+            serde_json::from_value(shipped[key].clone()).expect("grant list")
+        };
+        assert_eq!(
+            manifest.optional_permission_grants,
+            shipped_grants("optional_permission_grants")
+        );
+        assert_eq!(
+            manifest.permission_grants,
+            shipped_grants("permission_grants")
+        );
+        assert!(manifest
+            .optional_permission_grants
+            .contains(&"usage:audit".to_owned()));
+        assert!(!manifest
+            .permission_grants
+            .contains(&"usage:audit".to_owned()));
+        // A Core-tier builtin runs its sidecar without requesting the grant
+        // Gateway denies to apps (`may_run_sidecar`).
+        assert!(!manifest
+            .permission_grants
+            .iter()
+            .chain(&manifest.optional_permission_grants)
+            .any(|grant| grant == "sidecar:process"));
+        install_app(&store, &manifest).await.expect("install");
+        let client = reqwest::Client::new();
+        let enabled = enable_app(
+            &store,
+            &manifest,
+            std::slice::from_ref(&manifest),
+            &base,
+            None,
+            &client,
+        )
+        .await
+        .expect("required permissions enable ordinary editing");
+        assert!(enabled.target.enabled);
+        assert!(!enabled
+            .target
+            .approved_grants
+            .contains(&"usage:audit".to_owned()));
+        let mut desired = enabled.target.approved_grants.clone();
+        desired.push("usage:audit".to_owned());
+        assert!(
+            set_app_grants(&store, &manifest, &desired, &base, None, &client)
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .get(&manifest.id)
+                .await
+                .expect("read")
+                .expect("installed")
+                .enabled
+        );
+        allow_audit.store(true, std::sync::atomic::Ordering::SeqCst);
+        let approved = set_app_grants(&store, &manifest, &desired, &base, None, &client)
+            .await
+            .expect("explicit consent allowed by operator");
+        assert!(approved.approved_grants.contains(&"usage:audit".to_owned()));
+        drop(store);
+        let store = PluginStore::open_at(&path).expect("restart store");
+        assert!(store
+            .get(&manifest.id)
+            .await
+            .expect("read")
+            .expect("persisted app")
+            .approved_grants
+            .contains(&"usage:audit".to_owned()));
+        manifest.version = "999.0.0".to_owned();
+        manifest
+            .optional_permission_grants
+            .push("unapproved:extra".to_owned());
+        let updated = update_app(&store, &manifest, None, false)
+            .await
+            .expect("update");
+        assert!(updated.approved_grants.contains(&"usage:audit".to_owned()));
+        assert!(!updated
+            .approved_grants
+            .contains(&"unapproved:extra".to_owned()));
+        allow_audit.store(false, std::sync::atomic::Ordering::SeqCst);
+        let enabled = enable_app(
+            &store,
+            &manifest,
+            std::slice::from_ref(&manifest),
+            &base,
+            None,
+            &client,
+        )
+        .await
+        .expect("optional rejection cannot block re-enable");
+        assert!(enabled.target.enabled);
+        assert!(!enabled
+            .target
+            .approved_grants
+            .contains(&"usage:audit".to_owned()));
+        server.abort();
+        match previous_stub {
+            Some(value) => std::env::set_var(ENV_STUB_GRANTS, value),
+            None => std::env::remove_var(ENV_STUB_GRANTS),
+        }
+    }
+
     // ── install ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn altered_compiled_manifest_cannot_gain_builtin_provenance() {
+        let original = crate::plugin_manifest::PluginManifestLoader::load_install_catalog()
+            .into_iter()
+            .next()
+            .expect("compiled install catalog");
+        let trusted = install_app(&store(), &original)
+            .await
+            .expect("compiled install");
+        assert!(trusted.provenance.is_some());
+        let mut changed = original;
+        changed.permission_grants.push("hook:run-agent".to_owned());
+        let untrusted = install_app(&store(), &changed)
+            .await
+            .expect("altered install");
+        assert!(untrusted.provenance.is_none());
+    }
 
     #[tokio::test]
     async fn install_creates_disabled_record() {
@@ -1726,6 +1925,46 @@ mod tests {
         )
         .await;
         assert!(result.is_err(), "enable of uninstalled app should fail");
+
+        match prev {
+            Some(v) => std::env::set_var(super::ENV_STUB_GRANTS, v),
+            None => std::env::remove_var(super::ENV_STUB_GRANTS),
+        }
+    }
+
+    #[tokio::test]
+    async fn enable_refuses_a_revoked_plugin() {
+        let _env = stub_grants_guard();
+        let prev = std::env::var(super::ENV_STUB_GRANTS).ok();
+        std::env::set_var(super::ENV_STUB_GRANTS, "1");
+
+        let s = store();
+        let m = make_manifest("com.test.revoked", "1.0.0", vec![]);
+        install_app(&s, &m).await.unwrap();
+        s.revoke("com.test.revoked", Some("1.0.0"), None)
+            .await
+            .unwrap();
+        let client = reqwest::Client::new();
+        let result = enable_app(
+            &s,
+            &m,
+            std::slice::from_ref(&m),
+            "http://127.0.0.1:7981",
+            None,
+            &client,
+        )
+        .await;
+        let Err(EnableError::Other(error)) = result else {
+            panic!("a revoked plugin must not enable");
+        };
+        assert!(error.to_string().contains("revoked"));
+        assert!(
+            !s.get_record("com.test.revoked")
+                .await
+                .unwrap()
+                .unwrap()
+                .enabled
+        );
 
         match prev {
             Some(v) => std::env::set_var(super::ENV_STUB_GRANTS, v),
@@ -2101,6 +2340,63 @@ mod tests {
         let m3 = make_manifest("com.test.app", "3.0.0", vec![]);
         update_app(&s, &m3, None, false).await.unwrap();
         assert_eq!(s.get_ui_code("com.test.app").await.unwrap(), None);
+    }
+
+    /// Version, reconciled grants and ui_code land in one write: after an update
+    /// none of them is left at its old value, and `enabled` is untouched.
+    #[tokio::test]
+    async fn update_commits_version_grants_and_ui_code_together() {
+        let _stub = StubGrants::on();
+        let s = store();
+        let old = make_manifest(
+            "com.test.app",
+            "1.0.0",
+            vec!["spaces:docs", "mcp:web_search"],
+        );
+        install_app(&s, &old).await.unwrap();
+        let client = reqwest::Client::new();
+        enable_app(
+            &s,
+            &old,
+            std::slice::from_ref(&old),
+            "http://127.0.0.1:7981",
+            None,
+            &client,
+        )
+        .await
+        .unwrap();
+        s.set_ui_code("com.test.app", Some("OLD")).await.unwrap();
+        let before = s.get("com.test.app").await.unwrap().unwrap();
+        assert_eq!(
+            before.approved_grants.len(),
+            2,
+            "both declared grants start approved"
+        );
+
+        let new = make_manifest("com.test.app", "2.0.0", vec!["spaces:docs"]);
+        let returned = update_app(&s, &new, Some("NEW"), false).await.unwrap();
+        assert_eq!(returned.version, "2.0.0");
+        assert_eq!(returned.approved_grants, vec!["spaces:docs"]);
+        assert!(returned.enabled, "an update never toggles enabled");
+
+        let stored = s.get("com.test.app").await.unwrap().unwrap();
+        assert_eq!(stored.version, "2.0.0");
+        assert_eq!(stored.approved_grants, vec!["spaces:docs"]);
+        assert!(stored.enabled);
+        assert_eq!(
+            s.get_ui_code("com.test.app").await.unwrap().as_deref(),
+            Some("NEW")
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_update_reports_missing_record() {
+        let s = store();
+        let missing = s
+            .apply_update("com.test.absent", "2.0.0", None, Some("NEW"))
+            .await
+            .unwrap();
+        assert!(missing.is_none());
     }
 
     /// ATOMICITY: a refused update (here a downgrade without force — the analog of a

@@ -123,6 +123,9 @@
             "permission": "blueprint.view"
           }
         ]
+      },
+      "host_api": {
+        "grants": ["crypto:seal"]
       }
     }
   ],
@@ -145,7 +148,8 @@
   "permission_grants": [
     "blueprint:review",
     "mcp:blueprint",
-    "ui:declarative-http"
+    "ui:declarative-http",
+    "files:download"
   ],
   "permission_levels": [
     {

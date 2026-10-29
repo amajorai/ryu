@@ -43,7 +43,7 @@
 //!
 //! 1. `RYU_SAFE_MODE=1` — the env override, same idiom as `RYU_PROFILE` and the
 //!    `RYU_*_BIN` overrides.
-//! 2. `~/.ryu/safe-mode` — a sentinel FILE. This tier exists because the reason
+//! 2. `<data dir>/state/safe-mode` — a sentinel FILE. This tier exists because the reason
 //!    you need safe mode is often that Core will not come up: reading the flag
 //!    out of `preferences.db` is circular when the SQLite store or the boot path
 //!    is what is wedged, and the desktop cannot POST to a Core that is not
@@ -72,7 +72,7 @@ pub const SAFE_MODE_PREF_KEY: &str = "safe-mode.enabled";
 /// Env override. Wins over both the sentinel and the preference.
 pub const SAFE_MODE_ENV: &str = "RYU_SAFE_MODE";
 
-/// Sentinel file name under the Ryu data folder (`~/.ryu/safe-mode`).
+/// Sentinel file name under the Ryu data folder (`<data dir>/state/safe-mode`).
 pub const SAFE_MODE_SENTINEL: &str = "safe-mode";
 
 /// Which tier turned safe mode on. Reported by `GET /api/safe-mode` so the UI can
@@ -85,7 +85,7 @@ pub enum SafeModeSource {
     Off,
     /// `RYU_SAFE_MODE` env var.
     Env,
-    /// `~/.ryu/safe-mode` sentinel file.
+    /// `<data dir>/state/safe-mode` sentinel file.
     Sentinel,
     /// `safe-mode.enabled` preference.
     Preference,
@@ -161,9 +161,9 @@ pub fn parse_enabled(value: Option<&str>) -> bool {
     )
 }
 
-/// `~/.ryu/safe-mode` (honours a relocated data folder / `RYU_PROFILE`).
+/// `<data dir>/state/safe-mode` (honours a relocated data folder / `RYU_PROFILE`).
 pub fn sentinel_path() -> PathBuf {
-    crate::paths::ryu_dir().join(SAFE_MODE_SENTINEL)
+    crate::paths::state_path(SAFE_MODE_SENTINEL)
 }
 
 /// Whether the sentinel file is present.

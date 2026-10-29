@@ -1,0 +1,104 @@
+// Ryu playground for GitHub Codespaces.
+//
+// Installs the published, checksum-verified release binaries and the same
+// release's browser UI bundle (no build step), starts Ryu Core and a small
+// same-origin server for the Ryu web app on every start, and opens the web app
+// in a browser tab. Releases without the bundle fall back to the Ryu terminal
+// UI. The visitor's own Codespaces quota pays for it.
+// See .devcontainer/README.md for what runs and how to add a provider key.
+{
+  "name": "Ryu playground",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  "remoteUser": "vscode",
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+  "containerEnv": {
+    "RYU_DIR": "/workspaces/.ryu-playground",
+    "RYU_CORE_URL": "http://127.0.0.1:7980",
+    // Provider-backed demo: never download the multi-GB local model stack.
+    "RYU_SKIP_LOCAL_STACK_INSTALL": "1",
+    "RYU_KEYCHAIN": "off",
+    "RYU_MESH_ENABLED": "0",
+    "RYU_MESH_PREINSTALL_CLIENT": "0",
+    "RYU_SYNC_ENABLED": "0",
+    "RYU_DOWNLOADS_AUTORESUME": "0",
+    "RYU_PRODUCT_ANALYTICS_ENABLED": "false",
+    "RYU_CRASH_REPORTS_ENABLED": "false",
+    "RYU_DIAGNOSTICS_EXPORT_ENABLED": "false",
+    "RYU_COMMUNITY_STATS_ENABLED": "false",
+    "RYU_SUPPORT_ACCESS_LOCAL_ENABLED": "false"
+  },
+  "remoteEnv": {
+    // Literal path: ${containerEnv:HOME} is the container process's home, not
+    // the remote user's. install also links the commands into /usr/local/bin.
+    "PATH": "/home/vscode/.ryu/bin:${containerEnv:PATH}"
+  },
+  "forwardPorts": [7990, 7980],
+  "portsAttributes": {
+    // The Ryu web app. Private: GitHub signs the codespace owner in before
+    // the tunnel reaches it, and its server adds Core's token itself.
+    "7990": {
+      "label": "Ryu",
+      "onAutoForward": "openBrowser",
+      "visibility": "private"
+    },
+    "7980": {
+      "label": "Ryu Core API",
+      "onAutoForward": "silent",
+      "visibility": "private"
+    },
+    "7981": {
+      "label": "Ryu Gateway (loopback only)",
+      "onAutoForward": "ignore"
+    }
+  },
+  // Core's Gateway and sidecars listen on loopback too. Never auto-forward
+  // them: forwarded traffic reaches Core as a trusted local peer.
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
+  "secrets": {
+    "OPENAI_API_KEY": {
+      "description": "Optional. OpenAI API key. Chat works with it and nothing else set.",
+      "documentationUrl": "https://platform.openai.com/api-keys"
+    },
+    "RYU_DEFAULT_LLM_API_KEY": {
+      "description": "Optional. Key for any other OpenAI-compatible provider. Set it with RYU_DEFAULT_LLM_BASE_URL and RYU_DEFAULT_LLM_MODEL."
+    },
+    "RYU_DEFAULT_LLM_BASE_URL": {
+      "description": "Optional. OpenAI-compatible base URL of the provider whose key is in RYU_DEFAULT_LLM_API_KEY."
+    },
+    "RYU_DEFAULT_LLM_MODEL": {
+      "description": "Optional. Default chat model that provider serves."
+    },
+    "ANTHROPIC_API_KEY": {
+      "description": "Optional. Anthropic key for the Gateway. The default chat route still needs the RYU_DEFAULT_LLM_* settings.",
+      "documentationUrl": "https://console.anthropic.com/settings/keys"
+    },
+    "OPENROUTER_API_KEY": {
+      "description": "Optional. OpenRouter key for the Gateway. The default chat route still needs the RYU_DEFAULT_LLM_* settings.",
+      "documentationUrl": "https://openrouter.ai/settings/keys"
+    },
+    "RYU_PLAYGROUND_VERSION": {
+      "description": "Optional. Release tag to install, for example v0.4.0. Defaults to the latest release."
+    }
+  },
+  "onCreateCommand": "bash .devcontainer/playground.sh install",
+  "postStartCommand": "bash .devcontainer/playground.sh start",
+  "postAttachCommand": "bash .devcontainer/playground.sh attach",
+  "waitFor": "onCreateCommand",
+  "customizations": {
+    "codespaces": {
+      "openFiles": [".devcontainer/README.md"]
+    },
+    "vscode": {
+      "settings": {
+        "workbench.startupEditor": "none",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}

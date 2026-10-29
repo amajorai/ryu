@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/boxes"
+  },
+  "status": 429,
+  "body": {
+    "code": "quota_exceeded",
+    "error": {
+      "code": "quota_exceeded",
+      "details": {
+        "active": 1,
+        "limit": 1,
+        "scope": "tenant",
+        "resource": "boxes"
+      },
+      "message": "This tenant has reached its active Box quota.",
+      "requestId": "req_00000000000000000000000000000001",
+      "status": 429
+    },
+    "hint": "A capacity quota, not a rate limit: repeating the request fails until capacity is freed (delete a Box, snapshot or files) or the operator raises the limit. No Retry-After is sent.",
+    "message": "This tenant has reached its active Box quota.",
+    "ok": false,
+    "requestId": "req_00000000000000000000000000000001",
+    "retryable": false,
+    "status": 429,
+    "type": "box.error"
+  }
+}

@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { languagePackArchive } from "@ryu/i18n/core";
+import { z } from "zod";
 import {
 	fetchInstalledLanguagePacks,
 	importLanguagePack,
@@ -65,9 +66,12 @@ test("imports a portable archive through Core and validates the returned pack", 
 			expect(String(input)).toBe(
 				"http://127.0.0.1:7980/api/language-packs/import"
 			);
-			requestBody = JSON.parse(String(init?.body)) as {
-				archive_base64?: string;
-			};
+			expect(new Headers(init?.headers).get("authorization")).toBe(
+				"Bearer node-token"
+			);
+			requestBody = z
+				.object({ archive_base64: z.string() })
+				.parse(JSON.parse(String(init?.body)));
 			return Response.json({ pack });
 		},
 		{
@@ -83,4 +87,7 @@ test("imports a portable archive through Core and validates the returned pack", 
 	expect(imported).toEqual(pack);
 	expect(requestBody?.archive_base64).toBeString();
 	expect(requestBody?.archive_base64?.length).toBeGreaterThan(0);
+	expect(
+		new Uint8Array(Buffer.from(requestBody?.archive_base64 ?? "", "base64"))
+	).toEqual(new Uint8Array(archive));
 });

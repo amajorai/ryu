@@ -14,14 +14,18 @@ describe("isMaterialAppearance", () => {
 });
 
 describe("parseAppearance", () => {
-	it("defaults to translucent for null/empty/malformed input", () => {
-		expect(DEFAULT_APPEARANCE).toEqual({ background: "translucent" });
-		expect(parseAppearance(null)).toEqual({ background: "translucent" });
-		expect(parseAppearance("")).toEqual({ background: "translucent" });
-		expect(parseAppearance("{bad")).toEqual({ background: "translucent" });
+	it("defaults to acrylic for null/empty/malformed input", () => {
+		expect(DEFAULT_APPEARANCE).toEqual({ background: "acrylic" });
+		expect(parseAppearance(null)).toEqual({ background: "acrylic" });
+		expect(parseAppearance("")).toEqual({ background: "acrylic" });
+		expect(parseAppearance("{bad")).toEqual({ background: "acrylic" });
 	});
 
-	it("reads acrylic and mica", () => {
+	it("reads every background the desktop writes: translucent, acrylic and mica", () => {
+		// The exact strings Desktop Settings → Island → Background stores.
+		expect(
+			parseAppearance(JSON.stringify({ background: "translucent" }))
+		).toEqual({ background: "translucent" });
 		expect(parseAppearance(JSON.stringify({ background: "acrylic" }))).toEqual({
 			background: "acrylic",
 		});
@@ -30,12 +34,22 @@ describe("parseAppearance", () => {
 		});
 	});
 
-	it("coerces an unknown background to translucent", () => {
+	it("coerces an unknown or malformed background to acrylic", () => {
 		expect(parseAppearance(JSON.stringify({ background: "hologram" }))).toEqual(
-			{ background: "translucent" }
+			{ background: "acrylic" }
 		);
-		expect(parseAppearance(JSON.stringify({}))).toEqual({
-			background: "translucent",
+		expect(
+			parseAppearance(JSON.stringify({ background: "Translucent" }))
+		).toEqual({ background: "acrylic" });
+		expect(parseAppearance(JSON.stringify({ background: 1 }))).toEqual({
+			background: "acrylic",
 		});
+		expect(parseAppearance(JSON.stringify({}))).toEqual({
+			background: "acrylic",
+		});
+		expect(parseAppearance(JSON.stringify("translucent"))).toEqual({
+			background: "acrylic",
+		});
+		expect(parseAppearance("null")).toEqual({ background: "acrylic" });
 	});
 });

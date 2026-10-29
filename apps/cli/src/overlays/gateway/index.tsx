@@ -18,6 +18,8 @@ import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { ErrorView } from "../../ui/ErrorView.tsx";
 import { Loading } from "../../ui/Loading.tsx";
 import type { OverlayBodyProps, OverlayModule } from "../registry.ts";
+import { GatewayAdvancedPolicy } from "./advanced-policy.tsx";
+import { GatewayPolicyEditor } from "./policy.tsx";
 import {
 	AuditPanel,
 	BudgetsPanel,
@@ -35,6 +37,7 @@ type Section =
 	| "overview"
 	| "routing"
 	| "guardrails"
+	| "advanced"
 	| "budgets"
 	| "keys"
 	| "identities"
@@ -46,6 +49,7 @@ const SECTION_ORDER: Section[] = [
 	"overview",
 	"routing",
 	"guardrails",
+	"advanced",
 	"budgets",
 	"keys",
 	"identities",
@@ -54,17 +58,18 @@ const SECTION_ORDER: Section[] = [
 	"evals",
 ];
 
-const SECTION_LABELS: Record<Section, string> = {
+const SECTION_LABELS = {
 	overview: "Overview",
 	routing: "Routing",
 	guardrails: "Guardrails",
+	advanced: "Advanced safety",
 	budgets: "Budgets",
 	keys: "Keys",
 	identities: "Identities",
 	channels: "Channels",
 	audit: "Audit",
 	evals: "Evals",
-};
+} satisfies Record<Section, string>;
 
 const NAV_GROUPS: { items: Section[]; title?: string }[] = [
 	{ items: ["overview"] },
@@ -73,6 +78,7 @@ const NAV_GROUPS: { items: Section[]; title?: string }[] = [
 		items: [
 			"routing",
 			"guardrails",
+			"advanced",
 			"budgets",
 			"keys",
 			"identities",
@@ -96,7 +102,7 @@ function NavItem({ active, label }: { active: boolean; label: string }) {
 	const theme = useTheme();
 	return (
 		<box flexDirection="row" gap={1}>
-			<text fg={active ? theme.colors.primary : theme.colors.muted}>
+			<text fg={active ? theme.colors.primary : theme.colors.mutedForeground}>
 				{active ? "›" : " "}
 			</text>
 			<text fg={active ? theme.colors.primary : theme.colors.foreground}>
@@ -136,7 +142,11 @@ function DataPanel({ raw, section }: { raw: RawFor; section: Section }) {
 		return <RoutingPanel raw={raw} />;
 	}
 	if (section === "guardrails") {
-		return <GuardrailsPanel raw={raw} />;
+		return raw.reachable === true ? (
+			<GatewayPolicyEditor />
+		) : (
+			<GuardrailsPanel raw={raw} />
+		);
 	}
 	if (section === "budgets") {
 		return <BudgetsPanel raw={raw} />;
@@ -173,6 +183,7 @@ function SectionContent({
 			<ErrorView
 				hint="Core may still be starting · press r to retry"
 				message="gateway unreachable — Core may still be starting"
+				onRetry
 			/>
 		);
 	}
@@ -183,8 +194,21 @@ function GatewayBody(_props: OverlayBodyProps) {
 	const theme = useTheme();
 	const { state, refresh } = useGatewayStatus();
 	const [section, setSection] = useState<Section>("overview");
+	const [editingPolicy, setEditingPolicy] = useState(false);
 
 	useKeyboard((key) => {
+		if (editingPolicy) {
+			return;
+		}
+		if (section === "advanced" && ["up", "down", "r"].includes(key.name)) {
+			return;
+		}
+		if (
+			section === "guardrails" &&
+			(key.name === "up" || key.name === "down")
+		) {
+			return;
+		}
 		if (key.name === "r") {
 			refresh();
 			return;
@@ -201,13 +225,19 @@ function GatewayBody(_props: OverlayBodyProps) {
 	return (
 		<box flexDirection="column" gap={1}>
 			<text fg={theme.colors.mutedForeground}>
-				↑/↓ or j/k switch section · r refresh · Esc close
+				{section === "guardrails" || section === "advanced"
+					? "j/k switch section · r refresh · Esc close"
+					: "↑/↓ or j/k switch section · r refresh · Esc close"}
 			</text>
 			<box flexDirection="row" gap={2}>
 				<GatewayNav active={section} />
 				<box height={BODY_HEIGHT} width={CONTENT_WIDTH}>
 					<scrollbox flexGrow={1}>
-						<SectionContent section={section} state={state} />
+						{section === "advanced" ? (
+							<GatewayAdvancedPolicy onEditingChange={setEditingPolicy} />
+						) : (
+							<SectionContent section={section} state={state} />
+						)}
 					</scrollbox>
 				</box>
 			</box>

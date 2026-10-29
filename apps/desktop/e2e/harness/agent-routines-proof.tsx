@@ -1,9 +1,30 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { createRoot } from "react-dom/client";
 import { AgentRoutinesPanel } from "../../src/components/agents/AgentRoutinesPanel.tsx";
 import { AgentRunHistoryView } from "../../src/components/agents/AgentRunHistoryView.tsx";
 import { ChatHistoryProvider } from "../../src/contexts/ChatHistoryContext.tsx";
 import { TabsContext } from "../../src/contexts/TabsContext.tsx";
+import { type ProofJsonValue, parseProofJsonRecord } from "../fixture-json.ts";
+import { createTabsProofContext } from "./tabs-proof-context.ts";
 import "../../src/index.css";
+
+declare const window: Window;
+
+// This synthetic transport retains the original raw POST fields, including malformed
+// and future JSON values; it does not claim to be the production job DTO.
+interface RoutineFixtureTransport {
+	created_at: string;
+	enabled: ProofJsonValue | undefined;
+	history: ReturnType<typeof record>[];
+	id: string;
+	last_outcome: "failure" | "success" | null;
+	last_run_at: string | null;
+	name: ProofJsonValue | undefined;
+	require_approval: ProofJsonValue | undefined;
+	schedule: ProofJsonValue | undefined;
+	target: ProofJsonValue | undefined;
+	updated_at: string;
+}
 
 const AGENT_ID = "agent-routines";
 const now = Date.now();
@@ -12,13 +33,7 @@ function record(
 	outcome: "failure" | "success",
 	offsetHours: number,
 	error: string | null = null
-): {
-	error: string | null;
-	finished_at: string;
-	outcome: "failure" | "success";
-	run_id: string;
-	started_at: string;
-} {
+) {
 	const startedAt = new Date(now - offsetHours * 60 * 60 * 1000);
 	const finishedAt = new Date(startedAt.getTime() + 2 * 60 * 1000);
 	return {
@@ -30,7 +45,7 @@ function record(
 	};
 }
 
-let mockJobs = [
+let mockJobs: RoutineFixtureTransport[] = [
 	{
 		created_at: new Date(now - 48 * 60 * 60 * 1000).toISOString(),
 		enabled: true,
@@ -111,7 +126,7 @@ const conversations = [
 	},
 ];
 
-function json(body: unknown, status = 200): Response {
+function json<FixturePayload>(body: FixturePayload, status = 200): Response {
 	return new Response(JSON.stringify(body), {
 		headers: { "Content-Type": "application/json" },
 		status,
@@ -120,7 +135,11 @@ function json(body: unknown, status = 200): Response {
 
 function installProofNetwork() {
 	window.fetch = async (input, init) => {
-		const url = typeof input === "string" ? input : input.url;
+		const url = isNativeText(input)
+			? input
+			: input instanceof URL
+				? input.href
+				: input.url;
 		const method = init?.method ?? "GET";
 		if (url.includes("/api/runs/stream")) {
 			return new Response(
@@ -149,7 +168,8 @@ function installProofNetwork() {
 		if (url.includes("/api/conversations")) {
 			return json({ conversations });
 		}
-		if (url.endsWith("/heartbeat/jobs") && method === "GET") {
+		// The list opts in to app jobs (`?include=app_jobs`), so match the path.
+		if (url.split("?")[0].endsWith("/heartbeat/jobs") && method === "GET") {
 			return json({ jobs: mockJobs });
 		}
 		if (url.includes("/heartbeat/jobs/") && method === "PUT") {
@@ -168,11 +188,8 @@ function installProofNetwork() {
 			return json({ success: true });
 		}
 		if (url.endsWith("/heartbeat/jobs") && method === "POST") {
-			const body = JSON.parse(String(init?.body ?? "{}")) as Record<
-				string,
-				unknown
-			>;
-			const target = body.target as Record<string, unknown>;
+			const body = parseProofJsonRecord(String(init?.body ?? "{}"));
+			const target = body.target;
 			const job = {
 				created_at: new Date().toISOString(),
 				enabled: body.enabled ?? true,
@@ -194,14 +211,14 @@ function installProofNetwork() {
 }
 
 function ProofPage() {
-	const tabsValue = {
-		openTab: () => undefined,
-	};
+	const tabsValue = createTabsProofContext({
+		openTab: () => "routine-proof-tab",
+	});
 	return (
 		<main className="min-h-screen bg-background px-6 py-10 text-foreground">
 			<div className="mx-auto max-w-4xl">
 				<header className="mb-8">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+					<p className="font-medium text-muted-foreground text-xs uppercase tracking-(--tracking-section)">
 						Production component proof
 					</p>
 					<h1 className="mt-2 font-semibold text-4xl tracking-tight">
@@ -213,7 +230,7 @@ function ProofPage() {
 					</p>
 				</header>
 				<section className="rounded-3xl border bg-card p-5 shadow-sm">
-					<TabsContext.Provider value={tabsValue as never}>
+					<TabsContext.Provider value={tabsValue}>
 						<AgentRoutinesPanel agentId={AGENT_ID} />
 						<div className="my-8 border-t" />
 						<AgentRunHistoryView agentId={AGENT_ID} />
@@ -225,9 +242,10 @@ function ProofPage() {
 }
 
 installProofNetwork();
-const proofWindow = window as Window & {
-	__agentRoutinesProofRoot?: ReturnType<typeof createRoot>;
-};
+const proofWindow =
+	/* SAFETY: This private optional __agentRoutinesProofRoot holder is authored only by this module, which stores the complete native createRoot result and reuses it on later evaluation. The view preserves the browser Window and does not describe an external payload. */ window as Window & {
+		__agentRoutinesProofRoot?: ReturnType<typeof createRoot>;
+	};
 const proofRoot =
 	proofWindow.__agentRoutinesProofRoot ??
 	createRoot(document.getElementById("root")!);

@@ -8,9 +8,10 @@ import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
 
 const alertVariants = cva(
-	"group/alert relative grid w-full gap-0.5 rounded-2xl border px-4 py-3 text-start text-sm has-data-[slot=alert-action]:relative has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2.5 has-data-[slot=alert-action]:pe-18 *:[svg:not([class*='size-'])]:size-4 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current",
+	"group/alert corner-squircle relative grid w-full gap-0.5 rounded-2xl border px-4 py-3 text-start text-sm has-data-[slot=alert-action]:relative has-[>svg]:grid-cols-[auto_1fr] has-[>svg]:gap-x-2.5 has-data-[slot=alert-action]:pe-18 *:[svg:not([class*='size-'])]:size-4 *:[svg]:row-span-2 *:[svg]:translate-y-0.5 *:[svg]:text-current",
 	{
 		variants: {
+			borderTone: { default: "", subtle: "border-border/60" },
 			variant: {
 				default: "bg-card text-card-foreground",
 				destructive:
@@ -25,6 +26,10 @@ const alertVariants = cva(
 					"bg-card text-status-warning *:data-[slot=alert-description]:text-status-warning/90 *:[svg]:text-current",
 				info: "bg-card text-status-info *:data-[slot=alert-description]:text-status-info/90 *:[svg]:text-current",
 			},
+			appearance: {
+				"community-trust": "border-warning/30 bg-warning/5 text-foreground",
+			},
+			inset: { "community-inline": "px-3 py-2.5" },
 		},
 		defaultVariants: {
 			variant: "default",
@@ -34,12 +39,18 @@ const alertVariants = cva(
 
 function Alert({
 	className,
+	borderTone,
 	variant,
+	appearance,
+	inset,
 	...props
 }: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
 	return (
 		<div
-			className={cn(alertVariants({ variant }), className)}
+			className={cn(
+				alertVariants({ variant, borderTone, appearance, inset }),
+				className
+			)}
 			data-slot="alert"
 			role="alert"
 			{...props}
@@ -69,14 +80,16 @@ function AlertTitle({
 
 function AlertDescription({
 	className,
+	layout = "default",
 	children,
 	...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> & { layout?: "default" | "retry-actions" }) {
 	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn(
 				"text-balance text-muted-foreground text-sm md:text-pretty [&_a]:underline [&_a]:underline-offset-3 [&_a]:hover:text-foreground [&_p:not(:last-child)]:mb-4",
+				layout === "retry-actions" && "flex flex-col items-start gap-3",
 				className
 			)}
 			data-slot="alert-description"
@@ -112,7 +125,7 @@ function AlertDismiss({
 		<button
 			aria-label={localizedLabel}
 			className={cn(
-				"absolute end-3 top-2.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30",
+				"absolute end-3 top-2.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring",
 				className
 			)}
 			data-slot="alert-dismiss"

@@ -13,7 +13,7 @@ function message(id: string, role: "assistant" | "user"): UIMessage {
 		id,
 		role,
 		parts: [{ type: "text", text: id }],
-	} as UIMessage;
+	};
 }
 
 describe("message-list unread state", () => {

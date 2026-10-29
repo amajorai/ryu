@@ -1,0 +1,5 @@
+.frame {
+	width: var(--assistant-iframe-width, auto);
+	height: var(--assistant-iframe-height, auto);
+	border: var(--assistant-iframe-border, revert-layer);
+}

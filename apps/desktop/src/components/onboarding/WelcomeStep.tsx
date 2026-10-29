@@ -1,13 +1,15 @@
-import { AppleHelloEffect } from "@ryu/ui/components/apple-hello-effect";
-import { Button } from "@ryu/ui/components/button";
-import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { PageHeader } from "@ryu/ui/components/page-header";
-import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { AppleHelloEffect } from "@ryu/ui/components/apple-hello-effect.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { AnimatePresence, motion } from "framer-motion";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRyuOnboardingPersona } from "@/src/components/onboarding/RyuOnboardingPersona.tsx";
+import { useMotionAllowed } from "@/src/hooks/useSeasonalEffects.ts";
 
-const SIGNATURE_TO_HELLO_DELAY_MS = 5000;
-const HELLO_LANGUAGE_INTERVAL_MS = 2400;
+const WELCOME_MS = 3500;
+const HELLO_LANGUAGE_MS = 2400;
+const SENTENCE_MS = 3200;
+const FADE_SECONDS = 0.8;
 
 const HELLO_LANGUAGES = [
 	{ language: "English", text: "hello" },
@@ -15,6 +17,13 @@ const HELLO_LANGUAGES = [
 	{ language: "Spanish", text: "hola" },
 	{ language: "Vietnamese", text: "xin chào" },
 ] as const;
+
+type Beat =
+	| { kind: "welcome" }
+	| { kind: "hello"; language: string; text: string }
+	| { kind: "sentence"; text: string };
+
+const HEADER_CLASS = "text-center font-medium text-2xl sm:text-3xl";
 
 function RyuWelcomeWordmark({ reducedMotion }: { reducedMotion: boolean }) {
 	return (
@@ -32,134 +41,152 @@ function RyuWelcomeWordmark({ reducedMotion }: { reducedMotion: boolean }) {
 	);
 }
 
+function beatKey(beat: Beat) {
+	if (beat.kind === "welcome") {
+		return "welcome";
+	}
+	return beat.kind === "hello" ? `hello-${beat.language}` : beat.text;
+}
+
+function beatDuration(beat: Beat) {
+	if (beat.kind === "welcome") {
+		return WELCOME_MS;
+	}
+	return beat.kind === "hello" ? HELLO_LANGUAGE_MS : SENTENCE_MS;
+}
+
 interface WelcomeStepProps {
 	onContinue: () => void;
 }
 
+/**
+ * The first-run welcome: one line at a time, each fading into the next, ending
+ * on "Welcome to Ryu" and one pass of the hello loop, then straight into setup.
+ * Skip (or Enter or Escape) goes straight to setup. With motion off (the app's
+ * animations setting or the system's reduced-motion preference) it shows only
+ * the welcome line.
+ */
 export function WelcomeStep({ onContinue }: WelcomeStepProps) {
-	const [helloStarted, setHelloStarted] = useState(false);
-	const [helloIndex, setHelloIndex] = useState(0);
-	const reducedMotion = useReducedMotion();
+	const tl = useLiteralMessages();
+	const reducedMotion = !useMotionAllowed();
+	const { name } = useRyuOnboardingPersona();
+	const [index, setIndex] = useState(0);
+	const onContinueRef = useRef(onContinue);
+	onContinueRef.current = onContinue;
+	const finishedRef = useRef(false);
 
-	useEffect(() => {
-		const timeout = window.setTimeout(
-			() => setHelloStarted(true),
-			SIGNATURE_TO_HELLO_DELAY_MS
-		);
+	const beats = useMemo<Beat[]>(
+		() =>
+			reducedMotion
+				? [{ kind: "welcome" }]
+				: [
+						{ kind: "sentence", text: "Let's personalize your experience." },
+						{ kind: "sentence", text: tl("Hi, I'm {name}.", { name }) },
+						{ kind: "sentence", text: "I help you get real work done." },
+						{ kind: "welcome" },
+						...HELLO_LANGUAGES.map(
+							(hello): Beat => ({ kind: "hello", ...hello })
+						),
+					],
+		[name, reducedMotion, tl]
+	);
+	const beatIndex = Math.min(index, beats.length - 1);
+	const beat = beats[beatIndex] ?? beats[0];
+	const isLast = beatIndex >= beats.length - 1;
+	const duration = beatDuration(beat);
 
-		return () => window.clearTimeout(timeout);
+	const finish = useCallback(() => {
+		if (finishedRef.current) {
+			return;
+		}
+		finishedRef.current = true;
+		onContinueRef.current();
 	}, []);
 
 	useEffect(() => {
-		if (!helloStarted) {
-			return;
-		}
+		const timeout = window.setTimeout(() => {
+			if (isLast) {
+				finish();
+			} else {
+				setIndex((current) => current + 1);
+			}
+		}, duration);
+		return () => window.clearTimeout(timeout);
+	}, [beatIndex, isLast, duration, finish]);
 
-		const interval = window.setInterval(() => {
-			setHelloIndex((current) => (current + 1) % HELLO_LANGUAGES.length);
-		}, HELLO_LANGUAGE_INTERVAL_MS);
-
-		return () => window.clearInterval(interval);
-	}, [helloStarted]);
-
-	const greeting = HELLO_LANGUAGES[helloIndex];
-	const isCanonicalHello = greeting.language === "English";
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Enter" || event.key === "Escape") {
+				event.preventDefault();
+				finish();
+			}
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [finish]);
 
 	return (
-		<div className="scroll-fade h-full w-full overflow-y-auto">
+		<div
+			className="relative flex size-full items-center justify-center p-8"
+			data-tauri-drag-region="true"
+		>
 			<div
-				className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8"
-				data-tauri-drag-region="true"
+				aria-live="polite"
+				className="flex h-24 w-full max-w-xl items-center justify-center"
+				data-beat={beat.kind}
+				data-language={beat.kind === "hello" ? beat.language : undefined}
+				data-testid="onboarding-welcome-beat"
 			>
-				<StaggerReveal>
-					<div className="shrink-0">
-						<GhostOrb size="50px" variant="outline" />
-					</div>
-				</StaggerReveal>
-
-				<div className="flex min-h-44 w-full max-w-md flex-col items-center justify-center gap-7">
-					<div
-						aria-live="polite"
-						className="flex h-24 w-full items-center justify-center"
-						data-language={helloStarted ? greeting.language : undefined}
-						data-testid="apple-hello-loop"
-						role="status"
+				<AnimatePresence initial={false} mode="wait">
+					<motion.div
+						animate={{ opacity: 1 }}
+						className="flex items-center justify-center"
+						exit={{ opacity: 0 }}
+						initial={{ opacity: 0 }}
+						key={beatKey(beat)}
+						transition={{
+							duration: reducedMotion ? 0 : FADE_SECONDS,
+							ease: "easeInOut",
+						}}
 					>
-						<AnimatePresence initial={false} mode="wait">
-							{helloStarted ? (
-								<motion.div
-									animate={{ opacity: 1, y: 0 }}
-									className="flex h-24 items-center justify-center"
-									exit={{ opacity: 0, y: -10 }}
-									initial={{ opacity: 0, y: 10 }}
-									key={`hello-${greeting.language}`}
-									transition={{
-										duration: reducedMotion ? 0 : 0.35,
-										ease: "easeOut",
-									}}
-								>
-									<AppleHelloEffect
-										className="flex h-24 items-center justify-center text-5xl text-foreground sm:text-6xl"
-										durationScale={reducedMotion ? 0 : 0.7}
-										text={isCanonicalHello ? undefined : greeting.text}
-									/>
-								</motion.div>
-							) : (
-								<motion.div
-									animate={{ opacity: 1, y: 0 }}
-									className="flex h-24 items-center justify-center"
-									exit={{ opacity: 0, y: -10 }}
-									initial={{ opacity: 1, y: 0 }}
-									key="welcome"
-								>
-									<PageHeader
-										className="text-center"
-										stagger={false}
-										title={
-											<span className="inline-flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 leading-none">
-												<span>Welcome to</span>
-												<span
-													aria-hidden="true"
-													className="inline-flex h-[1.55em] items-center"
-												>
-													<RyuWelcomeWordmark
-														reducedMotion={Boolean(reducedMotion)}
-													/>
-												</span>
-												<span className="sr-only">Ryu</span>
-											</span>
-										}
-										titleClassName="text-2xl sm:text-3xl"
-									/>
-								</motion.div>
-							)}
-						</AnimatePresence>
-					</div>
-
-					<div className="flex h-14 items-center justify-center">
-						{helloStarted ? (
-							<motion.div
-								animate={{ opacity: 1, y: 0 }}
-								initial={{ opacity: 0, y: 8 }}
-								transition={{
-									duration: reducedMotion ? 0 : 0.4,
-									ease: "easeOut",
-								}}
-							>
-								<Button
-									aria-label="Continue to Ryu"
-									data-testid="onboarding-continue"
-									onClick={onContinue}
-									size="lg"
-									variant="mono"
-								>
-									Continue to Ryu
-								</Button>
-							</motion.div>
+						{beat.kind === "welcome" ? (
+							<h1 className={HEADER_CLASS}>
+								<span className="inline-flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 leading-none">
+									<span>Welcome to</span>
+									<span
+										aria-hidden="true"
+										className="inline-flex h-[1.55em] items-center"
+									>
+										<RyuWelcomeWordmark reducedMotion={reducedMotion} />
+									</span>
+									<span className="sr-only">Ryu</span>
+								</span>
+							</h1>
 						) : null}
-					</div>
-				</div>
+						{beat.kind === "hello" ? (
+							<div className="text-5xl text-foreground sm:text-6xl">
+								<AppleHelloEffect
+									className="flex h-24 items-center justify-center"
+									durationScale={reducedMotion ? 0 : 0.7}
+									text={beat.language === "English" ? undefined : beat.text}
+								/>
+							</div>
+						) : null}
+						{beat.kind === "sentence" ? (
+							<h1 className={HEADER_CLASS}>{beat.text}</h1>
+						) : null}
+					</motion.div>
+				</AnimatePresence>
 			</div>
+			<Button
+				aria-label="Skip the introduction"
+				className="absolute right-6 bottom-6"
+				data-testid="onboarding-welcome-skip"
+				onClick={finish}
+				variant="ghost"
+			>
+				Skip
+			</Button>
 		</div>
 	);
 }

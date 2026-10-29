@@ -16,6 +16,8 @@ import { Badge } from "@/components/ui/badge.tsx";
 import { useTheme } from "@/components/ui/theme-provider.tsx";
 import { useCore } from "../../core/CoreContext.tsx";
 import type { ListRow } from "../../core/featureList.ts";
+import { humanizeError, nativeErrorMessage } from "../../core/native-errors.ts";
+import { tf } from "../../i18n/translate.ts";
 import { ErrorView } from "../../ui/ErrorView.tsx";
 import { Loading } from "../../ui/Loading.tsx";
 import { SEARCH_REALMS, type StoreSection } from "./sections.ts";
@@ -38,10 +40,6 @@ interface Result {
 	realmLabel: string;
 	subtitle?: string;
 	title: string;
-}
-
-function errText(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 function matches(row: ListRow, needle: string): boolean {
@@ -70,7 +68,7 @@ function buildResults(byRealm: Map<StoreSection, ListRow[]>): Result[] {
 }
 
 export function StoreSearch({ active, query, onOpen }: StoreSearchProps) {
-	const { target, url, token } = useCore();
+	const { target } = useCore();
 	const theme = useTheme();
 
 	const [all, setAll] = useState<Result[]>([]);
@@ -87,9 +85,7 @@ export function StoreSearch({ active, query, onOpen }: StoreSearchProps) {
 		setLoading(true);
 		setError(null);
 		Promise.all(
-			SEARCH_REALMS.map((realm) =>
-				realm.load(target).catch(() => [] as ListRow[])
-			)
+			SEARCH_REALMS.map((realm) => realm.load(target).catch(() => []))
 		)
 			.then((lists) => {
 				if (reqRef.current !== reqId) {
@@ -102,11 +98,11 @@ export function StoreSearch({ active, query, onOpen }: StoreSearchProps) {
 				setAll(buildResults(byRealm));
 				setLoaded(true);
 			})
-			.catch((err: unknown) => {
+			.catch((err) => {
 				if (reqRef.current !== reqId) {
 					return;
 				}
-				setError(errText(err));
+				setError(nativeErrorMessage(err));
 				setLoaded(true);
 			})
 			.finally(() => {
@@ -153,13 +149,15 @@ export function StoreSearch({ active, query, onOpen }: StoreSearchProps) {
 		return <Loading label="Searching the store…" />;
 	}
 	if (error) {
-		return <ErrorView message={error} />;
+		return (
+			<ErrorView message={humanizeError(error, { url: target.url })} onRetry />
+		);
 	}
 	if (results.length === 0) {
 		return (
 			<box paddingLeft={1} paddingTop={1}>
 				<text fg={theme.colors.mutedForeground}>
-					{`No store matches for "${query.trim()}"`}
+					{tf('No store matches for "{query}"', { query: query.trim() })}
 				</text>
 			</box>
 		);
@@ -208,7 +206,7 @@ function ResultRow({
 }) {
 	return (
 		<box flexDirection="row" gap={1}>
-			<text fg={selected ? theme.colors.primary : theme.colors.muted}>
+			<text fg={selected ? theme.colors.primary : theme.colors.mutedForeground}>
 				{selected ? "›" : " "}
 			</text>
 			<Badge bordered={false} variant="secondary">

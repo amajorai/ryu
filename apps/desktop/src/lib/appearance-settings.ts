@@ -117,6 +117,8 @@ import {
 	NOTIFICATION_LAYOUT_KEY,
 	setNotificationLayout,
 } from "@/src/lib/notification-layout.ts";
+import { readProductMode } from "@/src/lib/product-mode.ts";
+import { interfaceLevelForProductMode } from "@/src/lib/response-mode-prompt.ts";
 import { registerSetting, resetCategory } from "@/src/lib/settings-registry.ts";
 import { DEFAULT_DARK_ID, DEFAULT_LIGHT_ID } from "@/src/lib/themes/presets.ts";
 import { DEFAULT_TIMEZONE, resetTimezone } from "@/src/lib/timezone.ts";
@@ -456,12 +458,19 @@ function registerAppearanceSettings(): void {
 	// also wrote it would make the final state depend on registration ORDER, which
 	// is the kind of bug that only shows up once someone reorders this file. Each
 	// pref is restored by the one entry that owns it.
+	//
+	// The level's default is the one the current product surface implies (Bot →
+	// Ryu Work, everything else → Code), not the global `APPEARANCE_DEFAULTS`
+	// value: the level also picks the response mode, which is part of every Ryu
+	// assistant thread's system prompt, and an appearance reset must not switch
+	// it (and reset those threads' prompt cache) without the interface switcher's
+	// confirmation.
 	registerSetting({
 		id: "appearance.interface-level",
 		category: "appearance",
 		label: "Interface mode",
 		reset: () =>
-			setInterfaceLevel(APPEARANCE_DEFAULTS.interfaceLevel, {
+			setInterfaceLevel(interfaceLevelForProductMode(readProductMode()), {
 				applyPrefs: false,
 			}),
 	});

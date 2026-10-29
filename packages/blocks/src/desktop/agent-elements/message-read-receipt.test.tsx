@@ -22,7 +22,7 @@ test("passes durable delivery through the user-message footer", () => {
 					id: "sent-message",
 					parts: [{ text: "Persisted message", type: "text" }],
 					role: "user",
-				} as UIMessage
+				} satisfies UIMessage
 			}
 			readReceipt={{ delivered: true, readers: [] }}
 		/>

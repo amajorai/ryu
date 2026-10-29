@@ -1,0 +1,37 @@
+.codeFont {
+	font-family: var(--font-code);
+}
+.codeSize {
+	font-size: 12.5px;
+}
+.codeMetrics {
+	font-size: 12.5px;
+	line-height: 1.55;
+}
+.bottomSpacer {
+	height: var(--workspace-height);
+	transition: var(--workspace-transition);
+}
+.bottomPanel {
+	display: var(--workspace-display);
+	height: var(--workspace-height);
+}
+.widthSpacer {
+	width: var(--workspace-width);
+	transition: var(--workspace-transition);
+}
+.pinnedPanel {
+	right: var(--workspace-right);
+	display: var(--workspace-display);
+	width: var(--workspace-width);
+	transition: var(--workspace-transition);
+}
+.floatingPinned {
+	right: var(--workspace-right);
+}
+.rightPanel {
+	width: var(--workspace-width);
+	pointer-events: var(--workspace-pointer-events);
+	transform: var(--workspace-transform);
+	transition: var(--workspace-transition);
+}

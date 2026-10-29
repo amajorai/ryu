@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
 
+pub mod online;
+pub use online::OnlineEvalsConfig;
+
 // ─── Evals config (moved verbatim from gateway `config.rs`) ──────────────────
 //
 // The serde-shaped config the runner consumes. It lives here (not in gateway
@@ -45,6 +48,21 @@ pub struct EvalsConfig {
     /// Default: true (on by default for all OpenAI-compatible providers).
     #[serde(default = "default_true")]
     pub stream_usage: bool,
+    /// Model that `POST /v1/evals/run` and `POST /v1/evals/score` use when a
+    /// request names no `model`/`models`. `None` (the default) means callers
+    /// must name a model: the Gateway never assumes a vendor model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    /// Model that judges LLM-judge assertions/evaluators when neither the
+    /// evaluator (`offline.judgeModel`) nor the request names one. `None`
+    /// keeps the previous behavior: the run's first model (dataset runs) or
+    /// the model that produced the response (online scoring) judges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_model: Option<String>,
+    /// `[evals.online]`: score a sampled fraction of production traffic with
+    /// catalog evaluators off the request path (opt-in; see [`online`]).
+    #[serde(default)]
+    pub online: OnlineEvalsConfig,
 }
 
 fn default_true() -> bool {
@@ -66,6 +84,9 @@ impl Default for EvalsConfig {
             max_latency_ms: default_max_latency_ms(),
             sample_rate: default_sample_rate(),
             stream_usage: true,
+            default_model: None,
+            judge_model: None,
+            online: OnlineEvalsConfig::default(),
         }
     }
 }
@@ -743,6 +764,22 @@ pub struct EvalCase {
     /// the result is scored as a deterministic replay fixture.
     #[serde(default, alias = "providerOutput")]
     pub provider_output: Option<Value>,
+    /// Source label for a precomputed response, such as `openrouter` for a
+    /// completed OpenRouter batch row. This is descriptive eval metadata only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_output_provider: Option<String>,
+    /// Whether a precomputed provider output is known to have passed Gateway
+    /// policy checks. `None` means the source did not measure this dimension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_output_policy_pass: Option<bool>,
+    /// Externally measured operation latency in milliseconds. For batch evals,
+    /// callers may provide the batch turnaround shared by its rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_latency_ms: Option<u64>,
+    /// Exact provider-reported row cost in micro-USD when the response body
+    /// does not carry its own usage cost.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_cost_micro_usd: Option<u64>,
     /// Arbitrary case metadata preserved in results and exports.
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, Value>,
@@ -828,6 +865,9 @@ pub struct CaseScore {
     /// Raw provider/replay latency in milliseconds.
     #[serde(default)]
     pub latency_ms: u64,
+    /// Whether `latency_ms` is an observed measurement rather than scorer time.
+    #[serde(default = "default_true")]
+    pub latency_available: bool,
     /// Whether this result reused a precomputed or in-run cached output.
     #[serde(default)]
     pub cache_hit: bool,
@@ -844,11 +884,14 @@ pub struct CaseScore {
     pub token_efficiency: f32,
     /// Whether the request passed all firewall/policy checks. Always present.
     pub policy_pass: bool,
+    /// Whether Gateway actually measured this request's policy outcome.
+    #[serde(default = "default_true")]
+    pub policy_available: bool,
     /// Present only when the case had an `expected` value. 1.0 = match, 0.0 = no match.
     pub substring_match: Option<f32>,
-    /// Weighted aggregate for this case. Weights vary based on which scorers are active:
-    /// - with substring: 0.3·latency + 0.2·token + 0.2·policy + 0.3·substring
-    /// - without: 0.4·latency + 0.3·token + 0.3·policy
+    /// Weighted aggregate for this case. Weights vary based on which scorers
+    /// and measurements are available; missing operational dimensions are
+    /// excluded and the remaining weights are renormalized.
     pub overall: f32,
     /// NEW: per-assertion results (always present; [] when no assertions).
     pub assertions: Vec<AssertionResult>,
@@ -870,10 +913,16 @@ pub struct EvalRunAggregate {
     pub mean_overall: f32,
     /// Mean latency score.
     pub mean_latency: f32,
+    /// Number of cases with a measured latency value.
+    #[serde(default)]
+    pub latency_available_cases: usize,
     /// Mean token efficiency.
     pub mean_token_efficiency: f32,
     /// Fraction of cases where `policy_pass == true`. Range [0, 1].
     pub policy_pass_rate: f32,
+    /// Number of cases whose policy outcome was measured by Gateway.
+    #[serde(default)]
+    pub policy_available_cases: usize,
     /// Mean substring match score across cases that had an `expected` value.
     /// `None` when no cases had `expected`.
     pub mean_substring_match: Option<f32>,
@@ -973,6 +1022,7 @@ pub fn score_case(
             }),
         cost_micro_usd: response["usage"]["cost_micro_usd"].as_u64(),
         latency_ms,
+        latency_available: true,
         cache_hit: false,
         error: None,
         prompt: case.prompt.clone(),
@@ -980,6 +1030,7 @@ pub fn score_case(
         latency_score,
         token_efficiency,
         policy_pass,
+        policy_available: true,
         substring_match,
         overall,
         // NEW — neutral defaults; Implementer B overwrites these via the pub
@@ -992,6 +1043,50 @@ pub fn score_case(
         // score_evaluators runs (it needs pipeline state for llm_judge).
         evaluators: Vec::new(),
     }
+}
+
+/// Mark operational dimensions that were not measured and renormalize the
+/// case score over the remaining dimensions. Batch result scoring uses this for
+/// Gateway policy, which the provider's separate asynchronous request did not
+/// execute.
+pub fn set_measurement_availability(
+    score: &mut CaseScore,
+    latency_available: bool,
+    policy_available: bool,
+) {
+    score.latency_available = latency_available;
+    score.policy_available = policy_available;
+    if !policy_available {
+        score.policy_pass = false;
+    }
+
+    let (latency_weight, token_weight, policy_weight, substring_weight) =
+        if score.substring_match.is_some() {
+            (0.3, 0.2, 0.2, 0.3)
+        } else {
+            (0.4, 0.3, 0.3, 0.0)
+        };
+    let mut weighted_score = 0.0;
+    let mut available_weight = 0.0;
+    if latency_available {
+        weighted_score += latency_weight * score.latency_score;
+        available_weight += latency_weight;
+    }
+    weighted_score += token_weight * score.token_efficiency;
+    available_weight += token_weight;
+    if policy_available {
+        weighted_score += policy_weight * if score.policy_pass { 1.0 } else { 0.0 };
+        available_weight += policy_weight;
+    }
+    if let Some(substring_match) = score.substring_match {
+        weighted_score += substring_weight * substring_match;
+        available_weight += substring_weight;
+    }
+    score.overall = if available_weight > 0.0 {
+        weighted_score / available_weight
+    } else {
+        0.0
+    };
 }
 
 // ─── Assertion + variable-substitution helpers ───────────────────────────────
@@ -1743,12 +1838,18 @@ pub fn eval_assertion_deterministic_with_metrics(
 }
 
 fn is_html_like(value: &str) -> bool {
-    Regex::new(r"(?is)<[a-z][^>]*>.*</[a-z][^>]*>").is_ok_and(|regex| regex.is_match(value.trim()))
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?is)<[a-z][^>]*>.*</[a-z][^>]*>").expect("valid html regex"))
+        .is_match(value.trim())
 }
 
 fn is_xml_like(value: &str) -> bool {
-    Regex::new(r"(?s)^<[A-Za-z_][\w:.-]*(?:\s[^>]*)?>.*</[A-Za-z_][\w:.-]*>$")
-        .is_ok_and(|regex| regex.is_match(value.trim()))
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?s)^<[A-Za-z_][\w:.-]*(?:\s[^>]*)?>.*</[A-Za-z_][\w:.-]*>$")
+            .expect("valid xml regex")
+    })
+    .is_match(value.trim())
 }
 
 fn is_sql_like(value: &str) -> bool {
@@ -1845,8 +1946,10 @@ pub fn aggregate_scores(cases: &[CaseScore]) -> EvalRunAggregate {
         return EvalRunAggregate {
             mean_overall: 0.0,
             mean_latency: 0.0,
+            latency_available_cases: 0,
             mean_token_efficiency: 0.0,
             policy_pass_rate: 0.0,
+            policy_available_cases: 0,
             mean_substring_match: None,
             total_cases: 0,
             total_input_tokens: 0,
@@ -1859,9 +1962,26 @@ pub fn aggregate_scores(cases: &[CaseScore]) -> EvalRunAggregate {
 
     let nf = n as f32;
     let mean_overall = cases.iter().map(|c| c.overall).sum::<f32>() / nf;
-    let mean_latency = cases.iter().map(|c| c.latency_score).sum::<f32>() / nf;
+    let latency_scores: Vec<f32> = cases
+        .iter()
+        .filter(|case| case.latency_available)
+        .map(|case| case.latency_score)
+        .collect();
+    let latency_available_cases = latency_scores.len();
+    let mean_latency = if latency_available_cases == 0 {
+        0.0
+    } else {
+        latency_scores.iter().sum::<f32>() / latency_available_cases as f32
+    };
     let mean_token_efficiency = cases.iter().map(|c| c.token_efficiency).sum::<f32>() / nf;
-    let policy_pass_rate = cases.iter().filter(|c| c.policy_pass).count() as f32 / nf;
+    let policy_cases: Vec<&CaseScore> = cases.iter().filter(|case| case.policy_available).collect();
+    let policy_available_cases = policy_cases.len();
+    let policy_pass_rate = if policy_available_cases == 0 {
+        0.0
+    } else {
+        policy_cases.iter().filter(|case| case.policy_pass).count() as f32
+            / policy_available_cases as f32
+    };
 
     let substring_cases: Vec<f32> = cases.iter().filter_map(|c| c.substring_match).collect();
     let mean_substring_match = if substring_cases.is_empty() {
@@ -1885,8 +2005,10 @@ pub fn aggregate_scores(cases: &[CaseScore]) -> EvalRunAggregate {
     EvalRunAggregate {
         mean_overall,
         mean_latency,
+        latency_available_cases,
         mean_token_efficiency,
         policy_pass_rate,
+        policy_available_cases,
         mean_substring_match,
         total_cases: n,
         total_input_tokens,
@@ -2026,6 +2148,9 @@ mod tests {
             max_latency_ms: 10_000,
             sample_rate: rate,
             stream_usage: true,
+            default_model: None,
+            judge_model: None,
+            online: Default::default(),
         }
     }
 
@@ -2167,6 +2292,28 @@ mod tests {
         let resp = make_response(5, 3, "Goodbye!");
         let score = score_case(&case, &resp, 200, true, 10_000);
         assert_eq!(score.substring_match, Some(0.0));
+    }
+
+    #[test]
+    fn unmeasured_policy_is_not_counted_as_a_pass_or_failure() {
+        let case = EvalCase {
+            prompt: "say hello".to_owned(),
+            expected: Some("hello".to_owned()),
+            ..Default::default()
+        };
+        let response = make_response(10, 10, "Hello there!");
+        let mut score = score_case(&case, &response, 42_000, true, 10_000);
+        set_measurement_availability(&mut score, true, false);
+
+        assert!(score.latency_available);
+        assert!(!score.policy_available);
+        assert!(!score.policy_pass);
+        assert!((score.overall - 0.5).abs() < f32::EPSILON);
+
+        let aggregate = aggregate_scores(&[score]);
+        assert_eq!(aggregate.latency_available_cases, 1);
+        assert_eq!(aggregate.policy_available_cases, 0);
+        assert_eq!(aggregate.policy_pass_rate, 0.0);
     }
 
     #[test]

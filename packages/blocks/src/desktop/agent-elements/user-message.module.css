@@ -1,0 +1,29 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	.timestamp {
+		font-size: var(--text-xs);
+		color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+	}
+	.image {
+		position: relative;
+		flex-shrink: 0;
+		width: 104px;
+		height: 104px;
+		padding: 4px;
+		overflow: hidden;
+		outline: none;
+		background-color: color-mix(in oklab, var(--muted) 50%, transparent);
+		border-radius: calc(var(--radius) + 4px);
+		transition-timing-function: var(--default-transition-timing-function, ease);
+		transition-duration: var(--default-transition-duration, 150ms);
+		transition-property: filter, transform;
+	}
+	.image:hover {
+		filter: brightness(0.95);
+	}
+	.image:focus-visible {
+		box-shadow: 0 0 0 2px var(--ring);
+	}
+}

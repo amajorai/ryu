@@ -1,5 +1,14 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { create } from "zustand";
+import { onBeforeAccountIdentityChange } from "@/lib/account-transition.ts";
 import { DEFAULT_CORE_URL } from "@/lib/core-url.ts";
+import {
+	ACCOUNTS_KEY,
+	ACTIVE_USER_KEY,
+	getVerifiedActiveUserId,
+	TOKEN_KEY,
+} from "@/lib/session-owner.ts";
+import { syncDesktopRoute } from "@/src/lib/api/local-egress.ts";
 import {
 	fetchManagedNodes,
 	type ManagedNode,
@@ -45,7 +54,7 @@ export interface Node {
 	serverId?: string | null;
 	token: string | null;
 	url: string;
-	/** Short-lived Better Auth JWT for a managed node; memory-only. */
+	/** Short-lived node-bound delegation for a managed node; memory-only. */
 	userJwt?: string | null;
 }
 
@@ -69,7 +78,7 @@ async function attachLocalNodeToken(data: NodesData): Promise<NodesData> {
 		const result = await invokeWhenReady<{ token?: unknown }>(
 			"local_node_token"
 		);
-		const token = typeof result.token === "string" ? result.token.trim() : "";
+		const token = isNativeText(result.token) ? result.token.trim() : "";
 		if (!token) {
 			return data;
 		}
@@ -157,7 +166,7 @@ interface NodeState {
 	refresh: () => Promise<void>;
 	/**
 	 * Refresh ONLY the auth token on already-added cloud nodes. The control-plane
-	 * mints a short-lived (~15 min) user JWT per `/nodes` fetch, so a token grabbed
+	 * mints a short-lived (~12 min) node-bound delegation per `/nodes` fetch, so a token grabbed
 	 * once at init expires mid-session and every authed call to the node then 401s.
 	 * This re-fetches the authoritative managed-node scope without touching
 	 * selection. A transient failed fetch keeps the existing nodes; a successful
@@ -227,9 +236,9 @@ const DISMISSED_CLOUD_KEY = "ryu:node-dismissed-cloud";
 function loadDismissedCloudUrls(): string[] {
 	try {
 		const raw = localStorage.getItem(DISMISSED_CLOUD_KEY);
-		const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+		const parsed: unknown = raw ? JSON.parse(raw) : [];
 		return Array.isArray(parsed)
-			? parsed.filter((u): u is string => typeof u === "string")
+			? parsed.filter((u): u is string => isNativeText(u))
 			: [];
 	} catch {
 		return [];
@@ -238,12 +247,12 @@ function loadDismissedCloudUrls(): string[] {
 
 /**
  * Decorate the local node list with the "Cloud" (managed) flag — and the LIVE
- * control-plane user JWT — for any node whose URL matches a managed cloud node the
+ * control-plane node delegation — for any node whose URL matches a managed cloud node the
  * org can reach. A managed node that is NOT added locally is never injected here
  * — it surfaces as a suggestion instead (see {@link computeSuggestions}).
  *
- * WHY THE JWT IS ADOPTED HERE: the control plane mints a short-lived (~15 min)
- * user JWT per `/nodes` fetch, and {@link useNodeStore.refreshCloudTokens} exists
+ * WHY THE CREDENTIAL IS ADOPTED HERE: the control plane mints a short-lived (~12 min)
+ * node-bound delegation per `/nodes` fetch, and {@link useNodeStore.refreshCloudTokens} exists
  * to keep an added cloud node's credential fresh. It swapped the token only into
  * `cloudNodes` though, while every caller reads the merged `nodes` — so the
  * persisted, hours-old token from add-time was the one actually sent, and the
@@ -325,6 +334,21 @@ function cloudNodesFromManaged(managed: ManagedNode[]): Node[] {
 		}));
 }
 
+/**
+ * "Route traffic through this computer" needs fresh node credentials on the
+ * LOCAL Core; ride the managed-node refresh so they never outlive their TTL.
+ */
+function keepDesktopRouteFresh(
+	localNodes: readonly Node[],
+	managed: readonly ManagedNode[]
+): void {
+	const local = localNodes.find((node) => isLocalNode(node)) ?? LOCAL_FALLBACK;
+	syncDesktopRoute(
+		{ url: local.url, token: local.token ?? null, userJwt: null },
+		managed
+	).catch(() => undefined);
+}
+
 /** Short timeout (ms) for the auto-select reachability probe. */
 const PROBE_TIMEOUT_MS = 2000;
 
@@ -356,17 +380,8 @@ function loadAutoSelect(): boolean {
  */
 async function probeNode(node: Node): Promise<boolean> {
 	const base = node.url.replace(/\/$/, "");
-	const headers: Record<string, string> = {};
-	const bearer = node.token ?? node.userJwt;
-	if (bearer) {
-		headers.Authorization = `Bearer ${bearer}`;
-	}
-	if (node.userJwt) {
-		headers["x-ryu-user-jwt"] = node.userJwt;
-	}
 	try {
 		const res = await fetch(`${base}/api/health`, {
-			headers,
 			signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
 		});
 		return res.ok;
@@ -435,7 +450,7 @@ export function startCloudTokenRefresh(): void {
 				.catch(() => undefined);
 		}, CLOUD_TOKEN_REFRESH_INTERVAL_MS);
 	}
-	if (cloudTokenFocusHandler === null && typeof window !== "undefined") {
+	if (cloudTokenFocusHandler === null && globalThis.window !== undefined) {
 		cloudTokenFocusHandler = () => {
 			useNodeStore
 				.getState()
@@ -452,11 +467,36 @@ export function stopCloudTokenRefresh(): void {
 		clearInterval(cloudTokenTimer);
 		cloudTokenTimer = null;
 	}
-	if (cloudTokenFocusHandler !== null && typeof window !== "undefined") {
+	if (cloudTokenFocusHandler !== null && globalThis.window !== undefined) {
 		window.removeEventListener("focus", cloudTokenFocusHandler);
 		cloudTokenFocusHandler = null;
 	}
 }
+
+/**
+ * The account whose node registry the store last hydrated, in the form the
+ * browser registry resolves it: the active-user selector plus the verified
+ * owner of the live session bearer. The browser registry key is a function of
+ * exactly these two values, so any change of key changes this fingerprint.
+ */
+function storedNodeRegistryOwner(): string {
+	let selector: string | null = null;
+	try {
+		selector = localStorage.getItem(ACTIVE_USER_KEY);
+	} catch {
+		// No storage: nothing is verified, which getVerifiedActiveUserId reports too.
+	}
+	return `${selector ?? ""}\u0000${getVerifiedActiveUserId() ?? ""}`;
+}
+
+let hydratedNodeRegistryOwner = storedNodeRegistryOwner();
+/**
+ * Bumped on every identity reset. An async node load captures it first and
+ * drops its result when it changed meanwhile, so a `list_nodes` or managed-node
+ * fetch that started under the previous account cannot re-install that
+ * account's bearer or delegation after the reset.
+ */
+let nodeIdentityGeneration = 0;
 
 export const useNodeStore = create<NodeState>((set, get) => ({
 	localNodes: [LOCAL_FALLBACK],
@@ -650,6 +690,8 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 		// store still resolves `getActiveNode()` to LOCAL_FALLBACK, whereas a wipe
 		// would drop every node the user has. A genuine `list_nodes` failure still
 		// propagates.
+		const generation = nodeIdentityGeneration;
+		hydratedNodeRegistryOwner = storedNodeRegistryOwner();
 		let data: NodesData;
 		try {
 			data = await attachLocalNodeToken(
@@ -660,6 +702,9 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 				return;
 			}
 			throw error;
+		}
+		if (generation !== nodeIdentityGeneration) {
+			return;
 		}
 		set((s) => ({
 			localNodes: data.nodes,
@@ -674,14 +719,16 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 	},
 
 	hydrateCloudNodes: async () => {
+		const generation = nodeIdentityGeneration;
 		const managed = await fetchManagedNodes();
-		if (managed === null) {
+		if (managed === null || generation !== nodeIdentityGeneration) {
 			return;
 		}
+		keepDesktopRouteFresh(get().localNodes, managed);
 		// Name managed nodes off the control-plane name, prefixed so they can't
 		// collide with a local node's name in the picker. Carry the per-org
-		// short-lived user JWT separately from a node bearer. Core validates it
-		// against the control-plane JWKS and narrows it to the node's organization.
+		// short-lived node delegation separately from a node bearer. Core validates
+		// its signature and exact node audience before applying organization scope.
 		// A managed node that advertised no reachable URL is DROPPED, not carried
 		// with `url: ""`. An empty base makes `apiUrl` throw before it fetches, so
 		// such a node would sit in the picker looking selectable and then fail every
@@ -698,7 +745,7 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 				s.dismissedCloudUrls
 			),
 		}));
-		// Keep the short-lived node JWT fresh for as long as a cloud node is present
+		// Keep the short-lived node delegation fresh while a cloud node is present
 		// (and only then). Idempotent, so re-hydrating never stacks timers; stopping
 		// when the set empties avoids a pointless /nodes poll.
 		if (cloud.length > 0) {
@@ -712,12 +759,14 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 		if (get().cloudNodes.length === 0) {
 			return;
 		}
+		const generation = nodeIdentityGeneration;
 		const managed = await fetchManagedNodes();
 		// A transient failure / offline server returns null; do NOT wipe the added
 		// cloud nodes on that. Keep the existing JWT and try again next tick.
-		if (managed === null) {
+		if (managed === null || generation !== nodeIdentityGeneration) {
 			return;
 		}
+		keepDesktopRouteFresh(get().localNodes, managed);
 		const cloud = cloudNodesFromManaged(managed);
 		set((s) => {
 			// A successful scope refresh is authoritative. Remove managed nodes that
@@ -782,7 +831,85 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 		return () => {
 			stopAutoSelectProbe();
 			stopCloudTokenRefresh();
-			(unlisten as () => void)();
+			unlisten();
 		};
 	},
 }));
+
+// A paired browser bearer belongs to the account that approved it. Retire the
+// hydrated state (every node bearer, the managed delegations, the selection and
+// the probes) and re-read the registry the current identity owns.
+function resetNodeStateForIdentityChange(): void {
+	nodeIdentityGeneration += 1;
+	stopAutoSelectProbe();
+	stopCloudTokenRefresh();
+	useNodeStore.setState({
+		activeNodeOnline: null,
+		autoSelectedNode: null,
+		cloudNodes: [],
+		defaultNode: "local",
+		localNodes: [LOCAL_FALLBACK],
+		nodes: [LOCAL_FALLBACK],
+		suggestedCloudNodes: [],
+		tabOverrides: {},
+	});
+	queueMicrotask(() => {
+		void useNodeStore
+			.getState()
+			.refresh()
+			.catch(() => undefined);
+	});
+}
+
+// In-document transitions announce themselves before the active account
+// changes; the refresh is queued so it runs after persistVault has updated the
+// storage selector and hydrates the destination account's browser registry.
+onBeforeAccountIdentityChange(({ from, to }) => {
+	if (from.userId === to.userId) {
+		return;
+	}
+	resetNodeStateForIdentityChange();
+});
+
+const NODE_OWNER_STORAGE_KEYS = new Set([
+	ACCOUNTS_KEY,
+	ACTIVE_USER_KEY,
+	TOKEN_KEY,
+]);
+const BROWSER_NODE_REGISTRY_PREFIX = "ryu_nodes";
+
+/**
+ * Another document on this origin (a second tab or window) switched account,
+ * signed out, or edited the node registry. The in-process announcement never
+ * reaches this document, so without this the store would keep the previous
+ * account's bearer in memory and keep sending it until a reload.
+ *
+ * A cleared storage area (`key === null`) or a changed registry owner gets the
+ * full identity reset; a registry edit under the same owner is re-read so a
+ * node removed elsewhere stops being used here.
+ */
+export function handleNodeRegistryStorageEvent(
+	event: Pick<StorageEvent, "key">
+): void {
+	const { key } = event;
+	const registryEdited = key?.startsWith(BROWSER_NODE_REGISTRY_PREFIX) ?? false;
+	if (!(key === null || registryEdited || NODE_OWNER_STORAGE_KEYS.has(key))) {
+		return;
+	}
+	const owner = storedNodeRegistryOwner();
+	if (key === null || owner !== hydratedNodeRegistryOwner) {
+		hydratedNodeRegistryOwner = owner;
+		resetNodeStateForIdentityChange();
+		return;
+	}
+	if (registryEdited) {
+		void useNodeStore
+			.getState()
+			.refresh()
+			.catch(() => undefined);
+	}
+}
+
+if (typeof globalThis.addEventListener === "function") {
+	globalThis.addEventListener("storage", handleNodeRegistryStorageEvent);
+}

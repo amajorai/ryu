@@ -37,7 +37,7 @@ function SimpleWorkspaceProof() {
 		<main className="min-h-screen bg-background px-8 py-10 text-foreground">
 			<div className="mx-auto max-w-6xl">
 				<header className="max-w-3xl">
-					<p className="font-heading font-semibold text-primary text-xs uppercase tracking-[0.18em]">
+					<p className="font-heading font-semibold text-primary text-xs uppercase tracking-(--tracking-section)">
 						Ryu · Simple chat
 					</p>
 					<h1 className="mt-3 font-heading font-semibold text-4xl tracking-tight">
@@ -51,7 +51,7 @@ function SimpleWorkspaceProof() {
 				</header>
 
 				<div className="mt-10 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-					<section className="rounded-[28px] border border-border/70 bg-card p-6 shadow-2xl">
+					<section className="rounded-4xl border border-border/70 bg-card p-6 shadow-2xl">
 						<div className="flex items-center justify-between gap-4">
 							<div>
 								<p className="font-medium text-sm">New conversation</p>
@@ -100,7 +100,7 @@ function SimpleWorkspaceProof() {
 					</section>
 
 					<section
-						className="rounded-[28px] border border-border/70 bg-card p-5 shadow-2xl"
+						className="rounded-4xl border border-border/70 bg-card p-5 shadow-2xl"
 						data-testid="environment-summary"
 					>
 						<div className="flex items-center justify-between gap-3">

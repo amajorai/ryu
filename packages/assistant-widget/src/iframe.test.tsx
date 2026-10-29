@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RyuAssistantWidgetIframe } from "./iframe";
+import { RyuAssistantWidgetIframe } from "./iframe.tsx";
 
 describe("RyuAssistantWidgetIframe", () => {
 	test("keeps the hosted surface sandboxed by default", () => {

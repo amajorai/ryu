@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import {
 	fetchMyPermissions,
 	fetchOrgs,
@@ -26,7 +26,10 @@ export function useCanManagePermission(permission: Permission): boolean {
 	const permissionsQuery = useQuery({
 		enabled: authed && Boolean(orgId),
 		queryKey: ["workspace-my-permissions", orgId],
-		queryFn: () => fetchMyPermissions(orgId as string),
+		queryFn:
+			orgId === null || orgId === undefined
+				? skipToken
+				: () => fetchMyPermissions(orgId),
 	});
 	if (!(permissionsQuery.isSuccess && permissionsQuery.data)) {
 		return true;

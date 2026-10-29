@@ -33,7 +33,7 @@ function Column({ dark, label }: { dark: boolean; label: string }) {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
+createRoot(document.getElementById("root")!).render(
 	<div className="flex min-h-screen">
 		<Column dark={false} label="Light" />
 		<Column dark label="Dark" />

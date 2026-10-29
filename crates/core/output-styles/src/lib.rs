@@ -81,8 +81,8 @@ const STYLES_DIR_NAME: &str = "output-styles";
 // `user_output_styles_dir`). Rather than depend on `apps/core`, the crate reads the
 // folder from a process-global set once at startup by Core
 // (`ryu_output_styles::set_data_dir(paths::ryu_dir())`), exactly as `ryu_skills`
-// does. When unset (crate-isolated unit tests) it falls back to the same default
-// Core computes: `$RYU_DIR` or `~/.ryu`.
+// does. When unset it falls back to the same pointer- and profile-aware
+// resolution every Ryu process uses (`ryu_sidecar_runtime::ryu_dir`).
 
 static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -94,21 +94,13 @@ pub fn set_data_dir(dir: PathBuf) {
     let _ = DATA_DIR.set(dir);
 }
 
-/// The Ryu data folder. The value Core published, or — when unset — the same default
-/// Core would compute (`$RYU_DIR`, else the OS home's `.ryu`).
+/// The Ryu data folder. The value Core published, or — when unset — the shared
+/// resolver's answer (`RYU_DIR`, the Storage pointer, then the profile default).
 fn data_dir() -> PathBuf {
-    if let Some(d) = DATA_DIR.get() {
-        return d.clone();
-    }
-    if let Some(v) = std::env::var_os("RYU_DIR") {
-        let p = PathBuf::from(v);
-        if !p.as_os_str().is_empty() {
-            return p;
-        }
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".ryu")
+    DATA_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(ryu_sidecar_runtime::ryu_dir)
 }
 
 pub(crate) fn ryu_data_dir() -> PathBuf {
@@ -334,7 +326,7 @@ pub fn parse_output_style_md_from(
     let fm: OutputStyleFrontMatter = if front_raw.trim().is_empty() {
         OutputStyleFrontMatter::default()
     } else {
-        serde_yml::from_str(&front_raw)
+        noyalib::compat::serde_yaml::from_str(&front_raw)
             .map_err(|e| format!("YAML parse error in output style '{id}': {e}"))?
     };
 
@@ -702,7 +694,7 @@ fn selection_path() -> PathBuf {
     if let Some(p) = non_empty_env(ENV_SELECTION_FILE) {
         return p;
     }
-    ryu_data_dir().join("output-style.json")
+    ryu_sidecar_runtime::layout::state_path(&ryu_data_dir(), "output-style.json")
 }
 
 /// The legacy node-default style id, or `None` when no style is selected.

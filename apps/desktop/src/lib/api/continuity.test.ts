@@ -130,3 +130,51 @@ describe("RNP continuity client", () => {
 		).rejects.toThrow("invalid continuity response");
 	});
 });
+
+it("validates every destination field while retaining its stable public failure", async () => {
+	const valid = {
+		version: 0,
+		conversationId: "conversation-1",
+		status: "merged",
+		imported: { messages: Number.MAX_SAFE_INTEGER, contextItems: 0 },
+		warnings: ["agent-unavailable", "earlier-messages-omitted"],
+		future: { ignored: true },
+	};
+	const client = createContinuityClient({ send: () => Promise.resolve(valid) });
+	expect(
+		await client.resumeConversation(
+			{ url: "https://destination.example", token: null },
+			bundle
+		)
+	).toEqual({
+		version: 0,
+		conversationId: "conversation-1",
+		status: "merged",
+		imported: { messages: Number.MAX_SAFE_INTEGER, contextItems: 0 },
+		warnings: ["agent-unavailable", "earlier-messages-omitted"],
+	});
+	for (const invalid of [
+		{ ...valid, version: 1 },
+		{ ...valid, status: "future-status" },
+		{ ...valid, conversationId: null },
+		{ ...valid, imported: { messages: 1.5, contextItems: 0 } },
+		{
+			...valid,
+			imported: { messages: Number.MAX_SAFE_INTEGER + 1, contextItems: 0 },
+		},
+		{ ...valid, imported: { messages: 0, contextItems: -1 } },
+		{ ...valid, warnings: ["future-warning"] },
+	]) {
+		const badClient = createContinuityClient({
+			send: () => Promise.resolve(invalid),
+		});
+		await expect(
+			badClient.resumeConversation(
+				{ url: "https://destination.example", token: null },
+				bundle
+			)
+		).rejects.toThrow(
+			"The destination returned an invalid continuity response."
+		);
+	}
+});

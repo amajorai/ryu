@@ -1,3 +1,4 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/managed-bots.ts
 //
 // Typed client for the zero-token Telegram onboarding path ("managed bots",
@@ -19,6 +20,8 @@
 // secret never leaves Core — see {@link ManagedBotPairing}, which has no field
 // for it. The desktop only ever sees nonce + deep link + status.
 
+import { activityJsonValueSchema } from "@ryuhq/core-client/activity.ts";
+import { z } from "zod";
 import { ApiError, type ApiTarget, request } from "./client.ts";
 
 /**
@@ -141,7 +144,15 @@ function unsupported(): ManagedBotFailure {
 	return { kind: "unsupported", message: UNSUPPORTED_MESSAGE };
 }
 
-function unreachable(error: unknown): ManagedBotFailure {
+// Thrown values are untyped at the catch boundary. Only genuine native Error
+// instances carry details this classifier reads; all other thrown values use
+// the existing generic service-failure message.
+const managedBotErrorSchema = z
+	.union([z.instanceof(ApiError), z.instanceof(Error)])
+	.nullable()
+	.catch(null);
+type ManagedBotError = z.output<typeof managedBotErrorSchema>;
+function unreachable(error: ManagedBotError): ManagedBotFailure {
 	if (error instanceof ApiError) {
 		return {
 			kind: "unreachable",
@@ -167,17 +178,20 @@ function unreachable(error: unknown): ManagedBotFailure {
  * exist — a Core too old to have it, or a manager that never mounted it. Both
  * mean the same thing to the user, so both collapse to `unsupported`.
  */
-export function classifyPairError(error: unknown): ManagedBotFailure {
-	if (
-		error instanceof ApiError &&
-		(error.status === 501 ||
-			error.status === 404 ||
-			error.serverMessage === UNSUPPORTED_ERROR)
-	) {
-		return unsupported();
+const pairFailureSchema = managedBotErrorSchema.transform(
+	(error): ManagedBotFailure => {
+		if (
+			error instanceof ApiError &&
+			(error.status === 501 ||
+				error.status === 404 ||
+				error.serverMessage === UNSUPPORTED_ERROR)
+		) {
+			return unsupported();
+		}
+		return unreachable(error);
 	}
-	return unreachable(error);
-}
+);
+export const classifyPairError = pairFailureSchema.parse;
 
 /**
  * Classify a failure from {@link getManagedBotStatus}.
@@ -188,20 +202,60 @@ export function classifyPairError(error: unknown): ManagedBotFailure {
  * is missing. Collapsing the two would drop the user into the manual fields with
  * a wrong explanation every time a link timed out.
  */
-export function classifyStatusError(error: unknown): ManagedBotFailure {
-	if (error instanceof ApiError) {
-		if (error.status === 501 || error.serverMessage === UNSUPPORTED_ERROR) {
-			return unsupported();
+const statusFailureSchema = managedBotErrorSchema.transform(
+	(error): ManagedBotFailure => {
+		if (error instanceof ApiError) {
+			if (error.status === 501 || error.serverMessage === UNSUPPORTED_ERROR) {
+				return unsupported();
+			}
+			if (error.status === 404) {
+				return {
+					kind: "expired",
+					message: "That pairing link is no longer valid.",
+				};
+			}
 		}
-		if (error.status === 404) {
-			return {
-				kind: "expired",
-				message: "That pairing link is no longer valid.",
-			};
-		}
+		return unreachable(error);
 	}
-	return unreachable(error);
+);
+export const classifyStatusError = statusFailureSchema.parse;
+
+function preserveManagedBotReply<S extends z.ZodType>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			activityJsonValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
 }
+export const managedBotPairingSchema = preserveManagedBotReply(
+	z.object({
+		deep_link: z.string(),
+		expires_at: z.string(),
+		nonce: z.string(),
+		status: z.literal("waiting").optional(),
+	})
+) satisfies z.ZodType<ManagedBotPairing>;
+export const managedBotStatusSchema = preserveManagedBotReply(
+	z.discriminatedUnion("status", [
+		z.object({ status: z.literal("waiting") }),
+		z.object({
+			status: z.literal("confirm"),
+			bot_id: z.number(),
+			bot_username: z.string(),
+			owner_telegram_user_id: z.number().nullable(),
+		}),
+		z.object({
+			status: z.literal("ready"),
+			bot_id: z.number(),
+			bot_username: z.string(),
+			channel_id: z.string().optional(),
+			token: z.string().optional(),
+		}),
+	])
+) satisfies z.ZodType<ManagedBotStatus>;
+const managedBotCancelSchema = preserveManagedBotReply(
+	z.object({ manager_forgot: z.boolean().optional(), status: z.string() })
+);
 
 /**
  * Open a pairing: Core asks the manager for a nonce + deep link, keeps the claim
@@ -216,11 +270,16 @@ export function beginManagedBotPairing(
 	form: ManagedBotPairingRequest,
 	signal?: AbortSignal
 ): Promise<ManagedBotPairing> {
-	return request<ManagedBotPairing>(target, PAIR_PATH, {
-		method: "POST",
-		body: form,
-		signal,
-	});
+	return request(
+		target,
+		PAIR_PATH,
+		{
+			method: "POST",
+			body: form,
+			signal,
+		},
+		gatewayJsonValueSchema
+	).then(managedBotPairingSchema.parse);
 }
 
 /** The pairing's own URL. One builder, so the poll/confirm/cancel calls agree. */
@@ -237,7 +296,12 @@ export function getManagedBotStatus(
 	nonce: string,
 	signal?: AbortSignal
 ): Promise<ManagedBotStatus> {
-	return request<ManagedBotStatus>(target, pairingUrl(nonce), { signal });
+	return request(
+		target,
+		pairingUrl(nonce),
+		{ signal },
+		gatewayJsonValueSchema
+	).then(managedBotStatusSchema.parse);
 }
 
 /**
@@ -250,14 +314,15 @@ export function confirmManagedBot(
 	nonce: string,
 	signal?: AbortSignal
 ): Promise<ManagedBotStatus> {
-	return request<ManagedBotStatus>(
+	return request(
 		target,
 		`${pairingUrl(nonce)}${CONFIRM_SUFFIX}`,
 		{
 			method: "POST",
 			signal,
-		}
-	);
+		},
+		gatewayJsonValueSchema
+	).then(managedBotStatusSchema.parse);
 }
 
 /**
@@ -270,9 +335,10 @@ export function cancelManagedBotPairing(
 	nonce: string,
 	signal?: AbortSignal
 ): Promise<{ manager_forgot?: boolean; status: string }> {
-	return request<{ manager_forgot?: boolean; status: string }>(
+	return request(
 		target,
 		pairingUrl(nonce),
-		{ method: "DELETE", signal }
-	);
+		{ method: "DELETE", signal },
+		gatewayJsonValueSchema
+	).then(managedBotCancelSchema.parse);
 }

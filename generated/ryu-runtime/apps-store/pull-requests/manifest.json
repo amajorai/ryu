@@ -6,12 +6,12 @@
   "privacyPolicyUrl": "https://ryuhq.com/privacy",
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/pull-requests",
-  "name": "Pull Requests",
-  "version": "0.1.14",
+  "name": "Code Review",
+  "version": "0.1.15",
   "stability": "experimental",
   "category": "Developer Tools",
-  "description": "A focused GitHub work inbox for Ryu. Browse pull requests and issues across repositories, inspect summaries and discussion, then review, manage stacked pull requests, merge changes, or close and comment on issues through the locally authenticated GitHub CLI.",
-  "tagline": "Review GitHub pull requests and issues without leaving Ryu",
+  "description": "A unified GitHub code review workspace for Ryu. Triage pull requests across repositories, inspect changes and checks, discuss and submit reviews, manage stacks, and ask the Ask Ryu assistant about the selected pull request.",
+  "tagline": "Review GitHub pull requests with your team and Ryu",
   "keywords": ["github", "git", "pull requests", "issues", "code review", "ci"],
   "icon": "git-pull-request",
   "iconDither": { "from": 221, "to": "transparent", "direction": "down" },
@@ -29,10 +29,10 @@
   "runnables": [
     {
       "id": "pull-requests-companion",
-      "name": "Pull Requests",
+      "name": "Code Review",
       "kind": "companion",
       "config": {
-        "label": "Pull Requests",
+        "label": "Code Review",
         "ui_entry": "./dist/index.html",
         "ui_format": "html"
       }
@@ -70,6 +70,10 @@
           },
           {
             "path": "/pulls/:owner/:repo/:number/diff",
+            "permission": "pull-requests.view"
+          },
+          {
+            "path": "/pulls/:owner/:repo/:number/feedback",
             "permission": "pull-requests.view"
           },
           {
@@ -125,7 +129,7 @@
       }
     }
   ],
-  "permission_grants": ["app:http", "shell:integrate"],
+  "permission_grants": ["app:http", "shell:integrate", "assistant:context"],
   "permission_levels": [
     {
       "id": "pull-requests.view",
@@ -137,17 +141,23 @@
       "label": "Can review",
       "description": "Post comments and reviews, mark drafts ready, manage stacked pull requests, merge pull requests, and comment on or close issues using your local GitHub CLI credentials.",
       "implies": ["pull-requests.view"]
+    },
+    {
+      "id": "pull-requests.ai-review",
+      "label": "Can ask for AI review",
+      "description": "Share the selected pull request's description, changed file list, review and check status, reviewer names, and diff with the Ask Ryu assistant as removable context. Nothing reaches a model until you ask the assistant a question.",
+      "implies": ["pull-requests.view"]
     }
   ],
   "companion": {
-    "label": "Pull Requests",
+    "label": "Code Review",
     "icon": "git-pull-request"
   },
   "contributes": {
     "sidebar_buttons": [
       {
         "id": "pull-requests-pulls",
-        "title": "Pull requests",
+        "title": "Code review",
         "icon": "git-pull-request",
         "target": "/plugin/app__pull-requests-companion",
         "context": { "view": "pulls" },
@@ -160,19 +170,6 @@
         "target": "/plugin/app__pull-requests-companion",
         "context": { "view": "issues" },
         "order": 34
-      }
-    ],
-    "chat_widget_templates": [
-      {
-        "id": "pull-requests.chat",
-        "title": "Pull Requests widget",
-        "description": "Pull Requests chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["pull requests widget"],
-        "examples": ["Show me a pull requests widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
       }
     ]
   }

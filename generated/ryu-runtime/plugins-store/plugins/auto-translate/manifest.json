@@ -1,0 +1,111 @@
+{
+  "tags": ["translation", "language", "chat", "accessibility"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/auto-translate",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/auto-translate",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/auto-translate",
+  "name": "Auto Translate",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "Translates assistant replies that are not in your language, Telegram-style: the original reply stays in the chat and the translation appears beside it. Target language, a do-not-translate list, and the side model are settings.",
+  "tagline": "Read every reply in your own language",
+  "keywords": ["translation", "translate", "language", "chat", "accessibility"],
+  "category": "Productivity",
+  "icon": "translate",
+  "iconDither": { "from": 172, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "permission_grants": ["hook:side-model", "preferences:read"],
+  "activation_events": ["*"],
+  "contributes": {
+    "composer_controls": [
+      {
+        "id": "auto-translate.toggle",
+        "type": "toggle",
+        "flag": "io.ryu.auto-translate",
+        "label": "Translate replies",
+        "description": "Translate replies in this chat even when automatic translation is off."
+      }
+    ],
+    "settings_tabs": [
+      {
+        "id": "auto-translate.settings",
+        "title": "Auto translate",
+        "scope": "node",
+        "fields": [
+          {
+            "type": "toggle",
+            "pref_key": "auto-translate-enabled",
+            "label": "Translate replies automatically",
+            "description": "Translate every reply that is not in your language. When off, use the composer's Translate replies toggle per chat.",
+            "default": true
+          },
+          {
+            "type": "select",
+            "pref_key": "auto-translate-target",
+            "label": "Translate to",
+            "description": "Replies already in this language are never translated.",
+            "default": "en",
+            "options": [
+              { "value": "en", "label": "English" },
+              { "value": "ar", "label": "Arabic" },
+              { "value": "zh-hans", "label": "Chinese (Simplified)" },
+              { "value": "zh-hant", "label": "Chinese (Traditional)" },
+              { "value": "nl", "label": "Dutch" },
+              { "value": "fr", "label": "French" },
+              { "value": "de", "label": "German" },
+              { "value": "he", "label": "Hebrew" },
+              { "value": "hi", "label": "Hindi" },
+              { "value": "id", "label": "Indonesian" },
+              { "value": "it", "label": "Italian" },
+              { "value": "ja", "label": "Japanese" },
+              { "value": "ko", "label": "Korean" },
+              { "value": "fa", "label": "Persian" },
+              { "value": "pl", "label": "Polish" },
+              { "value": "pt", "label": "Portuguese" },
+              { "value": "ru", "label": "Russian" },
+              { "value": "es", "label": "Spanish" },
+              { "value": "th", "label": "Thai" },
+              { "value": "tr", "label": "Turkish" },
+              { "value": "uk", "label": "Ukrainian" },
+              { "value": "vi", "label": "Vietnamese" }
+            ]
+          },
+          {
+            "type": "text",
+            "pref_key": "auto-translate-skip",
+            "label": "Do not translate",
+            "description": "Comma-separated language codes or English names to leave untranslated, for example: es, French. Your target language is always skipped.",
+            "placeholder": "es, fr",
+            "default": ""
+          },
+          {
+            "type": "model_picker",
+            "pref_key": "auto-translate-model",
+            "label": "Translation model",
+            "description": "Optional. Empty follows Ryu's normal side-model/node default."
+          }
+        ]
+      }
+    ],
+    "turn_hooks": [
+      {
+        "id": "auto-translate.reply",
+        "on": "post_assistant_turn",
+        "code_file": "hooks/reply.js"
+      }
+    ]
+  }
+}

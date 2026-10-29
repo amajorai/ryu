@@ -1,9 +1,10 @@
 {
   "name": "core",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "scripts": {
     "dev": "node scripts/dev.js",
+    "dev:restart": "node scripts/dev-restart.mjs",
     "dev:watch": "cargo watch -x 'run --features sandbox-wasmtime,voice-parakeet,voice-vad'",
     "build": "cargo build --release --features sandbox-wasmtime,voice-parakeet,voice-vad",
     "check": "cargo check",

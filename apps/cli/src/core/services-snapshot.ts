@@ -1,12 +1,20 @@
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
 import { type ApiTarget, request } from "@ryuhq/core-client/client";
 import { fetchSidecarStatus } from "@ryuhq/core-client/system";
+import { z } from "zod";
 
-interface SetupListWire {
-	installed?: string[];
-}
-interface SetupStatusWire {
-	states?: Record<string, { state?: string } | undefined>;
-}
+const setupListSchema = z.object({
+	installed: z.array(z.string().nullable().catch(null)).catch([]),
+});
+const setupStateSchema = z.object({
+	state: z.string().optional().catch(undefined),
+});
+const setupStatusSchema = z.object({
+	states: z
+		.record(z.string(), setupStateSchema.nullable().catch(null))
+		.catch({}),
+});
+
 export interface ServicesSnapshot {
 	installed: Set<string>;
 	installStates: Record<string, string>;
@@ -23,8 +31,18 @@ export async function loadServices(
 	const [runningResult, installedResult, statesResult] =
 		await Promise.allSettled([
 			fetchSidecarStatus(target, signal),
-			request<SetupListWire>(target, "/api/setup/list", { signal }),
-			request<SetupStatusWire>(target, "/api/setup/status", { signal }),
+			request(
+				target,
+				"/api/setup/list",
+				{ signal },
+				appResponseValueSchema
+			).then((value) => setupListSchema.parse(value)),
+			request(
+				target,
+				"/api/setup/status",
+				{ signal },
+				appResponseValueSchema
+			).then((value) => setupStatusSchema.parse(value)),
 		]);
 	signal?.throwIfAborted();
 	const running = new Set<string>();
@@ -41,7 +59,7 @@ export async function loadServices(
 			: undefined;
 	const installed = new Set(
 		Array.isArray(listed)
-			? listed.filter((name) => typeof name === "string")
+			? listed.flatMap((name) => (name === null ? [] : [name]))
 			: []
 	);
 	const installStates: Record<string, string> = {};

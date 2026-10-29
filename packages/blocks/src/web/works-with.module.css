@@ -1,0 +1,31 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	@keyframes marquee {
+		from {
+			transform: translateX(0);
+		}
+		to {
+			transform: translateX(-50%);
+		}
+	}
+	.track {
+		animation: marquee 36s linear infinite;
+	}
+	.viewport:hover .track {
+		animation-play-state: paused;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.track {
+			animation: none;
+		}
+	}
+}
+
+.logo {
+	mask-image: var(--tool-mask);
+	mask-repeat: no-repeat;
+	mask-position: center;
+	mask-size: contain;
+}

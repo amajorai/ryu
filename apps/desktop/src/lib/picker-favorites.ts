@@ -1,3 +1,5 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+
 // apps/desktop/src/lib/picker-favorites.ts
 //
 // Local "Recents" + "Pinned" for the composer's model/agent picker. Same
@@ -59,9 +61,9 @@ export function parseRefKey(key: string): PickerRef | null {
 function readList(key: string): string[] {
 	try {
 		const raw = localStorage.getItem(key);
-		const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+		const parsed: unknown = raw ? JSON.parse(raw) : [];
 		return Array.isArray(parsed)
-			? parsed.filter((v): v is string => typeof v === "string")
+			? parsed.filter((v): v is string => isNativeText(v))
 			: [];
 	} catch {
 		return [];

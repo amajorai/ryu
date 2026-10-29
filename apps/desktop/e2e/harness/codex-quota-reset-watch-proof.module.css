@@ -1,0 +1,348 @@
+.fixture1 {
+	padding: 15px 16px;
+	background: #111923;
+	border: 1px solid #223040;
+	border-radius: 14px;
+}
+
+.fixture2 {
+	font-size: 11px;
+	font-weight: 700;
+	color: #8292a5;
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+}
+
+.fixture3 {
+	margin-top: 7px;
+	font-size: 22px;
+	font-weight: 750;
+	color: #eef5ff;
+	letter-spacing: -0.03em;
+}
+
+.fixture4 {
+	box-sizing: border-box;
+	min-height: 100vh;
+	padding: 38px 24px 56px;
+	font-family:
+		-apple-system,
+		BlinkMacSystemFont,
+		Segoe UI,
+		sans-serif;
+	color: #eef5ff;
+	background: #090d12;
+}
+
+.fixture5 {
+	max-width: 1040px;
+	margin: 0 auto;
+}
+
+.fixture6 {
+	display: flex;
+	gap: 13px;
+	align-items: center;
+}
+
+.fixture7 {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 46px;
+	height: 46px;
+	font-size: 22px;
+	background: #153c32;
+	border: 1px solid #43d39e;
+	border-radius: 13px;
+}
+
+.fixture8 {
+	font-size: 12px;
+	font-weight: 750;
+	color: #43d39e;
+	letter-spacing: 0.14em;
+}
+
+.fixture9 {
+	margin: 5px 0 0;
+	font-size: 34px;
+	letter-spacing: -0.045em;
+}
+
+.fixture10 {
+	max-width: 790px;
+	margin: 20px 0 26px;
+	font-size: 16px;
+	line-height: 1.6;
+	color: #aebdcd;
+}
+
+.fixture11 {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 10px;
+}
+
+.fixture12 {
+	padding: 20px;
+	margin-top: 18px;
+	background: #111923;
+	border: 1px solid #223040;
+	border-radius: 18px;
+}
+
+.fixture13 {
+	font-size: 11px;
+	font-weight: 700;
+	color: #8292a5;
+	text-transform: uppercase;
+	letter-spacing: 0.14em;
+}
+
+.fixture14 {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 12px;
+	margin-top: 14px;
+}
+
+.fixture15 {
+	padding: 14px;
+	background: #0d141c;
+	border: 1px solid #223040;
+	border-radius: 14px;
+}
+
+.fixture16 {
+	font-size: 12px;
+	font-weight: 750;
+	color: #43d39e;
+}
+
+.fixture17 {
+	margin-top: 8px;
+	font-size: 16px;
+	font-weight: 700;
+}
+
+.fixture18 {
+	font-size: 12px;
+	color: #7dd3fc;
+}
+
+.fixture19 {
+	margin-top: 8px;
+	font-size: 12px;
+	line-height: 1.5;
+	color: #aebdcd;
+}
+
+.fixture20 {
+	display: grid;
+	grid-template-columns: 1.1fr 0.9fr;
+	gap: 18px;
+	margin-top: 18px;
+}
+
+.fixture21 {
+	padding: 20px;
+	background: #111923;
+	border: 1px solid #223040;
+	border-radius: 18px;
+}
+
+.fixture22 {
+	font-size: 11px;
+	font-weight: 700;
+	color: #8292a5;
+	text-transform: uppercase;
+	letter-spacing: 0.14em;
+}
+
+.fixture23 {
+	display: inline-block;
+	margin-top: 13px;
+	font-size: 15px;
+	color: #7dd3fc;
+}
+
+.fixture24 {
+	display: flex;
+	gap: 16px;
+	align-items: end;
+	margin-top: 20px;
+}
+
+.fixture25 {
+	font-size: 11px;
+	color: #8292a5;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+}
+
+.fixture26 {
+	font-size: 48px;
+	font-weight: 800;
+	line-height: 1;
+	color: #43d39e;
+	letter-spacing: -0.06em;
+}
+
+.fixture27 {
+	padding-left: 16px;
+	border-left: 1px solid #334155;
+}
+
+.fixture28 {
+	font-size: 17px;
+	font-weight: 700;
+	color: #eef5ff;
+}
+
+.fixture29 {
+	margin-top: 5px;
+	font-size: 12px;
+	line-height: 1.5;
+	color: #aebdcd;
+}
+
+.fixture30 {
+	padding-top: 14px;
+	margin-top: 20px;
+	font-size: 12px;
+	line-height: 1.55;
+	color: #aebdcd;
+	border-top: 1px solid #223040;
+}
+
+.fixture31 {
+	padding: 20px;
+	background: #111923;
+	border: 1px solid #223040;
+	border-radius: 18px;
+}
+
+.fixture32 {
+	font-size: 11px;
+	font-weight: 700;
+	color: #8292a5;
+	text-transform: uppercase;
+	letter-spacing: 0.14em;
+}
+
+.fixture33 {
+	margin-top: 13px;
+	font-size: 17px;
+	font-weight: 700;
+	color: #eef5ff;
+}
+
+.fixture34 {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 7px;
+	margin-top: 13px;
+}
+
+.fixture35 {
+	margin-top: 6px;
+	font-size: 18px;
+	font-weight: 750;
+}
+
+.fixture36 {
+	margin-top: 7px;
+	font-size: 13px;
+	line-height: 1.55;
+	color: #aebdcd;
+}
+
+.fixture37 {
+	padding: 20px;
+	margin-top: 18px;
+	background: #111923;
+	border: 1px solid #223040;
+	border-radius: 18px;
+}
+
+.fixture38 {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.fixture39 {
+	font-size: 11px;
+	font-weight: 700;
+	color: #8292a5;
+	text-transform: uppercase;
+	letter-spacing: 0.14em;
+}
+
+.fixture40 {
+	padding: 6px 10px;
+	font-size: 11px;
+	font-weight: 750;
+	color: #b9ffe2;
+	background: #153c32;
+	border: 1px solid #43d39e;
+	border-radius: 999px;
+}
+
+.fixture41 {
+	display: grid;
+	gap: 10px;
+	padding: 0;
+	margin: 16px 0 0;
+	line-height: 1.5;
+	color: #aebdcd;
+	list-style: none;
+}
+
+.fixture42 {
+	margin-top: 18px;
+	font-size: 12px;
+	line-height: 1.6;
+	color: #6f8297;
+}
+
+.dynamicFixture1 {
+	padding: var(--fixture-value-7);
+	font-size: var(--fixture-value-6);
+	color: var(--fixture-value-4);
+	cursor: var(--fixture-value-5);
+	background: var(--fixture-value-1);
+	border: var(--fixture-value-2);
+	border-radius: var(--fixture-value-3);
+}
+
+.dynamicFixture2 {
+	padding-left: var(--fixture-value-10);
+	margin-top: var(--fixture-value-9);
+	border-left: var(--fixture-value-8);
+}
+
+.dynamicFixture3 {
+	font-size: var(--fixture-value-12);
+	font-weight: var(--fixture-value-13);
+	color: var(--fixture-value-11);
+	letter-spacing: var(--fixture-value-14);
+}
+
+:root {
+	--codex-quota-reset-watch-proof-color-1: #153c32;
+	--codex-quota-reset-watch-proof-color-2: #0d141c;
+	--codex-quota-reset-watch-proof-color-3: #43d39e;
+	--codex-quota-reset-watch-proof-color-4: #334155;
+	--codex-quota-reset-watch-proof-color-5: #b9ffe2;
+	--codex-quota-reset-watch-proof-color-6: #aebdcd;
+}
+
+:root {
+	--codex-quota-state-tone-1: #7dd3fc;
+	--codex-quota-state-tone-2: #94a3b8;
+	--codex-quota-state-tone-3: #43d39e;
+	--codex-quota-state-tone-4: #fbbf24;
+}

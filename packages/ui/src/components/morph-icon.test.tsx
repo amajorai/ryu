@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MorphIconSwap } from "./morph-icon";
+import { MorphIconSwap } from "./morph-icon.tsx";
 
 const horizontal = [["path", { d: "M3 12h18" }]] as const;
 const vertical = [["path", { d: "M12 3v18" }]] as const;

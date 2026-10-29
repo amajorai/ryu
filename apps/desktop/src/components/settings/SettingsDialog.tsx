@@ -1,4 +1,5 @@
 import {
+	Analytics01Icon,
 	CloudIcon,
 	Coins01Icon,
 	ColorsIcon,
@@ -14,9 +15,11 @@ import {
 	Settings01Icon,
 	SourceCodeIcon,
 	UserCircleIcon,
+	UserIcon,
 	UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
+import ResizableSettingsLayout from "@ryu/blocks/desktop/resizable-settings-layout.tsx";
 import {
 	SettingsIconTile,
 	type SettingsTint,
@@ -39,7 +42,6 @@ import { useTheme } from "next-themes";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useSession } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
-import ResizableSettingsLayout from "@/src/components/ResizableSettingsLayout.tsx";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
@@ -69,11 +71,13 @@ import { DeveloperTab } from "./DeveloperTab.tsx";
 import { EntitySettings } from "./EntitySettings.tsx";
 import { GeneralTab } from "./GeneralTab.tsx";
 import { KeyboardShortcutsTab } from "./KeyboardShortcutsTab.tsx";
+import { ProfileTab } from "./ProfileTab.tsx";
 import { RyuAppsTab } from "./RyuAppsTab.tsx";
 import { ServicesOrgSwitcher } from "./ServicesOrgSwitcher.tsx";
 import { SessionsTab } from "./SessionsTab.tsx";
 import { SettingsSearchResults } from "./SettingsSearchResults.tsx";
 import { SettingsSyncTab } from "./SettingsSyncTab.tsx";
+import { StatsTab } from "./StatsTab.tsx";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 import { TeamsBillingTab } from "./TeamsBillingTab.tsx";
 import { TtsEngineSettings } from "./TtsEngineSettings.tsx";
@@ -89,10 +93,10 @@ const queryClient = new QueryClient();
 // NOT part of this union — they are matched by prefix at render time.
 type SectionValue = SettingsSectionValue;
 
-const KEYBOARD_SHORTCUT_CONTEXT: Partial<Record<SectionValue, string>> = {
-	general: "Customize shortcuts for app controls, tabs, and navigation.",
-	voice: "Customize shortcuts for voice mode and other voice actions.",
-};
+const KEYBOARD_SHORTCUT_CONTEXT = new Map<string, string>([
+	["general", "Customize shortcuts for app controls, tabs, and navigation."],
+	["voice", "Customize shortcuts for voice mode and other voice actions."],
+]);
 
 interface NavItem {
 	desktopOnly?: boolean;
@@ -173,6 +177,18 @@ const NAV_GROUPS: NavGroup[] = [
 				label: "Account",
 				icon: UserCircleIcon,
 				tint: "blue",
+			},
+			{
+				value: "profile",
+				label: "Profile",
+				icon: UserIcon,
+				tint: "blue",
+			},
+			{
+				value: "stats",
+				label: "Stats",
+				icon: Analytics01Icon,
+				tint: "purple",
 			},
 			{
 				value: "sessions",
@@ -300,12 +316,16 @@ function KeyboardShortcutsLink({
 	);
 }
 
-function SectionContent({ value }: { value: SectionValue }) {
+function SectionContent({ value }: { value: string }) {
 	switch (value) {
 		case "general":
 			return <GeneralTab />;
 		case "account":
 			return <AccountTab />;
+		case "profile":
+			return <ProfileTab />;
+		case "stats":
+			return <StatsTab />;
 		case "sessions":
 			return <SessionsTab />;
 		case "ryu-apps":
@@ -347,6 +367,37 @@ function SectionContent({ value }: { value: SectionValue }) {
 	}
 }
 
+/**
+ * The content pane, and the owner of the settings-search reveal.
+ *
+ * The reveal hook lives here rather than on `SettingsDialog` because the
+ * dialog's popup mounts in a portal one render after the dialog itself. At the
+ * dialog level the hook's effect ran before the pane existed: it claimed the
+ * pending reveal against the whole document, so a sub-paged section (General,
+ * Appearance) never saw the request and stayed on its index, and reopening
+ * Settings on the section it already showed claimed nothing at all. Mounted
+ * with the pane, the section's own render peeks the request first (to open the
+ * right sub-page) and the reveal is then scoped to this pane. The hook also
+ * claims a result chosen in the section already on screen, which switches no
+ * section and so would otherwise stay pending until the next visit.
+ */
+function SettingsContentPane({
+	children,
+	className,
+	section,
+}: {
+	children: ReactNode;
+	className: string;
+	section: string;
+}) {
+	const contentRef = useSettingReveal(section, "app");
+	return (
+		<div className={className} ref={contentRef}>
+			{children}
+		</div>
+	);
+}
+
 function normalizeDefaultSection(
 	defaultSection: SectionValue | (string & {}) | undefined,
 	isDesktop: boolean
@@ -377,7 +428,6 @@ export function SettingsDialog({
 	// The sidebar filter. Non-empty swaps the nav for search results — individual
 	// SETTINGS, not just tabs — from the shared index.
 	const [search, setSearch] = useState("");
-	const contentRef = useSettingReveal(activeSection);
 	const openGateway = useGatewayDialog((s) => s.openGateway);
 	const { resolvedTheme } = useTheme();
 	const target = toTarget(useActiveNode());
@@ -425,7 +475,7 @@ export function SettingsDialog({
 				items: group.items.map((item) => ({
 					...item,
 					icon: group.title === "Apps" ? Package01Icon : PlugSocketIcon,
-					tint: "gray" as SettingsTint,
+					tint: /* SAFETY: The authored gray literal is a declared SettingsTint; this fixes the local tile tint and does not project any plugin-provided value. */ "gray" as SettingsTint,
 				})),
 			})),
 		],
@@ -509,7 +559,7 @@ export function SettingsDialog({
 		allItems.find((i) => i.value === activeSection)?.label ?? "";
 	const activeEntity = entityById.get(activeSection);
 	const keyboardShortcutDescription = isDesktop
-		? KEYBOARD_SHORTCUT_CONTEXT[activeSection as SectionValue]
+		? KEYBOARD_SHORTCUT_CONTEXT.get(activeSection)
 		: undefined;
 
 	return (
@@ -519,16 +569,16 @@ export function SettingsDialog({
 				    box with no room for both panes on a phone, so below `md` — the same
 				    768px line `useIsMobile` stacks the panes at — it goes
 				    edge-to-edge, full dynamic viewport height. */}
-				<DialogContent className="!w-[85vw] !max-w-7xl max-md:!w-screen max-md:!max-w-none [&>[data-slot=dialog-close]]:!top-5 [&>[data-slot=dialog-close]]:!right-5 h-[85vh] gap-0 overflow-hidden p-0 max-md:h-[100dvh] max-md:rounded-none">
+				<DialogContent appearance="gateway-settings">
 					<ResizableSettingsLayout
 						content={
-							<div
+							<SettingsContentPane
 								className={
 									activeSection === "keyboard"
 										? "flex h-full min-h-0 flex-col px-4 py-4 md:px-8 md:py-6"
 										: "px-4 py-4 md:px-8 md:py-6"
 								}
-								ref={contentRef}
+								section={activeSection}
 							>
 								<h2 className="mb-6 shrink-0 font-medium text-base">
 									{activeLabel}
@@ -543,7 +593,7 @@ export function SettingsDialog({
 												: "space-y-6"
 										}
 									>
-										<SectionContent value={activeSection as SectionValue} />
+										<SectionContent value={activeSection} />
 										{keyboardShortcutDescription ? (
 											<KeyboardShortcutsLink
 												description={keyboardShortcutDescription}
@@ -552,24 +602,24 @@ export function SettingsDialog({
 										) : null}
 									</div>
 								)}
-							</div>
+							</SettingsContentPane>
 						}
 						contentScrollable={activeSection !== "keyboard"}
 						sidebar={
 							<>
-								<SidebarGroup className="py-1">
+								<SidebarGroup spacing="compact">
 									<Input
 										aria-label={t("settings.search.label")}
-										className="h-8 text-sm"
 										onChange={(e) => setSearch(e.target.value)}
 										placeholder={t("settings.search.placeholder")}
+										size="settings-search"
 										value={search}
 									/>
 								</SidebarGroup>
 								{query ? (
 									<>
 										{matchedSections.length > 0 ? (
-											<SidebarGroup className="py-1">
+											<SidebarGroup spacing="compact">
 												<SidebarGroupLabel>
 													{t("settings.search.sections")}
 												</SidebarGroupLabel>
@@ -590,7 +640,9 @@ export function SettingsDialog({
 																		tint={item.tint}
 																	/>
 																) : null}
-																<span className="truncate">{item.label}</span>
+																<span className="truncate" title={item.label}>
+																	{item.label}
+																</span>
 															</SidebarMenuButton>
 														</SidebarMenuItem>
 													))}
@@ -608,8 +660,8 @@ export function SettingsDialog({
 								{query
 									? null
 									: navGroups.map((group, gi) => (
-											// biome-ignore lint/suspicious/noArrayIndexKey: static nav groups with no stable key
-											<SidebarGroup className="py-1" key={group.title ?? gi}>
+											// static nav groups with no stable key
+											<SidebarGroup key={group.title ?? gi} spacing="compact">
 												{group.title && (
 													<SidebarGroupLabel>{group.title}</SidebarGroupLabel>
 												)}
@@ -628,14 +680,16 @@ export function SettingsDialog({
 																		tint={item.tint}
 																	/>
 																) : null}
-																<span className="truncate">{item.label}</span>
+																<span className="truncate" title={item.label}>
+																	{item.label}
+																</span>
 															</SidebarMenuButton>
 														</SidebarMenuItem>
 													))}
 												</SidebarMenu>
 											</SidebarGroup>
 										))}
-								<SidebarGroup className="mt-auto py-1">
+								<SidebarGroup className="mt-auto" spacing="compact">
 									<SidebarMenu>
 										<SidebarMenuItem>
 											<SidebarMenuButton onClick={handleSendFeedback}>
@@ -644,7 +698,7 @@ export function SettingsDialog({
 										</SidebarMenuItem>
 									</SidebarMenu>
 								</SidebarGroup>
-								<SidebarGroup className="py-1">
+								<SidebarGroup spacing="compact">
 									<SidebarGroupLabel>
 										{simpleInterface
 											? t("settings.search.device")

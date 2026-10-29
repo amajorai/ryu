@@ -33,7 +33,11 @@ import { useLocalizedString } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
 import { type ReactNode, useEffect, useState } from "react";
-import { SettingsGroup, SettingsItem, SettingsSection } from "./settings-items";
+import {
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "./settings-items.tsx";
 
 /**
  * The tint of a row's icon tile. Named rather than free-form so a surface cannot
@@ -55,7 +59,7 @@ export type SettingsTint =
 // Fixed 500-weight fills with white glyphs, in both themes deliberately: Apple's
 // Settings tiles do not dim in dark mode either, and a tile that follows the
 // theme stops being the constant landmark it exists to be.
-const TINT_CLASS: Record<SettingsTint, string> = {
+const TINT_CLASS = {
 	blue: "bg-blue-500",
 	gray: "bg-zinc-500",
 	green: "bg-emerald-500",
@@ -66,7 +70,7 @@ const TINT_CLASS: Record<SettingsTint, string> = {
 	red: "bg-red-500",
 	teal: "bg-teal-500",
 	yellow: "bg-amber-500",
-};
+} satisfies Record<SettingsTint, string>;
 
 interface SettingsIconTileProps {
 	className?: string;
@@ -93,14 +97,19 @@ export const SettingsIconTile = ({
 		aria-hidden="true"
 		className={cn(
 			"flex shrink-0 items-center justify-center text-white",
-			size === "sm" ? "size-[18px] rounded-[5px]" : "size-6 rounded-[7px]",
+			size === "sm"
+				? "size-[18px] rounded-(--radius-artwork-compact)"
+				: "size-6 rounded-sm",
 			TINT_CLASS[tint],
 			className
 		)}
 	>
+		{/* Important: a sidebar row sizes every descendant svg (`[&_svg]:size-4`),
+		    which would blow the glyph up to fill the tile and lose its inset. */}
 		<HugeiconsIcon
-			className={size === "sm" ? "size-3" : "size-4"}
+			className={size === "sm" ? "size-2.5!" : "size-4!"}
 			icon={icon}
+			size={size === "sm" ? 10 : 16}
 			strokeWidth={2}
 		/>
 	</span>
@@ -148,17 +157,24 @@ export const SettingsNavRow = ({
 			// `relative` is load-bearing: the title button's full-row overlay below
 			// positions against this row, not against whatever ancestor happens to be
 			// positioned.
-			"relative cursor-pointer transition-colors hover:bg-foreground/[0.04]",
+			"relative cursor-pointer",
 			className
 		)}
 		description={description}
+		navigation
 		title={
 			<button
 				className="flex w-full items-center gap-2.5 text-left"
 				onClick={onClick}
 				type="button"
 			>
-				{icon ? <SettingsIconTile icon={icon} tint={tint} /> : null}
+				{/* Tagged so the group's inset hairline starts past the tile, at the
+				    title — where Apple starts it. */}
+				{icon ? (
+					<span className="contents" data-slot="settings-icon-tile">
+						<SettingsIconTile icon={icon} tint={tint} />
+					</span>
+				) : null}
 				<span className="min-w-0 truncate">{title}</span>
 				{/* Stretches the button across the row so the whole row — chevron and
 				    value included — is one click target, without nesting those nodes
@@ -248,7 +264,7 @@ export const SettingsSubpages = ({
 	// render (the page bodies are inline JSX), so depending on it would re-fire
 	// this on every keystroke in any field inside a sub-page and trap the user on
 	// whichever page the last search named.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: see above — pages is a fresh array every render
+
 	useEffect(() => {
 		if (revealPageId && pages.some((p) => p.id === revealPageId)) {
 			if (!controlled) {
@@ -263,10 +279,11 @@ export const SettingsSubpages = ({
 			<div className={cn("flex flex-col gap-4", className)}>
 				<div className="flex flex-col gap-1">
 					<Button
-						className="-ml-2 h-7 w-fit gap-1 px-2 text-muted-foreground"
+						appearance="settings-back"
+						className="-ml-2 w-fit"
 						onClick={() => setPage(null)}
 						size="sm"
-						variant="ghost"
+						variant="ghost-muted"
 					>
 						<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
 						{backLabel}

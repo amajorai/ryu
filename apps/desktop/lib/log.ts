@@ -8,6 +8,8 @@
  *         log.error("[OAuth] callback failed:", err);
  */
 
+import { isNativeObjectLike } from "@ryu/ui/lib/native-primitive-observation.ts";
+
 type LogFn = (...args: unknown[]) => void;
 
 async function tauriLog(
@@ -31,7 +33,7 @@ function serialize(...args: unknown[]): string {
 			if (a instanceof Error) {
 				return `${a.message}\n${a.stack ?? ""}`;
 			}
-			if (typeof a === "object") {
+			if (a === null || isNativeObjectLike(a)) {
 				return JSON.stringify(a);
 			}
 			return String(a);

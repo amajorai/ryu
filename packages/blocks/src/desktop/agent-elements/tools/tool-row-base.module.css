@@ -1,0 +1,28 @@
+/* Establish the root theme order even when this private module loads first. */
+@layer properties, theme, base, components, utilities;
+
+@layer components {
+	.label {
+		flex-shrink: 0;
+		font-weight: 450;
+		white-space: nowrap;
+	}
+	.chevron {
+		rotate: 0deg;
+	}
+	[class~="group"][data-panel-open] .chevron {
+		rotate: 90deg;
+	}
+	.panel {
+		height: var(--collapsible-panel-height);
+		overflow: hidden;
+		transition: height 150ms ease-out;
+	}
+	.panel[data-ending-style],
+	.panel[data-starting-style] {
+		height: 0;
+	}
+	.panel[hidden]:not([hidden="until-found"]) {
+		display: none;
+	}
+}

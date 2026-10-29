@@ -20,10 +20,11 @@ let memoryModifier: QuickPreviewModifier = DEFAULT_QUICK_PREVIEW_MODIFIER;
 function readModifier(): QuickPreviewModifier {
 	try {
 		const value = localStorage.getItem(QUICK_PREVIEW_MODIFIER_KEY);
-		if (
-			QUICK_PREVIEW_MODIFIER_OPTIONS.some((option) => option.value === value)
-		) {
-			memoryModifier = value as QuickPreviewModifier;
+		const option = QUICK_PREVIEW_MODIFIER_OPTIONS.find(
+			(candidate) => candidate.value === value
+		);
+		if (option) {
+			memoryModifier = option.value;
 			return memoryModifier;
 		}
 		return DEFAULT_QUICK_PREVIEW_MODIFIER;
@@ -40,12 +41,12 @@ function subscribe(callback: () => void): () => void {
 			callback();
 		}
 	};
-	if (typeof window !== "undefined") {
+	if (globalThis.window !== undefined) {
 		window.addEventListener("storage", onStorage);
 	}
 	return () => {
 		listeners.delete(callback);
-		if (typeof window !== "undefined") {
+		if (globalThis.window !== undefined) {
 			window.removeEventListener("storage", onStorage);
 		}
 	};

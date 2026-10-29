@@ -30,11 +30,12 @@ import {
 	WorkflowCircle06Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { safeHttpUrl } from "@ryu/marketplace/catalog/safe-url";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { IconBrandGithub } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AttachedImage } from "@/components/agent-elements/input-bar.tsx";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import {
@@ -87,6 +88,7 @@ import {
 	pullGit,
 	syncGit,
 } from "@/src/lib/api/git.ts";
+import { repositoryCreationErrorMessage } from "@/src/lib/api/git-action-error-message.ts";
 import {
 	buildGitHubCompareUrl,
 	buildPullRequestCheckReport,
@@ -167,12 +169,16 @@ function formatBackgroundElapsed(elapsedMs: number): string {
 
 /** The provider-facing compare action shown only when the current branch can be compared. */
 export function CompareBranchLink({ href }: { href: string }) {
+	const safeHref = safeHttpUrl(href);
+	if (!safeHref) {
+		return null;
+	}
 	return (
 		<a
 			aria-label="Compare branch"
 			className="flex w-full items-center gap-2 rounded-md border border-border/70 px-2 py-1.5 font-medium text-muted-foreground text-xs transition hover:bg-muted/60 hover:text-foreground"
 			data-testid="compare-branch-link"
-			href={href}
+			href={safeHref}
 			rel="noopener noreferrer"
 			target="_blank"
 		>
@@ -232,7 +238,7 @@ function BackgroundProcessRow({
 				<span className="block truncate" title={process.command}>
 					{label}
 				</span>
-				<span className="block truncate text-[10px] text-muted-foreground">
+				<span className="type-compact block truncate text-muted-foreground">
 					{process.cwd} · {formatBackgroundElapsed(process.elapsed_ms)}
 				</span>
 			</span>
@@ -249,7 +255,7 @@ function BackgroundProcessRow({
 			>
 				<HugeiconsIcon
 					aria-hidden
-					className={cn("size-3.5", stopping && "animate-pulse")}
+					className={cn("size-3.5", stopping && "motion-safe:animate-pulse")}
 					icon={StopIcon}
 				/>
 			</button>
@@ -550,9 +556,10 @@ function EnvironmentDescription({
 					{pullRequest.url ? (
 						<a
 							className="truncate underline underline-offset-2"
-							href={pullRequest.url}
+							href={safeHttpUrl(pullRequest.url) ?? undefined}
 							rel="noopener noreferrer"
 							target="_blank"
+							title={pullRequest.label}
 						>
 							{pullRequest.label}
 						</a>
@@ -583,9 +590,10 @@ function EnvironmentDescription({
 					{repositoryOperation.url ? (
 						<a
 							className="truncate underline underline-offset-2"
-							href={repositoryOperation.url}
+							href={safeHttpUrl(repositoryOperation.url) ?? undefined}
 							rel="noopener noreferrer"
 							target="_blank"
+							title={repositoryOperation.label}
 						>
 							{repositoryOperation.label}
 						</a>
@@ -665,8 +673,8 @@ export function PinnedSummaryPanel({
 			return;
 		}
 		const handlePointerDown = (event: PointerEvent) => {
-			const pressed = event.target as HTMLElement | null;
-			if (!pressed) {
+			const pressed = event.target;
+			if (!(pressed instanceof Element)) {
 				return;
 			}
 			// Ignore presses inside the panel, or inside a menu/popover/dialog the
@@ -693,14 +701,49 @@ export function PinnedSummaryPanel({
 	const targetRef = useRef(target);
 	targetRef.current = target;
 
-	const [stoppingProcessId, setStoppingProcessId] = useState<string | null>(
-		null
+	const backgroundScope = useMemo(
+		() => ({
+			target: {
+				url: target.url,
+				token: target.token ?? null,
+				userJwt: target.userJwt ?? null,
+			},
+		}),
+		[target.url, target.token ?? null, target.userJwt ?? null]
 	);
-	const [backgroundError, setBackgroundError] = useState<string | null>(null);
+	const backgroundScopeRef = useRef(backgroundScope);
+	backgroundScopeRef.current = backgroundScope;
+	const backgroundMountedRef = useRef(false);
+	useEffect(() => {
+		backgroundMountedRef.current = true;
+		return () => {
+			backgroundMountedRef.current = false;
+		};
+	}, []);
+	const backgroundQueryClient = useQueryClient();
+	const backgroundQueryKey = [
+		"background-processes",
+		backgroundScope.target.url,
+		backgroundScope.target.token,
+		backgroundScope.target.userJwt,
+	];
+	const backgroundAuthorityKey = JSON.stringify(backgroundQueryKey);
+	const backgroundPendingRef = useRef(new Map<string, string>());
+	const [, setBackgroundPendingRevision] = useState(0);
+	const stoppingProcessId =
+		backgroundPendingRef.current.get(backgroundAuthorityKey) ?? null;
+	const [backgroundFailure, setBackgroundFailure] = useState<{
+		scope: typeof backgroundScope;
+		message: string;
+	} | null>(null);
+	const backgroundError =
+		backgroundFailure?.scope === backgroundScope
+			? backgroundFailure.message
+			: null;
 	const backgroundProcessesQuery = useQuery({
-		enabled: Boolean(target.url),
-		queryFn: () => listBackgroundProcesses(target),
-		queryKey: ["background-processes", target.url],
+		enabled: Boolean(backgroundScope.target.url),
+		queryFn: () => listBackgroundProcesses(backgroundScope.target),
+		queryKey: backgroundQueryKey,
 		refetchInterval: 1000,
 		retry: false,
 		staleTime: 0,
@@ -708,20 +751,39 @@ export function PinnedSummaryPanel({
 	const backgroundProcesses = backgroundProcessesQuery.data ?? [];
 
 	const handleStopBackgroundProcess = async (processId: string) => {
-		if (stoppingProcessId) {
+		const scope = backgroundScope;
+		if (
+			backgroundScopeRef.current !== scope ||
+			backgroundPendingRef.current.has(backgroundAuthorityKey)
+		) {
 			return;
 		}
-		setBackgroundError(null);
-		setStoppingProcessId(processId);
+		const ownsScope = () =>
+			backgroundMountedRef.current && backgroundScopeRef.current === scope;
+		backgroundPendingRef.current.set(backgroundAuthorityKey, processId);
+		setBackgroundPendingRevision((revision) => revision + 1);
+		setBackgroundFailure(null);
 		try {
-			await requestStopBackgroundProcess(targetRef.current, processId);
-			await backgroundProcessesQuery.refetch();
+			await requestStopBackgroundProcess(scope.target, processId);
 		} catch (error) {
-			setBackgroundError(
-				error instanceof Error ? error.message : "Could not stop process."
-			);
+			if (ownsScope()) {
+				setBackgroundFailure({
+					scope,
+					message:
+						error instanceof Error ? error.message : "Could not stop process.",
+				});
+			}
 		} finally {
-			setStoppingProcessId(null);
+			backgroundPendingRef.current.delete(backgroundAuthorityKey);
+			// Refresh the acknowledged authority even if the user left and returned;
+			// never refresh or change the controls of a different authority.
+			await backgroundQueryClient.invalidateQueries({
+				queryKey: backgroundQueryKey,
+				exact: true,
+			});
+			if (backgroundMountedRef.current) {
+				setBackgroundPendingRevision((revision) => revision + 1);
+			}
 		}
 	};
 
@@ -942,10 +1004,7 @@ export function PinnedSummaryPanel({
 			}
 			setRepositoryOperation({
 				status: "error",
-				message:
-					error instanceof Error
-						? error.message
-						: "Could not create the GitHub repository.",
+				message: repositoryCreationErrorMessage(error),
 			});
 		} finally {
 			if (activeGitOperationRef.current === controller) {
@@ -1310,8 +1369,12 @@ export function PinnedSummaryPanel({
 								/>
 							))}
 							{backgroundError && (
-								<p className="px-1.5 text-[10px] text-status-destructive">
-									{backgroundError}
+								<p
+									className="type-compact px-1.5 text-status-destructive"
+									role="alert"
+									title={backgroundError}
+								>
+									Could not stop process. Try again.
 								</p>
 							)}
 						</div>
@@ -1339,9 +1402,7 @@ export function PinnedSummaryPanel({
 				git={git}
 				githubAppEnabled={pullRequestsEnabled}
 				githubRepository={githubRepository}
-				githubRepositoryLoading={
-					githubRepositoryQuery.isLoading || githubRepositoryQuery.isFetching
-				}
+				githubRepositoryLoading={githubRepositoryQuery.isLoading}
 				gitSetup={gitSetup}
 				hasWork={hasWork}
 				onFixCi={onAttachTextFile ? handleFixCi : undefined}

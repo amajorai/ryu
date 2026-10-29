@@ -10,6 +10,7 @@ import {
 	isThemePresetId,
 	loadThemePreference,
 	loadThemePreferences,
+	noColorRequested,
 	resolveTheme,
 	resolveThemePreference,
 	saveThemePreference,
@@ -19,7 +20,11 @@ import {
 	THEME_MODES,
 	THEME_PRESET_IDS,
 } from "../core/themePreferences.ts";
-import { ryuTheme } from "../ui/theme.ts";
+import {
+	ryuNoColorDarkTheme,
+	ryuNoColorLightTheme,
+	ryuTheme,
+} from "../ui/theme.ts";
 
 const HEX_COLOR = /^#[0-9A-F]{6}$/i;
 
@@ -134,5 +139,33 @@ describe("theme resolution", () => {
 		expect(resolveThemePreference({ mode: "unknown", preset: "unknown" })).toBe(
 			ryuTheme
 		);
+	});
+});
+
+describe("NO_COLOR", () => {
+	test("is requested only when the variable is present and not empty", () => {
+		expect(noColorRequested({ NO_COLOR: "1" })).toBe(true);
+		expect(noColorRequested({ NO_COLOR: "" })).toBe(false);
+		expect(noColorRequested({})).toBe(false);
+	});
+
+	test("resolves a hue-free theme for the active scheme", () => {
+		expect(
+			resolveThemePreference({ mode: "light", preset: "ryu" }, "dark", true)
+		).toBe(ryuNoColorLightTheme);
+		expect(
+			resolveThemePreference({ mode: "system", preset: "ryu" }, "dark", true)
+		).toBe(ryuNoColorDarkTheme);
+		const { colors } = ryuNoColorDarkTheme;
+		for (const status of [
+			colors.primary,
+			colors.accent,
+			colors.success,
+			colors.warning,
+			colors.error,
+			colors.info,
+		]) {
+			expect(status).toBe(colors.foreground);
+		}
 	});
 });

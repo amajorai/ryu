@@ -1,12 +1,10 @@
-import {
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
-} from "@ryu/ui/components/collapsible";
+import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import { IconChevronRight } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { TextShimmer } from "../text-shimmer.tsx";
+import styles from "./tool-row-base.module.css";
 import { ToolTiming } from "./tool-timing.tsx";
 
 export interface ToolRowBaseProps {
@@ -70,12 +68,12 @@ export function ToolRowBase({
 							{icon}
 						</span>
 					))}
-				<span className="shrink-0 whitespace-nowrap font-[450]">
+				<span className={styles.label}>
 					{isAnimating && shimmerLabel ? (
 						<TextShimmer
 							as="span"
 							className="m-0 inline-flex h-4 items-center leading-none"
-							duration={1.2}
+							duration={0.9}
 						>
 							{shimmerLabel}
 						</TextShimmer>
@@ -99,7 +97,7 @@ export function ToolRowBase({
 						className={cn(
 							"shrink-0 text-muted-foreground transition-transform duration-150 ease-out",
 							"size-3",
-							"rotate-0 group-data-panel-open:rotate-90"
+							styles.chevron
 						)}
 					/>
 				</div>
@@ -107,6 +105,7 @@ export function ToolRowBase({
 		</div>
 	);
 
+	const localizedRow = useLocalizedText(row, { literal: true });
 	if (!expandable) {
 		return <div className="flex flex-col gap-1">{row}</div>;
 	}
@@ -117,24 +116,25 @@ export function ToolRowBase({
 			: { open: expanded, onOpenChange: onToggleExpand };
 
 	return (
-		<Collapsible className="flex w-full flex-col gap-2" {...rootProps}>
-			<CollapsibleTrigger
+		<CollapsiblePrimitive.Root
+			className="flex w-full flex-col gap-2"
+			data-slot="collapsible"
+			{...rootProps}
+		>
+			<CollapsiblePrimitive.Trigger
 				aria-disabled={!canToggle}
 				className="group flex"
+				data-slot="collapsible-trigger"
 				disabled={!canToggle}
 			>
-				{row}
-			</CollapsibleTrigger>
-			<CollapsibleContent
-				className={cn(
-					"overflow-hidden",
-					"h-[var(--collapsible-panel-height)] transition-[height] duration-150 ease-out",
-					"data-ending-style:h-0 data-starting-style:h-0",
-					"[&[hidden]:not([hidden='until-found'])]:hidden"
-				)}
+				{localizedRow}
+			</CollapsiblePrimitive.Trigger>
+			<CollapsiblePrimitive.Panel
+				className={styles.panel}
+				data-slot="collapsible-content"
 			>
 				{children}
-			</CollapsibleContent>
-		</Collapsible>
+			</CollapsiblePrimitive.Panel>
+		</CollapsiblePrimitive.Root>
 	);
 }

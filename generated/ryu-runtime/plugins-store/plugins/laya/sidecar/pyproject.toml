@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=84.1.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ryu-laya-sidecar"
+version = "0.1.0"
+description = "Authenticated local HTTP sidecar for the Ryu Laya plugin"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+server = ["laya==0.3.20"]
+
+[tool.setuptools.packages.find]
+include = ["ryu_laya*"]

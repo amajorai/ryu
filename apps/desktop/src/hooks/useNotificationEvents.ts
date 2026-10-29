@@ -1,4 +1,4 @@
-import { toast } from "@ryu/ui/components/sileo";
+import { toast } from "@ryu/ui/components/sileo.tsx";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
@@ -7,14 +7,17 @@ import { APPROVALS_ALIAS } from "@/src/contributions/companion-alias.ts";
 import { useCompanionAlias } from "@/src/contributions/use-companion-alias.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
+	redactConnectSuggestionEvent,
 	streamUserNotifications,
 	type UserNotificationEvent,
 } from "@/src/lib/api/notifications.ts";
+import { showOsNotification } from "@/src/lib/notifications/os-notify.ts";
+import { getUserAvailabilitySnapshot } from "@/src/lib/user-availability.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 const RECONNECT_DELAY_MS = 2000;
 
-/** Raise a native OS notification (best-effort; requests permission once). When
+/** Raise an OS notification (no-op when the user turned them off). When
  *  the ping carries a notification id, tapping it deep-links to the Inbox — but only
  *  if `onOpen` decides, at CLICK time, that some enabled app still owns that path;
  *  otherwise the click only focuses the window rather than opening a tab that can
@@ -23,36 +26,16 @@ const RECONNECT_DELAY_MS = 2000;
  *  loaded is still clickable once it lands, and a notification left on screen across
  *  an uninstall stops leading anywhere. */
 function osNotify(event: UserNotificationEvent, onOpen: () => void): void {
-	if (typeof Notification === "undefined") {
-		return;
-	}
-	const show = () => {
-		try {
-			const n = new Notification(event.title, {
-				body: event.body ?? undefined,
-				tag: event.notification_id ?? undefined,
-			});
-			n.onclick = () => {
-				window.focus();
-				if (event.notification_id) {
-					onOpen();
-				}
-			};
-		} catch {
-			// Notification construction can throw on some platforms; ignore.
-		}
-	};
-	if (Notification.permission === "granted") {
-		show();
-	} else if (Notification.permission === "default") {
-		Notification.requestPermission()
-			.then((perm) => {
-				if (perm === "granted") {
-					show();
-				}
-			})
-			.catch(() => undefined);
-	}
+	showOsNotification({
+		title: event.title,
+		body: event.body,
+		tag: event.notification_id,
+		onClick: () => {
+			if (event.notification_id) {
+				onOpen();
+			}
+		},
+	}).catch(() => undefined);
 }
 
 /**
@@ -98,12 +81,19 @@ export function useNotificationEvents(): void {
 		const target: ApiTarget = { url, token, userJwt };
 
 		const onEvent = (event: UserNotificationEvent) => {
+			const visibleEvent = redactConnectSuggestionEvent(
+				event,
+				getUserAvailabilitySnapshot().streamingPrivacyActive
+			);
 			const notify =
-				event.level === "error" || event.level === "warning"
+				visibleEvent.level === "error" || visibleEvent.level === "warning"
 					? toast.error
 					: toast.info;
-			notify({ title: event.title, description: event.body ?? undefined });
-			osNotify(event, () => {
+			notify({
+				title: visibleEvent.title,
+				description: visibleEvent.body ?? undefined,
+			});
+			osNotify(visibleEvent, () => {
 				if (inboxOwnerRef.current) {
 					openTab("/inbox");
 				}

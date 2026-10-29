@@ -1,3 +1,6 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
+import previewStyles from "./settings-preview.module.css";
+import type { PreviewStyle } from "./settings-preview-style.ts";
 // Storage settings tab: view + relocate the Ryu data folder, and back it up /
 // restore it. All path logic lives in Core (`crate::data_path`); this tab reads
 // the state, validates a target, and triggers either a point-only switch (Core
@@ -14,13 +17,23 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@ryu/ui/components/alert-dialog";
-import { Button } from "@ryu/ui/components/button";
+} from "@ryu/ui/components/alert-dialog.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { sileo } from "sileo";
+import { getRyuStatus, startRyuCore } from "@/lib/tauri-bridge.ts";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -28,8 +41,8 @@ import {
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
-import { useActiveNodeGetter } from "@/src/hooks/useActiveNode.ts";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import {
 	type DataPathInfo,
 	exportDataPath,
@@ -46,6 +59,9 @@ import {
 import { formatBytes, NODE_UPLOAD_MAX_BYTES } from "@/src/lib/api/spaces.ts";
 import { listenWhenReady } from "@/src/lib/tauri-ready.ts";
 import { NodeBackupSettings } from "./BackupSettings.tsx";
+
+/** Core refuses an export passphrase shorter than this (`data_path.rs`). */
+const MIN_BACKUP_PASSPHRASE_CHARS = 12;
 
 /** Profiles a copy can target.
  *
@@ -70,6 +86,19 @@ function humanBytes(n: number): string {
 interface PickedTarget {
 	path: string;
 	validation: ValidateResult;
+}
+
+/**
+ * The selected node's authority. Every read and write on this tab is bound to
+ * the node that is selected NOW, so a node switch rereads and a reply from the
+ * previous node is discarded instead of being shown as this node's state.
+ */
+function useSelectedNodeTarget(): ApiTarget {
+	const node = useActiveNode();
+	return useMemo(
+		() => toTarget({ url: node.url, token: node.token, userJwt: node.userJwt }),
+		[node.url, node.token, node.userJwt]
+	);
 }
 
 /**
@@ -102,15 +131,16 @@ interface PickedTarget {
  * when it is used.
  */
 function UploadCeilingSection() {
-	const getNode = useActiveNodeGetter();
+	const target = useSelectedNodeTarget();
 	const [capability, setCapability] = useState<ParseCapability | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
+		setCapability(null);
 		// Failure-tolerant: this probes the bound parse sidecar (2s budget, and it
 		// never wakes a sleeping one), so it is allowed to come back empty without
 		// taking the Storage tab down with it.
-		fetchParseCapability(toTarget(getNode()))
+		fetchParseCapability(target)
 			.then((next) => {
 				if (!cancelled) {
 					setCapability(next);
@@ -124,7 +154,7 @@ function UploadCeilingSection() {
 		return () => {
 			cancelled = true;
 		};
-	}, [getNode]);
+	}, [target]);
 
 	const reported = capability?.maxInputBytes ?? 0;
 	const limit = reported > 0 ? reported : NODE_UPLOAD_MAX_BYTES;
@@ -161,7 +191,11 @@ interface ProgressState {
 
 export function StorageSettings() {
 	const { canUseNativeShell } = useAppSurface();
-	const getNode = useActiveNodeGetter();
+	const target = useSelectedNodeTarget();
+	// The node this tab currently speaks for. Async results captured for an
+	// earlier node compare against it and are dropped once it has moved on.
+	const targetRef = useRef(target);
+	targetRef.current = target;
 	const [info, setInfo] = useState<DataPathInfo | null>(null);
 	const [picked, setPicked] = useState<PickedTarget | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -170,22 +204,36 @@ export function StorageSettings() {
 	);
 	const [progress, setProgress] = useState<ProgressState | null>(null);
 	const [pendingRestore, setPendingRestore] = useState<string | null>(null);
+	const [restorePassphrase, setRestorePassphrase] = useState("");
+	const [exportDialogOpen, setExportDialogOpen] = useState(false);
+	const [exportPassphrase, setExportPassphrase] = useState("");
+	const [exportConfirm, setExportConfirm] = useState("");
 	const [loadFailed, setLoadFailed] = useState(false);
 
 	const refresh = useCallback(() => {
 		setLoadFailed(false);
-		getDataPath(toTarget(getNode()))
+		getDataPath(target)
 			.then((next) => {
+				if (targetRef.current !== target) {
+					return;
+				}
 				setInfo(next);
 				setLoadFailed(false);
 			})
 			.catch(() => {
+				if (targetRef.current !== target) {
+					return;
+				}
 				setInfo(null);
 				setLoadFailed(true);
 			});
-	}, [getNode]);
+	}, [target]);
 
 	useEffect(() => {
+		// A folder picked and validated on one node is no authority to switch
+		// another, and the shown location belongs to the node it was read from.
+		setInfo(null);
+		setPicked(null);
 		refresh();
 	}, [refresh]);
 
@@ -212,12 +260,15 @@ export function StorageSettings() {
 
 	const pickFolder = useCallback(async () => {
 		const selected = await open({ directory: true, multiple: false });
-		if (typeof selected !== "string") {
+		if (!isNativeText(selected)) {
 			return;
 		}
-		const validation = await validateDataPath(toTarget(getNode()), selected);
+		const validation = await validateDataPath(target, selected);
+		if (targetRef.current !== target) {
+			return;
+		}
 		setPicked({ path: selected, validation });
-	}, [getNode]);
+	}, [target]);
 
 	const doMigrate = useCallback(async () => {
 		if (!picked) {
@@ -248,7 +299,7 @@ export function StorageSettings() {
 		}
 		setBusy(true);
 		try {
-			const res = await switchDataPath(toTarget(getNode()), picked.path);
+			const res = await switchDataPath(target, picked.path);
 			if (!res.ok) {
 				throw new Error(res.error ?? "switch failed");
 			}
@@ -257,12 +308,12 @@ export function StorageSettings() {
 			setBusy(false);
 			sileo.error({ title: "Could not switch folder", description: String(e) });
 		}
-	}, [getNode, picked]);
+	}, [target, picked]);
 
 	const doReset = useCallback(async () => {
 		setBusy(true);
 		try {
-			const res = await resetDataPath(toTarget(getNode()));
+			const res = await resetDataPath(target);
 			if (!res.ok) {
 				throw new Error(res.error ?? "reset failed");
 			}
@@ -271,10 +322,15 @@ export function StorageSettings() {
 			setBusy(false);
 			sileo.error({ title: "Could not reset folder", description: String(e) });
 		}
-	}, [getNode]);
+	}, [target]);
 
 	const doProfileCopy = useCallback(async (toProfile: string) => {
 		setBusy(true);
+		// The Tauri command stops this profile's local Core (whichever node is
+		// active) and deliberately does not restart it, so restart it here when it
+		// was running, whether or not the copy succeeds.
+		const coreWasRunning =
+			(await getRyuStatus().catch(() => "stopped")) === "running";
 		try {
 			// Core is stopped by the Tauri command before anything is copied (every
 			// store runs in WAL mode, so a live copy captures a torn snapshot), and the
@@ -283,8 +339,9 @@ export function StorageSettings() {
 			await invoke("copy_data_folder_to_profile", { toProfile });
 			sileo.success({
 				title: `Copied to the ${toProfile} profile`,
-				description:
-					"Start Ryu on that profile to use it. This profile is unchanged.",
+				description: coreWasRunning
+					? "Start Ryu on that profile to use it. This profile is unchanged; restarting local Core…"
+					: "Start Ryu on that profile to use it. This profile is unchanged.",
 			});
 		} catch (e) {
 			sileo.error({
@@ -292,22 +349,47 @@ export function StorageSettings() {
 				description: String(e),
 			});
 		} finally {
+			if (coreWasRunning) {
+				await startRyuCore().catch(() => undefined);
+			}
 			setBusy(false);
 			setPendingProfileCopy(null);
 		}
 	}, []);
 
+	const exportPassphraseError = (() => {
+		if ([...exportPassphrase].length < MIN_BACKUP_PASSPHRASE_CHARS) {
+			return `Use at least ${MIN_BACKUP_PASSPHRASE_CHARS} characters.`;
+		}
+		if (exportPassphrase !== exportConfirm) {
+			return "The passphrases do not match.";
+		}
+		return null;
+	})();
+
+	const closeExportDialog = useCallback(() => {
+		setExportDialogOpen(false);
+		setExportPassphrase("");
+		setExportConfirm("");
+	}, []);
+
 	const doExport = useCallback(async () => {
+		// The passphrase is held only for this export and cleared with the dialog.
+		const passphrase = exportPassphrase;
+		closeExportDialog();
 		const dest = await save({
 			defaultPath: "ryu-data-backup.zip",
 			filters: [{ name: "Zip archive", extensions: ["zip"] }],
 		});
-		if (!dest) {
+		// The destination was chosen for the node selected when Export was
+		// clicked. If another node was selected while the dialog was open, the
+		// earlier one is no longer this tab's authority, so nothing is written.
+		if (!dest || targetRef.current !== target) {
 			return;
 		}
 		setBusy(true);
 		try {
-			const res = await exportDataPath(toTarget(getNode()), dest);
+			const res = await exportDataPath(target, dest, passphrase);
 			if (!res.ok) {
 				throw new Error(res.error ?? "export failed");
 			}
@@ -320,14 +402,14 @@ export function StorageSettings() {
 		} finally {
 			setBusy(false);
 		}
-	}, [getNode]);
+	}, [closeExportDialog, exportPassphrase, target]);
 
 	const doImport = useCallback(async () => {
 		const archive = await open({
 			multiple: false,
 			filters: [{ name: "Zip archive", extensions: ["zip"] }],
 		});
-		if (typeof archive !== "string") {
+		if (!isNativeText(archive)) {
 			return;
 		}
 		// Confirm before wiping current data — the actual restore runs in runImport.
@@ -339,36 +421,45 @@ export function StorageSettings() {
 			return;
 		}
 		const archive = pendingRestore;
+		const passphrase = restorePassphrase;
 		setPendingRestore(null);
+		setRestorePassphrase("");
 		setBusy(true);
 		setProgress({ phase: "extract", copied: 0, total: 0 });
 		try {
-			// Resolves only on failure — on success the app restarts.
-			await invoke("import_data_folder", { archive });
+			// Resolves only on failure — on success the app restarts. Backups made
+			// before export encryption have no passphrase.
+			await invoke(
+				"import_data_folder",
+				passphrase ? { archive, passphrase } : { archive }
+			);
 		} catch (e) {
 			setBusy(false);
 			setProgress(null);
 			sileo.error({ title: "Restore failed", description: String(e) });
 		}
-	}, [pendingRestore]);
+	}, [pendingRestore, restorePassphrase]);
 
 	const progressPct =
 		progress && progress.total > 0
 			? Math.min(100, Math.round((progress.copied / progress.total) * 100))
 			: null;
 
+	const progressStyle: PreviewStyle = {
+		"--settings-preview-progress": `${progressPct ?? 10}%`,
+	};
 	let changeLocationBody: ReactNode;
 	if (progress) {
 		changeLocationBody = (
 			<div className="flex flex-col gap-1.5">
-				<div className="text-muted-foreground text-xs">
+				<div className="text-muted-foreground text-xs tabular-nums">
 					{progress.phase === "extract" ? "Restoring" : "Copying"}…
 					{progressPct === null ? "" : ` ${progressPct}%`}
 				</div>
 				<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
 					<div
-						className="h-full bg-primary transition-all"
-						style={{ width: `${progressPct ?? 10}%` }}
+						className={`h-full bg-primary transition-[width] motion-reduce:transition-none ${previewStyles.progress}`}
+						style={progressStyle}
 					/>
 				</div>
 				<div className="text-muted-foreground text-xs">
@@ -422,19 +513,7 @@ export function StorageSettings() {
 			</div>
 		);
 	} else {
-		changeLocationBody = (
-			<Button
-				className="self-start"
-				disabled={busy}
-				onClick={() => {
-					pickFolder().catch(() => undefined);
-				}}
-				size="sm"
-				variant="ghost"
-			>
-				Choose folder…
-			</Button>
-		);
+		changeLocationBody = null;
 	}
 
 	return (
@@ -444,26 +523,29 @@ export function StorageSettings() {
 				title="Data folder"
 			>
 				{loadFailed ? (
-					<div className="flex flex-col items-start gap-3 rounded-md bg-muted p-4">
+					<SettingsCard className="flex items-center justify-between gap-3">
 						<p className="text-muted-foreground text-sm">
 							We couldn't load your data folder details. Please check your
 							connection and try again.
 						</p>
-						<Button onClick={() => refresh()} size="sm" variant="ghost">
+						<Button onClick={() => refresh()} size="sm" variant="outline">
 							Retry
 						</Button>
-					</div>
+					</SettingsCard>
 				) : (
 					<SettingsGroup>
+						<SettingsItem title="Current location">
+							<p className="break-all pb-1 font-mono text-muted-foreground text-xs">
+								{info?.current ?? "Loading…"}
+							</p>
+						</SettingsItem>
 						<SettingsItem
-							description={info?.current ?? "Loading…"}
-							title="Current location"
-						/>
-						<SettingsItem
-							description={
-								info
-									? `${humanBytes(info.size_bytes)} used · ${humanBytes(info.free_space_bytes)} free on this drive`
-									: "—"
+							actions={
+								<span className="text-muted-foreground text-sm">
+									{info
+										? `${humanBytes(info.size_bytes)} used · ${humanBytes(info.free_space_bytes)} free on this drive`
+										: "—"}
+								</span>
 							}
 							title="Size"
 						/>
@@ -481,9 +563,12 @@ export function StorageSettings() {
 										Reset to default
 									</Button>
 								}
-								description={info.default}
 								title="Default location"
-							/>
+							>
+								<p className="break-all pb-1 font-mono text-muted-foreground text-xs">
+									{info.default}
+								</p>
+							</SettingsItem>
 						) : null}
 					</SettingsGroup>
 				)}
@@ -495,29 +580,53 @@ export function StorageSettings() {
 						caption="Pick a new folder, then choose to copy your existing data over or start fresh. The app restarts to apply."
 						title="Change location"
 					>
-						<SettingsCard className="flex flex-col gap-3">
-							{changeLocationBody}
-						</SettingsCard>
+						{changeLocationBody ? (
+							<SettingsCard className="flex flex-col gap-3">
+								{changeLocationBody}
+							</SettingsCard>
+						) : (
+							<SettingsGroup>
+								<SettingsItem
+									actions={
+										<Button
+											disabled={busy}
+											onClick={() => {
+												pickFolder().catch(() => undefined);
+											}}
+											size="sm"
+											variant="ghost"
+										>
+											Choose folder…
+										</Button>
+									}
+									title="New location"
+								/>
+							</SettingsGroup>
+						)}
 					</SettingsSection>
 
 					<SettingsSection
-						caption="Give another profile a copy of this one's data. For example, hand canary your stable chats, spaces and agents so you can test against real state instead of rebuilding it by hand. Both profiles stay usable; nothing here changes where THIS profile reads from."
+						caption="Give another profile a copy of this one's data. For example, hand canary your stable chats, spaces and agents so you can test against real state instead of rebuilding it by hand. Both profiles stay usable; nothing here changes where THIS profile reads from. A copy is refused if that profile already has data."
 						title="Copy to another profile"
 					>
 						<SettingsGroup>
 							{PROFILE_COPY_TARGETS.map((target) => (
 								<SettingsItem
 									actions={
-										<Button
-											disabled={busy}
-											onClick={() => setPendingProfileCopy(target)}
-											size="sm"
-											variant="ghost"
-										>
-											Copy
-										</Button>
+										<span className="flex items-center gap-2">
+											<span className="font-mono text-muted-foreground text-xs">
+												~/.ryu-{target}
+											</span>
+											<Button
+												disabled={busy}
+												onClick={() => setPendingProfileCopy(target)}
+												size="sm"
+												variant="ghost"
+											>
+												Copy
+											</Button>
+										</span>
 									}
-									description={`Copies into ~/.ryu-${target}. Refused if that profile already has data.`}
 									key={target}
 									title={`Copy to ${target}`}
 								/>
@@ -526,7 +635,7 @@ export function StorageSettings() {
 					</SettingsSection>
 
 					<SettingsSection
-						caption="Export a zip backup of the whole data folder, or restore from one. Restoring overwrites the current data and restarts the app. The backup does NOT contain your encryption key, so it can only be restored on this machine, signed in as this user."
+						caption="Export an encrypted backup of the whole data folder, or restore from one. The backup is locked with a passphrase you choose; without it the backup cannot be restored. Restoring overwrites the current data and restarts the app."
 						title="Backup &amp; restore"
 					>
 						<SettingsGroup>
@@ -534,18 +643,19 @@ export function StorageSettings() {
 								actions={
 									<Button
 										disabled={busy}
-										onClick={() => {
-											doExport().catch(() => undefined);
-										}}
+										onClick={() => setExportDialogOpen(true)}
 										size="sm"
 										variant="ghost"
 									>
 										Export…
 									</Button>
 								}
-								description="Save a zip of all your Ryu data."
 								title="Export backup"
-							/>
+							>
+								<p className="pb-1 text-muted-foreground text-xs">
+									Save a passphrase-encrypted zip of all your Ryu data.
+								</p>
+							</SettingsItem>
 							<SettingsItem
 								actions={
 									<Button
@@ -559,9 +669,12 @@ export function StorageSettings() {
 										Restore…
 									</Button>
 								}
-								description="Replace current data with a backup zip."
 								title="Restore backup"
-							/>
+							>
+								<p className="pb-1 text-muted-foreground text-xs">
+									Replace current data with a backup zip.
+								</p>
+							</SettingsItem>
 						</SettingsGroup>
 					</SettingsSection>
 				</>
@@ -618,7 +731,71 @@ export function StorageSettings() {
 			<AlertDialog
 				onOpenChange={(nextOpen) => {
 					if (!nextOpen) {
+						closeExportDialog();
+					}
+				}}
+				open={exportDialogOpen}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Encrypt this backup</AlertDialogTitle>
+						<AlertDialogDescription>
+							The backup holds all of your data, including saved credentials, so
+							Ryu encrypts it with a passphrase. You need the same passphrase to
+							restore it, and it cannot be recovered if you lose it.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<div className="grid gap-3">
+						<div className="grid gap-2">
+							<Label htmlFor="storage-export-passphrase">
+								Backup passphrase
+							</Label>
+							<Input
+								autoComplete="new-password"
+								id="storage-export-passphrase"
+								onChange={(event) => setExportPassphrase(event.target.value)}
+								type="password"
+								value={exportPassphrase}
+							/>
+						</div>
+						<div className="grid gap-2">
+							<Label htmlFor="storage-export-passphrase-confirm">
+								Confirm passphrase
+							</Label>
+							<Input
+								autoComplete="new-password"
+								id="storage-export-passphrase-confirm"
+								onChange={(event) => setExportConfirm(event.target.value)}
+								type="password"
+								value={exportConfirm}
+							/>
+						</div>
+						{exportPassphrase && exportPassphraseError ? (
+							<p className="text-muted-foreground text-xs" role="status">
+								{exportPassphraseError}
+							</p>
+						) : null}
+					</div>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={exportPassphraseError !== null}
+							onClick={(e) => {
+								e.preventDefault();
+								doExport().catch(() => undefined);
+							}}
+						>
+							Choose location…
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog
+				onOpenChange={(nextOpen) => {
+					if (!nextOpen) {
 						setPendingRestore(null);
+						setRestorePassphrase("");
 					}
 				}}
 				open={pendingRestore !== null}
@@ -637,11 +814,13 @@ export function StorageSettings() {
 						    memory entry and plugin secret is unreadable — and there is no
 						    rekey path to recover it. Saying so here is the only place a
 						    user can still act on it. */}
-						<AlertDialogDescription className="text-status-warning">
-							Your encryption key is stored in this machine&apos;s keychain, not
-							in the backup. If this zip came from another machine or another
-							user account, chats, memory and plugin secrets will restore but
-							stay permanently unreadable.
+						<AlertDialogDescription>
+							<span className="text-status-warning">
+								Your encryption key is stored in this machine&apos;s keychain,
+								not in the backup. If this zip came from another machine or
+								another user account, chats, memory and plugin secrets will
+								restore but stay permanently unreadable.
+							</span>
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					{pendingRestore ? (
@@ -649,6 +828,21 @@ export function StorageSettings() {
 							{pendingRestore}
 						</div>
 					) : null}
+					<div className="grid gap-2">
+						<Label htmlFor="storage-restore-passphrase">
+							Backup passphrase
+						</Label>
+						<Input
+							autoComplete="off"
+							id="storage-restore-passphrase"
+							onChange={(event) => setRestorePassphrase(event.target.value)}
+							type="password"
+							value={restorePassphrase}
+						/>
+						<p className="text-muted-foreground text-xs">
+							Leave empty only for a backup made before backups were encrypted.
+						</p>
+					</div>
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction

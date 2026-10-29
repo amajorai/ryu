@@ -10,7 +10,12 @@
 // single TanStack Query (no second join), with install/uninstall as mutations that
 // revalidate the list in place, mirroring the useMcpCatalog / useAppsCatalog shape.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	type DefaultError,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import {
 	type AgentCatalogEntry,
@@ -18,7 +23,7 @@ import {
 	installAgent,
 	uninstallAgent,
 } from "@/src/lib/api/agents.ts";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { ApiError, type ApiTarget } from "@/src/lib/api/client.ts";
 import { triggerAgentsRefresh } from "@/src/lib/core-refresh.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
@@ -92,8 +97,12 @@ export function useAgentsCatalog(): UseAgentsCatalogResult {
 		[uninstallMutation]
 	);
 
-	const errorOf = (e: unknown): string | null =>
-		e instanceof Error ? e.message : null;
+	const errorOf = (e: DefaultError | null): string | null => {
+		if (e instanceof ApiError && e.serverMessage) {
+			return e.serverMessage;
+		}
+		return e instanceof Error ? e.message : null;
+	};
 	const pendingId =
 		(installMutation.isPending ? installMutation.variables : null) ??
 		(uninstallMutation.isPending ? uninstallMutation.variables : null) ??

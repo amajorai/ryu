@@ -13,6 +13,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { channelLabel } from "@/src/lib/channel-brand.ts";
+import { DESKTOP_PRODUCT, type DesktopProduct } from "@/src/lib/product.ts";
 
 export type ReleaseChannel = "canary" | "nightly" | "beta" | "stable";
 
@@ -56,23 +57,66 @@ export const RELEASE_CHANNELS: {
 	},
 ];
 
-const CHANNEL_SET = new Set<ReleaseChannel>([
-	"canary",
-	"nightly",
+/**
+ * The channels the standalone Ryu Bot build is published on. Nightly and
+ * canary trains exist for Ryu only, and the Bot updater refuses them, so the
+ * Bot picker never offers them.
+ */
+const BOT_RELEASE_CHANNELS: ReadonlySet<ReleaseChannel> = new Set([
 	"beta",
 	"stable",
 ]);
 
-function isReleaseChannel(value: unknown): value is ReleaseChannel {
-	return typeof value === "string" && CHANNEL_SET.has(value as ReleaseChannel);
+/** The picker rows `product` can follow, in {@link RELEASE_CHANNELS} order. */
+export function releaseChannelsFor(
+	product: DesktopProduct
+): typeof RELEASE_CHANNELS {
+	if (product !== "bot") {
+		return RELEASE_CHANNELS;
+	}
+	return RELEASE_CHANNELS.filter(({ channel }) =>
+		BOT_RELEASE_CHANNELS.has(channel)
+	);
+}
+
+/** The picker rows for THIS build. */
+export const AVAILABLE_RELEASE_CHANNELS = releaseChannelsFor(DESKTOP_PRODUCT);
+
+function isReleaseChannel(value: string | null): value is ReleaseChannel {
+	return (
+		value === "canary" ||
+		value === "nightly" ||
+		value === "beta" ||
+		value === "stable"
+	);
+}
+
+/**
+ * A stored channel as `product` can follow it: unknown values, and a channel
+ * the product is not published on (a Ryu Bot install holding a nightly choice
+ * from before Bot had its own feed), fall back to the default.
+ */
+export function resolveReleaseChannel(
+	raw: string | null,
+	product: DesktopProduct
+): ReleaseChannel {
+	if (!isReleaseChannel(raw)) {
+		return DEFAULT_RELEASE_CHANNEL;
+	}
+	if (product === "bot" && !BOT_RELEASE_CHANNELS.has(raw)) {
+		return DEFAULT_RELEASE_CHANNEL;
+	}
+	return raw;
 }
 
 const listeners = new Set<() => void>();
 
 function read(): ReleaseChannel {
 	try {
-		const raw = localStorage.getItem(RELEASE_CHANNEL_KEY);
-		return isReleaseChannel(raw) ? raw : DEFAULT_RELEASE_CHANNEL;
+		return resolveReleaseChannel(
+			localStorage.getItem(RELEASE_CHANNEL_KEY),
+			DESKTOP_PRODUCT
+		);
 	} catch {
 		return DEFAULT_RELEASE_CHANNEL;
 	}

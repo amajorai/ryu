@@ -1,0 +1,39 @@
+.orbit {
+	width: var(--scene-size);
+	height: var(--scene-size);
+	margin-top: var(--scene-margin);
+	margin-left: var(--scene-margin);
+}
+.orbitDot,
+.particle {
+	top: var(--scene-top);
+	left: var(--scene-left);
+	width: var(--scene-size);
+	height: var(--scene-size);
+	color: var(--scene-color);
+	background-color: var(--scene-color);
+}
+.orbitDot {
+	--tw-shadow: 0 0 18px var(--tw-shadow-color, currentColor);
+	box-shadow:
+		var(--tw-inset-shadow), var(--tw-inset-ring-shadow),
+		var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+.particle {
+	--tw-shadow: 0 0 12px var(--tw-shadow-color, currentColor);
+	box-shadow:
+		var(--tw-inset-shadow), var(--tw-inset-ring-shadow),
+		var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+.ring {
+	width: var(--scene-size);
+	height: var(--scene-size);
+	border-color: var(--scene-color);
+}
+.bar {
+	height: var(--scene-height);
+	background-color: var(--scene-color);
+}
+.beam {
+	color: var(--scene-color);
+}

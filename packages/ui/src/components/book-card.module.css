@@ -1,0 +1,125 @@
+/** Rounder on the spine edge than the fore-edge, like a real hardback. */
+
+/** Cover proportions — a trade paperback, not a square card. */
+
+/** The binding: a sheen highlight over a shadow ramp, so the cover creases into
+ *  the spine instead of ending flat. Achromatic on purpose — this is paper
+ *  shading, so it is mixed from the theme's own ink and paper rather than a
+ *  hardcoded grey that only reads right in one mode. */
+
+/** The cut edge of the paper block: brighter where it meets the cover, falling
+ *  away into the gutter. */
+
+/** Three stacked shadows — contact, lift, ambient — so the book sits on the page
+ *  instead of floating. A stylesheet literal rather than a `shadow-[…]` utility: Tailwind
+ *  rewrites an arbitrary box-shadow's colour into `--tw-shadow-color`, which
+ *  swallows the `color-mix` alpha and leaves three OPAQUE ink-coloured shadows.
+ *  Verified against the built stylesheet, not assumed. */
+
+/* Native book geometry and theme-mixed paper shading. Keep the shadow value
+   literal: a Tailwind shadow utility rewrites its colour/alpha composition. */
+.scene {
+	perspective: 900px;
+}
+.book {
+	min-width: var(--book-width);
+	aspect-ratio: 49 / 60;
+	container-type: inline-size;
+	transform-style: preserve-3d;
+}
+@media (hover: hover) {
+	.motion:hover,
+	.motion:is(:where([class~="group"]):hover *) {
+		transform: rotateY(-20deg) scale(1.05) translateX(-8px);
+	}
+}
+.motion:is(:where([class~="group"]):focus-visible *) {
+	transform: rotateY(-20deg) scale(1.05) translateX(-8px);
+}
+.cover {
+	width: var(--book-width);
+	height: 100%;
+	border-radius: 6px 4px 4px 6px;
+	box-shadow:
+		0 1px 1px color-mix(in oklch, var(--color-foreground) 4%, transparent),
+		0 4px 8px -4px color-mix(in oklch, var(--color-foreground) 16%, transparent),
+		0 16px 24px -8px
+		color-mix(in oklch, var(--color-foreground) 10%, transparent);
+	transform: translateZ(0px);
+}
+.spine {
+	min-width: 9%;
+}
+.binding {
+	background:
+		linear-gradient(
+			90deg,
+			transparent 0%,
+			transparent 12%,
+			color-mix(in oklch, var(--color-background) 25%, transparent) 29.25%,
+			transparent 50.5%,
+			transparent 75.25%,
+			color-mix(in oklch, var(--color-background) 25%, transparent) 91%,
+			transparent 100%
+		),
+		linear-gradient(
+			90deg,
+			color-mix(in oklch, var(--color-foreground) 3%, transparent) 0%,
+			color-mix(in oklch, var(--color-foreground) 10%, transparent) 12%,
+			transparent 30%,
+			color-mix(in oklch, var(--color-foreground) 2%, transparent) 50%,
+			color-mix(in oklch, var(--color-foreground) 20%, transparent) 73.5%,
+			color-mix(in oklch, var(--color-foreground) 50%, transparent) 75.25%,
+			color-mix(in oklch, var(--color-foreground) 15%, transparent) 85.25%,
+			transparent 100%
+		);
+}
+.spineLabel {
+	max-height: 80%;
+	font-size: 7cqw;
+	writing-mode: vertical-rl;
+	text-orientation: mixed;
+}
+.art {
+	transform: translateZ(0px);
+}
+.caption {
+	gap: 6.1%;
+	min-height: 34%;
+	padding: 6.1%;
+	container-type: inline-size;
+}
+.title {
+	font-size: 11cqw;
+	line-height: 1.25em;
+	letter-spacing: -0.02em;
+}
+.footer {
+	font-size: 8cqw;
+}
+.hairline {
+	border-radius: inherit;
+}
+.pages {
+	top: 3px;
+	width: calc(29cqw - 2px);
+	height: calc(100% - 6px);
+	background:
+		linear-gradient(
+			90deg,
+			color-mix(in oklch, var(--color-foreground) 9%, var(--color-card)) 0%,
+			transparent 70%
+		),
+		linear-gradient(
+			var(--color-card),
+			color-mix(in oklch, var(--color-foreground) 5%, var(--color-card))
+		);
+	transform: translateX(calc(var(--book-width) - var(--book-depth) / 2 - 3px))
+		rotateY(90deg) translateX(calc(var(--book-depth) / 2));
+}
+.back {
+	width: var(--book-width);
+	height: 100%;
+	border-radius: 6px 4px 4px 6px;
+	transform: translateZ(calc(-1 * 29cqw));
+}

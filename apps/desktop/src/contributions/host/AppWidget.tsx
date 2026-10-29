@@ -7,4 +7,4 @@
 // `openExternal`, the active node's origin) now arrive as `env` on the
 // `WidgetHostContext` value ChatPage provides.
 
-export { AppWidget } from "@ryu/blocks/desktop/agent-elements/app-widget";
+export { AppWidget } from "@ryu/blocks/desktop/agent-elements/app-widget.tsx";

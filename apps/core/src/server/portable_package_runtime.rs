@@ -194,6 +194,8 @@ async fn enable_plugin(
         serde_json::json!({"type": "contributions_changed"}),
     );
 
+    crate::stats_beacon::witness_runtime_definition(kind, id, &manifest.id, &manifest);
+
     match crate::portable_packages::set_enabled(kind, id, true) {
         Ok(package) => Ok(package),
         Err(error) => {
@@ -436,6 +438,22 @@ fn materialize_skills(
             std::fs::write(target, data)?;
         }
         std::fs::write(destination.join(PORTABLE_SKILL_MARKER), marker)?;
+        if crate::stats_beacon::public_listing_witnessed(kind, id) {
+            let artifact_fingerprint = files
+                .get(&manifest_path)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .and_then(|content| {
+                    crate::skills_catalog::public_stats::artifact_fingerprint(&slug, content)
+                });
+            crate::skills_catalog::public_stats::record_public_install(
+                id,
+                &crate::skills_catalog::InstallResult {
+                    slug: slug.clone(),
+                    path: destination.join("SKILL.md").to_string_lossy().to_string(),
+                    artifact_fingerprint,
+                },
+            );
+        }
         ryu_skills::set_active(&slug, true);
         ids.push(slug);
     }
@@ -508,10 +526,21 @@ async fn enable_agent(
     package: &crate::portable_packages::InstalledPackage,
     files: &BTreeMap<String, Vec<u8>>,
 ) -> Result<crate::portable_packages::InstalledPackage> {
+    enable_agent_in_store(&state.agent_store, kind, id, package, files).await
+}
+
+// The production activation path depends only on the canonical agent store.
+async fn enable_agent_in_store(
+    store: &crate::agents::AgentStore,
+    kind: &str,
+    id: &str,
+    package: &crate::portable_packages::InstalledPackage,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Result<crate::portable_packages::InstalledPackage> {
     if !package.runtime_ids.is_empty() {
         let mut all_present = true;
         for runtime_id in &package.runtime_ids {
-            if state.agent_store.get(runtime_id).await?.is_none() {
+            if store.get(runtime_id).await?.is_none() {
                 all_present = false;
                 break;
             }
@@ -522,19 +551,32 @@ async fn enable_agent(
     }
     let (_, bytes) = file_with_name(files, "agent.json")
         .ok_or_else(|| anyhow::anyhow!("portable agent package `{id}` is missing agent.json"))?;
-    let template = serde_json::from_slice::<crate::agents::AgentTemplate>(bytes)
-        .context("portable agent template is invalid")?;
-    let schedules = template.agent_config.schedules.clone();
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).context("portable agent template is invalid")?;
+    // agent.json uses the same {template} envelope as the export endpoint;
+    // older portable packages may contain the template directly.
+    let template = serde_json::from_value::<crate::agents::AgentTemplate>(
+        value.get("template").cloned().unwrap_or(value),
+    )
+    .context("portable agent template is invalid")?;
+    if template.kind != "agent" {
+        bail!("portable agent template kind must be agent");
+    }
+    // Read schedules after sanitizing, which drops any conversation binding.
     let (template, _disclosure) = template.sanitize_for_untrusted_install();
-    let record = state
-        .agent_store
-        .create(template.into_create_agent())
-        .await?;
-    if let Err(error) = super::persist_agent_schedules(&record.id, &record.name, &schedules) {
-        let _ = state.agent_store.delete(&record.id).await;
+    let schedules = template.agent_config.schedules.clone();
+    let record = store.create(template.into_create_agent()).await?;
+    if let Err(error) = super::persist_agent_schedules(&record.id, &record.name, &schedules, None) {
+        let _ = store.delete(&record.id).await;
         bail!("agent schedules could not be saved: {error}");
     }
-    crate::portable_packages::set_runtime_ids(kind, id, vec![record.id.clone()])?;
+    if let Err(error) = crate::portable_packages::set_runtime_ids(kind, id, vec![record.id.clone()])
+    {
+        let _ = super::delete_agent_schedules(&record.id);
+        let _ = store.delete(&record.id).await;
+        return Err(error);
+    }
+    crate::stats_beacon::witness_runtime_definition("agent", id, &record.id, &record);
     crate::portable_packages::set_enabled(kind, id, true).map_err(Into::into)
 }
 
@@ -543,11 +585,23 @@ async fn disable_agent(
     kind: &str,
     id: &str,
 ) -> Result<crate::portable_packages::InstalledPackage> {
+    let package = disable_agent_in_store(&state.agent_store, kind, id).await?;
+    for runtime_id in &package.runtime_ids {
+        super::agent_routing_cleanup::clear_deleted_agent_routing(&state.client, runtime_id).await;
+    }
+    Ok(package)
+}
+
+async fn disable_agent_in_store(
+    store: &crate::agents::AgentStore,
+    kind: &str,
+    id: &str,
+) -> Result<crate::portable_packages::InstalledPackage> {
     let package = crate::portable_packages::get(kind, id)?
         .ok_or_else(|| anyhow::anyhow!("portable package `{kind}/{id}` is not installed"))?;
     for runtime_id in &package.runtime_ids {
-        let _ = super::delete_agent_schedules(runtime_id);
-        state.agent_store.delete(runtime_id).await?;
+        super::delete_agent_schedules(runtime_id)?;
+        store.delete(runtime_id).await?;
     }
     crate::portable_packages::set_enabled(kind, id, false).map_err(Into::into)
 }
@@ -569,13 +623,35 @@ async fn enable_workflow(
     let (_, bytes) = file_with_name(files, "workflow.json").ok_or_else(|| {
         anyhow::anyhow!("portable workflow package `{id}` is missing workflow.json")
     })?;
-    let mut workflow = serde_json::from_slice::<crate::workflow::Workflow>(bytes)
-        .context("portable workflow is invalid")?;
-    let saved = crate::workflow::persist_workflow(workflow.clone())
-        .await
-        .map_err(|error| anyhow::anyhow!(error))?;
-    workflow.id = saved.id.clone();
-    crate::portable_packages::set_runtime_ids(kind, id, vec![workflow.id])?;
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).context("portable workflow is invalid")?;
+    let runtime_ids = if value.get("primary").is_some() {
+        let template =
+            serde_json::from_value::<crate::workflow::templates::WorkflowTemplate>(value)
+                .context("portable workflow template is invalid")?;
+        crate::workflow::templates::install_definition(template)
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?
+    } else {
+        let mut workflow = serde_json::from_value::<crate::workflow::Workflow>(value)
+            .context("portable workflow is invalid")?;
+        workflow.id.clear();
+        let saved = crate::workflow::persist_workflow(workflow)
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        vec![saved.id]
+    };
+    if let Err(error) = crate::portable_packages::set_runtime_ids(kind, id, runtime_ids.clone()) {
+        for runtime_id in runtime_ids {
+            let _ = crate::workflow::store::delete_workflow(&runtime_id);
+        }
+        return Err(error);
+    }
+    for runtime_id in &runtime_ids {
+        if let Ok(workflow) = crate::workflow::store::load_workflow(runtime_id) {
+            crate::stats_beacon::witness_runtime_definition("workflow", id, runtime_id, &workflow);
+        }
+    }
     crate::portable_packages::set_enabled(kind, id, true).map_err(Into::into)
 }
 
@@ -788,3 +864,11 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "marketplace_store_workflow_tests.rs"]
+mod marketplace_store_workflow_tests;
+
+#[cfg(test)]
+#[path = "marketplace_store_asset_tests.rs"]
+mod marketplace_store_asset_tests;

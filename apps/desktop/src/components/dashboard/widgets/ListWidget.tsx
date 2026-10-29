@@ -3,7 +3,7 @@
 import { asRecord, cell, resolveArray } from "./data.ts";
 import { listConfigSchema, parseConfig } from "./schema.ts";
 
-function itemLabel(item: unknown, labelKey?: string): string {
+function itemLabel<TItem>(item: TItem, labelKey?: string): string | undefined {
 	const record = asRecord(item);
 	if (record) {
 		if (labelKey && record[labelKey] !== undefined) {

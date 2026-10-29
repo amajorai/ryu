@@ -1,18 +1,25 @@
+declare const window: Window;
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { z } from "zod";
 import { AgentSetupComposer } from "../../src/components/agents/AgentSetupComposer.tsx";
 import { EntitlementProvider } from "../../src/contexts/entitlement-context.tsx";
 import type { AgentSummary } from "../../src/lib/api/agents.ts";
+import styles from "./agent-setup-composer-proof.module.css";
 import "../../src/index.css";
 
-const RYU_NODE_URL = "http://127.0.0.1:8980";
+const requestInputStringSchema = z.string();
 const PROOF_AVATAR =
 	"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%230ea5e9'/%3E%3C/svg%3E";
 
 const agents: AgentSummary[] = [
 	{
 		avatarUrl: PROOF_AVATAR,
+		avatarGlyph: null,
+		lifecycleStatus: "active",
+		safetyProfile: "autonomous",
 		builtIn: true,
 		createdAt: null,
 		description: "The general-purpose Ryu agent.",
@@ -33,6 +40,9 @@ const agents: AgentSummary[] = [
 	},
 	{
 		avatarUrl: PROOF_AVATAR,
+		avatarGlyph: null,
+		lifecycleStatus: "active",
+		safetyProfile: "autonomous",
 		builtIn: true,
 		createdAt: null,
 		description: "A focused coding agent.",
@@ -53,7 +63,7 @@ const agents: AgentSummary[] = [
 	},
 ];
 
-const json = (body: unknown) =>
+const json = <FixturePayload,>(body: FixturePayload) =>
 	new Response(JSON.stringify(body), {
 		headers: { "Content-Type": "application/json" },
 		status: 200,
@@ -62,12 +72,12 @@ const json = (body: unknown) =>
 function installProofNetwork() {
 	const nativeFetch = window.fetch.bind(window);
 	window.fetch = async (input, init) => {
-		const url =
-			typeof input === "string"
-				? input
-				: input instanceof Request
-					? input.url
-					: input.url;
+		const inputString = requestInputStringSchema.safeParse(input);
+		const url = inputString.success
+			? inputString.data
+			: input instanceof Request
+				? input.url
+				: input.toString();
 
 		if (url.endsWith("/api/engines/models")) {
 			return json({
@@ -205,7 +215,9 @@ function AgentSetupComposerProof() {
 		<main className="min-h-screen bg-background px-6 py-10 text-foreground">
 			<div className="mx-auto max-w-4xl">
 				<header className="mb-8">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-[0.2em]">
+					<p
+						className={`font-medium text-muted-foreground text-xs uppercase ${styles.eyebrow}`}
+					>
 						Production component proof
 					</p>
 					<h1 className="mt-2 font-semibold text-4xl tracking-tight">

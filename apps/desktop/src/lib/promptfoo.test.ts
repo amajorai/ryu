@@ -3,6 +3,7 @@ import {
 	normalizePromptfooConfig,
 	parsePromptfooFile,
 	serializePromptfooConfig,
+	toPromptfooConfig,
 } from "./promptfoo.ts";
 
 describe("Promptfoo config normalization", () => {
@@ -120,6 +121,57 @@ describe("Promptfoo config normalization", () => {
 		});
 	});
 
+	test("keeps editor assertion options and named text-variant identity in JSON exports", () => {
+		const config = normalizePromptfooConfig({
+			prompts: [
+				{ content: "Answer {{question}}", id: "primary", name: "Primary" },
+				{ content: "Be brief.", id: "compact", name: "Compact" },
+			],
+			tests: [
+				{
+					assertions: [
+						{
+							kind: "contains",
+							options: {
+								not: true,
+								provider: "judge-fixture",
+								threshold: 0.75,
+								transform: "trim",
+								weight: 2,
+							},
+							value: "secret",
+						},
+					],
+				},
+			],
+		});
+		const exported = toPromptfooConfig(config);
+
+		expect(config.prompts[0]?.content).toBe("Answer {{question}}");
+		expect(
+			toPromptfooConfig({ ...config, prompts: [config.prompts[1]!] }).prompts
+		).toMatchObject([
+			{
+				content: "Be brief.",
+				id: "compact",
+				name: "Compact",
+			},
+		]);
+		expect(exported.tests).toMatchObject([
+			{
+				assert: [
+					{
+						type: "not-contains",
+						provider: "judge-fixture",
+						threshold: 0.75,
+						transform: "trim",
+						weight: 2,
+					},
+				],
+			},
+		]);
+	});
+
 	test("resolves selected file-backed prompts and datasets into owned content", () => {
 		const parsed = parsePromptfooFile(
 			JSON.stringify({
@@ -173,5 +225,69 @@ describe("Promptfoo config normalization", () => {
 		const exported = serializePromptfooConfig(parsed.config, "json");
 		expect(exported).toContain('"providers"');
 		expect(exported).not.toContain('"targets"');
+	});
+});
+
+describe("Promptfoo imported document boundaries", () => {
+	test("preserves additive document fields and hostile own JSON keys", () => {
+		const config = parsePromptfooFile(
+			'{"__proto__":{"owned":true},"extra":{"flag":true},"tests":[{"vars":{"__proto__":"literal","name":"Sam"},"context":[1,null],"provider_output":{"answer":42}}]}',
+			"suite.json"
+		).config;
+		expect(Object.hasOwn(config, "__proto__")).toBe(true);
+		expect(config.extra).toEqual({ flag: true });
+		expect(Object.hasOwn(config.tests[0]?.vars ?? {}, "__proto__")).toBe(true);
+		expect(config.tests[0]?.context).toEqual([1, null]);
+		expect(config.tests[0]?.providerOutput).toEqual({ answer: 42 });
+		expect({}).not.toHaveProperty("owned");
+	});
+	test("retains YAML non-finite numeric assertion values and thresholds", () => {
+		const config = parsePromptfooFile(
+			"tests:\n  - threshold: .inf\n    assert:\n      - type: equals\n        value: .nan\n",
+			"suite.yaml"
+		).config;
+		expect(config.tests[0]?.threshold).toBe(Number.POSITIVE_INFINITY);
+		expect(config.tests[0]?.assertions[0]).toEqual({
+			kind: "equals",
+			value: "NaN",
+		});
+	});
+	test("keeps per-field fallback behavior and assertion option precedence", () => {
+		const config = normalizePromptfooConfig({
+			tests: [
+				{
+					providers: [null, 12, "fixture"],
+					messages: [
+						null,
+						{ role: "tool", content: "ignored" },
+						{ role: 12, content: false },
+					],
+					assert: [
+						{
+							type: "not-regex",
+							value: ["one", 2, null],
+							options: { threshold: 0.2, not: false, rubricPrompt: "nested" },
+							threshold: 0.8,
+							not: true,
+							rubric_prompt: "outer",
+						},
+					],
+				},
+			],
+		});
+		expect(config.tests[0]?.providers).toEqual(["fixture"]);
+		expect(config.tests[0]?.messages).toEqual([{ role: "user", content: "" }]);
+		expect(config.tests[0]?.assertions).toEqual([
+			{
+				kind: "regex",
+				value: "one,2,null",
+				options: { threshold: 0.8, not: true, rubric_prompt: "outer" },
+			},
+		]);
+	});
+	test("rejects values that cannot come from a Promptfoo JSON or YAML document", () => {
+		expect(() =>
+			normalizePromptfooConfig({ tests: [], callback: () => true })
+		).toThrow();
 	});
 });

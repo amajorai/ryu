@@ -1,4 +1,6 @@
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Label } from "@ryu/ui/components/label.tsx";
 import {
@@ -8,13 +10,15 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@ryu/ui/components/select.tsx";
-import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { sileo } from "sileo";
 import {
 	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -26,6 +30,7 @@ import {
 	updateGatewayConfig,
 } from "@/src/lib/api/gateway.ts";
 import { gatewayAcpQueryOptions } from "@/src/lib/gateway-acp-query.ts";
+import { SettingsNotice } from "./SettingsNotice.tsx";
 
 const MIN_IDLE_MINUTES = 1;
 const MAX_IDLE_MINUTES = 24 * 60;
@@ -60,6 +65,7 @@ export function AcpRuntimeSection({
 	target: ApiTarget;
 }) {
 	const controlId = useId();
+	const tl = useLiteralMessages();
 	const queryClient = useQueryClient();
 	const options = gatewayAcpQueryOptions(target);
 	const configQuery = useQuery(options);
@@ -72,6 +78,9 @@ export function AcpRuntimeSection({
 		setIdleDraft(String(config.idle_timeout_minutes));
 	}, [config.idle_timeout_minutes]);
 
+	const writePending = useRef(false);
+	const [parallelOpen, setParallelOpen] = useState(false);
+
 	const save = useMutation({
 		mutationFn: (next: GatewayAcpSettings) =>
 			updateGatewayConfig(target, { acp: next }),
@@ -79,6 +88,9 @@ export function AcpRuntimeSection({
 			await queryClient.invalidateQueries({
 				queryKey: options.queryKey,
 			});
+		},
+		onSettled: () => {
+			writePending.current = false;
 		},
 		onError: (error: Error) => {
 			sileo.error({
@@ -88,9 +100,24 @@ export function AcpRuntimeSection({
 		},
 	});
 
-	const disabled = !canConfigure || save.isPending || configQuery.isLoading;
+	const disabled = !canConfigure || save.isPending || !configQuery.isSuccess;
 	const commit = (patch: Partial<GatewayAcpSettings>) => {
-		save.mutate({ ...acpSettings(config), ...patch });
+		if (disabled || writePending.current) {
+			return;
+		}
+		const next = { ...acpSettings(config), ...patch };
+		if (
+			next.idle_timeout_minutes === config.idle_timeout_minutes &&
+			next.max_parallel_agents === config.max_parallel_agents &&
+			next.keep_computer_awake === config.keep_computer_awake
+		) {
+			return;
+		}
+		// A control callback can run before React Query paints its pending state.
+		// Close the selection surface and synchronously admit only one write.
+		writePending.current = true;
+		setParallelOpen(false);
+		save.mutate(next);
 	};
 	const commitIdle = () => {
 		const value = Number(idleDraft);
@@ -116,7 +143,7 @@ export function AcpRuntimeSection({
 					title="ACP agent runtime"
 				>
 					<SettingsCard>
-						<Spinner />
+						<SkeletonRows />
 					</SettingsCard>
 				</SettingsSection>
 			</div>
@@ -124,6 +151,13 @@ export function AcpRuntimeSection({
 	}
 
 	const autoLimit = config.auto_max_parallel_agents;
+	const parallelItems = [
+		{ value: "auto", label: `Auto${autoLimit ? ` (${autoLimit})` : ""}` },
+		...PARALLEL_OPTIONS.map((value) => ({
+			value: String(value),
+			label: String(value),
+		})),
+	];
 	const effectiveLimit =
 		config.effective_max_parallel_agents ??
 		config.max_parallel_agents ??
@@ -136,23 +170,31 @@ export function AcpRuntimeSection({
 				caption="ACP sessions stay warm for faster replies, but old inactive threads are reaped and new processes wait behind a node-wide limit so they cannot accumulate without bound."
 				title="ACP agent runtime"
 			>
-				<div className="space-y-2">
-					<SettingsCard>
-						<div className="flex items-start justify-between gap-4">
-							<div className="min-w-0 space-y-1">
-								<Label htmlFor={`${controlId}-acp-idle-timeout`}>
-									{"Stop idle ACP sessions after"}
-								</Label>
-								<p className="text-muted-foreground text-xs">
-									An inactive session is killed after this many minutes to
-									release its memory. The next message starts a new ACP process
-									and may take longer.
-								</p>
-							</div>
-							<div className="flex shrink-0 items-center gap-2">
+				{configQuery.isError ? (
+					<SettingsNotice
+						action={
+							<Button
+								onClick={() => void configQuery.refetch()}
+								size="sm"
+								variant="outline"
+							>
+								Retry ACP runtime settings
+							</Button>
+						}
+						role="alert"
+					>
+						Could not load ACP runtime settings.
+					</SettingsNotice>
+				) : null}
+				{/* Titles stay real <Label>s: they name the controls for assistive
+				    technology, and the proofs look the switch up by that name. */}
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<div className="flex items-center gap-2">
 								<Input
 									aria-label="ACP idle timeout in minutes"
-									className="w-20 text-right tabular-nums"
+									className="w-20 text-right"
 									disabled={disabled}
 									id={`${controlId}-acp-idle-timeout`}
 									inputMode="numeric"
@@ -165,33 +207,38 @@ export function AcpRuntimeSection({
 											event.currentTarget.blur();
 										}
 									}}
+									purpose="numeric-setting"
 									type="number"
 									value={idleDraft}
 								/>
 								<span className="text-muted-foreground text-sm">min</span>
 							</div>
-						</div>
-					</SettingsCard>
-
-					<SettingsCard>
-						<div className="flex items-start justify-between gap-4">
-							<div className="min-w-0 space-y-1">
-								<Label htmlFor={`${controlId}-acp-max-parallel`}>
-									{"Maximum parallel ACP agents"}
-								</Label>
-								<p className="text-muted-foreground text-xs">
-									Auto uses a conservative CPU/RAM estimate for this node. New
-									agents wait instead of spawning when the limit is full.
-								</p>
-							</div>
+						}
+						description="An inactive session is killed after this many minutes to release its memory. The next message starts a new ACP process and may take longer."
+						title={
+							<Label
+								className="font-normal"
+								htmlFor={`${controlId}-acp-idle-timeout`}
+							>
+								{"Stop idle ACP sessions after"}
+							</Label>
+						}
+					/>
+					<SettingsItem
+						actions={
 							<Select
 								disabled={disabled}
+								items={parallelItems}
+								onOpenChange={(open) =>
+									setParallelOpen(open && !disabled && !writePending.current)
+								}
 								onValueChange={(value) =>
 									commit({
 										max_parallel_agents:
 											value === "auto" ? null : Number(value),
 									})
 								}
+								open={parallelOpen}
 								value={
 									config.max_parallel_agents === null
 										? "auto"
@@ -206,41 +253,47 @@ export function AcpRuntimeSection({
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value="auto">
-										Auto{autoLimit ? ` (${autoLimit})` : ""}
-									</SelectItem>
-									{PARALLEL_OPTIONS.map((value) => (
-										<SelectItem key={value} value={String(value)}>
-											{value}
+									{parallelItems.map((item) => (
+										<SelectItem
+											disabled={disabled}
+											key={item.value}
+											value={item.value}
+										>
+											{item.label}
 										</SelectItem>
 									))}
 								</SelectContent>
 							</Select>
-						</div>
-						<div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+						}
+						description="Auto uses a conservative CPU/RAM estimate for this node. New agents wait instead of spawning when the limit is full."
+						title={
+							<Label
+								className="font-normal"
+								htmlFor={`${controlId}-acp-max-parallel`}
+							>
+								{"Maximum parallel ACP agents"}
+							</Label>
+						}
+					>
+						<div className="flex flex-wrap items-center gap-2 text-xs">
 							<Badge variant="secondary">
-								{activeAgents} active / {effectiveLimit ?? "—"} allowed
+								{tl("{activeAgents} active / {allowedLimit} allowed", {
+									activeAgents: String(activeAgents),
+									allowedLimit: String(effectiveLimit ?? "—"),
+								})}
 							</Badge>
 							{config.hardware ? (
 								<span className="text-muted-foreground">
-									{config.hardware.physical_cores} physical{" · "}
-									{formatRam(config.hardware.total_ram_bytes)}
+									{tl("{physicalCores} physical · {ramSummary}", {
+										physicalCores: String(config.hardware.physical_cores),
+										ramSummary: formatRam(config.hardware.total_ram_bytes),
+									})}
 								</span>
 							) : null}
 						</div>
-					</SettingsCard>
-
-					<SettingsCard>
-						<div className="flex items-center justify-between gap-3">
-							<div className="space-y-1">
-								<Label htmlFor={`${controlId}-acp-keep-awake`}>
-									{"Keep this device awake while agents run"}
-								</Label>
-								<p className="text-muted-foreground text-xs">
-									Uses the native OS sleep-inhibition API only while a local ACP
-									agent is active. The display may still turn off.
-								</p>
-							</div>
+					</SettingsItem>
+					<SettingsItem
+						actions={
 							<Switch
 								aria-label="Keep this device awake while ACP agents run"
 								checked={config.keep_computer_awake}
@@ -250,9 +303,18 @@ export function AcpRuntimeSection({
 									commit({ keep_computer_awake })
 								}
 							/>
-						</div>
-					</SettingsCard>
-				</div>
+						}
+						description="Uses the native OS sleep-inhibition API only while a local ACP agent is active. The display may still turn off."
+						title={
+							<Label
+								className="font-normal"
+								htmlFor={`${controlId}-acp-keep-awake`}
+							>
+								{"Keep this device awake while agents run"}
+							</Label>
+						}
+					/>
+				</SettingsGroup>
 			</SettingsSection>
 		</div>
 	);

@@ -1,8 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
 const STORY_URL = "/dashboard-chart-blocks-proof.html";
-const PROOF_PATH =
-	"/Users/jiawei/Documents/Code/ryu/apps/desktop/artifacts/dashboard-chart-blocks-proof.png";
 
 interface RuntimeIssues {
 	consoleErrors: string[];
@@ -57,7 +55,10 @@ test("renders the dashboard chart-block composition cleanly", async ({
 		"four chart kinds"
 	);
 
-	await page.screenshot({ fullPage: true, path: PROOF_PATH });
+	await page.screenshot({
+		fullPage: true,
+		path: test.info().outputPath("dashboard-chart-blocks-proof.png"),
+	});
 
 	expect(issues.consoleErrors, "console.error output").toEqual([]);
 	expect(issues.pageErrors, "uncaught page errors").toEqual([]);

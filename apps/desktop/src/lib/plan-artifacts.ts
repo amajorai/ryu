@@ -1,3 +1,5 @@
+import { appRequestValueSchema } from "@ryuhq/core-client/app-request-json.ts";
+import { z } from "zod";
 import type { Artifact } from "./artifacts.ts";
 
 export type PlanTodoStatus = "completed" | "in_progress" | "pending";
@@ -29,14 +31,38 @@ export interface PlanArtifact {
 	title: string;
 }
 
-interface PlanSourcePart {
-	input?: unknown;
-	output?: unknown;
-	state?: unknown;
-	toolCallId?: unknown;
-	toolName?: unknown;
-	type?: unknown;
-}
+// Core persists tool inputs/results as serde_json::Value. During live assembly
+// optional fields may still be undefined; do not close a tool's future payload.
+const planRecordFieldsSchema = z.record(z.string(), appRequestValueSchema);
+const planRecordSchema = z.preprocess(
+	(value) => (Array.isArray(value) ? { ...value } : value),
+	z.custom<z.output<typeof planRecordFieldsSchema>>(
+		(value) =>
+			planRecordFieldsSchema.safeParse(value).success &&
+			appRequestValueSchema.safeParse(value).success
+	)
+);
+const planTextSchema = z.string().trim().min(1);
+const planPartFieldsSchema = z
+	.object({
+		input: appRequestValueSchema.optional(),
+		output: appRequestValueSchema.optional(),
+		state: appRequestValueSchema.optional(),
+		toolCallId: appRequestValueSchema.optional(),
+		toolName: appRequestValueSchema.optional(),
+		type: appRequestValueSchema.optional(),
+	})
+	.catchall(appRequestValueSchema);
+const planPartSchema = z.custom<z.output<typeof planPartFieldsSchema>>(
+	(value) =>
+		planPartFieldsSchema.safeParse(value).success &&
+		appRequestValueSchema.safeParse(value).success
+);
+type PlanSourcePart = z.output<typeof planPartSchema>;
+type PlanRecordInput = Parameters<typeof planRecordSchema.parse>[0];
+type PlanTextInput = Parameters<typeof planTextSchema.parse>[0];
+const planTodoArraySchema = z.array(z.unknown());
+type PlanTodosInput = Parameters<typeof planTodoArraySchema.parse>[0];
 
 interface PlanSourceMessage {
 	id?: unknown;
@@ -53,14 +79,14 @@ const PLAN_MARKER_PREFIX = "<!-- ryu-plan-key: ";
 const PLAN_MARKER_SUFFIX = " -->";
 const PLAN_TITLE_MAX_CHARS = 72;
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-	return typeof value === "object" && value !== null
-		? (value as Record<string, unknown>)
-		: null;
+function asRecord(value: PlanRecordInput) {
+	const parsed = planRecordSchema.safeParse(value);
+	return parsed.success ? parsed.data : null;
 }
 
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+function asString(value: PlanTextInput): string | undefined {
+	const parsed = planTextSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
 function toolName(part: PlanSourcePart): string {
@@ -85,16 +111,19 @@ function isTerminal(part: PlanSourcePart): boolean {
 	);
 }
 
-function todoStatus(value: unknown): PlanTodoStatus {
+function todoStatus(
+	value: z.output<typeof appRequestValueSchema>
+): PlanTodoStatus {
 	return value === "completed" || value === "in_progress" ? value : "pending";
 }
 
-function readTodos(value: unknown): PlanTodo[] {
-	if (!Array.isArray(value)) {
+function readTodos(value: PlanTodosInput): PlanTodo[] {
+	const parsed = planTodoArraySchema.safeParse(value);
+	if (!parsed.success) {
 		return [];
 	}
 	const todos: PlanTodo[] = [];
-	for (const item of value) {
+	for (const item of parsed.data) {
 		const record = asRecord(item);
 		const content = asString(record?.content) ?? asString(record?.step);
 		if (!content) {
@@ -231,10 +260,11 @@ export function extractPlans(
 		}
 		const sourceMessageId = asString(message.id) ?? `message-${messageIndex}`;
 		for (const [partIndex, rawPart] of message.parts.entries()) {
-			const part = asRecord(rawPart) as PlanSourcePart | null;
-			if (!(part && isTerminal(part))) {
+			const parsedPart = planPartSchema.safeParse(rawPart);
+			if (!(parsedPart.success && isTerminal(parsedPart.data))) {
 				continue;
 			}
+			const part = parsedPart.data;
 			const tool = toolName(part);
 			if (
 				tool !== "TodoWrite" &&

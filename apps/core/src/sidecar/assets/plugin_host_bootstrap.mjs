@@ -22,6 +22,13 @@
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 
+// Capture the native admissions before importing plugin code. Plugin mutations of
+// built-in prototypes must not alter the host's callable/primitive decisions.
+const intrinsicApply = Reflect.apply;
+const intrinsicFunctionSource = Function.prototype.toString;
+const intrinsicNumberValue = Number.prototype.valueOf;
+const intrinsicBox = Object;
+
 const env = process.env;
 const PLUGIN_ID = env.RYU_EXT_PLUGIN_ID || "";
 const EXT_TOKEN = env.RYU_EXT_TOKEN || "";
@@ -62,7 +69,7 @@ let activated = false;
 
 // The host bridge exposed to the plugin: every call routes through Core's ONE
 // governed RPC endpoint (`POST /api/host/rpc`), which grant-gates + dispatches
-// through the same PluginHookBridge the Deno turn-hook sandbox uses. No new
+// through the same PluginHookBridge the JS turn-hook sandbox uses. No new
 // vocabulary — `method` must be a row in the kernel-contracts host-API table.
 async function hostCall(method, args) {
 	if (!CORE_PORT) {
@@ -123,29 +130,85 @@ async function readBody(req) {
 	return Buffer.concat(chunks).toString("utf8");
 }
 
-async function* responseChunks(stream) {
-	if (stream && typeof stream[Symbol.asyncIterator] === "function") {
-		yield* stream;
-		return;
-	}
-	if (stream && typeof stream.getReader === "function") {
-		const reader = stream.getReader();
+/** Decode the two complete native streaming transports without calling their methods. */
+function parseResponseStream(stream) {
+	if (stream) {
+		const iterator = stream[Symbol.asyncIterator];
 		try {
-			while (true) {
-				const next = await reader.read();
-				if (next.done) {
-					return;
-				}
-				yield next.value;
-			}
-		} finally {
-			reader.releaseLock();
+			// The engine checks the callable slot, including cross-realm and proxy functions.
+			intrinsicApply(intrinsicFunctionSource, iterator, []);
+			return { kind: "async-iterable", stream };
+		} catch {
+			/* This transport has no callable asynchronous iterator. */
 		}
-		return;
+		const getReader = stream.getReader;
+		try {
+			intrinsicApply(intrinsicFunctionSource, getReader, []);
+			return { kind: "readable-stream", stream };
+		} catch {
+			/* This transport has no callable reader factory. */
+		}
 	}
 	throw new TypeError(
 		"response stream must be async iterable or a ReadableStream"
 	);
+}
+
+async function* responseChunks(stream) {
+	const transport = parseResponseStream(stream);
+	if (transport.kind === "async-iterable") {
+		yield* transport.stream;
+		return;
+	}
+	const reader = transport.stream.getReader();
+	try {
+		while (true) {
+			const next = await reader.read();
+			if (next.done) {
+				return;
+			}
+			yield next.value;
+		}
+	} finally {
+		reader.releaseLock();
+	}
+}
+
+/** HTTP status is a primitive native number; boxed numbers remain value shorthands. */
+function readResponseStatus(result) {
+	const status = result.status;
+	if (intrinsicBox(status) === status) {
+		return 200;
+	}
+	try {
+		intrinsicApply(intrinsicNumberValue, status, []);
+	} catch {
+		return 200;
+	}
+	// Preserve the original second property read, including accessor errors.
+	return result.status;
+}
+
+/** The declared module export is invoked unbound, exactly like native activate(context). */
+function parseExtensionActivation(mod) {
+	const activate = mod.activate || mod.default?.activate;
+	try {
+		intrinsicApply(intrinsicFunctionSource, activate, []);
+		return { activate };
+	} catch {
+		return null;
+	}
+}
+
+/** Optional deactivation is decoded only at shutdown, so getters remain lazy. */
+function parseExtensionDeactivation(mod) {
+	const deactivate = mod.deactivate || mod.default?.deactivate;
+	try {
+		intrinsicApply(intrinsicFunctionSource, deactivate, []);
+		return { deactivate };
+	} catch {
+		return null;
+	}
 }
 
 async function sendStream(res, status, headers, stream) {
@@ -207,7 +270,7 @@ async function handle(req, res) {
 		if (result == null) {
 			return send(res, 404, undefined, JSON.stringify({ error: "not found" }));
 		}
-		const status = typeof result.status === "number" ? result.status : 200;
+		const status = readResponseStatus(result);
 		if (result.stream !== undefined) {
 			return sendStream(res, status, result.headers, result.stream);
 		}
@@ -284,8 +347,8 @@ async function main() {
 		});
 		process.exit(3);
 	}
-	const activate = mod.activate || mod.default?.activate;
-	if (typeof activate !== "function") {
+	const activation = parseExtensionActivation(mod);
+	if (!activation) {
 		log("entry module has no exported activate()", {
 			level: "error",
 			entry: ENTRY,
@@ -293,6 +356,7 @@ async function main() {
 		process.exit(3);
 	}
 	try {
+		const { activate } = activation;
 		await activate(context);
 	} catch (err) {
 		log("activate() threw", { level: "error", error: String(err) });
@@ -306,9 +370,10 @@ async function main() {
 	// is aspirational today — it fires only if the process receives a catchable signal
 	// (e.g. a future graceful-stop that sends SIGTERM first, or a manual kill).
 	const shutdown = async () => {
-		const deactivate = mod.deactivate || mod.default?.deactivate;
-		if (typeof deactivate === "function") {
+		const deactivation = parseExtensionDeactivation(mod);
+		if (deactivation) {
 			try {
+				const { deactivate } = deactivation;
 				await deactivate(context);
 			} catch (err) {
 				log("deactivate() threw", { level: "error", error: String(err) });

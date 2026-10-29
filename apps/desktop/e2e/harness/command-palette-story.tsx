@@ -1,3 +1,4 @@
+import proofStyles from "./command-palette-story.module.css";
 // Standalone browser story for the REAL shared command palette
 // (`@ryu/command/CommandPalette`) — the exact prop-driven surface the desktop's
 // Cmd+K modal renders. Mounts it with a fixed `CommandAction[]` behind an open
@@ -9,6 +10,7 @@
 // behavior (grouping, filtering, empty state, onSelect), which is what renders
 // inside both the Tauri webview and the Electron command bar.
 
+import { InputBar } from "@ryu/blocks/desktop/agent-elements/input-bar.tsx";
 import { CommandPalette } from "@ryu/command/CommandPalette";
 import type { CommandAction } from "@ryu/command/types";
 import { useState } from "react";
@@ -18,10 +20,17 @@ import "../../src/index.css";
 function Story() {
 	const [open, setOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState("all");
+	const [composeDraft, setComposeDraft] = useState("");
 	const [lastSelected, setLastSelected] = useState("");
 
 	const select = (id: string) => () => {
 		setLastSelected(id);
+	};
+
+	const submitCompose = (content: string) => {
+		setLastSelected(`compose:${content.trim()}`);
+		setComposeDraft("");
+		setOpen(false);
 	};
 
 	const actions: CommandAction[] = [
@@ -84,7 +93,7 @@ function Story() {
 	];
 
 	return (
-		<div style={{ padding: 40 }}>
+		<div className={proofStyles.fixture1}>
 			<button
 				data-testid="open-palette"
 				onClick={() => setOpen(true)}
@@ -97,6 +106,31 @@ function Story() {
 				actions={actions}
 				activeTab={activeTab}
 				chrome="dialog"
+				composeContent={
+					<InputBar
+						autoFocus
+						className="pt-2.5"
+						leftActions={
+							<span
+								className="flex items-center gap-2 px-2 text-muted-foreground text-xs"
+								data-testid="compose-send-shortcut"
+							>
+								Send
+								<kbd className="type-caption rounded-md border border-border/70 px-1.5 py-0.5 font-mono">
+									Enter
+								</kbd>
+							</span>
+						}
+						onAttach={() => setLastSelected("compose:attach")}
+						onChange={setComposeDraft}
+						onSend={({ content }) => submitCompose(content)}
+						onStop={() => undefined}
+						placeholder="Write a message…"
+						status="ready"
+						value={composeDraft}
+					/>
+				}
+				dialogLayout="expanded"
 				onOpenChange={setOpen}
 				onTabChange={setActiveTab}
 				open={open}

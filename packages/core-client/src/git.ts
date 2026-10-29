@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { appJsonValueSchema } from "./app-request-json.ts";
 // apps/desktop/src/lib/api/git.ts
 //
 // Typed client for Core's git endpoints:
@@ -11,6 +13,77 @@ import {
 	fetchForTarget,
 	makeHeaders,
 } from "./client.ts";
+
+/** Validate complete native Git response fields at Response.json, retaining the
+ * original decoded receivers, nested arrays and all future JSON metadata. The
+ * omitted/nullish fields keep the existing non-repo and legacy fallbacks. */
+function gitResponseSchema<S extends z.ZodObject>(fields: S) {
+	return z.custom<z.output<S>>(
+		(value) =>
+			appJsonValueSchema.safeParse(value).success &&
+			fields.safeParse(value).success
+	);
+}
+const gitStatusSchema = gitResponseSchema(
+	z.object({
+		ahead: z.number().nullish(),
+		behind: z.number().nullish(),
+		branch: z.string().nullish(),
+		changed_files_count: z.number().nullish(),
+		dirty: z.boolean().nullish(),
+		is_repo: z.boolean().nullish(),
+		insertions: z.number().nullish(),
+		deletions: z.number().nullish(),
+		error: z.string().nullish(),
+	})
+);
+const nativeGitPathListSchema = z.custom<string[]>(
+	(value) => z.array(z.string()).safeParse(value).success
+);
+const gitBranchesSchema = gitResponseSchema(
+	z.object({
+		branches: nativeGitPathListSchema.nullish(),
+		current: z.string().nullish(),
+		is_repo: z.boolean().nullish(),
+		error: z.string().nullish(),
+	})
+);
+const gitCheckoutSchema = gitResponseSchema(
+	z.object({
+		success: z.boolean().nullish(),
+		branch: z.string().nullish(),
+		error: z.string().nullish(),
+	})
+);
+const nativeGitFileSummarySchema = gitResponseSchema(
+	z.object({
+		path: z.string(),
+		kind: z.enum(["added", "modified", "deleted", "renamed"]),
+		additions: z.number(),
+		deletions: z.number(),
+	})
+);
+const nativeGitFileListSchema = z.custom<
+	z.output<typeof nativeGitFileSummarySchema>[]
+>((value) => z.array(nativeGitFileSummarySchema).safeParse(value).success);
+const gitDiffSchema = gitResponseSchema(
+	z.object({
+		files: nativeGitFileListSchema.nullish(),
+		has_changes: z.boolean().nullish(),
+		unified_diff: z.string().nullish(),
+		error: z.string().nullish(),
+	})
+);
+const gitApplySchema = gitResponseSchema(
+	z.object({
+		conflicted_files: nativeGitPathListSchema.nullish(),
+		error: z.string().nullish(),
+		commit: z.string().nullish(),
+		pr_url: z.string().nullish(),
+		success: z.boolean().nullish(),
+		run_id: z.string().nullish(),
+	})
+);
 
 export interface GitStatus {
 	ahead: number;
@@ -50,7 +123,7 @@ export async function fetchGitStatus(
 		if (!resp.ok) {
 			return NOT_REPO;
 		}
-		const json = (await resp.json()) as Partial<GitStatus>;
+		const json = gitStatusSchema.parse(await resp.json());
 		return {
 			is_repo: json.is_repo ?? false,
 			branch: json.branch ?? null,
@@ -98,7 +171,7 @@ export async function fetchGitBranches(
 		if (!resp.ok) {
 			return NO_BRANCHES;
 		}
-		const json = (await resp.json()) as Partial<GitBranches>;
+		const json = gitBranchesSchema.parse(await resp.json());
 		return {
 			is_repo: json.is_repo ?? false,
 			current: json.current ?? null,
@@ -137,7 +210,7 @@ export async function checkoutBranch(
 			body: JSON.stringify({ cwd, branch }),
 			signal,
 		});
-		const json = (await resp.json()) as Partial<CheckoutResult>;
+		const json = gitCheckoutSchema.parse(await resp.json());
 		if (!resp.ok) {
 			return {
 				success: false,
@@ -224,23 +297,21 @@ export async function applyWorktree(
 		body: JSON.stringify(opts),
 		signal,
 	});
-	const json = (await resp.json()) as Record<string, unknown>;
+	const json = gitApplySchema.parse(await resp.json());
 	if (resp.status === 409) {
 		return {
 			success: false,
 			error: "merge_conflict",
-			conflicted_files: (json.conflicted_files as string[] | undefined) ?? [],
+			conflicted_files: json.conflicted_files ?? [],
 		};
 	}
 	if (!resp.ok) {
-		throw new Error(
-			(json.error as string | undefined) ?? `apply failed: ${resp.status}`
-		);
+		throw new Error(json.error ?? `apply failed: ${resp.status}`);
 	}
 	return {
 		success: true,
-		commit: (json.commit as string | null) ?? null,
-		pr_url: (json.pr_url as string | null) ?? null,
+		commit: json.commit ?? null,
+		pr_url: json.pr_url ?? null,
 	};
 }
 
@@ -269,7 +340,7 @@ export async function fetchWorktreeDiff(
 		if (!resp.ok) {
 			return EMPTY_DIFF;
 		}
-		const json = (await resp.json()) as Partial<WorktreeDiff>;
+		const json = gitDiffSchema.parse(await resp.json());
 		return {
 			has_changes: json.has_changes ?? false,
 			files: json.files ?? [],

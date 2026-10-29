@@ -1,5 +1,15 @@
-/** A deliberately small JSON-like shape so the model can consume persisted and live AI SDK parts. */
-type JsonRecord = Record<string, unknown>;
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import { z } from "zod";
+import { readStatsEnvironmentSlot } from "./stats-environment.mjs";
+import {
+	type StatsFieldCarrier,
+	type StatsFieldKey,
+	statsEnvironmentReceiverSchema,
+	statsFieldCarrierSchema,
+	statsFiniteNumberSchema,
+	statsPartKindSchema,
+	statsStringSchema,
+} from "./stats-native-fields.ts";
 
 export interface StatsMessage {
 	content?: unknown;
@@ -40,6 +50,28 @@ export interface StatsPreferences {
 	usagePercentMode: UsagePercentMode;
 	usageShowTimeCursor: boolean;
 }
+
+/** Complete authored preference cells, shared by persisted-state and UI inputs. */
+export const statsPreferenceFields = {
+	cacheColdGlyph: z.string(),
+	cacheCountdownGlyph: z.string(),
+	cacheHotGlyph: z.string(),
+	cacheScope: z.enum(["latest", "session"]),
+	cacheTimerTtlMinutes: z.union([z.literal(5), z.literal(60)]),
+	compactionShowReclaimed: z.boolean(),
+	compactionShowTriggers: z.boolean(),
+	compactionValue: z.enum(["total", "auto", "manual", "unknown", "reclaimed"]),
+	hideEmpty: z.boolean(),
+	resetTimerLocale: z.string(),
+	resetTimerMode: z.enum(["exact", "progress", "remaining"]),
+	resetTimerTimezone: z.enum(["local", "utc"]),
+	rollingWindowSeconds: z.custom<number>(isNativeNumber),
+	showCacheTimer: z.boolean(),
+	usagePercentMode: z.enum(["remaining", "used"]),
+	usageShowTimeCursor: z.boolean(),
+} satisfies {
+	[Field in keyof StatsPreferences]: z.ZodType<StatsPreferences[Field]>;
+};
 
 export const DEFAULT_STATS_PREFERENCES: StatsPreferences = {
 	cacheScope: "latest",
@@ -84,6 +116,11 @@ export interface StatsUsageMeter {
 
 /** Structural subset of the desktop usage API; provider credentials never enter this shape. */
 export interface StatsUsageSnapshot {
+	/**
+	 * The saved subscription account this usage belongs to, when the host knows
+	 * it. Display only; it may be an email address.
+	 */
+	accountLabel?: string | null;
 	available: boolean;
 	extraUsageUsd: number | null;
 	meters: readonly StatsUsageMeter[];
@@ -194,21 +231,18 @@ interface CompactionMarker {
 	trigger: "auto" | "manual" | "unknown";
 }
 
-function asRecord(value: unknown): JsonRecord | null {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as JsonRecord)
-		: null;
+function asRecord(
+	value: Parameters<typeof statsFieldCarrierSchema.safeParse>[0]
+): StatsFieldCarrier | null {
+	const carrier = statsFieldCarrierSchema.safeParse(value);
+	return carrier.success ? carrier.data : null;
 }
 
-function asFiniteNumber(value: unknown): number | undefined {
-	if (typeof value === "number" && Number.isFinite(value)) {
-		return value;
-	}
-	if (typeof value === "string" && value.trim() !== "") {
-		const parsed = Number(value);
-		return Number.isFinite(parsed) ? parsed : undefined;
-	}
-	return undefined;
+function asFiniteNumber(
+	value: Parameters<typeof statsFiniteNumberSchema.safeParse>[0]
+): number | undefined {
+	const parsed = statsFiniteNumberSchema.safeParse(value);
+	return parsed.success ? parsed.data : undefined;
 }
 
 function nonNegative(value: number | undefined): number | undefined {
@@ -216,8 +250,8 @@ function nonNegative(value: number | undefined): number | undefined {
 }
 
 function numberFrom(
-	record: JsonRecord | null,
-	keys: readonly string[]
+	record: StatsFieldCarrier | null,
+	keys: readonly StatsFieldKey[]
 ): number | undefined {
 	if (!record) {
 		return undefined;
@@ -232,25 +266,25 @@ function numberFrom(
 }
 
 function stringFrom(
-	record: JsonRecord | null,
-	keys: readonly string[]
+	record: StatsFieldCarrier | null,
+	keys: readonly StatsFieldKey[]
 ): string | undefined {
 	if (!record) {
 		return undefined;
 	}
 	for (const key of keys) {
-		const value = record[key];
-		if (typeof value === "string" && value.trim() !== "") {
-			return value;
+		const value = statsStringSchema.safeParse(record[key]);
+		if (value.success && value.data.trim() !== "") {
+			return value.data;
 		}
 	}
 	return undefined;
 }
 
 function firstRecord(
-	record: JsonRecord,
-	keys: readonly string[]
-): JsonRecord | null {
+	record: StatsFieldCarrier,
+	keys: readonly StatsFieldKey[]
+): StatsFieldCarrier | null {
 	for (const key of keys) {
 		const nested = asRecord(record[key]);
 		if (nested) {
@@ -261,8 +295,8 @@ function firstRecord(
 }
 
 function numberFromRecords(
-	records: readonly (JsonRecord | null)[],
-	keys: readonly string[]
+	records: readonly (StatsFieldCarrier | null)[],
+	keys: readonly StatsFieldKey[]
 ): number | undefined {
 	for (const record of records) {
 		const value = numberFrom(record, keys);
@@ -274,8 +308,8 @@ function numberFromRecords(
 }
 
 function stringFromRecords(
-	records: readonly (JsonRecord | null)[],
-	keys: readonly string[]
+	records: readonly (StatsFieldCarrier | null)[],
+	keys: readonly StatsFieldKey[]
 ): string | undefined {
 	for (const record of records) {
 		const value = stringFrom(record, keys);
@@ -286,13 +320,16 @@ function stringFromRecords(
 	return undefined;
 }
 
-function timestamp(value: unknown): number | undefined {
+function timestamp(
+	value: Parameters<typeof statsFiniteNumberSchema.safeParse>[0]
+): number | undefined {
 	const numeric = asFiniteNumber(value);
 	if (numeric !== undefined) {
 		return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
 	}
-	if (typeof value === "string") {
-		const parsed = Date.parse(value);
+	const text = statsStringSchema.safeParse(value);
+	if (text.success) {
+		const parsed = Date.parse(text.data);
 		return Number.isNaN(parsed) ? undefined : parsed;
 	}
 	return undefined;
@@ -307,15 +344,16 @@ function messageTimestamp(message: StatsMessage): number | undefined {
 	);
 }
 
-function partType(part: JsonRecord): string {
-	return typeof part.type === "string" ? part.type.toLowerCase() : "";
+function partType(part: StatsFieldCarrier): string {
+	const kind = statsPartKindSchema.safeParse(part);
+	return kind.success ? kind.data.type.toLowerCase() : "";
 }
 
-function partData(part: JsonRecord): JsonRecord {
+function partData(part: StatsFieldCarrier): StatsFieldCarrier {
 	return asRecord(part.data) ?? part;
 }
 
-function isStatsPart(part: JsonRecord): boolean {
+function isStatsPart(part: StatsFieldCarrier): boolean {
 	const type = partType(part);
 	if (
 		type === "data-ryu-stats" ||
@@ -344,7 +382,7 @@ function isStatsPart(part: JsonRecord): boolean {
 	);
 }
 
-function isCompactionPart(part: JsonRecord): boolean {
+function isCompactionPart(part: StatsFieldCarrier): boolean {
 	const type = partType(part);
 	if (type.includes("compact") || type.includes("compaction")) {
 		return true;
@@ -361,11 +399,14 @@ function isCompactionPart(part: JsonRecord): boolean {
 	);
 }
 
-function normalizeTrigger(value: unknown): CompactionMarker["trigger"] {
-	if (typeof value !== "string") {
+function normalizeTrigger(
+	value: Parameters<typeof statsStringSchema.safeParse>[0]
+): CompactionMarker["trigger"] {
+	const trigger = statsStringSchema.safeParse(value);
+	if (!trigger.success) {
 		return "unknown";
 	}
-	const normalized = value.toLowerCase();
+	const normalized = trigger.data.toLowerCase();
 	if (normalized.includes("auto")) {
 		return "auto";
 	}
@@ -375,7 +416,7 @@ function normalizeTrigger(value: unknown): CompactionMarker["trigger"] {
 	return "unknown";
 }
 
-function readCompaction(part: JsonRecord): CompactionMarker | null {
+function readCompaction(part: StatsFieldCarrier): CompactionMarker | null {
 	if (!isCompactionPart(part)) {
 		return null;
 	}
@@ -418,9 +459,9 @@ function readCompaction(part: JsonRecord): CompactionMarker | null {
 }
 
 function readContext(
-	root: JsonRecord,
+	root: StatsFieldCarrier,
 	type: string,
-	records: readonly (JsonRecord | null)[]
+	records: readonly (StatsFieldCarrier | null)[]
 ): Pick<
 	TurnSample,
 	| "contextInput"
@@ -488,7 +529,7 @@ function readContext(
 }
 
 function readTurnSample(
-	part: JsonRecord,
+	part: StatsFieldCarrier,
 	fallbackTimestamp?: number
 ): TurnSample | null {
 	if (!isStatsPart(part)) {
@@ -656,8 +697,8 @@ function mergeSample(left: TurnSample, right: TurnSample): TurnSample {
 function turnSamples(message: StatsMessage): TurnSample[] {
 	const parts = (message.parts ?? [])
 		.map(asRecord)
-		.filter((part): part is JsonRecord => part !== null);
-	const latestById = new Map<string, JsonRecord>();
+		.filter((part): part is StatsFieldCarrier => part !== null);
+	const latestById = new Map<string, StatsFieldCarrier>();
 	for (const part of parts) {
 		if (!isStatsPart(part)) {
 			continue;
@@ -678,8 +719,8 @@ function turnSamples(message: StatsMessage): TurnSample[] {
 	return sample ? [sample] : [];
 }
 
-function allParts(messages: readonly StatsMessage[]): JsonRecord[] {
-	const parts: JsonRecord[] = [];
+function allParts(messages: readonly StatsMessage[]): StatsFieldCarrier[] {
+	const parts: StatsFieldCarrier[] = [];
 	for (const message of messages) {
 		for (const part of message.parts ?? []) {
 			const record = asRecord(part);
@@ -742,17 +783,34 @@ export function resolveContextFallback(explicit?: number): number {
 	if (explicit !== undefined && Number.isFinite(explicit) && explicit > 0) {
 		return Math.floor(explicit);
 	}
-	const importMetaLike = import.meta as ImportMeta & {
-		env?: Record<string, unknown>;
-	};
-	const processLike = (
-		globalThis as typeof globalThis & {
-			process?: { env?: Record<string, unknown> };
-		}
-	).process;
+	const { env: moduleEnvironment } = z
+		.object({ env: z.unknown().optional() })
+		.parse(import.meta);
+	const runtimeProcess = z
+		.object({ process: z.unknown().optional() })
+		.parse(globalThis).process;
 	const configured = asFiniteNumber(
-		importMetaLike.env?.CCSTATUSLINE_CONTEXT_SIZE_FALLBACK ??
-			processLike?.env?.CCSTATUSLINE_CONTEXT_SIZE_FALLBACK
+		(moduleEnvironment == null
+			? undefined
+			: readStatsEnvironmentSlot(
+					statsEnvironmentReceiverSchema.parse(moduleEnvironment),
+					"CCSTATUSLINE_CONTEXT_SIZE_FALLBACK"
+				)) ??
+			(() => {
+				const environment =
+					runtimeProcess == null
+						? undefined
+						: readStatsEnvironmentSlot(
+								statsEnvironmentReceiverSchema.parse(runtimeProcess),
+								"env"
+							);
+				return environment == null
+					? undefined
+					: readStatsEnvironmentSlot(
+							statsEnvironmentReceiverSchema.parse(environment),
+							"CCSTATUSLINE_CONTEXT_SIZE_FALLBACK"
+						);
+			})()
 	);
 	return configured !== undefined && configured > 0
 		? Math.floor(configured)
@@ -1020,10 +1078,11 @@ export function deriveSessionStats(
 				(sample.cacheRead ?? 0) + (sample.cacheWrite ?? 0) > 0 &&
 				sample.observedAt !== undefined
 		);
+	const cacheTimerAnchor = cacheTimerSample?.observedAt;
 	const cacheTimer =
-		preferences.showCacheTimer && cacheTimerSample?.observedAt !== undefined
+		preferences.showCacheTimer && cacheTimerAnchor !== undefined
 			? (() => {
-					const anchorAt = cacheTimerSample.observedAt as number;
+					const anchorAt = cacheTimerAnchor;
 					const ttlMs = preferences.cacheTimerTtlMinutes * 60_000;
 					const remainingMs = anchorAt + ttlMs - now;
 					return {

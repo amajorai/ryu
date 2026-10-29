@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { resolveComposerKeyAction } from "./composer-send-shortcut.ts";
+import {
+	isImeComposingKeyEvent,
+	resolveComposerKeyAction,
+} from "./composer-send-shortcut.ts";
 
 function enter(
 	overrides: Partial<{
@@ -78,4 +81,15 @@ test("resolves command-enter mode shortcuts", () => {
 	).toEqual({
 		kind: "send",
 	});
+});
+
+test("treats IME composition keydowns as composing", () => {
+	expect(isImeComposingKeyEvent({ isComposing: true, keyCode: 13 })).toBe(true);
+	// WebKit reports the commit Enter with keyCode 229 and isComposing false.
+	expect(isImeComposingKeyEvent({ isComposing: false, keyCode: 229 })).toBe(
+		true
+	);
+	expect(isImeComposingKeyEvent({ isComposing: false, keyCode: 13 })).toBe(
+		false
+	);
 });

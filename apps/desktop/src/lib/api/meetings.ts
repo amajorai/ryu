@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/meetings.ts
 //
 // Typed client for the Core meeting-notes API (`/api/meetings/*`). Field names are
@@ -5,19 +7,104 @@
 // fetch + ReadableStream (not EventSource) so the bearer token can be attached —
 // same approach as the monitors alert stream.
 
+import type {
+	DetectionConfig,
+	MeetingNotes,
+	MeetingSource,
+	MeetingStatus,
+	Segment,
+	StartMeetingInput,
+	Transcript,
+} from "@ryuhq/core-client/meetings.ts";
 import { type ApiTarget, authenticatedFetch, request } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
-export type MeetingStatus = "detected" | "recording" | "processing" | "done";
-export type MeetingSource = "manual" | "auto";
+export type {
+	DetectionConfig,
+	MeetingNotes,
+	MeetingSource,
+	MeetingStatus,
+	Segment,
+	StartMeetingInput,
+	Transcript,
+} from "@ryuhq/core-client/meetings.ts";
 
-export interface MeetingNotes {
-	action_items: string[];
-	decisions: string[];
-	generated_at?: string;
-	key_points: string[];
-	model?: string;
-	summary: string;
-}
+const notesResponseSchema = z.looseObject({
+	action_items: z.array(z.string()),
+	decisions: z.array(z.string()),
+	generated_at: z.string().optional(),
+	key_points: z.array(z.string()),
+	model: z.string().optional(),
+	summary: z.string(),
+});
+const meetingsResponseSchema = z.looseObject({
+	app: z.union([z.null(), z.string()]).optional(),
+	created_at: z.string(),
+	doc_id: z.union([z.null(), z.string()]).optional(),
+	ended_at: z.union([z.null(), z.string()]).optional(),
+	icon: gatewayJsonValueSchema.optional(),
+	id: z.string(),
+	notes: z.union([z.null(), notesResponseSchema]).optional(),
+	participants: z.array(z.string()),
+	source: z.union([z.literal("manual"), z.literal("auto")]),
+	space_id: z.union([z.null(), z.string()]).optional(),
+	started_at: z.string(),
+	status: z.union([
+		z.literal("detected"),
+		z.literal("recording"),
+		z.literal("processing"),
+		z.literal("done"),
+	]),
+	title: z.string(),
+	title_custom: z.boolean().optional(),
+	updated_at: z.string(),
+});
+const jsonResponseSchema = z.looseObject({
+	meetings: z.array(meetingsResponseSchema).optional(),
+});
+const jsonResponseSchema2 = z.looseObject({
+	meeting: meetingsResponseSchema.optional(),
+	error: z.string().optional(),
+});
+const jsonResponseSchema3 = z.looseObject({
+	meeting: meetingsResponseSchema.optional(),
+	error: z.string().optional(),
+});
+const jsonResponseSchema4 = z.looseObject({
+	meeting: meetingsResponseSchema.optional(),
+	error: z.string().optional(),
+});
+const jsonResponseSchema5 = z.looseObject({
+	meeting: meetingsResponseSchema.optional(),
+	error: z.string().optional(),
+});
+const jsonResponseSchema6 = z.looseObject({
+	meeting: meetingsResponseSchema.optional(),
+	error: z.string().optional(),
+});
+const segmentsResponseSchema = z.looseObject({
+	created_at: z.string(),
+	id: z.number(),
+	meeting_id: z.string(),
+	speaker: z.union([z.null(), z.string()]).optional(),
+	t_offset_ms: z.number(),
+	text: z.string(),
+});
+const jsonResponseSchema7 = z.looseObject({
+	segments: z.array(segmentsResponseSchema),
+	text: z.string(),
+});
+const templatesResponseSchema = z.looseObject({
+	id: z.string(),
+	name: z.string(),
+});
+const jsonResponseSchema8 = z.looseObject({
+	templates: z.array(templatesResponseSchema).optional(),
+});
+const jsonResponseSchema9 = z.looseObject({
+	apps: z.array(z.string()),
+	enabled: z.boolean(),
+});
 
 export interface Meeting {
 	app?: string | null;
@@ -41,15 +128,6 @@ export interface Meeting {
 	updated_at: string;
 }
 
-export interface Segment {
-	created_at: string;
-	id: number;
-	meeting_id: string;
-	speaker?: string | null;
-	t_offset_ms: number;
-	text: string;
-}
-
 // Internally-tagged union mirroring Core's `MeetingEvent` (`{ "type": ... }`).
 export type MeetingEvent =
 	| { type: "detected"; app: string; title: string; detected_at: string }
@@ -58,25 +136,15 @@ export type MeetingEvent =
 	| { type: "status"; meeting_id: string; status: MeetingStatus }
 	| { type: "finalized"; meeting: Meeting };
 
-export interface StartMeetingInput {
-	app?: string;
-	source?: MeetingSource;
-	title?: string;
-}
-
-export interface DetectionConfig {
-	apps: string[];
-	enabled: boolean;
-}
-
 export async function listMeetings(
 	target: ApiTarget,
 	signal?: AbortSignal
 ): Promise<Meeting[]> {
-	const json = await request<{ meetings?: Meeting[] }>(
+	const json = await request(
 		target,
 		"/api/meetings",
-		{ signal }
+		{ signal },
+		jsonResponseSchema
 	);
 	return json.meetings ?? [];
 }
@@ -85,9 +153,11 @@ export async function getMeeting(
 	target: ApiTarget,
 	id: string
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
-		`/api/meetings/${id}`
+		`/api/meetings/${encodePathId(id)}`,
+		undefined,
+		jsonResponseSchema2
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "meeting not found");
@@ -99,10 +169,11 @@ export async function startMeeting(
 	target: ApiTarget,
 	data: StartMeetingInput = {}
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
 		"/api/meetings",
-		{ method: "POST", body: data }
+		{ method: "POST", body: data },
+		jsonResponseSchema3
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "failed to start meeting");
@@ -114,10 +185,11 @@ export async function finalizeMeeting(
 	target: ApiTarget,
 	id: string
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
-		`/api/meetings/${id}/finalize`,
-		{ method: "POST" }
+		`/api/meetings/${encodePathId(id)}/finalize`,
+		{ method: "POST" },
+		jsonResponseSchema4
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "failed to finalize meeting");
@@ -129,7 +201,12 @@ export async function deleteMeeting(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/meetings/${id}`, { method: "DELETE" });
+	await request(
+		target,
+		`/api/meetings/${encodePathId(id)}`,
+		{ method: "DELETE" },
+		gatewayJsonValueSchema
+	);
 }
 
 /** Manually rename a meeting. Marks the title user-chosen so Core's auto-namer
@@ -139,10 +216,11 @@ export async function renameMeeting(
 	id: string,
 	title: string
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
-		`/api/meetings/${id}/title`,
-		{ method: "POST", body: { title } }
+		`/api/meetings/${encodePathId(id)}/title`,
+		{ method: "POST", body: { title } },
+		jsonResponseSchema5
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "failed to rename meeting");
@@ -156,10 +234,11 @@ export async function setMeetingIcon(
 	id: string,
 	icon: unknown | null
 ): Promise<Meeting> {
-	const json = await request<{ meeting?: Meeting; error?: string }>(
+	const json = await request(
 		target,
-		`/api/meetings/${id}/icon`,
-		{ method: "POST", body: { icon } }
+		`/api/meetings/${encodePathId(id)}/icon`,
+		{ method: "POST", body: { icon } },
+		jsonResponseSchema6
 	);
 	if (!json.meeting) {
 		throw new Error(json.error ?? "failed to set meeting icon");
@@ -167,18 +246,15 @@ export async function setMeetingIcon(
 	return json.meeting;
 }
 
-export interface Transcript {
-	segments: Segment[];
-	text: string;
-}
-
 export async function getTranscript(
 	target: ApiTarget,
 	id: string
 ): Promise<Transcript> {
-	const json = await request<Transcript>(
+	const json = await request(
 		target,
-		`/api/meetings/${id}/transcript`
+		`/api/meetings/${encodePathId(id)}/transcript`,
+		undefined,
+		jsonResponseSchema7
 	);
 	return { segments: json.segments ?? [], text: json.text ?? "" };
 }
@@ -192,9 +268,11 @@ export interface MeetingTemplate {
 export async function listMeetingTemplates(
 	target: ApiTarget
 ): Promise<MeetingTemplate[]> {
-	const json = await request<{ templates?: MeetingTemplate[] }>(
+	const json = await request(
 		target,
-		"/api/meetings/templates"
+		"/api/meetings/templates",
+		undefined,
+		jsonResponseSchema8
 	);
 	return json.templates ?? [];
 }
@@ -234,7 +312,9 @@ export async function importMeeting(
 		const text = await resp.text();
 		let message = `import failed: ${resp.status}`;
 		try {
-			const parsed = JSON.parse(text) as { error?: string };
+			const parsed = z
+				.object({ error: z.string().optional() })
+				.parse(JSON.parse(text));
 			if (parsed.error) {
 				message = parsed.error;
 			}
@@ -243,6 +323,7 @@ export async function importMeeting(
 		}
 		throw new Error(message);
 	}
+	// SAFETY: On this successful native Meetings import route, import_meeting returns finalize_and_save JSON containing the serde-serialized Meeting; the built-in public mount forwards that body unchanged. This is the cooperative native route contract, not validation of arbitrary JSON.
 	const json = JSON.parse(await resp.text()) as {
 		meeting?: Meeting;
 		error?: string;
@@ -256,9 +337,11 @@ export async function importMeeting(
 export async function getDetectionConfig(
 	target: ApiTarget
 ): Promise<DetectionConfig> {
-	const json = await request<DetectionConfig>(
+	const json = await request(
 		target,
-		"/api/meetings/detection-config"
+		"/api/meetings/detection-config",
+		undefined,
+		jsonResponseSchema9
 	);
 	return { enabled: json.enabled ?? true, apps: json.apps ?? [] };
 }
@@ -267,10 +350,15 @@ export async function setDetectionConfig(
 	target: ApiTarget,
 	data: Partial<DetectionConfig>
 ): Promise<void> {
-	await request(target, "/api/meetings/detection-config", {
-		method: "PUT",
-		body: data,
-	});
+	await request(
+		target,
+		"/api/meetings/detection-config",
+		{
+			method: "PUT",
+			body: data,
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 /**
@@ -324,6 +412,7 @@ export async function streamMeetingEvents(
 						continue;
 					}
 					try {
+						// SAFETY: The native Meetings stream serializes its typed broadcast MeetingEvent enum with serde type/snake_case tags and native Meeting/Segment payloads; the public mount streams those bytes, and this reader skips comment/empty frames. Foreign forged JSON is not validated here.
 						onEvent(JSON.parse(payload) as MeetingEvent);
 					} catch {
 						// Non-JSON keep-alive or partial frame — ignore; the feed self-heals.

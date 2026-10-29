@@ -1,9 +1,9 @@
 [package]
 name = "ryu-usage"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "Per-agent subscription usage-metering primitive for Ryu: reads the credential a subscription CLI (Claude Code, Codex, Copilot, Grok, Z.ai GLM) already stored on this machine and calls the vendor's own usage endpoint to return normalized rolling rate-limit windows (5h session, weekly, per-model) plus the non-percent figures - credit balances, Codex's banked rate-limit resets with a per-credit expiry date, extra-usage spend. NEVER refreshes the token (single-use refresh tokens rotate; refreshing would log the real CLI out) and never spends a banked reset (irreversible). crates.io caps `description` at 1000 chars, so keep this under that limit."
+description = "Per-agent subscription usage meters for Ryu: reads existing credentials for Claude Code, Codex, Cursor, Copilot, Grok, Z.ai GLM, Devin, Antigravity, and OpenCode Go, then calls vendor usage endpoints and returns normalized quota windows and balances. Never refreshes or writes provider credentials, and never spends a banked reset."
 repository = "https://github.com/amajorai/ryu"
 
 # Versions are matched to apps/core/Cargo.toml so there is no version skew when
@@ -13,10 +13,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Keep reqwest's default features (rustls/native TLS) — the usage calls are HTTPS
 # to api.anthropic.com / chatgpt.com; dropping defaults would break the TLS backend.
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 base64 = { version = "0.22", features = ["alloc"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
+ed25519-dalek = "2"
+futures-util = "0.3"
+toml = "0.8"
+zeroize = "1"
 # rt + macros only: `spawn_blocking` needs the runtime, `#[tokio::test]` the macro.
 tokio = { version = "1", features = ["rt", "macros"] }
 

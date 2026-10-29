@@ -365,6 +365,8 @@ impl Channel for OpenWaChannel {
             voice: true,
             attachments: true,
             reactions: true,
+            reply_keyboards: false,
+            inline_buttons: false,
         }
     }
 
@@ -692,6 +694,7 @@ fn parse_inbound(data: &Value, self_chat_only: bool) -> Vec<InboundMessage> {
         message_id: data["id"].as_str().map(str::to_string),
         is_group,
         attachments,
+        channel_action: None,
     }]
 }
 

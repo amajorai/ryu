@@ -18,6 +18,10 @@ pub const SERVER_NAME: &str = "spaces";
 const DEFAULT_SEARCH_LIMIT: usize = 10;
 const MAX_SEARCH_LIMIT: usize = 100;
 
+/// Shared description of the optional `space_id` on the read tools.
+const DEFAULT_SPACE_ARGUMENT: &str =
+    "Readable Space id. Omit it to use the Spaces attached to the calling agent.";
+
 fn object_schema(properties: Value, required: &[&str]) -> Value {
     let mut schema = json!({
         "type": "object",
@@ -50,24 +54,24 @@ pub fn tools() -> Vec<RegistryTool> {
         ),
         tool(
             "list_documents",
-            "List documents in a readable Space.",
+            "List documents in a readable Space, by default the Spaces attached to the calling agent.",
             object_schema(
                 json!({
-                    "space_id": { "type": "string", "description": "Readable Space id." }
+                    "space_id": { "type": "string", "description": DEFAULT_SPACE_ARGUMENT }
                 }),
-                &["space_id"],
+                &[],
             ),
         ),
         tool(
             "search",
-            "Search a readable Space and return ranked matches.",
+            "Search a readable Space, by default the Spaces attached to the calling agent, and return ranked matches.",
             object_schema(
                 json!({
-                    "space_id": { "type": "string", "description": "Readable Space id." },
+                    "space_id": { "type": "string", "description": DEFAULT_SPACE_ARGUMENT },
                     "query": { "type": "string", "description": "Search query." },
                     "limit": { "type": "integer", "minimum": 1, "maximum": MAX_SEARCH_LIMIT }
                 }),
-                &["space_id", "query"],
+                &["query"],
             ),
         ),
         tool(
@@ -274,43 +278,138 @@ async fn list_spaces(
     }))
 }
 
+/// The Spaces a read tool targets, each already authorized for the principal.
+///
+/// An explicit `space_id` is used as given and must be readable. Without one the
+/// read goes to the calling agent's attached Spaces (its retrieval configuration,
+/// the same set auto-recall reads), skipping any the principal can no longer read.
+/// That is how an agent reaches the knowledge it was given without
+/// `spaces.list_spaces`, which would enumerate every Space its owner can read.
+async fn readable_target_spaces(
+    arguments: &Value,
+    store: &SpaceStore,
+    agents: Option<&AgentStore>,
+    principal: &ToolPrincipal,
+    agent_id: Option<&str>,
+) -> Result<Vec<String>> {
+    if let Some(space_id) = optional_string(arguments, "space_id") {
+        require_space_access(store, principal, &space_id, false, false).await?;
+        return Ok(vec![space_id]);
+    }
+    require_resolved_principal(principal)?;
+    let agent_id = agent_id.map(str::trim).filter(|id| !id.is_empty());
+    let attached = match (agents, agent_id) {
+        (Some(agents), Some(agent_id)) => agents
+            .get(agent_id)
+            .await?
+            .and_then(|agent| agent.memory)
+            .map(|memory| memory.space_ids)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    if attached.is_empty() {
+        bail!("missing 'space_id': pass a readable Space id (this agent has no attached Spaces to default to)");
+    }
+    let mut readable = Vec::with_capacity(attached.len());
+    for space_id in attached {
+        if require_space_access(store, principal, &space_id, false, false)
+            .await
+            .is_ok()
+        {
+            readable.push(space_id);
+        }
+    }
+    if readable.is_empty() {
+        bail!("space not found or inaccessible");
+    }
+    Ok(readable)
+}
+
 async fn list_documents(
     arguments: Value,
     store: &SpaceStore,
+    agents: Option<&AgentStore>,
     principal: &ToolPrincipal,
+    agent_id: Option<&str>,
 ) -> Result<Value> {
-    let space_id = required_string(&arguments, "space_id")?;
-    require_space_access(store, principal, &space_id, false, false).await?;
+    let space_ids = readable_target_spaces(&arguments, store, agents, principal, agent_id).await?;
     let (user_id, org_id, node_bound) = principal.filter_args();
-    let documents = store
-        .list_documents(
-            &space_id,
-            DocFilter::for_caller_with_team(user_id, org_id, None, node_bound),
-        )
-        .await?;
-    Ok(json!({ "ok": true, "space_id": space_id, "documents": documents }))
+    let mut listed = Vec::with_capacity(space_ids.len());
+    for space_id in space_ids {
+        let documents = store
+            .list_documents(
+                &space_id,
+                DocFilter::for_caller_with_team(user_id, org_id, None, node_bound),
+            )
+            .await?;
+        listed.push((space_id, documents));
+    }
+    if listed.len() == 1 {
+        let (space_id, documents) = listed.remove(0);
+        return Ok(json!({ "ok": true, "space_id": space_id, "documents": documents }));
+    }
+    let spaces: Vec<Value> = listed
+        .into_iter()
+        .map(|(space_id, documents)| json!({ "space_id": space_id, "documents": documents }))
+        .collect();
+    Ok(json!({ "ok": true, "spaces": spaces }))
 }
 
-async fn search(arguments: Value, store: &SpaceStore, principal: &ToolPrincipal) -> Result<Value> {
-    let space_id = required_string(&arguments, "space_id")?;
+async fn search(
+    arguments: Value,
+    store: &SpaceStore,
+    agents: Option<&AgentStore>,
+    principal: &ToolPrincipal,
+    agent_id: Option<&str>,
+) -> Result<Value> {
     let query = required_string(&arguments, "query")?;
-    require_space_access(store, principal, &space_id, false, false).await?;
+    let space_ids = readable_target_spaces(&arguments, store, agents, principal, agent_id).await?;
     let limit = arguments
         .get("limit")
         .and_then(Value::as_u64)
         .unwrap_or(DEFAULT_SEARCH_LIMIT as u64)
         .clamp(1, MAX_SEARCH_LIMIT as u64) as usize;
     let (user_id, org_id, node_bound) = principal.filter_args();
-    let matches = store
-        .search_ext(
-            &space_id,
-            &query,
-            limit,
-            None,
-            DocFilter::for_caller_with_team(user_id, org_id, None, node_bound),
-        )
-        .await?;
-    Ok(json!({ "ok": true, "space_id": space_id, "matches": matches }))
+    if let [space_id] = space_ids.as_slice() {
+        let matches = store
+            .search_ext(
+                space_id,
+                &query,
+                limit,
+                None,
+                DocFilter::for_caller_with_team(user_id, org_id, None, node_bound),
+            )
+            .await?;
+        return Ok(json!({ "ok": true, "space_id": space_id, "matches": matches }));
+    }
+    // Several attached Spaces: search each and keep the closest `limit` overall,
+    // each match tagged with the Space it came from.
+    let mut ranked = Vec::new();
+    for space_id in &space_ids {
+        let matches = store
+            .search_ext(
+                space_id,
+                &query,
+                limit,
+                None,
+                DocFilter::for_caller_with_team(user_id, org_id, None, node_bound),
+            )
+            .await?;
+        ranked.extend(matches.into_iter().map(|found| (space_id.clone(), found)));
+    }
+    ranked.sort_by(|left, right| left.1.distance.total_cmp(&right.1.distance));
+    ranked.truncate(limit);
+    let matches = ranked
+        .into_iter()
+        .map(|(space_id, found)| -> Result<Value> {
+            let mut value = serde_json::to_value(found)?;
+            if let Some(object) = value.as_object_mut() {
+                object.insert("space_id".to_owned(), Value::String(space_id));
+            }
+            Ok(value)
+        })
+        .collect::<Result<Vec<Value>>>()?;
+    Ok(json!({ "ok": true, "space_ids": space_ids, "matches": matches }))
 }
 
 async fn create_space(
@@ -481,8 +580,8 @@ pub async fn dispatch(
     };
     match tool {
         "list_spaces" => list_spaces(arguments, store, agents, principal, agent_id).await,
-        "list_documents" => list_documents(arguments, store, principal).await,
-        "search" => search(arguments, store, principal).await,
+        "list_documents" => list_documents(arguments, store, agents, principal, agent_id).await,
+        "search" => search(arguments, store, agents, principal, agent_id).await,
         "create_space" => create_space(arguments, store, principal).await,
         "rename_space" => rename_space(arguments, store, principal).await,
         "create_page" => create_page(arguments, store, principal).await,
@@ -654,6 +753,7 @@ mod tests {
                     space_ids: Vec::new(),
                     read_levels: vec!["user".to_owned()],
                     write_enabled: false,
+                    ..Default::default()
                 }),
                 ..Default::default()
             })
@@ -687,5 +787,139 @@ mod tests {
         .unwrap();
         assert_eq!(detached["attached"], false);
         assert_eq!(detached["space_ids"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn read_tools_default_to_the_calling_agents_attached_spaces() {
+        let spaces = SpaceStore::open_in_memory().unwrap();
+        let knowledge = spaces
+            .create_space("Knowledge", None, &owned("alice"))
+            .await
+            .unwrap();
+        let notes = spaces
+            .create_space("Notes", None, &owned("alice"))
+            .await
+            .unwrap();
+        for (space, title, body) in [
+            (&knowledge, "Profile", "Builds things in Singapore."),
+            (&notes, "Todo", "Ship the Singapore release."),
+        ] {
+            spaces
+                .import_document(space, title, body, "page", None, &owned("alice"))
+                .await
+                .unwrap();
+            spaces
+                .index_unindexed_documents_in_space(space)
+                .await
+                .unwrap();
+        }
+        let agents = AgentStore::open_in_memory(&AcpAgentRegistry::new()).unwrap();
+        let agent = agents
+            .create(CreateAgent {
+                name: "Reader".to_owned(),
+                memory: Some(MemorySlot {
+                    space_ids: vec![knowledge.clone()],
+                    read_levels: Vec::new(),
+                    write_enabled: false,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let alice = ToolPrincipal::Owned {
+            user_id: "alice".to_owned(),
+            org_id: Some("org1".to_owned()),
+        };
+        let call = |tool: &'static str, arguments: Value, agent_id: String| {
+            let spaces = &spaces;
+            let agents = &agents;
+            let alice = &alice;
+            async move {
+                dispatch(
+                    tool,
+                    arguments,
+                    Some(spaces),
+                    Some(agents),
+                    alice,
+                    Some(agent_id.as_str()),
+                )
+                .await
+            }
+        };
+
+        // No `space_id`: the one attached Space, in the explicit-call shape.
+        let listed = call("list_documents", json!({}), agent.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(listed["space_id"], knowledge);
+        assert_eq!(listed["documents"].as_array().unwrap().len(), 1);
+        let found = call("search", json!({ "query": "Singapore" }), agent.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(found["space_id"], knowledge);
+        assert!(!found["matches"].as_array().unwrap().is_empty());
+
+        // An explicit id still targets exactly that readable Space.
+        let explicit = call(
+            "list_documents",
+            json!({ "space_id": notes }),
+            agent.id.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(explicit["space_id"], notes);
+
+        // Several attached Spaces: one listing each, and merged search results
+        // tagged with the Space they came from.
+        agents
+            .set_space_access(&agent.id, &notes, true)
+            .await
+            .unwrap();
+        let listed = call("list_documents", json!({}), agent.id.clone())
+            .await
+            .unwrap();
+        assert_eq!(listed["spaces"].as_array().unwrap().len(), 2);
+        let found = call(
+            "search",
+            json!({ "query": "Singapore", "limit": 5 }),
+            agent.id.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(found["space_ids"].as_array().unwrap().len(), 2);
+        let matches = found["matches"].as_array().unwrap();
+        assert!(!matches.is_empty());
+        assert!(matches.iter().all(|found| found["space_id"].is_string()));
+
+        // An agent with nothing attached must still name a Space.
+        let bare = agents
+            .create(CreateAgent {
+                name: "Bare".to_owned(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let error = call("search", json!({ "query": "Singapore" }), bare.id.clone())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("space_id"), "{error:#}");
+
+        // Another member cannot read Alice's private attached Space through the
+        // default either.
+        let bob = ToolPrincipal::Owned {
+            user_id: "bob".to_owned(),
+            org_id: Some("org1".to_owned()),
+        };
+        let refused = dispatch(
+            "list_documents",
+            json!({}),
+            Some(&spaces),
+            Some(&agents),
+            &bob,
+            Some(&agent.id),
+        )
+        .await;
+        assert!(refused.is_err());
     }
 }

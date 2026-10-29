@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { coreProofStateSchema } from "./core-live-proof.contracts.ts";
 
 test("installed apps render from live isolated Core lists and contributions", async ({
 	page,
@@ -10,10 +11,9 @@ test("installed apps render from live isolated Core lists and contributions", as
 	if (!statePath) {
 		throw new Error("Set RYU_PERF_CORE_STATE to the isolated Core state file.");
 	}
-	const state = JSON.parse(await readFile(statePath, "utf8")) as {
-		port: number;
-		dataDir: string;
-	};
+	const state = coreProofStateSchema.parse(
+		JSON.parse(await readFile(statePath, "utf8"))
+	);
 	const token = await readFile(
 		path.join(state.dataDir, ".performance-token"),
 		"utf8"

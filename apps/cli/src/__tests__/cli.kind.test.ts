@@ -1,3 +1,5 @@
+import { appResponseValueSchema } from "@ryuhq/core-client/app-request-json";
+import { z } from "zod";
 // Tests for the app-vs-plugin classification the `ryu` CLI exposes (cli/kind.ts)
 // and its two consumers, `ryu list` and `ryu catalog`.
 //
@@ -26,7 +28,23 @@ import { type CliIO, type CoreApi, UsageError } from "../cli/types.ts";
 
 // ── Fixtures + fakes ──────────────────────────────────────────────────────────
 
-function makeIo(): { io: CliIO; out: () => string; err: () => string } {
+interface CapturedCliIO {
+	err: () => string;
+	io: CliIO;
+	out: () => string;
+}
+interface ClassifiedCatalogFixture extends CatalogEntry {
+	type: "app" | "plugin";
+}
+const classifiedIdOutputFields = z.array(z.looseObject({ id: z.string() }));
+const classifiedIdOutputObservationSchema = z.custom<
+	z.infer<typeof classifiedIdOutputFields>
+>(
+	(value) =>
+		appResponseValueSchema.safeParse(value).success &&
+		classifiedIdOutputFields.safeParse(value).success
+);
+function makeIo(): CapturedCliIO {
 	let outBuf = "";
 	let errBuf = "";
 	return {
@@ -105,7 +123,7 @@ const catalogApp = {
 	kinds: ["companion"],
 	tags: ["draw"],
 	type: "app",
-} as CatalogEntry;
+} satisfies ClassifiedCatalogFixture;
 
 /** Catalog PLUGIN, also explicitly typed. */
 const catalogPlugin = {
@@ -116,7 +134,7 @@ const catalogPlugin = {
 	kinds: ["tool"],
 	tags: ["review"],
 	type: "plugin",
-} as CatalogEntry;
+} satisfies ClassifiedCatalogFixture;
 
 const sampleRecord: AppRecord = {
 	approvedGrants: [],
@@ -158,7 +176,7 @@ test("catalogEntryKind prefers Core's explicit type discriminator", () => {
 		...baseEntry,
 		kinds: ["companion"],
 		type: "plugin",
-	} as CatalogEntry;
+	} satisfies ClassifiedCatalogFixture;
 	expect(catalogEntryKind(conflicted)).toBe("plugin");
 });
 
@@ -235,7 +253,9 @@ test("list --kind app --json: the filter applies to the machine output too", asy
 		api: stubApi({ fetchApps: bothApps }),
 	});
 	expect(code).toBe(0);
-	const parsed = JSON.parse(cap.out()) as AppInfo[];
+	const parsed = classifiedIdOutputObservationSchema.parse(
+		JSON.parse(cap.out())
+	);
 	expect(parsed.map((a) => a.id)).toEqual(["whiteboard"]);
 });
 
@@ -304,7 +324,9 @@ test("catalog --kind app --json: filtered entries, unreshaped", async () => {
 		api: stubApi({ fetchAppsCatalog: bothEntries }),
 	});
 	expect(code).toBe(0);
-	const parsed = JSON.parse(cap.out()) as CatalogEntry[];
+	const parsed = classifiedIdOutputObservationSchema.parse(
+		JSON.parse(cap.out())
+	);
 	expect(parsed.map((e) => e.id)).toEqual(["whiteboard"]);
 });
 

@@ -1,3 +1,7 @@
+import {
+	createFetchFixture,
+	parseJsonRequestBody,
+} from "./test-support/http-fixture.ts";
 // packages/core-client/src/meetings.test.ts
 //
 // Tests for the meeting-notes client. Two halves:
@@ -44,17 +48,17 @@ interface Captured {
 
 function stub(bodyText: string, status = 200): Captured {
 	const cap: Captured = {};
-	globalThis.fetch = ((url: string, init: RequestInit) => {
+	globalThis.fetch = createFetchFixture((url: string, init: RequestInit) => {
 		cap.url = url;
 		cap.init = init;
 		return Promise.resolve(new Response(bodyText, { status }));
-	}) as unknown as typeof fetch;
+	});
 	return cap;
 }
 
 function streamOnce(chunks: string[], init?: ResponseInit): void {
 	const encoder = new TextEncoder();
-	globalThis.fetch = (() =>
+	globalThis.fetch = createFetchFixture(() =>
 		Promise.resolve(
 			new Response(
 				new ReadableStream<Uint8Array>({
@@ -67,7 +71,8 @@ function streamOnce(chunks: string[], init?: ResponseInit): void {
 				}),
 				init
 			)
-		)) as unknown as typeof fetch;
+		)
+	);
 }
 
 async function collect(chunks: string[]): Promise<MeetingEvent[]> {
@@ -121,7 +126,7 @@ describe("single-meeting endpoints throw on an absent meeting", () => {
 		const cap = stub(JSON.stringify({ meeting }));
 		await startMeeting(target, { title: "Sync", source: "manual" });
 		expect(cap.init?.method).toBe("POST");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({
 			title: "Sync",
 			source: "manual",
 		});
@@ -146,7 +151,7 @@ describe("single-meeting endpoints throw on an absent meeting", () => {
 		const cap = stub(JSON.stringify({ meeting }));
 		await renameMeeting(target, "m1", "New");
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/meetings/m1/title");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({ title: "New" });
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({ title: "New" });
 		stub(JSON.stringify({ error: "locked" }));
 		await expect(renameMeeting(target, "m1", "New")).rejects.toThrow("locked");
 	});
@@ -154,7 +159,7 @@ describe("single-meeting endpoints throw on an absent meeting", () => {
 
 describe("deleteMeeting / transcript / detection-config", () => {
 	test("deleteMeeting issues a DELETE", async () => {
-		const cap = stub("");
+		const cap = stub(JSON.stringify({ ok: true }));
 		await deleteMeeting(target, "m1");
 		expect(cap.init?.method).toBe("DELETE");
 		expect(cap.url).toBe("http://127.0.0.1:7980/api/meetings/m1");
@@ -185,10 +190,10 @@ describe("deleteMeeting / transcript / detection-config", () => {
 	});
 
 	test("setDetectionConfig PUTs the partial config", async () => {
-		const cap = stub("");
+		const cap = stub(JSON.stringify({ enabled: false, apps: [] }));
 		await setDetectionConfig(target, { enabled: false });
 		expect(cap.init?.method).toBe("PUT");
-		expect(JSON.parse(cap.init?.body as string)).toEqual({ enabled: false });
+		expect(parseJsonRequestBody(cap.init?.body)).toEqual({ enabled: false });
 	});
 });
 

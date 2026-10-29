@@ -14,8 +14,6 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::sidecar::download_manager::ryu_dir;
-
 /// The local inference engines Ryu manages with swap-on-demand. Exactly one of
 /// these may be resident at a time. Keep this in sync with the providers
 /// registered in `main.rs`.
@@ -23,6 +21,7 @@ pub const LOCAL_ENGINES: &[&str] = &[
     "llamacpp",
     "ollama",
     "lemonade",
+    "magnitude",
     "llama-swap",
     "freetoken",
     "vllm",
@@ -42,6 +41,13 @@ pub fn is_local_engine(name: &str) -> bool {
     LOCAL_ENGINES.contains(&name)
 }
 
+/// True if `name` is a local engine this node can actually run. A data dir
+/// copied from another machine may persist an engine (e.g. MLX) the current
+/// platform cannot start; boot must skip it rather than fail at start.
+pub fn can_reside_on_node(name: &str) -> bool {
+    is_local_engine(name) && crate::catalog::registry::supported_on_node(name)
+}
+
 /// The OpenAI-compatible base URL a local engine serves on once resident. Each
 /// engine binds a fixed loopback port (see the provider modules under
 /// `sidecar/providers/`); chat requests for an agent bound to a local engine are
@@ -51,6 +57,9 @@ pub fn local_engine_base_url(name: &str) -> Option<String> {
         // ollama serves its OpenAI-compat API on 11434.
         "ollama" => Some("http://127.0.0.1:11434".to_owned()),
         "lemonade" => Some(crate::sidecar::providers::lemonade::BASE_URL.to_owned()),
+        // Magnitude's OpenAI-compat API is under `/inference/v1`; the `/inference`
+        // base makes the standard `{base}/v1/...` join resolve to it.
+        "magnitude" => Some(crate::sidecar::providers::magnitude::BASE_URL.to_owned()),
         "llama-swap" => Some(crate::sidecar::providers::llama_swap::BASE_URL.to_owned()),
         "freetoken" => Some(crate::sidecar::providers::freetoken::BASE_URL.to_owned()),
         // llama-server (`--port 8080 --host 127.0.0.1`). Profile-aware: the spawn
@@ -75,10 +84,7 @@ pub fn local_engine_base_url(name: &str) -> Option<String> {
         )),
         // mlx-serve is a native, model-directory server. It accepts an explicit
         // profile-aware port so development and release nodes never contend.
-        "mlx-serve" => Some(format!(
-            "http://127.0.0.1:{}",
-            crate::sidecar::providers::mlx_serve::default_port()
-        )),
+        "mlx-serve" => crate::sidecar::providers::mlx_serve::managed_base_url(),
         // omlx serve (DEFAULT_PORT = 8000 — shared with vLLM; mutually exclusive).
         "omlx" => Some("http://127.0.0.1:8000".to_owned()),
         // Docker Model Runner serves its OpenAI-compat API under `/engines/v1`
@@ -86,9 +92,10 @@ pub fn local_engine_base_url(name: &str) -> Option<String> {
         // `{base}/v1/chat/completions` join resolve to DMR's real endpoint, so no
         // routing code special-cases it. Adopt-only — Docker owns the process.
         "docker-model-runner" => Some("http://127.0.0.1:12434/engines".to_owned()),
-        // apfel serves Apple Foundation Models on :11434 (shared with Ollama —
-        // the two never reside at once; `apfel` has no `--port` override).
-        "apfel" => Some("http://127.0.0.1:11434".to_owned()),
+        // apfel serves Apple Foundation Models on its own profile-aware port
+        // (`--port`), never Ollama's :11434 — an adopted external Ollama keeps
+        // running while apfel is resident.
+        "apfel" => Some(crate::sidecar::providers::apfel::base_url()),
         // Mesh LLM's OpenAI-compatible API defaults to :9337. Profile-shift it
         // when Ryu manages the process so dev/canary nodes cannot collide.
         "mesh-llm" => Some(format!(
@@ -133,6 +140,10 @@ pub fn local_engine_url(name: &str) -> Option<String> {
             "{}/v1",
             crate::sidecar::providers::lemonade::BASE_URL
         )),
+        "magnitude" => Some(format!(
+            "{}/v1",
+            crate::sidecar::providers::magnitude::BASE_URL
+        )),
         "vllm" => Some("http://127.0.0.1:8000/v1".to_owned()),
         "sglang" => Some("http://127.0.0.1:30000/v1".to_owned()),
         "mlx" => Some(format!(
@@ -143,18 +154,19 @@ pub fn local_engine_url(name: &str) -> Option<String> {
             "http://127.0.0.1:{}/v1",
             crate::sidecar::providers::mlx_vlm::process::default_port()
         )),
-        "mlx-serve" => Some(format!(
-            "http://127.0.0.1:{}/v1",
-            crate::sidecar::providers::mlx_serve::default_port()
-        )),
+        "mlx-serve" => {
+            crate::sidecar::providers::mlx_serve::managed_base_url().map(|url| format!("{url}/v1"))
+        }
         // oMLX shares vLLM's :8000 — safe, the two never reside at once.
         "omlx" => Some("http://127.0.0.1:8000/v1".to_owned()),
         // Docker Model Runner's OpenAI-compat API is under `/engines/v1`; the
         // gateway appends `/chat/completions`, yielding the correct DMR path.
         "docker-model-runner" => Some("http://127.0.0.1:12434/engines/v1".to_owned()),
-        // apfel (Apple Foundation Models) — OpenAI-compat on :11434. Shares the
-        // port with Ollama; safe, the two never reside at once.
-        "apfel" => Some("http://127.0.0.1:11434/v1".to_owned()),
+        // apfel (Apple Foundation Models) — OpenAI-compat on its own port.
+        "apfel" => Some(format!(
+            "{}/v1",
+            crate::sidecar::providers::apfel::base_url()
+        )),
         "mesh-llm" => Some(format!(
             "http://127.0.0.1:{}/v1",
             crate::profile::port(crate::sidecar::providers::mesh_llm::DEFAULT_PORT)
@@ -164,7 +176,7 @@ pub fn local_engine_url(name: &str) -> Option<String> {
 }
 
 fn active_engine_path() -> PathBuf {
-    ryu_dir().join("active-engine.json")
+    crate::paths::state_path("active-engine.json")
 }
 
 /// Durable record of the currently selected local engine, persisted to
@@ -198,7 +210,7 @@ impl ActiveEngineStore {
             active: active.map(str::to_string),
         };
         let json = serde_json::to_string_pretty(&store)?;
-        std::fs::write(&path, json)?;
+        crate::atomic_file::write_atomic(&path, json.as_bytes())?;
         Ok(())
     }
 }
@@ -231,6 +243,22 @@ mod tests {
     }
 
     #[test]
+    fn resident_candidates_must_be_supported_on_this_node() {
+        assert!(can_reside_on_node("llamacpp"));
+        assert!(!can_reside_on_node("zeroclaw"));
+        let apple_silicon = cfg!(target_os = "macos") && cfg!(target_arch = "aarch64");
+        assert_eq!(can_reside_on_node("mlx"), apple_silicon);
+        assert_eq!(can_reside_on_node("omlx"), apple_silicon);
+    }
+
+    #[test]
+    fn apfel_url_is_not_ollamas_port() {
+        let apfel = local_engine_url("apfel").unwrap();
+        assert_ne!(Some(apfel.as_str()), local_engine_url("ollama").as_deref());
+        assert!(!apfel.contains(":11434"));
+    }
+
+    #[test]
     fn local_engines_expose_base_urls() {
         assert_eq!(
             local_engine_base_url("ollama").as_deref(),
@@ -249,7 +277,10 @@ mod tests {
             local_engine_base_url("sglang").as_deref(),
             Some("http://127.0.0.1:30000")
         );
-        assert!(local_engine_base_url("mlx-serve").is_some_and(|url| url.contains("127.0.0.1:")));
+        assert_eq!(
+            local_engine_base_url("mlx-serve"),
+            crate::sidecar::providers::mlx_serve::managed_base_url()
+        );
         // mlx is profile-aware; 8086 is the release-profile base port (moved off
         // 8082 to free the reranker's port).
         assert_eq!(
@@ -274,6 +305,15 @@ mod tests {
         // so the gateway can register it as a provider. A missing entry would
         // silently drop an engine from gateway routing.
         for engine in LOCAL_ENGINES {
+            if *engine == "mlx-serve"
+                && crate::sidecar::providers::mlx_serve::managed_base_url().is_none()
+            {
+                assert!(
+                    local_engine_url(engine).is_none(),
+                    "an unstarted managed engine must not advertise the native port"
+                );
+                continue;
+            }
             let url = local_engine_url(engine)
                 .unwrap_or_else(|| panic!("no serving URL for local engine {engine}"));
             assert!(

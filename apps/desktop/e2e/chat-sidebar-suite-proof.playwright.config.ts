@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
 	testDir: import.meta.dirname,
 	testMatch:
-		/(chat-row-menus-story|agent-conversation-branch-proof|keyboard-shortcuts-search-proof)\.spec\.ts/,
+		/(chat-row-menus-story|chat-row-selection-story|agent-conversation-branch-proof|keyboard-shortcuts-search-proof)\.spec\.ts/,
 	fullyParallel: false,
 	workers: 1,
 	reporter: [["list"]],

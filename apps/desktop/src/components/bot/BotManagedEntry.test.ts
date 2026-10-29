@@ -5,7 +5,7 @@ import {
 	resolveBotManagedEntryState,
 } from "./bot-managed-entry-state.ts";
 
-describe("Ryu Bot managed entry", () => {
+describe("Bot managed entry", () => {
 	test("waits for the subscription verdict before deciding", () => {
 		expect(
 			resolveBotManagedEntryState({

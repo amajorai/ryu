@@ -1,16 +1,26 @@
 "use client";
-
+import { usePrefersReducedMotion } from "@ryu/ui/components/reduced-motion.ts";
+import {
+	isNativeNumber,
+	isNativeText,
+} from "@ryu/ui/lib/native-primitive-observation.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { LenisOptions } from "lenis";
 import { ReactLenis, useLenis } from "lenis/react";
 import {
+	type MotionStyle,
+	type MotionValue,
 	motion,
 	useMotionValue,
-	useReducedMotion,
 	useSpring,
 } from "motion/react";
 import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useEffect, useRef } from "react";
+import styles from "./smooth-scroll.module.css";
+import {
+	driveLenisOnDemand,
+	useSmoothInputIntent,
+} from "./smooth-scroll-frames.ts";
 
 const DEFAULT_SPRING = {
 	damping: 26,
@@ -19,11 +29,21 @@ const DEFAULT_SPRING = {
 };
 
 export interface SmoothScrollProps
-	extends Omit<ComponentProps<typeof ReactLenis>, "options" | "root"> {
+	extends Omit<
+		ComponentProps<typeof ReactLenis>,
+		"autoRaf" | "options" | "root"
+	> {
 	/** Lenis options to merge with the website defaults. */
 	options?: LenisOptions;
 	/** Use the document scroll container instead of a local wrapper. */
 	root?: boolean;
+}
+
+/** Runs Lenis's frame loop only while it animates (see `driveLenisOnDemand`). */
+function LenisFrames() {
+	const lenis = useLenis();
+	useEffect(() => (lenis ? driveLenisOnDemand(lenis) : undefined), [lenis]);
+	return null;
 }
 
 /**
@@ -32,6 +52,13 @@ export interface SmoothScrollProps
  * Lenis owns the scroll interpolation while this wrapper keeps the reduced
  * motion path native. Consumers can read the same motion values in either
  * case through `useSmoothScroll`.
+ *
+ * Lenis advances only while a smooth scroll is animating, never every frame of
+ * an idle page. In root mode it is also created only once the visitor first
+ * uses an input it smooths (the wheel, by default); until then the document
+ * scrolls natively and `useLenis` consumers see no instance, exactly as before
+ * Lenis loads. Children render outside the Lenis provider in root mode (they
+ * read the root store instead), so creating Lenis never remounts them.
  */
 export function SmoothScroll({
 	children,
@@ -40,12 +67,33 @@ export function SmoothScroll({
 	root = true,
 	...props
 }: SmoothScrollProps) {
-	const reduce = useReducedMotion();
+	const reduce = usePrefersReducedMotion();
+	// The frame loop belongs to `LenisFrames`; Lenis's own would run every frame.
 	const mergedOptions: LenisOptions = {
 		duration: 1.05,
 		smoothWheel: true,
 		...options,
+		autoRaf: false,
 	};
+	const intent = useSmoothInputIntent(root && !reduce, mergedOptions);
+
+	if (root) {
+		return (
+			<>
+				{children}
+				{intent && !reduce ? (
+					<ReactLenis
+						className={cn("min-h-0", className)}
+						options={mergedOptions}
+						root
+						{...props}
+					>
+						<LenisFrames />
+					</ReactLenis>
+				) : null}
+			</>
+		);
+	}
 
 	if (reduce) {
 		return <>{children}</>;
@@ -55,9 +103,10 @@ export function SmoothScroll({
 		<ReactLenis
 			className={cn("min-h-0", className)}
 			options={mergedOptions}
-			root={root}
+			root={false}
 			{...props}
 		>
+			<LenisFrames />
 			{children}
 		</ReactLenis>
 	);
@@ -82,7 +131,8 @@ export function useSmoothScroll(): SmoothScrollState {
 	const isScrolling = useMotionValue(false);
 	const lenis = useLenis((instance) => {
 		scrollY.set(instance.scroll);
-		progress.set(instance.progress);
+		// Lenis reports 0/0 (NaN) on a page that cannot scroll; keep the rail empty.
+		progress.set(Number.isFinite(instance.progress) ? instance.progress : 0);
 		velocity.set(instance.velocity);
 		isScrolling.set(instance.isScrolling !== false);
 	});
@@ -93,17 +143,16 @@ export function useSmoothScroll(): SmoothScrollState {
 				lenis.scrollTo(target, { immediate });
 				return;
 			}
-			if (typeof target === "number") {
+			if (isNativeNumber(target)) {
 				window.scrollTo({
 					behavior: immediate ? "auto" : "smooth",
 					top: target,
 				});
 				return;
 			}
-			const element =
-				typeof target === "string"
-					? document.querySelector<HTMLElement>(target)
-					: target;
+			const element = isNativeText(target)
+				? document.querySelector<HTMLElement>(target)
+				: target;
 			element?.scrollIntoView({ behavior: immediate ? "auto" : "smooth" });
 		},
 		[lenis]
@@ -111,7 +160,7 @@ export function useSmoothScroll(): SmoothScrollState {
 
 	const fallbackFrame = useRef<number | null>(null);
 	useEffect(() => {
-		if (lenis || typeof window === "undefined") {
+		if (lenis || globalThis.window === undefined) {
 			return;
 		}
 
@@ -144,6 +193,11 @@ export function useSmoothScroll(): SmoothScrollState {
 	return { isScrolling, progress, scrollTo, scrollY, velocity };
 }
 
+/** Motion binds the spring-driven progress to the module's CSS variable. */
+interface ScrollProgressStyle extends MotionStyle {
+	"--blocks-progress": MotionValue<number>;
+}
+
 export interface ScrollProgressProps
 	extends Omit<ComponentProps<typeof motion.div>, "style"> {
 	className?: string;
@@ -158,12 +212,17 @@ export function ScrollProgress({ className, ...props }: ScrollProgressProps) {
 		<motion.div
 			aria-hidden="true"
 			className={cn(
-				"pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 origin-left bg-primary",
+				"pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 origin-left bg-foreground/60",
+				styles.progress,
 				className
 			)}
 			data-slot="scroll-progress"
 			{...props}
-			style={{ scaleX }}
+			style={
+				{
+					"--blocks-progress": scaleX,
+				} satisfies ScrollProgressStyle as ScrollProgressStyle
+			}
 		/>
 	);
 }

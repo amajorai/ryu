@@ -1,10 +1,12 @@
 import { LoginView } from "@ryu/blocks/desktop/login.tsx";
 import { I18nProvider, useI18n } from "@ryu/i18n/react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../../src/index.css";
 
 function LoginProofSurface() {
 	const { selectPack } = useI18n();
+	const [waiting, setWaiting] = useState(false);
 
 	return (
 		<main className="min-h-dvh bg-background p-8 text-foreground">
@@ -18,7 +20,14 @@ function LoginProofSurface() {
 					Switch to Arabic
 				</button>
 				<div className="min-h-0 flex-1 overflow-hidden rounded-3xl border bg-card">
-					<LoginView onContinueAsGuest={() => undefined} />
+					<LoginView
+						hasVerificationUri={waiting}
+						onCancel={() => setWaiting(false)}
+						onContinueAsGuest={() => undefined}
+						onSignIn={() => setWaiting(true)}
+						userCode={waiting ? "ABCD1234" : null}
+						waiting={waiting}
+					/>
 				</div>
 			</div>
 		</main>

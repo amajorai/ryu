@@ -1,4 +1,4 @@
-import { setEditorUploader } from "@ryu/ui/lib/editor-upload";
+import { setEditorUploader } from "@ryu/ui/lib/editor-upload.ts";
 import { useEffect } from "react";
 import { uploadUserFile } from "@/src/lib/api/uploads.ts";
 import { useActiveNodeGetter } from "./useActiveNode.ts";

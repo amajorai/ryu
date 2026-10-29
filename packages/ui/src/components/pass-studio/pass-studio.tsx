@@ -1,5 +1,7 @@
 "use client";
 
+import type { PaperShaderElement } from "@paper-design/shaders-react";
+import type { CSSProperties } from "react";
 import {
 	type RefObject,
 	useCallback,
@@ -10,6 +12,7 @@ import {
 	useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { isNativeNumber } from "../../lib/native-primitive-observation.ts";
 import { cn } from "../../lib/utils.ts";
 import { ditherAvatarHue } from "../dither-kit/avatar.tsx";
 import { MetalEdge } from "../metal-edge.tsx";
@@ -32,6 +35,7 @@ import {
 	type PassFormatId,
 	passFormat,
 } from "./formats.ts";
+import { type GifRecording, recordCanvasGif } from "./gif.ts";
 import {
 	CARD_HEIGHT_PX,
 	CARD_WIDTH_PX,
@@ -42,6 +46,7 @@ import {
 	readPassPalette,
 	waitlistFacePainter,
 } from "./paint.ts";
+import drawingStyles from "./pass-studio.drawing.module.css";
 import { type PassRecording, recordCanvasLoop } from "./record.ts";
 import {
 	BACKDROP_WASH_ALPHA,
@@ -49,6 +54,24 @@ import {
 	PassScene,
 	type PassSceneSources,
 } from "./scene.ts";
+
+interface PreviewBoxStyle extends CSSProperties {
+	"--pass-studio-1-height"?: string | undefined;
+	"--pass-studio-1-width"?: string | undefined;
+}
+interface ExportBoxStyle extends CSSProperties {
+	"--pass-studio-2-height"?: string | undefined;
+	"--pass-studio-2-width"?: string | undefined;
+}
+interface PreviewImageStyle extends CSSProperties {
+	"--pass-studio-3-max-height"?: string | undefined;
+}
+interface ExportImageStyle extends CSSProperties {
+	"--pass-studio-4-max-height"?: string | undefined;
+}
+function drawingLength(value: CSSProperties["width"]): string | undefined {
+	return isNativeNumber(value) ? `${value}px` : value;
+}
 
 /**
  * The pass, as a shareable picture or a looping video.
@@ -139,8 +162,16 @@ export function waitlistBackdrop(
 
 export interface PassStudioHandle {
 	/**
-	 * A `PASS_LOOP_SECONDS` loop at full export size. REAL TIME — it takes that
-	 * long, because `MediaRecorder` timestamps frames as they arrive. Pass a
+	 * The same loop as a looping GIF on a 480px short edge — the file that
+	 * autoplays in Slack, Discord, READMEs and iMessage, where an MP4 does not.
+	 */
+	exportGif(
+		onProgress?: (fraction: number) => void,
+		signal?: AbortSignal
+	): Promise<GifRecording>;
+	/**
+	 * A `PASS_LOOP_SECONDS` loop at full export size. Timestamped frame encoding
+	 * preserves the media timeline even on slower devices. Pass a
 	 * signal so a dialog that closes mid-record stops it rather than finishing
 	 * against an unmounted studio and firing a download afterwards.
 	 */
@@ -263,9 +294,11 @@ export function PassStudio({
 	// only ever ran forward would jump at every repeat, which is the one artefact
 	// an infinite loop makes impossible to miss.
 	const setShaderTime = useCallback((time: number) => {
+		// SAFETY: This private host renders only ShaderBackground's native Warp div. The installed Paper ShaderMount attaches its real mount to that same div and deletes it on disposal; the optional read preserves both unmounted cases and the native setFrame receiver. No arbitrary DOM child is admitted.
 		const mount = (
 			warpHostRef.current?.firstElementChild as
-				| { paperShaderMount?: { setFrame(ms: number): void } }
+				| PaperShaderElement
+				| null
 				| undefined
 		)?.paperShaderMount;
 		if (!mount) {
@@ -484,6 +517,17 @@ export function PassStudio({
 					signal,
 				});
 			},
+			exportGif: (onProgress, signal) => {
+				const canvas = exportCanvas();
+				captureRingStill();
+				return recordCanvasGif({
+					canvas,
+					onFrame: (time) => drawInto(canvas, time),
+					onProgress,
+					seconds: PASS_LOOP_SECONDS,
+					signal,
+				});
+			},
 		}),
 		[captureRingStill, drawInto, exportCanvas, frame]
 	);
@@ -491,6 +535,14 @@ export function PassStudio({
 	// Portalled to `document.body` — see the note at the top of this file.
 	// `mounted` gates it because `document` does not exist during the server
 	// render, and a portal target has to be there before the first paint.
+	const previewBoxStyle: PreviewBoxStyle = {
+		"--pass-studio-1-height": drawingLength(CARD_HEIGHT_PX),
+		"--pass-studio-1-width": drawingLength(CARD_WIDTH_PX),
+	};
+	const exportBoxStyle: ExportBoxStyle = {
+		"--pass-studio-2-height": drawingLength(CARD_HEIGHT_PX),
+		"--pass-studio-2-width": drawingLength(CARD_WIDTH_PX),
+	};
 	const shaderHosts = mounted
 		? createPortal(
 				<>
@@ -499,8 +551,11 @@ export function PassStudio({
 					    told is out of view — see the note at the top of this file. */}
 					<div
 						aria-hidden="true"
-						className="pointer-events-none fixed bottom-0 left-0 z-0 opacity-0"
-						style={{ height: CARD_HEIGHT_PX, width: CARD_WIDTH_PX }}
+						className={cn(
+							"pointer-events-none fixed bottom-0 left-0 z-0 opacity-0",
+							drawingStyles.previewBox
+						)}
+						style={previewBoxStyle}
 					>
 						<div className="h-full w-full" ref={warpHostRef}>
 							<ShaderBackground
@@ -522,8 +577,11 @@ export function PassStudio({
 					</div>
 					<div
 						aria-hidden="true"
-						className="pointer-events-none fixed bottom-0 left-0 z-0 opacity-0"
-						style={{ height: CARD_HEIGHT_PX, width: CARD_WIDTH_PX }}
+						className={cn(
+							"pointer-events-none fixed bottom-0 left-0 z-0 opacity-0",
+							drawingStyles.exportBox
+						)}
+						style={exportBoxStyle}
 					>
 						<div className="h-full w-full" ref={ringHostRef}>
 							<MetalEdge borderRadius={28} className="h-full">
@@ -536,6 +594,12 @@ export function PassStudio({
 			)
 		: null;
 
+	const previewImageStyle: PreviewImageStyle = {
+		"--pass-studio-3-max-height": drawingLength(PREVIEW_MAX_HEIGHT),
+	};
+	const exportImageStyle: ExportImageStyle = {
+		"--pass-studio-4-max-height": drawingLength(PREVIEW_MAX_HEIGHT),
+	};
 	return (
 		<div className={cn("relative", className)} ref={rootRef}>
 			{shaderHosts}
@@ -548,14 +612,20 @@ export function PassStudio({
 			    effect) is what keeps every ratio in the same box without a per-ratio
 			    rule. */}
 			<div
-				className="flex items-center justify-center"
-				style={{ maxHeight: PREVIEW_MAX_HEIGHT }}
+				className={cn(
+					"flex items-center justify-center",
+					drawingStyles.previewImage
+				)}
+				style={previewImageStyle}
 			>
 				<canvas
 					aria-label={previewLabel}
-					className="h-auto max-h-full w-auto max-w-full rounded-2xl border bg-muted/40"
+					className={cn(
+						"h-auto max-h-full w-auto max-w-full rounded-2xl border bg-muted/40",
+						drawingStyles.exportImage
+					)}
 					ref={previewRef}
-					style={{ maxHeight: PREVIEW_MAX_HEIGHT }}
+					style={exportImageStyle}
 				/>
 			</div>
 		</div>

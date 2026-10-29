@@ -1,9 +1,16 @@
+import { isNativeNumber } from "@ryu/ui/lib/native-primitive-observation.ts";
+import type { CSSProperties as ReactCSSProperties } from "react";
+import "../docx-nodes.css";
 import { BaseTocPlugin, type Heading, isHeading } from "@platejs/toc";
 import { Button } from "@ryu/ui/components/editor/ui/button.tsx";
 import { cva } from "class-variance-authority";
 import { NodeApi, type SlateEditor, type TElement } from "platejs";
 import type { SlateElementProps } from "platejs/static";
 import { SlateElement } from "platejs/static";
+
+interface EditorVariableStyle extends ReactCSSProperties {
+	"--editortocNodeStatic2-margin-left"?: string | number;
+}
 
 const headingItemVariants = cva(
 	"block h-auto w-full cursor-pointer truncate rounded-none px-0.5 py-1.5 text-start font-medium text-muted-foreground underline decoration-[0.5px] underline-offset-4 hover:bg-accent hover:text-muted-foreground",
@@ -29,6 +36,10 @@ export function TocElementStatic(props: SlateElementProps) {
 					headingList.map((item: Heading) => (
 						<Button
 							className={headingItemVariants({
+								// SAFETY: Installed cva indexes its actual variant table and omits
+								// unknown keys. The native Heading depth is forwarded unchanged:
+								// only 1/2/3 add spacing; 4/5/6 and custom depths keep the
+								// existing no-depth-class fallback. No closed-set membership is proved.
 								depth: item.depth as 1 | 2 | 3,
 							})}
 							key={item.title}
@@ -38,7 +49,7 @@ export function TocElementStatic(props: SlateElementProps) {
 						</Button>
 					))
 				) : (
-					<div className="text-gray-500 text-sm">
+					<div className="text-muted-foreground text-sm">
 						Create a heading to display the table of contents.
 					</div>
 				)}
@@ -48,14 +59,14 @@ export function TocElementStatic(props: SlateElementProps) {
 	);
 }
 
-const headingDepth: Record<string, number> = {
-	h1: 1,
-	h2: 2,
-	h3: 3,
-	h4: 4,
-	h5: 5,
-	h6: 6,
-};
+const headingDepth = new Map<string, number>([
+	["h1", 1],
+	["h2", 2],
+	["h3", 3],
+	["h4", 4],
+	["h5", 5],
+	["h6", 6],
+]);
 
 const getHeadingList = (editor?: SlateEditor) => {
 	if (!editor) {
@@ -82,7 +93,8 @@ const getHeadingList = (editor?: SlateEditor) => {
 	Array.from(values).forEach(([node, path]) => {
 		const { type } = node;
 		const title = NodeApi.string(node);
-		const depth = headingDepth[type];
+		const depth = headingDepth.get(type);
+		// SAFETY: Plate heading IDs are authored by its NodeId plugin and forwarded unchanged to internal bookmark links.
 		const id = node.id as string;
 
 		if (title && depth !== undefined) {
@@ -101,42 +113,38 @@ export function TocElementDocx(props: SlateElementProps) {
 	const { editor } = props;
 	const headingList = getHeadingList(editor);
 
-	const depthIndent: Record<number, string> = {
-		1: "0",
-		2: "24pt",
-		3: "48pt",
-	};
+	const depthIndent = new Map<number, string>([
+		[1, "0"],
+		[2, "24pt"],
+		[3, "48pt"],
+	]);
 
 	return (
 		<SlateElement {...props}>
-			<div
-				style={{
-					marginBottom: "12pt",
-					padding: "8pt 0",
-				}}
-			>
+			<div data-docx-style="editortocNodeStatic1">
 				{headingList.length > 0 ? (
-					headingList.map((item: Heading) => (
-						<p
-							key={item.id}
-							style={{
-								margin: "4pt 0",
-								paddingLeft: depthIndent[item.depth] || "0",
-							}}
-						>
-							<a
-								href={`#${item.id}`}
-								style={{
-									color: "#0066cc",
-									textDecoration: "underline",
-								}}
+					headingList.map((item: Heading) => {
+						const editortocNodeStatic2Style: EditorVariableStyle = {
+							"--editortocNodeStatic2-margin-left": isNativeNumber(
+								depthIndent.get(item.depth) || "0"
+							)
+								? `${depthIndent.get(item.depth) || "0"}px`
+								: depthIndent.get(item.depth) || "0",
+						};
+						return (
+							<p
+								data-docx-style="editortocNodeStatic2"
+								key={item.id}
+								style={editortocNodeStatic2Style}
 							>
-								{item.title}
-							</a>
-						</p>
-					))
+								<a data-docx-style="editortocNodeStatic3" href={`#${item.id}`}>
+									{item.title}
+								</a>
+							</p>
+						);
+					})
 				) : (
-					<p style={{ color: "#666", fontSize: "10pt" }}>
+					<p data-docx-style="editortocNodeStatic4">
 						Create a heading to display the table of contents.
 					</p>
 				)}

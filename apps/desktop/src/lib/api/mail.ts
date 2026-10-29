@@ -1,64 +1,53 @@
+import { gatewayJsonValueSchema } from "./gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/mail.ts
 // Node-scoped Agent Mail client. Core owns authentication and the sidecar owns
 // mail storage; this module keeps the desktop and Companion contracts typed.
 
+import {
+	type AppRequestValue,
+	type AppResponseValue,
+	appRequestValueSchema,
+	appResponseValueSchema,
+} from "@ryuhq/core-client/app-request-json.ts";
+import {
+	type MailAttachmentRecord,
+	type MailDraftRecord,
+	type MailEventRecord,
+	type MailInboxRecord,
+	type MailMessageRecord,
+	type MailStatusRecord,
+	type MailThreadRecord,
+	type MailWebhookRecord,
+	type MailWebhookWriteReply,
+	mailAttachmentDownloadSchema,
+	mailDraftRecordSchema,
+	mailDraftRecordsSchema,
+	mailEnvelopeSchema,
+	mailEventRecordsSchema,
+	mailHeadersReplySchema,
+	mailInboxRecordSchema,
+	mailInboxRecordsSchema,
+	mailMessageRecordSchema,
+	mailMessageRecordsSchema,
+	mailSecretReplySchema,
+	mailStatusRecordSchema,
+	mailThreadRecordsSchema,
+	mailWebhookRecordsSchema,
+	mailWebhookWriteReplySchema,
+} from "@ryuhq/core-client/mail.ts";
+import type { z } from "zod";
+
+import { resolveMountedAppPath } from "./app-request.ts";
 import { type ApiTarget, request } from "./client.ts";
+import { encodePathId } from "./path-id.ts";
 
 export type InboxProvider = "webhook" | "imap";
 
-export interface Inbox {
-	address: string;
-	client_id?: string | null;
-	created_at: string;
-	description?: string | null;
-	id: string;
-	metadata?: Record<string, unknown>;
-	name: string;
-	pod_id?: string | null;
-	provider: InboxProvider;
-	updated_at?: string;
-}
+export type Inbox = MailInboxRecord;
 
-export interface AttachmentMeta {
-	content_id?: string | null;
-	content_type: string;
-	filename: string;
-	id: string;
-	inline?: boolean;
-	size: number;
-}
+export type AttachmentMeta = MailAttachmentRecord;
 
-export interface EmailMessage {
-	attachments: AttachmentMeta[];
-	bcc_addrs: string[];
-	cc_addrs: string[];
-	client_id?: string | null;
-	created_at: string;
-	direction: string;
-	error?: string | null;
-	extracted_html?: string | null;
-	extracted_text?: string | null;
-	from_addr: string;
-	headers?: Record<string, string>;
-	html?: string;
-	id: string;
-	in_reply_to?: string;
-	inbox_id: string;
-	labels?: string[];
-	message_id: string;
-	opened_at?: string | null;
-	preview?: string | null;
-	provider_message_id?: string;
-	read?: boolean;
-	references?: string[];
-	reply_to_addrs?: string[];
-	status?: string;
-	subject: string;
-	text?: string;
-	thread_id?: string | null;
-	to_addrs: string[];
-	updated_at?: string;
-}
+export type EmailMessage = MailMessageRecord;
 
 export interface AttachmentInput {
 	content?: string;
@@ -69,18 +58,17 @@ export interface AttachmentInput {
 	inline?: boolean;
 }
 
-export interface MailStatus {
-	configured: boolean;
-	domainMode: "byo" | "managed" | string;
-	inbound: "webhook" | "imap" | "sns" | string;
-	inboxCount: number;
-	sendConfigured: boolean;
+export type MailStatus = MailStatusRecord;
+
+/** Native JSON.stringify draft values; Core owns method-specific validation. */
+export interface MailInputRecord {
+	[key: string]: AppRequestValue;
 }
 
 export interface CreateInboxInput {
 	address: string;
 	client_id?: string;
-	metadata?: Record<string, unknown>;
+	metadata?: MailInputRecord;
 	name: string;
 	pod_id?: string;
 	provider?: InboxProvider;
@@ -103,71 +91,29 @@ export interface SendInput {
 	trackOpens?: boolean;
 }
 
-export interface MailDraft {
-	attachments: AttachmentMeta[];
-	bcc_addrs: string[];
-	cc_addrs: string[];
-	client_id?: string | null;
-	created_at: string;
-	headers: Record<string, string>;
-	html?: string;
-	id: string;
-	inbox_id: string;
-	labels: string[];
-	reply_to_addrs: string[];
-	send_at?: string | null;
-	status: string;
-	subject: string;
-	text?: string;
-	thread_id?: string | null;
-	to_addrs: string[];
-	updated_at: string;
-}
+export type MailDraft = MailDraftRecord;
 
-export interface MailWebhook {
-	client_id?: string | null;
-	created_at: string;
-	enabled: boolean;
-	event_types: string[];
-	header_names: string[];
-	inbox_ids: string[];
-	pod_ids: string[];
-	updated_at: string;
-	url: string;
-	webhook_id: string;
-}
+export type MailWebhook = MailWebhookRecord;
 
-export interface MailEvent {
-	created_at: string;
-	event_id: string;
-	event_type: string;
-	inbox_id?: string | null;
-	message_id?: string | null;
-	payload: Record<string, unknown>;
-}
+export type MailEvent = MailEventRecord;
 
 export interface MailRequestInput {
-	body?: unknown;
+	body?: AppRequestValue;
 	method?: "DELETE" | "GET" | "PATCH" | "POST";
 	path: string;
 }
 
-export interface MailThread {
-	id: string;
-	latest_message?: EmailMessage | null;
-	message_count: number;
-	participants: string[];
-	subject?: string | null;
+export type MailThread = MailThreadRecord;
+
+function unwrap<T>(
+	value: Parameters<typeof appResponseValueSchema.parse>[0],
+	key: string,
+	fields: z.ZodType<T>
+): T {
+	return mailEnvelopeSchema(key, fields).parse(value);
 }
 
-function unwrap<T>(value: unknown, key: string): T {
-	if (typeof value === "object" && value !== null && key in value) {
-		return (value as Record<string, unknown>)[key] as T;
-	}
-	return value as T;
-}
-
-function queryString(query: Record<string, unknown>): string {
+function queryString(query: MailInputRecord): string {
 	const params = new URLSearchParams();
 	for (const [key, value] of Object.entries(query)) {
 		if (value === undefined || value === null || value === "") {
@@ -179,17 +125,29 @@ function queryString(query: Record<string, unknown>): string {
 }
 
 export function getMailStatus(target: ApiTarget): Promise<MailStatus> {
-	return request<MailStatus>(target, "/api/mail/status");
+	return request(target, "/api/mail/status", {}, gatewayJsonValueSchema).then(
+		mailStatusRecordSchema.parse
+	);
 }
 
 export async function listInboxes(target: ApiTarget): Promise<Inbox[]> {
-	return unwrap<Inbox[]>(await request(target, "/api/mail/inboxes"), "inboxes");
+	return unwrap<Inbox[]>(
+		await request(target, "/api/mail/inboxes", {}, gatewayJsonValueSchema),
+		"inboxes",
+		mailInboxRecordsSchema
+	);
 }
 
 export async function getInbox(target: ApiTarget, id: string): Promise<Inbox> {
 	return unwrap<Inbox>(
-		await request(target, `/api/mail/inboxes/${id}`),
-		"inbox"
+		await request(
+			target,
+			`/api/mail/inboxes/${encodePathId(id)}`,
+			{},
+			gatewayJsonValueSchema
+		),
+		"inbox",
+		mailInboxRecordSchema
 	);
 }
 
@@ -198,8 +156,14 @@ export async function createInbox(
 	body: CreateInboxInput
 ): Promise<Inbox> {
 	return unwrap<Inbox>(
-		await request(target, "/api/mail/inboxes", { method: "POST", body }),
-		"inbox"
+		await request(
+			target,
+			"/api/mail/inboxes",
+			{ method: "POST", body },
+			gatewayJsonValueSchema
+		),
+		"inbox",
+		mailInboxRecordSchema
 	);
 }
 
@@ -209,11 +173,17 @@ export async function renameInbox(
 	name: string
 ): Promise<Inbox> {
 	return unwrap<Inbox>(
-		await request(target, `/api/mail/inboxes/${id}`, {
-			method: "PATCH",
-			body: { name },
-		}),
-		"inbox"
+		await request(
+			target,
+			`/api/mail/inboxes/${encodePathId(id)}`,
+			{
+				method: "PATCH",
+				body: { name },
+			},
+			gatewayJsonValueSchema
+		),
+		"inbox",
+		mailInboxRecordSchema
 	);
 }
 
@@ -221,10 +191,16 @@ export async function rotateInboundSecret(
 	target: ApiTarget,
 	id: string
 ): Promise<string> {
-	const response = await request<{
-		inboundSecret?: string;
-		inbound_secret?: string;
-	}>(target, `/api/mail/inboxes/${id}/rotate-secret`, { method: "POST" });
+	const response = mailSecretReplySchema.parse(
+		await request(
+			target,
+			`/api/mail/inboxes/${encodePathId(id)}/rotate-secret`,
+			{
+				method: "POST",
+			},
+			gatewayJsonValueSchema
+		)
+	);
 	return response.inboundSecret ?? response.inbound_secret ?? "";
 }
 
@@ -232,20 +208,28 @@ export async function deleteInbox(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/mail/inboxes/${id}`, { method: "DELETE" });
+	await request(
+		target,
+		`/api/mail/inboxes/${encodePathId(id)}`,
+		{ method: "DELETE" },
+		gatewayJsonValueSchema
+	);
 }
 
 export async function listMessages(
 	target: ApiTarget,
 	inboxId: string,
-	query: Record<string, unknown> = {}
+	query: MailInputRecord = {}
 ): Promise<EmailMessage[]> {
 	return unwrap<EmailMessage[]>(
 		await request(
 			target,
-			`/api/mail/inboxes/${inboxId}/messages${queryString(query)}`
+			`/api/mail/inboxes/${encodePathId(inboxId)}/messages${queryString(query)}`,
+			{},
+			gatewayJsonValueSchema
 		),
-		"messages"
+		"messages",
+		mailMessageRecordsSchema
 	);
 }
 
@@ -253,7 +237,7 @@ export async function searchMessages(
 	target: ApiTarget,
 	inboxId: string,
 	q: string,
-	query: Record<string, unknown> = {}
+	query: MailInputRecord = {}
 ): Promise<EmailMessage[]> {
 	return listMessages(target, inboxId, { ...query, q });
 }
@@ -263,8 +247,14 @@ export async function getMessage(
 	id: string
 ): Promise<EmailMessage> {
 	return unwrap<EmailMessage>(
-		await request(target, `/api/mail/messages/${id}`),
-		"message"
+		await request(
+			target,
+			`/api/mail/messages/${encodePathId(id)}`,
+			{},
+			gatewayJsonValueSchema
+		),
+		"message",
+		mailMessageRecordSchema
 	);
 }
 
@@ -282,10 +272,12 @@ export async function updateMessage(
 	return unwrap<EmailMessage>(
 		await request(
 			target,
-			`/api/mail/inboxes/${inboxId}/messages/${messageId}`,
-			{ method: "PATCH", body }
+			`/api/mail/inboxes/${encodePathId(inboxId)}/messages/${encodePathId(messageId)}`,
+			{ method: "PATCH", body },
+			gatewayJsonValueSchema
 		),
-		"message"
+		"message",
+		mailMessageRecordSchema
 	);
 }
 
@@ -294,9 +286,14 @@ export async function deleteMessage(
 	inboxId: string,
 	messageId: string
 ): Promise<void> {
-	await request(target, `/api/mail/inboxes/${inboxId}/messages/${messageId}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/api/mail/inboxes/${encodePathId(inboxId)}/messages/${encodePathId(messageId)}`,
+		{
+			method: "DELETE",
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 export async function sendMessage(
@@ -306,14 +303,20 @@ export async function sendMessage(
 	idempotencyKey?: string
 ): Promise<EmailMessage> {
 	return unwrap<EmailMessage>(
-		await request(target, `/api/mail/inboxes/${inboxId}/send`, {
-			method: "POST",
-			body,
-			headers: idempotencyKey
-				? { "Idempotency-Key": idempotencyKey }
-				: undefined,
-		}),
-		"message"
+		await request(
+			target,
+			`/api/mail/inboxes/${encodePathId(inboxId)}/send`,
+			{
+				method: "POST",
+				body,
+				headers: idempotencyKey
+					? { "Idempotency-Key": idempotencyKey }
+					: undefined,
+			},
+			gatewayJsonValueSchema
+		),
+		"message",
+		mailMessageRecordSchema
 	);
 }
 
@@ -326,10 +329,12 @@ export async function replyMessage(
 	return unwrap<EmailMessage>(
 		await request(
 			target,
-			`/api/mail/inboxes/${inboxId}/messages/${messageId}/reply`,
-			{ method: "POST", body }
+			`/api/mail/inboxes/${encodePathId(inboxId)}/messages/${encodePathId(messageId)}/reply`,
+			{ method: "POST", body },
+			gatewayJsonValueSchema
 		),
-		"message"
+		"message",
+		mailMessageRecordSchema
 	);
 }
 
@@ -342,10 +347,12 @@ export async function replyAllMessage(
 	return unwrap<EmailMessage>(
 		await request(
 			target,
-			`/api/mail/inboxes/${inboxId}/messages/${messageId}/reply-all`,
-			{ method: "POST", body }
+			`/api/mail/inboxes/${encodePathId(inboxId)}/messages/${encodePathId(messageId)}/reply-all`,
+			{ method: "POST", body },
+			gatewayJsonValueSchema
 		),
-		"message"
+		"message",
+		mailMessageRecordSchema
 	);
 }
 
@@ -358,10 +365,12 @@ export async function forwardMessage(
 	return unwrap<EmailMessage>(
 		await request(
 			target,
-			`/api/mail/inboxes/${inboxId}/messages/${messageId}/forward`,
-			{ method: "POST", body }
+			`/api/mail/inboxes/${encodePathId(inboxId)}/messages/${encodePathId(messageId)}/forward`,
+			{ method: "POST", body },
+			gatewayJsonValueSchema
 		),
-		"message"
+		"message",
+		mailMessageRecordSchema
 	);
 }
 
@@ -371,10 +380,13 @@ export async function listThreads(
 	search?: string
 ): Promise<MailThread[]> {
 	const path = search
-		? `/api/mail/inboxes/${inboxId}/threads/search?q=${encodeURIComponent(search)}`
-		: `/api/mail/inboxes/${inboxId}/threads`;
-	const response = await request<{ threads: MailThread[] }>(target, path);
-	return response.threads;
+		? `/api/mail/inboxes/${encodePathId(inboxId)}/threads/search?q=${encodeURIComponent(search)}`
+		: `/api/mail/inboxes/${encodePathId(inboxId)}/threads`;
+	return unwrap(
+		await request(target, path, {}, gatewayJsonValueSchema),
+		"threads",
+		mailThreadRecordsSchema
+	);
 }
 
 export async function getThread(
@@ -382,46 +394,65 @@ export async function getThread(
 	inboxId: string,
 	threadId: string
 ): Promise<EmailMessage[]> {
-	const response = await request<{ messages: EmailMessage[] }>(
-		target,
-		`/api/mail/inboxes/${inboxId}/threads/${threadId}`
+	return unwrap(
+		await request(
+			target,
+			`/api/mail/inboxes/${encodePathId(inboxId)}/threads/${encodePathId(threadId)}`,
+			{},
+			gatewayJsonValueSchema
+		),
+		"messages",
+		mailMessageRecordsSchema
 	);
-	return response.messages;
 }
 
 export async function listDrafts(
 	target: ApiTarget,
 	inboxId: string
 ): Promise<MailDraft[]> {
-	const response = await request<{ drafts: MailDraft[] }>(
-		target,
-		`/api/mail/inboxes/${inboxId}/drafts`
+	return unwrap(
+		await request(
+			target,
+			`/api/mail/inboxes/${encodePathId(inboxId)}/drafts`,
+			{},
+			gatewayJsonValueSchema
+		),
+		"drafts",
+		mailDraftRecordsSchema
 	);
-	return response.drafts;
 }
 
 export async function createDraft(
 	target: ApiTarget,
 	inboxId: string,
-	body: Record<string, unknown>
+	body: MailInputRecord
 ): Promise<MailDraft> {
-	return request<MailDraft>(target, `/api/mail/inboxes/${inboxId}/drafts`, {
-		method: "POST",
-		body,
-	});
+	return request(
+		target,
+		`/api/mail/inboxes/${encodePathId(inboxId)}/drafts`,
+		{
+			method: "POST",
+			body,
+		},
+		gatewayJsonValueSchema
+	).then(mailDraftRecordSchema.parse);
 }
 
 export async function updateDraft(
 	target: ApiTarget,
 	inboxId: string,
 	draftId: string,
-	body: Record<string, unknown>
+	body: MailInputRecord
 ): Promise<MailDraft> {
-	return request<MailDraft>(
+	return request(
 		target,
-		`/api/mail/inboxes/${inboxId}/drafts/${draftId}`,
-		{ method: "PATCH", body }
-	);
+		`/api/mail/inboxes/${encodePathId(inboxId)}/drafts/${encodePathId(draftId)}`,
+		{
+			method: "PATCH",
+			body,
+		},
+		gatewayJsonValueSchema
+	).then(mailDraftRecordSchema.parse);
 }
 
 export async function deleteDraft(
@@ -429,9 +460,14 @@ export async function deleteDraft(
 	inboxId: string,
 	draftId: string
 ): Promise<void> {
-	await request(target, `/api/mail/inboxes/${inboxId}/drafts/${draftId}`, {
-		method: "DELETE",
-	});
+	await request(
+		target,
+		`/api/mail/inboxes/${encodePathId(inboxId)}/drafts/${encodePathId(draftId)}`,
+		{
+			method: "DELETE",
+		},
+		gatewayJsonValueSchema
+	);
 }
 
 export async function sendDraft(
@@ -443,76 +479,101 @@ export async function sendDraft(
 	return unwrap<EmailMessage>(
 		await request(
 			target,
-			`/api/mail/inboxes/${inboxId}/drafts/${draftId}/send`,
+			`/api/mail/inboxes/${encodePathId(inboxId)}/drafts/${encodePathId(draftId)}/send`,
 			{
 				method: "POST",
 				headers: idempotencyKey
 					? { "Idempotency-Key": idempotencyKey }
 					: undefined,
-			}
+			},
+			gatewayJsonValueSchema
 		),
-		"message"
+		"message",
+		mailMessageRecordSchema
 	);
 }
 
 export async function listWebhooks(target: ApiTarget): Promise<MailWebhook[]> {
-	const response = await request<{ webhooks: MailWebhook[] }>(
-		target,
-		"/api/mail/webhooks"
+	return unwrap(
+		await request(target, "/api/mail/webhooks", {}, gatewayJsonValueSchema),
+		"webhooks",
+		mailWebhookRecordsSchema
 	);
-	return response.webhooks;
 }
 
 export async function createWebhook(
 	target: ApiTarget,
-	body: Record<string, unknown>,
+	body: MailInputRecord,
 	inboxId?: string
-): Promise<{ secret?: string | null; webhook: MailWebhook }> {
+): Promise<MailWebhookWriteReply> {
 	return request(
 		target,
-		inboxId ? `/api/mail/inboxes/${inboxId}/webhooks` : "/api/mail/webhooks",
-		{ method: "POST", body }
-	);
+		inboxId
+			? `/api/mail/inboxes/${encodePathId(inboxId)}/webhooks`
+			: "/api/mail/webhooks",
+		{ method: "POST", body },
+		gatewayJsonValueSchema
+	).then(mailWebhookWriteReplySchema.parse);
 }
 
 export async function updateWebhook(
 	target: ApiTarget,
 	id: string,
-	body: Record<string, unknown>
-): Promise<{ secret?: string | null; webhook: MailWebhook }> {
-	return request(target, `/api/mail/webhooks/${id}`, { method: "PATCH", body });
+	body: MailInputRecord
+): Promise<MailWebhookWriteReply> {
+	return request(
+		target,
+		`/api/mail/webhooks/${encodePathId(id)}`,
+		{
+			method: "PATCH",
+			body,
+		},
+		gatewayJsonValueSchema
+	).then(mailWebhookWriteReplySchema.parse);
 }
 
 export async function deleteWebhook(
 	target: ApiTarget,
 	id: string
 ): Promise<void> {
-	await request(target, `/api/mail/webhooks/${id}`, { method: "DELETE" });
+	await request(
+		target,
+		`/api/mail/webhooks/${encodePathId(id)}`,
+		{ method: "DELETE" },
+		gatewayJsonValueSchema
+	);
 }
 
 export async function listWebhookHeaders(
 	target: ApiTarget,
 	id: string
 ): Promise<string[]> {
-	const response = await request<{
-		header_names?: string[];
-		headers?: string[];
-	}>(target, `/api/mail/webhooks/${id}/headers`);
+	const response = mailHeadersReplySchema.parse(
+		await request(
+			target,
+			`/api/mail/webhooks/${encodePathId(id)}/headers`,
+			{},
+			gatewayJsonValueSchema
+		)
+	);
 	return response.header_names ?? response.headers ?? [];
 }
-
 export async function updateWebhookHeaders(
 	target: ApiTarget,
 	id: string,
 	headers: Record<string, string>
 ): Promise<string[]> {
-	const response = await request<{
-		header_names?: string[];
-		headers?: string[];
-	}>(target, `/api/mail/webhooks/${id}/headers`, {
-		method: "PATCH",
-		body: { headers },
-	});
+	const response = mailHeadersReplySchema.parse(
+		await request(
+			target,
+			`/api/mail/webhooks/${encodePathId(id)}/headers`,
+			{
+				method: "PATCH",
+				body: { headers },
+			},
+			gatewayJsonValueSchema
+		)
+	);
 	return response.header_names ?? response.headers ?? [];
 }
 
@@ -520,26 +581,65 @@ export async function listEvents(
 	target: ApiTarget,
 	inboxId?: string
 ): Promise<MailEvent[]> {
-	const response = await request<{ events: MailEvent[] }>(
-		target,
-		inboxId ? `/api/mail/inboxes/${inboxId}/events` : "/api/mail/events"
+	return unwrap(
+		await request(
+			target,
+			inboxId
+				? `/api/mail/inboxes/${encodePathId(inboxId)}/events`
+				: "/api/mail/events",
+			{},
+			gatewayJsonValueSchema
+		),
+		"events",
+		mailEventRecordsSchema
 	);
-	return response.events;
 }
 
 export async function downloadAttachment(
 	target: ApiTarget,
 	attachmentId: string
 ): Promise<{ url: string }> {
-	return request(target, `/api/mail/attachments/${attachmentId}`);
+	return request(
+		target,
+		`/api/mail/attachments/${encodePathId(attachmentId)}`,
+		{},
+		gatewayJsonValueSchema
+	).then(mailAttachmentDownloadSchema.parse);
+}
+
+/** The mount Core serves Agent Mail on. A constant, never a parameter: the
+ *  companion frame contributes the sub-path and nothing else. */
+const MAIL_MOUNT = "/api/mail";
+
+/**
+ * Resolve a companion-chosen `mail.request` path with the WHATWG URL semantics
+ * `fetch` applies (tab/LF/CR removal, dot-segment collapse) and return the
+ * normalized path only when it still lies beneath {@link MAIL_MOUNT}.
+ */
+function resolveMailRequestPath(path: string): string | null {
+	if (!path.startsWith(`${MAIL_MOUNT}/`)) {
+		return null;
+	}
+	return resolveMountedAppPath(MAIL_MOUNT, path.slice(MAIL_MOUNT.length));
 }
 
 export async function mailRequest(
 	target: ApiTarget,
 	input: MailRequestInput
-): Promise<unknown> {
-	return request(target, input.path, {
-		method: input.method ?? "GET",
-		body: input.body,
-	});
+): Promise<AppResponseValue> {
+	const path = resolveMailRequestPath(input.path);
+	if (!path) {
+		throw new Error(
+			`Refusing to forward "${input.path}" — a mail request path must stay beneath ${MAIL_MOUNT} once normalized.`
+		);
+	}
+	return request(
+		target,
+		path,
+		{
+			method: input.method ?? "GET",
+			body: appRequestValueSchema.parse(input.body),
+		},
+		gatewayJsonValueSchema
+	).then(appResponseValueSchema.parse);
 }

@@ -28,27 +28,29 @@ import {
 	Delete01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { SkeletonRows } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { sileo } from "sileo";
 import { AgentSelectionField } from "@/components/agent-elements/input/agent-selection-field.tsx";
 import {
 	SettingsCard,
+	SettingsGroup,
+	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
 import { useAgents } from "@/src/hooks/useAgents.ts";
+import { useSubscriptions } from "@/src/hooks/useSubscriptions.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { EMPTY_AGENT_SELECTION } from "@/src/lib/api/preferences.ts";
 import type {
@@ -61,7 +63,10 @@ import {
 	fetchRoutingPolicy,
 	saveRoutingPolicy,
 } from "@/src/lib/api/routing.ts";
-import { supportsUsage } from "@/src/lib/api/usage.ts";
+import {
+	type SubscriptionsSnapshot,
+	supportsUsage,
+} from "@/src/lib/api/usage.ts";
 
 /** A blank rule, defaulted to the case people reach for first. */
 function newRule(id: string): RoutingRule {
@@ -78,10 +83,78 @@ function newRule(id: string): RoutingRule {
 	};
 }
 
+/**
+ * What a subscription-window rule watches: one agent's own login, a Ryu
+ * provider's whole account pool, or one saved account of that provider. Core
+ * accepts exactly one of `agent_id` / `provider_id`.
+ */
+interface SubscriptionScope {
+	account_id?: string;
+	agent_id: string;
+	provider_id?: string;
+}
+
+/** One entry of the "Subscription" dropdown. */
+interface ScopeOption {
+	label: string;
+	scope: SubscriptionScope;
+	value: string;
+}
+
+/** A dropdown value that cannot collide across scope kinds or ids. */
+function scopeValue(scope: SubscriptionScope): string {
+	if (scope.provider_id) {
+		return scope.account_id
+			? `account:${encodeURIComponent(scope.provider_id)}:${encodeURIComponent(scope.account_id)}`
+			: `provider:${encodeURIComponent(scope.provider_id)}`;
+	}
+	return `agent:${encodeURIComponent(scope.agent_id)}`;
+}
+
+/**
+ * Agents with a readable login, then each Ryu subscription provider whose
+ * accounts Core can read: its whole pool, then each saved account by name.
+ * Account names are display-only; the rule stores ids.
+ */
+function scopeOptions(
+	subscriptionAgents: string[],
+	snapshot: SubscriptionsSnapshot | undefined
+): ScopeOption[] {
+	const options: ScopeOption[] = subscriptionAgents.map((agentId) => ({
+		label: agentId,
+		scope: { agent_id: agentId },
+		value: scopeValue({ agent_id: agentId }),
+	}));
+	for (const provider of snapshot?.providers ?? []) {
+		if (
+			provider.kind !== "subscription" ||
+			!provider.capabilities.accountUsage ||
+			provider.accounts.length === 0
+		) {
+			continue;
+		}
+		const pool = { agent_id: "", provider_id: provider.providerId };
+		options.push({
+			label: `${provider.label} — every account`,
+			scope: pool,
+			value: scopeValue(pool),
+		});
+		for (const account of provider.accounts) {
+			const single = { ...pool, account_id: account.accountId };
+			options.push({
+				label: `${provider.label} — ${account.label ?? account.accountId}`,
+				scope: single,
+				value: scopeValue(single),
+			});
+		}
+	}
+	return options;
+}
+
 /** Swap the condition's source, seeding sensible defaults for the new unit. */
 function conditionForSource(
 	source: RoutingCondition["source"],
-	agentId: string,
+	defaultScope: SubscriptionScope,
 	creditProviders: string[]
 ): RoutingCondition {
 	if (source === "ryu_credits") {
@@ -92,7 +165,7 @@ function conditionForSource(
 	}
 	return {
 		source,
-		agent_id: agentId,
+		...defaultScope,
 		window: "",
 		remaining_below_percent: 50,
 	};
@@ -127,50 +200,128 @@ function sourceLabel(source: RoutingCondition["source"]): string {
 	return "Subscription window";
 }
 
-/** The threshold + its qualifiers, which differ per source. */
-function ConditionFields({
+/** Keep number editing local until commit so an autosave can't interrupt typing. */
+function ThresholdInput({
+	disabled,
+	id,
+	inputMode,
+	label,
+	max,
+	onCommit,
+	value,
+}: {
+	disabled: boolean;
+	id: string;
+	inputMode: "decimal" | "numeric";
+	label: string;
+	max?: number;
+	onCommit: (value: number) => void;
+	value: number;
+}) {
+	const [draft, setDraft] = useState(String(value));
+	const [error, setError] = useState<string | null>(null);
+	useEffect(() => {
+		setDraft(String(value));
+		setError(null);
+	}, [value]);
+
+	const commit = () => {
+		const trimmed = draft.trim();
+		const parsed = Number(trimmed);
+		if (
+			trimmed.length === 0 ||
+			!Number.isFinite(parsed) ||
+			parsed < 0 ||
+			(max !== undefined && parsed > max)
+		) {
+			setError(
+				max === undefined
+					? "Enter a non-negative USD amount."
+					: `Enter a percent from 0 to ${max}.`
+			);
+			return;
+		}
+		setError(null);
+		if (parsed !== value) {
+			onCommit(parsed);
+		}
+	};
+
+	return (
+		<SettingsItem
+			actions={
+				<div>
+					<Input
+						aria-describedby={error ? `${id}-error` : undefined}
+						aria-invalid={error ? true : undefined}
+						className="h-8 w-28"
+						disabled={disabled}
+						id={id}
+						inputMode={inputMode}
+						onBlur={commit}
+						onChange={(event) => {
+							setDraft(event.target.value);
+							setError(null);
+						}}
+						onKeyDown={(event) => {
+							if (event.key === "Enter") {
+								event.preventDefault();
+								event.currentTarget.blur();
+							}
+						}}
+						value={draft}
+					/>
+				</div>
+			}
+			title={<label htmlFor={id}>{label}</label>}
+		>
+			{error ? (
+				<p className="text-destructive text-xs" id={`${id}-error`} role="alert">
+					{error}
+				</p>
+			) : null}
+		</SettingsItem>
+	);
+}
+
+/**
+ * The threshold + its qualifiers, which differ per source. Returned as an array
+ * of rows (not a wrapper component) so the rule's `SettingsGroup` draws its
+ * hairlines between each of them.
+ */
+function conditionRows({
 	condition,
 	creditProviders,
 	disabled,
+	ruleId,
 	onChange,
-	subscriptionAgents,
+	scopes,
 }: {
 	condition: RoutingCondition;
 	creditProviders: string[];
 	disabled: boolean;
+	ruleId: string;
 	onChange: (next: RoutingCondition) => void;
-	subscriptionAgents: string[];
-}) {
+	scopes: ScopeOption[];
+}): ReactNode[] {
 	if (condition.source === "ryu_credits") {
-		return (
-			<div className="flex items-end gap-2">
-				<div className="space-y-1">
-					<Label className="text-xs" htmlFor="ryu-credit-threshold">
-						Dollars left, below
-					</Label>
-					<Input
-						className="h-8 w-28"
-						disabled={disabled}
-						id="ryu-credit-threshold"
-						inputMode="decimal"
-						onChange={(e) =>
-							onChange({
-								...condition,
-								below_usd: Number(e.target.value) || 0,
-							})
-						}
-						value={condition.below_usd}
-					/>
-				</div>
-			</div>
-		);
+		return [
+			<ThresholdInput
+				disabled={disabled}
+				id={`ryu-credit-threshold-${ruleId}`}
+				inputMode="decimal"
+				key="threshold"
+				label="Dollars left, below"
+				onCommit={(below_usd) => onChange({ ...condition, below_usd })}
+				value={condition.below_usd}
+			/>,
+		];
 	}
 
 	if (condition.source === "provider_credits") {
-		return (
-			<div className="flex items-end gap-2">
-				<div className="space-y-1">
-					<Label className="text-xs">Provider</Label>
+		return [
+			<SettingsItem
+				actions={
 					<Select
 						disabled={disabled}
 						items={creditProviders.map((id) => ({ label: id, value: id }))}
@@ -179,7 +330,10 @@ function ConditionFields({
 						}
 						value={condition.provider_id}
 					>
-						<SelectTrigger className="h-8 w-40">
+						<SelectTrigger
+							className="h-8 w-40"
+							id={`credit-provider-${ruleId}`}
+						>
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
@@ -190,55 +344,85 @@ function ConditionFields({
 							))}
 						</SelectContent>
 					</Select>
-				</div>
-				<div className="space-y-1">
-					<Label className="text-xs" htmlFor="provider-credit-threshold">
-						Dollars left, below
-					</Label>
-					<Input
-						className="h-8 w-28"
-						disabled={disabled}
-						id="provider-credit-threshold"
-						inputMode="decimal"
-						onChange={(e) =>
-							onChange({
-								...condition,
-								below_usd: Number(e.target.value) || 0,
-							})
-						}
-						value={condition.below_usd}
-					/>
-				</div>
-			</div>
-		);
+				}
+				key="provider"
+				title={<label htmlFor={`credit-provider-${ruleId}`}>Provider</label>}
+			/>,
+			<ThresholdInput
+				disabled={disabled}
+				id={`provider-credit-threshold-${ruleId}`}
+				inputMode="decimal"
+				key="threshold"
+				label="Dollars left, below"
+				onCommit={(below_usd) => onChange({ ...condition, below_usd })}
+				value={condition.below_usd}
+			/>,
+		];
 	}
 
-	return (
-		<div className="flex flex-wrap items-end gap-2">
-			<div className="space-y-1">
-				<Label className="text-xs">Agent</Label>
+	const currentScope = scopeValue(condition);
+	// A saved scope that is no longer offered (an account was removed, or the
+	// listing has not loaded) still shows by id instead of a blank trigger.
+	const scopeItems = scopes.some((option) => option.value === currentScope)
+		? scopes
+		: [
+				...scopes,
+				{
+					label:
+						condition.account_id ?? condition.provider_id ?? condition.agent_id,
+					scope: {
+						agent_id: condition.agent_id,
+						provider_id: condition.provider_id,
+						account_id: condition.account_id,
+					},
+					value: currentScope,
+				},
+			];
+	return [
+		<SettingsItem
+			actions={
 				<Select
 					disabled={disabled}
-					items={subscriptionAgents.map((id) => ({ label: id, value: id }))}
-					onValueChange={(agent_id) =>
-						onChange({ ...condition, agent_id: agent_id ?? "" })
-					}
-					value={condition.agent_id}
+					items={scopeItems}
+					onValueChange={(value) => {
+						const picked = scopeItems.find((option) => option.value === value);
+						if (!picked) {
+							return;
+						}
+						// Rebuild the scope rather than spreading over it: a stale
+						// `account_id` from a previous pick must not survive.
+						const {
+							agent_id: _agent,
+							provider_id: _provider,
+							account_id: _account,
+							...rest
+						} = condition;
+						onChange({ ...rest, ...picked.scope });
+					}}
+					value={currentScope}
 				>
-					<SelectTrigger className="h-8 w-44">
-						<SelectValue placeholder="Pick an agent" />
+					<SelectTrigger
+						className="h-8 w-64"
+						id={`subscription-agent-${ruleId}`}
+					>
+						<SelectValue placeholder="Pick a subscription" />
 					</SelectTrigger>
 					<SelectContent>
-						{subscriptionAgents.map((id) => (
-							<SelectItem key={id} value={id}>
-								{id}
+						{scopeItems.map((option) => (
+							<SelectItem key={option.value} value={option.value}>
+								{option.label}
 							</SelectItem>
 						))}
 					</SelectContent>
 				</Select>
-			</div>
-			<div className="space-y-1">
-				<Label className="text-xs">Window</Label>
+			}
+			key="subscription"
+			title={
+				<label htmlFor={`subscription-agent-${ruleId}`}>Subscription</label>
+			}
+		/>,
+		<SettingsItem
+			actions={
 				<Select
 					disabled={disabled}
 					items={WINDOW_OPTIONS}
@@ -250,7 +434,10 @@ function ConditionFields({
 					}
 					value={condition.window === "" ? "any" : condition.window}
 				>
-					<SelectTrigger className="h-8 w-40">
+					<SelectTrigger
+						className="h-8 w-40"
+						id={`subscription-window-${ruleId}`}
+					>
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
@@ -261,27 +448,23 @@ function ConditionFields({
 						))}
 					</SelectContent>
 				</Select>
-			</div>
-			<div className="space-y-1">
-				<Label className="text-xs" htmlFor="window-threshold">
-					Percent left, below
-				</Label>
-				<Input
-					className="h-8 w-28"
-					disabled={disabled}
-					id="window-threshold"
-					inputMode="numeric"
-					onChange={(e) =>
-						onChange({
-							...condition,
-							remaining_below_percent: Number(e.target.value) || 0,
-						})
-					}
-					value={condition.remaining_below_percent}
-				/>
-			</div>
-		</div>
-	);
+			}
+			key="window"
+			title={<label htmlFor={`subscription-window-${ruleId}`}>Window</label>}
+		/>,
+		<ThresholdInput
+			disabled={disabled}
+			id={`window-threshold-${ruleId}`}
+			inputMode="numeric"
+			key="threshold"
+			label="Percent left, below"
+			max={100}
+			onCommit={(remaining_below_percent) =>
+				onChange({ ...condition, remaining_below_percent })
+			}
+			value={condition.remaining_below_percent}
+		/>,
+	];
 }
 
 function RuleCard({
@@ -292,7 +475,7 @@ function RuleCard({
 	onMove,
 	onRemove,
 	rule,
-	subscriptionAgents,
+	scopes,
 	target,
 	total,
 }: {
@@ -303,118 +486,123 @@ function RuleCard({
 	onMove: (delta: number) => void;
 	onRemove: () => void;
 	rule: RoutingRule;
-	subscriptionAgents: string[];
+	scopes: ScopeOption[];
 	target: ApiTarget;
 	total: number;
 }) {
 	const disabled = !canConfigure;
 	return (
-		<SettingsCard className="space-y-3">
-			<div className="flex items-center justify-between gap-2">
-				<div className="flex items-center gap-2">
-					<Switch
-						aria-label="Rule enabled"
-						checked={rule.enabled}
-						disabled={disabled}
-						onCheckedChange={(enabled) => onChange({ ...rule, enabled })}
-					/>
-					<span className="font-medium text-sm">
-						{sourceLabel(rule.when.source)}
-					</span>
-				</div>
-				<div className="flex items-center gap-1">
-					<Button
-						aria-label="Move rule up"
-						disabled={disabled || index === 0}
-						onClick={() => onMove(-1)}
-						size="icon"
-						variant="ghost"
-					>
-						<HugeiconsIcon icon={ArrowUp01Icon} size={16} />
-					</Button>
-					<Button
-						aria-label="Move rule down"
-						disabled={disabled || index === total - 1}
-						onClick={() => onMove(1)}
-						size="icon"
-						variant="ghost"
-					>
-						<HugeiconsIcon icon={ArrowDown01Icon} size={16} />
-					</Button>
-					<Button
-						aria-label="Delete rule"
-						disabled={disabled}
-						onClick={onRemove}
-						size="icon"
-						variant="ghost"
-					>
-						<HugeiconsIcon icon={Delete01Icon} size={16} />
-					</Button>
-				</div>
-			</div>
-
-			<div className="space-y-1">
-				<Label className="text-xs">When</Label>
-				<Select
-					disabled={disabled}
-					items={SOURCE_OPTIONS}
-					onValueChange={(source) =>
-						onChange({
-							...rule,
-							when: conditionForSource(
-								(source ?? "ryu_credits") as RoutingCondition["source"],
-								subscriptionAgents[0] ?? "",
-								creditProviders
-							),
-						})
+		<div data-testid={`fallback-rule-${rule.id}`}>
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<div className="flex items-center gap-1">
+							<Switch
+								aria-label="Rule enabled"
+								checked={rule.enabled}
+								className="mr-1"
+								disabled={disabled}
+								onCheckedChange={(enabled) => onChange({ ...rule, enabled })}
+							/>
+							<Button
+								aria-label="Move rule up"
+								disabled={disabled || index === 0}
+								onClick={() => onMove(-1)}
+								size="icon"
+								variant="ghost"
+							>
+								<HugeiconsIcon icon={ArrowUp01Icon} size={16} />
+							</Button>
+							<Button
+								aria-label="Move rule down"
+								disabled={disabled || index === total - 1}
+								onClick={() => onMove(1)}
+								size="icon"
+								variant="ghost"
+							>
+								<HugeiconsIcon icon={ArrowDown01Icon} size={16} />
+							</Button>
+							<Button
+								aria-label="Delete rule"
+								disabled={disabled}
+								onClick={onRemove}
+								size="icon"
+								variant="ghost"
+							>
+								<HugeiconsIcon icon={Delete01Icon} size={16} />
+							</Button>
+						</div>
 					}
-					value={rule.when.source}
-				>
-					<SelectTrigger className="h-8 w-56">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{SOURCE_OPTIONS.map((opt) => (
-							<SelectItem key={opt.value} value={opt.value}>
-								{opt.label}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			</div>
-
-			<ConditionFields
-				condition={rule.when}
-				creditProviders={creditProviders}
-				disabled={disabled}
-				onChange={(when) => onChange({ ...rule, when })}
-				subscriptionAgents={subscriptionAgents}
-			/>
-
-			<div className="space-y-1">
-				<Label className="text-xs">Then run</Label>
-				<AgentSelectionField
-					ariaLabel="Fallback agent or model"
-					disabled={disabled}
-					onChange={(fallback) => onChange({ ...rule, fallback })}
-					placeholder="Just warn me — don't change the model"
-					target={target}
-					value={rule.fallback}
+					title={sourceLabel(rule.when.source)}
 				/>
-			</div>
-
-			<div className="flex items-center justify-between gap-3">
-				<span className="text-muted-foreground text-xs">
-					Show a notice above the composer when this fires
-				</span>
-				<Switch
-					aria-label="Notify when this rule fires"
-					checked={rule.notify}
-					disabled={disabled}
-					onCheckedChange={(notify) => onChange({ ...rule, notify })}
+				<SettingsItem
+					actions={
+						<Select<RoutingCondition["source"]>
+							disabled={disabled}
+							items={SOURCE_OPTIONS}
+							onValueChange={(source) =>
+								onChange({
+									...rule,
+									when: conditionForSource(
+										source ?? "ryu_credits",
+										scopes[0]?.scope ?? { agent_id: "" },
+										creditProviders
+									),
+								})
+							}
+							value={rule.when.source}
+						>
+							<SelectTrigger
+								className="h-8 w-56"
+								id={`fallback-source-${rule.id}`}
+							>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{SOURCE_OPTIONS.map((opt) => (
+									<SelectItem key={opt.value} value={opt.value}>
+										{opt.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					}
+					title={<label htmlFor={`fallback-source-${rule.id}`}>When</label>}
 				/>
-			</div>
-		</SettingsCard>
+				{conditionRows({
+					condition: rule.when,
+					creditProviders,
+					disabled,
+					onChange: (when) => onChange({ ...rule, when }),
+					ruleId: rule.id,
+					scopes,
+				})}
+				<SettingsItem
+					actions={
+						<AgentSelectionField
+							ariaLabel="Fallback agent or model"
+							disabled={disabled}
+							onChange={(fallback) => onChange({ ...rule, fallback })}
+							placeholder="Just warn me — don't change the model"
+							target={target}
+							value={rule.fallback}
+						/>
+					}
+					title="Then run"
+				/>
+				<SettingsItem
+					actions={
+						<Switch
+							aria-label="Notify when this rule fires"
+							checked={rule.notify}
+							disabled={disabled}
+							onCheckedChange={(notify) => onChange({ ...rule, notify })}
+						/>
+					}
+					title="Show a notice above the composer when this fires"
+				/>
+			</SettingsGroup>
+		</div>
 	);
 }
 
@@ -439,6 +627,10 @@ export function FallbackRulesSection({
 	const subscriptionAgents = agents
 		.map((a) => a.id)
 		.filter((id) => supportsUsage(id));
+	// Ryu subscription providers and their saved accounts, from Core's listing
+	// (no usage read): only providers whose accounts Core can read are offered.
+	const subscriptions = useSubscriptions({ target, usage: "none" });
+	const scopes = scopeOptions(subscriptionAgents, subscriptions.data);
 
 	const policyQuery = useQuery({
 		queryKey: ["routing-policy", target.url],
@@ -506,7 +698,7 @@ export function FallbackRulesSection({
 		>
 			{policyQuery.isLoading ? (
 				<SettingsCard>
-					<Spinner />
+					<SkeletonRows />
 				</SettingsCard>
 			) : null}
 			{!policyQuery.isLoading && rules.length === 0 ? (
@@ -518,7 +710,7 @@ export function FallbackRulesSection({
 					</p>
 				</SettingsCard>
 			) : null}
-			<div className="space-y-2">
+			<div className="space-y-3">
 				{rules.map((rule, index) => (
 					<RuleCard
 						canConfigure={canConfigure && !save.isPending}
@@ -540,7 +732,7 @@ export function FallbackRulesSection({
 						}}
 						onRemove={() => commit(rules.filter((r) => r.id !== rule.id))}
 						rule={rule}
-						subscriptionAgents={subscriptionAgents}
+						scopes={scopes}
 						target={target}
 						total={rules.length}
 					/>

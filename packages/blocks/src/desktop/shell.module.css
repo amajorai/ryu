@@ -1,0 +1,3 @@
+.chromeShadow {
+	composes: ryu-chrome-shadow from global;
+}

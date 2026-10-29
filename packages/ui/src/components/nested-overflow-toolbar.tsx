@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	ArrowLeftIcon,
@@ -35,12 +36,16 @@ export interface NestedOverflowToolbarProps {
 	categories: NestedOverflowToolbarCategory[];
 	className?: string;
 	defaultOpen?: boolean;
+	/** Present expanded categories as a grid instead of nested menus. */
+	expandedLayout?: "nested" | "grid";
 	placement?: "fixed" | "inline";
 	primary?: ReactNode;
 }
 
 /**
- * A compact, bottom-fixed action rail with one level of nested menus.
+ * A compact, bottom-fixed action rail with nested menus or an expanded grid.
+ *
+ * In grid mode, all categories are visible together above the compact rail.
  *
  * The root keeps primary actions visible and reveals category buttons behind the
  * overflow toggle. Selecting a category replaces the rail contents with that
@@ -52,19 +57,27 @@ export function NestedOverflowToolbar({
 	categories,
 	className,
 	defaultOpen = false,
+	expandedLayout = "nested",
 	primary,
 	placement = "fixed",
 }: NestedOverflowToolbarProps) {
 	const reduce = useReducedMotion();
+	const tl = useLiteralMessages();
 	const controlsId = useId();
 	const [isOpen, setIsOpen] = useState(defaultOpen);
 	const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
-	const activeCategory = categories.find(
-		(category) => category.id === activeCategoryId
-	);
-	const visibleLayerId = activeCategory
-		? `${controlsId}-category-${activeCategory.id}`
-		: `${controlsId}-${isOpen ? "open" : "closed"}`;
+	const activeCategory =
+		expandedLayout === "nested"
+			? categories.find((category) => category.id === activeCategoryId)
+			: undefined;
+	const visibleLayerId =
+		expandedLayout === "grid"
+			? `${controlsId}-expanded-grid`
+			: activeCategory
+				? `${controlsId}-category-${activeCategory.id}`
+				: `${controlsId}-${isOpen ? "open" : "closed"}`;
+	const rootLayerId =
+		expandedLayout === "grid" ? `${controlsId}-root` : visibleLayerId;
 	const transition = reduce ? { duration: 0 } : RAIL_TRANSITION;
 
 	const close = () => {
@@ -96,6 +109,40 @@ export function NestedOverflowToolbar({
 			)}
 			onKeyDown={handleKeyDown}
 		>
+			<AnimatePresence initial={false}>
+				{expandedLayout === "grid" && isOpen ? (
+					<motion.div
+						animate={{ opacity: 1, y: 0 }}
+						aria-hidden={!isOpen}
+						aria-label={tl("{ariaLabel} expanded", { ariaLabel })}
+						className="pointer-events-auto absolute bottom-full mb-2 grid max-h-[min(60vh,30rem)] w-[min(72rem,calc(100vw-2rem))] grid-cols-2 gap-2 overflow-y-auto rounded-2xl border border-border bg-card/95 p-2 text-card-foreground shadow-2xl shadow-black/10 backdrop-blur-xl sm:grid-cols-3 lg:grid-cols-4 dark:shadow-black/30"
+						exit={reduce ? { opacity: 0 } : { opacity: 0, y: 4 }}
+						id={visibleLayerId}
+						initial={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
+						key="expanded-grid"
+						role="group"
+						transition={transition}
+					>
+						{categories.map((category) => (
+							<div
+								aria-label={tl("{label} tools", { label: category.label })}
+								className="min-w-0 rounded-xl border border-border/60 bg-background/70 p-2"
+								key={category.id}
+								role="group"
+							>
+								<div className="mb-1.5 flex items-center gap-1.5 border-border/60 border-b px-1 pb-1.5 font-medium text-muted-foreground text-xs">
+									<span className="inline-flex size-4 shrink-0 items-center justify-center [&_svg]:size-3.5">
+										{category.icon}
+									</span>
+									{category.label}
+								</div>
+								<div className="min-w-0 max-w-full">{category.content}</div>
+							</div>
+						))}
+					</motion.div>
+				) : null}
+			</AnimatePresence>
+
 			<motion.div
 				aria-label={ariaLabel}
 				className="pointer-events-auto inline-flex max-w-full items-center overflow-hidden rounded-full border border-border bg-card/95 p-1 shadow-2xl shadow-black/10 backdrop-blur-xl supports-[backdrop-filter]:bg-card/80 dark:shadow-black/30"
@@ -135,7 +182,7 @@ export function NestedOverflowToolbar({
 							animate="present"
 							className="flex min-w-0 items-center gap-1"
 							exit="exit"
-							id={visibleLayerId}
+							id={rootLayerId}
 							initial="enter"
 							key={isOpen ? "open" : "closed"}
 							transition={transition}
@@ -146,11 +193,13 @@ export function NestedOverflowToolbar({
 									{primary}
 								</div>
 							) : null}
-							{isOpen ? (
+							{isOpen && expandedLayout === "nested" ? (
 								<div className="flex min-w-0 max-w-[calc(100vw-5rem)] items-center gap-1 overflow-x-auto">
 									{categories.map((category) => (
 										<RailButton
-											ariaLabel={`Open ${category.label} tools`}
+											ariaLabel={tl("Open {label} tools", {
+												label: category.label,
+											})}
 											key={category.id}
 											onClick={() => {
 												setIsOpen(true);
@@ -169,7 +218,7 @@ export function NestedOverflowToolbar({
 				</AnimatePresence>
 
 				<motion.button
-					aria-controls={visibleLayerId}
+					aria-controls={isOpen ? visibleLayerId : undefined}
 					aria-expanded={isOpen}
 					aria-label={isOpen ? "Close editor tools" : "Open editor tools"}
 					className={cn(

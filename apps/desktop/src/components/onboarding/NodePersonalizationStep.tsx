@@ -1,11 +1,15 @@
 import { Building03Icon, UserIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
-import { Card, CardContent, CardFooter } from "@ryu/ui/components/card";
-import { Label } from "@ryu/ui/components/label";
-import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group";
-import { Textarea } from "@ryu/ui/components/textarea";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Card, CardContent, CardFooter } from "@ryu/ui/components/card.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { RadioGroup, RadioGroupItem } from "@ryu/ui/components/radio-group.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
 import { useState } from "react";
+import {
+	type PromptCacheConfirmation,
+	PromptCacheConfirmDialog,
+} from "@/src/components/chat/PromptCacheConfirmDialog.tsx";
 import type {
 	NodeSetupKind,
 	SaveNodeOnboardingStateInput,
@@ -14,6 +18,7 @@ import {
 	DEFAULT_USER_PERSONALIZATION,
 	type UserPersonalization,
 } from "@/src/lib/api/preferences.ts";
+import { personalizationCacheWarning } from "@/src/lib/user-personalization-prompt.ts";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
 interface NodePersonalizationStepProps {
@@ -30,10 +35,7 @@ interface NodePersonalizationStepProps {
 	) => void;
 }
 
-const SETUP_KIND_COPY: Record<
-	NodeSetupKind,
-	{ description: string; label: string }
-> = {
+const SETUP_KIND_COPY = {
 	personal: {
 		description: "Keep personal details private to this node.",
 		label: "Personal use",
@@ -42,7 +44,7 @@ const SETUP_KIND_COPY: Record<
 		description: "Build shared company knowledge for this node.",
 		label: "Team or company use",
 	},
-};
+} satisfies Record<NodeSetupKind, { description: string; label: string }>;
 
 export function NodePersonalizationStep({
 	busy = false,
@@ -61,7 +63,39 @@ export function NodePersonalizationStep({
 		initialPersonalization
 	);
 
+	const [confirmation, setConfirmation] =
+		useState<PromptCacheConfirmation | null>(null);
+
 	const canContinue = canConfigure && setupKind !== null;
+
+	function submit(kind: NodeSetupKind) {
+		onContinue({
+			companyContext,
+			companyKnowledgeEnabled: kind === "team",
+			completed: false,
+			personalization,
+			setupKind: kind,
+		});
+	}
+
+	function handleContinue() {
+		if (!setupKind) {
+			return;
+		}
+		// Personal setup writes About you, which Core folds into every owner
+		// thread's system prompt. A node can reach this step with threads already
+		// on it (setup resumed, or an upgraded node), so any change to what the
+		// prompt carries is a cache miss for them: confirm first.
+		const warning =
+			setupKind === "personal"
+				? personalizationCacheWarning(initialPersonalization, personalization)
+				: null;
+		if (warning) {
+			setConfirmation(warning);
+			return;
+		}
+		submit(setupKind);
+	}
 
 	return (
 		<ActivationStepShell
@@ -69,13 +103,15 @@ export function NodePersonalizationStep({
 			title="How will you use this node?"
 		>
 			<Card
-				className="w-full max-w-xl border-0 shadow-none"
+				appearance="onboarding-setup"
+				className="w-full max-w-xl"
 				data-testid="onboarding-node-setup"
+				elevation="flat"
 			>
-				<CardContent className="space-y-4">
+				<CardContent spacing="relaxed">
 					<RadioGroup
 						aria-label="How will you use this node?"
-						className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+						className="grid-cols-1 sm:grid-cols-2"
 						onValueChange={(value: string) => {
 							if (value === "personal" || value === "team") {
 								setSetupKind(value);
@@ -103,7 +139,7 @@ export function NodePersonalizationStep({
 											size={18}
 										/>
 										<div className="min-w-0 space-y-1">
-											<Label className="font-medium text-sm" htmlFor={id}>
+											<Label htmlFor={id} variant="choice">
 												{copy.label}
 											</Label>
 											<p className="text-muted-foreground text-xs leading-relaxed">
@@ -165,23 +201,22 @@ export function NodePersonalizationStep({
 					<Button
 						disabled={busy || !canContinue}
 						loading={busy}
-						onClick={() => {
-							if (!setupKind) {
-								return;
-							}
-							onContinue({
-								companyContext,
-								companyKnowledgeEnabled: setupKind === "team",
-								completed: false,
-								personalization,
-								setupKind,
-							});
-						}}
+						onClick={handleContinue}
 					>
 						Continue
 					</Button>
 				</CardFooter>
 			</Card>
+			<PromptCacheConfirmDialog
+				confirmation={confirmation}
+				onApply={() => {
+					setConfirmation(null);
+					if (setupKind) {
+						submit(setupKind);
+					}
+				}}
+				onCancel={() => setConfirmation(null)}
+			/>
 		</ActivationStepShell>
 	);
 }

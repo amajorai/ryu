@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ApiTarget } from "./client.ts";
+import { createFetchFixture } from "./test-support/http-fixture.ts";
 import {
 	fetchWebhookSecret,
 	fetchWebhooks,
@@ -19,7 +20,7 @@ afterEach(() => {
 
 describe("webhook client", () => {
 	test("normalizes the registry while preserving metadata-only secrets", async () => {
-		globalThis.fetch = (() =>
+		globalThis.fetch = createFetchFixture(() =>
 			Promise.resolve(
 				Response.json({
 					endpoints: [
@@ -34,7 +35,8 @@ describe("webhook client", () => {
 					ingress_kind: "ryu-relay",
 					up: true,
 				})
-			)) as unknown as typeof fetch;
+			)
+		);
 
 		expect(await fetchWebhooks(target)).toEqual({
 			ingressKind: "ryu-relay",
@@ -58,10 +60,14 @@ describe("webhook client", () => {
 	});
 
 	test("uses explicit protected secret routes for read and generated write", async () => {
-		const calls: { body?: string; method?: string; url?: string }[] = [];
-		globalThis.fetch = ((url: string, init?: RequestInit) => {
+		const calls: {
+			body?: RequestInit["body"];
+			method?: string;
+			url?: string;
+		}[] = [];
+		globalThis.fetch = createFetchFixture((url: string, init?: RequestInit) => {
 			calls.push({
-				body: init?.body as string | undefined,
+				body: init?.body,
 				method: init?.method,
 				url,
 			});
@@ -73,7 +79,7 @@ describe("webhook client", () => {
 			return Promise.resolve(
 				new Response(JSON.stringify(body), { status: 200 })
 			);
-		}) as unknown as typeof fetch;
+		});
 
 		expect(await fetchWebhookSecret(target, "composio")).toBe("stored-secret");
 		expect(await setWebhookSecret(target, "composio")).toBe("generated-secret");

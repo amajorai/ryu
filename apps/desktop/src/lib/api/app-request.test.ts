@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+	type AppRequestMethod,
+	type MountedAppPathInput,
 	resolveMountedAppPath,
 	resolveOwnAppPath,
 	validateMountedAppRequest,
@@ -15,7 +17,7 @@ import { resolveTuitionPath } from "./tuition.ts";
 interface ResolverCase {
 	label: string;
 	mount: string;
-	resolve: (path: unknown) => string | null;
+	resolve: (path: MountedAppPathInput) => string | null;
 }
 
 const RESOLVERS: ResolverCase[] = [
@@ -45,7 +47,7 @@ const RESOLVERS: ResolverCase[] = [
 	},
 ];
 
-const SHARED_REJECTED_PATHS: unknown[] = [
+const SHARED_REJECTED_PATHS = [
 	"https://evil.test/x",
 	"//evil.test/x",
 	"items",
@@ -121,9 +123,9 @@ describe("mounted app path containment", () => {
 
 describe("mounted app request validation", () => {
 	const policy = {
-		allowedMethods: new Set(["GET"] as const),
+		allowedMethods: new Set<AppRequestMethod>(["GET"]),
 		invalidMethodMessage: (method: string) => `method:${method}`,
-		invalidPathMessage: (path: unknown) => `path:${String(path)}`,
+		invalidPathMessage: (path: MountedAppPathInput) => `path:${String(path)}`,
 		mount: "/api/example",
 	};
 

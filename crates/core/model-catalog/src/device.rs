@@ -41,6 +41,12 @@ pub struct DeviceInfo {
     pub unified_memory: bool,
     /// Detected OS label, e.g. `"windows"`, `"macos"`, `"linux"`.
     pub os: String,
+    /// Free bytes on the volume that holds the models directory (where every
+    /// model download lands), when detectable. Drives the "not enough disk"
+    /// verdict, which blocks an install outright.
+    pub disk_free_bytes: Option<u64>,
+    /// Human-friendly free-disk string, e.g. `"42.0 GB"`. Empty when unknown.
+    pub disk_free_human: String,
 }
 
 impl DeviceInfo {
@@ -63,7 +69,10 @@ impl DeviceInfo {
             None => (None, None, false),
         };
 
+        let disk_free_bytes = models_disk_free_bytes();
         DeviceInfo {
+            disk_free_human: disk_free_bytes.map(human_bytes).unwrap_or_default(),
+            disk_free_bytes,
             ram_human: total_ram_bytes.map(human_bytes).unwrap_or_default(),
             total_ram_bytes,
             vram_human: vram_bytes.map(human_bytes).unwrap_or_default(),
@@ -81,6 +90,9 @@ impl DeviceInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FitVerdict {
+    /// Not enough free disk space on the models volume to store it at all.
+    /// Blocks the install, like [`FitVerdict::TooBig`].
+    NoSpace,
     /// Won't fit — would exhaust memory even spilling to system RAM.
     TooBig,
     /// Fits only in system RAM (no usable GPU) — runs, but on CPU and slower.
@@ -99,6 +111,7 @@ pub enum FitVerdict {
 impl FitVerdict {
     pub fn as_str(self) -> &'static str {
         match self {
+            FitVerdict::NoSpace => "no_space",
             FitVerdict::TooBig => "too_big",
             FitVerdict::Cpu => "cpu",
             FitVerdict::Partial => "partial",
@@ -111,9 +124,10 @@ impl FitVerdict {
     /// A short, non-technical sentence a beginner can act on.
     pub fn label(self) -> &'static str {
         match self {
-            FitVerdict::TooBig => "Too large for your device",
-            FitVerdict::Cpu => "Runs on your CPU (slower, no GPU)",
-            FitVerdict::Partial => "Runs with partial GPU offload (slower)",
+            FitVerdict::NoSpace => "Not enough free disk space to download it",
+            FitVerdict::TooBig => "Too large for your device's memory",
+            FitVerdict::Cpu => "Runs on your CPU only — may be slow",
+            FitVerdict::Partial => "Only partly fits your GPU — may be slow",
             FitVerdict::Ok => "Runs on your GPU",
             FitVerdict::Great => "Runs great — fully on your GPU",
             FitVerdict::Unknown => "Can't check your device",
@@ -121,7 +135,88 @@ impl FitVerdict {
     }
 }
 
+impl FitVerdict {
+    /// Installing would crash the machine (out of memory) or fail mid-download
+    /// (out of disk). Core refuses these installs; clients disable the button.
+    pub fn blocks_install(self) -> bool {
+        matches!(self, FitVerdict::NoSpace | FitVerdict::TooBig)
+    }
+
+    /// Runs, but slowly enough that the user should be warned first.
+    pub fn is_slow(self) -> bool {
+        matches!(self, FitVerdict::Cpu | FitVerdict::Partial)
+    }
+}
+
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+/// Free space kept in reserve after a download so the OS, swap, and Ryu's own
+/// databases never hit a full disk because a model filled it. Re-exported from
+/// the download center so the up-front verdict and the transfer-time refusal
+/// share one number.
+pub const DISK_HEADROOM_BYTES: u64 = ryu_downloads::DISK_HEADROOM_BYTES;
+
+/// System RAM the model needs when it runs entirely on the CPU: weights plus
+/// KV/activation overhead plus OS/app headroom. Same formula as the CPU branch
+/// of [`estimate_fit`], exposed for CPU-only engines (the bundled sd.cpp server
+/// is a CPU build) and for the human-readable refusal message.
+pub fn system_ram_need_bytes(weight_bytes: u64) -> u64 {
+    (weight_bytes as f64 * 1.2 + 1.5 * GIB) as u64
+}
+
+/// Whether `bytes` more data fits on the models volume with
+/// [`DISK_HEADROOM_BYTES`] left over. `None` when free space is unknown.
+pub fn has_disk_space_for(bytes: u64, device: &DeviceInfo) -> Option<bool> {
+    device
+        .disk_free_bytes
+        .map(|free| free >= bytes.saturating_add(DISK_HEADROOM_BYTES))
+}
+
+/// Whether a model of `weight_bytes` fits in system RAM alone (CPU inference).
+/// `None` when RAM is unknown.
+pub fn fits_in_system_ram(weight_bytes: u64, device: &DeviceInfo) -> Option<bool> {
+    device
+        .total_ram_bytes
+        .map(|ram| ram >= system_ram_need_bytes(weight_bytes))
+}
+
+/// The install-time verdict: [`FitVerdict::NoSpace`] when the download can't be
+/// stored, otherwise the memory verdict from [`estimate_fit`]. Use this for
+/// anything not yet on disk; an installed file only needs [`estimate_fit`].
+pub fn estimate_install_fit(file_bytes: Option<u64>, device: &DeviceInfo) -> FitVerdict {
+    if let Some(bytes) = file_bytes.filter(|b| *b > 0) {
+        if has_disk_space_for(bytes, device) == Some(false) {
+            return FitVerdict::NoSpace;
+        }
+    }
+    estimate_fit(file_bytes, device)
+}
+
+/// Why installing `file_bytes` on `device` is refused, as one sentence with the
+/// real numbers, or `None` when the install may proceed (including when the
+/// size or the hardware is unknown — an unknown is never a refusal).
+pub fn install_block_reason(file_bytes: Option<u64>, device: &DeviceInfo) -> Option<String> {
+    let bytes = file_bytes.filter(|b| *b > 0)?;
+    match estimate_install_fit(Some(bytes), device) {
+        FitVerdict::NoSpace => Some(format!(
+            "Not enough free disk space: this download is {} and needs {} free (with {} kept in \
+             reserve), but only {} is free. Free up space or pick a smaller model.",
+            human_bytes(bytes),
+            human_bytes(bytes.saturating_add(DISK_HEADROOM_BYTES)),
+            human_bytes(DISK_HEADROOM_BYTES),
+            device.disk_free_human,
+        )),
+        FitVerdict::TooBig => Some(format!(
+            "Too large for this device: a {} model needs about {} of memory to run, but this \
+             computer has {}. Loading it could freeze or crash the machine — pick a smaller \
+             model or quantization, or run it on a bigger node or in the cloud.",
+            human_bytes(bytes),
+            human_bytes(system_ram_need_bytes(bytes)),
+            device.ram_human,
+        )),
+        _ => None,
+    }
+}
 
 /// Memory-aware default for llama.cpp `--parallel` (server slots = the
 /// continuous-batching width). Scales with the machine's usable inference
@@ -161,8 +256,7 @@ pub fn default_parallel_slots(device: &DeviceInfo) -> u32 {
 /// - **System need** ≈ weights × 1.2 + ~1.5 GB OS/app headroom.
 /// - Unified memory (Apple): compare against total RAM as a GPU-class pool.
 /// - Discrete GPU: fits in VRAM → `great`/`ok`; spills but fits VRAM+RAM →
-///   `partial`; only fits system RAM → unreachable here (GPU present) so falls
-///   to `partial`/`too_big`.
+///   `partial`; exceeds both → `too_big`; RAM unknown → `unknown` (never refuses).
 /// - No GPU detected: system RAM only → `cpu` / `too_big`.
 pub fn estimate_fit(file_bytes: Option<u64>, device: &DeviceInfo) -> FitVerdict {
     let Some(file) = file_bytes else {
@@ -193,13 +287,14 @@ pub fn estimate_fit(file_bytes: Option<u64>, device: &DeviceInfo) -> FitVerdict 
         if vram >= gpu_need {
             return FitVerdict::Ok;
         }
-        // Doesn't fit VRAM — can we spill the rest into system RAM?
-        if let Some(ram) = ram {
-            if ram >= sys_need {
-                return FitVerdict::Partial;
-            }
-        }
-        return FitVerdict::TooBig;
+        // Doesn't fit VRAM: partial offload keeps part of the model on the GPU
+        // and the rest in system RAM, so VRAM + RAM is the budget. An unknown
+        // RAM figure never refuses.
+        return match ram {
+            Some(ram) if vram + ram >= sys_need => FitVerdict::Partial,
+            Some(_) => FitVerdict::TooBig,
+            None => FitVerdict::Unknown,
+        };
     }
 
     // No GPU detected: CPU-only, system RAM governs.
@@ -239,6 +334,26 @@ pub fn human_bytes(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
+}
+
+// ── Disk probe ───────────────────────────────────────────────────────────────
+
+/// Free bytes on the filesystem that would contain `path` (symlinks resolved on
+/// the longest existing ancestor, Windows-safe). One probe for the whole node:
+/// the download center's preflight uses the same function, so the catalog's
+/// "not enough disk" verdict and the transfer-time refusal never disagree.
+pub fn available_space_for(path: &std::path::Path) -> Option<u64> {
+    ryu_downloads::available_space_for(path)
+}
+
+/// Free space on the volume holding `<data dir>/models`, where every model
+/// download lands.
+///
+/// `None` when no catalog host is installed (so [`DeviceInfo::detect`] stays
+/// infallible in processes that never ran `set_global_host`).
+fn models_disk_free_bytes() -> Option<u64> {
+    let root = crate::try_ryu_dir()?;
+    available_space_for(&ryu_sidecar_runtime::layout::models_root(&root))
 }
 
 // ── Platform RAM probes (zero extra dependencies) ────────────────────────────
@@ -561,10 +676,65 @@ mod tests {
             gpu_vendor: None,
             unified_memory: unified,
             os: "test".into(),
+            disk_free_bytes: None,
+            disk_free_human: String::new(),
         }
     }
 
     const GB: u64 = 1024 * 1024 * 1024;
+
+    #[test]
+    fn install_fit_blocks_when_the_disk_cannot_hold_the_download() {
+        let mut d = dev(Some(64 * GB), Some(24 * GB), false);
+        d.disk_free_bytes = Some(5 * GB);
+        d.disk_free_human = "5.0 GB".into();
+        // 4 GB + 2 GB reserve > 5 GB free.
+        assert_eq!(estimate_install_fit(Some(4 * GB), &d), FitVerdict::NoSpace);
+        assert!(FitVerdict::NoSpace.blocks_install());
+        let reason = install_block_reason(Some(4 * GB), &d).expect("refused");
+        assert!(reason.contains("disk space"), "{reason}");
+        // 2 GB + 2 GB reserve fits.
+        assert_eq!(estimate_install_fit(Some(2 * GB), &d), FitVerdict::Great);
+        assert!(install_block_reason(Some(2 * GB), &d).is_none());
+        // Unknown free space never blocks.
+        d.disk_free_bytes = None;
+        assert_ne!(estimate_install_fit(Some(4 * GB), &d), FitVerdict::NoSpace);
+    }
+
+    #[test]
+    fn install_block_reason_refuses_models_that_exceed_memory() {
+        let mut d = dev(Some(8 * GB), None, false);
+        d.ram_human = "8.0 GB".into();
+        let reason = install_block_reason(Some(12 * GB), &d).expect("refused");
+        assert!(reason.contains("8.0 GB"), "{reason}");
+        // CPU-only fits are slow, not blocked.
+        assert_eq!(estimate_fit(Some(3 * GB), &d), FitVerdict::Cpu);
+        assert!(FitVerdict::Cpu.is_slow());
+        assert!(!FitVerdict::Cpu.blocks_install());
+        assert!(install_block_reason(Some(3 * GB), &d).is_none());
+        // Unknown size or unknown hardware never blocks.
+        assert!(install_block_reason(None, &d).is_none());
+        assert!(install_block_reason(Some(12 * GB), &dev(None, None, false)).is_none());
+    }
+
+    #[test]
+    fn system_ram_fit_ignores_vram() {
+        // A big GPU does not help a CPU-only engine.
+        let d = dev(Some(8 * GB), Some(24 * GB), false);
+        assert_eq!(fits_in_system_ram(11 * GB, &d), Some(false));
+        assert_eq!(fits_in_system_ram(3 * GB, &d), Some(true));
+        assert_eq!(fits_in_system_ram(3 * GB, &dev(None, None, false)), None);
+    }
+
+    #[test]
+    fn available_space_for_a_temp_path_is_reported() {
+        let dir = std::env::temp_dir().join("ryu-device-disk-probe/not/yet/created");
+        // Lexical lookup: a missing path still resolves to its volume (when the
+        // platform exposes any disk at all).
+        if let Some(free) = available_space_for(&std::env::temp_dir()) {
+            assert_eq!(available_space_for(&dir), Some(free));
+        }
+    }
 
     #[test]
     fn gpu_vendor_is_classified_from_adapter_name() {
@@ -689,6 +859,30 @@ mod tests {
         assert_eq!(
             estimate_fit(Some(file), &dev(Some(ram), Some(vram), false)),
             FitVerdict::TooBig
+        );
+    }
+
+    #[test]
+    fn fit_partial_when_model_fits_vram_plus_ram_but_not_ram_alone() {
+        // 12 GiB VRAM + 16 GiB RAM, ~16.5 GB model (a 27B Q4_K_M): the model
+        // exceeds VRAM and system RAM alone cannot hold it with headroom, but
+        // partial offload fits in VRAM + RAM.
+        let file = 16_500_000_000u64;
+        let vram = 12u64 * 1024 * 1024 * 1024;
+        let ram = 16u64 * 1024 * 1024 * 1024;
+        assert_eq!(
+            estimate_fit(Some(file), &dev(Some(ram), Some(vram), false)),
+            FitVerdict::Partial
+        );
+    }
+
+    #[test]
+    fn fit_unknown_when_vram_is_too_small_and_ram_is_unknown() {
+        // A 2 GiB GPU with a failed RAM probe must not refuse a 4 GB model.
+        let vram = 2u64 * 1024 * 1024 * 1024;
+        assert_eq!(
+            estimate_fit(Some(4_000_000_000), &dev(None, Some(vram), false)),
+            FitVerdict::Unknown
         );
     }
 

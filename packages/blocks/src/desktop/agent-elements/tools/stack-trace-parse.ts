@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // Pure stack-trace parsing — no UI imports, so it is unit-testable in isolation.
 // The StackTrace component (stack-trace.tsx) renders what this produces.
 
@@ -25,11 +27,13 @@ export interface ParsedStackTrace {
 	frames: StackFrame[];
 }
 
-function parseFrameLocation(location: string): {
+interface StackFrameLocation {
+	col?: number;
 	file: string;
 	line?: number;
-	col?: number;
-} {
+}
+
+function parseFrameLocation(location: string): StackFrameLocation {
 	const match = LOCATION_RE.exec(location.trim());
 	if (!match) {
 		return { file: location.trim() };
@@ -93,6 +97,8 @@ export function parseStackTrace(trace: string): ParsedStackTrace {
  * one `at …` frame line so plain error strings (a single `Error: nope`) never
  * masquerade as a full trace.
  */
-export function looksLikeStackTrace(text: unknown): text is string {
-	return typeof text === "string" && HAS_FRAME_RE.test(text);
+const stackTraceTextSchema = z.string().regex(HAS_FRAME_RE);
+
+export function looksLikeStackTrace<T>(text: T): text is T & string {
+	return stackTraceTextSchema.safeParse(text).success;
 }

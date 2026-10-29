@@ -1,0 +1,160 @@
+.action,
+.tool {
+	display: grid;
+	place-items: center;
+	padding: 0;
+	color: #d0d0d4;
+	background: transparent;
+	border: 0;
+	border-radius: 50%;
+}
+
+.action {
+	width: 34px;
+	height: 34px;
+}
+
+.tool {
+	width: 34px;
+	height: 28px;
+}
+
+.action:hover,
+.tool:hover:not(:disabled) {
+	color: #fff;
+	background: rgba(255, 255, 255, 0.11);
+}
+
+.action:focus-visible,
+.tool:focus-visible,
+.swatch:focus-visible,
+.close:focus-visible,
+.attach:focus-visible {
+	outline: 2px solid rgba(255, 255, 255, 0.86);
+	outline-offset: 3px;
+}
+
+.action svg {
+	width: 17px;
+	height: 17px;
+}
+
+.tool svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tool[data-active="true"] {
+	color: #fff;
+	background: rgba(255, 255, 255, 0.13);
+}
+
+.tool:disabled {
+	color: rgba(225, 225, 230, 0.34);
+}
+
+.swatch {
+	position: relative;
+	display: grid;
+	flex: 0 0 auto;
+	place-items: center;
+	width: 20px;
+	min-width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 1px solid rgba(255, 255, 255, 0.36);
+	border-radius: 50%;
+	transition:
+		transform 120ms ease,
+		box-shadow 120ms ease;
+}
+
+.swatch[data-active="true"] {
+	outline: 2px solid #f4f4f5;
+	outline-offset: 3px;
+	transform: scale(1.08);
+}
+
+.close,
+.attach {
+	position: absolute;
+	z-index: 5;
+	display: grid;
+	place-items: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+}
+
+.close {
+	top: 8px;
+	left: 4px;
+	color: #a4a4a8;
+	background: transparent;
+}
+
+.close:hover {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.attach {
+	right: 8px;
+	bottom: 12px;
+	width: 28px;
+	height: 28px;
+	color: #202020;
+	background: #858585;
+}
+
+.attach:hover:not(:disabled) {
+	background: #f0f0f0;
+}
+
+.attach:disabled {
+	color: #282828;
+	background: #a4a4a4;
+	opacity: 0.76;
+}
+
+.close svg,
+.attach svg {
+	width: 16px;
+	height: 16px;
+}
+
+@media (max-width: 600px) {
+	.action {
+		width: 31px;
+		height: 31px;
+	}
+
+	.tool {
+		width: 31px;
+		height: 28px;
+	}
+
+	.swatch {
+		width: 18px;
+		min-width: 18px;
+		height: 18px;
+	}
+
+	.close {
+		top: 8px;
+		left: 4px;
+	}
+
+	.attach {
+		right: 12px;
+		bottom: 12px;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.swatch {
+		transition: none;
+		animation: none;
+	}
+}

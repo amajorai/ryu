@@ -1,3 +1,5 @@
+import type {} from "./proof-css-custom-properties.d.ts";
+import proofStyles from "./store-chrome-story.module.css";
 // Standalone browser story for the REAL Store/Library page chrome:
 // `StoreSectionTabs` (the pill section strip, scrolled through the shared
 // `TabsList`) and `StoreGlobalSearch` (the large muted search pill), both
@@ -29,11 +31,11 @@ import {
 	StoreGlobalSearch,
 	type StoreSectionTab,
 	StoreSectionTabs,
-} from "@ryu/blocks/desktop/store";
+} from "@ryu/blocks/desktop/store.tsx";
 import MarketplaceHelpDialog from "@ryu/marketplace/catalog/chrome/marketplace-help-dialog";
 import { REALM_ICONS } from "@ryu/marketplace/catalog/realm-icons";
 import { formatCount } from "@ryu/ui/lib/number-format.ts";
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { SECTION_ICONS } from "../../src/components/layout/sidebar-sections.ts";
 import "../../src/index.css";
@@ -244,9 +246,13 @@ function PageShell({ testid, width }: { testid: string; width: number }) {
 	const [query, setQuery] = useState("");
 	return (
 		<section
-			className="relative flex flex-col overflow-hidden rounded-xl border border-border"
+			className="relative flex h-80 w-(--proof-width) flex-col overflow-hidden rounded-xl border border-border"
 			data-testid={`${testid}-shell`}
-			style={{ height: 320, width }}
+			style={
+				{ "--proof-width": `${width}px` } satisfies CSSProperties & {
+					"--proof-width": string;
+				}
+			}
 		>
 			<div className="relative flex h-full flex-col overflow-hidden">
 				<div className="shrink-0 px-4 pt-4">
@@ -258,7 +264,7 @@ function PageShell({ testid, width }: { testid: string; width: number }) {
 					/>
 					<StoreSectionTabs
 						active="home"
-						className="pt-2 pb-1"
+						inset="store-sections"
 						sections={MANY}
 					/>
 				</div>
@@ -294,11 +300,11 @@ function Story() {
 		<div className="flex min-h-screen flex-col gap-8 bg-background p-6 text-foreground">
 			{/* Overflowing strip: 10 sections in a 420px column, so both the scroll
 			    and the edge fade are exercised. */}
-			<section data-testid="narrow-panel" style={{ width: 420 }}>
+			<section className={proofStyles.fixture1} data-testid="narrow-panel">
 				<p className="pb-2 font-semibold text-lg">Marketplace</p>
 				<StoreSectionTabs
 					active={narrowActive}
-					className="pt-2 pb-1"
+					inset="store-sections"
 					onSelect={setNarrowActive}
 					sections={MANY}
 				/>
@@ -306,11 +312,11 @@ function Story() {
 
 			{/* Non-overflowing strip: two sections with room to spare, so the fade
 			    must NOT engage. */}
-			<section data-testid="wide-panel" style={{ width: 900 }}>
+			<section className={proofStyles.fixture2} data-testid="wide-panel">
 				<p className="pb-2 font-semibold text-lg">Library</p>
 				<StoreSectionTabs
 					active={wideActive}
-					className="pt-2 pb-1"
+					inset="store-sections"
 					onSelect={setWideActive}
 					sections={FEW}
 				/>
@@ -323,11 +329,14 @@ function Story() {
 			<PageShell testid="page" width={640} />
 			<PageShell testid="cramped" width={360} />
 
-			<section data-testid="library-counts-panel" style={{ width: 900 }}>
+			<section
+				className={proofStyles.fixture3}
+				data-testid="library-counts-panel"
+			>
 				<p className="pb-2 font-semibold text-lg">Library registry</p>
 				<StoreSectionTabs
 					active="recents"
-					className="pt-2 pb-1"
+					inset="store-sections"
 					sections={LIBRARY}
 				/>
 				<p
@@ -340,9 +349,8 @@ function Story() {
 			</section>
 
 			<section
-				className="rounded-xl border border-border bg-card p-4"
+				className="max-w-225 rounded-xl border border-border bg-card p-4"
 				data-testid="count-format-proof"
-				style={{ maxWidth: 900 }}
 			>
 				<p className="pb-3 font-semibold text-lg">Count formatting</p>
 				<StoreSectionTabs active="downloads" sections={COUNT_FORMAT_PROOF} />
@@ -357,9 +365,8 @@ function Story() {
 			</section>
 
 			<section
-				className="rounded-xl border border-border bg-card p-4"
+				className="max-w-225 rounded-xl border border-border bg-card p-4"
 				data-testid="icon-parity-proof"
-				style={{ maxWidth: 900 }}
 			>
 				<p className="pb-3 font-semibold text-lg">Icon parity</p>
 				<div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

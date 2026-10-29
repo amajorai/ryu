@@ -139,6 +139,13 @@ pub struct ToolChargeBody {
     pub estimated: bool,
     #[serde(default)]
     pub task_label: Option<String>,
+    /// Provider-verified execution facts. Only accepted on this trusted route.
+    #[serde(default, rename = "composioUsage")]
+    pub composio_usage: Option<ryu_gw_contracts::composio_billing::ComposioUsage>,
+    #[serde(default, rename = "composioAccountingUnavailable")]
+    pub composio_accounting_unavailable: bool,
+    #[serde(default, rename = "authorizeOnly")]
+    pub authorize_only: bool,
 }
 
 fn normalized_tool_provider(value: Option<&str>) -> Result<&'static str, &'static str> {
@@ -176,21 +183,94 @@ pub async fn charge_tool(
         .key_config
         .as_ref()
         .is_some_and(|config| config.trusted_forwarder);
-    let trusted_agent_route = !ctx.is_master_key
+    let core_forwarded_dynamic = !ctx.is_master_key
         && ctx.key_config.is_none()
         && ctx.org_id.is_some()
-        && ctx.agent_id.is_some()
-        && body.agent_proof.is_some();
-    if !ctx.is_master_key && !trusted_forwarder && !trusted_agent_route {
+        && crate::pipeline::has_core_proof_key(&headers, ctx.org_id.as_deref());
+    if core_forwarded_dynamic
+        && body
+            .org_id
+            .as_deref()
+            .is_some_and(|org_id| Some(org_id) != ctx.org_id.as_deref())
+    {
         return Err(GatewayError::Unauthorized(
-            "tool budget charges require a master key, trusted forwarder, or Core agent proof"
-                .to_owned(),
+            "Core charge organization does not match the relay credential".to_owned(),
+        ));
+    }
+    let tenant_authorization_read = body.authorize_only && ctx.org_id.is_some();
+    if !may_accept_tool_charge(&ctx, trusted_forwarder, core_forwarded_dynamic)
+        && !tenant_authorization_read
+    {
+        return Err(GatewayError::Unauthorized(
+            "tool budget charges require a master key or trusted Core forwarder".to_owned(),
         ));
     }
 
     let provider = normalized_tool_provider(body.provider.as_deref())
         .map_err(|message| GatewayError::BadRequest(message.to_owned()))?;
+    if body.authorize_only {
+        let authorization_org = if ctx.is_master_key || trusted_forwarder {
+            body.org_id.as_deref().or(ctx.org_id.as_deref())
+        } else {
+            ctx.org_id.as_deref()
+        };
+        // A dynamic tenant whose balance the control plane could not read is
+        // unknown, not funded: refuse managed tool spend like the debit gate.
+        if ctx.credit_accounting_unavailable
+            || authorization_org
+                .is_some_and(|org_id| state.wallet.is_org_accounting_unavailable(org_id))
+        {
+            return Err(GatewayError::AccountingUnavailable);
+        }
+        return Ok(Json(json!({"accepted":true,"authorized":true})));
+    }
 
+    if body.composio_usage.is_some() && (provider != "composio" || body.cost_micro_usd.is_some()) {
+        return Err(GatewayError::BadRequest(
+            "composioUsage requires Composio and cannot be combined with a total cost".to_owned(),
+        ));
+    }
+    let composio_charge = body
+        .composio_usage
+        .as_ref()
+        .map(|usage| {
+            ryu_gw_contracts::composio_billing::price_composio_usage(
+                usage,
+                &state.config.composio.billing,
+                body.tool_calls,
+            )
+        })
+        .transpose()
+        .map_err(|message| GatewayError::BadRequest(message.to_owned()))?;
+    let cost_micro_usd = composio_charge
+        .as_ref()
+        .map(|charge| charge.total_micro_usd)
+        .or(body.cost_micro_usd);
+    let task_label = body
+        .composio_usage
+        .as_ref()
+        .map(|usage| {
+            let kind = match usage.kind {
+                ryu_gw_contracts::composio_billing::ComposioUsageKind::TriggerEvent => {
+                    "delivered trigger event(s)"
+                }
+                ryu_gw_contracts::composio_billing::ComposioUsageKind::Meta => "meta operation(s)",
+                ryu_gw_contracts::composio_billing::ComposioUsageKind::ToolCall => "tool call(s)",
+            };
+            let charge = composio_charge.as_ref().expect("priced usage");
+            format!(
+                "{} Composio {kind}; base {}, add-ons {}, premium {} micro-USD",
+                body.tool_calls,
+                charge.base_micro_usd,
+                charge.addons_micro_usd,
+                charge.premium_micro_usd
+            )
+        })
+        .or(body.task_label);
+
+    // Org limits attribute to the verified request identity only; the body's
+    // forwarded identity fields never pick which org caps are charged.
+    let org_limit_subject = crate::org_limits::subject_for(&ctx);
     let user_id = if ctx.key_config.is_none() && !ctx.is_master_key {
         ctx.user_id
     } else {
@@ -207,8 +287,22 @@ pub async fn charge_tool(
     } else {
         ctx.org_id.as_deref()
     };
+    if body.composio_accounting_unavailable {
+        if provider != "composio" {
+            return Err(GatewayError::BadRequest(
+                "Invalid accounting provider".to_owned(),
+            ));
+        }
+        if let Some(org_id) = org_id {
+            state.wallet.set_org_accounting_unavailable(org_id, true);
+        }
+        return Err(GatewayError::ProviderError(
+            "Composio execution completed but its billing receipt is unavailable; reconcile before further managed spend".to_owned(),
+        ));
+    }
     crate::pipeline::spawn_external_tool_debit_for_ids(
         &state,
+        &ctx.owner_binding,
         user_id.as_deref(),
         agent_id.as_deref(),
         session_id.as_deref(),
@@ -217,11 +311,12 @@ pub async fn charge_tool(
         ctx.managed_inference,
         provider,
         body.tool_id.as_deref(),
-        body.cost_micro_usd,
+        cost_micro_usd,
         body.transaction_id.as_deref(),
         body.estimated,
-        body.task_label.as_deref(),
+        task_label.as_deref(),
         body.tool_calls,
+        org_limit_subject.as_ref(),
     );
 
     Ok(Json(json!({
@@ -229,10 +324,19 @@ pub async fn charge_tool(
         "tool_calls": body.tool_calls,
         "provider": provider,
         "tool_id": body.tool_id,
-        "cost_micro_usd": body.cost_micro_usd,
+        "cost_micro_usd": cost_micro_usd,
+        "composioCharge": composio_charge,
         "currency": "USD",
         "unit": "micro_usd",
     })))
+}
+
+fn may_accept_tool_charge(
+    ctx: &crate::pipeline::RequestContext,
+    trusted_forwarder: bool,
+    core_forwarded_dynamic: bool,
+) -> bool {
+    ctx.is_master_key || trusted_forwarder || core_forwarded_dynamic
 }
 
 /// Optional org scope for `GET /v1/wallet`.
@@ -304,6 +408,63 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    #[tokio::test]
+    async fn composio_charge_prices_deliveries_premium_and_zdr_on_the_trusted_route() {
+        let mut state = crate::state::AppState::new_for_test_default();
+        state.config.composio.billing.zero_data_retention = true;
+        state.auth.write().unwrap().master_key = Some("billing-test-master".to_owned());
+        let state = std::sync::Arc::new(state);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            "Bearer billing-test-master".parse().unwrap(),
+        );
+        for (usage, units, expected) in [
+            (
+                json!({"kind":"toolCall","authSource":"managedApp","directExecution":true,"premiumChargeMicroUsd":8000}),
+                1,
+                8700,
+            ),
+            (
+                json!({"kind":"triggerEvent","authSource":"managedApp"}),
+                2,
+                10000,
+            ),
+            (json!({"kind":"meta","authSource":"managedApp"}), 1, 0),
+        ] {
+            let body = serde_json::from_value(json!({"tool_calls":units,"org_id":"org-a","provider":"composio","composioUsage":usage})).unwrap();
+            let Json(result) = charge_tool(
+                State(std::sync::Arc::clone(&state)),
+                headers.clone(),
+                Json(body),
+            )
+            .await
+            .unwrap();
+            assert_eq!(result["cost_micro_usd"], expected);
+            assert_eq!(result["composioCharge"]["totalMicroUsd"], expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn composio_receipt_outage_marks_only_the_bound_wallet_unavailable() {
+        let state = crate::state::AppState::new_for_test_default();
+        state.auth.write().unwrap().master_key = Some("billing-test-master".to_owned());
+        let state = std::sync::Arc::new(state);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            "Bearer billing-test-master".parse().unwrap(),
+        );
+        let body = serde_json::from_value(json!({"tool_calls":1,"org_id":"org-a","provider":"composio","composioAccountingUnavailable":true})).unwrap();
+        assert!(
+            charge_tool(State(std::sync::Arc::clone(&state)), headers, Json(body))
+                .await
+                .is_err()
+        );
+        assert!(state.wallet.is_org_accounting_unavailable("org-a"));
+        assert!(!state.wallet.is_org_accounting_unavailable("org-b"));
+    }
+
     #[test]
     fn filter_scope_narrows_to_single_id() {
         let mut m = HashMap::new();
@@ -341,4 +502,25 @@ mod tests {
             Err("unsupported external tool provider")
         );
     }
+
+    #[test]
+    fn an_inference_bearer_cannot_authorize_budget_charges() {
+        let mut ctx = crate::pipeline::test_support::plain_request_context();
+        ctx.org_id = Some("org-1".to_owned());
+        ctx.agent_id = Some("agent-1".to_owned());
+        ctx.key_config = None;
+        assert!(!may_accept_tool_charge(&ctx, false, false));
+        assert!(may_accept_tool_charge(&ctx, false, true));
+
+        ctx.is_master_key = true;
+        assert!(may_accept_tool_charge(&ctx, false, false));
+    }
 }
+
+#[cfg(test)]
+#[path = "budget_wallet_tests.rs"]
+mod wallet_tests;
+
+#[cfg(test)]
+#[path = "budget_spend_tests.rs"]
+mod spend_tests;

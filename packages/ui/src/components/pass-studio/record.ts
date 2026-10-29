@@ -1,12 +1,7 @@
 /**
- * Turning a drawing loop into a file.
- *
- * `MediaRecorder` over `canvas.captureStream()` rather than an encoder library:
- * it is the only path that ships in the browser, and the alternative — a WASM
- * encoder — is megabytes of download to produce the same H.264 the platform
- * already has. The cost is that recording is REAL TIME: ten seconds of video
- * takes ten seconds of wall clock, because the recorder timestamps frames as
- * they arrive rather than from a timeline.
+ * Export one complete drawing cycle. Timestamped WebCodecs frames preserve the
+ * intended media duration even when rendering or encoding is slower than real
+ * time. Browsers without a supported frame encoder retain canvas MediaRecorder.
  */
 
 /**
@@ -48,7 +43,7 @@ export interface PassRecording {
 export function supportedRecordingFormat():
 	| (typeof CODEC_LADDER)[number]
 	| null {
-	if (typeof MediaRecorder === "undefined") {
+	if (globalThis.MediaRecorder === undefined) {
 		return null;
 	}
 	return (
@@ -63,7 +58,7 @@ export function supportedRecordingFormat():
  * frame. `onFrame` receives the time in seconds since the recording started,
  * wrapped into the loop — so the caller draws a cycle and this closes it.
  */
-export function recordCanvasLoop({
+function recordCanvasLoopRealtime({
 	canvas,
 	fps,
 	onFrame,
@@ -104,8 +99,12 @@ export function recordCanvasLoop({
 		// duplicate, which the encoder collapses), so the reliable mechanism carries
 		// the recording and the precise one sharpens it.
 		const stream = canvas.captureStream(fps);
+		// SAFETY: canvas.captureStream creates a canvas-capture video track. The
+		// native requestFrame method is optional here because older Safari capture
+		// streams omit it; retain the existing self-sampling fallback unchanged.
 		const frameTrack = stream.getVideoTracks()[0] as
-			| (MediaStreamTrack & { requestFrame?: () => void })
+			| (Omit<CanvasCaptureMediaStreamTrack, "requestFrame"> &
+					Partial<Pick<CanvasCaptureMediaStreamTrack, "requestFrame">>)
 			| undefined;
 		const publish = () => frameTrack?.requestFrame?.();
 		const recorder = new MediaRecorder(stream, {
@@ -232,6 +231,122 @@ export function recordCanvasLoop({
 		publish();
 		raf = requestAnimationFrame(tick);
 	});
+}
+
+function nextRecordingFrame(signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		let raf = 0;
+		const cleanup = () => {
+			cancelAnimationFrame(raf);
+			signal?.removeEventListener("abort", interrupted);
+			document.removeEventListener("visibilitychange", interrupted);
+		};
+		const interrupted = () => {
+			if (!(signal?.aborted || document.hidden)) {
+				return;
+			}
+			cleanup();
+			reject(
+				signal?.aborted
+					? new DOMException("Recording aborted", "AbortError")
+					: new Error(
+							"Recording stopped because the tab went to the background"
+						)
+			);
+		};
+		signal?.addEventListener("abort", interrupted);
+		document.addEventListener("visibilitychange", interrupted);
+		raf = requestAnimationFrame(() => {
+			cleanup();
+			resolve();
+		});
+		interrupted();
+	});
+}
+
+/** Encode every frame on its intended media timeline, independently of capture latency. */
+export async function recordCanvasLoop(options: {
+	canvas: HTMLCanvasElement;
+	fps: number;
+	onFrame: (time: number) => void;
+	onProgress?: (fraction: number) => void;
+	seconds: number;
+	signal?: AbortSignal;
+}): Promise<PassRecording> {
+	if (globalThis.VideoEncoder === undefined) {
+		return recordCanvasLoopRealtime(options);
+	}
+	const {
+		BufferTarget,
+		CanvasSource,
+		Mp4OutputFormat,
+		Output,
+		Quality,
+		WebMOutputFormat,
+		canEncodeVideo,
+	} = await import("mediabunny");
+	const quality = new Quality({ bitrate: VIDEO_BITS_PER_SECOND });
+	const dimensions = {
+		width: options.canvas.width,
+		height: options.canvas.height,
+		quality,
+	};
+	const codec = (await canEncodeVideo("avc", dimensions))
+		? "avc"
+		: (await canEncodeVideo("vp9", dimensions))
+			? "vp9"
+			: null;
+	if (!codec) {
+		return recordCanvasLoopRealtime(options);
+	}
+	const target = new BufferTarget();
+	const output = new Output({
+		target,
+		format: codec === "avc" ? new Mp4OutputFormat() : new WebMOutputFormat(),
+	});
+	const source = new CanvasSource(options.canvas, { codec, quality });
+	output.addVideoTrack(source, { frameRate: options.fps });
+	const checkActive = () => {
+		if (options.signal?.aborted) {
+			throw new DOMException("Recording aborted", "AbortError");
+		}
+		if (document.hidden) {
+			throw new Error(
+				"Recording stopped because the tab went to the background"
+			);
+		}
+	};
+	try {
+		checkActive();
+		await output.start();
+		const frames = Math.max(1, Math.round(options.seconds * options.fps));
+		const duration = options.seconds / frames;
+		for (let frame = 0; frame < frames; frame++) {
+			checkActive();
+			options.onFrame(frame * duration);
+			// add captures this canvas now and awaits encoder backpressure. A slow
+			// device takes longer to export; it cannot silently drop media time.
+			await source.add(frame * duration, duration);
+			options.onProgress?.((frame + 1) / frames);
+			await nextRecordingFrame(options.signal);
+		}
+		checkActive();
+		await output.finalize();
+		checkActive();
+		if (!target.buffer) {
+			throw new Error("Could not encode the pass video");
+		}
+		return {
+			blob: new Blob([target.buffer], {
+				type: codec === "avc" ? "video/mp4" : "video/webm",
+			}),
+			extension: codec === "avc" ? "mp4" : "webm",
+			mimeType: codec === "avc" ? "video/mp4" : "video/webm",
+		};
+	} catch (error) {
+		await output.cancel();
+		throw error;
+	}
 }
 
 /** Hand a blob to the browser as a download. */

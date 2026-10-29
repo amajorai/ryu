@@ -33,4 +33,6 @@ export default defineConfig({
 			input: path.resolve(harnessDir, "goal-completion-proof.html"),
 		},
 	},
+
+	optimizeDeps: { esbuildOptions: { target: "esnext" } },
 });

@@ -1,16 +1,17 @@
 // Canonical app/plugin tile: layered material, preserved artwork and offline caching.
 
 import AppIconArtwork, {
+	type AppIconPresentation,
+	appIconPresentationClasses,
 	composerIconFor,
 } from "@ryu/ui/components/app-icon-artwork.tsx";
 import { Icon, iconToUrl } from "@ryu/ui/components/icon.tsx";
 import { useSvglIndex } from "@ryu/ui/components/svgl.ts";
 import { bundledIconArt } from "@ryu/ui/lib/app-icon-art.ts";
-import bundledGlyphs from "@ryu/ui/lib/app-icon-glyphs.json";
-import {
-	APP_ICON_FALLBACK_GLYPH,
-	appIconMaterial,
-} from "@ryu/ui/lib/app-icon-material.ts";
+import bundledGlyphs from "@ryu/ui/lib/app-icon-glyphs.json" with {
+	type: "json",
+};
+import { appIconMaterialSvg } from "@ryu/ui/lib/app-icon-material.ts";
 import {
 	APP_ICON_TILE_CARD,
 	APP_ICON_TILE_CARD_GLYPH,
@@ -19,12 +20,28 @@ import {
 	APP_ICON_TILE_HERO_SURFACE,
 } from "@ryu/ui/lib/app-icon-tile.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useCachedIconUrl } from "../icon-cache.ts";
 import { resolveCardIcon } from "../icon-url.ts";
 import type { CardDither, CardThemePreview } from "../types.ts";
+import styles from "./app-icon.module.css";
 import BrandOrCoverImage, { normalizeIconPadding } from "./brand-image.tsx";
 import { normalizeDither } from "./dither.ts";
+
+const bundledGlyphById = new Map(Object.entries(bundledGlyphs));
+
+interface MonogramVariables extends CSSProperties {
+	"--catalog-monogram-size": string;
+}
+interface BackgroundVariables extends CSSProperties {
+	"--catalog-icon-background": string;
+}
+interface MaterialVariables extends CSSProperties {
+	"--catalog-icon-material": string;
+}
+interface SwatchVariables extends CSSProperties {
+	"--catalog-swatch-color": string;
+}
 
 export interface AppIconProps {
 	/** Persist this icon's bytes under `<id>@<version>` (see
@@ -34,6 +51,7 @@ export interface AppIconProps {
 	cacheKey?: string | null;
 	/** Extra classes for the square (sizing lives here: `size-10`, `size-5`, …). */
 	className?: string;
+	corners?: "default" | "compact" | "mention";
 	/** Validated before use; an unpaintable spec falls through to `iconBackground`. */
 	dither?: CardDither | null;
 	/** Last-resort node when the item ships no art AND `seedId`/`name` is empty.
@@ -56,6 +74,7 @@ export interface AppIconProps {
 	iconUrlDark?: string | null;
 	/** Display name — the seed of last resort, and the img alt. */
 	name?: string | null;
+	presentation?: AppIconPresentation;
 	/** Stable seed for the generative tile — ALWAYS the item's unique id (the
 	 *  plugin id, not its label), so the same app tiles identically everywhere. */
 	seedId?: string | null;
@@ -87,6 +106,8 @@ export default function AppIcon({
 	iconAppearance,
 	cacheKey,
 	className,
+	corners = "default",
+	presentation,
 	dither,
 	fallback,
 	iconBackground,
@@ -101,6 +122,9 @@ export default function AppIcon({
 	variant = "card",
 }: AppIconProps) {
 	const isHero = variant === "hero";
+	const monogramStyle: MonogramVariables = {
+		"--catalog-monogram-size": `${size}px`,
+	};
 	const bare = Boolean(iconAppearance);
 	const safeDither = bare ? null : normalizeDither(dither);
 	const svglIndex = useSvglIndex();
@@ -125,9 +149,7 @@ export default function AppIcon({
 	const normalizedGlyph = resolvedIconId?.includes(":")
 		? resolvedIconId
 		: `hugeicons:${resolvedIconId}`;
-	const bundledGlyph = Object.hasOwn(bundledGlyphs, normalizedGlyph)
-		? bundledGlyphs[normalizedGlyph as keyof typeof bundledGlyphs]
-		: null;
+	const bundledGlyph = bundledGlyphById.get(normalizedGlyph) ?? null;
 	const glyphSource =
 		bundledGlyph ??
 		(resolvedIconId ? iconToUrl(resolvedIconId, { size }) : null);
@@ -156,7 +178,15 @@ export default function AppIcon({
 	const isPlaceholder = !(resolvedIconId || resolvedIconUrl || fallback);
 
 	if (!bare && composerIconFor(seedId)) {
-		return <AppIconArtwork className={className} id={seedId} size={size * 2} />;
+		return (
+			<AppIconArtwork
+				className={className}
+				corners={corners}
+				id={seedId}
+				presentation={presentation}
+				size={size * 2}
+			/>
+		);
 	}
 
 	let content: ReactNode;
@@ -176,6 +206,14 @@ export default function AppIcon({
 						: undefined
 				}
 				dark={cachedDark ?? darkSource}
+				fallback={
+					<span
+						className={cn("font-semibold uppercase", styles.monogram)}
+						style={monogramStyle}
+					>
+						{Array.from(name || seed || "R")[0]}
+					</span>
+				}
 				light={cachedLight ?? resolvedIconUrl}
 				padding={normalizeIconPadding(iconPadding)}
 			/>
@@ -189,6 +227,9 @@ export default function AppIcon({
 			<span
 				className={cn(
 					"relative flex shrink-0 items-center justify-center",
+					corners === "compact" && "rounded-artwork-compact",
+					corners === "mention" && "rounded-artwork-mention",
+					appIconPresentationClasses(presentation),
 					className
 				)}
 				data-app-icon="image"
@@ -198,9 +239,11 @@ export default function AppIcon({
 		);
 	}
 
-	const flatBackground =
+	const flatBackground: BackgroundVariables | undefined =
 		!(bare || safeDither) && iconBackground
-			? { background: iconBackground }
+			? {
+					"--catalog-icon-background": iconBackground,
+				}
 			: undefined;
 
 	const materialInput = {
@@ -217,6 +260,28 @@ export default function AppIcon({
 			(normalizeIconPadding(iconPadding) !== null && iconPadding !== "none")) &&
 		!(isPlaceholder && themePreview);
 	const glyphColor = useMaterial ? "text-foreground" : APP_ICON_TILE_CARD_GLYPH;
+	const lightMaterialStyle: MaterialVariables | undefined = useMaterial
+		? {
+				"--catalog-icon-material": `url("data:image/svg+xml,${encodeURIComponent(appIconMaterialSvg(materialInput))}")`,
+			}
+		: undefined;
+	const darkMaterialStyle: MaterialVariables | undefined = useMaterial
+		? {
+				"--catalog-icon-material": `url("data:image/svg+xml,${encodeURIComponent(appIconMaterialSvg(materialInput, "dark"))}")`,
+			}
+		: undefined;
+	const swatchBackground: SwatchVariables | undefined =
+		isPlaceholder && themePreview
+			? { "--catalog-swatch-color": themePreview.bg }
+			: undefined;
+	const swatchSurface: SwatchVariables | undefined =
+		isPlaceholder && themePreview
+			? { "--catalog-swatch-color": themePreview.surface }
+			: undefined;
+	const swatchPrimary: SwatchVariables | undefined =
+		isPlaceholder && themePreview
+			? { "--catalog-swatch-color": themePreview.primary }
+			: undefined;
 
 	return (
 		<span
@@ -226,28 +291,36 @@ export default function AppIcon({
 					: isHero
 						? APP_ICON_TILE_HERO
 						: APP_ICON_TILE_CARD,
+				corners === "compact" && "rounded-artwork-compact",
+				corners === "mention" && "rounded-artwork-mention",
+				!bare && styles.frame,
+				flatBackground && styles.flatBackground,
 				glyphColor,
 				bare || useMaterial || isPlaceholder || safeDither || iconBackground
 					? ""
 					: isHero
 						? APP_ICON_TILE_HERO_SURFACE
 						: APP_ICON_TILE_CARD_SURFACE,
+				appIconPresentationClasses(presentation),
 				className
 			)}
 			data-app-icon={useMaterial ? "fallback" : "art"}
-			style={bare ? undefined : { ...flatBackground, borderRadius: "24%" }}
+			style={flatBackground}
 		>
 			{useMaterial ? (
 				<>
 					<span
 						aria-hidden="true"
-						className="absolute inset-0 dark:hidden"
-						style={appIconMaterial(materialInput)}
+						className={cn("absolute inset-0 dark:hidden", styles.material)}
+						style={lightMaterialStyle}
 					/>
 					<span
 						aria-hidden="true"
-						className="absolute inset-0 hidden dark:block"
-						style={appIconMaterial(materialInput, "dark")}
+						className={cn(
+							"absolute inset-0 hidden dark:block",
+							styles.material
+						)}
+						style={darkMaterialStyle}
 					/>
 				</>
 			) : null}
@@ -260,26 +333,27 @@ export default function AppIcon({
 					// and the picker agree about what a theme looks like.
 					<span className="flex size-full flex-col overflow-hidden">
 						<span
-							className="block flex-1"
-							style={{ backgroundColor: themePreview.bg }}
+							className={cn("block flex-1", styles.swatch)}
+							style={swatchBackground}
 						/>
 						<span
-							className="block h-[25%]"
-							style={{ backgroundColor: themePreview.surface }}
+							className={cn("block h-[25%]", styles.swatch)}
+							style={swatchSurface}
 						/>
 						<span
-							className="block h-[20%]"
-							style={{ backgroundColor: themePreview.primary }}
+							className={cn("block h-[20%]", styles.swatch)}
+							style={swatchPrimary}
 						/>
 					</span>
 				) : (
 					<span
 						aria-hidden="true"
-						className="relative font-semibold uppercase"
-						style={{
-							...(useMaterial ? APP_ICON_FALLBACK_GLYPH : {}),
-							fontSize: size,
-						}}
+						className={cn(
+							"relative font-semibold uppercase",
+							styles.monogram,
+							useMaterial && styles.inheritedGlyph
+						)}
+						style={monogramStyle}
 					>
 						{Array.from(name || seed || "R")[0]}
 					</span>
@@ -288,9 +362,9 @@ export default function AppIcon({
 				<span
 					className={cn(
 						"relative flex items-center justify-center",
-						resolvedIconUrl && !resolvedIconId && "size-full"
+						resolvedIconUrl && !resolvedIconId && "size-full",
+						useMaterial && styles.inheritedGlyph
 					)}
-					style={useMaterial ? APP_ICON_FALLBACK_GLYPH : undefined}
 				>
 					{content}
 				</span>

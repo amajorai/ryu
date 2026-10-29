@@ -1,3 +1,4 @@
+import { resolveRpcStream } from "./streaming-rpc.ts";
 // The desktop extension host (#446): renders a plugin's UI in a SANDBOXED,
 // null-origin <iframe> and establishes a capability-gated postMessage RPC bridge
 // between the host (this trusted webview) and the plugin (the frame).
@@ -18,7 +19,7 @@
 //     `port2` into the frame, and runs all RPC over `port1`. Point-to-point ports
 //     sidestep the `targetOrigin: "*"` ambiguity a null-origin frame would force.
 //
-// ⚠️ THE FRAME'S CSP IS NOT THE ONLY CSP IT OBEYS. A document loaded from
+// ! THE FRAME'S CSP IS NOT THE ONLY CSP IT OBEYS. A document loaded from
 // `about:srcdoc` gets NO fresh policy container — it INHERITS the embedder's CSP,
 // and the inherited policy and the frame's own `<meta>` policy then apply as a
 // conjunction. So the bootstrap that posts `ryu-plugin-ready` runs only if the
@@ -39,12 +40,10 @@
 // The full rationale for the shipped `script-src` / `script-src-elem` /
 // `script-src-attr` split lives in `docs/desktop-extension-host-spec.md` §3.1.
 
-import type { MutableRefObject } from "react";
+import type { RefObject } from "react";
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { z } from "zod";
 import {
-	asAgentRunArg,
-	asFinetuneIdArg,
-	asRealtimeConnectionArg,
 	asRpcRequest,
 	assertGranted,
 	type Capability,
@@ -58,14 +57,78 @@ import {
 	toRpcError,
 } from "./rpc.ts";
 
-/** The iframe `sandbox` token list — the whole isolation boundary in one
- *  constant. `allow-scripts` ONLY: NO `allow-same-origin` (which would grant the
- *  frame the app's origin → parent DOM, cookies, storage, and Tauri IPC), and NO
- *  `allow-popups` / `allow-top-navigation` / `allow-forms`. Exported so the
- *  DOM-free `sandbox_never_same_origin` test can assert it without rendering the
- *  component. Do NOT add `allow-same-origin`; it converts the sandbox into full
- *  parent access (invariant #2). */
+// Window/port envelopes are decoded before lifecycle decisions and callbacks.
+const readyMessageSchema = z.object({
+	kind: z.literal("ryu-plugin-ready"),
+	nonce: z.string(),
+});
+const readyBoundarySchema = z.unknown().transform((data) => {
+	const parsed = readyMessageSchema.safeParse(data);
+	return parsed.success ? parsed.data : null;
+});
+const handshakeVersionSchema = z.object({ hostApiVersion: z.string().min(1) });
+const handshakeVersionBoundarySchema = z
+	.unknown()
+	.transform((data): string | null => {
+		const parsed = handshakeVersionSchema.safeParse(data);
+		return parsed.success ? parsed.data.hostApiVersion : null;
+	});
+export const frameMessageSchema = z.record(z.string(), z.unknown());
+export type ExtensionFrameMessage = z.infer<typeof frameMessageSchema>;
+
+/** The base iframe sandbox. Never add `allow-same-origin`, which would grant the
+ *  frame the app's origin → parent DOM, cookies, storage, and Tauri IPC. Popups
+ *  and top-navigation are always disabled. Forms are opt-in only for trusted
+ *  compiled HTML Companions with `connect-src 'none'` and `form-action 'none'`
+ *  CSP; downloads use their separate Gateway-approved grant. */
 export const IFRAME_SANDBOX = "allow-scripts";
+
+/** Manifest grant that lets a sandboxed Companion export a user-requested file. */
+export const APP_DOWNLOAD_GRANT = "files:download";
+
+/** Forms are enabled only for compiled-in first-party full-HTML Companions. */
+export function shouldEnableCompanionFormEvents(
+	firstParty: boolean,
+	isHtmlBundle: boolean
+): boolean {
+	return firstParty && isHtmlBundle;
+}
+
+/** Add only the browser download capability to the null-origin sandbox. */
+export function sandboxForDownloads(allowDownloads: boolean): string {
+	return allowDownloads ? `${IFRAME_SANDBOX} allow-downloads` : IFRAME_SANDBOX;
+}
+
+/**
+ * Compose a first-party HTML Companion sandbox without enabling document
+ * navigation. Local React form handlers need the `allow-forms` sandbox token,
+ * while the companion CSP's `connect-src 'none'; form-action 'none'` keeps the
+ * frame from reaching the network or submitting a form body. Callers opt in only
+ * for trusted compiled HTML bundles; Path A and third-party frames retain the default.
+ */
+export function sandboxForCompanion(options: {
+	allowDownloads?: boolean;
+	allowForms?: boolean;
+	srcdoc: string;
+}): string {
+	const tokens = [IFRAME_SANDBOX];
+	const csp = options.srcdoc.match(
+		/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i
+	)?.[1];
+	const egressLocked = csp
+		? /(?:^|;)\s*connect-src\s+'none'(?=\s*(?:;|$))/i.test(csp)
+		: false;
+	const formActionsLocked = csp
+		? /(?:^|;)\s*form-action\s+'none'(?=\s*(?:;|$))/i.test(csp)
+		: false;
+	if (options.allowForms && egressLocked && formActionsLocked) {
+		tokens.push("allow-forms");
+	}
+	if (options.allowDownloads) {
+		tokens.push("allow-downloads");
+	}
+	return tokens.join(" ");
+}
 
 /**
  * Attach the handshake listener during the COMMIT, not from a passive effect.
@@ -78,7 +141,7 @@ export const IFRAME_SANDBOX = "allow-scripts";
  * SSR, so fall back to `useEffect` where there is no DOM.
  */
 const useHandshakeEffect =
-	typeof document === "undefined" ? useEffect : useLayoutEffect;
+	globalThis.document === undefined ? useEffect : useLayoutEffect;
 
 /** Inputs to the handshake decision, pulled out of the DOM event so the decision
  *  is a pure function. */
@@ -104,13 +167,13 @@ export interface HandshakeInputs {
  * without a DOM.
  */
 export function shouldTransferPort(
-	data: unknown,
+	data: z.input<typeof readyBoundarySchema>,
 	{ expectedNonce, fromThisFrame, alreadyConnected }: HandshakeInputs
 ): boolean {
 	if (alreadyConnected) {
 		return false;
 	}
-	const msg = data as { kind?: string; nonce?: string } | null;
+	const msg = readyBoundarySchema.parse(data);
 	const isReady =
 		msg?.kind === "ryu-plugin-ready" && msg.nonce === expectedNonce;
 	return Boolean(isReady && fromThisFrame);
@@ -127,13 +190,18 @@ export function shouldTransferPort(
  * rejected: {@link shouldTransferPort} — the accept/reject gate — deliberately
  * does NOT read this field.
  */
-export function handshakeHostApiVersion(data: unknown): string | null {
-	const msg = data as { hostApiVersion?: unknown } | null;
-	const v = msg?.hostApiVersion;
-	return typeof v === "string" && v.length > 0 ? v : null;
-}
+export const handshakeHostApiVersion = handshakeVersionBoundarySchema.parse;
 
 export interface ExtensionHostProps {
+	/** True only when the Gateway-approved `files:download` grant is present. */
+	allowDownloads?: boolean;
+	/**
+	 * Opt into local HTML form handlers for a trusted compiled Companion. The
+	 * host additionally requires both `connect-src 'none'` and `form-action 'none'`
+	 * in `srcdoc`, so forms cannot reach the network, navigate, or transmit a body.
+	 * Default false keeps third-party and widget frames at the base sandbox.
+	 */
+	allowForms?: boolean;
 	/** Capabilities the host grants this plugin instance. For the MVP this is
 	 *  host-provided config; reading it from `manifest.json` grants is #443. */
 	granted: ReadonlySet<Capability>;
@@ -147,33 +215,40 @@ export interface ExtensionHostProps {
 	 * invoked only for messages whose source is this iframe; RPC handshakes still
 	 * remain handled by the host below.
 	 */
-	onMessage?: (data: unknown) => void;
+	onMessage?: (data: ExtensionFrameMessage) => void;
 	/** Optional (widget host, ADDITIVE): a ref the host fills with a push function
 	 *  once the port is live, so the caller can send `ryu-widget-set-globals` to the
 	 *  frame (spec §1.2 `HostPush`). Cleared to `null` on unmount. The plugin caller
 	 *  (`PluginHostPanel`) omits it and is unaffected. */
-	pushRef?: MutableRefObject<((msg: HostPush) => void) | null>;
+	pushRef?: RefObject<((msg: HostPush) => void) | null>;
 	/** The privileged services the host runs on the plugin's behalf (the plugin
 	 *  never holds the Core token). */
 	services: HostServices;
 	/** The plugin's sandboxed document. Must already have `nonce` interpolated by
 	 *  its builder (see `example-plugin.ts`). */
 	srcdoc: string;
+	/** Live host privacy state; unknown hosts keep connected-app summaries hidden. */
+	streamingPrivacyActive?: boolean;
 	/** Resolved host theme tokens to push into a mounted companion without
 	 *  requiring the app to request the shell-integration capability. */
 	themeTokens?: Readonly<Record<string, string>>;
 	title: string;
 }
 
+import { createMcpAppBridge } from "./mcp-app-bridge.ts";
+
 export function ExtensionHost({
 	srcdoc,
 	nonce,
 	granted,
+	allowDownloads = false,
+	allowForms = false,
 	services,
 	onConnected,
 	onMessage,
 	pushRef,
 	themeTokens,
+	streamingPrivacyActive = true,
 	title,
 }: ExtensionHostProps) {
 	const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -195,11 +270,21 @@ export function ExtensionHost({
 	// so the bridge effect stays keyed on [granted, nonce] only, like the others).
 	const pushRefRef = useRef(pushRef);
 	pushRefRef.current = pushRef;
+	const privacyRef = useRef(streamingPrivacyActive);
+	privacyRef.current = streamingPrivacyActive;
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: a new srcdoc owns a new bridge even when a caller retains its nonce.
 	useHandshakeEffect(() => {
 		const iframe = iframeRef.current;
-		if (!iframe) {
+		const expectedSandbox = sandboxForCompanion({
+			allowDownloads,
+			allowForms,
+			srcdoc,
+		});
+		if (
+			!iframe ||
+			iframe.srcdoc !== srcdoc ||
+			iframe.getAttribute("sandbox") !== expectedSandbox
+		) {
 			return;
 		}
 		let port: MessagePort | null = null;
@@ -224,11 +309,27 @@ export function ExtensionHost({
 			inFlightCalls = Math.max(0, inFlightCalls - 1);
 		};
 		const readLifetime = new AbortController();
+		const mcpApp = createMcpAppBridge({
+			granted,
+			services: () => servicesRef.current,
+			send: (message) => iframe.contentWindow?.postMessage(message, "*"),
+		});
+		const pushTarget = pushRefRef.current;
+		if (pushTarget) {
+			pushTarget.current = (message) => {
+				port?.postMessage(message);
+				mcpApp.push(message.globals);
+			};
+		}
 
 		// Post the terminal reply that ends a request (unary or streaming).
-		const postResult = (id: number, result?: unknown, error?: unknown) => {
-			const reply: RpcResponse = error
-				? { kind: "ryu-plugin-rpc-result", id, error: toRpcError(error) }
+		const postResult = (
+			id: number,
+			result?: RpcResponse["result"],
+			cause?: unknown
+		) => {
+			const reply: RpcResponse = cause
+				? { kind: "ryu-plugin-rpc-result", id, error: toRpcError(cause) }
 				: { kind: "ryu-plugin-rpc-result", id, result };
 			port?.postMessage(reply);
 		};
@@ -249,8 +350,9 @@ export function ExtensionHost({
 			// stream is a harmless no-op.
 			if (req.method === "agent.cancel") {
 				const targetId = req.args[0];
-				if (typeof targetId === "number") {
-					activeStreams.get(targetId)?.abort();
+				const parsed = z.number().safeParse(targetId);
+				if (parsed.success) {
+					activeStreams.get(parsed.data)?.abort();
 				}
 				postResult(req.id, null);
 				return;
@@ -265,112 +367,14 @@ export function ExtensionHost({
 					postResult(req.id, undefined, err);
 					return;
 				}
-				// Resolve the streaming service + validated input per method. Every
-				// streaming service shares the (input, emit, signal) shape; we bind the
-				// validated input into a uniform `start(emit, signal)` closure so the
-				// machinery below (duplicate-id guard, AbortController, teardown) is
-				// method-agnostic. The shell subscribe/register verbs (grant
-				// `shell:integrate`) take a LOOSE object arg (the service validates its own
-				// shape) and, like every stream, are cancel-on-unmount via `activeStreams`.
-				let start:
-					| ((
-							emit: (delta: string) => void,
-							signal: AbortSignal
-					  ) => Promise<void>)
-					| undefined;
-				let streamError: CodedRpcError | undefined;
-				const shellArg: Record<string, unknown> =
-					req.args[0] && typeof req.args[0] === "object"
-						? (req.args[0] as Record<string, unknown>)
-						: {};
-				const bindShellStream = (
-					svc:
-						| ((
-								input: Record<string, unknown>,
-								emit: (delta: string) => void,
-								signal: AbortSignal
-						  ) => Promise<void>)
-						| undefined
-				) => {
-					if (svc) {
-						start = (emit, signal) => svc(shellArg, emit, signal);
-					} else {
-						streamError = new CodedRpcError(
-							"server_error",
-							`${req.method} is not available`
-						);
-					}
-				};
-				if (req.method === "shell.themeSubscribe") {
-					bindShellStream(servicesRef.current.shellThemeSubscribe);
-				} else if (req.method === "shell.prefsSubscribe") {
-					bindShellStream(servicesRef.current.shellPrefsSubscribe);
-				} else if (req.method === "shell.registerCommand") {
-					bindShellStream(servicesRef.current.shellRegisterCommand);
-				} else if (req.method === "shell.registerTabIcon") {
-					bindShellStream(servicesRef.current.shellRegisterTabIcon);
-				} else if (req.method === "shell.eventsSubscribe") {
-					bindShellStream(servicesRef.current.shellEventsSubscribe);
-				} else if (req.method === "i18n.subscribe") {
-					bindShellStream(servicesRef.current.i18nSubscribe);
-				} else if (req.method === "finetune.stream") {
-					const arg = asFinetuneIdArg(req.args[0]);
-					const svc = servicesRef.current.finetuneStream;
-					if (!arg) {
-						streamError = new CodedRpcError(
-							"invalid_args",
-							"finetune.stream requires a { id: string }"
-						);
-					} else if (svc) {
-						start = (emit, signal) => svc(arg, emit, signal);
-					} else {
-						streamError = new CodedRpcError(
-							"server_error",
-							"finetune.stream is not available"
-						);
-					}
-				} else if (req.method === "realtime.subscribe") {
-					const arg = asRealtimeConnectionArg(req.args[0]);
-					const svc = servicesRef.current.realtimeSubscribe;
-					if (!arg) {
-						streamError = new CodedRpcError(
-							"invalid_args",
-							"realtime.subscribe requires a { connection_id: string }"
-						);
-					} else if (svc) {
-						start = (emit, signal) => svc(arg, emit, signal);
-					} else {
-						streamError = new CodedRpcError(
-							"server_error",
-							"realtime.subscribe is not available"
-						);
-					}
-				} else {
-					const arg = asAgentRunArg(req.args[0]);
-					const svc = servicesRef.current.runAgentStream;
-					if (!arg) {
-						streamError = new CodedRpcError(
-							"invalid_args",
-							"agent.run.stream requires a { task: string }"
-						);
-					} else if (svc) {
-						start = (emit, signal) => svc(arg, emit, signal);
-					} else {
-						streamError = new CodedRpcError(
-							"server_error",
-							"agent.run.stream is not available"
-						);
-					}
-				}
-				if (!start) {
-					postResult(
-						req.id,
-						undefined,
-						streamError ??
-							new CodedRpcError("server_error", "stream is not available")
-					);
+				let start;
+				try {
+					start = resolveRpcStream(req.method, req.args, servicesRef.current);
+				} catch (err) {
+					postResult(req.id, undefined, err);
 					return;
 				}
+
 				// `req.id` is chosen by the (untrusted) frame. Refuse a duplicate of an
 				// already-active stream so a colliding id cannot orphan the first
 				// stream's AbortController from the cancel map (nor have one stream's
@@ -404,7 +408,7 @@ export function ExtensionHost({
 				void Promise.resolve()
 					.then(() => start?.(emit, controller.signal))
 					.then(() => postResult(req.id, null))
-					.catch((err: unknown) => postResult(req.id, undefined, err))
+					.catch((cause: unknown) => postResult(req.id, undefined, cause))
 					.finally(() => {
 						activeStreams.delete(req.id);
 						releaseCall();
@@ -435,13 +439,13 @@ export function ExtensionHost({
 					};
 					port?.postMessage(reply);
 				})
-				.catch((err: unknown) => {
+				.catch((cause: unknown) => {
 					const reply: RpcResponse = {
 						kind: "ryu-plugin-rpc-result",
 						id: req.id,
 						// A widget CodedRpcError serializes to `{ code, message }`; a legacy
 						// CapabilityError stays a plain string (D6, backward-compatible).
-						error: toRpcError(err),
+						error: toRpcError(cause),
 					};
 					port?.postMessage(reply);
 				})
@@ -455,7 +459,13 @@ export function ExtensionHost({
 				return;
 			}
 			if (event.source === iframe.contentWindow) {
-				onMessageRef.current?.(event.data);
+				if (onMessageRef.current) {
+					const message = frameMessageSchema.safeParse(event.data);
+					if (message.success) {
+						onMessageRef.current(message.data);
+					}
+				}
+				void mcpApp.receive(event.data);
 			}
 			// The load-bearing decision, delegated to the pure predicate: correct
 			// nonce, from the window we created (`event.origin` is "null" here and
@@ -477,6 +487,14 @@ export function ExtensionHost({
 			const channel = new MessageChannel();
 			port = channel.port1;
 			port.onmessage = onPortMessage;
+			iframe.contentWindow?.postMessage(
+				{
+					kind: "ryu-plugin-privacy",
+					nonce,
+					streamingActive: privacyRef.current,
+				},
+				"*"
+			);
 			// Hand port2 to the frame, tagged with the nonce so the frame accepts
 			// only the port meant for it. targetOrigin "*" is unavoidable for a
 			// null-origin frame; the nonce + the just-verified source carry the auth.
@@ -488,10 +506,6 @@ export function ExtensionHost({
 			onConnectedRef.current?.();
 			// ADDITIVE (widget host): expose a push channel so the caller can send
 			// `ryu-widget-set-globals` to the frame over the same live port.
-			const pushTarget = pushRefRef.current;
-			if (pushTarget) {
-				pushTarget.current = (msg: HostPush) => port?.postMessage(msg);
-			}
 		};
 
 		window.addEventListener("message", onWindowMessage);
@@ -514,7 +528,18 @@ export function ExtensionHost({
 				port = null;
 			}
 		};
-	}, [granted, nonce, srcdoc]);
+	}, [allowDownloads, allowForms, granted, nonce, srcdoc]);
+
+	useHandshakeEffect(() => {
+		iframeRef.current?.contentWindow?.postMessage(
+			{
+				kind: "ryu-plugin-privacy",
+				nonce,
+				streamingActive: streamingPrivacyActive,
+			},
+			"*"
+		);
+	}, [nonce, streamingPrivacyActive]);
 
 	useEffect(() => {
 		const iframe = iframeRef.current;
@@ -529,18 +554,25 @@ export function ExtensionHost({
 
 	return (
 		<iframe
-			className="h-full w-full border-0 bg-background"
+			className="block h-full w-full border-0 bg-background"
+			// Dimension attributes keep the frame filling its container in hosts
+			// whose stylesheet does not generate the utility classes above.
+			height="100%"
+			key={sandboxForCompanion({
+				allowDownloads,
+				allowForms,
+				srcdoc,
+			})}
 			ref={iframeRef}
-			// allow-scripts WITHOUT allow-same-origin → null origin, no Tauri IPC.
-			sandbox={IFRAME_SANDBOX}
+			// The approved export grant adds downloads without changing the null origin.
+			sandbox={sandboxForCompanion({
+				allowDownloads,
+				allowForms,
+				srcdoc,
+			})}
 			srcDoc={srcdoc}
-			style={{
-				border: 0,
-				display: "block",
-				height: "100%",
-				width: "100%",
-			}}
 			title={title}
+			width="100%"
 		/>
 	);
 }

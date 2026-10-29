@@ -15,15 +15,13 @@
 // the pattern in `useNodeStore.test.ts`.
 
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type {
-	DownloadKind,
-	DownloadState,
-	DownloadTask,
-} from "@/src/lib/api/downloads.ts";
+import type { DownloadTask } from "@/src/lib/api/downloads.ts";
 
 mock.module("@/lib/auth-client.ts", () => ({
 	TOKEN_KEY: "ryu_session_token",
 	getToken: () => null,
+	getActiveToken: () =>
+		globalThis.localStorage?.getItem("ryu_session_token") ?? null,
 }));
 mock.module("@/src/lib/realtime/jwt.ts", () => ({
 	getRealtimeJwt: () => null,
@@ -42,12 +40,12 @@ function task(over: Partial<DownloadTask> & { id: string }): DownloadTask {
 		created_at: 0,
 		dest_path: null,
 		error: null,
-		kind: "model" as DownloadKind,
+		kind: "model",
 		label: "",
 		received_bytes: 0,
 		retryable: false,
 		speed_bps: null,
-		state: "active" as DownloadState,
+		state: "active",
 		total_bytes: null,
 		updated_at: 0,
 		url: null,
@@ -56,7 +54,9 @@ function task(over: Partial<DownloadTask> & { id: string }): DownloadTask {
 }
 
 function stateFrom(tasks: DownloadTask[]) {
-	return { tasks: Object.fromEntries(tasks.map((t) => [t.id, t])) };
+	return {
+		tasks: Object.fromEntries<DownloadTask>(tasks.map((t) => [t.id, t])),
+	};
 }
 
 beforeEach(() => {
@@ -110,7 +110,7 @@ describe("selectOrderedTasks", () => {
 			task({ id: "new", created_at: 300 }),
 			task({ id: "mid", created_at: 200 }),
 		]);
-		expect(selectOrderedTasks(s as never).map((t) => t.id)).toEqual([
+		expect(selectOrderedTasks(s).map((t) => t.id)).toEqual([
 			"new",
 			"mid",
 			"old",
@@ -118,13 +118,13 @@ describe("selectOrderedTasks", () => {
 	});
 
 	test("empty store yields an empty list", () => {
-		expect(selectOrderedTasks(stateFrom([]) as never)).toEqual([]);
+		expect(selectOrderedTasks(stateFrom([]))).toEqual([]);
 	});
 });
 
 describe("selectAggregate", () => {
 	test("empty: hasAny false, no in-flight, null percent", () => {
-		expect(selectAggregate(stateFrom([]) as never)).toEqual({
+		expect(selectAggregate(stateFrom([]))).toEqual({
 			inFlight: 0,
 			failed: 0,
 			percent: null,
@@ -141,7 +141,7 @@ describe("selectAggregate", () => {
 			task({ id: "f", state: "failed" }),
 			task({ id: "c", state: "completed" }),
 		]);
-		const agg = selectAggregate(s as never);
+		const agg = selectAggregate(s);
 		expect(agg.inFlight).toBe(3);
 		expect(agg.failed).toBe(1);
 		expect(agg.hasAny).toBe(true);
@@ -172,14 +172,14 @@ describe("selectAggregate", () => {
 			}),
 		]);
 		// (25 + 25) / (100 + 100) = 25%
-		expect(selectAggregate(s as never).percent).toBe(25);
+		expect(selectAggregate(s).percent).toBe(25);
 	});
 
 	test("percent is null when no in-flight task has a known size", () => {
 		const s = stateFrom([
 			task({ id: "a", state: "active", total_bytes: null }),
 		]);
-		expect(selectAggregate(s as never).percent).toBeNull();
+		expect(selectAggregate(s).percent).toBeNull();
 	});
 
 	test("received is clamped to total so overshoot can't exceed 100%", () => {
@@ -191,7 +191,7 @@ describe("selectAggregate", () => {
 				total_bytes: 100,
 			}),
 		]);
-		expect(selectAggregate(s as never).percent).toBe(100);
+		expect(selectAggregate(s).percent).toBe(100);
 	});
 });
 
@@ -201,7 +201,7 @@ describe("selectInstallProgress", () => {
 			task({ id: "a", kind: "model", state: "completed", label: "gemma" }),
 		]);
 		const sel = selectInstallProgress(["model"], "gemma");
-		expect(sel(s as never)).toEqual({ active: false, percent: null });
+		expect(sel(s)).toEqual({ active: false, percent: null });
 	});
 
 	test("matches by normalized name so 'whispercpp' finds a 'whisper.cpp' label", () => {
@@ -210,7 +210,7 @@ describe("selectInstallProgress", () => {
 			task({ id: "b", kind: "engine", state: "active", label: "llama.cpp" }),
 		]);
 		const sel = selectInstallProgress(["engine"], "whispercpp");
-		expect(sel(s as never).active).toBe(true);
+		expect(sel(s).active).toBe(true);
 	});
 
 	test("falls back to the sole trackable task of the kind when no name matches", () => {
@@ -225,7 +225,7 @@ describe("selectInstallProgress", () => {
 			}),
 		]);
 		const sel = selectInstallProgress(["model"], "nomatch");
-		expect(sel(s as never)).toEqual({ active: true, percent: 50 });
+		expect(sel(s)).toEqual({ active: true, percent: 50 });
 	});
 
 	// The exact-id path. It exists because the plugin buttons could never match by
@@ -249,7 +249,7 @@ describe("selectInstallProgress", () => {
 			"Harbor CRM",
 			"plugin:@ryu/crm"
 		);
-		expect(sel(s as never)).toEqual({ active: true, percent: 25 });
+		expect(sel(s)).toEqual({ active: true, percent: 25 });
 	});
 
 	test("a taskId row in a terminal state reports inactive, not the next best guess", () => {
@@ -258,7 +258,7 @@ describe("selectInstallProgress", () => {
 			task({ id: "other", kind: "other", state: "active", label: "x" }),
 		]);
 		const sel = selectInstallProgress(["other"], "x", "plugin:x");
-		expect(sel(s as never)).toEqual({ active: false, percent: null });
+		expect(sel(s)).toEqual({ active: false, percent: null });
 	});
 
 	test("an unknown taskId degrades to the label/fallback heuristics", () => {
@@ -273,7 +273,7 @@ describe("selectInstallProgress", () => {
 			}),
 		]);
 		const sel = selectInstallProgress(["model"], "gemma", "plugin:nope");
-		expect(sel(s as never)).toEqual({ active: true, percent: 50 });
+		expect(sel(s)).toEqual({ active: true, percent: 50 });
 	});
 
 	test("does NOT fall back when several tasks of the kind and none match by name", () => {
@@ -282,7 +282,7 @@ describe("selectInstallProgress", () => {
 			task({ id: "b", kind: "model", state: "active", label: "two" }),
 		]);
 		const sel = selectInstallProgress(["model"], "zzz");
-		expect(sel(s as never)).toEqual({ active: false, percent: null });
+		expect(sel(s)).toEqual({ active: false, percent: null });
 	});
 
 	test("paused counts as trackable; an unknown size gives an indeterminate (null) percent", () => {
@@ -296,7 +296,7 @@ describe("selectInstallProgress", () => {
 			}),
 		]);
 		const sel = selectInstallProgress(["model"], "gemma");
-		expect(sel(s as never)).toEqual({ active: true, percent: null });
+		expect(sel(s)).toEqual({ active: true, percent: null });
 	});
 
 	test("percent clamps to 100 on overshoot", () => {
@@ -311,7 +311,7 @@ describe("selectInstallProgress", () => {
 			}),
 		]);
 		const sel = selectInstallProgress(["model"], "gemma");
-		expect(sel(s as never).percent).toBe(100);
+		expect(sel(s).percent).toBe(100);
 	});
 
 	test("respects the kind filter", () => {
@@ -319,13 +319,11 @@ describe("selectInstallProgress", () => {
 			task({ id: "a", kind: "skill", state: "active", label: "gemma" }),
 		]);
 		// Same label, wrong kind → nothing matches.
-		expect(selectInstallProgress(["model"], "gemma")(s as never)).toEqual({
+		expect(selectInstallProgress(["model"], "gemma")(s)).toEqual({
 			active: false,
 			percent: null,
 		});
 		// Right kind → matches.
-		expect(selectInstallProgress(["skill"], "gemma")(s as never).active).toBe(
-			true
-		);
+		expect(selectInstallProgress(["skill"], "gemma")(s).active).toBe(true);
 	});
 });

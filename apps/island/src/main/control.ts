@@ -22,6 +22,7 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { app } from "electron";
+import { z } from "zod";
 import {
 	type ControlAction,
 	isControlAction,
@@ -87,7 +88,9 @@ function rejectNonJson(res: ServerResponse): void {
 async function readBody(req: IncomingMessage): Promise<string> {
 	const chunks: Buffer[] = [];
 	for await (const chunk of req) {
-		chunks.push(chunk as Buffer);
+		chunks.push(
+			Buffer.isBuffer(chunk) ? chunk : Buffer.from(z.string().parse(chunk))
+		);
 	}
 	return Buffer.concat(chunks).toString("utf8");
 }
@@ -122,7 +125,10 @@ export function startControlServer(): void {
 			}
 			readBody(req)
 				.then((raw) => {
-					const parsed = raw ? (JSON.parse(raw) as { action?: unknown }) : {};
+					const parsed = z
+						.object({ action: z.unknown().optional() })
+						.catch({})
+						.parse(raw ? JSON.parse(raw) : {});
 					if (!isControlAction(parsed.action)) {
 						res.writeHead(400, { "Content-Type": "application/json" });
 						res.end(JSON.stringify({ ok: false, error: "invalid action" }));
@@ -173,7 +179,7 @@ export function startControlServer(): void {
 	});
 	server.on("error", (err) => {
 		// Port in use or other bind failure: degrade to hotkey-only control.
-		// biome-ignore lint/suspicious/noConsole: main-process diagnostic, no renderer.
+		// main-process diagnostic, no renderer.
 		console.warn(`[island] control server unavailable: ${err.message}`);
 		server = null;
 	});

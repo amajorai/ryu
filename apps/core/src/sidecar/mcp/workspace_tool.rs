@@ -88,6 +88,42 @@ fn browser_schema() -> Value {
     })
 }
 
+/// Built-in interface renderers that are not Marketplace-contributable but that a
+/// user can still switch to (subject to the shell's own access gate).
+const HOST_ONLY_INTERFACE_RENDERERS: &[&str] = &["bot", "console"];
+
+/// Every built-in interface id (`ryu:<renderer>`), in switcher order.
+fn builtin_interface_ids() -> Vec<String> {
+    HOST_ONLY_INTERFACE_RENDERERS
+        .iter()
+        .chain(ryu_kernel_contracts::manifest::CONTRIBUTABLE_INTERFACE_RENDERERS.iter())
+        .map(|renderer| {
+            format!(
+                "{}:{renderer}",
+                ryu_kernel_contracts::manifest::BUILTIN_INTERFACE_NAMESPACE
+            )
+        })
+        .collect()
+}
+
+fn interface_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "interface": {
+                "type": "string",
+                "description": format!(
+                    "Interface id to switch to. Built-in ids: {}. Marketplace interfaces use \
+                     '<plugin>:<id>' ids, listed under `interfaces` by \
+                     ryu_api.get_api_plugins_contributions.",
+                    builtin_interface_ids().join(", ")
+                )
+            }
+        },
+        "required": ["interface"]
+    })
+}
+
 fn read_only_annotations() -> Value {
     json!({ "readOnlyHint": true, "destructiveHint": false })
 }
@@ -141,6 +177,25 @@ pub fn tools() -> Vec<RegistryTool> {
             annotations: Some(annotations),
             ..Default::default()
         },
+        RegistryTool {
+            id: format!("{SERVER_NAME}.switch_interface"),
+            server: SERVER_NAME.to_owned(),
+            name: "switch_interface".to_owned(),
+            description: Some(
+                "Switch the user's Ryu interface (the presentation layer: Bot, the OS desktop, \
+                 Console, Channels, Feed, Board, the 2D/3D worlds, or a Marketplace interface). \
+                 Only do this when the user asks. The user is asked to confirm first, and the \
+                 shell ignores an interface its own switcher would not offer them (for example \
+                 Console without organization authority, or one that is not rolled out). \
+                 Returns queued=true once the request is published."
+                    .to_owned(),
+            ),
+            input_schema: Some(interface_schema()),
+            // Not read-only: it changes the user's remembered interface. Not
+            // destructive: switching back is one click.
+            annotations: Some(json!({ "readOnlyHint": false, "destructiveHint": false })),
+            ..Default::default()
+        },
     ]
 }
 
@@ -190,6 +245,52 @@ fn browser_url(arguments: &Value) -> Result<String> {
         ));
     }
     Ok(url.to_owned())
+}
+
+fn interface_id(arguments: &Value) -> Result<String> {
+    let id = arguments
+        .get("interface")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("workspace.switch_interface requires a non-empty 'interface'")
+        })?;
+    let builtin_prefix = format!(
+        "{}:",
+        ryu_kernel_contracts::manifest::BUILTIN_INTERFACE_NAMESPACE
+    );
+    if id.starts_with(&builtin_prefix) {
+        return if builtin_interface_ids().iter().any(|builtin| builtin == id) {
+            Ok(id.to_owned())
+        } else {
+            Err(anyhow::anyhow!("unknown built-in interface '{id}'"))
+        };
+    }
+    // A Marketplace interface: `<plugin>:<local-id>`, same shape the manifest
+    // validator accepts. The shell still checks it against installed plugins.
+    let (plugin, local) = id
+        .rsplit_once(':')
+        .ok_or_else(|| anyhow::anyhow!("interface id '{id}' must look like '<plugin>:<id>'"))?;
+    let local_ok = !local.is_empty()
+        && local.len() <= 96
+        && local
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && local
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'));
+    let plugin_ok = !plugin.is_empty()
+        && plugin.len() <= 128
+        && !plugin.chars().any(|c| c.is_control() || c.is_whitespace());
+    if local_ok && plugin_ok {
+        Ok(id.to_owned())
+    } else {
+        Err(anyhow::anyhow!(
+            "interface id '{id}' is not a valid interface id"
+        ))
+    }
 }
 
 /// Publish one workspace action. The desktop consumes this through the existing
@@ -251,6 +352,22 @@ pub async fn dispatch(tool: &str, arguments: Value, principal: &ToolPrincipal) -
                 "url": url
             }))
         }
+        "switch_interface" => {
+            let interface = interface_id(&arguments)?;
+            crate::events::publish_navigation(crate::events::NavigationRequest {
+                plugin_id: AGENT_SOURCE.to_owned(),
+                target: interface.clone(),
+                params: None,
+                kind: crate::events::NavigationKind::Interface,
+                force_new: false,
+                target_user_id,
+            });
+            Ok(json!({
+                "queued": true,
+                "surface": "interface",
+                "interface": interface
+            }))
+        }
         other => Err(anyhow::anyhow!("unknown workspace tool '{other}'")),
     }
 }
@@ -286,6 +403,51 @@ mod tests {
             .unwrap(),
             Some("u1".to_owned())
         );
+    }
+
+    #[test]
+    fn interface_ids_are_builtins_or_plugin_scoped() {
+        assert_eq!(
+            interface_id(&json!({ "interface": "ryu:channels" })).unwrap(),
+            "ryu:channels"
+        );
+        assert!(interface_id(&json!({ "interface": "ryu:console" })).is_ok());
+        assert!(interface_id(&json!({ "interface": "ryu:bot" })).is_ok());
+        assert!(interface_id(&json!({ "interface": "ryu:not-a-renderer" })).is_err());
+        assert!(interface_id(&json!({ "interface": "@acme/pack:retro-feed" })).is_ok());
+        assert!(interface_id(&json!({ "interface": "acme:Bad Id" })).is_err());
+        assert!(interface_id(&json!({ "interface": "channels" })).is_err());
+        assert!(interface_id(&json!({ "interface": "" })).is_err());
+        assert!(interface_id(&json!({})).is_err());
+    }
+
+    #[test]
+    fn switch_interface_is_listed_and_not_read_only() {
+        let tool = tools()
+            .into_iter()
+            .find(|tool| tool.id == "workspace.switch_interface")
+            .expect("switch_interface is advertised");
+        assert_eq!(tool.annotations.unwrap()["readOnlyHint"], false);
+    }
+
+    #[tokio::test]
+    async fn switch_interface_publishes_an_interface_request() {
+        let mut rx = crate::events::subscribe_navigation();
+        let result = dispatch(
+            "switch_interface",
+            json!({ "interface": "ryu:feed" }),
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("workspace dispatch succeeds");
+        assert_eq!(result["surface"], "interface");
+        let event = loop {
+            let event = rx.try_recv().expect("navigation event published");
+            if event.kind == crate::events::NavigationKind::Interface {
+                break event;
+            }
+        };
+        assert_eq!(event.target, "ryu:feed");
     }
 
     #[tokio::test]

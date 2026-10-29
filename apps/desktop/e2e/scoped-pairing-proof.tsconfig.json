@@ -1,0 +1,25 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["@playwright/test", "vite/client"],
+    "paths": {
+      "@/*": ["./*"],
+      "@ryu/blocks/*": ["../../packages/blocks/src/*"],
+      "@ryu/ui/*": ["../../packages/ui/src/*"],
+      "@/src/hooks/useActiveNode.ts": [
+        "e2e/harness/scoped-pairing-proof.mock.ts"
+      ],
+      "@/src/lib/api/client.ts": ["e2e/harness/scoped-pairing-proof.mock.ts"]
+    },
+    "noEmit": true
+  },
+  "include": [
+    "../src/components/settings/NodeAccessSettings.tsx",
+    "../src/components/settings/NodeAccessSettings.model.ts",
+    "harness/scoped-pairing-proof.tsx",
+    "harness/scoped-pairing-proof.mock.ts",
+    "scoped-pairing-proof.spec.ts",
+    "scoped-pairing-proof.playwright.config.ts",
+    "harness/vite.scoped-pairing-proof.config.ts"
+  ]
+}

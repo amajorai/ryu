@@ -15,8 +15,10 @@
 # skip that download on a small host, set a provider key (e.g. OPENAI_API_KEY)
 # in the environment and Core routes there instead.
 #
-# The compose stack requires GATEWAY_MASTER_KEY. It is used only as the local
-# service-to-service bearer here; the gateway is never published to the host,
+# The compose stack requires four distinct Gateway credentials: an admin key
+# for Core's administrative client, an inference relay for agent requests, a
+# trusted Core relay, and a proof-only signer. ACP children receive none of the
+# Core/admin secrets. The gateway is never published to the host,
 # runs rootless, drops all Linux capabilities, and has a read-only root FS.
 
 services:
@@ -35,9 +37,20 @@ services:
       # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before starting the stack}
-      GATEWAY_ADMIN_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before starting the stack}
+      GATEWAY_RELAY_KEY: ${GATEWAY_RELAY_KEY:?set GATEWAY_RELAY_KEY before starting the stack}
+      GATEWAY_CORE_RELAY_KEY: ${GATEWAY_CORE_RELAY_KEY:?set GATEWAY_CORE_RELAY_KEY before starting the stack}
+      GATEWAY_CORE_PROOF_KEY: ${GATEWAY_CORE_PROOF_KEY:?set GATEWAY_CORE_PROOF_KEY before starting the stack}
+      # Optional identity secrets (base64 of 32+ random bytes each, e.g.
+      # `openssl rand -base64 32`). Set RYU_IDENTITY_ROOT to keep end-user
+      # hashes stable across restarts. A self-hosted gateway never sends a
+      # Ryu-derived identity to your providers, with or without them.
+      RYU_IDENTITY_ROOT: ${RYU_IDENTITY_ROOT:-}
+      RYU_IDENTITY_PEPPER: ${RYU_IDENTITY_PEPPER:-}
+      # Exposure hardening for a gateway reached through another container:
+      # auth can never be switched off and a 127.0.0.1 peer is never trusted as
+      # the local operator. It does not make this a hosted Ryu gateway, so none
+      # of Ryu's hosted-fleet rules apply to this stack.
       RYU_GATEWAY_FLEET: "1"
-      RYU_GATEWAY_PORT: "7981"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev
@@ -65,7 +78,9 @@ services:
       gateway:
         condition: service_healthy
     environment:
-      RYU_GATEWAY_TOKEN: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before starting the stack}
+      RYU_GATEWAY_TOKEN: ${GATEWAY_RELAY_KEY:?set GATEWAY_RELAY_KEY before starting the stack}
+      RYU_GATEWAY_CORE_TOKEN: ${GATEWAY_CORE_RELAY_KEY:?set GATEWAY_CORE_RELAY_KEY before starting the stack}
+      RYU_GATEWAY_CORE_PROOF_KEY: ${GATEWAY_CORE_PROOF_KEY:?set GATEWAY_CORE_PROOF_KEY before starting the stack}
       GATEWAY_ADMIN_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before starting the stack}
       RYU_BIND: "0.0.0.0:7980"
       RYU_DIR: "/data"

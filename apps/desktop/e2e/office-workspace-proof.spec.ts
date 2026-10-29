@@ -1,10 +1,6 @@
 import { expect, test } from "@playwright/test";
 
 const STORY_URL = "/office-workspace-proof.html";
-const OFFICE_PROOF =
-	"/Users/jiawei/.codex/visualizations/2026/08/22/01a0299b-6078-76e3-9caf-4e51b79cce0c/office-workspace-proof.png";
-const WHATSAPP_PROOF =
-	"/Users/jiawei/.codex/visualizations/2026/08/22/01a0299b-6078-76e3-9caf-4e51b79cce0c/whatsapp-workspace-proof.png";
 
 test("edits Office files and opens WhatsApp in the same workspace tab strip", async ({
 	page,
@@ -29,7 +25,9 @@ test("edits Office files and opens WhatsApp in the same workspace tab strip", as
 	await slidePreview.evaluate((image) => image.decode());
 	await page.getByRole("button", { name: "Save" }).click();
 	await expect(page.getByText(/Saved \d+ KB to Space/u)).toBeVisible();
-	await page.screenshot({ path: OFFICE_PROOF });
+	await page.screenshot({
+		path: test.info().outputPath("office-workspace-proof.png"),
+	});
 
 	await page.getByTestId("workspace-tab-xlsx").click();
 	const revenueCell = page.getByRole("textbox", { exact: true, name: "B2" });
@@ -49,5 +47,7 @@ test("edits Office files and opens WhatsApp in the same workspace tab strip", as
 	await expect(platform.locator("option:checked")).toHaveText(
 		"WhatsApp Personal"
 	);
-	await page.screenshot({ path: WHATSAPP_PROOF });
+	await page.screenshot({
+		path: test.info().outputPath("whatsapp-workspace-proof.png"),
+	});
 });

@@ -21,6 +21,7 @@ import { ExtensionHost } from "@ryu/app-host/ExtensionHost";
 import {
 	type Capability,
 	capabilitiesFromGrants,
+	type HostAgentSummary,
 	type HostServices,
 	type RouteClaim,
 	validatePluginRoute,
@@ -45,7 +46,7 @@ function toBase64Utf8(input: string): string {
 interface HostEvent {
 	accepted?: boolean;
 	claim?: RouteClaim;
-	returned?: unknown;
+	returned?: HostAgentSummary[];
 	type: "connected" | "listAgents" | "registerRoute";
 }
 
@@ -78,10 +79,7 @@ const DEFAULT_AGENTS: NonNullable<MountOptions["agents"]> = [
 
 function mount(options: MountOptions): void {
 	hostLog.length = 0;
-	const nonce =
-		typeof crypto?.randomUUID === "function"
-			? crypto.randomUUID()
-			: `nonce-${Date.now()}`;
+	const nonce = crypto.randomUUID();
 	const granted: ReadonlySet<Capability> = capabilitiesFromGrants(
 		options.grants
 	);
@@ -137,7 +135,9 @@ function sandboxAttr(): string | null {
 }
 
 const api: CertApi = { hostLog, mount, sandboxAttr };
-(window as unknown as { __ryuCert: CertApi }).__ryuCert = api;
+/* SAFETY: This assignment publishes the complete locally checked CertApi value on the native browser Window under __ryuCert. The view owns only that publication slot; it makes no claim about plugin messages or native SDK members. */ (
+	window as typeof window & { __ryuCert: CertApi }
+).__ryuCert = api;
 
 // Signal readiness so the spec can wait deterministically.
 document.body.setAttribute("data-harness-ready", "1");

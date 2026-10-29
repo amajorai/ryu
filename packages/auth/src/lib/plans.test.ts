@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	type CachedEntitlement,
+	canRemovePoweredByRyu,
 	capabilityTier,
 	channelUserLimitForEntitlement,
 	currentPlanVersionFor,
@@ -11,11 +12,15 @@ import {
 	decideDesktopAccess,
 	decideUpdateEligibility,
 	depositFee,
+	desktopGateConfig,
 	EMAIL_QUOTA_FREE,
 	type Entitlement,
 	emailQuotaForPlan,
+	emailStorageLimitBytes,
+	emailUsesFreeBaseline,
 	FREE_TIER_LIMITS,
 	GATED_CAPABILITIES,
+	gatewayRateCeilingForEntitlement,
 	KERNEL_QUOTAS,
 	MAIL_LIFECYCLE,
 	managedInferenceAvailable,
@@ -80,8 +85,17 @@ describe("depositFee (max of the plan rate or the $5 floor)", () => {
 describe("current Pro pricing", () => {
 	it("uses the margin-safe $49/$490 ladder for new contracts", () => {
 		expect(PLANS.pro.monthlyPriceMicroUsd).toBe(usdToMicro(49));
-		expect(currentPlanVersionFor("pro")).toBe(6);
+		expect(currentPlanVersionFor("pro")).toBe(7);
+		expect(PLANS.pro.monthlyCreditPoolMicroUsd).toBe(usdToMicro(14));
 		expect(planVersionFor("pro", currentPlanVersionFor("pro"))).toMatchObject({
+			monthlyPriceMicroUsd: usdToMicro(49),
+			monthlyCreditPoolMicroUsd: usdToMicro(14),
+			version: 7,
+		});
+	});
+
+	it("keeps the $15 pool for contracts sold before the 2026-10-20 trim", () => {
+		expect(planVersionFor("pro", 6)).toMatchObject({
 			monthlyPriceMicroUsd: usdToMicro(49),
 			monthlyCreditPoolMicroUsd: usdToMicro(15),
 			version: 6,
@@ -101,17 +115,25 @@ describe("current Plus pricing", () => {
 	it("uses the private lower-usage $39/$390 ladder", () => {
 		expect(PLAN_IDS.indexOf("plus")).toBeLessThan(PLAN_IDS.indexOf("pro"));
 		expect(PLANS.plus.monthlyPriceMicroUsd).toBe(usdToMicro(39));
-		expect(PLANS.plus.monthlyCreditPoolMicroUsd).toBe(usdToMicro(10));
+		expect(PLANS.plus.monthlyCreditPoolMicroUsd).toBe(usdToMicro(9));
 		expect(PLANS.plus.audience).toBe("individual");
 		expect(PLANS.plus.seatModel).toEqual({ kind: "single" });
-		expect(currentPlanVersionFor("plus")).toBe(1);
+		expect(currentPlanVersionFor("plus")).toBe(2);
 		expect(planVersionFor("plus", currentPlanVersionFor("plus"))).toMatchObject(
 			{
 				monthlyPriceMicroUsd: usdToMicro(39),
-				monthlyCreditPoolMicroUsd: usdToMicro(10),
-				version: 1,
+				monthlyCreditPoolMicroUsd: usdToMicro(9),
+				version: 2,
 			}
 		);
+	});
+
+	it("keeps the $10 pool for contracts sold before the 2026-10-20 trim", () => {
+		expect(planVersionFor("plus", 1)).toMatchObject({
+			monthlyPriceMicroUsd: usdToMicro(39),
+			monthlyCreditPoolMicroUsd: usdToMicro(10),
+			version: 1,
+		});
 	});
 });
 
@@ -121,15 +143,44 @@ describe("emailQuotaForPlan (Agent Inboxes)", () => {
 		expect(emailQuotaForPlan(null)).toMatchObject({
 			enabled: true,
 			inboxLimit: 1,
+			aliasLimit: 3,
 			monthlySendLimit: 50,
 		});
 	});
 
-	it("disables email for the desktop license (one-time, no managed cloud)", () => {
-		const q = emailQuotaForPlan("desktop-license");
-		expect(q.enabled).toBe(false);
-		expect(q.inboxLimit).toBe(0);
-		expect(q.monthlySendLimit).toBe(0);
+	it("keeps the free baseline for plans that add no hosted mail (desktop license, A Major Pass)", () => {
+		for (const plan of ["desktop-license", "marketplace-membership"] as const) {
+			expect(PLANS[plan].emailEnabled).toBe(false);
+			expect(emailUsesFreeBaseline(plan)).toBe(true);
+			expect(emailQuotaForPlan(plan)).toEqual(EMAIL_QUOTA_FREE);
+			expect(emailStorageLimitBytes(plan)).toBe(
+				EMAIL_QUOTA_FREE.storageLimitBytes
+			);
+		}
+		expect(emailUsesFreeBaseline(null)).toBe(true);
+		expect(emailUsesFreeBaseline("pro")).toBe(false);
+	});
+
+	it("expresses storage in GiB, matching the published allowance", () => {
+		expect(EMAIL_QUOTA_FREE.storageLimitBytes).toBe(1024 ** 3);
+		expect(emailQuotaForPlan("pro").storageLimitBytes).toBe(10 * 1024 ** 3);
+		expect(emailQuotaForPlan("plus").storageLimitBytes).toBe(10 * 1024 ** 3);
+		expect(emailQuotaForPlan("max").storageLimitBytes).toBe(100 * 1024 ** 3);
+	});
+
+	it("never trims a paid mail or Space allowance below the free baseline", () => {
+		for (const plan of Object.values(PLANS)) {
+			const quota = emailQuotaForPlan(plan.id);
+			expect(quota.monthlySendLimit).toBeGreaterThanOrEqual(
+				EMAIL_QUOTA_FREE.monthlySendLimit
+			);
+			expect(quota.storageLimitBytes).toBeGreaterThanOrEqual(
+				EMAIL_QUOTA_FREE.storageLimitBytes
+			);
+			expect(planLimit(plan.id, "spaceStorageLimitGb")).toBeGreaterThanOrEqual(
+				planLimit(null, "spaceStorageLimitGb")
+			);
+		}
 	});
 
 	it("enables email on every paid subscription plan", () => {
@@ -148,9 +199,28 @@ describe("emailQuotaForPlan (Agent Inboxes)", () => {
 		}
 	});
 
+	it("gives the free baseline three agent aliases and every mail plan unlimited", () => {
+		expect(emailQuotaForPlan(null).aliasLimit).toBe(3);
+		expect(EMAIL_QUOTA_FREE.aliasLimit).toBe(3);
+		for (const plan of Object.values(PLANS)) {
+			if (plan.emailEnabled) {
+				expect(plan.emailAliasLimit).toBe(Number.POSITIVE_INFINITY);
+				expect(emailQuotaForPlan(plan.id).aliasLimit).toBe(
+					Number.POSITIVE_INFINITY
+				);
+			} else {
+				expect(plan.emailAliasLimit).toBe(0);
+				expect(emailQuotaForPlan(plan.id).aliasLimit).toBe(3);
+			}
+		}
+		// A Major Pass adds no mail, so its holder keeps the free baseline.
+		expect(emailQuotaForPlan("marketplace-membership").aliasLimit).toBe(3);
+	});
+
 	it("mirrors the plan catalog numbers exactly (single source of truth)", () => {
 		const q = emailQuotaForPlan("pro");
 		expect(q.inboxLimit).toBe(PLANS.pro.emailInboxLimit);
+		expect(q.aliasLimit).toBe(PLANS.pro.emailAliasLimit);
 		expect(q.monthlySendLimit).toBe(PLANS.pro.emailMonthlySendLimit);
 		expect(q.enabled).toBe(PLANS.pro.emailEnabled);
 	});
@@ -219,12 +289,36 @@ describe("resolveEntitlement — subscriptions", () => {
 		expect(entitlement.monthlyCreditPoolMicroUsd).toBe(0);
 		expect(entitlement.seats).toBe(1);
 		expect(channelUserLimitForEntitlement(entitlement)).toBe(0);
-		expect(managedInferenceAvailable(entitlement, usdToMicro(100))).toBe(false);
-		expect(emailQuotaForPlan("marketplace-membership")).toMatchObject({
-			enabled: false,
-			inboxLimit: 0,
-			monthlySendLimit: 0,
-		});
+		expect(managedInferenceAvailable(entitlement, 0)).toBe(false);
+		expect(managedInferenceAvailable(entitlement, usdToMicro(100))).toBe(true);
+		expect(emailQuotaForPlan("marketplace-membership")).toEqual(
+			EMAIL_QUOTA_FREE
+		);
+	});
+
+	it("resolves a plan-change subscription by its product, not another plan's stamp", () => {
+		const proProduct = resolveProductId(
+			requireBinding(PLANS.pro.bindings.monthly, "pro.monthly"),
+			defaultsOnly
+		);
+		// Checked out as Plus (stamp "plus-monthly", version 2), then switched to
+		// Pro: only the product changed. Pro v2 is a $50 pool and must not apply.
+		const entitlement = resolveEntitlement(
+			{
+				planStamp: "plus-monthly",
+				planVersion: "2",
+				productId: proProduct,
+				status: "active",
+			},
+			null,
+			defaultsOnly
+		);
+		expect(entitlement.plan).toBe("pro");
+		expect(entitlement.monthlyCreditPoolMicroUsd).toBe(
+			planVersionFor("pro", currentPlanVersionFor("pro"))
+				.monthlyCreditPoolMicroUsd
+		);
+		expect(entitlement.monthlyCreditPoolMicroUsd).not.toBe(usdToMicro(50));
 	});
 
 	it("does not mark a desktop license for the Marketplace publisher pool", () => {
@@ -805,6 +899,47 @@ describe("decideDesktopAccess — betaFree break-glass flag (off by default)", (
 		expect(v.daysLeftInTrial).toBe(0);
 	});
 
+	it("maps the desktop trial rollout flag onto betaFree", () => {
+		expect(desktopGateConfig(true)).toEqual(DESKTOP_GATE);
+		expect(desktopGateConfig(false).betaFree).toBe(true);
+		const trialOff = decideDesktopAccess(expired, desktopGateConfig(false));
+		expect(trialOff.reason).toBe("beta");
+		expect(trialOff.paywalled).toBe(false);
+		const paidTrialOff = decideDesktopAccess(
+			{ ...expired, liveEntitlement: sub },
+			desktopGateConfig(false)
+		);
+		expect(paidTrialOff.reason).toBe("subscription");
+		expect(paidTrialOff.managedInference).toBe(true);
+	});
+
+	it("keeps an offline subscriber's cached plan under the beta flag", () => {
+		const cached: CachedEntitlement = {
+			cachedAtMs: NOW - 1 * DAY,
+			marketplaceApps: true,
+			proUnlocked: true,
+			managedInference: true,
+			plan: "pro",
+		};
+		const offline = decideDesktopAccess(
+			{ ...expired, liveEntitlement: null, cached },
+			desktopGateConfig(false)
+		);
+		expect(offline.reason).toBe("offline-grace");
+		expect(offline.plan).toBe("pro");
+		expect(offline.managedInference).toBe(true);
+
+		const betaCache = decideDesktopAccess(
+			{
+				...expired,
+				liveEntitlement: null,
+				cached: { ...cached, managedInference: false, plan: null },
+			},
+			desktopGateConfig(false)
+		);
+		expect(betaCache.reason).toBe("beta");
+	});
+
 	it("never shows a trial countdown under the beta flag", () => {
 		const v = decideDesktopAccess(
 			{ ...expired, firstLaunchMs: NOW - 2 * DAY },
@@ -824,16 +959,16 @@ describe("decideDesktopAccess — betaFree break-glass flag (off by default)", (
 	});
 });
 
-describe("CAPABILITY_TIERS — Band-2 pro capabilities (2026-07-11)", () => {
-	it("maps the new local power features to the pro band", () => {
-		for (const cap of ["evals", "graphrag", "companion-overlay"] as const) {
-			expect(capabilityTier(cap)).toBe("pro");
-		}
-	});
-
-	it("keeps the existing pro capabilities in the pro band", () => {
-		for (const cap of ["prompt-studio", "gateway-governance-ui"] as const) {
-			expect(capabilityTier(cap)).toBe("pro");
+describe("CAPABILITY_TIERS — free local features and paid managed services", () => {
+	it("does not plan-gate local desktop power features", () => {
+		for (const capability of [
+			"prompt-studio",
+			"evals",
+			"graphrag",
+			"companion-overlay",
+			"gateway-governance-ui",
+		] as const) {
+			expect(GATED_CAPABILITIES).not.toContain(capability);
 		}
 	});
 
@@ -860,29 +995,25 @@ describe("CAPABILITY_TIERS — Band-2 pro capabilities (2026-07-11)", () => {
 			expect(capabilityTier(cap)).toBe("subscription");
 		}
 	});
-
-	it("lists every new capability in GATED_CAPABILITIES", () => {
-		for (const cap of ["evals", "graphrag", "companion-overlay"] as const) {
-			expect(GATED_CAPABILITIES).toContain(cap);
-		}
-	});
 });
 
 describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 	it("returns the free baseline for a null plan", () => {
 		expect(planLimit(null, "maxOpenTabs")).toBe(3);
-		expect(planLimit(null, "maxAgents")).toBe(3);
-		expect(planLimit(null, "maxSpaces")).toBe(1);
-		expect(planLimit(null, "maxConcurrentRuns")).toBe(1);
-		expect(planLimit(null, "maxEvalRunsMonthly")).toBe(10);
+		expect(planLimit(null, "maxAgents")).toBe(Number.POSITIVE_INFINITY);
+		expect(planLimit(null, "maxSpaces")).toBe(Number.POSITIVE_INFINITY);
+		expect(planLimit(null, "maxConcurrentRuns")).toBe(Number.POSITIVE_INFINITY);
+		expect(planLimit(null, "maxEvalRunsMonthly")).toBe(
+			Number.POSITIVE_INFINITY
+		);
 		expect(planLimit(null, "spaceStorageLimitGb")).toBe(1);
 		expect(planLimit(null, "maxRemoteNodes")).toBe(1);
 	});
 
 	it("mirrors FREE_TIER_LIMITS exactly for a null plan (single source)", () => {
-		for (const field of Object.keys(FREE_TIER_LIMITS) as Array<
-			keyof typeof FREE_TIER_LIMITS
-		>) {
+		for (const field of Object.keys(FREE_TIER_LIMITS).filter(
+			(key): key is PlanLimitField => Object.hasOwn(QUOTAS, key)
+		)) {
 			expect(planLimit(null, field)).toBe(FREE_TIER_LIMITS[field]);
 		}
 	});
@@ -903,22 +1034,24 @@ describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 		}
 	});
 
-	it("keeps the two real-cost levers finite per plan", () => {
-		expect(planLimit("desktop-license", "maxConcurrentRuns")).toBe(3);
-		expect(planLimit("pro", "maxConcurrentRuns")).toBe(3);
-		expect(planLimit("plus", "maxConcurrentRuns")).toBe(3);
-		expect(planLimit("max", "maxConcurrentRuns")).toBe(3);
-		expect(planLimit("teams", "maxConcurrentRuns")).toBe(8);
-		expect(planLimit("teams-lite", "maxConcurrentRuns")).toBe(8);
-		expect(planLimit("business", "maxConcurrentRuns")).toBe(8);
-
+	it("keeps hosted storage finite per plan", () => {
 		expect(planLimit("desktop-license", "spaceStorageLimitGb")).toBe(20);
-		expect(planLimit("pro", "spaceStorageLimitGb")).toBe(20);
-		expect(planLimit("plus", "spaceStorageLimitGb")).toBe(20);
+		expect(planLimit("pro", "spaceStorageLimitGb")).toBe(10);
+		expect(planLimit("plus", "spaceStorageLimitGb")).toBe(10);
 		expect(planLimit("max", "spaceStorageLimitGb")).toBe(50);
 		expect(planLimit("teams", "spaceStorageLimitGb")).toBe(50);
 		expect(planLimit("teams-lite", "spaceStorageLimitGb")).toBe(50);
 		expect(planLimit("business", "spaceStorageLimitGb")).toBe(50);
+		// A Major Pass adds no hosted storage: it keeps the free baseline rather
+		// than falling through to an unbounded default.
+		expect(planLimit("marketplace-membership", "spaceStorageLimitGb")).toBe(
+			planLimit(null, "spaceStorageLimitGb")
+		);
+		for (const plan of PLAN_IDS) {
+			expect(Number.isFinite(planLimit(plan, "spaceStorageLimitGb"))).toBe(
+				true
+			);
+		}
 	});
 
 	/**
@@ -929,7 +1062,15 @@ describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 	 */
 	it("pins every tier × quota number", () => {
 		const INF = Number.POSITIVE_INFINITY;
-		const matrix: Record<
+		const matrix = {
+			maxAgents: [INF, INF, INF, INF, INF, INF, INF, INF],
+			maxConcurrentRuns: [INF, INF, INF, INF, INF, INF, INF, INF],
+			maxEvalRunsMonthly: [INF, INF, INF, INF, INF, INF, INF, INF],
+			maxOpenTabs: [3, INF, INF, INF, INF, INF, INF, INF],
+			maxRemoteNodes: [1, INF, INF, INF, INF, INF, INF, INF],
+			maxSpaces: [INF, INF, INF, INF, INF, INF, INF, INF],
+			spaceStorageLimitGb: [1, 20, 10, 10, 50, 50, 50, 50],
+		} satisfies Record<
 			PlanLimitField,
 			[
 				free: number,
@@ -941,33 +1082,28 @@ describe("planLimit — numeric caps (free baseline vs paid rows)", () => {
 				teamsLite: number,
 				business: number,
 			]
-		> = {
-			maxAgents: [3, INF, INF, INF, INF, INF, INF, INF],
-			maxConcurrentRuns: [1, 3, 3, 3, 3, 8, 8, 8],
-			maxEvalRunsMonthly: [10, INF, INF, INF, INF, INF, INF, INF],
-			maxOpenTabs: [3, INF, INF, INF, INF, INF, INF, INF],
-			maxRemoteNodes: [1, INF, INF, INF, INF, INF, INF, INF],
-			maxSpaces: [1, INF, INF, INF, INF, INF, INF, INF],
-			spaceStorageLimitGb: [1, 20, 20, 20, 50, 50, 50, 50],
-		};
+		>;
 		// Every declared key is in the matrix, and vice versa: a new quota that
 		// forgot its numbers fails here rather than shipping a silent Infinity.
 		expect(Object.keys(matrix).sort()).toEqual(Object.keys(QUOTAS).sort());
 		for (const [
 			field,
 			[free, license, pro, plus, max, teams, teamsLite, business],
-		] of Object.entries(matrix) as [
-			PlanLimitField,
-			[number, number, number, number, number, number, number, number],
-		][]) {
-			expect(planLimit(null, field)).toBe(free);
-			expect(planLimit("desktop-license", field)).toBe(license);
-			expect(planLimit("pro", field)).toBe(pro);
-			expect(planLimit("plus", field)).toBe(plus);
-			expect(planLimit("max", field)).toBe(max);
-			expect(planLimit("teams", field)).toBe(teams);
-			expect(planLimit("teams-lite", field)).toBe(teamsLite);
-			expect(planLimit("business", field)).toBe(business);
+		] of Object.entries(matrix)) {
+			const quotaField = Object.keys(QUOTAS).find(
+				(key): key is PlanLimitField => key === field
+			);
+			if (!quotaField) {
+				throw new Error("Missing quota fixture");
+			}
+			expect(planLimit(null, quotaField)).toBe(free);
+			expect(planLimit("desktop-license", quotaField)).toBe(license);
+			expect(planLimit("pro", quotaField)).toBe(pro);
+			expect(planLimit("plus", quotaField)).toBe(plus);
+			expect(planLimit("max", quotaField)).toBe(max);
+			expect(planLimit("teams", quotaField)).toBe(teams);
+			expect(planLimit("teams-lite", quotaField)).toBe(teamsLite);
+			expect(planLimit("business", quotaField)).toBe(business);
 		}
 	});
 });
@@ -1011,7 +1147,9 @@ describe("quota ownership — Core-owned limits", () => {
 	});
 
 	it("keeps every remaining quota Core-owned", () => {
-		for (const field of Object.keys(QUOTAS) as PlanLimitField[]) {
+		for (const field of Object.keys(QUOTAS).filter(
+			(key): key is PlanLimitField => Object.hasOwn(QUOTAS, key)
+		)) {
 			expect(quotaOwner(field)).toBeNull();
 		}
 	});
@@ -1086,8 +1224,10 @@ describe("managedInferenceAvailable — balance gate, not a pure tier gate", () 
 		expect(managedInferenceAvailable(proSub, 0)).toBe(true);
 	});
 
-	it("never lets the free (no-access) baseline spend, even with a balance", () => {
-		expect(managedInferenceAvailable(none, usdToMicro(100))).toBe(false);
+	it("opens standalone PAYG only when the wallet has prepaid balance", () => {
+		expect(managedInferenceAvailable(none, 0)).toBe(false);
+		expect(managedInferenceAvailable(none, -1)).toBe(false);
+		expect(managedInferenceAvailable(none, usdToMicro(5))).toBe(true);
 	});
 });
 
@@ -1355,5 +1495,60 @@ describe("decideUpdateEligibility — which builds a lifetime owner may install"
 		expect(v.eligible).toBe(true);
 		expect(v.reason).toBe("no-window");
 		expect(v.windowLapsed).toBe(false);
+	});
+});
+
+describe("gatewayRateCeilingForEntitlement", () => {
+	const managed = (plan: Entitlement["plan"], seats = 1): Entitlement => ({
+		desktopAccess: true,
+		managedInference: true,
+		marketplaceApps: false,
+		monthlyCreditPoolMicroUsd: 0,
+		plan,
+		seats,
+	});
+
+	it("gives free, promo, and unreadable entitlements the lowest ceiling", () => {
+		const unmanaged = gatewayRateCeilingForEntitlement(null);
+		expect(
+			gatewayRateCeilingForEntitlement({
+				...managed(null),
+				managedInference: false,
+			})
+		).toEqual(unmanaged);
+		expect(
+			gatewayRateCeilingForEntitlement(managed("max")).rpm
+		).toBeGreaterThan(unmanaged.rpm);
+	});
+
+	it("scales organization plans by seats and keeps personal plans flat", () => {
+		const teamsOne = gatewayRateCeilingForEntitlement(managed("teams", 1));
+		const teamsTen = gatewayRateCeilingForEntitlement(managed("teams", 10));
+		expect(teamsTen.rpm).toBe(teamsOne.rpm * 10);
+		expect(gatewayRateCeilingForEntitlement(managed("pro", 10))).toEqual(
+			gatewayRateCeilingForEntitlement(managed("pro", 1))
+		);
+	});
+});
+
+describe("canRemovePoweredByRyu", () => {
+	it("keeps the badge for free, trial and one-time plans", () => {
+		expect(canRemovePoweredByRyu(null)).toBe(false);
+		expect(canRemovePoweredByRyu("desktop-license")).toBe(false);
+		expect(canRemovePoweredByRyu("marketplace-membership")).toBe(false);
+		expect(canRemovePoweredByRyu("pro")).toBe(true);
+	});
+
+	// Core decides the badge for app sidecars from the `managed-inference-entitled`
+	// flag the desktop already pushes (`apps/core/src/entitlement.rs`). That is
+	// only sound while the two capabilities cover the same plans; a plan that
+	// splits them must give Core its own branding signal first.
+	it("branding removal tracks managed inference", () => {
+		for (const id of PLAN_IDS) {
+			expect({ id, removable: canRemovePoweredByRyu(id) }).toEqual({
+				id,
+				removable: PLANS[id].managedInference,
+			});
+		}
 	});
 });

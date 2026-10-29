@@ -1,5 +1,8 @@
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { z } from "zod";
+
+const checkoutRequestSchema = z.object({ checkoutId: z.string() });
 
 test("settlement stops obsolete requests and retry delays", async ({
 	page,
@@ -16,7 +19,9 @@ test("settlement stops obsolete requests and retry delays", async ({
 		}
 	});
 	await page.route("**/api/credits/reconcile-topup", async (route) => {
-		const id = route.request().postDataJSON().checkoutId as string;
+		const id = checkoutRequestSchema.parse(
+			route.request().postDataJSON()
+		).checkoutId;
 		calls.push(id);
 		if (calls.length === 2) {
 			await pending;

@@ -1,0 +1,21 @@
+{
+  "status": 404,
+  "headers": {
+    "content-type": "application/json;charset=utf-8",
+    "x-request-id": "req_263388293e0e49e6a0039706497ec3ab"
+  },
+  "body": {
+    "code": "not_found",
+    "error": {
+      "code": "not_found",
+      "message": "Not found.",
+      "requestId": "req_263388293e0e49e6a0039706497ec3ab",
+      "status": 404
+    },
+    "message": "Not found.",
+    "ok": false,
+    "requestId": "req_263388293e0e49e6a0039706497ec3ab",
+    "status": 404,
+    "type": "notify.error"
+  }
+}

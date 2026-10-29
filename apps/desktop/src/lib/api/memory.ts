@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { gatewayJsonValueSchema } from "@/src/lib/api/gateway-json-contracts.ts";
 // apps/desktop/src/lib/api/memory.ts
 //
 // Typed client for Core's long-term memory endpoints (`/api/memory`). A memory
@@ -8,6 +10,184 @@
 // to camelCase so callers stay idiomatic, and maps back on write.
 
 import { ApiError, type ApiTarget, request } from "./client.ts";
+
+const jsonResponseSchema = z.looseObject({
+	include_sensitive_topics: z.boolean().optional(),
+});
+const edgesResponseSchema = z.looseObject({
+	kind: z.string(),
+	memory_id: z.string(),
+	source: z.string(),
+	target: z.string(),
+	weight: z.number(),
+});
+const nodesResponseSchema = z.looseObject({
+	agent_id: z.string().optional(),
+	id: z.string(),
+	kind: z.union([
+		z.literal("memory"),
+		z.literal("topic"),
+		z.literal("person"),
+		z.literal("category"),
+		z.literal("scope"),
+		z.literal("agent"),
+	]),
+	label: z.string(),
+	memory_id: z.string().optional(),
+	normalized: z.string(),
+	scope: z.string().optional(),
+	scope_id: z.string().optional(),
+	sensitive: z.boolean(),
+});
+const graphResponseSchema = z.looseObject({
+	edges: z.array(edgesResponseSchema).optional(),
+	memory_count: z.number().optional(),
+	nodes: z.array(nodesResponseSchema).optional(),
+	truncated: z.boolean().optional(),
+});
+const memoriesResponseSchema = z.looseObject({
+	author_agent_id: z.union([z.null(), z.string()]).optional(),
+	category: z.string().optional(),
+	content: z.string(),
+	created_at: z.number().optional(),
+	id: z.string(),
+	importance: z.number().optional(),
+	scope: z.string().optional(),
+	scope_id: z.union([z.null(), z.string()]).optional(),
+	sensitive_topics: z.array(z.string()).optional(),
+	tags: z.array(z.string()).optional(),
+	updated_at: z.number().optional(),
+	when_to_use: z.union([z.null(), z.string()]).optional(),
+});
+const jsonResponseSchema2 = z.looseObject({
+	memories: z.array(memoriesResponseSchema).optional(),
+});
+const jsonResponseSchema3 = z.looseObject({ memory: memoriesResponseSchema });
+const jsonResponseSchema4 = z.looseObject({ memory: memoriesResponseSchema });
+const jsonResponseSchema5 = z.looseObject({ memory: memoriesResponseSchema });
+const jsonResponseSchema6 = z.looseObject({
+	removed: z.boolean().optional(),
+	success: z.boolean().optional(),
+});
+const commitsResponseSchema = z.looseObject({
+	author: z.string(),
+	files: z.array(z.string()),
+	hash: z.string(),
+	subject: z.string(),
+	timestamp: z.string(),
+});
+const jsonResponseSchema7 = z.looseObject({
+	commits: z.array(commitsResponseSchema).optional(),
+	configured: z.boolean().optional(),
+	path: z.string().optional(),
+});
+const proposalsResponseSchema = z.looseObject({
+	created_at: z.number().optional(),
+	current: z.union([z.null(), memoriesResponseSchema]).optional(),
+	id: z.string(),
+	proposed: memoriesResponseSchema,
+	reason: z.union([z.null(), z.string()]).optional(),
+	source: z.union([z.null(), z.string()]).optional(),
+	status: z.string().optional(),
+});
+const reviewResponseSchema = z.looseObject({
+	generated_at: z.number().optional(),
+	mode: z.string().optional(),
+	proposals: z.array(proposalsResponseSchema).optional(),
+	summary: z.union([z.null(), z.string()]).optional(),
+});
+const jsonResponseSchema8 = z.looseObject({
+	review: reviewResponseSchema.optional(),
+	proposals: z.array(proposalsResponseSchema).optional(),
+});
+const jsonResponseSchema9 = z.looseObject({
+	review: reviewResponseSchema.optional(),
+	proposals: z.array(proposalsResponseSchema).optional(),
+});
+const jsonResponseSchema10 = z.looseObject({ memory: memoriesResponseSchema });
+const settingsResponseSchema = z.looseObject({
+	automatic: z.boolean().optional(),
+	quiet_hours_end: z.number().optional(),
+	quiet_hours_start: z.number().optional(),
+});
+const jsonResponseSchema11 = z.looseObject({
+	settings: settingsResponseSchema.optional(),
+});
+const jsonResponseSchema12 = z.looseObject({
+	settings: settingsResponseSchema.optional(),
+});
+const activityResponseSchema = z.looseObject({
+	count: z.number().optional(),
+	label: z.string().optional(),
+	trend: z.union([z.null(), z.number()]).optional(),
+});
+const insightsResponseSchema = z.looseObject({
+	body: z.string().optional(),
+	id: z.string(),
+	title: z.string().optional(),
+	tone: z.string().optional(),
+});
+const topicsResponseSchema = z.looseObject({
+	count: z.number().optional(),
+	name: z.string(),
+	summary: z.union([z.null(), z.string()]).optional(),
+});
+const getReflectDashboardResponseSchema = z.looseObject({
+	activity: z.array(activityResponseSchema).optional(),
+	generated_at: z.number().optional(),
+	insights: z.array(insightsResponseSchema).optional(),
+	period: z.string().optional(),
+	topics: z.array(topicsResponseSchema).optional(),
+});
+const aiFluencyObservationsResponseSchema = z.looseObject({
+	detail: z.string().optional(),
+	evidence_count: z.number().optional(),
+	id: z.string(),
+	title: z.string().optional(),
+});
+const metricsResponseSchema = z.looseObject({
+	active_days: z.number().optional(),
+	activity_count: z.number().optional(),
+	conversation_count: z.number().optional(),
+	message_count: z.number().optional(),
+});
+const periodResponseSchema = z.looseObject({
+	from: z.number().optional(),
+	to: z.number().optional(),
+});
+const topicsResponseSchema2 = z.looseObject({
+	conversation_count: z.number().optional(),
+	label: z.string(),
+	message_count: z.number().optional(),
+});
+const usageResponseSchema = z.looseObject({
+	ai_fluency_observations: z
+		.array(aiFluencyObservationsResponseSchema)
+		.optional(),
+	metrics: metricsResponseSchema.optional(),
+	period: periodResponseSchema.optional(),
+	topics: z.array(topicsResponseSchema2).optional(),
+});
+const settingsResponseSchema2 = z.looseObject({
+	break_nudges: z.boolean().optional(),
+	quiet_hours_enabled: z.boolean().optional(),
+	quiet_hours_end: z.number().optional(),
+	quiet_hours_start: z.number().optional(),
+});
+const jsonResponseSchema13 = z.looseObject({
+	settings: settingsResponseSchema2.optional(),
+});
+const jsonResponseSchema14 = z.looseObject({
+	settings: settingsResponseSchema2.optional(),
+});
+const usageReviewSettingsResponseSchema = z.looseObject({
+	enabled: z.boolean().optional(),
+});
+
+/** The refusal Core returns while the opt-in usage review is turned off. */
+const USAGE_REVIEW_DISABLED = "usage_review_disabled";
+/** Core's default for the Reflect break-nudge preference (off). */
+const DEFAULT_BREAK_NUDGES = false;
 
 /** The review cadence Dream can use when it looks for durable memories. */
 export type DreamReviewMode = "manual" | "automatic";
@@ -62,13 +242,13 @@ export const MEMORY_CATEGORIES: MemoryCategory[] = [
 ];
 
 /** Human labels for the scope levels. */
-export const MEMORY_SCOPE_LABELS: Record<MemoryScope, string> = {
+export const MEMORY_SCOPE_LABELS = {
 	agent: "Agent",
 	user: "User",
 	node: "Node",
 	project: "Project",
 	org: "Organization",
-};
+} satisfies Record<MemoryScope, string>;
 
 /**
  * The scope levels in everyday words.
@@ -80,16 +260,16 @@ export const MEMORY_SCOPE_LABELS: Record<MemoryScope, string> = {
  * "everywhere I go" versus "only here", and "Node" answers neither question. The
  * rest are already plain and change only enough to read as a set.
  */
-export const MEMORY_SCOPE_FRIENDLY_LABELS: Record<MemoryScope, string> = {
+export const MEMORY_SCOPE_FRIENDLY_LABELS = {
 	agent: "This agent",
 	user: "Just me",
 	node: "This device",
 	project: "This project",
 	org: "My organization",
-};
+} satisfies Record<MemoryScope, string>;
 
 /** Human labels for the categories. */
-export const MEMORY_CATEGORY_LABELS: Record<MemoryCategory, string> = {
+export const MEMORY_CATEGORY_LABELS = {
 	user_fact: "User fact",
 	preference: "Preference",
 	domain_knowledge: "Domain knowledge",
@@ -100,7 +280,7 @@ export const MEMORY_CATEGORY_LABELS: Record<MemoryCategory, string> = {
 	procedure: "Procedure",
 	event: "Event",
 	other: "Other",
-};
+} satisfies Record<MemoryCategory, string>;
 
 /**
  * The categories in everyday words.
@@ -112,7 +292,7 @@ export const MEMORY_CATEGORY_LABELS: Record<MemoryCategory, string> = {
  * "the steps for doing something" — so friendly mode says that. The technical
  * names stay reachable for anyone matching them against the API's category values.
  */
-export const MEMORY_CATEGORY_FRIENDLY_LABELS: Record<MemoryCategory, string> = {
+export const MEMORY_CATEGORY_FRIENDLY_LABELS = {
 	user_fact: "About me",
 	preference: "Preference",
 	domain_knowledge: "Subject knowledge",
@@ -123,7 +303,7 @@ export const MEMORY_CATEGORY_FRIENDLY_LABELS: Record<MemoryCategory, string> = {
 	procedure: "How to do something",
 	event: "Something that happened",
 	other: "Other",
-};
+} satisfies Record<MemoryCategory, string>;
 
 /** Scope labels in the caller's current vocabulary. */
 export function memoryScopeLabels(
@@ -289,13 +469,23 @@ interface MemoryWire {
 	when_to_use?: string | null;
 }
 
+/** Core create/update payload, using the read contract's existing wire names. */
+type MemoryWrite = Partial<
+	Pick<
+		MemoryWire,
+		| "content"
+		| "scope"
+		| "scope_id"
+		| "category"
+		| "importance"
+		| "when_to_use"
+		| "tags"
+	>
+> & { agent_id?: MemoryCreate["agentId"] };
+
 /** Per-user, per-node memory privacy settings. */
 export interface MemorySettings {
 	includeSensitiveTopics: boolean;
-}
-
-interface MemorySettingsWire {
-	include_sensitive_topics?: boolean;
 }
 
 /** Typed graph projection returned by Core's memory graph endpoint. */
@@ -334,13 +524,6 @@ export interface MemoryGraphSnapshot {
 	truncated: boolean;
 }
 
-interface MemoryGraphWire {
-	edges?: MemoryGraphEdge[];
-	memory_count?: number;
-	nodes?: MemoryGraphNode[];
-	truncated?: boolean;
-}
-
 interface MemoryProposalWire {
 	created_at?: number;
 	current?: MemoryWire | null;
@@ -349,13 +532,6 @@ interface MemoryProposalWire {
 	reason?: string | null;
 	source?: string | null;
 	status?: string;
-}
-
-interface DreamReviewWire {
-	generated_at?: number;
-	mode?: string;
-	proposals?: MemoryProposalWire[];
-	summary?: string | null;
 }
 
 interface ReflectDashboardWire {
@@ -392,27 +568,6 @@ interface ReflectSettingsWire {
 	quiet_hours_start?: number;
 }
 
-interface UsageReviewWire {
-	ai_fluency_observations?: Array<{
-		detail?: string;
-		evidence_count?: number;
-		id: string;
-		title?: string;
-	}>;
-	metrics?: {
-		active_days?: number;
-		activity_count?: number;
-		conversation_count?: number;
-		message_count?: number;
-	};
-	period?: { from?: number; to?: number };
-	topics?: Array<{
-		conversation_count?: number;
-		label: string;
-		message_count?: number;
-	}>;
-}
-
 /**
  * Decode a wire scope string.
  *
@@ -428,15 +583,11 @@ interface UsageReviewWire {
  * as more widely shared than it is.
  */
 function toScope(value: string | undefined): MemoryScope {
-	return MEMORY_SCOPES.includes(value as MemoryScope)
-		? (value as MemoryScope)
-		: "user";
+	return MEMORY_SCOPES.find((scope) => scope === value) ?? "user";
 }
 
 function toCategory(value: string | undefined): MemoryCategory {
-	return MEMORY_CATEGORIES.includes(value as MemoryCategory)
-		? (value as MemoryCategory)
-		: "other";
+	return MEMORY_CATEGORIES.find((category) => category === value) ?? "other";
 }
 
 function toMemory(m: MemoryWire): Memory {
@@ -474,9 +625,7 @@ function toProposal(m: MemoryProposalWire): MemoryProposal {
 }
 
 function toPeriod(value: string | undefined): ReflectPeriod {
-	return REFLECT_PERIODS.includes(value as ReflectPeriod)
-		? (value as ReflectPeriod)
-		: "7d";
+	return REFLECT_PERIODS.find((period) => period === value) ?? "7d";
 }
 
 function toTone(value: string | undefined): ReflectInsight["tone"] {
@@ -487,9 +636,11 @@ function toTone(value: string | undefined): ReflectInsight["tone"] {
 export async function getMemorySettings(
 	target: ApiTarget
 ): Promise<MemorySettings> {
-	const json = await request<MemorySettingsWire>(
+	const json = await request(
 		target,
-		"/api/memory/settings"
+		"/api/memory/settings",
+		undefined,
+		jsonResponseSchema
 	);
 	return { includeSensitiveTopics: json.include_sensitive_topics ?? false };
 }
@@ -499,7 +650,7 @@ export async function setMemorySettings(
 	target: ApiTarget,
 	settings: Partial<MemorySettings>
 ): Promise<MemorySettings> {
-	const json = await request<MemorySettingsWire>(
+	const json = await request(
 		target,
 		"/api/memory/settings",
 		{
@@ -507,7 +658,8 @@ export async function setMemorySettings(
 			body: {
 				include_sensitive_topics: settings.includeSensitiveTopics ?? false,
 			},
-		}
+		},
+		jsonResponseSchema
 	);
 	return {
 		includeSensitiveTopics:
@@ -539,9 +691,11 @@ export async function getMemoryGraph(
 		params.set("max_edges", String(query.maxEdges));
 	}
 	const suffix = params.toString();
-	const graph = await request<MemoryGraphWire>(
+	const graph = await request(
 		target,
-		suffix ? `/api/memory/graph?${suffix}` : "/api/memory/graph"
+		suffix ? `/api/memory/graph?${suffix}` : "/api/memory/graph",
+		undefined,
+		graphResponseSchema
 	);
 	return {
 		edges: graph.edges ?? [],
@@ -570,9 +724,11 @@ export async function listMemories(
 		params.set("limit", String(query.limit));
 	}
 	const qs = params.toString();
-	const json = await request<{ memories?: MemoryWire[] }>(
+	const json = await request(
 		target,
-		qs ? `/api/memory?${qs}` : "/api/memory"
+		qs ? `/api/memory?${qs}` : "/api/memory",
+		undefined,
+		jsonResponseSchema2
 	);
 	return (json.memories ?? []).map(toMemory);
 }
@@ -582,9 +738,11 @@ export async function getMemory(
 	target: ApiTarget,
 	id: string
 ): Promise<Memory> {
-	const json = await request<{ memory: MemoryWire }>(
+	const json = await request(
 		target,
-		`/api/memory/${id}`
+		`/api/memory/${id}`,
+		undefined,
+		jsonResponseSchema3
 	);
 	return toMemory(json.memory);
 }
@@ -594,7 +752,7 @@ export async function createMemory(
 	target: ApiTarget,
 	input: MemoryCreate
 ): Promise<Memory> {
-	const body: Record<string, unknown> = { content: input.content };
+	const body: MemoryWrite = { content: input.content };
 	if (input.scope !== undefined) {
 		body.scope = input.scope;
 	}
@@ -616,10 +774,15 @@ export async function createMemory(
 	if (input.agentId !== undefined) {
 		body.agent_id = input.agentId;
 	}
-	const json = await request<{ memory: MemoryWire }>(target, "/api/memory", {
-		method: "POST",
-		body,
-	});
+	const json = await request(
+		target,
+		"/api/memory",
+		{
+			method: "POST",
+			body,
+		},
+		jsonResponseSchema4
+	);
 	return toMemory(json.memory);
 }
 
@@ -633,7 +796,7 @@ export async function updateMemory(
 	id: string,
 	update: MemoryUpdate
 ): Promise<Memory> {
-	const body: Record<string, unknown> = {};
+	const body: MemoryWrite = {};
 	if ("content" in update) {
 		body.content = update.content;
 	}
@@ -656,10 +819,11 @@ export async function updateMemory(
 	if ("tags" in update) {
 		body.tags = update.tags;
 	}
-	const json = await request<{ memory: MemoryWire }>(
+	const json = await request(
 		target,
 		`/api/memory/${id}`,
-		{ method: "PUT", body }
+		{ method: "PUT", body },
+		jsonResponseSchema5
 	);
 	return toMemory(json.memory);
 }
@@ -669,10 +833,11 @@ export async function deleteMemory(
 	target: ApiTarget,
 	id: string
 ): Promise<boolean> {
-	const json = await request<{ removed?: boolean; success?: boolean }>(
+	const json = await request(
 		target,
 		`/api/memory/${id}`,
-		{ method: "DELETE" }
+		{ method: "DELETE" },
+		jsonResponseSchema6
 	);
 	return json?.removed ?? json?.success ?? false;
 }
@@ -684,9 +849,11 @@ export async function getMemoryGitTrace(
 	limit = 20
 ): Promise<MemoryGitTrace> {
 	const query = new URLSearchParams({ path, limit: String(limit) });
-	const json = await request<Partial<MemoryGitTrace>>(
+	const json = await request(
 		target,
-		`/api/memory/git/trace?${query.toString()}`
+		`/api/memory/git/trace?${query.toString()}`,
+		undefined,
+		jsonResponseSchema7
 	);
 	return {
 		commits: json.commits ?? [],
@@ -704,10 +871,12 @@ export async function getMemoryGitTrace(
 const DREAM_REVIEW_PATH = "/api/memory/dream/review";
 
 export async function getDreamReview(target: ApiTarget): Promise<DreamReview> {
-	const json = await request<{
-		review?: DreamReviewWire;
-		proposals?: MemoryProposalWire[];
-	}>(target, DREAM_REVIEW_PATH);
+	const json = await request(
+		target,
+		DREAM_REVIEW_PATH,
+		undefined,
+		jsonResponseSchema8
+	);
 	const review = json.review ?? {};
 	return {
 		generatedAt: review.generated_at ?? 0,
@@ -721,10 +890,12 @@ export async function runDreamReview(
 	target: ApiTarget,
 	mode: DreamReviewMode = "manual"
 ): Promise<DreamReview> {
-	const json = await request<{
-		review?: DreamReviewWire;
-		proposals?: MemoryProposalWire[];
-	}>(target, DREAM_REVIEW_PATH, { method: "POST", body: { mode } });
+	const json = await request(
+		target,
+		DREAM_REVIEW_PATH,
+		{ method: "POST", body: { mode } },
+		jsonResponseSchema9
+	);
 	const review = json.review ?? {};
 	return {
 		generatedAt: review.generated_at ?? Date.now(),
@@ -738,10 +909,11 @@ export async function acceptMemoryProposal(
 	target: ApiTarget,
 	proposalId: string
 ): Promise<Memory> {
-	const json = await request<{ memory: MemoryWire }>(
+	const json = await request(
 		target,
 		`${DREAM_REVIEW_PATH}/proposals/${encodeURIComponent(proposalId)}/accept`,
-		{ method: "POST" }
+		{ method: "POST" },
+		jsonResponseSchema10
 	);
 	return toMemory(json.memory);
 }
@@ -753,16 +925,19 @@ export async function rejectMemoryProposal(
 	await request(
 		target,
 		`${DREAM_REVIEW_PATH}/proposals/${encodeURIComponent(proposalId)}/reject`,
-		{ method: "POST" }
+		{ method: "POST" },
+		gatewayJsonValueSchema
 	);
 }
 
 export async function getDreamSettings(
 	target: ApiTarget
 ): Promise<DreamSettings> {
-	const json = await request<{ settings?: DreamSettingsWire }>(
+	const json = await request(
 		target,
-		`${DREAM_REVIEW_PATH}/settings`
+		`${DREAM_REVIEW_PATH}/settings`,
+		undefined,
+		jsonResponseSchema11
 	);
 	const settings = json.settings ?? {};
 	return {
@@ -776,7 +951,7 @@ export async function updateDreamSettings(
 	target: ApiTarget,
 	settings: Partial<DreamSettings>
 ): Promise<DreamSettings> {
-	const body: Record<string, unknown> = {};
+	const body: DreamSettingsWire = {};
 	if (settings.automatic !== undefined) {
 		body.automatic = settings.automatic;
 	}
@@ -786,10 +961,11 @@ export async function updateDreamSettings(
 	if (settings.quietHoursEnd !== undefined) {
 		body.quiet_hours_end = settings.quietHoursEnd;
 	}
-	const json = await request<{ settings?: DreamSettingsWire }>(
+	const json = await request(
 		target,
 		`${DREAM_REVIEW_PATH}/settings`,
-		{ method: "PATCH", body }
+		{ method: "PATCH", body },
+		jsonResponseSchema12
 	);
 	const next = json.settings ?? {};
 	return {
@@ -807,9 +983,11 @@ export async function getReflectDashboard(
 ): Promise<ReflectDashboard> {
 	let json: ReflectDashboardWire;
 	try {
-		json = await request<ReflectDashboardWire>(
+		json = await request(
 			target,
-			`/api/memory/reflect?period=${encodeURIComponent(period)}`
+			`/api/memory/reflect?period=${encodeURIComponent(period)}`,
+			undefined,
+			getReflectDashboardResponseSchema
 		);
 	} catch (error) {
 		// Reflect's richer route is additive. Older nodes already expose the
@@ -822,9 +1000,11 @@ export async function getReflectDashboard(
 		}
 		const days = period === "90d" ? 90 : period === "30d" ? 30 : 7;
 		const to = Date.now();
-		const usage = await request<UsageReviewWire>(
+		const usage = await request(
 			target,
-			`/api/usage-review?from=${to - days * 24 * 60 * 60 * 1000}&to=${to}`
+			`/api/usage-review?from=${to - days * 24 * 60 * 60 * 1000}&to=${to}`,
+			undefined,
+			usageResponseSchema
 		);
 		const metrics = usage.metrics ?? {};
 		json = {
@@ -874,16 +1054,47 @@ export async function getReflectDashboard(
 	};
 }
 
+/**
+ * Whether `error` is Core's `403 usage_review_disabled` refusal. Reflect is a
+ * projection of the opt-in usage review, so a node that has not turned usage
+ * review on refuses the dashboard with this code rather than failing.
+ */
+export function isUsageReviewDisabled(error: unknown): boolean {
+	return (
+		error instanceof ApiError &&
+		error.status === 403 &&
+		(error.code === USAGE_REVIEW_DISABLED ||
+			error.serverMessage === USAGE_REVIEW_DISABLED)
+	);
+}
+
+/**
+ * Turn on the node's opt-in usage review (`PUT /api/usage-review/settings`).
+ * Only `enabled` is sent, so existing exclusions are kept. Resolves to the
+ * node's persisted `enabled` value.
+ */
+export async function enableUsageReview(target: ApiTarget): Promise<boolean> {
+	const json = await request(
+		target,
+		"/api/usage-review/settings",
+		{ method: "PUT", body: { enabled: true } },
+		usageReviewSettingsResponseSchema
+	);
+	return json.enabled ?? false;
+}
+
 export async function getReflectSettings(
 	target: ApiTarget
 ): Promise<ReflectSettings> {
-	const json = await request<{ settings?: ReflectSettingsWire }>(
+	const json = await request(
 		target,
-		"/api/memory/reflect/settings"
+		"/api/memory/reflect/settings",
+		undefined,
+		jsonResponseSchema13
 	);
 	const settings = json.settings ?? {};
 	return {
-		breakNudges: settings.break_nudges ?? true,
+		breakNudges: settings.break_nudges ?? DEFAULT_BREAK_NUDGES,
 		quietHoursEnabled: settings.quiet_hours_enabled ?? true,
 		quietHoursEnd: settings.quiet_hours_end ?? 8,
 		quietHoursStart: settings.quiet_hours_start ?? 22,
@@ -894,7 +1105,7 @@ export async function updateReflectSettings(
 	target: ApiTarget,
 	settings: Partial<ReflectSettings>
 ): Promise<ReflectSettings> {
-	const body: Record<string, unknown> = {};
+	const body: ReflectSettingsWire = {};
 	if (settings.breakNudges !== undefined) {
 		body.break_nudges = settings.breakNudges;
 	}
@@ -907,14 +1118,16 @@ export async function updateReflectSettings(
 	if (settings.quietHoursEnd !== undefined) {
 		body.quiet_hours_end = settings.quietHoursEnd;
 	}
-	const json = await request<{ settings?: ReflectSettingsWire }>(
+	const json = await request(
 		target,
 		"/api/memory/reflect/settings",
-		{ method: "PATCH", body }
+		{ method: "PATCH", body },
+		jsonResponseSchema14
 	);
 	const next = json.settings ?? {};
 	return {
-		breakNudges: next.break_nudges ?? settings.breakNudges ?? true,
+		breakNudges:
+			next.break_nudges ?? settings.breakNudges ?? DEFAULT_BREAK_NUDGES,
 		quietHoursEnabled:
 			next.quiet_hours_enabled ?? settings.quietHoursEnabled ?? true,
 		quietHoursEnd: next.quiet_hours_end ?? settings.quietHoursEnd ?? 8,

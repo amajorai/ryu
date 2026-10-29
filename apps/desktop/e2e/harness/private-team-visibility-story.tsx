@@ -1,9 +1,13 @@
+import { createTabsProofContext } from "./tabs-proof-context.ts";
+
+declare const window: Window;
+
 import {
 	UserMultiple02Icon,
 	ViewOffSlashIcon,
 } from "@hugeicons/core-free-icons";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { type ContextType, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
 	SidebarChatList,
@@ -21,8 +25,9 @@ import {
 	type VisibilityChangeRequest,
 	type VisibilityDragPayload,
 } from "../../src/lib/resource-visibility.ts";
-import type { Conversation } from "../../src/types/chat.ts";
+import type { Conversation } from "../../types/chat.ts";
 import "../../src/index.css";
+import { IDLE_REORDER_SHIFT } from "@ryu/ui/hooks/use-reorder-shift.tsx";
 
 const DAY_MS = 86_400_000;
 
@@ -38,10 +43,7 @@ function conversation(
 ): Conversation {
 	const time = stamp(daysAgo);
 	return {
-		agentId: null,
-		branch: null,
 		createdAt: time,
-		folderPath: null,
 		id,
 		lastMessage: visibility === "org" ? "Ready for review" : "Working notes",
 		participants: [],
@@ -50,8 +52,7 @@ function conversation(
 		title,
 		updatedAt: time,
 		visibility,
-		worktreePath: null,
-	} as unknown as Conversation;
+	};
 }
 
 function spaceDocument(
@@ -76,7 +77,7 @@ function spaceDocument(
 		spaceId,
 		title,
 		updatedAt: time,
-	} as unknown as SpaceDocument;
+	};
 }
 
 const INITIAL_SPACES: Space[] = [
@@ -106,19 +107,21 @@ const INITIAL_SPACES: Space[] = [
 	},
 ];
 
-const DOCUMENTS: Record<string, SpaceDocument[]> = {
-	"space-private": [
-		spaceDocument("doc-private", "space-private", "Private launch notes", 0),
-	],
-	"space-team": [
-		spaceDocument("doc-team-brief", "space-team", "Launch brief", 0),
-		spaceDocument("doc-team-meeting", "space-team", "Meeting notes", 1),
-	],
-};
+const DOCUMENTS = new Map(
+	Object.entries({
+		"space-private": [
+			spaceDocument("doc-private", "space-private", "Private launch notes", 0),
+		],
+		"space-team": [
+			spaceDocument("doc-team-brief", "space-team", "Launch brief", 0),
+			spaceDocument("doc-team-meeting", "space-team", "Meeting notes", 1),
+		],
+	})
+);
 
-const realFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-	const url = typeof input === "string" ? input : input.toString();
+const realFetch = window.fetch.bind(globalThis);
+window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+	const url = input instanceof Request ? input.url : String(input);
 	if (url.includes("/api/plugins/contributions")) {
 		return Promise.resolve(
 			new Response(JSON.stringify({ context_menu_items: [] }), {
@@ -127,23 +130,24 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 			})
 		);
 	}
-	return realFetch(input as RequestInfo, init);
-}) as typeof fetch;
+	return realFetch(input, init);
+};
 
-const tabsStub = {
-	openTab: () => undefined,
+const tabsStub = createTabsProofContext({
+	openTab: () => "proof-tab",
 	updateTabsIconWhere: () => undefined,
-} as unknown as NonNullable<ContextType<typeof TabsContext>>;
+});
 
-const dnd = {
+const dnd: NonNullable<Parameters<typeof SubSection>[0]["dnd"]> = {
 	draggingKey: null,
 	dragOverKey: null,
 	onDragEnd: () => undefined,
 	onDragOver: () => undefined,
 	onDragStart: () => undefined,
 	onDrop: () => undefined,
+	shift: IDLE_REORDER_SHIFT,
 	order: ["private", "team"],
-} as never;
+};
 
 const initialConversations = [
 	conversation("chat-private", "Private prompt", "private", 0),
@@ -185,7 +189,7 @@ function VisibilityGroup({
 				onDrop: onChatDrop,
 			}}
 		>
-			<div className="mb-2 px-2 text-[11px] text-muted-foreground">
+			<div className="type-caption mb-2 px-2 text-muted-foreground">
 				{groupDescription(group)}
 			</div>
 			{children}
@@ -260,7 +264,9 @@ function Story() {
 				<SpaceSidebarRow
 					canMakePrivate
 					key={space.id}
-					listDocuments={(spaceId) => Promise.resolve(DOCUMENTS[spaceId] ?? [])}
+					listDocuments={(spaceId) =>
+						Promise.resolve(DOCUMENTS.get(spaceId) ?? [])
+					}
 					onAdd={() => undefined}
 					onOpen={() => undefined}
 					onOpenDoc={() => undefined}
@@ -296,6 +302,7 @@ function Story() {
 				onOpenInNewWindow: () => undefined,
 				onOpenNewSideChat: () => undefined,
 				onOpenSideChat: () => undefined,
+				onMoveToProject: () => undefined,
 				onRemoveFromProject: () => undefined,
 				onRenameConversation: () => undefined,
 				onRequestConversationVisibility: requestVisibilityChange,
@@ -304,6 +311,7 @@ function Story() {
 				onToggleArchive: () => undefined,
 				onTogglePin: () => undefined,
 				pinnedIds: new Set<string>(),
+				projectTargets: [],
 				projectNameForFolder: (folderPath: string) =>
 					folderPath.split("/").at(-1) ?? folderPath,
 				target: { token: null, url: "http://127.0.0.1:8980" },
@@ -324,44 +332,48 @@ function Story() {
 						</p>
 					</div>
 					<div className="space-y-4">
-						{(["private", "team"] as ResourceVisibilityGroup[]).map((group) => {
-							const groupSpaces = spaces.filter(
-								(space) =>
-									resourceVisibilityGroup(space.visibility, space.system) ===
-									group
-							);
-							return (
-								<VisibilityGroup
-									count={groupSpaces.length}
-									group={group}
-									key={group}
-									onChatDrop={(payload) =>
-										requestVisibilityChange({ ...payload, to: group })
-									}
-								>
-									<SidebarScopePicker
-										allLabel={
-											group === "private"
-												? "All private spaces"
-												: "All team spaces"
+						{(["private", "team"] satisfies ResourceVisibilityGroup[]).map(
+							(group) => {
+								const groupSpaces = spaces.filter(
+									(space) =>
+										resourceVisibilityGroup(space.visibility, space.system) ===
+										group
+								);
+								return (
+									<VisibilityGroup
+										count={groupSpaces.length}
+										group={group}
+										key={group}
+										onChatDrop={(payload) =>
+											requestVisibilityChange({ ...payload, to: group })
 										}
-										icon={
-											group === "private"
-												? ViewOffSlashIcon
-												: UserMultiple02Icon
-										}
-										onValueChange={() => undefined}
-										options={groupSpaces.map((space) => ({
-											label: space.name,
-											value: space.id,
-										}))}
-										value="all"
-									/>
-									<div className="space-y-1">{renderSpaces(group)}</div>
-									<div className="mt-2 border-t pt-2">{renderChats(group)}</div>
-								</VisibilityGroup>
-							);
-						})}
+									>
+										<SidebarScopePicker
+											allLabel={
+												group === "private"
+													? "All private spaces"
+													: "All team spaces"
+											}
+											icon={
+												group === "private"
+													? ViewOffSlashIcon
+													: UserMultiple02Icon
+											}
+											onValueChange={() => undefined}
+											options={groupSpaces.map((space) => ({
+												label: space.name,
+												value: space.id,
+											}))}
+											value="all"
+										/>
+										<div className="space-y-1">{renderSpaces(group)}</div>
+										<div className="mt-2 border-t pt-2">
+											{renderChats(group)}
+										</div>
+									</VisibilityGroup>
+								);
+							}
+						)}
 					</div>
 					<div
 						className="mt-5 rounded-lg bg-muted/60 px-3 py-2 text-muted-foreground text-xs"

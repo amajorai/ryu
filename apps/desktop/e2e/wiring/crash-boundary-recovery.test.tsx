@@ -50,8 +50,8 @@ mock.module("@/src/lib/crash.ts", () => ({
 			tag: context?.tags?.crash_recovery,
 		});
 	},
-	reportError: (
-		_error: unknown,
+	reportError: <ReportedError,>(
+		_error: ReportedError,
 		context?: { extra?: Record<string, number>; tags?: Record<string, string> }
 	) => {
 		reports.push({
@@ -185,7 +185,7 @@ describe("CrashBoundary self-recovery", () => {
 
 		// The transient case: whatever broke is gone by the time we retry.
 		shouldThrow = false;
-		await advance((RETRY_BACKOFF_MS[0] as number) + 200);
+		await advance(RETRY_BACKOFF_MS[0] + 200);
 
 		expect(mountCount).toBeGreaterThan(mountsAtCrash);
 		expect(text()).toContain("alive");
@@ -197,7 +197,7 @@ describe("CrashBoundary self-recovery", () => {
 	it("reports every attempt to Sentry with its attempt number", async () => {
 		await mountBoundary();
 		shouldThrow = false;
-		await advance((RETRY_BACKOFF_MS[0] as number) + 200);
+		await advance(RETRY_BACKOFF_MS[0] + 200);
 
 		const errors = reports.filter((r) => r.kind === "error");
 		expect(errors).toHaveLength(1);
@@ -258,7 +258,7 @@ describe("CrashBoundary self-recovery", () => {
 		// that takes ~100ms to blow up would then retry forever.
 		await mountBoundary();
 		shouldThrow = false;
-		await advance((RETRY_BACKOFF_MS[0] as number) + 200);
+		await advance(RETRY_BACKOFF_MS[0] + 200);
 		expect(text()).toContain("alive");
 
 		// Render cleanly for a while — but less than STABLE_RENDER_MS, so the
@@ -297,7 +297,7 @@ describe("CrashBoundary self-recovery", () => {
 			// while leaving every other test green.
 			await mountBoundary();
 			shouldThrow = false;
-			await waitForText("alive", (RETRY_BACKOFF_MS[0] as number) + 1000);
+			await waitForText("alive", RETRY_BACKOFF_MS[0] + 1000);
 
 			await waitUntil(
 				() => reports.some((r) => r.kind === "recovered"),

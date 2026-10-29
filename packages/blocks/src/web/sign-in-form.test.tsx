@@ -20,12 +20,25 @@ test("secondary sign-in methods live under More options", () => {
 	expect(html).toContain('data-slot="accordion"');
 	const rememberIndex = html.indexOf("Remember this device for 30 days");
 	expect(rememberIndex).toBeLessThan(html.indexOf(">Sign in<"));
-	expect(html).toContain("flex items-center gap-2");
-	expect(html).toContain("mb-6 flex items-center gap-2");
+	expect(html).toContain("mb-6 flex items-start gap-2");
+	expect(html).toContain("grid gap-1");
 	expect(html).toContain(
 		"overflow-visible rounded-none border-0 bg-transparent shadow-none"
 	);
 	expect(html).toContain(
 		"border-0 bg-transparent shadow-none hover:bg-transparent hover:shadow-none"
 	);
+});
+
+test("magic-link sign-in can remember the requesting browser for 30 days", () => {
+	const html = renderToStaticMarkup(
+		<SignInForm
+			onSwitchToSignUp={() => undefined}
+			onToggleMagicLink={() => undefined}
+			useMagicLink
+		/>
+	);
+
+	expect(html).toContain("Remember this device for 30 days");
+	expect(html).toContain("Open the email link in this browser to remember it.");
 });

@@ -7,10 +7,13 @@ import {
 	type RefObject,
 	useCallback,
 	useEffect,
+	useId,
 	useRef,
 	useState,
 } from "react";
 import { createPortal } from "react-dom";
+import styles from "./elements-one.module.css";
+import type { AgentGeometryStyle } from "./elements-one-style.ts";
 import { SELECTABLE_ATTR } from "./quote-format.ts";
 import type {
 	ContributedSelectionAction,
@@ -19,8 +22,8 @@ import type {
 
 /**
  * Chat message quoting (ChatGPT / assistant-ui style). Selecting text inside a
- * message surfaces a floating "Quote" button; clicking it stashes the selection
- * as a pending quote shown above the composer, and the sent user bubble
+ * message surfaces a floating annotate box with a "Quote" action; quoting stashes
+ * the selection as a pending quote shown above the composer, and the sent user bubble
  * re-renders that quote as an inline block.
  *
  * The quote is persisted by prefixing the outgoing message with a markdown `>`
@@ -38,12 +41,16 @@ export {
 
 const SELECTABLE_SELECTOR = `[${SELECTABLE_ATTR}]`;
 
-function closestSelectable(node: Node | null): HTMLElement | null {
+function isElementNode(node: Node): node is Element {
+	return node.nodeType === Node.ELEMENT_NODE;
+}
+
+function closestSelectable(node: Node | null): Element | null {
 	let el: Node | null = node;
-	while (el && el.nodeType !== Node.ELEMENT_NODE) {
+	while (el && !isElementNode(el)) {
 		el = el.parentNode;
 	}
-	return (el as HTMLElement | null)?.closest(SELECTABLE_SELECTOR) ?? null;
+	return el?.closest(SELECTABLE_SELECTOR) ?? null;
 }
 
 interface SelectionQuoteToolbarProps {
@@ -51,21 +58,81 @@ interface SelectionQuoteToolbarProps {
 	/** Only react to selections inside this scroll container (avoids bleed across
 	 * split-view chats). Omit to accept any `[data-message-selectable]`. */
 	containerRef?: RefObject<HTMLElement | null>;
-	/** Dispatches a contributed action with the selected plain text. */
+	/** Dispatches a contributed action with the selected plain text and the note
+	 * typed into the popover (if any). */
 	onContributedAction?: (
 		action: ContributedSelectionAction,
 		context: SelectionActionContext
 	) => void;
-	/** Called with the selected plain text when the user clicks "Quote". */
-	onQuote?: (text: string) => void;
+	/** Called with the selected plain text (and the typed note, if any) when the
+	 * user clicks "Quote" or presses Enter in the note box. */
+	onQuote?: (text: string, note?: string) => void;
 	/** Declarative actions supplied by the host from enabled plugins. */
 	selectionActions?: readonly ContributedSelectionAction[];
 }
 
+interface SelectionDraft {
+	/** Prefer the space above the selection; flip below near the viewport top. */
+	placement: "above" | "below";
+	range: Range;
+	text: string;
+	x: number;
+	y: number;
+}
+
+/** CSS Custom Highlight name that keeps the selection visible once focus moves
+ * into the note box (focusing a textarea clears the document selection). */
+const SELECTION_HIGHLIGHT = "ryu-message-selection";
+const POPOVER_WIDTH = 320;
+const POPOVER_FLIP_THRESHOLD = 160;
+const VIEWPORT_GUTTER = 8;
+
+interface HighlightRegistryLike {
+	delete: (name: string) => boolean;
+	set: (name: string, highlight: unknown) => void;
+}
+
+function highlightRegistry(): HighlightRegistryLike | null {
+	if (typeof CSS === "undefined" || typeof Highlight === "undefined") {
+		return null;
+	}
+	return (
+		(CSS as unknown as { highlights?: HighlightRegistryLike }).highlights ??
+		null
+	);
+}
+
+function placeDraft(range: Range, text: string): SelectionDraft | null {
+	const rect = range.getBoundingClientRect();
+	if (rect.width === 0 && rect.height === 0) {
+		return null;
+	}
+	const half = POPOVER_WIDTH / 2 + VIEWPORT_GUTTER;
+	const center = rect.left + rect.width / 2;
+	const x = Math.min(
+		Math.max(center, half),
+		Math.max(half, window.innerWidth - half)
+	);
+	const placement = rect.top < POPOVER_FLIP_THRESHOLD ? "below" : "above";
+	return {
+		placement,
+		range,
+		text,
+		x,
+		y: placement === "above" ? rect.top - 6 : rect.bottom + 6,
+	};
+}
+
 /**
- * Floating toolbar that appears above a text selection made inside a message.
+ * Annotate popover that appears as soon as text inside a message is selected —
+ * the same mini note box the other annotation surfaces use, so writing comes
+ * first and choosing what to do with it comes second. The box is optional:
+ * every action (Quote, Ask in side chat, Explain, …) runs on the selection and
+ * forwards whatever was typed, so an empty box behaves like the old one-click
+ * toolbar.
+ *
  * Portals to `document.body` and is positioned from the selection's client
- * rect. Hides on collapse, scroll, or when the selection leaves message text.
+ * rect. Dismisses on Escape, an outside press, or once an action runs.
  */
 export function SelectionQuoteToolbar({
 	containerRef,
@@ -74,69 +141,118 @@ export function SelectionQuoteToolbar({
 	selectionActions,
 	onContributedAction,
 }: SelectionQuoteToolbarProps) {
-	const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
-		null
-	);
-	const textRef = useRef("");
+	const [draft, setDraft] = useState<SelectionDraft | null>(null);
+	const [note, setNote] = useState("");
+	const popoverRef = useRef<HTMLDivElement | null>(null);
+	const noteRef = useRef<HTMLTextAreaElement | null>(null);
+	const focusNoteRef = useRef(false);
+	const noteId = useId();
+	const draftTextRef = useRef("");
 
 	const hide = useCallback(() => {
-		setAnchor(null);
-		textRef.current = "";
+		draftTextRef.current = "";
+		setDraft(null);
+		setNote("");
+		highlightRegistry()?.delete(SELECTION_HIGHLIGHT);
 	}, []);
 
-	const update = useCallback(() => {
-		const selection = window.getSelection();
-		if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-			hide();
-			return;
-		}
-		const text = selection.toString().trim();
-		if (!text) {
-			hide();
-			return;
-		}
-		const anchorEl = closestSelectable(selection.anchorNode);
-		const focusEl = closestSelectable(selection.focusNode);
-		if (!(anchorEl && focusEl)) {
-			hide();
-			return;
-		}
-		if (containerRef?.current && !containerRef.current.contains(anchorEl)) {
-			hide();
-			return;
-		}
-		const rect = selection.getRangeAt(0).getBoundingClientRect();
-		if (rect.width === 0 && rect.height === 0) {
-			hide();
-			return;
-		}
-		textRef.current = text;
-		setAnchor({ top: rect.top, left: rect.left + rect.width / 2 });
-	}, [containerRef, hide]);
+	const update = useCallback(
+		(focusNote: boolean) => {
+			const selection = window.getSelection();
+			if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+				return;
+			}
+			const text = selection.toString().trim();
+			if (!text) {
+				return;
+			}
+			const anchorEl = closestSelectable(selection.anchorNode);
+			const focusEl = closestSelectable(selection.focusNode);
+			if (!(anchorEl && focusEl)) {
+				return;
+			}
+			if (containerRef?.current && !containerRef.current.contains(anchorEl)) {
+				return;
+			}
+			const range = selection.getRangeAt(0).cloneRange();
+			const next = placeDraft(range, text);
+			if (!next) {
+				return;
+			}
+			const registry = highlightRegistry();
+			if (registry) {
+				registry.set(SELECTION_HIGHLIGHT, new Highlight(range));
+			}
+			focusNoteRef.current = focusNote;
+			// Re-reading the same selection (a stray keyup) keeps the note intact.
+			if (draftTextRef.current !== text) {
+				setNote("");
+			}
+			draftTextRef.current = text;
+			setDraft(next);
+		},
+		[containerRef]
+	);
 
 	useEffect(() => {
+		const insidePopover = (target: EventTarget | null) =>
+			target instanceof Node && Boolean(popoverRef.current?.contains(target));
 		// mouseup/keyup finalize a selection; rAF lets it settle before we read it.
-		const onSettle = () => requestAnimationFrame(update);
-		const onSelectionChange = () => {
-			const selection = window.getSelection();
-			if (!selection || selection.isCollapsed) {
+		// A drag goes straight into the note box; a keyboard selection may still be
+		// extending, so it opens the box without stealing focus.
+		const onMouseUp = (event: MouseEvent) => {
+			if (!insidePopover(event.target)) {
+				requestAnimationFrame(() => update(true));
+			}
+		};
+		const onKeyUp = (event: KeyboardEvent) => {
+			if (!insidePopover(event.target)) {
+				requestAnimationFrame(() => update(false));
+			}
+		};
+		const onPointerDown = (event: PointerEvent) => {
+			if (!insidePopover(event.target)) {
 				hide();
 			}
 		};
-		document.addEventListener("mouseup", onSettle);
-		document.addEventListener("keyup", onSettle);
-		document.addEventListener("selectionchange", onSelectionChange);
-		// The selection rect is viewport-relative; a scroll moves it, so dismiss.
-		window.addEventListener("scroll", hide, true);
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				hide();
+			}
+		};
+		// The selection rect is viewport-relative; follow it while the transcript
+		// scrolls so a half-written note is not thrown away.
+		const onScroll = () => {
+			setDraft((current) =>
+				current ? (placeDraft(current.range, current.text) ?? current) : current
+			);
+		};
+		document.addEventListener("mouseup", onMouseUp);
+		document.addEventListener("keyup", onKeyUp);
+		document.addEventListener("pointerdown", onPointerDown, true);
+		document.addEventListener("keydown", onKeyDown);
+		window.addEventListener("scroll", onScroll, true);
+		window.addEventListener("resize", onScroll);
 		return () => {
-			document.removeEventListener("mouseup", onSettle);
-			document.removeEventListener("keyup", onSettle);
-			document.removeEventListener("selectionchange", onSelectionChange);
-			window.removeEventListener("scroll", hide, true);
+			document.removeEventListener("mouseup", onMouseUp);
+			document.removeEventListener("keyup", onKeyUp);
+			document.removeEventListener("pointerdown", onPointerDown, true);
+			document.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("scroll", onScroll, true);
+			window.removeEventListener("resize", onScroll);
 		};
 	}, [update, hide]);
 
-	if (!anchor) {
+	useEffect(() => {
+		if (draft && focusNoteRef.current) {
+			focusNoteRef.current = false;
+			noteRef.current?.focus({ preventScroll: true });
+		}
+	}, [draft]);
+
+	useEffect(() => hide, [hide]);
+
+	if (!draft) {
 		return null;
 	}
 	const actions = [...(selectionActions ?? [])]
@@ -147,30 +263,107 @@ export function SelectionQuoteToolbar({
 					(b.order ?? Number.MAX_SAFE_INTEGER) || a.label.localeCompare(b.label)
 		);
 	const hasQuote = Boolean(onQuote);
+	const trimmedNote = note.trim();
+
+	const finish = () => {
+		window.getSelection()?.removeAllRanges();
+		hide();
+	};
+	const runQuote = () => {
+		onQuote?.(draft.text, trimmedNote || undefined);
+		finish();
+	};
+	const runAction = (action: ContributedSelectionAction) => {
+		onContributedAction?.(
+			action,
+			trimmedNote
+				? { note: trimmedNote, text: draft.text }
+				: { text: draft.text }
+		);
+		finish();
+	};
+	const runPrimary = () => {
+		if (hasQuote) {
+			runQuote();
+			return;
+		}
+		const [first] = actions;
+		if (first) {
+			runAction(first);
+		}
+	};
 
 	return createPortal(
 		<div
+			aria-label="Annotate selection"
 			className={cn(
-				"fixed z-[60] -translate-x-1/2 -translate-y-full overflow-hidden rounded-lg border border-border bg-popover shadow-md",
+				styles.anchor,
+				styles.width,
+				"fixed z-[60] -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md",
+				draft.placement === "above" && "-translate-y-full",
 				className
 			)}
-			// Keep the underlying selection alive when the button is pressed.
-			onMouseDown={(event) => event.preventDefault()}
-			style={{ top: anchor.top, left: anchor.left }}
+			data-slot="selection-annotate"
+			ref={popoverRef}
+			role="dialog"
+			style={
+				{
+					"--agent-top": `${draft.y}px`,
+					"--agent-left": `${draft.x}px`,
+					"--agent-width": `${POPOVER_WIDTH}px`,
+				} satisfies AgentGeometryStyle as AgentGeometryStyle
+			}
 		>
-			<div className="flex items-center" data-slot="selection-toolbar">
+			{/* Keeps the highlighted range visible after focus enters the note box. */}
+			<style>{`::highlight(${SELECTION_HIGHLIGHT}){background-color:Highlight;color:HighlightText}`}</style>
+			<label className="sr-only" htmlFor={noteId}>
+				Note about the selected text
+			</label>
+			<textarea
+				className="block max-h-40 min-h-14 w-full resize-none bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground"
+				data-testid="selection-annotate-note"
+				id={noteId}
+				onChange={(event) => setNote(event.target.value)}
+				onCopy={(event) => {
+					// With nothing selected in the box, copy keeps copying the
+					// highlighted message text, as it did before the box took focus.
+					const target = event.currentTarget;
+					if (target.selectionStart === target.selectionEnd) {
+						event.preventDefault();
+						event.clipboardData.setData("text/plain", draft.text);
+					}
+				}}
+				onKeyDown={(event) => {
+					if (
+						event.key === "Enter" &&
+						!event.shiftKey &&
+						!event.nativeEvent.isComposing
+					) {
+						event.preventDefault();
+						runPrimary();
+					}
+				}}
+				placeholder="Add a note or question… (optional)"
+				ref={noteRef}
+				rows={2}
+				value={note}
+			/>
+			<div
+				className="flex flex-wrap items-center border-border border-t"
+				data-slot="selection-toolbar"
+				// Keep focus (and the typed note) in the box when an action is pressed.
+				onMouseDown={(event) => event.preventDefault()}
+			>
 				{hasQuote && (
 					<button
 						className="flex items-center gap-1.5 px-2.5 py-1.5 font-medium text-popover-foreground text-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:outline-none"
 						data-testid="selection-quote-action"
-						onClick={() => {
-							const text = textRef.current;
-							if (text) {
-								onQuote?.(text);
-							}
-							window.getSelection()?.removeAllRanges();
-							hide();
-						}}
+						onClick={runQuote}
+						title={
+							trimmedNote
+								? "Quote in the composer with your note"
+								: "Quote in the composer"
+						}
 						type="button"
 					>
 						<IconQuote className="size-3.5" />
@@ -189,14 +382,7 @@ export function SelectionQuoteToolbar({
 							aria-label={action.label}
 							className="whitespace-nowrap px-2.5 py-1.5 font-medium text-popover-foreground text-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:outline-none"
 							data-selection-action-id={action.id}
-							onClick={() => {
-								const text = textRef.current;
-								if (text) {
-									onContributedAction?.(action, { text });
-								}
-								window.getSelection()?.removeAllRanges();
-								hide();
-							}}
+							onClick={() => runAction(action)}
 							title={action.label}
 							type="button"
 						>
@@ -236,7 +422,7 @@ export function ComposerQuotePreview({
 			data-slot="composer-quote-preview"
 		>
 			<IconQuote className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-			<p className="line-clamp-3 min-w-0 flex-1 whitespace-pre-wrap text-[13px] text-muted-foreground leading-snug">
+			<p className="type-detail line-clamp-3 min-w-0 flex-1 whitespace-pre-wrap text-muted-foreground leading-snug">
 				{text}
 			</p>
 			{onDismiss && (
@@ -267,7 +453,7 @@ export function QuoteBlock({ text, className }: QuoteBlockProps) {
 	return (
 		<p
 			className={cn(
-				"mb-1.5 line-clamp-4 whitespace-pre-wrap border-foreground/25 border-l-2 pl-2 text-[13px] text-muted-foreground leading-snug",
+				"type-detail mb-1.5 line-clamp-4 whitespace-pre-wrap border-foreground/25 border-l-2 pl-2 text-muted-foreground leading-snug",
 				className
 			)}
 		>

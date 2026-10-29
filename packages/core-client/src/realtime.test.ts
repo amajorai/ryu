@@ -17,6 +17,7 @@ import {
 	decodeRealtimeEvent,
 	encodeDocSync,
 	encodeRealtimeEvent,
+	RealtimeConnection,
 	realtimeWsUrl,
 } from "./realtime.ts";
 
@@ -125,4 +126,28 @@ test("application room options carry app_id only in the join frame contract", ()
 	);
 	expect(url).not.toContain("com.example.app");
 	expect(url).not.toContain("node-secret");
+});
+
+test("sendEvent writes a single-encoded event object on the wire", () => {
+	const sent: string[] = [];
+	const connection = new RealtimeConnection(
+		{ url: "http://127.0.0.1:7980", token: null, userJwt: null },
+		{ appId: "com.example.app", kind: "application", roomId: "room_1" }
+	);
+	// Inject an open fake socket; the lifecycle itself needs a live Core.
+	Object.assign(connection, {
+		socket: { readyState: 1, send: (frame: string) => sent.push(frame) },
+	});
+	connection.sendEvent("table.snapshot", { rows: 2 });
+	expect(sent).toHaveLength(1);
+	const frame: unknown = JSON.parse(sent[0] ?? "");
+	expect(frame).toEqual({
+		type: "event",
+		event: "table.snapshot",
+		data: { rows: 2 },
+	});
+	expect(decodeRealtimeEvent(sent[0] ?? "")).toEqual({
+		name: "table.snapshot",
+		data: { rows: 2 },
+	});
 });

@@ -4,7 +4,7 @@
 // Reusing useShadowCapture preserves the same persisted pause state and Shadow
 // request path used by the Companion and Shadow settings surfaces.
 
-import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu";
+import { DropdownMenuItem } from "@ryu/ui/components/dropdown-menu.tsx";
 import { Pause, Play } from "lucide-react";
 import { useState } from "react";
 import { useShadowCapture } from "@/src/hooks/useShadowCapture.ts";

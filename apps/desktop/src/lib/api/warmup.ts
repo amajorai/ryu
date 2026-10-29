@@ -1,30 +1,21 @@
 // apps/desktop/src/lib/api/warmup.ts
 //
-// The composites behind the `warmup:crud` bridge capability, for the
-// `@ryu/warmup` companion. Following the monitors/calendar pattern, the host
-// holds the node token and drives Core's existing endpoints; the sandboxed frame
-// never fetches anything itself.
+// The shell side of the `warmup:crud` bridge capability, for the `@ryu/warmup`
+// companion. Each verb calls Core's app host bridge (`POST /api/plugins/:id/host`)
+// with the `warmup.*` kernel operation of the same name, so Core checks the app's
+// approved grant, runs the scheduler's own `agent.view` / `agent.edit` checks for
+// the signed-in user, and scopes every job to the calling app. The sandboxed frame
+// never fetches anything itself, and the owner is never a value it supplies.
 //
-// Nothing here is Warmup-specific inside Core: detection is `GET /api/agents` +
-// `GET /api/agents/:id/usage` + `GET /api/agents/:id/acp-config`, and scheduling
-// is `POST`/`DELETE /heartbeat/jobs`. The app is a configurator over the
-// scheduler; Core's tick loop is what actually runs the pings.
+// The replies reach the host as untyped JSON, so each one is zod-checked here
+// before it is forwarded to the frame.
 
-import { fetchAcpConfig } from "./acp.ts";
-import { fetchAgents } from "./agents.ts";
+import type { WarmupJobInput, WarmupRunNowPayload } from "@ryu/app-host/rpc";
+import { z } from "zod";
 import type { ApiTarget } from "./client.ts";
-import {
-	createJob,
-	deleteJob,
-	fetchJobs,
-	type JobInput,
-	runJobNow,
-	type ScheduledJob,
-} from "./schedules.ts";
-import { fetchAgentUsage, supportsUsage } from "./usage.ts";
-
-/** The manifest id stamped on every job this app creates. */
-export const WARMUP_APP_ID = "@ryu/warmup";
+import { pluginHostInvoke } from "./plugins.ts";
+import { scheduledRunResponseSchema } from "./schedule-wire-contracts.ts";
+import { type ScheduledJob, toScheduledJobs } from "./schedules.ts";
 
 /** One model an agent advertises (the ACP `availableModels` entry). */
 export interface WarmupModel {
@@ -36,6 +27,8 @@ export interface WarmupModel {
 /** One rolling window an agent reports. */
 export interface WarmupWindow {
 	label: string;
+	/** The model this window limits; `null` = account-wide. */
+	model: string | null;
 	resetsAt: string | null;
 	usedPercent: number;
 	windowSeconds: number | null;
@@ -52,123 +45,165 @@ export interface WarmupAgent {
 	windows: WarmupWindow[];
 }
 
+/** One saved login of a provider pool, with its own live usage windows. */
+export interface WarmupAccount {
+	available: boolean;
+	id: string;
+	label: string;
+	/** Core blocked this login until the user signs in again. */
+	needsReauth: boolean;
+	plan: string | null;
+	reason: string | null;
+	windows: WarmupWindow[];
+}
+
+/** A subscription provider whose saved accounts can each be pinged. */
+export interface WarmupProvider {
+	accounts: WarmupAccount[];
+	id: string;
+	models: WarmupModel[];
+	name: string;
+}
+
 /** What {@link detectWarmupAgents} reports. */
 export interface WarmupDetection {
 	agents: WarmupAgent[];
+	providers: WarmupProvider[];
 	tz: string;
 }
 
+const warmupModelWireSchema = z.object({
+	description: z.string().nullable(),
+	modelId: z.string(),
+	name: z.string(),
+});
+// `model` is absent from older Core; absent means account-wide.
+const warmupWindowWireSchema = z.object({
+	label: z.string(),
+	model: z
+		.string()
+		.nullable()
+		.optional()
+		.transform((model) => model ?? null),
+	resetsAt: z.string().nullable(),
+	usedPercent: z.number(),
+	windowSeconds: z.number().nullable(),
+});
+
+/** Runtime shape of the `warmup.detect` kernel operation's reply. */
+export const warmupDetectionWireSchema = z.object({
+	agents: z.array(
+		z.object({
+			available: z.boolean(),
+			id: z.string(),
+			models: z.array(warmupModelWireSchema),
+			name: z.string(),
+			plan: z.string().nullable(),
+			reason: z.string().nullable(),
+			windows: z.array(warmupWindowWireSchema),
+		})
+	),
+	// Older Core reports agents only.
+	providers: z
+		.array(
+			z.object({
+				accounts: z.array(
+					z.object({
+						available: z.boolean(),
+						id: z.string(),
+						label: z.string(),
+						needsReauth: z.boolean(),
+						plan: z.string().nullable(),
+						reason: z.string().nullable(),
+						windows: z.array(warmupWindowWireSchema),
+					})
+				),
+				id: z.string(),
+				models: z.array(warmupModelWireSchema),
+				name: z.string(),
+			})
+		)
+		.optional()
+		.transform((providers) => providers ?? []),
+	tz: z.string(),
+});
+
 /**
- * The node's IANA zone. `Intl` is the only source that already accounts for the
- * host's DST rules, and it returns exactly the name Core's `chrono-tz` parses.
+ * The desktop's IANA zone. The times the user picks are wall-clock times where
+ * they are sitting, which is this machine, not necessarily the node. `Intl`
+ * returns exactly the name Core's `chrono-tz` parses; `fallback` (the node's own
+ * zone from Core) is used when it is unavailable.
  */
-function nodeTimeZone(): string {
+function desktopTimeZone(fallback: string): string {
 	try {
-		return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+		return Intl.DateTimeFormat().resolvedOptions().timeZone || fallback;
 	} catch {
-		return "UTC";
+		return fallback;
 	}
 }
 
-/**
- * The agents worth warming up, with their live usage windows and advertised
- * models.
- *
- * `supportsUsage` filters the candidate list so we don't probe every agent on
- * the node — but it is only a filter: an agent that passes it and then answers
- * `available: false` is still listed, because "signed out" is a state the user
- * can fix and hiding it would look like the agent does not exist. Usage and ACP
- * config are fetched per agent and failures degrade to an empty result rather
- * than failing the whole detection.
- */
+/** Check a `warmup.detect` reply; the zone is the desktop's (see above). */
+export function toWarmupDetection(value: unknown): WarmupDetection {
+	const detection = warmupDetectionWireSchema.parse(value);
+	return { ...detection, tz: desktopTimeZone(detection.tz) };
+}
+
+/** Check a `warmup.runNow` reply. A job that ran and failed is a 200 with
+ *  `success: false`; it surfaces as an error carrying Core's message. */
+export function assertWarmupRunSucceeded(value: unknown): void {
+	const run = scheduledRunResponseSchema.parse(value);
+	if (run.success === false) {
+		throw new Error(run.error ?? "The ping failed to run.");
+	}
+}
+
+/** Check a `warmup.apply` reply (`{ jobs }`: what Core created). */
+export function toAppliedWarmupJobs(value: unknown): ScheduledJob[] {
+	return toScheduledJobs(value);
+}
+
+/** Subscription agents with their live usage windows and advertised models. */
 export async function detectWarmupAgents(
-	target: ApiTarget
+	target: ApiTarget,
+	pluginId: string
 ): Promise<WarmupDetection> {
-	const agents = await fetchAgents(target);
-	const candidates = agents.filter((agent) => supportsUsage(agent.id));
-
-	const detected = await Promise.all(
-		candidates.map(async (agent): Promise<WarmupAgent> => {
-			const [usage, config] = await Promise.all([
-				fetchAgentUsage(target, agent.id).catch(() => null),
-				fetchAcpConfig(target, agent.id).catch(() => null),
-			]);
-			return {
-				id: agent.id,
-				name: agent.name,
-				available: usage?.available ?? false,
-				plan: usage?.plan ?? null,
-				reason: usage?.reason ?? (usage ? null : "error"),
-				windows: (usage?.windows ?? []).map((w) => ({
-					label: w.label,
-					usedPercent: w.usedPercent,
-					resetsAt: w.resetsAt,
-					windowSeconds: w.windowSeconds,
-				})),
-				models: (config?.models?.availableModels ?? []).map((m) => ({
-					modelId: m.modelId,
-					name: m.name,
-					description: m.description ?? null,
-				})),
-			};
-		})
+	return toWarmupDetection(
+		await pluginHostInvoke(target, pluginId, "warmup.detect", {})
 	);
+}
 
-	return { agents: detected, tz: nodeTimeZone() };
+/** The calling app's scheduled jobs (Core narrows the list to the owner). */
+export async function listWarmupJobs(
+	target: ApiTarget,
+	pluginId: string
+): Promise<ScheduledJob[]> {
+	return toScheduledJobs(
+		await pluginHostInvoke(target, pluginId, "warmup.list", {})
+	);
 }
 
 /**
- * Replace this app's scheduled jobs with `jobs`.
- *
- * Core has no update route, so this deletes every job owned by
- * {@link WARMUP_APP_ID} and creates the given set. Deletion runs first and is
- * scoped by `ownerApp`, so a job Core or another App owns is never touched — the
- * frame supplies only the schedule and target; the owner id is stamped here.
- *
- * A create failure propagates Core's own validation message (bad cron, unknown
- * zone). The already-deleted jobs stay deleted; the app refetches after every
- * apply, so what it shows is what actually survived rather than what it asked
- * for.
+ * Replace the calling app's scheduled jobs with `jobs`. Core validates every
+ * job before deleting anything, so a bad cron or zone leaves the existing plan
+ * in place and surfaces Core's own message.
  */
 export async function applyWarmupJobs(
 	target: ApiTarget,
-	jobs: Omit<JobInput, "enabled" | "ownerApp">[]
+	pluginId: string,
+	jobs: WarmupJobInput[]
 ): Promise<void> {
-	const existing = await fetchJobs(target);
-	for (const job of existing) {
-		if (job.ownerApp === WARMUP_APP_ID) {
-			await deleteJob(target, job.id);
-		}
-	}
-	for (const job of jobs) {
-		await createJob(target, {
-			...job,
-			enabled: true,
-			ownerApp: WARMUP_APP_ID,
-		});
-	}
+	toAppliedWarmupJobs(
+		await pluginHostInvoke(target, pluginId, "warmup.apply", { jobs })
+	);
 }
 
-/** Every scheduled job on the node, so the app can find the ones it owns. */
-export function listWarmupJobs(target: ApiTarget): Promise<ScheduledJob[]> {
-	return fetchJobs(target);
-}
-
-/**
- * Run one of this app's scheduled pings now.
- *
- * Scoped to jobs the app owns: the capability is "manage my warmup pings", and
- * without this check it would silently become "run any automation on this node",
- * which is a strictly larger power than anything else the grant confers.
- */
+/** Run one of the calling app's pings now; Core refuses a job it does not own. */
 export async function runWarmupJobNow(
 	target: ApiTarget,
-	jobId: string
+	pluginId: string,
+	{ jobId }: WarmupRunNowPayload
 ): Promise<void> {
-	const jobs = await fetchJobs(target);
-	const job = jobs.find((j) => j.id === jobId);
-	if (!job || job.ownerApp !== WARMUP_APP_ID) {
-		throw new Error("That ping is no longer scheduled.");
-	}
-	await runJobNow(target, jobId);
+	assertWarmupRunSucceeded(
+		await pluginHostInvoke(target, pluginId, "warmup.runNow", { jobId })
+	);
 }

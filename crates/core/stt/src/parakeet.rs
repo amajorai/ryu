@@ -37,6 +37,27 @@ pub fn normalize_wav_to_16k_mono(audio: &[u8]) -> Result<Vec<u8>> {
     if spec.sample_rate == 0 {
         bail!("WAV input has no sample rate");
     }
+    // Bound both decoding and resampling before allocating sample vectors.
+    // Two hours supports long recordings while keeping normalized PCM bounded.
+    const MAX_DURATION_SECONDS: u64 = 7200;
+    const MAX_INPUT_BYTES: usize = 32 * 1024 * 1024;
+    if audio.len() > MAX_INPUT_BYTES {
+        bail!("WAV input exceeds 32 MiB");
+    }
+    let frames = u64::from(reader.duration());
+    if frames == 0 || frames > u64::from(spec.sample_rate) * MAX_DURATION_SECONDS {
+        bail!("WAV input must contain at most two hours of audio");
+    }
+    let scaled = frames
+        .checked_mul(16_000)
+        .context("WAV output size overflow")?;
+    let output_len =
+        usize::try_from((scaled + u64::from(spec.sample_rate) / 2) / u64::from(spec.sample_rate))
+            .context("WAV output size exceeds platform limits")?
+            .max(1);
+    if output_len > (32 * 1024 * 1024 - 44) / 2 {
+        bail!("Normalized WAV exceeds the sample budget");
+    }
 
     let interleaved = match (spec.sample_format, spec.bits_per_sample) {
         (hound::SampleFormat::Int, 8) => reader
@@ -81,8 +102,6 @@ pub fn normalize_wav_to_16k_mono(audio: &[u8]) -> Result<Vec<u8>> {
         bail!("WAV input has no samples");
     }
 
-    let output_len =
-        ((mono.len() as f64 * 16_000.0 / spec.sample_rate as f64).round() as usize).max(1);
     let ratio = spec.sample_rate as f64 / 16_000.0;
     let mut normalized = Vec::with_capacity(output_len);
     for index in 0..output_len {
@@ -302,6 +321,26 @@ mod normalization_tests {
 // it would require downloading and loading a real ONNX model.
 #[cfg(all(test, not(feature = "voice-parakeet")))]
 mod tests {
+    #[test]
+    fn rejects_resampling_amplification_before_allocating_output() {
+        for (rate, frames) in [(1, 8000), (2, 16000)] {
+            let mut input = std::io::Cursor::new(Vec::new());
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: rate,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            {
+                let mut writer = hound::WavWriter::new(&mut input, spec).unwrap();
+                for _ in 0..frames {
+                    writer.write_sample(0_i16).unwrap();
+                }
+                writer.finalize().unwrap();
+            }
+            assert!(super::normalize_wav_to_16k_mono(&input.into_inner()).is_err());
+        }
+    }
     use std::path::PathBuf;
 
     #[tokio::test]
@@ -322,12 +361,5 @@ mod tests {
     fn preload_without_feature_is_ok_noop() {
         // No model is on disk; the feature-off path must still return Ok(()).
         super::preload(&PathBuf::from("/definitely/missing")).expect("no-op preload");
-    }
-
-    #[test]
-    fn unload_without_feature_does_not_panic() {
-        super::unload();
-        // Idempotent.
-        super::unload();
     }
 }

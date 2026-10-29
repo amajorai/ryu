@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["bun"]
+  },
+  "include": [
+    "src/novnc.d.ts",
+    "src/vite-env.d.ts",
+    "e2e/gateway-specs-b-coverage.playwright.config.ts",
+    "e2e/harness/vite.gateway-specs-b-coverage.config.ts",
+    "e2e/gateway-budgets-settings-proof.spec.ts",
+    "e2e/node-selector-proof.spec.ts",
+    "e2e/startup-performance-proof.spec.ts"
+  ]
+}

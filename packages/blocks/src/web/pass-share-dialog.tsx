@@ -4,10 +4,12 @@ import {
 	CheckmarkCircle02Icon,
 	Copy01Icon,
 	Download04Icon,
+	Gif01Icon,
 	Image02Icon,
 	VideoReplayIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLiteralMessages } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -61,12 +63,13 @@ import { SvglIcon } from "./svgl-icon.tsx";
 // Image copies to the clipboard as an actual `image/png`, which is what makes it
 // pasteable straight into a post. Video cannot: there is no `video/mp4`
 // clipboard path in any browser, so its action is a download and the composer
-// opens beside it.
+// opens beside it. GIF is the third shape: smaller and lossier, but it autoplays
+// inline in Slack, Discord, iMessage and READMEs, where a video needs a click.
 
 const COPIED_RESET_MS = 2000;
 const PERCENT = 100;
 
-type ShareTab = "image" | "video";
+type ShareTab = "gif" | "image" | "video";
 
 /**
  * `Omit` over a union collapses to the keys the arms share, which would erase
@@ -109,6 +112,7 @@ export function PassShareDialog({
 	studio,
 	title,
 }: PassShareDialogProps) {
+	const tl = useLiteralMessages();
 	const reduceMotion = useReducedMotion();
 	const studioRef = useRef<PassStudioHandle | null>(null);
 	const [tab, setTab] = useState<ShareTab>("image");
@@ -118,7 +122,7 @@ export function PassShareDialog({
 	const [copied, setCopied] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [progress, setProgress] = useState(0);
-	// A recording runs for ten seconds of wall clock. Closing the dialog has to
+	// Encoding can take longer than the loop on a slow device. Closing the dialog has to
 	// stop it, or it finishes against a torn-down studio and drops a file in the
 	// user's downloads long after they walked away from the idea.
 	const recordingRef = useRef<AbortController | null>(null);
@@ -167,16 +171,21 @@ export function PassShareDialog({
 		}
 	};
 
-	const downloadVideo = async () => {
+	const downloadMotion = async (kind: "gif" | "video") => {
 		setBusy(true);
 		setProgress(0);
+		const controller = new AbortController();
+		recordingRef.current = controller;
+		const onProgress = (fraction: number) => {
+			if (!controller.signal.aborted) {
+				setProgress(fraction);
+			}
+		};
 		try {
-			const controller = new AbortController();
-			recordingRef.current = controller;
-			const recording = await studioRef.current?.exportLoop(
-				setProgress,
-				controller.signal
-			);
+			const recording =
+				kind === "gif"
+					? await studioRef.current?.exportGif(onProgress, controller.signal)
+					: await studioRef.current?.exportLoop(onProgress, controller.signal);
 			if (controller.signal.aborted) {
 				return;
 			}
@@ -192,6 +201,9 @@ export function PassShareDialog({
 				}
 			}
 		} catch (error) {
+			if (controller.signal.aborted) {
+				return;
+			}
 			// The background-tab case is reported specifically: it is the one failure
 			// a member can actually do something about, and its symptom (a still
 			// image where a turning card should be) looks identical to a bug.
@@ -199,22 +211,30 @@ export function PassShareDialog({
 			toast.error(
 				backgrounded
 					? "Recording stopped — the window went to the background"
-					: "Couldn't record the video",
+					: kind === "gif"
+						? "Couldn't make the GIF"
+						: "Couldn't record the video",
 				{
 					description:
-						"Keep this window in the foreground for the full 10 seconds.",
+						"Keep this window in the foreground until the file is ready.",
 				}
 			);
 		} finally {
-			recordingRef.current = null;
-			setBusy(false);
-			setProgress(0);
+			if (recordingRef.current === controller) {
+				recordingRef.current = null;
+				setBusy(false);
+				setProgress(0);
+			}
 		}
 	};
 
 	const handleOpenChange = (next: boolean) => {
 		if (!next) {
 			recordingRef.current?.abort();
+			setTab("image");
+			setFormatId(DEFAULT_PASS_FORMAT_ID);
+			setCopied(false);
+			setProgress(0);
 		}
 		onOpenChange(next);
 	};
@@ -228,22 +248,30 @@ export function PassShareDialog({
 				</DialogHeader>
 
 				<Tabs
-					className="gap-4"
-					onValueChange={(value) => setTab(value as ShareTab)}
+					onValueChange={(value) =>
+						// SAFETY: this private Tabs root selects only its authored
+						// image/video/gif triggers below, which are the ShareTab alternatives.
+						setTab(value as ShareTab)
+					}
+					spacing="comfortable"
 					value={tab}
 				>
 					{/* `mx-auto` on a `w-fit` list: the strip is the dialog's primary
 					    control here, not a filter above content, so it reads as centred
 					    under the title rather than hanging off the left edge. */}
-					<TabsList className="mx-auto" variant="pills-lg">
+					<TabsList className="mx-auto" manageLayout={false} variant="pills-lg">
 						<TabsIndicator />
-						<TabsTrigger value="image">
+						<TabsTrigger disabled={busy} value="image">
 							<HugeiconsIcon icon={Image02Icon} size={15} />
 							Image
 						</TabsTrigger>
-						<TabsTrigger value="video">
+						<TabsTrigger disabled={busy} value="video">
 							<HugeiconsIcon icon={VideoReplayIcon} size={15} />
 							Video
+						</TabsTrigger>
+						<TabsTrigger disabled={busy} value="gif">
+							<HugeiconsIcon icon={Gif01Icon} size={15} />
+							GIF
 						</TabsTrigger>
 					</TabsList>
 
@@ -282,7 +310,7 @@ export function PassShareDialog({
 						frame={tab === "image" ? PASS_STILL_TIME : undefined}
 						// The preview is page decoration and stops when asked. The
 						// exported file is not, and still turns.
-						paused={Boolean(reduceMotion)}
+						paused={Boolean(reduceMotion) || busy}
 						ref={studioRef}
 					/>
 
@@ -293,8 +321,18 @@ export function PassShareDialog({
 					</TabsContent>
 					<TabsContent value="video">
 						<p className="text-center text-muted-foreground text-xs">
-							{format.ratio} · {format.label} · a 10-second loop, recorded here.
-							Keep this window in the foreground while it renders.
+							{tl(
+								"{ratio} · {label} · a 10-second loop, recorded here. Keep this window in the foreground while it renders.",
+								{ label: format.label, ratio: format.ratio }
+							)}
+						</p>
+					</TabsContent>
+					<TabsContent value="gif">
+						<p className="text-center text-muted-foreground text-xs">
+							{tl(
+								"{ratio} · a looping GIF that autoplays in Slack, Discord, iMessage and READMEs. Keep this window in the foreground while it renders.",
+								{ ratio: format.ratio }
+							)}
 						</p>
 					</TabsContent>
 				</Tabs>
@@ -319,14 +357,18 @@ export function PassShareDialog({
 					<Button
 						className="w-full sm:w-auto"
 						disabled={busy}
-						onClick={tab === "image" ? downloadImage : downloadVideo}
+						onClick={
+							tab === "image" ? downloadImage : () => downloadMotion(tab)
+						}
 						size="lg"
 						type="button"
 						variant="secondary"
 					>
 						<HugeiconsIcon icon={Download04Icon} size={18} />
-						{busy && tab === "video"
-							? `Recording ${Math.round(progress * PERCENT)}%`
+						{busy && tab !== "image"
+							? tl("Exporting {percent}%", {
+									percent: Math.round(progress * PERCENT),
+								})
 							: "Download"}
 					</Button>
 					<Button

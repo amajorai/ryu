@@ -6,6 +6,11 @@ const WEB_URL_RE = /^https?:\/\//i;
 const FILEISH_RE = /(?:^|\/)[^/]+\.[A-Za-z0-9_-]{1,12}(?::\d+(?::\d+)?)?$/;
 const TRAILING_PUNCTUATION_RE = /[.,;:!?]+$/;
 const GENERATED_FILE_HREF_RE = /#ryu-file-path-([^\s)]+)/g;
+const MARKDOWN_LABEL_SPECIAL_RE = /([\\[\]_*`])/g;
+
+function mentionLabel(value: string): string {
+	return `@${value.replace(MARKDOWN_LABEL_SPECIAL_RE, "\\$1")}`;
+}
 
 function fileHref(path: string): string {
 	return `#ryu-file-path-${encodeURIComponent(path)}`;
@@ -16,34 +21,32 @@ function webHref(url: string): string {
 }
 
 function linkAtReferencesInPlainText(text: string): string {
-	const bracketed = text.replace(
-		BRACKETED_REFERENCE_RE,
-		(match, raw: string) => {
-			const value = raw.trim();
-			if (WEB_URL_RE.test(value)) {
-				return `[@${value}](${webHref(value)})`;
-			}
-			if (FILEISH_RE.test(value)) {
-				return `[@${value}](${fileHref(value)})`;
-			}
-			return match;
-		}
-	);
-
-	return bracketed.replace(
+	const linkedTokens = text.replace(
 		AT_TOKEN_RE,
 		(match, prefix: string, raw: string) => {
 			const punctuation = raw.match(TRAILING_PUNCTUATION_RE)?.[0] ?? "";
 			const value = punctuation ? raw.slice(0, -punctuation.length) : raw;
 			if (WEB_URL_RE.test(value)) {
-				return `${prefix}[@${value}](${webHref(value)})${punctuation}`;
+				return `${prefix}[${mentionLabel(value)}](${webHref(value)})${punctuation}`;
 			}
 			if (FILEISH_RE.test(value)) {
-				return `${prefix}[@${value}](${fileHref(value)})${punctuation}`;
+				return `${prefix}[${mentionLabel(value)}](${fileHref(value)})${punctuation}`;
 			}
 			return match;
 		}
 	);
+	// Bracketed references are expanded last so their generated @ labels are not
+	// parsed a second time into nested Markdown links.
+	return linkedTokens.replace(BRACKETED_REFERENCE_RE, (match, raw: string) => {
+		const value = raw.trim();
+		if (WEB_URL_RE.test(value)) {
+			return `[${mentionLabel(value)}](${webHref(value)})`;
+		}
+		if (FILEISH_RE.test(value)) {
+			return `[${mentionLabel(value)}](${fileHref(value)})`;
+		}
+		return match;
+	});
 }
 
 /** Turn agent-authored `@path/file.ts` and `@https://…` mentions into links. */

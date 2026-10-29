@@ -56,7 +56,7 @@
       }
     }
   ],
-  "permission_grants": ["storage:kv", "ui:toast"],
+  "permission_grants": ["storage:kv", "ui:toast", "files:download"],
   "permission_levels": [
     {
       "id": "convert.view",

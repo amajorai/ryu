@@ -1,0 +1,166 @@
+{
+  "tags": ["writing", "translate", "paraphrase", "text"],
+  "author": {
+    "name": "Ryu",
+    "url": "https://ryuhq.com"
+  },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/round-trip-translate",
+  "homepage": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/round-trip-translate",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/round-trip-translate",
+  "name": "Round-Trip Translate",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "category": "Productivity",
+  "description": "Rewrite text by translating it through a pivot language and back with Google Cloud Translation, after removing invisible Unicode characters. Requires your own Google Cloud Translation API key; the result can change meaning and should be reviewed.",
+  "tagline": "Reword text through a translation round trip",
+  "keywords": [
+    "translate",
+    "round trip",
+    "paraphrase",
+    "Google Translate",
+    "invisible characters"
+  ],
+  "icon": "languages",
+  "iconDither": {
+    "from": 210,
+    "to": "transparent",
+    "direction": "down"
+  },
+  "surfaces": {
+    "gateway": {
+      "support": "none"
+    },
+    "core": {
+      "support": "full"
+    },
+    "desktop": {
+      "support": "full"
+    },
+    "island": {
+      "support": "limited"
+    },
+    "mobile": {
+      "support": "limited"
+    },
+    "extension": {
+      "support": "limited"
+    },
+    "web": {
+      "support": "full"
+    },
+    "cli": {
+      "support": "full"
+    }
+  },
+  "engines": {
+    "ryu": ">=0.1.0"
+  },
+  "runnables": [
+    {
+      "id": "tool-google-translate",
+      "name": "Google Translate",
+      "kind": "tool",
+      "config": {
+        "slug": "google_translate.translate",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://translation.googleapis.com/language/translate/v2",
+        "secret_headers": {
+          "X-Goog-Api-Key": "env:RYU_PLUGIN__X40_RYU_X2F_ROUND_X2D_TRIP_X2D_TRANSLATE_API_KEY"
+        },
+        "body_defaults": {
+          "format": "text"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Translate text with Google Cloud Translation (Basic, v2). Returns data.translations[].translatedText and, when source is omitted, detectedSourceLanguage. Requires a Google Cloud Translation API key in the plugin settings.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "q": {
+              "type": "string",
+              "description": "The text to translate."
+            },
+            "target": {
+              "type": "string",
+              "description": "Target language code, for example en, de, or ja."
+            },
+            "source": {
+              "type": "string",
+              "description": "Source language code. Omit to let Google detect it."
+            },
+            "format": {
+              "type": "string",
+              "enum": ["text", "html"],
+              "description": "Input format. Defaults to text."
+            }
+          },
+          "required": ["q", "target"]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "id": "tool-round-trip-clean-text",
+      "name": "Clean Invisible Characters",
+      "kind": "tool",
+      "config": {
+        "slug": "round_trip.clean_text",
+        "backend": "inline_deno",
+        "description": "Remove invisible Unicode characters (zero-width characters, byte-order marks, soft hyphens, bidirectional controls, tag characters) and replace unusual space characters with ordinary spaces. Returns the cleaned text and per-kind counts.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "The text to clean."
+            },
+            "keep_joiners": {
+              "type": "boolean",
+              "description": "Keep zero-width joiners and non-joiners, which emoji sequences and some scripts (Persian, Indic) need. Defaults to false."
+            }
+          },
+          "required": ["text"]
+        },
+        "annotations": {
+          "readOnlyHint": true
+        },
+        "code": "// Tool body for `round_trip.clean_text`, run in Core's Deno sandbox.\n//\n// This file is a FRAGMENT, not an ES module: Core splices it into an async IIFE\n// with `input` (the call arguments) and `host` (the capability bridge) already\n// bound, and the body `return`s the tool's result. A top-level `return` is\n// therefore correct here and `export` is not.\n//\n// It removes characters a reader cannot see but a byte comparison can: zero-width\n// and joiner characters, the byte-order mark, soft hyphens, bidirectional controls\n// and Unicode tag characters. Unusual space characters become an ordinary space.\n// It is the deterministic half of the round trip: a model asked to \"remove the\n// invisible characters\" cannot see them, so this must not be left to the agent.\n\nconst primitiveStringAdmitted = (() => {\n\tconst raw = input.text;\n\ttry {\n\t\treturn String.prototype.valueOf.call(raw) === raw;\n\t} catch {\n\t\treturn false;\n\t}\n})();\nif (!primitiveStringAdmitted) {\n\tthrow new Error(\"round_trip.clean_text: 'text' is required and must be a string\");\n}\n\n// Removed outright. Joiners (U+200C, U+200D) are kept only when `keep_joiners`\n// is true, because Persian, Indic scripts and emoji sequences depend on them.\nconst REMOVE = [\n\t[0x00ad, 0x00ad, \"soft hyphen\"],\n\t[0x034f, 0x034f, \"combining grapheme joiner\"],\n\t[0x061c, 0x061c, \"bidi control\"],\n\t[0x115f, 0x1160, \"hangul filler\"],\n\t[0x17b4, 0x17b5, \"khmer inherent vowel\"],\n\t[0x180e, 0x180e, \"mongolian vowel separator\"],\n\t[0x200b, 0x200b, \"zero-width space\"],\n\t[0x200c, 0x200d, \"zero-width joiner\"],\n\t[0x200e, 0x200f, \"bidi control\"],\n\t[0x202a, 0x202e, \"bidi control\"],\n\t[0x2060, 0x2064, \"word joiner\"],\n\t[0x2066, 0x2069, \"bidi control\"],\n\t[0x206a, 0x206f, \"deprecated format character\"],\n\t[0x3164, 0x3164, \"hangul filler\"],\n\t[0xfeff, 0xfeff, \"byte-order mark\"],\n\t[0xffa0, 0xffa0, \"hangul filler\"],\n\t[0xfff9, 0xfffb, \"interlinear annotation\"],\n\t[0x1d173, 0x1d17a, \"musical format character\"],\n\t[0xe0000, 0xe007f, \"tag character\"],\n];\n// Replaced with U+0020.\nconst SPACES = [\n\t[0x00a0, 0x00a0],\n\t[0x1680, 0x1680],\n\t[0x2000, 0x200a],\n\t[0x202f, 0x202f],\n\t[0x205f, 0x205f],\n\t[0x3000, 0x3000],\n];\n\nconst keepJoiners = input.keep_joiners === true;\n\nconst classify = (codePoint) => {\n\tfor (const [from, to, label] of REMOVE) {\n\t\tif (codePoint >= from && codePoint <= to) {\n\t\t\tif (keepJoiners && label === \"zero-width joiner\") {\n\t\t\t\treturn null;\n\t\t\t}\n\t\t\treturn label;\n\t\t}\n\t}\n\treturn null;\n};\nconst isOddSpace = (codePoint) =>\n\tSPACES.some(([from, to]) => codePoint >= from && codePoint <= to);\n\nconst removed = {};\nlet replacedSpaces = 0;\nlet output = \"\";\nfor (const character of input.text) {\n\tconst codePoint = character.codePointAt(0);\n\tconst label = classify(codePoint);\n\tif (label !== null) {\n\t\tremoved[label] = (removed[label] ?? 0) + 1;\n\t\tcontinue;\n\t}\n\tif (isOddSpace(codePoint)) {\n\t\treplacedSpaces += 1;\n\t\toutput += \" \";\n\t\tcontinue;\n\t}\n\toutput += character;\n}\n\n// Stable key order so identical input always yields an identical result object.\nconst removedSorted = {};\nfor (const key of Object.keys(removed).sort()) {\n\tremovedSorted[key] = removed[key];\n}\nlet removedTotal = 0;\nfor (const count of Object.values(removedSorted)) {\n\tremovedTotal += count;\n}\n\nreturn {\n\ttext: output,\n\tchanged: output !== input.text,\n\tremoved_total: removedTotal,\n\tremoved: removedSorted,\n\treplaced_spaces: replacedSpaces,\n};\n"
+      }
+    },
+    {
+      "id": "skill-round-trip-translate",
+      "name": "Round-Trip Translate",
+      "kind": "skill",
+      "config": {
+        "skill_id": "round-trip-translate"
+      }
+    }
+  ],
+  "permission_grants": [
+    "tool:http-egress:translation.googleapis.com",
+    "tool:execute"
+  ],
+  "contributes": {
+    "settings_tabs": [
+      {
+        "id": "round-trip-translate.settings",
+        "title": "Round-Trip Translate",
+        "scope": "node",
+        "fields": [
+          {
+            "type": "secret",
+            "pref_key": "RYU_PLUGIN__X40_RYU_X2F_ROUND_X2D_TRIP_X2D_TRANSLATE_API_KEY",
+            "label": "Google Cloud Translation API key",
+            "description": "An API key for a Google Cloud project with the Cloud Translation API enabled. Stored encrypted on this node and sent only to translation.googleapis.com."
+          }
+        ]
+      }
+    ]
+  }
+}

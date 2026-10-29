@@ -13,7 +13,7 @@ const STATE_OPTIONS: Array<{ key: StateKey; label: string }> = [
 	{ key: "error", label: "Retry needs attention" },
 ];
 
-const STATES: Record<StateKey, ReconnectRetryState> = {
+const STATES = {
 	complete: {
 		candidateCount: 1,
 		failedCount: 0,
@@ -38,7 +38,7 @@ const STATES: Record<StateKey, ReconnectRetryState> = {
 		phase: "retrying",
 		retriedCount: 0,
 	},
-};
+} satisfies Record<StateKey, ReconnectRetryState>;
 
 function Story() {
 	const [stateKey, setStateKey] = useState<StateKey>("complete");
@@ -51,7 +51,7 @@ function Story() {
 		>
 			<div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-8 py-12">
 				<header className="mb-10 max-w-2xl">
-					<p className="mb-3 font-medium text-muted-foreground text-sm uppercase tracking-[0.18em]">
+					<p className="mb-3 font-medium text-muted-foreground text-sm uppercase tracking-(--tracking-section)">
 						Opt-in reliability plugin
 					</p>
 					<h1 className="font-semibold text-4xl tracking-tight">

@@ -1,3 +1,4 @@
+import { z } from "zod";
 // apps/desktop/src/lib/api/agent-threads.ts
 //
 // Client for importing an agent's *own* on-disk thread history (Claude Code /
@@ -70,11 +71,26 @@ export async function listAgentThreads(
 	if (!resp.ok) {
 		throw new Error(`Failed to load agent threads: ${resp.status}`);
 	}
-	const body = (await resp.json()) as {
-		engine?: string;
-		supported?: boolean;
-		threads?: NativeThreadWire[];
-	};
+	const body = z
+		.object({
+			engine: z.string().optional(),
+			supported: z.boolean().optional(),
+			threads: z
+				.array(
+					z.object({
+						cwd: z.string().optional(),
+						engine: z.string(),
+						git_branch: z.string().optional(),
+						id: z.string(),
+						message_count: z.number(),
+						native_session_id: z.string().optional(),
+						title: z.string(),
+						updated_at: z.number(),
+					})
+				)
+				.optional(),
+		})
+		.parse(await resp.json());
 	return {
 		engine: body.engine ?? "",
 		supported: body.supported ?? false,
@@ -126,17 +142,19 @@ export async function importAgentThread(
 	if (!resp.ok) {
 		throw new Error(`Failed to import thread: ${resp.status}`);
 	}
-	const body = (await resp.json()) as {
-		already_imported?: boolean;
-		conversation_id?: string | null;
-		cwd?: string;
-		dry_run?: boolean;
-		message_count?: number;
-		messages_added?: number;
-		truncated?: boolean;
-		title?: string;
-		would_create?: boolean;
-	};
+	const body = z
+		.object({
+			already_imported: z.boolean().optional(),
+			conversation_id: z.string().nullish(),
+			cwd: z.string().optional(),
+			dry_run: z.boolean().optional(),
+			message_count: z.number().optional(),
+			messages_added: z.number().optional(),
+			truncated: z.boolean().optional(),
+			title: z.string().optional(),
+			would_create: z.boolean().optional(),
+		})
+		.parse(await resp.json());
 	return {
 		alreadyImported: body.already_imported ?? false,
 		conversationId: body.conversation_id ?? null,

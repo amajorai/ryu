@@ -39,7 +39,8 @@
         "description": "Check that the Bitwarden Secrets Manager CLI (`bws`) is installed and report its version. Does not contact Bitwarden — no token needed. Use this FIRST to confirm the binary is present before calling the other bitwarden. tools.",
         "input_schema": {
           "type": "object",
-          "properties": {}
+          "properties": {},
+          "additionalProperties": false
         },
         "command_args": ["--version"]
       }
@@ -52,12 +53,14 @@
         "slug": "bitwarden.projects",
         "backend": "command",
         "bin": "bws",
+        "command_args": ["project", "list"],
         "timeout_secs": 60,
         "output": "json",
         "description": "List the Bitwarden Secrets Manager projects the machine account can read. Returns an array of { id, name }. Use the returned id as `project_id` for the bitwarden.list / bitwarden.get tools. Requires BWS_ACCESS_TOKEN in the environment.",
         "input_schema": {
           "type": "object",
-          "properties": {}
+          "properties": {},
+          "additionalProperties": false
         },
         "command_env": {
           "BWS_ACCESS_TOKEN": "env:BWS_ACCESS_TOKEN",
@@ -81,10 +84,12 @@
           "properties": {
             "project_id": {
               "type": "string",
+              "minLength": 1,
               "description": "The project UUID to list secrets from — the `id` returned by bitwarden.projects."
             }
           },
-          "required": ["project_id"]
+          "required": ["project_id"],
+          "additionalProperties": false
         },
         "command_args": ["secret", "list", "{project_id}"],
         "command_env": {
@@ -109,10 +114,12 @@
           "properties": {
             "secret_id": {
               "type": "string",
+              "minLength": 1,
               "description": "The secret UUID — the `id` field returned by bitwarden.list."
             }
           },
-          "required": ["secret_id"]
+          "required": ["secret_id"],
+          "additionalProperties": false
         },
         "command_args": ["secret", "get", "{secret_id}"],
         "command_env": {

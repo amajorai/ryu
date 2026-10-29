@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 import { openTabWindow } from "@/lib/tauri-bridge.ts";
 import {
 	invokeWhenReady,
@@ -21,6 +22,8 @@ export interface EntityActivation {
 
 export interface TabEntitySource {
 	conversationId?: string;
+	/** The tab's computer binding; absent for the default computer. */
+	node?: string;
 }
 
 export interface WindowTabRegistration {
@@ -40,7 +43,7 @@ export function isMainWindow(): boolean {
 		} = window;
 		const label =
 			tauriWindow.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
-		return typeof label !== "string" || label === "main";
+		return !isNativeText(label) || label === "main";
 	} catch {
 		return true;
 	}
@@ -48,13 +51,25 @@ export function isMainWindow(): boolean {
 
 /** Conversation ids are Core-owned identifiers, so they are the stable key
  * shared by renderers. Encoding keeps the protocol unambiguous even if a
- * future importer uses punctuation that looks like a key separator. */
-export function conversationEntityKey(conversationId: string): string {
-	return `conversation:${encodeURIComponent(conversationId)}`;
+ * future importer uses punctuation that looks like a key separator.
+ *
+ * An RNP handoff keeps the source conversation id, so the same id can live on
+ * two computers. A tab bound to a non-default computer is keyed with that
+ * computer's name, so routing never focuses another computer's copy. Without a
+ * node the key is unchanged. */
+export function conversationEntityKey(
+	conversationId: string,
+	node?: string | null
+): string {
+	return node
+		? `conversation:${encodeURIComponent(node)}:${encodeURIComponent(conversationId)}`
+		: `conversation:${encodeURIComponent(conversationId)}`;
 }
 
 export function tabEntityKey(tab: TabEntitySource): string | null {
-	return tab.conversationId ? conversationEntityKey(tab.conversationId) : null;
+	return tab.conversationId
+		? conversationEntityKey(tab.conversationId, tab.node)
+		: null;
 }
 
 /** Register the current renderer's tab snapshot with the native process. Plain
@@ -113,6 +128,8 @@ export async function openEntityInNewWindow(opts: {
 	try {
 		await openTabWindow({
 			...opts,
+			// Node-agnostic on purpose: callers pass the default computer's name
+			// too. The new window registers its node-qualified key once it mounts.
 			entityKey: opts.conversationId
 				? conversationEntityKey(opts.conversationId)
 				: undefined,
@@ -129,12 +146,11 @@ export async function listenForEntityActivation(
 	return listenWhenReady<{ key?: unknown; messageId?: unknown }>(
 		ENTITY_ACTIVATION_EVENT,
 		({ payload }) => {
-			if (typeof payload.key === "string" && payload.key.length > 0) {
+			if (isNativeText(payload.key) && payload.key.length > 0) {
 				onActivate({
 					key: payload.key,
 					messageId:
-						typeof payload.messageId === "string" &&
-						payload.messageId.length > 0
+						isNativeText(payload.messageId) && payload.messageId.length > 0
 							? payload.messageId
 							: undefined,
 				});

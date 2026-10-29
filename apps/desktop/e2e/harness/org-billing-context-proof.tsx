@@ -46,7 +46,7 @@ function Proof() {
 		>
 			<div className="mx-auto max-w-2xl space-y-6">
 				<header className="space-y-2">
-					<p className="font-medium text-primary text-xs uppercase tracking-[0.18em]">
+					<p className="font-medium text-primary text-xs uppercase tracking-(--tracking-section)">
 						Ryu desktop verification artifact
 					</p>
 					<h1 className="font-semibold text-3xl tracking-tight">

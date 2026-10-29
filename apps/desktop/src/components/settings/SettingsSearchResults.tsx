@@ -8,6 +8,7 @@
 // "Safety filters" is node-scoped and "Animate streaming chat text" is
 // client-scoped; they only know they typed a word.
 
+import { useLiteralMessages } from "@ryu/i18n/react";
 import {
 	SidebarGroup,
 	SidebarGroupLabel,
@@ -17,6 +18,8 @@ import {
 } from "@ryu/ui/components/sidebar.tsx";
 import { useMemo } from "react";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
+import { isRyuBot } from "@/src/lib/product.ts";
+import { useProductModeStore } from "@/src/lib/product-mode.ts";
 import {
 	type SettingsDialogId,
 	type SettingsEntry,
@@ -81,14 +84,17 @@ export function SettingsSearchResults({
 	query,
 	showEmptyState = true,
 }: SettingsSearchResultsProps) {
+	const tl = useLiteralMessages();
 	const { isDesktop } = useAppSurface();
+	const osAccess = useProductModeStore((state) => state.osAccess);
+	const workspace = osAccess && !isRyuBot();
 	const groups = useMemo(
 		() =>
 			groupResults(
-				visibleSettingsEntries(searchSettings(query), isDesktop),
+				visibleSettingsEntries(searchSettings(query), isDesktop, workspace),
 				currentDialog
 			),
-		[query, currentDialog, isDesktop]
+		[query, currentDialog, isDesktop, workspace]
 	);
 
 	if (groups.length === 0) {
@@ -96,9 +102,9 @@ export function SettingsSearchResults({
 			return null;
 		}
 		return (
-			<SidebarGroup className="py-1">
+			<SidebarGroup spacing="compact">
 				<p className="px-2 text-muted-foreground text-xs">
-					No setting matches “{query.trim()}”.
+					{tl("No setting matches “{query}”.", { query: query.trim() })}
 				</p>
 			</SidebarGroup>
 		);
@@ -107,19 +113,25 @@ export function SettingsSearchResults({
 	return (
 		<>
 			{groups.map((group) => (
-				<SidebarGroup className="py-1" key={group.key}>
+				<SidebarGroup key={group.key} spacing="compact">
 					<SidebarGroupLabel>{group.title}</SidebarGroupLabel>
 					<SidebarMenu>
 						{group.entries.map((entry) => (
 							<SidebarMenuItem key={entry.id}>
 								<SidebarMenuButton
-									className="h-auto py-1.5"
+									className="h-auto"
 									onClick={() => onSelect(entry)}
+									purpose="settings-search"
 								>
 									<span className="flex min-w-0 flex-col items-start gap-0.5">
-										<span className="truncate">{entry.label}</span>
+										<span className="truncate" title={entry.label}>
+											{entry.label}
+										</span>
 										{entry.group ? (
-											<span className="truncate text-[11px] text-muted-foreground">
+											<span
+												className="type-caption truncate text-muted-foreground"
+												title={entry.group}
+											>
 												{entry.group}
 											</span>
 										) : null}

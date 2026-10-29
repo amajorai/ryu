@@ -1,3 +1,11 @@
+import {
+	pluginLiveActivity,
+	pluginLiveSpec,
+} from "@/src/lib/api/plugin-contribution-specs.ts";
+import {
+	type PluginValue,
+	pluginValueSchema,
+} from "@/src/lib/api/plugin-wire-values.ts";
 // apps/desktop/src/live/adapters/contributed.ts
 //
 // Live-activity adapter for CONTRIBUTED activities (`contributes.live_activities`).
@@ -29,15 +37,17 @@ const REFRESH_FLOOR_MS = 1000;
 /** Map one contributed activity's source payload to cards (shared mapper). */
 function mapContribution(
 	contribution: PluginLiveActivity,
-	payload: unknown,
+	payload: PluginValue,
 	now: number
 ): LiveActivity[] {
-	return liveActivitiesFromResponse(contribution, payload, now).map(
-		({ activity, raw }) => ({
-			...activity,
-			action: actionForLiveActivity(contribution, raw),
-		})
-	);
+	return liveActivitiesFromResponse(
+		pluginLiveActivity(contribution),
+		payload,
+		now
+	).map(({ activity, raw }) => ({
+		...activity,
+		action: actionForLiveActivity(pluginLiveActivity(contribution), raw),
+	}));
 }
 
 /**
@@ -59,7 +69,7 @@ export function useContributedLiveActivities(): void {
 	const fetchable = useMemo(
 		() =>
 			live_activities.flatMap((contribution) => {
-				const source = contribution.spec?.source;
+				const source = pluginLiveSpec(contribution)?.source;
 				const sourceRequest = contributionSourceRequest(contribution, source);
 				return source && sourceRequest
 					? [{ contribution, source, sourceRequest }]
@@ -124,7 +134,9 @@ export function useContributedLiveActivities(): void {
 							headers: await requestHeaders(target),
 							signal: controller.signal,
 						});
-						return response.ok ? ((await response.json()) as unknown) : null;
+						return response.ok
+							? pluginValueSchema.parse(await response.json())
+							: null;
 					} finally {
 						signal.removeEventListener("abort", abort);
 						controller.abort();
@@ -142,7 +154,7 @@ export function useContributedLiveActivities(): void {
 			{
 				contribution: PluginLiveActivity;
 				signature: string;
-				payload: unknown;
+				payload: PluginValue;
 				activities: LiveActivity[];
 			}
 		>()

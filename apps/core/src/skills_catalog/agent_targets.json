@@ -1,6 +1,6 @@
 {
   "source": "https://github.com/vercel-labs/skills/blob/main/README.md#supported-agents",
-  "commit": "7407f3893ad4dceab546ac002c3ef806e4000c73",
+  "commit": "13e4063a1cf913f5606d57d42ab83a86f5001e04",
   "targets": [
     {
       "id": "adal",
@@ -74,7 +74,7 @@
     },
     {
       "id": "cline",
-      "name": "Cline, Dexto, Kimi Code CLI, Loaf, Sarvam Code, Warp, Zed",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
       "projectSkillsDir": ".agents/skills/",
       "globalSkillsDir": "~/.agents/skills/",
       "featured": false
@@ -109,9 +109,9 @@
     },
     {
       "id": "codex",
-      "name": "Codex",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
       "projectSkillsDir": ".agents/skills/",
-      "globalSkillsDir": "~/.codex/skills/",
+      "globalSkillsDir": "~/.agents/skills/",
       "featured": true
     },
     {
@@ -165,7 +165,7 @@
     },
     {
       "id": "dexto",
-      "name": "Cline, Dexto, Kimi Code CLI, Loaf, Sarvam Code, Warp, Zed",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
       "projectSkillsDir": ".agents/skills/",
       "globalSkillsDir": "~/.agents/skills/",
       "featured": false
@@ -200,9 +200,9 @@
     },
     {
       "id": "fx",
-      "name": "fx",
-      "projectSkillsDir": ".fx/skills/",
-      "globalSkillsDir": "~/.fx/skills/",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
+      "projectSkillsDir": ".agents/skills/",
+      "globalSkillsDir": "~/.agents/skills/",
       "featured": false
     },
     {
@@ -284,7 +284,7 @@
     },
     {
       "id": "kimi-code-cli",
-      "name": "Cline, Dexto, Kimi Code CLI, Loaf, Sarvam Code, Warp, Zed",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
       "projectSkillsDir": ".agents/skills/",
       "globalSkillsDir": "~/.agents/skills/",
       "featured": false
@@ -312,7 +312,7 @@
     },
     {
       "id": "loaf",
-      "name": "Cline, Dexto, Kimi Code CLI, Loaf, Sarvam Code, Warp, Zed",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
       "projectSkillsDir": ".agents/skills/",
       "globalSkillsDir": "~/.agents/skills/",
       "featured": false
@@ -389,9 +389,9 @@
     },
     {
       "id": "pi",
-      "name": "Pi",
-      "projectSkillsDir": ".pi/skills/",
-      "globalSkillsDir": "~/.pi/agent/skills/",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
+      "projectSkillsDir": ".agents/skills/",
+      "globalSkillsDir": "~/.agents/skills/",
       "featured": false
     },
     {
@@ -466,7 +466,7 @@
     },
     {
       "id": "sarvam-code",
-      "name": "Cline, Dexto, Kimi Code CLI, Loaf, Sarvam Code, Warp, Zed",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
       "projectSkillsDir": ".agents/skills/",
       "globalSkillsDir": "~/.agents/skills/",
       "featured": false
@@ -515,7 +515,7 @@
     },
     {
       "id": "warp",
-      "name": "Cline, Dexto, Kimi Code CLI, Loaf, Sarvam Code, Warp, Zed",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
       "projectSkillsDir": ".agents/skills/",
       "globalSkillsDir": "~/.agents/skills/",
       "featured": false
@@ -536,7 +536,7 @@
     },
     {
       "id": "zed",
-      "name": "Cline, Dexto, Kimi Code CLI, Loaf, Sarvam Code, Warp, Zed",
+      "name": "Cline, Codex, Dexto, fx, Kimi Code CLI, Loaf, Pi, Sarvam Code, Warp, Zed",
       "projectSkillsDir": ".agents/skills/",
       "globalSkillsDir": "~/.agents/skills/",
       "featured": false

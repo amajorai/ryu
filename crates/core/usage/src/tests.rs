@@ -75,6 +75,12 @@ fn engine_maps_ryu_subscription_provider_ids() {
         engine_for_agent("github-copilot"),
         Some(Engine::Copilot)
     ));
+    assert!(matches!(engine_for_agent("devin"), Some(Engine::Devin)));
+    assert!(matches!(
+        engine_for_agent("opencode-go"),
+        Some(Engine::OpenCode)
+    ));
+    assert!(matches!(engine_for_agent("ollama"), Some(Engine::Ollama)));
     assert!(matches!(engine_for_agent("chatgpt"), Some(Engine::ChatGpt)));
 }
 
@@ -86,6 +92,11 @@ fn engine_maps_every_curated_acp_id() {
         ("acp:copilot", Engine::Copilot),
         ("acp:grok", Engine::Grok),
         ("acp:glm", Engine::Glm),
+        ("acp:devin", Engine::Devin),
+        ("acp:opencode", Engine::OpenCode),
+        ("acp:ollama", Engine::Ollama),
+        ("acp:cursor", Engine::Cursor),
+        ("acp:gemini", Engine::Antigravity),
     ];
     for (id, expected) in cases {
         assert_eq!(engine_for_agent(id), Some(expected), "{id}");
@@ -96,11 +107,7 @@ fn engine_maps_every_curated_acp_id() {
 fn engine_none_for_unsupported_agents() {
     for id in [
         "ryu",
-        // Cursor, Gemini/Antigravity, Droid and Qwen are deliberately out of
-        // scope (see the crate docs' "Known gaps"), so they must stay hidden
-        // rather than half-reported.
-        "acp:cursor",
-        "acp:gemini",
+        // Droid and Qwen have no readable subscription usage source.
         "acp:droid",
         "acp:qwen",
         "acp:codebuddy",
@@ -116,7 +123,7 @@ fn engine_none_for_unsupported_agents() {
 
 #[tokio::test]
 async fn unsupported_agent_yields_hide_snapshot() {
-    let snap = fetch_usage("acp:gemini").await;
+    let snap = fetch_usage("acp:unknown").await;
     assert!(!snap.available);
     assert!(matches!(snap.reason, Some(UsageUnavailable::Unsupported)));
     assert!(snap.windows.is_empty());
@@ -130,6 +137,22 @@ async fn account_usage_without_a_credential_is_structured_not_logged_in() {
     assert_eq!(snap.agent_id, "claude-pro-max");
     assert_eq!(snap.engine, "claude");
     assert!(matches!(snap.reason, Some(UsageUnavailable::NotLoggedIn)));
+}
+
+#[tokio::test]
+async fn cli_usage_providers_are_not_read_from_a_saved_pi_account() {
+    for provider_id in ["devin", "opencode-go", "ollama", "cursor", "gemini"] {
+        let snapshot = fetch_ryu_provider_usage_for_credential(
+            provider_id,
+            Some(serde_json::json!({ "apiKey": "account-specific-secret" })),
+        )
+        .await;
+        assert!(!snapshot.available, "{provider_id}");
+        assert!(matches!(
+            snapshot.reason,
+            Some(UsageUnavailable::Unsupported)
+        ));
+    }
 }
 
 #[test]
@@ -161,6 +184,7 @@ fn engine_prefers_claude_when_both_substrings_present() {
         Some(Engine::Claude)
     ));
     assert!(matches!(engine_for_agent("ACP:CODEX"), Some(Engine::Codex)));
+    assert!(matches!(engine_for_agent("ACP:DEVIN"), Some(Engine::Devin)));
 }
 
 #[test]
@@ -238,6 +262,12 @@ fn read_file_reads_and_misses() {
     assert_eq!(read_file(&path), None, "absent file => None");
     std::fs::write(&path, "hello").unwrap();
     assert_eq!(read_file(&path).as_deref(), Some("hello"));
+
+    std::fs::write(&path, vec![b'x'; 1024 * 1024 + 1]).unwrap();
+    assert!(
+        read_file(&path).is_none(),
+        "oversized credential file => None"
+    );
 }
 
 #[test]
@@ -489,4 +519,60 @@ fn subscription_agents_cover_every_engine() {
             "pooled agent {id} does not resolve to an engine"
         );
     }
+}
+
+#[test]
+fn account_usage_support_matches_the_account_aware_engines() {
+    // Only engines with a per-credential reader can report a saved account's
+    // own windows. Everything else must stay `false` so callers never probe.
+    for provider in [
+        "claude-pro-max",
+        "openai-codex",
+        "chatgpt",
+        "github-copilot",
+    ] {
+        assert!(
+            supports_account_usage(provider),
+            "{provider} has an account-aware reader"
+        );
+    }
+    for provider in [
+        "chatgpt-plan",
+        "kiro",
+        "kimi-coding",
+        "radius",
+        "ant-ling",
+        "anthropic",
+        "openrouter",
+        "zai",
+        "opencode",
+        "acp:grok",
+        "acp:glm",
+        "",
+        "definitely-unknown",
+    ] {
+        assert!(
+            !supports_account_usage(provider),
+            "{provider} must not report per-account usage"
+        );
+    }
+}
+
+#[test]
+fn snapshot_omits_unset_provider_and_account_stamps() {
+    let snapshot = UsageSnapshot::unavailable("claude-pro-max", "claude", UsageUnavailable::Error);
+    let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
+    let object = value.as_object().expect("snapshot object");
+    assert!(!object.contains_key("provider_id"));
+    assert!(!object.contains_key("account_id"));
+    assert_eq!(object["agent_id"], "claude-pro-max");
+
+    let stamped = UsageSnapshot {
+        provider_id: Some("claude-pro-max".to_owned()),
+        account_id: Some("acct_fixture".to_owned()),
+        ..snapshot
+    };
+    let value = serde_json::to_value(&stamped).expect("serialize stamped snapshot");
+    assert_eq!(value["provider_id"], "claude-pro-max");
+    assert_eq!(value["account_id"], "acct_fixture");
 }

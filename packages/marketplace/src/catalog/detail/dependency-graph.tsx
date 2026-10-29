@@ -232,7 +232,7 @@ function DependencyStatus({
 }) {
 	if (node.repeated) {
 		return (
-			<Badge className="shrink-0 text-xs" variant="outline">
+			<Badge className="shrink-0" variant="outline">
 				Listed above
 			</Badge>
 		);
@@ -242,20 +242,20 @@ function DependencyStatus({
 	}
 	if (node.record?.enabled) {
 		return (
-			<Badge className="shrink-0 text-xs" variant="secondary">
+			<Badge className="shrink-0" variant="secondary">
 				Already enabled
 			</Badge>
 		);
 	}
 	if (node.record?.installed) {
 		return (
-			<Badge className="shrink-0 text-xs" variant="outline">
+			<Badge className="shrink-0" variant="outline">
 				Enabled with this
 			</Badge>
 		);
 	}
 	return (
-		<Badge className="shrink-0 text-xs" variant="outline">
+		<Badge className="shrink-0" variant="outline">
 			Added with this
 		</Badge>
 	);
@@ -277,7 +277,9 @@ function DependencyRows({
 							className="size-4 shrink-0 text-muted-foreground"
 							icon={PackageIcon}
 						/>
-						<span className="min-w-0 flex-1 truncate text-sm">{node.name}</span>
+						<span className="min-w-0 flex-1 truncate text-sm" title={node.name}>
+							{node.name}
+						</span>
 						{node.minVersion ? (
 							<span className="shrink-0 text-muted-foreground text-xs">
 								≥ {node.minVersion}

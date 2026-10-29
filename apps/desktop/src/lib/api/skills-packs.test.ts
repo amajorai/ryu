@@ -1,3 +1,4 @@
+import { isNativeText } from "@ryu/ui/lib/native-primitive-observation.ts";
 // apps/desktop/src/lib/api/skills-packs.test.ts
 //
 // Wire tests for the skill-pack client functions: they must POST/GET the exact
@@ -21,7 +22,7 @@ const TARGET: ApiTarget = {
 	userJwt: null,
 };
 
-function jsonResponse(body: unknown, status = 200): Response {
+function jsonResponse<TFixture>(body: TFixture, status = 200): Response {
 	return new Response(JSON.stringify(body), {
 		status,
 		headers: { "content-type": "application/json" },
@@ -35,12 +36,12 @@ interface CapturedCall {
 }
 
 /** Install a mock fetch that records every call and returns `body`. */
-function mockFetch(body: unknown): CapturedCall[] {
+function mockFetch<TFixture>(body: TFixture): CapturedCall[] {
 	const calls: CapturedCall[] = [];
 	globalThis.fetch = Object.assign(
 		mock(async (input: RequestInfo | URL, init?: RequestInit) => {
 			let parsed: unknown;
-			if (init?.body && typeof init.body === "string") {
+			if (init?.body && isNativeText(init.body)) {
 				parsed = JSON.parse(init.body);
 			}
 			calls.push({

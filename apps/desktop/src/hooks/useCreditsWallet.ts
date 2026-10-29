@@ -22,7 +22,7 @@ import type { Entitlement } from "@ryu/auth/lib/plans";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchEntitlement } from "@/src/lib/api/billing.ts";
 import {
-	type CreditsError,
+	CreditsError,
 	type CreditWallet,
 	fetchWallet,
 	hasCreditsAuth,
@@ -101,7 +101,14 @@ export function useCreditsWallet(): UseCreditsWallet {
 			setError(null);
 		} catch (e) {
 			if (latestOrgId.current === requestOrgId) {
-				setError(e as CreditsError);
+				setError(
+					e instanceof CreditsError
+						? e
+						: new CreditsError(
+								"unknown",
+								e instanceof Error ? e.message : "Could not load credits."
+							)
+				);
 			}
 		} finally {
 			const nextEntitlement = await entitlementPromise;
@@ -144,6 +151,14 @@ export function useCreditsWallet(): UseCreditsWallet {
 						balanceMicroUsd: liveWallet.balanceMicroUsd,
 						currency: liveWallet.currency,
 						updatedAt: liveWallet.updatedAt,
+						// Only the snapshot frame carries the hold view; keep the fetched
+						// one on the balance-change frames that omit it.
+						...(liveWallet.heldMicroUsd === undefined
+							? undefined
+							: {
+									availableMicroUsd: liveWallet.availableMicroUsd,
+									heldMicroUsd: liveWallet.heldMicroUsd,
+								}),
 					}
 				: prev
 		);

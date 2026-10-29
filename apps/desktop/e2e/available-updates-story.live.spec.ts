@@ -57,7 +57,7 @@ async function catalogEntries(): Promise<CatalogEntry[]> {
 			})`
 		);
 	}
-	const json = (await resp.json()) as { sidecars?: CatalogEntry[] };
+	const json = await resp.json();
 	return json.sidecars ?? [];
 }
 

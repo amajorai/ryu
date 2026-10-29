@@ -1,43 +1,53 @@
-import { Button } from "@ryu/ui/components/button";
+import { useLiteralMessages } from "@ryu/i18n/react";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardFooter,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
-import { ArrowRight, Check, ExternalLink } from "lucide-react";
+} from "@ryu/ui/components/card.tsx";
+import { useState } from "react";
+import { ConnectionPermissionDialog } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
+import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import type { ActivationTaskDraft } from "@/src/lib/onboarding-activation.ts";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
-function taskAppLabel(appName: string | null): string {
-	return appName ?? "your connected apps";
-}
-
 export function ActivationTaskStep({
 	draft,
+	connected,
+	subscribed,
 	error,
 	onStart,
+	onBack,
+	onConnect,
+	onUseOwnModel,
 	pending = false,
 }: {
 	draft: ActivationTaskDraft;
+	connected: boolean;
+	subscribed: boolean;
 	error?: string | null;
 	onStart: () => void;
+	onBack: () => void;
+	onConnect: (accessLevel: ConnectionAccessLevel) => Promise<void>;
+	onUseOwnModel: () => void;
 	pending?: boolean;
 }) {
-	const appLabel = taskAppLabel(draft.appName);
-
+	const tl = useLiteralMessages();
+	const [permissionOpen, setPermissionOpen] = useState(false);
+	const needsConnection = Boolean(draft.appSlug && !connected);
 	return (
 		<ActivationStepShell
-			subtitle="Your connected work is ready. Ryu will ask before it changes anything."
-			title="Ryu is ready to start your first task"
+			subtitle="Task preview. Nothing has run, and no credits have been used."
+			title="See what Ryu will work on"
 		>
-			<Card className="w-full max-w-2xl border border-border/60">
+			<Card
+				appearance="onboarding"
+				borderTone="subtle"
+				className="w-full max-w-2xl"
+			>
 				<CardHeader>
-					<div className="flex items-center gap-2 text-muted-foreground text-xs">
-						<Check className="size-3.5 text-status-success" />
-						Connected context ready
-					</div>
 					<CardTitle>{draft.title}</CardTitle>
 				</CardHeader>
 				<CardContent>
@@ -46,26 +56,68 @@ export function ActivationTaskStep({
 							{draft.prompt}
 						</p>
 					</div>
-					<div className="mt-4 flex items-center gap-2 text-muted-foreground text-xs">
-						<ExternalLink className="size-3.5" />
-						Using {appLabel} as connected context.
-					</div>
-					<div className="mt-2 flex items-center gap-2 text-muted-foreground text-xs">
-						<ExternalLink className="size-3.5" />
-						Ryu lives where you already work — nothing to change.
-					</div>
+					<p className="mt-4 text-muted-foreground text-sm">
+						{draft.appName
+							? connected
+								? tl("Uses {appName} for this task.", {
+										appName: draft.appName,
+									})
+								: tl("Requires a connection to {appName} for this task.", {
+										appName: draft.appName,
+									})
+							: "Uses the context you provide."}
+					</p>
+					<p className="mt-2 text-muted-foreground text-sm">
+						Ryu-managed execution requires an active subscription before work
+						starts. You can also open chat and choose your own model and
+						context.
+					</p>
 					{error ? (
 						<p className="mt-3 text-sm text-status-destructive" role="alert">
 							{error}
 						</p>
 					) : null}
 				</CardContent>
-				<CardFooter className="justify-end border-t">
-					<Button disabled={pending} loading={pending} onClick={onStart}>
-						Start task <ArrowRight className="size-4" />
+				<CardFooter
+					appearance="onboarding-step"
+					className="flex-wrap justify-between"
+					spacing="choices"
+				>
+					<Button disabled={pending} onClick={onBack} variant="ghost">
+						Choose another task
+					</Button>
+					<Button
+						disabled={pending}
+						onClick={onUseOwnModel}
+						variant="secondary"
+					>
+						Choose my own model
+					</Button>
+					<Button
+						disabled={pending}
+						loading={pending}
+						onClick={needsConnection ? () => setPermissionOpen(true) : onStart}
+					>
+						{needsConnection
+							? tl("Connect {appName} for this task", {
+									appName: draft.appName ?? tl("app"),
+								})
+							: subscribed
+								? "Start managed task"
+								: "See managed pricing"}
 					</Button>
 				</CardFooter>
 			</Card>
+			<ConnectionPermissionDialog
+				connectionName={draft.appName ?? "this integration"}
+				connectionType="Composio"
+				onConfirm={async (accessLevel) => {
+					await onConnect(accessLevel);
+					setPermissionOpen(false);
+				}}
+				onOpenChange={setPermissionOpen}
+				open={permissionOpen}
+			/>
 		</ActivationStepShell>
 	);
 }

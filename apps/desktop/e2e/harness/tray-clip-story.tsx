@@ -1,3 +1,4 @@
+import proofStyles from "./tray-clip-story.module.css";
 // Standalone browser story for the REAL sidebar-footer tray (TrayMorph, shared
 // by the Downloads and Inbox trays). It reproduces every host the sidebar
 // footer renders in, so the 23rem panel can be checked against each:
@@ -31,8 +32,6 @@ import {
 	TrayMorph,
 } from "../../src/components/shell/TrayPopover.tsx";
 import "../../src/index.css";
-
-const COL_W = 260;
 
 function Tray({ testid }: { testid: string }) {
 	const [open, setOpen] = useState(false);
@@ -77,8 +76,8 @@ function TallTray() {
 				<div className="flex flex-col gap-1 p-1.5">
 					{Array.from({ length: 12 }, (_, i) => (
 						<div
-							className="h-12 rounded-[14px] bg-muted/60"
-							// biome-ignore lint/suspicious/noArrayIndexKey: static filler rows
+							className="h-12 rounded-(--radius-xl) bg-muted/60"
+							// static filler rows
 							key={i}
 						/>
 					))}
@@ -91,19 +90,16 @@ function TallTray() {
 
 function Column({
 	label,
-	style,
+	variant,
 	testid,
 }: {
 	label: string;
-	style: React.CSSProperties;
+	variant: "clipped" | "clip-only" | "control";
 	testid: string;
 }) {
 	return (
-		<div style={{ position: "relative", height: 420, width: COL_W }}>
-			<div
-				className="flex flex-col justify-end bg-sidebar"
-				style={{ height: "100%", width: COL_W, ...style }}
-			>
+		<div className={proofStyles.fixture1}>
+			<div className={proofStyles.column} data-variant={variant}>
 				<p className="px-2 text-muted-foreground text-xs">{label}</p>
 				<Tray testid={testid} />
 			</div>
@@ -121,26 +117,19 @@ function Column({
 function PeekColumn() {
 	const [peeked, setPeeked] = useState(false);
 	return (
-		<div style={{ height: 420, position: "relative", width: COL_W }}>
+		<div className={proofStyles.fixture2}>
 			<div
-				className="flex flex-col justify-end overflow-hidden bg-sidebar"
+				className={proofStyles.peekColumn}
+				data-peeked={peeked}
 				data-testid="peek-panel"
 				onMouseEnter={() => setPeeked(true)}
 				onMouseLeave={() => setPeeked(false)}
-				style={{
-					height: "100%",
-					transform: peeked
-						? "translateX(0)"
-						: "translateX(calc(-100% - 12px))",
-					transition: "transform 200ms ease-out",
-					width: COL_W,
-				}}
 			>
 				<p className="px-2 text-muted-foreground text-xs">hover-peek</p>
 				<Tray testid="tray-peek" />
 			</div>
 			{/* The left-edge hover zone that reveals the panel. */}
-			{/** biome-ignore lint/a11y/noStaticElementInteractions: hover-peek zone */}
+			{/** hover-peek zone */}
 			<div
 				className="absolute top-0 left-0 h-full w-6"
 				data-testid="peek-zone"
@@ -157,7 +146,7 @@ function PeekColumn() {
  */
 function SheetColumn() {
 	return (
-		<div style={{ height: 420, width: COL_W }}>
+		<div className={proofStyles.fixture3}>
 			<Sheet>
 				<SheetTrigger data-testid="sheet-open">Open sheet sidebar</SheetTrigger>
 				<SheetContent
@@ -179,18 +168,22 @@ function Story() {
 		<div className="flex gap-16 p-10">
 			<Column
 				label="clipped (overflow hidden + transform)"
-				style={{ overflow: "hidden", transform: "translateX(0)" }}
 				testid="tray-clipped"
+				variant="clipped"
 			/>
 			<Column
 				label="clip only (no transform)"
-				style={{ overflow: "clip" }}
 				testid="tray-clip-only"
+				variant="clip-only"
 			/>
-			<Column label="control (no clip)" style={{}} testid="tray-control" />
+			<Column
+				label="control (no clip)"
+				testid="tray-control"
+				variant="control"
+			/>
 			<PeekColumn />
 			<SheetColumn />
-			<div style={{ height: 420, width: COL_W }}>
+			<div className={proofStyles.fixture4}>
 				<div className="flex h-full flex-col justify-end overflow-hidden bg-sidebar">
 					<p className="px-2 text-muted-foreground text-xs">tall tray</p>
 					<TallTray />

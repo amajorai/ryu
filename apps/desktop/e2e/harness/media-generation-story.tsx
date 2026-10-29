@@ -1,3 +1,7 @@
+import type {
+	ImageGenerationPartData,
+	VideoGenerationPartData,
+} from "@ryu/blocks/desktop/agent-elements/message-list.tsx";
 // Standalone browser story for the INLINE MEDIA GENERATION surfaces in the real
 // transcript — `data-image-generation` and `data-video-generation` parts, drawn
 // by `AssistantGeneratedImage` / `AssistantGeneratedVideo` in
@@ -52,13 +56,13 @@ const ARRIVED_VIDEO_URL = "data:video/mp4;base64,AAAAHGZ0eXBpc29t";
 function generationMessage(
 	id: string,
 	type: "data-image-generation" | "data-video-generation",
-	data: Record<string, unknown>
+	data: ImageGenerationPartData | VideoGenerationPartData
 ): UIMessage {
 	return {
 		id,
 		role: "assistant",
 		parts: [{ type, data }],
-	} as unknown as UIMessage;
+	};
 }
 
 function buildTranscript(): UIMessage[] {
@@ -67,7 +71,7 @@ function buildTranscript(): UIMessage[] {
 			id: "user-video",
 			role: "user",
 			parts: [{ type: "text", text: VIDEO_PROMPT }],
-		} as UIMessage,
+		},
 		generationMessage(VIDEO_MESSAGE_ID, "data-video-generation", {
 			status: "error",
 			prompt: VIDEO_PROMPT,
@@ -77,7 +81,7 @@ function buildTranscript(): UIMessage[] {
 			id: "user-image",
 			role: "user",
 			parts: [{ type: "text", text: IMAGE_PROMPT }],
-		} as UIMessage,
+		},
 		generationMessage(IMAGE_MESSAGE_ID, "data-image-generation", {
 			status: "error",
 			prompt: IMAGE_PROMPT,
@@ -87,7 +91,7 @@ function buildTranscript(): UIMessage[] {
 			id: "arrived-clip",
 			role: "assistant",
 			parts: [{ type: "file", mediaType: "video/mp4", url: ARRIVED_VIDEO_URL }],
-		} as unknown as UIMessage,
+		},
 	];
 }
 
@@ -102,14 +106,16 @@ function Story() {
 		(messageId: string, kind: "image" | "video", prompt: string) => {
 			const type =
 				kind === "video" ? "data-video-generation" : "data-image-generation";
-			const rewrite = (data: Record<string, unknown>) => {
+			const rewrite = (
+				data: ImageGenerationPartData | VideoGenerationPartData
+			) => {
 				setMessages((prev) =>
 					prev.map((message) =>
 						message.id === messageId
-							? ({
+							? {
 									...message,
 									parts: [{ type, data }],
-								} as unknown as UIMessage)
+								}
 							: message
 					)
 				);
@@ -156,4 +162,4 @@ function Story() {
 	);
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(<Story />);
+createRoot(document.getElementById("root")!).render(<Story />);

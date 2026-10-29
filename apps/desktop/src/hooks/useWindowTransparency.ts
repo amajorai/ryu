@@ -53,7 +53,7 @@ export function applyWindowTransparencyPreferences(
 		DEFAULT_WINDOW_TRANSPARENCY
 	)
 ): void {
-	if (typeof document === "undefined") {
+	if (globalThis.document === undefined) {
 		return;
 	}
 

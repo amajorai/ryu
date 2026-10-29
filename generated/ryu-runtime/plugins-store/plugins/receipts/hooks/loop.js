@@ -75,7 +75,7 @@ if (!raw) {
 let goal;
 try {
 	goal = JSON.parse(raw);
-} catch (e) {
+} catch  {
 	return { kind: "none" };
 }
 if (!goal || !goal.condition || goal.status !== "active") {
@@ -192,7 +192,11 @@ const verdict = await host.runAgent({
 	agent_id: ctx.agent_id,
 	preset: "code_read",
 });
-const accepted = /evidence\s+verified:\s*yes/i.test(verdict || "");
+const verdictText = parsePrimitiveText(verdict) !== undefined ? verdict.trim() : "";
+const finalVerdictLine = verdictText.split(/\r?\n/).at(-1) || "";
+const accepted = /^EVIDENCE VERIFIED:\s*yes\s*-\s*\S.*$/i.test(
+	finalVerdictLine
+);
 
 goal.rounds = rounds + 1;
 goal.nudges = 0;
@@ -234,7 +238,7 @@ async function evidenceKind() {
 	let pref = null;
 	try {
 		pref = await host.getPreference({ key: "receipts-evidence-kind" });
-	} catch (e) {
+	} catch  {
 		pref = null;
 	}
 	const v = String(pref || "")
@@ -251,7 +255,7 @@ async function maxRoundsPref() {
 	let pref = null;
 	try {
 		pref = await host.getPreference({ key: "receipts-max-rounds" });
-	} catch (e) {
+	} catch  {
 		pref = null;
 	}
 	const n = Number.parseInt(String(pref || ""), 10);
@@ -336,4 +340,15 @@ function captureBrief(kind) {
 		"- Capture the goal state itself, not a picture of your code or of a passing " +
 		"claim. A blank, errored, or unrelated screen will be rejected."
 	);
+}
+
+// Decode with the native String internal-slot check; boxed strings remain
+// non-text inputs. This flat sandbox fragment needs no module imports.
+function parsePrimitiveText(value) {
+	try {
+		const parsed = String.prototype.valueOf.call(value);
+		return parsed === value ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
 }

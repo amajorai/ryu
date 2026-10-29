@@ -9,11 +9,13 @@ import type {
 /** The host relationship shared by the web, mobile, and browser-extension
  * clients. Keep this here because it describes Ryu's shell architecture, not a
  * publisher's runtime claim. */
-const WRAPPED_SURFACES: Record<string, string> = {
-	extension: "desktop",
-	mobile: "desktop",
-	web: "desktop",
-};
+const WRAPPED_SURFACES = new Map(
+	Object.entries({
+		extension: "desktop",
+		mobile: "desktop",
+		web: "desktop",
+	})
+);
 
 const LEGACY_SURFACES = [
 	"gateway",
@@ -56,20 +58,23 @@ export function surfaceSupportRows(
 	const names = detail?.surfaces ?? entry.surfaces ?? [];
 	if (names.length > 0) {
 		const supported = new Set(names);
-		return unique(names).map((surface) => ({
-			inheritedFrom:
-				WRAPPED_SURFACES[surface] && supported.has(WRAPPED_SURFACES[surface])
-					? WRAPPED_SURFACES[surface]
-					: undefined,
-			surface,
-			support: "supported",
-		}));
+		return unique(names).map((surface) => {
+			const inheritedFrom = WRAPPED_SURFACES.get(surface);
+			return {
+				inheritedFrom:
+					inheritedFrom && supported.has(inheritedFrom)
+						? inheritedFrom
+						: undefined,
+				surface,
+				support: "supported",
+			};
+		});
 	}
 	if (entry.descriptor_only) {
 		return [];
 	}
 	return LEGACY_SURFACES.map((surface) => ({
-		inheritedFrom: WRAPPED_SURFACES[surface],
+		inheritedFrom: WRAPPED_SURFACES.get(surface),
 		surface,
 		support: "legacy",
 	}));

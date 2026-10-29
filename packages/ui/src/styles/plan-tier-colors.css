@@ -1,0 +1,106 @@
+/* Plan-tier badge tokens consumed by PlanBadge (`--plan-tier-<tier>-ink` and
+ * `--plan-tier-<tier>-gradient`). Shared by globals.css and isolated
+ * stylesheets (such as the Fumadocs UI preview) that render PlanBadge. */
+:root {
+	--plan-tier-marketplace-membership-ink: #ffffff;
+	--plan-tier-marketplace-membership-gradient: linear-gradient(
+		135deg,
+		#090613 0%,
+		#2b348f 30%,
+		#655be0 52%,
+		#de5c9f 73%,
+		#ff941f 100%
+	);
+	--plan-tier-pro-ink: #0b0b14;
+	--plan-tier-pro-gradient: linear-gradient(
+		15deg,
+		#9effef 0,
+		#d1ffd6 17%,
+		#fff8ad 34%,
+		#a3edff 51%,
+		#bdbdff 68%,
+		#ffb8eb 85%,
+		#ffdda3 100%
+	);
+	--plan-tier-plus-ink: #0b0b14;
+	--plan-tier-plus-gradient:
+		radial-gradient(
+			87.5139% 80.7298% at 76.8195% 26.8195%,
+			#e2dfd8 0%,
+			#e2dfd8 40%,
+			rgba(226, 223, 216, 0) 90%,
+			rgba(226, 223, 216, 0) 100%
+		),
+		radial-gradient(
+			101.273% 101.273% at 100% 55.2245%,
+			#56faf7 0%,
+			#56faf7 35%,
+			rgba(86, 250, 247, 0) 80%
+		),
+		radial-gradient(
+			160.387% 160.387% at 100% 53.6389%,
+			#a162ff 20%,
+			rgba(145, 76, 255, 0) 75%
+		),
+		radial-gradient(
+			197.349% 197.349% at 100% 53.6389%,
+			#f8dcbb 0%,
+			#f8dcbb 38%,
+			rgba(226, 223, 216, 0) 90%
+		);
+	--plan-tier-max-ink: #0b0b14;
+	--plan-tier-max-gradient: linear-gradient(
+		15deg,
+		#c679c4 0%,
+		#fa3d1d 25%,
+		#ffb005 50%,
+		#e1e1fe 75%,
+		#0358f7 100%
+	);
+	--plan-tier-teams-ink: #ffffff;
+	--plan-tier-teams-gradient: linear-gradient(
+		180deg,
+		#031c26 0%,
+		#1b6aa7 43%,
+		#57d2f4 100%
+	);
+	--plan-tier-teams-lite-ink: #ffffff;
+	--plan-tier-teams-lite-gradient: linear-gradient(
+		180deg,
+		#031c26 0%,
+		#1b6aa7 43%,
+		#57d2f4 100%
+	);
+	--plan-tier-business-ink: #ffffff;
+	--plan-tier-business-gradient: linear-gradient(
+		15deg,
+		#5dffe4 0,
+		#8dff9a 8%,
+		#fff36a 16%,
+		#60dfff 24%,
+		#7b7cff 32%,
+		#ff77d8 40%,
+		#ffc45f 48%,
+		#5dffe4 56%,
+		#8dff9a 64%,
+		#fff36a 72%,
+		#60dfff 80%,
+		#7b7cff 88%,
+		#ff77d8 96%,
+		#ffc45f 100%
+	);
+	--plan-tier-enterprise-ink: #ffffff;
+	--plan-tier-enterprise-gradient: linear-gradient(
+		15deg,
+		#0f766e 0,
+		#059669 34%,
+		#84cc16 67%,
+		#f59e0b 100%
+	);
+	--plan-tier-desktop-license-ink: #10131a;
+	--plan-tier-desktop-license-gradient: linear-gradient(
+		15deg,
+		#fff1b8 0%,
+		#c8942e 100%
+	);
+}

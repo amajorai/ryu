@@ -10,9 +10,10 @@
   "termsOfServiceUrl": "https://ryuhq.com/terms",
   "id": "@ryu/browser",
   "name": "Browser",
-  "version": "0.1.15",
+  "version": "0.1.18",
+  "stability": "experimental",
   "system": true,
-  "description": "A real-Chromium browser (Electron) exposed as the grant-gated `browser.control` capability. Local nodes can share one embedded session with the user; managed cloud nodes give each Bot a hidden tab lane inside one persistent managed-Bot Chromium context, so cookies and logins are shared while active tabs stay separate. Core routes the desktop Browser panel and agent tools through its authenticated ext-proxy.",
+  "description": "A real-Chromium browser (Electron) exposed as the grant-gated `browser.control` capability. Local nodes can share one embedded session with the user; managed cloud nodes give each Bot a hidden tab lane with its own persistent Chromium profile, so each agent signs in to sites separately and never sees another agent's cookies, logins, browsing history, site permissions, or downloads. Core routes the desktop Browser panel and agent tools through its authenticated ext-proxy.",
   "keywords": ["browser", "chromium", "automation", "web"],
   "icon": "browser",
   "iconDither": {
@@ -441,7 +442,7 @@
         "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
         "fail_open": true,
         "unwrap_body": true,
-        "description": "List the structured WebMCP tools currently registered by the page in one browser tab. Each tool includes its name, description, JSON input schema, origin, and read-only or untrusted-output hints. Call this before chromium.execute_webmcp_tool.",
+        "description": "List the structured WebMCP tools currently exposed in one browser tab. Each tool includes its tool_id, name, description, JSON input schema, origin, and read-only, consequential-action, debugging, or untrusted-output hints. Call this before chromium.execute_webmcp_tool.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -464,7 +465,7 @@
         "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
         "fail_open": true,
         "unwrap_body": true,
-        "description": "Execute one WebMCP tool registered by the page in a browser tab. Use the exact tool_name and arguments from chromium.list_webmcp_tools. This runs page JavaScript visibly in the user's signed-in tab and can cause external effects, so follow normal browser confirmation policy.",
+        "description": "Execute one WebMCP tool exposed in a browser tab. Use the exact tool_name, tool_id, and arguments from chromium.list_webmcp_tools; tool_id distinguishes same-name tools from different frames. This runs page JavaScript visibly in the user's signed-in tab and can cause external effects, so follow normal browser confirmation policy.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -472,6 +473,10 @@
             "tool_name": {
               "type": "string",
               "description": "Exact WebMCP name returned by the list operation."
+            },
+            "tool_id": {
+              "type": "string",
+              "description": "Exact tool_id returned by the list operation; required when a name appears more than once."
             },
             "arguments": {
               "type": "object",
@@ -675,6 +680,152 @@
           "required": ["from", "to"]
         }
       }
+    },
+    {
+      "id": "tool-browser-create-account",
+      "name": "Create Agent Account",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.create_account",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "POST",
+        "url": "core:/api/vault/agent-accounts",
+        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Create YOUR OWN website account record in the Ryu vault BEFORE you fill a sign-up form. Ryu generates a strong password and stores it; you never see it and must never ask the user for one or try to read it from the page. Pass the site's URL and the username and/or email you will register with. Returns `{account:{id,site,host,username,email,label,has_password,has_totp,...}}` with no secrets. Then fill the sign-up form with chromium.fill_credential (fields `username`, `email`, `password`) using `account.id`, and submit it. If the site then offers two-factor setup, use chromium.capture_totp.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "site": {
+              "type": "string",
+              "description": "The site's https URL, e.g. \"https://github.com\". Credentials only fill on this exact host (www. is ignored); a sign-in page on another host needs its own account."
+            },
+            "username": {
+              "type": "string",
+              "description": "Username you will register with, if the site uses one."
+            },
+            "email": {
+              "type": "string",
+              "description": "Email address you will register with, if the site asks for one."
+            },
+            "password_length": {
+              "type": "integer",
+              "minimum": 12,
+              "maximum": 128,
+              "description": "Length of the generated password. Omit for the default; lower it only when the site rejects long passwords."
+            },
+            "label": {
+              "type": "string",
+              "description": "Optional note to tell several accounts on the same site apart."
+            }
+          },
+          "required": ["site"]
+        }
+      }
+    },
+    {
+      "id": "tool-browser-list-accounts",
+      "name": "List Agent Accounts",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.list_accounts",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "GET",
+        "url": "core:/api/vault/agent-accounts",
+        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "List the website accounts you created with chromium.create_account, optionally only those for one site. Use it before logging in to find the account `id` to pass to chromium.fill_credential, and before signing up to avoid creating a duplicate. Returns `{accounts:[{id,site,host,username,email,label,has_password,has_totp,...}]}` — metadata only; passwords and 2FA secrets are never returned. `has_totp` tells you whether a login will need chromium.fill_credential with field `totp`.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "site": {
+              "type": "string",
+              "description": "Optional site URL or host (e.g. \"github.com\") to filter by."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "tool-browser-fill-credential",
+      "name": "Fill Agent Credential",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.fill_credential",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "POST",
+        "url": "core:/api/ext/@ryu/browser/fill-credential",
+        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Type one field of your vault account into the input a chromium.snapshot_tab `ref` names, replacing what is there — WITHOUT you ever seeing the value. Use it for sign-up and login forms instead of chromium.type: field `username` or `email` for the identifier, `password` for the password, and `totp` for the current 6-digit two-factor code (only after chromium.capture_totp enrolled it). Never ask the user for the password and never try to read it back from the page. Ryu refuses when the page is not https, its host is not the account's site, the input is inside an iframe, or (for `password`) the input is not a password field. Returns `{ok,tab,account,field,filled}`; set `submit` to press Enter afterwards.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "account": {
+              "type": "string",
+              "description": "Account id from chromium.create_account or chromium.list_accounts, e.g. \"github.com--a1b2c3d4\"."
+            },
+            "field": {
+              "type": "string",
+              "enum": ["username", "email", "password", "totp"],
+              "description": "Which credential to fill. `totp` fills the current two-factor code."
+            },
+            "ref": {
+              "type": "string",
+              "description": "Element reference of the input from a prior chromium.snapshot_tab, e.g. \"@e3\"."
+            },
+            "submit": {
+              "type": "boolean",
+              "description": "Press Enter after filling (a real key event, so the form submits)."
+            },
+            "tab_id": {
+              "type": "string",
+              "description": "Tab to act on. Omit for the tab the browser is currently showing."
+            }
+          },
+          "required": ["account", "field", "ref"]
+        }
+      }
+    },
+    {
+      "id": "tool-browser-capture-totp",
+      "name": "Capture Two-Factor Setup",
+      "kind": "tool",
+      "config": {
+        "slug": "chromium.capture_totp",
+        "backend": "http",
+        "caller_agent_query": "agent_id",
+        "method": "POST",
+        "url": "core:/api/ext/@ryu/browser/capture-totp",
+        "secret_headers": { "Authorization": "Bearer env:RYU_TOKEN" },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "When a site shows a two-factor (authenticator app) setup page for your account, enroll it in the vault: point `ref` at the QR code image, or at the text setup key (a \"can't scan?\" or \"enter this key manually\" link usually reveals it). Ryu reads the secret straight from the page and stores it; you never see it. Then complete the site's verification step with chromium.fill_credential field `totp`, and use the same at every later login. Returns `{ok,tab,account,enrolled}`. A 400 means no setup key was found under `ref`.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "account": {
+              "type": "string",
+              "description": "Account id from chromium.create_account or chromium.list_accounts."
+            },
+            "ref": {
+              "type": "string",
+              "description": "Element reference of the QR code image or the text setup key, from a prior chromium.snapshot_tab."
+            },
+            "tab_id": {
+              "type": "string",
+              "description": "Tab to act on. Omit for the tab the browser is currently showing."
+            }
+          },
+          "required": ["account", "ref"]
+        }
+      }
     }
   ],
   "sidecars": [
@@ -684,10 +835,25 @@
         "kind": "local",
         "command": "ryu-browser",
         "command_env": "RYU_BROWSER_BIN",
-        "port_env": "RYU_BROWSER_PORT"
+        "port_env": "RYU_BROWSER_PORT",
+        "env": {
+          "APPIMAGE_EXTRACT_AND_RUN": "1",
+          "RYU_EGRESS_PROXY_URL": "${RYU_EGRESS_PROXY_URL}"
+        },
+        "bundles": {
+          "macos-aarch64": {
+            "format": "tar.gz",
+            "entrypoint": "Ryu Browser.app/Contents/MacOS/Ryu Browser"
+          },
+          "macos-x86_64": {
+            "format": "tar.gz",
+            "entrypoint": "Ryu Browser.app/Contents/MacOS/Ryu Browser"
+          }
+        }
       },
       "port": 7993,
       "health_path": "/health",
+      "host_api": { "grants": ["vault:fill"] },
       "lazy": true,
       "idle_stop_secs": 300,
       "http": {
@@ -740,7 +906,17 @@
           { "path": "/hover", "permission": "browser.control" },
           { "path": "/click-at", "permission": "browser.control" },
           { "path": "/key", "permission": "browser.control" },
-          { "path": "/drag", "permission": "browser.control" }
+          { "path": "/drag", "permission": "browser.control" },
+          {
+            "path": "/fill-credential",
+            "method": "POST",
+            "permission": "browser.control"
+          },
+          {
+            "path": "/capture-totp",
+            "method": "POST",
+            "permission": "browser.control"
+          }
         ]
       }
     }
@@ -826,7 +1002,11 @@
       }
     }
   ],
-  "permission_grants": ["browser:control", "tool:http-egress:127.0.0.1"],
+  "permission_grants": [
+    "browser:control",
+    "tool:http-egress:127.0.0.1",
+    "vault:fill"
+  ],
   "permission_levels": [
     {
       "id": "browser.view",
@@ -856,19 +1036,6 @@
             "bodyKey": "url"
           }
         }
-      }
-    ],
-    "chat_widget_templates": [
-      {
-        "id": "browser.chat",
-        "title": "Browser widget",
-        "description": "Browser chat widget metadata is coming soon; no render tool is available yet.",
-        "triggers": ["browser widget"],
-        "examples": ["Show me a browser widget"],
-        "backing": {},
-        "display_mode": "inline",
-        "safe_action_ids": [],
-        "availability": "coming-soon"
       }
     ]
   }
